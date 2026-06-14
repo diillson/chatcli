@@ -6,6 +6,7 @@
 package ctxmgr
 
 import (
+	"context"
 	"fmt"
 	"strings"
 
@@ -26,7 +27,7 @@ func NewProcessor(logger *zap.Logger) *Processor {
 }
 
 // ProcessPaths processa múltiplos caminhos baseado no modo
-func (p *Processor) ProcessPaths(paths []string, mode ProcessingMode) ([]utils.FileInfo, utils.DirectoryScanOptions, error) {
+func (p *Processor) ProcessPaths(ctx context.Context, paths []string, mode ProcessingMode) ([]utils.FileInfo, utils.DirectoryScanOptions, error) {
 	if len(paths) == 0 {
 		return nil, utils.DirectoryScanOptions{}, fmt.Errorf("nenhum caminho fornecido")
 	}
@@ -102,7 +103,7 @@ func (p *Processor) ProcessPaths(paths []string, mode ProcessingMode) ([]utils.F
 			zap.String("path", expandedPath),
 			zap.String("mode", string(mode)))
 
-		files, err := utils.ProcessDirectory(expandedPath, scanOpts)
+		files, err := utils.ProcessDirectory(ctx, expandedPath, scanOpts)
 		if err != nil {
 			return nil, scanOpts, fmt.Errorf("erro ao processar '%s': %w", expandedPath, err)
 		}

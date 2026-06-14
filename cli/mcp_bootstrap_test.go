@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"testing"
@@ -66,7 +67,7 @@ func TestBootstrapMCPSkipsWhenDisabled(t *testing.T) {
 	t.Setenv("CHATCLI_MCP_ENABLED", "")
 	t.Setenv("CHATCLI_MCP_CONFIG", filepath.Join(t.TempDir(), "missing-subdir", "mcp_servers.json"))
 	cli := &ChatCLI{}
-	cli.bootstrapMCP(zap.NewNop())
+	cli.bootstrapMCP(context.Background(), zap.NewNop())
 	if cli.mcpManager != nil {
 		t.Error("manager should not be initialized when MCP is disabled and no path exists")
 	}
@@ -84,7 +85,7 @@ func TestBootstrapMCPInitsManagerWhenDirExists(t *testing.T) {
 	t.Setenv("CHATCLI_MCP_ENABLED", "")
 	t.Setenv("CHATCLI_MCP_CONFIG", cfgPath)
 	cli := &ChatCLI{}
-	cli.bootstrapMCP(zap.NewNop())
+	cli.bootstrapMCP(context.Background(), zap.NewNop())
 	defer cli.stopMCPConfigWatcher()
 	if cli.mcpManager == nil {
 		t.Fatal("manager should be initialized when parent dir exists")
@@ -113,7 +114,7 @@ func TestBootstrapMCPSurvivesMalformedConfig(t *testing.T) {
 	t.Setenv("CHATCLI_MCP_ENABLED", "true")
 	t.Setenv("CHATCLI_MCP_CONFIG", cfgPath)
 	cli := &ChatCLI{}
-	cli.bootstrapMCP(zap.NewNop())
+	cli.bootstrapMCP(context.Background(), zap.NewNop())
 	defer cli.stopMCPConfigWatcher()
 	if cli.mcpManager == nil {
 		t.Error("manager must still be set up despite LoadConfig failure")

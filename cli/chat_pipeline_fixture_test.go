@@ -12,6 +12,7 @@
 package cli
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"testing"
@@ -225,5 +226,5 @@ func TestFireUserPromptSubmitHook_NoManagerIsNoop(t *testing.T) {
 	// invariant under test is "no panic / no nil-deref", and the test
 	// framework's implicit "test fails on panic" is the assertion.
 	cli := &ChatCLI{}
-	cli.fireUserPromptSubmitHook("hello")
+	cli.fireUserPromptSubmitHook(context.Background(), "hello")
 }

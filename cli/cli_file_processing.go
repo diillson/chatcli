@@ -18,7 +18,7 @@ import (
 	"go.uber.org/zap"
 )
 
-func (cli *ChatCLI) processFileCommand(userInput string) (string, string) {
+func (cli *ChatCLI) processFileCommand(ctx context.Context, userInput string) (string, string) {
 	var additionalContext string
 
 	if strings.Contains(strings.ToLower(userInput), "@file") {
@@ -72,7 +72,7 @@ func (cli *ChatCLI) processFileCommand(userInput string) (string, string) {
 			case config.ModeSummary:
 				// Atualizar a mensagem da animação para o modo summary
 				cli.animation.UpdateMessage(fmt.Sprintf("Gerando resumo para %s...", path))
-				summary, err := cli.processDirectorySummary(path, tokenEstimator, maxTokens)
+				summary, err := cli.processDirectorySummary(ctx, path, tokenEstimator, maxTokens)
 				if err != nil {
 					additionalContext += fmt.Sprintf("\nErro ao processar '%s': %s\n", path, err.Error())
 				} else {
@@ -82,7 +82,7 @@ func (cli *ChatCLI) processFileCommand(userInput string) (string, string) {
 			case config.ModeChunked:
 				// Atualizar a mensagem da animação para o modo chunked
 				cli.animation.UpdateMessage(fmt.Sprintf("Dividindo %s em chunks...", path))
-				chunks, err := cli.processDirectoryChunked(path, tokenEstimator, maxTokens)
+				chunks, err := cli.processDirectoryChunked(ctx, path, tokenEstimator, maxTokens)
 				if err != nil {
 					additionalContext += fmt.Sprintf("\nErro ao processar '%s': %s\n", path, err.Error())
 				} else {
@@ -143,7 +143,7 @@ func (cli *ChatCLI) processFileCommand(userInput string) (string, string) {
 
 				// Extrair a consulta do usuário (tudo o que vier após o @file + opções)
 				query := extractUserQuery(userInput)
-				relevantContent, err := cli.processDirectorySmart(path, query, tokenEstimator, maxTokens)
+				relevantContent, err := cli.processDirectorySmart(ctx, path, query, tokenEstimator, maxTokens)
 				if err != nil {
 					additionalContext += fmt.Sprintf("\nErro ao processar '%s': %s\n", path, err.Error())
 				} else {
@@ -154,7 +154,7 @@ func (cli *ChatCLI) processFileCommand(userInput string) (string, string) {
 				// Ajustar limite de tamanho com base em tokens disponíveis
 				scanOptions.MaxTotalSize = estimateBytesFromTokens(maxTokens*3/4, tokenEstimator)
 
-				files, err := utils.ProcessDirectory(path, scanOptions)
+				files, err := utils.ProcessDirectory(ctx, path, scanOptions)
 				if err != nil {
 					cli.logger.Error(fmt.Sprintf("Erro ao processar '%s'", path), zap.Error(err))
 					additionalContext += fmt.Sprintf("\nErro ao processar '%s': %s\n", path, err.Error())
@@ -234,7 +234,7 @@ func extractFileCommandOptions(input string) ([]string, map[string]string, error
 	return paths, options, nil
 }
 
-func (cli *ChatCLI) processDirectorySummary(path string, tokenEstimator func(string) int, maxTokens int) (string, error) {
+func (cli *ChatCLI) processDirectorySummary(ctx context.Context, path string, tokenEstimator func(string) int, maxTokens int) (string, error) {
 	path, err := utils.ExpandPath(path)
 	if err != nil {
 		return "", fmt.Errorf("erro ao expandir o caminho: %w", err)
@@ -353,7 +353,7 @@ func (cli *ChatCLI) processDirectorySummary(path string, tokenEstimator func(str
 }
 
 // processDirectoryChunked processa um diretório e divide o conteúdo em chunks
-func (cli *ChatCLI) processDirectoryChunked(path string, tokenEstimator func(string) int, maxTokens int) ([]FileChunk, error) {
+func (cli *ChatCLI) processDirectoryChunked(ctx context.Context, path string, tokenEstimator func(string) int, maxTokens int) ([]FileChunk, error) {
 	path, err := utils.ExpandPath(path)
 	if err != nil {
 		return nil, fmt.Errorf("erro ao expandir o caminho: %w", err)
@@ -366,7 +366,7 @@ func (cli *ChatCLI) processDirectoryChunked(path string, tokenEstimator func(str
 	}
 
 	// Sem limite de tamanho, vamos coletar tudo e depois dividir
-	files, err := utils.ProcessDirectory(path, scanOptions)
+	files, err := utils.ProcessDirectory(ctx, path, scanOptions)
 	if err != nil {
 		return nil, err
 	}
@@ -438,7 +438,7 @@ func (cli *ChatCLI) processDirectoryChunked(path string, tokenEstimator func(str
 }
 
 // handleNextChunk processa o próximo chunk de arquivos com tratamento de falhas
-func (cli *ChatCLI) handleNextChunk() bool {
+func (cli *ChatCLI) handleNextChunk(ctx context.Context) bool {
 	if len(cli.fileChunks) == 0 {
 		if len(cli.failedChunks) > 0 {
 			fmt.Println(i18n.T("chunk.no_more_pending_but_failed", len(cli.failedChunks)))
@@ -472,7 +472,7 @@ func (cli *ChatCLI) handleNextChunk() bool {
 	})
 
 	cli.animation.ShowThinkingAnimation(cli.Client.GetModelName())
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Minute)
 	defer cancel()
 	aiResponse, err := cli.Client.SendPrompt(ctx, prompt+"\n\n"+nextChunk.Content, cli.history, 0)
 	cli.animation.StopThinkingAnimation()
@@ -503,7 +503,7 @@ func (cli *ChatCLI) handleNextChunk() bool {
 }
 
 // Novo método para reprocessar o último chunk que falhou
-func (cli *ChatCLI) handleRetryLastChunk() bool {
+func (cli *ChatCLI) handleRetryLastChunk(ctx context.Context) bool {
 	if cli.lastFailedChunk == nil || len(cli.failedChunks) == 0 {
 		fmt.Println(i18n.T("chunk.no_failed_to_retry"))
 		return false
@@ -527,7 +527,7 @@ func (cli *ChatCLI) handleRetryLastChunk() bool {
 
 	cli.history = append(cli.history, models.Message{Role: "user", Content: prompt + "\n\n" + progressInfo + chunk.Content})
 	cli.animation.ShowThinkingAnimation(cli.Client.GetModelName())
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Minute)
 	defer cancel()
 	aiResponse, err := cli.Client.SendPrompt(ctx, prompt+"\n\n"+chunk.Content, cli.history, 0)
 	cli.animation.StopThinkingAnimation()
@@ -564,7 +564,7 @@ func (cli *ChatCLI) handleRetryAllChunks() bool {
 	cli.fileChunks = append(cli.failedChunks, cli.fileChunks...)
 	cli.failedChunks = []FileChunk{}
 	cli.lastFailedChunk = nil
-	return cli.handleNextChunk()
+	return cli.handleNextChunk(cli.sessionCtx)
 }
 
 // Método para pular explicitamente um chunk
@@ -603,7 +603,7 @@ func extractUserQuery(input string) string {
 }
 
 // processDirectorySmart processa um diretório e seleciona partes relevantes para a consulta
-func (cli *ChatCLI) processDirectorySmart(path string, query string, tokenEstimator func(string) int, maxTokens int) (string, error) {
+func (cli *ChatCLI) processDirectorySmart(ctx context.Context, path string, query string, tokenEstimator func(string) int, maxTokens int) (string, error) {
 	path, err := utils.ExpandPath(path)
 	if err != nil {
 		return "", fmt.Errorf("erro ao expandir o caminho: %w", err)
@@ -611,7 +611,7 @@ func (cli *ChatCLI) processDirectorySmart(path string, query string, tokenEstima
 
 	// Se a consulta estiver vazia, usar o modo de resumo
 	if query == "" {
-		return cli.processDirectorySummary(path, tokenEstimator, maxTokens)
+		return cli.processDirectorySummary(ctx, path, tokenEstimator, maxTokens)
 	}
 
 	// Configurar opções de processamento de diretório
@@ -620,7 +620,7 @@ func (cli *ChatCLI) processDirectorySmart(path string, query string, tokenEstima
 		cli.animation.UpdateMessage(fmt.Sprintf("Analisando %s", info.Path))
 	}
 
-	files, err := utils.ProcessDirectory(path, scanOptions)
+	files, err := utils.ProcessDirectory(ctx, path, scanOptions)
 	if err != nil {
 		return "", err
 	}
@@ -635,7 +635,7 @@ func (cli *ChatCLI) processDirectorySmart(path string, query string, tokenEstima
 		Score float64
 	}
 
-	var scoredFiles []ScoredFile
+	scoredFiles := make([]ScoredFile, 0, len(files))
 
 	// Termos importantes da consulta
 	queryTerms := strings.Fields(strings.ToLower(query))
@@ -713,7 +713,7 @@ func (cli *ChatCLI) processDirectorySmart(path string, query string, tokenEstima
 	// Se não houver arquivos relevantes, retornar resumo
 	if len(selectedFiles) == 0 {
 		builder.WriteString("Nenhum arquivo teve pontuação suficiente. Aqui está um resumo estrutural:\n\n")
-		summary, err := cli.processDirectorySummary(path, tokenEstimator, maxTokens)
+		summary, err := cli.processDirectorySummary(ctx, path, tokenEstimator, maxTokens)
 		if err != nil {
 			return builder.String(), nil
 		}

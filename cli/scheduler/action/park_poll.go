@@ -122,14 +122,14 @@ func (p ParkPoll) Execute(ctx context.Context, action scheduler.Action, env *sch
 		// scheduler's failure path, which still triggers the retry
 		// policy but caps at MaxRetries — eventually firing AgentResume
 		// with timeout if the probes never recover.
-		return p.rescheduleSelf(action, env, "probe error: "+runErr.Error(), false)
+		return p.rescheduleSelf(ctx, action, env, "probe error: "+runErr.Error(), false)
 	}
 
 	if matchSuccessWhen(successWhen, summary, matched) {
 		return p.fireResume(ctx, env, token, "matched", summary.detail())
 	}
 
-	return p.rescheduleSelf(action, env, "probe did not match yet: "+summary.short(), true)
+	return p.rescheduleSelf(ctx, action, env, "probe did not match yet: "+summary.short(), true)
 }
 
 // probeSummary captures the fields evaluated by SuccessWhen.
@@ -296,7 +296,7 @@ func (ParkPoll) fireResume(ctx context.Context, env *scheduler.ExecEnv, token, o
 }
 
 // rescheduleSelf enqueues another ParkPoll iteration.
-func (p ParkPoll) rescheduleSelf(action scheduler.Action, env *scheduler.ExecEnv, reason string, transient bool) scheduler.ActionResult {
+func (p ParkPoll) rescheduleSelf(ctx context.Context, action scheduler.Action, env *scheduler.ExecEnv, reason string, transient bool) scheduler.ActionResult {
 	interval := payloadDuration(action, "interval", 30*time.Second)
 	job := scheduler.NewJob(
 		"park-poll:"+action.PayloadString("resume_token", ""),
@@ -308,7 +308,7 @@ func (p ParkPoll) rescheduleSelf(action scheduler.Action, env *scheduler.ExecEnv
 	if env.Enqueue == nil {
 		return scheduler.ActionResult{Err: fmt.Errorf("park_poll: scheduler enqueue not wired")}
 	}
-	if _, err := env.Enqueue(context.Background(), job); err != nil {
+	if _, err := env.Enqueue(ctx, job); err != nil {
 		return scheduler.ActionResult{Err: fmt.Errorf("park_poll: re-enqueue: %w", err)}
 	}
 	return scheduler.ActionResult{

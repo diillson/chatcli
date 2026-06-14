@@ -40,7 +40,7 @@ import (
 	"github.com/diillson/chatcli/i18n"
 	"github.com/diillson/chatcli/llm/client"
 	"github.com/diillson/chatcli/llm/manager"
-	"github.com/diillson/chatcli/llm/openai_assistant"
+	"github.com/diillson/chatcli/llm/openaiassistant"
 	"github.com/diillson/chatcli/pkg/persona"
 	"github.com/diillson/chatcli/ui/theme"
 	"github.com/fsnotify/fsnotify"
@@ -184,24 +184,29 @@ type ChatCLI struct {
 	interactionState     InteractionState
 	mu                   sync.Mutex
 	operationCancel      context.CancelFunc
-	isExecuting          atomic.Bool
-	processingDone       chan struct{}
-	messageQueue         []string   // FIFO queue of user messages typed during processing
-	messageQueueMu       sync.Mutex // protects messageQueue
-	prefixSpinnerIdx     int32      // atomic counter for animated prefix spinner
-	sessionManager       *SessionManager
-	currentSessionName   string
-	UserMaxTokens        int
-	pluginManager        *plugins.Manager
-	contextHandler       *ContextHandler
-	personaHandler       *PersonaHandler
-	skillHandler         *SkillHandler
-	executionProfile     ExecutionProfile
-	pendingAction        string // stores intended action before panic (for Windows go-prompt tearDown workaround)
-	replActive           bool   // true only inside the interactive Start() loop (gates the palette trigger)
-	paletteRequested     bool   // a handler asked to open the command palette; the executor runs it in place
-	paletteTarget        string // command to scope the palette to ("" opens the categorized root)
-	suppressPaletteOnce  bool   // skip the palette trigger for the next handled command (the palette's own selection)
+	// sessionCtx is the process/session-lifetime context, seeded in
+	// NewChatCLI and refreshed by Start. Interactive slash-command handlers
+	// that have no per-request context of their own (e.g. /nextchunk) derive
+	// their LLM-call deadline from it instead of context.Background().
+	sessionCtx          context.Context
+	isExecuting         atomic.Bool
+	processingDone      chan struct{}
+	messageQueue        []string   // FIFO queue of user messages typed during processing
+	messageQueueMu      sync.Mutex // protects messageQueue
+	prefixSpinnerIdx    int32      // atomic counter for animated prefix spinner
+	sessionManager      *SessionManager
+	currentSessionName  string
+	UserMaxTokens       int
+	pluginManager       *plugins.Manager
+	contextHandler      *ContextHandler
+	personaHandler      *PersonaHandler
+	skillHandler        *SkillHandler
+	executionProfile    ExecutionProfile
+	pendingAction       string // stores intended action before panic (for Windows go-prompt tearDown workaround)
+	replActive          bool   // true only inside the interactive Start() loop (gates the palette trigger)
+	paletteRequested    bool   // a handler asked to open the command palette; the executor runs it in place
+	paletteTarget       string // command to scope the palette to ("" opens the categorized root)
+	suppressPaletteOnce bool   // skip the palette trigger for the next handled command (the palette's own selection)
 
 	// Remote connection state (for /connect and /disconnect)
 	localClient   client.LLMClient           // saved local client when connected to remote
@@ -374,7 +379,7 @@ type thinkingOverrideState struct {
 }
 
 // NewChatCLI cria uma nova instância de ChatCLI
-func NewChatCLI(manager manager.LLMManager, logger *zap.Logger) (*ChatCLI, error) {
+func NewChatCLI(ctx context.Context, manager manager.LLMManager, logger *zap.Logger) (*ChatCLI, error) {
 	cli := &ChatCLI{
 		manager:          manager,
 		logger:           logger,
@@ -386,6 +391,11 @@ func NewChatCLI(manager manager.LLMManager, logger *zap.Logger) (*ChatCLI, error
 		processingDone:   make(chan struct{}),
 		executionProfile: ProfileNormal,
 	}
+
+	// Seed the session-lifetime context so interactive handlers can derive
+	// deadlines from it before Start refreshes it. Every caller passes a
+	// non-nil context (a real request ctx or context.Background()).
+	cli.sessionCtx = ctx
 
 	// Wire the security prompt's package-level input guard with our zap
 	// logger so dropped typeahead is logged at DEBUG. Calling this here
@@ -596,7 +606,7 @@ func NewChatCLI(manager manager.LLMManager, logger *zap.Logger) (*ChatCLI, error
 	// Start background memory annotation worker
 	if memoryEnabled {
 		cli.memWorker = newMemoryWorker(cli)
-		cli.memWorker.start()
+		cli.memWorker.start(ctx)
 		// Record session start for usage pattern tracking
 		cli.sessionStartTime = time.Now()
 		if mgr := memStore.Manager(); mgr != nil {
@@ -611,7 +621,7 @@ func NewChatCLI(manager manager.LLMManager, logger *zap.Logger) (*ChatCLI, error
 	// Initialize cost tracker
 	cli.costTracker = NewCostTracker()
 
-	cli.bootstrapMCP(logger)
+	cli.bootstrapMCP(ctx, logger)
 
 	// Initialize persona handler
 	cli.personaHandler = NewPersonaHandler(logger)
@@ -671,12 +681,12 @@ func NewChatCLI(manager manager.LLMManager, logger *zap.Logger) (*ChatCLI, error
 	}
 
 	// Pre-fetch available models for autocomplete
-	cli.refreshModelCache()
+	cli.refreshModelCache(ctx)
 
 	// Fire SessionStart hook
 	if cli.hookManager != nil {
 		wd, _ := os.Getwd()
-		cli.hookManager.FireAsync(hooks.HookEvent{
+		cli.hookManager.FireAsync(ctx, hooks.HookEvent{
 			Type:       hooks.EventSessionStart,
 			Timestamp:  time.Now(),
 			SessionID:  cli.currentSessionName,
@@ -685,7 +695,7 @@ func NewChatCLI(manager manager.LLMManager, logger *zap.Logger) (*ChatCLI, error
 	}
 
 	// Initialize scheduler subsystem (in-process or daemon client).
-	cli.initScheduler()
+	cli.initScheduler(ctx)
 
 	return cli, nil
 }
@@ -725,7 +735,7 @@ func (cli *ChatCLI) executor(in string) {
 	// foreground and may take a while (it re-enters the agent loop) —
 	// that is exactly the desired UX: the user sees the agent continue,
 	// then their original input is processed afterwards.
-	if cli.drainPendingResumes() {
+	if cli.drainPendingResumes(context.Background()) {
 		// Flush any cosmetic state the resume left behind.
 		_ = os.Stdout.Sync()
 	}
@@ -736,7 +746,7 @@ func (cli *ChatCLI) executor(in string) {
 	// then their typed input is processed. Notify/confirm banners
 	// are rendered separately below so they appear even on turns
 	// that have no queued auto-trigger.
-	if cli.drainPendingAutoTriggers() {
+	if cli.drainPendingAutoTriggers(cli.sessionCtx) {
 		_ = os.Stdout.Sync()
 	}
 	cli.renderChannelTriggerBanner()
@@ -792,7 +802,7 @@ func (cli *ChatCLI) executor(in string) {
 		// a single chat-mode turn instead of spinning up the agent loop.
 		// In default "hint" mode this only prints a tip and falls through.
 		// In "auto" mode the chat path is invoked and we return here.
-		if cli.maybeReroute("/run", task) {
+		if cli.maybeReroute(context.Background(), "/run", task) {
 			return
 		}
 		cli.pendingAction = "agent"
@@ -816,7 +826,7 @@ func (cli *ChatCLI) executor(in string) {
 	}
 
 	if strings.HasPrefix(in, "/") || in == "exit" || in == "quit" {
-		exit := cli.commandHandler.HandleCommand(in)
+		exit := cli.commandHandler.HandleCommand(context.Background(), in)
 		if !exit {
 			// If the handler asked to open the command palette, run it now —
 			// raw mode is already released while the executor runs — and
@@ -856,9 +866,9 @@ func (cli *ChatCLI) executor(in string) {
 		// after the response completes. SIGWINCH doesn't exist on Windows, so the
 		// async approach leaves go-prompt waiting for a keypress before redrawing.
 		// Ctrl+C still works via the OS signal handler (SIGINT) in a separate goroutine.
-		cli.processLLMRequest(in)
+		cli.processLLMRequest(context.Background(), in)
 	} else {
-		go cli.processLLMRequest(in)
+		go cli.processLLMRequest(context.Background(), in)
 	}
 }
 
@@ -893,7 +903,8 @@ func (cli *ChatCLI) dequeueMessage() string {
 }
 
 func (cli *ChatCLI) Start(ctx context.Context) {
-	defer cli.cleanup()
+	cli.sessionCtx = ctx
+	defer cli.cleanup(ctx)
 	cli.PrintWelcomeScreen()
 	cli.startHubSync(ctx) // resume the shared cross-channel conversation, if connected
 
@@ -912,12 +923,15 @@ func (cli *ChatCLI) Start(ctx context.Context) {
 					// which replaces our original panic value. Use pendingAction as fallback.
 					action := cli.pendingAction
 					cli.pendingAction = ""
-					if r == errAgentModeRequest || action == "agent" {
-					} else if r == errCoderModeRequest || action == "coder" {
+					rErr, _ := r.(error)
+					switch {
+					case errors.Is(rErr, errAgentModeRequest) || action == "agent":
+						// agent mode switch — nothing to undo here.
+					case errors.Is(rErr, errCoderModeRequest) || action == "coder":
 						cli.restoreTerminal()
-					} else if r == errExitRequest || action == "exit" {
+					case errors.Is(rErr, errExitRequest) || action == "exit":
 						shouldContinue = false
-					} else {
+					default:
 						panic(r)
 					}
 				}
@@ -1096,9 +1110,9 @@ func (cli *ChatCLI) Start(ctx context.Context) {
 			// /plan coder <task> routes to coder; /plan [agent] <task> routes to agent.
 			planCoder := strings.HasPrefix(lastCmd, "/plan coder ") || lastCmd == "/plan coder"
 			if strings.HasPrefix(lastCmd, "/coder") || planCoder {
-				cli.runCoderLogic()
+				cli.runCoderLogic(ctx)
 			} else if strings.HasPrefix(lastCmd, "/run") || strings.HasPrefix(lastCmd, "/agent") || strings.HasPrefix(lastCmd, "/plan") {
-				cli.runAgentLogic()
+				cli.runAgentLogic(ctx)
 			}
 
 			// Auto-resume any parked agents whose scheduler-driven wait
@@ -1112,7 +1126,7 @@ func (cli *ChatCLI) Start(ctx context.Context) {
 			// a new @park, which queues the next token while we're still
 			// processing the previous one — keep draining until the
 			// queue is empty for one full cycle.
-			for cli.drainPendingResumes() {
+			for cli.drainPendingResumes(ctx) {
 				// loop body intentionally empty; drainPendingResumes
 				// returns false when the queue is exhausted.
 			}
@@ -1153,7 +1167,7 @@ func (cli *ChatCLI) runRequestedPalette() bool {
 	// pickable selection (e.g. "/config", "/switch") from reopening the
 	// overlay; the trigger consumes and clears it on this very call.
 	cli.suppressPaletteOnce = true
-	exit := cli.commandHandler.HandleCommand(sel)
+	exit := cli.commandHandler.HandleCommand(context.Background(), sel)
 	cli.suppressPaletteOnce = false
 	cli.paletteRequested = false // ignore any re-trigger raised during execution
 	return exit
@@ -1177,9 +1191,9 @@ func (cli *ChatCLI) restoreTerminal() {
 }
 
 // Helper para executar lógica do agente com cancelamento via Ctrl+C
-func (cli *ChatCLI) runWithCancellation(taskName string, fn func(context.Context) error) {
-	// Cria contexto cancelável
-	ctx, cancel := context.WithCancel(context.Background())
+func (cli *ChatCLI) runWithCancellation(parent context.Context, taskName string, fn func(context.Context) error) {
+	// Cria contexto cancelável derivado do contexto pai
+	ctx, cancel := context.WithCancel(parent)
 
 	// Registra o cancelamento na struct para acesso global se necessário
 	cli.mu.Lock()
@@ -1224,7 +1238,7 @@ func (cli *ChatCLI) runWithCancellation(taskName string, fn func(context.Context
 	}
 }
 
-func (cli *ChatCLI) runAgentLogic() {
+func (cli *ChatCLI) runAgentLogic(ctx context.Context) {
 	cli.setExecutionProfile(ProfileAgent)
 	defer cli.setExecutionProfile(ProfileNormal)
 
@@ -1266,26 +1280,26 @@ func (cli *ChatCLI) runAgentLogic() {
 		{i18n.T("agent.banner.mode"), i18n.T("agent.banner.mode_value")},
 	})
 
-	query, additionalContext := cli.processSpecialCommands(query)
+	query, additionalContext := cli.processSpecialCommands(ctx, query)
 
 	if cli.agentMode == nil {
 		cli.agentMode = NewAgentMode(cli, cli.logger)
 	}
 
 	cli.agentMode.isOneShot = false // interactive /agent: keep the loop conversational
-	cli.runWithCancellation("Agent Mode", func(ctx context.Context) error {
+	cli.runWithCancellation(ctx, "Agent Mode", func(ctx context.Context) error {
 		return cli.agentMode.Run(ctx, query, additionalContext, "")
 	})
 
 	// Nudge memory worker after agent run
 	if cli.memWorker != nil {
-		cli.memWorker.nudge()
+		cli.memWorker.nudge(ctx)
 	}
 
 	fmt.Println(i18n.T("status.agent_mode_exit"))
 }
 
-func (cli *ChatCLI) runCoderLogic() {
+func (cli *ChatCLI) runCoderLogic(ctx context.Context) {
 	cli.setExecutionProfile(ProfileCoder)
 	defer cli.setExecutionProfile(ProfileNormal)
 
@@ -1317,20 +1331,20 @@ func (cli *ChatCLI) runCoderLogic() {
 		{i18n.T("coder.banner.policy"), i18n.T("coder.banner.policy_value")},
 	})
 
-	query, additionalContext := cli.processSpecialCommands(query)
+	query, additionalContext := cli.processSpecialCommands(ctx, query)
 
 	if cli.agentMode == nil {
 		cli.agentMode = NewAgentMode(cli, cli.logger)
 	}
 
 	cli.agentMode.isOneShot = false // interactive /coder: wait for input between turns
-	cli.runWithCancellation("Coder Mode", func(ctx context.Context) error {
+	cli.runWithCancellation(ctx, "Coder Mode", func(ctx context.Context) error {
 		return cli.agentMode.Run(ctx, query, additionalContext, CoderSystemPrompt)
 	})
 
 	// Nudge memory worker after coder run
 	if cli.memWorker != nil {
-		cli.memWorker.nudge()
+		cli.memWorker.nudge(ctx)
 	}
 
 	fmt.Println(colorize("\n "+i18n.T("coder.session_finished"), ColorGreen))
@@ -1370,7 +1384,7 @@ func (cli *ChatCLI) handleCtrlC(buf *prompt.Buffer) {
 
 	} else {
 		fmt.Println(i18n.T("prompt.confirm_exit"))
-		cli.cleanup()
+		cli.cleanup(context.Background())
 		os.Exit(0)
 	}
 }
@@ -1480,7 +1494,7 @@ func (cli *ChatCLI) schedulerStatusLine() string {
 	if !cli.schedulerEnabled() {
 		return ""
 	}
-	summaries := cli.schedulerList(scheduler.ListFilter{})
+	summaries := cli.schedulerList(cli.sessionCtx, scheduler.ListFilter{})
 	return scheduler.StatusLine(summaries)
 }
 
@@ -1524,7 +1538,7 @@ func shouldAutoEnableMCP(mcpConfigPath string) bool {
 // don't abort initialization — we still register the manager and
 // start the watcher so the user can fix the file in place and have
 // it picked up on save instead of having to restart chatcli.
-func (cli *ChatCLI) bootstrapMCP(logger *zap.Logger) {
+func (cli *ChatCLI) bootstrapMCP(ctx context.Context, logger *zap.Logger) {
 	mcpEnabled := os.Getenv("CHATCLI_MCP_ENABLED") == "true"
 	mcpConfigPath := resolveMCPConfigPath()
 	if !mcpEnabled && shouldAutoEnableMCP(mcpConfigPath) {
@@ -1538,7 +1552,10 @@ func (cli *ChatCLI) bootstrapMCP(logger *zap.Logger) {
 		logger.Warn("Failed to load MCP config (will retry on file change)",
 			zap.String("path", mcpConfigPath), zap.Error(err))
 	}
-	mcpCtx, mcpCancelFn := context.WithCancel(context.Background())
+	// The MCP manager outlives any single request; its lifecycle is governed
+	// by mcpCancel (fired in cleanup). Detach request cancellation while
+	// inheriting context values.
+	mcpCtx, mcpCancelFn := context.WithCancel(context.WithoutCancel(ctx))
 	cli.mcpManager = mcpMgr
 	cli.mcpCancel = mcpCancelFn
 	cli.mcpConfigPath = mcpConfigPath
@@ -1644,7 +1661,11 @@ func (cli *ChatCLI) stopMCPConfigWatcher() {
 	}
 }
 
-func (cli *ChatCLI) cleanup() {
+func (cli *ChatCLI) cleanup(ctx context.Context) {
+	// Teardown should not be aborted if the caller's context was already
+	// cancelled (e.g. Ctrl+C); detach cancellation but inherit values.
+	ctx = context.WithoutCancel(ctx)
+
 	// Close the on-disk hub opened by local mode, if any.
 	if cli.hubLocalClose != nil {
 		cli.hubLocalClose()
@@ -1654,7 +1675,7 @@ func (cli *ChatCLI) cleanup() {
 	// Fire SessionEnd hook
 	if cli.hookManager != nil {
 		wd, _ := os.Getwd()
-		cli.hookManager.Fire(hooks.HookEvent{
+		cli.hookManager.Fire(ctx, hooks.HookEvent{
 			Type:       hooks.EventSessionEnd,
 			Timestamp:  time.Now(),
 			SessionID:  cli.currentSessionName,
@@ -1692,7 +1713,7 @@ func (cli *ChatCLI) cleanup() {
 	cli.stopMCPConfigWatcher()
 	cli.shutdownChannelTriggers()
 	if cli.mcpManager != nil {
-		stopCtx, cancelStop := context.WithTimeout(context.Background(), 5*time.Second)
+		stopCtx, cancelStop := context.WithTimeout(ctx, 5*time.Second)
 		cli.mcpManager.StopAll(stopCtx)
 		_ = cli.mcpManager.CloseChannels()
 		cancelStop()
@@ -1705,8 +1726,8 @@ func (cli *ChatCLI) cleanup() {
 		cli.logger.Error("Erro ao salvar histórico", zap.Error(err))
 	}
 	if cli.Client != nil {
-		if assistantClient, ok := cli.Client.(*openai_assistant.OpenAIAssistantClient); ok {
-			if err := assistantClient.Cleanup(); err != nil {
+		if assistantClient, ok := cli.Client.(*openaiassistant.OpenAIAssistantClient); ok {
+			if err := assistantClient.Cleanup(ctx); err != nil {
 				cli.logger.Error("Erro na limpeza do OpenAI Assistant", zap.Error(err))
 			}
 		}

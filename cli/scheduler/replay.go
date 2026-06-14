@@ -28,8 +28,23 @@ import (
 
 // replay restores state from disk. Called from Start exactly once.
 func (s *Scheduler) replay() error {
-	snapJobs := map[JobID]bool{}
+	if err := s.hydrateFromDisk(); err != nil {
+		return err
+	}
 
+	now := time.Now()
+	s.rescheduleLiveJobs(now)
+	s.recheckBlockedJobs(now)
+
+	// Metric snapshot.
+	s.metrics.QueueDepth.Set(float64(s.queue.Len()))
+	s.metrics.ActiveJobs.Set(float64(s.activeCount()))
+	return nil
+}
+
+// hydrateFromDisk loads the snapshot (best-effort) then overlays the WAL,
+// which is authoritative.
+func (s *Scheduler) hydrateFromDisk() error {
 	if env, err := readSnapshot(s.cfg.DataDir, s.logger); err == nil && env != nil {
 		s.logger.Info("scheduler: loading snapshot",
 			zap.Time("captured_at", env.CapturedAt),
@@ -42,7 +57,6 @@ func (s *Scheduler) replay() error {
 			if !j.Status.IsTerminal() {
 				s.byName[j.Name] = j.ID
 			}
-			snapJobs[j.ID] = true
 		}
 	}
 
@@ -61,9 +75,12 @@ func (s *Scheduler) replay() error {
 			s.byName[j.Name] = j.ID
 		}
 	}
+	return nil
+}
 
-	// Reschedule live jobs.
-	now := time.Now()
+// rescheduleLiveJobs re-enqueues every non-terminal, non-paused, non-blocked
+// job, applying MissPolicy and restarting jobs interrupted mid-run.
+func (s *Scheduler) rescheduleLiveJobs(now time.Time) {
 	// Sort by NextFireAt so the queue order mirrors what it would have
 	// been pre-crash. Stable for ties.
 	live := make([]*Job, 0, len(s.jobs))
@@ -77,23 +94,8 @@ func (s *Scheduler) replay() error {
 	})
 
 	for _, j := range live {
-		next := j.NextFireAt
-		if next.IsZero() || next.Before(now) {
-			switch j.Schedule.MissPolicy {
-			case MissSkip:
-				// Forward to next natural fire.
-				n := j.Schedule.Next(now, j.CreatedAt)
-				if n.IsZero() {
-					s.logger.Info("scheduler: replay skipping terminal-schedule job",
-						zap.String("job_id", string(j.ID)))
-					continue
-				}
-				next = n
-			default:
-				next = now
-			}
-			j.NextFireAt = next
-			_ = s.wal.Write(j)
+		if !s.adjustNextFireAt(j, now) {
+			continue
 		}
 		// Jobs that were Running at the time of the crash must restart
 		// cleanly — transition them back to Pending and bump Attempts
@@ -108,9 +110,35 @@ func (s *Scheduler) replay() error {
 		}
 		s.queue.Enqueue(j.ID, j.NextFireAt)
 	}
+}
 
-	// Re-check blocked jobs — any dep that is now terminal in a
-	// non-success state should cascade into a failed child.
+// adjustNextFireAt updates a job's NextFireAt for replay. It returns false when
+// a MissSkip job has no future fire and should be left out of the queue.
+func (s *Scheduler) adjustNextFireAt(j *Job, now time.Time) bool {
+	next := j.NextFireAt
+	if next.IsZero() || next.Before(now) {
+		switch j.Schedule.MissPolicy {
+		case MissSkip:
+			// Forward to next natural fire.
+			n := j.Schedule.Next(now, j.CreatedAt)
+			if n.IsZero() {
+				s.logger.Info("scheduler: replay skipping terminal-schedule job",
+					zap.String("job_id", string(j.ID)))
+				return false
+			}
+			next = n
+		default:
+			next = now
+		}
+		j.NextFireAt = next
+		_ = s.wal.Write(j)
+	}
+	return true
+}
+
+// recheckBlockedJobs cascades dependency outcomes onto blocked jobs: a failed
+// dep fails the child; fully-resolved deps unblock it.
+func (s *Scheduler) recheckBlockedJobs(now time.Time) {
 	for _, j := range s.jobs {
 		if j.Status != StatusBlocked {
 			continue
@@ -146,11 +174,6 @@ func (s *Scheduler) replay() error {
 			s.queue.Enqueue(j.ID, j.NextFireAt)
 		}
 	}
-
-	// Metric snapshot.
-	s.metrics.QueueDepth.Set(float64(s.queue.Len()))
-	s.metrics.ActiveJobs.Set(float64(s.activeCount()))
-	return nil
 }
 
 // writeSnapshotNow captures state. Exposed for Shutdown and test helpers.

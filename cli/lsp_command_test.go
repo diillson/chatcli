@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"testing"
@@ -12,11 +13,11 @@ func newLSPTestCLI() *ChatCLI { return &ChatCLI{logger: zap.NewNop()} }
 
 func TestHandleLSP_Usage(t *testing.T) {
 	// No argument prints usage and returns without touching the filesystem.
-	newLSPTestCLI().handleLSPCommand("/lsp")
+	newLSPTestCLI().handleLSPCommand(context.Background(), "/lsp")
 }
 
 func TestHandleLSP_FileNotFound(t *testing.T) {
-	newLSPTestCLI().handleLSPCommand("/lsp /no/such/file.go")
+	newLSPTestCLI().handleLSPCommand(context.Background(), "/lsp /no/such/file.go")
 }
 
 func TestHandleLSP_UnsupportedExtension(t *testing.T) {
@@ -25,7 +26,7 @@ func TestHandleLSP_UnsupportedExtension(t *testing.T) {
 	if err := os.WriteFile(f, []byte("x"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	newLSPTestCLI().handleLSPCommand("/lsp " + f)
+	newLSPTestCLI().handleLSPCommand(context.Background(), "/lsp "+f)
 }
 
 func TestHandleLSP_SpawnFailure(t *testing.T) {
@@ -37,5 +38,5 @@ func TestHandleLSP_SpawnFailure(t *testing.T) {
 	if err := os.WriteFile(f, []byte("package main\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	newLSPTestCLI().handleLSPCommand("/lsp " + f)
+	newLSPTestCLI().handleLSPCommand(context.Background(), "/lsp "+f)
 }

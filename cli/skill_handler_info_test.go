@@ -13,6 +13,7 @@
 package cli
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"testing"
@@ -56,7 +57,7 @@ func TestSkillHandlerInfo_NotFoundEverywhere(t *testing.T) {
 	sh, _ := newInfoFixture(t)
 	// Both local install dir AND remote registries are empty/disabled —
 	// Info must reach the "not found" message and return without panic.
-	sh.Info("does-not-exist", "")
+	sh.Info(context.Background(), "does-not-exist", "")
 }
 
 func TestSkillHandlerInfo_LocalOnlyPrintsStatus(t *testing.T) {
@@ -78,7 +79,7 @@ body
 	// branches under test (printSkillInfoHeader, printSkillInfoDetails,
 	// printSkillInstallStatus single-install) all execute.
 	withSilencedStdout(t, func() {
-		sh.Info("ordinary-skill", "")
+		sh.Info(context.Background(), "ordinary-skill", "")
 	})
 }
 
@@ -107,7 +108,7 @@ body
 	}
 	// Info itself just needs to not crash on the multi-install path.
 	withSilencedStdout(t, func() {
-		sh.Info("echo", "")
+		sh.Info(context.Background(), "echo", "")
 	})
 }
 

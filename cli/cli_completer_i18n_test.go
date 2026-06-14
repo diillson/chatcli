@@ -6,6 +6,7 @@
 package cli
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
@@ -27,7 +28,7 @@ func TestGetContextNameSuggestions_NoMissingMarkers(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "main.go"), []byte("package main"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := handler.GetManager().CreateContext("ctx-uno", "demo", []string{dir}, "full", []string{"tag1"}, false); err != nil {
+	if _, err := handler.GetManager().CreateContext(context.Background(), "ctx-uno", "demo", []string{dir}, "full", []string{"tag1"}, false); err != nil {
 		t.Fatalf("CreateContext: %v", err)
 	}
 	c := &ChatCLI{contextHandler: handler, logger: zap.NewNop()}

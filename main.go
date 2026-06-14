@@ -28,20 +28,79 @@ import (
 	"go.uber.org/zap"
 )
 
+// isSubcommand reports whether arg is a recognized top-level subcommand and
+// dispatches it. It returns true when a subcommand was handled.
+func dispatchSubcommand() bool {
+	if len(os.Args) <= 1 {
+		return false
+	}
+	subcmd := os.Args[1]
+	switch subcmd {
+	case "server", "serve", "connect", "watch", "mcp-server", "mcp-serve", "acp", "gateway":
+		runSubcommand(subcmd, os.Args[2:])
+		return true
+	case "daemon":
+		runDaemonSubcommand(os.Args[2:])
+		return true
+	}
+	return false
+}
+
+// printVersionInfo prints version details (including update check) and is used
+// for the -version flag.
+func printVersionInfo() {
+	versionInfo := version.GetCurrentVersion()
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	latest, hasUpdate, err := version.CheckLatestVersionWithContext(ctx)
+	fmt.Println(version.FormatVersionInfo(versionInfo, latest, hasUpdate, err))
+}
+
+// applyStackSpotFlags applies StackSpot realm/agent overrides when the target
+// provider is StackSpot.
+func applyStackSpotFlags(llmManager manager.LLMManager, targetProvider string, opts *cli.Options, logger *zap.Logger) {
+	if strings.ToUpper(targetProvider) != "STACKSPOT" {
+		return
+	}
+	if opts.Realm != "" {
+		llmManager.SetStackSpotRealm(opts.Realm)
+		logger.Info("Realm/Tenant do StackSpot sobrescrito via flag", zap.String("realm", opts.Realm))
+	}
+	if opts.AgentID != "" {
+		llmManager.SetStackSpotAgentID(opts.AgentID)
+		logger.Info("Agent ID do StackSpot sobrescrito via flag", zap.String("agent-id", opts.AgentID))
+	}
+}
+
+// installInterruptHandler wires SIGINT so an in-flight operation is canceled
+// first, and otherwise the root context is canceled for a clean shutdown.
+func installInterruptHandler(chatCLI *cli.ChatCLI, cancel context.CancelFunc, logger *zap.Logger) {
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, syscall.SIGINT)
+
+	go func() {
+		for range sigChan {
+			if chatCLI.IsExecuting() {
+				logger.Info("Cancelando operação em andamento")
+				chatCLI.CancelOperation()
+			} else {
+				// Cancel the root context so chatCLI.Start() returns
+				// and the deferred cli.cleanup() runs — that's what
+				// stops MCP child processes, drains the scheduler and
+				// flushes history. os.Exit() would skip every defer
+				// and orphan the npx-spawned MCP servers.
+				logger.Info("Encerrando aplicação")
+				cancel()
+			}
+		}
+	}()
+}
+
 func main() {
 	// Check for subcommands (server, connect) before processing standard flags.
 	// These subcommands have their own flag sets and should not go through cli.Parse().
-	if len(os.Args) > 1 {
-		subcmd := os.Args[1]
-		if subcmd == "server" || subcmd == "serve" || subcmd == "connect" || subcmd == "watch" ||
-			subcmd == "mcp-server" || subcmd == "mcp-serve" || subcmd == "acp" || subcmd == "gateway" {
-			runSubcommand(subcmd, os.Args[2:])
-			return
-		}
-		if subcmd == "daemon" {
-			runDaemonSubcommand(os.Args[2:])
-			return
-		}
+	if dispatchSubcommand() {
+		return
 	}
 
 	args := cli.PreprocessArgs(os.Args[1:])
@@ -54,11 +113,7 @@ func main() {
 	i18n.Init()
 
 	if opts.Version {
-		versionInfo := version.GetCurrentVersion()
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		defer cancel()
-		latest, hasUpdate, err := version.CheckLatestVersionWithContext(ctx)
-		fmt.Println(version.FormatVersionInfo(versionInfo, latest, hasUpdate, err))
+		printVersionInfo()
 		return
 	}
 
@@ -129,7 +184,7 @@ func main() {
 		fmt.Println("Tip: use /auth login anthropic | openai-codex to authenticate via OAuth.")
 	}
 
-	chatCLI, err := cli.NewChatCLI(llmManager, logger)
+	chatCLI, err := cli.NewChatCLI(ctx, llmManager, logger)
 	if err != nil {
 		logger.Fatal("Erro ao inicializar o ChatCLI", zap.Error(err))
 	}
@@ -141,43 +196,16 @@ func main() {
 		targetProvider = chatCLI.Provider
 	}
 
-	if strings.ToUpper(targetProvider) == "STACKSPOT" {
-		if opts.Realm != "" {
-			llmManager.SetStackSpotRealm(opts.Realm)
-			logger.Info("Realm/Tenant do StackSpot sobrescrito via flag", zap.String("realm", opts.Realm))
-		}
-		if opts.AgentID != "" {
-			llmManager.SetStackSpotAgentID(opts.AgentID)
-			logger.Info("Agent ID do StackSpot sobrescrito via flag", zap.String("agent-id", opts.AgentID))
-		}
-	}
+	applyStackSpotFlags(llmManager, targetProvider, opts, logger)
 
-	if err := chatCLI.ApplyOverrides(llmManager, opts.Provider, opts.Model); err != nil {
+	if err := chatCLI.ApplyOverrides(ctx, llmManager, opts.Provider, opts.Model); err != nil {
 		// CORREÇÃO: Usar Fprintln com i18n.T
 		fmt.Fprintln(os.Stderr, i18n.T("main.error_apply_overrides", err))
 		logger.Error("Erro fatal ao aplicar overrides de provider/model via flags", zap.Error(err))
 		os.Exit(1)
 	}
 
-	sigChan := make(chan os.Signal, 1)
-	signal.Notify(sigChan, syscall.SIGINT)
-
-	go func() {
-		for range sigChan {
-			if chatCLI.IsExecuting() {
-				logger.Info("Cancelando operação em andamento")
-				chatCLI.CancelOperation()
-			} else {
-				// Cancel the root context so chatCLI.Start() returns
-				// and the deferred cli.cleanup() runs — that's what
-				// stops MCP child processes, drains the scheduler and
-				// flushes history. os.Exit() would skip every defer
-				// and orphan the npx-spawned MCP servers.
-				logger.Info("Encerrando aplicação")
-				cancel()
-			}
-		}
-	}()
+	installInterruptHandler(chatCLI, cancel, logger)
 
 	if chatCLI.HandleOneShotOrFatal(ctx, opts) {
 		return

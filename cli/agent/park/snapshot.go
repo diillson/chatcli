@@ -143,7 +143,7 @@ func (s *Snapshot) Save() error {
 		s.CreatedAt = time.Now().UTC()
 	}
 
-	path, err := pathFor(s.Token)
+	path, err := snapshotPath(s.Token)
 	if err != nil {
 		return err
 	}
@@ -188,7 +188,7 @@ func Load(token string) (*Snapshot, error) {
 	if err := validateToken(token); err != nil {
 		return nil, err
 	}
-	path, err := pathFor(token)
+	path, err := snapshotPath(token)
 	if err != nil {
 		return nil, err
 	}
@@ -217,7 +217,7 @@ func Delete(token string) error {
 	if err := validateToken(token); err != nil {
 		return err
 	}
-	path, err := pathFor(token)
+	path, err := snapshotPath(token)
 	if err != nil {
 		return err
 	}
@@ -241,7 +241,7 @@ func List() ([]*Snapshot, []error) {
 		return nil, []error{err}
 	}
 	var (
-		snaps  []*Snapshot
+		snaps  = make([]*Snapshot, 0, len(entries))
 		errs   []error
 		suffix = ".json"
 	)

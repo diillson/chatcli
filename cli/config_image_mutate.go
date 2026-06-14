@@ -34,30 +34,30 @@ import (
 )
 
 // routeConfigImage dispatches /config image <sub> [args].
-func (cli *ChatCLI) routeConfigImage(args []string) {
+func (cli *ChatCLI) routeConfigImage(ctx context.Context, args []string) {
 	if len(args) == 0 {
-		cli.showConfigImage()
+		cli.showConfigImage(ctx)
 		return
 	}
 	switch strings.ToLower(args[0]) {
 	case "help", "-h", "--help":
 		cli.printConfigImageUsage()
 	case "provider":
-		cli.setImageEnv("CHATCLI_IMAGE_PROVIDER", args[1:])
+		cli.setImageEnv(ctx, "CHATCLI_IMAGE_PROVIDER", args[1:])
 	case "api":
-		cli.setImageEnv("CHATCLI_IMAGE_API", args[1:])
+		cli.setImageEnv(ctx, "CHATCLI_IMAGE_API", args[1:])
 	case "model":
-		cli.setImageEnv("CHATCLI_IMAGE_MODEL", args[1:])
+		cli.setImageEnv(ctx, "CHATCLI_IMAGE_MODEL", args[1:])
 	case "url":
-		cli.setImageEnv("CHATCLI_IMAGE_URL", args[1:])
+		cli.setImageEnv(ctx, "CHATCLI_IMAGE_URL", args[1:])
 	case "models", "catalog":
-		fmt.Println(cli.imageModelsCatalog())
+		fmt.Println(cli.imageModelsCatalog(ctx))
 	case "reset":
 		for _, k := range []string{"CHATCLI_IMAGE_PROVIDER", "CHATCLI_IMAGE_API", "CHATCLI_IMAGE_MODEL", "CHATCLI_IMAGE_URL"} {
 			_ = os.Unsetenv(k)
 		}
 		fmt.Println(colorize("  "+i18n.T("cfg.image.reset_ok"), ColorGreen))
-		cli.showConfigImage()
+		cli.showConfigImage(ctx)
 	default:
 		fmt.Println(colorize("  "+i18n.T("cfg.image.unknown_sub", args[0]), ColorYellow))
 		cli.printConfigImageUsage()
@@ -70,13 +70,13 @@ func (cli *ChatCLI) routeConfigImage(args []string) {
 // shortcuts the text-model switch. With no argument it prints the image-model
 // catalog (same as `/config image models`). It deliberately does NOT touch the
 // text/chat model — image and text models are separate backends.
-func (cli *ChatCLI) handleImageModelCommand(input string) {
+func (cli *ChatCLI) handleImageModelCommand(ctx context.Context, input string) {
 	rest := strings.TrimSpace(strings.TrimPrefix(input, "/model-image"))
 	if rest == "" {
-		fmt.Println(cli.imageModelsCatalog())
+		fmt.Println(cli.imageModelsCatalog(ctx))
 		return
 	}
-	cli.setImageEnv("CHATCLI_IMAGE_MODEL", []string{rest})
+	cli.setImageEnv(ctx, "CHATCLI_IMAGE_MODEL", []string{rest})
 }
 
 // getImageModelSuggestions autocompletes the `/model-image <id>` shorthand with
@@ -101,7 +101,7 @@ func (cli *ChatCLI) getImageModelSuggestions(d prompt.Document) []prompt.Suggest
 }
 
 // setImageEnv applies a single image env override at runtime.
-func (cli *ChatCLI) setImageEnv(key string, args []string) {
+func (cli *ChatCLI) setImageEnv(ctx context.Context, key string, args []string) {
 	if len(args) == 0 {
 		fmt.Println(colorize("  "+i18n.T("cfg.image.value_required", key), ColorYellow))
 		return
@@ -109,16 +109,16 @@ func (cli *ChatCLI) setImageEnv(key string, args []string) {
 	val := strings.TrimSpace(strings.Join(args, " "))
 	_ = os.Setenv(key, val)
 	fmt.Println(colorize("  "+i18n.T("cfg.image.set_ok", key, val), ColorGreen))
-	cli.showConfigImage()
+	cli.showConfigImage(ctx)
 }
 
 // showConfigImage renders the @image panorama.
-func (cli *ChatCLI) showConfigImage() {
+func (cli *ChatCLI) showConfigImage(ctx context.Context) {
 	sectionHeader("🎨", "cfg.section.image.title", ColorBlue)
 	p := uiPrefix(ColorBlue)
 
 	status := i18n.T("cfg.val.imagegen_off")
-	if g := imagegen.NewFromEnv(cli.logger); !imagegen.IsNull(g) {
+	if g := imagegen.NewFromEnvContext(ctx, cli.logger); !imagegen.IsNull(g) {
 		status = g.Name()
 	}
 	kv(p, i18n.T("cfg.kv.imagegen"), status)
@@ -191,7 +191,7 @@ func (cli *ChatCLI) getConfigImageSuggestions(d prompt.Document) []prompt.Sugges
 
 // imageModelsCatalog renders the static image-model catalog plus, when an
 // OpenAI key is present, the image-capable models on the account.
-func (cli *ChatCLI) imageModelsCatalog() string {
+func (cli *ChatCLI) imageModelsCatalog(ctx context.Context) string {
 	var b strings.Builder
 	b.WriteString(i18n.T("cfg.image.catalog_header"))
 	b.WriteByte('\n')
@@ -199,7 +199,7 @@ func (cli *ChatCLI) imageModelsCatalog() string {
 		fmt.Fprintf(&b, "  • %-26s %-8s %-10s %s\n", m.Name, m.Provider, m.API, m.Note)
 	}
 	if key := strings.TrimSpace(os.Getenv("OPENAI_API_KEY")); key != "" {
-		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+		ctx, cancel := context.WithTimeout(ctx, 20*time.Second)
 		defer cancel()
 		if ids, err := imagegen.FetchOpenAIModels(ctx, "", key, cli.logger); err == nil && len(ids) > 0 {
 			b.WriteString("\n" + i18n.T("cfg.image.catalog_live") + "\n  " + strings.Join(ids, ", "))

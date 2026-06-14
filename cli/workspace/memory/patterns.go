@@ -138,7 +138,7 @@ func (pd *PatternDetector) GetTopCommands(n int) []string {
 		cmd   string
 		count int
 	}
-	var cmds []cmdCount
+	cmds := make([]cmdCount, 0, len(pd.stats.CommandFrequency))
 	for c, count := range pd.stats.CommandFrequency {
 		cmds = append(cmds, cmdCount{c, count})
 	}

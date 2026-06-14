@@ -40,7 +40,7 @@ type RemoteClient struct {
 func Dial(socketPath string) (*RemoteClient, error) {
 	conn, err := net.DialTimeout("unix", socketPath, 3*time.Second)
 	if err != nil {
-		return nil, fmt.Errorf("%w: %v", ErrNoDaemon, err)
+		return nil, fmt.Errorf("%w: %w", ErrNoDaemon, err)
 	}
 	c := &RemoteClient{
 		conn:       &framedConn{conn: conn},

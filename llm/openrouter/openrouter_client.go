@@ -395,7 +395,7 @@ func (c *OpenRouterClient) ListModels(ctx context.Context) ([]client.ModelInfo, 
 		return nil, fmt.Errorf("%s: %w", i18n.T("llm.error.decode_response_for", "OpenRouter"), err)
 	}
 
-	var modelList []client.ModelInfo
+	modelList := make([]client.ModelInfo, 0, len(result.Data))
 	for _, m := range result.Data {
 		modelList = append(modelList, client.ModelInfo{
 			ID:          m.ID,

@@ -93,14 +93,14 @@ func (mw *memoryWorker) extractionClients() []extractionClient {
 // callExtraction sends the extraction prompt through the client chain,
 // returning the first success. Each attempt gets its own timeout so a hung
 // provider cannot consume the whole budget of the ones behind it.
-func (mw *memoryWorker) callExtraction(prompt string, history []models.Message) (string, error) {
+func (mw *memoryWorker) callExtraction(parent context.Context, prompt string, history []models.Message) (string, error) {
 	clients := mw.extractionClients()
 	if len(clients) == 0 {
 		return "", fmt.Errorf("no LLM client available for memory extraction")
 	}
 	errs := make([]string, 0, len(clients))
 	for i, ec := range clients {
-		ctx, cancel := context.WithTimeout(context.Background(), memoryExtractTimeout)
+		ctx, cancel := context.WithTimeout(parent, memoryExtractTimeout)
 		response, err := ec.llm.SendPrompt(ctx, prompt, history, 0)
 		if mw.cli.refreshClientOnAuthError(err) {
 			if c := mw.cli.getClient(); c != nil {
@@ -176,7 +176,7 @@ func (mw *memoryWorker) pendingFiles() []string {
 // many were processed. It stops at the first still-failing segment — the
 // provider is likely still down, and order preserves conversation causality.
 // Corrupt files are removed so one bad write can never wedge the queue.
-func (mw *memoryWorker) drainPending() int {
+func (mw *memoryWorker) drainPending(ctx context.Context) int {
 	processed := 0
 	for _, path := range mw.pendingFiles() {
 		if processed >= pendingDrainBatch {
@@ -192,7 +192,7 @@ func (mw *memoryWorker) drainPending() int {
 			_ = os.Remove(path)
 			continue
 		}
-		if err := mw.extractAndSave(seg.Messages); err != nil {
+		if err := mw.extractAndSave(ctx, seg.Messages); err != nil {
 			mw.logger.Warn("Memory worker: pending segment still failing; will retry later",
 				zap.String("file", path), zap.Error(err))
 			break

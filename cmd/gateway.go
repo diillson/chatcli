@@ -34,7 +34,7 @@ func RunGateway(args []string, mgr manager.LLMManager, logger *zap.Logger) error
 	// streamed feed stays clean.
 	_ = os.Setenv("CHATCLI_NO_TYPEWRITER", "1")
 
-	chatCLI, err := cli.NewChatCLI(mgr, logger)
+	chatCLI, err := cli.NewChatCLI(context.Background(), mgr, logger)
 	if err != nil {
 		return err
 	}

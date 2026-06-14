@@ -8,6 +8,7 @@ package stackspotai
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -177,7 +178,8 @@ func (c *StackSpotClient) executeWithTokenRetry(ctx context.Context, requestFunc
 
 	response, err := requestFunc(token)
 	if err != nil {
-		if apiErr, ok := err.(*utils.APIError); ok && (apiErr.StatusCode == http.StatusUnauthorized || apiErr.StatusCode == http.StatusForbidden) {
+		var apiErr *utils.APIError
+		if errors.As(err, &apiErr) && (apiErr.StatusCode == http.StatusUnauthorized || apiErr.StatusCode == http.StatusForbidden) {
 			c.logger.Info(i18n.T("llm.stackspot.token_invalid_renewing"))
 			newToken, tokenErr := c.tokenManager.RefreshToken(ctx)
 			if tokenErr != nil {

@@ -69,7 +69,7 @@ func (rl *RulesLoader) LoadMatchingRules(contextPaths []string) string {
 		return ""
 	}
 
-	var parts []string
+	parts := make([]string, 0, len(matched))
 	for _, rule := range matched {
 		header := fmt.Sprintf("### Rule: %s", rule.Name)
 		if len(rule.Paths) > 0 {

@@ -7,6 +7,7 @@ package cmd
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"os"
@@ -255,7 +256,7 @@ func RunServer(args []string, llmMgr manager.LLMManager, logger *zap.Logger) err
 				zap.Int("targets", mw.TargetCount()),
 				zap.Duration("interval", multiCfg.Interval),
 			)
-			if err := mw.Start(ctx); err != nil && err != context.Canceled {
+			if err := mw.Start(ctx); err != nil && !errors.Is(err, context.Canceled) {
 				logger.Error(i18n.T("cmd.server.watch_error"), zap.Error(err))
 			}
 		}()
@@ -286,7 +287,7 @@ func startColocatedGateway(llmMgr manager.LLMManager, srv *server.Server, logger
 		logger.Warn(i18n.T("cmd.server.gateway_hub_disabled"))
 		return nil
 	}
-	gwCLI, err := cli.NewChatCLI(llmMgr, logger)
+	gwCLI, err := cli.NewChatCLI(context.Background(), llmMgr, logger)
 	if err != nil {
 		logger.Warn(i18n.T("cmd.server.gateway_init_failed"), zap.Error(err))
 		return nil

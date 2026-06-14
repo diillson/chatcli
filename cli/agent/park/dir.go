@@ -58,9 +58,9 @@ func Dir() (string, error) {
 	return dir, nil
 }
 
-// pathFor returns the on-disk path for a token. Callers must validate
+// snapshotPath returns the on-disk path for a token. Callers must validate
 // the token before calling this — Save and Load do.
-func pathFor(token string) (string, error) {
+func snapshotPath(token string) (string, error) {
 	dir, err := Dir()
 	if err != nil {
 		return "", err

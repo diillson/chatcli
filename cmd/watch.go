@@ -7,6 +7,7 @@ package cmd
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"os"
@@ -118,7 +119,7 @@ func RunWatch(ctx context.Context, args []string, llmMgr manager.LLMManager, log
 			}
 		}()
 
-		if err := mw.Start(watchCtx); err != nil && err != context.Canceled {
+		if err := mw.Start(watchCtx); err != nil && !errors.Is(err, context.Canceled) {
 			logger.Error(i18n.T("cmd.watch.error"), zap.Error(err))
 		}
 	}()
@@ -139,12 +140,12 @@ func RunWatch(ctx context.Context, args []string, llmMgr manager.LLMManager, log
 	}
 
 	// Interactive mode
-	chatCLI, err := cli.NewChatCLI(llmMgr, logger)
+	chatCLI, err := cli.NewChatCLI(ctx, llmMgr, logger)
 	if err != nil {
 		return fmt.Errorf("%s: %w", i18n.T("cmd.watch.init_failed"), err)
 	}
 
-	if err := chatCLI.ApplyOverrides(llmMgr, opts.Provider, opts.Model); err != nil {
+	if err := chatCLI.ApplyOverrides(ctx, llmMgr, opts.Provider, opts.Model); err != nil {
 		return fmt.Errorf("%s: %w", i18n.T("cmd.watch.override_failed"), err)
 	}
 

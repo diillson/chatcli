@@ -8,6 +8,7 @@ package scheduler
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 )
@@ -57,7 +58,7 @@ func TestPrune_RemovesTerminalJobs_KeepsActive(t *testing.T) {
 		t.Fatalf("pending job vanished after prune: %v", err)
 	}
 	// Pruned jobs must be gone.
-	if _, err := s.Query(failedJob.ID); err != ErrJobNotFound {
+	if _, err := s.Query(failedJob.ID); !errors.Is(err, ErrJobNotFound) {
 		t.Fatalf("failed job still queryable after prune: %v", err)
 	}
 }

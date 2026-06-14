@@ -51,7 +51,7 @@ func (c *ZAIClient) LastStopReason() string { return c.usageState.LastStopReason
 // NewZAIClient cria uma nova instância de ZAIClient.
 // ZAI doesn't use OAuth; the provider yields either a raw API key or an
 // `id.secret` pair that the client compiles into a JWT on each request.
-func NewZAIClient(provider auth.TokenProvider, model string, logger *zap.Logger, maxAttempts int, backoff time.Duration) *ZAIClient {
+func NewZAIClient(ctx context.Context, provider auth.TokenProvider, model string, logger *zap.Logger, maxAttempts int, backoff time.Duration) *ZAIClient {
 	httpClient := utils.NewHTTPClient(logger, 900*time.Second)
 	c := &ZAIClient{
 		provider:    provider,
@@ -65,7 +65,7 @@ func NewZAIClient(provider auth.TokenProvider, model string, logger *zap.Logger,
 
 	// Detect the id.secret JWT format from the current token. ZAI keys are
 	// static, so a one-shot probe is sufficient.
-	probe, _ := provider.Token(context.Background())
+	probe, _ := provider.Token(ctx)
 	if strings.Contains(probe, ".") {
 		parts := strings.SplitN(probe, ".", 2)
 		if len(parts) == 2 && parts[0] != "" && parts[1] != "" {
@@ -304,7 +304,7 @@ func (c *ZAIClient) ListModels(ctx context.Context) ([]client.ModelInfo, error) 
 		return nil, fmt.Errorf("%s: %w", i18n.T("llm.error.decode_response_for", "ZAI"), err)
 	}
 
-	var modelsList []client.ModelInfo
+	modelsList := make([]client.ModelInfo, 0, len(result.Data))
 	for _, m := range result.Data {
 		id := strings.ToLower(m.ID)
 		if !strings.HasPrefix(id, "glm-") && !strings.HasPrefix(id, "codegeex") &&

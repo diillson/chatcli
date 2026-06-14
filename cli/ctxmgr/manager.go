@@ -86,7 +86,7 @@ func NewManager(logger *zap.Logger) (*Manager, error) {
 }
 
 // CreateContext cria um novo contexto a partir de caminhos de arquivos/diretórios
-func (m *Manager) CreateContext(name, description string, paths []string, mode ProcessingMode, tags []string, force bool) (*FileContext, error) {
+func (m *Manager) CreateContext(ctx context.Context, name, description string, paths []string, mode ProcessingMode, tags []string, force bool) (*FileContext, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -145,7 +145,7 @@ func (m *Manager) CreateContext(name, description string, paths []string, mode P
 
 	scanOpts := utils.DefaultDirectoryScanOptions(m.logger)
 	if len(scanPaths) > 0 {
-		scanned, opts, err := m.processor.ProcessPaths(scanPaths, mode)
+		scanned, opts, err := m.processor.ProcessPaths(ctx, scanPaths, mode)
 		if err != nil {
 			return nil, fmt.Errorf("erro ao processar arquivos: %w", err)
 		}
@@ -164,7 +164,7 @@ func (m *Manager) CreateContext(name, description string, paths []string, mode P
 	}
 
 	// Criar contexto
-	ctx := &FileContext{
+	fctx := &FileContext{
 		ID:          uuid.New().String(),
 		Name:        name,
 		Description: description,
@@ -199,32 +199,32 @@ func (m *Manager) CreateContext(name, description string, paths []string, mode P
 			return nil, fmt.Errorf("erro ao dividir em chunks: %w", err)
 		}
 
-		ctx.Chunks = chunks
-		ctx.IsChunked = true
-		ctx.ChunkStrategy = string(ChunkSmart)
+		fctx.Chunks = chunks
+		fctx.IsChunked = true
+		fctx.ChunkStrategy = string(ChunkSmart)
 
 		m.logger.Info("Contexto dividido em chunks",
-			zap.String("context_id", ctx.ID),
+			zap.String("context_id", fctx.ID),
 			zap.Int("total_chunks", len(chunks)))
 	}
 
 	// Armazenar em memória
-	m.contexts[ctx.ID] = ctx
+	m.contexts[fctx.ID] = fctx
 
 	// Persistir no disco
-	if err := m.Storage.SaveContext(ctx); err != nil {
-		delete(m.contexts, ctx.ID)
+	if err := m.Storage.SaveContext(fctx); err != nil {
+		delete(m.contexts, fctx.ID)
 		return nil, fmt.Errorf("erro ao salvar contexto: %w", err)
 	}
 
 	m.logger.Info("Contexto criado com sucesso",
-		zap.String("id", ctx.ID),
-		zap.String("name", ctx.Name),
-		zap.Int("file_count", ctx.FileCount),
-		zap.Int64("total_size", ctx.TotalSize),
-		zap.Bool("is_chunked", ctx.IsChunked))
+		zap.String("id", fctx.ID),
+		zap.String("name", fctx.Name),
+		zap.Int("file_count", fctx.FileCount),
+		zap.Int64("total_size", fctx.TotalSize),
+		zap.Bool("is_chunked", fctx.IsChunked))
 
-	return ctx, nil
+	return fctx, nil
 }
 
 // AttachContext anexa um contexto a uma sessão (não envia à LLM ainda)
@@ -487,15 +487,15 @@ func (m *Manager) GetAttachedContexts(sessionID string) ([]*FileContext, error) 
 }
 
 // UpdateContext atualiza um contexto existente
-func (m *Manager) UpdateContext(name string, newPaths []string, newMode ProcessingMode, newTags []string, newDescription string) (*FileContext, error) {
+func (m *Manager) UpdateContext(ctx context.Context, name string, newPaths []string, newMode ProcessingMode, newTags []string, newDescription string) (*FileContext, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
 	// Buscar contexto existente
 	var existingCtx *FileContext
-	for _, ctx := range m.contexts {
-		if ctx.Name == name {
-			existingCtx = ctx
+	for _, fc := range m.contexts {
+		if fc.Name == name {
+			existingCtx = fc
 			break
 		}
 	}
@@ -516,7 +516,7 @@ func (m *Manager) UpdateContext(name string, newPaths []string, newMode Processi
 		}
 
 		var err error
-		files, scanOpts, err = m.processor.ProcessPaths(newPaths, mode)
+		files, scanOpts, err = m.processor.ProcessPaths(ctx, newPaths, mode)
 		if err != nil {
 			return nil, fmt.Errorf("erro ao processar arquivos: %w", err)
 		}
@@ -604,7 +604,7 @@ func (m *Manager) BuildPromptMessages(sessionID string, opts FormatOptions) ([]m
 		return attachments[i].Priority < attachments[j].Priority
 	})
 
-	var messages []models.Message
+	messages := make([]models.Message, 0, len(attachments))
 
 	for _, attachment := range attachments {
 		ctx, exists := m.contexts[attachment.ContextID]

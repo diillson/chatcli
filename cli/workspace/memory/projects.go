@@ -135,7 +135,7 @@ func (pt *ProjectTracker) FormatForPrompt() string {
 		return ""
 	}
 
-	var lines []string
+	lines := make([]string, 0, len(active))
 	for _, p := range active {
 		line := "- " + p.Name
 		if p.Path != "" {

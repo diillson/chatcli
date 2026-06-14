@@ -7,6 +7,7 @@ package k8s
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 
@@ -128,7 +129,7 @@ func (mw *MultiWatcher) Start(ctx context.Context) error {
 		go func(k string, w *ResourceWatcher) {
 			defer wg.Done()
 			mw.logger.Info("Starting watcher", zap.String("target", k))
-			if err := w.Start(ctx); err != nil && err != context.Canceled {
+			if err := w.Start(ctx); err != nil && !errors.Is(err, context.Canceled) {
 				mw.logger.Error("Watcher stopped with error", zap.String("target", k), zap.Error(err))
 			}
 		}(key, watcher)

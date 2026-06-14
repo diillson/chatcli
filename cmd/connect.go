@@ -154,7 +154,7 @@ func RunConnect(ctx context.Context, args []string, llmMgr manager.LLMManager, l
 		ProviderConfig: providerConfig,
 	}
 
-	remoteClient, err := remote.NewClient(remoteCfg, logger)
+	remoteClient, err := remote.NewClient(ctx, remoteCfg, logger)
 	if err != nil {
 		return fmt.Errorf("%s: %w", i18n.T("cmd.connect.remote_failed"), err)
 	}
@@ -193,7 +193,7 @@ func RunConnect(ctx context.Context, args []string, llmMgr manager.LLMManager, l
 	}
 
 	// Interactive mode: create ChatCLI with remote client as the LLM backend
-	chatCLI, err := cli.NewChatCLI(llmMgr, logger)
+	chatCLI, err := cli.NewChatCLI(ctx, llmMgr, logger)
 	if err != nil {
 		return fmt.Errorf("%s: %w", i18n.T("cmd.connect.init_failed"), err)
 	}

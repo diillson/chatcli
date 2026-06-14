@@ -1,6 +1,8 @@
 package zai
 
 import (
+	"context"
+
 	"github.com/diillson/chatcli/auth"
 	"github.com/diillson/chatcli/config"
 	"github.com/diillson/chatcli/llm/client"
@@ -19,7 +21,7 @@ func init() {
 				model = config.DefaultZAIModel
 			}
 			provider := auth.NewStaticTokenProvider(cfg.APIKey, auth.AuthModeAPIKey, "")
-			return NewZAIClient(provider, model, cfg.Logger, cfg.MaxRetries, cfg.Backoff), nil
+			return NewZAIClient(context.Background(), provider, model, cfg.Logger, cfg.MaxRetries, cfg.Backoff), nil
 		},
 	})
 }

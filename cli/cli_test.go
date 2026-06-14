@@ -78,7 +78,7 @@ func TestHandleVersionCommand(t *testing.T) {
 			os.Stdout = w
 			defer func() { os.Stdout = oldStdout }()
 
-			handler.handleVersionCommand()
+			handler.handleVersionCommand(context.Background())
 
 			w.Close()
 			out, _ := io.ReadAll(r)

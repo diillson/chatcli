@@ -417,7 +417,7 @@ func (cli *ChatCLI) schedulerJobIDSuggestions(activeOnly bool) []prompt.Suggest 
 		return nil
 	}
 	filter := scheduler.ListFilter{IncludeTerminal: !activeOnly}
-	list := cli.schedulerList(filter)
+	list := cli.schedulerList(cli.sessionCtx, filter)
 	out := make([]prompt.Suggest, 0, len(list))
 	for _, s := range list {
 		desc := s.Name + "  [" + string(s.Status) + "]"

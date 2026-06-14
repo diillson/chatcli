@@ -66,7 +66,7 @@ func NewSkillHandler(logger *zap.Logger, personaMgr *persona.Manager) *SkillHand
 }
 
 // HandleCommand routes /skill subcommands.
-func (sh *SkillHandler) HandleCommand(userInput string) {
+func (sh *SkillHandler) HandleCommand(ctx context.Context, userInput string) {
 	if sh.registryMgr == nil {
 		fmt.Println(colorize(" "+i18n.T("skill.registry.not_initialized"), ColorYellow))
 		if sh.initErr != nil {
@@ -90,7 +90,7 @@ func (sh *SkillHandler) HandleCommand(userInput string) {
 			return
 		}
 		query := strings.Join(args[2:], " ")
-		sh.Search(query)
+		sh.Search(ctx, query)
 
 	case "install":
 		if len(args) < 3 {
@@ -103,7 +103,7 @@ func (sh *SkillHandler) HandleCommand(userInput string) {
 			fmt.Println(colorize(" "+i18n.T("skill.usage.install"), ColorYellow))
 			return
 		}
-		sh.Install(skillName, fromRegistry)
+		sh.Install(ctx, skillName, fromRegistry)
 
 	case "uninstall", "remove":
 		if len(args) < 3 {
@@ -140,7 +140,7 @@ func (sh *SkillHandler) HandleCommand(userInput string) {
 			fmt.Println(colorize(" "+i18n.T("skill.usage.info"), ColorYellow))
 			return
 		}
-		sh.Info(infoName, infoFrom)
+		sh.Info(ctx, infoName, infoFrom)
 
 	case "prefer":
 		sh.Prefer(args[2:])
@@ -171,12 +171,12 @@ func (sh *SkillHandler) HandleCommand(userInput string) {
 }
 
 // Search performs a fan-out search across all registries.
-func (sh *SkillHandler) Search(query string) {
+func (sh *SkillHandler) Search(ctx context.Context, query string) {
 	fmt.Printf("\n  %s %s...\n",
 		i18n.T("skill.search.searching"),
 		colorize(fmt.Sprintf("%q", query), ColorCyan))
 
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
 	merged, results := sh.registryMgr.SearchAll(ctx, query)
@@ -297,8 +297,8 @@ func (sh *SkillHandler) Search(query string) {
 //	/skill install frontend-design                    → auto-detect or disambiguate
 //	/skill install frontend-design --from skills.sh   → explicit registry
 //	/skill install anthropics/skills/frontend-design   → skills.sh slug (unambiguous)
-func (sh *SkillHandler) Install(name string, fromRegistry string) {
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+func (sh *SkillHandler) Install(ctx context.Context, name string, fromRegistry string) {
+	ctx, cancel := context.WithTimeout(ctx, 60*time.Second)
 	defer cancel()
 
 	// Gather metadata from all registries
@@ -603,8 +603,8 @@ func (sh *SkillHandler) List() {
 // the output (name, description, version, …) is rendered by a focused
 // helper so the function stays under the project's complexity budget and
 // each row can be exercised independently in tests.
-func (sh *SkillHandler) Info(name string, fromRegistry string) {
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+func (sh *SkillHandler) Info(ctx context.Context, name string, fromRegistry string) {
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 
 	local := sh.findBestLocalInfo(name)

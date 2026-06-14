@@ -49,7 +49,7 @@ func (cli *ChatCLI) HandleOneShotOrFatal(ctx context.Context, opts *Options) boo
 	}
 
 	// Aplica overrides de provider/model
-	if err := cli.ApplyOverrides(cli.manager, opts.Provider, opts.Model); err != nil {
+	if err := cli.ApplyOverrides(ctx, cli.manager, opts.Provider, opts.Model); err != nil {
 		fmt.Fprintln(os.Stderr, i18n.T("manager.error_provider_not_supported", opts.Provider)+"\n\n"+i18n.T("oneshot.details_label")+":\n```\n"+err.Error()+"\n```")
 		cli.logger.Fatal("Erro ao aplicar provider/model via flags", zap.Error(err))
 	}
@@ -136,7 +136,7 @@ func PreprocessArgs(args []string) []string {
 }
 
 func (cli *ChatCLI) RunOnce(ctx context.Context, input string, disableAnimation bool, rawOutput bool) error {
-	userInput, additionalContext := cli.processSpecialCommands(input)
+	userInput, additionalContext := cli.processSpecialCommands(ctx, input)
 
 	cli.history = append(cli.history, models.Message{
 		Role:    "user",

@@ -8,6 +8,7 @@ package agent
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -149,7 +150,8 @@ func (e *CommandExecutor) executeNonInteractive(ctx context.Context, shell, shel
 	result.Error = utils.SanitizeSensitiveText(stderr.String())
 
 	if err != nil {
-		if exitErr, ok := err.(*exec.ExitError); ok {
+		var exitErr *exec.ExitError
+		if errors.As(err, &exitErr) {
 			if status, ok := exitErr.Sys().(syscall.WaitStatus); ok {
 				result.ExitCode = status.ExitStatus()
 			}
@@ -231,7 +233,8 @@ func (e *CommandExecutor) executeInteractive(ctx context.Context, shell, shellFl
 	fmt.Println("\n" + i18n.T("agent.executor.interactive_mode_footer"))
 
 	if err != nil {
-		if exitErr, ok := err.(*exec.ExitError); ok {
+		var exitErr *exec.ExitError
+		if errors.As(err, &exitErr) {
 			if status, ok := exitErr.Sys().(syscall.WaitStatus); ok {
 				result.ExitCode = status.ExitStatus()
 			}

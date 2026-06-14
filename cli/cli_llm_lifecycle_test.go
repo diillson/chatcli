@@ -50,7 +50,7 @@ func TestEndProcessingLifecycle_EmptyQueueRestoresIdleState(t *testing.T) {
 	cli.isExecuting.Store(true)
 	cli.interactionState = StateProcessing
 
-	cli.endProcessingLifecycle(func() {}) // empty queue → idle
+	cli.endProcessingLifecycle(context.Background(), func() {}) // empty queue → idle
 	if cli.isExecuting.Load() {
 		t.Error("isExecuting must be false after end with empty queue")
 	}
@@ -141,7 +141,7 @@ func TestWarnIfHistoryExceedsProxyCap_ExplicitCapShortCircuits(t *testing.T) {
 
 func TestAcquireOperationContext_ReleaseCancelsContextAndClearsSlot(t *testing.T) {
 	cli := &ChatCLI{}
-	ctx, release := cli.acquireOperationContext()
+	ctx, release := cli.acquireOperationContext(context.Background())
 	if cli.operationCancel == nil {
 		t.Fatal("operationCancel must be populated immediately after acquire")
 	}
@@ -164,7 +164,7 @@ func TestAcquireOperationContext_ReleaseCancelsContextAndClearsSlot(t *testing.T
 
 func TestAcquireOperationContext_DoubleReleaseIsSafe(t *testing.T) {
 	cli := &ChatCLI{}
-	_, release := cli.acquireOperationContext()
+	_, release := cli.acquireOperationContext(context.Background())
 	release()
 	release() // must not panic even though cancel was already called
 }

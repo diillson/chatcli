@@ -76,16 +76,16 @@ func (tm *TokenManager) GetAccessToken(ctx context.Context) (string, error) {
 	}
 
 	tm.logger.Info(i18n.T("llm.token.expired_or_missing"))
-	return tm.refreshToken(ctx)
+	return tm.renewToken(ctx)
 }
 
 // RefreshToken força a renovação do token de acesso
 func (tm *TokenManager) RefreshToken(ctx context.Context) (string, error) {
-	return tm.refreshToken(ctx)
+	return tm.renewToken(ctx)
 }
 
-// refreshToken renova o token de acesso com retry e backoff exponencial
-func (tm *TokenManager) refreshToken(ctx context.Context) (string, error) {
+// renewToken renova o token de acesso com retry e backoff exponencial
+func (tm *TokenManager) renewToken(ctx context.Context) (string, error) {
 	maxAttempts := 3
 	backoff := time.Second
 

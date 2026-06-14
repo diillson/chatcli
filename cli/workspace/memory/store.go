@@ -258,8 +258,12 @@ func (m *Manager) GetRelevantContextWithHyDE(ctx context.Context, query string, 
 			// retrieve call returns in milliseconds; backfill must
 			// survive the turn's ctx cancellation so embeddings
 			// become available for the next retrieval.
+			// context.WithoutCancel inherits values from ctx but is not
+			// cancelled when ctx is, so the backfill survives the turn's
+			// cancellation as required (see comment above).
+			bgCtx := context.WithoutCancel(ctx)
 			go func(items map[string]string) { //#nosec G118 -- detached on purpose; see comment above
-				if err := m.vectors.BackfillFacts(context.Background(), items); err != nil {
+				if err := m.vectors.BackfillFacts(bgCtx, items); err != nil {
 					m.logger.Warn("vector backfill failed", zap.Error(err))
 				}
 			}(items)

@@ -46,8 +46,8 @@ type logRing struct {
 	cap   int
 }
 
-func newLogRing(cap int) *logRing {
-	return &logRing{cap: cap}
+func newLogRing(capacity int) *logRing {
+	return &logRing{cap: capacity}
 }
 
 func (r *logRing) append(line string) {
@@ -284,7 +284,7 @@ func (m *Manager) Reload(ctx context.Context, configPath string) (ReloadDiff, er
 
 	var diff ReloadDiff
 	var toStop []string
-	var toStart []*ServerConnection
+	toStart := make([]*ServerConnection, 0, len(desired))
 	var toReplace []*ServerConnection
 
 	m.mu.Lock()

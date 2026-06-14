@@ -708,7 +708,7 @@ func (nc *NodeCollector) Collect(ctx context.Context, pods []PodStatus) []NodeSt
 	}
 
 	// Fetch node objects
-	var result []NodeStatus
+	result := make([]NodeStatus, 0, len(nodeNames))
 	for nodeName := range nodeNames {
 		node, err := nc.clientset.CoreV1().Nodes().Get(ctx, nodeName, metav1.GetOptions{})
 		if err != nil {

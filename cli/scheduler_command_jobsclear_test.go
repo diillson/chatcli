@@ -97,7 +97,7 @@ func TestJobsClear_PreviewWithoutYes(t *testing.T) {
 		// prompting fails the test instead of hanging the runner.
 		done := make(chan struct{})
 		go func() {
-			cli.jobsClear([]string{})
+			cli.jobsClear(context.Background(), []string{})
 			close(done)
 		}()
 		select {
@@ -128,7 +128,7 @@ func TestJobsClear_DeletesWithYes(t *testing.T) {
 	seedTerminalJobs(t, cli, 4)
 
 	out := captureStdout(t, func() {
-		cli.jobsClear([]string{"--yes"})
+		cli.jobsClear(context.Background(), []string{"--yes"})
 	})
 
 	if got := countTerminalJobs(cli); got != 0 {
@@ -146,7 +146,7 @@ func TestJobsClear_StatusFilterScopes(t *testing.T) {
 	seedTerminalJobs(t, cli, 2) // all cancelled
 
 	captureStdout(t, func() {
-		cli.jobsClear([]string{"--failed", "--yes"})
+		cli.jobsClear(context.Background(), []string{"--failed", "--yes"})
 	})
 
 	// Cancelled jobs should still be there; --failed didn't match.
@@ -156,7 +156,7 @@ func TestJobsClear_StatusFilterScopes(t *testing.T) {
 
 	// Now --cancelled --yes should clear them.
 	captureStdout(t, func() {
-		cli.jobsClear([]string{"--cancelled", "--yes"})
+		cli.jobsClear(context.Background(), []string{"--cancelled", "--yes"})
 	})
 	if got := countTerminalJobs(cli); got != 0 {
 		t.Errorf("--cancelled --yes failed to clean: %d still present", got)
@@ -170,7 +170,7 @@ func TestJobsClear_EmptyFilterShowsHelpfulMessage(t *testing.T) {
 	// No jobs seeded.
 
 	out := captureStdout(t, func() {
-		cli.jobsClear([]string{"--yes"})
+		cli.jobsClear(context.Background(), []string{"--yes"})
 	})
 
 	if !strings.Contains(out, "nothing to clear") {

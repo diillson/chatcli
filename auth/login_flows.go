@@ -160,7 +160,7 @@ func loginAnthropicLocalhost(ctx context.Context, logger *zap.Logger) (string, e
 	}()
 
 	defer func() {
-		shutdownCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		shutdownCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Second)
 		defer cancel()
 		_ = srv.Shutdown(shutdownCtx)
 	}()
@@ -408,7 +408,7 @@ func LoginOpenAICodexOAuth(ctx context.Context, logger *zap.Logger) (profileID s
 	}()
 
 	defer func() {
-		shutdownCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		shutdownCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Second)
 		defer cancel()
 		_ = srv.Shutdown(shutdownCtx)
 	}()

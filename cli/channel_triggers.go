@@ -281,7 +281,7 @@ func renderTriggerLine(a triggers.Action) string {
 // terminal for the duration. This is intentional — auto triggers
 // are explicit opt-in (the user wrote a rule with Mode=auto and a
 // tool whitelist) and the user expects to see the work happen.
-func (cli *ChatCLI) drainPendingAutoTriggers() bool {
+func (cli *ChatCLI) drainPendingAutoTriggers(ctx context.Context) bool {
 	if cli.channelTriggers == nil {
 		return false
 	}
@@ -297,7 +297,7 @@ func (cli *ChatCLI) drainPendingAutoTriggers() bool {
 
 	processed := false
 	for _, action := range queued {
-		cli.runAutoTriggerAction(action)
+		cli.runAutoTriggerAction(ctx, action)
 		processed = true
 	}
 	return processed
@@ -307,7 +307,7 @@ func (cli *ChatCLI) drainPendingAutoTriggers() bool {
 // agent loop with the rendered prompt. The envelope makes it visually
 // unambiguous that the work was started by a trigger, not by user
 // input.
-func (cli *ChatCLI) runAutoTriggerAction(action triggers.Action) {
+func (cli *ChatCLI) runAutoTriggerAction(ctx context.Context, action triggers.Action) {
 	header := i18n.T("chan.trigger.auto_header",
 		action.Rule.Name, action.Event.ServerName, action.Event.Channel)
 	fmt.Println()
@@ -321,7 +321,11 @@ func (cli *ChatCLI) runAutoTriggerAction(action triggers.Action) {
 		cli.agentMode = NewAgentMode(cli, cli.logger)
 	}
 	cli.agentMode.isOneShot = false // preserve prior behavior (Run used to force this)
-	cli.runWithCancellation("MCP Auto-Trigger", func(ctx context.Context) error {
+	// The auto-trigger agent run is a foreground action that must outlive
+	// the triggering /channel command's request context, so we detach
+	// cancellation while still inheriting context values. Previously this
+	// rooted context.Background(); WithoutCancel preserves that decoupling.
+	cli.runWithCancellation(context.WithoutCancel(ctx), "MCP Auto-Trigger", func(ctx context.Context) error {
 		// Auto triggers always run in agent mode (CoderSystemPrompt
 		// would constrain too heavily for free-form investigation).
 		// Tool whitelist is enforced upstream via the agent's tool
@@ -333,7 +337,7 @@ func (cli *ChatCLI) runAutoTriggerAction(action triggers.Action) {
 // channelTriggerConfirm marks a pending confirm action as accepted
 // (or denied) and, on acceptance, runs the agent on the rule's
 // prompt. id matches Action.ID; the second arg is true for "yes".
-func (cli *ChatCLI) channelTriggerConfirm(id uint64, accept bool) error {
+func (cli *ChatCLI) channelTriggerConfirm(ctx context.Context, id uint64, accept bool) error {
 	if cli.channelTriggers == nil {
 		return errors.New("MCP triggers not initialized")
 	}
@@ -355,7 +359,7 @@ func (cli *ChatCLI) channelTriggerConfirm(id uint64, accept bool) error {
 	}
 	// Promote to an auto-style execution so the user sees the
 	// auto-run envelope around the agent's work.
-	cli.runAutoTriggerAction(action)
+	cli.runAutoTriggerAction(ctx, action)
 	return nil
 }
 
@@ -363,7 +367,7 @@ func (cli *ChatCLI) channelTriggerConfirm(id uint64, accept bool) error {
 // chatcli to investigate a specific channel message manually, using
 // the default rule prompt (since no rule matched in `notify` form).
 // Returns an error when the seq does not exist in the ring.
-func (cli *ChatCLI) channelTriggerRun(seq uint64) error {
+func (cli *ChatCLI) channelTriggerRun(ctx context.Context, seq uint64) error {
 	if cli.mcpManager == nil {
 		return errors.New("MCP not enabled")
 	}
@@ -389,7 +393,7 @@ func (cli *ChatCLI) channelTriggerRun(seq uint64) error {
 		IssuedAt: time.Now().UTC(),
 		Prompt:   fmt.Sprintf(manualRunPromptFmt, msg.ServerName, msg.Channel, msg.Content),
 	}
-	cli.runAutoTriggerAction(action)
+	cli.runAutoTriggerAction(ctx, action)
 	return nil
 }
 

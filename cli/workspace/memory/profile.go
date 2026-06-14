@@ -166,7 +166,7 @@ func (ps *UserProfileStore) FormatForPrompt() string {
 		return ""
 	}
 
-	var parts []string
+	parts := make([]string, 0, 11+len(p.Preferences))
 	if p.Name != "" {
 		parts = append(parts, "Name: "+p.Name)
 	}

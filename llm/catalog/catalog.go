@@ -1610,9 +1610,9 @@ func GetPreferredAPI(provider, model string) PreferredAPI {
 // HasCapability verifica se o modelo anuncia determinada capacidade (best-effort).
 func HasCapability(provider, model, capability string) bool {
 	if meta, ok := Resolve(provider, model); ok {
-		cap := strings.ToLower(capability)
+		capLower := strings.ToLower(capability)
 		for _, c := range meta.Capabilities {
-			if strings.ToLower(c) == cap {
+			if strings.ToLower(c) == capLower {
 				return true
 			}
 		}

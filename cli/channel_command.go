@@ -19,6 +19,7 @@
 package cli
 
 import (
+	"context"
 	"fmt"
 	"strconv"
 	"strings"
@@ -29,7 +30,7 @@ import (
 	"github.com/diillson/chatcli/models"
 )
 
-func (cli *ChatCLI) handleChannelCommand(userInput string) {
+func (cli *ChatCLI) handleChannelCommand(ctx context.Context, userInput string) {
 	if cli.mcpManager == nil {
 		fmt.Println()
 		fmt.Println(uiBox("📡", i18n.T("chan.cmd.box_title"), ColorPurple))
@@ -61,9 +62,9 @@ func (cli *ChatCLI) handleChannelCommand(userInput string) {
 	case "rules":
 		cli.runChannelRules(args)
 	case "confirm":
-		cli.runChannelConfirm(args)
+		cli.runChannelConfirm(ctx, args)
 	case "run":
-		cli.runChannelRun(args)
+		cli.runChannelRun(ctx, args)
 	default:
 		cli.runChannelList(ch, subcommand)
 	}
@@ -220,7 +221,7 @@ func (cli *ChatCLI) runChannelRules(args []string) {
 
 // runChannelConfirm resolves a pending confirm action. Defaults to
 // accept when only the id is provided; explicit "no" denies it.
-func (cli *ChatCLI) runChannelConfirm(args []string) {
+func (cli *ChatCLI) runChannelConfirm(ctx context.Context, args []string) {
 	if len(args) < 3 {
 		fmt.Println(colorize("  "+i18n.T("chan.cmd.confirm_usage"), ColorYellow))
 		return
@@ -237,7 +238,7 @@ func (cli *ChatCLI) runChannelConfirm(args []string) {
 			accept = false
 		}
 	}
-	if err := cli.channelTriggerConfirm(id, accept); err != nil {
+	if err := cli.channelTriggerConfirm(ctx, id, accept); err != nil {
 		fmt.Println(colorize("  ✗ "+err.Error(), ColorYellow))
 		return
 	}
@@ -248,7 +249,7 @@ func (cli *ChatCLI) runChannelConfirm(args []string) {
 
 // runChannelRun manually triggers the agent on a stored channel
 // message. The user picks the seq from the /channel list output.
-func (cli *ChatCLI) runChannelRun(args []string) {
+func (cli *ChatCLI) runChannelRun(ctx context.Context, args []string) {
 	if len(args) < 3 {
 		fmt.Println(colorize("  "+i18n.T("chan.cmd.run_usage"), ColorYellow))
 		return
@@ -258,7 +259,7 @@ func (cli *ChatCLI) runChannelRun(args []string) {
 		fmt.Println(colorize("  "+i18n.T("chan.cmd.run_bad_seq"), ColorYellow))
 		return
 	}
-	if err := cli.channelTriggerRun(seq); err != nil {
+	if err := cli.channelTriggerRun(ctx, seq); err != nil {
 		fmt.Println(colorize("  ✗ "+err.Error(), ColorYellow))
 		return
 	}

@@ -18,6 +18,7 @@
 package cli
 
 import (
+	"context"
 	"fmt"
 	"runtime"
 	"strings"
@@ -47,7 +48,7 @@ var reservedSlashCommands = map[string]bool{
 // next LLM turn and kicks off processLLMRequest. Returns true when the input
 // was recognized (so the caller's default "unknown command" branch should
 // not fire); returns false when the input is not a skill invocation.
-func (ch *CommandHandler) tryInvokeUserSkill(userInput string) bool {
+func (ch *CommandHandler) tryInvokeUserSkill(ctx context.Context, userInput string) bool {
 	if !strings.HasPrefix(userInput, "/") || len(userInput) < 2 {
 		return false
 	}
@@ -127,9 +128,9 @@ func (ch *CommandHandler) tryInvokeUserSkill(userInput string) bool {
 	// message (same windows/non-windows scheduling rules).
 	ch.cli.interactionState = StateProcessing
 	if runtime.GOOS == "windows" {
-		ch.cli.processLLMRequest(prompt)
+		ch.cli.processLLMRequest(ctx, prompt)
 	} else {
-		go ch.cli.processLLMRequest(prompt)
+		go ch.cli.processLLMRequest(ctx, prompt)
 	}
 	return true
 }

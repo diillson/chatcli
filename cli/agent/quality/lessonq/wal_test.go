@@ -2,6 +2,7 @@ package lessonq
 
 import (
 	"bytes"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -213,7 +214,7 @@ func TestWAL_ClosedRejectsAppend(t *testing.T) {
 	w, _ := NewWAL(t.TempDir(), nil, nil)
 	w.Close()
 	err := w.Append(newTestJob(t, "x", "t"))
-	if err != ErrWALClosed {
+	if !errors.Is(err, ErrWALClosed) {
 		t.Fatalf("expected ErrWALClosed; got %v", err)
 	}
 }

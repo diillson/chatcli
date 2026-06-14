@@ -1,23 +1,24 @@
 package engine
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"strings"
 )
 
-func (e *Engine) handleGitStatus(args []string) error {
+func (e *Engine) handleGitStatus(ctx context.Context, args []string) error {
 	fs := flag.NewFlagSet("git-status", flag.ContinueOnError)
 	dir := fs.String("dir", ".", "")
 	if err := parseFlags(fs, args); err != nil {
 		return err
 	}
 
-	out, err := runCommand(*dir, "git", "status", "-sb")
+	out, err := runCommandCtx(ctx, *dir, "git", "status", "-sb")
 	return e.printCommandOutput(out, err)
 }
 
-func (e *Engine) handleGitDiff(args []string) error {
+func (e *Engine) handleGitDiff(ctx context.Context, args []string) error {
 	fs := flag.NewFlagSet("git-diff", flag.ContinueOnError)
 	dir := fs.String("dir", ".", "")
 	staged := fs.Bool("staged", false, "")
@@ -43,11 +44,11 @@ func (e *Engine) handleGitDiff(args []string) error {
 		cmdArgs = append(cmdArgs, "--", *path)
 	}
 
-	out, err := runCommand(*dir, "git", cmdArgs...)
+	out, err := runCommandCtx(ctx, *dir, "git", cmdArgs...)
 	return e.printCommandOutput(out, err)
 }
 
-func (e *Engine) handleGitLog(args []string) error {
+func (e *Engine) handleGitLog(ctx context.Context, args []string) error {
 	fs := flag.NewFlagSet("git-log", flag.ContinueOnError)
 	dir := fs.String("dir", ".", "")
 	limit := fs.Int("limit", 20, "")
@@ -61,24 +62,24 @@ func (e *Engine) handleGitLog(args []string) error {
 		cmdArgs = append(cmdArgs, "--", *path)
 	}
 
-	out, err := runCommand(*dir, "git", cmdArgs...)
+	out, err := runCommandCtx(ctx, *dir, "git", cmdArgs...)
 	return e.printCommandOutput(out, err)
 }
 
-func (e *Engine) handleGitChanged(args []string) error {
+func (e *Engine) handleGitChanged(ctx context.Context, args []string) error {
 	fs := flag.NewFlagSet("git-changed", flag.ContinueOnError)
 	dir := fs.String("dir", ".", "")
 	if err := parseFlags(fs, args); err != nil {
 		return err
 	}
 
-	out, err := runCommand(*dir, "git", "status", "--porcelain")
+	out, err := runCommandCtx(ctx, *dir, "git", "status", "--porcelain")
 	if err != nil {
 		return e.printCommandOutput(out, err)
 	}
 
 	lines := strings.Split(strings.TrimSpace(out), "\n")
-	var files []string
+	files := make([]string, 0, len(lines))
 	for _, l := range lines {
 		l = strings.TrimSpace(l)
 		if l == "" {
@@ -95,13 +96,13 @@ func (e *Engine) handleGitChanged(args []string) error {
 	return nil
 }
 
-func (e *Engine) handleGitBranch(args []string) error {
+func (e *Engine) handleGitBranch(ctx context.Context, args []string) error {
 	fs := flag.NewFlagSet("git-branch", flag.ContinueOnError)
 	dir := fs.String("dir", ".", "")
 	if err := parseFlags(fs, args); err != nil {
 		return err
 	}
 
-	out, err := runCommand(*dir, "git", "rev-parse", "--abbrev-ref", "HEAD")
+	out, err := runCommandCtx(ctx, *dir, "git", "rev-parse", "--abbrev-ref", "HEAD")
 	return e.printCommandOutput(out, err)
 }

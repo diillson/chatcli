@@ -74,7 +74,8 @@ func Retry[T any](ctx context.Context, logger *zap.Logger, maxAttempts int, init
 func IsTemporaryError(err error) bool {
 	// Desembrulha o erro se for wrapped
 	for err != nil {
-		if ne, ok := err.(net.Error); ok && ne.Timeout() {
+		var ne net.Error
+		if errors.As(err, &ne) && ne.Timeout() {
 			return true
 		}
 		var apiErr *APIError

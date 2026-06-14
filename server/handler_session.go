@@ -7,6 +7,7 @@ package server
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"strings"
@@ -115,7 +116,7 @@ func (h *Handler) InteractiveSession(stream pb.ChatCLIService_InteractiveSession
 
 	for {
 		msg, err := stream.Recv()
-		if err == io.EOF {
+		if errors.Is(err, io.EOF) {
 			h.logger.Info(i18n.T("server.session.interactive_ended"))
 			return nil
 		}

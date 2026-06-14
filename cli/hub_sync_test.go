@@ -185,17 +185,17 @@ func TestHubSyncBindAndList(t *testing.T) {
 func TestHubCommandWiring(t *testing.T) {
 	// /hub with no connection must not panic and must short-circuit.
 	c := &ChatCLI{logger: zap.NewNop()}
-	c.handleHubCommand("/hub whoami") // hubSync nil → not-connected path
+	c.handleHubCommand(context.Background(), "/hub whoami") // hubSync nil → not-connected path
 
 	// With a fake hub, drive each subcommand branch.
 	fc := newFakeHubClient()
 	c.hubSync = newHubSync(fc, zap.NewNop())
 	_ = c.hubSync.startFresh(context.Background()) // populate convID/principal for whoami
-	c.handleHubCommand("/hub whoami")
-	c.handleHubCommand("/hub bind telegram 123 alice")
-	c.handleHubCommand("/hub bind")     // usage branch
-	c.handleHubCommand("/hub bindings") // list branch
-	c.handleHubCommand("/hub bogus")    // default/usage branch
+	c.handleHubCommand(context.Background(), "/hub whoami")
+	c.handleHubCommand(context.Background(), "/hub bind telegram 123 alice")
+	c.handleHubCommand(context.Background(), "/hub bind")     // usage branch
+	c.handleHubCommand(context.Background(), "/hub bindings") // list branch
+	c.handleHubCommand(context.Background(), "/hub bogus")    // default/usage branch
 
 	fc.mu.Lock()
 	defer fc.mu.Unlock()
@@ -207,14 +207,14 @@ func TestHubCommandWiring(t *testing.T) {
 func TestShowConfigHub(t *testing.T) {
 	// Without a connection.
 	c := &ChatCLI{logger: zap.NewNop()}
-	c.showConfigHub()
+	c.showConfigHub(context.Background())
 
 	// With a live sync (covers the connected branch).
 	fc := newFakeHubClient()
 	c.hubSync = newHubSync(fc, zap.NewNop())
 	_ = c.hubSync.startFresh(context.Background())
 	t.Setenv("CHATCLI_HUB_ENABLED", "false") // exercise the disabled-label path
-	c.showConfigHub()
+	c.showConfigHub(context.Background())
 }
 
 func TestHubSyncNewSessionRotates(t *testing.T) {

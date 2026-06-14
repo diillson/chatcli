@@ -218,8 +218,9 @@ func parseVerifierResponse(raw string) VerifierResponse {
 // splitBulletLines turns "- a\n- b\n- c" into ["a","b","c"]. Tolerant
 // of "*" and missing dashes.
 func splitBulletLines(s string) []string {
-	var out []string
-	for _, line := range strings.Split(s, "\n") {
+	rawLines := strings.Split(s, "\n")
+	out := make([]string, 0, len(rawLines))
+	for _, line := range rawLines {
 		line = strings.TrimSpace(line)
 		if line == "" {
 			continue

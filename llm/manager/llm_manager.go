@@ -26,14 +26,14 @@ import (
 	"github.com/diillson/chatcli/llm/claudeai"
 	"github.com/diillson/chatcli/llm/client"
 	"github.com/diillson/chatcli/llm/copilot"
-	github_models "github.com/diillson/chatcli/llm/github_models"
+	githubmodels "github.com/diillson/chatcli/llm/githubmodels"
 	"github.com/diillson/chatcli/llm/googleai"
 	"github.com/diillson/chatcli/llm/minimax"
 	"github.com/diillson/chatcli/llm/moonshot"
 	"github.com/diillson/chatcli/llm/ollama"
 	"github.com/diillson/chatcli/llm/openai"
-	"github.com/diillson/chatcli/llm/openai_assistant"
-	"github.com/diillson/chatcli/llm/openai_responses"
+	"github.com/diillson/chatcli/llm/openaiassistant"
+	"github.com/diillson/chatcli/llm/openairesponses"
 	"github.com/diillson/chatcli/llm/openrouter"
 	"github.com/diillson/chatcli/llm/ratelimit"
 	"github.com/diillson/chatcli/llm/stackspotai"
@@ -84,6 +84,12 @@ type LLMManagerImpl struct {
 	stackspotRealm   string
 	stackspotAgentID string
 
+	// baseCtx is the manager-lifetime context used for request-independent
+	// work such as resolving (and refreshing) auth providers. It is derived
+	// from the constructor's context with cancellation detached, since the
+	// manager and its token providers outlive any single request.
+	baseCtx context.Context
+
 	tpMu           sync.Mutex
 	tokenProviders map[auth.ProviderID]auth.TokenProvider
 }
@@ -101,7 +107,7 @@ func (m *LLMManagerImpl) tokenProviderFor(provider auth.ProviderID) (auth.TokenP
 	if tp, ok := m.tokenProviders[provider]; ok {
 		return tp, nil
 	}
-	tp, err := auth.ResolveAuthProvider(context.Background(), provider, m.logger)
+	tp, err := auth.ResolveAuthProvider(m.baseCtx, provider, m.logger)
 	if err != nil {
 		return nil, err
 	}
@@ -145,7 +151,11 @@ func NewLLMManager(logger *zap.Logger) (LLMManager, error) {
 		logger:           logger,
 		stackspotRealm:   config.Global.GetString("STACKSPOT_REALM"),
 		stackspotAgentID: config.Global.GetString("STACKSPOT_AGENT_ID"),
-		tokenProviders:   make(map[auth.ProviderID]auth.TokenProvider),
+		// Auth providers (and their refresh goroutines) live for the manager's
+		// lifetime and are request-independent, so a fresh background root is the
+		// correct parent for their resolution/refresh work.
+		baseCtx:        context.Background(),
+		tokenProviders: make(map[auth.ProviderID]auth.TokenProvider),
 	}
 
 	manager.configurarOpenAIClient(maxRetries, initialBackoff)
@@ -351,7 +361,7 @@ func (m *LLMManagerImpl) configurarGoogleAIClient(maxRetries int, initialBackoff
 }
 
 // configurarOpenAIClient configura o cliente OpenAI se a variável de ambiente OPENAI_API_KEY estiver definida.
-// The factory picks `openai_responses` (ChatGPT backend) for OAuth tokens and
+// The factory picks `openairesponses` (ChatGPT backend) for OAuth tokens and
 // falls back to chat-completions for API keys; both flavors share the same
 // cached TokenProvider so the OAuth refresh loop runs only once.
 func (m *LLMManagerImpl) configurarOpenAIClient(maxRetries int, initialBackoff time.Duration) {
@@ -379,7 +389,7 @@ func (m *LLMManagerImpl) configurarOpenAIClient(maxRetries int, initialBackoff t
 
 		if useResponses {
 			m.logger.Info(i18n.T("llm.manager.using_responses_api"), zap.String("model", model), zap.Bool("oauth", isOAuth))
-			return openai_responses.NewOpenAIResponsesClient(
+			return openairesponses.NewOpenAIResponsesClient(
 				tp, model, m.logger,
 				maxRetries,
 				initialBackoff,
@@ -398,7 +408,7 @@ func (m *LLMManagerImpl) configurarOpenAIClient(maxRetries int, initialBackoff t
 		if model == "" {
 			model = config.DefaultOpenAiAssistModel
 		}
-		return openai_assistant.NewOpenAIAssistantClient(tp, model, m.logger)
+		return openaiassistant.NewOpenAIAssistantClient(m.baseCtx, tp, model, m.logger)
 	}
 }
 
@@ -493,6 +503,7 @@ func (m *LLMManagerImpl) configurarZAIClient(maxRetries int, initialBackoff time
 			}
 			provider := auth.NewStaticTokenProvider(apiKey, auth.AuthModeAPIKey, "")
 			return zai.NewZAIClient(
+				m.baseCtx,
 				provider,
 				model,
 				m.logger,
@@ -667,7 +678,7 @@ func (m *LLMManagerImpl) configurarGitHubModelsClient(maxRetries int, initialBac
 		if model == "" {
 			model = config.DefaultGitHubModelsModel
 		}
-		return github_models.NewGitHubModelsClient(tp, model, m.logger, maxRetries, initialBackoff), nil
+		return githubmodels.NewGitHubModelsClient(tp, model, m.logger, maxRetries, initialBackoff), nil
 	}
 }
 
@@ -696,7 +707,7 @@ func (m *LLMManagerImpl) configurarOpenRouterClient(maxRetries int, initialBacko
 
 // GetAvailableProviders retorna uma lista de provedores disponíveis configurados
 func (m *LLMManagerImpl) GetAvailableProviders() []string {
-	var providers []string
+	providers := make([]string, 0, len(m.clients))
 	for provider := range m.clients {
 		providers = append(providers, provider)
 	}
@@ -868,7 +879,7 @@ func (m *LLMManagerImpl) CreateClientWithKey(provider, model, apiKey string) (cl
 			useResponses = true
 		}
 		if useResponses {
-			return openai_responses.NewOpenAIResponsesClient(tp, model, m.logger, maxRetries, initialBackoff), nil
+			return openairesponses.NewOpenAIResponsesClient(tp, model, m.logger, maxRetries, initialBackoff), nil
 		}
 		return openai.NewOpenAIClient(tp, model, m.logger, maxRetries, initialBackoff), nil
 
@@ -898,7 +909,7 @@ func (m *LLMManagerImpl) CreateClientWithKey(provider, model, apiKey string) (cl
 			model = config.DefaultZAIModel
 		}
 		tp := auth.NewStaticTokenProvider(apiKey, auth.AuthModeAPIKey, "")
-		return zai.NewZAIClient(tp, model, m.logger, maxRetries, initialBackoff), nil
+		return zai.NewZAIClient(m.baseCtx, tp, model, m.logger, maxRetries, initialBackoff), nil
 
 	case "MINIMAX":
 		if model == "" {

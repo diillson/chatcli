@@ -3,7 +3,7 @@
  * Copyright (c) 2024 Edilson Freitas
  * License: Apache-2.0
  */
-package openai_responses
+package openairesponses
 
 import (
 	"bufio"
@@ -466,7 +466,7 @@ func (c *OpenAIResponsesClient) listModelsAPIKey(ctx context.Context) ([]client.
 		return nil, fmt.Errorf("%s: %w", i18n.T("llm.error.decode_response_for", "OpenAI"), err)
 	}
 
-	var modelList []client.ModelInfo
+	modelList := make([]client.ModelInfo, 0, len(result.Data))
 	for _, m := range result.Data {
 		id := strings.ToLower(m.ID)
 		if !strings.HasPrefix(id, "gpt-") && !strings.HasPrefix(id, "o1") &&

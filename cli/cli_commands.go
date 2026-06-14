@@ -15,7 +15,7 @@ import (
 	"go.uber.org/zap"
 )
 
-func (cli *ChatCLI) processSpecialCommands(userInput string) (string, string) {
+func (cli *ChatCLI) processSpecialCommands(ctx context.Context, userInput string) (string, string) {
 	var additionalContext string
 
 	// Pre-process @path/to/file mentions into @file path/to/file
@@ -33,7 +33,7 @@ func (cli *ChatCLI) processSpecialCommands(userInput string) (string, string) {
 	userInput, context = cli.processEnvCommand(userInput)
 	additionalContext += context
 
-	userInput, context = cli.processFileCommand(userInput)
+	userInput, context = cli.processFileCommand(ctx, userInput)
 	additionalContext += context
 
 	// Processar '>' como um operador para adicionar contexto

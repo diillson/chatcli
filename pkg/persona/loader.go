@@ -309,67 +309,8 @@ func (l *Loader) GetSkill(name string) (*Skill, error) {
 	}
 
 	// Helper to search for qualified names matching a base name.
-	// Scans directory entries for "{prefix}--{name}" patterns.
-	// When multiple matches exist, checks user preferences to pick the right one.
-	// Falls back to first match found if no preference is set.
 	findByBaseName := func(basePath string) (*Skill, error) {
-		entries, err := os.ReadDir(basePath)
-		if err != nil {
-			return nil, os.ErrNotExist
-		}
-
-		// Collect all qualified matches
-		type candidate struct {
-			dirName string
-			path    string
-		}
-		var candidates []candidate
-
-		for _, entry := range entries {
-			if !entry.IsDir() || strings.HasPrefix(entry.Name(), ".") {
-				continue
-			}
-			dirName := entry.Name()
-			sepIdx := strings.LastIndex(dirName, qualifiedSep)
-			if sepIdx <= 0 {
-				continue
-			}
-			basePart := dirName[sepIdx+len(qualifiedSep):]
-			if basePart == name {
-				packagePath := filepath.Join(basePath, dirName)
-				if _, err := os.Stat(filepath.Join(packagePath, "SKILL.md")); err == nil {
-					candidates = append(candidates, candidate{dirName: dirName, path: packagePath})
-				}
-			}
-		}
-
-		if len(candidates) == 0 {
-			return nil, os.ErrNotExist
-		}
-
-		// If only one match, use it directly
-		if len(candidates) == 1 {
-			return l.loadSkillFromPackage(candidates[0].path)
-		}
-
-		// Multiple matches — check user preference
-		prefs := l.loadSkillPreferences()
-		preferred := prefs[name]
-		if preferred != "" {
-			for _, c := range candidates {
-				// Load to check source field
-				skill, err := l.loadSkillFromPackage(c.path)
-				if err == nil && skill != nil {
-					source := l.extractSourceFromFrontmatter(c.path)
-					if source == preferred {
-						return skill, nil
-					}
-				}
-			}
-		}
-
-		// No preference or preference didn't match — use first candidate
-		return l.loadSkillFromPackage(candidates[0].path)
+		return l.findSkillByBaseName(basePath, name)
 	}
 
 	// 0. Check if user has a preference for this skill name.
@@ -416,6 +357,70 @@ func (l *Loader) GetSkill(name string) (*Skill, error) {
 	}
 
 	return nil, fmt.Errorf("skill not found: '%s' (checked local and global)", name)
+}
+
+// findSkillByBaseName searches basePath for qualified names matching a base name.
+// Scans directory entries for "{prefix}--{name}" patterns.
+// When multiple matches exist, checks user preferences to pick the right one.
+// Falls back to first match found if no preference is set.
+func (l *Loader) findSkillByBaseName(basePath, name string) (*Skill, error) {
+	entries, err := os.ReadDir(basePath)
+	if err != nil {
+		return nil, os.ErrNotExist
+	}
+
+	// Collect all qualified matches
+	type candidate struct {
+		dirName string
+		path    string
+	}
+	var candidates []candidate
+
+	for _, entry := range entries {
+		if !entry.IsDir() || strings.HasPrefix(entry.Name(), ".") {
+			continue
+		}
+		dirName := entry.Name()
+		sepIdx := strings.LastIndex(dirName, qualifiedSep)
+		if sepIdx <= 0 {
+			continue
+		}
+		basePart := dirName[sepIdx+len(qualifiedSep):]
+		if basePart == name {
+			packagePath := filepath.Join(basePath, dirName)
+			if _, err := os.Stat(filepath.Join(packagePath, "SKILL.md")); err == nil {
+				candidates = append(candidates, candidate{dirName: dirName, path: packagePath})
+			}
+		}
+	}
+
+	if len(candidates) == 0 {
+		return nil, os.ErrNotExist
+	}
+
+	// If only one match, use it directly
+	if len(candidates) == 1 {
+		return l.loadSkillFromPackage(candidates[0].path)
+	}
+
+	// Multiple matches — check user preference
+	prefs := l.loadSkillPreferences()
+	preferred := prefs[name]
+	if preferred != "" {
+		for _, c := range candidates {
+			// Load to check source field
+			skill, err := l.loadSkillFromPackage(c.path)
+			if err == nil && skill != nil {
+				source := l.extractSourceFromFrontmatter(c.path)
+				if source == preferred {
+					return skill, nil
+				}
+			}
+		}
+	}
+
+	// No preference or preference didn't match — use first candidate
+	return l.loadSkillFromPackage(candidates[0].path)
 }
 
 // loadSkillFromPackage loads a V2 skill structure (Directory based)

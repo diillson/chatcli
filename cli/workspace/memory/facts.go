@@ -476,7 +476,7 @@ func (fi *FactIndex) pruneLowestLocked(n int) {
 		id    string
 		score float64
 	}
-	var all []idScore
+	all := make([]idScore, 0, len(fi.facts))
 	for id, f := range fi.facts {
 		all = append(all, idScore{id: id, score: f.Score})
 	}

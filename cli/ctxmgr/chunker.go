@@ -128,7 +128,7 @@ func (c *Chunker) chunkByDirectory(files []utils.FileInfo) []FileChunk {
 	}
 
 	// Ordenar diretórios
-	var dirs []string
+	dirs := make([]string, 0, len(dirGroups))
 	for dir := range dirGroups {
 		dirs = append(dirs, dir)
 	}
@@ -186,7 +186,7 @@ func (c *Chunker) chunkByFileType(files []utils.FileInfo) []FileChunk {
 	}
 
 	// Ordenar tipos
-	var types []string
+	types := make([]string, 0, len(typeGroups))
 	for t := range typeGroups {
 		types = append(types, t)
 	}

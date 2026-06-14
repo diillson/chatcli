@@ -128,7 +128,7 @@ func lastResumeBadge(s *park.Snapshot) string {
 // A subsequent /resume <token> for the same token within the TTL is
 // silently no-op'd — that is the typical race when NotifyParkComplete
 // auto-injects the command right after the drain has already run it.
-func (cli *ChatCLI) handleResumeCommand(userInput string) {
+func (cli *ChatCLI) handleResumeCommand(ctx context.Context, userInput string) {
 	parts := strings.Fields(strings.TrimSpace(userInput))
 	if len(parts) < 2 {
 		fmt.Println(colorize("  "+i18n.T("park.resume.usage"), ColorYellow))
@@ -143,7 +143,7 @@ func (cli *ChatCLI) handleResumeCommand(userInput string) {
 		fmt.Println(colorize("  "+err.Error(), ColorYellow))
 		return
 	}
-	cli.runResumeForToken(token, "manual", "")
+	cli.runResumeForToken(ctx, token, "manual", "")
 }
 
 // markRecentlyResumed records that drainPendingResumes consumed a
@@ -252,7 +252,7 @@ func (cli *ChatCLI) resolveParkToken(input string) (string, error) {
 //
 // outcome and detail come from either the AgentResume payload (auto)
 // or are fixed strings ("manual", "") for explicit /resume.
-func (cli *ChatCLI) runResumeForToken(token, outcome, detail string) {
+func (cli *ChatCLI) runResumeForToken(ctx context.Context, token, outcome, detail string) {
 	snap, err := park.Load(token)
 	if err != nil {
 		fmt.Println(colorize("  ⚠ "+i18n.T("park.resume.load_failed", err), ColorYellow))
@@ -261,11 +261,11 @@ func (cli *ChatCLI) runResumeForToken(token, outcome, detail string) {
 	if cli.agentMode == nil {
 		cli.agentMode = NewAgentMode(cli, cli.logger)
 	}
-	cli.runWithCancellation("Park Resume", func(ctx context.Context) error {
+	cli.runWithCancellation(ctx, "Park Resume", func(ctx context.Context) error {
 		return cli.agentMode.RunResumed(ctx, snap, outcome, detail)
 	})
 	if cli.memWorker != nil {
-		cli.memWorker.nudge()
+		cli.memWorker.nudge(ctx)
 	}
 }
 
@@ -276,7 +276,7 @@ func (cli *ChatCLI) runResumeForToken(token, outcome, detail string) {
 //
 // Returns true when at least one resume was processed — the caller
 // can use that signal to skip the prompt redraw cycle for one tick.
-func (cli *ChatCLI) drainPendingResumes() bool {
+func (cli *ChatCLI) drainPendingResumes(ctx context.Context) bool {
 	cli.pendingResumeMu.Lock()
 	if len(cli.pendingResumeQueue) == 0 {
 		cli.pendingResumeMu.Unlock()
@@ -304,7 +304,7 @@ func (cli *ChatCLI) drainPendingResumes() bool {
 			outcome = out.Outcome
 			detail = out.Detail
 		}
-		cli.runResumeForToken(token, outcome, detail)
+		cli.runResumeForToken(ctx, token, outcome, detail)
 		cli.markRecentlyResumed(token)
 		processed = true
 	}
@@ -408,13 +408,4 @@ func SweepStaleParks(cutoff time.Time) (int, []error) {
 		}
 	}
 	return removed, errs
-}
-
-// min returns the smaller of two ints. Used by /parked to clip token
-// display to its first 8 chars.
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
 }

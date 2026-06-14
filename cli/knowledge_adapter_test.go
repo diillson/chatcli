@@ -6,6 +6,7 @@
 package cli
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
@@ -37,7 +38,7 @@ func newKnowledgeTestCLI(t *testing.T) *ChatCLI {
 	if err := os.WriteFile(corpus, []byte(lines), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	fc, err := handler.GetManager().CreateContext("chatcli-docs", "test corpus", []string{corpus}, "knowledge", nil, false)
+	fc, err := handler.GetManager().CreateContext(context.Background(), "chatcli-docs", "test corpus", []string{corpus}, "knowledge", nil, false)
 	if err != nil {
 		t.Fatalf("CreateContext: %v", err)
 	}

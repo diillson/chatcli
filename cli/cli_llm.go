@@ -28,18 +28,18 @@ import (
 // per-turn pipeline phases (system-prompt assembly, history splicing,
 // model/effort resolution, LLM execution, response handling) live in
 // chat_pipeline.go so each step can be read and tested in isolation.
-func (cli *ChatCLI) processLLMRequest(in string) {
+func (cli *ChatCLI) processLLMRequest(parentCtx context.Context, in string) {
 	stopSpinner := cli.startProcessingLifecycle()
-	defer cli.endProcessingLifecycle(stopSpinner)
+	defer cli.endProcessingLifecycle(parentCtx, stopSpinner)
 
-	ctx, releaseCtx := cli.acquireOperationContext()
+	ctx, releaseCtx := cli.acquireOperationContext(parentCtx)
 	defer releaseCtx()
 
 	cli.saveCheckpoint()
-	cli.fireUserPromptSubmitHook(in)
+	cli.fireUserPromptSubmitHook(ctx, in)
 	cli.animation.ShowThinkingAnimation(cli.Client.GetModelName())
 
-	userInput, additionalContext := cli.processSpecialCommands(in)
+	userInput, additionalContext := cli.processSpecialCommands(ctx, in)
 	// Pull turns that arrived on other channels (Telegram/…) into history so the
 	// model has cross-channel context. Silent — nothing is printed.
 	cli.syncHubContext(ctx)
@@ -50,7 +50,7 @@ func (cli *ChatCLI) processLLMRequest(in string) {
 	userMessage := models.Message{Role: "user", Content: userInput + additionalContext}
 
 	effectiveMaxTokens := cli.getMaxTokensForCurrentLLM()
-	cli.ensureModelCacheWarm()
+	cli.ensureModelCacheWarm(ctx)
 	resolution := cli.resolveSkillClient(assembly.modelHint)
 	cli.noticeSkillResolution(resolution)
 	ctx = cli.applyChatEffortHint(ctx, assembly.effort)
@@ -61,7 +61,7 @@ func (cli *ChatCLI) processLLMRequest(in string) {
 		tempHistory, effectiveMaxTokens, resolution, stopSpinner,
 	)
 	cli.handleChatTurnResult(
-		llmErr, userMessage, aiResponse, resolution.Client, resolution,
+		ctx, llmErr, userMessage, aiResponse, resolution.Client, resolution,
 		userInput, additionalContext, time.Since(turnStart),
 	)
 }
@@ -109,13 +109,13 @@ func (cli *ChatCLI) runPrefixSpinner(spinnerDone <-chan struct{}) {
 // message the user queued while the prior turn was running. The recursive
 // re-entry is bounded by the queue cap (10 messages); when the queue is
 // empty it restores the idle prompt.
-func (cli *ChatCLI) endProcessingLifecycle(stopSpinner func()) {
+func (cli *ChatCLI) endProcessingLifecycle(ctx context.Context, stopSpinner func()) {
 	defer cli.animation.SetSuppressed(false)
 	stopSpinner()
 
 	if nextMsg := cli.dequeueMessage(); nextMsg != "" {
 		cli.announceQueueDrain()
-		cli.processLLMRequest(nextMsg)
+		cli.processLLMRequest(ctx, nextMsg)
 		return
 	}
 	cli.isExecuting.Store(false)
@@ -145,8 +145,8 @@ func (cli *ChatCLI) announceQueueDrain() {
 // turn and stashes its cancel func in cli.operationCancel so /reset can
 // interrupt mid-turn. The returned release closure clears the slot and
 // fires cancel exactly once.
-func (cli *ChatCLI) acquireOperationContext() (context.Context, func()) {
-	ctx, cancel := context.WithCancel(context.Background())
+func (cli *ChatCLI) acquireOperationContext(parent context.Context) (context.Context, func()) {
+	ctx, cancel := context.WithCancel(parent)
 	cli.mu.Lock()
 	cli.operationCancel = cancel
 	cli.mu.Unlock()
@@ -161,12 +161,12 @@ func (cli *ChatCLI) acquireOperationContext() (context.Context, func()) {
 // fireUserPromptSubmitHook publishes the UserPromptSubmit event when the
 // hook manager is enabled. Best-effort: hooks run asynchronously and any
 // failure logs internally without blocking the turn.
-func (cli *ChatCLI) fireUserPromptSubmitHook(in string) {
+func (cli *ChatCLI) fireUserPromptSubmitHook(ctx context.Context, in string) {
 	if cli.hookManager == nil {
 		return
 	}
 	wd, _ := os.Getwd()
-	cli.hookManager.FireAsync(hooks.HookEvent{
+	cli.hookManager.FireAsync(ctx, hooks.HookEvent{
 		Type:       hooks.EventUserPromptSubmit,
 		Timestamp:  time.Now(),
 		UserPrompt: in,
@@ -226,7 +226,7 @@ func (cli *ChatCLI) handleProviderSelection(in string) {
 		fmt.Println(i18n.T("error.invalid_choice_normal_mode"))
 		return
 	}
-	_ = cli.applyProviderSwitch(availableProviders[choiceIndex-1])
+	_ = cli.applyProviderSwitch(cli.sessionCtx, availableProviders[choiceIndex-1])
 }
 
 // providerDefaultModel returns the model a provider should start on when no
@@ -264,7 +264,7 @@ func (cli *ChatCLI) providerDefaultModel(provider string) string {
 // updating the client, model cache and gateway runtime mirror. Shared by the
 // numbered /switch picker and the /provider command so both paths behave
 // identically.
-func (cli *ChatCLI) applyProviderSwitch(newProvider string) error {
+func (cli *ChatCLI) applyProviderSwitch(ctx context.Context, newProvider string) error {
 	newModel := cli.providerDefaultModel(newProvider)
 	newClient, err := cli.manager.GetClient(newProvider, newModel)
 	if err != nil {
@@ -278,7 +278,7 @@ func (cli *ChatCLI) applyProviderSwitch(newProvider string) error {
 	cli.Model = newModel
 	fmt.Println(i18n.T("status.provider_switched", cli.Client.GetModelName(), cli.Provider))
 	fmt.Println()
-	cli.refreshModelCache()
+	cli.refreshModelCache(ctx)
 	// Mirror the live choice for a running/future gateway daemon (separate process).
 	cli.writeRuntimeModelState()
 	return nil
@@ -289,7 +289,7 @@ func (cli *ChatCLI) applyProviderSwitch(newProvider string) error {
 // it lists the available providers (marking the current one); with an argument
 // it switches to that provider, matched case-insensitively. The palette opens
 // it scoped to the provider list, giving the same shortcut UX as /model.
-func (cli *ChatCLI) handleProviderCommand(input string) {
+func (cli *ChatCLI) handleProviderCommand(ctx context.Context, input string) {
 	available := cli.manager.GetAvailableProviders()
 	args := strings.Fields(input)
 	if len(args) < 2 {
@@ -307,7 +307,7 @@ func (cli *ChatCLI) handleProviderCommand(input string) {
 	requested := args[1]
 	for _, p := range available {
 		if strings.EqualFold(p, requested) {
-			_ = cli.applyProviderSwitch(p)
+			_ = cli.applyProviderSwitch(ctx, p)
 			return
 		}
 	}
@@ -318,13 +318,13 @@ func (cli *ChatCLI) handleProviderCommand(input string) {
 // caps the model's output tokens for the session without the longer flag form.
 // With no argument it reports the current override. It delegates to
 // handleSwitchCommand so parsing, validation and messaging stay in one place.
-func (cli *ChatCLI) handleMaxTokensCommand(input string) {
+func (cli *ChatCLI) handleMaxTokensCommand(ctx context.Context, input string) {
 	rest := strings.TrimSpace(strings.TrimPrefix(input, "/max-tokens"))
 	if rest == "" {
 		fmt.Println(i18n.T("cli.maxtokens.current", cli.UserMaxTokens))
 		return
 	}
-	cli.handleSwitchCommand("/switch --max-tokens " + rest)
+	cli.handleSwitchCommand(ctx, "/switch --max-tokens "+rest)
 }
 
 // handleModelCommand is a shorthand for `/switch --model <name>`: it changes
@@ -332,16 +332,16 @@ func (cli *ChatCLI) handleMaxTokensCommand(input string) {
 // argument it lists the available models (same as bare `/switch --model`). It
 // delegates to handleSwitchCommand so model-cache refresh, error handling and
 // the gateway runtime-state mirror all stay in one place.
-func (cli *ChatCLI) handleModelCommand(input string) {
+func (cli *ChatCLI) handleModelCommand(ctx context.Context, input string) {
 	rest := strings.TrimSpace(strings.TrimPrefix(input, "/model"))
 	if rest == "" {
-		cli.handleSwitchCommand("/switch --model")
+		cli.handleSwitchCommand(ctx, "/switch --model")
 		return
 	}
-	cli.handleSwitchCommand("/switch --model " + rest)
+	cli.handleSwitchCommand(ctx, "/switch --model "+rest)
 }
 
-func (cli *ChatCLI) handleSwitchCommand(userInput string) {
+func (cli *ChatCLI) handleSwitchCommand(ctx context.Context, userInput string) {
 	args := strings.Fields(userInput)
 	var newModel, newRealm, newAgentID string
 	shouldSwitchModel, shouldUpdateStackSpot := false, false
@@ -409,7 +409,7 @@ func (cli *ChatCLI) handleSwitchCommand(userInput string) {
 	}
 
 	if listModels {
-		cli.listAvailableModels()
+		cli.listAvailableModels(ctx)
 		return
 	}
 
@@ -418,7 +418,7 @@ func (cli *ChatCLI) handleSwitchCommand(userInput string) {
 		newClient, err := cli.manager.GetClient(cli.Provider, newModel)
 		if err != nil {
 			fmt.Println(i18n.T("cli.switch.change_model_error", newModel, err))
-			cli.listAvailableModels()
+			cli.listAvailableModels(ctx)
 		} else {
 			cli.Client = newClient
 			cli.Model = newModel
@@ -434,11 +434,11 @@ func (cli *ChatCLI) handleSwitchCommand(userInput string) {
 	}
 }
 
-func (cli *ChatCLI) listAvailableModels() {
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+func (cli *ChatCLI) listAvailableModels(ctx context.Context) {
+	listCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
 
-	models, err := cli.manager.ListModelsForProvider(ctx, cli.Provider)
+	models, err := cli.manager.ListModelsForProvider(listCtx, cli.Provider)
 	if err != nil {
 		fmt.Printf("  %s\n", i18n.T("sw.cmd.could_not_list_models", cli.Provider, err))
 		return
@@ -481,9 +481,11 @@ func (cli *ChatCLI) listAvailableModels() {
 
 // refreshModelCache fetches available models for the current provider in background
 // and caches them for autocomplete suggestions.
-func (cli *ChatCLI) refreshModelCache() {
+func (cli *ChatCLI) refreshModelCache(ctx context.Context) {
 	go func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		// The warmer must outlive the triggering request; detach
+		// cancellation while inheriting context values.
+		ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 15*time.Second)
 		defer cancel()
 
 		models, err := cli.manager.ListModelsForProvider(ctx, cli.Provider)

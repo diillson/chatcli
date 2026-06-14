@@ -1,6 +1,7 @@
 package plugins
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -143,7 +144,7 @@ func (m *Manager) Reload() {
 
 		// Verify plugin signature
 		if err := verifier.VerifyPlugin(pluginPath); err != nil {
-			if err == ErrNoSignature && verifier.AllowsUnsigned() {
+			if errors.Is(err, ErrNoSignature) && verifier.AllowsUnsigned() {
 				m.logger.Warn("Loading unsigned plugin (dev mode)", zap.String("plugin", entry.Name()))
 			} else {
 				m.logger.Warn("Plugin signature verification failed, skipping",

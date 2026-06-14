@@ -213,10 +213,3 @@ func buildToolResultSummary(content, toolCallID string) string {
 
 	return fmt.Sprintf("[Old tool result cleared — %d lines, %d chars, %s]", lines, chars, contentType)
 }
-
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
-}

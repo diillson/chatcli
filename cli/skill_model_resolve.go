@@ -53,7 +53,7 @@ func (cli *ChatCLI) resolveSkillClient(hint string) SkillClientResolution {
 //
 // Timeout is short (2s) to avoid slowing down the turn if the API is slow —
 // we accept stale catalog + heuristic results in that case.
-func (cli *ChatCLI) ensureModelCacheWarm() {
+func (cli *ChatCLI) ensureModelCacheWarm(ctx context.Context) {
 	cli.cachedModelsMu.RLock()
 	warm := len(cli.cachedModels) > 0
 	cli.cachedModelsMu.RUnlock()
@@ -61,7 +61,9 @@ func (cli *ChatCLI) ensureModelCacheWarm() {
 		return
 	}
 	go func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		// The warmer must outlive the triggering request; detach
+		// cancellation while inheriting context values.
+		ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Second)
 		defer cancel()
 		models, err := cli.manager.ListModelsForProvider(ctx, cli.Provider)
 		if err != nil || len(models) == 0 {

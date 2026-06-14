@@ -16,7 +16,7 @@ import (
 // handleCompactCommand handles /compact [instruction].
 // Without instruction: runs automatic compaction.
 // With instruction: runs guided compaction preserving what the user specifies.
-func (cli *ChatCLI) handleCompactCommand(userInput string) {
+func (cli *ChatCLI) handleCompactCommand(ctx context.Context, userInput string) {
 	instruction := strings.TrimSpace(strings.TrimPrefix(userInput, "/compact"))
 
 	if cli.Client == nil {
@@ -29,14 +29,14 @@ func (cli *ChatCLI) handleCompactCommand(userInput string) {
 		return
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, 60*time.Second)
 	defer cancel()
 
 	if instruction == "" {
 		// Fire PreCompact hook
 		if cli.hookManager != nil {
 			wd, _ := os.Getwd()
-			cli.hookManager.Fire(hooks.HookEvent{
+			cli.hookManager.Fire(ctx, hooks.HookEvent{
 				Type:       hooks.EventPreCompact,
 				Timestamp:  time.Now(),
 				SessionID:  cli.currentSessionName,
@@ -69,7 +69,10 @@ func (cli *ChatCLI) handleCompactCommand(userInput string) {
 		// Fire PostCompact hook
 		if cli.hookManager != nil {
 			wd, _ := os.Getwd()
-			cli.hookManager.FireAsync(hooks.HookEvent{
+			// Detached: the async hook must outlive this command (and the
+			// 60s timeout ctx that defer-cancels on return), so we strip
+			// cancellation but keep inherited values.
+			cli.hookManager.FireAsync(context.WithoutCancel(ctx), hooks.HookEvent{
 				Type:       hooks.EventPostCompact,
 				Timestamp:  time.Now(),
 				SessionID:  cli.currentSessionName,

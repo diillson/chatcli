@@ -6,6 +6,7 @@
 package cli
 
 import (
+	"context"
 	"os"
 	"strings"
 	"testing"
@@ -58,13 +59,13 @@ func TestHandleImageModelCommandSetsEnv(t *testing.T) {
 	t.Setenv("OPENAI_API_KEY", "") // keep imageModelsCatalog from hitting the network
 	cli := newTestCLI()
 
-	cli.handleImageModelCommand("/model-image image-01")
+	cli.handleImageModelCommand(context.Background(), "/model-image image-01")
 	if got := os.Getenv("CHATCLI_IMAGE_MODEL"); got != "image-01" {
 		t.Fatalf("CHATCLI_IMAGE_MODEL = %q, want image-01", got)
 	}
 
 	// Bare form prints the catalog and must not mutate the model.
-	cli.handleImageModelCommand("/model-image")
+	cli.handleImageModelCommand(context.Background(), "/model-image")
 	if got := os.Getenv("CHATCLI_IMAGE_MODEL"); got != "image-01" {
 		t.Fatalf("bare form changed the model to %q", got)
 	}

@@ -109,7 +109,7 @@ func (c *Client) ListRemotePlugins(ctx context.Context) ([]RemotePluginInfo, err
 		return nil, fmt.Errorf("remote ListRemotePlugins failed: %w", err)
 	}
 
-	var result []RemotePluginInfo
+	result := make([]RemotePluginInfo, 0, len(resp.Plugins))
 	for _, p := range resp.Plugins {
 		result = append(result, RemotePluginInfo{
 			Name:        p.Name,
@@ -170,7 +170,7 @@ func (c *Client) ListRemoteAgents(ctx context.Context) ([]RemoteAgentInfo, error
 		return nil, fmt.Errorf("remote ListRemoteAgents failed: %w", err)
 	}
 
-	var result []RemoteAgentInfo
+	result := make([]RemoteAgentInfo, 0, len(resp.Agents))
 	for _, a := range resp.Agents {
 		result = append(result, protoToRemoteAgentInfo(a))
 	}
@@ -195,7 +195,7 @@ func (c *Client) ListRemoteSkills(ctx context.Context) ([]RemoteSkillInfo, error
 		return nil, fmt.Errorf("remote ListRemoteSkills failed: %w", err)
 	}
 
-	var result []RemoteSkillInfo
+	result := make([]RemoteSkillInfo, 0, len(resp.Skills))
 	for _, s := range resp.Skills {
 		result = append(result, RemoteSkillInfo{
 			Name:         s.Name,

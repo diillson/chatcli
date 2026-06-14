@@ -24,7 +24,7 @@ import (
 	"github.com/diillson/chatcli/i18n"
 )
 
-func (cli *ChatCLI) handleLSPCommand(input string) {
+func (cli *ChatCLI) handleLSPCommand(ctx context.Context, input string) {
 	arg := strings.TrimSpace(strings.TrimPrefix(input, "/lsp"))
 	if arg == "" {
 		fmt.Println(colorize("  "+i18n.T("lsp.usage"), ColorGray))
@@ -50,10 +50,10 @@ func (cli *ChatCLI) handleLSPCommand(input string) {
 
 	fmt.Printf("  %s\n", colorize(i18n.T("lsp.starting", spec.Command[0]), ColorCyan))
 
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	spawnCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
-	client, err := lsp.Spawn(ctx, spec, cli.logger)
+	client, err := lsp.Spawn(spawnCtx, spec, cli.logger)
 	if err != nil {
 		fmt.Printf("  %s %s\n", colorize("ERR", ColorRed), i18n.T("lsp.spawn_failed", spec.Command[0], err))
 		return

@@ -36,7 +36,7 @@ func (b *Builder) BuildMultiAgentPrompt(agents []*Agent) (*ComposedPrompt, error
 		SkillsMissing: []string{},
 	}
 
-	var promptParts []string
+	promptParts := make([]string, 0, 8+len(agents)*4)
 
 	// 1. Collective Role Definition
 	agentNames := []string{}

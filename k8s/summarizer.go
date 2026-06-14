@@ -55,7 +55,20 @@ func (s *Summarizer) GenerateContext() string {
 	b.WriteString(fmt.Sprintf("[K8s Context: %s/%s in namespace/%s]\n", strings.ToLower(kind), r.Name, r.Namespace))
 	b.WriteString(fmt.Sprintf("Collected at: %s\n\n", snap.Timestamp.Format(time.RFC3339)))
 
-	// Resource Status (kind-aware)
+	writeResourceStatus(&b, kind, r)
+	s.writePodStatus(&b, snap)
+	writeHPAStatus(&b, snap)
+	writeNodeHealth(&b, snap)
+	writeRecentEvents(&b, snap)
+	s.writeAlerts(&b)
+	writeAppMetrics(&b, snap)
+	s.writeErrorLogs(&b)
+
+	return b.String()
+}
+
+// writeResourceStatus renders the kind-aware resource status section.
+func writeResourceStatus(b *strings.Builder, kind string, r ResourceStatus) {
 	b.WriteString(fmt.Sprintf("## %s Status\n", kind))
 	switch kind {
 	case "Job":
@@ -90,8 +103,10 @@ func (s *Summarizer) GenerateContext() string {
 			b.WriteString(fmt.Sprintf("    - %s\n", c))
 		}
 	}
+}
 
-	// Pod Status
+// writePodStatus renders the pod status section.
+func (s *Summarizer) writePodStatus(b *strings.Builder, snap ResourceSnapshot) {
 	b.WriteString(fmt.Sprintf("\n## Pods (%d total)\n", len(snap.Pods)))
 	totalRestarts, restartsInWindow := s.store.GetRestartTrend()
 	b.WriteString(fmt.Sprintf("  Total restarts: %d (delta in window: %d)\n", totalRestarts, restartsInWindow))
@@ -117,69 +132,80 @@ func (s *Summarizer) GenerateContext() string {
 			b.WriteString(fmt.Sprintf("    Condition: %s\n", cond))
 		}
 	}
+}
 
-	// HPA
-	if snap.HPA != nil {
-		h := snap.HPA
-		b.WriteString(fmt.Sprintf("\n## HPA (%s)\n", h.Name))
-		b.WriteString(fmt.Sprintf("  Replicas: %d current, %d desired (min=%d, max=%d)\n",
-			h.CurrentReplicas, h.DesiredReplicas, h.MinReplicas, h.MaxReplicas))
-		for _, m := range h.CurrentMetrics {
-			b.WriteString(fmt.Sprintf("  Metric: %s\n", m))
+// writeHPAStatus renders the HPA section, if present.
+func writeHPAStatus(b *strings.Builder, snap ResourceSnapshot) {
+	if snap.HPA == nil {
+		return
+	}
+	h := snap.HPA
+	b.WriteString(fmt.Sprintf("\n## HPA (%s)\n", h.Name))
+	b.WriteString(fmt.Sprintf("  Replicas: %d current, %d desired (min=%d, max=%d)\n",
+		h.CurrentReplicas, h.DesiredReplicas, h.MinReplicas, h.MaxReplicas))
+	for _, m := range h.CurrentMetrics {
+		b.WriteString(fmt.Sprintf("  Metric: %s\n", m))
+	}
+}
+
+// writeNodeHealth renders the node health section, if any nodes are present.
+func writeNodeHealth(b *strings.Builder, snap ResourceSnapshot) {
+	if len(snap.Nodes) == 0 {
+		return
+	}
+	b.WriteString(fmt.Sprintf("\n## Nodes (%d)\n", len(snap.Nodes)))
+	for _, node := range snap.Nodes {
+		status := "Ready"
+		if !node.Ready {
+			status = "NOT READY"
+		}
+		line := fmt.Sprintf("  - %s: %s", node.Name, status)
+		if node.Unschedulable {
+			line += " [CORDONED]"
+		}
+		if node.DiskPressure {
+			line += " [DiskPressure]"
+		}
+		if node.MemoryPressure {
+			line += " [MemoryPressure]"
+		}
+		if node.PIDPressure {
+			line += " [PIDPressure]"
+		}
+		if node.NetworkUnavail {
+			line += " [NetworkUnavailable]"
+		}
+		if node.CPUUsage != "" {
+			line += fmt.Sprintf(" cpu=%s/%s mem=%s/%s", node.CPUUsage, node.CPUAllocatable, node.MemoryUsage, node.MemoryAllocatable)
+		}
+		line += fmt.Sprintf(" pods=%d/%d k8s=%s", node.PodCount, node.PodCapacity, node.KubeletVersion)
+		b.WriteString(line + "\n")
+		for _, cond := range node.Conditions {
+			b.WriteString(fmt.Sprintf("    %s\n", cond))
 		}
 	}
+}
 
-	// Node Health
-	if len(snap.Nodes) > 0 {
-		b.WriteString(fmt.Sprintf("\n## Nodes (%d)\n", len(snap.Nodes)))
-		for _, node := range snap.Nodes {
-			status := "Ready"
-			if !node.Ready {
-				status = "NOT READY"
-			}
-			line := fmt.Sprintf("  - %s: %s", node.Name, status)
-			if node.Unschedulable {
-				line += " [CORDONED]"
-			}
-			if node.DiskPressure {
-				line += " [DiskPressure]"
-			}
-			if node.MemoryPressure {
-				line += " [MemoryPressure]"
-			}
-			if node.PIDPressure {
-				line += " [PIDPressure]"
-			}
-			if node.NetworkUnavail {
-				line += " [NetworkUnavailable]"
-			}
-			if node.CPUUsage != "" {
-				line += fmt.Sprintf(" cpu=%s/%s mem=%s/%s", node.CPUUsage, node.CPUAllocatable, node.MemoryUsage, node.MemoryAllocatable)
-			}
-			line += fmt.Sprintf(" pods=%d/%d k8s=%s", node.PodCount, node.PodCapacity, node.KubeletVersion)
-			b.WriteString(line + "\n")
-			for _, cond := range node.Conditions {
-				b.WriteString(fmt.Sprintf("    %s\n", cond))
-			}
-		}
+// writeRecentEvents renders the last 10 events, if any.
+func writeRecentEvents(b *strings.Builder, snap ResourceSnapshot) {
+	if len(snap.Events) == 0 {
+		return
 	}
-
-	// Recent Events
-	if len(snap.Events) > 0 {
-		b.WriteString(fmt.Sprintf("\n## Recent Events (%d)\n", len(snap.Events)))
-		// Show last 10 events
-		start := 0
-		if len(snap.Events) > 10 {
-			start = len(snap.Events) - 10
-		}
-		for _, ev := range snap.Events[start:] {
-			age := time.Since(ev.Timestamp).Truncate(time.Second)
-			b.WriteString(fmt.Sprintf("  [%s] %s %s: %s (%s ago)\n",
-				ev.Type, ev.Object, ev.Reason, ev.Message, age))
-		}
+	b.WriteString(fmt.Sprintf("\n## Recent Events (%d)\n", len(snap.Events)))
+	// Show last 10 events
+	start := 0
+	if len(snap.Events) > 10 {
+		start = len(snap.Events) - 10
 	}
+	for _, ev := range snap.Events[start:] {
+		age := time.Since(ev.Timestamp).Truncate(time.Second)
+		b.WriteString(fmt.Sprintf("  [%s] %s %s: %s (%s ago)\n",
+			ev.Type, ev.Object, ev.Reason, ev.Message, age))
+	}
+}
 
-	// Alerts
+// writeAlerts renders the active alerts section.
+func (s *Summarizer) writeAlerts(b *strings.Builder) {
 	alerts := s.store.GetAlerts()
 	if len(alerts) > 0 {
 		b.WriteString(fmt.Sprintf("\n## Active Alerts (%d)\n", len(alerts)))
@@ -190,21 +216,26 @@ func (s *Summarizer) GenerateContext() string {
 	} else {
 		b.WriteString("\n## Alerts: None active\n")
 	}
+}
 
-	// Application Metrics (Prometheus)
-	if snap.AppMetrics != nil && len(snap.AppMetrics.Metrics) > 0 {
-		b.WriteString(fmt.Sprintf("\n## Application Metrics (%d)\n", len(snap.AppMetrics.Metrics)))
-		names := make([]string, 0, len(snap.AppMetrics.Metrics))
-		for k := range snap.AppMetrics.Metrics {
-			names = append(names, k)
-		}
-		sort.Strings(names)
-		for _, name := range names {
-			b.WriteString(fmt.Sprintf("  %s: %.4g\n", name, snap.AppMetrics.Metrics[name]))
-		}
+// writeAppMetrics renders the Prometheus application metrics section, if any.
+func writeAppMetrics(b *strings.Builder, snap ResourceSnapshot) {
+	if snap.AppMetrics == nil || len(snap.AppMetrics.Metrics) == 0 {
+		return
 	}
+	b.WriteString(fmt.Sprintf("\n## Application Metrics (%d)\n", len(snap.AppMetrics.Metrics)))
+	names := make([]string, 0, len(snap.AppMetrics.Metrics))
+	for k := range snap.AppMetrics.Metrics {
+		names = append(names, k)
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		b.WriteString(fmt.Sprintf("  %s: %.4g\n", name, snap.AppMetrics.Metrics[name]))
+	}
+}
 
-	// Error Logs
+// writeErrorLogs renders the recent error logs section.
+func (s *Summarizer) writeErrorLogs(b *strings.Builder) {
 	errorLogs := s.store.GetErrorLogs(10)
 	if len(errorLogs) > 0 {
 		b.WriteString(fmt.Sprintf("\n## Recent Error Logs (%d)\n", len(errorLogs)))
@@ -215,8 +246,6 @@ func (s *Summarizer) GenerateContext() string {
 	} else {
 		b.WriteString("\n## Error Logs: None\n")
 	}
-
-	return b.String()
 }
 
 // GenerateStatusSummary creates a compact status line for display.
@@ -441,7 +470,7 @@ func (ms *MultiSummarizer) GenerateStatusSummary() string {
 
 // scoreTargets evaluates the health of each target.
 func (ms *MultiSummarizer) scoreTargets() []TargetHealthScore {
-	var scores []TargetHealthScore
+	scores := make([]TargetHealthScore, 0, len(ms.stores))
 	for key, store := range ms.stores {
 		snap, ok := store.LatestSnapshot()
 		if !ok {

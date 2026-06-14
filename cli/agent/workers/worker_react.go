@@ -29,6 +29,23 @@ type resolvedToolCall struct {
 	NativeArgs map[string]interface{} // structured args (native only)
 }
 
+// validatedTC is a resolved tool call after policy/allowlist classification.
+type validatedTC struct {
+	index   int
+	rtc     resolvedToolCall
+	blocked bool
+	msg     string
+}
+
+// execResult is the outcome of executing a single (possibly blocked) tool call.
+type execResult struct {
+	index  int
+	record ToolCallRecord
+	output string
+	failed bool
+	toolID string // for native tool result messages
+}
+
 // WorkerReActConfig controls the worker's internal ReAct loop.
 type WorkerReActConfig struct {
 	MaxTurns        int
@@ -141,84 +158,21 @@ func RunWorkerReAct(
 		}
 
 		// --- Call LLM (native or text mode) ---
-		var responseText string
-		var nativeToolCalls []models.ToolCall
-
-		if useNativeTools {
-			llmResp, err := toolAware.SendPromptWithTools(ctx, "", history, toolDefs, 0)
-			if err != nil {
-				return &AgentResult{
-					CallID:    callID,
-					Output:    finalOutput.String(),
-					Error:     fmt.Errorf("LLM call failed on turn %d: %w", turn+1, err),
-					Duration:  time.Since(startTime),
-					ToolCalls: allToolCalls,
-				}, err
-			}
-			responseText = llmResp.Content
-			nativeToolCalls = llmResp.ToolCalls
-
-			// Build assistant message with structured tool calls
-			history = append(history, models.Message{
-				Role:      "assistant",
-				Content:   responseText,
-				ToolCalls: nativeToolCalls,
-			})
-		} else {
-			var err error
-			responseText, err = llmClient.SendPrompt(ctx, "", history, 0)
-			if err != nil {
-				return &AgentResult{
-					CallID:    callID,
-					Output:    finalOutput.String(),
-					Error:     fmt.Errorf("LLM call failed on turn %d: %w", turn+1, err),
-					Duration:  time.Since(startTime),
-					ToolCalls: allToolCalls,
-				}, err
-			}
-			history = append(history, models.Message{Role: "assistant", Content: responseText})
+		responseText, nativeToolCalls, newHistory, err := callWorkerLLM(ctx, useNativeTools, toolAware, llmClient, history, toolDefs)
+		if err != nil {
+			return &AgentResult{
+				CallID:    callID,
+				Output:    finalOutput.String(),
+				Error:     fmt.Errorf("turn %d: LLM call failed: %w", turn+1, err),
+				Duration:  time.Since(startTime),
+				ToolCalls: allToolCalls,
+			}, err
 		}
+		history = newHistory
 
 		// --- Resolve tool calls to unified format ---
-		var resolved []resolvedToolCall
-
-		if useNativeTools && len(nativeToolCalls) > 0 {
-			for _, ntc := range nativeToolCalls {
-				subcmd, found := NativeToolNameToSubcmd(ntc.Name)
-				if !found {
-					subcmd = ntc.Name
-				}
-				flags := NativeToolArgsToFlags(subcmd, ntc.Arguments)
-				argsJSON, _ := json.Marshal(ntc.Arguments)
-
-				resolved = append(resolved, resolvedToolCall{
-					ID:         ntc.ID,
-					Name:       ntc.Name,
-					Subcmd:     subcmd,
-					Args:       flags,
-					RawArgs:    string(argsJSON),
-					Native:     true,
-					NativeArgs: ntc.Arguments,
-				})
-			}
-		} else if !useNativeTools {
-			// XML/JSON parsing fallback
-			xmlToolCalls, _ := agent.ParseToolCalls(responseText)
-			for _, tc := range xmlToolCalls {
-				subcmd, args, parseErr := parseCoderToolCall(tc)
-				if parseErr != nil {
-					allToolCalls = append(allToolCalls, ToolCallRecord{Name: tc.Name, Args: tc.Args, Error: parseErr})
-					continue
-				}
-				resolved = append(resolved, resolvedToolCall{
-					ID:      fmt.Sprintf("xml_%d", turn),
-					Name:    tc.Name,
-					Subcmd:  subcmd,
-					Args:    args,
-					RawArgs: tc.Args,
-				})
-			}
-		}
+		resolved, parseErrRecords := resolveToolCalls(useNativeTools, nativeToolCalls, responseText, turn)
+		allToolCalls = append(allToolCalls, parseErrRecords...)
 
 		if len(resolved) == 0 {
 			// No tool calls — worker is done
@@ -227,35 +181,8 @@ func RunWorkerReAct(
 		}
 
 		// --- Pre-validate and classify ---
-		type validatedTC struct {
-			index   int
-			rtc     resolvedToolCall
-			blocked bool
-			msg     string
-		}
-		validated := make([]validatedTC, 0, len(resolved))
-
-		for i, rtc := range resolved {
-			if blockedCmds[rtc.Subcmd] >= maxBlockedRetries {
-				allToolCalls = append(allToolCalls, ToolCallRecord{Name: rtc.Subcmd, Args: rtc.RawArgs, Error: fmt.Errorf("command %q permanently blocked after %d failed attempts", rtc.Subcmd, maxBlockedRetries)})
-				validated = append(validated, validatedTC{index: i, rtc: rtc, blocked: true, msg: fmt.Sprintf("[PERMANENTLY BLOCKED] Command %q has failed %d times. You MUST use a completely different approach.", rtc.Subcmd, maxBlockedRetries)})
-				continue
-			}
-
-			if !allowed[rtc.Subcmd] {
-				allToolCalls = append(allToolCalls, ToolCallRecord{Name: rtc.Subcmd, Args: rtc.RawArgs, Error: fmt.Errorf("command %q not allowed for this agent", rtc.Subcmd)})
-				validated = append(validated, validatedTC{index: i, rtc: rtc, blocked: true, msg: fmt.Sprintf("[BLOCKED] Command %q is not allowed. Allowed: %v", rtc.Subcmd, config.AllowedCommands)})
-				blockedCmds[rtc.Subcmd]++
-				continue
-			}
-			if config.ReadOnly && isWriteCommand(rtc.Subcmd) {
-				allToolCalls = append(allToolCalls, ToolCallRecord{Name: rtc.Subcmd, Args: rtc.RawArgs, Error: fmt.Errorf("write command %q blocked for read-only agent", rtc.Subcmd)})
-				validated = append(validated, validatedTC{index: i, rtc: rtc, blocked: true, msg: fmt.Sprintf("[BLOCKED] This agent is read-only and cannot execute %q", rtc.Subcmd)})
-				blockedCmds[rtc.Subcmd]++
-				continue
-			}
-			validated = append(validated, validatedTC{index: i, rtc: rtc})
-		}
+		validated, classifyRecords := classifyToolCalls(resolved, allowed, blockedCmds, config)
+		allToolCalls = append(allToolCalls, classifyRecords...)
 
 		var runnable []validatedTC
 		var runnableResolved []resolvedToolCall
@@ -267,13 +194,6 @@ func RunWorkerReAct(
 		}
 
 		// --- Execute tool calls ---
-		type execResult struct {
-			index  int
-			record ToolCallRecord
-			output string
-			failed bool
-			toolID string // for native tool result messages
-		}
 		results := make([]execResult, len(validated))
 
 		// Use the concurrency classifier for smarter parallelization.
@@ -284,89 +204,6 @@ func RunWorkerReAct(
 			logger.Info("Executing tool calls in parallel",
 				zap.Int("count", len(runnable)),
 				zap.String("callID", callID))
-		}
-
-		executeOne := func(v validatedTC) execResult {
-			if v.blocked {
-				return execResult{index: v.index, output: v.msg + "\n", failed: true, toolID: v.rtc.ID}
-			}
-
-			if policyChecker != nil {
-				policyAllowed, msg := policyChecker.CheckAndPrompt(ctx, v.rtc.Name, v.rtc.RawArgs)
-				if !policyAllowed {
-					blockedMsg := fmt.Sprintf("[BLOCKED BY POLICY] %s", msg)
-					record := ToolCallRecord{
-						Name:  v.rtc.Subcmd,
-						Args:  v.rtc.RawArgs,
-						Error: fmt.Errorf("blocked by security policy"),
-					}
-					return execResult{index: v.index, record: record, output: blockedMsg + "\n", failed: true, toolID: v.rtc.ID}
-				}
-			}
-
-			// Special-case: delegate is NOT an engine subcommand — it recursively
-			// spawns a subagent with isolated context. Handle it here before we
-			// build an engine.
-			if v.rtc.Subcmd == "delegate" {
-				dargs, perr := parseDelegateArgs(v.rtc.NativeArgs, v.rtc.RawArgs)
-				if perr != nil {
-					record := ToolCallRecord{Name: v.rtc.Subcmd, Args: v.rtc.RawArgs, Error: perr}
-					return execResult{index: v.index, record: record, output: fmt.Sprintf("[delegate] %v\n", perr), failed: true, toolID: v.rtc.ID}
-				}
-				subOut, subErr := runSubagent(ctx, dargs)
-				record := ToolCallRecord{Name: "delegate", Args: v.rtc.RawArgs, Output: subOut}
-				if subErr != nil {
-					record.Error = subErr
-					return execResult{index: v.index, record: record, output: fmt.Sprintf("[delegate] %v\n%s", subErr, subOut), failed: true, toolID: v.rtc.ID}
-				}
-				// Apply the same truncation policy as normal tool results so
-				// a chatty subagent doesn't blow up the parent context either.
-				subOut = TruncateToolResult("delegate", subOut)
-				record.Output = subOut
-				return execResult{index: v.index, record: record, output: fmt.Sprintf("[delegate] %s\n", subOut), failed: false, toolID: v.rtc.ID}
-			}
-
-			filePath := extractFilePathFromResolved(v.rtc)
-			if isWriteCommand(v.rtc.Subcmd) && filePath != "" && lockMgr != nil {
-				lockMgr.Lock(filePath)
-			}
-
-			var outBuf, errBuf strings.Builder
-			outWriter := engine.NewStreamWriter(func(line string) {
-				outBuf.WriteString(line)
-				outBuf.WriteString("\n")
-			})
-			errWriter := engine.NewStreamWriter(func(line string) {
-				errBuf.WriteString("ERR: ")
-				errBuf.WriteString(line)
-				errBuf.WriteString("\n")
-			})
-
-			eng := engine.NewEngine(outWriter, errWriter, "")
-			execErr := eng.Execute(ctx, v.rtc.Subcmd, v.rtc.Args)
-			outWriter.Flush()
-			errWriter.Flush()
-
-			if isWriteCommand(v.rtc.Subcmd) && filePath != "" && lockMgr != nil {
-				lockMgr.Unlock(filePath)
-			}
-
-			output := outBuf.String() + errBuf.String()
-			// Use smart truncation: large results saved to disk with inline preview
-			output = TruncateToolResult(v.rtc.Subcmd, output)
-
-			record := ToolCallRecord{Name: v.rtc.Subcmd, Args: v.rtc.RawArgs, Output: output}
-			hasFailed := false
-			if execErr != nil {
-				record.Error = execErr
-				hasFailed = true
-			}
-
-			out := fmt.Sprintf("[%s] %s\n", v.rtc.Subcmd, output)
-			if execErr != nil {
-				out += fmt.Sprintf("[ERROR] %v\n", execErr)
-			}
-			return execResult{index: v.index, record: record, output: out, failed: hasFailed, toolID: v.rtc.ID}
 		}
 
 		if canParallelize {
@@ -381,7 +218,7 @@ func RunWorkerReAct(
 				wg.Add(1)
 				go func(idx int, vtc validatedTC) {
 					defer wg.Done()
-					r := executeOne(vtc)
+					r := executeToolCall(ctx, vtc, lockMgr, policyChecker)
 					mu.Lock()
 					results[idx] = r
 					mu.Unlock()
@@ -390,91 +227,47 @@ func RunWorkerReAct(
 			wg.Wait()
 		} else {
 			for i, v := range validated {
-				results[i] = executeOne(v)
+				results[i] = executeToolCall(ctx, v, lockMgr, policyChecker)
 			}
 		}
 
 		// --- Aggregate results ---
-		var turnOutput strings.Builder
-		turnFailures := 0
-		turnBlocked := 0
-		var failedCmds []string
-
-		for _, r := range results {
-			if r.record.Name != "" {
-				allToolCalls = append(allToolCalls, r.record)
-			}
-			turnOutput.WriteString(r.output)
-			if r.failed {
-				turnFailures++
-				if r.record.Name != "" {
-					failedCmds = append(failedCmds, r.record.Name)
-					if r.record.Error != nil {
-						blockedCmds[r.record.Name]++
-					}
-				}
-			}
-		}
-
-		for _, v := range validated {
-			if v.blocked {
-				turnBlocked++
-			}
-		}
+		agg := aggregateTurnResults(results, validated, blockedCmds)
+		allToolCalls = append(allToolCalls, agg.records...)
+		turnOutput := agg.turnOutput
+		turnFailures := agg.turnFailures
+		turnBlocked := agg.turnBlocked
+		failedCmds := agg.failedCmds
 
 		// --- Build feedback and inject into history ---
-		if useNativeTools {
-			// Native mode: send proper tool_result messages
-			for _, r := range results {
-				toolContent := r.output
-				if r.failed && r.record.Error != nil {
-					toolContent = fmt.Sprintf("[ERROR] %v\n%s", r.record.Error, r.output)
+		history = appendTurnFeedback(history, useNativeTools, results, turnOutput,
+			turnFailures, turnBlocked, len(validated), consecutiveFailures, blockedCmds)
+
+		// Reflection bookkeeping (and native-mode reflection prompt injection)
+		if turnFailures > 0 {
+			consecutiveFailures++
+			if useNativeTools {
+				reflectionMsg := buildReflectionPrompt(turnBlocked, len(validated), consecutiveFailures, blockedCmds)
+				if reflectionMsg != "" {
+					history = append(history, models.Message{Role: "user", Content: reflectionMsg})
 				}
-				history = append(history, models.Message{
-					Role:       "tool",
-					Content:    toolContent,
-					ToolCallID: r.toolID,
-				})
+				logger.Debug("Reflection prompt injected (native)",
+					zap.Int("consecutive_failures", consecutiveFailures),
+					zap.Strings("failed_cmds", failedCmds),
+					zap.Int("turn", turn+1),
+				)
+			} else {
+				logger.Debug("Reflection prompt injected",
+					zap.Int("consecutive_failures", consecutiveFailures),
+					zap.Strings("failed_cmds", failedCmds),
+					zap.Int("turn", turn+1),
+				)
 			}
-		} else {
-			// Text mode: append feedback as user message (legacy behavior)
-			feedback := turnOutput.String()
-			if len(feedback) > MaxWorkerOutputBytes {
-				feedback = feedback[:MaxWorkerOutputBytes] + "\n... [feedback truncated]"
-			}
-
-			// --- REFLECTION MECHANISM ---
-			if turnFailures > 0 {
-				feedback += buildReflectionPrompt(turnBlocked, len(validated), consecutiveFailures, blockedCmds)
-			}
-
-			history = append(history, models.Message{Role: "user", Content: feedback})
-		}
-
-		// Reflection for native mode too
-		if useNativeTools && turnFailures > 0 {
-			consecutiveFailures++
-			reflectionMsg := buildReflectionPrompt(turnBlocked, len(validated), consecutiveFailures, blockedCmds)
-			if reflectionMsg != "" {
-				history = append(history, models.Message{Role: "user", Content: reflectionMsg})
-			}
-			logger.Debug("Reflection prompt injected (native)",
-				zap.Int("consecutive_failures", consecutiveFailures),
-				zap.Strings("failed_cmds", failedCmds),
-				zap.Int("turn", turn+1),
-			)
-		} else if !useNativeTools && turnFailures > 0 {
-			consecutiveFailures++
-			logger.Debug("Reflection prompt injected",
-				zap.Int("consecutive_failures", consecutiveFailures),
-				zap.Strings("failed_cmds", failedCmds),
-				zap.Int("turn", turn+1),
-			)
 		} else {
 			consecutiveFailures = 0
 		}
 
-		finalOutput.WriteString(turnOutput.String())
+		finalOutput.WriteString(turnOutput)
 	}
 
 	output := finalOutput.String()
@@ -489,6 +282,287 @@ func RunWorkerReAct(
 		ToolCalls:     allToolCalls,
 		ParallelCalls: maxParallel,
 	}, nil
+}
+
+// callWorkerLLM performs one LLM round trip in either native function-calling
+// mode or text mode, appends the assistant turn to history, and returns the
+// response text, any native tool calls, the updated history and an error.
+func callWorkerLLM(ctx context.Context, useNativeTools bool, toolAware client.ToolAwareClient, llmClient client.LLMClient, history []models.Message, toolDefs []models.ToolDefinition) (string, []models.ToolCall, []models.Message, error) {
+	if useNativeTools {
+		llmResp, err := toolAware.SendPromptWithTools(ctx, "", history, toolDefs, 0)
+		if err != nil {
+			return "", nil, history, err
+		}
+		responseText := llmResp.Content
+		nativeToolCalls := llmResp.ToolCalls
+
+		// Build assistant message with structured tool calls
+		history = append(history, models.Message{
+			Role:      "assistant",
+			Content:   responseText,
+			ToolCalls: nativeToolCalls,
+		})
+		return responseText, nativeToolCalls, history, nil
+	}
+
+	responseText, err := llmClient.SendPrompt(ctx, "", history, 0)
+	if err != nil {
+		return "", nil, history, err
+	}
+	history = append(history, models.Message{Role: "assistant", Content: responseText})
+	return responseText, nil, history, nil
+}
+
+// executeToolCall runs a single (possibly blocked) tool call: it enforces the
+// security policy, special-cases delegate (recursive subagent), and otherwise
+// dispatches to the coder engine, applying file locking and result truncation.
+func executeToolCall(ctx context.Context, v validatedTC, lockMgr *FileLockManager, policyChecker PolicyChecker) execResult {
+	if v.blocked {
+		return execResult{index: v.index, output: v.msg + "\n", failed: true, toolID: v.rtc.ID}
+	}
+
+	if policyChecker != nil {
+		policyAllowed, msg := policyChecker.CheckAndPrompt(ctx, v.rtc.Name, v.rtc.RawArgs)
+		if !policyAllowed {
+			blockedMsg := fmt.Sprintf("[BLOCKED BY POLICY] %s", msg)
+			record := ToolCallRecord{
+				Name:  v.rtc.Subcmd,
+				Args:  v.rtc.RawArgs,
+				Error: fmt.Errorf("blocked by security policy"),
+			}
+			return execResult{index: v.index, record: record, output: blockedMsg + "\n", failed: true, toolID: v.rtc.ID}
+		}
+	}
+
+	// Special-case: delegate is NOT an engine subcommand — it recursively
+	// spawns a subagent with isolated context. Handle it here before we
+	// build an engine.
+	if v.rtc.Subcmd == "delegate" {
+		return executeDelegate(ctx, v)
+	}
+
+	filePath := extractFilePathFromResolved(v.rtc)
+	if isWriteCommand(v.rtc.Subcmd) && filePath != "" && lockMgr != nil {
+		lockMgr.Lock(filePath)
+	}
+
+	var outBuf, errBuf strings.Builder
+	outWriter := engine.NewStreamWriter(func(line string) {
+		outBuf.WriteString(line)
+		outBuf.WriteString("\n")
+	})
+	errWriter := engine.NewStreamWriter(func(line string) {
+		errBuf.WriteString("ERR: ")
+		errBuf.WriteString(line)
+		errBuf.WriteString("\n")
+	})
+
+	eng := engine.NewEngine(outWriter, errWriter, "")
+	execErr := eng.Execute(ctx, v.rtc.Subcmd, v.rtc.Args)
+	outWriter.Flush()
+	errWriter.Flush()
+
+	if isWriteCommand(v.rtc.Subcmd) && filePath != "" && lockMgr != nil {
+		lockMgr.Unlock(filePath)
+	}
+
+	output := outBuf.String() + errBuf.String()
+	// Use smart truncation: large results saved to disk with inline preview
+	output = TruncateToolResult(v.rtc.Subcmd, output)
+
+	record := ToolCallRecord{Name: v.rtc.Subcmd, Args: v.rtc.RawArgs, Output: output}
+	hasFailed := false
+	if execErr != nil {
+		record.Error = execErr
+		hasFailed = true
+	}
+
+	out := fmt.Sprintf("[%s] %s\n", v.rtc.Subcmd, output)
+	if execErr != nil {
+		out += fmt.Sprintf("[ERROR] %v\n", execErr)
+	}
+	return execResult{index: v.index, record: record, output: out, failed: hasFailed, toolID: v.rtc.ID}
+}
+
+// executeDelegate handles the delegate tool call: it parses the delegation
+// args and recursively spawns an isolated subagent, applying the same result
+// truncation policy as normal tool calls.
+func executeDelegate(ctx context.Context, v validatedTC) execResult {
+	dargs, perr := parseDelegateArgs(v.rtc.NativeArgs, v.rtc.RawArgs)
+	if perr != nil {
+		record := ToolCallRecord{Name: v.rtc.Subcmd, Args: v.rtc.RawArgs, Error: perr}
+		return execResult{index: v.index, record: record, output: fmt.Sprintf("[delegate] %v\n", perr), failed: true, toolID: v.rtc.ID}
+	}
+	subOut, subErr := runSubagent(ctx, dargs)
+	record := ToolCallRecord{Name: "delegate", Args: v.rtc.RawArgs, Output: subOut}
+	if subErr != nil {
+		record.Error = subErr
+		return execResult{index: v.index, record: record, output: fmt.Sprintf("[delegate] %v\n%s", subErr, subOut), failed: true, toolID: v.rtc.ID}
+	}
+	// Apply the same truncation policy as normal tool results so
+	// a chatty subagent doesn't blow up the parent context either.
+	subOut = TruncateToolResult("delegate", subOut)
+	record.Output = subOut
+	return execResult{index: v.index, record: record, output: fmt.Sprintf("[delegate] %s\n", subOut), failed: false, toolID: v.rtc.ID}
+}
+
+// resolveToolCalls converts native tool calls or XML/JSON-parsed tool calls
+// into the unified resolvedToolCall representation. It returns the resolved
+// calls plus any ToolCallRecords for parse failures that the caller should
+// append to its running log.
+func resolveToolCalls(useNativeTools bool, nativeToolCalls []models.ToolCall, responseText string, turn int) ([]resolvedToolCall, []ToolCallRecord) {
+	var resolved []resolvedToolCall
+	var parseErrRecords []ToolCallRecord
+
+	if useNativeTools && len(nativeToolCalls) > 0 {
+		for _, ntc := range nativeToolCalls {
+			subcmd, found := NativeToolNameToSubcmd(ntc.Name)
+			if !found {
+				subcmd = ntc.Name
+			}
+			flags := NativeToolArgsToFlags(subcmd, ntc.Arguments)
+			argsJSON, _ := json.Marshal(ntc.Arguments)
+
+			resolved = append(resolved, resolvedToolCall{
+				ID:         ntc.ID,
+				Name:       ntc.Name,
+				Subcmd:     subcmd,
+				Args:       flags,
+				RawArgs:    string(argsJSON),
+				Native:     true,
+				NativeArgs: ntc.Arguments,
+			})
+		}
+	} else if !useNativeTools {
+		// XML/JSON parsing fallback
+		xmlToolCalls, _ := agent.ParseToolCalls(responseText)
+		for _, tc := range xmlToolCalls {
+			subcmd, args, parseErr := parseCoderToolCall(tc)
+			if parseErr != nil {
+				parseErrRecords = append(parseErrRecords, ToolCallRecord{Name: tc.Name, Args: tc.Args, Error: parseErr})
+				continue
+			}
+			resolved = append(resolved, resolvedToolCall{
+				ID:      fmt.Sprintf("xml_%d", turn),
+				Name:    tc.Name,
+				Subcmd:  subcmd,
+				Args:    args,
+				RawArgs: tc.Args,
+			})
+		}
+	}
+
+	return resolved, parseErrRecords
+}
+
+// classifyToolCalls pre-validates resolved tool calls against the allowlist,
+// the read-only policy and the per-command failure budget. Blocked calls are
+// marked (and their blockedCmds counters bumped) so the executor can short-
+// circuit them. It returns the classified calls plus the ToolCallRecords the
+// caller should append to its running log.
+func classifyToolCalls(resolved []resolvedToolCall, allowed map[string]bool, blockedCmds map[string]int, config WorkerReActConfig) ([]validatedTC, []ToolCallRecord) {
+	validated := make([]validatedTC, 0, len(resolved))
+	var records []ToolCallRecord
+
+	for i, rtc := range resolved {
+		if blockedCmds[rtc.Subcmd] >= maxBlockedRetries {
+			records = append(records, ToolCallRecord{Name: rtc.Subcmd, Args: rtc.RawArgs, Error: fmt.Errorf("command %q permanently blocked after %d failed attempts", rtc.Subcmd, maxBlockedRetries)})
+			validated = append(validated, validatedTC{index: i, rtc: rtc, blocked: true, msg: fmt.Sprintf("[PERMANENTLY BLOCKED] Command %q has failed %d times. You MUST use a completely different approach.", rtc.Subcmd, maxBlockedRetries)})
+			continue
+		}
+
+		if !allowed[rtc.Subcmd] {
+			records = append(records, ToolCallRecord{Name: rtc.Subcmd, Args: rtc.RawArgs, Error: fmt.Errorf("command %q not allowed for this agent", rtc.Subcmd)})
+			validated = append(validated, validatedTC{index: i, rtc: rtc, blocked: true, msg: fmt.Sprintf("[BLOCKED] Command %q is not allowed. Allowed: %v", rtc.Subcmd, config.AllowedCommands)})
+			blockedCmds[rtc.Subcmd]++
+			continue
+		}
+		if config.ReadOnly && isWriteCommand(rtc.Subcmd) {
+			records = append(records, ToolCallRecord{Name: rtc.Subcmd, Args: rtc.RawArgs, Error: fmt.Errorf("write command %q blocked for read-only agent", rtc.Subcmd)})
+			validated = append(validated, validatedTC{index: i, rtc: rtc, blocked: true, msg: fmt.Sprintf("[BLOCKED] This agent is read-only and cannot execute %q", rtc.Subcmd)})
+			blockedCmds[rtc.Subcmd]++
+			continue
+		}
+		validated = append(validated, validatedTC{index: i, rtc: rtc})
+	}
+
+	return validated, records
+}
+
+// turnAggregate holds the per-turn outcome rollup produced from exec results.
+type turnAggregate struct {
+	turnOutput   string
+	turnFailures int
+	turnBlocked  int
+	failedCmds   []string
+	records      []ToolCallRecord
+}
+
+// aggregateTurnResults rolls up the per-call execution results into the
+// counters and feedback string the loop needs, bumping blockedCmds for failed
+// commands that carried an error.
+func aggregateTurnResults(results []execResult, validated []validatedTC, blockedCmds map[string]int) turnAggregate {
+	var turnOutput strings.Builder
+	agg := turnAggregate{}
+
+	for _, r := range results {
+		if r.record.Name != "" {
+			agg.records = append(agg.records, r.record)
+		}
+		turnOutput.WriteString(r.output)
+		if r.failed {
+			agg.turnFailures++
+			if r.record.Name != "" {
+				agg.failedCmds = append(agg.failedCmds, r.record.Name)
+				if r.record.Error != nil {
+					blockedCmds[r.record.Name]++
+				}
+			}
+		}
+	}
+
+	for _, v := range validated {
+		if v.blocked {
+			agg.turnBlocked++
+		}
+	}
+
+	agg.turnOutput = turnOutput.String()
+	return agg
+}
+
+// appendTurnFeedback injects the turn's tool results back into the history. In
+// native mode it emits structured tool_result messages; in text mode it folds
+// the output (plus any reflection prompt) into a single user message.
+func appendTurnFeedback(history []models.Message, useNativeTools bool, results []execResult, turnOutput string, turnFailures, turnBlocked, totalValidated, consecutiveFailures int, blockedCmds map[string]int) []models.Message {
+	if useNativeTools {
+		// Native mode: send proper tool_result messages
+		for _, r := range results {
+			toolContent := r.output
+			if r.failed && r.record.Error != nil {
+				toolContent = fmt.Sprintf("[ERROR] %v\n%s", r.record.Error, r.output)
+			}
+			history = append(history, models.Message{
+				Role:       "tool",
+				Content:    toolContent,
+				ToolCallID: r.toolID,
+			})
+		}
+		return history
+	}
+
+	// Text mode: append feedback as user message (legacy behavior)
+	feedback := turnOutput
+	if len(feedback) > MaxWorkerOutputBytes {
+		feedback = feedback[:MaxWorkerOutputBytes] + "\n... [feedback truncated]"
+	}
+
+	// --- REFLECTION MECHANISM ---
+	if turnFailures > 0 {
+		feedback += buildReflectionPrompt(turnBlocked, totalValidated, consecutiveFailures, blockedCmds)
+	}
+
+	return append(history, models.Message{Role: "user", Content: feedback})
 }
 
 // nativeToolSystemPrompt builds a cleaner system prompt for native tool calling mode.

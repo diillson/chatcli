@@ -7,6 +7,7 @@ package cli
 
 import (
 	"bufio"
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
@@ -38,7 +39,7 @@ func NewContextHandler(logger *zap.Logger) (*ContextHandler, error) {
 }
 
 // HandleContextCommand processa comandos /context
-func (h *ContextHandler) HandleContextCommand(sessionID, input string) error {
+func (h *ContextHandler) HandleContextCommand(ctx context.Context, sessionID, input string) error {
 	parts := strings.Fields(input)
 	if len(parts) < 2 {
 		h.showContextHelp()
@@ -49,10 +50,10 @@ func (h *ContextHandler) HandleContextCommand(sessionID, input string) error {
 
 	switch subcommand {
 	case "create", "new":
-		return h.handleCreate(parts[2:])
+		return h.handleCreate(ctx, parts[2:])
 
 	case "update", "edit":
-		return h.handleUpdate(parts[2:])
+		return h.handleUpdate(ctx, parts[2:])
 
 	case "attach", "add":
 		return h.handleAttach(sessionID, parts[2:])
@@ -97,7 +98,7 @@ func (h *ContextHandler) HandleContextCommand(sessionID, input string) error {
 }
 
 // handleCreate cria um novo contexto
-func (h *ContextHandler) handleCreate(args []string) error {
+func (h *ContextHandler) handleCreate(ctx context.Context, args []string) error {
 	if len(args) < 2 {
 		return fmt.Errorf("%s", i18n.T("context.create.usage"))
 	}
@@ -198,19 +199,19 @@ func (h *ContextHandler) handleCreate(args []string) error {
 	}
 	fmt.Println()
 
-	ctx, err := h.manager.CreateContext(name, description, paths, mode, tags, force)
+	fileCtx, err := h.manager.CreateContext(ctx, name, description, paths, mode, tags, force)
 	if err != nil {
 		return fmt.Errorf("%s", i18n.T("context.create.error.failed", err))
 	}
 
 	fmt.Println(colorize(i18n.T("context.create.success"), ColorGreen))
-	h.printContextInfo(ctx, false)
+	h.printContextInfo(fileCtx, false)
 
 	return nil
 }
 
 // handleUpdate atualiza um contexto existente
-func (h *ContextHandler) handleUpdate(args []string) error {
+func (h *ContextHandler) handleUpdate(ctx context.Context, args []string) error {
 	if len(args) < 1 {
 		return fmt.Errorf("%s", i18n.T("context.update.usage"))
 	}
@@ -281,13 +282,13 @@ func (h *ContextHandler) handleUpdate(args []string) error {
 
 	fmt.Println(i18n.T("context.update.processing"))
 
-	ctx, err := h.manager.UpdateContext(name, paths, mode, tags, description)
+	fileCtx, err := h.manager.UpdateContext(ctx, name, paths, mode, tags, description)
 	if err != nil {
 		return fmt.Errorf("%s", i18n.T("context.update.error.failed", err))
 	}
 
 	fmt.Println(colorize(i18n.T("context.update.success"), ColorGreen))
-	h.printContextInfo(ctx, false)
+	h.printContextInfo(fileCtx, false)
 
 	return nil
 }

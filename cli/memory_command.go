@@ -29,7 +29,7 @@ import (
 //	/memory stats        — show usage statistics
 //	/memory facts [cat]  — list facts, optionally filtered by category
 //	/memory compact      — force memory compaction
-func (cli *ChatCLI) handleMemoryCommand(input string) {
+func (cli *ChatCLI) handleMemoryCommand(ctx context.Context, input string) {
 	if cli.memoryStore == nil {
 		fmt.Println(colorize("  "+i18n.T("memory.error.not_available"), ColorYellow))
 		return
@@ -83,7 +83,7 @@ func (cli *ChatCLI) handleMemoryCommand(input string) {
 		cli.showMemoryFacts(category)
 
 	case args == "compact":
-		cli.runMemoryCompact()
+		cli.runMemoryCompact(ctx)
 
 	default:
 		// Try to parse as a date
@@ -572,7 +572,7 @@ func (cli *ChatCLI) showMemoryFacts(category string) {
 	fmt.Println()
 }
 
-func (cli *ChatCLI) runMemoryCompact() {
+func (cli *ChatCLI) runMemoryCompact(ctx context.Context) {
 	mgr := cli.memoryStore.Manager()
 
 	fmt.Println(colorize("  "+i18n.T("mem.cmd.compact.running"), ColorCyan))
@@ -589,7 +589,7 @@ func (cli *ChatCLI) runMemoryCompact() {
 		}
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer cancel()
 
 	factsBefore := mgr.Facts.Count()

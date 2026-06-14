@@ -283,7 +283,7 @@ func ExtractKeywords(messages []string) []string {
 		word string
 		freq int
 	}
-	var sorted []wf
+	sorted := make([]wf, 0, len(wordFreq))
 	for w, f := range wordFreq {
 		sorted = append(sorted, wf{w, f})
 	}

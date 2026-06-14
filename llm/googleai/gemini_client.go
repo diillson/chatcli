@@ -395,13 +395,6 @@ func (c *GeminiClient) sanitizeErrorResponse(response string) string {
 	return sanitized
 }
 
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
-}
-
 // getMaxTokens obtém o limite de tokens configurado
 func (c *GeminiClient) getMaxTokens() int {
 	if tokenStr := os.Getenv("GOOGLEAI_MAX_TOKENS"); tokenStr != "" {
@@ -456,7 +449,7 @@ func (c *GeminiClient) ListModels(ctx context.Context) ([]client.ModelInfo, erro
 		return nil, fmt.Errorf("%s: %w", i18n.T("llm.error.decode_response_for", "Google AI"), err)
 	}
 
-	var modelList []client.ModelInfo
+	modelList := make([]client.ModelInfo, 0, len(result.Models))
 	for _, m := range result.Models {
 		// Filter to models that support generateContent
 		supportsChat := false

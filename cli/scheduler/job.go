@@ -185,14 +185,14 @@ func (j *Job) Validate() error {
 		return fmt.Errorf("%w: owner.kind is required", ErrInvalidJob)
 	}
 	if err := j.Schedule.Validate(); err != nil {
-		return fmt.Errorf("%w: %v", ErrInvalidSchedule, err)
+		return fmt.Errorf("%w: %w", ErrInvalidSchedule, err)
 	}
 	if err := j.Action.Validate(); err != nil {
-		return fmt.Errorf("%w: %v", ErrInvalidAction, err)
+		return fmt.Errorf("%w: %w", ErrInvalidAction, err)
 	}
 	if j.Wait != nil {
 		if err := j.Wait.Validate(); err != nil {
-			return fmt.Errorf("%w: %v", ErrInvalidCondition, err)
+			return fmt.Errorf("%w: %w", ErrInvalidCondition, err)
 		}
 	}
 	if j.Budget.BackoffMult > 0 && j.Budget.BackoffMult < 1 {

@@ -6,6 +6,7 @@
 package cli
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"regexp"
@@ -184,7 +185,7 @@ func isTrivialAgentQuery(query string, explicitAgentInvocation bool) trivialQuer
 // The function takes the full /run or /agent query string minus the
 // command token. Pass `label` (e.g. "/agent" or "/run") for user-facing
 // messaging only — it does not affect the classification.
-func (cli *ChatCLI) maybeReroute(label, task string) bool {
+func (cli *ChatCLI) maybeReroute(ctx context.Context, label, task string) bool {
 	task = strings.TrimSpace(task)
 	if task == "" {
 		return false
@@ -218,6 +219,6 @@ func (cli *ChatCLI) maybeReroute(label, task string) bool {
 	// The /agent and /run panic paths run synchronously; to preserve the
 	// same call shape on Windows (which runs chat synchronously too),
 	// default to synchronous dispatch here as well.
-	cli.processLLMRequest(task)
+	cli.processLLMRequest(ctx, task)
 	return true
 }

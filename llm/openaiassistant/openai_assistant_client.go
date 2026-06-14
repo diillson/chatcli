@@ -3,7 +3,7 @@
  * Copyright (c) 2024 Edilson Freitas
  * License: Apache-2.0
  */
-package openai_assistant
+package openaiassistant
 
 import (
 	"context"
@@ -74,12 +74,12 @@ type FileRegistry struct {
 // The Assistants API only speaks the API-key dialect; the provider must be in
 // AuthModeAPIKey. The token is snapshotted at construction since OpenAI
 // platform API keys do not expire.
-func NewOpenAIAssistantClient(provider auth.TokenProvider, model string, logger *zap.Logger) (*OpenAIAssistantClient, error) {
+func NewOpenAIAssistantClient(ctx context.Context, provider auth.TokenProvider, model string, logger *zap.Logger) (*OpenAIAssistantClient, error) {
 	if model == "" {
 		model = DefaultAssistantModel
 	}
 
-	token, err := provider.Token(context.Background())
+	token, err := provider.Token(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("%s: %w", i18n.T("llm.assistant.create_cache_dir_error"), err)
 	}
@@ -116,7 +116,7 @@ func NewOpenAIAssistantClient(provider auth.TokenProvider, model string, logger 
 	}
 
 	// Inicializar o assistente
-	if err := assistantClient.initializeAssistant(); err != nil {
+	if err := assistantClient.initializeAssistant(ctx); err != nil {
 		return nil, err
 	}
 
@@ -233,7 +233,7 @@ func (c *OpenAIAssistantClient) SendPrompt(ctx context.Context, prompt string, h
 }
 
 // Método para limpar threads ao fim da app
-func (c *OpenAIAssistantClient) Cleanup() error {
+func (c *OpenAIAssistantClient) Cleanup(ctx context.Context) error {
 	c.mu.RLock()
 	threadID := c.currentThreadID
 	c.mu.RUnlock()
@@ -243,7 +243,7 @@ func (c *OpenAIAssistantClient) Cleanup() error {
 	}
 
 	// Criar contexto com timeout para a limpeza
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 
 	// Tenta finalizar qualquer run ativo na thread
@@ -292,12 +292,12 @@ func (c *OpenAIAssistantClient) finishActiveRuns(ctx context.Context, threadID s
 }
 
 // initializeAssistant cria ou recupera um assistente OpenAI
-func (c *OpenAIAssistantClient) initializeAssistant() error {
+func (c *OpenAIAssistantClient) initializeAssistant(ctx context.Context) error {
 	// Tentar carregar assistantID do cache
 	assistantID, err := c.loadAssistantIDFromCache()
 	if err == nil && assistantID != "" {
 		// Verificar se o assistente ainda existe
-		if c.verifyAssistantExists(context.Background(), assistantID) {
+		if c.verifyAssistantExists(ctx, assistantID) {
 			c.assistantID = assistantID
 			c.logger.Info(i18n.T("llm.assistant.recovered_from_cache"), zap.String("assistantID", assistantID))
 			return nil
@@ -305,7 +305,7 @@ func (c *OpenAIAssistantClient) initializeAssistant() error {
 	}
 
 	// Criar um novo assistente
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
 	payload := map[string]interface{}{
