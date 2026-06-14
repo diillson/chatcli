@@ -930,6 +930,7 @@ func (m *Manager) AttachContextWithOptions(sessionID, contextID string, opts Att
 		AttachedAt:     time.Now(),
 		Priority:       opts.Priority,
 		SelectedChunks: opts.SelectedChunks,
+		RetrievalTopK:  opts.RetrievalTopK,
 	}
 
 	// Adicionar à lista de anexos da sessão

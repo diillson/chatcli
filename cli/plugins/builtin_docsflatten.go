@@ -56,6 +56,10 @@ type docsFlattenChunk struct {
 type docsFlattenArgs struct {
 	Root             string
 	Repo             string
+	URL              string
+	MaxPages         int
+	MaxDepth         int
+	SameHost         bool
 	Branch           string
 	Subdir           string
 	Format           string
@@ -97,8 +101,13 @@ func (*BuiltinDocsFlattenPlugin) Usage() string {
 	return `<tool_call name="@docs-flatten" args='{"root":"./docs","format":"jsonl","output":"/tmp/corpus.jsonl"}' />
 
 Flags (flat JSON or {"cmd":"flatten","args":{...}} envelope):
-  root      local directory with Markdown docs (use this OR repo)
-  repo      git URL to shallow-clone (use this OR root)
+  root      local directory with Markdown docs (one source: root|repo|url)
+  repo      git URL to shallow-clone (one source: root|repo|url)
+  url       seed URL of a rendered docs WEBSITE to crawl (one source:
+            root|repo|url). Flattens HTML pages — no Markdown repo needed.
+  maxPages  max pages to crawl when using url (default: 50)
+  maxDepth  max BFS link depth from the seed when using url (default: 2)
+  sameHost  only follow links on the seed's host when crawling (default: true)
   branch    branch to clone (default: main)
   subdir    docs subdirectory inside the repo (e.g. "docs")
   format    text | jsonl | json | yaml (default: text; use jsonl for
@@ -125,13 +134,17 @@ func (*BuiltinDocsFlattenPlugin) Schema() string {
 		"subcommands": []map[string]interface{}{
 			{
 				"name": "flatten",
-				"description": "Flatten a Markdown/MDX documentation tree (local dir or git repo) into AI-ready chunks. " +
-					"Handles .md, .mdx (Mintlify/Docusaurus — JSX components and imports are stripped, prose kept) and .markdown. " +
+				"description": "Flatten documentation into AI-ready chunks from one of three sources: a local Markdown/MDX tree (root), a git repo to shallow-clone (repo), or a rendered docs WEBSITE crawled over HTTP (url — no Markdown repo required). " +
+					"Handles .md, .mdx (Mintlify/Docusaurus — JSX components and imports are stripped, prose kept) and .markdown for root/repo; for url it crawls HTML pages, strips tags to clean text and chunks the same way. " +
 					"Use format=jsonl + output=<file> to produce a corpus for /context create <name> <file> --mode knowledge. " +
 					"ALWAYS set output when the corpus may be large — inline results are truncated.",
 				"flags": []map[string]interface{}{
-					{"name": "root", "type": "string", "description": "Local directory with the Markdown docs. Use this OR repo (exclusive)."},
-					{"name": "repo", "type": "string", "description": "Git URL (https://... or git@host:path). Use this OR root (exclusive)."},
+					{"name": "root", "type": "string", "description": "Local directory with the Markdown docs. Exactly one of root|repo|url."},
+					{"name": "repo", "type": "string", "description": "Git URL (https://... or git@host:path). Exactly one of root|repo|url."},
+					{"name": "url", "type": "string", "description": "Seed URL of a rendered docs website (http/https) to crawl and flatten into the same JSONL corpus. Exactly one of root|repo|url."},
+					{"name": "maxPages", "type": "integer", "description": "Max pages to crawl when using url. Default: 50."},
+					{"name": "maxDepth", "type": "integer", "description": "Max BFS link depth from the seed when using url. Default: 2."},
+					{"name": "sameHost", "type": "boolean", "description": "When crawling url, only follow links on the seed's host. Default: true."},
 					{"name": "branch", "type": "string", "description": "Branch to clone (only with repo). Default: main."},
 					{"name": "subdir", "type": "string", "description": "Docs subdirectory inside the repo (only with repo), e.g. 'docs'."},
 					{"name": "format", "type": "string", "description": "text | jsonl | json | yaml. Default: text. Use jsonl for knowledge corpora."},
@@ -144,6 +157,7 @@ func (*BuiltinDocsFlattenPlugin) Schema() string {
 				"examples": []string{
 					`{"root":"./docs","format":"jsonl","output":"/tmp/corpus.jsonl"}`,
 					`{"repo":"https://github.com/org/project","subdir":"docs","format":"jsonl","output":"/tmp/corpus.jsonl"}`,
+					`{"url":"https://docs.example.com/","maxPages":40,"maxDepth":2,"format":"jsonl","output":"/tmp/corpus.jsonl"}`,
 					`{"root":".","include":"README.md"}`,
 				},
 			},
@@ -168,6 +182,10 @@ func (p *BuiltinDocsFlattenPlugin) ExecuteWithStream(ctx context.Context, args [
 		if onOutput != nil {
 			onOutput(line)
 		}
+	}
+
+	if cfg.URL != "" {
+		return p.executeURL(ctx, cfg, emit)
 	}
 
 	root, provenance, cleanup, err := resolveDocsFlattenRoot(ctx, cfg, emit)
@@ -215,7 +233,7 @@ type docsFlattenProvenance struct {
 // parseDocsFlattenArgs supports flat JSON, the {"cmd","args"} envelope and
 // --flag argv form.
 func parseDocsFlattenArgs(args []string) (docsFlattenArgs, error) {
-	out := docsFlattenArgs{Branch: "main", Format: "text", MaxChars: 16000, StripFrontMatter: true}
+	out := docsFlattenArgs{Branch: "main", Format: "text", MaxChars: 16000, StripFrontMatter: true, MaxPages: 50, MaxDepth: 2, SameHost: true}
 	payload := strings.TrimSpace(strings.Join(args, " "))
 	var raw map[string]json.RawMessage
 	switch {
@@ -238,7 +256,8 @@ func parseDocsFlattenArgs(args []string) (docsFlattenArgs, error) {
 	}
 
 	out.Root = jsonString(raw, "root", "dir", "path")
-	out.Repo = jsonString(raw, "repo", "repoUrl", "url")
+	out.Repo = jsonString(raw, "repo", "repoUrl")
+	parseDocsFlattenCrawlArgs(raw, &out)
 	if v := jsonString(raw, "branch"); v != "" {
 		out.Branch = v
 	}
@@ -258,11 +277,8 @@ func parseDocsFlattenArgs(args []string) (docsFlattenArgs, error) {
 	}
 	out.Output = jsonString(raw, "output", "out")
 
-	if out.Root == "" && out.Repo == "" {
-		return out, errors.New(`either "root" or "repo" is required`)
-	}
-	if out.Root != "" && out.Repo != "" {
-		return out, errors.New(`"root" and "repo" are mutually exclusive`)
+	if err := validateDocsFlattenSource(&out); err != nil {
+		return out, err
 	}
 	switch out.Format {
 	case "text", "jsonl", "json", "yaml":
@@ -276,6 +292,56 @@ func parseDocsFlattenArgs(args []string) (docsFlattenArgs, error) {
 		return out, fmt.Errorf("invalid branch name %q", out.Branch)
 	}
 	return out, nil
+}
+
+// parseDocsFlattenCrawlArgs extracts the web-crawl source ("url") and its
+// bounds (maxPages/maxDepth/sameHost), supporting both camelCase and
+// kebab-case keys.
+func parseDocsFlattenCrawlArgs(raw map[string]json.RawMessage, out *docsFlattenArgs) {
+	out.URL = jsonString(raw, "url", "seed")
+	if v, ok := raw["maxPages"]; ok && len(v) > 0 {
+		out.MaxPages = jsonInt(raw, "maxPages")
+	} else if _, ok := raw["max-pages"]; ok {
+		out.MaxPages = jsonInt(raw, "max-pages")
+	}
+	if v, ok := raw["maxDepth"]; ok && len(v) > 0 {
+		out.MaxDepth = jsonInt(raw, "maxDepth")
+	} else if _, ok := raw["max-depth"]; ok {
+		out.MaxDepth = jsonInt(raw, "max-depth")
+	}
+	if v, present := jsonBoolLookup(raw, "sameHost", "same-host"); present {
+		out.SameHost = v
+	}
+}
+
+// validateDocsFlattenSource enforces that exactly one of root|repo|url is set
+// and sanity-checks the url source (scheme + non-negative bounds).
+func validateDocsFlattenSource(out *docsFlattenArgs) error {
+	sources := 0
+	for _, set := range []bool{out.Root != "", out.Repo != "", out.URL != ""} {
+		if set {
+			sources++
+		}
+	}
+	if sources == 0 {
+		return errors.New(`one of "root", "repo" or "url" is required`)
+	}
+	if sources > 1 {
+		return errors.New(`"root", "repo" and "url" are mutually exclusive — set exactly one`)
+	}
+	if out.URL == "" {
+		return nil
+	}
+	if _, err := validateWebTarget(out.URL); err != nil {
+		return fmt.Errorf("invalid url %q: %w", out.URL, err)
+	}
+	if out.MaxPages <= 0 {
+		out.MaxPages = 50
+	}
+	if out.MaxDepth < 0 {
+		out.MaxDepth = 0
+	}
+	return nil
 }
 
 // isValidGitBranch enforces the subset of git-check-ref-format rules that

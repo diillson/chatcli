@@ -693,6 +693,10 @@ func (a *AgentMode) Run(ctx context.Context, query string, additionalContext str
 	if kb := a.cli.knowledgeAgentBlock(); kb != "" {
 		toolsText += "\n\n" + kb
 	}
+	// Teach the autonomous documentation pipeline so the model proactively
+	// builds the knowledge it lacks instead of guessing or stalling. Cheap,
+	// deterministic, and rides in the same cacheable block.
+	toolsText += "\n\n" + contextPipelineHint()
 
 	// Fase 5: Inject auto-activated skills (triggers + path globs) into the
 	// agent-mode system prompt. Also honors a `/<skill-name>` manual
