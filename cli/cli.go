@@ -459,6 +459,16 @@ func NewChatCLI(manager manager.LLMManager, logger *zap.Logger) (*ChatCLI, error
 		// Markdown/MDX docs tree (local dir or git repo) into the JSONL
 		// corpus /context --mode knowledge ingests. Self-contained.
 		pluginMgr.RegisterBuiltinPlugin(plugins.NewBuiltinDocsFlattenPlugin())
+		// @registry-tags — keyless container image tag discovery across
+		// public/private OCI registries (Docker Hub, GCR, GHCR, Quay, ACR,
+		// Harbor, Artifactory). Reads ~/.docker/config.json for private
+		// repos and performs the OCI Bearer-token dance for anonymous ones.
+		// Self-contained (HTTP only), no adapter wiring needed.
+		pluginMgr.RegisterBuiltinPlugin(plugins.NewBuiltinRegistryTagsPlugin())
+		// @wikipedia — keyless factual lookup via the public MediaWiki API
+		// (search titles / read an article intro), language-configurable.
+		// A companion to @websearch/@webfetch/@knowledge. Self-contained.
+		pluginMgr.RegisterBuiltinPlugin(plugins.NewBuiltinWikipediaPlugin())
 		// Atomic read-only tools (Claude Code parity, Item 1). Narrow,
 		// flat-schema tools that route into the same engine as @coder
 		// read/search/tree but give the LLM a dedicated entry point —
