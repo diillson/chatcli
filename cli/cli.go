@@ -468,6 +468,10 @@ func NewChatCLI(ctx context.Context, manager manager.LLMManager, logger *zap.Log
 		// @docs-flatten — push-side companion of @knowledge: flattens a
 		// Markdown/MDX docs tree (local dir or git repo) into the JSONL
 		// corpus /context --mode knowledge ingests. Self-contained.
+		// @context — autonomous knowledge-base management: the agent builds,
+		// attaches/detaches and inspects its own context/knowledge bases without
+		// the user running /context. Adapter wired below.
+		pluginMgr.RegisterBuiltinPlugin(plugins.NewBuiltinContextPlugin())
 		pluginMgr.RegisterBuiltinPlugin(plugins.NewBuiltinDocsFlattenPlugin())
 		// @registry-tags — keyless container image tag discovery across
 		// public/private OCI registries (Docker Hub, GCR, GHCR, Quay, ACR,
@@ -588,6 +592,9 @@ func NewChatCLI(ctx context.Context, manager manager.LLMManager, logger *zap.Log
 	// Wire the @knowledge tool to this session's context manager so the agent
 	// can interrogate attached knowledge bases on demand.
 	plugins.SetKnowledgeAdapter(&knowledgePluginAdapter{cli: cli})
+	// @context adapter — lets the agent create/attach/detach/inspect its own
+	// context bases over the same live manager.
+	plugins.SetContextAdapter(&contextPluginAdapter{cli: cli})
 
 	// Wire the @send tool to the gateway platform registry. Independent of
 	// the memory store and of the gateway daemon lifecycle: adapters are
