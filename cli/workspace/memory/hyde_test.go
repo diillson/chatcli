@@ -79,7 +79,7 @@ func TestHyDEAugmenter_RespectsNumKeywordsCap(t *testing.T) {
 	got := aug.Augment(context.Background(), "q", []string{"orig"})
 	// 1 original + at most 2 hypothesis keywords
 	if len(got) > 3 {
-		t.Errorf("NumKeywords cap not honoured; got %v", got)
+		t.Errorf("NumKeywords cap not honored; got %v", got)
 	}
 }
 
