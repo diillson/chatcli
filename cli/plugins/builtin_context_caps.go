@@ -25,7 +25,7 @@ func contextSubcommand(args []string) (cmd, name string) {
 // read-only and (in coder mode) go through the policy confirmation.
 func (*BuiltinContextPlugin) IsReadOnly(args []string) bool {
 	switch cmd, _ := contextSubcommand(args); cmd {
-	case "list", "status":
+	case "list", "status", "show", "inspect", "metrics":
 		return true
 	default:
 		return false
@@ -44,14 +44,28 @@ func (*BuiltinContextPlugin) DescribeCall(args []string) string {
 	switch cmd {
 	case "create":
 		return i18n.T("plugins.context.describe.create", name)
+	case "update":
+		return i18n.T("plugins.context.describe.update", name)
 	case "attach":
 		return i18n.T("plugins.context.describe.attach", name)
 	case "detach":
 		return i18n.T("plugins.context.describe.detach", name)
 	case "list":
 		return i18n.T("plugins.context.describe.list")
+	case "show":
+		return i18n.T("plugins.context.describe.show", name)
+	case "inspect":
+		return i18n.T("plugins.context.describe.inspect", name)
+	case "merge":
+		return i18n.T("plugins.context.describe.merge", name)
 	case "status":
 		return i18n.T("plugins.context.describe.status")
+	case "export":
+		return i18n.T("plugins.context.describe.export", name)
+	case "import":
+		return i18n.T("plugins.context.describe.import")
+	case "metrics":
+		return i18n.T("plugins.context.describe.metrics")
 	case "delete":
 		return i18n.T("plugins.context.describe.delete", name)
 	default:

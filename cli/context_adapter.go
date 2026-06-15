@@ -13,6 +13,7 @@ package cli
 import (
 	"context"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -244,6 +245,190 @@ func (a *contextPluginAdapter) Delete(name string) (string, error) {
 	var b strings.Builder
 	fmt.Fprintf(&b, "Deleted context %q permanently.", fc.Name)
 	return b.String(), nil
+}
+
+// Update re-ingests or modifies an existing context. Empty fields keep the
+// current value (mirrors /context update).
+func (a *contextPluginAdapter) Update(name string, paths []string, mode, description string, tags []string) (string, error) {
+	mgr := a.manager()
+	if mgr == nil {
+		return "", fmt.Errorf("context manager unavailable in this session")
+	}
+	if mode != "" {
+		if _, ok := validContextMode(mode); !ok {
+			return "", fmt.Errorf("invalid mode %q (valid: knowledge|full|summary|chunked|smart)", mode)
+		}
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), contextOpTimeout)
+	defer cancel()
+	fc, err := mgr.UpdateContext(ctx, name, paths, ctxmgr.ProcessingMode(mode), tags, description)
+	if err != nil {
+		return "", err
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "Updated context %q (mode=%s) — %d unit(s), %s.", fc.Name, fc.Mode, fc.FileCount, humanMB(fc.TotalSize))
+	return b.String(), nil
+}
+
+// Show renders one context's metadata.
+func (a *contextPluginAdapter) Show(name string) (string, error) {
+	mgr := a.manager()
+	if mgr == nil {
+		return "", fmt.Errorf("context manager unavailable in this session")
+	}
+	fc, err := mgr.GetContextByName(name)
+	if err != nil {
+		return "", fmt.Errorf("context %q not found", name)
+	}
+	return renderContextInfo(fc, a.attachedIDs()[fc.ID]), nil
+}
+
+// Inspect renders a deeper view: the documents/chunks, and one chunk's content
+// when chunk > 0.
+func (a *contextPluginAdapter) Inspect(name string, chunk int) (string, error) {
+	mgr := a.manager()
+	if mgr == nil {
+		return "", fmt.Errorf("context manager unavailable in this session")
+	}
+	fc, err := mgr.GetContextByName(name)
+	if err != nil {
+		return "", fmt.Errorf("context %q not found", name)
+	}
+	var b strings.Builder
+	b.WriteString(renderContextInfo(fc, a.attachedIDs()[fc.ID]))
+	if chunk > 0 && fc.IsChunked {
+		if chunk > len(fc.Chunks) {
+			fmt.Fprintf(&b, "\nchunk %d out of range (have %d)", chunk, len(fc.Chunks))
+			return b.String(), nil
+		}
+		ch := fc.Chunks[chunk-1]
+		fmt.Fprintf(&b, "\n\n--- chunk %d/%d: %s (%d file(s)) ---", chunk, len(fc.Chunks), ch.Description, len(ch.Files))
+		for _, f := range ch.Files {
+			fmt.Fprintf(&b, "\n\n# %s\n%s", f.Path, f.Content)
+		}
+		return b.String(), nil
+	}
+	const maxList = 25
+	b.WriteString("\n  sources:")
+	for i, f := range fc.Files {
+		if i >= maxList {
+			fmt.Fprintf(&b, "\n    … and %d more", len(fc.Files)-maxList)
+			break
+		}
+		fmt.Fprintf(&b, "\n    - %s", f.Path)
+	}
+	return b.String(), nil
+}
+
+// Merge combines source contexts into a new one (deduplicated).
+func (a *contextPluginAdapter) Merge(name string, sources []string, description string) (string, error) {
+	mgr := a.manager()
+	if mgr == nil {
+		return "", fmt.Errorf("context manager unavailable in this session")
+	}
+	ids := make([]string, 0, len(sources))
+	for _, s := range sources {
+		fc, err := mgr.GetContextByName(s)
+		if err != nil {
+			return "", fmt.Errorf("source context %q not found", s)
+		}
+		ids = append(ids, fc.ID)
+	}
+	merged, err := mgr.MergeContexts(name, description, ids, ctxmgr.MergeOptions{RemoveDuplicates: true})
+	if err != nil {
+		return "", err
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "Merged %d context(s) into %q — %d unit(s), %s. Attach it with @context attach.",
+		len(sources), merged.Name, merged.FileCount, humanMB(merged.TotalSize))
+	return b.String(), nil
+}
+
+// Export writes a context to a portable file.
+func (a *contextPluginAdapter) Export(name, path string) (string, error) {
+	mgr := a.manager()
+	if mgr == nil {
+		return "", fmt.Errorf("context manager unavailable in this session")
+	}
+	fc, err := mgr.GetContextByName(name)
+	if err != nil {
+		return "", fmt.Errorf("context %q not found", name)
+	}
+	if err := mgr.Storage.ExportContext(fc, path); err != nil {
+		return "", err
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "Exported context %q to %s.", fc.Name, path)
+	return b.String(), nil
+}
+
+// Import loads a context from a file.
+func (a *contextPluginAdapter) Import(path string) (string, error) {
+	mgr := a.manager()
+	if mgr == nil {
+		return "", fmt.Errorf("context manager unavailable in this session")
+	}
+	fc, err := mgr.Storage.ImportContext(path)
+	if err != nil {
+		return "", err
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "Imported context %q (mode=%s) — %d unit(s), %s. Attach it with @context attach.",
+		fc.Name, fc.Mode, fc.FileCount, humanMB(fc.TotalSize))
+	return b.String(), nil
+}
+
+// Metrics summarizes the whole context store.
+func (a *contextPluginAdapter) Metrics() (string, error) {
+	mgr := a.manager()
+	if mgr == nil {
+		return "", fmt.Errorf("context manager unavailable in this session")
+	}
+	mt := mgr.GetMetrics()
+	if mt == nil {
+		return "No metrics available.", nil
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "Context store: %d context(s), %d attached, %d file(s), %s total.",
+		mt.TotalContexts, mt.AttachedContexts, mt.TotalFiles, humanMB(mt.TotalSizeBytes))
+	if len(mt.ContextsByMode) > 0 {
+		b.WriteString("\nBy mode:")
+		for _, mode := range ctxSortedKeys(mt.ContextsByMode) {
+			fmt.Fprintf(&b, " %s=%d", mode, mt.ContextsByMode[mode])
+		}
+	}
+	return b.String(), nil
+}
+
+// renderContextInfo formats a FileContext for show/inspect (deterministic).
+func renderContextInfo(fc *ctxmgr.FileContext, attached bool) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "Context %q\n", fc.Name)
+	fmt.Fprintf(&b, "  mode: %s | units: %d | size: %s | attached: %v\n", fc.Mode, fc.FileCount, humanMB(fc.TotalSize), attached)
+	if fc.Description != "" {
+		fmt.Fprintf(&b, "  description: %s\n", fc.Description)
+	}
+	if len(fc.Tags) > 0 {
+		fmt.Fprintf(&b, "  tags: %s\n", strings.Join(fc.Tags, ", "))
+	}
+	fmt.Fprintf(&b, "  created: %s | updated: %s", fc.CreatedAt.Format(time.RFC3339), fc.UpdatedAt.Format(time.RFC3339))
+	if len(fc.Metadata) > 0 {
+		b.WriteString("\n  metadata:")
+		for _, k := range ctxSortedKeys(fc.Metadata) {
+			fmt.Fprintf(&b, "\n    %s: %s", k, fc.Metadata[k])
+		}
+	}
+	return b.String()
+}
+
+// ctxSortedKeys returns the map keys in deterministic order.
+func ctxSortedKeys[V any](m map[string]V) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return keys
 }
 
 // attachedIDs returns the set of context IDs attached to the session.
