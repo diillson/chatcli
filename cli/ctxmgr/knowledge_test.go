@@ -258,6 +258,151 @@ func TestManager_CreateKnowledgeContextFromJSONL(t *testing.T) {
 	}
 }
 
+// TestManager_UpdateKnowledgeContextFromJSONL is the regression for the update
+// path swallowing a JSONL corpus as a single monolithic unit (units: 1) and
+// leaving kb.* provenance stale. Re-ingestion must re-chunk per line and refresh
+// commit/sources, exactly like CreateContext does.
+func TestManager_UpdateKnowledgeContextFromJSONL(t *testing.T) {
+	m := newTestManager(t)
+	orig := writeCorpus(t, []string{
+		`{"id":"a.md#0001","source":"a.md","content":"# Alpha\nold","repoUrl":"https://github.com/org/docs.git","commit":"oldcommit0000"}`,
+	})
+	fc, err := m.CreateContext(context.Background(), "kb-docs", "docs corpus", []string{orig}, ModeKnowledge, nil, false)
+	if err != nil {
+		t.Fatalf("CreateContext: %v", err)
+	}
+	if fc.FileCount != 1 || fc.Metadata[knowledgeMetaCommit] != "oldcommit0000" {
+		t.Fatalf("seed context = %d files, commit %q", fc.FileCount, fc.Metadata[knowledgeMetaCommit])
+	}
+
+	updated := writeCorpus(t, []string{
+		`{"id":"a.md#0001","source":"a.md","content":"# Alpha\nnew","repoUrl":"https://github.com/org/docs.git","commit":"newcommit1111"}`,
+		`{"id":"b.md#0001","source":"b.md","content":"# Beta\nnew section"}`,
+		`{"id":"c.md#0001","source":"c.md","content":"# Gamma\nthird doc"}`,
+	})
+	got, err := m.UpdateContext(context.Background(), "kb-docs", []string{updated}, "", nil, "")
+	if err != nil {
+		t.Fatalf("UpdateContext: %v", err)
+	}
+	// The whole point: 3 chunks, NOT 1 monolithic unit.
+	if got.FileCount != 3 {
+		t.Fatalf("FileCount = %d, want 3 (corpus re-chunked, not swallowed as one unit)", got.FileCount)
+	}
+	if got.Mode != ModeKnowledge {
+		t.Errorf("mode drifted to %s, want knowledge", got.Mode)
+	}
+	if got.Metadata[knowledgeMetaCommit] != "newcommit1111" {
+		t.Errorf("kb.commit = %q, want refreshed newcommit1111", got.Metadata[knowledgeMetaCommit])
+	}
+	if got.Metadata[knowledgeMetaSources] != "3" {
+		t.Errorf("kb.sources = %q, want 3", got.Metadata[knowledgeMetaSources])
+	}
+}
+
+// TestManager_UpdateClearsStaleChunkStateOnModeSwitch pins that switching a
+// context away from chunked mode during update drops the orphaned chunk index
+// (Chunks/IsChunked/ChunkStrategy) — a phantom IsChunked on a knowledge context
+// is a landmine for any path that branches on it.
+func TestManager_UpdateClearsStaleChunkStateOnModeSwitch(t *testing.T) {
+	m := newTestManager(t)
+	dir := t.TempDir()
+	src := filepath.Join(dir, "doc.md")
+	if err := os.WriteFile(src, []byte("# Title\n"+strings.Repeat("body line\n", 50)), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	fc, err := m.CreateContext(context.Background(), "kb-switch", "chunked seed", []string{src}, ModeChunked, nil, false)
+	if err != nil {
+		t.Fatalf("CreateContext: %v", err)
+	}
+	if !fc.IsChunked || len(fc.Chunks) == 0 {
+		t.Fatalf("seed must be chunked: IsChunked=%v chunks=%d", fc.IsChunked, len(fc.Chunks))
+	}
+
+	corpus := writeCorpus(t, []string{
+		`{"id":"a.md#0001","source":"a.md","content":"# Alpha\nknowledge now"}`,
+	})
+	got, err := m.UpdateContext(context.Background(), "kb-switch", []string{corpus}, ModeKnowledge, nil, "")
+	if err != nil {
+		t.Fatalf("UpdateContext: %v", err)
+	}
+	if got.Mode != ModeKnowledge {
+		t.Fatalf("mode = %s, want knowledge", got.Mode)
+	}
+	if got.IsChunked || got.Chunks != nil || got.ChunkStrategy != "" {
+		t.Errorf("stale chunk state survived mode switch: IsChunked=%v chunks=%d strategy=%q",
+			got.IsChunked, len(got.Chunks), got.ChunkStrategy)
+	}
+}
+
+// TestManager_UpdateChunkedRechunksOnNewFiles covers the chunked-mode update
+// path: re-supplying files must re-divide the corpus and keep the context
+// chunked, replacing the previous chunk set with the new content's.
+func TestManager_UpdateChunkedRechunksOnNewFiles(t *testing.T) {
+	m := newTestManager(t)
+	dir := t.TempDir()
+	f1 := filepath.Join(dir, "a.md")
+	if err := os.WriteFile(f1, []byte("# A\n"+strings.Repeat("alpha line\n", 60)), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	fc, err := m.CreateContext(context.Background(), "chk", "seed", []string{f1}, ModeChunked, nil, false)
+	if err != nil {
+		t.Fatalf("CreateContext: %v", err)
+	}
+	if !fc.IsChunked || len(fc.Chunks) == 0 {
+		t.Fatalf("seed must be chunked: IsChunked=%v chunks=%d", fc.IsChunked, len(fc.Chunks))
+	}
+
+	f2 := filepath.Join(dir, "b.md")
+	if err := os.WriteFile(f2, []byte("# B\n"+strings.Repeat("beta line\n", 120)), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	got, err := m.UpdateContext(context.Background(), "chk", []string{f2}, "", nil, "")
+	if err != nil {
+		t.Fatalf("UpdateContext: %v", err)
+	}
+	if got.Mode != ModeChunked || !got.IsChunked || len(got.Chunks) == 0 {
+		t.Fatalf("update must keep it chunked and re-divide: mode=%s chunked=%v chunks=%d",
+			got.Mode, got.IsChunked, len(got.Chunks))
+	}
+	if got.FileCount != 1 {
+		t.Errorf("FileCount = %d, want 1 (rescanned to the new file)", got.FileCount)
+	}
+}
+
+// TestManager_UpdateNonKnowledgeRescansPaths covers the non-knowledge update
+// branch: paths go through the normal scanner and replace the file set, with no
+// phantom chunk state left behind.
+func TestManager_UpdateNonKnowledgeRescansPaths(t *testing.T) {
+	m := newTestManager(t)
+	dir := t.TempDir()
+	f1 := filepath.Join(dir, "a.md")
+	if err := os.WriteFile(f1, []byte("# A\nalpha"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	fc, err := m.CreateContext(context.Background(), "full-ctx", "seed", []string{f1}, ModeFull, nil, false)
+	if err != nil {
+		t.Fatalf("CreateContext: %v", err)
+	}
+	if fc.Mode != ModeFull || fc.FileCount != 1 {
+		t.Fatalf("seed = mode %s, %d files", fc.Mode, fc.FileCount)
+	}
+
+	f2 := filepath.Join(dir, "b.md")
+	if err := os.WriteFile(f2, []byte("# B\nbeta beta"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	got, err := m.UpdateContext(context.Background(), "full-ctx", []string{f2}, "", nil, "")
+	if err != nil {
+		t.Fatalf("UpdateContext: %v", err)
+	}
+	if got.Mode != ModeFull || got.FileCount != 1 {
+		t.Fatalf("update = mode %s, %d files, want full/1", got.Mode, got.FileCount)
+	}
+	if got.IsChunked || got.Chunks != nil {
+		t.Errorf("non-chunked update must not carry chunk state: IsChunked=%v chunks=%d", got.IsChunked, len(got.Chunks))
+	}
+}
+
 // countingProvider records every Embed batch size, delegating to conceptProvider.
 type countingProvider struct {
 	conceptProvider

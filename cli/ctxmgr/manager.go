@@ -515,10 +515,44 @@ func (m *Manager) UpdateContext(ctx context.Context, name string, newPaths []str
 			mode = existingCtx.Mode // Manter modo anterior se não especificado
 		}
 
-		var err error
-		files, scanOpts, err = m.processor.ProcessPaths(ctx, newPaths, mode)
-		if err != nil {
-			return nil, fmt.Errorf("erro ao processar arquivos: %w", err)
+		// Mesmo gate de knowledge mode do CreateContext: corpora .jsonl do
+		// docs-flatten entram pelo parser nativo (um FileInfo por chunk,
+		// preservando source/título/proveniência), enquanto os demais caminhos
+		// seguem pelo scanner normal. Sem isto, um .jsonl seria ingerido como um
+		// único arquivo monolítico (units: 1) e a proveniência kb.* ficaria stale.
+		knowledgeMeta := map[string]string{}
+		var scanPaths []string
+		if mode == ModeKnowledge {
+			for _, p := range newPaths {
+				if !isJSONLPath(p) {
+					scanPaths = append(scanPaths, p)
+					continue
+				}
+				expanded, expandErr := utils.ExpandPath(p)
+				if expandErr != nil {
+					expanded = p
+				}
+				kfiles, kmeta, ingestErr := ingestKnowledgeJSONL(expanded, m.logger)
+				if ingestErr != nil {
+					return nil, ingestErr
+				}
+				files = append(files, kfiles...)
+				for k, v := range kmeta {
+					knowledgeMeta[k] = v
+				}
+			}
+		} else {
+			scanPaths = newPaths
+		}
+
+		scanOpts = utils.DefaultDirectoryScanOptions(m.logger)
+		if len(scanPaths) > 0 {
+			scanned, opts, err := m.processor.ProcessPaths(ctx, scanPaths, mode)
+			if err != nil {
+				return nil, fmt.Errorf("erro ao processar arquivos: %w", err)
+			}
+			files = append(files, scanned...)
+			scanOpts = opts
 		}
 
 		for _, f := range files {
@@ -542,6 +576,18 @@ func (m *Manager) UpdateContext(ctx context.Context, name string, newPaths []str
 			ExcludePatterns:   scanOpts.ExcludePatterns,
 			IncludeHidden:     scanOpts.IncludeHidden,
 		}
+
+		// Refrescar a proveniência kb.* a partir do novo corpus — commit e
+		// contagem de sources mudam a cada re-ingestão. Merge (não overwrite)
+		// preserva quaisquer outras chaves de metadata já gravadas no contexto.
+		if len(knowledgeMeta) > 0 {
+			if existingCtx.Metadata == nil {
+				existingCtx.Metadata = map[string]string{}
+			}
+			for k, v := range knowledgeMeta {
+				existingCtx.Metadata[k] = v
+			}
+		}
 	}
 
 	// Atualizar descrição se fornecida
@@ -558,20 +604,32 @@ func (m *Manager) UpdateContext(ctx context.Context, name string, newPaths []str
 	existingCtx.UpdatedAt = time.Now()
 
 	// Re-dividir em chunks se necessário
-	if existingCtx.Mode == ModeChunked && len(files) > 0 {
-		m.logger.Info("Re-dividindo arquivos em chunks após atualização",
-			zap.String("context_name", name),
-			zap.Int("total_files", len(files)))
+	if existingCtx.Mode == ModeChunked {
+		// Só re-chunka quando há arquivos novos; um update apenas de descrição/
+		// tags preserva os chunks existentes (conteúdo inalterado).
+		if len(files) > 0 {
+			m.logger.Info("Re-dividindo arquivos em chunks após atualização",
+				zap.String("context_name", name),
+				zap.Int("total_files", len(files)))
 
-		chunker := NewChunker(m.logger)
-		chunks, err := chunker.DivideIntoChunks(files, ChunkSmart)
-		if err != nil {
-			return nil, fmt.Errorf("erro ao dividir em chunks: %w", err)
+			chunker := NewChunker(m.logger)
+			chunks, err := chunker.DivideIntoChunks(files, ChunkSmart)
+			if err != nil {
+				return nil, fmt.Errorf("erro ao dividir em chunks: %w", err)
+			}
+
+			existingCtx.Chunks = chunks
+			existingCtx.IsChunked = true
+			existingCtx.ChunkStrategy = string(ChunkSmart)
 		}
-
-		existingCtx.Chunks = chunks
-		existingCtx.IsChunked = true
-		existingCtx.ChunkStrategy = string(ChunkSmart)
+	} else if len(files) > 0 {
+		// O modo deixou de ser chunked nesta atualização (ex.: chunked→knowledge):
+		// descartar o estado de chunk órfão para que um contexto knowledge/full
+		// nunca carregue um índice de chunks fantasma (IsChunked stale é landmine
+		// para qualquer caminho que ramifique em fc.IsChunked).
+		existingCtx.Chunks = nil
+		existingCtx.IsChunked = false
+		existingCtx.ChunkStrategy = ""
 	}
 
 	// Salvar no disco
