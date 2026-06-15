@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.141.0](https://github.com/diillson/chatcli/compare/v1.140.0...v1.141.0) (2026-06-15)
+
+
+### Features
+
+* full [@context](https://github.com/context) parity + [@registry-tags](https://github.com/registry-tags) sort/last ([#1059](https://github.com/diillson/chatcli/issues/1059)) ([ffc9be9](https://github.com/diillson/chatcli/commit/ffc9be9e9917592faec423349d8ca7381da0787a))
+
 ## [1.140.0](https://github.com/diillson/chatcli/compare/v1.139.0...v1.140.0) (2026-06-14)
 
 
