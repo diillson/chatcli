@@ -91,6 +91,65 @@ func TestContextAdapter_EndToEnd(t *testing.T) {
 	}
 }
 
+func TestContextAdapter_FullParity(t *testing.T) {
+	cli, corpus := newContextTestCLI(t)
+	a := &contextPluginAdapter{cli: cli}
+
+	if _, err := a.Create("docs-a", "knowledge", []string{corpus}, "a", false); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	show, err := a.Show("docs-a")
+	if err != nil || !strings.Contains(show, "docs-a") || !strings.Contains(show, "mode: knowledge") {
+		t.Fatalf("Show = %q, err %v", show, err)
+	}
+	insp, err := a.Inspect("docs-a", 0)
+	if err != nil || !strings.Contains(insp, "sources:") {
+		t.Fatalf("Inspect = %q, err %v", insp, err)
+	}
+	mt, err := a.Metrics()
+	if err != nil || !strings.Contains(strings.ToLower(mt), "context store") {
+		t.Fatalf("Metrics = %q, err %v", mt, err)
+	}
+
+	upd, err := a.Update("docs-a", []string{corpus}, "knowledge", "new desc", []string{"tag1"})
+	if err != nil || !strings.Contains(upd, "docs-a") {
+		t.Fatalf("Update = %q, err %v", upd, err)
+	}
+
+	exportPath := filepath.Join(t.TempDir(), "docs-a.json")
+	if _, err := a.Export("docs-a", exportPath); err != nil {
+		t.Fatalf("Export: %v", err)
+	}
+	if _, err := os.Stat(exportPath); err != nil {
+		t.Fatalf("export file missing: %v", err)
+	}
+	if imp, err := a.Import(exportPath); err != nil || !strings.Contains(imp, "Imported") {
+		t.Fatalf("Import = %q, err %v", imp, err)
+	}
+
+	if _, err := a.Create("docs-b", "knowledge", []string{corpus}, "b", false); err != nil {
+		t.Fatalf("Create docs-b: %v", err)
+	}
+	if mg, err := a.Merge("docs-all", []string{"docs-a", "docs-b"}, "merged"); err != nil || !strings.Contains(mg, "docs-all") {
+		t.Fatalf("Merge = %q, err %v", mg, err)
+	}
+
+	// Validation paths.
+	if _, err := a.Show("nope"); err == nil {
+		t.Error("Show of a missing context must error")
+	}
+	if _, err := a.Update("nope", []string{corpus}, "", "", nil); err == nil {
+		t.Error("Update of a missing context must error")
+	}
+	if _, err := a.Merge("x", []string{"docs-a", "nope"}, ""); err == nil {
+		t.Error("Merge with a missing source must error")
+	}
+	if _, err := a.Export("nope", exportPath); err == nil {
+		t.Error("Export of a missing context must error")
+	}
+}
+
 func TestContextAdapter_Validation(t *testing.T) {
 	cli, corpus := newContextTestCLI(t)
 	a := &contextPluginAdapter{cli: cli}

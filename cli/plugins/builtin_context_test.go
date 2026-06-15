@@ -20,8 +20,39 @@ type fakeContextAdapter struct {
 	attachName                         string
 	attachRag, attachPriority          int
 	detachName, deleteName             string
-	listed, statused                   bool
+	listed, statused, metricsed        bool
+	updateName, showName, mergeName    string
+	inspectName                        string
+	inspectChunk                       int
+	mergeSources                       []string
+	exportName, exportPath, importPath string
 }
+
+func (f *fakeContextAdapter) Update(name string, paths []string, mode, desc string, tags []string) (string, error) {
+	f.updateName = name
+	return "updated " + name, nil
+}
+func (f *fakeContextAdapter) Show(name string) (string, error) {
+	f.showName = name
+	return "show " + name, nil
+}
+func (f *fakeContextAdapter) Inspect(name string, chunk int) (string, error) {
+	f.inspectName, f.inspectChunk = name, chunk
+	return "inspect " + name, nil
+}
+func (f *fakeContextAdapter) Merge(name string, sources []string, desc string) (string, error) {
+	f.mergeName, f.mergeSources = name, sources
+	return "merged " + name, nil
+}
+func (f *fakeContextAdapter) Export(name, path string) (string, error) {
+	f.exportName, f.exportPath = name, path
+	return "exported " + name, nil
+}
+func (f *fakeContextAdapter) Import(path string) (string, error) {
+	f.importPath = path
+	return "imported", nil
+}
+func (f *fakeContextAdapter) Metrics() (string, error) { f.metricsed = true; return "metrics", nil }
 
 func (f *fakeContextAdapter) Create(name, mode string, paths []string, desc string, force bool) (string, error) {
 	f.createName, f.createMode, f.createPaths, f.createDesc, f.createForce = name, mode, paths, desc, force
@@ -56,7 +87,13 @@ func TestCanonicalContextCmd(t *testing.T) {
 		"attach": "attach", "add": "attach",
 		"detach": "detach", "remove": "detach", "rm": "detach",
 		"list": "list", "ls": "list",
-		"status": "status", "attached": "status", "info": "status",
+		"status": "status", "attached": "status",
+		"update": "update", "edit": "update",
+		"show": "show", "info": "show", "view": "show",
+		"inspect": "inspect",
+		"merge":   "merge", "join": "merge",
+		"export": "export", "import": "import",
+		"metrics": "metrics", "stats": "metrics",
 		"delete": "delete", "del": "delete",
 		"bogus": "",
 	}
@@ -138,6 +175,57 @@ func TestContextExecuteDispatch(t *testing.T) {
 	}
 	if _, err := run(`{"cmd":"status"}`); err != nil || !f.statused {
 		t.Fatalf("status routed wrong: %v", err)
+	}
+}
+
+func TestContextExecuteDispatch_FullParity(t *testing.T) {
+	f := withFakeContextAdapter(t)
+	p := NewBuiltinContextPlugin()
+	run := func(payload string) (string, error) {
+		return p.Execute(context.Background(), []string{payload})
+	}
+
+	if _, err := run(`{"cmd":"update","args":{"name":"react","paths":["/tmp/v19.jsonl"]}}`); err != nil || f.updateName != "react" {
+		t.Fatalf("update: %v %q", err, f.updateName)
+	}
+	if _, err := run(`{"cmd":"show","args":{"name":"react"}}`); err != nil || f.showName != "react" {
+		t.Fatalf("show: %v %q", err, f.showName)
+	}
+	if _, err := run(`{"cmd":"inspect","args":{"name":"react","chunk":3}}`); err != nil || f.inspectName != "react" || f.inspectChunk != 3 {
+		t.Fatalf("inspect: %v %q %d", err, f.inspectName, f.inspectChunk)
+	}
+	if _, err := run(`{"cmd":"merge","args":{"name":"all","sources":["a","b"]}}`); err != nil || f.mergeName != "all" || len(f.mergeSources) != 2 {
+		t.Fatalf("merge: %v %+v", err, f)
+	}
+	if _, err := run(`{"cmd":"export","args":{"name":"react","path":"/tmp/r.json"}}`); err != nil || f.exportName != "react" || f.exportPath != "/tmp/r.json" {
+		t.Fatalf("export: %v %+v", err, f)
+	}
+	if _, err := run(`{"cmd":"import","args":{"path":"/tmp/r.json"}}`); err != nil || f.importPath != "/tmp/r.json" {
+		t.Fatalf("import: %v %q", err, f.importPath)
+	}
+	if _, err := run(`{"cmd":"metrics"}`); err != nil || !f.metricsed {
+		t.Fatalf("metrics: %v", err)
+	}
+	// aliases
+	if _, err := run(`{"cmd":"info","args":{"name":"react"}}`); err != nil || f.showName != "react" {
+		t.Fatalf("info alias should route to show: %v", err)
+	}
+}
+
+func TestContextExecuteValidation_FullParity(t *testing.T) {
+	withFakeContextAdapter(t)
+	p := NewBuiltinContextPlugin()
+	bad := []string{
+		`{"cmd":"update","args":{}}`,                             // no name
+		`{"cmd":"show","args":{}}`,                               // no name
+		`{"cmd":"merge","args":{"name":"x","sources":["only"]}}`, // < 2 sources
+		`{"cmd":"export","args":{"name":"x"}}`,                   // no path
+		`{"cmd":"import","args":{}}`,                             // no path
+	}
+	for _, payload := range bad {
+		if _, err := p.Execute(context.Background(), []string{payload}); err == nil {
+			t.Errorf("expected validation error for %s", payload)
+		}
 	}
 }
 

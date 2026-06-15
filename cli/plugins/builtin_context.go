@@ -47,6 +47,9 @@ type ContextAdapter interface {
 	// (a corpus.jsonl from @docs-flatten, a local directory, or files) in the
 	// given mode (default "knowledge"). Returns an LLM-readable summary.
 	Create(name, mode string, paths []string, description string, force bool) (string, error)
+	// Update re-ingests/modifies an existing context. Empty fields keep the
+	// current value (mode/description); empty paths keep the current sources.
+	Update(name string, paths []string, mode, description string, tags []string) (string, error)
 	// Attach attaches a named context to the session. ragTopK > 0 turns on
 	// semantic top-K retrieval (hybrid when embeddings are configured);
 	// ragTopK <= 0 leaves the mode's default behavior. priority orders
@@ -56,8 +59,21 @@ type ContextAdapter interface {
 	Detach(name string) (string, error)
 	// List describes every available context (attached or not).
 	List() (string, error)
+	// Show renders one context's metadata (mode, size, tags, provenance).
+	Show(name string) (string, error)
+	// Inspect renders a deeper view of one context — its files/chunks, and the
+	// content of a specific chunk when chunk > 0.
+	Inspect(name string, chunk int) (string, error)
+	// Merge combines sources into a new named context.
+	Merge(name string, sources []string, description string) (string, error)
 	// Status describes what is attached to the current session.
 	Status() (string, error)
+	// Export writes a context to a portable file at path.
+	Export(name, path string) (string, error)
+	// Import loads a context from a file at path.
+	Import(path string) (string, error)
+	// Metrics summarizes the context store (counts, sizes, modes).
+	Metrics() (string, error)
 	// Delete permanently removes a context.
 	Delete(name string) (string, error)
 }
@@ -176,6 +192,63 @@ func (*BuiltinContextPlugin) Schema() string {
 				"flags":       []map[string]interface{}{{"name": "name", "type": "string", "required": true, "description": "Context name to delete."}},
 				"examples":    []string{`{"cmd":"delete","args":{"name":"react-docs"}}`},
 			},
+			{
+				"name":        "update",
+				"description": "Re-ingest or modify an existing context. Pass only the fields to change; omitted ones keep their current value.",
+				"flags": []map[string]interface{}{
+					{"name": "name", "type": "string", "required": true, "description": "Context name to update."},
+					{"name": "paths", "type": "array", "description": "New sources to re-ingest (replaces the previous ones). Omit to keep them."},
+					{"name": "mode", "type": "string", "description": "New mode. Omit to keep."},
+					{"name": "description", "type": "string", "description": "New description. Omit to keep."},
+					{"name": "tags", "type": "array", "description": "New tags. Omit to keep."},
+				},
+				"examples": []string{`{"cmd":"update","args":{"name":"react-docs","paths":["/tmp/react-v19.jsonl"]}}`},
+			},
+			{
+				"name":        "show",
+				"description": "Show one context's metadata: mode, size, document/passage count, tags, provenance and timestamps.",
+				"flags":       []map[string]interface{}{{"name": "name", "type": "string", "required": true, "description": "Context name."}},
+				"examples":    []string{`{"cmd":"show","args":{"name":"react-docs"}}`},
+			},
+			{
+				"name":        "inspect",
+				"description": "Deeper view of a context: its documents/chunks, and the content of one chunk when chunk>0.",
+				"flags": []map[string]interface{}{
+					{"name": "name", "type": "string", "required": true, "description": "Context name."},
+					{"name": "chunk", "type": "integer", "description": "1-based chunk number to dump in full. Omit for the overview."},
+				},
+				"examples": []string{`{"cmd":"inspect","args":{"name":"react-docs"}}`, `{"cmd":"inspect","args":{"name":"react-docs","chunk":2}}`},
+			},
+			{
+				"name":        "merge",
+				"description": "Combine two or more existing contexts into a new one (deduplicated).",
+				"flags": []map[string]interface{}{
+					{"name": "name", "type": "string", "required": true, "description": "Name of the merged context."},
+					{"name": "sources", "type": "array", "required": true, "description": "Context names to merge (>= 2)."},
+					{"name": "description", "type": "string", "description": "Optional description."},
+				},
+				"examples": []string{`{"cmd":"merge","args":{"name":"all-docs","sources":["react-docs","next-docs"]}}`},
+			},
+			{
+				"name":        "export",
+				"description": "Write a context to a portable file so it can be shared or backed up.",
+				"flags": []map[string]interface{}{
+					{"name": "name", "type": "string", "required": true, "description": "Context name to export."},
+					{"name": "path", "type": "string", "required": true, "description": "Destination file path."},
+				},
+				"examples": []string{`{"cmd":"export","args":{"name":"react-docs","path":"/tmp/react-docs.json"}}`},
+			},
+			{
+				"name":        "import",
+				"description": "Load a context from a file previously produced by export.",
+				"flags":       []map[string]interface{}{{"name": "path", "type": "string", "required": true, "description": "Source file path."}},
+				"examples":    []string{`{"cmd":"import","args":{"path":"/tmp/react-docs.json"}}`},
+			},
+			{
+				"name":        "metrics",
+				"description": "Summarize the context store: total contexts, how many are attached, total size and a per-mode breakdown.",
+				"examples":    []string{`{"cmd":"metrics"}`},
+			},
 		},
 	}
 	data, _ := json.Marshal(schema)
@@ -215,6 +288,60 @@ func (p *BuiltinContextPlugin) ExecuteWithStream(_ context.Context, args []strin
 		}
 		out, cerr := adapter.Create(name, mode, paths, jsonString(raw, "description", "desc"), jsonBool(raw, "force"))
 		return wrapContextErr("create", out, cerr)
+	case "update":
+		name := strings.TrimSpace(jsonString(raw, "name"))
+		if name == "" {
+			return "", fmt.Errorf("@context update: \"name\" is required")
+		}
+		out, uerr := adapter.Update(name,
+			contextStringSlice(raw, "paths", "path", "source"),
+			jsonString(raw, "mode"),
+			jsonString(raw, "description", "desc"),
+			contextStringSlice(raw, "tags", "tag"))
+		return wrapContextErr("update", out, uerr)
+	case "show":
+		name := strings.TrimSpace(jsonString(raw, "name"))
+		if name == "" {
+			return "", fmt.Errorf("@context show: \"name\" is required")
+		}
+		out, serr := adapter.Show(name)
+		return wrapContextErr("show", out, serr)
+	case "inspect":
+		name := strings.TrimSpace(jsonString(raw, "name"))
+		if name == "" {
+			return "", fmt.Errorf("@context inspect: \"name\" is required")
+		}
+		out, ierr := adapter.Inspect(name, jsonInt(raw, "chunk"))
+		return wrapContextErr("inspect", out, ierr)
+	case "merge":
+		name := strings.TrimSpace(jsonString(raw, "name"))
+		if name == "" {
+			return "", fmt.Errorf("@context merge: \"name\" is required")
+		}
+		sources := contextStringSlice(raw, "sources", "source", "contexts", "from")
+		if len(sources) < 2 {
+			return "", fmt.Errorf("@context merge: \"sources\" needs at least two context names")
+		}
+		out, merr := adapter.Merge(name, sources, jsonString(raw, "description", "desc"))
+		return wrapContextErr("merge", out, merr)
+	case "export":
+		name := strings.TrimSpace(jsonString(raw, "name"))
+		path := strings.TrimSpace(jsonString(raw, "path", "to", "output"))
+		if name == "" || path == "" {
+			return "", fmt.Errorf("@context export: \"name\" and \"path\" are required")
+		}
+		out, eerr := adapter.Export(name, path)
+		return wrapContextErr("export", out, eerr)
+	case "import":
+		path := strings.TrimSpace(jsonString(raw, "path", "from", "source"))
+		if path == "" {
+			return "", fmt.Errorf("@context import: \"path\" is required")
+		}
+		out, ierr := adapter.Import(path)
+		return wrapContextErr("import", out, ierr)
+	case "metrics":
+		out, merr := adapter.Metrics()
+		return wrapContextErr("metrics", out, merr)
 	case "attach":
 		name := strings.TrimSpace(jsonString(raw, "name"))
 		if name == "" {
@@ -243,7 +370,7 @@ func (p *BuiltinContextPlugin) ExecuteWithStream(_ context.Context, args []strin
 		out, derr := adapter.Delete(name)
 		return wrapContextErr("delete", out, derr)
 	default:
-		return "", fmt.Errorf("@context: unknown cmd %q (valid: create|attach|detach|list|status|delete)", cmd)
+		return "", fmt.Errorf("@context: unknown cmd %q (valid: create|update|attach|detach|list|show|inspect|merge|status|export|import|delete|metrics)", cmd)
 	}
 }
 
@@ -304,7 +431,7 @@ func parseContextInvocation(args []string) (string, map[string]json.RawMessage, 
 			cmd = inferContextCmd(inner)
 		}
 		if cmd == "" {
-			return "", nil, fmt.Errorf("missing or unknown cmd (valid: create|attach|detach|list|status|delete)")
+			return "", nil, fmt.Errorf("missing or unknown cmd (valid: create|update|attach|detach|list|show|inspect|merge|status|export|import|delete|metrics)")
 		}
 		return cmd, inner, nil
 	}
@@ -325,14 +452,28 @@ func canonicalContextCmd(s string) string {
 	switch strings.ToLower(strings.TrimSpace(s)) {
 	case "create", "new":
 		return "create"
+	case "update", "edit":
+		return "update"
 	case "attach", "add":
 		return "attach"
 	case "detach", "remove", "rm":
 		return "detach"
 	case "list", "ls":
 		return "list"
-	case "status", "attached", "info":
+	case "show", "info", "view":
+		return "show"
+	case "inspect":
+		return "inspect"
+	case "merge", "join":
+		return "merge"
+	case "status", "attached":
 		return "status"
+	case "export":
+		return "export"
+	case "import":
+		return "import"
+	case "metrics", "stats":
+		return "metrics"
 	case "delete", "del", "destroy":
 		return "delete"
 	default:
