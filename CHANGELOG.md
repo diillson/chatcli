@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.141.1](https://github.com/diillson/chatcli/compare/v1.141.0...v1.141.1) (2026-06-15)
+
+
+### Bug Fixes
+
+* **context:** re-chunk knowledge corpora on update and harden docs-flatten envelope ([#1061](https://github.com/diillson/chatcli/issues/1061)) ([e0c93d2](https://github.com/diillson/chatcli/commit/e0c93d2d044c26f1941432c3de51d66aee04d3e8))
+
 ## [1.141.0](https://github.com/diillson/chatcli/compare/v1.140.0...v1.141.0) (2026-06-15)
 
 
