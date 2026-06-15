@@ -241,10 +241,21 @@ func parseDocsFlattenArgs(args []string) (docsFlattenArgs, error) {
 		if err := json.Unmarshal([]byte(payload), &raw); err != nil {
 			return out, fmt.Errorf("malformed JSON args: %w", err)
 		}
+		// Accept the {"cmd","args"} envelope the model tends to emit (mirroring
+		// @context's shape) as well as flat JSON. Merge the nested args OVER any
+		// sibling top-level keys instead of replacing the map wholesale: a partial
+		// envelope like {"cmd":"flatten","repo":"…","args":{"format":"jsonl"}}
+		// must keep its source key rather than silently drop it (which surfaced as
+		// a misleading "source required"/"mutually exclusive" error and cost the
+		// agent a retry turn). The "cmd" verb is dropped — it is not a flatten flag.
 		if inner, ok := raw["args"]; ok {
 			var innerMap map[string]json.RawMessage
 			if err := json.Unmarshal(inner, &innerMap); err == nil {
-				raw = innerMap
+				delete(raw, "args")
+				delete(raw, "cmd")
+				for k, v := range innerMap {
+					raw[k] = v
+				}
 			}
 		}
 	default:

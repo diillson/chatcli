@@ -216,6 +216,17 @@ func TestParseDocsFlattenArgs(t *testing.T) {
 			t.Errorf("unexpected cfg: %+v", cfg)
 		}
 	})
+	t.Run("partial envelope keeps sibling source key", func(t *testing.T) {
+		// {cmd, repo at top-level, args:{...}} — the nested args must merge over
+		// the siblings, not replace them, so the source key survives.
+		cfg, err := parseDocsFlattenArgs([]string{`{"cmd":"flatten","repo":"https://github.com/org/x","args":{"format":"jsonl","output":"/tmp/x.jsonl"}}`})
+		if err != nil {
+			t.Fatalf("partial envelope must not drop the top-level source: %v", err)
+		}
+		if cfg.Repo != "https://github.com/org/x" || cfg.Format != "jsonl" || cfg.Output != "/tmp/x.jsonl" {
+			t.Errorf("unexpected cfg: %+v", cfg)
+		}
+	})
 	t.Run("argv flags", func(t *testing.T) {
 		cfg, err := parseDocsFlattenArgs([]string{"--root", "./docs", "--format", "yaml", "--include", "a.md,b/**/*.md"})
 		if err != nil {
