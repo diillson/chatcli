@@ -41,6 +41,9 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"regexp"
+	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -72,6 +75,23 @@ type registryTagsArgs struct {
 	Password string
 	Token    string
 	Limit    int
+	// Sort orders the result before it is truncated to Limit:
+	// newest (semver descending) | oldest (semver ascending) | name (lexical) |
+	// pushed (registry push order, newest first). Empty = registry order.
+	Sort string
+	// Last is a shorthand: the N most recent tags (implies Sort=newest, Limit=N).
+	Last int
+}
+
+// fetchBudget is how many tags to pull from the registry before sorting. When
+// a sort is requested we must read past Limit — the newest/highest tags may sit
+// at the END of a push-ordered listing — so we pull up to the hard cap and then
+// sort + truncate. Without a sort, Limit is the stop and the first page wins.
+func (c registryTagsArgs) fetchBudget() int {
+	if c.Sort != "" {
+		return registryTagsHardCap
+	}
+	return c.Limit
 }
 
 // BuiltinRegistryTagsPlugin is the @registry-tags tool.
@@ -117,6 +137,10 @@ Flags (flat JSON or {"cmd":"tags","args":{...}} envelope):
   password  registry password / token paired with username
   token     pre-issued Bearer token (GHCR PAT, GCR OAuth, Harbor robot token)
   limit     max tags to return (default 200, ceiling 1000)
+  sort      newest | oldest | name | pushed — order before truncating. Use
+            newest/last to surface recent tags on registries that list
+            oldest-first (e.g. GHCR); the fetch reads all pages, then sorts.
+  last      shorthand: the N most recent tags (sort=newest, limit=N)
 
 Credentials are optional: when omitted, ~/.docker/config.json is consulted,
 then REGISTRY_USERNAME / REGISTRY_PASSWORD / REGISTRY_TOKEN. Public images need
@@ -148,6 +172,8 @@ func (*BuiltinRegistryTagsPlugin) Schema() string {
 					{"name": "password", "type": "string", "description": "Registry password/token paired with username."},
 					{"name": "token", "type": "string", "description": "Pre-issued Bearer token (GHCR PAT, GCR OAuth, Harbor robot token)."},
 					{"name": "limit", "type": "integer", "description": "Max tags to return. Default 200, ceiling 1000."},
+					{"name": "sort", "type": "string", "description": "Order before truncating: newest (highest version first) | oldest | name | pushed (most recently pushed first, OCI). Omit for registry order. Needed to find the latest tags in registries that list oldest-first (e.g. GHCR)."},
+					{"name": "last", "type": "integer", "description": "Shorthand: the N most recent tags (implies sort=newest, limit=N)."},
 				},
 				"examples": []string{
 					`{"image":"redis"}`,
@@ -201,6 +227,9 @@ func (p *BuiltinRegistryTagsPlugin) ExecuteWithStream(ctx context.Context, args 
 	host := registryHost(registry)
 	var b strings.Builder
 	fmt.Fprintf(&b, "%s (%s) — %d tag(s)", image, host, len(tags))
+	if cfg.Sort != "" {
+		fmt.Fprintf(&b, ", sorted by %s", cfg.Sort)
+	}
 	if truncated {
 		fmt.Fprintf(&b, ", %s", i18n.T("plugins.registrytags.truncated", cfg.Limit))
 	}
@@ -242,9 +271,23 @@ func parseRegistryTagsArgs(args []string) (registryTagsArgs, error) {
 	if v := jsonInt(raw, "limit", "max"); v > 0 {
 		out.Limit = v
 	}
+	out.Sort = strings.ToLower(strings.TrimSpace(jsonString(raw, "sort", "order")))
+	out.Last = jsonInt(raw, "last", "recent")
+	// --last N is sugar: the N most recent tags = sort by newest, limit N.
+	if out.Last > 0 {
+		if out.Sort == "" {
+			out.Sort = "newest"
+		}
+		out.Limit = out.Last
+	}
 
 	if out.Image == "" {
 		return out, fmt.Errorf(`"image" is required (e.g. {"image":"redis"})`)
+	}
+	switch out.Sort {
+	case "", "newest", "oldest", "name", "pushed":
+	default:
+		return out, fmt.Errorf("invalid sort %q (valid: newest|oldest|name|pushed)", out.Sort)
 	}
 	if out.Limit > registryTagsHardCap {
 		out.Limit = registryTagsHardCap
@@ -348,10 +391,128 @@ func isDockerHub(registry string) bool {
 // fetchRegistryTags lists tags for image on registry, returning the (capped)
 // tag slice and whether the listing was truncated at the limit.
 func fetchRegistryTags(ctx context.Context, registry, image string, cfg registryTagsArgs) ([]string, bool, error) {
-	if isDockerHub(registry) {
-		return fetchDockerHubTags(ctx, registry, image, cfg)
+	var (
+		tags      []string
+		truncated bool
+		err       error
+	)
+	hub := isDockerHub(registry)
+	if hub {
+		tags, truncated, err = fetchDockerHubTags(ctx, registry, image, cfg)
+	} else {
+		tags, truncated, err = fetchOCITags(ctx, registry, image, cfg)
 	}
-	return fetchOCITags(ctx, registry, image, cfg)
+	if err != nil {
+		return nil, false, err
+	}
+
+	if cfg.Sort != "" {
+		sortTags(tags, cfg.Sort)
+		if len(tags) > cfg.Limit {
+			tags = tags[:cfg.Limit]
+			truncated = true
+		}
+	}
+	return tags, truncated, nil
+}
+
+// sortTags orders tags in place according to mode. "newest"/"oldest" use a
+// semver-aware comparator (non-semver tags rank below versioned ones, then
+// lexically); "name" is lexical ascending; "pushed" reverses the registry's
+// push order so the most recently pushed tags come first.
+func sortTags(tags []string, mode string) {
+	switch mode {
+	case "name":
+		sort.Strings(tags)
+	case "pushed":
+		for i, j := 0, len(tags)-1; i < j; i, j = i+1, j-1 {
+			tags[i], tags[j] = tags[j], tags[i]
+		}
+	case "oldest":
+		sort.SliceStable(tags, func(i, j int) bool { return compareTagVersions(tags[i], tags[j]) < 0 })
+	case "newest":
+		sort.SliceStable(tags, func(i, j int) bool { return compareTagVersions(tags[i], tags[j]) > 0 })
+	}
+}
+
+// semverTag is a parsed, comparable version tag.
+type semverTag struct {
+	major, minor, patch int
+	pre                 string
+}
+
+// semverTagRe matches an optional v-prefix, major.minor, optional .patch and an
+// optional -pre/+build suffix. Lenient by design — registry tags are messy.
+var semverTagRe = regexp.MustCompile(`^[vV]?(\d+)\.(\d+)(?:\.(\d+))?(?:[-+](.+))?$`)
+
+// parseSemverish parses a tag into a semverTag, reporting whether it looked like
+// a version at all.
+func parseSemverish(tag string) (semverTag, bool) {
+	m := semverTagRe.FindStringSubmatch(strings.TrimSpace(tag))
+	if m == nil {
+		return semverTag{}, false
+	}
+	maj, _ := strconv.Atoi(m[1])
+	minr, _ := strconv.Atoi(m[2])
+	patch := 0
+	if m[3] != "" {
+		patch, _ = strconv.Atoi(m[3])
+	}
+	return semverTag{maj, minr, patch, m[4]}, true
+}
+
+// compareTagVersions returns -1/0/1 in ascending version order. Versioned tags
+// outrank non-versioned ones; a release outranks its pre-release; non-versioned
+// tags fall back to lexical comparison.
+func compareTagVersions(a, b string) int {
+	av, aok := parseSemverish(a)
+	bv, bok := parseSemverish(b)
+	switch {
+	case aok && bok:
+		return av.compare(bv)
+	case aok:
+		return 1
+	case bok:
+		return -1
+	default:
+		return strings.Compare(a, b)
+	}
+}
+
+// compare orders two semverTags ascending.
+func (v semverTag) compare(o semverTag) int {
+	if c := cmpInt(v.major, o.major); c != 0 {
+		return c
+	}
+	if c := cmpInt(v.minor, o.minor); c != 0 {
+		return c
+	}
+	if c := cmpInt(v.patch, o.patch); c != 0 {
+		return c
+	}
+	// Equal numerics: a release (no pre-release) outranks a pre-release.
+	switch {
+	case v.pre == "" && o.pre == "":
+		return 0
+	case v.pre == "":
+		return 1
+	case o.pre == "":
+		return -1
+	default:
+		return strings.Compare(v.pre, o.pre)
+	}
+}
+
+// cmpInt is the three-way comparison for ints.
+func cmpInt(a, b int) int {
+	switch {
+	case a < b:
+		return -1
+	case a > b:
+		return 1
+	default:
+		return 0
+	}
 }
 
 // fetchDockerHubTags walks the Docker Hub repository tags API, following the
@@ -362,6 +523,7 @@ func fetchDockerHubTags(ctx context.Context, registry, image string, cfg registr
 		repo = "library/" + repo // official images live under library/
 	}
 	next := fmt.Sprintf("%s/v2/repositories/%s/tags/?page_size=100", registry, repo)
+	budget := cfg.fetchBudget()
 
 	var tags []string
 	for page := 0; next != "" && page < registryTagsMaxPages; page++ {
@@ -380,8 +542,8 @@ func fetchDockerHubTags(ctx context.Context, registry, image string, cfg registr
 		}
 		for _, r := range parsed.Results {
 			tags = append(tags, r.Name)
-			if len(tags) >= cfg.Limit {
-				return tags[:cfg.Limit], true, nil
+			if len(tags) >= budget {
+				return tags[:budget], true, nil
 			}
 		}
 		next = parsed.Next
@@ -398,6 +560,7 @@ func fetchOCITags(ctx context.Context, registry, image string, cfg registryTagsA
 	}
 
 	next := fmt.Sprintf("%s/v2/%s/tags/list?n=100", registry, image)
+	budget := cfg.fetchBudget()
 	var tags []string
 	for page := 0; next != "" && page < registryTagsMaxPages; page++ {
 		auth := bearer
@@ -435,8 +598,8 @@ func fetchOCITags(ctx context.Context, registry, image string, cfg registryTagsA
 		}
 		for _, t := range parsed.Tags {
 			tags = append(tags, t)
-			if len(tags) >= cfg.Limit {
-				return tags[:cfg.Limit], true, nil
+			if len(tags) >= budget {
+				return tags[:budget], true, nil
 			}
 		}
 		next = nextLinkURL(registry, header.Get("Link"))

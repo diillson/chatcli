@@ -85,6 +85,105 @@ func TestParseRegistryTagsArgs(t *testing.T) {
 	})
 }
 
+func TestParseRegistryTagsArgs_Sort(t *testing.T) {
+	t.Run("sort newest", func(t *testing.T) {
+		cfg, err := parseRegistryTagsArgs([]string{`{"image":"x","sort":"newest"}`})
+		if err != nil || cfg.Sort != "newest" {
+			t.Fatalf("got %+v err %v", cfg, err)
+		}
+	})
+	t.Run("last is sugar for newest+limit", func(t *testing.T) {
+		cfg, err := parseRegistryTagsArgs([]string{`{"image":"x","last":10}`})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if cfg.Sort != "newest" || cfg.Limit != 10 {
+			t.Fatalf("got sort=%q limit=%d", cfg.Sort, cfg.Limit)
+		}
+	})
+	t.Run("invalid sort errors", func(t *testing.T) {
+		if _, err := parseRegistryTagsArgs([]string{`{"image":"x","sort":"bogus"}`}); err == nil {
+			t.Fatal("expected error for invalid sort")
+		}
+	})
+	t.Run("fetchBudget", func(t *testing.T) {
+		if (registryTagsArgs{Limit: 5}).fetchBudget() != 5 {
+			t.Error("no sort → budget is limit")
+		}
+		if (registryTagsArgs{Limit: 5, Sort: "newest"}).fetchBudget() != registryTagsHardCap {
+			t.Error("sort → budget is hard cap")
+		}
+	})
+}
+
+func TestSortTags(t *testing.T) {
+	indexOf := func(s []string, v string) int {
+		for i, x := range s {
+			if x == v {
+				return i
+			}
+		}
+		return -1
+	}
+
+	newest := []string{"v1.0.0", "v2.3.0", "v2.3.1", "latest", "v1.2.0", "v2.3.1-rc1"}
+	sortTags(newest, "newest")
+	if newest[0] != "v2.3.1" {
+		t.Errorf("newest[0] = %q, want v2.3.1 (highest version)", newest[0])
+	}
+	if newest[len(newest)-1] != "latest" {
+		t.Errorf("non-semver tag must sort last for newest, got %v", newest)
+	}
+	if indexOf(newest, "v2.3.1") > indexOf(newest, "v2.3.1-rc1") {
+		t.Errorf("a release must outrank its pre-release: %v", newest)
+	}
+
+	oldest := []string{"v2.0.0", "v1.0.0", "v1.5.0"}
+	sortTags(oldest, "oldest")
+	if strings.Join(oldest, ",") != "v1.0.0,v1.5.0,v2.0.0" {
+		t.Errorf("oldest = %v", oldest)
+	}
+
+	name := []string{"b", "a", "c"}
+	sortTags(name, "name")
+	if strings.Join(name, ",") != "a,b,c" {
+		t.Errorf("name = %v", name)
+	}
+
+	pushed := []string{"old", "mid", "new"}
+	sortTags(pushed, "pushed")
+	if strings.Join(pushed, ",") != "new,mid,old" {
+		t.Errorf("pushed = %v", pushed)
+	}
+}
+
+// TestFetchRegistryTags_SortPaginatesToEnd proves the gap fix: the newest tag
+// sits on a LATER page (push order), and would be cut by the old first-N
+// behavior; with sort=newest the fetch reads to the end, sorts, then truncates.
+func TestFetchRegistryTags_SortPaginatesToEnd(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Get("last") == "" {
+			w.Header().Set("Link", `</v2/team/app/tags/list?n=100&last=p1>; rel="next"`)
+			_, _ = w.Write([]byte(`{"tags":["v1.0.0","v1.1.0"]}`)) // oldest first
+			return
+		}
+		_, _ = w.Write([]byte(`{"tags":["v2.0.0","v1.2.0"]}`)) // newest on the last page
+	}))
+	defer server.Close()
+
+	cfg := registryTagsArgs{Limit: 2, Sort: "newest"}
+	tags, truncated, err := fetchRegistryTags(context.Background(), server.URL, "team/app", cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(tags, ",") != "v2.0.0,v1.2.0" {
+		t.Fatalf("tags = %v, want [v2.0.0 v1.2.0] (newest after reading all pages)", tags)
+	}
+	if !truncated {
+		t.Error("truncated should be true when sort cut to the limit")
+	}
+}
+
 func TestParseBearerChallenge(t *testing.T) {
 	realm, params := parseBearerChallenge(`Bearer realm="https://ghcr.io/token",service="ghcr.io",scope="repository:cli/cli:pull"`)
 	if realm != "https://ghcr.io/token" {
