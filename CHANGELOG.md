@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.142.0](https://github.com/diillson/chatcli/compare/v1.141.1...v1.142.0) (2026-06-17)
+
+
+### Features
+
+* **docs-flatten:** ingest code and infra repos into knowledge bases ([#1078](https://github.com/diillson/chatcli/issues/1078)) ([08d81ce](https://github.com/diillson/chatcli/commit/08d81ceac1c8130e972add76a0e604a34fa76052))
+
+
+### Bug Fixes
+
+* **coder:** recover stdin after Ctrl+C at a security confirmation ([#1077](https://github.com/diillson/chatcli/issues/1077)) ([98ea5ae](https://github.com/diillson/chatcli/commit/98ea5ae1f56dc49aead79ab3ce0fde7360f264b6))
+
 ## [1.141.1](https://github.com/diillson/chatcli/compare/v1.141.0...v1.141.1) (2026-06-15)
 
 
