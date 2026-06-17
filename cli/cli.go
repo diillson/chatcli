@@ -1197,26 +1197,6 @@ func (cli *ChatCLI) restoreTerminal() {
 	fmt.Print("\033[2J\033[H")
 }
 
-// normalizeTerminalForREPL restores a sane terminal line discipline and drains
-// orphan stdin bytes after an interrupted agent/coder turn, WITHOUT clearing the
-// screen (unlike restoreTerminal, which is for full mode switches and wipes the
-// scrollback). A Ctrl+C can land mid-read at a cooked-mode security prompt,
-// leaving the TTY's line discipline inconsistent and stray type-ahead in its
-// buffer; both corrupt the next go-prompt REPL line — the "/coder enters but
-// nothing fires" failure. Safe only between an agent op returning and the next
-// prompt, where the centralized stdin reader is already stopped and go-prompt is
-// not yet running, so nothing else owns the TTY.
-func (cli *ChatCLI) normalizeTerminalForREPL() {
-	if runtime.GOOS != "windows" {
-		cmd := exec.Command(sttyPath, "sane")
-		cmd.Stdin = os.Stdin
-		if err := cmd.Run(); err != nil {
-			cli.logger.Warn("falha ao normalizar o terminal com 'stty sane'", zap.Error(err))
-		}
-	}
-	drainStdin()
-}
-
 // Helper para executar lógica do agente com cancelamento via Ctrl+C
 func (cli *ChatCLI) runWithCancellation(parent context.Context, taskName string, fn func(context.Context) error) {
 	// Cria contexto cancelável derivado do contexto pai
@@ -1254,17 +1234,6 @@ func (cli *ChatCLI) runWithCancellation(parent context.Context, taskName string,
 
 	// Executa a função do agente
 	err := fn(ctx)
-
-	// When the operation was cancelled (Ctrl+C), the interrupt may have landed
-	// mid-read at a cooked-mode security prompt — leaving the TTY's line
-	// discipline inconsistent and stray type-ahead in its buffer. By now the
-	// centralized stdin reader is stopped (the ReAct loop's deferred
-	// stopStdinReader ran as fn returned) and go-prompt is not yet running, so
-	// nothing owns the TTY: normalize it and discard the orphan bytes before
-	// control returns to the REPL, so the next /coder or /agent command fires.
-	if ctx.Err() != nil {
-		cli.normalizeTerminalForREPL()
-	}
 
 	// Tratamento de erro específico para cancelamento
 	if err != nil {
