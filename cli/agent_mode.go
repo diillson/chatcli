@@ -95,6 +95,21 @@ type AgentMode struct {
 	stdinWg      sync.WaitGroup
 	multilineBuf MultilineBuffer // ``` delimited multiline input
 
+	// cancelSignal is the Done() channel of the in-flight Run/ReAct loop's
+	// context. Blocking stdin reads (security confirmations, batch prompts)
+	// select on it so a Ctrl+C aborts them the instant the operation is
+	// cancelled — instead of hanging on the channel receive until the user
+	// presses Enter. That hang previously left the terminal in cooked mode
+	// and the centralized reader half-torn-down, which corrupted the next
+	// REPL prompt (the "/coder enters but nothing fires" bug). We store only
+	// the cancellation channel, not the context.Context: the reader needs the
+	// signal, nothing else, and a nil channel selects as "never" — exactly the
+	// "no operation in flight, nothing to cancel" semantics, with no fallback
+	// needed. Guarded by cancelSignalMu because the scheduler bridge inspects
+	// this instance from another goroutine while Run swaps the signal.
+	cancelSignal   <-chan struct{}
+	cancelSignalMu sync.RWMutex
+
 	// Skill hints captured at the start of Run() from auto-activated or
 	// manually invoked skills. Applied to each LLM turn via ctx for the
 	// duration of the agent loop. Cleared when the loop exits.
@@ -146,6 +161,38 @@ func splitStdinChunk(chunk []byte, lineBuf *strings.Builder) []string {
 		}
 	}
 	return lines
+}
+
+// drainStdin discards bytes left unread in the terminal input buffer. After an
+// interrupted agent/coder turn — especially one cancelled at a cooked-mode
+// security prompt — the TTY may hold orphan bytes: the stray newline that the
+// user pressed while Ctrl+C was racing the read, or type-ahead queued for the
+// now-dead turn. Left in place, those bytes get consumed by the next go-prompt
+// REPL line, so the following /coder or /agent command "doesn't fire".
+//
+// Must only be called when no stdin reader goroutine and no go-prompt own the
+// TTY (i.e. between an agent op returning and the next prompt) — otherwise it
+// races them for input. The poll(0) gate is non-blocking and the iteration cap
+// bounds it to 32 KiB; the whole drain runs under a short deadline so a Windows
+// WaitForSingleObject false positive (which can leave Read blocking) can never
+// hang the REPL.
+func drainStdin() {
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		buf := make([]byte, 512)
+		for i := 0; i < 64 && stdinPollReady(0); i++ {
+			if _, err := os.Stdin.Read(buf); err != nil {
+				return
+			}
+		}
+	}()
+	select {
+	case <-done:
+	case <-time.After(200 * time.Millisecond):
+		// Stuck on a blocking Read (Windows false positive). Don't wait —
+		// the orphan read is discarded when the goroutine eventually wakes.
+	}
 }
 
 // startStdinReader starts a goroutine that reads lines from stdin and sends
@@ -304,15 +351,56 @@ func (a *AgentMode) handleAgentAsk(ctx context.Context, argsJSON string) (string
 // human or stdin. It also starts with "s", satisfying the lighter [s/y] prompts.
 const unattendedConfirmAnswer = "sim, quero executar conscientemente"
 
-// readLine reads a single line from the centralized stdin reader.
-// Falls back to direct stdin read if the reader is not active. In unattended
-// mode there is no human/stdin, so every confirmation auto-approves.
+// setCancelSignal publishes the active loop's cancellation channel so blocking
+// stdin reads abort when the operation is interrupted. Pass nil to detach it
+// when the loop exits; a nil channel selects as "never", so reads simply block
+// on input again — the correct "nothing in flight to cancel" behavior.
+func (a *AgentMode) setCancelSignal(done <-chan struct{}) {
+	a.cancelSignalMu.Lock()
+	a.cancelSignal = done
+	a.cancelSignalMu.Unlock()
+}
+
+// currentCancelSignal returns the active loop's cancellation channel, or nil
+// when no Run is executing (e.g. unit tests that call readLine directly).
+func (a *AgentMode) currentCancelSignal() <-chan struct{} {
+	a.cancelSignalMu.RLock()
+	defer a.cancelSignalMu.RUnlock()
+	return a.cancelSignal
+}
+
+// readLine reads a single line from the centralized stdin reader, aborting on
+// cancellation of the active operation (Ctrl+C). See readLineSignal.
 func (a *AgentMode) readLine() string {
+	return a.readLineSignal(a.currentCancelSignal())
+}
+
+// readLineSignal reads a single line from the centralized stdin reader and
+// returns it, or returns "" the moment the cancel channel fires. Returning ""
+// on cancellation is the safe default for every interactive prompt that funnels
+// through here: an empty answer never matches an affirmative confirmation
+// phrase, so a Ctrl+C at a dangerous-command guard declines the action instead
+// of hanging on the channel receive until the user presses Enter — the hang
+// that left the terminal and reader in a broken state for the next REPL turn.
+//
+// A nil cancel channel never fires (select treats it as "never"), so callers
+// with no operation in flight simply block on input as before.
+//
+// In unattended mode there is no human/stdin, so every confirmation
+// auto-approves. When the centralized reader is inactive (tests, non-TTY) it
+// falls back to a direct blocking read; that path has no concurrent operation
+// to cancel, so it is intentionally not cancellation-aware.
+func (a *AgentMode) readLineSignal(cancel <-chan struct{}) string {
 	if a.cli != nil && a.cli.unattended {
 		return unattendedConfirmAnswer
 	}
 	if a.stdinLines != nil {
-		return <-a.stdinLines
+		select {
+		case line := <-a.stdinLines:
+			return line
+		case <-cancel:
+			return ""
+		}
 	}
 	// Fallback: direct stdin read
 	reader := bufio.NewReader(os.Stdin)
@@ -1280,6 +1368,15 @@ func (a *AgentMode) getToolContextString() string {
 //
 //nolint:gocyclo // legacy main loop; split tracked separately.
 func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) error {
+	// Publish the loop's cancel channel so blocking confirmation reads abort on
+	// Ctrl+C instead of hanging until Enter. Save/restore (not clear-to-nil)
+	// because this loop is re-entrant — handleCommandBlocks menu actions and
+	// park resume call back into it — so an inner turn must hand the outer
+	// turn's signal back when it returns, never leave a later read unguarded.
+	prevCancel := a.currentCancelSignal()
+	a.setCancelSignal(ctx.Done())
+	defer a.setCancelSignal(prevCancel)
+
 	// Start centralized stdin reader for type-ahead queue support
 	a.startStdinReader()
 	defer a.stopStdinReader()
