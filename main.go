@@ -72,26 +72,42 @@ func applyStackSpotFlags(llmManager manager.LLMManager, targetProvider string, o
 	}
 }
 
-// installInterruptHandler wires SIGINT so an in-flight operation is canceled
-// first, and otherwise the root context is canceled for a clean shutdown.
-func installInterruptHandler(chatCLI *cli.ChatCLI, cancel context.CancelFunc, logger *zap.Logger) {
+// installSignalHandlers wires process signals to the correct cancellation
+// scope. It is the SINGLE handler for SIGINT and SIGTERM — having two
+// independent handlers is exactly what caused the coder/agent re-entry bug
+// (see below).
+//
+//   - SIGTERM is always a shutdown request → cancel the root context.
+//   - SIGINT (Ctrl+C) cancels the in-flight operation when one is running
+//     (the interactive "interrupt this, keep the session" semantics), and only
+//     shuts the session down when idle at the prompt.
+//
+// CRITICAL: a SIGINT delivered WHILE a coder/agent operation runs must NOT
+// cancel the root context. During a security confirmation the TTY is in cooked
+// mode, so Ctrl+C arrives as a real signal (not a go-prompt key). If that
+// cancels the root context, every later coder/agent run — which derives its
+// context from root — is born already-cancelled and "doesn't fire", while chat
+// keeps working on a fresh background context. The only recovery was restarting
+// the process. Cancelling just the operation is the correct response; the root
+// context stays alive for the rest of the session.
+//
+// On a clean shutdown the root cancel lets chatCLI.Start() return so the
+// deferred cli.cleanup() runs (stopping MCP child processes, draining the
+// scheduler, flushing history) — os.Exit() would skip every defer and orphan
+// the npx-spawned MCP servers.
+func installSignalHandlers(isExecuting func() bool, cancelOperation, cancelRoot func(), logger *zap.Logger) {
 	sigChan := make(chan os.Signal, 1)
-	signal.Notify(sigChan, syscall.SIGINT)
+	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
 
 	go func() {
-		for range sigChan {
-			if chatCLI.IsExecuting() {
-				logger.Info("Cancelando operação em andamento")
-				chatCLI.CancelOperation()
-			} else {
-				// Cancel the root context so chatCLI.Start() returns
-				// and the deferred cli.cleanup() runs — that's what
-				// stops MCP child processes, drains the scheduler and
-				// flushes history. os.Exit() would skip every defer
-				// and orphan the npx-spawned MCP servers.
-				logger.Info("Encerrando aplicação")
-				cancel()
+		for sig := range sigChan {
+			if sig == syscall.SIGINT && isExecuting() {
+				logger.Info("Cancelando operação em andamento (SIGINT)")
+				cancelOperation()
+				continue
 			}
+			logger.Info("Encerrando aplicação", zap.String("signal", sig.String()))
+			cancelRoot()
 		}
 	}()
 }
@@ -205,25 +221,13 @@ func main() {
 		os.Exit(1)
 	}
 
-	installInterruptHandler(chatCLI, cancel, logger)
+	installSignalHandlers(chatCLI.IsExecuting, chatCLI.CancelOperation, cancel, logger)
 
 	if chatCLI.HandleOneShotOrFatal(ctx, opts) {
 		return
 	}
 
-	handleGracefulShutdown(cancel, logger)
-
 	chatCLI.Start(ctx)
-}
-
-func handleGracefulShutdown(cancelFunc context.CancelFunc, logger *zap.Logger) {
-	signals := make(chan os.Signal, 1)
-	signal.Notify(signals, os.Interrupt, syscall.SIGTERM)
-	go func() {
-		sig := <-signals
-		logger.Info("Recebido sinal para finalizar a aplicação", zap.String("sinal", sig.String()))
-		cancelFunc()
-	}()
 }
 
 // runSubcommand handles the 'server' and 'connect' subcommands.
