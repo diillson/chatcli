@@ -1,0 +1,89 @@
+name: Operator go.sum sync
+
+# When Dependabot bumps a dependency in the ROOT module that the operator
+# module also consumes (via `replace github.com/diillson/chatcli => ../`),
+# operator/go.sum goes stale and the operator stops building. That surfaces as
+# "Go Vulnerability Check" and "Trivy — Operator Image" failures with the
+# message `go: updates to go.mod needed; to update it: go mod tidy`.
+#
+# Dependabot cannot tidy a sibling module, so this workflow runs
+# `go mod tidy` inside operator/ on Dependabot PRs and commits the result back.
+#
+# PREREQUISITE (one-time): store a token with `contents: write` on this repo as
+# a *Dependabot* secret named DEPENDABOT_TIDY_TOKEN
+# (Settings > Secrets and variables > Dependabot > New repository secret).
+# Why a dedicated token:
+#   * The default GITHUB_TOKEN is read-only on Dependabot-triggered runs, so it
+#     cannot push back.
+#   * Regular Actions secrets are NOT exposed to Dependabot events — the secret
+#     must live under the Dependabot scope.
+#   * Pushing with this token re-triggers CI as the token owner (not
+#     github-actions[bot]), so the required "Lint, Test and Generate Coverage"
+#     check runs normally instead of being skipped by 1-ci.yml's actor guard.
+# Without the secret the job is a no-op (stays green), so it is safe to merge
+# this workflow before the secret is created.
+
+on:
+  pull_request:
+    branches: [main, develop]
+    paths:
+      - 'go.mod'
+      - 'go.sum'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: operator-gomod-sync-${{ github.head_ref }}
+  cancel-in-progress: true
+
+jobs:
+  sync:
+    name: Sync operator go.sum
+    # Only Dependabot PRs. The commit pushed below re-triggers this workflow
+    # with github.actor = token owner (not dependabot[bot]), so it does not loop.
+    if: github.actor == 'dependabot[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check sync token is configured
+        id: token
+        env:
+          TIDY_TOKEN: ${{ secrets.DEPENDABOT_TIDY_TOKEN }}
+        run: |
+          if [ -n "$TIDY_TOKEN" ]; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::DEPENDABOT_TIDY_TOKEN not set — skipping operator go.sum auto-sync. Add a contents:write token as a Dependabot secret to enable."
+          fi
+
+      - name: Checkout PR head
+        if: steps.token.outputs.present == 'true'
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.head_ref }}
+          token: ${{ secrets.DEPENDABOT_TIDY_TOKEN }}
+
+      - name: Set up Go
+        if: steps.token.outputs.present == 'true'
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+
+      - name: Tidy operator module
+        if: steps.token.outputs.present == 'true'
+        working-directory: operator
+        run: go mod tidy
+
+      - name: Commit and push if operator go.sum changed
+        if: steps.token.outputs.present == 'true'
+        run: |
+          if git diff --quiet -- operator/go.mod operator/go.sum; then
+            echo "operator go.sum already in sync — nothing to do"
+            exit 0
+          fi
+          git config user.name "dependabot[bot]"
+          git config user.email "49699333+dependabot[bot]@users.noreply.github.com"
+          git add operator/go.mod operator/go.sum
+          git commit -m "chore(deps): sync operator go.sum after root bump"
+          git push
