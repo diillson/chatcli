@@ -12,6 +12,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/zap"
 )
 
 // TestReadLineSignal_ReturnsLineWhenAvailable pins the happy path: a line
@@ -166,5 +167,58 @@ func TestDrainStdin_DoesNotHang(t *testing.T) {
 	case <-done:
 	case <-time.After(1 * time.Second):
 		t.Fatal("drainStdin exceeded its safety deadline and blocked the REPL")
+	}
+}
+
+// TestRunWithCancellation_CancelledPathNormalizes drives the wrapper with an
+// already-cancelled parent context: the wrapped function returns cleanly, but
+// because the operation context is cancelled the wrapper must run the terminal
+// recovery path before returning to the REPL. Asserts the call completes within
+// a deadline (the recovery never hangs) and that the wrapped fn observed a
+// cancelled context.
+func TestRunWithCancellation_CancelledPathNormalizes(t *testing.T) {
+	cli := &ChatCLI{logger: zap.NewNop()}
+
+	parent, cancel := context.WithCancel(context.Background())
+	cancel() // operation is interrupted before the work even starts
+
+	var sawCancelled bool
+	done := make(chan struct{})
+	go func() {
+		cli.runWithCancellation(parent, "test", func(ctx context.Context) error {
+			sawCancelled = ctx.Err() != nil
+			return nil
+		})
+		close(done)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(3 * time.Second):
+		t.Fatal("runWithCancellation hung on the cancelled recovery path")
+	}
+
+	assert.True(t, sawCancelled, "wrapped fn should see the cancelled operation context")
+	assert.False(t, cli.isExecuting.Load(), "isExecuting must be reset on return")
+}
+
+// TestNormalizeTerminalForREPL_Completes exercises the post-cancel terminal
+// recovery: it must run the line-discipline reset and stdin drain and return
+// without panicking or hanging, even when stdin is not a TTY (CI), where the
+// stty reset errors and is logged rather than fatal. Guarded by a deadline so a
+// regression that blocks the REPL fails loudly instead of stalling the suite.
+func TestNormalizeTerminalForREPL_Completes(t *testing.T) {
+	cli := &ChatCLI{logger: zap.NewNop()}
+
+	done := make(chan struct{})
+	go func() {
+		cli.normalizeTerminalForREPL()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("normalizeTerminalForREPL blocked — terminal recovery must never stall the REPL")
 	}
 }
