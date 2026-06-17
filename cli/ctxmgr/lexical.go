@@ -108,19 +108,62 @@ func (l *lexicalIndex) search(query string, k int) []lexHit {
 	return hits
 }
 
-// tokenizeLexical lowercases and splits on non-alphanumeric runes, dropping
+// tokenizeLexical splits text on non-alphanumeric runes and lowercases, dropping
 // one-rune tokens (noise in both prose and code). No stemming and no stopword
 // list: BM25's idf already discounts ubiquitous terms, and staying
 // language-neutral keeps pt-BR and English corpora equally searchable.
+//
+// Code identifiers get extra treatment: snake_case and kebab-case already split
+// on their separators, but camelCase / PascalCase would otherwise collapse into
+// one opaque token (getUserName → getusername). Each field is therefore ALSO
+// split on case boundaries, and both the whole field and its sub-words are
+// emitted — so a query for "eks", "user" or the exact identifier all hit. The
+// split is case-based only (no letter↔digit boundary) so tokens like "s3" or
+// "oauth2" survive intact.
 func tokenizeLexical(text string) []string {
-	fields := strings.FieldsFunc(strings.ToLower(text), func(r rune) bool {
+	fields := strings.FieldsFunc(text, func(r rune) bool {
 		return !unicode.IsLetter(r) && !unicode.IsDigit(r)
 	})
-	out := fields[:0]
+	out := make([]string, 0, len(fields))
 	for _, f := range fields {
-		if len(f) > 1 {
-			out = append(out, f)
+		if full := strings.ToLower(f); len(full) > 1 {
+			out = append(out, full)
+		}
+		parts := splitCamelCase(f)
+		if len(parts) < 2 {
+			continue // no case boundary — the whole field already covers it
+		}
+		for _, p := range parts {
+			if lp := strings.ToLower(p); len(lp) > 1 {
+				out = append(out, lp)
+			}
 		}
 	}
 	return out
+}
+
+// splitCamelCase breaks an identifier at case boundaries: a lower→upper
+// transition (getUser → get|User) and the tail of an acronym run that precedes
+// a word (HTTPServer → HTTP|Server). Returns the input unchanged when there is
+// no boundary. Operates on the original-case string; the caller lowercases.
+func splitCamelCase(s string) []string {
+	runes := []rune(s)
+	if len(runes) < 2 {
+		return []string{s}
+	}
+	var parts []string
+	start := 0
+	for i := 1; i < len(runes); i++ {
+		prev, cur := runes[i-1], runes[i]
+		boundary := unicode.IsLower(prev) && unicode.IsUpper(cur)
+		if unicode.IsUpper(prev) && unicode.IsUpper(cur) &&
+			i+1 < len(runes) && unicode.IsLower(runes[i+1]) {
+			boundary = true
+		}
+		if boundary {
+			parts = append(parts, string(runes[start:i]))
+			start = i
+		}
+	}
+	return append(parts, string(runes[start:]))
 }

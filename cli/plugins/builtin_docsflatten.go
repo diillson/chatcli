@@ -68,10 +68,15 @@ type docsFlattenArgs struct {
 	Exclude          []string
 	StripFrontMatter bool
 	Output           string
+	// Kind selects what gets ingested and how it is chunked: "docs" (default —
+	// Markdown only, legacy behavior preserved), "code" (source/Terraform/
+	// YAML/shell with structure-aware chunking), or "auto" (per-file: Markdown
+	// stays Markdown, recognized code/config files chunk structurally, other
+	// text windows). Code ingestion is opt-in so existing docs workflows never
+	// silently start pulling in stray source/config files.
+	Kind    string
+	MaxSize int // skip files larger than this many bytes (0 = default 1 MiB)
 }
-
-// docsFlattenExts are the Markdown extensions the walker accepts.
-var docsFlattenExts = map[string]bool{".md": true, ".mdx": true, ".markdown": true}
 
 // Front-matter title extractors. Quoted and unquoted values are both
 // accepted — Hugo/Docusaurus corpora commonly use `title: Getting Started`
@@ -101,10 +106,15 @@ func (*BuiltinDocsFlattenPlugin) Usage() string {
 	return `<tool_call name="@docs-flatten" args='{"root":"./docs","format":"jsonl","output":"/tmp/corpus.jsonl"}' />
 
 Flags (flat JSON or {"cmd":"flatten","args":{...}} envelope):
-  root      local directory with Markdown docs (one source: root|repo|url)
+  root      local directory to flatten (one source: root|repo|url)
   repo      git URL to shallow-clone (one source: root|repo|url)
   url       seed URL of a rendered docs WEBSITE to crawl (one source:
             root|repo|url). Flattens HTML pages — no Markdown repo needed.
+  kind      docs | code | auto (default: docs). docs = Markdown only (legacy).
+            code = ALSO ingest source/Terraform/YAML/shell, chunked by structure
+            (functions, resources, manifests) with symbol/resource titles —
+            point it at an app, infra or GitOps repo. auto = per-file: Markdown
+            stays Markdown, code/config chunk structurally, other text windows.
   maxPages  max pages to crawl when using url (default: 50)
   maxDepth  max BFS link depth from the seed when using url (default: 2)
   sameHost  only follow links on the seed's host when crawling (default: true)
@@ -113,7 +123,8 @@ Flags (flat JSON or {"cmd":"flatten","args":{...}} envelope):
   format    text | jsonl | json | yaml (default: text; use jsonl for
             /context --mode knowledge corpora)
   maxChars  max characters per chunk, 0 = no splitting (default: 16000)
-  include   comma-separated globs to include (** supported, e.g. docs/**/*.md)
+  maxSize   skip files larger than this many bytes (default: 1048576 = 1 MiB)
+  include   comma-separated globs to include (** supported, e.g. src/**/*.go)
   exclude   comma-separated globs to exclude
   stripFrontMatter  remove front matter, keep title as heading (default: true)
   output    file to write the result to. STRONGLY preferred for large corpora
@@ -134,28 +145,32 @@ func (*BuiltinDocsFlattenPlugin) Schema() string {
 		"subcommands": []map[string]interface{}{
 			{
 				"name": "flatten",
-				"description": "Flatten documentation into AI-ready chunks from one of three sources: a local Markdown/MDX tree (root), a git repo to shallow-clone (repo), or a rendered docs WEBSITE crawled over HTTP (url — no Markdown repo required). " +
-					"Handles .md, .mdx (Mintlify/Docusaurus — JSX components and imports are stripped, prose kept) and .markdown for root/repo; for url it crawls HTML pages, strips tags to clean text and chunks the same way. " +
-					"Use format=jsonl + output=<file> to produce a corpus for /context create <name> <file> --mode knowledge. " +
+				"description": "Flatten a documentation OR code/infra tree into AI-ready chunks from one of three sources: a local directory (root), a git repo to shallow-clone (repo), or a rendered docs WEBSITE crawled over HTTP (url). " +
+					"kind=docs (default) handles Markdown only. kind=code ALSO ingests source code (Go/Java/Python/Kotlin/TS/Rust/C#/…), Terraform (.tf), Kubernetes/Argo YAML and shell, chunked by structure — functions, resources, manifests — with symbol/resource titles; point it at an app, infra or GitOps repo to build a knowledge base. " +
+					"Use format=jsonl + output=<file> to produce a corpus for /context create <name> <file> --mode knowledge. Attach several (app + infra + gitops) so the model connects them. " +
 					"ALWAYS set output when the corpus may be large — inline results are truncated.",
 				"flags": []map[string]interface{}{
-					{"name": "root", "type": "string", "description": "Local directory with the Markdown docs. Exactly one of root|repo|url."},
+					{"name": "root", "type": "string", "description": "Local directory to flatten. Exactly one of root|repo|url."},
 					{"name": "repo", "type": "string", "description": "Git URL (https://... or git@host:path). Exactly one of root|repo|url."},
 					{"name": "url", "type": "string", "description": "Seed URL of a rendered docs website (http/https) to crawl and flatten into the same JSONL corpus. Exactly one of root|repo|url."},
+					{"name": "kind", "type": "string", "description": "docs | code | auto. Default: docs (Markdown only, legacy). code = ingest source/Terraform/YAML/shell with structure-aware chunking and symbol titles — use this for an app/infra/GitOps repo. auto = per-file (Markdown stays Markdown, code/config chunk structurally, other text windows)."},
 					{"name": "maxPages", "type": "integer", "description": "Max pages to crawl when using url. Default: 50."},
 					{"name": "maxDepth", "type": "integer", "description": "Max BFS link depth from the seed when using url. Default: 2."},
 					{"name": "sameHost", "type": "boolean", "description": "When crawling url, only follow links on the seed's host. Default: true."},
 					{"name": "branch", "type": "string", "description": "Branch to clone (only with repo). Default: main."},
-					{"name": "subdir", "type": "string", "description": "Docs subdirectory inside the repo (only with repo), e.g. 'docs'."},
+					{"name": "subdir", "type": "string", "description": "Subdirectory inside the repo (only with repo), e.g. 'docs' or 'modules'."},
 					{"name": "format", "type": "string", "description": "text | jsonl | json | yaml. Default: text. Use jsonl for knowledge corpora."},
 					{"name": "maxChars", "type": "integer", "description": "Max characters per chunk (0 = no split). Default: 16000."},
-					{"name": "include", "type": "string", "description": "Comma-separated include globs, ** crosses directories (e.g. 'docs/**/*.md'). Bare names match by basename."},
-					{"name": "exclude", "type": "string", "description": "Comma-separated exclude globs (e.g. 'node_modules/**,CHANGELOG.md')."},
+					{"name": "maxSize", "type": "integer", "description": "Skip files larger than this many bytes. Default: 1048576 (1 MiB)."},
+					{"name": "include", "type": "string", "description": "Comma-separated include globs, ** crosses directories (e.g. 'src/**/*.go'). Bare names match by basename."},
+					{"name": "exclude", "type": "string", "description": "Comma-separated exclude globs (e.g. 'node_modules/**,*.lock')."},
 					{"name": "stripFrontMatter", "type": "boolean", "description": "Strip YAML/TOML front matter, re-emitting its title as a heading. Default: true."},
 					{"name": "output", "type": "string", "description": "File path to write the result to. Required in practice for large corpora."},
 				},
 				"examples": []string{
 					`{"root":"./docs","format":"jsonl","output":"/tmp/corpus.jsonl"}`,
+					`{"root":"./app","kind":"code","format":"jsonl","output":"/tmp/app.jsonl"}`,
+					`{"root":"./infra","kind":"code","format":"jsonl","output":"/tmp/infra.jsonl"}`,
 					`{"repo":"https://github.com/org/project","subdir":"docs","format":"jsonl","output":"/tmp/corpus.jsonl"}`,
 					`{"url":"https://docs.example.com/","maxPages":40,"maxDepth":2,"format":"jsonl","output":"/tmp/corpus.jsonl"}`,
 					`{"root":".","include":"README.md"}`,
@@ -199,7 +214,14 @@ func (p *BuiltinDocsFlattenPlugin) ExecuteWithStream(ctx context.Context, args [
 		return "", fmt.Errorf("@docs-flatten: %w", err)
 	}
 	if len(chunks) == 0 {
-		return fmt.Sprintf("@docs-flatten: no Markdown files matched under %s", root), nil
+		if cfg.Kind == "docs" {
+			if n, exts := docsFlattenCodeCandidates(root); n > 0 {
+				return fmt.Sprintf("@docs-flatten: no Markdown matched under %s, but found %d code/config file(s) (e.g. %s). "+
+					"This looks like a source/infra repo — re-run with kind=code to index it (functions, Terraform resources, K8s/Argo manifests).",
+					root, n, strings.Join(exts, ", ")), nil
+			}
+		}
+		return fmt.Sprintf("@docs-flatten: no matching files under %s (kind=%s)", root, cfg.Kind), nil
 	}
 
 	rendered, err := renderDocsFlatten(chunks, cfg.Format)
@@ -233,7 +255,7 @@ type docsFlattenProvenance struct {
 // parseDocsFlattenArgs supports flat JSON, the {"cmd","args"} envelope and
 // --flag argv form.
 func parseDocsFlattenArgs(args []string) (docsFlattenArgs, error) {
-	out := docsFlattenArgs{Branch: "main", Format: "text", MaxChars: 16000, StripFrontMatter: true, MaxPages: 50, MaxDepth: 2, SameHost: true}
+	out := docsFlattenArgs{Branch: "main", Format: "text", MaxChars: 16000, StripFrontMatter: true, MaxPages: 50, MaxDepth: 2, SameHost: true, Kind: "docs"}
 	payload := strings.TrimSpace(strings.Join(args, " "))
 	var raw map[string]json.RawMessage
 	switch {
@@ -287,9 +309,22 @@ func parseDocsFlattenArgs(args []string) (docsFlattenArgs, error) {
 		out.StripFrontMatter = v
 	}
 	out.Output = jsonString(raw, "output", "out")
+	if v := strings.ToLower(jsonString(raw, "kind")); v != "" {
+		out.Kind = v
+	}
+	if v, ok := raw["maxSize"]; ok && len(v) > 0 {
+		out.MaxSize = jsonInt(raw, "maxSize")
+	} else if _, ok := raw["max-size"]; ok {
+		out.MaxSize = jsonInt(raw, "max-size")
+	}
 
 	if err := validateDocsFlattenSource(&out); err != nil {
 		return out, err
+	}
+	switch out.Kind {
+	case "auto", "docs", "code":
+	default:
+		return out, fmt.Errorf("invalid kind %q (valid: auto|docs|code)", out.Kind)
 	}
 	switch out.Format {
 	case "text", "jsonl", "json", "yaml":
@@ -528,9 +563,16 @@ func walkDocsFlatten(ctx context.Context, root string, cfg docsFlattenArgs, prov
 			if strings.HasPrefix(d.Name(), ".") && path != root {
 				return filepath.SkipDir
 			}
+			if cfg.Kind != "docs" && docsFlattenSkipDir(d.Name()) {
+				return filepath.SkipDir
+			}
 			return nil
 		}
-		if !docsFlattenExts[strings.ToLower(filepath.Ext(d.Name()))] {
+		if !docsFlattenAcceptExt(d.Name(), cfg.Kind) {
+			return nil
+		}
+		if info, statErr := d.Info(); statErr == nil && info.Size() > docsFlattenMaxFileSize(cfg) {
+			emit(fmt.Sprintf("skipping %s: %s exceeds size cap", filepath.ToSlash(d.Name()), humanByteSize(int(info.Size()))))
 			return nil
 		}
 		rel, err := filepath.Rel(root, path)
@@ -570,15 +612,46 @@ func docsFlattenSelected(rel string, cfg docsFlattenArgs) bool {
 	return true
 }
 
-// docsFlattenFile reads one Markdown file and converts it into chunks.
+// docsFlattenFile reads one file and converts it into chunks, choosing the
+// Markdown path or a structure-aware code/config path by the file's flavor. The
+// JSONL record shape is identical either way, so knowledge-mode ingestion is
+// unchanged.
 func docsFlattenFile(absPath, relPath string, cfg docsFlattenArgs, chunkIndex *int, prov docsFlattenProvenance) ([]docsFlattenChunk, error) {
-	data, err := os.ReadFile(absPath) // #nosec G304 -- path comes from the walked docs tree the user pointed the tool at
+	data, err := os.ReadFile(absPath) // #nosec G304 -- path comes from the walked tree the user pointed the tool at
 	if err != nil {
 		return nil, err
 	}
 
-	title, body, hasFM := parseDocsFlattenFrontMatter(string(data))
-	content := string(data)
+	var pieces []flatChunk
+	if flavor := docsFlattenFlavor(relPath); flavor == flavorMarkdown {
+		pieces = markdownPieces(string(data), relPath, cfg)
+	} else {
+		pieces = chunkCode(flavor, string(data), cfg.MaxChars)
+	}
+
+	chunks := make([]docsFlattenChunk, 0, len(pieces))
+	for _, p := range pieces {
+		chunks = append(chunks, docsFlattenChunk{
+			ID:        fmt.Sprintf("%s#%04d", relPath, *chunkIndex),
+			Source:    relPath,
+			Title:     p.Title,
+			Content:   p.Content,
+			ChunkSize: len(p.Content),
+			RepoURL:   prov.RepoURL,
+			Commit:    prov.Commit,
+		})
+		*chunkIndex++
+	}
+	return chunks, nil
+}
+
+// markdownPieces is the Markdown ingestion path (front-matter title, MDX
+// sanitization, normalization, heading-aware chunking). Every chunk carries the
+// file's front-matter title, preserving the original behavior. sanitizeMDX runs
+// only for .mdx files, exactly as before the code-ingestion refactor.
+func markdownPieces(raw, relPath string, cfg docsFlattenArgs) []flatChunk {
+	title, body, hasFM := parseDocsFlattenFrontMatter(raw)
+	content := raw
 	if cfg.StripFrontMatter {
 		content = body
 		if hasFM && title != "" {
@@ -590,24 +663,14 @@ func docsFlattenFile(absPath, relPath string, cfg docsFlattenArgs, chunkIndex *i
 	}
 	content = normalizeDocsFlattenMarkdown(content)
 	if strings.TrimSpace(content) == "" {
-		return nil, nil
+		return nil
 	}
-
-	raw := chunkMarkdown(content, cfg.MaxChars)
-	chunks := make([]docsFlattenChunk, 0, len(raw))
-	for _, c := range raw {
-		chunks = append(chunks, docsFlattenChunk{
-			ID:        fmt.Sprintf("%s#%04d", relPath, *chunkIndex),
-			Source:    relPath,
-			Title:     title,
-			Content:   c,
-			ChunkSize: len(c),
-			RepoURL:   prov.RepoURL,
-			Commit:    prov.Commit,
-		})
-		*chunkIndex++
+	parts := chunkMarkdown(content, cfg.MaxChars)
+	pieces := make([]flatChunk, 0, len(parts))
+	for _, c := range parts {
+		pieces = append(pieces, flatChunk{Content: c, Title: title})
 	}
-	return chunks, nil
+	return pieces
 }
 
 // parseDocsFlattenFrontMatter extracts the title from a YAML (---) or TOML

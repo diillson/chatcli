@@ -1115,7 +1115,7 @@
   "plugins.knowledge.describe_toc": "Listando conteúdo da knowledge base",
   "plugins.knowledge.describe_list": "Listando knowledge bases anexadas",
   "plugins.knowledge.describe_generic": "Consultando a knowledge base",
-  "plugins.docsflatten.description": "Achata documentação Markdown/MDX (diretório local ou repo git) em chunks prontos para IA (text/jsonl/json/yaml); jsonl alimenta /context --mode knowledge",
+  "plugins.docsflatten.description": "Achata documentação OU código/infra (Markdown, código-fonte, Terraform, YAML Kubernetes/Argo, shell) de diretório local ou repo git em chunks prontos para IA (text/jsonl/json/yaml); kind=code chunka por estrutura; jsonl alimenta /context --mode knowledge",
   "plugins.docsflatten.describe": "Achatando docs: %s",
   "plugins.context.description": "Constrói e gerencia suas próprias bases de conhecimento sem o usuário: cria um contexto a partir de docs (um corpus.jsonl do @docs-flatten, um diretório ou arquivos), atacha (com retrieval RAG opcional), inspeciona (list/status), desatacha ou deleta. Combina com @websearch + @docs-flatten + @knowledge para um pipeline autônomo de documentação.",
   "plugins.context.describe.create": "Construindo base de conhecimento: %s",
