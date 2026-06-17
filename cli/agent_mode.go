@@ -163,38 +163,6 @@ func splitStdinChunk(chunk []byte, lineBuf *strings.Builder) []string {
 	return lines
 }
 
-// drainStdin discards bytes left unread in the terminal input buffer. After an
-// interrupted agent/coder turn — especially one cancelled at a cooked-mode
-// security prompt — the TTY may hold orphan bytes: the stray newline that the
-// user pressed while Ctrl+C was racing the read, or type-ahead queued for the
-// now-dead turn. Left in place, those bytes get consumed by the next go-prompt
-// REPL line, so the following /coder or /agent command "doesn't fire".
-//
-// Must only be called when no stdin reader goroutine and no go-prompt own the
-// TTY (i.e. between an agent op returning and the next prompt) — otherwise it
-// races them for input. The poll(0) gate is non-blocking and the iteration cap
-// bounds it to 32 KiB; the whole drain runs under a short deadline so a Windows
-// WaitForSingleObject false positive (which can leave Read blocking) can never
-// hang the REPL.
-func drainStdin() {
-	done := make(chan struct{})
-	go func() {
-		defer close(done)
-		buf := make([]byte, 512)
-		for i := 0; i < 64 && stdinPollReady(0); i++ {
-			if _, err := os.Stdin.Read(buf); err != nil {
-				return
-			}
-		}
-	}()
-	select {
-	case <-done:
-	case <-time.After(200 * time.Millisecond):
-		// Stuck on a blocking Read (Windows false positive). Don't wait —
-		// the orphan read is discarded when the goroutine eventually wakes.
-	}
-}
-
 // startStdinReader starts a goroutine that reads lines from stdin and sends
 // them to the stdinLines channel. This centralizes all stdin reads in agent
 // mode, enabling type-ahead queue support.

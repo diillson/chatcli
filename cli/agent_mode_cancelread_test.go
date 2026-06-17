@@ -153,30 +153,11 @@ func TestCancelSignal_SaveRestore(t *testing.T) {
 	require.Nil(t, a.currentCancelSignal(), "detaching must restore the nil signal")
 }
 
-// TestDrainStdin_DoesNotHang is a smoke test for the post-cancel cleanup: with
-// no data pending, drainStdin must return promptly via the poll(0) gate, and it
-// must always honor its internal safety deadline rather than blocking the REPL.
-func TestDrainStdin_DoesNotHang(t *testing.T) {
-	done := make(chan struct{})
-	go func() {
-		drainStdin()
-		close(done)
-	}()
-
-	select {
-	case <-done:
-	case <-time.After(1 * time.Second):
-		t.Fatal("drainStdin exceeded its safety deadline and blocked the REPL")
-	}
-}
-
-// TestRunWithCancellation_CancelledPathNormalizes drives the wrapper with an
-// already-cancelled parent context: the wrapped function returns cleanly, but
-// because the operation context is cancelled the wrapper must run the terminal
-// recovery path before returning to the REPL. Asserts the call completes within
-// a deadline (the recovery never hangs) and that the wrapped fn observed a
-// cancelled context.
-func TestRunWithCancellation_CancelledPathNormalizes(t *testing.T) {
+// TestRunWithCancellation_CancelledParentReturnsClean drives the wrapper with an
+// already-cancelled parent context: the wrapped function must observe the
+// cancelled operation context, the call must return within a deadline (never
+// hang), and isExecuting must be reset so the REPL is usable again.
+func TestRunWithCancellation_CancelledParentReturnsClean(t *testing.T) {
 	cli := &ChatCLI{logger: zap.NewNop()}
 
 	parent, cancel := context.WithCancel(context.Background())
@@ -195,30 +176,9 @@ func TestRunWithCancellation_CancelledPathNormalizes(t *testing.T) {
 	select {
 	case <-done:
 	case <-time.After(3 * time.Second):
-		t.Fatal("runWithCancellation hung on the cancelled recovery path")
+		t.Fatal("runWithCancellation hung on the cancelled path")
 	}
 
 	assert.True(t, sawCancelled, "wrapped fn should see the cancelled operation context")
 	assert.False(t, cli.isExecuting.Load(), "isExecuting must be reset on return")
-}
-
-// TestNormalizeTerminalForREPL_Completes exercises the post-cancel terminal
-// recovery: it must run the line-discipline reset and stdin drain and return
-// without panicking or hanging, even when stdin is not a TTY (CI), where the
-// stty reset errors and is logged rather than fatal. Guarded by a deadline so a
-// regression that blocks the REPL fails loudly instead of stalling the suite.
-func TestNormalizeTerminalForREPL_Completes(t *testing.T) {
-	cli := &ChatCLI{logger: zap.NewNop()}
-
-	done := make(chan struct{})
-	go func() {
-		cli.normalizeTerminalForREPL()
-		close(done)
-	}()
-
-	select {
-	case <-done:
-	case <-time.After(2 * time.Second):
-		t.Fatal("normalizeTerminalForREPL blocked — terminal recovery must never stall the REPL")
-	}
 }
