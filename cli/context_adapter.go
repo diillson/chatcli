@@ -460,9 +460,9 @@ func humanMB(bytes int64) string {
 func contextPipelineHint() string {
 	return strings.TrimSpace(`
 ## Building knowledge you lack
-When you lack documentation for a library/framework/API and no knowledge base covers it, build one yourself instead of guessing or asking the user:
+When you lack documentation for a library/framework/API, OR need to reason across a code/infra repository (app code, Terraform, Kubernetes/Argo GitOps), and no knowledge base covers it, build one yourself instead of guessing or asking the user:
 1. Locate the source — @websearch for the official docs (prefer the project's Markdown repo); or use a path/repo/URL the user gave.
-2. Flatten it — @docs-flatten with root=<dir>, repo=<git-url>, or url=<docs-site> → produces a corpus.jsonl.
+2. Flatten it — @docs-flatten with root=<dir>, repo=<git-url>, or url=<docs-site> → produces a corpus.jsonl. For a SOURCE/INFRA repo (it contains .go/.py/.ts/.java/.tf/.yaml/.sh, not just Markdown), add kind=code so functions, Terraform resources and K8s/Argo manifests are chunked by structure. Build one base per layer (app, infra, gitops) and attach them together so you can connect across layers.
 3. @context create {"name":"<topic>","paths":["<corpus.jsonl>"],"mode":"knowledge"} → then @context attach {"name":"<topic>"}.
 4. Query it with @knowledge (search/get) and ground your answer in the retrieved passages.
 Use @context list / @context status to see what is attached, and @context detach when you are done. Prefer authoritative sources; do not build a base from an unrelated or low-quality page.`)
