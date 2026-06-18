@@ -1,3 +1,9 @@
+/*
+ * ChatCLI - Command Line Interface for LLM interaction
+ * Copyright (c) 2024 Edilson Freitas
+ * License: Apache-2.0
+ */
+
 // Package visionwire converts the provider-agnostic models.ImageContent
 // carried on a message into the per-provider wire formats for vision
 // (multimodal) input. Centralizing the dialect knowledge here keeps each
