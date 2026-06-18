@@ -129,6 +129,44 @@ func (c *BedrockClient) getMaxTokensConverse() int {
 // dropped here: Converse's cachePoint block has a different placement
 // model and we deliberately keep the Anthropic cache planner scoped to
 // the dedicated familyAnthropic path.
+// bedrockImageBlocks converts the provider-agnostic image attachments into
+// Bedrock Converse image content blocks. Bedrock requires the raw bytes
+// (there is no URL source on the Converse ImageBlock), so URL-only images
+// are skipped — the caller's describe-fallback handles those. Unsupported
+// media types are dropped rather than erroring the whole turn.
+func bedrockImageBlocks(images []models.ImageContent) []bedrockruntimetypes.ContentBlock {
+	if len(images) == 0 {
+		return nil
+	}
+	var blocks []bedrockruntimetypes.ContentBlock
+	for _, ic := range images {
+		if !ic.IsValid() || len(ic.Data) == 0 {
+			continue
+		}
+		mt, _ := models.NormalizeImageMediaType(ic.MediaType)
+		var format bedrockruntimetypes.ImageFormat
+		switch mt {
+		case "image/png":
+			format = bedrockruntimetypes.ImageFormatPng
+		case "image/jpeg":
+			format = bedrockruntimetypes.ImageFormatJpeg
+		case "image/gif":
+			format = bedrockruntimetypes.ImageFormatGif
+		case "image/webp":
+			format = bedrockruntimetypes.ImageFormatWebp
+		default:
+			continue
+		}
+		blocks = append(blocks, &bedrockruntimetypes.ContentBlockMemberImage{
+			Value: bedrockruntimetypes.ImageBlock{
+				Format: format,
+				Source: &bedrockruntimetypes.ImageSourceMemberBytes{Value: ic.Data},
+			},
+		})
+	}
+	return blocks
+}
+
 func buildConverseMessages(prompt string, history []models.Message) ([]bedrockruntimetypes.Message, []bedrockruntimetypes.SystemContentBlock) {
 	var messages []bedrockruntimetypes.Message
 	var systemBlocks []bedrockruntimetypes.SystemContentBlock
@@ -140,22 +178,25 @@ func buildConverseMessages(prompt string, history []models.Message) ([]bedrockru
 		systemBlocks = append(systemBlocks, &bedrockruntimetypes.SystemContentBlockMemberText{Value: text})
 	}
 
-	appendMessage := func(role bedrockruntimetypes.ConversationRole, text string) {
-		if strings.TrimSpace(text) == "" {
+	appendMessage := func(role bedrockruntimetypes.ConversationRole, text string, images []models.ImageContent) {
+		imageBlocks := bedrockImageBlocks(images)
+		if strings.TrimSpace(text) == "" && len(imageBlocks) == 0 {
 			return
+		}
+		// Image blocks first (better grounding), then the text block.
+		blocks := imageBlocks
+		if strings.TrimSpace(text) != "" {
+			blocks = append(blocks, &bedrockruntimetypes.ContentBlockMemberText{Value: text})
 		}
 		// Coalesce consecutive same-role messages — Bedrock Converse
 		// rejects two user (or two assistant) messages in a row.
 		if n := len(messages); n > 0 && messages[n-1].Role == role {
-			messages[n-1].Content = append(messages[n-1].Content,
-				&bedrockruntimetypes.ContentBlockMemberText{Value: text})
+			messages[n-1].Content = append(messages[n-1].Content, blocks...)
 			return
 		}
 		messages = append(messages, bedrockruntimetypes.Message{
-			Role: role,
-			Content: []bedrockruntimetypes.ContentBlock{
-				&bedrockruntimetypes.ContentBlockMemberText{Value: text},
-			},
+			Role:    role,
+			Content: blocks,
 		})
 	}
 
@@ -170,14 +211,14 @@ func buildConverseMessages(prompt string, history []models.Message) ([]bedrockru
 				flushSystem(msg.Content)
 			}
 		case "assistant":
-			appendMessage(bedrockruntimetypes.ConversationRoleAssistant, msg.Content)
+			appendMessage(bedrockruntimetypes.ConversationRoleAssistant, msg.Content, msg.Images)
 		default:
-			appendMessage(bedrockruntimetypes.ConversationRoleUser, msg.Content)
+			appendMessage(bedrockruntimetypes.ConversationRoleUser, msg.Content, msg.Images)
 		}
 	}
 
 	if len(history) == 0 || history[len(history)-1].Role != "user" || history[len(history)-1].Content != prompt {
-		appendMessage(bedrockruntimetypes.ConversationRoleUser, prompt)
+		appendMessage(bedrockruntimetypes.ConversationRoleUser, prompt, nil)
 	}
 
 	// Converse rejects requests that start with an assistant message.

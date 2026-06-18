@@ -29,6 +29,7 @@ import (
 	"github.com/diillson/chatcli/i18n"
 	"github.com/diillson/chatcli/llm/catalog"
 	"github.com/diillson/chatcli/llm/client"
+	"github.com/diillson/chatcli/llm/internal/visionwire"
 	"github.com/diillson/chatcli/models"
 	"github.com/diillson/chatcli/utils"
 	"go.uber.org/zap"
@@ -324,7 +325,7 @@ func (c *BedrockClient) buildMessagesAndSystem(prompt string, history []models.M
 	for _, msg := range history {
 		switch strings.ToLower(strings.TrimSpace(msg.Role)) {
 		case "assistant":
-			messages = append(messages, map[string]interface{}{"role": "assistant", "content": msg.Content})
+			messages = append(messages, map[string]interface{}{"role": "assistant", "content": visionwire.AnthropicContent(msg.Content, msg.Images)})
 		case "system":
 			if len(msg.SystemParts) > 0 {
 				for _, part := range msg.SystemParts {
@@ -341,7 +342,7 @@ func (c *BedrockClient) buildMessagesAndSystem(prompt string, history []models.M
 				plainSystemParts = append(plainSystemParts, msg.Content)
 			}
 		default:
-			messages = append(messages, map[string]interface{}{"role": "user", "content": msg.Content})
+			messages = append(messages, map[string]interface{}{"role": "user", "content": visionwire.AnthropicContent(msg.Content, msg.Images)})
 		}
 	}
 

@@ -109,7 +109,7 @@ var registry = []ModelMeta{
 		ContextWindow:   200000,
 		MaxOutputTokens: 100000,
 		PreferredAPI:    APIResponses,
-		Capabilities:    []string{"json_mode", "tools"},
+		Capabilities:    []string{"vision", "json_mode", "tools"},
 	},
 	{
 		ID:              "gpt-5.3-codex",
@@ -139,7 +139,7 @@ var registry = []ModelMeta{
 		ContextWindow:   200000,
 		MaxOutputTokens: 100000,
 		PreferredAPI:    APIResponses,
-		Capabilities:    []string{"json_mode", "tools"},
+		Capabilities:    []string{"vision", "json_mode", "tools"},
 	},
 	{
 		// gpt-5 (Aug 7 2025), incl. mini/nano/pro: 400K context, 128K max
@@ -163,7 +163,7 @@ var registry = []ModelMeta{
 		ContextWindow:   200000,
 		MaxOutputTokens: 100000,
 		PreferredAPI:    APIResponses,
-		Capabilities:    []string{"reasoning", "tools", "json_mode"},
+		Capabilities:    []string{"vision", "reasoning", "tools", "json_mode"},
 	},
 	{
 		ID:              "o3-mini",
@@ -183,7 +183,7 @@ var registry = []ModelMeta{
 		ContextWindow:   200000,
 		MaxOutputTokens: 100000,
 		PreferredAPI:    APIResponses,
-		Capabilities:    []string{"reasoning", "tools", "json_mode"},
+		Capabilities:    []string{"vision", "reasoning", "tools", "json_mode"},
 	},
 	// ── OpenAI GPT-4.1 family ─────────────────────────────────────
 	{
@@ -252,7 +252,7 @@ var registry = []ModelMeta{
 		MaxOutputTokens: 64000,
 		PreferredAPI:    APIAnthropicMessages,
 		APIVersion:      config.ClaudeAIAPIVersionDefault,
-		Capabilities:    []string{"json_mode", "tools"},
+		Capabilities:    []string{"vision", "json_mode", "tools"},
 	},
 	{
 		// Sonnet 4.5: 200K context, 64K max output. 1M context available
@@ -265,7 +265,7 @@ var registry = []ModelMeta{
 		MaxOutputTokens: 64000,
 		PreferredAPI:    APIAnthropicMessages,
 		APIVersion:      config.ClaudeAIAPIVersionDefault,
-		Capabilities:    []string{"json_mode", "tools"},
+		Capabilities:    []string{"vision", "json_mode", "tools"},
 	},
 	{
 		// Sonnet 4.6: 1M context, 64K max output (per Anthropic). Previous
@@ -278,7 +278,7 @@ var registry = []ModelMeta{
 		MaxOutputTokens: 64000,
 		PreferredAPI:    APIAnthropicMessages,
 		APIVersion:      config.ClaudeAIAPIVersionDefault,
-		Capabilities:    []string{"json_mode", "tools"},
+		Capabilities:    []string{"vision", "json_mode", "tools"},
 	},
 	{
 		// Haiku 4.5 (claude-haiku-4-5-20251001): 200K context, 64K max
@@ -292,7 +292,7 @@ var registry = []ModelMeta{
 		MaxOutputTokens: 64000,
 		PreferredAPI:    APIAnthropicMessages,
 		APIVersion:      config.ClaudeAIAPIVersionDefault,
-		Capabilities:    []string{"json_mode", "tools"},
+		Capabilities:    []string{"vision", "json_mode", "tools"},
 	},
 	// NOTE: Claude 4.x entries are ordered newest-first below. The Resolve()
 	// tier-2 alias match iterates the registry in order and returns on first
@@ -322,6 +322,7 @@ var registry = []ModelMeta{
 		PreferredAPI:    APIAnthropicMessages,
 		APIVersion:      config.ClaudeAIAPIVersionDefault,
 		Capabilities: []string{
+			"vision",
 			"json_mode", "tools",
 			"adaptive_thinking", "mid_conversation_system",
 		},
@@ -350,6 +351,7 @@ var registry = []ModelMeta{
 		PreferredAPI:    APIAnthropicMessages,
 		APIVersion:      config.ClaudeAIAPIVersionDefault,
 		Capabilities: []string{
+			"vision",
 			"json_mode", "tools",
 			"adaptive_thinking", "fast_mode",
 			"mid_conversation_system", "low_cache_minimum",
@@ -369,7 +371,7 @@ var registry = []ModelMeta{
 		MaxOutputTokens: 128000,
 		PreferredAPI:    APIAnthropicMessages,
 		APIVersion:      config.ClaudeAIAPIVersionDefault,
-		Capabilities:    []string{"json_mode", "tools", "adaptive_thinking"},
+		Capabilities:    []string{"vision", "json_mode", "tools", "adaptive_thinking"},
 	},
 	{
 		// Sonnet 4.7: NOT in the Anthropic GA matrix as of Apr 2026 (the
@@ -388,7 +390,7 @@ var registry = []ModelMeta{
 		MaxOutputTokens: 64000,
 		PreferredAPI:    APIAnthropicMessages,
 		APIVersion:      config.ClaudeAIAPIVersionDefault,
-		Capabilities:    []string{"json_mode", "tools"},
+		Capabilities:    []string{"vision", "json_mode", "tools"},
 	},
 	{
 		// Opus 4.6: 1M context, 128K max output (per Anthropic legacy
@@ -401,7 +403,7 @@ var registry = []ModelMeta{
 		MaxOutputTokens: 128000,
 		PreferredAPI:    APIAnthropicMessages,
 		APIVersion:      config.ClaudeAIAPIVersionDefault,
-		Capabilities:    []string{"json_mode", "tools"},
+		Capabilities:    []string{"vision", "json_mode", "tools"},
 	},
 	{
 		// Opus 4.5 (claude-opus-4-5-20251101): 200K context, 64K max output.
@@ -413,7 +415,7 @@ var registry = []ModelMeta{
 		MaxOutputTokens: 64000,
 		PreferredAPI:    APIAnthropicMessages,
 		APIVersion:      config.ClaudeAIAPIVersionDefault,
-		Capabilities:    []string{"json_mode", "tools"},
+		Capabilities:    []string{"vision", "json_mode", "tools"},
 	},
 	{
 		// Opus 4.1: 200K context, 32K max output. Previous 20K/20K was a
@@ -427,7 +429,7 @@ var registry = []ModelMeta{
 		MaxOutputTokens: 32000,
 		PreferredAPI:    APIAnthropicMessages,
 		APIVersion:      config.ClaudeAIAPIVersionDefault,
-		Capabilities:    []string{"json_mode", "tools"},
+		Capabilities:    []string{"vision", "json_mode", "tools"},
 	},
 	{
 		// Opus 4.0 (deprecated, retires Jun 15 2026): 200K context, 32K
@@ -440,7 +442,7 @@ var registry = []ModelMeta{
 		MaxOutputTokens: 32000,
 		PreferredAPI:    APIAnthropicMessages,
 		APIVersion:      config.ClaudeAIAPIVersionDefault,
-		Capabilities:    []string{"json_mode", "tools"},
+		Capabilities:    []string{"vision", "json_mode", "tools"},
 	},
 	// Claude 3.x — specs from Anthropic's legacy/3.x docs. All 3.x models
 	// share the 200K input window; max output varies by version.
@@ -454,7 +456,7 @@ var registry = []ModelMeta{
 		MaxOutputTokens: 8192,
 		PreferredAPI:    APIAnthropicMessages,
 		APIVersion:      config.ClaudeAIAPIVersionDefault,
-		Capabilities:    []string{"json_mode", "tools"},
+		Capabilities:    []string{"vision", "json_mode", "tools"},
 	},
 	{
 		// Haiku 3.5 (claude-3-5-haiku-20241022): 200K / 8192. Was missing
@@ -486,7 +488,7 @@ var registry = []ModelMeta{
 		MaxOutputTokens: 8192,
 		PreferredAPI:    APIAnthropicMessages,
 		APIVersion:      config.ClaudeAIAPIVersionDefault,
-		Capabilities:    []string{"json_mode", "tools"},
+		Capabilities:    []string{"vision", "json_mode", "tools"},
 	},
 	{
 		// Haiku 3 (claude-3-haiku-20240307): 200K / 4096.
@@ -498,7 +500,7 @@ var registry = []ModelMeta{
 		MaxOutputTokens: 4096,
 		PreferredAPI:    APIAnthropicMessages,
 		APIVersion:      config.ClaudeAIAPIVersionDefault,
-		Capabilities:    []string{"json_mode"},
+		Capabilities:    []string{"vision", "json_mode"},
 	},
 	{
 		// Opus 3 (claude-3-opus-20240229): 200K / 4096.
@@ -510,7 +512,7 @@ var registry = []ModelMeta{
 		MaxOutputTokens: 4096,
 		PreferredAPI:    APIAnthropicMessages,
 		APIVersion:      config.ClaudeAIAPIVersionDefault,
-		Capabilities:    []string{"json_mode", "tools"},
+		Capabilities:    []string{"vision", "json_mode", "tools"},
 	},
 	// Google Gemini Models. Specs from ai.google.dev model docs:
 	// every Gemini 2.x exposes a 1,048,576-token input window with a
@@ -611,7 +613,7 @@ var registry = []ModelMeta{
 		ContextWindow:   200000,
 		MaxOutputTokens: 64000,
 		PreferredAPI:    APIChatCompletions,
-		Capabilities:    []string{"tools"},
+		Capabilities:    []string{"vision", "tools"},
 	},
 	{
 		ID:              "gemini-2.0-flash",
@@ -621,7 +623,7 @@ var registry = []ModelMeta{
 		ContextWindow:   1000000,
 		MaxOutputTokens: 8192,
 		PreferredAPI:    APIChatCompletions,
-		Capabilities:    []string{"tools"},
+		Capabilities:    []string{"vision", "tools"},
 	},
 	// GitHub Models marketplace (models.inference.ai.azure.com)
 	// These are the known models available via GitHub PAT.
@@ -726,7 +728,7 @@ var registry = []ModelMeta{
 		ContextWindow:   2000000,
 		MaxOutputTokens: 16384,
 		PreferredAPI:    APIChatCompletions,
-		Capabilities:    []string{"tools", "json_mode"},
+		Capabilities:    []string{"vision", "tools", "json_mode"},
 	},
 	{
 		// grok-4-1: forward variant; tracked at the same 2M / 16K profile
@@ -738,7 +740,7 @@ var registry = []ModelMeta{
 		ContextWindow:   2000000,
 		MaxOutputTokens: 16384,
 		PreferredAPI:    APIChatCompletions,
-		Capabilities:    []string{"tools", "json_mode"},
+		Capabilities:    []string{"vision", "tools", "json_mode"},
 	},
 	{
 		// grok-3: 131,072 context (128K), 16K max output.
@@ -1056,7 +1058,7 @@ var registry = []ModelMeta{
 		ContextWindow:   200000,
 		MaxOutputTokens: 64000,
 		PreferredAPI:    APIChatCompletions,
-		Capabilities:    []string{"tools", "json_mode"},
+		Capabilities:    []string{"vision", "tools", "json_mode"},
 	},
 	{
 		ID:              "anthropic/claude-opus-4",
@@ -1066,7 +1068,7 @@ var registry = []ModelMeta{
 		ContextWindow:   200000,
 		MaxOutputTokens: 32000,
 		PreferredAPI:    APIChatCompletions,
-		Capabilities:    []string{"tools", "json_mode"},
+		Capabilities:    []string{"vision", "tools", "json_mode"},
 	},
 	{
 		ID:              "google/gemini-2.5-pro",
@@ -1096,7 +1098,7 @@ var registry = []ModelMeta{
 		ContextWindow:   1048576,
 		MaxOutputTokens: 65536,
 		PreferredAPI:    APIChatCompletions,
-		Capabilities:    []string{"tools"},
+		Capabilities:    []string{"vision", "tools"},
 	},
 	{
 		// DeepSeek R1 via OpenRouter: served at 64K context per the

@@ -18,6 +18,7 @@ import (
 	"github.com/diillson/chatcli/auth"
 	"github.com/diillson/chatcli/i18n"
 	"github.com/diillson/chatcli/llm/client"
+	"github.com/diillson/chatcli/llm/internal/visionwire"
 	"github.com/diillson/chatcli/llm/toolshim"
 	"github.com/diillson/chatcli/models"
 	"github.com/diillson/chatcli/utils"
@@ -151,18 +152,18 @@ func buildToolMessages(prompt string, history []models.Message) []interface{} {
 			} else {
 				messages = append(messages, map[string]interface{}{
 					"role":    "assistant",
-					"content": msg.Content,
+					"content": visionwire.OpenAIContent(msg.Content, msg.Images),
 				})
 			}
 		case "system", "user":
 			messages = append(messages, map[string]interface{}{
 				"role":    role,
-				"content": msg.Content,
+				"content": visionwire.OpenAIContent(msg.Content, msg.Images),
 			})
 		default:
 			messages = append(messages, map[string]interface{}{
 				"role":    "user",
-				"content": msg.Content,
+				"content": visionwire.OpenAIContent(msg.Content, msg.Images),
 			})
 		}
 	}

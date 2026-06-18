@@ -22,6 +22,7 @@ import (
 	"github.com/diillson/chatcli/i18n"
 	"github.com/diillson/chatcli/llm/catalog"
 	"github.com/diillson/chatcli/llm/client"
+	"github.com/diillson/chatcli/llm/internal/visionwire"
 	"github.com/diillson/chatcli/models"
 	"github.com/diillson/chatcli/utils"
 	"go.uber.org/zap"
@@ -130,18 +131,18 @@ func (c *ZAIClient) SendPrompt(ctx context.Context, prompt string, history []mod
 		effectiveMaxTokens = c.getMaxTokens()
 	}
 
-	messages := []map[string]string{}
+	messages := []map[string]interface{}{}
 	for _, msg := range history {
 		role := strings.ToLower(strings.TrimSpace(msg.Role))
 		if role != "system" && role != "user" && role != "assistant" {
 			role = "user"
 		}
-		messages = append(messages, map[string]string{"role": role, "content": msg.Content})
+		messages = append(messages, map[string]interface{}{"role": role, "content": visionwire.OpenAIContent(msg.Content, msg.Images)})
 	}
 
 	if len(history) == 0 || history[len(history)-1].Role != "user" || history[len(history)-1].Content != prompt {
 		if strings.TrimSpace(prompt) != "" {
-			messages = append(messages, map[string]string{
+			messages = append(messages, map[string]interface{}{
 				"role":    "user",
 				"content": prompt,
 			})
