@@ -473,7 +473,10 @@ func TestBuildToolMessages_WithAllRoles(t *testing.T) {
 	assert.Equal(t, "system", msgs[0].(map[string]interface{})["role"])
 	assert.Equal(t, "user", msgs[1].(map[string]interface{})["role"])
 	assert.Equal(t, "assistant", msgs[2].(map[string]interface{})["role"])
-	assert.Equal(t, "Hi", msgs[2].(map[string]interface{})["content"])
+	// Content is a visionwire.Content value; a text-only turn must still
+	// serialize to the bare JSON string (byte-identical to the legacy path).
+	moonshotContentJSON, _ := json.Marshal(msgs[2].(map[string]interface{})["content"])
+	assert.Equal(t, `"Hi"`, string(moonshotContentJSON))
 	assert.Equal(t, "user", msgs[3].(map[string]interface{})["role"])
 
 	assistantTC := msgs[4].(map[string]interface{})

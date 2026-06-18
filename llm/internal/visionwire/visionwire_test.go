@@ -1,6 +1,7 @@
 package visionwire
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 
@@ -21,57 +22,84 @@ func img() models.ImageContent {
 	return models.ImageContent{MediaType: "image/png", Data: pngBytes, FileName: "x.png"}
 }
 
-func TestOpenAIContentTextOnly(t *testing.T) {
-	got := OpenAIContent("hello", nil)
-	if s, ok := got.(string); !ok || s != "hello" {
-		t.Fatalf("text-only must stay a plain string, got %#v", got)
+// marshalContent renders a Content exactly as it serializes inside a provider
+// request map (via its MarshalJSON), so the assertions check real wire bytes.
+func marshalContent(t *testing.T, c Content) string {
+	t.Helper()
+	b, err := json.Marshal(c)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	return string(b)
+}
+
+func TestOpenAIContentTextOnlyIsString(t *testing.T) {
+	got := marshalContent(t, OpenAIContent("hello", nil))
+	if got != `"hello"` {
+		t.Fatalf("text-only must marshal as a JSON string, got %s", got)
 	}
 }
 
 func TestOpenAIContentWithImage(t *testing.T) {
-	got := OpenAIContent("what is this?", []models.ImageContent{img()})
-	parts, ok := got.([]interface{})
-	if !ok || len(parts) != 2 {
-		t.Fatalf("expected 2 parts, got %#v", got)
+	got := marshalContent(t, OpenAIContent("what is this?", []models.ImageContent{img()}))
+	var parts []map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(got), &parts); err != nil {
+		t.Fatalf("expected a parts array, got %s (%v)", got, err)
 	}
-	last := parts[1].(map[string]interface{})
-	if last["type"] != "image_url" {
-		t.Fatalf("expected image_url part, got %#v", last)
+	if len(parts) != 2 {
+		t.Fatalf("expected 2 parts, got %d: %s", len(parts), got)
 	}
-	url := last["image_url"].(map[string]interface{})["url"].(string)
-	if !strings.HasPrefix(url, "data:image/png;base64,") {
-		t.Fatalf("bad data url: %q", url)
+	if !strings.Contains(got, `"type":"image_url"`) || !strings.Contains(got, "data:image/png;base64,") {
+		t.Fatalf("missing image_url data URL: %s", got)
 	}
 }
 
 func TestAnthropicContentImageFirst(t *testing.T) {
-	got := AnthropicContent("caption", []models.ImageContent{img()})
-	blocks := got.([]interface{})
+	got := marshalContent(t, AnthropicContent("caption", []models.ImageContent{img()}))
+	var blocks []map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(got), &blocks); err != nil {
+		t.Fatalf("expected blocks array: %s (%v)", got, err)
+	}
 	if len(blocks) != 2 {
 		t.Fatalf("expected 2 blocks, got %d", len(blocks))
 	}
-	if blocks[0].(map[string]interface{})["type"] != "image" {
-		t.Fatalf("image must come first, got %#v", blocks[0])
+	if string(blocks[0]["type"]) != `"image"` {
+		t.Fatalf("image block must come first, got %s", got)
+	}
+}
+
+func TestAnthropicOAuthAlwaysArray(t *testing.T) {
+	// Text-only OAuth content must still be an array (not a bare string).
+	got := marshalContent(t, AnthropicOAuthContent("hi", nil))
+	if !strings.HasPrefix(strings.TrimSpace(got), "[") {
+		t.Fatalf("OAuth content must always be an array, got %s", got)
+	}
+	if !strings.Contains(got, `"type":"text"`) || !strings.Contains(got, `"text":"hi"`) {
+		t.Fatalf("OAuth text block malformed: %s", got)
 	}
 }
 
 func TestGeminiPartsInlineData(t *testing.T) {
-	parts := GeminiParts("hi", []models.ImageContent{img()})
-	if len(parts) != 2 {
-		t.Fatalf("expected text + inline_data, got %d", len(parts))
-	}
-	if _, ok := parts[1]["inline_data"]; !ok {
-		t.Fatalf("expected inline_data part, got %#v", parts[1])
+	got := marshalContent(t, GeminiParts("hi", []models.ImageContent{img()}))
+	if !strings.Contains(got, `"inline_data"`) || !strings.Contains(got, `"text":"hi"`) {
+		t.Fatalf("expected text + inline_data parts: %s", got)
 	}
 }
 
-func TestInvalidImageDropped(t *testing.T) {
+func TestResponsesUserContentInputImage(t *testing.T) {
+	got := marshalContent(t, ResponsesUserContent("q", []models.ImageContent{img()}))
+	if !strings.Contains(got, `"type":"input_image"`) || !strings.Contains(got, `"type":"input_text"`) {
+		t.Fatalf("expected input_text + input_image parts: %s", got)
+	}
+}
+
+func TestInvalidImageDroppedKeepsString(t *testing.T) {
 	bad := models.ImageContent{MediaType: "application/pdf", Data: []byte("x")}
 	if HasImages([]models.ImageContent{bad}) {
 		t.Fatalf("unsupported media type must be filtered")
 	}
-	got := OpenAIContent("t", []models.ImageContent{bad})
-	if _, ok := got.(string); !ok {
-		t.Fatalf("with no valid images, content must stay a string")
+	got := marshalContent(t, OpenAIContent("t", []models.ImageContent{bad}))
+	if got != `"t"` {
+		t.Fatalf("with no valid images, content must marshal as a string, got %s", got)
 	}
 }

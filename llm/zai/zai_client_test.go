@@ -351,7 +351,10 @@ func TestBuildToolMessages_WithAllRoles(t *testing.T) {
 	assert.Equal(t, "user", msgs[1].(map[string]interface{})["role"])
 	// assistant text
 	assert.Equal(t, "assistant", msgs[2].(map[string]interface{})["role"])
-	assert.Equal(t, "Hi there!", msgs[2].(map[string]interface{})["content"])
+	// Content is a visionwire.Content value; a text-only turn must still
+	// serialize to the bare JSON string (byte-identical to the legacy path).
+	zaiContentJSON, _ := json.Marshal(msgs[2].(map[string]interface{})["content"])
+	assert.Equal(t, `"Hi there!"`, string(zaiContentJSON))
 	// user
 	assert.Equal(t, "user", msgs[3].(map[string]interface{})["role"])
 	// assistant with tool_calls

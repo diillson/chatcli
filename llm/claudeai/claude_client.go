@@ -521,7 +521,7 @@ func (c *ClaudeClient) buildOAuthMessagesAndSystem(prompt string, history []mode
 		case "assistant":
 			messages = append(messages, map[string]interface{}{
 				"role":    "assistant",
-				"content": visionwire.AnthropicContentBlocks(oauthTextBlock(msg.Content), msg.Images),
+				"content": visionwire.AnthropicOAuthContent(msg.Content, msg.Images),
 			})
 		case "system":
 			// If structured SystemParts are available, use them for cache_control
@@ -544,7 +544,7 @@ func (c *ClaudeClient) buildOAuthMessagesAndSystem(prompt string, history []mode
 		default:
 			messages = append(messages, map[string]interface{}{
 				"role":    "user",
-				"content": visionwire.AnthropicContentBlocks(oauthTextBlock(msg.Content), msg.Images),
+				"content": visionwire.AnthropicOAuthContent(msg.Content, msg.Images),
 			})
 		}
 	}
