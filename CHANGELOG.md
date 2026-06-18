@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.142.1](https://github.com/diillson/chatcli/compare/v1.142.0...v1.142.1) (2026-06-17)
+
+
+### Bug Fixes
+
+* **signals:** SIGINT during an operation must not cancel the session ([#1080](https://github.com/diillson/chatcli/issues/1080)) ([c6b81d3](https://github.com/diillson/chatcli/commit/c6b81d344e91407cae8f8e9644ce85262852d96b))
+
 ## [1.142.0](https://github.com/diillson/chatcli/compare/v1.141.1...v1.142.0) (2026-06-17)
 
 
