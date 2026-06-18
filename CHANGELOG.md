@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.143.0](https://github.com/diillson/chatcli/compare/v1.142.1...v1.143.0) (2026-06-18)
+
+
+### Features
+
+* multimodal vision input + multi-provider image editing ([#1082](https://github.com/diillson/chatcli/issues/1082)) ([cf0f397](https://github.com/diillson/chatcli/commit/cf0f3979fa33f1e8603621daeb71b22f1f75e569))
+
 ## [1.142.1](https://github.com/diillson/chatcli/compare/v1.142.0...v1.142.1) (2026-06-17)
 
 
