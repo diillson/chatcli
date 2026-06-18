@@ -136,11 +136,14 @@ func PreprocessArgs(args []string) []string {
 }
 
 func (cli *ChatCLI) RunOnce(ctx context.Context, input string, disableAnimation bool, rawOutput bool) error {
-	userInput, additionalContext := cli.processSpecialCommands(ctx, input)
+	userInput, additionalContext, images := cli.processSpecialCommands(ctx, input)
+	images, visionDesc := cli.gateImagesForModel(ctx, images)
+	additionalContext += visionDesc
 
 	cli.history = append(cli.history, models.Message{
 		Role:    "user",
 		Content: userInput + additionalContext,
+		Images:  images,
 	})
 
 	// Compact history if over budget. In one-shot mode we keep the status

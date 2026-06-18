@@ -39,15 +39,19 @@ func (cli *ChatCLI) processLLMRequest(parentCtx context.Context, in string) {
 	cli.fireUserPromptSubmitHook(ctx, in)
 	cli.animation.ShowThinkingAnimation(cli.Client.GetModelName())
 
-	userInput, additionalContext := cli.processSpecialCommands(ctx, in)
+	userInput, additionalContext, images := cli.processSpecialCommands(ctx, in)
+	// Vision gating (hybrid B+A): keep native images for vision models, or
+	// fold a textual description into the prompt for text-only models.
+	images, visionDesc := cli.gateImagesForModel(ctx, images)
+	additionalContext += visionDesc
 	// Pull turns that arrived on other channels (Telegram/…) into history so the
 	// model has cross-channel context. Silent — nothing is printed.
 	cli.syncHubContext(ctx)
 	cli.compactHistoryIfNeeded(ctx)
 
 	assembly := cli.assembleChatSystemPrompt(ctx, userInput, additionalContext)
-	tempHistory := cli.buildChatTempHistory(assembly.parts, userInput, additionalContext)
-	userMessage := models.Message{Role: "user", Content: userInput + additionalContext}
+	tempHistory := cli.buildChatTempHistory(assembly.parts, userInput, additionalContext, images)
+	userMessage := models.Message{Role: "user", Content: userInput + additionalContext, Images: images}
 
 	effectiveMaxTokens := cli.getMaxTokensForCurrentLLM()
 	cli.ensureModelCacheWarm(ctx)

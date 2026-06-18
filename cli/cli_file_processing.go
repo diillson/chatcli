@@ -13,13 +13,20 @@ import (
 
 	"github.com/diillson/chatcli/config"
 	"github.com/diillson/chatcli/i18n"
+	"github.com/diillson/chatcli/llm/catalog"
 	"github.com/diillson/chatcli/models"
 	"github.com/diillson/chatcli/utils"
 	"go.uber.org/zap"
 )
 
-func (cli *ChatCLI) processFileCommand(ctx context.Context, userInput string) (string, string) {
+// maxImageAttachmentBytes caps a single attached image. Vision providers
+// reject very large images; this also guards memory on accidental @file of
+// a huge binary.
+const maxImageAttachmentBytes = 20 * 1024 * 1024 // 20 MB
+
+func (cli *ChatCLI) processFileCommand(ctx context.Context, userInput string) (string, string, []models.ImageContent) {
 	var additionalContext string
+	var images []models.ImageContent
 
 	if strings.Contains(strings.ToLower(userInput), "@file") {
 		// Removida a verificação especial para o OpenAI Assistant
@@ -28,7 +35,7 @@ func (cli *ChatCLI) processFileCommand(ctx context.Context, userInput string) (s
 		paths, options, err := extractFileCommandOptions(userInput)
 		if err != nil {
 			cli.logger.Error("Erro ao processar os comandos @file", zap.Error(err))
-			return userInput, fmt.Sprintf("\nErro ao processar @file: %s\n", err.Error())
+			return userInput, fmt.Sprintf("\nErro ao processar @file: %s\n", err.Error()), nil
 		}
 
 		// Usar o modo a partir das opções já extraídas
@@ -43,6 +50,15 @@ func (cli *ChatCLI) processFileCommand(ctx context.Context, userInput string) (s
 
 		// Processar cada caminho encontrado após @file
 		for _, path := range paths {
+			// Vision: se o caminho aponta para um único arquivo de imagem,
+			// anexa os bytes como ImageContent (entrada multimodal) em vez de
+			// inliná-lo como texto ilegível. Diretórios/globs seguem o fluxo
+			// de texto normal.
+			if img, ok := cli.loadImageAttachment(path); ok {
+				images = append(images, img)
+				continue
+			}
+
 			// Configurações de escaneamento
 			scanOptions := utils.DefaultDirectoryScanOptions(cli.logger)
 
@@ -175,7 +191,91 @@ func (cli *ChatCLI) processFileCommand(ctx context.Context, userInput string) (s
 		userInput = removeAllFileCommands(userInput)
 	}
 
-	return userInput, additionalContext
+	return userInput, additionalContext, images
+}
+
+// gateImagesForModel decides what to do with attached images given the active
+// model's capabilities (hybrid B+A strategy):
+//   - Vision-capable model → pass the images through to the provider (path B).
+//   - Otherwise → fall back to a textual description produced by a vision
+//     model (path A), appended to additionalContext, returning no images.
+//
+// It returns the images to attach natively and any text to fold into the
+// prompt. When neither vision nor a describe-fallback is available the images
+// are dropped with a user-facing warning, so a non-vision provider never
+// receives an image it cannot decode.
+func (cli *ChatCLI) gateImagesForModel(ctx context.Context, images []models.ImageContent) ([]models.ImageContent, string) {
+	if len(images) == 0 {
+		return nil, ""
+	}
+	if catalog.HasCapability(cli.Provider, cli.Model, "vision") {
+		return images, ""
+	}
+
+	// Active model has no vision: try the describe-fallback bridge.
+	if desc, ok := cli.describeImagesFallback(ctx, images); ok {
+		cli.logger.Info("vision: modelo sem suporte nativo, usando describe-fallback",
+			zap.String("provider", cli.Provider), zap.String("model", cli.Model),
+			zap.Int("images", len(images)))
+		return nil, desc
+	}
+
+	fmt.Println(i18n.T("vision.warn.model_no_vision", cli.Model))
+	cli.logger.Warn("vision: imagem anexada mas modelo não suporta vision e sem fallback",
+		zap.String("provider", cli.Provider), zap.String("model", cli.Model))
+	return nil, ""
+}
+
+// imageFileExtensions are the extensions we treat as vision attachments.
+var imageFileExtensions = map[string]bool{
+	".png": true, ".jpg": true, ".jpeg": true, ".gif": true, ".webp": true,
+}
+
+// loadImageAttachment reports whether path is a single image file and, if so,
+// reads it into an ImageContent. Directories, oversized files, unreadable
+// paths, and non-image content all return ok=false so the caller falls back
+// to the normal text-scanning flow.
+func (cli *ChatCLI) loadImageAttachment(path string) (models.ImageContent, bool) {
+	expanded, err := utils.ExpandPath(path)
+	if err != nil {
+		expanded = path
+	}
+
+	info, err := os.Stat(expanded)
+	if err != nil || info.IsDir() {
+		return models.ImageContent{}, false
+	}
+
+	// Fast reject by extension only when it is clearly non-image AND large;
+	// otherwise we still sniff, so an extensionless image is detected.
+	ext := strings.ToLower(filepath.Ext(expanded))
+	if info.Size() > maxImageAttachmentBytes {
+		if imageFileExtensions[ext] {
+			cli.logger.Warn("imagem excede o limite de anexo, ignorando",
+				zap.String("path", expanded), zap.Int64("size", info.Size()))
+		}
+		return models.ImageContent{}, false
+	}
+
+	data, err := os.ReadFile(expanded)
+	if err != nil {
+		return models.ImageContent{}, false
+	}
+
+	mime, ok := models.DetectImageMediaType(data)
+	if !ok {
+		// Not a recognized image; let the text path handle it.
+		return models.ImageContent{}, false
+	}
+
+	cli.logger.Debug("imagem anexada via @file",
+		zap.String("path", expanded), zap.String("mime", mime), zap.Int("bytes", len(data)))
+
+	return models.ImageContent{
+		MediaType: mime,
+		Data:      data,
+		FileName:  filepath.Base(expanded),
+	}, true
 }
 
 // extractFileCommandOptions extrai caminhos e opções do comando @file

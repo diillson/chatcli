@@ -66,6 +66,11 @@ type AgentMode struct {
 	isCoderMode      bool
 	isOneShot        bool
 	coderBannerShown bool
+	// pendingUserImages carries vision attachments for the NEXT user turn,
+	// set by the caller right before Run/RunOnce and consumed (then cleared)
+	// when the user message is appended. Transient per-turn state — the Run
+	// reentrancy guard ensures it is never read across concurrent runs.
+	pendingUserImages []models.ImageContent
 	// gatewayPersona layers a messaging-gateway directive on top of the coder
 	// system prompt: keep the coder engine's full tool capability (create/edit
 	// files, run commands, iterate) but answer concisely in plain chat-friendly
@@ -871,7 +876,8 @@ func (a *AgentMode) Run(ctx context.Context, query string, additionalContext str
 		}
 	}
 
-	a.cli.history = append(a.cli.history, models.Message{Role: "user", Content: currentQuery})
+	a.cli.history = append(a.cli.history, models.Message{Role: "user", Content: currentQuery, Images: a.pendingUserImages})
+	a.pendingUserImages = nil
 
 	// Phase 2 (#2): Plan-and-Solve / ReWOO. When the quality config asks
 	// for it (mode=always, mode=auto + high complexity, or the user-set
@@ -1045,7 +1051,15 @@ func (cli *ChatCLI) runCoderQuery(ctx context.Context, query string, gatewayPers
 	defer cli.setExecutionProfile(ProfileNormal)
 
 	// Processar contextos especiais como @file, @git, etc.
-	query, additionalContext := cli.processSpecialCommands(ctx, query)
+	query, additionalContext, images := cli.processSpecialCommands(ctx, query)
+	// Merge images staged from outside the @file flow (e.g. the gateway), then
+	// gate against the active model (native vision vs describe-fallback).
+	if len(cli.pendingInboundImages) > 0 {
+		images = append(images, cli.pendingInboundImages...)
+		cli.pendingInboundImages = nil
+	}
+	images, visionDesc := cli.gateImagesForModel(ctx, images)
+	additionalContext += visionDesc
 	fullQuery := query
 	if additionalContext != "" {
 		fullQuery = query + "\n\nContexto adicional:\n" + additionalContext
@@ -1056,6 +1070,7 @@ func (cli *ChatCLI) runCoderQuery(ctx context.Context, query string, gatewayPers
 		cli.agentMode = NewAgentMode(cli, cli.logger)
 	}
 
+	cli.agentMode.pendingUserImages = images
 	cli.agentMode.isCoderMode = true
 	cli.agentMode.isOneShot = true
 	cli.agentMode.gatewayPersona = gatewayPersona
@@ -1079,7 +1094,8 @@ func (a *AgentMode) RunOnce(ctx context.Context, query string, autoExecute bool)
 	}
 
 	a.cli.history = append(a.cli.history, models.Message{Role: "system", Content: systemInstruction})
-	a.cli.history = append(a.cli.history, models.Message{Role: "user", Content: enrichedQuery})
+	a.cli.history = append(a.cli.history, models.Message{Role: "user", Content: enrichedQuery, Images: a.pendingUserImages})
+	a.pendingUserImages = nil
 
 	a.cli.animation.ShowThinkingAnimation(a.cli.Client.GetModelName())
 

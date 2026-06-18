@@ -27,7 +27,9 @@ func (cli *ChatCLI) RunAgentOnce(ctx context.Context, input string, autoExecute 
 	}
 
 	// Processar contextos especiais como @file, @git, etc.
-	query, additionalContext := cli.processSpecialCommands(ctx, query)
+	query, additionalContext, images := cli.processSpecialCommands(ctx, query)
+	images, visionDesc := cli.gateImagesForModel(ctx, images)
+	additionalContext += visionDesc
 	fullQuery := query
 	if additionalContext != "" {
 		fullQuery = query + "\n\nContexto adicional:\n" + additionalContext
@@ -38,6 +40,7 @@ func (cli *ChatCLI) RunAgentOnce(ctx context.Context, input string, autoExecute 
 		cli.agentMode = NewAgentMode(cli, cli.logger)
 	}
 
+	cli.agentMode.pendingUserImages = images
 	// Chama a nova função não-interativa do AgentMode
 	return cli.agentMode.RunOnce(ctx, fullQuery, autoExecute)
 }

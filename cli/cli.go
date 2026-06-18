@@ -176,6 +176,10 @@ type ChatCLI struct {
 	commandHandler       *CommandHandler
 	lastCommandOutput    string
 	fileChunks           []FileChunk // Chunks pendentes para processamento
+	// pendingInboundImages stages vision attachments for the next coder/agent
+	// run when they arrive from outside the interactive @file flow (e.g. the
+	// messaging gateway). runCoderQuery merges and clears them. Transient.
+	pendingInboundImages []models.ImageContent
 	failedChunks         []FileChunk // Chunks que falharam no processamento
 	lastFailedChunk      *FileChunk  // Referência ao último chunk que falhou
 	agentMode            *AgentMode  // Modo de agente
@@ -1287,12 +1291,15 @@ func (cli *ChatCLI) runAgentLogic(ctx context.Context) {
 		{i18n.T("agent.banner.mode"), i18n.T("agent.banner.mode_value")},
 	})
 
-	query, additionalContext := cli.processSpecialCommands(ctx, query)
+	query, additionalContext, images := cli.processSpecialCommands(ctx, query)
+	images, visionDesc := cli.gateImagesForModel(ctx, images)
+	additionalContext += visionDesc
 
 	if cli.agentMode == nil {
 		cli.agentMode = NewAgentMode(cli, cli.logger)
 	}
 
+	cli.agentMode.pendingUserImages = images
 	cli.agentMode.isOneShot = false // interactive /agent: keep the loop conversational
 	cli.runWithCancellation(ctx, "Agent Mode", func(ctx context.Context) error {
 		return cli.agentMode.Run(ctx, query, additionalContext, "")
@@ -1338,12 +1345,15 @@ func (cli *ChatCLI) runCoderLogic(ctx context.Context) {
 		{i18n.T("coder.banner.policy"), i18n.T("coder.banner.policy_value")},
 	})
 
-	query, additionalContext := cli.processSpecialCommands(ctx, query)
+	query, additionalContext, images := cli.processSpecialCommands(ctx, query)
+	images, visionDesc := cli.gateImagesForModel(ctx, images)
+	additionalContext += visionDesc
 
 	if cli.agentMode == nil {
 		cli.agentMode = NewAgentMode(cli, cli.logger)
 	}
 
+	cli.agentMode.pendingUserImages = images
 	cli.agentMode.isOneShot = false // interactive /coder: wait for input between turns
 	cli.runWithCancellation(ctx, "Coder Mode", func(ctx context.Context) error {
 		return cli.agentMode.Run(ctx, query, additionalContext, CoderSystemPrompt)
