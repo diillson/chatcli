@@ -67,7 +67,7 @@ func TestGatewayCleanLine(t *testing.T) {
 
 func TestGatewayAgentFunc_NoClient(t *testing.T) {
 	c := &ChatCLI{} // Client is nil
-	fn := c.gatewayAgentFunc(newHubSessions(nil, zap.NewNop()), transcription.NewNull())
+	fn := c.gatewayAgentFunc(newHubSessions(nil, zap.NewNop()), transcription.NewNull(), newGatewayImageOutbox())
 	if _, err := fn(context.Background(), "telegram:1", "hi"); err == nil {
 		t.Error("expected error when no active model")
 	}

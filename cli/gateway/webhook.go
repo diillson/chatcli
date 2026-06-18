@@ -76,6 +76,11 @@ type webhookInbound struct {
 	AudioB64  string `json:"audio_b64"`
 	AudioURL  string `json:"audio_url"`
 	AudioMime string `json:"audio_mime"`
+	// Optional image: inline base64 (image_b64, decoded here) or a URL
+	// (image_url, fetched by the adapter). image_mime is best-effort.
+	ImageB64  string `json:"image_b64"`
+	ImageURL  string `json:"image_url"`
+	ImageMime string `json:"image_mime"`
 }
 
 // inboundHandler builds the HTTP handler. Extracted from Start so it can be
@@ -97,7 +102,8 @@ func (w *WebhookAdapter) inboundHandler(ctx context.Context, inbound chan<- Inbo
 			return
 		}
 		w.hydrateAudio(ctx, &msg)
-		if strings.TrimSpace(msg.Text) == "" && msg.Audio == nil {
+		w.hydrateImages(ctx, &msg)
+		if strings.TrimSpace(msg.Text) == "" && msg.Audio == nil && msg.Image == nil {
 			rw.WriteHeader(http.StatusBadRequest)
 			return
 		}
@@ -150,7 +156,19 @@ func (w *WebhookAdapter) Send(ctx context.Context, msg OutboundMessage) error {
 		// No callback configured: nothing to deliver to (inbound-only mode).
 		return nil
 	}
-	payload, _ := json.Marshal(map[string]string{"chat_id": msg.ChatID, "text": msg.Text})
+	out := map[string]string{"chat_id": msg.ChatID, "text": msg.Text}
+	// Image reply: deliver the picture inline as base64 alongside the text so a
+	// generic consumer can render it. The text is never dropped.
+	if msg.Image != nil && len(msg.Image.Data) > 0 {
+		out["image_b64"] = base64.StdEncoding.EncodeToString(msg.Image.Data)
+		if msg.Image.Mime != "" {
+			out["image_mime"] = msg.Image.Mime
+		}
+		if msg.Image.FileName != "" {
+			out["image_filename"] = msg.Image.FileName
+		}
+	}
+	payload, _ := json.Marshal(out)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, w.callbackURL, bytes.NewReader(payload))
 	if err != nil {
 		return err
@@ -195,7 +213,19 @@ func parseWebhookInbound(body []byte) (InboundMessage, bool) {
 		audio = &InboundAudio{ref: strings.TrimSpace(in.AudioURL), MimeType: in.AudioMime}
 	}
 
-	if strings.TrimSpace(in.Text) == "" && audio == nil {
+	var image *InboundImage
+	switch {
+	case strings.TrimSpace(in.ImageB64) != "":
+		data, err := base64.StdEncoding.DecodeString(strings.TrimSpace(in.ImageB64))
+		if err != nil || len(data) == 0 {
+			return InboundMessage{}, false
+		}
+		image = &InboundImage{Data: data, MimeType: in.ImageMime}
+	case strings.TrimSpace(in.ImageURL) != "":
+		image = &InboundImage{ref: strings.TrimSpace(in.ImageURL), MimeType: in.ImageMime}
+	}
+
+	if strings.TrimSpace(in.Text) == "" && audio == nil && image == nil {
 		return InboundMessage{}, false
 	}
 	return InboundMessage{
@@ -204,6 +234,7 @@ func parseWebhookInbound(body []byte) (InboundMessage, bool) {
 		UserID:   in.UserID,
 		Text:     in.Text,
 		Audio:    audio,
+		Image:    image,
 	}, true
 }
 
@@ -223,6 +254,25 @@ func (w *WebhookAdapter) hydrateAudio(ctx context.Context, msg *InboundMessage) 
 	msg.Audio.Data = data
 	if msg.Audio.MimeType == "" {
 		msg.Audio.MimeType = mime
+	}
+}
+
+// hydrateImages fetches an image_url attachment (no auth — the caller owns the
+// URL). An inline base64 image already has Data and is left untouched. On
+// failure it clears Image.
+func (w *WebhookAdapter) hydrateImages(ctx context.Context, msg *InboundMessage) {
+	if msg.Image == nil || len(msg.Image.Data) > 0 {
+		return
+	}
+	data, mime, err := fetchAudioBytes(ctx, w.http, msg.Image.ref, "", maxImageBytes())
+	if err != nil {
+		w.logger.Warn("gateway/webhook: image download failed", zap.String("user", msg.UserID), zap.Error(err))
+		msg.Image = nil
+		return
+	}
+	msg.Image.Data = data
+	if msg.Image.MimeType == "" {
+		msg.Image.MimeType = mime
 	}
 }
 

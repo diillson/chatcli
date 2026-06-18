@@ -7,6 +7,7 @@ package ollama
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -83,7 +84,7 @@ func (c *Client) SendPrompt(ctx context.Context, prompt string, history []models
 	}
 
 	// Monta mensagens a partir do histórico, sem duplicar o prompt (mesma lógica dos outros clientes)
-	msgs := make([]map[string]string, 0, len(history))
+	msgs := make([]map[string]interface{}, 0, len(history))
 	for _, m := range history {
 		role := strings.ToLower(strings.TrimSpace(m.Role))
 		switch role {
@@ -91,12 +92,29 @@ func (c *Client) SendPrompt(ctx context.Context, prompt string, history []models
 		default:
 			role = "user"
 		}
-		msgs = append(msgs, map[string]string{"role": role, "content": m.Content})
+		msg := map[string]interface{}{"role": role, "content": m.Content}
+		// Ollama native /api/chat carries images as an array of raw standard
+		// base64 strings (no data: prefix, no mime) on the message object.
+		// Only images with bytes are usable here — Ollama needs raw bytes,
+		// so URL-only attachments are skipped.
+		if len(m.Images) > 0 {
+			imgs := make([]string, 0, len(m.Images))
+			for _, ic := range m.Images {
+				if !ic.IsValid() || len(ic.Data) == 0 {
+					continue
+				}
+				imgs = append(imgs, base64.StdEncoding.EncodeToString(ic.Data))
+			}
+			if len(imgs) > 0 {
+				msg["images"] = imgs
+			}
+		}
+		msgs = append(msgs, msg)
 	}
 
 	if len(history) == 0 || history[len(history)-1].Role != "user" || history[len(history)-1].Content != prompt {
 		if strings.TrimSpace(prompt) != "" {
-			msgs = append(msgs, map[string]string{"role": "user", "content": prompt})
+			msgs = append(msgs, map[string]interface{}{"role": "user", "content": prompt})
 		}
 	}
 

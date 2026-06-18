@@ -18,6 +18,14 @@ type Message struct {
 	ToolCallID  string         `json:"tool_call_id,omitempty"` // ID when this message is a tool result.
 	SystemParts []ContentBlock `json:"system_parts,omitempty"` // Structured system prompt parts (for cache control).
 
+	// Images carries vision input attached to this turn. Populated for
+	// user messages (an attached/pasted/forwarded image) and consumed by
+	// vision-capable provider adapters, which serialize each entry into
+	// their native image block. Providers without vision ignore it (the
+	// gateway/CLI may instead route through the describe-fallback). The
+	// text in Content still applies — an image usually rides with a caption.
+	Images []ImageContent `json:"images,omitempty"`
+
 	// IsError marks this tool-result message as a business-level
 	// failure (the tool ran, but reported an error: command exit code,
 	// HTTP 4xx, missing file). Provider adapters use it to set the
@@ -65,7 +73,8 @@ func (m *Message) IsValid() bool {
 	if m.Role == "assistant" && len(m.ToolCalls) > 0 {
 		return true
 	}
-	return validRoles[m.Role] && m.Content != ""
+	// A turn carrying an image (with or without a text caption) is valid.
+	return validRoles[m.Role] && (m.Content != "" || len(m.Images) > 0)
 }
 
 // ResponseData representa os dados de resposta da LLM.

@@ -22,6 +22,7 @@ import (
 	"github.com/diillson/chatcli/i18n"
 	"github.com/diillson/chatcli/llm/catalog"
 	"github.com/diillson/chatcli/llm/client"
+	"github.com/diillson/chatcli/llm/internal/visionwire"
 
 	"github.com/diillson/chatcli/models"
 	"github.com/diillson/chatcli/utils"
@@ -93,8 +94,10 @@ func (c *OpenAIClient) SendPrompt(ctx context.Context, prompt string, history []
 		effectiveMaxTokens = c.getMaxTokens() // valor padrão
 	}
 
-	// Construir o array de mensagens APENAS a partir do history
-	messages := []map[string]string{}
+	// Construir o array de mensagens APENAS a partir do history.
+	// map[string]interface{} (não string) para que turnos com imagem
+	// possam carregar um array de parts multimodais via visionwire.
+	messages := []map[string]interface{}{}
 
 	for _, msg := range history {
 		role := strings.ToLower(strings.TrimSpace(msg.Role))
@@ -104,9 +107,9 @@ func (c *OpenAIClient) SendPrompt(ctx context.Context, prompt string, history []
 		default:
 			role = "user"
 		}
-		messages = append(messages, map[string]string{
+		messages = append(messages, map[string]interface{}{
 			"role":    role,
-			"content": msg.Content,
+			"content": visionwire.OpenAIContent(msg.Content, msg.Images),
 		})
 	}
 
@@ -114,7 +117,7 @@ func (c *OpenAIClient) SendPrompt(ctx context.Context, prompt string, history []
 	// adiciona o "prompt" como user aqui.
 	if len(history) == 0 || history[len(history)-1].Role != "user" || history[len(history)-1].Content != prompt {
 		if strings.TrimSpace(prompt) != "" {
-			messages = append(messages, map[string]string{
+			messages = append(messages, map[string]interface{}{
 				"role":    "user",
 				"content": prompt,
 			})
@@ -322,7 +325,7 @@ func (c *OpenAIClient) SendPromptStream(ctx context.Context, prompt string, hist
 		effectiveMaxTokens = c.getMaxTokens()
 	}
 
-	messages := []map[string]string{}
+	messages := []map[string]interface{}{}
 	for _, msg := range history {
 		role := strings.ToLower(strings.TrimSpace(msg.Role))
 		switch role {
@@ -330,11 +333,11 @@ func (c *OpenAIClient) SendPromptStream(ctx context.Context, prompt string, hist
 		default:
 			role = "user"
 		}
-		messages = append(messages, map[string]string{"role": role, "content": msg.Content})
+		messages = append(messages, map[string]interface{}{"role": role, "content": visionwire.OpenAIContent(msg.Content, msg.Images)})
 	}
 	if len(history) == 0 || history[len(history)-1].Role != "user" || history[len(history)-1].Content != prompt {
 		if strings.TrimSpace(prompt) != "" {
-			messages = append(messages, map[string]string{"role": "user", "content": prompt})
+			messages = append(messages, map[string]interface{}{"role": "user", "content": prompt})
 		}
 	}
 

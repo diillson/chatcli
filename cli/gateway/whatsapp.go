@@ -12,7 +12,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"mime/multipart"
 	"net/http"
+	"net/textproto"
 	"os"
 	"strconv"
 	"strings"
@@ -91,8 +93,9 @@ func (a *WhatsAppAdapter) webhookHandler(ctx context.Context, inbound chan<- Inb
 			rw.WriteHeader(http.StatusOK) // ack fast; Meta retries on non-200
 			for _, msg := range parseWhatsAppInbound(body) {
 				a.hydrateAudio(ctx, &msg)
-				if strings.TrimSpace(msg.Text) == "" && msg.Audio == nil {
-					continue // audio download failed and there was no text
+				a.hydrateImages(ctx, &msg)
+				if strings.TrimSpace(msg.Text) == "" && msg.Audio == nil && msg.Image == nil {
+					continue // audio/image download failed and there was no text
 				}
 				select {
 				case inbound <- msg:
@@ -131,6 +134,16 @@ func (a *WhatsAppAdapter) Start(ctx context.Context, inbound chan<- InboundMessa
 
 // Send delivers a reply via the Graph API.
 func (a *WhatsAppAdapter) Send(ctx context.Context, msg OutboundMessage) error {
+	// Image reply: when a picture is attached, upload it to the media endpoint
+	// then send an image message referencing the returned id, with the text as
+	// caption. Falls back to text on any failure so a reply is never lost.
+	if msg.Image != nil && len(msg.Image.Data) > 0 {
+		if err := a.sendPhoto(ctx, msg); err != nil {
+			a.logger.Warn("whatsapp: photo send failed, falling back to text", zap.Error(err))
+		} else {
+			return nil
+		}
+	}
 	payload, _ := json.Marshal(map[string]interface{}{
 		"messaging_product": "whatsapp",
 		"to":                msg.ChatID,
@@ -156,6 +169,105 @@ func (a *WhatsAppAdapter) Send(ctx context.Context, msg OutboundMessage) error {
 	return nil
 }
 
+// sendPhoto delivers an image reply via the two-step Cloud API flow: first
+// upload the bytes to the media endpoint to obtain a media id, then send an
+// image message referencing the id with the text as caption.
+func (a *WhatsAppAdapter) sendPhoto(ctx context.Context, msg OutboundMessage) error {
+	mediaID, err := a.uploadMedia(ctx, msg.Image)
+	if err != nil {
+		return err
+	}
+	image := map[string]string{"id": mediaID}
+	if strings.TrimSpace(msg.Text) != "" {
+		image["caption"] = msg.Text
+	}
+	payload, _ := json.Marshal(map[string]interface{}{
+		"messaging_product": "whatsapp",
+		"to":                msg.ChatID,
+		"type":              "image",
+		"image":             image,
+	})
+	endpoint := fmt.Sprintf("%s/%s/messages", a.graphBase, a.phoneID)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(payload))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+a.accessToken)
+	resp, err := a.http.Do(req)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = resp.Body.Close() }()
+	_, _ = io.Copy(io.Discard, resp.Body)
+	if resp.StatusCode >= 300 {
+		return fmt.Errorf("whatsapp send image status %d", resp.StatusCode)
+	}
+	return nil
+}
+
+// uploadMedia POSTs the image bytes to the /{phone-id}/media endpoint and
+// returns the resulting media id. Filename defaults to "reply.png" and the
+// content type to "image/png" when none is supplied.
+func (a *WhatsAppAdapter) uploadMedia(ctx context.Context, img *OutboundImage) (string, error) {
+	filename := img.FileName
+	if filename == "" {
+		filename = "reply.png"
+	}
+	mime := img.Mime
+	if mime == "" {
+		mime = "image/png"
+	}
+
+	var buf bytes.Buffer
+	w := multipart.NewWriter(&buf)
+	_ = w.WriteField("messaging_product", "whatsapp")
+	_ = w.WriteField("type", mime)
+	header := make(textproto.MIMEHeader)
+	header.Set("Content-Disposition", fmt.Sprintf(`form-data; name="file"; filename=%q`, filename))
+	header.Set("Content-Type", mime)
+	part, err := w.CreatePart(header)
+	if err != nil {
+		return "", err
+	}
+	if _, err := part.Write(img.Data); err != nil {
+		return "", err
+	}
+	if err := w.Close(); err != nil {
+		return "", err
+	}
+
+	endpoint := fmt.Sprintf("%s/%s/media", a.graphBase, a.phoneID)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, &buf)
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Content-Type", w.FormDataContentType())
+	req.Header.Set("Authorization", "Bearer "+a.accessToken)
+	resp, err := a.http.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer func() { _ = resp.Body.Close() }()
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", err
+	}
+	if resp.StatusCode >= 300 {
+		return "", fmt.Errorf("whatsapp media upload status %d", resp.StatusCode)
+	}
+	var up struct {
+		ID string `json:"id"`
+	}
+	if err := json.Unmarshal(body, &up); err != nil {
+		return "", err
+	}
+	if up.ID == "" {
+		return "", fmt.Errorf("whatsapp media upload: empty id")
+	}
+	return up.ID, nil
+}
+
 // whatsAppWebhook mirrors the Cloud API webhook payload (text + audio).
 type whatsAppWebhook struct {
 	Entry []struct {
@@ -171,6 +283,10 @@ type whatsAppWebhook struct {
 						ID       string `json:"id"`
 						MimeType string `json:"mime_type"`
 					} `json:"audio"`
+					Image *struct {
+						ID       string `json:"id"`
+						MimeType string `json:"mime_type"`
+					} `json:"image"`
 				} `json:"messages"`
 			} `json:"value"`
 		} `json:"changes"`
@@ -208,6 +324,13 @@ func parseWhatsAppInbound(body []byte) []InboundMessage {
 						UserID:   m.From,
 						Audio:    &InboundAudio{ref: m.Audio.ID, MimeType: m.Audio.MimeType},
 					})
+				case m.Type == "image" && m.Image != nil && m.Image.ID != "":
+					out = append(out, InboundMessage{
+						Platform: whatsappPlatform,
+						ChatID:   m.From,
+						UserID:   m.From,
+						Image:    &InboundImage{ref: m.Image.ID, MimeType: m.Image.MimeType},
+					})
 				}
 			}
 		}
@@ -222,7 +345,7 @@ func (a *WhatsAppAdapter) hydrateAudio(ctx context.Context, msg *InboundMessage)
 	if msg.Audio == nil || len(msg.Audio.Data) > 0 {
 		return
 	}
-	data, mime, err := a.downloadMedia(ctx, msg.Audio.ref)
+	data, mime, err := a.downloadMedia(ctx, msg.Audio.ref, maxAudioBytes())
 	if err != nil {
 		a.logger.Warn("gateway/whatsapp: voice download failed", zap.String("user", msg.UserID), zap.Error(err))
 		msg.Audio = nil
@@ -234,8 +357,27 @@ func (a *WhatsAppAdapter) hydrateAudio(ctx context.Context, msg *InboundMessage)
 	}
 }
 
-// downloadMedia performs the Graph media lookup then fetches the bytes.
-func (a *WhatsAppAdapter) downloadMedia(ctx context.Context, mediaID string) ([]byte, string, error) {
+// hydrateImages resolves the WhatsApp image media id to its bytes via the same
+// two-step Graph flow as audio. On failure it clears Image.
+func (a *WhatsAppAdapter) hydrateImages(ctx context.Context, msg *InboundMessage) {
+	if msg.Image == nil || len(msg.Image.Data) > 0 {
+		return
+	}
+	data, mime, err := a.downloadMedia(ctx, msg.Image.ref, maxImageBytes())
+	if err != nil {
+		a.logger.Warn("gateway/whatsapp: image download failed", zap.String("user", msg.UserID), zap.Error(err))
+		msg.Image = nil
+		return
+	}
+	msg.Image.Data = data
+	if msg.Image.MimeType == "" {
+		msg.Image.MimeType = mime
+	}
+}
+
+// downloadMedia performs the Graph media lookup then fetches the bytes. limit
+// caps the download (audio and image use different ceilings).
+func (a *WhatsAppAdapter) downloadMedia(ctx context.Context, mediaID string, limit int64) ([]byte, string, error) {
 	endpoint := fmt.Sprintf("%s/%s", a.graphBase, mediaID)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
 	if err != nil {
@@ -264,7 +406,7 @@ func (a *WhatsAppAdapter) downloadMedia(ctx context.Context, mediaID string) ([]
 	if lookup.URL == "" {
 		return nil, "", fmt.Errorf("whatsapp media lookup: empty url")
 	}
-	data, ctype, err := fetchAudioBytes(ctx, a.http, lookup.URL, a.accessToken, maxAudioBytes())
+	data, ctype, err := fetchAudioBytes(ctx, a.http, lookup.URL, a.accessToken, limit)
 	if err != nil {
 		return nil, "", err
 	}

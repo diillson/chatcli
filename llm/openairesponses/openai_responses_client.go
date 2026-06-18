@@ -23,6 +23,7 @@ import (
 	"github.com/diillson/chatcli/i18n"
 	"github.com/diillson/chatcli/llm/catalog"
 	"github.com/diillson/chatcli/llm/client"
+	"github.com/diillson/chatcli/llm/internal/visionwire"
 	"github.com/diillson/chatcli/models"
 	"github.com/diillson/chatcli/utils"
 	"go.uber.org/zap"
@@ -112,6 +113,18 @@ func (c *OpenAIResponsesClient) SendPrompt(ctx context.Context, prompt string, h
 			"input":        conversationInput,
 			"store":        false,
 			"stream":       true,
+		}
+	} else if historyHasImages(history) {
+		// Vision: the Responses API cannot carry images in a flattened text
+		// string, so switch to the structured role+parts input array (same
+		// shape as the OAuth path). Only taken when an image is actually
+		// attached, so text-only requests keep the byte-identical flat path.
+		instructions, conversationInput := buildOAuthPayload(history, prompt)
+		reqBody = map[string]interface{}{
+			"model":             c.model,
+			"instructions":      instructions,
+			"input":             conversationInput,
+			"max_output_tokens": effectiveMaxTokens,
 		}
 	} else {
 		input := buildTextFromHistory(history, "")
@@ -375,11 +388,23 @@ func (c *OpenAIResponsesClient) processStreamResponse(resp *http.Response) (stri
 	return sb.String(), nil
 }
 
+// historyHasImages reports whether any message in the history carries a
+// valid vision attachment, used to decide between the flat-text and the
+// structured input shapes for the Responses API.
+func historyHasImages(history []models.Message) bool {
+	for _, m := range history {
+		if visionwire.HasImages(m.Images) {
+			return true
+		}
+	}
+	return false
+}
+
 // buildOAuthPayload extracts system messages as instructions and builds
 // structured conversation items for the ChatGPT backend Responses API.
-func buildOAuthPayload(history []models.Message, prompt string) (string, []map[string]string) {
+func buildOAuthPayload(history []models.Message, prompt string) (string, []map[string]interface{}) {
 	var instructions strings.Builder
-	var input []map[string]string
+	var input []map[string]interface{}
 
 	for _, m := range history {
 		role := strings.ToLower(strings.TrimSpace(m.Role))
@@ -390,16 +415,16 @@ func buildOAuthPayload(history []models.Message, prompt string) (string, []map[s
 			}
 			instructions.WriteString(m.Content)
 		case "assistant":
-			input = append(input, map[string]string{"role": "assistant", "content": m.Content})
+			input = append(input, map[string]interface{}{"role": "assistant", "content": m.Content})
 		default:
-			input = append(input, map[string]string{"role": "user", "content": m.Content})
+			input = append(input, map[string]interface{}{"role": "user", "content": visionwire.ResponsesUserContent(m.Content, m.Images)})
 		}
 	}
 
 	// Append current prompt if not already the last user message
 	if len(history) == 0 || history[len(history)-1].Role != "user" || history[len(history)-1].Content != prompt {
 		if strings.TrimSpace(prompt) != "" {
-			input = append(input, map[string]string{"role": "user", "content": prompt})
+			input = append(input, map[string]interface{}{"role": "user", "content": prompt})
 		}
 	}
 

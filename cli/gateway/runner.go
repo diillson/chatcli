@@ -67,6 +67,7 @@ type Runner struct {
 	voice          func(ctx context.Context, text string) *OutboundAudio
 	voiceMode      string      // VoiceModeInKind (default) or VoiceModeAlways
 	voicePrefs     *VoicePrefs // per-session overrides set via the @voice tool
+	image          func(ctx context.Context, session string) *OutboundImage
 }
 
 // SetThinkingNotice sets the localized "the assistant is working" message used
@@ -85,6 +86,14 @@ func (r *Runner) SetVoiceSynthesizer(fn func(ctx context.Context, text string) *
 // final reply; any other value (including empty) means VoiceModeInKind — the
 // reply carries audio only when the inbound message itself was voice.
 func (r *Runner) SetVoiceMode(mode string) { r.voiceMode = mode }
+
+// SetImageProvider enables image replies: the runner calls fn with the session
+// key when building the final reply, and attaches any returned image so
+// photo-capable adapters send it. Used to deliver a picture the agent
+// generated/edited during the run. A nil fn (default) keeps replies image-free.
+func (r *Runner) SetImageProvider(fn func(ctx context.Context, session string) *OutboundImage) {
+	r.image = fn
+}
 
 // SetVoicePrefs attaches the per-session preference store. A session's stored
 // choice (set by the user asking in the conversation) outranks the global mode.
@@ -218,6 +227,12 @@ func (r *Runner) handle(ctx context.Context, msg InboundMessage) {
 		if kind == "final" && r.wantsVoice(&msg) {
 			if audio := r.voice(ctx, clipped); audio != nil {
 				out.Audio = audio
+			}
+		}
+		// Attach an image the agent produced during this run (final only).
+		if kind == "final" && r.image != nil {
+			if img := r.image(ctx, msg.SessionKey()); img != nil {
+				out.Image = img
 			}
 		}
 		if err := adapter.Send(ctx, out); err != nil {

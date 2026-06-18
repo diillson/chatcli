@@ -22,6 +22,7 @@ import (
 	"github.com/diillson/chatcli/i18n"
 	"github.com/diillson/chatcli/llm/catalog"
 	"github.com/diillson/chatcli/llm/client"
+	"github.com/diillson/chatcli/llm/internal/visionwire"
 	"github.com/diillson/chatcli/models"
 	"github.com/diillson/chatcli/utils"
 	"go.uber.org/zap"
@@ -94,28 +95,31 @@ func (c *MiniMaxClient) SendPrompt(ctx context.Context, prompt string, history [
 		effectiveMaxTokens = c.getMaxTokens()
 	}
 
-	messages := []map[string]string{}
-	for _, msg := range history {
-		role := strings.ToLower(strings.TrimSpace(msg.Role))
-		if role != "system" && role != "user" && role != "assistant" {
-			role = "user"
-		}
-		messages = append(messages, map[string]string{"role": role, "content": msg.Content})
-	}
-
-	if len(history) == 0 || history[len(history)-1].Role != "user" || history[len(history)-1].Content != prompt {
-		if strings.TrimSpace(prompt) != "" {
-			messages = append(messages, map[string]string{
-				"role":    "user",
-				"content": prompt,
-			})
-		}
-	}
-
 	var payload map[string]interface{}
 	if c.anthropicCompat {
-		payload = c.buildAnthropicPayload(messages, effectiveMaxTokens)
+		payload = c.buildAnthropicPayload(prompt, history, effectiveMaxTokens)
 	} else {
+		messages := []map[string]interface{}{}
+		for _, msg := range history {
+			role := strings.ToLower(strings.TrimSpace(msg.Role))
+			if role != "system" && role != "user" && role != "assistant" {
+				role = "user"
+			}
+			messages = append(messages, map[string]interface{}{
+				"role":    role,
+				"content": visionwire.OpenAIContent(msg.Content, msg.Images),
+			})
+		}
+
+		if len(history) == 0 || history[len(history)-1].Role != "user" || history[len(history)-1].Content != prompt {
+			if strings.TrimSpace(prompt) != "" {
+				messages = append(messages, map[string]interface{}{
+					"role":    "user",
+					"content": prompt,
+				})
+			}
+		}
+
 		payload = map[string]interface{}{
 			"model":      c.model,
 			"messages":   messages,
@@ -261,18 +265,38 @@ func (c *MiniMaxClient) processResponse(resp *http.Response) (string, error) {
 	return firstChoice.Message.Content, nil
 }
 
-// buildAnthropicPayload converts the standard messages format to the Anthropic Messages API format.
-func (c *MiniMaxClient) buildAnthropicPayload(messages []map[string]string, maxTokens int) map[string]interface{} {
+// buildAnthropicPayload converts the conversation history into the Anthropic
+// Messages API format. Image attachments on a turn are serialized as Anthropic
+// image blocks via visionwire.AnthropicContent; text-only turns keep the plain
+// string content (byte-identical to the legacy path).
+func (c *MiniMaxClient) buildAnthropicPayload(prompt string, history []models.Message, maxTokens int) map[string]interface{} {
 	var systemContent string
-	var anthropicMessages []map[string]string
+	var anthropicMessages []map[string]interface{}
 
-	for _, msg := range messages {
-		if msg["role"] == "system" {
-			systemContent = msg["content"]
-		} else {
-			anthropicMessages = append(anthropicMessages, map[string]string{
-				"role":    msg["role"],
-				"content": msg["content"],
+	appendMsg := func(role, content string, imgs []models.ImageContent) {
+		role = strings.ToLower(strings.TrimSpace(role))
+		if role != "system" && role != "user" && role != "assistant" {
+			role = "user"
+		}
+		if role == "system" {
+			systemContent = content
+			return
+		}
+		anthropicMessages = append(anthropicMessages, map[string]interface{}{
+			"role":    role,
+			"content": visionwire.AnthropicContent(content, imgs),
+		})
+	}
+
+	for _, msg := range history {
+		appendMsg(msg.Role, msg.Content, msg.Images)
+	}
+
+	if len(history) == 0 || history[len(history)-1].Role != "user" || history[len(history)-1].Content != prompt {
+		if strings.TrimSpace(prompt) != "" {
+			anthropicMessages = append(anthropicMessages, map[string]interface{}{
+				"role":    "user",
+				"content": prompt,
 			})
 		}
 	}

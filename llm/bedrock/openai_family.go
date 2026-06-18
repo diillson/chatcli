@@ -18,6 +18,7 @@ import (
 
 	"github.com/diillson/chatcli/i18n"
 	"github.com/diillson/chatcli/llm/client"
+	"github.com/diillson/chatcli/llm/internal/visionwire"
 	"github.com/diillson/chatcli/models"
 	"github.com/diillson/chatcli/utils"
 	"go.uber.org/zap"
@@ -113,7 +114,7 @@ func buildOpenAIMessages(prompt string, history []models.Message) []map[string]i
 		case "assistant":
 			messages = append(messages, map[string]interface{}{
 				"role":    "assistant",
-				"content": msg.Content,
+				"content": visionwire.OpenAIContent(msg.Content, msg.Images),
 			})
 		case "system":
 			// SystemParts (with cache_control) have no OpenAI equivalent —
@@ -130,7 +131,7 @@ func buildOpenAIMessages(prompt string, history []models.Message) []map[string]i
 		default:
 			messages = append(messages, map[string]interface{}{
 				"role":    "user",
-				"content": msg.Content,
+				"content": visionwire.OpenAIContent(msg.Content, msg.Images),
 			})
 		}
 	}

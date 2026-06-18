@@ -26,6 +26,7 @@ import (
 	"github.com/diillson/chatcli/i18n"
 	"github.com/diillson/chatcli/llm/catalog"
 	"github.com/diillson/chatcli/llm/client"
+	"github.com/diillson/chatcli/llm/internal/visionwire"
 	"github.com/diillson/chatcli/models"
 	"github.com/diillson/chatcli/utils"
 	"go.uber.org/zap"
@@ -451,15 +452,17 @@ func (c *ClaudeClient) processStreamResponse(resp *http.Response) (string, error
 	return responseText, nil
 }
 
-func (c *ClaudeClient) buildMessagesAndSystem(prompt string, history []models.Message) ([]map[string]string, interface{}) {
-	var messages []map[string]string
+func (c *ClaudeClient) buildMessagesAndSystem(prompt string, history []models.Message) ([]map[string]interface{}, interface{}) {
+	// map[string]interface{} (não string) para que o conteúdo possa ser um
+	// array de blocos (imagem + texto) em turnos com vision via visionwire.
+	var messages []map[string]interface{}
 	var systemBlocks []map[string]interface{}
 	var plainSystemParts []string
 
 	for _, msg := range history {
 		switch strings.ToLower(strings.TrimSpace(msg.Role)) {
 		case "assistant":
-			messages = append(messages, map[string]string{"role": "assistant", "content": msg.Content})
+			messages = append(messages, map[string]interface{}{"role": "assistant", "content": visionwire.AnthropicContent(msg.Content, msg.Images)})
 		case "system":
 			// If structured SystemParts are available, use them for cache_control
 			if len(msg.SystemParts) > 0 {
@@ -479,13 +482,13 @@ func (c *ClaudeClient) buildMessagesAndSystem(prompt string, history []models.Me
 				plainSystemParts = append(plainSystemParts, msg.Content)
 			}
 		default:
-			messages = append(messages, map[string]string{"role": "user", "content": msg.Content})
+			messages = append(messages, map[string]interface{}{"role": "user", "content": visionwire.AnthropicContent(msg.Content, msg.Images)})
 		}
 	}
 
 	if len(history) == 0 || history[len(history)-1].Role != "user" || history[len(history)-1].Content != prompt {
 		if strings.TrimSpace(prompt) != "" {
-			messages = append(messages, map[string]string{"role": "user", "content": prompt})
+			messages = append(messages, map[string]interface{}{"role": "user", "content": prompt})
 		}
 	}
 
@@ -518,7 +521,7 @@ func (c *ClaudeClient) buildOAuthMessagesAndSystem(prompt string, history []mode
 		case "assistant":
 			messages = append(messages, map[string]interface{}{
 				"role":    "assistant",
-				"content": []interface{}{oauthTextBlock(msg.Content)},
+				"content": visionwire.AnthropicOAuthContent(msg.Content, msg.Images),
 			})
 		case "system":
 			// If structured SystemParts are available, use them for cache_control
@@ -541,7 +544,7 @@ func (c *ClaudeClient) buildOAuthMessagesAndSystem(prompt string, history []mode
 		default:
 			messages = append(messages, map[string]interface{}{
 				"role":    "user",
-				"content": []interface{}{oauthTextBlock(msg.Content)},
+				"content": visionwire.AnthropicOAuthContent(msg.Content, msg.Images),
 			})
 		}
 	}

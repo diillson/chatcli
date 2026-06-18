@@ -22,6 +22,7 @@ import (
 	"github.com/diillson/chatcli/i18n"
 	"github.com/diillson/chatcli/llm/catalog"
 	"github.com/diillson/chatcli/llm/client"
+	"github.com/diillson/chatcli/llm/internal/visionwire"
 	"github.com/diillson/chatcli/models"
 	"github.com/diillson/chatcli/utils"
 	"go.uber.org/zap"
@@ -167,20 +168,16 @@ func (c *GeminiClient) buildContentsAndSystem(history []models.Message, prompt s
 		switch strings.ToLower(msg.Role) {
 		case "assistant":
 			contents = append(contents, map[string]interface{}{
-				"role": "model",
-				"parts": []map[string]string{
-					{"text": msg.Content},
-				},
+				"role":  "model",
+				"parts": visionwire.GeminiParts(msg.Content, msg.Images),
 			})
 		case "system":
 			// Gemini v1beta aceita system_instruction como top-level.
 			systemParts = append(systemParts, map[string]string{"text": msg.Content})
 		default: // "user"
 			contents = append(contents, map[string]interface{}{
-				"role": "user",
-				"parts": []map[string]string{
-					{"text": msg.Content},
-				},
+				"role":  "user",
+				"parts": visionwire.GeminiParts(msg.Content, msg.Images),
 			})
 		}
 	}

@@ -171,6 +171,7 @@ var envDefaults = map[string]envDefault{
 	"CHATCLI_TRANSCRIPTION_LANG":      {Value: "(auto)", Source: "transcription.NewFromEnv"},
 	"CHATCLI_TRANSCRIPTION_CACHE_DIR": {Value: "(os cache dir)", Source: "transcription embedded engine/model cache"},
 	"CHATCLI_GATEWAY_MAX_AUDIO_BYTES": {Value: "20971520", Source: "gateway.defaultMaxAudioBytes"},
+	"CHATCLI_GATEWAY_MAX_IMAGE_BYTES": {Value: "20971520", Source: "gateway.defaultMaxImageBytes"},
 
 	// ─── Text-to-speech (@speak + gateway voice replies) ─────────
 	"CHATCLI_TTS_PROVIDER":        {Value: "auto", Source: "tts.NewFromEnv: auto|embedded|command|url|openai|groq|google"},
@@ -179,12 +180,20 @@ var envDefaults = map[string]envDefault{
 	"CHATCLI_TTS_VOICE_PT":        {Value: "pm_alex", Source: "tts embedded voice for Portuguese replies"},
 	"CHATCLI_TTS_CACHE_DIR":       {Value: "(os cache dir)", Source: "tts embedded engine/model cache"},
 	"CHATCLI_GATEWAY_VOICE_REPLY": {Value: "auto", Source: "gateway voice reply: auto|always|never"},
+	"CHATCLI_GATEWAY_IMAGE_REPLY": {Value: "auto", Source: "gateway image reply: auto|never"},
 
-	// ─── Image generation (@image) ───────────────────────────────
-	"CHATCLI_IMAGE_PROVIDER": {Value: "auto", Source: "imagegen.NewFromEnv"},
-	"CHATCLI_IMAGE_API":      {Value: "images", Source: "imagegen (images|responses)"},
-	"CHATCLI_IMAGE_URL":      {Value: "(none)", Source: "imagegen self-hosted endpoint"},
-	"CHATCLI_IMAGE_MODEL":    {Value: "gpt-image-1", Source: "imagegen.defaultImageModel"},
+	// ─── Image generation/editing (@image) ───────────────────────
+	"CHATCLI_IMAGE_PROVIDER":      {Value: "auto", Source: "imagegen.NewFromEnv"},
+	"CHATCLI_IMAGE_API":           {Value: "images", Source: "imagegen (images|responses)"},
+	"CHATCLI_IMAGE_URL":           {Value: "(none)", Source: "imagegen self-hosted endpoint"},
+	"CHATCLI_IMAGE_MODEL":         {Value: "gpt-image-1", Source: "imagegen.defaultImageModel"},
+	"CHATCLI_IMAGE_EDIT_PROVIDER": {Value: "(inherit)", Source: "imagegen edit fallback when active provider can't edit"},
+	"CHATCLI_IMAGE_EDIT_MODEL":    {Value: "(default)", Source: "imagegen edit fallback model"},
+
+	// ─── Vision input (image understanding / describe-fallback) ───
+	"CHATCLI_VISION_INPUT":    {Value: "auto", Source: "vision input mode: auto|native|describe|off"},
+	"CHATCLI_VISION_PROVIDER": {Value: "(auto)", Source: "vision describe-fallback provider override"},
+	"CHATCLI_VISION_MODEL":    {Value: "(auto)", Source: "vision describe-fallback model override"},
 
 	// ─── Gateway: @send home channels (proactive outbound) ───────
 	"CHATCLI_TELEGRAM_HOME_CHANNEL": {Value: "(none)", Source: "send_adapter.go (@send default target)"},

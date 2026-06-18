@@ -16,7 +16,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"mime/multipart"
 	"net/http"
+	"net/textproto"
 	"strings"
 	"time"
 
@@ -31,6 +33,7 @@ const (
 	defaultImageModel = "gpt-image-1"
 	imageGenTimeout   = 180 * time.Second
 	imagesPath        = "/images/generations"
+	imagesEditPath    = "/images/edits"
 	maxErrBody        = 300
 )
 
@@ -42,8 +45,14 @@ type OpenAICompatible struct {
 	label    string
 	omitSize bool // some servers (xAI grok-image) reject the "size" field
 	omitN    bool // some servers (Z.AI CogView/GLM-Image) reject the "n" field
+	canEdit  bool // whether the endpoint exposes /images/edits (OpenAI, self-hosted) vs generate-only (xAI, Z.AI)
 	client   *http.Client
 }
+
+// supportsEdit reports whether this endpoint exposes image editing. Set by the
+// factory: true for OpenAI proper and self-hosted OpenAI-compatible servers,
+// false for generation-only providers (xAI Aurora/grok-image, Z.AI CogView).
+func (o *OpenAICompatible) supportsEdit() bool { return o.canEdit }
 
 // NewOpenAICompatible builds the provider. baseURL is required; apiKey may be
 // empty for keyless self-hosted servers; model falls back to dall-e-3.
@@ -124,13 +133,145 @@ func (o *OpenAICompatible) Generate(ctx context.Context, prompt string, opts Opt
 		return nil, fmt.Errorf("imagegen: %s returned %d: %s", o.label, resp.StatusCode, strings.TrimSpace(string(snippet)))
 	}
 
+	return o.decodeImageResponse(ctx, resp.Body)
+}
+
+// Edit posts the input image and prompt to the /images/edits endpoint as
+// multipart/form-data (required by OpenAI image edits). gpt-image-1 returns
+// b64_json; legacy shapes returning a URL are handled too. Only the first
+// input image is sent as the primary `image` (with any extra inputs appended
+// as image[] for models that accept multiple references).
+func (o *OpenAICompatible) Edit(ctx context.Context, prompt string, inputs []Image, opts EditOptions) ([]Image, error) {
+	if strings.TrimSpace(prompt) == "" {
+		return nil, fmt.Errorf("imagegen: empty prompt")
+	}
+	if len(inputs) == 0 || len(inputs[0].Data) == 0 {
+		return nil, fmt.Errorf("imagegen: edit requires an input image")
+	}
+	n := opts.N
+	if n <= 0 {
+		n = 1
+	}
+
+	var buf bytes.Buffer
+	mw := multipart.NewWriter(&buf)
+	if err := mw.WriteField("model", o.model); err != nil {
+		return nil, err
+	}
+	if err := mw.WriteField("prompt", prompt); err != nil {
+		return nil, err
+	}
+	if !o.omitN {
+		_ = mw.WriteField("n", fmt.Sprintf("%d", n))
+	}
+	if !o.omitSize && opts.Size != "" {
+		_ = mw.WriteField("size", opts.Size)
+	}
+	// Primary image plus optional additional references.
+	for i, in := range inputs {
+		if len(in.Data) == 0 {
+			continue
+		}
+		field := "image"
+		if i > 0 {
+			field = "image[]"
+		}
+		// IMPORTANT: set the part's Content-Type explicitly. The stdlib's
+		// CreateFormFile always writes application/octet-stream, which OpenAI's
+		// /images/edits rejects ("unsupported mimetype"). Derive it from the
+		// image's MIME (sniffed at load time), falling back to the extension.
+		if err := writeImagePart(mw, field, imageFormName(in, i), partContentType(in), in.Data); err != nil {
+			return nil, err
+		}
+	}
+	if len(opts.Mask) > 0 {
+		if err := writeImagePart(mw, "mask", "mask.png", "image/png", opts.Mask); err != nil {
+			return nil, err
+		}
+	}
+	if err := mw.Close(); err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, o.baseURL+imagesEditPath, &buf)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", mw.FormDataContentType())
+	if o.apiKey != "" {
+		req.Header.Set("Authorization", "Bearer "+o.apiKey)
+	}
+	resp, err := o.client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("imagegen: request failed: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK {
+		snippet, _ := io.ReadAll(io.LimitReader(resp.Body, maxErrBody))
+		return nil, fmt.Errorf("imagegen: %s edit returned %d: %s", o.label, resp.StatusCode, strings.TrimSpace(string(snippet)))
+	}
+	return o.decodeImageResponse(ctx, resp.Body)
+}
+
+// imageFormName returns a plausible multipart filename with the right
+// extension so the server infers the content type.
+func imageFormName(in Image, i int) string {
+	ext := in.Ext
+	if ext == "" {
+		ext = "png"
+	}
+	return fmt.Sprintf("image-%d.%s", i, ext)
+}
+
+// partContentType resolves the MIME type for a multipart image part: the
+// image's own Mime when present, otherwise inferred from its extension, with a
+// png fallback. OpenAI's /images/edits validates this header.
+func partContentType(in Image) string {
+	if in.Mime != "" {
+		return in.Mime
+	}
+	switch strings.ToLower(in.Ext) {
+	case "jpg", "jpeg":
+		return "image/jpeg"
+	case "webp":
+		return "image/webp"
+	case "gif":
+		return "image/gif"
+	default:
+		return "image/png"
+	}
+}
+
+// writeImagePart writes a multipart file part with an explicit Content-Type
+// header (CreateFormFile would hardcode application/octet-stream).
+func writeImagePart(mw *multipart.Writer, field, filename, contentType string, data []byte) error {
+	h := make(textproto.MIMEHeader)
+	h.Set("Content-Disposition",
+		fmt.Sprintf(`form-data; name="%s"; filename="%s"`, escapeQuotes(field), escapeQuotes(filename)))
+	h.Set("Content-Type", contentType)
+	fw, err := mw.CreatePart(h)
+	if err != nil {
+		return err
+	}
+	_, err = fw.Write(data)
+	return err
+}
+
+// escapeQuotes mirrors the stdlib's multipart quoting for header values.
+func escapeQuotes(s string) string {
+	return strings.NewReplacer("\\", "\\\\", `"`, "\\\"").Replace(s)
+}
+
+// decodeImageResponse parses the shared {data:[{b64_json|url}]} response
+// produced by both /images/generations and /images/edits.
+func (o *OpenAICompatible) decodeImageResponse(ctx context.Context, body io.Reader) ([]Image, error) {
 	var out struct {
 		Data []struct {
 			B64 string `json:"b64_json"`
 			URL string `json:"url"`
 		} `json:"data"`
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+	if err := json.NewDecoder(body).Decode(&out); err != nil {
 		return nil, fmt.Errorf("imagegen: decode response: %w", err)
 	}
 	if len(out.Data) == 0 {

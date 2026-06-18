@@ -22,6 +22,7 @@ import (
 	"github.com/diillson/chatcli/i18n"
 	"github.com/diillson/chatcli/llm/catalog"
 	"github.com/diillson/chatcli/llm/client"
+	"github.com/diillson/chatcli/llm/internal/visionwire"
 	"github.com/diillson/chatcli/llm/toolshim"
 	"github.com/diillson/chatcli/models"
 	"github.com/diillson/chatcli/utils"
@@ -99,7 +100,7 @@ func (c *OpenRouterClient) buildMessages(prompt string, history []models.Message
 
 		msgMap := map[string]interface{}{
 			"role":    role,
-			"content": msg.Content,
+			"content": visionwire.OpenAIContent(msg.Content, msg.Images),
 		}
 
 		// Preserve tool_call_id for tool response messages and prefix

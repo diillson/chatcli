@@ -22,10 +22,46 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 
 	"github.com/diillson/chatcli/i18n"
 	"github.com/diillson/chatcli/llm/imagegen"
+	"github.com/diillson/chatcli/models"
 )
+
+// generatedImagesRegistry records the file paths of images produced by the
+// most recent @image gen/edit calls, so an out-of-band consumer (the messaging
+// gateway) can attach the picture to its reply. It is a small bounded buffer
+// guarded by a mutex; the consumer drains it with TakeGeneratedImages. In
+// interactive use nothing drains it, so it self-bounds at maxRecordedImages.
+var generatedImagesRegistry struct {
+	mu    sync.Mutex
+	paths []string
+}
+
+const maxRecordedImages = 16
+
+// RecordGeneratedImages appends freshly written image paths to the registry.
+func RecordGeneratedImages(paths ...string) {
+	if len(paths) == 0 {
+		return
+	}
+	generatedImagesRegistry.mu.Lock()
+	defer generatedImagesRegistry.mu.Unlock()
+	generatedImagesRegistry.paths = append(generatedImagesRegistry.paths, paths...)
+	if n := len(generatedImagesRegistry.paths); n > maxRecordedImages {
+		generatedImagesRegistry.paths = generatedImagesRegistry.paths[n-maxRecordedImages:]
+	}
+}
+
+// TakeGeneratedImages returns and clears the recorded image paths.
+func TakeGeneratedImages() []string {
+	generatedImagesRegistry.mu.Lock()
+	defer generatedImagesRegistry.mu.Unlock()
+	out := generatedImagesRegistry.paths
+	generatedImagesRegistry.paths = nil
+	return out
+}
 
 // BuiltinImagePlugin is the @image tool.
 type BuiltinImagePlugin struct{}
@@ -38,7 +74,7 @@ func (*BuiltinImagePlugin) Name() string { return "@image" }
 
 // Description surfaces the tool.
 func (*BuiltinImagePlugin) Description() string {
-	return "Generate images from a text prompt using the configured backend (self-hosted Stable Diffusion WebUI, a compatible endpoint, or OpenAI) and save them to file. Use when asked to 'generate an image of', 'create a picture', 'draw', 'make an illustration'."
+	return "Generate OR edit images using the configured backend (self-hosted Stable Diffusion WebUI, a compatible endpoint, or OpenAI) and save them to file. Use 'gen' when asked to 'generate an image of', 'create a picture', 'draw', 'make an illustration'; use 'edit' when asked to 'edit', 'modify', 'change', 'alter' an existing image (image-to-image / img2img)."
 }
 
 // Usage explains the canonical invocation.
@@ -51,6 +87,12 @@ Subcommands (cmd + args):
        size    optional WxH (default 1024x1024)
        n       optional number of images (default 1)
        out     optional output file path (single image) or directory (multiple)
+  edit {prompt, image, images?, mask?, strength?, size?, n?, out?}
+       prompt    how to transform the image (required)
+       image     path to the input image (required; or "images" for several)
+       mask      optional path to a PNG mask for inpainting
+       strength  optional 0..1 — how much to change the input (img2img)
+       out       optional output file path or directory
   status  show the effective image backend
   models  list image-capable models (catalog + your OpenAI account)`
 }
@@ -76,6 +118,17 @@ func (*BuiltinImagePlugin) Schema() string {
 					{"name": "out", "type": "string", "required": false, "description": "Output file (single) or directory (multiple)."},
 				},
 				"examples": []string{`{"cmd":"gen","args":{"prompt":"a watercolor fox","size":"1024x1024"}}`},
+			},
+			{
+				"name":        "edit",
+				"description": "Edit/transform an existing image (image-to-image) guided by a prompt.",
+				"flags": []map[string]interface{}{
+					{"name": "prompt", "type": "string", "required": true, "description": "How to transform the image."},
+					{"name": "image", "type": "string", "required": true, "description": "Path to the input image."},
+					{"name": "strength", "type": "number", "required": false, "description": "0..1 how much to change the input (img2img)."},
+					{"name": "out", "type": "string", "required": false, "description": "Output file or directory."},
+				},
+				"examples": []string{`{"cmd":"edit","args":{"prompt":"make it look like winter","image":"/tmp/photo.png"}}`},
 			},
 			{
 				"name":        "status",
@@ -139,10 +192,93 @@ func (p *BuiltinImagePlugin) ExecuteWithStream(ctx context.Context, args []strin
 		if err != nil {
 			return "", fmt.Errorf("@image: %w", err)
 		}
+		RecordGeneratedImages(paths...)
 		return i18n.T("image.tool.generated", len(paths), provider.Name(), strings.Join(paths, "\n  ")), nil
+	case "edit":
+		var in struct {
+			Prompt   string   `json:"prompt"`
+			Image    string   `json:"image"`
+			Images   []string `json:"images"`
+			Mask     string   `json:"mask"`
+			Size     string   `json:"size"`
+			N        int      `json:"n"`
+			Strength float64  `json:"strength"`
+			Out      string   `json:"out"`
+		}
+		_ = json.Unmarshal([]byte(inner), &in)
+		if strings.TrimSpace(in.Prompt) == "" {
+			return "", errors.New(`@image edit: "prompt" is required`)
+		}
+		paths := in.Images
+		if len(paths) == 0 && strings.TrimSpace(in.Image) != "" {
+			paths = []string{in.Image}
+		}
+		if len(paths) == 0 {
+			return "", errors.New(`@image edit: "image" (path) is required`)
+		}
+		if imagegen.IsNull(provider) {
+			return "", imagegen.ErrDisabled
+		}
+		// Editing inherits the configured backend (the one /model-image picks).
+		// Only if that backend can't edit does ResolveEditor route to an
+		// edit-capable fallback — reported below so the switch is explicit.
+		editor, used, fellBack, ok := imagegen.ResolveEditor(ctx, provider, nil)
+		if !ok {
+			return "", fmt.Errorf("@image: backend %q does not support image editing and no edit-capable fallback is configured. Editing backends: sdwebui (img2img, keyless), openai (gpt-image-1), google (Gemini image), bedrock (Stability/Nova). Set CHATCLI_IMAGE_EDIT_PROVIDER or switch the image provider. Generation-only: xai, zai, minimax", provider.Name())
+		}
+		inputs, err := loadInputImages(paths)
+		if err != nil {
+			return "", fmt.Errorf("@image edit: %w", err)
+		}
+		opts := imagegen.EditOptions{Size: in.Size, N: in.N, Strength: in.Strength}
+		if strings.TrimSpace(in.Mask) != "" {
+			if mask, mErr := os.ReadFile(in.Mask); mErr == nil {
+				opts.Mask = mask
+			}
+		}
+		images, err := editor.Edit(ctx, in.Prompt, inputs, opts)
+		if err != nil {
+			return "", fmt.Errorf("@image: %w", err)
+		}
+		outPaths, err := writeImages(in.Out, images)
+		if err != nil {
+			return "", fmt.Errorf("@image: %w", err)
+		}
+		RecordGeneratedImages(outPaths...)
+		msg := i18n.T("image.tool.edited", len(outPaths), used, strings.Join(outPaths, "\n  "))
+		if fellBack {
+			// Configured backend can't edit; we routed to one that can.
+			msg = i18n.T("image.edit.routed", provider.Name(), used) + "\n" + msg
+		}
+		return msg, nil
 	default:
-		return "", fmt.Errorf("@image: unknown cmd %q (valid: gen|status)", cmd)
+		return "", fmt.Errorf("@image: unknown cmd %q (valid: gen|edit|status|models)", cmd)
 	}
+}
+
+// loadInputImages reads the given file paths into imagegen.Image values,
+// inferring the MIME/extension from the bytes.
+func loadInputImages(paths []string) ([]imagegen.Image, error) {
+	out := make([]imagegen.Image, 0, len(paths))
+	for _, p := range paths {
+		data, err := os.ReadFile(p) //#nosec G304 -- user/agent-specified image path for @image edit
+		if err != nil {
+			return nil, fmt.Errorf("read %q: %w", p, err)
+		}
+		mime, ok := models.DetectImageMediaType(data)
+		if !ok {
+			return nil, fmt.Errorf("%q is not a supported image", p)
+		}
+		ext := strings.TrimPrefix(filepath.Ext(p), ".")
+		if ext == "" {
+			ext = strings.TrimPrefix(mime, "image/")
+		}
+		out = append(out, imagegen.Image{Data: data, Mime: mime, Ext: ext})
+	}
+	if len(out) == 0 {
+		return nil, errors.New("no readable input images")
+	}
+	return out, nil
 }
 
 // writeImages saves the images. With one image and an out file path, it writes
@@ -227,6 +363,8 @@ func canonicalImageCmd(s string) string {
 	switch strings.ToLower(strings.TrimSpace(s)) {
 	case "gen", "generate", "create", "draw", "image":
 		return "gen"
+	case "edit", "img2img", "modify", "alter", "change":
+		return "edit"
 	case "status", "backend":
 		return "status"
 	case "models", "catalog", "list":

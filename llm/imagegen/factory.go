@@ -149,6 +149,86 @@ func NewFromEnvContext(ctx context.Context, logger *zap.Logger) Provider {
 	return NewNull()
 }
 
+// ResolveEditor returns an edit-capable provider for image editing. It first
+// honors the CONFIGURED backend (the one /model-image / CHATCLI_IMAGE_* selects)
+// so a single model choice serves both generation and editing. Only when that
+// backend cannot edit (xAI, Z.AI, MiniMax, Imagen-predict) does it route to an
+// edit-capable fallback, reporting the backend actually used so the caller can
+// tell the user a switch happened. Returns ok=false when no editor is reachable.
+func ResolveEditor(ctx context.Context, primary Provider, logger *zap.Logger) (ed Editor, used string, fellBack bool, ok bool) {
+	if logger == nil {
+		logger = zap.NewNop()
+	}
+	if e, isEd := AsEditor(primary); isEd {
+		return e, primary.Name(), false, true
+	}
+	if fb, name := editorFallback(ctx, logger); fb != nil {
+		return fb, name, true, true
+	}
+	return nil, "", false, false
+}
+
+// editorFallback picks an edit-capable backend when the configured one can't
+// edit. Order: explicit CHATCLI_IMAGE_EDIT_PROVIDER → self-hosted SD WebUI (if a
+// URL is configured, keyless) → OpenAI → Google → Bedrock, each gated on its
+// credential being present so it never routes to a backend that can't run.
+func editorFallback(ctx context.Context, logger *zap.Logger) (Editor, string) {
+	if ep := strings.ToLower(strings.TrimSpace(os.Getenv("CHATCLI_IMAGE_EDIT_PROVIDER"))); ep != "" {
+		if p := buildEditProvider(ctx, ep, strings.TrimSpace(os.Getenv("CHATCLI_IMAGE_EDIT_MODEL")), logger); p != nil {
+			if e, ok := AsEditor(p); ok {
+				return e, p.Name()
+			}
+		}
+	}
+	if url := strings.TrimSpace(os.Getenv("CHATCLI_IMAGE_URL")); url != "" {
+		if e, ok := AsEditor(sdOrNull(url, logger)); ok {
+			return e, "sdwebui"
+		}
+	}
+	if strings.TrimSpace(os.Getenv("OPENAI_API_KEY")) != "" {
+		if e, ok := AsEditor(cloudOrNull(openAIBaseURL, os.Getenv("OPENAI_API_KEY"), defaultImageModel, "openai", logger, "")); ok {
+			return e, "openai"
+		}
+	}
+	if googleImageKey() != "" {
+		if e, ok := AsEditor(googleOrNull(defaultGeminiImageModel, logger, "")); ok {
+			return e, "google"
+		}
+	}
+	if bedrockImageRegion() != "" {
+		if e, ok := AsEditor(bedrockOrNull(ctx, "", logger)); ok {
+			return e, "bedrock"
+		}
+	}
+	return nil, ""
+}
+
+// buildEditProvider builds a specific backend by name for the explicit
+// CHATCLI_IMAGE_EDIT_PROVIDER override.
+func buildEditProvider(ctx context.Context, name, model string, logger *zap.Logger) Provider {
+	switch name {
+	case "sdwebui", "automatic1111", "sd":
+		return sdOrNull(strings.TrimSpace(os.Getenv("CHATCLI_IMAGE_URL")), logger)
+	case "url", "selfhosted":
+		return selfHostedOrNull(strings.TrimSpace(os.Getenv("CHATCLI_IMAGE_URL")), model, logger)
+	case "openai":
+		m := model
+		if m == "" {
+			m = defaultImageModel
+		}
+		return cloudOrNull(openAIBaseURL, os.Getenv("OPENAI_API_KEY"), m, "openai", logger, "")
+	case "google", "gemini", "imagen":
+		m := model
+		if m == "" {
+			m = defaultGeminiImageModel
+		}
+		return googleOrNull(m, logger, "")
+	case "bedrock", "aws":
+		return bedrockOrNull(ctx, model, logger)
+	}
+	return nil
+}
+
 // bedrockOrNull builds the AWS Bedrock image backend (Nova Canvas / Titan),
 // loading credentials from the standard AWS chain.
 func bedrockOrNull(ctx context.Context, model string, logger *zap.Logger) Provider {
@@ -290,6 +370,9 @@ func selfHostedOrNull(url, model string, logger *zap.Logger) Provider {
 		logger.Warn("imagegen: invalid CHATCLI_IMAGE_URL; image generation disabled", zap.Error(err))
 		return NewNull()
 	}
+	// A self-hosted OpenAI-compatible server (LocalAI, etc.) generally exposes
+	// /images/edits; enable editing and let the endpoint reject if it doesn't.
+	p.canEdit = true
 	return p
 }
 
@@ -345,5 +428,8 @@ func cloudOrNull(baseURL, key, model, label string, logger *zap.Logger, missingM
 		logger.Warn("imagegen: provider init failed; image generation disabled", zap.Error(err))
 		return NewNull()
 	}
+	// OpenAI proper exposes /images/edits (gpt-image-1). Other cloud labels
+	// routed through this helper are generation-only.
+	p.canEdit = label == "openai"
 	return p
 }

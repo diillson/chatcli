@@ -184,7 +184,7 @@ func TestBuildChatTempHistory_OrderingInvariant(t *testing.T) {
 		},
 	}
 	parts := []models.ContentBlock{{Type: "text", Text: "new-system"}}
-	out := cli.buildChatTempHistory(parts, "u2", " ctx")
+	out := cli.buildChatTempHistory(parts, "u2", " ctx", nil)
 
 	// Expected: [new-system, old-system, u1, a1, u2+ ctx]
 	if len(out) != 5 {
@@ -211,7 +211,7 @@ func TestBuildChatTempHistory_NoSystemParts(t *testing.T) {
 	cli := &ChatCLI{
 		history: []models.Message{{Role: "user", Content: "u1"}},
 	}
-	out := cli.buildChatTempHistory(nil, "u2", "")
+	out := cli.buildChatTempHistory(nil, "u2", "", nil)
 	// No parts → no new system message; history is just [u1, u2].
 	if len(out) != 2 {
 		t.Fatalf("len = %d, want 2", len(out))

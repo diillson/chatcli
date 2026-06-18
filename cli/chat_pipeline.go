@@ -464,7 +464,7 @@ func (cli *ChatCLI) watcherContextPart() (models.ContentBlock, bool) {
 // The current user turn is appended last. cli.history is NOT mutated — that
 // happens only after a successful LLM response.
 func (cli *ChatCLI) buildChatTempHistory(
-	parts []models.ContentBlock, userInput, additionalContext string,
+	parts []models.ContentBlock, userInput, additionalContext string, images []models.ImageContent,
 ) []models.Message {
 	// Purge stale `[ACTIVE MODE: …]` system messages left behind by a
 	// previous /agent or /coder run in the same session. Without this,
@@ -492,6 +492,7 @@ func (cli *ChatCLI) buildChatTempHistory(
 	tempHistory = append(tempHistory, models.Message{
 		Role:    "user",
 		Content: userInput + additionalContext,
+		Images:  images,
 	})
 	return tempHistory
 }
