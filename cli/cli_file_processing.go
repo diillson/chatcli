@@ -13,7 +13,6 @@ import (
 
 	"github.com/diillson/chatcli/config"
 	"github.com/diillson/chatcli/i18n"
-	"github.com/diillson/chatcli/llm/catalog"
 	"github.com/diillson/chatcli/models"
 	"github.com/diillson/chatcli/utils"
 	"go.uber.org/zap"
@@ -195,35 +194,40 @@ func (cli *ChatCLI) processFileCommand(ctx context.Context, userInput string) (s
 }
 
 // gateImagesForModel decides what to do with attached images given the active
-// model's capabilities (hybrid B+A strategy):
-//   - Vision-capable model → pass the images through to the provider (path B).
-//   - Otherwise → fall back to a textual description produced by a vision
-//     model (path A), appended to additionalContext, returning no images.
+// model (hybrid B+A strategy). It resolves a vision mode (see resolveVisionMode)
+// and then:
+//   - native   → pass the images through to the provider (path B);
+//   - describe → fold a textual description from a vision model into the
+//     prompt (path A), returning no images;
+//   - off      → ignore the images.
 //
-// It returns the images to attach natively and any text to fold into the
-// prompt. When neither vision nor a describe-fallback is available the images
-// are dropped with a user-facing warning, so a non-vision provider never
-// receives an image it cannot decode.
+// When describe is selected but no vision model is reachable, the images are
+// dropped with a user-facing warning, so a non-vision provider never receives
+// an image it cannot decode.
 func (cli *ChatCLI) gateImagesForModel(ctx context.Context, images []models.ImageContent) ([]models.ImageContent, string) {
 	if len(images) == 0 {
 		return nil, ""
 	}
-	if catalog.HasCapability(cli.Provider, cli.Model, "vision") {
+
+	switch cli.resolveVisionMode() {
+	case visionNative:
 		return images, ""
+	case visionOff:
+		cli.logger.Info("vision: input disabled by CHATCLI_VISION_INPUT=off",
+			zap.String("provider", cli.Provider), zap.String("model", cli.Model))
+		return nil, ""
+	default: // visionDescribe
+		if desc, ok := cli.describeImagesFallback(ctx, images); ok {
+			cli.logger.Info("vision: native vision unavailable, using describe-fallback",
+				zap.String("provider", cli.Provider), zap.String("model", cli.Model),
+				zap.Int("images", len(images)))
+			return nil, desc
+		}
+		fmt.Println(i18n.T("vision.warn.model_no_vision", cli.Model))
+		cli.logger.Warn("vision: image attached but model has no vision and no fallback is available",
+			zap.String("provider", cli.Provider), zap.String("model", cli.Model))
+		return nil, ""
 	}
-
-	// Active model has no vision: try the describe-fallback bridge.
-	if desc, ok := cli.describeImagesFallback(ctx, images); ok {
-		cli.logger.Info("vision: modelo sem suporte nativo, usando describe-fallback",
-			zap.String("provider", cli.Provider), zap.String("model", cli.Model),
-			zap.Int("images", len(images)))
-		return nil, desc
-	}
-
-	fmt.Println(i18n.T("vision.warn.model_no_vision", cli.Model))
-	cli.logger.Warn("vision: imagem anexada mas modelo não suporta vision e sem fallback",
-		zap.String("provider", cli.Provider), zap.String("model", cli.Model))
-	return nil, ""
 }
 
 // imageFileExtensions are the extensions we treat as vision attachments.

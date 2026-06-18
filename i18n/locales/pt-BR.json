@@ -2511,7 +2511,7 @@
   "image.tool.generated": "Geradas %d imagem(ns) via %s:\n  %s",
   "image.tool.edited": "Editadas %d imagem(ns) via %s:\n  %s",
   "image.edit.routed": "ℹ️  O backend de imagem %q não edita imagens; roteado para %q nesta edição. Defina CHATCLI_IMAGE_EDIT_PROVIDER para fixar outro.",
-  "vision.warn.model_no_vision": "⚠️  O modelo atual (%s) não suporta entrada de imagem, e não há modelo com visão disponível para o describe-fallback. A imagem anexada foi ignorada — troque para um modelo com visão.",
+  "vision.warn.model_no_vision": "⚠️  O modelo atual (%s) não suporta entrada de imagem, e não há modelo com visão disponível para o describe-fallback. A imagem anexada foi ignorada — troque para um modelo com visão, ou defina CHATCLI_VISION_INPUT=native se este modelo fora do catálogo aceita imagens.",
   "vision.describe.instruction": "Descreva a(s) imagem(ns) anexada(s) em detalhe completo e fiel: todo texto visível (literal), objetos, pessoas, layout, cores, gráficos/diagramas e seus dados, e qualquer outra coisa relevante. Esta descrição será a única representação da imagem disponível para outro modelo, então seja completo e preciso.",
   "vision.describe.in_progress": "Descrevendo imagem com %s...",
   "vision.describe.note": "[Transcrição de %d imagem(ns) anexada(s), gerada pelo modelo de visão %s — o original não pôde ser enviado nativamente:]",

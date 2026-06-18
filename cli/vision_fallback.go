@@ -1,3 +1,8 @@
+/*
+ * ChatCLI - Command Line Interface for LLM interaction
+ * Copyright (c) 2024 Edilson Freitas
+ * License: Apache-2.0
+ */
 package cli
 
 import (
@@ -14,6 +19,72 @@ import (
 // describeMaxTokens caps the captioning response. A few paragraphs of
 // description is plenty; we do not want the bridge to balloon the prompt.
 const describeMaxTokens = 1500
+
+// visionMode is how attached images are handled for the active model.
+type visionMode int
+
+const (
+	visionNative   visionMode = iota // send native image blocks to the model
+	visionDescribe                   // caption via a vision model, fold into prompt
+	visionOff                        // ignore attached images entirely
+)
+
+// resolveVisionMode decides how to treat attached images for the active
+// provider+model. Layered, authoritative-first, so an off-catalog model
+// (one fetched from the provider's /models API with no catalog entry) is still
+// handled correctly:
+//
+//  1. CHATCLI_VISION_INPUT explicit override — native | describe | off. This is
+//     the escape hatch when you KNOW an off-catalog model does or doesn't see.
+//  2. The catalog vision capability (authoritative for known models).
+//  3. A conservative heuristic for off-catalog ids that are *unambiguously*
+//     vision models (the id literally carries a vision marker like "-vl" or
+//     "vision"); these names exist only for multimodal models, so the
+//     false-positive risk is near zero.
+//  4. Otherwise describe-fallback — the safe default, since sending image
+//     blocks to a text-only model is a hard API error.
+func (cli *ChatCLI) resolveVisionMode() visionMode {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv("CHATCLI_VISION_INPUT"))) {
+	case "native", "on", "force":
+		return visionNative
+	case "describe", "caption", "fallback":
+		return visionDescribe
+	case "off", "none", "ignore":
+		return visionOff
+	}
+	if catalog.HasCapability(cli.Provider, cli.Model, "vision") {
+		return visionNative
+	}
+	if modelIDImpliesVision(cli.Model) {
+		cli.logger.Debug("vision: off-catalog model id implies vision, sending native",
+			zap.String("provider", cli.Provider), zap.String("model", cli.Model))
+		return visionNative
+	}
+	return visionDescribe
+}
+
+// visionIDMarkers are substrings that appear only in multimodal model ids, so a
+// match is a near-certain vision model even when the catalog has no entry.
+var visionIDMarkers = []string{
+	"vision", "-vl", "vl-", "-vl-", "_vl", "vl_",
+	"pixtral", "llava", "internvl", "qwen-vl", "qwen2-vl", "qwen2.5-vl",
+	"multimodal", "omni",
+}
+
+// modelIDImpliesVision reports whether a model id unambiguously names a vision
+// model. Deliberately conservative: it matches explicit vision markers only,
+// never broad family prefixes (which have text-only exceptions such as
+// claude-3-5-haiku or o3-mini), because a false positive sends an image block
+// to a text-only model and hard-errors the request.
+func modelIDImpliesVision(model string) bool {
+	m := strings.ToLower(strings.TrimSpace(model))
+	for _, marker := range visionIDMarkers {
+		if strings.Contains(m, marker) {
+			return true
+		}
+	}
+	return false
+}
 
 // describeImagesFallback implements the "A" half of the hybrid vision
 // strategy: when the active model has no native vision, it routes the

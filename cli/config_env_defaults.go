@@ -191,6 +191,7 @@ var envDefaults = map[string]envDefault{
 	"CHATCLI_IMAGE_EDIT_MODEL":    {Value: "(default)", Source: "imagegen edit fallback model"},
 
 	// ─── Vision input (image understanding / describe-fallback) ───
+	"CHATCLI_VISION_INPUT":    {Value: "auto", Source: "vision input mode: auto|native|describe|off"},
 	"CHATCLI_VISION_PROVIDER": {Value: "(auto)", Source: "vision describe-fallback provider override"},
 	"CHATCLI_VISION_MODEL":    {Value: "(auto)", Source: "vision describe-fallback model override"},
 
