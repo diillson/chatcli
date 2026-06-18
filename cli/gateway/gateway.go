@@ -40,11 +40,13 @@ type InboundMessage struct {
 	// Consumers read Data/MimeType/FileName only.
 	Audio *InboundAudio
 
-	// Images carries photo/image attachments when the message has any. Same
+	// Image carries a photo/image attachment when the message has one. Same
 	// two-phase lifecycle as Audio: the parser fills metadata + download
 	// handle, the adapter hydrates Data, consumers read Data/MimeType/FileName.
 	// Fed to vision-capable models (or the describe-fallback) by the agent func.
-	Images []*InboundImage
+	// A single pointer (not a slice) keeps InboundMessage comparable; adapters
+	// carry the primary attachment.
+	Image *InboundImage
 }
 
 // InboundAudio is a voice/audio attachment on an inbound message.

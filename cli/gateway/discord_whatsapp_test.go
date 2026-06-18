@@ -68,8 +68,8 @@ func TestParseWhatsAppInbound(t *testing.T) {
 	if msgs[0].ChatID != "5511999" || msgs[0].Text != "oi" || msgs[0].Platform != "whatsapp" {
 		t.Errorf("whatsapp parse wrong: %+v", msgs[0])
 	}
-	if len(msgs[1].Images) != 1 || msgs[1].Images[0].ref != "IMG1" || msgs[1].Images[0].MimeType != "image/jpeg" {
-		t.Errorf("whatsapp image parse wrong: %+v", msgs[1].Images)
+	if msgs[1].Image == nil || msgs[1].Image.ref != "IMG1" || msgs[1].Image.MimeType != "image/jpeg" {
+		t.Errorf("whatsapp image parse wrong: %+v", msgs[1].Image)
 	}
 }
 

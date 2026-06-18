@@ -147,28 +147,20 @@ func (t *TelegramAdapter) poll(ctx context.Context) ([]InboundMessage, int64, er
 // same getFile→download flow as audio, dropping attachments that can't be
 // fetched so a failed download degrades gracefully.
 func (t *TelegramAdapter) hydrateImages(ctx context.Context, m *InboundMessage) {
-	if len(m.Images) == 0 {
+	if m.Image == nil || len(m.Image.Data) > 0 {
 		return
 	}
-	kept := m.Images[:0]
-	for _, img := range m.Images {
-		if len(img.Data) > 0 {
-			kept = append(kept, img)
-			continue
-		}
-		data, mime, err := t.downloadFile(ctx, img.ref, maxImageBytes())
-		if err != nil {
-			t.logger.Warn("gateway/telegram: image download failed",
-				zap.String("user", m.UserID), zap.Error(err))
-			continue
-		}
-		img.Data = data
-		if img.MimeType == "" {
-			img.MimeType = mime
-		}
-		kept = append(kept, img)
+	data, mime, err := t.downloadFile(ctx, m.Image.ref, maxImageBytes())
+	if err != nil {
+		t.logger.Warn("gateway/telegram: image download failed",
+			zap.String("user", m.UserID), zap.Error(err))
+		m.Image = nil
+		return
 	}
-	m.Images = kept
+	m.Image.Data = data
+	if m.Image.MimeType == "" {
+		m.Image.MimeType = mime
+	}
 }
 
 // hydrateAudio downloads the bytes for any voice/audio attachment and drops
@@ -191,7 +183,7 @@ func (t *TelegramAdapter) hydrateAudio(ctx context.Context, msgs []InboundMessag
 			}
 		}
 		t.hydrateImages(ctx, &m)
-		if strings.TrimSpace(m.Text) == "" && m.Audio == nil && len(m.Images) == 0 {
+		if strings.TrimSpace(m.Text) == "" && m.Audio == nil && m.Image == nil {
 			continue // download failed and there was no text — nothing to do
 		}
 		out = append(out, m)
@@ -502,9 +494,12 @@ func parseTelegramUpdates(body []byte) ([]InboundMessage, int64, error) {
 		if af != nil {
 			audio = &InboundAudio{ref: af.FileID, MimeType: af.MimeType, FileName: af.FileName}
 		}
-		var images []*InboundImage
-		for _, img := range imgs {
-			images = append(images, &InboundImage{ref: img.FileID, MimeType: img.MimeType, FileName: img.FileName})
+		// imageFiles() orders smallest→largest / photo-before-document; keep the
+		// primary (first) attachment so InboundMessage carries a single image.
+		var image *InboundImage
+		if len(imgs) > 0 {
+			img := imgs[0]
+			image = &InboundImage{ref: img.FileID, MimeType: img.MimeType, FileName: img.FileName}
 		}
 		msgs = append(msgs, InboundMessage{
 			Platform: telegramPlatform,
@@ -513,7 +508,7 @@ func parseTelegramUpdates(body []byte) ([]InboundMessage, int64, error) {
 			UserName: userName,
 			Text:     text,
 			Audio:    audio,
-			Images:   images,
+			Image:    image,
 		})
 	}
 	return msgs, maxID, nil

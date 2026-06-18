@@ -452,7 +452,7 @@ func (cli *ChatCLI) maybeEnableImageReplies(runner *gateway.Runner, outbox *gate
 // OutboundImage. Returns nil when there is nothing to send or it is unreadable.
 func loadFirstGeneratedImage(paths []string) *gateway.OutboundImage {
 	for _, p := range paths {
-		data, err := os.ReadFile(p)
+		data, err := os.ReadFile(p) //#nosec G304 -- path written by the @image tool during this run, not external input
 		if err != nil || len(data) == 0 {
 			continue
 		}
@@ -557,7 +557,7 @@ func (cli *ChatCLI) gatewayAgentFunc(sessions *hubSessions, transcriber transcri
 		// model gating decides native vision vs the describe-fallback. An
 		// image with no caption still gets a default instruction so the engine
 		// has a task.
-		if imgs := inboundImagesToModels(msg.Images); len(imgs) > 0 {
+		if imgs := inboundImageToModels(msg.Image); len(imgs) > 0 {
 			cli.pendingInboundImages = imgs
 			if strings.TrimSpace(msg.Text) == "" {
 				msg.Text = i18n.T("gateway.image.default_prompt")
@@ -618,34 +618,28 @@ func (cli *ChatCLI) gatewayAgentFunc(sessions *hubSessions, transcriber transcri
 	}
 }
 
-// inboundImagesToModels converts hydrated gateway image attachments into the
-// provider-agnostic models.ImageContent carried on a user turn. Attachments
-// without bytes or with an unsupported media type are dropped.
-func inboundImagesToModels(imgs []*gateway.InboundImage) []models.ImageContent {
-	if len(imgs) == 0 {
+// inboundImageToModels converts a hydrated gateway image attachment into the
+// provider-agnostic models.ImageContent carried on a user turn. It returns a
+// 0- or 1-element slice (downstream callers carry a slice): an attachment
+// without bytes or with an unsupported media type yields none.
+func inboundImageToModels(im *gateway.InboundImage) []models.ImageContent {
+	if im == nil || len(im.Data) == 0 {
 		return nil
 	}
-	out := make([]models.ImageContent, 0, len(imgs))
-	for _, im := range imgs {
-		if im == nil || len(im.Data) == 0 {
-			continue
+	mime := im.MimeType
+	if _, ok := models.NormalizeImageMediaType(mime); !ok {
+		// Fall back to sniffing when the platform sent no/!supported MIME.
+		if sniffed, ok2 := models.DetectImageMediaType(im.Data); ok2 {
+			mime = sniffed
+		} else {
+			return nil
 		}
-		mime := im.MimeType
-		if _, ok := models.NormalizeImageMediaType(mime); !ok {
-			// Fall back to sniffing when the platform sent no/!supported MIME.
-			if sniffed, ok2 := models.DetectImageMediaType(im.Data); ok2 {
-				mime = sniffed
-			} else {
-				continue
-			}
-		}
-		out = append(out, models.ImageContent{
-			MediaType: mime,
-			Data:      im.Data,
-			FileName:  im.FileName,
-		})
 	}
-	return out
+	return []models.ImageContent{{
+		MediaType: mime,
+		Data:      im.Data,
+		FileName:  im.FileName,
+	}}
 }
 
 // transcribeInbound converts a voice message to text. It returns handled=true

@@ -94,7 +94,7 @@ func (a *WhatsAppAdapter) webhookHandler(ctx context.Context, inbound chan<- Inb
 			for _, msg := range parseWhatsAppInbound(body) {
 				a.hydrateAudio(ctx, &msg)
 				a.hydrateImages(ctx, &msg)
-				if strings.TrimSpace(msg.Text) == "" && msg.Audio == nil && len(msg.Images) == 0 {
+				if strings.TrimSpace(msg.Text) == "" && msg.Audio == nil && msg.Image == nil {
 					continue // audio/image download failed and there was no text
 				}
 				select {
@@ -329,7 +329,7 @@ func parseWhatsAppInbound(body []byte) []InboundMessage {
 						Platform: whatsappPlatform,
 						ChatID:   m.From,
 						UserID:   m.From,
-						Images:   []*InboundImage{{ref: m.Image.ID, MimeType: m.Image.MimeType}},
+						Image:    &InboundImage{ref: m.Image.ID, MimeType: m.Image.MimeType},
 					})
 				}
 			}
@@ -357,30 +357,22 @@ func (a *WhatsAppAdapter) hydrateAudio(ctx context.Context, msg *InboundMessage)
 	}
 }
 
-// hydrateImages resolves each WhatsApp image media id to its bytes via the same
-// two-step Graph flow as audio. Attachments that can't be fetched are dropped.
+// hydrateImages resolves the WhatsApp image media id to its bytes via the same
+// two-step Graph flow as audio. On failure it clears Image.
 func (a *WhatsAppAdapter) hydrateImages(ctx context.Context, msg *InboundMessage) {
-	if len(msg.Images) == 0 {
+	if msg.Image == nil || len(msg.Image.Data) > 0 {
 		return
 	}
-	kept := msg.Images[:0]
-	for _, img := range msg.Images {
-		if len(img.Data) > 0 {
-			kept = append(kept, img)
-			continue
-		}
-		data, mime, err := a.downloadMedia(ctx, img.ref, maxImageBytes())
-		if err != nil {
-			a.logger.Warn("gateway/whatsapp: image download failed", zap.String("user", msg.UserID), zap.Error(err))
-			continue
-		}
-		img.Data = data
-		if img.MimeType == "" {
-			img.MimeType = mime
-		}
-		kept = append(kept, img)
+	data, mime, err := a.downloadMedia(ctx, msg.Image.ref, maxImageBytes())
+	if err != nil {
+		a.logger.Warn("gateway/whatsapp: image download failed", zap.String("user", msg.UserID), zap.Error(err))
+		msg.Image = nil
+		return
 	}
-	msg.Images = kept
+	msg.Image.Data = data
+	if msg.Image.MimeType == "" {
+		msg.Image.MimeType = mime
+	}
 }
 
 // downloadMedia performs the Graph media lookup then fetches the bytes. limit

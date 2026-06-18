@@ -101,7 +101,7 @@ func (s *SlackAdapter) eventsHandler(ctx context.Context, inbound chan<- Inbound
 		if hasMsg {
 			s.hydrateAudio(ctx, &msg)
 			s.hydrateImages(ctx, &msg)
-			if strings.TrimSpace(msg.Text) == "" && msg.Audio == nil && len(msg.Images) == 0 {
+			if strings.TrimSpace(msg.Text) == "" && msg.Audio == nil && msg.Image == nil {
 				return // audio/image download failed and there was no text
 			}
 			select {
@@ -278,10 +278,11 @@ func parseSlackEvent(body []byte) (challenge string, msg InboundMessage, hasMsg 
 		return "", InboundMessage{}, false, nil
 	}
 	// A voice memo / audio file arrives as a "file_share" subtype carrying
-	// files[]; pick the first audio file. Image files (photos, screenshots) are
-	// collected too. Their bytes are fetched later.
+	// files[]; pick the first audio file. The first image file (photo,
+	// screenshot) is kept as the primary attachment. Their bytes are fetched
+	// later.
 	var audio *InboundAudio
-	var images []*InboundImage
+	var image *InboundImage
 	for _, f := range e.Files {
 		if f.URLPrivate == "" {
 			continue
@@ -289,13 +290,13 @@ func parseSlackEvent(body []byte) (challenge string, msg InboundMessage, hasMsg 
 		switch {
 		case audio == nil && isAudioMime(f.Mimetype):
 			audio = &InboundAudio{ref: f.URLPrivate, MimeType: f.Mimetype, FileName: f.Name}
-		case isImageMime(f.Mimetype):
-			images = append(images, &InboundImage{ref: f.URLPrivate, MimeType: f.Mimetype, FileName: f.Name})
+		case image == nil && isImageMime(f.Mimetype):
+			image = &InboundImage{ref: f.URLPrivate, MimeType: f.Mimetype, FileName: f.Name}
 		}
 	}
 	// Reject other subtypes (edits, joins, …) and empty messages unless they
 	// carry audio or an image.
-	if audio == nil && len(images) == 0 && (e.SubType != "" || strings.TrimSpace(e.Text) == "") {
+	if audio == nil && image == nil && (e.SubType != "" || strings.TrimSpace(e.Text) == "") {
 		return "", InboundMessage{}, false, nil
 	}
 	return "", InboundMessage{
@@ -304,7 +305,7 @@ func parseSlackEvent(body []byte) (challenge string, msg InboundMessage, hasMsg 
 		UserID:   e.User,
 		Text:     e.Text,
 		Audio:    audio,
-		Images:   images,
+		Image:    image,
 	}, true, nil
 }
 
@@ -326,31 +327,22 @@ func (s *SlackAdapter) hydrateAudio(ctx context.Context, msg *InboundMessage) {
 	}
 }
 
-// hydrateImages downloads each Slack image file (url_private requires the bot
-// token as a bearer, same as audio). Attachments that fail to download are
-// dropped.
+// hydrateImages downloads the Slack image file (url_private requires the bot
+// token as a bearer, same as audio). On failure it clears Image.
 func (s *SlackAdapter) hydrateImages(ctx context.Context, msg *InboundMessage) {
-	if len(msg.Images) == 0 {
+	if msg.Image == nil || len(msg.Image.Data) > 0 {
 		return
 	}
-	kept := msg.Images[:0]
-	for _, img := range msg.Images {
-		if len(img.Data) > 0 {
-			kept = append(kept, img)
-			continue
-		}
-		data, mime, err := fetchAudioBytes(ctx, s.http, img.ref, s.botToken, maxImageBytes())
-		if err != nil {
-			s.logger.Warn("gateway/slack: image download failed", zap.String("user", msg.UserID), zap.Error(err))
-			continue
-		}
-		img.Data = data
-		if img.MimeType == "" {
-			img.MimeType = mime
-		}
-		kept = append(kept, img)
+	data, mime, err := fetchAudioBytes(ctx, s.http, msg.Image.ref, s.botToken, maxImageBytes())
+	if err != nil {
+		s.logger.Warn("gateway/slack: image download failed", zap.String("user", msg.UserID), zap.Error(err))
+		msg.Image = nil
+		return
 	}
-	msg.Images = kept
+	msg.Image.Data = data
+	if msg.Image.MimeType == "" {
+		msg.Image.MimeType = mime
+	}
 }
 
 func init() {

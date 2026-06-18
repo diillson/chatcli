@@ -96,8 +96,8 @@ func TestParseTelegram_Photo(t *testing.T) {
 		t.Fatalf("want 1 msg, got %d", len(msgs))
 	}
 	m := msgs[0]
-	if len(m.Images) != 1 || m.Images[0].ref != "BIG" {
-		t.Errorf("images = %+v", m.Images)
+	if m.Image == nil || m.Image.ref != "BIG" {
+		t.Errorf("image = %+v", m.Image)
 	}
 	if m.Text != "look" { // caption promoted to text
 		t.Errorf("text = %q, want caption", m.Text)
@@ -108,8 +108,8 @@ func TestParseTelegram_Photo(t *testing.T) {
 	if err != nil || len(dmsgs) != 1 {
 		t.Fatalf("image document should parse: err=%v n=%d", err, len(dmsgs))
 	}
-	if len(dmsgs[0].Images) != 1 || dmsgs[0].Images[0].ref != "DOC1" || dmsgs[0].Images[0].MimeType != "image/png" {
-		t.Errorf("document images = %+v", dmsgs[0].Images)
+	if dmsgs[0].Image == nil || dmsgs[0].Image.ref != "DOC1" || dmsgs[0].Image.MimeType != "image/png" {
+		t.Errorf("document image = %+v", dmsgs[0].Image)
 	}
 }
 
@@ -140,8 +140,8 @@ func TestParseDiscord_AudioAttachment(t *testing.T) {
 	if !ok {
 		t.Fatal("image-only message must now be accepted")
 	}
-	if len(im.Images) != 1 || im.Images[0].ref != "https://cdn/x.png" || im.Images[0].MimeType != "image/png" {
-		t.Errorf("images = %+v", im.Images)
+	if im.Image == nil || im.Image.ref != "https://cdn/x.png" || im.Image.MimeType != "image/png" {
+		t.Errorf("image = %+v", im.Image)
 	}
 	// A non-image, non-audio attachment with no text is still rejected.
 	doc := []byte(`{"channel_id":"C1","content":"","author":{"id":"u1"},"attachments":[{"url":"https://cdn/x.pdf","content_type":"application/pdf"}]}`)
@@ -170,8 +170,8 @@ func TestParseSlack_AudioFile(t *testing.T) {
 	if err != nil || !has {
 		t.Fatalf("image file_share should yield a message (has=%v err=%v)", has, err)
 	}
-	if len(imsg.Images) != 1 || imsg.Images[0].ref != "https://files/p.png" || imsg.Images[0].MimeType != "image/png" {
-		t.Errorf("slack images = %+v", imsg.Images)
+	if imsg.Image == nil || imsg.Image.ref != "https://files/p.png" || imsg.Image.MimeType != "image/png" {
+		t.Errorf("slack image = %+v", imsg.Image)
 	}
 }
 
@@ -190,13 +190,13 @@ func TestParseWebhook_Audio(t *testing.T) {
 	// Inline base64 image is decoded in-place; an image-only payload is accepted.
 	imgb64 := base64.StdEncoding.EncodeToString([]byte("png-bytes"))
 	m, ok = parseWebhookInbound([]byte(`{"chat_id":"c1","image_b64":"` + imgb64 + `","image_mime":"image/png"}`))
-	if !ok || len(m.Images) != 1 || string(m.Images[0].Data) != "png-bytes" || m.Images[0].MimeType != "image/png" {
-		t.Errorf("image b64 decode failed: ok=%v images=%+v", ok, m.Images)
+	if !ok || m.Image == nil || string(m.Image.Data) != "png-bytes" || m.Image.MimeType != "image/png" {
+		t.Errorf("image b64 decode failed: ok=%v image=%+v", ok, m.Image)
 	}
 	// image_url is recorded for later fetch.
 	m, ok = parseWebhookInbound([]byte(`{"chat_id":"c1","image_url":"https://x/p.png"}`))
-	if !ok || len(m.Images) != 1 || m.Images[0].ref != "https://x/p.png" {
-		t.Errorf("image_url not recorded: %+v", m.Images)
+	if !ok || m.Image == nil || m.Image.ref != "https://x/p.png" {
+		t.Errorf("image_url not recorded: %+v", m.Image)
 	}
 	// Text-only still works; empty payload rejected.
 	if _, ok := parseWebhookInbound([]byte(`{"chat_id":"c1","text":"hi"}`)); !ok {

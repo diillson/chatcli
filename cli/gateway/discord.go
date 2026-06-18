@@ -194,7 +194,7 @@ func (d *DiscordAdapter) runSession(ctx context.Context, inbound chan<- InboundM
 				if msg, ok := parseDiscordMessage(dData); ok {
 					d.hydrateAudio(sessionCtx, &msg)
 					d.hydrateImages(sessionCtx, &msg)
-					if strings.TrimSpace(msg.Text) == "" && msg.Audio == nil && len(msg.Images) == 0 {
+					if strings.TrimSpace(msg.Text) == "" && msg.Audio == nil && msg.Image == nil {
 						continue // audio/image download failed and there was no text
 					}
 					select {
@@ -375,7 +375,7 @@ func parseDiscordMessage(d json.RawMessage) (InboundMessage, bool) {
 		return InboundMessage{}, false
 	}
 	var audio *InboundAudio
-	var images []*InboundImage
+	var image *InboundImage
 	for _, at := range m.Attachments {
 		if at.URL == "" {
 			continue
@@ -383,11 +383,12 @@ func parseDiscordMessage(d json.RawMessage) (InboundMessage, bool) {
 		switch {
 		case audio == nil && isAudioMime(at.ContentType):
 			audio = &InboundAudio{ref: at.URL, MimeType: at.ContentType, FileName: at.Filename}
-		case isImageMime(at.ContentType):
-			images = append(images, &InboundImage{ref: at.URL, MimeType: at.ContentType, FileName: at.Filename})
+		case image == nil && isImageMime(at.ContentType):
+			// Keep the first image attachment as the primary one.
+			image = &InboundImage{ref: at.URL, MimeType: at.ContentType, FileName: at.Filename}
 		}
 	}
-	if strings.TrimSpace(m.Content) == "" && audio == nil && len(images) == 0 {
+	if strings.TrimSpace(m.Content) == "" && audio == nil && image == nil {
 		return InboundMessage{}, false
 	}
 	return InboundMessage{
@@ -397,7 +398,7 @@ func parseDiscordMessage(d json.RawMessage) (InboundMessage, bool) {
 		UserName: m.Author.Username,
 		Text:     m.Content,
 		Audio:    audio,
-		Images:   images,
+		Image:    image,
 	}, true
 }
 
@@ -419,31 +420,22 @@ func (d *DiscordAdapter) hydrateAudio(ctx context.Context, msg *InboundMessage) 
 	}
 }
 
-// hydrateImages downloads each Discord image attachment from its CDN URL
-// (already signed — no auth header needed). Attachments that fail to download
-// are dropped.
+// hydrateImages downloads the Discord image attachment from its CDN URL
+// (already signed — no auth header needed). On failure it clears Image.
 func (d *DiscordAdapter) hydrateImages(ctx context.Context, msg *InboundMessage) {
-	if len(msg.Images) == 0 {
+	if msg.Image == nil || len(msg.Image.Data) > 0 {
 		return
 	}
-	kept := msg.Images[:0]
-	for _, img := range msg.Images {
-		if len(img.Data) > 0 {
-			kept = append(kept, img)
-			continue
-		}
-		data, mime, err := fetchAudioBytes(ctx, d.http, img.ref, "", maxImageBytes())
-		if err != nil {
-			d.logger.Warn("gateway/discord: image download failed", zap.String("user", msg.UserID), zap.Error(err))
-			continue
-		}
-		img.Data = data
-		if img.MimeType == "" {
-			img.MimeType = mime
-		}
-		kept = append(kept, img)
+	data, mime, err := fetchAudioBytes(ctx, d.http, msg.Image.ref, "", maxImageBytes())
+	if err != nil {
+		d.logger.Warn("gateway/discord: image download failed", zap.String("user", msg.UserID), zap.Error(err))
+		msg.Image = nil
+		return
 	}
-	msg.Images = kept
+	msg.Image.Data = data
+	if msg.Image.MimeType == "" {
+		msg.Image.MimeType = mime
+	}
 }
 
 func init() {

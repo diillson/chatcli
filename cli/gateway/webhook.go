@@ -103,7 +103,7 @@ func (w *WebhookAdapter) inboundHandler(ctx context.Context, inbound chan<- Inbo
 		}
 		w.hydrateAudio(ctx, &msg)
 		w.hydrateImages(ctx, &msg)
-		if strings.TrimSpace(msg.Text) == "" && msg.Audio == nil && len(msg.Images) == 0 {
+		if strings.TrimSpace(msg.Text) == "" && msg.Audio == nil && msg.Image == nil {
 			rw.WriteHeader(http.StatusBadRequest)
 			return
 		}
@@ -213,19 +213,19 @@ func parseWebhookInbound(body []byte) (InboundMessage, bool) {
 		audio = &InboundAudio{ref: strings.TrimSpace(in.AudioURL), MimeType: in.AudioMime}
 	}
 
-	var images []*InboundImage
+	var image *InboundImage
 	switch {
 	case strings.TrimSpace(in.ImageB64) != "":
 		data, err := base64.StdEncoding.DecodeString(strings.TrimSpace(in.ImageB64))
 		if err != nil || len(data) == 0 {
 			return InboundMessage{}, false
 		}
-		images = append(images, &InboundImage{Data: data, MimeType: in.ImageMime})
+		image = &InboundImage{Data: data, MimeType: in.ImageMime}
 	case strings.TrimSpace(in.ImageURL) != "":
-		images = append(images, &InboundImage{ref: strings.TrimSpace(in.ImageURL), MimeType: in.ImageMime})
+		image = &InboundImage{ref: strings.TrimSpace(in.ImageURL), MimeType: in.ImageMime}
 	}
 
-	if strings.TrimSpace(in.Text) == "" && audio == nil && len(images) == 0 {
+	if strings.TrimSpace(in.Text) == "" && audio == nil && image == nil {
 		return InboundMessage{}, false
 	}
 	return InboundMessage{
@@ -234,7 +234,7 @@ func parseWebhookInbound(body []byte) (InboundMessage, bool) {
 		UserID:   in.UserID,
 		Text:     in.Text,
 		Audio:    audio,
-		Images:   images,
+		Image:    image,
 	}, true
 }
 
@@ -257,31 +257,23 @@ func (w *WebhookAdapter) hydrateAudio(ctx context.Context, msg *InboundMessage) 
 	}
 }
 
-// hydrateImages fetches any image_url attachment (no auth — the caller owns the
-// URL). Inline base64 images already have Data and are left untouched. Images
-// that fail to download are dropped.
+// hydrateImages fetches an image_url attachment (no auth — the caller owns the
+// URL). An inline base64 image already has Data and is left untouched. On
+// failure it clears Image.
 func (w *WebhookAdapter) hydrateImages(ctx context.Context, msg *InboundMessage) {
-	if len(msg.Images) == 0 {
+	if msg.Image == nil || len(msg.Image.Data) > 0 {
 		return
 	}
-	kept := msg.Images[:0]
-	for _, img := range msg.Images {
-		if len(img.Data) > 0 {
-			kept = append(kept, img)
-			continue
-		}
-		data, mime, err := fetchAudioBytes(ctx, w.http, img.ref, "", maxImageBytes())
-		if err != nil {
-			w.logger.Warn("gateway/webhook: image download failed", zap.String("user", msg.UserID), zap.Error(err))
-			continue
-		}
-		img.Data = data
-		if img.MimeType == "" {
-			img.MimeType = mime
-		}
-		kept = append(kept, img)
+	data, mime, err := fetchAudioBytes(ctx, w.http, msg.Image.ref, "", maxImageBytes())
+	if err != nil {
+		w.logger.Warn("gateway/webhook: image download failed", zap.String("user", msg.UserID), zap.Error(err))
+		msg.Image = nil
+		return
 	}
-	msg.Images = kept
+	msg.Image.Data = data
+	if msg.Image.MimeType == "" {
+		msg.Image.MimeType = mime
+	}
 }
 
 func init() {
