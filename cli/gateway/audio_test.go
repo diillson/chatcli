@@ -84,6 +84,35 @@ func TestParseTelegram_Voice(t *testing.T) {
 	}
 }
 
+func TestParseTelegram_Photo(t *testing.T) {
+	// A photo arrives as an ascending-size array; the largest (last) is picked,
+	// the caption is promoted to text, and an image-only message is kept.
+	body := []byte(`{"ok":true,"result":[{"update_id":8,"message":{"chat":{"id":42},"from":{"id":9,"username":"ed"},"caption":"look","photo":[{"file_id":"SMALL"},{"file_id":"BIG","file_size":9000}]}}]}`)
+	msgs, _, err := parseTelegramUpdates(body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(msgs) != 1 {
+		t.Fatalf("want 1 msg, got %d", len(msgs))
+	}
+	m := msgs[0]
+	if len(m.Images) != 1 || m.Images[0].ref != "BIG" {
+		t.Errorf("images = %+v", m.Images)
+	}
+	if m.Text != "look" { // caption promoted to text
+		t.Errorf("text = %q, want caption", m.Text)
+	}
+	// An image document is also picked up when its mime is an image type.
+	docBody := []byte(`{"ok":true,"result":[{"update_id":9,"message":{"chat":{"id":42},"from":{"id":9},"document":{"file_id":"DOC1","mime_type":"image/png","file_name":"x.png"}}}]}`)
+	dmsgs, _, err := parseTelegramUpdates(docBody)
+	if err != nil || len(dmsgs) != 1 {
+		t.Fatalf("image document should parse: err=%v n=%d", err, len(dmsgs))
+	}
+	if len(dmsgs[0].Images) != 1 || dmsgs[0].Images[0].ref != "DOC1" || dmsgs[0].Images[0].MimeType != "image/png" {
+		t.Errorf("document images = %+v", dmsgs[0].Images)
+	}
+}
+
 func TestParseWhatsApp_Audio(t *testing.T) {
 	body := []byte(`{"entry":[{"changes":[{"value":{"messages":[{"from":"55119","type":"audio","audio":{"id":"MID9","mime_type":"audio/ogg"}}]}}]}]}`)
 	msgs := parseWhatsAppInbound(body)
@@ -104,10 +133,20 @@ func TestParseDiscord_AudioAttachment(t *testing.T) {
 	if m.Audio == nil || m.Audio.ref != "https://cdn/x.ogg" || m.Audio.FileName != "x.ogg" {
 		t.Errorf("audio = %+v", m.Audio)
 	}
-	// A non-audio attachment with no text is rejected.
-	img := []byte(`{"channel_id":"C1","content":"","author":{"id":"u1"},"attachments":[{"url":"https://cdn/x.png","content_type":"image/png"}]}`)
-	if _, ok := parseDiscordMessage(img); ok {
-		t.Error("image-only message must be rejected")
+	// An image-only attachment with no text is now ACCEPTED and carries an
+	// InboundImage (vision input).
+	img := []byte(`{"channel_id":"C1","content":"","author":{"id":"u1"},"attachments":[{"url":"https://cdn/x.png","content_type":"image/png","filename":"x.png"}]}`)
+	im, ok := parseDiscordMessage(img)
+	if !ok {
+		t.Fatal("image-only message must now be accepted")
+	}
+	if len(im.Images) != 1 || im.Images[0].ref != "https://cdn/x.png" || im.Images[0].MimeType != "image/png" {
+		t.Errorf("images = %+v", im.Images)
+	}
+	// A non-image, non-audio attachment with no text is still rejected.
+	doc := []byte(`{"channel_id":"C1","content":"","author":{"id":"u1"},"attachments":[{"url":"https://cdn/x.pdf","content_type":"application/pdf"}]}`)
+	if _, ok := parseDiscordMessage(doc); ok {
+		t.Error("non-media attachment with no text must be rejected")
 	}
 }
 
@@ -120,10 +159,19 @@ func TestParseSlack_AudioFile(t *testing.T) {
 	if msg.Audio == nil || msg.Audio.ref != "https://files/a.m4a" {
 		t.Errorf("audio = %+v", msg.Audio)
 	}
-	// A non-audio file_share with no text is ignored.
+	// A non-media file_share (e.g. a PDF) with no text is ignored.
 	doc := []byte(`{"type":"event_callback","event":{"type":"message","subtype":"file_share","channel":"C1","user":"U1","files":[{"mimetype":"application/pdf","url_private":"https://files/d.pdf"}]}}`)
 	if _, _, has, _ := parseSlackEvent(doc); has {
-		t.Error("non-audio file_share must be ignored")
+		t.Error("non-media file_share must be ignored")
+	}
+	// An image file_share with no text is now ACCEPTED and carries an InboundImage.
+	img := []byte(`{"type":"event_callback","event":{"type":"message","subtype":"file_share","channel":"C1","user":"U1","files":[{"mimetype":"image/png","url_private":"https://files/p.png","name":"p.png"}]}}`)
+	_, imsg, has, err := parseSlackEvent(img)
+	if err != nil || !has {
+		t.Fatalf("image file_share should yield a message (has=%v err=%v)", has, err)
+	}
+	if len(imsg.Images) != 1 || imsg.Images[0].ref != "https://files/p.png" || imsg.Images[0].MimeType != "image/png" {
+		t.Errorf("slack images = %+v", imsg.Images)
 	}
 }
 
@@ -138,6 +186,17 @@ func TestParseWebhook_Audio(t *testing.T) {
 	m, ok = parseWebhookInbound([]byte(`{"chat_id":"c1","audio_url":"https://x/a.ogg"}`))
 	if !ok || m.Audio == nil || m.Audio.ref != "https://x/a.ogg" {
 		t.Errorf("audio_url not recorded: %+v", m.Audio)
+	}
+	// Inline base64 image is decoded in-place; an image-only payload is accepted.
+	imgb64 := base64.StdEncoding.EncodeToString([]byte("png-bytes"))
+	m, ok = parseWebhookInbound([]byte(`{"chat_id":"c1","image_b64":"` + imgb64 + `","image_mime":"image/png"}`))
+	if !ok || len(m.Images) != 1 || string(m.Images[0].Data) != "png-bytes" || m.Images[0].MimeType != "image/png" {
+		t.Errorf("image b64 decode failed: ok=%v images=%+v", ok, m.Images)
+	}
+	// image_url is recorded for later fetch.
+	m, ok = parseWebhookInbound([]byte(`{"chat_id":"c1","image_url":"https://x/p.png"}`))
+	if !ok || len(m.Images) != 1 || m.Images[0].ref != "https://x/p.png" {
+		t.Errorf("image_url not recorded: %+v", m.Images)
 	}
 	// Text-only still works; empty payload rejected.
 	if _, ok := parseWebhookInbound([]byte(`{"chat_id":"c1","text":"hi"}`)); !ok {
@@ -181,7 +240,7 @@ func TestTelegramDownloadFile(t *testing.T) {
 
 	ad := NewTelegramAdapter("TOKEN", nil, zap.NewNop())
 	ad.baseURL = srv.URL
-	data, mime, err := ad.downloadFile(context.Background(), "FID")
+	data, mime, err := ad.downloadFile(context.Background(), "FID", maxAudioBytes())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -210,7 +269,7 @@ func TestWhatsAppDownloadMedia(t *testing.T) {
 
 	ad := NewWhatsAppAdapter("TOK", "PHONE", "verify", "", "", zap.NewNop())
 	ad.graphBase = srv.URL
-	data, mime, err := ad.downloadMedia(context.Background(), "MID")
+	data, mime, err := ad.downloadMedia(context.Background(), "MID", maxAudioBytes())
 	if err != nil {
 		t.Fatal(err)
 	}

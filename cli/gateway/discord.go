@@ -13,6 +13,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"mime/multipart"
 	"net/http"
 	"os"
 	"strings"
@@ -192,8 +193,9 @@ func (d *DiscordAdapter) runSession(ctx context.Context, inbound chan<- InboundM
 			if t == "MESSAGE_CREATE" {
 				if msg, ok := parseDiscordMessage(dData); ok {
 					d.hydrateAudio(sessionCtx, &msg)
-					if strings.TrimSpace(msg.Text) == "" && msg.Audio == nil {
-						continue // audio download failed and there was no text
+					d.hydrateImages(sessionCtx, &msg)
+					if strings.TrimSpace(msg.Text) == "" && msg.Audio == nil && len(msg.Images) == 0 {
+						continue // audio/image download failed and there was no text
 					}
 					select {
 					case inbound <- msg:
@@ -208,6 +210,16 @@ func (d *DiscordAdapter) runSession(ctx context.Context, inbound chan<- InboundM
 
 // Send delivers a reply via the REST API.
 func (d *DiscordAdapter) Send(ctx context.Context, msg OutboundMessage) error {
+	// Image reply: when a picture is attached, upload it as a file with the text
+	// as the message content. Falls back to text on any failure so a reply is
+	// never lost.
+	if msg.Image != nil && len(msg.Image.Data) > 0 {
+		if err := d.sendPhoto(ctx, msg); err != nil {
+			d.logger.Warn("discord: photo send failed, falling back to text", zap.Error(err))
+		} else {
+			return nil
+		}
+	}
 	payload, _ := json.Marshal(map[string]string{"content": msg.Text})
 	endpoint := fmt.Sprintf("%s/channels/%s/messages", d.restBase, msg.ChatID)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(payload))
@@ -224,6 +236,51 @@ func (d *DiscordAdapter) Send(ctx context.Context, msg OutboundMessage) error {
 	_, _ = io.Copy(io.Discard, resp.Body)
 	if resp.StatusCode >= 300 {
 		return fmt.Errorf("discord send status %d", resp.StatusCode)
+	}
+	return nil
+}
+
+// sendPhoto uploads the image to the channel via a multipart message: a
+// files[0] part carries the bytes and a payload_json part carries the text as
+// the message content. Filename defaults to "reply.png" when none is supplied.
+func (d *DiscordAdapter) sendPhoto(ctx context.Context, msg OutboundMessage) error {
+	filename := msg.Image.FileName
+	if filename == "" {
+		filename = "reply.png"
+	}
+
+	var buf bytes.Buffer
+	w := multipart.NewWriter(&buf)
+	jsonPayload, _ := json.Marshal(map[string]string{"content": msg.Text})
+	if err := w.WriteField("payload_json", string(jsonPayload)); err != nil {
+		return err
+	}
+	part, err := w.CreateFormFile("files[0]", filename)
+	if err != nil {
+		return err
+	}
+	if _, err := part.Write(msg.Image.Data); err != nil {
+		return err
+	}
+	if err := w.Close(); err != nil {
+		return err
+	}
+
+	endpoint := fmt.Sprintf("%s/channels/%s/messages", d.restBase, msg.ChatID)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, &buf)
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", w.FormDataContentType())
+	req.Header.Set("Authorization", "Bot "+d.token)
+	resp, err := d.http.Do(req)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = resp.Body.Close() }()
+	_, _ = io.Copy(io.Discard, resp.Body)
+	if resp.StatusCode >= 300 {
+		return fmt.Errorf("discord send photo status %d", resp.StatusCode)
 	}
 	return nil
 }
@@ -318,13 +375,19 @@ func parseDiscordMessage(d json.RawMessage) (InboundMessage, bool) {
 		return InboundMessage{}, false
 	}
 	var audio *InboundAudio
+	var images []*InboundImage
 	for _, at := range m.Attachments {
-		if at.URL != "" && isAudioMime(at.ContentType) {
+		if at.URL == "" {
+			continue
+		}
+		switch {
+		case audio == nil && isAudioMime(at.ContentType):
 			audio = &InboundAudio{ref: at.URL, MimeType: at.ContentType, FileName: at.Filename}
-			break
+		case isImageMime(at.ContentType):
+			images = append(images, &InboundImage{ref: at.URL, MimeType: at.ContentType, FileName: at.Filename})
 		}
 	}
-	if strings.TrimSpace(m.Content) == "" && audio == nil {
+	if strings.TrimSpace(m.Content) == "" && audio == nil && len(images) == 0 {
 		return InboundMessage{}, false
 	}
 	return InboundMessage{
@@ -334,6 +397,7 @@ func parseDiscordMessage(d json.RawMessage) (InboundMessage, bool) {
 		UserName: m.Author.Username,
 		Text:     m.Content,
 		Audio:    audio,
+		Images:   images,
 	}, true
 }
 
@@ -353,6 +417,33 @@ func (d *DiscordAdapter) hydrateAudio(ctx context.Context, msg *InboundMessage) 
 	if msg.Audio.MimeType == "" {
 		msg.Audio.MimeType = mime
 	}
+}
+
+// hydrateImages downloads each Discord image attachment from its CDN URL
+// (already signed — no auth header needed). Attachments that fail to download
+// are dropped.
+func (d *DiscordAdapter) hydrateImages(ctx context.Context, msg *InboundMessage) {
+	if len(msg.Images) == 0 {
+		return
+	}
+	kept := msg.Images[:0]
+	for _, img := range msg.Images {
+		if len(img.Data) > 0 {
+			kept = append(kept, img)
+			continue
+		}
+		data, mime, err := fetchAudioBytes(ctx, d.http, img.ref, "", maxImageBytes())
+		if err != nil {
+			d.logger.Warn("gateway/discord: image download failed", zap.String("user", msg.UserID), zap.Error(err))
+			continue
+		}
+		img.Data = data
+		if img.MimeType == "" {
+			img.MimeType = mime
+		}
+		kept = append(kept, img)
+	}
+	msg.Images = kept
 }
 
 func init() {

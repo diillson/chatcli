@@ -55,15 +55,21 @@ func TestDiscordIdentifyIntents(t *testing.T) {
 func TestParseWhatsAppInbound(t *testing.T) {
 	body := []byte(`{"entry":[{"changes":[{"value":{"messages":[
 		{"from":"5511999","type":"text","text":{"body":"oi"}},
-		{"from":"5511888","type":"image"},
+		{"from":"5511888","type":"image","image":{"id":"IMG1","mime_type":"image/jpeg"}},
+		{"from":"5511666","type":"image"},
 		{"from":"5511777","type":"text","text":{"body":"  "}}
 	]}}]}]}`)
 	msgs := parseWhatsAppInbound(body)
-	if len(msgs) != 1 {
-		t.Fatalf("expected 1 text message (image+blank skipped), got %d", len(msgs))
+	// A text message and an image-with-id are kept; an image without an id and
+	// a blank-text message are skipped.
+	if len(msgs) != 2 {
+		t.Fatalf("expected 2 messages (text + image), got %d", len(msgs))
 	}
 	if msgs[0].ChatID != "5511999" || msgs[0].Text != "oi" || msgs[0].Platform != "whatsapp" {
 		t.Errorf("whatsapp parse wrong: %+v", msgs[0])
+	}
+	if len(msgs[1].Images) != 1 || msgs[1].Images[0].ref != "IMG1" || msgs[1].Images[0].MimeType != "image/jpeg" {
+		t.Errorf("whatsapp image parse wrong: %+v", msgs[1].Images)
 	}
 }
 

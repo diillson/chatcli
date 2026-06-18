@@ -143,6 +143,34 @@ func (t *TelegramAdapter) poll(ctx context.Context) ([]InboundMessage, int64, er
 	return t.hydrateAudio(ctx, msgs), maxID, nil
 }
 
+// hydrateImages downloads the bytes for any photo/image attachment using the
+// same getFile→download flow as audio, dropping attachments that can't be
+// fetched so a failed download degrades gracefully.
+func (t *TelegramAdapter) hydrateImages(ctx context.Context, m *InboundMessage) {
+	if len(m.Images) == 0 {
+		return
+	}
+	kept := m.Images[:0]
+	for _, img := range m.Images {
+		if len(img.Data) > 0 {
+			kept = append(kept, img)
+			continue
+		}
+		data, mime, err := t.downloadFile(ctx, img.ref, maxImageBytes())
+		if err != nil {
+			t.logger.Warn("gateway/telegram: image download failed",
+				zap.String("user", m.UserID), zap.Error(err))
+			continue
+		}
+		img.Data = data
+		if img.MimeType == "" {
+			img.MimeType = mime
+		}
+		kept = append(kept, img)
+	}
+	m.Images = kept
+}
+
 // hydrateAudio downloads the bytes for any voice/audio attachment and drops
 // attachments (or whole messages) that can't be fetched, so a failed download
 // degrades gracefully instead of dispatching an empty audio ref.
@@ -150,7 +178,7 @@ func (t *TelegramAdapter) hydrateAudio(ctx context.Context, msgs []InboundMessag
 	out := msgs[:0]
 	for _, m := range msgs {
 		if m.Audio != nil && len(m.Audio.Data) == 0 {
-			data, mime, err := t.downloadFile(ctx, m.Audio.ref)
+			data, mime, err := t.downloadFile(ctx, m.Audio.ref, maxAudioBytes())
 			if err != nil {
 				t.logger.Warn("gateway/telegram: voice download failed",
 					zap.String("user", m.UserID), zap.Error(err))
@@ -162,7 +190,8 @@ func (t *TelegramAdapter) hydrateAudio(ctx context.Context, msgs []InboundMessag
 				}
 			}
 		}
-		if strings.TrimSpace(m.Text) == "" && m.Audio == nil {
+		t.hydrateImages(ctx, &m)
+		if strings.TrimSpace(m.Text) == "" && m.Audio == nil && len(m.Images) == 0 {
 			continue // download failed and there was no text — nothing to do
 		}
 		out = append(out, m)
@@ -171,8 +200,9 @@ func (t *TelegramAdapter) hydrateAudio(ctx context.Context, msgs []InboundMessag
 }
 
 // downloadFile resolves a Telegram file_id to its bytes: getFile returns the
-// storage path, then the file is fetched from the bot file endpoint.
-func (t *TelegramAdapter) downloadFile(ctx context.Context, fileID string) ([]byte, string, error) {
+// storage path, then the file is fetched from the bot file endpoint. limit caps
+// the download (audio and image use different ceilings).
+func (t *TelegramAdapter) downloadFile(ctx context.Context, fileID string, limit int64) ([]byte, string, error) {
 	endpoint := fmt.Sprintf("%s/bot%s/getFile?file_id=%s", t.baseURL, t.token, url.QueryEscape(fileID))
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
 	if err != nil {
@@ -203,7 +233,7 @@ func (t *TelegramAdapter) downloadFile(ctx context.Context, fileID string) ([]by
 		return nil, "", fmt.Errorf("telegram getFile: no file_path")
 	}
 	fileURL := fmt.Sprintf("%s/file/bot%s/%s", t.baseURL, t.token, gf.Result.FilePath)
-	return fetchAudioBytes(ctx, t.http, fileURL, "", maxAudioBytes())
+	return fetchAudioBytes(ctx, t.http, fileURL, "", limit)
 }
 
 // Send delivers a reply via sendMessage.
@@ -214,6 +244,15 @@ func (t *TelegramAdapter) Send(ctx context.Context, msg OutboundMessage) error {
 	if msg.Audio != nil && len(msg.Audio.Data) > 0 {
 		if err := t.sendVoice(ctx, msg); err != nil {
 			t.logger.Warn("telegram: voice send failed, falling back to text", zap.Error(err))
+		} else {
+			return nil
+		}
+	}
+	// Image reply: when a picture is attached, deliver it via sendPhoto with the
+	// text as caption. Falls back to text on any failure so a reply is never lost.
+	if msg.Image != nil && len(msg.Image.Data) > 0 {
+		if err := t.sendPhoto(ctx, msg); err != nil {
+			t.logger.Warn("telegram: photo send failed, falling back to text", zap.Error(err))
 		} else {
 			return nil
 		}
@@ -287,6 +326,50 @@ func (t *TelegramAdapter) sendVoice(ctx context.Context, msg OutboundMessage) er
 	return nil
 }
 
+// sendPhoto uploads the image via sendPhoto with the text attached as the
+// caption (clipped to Telegram's caption limit). Filename defaults to
+// "reply.png" when none is supplied.
+func (t *TelegramAdapter) sendPhoto(ctx context.Context, msg OutboundMessage) error {
+	filename := msg.Image.FileName
+	if filename == "" {
+		filename = "reply.png"
+	}
+
+	var buf bytes.Buffer
+	w := multipart.NewWriter(&buf)
+	_ = w.WriteField("chat_id", msg.ChatID)
+	if caption := clip(msg.Text, 1024); strings.TrimSpace(caption) != "" {
+		_ = w.WriteField("caption", caption)
+	}
+	part, err := w.CreateFormFile("photo", filename)
+	if err != nil {
+		return err
+	}
+	if _, err := part.Write(msg.Image.Data); err != nil {
+		return err
+	}
+	if err := w.Close(); err != nil {
+		return err
+	}
+
+	endpoint := fmt.Sprintf("%s/bot%s/sendPhoto", t.baseURL, t.token)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, &buf)
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", w.FormDataContentType())
+	resp, err := t.http.Do(req)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = resp.Body.Close() }()
+	_, _ = io.Copy(io.Discard, resp.Body)
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("telegram sendPhoto status %d", resp.StatusCode)
+	}
+	return nil
+}
+
 // SendTyping shows the native "typing…" indicator in the chat. It expires after
 // ~5s, so the Runner refreshes it while the agent works. Implements TypingAware.
 func (t *TelegramAdapter) SendTyping(ctx context.Context, chatID string) error {
@@ -330,12 +413,14 @@ type tgFile struct {
 }
 
 type tgMessage struct {
-	From    *tgUser `json:"from"`
-	Chat    *tgChat `json:"chat"`
-	Text    string  `json:"text"`
-	Caption string  `json:"caption"` // text attached to a voice/audio note
-	Voice   *tgFile `json:"voice"`   // voice note (Opus/OGG)
-	Audio   *tgFile `json:"audio"`   // music / audio file
+	From     *tgUser  `json:"from"`
+	Chat     *tgChat  `json:"chat"`
+	Text     string   `json:"text"`
+	Caption  string   `json:"caption"`  // text attached to a voice/audio/photo note
+	Voice    *tgFile  `json:"voice"`    // voice note (Opus/OGG)
+	Audio    *tgFile  `json:"audio"`    // music / audio file
+	Photo    []tgFile `json:"photo"`    // compressed photo, ascending sizes
+	Document *tgFile  `json:"document"` // arbitrary file (may be an image)
 }
 
 // audioFile returns the voice note or audio file on the message, if any.
@@ -348,6 +433,22 @@ func (m *tgMessage) audioFile() *tgFile {
 		return m.Audio
 	}
 	return nil
+}
+
+// imageFiles returns the image attachments on the message. A photo arrives as
+// an array of PhotoSize ordered smallest→largest; we keep the last (largest)
+// entry. An image sent as a document (uncompressed) is also picked up.
+func (m *tgMessage) imageFiles() []*tgFile {
+	var out []*tgFile
+	if n := len(m.Photo); n > 0 {
+		if largest := &m.Photo[n-1]; largest.FileID != "" {
+			out = append(out, largest)
+		}
+	}
+	if m.Document != nil && m.Document.FileID != "" && isImageMime(m.Document.MimeType) {
+		out = append(out, m.Document)
+	}
+	return out
 }
 
 type tgUpdate struct {
@@ -380,12 +481,13 @@ func parseTelegramUpdates(body []byte) ([]InboundMessage, int64, error) {
 			continue
 		}
 		af := u.Message.audioFile()
+		imgs := u.Message.imageFiles()
 		text := u.Message.Text
-		if af != nil && strings.TrimSpace(text) == "" {
-			text = u.Message.Caption // a caption on a voice/audio note
+		if (af != nil || len(imgs) > 0) && strings.TrimSpace(text) == "" {
+			text = u.Message.Caption // a caption on a voice/audio/photo note
 		}
-		// Skip only when there is nothing usable — neither text nor audio.
-		if strings.TrimSpace(text) == "" && af == nil {
+		// Skip only when there is nothing usable — neither text, audio, nor image.
+		if strings.TrimSpace(text) == "" && af == nil && len(imgs) == 0 {
 			continue
 		}
 		userID, userName := "", ""
@@ -400,6 +502,10 @@ func parseTelegramUpdates(body []byte) ([]InboundMessage, int64, error) {
 		if af != nil {
 			audio = &InboundAudio{ref: af.FileID, MimeType: af.MimeType, FileName: af.FileName}
 		}
+		var images []*InboundImage
+		for _, img := range imgs {
+			images = append(images, &InboundImage{ref: img.FileID, MimeType: img.MimeType, FileName: img.FileName})
+		}
 		msgs = append(msgs, InboundMessage{
 			Platform: telegramPlatform,
 			ChatID:   strconv.FormatInt(u.Message.Chat.ID, 10),
@@ -407,6 +513,7 @@ func parseTelegramUpdates(body []byte) ([]InboundMessage, int64, error) {
 			UserName: userName,
 			Text:     text,
 			Audio:    audio,
+			Images:   images,
 		})
 	}
 	return msgs, maxID, nil

@@ -15,6 +15,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"mime/multipart"
 	"net/http"
 	"os"
 	"strconv"
@@ -99,8 +100,9 @@ func (s *SlackAdapter) eventsHandler(ctx context.Context, inbound chan<- Inbound
 		rw.WriteHeader(http.StatusOK) // ack fast; Slack retries on slow/!200
 		if hasMsg {
 			s.hydrateAudio(ctx, &msg)
-			if strings.TrimSpace(msg.Text) == "" && msg.Audio == nil {
-				return // audio download failed and there was no text
+			s.hydrateImages(ctx, &msg)
+			if strings.TrimSpace(msg.Text) == "" && msg.Audio == nil && len(msg.Images) == 0 {
+				return // audio/image download failed and there was no text
 			}
 			select {
 			case inbound <- msg:
@@ -135,6 +137,16 @@ func (s *SlackAdapter) Start(ctx context.Context, inbound chan<- InboundMessage)
 
 // Send posts a reply via chat.postMessage.
 func (s *SlackAdapter) Send(ctx context.Context, msg OutboundMessage) error {
+	// Image reply: when a picture is attached, upload it via files.upload with
+	// the text as the initial comment. Falls back to text on any failure so a
+	// reply is never lost.
+	if msg.Image != nil && len(msg.Image.Data) > 0 {
+		if err := s.sendPhoto(ctx, msg); err != nil {
+			s.logger.Warn("slack: photo send failed, falling back to text", zap.Error(err))
+		} else {
+			return nil
+		}
+	}
 	payload, _ := json.Marshal(map[string]string{"channel": msg.ChatID, "text": msg.Text})
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, s.apiBase+"/chat.postMessage", bytes.NewReader(payload))
 	if err != nil {
@@ -150,6 +162,63 @@ func (s *SlackAdapter) Send(ctx context.Context, msg OutboundMessage) error {
 	_, _ = io.Copy(io.Discard, resp.Body)
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("slack chat.postMessage status %d", resp.StatusCode)
+	}
+	return nil
+}
+
+// sendPhoto uploads the image via the files.upload API: a multipart request
+// carrying the channel, the file bytes, a filename and the text as the
+// initial_comment. The bot token authenticates the call. Filename defaults to
+// "reply.png" when none is supplied.
+func (s *SlackAdapter) sendPhoto(ctx context.Context, msg OutboundMessage) error {
+	filename := msg.Image.FileName
+	if filename == "" {
+		filename = "reply.png"
+	}
+
+	var buf bytes.Buffer
+	w := multipart.NewWriter(&buf)
+	_ = w.WriteField("channels", msg.ChatID)
+	if strings.TrimSpace(msg.Text) != "" {
+		_ = w.WriteField("initial_comment", msg.Text)
+	}
+	_ = w.WriteField("filename", filename)
+	part, err := w.CreateFormFile("file", filename)
+	if err != nil {
+		return err
+	}
+	if _, err := part.Write(msg.Image.Data); err != nil {
+		return err
+	}
+	if err := w.Close(); err != nil {
+		return err
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, s.apiBase+"/files.upload", &buf)
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", w.FormDataContentType())
+	req.Header.Set("Authorization", "Bearer "+s.botToken)
+	resp, err := s.http.Do(req)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = resp.Body.Close() }()
+	body, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("slack files.upload status %d", resp.StatusCode)
+	}
+	// Slack always returns 200; success is signalled by the "ok" field.
+	var res struct {
+		OK    bool   `json:"ok"`
+		Error string `json:"error"`
+	}
+	if err := json.Unmarshal(body, &res); err != nil {
+		return err
+	}
+	if !res.OK {
+		return fmt.Errorf("slack files.upload error: %s", res.Error)
 	}
 	return nil
 }
@@ -209,17 +278,24 @@ func parseSlackEvent(body []byte) (challenge string, msg InboundMessage, hasMsg 
 		return "", InboundMessage{}, false, nil
 	}
 	// A voice memo / audio file arrives as a "file_share" subtype carrying
-	// files[]; pick the first audio file. Its bytes are fetched later.
+	// files[]; pick the first audio file. Image files (photos, screenshots) are
+	// collected too. Their bytes are fetched later.
 	var audio *InboundAudio
+	var images []*InboundImage
 	for _, f := range e.Files {
-		if f.URLPrivate != "" && isAudioMime(f.Mimetype) {
+		if f.URLPrivate == "" {
+			continue
+		}
+		switch {
+		case audio == nil && isAudioMime(f.Mimetype):
 			audio = &InboundAudio{ref: f.URLPrivate, MimeType: f.Mimetype, FileName: f.Name}
-			break
+		case isImageMime(f.Mimetype):
+			images = append(images, &InboundImage{ref: f.URLPrivate, MimeType: f.Mimetype, FileName: f.Name})
 		}
 	}
 	// Reject other subtypes (edits, joins, …) and empty messages unless they
-	// carry audio.
-	if audio == nil && (e.SubType != "" || strings.TrimSpace(e.Text) == "") {
+	// carry audio or an image.
+	if audio == nil && len(images) == 0 && (e.SubType != "" || strings.TrimSpace(e.Text) == "") {
 		return "", InboundMessage{}, false, nil
 	}
 	return "", InboundMessage{
@@ -228,6 +304,7 @@ func parseSlackEvent(body []byte) (challenge string, msg InboundMessage, hasMsg 
 		UserID:   e.User,
 		Text:     e.Text,
 		Audio:    audio,
+		Images:   images,
 	}, true, nil
 }
 
@@ -247,6 +324,33 @@ func (s *SlackAdapter) hydrateAudio(ctx context.Context, msg *InboundMessage) {
 	if msg.Audio.MimeType == "" {
 		msg.Audio.MimeType = mime
 	}
+}
+
+// hydrateImages downloads each Slack image file (url_private requires the bot
+// token as a bearer, same as audio). Attachments that fail to download are
+// dropped.
+func (s *SlackAdapter) hydrateImages(ctx context.Context, msg *InboundMessage) {
+	if len(msg.Images) == 0 {
+		return
+	}
+	kept := msg.Images[:0]
+	for _, img := range msg.Images {
+		if len(img.Data) > 0 {
+			kept = append(kept, img)
+			continue
+		}
+		data, mime, err := fetchAudioBytes(ctx, s.http, img.ref, s.botToken, maxImageBytes())
+		if err != nil {
+			s.logger.Warn("gateway/slack: image download failed", zap.String("user", msg.UserID), zap.Error(err))
+			continue
+		}
+		img.Data = data
+		if img.MimeType == "" {
+			img.MimeType = mime
+		}
+		kept = append(kept, img)
+	}
+	msg.Images = kept
 }
 
 func init() {

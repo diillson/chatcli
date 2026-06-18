@@ -39,6 +39,12 @@ type InboundMessage struct {
 	// owning adapter then downloads the bytes into Data before dispatch.
 	// Consumers read Data/MimeType/FileName only.
 	Audio *InboundAudio
+
+	// Images carries photo/image attachments when the message has any. Same
+	// two-phase lifecycle as Audio: the parser fills metadata + download
+	// handle, the adapter hydrates Data, consumers read Data/MimeType/FileName.
+	// Fed to vision-capable models (or the describe-fallback) by the agent func.
+	Images []*InboundImage
 }
 
 // InboundAudio is a voice/audio attachment on an inbound message.
@@ -50,6 +56,18 @@ type InboundAudio struct {
 	// ref is a platform-opaque download handle (Telegram file_id, WhatsApp
 	// media id, Discord/Slack URL) that the owning adapter resolves to Data.
 	// It never leaves the gateway package.
+	ref string
+}
+
+// InboundImage is a photo/image attachment on an inbound message. It mirrors
+// InboundAudio's two-phase (parse metadata → hydrate bytes) lifecycle.
+type InboundImage struct {
+	Data     []byte // the raw image, populated by the adapter after download
+	MimeType string // e.g. "image/jpeg" — best-effort, may be empty
+	FileName string // best-effort original name, may be empty
+
+	// ref is the platform-opaque download handle resolved to Data by the
+	// owning adapter. It never leaves the gateway package.
 	ref string
 }
 
@@ -65,6 +83,15 @@ type OutboundMessage struct {
 	ChatID string
 	Text   string
 	Audio  *OutboundAudio
+	Image  *OutboundImage
+}
+
+// OutboundImage is an image reply (generated/edited) to deliver alongside or
+// instead of text on adapters that support sending photos.
+type OutboundImage struct {
+	Data     []byte
+	Mime     string // e.g. "image/png"
+	FileName string // e.g. "reply.png"
 }
 
 // OutboundAudio is a synthesized voice reply to deliver alongside/instead of

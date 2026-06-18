@@ -34,6 +34,7 @@ import (
 	"unicode"
 
 	"github.com/diillson/chatcli/cli/gateway"
+	"github.com/diillson/chatcli/cli/plugins"
 	"github.com/diillson/chatcli/i18n"
 	"github.com/diillson/chatcli/llm/transcription"
 	"github.com/diillson/chatcli/llm/tts"
@@ -287,10 +288,12 @@ func (cli *ChatCLI) runGateway(ctx context.Context, broker hub.Store) error {
 		}()
 	}
 
-	runner := gateway.NewRunner(adapters, cli.gatewayAgentFunc(sessions, transcriber), cli.logger, 0)
+	imgOutbox := newGatewayImageOutbox()
+	runner := gateway.NewRunner(adapters, cli.gatewayAgentFunc(sessions, transcriber, imgOutbox), cli.logger, 0)
 	runner.SetThinkingNotice(i18n.T("gateway.thinking"))
 	runner.SetVoicePrefs(gateway.SharedVoicePrefs())
 	cli.maybeEnableVoiceReplies(runner)
+	cli.maybeEnableImageReplies(runner, imgOutbox)
 	return runner.Run(ctx)
 }
 
@@ -385,6 +388,83 @@ func (cli *ChatCLI) maybeEnableVoiceReplies(runner *gateway.Runner) {
 	})
 }
 
+// Image reply policy values parsed from CHATCLI_GATEWAY_IMAGE_REPLY.
+const (
+	imageReplyAuto  = "auto"  // attach a picture whenever the agent produced one (default)
+	imageReplyNever = "never" // never send pictures, even if generated
+)
+
+// imageReplyMode parses CHATCLI_GATEWAY_IMAGE_REPLY. Empty/"auto"/truthy →
+// auto; "never"/"off"/falsey → never. Unknown values fall back to auto.
+func imageReplyMode(raw string) string {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "", imageReplyAuto, "always", "on":
+		return imageReplyAuto
+	case imageReplyNever, "off":
+		return imageReplyNever
+	}
+	if enabled, err := strconv.ParseBool(strings.TrimSpace(raw)); err == nil && !enabled {
+		return imageReplyNever
+	}
+	return imageReplyAuto
+}
+
+// gatewayImageOutbox holds, per session, the picture the agent produced during
+// the just-finished run until the runner attaches it to the final reply. Runs
+// are serialized in the agent func, but the runner sends concurrently, so the
+// per-session map is mutex-guarded and keyed to avoid cross-session bleed.
+type gatewayImageOutbox struct {
+	mu sync.Mutex
+	m  map[string]*gateway.OutboundImage
+}
+
+func newGatewayImageOutbox() *gatewayImageOutbox {
+	return &gatewayImageOutbox{m: make(map[string]*gateway.OutboundImage)}
+}
+
+func (o *gatewayImageOutbox) put(session string, img *gateway.OutboundImage) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	o.m[session] = img
+}
+
+func (o *gatewayImageOutbox) take(session string) *gateway.OutboundImage {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	img := o.m[session]
+	delete(o.m, session)
+	return img
+}
+
+// maybeEnableImageReplies wires the runner to attach a generated/edited image
+// to the final reply per CHATCLI_GATEWAY_IMAGE_REPLY (auto default, never off).
+func (cli *ChatCLI) maybeEnableImageReplies(runner *gateway.Runner, outbox *gatewayImageOutbox) {
+	if imageReplyMode(os.Getenv("CHATCLI_GATEWAY_IMAGE_REPLY")) == imageReplyNever {
+		return
+	}
+	cli.logger.Info("gateway: image replies enabled")
+	runner.SetImageProvider(func(_ context.Context, session string) *gateway.OutboundImage {
+		return outbox.take(session)
+	})
+}
+
+// loadFirstGeneratedImage reads the first existing image path into an
+// OutboundImage. Returns nil when there is nothing to send or it is unreadable.
+func loadFirstGeneratedImage(paths []string) *gateway.OutboundImage {
+	for _, p := range paths {
+		data, err := os.ReadFile(p)
+		if err != nil || len(data) == 0 {
+			continue
+		}
+		mime, ok := models.DetectImageMediaType(data)
+		if !ok {
+			mime = "image/png"
+		}
+		return &gateway.OutboundImage{Data: data, Mime: mime, FileName: filepath.Base(p)}
+	}
+	return nil
+}
+
 // teeLoggerToGatewayLog adds a JSON sink at gatewayStatePath("gateway.log") to
 // cli.logger so the daemon's structured logs land in the file /gateway start
 // advertises (in addition to app.log). Returns a closer for the file, or nil
@@ -416,8 +496,10 @@ func (cli *ChatCLI) teeLoggerToGatewayLog() func() {
 // while the gateway persona keeps the reply concise and chat-friendly. Runs
 // serialize because the loop mutates shared ChatCLI state (history,
 // lastAgentReply) and redirects os.Stdout for capture.
-func (cli *ChatCLI) gatewayAgentFunc(sessions *hubSessions, transcriber transcription.Provider) gateway.AgentFunc {
+func (cli *ChatCLI) gatewayAgentFunc(sessions *hubSessions, transcriber transcription.Provider, imgOutbox *gatewayImageOutbox) gateway.AgentFunc {
 	var mu sync.Mutex
+
+	imageRepliesOn := imageReplyMode(os.Getenv("CHATCLI_GATEWAY_IMAGE_REPLY")) != imageReplyNever
 
 	transcribeLang := strings.TrimSpace(os.Getenv("CHATCLI_TRANSCRIPTION_LANG"))
 
@@ -471,6 +553,17 @@ func (cli *ChatCLI) gatewayAgentFunc(sessions *hubSessions, transcriber transcri
 			msg.Text = transcript
 		}
 
+		// Image message: stage the attachment(s) for the coder run. The run's
+		// model gating decides native vision vs the describe-fallback. An
+		// image with no caption still gets a default instruction so the engine
+		// has a task.
+		if imgs := inboundImagesToModels(msg.Images); len(imgs) > 0 {
+			cli.pendingInboundImages = imgs
+			if strings.TrimSpace(msg.Text) == "" {
+				msg.Text = i18n.T("gateway.image.default_prompt")
+			}
+		}
+
 		// Resolve the sender's shared conversation and record the incoming turn
 		// before running, so the message survives even if the run fails. preamble
 		// carries the prior dialog (across every channel) as context.
@@ -487,6 +580,12 @@ func (cli *ChatCLI) gatewayAgentFunc(sessions *hubSessions, transcriber transcri
 			task += "\n\n" + speechReplyDirective
 		}
 
+		// Discard any stale generated-image paths from a prior run so this
+		// reply only carries pictures produced now. Runs are serialized by mu.
+		if imageRepliesOn {
+			_ = plugins.TakeGeneratedImages()
+		}
+
 		emit := gateway.Progress(ctx)
 		var lastSent string
 		stream := func(line string) {
@@ -501,6 +600,14 @@ func (cli *ChatCLI) gatewayAgentFunc(sessions *hubSessions, transcriber transcri
 			return "", err
 		}
 
+		// If the agent generated/edited an image during the run, stash it for
+		// the runner to attach to the final reply on photo-capable adapters.
+		if imageRepliesOn {
+			if img := loadFirstGeneratedImage(plugins.TakeGeneratedImages()); img != nil {
+				imgOutbox.put(session, img)
+			}
+		}
+
 		// The clean prose answer was captured (and not printed) during the run.
 		reply := strings.TrimSpace(cli.lastAgentReply)
 		if reply == "" {
@@ -509,6 +616,36 @@ func (cli *ChatCLI) gatewayAgentFunc(sessions *hubSessions, transcriber transcri
 		conv.finish(ctx, reply)
 		return reply, nil
 	}
+}
+
+// inboundImagesToModels converts hydrated gateway image attachments into the
+// provider-agnostic models.ImageContent carried on a user turn. Attachments
+// without bytes or with an unsupported media type are dropped.
+func inboundImagesToModels(imgs []*gateway.InboundImage) []models.ImageContent {
+	if len(imgs) == 0 {
+		return nil
+	}
+	out := make([]models.ImageContent, 0, len(imgs))
+	for _, im := range imgs {
+		if im == nil || len(im.Data) == 0 {
+			continue
+		}
+		mime := im.MimeType
+		if _, ok := models.NormalizeImageMediaType(mime); !ok {
+			// Fall back to sniffing when the platform sent no/!supported MIME.
+			if sniffed, ok2 := models.DetectImageMediaType(im.Data); ok2 {
+				mime = sniffed
+			} else {
+				continue
+			}
+		}
+		out = append(out, models.ImageContent{
+			MediaType: mime,
+			Data:      im.Data,
+			FileName:  im.FileName,
+		})
+	}
+	return out
 }
 
 // transcribeInbound converts a voice message to text. It returns handled=true
