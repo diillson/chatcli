@@ -261,7 +261,7 @@ func (cli *ChatCLI) loadImageAttachment(path string) (models.ImageContent, bool)
 		return models.ImageContent{}, false
 	}
 
-	data, err := os.ReadFile(expanded)
+	data, err := os.ReadFile(expanded) //#nosec G304 -- user-specified @file path to attach as a vision image
 	if err != nil {
 		return models.ImageContent{}, false
 	}

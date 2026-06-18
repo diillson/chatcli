@@ -261,7 +261,7 @@ func (p *BuiltinImagePlugin) ExecuteWithStream(ctx context.Context, args []strin
 func loadInputImages(paths []string) ([]imagegen.Image, error) {
 	out := make([]imagegen.Image, 0, len(paths))
 	for _, p := range paths {
-		data, err := os.ReadFile(p)
+		data, err := os.ReadFile(p) //#nosec G304 -- user/agent-specified image path for @image edit
 		if err != nil {
 			return nil, fmt.Errorf("read %q: %w", p, err)
 		}
