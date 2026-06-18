@@ -23,7 +23,10 @@ import (
 	"go.uber.org/zap"
 )
 
-const sdTxt2ImgPath = "/sdapi/v1/txt2img"
+const (
+	sdTxt2ImgPath = "/sdapi/v1/txt2img"
+	sdImg2ImgPath = "/sdapi/v1/img2img"
+)
 
 // Automatic1111 generates images against a local Stable Diffusion WebUI.
 type Automatic1111 struct {
@@ -91,9 +94,69 @@ func (a *Automatic1111) Generate(ctx context.Context, prompt string, opts Option
 	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
 		return nil, fmt.Errorf("imagegen: decode response: %w", err)
 	}
-	images := make([]Image, 0, len(out.Images))
-	for _, b64 := range out.Images {
-		// SD WebUI sometimes prefixes a data URI; strip it.
+	return decodeSDImages(out.Images)
+}
+
+// Edit runs Stable Diffusion img2img: the input image(s) seed the diffusion
+// and the prompt guides the transformation. Strength maps to denoising_strength
+// (how far from the original the result may drift).
+func (a *Automatic1111) Edit(ctx context.Context, prompt string, inputs []Image, opts EditOptions) ([]Image, error) {
+	if strings.TrimSpace(prompt) == "" {
+		return nil, fmt.Errorf("imagegen: empty prompt")
+	}
+	if len(inputs) == 0 || len(inputs[0].Data) == 0 {
+		return nil, fmt.Errorf("imagegen: edit requires an input image")
+	}
+	w, h := parseSize(opts.Size)
+	n := opts.N
+	if n <= 0 {
+		n = 1
+	}
+	denoise := opts.Strength
+	if denoise <= 0 || denoise > 1 {
+		denoise = 0.6 // a sensible default: visible change while preserving structure
+	}
+	payload := map[string]interface{}{
+		"prompt":             prompt,
+		"init_images":        []string{base64.StdEncoding.EncodeToString(inputs[0].Data)},
+		"denoising_strength": denoise,
+		"steps":              a.steps,
+		"width":              w,
+		"height":             h,
+		"batch_size":         n,
+	}
+	if len(opts.Mask) > 0 {
+		payload["mask"] = base64.StdEncoding.EncodeToString(opts.Mask)
+	}
+	body, _ := json.Marshal(payload)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, a.baseURL+sdImg2ImgPath, bytes.NewReader(body))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := a.client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("imagegen: request failed (is Stable Diffusion WebUI running with --api?): %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK {
+		snippet, _ := io.ReadAll(io.LimitReader(resp.Body, maxErrBody))
+		return nil, fmt.Errorf("imagegen: sdwebui img2img returned %d: %s", resp.StatusCode, strings.TrimSpace(string(snippet)))
+	}
+	var out struct {
+		Images []string `json:"images"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		return nil, fmt.Errorf("imagegen: decode response: %w", err)
+	}
+	return decodeSDImages(out.Images)
+}
+
+// decodeSDImages decodes the base64 image list returned by both the txt2img
+// and img2img endpoints, stripping any data-URI prefix.
+func decodeSDImages(b64s []string) ([]Image, error) {
+	images := make([]Image, 0, len(b64s))
+	for _, b64 := range b64s {
 		if i := strings.Index(b64, ","); strings.HasPrefix(b64, "data:") && i >= 0 {
 			b64 = b64[i+1:]
 		}

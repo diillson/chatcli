@@ -77,6 +77,72 @@ func (b *Bedrock) Generate(ctx context.Context, prompt string, opts Options) ([]
 	return parseBedrockImages(out.Body)
 }
 
+// Edit transforms an input image guided by prompt. Stability models use the
+// "image-to-image" mode; the Amazon models (Nova Canvas / Titan) use the
+// IMAGE_VARIATION task. Both return the shared {"images":["<b64>"]} shape.
+func (b *Bedrock) Edit(ctx context.Context, prompt string, inputs []Image, opts EditOptions) ([]Image, error) {
+	if strings.TrimSpace(prompt) == "" {
+		return nil, fmt.Errorf("imagegen: empty prompt")
+	}
+	if len(inputs) == 0 || len(inputs[0].Data) == 0 {
+		return nil, fmt.Errorf("imagegen: edit requires an input image")
+	}
+	body := buildBedrockEditRequest(b.model, prompt, inputs[0].Data, opts)
+	out, err := b.runtime.InvokeModel(ctx, &bedrockruntime.InvokeModelInput{
+		ModelId:     strPtr(b.model),
+		ContentType: strPtr("application/json"),
+		Accept:      strPtr("application/json"),
+		Body:        body,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("imagegen: bedrock InvokeModel (edit): %w", err)
+	}
+	return parseBedrockImages(out.Body)
+}
+
+// buildBedrockEditRequest builds the image-to-image InvokeModel body per model
+// family. Stability: mode "image-to-image" with the base64 image + strength.
+// Amazon (Nova Canvas / Titan): IMAGE_VARIATION conditioned on the input image.
+func buildBedrockEditRequest(model, prompt string, img []byte, opts EditOptions) []byte {
+	b64 := base64.StdEncoding.EncodeToString(img)
+	if strings.HasPrefix(strings.ToLower(model), "stability.") {
+		strength := opts.Strength
+		if strength <= 0 || strength > 1 {
+			strength = 0.6
+		}
+		body, _ := json.Marshal(map[string]interface{}{
+			"prompt":        prompt,
+			"mode":          "image-to-image",
+			"image":         b64,
+			"strength":      strength,
+			"output_format": "png",
+		})
+		return body
+	}
+	// Amazon Nova Canvas / Titan IMAGE_VARIATION. similarityStrength (0.2–1.0):
+	// higher keeps the result closer to the source; 0.7 preserves composition
+	// while letting the prompt steer the change.
+	sim := opts.Strength
+	if sim < 0.2 || sim > 1.0 {
+		sim = 0.7
+	}
+	w, h := parseSize(opts.Size)
+	body, _ := json.Marshal(map[string]interface{}{
+		"taskType": "IMAGE_VARIATION",
+		"imageVariationParams": map[string]interface{}{
+			"text":               prompt,
+			"images":             []string{b64},
+			"similarityStrength": sim,
+		},
+		"imageGenerationConfig": map[string]interface{}{
+			"numberOfImages": 1,
+			"width":          w,
+			"height":         h,
+		},
+	})
+	return body
+}
+
 // buildBedrockRequest builds the InvokeModel body per model family. Nova Canvas
 // and Titan share the TEXT_IMAGE shape; Stability models use a text-to-image
 // shape with an aspect ratio. The {"images":["<b64>"]} response is shared.
