@@ -138,7 +138,7 @@ func bedrockImageBlocks(images []models.ImageContent) []bedrockruntimetypes.Cont
 	if len(images) == 0 {
 		return nil
 	}
-	var blocks []bedrockruntimetypes.ContentBlock
+	blocks := make([]bedrockruntimetypes.ContentBlock, 0, len(images))
 	for _, ic := range images {
 		if !ic.IsValid() || len(ic.Data) == 0 {
 			continue

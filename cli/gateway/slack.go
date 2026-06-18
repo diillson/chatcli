@@ -209,7 +209,7 @@ func (s *SlackAdapter) sendPhoto(ctx context.Context, msg OutboundMessage) error
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("slack files.upload status %d", resp.StatusCode)
 	}
-	// Slack always returns 200; success is signalled by the "ok" field.
+	// Slack always returns 200; success is signaled by the "ok" field.
 	var res struct {
 		OK    bool   `json:"ok"`
 		Error string `json:"error"`
