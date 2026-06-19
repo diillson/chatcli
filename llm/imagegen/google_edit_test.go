@@ -75,11 +75,61 @@ func TestGoogleEdit_RoutesImagenToGemini(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	g := &Google{baseURL: srv.URL, apiKey: "k", model: "imagen-3.0-generate-002", client: srv.Client()}
+	g := &Google{baseURL: srv.URL, apiKey: "k", model: "imagen-4.0-generate-001", client: srv.Client()}
 	if _, err := g.Edit(context.Background(), "x", []Image{{Data: []byte("i"), Mime: "image/png"}}, EditOptions{}); err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(path, defaultGeminiImageModel) {
 		t.Errorf("Imagen edit should route to %q, path was %q", defaultGeminiImageModel, path)
+	}
+}
+
+// A Gemini image model generates from text via :generateContent (not Imagen's
+// :predict). Proves Generate routes gemini-* to the generateContent endpoint.
+func TestGoogleGenerate_GeminiUsesGenerateContent(t *testing.T) {
+	var path string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		path = r.URL.Path
+		resp := map[string]interface{}{
+			"candidates": []map[string]interface{}{{
+				"content": map[string]interface{}{
+					"parts": []map[string]interface{}{{
+						"inlineData": map[string]interface{}{"data": base64.StdEncoding.EncodeToString([]byte("Y"))},
+					}},
+				},
+			}},
+		}
+		_ = json.NewEncoder(w).Encode(resp)
+	}))
+	defer srv.Close()
+
+	g := &Google{baseURL: srv.URL, apiKey: "k", model: "gemini-2.5-flash-image", client: srv.Client()}
+	imgs, err := g.Generate(context.Background(), "a fox", Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(path, ":generateContent") {
+		t.Errorf("gemini Generate should hit :generateContent, path was %q", path)
+	}
+	if len(imgs) != 1 || string(imgs[0].Data) != "Y" {
+		t.Errorf("unexpected images %+v", imgs)
+	}
+}
+
+// An Imagen model must keep using the :predict endpoint for generation.
+func TestGoogleGenerate_ImagenUsesPredict(t *testing.T) {
+	var path string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		path = r.URL.Path
+		_, _ = w.Write([]byte(`{"predictions":[{"bytesBase64Encoded":"` + base64.StdEncoding.EncodeToString([]byte("Z")) + `","mimeType":"image/png"}]}`))
+	}))
+	defer srv.Close()
+
+	g := &Google{baseURL: srv.URL, apiKey: "k", model: "imagen-4.0-generate-001", client: srv.Client()}
+	if _, err := g.Generate(context.Background(), "a fox", Options{}); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(path, ":predict") {
+		t.Errorf("imagen Generate should hit :predict, path was %q", path)
 	}
 }

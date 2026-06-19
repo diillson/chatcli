@@ -27,8 +27,11 @@ import (
 )
 
 const (
-	googleImageBase    = "https://generativelanguage.googleapis.com"
-	defaultImagenModel = "imagen-3.0-generate-002"
+	googleImageBase = "https://generativelanguage.googleapis.com"
+	// defaultImagenModel is the current Imagen generation model. Imagen 3
+	// (imagen-3.0-generate-002) was retired from the Gemini API and only 404s
+	// now; Imagen 4 is the current family.
+	defaultImagenModel = "imagen-4.0-generate-001"
 	// defaultGeminiImageModel is a Gemini image model ("Nano Banana") that
 	// edits via :generateContent with an inline input image. Imagen's :predict
 	// endpoint is generation-only, so editing routes through this model.
@@ -54,16 +57,27 @@ func NewGoogle(apiKey, model string, logger *zap.Logger) (*Google, error) {
 	if logger == nil {
 		logger = zap.NewNop()
 	}
-	return &Google{baseURL: googleImageBase, apiKey: strings.TrimSpace(apiKey), model: model, client: utils.NewHTTPClient(logger, imageGenTimeout)}, nil
+	return &Google{baseURL: googleImageBase, apiKey: strings.TrimSpace(apiKey), model: model, client: utils.NewHTTPClientH1(logger, imageGenTimeout)}, nil
 }
 
 // Name returns "google".
 func (*Google) Name() string { return "google" }
 
-// Generate posts the prompt and decodes the returned base64 images.
+// isGeminiModel reports whether the configured model is a Gemini image model
+// (gen + edit via :generateContent) rather than an Imagen model (:predict).
+func isGeminiModel(model string) bool {
+	return strings.HasPrefix(strings.ToLower(strings.TrimSpace(model)), "gemini")
+}
+
+// Generate produces images from a text prompt. Imagen models use the :predict
+// endpoint; Gemini image models (gemini-*-image) generate via :generateContent
+// with an IMAGE response modality, so they route through the shared helper.
 func (g *Google) Generate(ctx context.Context, prompt string, opts Options) ([]Image, error) {
 	if strings.TrimSpace(prompt) == "" {
 		return nil, fmt.Errorf("imagegen: empty prompt")
+	}
+	if isGeminiModel(g.model) {
+		return g.generateContentImages(ctx, g.model, []map[string]interface{}{{"text": prompt}})
 	}
 	n := opts.N
 	if n <= 0 {
@@ -155,6 +169,14 @@ func (g *Google) Edit(ctx context.Context, prompt string, inputs []Image, opts E
 		})
 	}
 
+	return g.generateContentImages(ctx, model, parts)
+}
+
+// generateContentImages posts a :generateContent request (IMAGE modality) with
+// the given parts and decodes the returned inline images. It serves both
+// text-to-image generation (parts = just the prompt) and editing (parts =
+// prompt + inline input images) for Gemini image models.
+func (g *Google) generateContentImages(ctx context.Context, model string, parts []map[string]interface{}) ([]Image, error) {
 	body, _ := json.Marshal(map[string]interface{}{
 		"contents": []map[string]interface{}{{"role": "user", "parts": parts}},
 		"generationConfig": map[string]interface{}{
@@ -174,7 +196,7 @@ func (g *Google) Edit(ctx context.Context, prompt string, inputs []Image, opts E
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		snippet, _ := io.ReadAll(io.LimitReader(resp.Body, maxErrBody))
-		return nil, fmt.Errorf("imagegen: google edit returned %d: %s", resp.StatusCode, strings.TrimSpace(string(snippet)))
+		return nil, fmt.Errorf("imagegen: google returned %d: %s", resp.StatusCode, strings.TrimSpace(string(snippet)))
 	}
 
 	var out struct {
@@ -214,7 +236,7 @@ func (g *Google) Edit(ctx context.Context, prompt string, inputs []Image, opts E
 		}
 	}
 	if len(images) == 0 {
-		return nil, fmt.Errorf("imagegen: google edit returned no image (model %q may not support image output)", model)
+		return nil, fmt.Errorf("imagegen: google returned no image (model %q may not support image output)", model)
 	}
 	return images, nil
 }

@@ -38,9 +38,12 @@ import (
 )
 
 const (
-	openAIBaseURL   = "https://api.openai.com/v1"
-	xaiBaseURL      = "https://api.x.ai/v1"
-	defaultXAIModel = "grok-2-image"
+	openAIBaseURL = "https://api.openai.com/v1"
+	xaiBaseURL    = "https://api.x.ai/v1"
+	// defaultXAIModel is xAI's current image model. grok-2-image was retired
+	// (404s now); grok-imagine-image is the current Grok Imagine generator
+	// (OpenAI-shaped /images/generations, returns an image URL).
+	defaultXAIModel = "grok-imagine-image"
 
 	// Z.AI (Zhipu) CogView / GLM-Image: OpenAI-shaped /images/generations, but
 	// the response carries image URLs and the "n" field is rejected.
@@ -406,7 +409,7 @@ func providerFromModel(model string) string {
 		return "minimax"
 	case strings.HasPrefix(model, "grok"):
 		return "xai"
-	case strings.HasPrefix(model, "imagen"):
+	case strings.HasPrefix(model, "imagen"), strings.HasPrefix(model, "gemini"):
 		return "google"
 	case strings.HasPrefix(model, "gpt-image"), strings.HasPrefix(model, "dall-e"):
 		return "openai"

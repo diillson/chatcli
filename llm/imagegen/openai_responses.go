@@ -64,7 +64,7 @@ func NewOpenAIResponses(baseURL, apiKey, model string, logger *zap.Logger) (*Ope
 		baseURL: baseURL,
 		apiKey:  strings.TrimSpace(apiKey),
 		model:   model,
-		client:  utils.NewHTTPClient(logger, imageGenTimeout),
+		client:  utils.NewHTTPClientH1(logger, imageGenTimeout),
 	}, nil
 }
 

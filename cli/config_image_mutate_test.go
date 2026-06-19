@@ -53,7 +53,7 @@ func TestImageModelsCatalog_Content(t *testing.T) {
 	t.Setenv("OPENAI_API_KEY", "") // skip live GET
 	cli := &ChatCLI{logger: zap.NewNop()}
 	out := cli.imageModelsCatalog(context.Background())
-	for _, want := range []string{"gpt-image-1", "gpt-5.5", "grok-2-image", "nova-canvas"} {
+	for _, want := range []string{"gpt-image-1", "gpt-5.5", "grok-imagine-image", "nova-canvas"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("catalog missing %q", want)
 		}

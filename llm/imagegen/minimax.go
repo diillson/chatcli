@@ -58,7 +58,7 @@ func NewMiniMax(baseURL, apiKey, model string, logger *zap.Logger) (*MiniMax, er
 		baseURL: baseURL,
 		apiKey:  strings.TrimSpace(apiKey),
 		model:   model,
-		client:  utils.NewHTTPClient(logger, imageGenTimeout),
+		client:  utils.NewHTTPClientH1(logger, imageGenTimeout),
 	}, nil
 }
 

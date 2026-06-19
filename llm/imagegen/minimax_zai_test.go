@@ -188,8 +188,9 @@ func TestProviderFromModel(t *testing.T) {
 		"image-01":                         "minimax",
 		"gpt-image-1":                      "openai",
 		"gpt-5.5":                          "openai-responses",
-		"grok-2-image":                     "xai",
-		"imagen-3.0-generate-002":          "google",
+		"grok-imagine-image":               "xai",
+		"imagen-4.0-generate-001":          "google",
+		"gemini-2.5-flash-image":           "google",
 		"stability.stable-image-core-v1:1": "bedrock",
 		"amazon.nova-canvas-v1:0":          "bedrock",
 		"":                                 "",
@@ -243,8 +244,8 @@ func TestFactoryAutoRoutesEachProvider(t *testing.T) {
 	}{
 		{"gpt-image-1", "OPENAI_API_KEY", "ok", "openai"},
 		{"gpt-5.5", "OPENAI_API_KEY", "ok", ""}, // responses backend; just must not be Null
-		{"imagen-3.0-generate-002", "GOOGLEAI_API_KEY", "gk", "google"},
-		{"grok-2-image", "XAI_API_KEY", "xk", "xai"},
+		{"imagen-4.0-generate-001", "GOOGLEAI_API_KEY", "gk", "google"},
+		{"grok-imagine-image", "XAI_API_KEY", "xk", "xai"},
 	}
 	for _, c := range cases {
 		clear()
