@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.143.1](https://github.com/diillson/chatcli/compare/v1.143.0...v1.143.1) (2026-06-19)
+
+
+### Bug Fixes
+
+* **imagegen:** refresh model catalog and pin image HTTP calls to HTTP/1.1 ([#1084](https://github.com/diillson/chatcli/issues/1084)) ([4fc768e](https://github.com/diillson/chatcli/commit/4fc768e9864a23771fdf1b4d4e59bc1b8778a4d4))
+
 ## [1.143.0](https://github.com/diillson/chatcli/compare/v1.142.1...v1.143.0) (2026-06-18)
 
 
