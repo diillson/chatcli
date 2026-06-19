@@ -50,7 +50,7 @@ func NewAutomatic1111(baseURL string, steps int, logger *zap.Logger) (*Automatic
 	if logger == nil {
 		logger = zap.NewNop()
 	}
-	return &Automatic1111{baseURL: baseURL, steps: steps, client: utils.NewHTTPClient(logger, imageGenTimeout)}, nil
+	return &Automatic1111{baseURL: baseURL, steps: steps, client: utils.NewHTTPClientH1(logger, imageGenTimeout)}, nil
 }
 
 // Name returns "sdwebui".

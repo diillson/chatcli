@@ -120,7 +120,7 @@ func TestGoogle_Generate(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	g, err := NewGoogle("gkey", "imagen-3.0-generate-002", zap.NewNop())
+	g, err := NewGoogle("gkey", "imagen-4.0-generate-001", zap.NewNop())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -154,7 +154,7 @@ func TestXAI_OmitsSize(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	p, err := NewOpenAICompatible(srv.URL, "xkey", "grok-2-image", "xai", zap.NewNop())
+	p, err := NewOpenAICompatible(srv.URL, "xkey", "grok-imagine-image", "xai", zap.NewNop())
 	if err != nil {
 		t.Fatal(err)
 	}

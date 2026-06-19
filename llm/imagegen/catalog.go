@@ -45,15 +45,22 @@ func KnownModels() []ModelInfo {
 		// OpenAI Responses API (a chat model generates via the image_generation tool).
 		{Name: "gpt-5.5", Provider: "openai", API: "responses", Note: "Chat model w/ image_generation tool (Responses API)."},
 		{Name: "gpt-5", Provider: "openai", API: "responses", Note: "gpt-5 and newer support the image_generation tool."},
-		// Google.
-		{Name: "imagen-3.0-generate-002", Provider: "google", API: "native", Note: "Google Imagen (predict)."},
-		// xAI.
-		{Name: "grok-2-image", Provider: "xai", API: "native", Note: "xAI image (OpenAI-shaped /images/generations, no size)."},
-		{Name: "grok-imagine-image-quality", Provider: "xai", API: "imagine", Note: "xAI Imagine quality model (Imagine API)."},
+		// Google Imagen (:predict, generation-only). Imagen 3 was retired from the
+		// Gemini API (only 404s now) — Imagen 4 is the current family.
+		{Name: "imagen-4.0-generate-001", Provider: "google", API: "native", Note: "Google Imagen 4 (predict; default)."},
+		{Name: "imagen-4.0-ultra-generate-001", Provider: "google", API: "native", Note: "Google Imagen 4 Ultra (predict; highest quality)."},
+		{Name: "imagen-4.0-fast-generate-001", Provider: "google", API: "native", Note: "Google Imagen 4 Fast (predict; cheapest/fast)."},
+		// Google Gemini image models (:generateContent — text-to-image AND editing).
+		{Name: "gemini-2.5-flash-image", Provider: "google", API: "gemini", Note: "Gemini 2.5 Flash Image (gen + edit; default editor)."},
+		{Name: "gemini-3-pro-image", Provider: "google", API: "gemini", Note: "Gemini 3 Pro Image (gen + edit; highest quality)."},
+		{Name: "gemini-3.1-flash-image", Provider: "google", API: "gemini", Note: "Gemini 3.1 Flash Image (gen + edit; fast)."},
+		// xAI. grok-2-image was retired and grok-imagine-image-quality is async
+		// (it resets the connection on /images/generations → EOF) — removed.
+		{Name: "grok-imagine-image", Provider: "xai", API: "native", Note: "xAI Grok Imagine (OpenAI-shaped /images/generations, no size; URL response)."},
 		// Z.AI (Zhipu) — OpenAI-shaped /images/generations, returns image URLs.
+		// cogview-3-flash is China-only (open.bigmodel.cn) and not on api.z.ai — omitted.
 		{Name: "glm-image", Provider: "zai", API: "images", Note: "Z.AI GLM-Image (newest; bilingual text-in-image; default)."},
 		{Name: "cogview-4-250304", Provider: "zai", API: "images", Note: "Z.AI CogView-4 flagship (bilingual)."},
-		{Name: "cogview-3-flash", Provider: "zai", API: "images", Note: "Z.AI CogView-3 Flash (free tier)."},
 		// MiniMax (Hailuo) — custom /v1/image_generation endpoint, base64 response.
 		{Name: "image-01", Provider: "minimax", API: "native", Note: "MiniMax Image-01 (text-to-image, up to 9 images)."},
 		// AWS Bedrock (InvokeModel). Current Stability models use the text-to-image
@@ -63,7 +70,7 @@ func KnownModels() []ModelInfo {
 		{Name: "stability.stable-image-ultra-v1:1", Provider: "bedrock", API: "stability", Note: "Bedrock Stability Stable Image Ultra (current; highest quality)."},
 		{Name: "stability.sd3-5-large-v1:0", Provider: "bedrock", API: "stability", Note: "Bedrock Stability SD3.5 Large (current; flagship)."},
 		{Name: "amazon.nova-canvas-v1:0", Provider: "bedrock", API: "native", Note: "Bedrock Nova Canvas (TEXT_IMAGE; LEGACY, EOL 2026-09-30)."},
-		{Name: "amazon.titan-image-generator-v2:0", Provider: "bedrock", API: "native", Note: "Bedrock Titan Image v2 (TEXT_IMAGE; legacy)."},
+		{Name: "amazon.titan-image-generator-v2:0", Provider: "bedrock", API: "native", Note: "Bedrock Titan Image v2 (TEXT_IMAGE; LEGACY, EOL 2026-06-30)."},
 	}
 }
 
@@ -85,7 +92,7 @@ func FetchOpenAIModels(ctx context.Context, baseURL, apiKey string, logger *zap.
 		return nil, err
 	}
 	req.Header.Set("Authorization", "Bearer "+strings.TrimSpace(apiKey))
-	resp, err := utils.NewHTTPClient(logger, imageGenTimeout).Do(req)
+	resp, err := utils.NewHTTPClientH1(logger, imageGenTimeout).Do(req)
 	if err != nil {
 		return nil, err
 	}

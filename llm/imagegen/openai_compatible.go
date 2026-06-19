@@ -78,7 +78,7 @@ func NewOpenAICompatible(baseURL, apiKey, model, label string, logger *zap.Logge
 		apiKey:  strings.TrimSpace(apiKey),
 		model:   model,
 		label:   label,
-		client:  utils.NewHTTPClient(logger, imageGenTimeout),
+		client:  utils.NewHTTPClientH1(logger, imageGenTimeout),
 	}, nil
 }
 
