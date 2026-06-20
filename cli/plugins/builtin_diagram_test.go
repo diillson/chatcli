@@ -8,11 +8,138 @@ package plugins
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 )
+
+func TestDiagramMetadata(t *testing.T) {
+	p := NewBuiltinDiagramPlugin()
+	if p.Name() != "@diagram" {
+		t.Errorf("name = %q", p.Name())
+	}
+	if p.Description() == "" {
+		t.Error("description empty")
+	}
+	if p.Usage() == "" {
+		t.Error("usage empty")
+	}
+	if p.Version() == "" {
+		t.Error("version empty")
+	}
+	if p.Path() != "" {
+		t.Errorf("builtin path must be empty, got %q", p.Path())
+	}
+	if p.IsReadOnly(nil) {
+		t.Error("@diagram writes a file — must not be read-only")
+	}
+	if p.IsConcurrencySafe(nil) {
+		t.Error("@diagram writes a file — must not be concurrency-safe")
+	}
+	var sch struct {
+		Subcommands []struct {
+			Name string `json:"name"`
+		} `json:"subcommands"`
+	}
+	if err := json.Unmarshal([]byte(p.Schema()), &sch); err != nil {
+		t.Fatalf("schema is not valid JSON: %v", err)
+	}
+	if len(sch.Subcommands) != 2 {
+		t.Fatalf("expected 2 subcommands, got %d", len(sch.Subcommands))
+	}
+}
+
+func TestDiagramDescribeCall(t *testing.T) {
+	p := NewBuiltinDiagramPlugin()
+	cases := [][]string{
+		{`{"dot":"digraph{a->b}","output":"/tmp/z.png"}`}, // render with output
+		{`{"dot":"digraph{a->b}"}`},                       // render without output (uses format)
+		{`{"cmd":"gomod","root":"./x"}`},                  // gomod
+		{`{not valid json`},                               // bad args → fallback description
+	}
+	for i, args := range cases {
+		if s := p.DescribeCall(args); s == "" {
+			t.Errorf("case %d: DescribeCall returned empty", i)
+		}
+	}
+}
+
+func TestDiagramRenderErrors(t *testing.T) {
+	p := NewBuiltinDiagramPlugin()
+	cases := []struct {
+		name string
+		args []string
+	}{
+		{"file not found", []string{`{"file":"/nonexistent/nope.dot"}`}},
+		{"empty dot", []string{`{"dot":"   "}`}},
+		{"gomod root not a dir", []string{`{"cmd":"gomod","root":"/nonexistent/dir/xyz"}`}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if _, err := p.Execute(context.Background(), tc.args); err == nil {
+				t.Errorf("expected error for %s, got nil", tc.name)
+			}
+		})
+	}
+}
+
+// TestDiagramGomodStylesAndOptions exercises the clustered import-graph path:
+// a nested package produces a real cluster (covering sanitizeClusterID and the
+// cluster-emitting branch), internalOnly=false drives isStdlibImport, and every
+// style variant is rendered through diagramStyle.
+func TestDiagramGomodStylesAndOptions(t *testing.T) {
+	mod := t.TempDir()
+	writeFile(t, filepath.Join(mod, "go.mod"), "module example.com/s\n\ngo 1.21\n")
+	writeFile(t, filepath.Join(mod, "sub", "b", "b.go"), "package b\nfunc B() {}\n")
+	writeFile(t, filepath.Join(mod, "a", "a.go"),
+		"package a\n\nimport (\n\t_ \"fmt\"\n\t\"example.com/s/sub/b\"\n)\n\nfunc A() { b.B() }\n")
+
+	p := NewBuiltinDiagramPlugin()
+	for _, style := range []string{"dark", "light", "plain"} {
+		args := []string{`{"cmd":"gomod","root":"` + mod + `","dotOnly":true,"internalOnly":false,"style":"` + style + `"}`}
+		res, err := p.Execute(context.Background(), args)
+		if err != nil {
+			t.Fatalf("style %s: %v", style, err)
+		}
+		if !strings.Contains(res, `"a" -> "sub/b"`) {
+			t.Errorf("style %s: missing edge a -> sub/b:\n%s", style, res)
+		}
+		if !strings.Contains(res, "cluster_sub") {
+			t.Errorf("style %s: missing cluster_sub:\n%s", style, res)
+		}
+	}
+
+	// cluster=false drops the subgraph grouping but keeps the edge.
+	res, err := p.Execute(context.Background(), []string{`{"cmd":"gomod","root":"` + mod + `","dotOnly":true,"cluster":false}`})
+	if err != nil {
+		t.Fatalf("cluster=false: %v", err)
+	}
+	if strings.Contains(res, "cluster_") {
+		t.Errorf("cluster=false must not emit clusters:\n%s", res)
+	}
+	if !strings.Contains(res, `"a" -> "sub/b"`) {
+		t.Errorf("cluster=false: missing edge:\n%s", res)
+	}
+}
+
+// TestDiagramGomodNoEdges covers the no-edges branch: a single package that
+// imports only the standard library produces no intra-module edges.
+func TestDiagramGomodNoEdges(t *testing.T) {
+	mod := t.TempDir()
+	writeFile(t, filepath.Join(mod, "go.mod"), "module example.com/lonely\n\ngo 1.21\n")
+	writeFile(t, filepath.Join(mod, "main.go"), "package main\n\nimport \"fmt\"\n\nfunc main() { fmt.Println(\"hi\") }\n")
+
+	res, err := NewBuiltinDiagramPlugin().Execute(context.Background(),
+		[]string{`{"cmd":"gomod","root":"` + mod + `"}`})
+	if err != nil {
+		t.Fatalf("no-edges gomod: %v", err)
+	}
+	if !strings.Contains(res, "no_edges") && !strings.Contains(strings.ToLower(res), "edge") {
+		t.Errorf("expected a no-edges message, got: %q", res)
+	}
+}
 
 // pngMagic is the 8-byte PNG file signature.
 var pngMagic = []byte{0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A}
