@@ -54,6 +54,25 @@ func TestT_ArglessUnescapesLiteralPercent(t *testing.T) {
 	}
 }
 
+// TestT_DiagramDescriptionLocalized pins the @diagram catalog entry: the key
+// must exist in both shipped locales and its escaped "100%%" must render as a
+// single "100%" — proving the builtin's primary tool-catalog string is wired.
+func TestT_DiagramDescriptionLocalized(t *testing.T) {
+	for _, lang := range []string{"en-US", "pt-BR"} {
+		initFor(t, lang)
+		got := T("plugins.diagram.description")
+		if got == "plugins.diagram.description" || got == "" {
+			t.Fatalf("[%s] description not in catalog, got raw key: %q", lang, got)
+		}
+		if strings.Contains(got, "%%") || strings.Contains(got, "MISSING") {
+			t.Errorf("[%s] escaped percent must render as a single %%, got %q", lang, got)
+		}
+		if !strings.Contains(got, "100%") {
+			t.Errorf("[%s] literal percent lost: %q", lang, got)
+		}
+	}
+}
+
 func TestT_FallbackToDefaultLanguage(t *testing.T) {
 	// A locale that doesn't exist resolves to the default (en) catalog.
 	initFor(t, "fr-FR")

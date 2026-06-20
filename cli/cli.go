@@ -487,6 +487,12 @@ func NewChatCLI(ctx context.Context, manager manager.LLMManager, logger *zap.Log
 		// (search titles / read an article intro), language-configurable.
 		// A companion to @websearch/@webfetch/@knowledge. Self-contained.
 		pluginMgr.RegisterBuiltinPlugin(plugins.NewBuiltinWikipediaPlugin())
+		// @diagram — render architecture/dependency/flow diagrams to
+		// PNG/SVG/JPG from Graphviz DOT, with crisp and exactly-correct text
+		// labels. Graphviz is embedded as WASM (go-graphviz + wazero): no cgo,
+		// no external `dot` to install, no network. Also builds the real Go
+		// import graph of a module via `go list`. Self-contained.
+		pluginMgr.RegisterBuiltinPlugin(plugins.NewBuiltinDiagramPlugin())
 		// Atomic read-only tools (Claude Code parity, Item 1). Narrow,
 		// flat-schema tools that route into the same engine as @coder
 		// read/search/tree but give the LLM a dedicated entry point —
