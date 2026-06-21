@@ -247,8 +247,18 @@ func loadEmbeddedFont(_ context.Context, job *graphviz.Job, tf *graphviz.TextFon
 		// renderer fall back to its own default face.
 		return nil, nil
 	}
+	// The renderer draws coordinates scaled by job.Scale() (which includes
+	// dpi/72), but its built-in faces size text with only font.Size()*Zoom() —
+	// no DPI — so glyphs come out ~dpi/72 too small for their boxes (a known
+	// gap the package's TTC path avoids but its default TTF face does not).
+	// Pass the job DPI so text scales to match the boxes and stays legible.
+	dpi := 72.0
+	if d := job.DPI(); d != nil && d.X() > 0 {
+		dpi = d.X()
+	}
 	return truetype.NewFace(ft, &truetype.Options{
 		Size:    tf.Size() * job.Zoom(),
+		DPI:     dpi,
 		Hinting: xfont.HintingFull,
 	}), nil
 }
