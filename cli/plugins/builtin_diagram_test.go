@@ -460,6 +460,61 @@ func TestDiagramSystemBackendRenders(t *testing.T) {
 	}
 }
 
+// TestDiagramEffectiveFormat covers the format resolution: explicit/extension
+// intent always wins, and an unset format defaults to SVG only when the
+// effective backend is the embedded rasterizer.
+func TestDiagramEffectiveFormat(t *testing.T) {
+	tests := []struct {
+		name string
+		cfg  diagramArgs
+		want string
+	}{
+		{"explicit format wins", diagramArgs{Format: "png", FormatExplicit: true, Backend: diagramBackendEmbedded}, "png"},
+		{"png extension wins over embedded-svg", diagramArgs{Format: "png", Backend: diagramBackendEmbedded, Output: "/tmp/a.png"}, "png"},
+		{"svg extension honored", diagramArgs{Format: "png", Backend: diagramBackendEmbedded, Output: "/tmp/a.svg"}, "svg"},
+		{"embedded defaults to svg", diagramArgs{Format: "png", Backend: diagramBackendEmbedded}, "svg"},
+		{"system keeps png", diagramArgs{Format: "png", Backend: diagramBackendSystem}, "png"},
+		{"unknown extension falls to embedded svg", diagramArgs{Format: "png", Backend: diagramBackendEmbedded, Output: "/tmp/a.dat"}, "svg"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := effectiveDiagramFormat(tc.cfg); got != tc.want {
+				t.Errorf("effectiveDiagramFormat = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+// TestDiagramEmbeddedDefaultsToSVG proves the end-to-end default: an embedded
+// render with no format and no output writes an SVG.
+func TestDiagramEmbeddedDefaultsToSVG(t *testing.T) {
+	cfg, err := parseDiagramArgs([]string{`{"dot":"digraph{a->b}","backend":"embedded"}`})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := effectiveDiagramFormat(cfg); got != "svg" {
+		t.Fatalf("embedded no-format effective = %q, want svg", got)
+	}
+}
+
+// TestDiagramEmbeddedMonoPNG renders an embedded PNG with a monospace label,
+// exercising the embedded font-loader path and asserting valid PNG output.
+func TestDiagramEmbeddedMonoPNG(t *testing.T) {
+	out := filepath.Join(t.TempDir(), "mono.png")
+	p := NewBuiltinDiagramPlugin()
+	args := []string{`{"dot":"digraph{a[label=\"x.Run()\",fontname=Courier]; a->b}","backend":"embedded","format":"png","output":"` + out + `"}`}
+	if _, err := p.Execute(context.Background(), args); err != nil {
+		t.Fatalf("embedded mono render: %v", err)
+	}
+	data, err := os.ReadFile(out)
+	if err != nil {
+		t.Fatalf("output not written: %v", err)
+	}
+	if len(data) < 8 || !bytes.Equal(data[:8], pngMagic) {
+		t.Fatal("embedded mono output is not a valid PNG")
+	}
+}
+
 func writeFile(t *testing.T, path, content string) {
 	t.Helper()
 	if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
