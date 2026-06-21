@@ -190,6 +190,9 @@ var envDefaults = map[string]envDefault{
 	"CHATCLI_IMAGE_EDIT_PROVIDER": {Value: "(inherit)", Source: "imagegen edit fallback when active provider can't edit"},
 	"CHATCLI_IMAGE_EDIT_MODEL":    {Value: "(default)", Source: "imagegen edit fallback model"},
 
+	// ─── Diagram rendering (@diagram) ────────────────────────────
+	"CHATCLI_DIAGRAM_BACKEND": {Value: "auto", Source: "plugins.configuredDiagramBackend: auto|system|embedded"},
+
 	// ─── Vision input (image understanding / describe-fallback) ───
 	"CHATCLI_VISION_INPUT":    {Value: "auto", Source: "vision input mode: auto|native|describe|off"},
 	"CHATCLI_VISION_PROVIDER": {Value: "(auto)", Source: "vision describe-fallback provider override"},

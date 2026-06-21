@@ -361,6 +361,105 @@ func TestDiagramGomodRenders(t *testing.T) {
 	}
 }
 
+// TestDiagramBackendParse covers the backend selector: env default, per-call
+// override, and validation of an unknown value.
+func TestDiagramBackendParse(t *testing.T) {
+	t.Run("default is auto when env unset", func(t *testing.T) {
+		t.Setenv(diagramBackendEnv, "")
+		got, err := parseDiagramArgs([]string{`{"dot":"digraph{a->b}"}`})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got.Backend != diagramBackendAuto {
+			t.Errorf("backend = %q, want %q", got.Backend, diagramBackendAuto)
+		}
+	})
+	t.Run("env sets the default", func(t *testing.T) {
+		t.Setenv(diagramBackendEnv, "EMBEDDED")
+		got, err := parseDiagramArgs([]string{`{"dot":"digraph{a->b}"}`})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got.Backend != diagramBackendEmbedded {
+			t.Errorf("backend = %q, want %q", got.Backend, diagramBackendEmbedded)
+		}
+	})
+	t.Run("arg overrides env", func(t *testing.T) {
+		t.Setenv(diagramBackendEnv, "embedded")
+		got, err := parseDiagramArgs([]string{`{"dot":"digraph{a->b}","backend":"system"}`})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got.Backend != diagramBackendSystem {
+			t.Errorf("backend = %q, want %q", got.Backend, diagramBackendSystem)
+		}
+	})
+	t.Run("invalid backend is rejected", func(t *testing.T) {
+		if _, err := parseDiagramArgs([]string{`{"dot":"digraph{a->b}","backend":"gpu"}`}); err == nil {
+			t.Error("expected validation error for invalid backend, got nil")
+		}
+	})
+	t.Run("invalid env falls back to auto", func(t *testing.T) {
+		t.Setenv(diagramBackendEnv, "bogus")
+		if got := configuredDiagramBackend(); got != diagramBackendAuto {
+			t.Errorf("configuredDiagramBackend() = %q, want %q", got, diagramBackendAuto)
+		}
+	})
+}
+
+// TestDiagramResolveBackend verifies auto resolves against PATH while explicit
+// choices pass through unchanged.
+func TestDiagramResolveBackend(t *testing.T) {
+	if got := resolveDiagramBackend(diagramBackendEmbedded); got != diagramBackendEmbedded {
+		t.Errorf("resolve(embedded) = %q, want embedded", got)
+	}
+	if got := resolveDiagramBackend(diagramBackendSystem); got != diagramBackendSystem {
+		t.Errorf("resolve(system) = %q, want system", got)
+	}
+	wantAuto := diagramBackendEmbedded
+	if systemDotPath() != "" {
+		wantAuto = diagramBackendSystem
+	}
+	if got := resolveDiagramBackend(diagramBackendAuto); got != wantAuto {
+		t.Errorf("resolve(auto) = %q, want %q", got, wantAuto)
+	}
+}
+
+// TestDiagramExplicitSystemWithoutDot asserts that backend=system errors when
+// no `dot` is on PATH, instead of silently falling back.
+func TestDiagramExplicitSystemWithoutDot(t *testing.T) {
+	if systemDotPath() != "" {
+		t.Skip("system dot is installed; cannot exercise the missing-dot path")
+	}
+	p := NewBuiltinDiagramPlugin()
+	_, err := p.Execute(context.Background(), []string{`{"dot":"digraph{a->b}","backend":"system"}`})
+	if err == nil {
+		t.Fatal("expected error for backend=system without dot, got nil")
+	}
+}
+
+// TestDiagramSystemBackendRenders renders via the real system `dot` when one is
+// installed, asserting it produces a valid PNG (proves the system path works,
+// not just the embedded one).
+func TestDiagramSystemBackendRenders(t *testing.T) {
+	if systemDotPath() == "" {
+		t.Skip("no system dot on PATH")
+	}
+	out := filepath.Join(t.TempDir(), "sys.png")
+	p := NewBuiltinDiagramPlugin()
+	args := []string{`{"dot":"digraph{a->b->c}","backend":"system","output":"` + out + `"}`}
+	if _, err := p.Execute(context.Background(), args); err != nil {
+		t.Fatalf("system render: %v", err)
+	}
+	data, err := os.ReadFile(out)
+	if err != nil {
+		t.Fatalf("output not written: %v", err)
+	}
+	if len(data) < 8 || !bytes.Equal(data[:8], pngMagic) {
+		t.Fatal("system backend output is not a valid PNG")
+	}
+}
+
 func writeFile(t *testing.T, path, content string) {
 	t.Helper()
 	if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
