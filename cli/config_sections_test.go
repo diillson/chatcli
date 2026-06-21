@@ -76,6 +76,7 @@ func TestConfigSections_NoPanicWithMinimalCLI(t *testing.T) {
 		{"server", func(c *ChatCLI) { c.showConfigServer() }},
 		{"session", func(c *ChatCLI) { c.showConfigSession() }},
 		{"integrations", func(c *ChatCLI) { c.showConfigIntegrations(context.Background()) }},
+		{"diagram", func(c *ChatCLI) { c.showConfigDiagram(context.Background()) }},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

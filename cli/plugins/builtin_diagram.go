@@ -8,11 +8,14 @@
  *
  * Renders architecture / dependency / flow diagrams to PNG, SVG or JPG from
  * Graphviz DOT — deterministically, with crisp and 100% correct text labels.
- * Graphviz itself is embedded: go-graphviz ships the upstream engine compiled
- * to WebAssembly and runs it through the pure-Go wazero runtime, so there is
- * NO cgo, NO external `dot` binary to install and NO network call. This is the
- * same "embedded, self-contained, keyless-first" approach the project already
- * uses for TTS/STT (sherpa-onnx) and voice notes (pion/opus).
+ * Graphviz is embedded: go-graphviz ships the upstream engine compiled to
+ * WebAssembly and runs it through the pure-Go wazero runtime, so it works with
+ * NO cgo, NO install and NO network call — the same "embedded, self-contained,
+ * keyless-first" approach the project uses for TTS/STT (sherpa-onnx) and voice
+ * notes (pion/opus). When a system Graphviz (`dot`) is on PATH the backend
+ * defaults to using it (backend=auto): rendering the SAME DOT through fontconfig
+ * + the system fonts + cairo yields crisper, better-laid-out output. The
+ * embedded engine remains the fallback so the tool never requires an install.
  *
  * Why this exists: LLMs are unreliable at rendering legible text inside raster
  * images. A vision model "guesses" letters; a layout engine does not. By giving
@@ -43,9 +46,16 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 
 	"github.com/diillson/chatcli/i18n"
 	"github.com/goccy/go-graphviz"
+	"github.com/golang/freetype/truetype"
+	xfont "golang.org/x/image/font"
+	"golang.org/x/image/font/gofont/gobold"
+	"golang.org/x/image/font/gofont/gomono"
+	"golang.org/x/image/font/gofont/gomonobold"
+	"golang.org/x/image/font/gofont/goregular"
 )
 
 // diagramDefaultDPI is the raster resolution used when none is given. 150 DPI
@@ -58,6 +68,200 @@ const (
 	diagramMinDPI = 30
 	diagramMaxDPI = 600
 )
+
+// Rendering backends. The embedded WASM engine is fully self-contained but
+// rasterizes with a bundled font and no cairo/pango, so requested fonts like
+// Helvetica/Menlo fall back and text-heavy diagrams look plainer. A system
+// `dot` (e.g. `brew install graphviz`) renders the SAME DOT with fontconfig +
+// the system fonts and the cairo backend, producing crisper, better-laid-out
+// output. The backend is selectable so users get the nicer result when they
+// have Graphviz installed, while the binary stays self-contained for everyone
+// else.
+const (
+	diagramBackendAuto     = "auto"     // prefer system `dot` if on PATH, else embedded
+	diagramBackendSystem   = "system"   // require a system `dot`, error if absent
+	diagramBackendEmbedded = "embedded" // always the bundled WASM engine
+)
+
+// diagramBackendEnv selects the default rendering backend process-wide. A
+// per-call "backend" arg overrides it.
+const diagramBackendEnv = "CHATCLI_DIAGRAM_BACKEND"
+
+// configuredDiagramBackend returns the backend requested via the environment
+// (lowercased), defaulting to "auto" when unset or invalid.
+func configuredDiagramBackend() string {
+	switch v := strings.ToLower(strings.TrimSpace(os.Getenv(diagramBackendEnv))); v {
+	case diagramBackendSystem, diagramBackendEmbedded, diagramBackendAuto:
+		return v
+	default:
+		return diagramBackendAuto
+	}
+}
+
+// systemDotPath returns the path to a system `dot` (Graphviz) binary, or "" if
+// none is installed on PATH.
+func systemDotPath() string {
+	p, err := exec.LookPath("dot")
+	if err != nil {
+		return ""
+	}
+	return p
+}
+
+// resolveDiagramBackend turns "auto" into a concrete backend: system when a
+// `dot` binary is installed, otherwise embedded. system/embedded pass through.
+func resolveDiagramBackend(requested string) string {
+	switch requested {
+	case diagramBackendSystem, diagramBackendEmbedded:
+		return requested
+	default: // auto (or anything unexpected)
+		if systemDotPath() != "" {
+			return diagramBackendSystem
+		}
+		return diagramBackendEmbedded
+	}
+}
+
+// effectiveDiagramFormat resolves the format actually rendered. An explicit
+// format (arg) or a recognized output-file extension always wins. Otherwise,
+// when the effective backend is the embedded rasterizer, we default to SVG:
+// embedded SVG is vector output identical to a system `dot` render, so it
+// sidesteps the only place the engines diverge (raster quality). With a system
+// `dot` in play the raster default (PNG) is already crisp, so it stays.
+func effectiveDiagramFormat(cfg diagramArgs) string {
+	if cfg.FormatExplicit {
+		return cfg.Format
+	}
+	if cfg.Output != "" {
+		ext := strings.ToLower(strings.TrimPrefix(filepath.Ext(cfg.Output), "."))
+		if _, ok := diagramValidFormats[ext]; ok {
+			return ext
+		}
+	}
+	if resolveDiagramBackend(cfg.Backend) == diagramBackendEmbedded {
+		return "svg"
+	}
+	return cfg.Format
+}
+
+// DiagramBackendStatus is a snapshot of how @diagram will render, surfaced by
+// `/config diagram` so the operator can see which engine is actually in play.
+type DiagramBackendStatus struct {
+	Configured string // auto | system | embedded (from CHATCLI_DIAGRAM_BACKEND)
+	Effective  string // system | embedded (auto resolved against PATH)
+	DotPath    string // path to system `dot`, "" if not installed
+	DotVersion string // `dot -V` banner, "" if unavailable
+}
+
+// GetDiagramBackendStatus resolves the current @diagram backend for display.
+func GetDiagramBackendStatus(ctx context.Context) DiagramBackendStatus {
+	cfg := configuredDiagramBackend()
+	st := DiagramBackendStatus{Configured: cfg, Effective: resolveDiagramBackend(cfg)}
+	if p := systemDotPath(); p != "" {
+		st.DotPath = p
+		st.DotVersion = systemDotVersion(ctx, p)
+	}
+	return st
+}
+
+// systemDotVersion returns the `dot -V` banner (Graphviz prints it to stderr),
+// or "" when the binary can't be run.
+func systemDotVersion(ctx context.Context, dotBin string) string {
+	out, err := exec.CommandContext(ctx, dotBin, "-V").CombinedOutput() // #nosec G204 -- dotBin came from exec.LookPath; fixed "-V" arg
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(out))
+}
+
+// --- embedded raster: font quality ----------------------------------------
+//
+// The embedded WASM rasterizer (go-graphviz's ImageRenderer) draws label text
+// with a single bundled face and no hinting, and only falls back to it when a
+// requested font (e.g. Helvetica, Menlo) isn't found — so monospace labels lose
+// their fixed pitch and all text looks softer than a system `dot` render. We
+// register a font loader that maps the requested family to a bundled Go font
+// (proportional vs monospace, regular vs bold) and turns on full hinting for
+// crisp glyphs. This is the highest-leverage lever we control on the embedded
+// path: the same DOT renders with consistent, legible text on every machine,
+// closing most of the visible gap with cairo without any system dependency.
+//
+// We keep the exact size formula the renderer's own default uses
+// (font.Size() * job.Zoom()) so glyph metrics — and therefore layout — are
+// unchanged; only the typeface and hinting improve.
+
+var (
+	embFontOnce sync.Once
+	embRegular  *truetype.Font
+	embBold     *truetype.Font
+	embMono     *truetype.Font
+	embMonoBold *truetype.Font
+
+	diagramFontLoaderOnce sync.Once
+)
+
+// parseEmbeddedFonts parses the four bundled Go faces once. The Go fonts ship
+// with golang.org/x/image (already a dependency), so this adds no new module.
+func parseEmbeddedFonts() {
+	embFontOnce.Do(func() {
+		embRegular, _ = truetype.Parse(goregular.TTF)
+		embBold, _ = truetype.Parse(gobold.TTF)
+		embMono, _ = truetype.Parse(gomono.TTF)
+		embMonoBold, _ = truetype.Parse(gomonobold.TTF)
+	})
+}
+
+// ensureEmbeddedFontLoader registers the embedded font loader exactly once. It
+// only affects the raster (PNG/JPG) path — SVG output is vector and never
+// rasterizes text — and the loader is global to go-graphviz, which is fine
+// since @diagram is its only user in-process.
+func ensureEmbeddedFontLoader() {
+	diagramFontLoaderOnce.Do(func() {
+		graphviz.SetFontLoader(loadEmbeddedFont)
+	})
+}
+
+// loadEmbeddedFont maps a requested font family to a bundled Go face. Monospace
+// requests (mono/courier/menlo/consolas) get a real fixed-pitch face; bold
+// requests get the bold cut; everything else gets the proportional regular.
+func loadEmbeddedFont(_ context.Context, job *graphviz.Job, tf *graphviz.TextFont) (xfont.Face, error) {
+	parseEmbeddedFonts()
+	name := strings.ToLower(tf.Name())
+	bold := strings.Contains(name, "bold")
+	mono := strings.Contains(name, "mono") ||
+		strings.Contains(name, "courier") ||
+		strings.Contains(name, "menlo") ||
+		strings.Contains(name, "consol")
+
+	ft := embRegular
+	switch {
+	case mono && bold:
+		ft = embMonoBold
+	case mono:
+		ft = embMono
+	case bold:
+		ft = embBold
+	}
+	if ft == nil {
+		// Parsing failed (should never happen for bundled assets); let the
+		// renderer fall back to its own default face.
+		return nil, nil
+	}
+	// The renderer draws coordinates scaled by job.Scale() (which includes
+	// dpi/72), but its built-in faces size text with only font.Size()*Zoom() —
+	// no DPI — so glyphs come out ~dpi/72 too small for their boxes (a known
+	// gap the package's TTC path avoids but its default TTF face does not).
+	// Pass the job DPI so text scales to match the boxes and stays legible.
+	dpi := 72.0
+	if d := job.DPI(); d != nil && d.X() > 0 {
+		dpi = d.X()
+	}
+	return truetype.NewFace(ft, &truetype.Options{
+		Size:    tf.Size() * job.Zoom(),
+		DPI:     dpi,
+		Hinting: xfont.HintingFull,
+	}), nil
+}
 
 // diagramValidFormats is the set of output formats @diagram emits.
 var diagramValidFormats = map[string]graphviz.Format{
@@ -81,15 +285,18 @@ var diagramValidEngines = map[string]graphviz.Layout{
 
 // diagramArgs is the typed view of @diagram's JSON input.
 type diagramArgs struct {
-	Cmd    string // render | gomod (resolved)
-	DOT    string // inline DOT source (render)
-	File   string // path to a .dot file (render)
-	Root   string // module directory (gomod)
-	Format string // png | svg | jpg
-	Engine string // dot | neato | fdp | sfdp | circo | twopi | osage | patchwork
-	DPI    int    // raster resolution (png/jpg)
-	Output string // destination file path (empty => temp file)
-	Style  string // dark | light | plain (gomod styling)
+	Cmd     string // render | gomod (resolved)
+	DOT     string // inline DOT source (render)
+	File    string // path to a .dot file (render)
+	Root    string // module directory (gomod)
+	Format  string // png | svg | jpg
+	Engine  string // dot | neato | fdp | sfdp | circo | twopi | osage | patchwork
+	DPI     int    // raster resolution (png/jpg)
+	Output  string // destination file path (empty => temp file)
+	Style   string // dark | light | plain (gomod styling)
+	Backend string // auto | system | embedded (rendering engine)
+
+	FormatExplicit bool // true when the caller pinned the format (arg or output ext)
 
 	InternalOnly bool // gomod: only edges between packages of THIS module
 	Cluster      bool // gomod: group nodes into subgraph clusters by top dir
@@ -147,6 +354,7 @@ render — DOT source to an image. Use this for architecture/flow diagrams; writ
   format   png | svg | jpg (default: png)
   engine   dot | neato | fdp | sfdp | circo | twopi | osage | patchwork (default: dot)
   dpi      raster resolution for png/jpg (default: 150; use 300 for print)
+  backend  auto | system | embedded (default: auto; CHATCLI_DIAGRAM_BACKEND)
   output   destination file (default: a temp file whose path is returned)
 
 gomod — render the REAL import graph of a Go module (no manual enumeration).
@@ -157,7 +365,11 @@ gomod — render the REAL import graph of a Go module (no manual enumeration).
   dotOnly       return the generated DOT source instead of an image (default: false)
   format/engine/dpi/output  same as render
 
-Graphviz is embedded (WASM) — no install, no external 'dot', no network.`
+Graphviz is embedded (WASM) so it works with no install. When a system Graphviz
+('dot') is on PATH it is used automatically (backend=auto) for crisper fonts and
+layout; set backend=embedded to force the bundled engine, or CHATCLI_DIAGRAM_BACKEND.
+With the embedded engine and no format given, output defaults to SVG (vector,
+identical to a system render); the embedded raster path uses bundled Go fonts.`
 }
 
 // Version is semver. 1.x: initial builtin.
@@ -175,14 +387,16 @@ func (*BuiltinDiagramPlugin) Schema() string {
 				"name": "render",
 				"description": "Render Graphviz DOT (inline via dot, or a .dot file via file) to a PNG/SVG/JPG image. " +
 					"Use this whenever the user asks for an architecture, flow, dependency, ER or any node/edge diagram as an image — " +
-					"WRITE the DOT yourself and render it here. Text labels come out crisp and exactly correct (never do this by generating a raster image with @image, and never install graphviz: it is embedded). " +
+					"WRITE the DOT yourself and render it here. Text labels come out crisp and exactly correct (never do this by generating a raster image with @image). " +
+					"Graphviz is embedded so no install is needed; if a system Graphviz is on PATH it is used automatically (backend=auto) for nicer fonts/layout. " +
 					"SVG is infinitely scalable; PNG with dpi=300 is print-grade.",
 				"flags": []map[string]interface{}{
 					{"name": "dot", "type": "string", "description": "Inline Graphviz DOT source. Exactly one of dot|file."},
 					{"name": "file", "type": "string", "description": "Path to a .dot file to render. Exactly one of dot|file."},
-					{"name": "format", "type": "string", "description": "png | svg | jpg. Default: png."},
+					{"name": "format", "type": "string", "description": "png | svg | jpg. Default: png — but SVG when the embedded engine renders and no format is given (embedded SVG matches a system render; embedded raster is slightly softer)."},
 					{"name": "engine", "type": "string", "description": "Layout engine: dot | neato | fdp | sfdp | circo | twopi | osage | patchwork. Default: dot."},
 					{"name": "dpi", "type": "integer", "description": "Raster resolution for png/jpg (30-600). Default: 150. Use 300 for print."},
+					{"name": "backend", "type": "string", "description": "Rendering engine: auto | system | embedded. auto (default) prefers a system `dot` if installed (crisper) and falls back to the embedded WASM engine. Overrides CHATCLI_DIAGRAM_BACKEND."},
 					{"name": "output", "type": "string", "description": "Destination file path. If omitted, a temp file is written and its path returned."},
 				},
 				"examples": []string{
@@ -204,6 +418,7 @@ func (*BuiltinDiagramPlugin) Schema() string {
 					{"name": "format", "type": "string", "description": "png | svg | jpg. Default: png."},
 					{"name": "engine", "type": "string", "description": "Layout engine. Default: dot."},
 					{"name": "dpi", "type": "integer", "description": "Raster resolution (30-600). Default: 150."},
+					{"name": "backend", "type": "string", "description": "Rendering engine: auto | system | embedded. Default: auto (CHATCLI_DIAGRAM_BACKEND)."},
 					{"name": "output", "type": "string", "description": "Destination file path. If omitted, a temp file is written and its path returned."},
 				},
 				"examples": []string{
@@ -256,6 +471,7 @@ func diagramRunRender(ctx context.Context, cfg diagramArgs, emit func(string)) (
 	if strings.TrimSpace(dotSrc) == "" {
 		return "", errors.New("@diagram: empty DOT source")
 	}
+	cfg.Format = effectiveDiagramFormat(cfg)
 	emit(i18n.T("plugins.diagram.describe_render", strings.ToUpper(cfg.Format)))
 	return diagramRenderAndWrite(ctx, dotSrc, cfg)
 }
@@ -274,6 +490,7 @@ func diagramRunGomod(ctx context.Context, cfg diagramArgs, emit func(string)) (s
 	if cfg.DOTOnly {
 		return dotSrc, nil
 	}
+	cfg.Format = effectiveDiagramFormat(cfg)
 	return diagramRenderAndWrite(ctx, dotSrc, cfg)
 }
 
@@ -307,10 +524,57 @@ func diagramRenderAndWrite(ctx context.Context, dotSrc string, cfg diagramArgs) 
 	return summary, nil
 }
 
-// renderDiagramDOT parses DOT and renders it to the configured format with the
-// configured layout engine and DPI. Graphviz runs as embedded WASM (wazero):
-// no cgo, no external `dot`, no network.
+// renderDiagramDOT renders dotSrc to the configured format using the resolved
+// backend. The system `dot` (when present/selected) yields crisper output via
+// fontconfig + system fonts + cairo; the embedded WASM engine is the fully
+// self-contained fallback. Under "auto" a system render failure transparently
+// falls back to embedded so a broken local Graphviz never breaks rendering;
+// under an explicit "system" the error is surfaced.
 func renderDiagramDOT(ctx context.Context, dotSrc string, cfg diagramArgs) ([]byte, error) {
+	if resolveDiagramBackend(cfg.Backend) == diagramBackendSystem {
+		data, err := renderViaSystemDot(ctx, dotSrc, cfg)
+		if err == nil {
+			return data, nil
+		}
+		if cfg.Backend == diagramBackendSystem {
+			return nil, err // explicit request: do not silently fall back
+		}
+		// auto: fall through to the embedded engine
+	}
+	return renderViaEmbedded(ctx, dotSrc, cfg)
+}
+
+// renderViaSystemDot pipes the DOT through the system `dot` binary. format and
+// engine are validated against closed allow-lists and dpi is bounded, so the
+// argv is fully constrained.
+func renderViaSystemDot(ctx context.Context, dotSrc string, cfg diagramArgs) ([]byte, error) {
+	dotBin := systemDotPath()
+	if dotBin == "" {
+		return nil, errors.New("backend=system requested but no `dot` (Graphviz) found on PATH — install it (e.g. `brew install graphviz`) or use backend=embedded")
+	}
+	dotArgs := []string{"-T" + cfg.Format, "-K" + cfg.Engine}
+	if cfg.Format != "svg" {
+		dotArgs = append(dotArgs, fmt.Sprintf("-Gdpi=%d", cfg.DPI))
+	}
+	cmd := exec.CommandContext(ctx, dotBin, dotArgs...) // #nosec G204 -- dotBin from exec.LookPath; format/engine validated against closed maps; dpi bounded int
+	cmd.Stdin = strings.NewReader(dotSrc)
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		return nil, fmt.Errorf("system dot render failed: %w\n%s", err, strings.TrimSpace(stderr.String()))
+	}
+	if stdout.Len() == 0 {
+		return nil, fmt.Errorf("system dot produced no output\n%s", strings.TrimSpace(stderr.String()))
+	}
+	return stdout.Bytes(), nil
+}
+
+// renderViaEmbedded renders with the embedded Graphviz: go-graphviz ships the
+// upstream engine compiled to WebAssembly and runs it through the pure-Go
+// wazero runtime — no cgo, no external `dot`, no network.
+func renderViaEmbedded(ctx context.Context, dotSrc string, cfg diagramArgs) ([]byte, error) {
+	ensureEmbeddedFontLoader()
 	g, err := graphviz.New(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("init graphviz: %w", err)
@@ -343,6 +607,7 @@ func parseDiagramArgs(args []string) (diagramArgs, error) {
 		Engine:       "dot",
 		DPI:          diagramDefaultDPI,
 		Style:        "dark",
+		Backend:      configuredDiagramBackend(),
 		InternalOnly: true,
 		Cluster:      true,
 	}
@@ -383,6 +648,7 @@ func parseDiagramArgs(args []string) (diagramArgs, error) {
 	out.Root = jsonString(raw, "root", "dir", "module")
 	if v := strings.ToLower(jsonString(raw, "format", "fmt")); v != "" {
 		out.Format = v
+		out.FormatExplicit = true
 	}
 	if v := strings.ToLower(jsonString(raw, "engine", "layout")); v != "" {
 		out.Engine = v
@@ -393,6 +659,9 @@ func parseDiagramArgs(args []string) (diagramArgs, error) {
 	out.Output = jsonString(raw, "output", "out")
 	if v := strings.ToLower(jsonString(raw, "style", "theme")); v != "" {
 		out.Style = v
+	}
+	if v := strings.ToLower(jsonString(raw, "backend", "engine_backend")); v != "" {
+		out.Backend = v
 	}
 	if v, present := jsonBoolLookup(raw, "internalOnly", "internal-only"); present {
 		out.InternalOnly = v
@@ -433,6 +702,11 @@ func finalizeDiagramArgs(out diagramArgs) (diagramArgs, error) {
 	case "dark", "light", "plain":
 	default:
 		return out, fmt.Errorf("invalid style %q (valid: dark|light|plain)", out.Style)
+	}
+	switch out.Backend {
+	case diagramBackendAuto, diagramBackendSystem, diagramBackendEmbedded:
+	default:
+		return out, fmt.Errorf("invalid backend %q (valid: auto|system|embedded)", out.Backend)
 	}
 	if out.DPI < diagramMinDPI {
 		out.DPI = diagramMinDPI

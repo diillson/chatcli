@@ -120,6 +120,8 @@ func (cli *ChatCLI) routeConfigCommand(ctx context.Context, args []string) {
 		} else {
 			cli.routeConfigImage(ctx, args[1:])
 		}
+	case "diagram", "diagrams":
+		cli.showConfigDiagram(ctx)
 	case "quality":
 		cli.showConfigQuality()
 	case "memory", "mem":
@@ -393,6 +395,7 @@ func (cli *ChatCLI) showConfigAll(ctx context.Context) {
 	cli.showConfigResilience()
 	cli.showConfigSession()
 	cli.showConfigIntegrations(ctx)
+	cli.showConfigDiagram(ctx)
 	cli.showConfigAuth()
 	cli.showConfigSecurity()
 	cli.showConfigChat()
@@ -864,6 +867,35 @@ func budgetLevelString(l BudgetLevel) string {
 // showConfigIntegrations covers MCP, hooks, plugins, skill registries,
 // websearch, worktrees, and remote connection — everything that links the
 // CLI to an external subsystem.
+// showConfigDiagram renders the @diagram rendering-backend panorama: the
+// configured backend, the one that will actually run (auto resolved against
+// PATH), and whether a system Graphviz is installed. This is read-only —
+// the backend is selected via CHATCLI_DIAGRAM_BACKEND or the per-call
+// "backend" arg.
+func (cli *ChatCLI) showConfigDiagram(ctx context.Context) {
+	sectionHeader("📊", "cfg.section.diagram.title", ColorCyan)
+	p := uiPrefix(ColorCyan)
+
+	st := plugins.GetDiagramBackendStatus(ctx)
+
+	subheader(p, "cfg.sub.diagram.backend")
+	kv(p, "CHATCLI_DIAGRAM_BACKEND", envOr("CHATCLI_DIAGRAM_BACKEND"))
+	kv(p, i18n.T("cfg.kv.diagram_effective"), st.Effective)
+
+	fmt.Println(p)
+	subheader(p, "cfg.sub.diagram.system")
+	if st.DotPath != "" {
+		kv(p, i18n.T("cfg.kv.diagram_dot"), st.DotPath)
+		if st.DotVersion != "" {
+			kv(p, i18n.T("cfg.kv.diagram_dot_version"), st.DotVersion)
+		}
+	} else {
+		kv(p, i18n.T("cfg.kv.diagram_dot"), i18n.T("cfg.val.diagram_dot_missing"))
+	}
+
+	sectionEnd(ColorCyan)
+}
+
 func (cli *ChatCLI) showConfigIntegrations(ctx context.Context) {
 	sectionHeader("🔗", "cfg.section.integrations.title", ColorPurple)
 	p := uiPrefix(ColorPurple)

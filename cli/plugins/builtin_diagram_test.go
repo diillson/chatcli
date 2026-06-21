@@ -206,7 +206,10 @@ func TestDiagramRenderFromFile(t *testing.T) {
 
 func TestDiagramDefaultTempOutput(t *testing.T) {
 	p := NewBuiltinDiagramPlugin()
-	res, err := p.Execute(context.Background(), []string{`{"dot":"digraph{a->b}"}`})
+	// Pin format=png so the temp-output mechanism is exercised deterministically
+	// regardless of whether a system `dot` is installed (which, via backend=auto,
+	// would otherwise change the default format to SVG on a host without it).
+	res, err := p.Execute(context.Background(), []string{`{"dot":"digraph{a->b}","format":"png"}`})
 	if err != nil {
 		t.Fatalf("render to temp: %v", err)
 	}
@@ -358,6 +361,169 @@ func TestDiagramGomodRenders(t *testing.T) {
 	}
 	if len(data) < 8 || !bytes.Equal(data[:8], pngMagic) {
 		t.Fatalf("gomod output is not a valid PNG")
+	}
+}
+
+// TestDiagramBackendParse covers the backend selector: env default, per-call
+// override, and validation of an unknown value.
+func TestDiagramBackendParse(t *testing.T) {
+	t.Run("default is auto when env unset", func(t *testing.T) {
+		t.Setenv(diagramBackendEnv, "")
+		got, err := parseDiagramArgs([]string{`{"dot":"digraph{a->b}"}`})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got.Backend != diagramBackendAuto {
+			t.Errorf("backend = %q, want %q", got.Backend, diagramBackendAuto)
+		}
+	})
+	t.Run("env sets the default", func(t *testing.T) {
+		t.Setenv(diagramBackendEnv, "EMBEDDED")
+		got, err := parseDiagramArgs([]string{`{"dot":"digraph{a->b}"}`})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got.Backend != diagramBackendEmbedded {
+			t.Errorf("backend = %q, want %q", got.Backend, diagramBackendEmbedded)
+		}
+	})
+	t.Run("arg overrides env", func(t *testing.T) {
+		t.Setenv(diagramBackendEnv, "embedded")
+		got, err := parseDiagramArgs([]string{`{"dot":"digraph{a->b}","backend":"system"}`})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got.Backend != diagramBackendSystem {
+			t.Errorf("backend = %q, want %q", got.Backend, diagramBackendSystem)
+		}
+	})
+	t.Run("invalid backend is rejected", func(t *testing.T) {
+		if _, err := parseDiagramArgs([]string{`{"dot":"digraph{a->b}","backend":"gpu"}`}); err == nil {
+			t.Error("expected validation error for invalid backend, got nil")
+		}
+	})
+	t.Run("invalid env falls back to auto", func(t *testing.T) {
+		t.Setenv(diagramBackendEnv, "bogus")
+		if got := configuredDiagramBackend(); got != diagramBackendAuto {
+			t.Errorf("configuredDiagramBackend() = %q, want %q", got, diagramBackendAuto)
+		}
+	})
+}
+
+// TestDiagramResolveBackend verifies auto resolves against PATH while explicit
+// choices pass through unchanged.
+func TestDiagramResolveBackend(t *testing.T) {
+	if got := resolveDiagramBackend(diagramBackendEmbedded); got != diagramBackendEmbedded {
+		t.Errorf("resolve(embedded) = %q, want embedded", got)
+	}
+	if got := resolveDiagramBackend(diagramBackendSystem); got != diagramBackendSystem {
+		t.Errorf("resolve(system) = %q, want system", got)
+	}
+	wantAuto := diagramBackendEmbedded
+	if systemDotPath() != "" {
+		wantAuto = diagramBackendSystem
+	}
+	if got := resolveDiagramBackend(diagramBackendAuto); got != wantAuto {
+		t.Errorf("resolve(auto) = %q, want %q", got, wantAuto)
+	}
+}
+
+// TestDiagramExplicitSystemWithoutDot asserts that backend=system errors when
+// no `dot` is on PATH, instead of silently falling back.
+func TestDiagramExplicitSystemWithoutDot(t *testing.T) {
+	if systemDotPath() != "" {
+		t.Skip("system dot is installed; cannot exercise the missing-dot path")
+	}
+	p := NewBuiltinDiagramPlugin()
+	_, err := p.Execute(context.Background(), []string{`{"dot":"digraph{a->b}","backend":"system"}`})
+	if err == nil {
+		t.Fatal("expected error for backend=system without dot, got nil")
+	}
+}
+
+// TestDiagramSystemBackendRenders renders via the real system `dot` when one is
+// installed, asserting it produces a valid PNG (proves the system path works,
+// not just the embedded one).
+func TestDiagramSystemBackendRenders(t *testing.T) {
+	if systemDotPath() == "" {
+		t.Skip("no system dot on PATH")
+	}
+	out := filepath.Join(t.TempDir(), "sys.png")
+	p := NewBuiltinDiagramPlugin()
+	args := []string{`{"dot":"digraph{a->b->c}","backend":"system","output":"` + out + `"}`}
+	if _, err := p.Execute(context.Background(), args); err != nil {
+		t.Fatalf("system render: %v", err)
+	}
+	data, err := os.ReadFile(out)
+	if err != nil {
+		t.Fatalf("output not written: %v", err)
+	}
+	if len(data) < 8 || !bytes.Equal(data[:8], pngMagic) {
+		t.Fatal("system backend output is not a valid PNG")
+	}
+}
+
+// TestDiagramEffectiveFormat covers the format resolution: explicit/extension
+// intent always wins, and an unset format defaults to SVG only when the
+// effective backend is the embedded rasterizer.
+func TestDiagramEffectiveFormat(t *testing.T) {
+	tests := []struct {
+		name string
+		cfg  diagramArgs
+		want string
+	}{
+		{"explicit format wins", diagramArgs{Format: "png", FormatExplicit: true, Backend: diagramBackendEmbedded}, "png"},
+		{"png extension wins over embedded-svg", diagramArgs{Format: "png", Backend: diagramBackendEmbedded, Output: "/tmp/a.png"}, "png"},
+		{"svg extension honored", diagramArgs{Format: "png", Backend: diagramBackendEmbedded, Output: "/tmp/a.svg"}, "svg"},
+		{"embedded defaults to svg", diagramArgs{Format: "png", Backend: diagramBackendEmbedded}, "svg"},
+		{"system keeps png", diagramArgs{Format: "png", Backend: diagramBackendSystem}, "png"},
+		{"unknown extension falls to embedded svg", diagramArgs{Format: "png", Backend: diagramBackendEmbedded, Output: "/tmp/a.dat"}, "svg"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := effectiveDiagramFormat(tc.cfg); got != tc.want {
+				t.Errorf("effectiveDiagramFormat = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+// TestDiagramEmbeddedDefaultsToSVG proves the end-to-end default: an embedded
+// render with no format and no output writes an SVG temp file.
+func TestDiagramEmbeddedDefaultsToSVG(t *testing.T) {
+	p := NewBuiltinDiagramPlugin()
+	res, err := p.Execute(context.Background(), []string{`{"dot":"digraph{a->b}","backend":"embedded"}`})
+	if err != nil {
+		t.Fatalf("embedded default render: %v", err)
+	}
+	if !strings.Contains(res, ".svg") {
+		t.Fatalf("expected an .svg temp path in summary, got: %q", res)
+	}
+	for _, tok := range strings.Fields(res) {
+		if strings.HasSuffix(tok, ".svg") {
+			if _, statErr := os.Stat(tok); statErr != nil {
+				t.Errorf("temp output %q does not exist: %v", tok, statErr)
+			}
+			_ = os.Remove(tok)
+		}
+	}
+}
+
+// TestDiagramEmbeddedMonoPNG renders an embedded PNG with a monospace label,
+// exercising the embedded font-loader path and asserting valid PNG output.
+func TestDiagramEmbeddedMonoPNG(t *testing.T) {
+	out := filepath.Join(t.TempDir(), "mono.png")
+	p := NewBuiltinDiagramPlugin()
+	args := []string{`{"dot":"digraph{a[label=\"x.Run()\",fontname=Courier]; a->b}","backend":"embedded","format":"png","output":"` + out + `"}`}
+	if _, err := p.Execute(context.Background(), args); err != nil {
+		t.Fatalf("embedded mono render: %v", err)
+	}
+	data, err := os.ReadFile(out)
+	if err != nil {
+		t.Fatalf("output not written: %v", err)
+	}
+	if len(data) < 8 || !bytes.Equal(data[:8], pngMagic) {
+		t.Fatal("embedded mono output is not a valid PNG")
 	}
 }
 
