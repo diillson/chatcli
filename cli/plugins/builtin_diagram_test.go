@@ -206,7 +206,10 @@ func TestDiagramRenderFromFile(t *testing.T) {
 
 func TestDiagramDefaultTempOutput(t *testing.T) {
 	p := NewBuiltinDiagramPlugin()
-	res, err := p.Execute(context.Background(), []string{`{"dot":"digraph{a->b}"}`})
+	// Pin format=png so the temp-output mechanism is exercised deterministically
+	// regardless of whether a system `dot` is installed (which, via backend=auto,
+	// would otherwise change the default format to SVG on a host without it).
+	res, err := p.Execute(context.Background(), []string{`{"dot":"digraph{a->b}","format":"png"}`})
 	if err != nil {
 		t.Fatalf("render to temp: %v", err)
 	}
@@ -486,14 +489,23 @@ func TestDiagramEffectiveFormat(t *testing.T) {
 }
 
 // TestDiagramEmbeddedDefaultsToSVG proves the end-to-end default: an embedded
-// render with no format and no output writes an SVG.
+// render with no format and no output writes an SVG temp file.
 func TestDiagramEmbeddedDefaultsToSVG(t *testing.T) {
-	cfg, err := parseDiagramArgs([]string{`{"dot":"digraph{a->b}","backend":"embedded"}`})
+	p := NewBuiltinDiagramPlugin()
+	res, err := p.Execute(context.Background(), []string{`{"dot":"digraph{a->b}","backend":"embedded"}`})
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("embedded default render: %v", err)
 	}
-	if got := effectiveDiagramFormat(cfg); got != "svg" {
-		t.Fatalf("embedded no-format effective = %q, want svg", got)
+	if !strings.Contains(res, ".svg") {
+		t.Fatalf("expected an .svg temp path in summary, got: %q", res)
+	}
+	for _, tok := range strings.Fields(res) {
+		if strings.HasSuffix(tok, ".svg") {
+			if _, statErr := os.Stat(tok); statErr != nil {
+				t.Errorf("temp output %q does not exist: %v", tok, statErr)
+			}
+			_ = os.Remove(tok)
+		}
 	}
 }
 
