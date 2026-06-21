@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.144.0](https://github.com/diillson/chatcli/compare/v1.143.1...v1.144.0) (2026-06-21)
+
+
+### Features
+
+* **plugins:** add [@diagram](https://github.com/diagram) builtin for embedded Graphviz rendering ([#1086](https://github.com/diillson/chatcli/issues/1086)) ([db27d2f](https://github.com/diillson/chatcli/commit/db27d2fac8267115ed416d5080ac670bafa08e58))
+* **plugins:** add selectable system/embedded Graphviz backend to [@diagram](https://github.com/diagram) ([3ea68b5](https://github.com/diillson/chatcli/commit/3ea68b5f140db7b47e93ea5b9843e88f07ed3b53))
+
 ## [1.143.1](https://github.com/diillson/chatcli/compare/v1.143.0...v1.143.1) (2026-06-19)
 
 
