@@ -55,8 +55,9 @@ func (s *Scheduler) handleJob(ctx context.Context, id JobID, workerID int) {
 		return
 	}
 
-	// Cheap check without taking the job lock; handleJob takes it below.
-	if j.Status.IsTerminal() || j.Status == StatusPaused {
+	// Cheap pre-check before the per-cycle work. Read the status under the job
+	// lock — JobStatus is a string and a concurrent Cancel/transition writes it.
+	if st := j.statusSnapshot(); st.IsTerminal() || st == StatusPaused {
 		return
 	}
 
@@ -526,7 +527,7 @@ func (s *Scheduler) unblockDependents(finished JobID) {
 	s.mu.RLock()
 	candidates := make([]*Job, 0)
 	for _, j := range s.jobs {
-		if j.Status != StatusBlocked {
+		if j.statusSnapshot() != StatusBlocked {
 			continue
 		}
 		for _, dep := range j.DependsOn {
