@@ -1,9 +1,13 @@
 package cli
 
 import (
+	"context"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/diillson/chatcli/cli/agent/quality"
 	"github.com/diillson/chatcli/cli/workspace"
 	"github.com/diillson/chatcli/cli/workspace/memory"
 	"github.com/diillson/chatcli/llm/embedding"
@@ -123,6 +127,51 @@ func TestRefreshEmbeddingProvider_RewiresContextRetrieval(t *testing.T) {
 	cli.refreshEmbeddingProvider()
 	if ch.GetManager().RetrievalEnabled() {
 		t.Fatal("expected /context retrieval disabled after provider removal")
+	}
+}
+
+func TestHydeAugmenterFor(t *testing.T) {
+	resetHydeProvider(t)
+	cli := &ChatCLI{logger: zap.NewNop()}
+
+	// Master switch off — augmenter is nil regardless of the HyDE block.
+	if aug := cli.hydeAugmenterFor(quality.Config{Enabled: false, HyDE: quality.HyDEConfig{Enabled: true}}); aug != nil {
+		t.Fatal("disabled quality pipeline must yield a nil augmenter")
+	}
+
+	// Master on but HyDE off — still nil.
+	if aug := cli.hydeAugmenterFor(quality.Config{Enabled: true, HyDE: quality.HyDEConfig{Enabled: false}}); aug != nil {
+		t.Fatal("HyDE disabled must yield a nil augmenter")
+	}
+
+	// HyDE enabled but no LLM client wired — the augmenter cannot be built, so
+	// the seam degrades to nil (callers then take their non-HyDE path). This
+	// also exercises the ensureHyDEVectors/hydeAugmenter body; UseVectors stays
+	// false so no embedding provider or memory store is required.
+	enabled := quality.Config{Enabled: true, HyDE: quality.HyDEConfig{Enabled: true, UseVectors: false}}
+	if aug := cli.hydeAugmenterFor(enabled); aug != nil {
+		t.Fatal("with no LLM client wired the augmenter must be nil")
+	}
+}
+
+// TestRetrieveWorkspaceContext_NoHyDE exercises the refactored chat retrieval
+// call site: with HyDE off, hydeAugmenterFor returns nil and the workspace
+// context is still assembled normally through BuildWorkspaceContextMode.
+func TestRetrieveWorkspaceContext_NoHyDE(t *testing.T) {
+	resetHydeProvider(t)
+	t.Setenv("CHATCLI_EMBED_PROVIDER", "") // no augmenter even if HyDE is on
+
+	wsDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(wsDir, "SOUL.md"), []byte("You are a helpful assistant"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	bl := workspace.NewBootstrapLoader(wsDir, t.TempDir(), zap.NewNop())
+	ms := workspace.NewMemoryStore(t.TempDir(), zap.NewNop())
+	cli := &ChatCLI{logger: zap.NewNop(), contextBuilder: workspace.NewContextBuilder(bl, ms, t.TempDir())}
+
+	out := cli.retrieveWorkspaceContext(context.Background(), "hello", nil)
+	if !strings.Contains(out, "You are a helpful assistant") {
+		t.Fatalf("expected workspace context to include bootstrap content, got %q", out)
 	}
 }
 
