@@ -2875,7 +2875,7 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 				if a.taskTracker != nil && a.taskTracker.NeedsReplanning() {
 					feedbackForAI += "\n\nATENÇÃO: Múltiplas falhas detectadas. Crie um NOVO <reasoning> com uma lista replanejada de tarefas, considerando os erros anteriores."
 				}
-				a.cli.history = append(a.cli.history, models.Message{Role: "user", Content: feedbackForAI})
+				a.cli.history = append(a.cli.history, buildBatchFeedbackMessage(feedbackForAI, toolCalls))
 			}
 
 			// Inject tool-loop guidance (if the guard fired this turn) so the
