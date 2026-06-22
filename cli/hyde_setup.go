@@ -154,14 +154,20 @@ func (cli *ChatCLI) ensureHyDEVectors(qcfg quality.Config) {
 		zap.Int("loaded", idx.Count()))
 }
 
-// hydeRetrieveContext is the entry point used by chat (cli_llm.go) and
-// agent (agent_mode.go) to assemble the workspace context with HyDE
-// applied. Falls back to the non-HyDE path when augmenter is nil.
-func (cli *ChatCLI) hydeRetrieveContext(ctx context.Context, query string, hints []string, qcfg quality.Config) string {
-	if cli.contextBuilder == nil {
-		return ""
+// hydeAugmenterFor resolves the per-call HyDE augmenter: it lazily attaches the
+// vector index when needed and returns the augmenter, or nil when HyDE is
+// disabled (or no LLM client is wired). This is the single setup seam every
+// retrieval path shares — chat, agent/coder, and the @memory recall tool.
+//
+// Only this preparation step is centralized; what each caller does with the
+// augmenter (mode-aware workspace context, direct memory recall, ...)
+// legitimately differs and stays at the call site. Downstream builders already
+// treat a nil augmenter as the non-HyDE path, so callers can pass the result
+// straight through.
+func (cli *ChatCLI) hydeAugmenterFor(qcfg quality.Config) *memory.HyDEAugmenter {
+	if !qcfg.Enabled || !qcfg.HyDE.Enabled {
+		return nil
 	}
 	cli.ensureHyDEVectors(qcfg)
-	aug := cli.hydeAugmenter(qcfg)
-	return cli.contextBuilder.BuildSystemPromptPrefixWithHyDE(ctx, query, hints, aug)
+	return cli.hydeAugmenter(qcfg)
 }

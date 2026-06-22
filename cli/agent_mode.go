@@ -1013,11 +1013,7 @@ func (a *AgentMode) buildWorkspaceBlocks(ctx context.Context, query string) (str
 	// "full" (push) injects the whole hint-driven retrieval. Agent/coder
 	// can pull, so they honor the configured mode directly.
 	mode := loadMemoryMode()
-	var aug *memory.HyDEAugmenter
-	if a.qualityConfig.HyDE.Enabled && a.qualityConfig.Enabled {
-		a.cli.ensureHyDEVectors(a.qualityConfig)
-		aug = a.cli.hydeAugmenter(a.qualityConfig)
-	}
+	aug := a.cli.hydeAugmenterFor(a.qualityConfig)
 	recallHint := ""
 	if mode == memModeIndex {
 		recallHint = memoryRecallHint

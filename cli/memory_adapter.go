@@ -106,8 +106,7 @@ func (a *memoryPluginAdapter) Recall(query string) (string, error) {
 			hints = strings.Fields(q)
 		}
 		if qcfg := quality.LoadFromEnv(); qcfg.Enabled && qcfg.HyDE.Enabled {
-			a.cli.ensureHyDEVectors(qcfg)
-			out = a.cli.memoryStore.GetRelevantContextWithHyDE(ctx, q, hints, a.cli.hydeAugmenter(qcfg))
+			out = a.cli.memoryStore.GetRelevantContextWithHyDE(ctx, q, hints, a.cli.hydeAugmenterFor(qcfg))
 		} else {
 			out = a.cli.memoryStore.GetRelevantContext(hints)
 		}

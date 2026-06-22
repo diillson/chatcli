@@ -207,11 +207,7 @@ func (cli *ChatCLI) retrieveWorkspaceContext(ctx context.Context, userInput stri
 	if mode == memModeIndex {
 		mode = memModeFull // chat cannot recall; fall back to the push model
 	}
-	var aug *memory.HyDEAugmenter
-	if qcfg := quality.LoadFromEnv(); qcfg.HyDE.Enabled && qcfg.Enabled {
-		cli.ensureHyDEVectors(qcfg)
-		aug = cli.hydeAugmenter(qcfg)
-	}
+	aug := cli.hydeAugmenterFor(quality.LoadFromEnv())
 	return cli.contextBuilder.BuildWorkspaceContextMode(ctx, userInput, hints, aug, mode, "")
 }
 
