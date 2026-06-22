@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/diillson/chatcli/models"
 	"go.uber.org/zap"
 )
 
@@ -170,6 +171,33 @@ func TestTrimInjectedContext(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestTrimMessagePreservesVerbatimFlagged(t *testing.T) {
+	logger, _ := zap.NewDevelopment()
+	trimmer := NewMessageTrimmer(logger)
+
+	// The model called @recall to read a previously-compressed original in full.
+	// Its feedback message is flagged PreserveVerbatim at construction, so the
+	// trimmer must leave it byte-identical — no knowledge of the tool-output
+	// text format required. Re-trimming would discard the detail and force
+	// another recall.
+	original := strings.Repeat("important recalled line that must survive compaction\n", 200)
+	feedback := "The tool 'batch_execution' was executed and returned the following:\n\n" +
+		"<tool_output>\n--- Resultado da Ação 1 (@recall) ---\n" + original + "\n</tool_output>\n\n" +
+		"(If the task is done, reply only with a final summary.)"
+
+	flagged := models.Message{Role: "user", Content: feedback, Meta: &models.MessageMeta{PreserveVerbatim: true}}
+	out := trimmer.trimMessage(flagged, []models.Message{flagged}, 0)
+	if out.Content != feedback {
+		t.Fatalf("PreserveVerbatim message was reduced during compaction; it must survive byte-identical")
+	}
+
+	// Control: the same content WITHOUT the flag is still truncated.
+	unflagged := models.Message{Role: "user", Content: feedback}
+	if outPlain := trimmer.trimMessage(unflagged, []models.Message{unflagged}, 0); strings.Contains(outPlain.Content, original) {
+		t.Fatal("control: unflagged tool output should still be truncated, but it survived intact")
 	}
 }
 
