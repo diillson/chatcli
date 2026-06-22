@@ -59,7 +59,7 @@ jobs:
 
       - name: Checkout PR head
         if: steps.token.outputs.present == 'true'
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           ref: ${{ github.head_ref }}
           token: ${{ secrets.DEPENDABOT_TIDY_TOKEN }}

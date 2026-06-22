@@ -79,7 +79,7 @@ jobs:
     environment: production
     steps:
       - name: Checkout tag
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           fetch-depth: 0
           ref: ${{ needs.release_please.outputs.tag_name }}
@@ -168,7 +168,7 @@ jobs:
       packages: write
     steps:
       - name: Checkout tag
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           ref: ${{ needs.release_please.outputs.tag_name }}
 
@@ -232,7 +232,7 @@ jobs:
       packages: read
     steps:
       - name: Checkout (for .trivyignore.yaml)
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           ref: ${{ needs.release_please.outputs.tag_name }}
           sparse-checkout: .trivyignore.yaml
@@ -338,7 +338,7 @@ jobs:
       packages: write
     steps:
       - name: Checkout tag
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           ref: ${{ needs.release_please.outputs.tag_name }}
 
@@ -399,7 +399,7 @@ jobs:
       packages: read
     steps:
       - name: Checkout (for .trivyignore.yaml)
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           ref: ${{ needs.release_please.outputs.tag_name }}
           sparse-checkout: .trivyignore.yaml
@@ -491,7 +491,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout tap repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           repository: diillson/homebrew-chatcli
           token: ${{ secrets.GH_RELEASE_TOKEN }}
@@ -602,7 +602,7 @@ jobs:
 
     steps:
       - name: Checkout tag
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           ref: ${{ needs.release_please.outputs.tag_name }}
 
@@ -715,13 +715,13 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout docs repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           repository: diillson/chatcli.ai
           token: ${{ secrets.GH_RELEASE_TOKEN }}
 
       - name: Checkout chatcli source (for CHANGELOG.md)
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           path: _chatcli_src
           fetch-depth: 1
@@ -876,7 +876,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
