@@ -7,6 +7,14 @@ type MessageMeta struct {
 	IsSummary bool   `json:"is_summary,omitempty"` // true if this message is a compacted summary
 	SummaryOf int    `json:"summary_of,omitempty"` // how many original messages were summarized
 	Mode      string `json:"mode,omitempty"`       // "chat", "agent", "coder" — which mode produced this message
+
+	// PreserveVerbatim marks a message whose content must never be reduced
+	// during history compaction. Set, for example, on tool feedback that
+	// carries @recall output: the model explicitly asked to see that original
+	// in full, so re-trimming it would discard the detail and force another
+	// recall. A structural flag avoids coupling the trimmer to any content
+	// format. See cli.MessageTrimmer.trimMessage.
+	PreserveVerbatim bool `json:"preserve_verbatim,omitempty"`
 }
 
 // Message representa uma mensagem trocada com o modelo de linguagem.

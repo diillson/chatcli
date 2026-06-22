@@ -130,6 +130,38 @@ func TestLayerIdempotentOnAlreadyCompressed(t *testing.T) {
 	}
 }
 
+func TestLayerNeverCompressesRecallOutput(t *testing.T) {
+	// The @recall tool returns a previously-offloaded original verbatim.
+	// Compressing its output would re-truncate and re-offload the very content
+	// the model asked to see in full, so recall would hand back a truncated
+	// view with a fresh marker — defeating its entire purpose. The chokepoint
+	// in agent_mode.go funnels every tool's output (including @recall's) through
+	// CompressToolOutput, so the guard must live in the Layer.
+	l := NewLayer(Config{Mode: ModeLossyWithCCR, Store: NewMemoryStore(), Threshold: 100})
+	var sb strings.Builder
+	for f := 0; f < 5; f++ {
+		for ln := 1; ln <= 12; ln++ {
+			fmt.Fprintf(&sb, "pkg/file%d.go:%d:some matching content here %d\n", f, ln, ln)
+		}
+	}
+	original := sb.String()
+	// Sanity: this payload DOES compress under a normal tool name.
+	if out, _ := l.CompressToolOutput("@search", original); len(out) >= len(original) {
+		t.Fatal("test payload should compress under @search; otherwise the guard is untested")
+	}
+	// Both the bare and @-prefixed forms (GetPlugin accepts either) must pass
+	// recall output through byte-identical.
+	for _, name := range []string{"@recall", "recall"} {
+		out, res := l.CompressToolOutput(name, original)
+		if out != original {
+			t.Fatalf("%s output must pass through verbatim, got %d bytes (want %d)", name, len(out), len(original))
+		}
+		if res.Strategy != "passthrough" {
+			t.Fatalf("%s must not engage a compressor, got strategy=%q", name, res.Strategy)
+		}
+	}
+}
+
 func TestNewLayerFromEnvOff(t *testing.T) {
 	t.Setenv("CHATCLI_COMPRESSION", "off")
 	l := NewLayerFromEnv(t.TempDir())

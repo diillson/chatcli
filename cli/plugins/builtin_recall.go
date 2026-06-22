@@ -70,6 +70,19 @@ func stripCCRMarker(s string) string {
 	return strings.TrimSpace(s)
 }
 
+// RecallToolName is the canonical name of the @recall builtin. It is the
+// single source of truth other packages compare against (e.g. the history
+// trimmer's verbatim guard and the agent loop) so the name lives in one place.
+const RecallToolName = "@recall"
+
+// IsRecallTool reports whether toolName refers to the @recall builtin. Tool
+// names reach callers either bare ("recall") or '@'-prefixed ("@recall") —
+// GetPlugin accepts both — so the prefix is normalized before comparing.
+func IsRecallTool(toolName string) bool {
+	name := strings.TrimPrefix(strings.TrimSpace(toolName), "@")
+	return strings.EqualFold(name, strings.TrimPrefix(RecallToolName, "@"))
+}
+
 // BuiltinRecallPlugin is the @recall tool.
 type BuiltinRecallPlugin struct{}
 

@@ -92,6 +92,15 @@ func (t *MessageTrimmer) trimMessage(msg models.Message, history []models.Messag
 		return msg
 	}
 
+	// Never reduce messages explicitly marked verbatim. This is how @recall
+	// output survives compaction: the producer flags it structurally
+	// (MessageMeta.PreserveVerbatim) so the trimmer needs no knowledge of the
+	// tool-output text format. Re-trimming it would discard the original the
+	// model asked to see in full and force another recall.
+	if msg.Meta != nil && msg.Meta.PreserveVerbatim {
+		return msg
+	}
+
 	trimmed := msg
 
 	switch msg.Role {
