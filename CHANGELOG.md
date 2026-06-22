@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.145.0](https://github.com/diillson/chatcli/compare/v1.144.0...v1.145.0) (2026-06-22)
+
+
+### Features
+
+* native context compression, image compression and output-token reduction ([#1095](https://github.com/diillson/chatcli/issues/1095)) ([6df524d](https://github.com/diillson/chatcli/commit/6df524deb247535cfaf04b52e4384a9f798d0f07))
+
 ## [1.144.0](https://github.com/diillson/chatcli/compare/v1.143.1...v1.144.0) (2026-06-21)
 
 
