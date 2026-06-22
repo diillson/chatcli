@@ -28,7 +28,9 @@ import (
 	"github.com/c-bata/go-prompt"
 	"github.com/diillson/chatcli/cli/agent"
 	"github.com/diillson/chatcli/cli/agent/quality/lessonq"
+	"github.com/diillson/chatcli/cli/agent/workers"
 	"github.com/diillson/chatcli/cli/coder"
+	"github.com/diillson/chatcli/cli/compress"
 	"github.com/diillson/chatcli/cli/hooks"
 	"github.com/diillson/chatcli/cli/mcp"
 	"github.com/diillson/chatcli/cli/palette"
@@ -238,6 +240,11 @@ type ChatCLI struct {
 	// Workspace context (bootstrap files + memory)
 	contextBuilder *workspace.ContextBuilder
 	memoryStore    *workspace.MemoryStore
+
+	// Content-aware, reversible context compression (CCR). Reduces verbose
+	// tool output (search/log/diff/JSON) before it reaches the model while
+	// keeping the full original recoverable via @recall. Shared across modes.
+	compressionLayer *compress.Layer
 
 	// Conversation checkpoints for rewind
 	checkpoints []conversationCheckpoint
@@ -493,6 +500,14 @@ func NewChatCLI(ctx context.Context, manager manager.LLMManager, logger *zap.Log
 		// no external `dot` to install, no network. Also builds the real Go
 		// import graph of a module via `go list`. Self-contained.
 		pluginMgr.RegisterBuiltinPlugin(plugins.NewBuiltinDiagramPlugin())
+		// @compress / @recall — content-aware, reversible context compression
+		// (CCR). @compress shrinks bulky payloads (logs/search/diff/JSON) on
+		// demand; @recall restores the byte-identical original from a
+		// "<<ccr:KEY>>" marker. The same layer also compresses tool output
+		// automatically in the agent/coder loop. Adapter wired below once the
+		// compression layer exists.
+		pluginMgr.RegisterBuiltinPlugin(plugins.NewBuiltinCompressPlugin())
+		pluginMgr.RegisterBuiltinPlugin(plugins.NewBuiltinRecallPlugin())
 		// Atomic read-only tools (Claude Code parity, Item 1). Narrow,
 		// flat-schema tools that route into the same engine as @coder
 		// read/search/tree but give the LLM a dedicated entry point —
@@ -598,6 +613,25 @@ func NewChatCLI(ctx context.Context, manager manager.LLMManager, logger *zap.Log
 		// persist facts deterministically.
 		plugins.SetMemoryAdapter(&memoryPluginAdapter{cli: cli})
 	}
+
+	// Build the content-aware compression layer (CCR store under ~/.chatcli/ccr)
+	// from environment config, and wire the @compress/@recall tools to it. The
+	// layer is also consulted by the agent/coder loop to compress tool output.
+	cli.compressionLayer = compress.NewLayerFromEnv(filepath.Join(homeDir, ".chatcli"))
+	plugins.SetCompressionAdapter(&compressionPluginAdapter{cli: cli})
+	// Let the history compactor reduce oversized tool feedback / injected
+	// context reversibly (CCR) instead of byte-truncating — engages during
+	// compaction across agent, coder and chat.
+	if cli.historyCompactor != nil {
+		cli.historyCompactor.SetCompressionLayer(cli.compressionLayer)
+	}
+	// Share the same compression engine with delegated sub-agents/workers so
+	// their tool output is compressed too, and identical content read by
+	// sibling agents dedupes against the one content-addressed CCR store.
+	workers.RegisterToolOutputCompressor(func(toolName, output string) string {
+		out, _ := cli.compressionLayer.CompressToolOutput(toolName, output)
+		return out
+	})
 
 	// Wire the @knowledge tool to this session's context manager so the agent
 	// can interrogate attached knowledge bases on demand.

@@ -44,6 +44,32 @@ var (
 	resultDirCustom string // set by SetResultDir (session workspace)
 )
 
+// toolOutputCompressor, when registered, applies content-aware reversible
+// compression (CCR) to a worker/sub-agent tool result before the inline-size
+// check. It is wired by the top-level cli package to the session's shared
+// compression layer, so every delegated agent benefits from the same engine —
+// and because CCR keys are content hashes against one shared store, identical
+// content read by sibling agents is stored only once (cross-agent dedup) and
+// recoverable via @recall from any of them.
+var (
+	toolOutputCompressor   func(toolName, output string) string
+	toolOutputCompressorMu sync.RWMutex
+)
+
+// RegisterToolOutputCompressor wires (or clears, with nil) the shared
+// compressor used by TruncateToolResult. Safe to call at startup.
+func RegisterToolOutputCompressor(fn func(toolName, output string) string) {
+	toolOutputCompressorMu.Lock()
+	toolOutputCompressor = fn
+	toolOutputCompressorMu.Unlock()
+}
+
+func currentToolOutputCompressor() func(string, string) string {
+	toolOutputCompressorMu.RLock()
+	defer toolOutputCompressorMu.RUnlock()
+	return toolOutputCompressor
+}
+
 // SetResultDir overrides the directory used for persisting large tool results.
 // Called by the session workspace so overflow lands inside the session scratch
 // area (which is on the read allowlist). Empty resets to default behavior.
@@ -79,6 +105,13 @@ func getResultDir() string {
 // version with a reference to the file.
 // If the result is within limits, it returns the original unchanged.
 func TruncateToolResult(subcmd, result string) string {
+	// Content-aware reversible compression first: it may bring a large result
+	// under the inline limit entirely (avoiding disk overflow), and shares the
+	// session CCR store so sibling agents dedupe identical content. No-op when
+	// unregistered, disabled, below threshold, or already CCR-compressed.
+	if fn := currentToolOutputCompressor(); fn != nil {
+		result = fn(subcmd, result)
+	}
 	if len(result) <= MaxInlineResultBytes {
 		return result
 	}

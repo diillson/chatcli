@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/diillson/chatcli/cli/compress"
 	"github.com/diillson/chatcli/i18n"
 	"github.com/diillson/chatcli/llm/catalog"
 	"github.com/diillson/chatcli/llm/client"
@@ -137,6 +138,15 @@ func NewHistoryCompactor(logger *zap.Logger) *HistoryCompactor {
 	return &HistoryCompactor{
 		logger:  logger,
 		trimmer: NewMessageTrimmer(logger),
+	}
+}
+
+// SetCompressionLayer wires the content-aware compression layer into the
+// embedded trimmer so oversized tool feedback and injected context are reduced
+// reversibly (CCR) during compaction instead of being byte-truncated.
+func (hc *HistoryCompactor) SetCompressionLayer(l *compress.Layer) {
+	if hc.trimmer != nil {
+		hc.trimmer.SetCompressionLayer(l)
 	}
 }
 

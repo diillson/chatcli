@@ -982,6 +982,10 @@ func (a *AgentMode) composeCoreText(isCoder, hasActivePersona bool) string {
 	if a.gatewayPersona && (hasActivePersona || !isCoder) {
 		coreText += "\n\n" + i18n.T("gateway.persona_prompt")
 	}
+	// Output-token reduction: append the (static, cache-friendly) verbosity
+	// directive so the model drops preamble/restatement/ceremony. Empty when
+	// CHATCLI_OUTPUT_VERBOSITY=full.
+	coreText += verbosityDirectiveBlock()
 	return coreText
 }
 
@@ -2722,6 +2726,20 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 					agent.MarkTaskCompleted(a.taskTracker)
 				}
 				renderPlanProgress()
+
+				// Content-aware, reversible compression of the LLM-facing tool
+				// output (search/log/diff/JSON). This is the single chokepoint
+				// for both the structured-native path (turnToolResults below)
+				// and the legacy batch text path, so it engages in agent and
+				// coder mode alike. Humans already saw the full output (above)
+				// and the PostToolUse hook already received it; only the model's
+				// copy is reduced, with the original recoverable via @recall.
+				// Errors are left verbatim so the model can debug them in full.
+				// CompressToolOutput is nil-safe and a no-op when disabled or
+				// below the size threshold.
+				if execErr == nil && a.cli != nil {
+					toolOutput, _ = a.cli.compressionLayer.CompressToolOutput(tc.Name, toolOutput)
+				}
 
 				// Capture the structured outcome for downstream phases.
 				// Duration is wall-clock for this single tool — Fase 3 will

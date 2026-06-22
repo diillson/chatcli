@@ -148,9 +148,11 @@ func (cli *ChatCLI) assembleChatSystemPrompt(
 // modeAndLanguagePart returns the Part 0 block — mode-awareness banner
 // concatenated with the i18n response-language directive. Always cacheable.
 func modeAndLanguagePart() models.ContentBlock {
+	// Output-token reduction: the verbosity directive is a static string per
+	// level, so appending it keeps this Part 0 block cacheable.
 	return models.ContentBlock{
 		Type:         "text",
-		Text:         ChatModeSystemHint + "\n" + i18n.T("ai.response_language"),
+		Text:         ChatModeSystemHint + "\n" + i18n.T("ai.response_language") + verbosityDirectiveBlock(),
 		CacheControl: &models.CacheControl{Type: "ephemeral"},
 	}
 }
@@ -753,6 +755,15 @@ func (cli *ChatCLI) chatEnvelopeFooter(usage *models.UsageInfo) string {
 	if window := catalog.GetContextWindow(cli.Provider, cli.Model); window > 0 {
 		pct := float64(usage.PromptTokens) / float64(window) * 100
 		parts = append(parts, i18n.T("chat.envelope.context_pct", clampPct(pct)))
+	}
+	// Session compression savings (shared across agent/coder/chat). Shown only
+	// when the layer has actually saved something this session.
+	if cli.compressionLayer != nil {
+		if s, _ := cli.compressionLayer.Stats(); s.SavedBytes() > 0 {
+			if savedTok := s.SavedBytes() / 4; savedTok > 0 {
+				parts = append(parts, i18n.T("chat.envelope.compression_saved", formatTokenCount(savedTok)))
+			}
+		}
 	}
 	if len(parts) == 0 {
 		return ""

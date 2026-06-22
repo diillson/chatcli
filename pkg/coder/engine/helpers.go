@@ -12,6 +12,13 @@ import (
 	"unicode/utf8"
 )
 
+// pathFlagNames are the path-bearing string flags whose leading "~" must be
+// expanded to the user's home directory after parsing. Without this, a model
+// passing "~/proj/main.go" makes the engine create a literal "~" directory
+// under the cwd (filepath.Abs leaves "~" untouched). Expanding here is a single
+// chokepoint that covers every command (write/patch/read/tree/search/git/...).
+var pathFlagNames = []string{"file", "dir", "path"}
+
 // parseFlags parses flags with ContinueOnError and returns a descriptive error.
 func parseFlags(fs *flag.FlagSet, args []string) error {
 	fs.SetOutput(io.Discard)
@@ -23,7 +30,39 @@ func parseFlags(fs *flag.FlagSet, args []string) error {
 		return fmt.Errorf("flag parse error in '%s': %w\nAvailable flags:\n  %s",
 			fs.Name(), err, strings.Join(flags, "\n  "))
 	}
+	for _, name := range pathFlagNames {
+		f := fs.Lookup(name)
+		if f == nil {
+			continue
+		}
+		if v := f.Value.String(); strings.HasPrefix(v, "~") {
+			_ = f.Value.Set(expandUserPath(v))
+		}
+	}
 	return nil
+}
+
+// expandUserPath expands a leading "~" or "~/" to the user's home directory.
+// Mirrors utils.ExpandPath semantics but is kept local so pkg/coder/engine
+// stays dependency-light. "~username" is intentionally left untouched (we only
+// resolve the current user's home), and the original path is returned on any
+// failure so a write never silently retargets.
+func expandUserPath(path string) string {
+	if path == "" || path[0] != '~' {
+		return path
+	}
+	// Only "~" alone or "~/" (or "~\" on Windows) — never "~username".
+	if path != "~" && !strings.HasPrefix(path, "~/") && !(len(path) > 1 && path[1] == filepath.Separator) {
+		return path
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return path
+	}
+	if path == "~" {
+		return home
+	}
+	return filepath.Join(home, path[2:])
 }
 
 func smartDecode(content, enc string) ([]byte, error) {

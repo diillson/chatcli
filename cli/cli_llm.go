@@ -57,7 +57,7 @@ func (cli *ChatCLI) processLLMRequest(parentCtx context.Context, in string) {
 	cli.ensureModelCacheWarm(ctx)
 	resolution := cli.resolveSkillClient(assembly.modelHint)
 	cli.noticeSkillResolution(resolution)
-	ctx = cli.applyChatEffortHint(ctx, assembly.effort)
+	ctx = cli.applyChatEffortHint(ctx, routeEffortForPrompt(userInput, assembly.effort))
 
 	turnStart := time.Now()
 	aiResponse, llmErr := cli.executeLLMTurn(

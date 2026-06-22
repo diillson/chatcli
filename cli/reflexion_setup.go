@@ -19,6 +19,7 @@ package cli
 import (
 	"context"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 	"time"
@@ -28,6 +29,7 @@ import (
 	"github.com/diillson/chatcli/cli/workspace/memory"
 	"github.com/diillson/chatcli/i18n"
 	"github.com/diillson/chatcli/models"
+	"github.com/diillson/chatcli/utils"
 	"go.uber.org/zap"
 )
 
@@ -72,12 +74,80 @@ func (cli *ChatCLI) makeLessonPersister() quality.PersistLessonFunc {
 		tags := append([]string{}, lesson.Tags...)
 		tags = append(tags, "reflexion", "trigger:"+lesson.Trigger)
 
-		mgr.Facts.AddFactWithSource(lesson.FactContent(), "lesson", tags, mgr.WorkspaceDir())
+		added := mgr.Facts.AddFactWithSource(lesson.FactContent(), "lesson", tags, mgr.WorkspaceDir())
+		// Mirror genuinely new lessons into a human-readable LESSONS.md so
+		// failures mined from sessions accumulate as durable, browsable
+		// documentation (the agent can @read/@knowledge it too). Using the
+		// dedup bool keeps the doc free of near-duplicate repeats.
+		if added {
+			cli.appendLessonDoc(mgr.WorkspaceDir(), lesson)
+		}
 		// AddFactWithSource never returns an error — it deduplicates
 		// silently. We translate "false" (already existed) into nil
 		// so the hook's logger doesn't spam on near-duplicate runs.
 		return nil
 	}
+}
+
+// lessonsDocName is the human-readable lessons file written under the
+// reflexion base dir.
+const lessonsDocName = "LESSONS.md"
+
+// appendLessonDoc appends one lesson as a Markdown entry to
+// <workspaceDir>/.chatcli/reflexion/LESSONS.md. Failures are logged at debug
+// and never propagate — documentation is best-effort, it must not break the
+// reflexion pipeline. Controlled by CHATCLI_QUALITY_REFLEXION_DOC (default on).
+func (cli *ChatCLI) appendLessonDoc(workspaceDir string, lesson quality.Lesson) {
+	if strings.EqualFold(strings.TrimSpace(utils.GetEnvOrDefault("CHATCLI_QUALITY_REFLEXION_DOC", "on")), "off") {
+		return
+	}
+	dir := filepath.Join(workspaceDir, ".chatcli", "reflexion")
+	if err := os.MkdirAll(dir, 0o750); err != nil {
+		cli.logger.Debug("reflexion: could not create lessons dir", zap.Error(err))
+		return
+	}
+	path := filepath.Join(dir, lessonsDocName)
+
+	when := lesson.CreatedAt
+	if when.IsZero() {
+		when = time.Now()
+	}
+	var b strings.Builder
+	// Seed a title once when the file does not yet exist.
+	if _, statErr := os.Stat(path); os.IsNotExist(statErr) {
+		b.WriteString("# Lessons learned\n\nAuto-generated from agent reflexion. Newest entries appended at the end.\n")
+	}
+	fmt.Fprintf(&b, "\n## %s — trigger: %s\n", when.Format(time.RFC3339), nonEmpty(lesson.Trigger, "manual"))
+	if lesson.Situation != "" {
+		fmt.Fprintf(&b, "- **Situation:** %s\n", lesson.Situation)
+	}
+	if lesson.Mistake != "" {
+		fmt.Fprintf(&b, "- **Mistake:** %s\n", lesson.Mistake)
+	}
+	if lesson.Correction != "" {
+		fmt.Fprintf(&b, "- **Correction:** %s\n", lesson.Correction)
+	}
+	if len(lesson.Tags) > 0 {
+		fmt.Fprintf(&b, "- **Tags:** %s\n", strings.Join(lesson.Tags, ", "))
+	}
+
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600) // #nosec G304 -- path under our own ~/.chatcli reflexion dir
+	if err != nil {
+		cli.logger.Debug("reflexion: could not open lessons doc", zap.Error(err))
+		return
+	}
+	defer func() { _ = f.Close() }()
+	if _, err := f.WriteString(b.String()); err != nil {
+		cli.logger.Debug("reflexion: could not append lesson doc", zap.Error(err))
+	}
+}
+
+// nonEmpty returns s, or def when s is blank.
+func nonEmpty(s, def string) string {
+	if strings.TrimSpace(s) == "" {
+		return def
+	}
+	return s
 }
 
 // ensureReflexionRunner lazily constructs (and starts) the durable

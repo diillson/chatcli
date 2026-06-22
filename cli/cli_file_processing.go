@@ -7,10 +7,12 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"time"
 
+	"github.com/diillson/chatcli/cli/imgcompress"
 	"github.com/diillson/chatcli/config"
 	"github.com/diillson/chatcli/i18n"
 	"github.com/diillson/chatcli/models"
@@ -211,7 +213,7 @@ func (cli *ChatCLI) gateImagesForModel(ctx context.Context, images []models.Imag
 
 	switch cli.resolveVisionMode() {
 	case visionNative:
-		return images, ""
+		return cli.compressImagesForVision(images), ""
 	case visionOff:
 		cli.logger.Info("vision: input disabled by CHATCLI_VISION_INPUT=off",
 			zap.String("provider", cli.Provider), zap.String("model", cli.Model))
@@ -228,6 +230,60 @@ func (cli *ChatCLI) gateImagesForModel(ctx context.Context, images []models.Imag
 			zap.String("provider", cli.Provider), zap.String("model", cli.Model))
 		return nil, ""
 	}
+}
+
+// compressImagesForVision downscales/re-encodes inline image bytes before they
+// reach a vision model — cutting upload bytes, latency and (above the edge cap)
+// the billed vision tokens. Keyless and pure-Go. Controlled by:
+//
+//	CHATCLI_VISION_COMPRESS       on|off (default on)
+//	CHATCLI_VISION_MAX_EDGE       longest-edge cap in px (default 1568)
+//	CHATCLI_VISION_JPEG_QUALITY   1..100 (default 82)
+//
+// URL-only images (no inline bytes) are passed through untouched. The function
+// is conservative: imgcompress never inflates a payload and never drops alpha.
+func (cli *ChatCLI) compressImagesForVision(images []models.ImageContent) []models.ImageContent {
+	if strings.EqualFold(strings.TrimSpace(utils.GetEnvOrDefault("CHATCLI_VISION_COMPRESS", "on")), "off") {
+		return images
+	}
+	opts := imgcompress.DefaultOptions()
+	if v := strings.TrimSpace(os.Getenv("CHATCLI_VISION_MAX_EDGE")); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			opts.MaxEdge = n
+		}
+	}
+	if v := strings.TrimSpace(os.Getenv("CHATCLI_VISION_JPEG_QUALITY")); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n >= 1 && n <= 100 {
+			opts.JPEGQuality = n
+		}
+	}
+
+	totalSaved := 0
+	out := make([]models.ImageContent, len(images))
+	copy(out, images)
+	for i := range out {
+		if len(out[i].Data) == 0 {
+			continue // URL-only; nothing to recompress
+		}
+		data, res := imgcompress.Compress(out[i].Data, out[i].MediaType, opts)
+		if !res.Changed {
+			continue
+		}
+		out[i].Data = data
+		out[i].MediaType = res.OutMediaType
+		totalSaved += res.SavedBytes()
+		cli.logger.Debug("vision: image recompressed",
+			zap.String("file", out[i].FileName),
+			zap.Int("orig_bytes", res.OrigBytes), zap.Int("new_bytes", res.NewBytes),
+			zap.String("orig_dim", fmt.Sprintf("%dx%d", res.OrigW, res.OrigH)),
+			zap.String("new_dim", fmt.Sprintf("%dx%d", res.NewW, res.NewH)),
+			zap.String("out_type", res.OutMediaType))
+	}
+	if totalSaved > 0 {
+		cli.logger.Info("vision: image compression saved bytes",
+			zap.Int("images", len(out)), zap.Int("bytes_saved", totalSaved))
+	}
+	return out
 }
 
 // imageFileExtensions are the extensions we treat as vision attachments.
