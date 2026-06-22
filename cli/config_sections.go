@@ -57,23 +57,21 @@ func (cli *ChatCLI) routeConfigCommand(ctx context.Context, args []string) {
 		cli.showConfigPanorama()
 		return
 	}
-	switch strings.ToLower(args[0]) {
+	section := strings.ToLower(args[0])
+	// Sections that follow the uniform "bare shows the panorama, arguments
+	// mutate" shape are dispatched from a table so this function stays flat.
+	// Sections needing the context (image/hub/scheduler) or a special alias
+	// (ui/theme) keep their explicit cases below.
+	if cli.routeHierarchicalConfig(section, args[1:]) {
+		return
+	}
+	switch section {
 	case "all", "full":
 		cli.showConfigAll(ctx)
 	case "general":
 		cli.showConfigGeneral()
 	case "providers", "provider":
 		cli.showConfigProviders()
-	case "agent":
-		// /config agent is also hierarchical now: bare form dumps the
-		// read-only panorama; ui (and future subcommands) mutate the
-		// runtime style. Mirrors the security routing immediately
-		// below so behavior is uniform across sections.
-		if len(args) == 1 {
-			cli.showConfigAgent()
-		} else {
-			cli.routeConfigAgent(args[1:])
-		}
 	case "ui":
 		// Hierarchical like security/hub: bare form shows the theme +
 		// color-profile panorama; `ui theme <name>` switches at runtime.
@@ -95,23 +93,6 @@ func (cli *ChatCLI) routeConfigCommand(ctx context.Context, args []string) {
 		cli.showConfigIntegrations(ctx)
 	case "auth":
 		cli.showConfigAuth()
-	case "security":
-		// /config security is now hierarchical: the bare form still
-		// dumps the read-only panorama, but rules/allow/deny/forget/
-		// reload subcommands mutate the coder PolicyManager live.
-		if len(args) == 1 {
-			cli.showConfigSecurity()
-		} else {
-			cli.routeConfigSecurity(args[1:])
-		}
-	case "chat":
-		// Hierarchical like security/agent: bare form shows the chat panorama;
-		// `chat ask on|off|toggle` flips the ask_user exception at runtime.
-		if len(args) == 1 {
-			cli.showConfigChat()
-		} else {
-			cli.routeConfigChat(args[1:])
-		}
 	case "image", "img":
 		// Hierarchical: bare form shows the @image panorama; provider/api/
 		// model/url/models/reset mutate the backend at runtime.
@@ -142,6 +123,40 @@ func (cli *ChatCLI) routeConfigCommand(ctx context.Context, args []string) {
 		fmt.Println(colorize("  "+i18n.T("cfg.route.unknown_section", args[0]), ColorYellow))
 		fmt.Println(colorize("  "+i18n.T("cfg.route.hint"), ColorGray))
 	}
+}
+
+// hierarchicalConfigSection pairs a section's read-only panorama with its
+// argument router. rest is the args after the section token.
+type hierarchicalConfigSection struct {
+	show  func()
+	route func(rest []string)
+}
+
+// routeHierarchicalConfig dispatches the sections that follow the uniform
+// "bare shows the panorama, arguments mutate" shape. Returns true when the
+// section was handled, false to let routeConfigCommand's switch take over.
+// Keeping these out of the switch holds routeConfigCommand's complexity down
+// and makes the shared shape explicit.
+func (cli *ChatCLI) routeHierarchicalConfig(section string, rest []string) bool {
+	table := map[string]hierarchicalConfigSection{
+		"agent":       {cli.showConfigAgent, cli.routeConfigAgent},
+		"security":    {cli.showConfigSecurity, cli.routeConfigSecurity},
+		"chat":        {cli.showConfigChat, cli.routeConfigChat},
+		"compression": {cli.showConfigCompression, cli.routeConfigCompression},
+		"compress":    {cli.showConfigCompression, cli.routeConfigCompression},
+		"output":      {cli.showConfigOutput, cli.routeConfigOutput},
+		"verbosity":   {cli.showConfigOutput, cli.routeConfigOutput},
+	}
+	h, ok := table[section]
+	if !ok {
+		return false
+	}
+	if len(rest) == 0 {
+		h.show()
+	} else {
+		h.route(rest)
+	}
+	return true
 }
 
 // ─── Shared formatting helpers ─────────────────────────────────
@@ -1030,6 +1045,9 @@ func (cli *ChatCLI) showConfigIntegrations(ctx context.Context) {
 	kv(p, "CHATCLI_VISION_INPUT", envOr("CHATCLI_VISION_INPUT"))
 	kv(p, "CHATCLI_VISION_PROVIDER", envOr("CHATCLI_VISION_PROVIDER"))
 	kv(p, "CHATCLI_VISION_MODEL", envOr("CHATCLI_VISION_MODEL"))
+	kv(p, "CHATCLI_VISION_COMPRESS", envOrDefault("CHATCLI_VISION_COMPRESS", "on"))
+	kv(p, "CHATCLI_VISION_MAX_EDGE", envOrDefault("CHATCLI_VISION_MAX_EDGE", "1568"))
+	kv(p, "CHATCLI_VISION_JPEG_QUALITY", envOrDefault("CHATCLI_VISION_JPEG_QUALITY", "82"))
 
 	fmt.Println(p)
 	subheader(p, "cfg.sub.integ.gateway_send")

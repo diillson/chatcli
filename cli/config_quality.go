@@ -73,6 +73,7 @@ func (cli *ChatCLI) showConfigQuality() {
 	kv(p, "CHATCLI_QUALITY_REFLEXION_ON_HALLUCINATION", boolLabel(cfg.Reflexion.OnHallucination))
 	kv(p, "CHATCLI_QUALITY_REFLEXION_ON_LOW_QUALITY", boolLabel(cfg.Reflexion.OnLowQuality))
 	kv(p, "CHATCLI_QUALITY_REFLEXION_PERSIST", boolLabel(cfg.Reflexion.Persist))
+	kv(p, "CHATCLI_QUALITY_REFLEXION_DOC", envOrDefault("CHATCLI_QUALITY_REFLEXION_DOC", "on"))
 	// Durable lesson queue (WAL + worker pool + DLQ). Enabled by
 	// default so lessons survive process crashes. Disable to fall
 	// back to detached-goroutine legacy mode.

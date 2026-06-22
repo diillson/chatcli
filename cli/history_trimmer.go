@@ -5,6 +5,7 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/diillson/chatcli/cli/compress"
 	"github.com/diillson/chatcli/models"
 	"go.uber.org/zap"
 )
@@ -13,11 +14,37 @@ import (
 // to reduce token usage without losing semantic information.
 type MessageTrimmer struct {
 	logger *zap.Logger
+	// comp, when set and enabled, replaces the byte-level head/tail truncation
+	// of oversized tool feedback and injected context with content-aware,
+	// reversible compression (CCR). It engages during compaction across all
+	// modes — including chat, where bulky attached context is the main target.
+	comp *compress.Layer
 }
 
 // NewMessageTrimmer creates a new MessageTrimmer.
 func NewMessageTrimmer(logger *zap.Logger) *MessageTrimmer {
 	return &MessageTrimmer{logger: logger}
+}
+
+// SetCompressionLayer wires the content-aware compression layer (optional).
+func (t *MessageTrimmer) SetCompressionLayer(l *compress.Layer) { t.comp = l }
+
+// compressOrEmpty returns a content-aware, reversible reduction of s when the
+// compression layer is active and actually shrinks it; otherwise "" so the
+// caller keeps its existing byte-level fallback. Already-CCR-compressed content
+// is left untouched (idempotent across repeated compaction passes).
+func (t *MessageTrimmer) compressOrEmpty(s string) string {
+	if t.comp == nil || !t.comp.Enabled() {
+		return ""
+	}
+	if compress.ExtractKeys(s) != nil {
+		return ""
+	}
+	out, res := t.comp.CompressToolOutput("", s)
+	if res.CompressedSize < res.OriginalSize {
+		return out
+	}
+	return ""
 }
 
 // Regex patterns for extracting/stripping content.
@@ -185,8 +212,12 @@ func (t *MessageTrimmer) trimToolFeedback(content string) string {
 	})
 
 	// If content doesn't have <tool_output> tags but is still huge (raw output),
-	// truncate the overall message
+	// reduce it. Prefer content-aware reversible compression (CCR); fall back to
+	// byte-level head/tail truncation when compression isn't active or doesn't help.
 	if len(content) > 8000 && !strings.Contains(content, "<tool_output>") {
+		if c := t.compressOrEmpty(content); c != "" {
+			return c
+		}
 		// Looks for "--- Resultado da Ação" pattern (batch output)
 		// Keep header + first portion + tail
 		content = truncatePreservingStructure(content, 8000)
@@ -242,6 +273,16 @@ func (t *MessageTrimmer) trimInjectedContext(content string) string {
 	// Extract the marker/header line(s) and keep a truncated version
 	lines := strings.SplitN(content, "\n", 4)
 	header := strings.Join(lines[:min(3, len(lines))], "\n")
+
+	// Prefer content-aware reversible compression of the body (keeps the
+	// header so the model still sees what the context is). This is the main
+	// chat-mode win: bulky attached/knowledge context becomes recoverable via
+	// @recall instead of being permanently truncated.
+	if len(header)+1 < len(content) {
+		if c := t.compressOrEmpty(content[len(header)+1:]); c != "" {
+			return header + "\n\n" + c
+		}
+	}
 
 	truncated := header + "\n\n" +
 		content[len(header)+1:min(len(header)+2000, len(content))] +

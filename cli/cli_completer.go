@@ -1531,6 +1531,8 @@ func (cli *ChatCLI) getConfigSuggestions(d prompt.Document) []prompt.Suggest {
 			{Text: "chat", Description: i18n.T("cfg.section.chat.title")},
 			{Text: "image", Description: i18n.T("cfg.section.image.title")},
 			{Text: "diagram", Description: i18n.T("cfg.section.diagram.title")},
+			{Text: "compression", Description: i18n.T("cfg.section.compression.title")},
+			{Text: "output", Description: i18n.T("cfg.section.output.title")},
 			{Text: "scheduler", Description: i18n.T("cfg.section.scheduler.title")},
 			{Text: "server", Description: i18n.T("complete.config.server")},
 			{Text: "hub", Description: i18n.T("cfg.section.hub.title")},
@@ -1561,6 +1563,16 @@ func (cli *ChatCLI) getConfigSuggestions(d prompt.Document) []prompt.Suggest {
 	// /config chat <TAB> → ask_user toggle subcommands
 	if strings.ToLower(args[1]) == "chat" {
 		return cli.getConfigChatSuggestions(d)
+	}
+
+	// /config compression <TAB> → mode subcommands (lossy/lossless/off/stats)
+	if s := strings.ToLower(args[1]); s == "compression" || s == "compress" {
+		return cli.getConfigCompressionSuggestions(d)
+	}
+
+	// /config output <TAB> → verbosity + effort subcommands
+	if s := strings.ToLower(args[1]); s == "output" || s == "verbosity" {
+		return cli.getConfigOutputSuggestions(d)
 	}
 
 	// /config ui <TAB> → theme subcommand + values
