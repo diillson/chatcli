@@ -210,6 +210,19 @@ func (j *Job) Validate() error {
 func (j *Job) lock()   { j.mu.Lock() }
 func (j *Job) unlock() { j.mu.Unlock() }
 
+// statusSnapshot returns the job's status under its lock. JobStatus is a
+// string, and transitions write j.Status under j.lock(), so any read of the
+// field from another goroutine must hold the lock too — an unsynchronized read
+// can tear against a concurrent write. Read-only callers that only need a
+// point-in-time status (fire pre-checks, registry scans) go through here
+// instead of touching the field directly. Mirrors the inline snapshot already
+// used in resolveDependency.
+func (j *Job) statusSnapshot() JobStatus {
+	j.lock()
+	defer j.unlock()
+	return j.Status
+}
+
 // JobSummary is the compact view returned by List and the status line.
 // Stripping history and transitions keeps the JSON small for IPC.
 type JobSummary struct {

@@ -2,6 +2,7 @@ package scheduler
 
 import (
 	"context"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -310,6 +311,60 @@ func TestScheduler_RecurringInterval_RearmsInPlace(t *testing.T) {
 	if len(allJobs) != 1 {
 		t.Errorf("recurring should reuse one Job; got %d total entries", len(allJobs))
 	}
+}
+
+// TestScheduler_StatusReadsAreRaceFree drives the registry-scan status read
+// (activeCount — the same unsynchronized-read class as handleJob's fire
+// pre-check) concurrently with status writes under the job lock. JobStatus is a
+// string, so before these reads were routed through statusSnapshot they tore
+// against concurrent transitions. Under -race this fails on the old code and
+// passes on the fixed code; it is what TestScheduler_RecurringInterval_
+// CancelStopsRearm only hit intermittently.
+func TestScheduler_StatusReadsAreRaceFree(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.DataDir = t.TempDir()
+	cfg.AuditEnabled = false
+	cfg.SnapshotInterval = 0
+	cfg.WALGCInterval = 0
+	cfg.DaemonAutoConnect = false
+	s, err := New(cfg, NewNoopBridge(), SchedulerDeps{}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Register the job directly — no Start, no dispatcher — so the only
+	// concurrent accessors are the two goroutines below.
+	j := NewJob("racer",
+		Owner{Kind: OwnerUser, ID: "u"},
+		Schedule{Kind: ScheduleInterval, Interval: time.Hour},
+		Action{Type: ActionType("fake_act")})
+	s.mu.Lock()
+	s.jobs[j.ID] = j
+	s.mu.Unlock()
+
+	const iters = 5000
+	var wg sync.WaitGroup
+	wg.Add(2)
+	// Writer: flip the status under the job lock, exactly as transition does.
+	go func() {
+		defer wg.Done()
+		for i := 0; i < iters; i++ {
+			j.lock()
+			if j.Status == StatusRunning {
+				j.Status = StatusPending
+			} else {
+				j.Status = StatusRunning
+			}
+			j.unlock()
+		}
+	}()
+	// Reader: the registry scan that previously read j.Status without the lock.
+	go func() {
+		defer wg.Done()
+		for i := 0; i < iters; i++ {
+			_ = s.activeCount()
+		}
+	}()
+	wg.Wait()
 }
 
 // TestScheduler_RecurringInterval_CancelStopsRearm ensures cancelling

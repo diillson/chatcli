@@ -422,7 +422,7 @@ func (s *Scheduler) Enqueue(ctx context.Context, job *Job) (*Job, error) {
 			cur := s.jobs[existing]
 			return cur.Clone(), nil
 		}
-		if cur, ok := s.jobs[existing]; ok && !cur.Status.IsTerminal() {
+		if cur, ok := s.jobs[existing]; ok && !cur.statusSnapshot().IsTerminal() {
 			s.mu.Unlock()
 			s.metrics.EnqueueErrors.WithLabelValues("duplicate_name").Inc()
 			return nil, fmt.Errorf("%w: %q is live as %s", ErrDuplicateName, job.Name, existing)
@@ -454,7 +454,7 @@ func (s *Scheduler) Enqueue(ctx context.Context, job *Job) (*Job, error) {
 	if len(job.DependsOn) > 0 && job.Status == StatusPending {
 		// Are any deps still non-terminal?
 		for _, depID := range job.DependsOn {
-			if d, ok := s.jobs[depID]; ok && !d.Status.IsTerminal() {
+			if d, ok := s.jobs[depID]; ok && !d.statusSnapshot().IsTerminal() {
 				job.Status = StatusBlocked
 				break
 			}
@@ -808,7 +808,7 @@ func (s *Scheduler) activeCount() int {
 	defer s.mu.RUnlock()
 	n := 0
 	for _, j := range s.jobs {
-		if !j.Status.IsTerminal() {
+		if !j.statusSnapshot().IsTerminal() {
 			n++
 		}
 	}
