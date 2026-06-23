@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.145.1](https://github.com/diillson/chatcli/compare/v1.145.0...v1.145.1) (2026-06-22)
+
+
+### Bug Fixes
+
+* **compress:** keep [@recall](https://github.com/recall) output full through compaction ([#1097](https://github.com/diillson/chatcli/issues/1097)) ([35417ce](https://github.com/diillson/chatcli/commit/35417ce7553a6d9f1e287154d1937781ad6f00b2))
+* **scheduler:** synchronize JobStatus reads against concurrent transitions ([#1099](https://github.com/diillson/chatcli/issues/1099)) ([964b049](https://github.com/diillson/chatcli/commit/964b0493c6d7f6b13c21c8459cc3045b43d25e10))
+
 ## [1.145.0](https://github.com/diillson/chatcli/compare/v1.144.0...v1.145.0) (2026-06-22)
 
 
