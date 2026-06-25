@@ -14,6 +14,7 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/diillson/chatcli/config"
 	"github.com/diillson/chatcli/i18n"
 )
 
@@ -43,6 +44,15 @@ func (cli *ChatCLI) showConfigMemory() {
 	} else {
 		kv(p, i18n.T("cfg.kv.memory_store"), i18n.T("cfg.val.not_initialized"))
 	}
+
+	// Self-evolution shares the memory worker's extraction pass, so it lives
+	// under the same section. Read-only; set via CHATCLI_SELFEVOLVE_MODE.
+	subheader(p, "cfg.sub.selfevolve")
+	evolveDesc := i18n.T("cfg.kv.selfevolve.mode_" + resolveSelfEvolveMode().String())
+	if os.Getenv(config.SelfEvolveModeEnv) == "" {
+		evolveDesc = defaultMarker + evolveDesc
+	}
+	kv(p, config.SelfEvolveModeEnv, evolveDesc)
 
 	sectionEnd(ColorBlue)
 }

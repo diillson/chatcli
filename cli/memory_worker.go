@@ -233,6 +233,21 @@ func (mw *memoryWorker) extractAndSave(ctx context.Context, messages []models.Me
 
 	mgr := mw.cli.memoryStore.Manager()
 
+	// Self-evolution piggybacks on this same extraction pass (no extra LLM
+	// call): when enabled, the prompt asks for SKILL_CANDIDATES alongside the
+	// memory sections, and we act on them after parsing the response.
+	evolveMode := resolveSelfEvolveMode()
+	instructions := memory.EnhancedExtractionPromptV2
+	if evolveMode != selfEvolveOff {
+		instructions += "\n" + selfEvolveSkillDirective
+		// Inject only the compact skill index (names + descriptions), so the
+		// model can target an existing skill for evolution without any bodies
+		// bloating the per-turn prompt. The body is pulled on demand at merge.
+		if idx := mw.cli.buildSkillIndex(); idx != "" {
+			instructions += "\n\n" + idx
+		}
+	}
+
 	// Build conversation snippet for extraction
 	var sb strings.Builder
 	for _, msg := range messages {
@@ -246,7 +261,7 @@ func (mw *memoryWorker) extractAndSave(ctx context.Context, messages []models.Me
 
 	// Build enhanced prompt with existing context
 	var fullPrompt strings.Builder
-	fullPrompt.WriteString(memory.EnhancedExtractionPromptV2)
+	fullPrompt.WriteString(instructions)
 	fullPrompt.WriteString("\n\n---\n\n")
 
 	// Include current workspace so the extraction LLM can distinguish session context
@@ -268,7 +283,7 @@ func (mw *memoryWorker) extractAndSave(ctx context.Context, messages []models.Me
 
 	// Pass prompt as both the prompt param and the last user message in history.
 	history := []models.Message{
-		{Role: "system", Content: memory.EnhancedExtractionPromptV2},
+		{Role: "system", Content: instructions},
 		{Role: "user", Content: prompt},
 	}
 
@@ -296,6 +311,14 @@ func (mw *memoryWorker) extractAndSave(ctx context.Context, messages []models.Me
 	summary := mw.cli.memoryStore.ProcessExtractionResult(response)
 	if !summary.IsEmpty() {
 		mw.cli.pushMemoryNotice(formatMemoryNotice(summary))
+	}
+
+	// Same response, second harvest: author new skills, or evolve existing ones
+	// (pulling only the targeted skill's body via mergeSkillBody on demand).
+	if evolveMode != selfEvolveOff {
+		if es := mw.cli.applySkillCandidates(ctx, response, evolveMode, mw.cli.mergeSkillBody); !es.isEmpty() {
+			mw.cli.pushMemoryNotice(formatSelfEvolveNotice(es))
+		}
 	}
 
 	mw.logger.Debug("Memory worker: enhanced extraction complete",

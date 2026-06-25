@@ -192,6 +192,10 @@ func (p *BuiltinSkillPlugin) ExecuteWithStream(_ context.Context, args []string,
 		var in skillInput
 		_ = json.Unmarshal([]byte(inner), &in)
 		return removeSkill(dir, in.Name)
+	case "restore":
+		var in skillInput
+		_ = json.Unmarshal([]byte(inner), &in)
+		return restoreSkillCmd(in.Name)
 	case "stats":
 		return statsSkills(dir)
 	case "export":
@@ -203,8 +207,24 @@ func (p *BuiltinSkillPlugin) ExecuteWithStream(_ context.Context, args []string,
 		_ = json.Unmarshal([]byte(inner), &in)
 		return importSkills(dir, in.Path, in.Overwrite)
 	default:
-		return "", fmt.Errorf("@skill: unknown cmd %q (valid: create|update|list|show|remove|stats|export|import)", cmd)
+		return "", fmt.Errorf("@skill: unknown cmd %q (valid: create|update|list|show|remove|restore|stats|export|import)", cmd)
 	}
+}
+
+// restoreSkillCmd reverts a skill to the backup the self-evolution engine took
+// before it first modified a user-authored skill.
+func restoreSkillCmd(name string) (string, error) {
+	if !skillNameRe.MatchString(strings.TrimSpace(name)) {
+		return "", fmt.Errorf("@skill restore: invalid name %q", name)
+	}
+	restored, err := RestoreSkill(name)
+	if err != nil {
+		return "", fmt.Errorf("@skill restore: %w", err)
+	}
+	if !restored {
+		return i18n.T("skill.tool.restore_none", name), nil
+	}
+	return i18n.T("skill.tool.restored", name), nil
 }
 
 // statsSkills reports activation analytics, most-used first, and flags authored
@@ -540,6 +560,8 @@ func canonicalSkillCmd(s string) string {
 		return "show"
 	case "remove", "delete", "rm":
 		return "remove"
+	case "restore", "revert", "undo":
+		return "restore"
 	case "stats", "usage", "analytics":
 		return "stats"
 	case "export", "pack":

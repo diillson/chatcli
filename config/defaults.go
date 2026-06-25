@@ -118,6 +118,16 @@ const (
 	MemoryRetrievalEnv    = "CHATCLI_MEMORY_RETRIEVAL_BUDGET"
 	MemoryCompactionHours = 24 // hours between compaction runs
 
+	// Self-evolution engine: governs autonomous skill authoring driven by the
+	// background extraction pass. Deliberately the ONLY new operator-facing
+	// knob — cadence, cost budget and resilience are inherited from the memory
+	// worker and the session budget rather than multiplying env vars.
+	//   off     — never author or suggest skills (memory learning unaffected)
+	//   suggest — detect and surface a one-line suggestion; never touch disk
+	//   auto    — author/evolve engine-owned skills automatically (edit-safe)
+	SelfEvolveModeEnv     = "CHATCLI_SELFEVOLVE_MODE"
+	DefaultSelfEvolveMode = "auto"
+
 	// UI / theme configuration. ThemeEnv selects the color theme applied
 	// across chat, coder and agent surfaces (cards, borders, markdown,
 	// spinners). DefaultTheme is the value used when ThemeEnv is unset.
