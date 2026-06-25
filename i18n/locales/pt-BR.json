@@ -1802,6 +1802,7 @@
   "cfg.section.memory.title": "MEMÓRIA DE LONGO PRAZO",
   "cfg.sub.memory.injection": "Modo de injeção (agent/coder)",
   "cfg.sub.selfevolve": "Auto-evolução (autoria de skills)",
+  "cfg.sub.graph": "Grafo de conhecimento (index card por turno)",
   "cfg.kv.selfevolve.mode_auto": "auto — detecta e cria/evolui skills automaticamente (edit-safe, reversível)",
   "cfg.kv.selfevolve.mode_suggest": "suggest — detecta e sugere skills; nunca escreve em disco",
   "cfg.kv.selfevolve.mode_off": "off — desativado",

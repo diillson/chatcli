@@ -18,11 +18,42 @@ package cli
 
 import (
 	"fmt"
+	"os"
 	"regexp"
 	"strings"
 
+	"github.com/diillson/chatcli/config"
 	"github.com/diillson/chatcli/pkg/knowledge"
 )
+
+// graphRecallHint points the model at the pull tool. It is intentionally short
+// and stable so the injected block stays prompt-cache friendly.
+const graphRecallHint = "To go deeper, call @memory neighbors <subject> for a subject's connected notes (backlinks + related)."
+
+// graphIndexEnabled reports whether the per-turn map-of-content card is injected.
+// Default on; any falsey value disables it. The @graph pull tool is unaffected.
+func graphIndexEnabled() bool {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv(config.GraphIndexEnv))) {
+	case "off", "false", "0", "no", "disabled":
+		return false
+	}
+	return true
+}
+
+// graphIndexBlock renders the prompt block: the deterministic MOC card plus the
+// pull hint. Returns "" when disabled or the graph is empty, so quiet setups pay
+// nothing. The card itself is byte-stable between knowledge changes, so it does
+// not bust the prompt cache turn to turn.
+func (cli *ChatCLI) graphIndexBlock() string {
+	if !graphIndexEnabled() {
+		return ""
+	}
+	card := cli.buildKnowledgeGraph().IndexCard(graphIndexMaxHubs)
+	if card == "" {
+		return ""
+	}
+	return "# Knowledge Graph (index)\n" + card + "\n" + graphRecallHint
+}
 
 // buildKnowledgeGraph assembles the graph from the live stores. Safe to call
 // with a nil memory store or persona handler — it simply yields a smaller graph.
@@ -175,50 +206,31 @@ func graphTitle(content string) string {
 	return truncateForLog(line, 60)
 }
 
-// --- @graph adapter (plugins.GraphAdapter) ---
+// --- graph access (exposed through the @memory tool: map / neighbors) ---
 
 const (
-	graphSearchLimit  = 8
 	graphHoodHops     = 2
 	graphHoodLimit    = 12
 	graphIndexMaxHubs = 8
 )
 
-// graphPluginAdapter implements plugins.GraphAdapter by building the graph fresh
-// per call (cheap, in-memory) and formatting results for the model.
-type graphPluginAdapter struct {
-	cli *ChatCLI
-}
-
-func (a *graphPluginAdapter) Index() (string, error) {
-	g := a.cli.buildKnowledgeGraph()
-	card := g.IndexCard(graphIndexMaxHubs)
+// graphMapText renders the graph map-of-content (counts + hubs) for @memory map.
+func (cli *ChatCLI) graphMapText() (string, error) {
+	card := cli.buildKnowledgeGraph().IndexCard(graphIndexMaxHubs)
 	if card == "" {
 		return "The knowledge graph is empty so far.", nil
 	}
 	return card, nil
 }
 
-func (a *graphPluginAdapter) Search(query string) (string, error) {
-	g := a.cli.buildKnowledgeGraph()
-	hits := g.Search(strings.Fields(query), graphSearchLimit)
-	if len(hits) == 0 {
-		return fmt.Sprintf("No graph nodes match %q.", query), nil
-	}
-	var b strings.Builder
-	fmt.Fprintf(&b, "Graph nodes matching %q:\n", query)
-	for _, n := range hits {
-		writeGraphNode(&b, n)
-	}
-	return strings.TrimRight(b.String(), "\n"), nil
-}
-
-func (a *graphPluginAdapter) Neighbors(idOrQuery string) (string, error) {
-	g := a.cli.buildKnowledgeGraph()
+// graphNeighborsText renders the local graph (backlinks + related notes) of the
+// node best matching idOrQuery, for @memory neighbors. Free text resolves to the
+// best-matching node, so the model can pass a subject rather than a node id.
+func (cli *ChatCLI) graphNeighborsText(idOrQuery string) (string, error) {
+	g := cli.buildKnowledgeGraph()
 
 	seed, ok := g.Node(idOrQuery)
 	if !ok {
-		// Resolve free text to the best-matching node.
 		if hits := g.Search(strings.Fields(idOrQuery), 1); len(hits) > 0 {
 			seed = hits[0]
 		}

@@ -1019,6 +1019,20 @@ func (a *AgentMode) buildWorkspaceBlocks(ctx context.Context, query string) (str
 		recallHint = memoryRecallHint
 	}
 	workspaceText := a.cli.contextBuilder.BuildWorkspaceContextMode(ctx, query, hints, aug, mode, recallHint)
+
+	// Append the knowledge-graph map-of-content card next to the memory index.
+	// It is tiny and deterministic (so prompt-cache friendly), and agent/coder
+	// can pull a subject's neighborhood on demand via @graph.
+	if mode != memModeOff {
+		if gb := a.cli.graphIndexBlock(); gb != "" {
+			if strings.TrimSpace(workspaceText) == "" {
+				workspaceText = gb
+			} else {
+				workspaceText = strings.TrimRight(workspaceText, "\n") + "\n\n" + gb
+			}
+		}
+	}
+
 	dynamicText := a.cli.contextBuilder.BuildDynamicContext()
 	return workspaceText, dynamicText
 }

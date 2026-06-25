@@ -128,6 +128,12 @@ const (
 	SelfEvolveModeEnv     = "CHATCLI_SELFEVOLVE_MODE"
 	DefaultSelfEvolveMode = "auto"
 
+	// Knowledge graph: inject the tiny deterministic map-of-content card into
+	// the agent/coder prompt (like the memory index). On by default; set to a
+	// falsey value to suppress it. Detail is always pullable via the @graph
+	// tool regardless of this flag.
+	GraphIndexEnv = "CHATCLI_GRAPH_INDEX"
+
 	// UI / theme configuration. ThemeEnv selects the color theme applied
 	// across chat, coder and agent surfaces (cards, borders, markdown,
 	// spinners). DefaultTheme is the value used when ThemeEnv is unset.

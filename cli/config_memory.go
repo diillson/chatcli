@@ -54,5 +54,17 @@ func (cli *ChatCLI) showConfigMemory() {
 	}
 	kv(p, config.SelfEvolveModeEnv, evolveDesc)
 
+	// Knowledge graph: per-turn map-of-content injection (the @graph pull tool
+	// is always available regardless).
+	subheader(p, "cfg.sub.graph")
+	graphVal := i18n.T("cfg.val.disabled")
+	if graphIndexEnabled() {
+		graphVal = i18n.T("cfg.val.enabled")
+	}
+	if os.Getenv(config.GraphIndexEnv) == "" {
+		graphVal = defaultMarker + graphVal
+	}
+	kv(p, config.GraphIndexEnv, graphVal)
+
 	sectionEnd(ColorBlue)
 }

@@ -50,12 +50,11 @@ func TestBuildKnowledgeGraph(t *testing.T) {
 		t.Fatal("fact→project edge missing")
 	}
 
-	// @graph adapter formats index and neighborhood.
-	a := &graphPluginAdapter{cli: cli}
-	if idx, _ := a.Index(); !strings.Contains(idx, "Knowledge graph:") {
-		t.Fatalf("index card malformed: %q", idx)
+	// @memory map / neighbors formatting (graph folded into @memory).
+	if idx, _ := cli.graphMapText(); !strings.Contains(idx, "Knowledge graph:") {
+		t.Fatalf("map card malformed: %q", idx)
 	}
-	out, _ := a.Neighbors("authentication") // free-text resolves to topic:authentication
+	out, _ := cli.graphNeighborsText("authentication") // free-text resolves to topic:authentication
 	if !strings.Contains(out, "Local graph") || !strings.Contains(out, "OAuth2") {
 		t.Fatalf("neighbors output malformed:\n%s", out)
 	}

@@ -18,7 +18,7 @@ func TestBuiltinMemory_Metadata(t *testing.T) {
 		t.Errorf("builtin path should be empty, got %q", p.Path())
 	}
 	schema := p.Schema()
-	for _, want := range []string{"remember", "profile", "forget", "recall", "subcommands"} {
+	for _, want := range []string{"remember", "profile", "forget", "recall", "neighbors", "map", "subcommands"} {
 		if !strings.Contains(schema, want) {
 			t.Errorf("schema missing %q", want)
 		}
@@ -55,6 +55,22 @@ func TestBuiltinMemory_MoreDispatch(t *testing.T) {
 	}
 	if fake.lastRemember[0] != "argv fact" {
 		t.Errorf("argv form not parsed: %v", fake.lastRemember)
+	}
+
+	// graph folded into @memory: neighbors routes the query through to the graph
+	if _, err := p.Execute(ctx, []string{`{"cmd":"neighbors","args":{"query":"auth"}}`}); err != nil {
+		t.Fatalf("neighbors: %v", err)
+	}
+	if fake.lastNeighbors != "auth" {
+		t.Errorf("neighbors query not propagated: %q", fake.lastNeighbors)
+	}
+	// map needs no args
+	if out, err := p.Execute(ctx, []string{`{"cmd":"map"}`}); err != nil || out != "map" {
+		t.Fatalf("map: out=%q err=%v", out, err)
+	}
+	// neighbors without query -> error
+	if _, err := p.Execute(ctx, []string{`{"cmd":"neighbors","args":{}}`}); err == nil {
+		t.Error("expected error for neighbors without query")
 	}
 
 	// unknown cmd -> error
@@ -136,10 +152,11 @@ func TestParseProfileFields(t *testing.T) {
 
 // fakeMemAdapter records calls for dispatch testing.
 type fakeMemAdapter struct {
-	lastRemember [2]string
-	lastProfile  map[string]string
-	lastForget   string
-	lastRecall   string
+	lastRemember  [2]string
+	lastProfile   map[string]string
+	lastForget    string
+	lastRecall    string
+	lastNeighbors string
 }
 
 func (f *fakeMemAdapter) Remember(content, category string) (string, error) {
@@ -152,6 +169,11 @@ func (f *fakeMemAdapter) UpdateProfile(u map[string]string) (string, error) {
 }
 func (f *fakeMemAdapter) Forget(m string) (string, error) { f.lastForget = m; return "ok", nil }
 func (f *fakeMemAdapter) Recall(q string) (string, error) { f.lastRecall = q; return "ok", nil }
+func (f *fakeMemAdapter) GraphMap() (string, error)       { return "map", nil }
+func (f *fakeMemAdapter) GraphNeighbors(q string) (string, error) {
+	f.lastNeighbors = q
+	return "neighbors", nil
+}
 
 func TestBuiltinMemory_Dispatch(t *testing.T) {
 	fake := &fakeMemAdapter{}
