@@ -83,7 +83,7 @@ func TestRenderGraphProducesPNG(t *testing.T) {
 	g := dotSampleGraph()
 	dot := graphToDOT(g, selectFullGraphNodes(g), "test")
 	out := filepath.Join(t.TempDir(), "graph.png")
-	if _, err := plugins.RenderDOTToFile(context.Background(), dot, "png", "", out); err != nil {
+	if _, err := plugins.RenderDOTToFile(context.Background(), dot, "png", graphVizEngine, out, graphVizDPI); err != nil {
 		t.Fatalf("render failed: %v", err)
 	}
 	fi, err := os.Stat(out)

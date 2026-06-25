@@ -15,14 +15,17 @@ import "context"
 // RenderDOTToFile renders DOT source to an image file using the diagram engine
 // (embedded go-graphviz, with the system `dot` as an optional sharper backend
 // per CHATCLI_DIAGRAM_BACKEND). format defaults to png and engine to dot when
-// empty; output defaults to a temp file when empty. Returns a human summary
-// that includes the written path.
-func RenderDOTToFile(ctx context.Context, dotSrc, format, engine, output string) (string, error) {
+// empty; dpi defaults to a legible 96 when not positive; output defaults to a
+// temp file when empty. Returns a human summary that includes the written path.
+func RenderDOTToFile(ctx context.Context, dotSrc, format, engine, output string, dpi int) (string, error) {
 	if format == "" {
 		format = "png"
 	}
 	if engine == "" {
 		engine = "dot"
+	}
+	if dpi <= 0 {
+		dpi = 96
 	}
 	cfg := diagramArgs{
 		Cmd:     "render",
@@ -32,7 +35,7 @@ func RenderDOTToFile(ctx context.Context, dotSrc, format, engine, output string)
 		Style:   "dark",
 		Backend: configuredDiagramBackend(),
 		Output:  output,
-		DPI:     diagramMinDPI,
+		DPI:     dpi,
 	}
 	cfg, err := finalizeDiagramArgs(cfg)
 	if err != nil {
