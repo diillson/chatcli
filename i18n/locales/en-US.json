@@ -2372,6 +2372,11 @@
   "complete.root.compact": "Compact history (use /compact <instruction> to guide what to preserve)",
   "complete.root.rewind": "Rewind to a previous conversation checkpoint",
   "complete.root.memory": "View/load memory notes (today, yesterday, week, load <date>, longterm, list)",
+  "complete.root.graph": "Visualize the knowledge graph as an image (/graph or /graph <subject>)",
+  "graph.cmd.empty": "The knowledge graph is empty so far.",
+  "graph.cmd.no_node": "No graph node found for %q.",
+  "graph.cmd.rendered": "Rendered the knowledge graph:",
+  "graph.cmd.error": "Could not render the graph: %s",
 
   "complete.generic.flag_mode": "Set file processing mode (full, summary, chunked, smart, knowledge)",
   "complete.generic.flag_model": "Switch the model (runtime) based on the current provider (gpt-5, grok-4, etc.)",

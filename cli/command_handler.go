@@ -219,6 +219,7 @@ func (ch *CommandHandler) buildRoutes() {
 		{"/watch", false, func(ctx context.Context, in string) bool { ch.handleWatchCommand(ctx, in); return false }},
 		{"/compact", false, func(ctx context.Context, in string) bool { c.handleCompactCommand(ctx, in); return false }},
 		{"/memory", false, func(ctx context.Context, in string) bool { c.handleMemoryCommand(ctx, in); return false }},
+		{"/graph", false, func(ctx context.Context, in string) bool { c.handleGraphCommand(ctx, in); return false }},
 		{"/mcp", false, func(ctx context.Context, in string) bool { c.handleMCPCommand(ctx, in); return false }},
 		{"/hooks", false, func(_ context.Context, in string) bool { c.handleHooksCommand(in); return false }},
 		{"/ratelimit", true, func(_ context.Context, _ string) bool { c.handleRateLimitCommand(); return false }},

@@ -2372,6 +2372,11 @@
   "complete.root.compact": "Compacta o histórico (use /compact <instrução> para guiar o que preservar)",
   "complete.root.rewind": "Volta a um checkpoint anterior da conversa",
   "complete.root.memory": "Ver/carregar anotações de memória (today, yesterday, week, load <data>, longterm, list)",
+  "complete.root.graph": "Visualizar o grafo de conhecimento como imagem (/graph ou /graph <assunto>)",
+  "graph.cmd.empty": "O grafo de conhecimento ainda está vazio.",
+  "graph.cmd.no_node": "Nenhum nó do grafo encontrado para %q.",
+  "graph.cmd.rendered": "Grafo de conhecimento renderizado:",
+  "graph.cmd.error": "Não foi possível renderizar o grafo: %s",
 
   "complete.generic.flag_mode": "Define o modo de processamento de arquivos (full, summary, chunked, smart, knowledge)",
   "complete.generic.flag_model": "Troque o modelo (Runtime) baseado no provedor atual (grpt-5, grok-4, etc.)",

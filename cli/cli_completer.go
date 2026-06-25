@@ -343,6 +343,7 @@ func (cli *ChatCLI) GetInternalCommands() []prompt.Suggest {
 		{Text: "/compact", Description: i18n.T("complete.root.compact")},
 		{Text: "/rewind", Description: i18n.T("complete.root.rewind")},
 		{Text: "/memory", Description: i18n.T("complete.root.memory")},
+		{Text: "/graph", Description: i18n.T("complete.root.graph")},
 		{Text: "/websearch", Description: i18n.T("complete.websearch.root_desc")},
 		{Text: "/schedule", Description: i18n.T("help.command.schedule")},
 		{Text: "/wait", Description: i18n.T("help.command.wait")},
