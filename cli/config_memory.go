@@ -14,6 +14,7 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/diillson/chatcli/config"
 	"github.com/diillson/chatcli/i18n"
 )
 
@@ -43,6 +44,22 @@ func (cli *ChatCLI) showConfigMemory() {
 	} else {
 		kv(p, i18n.T("cfg.kv.memory_store"), i18n.T("cfg.val.not_initialized"))
 	}
+
+	// Self-evolution has its own section (/config selfevolve); a one-line
+	// pointer keeps it discoverable from here since it shares this worker.
+	kv(p, i18n.T("cfg.kv.selfevolve.see_section"), i18n.T("cfg.kv.selfevolve.see_section_val"))
+
+	// Knowledge graph: per-turn map-of-content injection (the @memory neighbors
+	// pull is always available regardless).
+	subheader(p, "cfg.sub.graph")
+	graphVal := i18n.T("cfg.val.disabled")
+	if graphIndexEnabled() {
+		graphVal = i18n.T("cfg.val.enabled")
+	}
+	if os.Getenv(config.GraphIndexEnv) == "" {
+		graphVal = defaultMarker + graphVal
+	}
+	kv(p, config.GraphIndexEnv, graphVal)
 
 	sectionEnd(ColorBlue)
 }

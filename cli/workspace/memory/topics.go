@@ -67,6 +67,53 @@ func (tt *TopicTracker) Record(topicNames []string) {
 	}
 }
 
+// topicSummaryCap bounds a stored topic summary so threading never grows the
+// store unbounded.
+const topicSummaryCap = 240
+
+// RecordWithSummary records topic mentions and merges a rolling one-line summary
+// per topic. The latest non-empty summary wins (the extractor re-synthesizes the
+// topic from recent discussion each pass), keeping the thread current and
+// bounded. A topic with an empty summary degrades to a plain Record.
+func (tt *TopicTracker) RecordWithSummary(topics map[string]string) {
+	if len(topics) == 0 {
+		return
+	}
+
+	tt.mu.Lock()
+	defer tt.mu.Unlock()
+
+	now := time.Now()
+	changed := false
+
+	for rawName, summary := range topics {
+		name := normalizeTopic(rawName)
+		if name == "" {
+			continue
+		}
+		summary = strings.TrimSpace(summary)
+		if len(summary) > topicSummaryCap {
+			summary = strings.TrimSpace(summary[:topicSummaryCap])
+		}
+
+		t, ok := tt.topics[name]
+		if !ok {
+			t = &Topic{Name: name, FirstSeen: now}
+			tt.topics[name] = t
+		}
+		t.Mentions++
+		t.LastSeen = now
+		if summary != "" {
+			t.Summary = summary
+		}
+		changed = true
+	}
+
+	if changed {
+		tt.persist()
+	}
+}
+
 // LinkFact associates a fact ID with a topic.
 func (tt *TopicTracker) LinkFact(topicName string, factID string) {
 	topicName = normalizeTopic(topicName)
@@ -153,9 +200,18 @@ func (tt *TopicTracker) FormatForPrompt(limit int) string {
 
 	parts := make([]string, 0, len(top))
 	for _, t := range top {
-		parts = append(parts, t.Name)
+		// Include the rolling summary when present so the pull/retrieval path
+		// carries what was discussed, not just the topic name.
+		if s := strings.TrimSpace(t.Summary); s != "" {
+			if len(s) > 80 {
+				s = strings.TrimSpace(s[:80])
+			}
+			parts = append(parts, t.Name+" — "+s)
+		} else {
+			parts = append(parts, t.Name)
+		}
 	}
-	return "Active topics: " + strings.Join(parts, ", ")
+	return "Active topics:\n  - " + strings.Join(parts, "\n  - ")
 }
 
 // --- internal ---

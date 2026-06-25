@@ -128,7 +128,7 @@ func TestOnExtractionFailure_QueuesAndNotifies(t *testing.T) {
 
 	// Success resets the streak so a future streak notifies again.
 	mw.onExtractionSuccess(20)
-	if mw.consecutiveFails != 0 || mw.failNoticeSent {
+	if mw.coord.consecutiveFails != 0 || mw.failNoticeSent {
 		t.Fatal("success must reset the failure streak")
 	}
 }

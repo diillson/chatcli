@@ -375,7 +375,9 @@ func (m *Manager) RememberFact(content, category string) bool {
 	if !isKnownCategory(cat) {
 		cat = classifyFactContent(content)
 	}
-	added := m.Facts.AddFactWithSource(content, cat, extractTags(content), m.workspaceDir)
+	// Deterministic, user/agent-stated facts are trusted more than the
+	// background extractor's inferences.
+	added := m.Facts.AddFactWithMeta(content, cat, extractTags(content), m.workspaceDir, ConfidenceUser, ProvenanceUser)
 	m.compactor.RegenerateMemoryMD()
 	return added
 }
@@ -472,7 +474,7 @@ func (m *Manager) ProcessExtractionResult(response string) ExtractionSummary {
 	}
 
 	if len(topics) > 0 {
-		m.Topics.Record(topics)
+		m.Topics.RecordWithSummary(topics)
 		sum.TopicsRecorded = len(topics)
 	}
 
@@ -531,9 +533,10 @@ func (m *Manager) Stats() map[string]interface{} {
 // --- Response Parsing ---
 
 // parseEnhancedResponse parses the enhanced extraction prompt response.
-func parseEnhancedResponse(response string) (daily, longTerm string, profile map[string]string, topics []string, projects map[string]string) {
+func parseEnhancedResponse(response string) (daily, longTerm string, profile map[string]string, topics map[string]string, projects map[string]string) {
 	profile = make(map[string]string)
 	projects = make(map[string]string)
+	topics = make(map[string]string)
 
 	upper := strings.ToUpper(response)
 
@@ -603,7 +606,7 @@ func parseEnhancedResponse(response string) (daily, longTerm string, profile map
 		case "PROFILE_UPDATE", "PROFILE":
 			profile = parseKeyValues(content)
 		case "TOPICS":
-			topics = parseCSV(content)
+			topics = parseTopics(content)
 		case "PROJECTS":
 			projects = parseKeyValues(content)
 		}
@@ -681,44 +684,36 @@ func parseKeyValues(content string) map[string]string {
 	return result
 }
 
-func parseCSV(content string) []string {
-	// Handle both comma-separated and line-separated
-	content = strings.TrimSpace(content)
-	if content == "" {
-		return nil
-	}
-
-	var items []string
-
-	// First try comma-separated on a single line
-	if !strings.Contains(content, "\n") || strings.Contains(content, ",") {
-		parts := strings.Split(content, ",")
-		for _, p := range parts {
-			p = strings.TrimSpace(p)
-			p = strings.TrimPrefix(p, "- ")
-			p = strings.TrimPrefix(p, "* ")
-			p = strings.TrimSpace(p)
-			if p != "" {
-				items = append(items, p)
+// parseTopics parses the TOPICS section into a name→summary map. It accepts the
+// new "name: summary" line format and the legacy bare/comma-separated names
+// (summary empty), so old prompts and partial model output still parse.
+func parseTopics(content string) map[string]string {
+	out := make(map[string]string)
+	for _, line := range strings.Split(content, "\n") {
+		line = strings.TrimSpace(line)
+		line = strings.TrimLeft(line, "-•*# ")
+		line = strings.TrimSpace(line)
+		if line == "" || isNothingNew(line) {
+			continue
+		}
+		if i := strings.Index(line, ":"); i >= 0 {
+			name := strings.TrimSpace(line[:i])
+			summary := strings.TrimSpace(line[i+1:])
+			if name != "" {
+				out[name] = summary
+			}
+			continue
+		}
+		// No colon → a bare (possibly comma-separated) list of names.
+		for _, part := range strings.Split(line, ",") {
+			if n := strings.TrimSpace(part); n != "" {
+				if _, exists := out[n]; !exists {
+					out[n] = ""
+				}
 			}
 		}
 	}
-
-	// Also check line-separated
-	if len(items) == 0 {
-		lines := strings.Split(content, "\n")
-		for _, line := range lines {
-			line = strings.TrimSpace(line)
-			line = strings.TrimPrefix(line, "- ")
-			line = strings.TrimPrefix(line, "* ")
-			line = strings.TrimSpace(line)
-			if line != "" {
-				items = append(items, line)
-			}
-		}
-	}
-
-	return items
+	return out
 }
 
 // knownCategories is the fixed set of fact buckets shared by the migration

@@ -40,12 +40,24 @@ type Fact struct {
 	Score         float64   `json:"score"`
 	Source        string    `json:"source,omitempty"`
 	SourceProject string    `json:"source_project,omitempty"` // project path where this fact was learned
+	// Confidence ∈ (0,1] is how much to trust this fact: deterministic
+	// user-stated facts rank above background-extracted guesses, and a fact
+	// reinforced by re-observation climbs. Zero means "unset" (legacy facts)
+	// and is treated as the default; see Fact.confidence().
+	Confidence float64 `json:"confidence,omitempty"`
+	// Provenance records HOW the fact was learned (e.g. "user", "extraction",
+	// "correction", or a supersession note), for auditability.
+	Provenance string `json:"provenance,omitempty"`
 }
 
 // Topic tracks a recurring subject across conversations.
 type Topic struct {
-	Name         string    `json:"name"`
-	Mentions     int       `json:"mentions"`
+	Name     string `json:"name"`
+	Mentions int    `json:"mentions"`
+	// Summary is a rolling one-line synthesis of what was discussed about this
+	// topic, refreshed by the background extraction pass. It turns a topic from
+	// a bare name into a knowledge node (and feeds the graph node's summary).
+	Summary      string    `json:"summary,omitempty"`
 	FirstSeen    time.Time `json:"first_seen"`
 	LastSeen     time.Time `json:"last_seen"`
 	RelatedFacts []string  `json:"related_fact_ids,omitempty"`

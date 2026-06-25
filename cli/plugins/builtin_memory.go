@@ -45,6 +45,19 @@ type MemoryAdapter interface {
 	Recall(query string) (string, error)
 }
 
+// GraphAccessor is an OPTIONAL capability a MemoryAdapter may also implement to
+// back the @memory graph subcommands (neighbors/map). It is a separate
+// interface, not part of MemoryAdapter, so adding the knowledge-graph view never
+// breaks existing MemoryAdapter implementations; the plugin type-asserts to it
+// and degrades gracefully when an adapter does not provide it.
+type GraphAccessor interface {
+	// GraphMap returns the knowledge-graph map-of-content (node counts + hubs).
+	GraphMap() (string, error)
+	// GraphNeighbors returns the local graph (backlinks + related notes) of the
+	// subject best matching the query.
+	GraphNeighbors(query string) (string, error)
+}
+
 // memAdapterHolder wraps the adapter so atomic.Value always receives a
 // consistent, non-nil concrete type — storing a bare nil interface (or
 // switching concrete types) would panic. The wrapper lets SetMemoryAdapter(nil)
@@ -80,7 +93,7 @@ func (*BuiltinMemoryPlugin) Name() string { return "@memory" }
 
 // Description surfaces the tool in /plugin list and the help.
 func (*BuiltinMemoryPlugin) Description() string {
-	return "Persist or recall long-term memory. Use it the moment the user reveals a durable fact about themselves (certifications, skills, role, preferences, goals) or the project — don't wait for background extraction."
+	return "Persist or recall long-term memory, and explore the knowledge graph of how it connects. Use it the moment the user reveals a durable fact about themselves (certifications, skills, role, preferences, goals) or the project — don't wait for background extraction. Use 'recall' to find facts by content, and 'neighbors'/'map' to see how a subject connects (backlinks, related notes)."
 }
 
 // Usage explains the canonical invocation forms.
@@ -90,12 +103,15 @@ func (*BuiltinMemoryPlugin) Usage() string {
 Subcommands (cmd + args):
   remember {content, category?:architecture|pattern|preference|gotcha|project|personal|general}
   profile  {fields:{certifications:"AWS SAA", role:"SRE", company:"...", skills:"Go, k8s", ...}}
-  forget   {match:"<substring of the fact to remove>"}
-  recall   {query?:"topic to recall"}
+  forget    {match:"<substring of the fact to remove>"}
+  recall    {query?:"topic to recall"}
+  neighbors {query:"<subject or node id>"}   local graph: backlinks + related notes
+  map                                         knowledge-graph overview (counts + hubs)
 
 Prefer 'profile' for stable attributes of the user (name/role/certifications/
 skills/company/location/goals or any key=value), and 'remember' for project
-facts, conventions, and gotchas.`
+facts, conventions, and gotchas. Use 'recall' to search by content and
+'neighbors' to follow relationships from a subject.`
 }
 
 // Version is semver; bumped when the surface changes.
@@ -148,6 +164,20 @@ func (*BuiltinMemoryPlugin) Schema() string {
 					{"name": "query", "type": "string", "description": "Optional topic to narrow recall."},
 				},
 				"examples": []string{`{"cmd":"recall","args":{"query":"certifications"}}`},
+			},
+			{
+				"name":        "neighbors",
+				"description": "Show the local knowledge graph of a subject — its backlinks and related notes (facts, topics, projects, skills). Answers 'what connects to X', which content recall cannot.",
+				"flags": []map[string]interface{}{
+					{"name": "query", "type": "string", "required": true, "description": "A subject or exact node id to expand."},
+				},
+				"examples": []string{`{"cmd":"neighbors","args":{"query":"authentication"}}`},
+			},
+			{
+				"name":        "map",
+				"description": "Knowledge-graph overview: node counts by kind and the hub subjects.",
+				"flags":       []map[string]interface{}{},
+				"examples":    []string{`{"cmd":"map"}`},
 			},
 		},
 	}
@@ -211,9 +241,28 @@ func (p *BuiltinMemoryPlugin) ExecuteWithStream(_ context.Context, args []string
 		}
 		_ = json.Unmarshal([]byte(inner), &in)
 		return adapter.Recall(in.Query)
+	case "map":
+		ga, ok := adapter.(GraphAccessor)
+		if !ok {
+			return "", errors.New("@memory map: knowledge graph not available")
+		}
+		return ga.GraphMap()
+	case "neighbors":
+		ga, ok := adapter.(GraphAccessor)
+		if !ok {
+			return "", errors.New("@memory neighbors: knowledge graph not available")
+		}
+		var in struct {
+			Query string `json:"query"`
+		}
+		_ = json.Unmarshal([]byte(inner), &in)
+		if strings.TrimSpace(in.Query) == "" {
+			return "", errors.New(`@memory neighbors: "query" is required (a subject or node id)`)
+		}
+		return ga.GraphNeighbors(in.Query)
 	default:
 		return "", fmt.Errorf(
-			"@memory: unknown cmd %q (valid: remember|profile|forget|recall)", cmd,
+			"@memory: unknown cmd %q (valid: remember|profile|forget|recall|neighbors|map)", cmd,
 		)
 	}
 }
@@ -238,7 +287,7 @@ func parseMemoryInvocation(args []string) (string, string, error) {
 		canon := canonicalMemoryCmd(cmdStr)
 		if canon == "" {
 			return "", "", fmt.Errorf(
-				"missing or unknown cmd %q (valid: remember|profile|forget|recall)", cmdStr,
+				"missing or unknown cmd %q (valid: remember|profile|forget|recall|neighbors|map)", cmdStr,
 			)
 		}
 		var inner string
@@ -277,6 +326,10 @@ func canonicalMemoryCmd(s string) string {
 		return "forget"
 	case "recall", "read", "get", "search":
 		return "recall"
+	case "neighbors", "related", "links", "backlinks", "connected":
+		return "neighbors"
+	case "map", "graph", "moc", "overview":
+		return "map"
 	}
 	return ""
 }

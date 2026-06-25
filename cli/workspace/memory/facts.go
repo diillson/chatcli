@@ -43,12 +43,52 @@ func (fi *FactIndex) AddFact(content, category string, tags []string) bool {
 	return fi.AddFactWithSource(content, category, tags, "")
 }
 
+// Confidence and provenance defaults. Deterministic, user-stated facts are
+// trusted more than background-extracted guesses; a fact re-observed over time
+// climbs toward certainty. Zero confidence means "legacy/unset" and is treated
+// as the extraction default — see Fact.confidence().
+const (
+	ConfidenceUser       = 0.9 // user/agent stated it deterministically
+	ConfidenceCorrection = 1.0 // user explicitly corrected a prior belief
+	ConfidenceExtraction = 0.6 // inferred by the background extraction pass
+	defaultConfidence    = 0.6
+
+	ProvenanceUser       = "user"
+	ProvenanceExtraction = "extraction"
+	ProvenanceCorrection = "correction"
+	ProvenanceLegacy     = "legacy" // pre-confidence fact enriched at load
+
+	// Reconciliation thresholds over significant-token Jaccard similarity.
+	reconcileDuplicateJaccard = 0.85 // ≥ → a rephrasing of an existing fact: reinforce, don't duplicate
+	reconcileSupersedeJaccard = 0.5  // [this, dup) + same subject → an update/contradiction: supersede
+)
+
+// confidence returns the fact's trust weight, defaulting legacy/unset facts.
+func (f *Fact) confidence() float64 {
+	if f.Confidence > 0 {
+		return f.Confidence
+	}
+	return defaultConfidence
+}
+
 // AddFactWithSource adds a new fact with source project annotation.
 // sourceProject is the workspace directory where the fact was learned (may be empty).
 func (fi *FactIndex) AddFactWithSource(content, category string, tags []string, sourceProject string) bool {
+	return fi.AddFactWithMeta(content, category, tags, sourceProject, ConfidenceExtraction, ProvenanceExtraction)
+}
+
+// AddFactWithMeta is AddFactWithSource with explicit confidence and provenance.
+// It deduplicates by content hash (reinforcing on an exact repeat) and, before
+// inserting, reconciles against same-category facts: a near-duplicate rephrasing
+// reinforces the existing fact, and a same-subject update of equal-or-higher
+// confidence supersedes the stale one instead of piling up a contradiction.
+func (fi *FactIndex) AddFactWithMeta(content, category string, tags []string, sourceProject string, confidence float64, provenance string) bool {
 	content = strings.TrimSpace(content)
 	if content == "" {
 		return false
+	}
+	if confidence <= 0 {
+		confidence = defaultConfidence
 	}
 
 	id := fi.hashContent(content)
@@ -56,16 +96,30 @@ func (fi *FactIndex) AddFactWithSource(content, category string, tags []string, 
 	fi.mu.Lock()
 	defer fi.mu.Unlock()
 
+	// Exact duplicate (same content hash) — reinforce.
 	if existing, ok := fi.facts[id]; ok {
-		// Fact already exists — bump access count and update timestamp
-		existing.AccessCount++
-		existing.LastAccessed = time.Now()
-		// Update source project if it was missing
-		if existing.SourceProject == "" && sourceProject != "" {
-			existing.SourceProject = sourceProject
-		}
+		fi.reinforceLocked(existing, sourceProject, confidence, provenance)
 		fi.persistLocked()
 		return false
+	}
+
+	// Reconcile against near-duplicates / stale same-subject facts.
+	switch outcome, target := fi.reconcileLocked(content, category, confidence); outcome {
+	case reconcileReinforce:
+		fi.reinforceLocked(target, sourceProject, confidence, provenance)
+		fi.persistLocked()
+		return false
+	case reconcileSupersede:
+		fi.logger.Debug("memory: superseding stale fact",
+			zap.String("old_id", target.ID),
+			zap.String("old", target.Content),
+			zap.String("new", content),
+		)
+		delete(fi.facts, target.ID)
+		if provenance == "" {
+			provenance = ProvenanceExtraction
+		}
+		provenance += " (supersedes " + target.ID + ")"
 	}
 
 	fact := &Fact{
@@ -78,6 +132,8 @@ func (fi *FactIndex) AddFactWithSource(content, category string, tags []string, 
 		AccessCount:   1,
 		Score:         1.0,
 		SourceProject: sourceProject,
+		Confidence:    confidence,
+		Provenance:    provenance,
 	}
 
 	fi.facts[id] = fact
@@ -89,6 +145,63 @@ func (fi *FactIndex) AddFactWithSource(content, category string, tags []string, 
 
 	fi.persistLocked()
 	return true
+}
+
+// reinforceLocked records a re-observation of a fact: bumps access/recency,
+// backfills a missing source, and raises confidence toward the stronger signal
+// plus a small increment (capped at 1.0). Must hold the write lock.
+func (fi *FactIndex) reinforceLocked(f *Fact, sourceProject string, confidence float64, provenance string) {
+	f.AccessCount++
+	f.LastAccessed = time.Now()
+	if f.SourceProject == "" && sourceProject != "" {
+		f.SourceProject = sourceProject
+	}
+	base := f.confidence()
+	if confidence > base {
+		base = confidence
+	}
+	f.Confidence = math.Min(1.0, base+0.05)
+	if provenance != "" && f.Provenance == "" {
+		f.Provenance = provenance
+	}
+}
+
+type reconcileOutcome int
+
+const (
+	reconcileNone reconcileOutcome = iota
+	reconcileReinforce
+	reconcileSupersede
+)
+
+// reconcileLocked compares new content against existing same-category facts and
+// decides whether to reinforce a near-duplicate, supersede a stale same-subject
+// fact, or do neither. Conservative by design: supersession needs both a shared
+// subject and a new confidence at least as high as the target, so a weak guess
+// can never wipe a stronger fact. Must hold at least a read lock.
+func (fi *FactIndex) reconcileLocked(content, category string, confidence float64) (reconcileOutcome, *Fact) {
+	newTokens := factTokenSet(content)
+	if len(newTokens) == 0 {
+		return reconcileNone, nil
+	}
+	var bestSupersede *Fact
+	var bestSim float64
+	for _, f := range fi.facts {
+		if f.Category != category {
+			continue
+		}
+		sim := jaccard(newTokens, factTokenSet(f.Content))
+		if sim >= reconcileDuplicateJaccard {
+			return reconcileReinforce, f // a rephrasing of an existing fact
+		}
+		if sim >= reconcileSupersedeJaccard && sim > bestSim && sharesSubject(content, f.Content) {
+			bestSupersede, bestSim = f, sim
+		}
+	}
+	if bestSupersede != nil && confidence >= bestSupersede.confidence() {
+		return reconcileSupersede, bestSupersede
+	}
+	return reconcileNone, nil
 }
 
 // RemoveFact removes a fact by ID.
@@ -430,6 +543,82 @@ func (fi *FactIndex) hashContent(content string) string {
 	return fmt.Sprintf("%x", h[:12]) // 24 hex chars — enough for uniqueness
 }
 
+// reconcileStopwords are dropped before similarity so connective words
+// ("the", "via", "de", "para") cannot inflate the overlap of unrelated facts.
+var reconcileStopwords = map[string]bool{
+	"the": true, "a": true, "an": true, "and": true, "or": true, "of": true,
+	"to": true, "for": true, "in": true, "on": true, "with": true, "via": true,
+	"is": true, "are": true, "was": true, "uses": true, "use": true, "user": true,
+	"de": true, "da": true, "do": true, "para": true, "com": true, "que": true,
+	"em": true, "no": true, "na": true, "usa": true, "usuario": true,
+}
+
+// sigTokens returns the lowercased significant tokens of content in order:
+// alphanumeric runs of length ≥ 3 that are not stopwords.
+func sigTokens(content string) []string {
+	fields := strings.FieldsFunc(strings.ToLower(content), func(r rune) bool {
+		return !(r >= 'a' && r <= 'z' || r >= '0' && r <= '9')
+	})
+	out := make([]string, 0, len(fields))
+	for _, t := range fields {
+		if len(t) < 3 || reconcileStopwords[t] {
+			continue
+		}
+		out = append(out, t)
+	}
+	return out
+}
+
+func factTokenSet(content string) map[string]bool {
+	toks := sigTokens(content)
+	set := make(map[string]bool, len(toks))
+	for _, t := range toks {
+		set[t] = true
+	}
+	return set
+}
+
+// jaccard is the size of the intersection over the union of two token sets.
+func jaccard(a, b map[string]bool) float64 {
+	if len(a) == 0 || len(b) == 0 {
+		return 0
+	}
+	inter := 0
+	for t := range a {
+		if b[t] {
+			inter++
+		}
+	}
+	union := len(a) + len(b) - inter
+	if union == 0 {
+		return 0
+	}
+	return float64(inter) / float64(union)
+}
+
+// sharesSubject reports whether two facts open on the same subject: their first
+// up to two significant tokens match. This gates supersession so that two facts
+// merely sharing some vocabulary are not mistaken for an update of one another.
+func sharesSubject(a, b string) bool {
+	ta, tb := sigTokens(a), sigTokens(b)
+	if len(ta) == 0 || len(tb) == 0 {
+		return false
+	}
+	n := 2
+	if len(ta) < n {
+		n = len(ta)
+	}
+	if len(tb) < n {
+		n = len(tb)
+	}
+	for i := 0; i < n; i++ {
+		if ta[i] != tb[i] {
+			return false
+		}
+	}
+	return true
+}
+
 func (fi *FactIndex) computeRelevance(f *Fact, keywords []string) float64 {
 	contentLower := strings.ToLower(f.Content)
 	tagsJoined := strings.ToLower(strings.Join(f.Tags, " "))
@@ -464,7 +653,10 @@ func (fi *FactIndex) recalcScoresLocked() {
 		}
 		accessBoost := 1.0 + math.Log1p(float64(f.AccessCount))
 		decay := math.Exp(-daysSinceAccess * math.Ln2 / halfLife)
-		f.Score = accessBoost * decay
+		// Confidence ∈ (0,1] scales the score into (0.5, 1.5]×, so a trusted
+		// fact outranks a low-confidence guess of equal recency and survives
+		// decay and pruning longer.
+		f.Score = accessBoost * decay * (0.5 + f.confidence())
 	}
 }
 
@@ -510,7 +702,50 @@ func (fi *FactIndex) load() {
 	for _, f := range facts {
 		fi.facts[f.ID] = f
 	}
+
+	// One-time, idempotent enrichment of facts saved before confidence existed:
+	// give each a confidence derived from how often it was re-observed and a
+	// "legacy" provenance, then rewrite the index once. Non-destructive — no
+	// fact is removed, and facts that already have a confidence are skipped, so
+	// later loads are no-ops.
+	if fi.backfillLegacyConfidenceLocked() {
+		fi.persistLocked()
+		fi.logger.Info("memory: enriched legacy facts with confidence/provenance")
+	}
+
 	fi.logger.Debug("loaded fact index", zap.Int("count", len(fi.facts)))
+}
+
+// backfillLegacyConfidenceLocked assigns confidence/provenance to pre-confidence
+// facts in place and reports whether anything changed. Caller holds the write
+// lock (or, as in load, runs single-threaded during construction).
+func (fi *FactIndex) backfillLegacyConfidenceLocked() bool {
+	changed := false
+	for _, f := range fi.facts {
+		if f.Confidence > 0 {
+			continue // already has a confidence — leave it (idempotent)
+		}
+		f.Confidence = legacyConfidence(f.AccessCount)
+		if f.Provenance == "" {
+			f.Provenance = ProvenanceLegacy
+		}
+		changed = true
+	}
+	return changed
+}
+
+// legacyConfidence maps a legacy fact's re-observation count to a confidence in
+// [0.5, 0.85]: a fact the user kept hitting is more trustworthy, but without a
+// known source it never reaches the level of a freshly user-stated fact.
+func legacyConfidence(accessCount int) float64 {
+	c := 0.5 + 0.1*math.Log1p(float64(accessCount))
+	if c < 0.5 {
+		c = 0.5
+	}
+	if c > 0.85 {
+		c = 0.85
+	}
+	return c
 }
 
 func (fi *FactIndex) persistLocked() {

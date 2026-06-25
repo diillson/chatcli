@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/diillson/chatcli/cli/workspace/memory"
@@ -20,18 +19,19 @@ import (
 type memoryWorker struct {
 	cli              *ChatCLI
 	logger           *zap.Logger
-	lastProcessedIdx int       // index of last message processed for memory
-	lastRunTime      time.Time // when we last ran the extraction
+	lastProcessedIdx int // index of last message processed for memory
 	mu               sync.Mutex
-	running          atomic.Bool
 	stopCh           chan struct{}
 
+	// coord owns cadence, back-pressure and the circuit breaker for the
+	// extraction pass; the worker keeps only the memory-specific watermark and
+	// the failure-notice latch.
+	coord *runCoordinator
+
 	// Resilience: segments that fail every provider are queued on disk at
-	// pendingDir and drained on later runs; consecutiveFails drives the
-	// user-visible "memory is failing" notice (sent once per failure streak).
-	pendingDir       string
-	consecutiveFails int  // guarded by mu
-	failNoticeSent   bool // guarded by mu
+	// pendingDir and drained on later runs.
+	pendingDir     string
+	failNoticeSent bool // guarded by mu
 	// lookupFallback resolves a fallback provider client; indirected so tests
 	// exercise the chain without a full LLM manager.
 	lookupFallback func(provider string) (client.LLMClient, error)
@@ -56,6 +56,7 @@ func newMemoryWorker(cli *ChatCLI) *memoryWorker {
 		logger:     cli.logger,
 		stopCh:     make(chan struct{}),
 		pendingDir: defaultPendingDir(),
+		coord:      newRunCoordinator(memoryCooldown, memoryMinNewMessages),
 	}
 	mw.lookupFallback = func(provider string) (client.LLMClient, error) {
 		if cli.manager == nil {
@@ -90,7 +91,7 @@ func (mw *memoryWorker) nudge(ctx context.Context) {
 		return
 	}
 	// Don't queue multiple runs
-	if mw.running.Load() {
+	if mw.coord.isRunning() {
 		return
 	}
 	// The extraction goroutine outlives the triggering request; detach
@@ -122,27 +123,19 @@ func (mw *memoryWorker) loop(ctx context.Context) {
 }
 
 func (mw *memoryWorker) maybeExtract(ctx context.Context) {
-	if !mw.running.CompareAndSwap(false, true) {
-		return
-	}
-	defer mw.running.Store(false)
-
 	mw.mu.Lock()
 	lastIdx := mw.lastProcessedIdx
-	lastRun := mw.lastRunTime
 	mw.mu.Unlock()
 
-	// Cooldown check
-	if time.Since(lastRun) < memoryCooldown {
-		return
-	}
-
-	// Check if enough new messages exist
 	historyLen := len(mw.cli.history)
 	newMessages := historyLen - lastIdx
-	if newMessages < memoryMinNewMessages {
+
+	// One gate for back-pressure, cadence (cooldown + min new messages) and the
+	// circuit breaker. Only release when it actually acquired.
+	if !mw.coord.tryAcquire(newMessages) {
 		return
 	}
+	defer mw.coord.release()
 
 	// Extract the new messages (copy to avoid races)
 	messagesToProcess := make([]models.Message, newMessages)
@@ -184,10 +177,9 @@ func (mw *memoryWorker) onExtractionSuccess(historyLen int) {
 	mw.logger.Debug("Memory worker: annotations saved successfully")
 	mw.mu.Lock()
 	mw.lastProcessedIdx = historyLen
-	mw.lastRunTime = time.Now()
-	mw.consecutiveFails = 0
 	mw.failNoticeSent = false
 	mw.mu.Unlock()
+	mw.coord.recordSuccess()
 	if mw.cli.contextBuilder != nil {
 		mw.cli.contextBuilder.InvalidateCache()
 	}
@@ -208,17 +200,16 @@ func (mw *memoryWorker) onExtractionFailure(err error, segment []models.Message,
 		mw.logger.Info("Memory worker: segment queued for retry", zap.String("file", path))
 	}
 
+	fails := mw.coord.recordFailure()
+
 	mw.mu.Lock()
-	mw.lastRunTime = time.Now()
 	if queued {
 		mw.lastProcessedIdx = historyLen
 	}
-	mw.consecutiveFails++
-	notify := mw.consecutiveFails >= memoryFailNoticeThreshold && !mw.failNoticeSent
+	notify := fails >= memoryFailNoticeThreshold && !mw.failNoticeSent
 	if notify {
 		mw.failNoticeSent = true
 	}
-	fails := mw.consecutiveFails
 	mw.mu.Unlock()
 
 	if notify {
@@ -226,12 +217,39 @@ func (mw *memoryWorker) onExtractionFailure(err error, segment []models.Message,
 	}
 }
 
+// topicSummaryDirective augments the base prompt's TOPICS section to capture a
+// rolling one-line summary per topic (conversation threading) without mutating
+// the exported prompt constant.
+const topicSummaryDirective = `
+## TOPICS — format note
+In the ## TOPICS section, prefer one topic per line as "name: <one-line summary
+of what was discussed or decided about it>" instead of bare names, so the topic
+carries what was learned. A bare comma-separated list of names is still accepted.`
+
 func (mw *memoryWorker) extractAndSave(ctx context.Context, messages []models.Message) error {
 	if mw.cli.memoryStore == nil {
 		return fmt.Errorf("memory store not available")
 	}
 
 	mgr := mw.cli.memoryStore.Manager()
+
+	// Self-evolution piggybacks on this same extraction pass (no extra LLM
+	// call): when enabled, the prompt asks for SKILL_CANDIDATES alongside the
+	// memory sections, and we act on them after parsing the response.
+	evolveMode := resolveSelfEvolveMode()
+	// Topic threading rides as an appended directive so the base extraction
+	// prompt constant stays byte-stable (an exported const value change reads as
+	// an incompatible API change); the parser accepts both formats.
+	instructions := memory.EnhancedExtractionPromptV2 + "\n" + topicSummaryDirective
+	if evolveMode != selfEvolveOff {
+		instructions += "\n" + selfEvolveSkillDirective
+		// Inject only the compact skill index (names + descriptions), so the
+		// model can target an existing skill for evolution without any bodies
+		// bloating the per-turn prompt. The body is pulled on demand at merge.
+		if idx := mw.cli.buildSkillIndex(); idx != "" {
+			instructions += "\n\n" + idx
+		}
+	}
 
 	// Build conversation snippet for extraction
 	var sb strings.Builder
@@ -246,7 +264,7 @@ func (mw *memoryWorker) extractAndSave(ctx context.Context, messages []models.Me
 
 	// Build enhanced prompt with existing context
 	var fullPrompt strings.Builder
-	fullPrompt.WriteString(memory.EnhancedExtractionPromptV2)
+	fullPrompt.WriteString(instructions)
 	fullPrompt.WriteString("\n\n---\n\n")
 
 	// Include current workspace so the extraction LLM can distinguish session context
@@ -268,7 +286,7 @@ func (mw *memoryWorker) extractAndSave(ctx context.Context, messages []models.Me
 
 	// Pass prompt as both the prompt param and the last user message in history.
 	history := []models.Message{
-		{Role: "system", Content: memory.EnhancedExtractionPromptV2},
+		{Role: "system", Content: instructions},
 		{Role: "user", Content: prompt},
 	}
 
@@ -296,6 +314,14 @@ func (mw *memoryWorker) extractAndSave(ctx context.Context, messages []models.Me
 	summary := mw.cli.memoryStore.ProcessExtractionResult(response)
 	if !summary.IsEmpty() {
 		mw.cli.pushMemoryNotice(formatMemoryNotice(summary))
+	}
+
+	// Same response, second harvest: author new skills, or evolve existing ones
+	// (pulling only the targeted skill's body via mergeSkillBody on demand).
+	if evolveMode != selfEvolveOff {
+		if es := mw.cli.applySkillCandidates(ctx, response, evolveMode, mw.cli.mergeSkillBody); !es.isEmpty() {
+			mw.cli.pushMemoryNotice(formatSelfEvolveNotice(es))
+		}
 	}
 
 	mw.logger.Debug("Memory worker: enhanced extraction complete",

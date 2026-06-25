@@ -117,3 +117,14 @@ func (a *memoryPluginAdapter) Recall(query string) (string, error) {
 	}
 	return out, nil
 }
+
+// GraphMap and GraphNeighbors expose the knowledge graph as a relational VIEW of
+// the same memory/skill data — the "what connects to this" angle that content
+// recall cannot give. The graph is derived on demand; see knowledge_graph.go.
+func (a *memoryPluginAdapter) GraphMap() (string, error) {
+	return a.cli.graphMapText()
+}
+
+func (a *memoryPluginAdapter) GraphNeighbors(query string) (string, error) {
+	return a.cli.graphNeighborsText(query)
+}

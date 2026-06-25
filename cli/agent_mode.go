@@ -758,6 +758,11 @@ func (a *AgentMode) Run(ctx context.Context, query string, additionalContext str
 	// builds the knowledge it lacks instead of guessing or stalling. Cheap,
 	// deterministic, and rides in the same cacheable block.
 	toolsText += "\n\n" + contextPipelineHint()
+	// Pilar 1A: nudge proactive in-turn skill authoring/evolution (cacheable,
+	// empty when self-evolution is off).
+	if sh := skillAuthoringHint(); sh != "" {
+		toolsText += "\n\n" + sh
+	}
 
 	// Fase 5: Inject auto-activated skills (triggers + path globs) into the
 	// agent-mode system prompt. Also honors a `/<skill-name>` manual
@@ -1019,6 +1024,20 @@ func (a *AgentMode) buildWorkspaceBlocks(ctx context.Context, query string) (str
 		recallHint = memoryRecallHint
 	}
 	workspaceText := a.cli.contextBuilder.BuildWorkspaceContextMode(ctx, query, hints, aug, mode, recallHint)
+
+	// Append the knowledge-graph map-of-content card next to the memory index.
+	// It is tiny and deterministic (so prompt-cache friendly), and agent/coder
+	// can pull a subject's neighborhood on demand via @graph.
+	if mode != memModeOff {
+		if gb := a.cli.graphIndexBlock(); gb != "" {
+			if strings.TrimSpace(workspaceText) == "" {
+				workspaceText = gb
+			} else {
+				workspaceText = strings.TrimRight(workspaceText, "\n") + "\n\n" + gb
+			}
+		}
+	}
+
 	dynamicText := a.cli.contextBuilder.BuildDynamicContext()
 	return workspaceText, dynamicText
 }
