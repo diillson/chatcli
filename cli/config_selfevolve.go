@@ -1,6 +1,7 @@
 /*
  * ChatCLI - Command Line Interface for LLM interaction
  * Copyright (c) 2024 Edilson Freitas
+ * License: Apache-2.0
  *
  * /config selfevolve renders the self-evolution engine state: the autonomy
  * mode plus live observability of what the engine owns (skills it authored) vs

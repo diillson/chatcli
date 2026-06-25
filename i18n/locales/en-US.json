@@ -2377,6 +2377,7 @@
   "graph.cmd.no_node": "No graph node found for %q.",
   "graph.cmd.rendered": "Rendered the knowledge graph:",
   "graph.cmd.error": "Could not render the graph: %s",
+  "graph.tool.no_node": "No graph node found for %q.",
 
   "complete.generic.flag_mode": "Set file processing mode (full, summary, chunked, smart, knowledge)",
   "complete.generic.flag_model": "Switch the model (runtime) based on the current provider (gpt-5, grok-4, etc.)",

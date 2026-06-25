@@ -217,6 +217,15 @@ func (mw *memoryWorker) onExtractionFailure(err error, segment []models.Message,
 	}
 }
 
+// topicSummaryDirective augments the base prompt's TOPICS section to capture a
+// rolling one-line summary per topic (conversation threading) without mutating
+// the exported prompt constant.
+const topicSummaryDirective = `
+## TOPICS — format note
+In the ## TOPICS section, prefer one topic per line as "name: <one-line summary
+of what was discussed or decided about it>" instead of bare names, so the topic
+carries what was learned. A bare comma-separated list of names is still accepted.`
+
 func (mw *memoryWorker) extractAndSave(ctx context.Context, messages []models.Message) error {
 	if mw.cli.memoryStore == nil {
 		return fmt.Errorf("memory store not available")
@@ -228,7 +237,10 @@ func (mw *memoryWorker) extractAndSave(ctx context.Context, messages []models.Me
 	// call): when enabled, the prompt asks for SKILL_CANDIDATES alongside the
 	// memory sections, and we act on them after parsing the response.
 	evolveMode := resolveSelfEvolveMode()
-	instructions := memory.EnhancedExtractionPromptV2
+	// Topic threading rides as an appended directive so the base extraction
+	// prompt constant stays byte-stable (an exported const value change reads as
+	// an incompatible API change); the parser accepts both formats.
+	instructions := memory.EnhancedExtractionPromptV2 + "\n" + topicSummaryDirective
 	if evolveMode != selfEvolveOff {
 		instructions += "\n" + selfEvolveSkillDirective
 		// Inject only the compact skill index (names + descriptions), so the

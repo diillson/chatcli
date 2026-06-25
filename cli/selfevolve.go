@@ -145,19 +145,6 @@ type skillCandidate struct {
 	Improvement string // EVOLVE: what to change (merged into the current body)
 }
 
-// isEvolve reports whether the candidate targets an existing skill rather than
-// creating one. An explicit action wins; otherwise an improvement-without-body
-// is an evolution.
-func (c skillCandidate) isEvolve() bool {
-	switch strings.ToLower(strings.TrimSpace(c.Action)) {
-	case "evolve", "update":
-		return true
-	case "create", "new":
-		return false
-	}
-	return strings.TrimSpace(c.Improvement) != "" && strings.TrimSpace(c.Body) == ""
-}
-
 // validCreate reports whether the candidate can be authored as a new skill.
 func (c skillCandidate) validCreate() bool {
 	return skillSlugRe.MatchString(c.Name) &&

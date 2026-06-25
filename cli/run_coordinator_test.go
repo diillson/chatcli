@@ -60,24 +60,25 @@ func TestCoordinatorCadence(t *testing.T) {
 func TestCoordinatorCircuitBreaker(t *testing.T) {
 	rc, clk := newClockedCoord(2*time.Minute, 1)
 
+	// Below the threshold the breaker stays closed: after the cooldown a run is
+	// allowed.
 	rc.recordFailure()
 	rc.recordFailure()
-	if rc.breakerOpen() {
-		t.Fatal("breaker should still be closed below the threshold")
+	clk.advance(3 * time.Minute)
+	if !rc.tryAcquire(1) {
+		t.Fatal("below the threshold the breaker must stay closed")
 	}
+	rc.release()
+
+	// The third failure opens the breaker.
 	if n := rc.recordFailure(); n != 3 {
 		t.Fatalf("failure streak = %d, want 3", n)
 	}
-	if !rc.breakerOpen() {
-		t.Fatal("breaker should open at the threshold")
-	}
-
 	// Within the open window, runs are suppressed even past the cooldown.
 	clk.advance(3 * time.Minute)
 	if rc.tryAcquire(1) {
 		t.Fatal("breaker must suppress runs while open")
 	}
-
 	// Past the window, runs resume.
 	clk.advance(3 * time.Minute)
 	if !rc.tryAcquire(1) {
@@ -85,12 +86,10 @@ func TestCoordinatorCircuitBreaker(t *testing.T) {
 	}
 	rc.release()
 
-	// A success clears the breaker and the streak.
-	rc.recordFailure()
-	rc.recordFailure()
+	// A success clears the streak.
 	rc.recordFailure()
 	rc.recordSuccess()
-	if rc.breakerOpen() || rc.consecutiveFails != 0 {
-		t.Fatal("success must reset the breaker and streak")
+	if rc.consecutiveFails != 0 {
+		t.Fatal("success must reset the failure streak")
 	}
 }

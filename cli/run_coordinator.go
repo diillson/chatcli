@@ -111,10 +111,3 @@ func (rc *runCoordinator) recordFailure() int {
 	}
 	return rc.consecutiveFails
 }
-
-// breakerOpen reports whether the breaker is currently suppressing runs.
-func (rc *runCoordinator) breakerOpen() bool {
-	rc.mu.Lock()
-	defer rc.mu.Unlock()
-	return rc.now().Before(rc.openUntil)
-}

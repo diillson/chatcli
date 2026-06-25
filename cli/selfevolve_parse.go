@@ -131,9 +131,10 @@ func splitTriggers(s string) []string {
 	if s == "" {
 		return nil
 	}
-	seen := make(map[string]bool)
-	var out []string
-	for _, raw := range strings.Split(s, ",") {
+	parts := strings.Split(s, ",")
+	seen := make(map[string]bool, len(parts))
+	out := make([]string, 0, len(parts))
+	for _, raw := range parts {
 		t := strings.TrimSpace(strings.Trim(raw, `"'`))
 		if t == "" || seen[strings.ToLower(t)] {
 			continue

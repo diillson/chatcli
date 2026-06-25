@@ -716,46 +716,6 @@ func parseTopics(content string) map[string]string {
 	return out
 }
 
-func parseCSV(content string) []string {
-	// Handle both comma-separated and line-separated
-	content = strings.TrimSpace(content)
-	if content == "" {
-		return nil
-	}
-
-	var items []string
-
-	// First try comma-separated on a single line
-	if !strings.Contains(content, "\n") || strings.Contains(content, ",") {
-		parts := strings.Split(content, ",")
-		for _, p := range parts {
-			p = strings.TrimSpace(p)
-			p = strings.TrimPrefix(p, "- ")
-			p = strings.TrimPrefix(p, "* ")
-			p = strings.TrimSpace(p)
-			if p != "" {
-				items = append(items, p)
-			}
-		}
-	}
-
-	// Also check line-separated
-	if len(items) == 0 {
-		lines := strings.Split(content, "\n")
-		for _, line := range lines {
-			line = strings.TrimSpace(line)
-			line = strings.TrimPrefix(line, "- ")
-			line = strings.TrimPrefix(line, "* ")
-			line = strings.TrimSpace(line)
-			if line != "" {
-				items = append(items, line)
-			}
-		}
-	}
-
-	return items
-}
-
 // knownCategories is the fixed set of fact buckets shared by the migration
 // heuristic, the extraction parser, and the manual commands.
 var knownCategories = map[string]struct{}{
@@ -858,11 +818,9 @@ communication_style=...
 (Only include fields that have new information. Skip this section if nothing new.)
 
 ## TOPICS
-Technical topics discussed in this segment, each with a ONE-LINE summary of what
-was discussed or decided about it. One per line as "name: summary":
-Go generics: chose type parameters over reflection for the parser
-memory systems: added confidence scoring and contradiction reconciliation
-(A bare comma-separated list of names is also accepted. Skip if no clear topics.)
+List technical topics discussed in this segment (comma-separated):
+Go, Bubble Tea, memory systems, ...
+(Skip if no clear technical topics.)
 
 ## PROJECTS
 If a specific project was worked on, output KEY=VALUE pairs:
@@ -928,11 +886,9 @@ about the user just because it has no predefined field.
 (Only include fields that have new information. Skip this section if nothing new.)
 
 ## TOPICS
-Technical topics discussed in this segment, each with a ONE-LINE summary of what
-was discussed or decided about it. One per line as "name: summary":
-Go generics: chose type parameters over reflection for the parser
-memory systems: added confidence scoring and contradiction reconciliation
-(A bare comma-separated list of names is also accepted. Skip if no clear topics.)
+List technical topics discussed in this segment (comma-separated):
+Go, Bubble Tea, memory systems, ...
+(Skip if no clear technical topics.)
 
 ## PROJECTS
 If a specific project was worked on, output KEY=VALUE pairs:

@@ -23,6 +23,7 @@ import (
 	"strings"
 
 	"github.com/diillson/chatcli/config"
+	"github.com/diillson/chatcli/i18n"
 	"github.com/diillson/chatcli/pkg/knowledge"
 )
 
@@ -236,7 +237,7 @@ func (cli *ChatCLI) graphNeighborsText(idOrQuery string) (string, error) {
 		}
 	}
 	if seed == nil {
-		return fmt.Sprintf("No graph node found for %q.", idOrQuery), nil
+		return i18n.T("graph.tool.no_node", idOrQuery), nil
 	}
 
 	hood := g.Neighborhood(seed.ID, graphHoodHops, graphHoodLimit)

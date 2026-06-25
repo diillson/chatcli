@@ -43,12 +43,18 @@ type MemoryAdapter interface {
 	// The implementation may run HyDE/embedding round-trips to widen recall
 	// semantically; it bounds those internally.
 	Recall(query string) (string, error)
-	// GraphMap returns the knowledge-graph map-of-content (node counts + hubs):
-	// a relational overview of what is known and how it connects.
+}
+
+// GraphAccessor is an OPTIONAL capability a MemoryAdapter may also implement to
+// back the @memory graph subcommands (neighbors/map). It is a separate
+// interface, not part of MemoryAdapter, so adding the knowledge-graph view never
+// breaks existing MemoryAdapter implementations; the plugin type-asserts to it
+// and degrades gracefully when an adapter does not provide it.
+type GraphAccessor interface {
+	// GraphMap returns the knowledge-graph map-of-content (node counts + hubs).
 	GraphMap() (string, error)
 	// GraphNeighbors returns the local graph (backlinks + related notes) of the
-	// subject best matching the query — the "what connects to this" view that
-	// content recall cannot give.
+	// subject best matching the query.
 	GraphNeighbors(query string) (string, error)
 }
 
@@ -236,8 +242,16 @@ func (p *BuiltinMemoryPlugin) ExecuteWithStream(_ context.Context, args []string
 		_ = json.Unmarshal([]byte(inner), &in)
 		return adapter.Recall(in.Query)
 	case "map":
-		return adapter.GraphMap()
+		ga, ok := adapter.(GraphAccessor)
+		if !ok {
+			return "", errors.New("@memory map: knowledge graph not available")
+		}
+		return ga.GraphMap()
 	case "neighbors":
+		ga, ok := adapter.(GraphAccessor)
+		if !ok {
+			return "", errors.New("@memory neighbors: knowledge graph not available")
+		}
 		var in struct {
 			Query string `json:"query"`
 		}
@@ -245,7 +259,7 @@ func (p *BuiltinMemoryPlugin) ExecuteWithStream(_ context.Context, args []string
 		if strings.TrimSpace(in.Query) == "" {
 			return "", errors.New(`@memory neighbors: "query" is required (a subject or node id)`)
 		}
-		return adapter.GraphNeighbors(in.Query)
+		return ga.GraphNeighbors(in.Query)
 	default:
 		return "", fmt.Errorf(
 			"@memory: unknown cmd %q (valid: remember|profile|forget|recall|neighbors|map)", cmd,
@@ -312,7 +326,7 @@ func canonicalMemoryCmd(s string) string {
 		return "forget"
 	case "recall", "read", "get", "search":
 		return "recall"
-	case "neighbors", "neighbours", "related", "links", "backlinks", "connected":
+	case "neighbors", "related", "links", "backlinks", "connected":
 		return "neighbors"
 	case "map", "graph", "moc", "overview":
 		return "map"
