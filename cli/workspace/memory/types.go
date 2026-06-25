@@ -52,8 +52,12 @@ type Fact struct {
 
 // Topic tracks a recurring subject across conversations.
 type Topic struct {
-	Name         string    `json:"name"`
-	Mentions     int       `json:"mentions"`
+	Name     string `json:"name"`
+	Mentions int    `json:"mentions"`
+	// Summary is a rolling one-line synthesis of what was discussed about this
+	// topic, refreshed by the background extraction pass. It turns a topic from
+	// a bare name into a knowledge node (and feeds the graph node's summary).
+	Summary      string    `json:"summary,omitempty"`
 	FirstSeen    time.Time `json:"first_seen"`
 	LastSeen     time.Time `json:"last_seen"`
 	RelatedFacts []string  `json:"related_fact_ids,omitempty"`

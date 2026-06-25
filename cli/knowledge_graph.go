@@ -107,7 +107,7 @@ func (cli *ChatCLI) addMemoryNodes(g *knowledge.Graph) {
 	// Topics link to their related facts (the relationship already recorded).
 	for _, tp := range m.Topics.GetAll() {
 		id := "topic:" + graphSlug(tp.Name)
-		g.AddNode(knowledge.Node{ID: id, Kind: knowledge.KindTopic, Title: tp.Name, Weight: float64(tp.Mentions)})
+		g.AddNode(knowledge.Node{ID: id, Kind: knowledge.KindTopic, Title: tp.Name, Summary: tp.Summary, Weight: float64(tp.Mentions)})
 		for _, fid := range tp.RelatedFacts {
 			if nfid, ok := factByID[fid]; ok {
 				g.AddEdge(id, nfid, 2)
