@@ -40,6 +40,14 @@ type Fact struct {
 	Score         float64   `json:"score"`
 	Source        string    `json:"source,omitempty"`
 	SourceProject string    `json:"source_project,omitempty"` // project path where this fact was learned
+	// Confidence ∈ (0,1] is how much to trust this fact: deterministic
+	// user-stated facts rank above background-extracted guesses, and a fact
+	// reinforced by re-observation climbs. Zero means "unset" (legacy facts)
+	// and is treated as the default; see Fact.confidence().
+	Confidence float64 `json:"confidence,omitempty"`
+	// Provenance records HOW the fact was learned (e.g. "user", "extraction",
+	// "correction", or a supersession note), for auditability.
+	Provenance string `json:"provenance,omitempty"`
 }
 
 // Topic tracks a recurring subject across conversations.

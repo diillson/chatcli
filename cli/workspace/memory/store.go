@@ -375,7 +375,9 @@ func (m *Manager) RememberFact(content, category string) bool {
 	if !isKnownCategory(cat) {
 		cat = classifyFactContent(content)
 	}
-	added := m.Facts.AddFactWithSource(content, cat, extractTags(content), m.workspaceDir)
+	// Deterministic, user/agent-stated facts are trusted more than the
+	// background extractor's inferences.
+	added := m.Facts.AddFactWithMeta(content, cat, extractTags(content), m.workspaceDir, ConfidenceUser, ProvenanceUser)
 	m.compactor.RegenerateMemoryMD()
 	return added
 }
