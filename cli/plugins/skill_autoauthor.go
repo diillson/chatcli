@@ -124,7 +124,7 @@ func BackupSkill(name string) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	if err := os.WriteFile(backup, data, 0o600); err != nil {
+	if err := os.WriteFile(backup, data, 0o600); err != nil { // #nosec G304 G703 -- name validated against slug regex in skillPaths
 		return false, err
 	}
 	return true, nil
@@ -145,7 +145,7 @@ func RestoreSkill(name string) (bool, error) {
 		}
 		return false, err
 	}
-	if err := os.WriteFile(skillMD, data, 0o600); err != nil {
+	if err := os.WriteFile(skillMD, data, 0o600); err != nil { // #nosec G304 G703 -- name validated against slug regex in skillPaths
 		return false, err
 	}
 	return true, os.Remove(backup)
