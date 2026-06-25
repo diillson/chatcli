@@ -472,6 +472,9 @@ func NewChatCLI(ctx context.Context, manager manager.LLMManager, logger *zap.Log
 		// adapter is wired below once the memory store exists; until then
 		// the tool reports "memory not enabled" rather than panicking.
 		pluginMgr.RegisterBuiltinPlugin(plugins.NewBuiltinMemoryPlugin())
+		// @graph — read-only pull access to the in-core knowledge graph derived
+		// from memory + skills (search, neighbors/backlinks). Adapter wired below.
+		pluginMgr.RegisterBuiltinPlugin(plugins.NewBuiltinGraphPlugin())
 		// @knowledge — pull-side of /context --mode knowledge: search, read
 		// and walk attached documentation corpora on demand. Adapter wired
 		// below once the context handler exists.
@@ -685,6 +688,10 @@ func NewChatCLI(ctx context.Context, manager manager.LLMManager, logger *zap.Log
 
 	// Initialize skill registry handler
 	cli.skillHandler = NewSkillHandler(logger, cli.personaHandler.GetManager())
+
+	// Wire the @graph tool now that both the memory store and persona manager
+	// exist: the graph is derived from both on demand.
+	plugins.SetGraphAdapter(&graphPluginAdapter{cli: cli})
 
 	cli.Client = client
 	cli.commandHandler = NewCommandHandler(cli)
