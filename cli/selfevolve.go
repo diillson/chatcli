@@ -419,6 +419,22 @@ func skillFileBody(content string) string {
 	return after
 }
 
+// skillAuthoringHint teaches the model to capture reusable skills proactively
+// in-turn (Pilar 1A), reinforcing the background worker's autonomy. It is a
+// deterministic, cacheable block, returned empty when self-evolution is off so
+// the prompt carries nothing when the feature is disabled.
+func skillAuthoringHint() string {
+	if resolveSelfEvolveMode() == selfEvolveOff {
+		return ""
+	}
+	return strings.TrimSpace(`
+## Capturing reusable skills
+When you complete a multi-step procedure, a project convention, or a workflow the user is likely to repeat, persist it as a skill so it auto-activates next time its topic comes up:
+- A new, generalizable procedure not yet covered by a skill → @skill create {name, description, triggers, content}.
+- An improvement to how an existing skill's topic is done → @skill update reusing that skill's EXACT name.
+Save the reusable PROCEDURE, not one-off facts (facts go to @memory). Keep skills focused and trigger-specific. A background pass also captures skills, but author proactively when you just did something worth reusing.`)
+}
+
 // formatSelfEvolveNotice renders a one-line summary of what the engine did this
 // pass, e.g. "skills: authored deploy-this-project" or "skill suggestion: ...".
 // Returns "" when nothing happened, so the worker stays silent on quiet turns.

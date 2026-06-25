@@ -758,6 +758,11 @@ func (a *AgentMode) Run(ctx context.Context, query string, additionalContext str
 	// builds the knowledge it lacks instead of guessing or stalling. Cheap,
 	// deterministic, and rides in the same cacheable block.
 	toolsText += "\n\n" + contextPipelineHint()
+	// Pilar 1A: nudge proactive in-turn skill authoring/evolution (cacheable,
+	// empty when self-evolution is off).
+	if sh := skillAuthoringHint(); sh != "" {
+		toolsText += "\n\n" + sh
+	}
 
 	// Fase 5: Inject auto-activated skills (triggers + path globs) into the
 	// agent-mode system prompt. Also honors a `/<skill-name>` manual

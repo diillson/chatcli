@@ -253,6 +253,26 @@ func TestApplySkillCandidates_EvolvesEngineOwnedSkill(t *testing.T) {
 	}
 }
 
+func TestSkillAuthoringHintGatedByMode(t *testing.T) {
+	t.Setenv(config.SelfEvolveModeEnv, "off")
+	if h := skillAuthoringHint(); h != "" {
+		t.Fatalf("off mode should yield no authoring hint, got: %q", h)
+	}
+	t.Setenv(config.SelfEvolveModeEnv, "auto")
+	h := skillAuthoringHint()
+	if !strings.Contains(h, "@skill create") || !strings.Contains(h, "@skill update") {
+		t.Fatalf("auto-mode hint should teach @skill create/update, got:\n%s", h)
+	}
+}
+
+func TestShowConfigSelfEvolveDoesNotPanic(t *testing.T) {
+	dir := t.TempDir()
+	plugins.SetSkillsDirOverride(dir)
+	t.Cleanup(func() { plugins.SetSkillsDirOverride("") })
+	// personaHandler nil and an empty manifest must render without panicking.
+	newTestCLI().showConfigSelfEvolve()
+}
+
 func TestApplySkillCandidates_SuggestModeNeverWrites(t *testing.T) {
 	dir := t.TempDir()
 	plugins.SetSkillsDirOverride(dir)

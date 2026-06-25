@@ -107,6 +107,8 @@ func (cli *ChatCLI) routeConfigCommand(ctx context.Context, args []string) {
 		cli.showConfigQuality()
 	case "memory", "mem":
 		cli.showConfigMemory()
+	case "selfevolve", "evolve", "self-evolution":
+		cli.showConfigSelfEvolve()
 	case "scheduler", "schedule":
 		cli.showConfigScheduler(ctx)
 	case "server":

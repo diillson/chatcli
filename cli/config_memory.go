@@ -45,17 +45,12 @@ func (cli *ChatCLI) showConfigMemory() {
 		kv(p, i18n.T("cfg.kv.memory_store"), i18n.T("cfg.val.not_initialized"))
 	}
 
-	// Self-evolution shares the memory worker's extraction pass, so it lives
-	// under the same section. Read-only; set via CHATCLI_SELFEVOLVE_MODE.
-	subheader(p, "cfg.sub.selfevolve")
-	evolveDesc := i18n.T("cfg.kv.selfevolve.mode_" + resolveSelfEvolveMode().String())
-	if os.Getenv(config.SelfEvolveModeEnv) == "" {
-		evolveDesc = defaultMarker + evolveDesc
-	}
-	kv(p, config.SelfEvolveModeEnv, evolveDesc)
+	// Self-evolution has its own section (/config selfevolve); a one-line
+	// pointer keeps it discoverable from here since it shares this worker.
+	kv(p, i18n.T("cfg.kv.selfevolve.see_section"), i18n.T("cfg.kv.selfevolve.see_section_val"))
 
-	// Knowledge graph: per-turn map-of-content injection (the @graph pull tool
-	// is always available regardless).
+	// Knowledge graph: per-turn map-of-content injection (the @memory neighbors
+	// pull is always available regardless).
 	subheader(p, "cfg.sub.graph")
 	graphVal := i18n.T("cfg.val.disabled")
 	if graphIndexEnabled() {
