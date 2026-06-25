@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.146.0](https://github.com/diillson/chatcli/compare/v1.145.1...v1.146.0) (2026-06-25)
+
+
+### Features
+
+* self-evolution engine, in-core knowledge graph and memory quality ([#1101](https://github.com/diillson/chatcli/issues/1101)) ([436757c](https://github.com/diillson/chatcli/commit/436757cc7db4959bc92aeda7ea7f203ed1245483))
+
 ## [1.145.1](https://github.com/diillson/chatcli/compare/v1.145.0...v1.145.1) (2026-06-22)
 
 
