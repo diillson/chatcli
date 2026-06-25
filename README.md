@@ -59,7 +59,7 @@
 | | |
 |---|---|
 | **Multi-provider com fallback** | 14 provedores de LLM (OpenAI · OpenAI Responses · Anthropic · Bedrock · Google · xAI · ZAI · MiniMax · Moonshot (Kimi) · Copilot · GitHub Models · StackSpot · OpenRouter · Ollama), com classificação inteligente de erros, backoff exponencial e cooldown por provider. |
-| **Agentes autônomos** | 14 workers especializados coordenados por motor ReAct (Reason + Act), com execução paralela e pipeline de qualidade em 7 padrões. |
+| **Agentes autônomos** | 14 workers builtin coordenados por motor ReAct (Reason + Act): 12 specialists de orquestração executam em paralelo + 2 de qualidade (refiner, verifier), com pipeline de qualidade em 7 padrões. |
 | **Quality pipeline** | Self-Refine, Chain-of-Verification (CoVe), Reflexion, RAG + HyDE, Plan-and-Solve (ReWOO), backbone de reasoning cross-provider — todos compostos por state machine thread-safe com circuit breakers e hot reload. |
 | **Scheduler (Chronos)** | Agendamento durável com cron + wait-until + DAG + daemon mode. `/schedule`, `/wait`, `/jobs` + tool `@scheduler` para agents. WAL CRC32, snapshots, rate limiter, circuit breakers, audit JSONL, 13 métricas Prometheus. Jobs sobrevivem a crash e a fechar o CLI. |
 | **Reflexion durável** | Fila WAL-backed com worker pool, dead letter queue, replay on boot, retry exponencial com jitter — lições sobrevivem a crash do processo. |
@@ -287,7 +287,7 @@ CHATCLI_FALLBACK_PROVIDERS=OPENAI,CLAUDEAI,BEDROCK,ZAI,MINIMAX,MOONSHOT,OPENROUT
 
 ## Agentes autônomos
 
-> Motor ReAct (Reason + Act) com **14 agentes especializados** executando em paralelo.
+> Motor ReAct (Reason + Act) com **14 agents builtin**: 12 specialists de orquestração executando em paralelo (`file, coder, shell, git, search, planner, reviewer, tester, refactor, diagnostics, formatter, deps`) + 2 do harness de qualidade (`refiner`, `verifier`).
 
 ```bash
 /coder "Refatore o módulo auth para usar JWT"

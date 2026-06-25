@@ -59,7 +59,7 @@
 | | |
 |---|---|
 | **Multi-provider with failover** | 14 LLM providers (OpenAI · OpenAI Responses · Anthropic · Bedrock · Google · xAI · ZAI · MiniMax · Moonshot (Kimi) · Copilot · GitHub Models · StackSpot · OpenRouter · Ollama) with intelligent error classification, exponential backoff, and per-provider cooldown. |
-| **Autonomous agents** | 14 specialized workers coordinated by a ReAct engine (Reason + Act), with parallel execution and a 7-pattern quality pipeline. |
+| **Autonomous agents** | 14 built-in workers coordinated by a ReAct engine (Reason + Act): 12 orchestration specialists run in parallel + 2 quality agents (refiner, verifier), plus a 7-pattern quality pipeline. |
 | **Quality pipeline** | Self-Refine, Chain-of-Verification (CoVe), Reflexion, RAG + HyDE, Plan-and-Solve (ReWOO), cross-provider reasoning backbone — all composed via a thread-safe state machine with circuit breakers and hot reload. |
 | **Scheduler (Chronos)** | Durable scheduling with cron + wait-until + DAG + daemon mode. `/schedule`, `/wait`, `/jobs` + `@scheduler` tool for agents. CRC32 WAL, snapshots, rate limiter, circuit breakers, JSONL audit, 13 Prometheus metrics. Jobs survive crashes and CLI exit. |
 | **Durable Reflexion** | WAL-backed queue with worker pool, dead letter queue, boot replay, exponential retry with jitter — lessons survive process crashes. |
@@ -287,7 +287,7 @@ CHATCLI_FALLBACK_PROVIDERS=OPENAI,CLAUDEAI,BEDROCK,ZAI,MINIMAX,MOONSHOT,OPENROUT
 
 ## Autonomous Agents
 
-> ReAct engine (Reason + Act) with **14 specialized agents** running in parallel.
+> ReAct engine (Reason + Act) with **14 built-in agents**: 12 orchestration specialists running in parallel (`file, coder, shell, git, search, planner, reviewer, tester, refactor, diagnostics, formatter, deps`) + 2 quality-harness agents (`refiner`, `verifier`).
 
 ```bash
 /coder "Refactor the auth module to use JWT"
