@@ -58,7 +58,7 @@
 
 | | |
 |---|---|
-| **Multi-provider with failover** | 14 LLM providers (OpenAI · Anthropic · Bedrock · Google · xAI · ZAI · MiniMax · Moonshot (Kimi) · Copilot · GitHub Models · StackSpot · OpenRouter · Ollama · OpenAI Assistants) with intelligent error classification, exponential backoff, and per-provider cooldown. |
+| **Multi-provider with failover** | 14 LLM providers (OpenAI · OpenAI Responses · Anthropic · Bedrock · Google · xAI · ZAI · MiniMax · Moonshot (Kimi) · Copilot · GitHub Models · StackSpot · OpenRouter · Ollama) with intelligent error classification, exponential backoff, and per-provider cooldown. |
 | **Autonomous agents** | 14 specialized workers coordinated by a ReAct engine (Reason + Act), with parallel execution and a 7-pattern quality pipeline. |
 | **Quality pipeline** | Self-Refine, Chain-of-Verification (CoVe), Reflexion, RAG + HyDE, Plan-and-Solve (ReWOO), cross-provider reasoning backbone — all composed via a thread-safe state machine with circuit breakers and hot reload. |
 | **Scheduler (Chronos)** | Durable scheduling with cron + wait-until + DAG + daemon mode. `/schedule`, `/wait`, `/jobs` + `@scheduler` tool for agents. CRC32 WAL, snapshots, rate limiter, circuit breakers, JSONL audit, 13 Prometheus metrics. Jobs survive crashes and CLI exit. |
@@ -125,7 +125,7 @@ OPENAI_API_KEY=sk-xxx
 | StackSpot | `CLIENT_ID`, `CLIENT_KEY` | — | `STACKSPOT_REALM`, `STACKSPOT_AGENT_ID` |
 | OpenRouter | `OPENROUTER_API_KEY` | — | `OPENROUTER_MAX_TOKENS`, `OPENROUTER_FALLBACK_MODELS` |
 | Ollama | — | `OLLAMA_MODEL` | `OLLAMA_ENABLED=true`, `OLLAMA_BASE_URL` |
-| OpenAI Assistants | `OPENAI_API_KEY` | `OPENAI_ASSISTANT_MODEL` | `OPENAI_ASSISTANT_ID` |
+| OpenAI (Responses API) | `OPENAI_API_KEY` | `OPENAI_MODEL` | `OPENAI_RESPONSES_API_URL` |
 
 </details>
 
@@ -274,7 +274,7 @@ helm install chatcli oci://ghcr.io/diillson/charts/chatcli \
 | **StackSpot AI** | StackSpotAI | — | — | — |
 | **OpenRouter** | openai/gpt-5.2 | Native | Yes | Passthrough |
 | **Ollama** | (local) | XML fallback | — | `<thinking>` tag normalization |
-| **OpenAI Assistants** | gpt-4o | Assistants API | — | — |
+| **OpenAI (Responses API)** | gpt-5.4 | Native | Yes | `reasoning_effort` |
 
 ```bash
 # Configurable fallback chain
@@ -511,7 +511,7 @@ Credentials are stored with **AES-256-GCM** at `~/.chatcli/auth-profiles.json`.
 | **Config** | `/config [section]` · `/status` · `/settings` · `/switch <provider\|model>` |
 | **Agent mode** | `/agent [task]` · `/run` · `/coder` · `/plan [query]` · `/moa <prompt>` |
 | **Quality pipeline** | `/thinking [on\|off\|auto]` · `/refine [draft]` · `/verify [answer]` · `/reflect [list\|failed\|retry\|purge\|drain\|<text>]` |
-| **Memory** | `/memory {longterm,list,profile,facts,remember,forget,profile set,compact}` · `@memory` (tool) · `/compact [ratio]` |
+| **Memory & graph** | `/memory {longterm,list,profile,facts,remember,forget,profile set,compact}` · `@memory` (remember/recall/forget/profile/neighbors/map) · `/graph [subject]` · `/compact [ratio]` |
 | **Extensibility** | `/mcp {init,list,invoke,config}` · `/plugin {list,load,unload}` · `/skill <name>` · `/hooks {list,enable,disable,test}` |
 | **Messaging & Servers** | `/gateway {start,status}` (Telegram/Slack/Discord/WhatsApp/webhook) · `chatcli mcp-server` · `chatcli acp` |
 | **Remote** | `/auth {login,logout,status}` · `/connect <server>` · `/disconnect` |
@@ -538,9 +538,11 @@ Credentials are stored with **AES-256-GCM** at `~/.chatcli/auth-profiles.json`.
 | **Trajectory export** | `/export` — current conversation as ShareGPT JSONL for fine-tuning/analysis. |
 | **Persistent contexts** | `/context create`, `/context attach` — inject whole projects into the system prompt with cache hints. |
 | **Knowledge base (keyless RAG)** | `/context create docs corpus.jsonl --mode knowledge` — documentation corpora (e.g. JSONL from the builtin `@docs-flatten` tool, which flattens local or git-repo Markdown/MDX docs) become a knowledge base: attaching injects only an index card (~900 fixed tokens, even at 6MB+) and relevant passages are retrieved per turn via pure-Go BM25 (no API key) + embeddings when configured. The `@knowledge` tool (search/get/toc) interrogates the base iteratively in agent/coder and also in chat (read-only exception, `/config chat knowledge`) — including authoring skills from the docs with `@skill`. |
-| **Bootstrap & Memory** | `SOUL.md`, `USER.md`, `IDENTITY.md`, `RULES.md` + long-term memory with facts and decay. |
+| **Bootstrap & Memory** | `SOUL.md`, `USER.md`, `IDENTITY.md`, `RULES.md` + long-term memory with facts (confidence + provenance + contradiction reconciliation), topics with rolling summaries, and decay. |
+| **Self-evolution** | Skills author and evolve themselves on the memory extraction pass (no extra LLM call): reusable procedures become auto-activating skills; an insight evolves an existing skill by additive merge, with a reversible backup (`@skill restore`). `CHATCLI_SELFEVOLVE_MODE=off\|suggest\|auto`; observability under `/config selfevolve`. |
+| **Knowledge graph (Obsidian in the core)** | Facts, topics, projects, skills and tags become an on-demand graph: `@memory neighbors <subject>` / `map` pull backlinks and related notes, a tiny index card rides each turn, and `/graph [subject]` renders the graph to an image (embedded go-graphviz). `CHATCLI_GRAPH_INDEX=on\|off`. |
 | **Plugins** | Auto-detection, schema validation, Ed25519 signatures, remote plugins. |
-| **Skills** | Multi-registry (skills.sh, ClawHub, ChatCLI.dev), fuzzy search, security audits, source preferences, atomic install. |
+| **Skills** | Self-authoring (`@skill`), multi-registry (skills.sh, ClawHub, ChatCLI.dev), fuzzy search, security audits, source preferences, atomic install. |
 | **Custom personas** | Markdown with YAML frontmatter (model, tools, skills). |
 | **Hooks** | PreToolUse, PostToolUse, SessionStart/End, UserPromptSubmit, Pre/PostCompact — shell or webhook. |
 | **WebFetch / WebSearch** | DuckDuckGo + fetch with text extraction. |

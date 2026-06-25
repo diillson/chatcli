@@ -58,7 +58,7 @@
 
 | | |
 |---|---|
-| **Multi-provider com fallback** | 14 provedores de LLM (OpenAI · Anthropic · Bedrock · Google · xAI · ZAI · MiniMax · Moonshot (Kimi) · Copilot · GitHub Models · StackSpot · OpenRouter · Ollama · OpenAI Assistants), com classificação inteligente de erros, backoff exponencial e cooldown por provider. |
+| **Multi-provider com fallback** | 14 provedores de LLM (OpenAI · OpenAI Responses · Anthropic · Bedrock · Google · xAI · ZAI · MiniMax · Moonshot (Kimi) · Copilot · GitHub Models · StackSpot · OpenRouter · Ollama), com classificação inteligente de erros, backoff exponencial e cooldown por provider. |
 | **Agentes autônomos** | 14 workers especializados coordenados por motor ReAct (Reason + Act), com execução paralela e pipeline de qualidade em 7 padrões. |
 | **Quality pipeline** | Self-Refine, Chain-of-Verification (CoVe), Reflexion, RAG + HyDE, Plan-and-Solve (ReWOO), backbone de reasoning cross-provider — todos compostos por state machine thread-safe com circuit breakers e hot reload. |
 | **Scheduler (Chronos)** | Agendamento durável com cron + wait-until + DAG + daemon mode. `/schedule`, `/wait`, `/jobs` + tool `@scheduler` para agents. WAL CRC32, snapshots, rate limiter, circuit breakers, audit JSONL, 13 métricas Prometheus. Jobs sobrevivem a crash e a fechar o CLI. |
@@ -125,7 +125,7 @@ OPENAI_API_KEY=sk-xxx
 | StackSpot | `CLIENT_ID`, `CLIENT_KEY` | — | `STACKSPOT_REALM`, `STACKSPOT_AGENT_ID` |
 | OpenRouter | `OPENROUTER_API_KEY` | — | `OPENROUTER_MAX_TOKENS`, `OPENROUTER_FALLBACK_MODELS` |
 | Ollama | — | `OLLAMA_MODEL` | `OLLAMA_ENABLED=true`, `OLLAMA_BASE_URL` |
-| OpenAI Assistants | `OPENAI_API_KEY` | `OPENAI_ASSISTANT_MODEL` | `OPENAI_ASSISTANT_ID` |
+| OpenAI (Responses API) | `OPENAI_API_KEY` | `OPENAI_MODEL` | `OPENAI_RESPONSES_API_URL` |
 
 </details>
 
@@ -274,7 +274,7 @@ helm install chatcli oci://ghcr.io/diillson/charts/chatcli \
 | **StackSpot AI** | StackSpotAI | — | — | — |
 | **OpenRouter** | openai/gpt-5.2 | Nativo | Sim | Passthrough |
 | **Ollama** | (local) | XML fallback | — | Tags `<thinking>` normalizadas |
-| **OpenAI Assistants** | gpt-4o | Assistants API | — | — |
+| **OpenAI (Responses API)** | gpt-5.4 | Nativo | Sim | `reasoning_effort` |
 
 ```bash
 # Fallback chain configurável
@@ -511,7 +511,7 @@ Credenciais armazenadas com **AES-256-GCM** em `~/.chatcli/auth-profiles.json`.
 | **Config** | `/config [section]` · `/status` · `/settings` · `/switch <provider\|model>` |
 | **Modo agente** | `/agent [task]` · `/run` · `/coder` · `/plan [query]` · `/moa <prompt>` |
 | **Quality pipeline** | `/thinking [on\|off\|auto]` · `/refine [draft]` · `/verify [answer]` · `/reflect [list\|failed\|retry\|purge\|drain\|<texto>]` |
-| **Memória** | `/memory {longterm,list,profile,facts,remember,forget,profile set,compact}` · `@memory` (tool) · `/compact [ratio]` |
+| **Memória & grafo** | `/memory {longterm,list,profile,facts,remember,forget,profile set,compact}` · `@memory` (remember/recall/forget/profile/neighbors/map) · `/graph [assunto]` · `/compact [ratio]` |
 | **Extensibilidade** | `/mcp {init,list,invoke,config}` · `/plugin {list,load,unload}` · `/skill <name>` · `/hooks {list,enable,disable,test}` |
 | **Mensageria & Servidores** | `/gateway {start,status}` (Telegram/Slack/Discord/WhatsApp/webhook) · `chatcli mcp-server` · `chatcli acp` |
 | **Remoto** | `/auth {login,logout,status}` · `/connect <server>` · `/disconnect` |
@@ -538,9 +538,11 @@ Credenciais armazenadas com **AES-256-GCM** em `~/.chatcli/auth-profiles.json`.
 | **Exportar trajetória** | `/export` — conversa atual como JSONL ShareGPT para fine-tuning/análise. |
 | **Contextos persistentes** | `/context create`, `/context attach` — injeta projetos inteiros no system prompt com cache hints. |
 | **Knowledge base (RAG keyless)** | `/context create docs corpus.jsonl --mode knowledge` — corpora de docs ou de código/infra (ex.: JSONL da tool builtin `@docs-flatten`, que achata Markdown/MDX e — com `kind=code` — código-fonte, Terraform e YAML Kubernetes/Argo locais ou de um repo git, chunkando por estrutura) viram base de conhecimento: o attach injeta só um index card (~900 tokens fixos, mesmo com 6MB+) e trechos relevantes são recuperados por turno via BM25 puro-Go (sem API key) + embeddings quando configurados. A tool `@knowledge` (search/get/toc) consulta a base iterativamente no agent/coder e também no chat (exceção read-only, `/config chat knowledge`) — inclusive pra criar skills a partir da doc com `@skill`. |
-| **Bootstrap e Memória** | `SOUL.md`, `USER.md`, `IDENTITY.md`, `RULES.md` + memória de longo prazo com facts e decay. |
+| **Bootstrap e Memória** | `SOUL.md`, `USER.md`, `IDENTITY.md`, `RULES.md` + memória de longo prazo com facts (confiança + proveniência + reconciliação de contradições), tópicos com resumo rolante e decay. |
+| **Auto-evolução (self-evolution)** | Skills se auto-criam e evoluem na própria passada de extração de memória (sem chamada extra de LLM): procedimentos reutilizáveis viram skills que auto-ativam; uma melhoria evolui a skill existente por merge aditivo, com backup reversível (`@skill restore`). `CHATCLI_SELFEVOLVE_MODE=off\|suggest\|auto`; observabilidade em `/config selfevolve`. |
+| **Grafo de conhecimento (Obsidian no core)** | Facts, tópicos, projetos, skills e tags viram um grafo derivado on-demand: `@memory neighbors <assunto>` / `map` puxam backlinks e notas conectadas, um index card minúsculo entra por turno, e `/graph [assunto]` renderiza o grafo em imagem (go-graphviz embarcado). `CHATCLI_GRAPH_INDEX=on\|off`. |
 | **Plugins** | Auto-detecção, schema validation, assinatura Ed25519, plugins remotos. |
-| **Skills** | Registry multi-source (skills.sh, ClawHub, ChatCLI.dev), busca fuzzy, auditorias de segurança, preferências e instalação atômica. |
+| **Skills** | Auto-autoria (`@skill`), registry multi-source (skills.sh, ClawHub, ChatCLI.dev), busca fuzzy, auditorias de segurança, preferências e instalação atômica. |
 | **Personas customizáveis** | Markdown com frontmatter YAML (model, tools, skills). |
 | **Hooks** | PreToolUse, PostToolUse, SessionStart/End, UserPromptSubmit, Compact pre/post — shell ou webhook. |
 | **WebFetch / WebSearch** | DuckDuckGo + fetch com extração de texto. |
