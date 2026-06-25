@@ -56,6 +56,7 @@ const (
 	ProvenanceUser       = "user"
 	ProvenanceExtraction = "extraction"
 	ProvenanceCorrection = "correction"
+	ProvenanceLegacy     = "legacy" // pre-confidence fact enriched at load
 
 	// Reconciliation thresholds over significant-token Jaccard similarity.
 	reconcileDuplicateJaccard = 0.85 // ≥ → a rephrasing of an existing fact: reinforce, don't duplicate
@@ -701,7 +702,50 @@ func (fi *FactIndex) load() {
 	for _, f := range facts {
 		fi.facts[f.ID] = f
 	}
+
+	// One-time, idempotent enrichment of facts saved before confidence existed:
+	// give each a confidence derived from how often it was re-observed and a
+	// "legacy" provenance, then rewrite the index once. Non-destructive — no
+	// fact is removed, and facts that already have a confidence are skipped, so
+	// later loads are no-ops.
+	if fi.backfillLegacyConfidenceLocked() {
+		fi.persistLocked()
+		fi.logger.Info("memory: enriched legacy facts with confidence/provenance")
+	}
+
 	fi.logger.Debug("loaded fact index", zap.Int("count", len(fi.facts)))
+}
+
+// backfillLegacyConfidenceLocked assigns confidence/provenance to pre-confidence
+// facts in place and reports whether anything changed. Caller holds the write
+// lock (or, as in load, runs single-threaded during construction).
+func (fi *FactIndex) backfillLegacyConfidenceLocked() bool {
+	changed := false
+	for _, f := range fi.facts {
+		if f.Confidence > 0 {
+			continue // already has a confidence — leave it (idempotent)
+		}
+		f.Confidence = legacyConfidence(f.AccessCount)
+		if f.Provenance == "" {
+			f.Provenance = ProvenanceLegacy
+		}
+		changed = true
+	}
+	return changed
+}
+
+// legacyConfidence maps a legacy fact's re-observation count to a confidence in
+// [0.5, 0.85]: a fact the user kept hitting is more trustworthy, but without a
+// known source it never reaches the level of a freshly user-stated fact.
+func legacyConfidence(accessCount int) float64 {
+	c := 0.5 + 0.1*math.Log1p(float64(accessCount))
+	if c < 0.5 {
+		c = 0.5
+	}
+	if c > 0.85 {
+		c = 0.85
+	}
+	return c
 }
 
 func (fi *FactIndex) persistLocked() {
