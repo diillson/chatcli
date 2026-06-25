@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/diillson/chatcli/cli/workspace/memory"
@@ -20,18 +19,19 @@ import (
 type memoryWorker struct {
 	cli              *ChatCLI
 	logger           *zap.Logger
-	lastProcessedIdx int       // index of last message processed for memory
-	lastRunTime      time.Time // when we last ran the extraction
+	lastProcessedIdx int // index of last message processed for memory
 	mu               sync.Mutex
-	running          atomic.Bool
 	stopCh           chan struct{}
 
+	// coord owns cadence, back-pressure and the circuit breaker for the
+	// extraction pass; the worker keeps only the memory-specific watermark and
+	// the failure-notice latch.
+	coord *runCoordinator
+
 	// Resilience: segments that fail every provider are queued on disk at
-	// pendingDir and drained on later runs; consecutiveFails drives the
-	// user-visible "memory is failing" notice (sent once per failure streak).
-	pendingDir       string
-	consecutiveFails int  // guarded by mu
-	failNoticeSent   bool // guarded by mu
+	// pendingDir and drained on later runs.
+	pendingDir     string
+	failNoticeSent bool // guarded by mu
 	// lookupFallback resolves a fallback provider client; indirected so tests
 	// exercise the chain without a full LLM manager.
 	lookupFallback func(provider string) (client.LLMClient, error)
@@ -56,6 +56,7 @@ func newMemoryWorker(cli *ChatCLI) *memoryWorker {
 		logger:     cli.logger,
 		stopCh:     make(chan struct{}),
 		pendingDir: defaultPendingDir(),
+		coord:      newRunCoordinator(memoryCooldown, memoryMinNewMessages),
 	}
 	mw.lookupFallback = func(provider string) (client.LLMClient, error) {
 		if cli.manager == nil {
@@ -90,7 +91,7 @@ func (mw *memoryWorker) nudge(ctx context.Context) {
 		return
 	}
 	// Don't queue multiple runs
-	if mw.running.Load() {
+	if mw.coord.isRunning() {
 		return
 	}
 	// The extraction goroutine outlives the triggering request; detach
@@ -122,27 +123,19 @@ func (mw *memoryWorker) loop(ctx context.Context) {
 }
 
 func (mw *memoryWorker) maybeExtract(ctx context.Context) {
-	if !mw.running.CompareAndSwap(false, true) {
-		return
-	}
-	defer mw.running.Store(false)
-
 	mw.mu.Lock()
 	lastIdx := mw.lastProcessedIdx
-	lastRun := mw.lastRunTime
 	mw.mu.Unlock()
 
-	// Cooldown check
-	if time.Since(lastRun) < memoryCooldown {
-		return
-	}
-
-	// Check if enough new messages exist
 	historyLen := len(mw.cli.history)
 	newMessages := historyLen - lastIdx
-	if newMessages < memoryMinNewMessages {
+
+	// One gate for back-pressure, cadence (cooldown + min new messages) and the
+	// circuit breaker. Only release when it actually acquired.
+	if !mw.coord.tryAcquire(newMessages) {
 		return
 	}
+	defer mw.coord.release()
 
 	// Extract the new messages (copy to avoid races)
 	messagesToProcess := make([]models.Message, newMessages)
@@ -184,10 +177,9 @@ func (mw *memoryWorker) onExtractionSuccess(historyLen int) {
 	mw.logger.Debug("Memory worker: annotations saved successfully")
 	mw.mu.Lock()
 	mw.lastProcessedIdx = historyLen
-	mw.lastRunTime = time.Now()
-	mw.consecutiveFails = 0
 	mw.failNoticeSent = false
 	mw.mu.Unlock()
+	mw.coord.recordSuccess()
 	if mw.cli.contextBuilder != nil {
 		mw.cli.contextBuilder.InvalidateCache()
 	}
@@ -208,17 +200,16 @@ func (mw *memoryWorker) onExtractionFailure(err error, segment []models.Message,
 		mw.logger.Info("Memory worker: segment queued for retry", zap.String("file", path))
 	}
 
+	fails := mw.coord.recordFailure()
+
 	mw.mu.Lock()
-	mw.lastRunTime = time.Now()
 	if queued {
 		mw.lastProcessedIdx = historyLen
 	}
-	mw.consecutiveFails++
-	notify := mw.consecutiveFails >= memoryFailNoticeThreshold && !mw.failNoticeSent
+	notify := fails >= memoryFailNoticeThreshold && !mw.failNoticeSent
 	if notify {
 		mw.failNoticeSent = true
 	}
-	fails := mw.consecutiveFails
 	mw.mu.Unlock()
 
 	if notify {
