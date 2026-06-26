@@ -6,6 +6,7 @@
 package cli
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/diillson/chatcli/models"
@@ -29,6 +30,45 @@ func TestChatEnvelopeFooter_ShowsCostAndContext(t *testing.T) {
 	// A known-priced model yields a cost token and a context percentage.
 	assert.Contains(t, footer, "$", "footer shows a cost")
 	assert.Contains(t, footer, "ctx", "footer shows context fill")
+}
+
+func TestTelemetryParts_NilWhenNoUsage(t *testing.T) {
+	cli := &ChatCLI{Provider: "OPENAI", Model: "gpt-4o"}
+	assert.Nil(t, cli.telemetryParts(nil, 1.0, true), "no usage → no parts")
+	assert.Nil(t, cli.telemetryParts(&models.UsageInfo{}, 1.0, true), "zero usage → no parts")
+}
+
+func TestTelemetryParts_IncludeTokensPrependsSummary(t *testing.T) {
+	cli := &ChatCLI{Provider: "OPENAI", Model: "gpt-4o"}
+	usage := &models.UsageInfo{PromptTokens: 1000, CompletionTokens: 500}
+
+	withTokens := cli.telemetryParts(usage, 0.5, true)
+	if assert.NotEmpty(t, withTokens) {
+		// The leading part is the token in/out summary ("1000↑ 500↓").
+		assert.Contains(t, withTokens[0], "↑", "first part is the token summary")
+		assert.Contains(t, withTokens[0], "↓")
+	}
+
+	// Without tokens (chat footer path), the summary is absent.
+	noTokens := cli.telemetryParts(usage, 0.5, false)
+	if assert.NotEmpty(t, noTokens) {
+		assert.NotContains(t, noTokens[0], "↑", "footer path omits the token summary")
+	}
+}
+
+func TestTelemetryParts_ShowsCostAndContext(t *testing.T) {
+	cli := &ChatCLI{Provider: "OPENAI", Model: "gpt-4o"}
+	parts := cli.telemetryParts(&models.UsageInfo{PromptTokens: 1000, CompletionTokens: 500}, 0.5, true)
+
+	joined := strings.Join(parts, " · ")
+	assert.Contains(t, joined, "$", "shows the cost figure passed in")
+	assert.Contains(t, joined, "ctx", "shows context fill for a known-window model")
+}
+
+func TestTelemetryParts_OmitsCostWhenZero(t *testing.T) {
+	cli := &ChatCLI{Provider: "OPENAI", Model: "gpt-4o"}
+	parts := cli.telemetryParts(&models.UsageInfo{PromptTokens: 1000, CompletionTokens: 500}, 0, true)
+	assert.NotContains(t, strings.Join(parts, " · "), "$", "zero cost → no cost part")
 }
 
 func TestFormatTurnCost_Precision(t *testing.T) {

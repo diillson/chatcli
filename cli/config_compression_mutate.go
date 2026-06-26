@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/c-bata/go-prompt"
 	"github.com/diillson/chatcli/cli/compress"
@@ -43,6 +44,8 @@ func (cli *ChatCLI) routeConfigCompression(args []string) {
 		cli.showConfigCompression()
 	case "stats":
 		cli.showCompressionStats()
+	case "prune", "gc", "cleanup", "curate":
+		cli.pruneCompressionStore()
 	case "off", "disable", "none":
 		cli.setCompressionMode("off")
 	case "lossless", "safe":
@@ -85,6 +88,51 @@ func (cli *ChatCLI) setCompressionMode(modeStr string) {
 	fmt.Println(colorize("    "+i18n.T("cfg.compression.persist_hint", m.String()), ColorGray))
 }
 
+// pruneCompressionStore runs an on-demand curation pass over the CCR store
+// (TTL-expired entries + size-cap eviction) and reports what was freed, so the
+// user has an explicit lever instead of relying on the startup/throttled sweeps.
+func (cli *ChatCLI) pruneCompressionStore() {
+	if cli.compressionLayer == nil {
+		fmt.Println(colorize("  ❌ "+i18n.T("cfg.compression.unavailable"), ColorRed))
+		return
+	}
+	res := cli.compressionLayer.Prune()
+	if res.Removed == 0 {
+		fmt.Println(colorize("  ✔ "+i18n.T("cfg.compression.prune_none", res.RemainingEntries), ColorGray))
+		return
+	}
+	fmt.Println(colorize("  ✔ "+i18n.T("cfg.compression.prune_ok",
+		res.Removed, formatTokenCount(res.BytesFreed), res.RemainingEntries), ColorGreen))
+}
+
+// ccrStoreSummary renders the CCR footprint with curation visibility: entries,
+// bytes, and (when present) how many entries are already stale plus the oldest
+// entry's age, so the store is never an opaque blob.
+func ccrStoreSummary(store compress.StoreStats) string {
+	out := fmt.Sprintf("%d entries / %d bytes", store.Entries, store.TotalBytes)
+	if store.StaleEntries > 0 {
+		out += fmt.Sprintf(" · %s", i18n.T("cfg.compression.ccr_stale", store.StaleEntries))
+	}
+	if store.OldestAge > 0 {
+		out += fmt.Sprintf(" · %s", i18n.T("cfg.compression.ccr_oldest", formatAgeCompact(store.OldestAge)))
+	}
+	return out
+}
+
+// formatAgeCompact renders a duration as a short human age: "45m", "6h", "3d".
+func formatAgeCompact(d time.Duration) string {
+	switch {
+	case d >= 24*time.Hour:
+		return fmt.Sprintf("%dd", int(d.Hours())/24)
+	case d >= time.Hour:
+		return fmt.Sprintf("%dh", int(d.Hours()))
+	case d >= time.Minute:
+		return fmt.Sprintf("%dm", int(d.Minutes()))
+	default:
+		return fmt.Sprintf("%ds", int(d.Seconds()))
+	}
+}
+
 // showConfigCompression renders the compression panorama.
 func (cli *ChatCLI) showConfigCompression() {
 	sectionHeader("🗜️", "cfg.section.compression.title", ColorBlue)
@@ -104,8 +152,7 @@ func (cli *ChatCLI) showConfigCompression() {
 		stats, store := cli.compressionLayer.Stats()
 		kv(p, i18n.T("cfg.compression.saved"),
 			fmt.Sprintf("%d/%d bytes (%.0f%%)", stats.SavedBytes(), stats.BytesIn, (1-stats.Ratio())*100))
-		kv(p, i18n.T("cfg.compression.ccr_store"),
-			fmt.Sprintf("%d entries / %d bytes", store.Entries, store.TotalBytes))
+		kv(p, i18n.T("cfg.compression.ccr_store"), ccrStoreSummary(store))
 	}
 
 	fmt.Println(p)
@@ -131,7 +178,7 @@ func (cli *ChatCLI) showCompressionStats() {
 	for _, s := range stats.ByStrategy {
 		kv(p, "  "+s.Strategy, fmt.Sprintf("calls=%d  %d→%d bytes", s.Calls, s.BytesIn, s.BytesOut))
 	}
-	kv(p, i18n.T("cfg.compression.ccr_store"), fmt.Sprintf("%d entries / %d bytes", store.Entries, store.TotalBytes))
+	kv(p, i18n.T("cfg.compression.ccr_store"), ccrStoreSummary(store))
 	sectionEnd(ColorBlue)
 }
 
@@ -143,6 +190,7 @@ func (cli *ChatCLI) printConfigCompressionUsage() {
 	fmt.Println("  /config compression lossless   # " + i18n.T("cfg.compression.usage_lossless"))
 	fmt.Println("  /config compression off        # " + i18n.T("cfg.compression.usage_off"))
 	fmt.Println("  /config compression stats      # " + i18n.T("cfg.compression.usage_stats"))
+	fmt.Println("  /config compression prune      # " + i18n.T("cfg.compression.usage_prune"))
 	fmt.Println()
 	fmt.Println(colorize("  "+i18n.T("cfg.compression.usage_note"), ColorGray))
 }
@@ -159,6 +207,7 @@ func (cli *ChatCLI) getConfigCompressionSuggestions(d prompt.Document) []prompt.
 			{Text: "lossless", Description: i18n.T("complete.config.compression_lossless")},
 			{Text: "off", Description: i18n.T("complete.config.compression_off")},
 			{Text: "stats", Description: i18n.T("complete.config.compression_stats")},
+			{Text: "prune", Description: i18n.T("complete.config.compression_prune")},
 		}
 		return prompt.FilterHasPrefix(subs, word, true)
 	}

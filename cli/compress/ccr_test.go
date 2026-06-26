@@ -145,6 +145,124 @@ func TestDiskStoreTTLPruneOnReopen(t *testing.T) {
 	}
 }
 
+func TestDiskStorePruneRemovesStaleAndReports(t *testing.T) {
+	dir := t.TempDir()
+	s, _ := NewDiskStore(dir, 0, time.Hour)
+	kStale, _ := s.Put("stale payload")
+	kFresh, _ := s.Put("fresh payload")
+
+	// Backdate the stale entry beyond the TTL (in-memory recency drives prune).
+	s.mu.Lock()
+	s.entries[kStale].lastAccess = time.Now().Add(-2 * time.Hour)
+	s.mu.Unlock()
+
+	res := s.Prune()
+	if res.Removed != 1 {
+		t.Fatalf("Removed = %d, want 1", res.Removed)
+	}
+	if res.BytesFreed != int64(len("stale payload")) {
+		t.Fatalf("BytesFreed = %d, want %d", res.BytesFreed, len("stale payload"))
+	}
+	if res.RemainingEntries != 1 {
+		t.Fatalf("RemainingEntries = %d, want 1", res.RemainingEntries)
+	}
+	if _, ok, _ := s.Get(kStale); ok {
+		t.Fatal("stale entry survived Prune")
+	}
+	if _, ok, _ := s.Get(kFresh); !ok {
+		t.Fatal("Prune dropped the fresh entry")
+	}
+}
+
+func TestDiskStoreOnPutTTLSweep(t *testing.T) {
+	dir := t.TempDir()
+	s, _ := NewDiskStore(dir, 0, time.Hour)
+	kOld, _ := s.Put("old payload")
+
+	// Backdate the entry and force the sweep throttle open so the next Put
+	// triggers a mid-session TTL sweep (the daemon long-run gap).
+	s.mu.Lock()
+	s.entries[kOld].lastAccess = time.Now().Add(-2 * time.Hour)
+	s.lastTTLSweep = time.Now().Add(-2 * ccrTTLSweepInterval)
+	s.mu.Unlock()
+
+	if _, err := s.Put("new payload"); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok, _ := s.Get(kOld); ok {
+		t.Fatal("on-Put TTL sweep did not curate the stale entry")
+	}
+}
+
+func TestDiskStoreStatsReportsStaleAndOldest(t *testing.T) {
+	dir := t.TempDir()
+	s, _ := NewDiskStore(dir, 0, time.Hour)
+	kOld, _ := s.Put("old payload")
+	_, _ = s.Put("fresh payload")
+
+	s.mu.Lock()
+	s.entries[kOld].lastAccess = time.Now().Add(-3 * time.Hour)
+	s.mu.Unlock()
+
+	st := s.Stats()
+	if st.StaleEntries != 1 {
+		t.Fatalf("StaleEntries = %d, want 1", st.StaleEntries)
+	}
+	if st.TTL != time.Hour {
+		t.Fatalf("TTL = %v, want 1h", st.TTL)
+	}
+	if st.OldestAge < 3*time.Hour {
+		t.Fatalf("OldestAge = %v, want >= 3h", st.OldestAge)
+	}
+}
+
+func TestLayerPruneDelegatesToPruner(t *testing.T) {
+	dir := t.TempDir()
+	ds, err := NewDiskStore(dir, 0, time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	l := NewLayer(Config{Mode: ModeLossyWithCCR, Store: ds})
+
+	kStale, _ := ds.Put("stale payload")
+	_, _ = ds.Put("fresh payload")
+	ds.mu.Lock()
+	ds.entries[kStale].lastAccess = time.Now().Add(-2 * time.Hour)
+	ds.mu.Unlock()
+
+	res := l.Prune()
+	if res.Removed != 1 {
+		t.Fatalf("Layer.Prune Removed = %d, want 1", res.Removed)
+	}
+	if res.RemainingEntries != 1 {
+		t.Fatalf("RemainingEntries = %d, want 1", res.RemainingEntries)
+	}
+}
+
+func TestLayerPruneNilSafe(t *testing.T) {
+	var l *Layer
+	if got := l.Prune(); got != (PruneResult{}) {
+		t.Fatalf("nil Layer.Prune = %+v, want zero", got)
+	}
+	l2 := NewLayer(Config{Mode: ModeLossyWithCCR, Store: nil})
+	if got := l2.Prune(); got != (PruneResult{}) {
+		t.Fatalf("nil-store Layer.Prune = %+v, want zero", got)
+	}
+}
+
+func TestMemoryStorePruneIsNoop(t *testing.T) {
+	m := NewMemoryStore()
+	_, _ = m.Put("a")
+	_, _ = m.Put("bb")
+	res := m.Prune()
+	if res.Removed != 0 {
+		t.Fatalf("MemoryStore.Prune removed %d, want 0 (unbounded)", res.Removed)
+	}
+	if res.RemainingEntries != 2 {
+		t.Fatalf("RemainingEntries = %d, want 2", res.RemainingEntries)
+	}
+}
+
 func TestDiskStoreGetHandlesVanishedFile(t *testing.T) {
 	dir := t.TempDir()
 	s, _ := NewDiskStore(dir, 0, 0)

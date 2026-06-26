@@ -43,6 +43,11 @@ type TurnStats struct {
 	// Session totals (accumulated across all turns)
 	SessionAgents    int
 	SessionToolCalls int
+	// Telemetry is a pre-formatted, locale-aware, " · "-joined telemetry
+	// string (token in/out, context %, cost, compression savings) appended to
+	// the end of the turn line. A plain string (not a slice) keeps TurnStats
+	// comparable and the metrics package free of any cli/i18n/catalog import.
+	Telemetry string
 }
 
 func FormatTurnInfo(t, m int, d time.Duration, stats *TurnStats) string {
@@ -82,6 +87,12 @@ func FormatTurnInfo(t, m int, d time.Duration, stats *TurnStats) string {
 			if len(sessParts) > 0 {
 				p = append(p, fmt.Sprintf("%s(session: %s)%s", ColorGray, strings.Join(sessParts, ", "), ColorReset))
 			}
+		}
+
+		// Live telemetry (tokens · ctx% · cost · savings), pre-formatted by
+		// the caller. Mirrors what chat mode shows in its envelope footer.
+		if stats.Telemetry != "" {
+			p = append(p, fmt.Sprintf("%s%s%s", ColorGray, stats.Telemetry, ColorReset))
 		}
 	}
 	return strings.Join(p, " ")
