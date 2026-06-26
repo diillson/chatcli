@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.146.1](https://github.com/diillson/chatcli/compare/v1.146.0...v1.146.1) (2026-06-26)
+
+
+### Bug Fixes
+
+* **engine:** expand env vars and tilde in file tool paths ([#1103](https://github.com/diillson/chatcli/issues/1103)) ([6a38d3a](https://github.com/diillson/chatcli/commit/6a38d3a96bdddddfb03c777b5f036549bb0898d6))
+
 ## [1.146.0](https://github.com/diillson/chatcli/compare/v1.145.1...v1.146.0) (2026-06-25)
 
 
