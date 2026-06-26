@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.147.0](https://github.com/diillson/chatcli/compare/v1.146.1...v1.147.0) (2026-06-26)
+
+
+### Features
+
+* live telemetry in agent/coder + on-demand CCR curation ([#1105](https://github.com/diillson/chatcli/issues/1105)) ([e5d501d](https://github.com/diillson/chatcli/commit/e5d501dd2ec5f7c6e4aa2ae2713597d61039c14a))
+
 ## [1.146.1](https://github.com/diillson/chatcli/compare/v1.146.0...v1.146.1) (2026-06-26)
 
 
