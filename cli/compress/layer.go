@@ -248,3 +248,17 @@ func (l *Layer) Stats() (Stats, StoreStats) {
 	}
 	return l.metrics.Snapshot(), ss
 }
+
+// Prune curates the CCR store now (drop TTL-expired entries, evict to the size
+// cap) and returns what was removed. Used by `/config compression prune`. A nil
+// layer/store, or a Store that does not implement Pruner, is a no-op returning
+// a zero result.
+func (l *Layer) Prune() PruneResult {
+	if l == nil || l.store == nil {
+		return PruneResult{}
+	}
+	if p, ok := l.store.(Pruner); ok {
+		return p.Prune()
+	}
+	return PruneResult{}
+}

@@ -97,6 +97,23 @@ type StoreStats struct {
 	Entries    int
 	TotalBytes int64
 	MaxBytes   int64
+	// Curation visibility: age of the least-recently-accessed entry, how many
+	// entries are already past the TTL (i.e. would be removed by a prune), and
+	// the configured TTL (0 = disabled). Let the /config surface show that
+	// curation is happening rather than leaving the store opaque.
+	OldestAge    time.Duration
+	StaleEntries int
+	TTL          time.Duration
+}
+
+// PruneResult reports what a curation pass removed and what remains, so the
+// user gets concrete feedback ("freed N entries / X bytes") instead of a
+// silent cleanup.
+type PruneResult struct {
+	Removed          int
+	BytesFreed       int64
+	RemainingEntries int
+	RemainingBytes   int64
 }
 
 // Store persists compression originals for on-demand retrieval. Implementations
@@ -113,6 +130,16 @@ type Store interface {
 
 	// Stats reports the current footprint.
 	Stats() StoreStats
+}
+
+// Pruner is the optional capability of a Store that curates itself on demand —
+// dropping TTL-expired entries and evicting down to the size cap. It is kept
+// separate from Store (probed via a type assertion in Layer.Prune) so adding
+// curation does not break the Store contract for existing implementations.
+type Pruner interface {
+	// Prune curates the store now and returns what was removed. Idempotent
+	// and safe to call at any time.
+	Prune() PruneResult
 }
 
 // ─── MemoryStore ────────────────────────────────────────────────────────────
@@ -158,6 +185,14 @@ func (m *MemoryStore) Stats() StoreStats {
 	return StoreStats{Entries: len(m.data), TotalBytes: total, MaxBytes: 0}
 }
 
+// Prune implements Store. MemoryStore is unbounded and TTL-less (test/one-shot
+// use), so there is nothing to curate; it reports the current footprint as
+// remaining.
+func (m *MemoryStore) Prune() PruneResult {
+	st := m.Stats()
+	return PruneResult{RemainingEntries: st.Entries, RemainingBytes: st.TotalBytes}
+}
+
 // ─── DiskStore ──────────────────────────────────────────────────────────────
 
 // DiskStore is a bounded, content-addressed, crash-safe on-disk Store.
@@ -173,9 +208,10 @@ type DiskStore struct {
 	maxBytes int64
 	ttl      time.Duration
 
-	mu         sync.Mutex
-	entries    map[string]*diskEntry // key -> metadata
-	totalBytes int64
+	mu           sync.Mutex
+	entries      map[string]*diskEntry // key -> metadata
+	totalBytes   int64
+	lastTTLSweep time.Time // throttles the on-Put TTL sweep (see maybeSweepTTLLocked)
 }
 
 type diskEntry struct {
@@ -184,6 +220,13 @@ type diskEntry struct {
 }
 
 const ccrFileExt = ".ccr"
+
+// ccrTTLSweepInterval bounds how often a TTL sweep runs mid-session. TTL is
+// otherwise only enforced at startup (load); without this, a long-lived
+// process (e.g. the gateway daemon) would never expire stale entries until a
+// restart, relying solely on the LRU size cap. Hourly keeps the O(n) map scan
+// off the hot path while still curating during active use.
+const ccrTTLSweepInterval = time.Hour
 
 // NewDiskStore opens (creating if needed) a bounded store rooted at dir. A
 // maxBytes <= 0 disables the size cap; a ttl <= 0 disables TTL pruning. On
@@ -231,6 +274,7 @@ func (s *DiskStore) load() error {
 	}
 	s.pruneTTL(now)
 	s.evictLocked()
+	s.lastTTLSweep = now
 	return nil
 }
 
@@ -277,8 +321,23 @@ func (s *DiskStore) Put(content string) (string, error) {
 
 	s.entries[key] = &diskEntry{size: int64(len(content)), lastAccess: now}
 	s.totalBytes += int64(len(content))
+	s.maybeSweepTTLLocked(now)
 	s.evictLocked()
 	return key, nil
+}
+
+// maybeSweepTTLLocked runs a TTL prune at most once per ccrTTLSweepInterval so
+// stale entries are curated during a long-running session, not just at startup.
+// Caller must hold the mutex.
+func (s *DiskStore) maybeSweepTTLLocked(now time.Time) {
+	if s.ttl <= 0 {
+		return
+	}
+	if !s.lastTTLSweep.IsZero() && now.Sub(s.lastTTLSweep) < ccrTTLSweepInterval {
+		return
+	}
+	s.pruneTTL(now)
+	s.lastTTLSweep = now
 }
 
 // Get implements Store. A hit refreshes the entry's recency.
@@ -313,11 +372,55 @@ func (s *DiskStore) Get(key string) (string, bool, error) {
 	return string(data), true, nil
 }
 
-// Stats implements Store.
+// Stats implements Store. Beyond the raw footprint it computes the
+// least-recently-accessed entry's age and how many entries are already past
+// the TTL, so the /config surface can show curation status.
 func (s *DiskStore) Stats() StoreStats {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return StoreStats{Entries: len(s.entries), TotalBytes: s.totalBytes, MaxBytes: s.maxBytes}
+
+	now := time.Now()
+	var oldest time.Time
+	stale := 0
+	cutoff := now.Add(-s.ttl)
+	for _, e := range s.entries {
+		if oldest.IsZero() || e.lastAccess.Before(oldest) {
+			oldest = e.lastAccess
+		}
+		if s.ttl > 0 && e.lastAccess.Before(cutoff) {
+			stale++
+		}
+	}
+	var oldestAge time.Duration
+	if !oldest.IsZero() {
+		oldestAge = now.Sub(oldest)
+	}
+	return StoreStats{
+		Entries:      len(s.entries),
+		TotalBytes:   s.totalBytes,
+		MaxBytes:     s.maxBytes,
+		OldestAge:    oldestAge,
+		StaleEntries: stale,
+		TTL:          s.ttl,
+	}
+}
+
+// Prune implements Store: a TTL prune plus size-cap eviction, run on demand.
+func (s *DiskStore) Prune() PruneResult {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	beforeN, beforeBytes := len(s.entries), s.totalBytes
+	now := time.Now()
+	s.pruneTTL(now)
+	s.evictLocked()
+	s.lastTTLSweep = now
+	return PruneResult{
+		Removed:          beforeN - len(s.entries),
+		BytesFreed:       beforeBytes - s.totalBytes,
+		RemainingEntries: len(s.entries),
+		RemainingBytes:   s.totalBytes,
+	}
 }
 
 // pruneTTL removes entries whose last access is older than the TTL. Caller
