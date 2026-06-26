@@ -127,7 +127,11 @@ func (e *Engine) handleMultipatch(args []string) error {
 			return fmt.Errorf("edit #%d: replace decode failed: %w", idx, err)
 		}
 
-		abs, err := filepath.Abs(ed.File)
+		// ed.File arrives inside the --edits JSON, so it bypasses the
+		// path-flag expansion in parseFlags; expand it here too or a
+		// "~/x" / "$CHATCLI_AGENT_TMPDIR/x" edit target would resolve
+		// to a literal directory under the cwd.
+		abs, err := filepath.Abs(expandPath(ed.File))
 		if err != nil {
 			return fmt.Errorf("edit #%d: resolve path: %w", idx, err)
 		}

@@ -163,7 +163,10 @@ func normalizeDiffPath(p string) string {
 	p = strings.TrimSpace(p)
 	p = strings.TrimPrefix(p, "a/")
 	p = strings.TrimPrefix(p, "b/")
-	return p
+	// Diff-header paths bypass the parseFlags path expansion, so resolve
+	// "~"/env references here too and keep them comparable to the (already
+	// expanded) --file argument when matching hunks to a target file.
+	return expandPath(p)
 }
 
 func (e *Engine) applyHunksToFile(path string, hunks []diffHunk) error {
