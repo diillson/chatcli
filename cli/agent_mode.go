@@ -1477,6 +1477,16 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 		default:
 		}
 
+		// Surface background memory/skill writes (auto-extraction ticker,
+		// queued notices) the moment they land instead of holding them until
+		// the REPL regains control after the mode exits. Safe to drain here:
+		// the go-prompt redraw loop is suspended for the whole Run(), so this
+		// loop is the sole stdout writer — the race that made drain REPL-only
+		// (see memory_notice.go) does not apply inside the agent loop.
+		if !a.cli.unattended {
+			a.cli.drainMemoryNotices()
+		}
+
 		// Check for type-ahead messages from user (works in both /agent and
 		// /coder modes). Lines typed while the LLM was streaming or while a
 		// tool was running get drained into the conversation as a fresh user
@@ -1661,13 +1671,15 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 
 		// Track cost for agent mode turn — prefer real API usage.
 		// Attribute to whichever provider+model the resolver actually
-		// served this turn (see clientAndCtxForTurn).
+		// served this turn (see clientAndCtxForTurn). turnUsage is hoisted
+		// so the per-turn telemetry line (showTurnStats) can reuse it.
+		var turnUsage *models.UsageInfo
 		if a.cli.costTracker != nil && err == nil {
 			inputChars := 0
 			for _, m := range turnHistory {
 				inputChars += len(m.Content)
 			}
-			usage := llmclient.GetUsageOrEstimate(turnClient, inputChars, len(aiResponse))
+			turnUsage = llmclient.GetUsageOrEstimate(turnClient, inputChars, len(aiResponse))
 			effProvider := a.cli.Provider
 			effModel := a.cli.Model
 			if a.skillModelHint != "" {
@@ -1675,7 +1687,7 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 				effProvider = resolution.Provider
 				effModel = resolution.Model
 			}
-			a.cli.costTracker.RecordRealUsage(effProvider, effModel, usage)
+			a.cli.costTracker.RecordRealUsage(effProvider, effModel, turnUsage)
 		}
 
 		// Para o timer e obtém a duração
@@ -1691,11 +1703,19 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 			if a.cli.unattended {
 				return
 			}
+			// Live telemetry (tokens · ctx% · session cost · savings), reusing
+			// the exact data sources behind chat mode's envelope footer so the
+			// user stays aware of spend/context inside agent & coder too.
+			var telem string
+			if turnUsage != nil && a.cli.costTracker != nil {
+				telem = strings.Join(a.cli.telemetryParts(turnUsage, a.cli.costTracker.TotalCost(), true), " · ")
+			}
 			fmt.Println(metrics.FormatTurnInfo(turn+1, maxTurns, turnDuration, &metrics.TurnStats{
 				TurnAgents:       turnAgents,
 				TurnToolCalls:    turnToolCalls,
 				SessionAgents:    a.agentsLaunched,
 				SessionToolCalls: a.toolCallsExecd,
+				Telemetry:        telem,
 			}))
 		}
 
@@ -3002,6 +3022,7 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 		if !a.cli.unattended {
 			fmt.Println(renderer.Colorize("\n"+i18n.T("agent.status.task_completed"), agent.ColorGreen+agent.ColorBold))
 		}
+		a.emitSessionSummary()
 		return nil
 	}
 
@@ -3009,7 +3030,36 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 		"\n"+i18n.T("agent.status.max_turns_stopped", maxTurns),
 		agent.ColorYellow,
 	))
+	a.emitSessionSummary()
 	return nil
+}
+
+// emitSessionSummary prints a one-line wrap-up of cumulative session spend
+// (tokens · cost · compression savings) when an agent/coder run finishes, so
+// the user gets the same close-out awareness chat mode gives per reply. The
+// figures are session-cumulative (the cost tracker spans the whole CLI
+// session, like /cost). No-op when unattended or when nothing was tracked.
+func (a *AgentMode) emitSessionSummary() {
+	if a.cli.unattended || a.cli.costTracker == nil {
+		return
+	}
+	totalTokens := a.cli.costTracker.TotalTokens()
+	totalCost := a.cli.costTracker.TotalCost()
+	if totalTokens == 0 && totalCost == 0 {
+		return
+	}
+	parts := []string{formatTokenCount(totalTokens)}
+	if totalCost > 0 {
+		parts = append(parts, formatTurnCost(totalCost))
+	}
+	if a.cli.compressionLayer != nil {
+		if s, _ := a.cli.compressionLayer.Stats(); s.SavedBytes() > 0 {
+			if savedTok := s.SavedBytes() / 4; savedTok > 0 {
+				parts = append(parts, i18n.T("chat.envelope.compression_saved", formatTokenCount(savedTok)))
+			}
+		}
+	}
+	fmt.Println(colorize("  "+i18n.T("agent.telemetry.session", strings.Join(parts, " · ")), ColorGray))
 }
 
 func (a *AgentMode) continueWithNewAIResponse(ctx context.Context) {

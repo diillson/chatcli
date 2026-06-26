@@ -1281,6 +1281,7 @@
   "multiline.canceled": "multiline cancelled",
   "agent.status.task_completed": "🏁 TASK COMPLETED",
   "agent.status.max_turns_stopped": "⚠️ Limit of %d steps reached. The agent stopped to prevent an infinite loop.",
+  "agent.telemetry.session": "session: %s",
   "agent.label.command": "Command",
   "agent.dryrun.label": "Dry-run",
   "agent.dryrun.failed": "Dry-run failed",

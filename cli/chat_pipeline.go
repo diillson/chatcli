@@ -744,9 +744,30 @@ func (cli *ChatCLI) chatEnvelopeFooter(usage *models.UsageInfo) string {
 	turnCost := float64(usage.PromptTokens)/1_000_000*inputCost +
 		float64(usage.CompletionTokens)/1_000_000*outputCost
 
-	parts := make([]string, 0, 2)
-	if turnCost > 0 {
-		parts = append(parts, formatTurnCost(turnCost))
+	parts := cli.telemetryParts(usage, turnCost, false)
+	if len(parts) == 0 {
+		return ""
+	}
+	return colorize(" "+strings.Join(parts, " · ")+" ", ColorGray)
+}
+
+// telemetryParts builds the shared cost/context/savings telemetry rendered both
+// in the chat envelope footer and the agent/coder per-turn line, so the two
+// stay in lockstep. costUSD is the cost figure to show — per-turn for the chat
+// footer, accumulated-session for agent/coder where many turns run unattended.
+// When includeTokens is set, a leading "in↑ out↓" token summary is prepended
+// (the agent line has no header to carry it, unlike the chat envelope). Returns
+// nil when usage is unreported so callers can omit the telemetry cleanly.
+func (cli *ChatCLI) telemetryParts(usage *models.UsageInfo, costUSD float64, includeTokens bool) []string {
+	if usage == nil || (usage.PromptTokens == 0 && usage.CompletionTokens == 0) {
+		return nil
+	}
+	parts := make([]string, 0, 4)
+	if includeTokens {
+		parts = append(parts, i18n.T("chat.envelope.tokens", usage.PromptTokens, usage.CompletionTokens))
+	}
+	if costUSD > 0 {
+		parts = append(parts, formatTurnCost(costUSD))
 	}
 	if window := catalog.GetContextWindow(cli.Provider, cli.Model); window > 0 {
 		pct := float64(usage.PromptTokens) / float64(window) * 100
@@ -761,10 +782,7 @@ func (cli *ChatCLI) chatEnvelopeFooter(usage *models.UsageInfo) string {
 			}
 		}
 	}
-	if len(parts) == 0 {
-		return ""
-	}
-	return colorize(" "+strings.Join(parts, " · ")+" ", ColorGray)
+	return parts
 }
 
 // formatTurnCost renders a per-turn cost compactly: sub-cent costs keep four
