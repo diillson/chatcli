@@ -8,16 +8,24 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strings"
 	"unicode/utf8"
 )
 
-// pathFlagNames are the path-bearing string flags whose leading "~" must be
-// expanded to the user's home directory after parsing. Without this, a model
-// passing "~/proj/main.go" makes the engine create a literal "~" directory
-// under the cwd (filepath.Abs leaves "~" untouched). Expanding here is a single
-// chokepoint that covers every command (write/patch/read/tree/search/git/...).
+// pathFlagNames are the path-bearing string flags whose shell-style references
+// (a leading "~" and environment variables) must be expanded after parsing.
+// Without this, a model passing "~/proj/main.go" or "$CHATCLI_AGENT_TMPDIR/x"
+// makes the engine create a literal "~" / "$CHATCLI_AGENT_TMPDIR" directory
+// under the cwd (filepath.Abs leaves both untouched). Expanding here is a
+// single chokepoint that covers every command (write/patch/read/tree/search/
+// git/...).
 var pathFlagNames = []string{"file", "dir", "path"}
+
+// winEnvVarPattern matches Windows-style "%VAR%" environment references. Only
+// applied on Windows so a literal "%" on POSIX (valid filename char) is never
+// misread as a variable delimiter.
+var winEnvVarPattern = regexp.MustCompile(`%([A-Za-z_][A-Za-z0-9_]*)%`)
 
 // parseFlags parses flags with ContinueOnError and returns a descriptive error.
 func parseFlags(fs *flag.FlagSet, args []string) error {
@@ -35,11 +43,58 @@ func parseFlags(fs *flag.FlagSet, args []string) error {
 		if f == nil {
 			continue
 		}
-		if v := f.Value.String(); strings.HasPrefix(v, "~") {
-			_ = f.Value.Set(expandUserPath(v))
+		// Expand unconditionally: env-var references can sit anywhere in the
+		// value ("$DIR/file", "%TEMP%\\x"), not just at the front like "~".
+		if v := f.Value.String(); v != "" {
+			if exp := expandPath(v); exp != v {
+				_ = f.Value.Set(exp)
+			}
 		}
 	}
 	return nil
+}
+
+// expandPath normalizes a path-bearing value the way a shell would, so the
+// engine writes to the intended location instead of creating a literal
+// directory named after an unexpanded token. Environment variables are
+// resolved first (their values may themselves begin with "~"), then a leading
+// "~"/"~/". It is OS-aware (POSIX "$VAR"/"${VAR}" everywhere, Windows "%VAR%")
+// and idempotent on already-expanded or plain paths.
+func expandPath(path string) string {
+	if path == "" {
+		return path
+	}
+	return expandUserPath(expandEnv(path))
+}
+
+// expandEnv resolves environment-variable references in a path: "$VAR" and
+// "${VAR}" on every OS, plus "%VAR%" on Windows.
+//
+// Unset variables are deliberately preserved verbatim instead of collapsing to
+// the empty string. os.ExpandEnv would turn "$UNSET/file" into "/file" —
+// silently retargeting a write to the filesystem root — so we map through
+// os.Expand with a lookup that keeps the original reference when a variable is
+// missing. validatePath/Write then fails loudly on the literal token rather
+// than writing somewhere unexpected.
+func expandEnv(path string) string {
+	expanded := os.Expand(path, func(name string) string {
+		if name == "" {
+			return "$" // lone "$" with no following name: keep it literal
+		}
+		if v, ok := os.LookupEnv(name); ok {
+			return v
+		}
+		return "${" + name + "}"
+	})
+	if runtime.GOOS == "windows" {
+		expanded = winEnvVarPattern.ReplaceAllStringFunc(expanded, func(tok string) string {
+			if v, ok := os.LookupEnv(tok[1 : len(tok)-1]); ok {
+				return v
+			}
+			return tok // unset: leave "%VAR%" literal, never collapse
+		})
+	}
+	return expanded
 }
 
 // expandUserPath expands a leading "~" or "~/" to the user's home directory.
