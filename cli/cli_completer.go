@@ -1534,6 +1534,7 @@ func (cli *ChatCLI) getConfigSuggestions(d prompt.Document) []prompt.Suggest {
 			{Text: "chat", Description: i18n.T("cfg.section.chat.title")},
 			{Text: "image", Description: i18n.T("cfg.section.image.title")},
 			{Text: "diagram", Description: i18n.T("cfg.section.diagram.title")},
+			{Text: "graphview", Description: i18n.T("cfg.section.graphview.title")},
 			{Text: "compression", Description: i18n.T("cfg.section.compression.title")},
 			{Text: "output", Description: i18n.T("cfg.section.output.title")},
 			{Text: "scheduler", Description: i18n.T("cfg.section.scheduler.title")},

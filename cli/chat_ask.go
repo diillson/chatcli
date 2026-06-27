@@ -64,19 +64,20 @@ func (cli *ChatCLI) maybeChatAskTurn(
 ) (string, bool, error) {
 	askOn := chatAskEnabled()
 	kbOn := cli.chatKnowledgeActive()
-	if !askOn && !kbOn {
+	gvOn := chatGraphViewEnabled()
+	if !askOn && !kbOn && !gvOn {
 		return "", false, nil
 	}
 	// Native tool-use providers: buffered decision turn offering only the
 	// sanctioned exception tools.
 	if tac, ok := client.AsToolAware(activeClient); ok && tac.SupportsNativeTools() {
 		out, err := cli.executeChatAskNative(ctx, tac, activeClient, userInput, additionalContext,
-			tempHistory, effectiveMaxTokens, resolution, stopSpinner, askOn, kbOn)
+			tempHistory, effectiveMaxTokens, resolution, stopSpinner, askOn, kbOn, gvOn)
 		return out, true, err
 	}
 	// Providers without native tools (e.g. Claude in OAuth mode): XML transport.
 	out, err := cli.executeChatAskXML(ctx, activeClient, userInput, additionalContext,
-		tempHistory, effectiveMaxTokens, stopSpinner, askOn, kbOn)
+		tempHistory, effectiveMaxTokens, stopSpinner, askOn, kbOn, gvOn)
 	return out, true, err
 }
 
@@ -103,7 +104,7 @@ func (cli *ChatCLI) executeChatAskNative(
 	effectiveMaxTokens int,
 	resolution SkillClientResolution,
 	stopSpinner func(),
-	askOn, kbOn bool,
+	askOn, kbOn, gvOn bool,
 ) (string, error) {
 	var tools []models.ToolDefinition
 	if askOn {
@@ -112,8 +113,12 @@ func (cli *ChatCLI) executeChatAskNative(
 	if kbOn {
 		tools = append(tools, knowledgeToolDefinition())
 	}
+	if gvOn {
+		tools = append(tools, graphViewToolDefinition())
+	}
 	prompt := userInput + additionalContext
 	history := tempHistory
+	gvDone := false
 
 	for round := 0; ; round++ {
 		resp, err := tac.SendPromptWithTools(ctx, prompt, history, tools, effectiveMaxTokens)
@@ -128,7 +133,7 @@ func (cli *ChatCLI) executeChatAskNative(
 			cli.costTracker.RecordRealUsage(resolution.Provider, resolution.Model, resp.Usage)
 		}
 
-		var askArgs, kbArgs string
+		var askArgs, kbArgs, gvArgs string
 		if resp != nil {
 			for _, tc := range resp.ToolCalls {
 				switch {
@@ -136,6 +141,8 @@ func (cli *ChatCLI) executeChatAskNative(
 					askArgs = tc.ArgumentsJSON()
 				case kbOn && isKnowledgeToolName(tc.Name) && kbArgs == "":
 					kbArgs = tc.ArgumentsJSON()
+				case gvOn && isGraphViewToolName(tc.Name) && gvArgs == "":
+					gvArgs = tc.ArgumentsJSON()
 				}
 			}
 		}
@@ -144,6 +151,15 @@ func (cli *ChatCLI) executeChatAskNative(
 		if kbArgs != "" && round < chatKnowledgeMaxRounds {
 			result := cli.runChatKnowledge(ctx, kbArgs)
 			history, prompt = appendKnowledgeRound(history, prompt, kbArgs, result)
+			continue
+		}
+
+		// Graph render: a one-shot action — render once, fold the result in, and
+		// let the next round produce the natural-language confirmation.
+		if gvArgs != "" && !gvDone {
+			result := cli.runChatGraphView(ctx, gvArgs)
+			history, prompt = appendGraphViewRound(history, prompt, gvArgs, result)
+			gvDone = true
 			continue
 		}
 
@@ -174,7 +190,7 @@ func (cli *ChatCLI) executeChatAskXML(
 	tempHistory []models.Message,
 	effectiveMaxTokens int,
 	stopSpinner func(),
-	askOn, kbOn bool,
+	askOn, kbOn, gvOn bool,
 ) (string, error) {
 	instruction := ""
 	if askOn {
@@ -183,8 +199,12 @@ func (cli *ChatCLI) executeChatAskXML(
 	if kbOn {
 		instruction += chatKnowledgeXMLInstruction()
 	}
+	if gvOn {
+		instruction += chatGraphViewXMLInstruction()
+	}
 	prompt := userInput + additionalContext + instruction
 	history := tempHistory
+	gvDone := false
 
 	for round := 0; ; round++ {
 		resp, err := activeClient.SendPrompt(ctx, prompt, history, effectiveMaxTokens)
@@ -197,13 +217,15 @@ func (cli *ChatCLI) executeChatAskXML(
 		}
 
 		calls, _ := agent.ParseToolCalls(resp)
-		var askArgs, kbArgs string
+		var askArgs, kbArgs, gvArgs string
 		for _, tc := range calls {
 			switch {
 			case askOn && isAskToolName(tc.Name) && askArgs == "":
 				askArgs = tc.Args
 			case kbOn && isKnowledgeToolName(tc.Name) && kbArgs == "":
 				kbArgs = tc.Args
+			case gvOn && isGraphViewToolName(tc.Name) && gvArgs == "":
+				gvArgs = tc.Args
 			}
 		}
 
@@ -213,6 +235,15 @@ func (cli *ChatCLI) executeChatAskXML(
 			result := cli.runChatKnowledge(ctx, kbArgs)
 			history, prompt = appendKnowledgeRound(history, prompt, kbArgs, result)
 			prompt += chatKnowledgeXMLInstruction()
+			continue
+		}
+
+		// Graph render: one-shot — render once, fold in the result, then let the
+		// next round produce the natural-language confirmation.
+		if gvArgs != "" && !gvDone {
+			result := cli.runChatGraphView(ctx, gvArgs)
+			history, prompt = appendGraphViewRound(history, prompt, gvArgs, result)
+			gvDone = true
 			continue
 		}
 

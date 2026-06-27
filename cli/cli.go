@@ -500,6 +500,14 @@ func NewChatCLI(ctx context.Context, manager manager.LLMManager, logger *zap.Log
 		// no external `dot` to install, no network. Also builds the real Go
 		// import graph of a module via `go list`. Self-contained.
 		pluginMgr.RegisterBuiltinPlugin(plugins.NewBuiltinDiagramPlugin())
+		// @graphview — render an INTERACTIVE, Obsidian-style force-directed
+		// graph (drag/zoom/pan/search/filter) to a self-contained HTML file
+		// and open it in the browser. The physics engine is embedded JS on a
+		// canvas: no CDN, no network, no API key. Sources: json (model-
+		// supplied nodes/edges — e.g. the conversation), knowledge (the
+		// in-core knowledge graph) and conversation (a structural session
+		// graph). Provider for the latter two wired below.
+		pluginMgr.RegisterBuiltinPlugin(plugins.NewBuiltinGraphViewPlugin())
 		// @compress / @recall — content-aware, reversible context compression
 		// (CCR). @compress shrinks bulky payloads (logs/search/diff/JSON) on
 		// demand; @recall restores the byte-identical original from a
@@ -639,6 +647,9 @@ func NewChatCLI(ctx context.Context, manager manager.LLMManager, logger *zap.Log
 	// @context adapter — lets the agent create/attach/detach/inspect its own
 	// context bases over the same live manager.
 	plugins.SetContextAdapter(&contextPluginAdapter{cli: cli})
+	// @graphview provider — feeds the knowledge/conversation sources from this
+	// session's in-core knowledge graph and message history.
+	plugins.SetGraphSourceProvider(&graphViewPluginAdapter{cli: cli})
 
 	// Wire the @send tool to the gateway platform registry. Independent of
 	// the memory store and of the gateway daemon lifecycle: adapters are

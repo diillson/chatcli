@@ -168,6 +168,7 @@ func TestMaybeChatAskTurn_XMLKnowledgeLoop(t *testing.T) {
 func TestMaybeChatAskTurn_BothDisabled(t *testing.T) {
 	t.Setenv(chatAskEnvVar, "false")
 	t.Setenv(chatKnowledgeEnvVar, "false")
+	t.Setenv(chatGraphViewEnvVar, "false")
 	cli := newKnowledgeTestCLI(t)
 	cli.animation = NewAnimationManager()
 	if _, handled, _ := cli.maybeChatAskTurn(context.Background(), &askLLMFake{}, "hi", "", nil, 500, SkillClientResolution{}, func() {}); handled {

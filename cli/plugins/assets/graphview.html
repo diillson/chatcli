@@ -1,0 +1,621 @@
+<!doctype html>
+<!--
+  ChatCLI — interactive graph view (Obsidian-style).
+  Self-contained, dependency-free, offline. The Go @graphview tool replaces the
+  data placeholder below (in the GRAPH assignment) with a JSON object
+  {title, theme, nodes, edges}.
+  Rendering: a force-directed simulation on <canvas> with drag, zoom/pan, search,
+  type filtering, a legend, and a dark/light theme. No CDN, no network, no API key.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>ChatCLI · Graph</title>
+<style>
+  :root {
+    --bg: #1e1e2e; --panel: #181825cc; --panel-border: #313244;
+    --text: #cdd6f4; --muted: #9399b2; --edge: #45475a; --edge-hi: #cdd6f4;
+    --accent: #89b4fa; --shadow: rgba(0,0,0,.45);
+  }
+  body.light {
+    --bg: #f6f6fb; --panel: #ffffffd9; --panel-border: #d3d3e0;
+    --text: #2a2a3c; --muted: #6b6b80; --edge: #c2c2d4; --edge-hi: #2a2a3c;
+    --accent: #3b6ea5; --shadow: rgba(0,0,0,.15);
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; overflow: hidden; background: var(--bg); }
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; color: var(--text); }
+  /* width/height are REQUIRED: <canvas> is a replaced element, so `inset:0`
+     alone leaves it at its intrinsic size (a small square in the corner). The
+     explicit 100%/100% is what makes it fill the viewport. */
+  #canvas { display: block; position: fixed; inset: 0; width: 100%; height: 100%; cursor: grab; touch-action: none; }
+  #canvas.grabbing { cursor: grabbing; }
+
+  .panel {
+    position: fixed; background: var(--panel); border: 1px solid var(--panel-border);
+    border-radius: 12px; backdrop-filter: blur(8px); box-shadow: 0 6px 24px var(--shadow);
+  }
+  #toolbar { top: 16px; left: 16px; padding: 10px 12px; display: flex; gap: 8px; align-items: center; max-width: calc(100vw - 32px); }
+  #title { font-weight: 600; font-size: 14px; margin-right: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 30vw; }
+  #search {
+    background: transparent; border: 1px solid var(--panel-border); color: var(--text);
+    border-radius: 8px; padding: 6px 10px; font-size: 13px; outline: none; width: 200px;
+  }
+  #search:focus { border-color: var(--accent); }
+  .btn {
+    background: transparent; border: 1px solid var(--panel-border); color: var(--text);
+    border-radius: 8px; padding: 6px 9px; font-size: 13px; cursor: pointer; user-select: none; line-height: 1;
+  }
+  .btn:hover { border-color: var(--accent); color: var(--accent); }
+  #stats { color: var(--muted); font-size: 12px; white-space: nowrap; }
+
+  #legend { top: 16px; right: 16px; padding: 10px 12px; max-width: 240px; max-height: 70vh; overflow-y: auto; }
+  #legend h4 { margin: 0 0 8px; font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); font-weight: 600; }
+  .legend-row { display: flex; align-items: center; gap: 8px; padding: 3px 4px; border-radius: 6px; cursor: pointer; user-select: none; font-size: 13px; }
+  .legend-row:hover { background: var(--panel-border); }
+  .legend-row.off { opacity: .4; }
+  .swatch { width: 12px; height: 12px; border-radius: 3px; flex: none; }
+  .legend-row .count { margin-left: auto; color: var(--muted); font-size: 12px; }
+
+  #tooltip {
+    position: fixed; pointer-events: none; max-width: 320px; padding: 8px 11px; font-size: 12.5px;
+    line-height: 1.4; opacity: 0; transition: opacity .12s; z-index: 10;
+  }
+  #tooltip .tt-kind { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .05em; }
+  #tooltip .tt-title { font-weight: 600; margin: 2px 0; }
+  #tooltip .tt-summary { color: var(--muted); }
+
+  #detail { left: 16px; bottom: 16px; max-width: 340px; padding: 12px 14px; display: none; }
+  #detail .d-kind { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .05em; }
+  #detail .d-title { font-weight: 600; font-size: 15px; margin: 3px 0 6px; }
+  #detail .d-summary { color: var(--muted); font-size: 12.5px; line-height: 1.45; max-height: 30vh; overflow-y: auto; }
+  #detail .d-neighbors { margin-top: 8px; font-size: 12px; }
+  #detail .d-neighbors b { color: var(--text); }
+  #detail .d-close { position: absolute; top: 8px; right: 10px; cursor: pointer; color: var(--muted); font-size: 16px; line-height: 1; }
+  #detail .d-close:hover { color: var(--accent); }
+
+  #empty { position: fixed; inset: 0; display: none; align-items: center; justify-content: center; color: var(--muted); font-size: 15px; }
+  #hint { position: fixed; bottom: 14px; left: 16px; color: var(--muted); font-size: 11.5px; opacity: .8; }
+
+  /* Responsive: on narrow / touch screens the toolbar wraps, the search grows
+     to fill the row, the title is hidden to save space, the legend docks to the
+     bottom as a scrollable strip, and the hint is dropped. */
+  @media (max-width: 720px) {
+    #toolbar { left: 8px; right: 8px; top: 8px; flex-wrap: wrap; padding: 8px; }
+    #title { display: none; }
+    #search { flex: 1 1 120px; width: auto; min-width: 0; }
+    #stats { flex-basis: 100%; }
+    #legend {
+      top: auto; bottom: 8px; left: 8px; right: 8px; max-width: none;
+      max-height: 28vh; display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: center;
+    }
+    #legend h4 { width: 100%; margin: 0 0 4px; }
+    .legend-row { padding: 2px 6px; }
+    #hint { display: none; }
+  }
+  @media (hover: none) { #hint { display: none; } }
+</style>
+</head>
+<body>
+<canvas id="canvas"></canvas>
+
+<div id="toolbar" class="panel">
+  <span id="title"></span>
+  <input id="search" type="search" placeholder="Search…" autocomplete="off" spellcheck="false" />
+  <button class="btn" id="fit" title="Fit to view">Fit</button>
+  <button class="btn" id="reheat" title="Re-run layout">Reheat</button>
+  <button class="btn" id="theme" title="Toggle theme">◐</button>
+  <span id="stats"></span>
+</div>
+
+<div id="legend" class="panel"><h4>Types</h4><div id="legend-rows"></div></div>
+<div id="tooltip" class="panel"></div>
+<div id="detail" class="panel"></div>
+<div id="empty">This graph has no nodes.</div>
+<div id="hint">drag nodes · scroll to zoom · drag background to pan · click a type to filter</div>
+
+<script>
+"use strict";
+const GRAPH = __CHATCLI_GRAPH_DATA__;
+
+// ---- palette by node kind (mirrors cli kindColor, plus generic fallbacks) ----
+const KIND_COLORS = {
+  profile: "#f9e2af", project: "#89b4fa", topic: "#a6e3a1", skill: "#cba6f7",
+  fact: "#94e2d5", tag: "#9399b2", message: "#89b4fa", user: "#f9e2af",
+  assistant: "#a6e3a1", tool: "#cba6f7", file: "#fab387", entity: "#f38ba8",
+};
+const FALLBACK_COLORS = ["#89b4fa","#a6e3a1","#cba6f7","#fab387","#f38ba8","#94e2d5","#f9e2af","#74c7ec"];
+const kindPalette = {};
+let fallbackIdx = 0;
+function colorFor(kind) {
+  const k = (kind || "node").toLowerCase();
+  if (KIND_COLORS[k]) return KIND_COLORS[k];
+  if (!kindPalette[k]) kindPalette[k] = FALLBACK_COLORS[fallbackIdx++ % FALLBACK_COLORS.length];
+  return kindPalette[k];
+}
+
+// ---- model ----
+const canvas = document.getElementById("canvas");
+const ctx = canvas.getContext("2d");
+let DPR = Math.max(1, window.devicePixelRatio || 1);
+
+const rawNodes = Array.isArray(GRAPH.nodes) ? GRAPH.nodes : [];
+const rawEdges = Array.isArray(GRAPH.edges) ? GRAPH.edges : [];
+document.getElementById("title").textContent = GRAPH.title || "Graph";
+if (GRAPH.theme === "light") document.body.classList.add("light");
+
+const nodes = [];
+const byId = new Map();
+const kindOn = {};   // kind -> visible
+const kindCount = {};
+// seed deterministic spiral positions so layout is reproducible run-to-run
+rawNodes.forEach((n, i) => {
+  const k = (n.kind || "node").toLowerCase();
+  kindCount[k] = (kindCount[k] || 0) + 1;
+  if (kindOn[k] === undefined) kindOn[k] = true;
+  const ang = i * 2.399963229728653; // golden angle
+  const r = 12 * Math.sqrt(i + 1);
+  const node = {
+    id: n.id, label: n.label || n.title || n.id, kind: k,
+    summary: n.summary || "", weight: typeof n.weight === "number" ? n.weight : 1,
+    x: Math.cos(ang) * r, y: Math.sin(ang) * r, vx: 0, vy: 0, deg: 0, pinned: false,
+  };
+  nodes.push(node);
+  byId.set(node.id, node);
+});
+
+const edges = [];
+for (const e of rawEdges) {
+  const a = byId.get(e.source), b = byId.get(e.target);
+  if (!a || !b || a === b) continue;
+  const w = typeof e.weight === "number" && e.weight > 0 ? e.weight : 1;
+  edges.push({ a, b, w });
+  a.deg++; b.deg++;
+}
+// node radius from degree + intrinsic weight
+for (const n of nodes) n.r = 5 + Math.sqrt(n.deg + 1) * 3 + Math.min(n.weight, 6);
+
+if (nodes.length === 0) document.getElementById("empty").style.display = "flex";
+
+// ---- camera ----
+let cam = { x: 0, y: 0, scale: 1 };
+function worldToScreen(x, y) { return [ (x - cam.x) * cam.scale + canvas.clientWidth / 2, (y - cam.y) * cam.scale + canvas.clientHeight / 2 ]; }
+function screenToWorld(sx, sy) { return [ (sx - canvas.clientWidth / 2) / cam.scale + cam.x, (sy - canvas.clientHeight / 2) / cam.scale + cam.y ]; }
+
+function resize() {
+  DPR = Math.max(1, window.devicePixelRatio || 1);
+  canvas.width = Math.floor(canvas.clientWidth * DPR);
+  canvas.height = Math.floor(canvas.clientHeight * DPR);
+}
+// userInteracted goes true the first time the user pans/zooms/drags. Until
+// then the camera auto-frames the graph every frame and on every resize, so the
+// view always fills the window (a small/settling graph never sits tiny in a
+// corner). After interaction we respect the user's chosen camera.
+let userInteracted = false;
+function onResize() { resize(); if (!userInteracted) fitToView(); }
+window.addEventListener("resize", onResize);
+resize();
+
+function fitToView() {
+  const vis = nodes.filter(visible);
+  if (vis.length === 0) return;
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  for (const n of vis) {
+    minX = Math.min(minX, n.x - n.r); minY = Math.min(minY, n.y - n.r);
+    maxX = Math.max(maxX, n.x + n.r); maxY = Math.max(maxY, n.y + n.r);
+  }
+  const pad = 100;
+  const w = Math.max(1, maxX - minX), h = Math.max(1, maxY - minY);
+  const s = Math.min((canvas.clientWidth - pad) / w, (canvas.clientHeight - pad) / h);
+  // Allow zooming IN (up to 4×) so a small graph fills a large window, but never
+  // so far that single nodes look huge.
+  cam.scale = Math.max(0.05, Math.min(s, 4));
+  cam.x = (minX + maxX) / 2; cam.y = (minY + maxY) / 2;
+}
+
+// ---- physics: repulsion + spring + gravity, with damping ----
+let alpha = 1;           // cooling factor
+const REPULSION = 9000;
+const SPRING_LEN = 70;
+const SPRING_K = 0.02;
+const GRAVITY = 0.012;
+const DAMPING = 0.86;
+
+function step() {
+  if (alpha < 0.002) return;
+  const N = nodes.length;
+  for (const n of nodes) { n.fx = 0; n.fy = 0; }
+  // pairwise repulsion (O(n^2) — fine for the bounded graphs we render)
+  for (let i = 0; i < N; i++) {
+    const a = nodes[i];
+    if (!visible(a)) continue;
+    for (let j = i + 1; j < N; j++) {
+      const b = nodes[j];
+      if (!visible(b)) continue;
+      let dx = a.x - b.x, dy = a.y - b.y;
+      let d2 = dx * dx + dy * dy;
+      if (d2 < 0.01) { dx = (Math.random() - 0.5); dy = (Math.random() - 0.5); d2 = dx * dx + dy * dy + 0.01; }
+      const f = REPULSION / d2;
+      const d = Math.sqrt(d2);
+      const ux = dx / d, uy = dy / d;
+      a.fx += ux * f; a.fy += uy * f;
+      b.fx -= ux * f; b.fy -= uy * f;
+    }
+  }
+  // springs along edges
+  for (const e of edges) {
+    if (!visible(e.a) || !visible(e.b)) continue;
+    const dx = e.b.x - e.a.x, dy = e.b.y - e.a.y;
+    const d = Math.sqrt(dx * dx + dy * dy) || 0.01;
+    const f = SPRING_K * (d - SPRING_LEN) * Math.min(e.w, 4);
+    const ux = dx / d, uy = dy / d;
+    e.a.fx += ux * f; e.a.fy += uy * f;
+    e.b.fx -= ux * f; e.b.fy -= uy * f;
+  }
+  // gravity toward origin + integrate
+  for (const n of nodes) {
+    if (!visible(n)) continue;
+    n.fx -= n.x * GRAVITY; n.fy -= n.y * GRAVITY;
+    if (n === dragNode) continue;
+    if (n.pinned) continue;
+    n.vx = (n.vx + n.fx * alpha) * DAMPING;
+    n.vy = (n.vy + n.fy * alpha) * DAMPING;
+    n.x += n.vx; n.y += n.vy;
+  }
+  alpha *= 0.985;
+}
+
+// ---- visibility / search ----
+let query = "";
+function visible(n) { return kindOn[n.kind]; }
+function matches(n) {
+  if (!query) return true;
+  const q = query.toLowerCase();
+  return n.label.toLowerCase().includes(q) || n.summary.toLowerCase().includes(q);
+}
+
+// ---- render ----
+function draw() {
+  const W = canvas.clientWidth, H = canvas.clientHeight;
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  ctx.clearRect(0, 0, W, H);
+
+  const css = getComputedStyle(document.body);
+  const edgeColor = css.getPropertyValue("--edge").trim();
+  const edgeHi = css.getPropertyValue("--edge-hi").trim();
+  const textColor = css.getPropertyValue("--text").trim();
+  const searching = query.length > 0;
+  const focus = selected || hoverNode; // sticky selection wins, else hover
+
+  // edges
+  ctx.lineWidth = 1;
+  for (const e of edges) {
+    if (!visible(e.a) || !visible(e.b)) continue;
+    const hot = (focus && (e.a === focus || e.b === focus)) || e === selectedEdge;
+    const dim = (searching && !(matches(e.a) && matches(e.b)) && !hot) || (focus && !hot);
+    const [ax, ay] = worldToScreen(e.a.x, e.a.y);
+    const [bx, by] = worldToScreen(e.b.x, e.b.y);
+    ctx.strokeStyle = hot ? edgeHi : edgeColor;
+    ctx.globalAlpha = dim ? 0.08 : (hot ? 0.9 : 0.5);
+    ctx.lineWidth = Math.min(0.6 + e.w * 0.5, 3) * (hot ? 1.6 : 1);
+    ctx.beginPath(); ctx.moveTo(ax, ay); ctx.lineTo(bx, by); ctx.stroke();
+  }
+  ctx.globalAlpha = 1;
+
+  // nodes
+  const showLabels = cam.scale > 0.55;
+  for (const n of nodes) {
+    if (!visible(n)) continue;
+    const [sx, sy] = worldToScreen(n.x, n.y);
+    const r = Math.max(2, n.r * cam.scale);
+    const isHover = n === focus;
+    const isNeighbor = focus && isNeighborOf(n, focus);
+    const dim = (searching && !matches(n)) || (focus && !isHover && !isNeighbor);
+    ctx.globalAlpha = dim ? 0.18 : 1;
+    ctx.beginPath();
+    ctx.arc(sx, sy, r, 0, Math.PI * 2);
+    ctx.fillStyle = colorFor(n.kind);
+    ctx.fill();
+    if (isHover || n.pinned) { ctx.lineWidth = 2; ctx.strokeStyle = textColor; ctx.stroke(); }
+    if (showLabels && !dim) {
+      ctx.globalAlpha = 1;
+      ctx.fillStyle = textColor;
+      ctx.font = `${Math.min(13, 9 + cam.scale * 2)}px -apple-system, system-ui, sans-serif`;
+      ctx.textAlign = "center"; ctx.textBaseline = "top";
+      const label = n.label.length > 28 ? n.label.slice(0, 27) + "…" : n.label;
+      ctx.fillText(label, sx, sy + r + 2);
+    }
+  }
+  ctx.globalAlpha = 1;
+  document.getElementById("stats").textContent =
+    `${nodes.filter(visible).length}/${nodes.length} nodes · ${edges.length} edges`;
+}
+
+const neighborCache = new Map();
+function isNeighborOf(n, h) {
+  let set = neighborCache.get(h);
+  if (!set) { set = new Set(); for (const e of edges) { if (e.a === h) set.add(e.b); if (e.b === h) set.add(e.a); } neighborCache.set(h, set); }
+  return set.has(n);
+}
+
+function frame() {
+  step();
+  if (camTarget) {
+    // Smoothly glide the camera toward a focused node ("expand" on click).
+    cam.x += (camTarget.x - cam.x) * 0.18;
+    cam.y += (camTarget.y - cam.y) * 0.18;
+    cam.scale += (camTarget.scale - cam.scale) * 0.18;
+    if (Math.abs(camTarget.x - cam.x) < 0.5 && Math.abs(camTarget.y - cam.y) < 0.5 &&
+        Math.abs(camTarget.scale - cam.scale) < 0.005) camTarget = null;
+  } else if (!userInteracted && alpha > 0.03) {
+    // Until the user takes control, keep the whole graph framed so it fills the
+    // window regardless of size.
+    fitToView();
+  }
+  draw();
+  requestAnimationFrame(frame);
+}
+
+// ---- interaction ----
+let hoverNode = null, dragNode = null;
+let selected = null, selectedEdge = null;
+let camTarget = null;
+let panning = false;
+let last = { x: 0, y: 0 };
+
+function nodeAt(sx, sy) {
+  let best = null, bestD = Infinity;
+  for (const n of nodes) {
+    if (!visible(n)) continue;
+    const [nx, ny] = worldToScreen(n.x, n.y);
+    const r = Math.max(6, n.r * cam.scale) + 4;
+    const d = (nx - sx) ** 2 + (ny - sy) ** 2;
+    if (d <= r * r && d < bestD) { best = n; bestD = d; }
+  }
+  return best;
+}
+
+// edgeAt returns the visible edge whose segment passes within ~6px of (sx,sy).
+function edgeAt(sx, sy) {
+  let best = null, bestD = 6 * 6;
+  for (const e of edges) {
+    if (!visible(e.a) || !visible(e.b)) continue;
+    const [ax, ay] = worldToScreen(e.a.x, e.a.y);
+    const [bx, by] = worldToScreen(e.b.x, e.b.y);
+    const dx = bx - ax, dy = by - ay;
+    const len2 = dx * dx + dy * dy || 1;
+    let t = ((sx - ax) * dx + (sy - ay) * dy) / len2;
+    t = Math.max(0, Math.min(1, t));
+    const px = ax + t * dx, py = ay + t * dy;
+    const d = (px - sx) ** 2 + (py - sy) ** 2;
+    if (d < bestD) { best = e; bestD = d; }
+  }
+  return best;
+}
+
+const detail = document.getElementById("detail");
+
+// selectNode pins the highlight, shows the detail card and glides the camera so
+// the node and its neighborhood fill the view — the "expand on click" feel.
+function selectNode(n) {
+  selected = n; selectedEdge = null;
+  userInteracted = true;
+  focusCameraOn(n);
+  renderDetail(n);
+}
+
+function selectEdge(e) {
+  selectedEdge = e; selected = null;
+  detail.style.display = "block";
+  detail.innerHTML =
+    `<span class="d-close">×</span>` +
+    `<div class="d-kind">edge</div>` +
+    `<div class="d-title">${esc(e.a.label)} — ${esc(e.b.label)}</div>` +
+    `<div class="d-summary">weight ${(+e.w).toFixed(2)}</div>`;
+  detail.querySelector(".d-close").addEventListener("click", clearSelection);
+}
+
+function clearSelection() {
+  selected = null; selectedEdge = null;
+  detail.style.display = "none";
+}
+
+// focusCameraOn frames a node together with its neighbors, zooming IN so the
+// local graph expands to fill the viewport.
+function focusCameraOn(n) {
+  const set = [n];
+  for (const e of edges) {
+    if (e.a === n && visible(e.b)) set.push(e.b);
+    if (e.b === n && visible(e.a)) set.push(e.a);
+  }
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  for (const m of set) {
+    minX = Math.min(minX, m.x - m.r); minY = Math.min(minY, m.y - m.r);
+    maxX = Math.max(maxX, m.x + m.r); maxY = Math.max(maxY, m.y + m.r);
+  }
+  const pad = 140;
+  const w = Math.max(1, maxX - minX), h = Math.max(1, maxY - minY);
+  const s = Math.min((canvas.clientWidth - pad) / w, (canvas.clientHeight - pad) / h);
+  camTarget = { x: (minX + maxX) / 2, y: (minY + maxY) / 2, scale: Math.max(0.1, Math.min(s, 4)) };
+}
+
+function renderDetail(n) {
+  const neighbors = [];
+  for (const e of edges) {
+    if (e.a === n && visible(e.b)) neighbors.push(e.b);
+    if (e.b === n && visible(e.a)) neighbors.push(e.a);
+  }
+  const list = neighbors.slice(0, 12).map(m => esc(m.label)).join(", ");
+  detail.style.display = "block";
+  detail.innerHTML =
+    `<span class="d-close">×</span>` +
+    `<div class="d-kind">${esc(n.kind)}</div>` +
+    `<div class="d-title">${esc(n.label)}</div>` +
+    (n.summary ? `<div class="d-summary">${esc(n.summary)}</div>` : "") +
+    `<div class="d-neighbors"><b>${neighbors.length}</b> connection${neighbors.length === 1 ? "" : "s"}` +
+    (list ? `: ${list}${neighbors.length > 12 ? "…" : ""}` : "") + `</div>`;
+  detail.querySelector(".d-close").addEventListener("click", clearSelection);
+}
+
+// Pointer Events unify mouse, trackpad and touch. A single pointer drags a node
+// or pans; two pointers pinch-zoom and pan together — so the view is fully
+// usable on phones/tablets, not just with a mouse.
+const pointers = new Map();   // pointerId -> {x, y}
+let pinch = null;             // {dist, anchorWorld} while two pointers are down
+let tapStart = null, tapMoved = false; // distinguish a click/tap from a drag/pan
+
+function pointerMid() {
+  let sx = 0, sy = 0;
+  for (const p of pointers.values()) { sx += p.x; sy += p.y; }
+  return [sx / pointers.size, sy / pointers.size];
+}
+function pointerDist() {
+  const it = pointers.values(); const a = it.next().value, b = it.next().value;
+  return Math.hypot(a.x - b.x, a.y - b.y);
+}
+
+canvas.addEventListener("pointerdown", (ev) => {
+  canvas.setPointerCapture(ev.pointerId);
+  pointers.set(ev.pointerId, { x: ev.clientX, y: ev.clientY });
+  userInteracted = true;
+  camTarget = null; // a new gesture cancels any in-flight focus glide
+  if (pointers.size === 1) {
+    tapStart = { x: ev.clientX, y: ev.clientY }; tapMoved = false;
+    const n = nodeAt(ev.clientX, ev.clientY);
+    if (n) { dragNode = n; n.pinned = true; alpha = Math.max(alpha, 0.5); }
+    else { panning = true; canvas.classList.add("grabbing"); }
+    last = { x: ev.clientX, y: ev.clientY };
+  } else if (pointers.size === 2) {
+    // Second finger: start a pinch; cancel any single-pointer drag/pan/tap.
+    if (dragNode) dragNode.pinned = false;
+    dragNode = null; panning = false; tapMoved = true; canvas.classList.remove("grabbing");
+    const [mx, my] = pointerMid();
+    pinch = { dist: pointerDist(), anchorWorld: screenToWorld(mx, my) };
+  }
+});
+
+canvas.addEventListener("pointermove", (ev) => {
+  if (pointers.has(ev.pointerId)) pointers.set(ev.pointerId, { x: ev.clientX, y: ev.clientY });
+  if (tapStart && !tapMoved && Math.hypot(ev.clientX - tapStart.x, ev.clientY - tapStart.y) > 5) tapMoved = true;
+
+  if (pinch && pointers.size >= 2) {
+    const d = pointerDist();
+    if (d > 0 && pinch.dist > 0) {
+      cam.scale = Math.max(0.05, Math.min(cam.scale * (d / pinch.dist), 6));
+      pinch.dist = d;
+    }
+    const [mx, my] = pointerMid();
+    // Keep the anchored world point under the (possibly moved) midpoint → this
+    // gives pan and zoom in one gesture.
+    cam.x = pinch.anchorWorld[0] - (mx - canvas.clientWidth / 2) / cam.scale;
+    cam.y = pinch.anchorWorld[1] - (my - canvas.clientHeight / 2) / cam.scale;
+    return;
+  }
+
+  if (dragNode) {
+    const [wx, wy] = screenToWorld(ev.clientX, ev.clientY);
+    dragNode.x = wx; dragNode.y = wy; dragNode.vx = 0; dragNode.vy = 0;
+    alpha = Math.max(alpha, 0.3);
+  } else if (panning) {
+    cam.x -= (ev.clientX - last.x) / cam.scale;
+    cam.y -= (ev.clientY - last.y) / cam.scale;
+    last = { x: ev.clientX, y: ev.clientY };
+  } else if (ev.pointerType === "mouse") {
+    const n = nodeAt(ev.clientX, ev.clientY);
+    if (n !== hoverNode) { hoverNode = n; updateTooltip(ev); }
+    else if (n) updateTooltip(ev);
+  }
+});
+
+function endPointer(ev) {
+  const upX = ev.clientX, upY = ev.clientY;
+  pointers.delete(ev.pointerId);
+  if (pointers.size < 2) pinch = null;
+  if (pointers.size === 1) {
+    // One finger remains after a pinch → resume panning from it (not a tap).
+    const [, p] = pointers.entries().next().value;
+    last = { x: p.x, y: p.y }; panning = true; tapMoved = true;
+  }
+  if (pointers.size === 0) {
+    const wasTap = tapStart && !tapMoved;
+    if (dragNode) dragNode.pinned = false; // release to let physics retake it
+    dragNode = null; panning = false; canvas.classList.remove("grabbing");
+    hoverNode = null; tooltip.style.opacity = 0;
+    if (wasTap) handleTap(upX, upY);
+    tapStart = null;
+  }
+}
+
+// handleTap selects the node or edge under a click/tap, or clears the selection
+// when tapping empty space.
+function handleTap(sx, sy) {
+  const n = nodeAt(sx, sy);
+  if (n) { selectNode(n); return; }
+  const e = edgeAt(sx, sy);
+  if (e) { selectEdge(e); return; }
+  clearSelection();
+}
+canvas.addEventListener("pointerup", endPointer);
+canvas.addEventListener("pointercancel", endPointer);
+
+canvas.addEventListener("dblclick", (ev) => {
+  const n = nodeAt(ev.clientX, ev.clientY);
+  if (n) { n.pinned = !n.pinned; alpha = Math.max(alpha, 0.4); }
+});
+canvas.addEventListener("wheel", (ev) => {
+  ev.preventDefault();
+  userInteracted = true;
+  const [wx, wy] = screenToWorld(ev.clientX, ev.clientY);
+  const factor = Math.exp(-ev.deltaY * 0.0015);
+  cam.scale = Math.max(0.05, Math.min(cam.scale * factor, 6));
+  const [nx, ny] = screenToWorld(ev.clientX, ev.clientY);
+  cam.x += wx - nx; cam.y += wy - ny;
+}, { passive: false });
+
+const tooltip = document.getElementById("tooltip");
+function updateTooltip(ev) {
+  if (!hoverNode) { tooltip.style.opacity = 0; return; }
+  tooltip.innerHTML =
+    `<div class="tt-kind">${esc(hoverNode.kind)}</div>` +
+    `<div class="tt-title">${esc(hoverNode.label)}</div>` +
+    (hoverNode.summary ? `<div class="tt-summary">${esc(hoverNode.summary.slice(0, 240))}</div>` : "");
+  tooltip.style.opacity = 1;
+  const pad = 14;
+  let x = ev.clientX + pad, y = ev.clientY + pad;
+  const tw = tooltip.offsetWidth, th = tooltip.offsetHeight;
+  if (x + tw > window.innerWidth) x = ev.clientX - tw - pad;
+  if (y + th > window.innerHeight) y = ev.clientY - th - pad;
+  tooltip.style.left = x + "px"; tooltip.style.top = y + "px";
+}
+function esc(s) { return String(s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c])); }
+
+// ---- toolbar / legend ----
+document.getElementById("search").addEventListener("input", (e) => { query = e.target.value.trim(); });
+// Fit re-frames AND resumes auto-framing so the graph tracks the window again.
+document.getElementById("fit").addEventListener("click", () => { userInteracted = false; fitToView(); });
+document.getElementById("reheat").addEventListener("click", () => { alpha = 1; });
+document.getElementById("theme").addEventListener("click", () => { document.body.classList.toggle("light"); });
+
+const legendRows = document.getElementById("legend-rows");
+Object.keys(kindCount).sort().forEach((k) => {
+  const row = document.createElement("div");
+  row.className = "legend-row";
+  row.innerHTML = `<span class="swatch" style="background:${colorFor(k)}"></span><span>${esc(k)}</span><span class="count">${kindCount[k]}</span>`;
+  row.addEventListener("click", () => {
+    kindOn[k] = !kindOn[k];
+    row.classList.toggle("off", !kindOn[k]);
+    neighborCache.clear(); alpha = Math.max(alpha, 0.5);
+  });
+  legendRows.appendChild(row);
+});
+if (Object.keys(kindCount).length === 0) document.getElementById("legend").style.display = "none";
+
+// settle, fit, run
+for (let i = 0; i < 80; i++) step();
+fitToView();
+alpha = 0.9;
+frame();
+</script>
+</body>
+</html>
