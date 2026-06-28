@@ -42,6 +42,8 @@ func (cli *ChatCLI) routeConfigChat(args []string) {
 		cli.configChatAsk(args[1:])
 	case "knowledge", "kb":
 		cli.configChatKnowledge(args[1:])
+	case "graphview", "graph", "gv":
+		cli.configChatGraphView(args[1:])
 	case "on", "enable", "status", "off", "disable", "toggle":
 		// Allow the shorthand `/config chat on|off|toggle|status` too.
 		cli.configChatAsk(args)
@@ -93,6 +95,27 @@ func (cli *ChatCLI) configChatKnowledge(args []string) {
 	}
 }
 
+// configChatGraphView handles `/config chat graphview [on|off|toggle|status]`.
+func (cli *ChatCLI) configChatGraphView(args []string) {
+	if len(args) == 0 {
+		cli.showConfigChat()
+		return
+	}
+	switch strings.ToLower(strings.TrimSpace(args[0])) {
+	case "on", "enable", "true", "1", "yes":
+		cli.setChatToggle(chatGraphViewEnvVar, "graphview", chatGraphViewEnabled(), true)
+	case "off", "disable", "false", "0", "no":
+		cli.setChatToggle(chatGraphViewEnvVar, "graphview", chatGraphViewEnabled(), false)
+	case "toggle":
+		cli.setChatToggle(chatGraphViewEnvVar, "graphview", chatGraphViewEnabled(), !chatGraphViewEnabled())
+	case "status", "show":
+		cli.showConfigChat()
+	default:
+		fmt.Println(colorize("  ❌ "+i18n.T("cfg.chat.gv_invalid", args[0]), ColorRed))
+		fmt.Println(colorize("  "+i18n.T("cfg.chat.gv_valid"), ColorGray))
+	}
+}
+
 // setChatAsk flips CHATCLI_CHAT_ASK at runtime.
 func (cli *ChatCLI) setChatAsk(enable bool) {
 	cli.setChatToggle(chatAskEnvVar, "ask_user", chatAskEnabled(), enable)
@@ -137,6 +160,8 @@ func (cli *ChatCLI) showConfigChat() {
 	kv(p, i18n.T("cfg.chat.ask_effective"), chatStateLabel(chatAskEnabled()))
 	kv(p, chatKnowledgeEnvVar, envBool(chatKnowledgeEnvVar))
 	kv(p, i18n.T("cfg.chat.kb_effective"), chatStateLabel(chatKnowledgeEnabled()))
+	kv(p, chatGraphViewEnvVar, envBool(chatGraphViewEnvVar))
+	kv(p, i18n.T("cfg.chat.gv_effective"), chatStateLabel(chatGraphViewEnabled()))
 
 	// Both native (API key) and XML (OAuth) providers work; report which path
 	// the active provider will take so the user knows what to expect.
@@ -176,6 +201,7 @@ func (cli *ChatCLI) getConfigChatSuggestions(d prompt.Document) []prompt.Suggest
 		subs := []prompt.Suggest{
 			{Text: "ask", Description: i18n.T("complete.config.chat_ask")},
 			{Text: "knowledge", Description: i18n.T("complete.config.chat_knowledge")},
+			{Text: "graphview", Description: i18n.T("complete.config.chat_graphview")},
 			{Text: "on", Description: i18n.T("complete.config.chat_on")},
 			{Text: "off", Description: i18n.T("complete.config.chat_off")},
 			{Text: "toggle", Description: i18n.T("complete.config.chat_toggle")},
@@ -185,7 +211,7 @@ func (cli *ChatCLI) getConfigChatSuggestions(d prompt.Document) []prompt.Suggest
 	}
 
 	// /config chat ask|knowledge <TAB>
-	if len(args) >= 3 && (strings.ToLower(args[2]) == "ask" || strings.ToLower(args[2]) == "knowledge") {
+	if len(args) >= 3 && (strings.ToLower(args[2]) == "ask" || strings.ToLower(args[2]) == "knowledge" || strings.ToLower(args[2]) == "graphview") {
 		if len(args) == 3 || (len(args) == 4 && !strings.HasSuffix(line, " ")) {
 			vals := []prompt.Suggest{
 				{Text: "on", Description: i18n.T("complete.config.chat_on")},
@@ -208,6 +234,8 @@ func (cli *ChatCLI) printConfigChatUsage() {
 	fmt.Println("  /config chat ask toggle       # " + i18n.T("cfg.chat.usage_toggle"))
 	fmt.Println("  /config chat knowledge on     # " + i18n.T("cfg.chat.usage_kb_on"))
 	fmt.Println("  /config chat knowledge off    # " + i18n.T("cfg.chat.usage_kb_off"))
+	fmt.Println("  /config chat graphview on     # " + i18n.T("cfg.chat.usage_gv_on"))
+	fmt.Println("  /config chat graphview off    # " + i18n.T("cfg.chat.usage_gv_off"))
 	fmt.Println()
 	fmt.Println(colorize("  "+i18n.T("cfg.chat.usage_note"), ColorGray))
 }

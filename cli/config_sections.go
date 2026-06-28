@@ -103,6 +103,8 @@ func (cli *ChatCLI) routeConfigCommand(ctx context.Context, args []string) {
 		}
 	case "diagram", "diagrams":
 		cli.showConfigDiagram(ctx)
+	case "graphview", "graph":
+		cli.showConfigGraphView()
 	case "quality":
 		cli.showConfigQuality()
 	case "memory", "mem":
@@ -413,6 +415,7 @@ func (cli *ChatCLI) showConfigAll(ctx context.Context) {
 	cli.showConfigSession()
 	cli.showConfigIntegrations(ctx)
 	cli.showConfigDiagram(ctx)
+	cli.showConfigGraphView()
 	cli.showConfigAuth()
 	cli.showConfigSecurity()
 	cli.showConfigChat()
@@ -910,6 +913,22 @@ func (cli *ChatCLI) showConfigDiagram(ctx context.Context) {
 		kv(p, i18n.T("cfg.kv.diagram_dot"), i18n.T("cfg.val.diagram_dot_missing"))
 	}
 
+	sectionEnd(ColorCyan)
+}
+
+// showConfigGraphView renders the @graphview panorama: the default theme, the
+// auto-open behavior and the chat-mode exception toggle.
+func (cli *ChatCLI) showConfigGraphView() {
+	sectionHeader("🕸", "cfg.section.graphview.title", ColorCyan)
+	p := uiPrefix(ColorCyan)
+
+	kv(p, "CHATCLI_GRAPHVIEW_THEME", envOr("CHATCLI_GRAPHVIEW_THEME"))
+	kv(p, "CHATCLI_GRAPHVIEW_OPEN", envBool("CHATCLI_GRAPHVIEW_OPEN"))
+	kv(p, chatGraphViewEnvVar, envBool(chatGraphViewEnvVar))
+	kv(p, i18n.T("cfg.chat.gv_effective"), chatStateLabel(chatGraphViewEnabled()))
+
+	fmt.Println(p)
+	fmt.Println(p + colorize(i18n.T("cfg.graphview.about"), ColorGray))
 	sectionEnd(ColorCyan)
 }
 

@@ -44,6 +44,7 @@ const askXML = `<tool_call name="@ask" args='{"questions":[{"header":"H","questi
 
 func TestMaybeChatAskTurn_Disabled(t *testing.T) {
 	t.Setenv(chatAskEnvVar, "false")
+	t.Setenv(chatGraphViewEnvVar, "false")
 	cli := newAskTestCLI()
 	_, handled, err := cli.maybeChatAskTurn(context.Background(), &askLLMFake{}, "hi", "", nil, 500, SkillClientResolution{}, func() {})
 	if handled || err != nil {

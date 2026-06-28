@@ -193,6 +193,11 @@ var envDefaults = map[string]envDefault{
 	// ─── Diagram rendering (@diagram) ────────────────────────────
 	"CHATCLI_DIAGRAM_BACKEND": {Value: "auto", Source: "plugins.configuredDiagramBackend: auto|system|embedded"},
 
+	// ─── Interactive graph view (@graphview) ─────────────────────
+	"CHATCLI_GRAPHVIEW_OPEN":  {Value: "true", IsBool: true, Source: "plugins.graphViewOpenEnvEnabled: open the rendered HTML in the browser"},
+	"CHATCLI_GRAPHVIEW_THEME": {Value: "dark", Source: "plugins.graphViewDefaultTheme: dark|light"},
+	"CHATCLI_CHAT_GRAPHVIEW":  {Value: "true", IsBool: true, Source: "chat_graphview.go: chat-mode @graphview exception"},
+
 	// ─── Vision input (image understanding / describe-fallback) ───
 	"CHATCLI_VISION_INPUT":    {Value: "auto", Source: "vision input mode: auto|native|describe|off"},
 	"CHATCLI_VISION_PROVIDER": {Value: "(auto)", Source: "vision describe-fallback provider override"},
