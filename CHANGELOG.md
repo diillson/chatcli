@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.148.0](https://github.com/diillson/chatcli/compare/v1.147.0...v1.148.0) (2026-06-28)
+
+
+### Features
+
+* **graphview:** interactive grap-style, graph in agent, coder and chat ([#1107](https://github.com/diillson/chatcli/issues/1107)) ([b058dfc](https://github.com/diillson/chatcli/commit/b058dfca75f262e8e034263d4255e650424b157f))
+
 ## [1.147.0](https://github.com/diillson/chatcli/compare/v1.146.1...v1.147.0) (2026-06-26)
 
 
