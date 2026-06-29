@@ -613,7 +613,7 @@ jobs:
         uses: sigstore/cosign-installer@v3
 
       - name: Install crane
-        uses: imjasonh/setup-crane@v0.6
+        uses: imjasonh/setup-crane@v0.7
 
       - name: Login to GHCR
         run: echo "${{ secrets.GITHUB_TOKEN }}" | helm registry login ghcr.io -u ${{ github.repository_owner }} --password-stdin
