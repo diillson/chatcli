@@ -52,8 +52,12 @@ const (
 // resolveFamily picks the dispatch path. Precedence:
 //  1. BEDROCK_PROVIDER env var ("anthropic"/"claude", "openai"/"gpt",
 //     "converse"/"auto").
-//  2. Model ID prefix: "openai.*" → OpenAI; any "anthropic" segment
-//     (bare or behind a global./us./eu./apac. profile prefix) → Anthropic.
+//  2. Model ID content: "openai.*" → OpenAI; any Claude marker (an
+//     "anthropic" segment — bare or behind a global./us./eu./apac.
+//     profile prefix — or a bare "claude"/"fable" first-party id) →
+//     Anthropic. Claude models always speak the Anthropic Messages
+//     schema; routing them through Converse would silently drop
+//     cache_control markers and extended-thinking knobs.
 //  3. Default: Converse — covers Llama, Nova, Mistral, Cohere, AI21,
 //     DeepSeek, Stability and any unknown provider through the unified
 //     Bedrock Converse API.
@@ -70,10 +74,60 @@ func resolveFamily(model string) modelFamily {
 	if strings.HasPrefix(m, "openai.") || strings.Contains(m, ".openai.") {
 		return familyOpenAI
 	}
-	if strings.HasPrefix(m, "anthropic.") || strings.Contains(m, ".anthropic.") {
+	if isClaudeModelID(m) {
 		return familyAnthropic
 	}
 	return familyConverse
+}
+
+// isClaudeModelID reports whether a Bedrock model id refers to an Anthropic
+// Claude model, whatever the surface spelling: "anthropic."-prefixed base
+// IDs, inference-profile IDs (global./us./eu./apac. + ".anthropic."), or a
+// bare first-party id ("claude-fable-5", "fable-5", "claude-sonnet-5") the
+// user picked out of habit.
+func isClaudeModelID(model string) bool {
+	m := strings.ToLower(model)
+	return strings.HasPrefix(m, "anthropic.") ||
+		strings.Contains(m, ".anthropic.") ||
+		strings.Contains(m, "claude") ||
+		strings.Contains(m, "fable")
+}
+
+// normalizeBedrockModelID upgrades a bare first-party Claude id to the
+// invokable Bedrock id from the catalog (e.g. "claude-fable-5" →
+// "anthropic.claude-fable-5"). IDs that already carry an "anthropic."
+// segment — including account-specific inference profiles — and non-Claude
+// IDs pass through untouched.
+func normalizeBedrockModelID(model string) string {
+	m := strings.ToLower(strings.TrimSpace(model))
+	if m == "" || strings.Contains(m, "anthropic.") || !isClaudeModelID(m) {
+		return model
+	}
+	if meta, ok := catalog.Resolve(catalog.ProviderBedrock, model); ok &&
+		strings.Contains(strings.ToLower(meta.ID), "anthropic.") {
+		return meta.ID
+	}
+	return model
+}
+
+// filterBedrockCapabilities strips capability flags that exist on the
+// first-party Claude API but are not served by Bedrock, per Anthropic's
+// platform-availability matrix: fast_mode (research preview, first-party
+// only) and mid_conversation_system (unsupported on Bedrock). Advertising
+// either on a Bedrock entry would make the request builders emit
+// parameters AWS rejects.
+func filterBedrockCapabilities(caps []string) []string {
+	if caps == nil {
+		return nil
+	}
+	out := make([]string, 0, len(caps))
+	for _, c := range caps {
+		if c == "fast_mode" || c == "mid_conversation_system" {
+			continue
+		}
+		out = append(out, c)
+	}
+	return out
 }
 
 // BedrockClient invokes foundation models hosted on AWS Bedrock.
@@ -104,6 +158,11 @@ type BedrockClient struct {
 // The AWS SDK is initialized lazily on the first call so that a missing
 // credentials chain does not break provider discovery.
 func NewBedrockClient(model, region, profile string, logger *zap.Logger, maxAttempts int, backoff time.Duration) *BedrockClient {
+	if normalized := normalizeBedrockModelID(model); normalized != model {
+		logger.Info("bedrock: normalized bare Claude model id to invokable Bedrock id",
+			zap.String("from", model), zap.String("to", normalized))
+		model = normalized
+	}
 	return &BedrockClient{
 		model:       model,
 		region:      region,
@@ -621,13 +680,26 @@ func registerBedrockModel(id, displayName string) {
 	if _, ok := catalog.Resolve(catalog.ProviderBedrock, id); ok {
 		return
 	}
-	catalog.Register(catalog.ModelMeta{
+	meta := catalog.ModelMeta{
 		ID:           id,
 		Aliases:      []string{id},
 		DisplayName:  displayName,
 		Provider:     catalog.ProviderBedrock,
 		PreferredAPI: preferredAPIFor(id),
-	})
+	}
+	// Discovered Claude IDs inherit context window, output ceiling and
+	// capabilities from the first-party catalog entry (Resolve matches the
+	// embedded "claude-…" segment inside profile-prefixed IDs). Without
+	// this, an unknown-but-real Claude id would fall back to the generic
+	// 50K context default and trip auto-compaction on almost every turn.
+	if isClaudeModelID(id) {
+		if fp, ok := catalog.Resolve(catalog.ProviderClaudeAI, id); ok {
+			meta.ContextWindow = fp.ContextWindow
+			meta.MaxOutputTokens = fp.MaxOutputTokens
+			meta.Capabilities = filterBedrockCapabilities(fp.Capabilities)
+		}
+	}
+	catalog.Register(meta)
 }
 
 // preferredAPIFor matches the dispatch family to a catalog PreferredAPI so

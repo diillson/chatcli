@@ -218,15 +218,104 @@ func TestClaudeOpus48Specs(t *testing.T) {
 			"claude-opus-4-8 should advertise %q capability", capability)
 	}
 
-	// Bedrock mirror — inference-profile-prefixed id.
+	// Bedrock mirror — dateless id per Anthropic's Bedrock docs (Opus 4.8
+	// has no ARN-versioned model ID on Bedrock).
 	bedMeta, ok := Resolve(ProviderBedrock, "claude-opus-4-8")
 	assert.True(t, ok, "claude-opus-4-8 must resolve via Bedrock alias")
-	assert.Equal(t, "global.anthropic.claude-opus-4-8-20260528-v1:0", bedMeta.ID)
+	assert.Equal(t, "anthropic.claude-opus-4-8", bedMeta.ID)
 	assert.Equal(t, 1000000, bedMeta.ContextWindow)
 	assert.Equal(t, 128000, bedMeta.MaxOutputTokens)
 	assert.True(t,
 		HasCapability(ProviderBedrock, "claude-opus-4-8", "adaptive_thinking"),
 		"Bedrock Opus 4.8 mirror should advertise adaptive_thinking")
+	// The previously-shipped (fabricated) dated profile ID must keep
+	// resolving for anyone who pinned it in scripts or env.
+	legacy, ok := Resolve(ProviderBedrock, "global.anthropic.claude-opus-4-8-20260528-v1:0")
+	assert.True(t, ok, "legacy dated Bedrock id must still resolve as alias")
+	assert.Equal(t, "anthropic.claude-opus-4-8", legacy.ID)
+	// fast_mode is a first-party research preview and
+	// mid_conversation_system is not served by Bedrock — neither may be
+	// advertised on the Bedrock mirror or the client would emit
+	// parameters AWS rejects.
+	assert.False(t, HasCapability(ProviderBedrock, "claude-opus-4-8", "fast_mode"))
+	assert.False(t, HasCapability(ProviderBedrock, "claude-opus-4-8", "mid_conversation_system"))
+}
+
+// TestClaudeSonnet5Specs pins the published Sonnet 5 specs (models
+// overview, Jun 2026): 1M context, 128K max output, adaptive thinking,
+// $3/$15 tier. "sonnet-5" shorthand must resolve to it and must NOT be
+// swallowed by any sonnet-4.x alias.
+func TestClaudeSonnet5Specs(t *testing.T) {
+	for _, id := range []string{"claude-sonnet-5", "sonnet-5"} {
+		meta, ok := Resolve(ProviderClaudeAI, id)
+		assert.True(t, ok, "expected %s to resolve on ProviderClaudeAI", id)
+		assert.Equal(t, "claude-sonnet-5", meta.ID, "alias %s must resolve to claude-sonnet-5", id)
+		assert.Equal(t, 1000000, meta.ContextWindow, "Sonnet 5 context window is 1M tokens")
+		assert.Equal(t, 128000, meta.MaxOutputTokens, "Sonnet 5 max output is 128K")
+		assert.Equal(t, APIAnthropicMessages, meta.PreferredAPI)
+	}
+	for _, capability := range []string{"tools", "json_mode", "vision", "adaptive_thinking"} {
+		assert.True(t,
+			HasCapability(ProviderClaudeAI, "claude-sonnet-5", capability),
+			"claude-sonnet-5 should advertise %q capability", capability)
+	}
+	assert.False(t,
+		HasCapability(ProviderClaudeAI, "claude-sonnet-5", "fast_mode"),
+		"claude-sonnet-5 must not advertise fast_mode (Opus-tier research preview only)")
+	// Regression guard: sonnet-4-x lookups must keep resolving to their own
+	// entries after the sonnet-5 entry lands.
+	m46, ok := Resolve(ProviderClaudeAI, "claude-sonnet-4-6")
+	assert.True(t, ok)
+	assert.Equal(t, "claude-sonnet-4-6", m46.ID)
+}
+
+// TestBedrockFable5Entry pins Fable 5 on Bedrock: dateless
+// anthropic.claude-fable-5 id (reachable through InvokeModel per the
+// Bedrock docs), 1M context so auto-compaction doesn't fire on the
+// 50K unknown-model default, and adaptive_thinking so effort routing
+// emits `thinking:{type:"adaptive"}` instead of a budgeted block.
+func TestBedrockFable5Entry(t *testing.T) {
+	for _, id := range []string{
+		"anthropic.claude-fable-5",
+		"global.anthropic.claude-fable-5",
+		"claude-fable-5",
+		"bedrock-fable-5",
+	} {
+		meta, ok := Resolve(ProviderBedrock, id)
+		assert.True(t, ok, "expected %s to resolve on ProviderBedrock", id)
+		assert.Equal(t, "anthropic.claude-fable-5", meta.ID, "alias %s must resolve to the Bedrock Fable 5 entry", id)
+		assert.Equal(t, 1000000, meta.ContextWindow)
+		assert.Equal(t, 128000, meta.MaxOutputTokens)
+		assert.Equal(t, APIAnthropicMessages, meta.PreferredAPI)
+	}
+	assert.Equal(t, 1000000, GetContextWindow(ProviderBedrock, "anthropic.claude-fable-5"))
+	assert.True(t,
+		HasCapability(ProviderBedrock, "anthropic.claude-fable-5", "adaptive_thinking"),
+		"Bedrock Fable 5 must advertise adaptive_thinking")
+	assert.False(t,
+		HasCapability(ProviderBedrock, "anthropic.claude-fable-5", "fast_mode"))
+	assert.False(t,
+		HasCapability(ProviderBedrock, "anthropic.claude-fable-5", "mid_conversation_system"))
+}
+
+// TestGLM52Entry pins GLM-5.2 (Z.AI, Jun 13 2026): 1M-token context and
+// 128K max output per docs.z.ai/guides/llm/glm-5.2. The entry must sit
+// ahead of the glm-5 / glm-5.1 entries so the more specific id is never
+// shadowed by their alias prefixes.
+func TestGLM52Entry(t *testing.T) {
+	for _, id := range []string{"glm-5.2", "glm-5-2"} {
+		meta, ok := Resolve(ProviderZAI, id)
+		assert.True(t, ok, "expected %s to resolve on ProviderZAI", id)
+		assert.Equal(t, "glm-5.2", meta.ID, "alias %s must resolve to glm-5.2", id)
+		assert.Equal(t, 1000000, meta.ContextWindow, "GLM-5.2 context window is 1M tokens")
+		assert.Equal(t, 128000, meta.MaxOutputTokens, "GLM-5.2 max output is 128K")
+		assert.Equal(t, APIChatCompletions, meta.PreferredAPI)
+	}
+	assert.Equal(t, 1000000, GetContextWindow(ProviderZAI, "glm-5.2"))
+	// glm-5 must keep resolving to its own entry (no shadowing either way).
+	m5, ok := Resolve(ProviderZAI, "glm-5")
+	assert.True(t, ok)
+	assert.Equal(t, "glm-5", m5.ID)
 }
 
 // TestGPT55LimitsAndCapabilities pins the published Apr 23 2026 specs:
