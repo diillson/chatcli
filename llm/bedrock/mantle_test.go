@@ -6,6 +6,7 @@
 package bedrock
 
 import (
+	"context"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -13,6 +14,7 @@ import (
 	"os"
 	"testing"
 
+	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
@@ -139,6 +141,134 @@ func TestSendPromptAnthropicMantleRoundTrip(t *testing.T) {
 		}
 	}
 	assert.Equal(t, 1, markers, "cache_control marker must reach the Mantle wire")
+}
+
+// Without AWS_BEARER_TOKEN_BEDROCK the request is SigV4-signed with the
+// bedrock-mantle service using the resolved credential chain.
+func TestSendPromptAnthropicMantleSigV4(t *testing.T) {
+	var gotAuth string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotAuth = r.Header.Get("Authorization")
+		w.Header().Set("content-type", "application/json")
+		_, _ = w.Write([]byte(`{"content":[{"type":"text","text":"signed"}]}`))
+	}))
+	defer srv.Close()
+
+	setEnvForTest(t, "BEDROCK_MANTLE_BASE_URL", srv.URL)
+	setEnvForTest(t, "AWS_BEARER_TOKEN_BEDROCK", "")
+
+	c := &BedrockClient{
+		model:       "anthropic.claude-sonnet-5",
+		region:      "us-east-1",
+		logger:      zap.NewNop(),
+		maxAttempts: 1,
+		credentials: aws.CredentialsProviderFunc(func(context.Context) (aws.Credentials, error) {
+			return aws.Credentials{AccessKeyID: "AKIDTEST", SecretAccessKey: "secret"}, nil
+		}),
+	}
+	out, err := c.sendPromptAnthropicMantle(t.Context(), "ping", nil, 0)
+	require.NoError(t, err)
+	assert.Equal(t, "signed", out)
+	assert.Contains(t, gotAuth, "AWS4-HMAC-SHA256")
+	assert.Contains(t, gotAuth, "/bedrock-mantle/aws4_request",
+		"signature must use the bedrock-mantle service name")
+}
+
+// No bearer token and no initialized credential chain must produce an
+// actionable error, not a nil-pointer panic.
+func TestSendPromptAnthropicMantleNoCredentials(t *testing.T) {
+	setEnvForTest(t, "BEDROCK_MANTLE_BASE_URL", "http://127.0.0.1:1")
+	setEnvForTest(t, "AWS_BEARER_TOKEN_BEDROCK", "")
+
+	c := &BedrockClient{
+		model:       "anthropic.claude-sonnet-5",
+		region:      "us-east-1",
+		logger:      zap.NewNop(),
+		maxAttempts: 1,
+	}
+	_, err := c.sendPromptAnthropicMantle(t.Context(), "ping", nil, 128)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "AWS_BEARER_TOKEN_BEDROCK")
+}
+
+// A transport-level failure (connection refused) must surface through the
+// retry wrapper as a bedrock-mantle error.
+func TestSendPromptAnthropicMantleTransportError(t *testing.T) {
+	setEnvForTest(t, "BEDROCK_MANTLE_BASE_URL", "http://127.0.0.1:1")
+	setEnvForTest(t, "AWS_BEARER_TOKEN_BEDROCK", "test-bearer-token")
+
+	c := &BedrockClient{
+		model:       "anthropic.claude-sonnet-5",
+		region:      "us-east-1",
+		logger:      zap.NewNop(),
+		maxAttempts: 1,
+	}
+	_, err := c.sendPromptAnthropicMantle(t.Context(), "ping", nil, 128)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "bedrock-mantle")
+}
+
+// Non-JSON error bodies (load balancers, proxies) fall back to the raw
+// status + body instead of getting swallowed.
+func TestSendPromptAnthropicMantleHTTPErrorNonJSON(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusBadGateway)
+		_, _ = w.Write([]byte("upstream exploded"))
+	}))
+	defer srv.Close()
+
+	setEnvForTest(t, "BEDROCK_MANTLE_BASE_URL", srv.URL)
+	setEnvForTest(t, "AWS_BEARER_TOKEN_BEDROCK", "test-bearer-token")
+
+	c := &BedrockClient{
+		model:       "anthropic.claude-sonnet-5",
+		region:      "us-east-1",
+		logger:      zap.NewNop(),
+		maxAttempts: 1,
+	}
+	_, err := c.sendPromptAnthropicMantle(t.Context(), "ping", nil, 128)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "HTTP 502")
+}
+
+// The corporate-TLS override must reach the Mantle transport the same way
+// it reaches the AWS SDK clients.
+func TestMantleHTTPClientCorporateTLS(t *testing.T) {
+	setEnvForTest(t, "CHATCLI_BEDROCK_INSECURE_SKIP_VERIFY", "true")
+	setEnvForTest(t, "CHATCLI_BEDROCK_CA_BUNDLE", "")
+
+	c := &BedrockClient{logger: zap.NewNop()}
+	hc := c.mantleHTTPClient()
+	require.NotNil(t, hc)
+	assert.NotNil(t, hc.Transport, "corporate override must install a custom transport")
+
+	// Without overrides, the default client (process-global trust) is used.
+	setEnvForTest(t, "CHATCLI_BEDROCK_INSECURE_SKIP_VERIFY", "")
+	setEnvForTest(t, "CHATCLI_TLS_INSECURE_SKIP_VERIFY", "")
+	hc = c.mantleHTTPClient()
+	require.NotNil(t, hc)
+	assert.Nil(t, hc.Transport)
+}
+
+// SendPrompt must dispatch mantle-only models through the Messages
+// endpoint end to end (ensureRuntime included).
+func TestSendPromptDispatchesSonnet5ToMantle(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("content-type", "application/json")
+		_, _ = w.Write([]byte(`{"content":[{"type":"text","text":"via-mantle"}]}`))
+	}))
+	defer srv.Close()
+
+	setEnvForTest(t, "BEDROCK_MANTLE_BASE_URL", srv.URL)
+	setEnvForTest(t, "AWS_BEARER_TOKEN_BEDROCK", "test-bearer-token")
+	setEnvForTest(t, "AWS_REGION", "us-east-1")
+	setEnvForTest(t, "BEDROCK_PROVIDER", "")
+	setEnvForTest(t, "BEDROCK_ANTHROPIC_ENDPOINT", "")
+
+	c := NewBedrockClient("anthropic.claude-sonnet-5", "us-east-1", "", zap.NewNop(), 1, 0)
+	out, err := c.SendPrompt(t.Context(), "ping", nil, 128)
+	require.NoError(t, err)
+	assert.Equal(t, "via-mantle", out)
 }
 
 // Mantle errors come back in the standard Anthropic error envelope; the

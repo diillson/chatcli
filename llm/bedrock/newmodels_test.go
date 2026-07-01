@@ -10,7 +10,10 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+	"go.uber.org/zap"
 
+	"github.com/diillson/chatcli/llm/catalog"
 	"github.com/diillson/chatcli/models"
 )
 
@@ -100,6 +103,62 @@ func TestFilterBedrockCapabilities(t *testing.T) {
 		[]string{"vision", "json_mode", "tools", "adaptive_thinking", "low_cache_minimum"},
 		got)
 	assert.Nil(t, filterBedrockCapabilities(nil))
+}
+
+// The constructor applies the normalization so every downstream consumer
+// (dispatch, catalog lookups, ListModels registration) sees the invokable
+// id from the very first call.
+func TestNewBedrockClientNormalizesBareClaudeID(t *testing.T) {
+	c := NewBedrockClient("claude-fable-5", "us-east-1", "", zap.NewNop(), 1, 0)
+	assert.Equal(t, "anthropic.claude-fable-5", c.model)
+
+	// Profile ids the user picked from ListModels pass through untouched.
+	c = NewBedrockClient("us.anthropic.claude-sonnet-4-5-20250929-v1:0", "us-east-1", "", zap.NewNop(), 1, 0)
+	assert.Equal(t, "us.anthropic.claude-sonnet-4-5-20250929-v1:0", c.model)
+}
+
+// Dynamically discovered Claude ids must inherit specs from the
+// first-party catalog so an unknown-but-real Claude model doesn't fall
+// back to the generic 50K context default (auto-compaction on every
+// turn). Non-Claude ids register without enrichment; already-known ids
+// are left alone.
+func TestRegisterBedrockModelEnrichment(t *testing.T) {
+	// Synthetic first-party model that has no Bedrock mirror — the only
+	// deterministic way to exercise the inheritance branch, since every
+	// real first-party Claude id already has a Bedrock catalog entry.
+	catalog.Register(catalog.ModelMeta{
+		ID:              "claude-zeta-9-test",
+		Aliases:         []string{"claude-zeta-9-test"},
+		DisplayName:     "Claude Zeta 9 (test fixture)",
+		Provider:        catalog.ProviderClaudeAI,
+		ContextWindow:   777000,
+		MaxOutputTokens: 77000,
+		PreferredAPI:    catalog.APIAnthropicMessages,
+		Capabilities:    []string{"tools", "adaptive_thinking", "fast_mode", "mid_conversation_system"},
+	})
+
+	registerBedrockModel("global.anthropic.claude-zeta-9-test", "Claude Zeta 9 (Bedrock)")
+	meta, ok := catalog.Resolve(catalog.ProviderBedrock, "global.anthropic.claude-zeta-9-test")
+	require.True(t, ok)
+	assert.Equal(t, 777000, meta.ContextWindow, "discovered Claude id must inherit the first-party context window")
+	assert.Equal(t, 77000, meta.MaxOutputTokens)
+	assert.Contains(t, meta.Capabilities, "adaptive_thinking")
+	assert.NotContains(t, meta.Capabilities, "fast_mode", "first-party-only capability must be filtered")
+	assert.NotContains(t, meta.Capabilities, "mid_conversation_system")
+
+	// Known ids short-circuit: re-registering must not clobber the static
+	// entry's specs.
+	registerBedrockModel("anthropic.claude-fable-5", "should be ignored")
+	fable, ok := catalog.Resolve(catalog.ProviderBedrock, "anthropic.claude-fable-5")
+	require.True(t, ok)
+	assert.Equal(t, "Claude Fable 5 (Bedrock, 1M ctx)", fable.DisplayName)
+
+	// Non-Claude ids register without first-party inheritance.
+	registerBedrockModel("meta.llama-test-x9", "Meta Llama Test (Bedrock)")
+	llama, ok := catalog.Resolve(catalog.ProviderBedrock, "meta.llama-test-x9")
+	require.True(t, ok)
+	assert.Zero(t, llama.ContextWindow)
+	assert.Equal(t, catalog.APIChatCompletions, llama.PreferredAPI)
 }
 
 // The whole point of routing Fable 5 through the Anthropic InvokeModel path:
