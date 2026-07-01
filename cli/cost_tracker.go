@@ -445,6 +445,7 @@ func getModelPricing(provider, model string) (inputCost, outputCost float64) {
 		googlePricing,
 		grokPricing,
 		deepseekPricing,
+		zaiPricing,
 	} {
 		if in, out, ok := fn(model); ok {
 			return in, out
@@ -532,6 +533,21 @@ func grokPricing(model string) (float64, float64, bool) {
 		return 2.0, 10.0, true
 	case strings.Contains(model, "grok"):
 		return 5.0, 15.0, true
+	}
+	return 0, 0, false
+}
+
+// zaiPricing covers Z.AI's GLM-5 family. Public list prices (docs.z.ai,
+// Jun 2026): GLM-5.2 $1.40/$4.40, GLM-5 $1.00/$3.20 per MTok. Ordering
+// matters: the specific "glm-5.2" tag must win before the bare "glm-5"
+// prefix. GLM-4.x and other Z.AI ids fall through to the conservative
+// flat rate in providerFallbackPricing.
+func zaiPricing(model string) (float64, float64, bool) {
+	switch {
+	case strings.Contains(model, "glm-5.2"), strings.Contains(model, "glm-5-2"):
+		return 1.40, 4.40, true
+	case strings.Contains(model, "glm-5"):
+		return 1.00, 3.20, true
 	}
 	return 0, 0, false
 }

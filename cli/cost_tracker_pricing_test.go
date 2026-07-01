@@ -59,8 +59,15 @@ func TestGetModelPricing(t *testing.T) {
 		// Provider-keyed fallbacks
 		{"minimax via model", "OTHER", "minimax-m2.7", 0.20, 1.10},
 		{"minimax via provider", "MINIMAX", "anything", 0.20, 1.10},
+		// Z.AI GLM-5 family — public list prices (docs.z.ai, Jun 2026):
+		// GLM-5.2 $1.40/$4.40, GLM-5 $1.00/$3.20 per MTok. The specific
+		// "glm-5.2" tag must win before the bare "glm-5" prefix; unknown
+		// GLM/ZAI ids keep the conservative flat fallback.
+		{"glm-5.2", "ZAI", "glm-5.2", 1.40, 4.40},
+		{"glm-5.2 via model on other provider", "OTHER", "glm-5.2", 1.40, 4.40},
+		{"glm-5 via glm model", "OTHER", "glm-5", 1.00, 3.20},
 		{"zai via provider", "ZAI", "anything", 0.50, 0.50},
-		{"zai via glm model", "OTHER", "glm-5", 0.50, 0.50},
+		{"zai legacy glm model", "OTHER", "glm-4.5", 0.50, 0.50},
 
 		// Moonshot (Kimi) — K2.6 list price, conservative single tier.
 		{"moonshot via provider", "MOONSHOT", "kimi-k2.6", 0.95, 4.00},

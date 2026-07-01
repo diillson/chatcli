@@ -328,6 +328,25 @@ var registry = []ModelMeta{
 		},
 	},
 	{
+		// Sonnet 5 (claude-sonnet-5, Jun 2026): the Sonnet-tier successor —
+		// Anthropic skipped a "Sonnet 4.7"/"4.8" and jumped straight to 5.
+		// 1M context, 128K max output, adaptive thinking (effort defaults to
+		// "high" server-side on the Claude API). $3/$15 per MTok (intro
+		// $2/$10 through Aug 31 2026 — cost_tracker uses the standard rate).
+		// No fast_mode (Opus-tier research preview only) and no
+		// mid_conversation_system (documented for Opus 4.8 only). Dateless
+		// pinned-snapshot ID per the Jun 2026 models overview.
+		ID:              "claude-sonnet-5",
+		Aliases:         []string{"claude-sonnet-5", "sonnet-5", "claude-5-sonnet"},
+		DisplayName:     "Claude Sonnet 5 (1M context)",
+		Provider:        ProviderClaudeAI,
+		ContextWindow:   1000000,
+		MaxOutputTokens: 128000,
+		PreferredAPI:    APIAnthropicMessages,
+		APIVersion:      config.ClaudeAIAPIVersionDefault,
+		Capabilities:    []string{"vision", "json_mode", "tools", "adaptive_thinking"},
+	},
+	{
 		// Opus 4.8 (claude-opus-4-8, May 28 2026): 1M context by default on
 		// the Claude API, 128K max output. Same API constraints as 4.7
 		// (no temperature/top_p/top_k; adaptive thinking only — extended
@@ -782,6 +801,20 @@ var registry = []ModelMeta{
 	// so generic alias prefixes ("glm-5") don't shadow the more specific
 	// "glm-5.1" / "glm-5-turbo" tags.
 	{
+		// GLM-5.2 (Jun 13 2026): 1M-token context, 128K max output
+		// (docs.z.ai/guides/llm/glm-5.2). Open-weight MoE, MIT license,
+		// tuned for coding/agentic workloads with thinking mode, function
+		// calling and structured output.
+		ID:              "glm-5.2",
+		Aliases:         []string{"glm-5.2", "glm-5-2"},
+		DisplayName:     "GLM-5.2 (1M context)",
+		Provider:        ProviderZAI,
+		ContextWindow:   1000000,
+		MaxOutputTokens: 128000,
+		PreferredAPI:    APIChatCompletions,
+		Capabilities:    []string{"tools", "json_mode"},
+	},
+	{
 		// GLM-5.1: 200K / 128K (docs.z.ai/guides/llm/glm-5.1).
 		ID:              "glm-5.1",
 		Aliases:         []string{"glm-5.1", "glm-5-1"},
@@ -1134,49 +1167,67 @@ var registry = []ModelMeta{
 	// A listagem dinâmica via `bedrock:ListInferenceProfiles` complementa
 	// este catálogo com o que a conta AWS realmente tem acesso.
 
-	// Claude 4.6 (abr 2026 — mais recentes). Bedrock specs follow the
-	// Anthropic models page: Sonnet 4.6 = 1M / 64K, Opus 4.6 = 1M / 128K.
+	// NOTE (capabilities on Bedrock mirrors): fast_mode is a first-party
+	// research preview and mid_conversation_system is not served by Bedrock
+	// (Anthropic platform-availability matrix) — neither flag may appear on
+	// ProviderBedrock entries or the client would emit parameters AWS
+	// rejects. Per-block prompt caching (cache_control) IS supported for
+	// Claude on Bedrock; only the top-level automatic cache parameter is
+	// first-party-only, and this client never emits it.
+
+	// Fable 5 (Jun 9 2026). Dateless ID per Anthropic's Bedrock docs —
+	// Fable 5, Opus 4.8 and Opus 4.7 have NO ARN-versioned model IDs on
+	// Bedrock and are reachable through InvokeModel with the plain
+	// "anthropic."-prefixed id (served by the Claude-in-Amazon-Bedrock
+	// Messages infrastructure).
 	{
-		ID:              "global.anthropic.claude-sonnet-4-6-20260115-v1:0",
-		Aliases:         []string{"bedrock-sonnet-4-6", "anthropic.claude-sonnet-4-6-20260115-v1:0", "claude-sonnet-4-6"},
-		DisplayName:     "Claude Sonnet 4.6 (Bedrock, global, 1M ctx)",
-		Provider:        ProviderBedrock,
-		ContextWindow:   1000000,
-		MaxOutputTokens: 64000,
-		PreferredAPI:    APIAnthropicMessages,
-		Capabilities:    []string{"tools", "vision", "json_mode"},
-	},
-	{
-		ID:              "global.anthropic.claude-opus-4-6-20260115-v1:0",
-		Aliases:         []string{"bedrock-opus-4-6", "anthropic.claude-opus-4-6-20260115-v1:0", "claude-opus-4-6"},
-		DisplayName:     "Claude Opus 4.6 (Bedrock, global, 1M ctx)",
+		ID:              "anthropic.claude-fable-5",
+		Aliases:         []string{"bedrock-fable-5", "global.anthropic.claude-fable-5", "claude-fable-5", "fable-5"},
+		DisplayName:     "Claude Fable 5 (Bedrock, 1M ctx)",
 		Provider:        ProviderBedrock,
 		ContextWindow:   1000000,
 		MaxOutputTokens: 128000,
 		PreferredAPI:    APIAnthropicMessages,
-		Capabilities:    []string{"tools", "vision", "json_mode"},
+		Capabilities:    []string{"tools", "vision", "json_mode", "adaptive_thinking"},
 	},
-	// Claude 4.8 (May 28 2026 — newest). Opus 4.8 = 1M / 128K per Anthropic.
-	// Same on-demand restrictions as 4.7: needs an inference profile prefix
-	// (global./us./eu./apac.) — the bare id is kept as an alias for
-	// resolution by callers that pin the foundation-model name.
+	// Sonnet 5 (Jun 2026). Served EXCLUSIVELY by the Claude-in-Amazon-
+	// Bedrock Messages endpoint (bedrock-mantle.{region}.api.aws) — it has
+	// no InvokeModel surface. The bedrock_mantle_only capability tells the
+	// Bedrock client to route the request through the Mantle path; sending
+	// this id to InvokeModel would return a ValidationException.
 	{
-		ID:              "global.anthropic.claude-opus-4-8-20260528-v1:0",
-		Aliases:         []string{"bedrock-opus-4-8", "anthropic.claude-opus-4-8-20260528-v1:0", "claude-opus-4-8"},
-		DisplayName:     "Claude Opus 4.8 (Bedrock, global, 1M ctx)",
+		ID:              "anthropic.claude-sonnet-5",
+		Aliases:         []string{"bedrock-sonnet-5", "global.anthropic.claude-sonnet-5", "claude-sonnet-5", "sonnet-5"},
+		DisplayName:     "Claude Sonnet 5 (Bedrock, 1M ctx)",
+		Provider:        ProviderBedrock,
+		ContextWindow:   1000000,
+		MaxOutputTokens: 128000,
+		PreferredAPI:    APIAnthropicMessages,
+		Capabilities:    []string{"tools", "vision", "json_mode", "adaptive_thinking", "bedrock_mantle_only"},
+	},
+	// Claude 4.8 (May 28 2026). Opus 4.8 = 1M / 128K per Anthropic.
+	// The previously-shipped dated profile IDs (…-20260528-v1:0) never
+	// existed on AWS; they stay as aliases so pinned configs keep resolving.
+	{
+		ID: "anthropic.claude-opus-4-8",
+		Aliases: []string{
+			"bedrock-opus-4-8", "global.anthropic.claude-opus-4-8",
+			"global.anthropic.claude-opus-4-8-20260528-v1:0",
+			"anthropic.claude-opus-4-8-20260528-v1:0", "claude-opus-4-8",
+		},
+		DisplayName:     "Claude Opus 4.8 (Bedrock, 1M ctx)",
 		Provider:        ProviderBedrock,
 		ContextWindow:   1000000,
 		MaxOutputTokens: 128000,
 		PreferredAPI:    APIAnthropicMessages,
 		Capabilities: []string{
 			"tools", "vision", "json_mode",
-			"adaptive_thinking", "fast_mode",
-			"mid_conversation_system", "low_cache_minimum",
+			"adaptive_thinking", "low_cache_minimum",
 		},
 	},
 
 	// Claude 4.7. Sonnet 4.7 mirrors 4.6's profile (forward-projected),
-	// Opus 4.7 = 1M / 128K per Anthropic.
+	// Opus 4.7 = 1M / 128K per Anthropic (dateless id, same rule as 4.8).
 	{
 		ID:              "global.anthropic.claude-sonnet-4-7-20260401-v1:0",
 		Aliases:         []string{"bedrock-sonnet-4-7", "anthropic.claude-sonnet-4-7-20260401-v1:0", "claude-sonnet-4-7"},
@@ -1188,14 +1239,53 @@ var registry = []ModelMeta{
 		Capabilities:    []string{"tools", "vision", "json_mode"},
 	},
 	{
-		ID:              "global.anthropic.claude-opus-4-7-20260401-v1:0",
-		Aliases:         []string{"bedrock-opus-4-7", "anthropic.claude-opus-4-7-20260401-v1:0", "claude-opus-4-7"},
-		DisplayName:     "Claude Opus 4.7 (Bedrock, global, 1M ctx)",
+		ID: "anthropic.claude-opus-4-7",
+		Aliases: []string{
+			"bedrock-opus-4-7", "global.anthropic.claude-opus-4-7",
+			"global.anthropic.claude-opus-4-7-20260401-v1:0",
+			"anthropic.claude-opus-4-7-20260401-v1:0", "claude-opus-4-7",
+		},
+		DisplayName:     "Claude Opus 4.7 (Bedrock, 1M ctx)",
 		Provider:        ProviderBedrock,
 		ContextWindow:   1000000,
 		MaxOutputTokens: 128000,
 		PreferredAPI:    APIAnthropicMessages,
 		Capabilities:    []string{"tools", "vision", "json_mode", "adaptive_thinking"},
+	},
+
+	// Claude 4.6 (abr 2026). Bedrock specs follow the Anthropic models
+	// page: Sonnet 4.6 = 1M / 64K, Opus 4.6 = 1M / 128K. Real Bedrock IDs
+	// per the docs: anthropic.claude-sonnet-4-6 and
+	// anthropic.claude-opus-4-6-v1 behind a global. inference profile.
+	// The previously-shipped dated IDs (…-20260115-v1:0) never existed on
+	// AWS; kept as aliases for pinned configs.
+	{
+		ID: "global.anthropic.claude-sonnet-4-6",
+		Aliases: []string{
+			"bedrock-sonnet-4-6", "anthropic.claude-sonnet-4-6",
+			"global.anthropic.claude-sonnet-4-6-20260115-v1:0",
+			"anthropic.claude-sonnet-4-6-20260115-v1:0", "claude-sonnet-4-6",
+		},
+		DisplayName:     "Claude Sonnet 4.6 (Bedrock, global, 1M ctx)",
+		Provider:        ProviderBedrock,
+		ContextWindow:   1000000,
+		MaxOutputTokens: 64000,
+		PreferredAPI:    APIAnthropicMessages,
+		Capabilities:    []string{"tools", "vision", "json_mode"},
+	},
+	{
+		ID: "global.anthropic.claude-opus-4-6-v1",
+		Aliases: []string{
+			"bedrock-opus-4-6", "anthropic.claude-opus-4-6-v1",
+			"global.anthropic.claude-opus-4-6-20260115-v1:0",
+			"anthropic.claude-opus-4-6-20260115-v1:0", "claude-opus-4-6",
+		},
+		DisplayName:     "Claude Opus 4.6 (Bedrock, global, 1M ctx)",
+		Provider:        ProviderBedrock,
+		ContextWindow:   1000000,
+		MaxOutputTokens: 128000,
+		PreferredAPI:    APIAnthropicMessages,
+		Capabilities:    []string{"tools", "vision", "json_mode"},
 	},
 	{
 		ID:              "global.anthropic.claude-haiku-4-5-20251001-v1:0",
