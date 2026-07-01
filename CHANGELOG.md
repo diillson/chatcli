@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.149.0](https://github.com/diillson/chatcli/compare/v1.148.0...v1.149.0) (2026-07-01)
+
+
+### Features
+
+* **models:** Claude Sonnet 5 + GLM-5.2 + Bedrock Fable 5/Sonnet 5 support ([#1111](https://github.com/diillson/chatcli/issues/1111)) ([da7d91e](https://github.com/diillson/chatcli/commit/da7d91ef0cc8ecdc5ce2a853d5747bd3b5179ce1))
+
 ## [1.148.0](https://github.com/diillson/chatcli/compare/v1.147.0...v1.148.0) (2026-06-28)
 
 
