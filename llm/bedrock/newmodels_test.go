@@ -14,6 +14,13 @@ import (
 	"github.com/diillson/chatcli/models"
 )
 
+// Compile-time guard: BedrockClient must stay a comparable type. Floor 13
+// (apidiff) treats losing comparability as a breaking API change — adding
+// a field with a non-comparable type (slice, map, aws.Config, …) breaks
+// any downstream == comparison of client values. Using the type as a map
+// key only compiles while it remains comparable.
+var _ = map[BedrockClient]struct{}(nil)
+
 // Claude models on Bedrock always speak the Anthropic Messages schema —
 // routing a bare "claude-*" ID (no "anthropic." segment) through Converse
 // silently drops cache_control markers and extended-thinking knobs. These

@@ -143,7 +143,10 @@ func (c *BedrockClient) doMantleRequest(ctx context.Context, endpoint string, pa
 		// x-api-key — no SigV4 signature on this path.
 		req.Header.Set("x-api-key", bearer)
 	} else {
-		creds, err := c.awsCfg.Credentials.Retrieve(ctx)
+		if c.credentials == nil {
+			return "", fmt.Errorf("bedrock-mantle: AWS credential chain not initialized (or set AWS_BEARER_TOKEN_BEDROCK)")
+		}
+		creds, err := c.credentials.Retrieve(ctx)
 		if err != nil {
 			return "", fmt.Errorf("bedrock-mantle: resolve AWS credentials (or set AWS_BEARER_TOKEN_BEDROCK): %w", err)
 		}
