@@ -534,6 +534,9 @@ func (cli *ChatCLI) showConfigProviders() {
 	kv(p, "BEDROCK_MAX_TOKENS", envOr("BEDROCK_MAX_TOKENS"))
 	kv(p, "BEDROCK_TEMPERATURE", envOr("BEDROCK_TEMPERATURE"))
 	kv(p, "BEDROCK_TOP_P", envOr("BEDROCK_TOP_P"))
+	kv(p, "BEDROCK_ANTHROPIC_ENDPOINT", envOr("BEDROCK_ANTHROPIC_ENDPOINT"))
+	kv(p, "BEDROCK_MANTLE_BASE_URL", envOr("BEDROCK_MANTLE_BASE_URL"))
+	kv(p, "AWS_BEARER_TOKEN_BEDROCK", presence(os.Getenv("AWS_BEARER_TOKEN_BEDROCK")))
 
 	fmt.Println(p)
 	subheader(p, "cfg.sub.prov.copilot")

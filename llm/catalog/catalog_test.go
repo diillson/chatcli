@@ -298,6 +298,40 @@ func TestBedrockFable5Entry(t *testing.T) {
 		HasCapability(ProviderBedrock, "anthropic.claude-fable-5", "mid_conversation_system"))
 }
 
+// TestBedrockSonnet5Entry pins Sonnet 5 on Bedrock. The model is served
+// exclusively by the bedrock-mantle Messages endpoint (no InvokeModel
+// surface), which the entry advertises through the bedrock_mantle_only
+// capability — the client uses it to route the request to the right wire.
+func TestBedrockSonnet5Entry(t *testing.T) {
+	for _, id := range []string{
+		"anthropic.claude-sonnet-5",
+		"global.anthropic.claude-sonnet-5",
+		"claude-sonnet-5",
+		"bedrock-sonnet-5",
+	} {
+		meta, ok := Resolve(ProviderBedrock, id)
+		assert.True(t, ok, "expected %s to resolve on ProviderBedrock", id)
+		assert.Equal(t, "anthropic.claude-sonnet-5", meta.ID, "alias %s must resolve to the Bedrock Sonnet 5 entry", id)
+		assert.Equal(t, 1000000, meta.ContextWindow)
+		assert.Equal(t, 128000, meta.MaxOutputTokens)
+		assert.Equal(t, APIAnthropicMessages, meta.PreferredAPI)
+	}
+	assert.True(t,
+		HasCapability(ProviderBedrock, "anthropic.claude-sonnet-5", "adaptive_thinking"))
+	assert.True(t,
+		HasCapability(ProviderBedrock, "anthropic.claude-sonnet-5", "bedrock_mantle_only"),
+		"Sonnet 5 must be flagged mantle-only so the client picks the Messages endpoint")
+	assert.False(t,
+		HasCapability(ProviderBedrock, "anthropic.claude-sonnet-5", "fast_mode"))
+	assert.False(t,
+		HasCapability(ProviderBedrock, "anthropic.claude-sonnet-5", "mid_conversation_system"))
+	// Regression guard: the 4.x Bedrock sonnets keep resolving to their
+	// own entries.
+	m46, ok := Resolve(ProviderBedrock, "claude-sonnet-4-6")
+	assert.True(t, ok)
+	assert.Equal(t, "global.anthropic.claude-sonnet-4-6", m46.ID)
+}
+
 // TestGLM52Entry pins GLM-5.2 (Z.AI, Jun 13 2026): 1M-token context and
 // 128K max output per docs.z.ai/guides/llm/glm-5.2. The entry must sit
 // ahead of the glm-5 / glm-5.1 entries so the more specific id is never

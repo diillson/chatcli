@@ -1179,11 +1179,7 @@ var registry = []ModelMeta{
 	// Fable 5, Opus 4.8 and Opus 4.7 have NO ARN-versioned model IDs on
 	// Bedrock and are reachable through InvokeModel with the plain
 	// "anthropic."-prefixed id (served by the Claude-in-Amazon-Bedrock
-	// Messages infrastructure). Claude Sonnet 5 is NOT available on the
-	// InvokeModel surface (anthropic.claude-sonnet-5 exists only on the
-	// bedrock-mantle Messages endpoint), so it deliberately has no static
-	// entry here — it will appear via dynamic discovery once this client
-	// speaks the Mantle endpoint.
+	// Messages infrastructure).
 	{
 		ID:              "anthropic.claude-fable-5",
 		Aliases:         []string{"bedrock-fable-5", "global.anthropic.claude-fable-5", "claude-fable-5", "fable-5"},
@@ -1193,6 +1189,21 @@ var registry = []ModelMeta{
 		MaxOutputTokens: 128000,
 		PreferredAPI:    APIAnthropicMessages,
 		Capabilities:    []string{"tools", "vision", "json_mode", "adaptive_thinking"},
+	},
+	// Sonnet 5 (Jun 2026). Served EXCLUSIVELY by the Claude-in-Amazon-
+	// Bedrock Messages endpoint (bedrock-mantle.{region}.api.aws) — it has
+	// no InvokeModel surface. The bedrock_mantle_only capability tells the
+	// Bedrock client to route the request through the Mantle path; sending
+	// this id to InvokeModel would return a ValidationException.
+	{
+		ID:              "anthropic.claude-sonnet-5",
+		Aliases:         []string{"bedrock-sonnet-5", "global.anthropic.claude-sonnet-5", "claude-sonnet-5", "sonnet-5"},
+		DisplayName:     "Claude Sonnet 5 (Bedrock, 1M ctx)",
+		Provider:        ProviderBedrock,
+		ContextWindow:   1000000,
+		MaxOutputTokens: 128000,
+		PreferredAPI:    APIAnthropicMessages,
+		Capabilities:    []string{"tools", "vision", "json_mode", "adaptive_thinking", "bedrock_mantle_only"},
 	},
 	// Claude 4.8 (May 28 2026). Opus 4.8 = 1M / 128K per Anthropic.
 	// The previously-shipped dated profile IDs (…-20260528-v1:0) never

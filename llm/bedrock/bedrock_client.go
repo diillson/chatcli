@@ -152,6 +152,10 @@ type BedrockClient struct {
 	backoff     time.Duration
 	runtime     *bedrockruntime.Client
 	control     *bedrocksvc.Client
+	// awsCfg carries the resolved credential chain for endpoints outside
+	// the AWS SDK service clients — the bedrock-mantle Messages endpoint
+	// signs raw HTTP requests with SigV4 using these credentials.
+	awsCfg aws.Config
 }
 
 // NewBedrockClient creates a client bound to a model id and region.
@@ -235,6 +239,7 @@ func (c *BedrockClient) ensureRuntime(ctx context.Context) error {
 	c.region = resolvedRegion
 	c.runtime = runtime
 	c.control = bedrocksvc.NewFromConfig(cfg)
+	c.awsCfg = cfg
 	c.logger.Info(i18n.T("llm.info.configuring_provider", "Bedrock"),
 		zap.String("region", c.region),
 		zap.String("endpoint", RuntimeEndpointURL(c.region)),
@@ -276,6 +281,9 @@ func (c *BedrockClient) SendPrompt(ctx context.Context, prompt string, history [
 	case familyConverse:
 		return c.sendPromptConverse(ctx, prompt, history, maxTokens)
 	default:
+		if usesMantleEndpoint(c.model) {
+			return c.sendPromptAnthropicMantle(ctx, prompt, history, maxTokens)
+		}
 		return c.sendPromptAnthropic(ctx, prompt, history, maxTokens)
 	}
 }
