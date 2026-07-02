@@ -249,19 +249,35 @@ func TestScheduler_RecurringInterval_RearmsInPlace(t *testing.T) {
 
 	// Poll briefly for the scheduler's post-fire bookkeeping to settle.
 	// fa.calls is incremented inside the action callback BEFORE the
-	// scheduler advances NextFireAt for the next cycle, so a query that
-	// runs immediately after `fa.calls.Load() >= wantFires` can race the
-	// re-arm path and observe a stale NextFireAt. On Ubuntu CI with the
-	// race detector the gap can exceed 200ms, which used to flake the
-	// assertion below. The poll preserves the invariant (NextFireAt
-	// must be within 200ms of now) while waiting up to 1s for it to
-	// become observable; if it never settles, the post-loop assertion
-	// still surfaces the failure.
+	// scheduler persists the cycle's history entry and advances NextFireAt,
+	// so a query that runs immediately after `fa.calls.Load() >= wantFires`
+	// can race the re-arm path and observe stale state. On Ubuntu CI with
+	// the race detector the gap can exceed 200ms — this used to flake the
+	// NextFireAt assertion, and later (PR #1126's Floor 2 run) the HISTORY
+	// assertions: 3 fires counted but only 2 history entries persisted yet.
+	// The poll therefore waits for the WHOLE post-fire bookkeeping —
+	// NextFireAt re-armed AND one history entry per fired cycle — up to 2s.
+	// Every invariant is still enforced by the assertions below; the poll
+	// only waits for them to become observable, and if they never settle the
+	// assertions surface the failure exactly as before.
+	settled := func(j *Job) bool {
+		if j.NextFireAt.Before(time.Now().Add(-200 * time.Millisecond)) {
+			return false
+		}
+		if len(j.History) < wantFires {
+			return false
+		}
+		cycles := map[int]bool{}
+		for _, h := range j.History {
+			cycles[h.CycleNum] = true
+		}
+		return len(cycles) >= wantFires
+	}
 	var q *Job
 	var queryErr error
-	for end := time.Now().Add(1 * time.Second); time.Now().Before(end); {
+	for end := time.Now().Add(2 * time.Second); time.Now().Before(end); {
 		q, queryErr = s.Query(created.ID)
-		if queryErr == nil && !q.NextFireAt.Before(time.Now().Add(-200*time.Millisecond)) {
+		if queryErr == nil && settled(q) {
 			break
 		}
 		time.Sleep(20 * time.Millisecond)
