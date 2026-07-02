@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.149.1](https://github.com/diillson/chatcli/compare/v1.149.0...v1.149.1) (2026-07-02)
+
+
+### Bug Fixes
+
+* **bedrock:** route Fable 5 via Mantle and canonicalize profile IDs on the Messages wire ([#1114](https://github.com/diillson/chatcli/issues/1114)) ([726d110](https://github.com/diillson/chatcli/commit/726d1108c90c2c6f0db06b62679ca555d63c67d4))
+
 ## [1.149.0](https://github.com/diillson/chatcli/compare/v1.148.0...v1.149.0) (2026-07-01)
 
 
