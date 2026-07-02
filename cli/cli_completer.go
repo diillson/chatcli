@@ -1651,6 +1651,7 @@ func (cli *ChatCLI) getConfigAgentSuggestions(d prompt.Document) []prompt.Sugges
 	if len(args) == 2 || (len(args) == 3 && !strings.HasSuffix(line, " ")) {
 		subs := []prompt.Suggest{
 			{Text: "ui", Description: i18n.T("complete.config.agent.ui")},
+			{Text: "catalog", Description: i18n.T("complete.config.agent.catalog")},
 			{Text: "help", Description: i18n.T("cfg.agent.usage_header")},
 		}
 		return prompt.FilterHasPrefix(subs, word, true)
@@ -1667,6 +1668,16 @@ func (cli *ChatCLI) getConfigAgentSuggestions(d prompt.Document) []prompt.Sugges
 		return []prompt.Suggest{}
 	}
 	sub := strings.ToLower(args[2])
+	if sub == "catalog" || sub == "tools" {
+		if len(args) == 3 || (len(args) == 4 && !strings.HasSuffix(line, " ")) {
+			vals := []prompt.Suggest{
+				{Text: "deferred", Description: i18n.T("complete.config.agent.catalog_deferred")},
+				{Text: "full", Description: i18n.T("complete.config.agent.catalog_full")},
+			}
+			return prompt.FilterHasPrefix(vals, word, true)
+		}
+		return []prompt.Suggest{}
+	}
 	if sub == "ui" || sub == "style" {
 		if len(args) == 3 || (len(args) == 4 && !strings.HasSuffix(line, " ")) {
 			vals := []prompt.Suggest{

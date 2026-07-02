@@ -1234,98 +1234,22 @@ func (a *AgentMode) getToolContextString() string {
 		return ""
 	}
 
+	// Deferred catalog (default): only the CORE work-loop tools carry their
+	// full definition inline; every other builtin becomes a one-line index
+	// entry the model expands on demand via @tools describe. Measured saving:
+	// ~11k → ~2.5k tokens of tool definitions per agent turn. External
+	// (user-installed) plugins stay fully rendered — few and explicitly
+	// chosen. CHATCLI_AGENT_TOOL_CATALOG=full restores the legacy behavior.
+	deferred := toolCatalogDeferred()
 	toolDescriptions := make([]string, 0, len(plugins))
+	indexLines := make([]string, 0, len(plugins))
 	coderCheatSheet := ""
 	for _, plugin := range plugins {
-
-		var b strings.Builder
-		b.WriteString(fmt.Sprintf("- Ferramenta: %s\n", plugin.Name()))
-		b.WriteString(fmt.Sprintf("  Descrição: %s\n", plugin.Description()))
-
-		if plugin.Schema() != "" {
-			// Decodifica o schema para um formato estruturado
-			var schema struct {
-				ArgsFormat  string `json:"argsFormat"`
-				Subcommands []struct {
-					Name        string   `json:"name"`
-					Description string   `json:"description"`
-					Examples    []string `json:"examples"`
-					Flags       []struct {
-						Name        string `json:"name"`
-						Description string `json:"description"`
-						Type        string `json:"type"`
-						Default     string `json:"default"`
-						Required    bool   `json:"required"`
-					} `json:"flags"`
-				} `json:"subcommands"`
-			}
-
-			if err := json.Unmarshal([]byte(plugin.Schema()), &schema); err == nil {
-				if a.isCoderMode {
-					// Modo /coder: contexto compacto para reduzir ruído
-					if schema.ArgsFormat != "" {
-						b.WriteString(fmt.Sprintf("  Formato args: %s\n", schema.ArgsFormat))
-					}
-					b.WriteString("  Subcomandos:\n")
-					for _, sub := range schema.Subcommands {
-						b.WriteString(fmt.Sprintf("    - %s: %s\n", sub.Name, sub.Description))
-						var requiredFlags []string
-						for _, flag := range sub.Flags {
-							if flag.Required {
-								requiredFlags = append(requiredFlags, fmt.Sprintf("%s (%s)", flag.Name, flag.Type))
-							}
-						}
-						if len(requiredFlags) > 0 {
-							b.WriteString("      Obrigatórios: " + strings.Join(requiredFlags, ", ") + "\n")
-						}
-						if len(sub.Examples) > 0 {
-							b.WriteString(fmt.Sprintf("      Ex: %s\n", sub.Examples[0]))
-						}
-					}
-				} else {
-					// Modo /agent: contexto completo
-					if schema.ArgsFormat != "" {
-						b.WriteString(fmt.Sprintf("  Formato args: %s\n", schema.ArgsFormat))
-					}
-					b.WriteString("  Subcomandos Disponíveis:\n")
-					for _, sub := range schema.Subcommands {
-						b.WriteString(fmt.Sprintf("    - %s: %s\n", sub.Name, sub.Description))
-						if len(sub.Flags) > 0 {
-							b.WriteString("      Flags:\n")
-							for _, flag := range sub.Flags {
-								req := ""
-								if flag.Required {
-									req = " [obrigatório]"
-								}
-								flagDesc := fmt.Sprintf("        - %s (%s)%s: %s", flag.Name, flag.Type, req, flag.Description)
-								if flag.Default != "" {
-									flagDesc += fmt.Sprintf(" (padrão: %s)", flag.Default)
-								}
-								b.WriteString(flagDesc + "\n")
-							}
-						}
-						if len(sub.Examples) > 0 {
-							limit := 2
-							if len(sub.Examples) < limit {
-								limit = len(sub.Examples)
-							}
-							b.WriteString("      Exemplos:\n")
-							for i := 0; i < limit; i++ {
-								b.WriteString(fmt.Sprintf("        - %s\n", sub.Examples[i]))
-							}
-						}
-					}
-				}
-			} else {
-				// Fallback para o uso antigo se o JSON do schema for inválido
-				b.WriteString(fmt.Sprintf("  Uso: %s\n", plugin.Usage()))
-			}
-		} else {
-			// Fallback para plugins que não têm o schema
-			b.WriteString(fmt.Sprintf("  Uso: %s\n", plugin.Usage()))
+		if deferred && plugin.Path() == "" && !isCoreTool(plugin.Name()) {
+			indexLines = append(indexLines, renderToolIndexLine(plugin))
+			continue
 		}
-
-		toolDescriptions = append(toolDescriptions, b.String())
+		toolDescriptions = append(toolDescriptions, renderToolBlock(plugin, a.isCoderMode))
 	}
 
 	if a.isCoderMode {
@@ -1354,7 +1278,11 @@ func (a *AgentMode) getToolContextString() string {
 		}
 	}
 
-	toolContext := "\n\n" + i18n.T("agent.system_prompt.tools_header") + "\n" + coderCheatSheet + strings.Join(toolDescriptions, "\n") + "\n\n" + i18n.T("agent.system_prompt.tools_instruction")
+	indexSection := ""
+	if len(indexLines) > 0 {
+		indexSection = "\n\n" + deferredCatalogInstruction + strings.Join(indexLines, "")
+	}
+	toolContext := "\n\n" + i18n.T("agent.system_prompt.tools_header") + "\n" + coderCheatSheet + strings.Join(toolDescriptions, "\n") + indexSection + "\n\n" + i18n.T("agent.system_prompt.tools_instruction")
 	if a.isCoderMode {
 		toolContext += "\nDicas rápidas (@coder):\n" +
 			"- Use args JSON sempre que possível: {\"cmd\":\"read\",\"args\":{\"file\":\"main.go\"}}\n" +
