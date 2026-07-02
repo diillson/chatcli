@@ -74,34 +74,7 @@ func (cp *CapacityPlanner) AnalyzeResourceTrends(ctx context.Context, resource p
 		return nil, err
 	}
 
-	if len(deploy.Spec.Template.Spec.Containers) > 0 {
-		c := deploy.Spec.Template.Spec.Containers[0]
-		if c.Resources.Limits != nil {
-			if cpu, ok := c.Resources.Limits[corev1.ResourceCPU]; ok {
-				forecast.Limits.CPUMillicores = cpu.MilliValue()
-			}
-			if mem, ok := c.Resources.Limits[corev1.ResourceMemory]; ok {
-				forecast.Limits.MemoryBytes = mem.Value()
-			}
-		}
-		// Use requests as current usage proxy
-		if c.Resources.Requests != nil {
-			if cpu, ok := c.Resources.Requests[corev1.ResourceCPU]; ok {
-				forecast.CurrentUsage.CPUMillicores = cpu.MilliValue()
-			}
-			if mem, ok := c.Resources.Requests[corev1.ResourceMemory]; ok {
-				forecast.CurrentUsage.MemoryBytes = mem.Value()
-			}
-		}
-	}
-
-	// Calculate usage percentage
-	if forecast.Limits.CPUMillicores > 0 {
-		forecast.UsagePercentage.CPU = float64(forecast.CurrentUsage.CPUMillicores) / float64(forecast.Limits.CPUMillicores) * 100
-	}
-	if forecast.Limits.MemoryBytes > 0 {
-		forecast.UsagePercentage.Memory = float64(forecast.CurrentUsage.MemoryBytes) / float64(forecast.Limits.MemoryBytes) * 100
-	}
+	fillUsageFromDeployment(forecast, &deploy)
 
 	// Query anomalies for trend analysis
 	var anomalies platformv1alpha1.AnomalyList
@@ -143,7 +116,51 @@ func (cp *CapacityPlanner) AnalyzeResourceTrends(ctx context.Context, resource p
 		forecast.Trend.Direction = "stable"
 	}
 
-	// Forecast exhaustion
+	fillExhaustionForecast(forecast)
+
+	// Recommendation
+	forecast.Forecast.Recommendation = cp.generateRecommendation(forecast)
+
+	cp.fillIncidentCorrelation(ctx, forecast, resource, cutoff)
+
+	return forecast, nil
+}
+
+// fillUsageFromDeployment extracts limits and request-based current usage from
+// the deployment's first container and derives the usage percentages.
+func fillUsageFromDeployment(forecast *CapacityForecast, deploy *appsv1.Deployment) {
+	if len(deploy.Spec.Template.Spec.Containers) > 0 {
+		c := deploy.Spec.Template.Spec.Containers[0]
+		if c.Resources.Limits != nil {
+			if cpu, ok := c.Resources.Limits[corev1.ResourceCPU]; ok {
+				forecast.Limits.CPUMillicores = cpu.MilliValue()
+			}
+			if mem, ok := c.Resources.Limits[corev1.ResourceMemory]; ok {
+				forecast.Limits.MemoryBytes = mem.Value()
+			}
+		}
+		// Use requests as current usage proxy
+		if c.Resources.Requests != nil {
+			if cpu, ok := c.Resources.Requests[corev1.ResourceCPU]; ok {
+				forecast.CurrentUsage.CPUMillicores = cpu.MilliValue()
+			}
+			if mem, ok := c.Resources.Requests[corev1.ResourceMemory]; ok {
+				forecast.CurrentUsage.MemoryBytes = mem.Value()
+			}
+		}
+	}
+
+	if forecast.Limits.CPUMillicores > 0 {
+		forecast.UsagePercentage.CPU = float64(forecast.CurrentUsage.CPUMillicores) / float64(forecast.Limits.CPUMillicores) * 100
+	}
+	if forecast.Limits.MemoryBytes > 0 {
+		forecast.UsagePercentage.Memory = float64(forecast.CurrentUsage.MemoryBytes) / float64(forecast.Limits.MemoryBytes) * 100
+	}
+}
+
+// fillExhaustionForecast projects when CPU/memory hit 100% given the current
+// usage and per-day trend, ignoring horizons beyond a year.
+func fillExhaustionForecast(forecast *CapacityForecast) {
 	now := time.Now()
 	if forecast.Trend.CPUTrendPerDay > 0 && forecast.UsagePercentage.CPU < 100 {
 		daysLeft := (100 - forecast.UsagePercentage.CPU) / forecast.Trend.CPUTrendPerDay
@@ -161,28 +178,27 @@ func (cp *CapacityPlanner) AnalyzeResourceTrends(ctx context.Context, resource p
 			forecast.Forecast.DaysUntilMemoryExhaustion = int(daysLeft)
 		}
 	}
+}
 
-	// Recommendation
-	forecast.Forecast.Recommendation = cp.generateRecommendation(forecast)
-
-	// Incident correlation
+// fillIncidentCorrelation counts window incidents and flags the resource as a
+// bottleneck when it is tied to more than two of them.
+func (cp *CapacityPlanner) fillIncidentCorrelation(ctx context.Context, forecast *CapacityForecast, resource platformv1alpha1.ResourceRef, cutoff time.Time) {
 	var issues platformv1alpha1.IssueList
-	if err := cp.client.List(ctx, &issues, client.InNamespace(resource.Namespace)); err == nil {
-		for _, iss := range issues.Items {
-			if iss.CreationTimestamp.Time.Before(cutoff) {
-				continue
-			}
-			forecast.IncidentCorrelation.IncidentsInWindow++
-			if iss.Spec.Resource.Name == resource.Name {
-				forecast.IncidentCorrelation.ResourceRelatedIncidents++
-			}
+	if err := cp.client.List(ctx, &issues, client.InNamespace(resource.Namespace)); err != nil {
+		return
+	}
+	for _, iss := range issues.Items {
+		if iss.CreationTimestamp.Time.Before(cutoff) {
+			continue
 		}
-		if forecast.IncidentCorrelation.ResourceRelatedIncidents > 2 {
-			forecast.IncidentCorrelation.ResourceIsBottleneck = true
+		forecast.IncidentCorrelation.IncidentsInWindow++
+		if iss.Spec.Resource.Name == resource.Name {
+			forecast.IncidentCorrelation.ResourceRelatedIncidents++
 		}
 	}
-
-	return forecast, nil
+	if forecast.IncidentCorrelation.ResourceRelatedIncidents > 2 {
+		forecast.IncidentCorrelation.ResourceIsBottleneck = true
+	}
 }
 
 func (cp *CapacityPlanner) generateRecommendation(f *CapacityForecast) string {

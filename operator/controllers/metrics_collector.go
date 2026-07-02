@@ -394,7 +394,7 @@ func (mc *MetricsCollector) buildMetricsSummary(snapshot *MetricsSnapshot) strin
 		return ""
 	}
 
-	var parts []string
+	parts := make([]string, 0, len(snapshot.Trends))
 
 	for _, t := range snapshot.Trends {
 		parts = append(parts, fmt.Sprintf("%s: %s (%.1f%% change, before=%.4f, during=%.4f, after=%.4f) [%s]",

@@ -89,7 +89,7 @@ func (ce *CorrelationEngine) FindRelatedAnomalies(ctx context.Context, resource 
 	}
 
 	cutoff := time.Now().Add(-window)
-	var related []platformv1alpha1.Anomaly
+	related := make([]platformv1alpha1.Anomaly, 0, len(list.Items))
 	for _, a := range list.Items {
 		if a.Status.Correlated {
 			continue

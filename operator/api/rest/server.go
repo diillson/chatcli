@@ -1582,7 +1582,7 @@ func (s *APIServer) handleAnalyticsCapacity(w http.ResponseWriter, r *http.Reque
 	}
 
 	seen := make(map[string]bool)
-	var forecasts []interface{}
+	forecasts := make([]interface{}, 0, len(issues.Items))
 	for _, iss := range issues.Items {
 		key := fmt.Sprintf("%s/%s/%s", iss.Spec.Resource.Kind, iss.Spec.Resource.Namespace, iss.Spec.Resource.Name)
 		if seen[key] {
@@ -2568,7 +2568,7 @@ func (s *APIServer) handleFederationClusters(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	var clusters []ClusterItem
+	clusters := make([]ClusterItem, 0, len(items))
 	for _, item := range items {
 		ci := unstructuredToCluster(item)
 		if tier != "" && ci.Tier != tier {
@@ -2589,7 +2589,7 @@ func (s *APIServer) handleFederationCorrelations(w http.ResponseWriter, r *http.
 		return
 	}
 
-	var correlations []map[string]interface{}
+	correlations := make([]map[string]interface{}, 0, len(issues.Items))
 	seen := make(map[string]bool)
 	for _, iss := range issues.Items {
 		if iss.Annotations == nil {
@@ -2662,7 +2662,7 @@ func (s *APIServer) handleListAIInsights(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	var items []AIInsightItem
+	items := make([]AIInsightItem, 0, len(insights.Items))
 	for _, ai := range insights.Items {
 		if issueFilter != "" && ai.Spec.IssueRef.Name != issueFilter {
 			continue
@@ -2780,7 +2780,7 @@ func (s *APIServer) handleListRemediations(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	var items []RemediationItem
+	items := make([]RemediationItem, 0, len(remediations.Items))
 	for _, rp := range remediations.Items {
 		if stateFilter != "" && !strings.EqualFold(string(rp.Status.State), stateFilter) {
 			continue

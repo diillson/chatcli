@@ -101,7 +101,7 @@ func TestRemediationReconcile_NotFound(t *testing.T) {
 	if err != nil {
 		t.Fatalf("expected no error, got %v", err)
 	}
-	if result.Requeue {
+	if result.RequeueAfter > 0 {
 		t.Error("expected no requeue")
 	}
 }
@@ -117,7 +117,7 @@ func TestRemediationReconcile_PendingToExecuting(t *testing.T) {
 	if err != nil {
 		t.Fatalf("reconcile failed: %v", err)
 	}
-	if !result.Requeue {
+	if result.RequeueAfter == 0 {
 		t.Error("expected requeue after transitioning to Executing")
 	}
 
@@ -908,7 +908,7 @@ func TestRemediationReconcile_TerminalStateNoop(t *testing.T) {
 	if err != nil {
 		t.Fatalf("expected no error, got %v", err)
 	}
-	if result.Requeue {
+	if result.RequeueAfter > 0 {
 		t.Error("expected no requeue for terminal state")
 	}
 }

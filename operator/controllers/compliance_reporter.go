@@ -75,7 +75,6 @@ func (cr *ComplianceReporter) GenerateReport(ctx context.Context, namespace stri
 	start := now.Add(-window)
 	report := &ComplianceReport{Period: ReportPeriod{Start: start, End: now}}
 
-	// Issues
 	var issues platformv1alpha1.IssueList
 	opts := []client.ListOption{}
 	if namespace != "" {
@@ -85,10 +84,23 @@ func (cr *ComplianceReporter) GenerateReport(ctx context.Context, namespace stri
 		return nil, err
 	}
 
+	detectCount, resolveCount := fillIncidentMetrics(report, &issues, start)
+	if err := cr.fillRemediationMetrics(ctx, report, opts, start); err != nil {
+		return nil, err
+	}
+	cr.fillApprovalMetrics(ctx, report, opts, start)
+	fillSLAMetrics(report, &issues, start, detectCount, resolveCount)
+	cr.fillAuditSummary(ctx, report, opts, start)
+
+	return report, nil
+}
+
+// fillIncidentMetrics aggregates incident counts, MTTD and MTTR over the
+// window, returning the detect/resolve sample sizes the SLA section reuses.
+func fillIncidentMetrics(report *ComplianceReport, issues *platformv1alpha1.IssueList, start time.Time) (detectCount, resolveCount int) {
 	report.IncidentMetrics.BySeverity = make(map[string]int64)
 	report.IncidentMetrics.ByState = make(map[string]int64)
 	var totalDetectDur, totalResolveDur time.Duration
-	var detectCount, resolveCount int
 	var totalAttempts int64
 
 	for _, iss := range issues.Items {
@@ -118,11 +130,15 @@ func (cr *ComplianceReporter) GenerateReport(ctx context.Context, namespace stri
 	if report.IncidentMetrics.TotalIncidents > 0 {
 		report.IncidentMetrics.MeanRemediationAttempts = float64(totalAttempts) / float64(report.IncidentMetrics.TotalIncidents)
 	}
+	return detectCount, resolveCount
+}
 
-	// Remediations
+// fillRemediationMetrics aggregates remediation-plan outcomes and per-action
+// success/failure stats over the window.
+func (cr *ComplianceReporter) fillRemediationMetrics(ctx context.Context, report *ComplianceReport, opts []client.ListOption, start time.Time) error {
 	var plans platformv1alpha1.RemediationPlanList
 	if err := cr.client.List(ctx, &plans, opts...); err != nil {
-		return nil, err
+		return err
 	}
 
 	report.RemediationMetrics.ByActionType = make(map[string]ActionStats)
@@ -156,90 +172,99 @@ func (cr *ComplianceReporter) GenerateReport(ctx context.Context, namespace stri
 	if completed+failed > 0 {
 		report.RemediationMetrics.SuccessRate = float64(completed) / float64(completed+failed) * 100
 	}
+	return nil
+}
 
-	// Approvals
+// fillApprovalMetrics aggregates approval outcomes and mean decision time.
+// List failures leave the section empty — approvals are optional data.
+func (cr *ComplianceReporter) fillApprovalMetrics(ctx context.Context, report *ComplianceReport, opts []client.ListOption, start time.Time) {
 	var approvals platformv1alpha1.ApprovalRequestList
-	if err := cr.client.List(ctx, &approvals, opts...); err == nil {
-		var totalDecisionDur time.Duration
-		var decisionCount int
-		for _, ar := range approvals.Items {
-			if ar.CreationTimestamp.Time.Before(start) {
-				continue
-			}
-			report.ApprovalMetrics.TotalRequests++
-			switch ar.Status.State {
-			case platformv1alpha1.ApprovalStateApproved:
-				if ar.Status.AutoApproved {
-					report.ApprovalMetrics.AutoApproved++
-				} else {
-					report.ApprovalMetrics.ManualApproved++
-				}
-				if ar.Status.ApprovedAt != nil {
-					totalDecisionDur += ar.Status.ApprovedAt.Time.Sub(ar.CreationTimestamp.Time)
-					decisionCount++
-				}
-			case platformv1alpha1.ApprovalStateRejected:
-				report.ApprovalMetrics.Rejected++
-			case platformv1alpha1.ApprovalStateExpired:
-				report.ApprovalMetrics.Expired++
-			}
+	if err := cr.client.List(ctx, &approvals, opts...); err != nil {
+		return
+	}
+	var totalDecisionDur time.Duration
+	var decisionCount int
+	for _, ar := range approvals.Items {
+		if ar.CreationTimestamp.Time.Before(start) {
+			continue
 		}
-		if decisionCount > 0 {
-			report.ApprovalMetrics.AverageDecisionTime = totalDecisionDur / time.Duration(decisionCount)
+		report.ApprovalMetrics.TotalRequests++
+		switch ar.Status.State {
+		case platformv1alpha1.ApprovalStateApproved:
+			if ar.Status.AutoApproved {
+				report.ApprovalMetrics.AutoApproved++
+			} else {
+				report.ApprovalMetrics.ManualApproved++
+			}
+			if ar.Status.ApprovedAt != nil {
+				totalDecisionDur += ar.Status.ApprovedAt.Time.Sub(ar.CreationTimestamp.Time)
+				decisionCount++
+			}
+		case platformv1alpha1.ApprovalStateRejected:
+			report.ApprovalMetrics.Rejected++
+		case platformv1alpha1.ApprovalStateExpired:
+			report.ApprovalMetrics.Expired++
 		}
 	}
+	if decisionCount > 0 {
+		report.ApprovalMetrics.AverageDecisionTime = totalDecisionDur / time.Duration(decisionCount)
+	}
+}
 
-	// SLA Compliance — calculate from issues and SLA definitions
-	// CompliancePercentage = ((totalIncidents - slaViolations) / totalIncidents) * 100
+// fillSLAMetrics derives SLA compliance from the incident set:
+// CompliancePercentage = ((totalIncidents - slaViolations) / totalIncidents) * 100.
+func fillSLAMetrics(report *ComplianceReport, issues *platformv1alpha1.IssueList, start time.Time, detectCount, resolveCount int) {
 	totalIncidents := report.IncidentMetrics.TotalIncidents
-	if totalIncidents > 0 {
-		// Count SLA violations: issues that were escalated (indicates SLA breach)
-		// or have SLA-related annotations
-		var violations int64
-		for _, iss := range issues.Items {
-			if iss.CreationTimestamp.Time.Before(start) {
-				continue
-			}
-			// Escalated = SLA resolution time exceeded
-			if iss.Status.State == platformv1alpha1.IssueStateEscalated {
-				report.SLAMetrics.ResolutionSLAViolations++
-				violations++
-			}
-			// Check if response SLA was violated (DetectedAt too late)
-			if iss.Status.DetectedAt != nil {
-				detectTime := iss.Status.DetectedAt.Time.Sub(iss.CreationTimestamp.Time)
-				report.SLAMetrics.AverageResponseTime += detectTime
-			}
-			if iss.Status.ResolvedAt != nil {
-				resolveTime := iss.Status.ResolvedAt.Time.Sub(iss.CreationTimestamp.Time)
-				report.SLAMetrics.AverageResolutionTime += resolveTime
-			}
-		}
-		if detectCount > 0 {
-			report.SLAMetrics.AverageResponseTime = report.SLAMetrics.AverageResponseTime / time.Duration(detectCount)
-		}
-		if resolveCount > 0 {
-			report.SLAMetrics.AverageResolutionTime = report.SLAMetrics.AverageResolutionTime / time.Duration(resolveCount)
-		}
-		report.SLAMetrics.CompliancePercentage = float64(totalIncidents-violations) / float64(totalIncidents) * 100
-	} else {
+	if totalIncidents == 0 {
 		report.SLAMetrics.CompliancePercentage = 100 // No incidents = 100% compliance
+		return
 	}
-
-	// Audit events
-	var auditEvents platformv1alpha1.AuditEventList
-	if err := cr.client.List(ctx, &auditEvents, opts...); err == nil {
-		report.AuditSummary.BySeverity = make(map[string]int64)
-		report.AuditSummary.ByEventType = make(map[string]int64)
-		for _, ae := range auditEvents.Items {
-			if ae.CreationTimestamp.Time.Before(start) {
-				continue
-			}
-			report.AuditSummary.TotalEvents++
-			report.AuditSummary.BySeverity[ae.Spec.Severity]++
-			report.AuditSummary.ByEventType[ae.Spec.EventType]++
+	// Count SLA violations: issues that were escalated (indicates SLA breach)
+	// or have SLA-related annotations.
+	var violations int64
+	for _, iss := range issues.Items {
+		if iss.CreationTimestamp.Time.Before(start) {
+			continue
+		}
+		// Escalated = SLA resolution time exceeded
+		if iss.Status.State == platformv1alpha1.IssueStateEscalated {
+			report.SLAMetrics.ResolutionSLAViolations++
+			violations++
+		}
+		// Check if response SLA was violated (DetectedAt too late)
+		if iss.Status.DetectedAt != nil {
+			detectTime := iss.Status.DetectedAt.Time.Sub(iss.CreationTimestamp.Time)
+			report.SLAMetrics.AverageResponseTime += detectTime
+		}
+		if iss.Status.ResolvedAt != nil {
+			resolveTime := iss.Status.ResolvedAt.Time.Sub(iss.CreationTimestamp.Time)
+			report.SLAMetrics.AverageResolutionTime += resolveTime
 		}
 	}
+	if detectCount > 0 {
+		report.SLAMetrics.AverageResponseTime = report.SLAMetrics.AverageResponseTime / time.Duration(detectCount)
+	}
+	if resolveCount > 0 {
+		report.SLAMetrics.AverageResolutionTime = report.SLAMetrics.AverageResolutionTime / time.Duration(resolveCount)
+	}
+	report.SLAMetrics.CompliancePercentage = float64(totalIncidents-violations) / float64(totalIncidents) * 100
+}
 
-	return report, nil
+// fillAuditSummary aggregates audit events by severity and type. List
+// failures leave the section empty — audit data is optional.
+func (cr *ComplianceReporter) fillAuditSummary(ctx context.Context, report *ComplianceReport, opts []client.ListOption, start time.Time) {
+	var auditEvents platformv1alpha1.AuditEventList
+	if err := cr.client.List(ctx, &auditEvents, opts...); err != nil {
+		return
+	}
+	report.AuditSummary.BySeverity = make(map[string]int64)
+	report.AuditSummary.ByEventType = make(map[string]int64)
+	for _, ae := range auditEvents.Items {
+		if ae.CreationTimestamp.Time.Before(start) {
+			continue
+		}
+		report.AuditSummary.TotalEvents++
+		report.AuditSummary.BySeverity[ae.Spec.Severity]++
+		report.AuditSummary.ByEventType[ae.Spec.EventType]++
+	}
 }

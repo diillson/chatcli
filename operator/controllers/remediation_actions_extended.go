@@ -502,12 +502,10 @@ func (r *RemediationReconciler) executeResizePVC(ctx context.Context, resource p
 		return fmt.Errorf("new size (%s) must be larger than current size (%s)", newSize, currentSize.String())
 	}
 
-	// Check if storage class supports expansion
-	if pvc.Spec.StorageClassName != nil {
-		// The CSI driver and StorageClass must support expansion,
-		// but we can't easily check this at runtime without the StorageClass API.
-		// The API server will reject the request if expansion is not supported.
-	}
+	// Storage-class expansion support is not checked here: the CSI driver and
+	// StorageClass must support it, but that cannot be verified at runtime
+	// without the StorageClass API — the API server rejects the request when
+	// expansion is unsupported.
 
 	pvc.Spec.Resources.Requests[corev1.ResourceStorage] = qty
 	return r.Update(ctx, &pvc)

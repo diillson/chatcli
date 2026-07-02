@@ -2,12 +2,13 @@
 #
 # Strategy: enable the linters whose findings have caught real bugs in
 # the past (errcheck/govet/staticcheck/revive) plus a few quality-of-life
-# ones (misspell, unconvert, prealloc). Existing legacy code is
-# grandfathered via the workflow's `--new-from-rev=origin/main` flag —
-# every linter listed here runs on PRs, but only flags lines the PR
-# actually added or modified. The Quality Gate Floor 1 calls this file
-# without --new-from-rev for new branches off main to ensure the
-# baseline is enforceable.
+# ones (misspell, unconvert, prealloc). The legacy backlog is fully paid
+# down (misspell in PR #1055, errorlint/prealloc/gocyclo/revive/
+# contextcheck in #1056, the remainder — root and operator — in the
+# change that removed --new-from-rev), so CI enforces the FULL module on
+# every PR: `golangci-lint run ./...` must stay at zero findings in both
+# modules. New debt fails the gate immediately instead of accumulating
+# outside PR diffs.
 
 run:
   timeout: 5m

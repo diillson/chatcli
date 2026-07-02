@@ -216,10 +216,6 @@ func IsUnsafeCommand(cmd string, allowSudo bool) (bool, string) {
 	return false, ""
 }
 
-func runCommand(dir, cmd string, args ...string) (string, error) {
-	return runCommandCtx(context.Background(), dir, cmd, args...)
-}
-
 func runCommandCtx(ctx context.Context, dir, cmd string, args ...string) (string, error) {
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Minute)
 	defer cancel()

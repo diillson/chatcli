@@ -52,7 +52,7 @@ func TestDiagnosticAllowlist_Defaults(t *testing.T) {
 }
 
 func TestDiagnosticAllowlist_EnvOverride(t *testing.T) {
-	// Reset the sync.Once so we can re-initialise with the env var set. This is the
+	// Reset the sync.Once so we can re-initialize with the env var set. This is the
 	// only place we intentionally break cache encapsulation; every other call site
 	// uses the cached singleton.
 	resetDiagnosticAllowlistCache()

@@ -124,7 +124,7 @@ func (g *GitOpsDetector) detectHelmRelease(ctx context.Context, resource platfor
 	}
 
 	// Find secrets matching the resource name
-	var candidates []releaseEntry
+	candidates := make([]releaseEntry, 0, len(secrets.Items))
 	for i := range secrets.Items {
 		s := &secrets.Items[i]
 		releaseName := s.Labels["name"]

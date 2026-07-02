@@ -146,7 +146,7 @@ func (r *RemediationReconciler) handleWaitingApproval(ctx context.Context, plan 
 		plan.Status.State = platformv1alpha1.RemediationStateExecuting
 		plan.Status.StartedAt = &now
 		plan.Status.Result = ""
-		return ctrl.Result{Requeue: true}, r.Status().Update(ctx, plan)
+		return ctrl.Result{RequeueAfter: conflictRetryDelay}, r.Status().Update(ctx, plan)
 
 	case platformv1alpha1.ApprovalStateRejected:
 		rejectedBy, reason := lastDecision(ar.Status.Decisions)
@@ -223,7 +223,7 @@ func (r *RemediationReconciler) handlePending(ctx context.Context, plan *platfor
 		}
 	}
 
-	return ctrl.Result{Requeue: true}, nil
+	return ctrl.Result{RequeueAfter: conflictRetryDelay}, nil
 }
 
 func (r *RemediationReconciler) handleExecuting(ctx context.Context, plan *platformv1alpha1.RemediationPlan) (ctrl.Result, error) {
@@ -244,7 +244,7 @@ func (r *RemediationReconciler) handleExecuting(ctx context.Context, plan *platf
 	rollbackEngine := NewRollbackEngine(r.Client)
 
 	// Capture full restorable pre-flight snapshot (structured, not just text)
-	var evidence []platformv1alpha1.EvidenceItem
+	evidence := make([]platformv1alpha1.EvidenceItem, 0, 4)
 	preflightSnapshot, err := rollbackEngine.CaptureSnapshot(ctx, resource)
 	if err != nil {
 		log.Info("Failed to capture structured snapshot, falling back to text", "error", err)
@@ -263,7 +263,7 @@ func (r *RemediationReconciler) handleExecuting(ctx context.Context, plan *platf
 	}
 
 	// Execute each action with ReAct loop: Act → Observe → decide if resource is healthy (early exit)
-	var checkpoints []platformv1alpha1.ActionCheckpoint
+	checkpoints := make([]platformv1alpha1.ActionCheckpoint, 0, len(plan.Spec.Actions))
 	for i, action := range plan.Spec.Actions {
 		// ReAct: OBSERVE — check if resource is already healthy before running next action
 		if i > 0 {
@@ -811,7 +811,7 @@ func (r *RemediationReconciler) handleAgenticResolved(ctx context.Context, plan 
 
 	if err := r.Update(ctx, plan); err != nil {
 		if errors.IsConflict(err) {
-			return ctrl.Result{Requeue: true}, nil
+			return ctrl.Result{RequeueAfter: conflictRetryDelay}, nil
 		}
 		return ctrl.Result{}, err
 	}
@@ -973,7 +973,7 @@ func (r *RemediationReconciler) rejectDivergentAgenticAction(ctx context.Context
 	needStartedAt := plan.Status.AgenticStartedAt == nil
 	if err := r.Update(ctx, plan); err != nil {
 		if errors.IsConflict(err) {
-			return ctrl.Result{Requeue: true}, nil
+			return ctrl.Result{RequeueAfter: conflictRetryDelay}, nil
 		}
 		return ctrl.Result{}, err
 	}

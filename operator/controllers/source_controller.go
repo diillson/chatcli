@@ -143,7 +143,7 @@ func (r *SourceRepositoryReconciler) resolveAuth(ctx context.Context, repo *plat
 			return nil, fmt.Errorf("secret %s missing 'token' key", repo.Spec.SecretRef)
 		}
 		// For HTTPS URLs, inject token into URL via credential helper
-		env = append(env, fmt.Sprintf("GIT_ASKPASS=echo"), fmt.Sprintf("GIT_TOKEN=%s", token))
+		env = append(env, "GIT_ASKPASS=echo", fmt.Sprintf("GIT_TOKEN=%s", token))
 
 	case platformv1alpha1.SourceRepoAuthSSH:
 		sshKey := secret.Data["ssh-key"]
@@ -401,13 +401,13 @@ func detectLanguages(localPath string) []string {
 		name  string
 		count int
 	}
-	var sorted []langEntry
+	sorted := make([]langEntry, 0, len(langCount))
 	for name, count := range langCount {
 		sorted = append(sorted, langEntry{name, count})
 	}
 	sort.Slice(sorted, func(i, j int) bool { return sorted[i].count > sorted[j].count })
 
-	var result []string
+	result := make([]string, 0, 5)
 	for i, e := range sorted {
 		if i >= 5 {
 			break
@@ -595,7 +595,7 @@ func findSuspectedCommit(recentChanges []platformv1alpha1.GitCommitInfo, inciden
 		score  float64
 	}
 
-	var candidates []scored
+	candidates := make([]scored, 0, len(recentChanges))
 	for _, c := range recentChanges {
 		diff := incidentTime.Sub(c.Timestamp.Time)
 		if diff < 0 {
@@ -805,7 +805,7 @@ func readLinesAround(rootDir, filePath string, targetLine, contextLines int) (st
 
 // readConfigFiles reads deployment-related config files.
 func readConfigFiles(localPath string, configFiles []string) []ConfigFileContent {
-	var configs []ConfigFileContent
+	configs := make([]ConfigFileContent, 0, len(configFiles))
 
 	important := []string{"Dockerfile", "values.yaml", "Chart.yaml"}
 	for _, cf := range configFiles {
