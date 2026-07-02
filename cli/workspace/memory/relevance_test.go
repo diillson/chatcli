@@ -8,7 +8,7 @@ import (
 
 // TestSearchDoesNotMatchInsideWords pins lexical precision: raw substring
 // matching made short keywords fire inside unrelated words ("go" inside
-// "django", "art" inside "artefact"), polluting retrieval with noise facts
+// "django", "art" inside "artifact"), polluting retrieval with noise facts
 // that then get access-boosted and entrench themselves.
 func TestSearchDoesNotMatchInsideWords(t *testing.T) {
 	fi := NewFactIndex(t.TempDir(), DefaultConfig(), zap.NewNop())

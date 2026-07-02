@@ -356,29 +356,22 @@ func (x *Index) persist() error {
 	}
 	// Atomic replace (same-dir temp + rename): at tens of MB a plain WriteFile
 	// interrupted mid-write leaves a torn file that costs a full re-embed of
-	// the corpus on the next start.
+	// the corpus on the next start. CreateTemp reserves a unique 0600 name;
+	// the write goes through os.WriteFile so there is a single error surface
+	// per step.
 	tmp, err := os.CreateTemp(filepath.Dir(x.path), filepath.Base(x.path)+".*.tmp")
 	if err != nil {
 		return err
 	}
 	tmpName := tmp.Name()
-	if _, werr := tmp.Write(data); werr != nil {
-		_ = tmp.Close()
+	_ = tmp.Close()
+	if err := os.WriteFile(tmpName, data, 0o600); err != nil {
 		_ = os.Remove(tmpName)
-		return werr
+		return err
 	}
-	if cerr := tmp.Chmod(0o600); cerr != nil {
-		_ = tmp.Close()
+	if err := os.Rename(tmpName, x.path); err != nil {
 		_ = os.Remove(tmpName)
-		return cerr
-	}
-	if cerr := tmp.Close(); cerr != nil {
-		_ = os.Remove(tmpName)
-		return cerr
-	}
-	if rerr := os.Rename(tmpName, x.path); rerr != nil {
-		_ = os.Remove(tmpName)
-		return rerr
+		return err
 	}
 	return nil
 }

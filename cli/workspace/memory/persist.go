@@ -65,9 +65,13 @@ func atomicWriteFile(path string, data []byte, perm os.FileMode) error {
 // original bytes remain recoverable.
 func quarantineCorrupt(path string) (string, error) {
 	dst := path + ".corrupt"
+	// #nosec G703 -- path is a fixed store filename under the operator-configured
+	// memory directory (~/.chatcli/memory), never user/model input; same
+	// precedent as the CCR store paths in cli/compress/ccr.go.
 	if _, err := os.Stat(dst); err == nil {
 		dst = fmt.Sprintf("%s.corrupt-%d", path, time.Now().Unix())
 	}
+	// #nosec G703 -- see above: operator-configured store path, not tainted input.
 	if err := os.Rename(path, dst); err != nil {
 		return "", err
 	}
