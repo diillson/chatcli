@@ -102,11 +102,6 @@ func (cli *ChatCLI) moaClientFor(provider, model string) (client.LLMClient, erro
 	return cli.manager.GetClient(cp, model)
 }
 
-// clientFor delegates to the shared session-aware resolver.
-func (a *moaPluginAdapter) clientFor(provider, model string) (client.LLMClient, error) {
-	return a.cli.moaClientFor(provider, model)
-}
-
 // canonicalProvider delegates to the shared resolver.
 func (a *moaPluginAdapter) canonicalProvider(name string) string {
 	return a.cli.canonicalProviderName(name)
@@ -186,21 +181,20 @@ func (a *moaPluginAdapter) Run(ctx context.Context, prompt string, memberSpecs [
 		return "", fmt.Errorf("%s", i18n.T("moa.tool.no_members"))
 	}
 
-	// Fan out: each member answers the same prompt in parallel.
+	// Fan out: each member answers the same prompt in parallel, through the
+	// shared tool-aware turn executor — members hold the same read-only
+	// exceptions (knowledge retrieval, CCR recall) the /moa panel grants, so a
+	// member can ground its answer instead of guessing. The session history is
+	// passed so a context-dependent @moa is answered with the prior
+	// conversation (mirrors the /moa command).
+	turn := a.cli.moaTurn(a.cli.moaToolsetForRun(a.cli.history))
 	results := make([]moaResult, len(members))
 	var wg sync.WaitGroup
 	for i, m := range members {
 		wg.Add(1)
 		go func(i int, m moaMember) {
 			defer wg.Done()
-			cl, err := a.clientFor(m.provider, m.model)
-			if err != nil {
-				results[i] = moaResult{label: m.label, err: err}
-				return
-			}
-			// Pass the session history so a context-dependent @moa is answered
-			// with the prior conversation (mirrors the /moa command).
-			ans, err := cl.SendPrompt(ctx, prompt, a.cli.history, 0)
+			ans, err := turn(ctx, moa.Ref{Provider: m.provider, Model: m.model}, prompt, a.cli.history)
 			results[i] = moaResult{label: m.label, answer: ans, err: err}
 		}(i, m)
 	}
@@ -234,18 +228,12 @@ func (a *moaPluginAdapter) Run(ctx context.Context, prompt string, memberSpecs [
 		return ok[0].answer, nil
 	}
 
-	// Synthesize.
+	// Synthesize — through the same tool-aware turn, so the aggregator can
+	// also ground its verdict. Any failure (aggregator unavailable, empty
+	// output) falls back to the longest candidate rather than failing the call.
 	aggProvider, aggModel := a.resolveAggregator(aggregatorSpec)
-	aggClient, err := a.clientFor(aggProvider, aggModel)
-	if err != nil {
-		// Aggregator unavailable: fall back to the longest candidate rather
-		// than failing the whole call.
-		a.log().Warn("@moa aggregator unavailable, returning best candidate", zap.Error(err))
-		return bestCandidate(ok), nil
-	}
-
 	synthPrompt := buildSynthesisPrompt(prompt, ok)
-	final, err := aggClient.SendPrompt(ctx, synthPrompt, nil, 0)
+	final, err := turn(ctx, moa.Ref{Provider: aggProvider, Model: aggModel}, synthPrompt, nil)
 	if err != nil || strings.TrimSpace(final) == "" {
 		a.log().Warn("@moa synthesis failed, returning best candidate", zap.Error(err))
 		return bestCandidate(ok), nil
