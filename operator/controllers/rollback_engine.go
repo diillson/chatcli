@@ -275,8 +275,8 @@ func (re *RollbackEngine) captureHPASnapshot(ctx context.Context, resource platf
 			if hpa.Spec.MinReplicas != nil {
 				snapshot.HPAMinReplicas = hpa.Spec.MinReplicas
 			}
-			max := hpa.Spec.MaxReplicas
-			snapshot.HPAMaxReplicas = &max
+			maxReplicas := hpa.Spec.MaxReplicas
+			snapshot.HPAMaxReplicas = &maxReplicas
 			break
 		}
 	}

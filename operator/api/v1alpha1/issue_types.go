@@ -75,9 +75,9 @@ type IssueSpec struct {
 	// Description of the issue.
 	Description string `json:"description"`
 
-	// CorrelationId links correlated anomaly signals.
+	// CorrelationID links correlated anomaly signals.
 	// +optional
-	CorrelationId string `json:"correlationId,omitempty"`
+	CorrelationID string `json:"correlationId,omitempty"`
 
 	// RiskScore is an AI-calculated risk score (0-100).
 	// +kubebuilder:validation:Minimum=0

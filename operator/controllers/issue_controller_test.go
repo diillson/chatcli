@@ -88,7 +88,7 @@ func TestIssueReconcile_NotFound(t *testing.T) {
 	if err != nil {
 		t.Fatalf("expected no error, got %v", err)
 	}
-	if result.Requeue {
+	if result.RequeueAfter > 0 {
 		t.Error("expected no requeue")
 	}
 }
@@ -473,9 +473,10 @@ func TestIssueReconcile_AnalyzingToRemediatingFromAI(t *testing.T) {
 		t.Error("expected non-empty strategy")
 	}
 	if len(plan.Spec.Strategy) > 0 && len(plan.Spec.Strategy) <= 256 {
-		// Strategy should contain the full AI analysis, not be truncated
+		// A short strategy must at least reference the auto-generated runbook —
+		// this branch used to be empty, silently asserting nothing.
 		if !strings.Contains(plan.Spec.Strategy, "auto-") {
-			// It should reference the auto-generated runbook
+			t.Errorf("expected short strategy to reference the auto-generated runbook, got %q", plan.Spec.Strategy)
 		}
 	}
 

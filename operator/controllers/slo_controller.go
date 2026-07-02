@@ -115,13 +115,13 @@ func (r *SLOReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.R
 		remaining = math.Max(0, 1.0-consumed)
 		consumedPercentage = consumed * 100.0
 	} else {
-		// 100% target means zero error budget
+		// 100% target means zero error budget. Only remaining and
+		// consumedPercentage feed the status below; consumed is read solely
+		// in the errorBudgetTotal > 0 branch above.
 		if currentValue < 1.0 {
-			consumed = 1.0
 			remaining = 0.0
 			consumedPercentage = 100.0
 		} else {
-			consumed = 0.0
 			remaining = 1.0
 			consumedPercentage = 0.0
 		}

@@ -451,12 +451,6 @@ type HealthResponse struct {
 	Timestamp string `json:"timestamp"`
 }
 
-// requestContext holds parsed authentication info for a request.
-type requestContext struct {
-	Role   string
-	APIKey string
-}
-
 // paginationParams holds parsed pagination parameters.
 type paginationParams struct {
 	Page     int

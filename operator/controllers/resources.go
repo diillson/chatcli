@@ -235,7 +235,37 @@ func (r *InstanceReconciler) buildPodSpec(instance *platformv1alpha1.Instance) c
 		})
 	}
 
-	// Volume mounts
+	volumeMounts, volumes, initContainers := r.buildInstanceVolumes(instance)
+	container.VolumeMounts = volumeMounts
+
+	podSpec := corev1.PodSpec{
+		ServiceAccountName: instance.Name,
+		InitContainers:     initContainers,
+		Containers:         []corev1.Container{container},
+		Volumes:            volumes,
+	}
+
+	if instance.Spec.SecurityContext != nil {
+		podSpec.SecurityContext = instance.Spec.SecurityContext
+	} else {
+		// Default security context
+		podSpec.SecurityContext = &corev1.PodSecurityContext{
+			RunAsNonRoot: boolPtr(true),
+			RunAsUser:    int64Ptr(1000),
+			SeccompProfile: &corev1.SeccompProfile{
+				Type: corev1.SeccompProfileTypeRuntimeDefault,
+			},
+		}
+	}
+
+	return podSpec
+}
+
+// buildInstanceVolumes assembles the volume mounts, volumes and init
+// containers an Instance pod needs: the writable tmp/data dirs required by
+// the read-only root filesystem, then one optional block per feature
+// (sessions PVC, TLS, watcher config, agents, skills, MCP, plugins).
+func (r *InstanceReconciler) buildInstanceVolumes(instance *platformv1alpha1.Instance) ([]corev1.VolumeMount, []corev1.Volume, []corev1.Container) {
 	var volumeMounts []corev1.VolumeMount
 	var volumes []corev1.Volume
 
@@ -427,29 +457,7 @@ func (r *InstanceReconciler) buildPodSpec(instance *platformv1alpha1.Instance) c
 		}
 	}
 
-	container.VolumeMounts = volumeMounts
-
-	podSpec := corev1.PodSpec{
-		ServiceAccountName: instance.Name,
-		InitContainers:     initContainers,
-		Containers:         []corev1.Container{container},
-		Volumes:            volumes,
-	}
-
-	if instance.Spec.SecurityContext != nil {
-		podSpec.SecurityContext = instance.Spec.SecurityContext
-	} else {
-		// Default security context
-		podSpec.SecurityContext = &corev1.PodSecurityContext{
-			RunAsNonRoot: boolPtr(true),
-			RunAsUser:    int64Ptr(1000),
-			SeccompProfile: &corev1.SeccompProfile{
-				Type: corev1.SeccompProfileTypeRuntimeDefault,
-			},
-		}
-	}
-
-	return podSpec
+	return volumeMounts, volumes, initContainers
 }
 
 func (r *InstanceReconciler) buildContainerArgs(instance *platformv1alpha1.Instance) []string {

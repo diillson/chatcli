@@ -247,7 +247,7 @@ func (ca *CascadeAnalyzer) buildCascadeChain(currentIssue *platformv1alpha1.Issu
 	}
 
 	// Build nodes from all correlated issues + current
-	var allNodes []CascadeNode
+	allNodes := make([]CascadeNode, 0, len(correlatedIssues))
 
 	for _, iss := range correlatedIssues {
 		detected := iss.CreationTimestamp.Time

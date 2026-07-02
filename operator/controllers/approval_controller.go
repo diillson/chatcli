@@ -599,11 +599,6 @@ func severityMaxRank(sev platformv1alpha1.IssueSeverity) int {
 	}
 }
 
-// severityToRank returns the numeric rank for a given severity level (used externally).
-func severityToRank(sev platformv1alpha1.IssueSeverity) int {
-	return severityMaxRank(sev)
-}
-
 // findRemediationPlan finds the RemediationPlan associated with an ApprovalRequest.
 func (r *ApprovalReconciler) findRemediationPlan(ctx context.Context, ar *platformv1alpha1.ApprovalRequest) (*platformv1alpha1.RemediationPlan, error) {
 	if ar.Spec.RemediationPlanRef == "" {

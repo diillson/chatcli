@@ -10,6 +10,7 @@ import (
 	"sort"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -579,7 +580,7 @@ func detectErrorPatterns(lines []string) []ErrorPattern {
 		}
 	}
 
-	var patterns []ErrorPattern
+	patterns := make([]ErrorPattern, 0, len(patternCounts))
 	for _, p := range patternCounts {
 		patterns = append(patterns, *p)
 	}
@@ -598,7 +599,7 @@ func detectErrorPatterns(lines []string) []ErrorPattern {
 
 // parseStructuredLogs extracts error-level entries from JSON-formatted logs.
 func parseStructuredLogs(lines []string) []StructuredLogEntry {
-	var entries []StructuredLogEntry
+	entries := make([]StructuredLogEntry, 0, len(lines))
 
 	for _, line := range lines {
 		line = strings.TrimSpace(line)
@@ -683,7 +684,7 @@ func parseStructuredLogs(lines []string) []StructuredLogEntry {
 
 // extractCriticalLines extracts FATAL/PANIC/ERROR lines with surrounding context.
 func extractCriticalLines(lines []string, podName, containerName string) []CriticalLogLine {
-	var critical []CriticalLogLine
+	critical := make([]CriticalLogLine, 0, len(lines))
 	critRegex := regexp.MustCompile(`(?i)\b(FATAL|PANIC|CRITICAL)\b`)
 
 	for i, line := range lines {
@@ -799,7 +800,9 @@ func aggregateErrorPatterns(patterns []ErrorPattern) []ErrorPattern {
 	return result
 }
 
-// FormatForAI formats the log analysis result as a text block suitable for LLM context.
+// FormatForAI formats the log analysis result as a text block suitable for
+// LLM context. Each section renders through its own writer, ordered by
+// diagnostic value (stack traces first).
 func (r *LogAnalysisResult) FormatForAI() string {
 	if r == nil {
 		return ""
@@ -807,117 +810,147 @@ func (r *LogAnalysisResult) FormatForAI() string {
 
 	var sb strings.Builder
 	sb.WriteString("## Application Log Analysis\n\n")
-
-	// Stack traces (most valuable for root cause)
-	if len(r.StackTraces) > 0 {
-		sb.WriteString("### Stack Traces Found\n")
-		for i, t := range r.StackTraces {
-			if i >= 5 {
-				sb.WriteString(fmt.Sprintf("... and %d more stack traces\n", len(r.StackTraces)-5))
-				break
-			}
-			sb.WriteString(fmt.Sprintf("\n**[%s] %s: %s** (pod=%s, container=%s, occurrences=%d)\n",
-				t.Language, t.ExceptionType, t.Message, t.PodName, t.ContainerName, t.OccurrenceCount))
-			// Show top 10 frames
-			maxFrames := 10
-			if len(t.Frames) < maxFrames {
-				maxFrames = len(t.Frames)
-			}
-			for _, f := range t.Frames[:maxFrames] {
-				sb.WriteString(fmt.Sprintf("  %s\n", f))
-			}
-			if len(t.Frames) > 10 {
-				sb.WriteString(fmt.Sprintf("  ... %d more frames\n", len(t.Frames)-10))
-			}
-		}
-		sb.WriteString("\n")
-	}
-
-	// Error patterns
-	if len(r.ErrorPatterns) > 0 {
-		sb.WriteString("### Error Patterns Detected\n")
-		for i, p := range r.ErrorPatterns {
-			if i >= 10 {
-				break
-			}
-			sb.WriteString(fmt.Sprintf("- [%s/%s] %s (count=%d)\n",
-				p.Severity, p.Category, p.SampleLines[0], p.Count))
-		}
-		sb.WriteString("\n")
-	}
-
-	// Structured log errors
-	if len(r.StructuredErrors) > 0 {
-		sb.WriteString("### Structured Log Errors\n")
-		for i, e := range r.StructuredErrors {
-			if i >= 10 {
-				break
-			}
-			sb.WriteString(fmt.Sprintf("- [%s] %s", e.Level, e.Message))
-			if e.Error != "" {
-				sb.WriteString(fmt.Sprintf(" error=%s", truncateLine(e.Error, 150)))
-			}
-			if e.Logger != "" {
-				sb.WriteString(fmt.Sprintf(" logger=%s", e.Logger))
-			}
-			sb.WriteString("\n")
-		}
-		sb.WriteString("\n")
-	}
-
-	// Critical lines
-	if len(r.CriticalLines) > 0 {
-		sb.WriteString("### Critical Log Lines\n")
-		for i, cl := range r.CriticalLines {
-			if i >= 5 {
-				break
-			}
-			sb.WriteString(fmt.Sprintf("Pod=%s Container=%s:\n", cl.PodName, cl.ContainerName))
-			for _, b := range cl.LinesBefore {
-				sb.WriteString(fmt.Sprintf("    %s\n", b))
-			}
-			sb.WriteString(fmt.Sprintf(" >> %s\n", cl.Line))
-			for _, a := range cl.LinesAfter {
-				sb.WriteString(fmt.Sprintf("    %s\n", a))
-			}
-			sb.WriteString("\n")
-		}
-	}
-
-	// Init container findings
-	if len(r.InitContainerLogs) > 0 {
-		sb.WriteString("### Init Container Findings\n")
-		for _, s := range r.InitContainerLogs {
-			if s.ErrorCount > 0 || len(s.KeyFindings) > 0 {
-				sb.WriteString(fmt.Sprintf("- %s/%s: errors=%d warnings=%d\n",
-					s.PodName, s.ContainerName, s.ErrorCount, s.WarnCount))
-				for _, f := range s.KeyFindings {
-					sb.WriteString(fmt.Sprintf("  - %s\n", f))
-				}
-			}
-		}
-		sb.WriteString("\n")
-	}
-
-	// Sidecar findings
-	if len(r.SidecarLogs) > 0 {
-		for _, s := range r.SidecarLogs {
-			if s.ErrorCount > 0 {
-				sb.WriteString(fmt.Sprintf("### Sidecar %s/%s: errors=%d\n",
-					s.PodName, s.ContainerName, s.ErrorCount))
-				for _, f := range s.KeyFindings {
-					sb.WriteString(fmt.Sprintf("- %s\n", f))
-				}
-			}
-		}
-		sb.WriteString("\n")
-	}
+	r.writeStackTraces(&sb)
+	r.writeErrorPatterns(&sb)
+	r.writeStructuredErrors(&sb)
+	r.writeCriticalLines(&sb)
+	r.writeInitContainerFindings(&sb)
+	r.writeSidecarFindings(&sb)
 
 	result := sb.String()
 	if len(result) > 6000 {
-		result = result[:5997] + "..."
+		// Cut on a rune boundary: log content is arbitrary UTF-8 and this
+		// text is injected into the LLM context.
+		cut := 5997
+		for cut > 0 && !utf8.RuneStart(result[cut]) {
+			cut--
+		}
+		result = result[:cut] + "..."
 	}
 	return result
+}
+
+// writeStackTraces renders the stack-trace section (most valuable for root cause).
+func (r *LogAnalysisResult) writeStackTraces(sb *strings.Builder) {
+	if len(r.StackTraces) == 0 {
+		return
+	}
+	sb.WriteString("### Stack Traces Found\n")
+	for i, t := range r.StackTraces {
+		if i >= 5 {
+			sb.WriteString(fmt.Sprintf("... and %d more stack traces\n", len(r.StackTraces)-5))
+			break
+		}
+		sb.WriteString(fmt.Sprintf("\n**[%s] %s: %s** (pod=%s, container=%s, occurrences=%d)\n",
+			t.Language, t.ExceptionType, t.Message, t.PodName, t.ContainerName, t.OccurrenceCount))
+		// Show top 10 frames
+		maxFrames := 10
+		if len(t.Frames) < maxFrames {
+			maxFrames = len(t.Frames)
+		}
+		for _, f := range t.Frames[:maxFrames] {
+			sb.WriteString(fmt.Sprintf("  %s\n", f))
+		}
+		if len(t.Frames) > 10 {
+			sb.WriteString(fmt.Sprintf("  ... %d more frames\n", len(t.Frames)-10))
+		}
+	}
+	sb.WriteString("\n")
+}
+
+// writeErrorPatterns renders the detected error-pattern section.
+func (r *LogAnalysisResult) writeErrorPatterns(sb *strings.Builder) {
+	if len(r.ErrorPatterns) == 0 {
+		return
+	}
+	sb.WriteString("### Error Patterns Detected\n")
+	for i, p := range r.ErrorPatterns {
+		if i >= 10 {
+			break
+		}
+		sb.WriteString(fmt.Sprintf("- [%s/%s] %s (count=%d)\n",
+			p.Severity, p.Category, p.SampleLines[0], p.Count))
+	}
+	sb.WriteString("\n")
+}
+
+// writeStructuredErrors renders the structured-log-error section.
+func (r *LogAnalysisResult) writeStructuredErrors(sb *strings.Builder) {
+	if len(r.StructuredErrors) == 0 {
+		return
+	}
+	sb.WriteString("### Structured Log Errors\n")
+	for i, e := range r.StructuredErrors {
+		if i >= 10 {
+			break
+		}
+		sb.WriteString(fmt.Sprintf("- [%s] %s", e.Level, e.Message))
+		if e.Error != "" {
+			sb.WriteString(fmt.Sprintf(" error=%s", truncateLine(e.Error, 150)))
+		}
+		if e.Logger != "" {
+			sb.WriteString(fmt.Sprintf(" logger=%s", e.Logger))
+		}
+		sb.WriteString("\n")
+	}
+	sb.WriteString("\n")
+}
+
+// writeCriticalLines renders critical lines with their surrounding context.
+func (r *LogAnalysisResult) writeCriticalLines(sb *strings.Builder) {
+	if len(r.CriticalLines) == 0 {
+		return
+	}
+	sb.WriteString("### Critical Log Lines\n")
+	for i, cl := range r.CriticalLines {
+		if i >= 5 {
+			break
+		}
+		sb.WriteString(fmt.Sprintf("Pod=%s Container=%s:\n", cl.PodName, cl.ContainerName))
+		for _, b := range cl.LinesBefore {
+			sb.WriteString(fmt.Sprintf("    %s\n", b))
+		}
+		sb.WriteString(fmt.Sprintf(" >> %s\n", cl.Line))
+		for _, a := range cl.LinesAfter {
+			sb.WriteString(fmt.Sprintf("    %s\n", a))
+		}
+		sb.WriteString("\n")
+	}
+}
+
+// writeInitContainerFindings renders init-container findings.
+func (r *LogAnalysisResult) writeInitContainerFindings(sb *strings.Builder) {
+	if len(r.InitContainerLogs) == 0 {
+		return
+	}
+	sb.WriteString("### Init Container Findings\n")
+	for _, s := range r.InitContainerLogs {
+		if s.ErrorCount > 0 || len(s.KeyFindings) > 0 {
+			sb.WriteString(fmt.Sprintf("- %s/%s: errors=%d warnings=%d\n",
+				s.PodName, s.ContainerName, s.ErrorCount, s.WarnCount))
+			for _, f := range s.KeyFindings {
+				sb.WriteString(fmt.Sprintf("  - %s\n", f))
+			}
+		}
+	}
+	sb.WriteString("\n")
+}
+
+// writeSidecarFindings renders sidecar findings (only containers with errors).
+func (r *LogAnalysisResult) writeSidecarFindings(sb *strings.Builder) {
+	if len(r.SidecarLogs) == 0 {
+		return
+	}
+	for _, s := range r.SidecarLogs {
+		if s.ErrorCount > 0 {
+			sb.WriteString(fmt.Sprintf("### Sidecar %s/%s: errors=%d\n",
+				s.PodName, s.ContainerName, s.ErrorCount))
+			for _, f := range s.KeyFindings {
+				sb.WriteString(fmt.Sprintf("- %s\n", f))
+			}
+		}
+	}
+	sb.WriteString("\n")
 }
 
 // isResourcePod checks if a pod belongs to the given resource (Deployment, StatefulSet, DaemonSet, Job).

@@ -624,7 +624,7 @@ func (r *IssueReconciler) createRemediationPlan(ctx context.Context, issue *plat
 	planName := fmt.Sprintf("%s-plan-%d", issue.Name, attempt)
 
 	// Build actions from runbook steps — use mapActionType for consistent mapping
-	var actions []platformv1alpha1.RemediationAction
+	actions := make([]platformv1alpha1.RemediationAction, 0, len(runbook.Spec.Steps))
 	for _, step := range runbook.Spec.Steps {
 		actionType := mapActionType(step.Action)
 		actions = append(actions, platformv1alpha1.RemediationAction{
@@ -682,15 +682,10 @@ func (r *IssueReconciler) generateRunbookFromAI(ctx context.Context, issue *plat
 	rbName := sanitizeRunbookName(fmt.Sprintf("auto-%s-%s-%s-%s",
 		signalType, issue.Spec.Severity, strings.ToLower(issue.Spec.Resource.Kind), analysisHash))
 
-	// Convert AI suggested actions to runbook steps
-	var steps []platformv1alpha1.RunbookStep
+	// Convert AI suggested actions to runbook steps (field-identical types).
+	steps := make([]platformv1alpha1.RunbookStep, 0, len(insight.Status.SuggestedActions))
 	for _, sa := range insight.Status.SuggestedActions {
-		steps = append(steps, platformv1alpha1.RunbookStep{
-			Name:        sa.Name,
-			Action:      sa.Action,
-			Description: sa.Description,
-			Params:      sa.Params,
-		})
+		steps = append(steps, platformv1alpha1.RunbookStep(sa))
 	}
 
 	// Build full description from AI analysis (no truncation)
@@ -1694,7 +1689,7 @@ func (r *IssueReconciler) generateAgenticRunbook(ctx context.Context, issue *pla
 	rbName := sanitizeRunbookName(fmt.Sprintf("agentic-%s-%s-%s",
 		signalType, issue.Spec.Severity, strings.ToLower(issue.Spec.Resource.Kind)))
 
-	var steps []platformv1alpha1.RunbookStep
+	steps := make([]platformv1alpha1.RunbookStep, 0, len(plan.Spec.AgenticHistory))
 	for _, step := range plan.Spec.AgenticHistory {
 		if step.Action == nil || strings.HasPrefix(step.Observation, "FAILED:") {
 			continue
@@ -1752,7 +1747,7 @@ func (r *IssueReconciler) buildTrendingInfo(ctx context.Context, issue *platform
 	windowDays := int32(30)
 	cutoff := time.Now().AddDate(0, 0, -int(windowDays))
 
-	var related []string
+	related := make([]string, 0, len(pms.Items))
 	for _, pm := range pms.Items {
 		if pm.Spec.Resource.Name != issue.Spec.Resource.Name {
 			continue

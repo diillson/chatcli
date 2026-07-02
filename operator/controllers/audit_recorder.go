@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"fmt"
 	"time"
+	"unicode/utf8"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -215,9 +216,14 @@ func randomSuffix(n int) string {
 	return string(b)
 }
 
-func truncate(s string, max int) string {
-	if len(s) <= max {
+func truncate(s string, limit int) string {
+	if len(s) <= limit {
 		return s
 	}
-	return s[:max] + "..."
+	// Cut on a rune boundary: audit detail is arbitrary UTF-8, and a mid-rune
+	// byte slice would store invalid text in the audit record.
+	for limit > 0 && !utf8.RuneStart(s[limit]) {
+		limit--
+	}
+	return s[:limit] + "..."
 }

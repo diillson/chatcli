@@ -82,7 +82,7 @@ func TestPostMortem_TerminalClosed(t *testing.T) {
 	if err != nil {
 		t.Fatalf("reconcile failed: %v", err)
 	}
-	if result.Requeue || result.RequeueAfter > 0 {
+	if result.RequeueAfter > 0 {
 		t.Error("expected no requeue for terminal state")
 	}
 

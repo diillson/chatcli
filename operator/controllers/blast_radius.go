@@ -534,45 +534,49 @@ func (bp *BlastRadiusPredictor) checkQuota(ctx context.Context, res platformv1al
 		return
 	}
 
-	for _, q := range quotas.Items {
-		result := &QuotaCheckResult{
-			QuotaName: q.Name,
-		}
-
-		cpuUsed := q.Status.Used[corev1.ResourceRequestsCPU]
-		cpuHard := q.Status.Hard[corev1.ResourceRequestsCPU]
-		memUsed := q.Status.Used[corev1.ResourceRequestsMemory]
-		memHard := q.Status.Hard[corev1.ResourceRequestsMemory]
-
-		if !cpuHard.IsZero() {
-			remaining := cpuHard.DeepCopy()
-			remaining.Sub(cpuUsed)
-			result.CPURemaining = remaining.String()
-		}
-		if !memHard.IsZero() {
-			remaining := memHard.DeepCopy()
-			remaining.Sub(memUsed)
-			result.MemRemaining = remaining.String()
-		}
-
-		// Check if quota is near limit (>90% used)
-		if !cpuHard.IsZero() && cpuUsed.AsApproximateFloat64() > cpuHard.AsApproximateFloat64()*0.9 {
-			prediction.Warnings = append(prediction.Warnings,
-				fmt.Sprintf("CPU quota %s is >90%% used (used=%s hard=%s)",
-					q.Name, cpuUsed.String(), cpuHard.String()))
-		}
-		if !memHard.IsZero() && memUsed.AsApproximateFloat64() > memHard.AsApproximateFloat64()*0.9 {
-			prediction.Warnings = append(prediction.Warnings,
-				fmt.Sprintf("Memory quota %s is >90%% used (used=%s hard=%s)",
-					q.Name, memUsed.String(), memHard.String()))
-		}
-
-		result.Detail = fmt.Sprintf("Quota %s: CPU remaining=%s, Memory remaining=%s",
-			q.Name, result.CPURemaining, result.MemRemaining)
-
-		prediction.QuotaCheck = result
-		break
+	// Only the first quota informs the prediction (a namespace rarely carries
+	// more than one) — an explicit head take, where a loop with an
+	// unconditional break disguised the intent.
+	if len(quotas.Items) == 0 {
+		return
 	}
+	q := quotas.Items[0]
+	result := &QuotaCheckResult{
+		QuotaName: q.Name,
+	}
+
+	cpuUsed := q.Status.Used[corev1.ResourceRequestsCPU]
+	cpuHard := q.Status.Hard[corev1.ResourceRequestsCPU]
+	memUsed := q.Status.Used[corev1.ResourceRequestsMemory]
+	memHard := q.Status.Hard[corev1.ResourceRequestsMemory]
+
+	if !cpuHard.IsZero() {
+		remaining := cpuHard.DeepCopy()
+		remaining.Sub(cpuUsed)
+		result.CPURemaining = remaining.String()
+	}
+	if !memHard.IsZero() {
+		remaining := memHard.DeepCopy()
+		remaining.Sub(memUsed)
+		result.MemRemaining = remaining.String()
+	}
+
+	// Check if quota is near limit (>90% used)
+	if !cpuHard.IsZero() && cpuUsed.AsApproximateFloat64() > cpuHard.AsApproximateFloat64()*0.9 {
+		prediction.Warnings = append(prediction.Warnings,
+			fmt.Sprintf("CPU quota %s is >90%% used (used=%s hard=%s)",
+				q.Name, cpuUsed.String(), cpuHard.String()))
+	}
+	if !memHard.IsZero() && memUsed.AsApproximateFloat64() > memHard.AsApproximateFloat64()*0.9 {
+		prediction.Warnings = append(prediction.Warnings,
+			fmt.Sprintf("Memory quota %s is >90%% used (used=%s hard=%s)",
+				q.Name, memUsed.String(), memHard.String()))
+	}
+
+	result.Detail = fmt.Sprintf("Quota %s: CPU remaining=%s, Memory remaining=%s",
+		q.Name, result.CPURemaining, result.MemRemaining)
+
+	prediction.QuotaCheck = result
 }
 
 // findAffectedServices discovers services that depend on the resource.

@@ -6,6 +6,7 @@ import (
 	"os"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -90,125 +91,7 @@ func (r *AIInsightReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 		}
 	}
 
-	// Build Kubernetes context for AI enrichment
-	var kubeCtx string
-	if r.ContextBuilder != nil {
-		var ctxErr error
-		kubeCtx, ctxErr = r.ContextBuilder.BuildContext(ctx, issue.Spec.Resource)
-		if ctxErr != nil {
-			logger.Info("Failed to build K8s context, continuing without it", "error", ctxErr)
-		}
-	}
-
-	// Determine incident time for contextual enrichment
-	incidentTime := issue.CreationTimestamp.Time
-	if issue.Status.DetectedAt != nil {
-		incidentTime = issue.Status.DetectedAt.Time
-	}
-
-	// Build enriched context from all sources
-	var enrichedContext strings.Builder
-	enrichedContext.WriteString(kubeCtx)
-
-	// Log analysis
-	if r.LogAnalyzer != nil {
-		if logResult, err := r.LogAnalyzer.AnalyzePodLogs(ctx, issue.Spec.Resource, incidentTime); err == nil && logResult != nil {
-			logText := logResult.FormatForAI()
-			if logText != "" {
-				enrichedContext.WriteString("\n")
-				enrichedContext.WriteString(logText)
-			}
-			insight.Status.LogAnalysis = logResult.Summary
-		}
-	}
-
-	// Prometheus metrics
-	if r.MetricsCollector != nil {
-		if metricsResult, err := r.MetricsCollector.CollectIncidentMetrics(ctx, issue.Spec.Resource, incidentTime); err == nil && metricsResult != nil {
-			metricsText := metricsResult.FormatForAI()
-			if metricsText != "" {
-				enrichedContext.WriteString("\n")
-				enrichedContext.WriteString(metricsText)
-			}
-			insight.Status.MetricsContext = metricsResult.Summary
-		}
-	}
-
-	// GitOps context (Helm/ArgoCD/Flux)
-	if r.GitOpsDetector != nil {
-		if gitopsCtx, err := r.GitOpsDetector.DetectGitOpsContext(ctx, issue.Spec.Resource); err == nil && gitopsCtx != nil {
-			gitopsText := gitopsCtx.FormatForAI()
-			if gitopsText != "" {
-				enrichedContext.WriteString("\n")
-				enrichedContext.WriteString(gitopsText)
-			}
-			insight.Status.GitOpsContext = gitopsCtx.Summary
-		}
-	}
-
-	// Source code correlation
-	var stackTraces []StackTrace
-	if r.LogAnalyzer != nil {
-		if logResult, err := r.LogAnalyzer.AnalyzePodLogs(ctx, issue.Spec.Resource, incidentTime); err == nil && logResult != nil {
-			stackTraces = logResult.StackTraces
-		}
-	}
-	if r.SourceCodeAnalyzer != nil {
-		if srcCtx, err := r.SourceCodeAnalyzer.BuildSourceContext(ctx, issue.Spec.Resource, incidentTime, stackTraces); err == nil && srcCtx != nil {
-			srcText := srcCtx.FormatForAI()
-			if srcText != "" {
-				enrichedContext.WriteString("\n")
-				enrichedContext.WriteString(srcText)
-			}
-			insight.Status.SourceCodeContext = srcCtx.Summary
-		}
-	}
-
-	// Cascade / cross-service analysis
-	if r.CascadeAnalyzer != nil {
-		if cascadeResult, err := r.CascadeAnalyzer.AnalyzeCascade(ctx, &issue); err == nil && cascadeResult != nil {
-			cascadeText := cascadeResult.FormatForAI()
-			if cascadeText != "" {
-				enrichedContext.WriteString("\n")
-				enrichedContext.WriteString(cascadeText)
-			}
-			insight.Status.CascadeAnalysis = cascadeResult.Summary
-		}
-	}
-
-	// RCA enrichment
-	rcaEnricher := NewRCAEnricher(r.Client)
-	if rcaCtx, err := rcaEnricher.EnrichIssueContext(ctx, &issue); err == nil && rcaCtx != nil {
-		rcaText := rcaCtx.FormatForAI()
-		if rcaText != "" {
-			enrichedContext.WriteString("\n")
-			enrichedContext.WriteString(rcaText)
-		}
-	}
-
-	// Security (M1): Scrub sensitive data from logs before sending to LLM
-	scrubber := NewLogScrubber(os.Getenv("CHATCLI_LOG_SCRUB_PATTERNS"))
-	combinedContext := scrubber.ScrubText(enrichedContext.String())
-	if len(combinedContext) > 30000 {
-		combinedContext = combinedContext[:30000] + "\n... (context truncated)"
-	}
-
-	// Read failure context from annotation (set by retry re-analysis flow)
-	var failureCtx string
-	if insight.Annotations != nil {
-		failureCtx = insight.Annotations["platform.chatcli.io/failure-context"]
-	}
-
-	// Inject candidate runbook context for AI validation (if present)
-	if insight.Annotations != nil {
-		if rbCtx := insight.Annotations["platform.chatcli.io/runbook-context"]; rbCtx != "" {
-			combinedContext = combinedContext + "\n\n--- RUNBOOK VALIDATION ---\n" + rbCtx
-			// Re-truncate if needed
-			if len(combinedContext) > 32000 {
-				combinedContext = combinedContext[:32000] + "\n... (context truncated)"
-			}
-		}
-	}
+	combinedContext, failureCtx := r.buildAnalysisContext(ctx, &insight, &issue)
 
 	// Call AnalyzeIssue RPC
 	analyzeReq := &pb.AnalyzeIssueRequest{
@@ -277,6 +160,135 @@ func (r *AIInsightReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 		"model", resp.Model)
 
 	return ctrl.Result{}, nil
+}
+
+// buildAnalysisContext assembles, scrubs and bounds the enrichment context an
+// analysis call sends to the LLM, and returns the failure context of a prior
+// attempt (set by the retry re-analysis flow) alongside it.
+func (r *AIInsightReconciler) buildAnalysisContext(ctx context.Context, insight *platformv1alpha1.AIInsight, issue *platformv1alpha1.Issue) (combined, failureCtx string) {
+	// Determine incident time for contextual enrichment
+	incidentTime := issue.CreationTimestamp.Time
+	if issue.Status.DetectedAt != nil {
+		incidentTime = issue.Status.DetectedAt.Time
+	}
+
+	raw := r.gatherEnrichmentSources(ctx, insight, issue, incidentTime)
+
+	// Security (M1): Scrub sensitive data from logs before sending to LLM
+	scrubber := NewLogScrubber(os.Getenv("CHATCLI_LOG_SCRUB_PATTERNS"))
+	combined = truncateContextRuneSafe(scrubber.ScrubText(raw), 30000)
+
+	// Read failure context from annotation (set by retry re-analysis flow)
+	if insight.Annotations != nil {
+		failureCtx = insight.Annotations["platform.chatcli.io/failure-context"]
+	}
+
+	// Inject candidate runbook context for AI validation (if present)
+	if insight.Annotations != nil {
+		if rbCtx := insight.Annotations["platform.chatcli.io/runbook-context"]; rbCtx != "" {
+			combined = truncateContextRuneSafe(combined+"\n\n--- RUNBOOK VALIDATION ---\n"+rbCtx, 32000)
+		}
+	}
+	return combined, failureCtx
+}
+
+// gatherEnrichmentSources runs every wired enrichment collector — Kubernetes
+// context, log analysis, Prometheus metrics, GitOps, source-code correlation,
+// cascade analysis and RCA — appending each non-empty block and recording the
+// per-source summaries on the insight status. Every collector is optional and
+// failure-tolerant: enrichment must never block the analysis itself.
+func (r *AIInsightReconciler) gatherEnrichmentSources(ctx context.Context, insight *platformv1alpha1.AIInsight, issue *platformv1alpha1.Issue, incidentTime time.Time) string {
+	logger := log.FromContext(ctx)
+	var enrichedContext strings.Builder
+
+	if r.ContextBuilder != nil {
+		kubeCtx, ctxErr := r.ContextBuilder.BuildContext(ctx, issue.Spec.Resource)
+		if ctxErr != nil {
+			logger.Info("Failed to build K8s context, continuing without it", "error", ctxErr)
+		}
+		enrichedContext.WriteString(kubeCtx)
+	}
+
+	// Log analysis — analyzed once; the stack traces feed source correlation
+	// below (this used to run AnalyzePodLogs a second time for the same data).
+	var stackTraces []StackTrace
+	if r.LogAnalyzer != nil {
+		if logResult, err := r.LogAnalyzer.AnalyzePodLogs(ctx, issue.Spec.Resource, incidentTime); err == nil && logResult != nil {
+			if logText := logResult.FormatForAI(); logText != "" {
+				enrichedContext.WriteString("\n")
+				enrichedContext.WriteString(logText)
+			}
+			insight.Status.LogAnalysis = logResult.Summary
+			stackTraces = logResult.StackTraces
+		}
+	}
+
+	// Prometheus metrics
+	if r.MetricsCollector != nil {
+		if metricsResult, err := r.MetricsCollector.CollectIncidentMetrics(ctx, issue.Spec.Resource, incidentTime); err == nil && metricsResult != nil {
+			if metricsText := metricsResult.FormatForAI(); metricsText != "" {
+				enrichedContext.WriteString("\n")
+				enrichedContext.WriteString(metricsText)
+			}
+			insight.Status.MetricsContext = metricsResult.Summary
+		}
+	}
+
+	// GitOps context (Helm/ArgoCD/Flux)
+	if r.GitOpsDetector != nil {
+		if gitopsCtx, err := r.GitOpsDetector.DetectGitOpsContext(ctx, issue.Spec.Resource); err == nil && gitopsCtx != nil {
+			if gitopsText := gitopsCtx.FormatForAI(); gitopsText != "" {
+				enrichedContext.WriteString("\n")
+				enrichedContext.WriteString(gitopsText)
+			}
+			insight.Status.GitOpsContext = gitopsCtx.Summary
+		}
+	}
+
+	// Source code correlation
+	if r.SourceCodeAnalyzer != nil {
+		if srcCtx, err := r.SourceCodeAnalyzer.BuildSourceContext(ctx, issue.Spec.Resource, incidentTime, stackTraces); err == nil && srcCtx != nil {
+			if srcText := srcCtx.FormatForAI(); srcText != "" {
+				enrichedContext.WriteString("\n")
+				enrichedContext.WriteString(srcText)
+			}
+			insight.Status.SourceCodeContext = srcCtx.Summary
+		}
+	}
+
+	// Cascade / cross-service analysis
+	if r.CascadeAnalyzer != nil {
+		if cascadeResult, err := r.CascadeAnalyzer.AnalyzeCascade(ctx, issue); err == nil && cascadeResult != nil {
+			if cascadeText := cascadeResult.FormatForAI(); cascadeText != "" {
+				enrichedContext.WriteString("\n")
+				enrichedContext.WriteString(cascadeText)
+			}
+			insight.Status.CascadeAnalysis = cascadeResult.Summary
+		}
+	}
+
+	// RCA enrichment
+	rcaEnricher := NewRCAEnricher(r.Client)
+	if rcaCtx, err := rcaEnricher.EnrichIssueContext(ctx, issue); err == nil && rcaCtx != nil {
+		if rcaText := rcaCtx.FormatForAI(); rcaText != "" {
+			enrichedContext.WriteString("\n")
+			enrichedContext.WriteString(rcaText)
+		}
+	}
+
+	return enrichedContext.String()
+}
+
+// truncateContextRuneSafe bounds s to limit bytes, cutting on a rune boundary
+// — log content is arbitrary UTF-8 and this text goes to the LLM.
+func truncateContextRuneSafe(s string, limit int) string {
+	if len(s) <= limit {
+		return s
+	}
+	for limit > 0 && !utf8.RuneStart(s[limit]) {
+		limit--
+	}
+	return s[:limit] + "\n... (context truncated)"
 }
 
 // SetupWithManager sets up the controller with the Manager.

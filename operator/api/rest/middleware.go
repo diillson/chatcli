@@ -66,19 +66,6 @@ func (s *APIServer) authMiddleware(next http.Handler) http.Handler {
 	})
 }
 
-// requireRole returns a middleware that checks the role meets the minimum requirement.
-// Role hierarchy: admin > operator > viewer.
-func requireRole(minRole string, next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		role := roleFromContext(r.Context())
-		if !hasMinRole(role, minRole) {
-			writeError(w, http.StatusForbidden, "insufficient permissions: requires "+minRole+" role")
-			return
-		}
-		next.ServeHTTP(w, r)
-	})
-}
-
 // hasMinRole checks if the given role meets the minimum role requirement.
 func hasMinRole(role, minRole string) bool {
 	roleLevel := map[string]int{
@@ -252,21 +239,4 @@ func pathSegments(path string) []string {
 		return nil
 	}
 	return strings.Split(path, "/")
-}
-
-// matchRoute checks if segments match a pattern like ["api", "v1", "incidents", ":name"].
-// Returns extracted parameters or nil if no match.
-func matchRoute(segments []string, pattern []string) map[string]string {
-	if len(segments) != len(pattern) {
-		return nil
-	}
-	params := make(map[string]string)
-	for i, p := range pattern {
-		if strings.HasPrefix(p, ":") {
-			params[p[1:]] = segments[i]
-		} else if p != segments[i] {
-			return nil
-		}
-	}
-	return params
 }

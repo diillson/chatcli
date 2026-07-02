@@ -421,8 +421,8 @@ func (r *NotificationReconciler) buildMessage(issue *platformv1alpha1.Issue, pol
 		"SignalType": issue.Spec.SignalType,
 		"RiskScore":  fmt.Sprintf("%d", issue.Spec.RiskScore),
 	}
-	if issue.Spec.CorrelationId != "" {
-		fields["CorrelationID"] = issue.Spec.CorrelationId
+	if issue.Spec.CorrelationID != "" {
+		fields["CorrelationID"] = issue.Spec.CorrelationID
 	}
 	if issue.Status.RemediationAttempts > 0 {
 		fields["RemediationAttempts"] = fmt.Sprintf("%d/%d",
