@@ -1216,6 +1216,8 @@
   "plugins.proc.describe_stop": "Parando processo %s",
   "plugins.proc.describe_remove": "Removendo processo %s",
   "plugins.proc.describe_list": "Listando processos em background",
+  "plugins.http.describe_generic": "Enviando requisição HTTP",
+  "plugins.http.describe_request": "HTTP %s %s",
   "plugins.knowledge.describe_list": "Listando knowledge bases anexadas",
   "plugins.knowledge.describe_generic": "Consultando a knowledge base",
   "plugins.docsflatten.description": "Achata documentação OU código/infra (Markdown, código-fonte, Terraform, YAML Kubernetes/Argo, shell) de diretório local ou repo git em chunks prontos para IA (text/jsonl/json/yaml); kind=code chunka por estrutura; jsonl alimenta /context --mode knowledge",

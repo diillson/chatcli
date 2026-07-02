@@ -506,6 +506,10 @@ func NewChatCLI(ctx context.Context, manager manager.LLMManager, logger *zap.Log
 		// long-running commands (dev servers, watchers). Adapter wired below
 		// over a session supervisor sharing the agent exec validator.
 		pluginMgr.RegisterBuiltinPlugin(plugins.NewBuiltinProcPlugin())
+		// @http — structured HTTP client for testing APIs (pairs with @proc:
+		// start the server, hit its endpoints). Self-contained: shares the
+		// hardened proxy/TLS/SSRF web client with @webfetch.
+		pluginMgr.RegisterBuiltinPlugin(plugins.NewBuiltinHTTPPlugin())
 		// @docs-flatten — push-side companion of @knowledge: flattens a
 		// Markdown/MDX docs tree (local dir or git repo) into the JSONL
 		// corpus /context --mode knowledge ingests. Self-contained.
