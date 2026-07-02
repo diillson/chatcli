@@ -7,13 +7,42 @@ package ctxmgr
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/diillson/chatcli/utils"
 	"go.uber.org/zap"
 )
+
+// errContextCorrupt marks a context file that exists but cannot be parsed —
+// the signal LoadAllContexts uses to quarantine it instead of skipping it
+// silently on every start.
+var errContextCorrupt = errors.New("context file corrupt")
+
+// atomicWrite persists data via a same-directory temp file and an atomic
+// rename. Context files embed the whole corpus (multi-MB for knowledge
+// bases); a plain WriteFile interrupted mid-write leaves a torn file and the
+// knowledge base silently vanishes from the next load.
+func atomicWrite(path string, data []byte) error {
+	tmp, err := os.CreateTemp(filepath.Dir(path), filepath.Base(path)+".*.tmp")
+	if err != nil {
+		return err
+	}
+	tmpName := tmp.Name()
+	_ = tmp.Close()
+	if err := os.WriteFile(tmpName, data, 0o600); err != nil {
+		_ = os.Remove(tmpName)
+		return err
+	}
+	if err := os.Rename(tmpName, path); err != nil {
+		_ = os.Remove(tmpName)
+		return err
+	}
+	return nil
+}
 
 // Storage gerencia a persistência de contextos em disco
 type Storage struct {
@@ -43,12 +72,15 @@ func NewStorage(logger *zap.Logger) (*Storage, error) {
 func (s *Storage) SaveContext(ctx *FileContext) error {
 	filePath := s.getContextPath(ctx.ID)
 
-	data, err := json.MarshalIndent(ctx, "", "  ")
+	// Compact encoding on purpose: a knowledge context embeds its whole corpus
+	// and nobody reads a 50k-chunk JSON by eye — indentation only doubled the
+	// file and the marshal allocation.
+	data, err := json.Marshal(ctx)
 	if err != nil {
 		return fmt.Errorf("erro ao serializar contexto: %w", err)
 	}
 
-	if err := os.WriteFile(filePath, data, 0o600); err != nil {
+	if err := atomicWrite(filePath, data); err != nil {
 		return fmt.Errorf("erro ao salvar contexto: %w", err)
 	}
 
@@ -70,7 +102,7 @@ func (s *Storage) LoadContext(contextID string) (*FileContext, error) {
 
 	var ctx FileContext
 	if err := json.Unmarshal(data, &ctx); err != nil {
-		return nil, fmt.Errorf("erro ao desserializar contexto: %w", err)
+		return nil, fmt.Errorf("erro ao desserializar contexto %s: %w (%w)", contextID, errContextCorrupt, err)
 	}
 
 	// NOVO: Reconstruir ScanOptions a partir dos metadados
@@ -105,6 +137,23 @@ func (s *Storage) LoadAllContexts() ([]*FileContext, error) {
 		contextID := entry.Name()[:len(entry.Name())-5] // Remove .json
 		ctx, err := s.LoadContext(contextID)
 		if err != nil {
+			// Parse failure: quarantine with a visible name instead of skipping
+			// silently forever — a knowledge base that "disappears" from
+			// /context list with only a debug-level trail is undiagnosable.
+			if errors.Is(err, errContextCorrupt) {
+				src := s.getContextPath(contextID)
+				dst := src + ".corrupt"
+				if _, serr := os.Stat(dst); serr == nil {
+					dst = fmt.Sprintf("%s.corrupt-%d", src, time.Now().Unix())
+				}
+				if renameErr := os.Rename(src, dst); renameErr == nil {
+					s.logger.Warn("Contexto corrompido movido para quarentena",
+						zap.String("id", contextID),
+						zap.String("quarantine", dst),
+						zap.Error(err))
+					continue
+				}
+			}
 			s.logger.Warn("Erro ao carregar contexto, pulando",
 				zap.String("id", contextID),
 				zap.Error(err))
@@ -139,12 +188,14 @@ func (s *Storage) GetStoragePath() string {
 
 // ExportContext exporta um contexto para um arquivo específico
 func (s *Storage) ExportContext(ctx *FileContext, targetPath string) error {
+	// Exports keep the indented form: they are the one artifact a human may
+	// open (sharing/reviewing a context definition).
 	data, err := json.MarshalIndent(ctx, "", "  ")
 	if err != nil {
 		return fmt.Errorf("erro ao serializar contexto para exportação: %w", err)
 	}
 
-	if err := os.WriteFile(targetPath, data, 0o600); err != nil {
+	if err := atomicWrite(targetPath, data); err != nil {
 		return fmt.Errorf("erro ao exportar contexto: %w", err)
 	}
 

@@ -106,10 +106,13 @@ func (e *RetrievalEngine) Enabled() bool {
 	return e != nil && !embedding.IsNull(e.provider)
 }
 
-// Retrieve returns the top-k passages of fc most relevant to query. It builds
-// the per-context vector cache lazily, embeds only segments not already cached,
-// and evicts vectors for passages that no longer exist (file edited/removed), so
-// repeated calls are cheap and never serve a match against stale text.
+// Retrieve returns the top-k passages of fc most relevant to query. Segments,
+// the vector-index handle and its prune run come from the same fingerprint
+// cache the hybrid path uses — previously this path re-segmented the context
+// and re-parsed the whole persisted vector JSON on EVERY query, the exact
+// per-call cost the cache exists to avoid. It embeds only segments not already
+// cached, so repeated calls are cheap and never serve a match against stale
+// text.
 func (e *RetrievalEngine) Retrieve(ctx context.Context, fc *FileContext, query string, k int) ([]Segment, error) {
 	if !e.Enabled() || fc == nil {
 		return nil, nil
@@ -121,22 +124,20 @@ func (e *RetrievalEngine) Retrieve(ctx context.Context, fc *FileContext, query s
 		return nil, nil
 	}
 
-	segs := SegmentFiles(fc.Files, e.segOpts)
+	entry := e.entryFor(fc)
+	segs := entry.segs
 	if len(segs) == 0 {
 		return nil, nil
 	}
 
 	byID := make(map[string]Segment, len(segs))
-	keep := make(map[string]struct{}, len(segs))
 	allIDs := make([]string, 0, len(segs))
 	for _, s := range segs {
 		byID[s.ID] = s
-		keep[s.ID] = struct{}{}
 		allIDs = append(allIDs, s.ID)
 	}
 
-	idx := vindex.New(e.vectorPath(fc.ID), e.provider, vindex.WithLogger(e.logger))
-	idx.Prune(keep)
+	idx := entry.vec // built and pruned by entryFor when the engine is enabled
 
 	if missing := idx.MissingFor(allIDs); len(missing) > 0 {
 		sub := make(map[string]string, len(missing))
