@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.149.2](https://github.com/diillson/chatcli/compare/v1.149.1...v1.149.2) (2026-07-02)
+
+
+### Bug Fixes
+
+* **moa:** brief every MoA participant like a chat turn and grant read-only tools ([#1116](https://github.com/diillson/chatcli/issues/1116)) ([8acc383](https://github.com/diillson/chatcli/commit/8acc383e394d23feb940e81f4f65590fe16b3994))
+
 ## [1.149.1](https://github.com/diillson/chatcli/compare/v1.149.0...v1.149.1) (2026-07-02)
 
 
