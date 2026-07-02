@@ -9,6 +9,7 @@ package compress
 import (
 	"fmt"
 	"strings"
+	"unicode/utf8"
 )
 
 // ProseCompressor reduces prose / Markdown — the HTML-turned-Markdown an agent
@@ -38,6 +39,20 @@ func NewProseCompressor() *ProseCompressor {
 	return &ProseCompressor{SectionCap: 6000}
 }
 
+// NewProseCompressorFor returns a compressor tuned for the given profile:
+// conservative keeps roughly double the default section budget, aggressive
+// roughly half.
+func NewProseCompressorFor(p Profile) *ProseCompressor {
+	switch p {
+	case ProfileConservative:
+		return &ProseCompressor{SectionCap: 12000}
+	case ProfileAggressive:
+		return &ProseCompressor{SectionCap: 3000}
+	default:
+		return NewProseCompressor()
+	}
+}
+
 // Name implements Compressor.
 func (*ProseCompressor) Name() string { return "prose" }
 
@@ -63,8 +78,11 @@ func (c *ProseCompressor) Compress(content string, opts Options) (Result, error)
 		return passthrough(content), nil
 	}
 
+	// Byte shrinkage is the engage signal; the removed-lines counter is
+	// diagnostic only (a single-line section can shrink by thousands of bytes
+	// while removing zero whole lines).
 	reduced, removed := c.reduce(content)
-	if removed == 0 || len(reduced) >= len(content) {
+	if len(reduced) >= len(content) {
 		return passthrough(content), nil
 	}
 
@@ -146,12 +164,20 @@ func (c *ProseCompressor) trimLongSections(content string) (string, int) {
 		if len(body) <= c.SectionCap {
 			out = append(out, section...)
 		} else {
-			head := c.SectionCap * 2 / 3
-			tail := c.SectionCap / 3
+			// Align both cuts to rune boundaries: web prose is routinely
+			// non-ASCII and a mid-rune byte slice would inject invalid UTF-8
+			// into the model's prompt.
+			head := runeBoundaryBefore(body, c.SectionCap*2/3)
+			tailStart := runeBoundaryAfter(body, len(body)-c.SectionCap/3)
 			before := len(strings.Split(body, "\n"))
-			trimmed := body[:head] + fmt.Sprintf("\n\n... [%d chars of this section omitted] ...\n\n", len(body)-head-tail) + body[len(body)-tail:]
+			trimmed := body[:head] + fmt.Sprintf("\n\n... [%d chars of this section omitted] ...\n\n", tailStart-head) + body[tailStart:]
 			out = append(out, trimmed)
-			removed += before - len(strings.Split(trimmed, "\n"))
+			// The gap scaffolding adds lines of its own, so a single-line
+			// section trims to MORE lines than it had — clamp at zero; this
+			// counter reports removals, never a negative artifact.
+			if delta := before - len(strings.Split(trimmed, "\n")); delta > 0 {
+				removed += delta
+			}
 		}
 		section = nil
 	}
@@ -166,6 +192,33 @@ func (c *ProseCompressor) trimLongSections(content string) (string, int) {
 	}
 	flush()
 	return strings.Join(out, "\n"), removed
+}
+
+// runeBoundaryBefore returns the largest index <= i that starts a UTF-8 rune
+// in s (clamped to [0, len(s)]).
+func runeBoundaryBefore(s string, i int) int {
+	if i <= 0 {
+		return 0
+	}
+	if i >= len(s) {
+		return len(s)
+	}
+	for i > 0 && !utf8.RuneStart(s[i]) {
+		i--
+	}
+	return i
+}
+
+// runeBoundaryAfter returns the smallest index >= i that starts a UTF-8 rune
+// in s (clamped to [0, len(s)]).
+func runeBoundaryAfter(s string, i int) int {
+	if i <= 0 {
+		return 0
+	}
+	for i < len(s) && !utf8.RuneStart(s[i]) {
+		i++
+	}
+	return i
 }
 
 // isMarkdownHeading reports whether a line is an ATX Markdown heading ("# ...").

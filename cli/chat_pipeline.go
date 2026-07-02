@@ -773,11 +773,16 @@ func (cli *ChatCLI) telemetryParts(usage *models.UsageInfo, costUSD float64, inc
 		pct := float64(usage.PromptTokens) / float64(window) * 100
 		parts = append(parts, i18n.T("chat.envelope.context_pct", clampPct(pct)))
 	}
-	// Session compression savings (shared across agent/coder/chat). Shown only
-	// when the layer has actually saved something this session.
+	// Compression savings SINCE THE LAST RENDER — per-turn, matching the cost
+	// and ctx% figures beside it (the session total lives in /config
+	// compression stats and the agent close-out summary). The high-water mark
+	// makes each render report only fresh savings, whichever surface (chat
+	// footer or agent turn line) renders first.
 	if cli.compressionLayer != nil {
-		if s, _ := cli.compressionLayer.Stats(); s.SavedBytes() > 0 {
-			if savedTok := s.SavedBytes() / 4; savedTok > 0 {
+		if s, _ := cli.compressionLayer.Stats(); s.SavedBytes() > cli.compressionSavedShown {
+			delta := s.SavedBytes() - cli.compressionSavedShown
+			cli.compressionSavedShown = s.SavedBytes()
+			if savedTok := delta / 4; savedTok > 0 {
 				parts = append(parts, i18n.T("chat.envelope.compression_saved", formatTokenCount(savedTok)))
 			}
 		}

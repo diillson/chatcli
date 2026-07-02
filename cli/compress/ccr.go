@@ -9,6 +9,7 @@ package compress
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -16,6 +17,13 @@ import (
 	"sync"
 	"time"
 )
+
+// ErrEntryTooLarge is returned by a bounded Store's Put when the content
+// exceeds the per-entry capacity. Storing it would force the eviction pass to
+// remove the entry itself (along with everything else), leaving any embedded
+// retrieval marker dangling — so the store refuses up front and the caller
+// degrades to passthrough, honoring the never-degrade contract.
+var ErrEntryTooLarge = errors.New("compress: content exceeds the CCR store per-entry capacity")
 
 // CCR — Contextual Compression Retrieval.
 //
@@ -27,6 +35,14 @@ import (
 //
 // Keys are content-addressed (a short SHA-256 prefix), so storing the same
 // content twice is idempotent and natural deduplication falls out for free.
+//
+// SCOPE — the store is per OS user (one directory under ~/.chatcli), shared
+// by every ChatCLI process that user runs: REPL and gateway daemon alike.
+// That sharing is intentional (cross-process recall, content dedup). It also
+// means markers persisted in conversation logs are recallable by any process
+// reading the same store, so the gateway must remain single-principal per OS
+// user; a multi-tenant deployment needs per-principal store directories
+// (CHATCLI_COMPRESSION_CCR_DIR).
 
 // keyLen is the number of hex characters kept from the SHA-256 digest. 16 hex
 // chars = 64 bits of address space — collision-safe for the volume a single
@@ -144,53 +160,115 @@ type Pruner interface {
 
 // ─── MemoryStore ────────────────────────────────────────────────────────────
 
-// MemoryStore is an in-process, unbounded Store. Ideal for tests and for the
-// one-shot (-p) path where nothing should touch disk. For long-running
-// sessions prefer DiskStore, which is bounded.
+// MemoryStore is an in-process Store. Unbounded by default (tests and the
+// one-shot -p path, where sessions are short and nothing should touch disk);
+// NewBoundedMemoryStore adds the same LRU size cap and per-entry capacity as
+// DiskStore, for use as the long-running fallback when the disk store cannot
+// be opened. TTL is deliberately absent: it exists to curate entries across
+// restarts, and a memory store never survives one — the LRU cap is what bounds
+// a long-lived process.
 type MemoryStore struct {
-	mu   sync.RWMutex
-	data map[string]string
+	maxBytes int64 // <= 0 means unbounded
+
+	mu         sync.RWMutex
+	data       map[string]*memEntry
+	totalBytes int64
 }
 
-// NewMemoryStore returns an empty in-memory store.
+type memEntry struct {
+	content    string
+	lastAccess time.Time
+}
+
+// NewMemoryStore returns an empty, unbounded in-memory store.
 func NewMemoryStore() *MemoryStore {
-	return &MemoryStore{data: make(map[string]string)}
+	return &MemoryStore{data: make(map[string]*memEntry)}
+}
+
+// NewBoundedMemoryStore returns an in-memory store bounded at maxBytes with
+// LRU eviction and a per-entry capacity of maxBytes/4 (see ErrEntryTooLarge).
+// A maxBytes <= 0 yields an unbounded store, same as NewMemoryStore.
+func NewBoundedMemoryStore(maxBytes int64) *MemoryStore {
+	return &MemoryStore{maxBytes: maxBytes, data: make(map[string]*memEntry)}
 }
 
 // Put implements Store.
 func (m *MemoryStore) Put(content string) (string, error) {
+	if limit := maxEntryBytes(m.maxBytes); limit > 0 && int64(len(content)) > limit {
+		return "", ErrEntryTooLarge
+	}
 	key := KeyFor(content)
+	now := time.Now()
 	m.mu.Lock()
-	m.data[key] = content
-	m.mu.Unlock()
+	defer m.mu.Unlock()
+	if e, ok := m.data[key]; ok {
+		e.lastAccess = now // idempotent: refresh recency only
+		return key, nil
+	}
+	m.data[key] = &memEntry{content: content, lastAccess: now}
+	m.totalBytes += int64(len(content))
+	m.evictLocked()
 	return key, nil
 }
 
-// Get implements Store.
+// Get implements Store. A hit refreshes the entry's recency.
 func (m *MemoryStore) Get(key string) (string, bool, error) {
-	m.mu.RLock()
-	v, ok := m.data[key]
-	m.mu.RUnlock()
-	return v, ok, nil
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	e, ok := m.data[key]
+	if !ok {
+		return "", false, nil
+	}
+	e.lastAccess = time.Now()
+	return e.content, true, nil
 }
 
 // Stats implements Store.
 func (m *MemoryStore) Stats() StoreStats {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	var total int64
-	for _, v := range m.data {
-		total += int64(len(v))
-	}
-	return StoreStats{Entries: len(m.data), TotalBytes: total, MaxBytes: 0}
+	return StoreStats{Entries: len(m.data), TotalBytes: m.totalBytes, MaxBytes: m.maxBytes}
 }
 
-// Prune implements Store. MemoryStore is unbounded and TTL-less (test/one-shot
-// use), so there is nothing to curate; it reports the current footprint as
-// remaining.
+// Prune implements Pruner: evicts down to the size cap (a no-op when
+// unbounded, since Put keeps a bounded store within its cap continuously).
 func (m *MemoryStore) Prune() PruneResult {
-	st := m.Stats()
-	return PruneResult{RemainingEntries: st.Entries, RemainingBytes: st.TotalBytes}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	beforeN, beforeBytes := len(m.data), m.totalBytes
+	m.evictLocked()
+	return PruneResult{
+		Removed:          beforeN - len(m.data),
+		BytesFreed:       beforeBytes - m.totalBytes,
+		RemainingEntries: len(m.data),
+		RemainingBytes:   m.totalBytes,
+	}
+}
+
+// evictLocked removes least-recently-used entries until the footprint is
+// within the cap. Caller must hold the mutex. No-op when unbounded.
+func (m *MemoryStore) evictLocked() {
+	if m.maxBytes <= 0 || m.totalBytes <= m.maxBytes {
+		return
+	}
+	type kv struct {
+		key string
+		e   *memEntry
+	}
+	all := make([]kv, 0, len(m.data))
+	for k, e := range m.data {
+		all = append(all, kv{k, e})
+	}
+	sort.Slice(all, func(i, j int) bool {
+		return all[i].e.lastAccess.Before(all[j].e.lastAccess)
+	})
+	for _, item := range all {
+		if m.totalBytes <= m.maxBytes {
+			break
+		}
+		delete(m.data, item.key)
+		m.totalBytes -= int64(len(item.e.content))
+	}
 }
 
 // ─── DiskStore ──────────────────────────────────────────────────────────────
@@ -208,10 +286,10 @@ type DiskStore struct {
 	maxBytes int64
 	ttl      time.Duration
 
-	mu           sync.Mutex
-	entries      map[string]*diskEntry // key -> metadata
-	totalBytes   int64
-	lastTTLSweep time.Time // throttles the on-Put TTL sweep (see maybeSweepTTLLocked)
+	mu         sync.Mutex
+	entries    map[string]*diskEntry // key -> metadata (cache of the directory)
+	totalBytes int64
+	lastSweep  time.Time // throttles the on-Put sweep (see maybeSweepLocked)
 }
 
 type diskEntry struct {
@@ -221,17 +299,40 @@ type diskEntry struct {
 
 const ccrFileExt = ".ccr"
 
-// ccrTTLSweepInterval bounds how often a TTL sweep runs mid-session. TTL is
-// otherwise only enforced at startup (load); without this, a long-lived
-// process (e.g. the gateway daemon) would never expire stale entries until a
-// restart, relying solely on the LRU size cap. Hourly keeps the O(n) map scan
-// off the hot path while still curating during active use.
-const ccrTTLSweepInterval = time.Hour
+// perEntryCapDivisor bounds a single entry to maxBytes/perEntryCapDivisor.
+// The invariant it buys: after evicting older entries, a just-put entry always
+// fits within the cap, so the eviction pass can never remove the entry it was
+// triggered by — the failure mode where Put returned a key whose content was
+// already gone (a dangling <<ccr:KEY>> marker). The divisor also keeps one
+// pathological payload from monopolizing the store: at least 4 originals of
+// maximal size coexist.
+const perEntryCapDivisor = 4
+
+// maxEntryBytes returns the per-entry capacity for a store bounded at
+// maxBytes, or 0 when the store is unbounded (no per-entry limit).
+func maxEntryBytes(maxBytes int64) int64 {
+	if maxBytes <= 0 {
+		return 0
+	}
+	return maxBytes / perEntryCapDivisor
+}
+
+// ccrSweepInterval bounds how often a curation sweep (directory rescan + TTL
+// prune) runs mid-session. Sweeps are otherwise only done at startup (load);
+// without this, a long-lived process (e.g. the gateway daemon) would never
+// expire stale entries — nor notice entries added/evicted by the other
+// ChatCLI process sharing the directory — until a restart. Hourly keeps the
+// O(n) directory scan off the hot path while still curating during active use.
+const ccrSweepInterval = time.Hour
 
 // NewDiskStore opens (creating if needed) a bounded store rooted at dir. A
 // maxBytes <= 0 disables the size cap; a ttl <= 0 disables TTL pruning. On
 // open it scans existing entries, prunes any past their TTL, and evicts down
 // to the cap so a restart inherits a healthy footprint.
+//
+// A bounded store also enforces a per-entry capacity (maxBytes/4): Put returns
+// ErrEntryTooLarge for content that would immediately fall out of the cap,
+// instead of accepting it and letting eviction leave the returned key dangling.
 func NewDiskStore(dir string, maxBytes int64, ttl time.Duration) (*DiskStore, error) {
 	// #nosec G703 -- dir is the operator-configured CCR store path
 	// (CHATCLI_COMPRESSION_CCR_DIR or ~/.chatcli/ccr), not attacker input.
@@ -252,11 +353,28 @@ func NewDiskStore(dir string, maxBytes int64, ttl time.Duration) (*DiskStore, er
 
 // load scans the directory and seeds in-memory metadata, then prunes/evicts.
 func (s *DiskStore) load() error {
+	if err := s.scanLocked(); err != nil {
+		return err
+	}
+	now := time.Now()
+	s.pruneTTL(now)
+	s.evictLocked()
+	s.lastSweep = now
+	return nil
+}
+
+// scanLocked rebuilds the in-memory index from the directory — the source of
+// truth shared with any other ChatCLI process using the same CCR dir. File
+// mtime doubles as last-access across processes (both Put and Get refresh it
+// via Chtimes), so rebuilding from mtime never loses recency information.
+// Caller must hold the mutex.
+func (s *DiskStore) scanLocked() error {
 	ents, err := os.ReadDir(s.dir)
 	if err != nil {
 		return err
 	}
-	now := time.Now()
+	entries := make(map[string]*diskEntry, len(ents))
+	var total int64
 	for _, e := range ents {
 		if e.IsDir() || filepath.Ext(e.Name()) != ccrFileExt {
 			continue
@@ -269,12 +387,11 @@ func (s *DiskStore) load() error {
 		if ierr != nil {
 			continue
 		}
-		s.entries[key] = &diskEntry{size: info.Size(), lastAccess: info.ModTime()}
-		s.totalBytes += info.Size()
+		entries[key] = &diskEntry{size: info.Size(), lastAccess: info.ModTime()}
+		total += info.Size()
 	}
-	s.pruneTTL(now)
-	s.evictLocked()
-	s.lastTTLSweep = now
+	s.entries = entries
+	s.totalBytes = total
 	return nil
 }
 
@@ -286,6 +403,9 @@ func (s *DiskStore) path(key string) string {
 // Put implements Store. The write is atomic (temp file + rename) so a crash
 // never leaves a partial original under a valid content hash.
 func (s *DiskStore) Put(content string) (string, error) {
+	if limit := maxEntryBytes(s.maxBytes); limit > 0 && int64(len(content)) > limit {
+		return "", ErrEntryTooLarge
+	}
 	key := KeyFor(content)
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -321,23 +441,24 @@ func (s *DiskStore) Put(content string) (string, error) {
 
 	s.entries[key] = &diskEntry{size: int64(len(content)), lastAccess: now}
 	s.totalBytes += int64(len(content))
-	s.maybeSweepTTLLocked(now)
+	s.maybeSweepLocked(now)
 	s.evictLocked()
 	return key, nil
 }
 
-// maybeSweepTTLLocked runs a TTL prune at most once per ccrTTLSweepInterval so
-// stale entries are curated during a long-running session, not just at startup.
+// maybeSweepLocked runs a curation sweep — directory rescan (reconciling with
+// entries added/removed by other processes) plus TTL prune — at most once per
+// ccrSweepInterval, so a long-running session stays curated and honest about
+// its real footprint, not just at startup. A rescan failure keeps the current
+// view: the next Get/Put self-heals per key, and the next sweep retries.
 // Caller must hold the mutex.
-func (s *DiskStore) maybeSweepTTLLocked(now time.Time) {
-	if s.ttl <= 0 {
+func (s *DiskStore) maybeSweepLocked(now time.Time) {
+	if !s.lastSweep.IsZero() && now.Sub(s.lastSweep) < ccrSweepInterval {
 		return
 	}
-	if !s.lastTTLSweep.IsZero() && now.Sub(s.lastTTLSweep) < ccrTTLSweepInterval {
-		return
-	}
+	_ = s.scanLocked()
 	s.pruneTTL(now)
-	s.lastTTLSweep = now
+	s.lastSweep = now
 }
 
 // Get implements Store. A hit refreshes the entry's recency.
@@ -352,7 +473,13 @@ func (s *DiskStore) Get(key string) (string, bool, error) {
 
 	e, ok := s.entries[key]
 	if !ok {
-		return "", false, nil
+		// Not in this process's index — but another ChatCLI process sharing
+		// the directory (REPL vs gateway daemon) may have offloaded it after
+		// our last scan. The directory is the source of truth: fall through to
+		// disk and adopt the entry on a hit, so cross-process @recall works
+		// immediately instead of waiting for the next sweep. The key is
+		// already validated, so this touches only paths inside the store.
+		return s.adoptFromDiskLocked(key)
 	}
 	// #nosec G304 -- key is validated by isValidKey (fixed-width lowercase hex)
 	// and joined under s.dir, so the path cannot escape the store directory.
@@ -368,6 +495,27 @@ func (s *DiskStore) Get(key string) (string, bool, error) {
 	}
 	now := time.Now()
 	e.lastAccess = now
+	_ = os.Chtimes(s.path(key), now, now)
+	return string(data), true, nil
+}
+
+// adoptFromDiskLocked resolves a Get miss against the directory itself and,
+// on a hit, adopts the entry into the in-memory index (refreshing recency so
+// the adopted entry is not the next eviction victim). Caller must hold the
+// mutex and have validated the key.
+func (s *DiskStore) adoptFromDiskLocked(key string) (string, bool, error) {
+	// #nosec G304 -- key is validated by isValidKey (fixed-width lowercase hex)
+	// and joined under s.dir, so the path cannot escape the store directory.
+	data, err := os.ReadFile(s.path(key))
+	if err != nil {
+		if os.IsNotExist(err) {
+			return "", false, nil // genuinely unknown key
+		}
+		return "", false, err
+	}
+	now := time.Now()
+	s.entries[key] = &diskEntry{size: int64(len(data)), lastAccess: now}
+	s.totalBytes += int64(len(data))
 	_ = os.Chtimes(s.path(key), now, now)
 	return string(data), true, nil
 }
@@ -405,16 +553,20 @@ func (s *DiskStore) Stats() StoreStats {
 	}
 }
 
-// Prune implements Store: a TTL prune plus size-cap eviction, run on demand.
+// Prune implements Store: a directory rescan (reconciling with other
+// processes), TTL prune, and size-cap eviction, run on demand. The
+// before/after delta is computed over the reconciled view so the report
+// reflects what this pass actually freed, not stale accounting.
 func (s *DiskStore) Prune() PruneResult {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	_ = s.scanLocked()
 	beforeN, beforeBytes := len(s.entries), s.totalBytes
 	now := time.Now()
 	s.pruneTTL(now)
 	s.evictLocked()
-	s.lastTTLSweep = now
+	s.lastSweep = now
 	return PruneResult{
 		Removed:          beforeN - len(s.entries),
 		BytesFreed:       beforeBytes - s.totalBytes,

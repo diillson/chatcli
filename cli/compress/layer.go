@@ -34,17 +34,26 @@ func isRecallTool(toolName string) bool {
 //
 // The zero Layer is not usable; build one with NewLayer or NewLayerFromEnv.
 type Layer struct {
-	router    *ContentRouter
+	router    atomic.Pointer[ContentRouter] // swapped whole on SetProfile
 	store     Store
 	mode      atomic.Int32 // holds a Mode; mutable at runtime via SetMode (/config compression)
-	threshold int
+	profile   atomic.Int32 // holds a Profile; mutable at runtime via SetProfile
+	threshold atomic.Int64 // bytes; mutable at runtime via SetThreshold
 	metrics   *Metrics
+
+	// storeFallbackErr records why the persistent CCR store could not be
+	// opened when the layer had to fall back to a bounded in-memory store.
+	// Nil when the configured store opened normally. Surfaced via
+	// StoreFallback so the caller can log/display the degradation instead of
+	// the user silently losing cross-restart recall.
+	storeFallbackErr error
 }
 
 // Config controls Layer construction. Fields left zero take documented
 // defaults (see NewLayerFromEnv).
 type Config struct {
 	Mode      Mode
+	Profile   Profile
 	Threshold int
 	Store     Store
 }
@@ -59,21 +68,10 @@ const (
 	ccrDirName       = "ccr"
 )
 
-// allCompressors returns a fresh router over the full built-in set. Order is
-// irrelevant — the router selects by detection confidence.
+// newDefaultRouter returns a fresh router over the full built-in set at the
+// default profile. Kept as the profile-agnostic entry point for tests/benches.
 func newDefaultRouter() *ContentRouter {
-	return NewContentRouter(
-		NewSearchCompressor(),
-		NewLogCompressor(),
-		NewDiffCompressor(),
-		NewJSONCrusher(),
-		// Never auto-fires (Detect returns 0 unless Hint.MIME=="code"); kept in
-		// the router so explicit code compression flows through the same path.
-		NewCodeCompressor(),
-		// Auto-fires only on web/reference tool output (not local file reads)
-		// or an explicit prose/markdown hint.
-		NewProseCompressor(),
-	)
+	return newRouterFor(ProfileDefault)
 }
 
 // NewLayer builds a Layer from an explicit Config. A nil Store with
@@ -85,12 +83,13 @@ func NewLayer(cfg Config) *Layer {
 		threshold = DefaultThreshold
 	}
 	l := &Layer{
-		router:    newDefaultRouter(),
-		store:     cfg.Store,
-		threshold: threshold,
-		metrics:   NewMetrics(),
+		store:   cfg.Store,
+		metrics: NewMetrics(),
 	}
+	l.router.Store(newRouterFor(cfg.Profile))
 	l.mode.Store(int32(cfg.Mode))
+	l.profile.Store(int32(cfg.Profile))
+	l.threshold.Store(int64(threshold))
 	return l
 }
 
@@ -101,6 +100,7 @@ func NewLayer(cfg Config) *Layer {
 // Recognized variables:
 //
 //	CHATCLI_COMPRESSION            off | lossless | lossy-with-ccr (default lossy-with-ccr)
+//	CHATCLI_COMPRESSION_PROFILE    conservative | default | aggressive (default default)
 //	CHATCLI_COMPRESSION_THRESHOLD  bytes below which output is untouched (default 4000)
 //	CHATCLI_COMPRESSION_CCR_DIR    override the CCR store directory
 //	CHATCLI_COMPRESSION_CCR_MAX_MB CCR size cap in MiB (default 256; 0 = unbounded)
@@ -111,6 +111,7 @@ func NewLayer(cfg Config) *Layer {
 // CHATCLI_QUALITY_*, CHATCLI_MICROCOMPACT_*, ...).
 func NewLayerFromEnv(stateDir string) *Layer {
 	mode, _ := ParseMode(os.Getenv("CHATCLI_COMPRESSION"))
+	profile, _ := ParseProfile(os.Getenv("CHATCLI_COMPRESSION_PROFILE"))
 
 	threshold := DefaultThreshold
 	if v := os.Getenv("CHATCLI_COMPRESSION_THRESHOLD"); v != "" {
@@ -122,14 +123,30 @@ func NewLayerFromEnv(stateDir string) *Layer {
 	// The CCR store is always built (even in off/lossless mode) so the user
 	// can switch to lossy mode at runtime via `/config compression lossy`
 	// without restarting. An empty store directory is cheap and harmless.
-	cfg := Config{Mode: mode, Threshold: threshold, Store: newCCRStoreFromEnv(stateDir)}
-	return NewLayer(cfg)
+	store, storeErr := newCCRStoreFromEnv(stateDir)
+	l := NewLayer(Config{Mode: mode, Profile: profile, Threshold: threshold, Store: store})
+	l.storeFallbackErr = storeErr
+	return l
+}
+
+// StoreFallback reports why the persistent CCR store could not be opened, or
+// nil when the configured store is active. A non-nil value means the layer is
+// running on a bounded in-memory store: compression still works and markers
+// still recall within this process, but offloaded originals do not survive a
+// restart and are not shared with other ChatCLI processes.
+func (l *Layer) StoreFallback() error {
+	if l == nil {
+		return nil
+	}
+	return l.storeFallbackErr
 }
 
 // newCCRStoreFromEnv resolves the CCR directory and size/TTL caps and opens a
-// DiskStore. On any failure it falls back to an in-memory store so the session
-// still benefits from compression (just without cross-restart persistence).
-func newCCRStoreFromEnv(stateDir string) Store {
+// DiskStore. On failure it falls back to a bounded in-memory store (same size
+// cap) so the session still benefits from compression — just without
+// cross-restart persistence — and returns the cause so the caller can surface
+// the degradation.
+func newCCRStoreFromEnv(stateDir string) (Store, error) {
 	dir := os.Getenv("CHATCLI_COMPRESSION_CCR_DIR")
 	if dir == "" {
 		if stateDir == "" {
@@ -158,9 +175,9 @@ func newCCRStoreFromEnv(stateDir string) Store {
 
 	store, err := NewDiskStore(dir, maxBytes, ttl)
 	if err != nil {
-		return NewMemoryStore()
+		return NewBoundedMemoryStore(maxBytes), err
 	}
-	return store
+	return store, nil
 }
 
 // Mode reports the Layer's active mode. Safe for concurrent use.
@@ -176,6 +193,45 @@ func (l *Layer) Mode() Mode {
 func (l *Layer) SetMode(m Mode) {
 	if l != nil {
 		l.mode.Store(int32(m))
+	}
+}
+
+// Profile reports the Layer's active aggressiveness profile. Safe for
+// concurrent use.
+func (l *Layer) Profile() Profile {
+	if l == nil {
+		return ProfileDefault
+	}
+	return Profile(l.profile.Load())
+}
+
+// SetProfile changes the aggressiveness profile at runtime (used by /config
+// compression profile). The router is rebuilt with the new caps and swapped
+// atomically, so in-flight Compress calls finish on the old tuning and
+// subsequent calls pick up the new one. Safe for concurrent use.
+func (l *Layer) SetProfile(p Profile) {
+	if l == nil {
+		return
+	}
+	l.profile.Store(int32(p))
+	l.router.Store(newRouterFor(p))
+}
+
+// Threshold reports the minimum payload size (bytes) that engages
+// compression. Safe for concurrent use.
+func (l *Layer) Threshold() int {
+	if l == nil {
+		return DefaultThreshold
+	}
+	return int(l.threshold.Load())
+}
+
+// SetThreshold changes the engage threshold at runtime (used by /config
+// compression threshold). Values <= 0 mean "always attempt compression".
+// Safe for concurrent use.
+func (l *Layer) SetThreshold(n int) {
+	if l != nil {
+		l.threshold.Store(int64(n))
 	}
 }
 
@@ -212,10 +268,10 @@ func (l *Layer) CompressHinted(h Hint, content string) (string, Result) {
 	if ExtractKeys(content) != nil {
 		return content, passthrough(content)
 	}
-	res := l.router.Compress(content, h, Options{
+	res := l.router.Load().Compress(content, h, Options{
 		Mode:      l.Mode(),
 		Store:     l.store,
-		Threshold: l.threshold,
+		Threshold: l.Threshold(),
 		Metrics:   l.metrics,
 	})
 	return res.Compressed, res

@@ -6,9 +6,12 @@
 package cli
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
+	"github.com/diillson/chatcli/cli/compress"
+	"github.com/diillson/chatcli/i18n"
 	"github.com/diillson/chatcli/models"
 	"github.com/diillson/chatcli/ui/theme"
 	"github.com/stretchr/testify/assert"
@@ -69,6 +72,34 @@ func TestTelemetryParts_OmitsCostWhenZero(t *testing.T) {
 	cli := &ChatCLI{Provider: "OPENAI", Model: "gpt-4o"}
 	parts := cli.telemetryParts(&models.UsageInfo{PromptTokens: 1000, CompletionTokens: 500}, 0, true)
 	assert.NotContains(t, strings.Join(parts, " · "), "$", "zero cost → no cost part")
+}
+
+// TestTelemetryParts_CompressionSavingsAreTurnDeltas verifies the savings
+// figure is per-render (matching the per-turn cost/ctx% beside it): a second
+// render with no new compression shows no savings part, and fresh savings
+// report only the delta.
+func TestTelemetryParts_CompressionSavingsAreTurnDeltas(t *testing.T) {
+	layer := compress.NewLayer(compress.Config{
+		Mode: compress.ModeLossyWithCCR, Threshold: 100, Store: compress.NewMemoryStore(),
+	})
+	cli := &ChatCLI{Provider: "OPENAI", Model: "gpt-4o", compressionLayer: layer}
+	usage := &models.UsageInfo{PromptTokens: 1000, CompletionTokens: 500}
+
+	// Generate savings, then render: the savings part appears.
+	var b strings.Builder
+	for i := 0; i < 60; i++ {
+		fmt.Fprintf(&b, "pkg/file.go:%d: match for the searched symbol\n", i+1)
+	}
+	if _, res := layer.CompressToolOutput("@search", b.String()); res.SavedBytes() == 0 {
+		t.Fatal("fixture produced no savings")
+	}
+	first := strings.Join(cli.telemetryParts(usage, 0, false), " · ")
+	assert.Contains(t, first, i18n.T("chat.envelope.compression_saved", ""), "first render shows fresh savings")
+
+	// Second render with no new compression: no savings part repeated.
+	second := strings.Join(cli.telemetryParts(usage, 0, false), " · ")
+	assert.NotContains(t, second, i18n.T("chat.envelope.compression_saved", ""),
+		"already-reported savings must not repeat on the next turn")
 }
 
 func TestFormatTurnCost_Precision(t *testing.T) {

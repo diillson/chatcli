@@ -32,6 +32,19 @@ func NewDiffCompressor() *DiffCompressor {
 	}
 }
 
+// NewDiffCompressorFor returns a compressor tuned for the given profile:
+// conservative keeps roughly double the default caps, aggressive roughly half.
+func NewDiffCompressorFor(p Profile) *DiffCompressor {
+	switch p {
+	case ProfileConservative:
+		return &DiffCompressor{MaxContextLines: 4, MaxHunksPerFile: 20, MaxFiles: 40}
+	case ProfileAggressive:
+		return &DiffCompressor{MaxContextLines: 1, MaxHunksPerFile: 5, MaxFiles: 10}
+	default:
+		return NewDiffCompressor()
+	}
+}
+
 // Name implements Compressor.
 func (*DiffCompressor) Name() string { return "diff" }
 
@@ -41,7 +54,7 @@ func (c *DiffCompressor) Detect(content string, h Hint) float64 {
 	case "git diff", "git show", "diff":
 		return 0.95
 	}
-	lines := splitLines(content)
+	lines := detectSampleLines(content)
 	if len(lines) < 5 {
 		return 0
 	}

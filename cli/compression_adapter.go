@@ -57,8 +57,11 @@ func (a *compressionPluginAdapter) Stats() string {
 	fmt.Fprintf(&b, "  calls: %d (reduced %d)\n", stats.Calls, stats.Reductions)
 	fmt.Fprintf(&b, "  bytes: %d -> %d (%.0f%% of original, %d saved)\n",
 		stats.BytesIn, stats.BytesOut, stats.Ratio()*100, stats.SavedBytes())
-	fmt.Fprintf(&b, "  CCR: %d stored, %d recalled, %d misses\n",
-		stats.CCRPuts, stats.CCRHits, stats.CCRMisses)
+	fmt.Fprintf(&b, "  CCR: %d stored, %d recalled, %d misses", stats.CCRPuts, stats.CCRHits, stats.CCRMisses)
+	if rate, ok := stats.RecallHitRate(); ok {
+		fmt.Fprintf(&b, " (hit-rate %d%%)", rate)
+	}
+	b.WriteByte('\n')
 	if len(stats.ByStrategy) > 0 {
 		b.WriteString("  by strategy:\n")
 		for _, s := range stats.ByStrategy {

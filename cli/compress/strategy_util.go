@@ -65,3 +65,59 @@ func splitLines(s string) []string {
 	}
 	return strings.Split(s, "\n")
 }
+
+// Detection sampling bounds. Detect runs on EVERY above-threshold tool result
+// before any compression work, and content-based detectors only need line
+// fractions to score confidence — scanning a multi-megabyte payload in full
+// (and allocating its complete line slice, once per detector) would tax the
+// agent-loop hot path for no additional signal.
+const (
+	detectSampleMaxBytes = 64 * 1024
+	detectSampleMaxLines = 200
+)
+
+// detectSampleLines returns up to detectSampleMaxLines lines drawn from the
+// HEAD and TAIL of s (half each, bounded to detectSampleMaxBytes total, cut to
+// complete lines so truncation never skews parse fractions). Sampling both
+// ends matters: build/test logs concentrate their signal at the tail (the
+// failure summary), while search/diff shapes show at the head — a head-only
+// sample would misroute exactly the "long build that fails at the end" payload
+// the log compressor exists for. For payloads within both bounds it is
+// equivalent to splitLines.
+func detectSampleLines(s string) []string {
+	if len(s) > detectSampleMaxBytes {
+		headEnd := detectSampleMaxBytes / 2
+		if cut := strings.LastIndexByte(s[:headEnd], '\n'); cut > 0 {
+			headEnd = cut
+		}
+		tailStart := len(s) - detectSampleMaxBytes/2
+		if cut := strings.IndexByte(s[tailStart:], '\n'); cut >= 0 {
+			tailStart += cut + 1
+		}
+		head, tail := splitLines(s[:headEnd]), splitLines(s[tailStart:])
+		return sampleHeadTail(head, tail, detectSampleMaxLines)
+	}
+	lines := splitLines(s)
+	if len(lines) > detectSampleMaxLines {
+		half := detectSampleMaxLines / 2
+		return sampleHeadTail(lines[:half], lines[len(lines)-half:], detectSampleMaxLines)
+	}
+	return lines
+}
+
+// sampleHeadTail combines a head and a tail line set into a single sample of
+// at most maxLines (half from each end), copying into a fresh slice so the
+// result never aliases the callers' backing arrays.
+func sampleHeadTail(head, tail []string, maxLines int) []string {
+	half := maxLines / 2
+	if len(head) > half {
+		head = head[:half]
+	}
+	if len(tail) > half {
+		tail = tail[len(tail)-half:]
+	}
+	out := make([]string, 0, len(head)+len(tail))
+	out = append(out, head...)
+	out = append(out, tail...)
+	return out
+}

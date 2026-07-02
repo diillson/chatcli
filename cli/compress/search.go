@@ -39,6 +39,19 @@ func NewSearchCompressor() *SearchCompressor {
 	}
 }
 
+// NewSearchCompressorFor returns a compressor tuned for the given profile:
+// conservative keeps roughly double the default caps, aggressive roughly half.
+func NewSearchCompressorFor(p Profile) *SearchCompressor {
+	switch p {
+	case ProfileConservative:
+		return &SearchCompressor{MaxMatchesPerFile: 10, MaxTotalMatches: 60, MaxFiles: 30}
+	case ProfileAggressive:
+		return &SearchCompressor{MaxMatchesPerFile: 3, MaxTotalMatches: 15, MaxFiles: 8}
+	default:
+		return NewSearchCompressor()
+	}
+}
+
 // Name implements Compressor.
 func (*SearchCompressor) Name() string { return "search" }
 
@@ -60,7 +73,7 @@ func (c *SearchCompressor) Detect(content string, h Hint) float64 {
 	case "@search", "grep", "rg", "ripgrep", "ag", "ack":
 		return 0.95
 	}
-	lines := splitLines(content)
+	lines := detectSampleLines(content)
 	if len(lines) < 3 {
 		return 0
 	}
