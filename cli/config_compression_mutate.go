@@ -21,6 +21,7 @@ package cli
 import (
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -58,6 +59,18 @@ func (cli *ChatCLI) routeConfigCompression(args []string) {
 		} else {
 			cli.showConfigCompression()
 		}
+	case "profile":
+		if len(args) >= 2 {
+			cli.setCompressionProfile(args[1])
+		} else {
+			cli.showConfigCompression()
+		}
+	case "threshold":
+		if len(args) >= 2 {
+			cli.setCompressionThreshold(args[1])
+		} else {
+			cli.showConfigCompression()
+		}
 	default:
 		fmt.Println(colorize("  ❌ "+i18n.T("cfg.compression.set_invalid", args[0]), ColorRed))
 		fmt.Println(colorize("  "+i18n.T("cfg.compression.set_valid"), ColorGray))
@@ -86,6 +99,54 @@ func (cli *ChatCLI) setCompressionMode(modeStr string) {
 		fmt.Println(colorize("  ✔ "+i18n.T("cfg.compression.set_ok", prev.String(), m.String()), ColorGreen))
 	}
 	fmt.Println(colorize("    "+i18n.T("cfg.compression.persist_hint", m.String()), ColorGray))
+}
+
+// setCompressionProfile flips the live layer's aggressiveness profile and
+// mirrors it to the env var so a rebuilt layer (e.g. the gateway) inherits it.
+func (cli *ChatCLI) setCompressionProfile(profileStr string) {
+	if cli.compressionLayer == nil {
+		fmt.Println(colorize("  ❌ "+i18n.T("cfg.compression.unavailable"), ColorRed))
+		return
+	}
+	p, ok := compress.ParseProfile(strings.ToLower(strings.TrimSpace(profileStr)))
+	if !ok {
+		fmt.Println(colorize("  ❌ "+i18n.T("cfg.compression.profile_invalid", profileStr), ColorRed))
+		fmt.Println(colorize("  "+i18n.T("cfg.compression.profile_valid"), ColorGray))
+		return
+	}
+	prev := cli.compressionLayer.Profile()
+	cli.compressionLayer.SetProfile(p)
+	_ = os.Setenv("CHATCLI_COMPRESSION_PROFILE", p.String())
+
+	if prev == p {
+		fmt.Println(colorize("  ✔ "+i18n.T("cfg.compression.profile_noop", p.String()), ColorGray))
+	} else {
+		fmt.Println(colorize("  ✔ "+i18n.T("cfg.compression.profile_ok", prev.String(), p.String()), ColorGreen))
+	}
+	fmt.Println(colorize("    "+i18n.T("cfg.compression.profile_persist_hint", p.String()), ColorGray))
+}
+
+// setCompressionThreshold changes the engage threshold (bytes) on the live
+// layer and mirrors it to the env var for rebuilt layers.
+func (cli *ChatCLI) setCompressionThreshold(raw string) {
+	if cli.compressionLayer == nil {
+		fmt.Println(colorize("  ❌ "+i18n.T("cfg.compression.unavailable"), ColorRed))
+		return
+	}
+	n, err := strconv.Atoi(strings.TrimSpace(raw))
+	if err != nil || n < 0 {
+		fmt.Println(colorize("  ❌ "+i18n.T("cfg.compression.threshold_invalid", raw), ColorRed))
+		return
+	}
+	prev := cli.compressionLayer.Threshold()
+	cli.compressionLayer.SetThreshold(n)
+	_ = os.Setenv("CHATCLI_COMPRESSION_THRESHOLD", strconv.Itoa(n))
+
+	if prev == n {
+		fmt.Println(colorize("  ✔ "+i18n.T("cfg.compression.threshold_noop", n), ColorGray))
+	} else {
+		fmt.Println(colorize("  ✔ "+i18n.T("cfg.compression.threshold_ok", prev, n), ColorGreen))
+	}
 }
 
 // pruneCompressionStore runs an on-demand curation pass over the CCR store
@@ -143,7 +204,14 @@ func (cli *ChatCLI) showConfigCompression() {
 		mode = cli.compressionLayer.Mode().String()
 	}
 	kv(p, i18n.T("cfg.compression.mode"), mode)
-	kv(p, "CHATCLI_COMPRESSION_THRESHOLD", envOrDefault("CHATCLI_COMPRESSION_THRESHOLD", "4000"))
+	profile := compress.ProfileDefault.String()
+	threshold := fmt.Sprintf("%d", compress.DefaultThreshold)
+	if cli.compressionLayer != nil {
+		profile = cli.compressionLayer.Profile().String()
+		threshold = fmt.Sprintf("%d", cli.compressionLayer.Threshold())
+	}
+	kv(p, i18n.T("cfg.compression.profile"), profile)
+	kv(p, "CHATCLI_COMPRESSION_THRESHOLD", threshold)
 	kv(p, "CHATCLI_COMPRESSION_CCR_DIR", envOrDefault("CHATCLI_COMPRESSION_CCR_DIR", "~/.chatcli/ccr"))
 	kv(p, "CHATCLI_COMPRESSION_CCR_MAX_MB", envOrDefault("CHATCLI_COMPRESSION_CCR_MAX_MB", "256"))
 	kv(p, "CHATCLI_COMPRESSION_CCR_TTL", envOrDefault("CHATCLI_COMPRESSION_CCR_TTL", "168h"))
@@ -153,6 +221,10 @@ func (cli *ChatCLI) showConfigCompression() {
 		kv(p, i18n.T("cfg.compression.saved"),
 			fmt.Sprintf("%d/%d bytes (%.0f%%)", stats.SavedBytes(), stats.BytesIn, (1-stats.Ratio())*100))
 		kv(p, i18n.T("cfg.compression.ccr_store"), ccrStoreSummary(store))
+		if err := cli.compressionLayer.StoreFallback(); err != nil {
+			kv(p, i18n.T("cfg.compression.store_backend"),
+				colorize(i18n.T("cfg.compression.store_memory_fallback", err.Error()), ColorYellow))
+		}
 	}
 
 	fmt.Println(p)
@@ -174,7 +246,11 @@ func (cli *ChatCLI) showCompressionStats() {
 	kv(p, i18n.T("cfg.compression.calls"), fmt.Sprintf("%d (%d reduced)", stats.Calls, stats.Reductions))
 	kv(p, i18n.T("cfg.compression.saved"),
 		fmt.Sprintf("%d/%d bytes (%.0f%%)", stats.SavedBytes(), stats.BytesIn, (1-stats.Ratio())*100))
-	kv(p, "CCR", fmt.Sprintf("%d stored / %d recalled / %d misses", stats.CCRPuts, stats.CCRHits, stats.CCRMisses))
+	ccrLine := fmt.Sprintf("%d stored / %d recalled / %d misses", stats.CCRPuts, stats.CCRHits, stats.CCRMisses)
+	if rate, ok := stats.RecallHitRate(); ok {
+		ccrLine += " · " + i18n.T("cfg.compression.ccr_hitrate", rate)
+	}
+	kv(p, "CCR", ccrLine)
 	for _, s := range stats.ByStrategy {
 		kv(p, "  "+s.Strategy, fmt.Sprintf("calls=%d  %d→%d bytes", s.Calls, s.BytesIn, s.BytesOut))
 	}
@@ -191,6 +267,8 @@ func (cli *ChatCLI) printConfigCompressionUsage() {
 	fmt.Println("  /config compression off        # " + i18n.T("cfg.compression.usage_off"))
 	fmt.Println("  /config compression stats      # " + i18n.T("cfg.compression.usage_stats"))
 	fmt.Println("  /config compression prune      # " + i18n.T("cfg.compression.usage_prune"))
+	fmt.Println("  /config compression profile <conservative|default|aggressive>  # " + i18n.T("cfg.compression.usage_profile"))
+	fmt.Println("  /config compression threshold <bytes>                          # " + i18n.T("cfg.compression.usage_threshold"))
 	fmt.Println()
 	fmt.Println(colorize("  "+i18n.T("cfg.compression.usage_note"), ColorGray))
 }
@@ -208,6 +286,18 @@ func (cli *ChatCLI) getConfigCompressionSuggestions(d prompt.Document) []prompt.
 			{Text: "off", Description: i18n.T("complete.config.compression_off")},
 			{Text: "stats", Description: i18n.T("complete.config.compression_stats")},
 			{Text: "prune", Description: i18n.T("complete.config.compression_prune")},
+			{Text: "profile", Description: i18n.T("complete.config.compression_profile")},
+			{Text: "threshold", Description: i18n.T("complete.config.compression_threshold")},
+		}
+		return prompt.FilterHasPrefix(subs, word, true)
+	}
+
+	// Third token: values for `/config compression profile <…>`.
+	if len(args) >= 3 && strings.EqualFold(args[2], "profile") {
+		subs := []prompt.Suggest{
+			{Text: "conservative", Description: i18n.T("complete.config.compression_profile_conservative")},
+			{Text: "default", Description: i18n.T("complete.config.compression_profile_default")},
+			{Text: "aggressive", Description: i18n.T("complete.config.compression_profile_aggressive")},
 		}
 		return prompt.FilterHasPrefix(subs, word, true)
 	}

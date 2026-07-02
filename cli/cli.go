@@ -245,6 +245,10 @@ type ChatCLI struct {
 	// tool output (search/log/diff/JSON) before it reaches the model while
 	// keeping the full original recoverable via @recall. Shared across modes.
 	compressionLayer *compress.Layer
+	// High-water mark of compression savings (bytes) already reported by the
+	// per-turn telemetry, so each render shows only the delta since the last
+	// one. Session totals live in /config compression stats.
+	compressionSavedShown int64
 
 	// Conversation checkpoints for rewind
 	checkpoints []conversationCheckpoint
@@ -626,6 +630,12 @@ func NewChatCLI(ctx context.Context, manager manager.LLMManager, logger *zap.Log
 	// from environment config, and wire the @compress/@recall tools to it. The
 	// layer is also consulted by the agent/coder loop to compress tool output.
 	cli.compressionLayer = compress.NewLayerFromEnv(filepath.Join(homeDir, ".chatcli"))
+	if err := cli.compressionLayer.StoreFallback(); err != nil {
+		// The layer already degraded to a bounded in-memory store; surface the
+		// cause so the loss of cross-restart recall is never silent.
+		logger.Warn("CCR persistent store unavailable; compression running on a bounded in-memory store (offloaded originals will not survive a restart)",
+			zap.Error(err))
+	}
 	plugins.SetCompressionAdapter(&compressionPluginAdapter{cli: cli})
 	// Let the history compactor reduce oversized tool feedback / injected
 	// context reversibly (CCR) instead of byte-truncating — engages during

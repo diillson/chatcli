@@ -121,6 +121,18 @@ func (s Stats) SavedBytes() int64 {
 	return s.BytesIn - s.BytesOut
 }
 
+// RecallHitRate returns the percentage (0–100) of @recall lookups that were
+// served, and ok=false when no lookups have happened yet. A persistently low
+// rate signals over-aggressive eviction (cap too small / TTL too short) —
+// markers are being promised that the store can no longer honor.
+func (s Stats) RecallHitRate() (int, bool) {
+	lookups := s.CCRHits + s.CCRMisses
+	if lookups == 0 {
+		return 0, false
+	}
+	return int(float64(s.CCRHits)/float64(lookups)*100 + 0.5), true
+}
+
 // Ratio is the aggregate BytesOut/BytesIn in [0,1]; 1.0 means no reduction.
 func (s Stats) Ratio() float64 {
 	if s.BytesIn == 0 {

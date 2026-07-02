@@ -37,6 +37,19 @@ func NewJSONCrusher() *JSONCrusher {
 	return &JSONCrusher{MinItemsToCrush: 20, HeadItems: 8, TailItems: 2}
 }
 
+// NewJSONCrusherFor returns a crusher tuned for the given profile:
+// conservative keeps roughly double the default sample, aggressive roughly half.
+func NewJSONCrusherFor(p Profile) *JSONCrusher {
+	switch p {
+	case ProfileConservative:
+		return &JSONCrusher{MinItemsToCrush: 40, HeadItems: 16, TailItems: 4}
+	case ProfileAggressive:
+		return &JSONCrusher{MinItemsToCrush: 10, HeadItems: 4, TailItems: 1}
+	default:
+		return NewJSONCrusher()
+	}
+}
+
 // Name implements Compressor.
 func (*JSONCrusher) Name() string { return "json-crush" }
 
@@ -59,6 +72,13 @@ func isCCRSentinel(elem any) bool {
 func (c *JSONCrusher) Detect(content string, h Hint) float64 {
 	t := strings.TrimSpace(content)
 	if t == "" || (t[0] != '{' && t[0] != '[') {
+		return 0
+	}
+	// O(1) shape check before the O(n) validation: valid JSON must close the
+	// bracket it opens, so bracket-leading non-JSON (log lines like
+	// "[INFO] ...") is dismissed without scanning the whole payload.
+	last := t[len(t)-1]
+	if (t[0] == '{' && last != '}') || (t[0] == '[' && last != ']') {
 		return 0
 	}
 	if !json.Valid([]byte(t)) {

@@ -46,6 +46,33 @@ func NewLogCompressor() *LogCompressor {
 	}
 }
 
+// NewLogCompressorFor returns a compressor tuned for the given profile:
+// conservative keeps roughly double the default caps, aggressive roughly half.
+func NewLogCompressorFor(p Profile) *LogCompressor {
+	switch p {
+	case ProfileConservative:
+		return &LogCompressor{
+			MaxErrors:         20,
+			ErrorContextLines: 5,
+			MaxStackTraces:    5,
+			StackTraceMaxLine: 40,
+			MaxWarnings:       10,
+			MaxTotalLines:     200,
+		}
+	case ProfileAggressive:
+		return &LogCompressor{
+			MaxErrors:         5,
+			ErrorContextLines: 2,
+			MaxStackTraces:    2,
+			StackTraceMaxLine: 10,
+			MaxWarnings:       3,
+			MaxTotalLines:     50,
+		}
+	default:
+		return NewLogCompressor()
+	}
+}
+
 // Name implements Compressor.
 func (*LogCompressor) Name() string { return "log" }
 
@@ -78,7 +105,7 @@ func (c *LogCompressor) Detect(content string, h Hint) float64 {
 		// otherwise look like grep "path:line:" rows to the search detector).
 		return 0.95
 	}
-	lines := splitLines(content)
+	lines := detectSampleLines(content)
 	if len(lines) < 8 {
 		return 0
 	}

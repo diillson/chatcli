@@ -111,12 +111,23 @@ func TestDiskStorePersistsAcrossReopen(t *testing.T) {
 
 func TestDiskStoreLRUEviction(t *testing.T) {
 	dir := t.TempDir()
-	// Cap at 30 bytes; each payload is 20 bytes, so only one fits at a time.
-	s, _ := NewDiskStore(dir, 30, 0)
-	kOld, _ := s.Put(strings.Repeat("a", 20))
-	// Make the second Put strictly newer.
+	// Cap at 80 bytes with 20-byte payloads: each entry respects the per-entry
+	// capacity (80/4 = 20), four fill the store exactly, and the fifth pushes
+	// the footprint over the cap so the oldest entry must be evicted.
+	s, _ := NewDiskStore(dir, 80, 0)
+	kOld, err := s.Put(strings.Repeat("a", 20))
+	if err != nil {
+		t.Fatalf("Put(oldest): %v", err)
+	}
+	// Make every subsequent Put strictly newer than the first.
 	time.Sleep(10 * time.Millisecond)
-	kNew, _ := s.Put(strings.Repeat("b", 20))
+	var kNew string
+	for _, c := range []string{"b", "c", "d", "e"} {
+		kNew, err = s.Put(strings.Repeat(c, 20))
+		if err != nil {
+			t.Fatalf("Put(%s): %v", c, err)
+		}
+	}
 
 	if _, ok, _ := s.Get(kOld); ok {
 		t.Fatal("LRU eviction did not drop the oldest entry")
@@ -151,9 +162,14 @@ func TestDiskStorePruneRemovesStaleAndReports(t *testing.T) {
 	kStale, _ := s.Put("stale payload")
 	kFresh, _ := s.Put("fresh payload")
 
-	// Backdate the stale entry beyond the TTL (in-memory recency drives prune).
+	// Backdate the stale entry beyond the TTL — file mtime included, since
+	// Prune rescans the directory and mtime is the cross-process recency truth.
+	stale := time.Now().Add(-2 * time.Hour)
+	if err := os.Chtimes(s.path(kStale), stale, stale); err != nil {
+		t.Fatal(err)
+	}
 	s.mu.Lock()
-	s.entries[kStale].lastAccess = time.Now().Add(-2 * time.Hour)
+	s.entries[kStale].lastAccess = stale
 	s.mu.Unlock()
 
 	res := s.Prune()
@@ -179,11 +195,17 @@ func TestDiskStoreOnPutTTLSweep(t *testing.T) {
 	s, _ := NewDiskStore(dir, 0, time.Hour)
 	kOld, _ := s.Put("old payload")
 
-	// Backdate the entry and force the sweep throttle open so the next Put
-	// triggers a mid-session TTL sweep (the daemon long-run gap).
+	// Backdate the entry — both the in-memory index and the file mtime, since
+	// the sweep rescans the directory and trusts mtime as the shared
+	// last-access truth — and force the throttle open so the next Put triggers
+	// a mid-session TTL sweep (the daemon long-run gap).
+	stale := time.Now().Add(-2 * time.Hour)
+	if err := os.Chtimes(s.path(kOld), stale, stale); err != nil {
+		t.Fatal(err)
+	}
 	s.mu.Lock()
-	s.entries[kOld].lastAccess = time.Now().Add(-2 * time.Hour)
-	s.lastTTLSweep = time.Now().Add(-2 * ccrTTLSweepInterval)
+	s.entries[kOld].lastAccess = stale
+	s.lastSweep = time.Now().Add(-2 * ccrSweepInterval)
 	s.mu.Unlock()
 
 	if _, err := s.Put("new payload"); err != nil {
@@ -226,8 +248,14 @@ func TestLayerPruneDelegatesToPruner(t *testing.T) {
 
 	kStale, _ := ds.Put("stale payload")
 	_, _ = ds.Put("fresh payload")
+	// Backdate the file mtime too: Prune rescans the directory and trusts
+	// mtime as the cross-process last-access truth.
+	stale := time.Now().Add(-2 * time.Hour)
+	if err := os.Chtimes(ds.path(kStale), stale, stale); err != nil {
+		t.Fatal(err)
+	}
 	ds.mu.Lock()
-	ds.entries[kStale].lastAccess = time.Now().Add(-2 * time.Hour)
+	ds.entries[kStale].lastAccess = stale
 	ds.mu.Unlock()
 
 	res := l.Prune()
