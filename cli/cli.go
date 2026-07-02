@@ -27,6 +27,7 @@ import (
 
 	"github.com/c-bata/go-prompt"
 	"github.com/diillson/chatcli/cli/agent"
+	"github.com/diillson/chatcli/cli/agent/lsp"
 	"github.com/diillson/chatcli/cli/agent/quality/lessonq"
 	"github.com/diillson/chatcli/cli/agent/workers"
 	"github.com/diillson/chatcli/cli/coder"
@@ -249,6 +250,12 @@ type ChatCLI struct {
 	// per-turn telemetry, so each render shows only the delta since the last
 	// one. Session totals live in /config compression stats.
 	compressionSavedShown int64
+
+	// Session language-server pool behind the @lsp tool. Created lazily on
+	// the first @lsp call (starting gopls for sessions that never navigate
+	// code would be waste) and shut down with the session.
+	lspPool     *lsp.Pool
+	lspPoolOnce sync.Once
 
 	// Conversation checkpoints for rewind
 	checkpoints []conversationCheckpoint
@@ -480,6 +487,10 @@ func NewChatCLI(ctx context.Context, manager manager.LLMManager, logger *zap.Log
 		// and walk attached documentation corpora on demand. Adapter wired
 		// below once the context handler exists.
 		pluginMgr.RegisterBuiltinPlugin(plugins.NewBuiltinKnowledgePlugin())
+		// @lsp — semantic code navigation through real language servers:
+		// diagnostics, definition, references, symbols, hover. Adapter wired
+		// below over a lazily created, session-scoped server pool.
+		pluginMgr.RegisterBuiltinPlugin(plugins.NewBuiltinLSPPlugin())
 		// @docs-flatten — push-side companion of @knowledge: flattens a
 		// Markdown/MDX docs tree (local dir or git repo) into the JSONL
 		// corpus /context --mode knowledge ingests. Self-contained.
@@ -654,6 +665,9 @@ func NewChatCLI(ctx context.Context, manager manager.LLMManager, logger *zap.Log
 	// Wire the @knowledge tool to this session's context manager so the agent
 	// can interrogate attached knowledge bases on demand.
 	plugins.SetKnowledgeAdapter(&knowledgePluginAdapter{cli: cli})
+	// Wire the @lsp tool to the session language-server pool (created lazily
+	// on first use; shut down with the session).
+	plugins.SetLSPAdapter(&lspToolAdapter{cli: cli})
 	// @context adapter — lets the agent create/attach/detach/inspect its own
 	// context bases over the same live manager.
 	plugins.SetContextAdapter(&contextPluginAdapter{cli: cli})
@@ -1813,6 +1827,8 @@ func (cli *ChatCLI) cleanup(ctx context.Context) {
 	if cli.pluginManager != nil {
 		cli.pluginManager.Close()
 	}
+	// Shut down any language servers the @lsp tool started.
+	cli.shutdownLSPPool()
 
 	// Tear down the session scratch workspace. Respects
 	// CHATCLI_AGENT_KEEP_TMPDIR=true for debugging (files are left behind).
