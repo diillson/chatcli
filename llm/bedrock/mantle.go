@@ -52,11 +52,18 @@ func mantleMessagesURL(region string) string {
 // usesMantleEndpoint decides whether an Anthropic-family request must go
 // through the Mantle Messages endpoint instead of legacy InvokeModel.
 //
-// Default: catalog-driven — models flagged bedrock_mantle_only (Sonnet 5
-// has no InvokeModel surface at all) route to Mantle; everything else
-// stays on the proven InvokeModel path. BEDROCK_ANTHROPIC_ENDPOINT
-// overrides for operators: "mantle" forces every Anthropic request onto
-// the Messages endpoint, "invoke"/"legacy" pins them all to InvokeModel.
+// Default: catalog-driven — models flagged bedrock_mantle_only route to
+// Mantle; everything else stays on the proven InvokeModel path. Sonnet 5
+// has no InvokeModel surface at all, and Fable 5 rejects InvokeModel with
+// 400 "data retention mode 'default' is not available for this model"
+// (it requires 30-day retention, provided only under the
+// Claude-in-Amazon-Bedrock agreement the Mantle endpoint serves).
+// Catalog resolution matches inference-profile spellings too
+// (us./eu./apac./global. + the embedded claude segment), so a profile id
+// picked from ListInferenceProfiles routes the same as the canonical id.
+// BEDROCK_ANTHROPIC_ENDPOINT overrides for operators: "mantle" forces
+// every Anthropic request onto the Messages endpoint, "invoke"/"legacy"
+// pins them all to InvokeModel.
 func usesMantleEndpoint(model string) bool {
 	switch strings.ToLower(strings.TrimSpace(os.Getenv("BEDROCK_ANTHROPIC_ENDPOINT"))) {
 	case "mantle":
@@ -65,6 +72,37 @@ func usesMantleEndpoint(model string) bool {
 		return false
 	}
 	return catalog.HasCapability(catalog.ProviderBedrock, model, "bedrock_mantle_only")
+}
+
+// mantleProfilePrefixes are the cross-region inference-profile prefixes
+// AWS prepends to Bedrock model IDs (ListInferenceProfiles spelling).
+// The Mantle Messages endpoint does not know these — it serves the
+// canonical "anthropic."-prefixed dateless IDs only.
+var mantleProfilePrefixes = []string{"us.", "eu.", "apac.", "jp.", "au.", "global."}
+
+// mantleModelID canonicalizes whatever Bedrock-side spelling the user
+// selected — an inference-profile ID discovered via ListInferenceProfiles
+// ("us.anthropic.claude-sonnet-5", "global.anthropic.claude-sonnet-5-v1:0"),
+// a bare first-party id or a catalog alias — into the id the Mantle
+// Messages endpoint actually serves. Sending a profile id verbatim
+// returns 404 not_found_error ("model does not exist").
+//
+// Resolution order: the Bedrock catalog first (it owns the invokable
+// Mantle id, and Resolve matches the embedded claude segment inside
+// profile-prefixed IDs); a mechanical profile-prefix strip as fallback
+// for real-but-uncataloged Claude IDs; non-Claude ids pass through.
+func mantleModelID(model string) string {
+	if meta, ok := catalog.Resolve(catalog.ProviderBedrock, model); ok &&
+		strings.HasPrefix(strings.ToLower(meta.ID), "anthropic.") {
+		return meta.ID
+	}
+	m := strings.ToLower(strings.TrimSpace(model))
+	for _, p := range mantleProfilePrefixes {
+		if strings.HasPrefix(m, p) && strings.HasPrefix(m[len(p):], "anthropic.") {
+			return strings.TrimSpace(model)[len(p):]
+		}
+	}
+	return model
 }
 
 // sendPromptAnthropicMantle sends a Messages API request to the
@@ -81,8 +119,14 @@ func (c *BedrockClient) sendPromptAnthropicMantle(ctx context.Context, prompt st
 
 	messages, systemObj := c.buildMessagesAndSystem(prompt, history)
 
+	wireModel := mantleModelID(c.model)
+	if wireModel != c.model {
+		c.logger.Info("bedrock-mantle: canonicalized inference-profile id for the Messages wire",
+			zap.String("from", c.model), zap.String("to", wireModel))
+	}
+
 	reqBody := map[string]interface{}{
-		"model":      c.model,
+		"model":      wireModel,
 		"max_tokens": effectiveMaxTokens,
 		"messages":   messages,
 	}

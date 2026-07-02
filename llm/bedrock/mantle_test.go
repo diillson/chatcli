@@ -54,24 +54,96 @@ func TestMantleMessagesURL(t *testing.T) {
 }
 
 // Sonnet 5 exists ONLY on the bedrock-mantle Messages endpoint (no
-// InvokeModel surface), so it must route to Mantle by default. Fable 5 /
-// Opus 4.8 stay on InvokeModel unless the operator forces the endpoint.
+// InvokeModel surface) and Fable 5 rejects legacy InvokeModel outright
+// (400 "data retention mode 'default' is not available for this model" —
+// it requires 30-day retention, which only the Claude-in-Amazon-Bedrock
+// agreement provides), so both must route to Mantle by default — whatever
+// spelling the user selected, including inference-profile IDs discovered
+// via ListInferenceProfiles. Opus 4.8 stays on InvokeModel unless the
+// operator forces the endpoint.
 func TestUsesMantleEndpoint(t *testing.T) {
 	setEnvForTest(t, "BEDROCK_ANTHROPIC_ENDPOINT", "")
 
 	assert.True(t, usesMantleEndpoint("anthropic.claude-sonnet-5"))
 	assert.True(t, usesMantleEndpoint("claude-sonnet-5"))
-	assert.False(t, usesMantleEndpoint("anthropic.claude-fable-5"))
+	assert.True(t, usesMantleEndpoint("us.anthropic.claude-sonnet-5"))
+	assert.True(t, usesMantleEndpoint("global.anthropic.claude-sonnet-5"))
+	assert.True(t, usesMantleEndpoint("anthropic.claude-fable-5"))
+	assert.True(t, usesMantleEndpoint("us.anthropic.claude-fable-5"))
+	assert.True(t, usesMantleEndpoint("global.anthropic.claude-fable-5"))
 	assert.False(t, usesMantleEndpoint("anthropic.claude-opus-4-8"))
 	assert.False(t, usesMantleEndpoint("global.anthropic.claude-opus-4-6-v1"))
 
 	// Operator override: force every Anthropic request through Mantle…
 	setEnvForTest(t, "BEDROCK_ANTHROPIC_ENDPOINT", "mantle")
-	assert.True(t, usesMantleEndpoint("anthropic.claude-fable-5"))
+	assert.True(t, usesMantleEndpoint("anthropic.claude-opus-4-8"))
 
 	// …or pin everything to the legacy InvokeModel path.
 	setEnvForTest(t, "BEDROCK_ANTHROPIC_ENDPOINT", "invoke")
 	assert.False(t, usesMantleEndpoint("anthropic.claude-sonnet-5"))
+	assert.False(t, usesMantleEndpoint("anthropic.claude-fable-5"))
+}
+
+// The Mantle Messages endpoint serves the canonical "anthropic."-prefixed
+// dateless IDs only. Regional/global inference-profile IDs — exactly what
+// ListInferenceProfiles hands the user in /switch — return 404
+// not_found_error if sent verbatim, so the wire model must be
+// canonicalized before the request is built.
+func TestMantleModelID(t *testing.T) {
+	cases := map[string]string{
+		// Already canonical: untouched.
+		"anthropic.claude-sonnet-5": "anthropic.claude-sonnet-5",
+		"anthropic.claude-fable-5":  "anthropic.claude-fable-5",
+		// Inference-profile spellings resolve through the catalog to the
+		// invokable Mantle id.
+		"us.anthropic.claude-sonnet-5":      "anthropic.claude-sonnet-5",
+		"global.anthropic.claude-sonnet-5":  "anthropic.claude-sonnet-5",
+		"us.anthropic.claude-sonnet-5-v1:0": "anthropic.claude-sonnet-5",
+		"us.anthropic.claude-fable-5":       "anthropic.claude-fable-5",
+		"global.anthropic.claude-fable-5":   "anthropic.claude-fable-5",
+		// Bare first-party id (users type it out of habit).
+		"claude-sonnet-5": "anthropic.claude-sonnet-5",
+		// Unknown-but-real Claude profile id the catalog can't resolve:
+		// the mechanical prefix strip is the fallback.
+		"us.anthropic.claude-zeta-9-v1:0": "anthropic.claude-zeta-9-v1:0",
+		// Non-Claude ids pass through untouched.
+		"meta.llama3-70b-instruct-v1:0": "meta.llama3-70b-instruct-v1:0",
+	}
+	for in, want := range cases {
+		assert.Equal(t, want, mantleModelID(in), "mantleModelID(%q)", in)
+	}
+}
+
+// A client bound to a discovered inference-profile ID must put the
+// canonical Mantle id on the wire — this is the exact scenario behind the
+// production 404: /switch lists "us.anthropic.claude-sonnet-5", the user
+// selects it, and the Messages endpoint doesn't know that id.
+func TestSendPromptAnthropicMantleNormalizesProfileID(t *testing.T) {
+	var gotBody map[string]interface{}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		raw, err := io.ReadAll(r.Body)
+		require.NoError(t, err)
+		require.NoError(t, json.Unmarshal(raw, &gotBody))
+		w.Header().Set("content-type", "application/json")
+		_, _ = w.Write([]byte(`{"content":[{"type":"text","text":"pong"}]}`))
+	}))
+	defer srv.Close()
+
+	setEnvForTest(t, "BEDROCK_MANTLE_BASE_URL", srv.URL)
+	setEnvForTest(t, "AWS_BEARER_TOKEN_BEDROCK", "test-bearer-token")
+
+	c := &BedrockClient{
+		model:       "us.anthropic.claude-sonnet-5",
+		region:      "us-east-1",
+		logger:      zap.NewNop(),
+		maxAttempts: 1,
+	}
+
+	out, err := c.sendPromptAnthropicMantle(t.Context(), "ping", nil, 512)
+	require.NoError(t, err)
+	assert.Equal(t, "pong", out)
+	assert.Equal(t, "anthropic.claude-sonnet-5", gotBody["model"],
+		"inference-profile id must be canonicalized for the Mantle wire")
 }
 
 // End-to-end request assembly against a fake Mantle endpoint: the body is
