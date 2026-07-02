@@ -491,6 +491,10 @@ func NewChatCLI(ctx context.Context, manager manager.LLMManager, logger *zap.Log
 		// diagnostics, definition, references, symbols, hover. Adapter wired
 		// below over a lazily created, session-scoped server pool.
 		pluginMgr.RegisterBuiltinPlugin(plugins.NewBuiltinLSPPlugin())
+		// @tools — tool-catalog meta-tool behind the deferred catalog: the
+		// model pulls full definitions of indexed tools on demand instead of
+		// every definition riding in every prompt. Adapter wired below.
+		pluginMgr.RegisterBuiltinPlugin(plugins.NewBuiltinToolsPlugin())
 		// @docs-flatten — push-side companion of @knowledge: flattens a
 		// Markdown/MDX docs tree (local dir or git repo) into the JSONL
 		// corpus /context --mode knowledge ingests. Self-contained.
@@ -668,6 +672,8 @@ func NewChatCLI(ctx context.Context, manager manager.LLMManager, logger *zap.Log
 	// Wire the @lsp tool to the session language-server pool (created lazily
 	// on first use; shut down with the session).
 	plugins.SetLSPAdapter(&lspToolAdapter{cli: cli})
+	// Wire the @tools meta-tool to the plugin registry (deferred catalog).
+	plugins.SetToolCatalogAdapter(&toolCatalogPluginAdapter{cli: cli})
 	// @context adapter — lets the agent create/attach/detach/inspect its own
 	// context bases over the same live manager.
 	plugins.SetContextAdapter(&contextPluginAdapter{cli: cli})

@@ -56,6 +56,8 @@ func (cli *ChatCLI) routeConfigAgent(args []string) {
 		cli.printConfigAgentUsage()
 	case "ui", "style":
 		cli.configAgentUI(rest)
+	case "catalog", "tools":
+		cli.configAgentCatalog(rest)
 	default:
 		fmt.Println(colorize("  "+i18n.T("cfg.agent.unknown_sub", sub), ColorYellow))
 		cli.printConfigAgentUsage()
@@ -72,9 +74,35 @@ func (cli *ChatCLI) printConfigAgentUsage() {
 	fmt.Println("  /config agent ui full                  # " + i18n.T("cfg.agent.usage_ui_full"))
 	fmt.Println("  /config agent ui compact               # " + i18n.T("cfg.agent.usage_ui_compact"))
 	fmt.Println("  /config agent ui minimal               # " + i18n.T("cfg.agent.usage_ui_minimal"))
+	fmt.Println("  /config agent catalog                  # " + i18n.T("cfg.agent.usage_catalog_show"))
+	fmt.Println("  /config agent catalog deferred|full    # " + i18n.T("cfg.agent.usage_catalog_set"))
 	fmt.Println()
 	fmt.Println(colorize("  "+i18n.T("cfg.agent.usage_note_scope"), ColorGray))
 	fmt.Println(colorize("  "+i18n.T("cfg.agent.usage_note_persist"), ColorGray))
+}
+
+// configAgentCatalog handles `/config agent catalog [deferred|full]`: the
+// tool-definition deferral that keeps the agent prompt at ~3.7k instead of
+// ~12.4k tokens of tool definitions. No arg = show; with arg = set runtime
+// mode (mirrored to the env var so rebuilt prompts inherit it).
+func (cli *ChatCLI) configAgentCatalog(args []string) {
+	if len(args) == 0 {
+		mode := "deferred"
+		if !toolCatalogDeferred() {
+			mode = "full"
+		}
+		fmt.Println(colorize("  "+i18n.T("cfg.agent.catalog_current", mode), ColorCyan))
+		fmt.Println(colorize("  "+i18n.T("cfg.agent.catalog_about"), ColorGray))
+		return
+	}
+	target := strings.ToLower(strings.TrimSpace(args[0]))
+	if target != "deferred" && target != "full" {
+		fmt.Println(colorize("  ❌ "+i18n.T("cfg.agent.catalog_invalid", target), ColorRed))
+		return
+	}
+	_ = os.Setenv(toolCatalogEnvVar, target)
+	fmt.Println(colorize("  ✔ "+i18n.T("cfg.agent.catalog_set", target), ColorGreen))
+	fmt.Println(colorize("    "+i18n.T("cfg.agent.catalog_persist_hint", toolCatalogEnvVar, target), ColorGray))
 }
 
 // configAgentUI handles `/config agent ui [value]`. No arg = show
