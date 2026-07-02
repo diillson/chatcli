@@ -3,7 +3,9 @@ package memory
 import (
 	"context"
 	"fmt"
+	"sort"
 	"strings"
+	"unicode/utf8"
 )
 
 // RelevanceRetriever selects the most relevant memories for the current conversation.
@@ -271,7 +273,8 @@ func ExtractKeywords(messages []string) []string {
 		for _, w := range words {
 			// Clean punctuation
 			w = strings.Trim(w, ".,;:!?\"'`()[]{}#*-_/\\<>")
-			if len(w) < 3 || stopWords[w] {
+			// Rune count, not byte length: accented pt-BR words are multi-byte.
+			if utf8.RuneCountInString(w) < 3 || stopWords[w] {
 				continue
 			}
 			wordFreq[w]++
@@ -291,14 +294,14 @@ func ExtractKeywords(messages []string) []string {
 		return nil
 	}
 
-	// Sort by frequency descending
-	for i := 0; i < len(sorted); i++ {
-		for j := i + 1; j < len(sorted); j++ {
-			if sorted[j].freq > sorted[i].freq {
-				sorted[i], sorted[j] = sorted[j], sorted[i]
-			}
+	// Sort by frequency descending, word ascending on ties so the hint set is
+	// deterministic across runs (map iteration order is randomized).
+	sort.Slice(sorted, func(i, j int) bool {
+		if sorted[i].freq != sorted[j].freq {
+			return sorted[i].freq > sorted[j].freq
 		}
-	}
+		return sorted[i].word < sorted[j].word
+	})
 
 	// Return top 20 keywords
 	limit := 20

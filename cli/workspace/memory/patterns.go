@@ -288,7 +288,14 @@ func (pd *PatternDetector) load() {
 	}
 	var s UsageStats
 	if err := json.Unmarshal(data, &s); err != nil {
-		pd.logger.Warn("failed to parse usage stats", zap.Error(err))
+		// Quarantine for recovery instead of leaving the corrupt file in place
+		// for the next persist to overwrite (see persist.go).
+		if qpath, qerr := quarantineCorrupt(pd.path); qerr == nil {
+			pd.logger.Warn("usage stats corrupt; quarantined for recovery",
+				zap.String("quarantine", qpath), zap.Error(err))
+		} else {
+			pd.logger.Warn("usage stats corrupt and quarantine failed", zap.Error(qerr))
+		}
 		return
 	}
 	if s.CommandFrequency == nil {
@@ -305,5 +312,7 @@ func (pd *PatternDetector) persist() {
 	if err != nil {
 		return
 	}
-	_ = os.WriteFile(pd.path, data, 0o600)
+	if err := atomicWriteFile(pd.path, data, 0o600); err != nil {
+		pd.logger.Warn("failed to write usage stats", zap.Error(err))
+	}
 }

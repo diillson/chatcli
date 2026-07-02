@@ -63,7 +63,8 @@ func (ms *MemoryStore) ReadLongTerm() string {
 	return ms.manager.ReadLongTerm()
 }
 
-// WriteLongTerm replaces all long-term memory.
+// WriteLongTerm parses content into facts and merges them into long-term
+// memory (existing facts are kept; duplicates reinforce).
 func (ms *MemoryStore) WriteLongTerm(content string) error {
 	return ms.manager.WriteLongTerm(content)
 }

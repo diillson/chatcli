@@ -10,6 +10,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode"
+	"unicode/utf8"
 
 	"go.uber.org/zap"
 	"golang.org/x/text/cases"
@@ -17,21 +19,62 @@ import (
 )
 
 // FactIndex manages scored long-term memory facts with JSON persistence.
+//
+// Multiple ChatCLI processes (REPL and gateway daemon) share the same memory
+// directory, so persistence is reconciling, not last-writer-wins: every
+// persist first merges the on-disk state (facts learned by the other process)
+// and applies tombstones (facts explicitly forgotten by either process)
+// before rewriting the file. See mergeFromDiskLocked.
 type FactIndex struct {
 	facts  map[string]*Fact // keyed by ID
 	mu     sync.RWMutex
 	path   string // path to memory_index.json
 	logger *zap.Logger
 	config Config
+
+	// tombstones records explicit deletions (id → when) so reconciliation
+	// never resurrects a forgotten fact from the shared file — and so the
+	// deletion propagates to the other process's next persist. A tombstone
+	// kills any copy whose CreatedAt predates it: passive access does not
+	// undo a forget, only a deliberate re-add (fresh CreatedAt) does.
+	tombstones    map[string]time.Time
+	tombstonePath string
+
+	// MarkAccessed debounce: access bumps happen on every retrieval, and a
+	// full-file rewrite per retrieval is wasted IO that also widens the
+	// multi-process race window. Bumps are folded into the next real persist,
+	// or flushed when the interval elapses.
+	accessFlushInterval time.Duration
+	lastAccessFlush     time.Time
+	accessDirty         bool
+
+	// onRemoved, when set, is invoked for every explicit fact removal
+	// (forget, archive, replace/compaction, supersede, cap prune) so derived
+	// per-fact state — today the vector index — is dropped in lockstep and
+	// never orphans. Invoked synchronously with fi.mu held; the callback must
+	// not call back into the FactIndex.
+	onRemoved func(ids []string)
 }
+
+// factAccessFlushInterval bounds how often bare access-metadata bumps rewrite
+// the index file. Real mutations always persist immediately.
+const factAccessFlushInterval = 30 * time.Second
+
+// tombstoneRetention is how long a deletion marker is kept. Long enough for
+// every co-running process to observe it; bounded so the sidecar never grows
+// without limit.
+const tombstoneRetention = 30 * 24 * time.Hour
 
 // NewFactIndex creates a new fact index.
 func NewFactIndex(memoryDir string, config Config, logger *zap.Logger) *FactIndex {
 	fi := &FactIndex{
-		facts:  make(map[string]*Fact),
-		path:   fmt.Sprintf("%s/memory_index.json", memoryDir),
-		logger: logger,
-		config: config,
+		facts:               make(map[string]*Fact),
+		path:                fmt.Sprintf("%s/memory_index.json", memoryDir),
+		logger:              logger,
+		config:              config,
+		tombstones:          make(map[string]time.Time),
+		tombstonePath:       fmt.Sprintf("%s/memory_tombstones.json", memoryDir),
+		accessFlushInterval: factAccessFlushInterval,
 	}
 	fi.load()
 	return fi
@@ -116,6 +159,9 @@ func (fi *FactIndex) AddFactWithMeta(content, category string, tags []string, so
 			zap.String("new", content),
 		)
 		delete(fi.facts, target.ID)
+		// Tombstone the superseded fact or the shared-file merge re-adopts it
+		// from disk and the update never sticks.
+		fi.recordTombstonesLocked(target.ID)
 		if provenance == "" {
 			provenance = ProvenanceExtraction
 		}
@@ -213,6 +259,7 @@ func (fi *FactIndex) RemoveFact(id string) bool {
 		return false
 	}
 	delete(fi.facts, id)
+	fi.recordTombstonesLocked(id)
 	fi.persistLocked()
 	return true
 }
@@ -232,13 +279,16 @@ func (fi *FactIndex) ForgetMatching(substr string) []*Fact {
 	defer fi.mu.Unlock()
 
 	var removed []*Fact
+	var removedIDs []string
 	for id, f := range fi.facts {
 		if strings.Contains(strings.ToLower(f.Content), substr) {
 			removed = append(removed, f)
+			removedIDs = append(removedIDs, id)
 			delete(fi.facts, id)
 		}
 	}
 	if len(removed) > 0 {
+		fi.recordTombstonesLocked(removedIDs...)
 		fi.persistLocked()
 	}
 	return removed
@@ -249,25 +299,33 @@ func (fi *FactIndex) GetAll() []*Fact {
 	fi.mu.RLock()
 	defer fi.mu.RUnlock()
 
-	fi.recalcScoresLocked()
 	return fi.sortedByScoreLocked()
 }
 
 // sortedByScoreLocked returns every fact ordered by temporal score descending,
 // with a deterministic id tie-break so output never depends on Go's randomized
-// map iteration order. The caller must hold at least a read lock and is
-// responsible for calling recalcScoresLocked first if fresh scores are needed.
+// map iteration order. Scores are computed purely (scoreOf) — never written
+// back — so the caller may hold just a read lock.
 func (fi *FactIndex) sortedByScoreLocked() []*Fact {
-	facts := make([]*Fact, 0, len(fi.facts))
-	for _, f := range fi.facts {
-		facts = append(facts, f)
+	now := time.Now()
+	type scored struct {
+		f *Fact
+		s float64
 	}
-	sort.Slice(facts, func(i, j int) bool {
-		if facts[i].Score != facts[j].Score {
-			return facts[i].Score > facts[j].Score
+	list := make([]scored, 0, len(fi.facts))
+	for _, f := range fi.facts {
+		list = append(list, scored{f: f, s: fi.scoreOf(f, now)})
+	}
+	sort.Slice(list, func(i, j int) bool {
+		if list[i].s != list[j].s {
+			return list[i].s > list[j].s
 		}
-		return facts[i].ID < facts[j].ID
+		return list[i].f.ID < list[j].f.ID
 	})
+	facts := make([]*Fact, len(list))
+	for i, it := range list {
+		facts[i] = it.f
+	}
 	return facts
 }
 
@@ -287,7 +345,7 @@ func (fi *FactIndex) GetByCategory(category string) []*Fact {
 	fi.mu.RLock()
 	defer fi.mu.RUnlock()
 
-	fi.recalcScoresLocked()
+	now := time.Now()
 	var results []*Fact
 	for _, f := range fi.facts {
 		if f.Category == category {
@@ -295,7 +353,7 @@ func (fi *FactIndex) GetByCategory(category string) []*Fact {
 		}
 	}
 	sort.Slice(results, func(i, j int) bool {
-		return results[i].Score > results[j].Score
+		return fi.scoreOf(results[i], now) > fi.scoreOf(results[j], now)
 	})
 	return results
 }
@@ -310,26 +368,25 @@ func (fi *FactIndex) Search(keywords []string) []*Fact {
 	fi.mu.RLock()
 	defer fi.mu.RUnlock()
 
-	fi.recalcScoresLocked()
+	now := time.Now()
 
 	type scoredFact struct {
-		fact      *Fact
-		relevance float64
+		fact     *Fact
+		combined float64
 	}
 
 	var results []scoredFact
 	for _, f := range fi.facts {
 		rel := fi.computeRelevance(f, keywords)
 		if rel > 0 {
-			results = append(results, scoredFact{fact: f, relevance: rel})
+			// Combined score: temporal score × relevance, both computed
+			// purely so concurrent readers never write shared state.
+			results = append(results, scoredFact{fact: f, combined: fi.scoreOf(f, now) * rel})
 		}
 	}
 
 	sort.Slice(results, func(i, j int) bool {
-		// Combined score: temporal score * relevance
-		si := results[i].fact.Score * results[i].relevance
-		sj := results[j].fact.Score * results[j].relevance
-		return si > sj
+		return results[i].combined > results[j].combined
 	})
 
 	facts := make([]*Fact, len(results))
@@ -358,7 +415,7 @@ func (fi *FactIndex) SearchBlended(keywords []string, semantic map[string]float6
 	fi.mu.RLock()
 	defer fi.mu.RUnlock()
 
-	fi.recalcScoresLocked()
+	now := time.Now()
 	w = w.normalized()
 
 	cands := make(map[string]*candidate, len(semantic)+8)
@@ -366,7 +423,7 @@ func (fi *FactIndex) SearchBlended(keywords []string, semantic map[string]float6
 	if len(keywords) > 0 {
 		for _, f := range fi.facts {
 			if rel := fi.computeRelevance(f, keywords); rel > 0 {
-				cands[f.ID] = &candidate{fact: f, lexical: rel, temporal: f.Score}
+				cands[f.ID] = &candidate{fact: f, lexical: rel, temporal: fi.scoreOf(f, now)}
 			}
 		}
 	}
@@ -380,7 +437,7 @@ func (fi *FactIndex) SearchBlended(keywords []string, semantic map[string]float6
 			c.semantic = sem
 			continue
 		}
-		cands[id] = &candidate{fact: f, semantic: sem, temporal: f.Score}
+		cands[id] = &candidate{fact: f, semantic: sem, temporal: fi.scoreOf(f, now)}
 	}
 
 	if len(cands) == 0 {
@@ -410,7 +467,10 @@ func (fi *FactIndex) SearchBlended(keywords []string, semantic map[string]float6
 	return out
 }
 
-// MarkAccessed updates access metadata for retrieved facts.
+// MarkAccessed updates access metadata for retrieved facts. Bumps are
+// debounced: they fold into the next real persist, or flush when the
+// interval elapses — a bare access is not worth a full-file rewrite per
+// retrieval (see accessFlushInterval).
 func (fi *FactIndex) MarkAccessed(ids []string) {
 	fi.mu.Lock()
 	defer fi.mu.Unlock()
@@ -423,9 +483,14 @@ func (fi *FactIndex) MarkAccessed(ids []string) {
 			changed = true
 		}
 	}
-	if changed {
-		fi.persistLocked()
+	if !changed {
+		return
 	}
+	if time.Since(fi.lastAccessFlush) >= fi.accessFlushInterval {
+		fi.persistLocked()
+		return
+	}
+	fi.accessDirty = true
 }
 
 // Count returns the number of stored facts.
@@ -435,15 +500,25 @@ func (fi *FactIndex) Count() int {
 	return len(fi.facts)
 }
 
-// ReplaceFacts replaces the entire fact set (used by compaction).
+// ReplaceFacts replaces the entire fact set (used by compaction). Facts
+// dropped by the replacement are tombstoned so the shared-file merge (and the
+// other process) honors the consolidation instead of resurrecting them.
 func (fi *FactIndex) ReplaceFacts(facts []*Fact) {
 	fi.mu.Lock()
 	defer fi.mu.Unlock()
 
-	fi.facts = make(map[string]*Fact, len(facts))
+	next := make(map[string]*Fact, len(facts))
 	for _, f := range facts {
-		fi.facts[f.ID] = f
+		next[f.ID] = f
 	}
+	var droppedIDs []string
+	for id := range fi.facts {
+		if _, kept := next[id]; !kept {
+			droppedIDs = append(droppedIDs, id)
+		}
+	}
+	fi.facts = next
+	fi.recordTombstonesLocked(droppedIDs...)
 	fi.persistLocked()
 }
 
@@ -452,23 +527,23 @@ func (fi *FactIndex) GetArchiveCandidates(threshold float64) []*Fact {
 	fi.mu.RLock()
 	defer fi.mu.RUnlock()
 
-	fi.recalcScoresLocked()
+	now := time.Now()
 	var candidates []*Fact
 	for _, f := range fi.facts {
-		if f.Score < threshold {
+		if fi.scoreOf(f, now) < threshold {
 			candidates = append(candidates, f)
 		}
 	}
 	return candidates
 }
 
-// ArchiveFacts moves low-scoring facts to an archive file and removes them from the index.
-func (fi *FactIndex) ArchiveFacts(facts []*Fact, archivePath string) error {
+// appendFactsToArchive appends facts to the JSON archive at archivePath,
+// creating it when absent. It never removes anything — pure append, so a
+// fact archived twice is duplicated rather than risk being lost.
+func appendFactsToArchive(facts []*Fact, archivePath string) error {
 	if len(facts) == 0 {
 		return nil
 	}
-
-	// Read existing archive
 	var archive []*Fact
 	if data, err := os.ReadFile(archivePath); err == nil { //#nosec G304 -- path supplied by user/agent through validated tool surface (boundary check upstream)
 		_ = json.Unmarshal(data, &archive)
@@ -479,16 +554,27 @@ func (fi *FactIndex) ArchiveFacts(facts []*Fact, archivePath string) error {
 	if err != nil {
 		return err
 	}
-	if err := os.WriteFile(archivePath, data, 0o600); err != nil {
+	return atomicWriteFile(archivePath, data, 0o600)
+}
+
+// ArchiveFacts moves low-scoring facts to an archive file and removes them from the index.
+func (fi *FactIndex) ArchiveFacts(facts []*Fact, archivePath string) error {
+	if len(facts) == 0 {
+		return nil
+	}
+	if err := appendFactsToArchive(facts, archivePath); err != nil {
 		return err
 	}
 
 	// Remove from index
 	fi.mu.Lock()
 	defer fi.mu.Unlock()
+	ids := make([]string, 0, len(facts))
 	for _, f := range facts {
 		delete(fi.facts, f.ID)
+		ids = append(ids, f.ID)
 	}
+	fi.recordTombstonesLocked(ids...)
 	fi.persistLocked()
 	return nil
 }
@@ -554,14 +640,17 @@ var reconcileStopwords = map[string]bool{
 }
 
 // sigTokens returns the lowercased significant tokens of content in order:
-// alphanumeric runs of length ≥ 3 that are not stopwords.
+// letter/digit runs of at least 3 runes that are not stopwords. Tokenization
+// is Unicode-aware — an ASCII-only splitter shreds accented Portuguese words
+// ("configuração" → "configura" + debris), silently degrading the Jaccard
+// dedupe/supersede similarity for exactly the language most facts arrive in.
 func sigTokens(content string) []string {
 	fields := strings.FieldsFunc(strings.ToLower(content), func(r rune) bool {
-		return !(r >= 'a' && r <= 'z' || r >= '0' && r <= '9')
+		return !unicode.IsLetter(r) && !unicode.IsDigit(r)
 	})
 	out := make([]string, 0, len(fields))
 	for _, t := range fields {
-		if len(t) < 3 || reconcileStopwords[t] {
+		if utf8.RuneCountInString(t) < 3 || reconcileStopwords[t] {
 			continue
 		}
 		out = append(out, t)
@@ -619,17 +708,27 @@ func sharesSubject(a, b string) bool {
 	return true
 }
 
+// minRunesForPrefixMatch is the shortest keyword allowed to match as a token
+// PREFIX ("compress" → "compression"). Shorter keywords match tokens exactly
+// only — raw substring matching let 2-3 letter keywords fire inside unrelated
+// words ("go" inside "django"), polluting retrieval with noise facts that the
+// access boost then entrenched.
+const minRunesForPrefixMatch = 4
+
 func (fi *FactIndex) computeRelevance(f *Fact, keywords []string) float64 {
-	contentLower := strings.ToLower(f.Content)
-	tagsJoined := strings.ToLower(strings.Join(f.Tags, " "))
+	contentToks := allTokens(f.Content)
+	tagToks := allTokens(strings.Join(f.Tags, " "))
 
 	var score float64
 	for _, kw := range keywords {
-		kwLower := strings.ToLower(kw)
-		if strings.Contains(contentLower, kwLower) {
+		kwLower := strings.ToLower(strings.TrimSpace(kw))
+		if kwLower == "" {
+			continue
+		}
+		if anyTokenMatches(contentToks, kwLower) {
 			score += 1.0
 		}
-		if strings.Contains(tagsJoined, kwLower) {
+		if anyTokenMatches(tagToks, kwLower) {
 			score += 0.5
 		}
 	}
@@ -637,32 +736,66 @@ func (fi *FactIndex) computeRelevance(f *Fact, keywords []string) float64 {
 	return score / float64(len(keywords))
 }
 
-// recalcScoresLocked recalculates temporal scores for all facts.
-// Must be called with at least a read lock held.
-func (fi *FactIndex) recalcScoresLocked() {
+// allTokens returns every lowercased letter/digit run of content — unfiltered
+// (no stopword/length cut), because filtering belongs to keyword EXTRACTION;
+// the matching side must be able to satisfy whatever keyword arrives.
+func allTokens(content string) []string {
+	return strings.FieldsFunc(strings.ToLower(content), func(r rune) bool {
+		return !unicode.IsLetter(r) && !unicode.IsDigit(r)
+	})
+}
+
+// anyTokenMatches reports whether kw matches any token: exactly, or as a
+// prefix when the keyword is long enough to be discriminating.
+func anyTokenMatches(tokens []string, kw string) bool {
+	prefixOK := utf8.RuneCountInString(kw) >= minRunesForPrefixMatch
+	for _, t := range tokens {
+		if t == kw {
+			return true
+		}
+		if prefixOK && strings.HasPrefix(t, kw) {
+			return true
+		}
+	}
+	return false
+}
+
+// scoreOf computes a fact's temporal score PURELY — no shared state is
+// written, so any number of readers may call it concurrently under the read
+// lock. The stored Fact.Score field is refreshed only at persist time (write
+// lock held) as a human-readable annotation in the JSON; ranking never reads
+// the stored field.
+func (fi *FactIndex) scoreOf(f *Fact, now time.Time) float64 {
 	halfLife := fi.config.DecayHalfLifeDays
 	if halfLife <= 0 {
 		halfLife = 30.0
 	}
-	now := time.Now()
+	daysSinceAccess := now.Sub(f.LastAccessed).Hours() / 24.0
+	if daysSinceAccess < 0 {
+		daysSinceAccess = 0
+	}
+	accessBoost := 1.0 + math.Log1p(float64(f.AccessCount))
+	decay := math.Exp(-daysSinceAccess * math.Ln2 / halfLife)
+	// Confidence ∈ (0,1] scales the score into (0.5, 1.5]×, so a trusted
+	// fact outranks a low-confidence guess of equal recency and survives
+	// decay and pruning longer.
+	return accessBoost * decay * (0.5 + f.confidence())
+}
 
+// recalcScoresLocked refreshes every fact's stored Score annotation. It
+// MUTATES shared state, so the caller must hold the WRITE lock — it is called
+// only from persistLocked, purely so the persisted JSON carries current
+// scores for human inspection.
+func (fi *FactIndex) recalcScoresLocked() {
+	now := time.Now()
 	for _, f := range fi.facts {
-		daysSinceAccess := now.Sub(f.LastAccessed).Hours() / 24.0
-		if daysSinceAccess < 0 {
-			daysSinceAccess = 0
-		}
-		accessBoost := 1.0 + math.Log1p(float64(f.AccessCount))
-		decay := math.Exp(-daysSinceAccess * math.Ln2 / halfLife)
-		// Confidence ∈ (0,1] scales the score into (0.5, 1.5]×, so a trusted
-		// fact outranks a low-confidence guess of equal recency and survives
-		// decay and pruning longer.
-		f.Score = accessBoost * decay * (0.5 + f.confidence())
+		f.Score = fi.scoreOf(f, now)
 	}
 }
 
 // pruneLowestLocked removes the N lowest-scoring facts. Must hold write lock.
 func (fi *FactIndex) pruneLowestLocked(n int) {
-	fi.recalcScoresLocked()
+	now := time.Now()
 
 	type idScore struct {
 		id    string
@@ -670,18 +803,23 @@ func (fi *FactIndex) pruneLowestLocked(n int) {
 	}
 	all := make([]idScore, 0, len(fi.facts))
 	for id, f := range fi.facts {
-		all = append(all, idScore{id: id, score: f.Score})
+		all = append(all, idScore{id: id, score: fi.scoreOf(f, now)})
 	}
 	sort.Slice(all, func(i, j int) bool {
 		return all[i].score < all[j].score
 	})
 
+	pruned := make([]string, 0, n)
 	for i := 0; i < n && i < len(all); i++ {
 		fi.logger.Debug("pruning low-score fact",
 			zap.String("id", all[i].id),
 			zap.Float64("score", all[i].score))
 		delete(fi.facts, all[i].id)
+		pruned = append(pruned, all[i].id)
 	}
+	// Tombstone so the shared-file merge doesn't re-adopt what the cap just
+	// evicted (and the other process converges on the same eviction).
+	fi.recordTombstonesLocked(pruned...)
 }
 
 func (fi *FactIndex) load() {
@@ -695,7 +833,16 @@ func (fi *FactIndex) load() {
 
 	var facts []*Fact
 	if err := json.Unmarshal(data, &facts); err != nil {
-		fi.logger.Warn("failed to parse fact index", zap.Error(err))
+		// Quarantine, never leave in place: an unparseable index left under
+		// the live name gets overwritten by the next persist, silently erasing
+		// every accumulated fact. Moving it aside keeps the bytes recoverable.
+		if qpath, qerr := quarantineCorrupt(fi.path); qerr == nil {
+			fi.logger.Warn("fact index corrupt; quarantined for recovery",
+				zap.String("quarantine", qpath), zap.Error(err))
+		} else {
+			fi.logger.Warn("fact index corrupt and quarantine failed; refusing to start empty over it",
+				zap.Error(qerr))
+		}
 		return
 	}
 
@@ -749,6 +896,13 @@ func legacyConfidence(accessCount int) float64 {
 }
 
 func (fi *FactIndex) persistLocked() {
+	// Reconcile with the shared file first: adopt facts the other process
+	// persisted and honor tombstones from either side, so a rewrite never
+	// erases the other process's learning.
+	fi.mergeFromDiskLocked()
+	// Refresh the persisted Score annotations (write lock is held here).
+	fi.recalcScoresLocked()
+
 	facts := make([]*Fact, 0, len(fi.facts))
 	for _, f := range fi.facts {
 		facts = append(facts, f)
@@ -765,7 +919,129 @@ func (fi *FactIndex) persistLocked() {
 		return
 	}
 
-	if err := os.WriteFile(fi.path, data, 0o600); err != nil {
+	if err := atomicWriteFile(fi.path, data, 0o600); err != nil {
 		fi.logger.Warn("failed to write fact index", zap.Error(err))
+	}
+	fi.lastAccessFlush = time.Now()
+	fi.accessDirty = false
+}
+
+// mergeFromDiskLocked reconciles the in-memory map with the shared on-disk
+// state before a rewrite:
+//
+//  1. Tombstones are unioned from the sidecar (deletions made by the other
+//     process) and applied — any copy whose CreatedAt predates its tombstone
+//     is dropped, here and from the write that follows.
+//  2. Facts present on disk but not in memory (learned by the other process)
+//     are adopted; facts known to both keep the freshest access metadata and
+//     the highest confidence.
+//
+// Read failures leave the current view untouched — worst case is the old
+// last-writer-wins behavior for one cycle. Caller must hold the write lock.
+func (fi *FactIndex) mergeFromDiskLocked() {
+	fi.loadTombstonesLocked()
+	for id, ts := range fi.tombstones {
+		if f, ok := fi.facts[id]; ok && ts.After(f.CreatedAt) {
+			delete(fi.facts, id)
+		}
+	}
+
+	data, err := os.ReadFile(fi.path)
+	if err != nil {
+		return
+	}
+	var onDisk []*Fact
+	if err := json.Unmarshal(data, &onDisk); err != nil {
+		return
+	}
+	for _, df := range onDisk {
+		if df == nil || df.ID == "" {
+			continue
+		}
+		if ts, dead := fi.tombstones[df.ID]; dead && ts.After(df.CreatedAt) {
+			continue
+		}
+		cur, ok := fi.facts[df.ID]
+		if !ok {
+			fi.facts[df.ID] = df
+			continue
+		}
+		if df.LastAccessed.After(cur.LastAccessed) {
+			cur.LastAccessed = df.LastAccessed
+		}
+		if df.AccessCount > cur.AccessCount {
+			cur.AccessCount = df.AccessCount
+		}
+		if df.Confidence > cur.Confidence {
+			cur.Confidence = df.Confidence
+		}
+	}
+	if excess := len(fi.facts) - fi.config.MaxFactsCount; excess > 0 {
+		fi.pruneLowestLocked(excess)
+	}
+}
+
+// SetOnRemoved registers the removal hook (see the field doc). Pass nil to
+// detach. Not safe to call concurrently with index operations — wire it at
+// construction/attach time.
+func (fi *FactIndex) SetOnRemoved(fn func(ids []string)) {
+	fi.mu.Lock()
+	fi.onRemoved = fn
+	fi.mu.Unlock()
+}
+
+// recordTombstonesLocked marks ids as explicitly deleted, persists the
+// sidecar so the deletion propagates to the other process, and notifies the
+// removal hook so derived state (vectors) is dropped in lockstep. This is the
+// single chokepoint every deletion path goes through. Caller must hold the
+// write lock.
+func (fi *FactIndex) recordTombstonesLocked(ids ...string) {
+	if len(ids) == 0 {
+		return
+	}
+	if fi.onRemoved != nil {
+		fi.onRemoved(ids)
+	}
+	now := time.Now()
+	for _, id := range ids {
+		fi.tombstones[id] = now
+	}
+	fi.pruneTombstonesLocked(now)
+	data, err := json.MarshalIndent(fi.tombstones, "", "  ")
+	if err != nil {
+		return
+	}
+	if err := atomicWriteFile(fi.tombstonePath, data, 0o600); err != nil {
+		fi.logger.Warn("failed to persist fact tombstones", zap.Error(err))
+	}
+}
+
+// loadTombstonesLocked unions the sidecar's tombstones into memory (the other
+// process may have recorded deletions since our last read).
+func (fi *FactIndex) loadTombstonesLocked() {
+	data, err := os.ReadFile(fi.tombstonePath)
+	if err != nil {
+		return
+	}
+	var onDisk map[string]time.Time
+	if err := json.Unmarshal(data, &onDisk); err != nil {
+		return
+	}
+	for id, ts := range onDisk {
+		if cur, ok := fi.tombstones[id]; !ok || ts.After(cur) {
+			fi.tombstones[id] = ts
+		}
+	}
+	fi.pruneTombstonesLocked(time.Now())
+}
+
+// pruneTombstonesLocked drops deletion markers past retention so the sidecar
+// stays bounded. Caller must hold the write lock.
+func (fi *FactIndex) pruneTombstonesLocked(now time.Time) {
+	cutoff := now.Add(-tombstoneRetention)
+	for id, ts := range fi.tombstones {
+		if ts.Before(cutoff) {
+			delete(fi.tombstones, id)
+		}
 	}
 }

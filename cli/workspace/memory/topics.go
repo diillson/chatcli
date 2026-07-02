@@ -233,7 +233,14 @@ func (tt *TopicTracker) load() {
 	}
 	var topics []Topic
 	if err := json.Unmarshal(data, &topics); err != nil {
-		tt.logger.Warn("failed to parse topics", zap.Error(err))
+		// Quarantine for recovery instead of leaving the corrupt file in place
+		// for the next persist to overwrite (see persist.go).
+		if qpath, qerr := quarantineCorrupt(tt.path); qerr == nil {
+			tt.logger.Warn("topics store corrupt; quarantined for recovery",
+				zap.String("quarantine", qpath), zap.Error(err))
+		} else {
+			tt.logger.Warn("topics store corrupt and quarantine failed", zap.Error(qerr))
+		}
 		return
 	}
 	for i := range topics {
@@ -254,5 +261,7 @@ func (tt *TopicTracker) persist() {
 	if err != nil {
 		return
 	}
-	_ = os.WriteFile(tt.path, data, 0o600)
+	if err := atomicWriteFile(tt.path, data, 0o600); err != nil {
+		tt.logger.Warn("failed to write topics store", zap.Error(err))
+	}
 }
