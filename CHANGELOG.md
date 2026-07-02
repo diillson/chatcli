@@ -1,5 +1,23 @@
 # Changelog
 
+## [1.150.0](https://github.com/diillson/chatcli/compare/v1.149.2...v1.150.0) (2026-07-02)
+
+
+### Features
+
+* **agent:** defer the tool catalog — index plus on-demand [@tools](https://github.com/tools) describe ([#1125](https://github.com/diillson/chatcli/issues/1125)) ([e539687](https://github.com/diillson/chatcli/commit/e539687c1ec24ebe81fc6a326d4929b5dab6a116))
+* **compress:** harden CCR reversibility and add runtime profiles ([#1119](https://github.com/diillson/chatcli/issues/1119)) ([ca39987](https://github.com/diillson/chatcli/commit/ca399877315237a1c13da7df7eb3a85443978cc2))
+* **http:** structured HTTP client for the agent as the [@http](https://github.com/http) tool ([#1127](https://github.com/diillson/chatcli/issues/1127)) ([63f772d](https://github.com/diillson/chatcli/commit/63f772da746b1700d7f95a19b5f9a6e24795b8c5))
+* **lsp:** expose semantic code navigation to the agent as the [@lsp](https://github.com/lsp) tool ([#1124](https://github.com/diillson/chatcli/issues/1124)) ([e6301f4](https://github.com/diillson/chatcli/commit/e6301f41253df0ff5d511abf10e6302553c775fa))
+* **proc:** background-process supervision for the agent as the [@proc](https://github.com/proc) tool ([#1126](https://github.com/diillson/chatcli/issues/1126)) ([90e82ba](https://github.com/diillson/chatcli/commit/90e82ba230467d4843767ceeafc2c54649bd90f3))
+
+
+### Bug Fixes
+
+* **ctxmgr:** harden knowledge-mode durability, UTF-8 boundaries and retrieval cost ([#1122](https://github.com/diillson/chatcli/issues/1122)) ([78bbd62](https://github.com/diillson/chatcli/commit/78bbd62f9a4bff6297dcd35970da2e8d907f972f))
+* **lint:** zero both module baselines and enforce full-module linting ([#1123](https://github.com/diillson/chatcli/issues/1123)) ([32b060c](https://github.com/diillson/chatcli/commit/32b060c233d921dd0e2115a7c7b2a972c42bd0a5))
+* **memory:** eliminate silent memory-loss vectors and harden retrieval ([#1121](https://github.com/diillson/chatcli/issues/1121)) ([25ccfbc](https://github.com/diillson/chatcli/commit/25ccfbcd2614c9902e16c6f94e2b0ec74052f33d))
+
 ## [1.149.2](https://github.com/diillson/chatcli/compare/v1.149.1...v1.149.2) (2026-07-02)
 
 
