@@ -16,7 +16,6 @@
 <a href="https://github.com/diillson/chatcli/actions/workflows/security-scan.yml"><img src="https://github.com/diillson/chatcli/actions/workflows/security-scan.yml/badge.svg" alt="Security Scan"/></a>
 <a href="https://github.com/diillson/chatcli/releases"><img src="https://img.shields.io/github/v/release/diillson/chatcli" alt="Release"/></a>
 <a href="https://artifacthub.io/packages/search?ts_query_web=chatcli&sort=relevance&page=1"><img src="https://img.shields.io/endpoint?url=https://artifacthub.io/badge/repository/chatcli" alt="ArtifactHub"/></a>
-<a href="https://goreportcard.com/report/github.com/diillson/chatcli"><img src="https://goreportcard.com/badge/github.com/diillson/chatcli" alt="Go Report Card"/></a>
 <a href="https://pkg.go.dev/github.com/diillson/chatcli"><img src="https://pkg.go.dev/badge/github.com/diillson/chatcli.svg" alt="Go Reference"/></a>
 
 <br>
