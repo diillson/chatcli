@@ -16,6 +16,8 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+
+	"go.uber.org/zap"
 )
 
 const (
@@ -117,7 +119,8 @@ func (m *Manager) KnowledgeSearch(ctx context.Context, sessionID, kb, query stri
 	for _, fc := range targets {
 		segs, err := engine.RetrieveHybrid(ctx, fc, query, k)
 		if err != nil {
-			m.logger.Warn("knowledge search failed for context; skipping")
+			m.logger.Warn("knowledge search failed for context; skipping",
+				zap.String("context", fc.Name), zap.Error(err))
 			continue
 		}
 		for _, s := range segs {
@@ -158,9 +161,16 @@ func (m *Manager) KnowledgeDocument(sessionID, kb, source string, offset int) (p
 		if offset >= total {
 			return "", total, 0, fmt.Errorf("offset %d beyond document end (%d chars)", offset, total)
 		}
+		// Snap both cut points to rune starts: offsets are byte positions the
+		// MODEL echoes back between calls, so a mid-rune page boundary would
+		// both emit invalid UTF-8 and corrupt the next page. nextOffset always
+		// references the actual end used, so pages reassemble exactly.
+		offset = alignRuneBefore(doc, offset)
 		end := offset + docPageChars
 		if end > total {
 			end = total
+		} else {
+			end = alignRuneBefore(doc, end)
 		}
 		next := 0
 		if end < total {
@@ -234,14 +244,15 @@ func FormatKnowledgeHits(query string, hits []KnowledgeHit) string {
 	return b.String()
 }
 
-// snippet trims s to at most limit bytes, cutting at a word boundary and
-// flagging the elision so the model knows there is more behind `get`.
+// snippet trims s to at most limit bytes, preferring a word boundary and
+// always landing on a rune boundary, flagging the elision so the model knows
+// there is more behind `get`.
 func snippet(s string, limit int) string {
 	s = strings.TrimSpace(s)
 	if len(s) <= limit {
 		return s
 	}
-	cut := s[:limit]
+	cut := s[:alignRuneBefore(s, limit)]
 	if i := strings.LastIndexAny(cut, " \n\t"); i > limit/2 {
 		cut = cut[:i]
 	}

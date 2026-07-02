@@ -17,6 +17,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"unicode/utf8"
 )
 
 const (
@@ -120,12 +121,30 @@ func writeDigestTree(b *strings.Builder, sources []digestSource, budget int) {
 func digestLine(s digestSource) string {
 	title := strings.TrimSpace(s.title)
 	if len(title) > digestMaxTitleChars {
-		title = title[:digestMaxTitleChars-1] + "…"
+		// Rune-aligned cut: pt-BR titles are multi-byte, and this line lands
+		// in the CACHED system-prompt prefix — invalid UTF-8 there poisons
+		// every turn.
+		title = title[:alignRuneBefore(title, digestMaxTitleChars-1)] + "…"
 	}
 	if title != "" {
 		return fmt.Sprintf("- %s (%d passages) — %s\n", s.path, s.chunks, title)
 	}
 	return fmt.Sprintf("- %s (%d passages)\n", s.path, s.chunks)
+}
+
+// alignRuneBefore returns the largest index <= i that starts a UTF-8 rune in
+// s (clamped to [0, len(s)]), so byte-budget cuts never split a rune.
+func alignRuneBefore(s string, i int) int {
+	if i <= 0 {
+		return 0
+	}
+	if i >= len(s) {
+		return len(s)
+	}
+	for i > 0 && !utf8.RuneStart(s[i]) {
+		i--
+	}
+	return i
 }
 
 // firstHeading extracts the first markdown heading of a chunk as a

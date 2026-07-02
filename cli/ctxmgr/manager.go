@@ -652,7 +652,12 @@ func (m *Manager) BuildPromptMessages(sessionID string, opts FormatOptions) ([]m
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
-	attachments := m.attachedContexts[sessionID]
+	// Copy before sorting: this method holds only the READ lock, and sorting
+	// the shared slice in place would mutate state other readers iterate.
+	// Today the list arrives pre-sorted (attach keeps it ordered), so the
+	// in-place sort happened to never swap — but that is an invariant of a
+	// different method, not something this read path may lean on.
+	attachments := append([]AttachedContext(nil), m.attachedContexts[sessionID]...)
 	if len(attachments) == 0 {
 		return nil, nil
 	}
