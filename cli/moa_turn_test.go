@@ -65,8 +65,59 @@ func TestMoaToolsetLabel(t *testing.T) {
 	if got := moaToolsetLabel(moaToolset{}); got != "" {
 		t.Errorf("empty toolset must render empty, got %q", got)
 	}
-	if got := moaToolsetLabel(moaToolset{knowledge: true, recall: true}); got != "knowledge, recall" {
+	if got := moaToolsetLabel(moaToolset{knowledge: true, recall: true, memory: true}); got != "knowledge, recall, memory" {
 		t.Errorf("label = %q", got)
+	}
+}
+
+func TestMoaToolsetForRun_MemoryGate(t *testing.T) {
+	t.Setenv("CHATCLI_MEMORY_MODE", "off")
+	if ts := (&ChatCLI{}).moaToolsetForRun(nil); ts.memory {
+		t.Error("memory mode off must not grant the memory tool")
+	}
+	t.Setenv("CHATCLI_MEMORY_MODE", "index")
+	if ts := (&ChatCLI{}).moaToolsetForRun(nil); !ts.memory {
+		t.Error("memory mode index must grant the memory tool")
+	}
+}
+
+// moaMemFake implements plugins.MemoryAdapter and records which methods run —
+// panel turns must only ever reach Recall.
+type moaMemFake struct {
+	recalled string
+	mutated  bool
+}
+
+func (f *moaMemFake) Remember(string, string) (string, error) {
+	f.mutated = true
+	return "", nil
+}
+func (f *moaMemFake) UpdateProfile(map[string]string) (string, error) {
+	f.mutated = true
+	return "", nil
+}
+func (f *moaMemFake) Forget(string) (string, error) {
+	f.mutated = true
+	return "", nil
+}
+func (f *moaMemFake) Recall(query string) (string, error) {
+	f.recalled = query
+	return "User is a platform SRE; prefers keyless backends", nil
+}
+
+// runMoaMemory must pin the subcommand to recall — even if a model smuggles a
+// mutating cmd into the args, only Recall may execute.
+func TestRunMoaMemory_ReadOnlyByConstruction(t *testing.T) {
+	fake := &moaMemFake{}
+	plugins.SetMemoryAdapter(fake)
+	t.Cleanup(func() { plugins.SetMemoryAdapter(nil) })
+
+	out := runMoaMemory(context.Background(), `{"cmd":"forget","query":"certifications"}`)
+	if fake.mutated {
+		t.Fatal("a mutating memory subcommand must never execute from a panel turn")
+	}
+	if fake.recalled != "certifications" || !strings.Contains(out, "platform SRE") {
+		t.Errorf("recall not executed as expected: recalled=%q out=%q", fake.recalled, out)
 	}
 }
 
@@ -154,6 +205,48 @@ func TestMoaTurn_NoToolsUsesPlainSendPrompt(t *testing.T) {
 	}
 	if fc.sendCalls != 1 || fc.seenTools != nil {
 		t.Errorf("an empty toolset must use the single-shot path (sendCalls=%d, tools=%v)", fc.sendCalls, fc.seenTools)
+	}
+}
+
+// moaMemoryToolFake drives the native loop: round one asks for a memory
+// recall, round two must see the recalled notes folded in and answers.
+type moaMemoryToolFake struct {
+	askLLMFake
+	calls int
+}
+
+func (f *moaMemoryToolFake) SupportsNativeTools() bool { return true }
+func (f *moaMemoryToolFake) SendPromptWithTools(_ context.Context, prompt string, _ []models.Message, _ []models.ToolDefinition, _ int) (*models.LLMResponse, error) {
+	f.calls++
+	if f.calls == 1 {
+		return &models.LLMResponse{ToolCalls: []models.ToolCall{{
+			Name:      "memory",
+			Arguments: map[string]interface{}{"query": "user preferences"},
+		}}}, nil
+	}
+	if !strings.Contains(prompt, "memory result:") || !strings.Contains(prompt, "platform SRE") {
+		return &models.LLMResponse{Content: "follow-up missing memory result"}, nil
+	}
+	return &models.LLMResponse{Content: "answer grounded in user notes"}, nil
+}
+
+func TestMoaTurn_NativeMemoryRecallLoop(t *testing.T) {
+	fake := &moaMemFake{}
+	plugins.SetMemoryAdapter(fake)
+	t.Cleanup(func() { plugins.SetMemoryAdapter(nil) })
+
+	fc := &moaMemoryToolFake{}
+	cli := &ChatCLI{Provider: "fake", Model: "m", Client: fc}
+	turn := cli.moaTurn(moaToolset{memory: true})
+	out, err := turn(context.Background(), moa.Ref{Provider: "fake", Model: "m"}, "what stack does the user prefer?", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out != "answer grounded in user notes" {
+		t.Fatalf("out = %q", out)
+	}
+	if fake.recalled != "user preferences" || fake.mutated {
+		t.Fatalf("recall must run read-only: recalled=%q mutated=%v", fake.recalled, fake.mutated)
 	}
 }
 

@@ -3,11 +3,14 @@
  * Copyright (c) 2024 Edilson Freitas. License: Apache-2.0.
  *
  * A MoA run is a panel of experts, and each expert should be as capable as a
- * regular conversation turn: able to pull from the attached knowledge bases
- * and to expand "<<ccr:KEY>>" compression markers back into their originals.
- * This file builds the moa.Turn executor that grants exactly those two
+ * regular conversation turn: able to pull from the attached knowledge bases,
+ * to expand "<<ccr:KEY>>" compression markers back into their originals, and
+ * to recall the user's long-term memory (profile, durable facts, notes).
+ * This file builds the moa.Turn executor that grants exactly those three
  * sanctioned READ-ONLY exceptions to every participant — proposers and
- * aggregator alike.
+ * aggregator alike. Memory access is recall-only by construction: the
+ * executor pins the @memory subcommand to "recall", so the mutating forms
+ * (remember, profile, forget) are unreachable from a panel turn.
  *
  * Deliberately excluded: ask_user (participants run concurrently and
  * unattended — N models racing to open interactive overlays is not a panel,
@@ -23,6 +26,7 @@ package cli
 
 import (
 	"context"
+	"encoding/json"
 	"strings"
 
 	"github.com/diillson/chatcli/cli/agent"
@@ -43,9 +47,10 @@ const moaToolMaxRounds = 4
 type moaToolset struct {
 	knowledge bool // attached knowledge bases may be queried
 	recall    bool // <<ccr:KEY>> markers may be expanded
+	memory    bool // the user's long-term memory may be recalled (read-only)
 }
 
-func (t moaToolset) any() bool { return t.knowledge || t.recall }
+func (t moaToolset) any() bool { return t.knowledge || t.recall || t.memory }
 
 // moaToolsetLabel renders the granted capabilities for the run status line —
 // tool identifiers, not translatable prose ("" when none apply).
@@ -57,6 +62,9 @@ func moaToolsetLabel(t moaToolset) string {
 	if t.recall {
 		names = append(names, "recall")
 	}
+	if t.memory {
+		names = append(names, "memory")
+	}
 	return strings.Join(names, ", ")
 }
 
@@ -64,9 +72,16 @@ func moaToolsetLabel(t moaToolset) string {
 // same gate as the chat exception (enabled + a base attached to the session);
 // recall is granted only when the compression layer is wired AND the shared
 // history actually carries a CCR marker — offering it otherwise would be a
-// dead tool in every participant's prompt.
+// dead tool in every participant's prompt. Memory recall is granted whenever
+// long-term memory is on: the briefing pushes the memories relevant to the
+// USER'S prompt, but an expert's own line of reasoning may need facts that
+// retrieval did not surface — the pull closes that gap (and @moa in
+// agent/coder mode gets no memory push at all).
 func (cli *ChatCLI) moaToolsetForRun(history []models.Message) moaToolset {
-	ts := moaToolset{knowledge: cli.chatKnowledgeActive()}
+	ts := moaToolset{
+		knowledge: cli.chatKnowledgeActive(),
+		memory:    loadMemoryMode() != memModeOff,
+	}
 	if cli.compressionLayer != nil && historyHasCCRMarkers(history) {
 		ts.recall = true
 	}
@@ -122,6 +137,9 @@ func (cli *ChatCLI) runMoaTurnNative(
 	if ts.recall {
 		tools = append(tools, recallToolDefinition())
 	}
+	if ts.memory {
+		tools = append(tools, memoryRecallToolDefinition())
+	}
 
 	for round := 0; ; round++ {
 		resp, err := tac.SendPromptWithTools(ctx, prompt, history, tools, 0)
@@ -135,13 +153,15 @@ func (cli *ChatCLI) runMoaTurnNative(
 			cli.costTracker.RecordRealUsage(ref.Provider, ref.Model, resp.Usage)
 		}
 
-		var kbArgs, rcArgs string
+		var kbArgs, rcArgs, memArgs string
 		for _, tc := range resp.ToolCalls {
 			switch {
 			case ts.knowledge && isKnowledgeToolName(tc.Name) && kbArgs == "":
 				kbArgs = tc.ArgumentsJSON()
 			case ts.recall && plugins.IsRecallTool(tc.Name) && rcArgs == "":
 				rcArgs = tc.ArgumentsJSON()
+			case ts.memory && isMemoryToolName(tc.Name) && memArgs == "":
+				memArgs = tc.ArgumentsJSON()
 			}
 		}
 
@@ -152,6 +172,10 @@ func (cli *ChatCLI) runMoaTurnNative(
 			}
 			if rcArgs != "" {
 				history, prompt = appendMoaToolRound(history, prompt, "recall", rcArgs, runMoaRecall(ctx, rcArgs))
+				continue
+			}
+			if memArgs != "" {
+				history, prompt = appendMoaToolRound(history, prompt, "memory", memArgs, runMoaMemory(ctx, memArgs))
 				continue
 			}
 		}
@@ -176,6 +200,9 @@ func (cli *ChatCLI) runMoaTurnXML(
 	if ts.recall {
 		instruction += moaRecallXMLInstruction()
 	}
+	if ts.memory {
+		instruction += moaMemoryXMLInstruction()
+	}
 	prompt += instruction
 
 	for round := 0; ; round++ {
@@ -185,13 +212,15 @@ func (cli *ChatCLI) runMoaTurnXML(
 		}
 
 		calls, _ := agent.ParseToolCalls(resp)
-		var kbArgs, rcArgs string
+		var kbArgs, rcArgs, memArgs string
 		for _, tc := range calls {
 			switch {
 			case ts.knowledge && isKnowledgeToolName(tc.Name) && kbArgs == "":
 				kbArgs = tc.Args
 			case ts.recall && plugins.IsRecallTool(tc.Name) && rcArgs == "":
 				rcArgs = tc.Args
+			case ts.memory && isMemoryToolName(tc.Name) && memArgs == "":
+				memArgs = tc.Args
 			}
 		}
 
@@ -204,6 +233,11 @@ func (cli *ChatCLI) runMoaTurnXML(
 			}
 			if rcArgs != "" {
 				history, prompt = appendMoaToolRound(history, prompt, "recall", rcArgs, runMoaRecall(ctx, rcArgs))
+				prompt += instruction
+				continue
+			}
+			if memArgs != "" {
+				history, prompt = appendMoaToolRound(history, prompt, "memory", memArgs, runMoaMemory(ctx, memArgs))
 				prompt += instruction
 				continue
 			}
@@ -270,6 +304,75 @@ func recallToolDefinition() models.ToolDefinition {
 			},
 		},
 	}
+}
+
+// runMoaMemory executes one read-only memory recall through the @memory
+// builtin. The envelope is built HERE with cmd pinned to "recall", so a
+// participant can never reach the mutating subcommands (remember, profile,
+// forget) — N concurrent panelists writing memory would corrupt it. Errors
+// come back as a tool-result string.
+func runMoaMemory(ctx context.Context, argsJSON string) string {
+	var in struct {
+		Query string `json:"query"`
+	}
+	_ = json.Unmarshal([]byte(argsJSON), &in)
+	envelope, err := json.Marshal(map[string]interface{}{
+		"cmd":  "recall",
+		"args": map[string]string{"query": in.Query},
+	})
+	if err != nil {
+		return "memory error: " + err.Error()
+	}
+	out, err := plugins.NewBuiltinMemoryPlugin().Execute(ctx, []string{string(envelope)})
+	if err != nil {
+		return "memory error: " + err.Error()
+	}
+	return out
+}
+
+// memoryRecallToolDefinition is the native tool-use definition for read-only
+// memory recall offered to MoA participants: what the user has noted over
+// time — profile, durable facts, preferences, project notes.
+func memoryRecallToolDefinition() models.ToolDefinition {
+	return models.ToolDefinition{
+		Type: "function",
+		Function: models.ToolFunctionDef{
+			Name: "memory",
+			Description: "Recall the user's long-term memory (read-only): profile, durable facts, preferences and project notes " +
+				"recorded across sessions. Use when the answer depends on something the user likely noted before " +
+				"and the provided context does not include it.",
+			Parameters: map[string]interface{}{
+				"type": "object",
+				"properties": map[string]interface{}{
+					"query": map[string]interface{}{
+						"type":        "string",
+						"description": "Topic to recall (empty returns the currently relevant memory).",
+					},
+				},
+			},
+		},
+	}
+}
+
+// isMemoryToolName matches the tool name in plugin (@memory) or native
+// (memory) form, case-insensitively.
+func isMemoryToolName(name string) bool {
+	n := strings.ToLower(strings.TrimSpace(name))
+	return n == "@memory" || n == "memory"
+}
+
+// moaMemoryXMLInstruction pins the memory-recall call format for providers
+// WITHOUT native tools. Only the recall form is offered — the executor pins
+// cmd to "recall" regardless of what the model sends.
+func moaMemoryXMLInstruction() string {
+	return "\n\n[Panel exception — memory recall is ENABLED for this turn]\n" +
+		"The user keeps long-term memory (profile, durable facts, preferences, project notes). " +
+		"You normally have no tools, but for THIS turn you MAY recall from it (read-only), and the call WILL be executed. " +
+		"If — and only if — the answer depends on something the user likely noted and the provided context lacks it, " +
+		"reply with EXACTLY one tag and nothing else:\n" +
+		`<tool_call name="@memory" args='{"query":"<topic to recall>"}' />` + "\n" +
+		"You will receive the recalled notes and may then answer. Never try to store, edit or forget memory. " +
+		"If the context already suffices, just answer normally."
 }
 
 // moaRecallXMLInstruction pins the recall call format for providers WITHOUT
