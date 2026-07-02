@@ -11,6 +11,11 @@
  * aggregator model. Provider-agnostic — any configured provider can be a
  * reference or the aggregator.
  *
+ * Every participant is briefed like a regular chat turn (structured system
+ * prompt: attached contexts, workspace memory, skills, retrieval) and holds
+ * the chat-sanctioned read-only tool exceptions (knowledge retrieval, CCR
+ * recall) — see moa_turn.go.
+ *
  *   CHATCLI_MOA_MODELS="openai:gpt-5,claudeai:claude-opus-4-8,googleai:gemini-2.5-pro"
  *   CHATCLI_MOA_AGGREGATOR="claudeai:claude-opus-4-8"   (defaults to current model)
  */
@@ -25,7 +30,6 @@ import (
 
 	"github.com/diillson/chatcli/cli/agent/moa"
 	"github.com/diillson/chatcli/i18n"
-	"github.com/diillson/chatcli/llm/client"
 	"github.com/diillson/chatcli/models"
 )
 
@@ -52,25 +56,28 @@ func (cli *ChatCLI) handleMoACommand(ctx context.Context, input string) {
 		aggregator = agg[0]
 	}
 
-	factory := func(provider, model string) (moa.Client, error) {
-		// Shared resolver: case-insensitive provider match + reuse of the live
-		// session client so OAuth / forwarded-token auth is honored (same as the
-		// @moa tool). Plain GetClient here failed on lowercase env names like
-		// "openai" because the registry keys are upper-case.
-		c, err := cli.moaClientFor(provider, model)
-		if err != nil {
-			return nil, err
-		}
-		var _ client.LLMClient = c // documents that LLMClient satisfies moa.Client
-		return c, nil
-	}
+	// Every panel member gets the same briefing a regular chat turn gets: the
+	// structured system prompt (attached contexts, workspace memory, skills,
+	// retrieval) plus the prior conversation. Assembled ONCE per run — it
+	// consumes per-turn staging state (e.g. a pending manual skill) — and
+	// shared read-only by all participants.
+	assembly := cli.assembleChatSystemPrompt(ctx, prompt, "")
+	tempHistory := cli.buildChatTempHistory(assembly.parts, prompt, "", nil)
+
+	// Panel members also get the chat-sanctioned read-only tool exceptions
+	// (knowledge retrieval, CCR marker recall) when they apply to this session.
+	toolset := cli.moaToolsetForRun(tempHistory)
+	turn := cli.moaTurn(toolset)
 
 	fmt.Printf("  %s\n", colorize(i18n.T("moa.running", len(refs)), ColorCyan))
+	if caps := moaToolsetLabel(toolset); caps != "" {
+		fmt.Printf("  %s\n", colorize(i18n.T("moa.tools", caps), ColorGray))
+	}
 
 	runCtx, cancel := context.WithTimeout(ctx, 5*time.Minute)
 	defer cancel()
 
-	final, results, err := moa.RunWithHistory(runCtx, prompt, cli.history, refs, factory, aggregator)
+	final, results, err := moa.RunSession(runCtx, prompt, tempHistory, refs, aggregator, turn)
 	if err != nil {
 		fmt.Printf("  %s %v\n", colorize("ERR", ColorRed), err)
 		return

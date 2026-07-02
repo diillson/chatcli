@@ -303,6 +303,7 @@
   "moa.usage": "Uso: /moa <prompt> (defina CHATCLI_MOA_MODELS=\"provider:model,...\")",
   "moa.no_models": "Nenhum modelo MoA configurado. Defina CHATCLI_MOA_MODELS=\"openai:gpt-5,claudeai:claude-opus-4-8\".",
   "moa.running": "Consultando %d modelos em paralelo e sintetizando...",
+  "moa.tools": "Ferramentas de especialista ativas neste painel: %s",
   "session.usage_delete": "  /session delete <nome>",
   "session.usage_new": "  /session new",
   "session.error_save": " ❌ Erro ao salvar sessão: %v",

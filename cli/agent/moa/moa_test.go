@@ -124,3 +124,80 @@ func TestRun_NoRefs(t *testing.T) {
 		t.Error("expected error with no refs")
 	}
 }
+
+// RunSession must route every participant — proposers AND aggregator —
+// through the injected turn executor, so host-granted capabilities (enriched
+// system context, tool rounds) apply to the whole panel.
+func TestRunSession_RoutesAllParticipantsThroughTurn(t *testing.T) {
+	var mu sync.Mutex
+	seen := map[string]string{} // ref → prompt
+	turn := func(_ context.Context, ref Ref, prompt string, _ []models.Message) (string, error) {
+		mu.Lock()
+		seen[ref.String()] = prompt
+		mu.Unlock()
+		if ref.Provider == "agg" {
+			return "synthesized", nil
+		}
+		return "answer from " + ref.Provider, nil
+	}
+	out, results, err := RunSession(context.Background(), "question", nil,
+		[]Ref{{Provider: "a"}, {Provider: "b"}}, Ref{Provider: "agg"}, turn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out != "synthesized" {
+		t.Errorf("expected aggregator output, got %q", out)
+	}
+	if len(results) != 2 {
+		t.Errorf("expected 2 ref results, got %d", len(results))
+	}
+	if seen["a"] != "question" || seen["b"] != "question" {
+		t.Errorf("proposers should receive the user prompt, got %v", seen)
+	}
+	if !strings.Contains(seen["agg"], "answer from a") || !strings.Contains(seen["agg"], "answer from b") {
+		t.Errorf("aggregator prompt missing candidates: %q", seen["agg"])
+	}
+}
+
+func TestRunSession_NilTurn(t *testing.T) {
+	if _, _, err := RunSession(context.Background(), "q", nil, []Ref{{Provider: "a"}}, Ref{}, nil); err == nil {
+		t.Error("expected error with nil turn executor")
+	}
+}
+
+// The aggregator must see the shared history minus the trailing user turn
+// (its prompt already embeds the request — keeping both would put two
+// consecutive user messages on the wire), while proposers see it whole.
+func TestRunSession_AggregatorHistoryDropsTrailingUserTurn(t *testing.T) {
+	hist := []models.Message{
+		{Role: "system", Content: "briefing"},
+		{Role: "user", Content: "question"},
+	}
+	var mu sync.Mutex
+	histLen := map[string]int{}
+	turn := func(_ context.Context, ref Ref, _ string, h []models.Message) (string, error) {
+		mu.Lock()
+		histLen[ref.String()] = len(h)
+		mu.Unlock()
+		return "ok", nil
+	}
+	if _, _, err := RunSession(context.Background(), "question", hist,
+		[]Ref{{Provider: "a"}}, Ref{Provider: "agg"}, turn); err != nil {
+		t.Fatal(err)
+	}
+	if histLen["a"] != 2 {
+		t.Errorf("proposer should see the full 2-message history, got %d", histLen["a"])
+	}
+	if histLen["agg"] != 1 {
+		t.Errorf("aggregator should see history without the trailing user turn, got %d", histLen["agg"])
+	}
+}
+
+// A history that does not end with the duplicated user turn passes to the
+// aggregator untouched.
+func TestHistoryForAggregation_NoDuplicateTrailingTurn(t *testing.T) {
+	hist := []models.Message{{Role: "assistant", Content: "earlier"}}
+	if got := historyForAggregation(hist, "question"); len(got) != 1 {
+		t.Errorf("history without a duplicate trailing user turn must be kept, got %d messages", len(got))
+	}
+}

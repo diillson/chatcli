@@ -45,6 +45,24 @@ type Client interface {
 // Factory resolves a client for a (provider, model) pair.
 type Factory func(provider, model string) (Client, error)
 
+// Turn runs one participant's complete turn: a single LLM exchange plus
+// whatever bounded, read-only tool rounds the host wires in (knowledge
+// retrieval, CCR recall, ...). The package stays provider- and tool-agnostic:
+// it only sequences turns, the host decides what a turn is capable of.
+type Turn func(ctx context.Context, ref Ref, prompt string, history []models.Message) (string, error)
+
+// factoryTurn adapts a plain client Factory into a Turn with no tool rounds —
+// the classic single-shot SendPrompt exchange.
+func factoryTurn(factory Factory) Turn {
+	return func(ctx context.Context, ref Ref, prompt string, history []models.Message) (string, error) {
+		c, err := factory(ref.Provider, ref.Model)
+		if err != nil {
+			return "", err
+		}
+		return c.SendPrompt(ctx, prompt, history, 0)
+	}
+}
+
 // RefResult is one reference model's outcome.
 type RefResult struct {
 	Ref    Ref
@@ -89,8 +107,20 @@ func Run(ctx context.Context, prompt string, refs []Ref, factory Factory, aggreg
 // RunWithHistory is Run with the prior conversation, passed to each proposer so
 // a follow-up MoA is context-aware.
 func RunWithHistory(ctx context.Context, prompt string, history []models.Message, refs []Ref, factory Factory, aggregator Ref) (string, []RefResult, error) {
+	return RunSession(ctx, prompt, history, refs, aggregator, factoryTurn(factory))
+}
+
+// RunSession is the full MoA entry point: every reference runs its turn
+// concurrently over the shared history, then the aggregator's turn
+// synthesizes the successful answers. The turn executor carries whatever
+// capabilities the host granted (system context, tool rounds), so proposers
+// and aggregator behave like the host's regular conversation turns.
+func RunSession(ctx context.Context, prompt string, history []models.Message, refs []Ref, aggregator Ref, turn Turn) (string, []RefResult, error) {
 	if len(refs) == 0 {
 		return "", nil, fmt.Errorf("no reference models configured")
+	}
+	if turn == nil {
+		return "", nil, fmt.Errorf("no turn executor configured")
 	}
 
 	results := make([]RefResult, len(refs))
@@ -99,16 +129,8 @@ func RunWithHistory(ctx context.Context, prompt string, history []models.Message
 		wg.Add(1)
 		go func(i int, ref Ref) {
 			defer wg.Done()
-			res := RefResult{Ref: ref}
-			c, err := factory(ref.Provider, ref.Model)
-			if err != nil {
-				res.Err = err
-				results[i] = res
-				return
-			}
-			out, err := c.SendPrompt(ctx, prompt, history, 0)
-			res.Output, res.Err = out, err
-			results[i] = res
+			out, err := turn(ctx, ref, prompt, history)
+			results[i] = RefResult{Ref: ref, Output: out, Err: err}
 		}(i, ref)
 	}
 	wg.Wait()
@@ -124,15 +146,24 @@ func RunWithHistory(ctx context.Context, prompt string, history []models.Message
 		return "", results, fmt.Errorf("all %d reference models failed", len(refs))
 	}
 
-	aggClient, err := factory(aggregator.Provider, aggregator.Model)
-	if err != nil {
-		return "", results, fmt.Errorf("aggregator unavailable: %w", err)
-	}
-	final, err := aggClient.SendPrompt(ctx, BuildAggregationPrompt(prompt, results), nil, 0)
+	final, err := turn(ctx, aggregator, BuildAggregationPrompt(prompt, results), historyForAggregation(history, prompt))
 	if err != nil {
 		return "", results, fmt.Errorf("aggregation failed: %w", err)
 	}
 	return final, results, nil
+}
+
+// historyForAggregation prepares the shared history for the aggregator turn.
+// The aggregation prompt embeds the user's request, so a trailing user turn
+// that duplicates it is dropped — otherwise two consecutive user messages
+// would reach the wire. Everything else (system context, prior conversation)
+// is kept so the aggregator synthesizes with the same briefing the proposers
+// had.
+func historyForAggregation(history []models.Message, prompt string) []models.Message {
+	if n := len(history); n > 0 && history[n-1].Role == "user" && history[n-1].Content == prompt {
+		return history[:n-1]
+	}
+	return history
 }
 
 func countOK(results []RefResult) int {
