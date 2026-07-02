@@ -2,13 +2,28 @@ package memory
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
 	"go.uber.org/zap"
 )
+
+// compactionMinKeepRatio is the shrink guard on LLM-assisted consolidation: a
+// result keeping fewer than this fraction of the original facts is treated as
+// truncated/defective model output and rejected (score-based curation runs
+// instead). Models cut long lists routinely; before this guard a truncated
+// answer was applied wholesale, permanently deleting every fact the model
+// failed to echo.
+const compactionMinKeepRatio = 0.5
+
+// compactorStateFile persists the last-compaction timestamp so a process
+// restart does not re-trigger the (LLM-billed, destructive-adjacent)
+// consolidation pass that just ran.
+const compactorStateFile = "compactor_state.json"
 
 // Compactor handles LLM-based memory consolidation and cleanup.
 type Compactor struct {
@@ -21,14 +36,48 @@ type Compactor struct {
 	lastCompaction time.Time
 }
 
-// NewCompactor creates a new memory compactor.
+// compactorState is the on-disk shape of the compactor's durable state.
+type compactorState struct {
+	LastCompaction time.Time `json:"last_compaction"`
+}
+
+// NewCompactor creates a new memory compactor, restoring the last-compaction
+// timestamp from the previous process when present.
 func NewCompactor(facts *FactIndex, daily *DailyNoteStore, config Config, memDir string, logger *zap.Logger) *Compactor {
-	return &Compactor{
+	c := &Compactor{
 		facts:  facts,
 		daily:  daily,
 		config: config,
 		logger: logger,
 		memDir: memDir,
+	}
+	c.loadState()
+	return c
+}
+
+// loadState restores lastCompaction from disk. Any read/parse failure just
+// leaves the zero value — the worst case is one extra compaction check.
+func (c *Compactor) loadState() {
+	data, err := os.ReadFile(filepath.Join(c.memDir, compactorStateFile))
+	if err != nil {
+		return
+	}
+	var s compactorState
+	if err := json.Unmarshal(data, &s); err != nil {
+		return
+	}
+	c.lastCompaction = s.LastCompaction
+}
+
+// markCompacted records a completed compaction in memory and on disk.
+func (c *Compactor) markCompacted() {
+	c.lastCompaction = time.Now()
+	data, err := json.Marshal(compactorState{LastCompaction: c.lastCompaction})
+	if err != nil {
+		return
+	}
+	if err := atomicWriteFile(filepath.Join(c.memDir, compactorStateFile), data, 0o600); err != nil {
+		c.logger.Warn("failed to persist compactor state", zap.Error(err))
 	}
 }
 
@@ -58,7 +107,7 @@ func (c *Compactor) RunWithLLM(ctx context.Context, sendPrompt func(ctx context.
 	facts := c.facts.GetAll()
 	if len(facts) < 10 {
 		c.logger.Debug("Too few facts for compaction", zap.Int("count", len(facts)))
-		c.lastCompaction = time.Now()
+		c.markCompacted()
 		return nil
 	}
 
@@ -83,16 +132,50 @@ func (c *Compactor) RunWithLLM(ctx context.Context, sendPrompt func(ctx context.
 	consolidated := c.parseCompactionResponse(response, facts)
 	if len(consolidated) == 0 {
 		c.logger.Warn("LLM returned empty compaction, keeping original facts")
-		c.lastCompaction = time.Now()
+		c.markCompacted()
 		return nil
+	}
+
+	// Shrink guard: consolidation legitimately merges near-duplicates, but a
+	// result that keeps under half the facts is far more likely a truncated
+	// model answer than a real cleanup. Refuse it — memory loss is the one
+	// failure this subsystem must never have — and curate conservatively.
+	if float64(len(consolidated)) < float64(len(facts))*compactionMinKeepRatio {
+		c.logger.Warn("LLM compaction kept too few facts — rejecting as truncated output",
+			zap.Int("before", len(facts)),
+			zap.Int("after", len(consolidated)))
+		return c.RunScoreBased()
+	}
+
+	// Archive whatever the consolidation dropped BEFORE replacing, so every
+	// removed fact stays individually recoverable from memory_archive.json.
+	kept := make(map[string]struct{}, len(consolidated))
+	for _, f := range consolidated {
+		kept[f.ID] = struct{}{}
+	}
+	var dropped []*Fact
+	for _, f := range facts {
+		if _, ok := kept[f.ID]; !ok {
+			dropped = append(dropped, f)
+		}
+	}
+	if len(dropped) > 0 {
+		archivePath := filepath.Join(c.memDir, "memory_archive.json")
+		if err := appendFactsToArchive(dropped, archivePath); err != nil {
+			c.logger.Warn("failed to archive facts dropped by compaction — keeping original facts",
+				zap.Error(err))
+			c.markCompacted()
+			return nil
+		}
 	}
 
 	c.logger.Info("Memory compaction complete",
 		zap.Int("before", len(facts)),
-		zap.Int("after", len(consolidated)))
+		zap.Int("after", len(consolidated)),
+		zap.Int("archived", len(dropped)))
 
 	c.facts.ReplaceFacts(consolidated)
-	c.lastCompaction = time.Now()
+	c.markCompacted()
 
 	// Regenerate MEMORY.md
 	c.writeMemoryMD()
@@ -109,7 +192,7 @@ func (c *Compactor) RunScoreBased() error {
 	candidates := c.facts.GetArchiveCandidates(threshold)
 
 	if len(candidates) > 0 {
-		archivePath := c.memDir + "/memory_archive.json"
+		archivePath := filepath.Join(c.memDir, "memory_archive.json")
 		if err := c.facts.ArchiveFacts(candidates, archivePath); err != nil {
 			c.logger.Warn("Failed to archive facts", zap.Error(err))
 		} else {
@@ -118,7 +201,7 @@ func (c *Compactor) RunScoreBased() error {
 		}
 	}
 
-	c.lastCompaction = time.Now()
+	c.markCompacted()
 	c.writeMemoryMD()
 
 	return nil
@@ -133,7 +216,7 @@ func (c *Compactor) CleanupDailyNotes() (int, error) {
 func (c *Compactor) writeMemoryMD() {
 	content := c.facts.GenerateMarkdown(c.config.MaxMemoryMDSize)
 	path := c.memDir + "/MEMORY.md"
-	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+	if err := atomicWriteFile(path, []byte(content), 0o600); err != nil {
 		c.logger.Warn("Failed to regenerate MEMORY.md", zap.Error(err))
 	}
 }
@@ -201,6 +284,12 @@ func (c *Compactor) parseCompactionResponse(response string, originalFacts []*Fa
 			fact.CreatedAt = matchedFact.CreatedAt
 			fact.AccessCount = matchedFact.AccessCount
 			fact.Tags = matchedFact.Tags
+			// Trust metadata must survive consolidation: without this, every
+			// compaction silently downgraded user-stated facts (0.9/1.0) to
+			// the extraction default and erased where they were learned.
+			fact.Confidence = matchedFact.Confidence
+			fact.Provenance = matchedFact.Provenance
+			fact.SourceProject = matchedFact.SourceProject
 		}
 
 		// Generate ID from content

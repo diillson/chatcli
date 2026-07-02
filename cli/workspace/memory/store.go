@@ -6,6 +6,7 @@ import (
 	"os"
 	"sort"
 	"strings"
+	"sync/atomic"
 
 	"go.uber.org/zap"
 )
@@ -35,6 +36,12 @@ type Manager struct {
 	// llm/embedding directly. nil → keyword-only retrieval (no
 	// regression).
 	vectors *VectorIndex
+
+	// backfillInFlight single-flights the detached embedding backfill:
+	// concurrent retrievals (MoA participants, gateway turns) would otherwise
+	// launch overlapping backfills embedding the same facts — double the
+	// embedding bill for zero benefit.
+	backfillInFlight atomic.Bool
 }
 
 // NewManager creates a new memory manager. The memoryDir should be the
@@ -247,7 +254,11 @@ func (m *Manager) GetRelevantContextWithHyDE(ctx context.Context, query string, 
 			ids = append(ids, f.ID)
 		}
 		missing := m.vectors.MissingFor(ids)
-		if len(missing) > 0 {
+		// Single-flight: the CAS happens synchronously on the caller's
+		// goroutine, so a concurrent retrieval deterministically observes the
+		// in-flight backfill and skips — the missing set it would embed is
+		// the same one already being filled.
+		if len(missing) > 0 && m.backfillInFlight.CompareAndSwap(false, true) {
 			items := make(map[string]string, len(missing))
 			for _, id := range missing {
 				if f, ok := m.Facts.GetByID(id); ok {
@@ -263,6 +274,7 @@ func (m *Manager) GetRelevantContextWithHyDE(ctx context.Context, query string, 
 			// cancellation as required (see comment above).
 			bgCtx := context.WithoutCancel(ctx)
 			go func(items map[string]string) { //#nosec G118 -- detached on purpose; see comment above
+				defer m.backfillInFlight.Store(false)
 				if err := m.vectors.BackfillFacts(bgCtx, items); err != nil {
 					m.logger.Warn("vector backfill failed", zap.Error(err))
 				}
@@ -276,8 +288,18 @@ func (m *Manager) GetRelevantContextWithHyDE(ctx context.Context, query string, 
 // AttachVectorIndex wires a VectorIndex into the manager. Pass nil to
 // detach (returns retrieval to keyword-only mode). Safe to call
 // multiple times — only the most recent index is used.
+//
+// Attaching also registers the fact-removal hook so every deletion path
+// (forget, archive, compaction replace, supersede, cap prune) drops the
+// matching vector — orphan vectors would otherwise accumulate forever and
+// keep growing vector_index.json.
 func (m *Manager) AttachVectorIndex(v *VectorIndex) {
 	m.vectors = v
+	if v == nil {
+		m.Facts.SetOnRemoved(nil)
+		return
+	}
+	m.Facts.SetOnRemoved(func(ids []string) { v.Forget(ids...) })
 }
 
 // VectorIndex returns the attached vector index (may be nil).
@@ -290,8 +312,10 @@ func (m *Manager) ReadLongTerm() string {
 	return m.Facts.GenerateMarkdown(m.config.MaxMemoryMDSize)
 }
 
-// WriteLongTerm replaces all long-term memory with new content.
-// This parses the content into facts.
+// WriteLongTerm parses content (markdown headings + bullet lines) into facts
+// and MERGES them into long-term memory — existing facts are kept, with
+// duplicates deduplicated/reinforced by the add-time reconciliation. It does
+// not clear anything; use ForgetFacts for removals.
 func (m *Manager) WriteLongTerm(content string) error {
 	// Parse content into facts
 	lines := strings.Split(content, "\n")
@@ -554,20 +578,15 @@ func parseEnhancedResponse(response string) (daily, longTerm string, profile map
 		{"PROJECTS", findSection(upper, "PROJECTS")},
 	}
 
-	// Filter found sections and sort by position
+	// Filter found sections and sort by position (stable: PROFILE_UPDATE and
+	// PROFILE can match at the same index; declaration order must win).
 	var found []section
 	for _, s := range sections {
 		if s.idx >= 0 {
 			found = append(found, s)
 		}
 	}
-	for i := 0; i < len(found); i++ {
-		for j := i + 1; j < len(found); j++ {
-			if found[j].idx < found[i].idx {
-				found[i], found[j] = found[j], found[i]
-			}
-		}
-	}
+	sort.SliceStable(found, func(i, j int) bool { return found[i].idx < found[j].idx })
 
 	// Extract content between sections
 	extractContent := func(startIdx int, nextIdx int) string {

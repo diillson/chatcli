@@ -298,7 +298,12 @@ func (x *Index) load() {
 	}
 	var f indexFile
 	if err := json.Unmarshal(data, &f); err != nil {
-		x.logger.Warn("vindex unmarshal failed", zap.Error(err))
+		// A torn/corrupt vector cache has no recovery value (vectors are
+		// re-embeddable), but it must not linger: left in place it would be
+		// reloaded and re-warned about on every start. Discard so the next
+		// Upsert repopulates a clean index.
+		x.logger.Warn("vindex unmarshal failed — discarding corrupt cache for re-embed", zap.Error(err))
+		x.discardStale()
 		return
 	}
 	// Dimension mismatch: cosine across different arities is undefined.
@@ -349,7 +354,33 @@ func (x *Index) persist() error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(x.path, data, 0o600)
+	// Atomic replace (same-dir temp + rename): at tens of MB a plain WriteFile
+	// interrupted mid-write leaves a torn file that costs a full re-embed of
+	// the corpus on the next start.
+	tmp, err := os.CreateTemp(filepath.Dir(x.path), filepath.Base(x.path)+".*.tmp")
+	if err != nil {
+		return err
+	}
+	tmpName := tmp.Name()
+	if _, werr := tmp.Write(data); werr != nil {
+		_ = tmp.Close()
+		_ = os.Remove(tmpName)
+		return werr
+	}
+	if cerr := tmp.Chmod(0o600); cerr != nil {
+		_ = tmp.Close()
+		_ = os.Remove(tmpName)
+		return cerr
+	}
+	if cerr := tmp.Close(); cerr != nil {
+		_ = os.Remove(tmpName)
+		return cerr
+	}
+	if rerr := os.Rename(tmpName, x.path); rerr != nil {
+		_ = os.Remove(tmpName)
+		return rerr
+	}
+	return nil
 }
 
 // ─── bounded top-K (min-heap) ─────────────────────────────────────────────

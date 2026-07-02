@@ -244,7 +244,14 @@ func (ps *UserProfileStore) load() {
 	}
 	var p UserProfile
 	if err := json.Unmarshal(data, &p); err != nil {
-		ps.logger.Warn("failed to parse user profile", zap.Error(err))
+		// Quarantine for recovery instead of leaving the corrupt file in place
+		// for the next persist to overwrite (see persist.go).
+		if qpath, qerr := quarantineCorrupt(ps.path); qerr == nil {
+			ps.logger.Warn("user profile corrupt; quarantined for recovery",
+				zap.String("quarantine", qpath), zap.Error(err))
+		} else {
+			ps.logger.Warn("user profile corrupt and quarantine failed", zap.Error(qerr))
+		}
 		return
 	}
 	if p.TopCommands == nil {
@@ -262,7 +269,7 @@ func (ps *UserProfileStore) persist() {
 		ps.logger.Warn("failed to marshal user profile", zap.Error(err))
 		return
 	}
-	if err := os.WriteFile(ps.path, data, 0o600); err != nil {
+	if err := atomicWriteFile(ps.path, data, 0o600); err != nil {
 		ps.logger.Warn("failed to write user profile", zap.Error(err))
 	}
 }

@@ -215,7 +215,14 @@ func (pt *ProjectTracker) load() {
 	}
 	var projects []Project
 	if err := json.Unmarshal(data, &projects); err != nil {
-		pt.logger.Warn("failed to parse projects", zap.Error(err))
+		// Quarantine for recovery instead of leaving the corrupt file in place
+		// for the next persist to overwrite (see persist.go).
+		if qpath, qerr := quarantineCorrupt(pt.path); qerr == nil {
+			pt.logger.Warn("projects store corrupt; quarantined for recovery",
+				zap.String("quarantine", qpath), zap.Error(err))
+		} else {
+			pt.logger.Warn("projects store corrupt and quarantine failed", zap.Error(qerr))
+		}
 		return
 	}
 	for i := range projects {
@@ -236,5 +243,7 @@ func (pt *ProjectTracker) persist() {
 	if err != nil {
 		return
 	}
-	_ = os.WriteFile(pt.path, data, 0o600)
+	if err := atomicWriteFile(pt.path, data, 0o600); err != nil {
+		pt.logger.Warn("failed to write projects store", zap.Error(err))
+	}
 }
