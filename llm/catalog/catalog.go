@@ -1177,9 +1177,14 @@ var registry = []ModelMeta{
 
 	// Fable 5 (Jun 9 2026). Dateless ID per Anthropic's Bedrock docs —
 	// Fable 5, Opus 4.8 and Opus 4.7 have NO ARN-versioned model IDs on
-	// Bedrock and are reachable through InvokeModel with the plain
-	// "anthropic."-prefixed id (served by the Claude-in-Amazon-Bedrock
-	// Messages infrastructure).
+	// Bedrock. Fable 5 is served EXCLUSIVELY by the Claude-in-Amazon-
+	// Bedrock Messages endpoint: it requires 30-day data retention, which
+	// only that agreement provides — legacy InvokeModel runs under the
+	// account's default retention mode and answers 400 ValidationException
+	// "data retention mode 'default' is not available for this model",
+	// whatever profile prefix (us./global.) the caller uses. The
+	// bedrock_mantle_only capability routes it through the Mantle path,
+	// same as Sonnet 5.
 	{
 		ID:              "anthropic.claude-fable-5",
 		Aliases:         []string{"bedrock-fable-5", "global.anthropic.claude-fable-5", "claude-fable-5", "fable-5"},
@@ -1188,7 +1193,7 @@ var registry = []ModelMeta{
 		ContextWindow:   1000000,
 		MaxOutputTokens: 128000,
 		PreferredAPI:    APIAnthropicMessages,
-		Capabilities:    []string{"tools", "vision", "json_mode", "adaptive_thinking"},
+		Capabilities:    []string{"tools", "vision", "json_mode", "adaptive_thinking", "bedrock_mantle_only"},
 	},
 	// Sonnet 5 (Jun 2026). Served EXCLUSIVELY by the Claude-in-Amazon-
 	// Bedrock Messages endpoint (bedrock-mantle.{region}.api.aws) — it has

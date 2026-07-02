@@ -1,6 +1,7 @@
 package bedrock
 
 import (
+	"errors"
 	"os"
 	"strings"
 	"testing"
@@ -90,6 +91,41 @@ func TestSupportsOnDemand(t *testing.T) {
 				t.Errorf("supportsOnDemand(%v) = %v, want %v", tc.in, got, tc.want)
 			}
 		})
+	}
+}
+
+// AWS answers the legacy InvokeModel surface with a 400
+// ValidationException when a model is only served under the
+// Claude-in-Amazon-Bedrock data-retention agreement (Fable 5 requires
+// 30-day retention; the default retention mode is rejected). The raw
+// message doesn't say what to do about it — the wrapper must point at the
+// Mantle endpoint and the console opt-in.
+func TestWrapBedrockDataRetentionError(t *testing.T) {
+	base := errors.New("operation error Bedrock Runtime: InvokeModel, " +
+		"https response error StatusCode: 400, ValidationException: " +
+		"Data retention mode 'default' is not available for this model.")
+	err := wrapBedrockInferenceProfileError("us.anthropic.claude-fable-5", base)
+	if err == nil {
+		t.Fatal("expected a wrapped error, got nil")
+	}
+	for _, want := range []string{
+		"Claude in Amazon Bedrock",
+		"BEDROCK_ANTHROPIC_ENDPOINT",
+		"us.anthropic.claude-fable-5",
+	} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("wrapped error %q missing %q", err.Error(), want)
+		}
+	}
+	if !errors.Is(err, base) {
+		t.Error("wrapped error must preserve the original via %w")
+	}
+
+	// Unrelated errors pass through untouched (same value, no wrapping).
+	other := errors.New("ThrottlingException: too many requests")
+	got := wrapBedrockInferenceProfileError("anthropic.claude-fable-5", other)
+	if !errors.Is(got, other) || got.Error() != other.Error() {
+		t.Errorf("unrelated error must pass through untouched, got %v", got)
 	}
 }
 

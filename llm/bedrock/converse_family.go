@@ -266,6 +266,17 @@ func wrapBedrockInferenceProfileError(model string, err error) error {
 		msg = apiErr.ErrorMessage()
 	}
 	low := strings.ToLower(msg)
+	if strings.Contains(low, "data retention mode") {
+		// Fable-5-class models are served under the Claude-in-Amazon-Bedrock
+		// agreement (30-day retention) and reject the legacy InvokeModel
+		// surface, which runs under the account's default retention mode.
+		return fmt.Errorf(
+			"bedrock: model %q is served by the Claude in Amazon Bedrock Messages endpoint and rejects legacy InvokeModel "+
+				"(its data-retention terms are not available there). ChatCLI routes this model through bedrock-mantle "+
+				"automatically — if you pinned BEDROCK_ANTHROPIC_ENDPOINT=invoke, unset it or set BEDROCK_ANTHROPIC_ENDPOINT=mantle. "+
+				"Also confirm the model is enabled with a data retention mode under \"Model access\" in the AWS Bedrock console. Original: %w",
+			model, err)
+	}
 	if !strings.Contains(low, "inference profile") &&
 		!strings.Contains(low, "on-demand throughput isn't supported") &&
 		!strings.Contains(low, "on-demand throughput is not supported") {
