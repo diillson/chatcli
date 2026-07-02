@@ -28,6 +28,7 @@ import (
 	"github.com/c-bata/go-prompt"
 	"github.com/diillson/chatcli/cli/agent"
 	"github.com/diillson/chatcli/cli/agent/lsp"
+	"github.com/diillson/chatcli/cli/agent/proc"
 	"github.com/diillson/chatcli/cli/agent/quality/lessonq"
 	"github.com/diillson/chatcli/cli/agent/workers"
 	"github.com/diillson/chatcli/cli/coder"
@@ -256,6 +257,12 @@ type ChatCLI struct {
 	// code would be waste) and shut down with the session.
 	lspPool     *lsp.Pool
 	lspPoolOnce sync.Once
+
+	// Session background-process supervisor behind the @proc tool. Created
+	// lazily on the first @proc call; every process it owns dies with the
+	// session.
+	procSup     *proc.Supervisor
+	procSupOnce sync.Once
 
 	// Conversation checkpoints for rewind
 	checkpoints []conversationCheckpoint
@@ -495,6 +502,10 @@ func NewChatCLI(ctx context.Context, manager manager.LLMManager, logger *zap.Log
 		// model pulls full definitions of indexed tools on demand instead of
 		// every definition riding in every prompt. Adapter wired below.
 		pluginMgr.RegisterBuiltinPlugin(plugins.NewBuiltinToolsPlugin())
+		// @proc — background-process supervision: start/status/logs/stop for
+		// long-running commands (dev servers, watchers). Adapter wired below
+		// over a session supervisor sharing the agent exec validator.
+		pluginMgr.RegisterBuiltinPlugin(plugins.NewBuiltinProcPlugin())
 		// @docs-flatten — push-side companion of @knowledge: flattens a
 		// Markdown/MDX docs tree (local dir or git repo) into the JSONL
 		// corpus /context --mode knowledge ingests. Self-contained.
@@ -674,6 +685,9 @@ func NewChatCLI(ctx context.Context, manager manager.LLMManager, logger *zap.Log
 	plugins.SetLSPAdapter(&lspToolAdapter{cli: cli})
 	// Wire the @tools meta-tool to the plugin registry (deferred catalog).
 	plugins.SetToolCatalogAdapter(&toolCatalogPluginAdapter{cli: cli})
+	// Wire the @proc tool to the session process supervisor (created lazily
+	// on first use; all processes die with the session).
+	plugins.SetProcAdapter(&procToolAdapter{cli: cli})
 	// @context adapter — lets the agent create/attach/detach/inspect its own
 	// context bases over the same live manager.
 	plugins.SetContextAdapter(&contextPluginAdapter{cli: cli})
@@ -1835,6 +1849,8 @@ func (cli *ChatCLI) cleanup(ctx context.Context) {
 	}
 	// Shut down any language servers the @lsp tool started.
 	cli.shutdownLSPPool()
+	// Stop any background processes the @proc tool started.
+	cli.shutdownProcSupervisor()
 
 	// Tear down the session scratch workspace. Respects
 	// CHATCLI_AGENT_KEEP_TMPDIR=true for debugging (files are left behind).
