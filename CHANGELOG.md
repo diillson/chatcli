@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.151.0](https://github.com/diillson/chatcli/compare/v1.150.0...v1.151.0) (2026-07-03)
+
+
+### Features
+
+* **tools:** expose MCP tools through the [@tools](https://github.com/tools) catalog ([#1129](https://github.com/diillson/chatcli/issues/1129)) ([816245b](https://github.com/diillson/chatcli/commit/816245b6366a170d60ddcd9077ba98587305122a))
+
 ## [1.150.0](https://github.com/diillson/chatcli/compare/v1.149.2...v1.150.0) (2026-07-02)
 
 
