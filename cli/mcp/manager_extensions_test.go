@@ -148,6 +148,30 @@ func TestManager_GetTools_EnabledToolsTrumpsDisabledTools(t *testing.T) {
 	}
 }
 
+// TestManager_VisibleTools_FilterAndOrder pins the @tools-catalog contract:
+// the snapshot honors the same visibility filter as GetTools/GetToolsSummary
+// and comes back sorted by name so the rendered catalog is stable across
+// turns (map iteration order must not leak into the prompt).
+func TestManager_VisibleTools_FilterAndOrder(t *testing.T) {
+	m := newMgrWithFixture(t,
+		ServerConfig{DisabledTools: []string{"write_file"}},
+		ServerConfig{},
+	)
+	got := m.VisibleTools()
+	names := make([]string, 0, len(got))
+	for _, tool := range got {
+		names = append(names, tool.Name)
+	}
+	want := []string{"exec", "list_files", "query", "read_file"}
+	if !sliceEq(names, want) {
+		t.Errorf("VisibleTools names = %v, want %v (filtered + sorted)", names, want)
+	}
+	// Snapshot carries the fields the catalog renders.
+	if got[0].ServerName == "" || got[0].Description == "" {
+		t.Errorf("snapshot missing ServerName/Description: %+v", got[0])
+	}
+}
+
 func TestManager_ToolCount_MatchesVisibleToolCount(t *testing.T) {
 	m := newMgrWithFixture(t,
 		ServerConfig{DisabledTools: []string{"write_file", "list_files"}},

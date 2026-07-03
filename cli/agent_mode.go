@@ -3177,7 +3177,9 @@ func buildMCPToolsSection(tools []models.ToolDefinition, isCoderMode bool) strin
 	var b strings.Builder
 	b.WriteString("MCP Tools (external):\n")
 	b.WriteString("  Para invocar: <tool_call name=\"mcp_<tool>\" args='{\"param\":\"value\"}' />\n")
-	b.WriteString("  Se precisar dos parâmetros exatos, invoque e o sistema retornará o schema.\n")
+	b.WriteString("  Antes do primeiro uso de uma tool MCP, obtenha o schema completo de parâmetros com " +
+		"<tool_call name=\"@tools\" args='{\"cmd\":\"describe\",\"args\":{\"name\":\"mcp_<tool>\"}}' /> — não adivinhe argumentos.\n")
+	b.WriteString("  Se invocar sem os parâmetros obrigatórios, o sistema retornará o schema para você corrigir.\n")
 	if isCoderMode {
 		b.WriteString("\n  " + i18n.T("agent.mcp.routing_hint_coder") + "\n")
 	} else {

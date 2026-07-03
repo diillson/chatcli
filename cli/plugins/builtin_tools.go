@@ -59,20 +59,21 @@ func (*BuiltinToolsPlugin) Name() string { return "@tools" }
 
 // Description surfaces the tool in /plugin list and the agent tool catalog.
 func (*BuiltinToolsPlugin) Description() string {
-	return "Tool catalog: get the full definition (subcommands, flags, examples) of any tool listed in the index before using it, or list every available tool. Call describe once per unfamiliar tool instead of guessing its arguments."
+	return "Tool catalog: get the full definition of any tool listed in the index before using it — builtins (subcommands, flags, examples) and MCP tools (mcp_* names, full parameter JSON Schema) — or list every available tool. Call describe once per unfamiliar tool instead of guessing its arguments."
 }
 
 // Usage explains the canonical invocation forms.
 func (*BuiltinToolsPlugin) Usage() string {
 	return `<tool_call name="@tools" args='{"cmd":"describe","args":{"name":"@diagram"}}' />
+<tool_call name="@tools" args='{"cmd":"describe","args":{"name":"mcp_read_file"}}' />
 
 Subcommands (cmd + args):
-  describe {name}   full definition of one tool (subcommands, flags, examples)
-  list     {}       one-line index of every available tool`
+  describe {name}   full definition of one tool (builtin: subcommands/flags/examples; mcp_*: parameter JSON Schema)
+  list     {}       one-line index of every available tool, MCP tools included`
 }
 
 // Version is semver; bumped when the surface changes.
-func (*BuiltinToolsPlugin) Version() string { return "1.0.0" }
+func (*BuiltinToolsPlugin) Version() string { return "1.1.0" }
 
 // Path is empty for builtin plugins.
 func (*BuiltinToolsPlugin) Path() string { return "" }
@@ -84,15 +85,15 @@ func (*BuiltinToolsPlugin) Schema() string {
 		"subcommands": []map[string]interface{}{
 			{
 				"name":        "describe",
-				"description": "full definition of one tool: subcommands, flags, examples",
+				"description": "full definition of one tool: subcommands/flags/examples for builtins, parameter JSON Schema for MCP tools (mcp_* names)",
 				"flags": []map[string]interface{}{
-					{"name": "name", "description": "tool name, with or without the @ prefix", "type": "string", "required": true},
+					{"name": "name", "description": "tool name, with or without the @ prefix; MCP tools use their mcp_ prefix", "type": "string", "required": true},
 				},
-				"examples": []string{`{"cmd":"describe","args":{"name":"@diagram"}}`},
+				"examples": []string{`{"cmd":"describe","args":{"name":"@diagram"}}`, `{"cmd":"describe","args":{"name":"mcp_read_file"}}`},
 			},
 			{
 				"name":        "list",
-				"description": "one-line index of every available tool",
+				"description": "one-line index of every available tool, including MCP tools from connected servers",
 				"examples":    []string{`{"cmd":"list"}`},
 			},
 		},

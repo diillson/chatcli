@@ -310,6 +310,12 @@ func TestBuildMCPToolsSection(t *testing.T) {
 		if !strings.Contains(s, "mcp_read_file") || !strings.Contains(s, "mcp_list_dir") {
 			t.Errorf("missing tool entry in section:\n%s", s)
 		}
+		// The section must route schema discovery through @tools describe —
+		// never blind invocation (a schemaless call to a no-required-params
+		// tool EXECUTES it as a side effect of "discovery").
+		if !strings.Contains(s, `name=\"@tools\"`) && !strings.Contains(s, `name="@tools"`) {
+			t.Errorf("section must teach @tools describe for MCP schemas:\n%s", s)
+		}
 	}
 	// Coder mode must reference @coder fallback; agent mode must not.
 	if !strings.Contains(coder, "@coder") {

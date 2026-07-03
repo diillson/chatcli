@@ -23,6 +23,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"github.com/diillson/chatcli/cli/mcp"
 	"github.com/diillson/chatcli/cli/plugins"
 )
 
@@ -163,6 +164,40 @@ func firstSentence(s string) string {
 		return s[:cut] + "…"
 	}
 	return s
+}
+
+// renderMCPToolBlock renders one MCP tool's full prompt block — the MCP
+// counterpart of renderToolBlock. MCP servers describe their tools with a
+// JSON Schema rather than the plugin subcommand/flag shape, so the block
+// carries the schema verbatim (pretty-printed) plus the invocation form.
+// Shared shape with @tools describe so the model learns one format.
+func renderMCPToolBlock(tool mcp.MCPTool) string {
+	var b strings.Builder
+	b.WriteString(fmt.Sprintf("- Ferramenta: mcp_%s (MCP, servidor: %s)\n", tool.Name, tool.ServerName))
+	b.WriteString(fmt.Sprintf("  Descrição: %s\n", tool.Description))
+	b.WriteString(fmt.Sprintf("  Invocação: <tool_call name=\"mcp_%s\" args='{...}' /> (args = JSON validado pelo schema abaixo)\n", tool.Name))
+	if len(tool.Parameters) == 0 {
+		b.WriteString("  Parâmetros: nenhum — invoque com args='{}'\n")
+		return b.String()
+	}
+	schemaJSON, err := json.MarshalIndent(tool.Parameters, "    ", "  ")
+	if err != nil {
+		// A schema that came in over JSON-RPC always re-marshals; guard anyway.
+		b.WriteString("  Parâmetros: schema indisponível — invoque e o sistema retornará o schema\n")
+		return b.String()
+	}
+	b.WriteString("  Parâmetros (JSON Schema):\n    ")
+	b.Write(schemaJSON)
+	b.WriteString("\n")
+	return b.String()
+}
+
+// renderMCPToolIndexLine renders one MCP tool as a single catalog line,
+// mirroring renderToolIndexLine. The [MCP:server] tag matches the format the
+// system-prompt MCP section already uses, so both surfaces name tools the
+// same way.
+func renderMCPToolIndexLine(tool mcp.MCPTool) string {
+	return fmt.Sprintf("- mcp_%s [MCP:%s]: %s\n", tool.Name, tool.ServerName, firstSentence(tool.Description))
 }
 
 // deferredCatalogInstruction tells the model how to pull a full definition.
