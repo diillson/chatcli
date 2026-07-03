@@ -604,6 +604,26 @@ func (m *Manager) GetToolsSummary() []models.ToolDefinition {
 	return defs
 }
 
+// VisibleTools returns value snapshots of every discovered tool the LLM is
+// allowed to see (EnabledTools/DisabledTools honored, same filter as
+// GetTools/GetToolsSummary), sorted by name so consumers render a stable,
+// cache-friendly catalog. Used by the @tools meta-tool to describe MCP tools
+// without re-parsing the display strings GetTools embeds in descriptions.
+func (m *Manager) VisibleTools() []MCPTool {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	out := make([]MCPTool, 0, len(m.tools))
+	for _, tool := range m.tools {
+		if !m.isToolVisibleUnlocked(tool) {
+			continue
+		}
+		out = append(out, *tool)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
+	return out
+}
+
 // GetToolSchema returns the full JSON schema for a specific MCP tool.
 // Used when the model attempts to invoke a tool and needs parameter details.
 func (m *Manager) GetToolSchema(toolName string) map[string]interface{} {
