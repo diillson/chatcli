@@ -83,6 +83,7 @@ func fakeMCPTools() []mcp.MCPTool {
 			},
 		},
 		{Name: "ping", Description: "Health check", ServerName: "fs"},
+		{Name: "create_issue", Description: "Opens a GitHub issue", ServerName: "gh"},
 	}
 }
 
@@ -156,8 +157,8 @@ func TestToolCatalogAdapterListMCP(t *testing.T) {
 	if err != nil {
 		t.Fatalf("List: %v", err)
 	}
-	if !strings.Contains(out, "4 tool(s) available") {
-		t.Errorf("List must count builtins+MCP (2+2), got: %q", out)
+	if !strings.Contains(out, "5 tool(s) available") {
+		t.Errorf("List must count builtins+MCP (2+3), got: %q", out)
 	}
 	if !strings.Contains(out, "- mcp_read_file [MCP:fs]: Reads a file from the sandbox.") {
 		t.Errorf("List missing MCP index line: %q", out)
@@ -167,6 +168,15 @@ func TestToolCatalogAdapterListMCP(t *testing.T) {
 	}
 	if strings.Contains(out, `"properties"`) {
 		t.Error("List must stay one line per tool — no schemas")
+	}
+	// Tools cluster under one header per owning server, servers in order.
+	fsHdr := strings.Index(out, `Servidor MCP "fs":`)
+	ghHdr := strings.Index(out, `Servidor MCP "gh":`)
+	if fsHdr < 0 || ghHdr < 0 || fsHdr > ghHdr {
+		t.Errorf("List must group MCP tools under per-server headers in order, got: %q", out)
+	}
+	if issue := strings.Index(out, "- mcp_create_issue [MCP:gh]:"); issue < ghHdr {
+		t.Errorf("gh tool must sit under the gh server header, got: %q", out)
 	}
 
 	// Without MCP the section is absent entirely.

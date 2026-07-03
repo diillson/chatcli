@@ -96,8 +96,18 @@ func (a *toolCatalogPluginAdapter) List() (string, error) {
 	}
 	if len(mcpToolset) > 0 {
 		b.WriteString("MCP tools (external servers — describe before first use):\n")
+		// Cluster by owning server so provenance reads at a glance; the
+		// per-line [MCP:server] tag stays for models that quote lines out
+		// of context. VisibleTools sorts by tool name, so within a server
+		// the name order is preserved by the stable sort.
+		sort.SliceStable(mcpToolset, func(i, j int) bool { return mcpToolset[i].ServerName < mcpToolset[j].ServerName })
+		lastServer := ""
 		for _, t := range mcpToolset {
-			b.WriteString(renderMCPToolIndexLine(t))
+			if t.ServerName != lastServer {
+				fmt.Fprintf(&b, "  Servidor MCP %q:\n", t.ServerName)
+				lastServer = t.ServerName
+			}
+			b.WriteString("  " + renderMCPToolIndexLine(t))
 		}
 	}
 	return strings.TrimRight(b.String(), "\n"), nil
