@@ -60,6 +60,37 @@ func TestToolsListAndAliases(t *testing.T) {
 	}
 }
 
+// The agent-mode flattener converts {"cmd":"describe","args":{"name":"X"}}
+// into argv ["describe","--name","X"]; the argv path must parse flags instead
+// of taking "--name" as the tool name.
+func TestToolsDescribeArgvFlagForms(t *testing.T) {
+	p := NewBuiltinToolsPlugin()
+	cases := []struct {
+		argv []string
+		want string
+	}{
+		{[]string{"describe", "--name", "@graphview"}, "@graphview"},
+		{[]string{"describe", "--name=@graphview"}, "@graphview"},
+		{[]string{"describe", "--name", "graphview"}, "graphview"},
+		{[]string{"describe", "@graphview"}, "@graphview"},
+	}
+	for _, tc := range cases {
+		fake := withFakeCatalog(t)
+		if _, err := p.Execute(context.Background(), tc.argv); err != nil {
+			t.Fatalf("%v: %v", tc.argv, err)
+		}
+		if fake.described != tc.want {
+			t.Errorf("%v: described %q, want %q", tc.argv, fake.described, tc.want)
+		}
+	}
+	// Flag with no value must still fail with the actionable "name" error,
+	// not leak "--name" to the catalog as a tool name.
+	withFakeCatalog(t)
+	if _, err := p.Execute(context.Background(), []string{"describe", "--name"}); err == nil || !strings.Contains(err.Error(), `"name" is required`) {
+		t.Fatalf("dangling flag must error on missing name, got %v", err)
+	}
+}
+
 func TestToolsValidation(t *testing.T) {
 	withFakeCatalog(t)
 	p := NewBuiltinToolsPlugin()

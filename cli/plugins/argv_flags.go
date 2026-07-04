@@ -42,13 +42,23 @@ func argvToInnerJSON(argv []string, arrayKeys, intKeys map[string]bool) (positio
 		if strings.HasPrefix(a, "--") {
 			seenFlag = true
 			key := strings.TrimLeft(a, "-")
+			var inlineVal string
+			hasInline := false
+			if eq := strings.IndexByte(key, '='); eq >= 0 { // --key=value spelling
+				inlineVal = trimQuotes(key[eq+1:])
+				key = key[:eq]
+				hasInline = true
+			}
 			if _, ok := values[key]; !ok {
 				order = append(order, key)
 			}
-			if i+1 < len(argv) && !strings.HasPrefix(argv[i+1], "--") {
+			switch {
+			case hasInline:
+				values[key] = append(values[key], inlineVal)
+			case i+1 < len(argv) && !strings.HasPrefix(argv[i+1], "--"):
 				values[key] = append(values[key], argv[i+1])
 				i++
-			} else {
+			default:
 				values[key] = append(values[key], "\x00bool") // sentinel for bare flag
 			}
 			continue

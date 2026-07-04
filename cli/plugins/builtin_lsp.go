@@ -277,17 +277,33 @@ func parseLSPInvocation(args []string) (string, string, error) {
 	if canon == "" {
 		return "", "", fmt.Errorf("unknown cmd %q (valid: diagnostics|definition|references|symbols|hover)", args[0])
 	}
-	// argv form: positional file [line column]
-	in := map[string]interface{}{}
-	if len(args) > 1 {
-		in["file"] = args[1]
+	// argv form: the agent flattener delivers the {cmd,args} envelope as
+	// "--flag value" pairs; the legacy positional "file [line column]" form
+	// stays supported when no flag token is present.
+	tail := args[1:]
+	if !hasFlagToken(tail) {
+		in := map[string]interface{}{}
+		if len(tail) > 0 {
+			in["file"] = tail[0]
+		}
+		if len(tail) > 2 {
+			in["line"] = atoiSafe(tail[1])
+			in["column"] = atoiSafe(tail[2])
+		}
+		b, _ := json.Marshal(in)
+		return canon, string(b), nil
 	}
-	if len(args) > 3 {
-		in["line"] = atoiSafe(args[2])
-		in["column"] = atoiSafe(args[3])
+	return canon, argvInner(tail, "file", nil, map[string]bool{"line": true, "column": true, "limit": true}), nil
+}
+
+// hasFlagToken reports whether any argv token is flag-shaped.
+func hasFlagToken(args []string) bool {
+	for _, a := range args {
+		if strings.HasPrefix(strings.TrimSpace(a), "-") {
+			return true
+		}
 	}
-	b, _ := json.Marshal(in)
-	return canon, string(b), nil
+	return false
 }
 
 func atoiSafe(s string) int {

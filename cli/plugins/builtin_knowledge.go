@@ -243,11 +243,11 @@ func parseKnowledgeInvocation(args []string) (string, string, error) {
 			args[0],
 		)
 	}
-	inner, err := memoryFlagsToJSON(args[1:])
-	if err != nil {
-		return "", "", err
-	}
-	return canon, inner, nil
+	// The agent flattener delivers the {cmd,args} envelope as "--flag value"
+	// pairs; numeric fields (top_k, offset) must come back as numbers, and a
+	// bare positional maps onto the subcommand's primary field.
+	primary := map[string]string{"search": "query", "get": "source", "toc": "prefix"}[canon]
+	return canon, argvInner(args[1:], primary, nil, map[string]bool{"top_k": true, "offset": true}), nil
 }
 
 // canonicalKnowledgeCmd folds aliases into the four canonical names.

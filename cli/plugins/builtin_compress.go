@@ -99,6 +99,9 @@ func (p *BuiltinCompressPlugin) ExecuteWithStream(_ context.Context, args []stri
 		if err := json.Unmarshal([]byte(payload), &in); err != nil {
 			return "", fmt.Errorf(`@compress: parse args: %w. Expected {"content":"...","hint":"auto"}`, err)
 		}
+	} else if strings.EqualFold(payload, "stats") {
+		// The agent flattener reduces {"cmd":"stats"} to the bare argv token.
+		in.Cmd = "stats"
 	} else {
 		// Bare text: treat the whole payload as content with auto hint.
 		in.Content = payload

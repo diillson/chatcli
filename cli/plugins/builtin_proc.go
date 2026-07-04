@@ -252,16 +252,41 @@ func parseProcInvocation(args []string) (string, string, error) {
 	if canon == "" {
 		return "", "", fmt.Errorf("unknown cmd %q (valid: start|status|logs|stop|remove|list)", args[0])
 	}
-	in := map[string]interface{}{}
-	if len(args) > 1 {
-		if canon == "start" {
-			in["command"] = strings.Join(args[1:], " ")
-		} else {
-			in["id"] = args[1]
+	// The agent flattener delivers the {cmd,args} envelope as "--flag value"
+	// pairs (folding the "command" key onto "cmd"); the legacy positional
+	// forms ("start npm run dev" / "logs p1") stay supported when no flag
+	// token is present.
+	tail := args[1:]
+	if !hasFlagToken(tail) {
+		in := map[string]interface{}{}
+		if len(tail) > 0 {
+			if canon == "start" {
+				in["command"] = strings.Join(tail, " ")
+			} else {
+				in["id"] = tail[0]
+			}
+		}
+		b, _ := json.Marshal(in)
+		return canon, string(b), nil
+	}
+	primary := "id"
+	if canon == "start" {
+		primary = "command"
+	}
+	inner := argvInner(tail, primary, nil, map[string]bool{"tail": true})
+	var m map[string]interface{}
+	if err := json.Unmarshal([]byte(inner), &m); err == nil {
+		if v, ok := m["cmd"]; ok {
+			if _, has := m["command"]; !has {
+				m["command"] = v
+			}
+			delete(m, "cmd")
+			if b, err := json.Marshal(m); err == nil {
+				inner = string(b)
+			}
 		}
 	}
-	b, _ := json.Marshal(in)
-	return canon, string(b), nil
+	return canon, inner, nil
 }
 
 // canonicalProcCmd folds aliases onto the canonical subcommand names.
