@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.151.1](https://github.com/diillson/chatcli/compare/v1.151.0...v1.151.1) (2026-07-04)
+
+
+### Bug Fixes
+
+* **plugins:** parse the flattened flag argv across builtin tools ([#1131](https://github.com/diillson/chatcli/issues/1131)) ([9aaf298](https://github.com/diillson/chatcli/commit/9aaf29815721b60409dcf79b74ad27d8a99d4a96))
+
 ## [1.151.0](https://github.com/diillson/chatcli/compare/v1.150.0...v1.151.0) (2026-07-03)
 
 
