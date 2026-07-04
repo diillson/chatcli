@@ -343,10 +343,12 @@ func parseProfileFields(inner string) (map[string]string, error) {
 		return nil, nil
 	}
 	var wrapped struct {
-		Fields map[string]interface{} `json:"fields"`
+		Fields json.RawMessage `json:"fields"`
 	}
 	if err := json.Unmarshal([]byte(inner), &wrapped); err == nil && len(wrapped.Fields) > 0 {
-		return stringifyMap(wrapped.Fields), nil
+		if m := decodeFieldsObject(wrapped.Fields); len(m) > 0 {
+			return stringifyMap(m), nil
+		}
 	}
 	var bare map[string]interface{}
 	if err := json.Unmarshal([]byte(inner), &bare); err != nil {
@@ -354,6 +356,25 @@ func parseProfileFields(inner string) (map[string]string, error) {
 	}
 	delete(bare, "fields")
 	return stringifyMap(bare), nil
+}
+
+// decodeFieldsObject reads a JSON object from raw, accepting the direct
+// object form and the JSON-encoded string the agent flattener produces when
+// it stringifies a nested object into a "--fields" argv value.
+func decodeFieldsObject(raw json.RawMessage) map[string]interface{} {
+	var direct map[string]interface{}
+	if err := json.Unmarshal(raw, &direct); err == nil {
+		return direct
+	}
+	var s string
+	if err := json.Unmarshal(raw, &s); err != nil {
+		return nil
+	}
+	var inner map[string]interface{}
+	if err := json.Unmarshal([]byte(s), &inner); err != nil {
+		return nil
+	}
+	return inner
 }
 
 // stringifyMap coerces JSON values to strings (numbers/bools become text;

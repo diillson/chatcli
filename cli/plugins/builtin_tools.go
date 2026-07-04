@@ -171,9 +171,30 @@ func parseToolsInvocation(args []string) (string, string, error) {
 	if canon == "" {
 		return "", "", fmt.Errorf("unknown cmd %q (valid: describe|list)", args[0])
 	}
+	// The agent flattener delivers the {cmd,args} envelope as "--flag value"
+	// argv, so both flag and positional spellings must resolve here.
 	in := map[string]interface{}{}
-	if len(args) > 1 {
-		in["name"] = args[1]
+	rest := args[1:]
+	for i := 0; i < len(rest); i++ {
+		a := strings.TrimSpace(rest[i])
+		if a == "" {
+			continue
+		}
+		if strings.HasPrefix(a, "-") {
+			key := strings.TrimLeft(a, "-")
+			if eq := strings.IndexByte(key, '='); eq >= 0 {
+				in[key[:eq]] = trimQuotes(strings.TrimSpace(key[eq+1:]))
+				continue
+			}
+			if i+1 < len(rest) {
+				i++
+				in[key] = trimQuotes(strings.TrimSpace(rest[i]))
+			}
+			continue
+		}
+		if _, ok := in["name"]; !ok {
+			in["name"] = a
+		}
 	}
 	b, _ := json.Marshal(in)
 	return canon, string(b), nil

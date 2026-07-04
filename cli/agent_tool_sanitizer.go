@@ -651,30 +651,7 @@ func buildArgvFromJSONMap(m map[string]any) ([]string, bool, error) {
 	}
 
 	argv := []string{cmd}
-	argsMap := map[string]any{}
-
-	if raw, ok := m["args"]; ok {
-		if mm, ok := raw.(map[string]any); ok {
-			for k, v := range mm {
-				if k == "command" {
-					argsMap["cmd"] = v
-					continue
-				}
-				argsMap[k] = v
-			}
-		}
-	}
-	if raw, ok := m["flags"]; ok {
-		if mm, ok := raw.(map[string]any); ok {
-			for k, v := range mm {
-				if k == "command" {
-					argsMap["cmd"] = v
-					continue
-				}
-				argsMap[k] = v
-			}
-		}
-	}
+	argsMap := collectArgsMap(m)
 
 	keys := make([]string, 0, len(argsMap))
 	for k := range argsMap {
@@ -694,6 +671,38 @@ func buildArgvFromJSONMap(m map[string]any) ([]string, bool, error) {
 	}
 
 	return argv, true, nil
+}
+
+// collectArgsMap merges the call's argument sources in precedence order:
+// top-level keys outside the envelope first — models routinely flatten
+// ({"cmd":"describe","name":"x"} instead of nesting under "args") and those
+// keys carry the call's actual arguments, so they must not be dropped —
+// then the explicit args/flags maps, which win on key conflicts. "command"
+// folds onto "cmd" at every level.
+func collectArgsMap(m map[string]any) map[string]any {
+	argsMap := map[string]any{}
+	put := func(k string, v any) {
+		if k == "command" {
+			argsMap["cmd"] = v
+			return
+		}
+		argsMap[k] = v
+	}
+	for k, v := range m {
+		switch k {
+		case "cmd", "argv", "args", "flags", "positional", "_":
+		default:
+			put(k, v)
+		}
+	}
+	for _, envelope := range []string{"args", "flags"} {
+		if mm, ok := m[envelope].(map[string]any); ok {
+			for k, v := range mm {
+				put(k, v)
+			}
+		}
+	}
+	return argsMap
 }
 
 func normalizeFlagName(name string) string {

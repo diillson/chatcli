@@ -137,11 +137,39 @@ func (p *BuiltinHTTPPlugin) ExecuteWithStream(ctx context.Context, args []string
 
 // httpArgs is the parsed request specification.
 type httpArgs struct {
-	Method         string            `json:"method"`
-	URL            string            `json:"url"`
-	Headers        map[string]string `json:"headers"`
-	Body           string            `json:"body"`
-	TimeoutSeconds int               `json:"timeout_seconds"`
+	Method         string    `json:"method"`
+	URL            string    `json:"url"`
+	Headers        headerMap `json:"headers"`
+	Body           string    `json:"body"`
+	TimeoutSeconds int       `json:"timeout_seconds"`
+}
+
+// headerMap unmarshals from an object or from a JSON-encoded object string —
+// the agent flattener stringifies nested objects when it converts the
+// envelope to "--flag value" argv.
+type headerMap map[string]string
+
+func (h *headerMap) UnmarshalJSON(b []byte) error {
+	var direct map[string]string
+	if err := json.Unmarshal(b, &direct); err == nil {
+		*h = direct
+		return nil
+	}
+	var s string
+	if err := json.Unmarshal(b, &s); err != nil {
+		return errors.New(`"headers" must be an object of string values`)
+	}
+	s = strings.TrimSpace(s)
+	if s == "" {
+		*h = nil
+		return nil
+	}
+	var inner map[string]string
+	if err := json.Unmarshal([]byte(s), &inner); err != nil {
+		return fmt.Errorf(`"headers" must be an object of string values: %w`, err)
+	}
+	*h = inner
+	return nil
 }
 
 // perform executes the request through the shared hardened client.
@@ -311,13 +339,21 @@ func parseHTTPInvocation(args []string) (httpArgs, error) {
 		if !ok {
 			return in, fmt.Errorf("unknown cmd %q (valid: request|get|head|options|post|put|patch|delete)", args[0])
 		}
-		in.Method = methodFromCmd
-		if len(args) > 1 {
-			in.URL = args[1]
+		tail := args[1:]
+		// Legacy positional "request GET <url>" before the flag scan.
+		if methodFromCmd == "" && len(tail) >= 2 &&
+			!strings.HasPrefix(tail[0], "-") && httpAllowedMethods[strings.ToUpper(tail[0])] {
+			methodFromCmd = strings.ToUpper(tail[0])
+			tail = tail[1:]
 		}
-		if in.Method == "" && len(args) > 2 { // argv "request GET <url>"
-			in.Method = strings.ToUpper(args[1])
-			in.URL = args[2]
+		// The agent flattener delivers the {cmd,args} envelope as "--flag
+		// value" argv; a bare positional is the URL.
+		inner := argvInner(tail, "url", nil, map[string]bool{"timeout_seconds": true})
+		if err := json.Unmarshal([]byte(inner), &in); err != nil {
+			return in, fmt.Errorf("parse args: %w", err)
+		}
+		if methodFromCmd != "" {
+			in.Method = methodFromCmd
 		}
 	}
 

@@ -536,34 +536,52 @@ func trimNonEmpty(in []string) []string {
 // contextArgvToMap converts `--flag value`, `--flag=value` and bare positional
 // names into the raw map the JSON path produces.
 func contextArgvToMap(args []string) map[string]json.RawMessage {
-	raw := map[string]json.RawMessage{}
-	put := func(k, v string) {
-		if b, err := json.Marshal(v); err == nil {
-			raw[k] = b
-		}
-	}
+	// Repeated flags accumulate: the agent flattener emits array fields
+	// (paths, tags, sources) as one "--key value" pair per element, so
+	// overwriting would silently keep only the last element.
+	vals := map[string][]string{}
+	bools := map[string]bool{}
+	add := func(k, v string) { vals[k] = append(vals[k], v) }
 	var positional []string
 	for i := 0; i < len(args); i++ {
 		a := strings.TrimSpace(args[i])
 		switch {
 		case strings.HasPrefix(a, "--") && strings.Contains(a, "="):
 			kv := strings.SplitN(strings.TrimPrefix(a, "--"), "=", 2)
-			put(kv[0], trimQuotes(kv[1]))
+			add(kv[0], trimQuotes(kv[1]))
 		case strings.HasPrefix(a, "--"):
 			key := strings.TrimPrefix(a, "--")
 			if i+1 < len(args) && !strings.HasPrefix(args[i+1], "--") {
-				put(key, trimQuotes(args[i+1]))
+				add(key, trimQuotes(args[i+1]))
 				i++
 			} else {
-				raw[key] = json.RawMessage("true")
+				bools[key] = true
 			}
 		case a != "":
 			positional = append(positional, a)
 		}
 	}
+	raw := map[string]json.RawMessage{}
+	for k := range bools {
+		raw[k] = json.RawMessage("true")
+	}
+	for k, vs := range vals {
+		var b []byte
+		var err error
+		if len(vs) == 1 {
+			b, err = json.Marshal(vs[0])
+		} else {
+			b, err = json.Marshal(vs)
+		}
+		if err == nil {
+			raw[k] = b
+		}
+	}
 	if len(positional) > 0 {
 		if _, ok := raw["name"]; !ok {
-			put("name", positional[0])
+			if b, err := json.Marshal(positional[0]); err == nil {
+				raw["name"] = b
+			}
 		}
 		if len(positional) > 1 {
 			if b, err := json.Marshal(positional[1:]); err == nil {

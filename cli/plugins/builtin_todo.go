@@ -222,7 +222,16 @@ func parseTodoInvocation(args []string) (string, map[string]json.RawMessage, err
 		}
 		return sub, inner, nil
 	}
-	// Positional. First token is the subcommand.
+	// Positional/flag argv. First token is the subcommand; the agent
+	// flattener delivers the envelope args as "--flag value" pairs after it
+	// (array fields as repeated flags, objects JSON-stringified).
+	_, innerJSON := argvToInnerJSON(args[1:], map[string]bool{"todos": true}, map[string]bool{"id": true})
+	if innerJSON != "{}" {
+		var inner map[string]json.RawMessage
+		if err := json.Unmarshal([]byte(innerJSON), &inner); err == nil {
+			return first, inner, nil
+		}
+	}
 	return first, nil, nil
 }
 
@@ -236,7 +245,20 @@ func todoItemsFromPayload(payload map[string]json.RawMessage) ([]TodoItem, error
 	}
 	var items []TodoItem
 	if err := json.Unmarshal(raw, &items); err != nil {
-		return nil, fmt.Errorf("@todo write: invalid todos array: %w", err)
+		// The agent flattener JSON-stringifies each object of an array field;
+		// decode string elements as items before giving up.
+		var strs []string
+		if err2 := json.Unmarshal(raw, &strs); err2 != nil {
+			return nil, fmt.Errorf("@todo write: invalid todos array: %w", err)
+		}
+		items = items[:0] // drop the zero-value items the failed decode left behind
+		for _, s := range strs {
+			var it TodoItem
+			if err2 := json.Unmarshal([]byte(s), &it); err2 != nil {
+				return nil, fmt.Errorf("@todo write: invalid todos array: %w", err2)
+			}
+			items = append(items, it)
+		}
 	}
 	if len(items) == 0 {
 		return nil, errors.New("@todo write: todos array cannot be empty")
