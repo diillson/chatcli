@@ -48,6 +48,9 @@ const (
 	compactionCheckInterval = 6 * time.Hour
 	// How often to check for daily note cleanup (24 hours).
 	dailyCleanupInterval = 24 * time.Hour
+	// How often to check for weekly/monthly rollups (idempotent, cheap when
+	// nothing is pending).
+	rollupCheckInterval = 12 * time.Hour
 )
 
 func newMemoryWorker(cli *ChatCLI) *memoryWorker {
@@ -104,9 +107,15 @@ func (mw *memoryWorker) loop(ctx context.Context) {
 	extractTicker := time.NewTicker(3 * time.Minute)
 	compactTicker := time.NewTicker(compactionCheckInterval)
 	cleanupTicker := time.NewTicker(dailyCleanupInterval)
+	// Rollups must not wait for the 24h cleanup tick — short sessions would
+	// never consolidate. One early pass shortly after start, then periodic.
+	rollupTimer := time.NewTimer(2 * time.Minute)
+	rollupTicker := time.NewTicker(rollupCheckInterval)
 	defer extractTicker.Stop()
 	defer compactTicker.Stop()
 	defer cleanupTicker.Stop()
+	defer rollupTimer.Stop()
+	defer rollupTicker.Stop()
 
 	for {
 		select {
@@ -118,6 +127,41 @@ func (mw *memoryWorker) loop(ctx context.Context) {
 			mw.maybeCompact(ctx)
 		case <-cleanupTicker.C:
 			mw.cleanupDailyNotes()
+		case <-rollupTimer.C:
+			mw.runRollups(ctx)
+		case <-rollupTicker.C:
+			mw.runRollups(ctx)
+		}
+	}
+}
+
+// runRollups consolidates elapsed weeks/months into digests. Rollup passes
+// are idempotent and cheap when nothing is pending; the LLM is only invoked
+// when a digest is actually due, and its absence degrades to deterministic
+// condensation.
+func (mw *memoryWorker) runRollups(ctx context.Context) {
+	if mw.cli.memoryStore == nil {
+		return
+	}
+	mgr := mw.cli.memoryStore.Manager()
+
+	var sendPrompt func(ctx context.Context, prompt string) (string, error)
+	if llmClient := mw.cli.getClient(); llmClient != nil {
+		sendPrompt = func(ctx context.Context, prompt string) (string, error) {
+			history := []models.Message{{Role: "user", Content: prompt}}
+			return llmClient.SendPrompt(ctx, prompt, history, 0)
+		}
+	}
+
+	written, err := mgr.RunRollups(ctx, sendPrompt)
+	if err != nil {
+		mw.logger.Warn("Memory worker: rollups failed", zap.Error(err))
+		return
+	}
+	if written > 0 {
+		mw.logger.Info("Memory worker: rollup digests written", zap.Int("count", written))
+		if mw.cli.contextBuilder != nil {
+			mw.cli.contextBuilder.InvalidateCache()
 		}
 	}
 }
@@ -240,7 +284,7 @@ func (mw *memoryWorker) extractAndSave(ctx context.Context, messages []models.Me
 	// Topic threading rides as an appended directive so the base extraction
 	// prompt constant stays byte-stable (an exported const value change reads as
 	// an incompatible API change); the parser accepts both formats.
-	instructions := memory.EnhancedExtractionPromptV2 + "\n" + topicSummaryDirective
+	instructions := memory.EnhancedExtractionPromptV3 + "\n" + topicSummaryDirective
 	if evolveMode != selfEvolveOff {
 		instructions += "\n" + selfEvolveSkillDirective
 		// Inject only the compact skill index (names + descriptions), so the

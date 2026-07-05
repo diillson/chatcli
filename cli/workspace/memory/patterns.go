@@ -208,6 +208,23 @@ func (pd *PatternDetector) FormatForPrompt() string {
 		parts = append(parts, "Preferred modes: "+strings.Join(fList, ", "))
 	}
 
+	// Recurring errors — lets the model preempt what keeps biting the user.
+	if len(s.CommonErrors) > 0 {
+		top := s.CommonErrors[0]
+		for _, e := range s.CommonErrors[1:] {
+			if e.Count > top.Count {
+				top = e
+			}
+		}
+		if top.Count >= 3 {
+			msg := top.Pattern
+			if len(msg) > 80 {
+				msg = msg[:80] + "…"
+			}
+			parts = append(parts, formatStat("Recurring error (%dx): %s", top.Count, msg))
+		}
+	}
+
 	// Filter empty parts
 	var filtered []string
 	for _, p := range parts {
