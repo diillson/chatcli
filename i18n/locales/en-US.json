@@ -2631,6 +2631,8 @@
   "mem.cmd.profile.interests": "Interests:",
   "mem.cmd.profile.directives": "Directives:",
   "mem.cmd.profile.milestones": "Milestones:",
+  "mem.cmd.profile.stances": "Stances (with the why):",
+  "mem.cmd.profile.environment": "Environment:",
   "mem.cmd.profile.set.usage": "Usage: /memory profile set <key>=<value> (e.g. profile set certifications=AWS SAA)",
   "mem.cmd.profile.set.ok": "Profile field '%s' updated.",
   "mem.cmd.profile.set.nochange": "No change (value already set).",

@@ -10,6 +10,7 @@ import (
 	"time"
 
 	prompt "github.com/c-bata/go-prompt"
+	"github.com/diillson/chatcli/cli/workspace/memory"
 	"github.com/diillson/chatcli/i18n"
 	"github.com/diillson/chatcli/models"
 )
@@ -229,52 +230,9 @@ func (cli *ChatCLI) showMemoryProfile() {
 		return
 	}
 
-	if profile.Name != "" {
-		fmt.Printf("  %s  %s\n", colorize(i18n.T("mem.cmd.profile.name"), ColorYellow), profile.Name)
-	}
-	if profile.Role != "" {
-		fmt.Printf("  %s  %s\n", colorize(i18n.T("mem.cmd.profile.role"), ColorYellow), profile.Role)
-	}
-	if profile.ExpertiseLevel != "" {
-		fmt.Printf("  %s  %s\n", colorize(i18n.T("mem.cmd.profile.expertise"), ColorYellow), profile.ExpertiseLevel)
-	}
-	if profile.PreferredLang != "" {
-		fmt.Printf("  %s  %s\n", colorize(i18n.T("mem.cmd.profile.language"), ColorYellow), profile.PreferredLang)
-	}
-	if profile.CommStyle != "" {
-		fmt.Printf("  %s  %s\n", colorize(i18n.T("mem.cmd.profile.style"), ColorYellow), profile.CommStyle)
-	}
-	if profile.Company != "" {
-		fmt.Printf("  %s  %s\n", colorize(i18n.T("mem.cmd.profile.company"), ColorYellow), profile.Company)
-	}
-	if profile.Location != "" {
-		fmt.Printf("  %s  %s\n", colorize(i18n.T("mem.cmd.profile.location"), ColorYellow), profile.Location)
-	}
-	if len(profile.Certifications) > 0 {
-		fmt.Printf("  %s  %s\n", colorize(i18n.T("mem.cmd.profile.certifications"), ColorYellow), strings.Join(profile.Certifications, ", "))
-	}
-	if len(profile.Skills) > 0 {
-		fmt.Printf("  %s  %s\n", colorize(i18n.T("mem.cmd.profile.skills"), ColorYellow), strings.Join(profile.Skills, ", "))
-	}
-	if len(profile.Goals) > 0 {
-		fmt.Printf("  %s  %s\n", colorize(i18n.T("mem.cmd.profile.goals"), ColorYellow), strings.Join(profile.Goals, ", "))
-	}
-	if len(profile.Interests) > 0 {
-		fmt.Printf("  %s  %s\n", colorize(i18n.T("mem.cmd.profile.interests"), ColorYellow), strings.Join(profile.Interests, ", "))
-	}
-	if len(profile.Directives) > 0 {
-		fmt.Printf("  %s  %s\n", colorize(i18n.T("mem.cmd.profile.directives"), ColorYellow), strings.Join(profile.Directives, "; "))
-	}
-	if len(profile.Milestones) > 0 {
-		fmt.Printf("\n  %s\n", colorize(i18n.T("mem.cmd.profile.milestones"), ColorYellow))
-		ms := profile.Milestones
-		if len(ms) > 10 {
-			ms = ms[len(ms)-10:]
-		}
-		for _, m := range ms {
-			fmt.Printf("    [%s] %s\n", m.Date.Format("2006-01-02"), m.Text)
-		}
-	}
+	printProfileScalars(profile)
+	printProfileLists(profile)
+	printProfileTimeline(profile)
 
 	if len(profile.TopCommands) > 0 {
 		fmt.Printf("\n  %s\n", colorize(i18n.T("mem.cmd.profile.top_commands"), ColorYellow))
@@ -300,8 +258,12 @@ func (cli *ChatCLI) showMemoryProfile() {
 
 	if len(profile.Preferences) > 0 {
 		fmt.Printf("\n  %s\n", colorize(i18n.T("mem.cmd.profile.preferences"), ColorYellow))
-		for k, v := range profile.Preferences {
-			fmt.Printf("    %s: %s\n", k, v)
+		for _, k := range sortedStringKeys(profile.Preferences) {
+			label := k
+			if profile.FieldMeta["pref:"+k].Sensitive {
+				label = "🔒 " + k
+			}
+			fmt.Printf("    %s: %s\n", label, profile.Preferences[k])
 		}
 	}
 
@@ -816,12 +778,91 @@ func memoryCategorySuggestions(bracketed bool) []prompt.Suggest {
 	return out
 }
 
+// printProfileScalars renders the identity attributes of the profile panel.
+func printProfileScalars(profile memory.UserProfile) {
+	for _, f := range []struct{ key, value string }{
+		{"mem.cmd.profile.name", profile.Name},
+		{"mem.cmd.profile.role", profile.Role},
+		{"mem.cmd.profile.expertise", profile.ExpertiseLevel},
+		{"mem.cmd.profile.language", profile.PreferredLang},
+		{"mem.cmd.profile.style", profile.CommStyle},
+		{"mem.cmd.profile.company", profile.Company},
+		{"mem.cmd.profile.location", profile.Location},
+	} {
+		if f.value != "" {
+			fmt.Printf("  %s  %s\n", colorize(i18n.T(f.key), ColorYellow), f.value)
+		}
+	}
+}
+
+// printProfileLists renders the list-shaped attributes of the profile panel.
+func printProfileLists(profile memory.UserProfile) {
+	for _, f := range []struct {
+		key   string
+		items []string
+		sep   string
+	}{
+		{"mem.cmd.profile.certifications", profile.Certifications, ", "},
+		{"mem.cmd.profile.skills", profile.Skills, ", "},
+		{"mem.cmd.profile.goals", profile.Goals, ", "},
+		{"mem.cmd.profile.interests", profile.Interests, ", "},
+		{"mem.cmd.profile.directives", profile.Directives, "; "},
+	} {
+		if len(f.items) > 0 {
+			fmt.Printf("  %s  %s\n", colorize(i18n.T(f.key), ColorYellow), strings.Join(f.items, f.sep))
+		}
+	}
+	if len(profile.Environment) > 0 {
+		envEntries := make([]string, 0, len(profile.Environment))
+		for _, k := range sortedStringKeys(profile.Environment) {
+			envEntries = append(envEntries, k+"="+profile.Environment[k])
+		}
+		fmt.Printf("  %s  %s\n", colorize(i18n.T("mem.cmd.profile.environment"), ColorYellow), strings.Join(envEntries, ", "))
+	}
+}
+
+// printProfileTimeline renders stances and the milestone timeline.
+func printProfileTimeline(profile memory.UserProfile) {
+	if len(profile.Stances) > 0 {
+		fmt.Printf("\n  %s\n", colorize(i18n.T("mem.cmd.profile.stances"), ColorYellow))
+		for _, s := range profile.Stances {
+			line := s.Position
+			if s.Reason != "" {
+				line += " — " + s.Reason
+			}
+			fmt.Printf("    %s\n", line)
+		}
+	}
+	if len(profile.Milestones) > 0 {
+		fmt.Printf("\n  %s\n", colorize(i18n.T("mem.cmd.profile.milestones"), ColorYellow))
+		ms := profile.Milestones
+		if len(ms) > 10 {
+			ms = ms[len(ms)-10:]
+		}
+		for _, m := range ms {
+			fmt.Printf("    [%s] %s\n", m.Date.Format("2006-01-02"), m.Text)
+		}
+	}
+}
+
+// sortedStringKeys returns map keys in stable order for deterministic output.
+func sortedStringKeys(m map[string]string) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return keys
+}
+
 // memoryProfileKeySuggestions lists the profile keys for /memory profile set.
 func memoryProfileKeySuggestions() []prompt.Suggest {
 	keys := []string{"name=", "role=", "expertise_level=", "preferred_language=",
 		"communication_style=", "company=", "location=", "certifications=", "skills=", "goals=",
-		"interests=", "directives=", "milestone=",
-		"goals_done=", "goals_remove=", "goals_replace=", "preferences_remove="}
+		"interests=", "directives=", "milestone=", "stance=",
+		"goals_done=", "goals_remove=", "goals_replace=", "preferences_remove=",
+		"env_os=", "env_shell=", "env_editor=", "env_machine=",
+		"sensitive_mark=", "sensitive_unmark="}
 	out := make([]prompt.Suggest, 0, len(keys))
 	for _, k := range keys {
 		out = append(out, prompt.Suggest{Text: k})

@@ -26,6 +26,7 @@ type Manager struct {
 	Projects *ProjectTracker
 	Patterns *PatternDetector
 	Daily    *DailyNoteStore
+	Rollups  *RollupStore
 
 	compactor *Compactor
 	retriever *RelevanceRetriever
@@ -64,9 +65,11 @@ func NewManager(memoryDir string, config Config, logger *zap.Logger) *Manager {
 	m.Projects = NewProjectTracker(memoryDir, logger)
 	m.Patterns = NewPatternDetector(memoryDir, logger)
 	m.Daily = NewDailyNoteStore(memoryDir, logger)
+	m.Rollups = NewRollupStore(memoryDir, logger)
 
 	m.compactor = NewCompactor(m.Facts, m.Daily, config, memoryDir, logger)
 	m.retriever = NewRelevanceRetriever(m.Facts, m.Profile, m.Topics, m.Projects, m.Patterns, m.Daily, config)
+	m.retriever.SetRollups(m.Rollups)
 	m.migration = NewMigration(memoryDir, m.Facts, logger)
 
 	// Auto-migrate if needed
@@ -492,7 +495,9 @@ func (m *Manager) ProcessExtractionResult(response string) ExtractionSummary {
 	}
 
 	if len(profileUpdates) > 0 {
-		if m.Profile.Update(profileUpdates) {
+		// Background extraction is an inference, not the user's own words —
+		// recorded as such so freshness/trust can tell them apart.
+		if m.Profile.UpdateWithSource(profileUpdates, FieldSourceExtraction) {
 			sum.ProfileUpdated = true
 		}
 	}
@@ -536,6 +541,17 @@ func (m *Manager) NeedsCompaction() bool {
 // CleanupDailyNotes removes old daily notes.
 func (m *Manager) CleanupDailyNotes() (int, error) {
 	return m.compactor.CleanupDailyNotes()
+}
+
+// RunRollups consolidates elapsed weeks/months of daily notes into weekly and
+// monthly digests. sendPrompt may be nil — rollups then fall back to
+// deterministic condensation instead of an LLM summary.
+func (m *Manager) RunRollups(ctx context.Context, sendPrompt func(ctx context.Context, prompt string) (string, error)) (int, error) {
+	var summarize SummarizeFunc
+	if sendPrompt != nil {
+		summarize = sendPrompt
+	}
+	return m.Rollups.Run(ctx, summarize)
 }
 
 // GetConfig returns the current config.
@@ -971,6 +987,8 @@ goals=...               (comma-separated ACTIVE goals)
 interests=...           (comma-separated durable interests/hobbies/tastes)
 directives=...          (standing instructions the user gave about HOW to work with them; semicolon-separated)
 milestone=...           (a dated life/career event that HAPPENED — certification earned, job change, purchase closed)
+stance=...              (a technical position WITH its reason, as "position :: reason"; semicolon-separated. Capture the WHY — it lets future sessions apply the user's judgment to new cases)
+env_<key>=...           (machine/tooling facts: env_os=..., env_shell=..., env_editor=..., env_machine=...)
 You MAY also emit any other relevant key=value about the user even if it is
 not listed above (e.g. github=..., years_experience=..., favorite_editor=...).
 Unknown keys are preserved as profile preferences — never drop a stable fact
@@ -987,6 +1005,10 @@ it supersedes the old entry instead of duplicating it.
 NEVER record the user's requests or instructions about their memory/profile
 (e.g. "remove X from my goals") as goals or facts — APPLY them via
 goals_remove/goals_done/preferences_remove instead.
+Private data (finances, health, family, documents, contacts, beliefs) is
+auto-flagged sensitive by key name — use precise keys (e.g. renda_mensal=,
+not nota=) so the flagging works. Record such data ONLY when the user stated
+it explicitly, never by inference.
 (Only include fields that have new information. Skip this section if nothing new.)
 
 ## TOPICS

@@ -26,9 +26,33 @@ type UserProfile struct {
 	Interests      []string          `json:"interests,omitempty"`
 	Directives     []string          `json:"directives,omitempty"`
 	Milestones     []Milestone       `json:"milestones,omitempty"`
+	Stances        []Stance          `json:"stances,omitempty"`
+	Environment    map[string]string `json:"environment,omitempty"`
 	TopCommands    map[string]int    `json:"top_commands,omitempty"`
 	Preferences    map[string]string `json:"preferences,omitempty"`
+	FieldMeta      map[string]FieldMeta `json:"field_meta,omitempty"`
 	LastUpdated    time.Time         `json:"last_updated"`
+}
+
+// Stance is a technical position the user holds WITH its reasoning. The
+// reason is what lets the model apply the user's judgment to situations they
+// never commented on — a preference without a why does not generalize.
+type Stance struct {
+	Position  string    `json:"position"`
+	Reason    string    `json:"reason,omitempty"`
+	UpdatedAt time.Time `json:"updated_at,omitempty"`
+}
+
+// FieldMeta records how and when one profile attribute was established, so
+// the model can weigh trust (user-stated vs extracted) and freshness
+// (re-affirmed recently vs stale) instead of asserting old data confidently.
+// Sensitive marks private context: used to inform answers, never quoted into
+// code, tests, examples or any generated artifact.
+type FieldMeta struct {
+	Source      string    `json:"source,omitempty"` // user | extraction
+	UpdatedAt   time.Time `json:"updated_at,omitempty"`
+	ConfirmedAt time.Time `json:"confirmed_at,omitempty"`
+	Sensitive   bool      `json:"sensitive,omitempty"`
 }
 
 // Milestone is a dated durable event in the user's life or career timeline —

@@ -16,6 +16,7 @@ type RelevanceRetriever struct {
 	projects     *ProjectTracker
 	patterns     *PatternDetector
 	daily        *DailyNoteStore
+	rollups      *RollupStore // optional; nil → no trajectory section
 	config       Config
 	workspaceDir string // current session workspace for disambiguation
 }
@@ -39,6 +40,13 @@ func NewRelevanceRetriever(
 		daily:    daily,
 		config:   config,
 	}
+}
+
+// SetRollups attaches the weekly/monthly digest store so assemble can add
+// the long-range trajectory section. Additive wiring (mirrors how the vector
+// index attaches) so the constructor signature stays stable.
+func (r *RelevanceRetriever) SetRollups(rs *RollupStore) {
+	r.rollups = rs
 }
 
 // SetWorkspaceDir updates the current workspace directory for disambiguation.
@@ -213,7 +221,19 @@ func (r *RelevanceRetriever) assemble(rankedFacts []*Fact) string {
 		}
 	}
 
-	// 6. Usage patterns (brief, if budget allows)
+	// 6. Long-range trajectory (latest monthly + recent weekly digests) —
+	// the narrative daily notes lose after their 30-day retention.
+	if r.rollups != nil && remaining > 250 {
+		if traj := r.rollups.FormatTrajectory(remaining / 4); traj != "" {
+			section := "## Trajectory\n\n" + traj
+			if len(section) < remaining {
+				sections = append(sections, section)
+				remaining -= len(section)
+			}
+		}
+	}
+
+	// 7. Usage patterns (brief, if budget allows)
 	if remaining > 100 {
 		if patternText := r.patterns.FormatForPrompt(); patternText != "" {
 			section := "## Usage Patterns\n\n" + patternText

@@ -367,6 +367,67 @@ func cleanListInPlace(list *[]string, drop func(string) bool) bool {
 	return true
 }
 
+// sensitiveKeyMarkers flag a preference/environment key as private context —
+// finance, identity documents, contact, health, family, weapons, beliefs.
+// Sensitive fields still personalize answers but must never be quoted into
+// code, tests, examples or any generated artifact.
+var sensitiveKeyMarkers = []string{
+	"salary", "income", "renda", "salario", "salário", "fgts", "patrimonio", "patrimônio",
+	"saldo", "financ", "invest", "divida", "dívida", "emprest", "imposto", "bank", "banco",
+	"conta", "cartao", "cartão", "card", "pix", "cpf", "rg", "passport", "passaporte",
+	"address", "endereco", "endereço", "phone", "telefone", "whatsapp", "email",
+	"saude", "saúde", "health", "doenca", "doença", "medic", "terapia",
+	"familia", "família", "family", "filho", "filha", "esposa", "marido", "conjuge", "cônjuge",
+	"arma", "weapon", "gun", "religi", "politic", "polít",
+}
+
+// isSensitiveField auto-classifies a field as sensitive by its key name.
+// Only key-level detection is automatic (preferences carry one value per
+// key); list fields mix public and private content and are only flagged
+// explicitly via sensitive_mark.
+func isSensitiveField(field, rawKey string) bool {
+	key := strings.ToLower(strings.TrimSpace(rawKey))
+	if pref, ok := strings.CutPrefix(field, "pref:"); ok {
+		key = strings.ToLower(pref)
+	}
+	return containsAny(key, sensitiveKeyMarkers...)
+}
+
+// hardDirectiveMarkers split standing directives into hard rules (vetoes and
+// obligations) versus softer preferences, so the prompt can rank MUSTs first.
+var hardDirectiveMarkers = []string{
+	"nunca", "never", "jamais", "proibid", "forbidden", "must not", "must ",
+	"não pode", "nao pode", "sempre", "always", "obrigat",
+}
+
+// isHardDirective reports whether a directive reads as a veto/obligation.
+func isHardDirective(s string) bool {
+	return containsAny(strings.ToLower(s), hardDirectiveMarkers...)
+}
+
+// environmentKeyPrefixes route legacy free-form preference keys that actually
+// describe the user's machine/tooling into the structured Environment map.
+var environmentKeyPrefixes = []string{"mac_", "macos_", "os_", "hw_", "machine_", "env_"}
+
+// environmentKeyNames are exact legacy preference keys migrated to Environment.
+var environmentKeyNames = map[string]struct{}{
+	"os": {}, "shell": {}, "terminal": {}, "editor": {}, "ide": {}, "hardware": {},
+}
+
+// isEnvironmentKey reports whether a preference key describes environment.
+func isEnvironmentKey(key string) bool {
+	k := strings.ToLower(strings.TrimSpace(key))
+	if _, ok := environmentKeyNames[k]; ok {
+		return true
+	}
+	for _, p := range environmentKeyPrefixes {
+		if strings.HasPrefix(k, p) {
+			return true
+		}
+	}
+	return false
+}
+
 // normalizeLoadedProfile self-heals list fields written by earlier versions
 // (append-only updates + naive comma splitting). It runs on every load and is
 // idempotent; the caller persists when it reports a change, so a polluted
@@ -382,6 +443,55 @@ func normalizeLoadedProfile(p *UserProfile) bool {
 		return isCompletedStatus(s) || isInstructionEcho(s)
 	}) {
 		changed = true
+	}
+	if migrateEnvironmentPrefs(p) {
+		changed = true
+	}
+	if backfillSensitiveMeta(p) {
+		changed = true
+	}
+	return changed
+}
+
+// migrateEnvironmentPrefs moves machine/tooling facts out of the free-form
+// preference bag into the structured Environment map, once.
+func migrateEnvironmentPrefs(p *UserProfile) bool {
+	changed := false
+	for k, v := range p.Preferences {
+		if !isEnvironmentKey(k) {
+			continue
+		}
+		if p.Environment == nil {
+			p.Environment = make(map[string]string)
+		}
+		envKey := strings.ToLower(strings.TrimPrefix(strings.TrimSpace(k), "env_"))
+		if _, exists := p.Environment[envKey]; !exists {
+			p.Environment[envKey] = v
+		}
+		delete(p.Preferences, k)
+		delete(p.FieldMeta, "pref:"+k)
+		changed = true
+	}
+	return changed
+}
+
+// backfillSensitiveMeta flags pre-existing sensitive preference keys that
+// were written before sensitivity tracking existed.
+func backfillSensitiveMeta(p *UserProfile) bool {
+	changed := false
+	for k := range p.Preferences {
+		if !isSensitiveField("pref:"+k, k) {
+			continue
+		}
+		if p.FieldMeta == nil {
+			p.FieldMeta = make(map[string]FieldMeta)
+		}
+		m := p.FieldMeta["pref:"+k]
+		if !m.Sensitive {
+			m.Sensitive = true
+			p.FieldMeta["pref:"+k] = m
+			changed = true
+		}
 	}
 	return changed
 }

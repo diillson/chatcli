@@ -3,6 +3,7 @@ package memory
 import (
 	"encoding/json"
 	"os"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -55,10 +56,29 @@ func (ps *UserProfileStore) isEmptyLocked() bool {
 		p.PreferredLang == "" && p.CommStyle == "" && p.Company == "" &&
 		p.Location == "" && len(p.Certifications) == 0 && len(p.Skills) == 0 &&
 		len(p.Goals) == 0 && len(p.Interests) == 0 && len(p.Directives) == 0 &&
-		len(p.Milestones) == 0 && len(p.Preferences) == 0
+		len(p.Milestones) == 0 && len(p.Stances) == 0 && len(p.Environment) == 0 &&
+		len(p.Preferences) == 0
 }
 
-// Update applies partial updates to the profile.
+// Sources recorded in FieldMeta: deterministic user-stated updates (tool,
+// /memory profile set, chat exception) rank above background extraction.
+const (
+	FieldSourceUser       = "user"
+	FieldSourceExtraction = "extraction"
+)
+
+// staleAfter is how long a field may go without re-affirmation before the
+// prompt flags it as possibly stale, prompting a casual re-confirmation.
+const staleAfter = 120 * 24 * time.Hour
+
+// Update applies partial updates to the profile with the deterministic
+// "user" source (see UpdateWithSource for semantics).
+func (ps *UserProfileStore) Update(updates map[string]string) bool {
+	return ps.UpdateWithSource(updates, FieldSourceUser)
+}
+
+// UpdateWithSource applies partial updates to the profile, recording per-field
+// provenance and freshness in FieldMeta.
 //
 // Scalar fields overwrite. List fields (certifications/skills/goals/interests/
 // directives) default to UPSERT — new items append, and an item whose stem
@@ -66,66 +86,159 @@ func (ps *UserProfileStore) isEmptyLocked() bool {
 // stop accumulating. Keys may carry an operation affix to change that:
 // "goals_replace" overwrites the whole list (empty value clears it),
 // "goals_remove"/"goals_done" removes matching entries. "milestone" appends a
-// dated event to the timeline, and "preferences_remove" deletes preference
-// keys. Empty values are ignored except for *_replace.
-func (ps *UserProfileStore) Update(updates map[string]string) bool {
+// dated event to the timeline, "stance" records "position :: reason",
+// "env_<key>" fills the structured environment, "preferences_remove" deletes
+// preference keys, and "sensitive_mark"/"sensitive_unmark" flip a field's
+// privacy flag. Empty values are ignored except for *_replace.
+//
+// A user-sourced update that changes nothing still counts as re-affirmation:
+// ConfirmedAt is bumped so freshness reflects "recently confirmed", not just
+// "recently changed".
+func (ps *UserProfileStore) UpdateWithSource(updates map[string]string, source string) bool {
 	ps.mu.Lock()
 	defer ps.mu.Unlock()
 
-	changed := false
+	changed, metaDirty := false, false
 	for key, value := range updates {
-		if ps.applyUpdate(key, strings.TrimSpace(value)) {
+		res := ps.applyUpdate(key, strings.TrimSpace(value))
+		if res.changed {
 			changed = true
+		}
+		if ps.touchFieldMeta(res, key, source) {
+			metaDirty = true
 		}
 	}
 
 	if changed {
 		ps.profile.LastUpdated = time.Now()
+	}
+	if changed || metaDirty {
 		ps.persist()
 	}
 	return changed
 }
 
+// updateResult describes one applied key/value: which canonical field it
+// touched (empty when nothing applies), whether data changed, and whether an
+// unchanged write still counts as the user re-affirming the current value.
+type updateResult struct {
+	field      string
+	changed    bool
+	affirmable bool
+}
+
 // applyUpdate applies one key/value update; callers must hold the write lock.
-func (ps *UserProfileStore) applyUpdate(key, value string) bool {
+func (ps *UserProfileStore) applyUpdate(key, value string) updateResult {
 	if field, op, ok := resolveListKey(key); ok {
-		return ps.applyListOp(field, op, value)
+		return updateResult{field: field, changed: ps.applyListOp(field, op, value), affirmable: op == opUpsert}
+	}
+	lk := strings.ToLower(strings.TrimSpace(key))
+	switch lk {
+	case "sensitive_mark", "mark_sensitive":
+		return updateResult{changed: ps.setSensitive(value, true)}
+	case "sensitive_unmark", "unmark_sensitive":
+		return updateResult{changed: ps.setSensitive(value, false)}
 	}
 	if value == "" {
-		return false
+		return updateResult{}
 	}
-	switch strings.ToLower(strings.TrimSpace(key)) {
+	switch lk {
 	case "name":
-		return ps.setScalar(&ps.profile.Name, value)
+		return updateResult{field: "name", changed: ps.setScalar(&ps.profile.Name, value), affirmable: true}
 	case "role":
-		return ps.setScalar(&ps.profile.Role, value)
+		return updateResult{field: "role", changed: ps.setScalar(&ps.profile.Role, value), affirmable: true}
 	case "expertise_level", "expertise", "level":
-		return ps.setScalar(&ps.profile.ExpertiseLevel, normalizeExpertise(value))
+		return updateResult{field: "expertise_level", changed: ps.setScalar(&ps.profile.ExpertiseLevel, normalizeExpertise(value)), affirmable: true}
 	case "preferred_language", "language", "lang":
-		return ps.setScalar(&ps.profile.PreferredLang, value)
+		return updateResult{field: "preferred_language", changed: ps.setScalar(&ps.profile.PreferredLang, value), affirmable: true}
 	case "communication_style", "comm_style", "style":
-		return ps.setScalar(&ps.profile.CommStyle, value)
+		return updateResult{field: "communication_style", changed: ps.setScalar(&ps.profile.CommStyle, value), affirmable: true}
 	case "company", "employer", "organization", "org":
-		return ps.setScalar(&ps.profile.Company, value)
+		return updateResult{field: "company", changed: ps.setScalar(&ps.profile.Company, value), affirmable: true}
 	case "location", "city", "country", "timezone", "tz":
-		return ps.setScalar(&ps.profile.Location, value)
+		return updateResult{field: "location", changed: ps.setScalar(&ps.profile.Location, value), affirmable: true}
 	case "milestone", "milestones":
-		return ps.addMilestones(value)
+		return updateResult{field: "milestones", changed: ps.addMilestones(value)}
+	case "stance", "stances", "position", "opinion":
+		return updateResult{field: "stances", changed: ps.upsertStances(value), affirmable: true}
+	case "environment_remove", "env_remove":
+		return updateResult{field: "environment", changed: ps.removeEnvironment(value)}
 	case "preferences_remove", "preference_remove", "remove_preference", "remove_preferences":
-		return ps.removePreferences(value)
-	default:
-		// Store as generic preference. This is the escape hatch that
-		// keeps the profile open-ended: any personal fact the model
-		// reports with a novel key is preserved instead of dropped.
-		if ps.profile.Preferences == nil {
-			ps.profile.Preferences = make(map[string]string)
-		}
-		if ps.profile.Preferences[key] != value {
-			ps.profile.Preferences[key] = value
-			return true
-		}
+		return updateResult{field: "preferences", changed: ps.removePreferences(value)}
+	}
+	if envKey, ok := strings.CutPrefix(lk, "env_"); ok && envKey != "" {
+		return updateResult{field: "environment", changed: ps.setEnvironment(envKey, value), affirmable: true}
+	}
+	// Store as generic preference. This is the escape hatch that keeps the
+	// profile open-ended: any personal fact the model reports with a novel
+	// key is preserved instead of dropped. Meta is tracked per key so
+	// sensitivity and staleness work at preference granularity.
+	if ps.profile.Preferences == nil {
+		ps.profile.Preferences = make(map[string]string)
+	}
+	if ps.profile.Preferences[key] != value {
+		ps.profile.Preferences[key] = value
+		return updateResult{field: "pref:" + key, changed: true, affirmable: true}
+	}
+	return updateResult{field: "pref:" + key, changed: false, affirmable: true}
+}
+
+// touchFieldMeta maintains provenance/freshness/sensitivity for one applied
+// update; callers must hold the write lock. Returns whether meta changed.
+func (ps *UserProfileStore) touchFieldMeta(res updateResult, rawKey, source string) bool {
+	if res.field == "" {
 		return false
 	}
+	if ps.profile.FieldMeta == nil {
+		ps.profile.FieldMeta = make(map[string]FieldMeta)
+	}
+	m := ps.profile.FieldMeta[res.field]
+	dirty := false
+	now := time.Now()
+	switch {
+	case res.changed:
+		m.Source, m.UpdatedAt, m.ConfirmedAt = source, now, now
+		dirty = true
+	case res.affirmable && source == FieldSourceUser:
+		// The user restating the current value is a confirmation — and it
+		// upgrades trust when the value had only been inferred by extraction.
+		m.ConfirmedAt = now
+		m.Source = source
+		dirty = true
+	}
+	if !m.Sensitive && isSensitiveField(res.field, rawKey) {
+		m.Sensitive = true
+		dirty = true
+	}
+	if dirty {
+		ps.profile.FieldMeta[res.field] = m
+	}
+	return dirty
+}
+
+// setSensitive flips the privacy flag on the named fields (comma-separated;
+// preference keys may be given bare or as "pref:<key>").
+func (ps *UserProfileStore) setSensitive(value string, sensitive bool) bool {
+	if ps.profile.FieldMeta == nil {
+		ps.profile.FieldMeta = make(map[string]FieldMeta)
+	}
+	changed := false
+	for _, name := range splitListItems(value) {
+		key := strings.ToLower(strings.TrimSpace(name))
+		if key == "" {
+			continue
+		}
+		if _, isPref := ps.profile.Preferences[key]; isPref && !strings.HasPrefix(key, "pref:") {
+			key = "pref:" + key
+		}
+		m := ps.profile.FieldMeta[key]
+		if m.Sensitive != sensitive {
+			m.Sensitive = sensitive
+			ps.profile.FieldMeta[key] = m
+			changed = true
+		}
+	}
+	return changed
 }
 
 func (ps *UserProfileStore) setScalar(target *string, value string) bool {
@@ -201,12 +314,75 @@ func (ps *UserProfileStore) addMilestones(value string) bool {
 	return changed
 }
 
-// removePreferences deletes the named preference keys (comma-separated).
+// removePreferences deletes the named preference keys (comma-separated),
+// along with their per-key meta.
 func (ps *UserProfileStore) removePreferences(value string) bool {
 	changed := false
 	for _, k := range splitListItems(value) {
 		if _, ok := ps.profile.Preferences[k]; ok {
 			delete(ps.profile.Preferences, k)
+			delete(ps.profile.FieldMeta, "pref:"+k)
+			changed = true
+		}
+	}
+	return changed
+}
+
+// upsertStances records "position :: reason" entries. A stance restating an
+// existing position (same stem) supersedes it — positions evolve, they do
+// not accumulate. Multiple stances split on ';'/newlines.
+func (ps *UserProfileStore) upsertStances(value string) bool {
+	changed := false
+	for _, item := range splitSentenceItems(value) {
+		position, reason := item, ""
+		if i := strings.Index(item, "::"); i >= 0 {
+			position = strings.TrimSpace(item[:i])
+			reason = strings.TrimSpace(item[i+2:])
+		}
+		if position == "" || isFragmentEntry(position) {
+			continue
+		}
+		st := stemOf(position)
+		found := false
+		for i := range ps.profile.Stances {
+			if stemOf(ps.profile.Stances[i].Position) != st {
+				continue
+			}
+			found = true
+			if ps.profile.Stances[i].Position != position || ps.profile.Stances[i].Reason != reason {
+				ps.profile.Stances[i] = Stance{Position: position, Reason: reason, UpdatedAt: time.Now()}
+				changed = true
+			}
+			break
+		}
+		if !found {
+			ps.profile.Stances = append(ps.profile.Stances, Stance{Position: position, Reason: reason, UpdatedAt: time.Now()})
+			changed = true
+		}
+	}
+	return changed
+}
+
+// setEnvironment sets one structured environment attribute (machine, OS,
+// shell, editor, …) keyed without the env_ prefix.
+func (ps *UserProfileStore) setEnvironment(key, value string) bool {
+	if ps.profile.Environment == nil {
+		ps.profile.Environment = make(map[string]string)
+	}
+	if ps.profile.Environment[key] == value {
+		return false
+	}
+	ps.profile.Environment[key] = value
+	return true
+}
+
+// removeEnvironment deletes the named environment keys (comma-separated).
+func (ps *UserProfileStore) removeEnvironment(value string) bool {
+	changed := false
+	for _, k := range splitListItems(value) {
+		k = strings.ToLower(strings.TrimSpace(k))
+		if _, ok := ps.profile.Environment[k]; ok {
+			delete(ps.profile.Environment, k)
 			changed = true
 		}
 	}
@@ -240,92 +416,194 @@ func (ps *UserProfileStore) FormatForPrompt() string {
 		return ""
 	}
 
-	parts := make([]string, 0, 11+len(p.Preferences))
-	if p.Name != "" {
-		parts = append(parts, "Name: "+p.Name)
-	}
-	if p.Role != "" {
-		parts = append(parts, "Role: "+p.Role)
-	}
-	if p.ExpertiseLevel != "" {
-		parts = append(parts, "Expertise: "+p.ExpertiseLevel)
-	}
-	if p.PreferredLang != "" {
-		parts = append(parts, "Language: "+p.PreferredLang)
-	}
-	if p.CommStyle != "" {
-		parts = append(parts, "Style: "+p.CommStyle)
-	}
-	if p.Company != "" {
-		parts = append(parts, "Company: "+p.Company)
-	}
-	if p.Location != "" {
-		parts = append(parts, "Location: "+p.Location)
-	}
-	if len(p.Certifications) > 0 {
-		parts = append(parts, "Certifications: "+strings.Join(p.Certifications, ", "))
-	}
-	if len(p.Skills) > 0 {
-		parts = append(parts, "Skills: "+strings.Join(p.Skills, ", "))
-	}
-	if len(p.Goals) > 0 {
-		parts = append(parts, "Goals: "+strings.Join(p.Goals, ", "))
-	}
-	if len(p.Interests) > 0 {
-		parts = append(parts, "Interests: "+strings.Join(p.Interests, ", "))
-	}
-	if len(p.Directives) > 0 {
-		parts = append(parts, "Directives (standing user instructions — follow them): "+strings.Join(p.Directives, "; "))
-	}
-	if len(p.Milestones) > 0 {
-		// Most recent milestones last (chronological), bounded so the prompt
-		// stays lean while long-range history remains on disk.
-		ms := p.Milestones
-		if len(ms) > 8 {
-			ms = ms[len(ms)-8:]
-		}
-		entries := make([]string, 0, len(ms))
-		for _, m := range ms {
-			entries = append(entries, "["+m.Date.Format("2006-01-02")+"] "+m.Text)
-		}
-		parts = append(parts, "Milestones: "+strings.Join(entries, "; "))
-	}
+	parts := make([]string, 0, 16+len(p.Preferences))
+	parts = appendIdentityParts(parts, p)
+	parts = appendListParts(parts, p)
+	parts = appendDirectiveParts(parts, p)
+	parts = appendStanceParts(parts, p)
+	parts = appendEnvironmentParts(parts, p)
+	parts = appendMilestoneParts(parts, p)
+	parts = appendTopCommandParts(parts, p)
+	parts = appendPreferenceParts(parts, p)
 
-	// Top 5 commands
-	if len(p.TopCommands) > 0 {
-		type cmdCount struct {
-			cmd   string
-			count int
-		}
-		var cmds []cmdCount
-		for c, n := range p.TopCommands {
-			cmds = append(cmds, cmdCount{c, n})
-		}
-		// Sort by count descending
-		for i := 0; i < len(cmds); i++ {
-			for j := i + 1; j < len(cmds); j++ {
-				if cmds[j].count > cmds[i].count {
-					cmds[i], cmds[j] = cmds[j], cmds[i]
-				}
-			}
-		}
-		limit := 5
-		if len(cmds) < limit {
-			limit = len(cmds)
-		}
-		var topList []string
-		for _, c := range cmds[:limit] {
-			topList = append(topList, c.cmd)
-		}
-		parts = append(parts, "Most used: "+strings.Join(topList, ", "))
+	if stale := staleFieldsLine(p); stale != "" {
+		parts = append(parts, stale)
 	}
-
-	// Key preferences
-	for k, v := range p.Preferences {
-		parts = append(parts, k+": "+v)
+	if hasSensitiveMeta(p) {
+		parts = append(parts, "Privacy: fields tagged [sensitive] are private context — use them to inform answers, but NEVER quote them into code, tests, examples, commits, documents or any generated artifact.")
 	}
 
 	return strings.Join(parts, "\n")
+}
+
+func appendIdentityParts(parts []string, p UserProfile) []string {
+	for _, f := range []struct{ label, value string }{
+		{"Name", p.Name}, {"Role", p.Role}, {"Expertise", p.ExpertiseLevel},
+		{"Language", p.PreferredLang}, {"Style", p.CommStyle},
+		{"Company", p.Company}, {"Location", p.Location},
+	} {
+		if f.value != "" {
+			parts = append(parts, f.label+": "+f.value)
+		}
+	}
+	return parts
+}
+
+func appendListParts(parts []string, p UserProfile) []string {
+	for _, f := range []struct {
+		label string
+		items []string
+	}{
+		{"Certifications", p.Certifications}, {"Skills", p.Skills},
+		{"Goals", p.Goals}, {"Interests", p.Interests},
+	} {
+		if len(f.items) > 0 {
+			parts = append(parts, f.label+": "+strings.Join(f.items, ", "))
+		}
+	}
+	return parts
+}
+
+func appendDirectiveParts(parts []string, p UserProfile) []string {
+	var hard, soft []string
+	for _, d := range p.Directives {
+		if isHardDirective(d) {
+			hard = append(hard, d)
+		} else {
+			soft = append(soft, d)
+		}
+	}
+	if len(hard) > 0 {
+		parts = append(parts, "Directives — hard rules (MUST follow): "+strings.Join(hard, "; "))
+	}
+	if len(soft) > 0 {
+		parts = append(parts, "Directives — preferences: "+strings.Join(soft, "; "))
+	}
+	return parts
+}
+
+func appendStanceParts(parts []string, p UserProfile) []string {
+	if len(p.Stances) == 0 {
+		return parts
+	}
+	entries := make([]string, 0, len(p.Stances))
+	for _, s := range p.Stances {
+		e := s.Position
+		if s.Reason != "" {
+			e += " (why: " + s.Reason + ")"
+		}
+		entries = append(entries, e)
+	}
+	return append(parts, "Stances (positions the user holds — apply their reasoning to new cases): "+strings.Join(entries, "; "))
+}
+
+func appendEnvironmentParts(parts []string, p UserProfile) []string {
+	if len(p.Environment) == 0 {
+		return parts
+	}
+	entries := make([]string, 0, len(p.Environment))
+	for _, k := range sortedKeys(p.Environment) {
+		entries = append(entries, k+"="+p.Environment[k])
+	}
+	return append(parts, "Environment: "+strings.Join(entries, ", "))
+}
+
+// appendMilestoneParts renders the most recent milestones (chronological,
+// bounded) so the prompt stays lean while history remains on disk.
+func appendMilestoneParts(parts []string, p UserProfile) []string {
+	if len(p.Milestones) == 0 {
+		return parts
+	}
+	ms := p.Milestones
+	if len(ms) > 8 {
+		ms = ms[len(ms)-8:]
+	}
+	entries := make([]string, 0, len(ms))
+	for _, m := range ms {
+		entries = append(entries, "["+m.Date.Format("2006-01-02")+"] "+m.Text)
+	}
+	return append(parts, "Milestones: "+strings.Join(entries, "; "))
+}
+
+func appendTopCommandParts(parts []string, p UserProfile) []string {
+	if len(p.TopCommands) == 0 {
+		return parts
+	}
+	type cmdCount struct {
+		cmd   string
+		count int
+	}
+	cmds := make([]cmdCount, 0, len(p.TopCommands))
+	for c, n := range p.TopCommands {
+		cmds = append(cmds, cmdCount{c, n})
+	}
+	sort.Slice(cmds, func(i, j int) bool { return cmds[i].count > cmds[j].count })
+	limit := 5
+	if len(cmds) < limit {
+		limit = len(cmds)
+	}
+	topList := make([]string, 0, limit)
+	for _, c := range cmds[:limit] {
+		topList = append(topList, c.cmd)
+	}
+	return append(parts, "Most used: "+strings.Join(topList, ", "))
+}
+
+// appendPreferenceParts renders preferences in stable order; sensitive ones
+// carry the privacy tag.
+func appendPreferenceParts(parts []string, p UserProfile) []string {
+	for _, k := range sortedKeys(p.Preferences) {
+		label := k
+		if p.FieldMeta["pref:"+k].Sensitive {
+			label += " [sensitive]"
+		}
+		parts = append(parts, label+": "+p.Preferences[k])
+	}
+	return parts
+}
+
+// staleFieldsLine lists fields not re-affirmed within staleAfter, so the
+// model casually re-confirms them instead of asserting old data. Fields
+// written before meta tracking existed have no timestamps and are skipped —
+// their age is unknown, not provably stale.
+func staleFieldsLine(p UserProfile) string {
+	stale := make([]string, 0, len(p.FieldMeta))
+	for _, field := range sortedKeys(p.FieldMeta) {
+		m := p.FieldMeta[field]
+		ref := m.ConfirmedAt
+		if ref.IsZero() {
+			ref = m.UpdatedAt
+		}
+		if ref.IsZero() || time.Since(ref) < staleAfter {
+			continue
+		}
+		stale = append(stale, strings.TrimPrefix(field, "pref:")+" ("+ref.Format("2006-01-02")+")")
+	}
+	if len(stale) == 0 {
+		return ""
+	}
+	return "Possibly stale (not re-confirmed since): " + strings.Join(stale, ", ") +
+		" — when naturally relevant, casually re-confirm instead of asserting."
+}
+
+// hasSensitiveMeta reports whether any field carries the privacy flag.
+func hasSensitiveMeta(p UserProfile) bool {
+	for _, m := range p.FieldMeta {
+		if m.Sensitive {
+			return true
+		}
+	}
+	return false
+}
+
+// sortedKeys returns map keys in stable order for deterministic prompts.
+func sortedKeys[V any](m map[string]V) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return keys
 }
 
 // --- internal ---
