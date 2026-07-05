@@ -102,20 +102,31 @@ func (*BuiltinMemoryPlugin) Usage() string {
 
 Subcommands (cmd + args):
   remember {content, category?:architecture|pattern|preference|gotcha|project|personal|general}
-  profile  {fields:{certifications:"AWS SAA", role:"SRE", company:"...", skills:"Go, k8s", ...}}
+  profile  {fields:{certifications:"AWS SAA", role:"SRE", goals:"...", interests:"...", directives:"...", milestone:"...", ...}}
   forget    {match:"<substring of the fact to remove>"}
   recall    {query?:"topic to recall"}
   neighbors {query:"<subject or node id>"}   local graph: backlinks + related notes
   map                                         knowledge-graph overview (counts + hubs)
 
 Prefer 'profile' for stable attributes of the user (name/role/certifications/
-skills/company/location/goals or any key=value), and 'remember' for project
-facts, conventions, and gotchas. Use 'recall' to search by content and
-'neighbors' to follow relationships from a subject.`
+skills/goals/interests/directives/milestone or any key=value), and 'remember'
+for project facts, conventions, and gotchas. Use 'recall' to search by content
+and 'neighbors' to follow relationships from a subject.
+
+Profile LIST fields (certifications/skills/goals/interests/directives) UPSERT
+by default: new items append, and an item restating an existing entry (same
+text apart from status/parenthetical) supersedes it in place. To overwrite or
+remove, add an operation suffix to the key:
+  goals_replace="only goal"    replace the whole list ("" clears it)
+  goals_done="tirar CKA"       remove completed goal(s) — also record milestone=/certifications=
+  goals_remove="Anthropic"     remove every goal matching the substring
+The same suffixes work on all list fields; preferences_remove="key" deletes a
+preference. 'forget' only removes stored FACTS — use the suffixes above for
+profile fields.`
 }
 
 // Version is semver; bumped when the surface changes.
-func (*BuiltinMemoryPlugin) Version() string { return "1.0.0" }
+func (*BuiltinMemoryPlugin) Version() string { return "1.1.0" }
 
 // Path is empty for builtin plugins.
 func (*BuiltinMemoryPlugin) Path() string { return "" }
@@ -140,18 +151,19 @@ func (*BuiltinMemoryPlugin) Schema() string {
 			},
 			{
 				"name":        "profile",
-				"description": "Update durable attributes of the user. Known keys: name, role, expertise_level, preferred_language, communication_style, company, location, certifications, skills, goals. Any other key=value is preserved too.",
+				"description": "Update durable attributes of the user. Known keys: name, role, expertise_level, preferred_language, communication_style, company, location, certifications, skills, goals, interests, directives, milestone. Any other key=value is preserved too. List fields UPSERT by default (append new, supersede restated); use key suffixes to change that: goals_replace overwrites the whole list (empty value clears it), goals_done/goals_remove removes matching entries — same suffixes on certifications/skills/interests/directives. preferences_remove deletes preference keys. When the user completes a goal, move it: goals_done + milestone (+ certifications when a credential was earned).",
 				"flags": []map[string]interface{}{
-					{"name": "fields", "type": "object", "required": true, "description": "key/value map of profile attributes; list fields (certifications/skills/goals) accept comma-separated values."},
+					{"name": "fields", "type": "object", "required": true, "description": "key/value map of profile attributes; list fields accept comma-separated values (commas inside parentheses are safe)."},
 				},
 				"examples": []string{
 					`{"cmd":"profile","args":{"fields":{"certifications":"AWS Solutions Architect","role":"SRE"}}}`,
-					`{"cmd":"profile","args":{"fields":{"company":"Acme","location":"São Paulo","skills":"Go, Kubernetes"}}}`,
+					`{"cmd":"profile","args":{"fields":{"goals_done":"obter CKA","milestone":"Earned the CKA certification","certifications":"CKA"}}}`,
+					`{"cmd":"profile","args":{"fields":{"goals_replace":"publicar um blog pessoal (Hugo, tema claro)","interests":"fotografia","directives":"evitar jargão"}}}`,
 				},
 			},
 			{
 				"name":        "forget",
-				"description": "Remove stored facts whose text contains the given substring (case-insensitive).",
+				"description": "Remove stored FACTS whose text contains the given substring (case-insensitive). Does not touch profile fields — use profile with goals_remove/certifications_remove/... for those.",
 				"flags": []map[string]interface{}{
 					{"name": "match", "type": "string", "required": true, "description": "Substring identifying the fact(s) to remove."},
 				},

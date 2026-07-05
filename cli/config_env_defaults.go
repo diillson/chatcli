@@ -197,6 +197,7 @@ var envDefaults = map[string]envDefault{
 	"CHATCLI_GRAPHVIEW_OPEN":  {Value: "true", IsBool: true, Source: "plugins.graphViewOpenEnvEnabled: open the rendered HTML in the browser"},
 	"CHATCLI_GRAPHVIEW_THEME": {Value: "dark", Source: "plugins.graphViewDefaultTheme: dark|light"},
 	"CHATCLI_CHAT_GRAPHVIEW":  {Value: "true", IsBool: true, Source: "chat_graphview.go: chat-mode @graphview exception"},
+	"CHATCLI_CHAT_MEMORY":     {Value: "true", IsBool: true, Source: "chat_memory.go: chat-mode @memory exception (profile/facts persistence)"},
 
 	// ─── Vision input (image understanding / describe-fallback) ───
 	"CHATCLI_VISION_INPUT":    {Value: "auto", Source: "vision input mode: auto|native|describe|off"},

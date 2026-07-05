@@ -259,6 +259,22 @@ func (cli *ChatCLI) showMemoryProfile() {
 	if len(profile.Goals) > 0 {
 		fmt.Printf("  %s  %s\n", colorize(i18n.T("mem.cmd.profile.goals"), ColorYellow), strings.Join(profile.Goals, ", "))
 	}
+	if len(profile.Interests) > 0 {
+		fmt.Printf("  %s  %s\n", colorize(i18n.T("mem.cmd.profile.interests"), ColorYellow), strings.Join(profile.Interests, ", "))
+	}
+	if len(profile.Directives) > 0 {
+		fmt.Printf("  %s  %s\n", colorize(i18n.T("mem.cmd.profile.directives"), ColorYellow), strings.Join(profile.Directives, "; "))
+	}
+	if len(profile.Milestones) > 0 {
+		fmt.Printf("\n  %s\n", colorize(i18n.T("mem.cmd.profile.milestones"), ColorYellow))
+		ms := profile.Milestones
+		if len(ms) > 10 {
+			ms = ms[len(ms)-10:]
+		}
+		for _, m := range ms {
+			fmt.Printf("    [%s] %s\n", m.Date.Format("2006-01-02"), m.Text)
+		}
+	}
 
 	if len(profile.TopCommands) > 0 {
 		fmt.Printf("\n  %s\n", colorize(i18n.T("mem.cmd.profile.top_commands"), ColorYellow))
@@ -803,7 +819,9 @@ func memoryCategorySuggestions(bracketed bool) []prompt.Suggest {
 // memoryProfileKeySuggestions lists the profile keys for /memory profile set.
 func memoryProfileKeySuggestions() []prompt.Suggest {
 	keys := []string{"name=", "role=", "expertise_level=", "preferred_language=",
-		"communication_style=", "company=", "location=", "certifications=", "skills=", "goals="}
+		"communication_style=", "company=", "location=", "certifications=", "skills=", "goals=",
+		"interests=", "directives=", "milestone=",
+		"goals_done=", "goals_remove=", "goals_replace=", "preferences_remove="}
 	out := make([]prompt.Suggest, 0, len(keys))
 	for _, k := range keys {
 		out = append(out, prompt.Suggest{Text: k})

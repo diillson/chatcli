@@ -67,15 +67,21 @@ func TestUserProfile_IsEmpty(t *testing.T) {
 	}
 }
 
-func TestAppendUnique(t *testing.T) {
+func TestUpsertItems(t *testing.T) {
 	var list []string
-	if !appendUnique(&list, "a, b ,c") || len(list) != 3 {
+	if !upsertItems(&list, splitListItems("a, b ,c")) || len(list) != 3 {
 		t.Fatalf("expected 3 items, got %v", list)
 	}
-	if appendUnique(&list, "A") { // case-insensitive dup
-		t.Error("expected case-insensitive dedup to reject 'A'")
+	// Case variant shares the stem: it supersedes in place, never appends.
+	upsertItems(&list, splitListItems("A"))
+	if len(list) != 3 {
+		t.Errorf("expected case-insensitive stem dedup to keep 3 items, got %v", list)
 	}
-	if !appendUnique(&list, "d") || len(list) != 4 {
+	if !upsertItems(&list, splitListItems("d")) || len(list) != 4 {
 		t.Errorf("expected 4 items after adding d, got %v", list)
+	}
+	// Identical restatement is a no-op.
+	if upsertItems(&list, splitListItems("d")) {
+		t.Error("identical item must not report change")
 	}
 }

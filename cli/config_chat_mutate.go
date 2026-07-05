@@ -44,6 +44,8 @@ func (cli *ChatCLI) routeConfigChat(args []string) {
 		cli.configChatKnowledge(args[1:])
 	case "graphview", "graph", "gv":
 		cli.configChatGraphView(args[1:])
+	case "memory", "mem":
+		cli.configChatMemory(args[1:])
 	case "on", "enable", "status", "off", "disable", "toggle":
 		// Allow the shorthand `/config chat on|off|toggle|status` too.
 		cli.configChatAsk(args)
@@ -116,6 +118,27 @@ func (cli *ChatCLI) configChatGraphView(args []string) {
 	}
 }
 
+// configChatMemory handles `/config chat memory [on|off|toggle|status]`.
+func (cli *ChatCLI) configChatMemory(args []string) {
+	if len(args) == 0 {
+		cli.showConfigChat()
+		return
+	}
+	switch strings.ToLower(strings.TrimSpace(args[0])) {
+	case "on", "enable", "true", "1", "yes":
+		cli.setChatToggle(chatMemoryEnvVar, "memory", chatMemoryEnabled(), true)
+	case "off", "disable", "false", "0", "no":
+		cli.setChatToggle(chatMemoryEnvVar, "memory", chatMemoryEnabled(), false)
+	case "toggle":
+		cli.setChatToggle(chatMemoryEnvVar, "memory", chatMemoryEnabled(), !chatMemoryEnabled())
+	case "status", "show":
+		cli.showConfigChat()
+	default:
+		fmt.Println(colorize("  ❌ "+i18n.T("cfg.chat.mem_invalid", args[0]), ColorRed))
+		fmt.Println(colorize("  "+i18n.T("cfg.chat.mem_valid"), ColorGray))
+	}
+}
+
 // setChatAsk flips CHATCLI_CHAT_ASK at runtime.
 func (cli *ChatCLI) setChatAsk(enable bool) {
 	cli.setChatToggle(chatAskEnvVar, "ask_user", chatAskEnabled(), enable)
@@ -162,6 +185,8 @@ func (cli *ChatCLI) showConfigChat() {
 	kv(p, i18n.T("cfg.chat.kb_effective"), chatStateLabel(chatKnowledgeEnabled()))
 	kv(p, chatGraphViewEnvVar, envBool(chatGraphViewEnvVar))
 	kv(p, i18n.T("cfg.chat.gv_effective"), chatStateLabel(chatGraphViewEnabled()))
+	kv(p, chatMemoryEnvVar, envBool(chatMemoryEnvVar))
+	kv(p, i18n.T("cfg.chat.mem_effective"), chatStateLabel(chatMemoryEnabled()))
 
 	// Both native (API key) and XML (OAuth) providers work; report which path
 	// the active provider will take so the user knows what to expect.
@@ -202,6 +227,7 @@ func (cli *ChatCLI) getConfigChatSuggestions(d prompt.Document) []prompt.Suggest
 			{Text: "ask", Description: i18n.T("complete.config.chat_ask")},
 			{Text: "knowledge", Description: i18n.T("complete.config.chat_knowledge")},
 			{Text: "graphview", Description: i18n.T("complete.config.chat_graphview")},
+			{Text: "memory", Description: i18n.T("complete.config.chat_memory")},
 			{Text: "on", Description: i18n.T("complete.config.chat_on")},
 			{Text: "off", Description: i18n.T("complete.config.chat_off")},
 			{Text: "toggle", Description: i18n.T("complete.config.chat_toggle")},
@@ -211,7 +237,7 @@ func (cli *ChatCLI) getConfigChatSuggestions(d prompt.Document) []prompt.Suggest
 	}
 
 	// /config chat ask|knowledge <TAB>
-	if len(args) >= 3 && (strings.ToLower(args[2]) == "ask" || strings.ToLower(args[2]) == "knowledge" || strings.ToLower(args[2]) == "graphview") {
+	if len(args) >= 3 && (strings.ToLower(args[2]) == "ask" || strings.ToLower(args[2]) == "knowledge" || strings.ToLower(args[2]) == "graphview" || strings.ToLower(args[2]) == "memory") {
 		if len(args) == 3 || (len(args) == 4 && !strings.HasSuffix(line, " ")) {
 			vals := []prompt.Suggest{
 				{Text: "on", Description: i18n.T("complete.config.chat_on")},
@@ -236,6 +262,8 @@ func (cli *ChatCLI) printConfigChatUsage() {
 	fmt.Println("  /config chat knowledge off    # " + i18n.T("cfg.chat.usage_kb_off"))
 	fmt.Println("  /config chat graphview on     # " + i18n.T("cfg.chat.usage_gv_on"))
 	fmt.Println("  /config chat graphview off    # " + i18n.T("cfg.chat.usage_gv_off"))
+	fmt.Println("  /config chat memory on        # " + i18n.T("cfg.chat.usage_mem_on"))
+	fmt.Println("  /config chat memory off       # " + i18n.T("cfg.chat.usage_mem_off"))
 	fmt.Println()
 	fmt.Println(colorize("  "+i18n.T("cfg.chat.usage_note"), ColorGray))
 }

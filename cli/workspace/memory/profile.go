@@ -54,87 +54,161 @@ func (ps *UserProfileStore) isEmptyLocked() bool {
 	return p.Name == "" && p.Role == "" && p.ExpertiseLevel == "" &&
 		p.PreferredLang == "" && p.CommStyle == "" && p.Company == "" &&
 		p.Location == "" && len(p.Certifications) == 0 && len(p.Skills) == 0 &&
-		len(p.Goals) == 0 && len(p.Preferences) == 0
+		len(p.Goals) == 0 && len(p.Interests) == 0 && len(p.Directives) == 0 &&
+		len(p.Milestones) == 0 && len(p.Preferences) == 0
 }
 
 // Update applies partial updates to the profile.
-// Only non-empty fields in the update are applied.
+//
+// Scalar fields overwrite. List fields (certifications/skills/goals/interests/
+// directives) default to UPSERT — new items append, and an item whose stem
+// matches an existing entry supersedes it in place, so progress restatements
+// stop accumulating. Keys may carry an operation affix to change that:
+// "goals_replace" overwrites the whole list (empty value clears it),
+// "goals_remove"/"goals_done" removes matching entries. "milestone" appends a
+// dated event to the timeline, and "preferences_remove" deletes preference
+// keys. Empty values are ignored except for *_replace.
 func (ps *UserProfileStore) Update(updates map[string]string) bool {
 	ps.mu.Lock()
 	defer ps.mu.Unlock()
 
 	changed := false
 	for key, value := range updates {
-		value = strings.TrimSpace(value)
-		if value == "" {
-			continue
-		}
-		switch strings.ToLower(key) {
-		case "name":
-			if ps.profile.Name != value {
-				ps.profile.Name = value
-				changed = true
-			}
-		case "role":
-			if ps.profile.Role != value {
-				ps.profile.Role = value
-				changed = true
-			}
-		case "expertise_level", "expertise", "level":
-			normalized := normalizeExpertise(value)
-			if ps.profile.ExpertiseLevel != normalized {
-				ps.profile.ExpertiseLevel = normalized
-				changed = true
-			}
-		case "preferred_language", "language", "lang":
-			if ps.profile.PreferredLang != value {
-				ps.profile.PreferredLang = value
-				changed = true
-			}
-		case "communication_style", "comm_style", "style":
-			if ps.profile.CommStyle != value {
-				ps.profile.CommStyle = value
-				changed = true
-			}
-		case "company", "employer", "organization", "org":
-			if ps.profile.Company != value {
-				ps.profile.Company = value
-				changed = true
-			}
-		case "location", "city", "country", "timezone", "tz":
-			if ps.profile.Location != value {
-				ps.profile.Location = value
-				changed = true
-			}
-		case "certification", "certifications", "cert", "certs":
-			if appendUnique(&ps.profile.Certifications, value) {
-				changed = true
-			}
-		case "skill", "skills":
-			if appendUnique(&ps.profile.Skills, value) {
-				changed = true
-			}
-		case "goal", "goals", "objective", "objectives":
-			if appendUnique(&ps.profile.Goals, value) {
-				changed = true
-			}
-		default:
-			// Store as generic preference. This is the escape hatch that
-			// keeps the profile open-ended: any personal fact the model
-			// reports with a novel key is preserved instead of dropped.
-			if ps.profile.Preferences == nil {
-				ps.profile.Preferences = make(map[string]string)
-			}
-			if ps.profile.Preferences[key] != value {
-				ps.profile.Preferences[key] = value
-				changed = true
-			}
+		if ps.applyUpdate(key, strings.TrimSpace(value)) {
+			changed = true
 		}
 	}
 
 	if changed {
 		ps.profile.LastUpdated = time.Now()
 		ps.persist()
+	}
+	return changed
+}
+
+// applyUpdate applies one key/value update; callers must hold the write lock.
+func (ps *UserProfileStore) applyUpdate(key, value string) bool {
+	if field, op, ok := resolveListKey(key); ok {
+		return ps.applyListOp(field, op, value)
+	}
+	if value == "" {
+		return false
+	}
+	switch strings.ToLower(strings.TrimSpace(key)) {
+	case "name":
+		return ps.setScalar(&ps.profile.Name, value)
+	case "role":
+		return ps.setScalar(&ps.profile.Role, value)
+	case "expertise_level", "expertise", "level":
+		return ps.setScalar(&ps.profile.ExpertiseLevel, normalizeExpertise(value))
+	case "preferred_language", "language", "lang":
+		return ps.setScalar(&ps.profile.PreferredLang, value)
+	case "communication_style", "comm_style", "style":
+		return ps.setScalar(&ps.profile.CommStyle, value)
+	case "company", "employer", "organization", "org":
+		return ps.setScalar(&ps.profile.Company, value)
+	case "location", "city", "country", "timezone", "tz":
+		return ps.setScalar(&ps.profile.Location, value)
+	case "milestone", "milestones":
+		return ps.addMilestones(value)
+	case "preferences_remove", "preference_remove", "remove_preference", "remove_preferences":
+		return ps.removePreferences(value)
+	default:
+		// Store as generic preference. This is the escape hatch that
+		// keeps the profile open-ended: any personal fact the model
+		// reports with a novel key is preserved instead of dropped.
+		if ps.profile.Preferences == nil {
+			ps.profile.Preferences = make(map[string]string)
+		}
+		if ps.profile.Preferences[key] != value {
+			ps.profile.Preferences[key] = value
+			return true
+		}
+		return false
+	}
+}
+
+func (ps *UserProfileStore) setScalar(target *string, value string) bool {
+	if *target == value {
+		return false
+	}
+	*target = value
+	return true
+}
+
+// listRef resolves a canonical list-field name to its slice.
+func (ps *UserProfileStore) listRef(field string) *[]string {
+	switch field {
+	case "certifications":
+		return &ps.profile.Certifications
+	case "skills":
+		return &ps.profile.Skills
+	case "goals":
+		return &ps.profile.Goals
+	case "interests":
+		return &ps.profile.Interests
+	case "directives":
+		return &ps.profile.Directives
+	}
+	return nil
+}
+
+// applyListOp executes one list operation; callers must hold the write lock.
+func (ps *UserProfileStore) applyListOp(field string, op listOp, value string) bool {
+	list := ps.listRef(field)
+	if list == nil {
+		return false
+	}
+	switch op {
+	case opReplace:
+		return replaceItems(list, splitListItems(value))
+	case opRemove:
+		if value == "" {
+			return false
+		}
+		return removeItems(list, splitListItems(value))
+	default:
+		if value == "" {
+			return false
+		}
+		return upsertItems(list, splitListItems(value))
+	}
+}
+
+// addMilestones appends dated timeline events, skipping restatements of an
+// already-recorded milestone (same stem). Milestones split only on ';' and
+// newlines — they are sentences and legitimately contain commas.
+func (ps *UserProfileStore) addMilestones(value string) bool {
+	changed := false
+	for _, item := range splitSentenceItems(value) {
+		if item == "" || isFragmentEntry(item) {
+			continue
+		}
+		st := stemOf(item)
+		dup := false
+		for _, m := range ps.profile.Milestones {
+			if stemOf(m.Text) == st {
+				dup = true
+				break
+			}
+		}
+		if dup {
+			continue
+		}
+		ps.profile.Milestones = append(ps.profile.Milestones, Milestone{Date: time.Now(), Text: item})
+		changed = true
+	}
+	return changed
+}
+
+// removePreferences deletes the named preference keys (comma-separated).
+func (ps *UserProfileStore) removePreferences(value string) bool {
+	changed := false
+	for _, k := range splitListItems(value) {
+		if _, ok := ps.profile.Preferences[k]; ok {
+			delete(ps.profile.Preferences, k)
+			changed = true
+		}
 	}
 	return changed
 }
@@ -196,6 +270,25 @@ func (ps *UserProfileStore) FormatForPrompt() string {
 	}
 	if len(p.Goals) > 0 {
 		parts = append(parts, "Goals: "+strings.Join(p.Goals, ", "))
+	}
+	if len(p.Interests) > 0 {
+		parts = append(parts, "Interests: "+strings.Join(p.Interests, ", "))
+	}
+	if len(p.Directives) > 0 {
+		parts = append(parts, "Directives (standing user instructions — follow them): "+strings.Join(p.Directives, "; "))
+	}
+	if len(p.Milestones) > 0 {
+		// Most recent milestones last (chronological), bounded so the prompt
+		// stays lean while long-range history remains on disk.
+		ms := p.Milestones
+		if len(ms) > 8 {
+			ms = ms[len(ms)-8:]
+		}
+		entries := make([]string, 0, len(ms))
+		for _, m := range ms {
+			entries = append(entries, "["+m.Date.Format("2006-01-02")+"] "+m.Text)
+		}
+		parts = append(parts, "Milestones: "+strings.Join(entries, "; "))
 	}
 
 	// Top 5 commands
@@ -260,7 +353,15 @@ func (ps *UserProfileStore) load() {
 	if p.Preferences == nil {
 		p.Preferences = make(map[string]string)
 	}
+	// Self-heal list fields polluted by earlier append-only versions and
+	// persist the healed profile, so legacy damage is fixed on the next run
+	// and never resurfaces.
+	healed := normalizeLoadedProfile(&p)
 	ps.profile = p
+	if healed {
+		ps.profile.LastUpdated = time.Now()
+		ps.persist()
+	}
 }
 
 func (ps *UserProfileStore) persist() {
@@ -272,34 +373,6 @@ func (ps *UserProfileStore) persist() {
 	if err := atomicWriteFile(ps.path, data, 0o600); err != nil {
 		ps.logger.Warn("failed to write user profile", zap.Error(err))
 	}
-}
-
-// appendUnique splits value on commas/semicolons and appends each item to
-// *list when not already present (case-insensitive). It returns true if the
-// list grew. The model often reports several items at once
-// ("AWS SAA, CKA, Terraform Associate"); splitting here keeps each as its
-// own entry rather than one mashed-together string.
-func appendUnique(list *[]string, value string) bool {
-	seen := make(map[string]struct{}, len(*list))
-	for _, existing := range *list {
-		seen[strings.ToLower(strings.TrimSpace(existing))] = struct{}{}
-	}
-
-	added := false
-	for _, raw := range strings.FieldsFunc(value, func(r rune) bool { return r == ',' || r == ';' }) {
-		item := strings.TrimSpace(raw)
-		if item == "" {
-			continue
-		}
-		key := strings.ToLower(item)
-		if _, ok := seen[key]; ok {
-			continue
-		}
-		seen[key] = struct{}{}
-		*list = append(*list, item)
-		added = true
-	}
-	return added
 }
 
 func normalizeExpertise(level string) string {

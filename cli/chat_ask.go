@@ -3,8 +3,10 @@
  * Copyright (c) 2024 Edilson Freitas. License: Apache-2.0.
  *
  * Chat mode is tool-less by design. Sanctioned exceptions only: ask_user
- * (interactive choice) and — when a knowledge base is attached — read-only
- * knowledge retrieval (chat_knowledge.go). No exec/file/search tools, ever.
+ * (interactive choice), read-only knowledge retrieval when a knowledge base
+ * is attached (chat_knowledge.go), graphview rendering (chat_graphview.go)
+ * and long-term memory/profile persistence (chat_memory.go). No exec/file/
+ * search tools, ever.
  * Native providers use a buffered SendPromptWithTools turn; non-native ones
  * (Claude OAuth) use a buffered XML turn with the formats injected and the
  * markup suppressed. In both cases the turn is BUFFERED and the text RETURNED
@@ -65,19 +67,20 @@ func (cli *ChatCLI) maybeChatAskTurn(
 	askOn := chatAskEnabled()
 	kbOn := cli.chatKnowledgeActive()
 	gvOn := chatGraphViewEnabled()
-	if !askOn && !kbOn && !gvOn {
+	memOn := cli.chatMemoryActive()
+	if !askOn && !kbOn && !gvOn && !memOn {
 		return "", false, nil
 	}
 	// Native tool-use providers: buffered decision turn offering only the
 	// sanctioned exception tools.
 	if tac, ok := client.AsToolAware(activeClient); ok && tac.SupportsNativeTools() {
 		out, err := cli.executeChatAskNative(ctx, tac, activeClient, userInput, additionalContext,
-			tempHistory, effectiveMaxTokens, resolution, stopSpinner, askOn, kbOn, gvOn)
+			tempHistory, effectiveMaxTokens, resolution, stopSpinner, askOn, kbOn, gvOn, memOn)
 		return out, true, err
 	}
 	// Providers without native tools (e.g. Claude in OAuth mode): XML transport.
 	out, err := cli.executeChatAskXML(ctx, activeClient, userInput, additionalContext,
-		tempHistory, effectiveMaxTokens, stopSpinner, askOn, kbOn, gvOn)
+		tempHistory, effectiveMaxTokens, stopSpinner, askOn, kbOn, gvOn, memOn)
 	return out, true, err
 }
 
@@ -104,18 +107,9 @@ func (cli *ChatCLI) executeChatAskNative(
 	effectiveMaxTokens int,
 	resolution SkillClientResolution,
 	stopSpinner func(),
-	askOn, kbOn, gvOn bool,
+	askOn, kbOn, gvOn, memOn bool,
 ) (string, error) {
-	var tools []models.ToolDefinition
-	if askOn {
-		tools = append(tools, workers.AskUserToolDefinition())
-	}
-	if kbOn {
-		tools = append(tools, knowledgeToolDefinition())
-	}
-	if gvOn {
-		tools = append(tools, graphViewToolDefinition())
-	}
+	tools := buildChatExceptionTools(askOn, kbOn, gvOn, memOn)
 	prompt := userInput + additionalContext
 	history := tempHistory
 	gvDone := false
@@ -133,38 +127,39 @@ func (cli *ChatCLI) executeChatAskNative(
 			cli.costTracker.RecordRealUsage(resolution.Provider, resolution.Model, resp.Usage)
 		}
 
-		var askArgs, kbArgs, gvArgs string
+		var calls chatExceptionCalls
 		if resp != nil {
 			for _, tc := range resp.ToolCalls {
-				switch {
-				case askOn && isAskToolName(tc.Name) && askArgs == "":
-					askArgs = tc.ArgumentsJSON()
-				case kbOn && isKnowledgeToolName(tc.Name) && kbArgs == "":
-					kbArgs = tc.ArgumentsJSON()
-				case gvOn && isGraphViewToolName(tc.Name) && gvArgs == "":
-					gvArgs = tc.ArgumentsJSON()
-				}
+				calls.collect(tc.Name, tc.ArgumentsJSON(), askOn, kbOn, gvOn, memOn)
 			}
 		}
 
 		// Knowledge pull: execute, fold into the conversation, decide again.
-		if kbArgs != "" && round < chatKnowledgeMaxRounds {
-			result := cli.runChatKnowledge(ctx, kbArgs)
-			history, prompt = appendKnowledgeRound(history, prompt, kbArgs, result)
+		if calls.kb != "" && round < chatKnowledgeMaxRounds {
+			result := cli.runChatKnowledge(ctx, calls.kb)
+			history, prompt = appendKnowledgeRound(history, prompt, calls.kb, result)
+			continue
+		}
+
+		// Memory write/read: execute, fold the result in, decide again — the
+		// model may chain recall → update → verify before confirming.
+		if calls.mem != "" && round < chatMemoryMaxRounds {
+			result := cli.runChatMemory(ctx, calls.mem)
+			history, prompt = appendMemoryRound(history, prompt, calls.mem, result)
 			continue
 		}
 
 		// Graph render: a one-shot action — render once, fold the result in, and
 		// let the next round produce the natural-language confirmation.
-		if gvArgs != "" && !gvDone {
-			result := cli.runChatGraphView(ctx, gvArgs)
-			history, prompt = appendGraphViewRound(history, prompt, gvArgs, result)
+		if calls.gv != "" && !gvDone {
+			result := cli.runChatGraphView(ctx, calls.gv)
+			history, prompt = appendGraphViewRound(history, prompt, calls.gv, result)
 			gvDone = true
 			continue
 		}
 
 		// No ask: the buffered content is the answer.
-		if askArgs == "" {
+		if calls.ask == "" {
 			cli.finishSpinner(stopSpinner)
 			if resp != nil {
 				return resp.Content, nil
@@ -175,8 +170,46 @@ func (cli *ChatCLI) executeChatAskNative(
 		// Ask: stop the spinner, render the overlay, then buffered follow-up.
 		// The accumulated history keeps any pulled passages in context.
 		cli.finishSpinner(stopSpinner)
-		result := cli.runChatAsk(ctx, askArgs)
+		result := cli.runChatAsk(ctx, calls.ask)
 		return cli.chatAskFollowup(ctx, activeClient, prompt, "", history, result, effectiveMaxTokens)
+	}
+}
+
+// buildChatExceptionTools assembles the native tool definitions for the
+// enabled chat exceptions, in a stable order.
+func buildChatExceptionTools(askOn, kbOn, gvOn, memOn bool) []models.ToolDefinition {
+	var tools []models.ToolDefinition
+	if askOn {
+		tools = append(tools, workers.AskUserToolDefinition())
+	}
+	if kbOn {
+		tools = append(tools, knowledgeToolDefinition())
+	}
+	if gvOn {
+		tools = append(tools, graphViewToolDefinition())
+	}
+	if memOn {
+		tools = append(tools, memoryToolDefinition())
+	}
+	return tools
+}
+
+// chatExceptionCalls carries the FIRST call captured per exception tool in one
+// decision round; collect ignores disabled tools and later duplicates.
+type chatExceptionCalls struct {
+	ask, kb, gv, mem string
+}
+
+func (c *chatExceptionCalls) collect(name, args string, askOn, kbOn, gvOn, memOn bool) {
+	switch {
+	case askOn && isAskToolName(name) && c.ask == "":
+		c.ask = args
+	case kbOn && isKnowledgeToolName(name) && c.kb == "":
+		c.kb = args
+	case gvOn && isGraphViewToolName(name) && c.gv == "":
+		c.gv = args
+	case memOn && isMemoryToolName(name) && c.mem == "":
+		c.mem = args
 	}
 }
 
@@ -190,7 +223,7 @@ func (cli *ChatCLI) executeChatAskXML(
 	tempHistory []models.Message,
 	effectiveMaxTokens int,
 	stopSpinner func(),
-	askOn, kbOn, gvOn bool,
+	askOn, kbOn, gvOn, memOn bool,
 ) (string, error) {
 	instruction := ""
 	if askOn {
@@ -201,6 +234,9 @@ func (cli *ChatCLI) executeChatAskXML(
 	}
 	if gvOn {
 		instruction += chatGraphViewXMLInstruction()
+	}
+	if memOn {
+		instruction += chatMemoryXMLInstruction()
 	}
 	prompt := userInput + additionalContext + instruction
 	history := tempHistory
@@ -216,42 +252,44 @@ func (cli *ChatCLI) executeChatAskXML(
 			return "", err
 		}
 
-		calls, _ := agent.ParseToolCalls(resp)
-		var askArgs, kbArgs, gvArgs string
-		for _, tc := range calls {
-			switch {
-			case askOn && isAskToolName(tc.Name) && askArgs == "":
-				askArgs = tc.Args
-			case kbOn && isKnowledgeToolName(tc.Name) && kbArgs == "":
-				kbArgs = tc.Args
-			case gvOn && isGraphViewToolName(tc.Name) && gvArgs == "":
-				gvArgs = tc.Args
-			}
+		parsed, _ := agent.ParseToolCalls(resp)
+		var calls chatExceptionCalls
+		for _, tc := range parsed {
+			calls.collect(tc.Name, tc.Args, askOn, kbOn, gvOn, memOn)
 		}
 
 		// Knowledge pull: execute, fold into the conversation, decide again.
 		// The continuation prompt re-pins the call format for the next round.
-		if kbArgs != "" && round < chatKnowledgeMaxRounds {
-			result := cli.runChatKnowledge(ctx, kbArgs)
-			history, prompt = appendKnowledgeRound(history, prompt, kbArgs, result)
+		if calls.kb != "" && round < chatKnowledgeMaxRounds {
+			result := cli.runChatKnowledge(ctx, calls.kb)
+			history, prompt = appendKnowledgeRound(history, prompt, calls.kb, result)
 			prompt += chatKnowledgeXMLInstruction()
+			continue
+		}
+
+		// Memory write/read: execute, fold the result in, decide again — the
+		// continuation prompt re-pins the call format for the next round.
+		if calls.mem != "" && round < chatMemoryMaxRounds {
+			result := cli.runChatMemory(ctx, calls.mem)
+			history, prompt = appendMemoryRound(history, prompt, calls.mem, result)
+			prompt += chatMemoryXMLInstruction()
 			continue
 		}
 
 		// Graph render: one-shot — render once, fold in the result, then let the
 		// next round produce the natural-language confirmation.
-		if gvArgs != "" && !gvDone {
-			result := cli.runChatGraphView(ctx, gvArgs)
-			history, prompt = appendGraphViewRound(history, prompt, gvArgs, result)
+		if calls.gv != "" && !gvDone {
+			result := cli.runChatGraphView(ctx, calls.gv)
+			history, prompt = appendGraphViewRound(history, prompt, calls.gv, result)
 			gvDone = true
 			continue
 		}
 
 		// No ask: the buffered text is the answer, minus any stray tool-call markup.
-		if askArgs == "" {
+		if calls.ask == "" {
 			cli.finishSpinner(stopSpinner)
 			clean := resp
-			for _, tc := range calls {
+			for _, tc := range parsed {
 				if tc.Raw != "" {
 					clean = strings.ReplaceAll(clean, tc.Raw, "")
 				}
@@ -260,7 +298,7 @@ func (cli *ChatCLI) executeChatAskXML(
 		}
 
 		cli.finishSpinner(stopSpinner)
-		result := cli.runChatAsk(ctx, askArgs)
+		result := cli.runChatAsk(ctx, calls.ask)
 		return cli.chatAskFollowup(ctx, activeClient, prompt, "", history, result, effectiveMaxTokens)
 	}
 }

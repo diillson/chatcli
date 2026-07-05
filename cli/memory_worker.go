@@ -240,7 +240,7 @@ func (mw *memoryWorker) extractAndSave(ctx context.Context, messages []models.Me
 	// Topic threading rides as an appended directive so the base extraction
 	// prompt constant stays byte-stable (an exported const value change reads as
 	// an incompatible API change); the parser accepts both formats.
-	instructions := memory.EnhancedExtractionPromptV2 + "\n" + topicSummaryDirective
+	instructions := memory.EnhancedExtractionPromptV3 + "\n" + topicSummaryDirective
 	if evolveMode != selfEvolveOff {
 		instructions += "\n" + selfEvolveSkillDirective
 		// Inject only the compact skill index (names + descriptions), so the

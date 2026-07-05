@@ -510,7 +510,7 @@ Credenciais armazenadas com **AES-256-GCM** em `~/.chatcli/auth-profiles.json`.
 | **Config** | `/config [section]` · `/status` · `/settings` · `/switch <provider\|model>` |
 | **Modo agente** | `/agent [task]` · `/run` · `/coder` · `/plan [query]` · `/moa <prompt>` |
 | **Quality pipeline** | `/thinking [on\|off\|auto]` · `/refine [draft]` · `/verify [answer]` · `/reflect [list\|failed\|retry\|purge\|drain\|<texto>]` |
-| **Memória & grafo** | `/memory {longterm,list,profile,facts,remember,forget,profile set,compact}` · `@memory` (remember/recall/forget/profile/neighbors/map) · `/graph [assunto]` · `/compact [ratio]` |
+| **Memória & grafo** | `/memory {longterm,list,profile,facts,remember,forget,profile set,compact}` · `@memory` (remember/recall/forget/profile/neighbors/map) — perfil com ciclo de vida: campos de lista fazem upsert (reafirmar um item supera o antigo, não duplica) e sufixos `_replace`/`_done`/`_remove` reescrevem (ex.: `goals_done=` remove o objetivo concluído; registre junto `milestone=` e `certifications=`); novos campos `interests`, `directives` e `milestone` (linha do tempo datada); atualização de perfil funciona também no chat (exceção sancionada, `/config chat memory`, `CHATCLI_CHAT_MEMORY`) · `/graph [assunto]` · `/compact [ratio]` |
 | **Extensibilidade** | `/mcp {init,list,invoke,config}` · `/plugin {list,load,unload}` · `/skill <name>` · `/hooks {list,enable,disable,test}` |
 | **Mensageria & Servidores** | `/gateway {start,status}` (Telegram/Slack/Discord/WhatsApp/webhook) · `chatcli mcp-server` · `chatcli acp` |
 | **Remoto** | `/auth {login,logout,status}` · `/connect <server>` · `/disconnect` |

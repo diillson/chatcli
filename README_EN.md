@@ -510,7 +510,7 @@ Credentials are stored with **AES-256-GCM** at `~/.chatcli/auth-profiles.json`.
 | **Config** | `/config [section]` · `/status` · `/settings` · `/switch <provider\|model>` |
 | **Agent mode** | `/agent [task]` · `/run` · `/coder` · `/plan [query]` · `/moa <prompt>` |
 | **Quality pipeline** | `/thinking [on\|off\|auto]` · `/refine [draft]` · `/verify [answer]` · `/reflect [list\|failed\|retry\|purge\|drain\|<text>]` |
-| **Memory & graph** | `/memory {longterm,list,profile,facts,remember,forget,profile set,compact}` · `@memory` (remember/recall/forget/profile/neighbors/map) · `/graph [subject]` · `/compact [ratio]` |
+| **Memory & graph** | `/memory {longterm,list,profile,facts,remember,forget,profile set,compact}` · `@memory` (remember/recall/forget/profile/neighbors/map) — profile with lifecycle: list fields upsert (restating an item supersedes instead of duplicating) and `_replace`/`_done`/`_remove` key suffixes rewrite (e.g. `goals_done=` removes the finished goal; record `milestone=` and `certifications=` alongside); new `interests`, `directives` and `milestone` (dated timeline) fields; profile updates also work in chat (sanctioned exception, `/config chat memory`, `CHATCLI_CHAT_MEMORY`) · `/graph [subject]` · `/compact [ratio]` |
 | **Extensibility** | `/mcp {init,list,invoke,config}` · `/plugin {list,load,unload}` · `/skill <name>` · `/hooks {list,enable,disable,test}` |
 | **Messaging & Servers** | `/gateway {start,status}` (Telegram/Slack/Discord/WhatsApp/webhook) · `chatcli mcp-server` · `chatcli acp` |
 | **Remote** | `/auth {login,logout,status}` · `/connect <server>` · `/disconnect` |

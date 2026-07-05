@@ -23,9 +23,21 @@ type UserProfile struct {
 	Certifications []string          `json:"certifications,omitempty"`
 	Skills         []string          `json:"skills,omitempty"`
 	Goals          []string          `json:"goals,omitempty"`
+	Interests      []string          `json:"interests,omitempty"`
+	Directives     []string          `json:"directives,omitempty"`
+	Milestones     []Milestone       `json:"milestones,omitempty"`
 	TopCommands    map[string]int    `json:"top_commands,omitempty"`
 	Preferences    map[string]string `json:"preferences,omitempty"`
 	LastUpdated    time.Time         `json:"last_updated"`
+}
+
+// Milestone is a dated durable event in the user's life or career timeline —
+// a certification earned, a job change, a purchase completed. Milestones are
+// append-only history: they complement Goals (what the user wants) with what
+// actually happened and when, so long-range context survives goal cleanup.
+type Milestone struct {
+	Date time.Time `json:"date"`
+	Text string    `json:"text"`
 }
 
 // Fact is a single unit of long-term memory with scoring metadata.
