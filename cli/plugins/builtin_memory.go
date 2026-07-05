@@ -125,6 +125,7 @@ preference. 'forget' only removes stored FACTS — use the suffixes above for
 profile fields.
 
 Deeper profile keys — capture these the moment they surface:
+  directives="[scope:<project>] rule"  project-scoped rule (injected only in that workspace); no tag = global
   stance="position :: reason"       technical position WITH its why (supersedes on restate)
   env_os= / env_shell= / env_...    structured machine/tooling facts
   milestone="dated event that happened"
@@ -159,7 +160,7 @@ func (*BuiltinMemoryPlugin) Schema() string {
 			},
 			{
 				"name":        "profile",
-				"description": "Update durable attributes of the user. Known keys: name, role, expertise_level, preferred_language, communication_style, company, location, certifications, skills, goals, interests, directives, milestone, stance (\"position :: reason\"), env_<key> (machine/tooling). Any other key=value is preserved too. List fields UPSERT by default (append new, supersede restated); use key suffixes to change that: goals_replace overwrites the whole list (empty value clears it), goals_done/goals_remove removes matching entries — same suffixes on certifications/skills/interests/directives. preferences_remove deletes preference keys; sensitive_mark/sensitive_unmark flip a field's privacy flag. When the user completes a goal, move it: goals_done + milestone (+ certifications when a credential was earned).",
+				"description": "Update durable attributes of the user. Known keys: name, role, expertise_level, preferred_language, communication_style, company, location, certifications, skills, goals, interests, directives, milestone, stance (\"position :: reason\"), env_<key> (machine/tooling). Directives accept a project scope: \"[scope:<project>] rule\" is only injected when that workspace is active; no tag = global. Any other key=value is preserved too. List fields UPSERT by default (append new, supersede restated); use key suffixes to change that: goals_replace overwrites the whole list (empty value clears it), goals_done/goals_remove removes matching entries — same suffixes on certifications/skills/interests/directives. preferences_remove deletes preference keys; sensitive_mark/sensitive_unmark flip a field's privacy flag. When the user completes a goal, move it: goals_done + milestone (+ certifications when a credential was earned).",
 				"flags": []map[string]interface{}{
 					{"name": "fields", "type": "object", "required": true, "description": "key/value map of profile attributes; list fields accept comma-separated values (commas inside parentheses are safe)."},
 				},

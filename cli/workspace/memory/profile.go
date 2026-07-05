@@ -406,8 +406,18 @@ func (ps *UserProfileStore) RecordCommand(cmd string) {
 	ps.persist()
 }
 
-// FormatForPrompt returns a concise summary for system prompt injection.
+// FormatForPrompt returns a concise summary for system prompt injection,
+// with every scoped directive visible (labeled). Prefer FormatForPromptScoped
+// when the caller knows the active workspace.
 func (ps *UserProfileStore) FormatForPrompt() string {
+	return ps.FormatForPromptScoped("")
+}
+
+// FormatForPromptScoped is FormatForPrompt filtered by the active workspace:
+// directives scoped to another project are omitted, matching ones appear with
+// their scope label, and globals always show. An empty workspaceDir hides
+// nothing — no context means no basis to filter.
+func (ps *UserProfileStore) FormatForPromptScoped(workspaceDir string) string {
 	ps.mu.RLock()
 	defer ps.mu.RUnlock()
 
@@ -419,7 +429,7 @@ func (ps *UserProfileStore) FormatForPrompt() string {
 	parts := make([]string, 0, 16+len(p.Preferences))
 	parts = appendIdentityParts(parts, p)
 	parts = appendListParts(parts, p)
-	parts = appendDirectiveParts(parts, p)
+	parts = appendDirectiveParts(parts, p, workspaceDir)
 	parts = appendStanceParts(parts, p)
 	parts = appendEnvironmentParts(parts, p)
 	parts = appendMilestoneParts(parts, p)
@@ -464,13 +474,24 @@ func appendListParts(parts []string, p UserProfile) []string {
 	return parts
 }
 
-func appendDirectiveParts(parts []string, p UserProfile) []string {
+// appendDirectiveParts partitions directives into hard rules and preferences,
+// applying workspace scoping: a "[scope:<name>]" directive only renders when
+// the workspace matches (or no workspace context exists), labeled with its
+// scope so the model knows where the rule comes from.
+func appendDirectiveParts(parts []string, p UserProfile, workspaceDir string) []string {
 	var hard, soft []string
 	for _, d := range p.Directives {
-		if isHardDirective(d) {
-			hard = append(hard, d)
+		scope, text := parseDirectiveScope(d)
+		if scope != "" {
+			if workspaceDir != "" && !directiveMatchesWorkspace(scope, workspaceDir) {
+				continue
+			}
+			text = "[" + scope + "] " + text
+		}
+		if isHardDirective(text) {
+			hard = append(hard, text)
 		} else {
-			soft = append(soft, d)
+			soft = append(soft, text)
 		}
 	}
 	if len(hard) > 0 {

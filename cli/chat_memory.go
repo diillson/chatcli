@@ -62,7 +62,8 @@ func memoryToolDefinition() models.ToolDefinition {
 			Name: "memory",
 			Description: "Persist or update the user's long-term memory and profile the moment they reveal or correct " +
 				"a durable fact about themselves (role, certifications, skills, goals, interests, standing directives, " +
-				"milestones, stances as \"position :: reason\", env_<key> machine facts). " +
+				"milestones, stances as \"position :: reason\", env_<key> machine facts, " +
+				"directives optionally scoped as \"[scope:<project>] rule\"). " +
 				"Use 'profile' for profile attributes and 'remember' for durable facts; 'recall' reads current memory first. " +
 				"Profile list fields upsert by default; key suffixes rewrite: goals_replace overwrites the whole list, " +
 				"goals_done/goals_remove delete matching entries (same suffixes for certifications/skills/interests/directives). " +

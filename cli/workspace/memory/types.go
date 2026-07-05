@@ -13,25 +13,25 @@ import (
 // match a typed field lands in Preferences (free-form key/value), so the
 // profile can grow without a schema change — see UserProfileStore.Update.
 type UserProfile struct {
-	Name           string            `json:"name,omitempty"`
-	Role           string            `json:"role,omitempty"`
-	ExpertiseLevel string            `json:"expertise_level,omitempty"` // beginner, intermediate, expert
-	PreferredLang  string            `json:"preferred_language,omitempty"`
-	CommStyle      string            `json:"communication_style,omitempty"`
-	Company        string            `json:"company,omitempty"`
-	Location       string            `json:"location,omitempty"`
-	Certifications []string          `json:"certifications,omitempty"`
-	Skills         []string          `json:"skills,omitempty"`
-	Goals          []string          `json:"goals,omitempty"`
-	Interests      []string          `json:"interests,omitempty"`
-	Directives     []string          `json:"directives,omitempty"`
-	Milestones     []Milestone       `json:"milestones,omitempty"`
-	Stances        []Stance          `json:"stances,omitempty"`
-	Environment    map[string]string `json:"environment,omitempty"`
-	TopCommands    map[string]int    `json:"top_commands,omitempty"`
-	Preferences    map[string]string `json:"preferences,omitempty"`
+	Name           string               `json:"name,omitempty"`
+	Role           string               `json:"role,omitempty"`
+	ExpertiseLevel string               `json:"expertise_level,omitempty"` // beginner, intermediate, expert
+	PreferredLang  string               `json:"preferred_language,omitempty"`
+	CommStyle      string               `json:"communication_style,omitempty"`
+	Company        string               `json:"company,omitempty"`
+	Location       string               `json:"location,omitempty"`
+	Certifications []string             `json:"certifications,omitempty"`
+	Skills         []string             `json:"skills,omitempty"`
+	Goals          []string             `json:"goals,omitempty"`
+	Interests      []string             `json:"interests,omitempty"`
+	Directives     []string             `json:"directives,omitempty"`
+	Milestones     []Milestone          `json:"milestones,omitempty"`
+	Stances        []Stance             `json:"stances,omitempty"`
+	Environment    map[string]string    `json:"environment,omitempty"`
+	TopCommands    map[string]int       `json:"top_commands,omitempty"`
+	Preferences    map[string]string    `json:"preferences,omitempty"`
 	FieldMeta      map[string]FieldMeta `json:"field_meta,omitempty"`
-	LastUpdated    time.Time         `json:"last_updated"`
+	LastUpdated    time.Time            `json:"last_updated"`
 }
 
 // Stance is a technical position the user holds WITH its reasoning. The

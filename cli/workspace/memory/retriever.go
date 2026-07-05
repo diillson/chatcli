@@ -132,8 +132,9 @@ func (r *RelevanceRetriever) assemble(rankedFacts []*Fact) string {
 	var sections []string
 	remaining := budget
 
-	// 1. User profile (always included, small)
-	if profileText := r.profile.FormatForPrompt(); profileText != "" {
+	// 1. User profile (always included, small). Workspace-scoped so
+	// directives bound to other projects stay out of this session.
+	if profileText := r.profile.FormatForPromptScoped(r.workspaceDir); profileText != "" {
 		section := "## User Profile\n\n" + profileText
 		if len(section) < remaining {
 			sections = append(sections, section)

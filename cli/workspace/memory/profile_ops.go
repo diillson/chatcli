@@ -1,3 +1,8 @@
+/*
+ * ChatCLI - Command Line Interface for LLM interaction
+ * Copyright (c) 2024 Edilson Freitas
+ * License: Apache-2.0
+ */
 package memory
 
 import (
@@ -391,6 +396,49 @@ func isSensitiveField(field, rawKey string) bool {
 		key = strings.ToLower(pref)
 	}
 	return containsAny(key, sensitiveKeyMarkers...)
+}
+
+// directiveScopePrefix is the canonical, documented syntax for scoping a
+// directive to one project: "[scope:<name>] rule text". Scope is part of the
+// directive's identity (same rule in two projects = two entries), and the
+// retriever filters by the active workspace at injection time.
+const directiveScopePrefix = "[scope:"
+
+// parseDirectiveScope splits the canonical scope prefix off a directive.
+// Entries without a (valid, non-empty) scope tag are global: scope == "".
+func parseDirectiveScope(entry string) (scope, text string) {
+	e := strings.TrimSpace(entry)
+	if !strings.HasPrefix(strings.ToLower(e), directiveScopePrefix) {
+		return "", e
+	}
+	end := strings.Index(e, "]")
+	if end < 0 {
+		return "", e
+	}
+	scope = strings.ToLower(strings.TrimSpace(e[len(directiveScopePrefix):end]))
+	if scope == "" {
+		return "", e
+	}
+	return scope, strings.TrimSpace(e[end+1:])
+}
+
+// directiveMatchesWorkspace reports whether a scope applies to the workspace:
+// the scope must equal one of the workspace path's segments, case-insensitive
+// and exact — substring matching would make "proj" claim every project.
+func directiveMatchesWorkspace(scope, workspaceDir string) bool {
+	s := strings.ToLower(strings.TrimSpace(scope))
+	if s == "" {
+		return true
+	}
+	segments := strings.FieldsFunc(strings.ToLower(workspaceDir), func(r rune) bool {
+		return r == '/' || r == '\\'
+	})
+	for _, seg := range segments {
+		if seg == s {
+			return true
+		}
+	}
+	return false
 }
 
 // hardDirectiveMarkers split standing directives into hard rules (vetoes and
