@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.152.0](https://github.com/diillson/chatcli/compare/v1.151.1...v1.152.0) (2026-07-05)
+
+
+### Features
+
+* **memory:** profile lifecycle, self-healing, chat persistence and deep user expertise layer ([#1133](https://github.com/diillson/chatcli/issues/1133)) ([ba7d594](https://github.com/diillson/chatcli/commit/ba7d5942cbe2ba71bdee737f6084347bd664ebbc))
+
 ## [1.151.1](https://github.com/diillson/chatcli/compare/v1.151.0...v1.151.1) (2026-07-04)
 
 
