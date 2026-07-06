@@ -6,8 +6,8 @@
 
 <h1 align="center">ChatCLI</h1>
 <p align="center">
-  <strong>Plataforma de IA unificada para terminal, servidor gRPC e Kubernetes.</strong><br>
-  <sub>14 provedores · 14 agentes autônomos · pipeline de qualidade em 7 padrões · um único binário.</sub>
+  <strong>Unified AI platform for terminal, gRPC server, and Kubernetes.</strong><br>
+  <sub>14 providers · 14 autonomous agents · 7-pattern quality pipeline · one binary.</sub>
 </p>
 
 <div align="center">
@@ -35,10 +35,10 @@
 <br>
 
 <p align="center">
-  <a href="README_EN.md">English</a> &bull;
-  <a href="https://chatcli.edilsonfreitas.com">Documentação completa</a> &bull;
-  <a href="#arquitetura">Arquitetura</a> &bull;
-  <a href="#observabilidade">Observabilidade</a>
+  <a href="README_PT.md">Português</a> &bull;
+  <a href="https://chatcli.edilsonfreitas.com">Full documentation</a> &bull;
+  <a href="#architecture">Architecture</a> &bull;
+  <a href="#observability">Observability</a>
 </p>
 
 ---
@@ -49,27 +49,27 @@
 
 <br>
 
-> **ChatCLI** conecta os maiores modelos de linguagem do mercado a uma interface única e extensível — do `chatcli -p` no terminal até um operador Kubernetes com pipeline AIOps autônomo, passando por um servidor gRPC production-ready com autenticação, fallback e métricas Prometheus.
+> **ChatCLI** connects the industry's leading LLMs to a single, extensible interface — from `chatcli -p` in your terminal to a Kubernetes operator with an autonomous AIOps pipeline, passing through a production-ready gRPC server with authentication, failover, and Prometheus metrics.
 
 <br>
 
-## Destaques
+## Highlights
 
 | | |
 |---|---|
-| **Multi-provider com fallback** | 14 provedores de LLM (OpenAI · OpenAI Responses · Anthropic · Bedrock · Google · xAI · ZAI · MiniMax · Moonshot (Kimi) · Copilot · GitHub Models · StackSpot · OpenRouter · Ollama), com classificação inteligente de erros, backoff exponencial e cooldown por provider. |
-| **Agentes autônomos** | 14 workers builtin coordenados por motor ReAct (Reason + Act): 12 specialists de orquestração executam em paralelo + 2 de qualidade (refiner, verifier), com pipeline de qualidade em 7 padrões. |
-| **Quality pipeline** | Self-Refine, Chain-of-Verification (CoVe), Reflexion, RAG + HyDE, Plan-and-Solve (ReWOO), backbone de reasoning cross-provider — todos compostos por state machine thread-safe com circuit breakers e hot reload. |
-| **Scheduler (Chronos)** | Agendamento durável com cron + wait-until + DAG + daemon mode. `/schedule`, `/wait`, `/jobs` + tool `@scheduler` para agents. WAL CRC32, snapshots, rate limiter, circuit breakers, audit JSONL, 13 métricas Prometheus. Jobs sobrevivem a crash e a fechar o CLI. |
-| **Reflexion durável** | Fila WAL-backed com worker pool, dead letter queue, replay on boot, retry exponencial com jitter — lições sobrevivem a crash do processo. |
-| **Convergência semântica** | Cascade char → Jaccard → embedding cosine para Self-Refine, com cache LRU/TTL e quality regression detection. |
-| **Production-ready** | gRPC + TLS 1.3, JWT + RBAC, AES-256-GCM, rate limiting, audit logging, 50+ métricas Prometheus. |
-| **Kubernetes-native** | Operador com 17 CRDs e pipeline AIOps autônomo (54+ ações de remediação), SLO monitoring, post-mortems. |
-| **Extensível** | Plugins com verificação Ed25519, skills multi-registry (skills.sh, ClawHub, ChatCLI.dev), hooks de lifecycle, MCP client (stdio + SSE). |
+| **Multi-provider with failover** | 14 LLM providers (OpenAI · OpenAI Responses · Anthropic · Bedrock · Google · xAI · ZAI · MiniMax · Moonshot (Kimi) · Copilot · GitHub Models · StackSpot · OpenRouter · Ollama) with intelligent error classification, exponential backoff, and per-provider cooldown. |
+| **Autonomous agents** | 14 built-in workers coordinated by a ReAct engine (Reason + Act): 12 orchestration specialists run in parallel + 2 quality agents (refiner, verifier), plus a 7-pattern quality pipeline. |
+| **Quality pipeline** | Self-Refine, Chain-of-Verification (CoVe), Reflexion, RAG + HyDE, Plan-and-Solve (ReWOO), cross-provider reasoning backbone — all composed via a thread-safe state machine with circuit breakers and hot reload. |
+| **Scheduler (Chronos)** | Durable scheduling with cron + wait-until + DAG + daemon mode. `/schedule`, `/wait`, `/jobs` + `@scheduler` tool for agents. CRC32 WAL, snapshots, rate limiter, circuit breakers, JSONL audit, 13 Prometheus metrics. Jobs survive crashes and CLI exit. |
+| **Durable Reflexion** | WAL-backed queue with worker pool, dead letter queue, boot replay, exponential retry with jitter — lessons survive process crashes. |
+| **Semantic convergence** | char → Jaccard → embedding cosine cascade for Self-Refine, with LRU/TTL cache and quality regression detection. |
+| **Production-ready** | gRPC + TLS 1.3, JWT + RBAC, AES-256-GCM, rate limiting, audit logging, 50+ Prometheus metrics. |
+| **Kubernetes-native** | Operator with 17 CRDs and an autonomous AIOps pipeline (54+ remediation actions), SLO monitoring, post-mortems. |
+| **Extensible** | Plugins with Ed25519 signature verification, multi-registry skills (skills.sh, ClawHub, ChatCLI.dev), lifecycle hooks, MCP client (stdio + SSE). |
 
 ---
 
-## Instalação
+## Installation
 
 ```bash
 # Homebrew (macOS / Linux)
@@ -78,18 +78,18 @@ brew tap diillson/chatcli && brew install chatcli
 # Go install
 go install github.com/diillson/chatcli@latest
 
-# Binários pre-compilados assinados (cosign)
+# Pre-built, cosign-signed binaries
 # https://github.com/diillson/chatcli/releases
 ```
 
 <details>
-<summary><strong>Compilação a partir do código-fonte</strong></summary>
+<summary><strong>Build from source</strong></summary>
 
 ```bash
 git clone https://github.com/diillson/chatcli.git && cd chatcli
 go mod tidy && go build -o chatcli
 
-# Com informações de versão injetadas via ldflags
+# With version metadata injected via ldflags
 VERSION=$(git describe --tags --always --dirty 2>/dev/null || echo "dev")
 go build -ldflags "-X github.com/diillson/chatcli/version.Version=${VERSION}" -o chatcli
 ```
@@ -98,7 +98,7 @@ go build -ldflags "-X github.com/diillson/chatcli/version.Version=${VERSION}" -o
 
 ---
 
-## Configuração rápida
+## Quick Setup
 
 ```bash
 LLM_PROVIDER=OPENAI    # OPENAI, CLAUDEAI, BEDROCK, GOOGLEAI, XAI, ZAI, MINIMAX, MOONSHOT,
@@ -107,7 +107,7 @@ OPENAI_API_KEY=sk-xxx
 ```
 
 <details>
-<summary><strong>Referência completa de variáveis por provider</strong></summary>
+<summary><strong>Full provider configuration reference</strong></summary>
 
 | Provider | API Key | Model | Extras |
 |---|---|---|---|
@@ -119,7 +119,7 @@ OPENAI_API_KEY=sk-xxx
 | ZAI | `ZAI_API_KEY` | `ZAI_MODEL` | `ZAI_MAX_TOKENS` |
 | MiniMax | `MINIMAX_API_KEY` | `MINIMAX_MODEL` | `MINIMAX_MAX_TOKENS` |
 | Moonshot (Kimi) | `MOONSHOT_API_KEY` | `MOONSHOT_MODEL` | `MOONSHOT_MAX_TOKENS`, `MOONSHOT_THINKING` |
-| GitHub Copilot | `GITHUB_COPILOT_TOKEN` | `COPILOT_MODEL` | ou `/auth login github-copilot` |
+| GitHub Copilot | `GITHUB_COPILOT_TOKEN` | `COPILOT_MODEL` | or `/auth login github-copilot` |
 | GitHub Models | `GITHUB_TOKEN` | `GITHUB_MODELS_MODEL` | `GH_TOKEN`, `GITHUB_MODELS_TOKEN` |
 | StackSpot | `CLIENT_ID`, `CLIENT_KEY` | — | `STACKSPOT_REALM`, `STACKSPOT_AGENT_ID` |
 | OpenRouter | `OPENROUTER_API_KEY` | — | `OPENROUTER_MAX_TOKENS`, `OPENROUTER_FALLBACK_MODELS` |
@@ -130,35 +130,35 @@ OPENAI_API_KEY=sk-xxx
 
 ---
 
-## Três modos de operação
+## Three Modes of Operation
 
 <table>
 <tr>
 <td width="33%" valign="top">
 
-### CLI Interativa
+### Interactive CLI
 
-Terminal inteligente com TUI (Bubble Tea), contexto de projeto, tool calling e agentes autônomos.
+AI-powered terminal with a Bubble Tea TUI, project context, tool calling, and autonomous agents.
 
 ```bash
 chatcli
-chatcli -p "Explique este repo"
-git diff | chatcli -p "Resuma"
+chatcli -p "Explain this repo"
+git diff | chatcli -p "Summarize"
 ```
 
 </td>
 <td width="33%" valign="top">
 
-### Servidor gRPC
+### gRPC Server
 
-Backend compartilhado com TLS 1.3, JWT/RBAC, fallback, métricas Prometheus, MCP e discovery de plugins.
+Shared backend with TLS 1.3, JWT/RBAC, failover, Prometheus metrics, MCP, and plugin discovery.
 
 ```bash
 chatcli server --port 50051 \
-  --token meu-token
+  --token my-token
 chatcli connect \
   --server host:50051 \
-  --token meu-token
+  --token my-token
 ```
 
 </td>
@@ -166,7 +166,7 @@ chatcli connect \
 
 ### Kubernetes Operator
 
-Pipeline AIOps autônomo com 17 CRDs, 54+ ações de remediação, SLO monitoring e post-mortems.
+Autonomous AIOps pipeline with 17 CRDs, 54+ remediation actions, SLO monitoring, and post-mortems.
 
 ```bash
 helm install chatcli-operator \
@@ -179,52 +179,52 @@ helm install chatcli-operator \
 </tr>
 </table>
 
-### Scheduler autônomo (Chronos)
+### Autonomous scheduler (Chronos)
 
-O scheduler roda embutido no CLI e, opcionalmente, como daemon. Jobs sobrevivem a reinícios via WAL + snapshot.
+The scheduler runs embedded in the CLI and optionally as a daemon. Jobs survive restarts via WAL + snapshot.
 
 ```bash
-# Dispara um comando em 30s
+# Fire a command in 30s
 /schedule ping --when +30s --do "/run curl https://api.example.com/health"
 
-# Cron diário com retry
+# Daily cron with retry
 /schedule backup --cron "0 2 * * *" --do "shell: ./backup.sh" --max-retries 3
 
-# Deploy + wait K8s + trigger smoke
+# Deploy + K8s wait + trigger smoke
 /schedule deploy --when +0s --do "shell: terraform apply -auto-approve" \
   --wait "k8s:deployment/prod/api:Available" --timeout 15m \
   --triggers smoke-tests
 
-# Daemon para rodar sozinho com o CLI fechado
+# Daemon to keep running with the CLI closed
 chatcli daemon start --detach
 chatcli daemon status
 
-# Listar / inspecionar / cancelar
+# List / inspect / cancel
 /jobs list
 /jobs show <id>
 /jobs tree
 /jobs cancel <id>
 ```
 
-Agents ganham a tool `@scheduler` e podem se auto-pausar esperando condições — veja [Cookbook: automações com Scheduler](https://chatcli.edilsonfreitas.com/cookbook/scheduler-automations) e [doc da feature](https://chatcli.edilsonfreitas.com/features/scheduler).
+Agents get the `@scheduler` tool and can pause themselves waiting on conditions — see [Cookbook: scheduler automation](https://chatcli.edilsonfreitas.com/en/cookbook/scheduler-automations) and the [feature doc](https://chatcli.edilsonfreitas.com/en/features/scheduler).
 
 <details>
-<summary><strong>Comandos contextuais (modo CLI)</strong></summary>
+<summary><strong>Context commands (CLI mode)</strong></summary>
 
-Injete dados do ambiente diretamente no prompt:
+Inject environment data directly into your prompt:
 
-| Comando | O que faz |
+| Command | Description |
 |---|---|
-| `@git` | Status, branches e commits recentes |
-| `@file <path>` | Conteúdo de arquivos/diretórios |
-| `@env` | Variáveis de ambiente |
-| `@history` | Últimos comandos do shell |
-| `@command <cmd>` | Executa e injeta a saída |
+| `@git` | Status, branches, and recent commits |
+| `@file <path>` | File or directory contents |
+| `@env` | Environment variables |
+| `@history` | Recent shell commands |
+| `@command <cmd>` | Execute a command and inject its output |
 
 </details>
 
 <details>
-<summary><strong>Exemplo de manifesto Kubernetes (Instance CRD)</strong></summary>
+<summary><strong>Kubernetes manifest example (Instance CRD)</strong></summary>
 
 ```yaml
 apiVersion: platform.chatcli.io/v1alpha1
@@ -254,131 +254,131 @@ helm install chatcli oci://ghcr.io/diillson/charts/chatcli \
 
 ---
 
-## Provedores suportados
+## Supported Providers
 
-> 14 provedores com interface unificada. Fallback automático com classificação inteligente de erros, extended thinking cross-provider e cache de prompt onde disponível.
+> 14 providers with a unified interface. Automatic failover with intelligent error classification, cross-provider extended thinking, and prompt caching where available.
 
 | Provider | Default Model | Tool Calling | Vision | Reasoning / Thinking |
 |---|---|---|---|---|
-| **OpenAI** | gpt-5.4 | Nativo | Sim | `reasoning_effort` (o-series / gpt-5) |
-| **Anthropic (Claude)** | claude-sonnet-4-6 | Nativo | Sim | Extended thinking com cache |
-| **AWS Bedrock** | claude-sonnet-4-5 | Nativo | Sim | Thinking budget (Anthropic models) |
-| **Google Gemini** | gemini-2.5-flash | Nativo | Sim | — |
+| **OpenAI** | gpt-5.4 | Native | Yes | `reasoning_effort` (o-series / gpt-5) |
+| **Anthropic (Claude)** | claude-sonnet-4-6 | Native | Yes | Extended thinking with cache |
+| **AWS Bedrock** | claude-sonnet-4-5 | Native | Yes | Thinking budget (Anthropic models) |
+| **Google Gemini** | gemini-2.5-flash | Native | Yes | — |
 | **xAI (Grok)** | grok-4-1 | XML fallback | — | — |
-| **ZAI (Zhipu AI)** | glm-5 | Nativo | Sim | — |
-| **MiniMax** | MiniMax-M2.7 | Nativo | Sim | — |
-| **Moonshot (Kimi)** | kimi-k2.6 | Nativo | Sim | `MOONSHOT_THINKING=enabled\|disabled\|auto` |
-| **GitHub Copilot** | gpt-4o | Nativo | Sim | — |
-| **GitHub Models** | gpt-4o | Nativo | Sim | — |
+| **ZAI (Zhipu AI)** | glm-5 | Native | Yes | — |
+| **MiniMax** | MiniMax-M2.7 | Native | Yes | — |
+| **Moonshot (Kimi)** | kimi-k2.6 | Native | Yes | `MOONSHOT_THINKING=enabled\|disabled\|auto` |
+| **GitHub Copilot** | gpt-4o | Native | Yes | — |
+| **GitHub Models** | gpt-4o | Native | Yes | — |
 | **StackSpot AI** | StackSpotAI | — | — | — |
-| **OpenRouter** | openai/gpt-5.2 | Nativo | Sim | Passthrough |
-| **Ollama** | (local) | XML fallback | — | Tags `<thinking>` normalizadas |
-| **OpenAI (Responses API)** | gpt-5.4 | Nativo | Sim | `reasoning_effort` |
+| **OpenRouter** | openai/gpt-5.2 | Native | Yes | Passthrough |
+| **Ollama** | (local) | XML fallback | — | `<thinking>` tag normalization |
+| **OpenAI (Responses API)** | gpt-5.4 | Native | Yes | `reasoning_effort` |
 
 ```bash
-# Fallback chain configurável
+# Configurable fallback chain
 CHATCLI_FALLBACK_PROVIDERS=OPENAI,CLAUDEAI,BEDROCK,ZAI,MINIMAX,MOONSHOT,OPENROUTER
 ```
 
-`/thinking on|off|auto` ativa extended thinking / reasoning_effort em qualquer provider que suporte — o mapeamento cross-provider é automático.
+`/thinking on|off|auto` enables extended thinking / reasoning_effort on any provider that supports it — the cross-provider mapping is automatic.
 
 ---
 
-## Agentes autônomos
+## Autonomous Agents
 
-> Motor ReAct (Reason + Act) com **14 agents builtin**: 12 specialists de orquestração executando em paralelo (`file, coder, shell, git, search, planner, reviewer, tester, refactor, diagnostics, formatter, deps`) + 2 do harness de qualidade (`refiner`, `verifier`).
+> ReAct engine (Reason + Act) with **14 built-in agents**: 12 orchestration specialists running in parallel (`file, coder, shell, git, search, planner, reviewer, tester, refactor, diagnostics, formatter, deps`) + 2 quality-harness agents (`refiner`, `verifier`).
 
 ```bash
-/coder "Refatore o módulo auth para usar JWT"
-chatcli -p "Crie testes para o pacote utils" --agent-auto-exec
+/coder "Refactor the auth module to use JWT"
+chatcli -p "Create tests for the utils package" --agent-auto-exec
 ```
 
-| Agente | Responsabilidade |
+| Agent | Responsibility |
 |---|---|
-| **File** | Leitura, escrita e manipulação de arquivos |
-| **Coder** | Geração e edição de código |
-| **Shell** | Execução de comandos no sistema |
-| **Git** | Operações de versionamento |
-| **Search** | Busca em código e arquivos |
-| **Planner** | Decomposição de tarefas complexas (Plan-and-Solve / ReWOO) |
-| **Reviewer** | Code review automatizado |
-| **Tester** | Geração e execução de testes |
-| **Refactor** | Refatoração segura de código |
-| **Diagnostics** | Análise e debug de problemas |
-| **Formatter** | Formatação e linting |
-| **Deps** | Gerenciamento de dependências |
+| **File** | File reading, writing, and manipulation |
+| **Coder** | Code generation and editing |
+| **Shell** | System command execution |
+| **Git** | Version control operations |
+| **Search** | Code and file search |
+| **Planner** | Complex task decomposition (Plan-and-Solve / ReWOO) |
+| **Reviewer** | Automated code review |
+| **Tester** | Test generation and execution |
+| **Refactor** | Safe code refactoring |
+| **Diagnostics** | Problem analysis and debugging |
+| **Formatter** | Formatting and linting |
+| **Deps** | Dependency management |
 | **Refiner** | Self-Refine post-hook (critique → revise) |
-| **Verifier** | Chain-of-Verification (perguntas + resposta final) |
+| **Verifier** | Chain-of-Verification (questions + final answer) |
 
-Workers são coordenados pelo **dispatcher** com semáforo configurável (`CHATCLI_AGENT_MAX_WORKERS`), política de retry e sincronização por `FileLockManager`.
+Workers are coordinated by the **dispatcher** with a configurable semaphore (`CHATCLI_AGENT_MAX_WORKERS`), retry policy, and `FileLockManager` synchronization.
 
 ---
 
 ## Harness/Quality Pipeline
 
-> Sete padrões de prompting e execução compostos por uma pipeline pluggable com state machine, hot reload e isolamento por hook.
+> Seven prompting/execution patterns composed via a pluggable pipeline with state machine, hot reload, and per-hook isolation.
 
-| # | Padrão | Status | Opt-in |
+| # | Pattern | Status | Opt-in |
 |---|---|---|---|
-| 1 | **ReAct** (Reason + Act) | ✅ core do agente | — |
+| 1 | **ReAct** (Reason + Act) | ✅ agent core | — |
 | 2 | **Plan-and-Solve / ReWOO** | ✅ | `/plan`, `CHATCLI_QUALITY_PLAN_FIRST_MODE` |
-| 3 | **Reflexion** (com fila durável) | ✅ | ligada por padrão |
+| 3 | **Reflexion** (with durable queue) | ✅ | on by default |
 | 4 | **RAG + HyDE** | ✅ | `CHATCLI_QUALITY_HYDE_ENABLED=1` |
-| 5 | **Self-Refine** (com convergência semântica) | ✅ | `CHATCLI_QUALITY_REFINE_ENABLED=1` |
+| 5 | **Self-Refine** (with semantic convergence) | ✅ | `CHATCLI_QUALITY_REFINE_ENABLED=1` |
 | 6 | **Chain-of-Verification** (CoVe) | ✅ | `CHATCLI_QUALITY_VERIFY_ENABLED=1` |
-| 7 | **Reasoning backbone** cross-provider | ✅ | `CHATCLI_QUALITY_REASONING_MODE=auto` |
+| 7 | **Cross-provider reasoning backbone** | ✅ | `CHATCLI_QUALITY_REASONING_MODE=auto` |
 
-### Arquitetura do Pipeline
+### Pipeline Architecture
 
-- **State machine** (Active → Draining → Closed) com transições via CAS atômico.
-- **Copy-on-Write** via `atomic.Pointer[snapshot]` — `AddPre/AddPost/SwapConfig` atômicos, zero lock no hot path.
-- **Isolamento por hook**: panic recovery, timeout enforcement (default 30s), circuit breaker (5 falhas → open por 30s).
-- **Priority-based ordering** via interface opcional `Prioritized` (backward compat — hooks sem prioridade ficam em 100).
-- **Short-circuit sentinels**: `ErrSkipExecution` (cache-hit antes do `agent.Execute`) e `ErrSkipRemainingHooks` (ensemble patterns).
-- **Graceful shutdown** com `DrainAndClose(timeout)` respeitando in-flight.
+- **State machine** (Active → Draining → Closed) with atomic CAS transitions.
+- **Copy-on-Write** via `atomic.Pointer[snapshot]` — `AddPre/AddPost/SwapConfig` are atomic, zero locks on the hot path.
+- **Per-hook isolation**: panic recovery, timeout enforcement (default 30s), circuit breaker (5 failures → open for 30s).
+- **Priority-based ordering** via optional `Prioritized` interface (backward-compatible — unmarked hooks default to 100).
+- **Short-circuit sentinels**: `ErrSkipExecution` (cache-hit before `agent.Execute`) and `ErrSkipRemainingHooks` (ensemble patterns).
+- **Graceful shutdown** via `DrainAndClose(timeout)` honoring in-flight calls.
 
-### Reflexion durável (WAL + DLQ)
+### Durable Reflexion (WAL + DLQ)
 
-Triggers de reflexion (erro, alucinação detectada pelo CoVe, baixa qualidade) passam por uma fila de lessons com garantia enterprise — lições sobrevivem a crash do processo:
+Reflexion triggers (error, hallucination flagged by CoVe, low quality) flow through a lesson queue with enterprise guarantees — lessons survive process crashes:
 
-- **WAL** com CRC32 duplo, atomic rename, dir fsync — detecta torn writes automaticamente.
-- **Worker pool** (default 2) com per-job timeout, exponential backoff + jitter, `MaxAttempts` configurável.
-- **DLQ** persistente (mesmo formato WAL) com subcomandos `/reflect failed`, `/reflect retry <id>`, `/reflect purge <id>`.
-- **Drain-on-boot**: lições pendentes de uma sessão anterior são reprocessadas automaticamente.
-- **Idempotência** via `sha256(task | trigger | attempt)` — re-trigger da mesma situação é no-op.
-- **Stale discard** (default 7d) — lições velhas descartadas no replay.
+- **WAL** with double CRC32, atomic rename, dir fsync — torn writes detected automatically.
+- **Worker pool** (default 2) with per-job timeout, exponential backoff with jitter, configurable `MaxAttempts`.
+- **Persistent DLQ** (same WAL format) with `/reflect failed`, `/reflect retry <id>`, `/reflect purge <id>`.
+- **Drain-on-boot**: pending lessons from a previous session are reprocessed automatically.
+- **Idempotency** via `sha256(task | trigger | attempt)` — re-triggering the same situation is a no-op.
+- **Stale discard** (default 7d) — old lessons dropped at replay time.
 
 ```bash
-/reflect list              # fila atual + DLQ
-/reflect failed            # DLQ com último erro por entrada
-/reflect retry <job-id>    # reenfileira uma lição que falhou
-/reflect purge <job-id>    # remove definitivamente da DLQ
-/reflect drain             # força replay do WAL
+/reflect list              # current queue + DLQ
+/reflect failed            # DLQ with last error per entry
+/reflect retry <job-id>    # re-queue a failed lesson
+/reflect purge <job-id>    # permanently remove a DLQ entry
+/reflect drain             # force WAL replay
 ```
 
-### Convergência semântica (Self-Refine)
+### Semantic Convergence (Self-Refine)
 
-O Self-Refine usa cascade char → Jaccard → embedding para detectar quando parar iterando. Resolve "same meaning, different words" que o heurístico char-level não pegava:
+Self-Refine uses a char → Jaccard → embedding cascade to detect when to stop iterating. Catches "same meaning, different words" that the char-level heuristic missed:
 
-| Etapa | Custo | Quando dispara |
+| Stage | Cost | When it fires |
 |---|---|---|
-| **Char** | μs | Sempre. Early-exit quando sim > 0.99 (idêntico) ou sim < 0.3 (divergiu) |
-| **Jaccard** | ms | Borderline, sets de tokens normalizados com stop-words PT/EN |
-| **Embedding** | ms + $ | Borderline pós-Jaccard. Opt-in via `CHATCLI_QUALITY_REFINE_CONVERGENCE_EMBEDDING=1` |
+| **Char** | μs | Always. Early-exit when sim > 0.99 (identical) or sim < 0.3 (diverged) |
+| **Jaccard** | ms | Borderline, normalized token sets with EN/PT stop-words |
+| **Embedding** | ms + $ | Borderline after Jaccard. Opt-in via `CHATCLI_QUALITY_REFINE_CONVERGENCE_EMBEDDING=1` |
 
-- **Cache LRU com TTL** (default 256 entries / 5min) evita chamar embedder duas vezes pelo mesmo texto.
-- **Circuit breaker** por scorer — provider fora do ar degrada pra Jaccard sem travar refine.
-- **Quality regression detection**: se pass N piora (>15% sim loss vs melhor) → reverte pro melhor draft visto + marca `refine_rolled_back` pra Reflexion aprender.
-- **Modo strict**: recusa declarar convergência sem embedding quando a stakes for alta.
+- **LRU cache with TTL** (default 256 entries / 5min) avoids re-embedding identical text.
+- **Per-scorer circuit breaker** — provider outage degrades to Jaccard without blocking refine.
+- **Quality regression detection**: when pass N gets worse (>15% sim loss vs best) → revert to best draft + set `refine_rolled_back` metadata so Reflexion can learn.
+- **Strict mode**: refuses to declare convergence without embedding when stakes are high.
 
 <details>
-<summary><strong>Config completo do quality pipeline</strong></summary>
+<summary><strong>Full quality pipeline config</strong></summary>
 
 ```bash
 # Master switch
 CHATCLI_QUALITY_ENABLED=true
 
-# Self-Refine (#5) + convergência semântica
+# Self-Refine (#5) + semantic convergence
 CHATCLI_QUALITY_REFINE_ENABLED=false            # opt-in
 CHATCLI_QUALITY_REFINE_MAX_PASSES=1
 CHATCLI_QUALITY_REFINE_CONVERGENCE_ENABLED=true
@@ -390,7 +390,7 @@ CHATCLI_QUALITY_VERIFY_ENABLED=false
 CHATCLI_QUALITY_VERIFY_NUM_QUESTIONS=3
 CHATCLI_QUALITY_VERIFY_REWRITE=true
 
-# Reflexion (#3) + fila durável
+# Reflexion (#3) + durable queue
 CHATCLI_QUALITY_REFLEXION_ENABLED=true
 CHATCLI_QUALITY_REFLEXION_QUEUE_ENABLED=true    # WAL + worker pool + DLQ
 CHATCLI_QUALITY_REFLEXION_QUEUE_WORKERS=2
@@ -409,15 +409,15 @@ CHATCLI_QUALITY_REASONING_MODE=auto              # off|on|auto
 CHATCLI_QUALITY_REASONING_BUDGET=8000
 ```
 
-Todos expostos no `/config quality` com estado em tempo real (hooks registrados, queue depth, DLQ size).
+All exposed via `/config quality` with runtime state (registered hooks, queue depth, DLQ size).
 
 </details>
 
 ---
 
-## Observabilidade
+## Observability
 
-> Prometheus end-to-end em namespace `chatcli`. 50+ métricas cobrindo LLM, agentes, pipeline, queue e fila de lições.
+> End-to-end Prometheus integration in the `chatcli` namespace. 50+ metrics covering LLM, agents, pipeline, queue, and lesson queue.
 
 ```bash
 chatcli server --port 50051 --metrics-port 9090
@@ -425,151 +425,151 @@ curl http://localhost:9090/metrics | grep chatcli_
 curl http://localhost:9090/healthz
 ```
 
-### Métricas principais
+### Key metrics
 
-| Subsystem | Métrica | Tipo |
+| Subsystem | Metric | Type |
 |---|---|---|
 | `chatcli_llm_*` | `requests_total`, `request_duration_seconds`, `tokens_used_total`, `errors_total` | Counter, Histogram |
 | `chatcli_quality_pipeline_*` | `dispatch_total`, `hook_duration_seconds`, `hook_errors_total`, `hook_circuit_state`, `generation` | Counter, Histogram, Gauge |
 | `chatcli_lessonq_*` | `enqueue_total`, `queue_depth`, `dlq_size`, `processing_duration_seconds`, `wal_corruption_total`, `retry_total` | Counter, Gauge, Histogram |
-| `chatcli_session_*` | duração, comandos executados, sinais | Counter, Gauge |
+| `chatcli_session_*` | duration, commands executed, signals | Counter, Gauge |
 | `chatcli_grpc_*` | unary + stream interceptors | Counter, Histogram |
 
-Collectors padrão do Go runtime e `process_*` também registrados automaticamente.
+Standard Go runtime and `process_*` collectors are registered automatically.
 
 ---
 
 ## Enterprise Security
 
-> Segurança não é um feature flag. É a fundação de cada camada do ChatCLI.
+> Security is not a feature flag. It is the foundation of every layer of ChatCLI.
 
 <table>
 <tr>
 <td width="50%" valign="top">
 
-**Autenticação e autorização**
-- JWT com RBAC (admin / user / readonly)
+**Authentication & authorization**
+- JWT with RBAC (admin / user / readonly)
 - OAuth PKCE + Device Flow (RFC 8628)
-- Token refresh automático por provider
+- Automatic token refresh per provider
 
-**Criptografia**
-- AES-256-GCM para credenciais at rest
-- TLS 1.3 para comunicação gRPC
-- Sessões encriptadas em disco
+**Encryption**
+- AES-256-GCM for credentials at rest
+- TLS 1.3 for gRPC communication
+- Encrypted session store on disk
 
-**Rede**
-- Prevenção de SSRF integrada
-- Rate limiting por client/endpoint
-- Webhook validation no operator
+**Network**
+- Built-in SSRF prevention
+- Per-client rate limiting
+- Operator webhook validation
 
 </td>
 <td width="50%" valign="top">
 
-**Plugin e agent security**
-- Verificação de assinatura Ed25519 para plugins
-- Agent command allowlist (150+ comandos aprovados)
-- Schema validation em plugin discovery
+**Plugin & agent security**
+- Ed25519 plugin signature verification
+- Agent command allowlist (150+ approved commands)
+- Schema validation during plugin discovery
 
-**Auditoria e compliance**
+**Auditing & compliance**
 - Structured audit logging (JSON Lines)
-- Cost tracking por sessão e provider
-- Prometheus metrics para observabilidade
+- Per-session cost tracking per provider
+- Prometheus metrics for observability
 
 **CI/CD security**
-- `govulncheck` + `gosec` em cada PR
-- Trivy image scanning automatizado
-- Cosign signature nas releases + SBOM CycloneDX
+- `govulncheck` + `gosec` on every PR
+- Automated Trivy image scanning
+- Cosign-signed releases + CycloneDX SBOM
 
 </td>
 </tr>
 </table>
 
 <details>
-<summary><strong>Autenticação OAuth integrada</strong></summary>
+<summary><strong>Built-in OAuth</strong></summary>
 
 ```
-/auth login openai-codex       # OAuth PKCE + callback local
-/auth login anthropic          # OAuth PKCE + code manual
+/auth login openai-codex       # OAuth PKCE + local callback
+/auth login anthropic          # OAuth PKCE + manual code
 /auth login github-copilot     # Device Flow (RFC 8628)
-/auth status                   # Status de todos os providers
+/auth status                   # All provider status
 ```
 
-Credenciais armazenadas com **AES-256-GCM** em `~/.chatcli/auth-profiles.json`.
+Credentials are stored with **AES-256-GCM** at `~/.chatcli/auth-profiles.json`.
 
 </details>
 
 ---
 
-## Referência de comandos
+## Command Reference
 
-| Categoria | Comandos |
+| Category | Commands |
 |---|---|
 | **Core** | `/help` · `/version` · `/reload` · `/exit` · `/reset` |
-| **Sessões** | `/session {save,load,list,delete,new,fork,search}` · `/export` · `/newsession` · `/rewind` |
-| **Contexto** | `/context {create,attach,list,remove}` · `@git` · `@file` · `@env` · `@history` · `@command` |
+| **Sessions** | `/session {save,load,list,delete,new,fork,search}` · `/export` · `/newsession` · `/rewind` |
+| **Context** | `/context {create,attach,list,remove}` · `@git` · `@file` · `@env` · `@history` · `@command` |
 | **Config** | `/config [section]` · `/status` · `/settings` · `/switch <provider\|model>` |
-| **Modo agente** | `/agent [task]` · `/run` · `/coder` · `/plan [query]` · `/moa <prompt>` |
-| **Quality pipeline** | `/thinking [on\|off\|auto]` · `/refine [draft]` · `/verify [answer]` · `/reflect [list\|failed\|retry\|purge\|drain\|<texto>]` |
-| **Memória & grafo** | `/memory {longterm,list,profile,facts,remember,forget,profile set,compact}` · `@memory` (remember/recall/forget/profile/neighbors/map) — perfil com ciclo de vida: campos de lista fazem upsert (reafirmar um item supera o antigo, não duplica) e sufixos `_replace`/`_done`/`_remove` reescrevem (ex.: `goals_done=` remove o objetivo concluído; registre junto `milestone=` e `certifications=`); novos campos `interests`, `directives` (regras duras vs preferências; escopo por projeto com `"[scope:<projeto>] regra"` — injetada só quando o workspace correspondente está ativo), `milestone` (linha do tempo datada), `stance` (posição técnica com o porquê, `"posição :: razão"`) e `env_<chave>` (ambiente estruturado); proveniência+frescor por campo (user vs extraction, reafirmação atualiza `confirmed_at`, campos velhos são sinalizados como possivelmente desatualizados) e camada de privacidade (chaves financeiras/saúde/família auto-marcadas `[sensitive]`: personalizam respostas mas nunca entram em código/exemplos/artefatos; `sensitive_mark`/`sensitive_unmark`); daily notes consolidam em digests semanais e mensais (seção Trajectory no contexto); atualização de perfil funciona também no chat (exceção sancionada, `/config chat memory`, `CHATCLI_CHAT_MEMORY`) · `/graph [assunto]` · `/compact [ratio]` |
-| **Extensibilidade** | `/mcp {init,list,invoke,config}` · `/plugin {list,load,unload}` · `/skill <name>` · `/hooks {list,enable,disable,test}` |
-| **Mensageria & Servidores** | `/gateway {start,status}` (Telegram/Slack/Discord/WhatsApp/webhook) · `chatcli mcp-server` · `chatcli acp` |
-| **Remoto** | `/auth {login,logout,status}` · `/connect <server>` · `/disconnect` |
-| **Ferramentas** | `/watch {pid\|file}` · `/worktree {create,list,remove}` · `/channel {create,switch}` · `/websearch <query>` · `/lsp <arquivo>` |
-| **Scheduler** | `/schedule <nome> --when <t> --do <a>` · `/wait --until <cond>` · `/jobs {list,show,tree,cancel,pause,resume,logs,daemon}` · `chatcli daemon {start,stop,status,ping,install}` |
-| **Diagnóstico** | `/metrics` · `/cost` · `/ratelimit` (`/limits`) |
+| **Agent mode** | `/agent [task]` · `/run` · `/coder` · `/plan [query]` · `/moa <prompt>` |
+| **Quality pipeline** | `/thinking [on\|off\|auto]` · `/refine [draft]` · `/verify [answer]` · `/reflect [list\|failed\|retry\|purge\|drain\|<text>]` |
+| **Memory & graph** | `/memory {longterm,list,profile,facts,remember,forget,profile set,compact}` · `@memory` (remember/recall/forget/profile/neighbors/map) — profile with lifecycle: list fields upsert (restating an item supersedes instead of duplicating) and `_replace`/`_done`/`_remove` key suffixes rewrite (e.g. `goals_done=` removes the finished goal; record `milestone=` and `certifications=` alongside); new `interests`, `directives` (hard rules vs preferences; per-project scope with `"[scope:<project>] rule"` — injected only when the matching workspace is active), `milestone` (dated timeline), `stance` (technical position with its why, `"position :: reason"`) and `env_<key>` (structured environment) fields; per-field provenance+freshness (user vs extraction, re-affirmation bumps `confirmed_at`, aging fields get flagged as possibly stale) and a privacy tier (finance/health/family keys auto-tagged `[sensitive]`: they personalize answers but never enter code/examples/artifacts; `sensitive_mark`/`sensitive_unmark`); daily notes consolidate into weekly and monthly digests (Trajectory section in context); profile updates also work in chat (sanctioned exception, `/config chat memory`, `CHATCLI_CHAT_MEMORY`) · `/graph [subject]` · `/compact [ratio]` |
+| **Extensibility** | `/mcp {init,list,invoke,config}` · `/plugin {list,load,unload}` · `/skill <name>` · `/hooks {list,enable,disable,test}` |
+| **Messaging & Servers** | `/gateway {start,status}` (Telegram/Slack/Discord/WhatsApp/webhook) · `chatcli mcp-server` · `chatcli acp` |
+| **Remote** | `/auth {login,logout,status}` · `/connect <server>` · `/disconnect` |
+| **Tools** | `/watch {pid\|file}` · `/worktree {create,list,remove}` · `/channel {create,switch}` · `/websearch <query>` · `/lsp <file>` |
+| **Scheduler** | `/schedule <name> --when <t> --do <a>` · `/wait --until <cond>` · `/jobs {list,show,tree,cancel,pause,resume,logs,daemon}` · `chatcli daemon {start,stop,status,ping,install}` |
+| **Diagnostics** | `/metrics` · `/cost` · `/ratelimit` (`/limits`) |
 
 ---
 
-## Funcionalidades
+## Core Features
 
-> Cada feature foi projetada para compor com as demais. Plugins descobrem skills. Hooks acionam tools. Contextos alimentam agentes.
+> Every feature is designed to compose with the others. Plugins discover skills. Hooks drive tools. Contexts feed agents.
 
-| Feature | Descrição |
+| Feature | Description |
 |---|---|
-| **Tool calling nativo** | APIs nativas de OpenAI, Anthropic, Bedrock, Google, ZAI, MiniMax, Moonshot, OpenRouter. Cache `ephemeral` para Anthropic. XML fallback automático para providers sem suporte nativo. |
-| **MCP (Model Context Protocol)** | Client via stdio e SSE para contexto expandido. Server (`chatcli mcp-server`) expõe chat, agent, coder e built-in tools; modo ACP (`chatcli acp`) para editores. |
-| **Chat Gateway** | Roda como daemon de mensageria (Telegram, Slack, Discord, WhatsApp, webhook): cada mensagem passa pelo agent loop e o progresso é transmitido de volta ao chat. Mensagens de voz são transcritas (whisper local-first) e respondidas em voz por padrão (`CHATCLI_GATEWAY_VOICE_REPLY=auto\|always\|never`); cada conversa controla isso pedindo em linguagem natural ("responde em áudio" / "para de mandar áudio") via tool `@voice`, com preferência persistida. |
-| **Voz embarcada (TTS)** | `CHATCLI_TTS_PROVIDER=embedded` — voz neural Kokoro offline, sem API key e sem cgo: baixa o engine sherpa-onnx + modelo uma única vez (~150MB) e funciona igual em Linux/macOS/Windows. Roteia pt-BR/inglês por idioma da resposta (`CHATCLI_TTS_VOICE=bm_george`, `CHATCLI_TTS_VOICE_PT=pm_alex`); demais backends (say/espeak, self-hosted, OpenAI/Groq/Gemini) seguem disponíveis. |
-| **Transcrição embarcada (STT)** | Whisper multilíngue offline via sherpa-onnx, sem API key e sem cgo — é o fallback automático: sem nada configurado, o gateway baixa o engine + modelo ONNX uma única vez (~200MB no `base`; `CHATCLI_TRANSCRIPTION_MODEL=tiny\|base\|small\|…`) já no startup e transcreve notas de voz detectando o idioma falado. Voice notes OGG/Opus (Telegram/WhatsApp) são decodificadas em puro Go — sem ffmpeg; só formatos residuais (mp3/m4a) pedem ffmpeg, e o preflight do gateway + `/gateway status` avisam com o comando de instalação da sua plataforma. `CHATCLI_TRANSCRIPTION_PROVIDER=embedded` força-o sobre outros backends (whisper CLI local, self-hosted, Groq/OpenAI), que seguem disponíveis. |
-| **Mixture-of-Agents** | `/moa` — vários modelos propõem em paralelo e um agregador sintetiza (Wang et al., 2406.04692). Cada participante recebe o mesmo briefing de um turno de chat (contextos anexados, memória do workspace, skills) mais recuperação read-only de knowledge, recall de CCR e recall da memória de longo prazo. |
-| **Diagnósticos LSP** | `/lsp <arquivo>` — erros/avisos do compilador via Language Server Protocol (gopls, pyright, rust-analyzer, clangd, …). |
-| **Rate limits** | `/ratelimit` — limites do provider parseados dos headers `x-ratelimit-*` (requests/tokens, % usado, reset). |
-| **Exportar trajetória** | `/export` — conversa atual como JSONL ShareGPT para fine-tuning/análise. |
-| **Contextos persistentes** | `/context create`, `/context attach` — injeta projetos inteiros no system prompt com cache hints. |
-| **Knowledge base (RAG keyless)** | `/context create docs corpus.jsonl --mode knowledge` — corpora de docs ou de código/infra (ex.: JSONL da tool builtin `@docs-flatten`, que achata Markdown/MDX e — com `kind=code` — código-fonte, Terraform e YAML Kubernetes/Argo locais ou de um repo git, chunkando por estrutura) viram base de conhecimento: o attach injeta só um index card (~900 tokens fixos, mesmo com 6MB+) e trechos relevantes são recuperados por turno via BM25 puro-Go (sem API key) + embeddings quando configurados. A tool `@knowledge` (search/get/toc) consulta a base iterativamente no agent/coder e também no chat (exceção read-only, `/config chat knowledge`) — inclusive pra criar skills a partir da doc com `@skill`. |
-| **Bootstrap e Memória** | `SOUL.md`, `USER.md`, `IDENTITY.md`, `RULES.md` + memória de longo prazo com facts (confiança + proveniência + reconciliação de contradições), tópicos com resumo rolante e decay. |
-| **Auto-evolução (self-evolution)** | Skills se auto-criam e evoluem na própria passada de extração de memória (sem chamada extra de LLM): procedimentos reutilizáveis viram skills que auto-ativam; uma melhoria evolui a skill existente por merge aditivo, com backup reversível (`@skill restore`). `CHATCLI_SELFEVOLVE_MODE=off\|suggest\|auto`; observabilidade em `/config selfevolve`. |
-| **Grafo de conhecimento (Obsidian no core)** | Facts, tópicos, projetos, skills e tags viram um grafo derivado on-demand: `@memory neighbors <assunto>` / `map` puxam backlinks e notas conectadas, um index card minúsculo entra por turno, e `/graph [assunto]` renderiza o grafo em imagem (go-graphviz embarcado). `CHATCLI_GRAPH_INDEX=on\|off`. |
-| **Plugins** | Auto-detecção, schema validation, assinatura Ed25519, plugins remotos. |
-| **Skills** | Auto-autoria (`@skill`), registry multi-source (skills.sh, ClawHub, ChatCLI.dev), busca fuzzy, auditorias de segurança, preferências e instalação atômica. |
-| **Personas customizáveis** | Markdown com frontmatter YAML (model, tools, skills). |
-| **Hooks** | PreToolUse, PostToolUse, SessionStart/End, UserPromptSubmit, Compact pre/post — shell ou webhook. |
-| **WebFetch / WebSearch** | DuckDuckGo + fetch com extração de texto. |
-| **Cost tracking** | Custo por sessão com pricing tables por provider. |
-| **Git Worktrees** | Trabalho isolado em branches paralelas. |
+| **Native tool calling** | Native APIs from OpenAI, Anthropic, Bedrock, Google, ZAI, MiniMax, Moonshot, OpenRouter. `ephemeral` cache for Anthropic. Automatic XML fallback for providers without native support. |
+| **MCP (Model Context Protocol)** | Client via stdio and SSE for expanded context. Server (`chatcli mcp-server`) exposes chat, agent, coder and built-in tools; ACP mode (`chatcli acp`) for editors. |
+| **Chat Gateway** | Runs as a messaging daemon (Telegram, Slack, Discord, WhatsApp, webhook): each message runs through the agent loop and progress is streamed back to the chat. Voice messages are transcribed (local-first whisper) and answered in voice by default (`CHATCLI_GATEWAY_VOICE_REPLY=auto\|always\|never`); each conversation controls it by asking in natural language ("answer me in audio" / "stop sending audio") via the `@voice` tool, with the preference persisted. |
+| **Embedded voice (TTS)** | `CHATCLI_TTS_PROVIDER=embedded` — offline Kokoro neural voice, no API key and no cgo: downloads the sherpa-onnx engine + model once (~150MB) and works the same on Linux/macOS/Windows. Routes pt-BR/English by reply language (`CHATCLI_TTS_VOICE=bm_george`, `CHATCLI_TTS_VOICE_PT=pm_alex`); the other backends (say/espeak, self-hosted, OpenAI/Groq/Gemini) remain available. |
+| **Embedded transcription (STT)** | Offline multilingual Whisper via sherpa-onnx, no API key and no cgo — and the automatic fallback: with nothing configured, the gateway downloads the engine + an ONNX model once (~200MB for `base`; `CHATCLI_TRANSCRIPTION_MODEL=tiny\|base\|small\|…`) at startup and transcribes voice notes auto-detecting the spoken language. OGG/Opus voice notes (Telegram/WhatsApp) decode in pure Go — no ffmpeg needed; only residual formats (mp3/m4a) require ffmpeg, and the gateway preflight + `/gateway status` warn with your platform's install command. `CHATCLI_TRANSCRIPTION_PROVIDER=embedded` forces it over the other backends (local whisper CLI, self-hosted, Groq/OpenAI), which remain available. |
+| **Mixture-of-Agents** | `/moa` — several models propose in parallel and an aggregator synthesizes (Wang et al., 2406.04692). Every participant gets the same briefing as a chat turn (attached contexts, workspace memory, skills) plus read-only knowledge retrieval, CCR recall and long-term memory recall. |
+| **LSP diagnostics** | `/lsp <file>` — compiler errors/warnings via the Language Server Protocol (gopls, pyright, rust-analyzer, clangd, …). |
+| **Rate limits** | `/ratelimit` — provider limits parsed from `x-ratelimit-*` headers (requests/tokens, % used, reset). |
+| **Trajectory export** | `/export` — current conversation as ShareGPT JSONL for fine-tuning/analysis. |
+| **Persistent contexts** | `/context create`, `/context attach` — inject whole projects into the system prompt with cache hints. |
+| **Knowledge base (keyless RAG)** | `/context create docs corpus.jsonl --mode knowledge` — documentation corpora (e.g. JSONL from the builtin `@docs-flatten` tool, which flattens local or git-repo Markdown/MDX docs) become a knowledge base: attaching injects only an index card (~900 fixed tokens, even at 6MB+) and relevant passages are retrieved per turn via pure-Go BM25 (no API key) + embeddings when configured. The `@knowledge` tool (search/get/toc) interrogates the base iteratively in agent/coder and also in chat (read-only exception, `/config chat knowledge`) — including authoring skills from the docs with `@skill`. |
+| **Bootstrap & Memory** | `SOUL.md`, `USER.md`, `IDENTITY.md`, `RULES.md` + long-term memory with facts (confidence + provenance + contradiction reconciliation), topics with rolling summaries, and decay. |
+| **Self-evolution** | Skills author and evolve themselves on the memory extraction pass (no extra LLM call): reusable procedures become auto-activating skills; an insight evolves an existing skill by additive merge, with a reversible backup (`@skill restore`). `CHATCLI_SELFEVOLVE_MODE=off\|suggest\|auto`; observability under `/config selfevolve`. |
+| **Knowledge graph (Obsidian in the core)** | Facts, topics, projects, skills and tags become an on-demand graph: `@memory neighbors <subject>` / `map` pull backlinks and related notes, a tiny index card rides each turn, and `/graph [subject]` renders the graph to an image (embedded go-graphviz). `CHATCLI_GRAPH_INDEX=on\|off`. |
+| **Plugins** | Auto-detection, schema validation, Ed25519 signatures, remote plugins. |
+| **Skills** | Self-authoring (`@skill`), multi-registry (skills.sh, ClawHub, ChatCLI.dev), fuzzy search, security audits, source preferences, atomic install. |
+| **Custom personas** | Markdown with YAML frontmatter (model, tools, skills). |
+| **Hooks** | PreToolUse, PostToolUse, SessionStart/End, UserPromptSubmit, Pre/PostCompact — shell or webhook. |
+| **WebFetch / WebSearch** | DuckDuckGo + fetch with text extraction. |
+| **Cost tracking** | Per-session cost with per-provider pricing tables. |
+| **Git Worktrees** | Isolated work on parallel branches. |
 | **K8s Watcher** | Multi-target: metrics, logs, events, Prometheus scraping. |
-| **i18n** | Português e Inglês com detecção automática. |
+| **i18n** | Portuguese and English with automatic detection. |
 | **Session management** | Save, load, fork, export. |
 
 ---
 
-## Arquitetura
+## Architecture
 
 ```
 chatcli/
   cli/
     agent/
-      quality/              Pipeline 7 patterns (state machine + COW snapshots)
+      quality/              7-pattern pipeline (state machine + COW snapshots)
         convergence/        Semantic convergence (char → jaccard → embedding)
         lessonq/            Reflexion durable queue (WAL + worker pool + DLQ)
-      workers/              14 agentes + dispatcher + FileLockManager
+      workers/              14 agents + dispatcher + FileLockManager
     hooks/                  Lifecycle events (shell/webhook)
     mcp/                    MCP client (stdio + SSE)
     plugins/                Plugin manager + signature verification
-    scheduler/              Chronos — scheduler durável (WAL + cron + DAG + daemon)
+    scheduler/              Chronos — durable scheduler (WAL + cron + DAG + daemon)
       condition/            10 evaluators (shell, http, k8s, docker, tcp, llm, ...)
       action/               8 executors (slash, shell, agent, webhook, ...)
-      builtins/             Registro agregado de evaluators + executors
+      builtins/             Aggregated registry for evaluators + executors
     workspace/memory/       Facts, topics, patterns, vector index (HyDE)
     tui/                    Bubble Tea adapters
   llm/
@@ -579,47 +579,47 @@ chatcli/
     copilot/  github_models/  stackspotai/  openrouter/  ollama/
     fallback/  catalog/  registry/  token/  toolshim/  embedding/
   metrics/                  Prometheus registry + /metrics + /healthz
-  server/                   gRPC + TLS + JWT + MCP + Plugin discovery
+  server/                   gRPC + TLS + JWT + MCP + plugin discovery
   operator/                 Kubernetes Operator (17 CRDs, AIOps pipeline)
   k8s/                      Watcher (collectors, store, summarizer)
   models/                   ToolDefinition, ToolCall, LLMResponse, Message
   auth/                     OAuth PKCE, Device Flow, AES-256-GCM store
-  config/                   ConfigManager com migração versionada
+  config/                   ConfigManager with versioned migration
   i18n/                     embed.FS + golang.org/x/text (PT / EN)
 ```
 
-> **Princípio de design:** cada pacote define suas interfaces e se auto-registra no sistema. O `llm/` registry permite adicionar um novo provider implementando uma única interface. O pipeline de qualidade é pluggable via `AddPre`/`AddPost` com swap atômico. O operator coordena CRDs independentes via controller pattern.
+> **Design principle:** each package declares its own interfaces and self-registers. The `llm/` registry lets you add a new provider by implementing a single interface. The quality pipeline is pluggable via `AddPre`/`AddPost` with atomic swap. The operator coordinates independent CRDs via the controller pattern.
 
 ---
 
 ## CI/CD & Releases
 
-- **CI** (`.github/workflows/1-ci.yml`): golangci-lint, gofmt, `go vet`, `go test -race -coverprofile`, coverage HTML como artifact.
-- **Security scan** (`security-scan.yml`): Trivy image scanning contínuo.
-- **Release automation** (`release-please` + `publish-release.yml`): multi-platform builds, assinaturas cosign, SBOM CycloneDX, publish em ArtifactHub.
-- **Makefile**: `make build`, `make test`, `make lint`, `make install` com injeção de `Version`, `CommitHash`, `BuildDate` via ldflags.
+- **CI** (`.github/workflows/1-ci.yml`): golangci-lint, gofmt, `go vet`, `go test -race -coverprofile`, coverage HTML as artifact.
+- **Security scan** (`security-scan.yml`): continuous Trivy image scanning.
+- **Release automation** (`release-please` + `publish-release.yml`): multi-platform builds, cosign signatures, CycloneDX SBOM, ArtifactHub publishing.
+- **Makefile**: `make build`, `make test`, `make lint`, `make install` with `Version`, `CommitHash`, `BuildDate` injected via ldflags.
 
 ---
 
-## Contribuição
+## Contributing
 
-1. Fork o repositório
-2. Crie uma branch a partir da `main`: `git checkout -b feature/minha-feature`
-3. Commit e push
-4. Abra um Pull Request
+1. Fork the repository
+2. Create a branch from `main`: `git checkout -b feature/my-feature`
+3. Commit and push
+4. Open a Pull Request
 
-Veja [`docs/`](docs/) para guias detalhados de arquitetura, quality pipeline e operator.
+See [`docs/`](docs/) for detailed architecture, quality pipeline, and operator guides.
 
 ---
 
-## Licença
+## License
 
 [Apache License 2.0](LICENSE)
 
 ---
 
 <p align="center">
-  <a href="https://chatcli.edilsonfreitas.com"><strong>Documentação</strong></a> &bull;
+  <a href="https://chatcli.edilsonfreitas.com"><strong>Documentation</strong></a> &bull;
   <a href="https://github.com/diillson/chatcli/releases"><strong>Releases</strong></a> &bull;
   <a href="https://artifacthub.io/packages/search?ts_query_web=chatcli&sort=relevance&page=1"><strong>Helm Charts</strong></a> &bull;
   <a href="https://pkg.go.dev/github.com/diillson/chatcli"><strong>Go Reference</strong></a> &bull;
