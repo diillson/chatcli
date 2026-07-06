@@ -763,7 +763,9 @@ jobs:
           fi
 
           # 3) "Atualizações recentes" / "Recent updates" Update block
-          #    in introduction.mdx (PT-BR) and en/introduction.mdx (EN).
+          #    in introduction.mdx (EN, site root) and pt/introduction.mdx
+          #    (PT-BR). English moved to the root when it became the
+          #    site's default language.
           #    Driven by release-please's CHANGELOG.md from the chatcli
           #    source repo (checked out above into _chatcli_src). We
           #    extract the latest release section (between the first
@@ -818,7 +820,7 @@ jobs:
 
               # Inject before the FIRST existing <Update label="..."> block.
               # Idempotent: skip if a block with this label already exists.
-              for f in introduction.mdx en/introduction.mdx; do
+              for f in introduction.mdx pt/introduction.mdx; do
                 if [ ! -f "$f" ]; then continue; fi
                 if grep -q "<Update label=\"${MAJOR_MINOR}\"" "$f"; then
                   echo "  ${f}: already has Update label=${MAJOR_MINOR}, skipping"
