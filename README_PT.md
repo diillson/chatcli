@@ -35,7 +35,7 @@
 <br>
 
 <p align="center">
-  <a href="README_EN.md">English</a> &bull;
+  <a href="README.md">English</a> &bull;
   <a href="https://chatcli.edilsonfreitas.com">Documentação completa</a> &bull;
   <a href="#arquitetura">Arquitetura</a> &bull;
   <a href="#observabilidade">Observabilidade</a>
