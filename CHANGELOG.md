@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.153.0](https://github.com/diillson/chatcli/compare/v1.152.0...v1.153.0) (2026-07-07)
+
+
+### Features
+
+* **skills:** match multi-word triggers in any word order ([#1146](https://github.com/diillson/chatcli/issues/1146)) ([3dae238](https://github.com/diillson/chatcli/commit/3dae238d77679c6db6973510e0c762f6fb97b7a2))
+* **skills:** re-activate skills mid-loop in agent and coder modes ([#1144](https://github.com/diillson/chatcli/issues/1144)) ([b512e9c](https://github.com/diillson/chatcli/commit/b512e9c2fd85559c4ec32c7bab549578b4001c64))
+
 ## [1.152.0](https://github.com/diillson/chatcli/compare/v1.151.1...v1.152.0) (2026-07-05)
 
 
