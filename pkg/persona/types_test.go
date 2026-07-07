@@ -34,6 +34,72 @@ func TestMatchesTrigger(t *testing.T) {
 	}
 }
 
+func TestMatchesTrigger_MultiWordAnyOrder(t *testing.T) {
+	s := &Skill{Triggers: StringList{"servicenow login"}}
+	cases := []struct {
+		name string
+		in   string
+		want bool
+	}{
+		{"contiguous phrase (fast path)", "faz o servicenow login pra mim", true},
+		{"reversed order with words between", "preciso fazer o login no servicenow", true},
+		{"reversed order, case-insensitive", "como faço Login no ServiceNow?", true},
+		{"words split across the sentence", "o login da conta corporativa fica no portal servicenow", true},
+		{"only one word present", "preciso acessar o servicenow", false},
+		{"other word only", "esqueci meu login do gmail", false},
+		{"neither word", "abre um chamado pra mim", false},
+		{"empty input", "", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := s.MatchesTrigger(tc.in); got != tc.want {
+				t.Fatalf("MatchesTrigger(%q) = %v, want %v", tc.in, got, tc.want)
+			}
+		})
+	}
+
+	// Single-word triggers keep pure substring semantics — no regression.
+	single := &Skill{Triggers: StringList{"servicenow"}}
+	if !single.MatchesTrigger("acessa servicenow.com aí") {
+		t.Fatal("single-word trigger must keep substring matching")
+	}
+}
+
+// Multi-word tier must match on WHOLE tokens: short trigger words ("me",
+// "on", "no") appearing inside other words must not fire. This is the exact
+// false positive that a per-word substring check produces for the builtin
+// send-message skill (trigger "message me" vs input "unrelated user message",
+// where "me" hides inside "message").
+func TestMatchesTrigger_MultiWordNeedsWholeTokens(t *testing.T) {
+	s := &Skill{Triggers: StringList{"message me"}}
+	cases := []struct {
+		name string
+		in   string
+		want bool
+	}{
+		{"short word hidden inside another word", "unrelated user message", false},
+		{"both as whole tokens, any order", "can you me... send that message?", true},
+		{"contiguous phrase still works", "please message me when done", true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := s.MatchesTrigger(tc.in); got != tc.want {
+				t.Fatalf("MatchesTrigger(%q) = %v, want %v", tc.in, got, tc.want)
+			}
+		})
+	}
+
+	// Punctuation inside trigger words tokenizes the same way as the text,
+	// so "run unit-tests" fires on "unit-tests run fine" (order-free).
+	hyphen := &Skill{Triggers: StringList{"run unit-tests"}}
+	if !hyphen.MatchesTrigger("the unit-tests only run in CI") {
+		t.Fatal("hyphenated trigger words must tokenize like the text")
+	}
+	if hyphen.MatchesTrigger("run the linter") {
+		t.Fatal("missing trigger tokens must not match")
+	}
+}
+
 func TestMatchesPath_Basic(t *testing.T) {
 	s := &Skill{Paths: StringList{"*_test.go"}}
 	cases := []struct {

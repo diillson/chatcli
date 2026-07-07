@@ -9,6 +9,7 @@ package persona
 import (
 	"path/filepath"
 	"strings"
+	"unicode"
 
 	"gopkg.in/yaml.v3"
 )
@@ -127,18 +128,65 @@ type Skill struct {
 	Scripts map[string]string `json:"scripts" yaml:"-"`
 }
 
-// MatchesTrigger checks if the given text contains any of the skill's trigger keywords.
+// MatchesTrigger checks if the given text matches any of the skill's trigger
+// keywords. Matching is case-insensitive and has two tiers:
+//
+//  1. Fast path — the whole trigger appears as a contiguous substring
+//     (historical behavior, always tried first).
+//  2. Multi-word triggers — every word of the trigger appears as a WHOLE
+//     token in the text, in any order. "servicenow login" therefore also
+//     fires on "preciso fazer o login no servicenow".
+//
+// Tier 2 deliberately requires whole tokens, not per-word substrings: short
+// trigger words ("me", "on", "no") hide inside unrelated words far too often
+// (e.g. "message me" would otherwise fire on any text containing the word
+// "message"). Both sides are tokenized with the same splitter, so trigger
+// words carrying punctuation ("unit-tests") match texts the same way.
 func (s *Skill) MatchesTrigger(text string) bool {
 	if len(s.Triggers) == 0 {
 		return false
 	}
 	textLower := strings.ToLower(text)
+	var textTokens map[string]bool // built lazily, only when a tier-2 check runs
 	for _, trigger := range s.Triggers {
-		if strings.Contains(textLower, strings.ToLower(trigger)) {
+		triggerLower := strings.ToLower(trigger)
+		if strings.Contains(textLower, triggerLower) {
+			return true
+		}
+		words := splitTriggerTokens(triggerLower)
+		if len(words) < 2 {
+			continue
+		}
+		if textTokens == nil {
+			textTokens = make(map[string]bool)
+			for _, tok := range splitTriggerTokens(textLower) {
+				textTokens[tok] = true
+			}
+		}
+		if allTokensPresent(textTokens, words) {
 			return true
 		}
 	}
 	return false
+}
+
+// splitTriggerTokens splits lowered text into letter/digit runs. Punctuation,
+// hyphens and symbols are separators, so "unit-tests" and "servicenow.com"
+// yield the tokens their words would produce in prose.
+func splitTriggerTokens(s string) []string {
+	return strings.FieldsFunc(s, func(r rune) bool {
+		return !unicode.IsLetter(r) && !unicode.IsNumber(r)
+	})
+}
+
+// allTokensPresent reports whether every word is a whole token of the text.
+func allTokensPresent(textTokens map[string]bool, words []string) bool {
+	for _, w := range words {
+		if !textTokens[w] {
+			return false
+		}
+	}
+	return true
 }
 
 // MatchesPath checks if any of the given file paths match any of the skill's
