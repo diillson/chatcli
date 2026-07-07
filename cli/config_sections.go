@@ -992,6 +992,7 @@ func (cli *ChatCLI) showConfigIntegrations(ctx context.Context) {
 
 	fmt.Println(p)
 	subheader(p, "cfg.sub.integ.skills")
+	kv(p, "CHATCLI_AGENT_SKILL_RESCAN", envBool("CHATCLI_AGENT_SKILL_RESCAN"))
 	kv(p, "CHATCLI_REGISTRY_DISABLE", envBool("CHATCLI_REGISTRY_DISABLE"))
 	kv(p, "CHATCLI_REGISTRY_URLS", envOr("CHATCLI_REGISTRY_URLS"))
 	kv(p, "CHATCLI_SKILL_INSTALL_DIR", envOr("CHATCLI_SKILL_INSTALL_DIR"))
