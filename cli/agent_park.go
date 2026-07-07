@@ -25,6 +25,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"sort"
 	"strings"
 	"time"
 
@@ -70,7 +71,15 @@ func (a *AgentMode) handleAgentPark(
 		Model:           a.cli.Model,
 		SkillModelHint:  a.skillModelHint,
 		SkillEffortHint: a.skillEffortHint,
-		Park:            req,
+		InjectedSkillNames: func() []string {
+			names := make([]string, 0, len(a.injectedSkillNames))
+			for name := range a.injectedSkillNames {
+				names = append(names, name)
+			}
+			sort.Strings(names)
+			return names
+		}(),
+		Park: req,
 	}
 	// Carry the pending native tool_use ID through the snapshot so
 	// resume can synthesize a matching tool_result and avoid Anthropic's
@@ -304,6 +313,12 @@ func (a *AgentMode) RunResumed(ctx context.Context, snap *park.Snapshot, outcome
 	}
 	if snap.SkillEffortHint != llmclient.EffortUnset {
 		a.skillEffortHint = snap.SkillEffortHint
+	}
+	// Rebuild the mid-loop skill dedup set so skills injected before the
+	// park never duplicate after resume.
+	a.injectedSkillNames = make(map[string]bool, len(snap.InjectedSkillNames))
+	for _, name := range snap.InjectedSkillNames {
+		a.injectedSkillNames[name] = true
 	}
 	a.cli.history = append([]models.Message(nil), snap.History...)
 

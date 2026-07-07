@@ -104,10 +104,17 @@ func buildSkillInjectionBlock(skills []*persona.Skill) string {
 	b.WriteString("The following skills were automatically activated based on ")
 	b.WriteString("your input (matched via `triggers:` keywords or `paths:` globs ")
 	b.WriteString("in the skill frontmatter). Follow their guidance when relevant.\n\n")
+	renderSkillEntries(&b, skills)
+	return b.String()
+}
+
+// renderSkillEntries writes the shared per-skill markdown section (name,
+// version, description, content) used by every skill injection block.
+func renderSkillEntries(b *strings.Builder, skills []*persona.Skill) {
 	for _, skill := range skills {
-		fmt.Fprintf(&b, "## Skill: %s", skill.Name)
+		fmt.Fprintf(b, "## Skill: %s", skill.Name)
 		if skill.Version != "" {
-			fmt.Fprintf(&b, " (v%s)", skill.Version)
+			fmt.Fprintf(b, " (v%s)", skill.Version)
 		}
 		b.WriteString("\n\n")
 		if skill.Description != "" {
@@ -119,7 +126,6 @@ func buildSkillInjectionBlock(skills []*persona.Skill) string {
 			b.WriteString("\n\n")
 		}
 	}
-	return b.String()
 }
 
 // buildPinnedSkillInjectionBlock formats user-pinned skills (via `/skill pin`)
@@ -139,21 +145,7 @@ func buildPinnedSkillInjectionBlock(skills []*persona.Skill) string {
 	b.WriteString("The user pinned the following skills for this session via ")
 	b.WriteString("`/skill pin <name>`. They apply to every turn regardless of ")
 	b.WriteString("input triggers or file paths — treat them as standing instructions.\n\n")
-	for _, skill := range skills {
-		fmt.Fprintf(&b, "## Skill: %s", skill.Name)
-		if skill.Version != "" {
-			fmt.Fprintf(&b, " (v%s)", skill.Version)
-		}
-		b.WriteString("\n\n")
-		if skill.Description != "" {
-			b.WriteString(skill.Description)
-			b.WriteString("\n\n")
-		}
-		if strings.TrimSpace(skill.Content) != "" {
-			b.WriteString(skill.Content)
-			b.WriteString("\n\n")
-		}
-	}
+	renderSkillEntries(&b, skills)
 	return b.String()
 }
 

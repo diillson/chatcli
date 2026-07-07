@@ -1185,6 +1185,7 @@
   "compact.status.truncated": "✓ Truncado (%d → %d msgs)",
   "agent.microcompact.applied": "microcompact: %d truncados, %d resumidos, %s liberados",
   "agent.queue.new_user_instruction": "Nova instrução do usuário recebida",
+  "agent.skill.rescan_activated": "Skill auto-ativada durante a tarefa: %s",
   "agent.queue.indicator": "(%d na fila)",
   "agent.spinner.executing": "EXECUTANDO: %s %s",
   "agent.spinner.action_placeholder": "ação",

@@ -121,6 +121,13 @@ type AgentMode struct {
 	skillModelHint  string
 	skillEffortHint llmclient.SkillEffort
 
+	// injectedSkillNames tracks every skill already delivered to the model
+	// during the current Run() — via the startup system-prompt blocks
+	// (pinned/auto/manual) or a mid-loop re-scan injection — so the per-turn
+	// re-scan (skill_rescan.go) never injects the same skill twice. Reset at
+	// the start of each Run() alongside the skill hints.
+	injectedSkillNames map[string]bool
+
 	// Session-scoped flag: true once we have warned the user that the
 	// history is approaching likely corporate-proxy payload limits and
 	// no explicit CHATCLI_MAX_PAYLOAD is configured. Prevents the warning
@@ -776,6 +783,7 @@ func (a *AgentMode) Run(ctx context.Context, query string, additionalContext str
 	// without an active skill does not inherit the old model/effort.
 	a.skillModelHint = ""
 	a.skillEffortHint = llmclient.EffortUnset
+	a.injectedSkillNames = make(map[string]bool)
 	// Block 4 — skills (pinned + auto-activated + manual) and Orchestrator
 	// catalog. Built last because it's the most volatile (changes per query)
 	// and sits at the tail of the system prompt so earlier blocks stay
@@ -788,6 +796,7 @@ func (a *AgentMode) Run(ctx context.Context, query string, additionalContext str
 		manualArgs := a.cli.pendingManualSkillArgs
 		a.cli.pendingManualSkill = nil
 		a.cli.pendingManualSkillArgs = ""
+		a.noteInjectedSkills(manual)
 		if block := renderManualSkillBlock(manual, manualArgs); block != "" {
 			if skillsText != "" {
 				skillsText += "\n\n"
@@ -1372,6 +1381,24 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 		renderer.RenderAssistantResponseTimelineEvent(icon, title, rendered, color)
 	}
 
+	// Mid-loop skill re-activation (skill_rescan.go). pendingSkillBlock holds
+	// a skill block matched against the ASSISTANT's output; it is flushed into
+	// history only at the next turn boundary so the injected user-role message
+	// can never land between an assistant tool_use and its tool_result (which
+	// would corrupt native tool protocols). User follow-ups inject in place —
+	// their slot is already a safe turn boundary.
+	var pendingSkillBlock string
+	notifySkillActivation := func(names []string) {
+		if len(names) == 0 || a.cli.unattended {
+			return
+		}
+		fmt.Printf("\r\033[K  %s %s\n",
+			renderer.Colorize("✨", agent.ColorCyan),
+			renderer.Colorize(
+				i18n.T("agent.skill.rescan_activated", strings.Join(names, ", ")),
+				agent.ColorCyan))
+	}
+
 	// Context recovery state for the session
 	contextRecovery := agent.NewContextRecovery(agent.DefaultContextRecoveryConfig(), a.logger)
 	currentMaxTokens := 0           // 0 = use provider default
@@ -1434,6 +1461,21 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 				Role:    "user",
 				Content: userMsg,
 			})
+			// A type-ahead follow-up is a fresh trigger surface: activate its
+			// skills NOW so they shape the very next turn, not one turn late.
+			if block, names := a.rescanSkillsMidLoop(userMsg); block != "" {
+				a.cli.history = append(a.cli.history, models.Message{Role: "user", Content: block})
+				notifySkillActivation(names)
+			}
+		}
+
+		// Flush the skill block queued by the previous turn's assistant-output
+		// re-scan. This is a turn boundary: the previous turn's tool results
+		// are already in history, so the injection cannot split a tool_use
+		// from its tool_result.
+		if pendingSkillBlock != "" {
+			a.cli.history = append(a.cli.history, models.Message{Role: "user", Content: pendingSkillBlock})
+			pendingSkillBlock = ""
 		}
 
 		// Microcompact (Level 0): cheap, progressive compaction of OLD tool
@@ -1764,6 +1806,18 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 			})
 		} else {
 			a.cli.history = append(a.cli.history, models.Message{Role: "assistant", Content: aiResponse})
+		}
+
+		// Mid-loop skill activation: the model's own <reasoning> text and the
+		// file paths inside its tool_call args are trigger surfaces too. A
+		// skill whose keyword only surfaces in the agent's plan ("I'll write a
+		// Helm chart for this") — or whose path glob matches a file the agent
+		// just started touching — is injected at the next turn boundary, in
+		// time to improve the remaining work. Deduped per Run, so a skill the
+		// user's query already activated never re-fires here.
+		if block, names := a.rescanSkillsMidLoop(aiResponse); block != "" {
+			pendingSkillBlock = block
+			notifySkillActivation(names)
 		}
 
 		// Parsear Tool Calls — native ou XML fallback
@@ -2939,6 +2993,12 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 				Role:    "user",
 				Content: userInput,
 			})
+			// Same contract as the type-ahead path: a mid-session follow-up
+			// activates its skills before the next turn is sent.
+			if block, names := a.rescanSkillsMidLoop(userInput); block != "" {
+				a.cli.history = append(a.cli.history, models.Message{Role: "user", Content: block})
+				notifySkillActivation(names)
+			}
 			continue
 		}
 
@@ -3310,6 +3370,9 @@ func (a *AgentMode) buildAgentSkillBlocks(query, additionalContext string) strin
 
 	merged := append([]*persona.Skill(nil), pinned...)
 	merged = append(merged, autoActivated...)
+	// Seed the mid-loop re-scan dedup set: everything injected here is
+	// already in the model's system prompt for the whole Run.
+	a.noteInjectedSkills(merged...)
 	if len(merged) > 0 {
 		model, effort, _ := pickSkillModelAndEffort(merged)
 		if model != "" {

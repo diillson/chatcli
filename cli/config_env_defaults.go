@@ -109,6 +109,7 @@ var envDefaults = map[string]envDefault{
 
 	// ─── Agent: token efficiency ─────────────────────────────────
 	"CHATCLI_AGENT_EARLY_EXIT":       {Value: "true", IsBool: true, Source: "agent_earlyexit.earlyExitEnabled"},
+	"CHATCLI_AGENT_SKILL_RESCAN":     {Value: "true", IsBool: true, Source: "skill_rescan.skillRescanEnabled"},
 	"CHATCLI_AGENT_EARLY_EXIT_TURNS": {Value: "3", Source: "agent_earlyexit.defaultStagnationThreshold"},
 	"CHATCLI_AGENT_SMART_ROUTE":      {Value: "hint", Source: "agent_routing.smartRouting"},
 

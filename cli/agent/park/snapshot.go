@@ -58,6 +58,11 @@ type Snapshot struct {
 	SkillModelHint  string                `json:"skill_model_hint,omitempty"`
 	SkillEffortHint llmclient.SkillEffort `json:"skill_effort_hint,omitempty"`
 
+	// InjectedSkillNames is the mid-loop skill dedup set at park time.
+	// Restored so a skill already delivered to the model before the park
+	// cannot re-fire (and duplicate its prompt block) after resume.
+	InjectedSkillNames []string `json:"injected_skill_names,omitempty"`
+
 	// OriginalQuery is the user's original /coder or /agent prompt,
 	// retained for /parked rendering and audit trails.
 	OriginalQuery string `json:"original_query,omitempty"`
