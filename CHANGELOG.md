@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.154.0](https://github.com/diillson/chatcli/compare/v1.153.0...v1.154.0) (2026-07-08)
+
+
+### Features
+
+* add [@api-explorer](https://github.com/api-explorer) builtin for end-to-end API reconnaissance ([cc99eab](https://github.com/diillson/chatcli/commit/cc99eabc6ad72094fca0737d248c4a7fafed9ae5))
+
 ## [1.153.0](https://github.com/diillson/chatcli/compare/v1.152.0...v1.153.0) (2026-07-07)
 
 
