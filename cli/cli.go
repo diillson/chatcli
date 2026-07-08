@@ -510,6 +510,14 @@ func NewChatCLI(ctx context.Context, manager manager.LLMManager, logger *zap.Log
 		// start the server, hit its endpoints). Self-contained: shares the
 		// hardened proxy/TLS/SSRF web client with @webfetch.
 		pluginMgr.RegisterBuiltinPlugin(plugins.NewBuiltinHTTPPlugin())
+		// @api-explorer — end-to-end API reconnaissance: from a base URL it
+		// auto-discovers the OpenAPI/Swagger spec (JSON or YAML) across ~18
+		// well-known locations, fingerprints server tech/auth/rate-limit from
+		// response headers, catalogs every path/method/parameter/security
+		// scheme, deep-dives a single endpoint, and introspects GraphQL
+		// schemas. Read-only (GET/HEAD/OPTIONS + GraphQL introspection).
+		// Self-contained: shares the hardened proxy/TLS/SSRF web client.
+		pluginMgr.RegisterBuiltinPlugin(plugins.NewBuiltinAPIExplorerPlugin())
 		// @docs-flatten — push-side companion of @knowledge: flattens a
 		// Markdown/MDX docs tree (local dir or git repo) into the JSONL
 		// corpus /context --mode knowledge ingests. Self-contained.
