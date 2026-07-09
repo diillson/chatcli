@@ -147,13 +147,21 @@ type apiCore struct {
 	uploadClient *http.Client
 }
 
-// devinDefaultUserAgent identifies the client to Devin. A CloudFront/AWS-WAF
-// edge in front of api.devin.ai can 403 ("The request could not be
-// satisfied") a request whose User-Agent is Go's default
-// "Go-http-client/…", which bot-reputation rules flag. Sending a stable,
-// identifiable UA sidesteps that. Override with DEVIN_USER_AGENT when a
-// deployment's WAF requires a browser-like string.
-const devinDefaultUserAgent = "ChatCLI/1.0 (+https://github.com/diillson/chatcli)"
+// devinDefaultUserAgent identifies the client to Devin. Two edges care about
+// this value and pull it in opposite directions:
+//
+//   - The CloudFront/AWS-WAF edge in front of api.devin.ai 403s ("The request
+//     could not be satisfied") requests carrying Go's default
+//     "Go-http-client/…", which bot-reputation rules flag — so we must send a
+//     custom UA.
+//   - A TLS-intercepting corporate proxy (the kind that needs CHATCLI_CA_BUNDLE)
+//     inspects header VALUES; a URL embedded in the UA can trip DLP/URL-category
+//     filtering and get the request blocked at the proxy.
+//
+// So the default is a plain token with NO embedded URL: identifiable enough
+// for the WAF, innocuous enough for a header-scanning proxy. Override with
+// DEVIN_USER_AGENT when a deployment's WAF requires a browser-like string.
+const devinDefaultUserAgent = "ChatCLI/1.0"
 
 // setCommonHeaders applies the bearer credential and the User-Agent shared by
 // every Devin request.
