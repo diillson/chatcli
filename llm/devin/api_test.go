@@ -122,6 +122,11 @@ func TestV1SessionLifecycle(t *testing.T) {
 		if got := r.Header.Get("Authorization"); got != "Bearer apk_test" {
 			t.Errorf("Authorization = %q", got)
 		}
+		// The client must send an identifiable User-Agent so an AWS-WAF edge
+		// does not 403 the request as a default Go client.
+		if ua := r.Header.Get("User-Agent"); ua == "" || strings.HasPrefix(ua, "Go-http-client") {
+			t.Errorf("User-Agent = %q, want a non-default identifier", ua)
+		}
 		var payload map[string]any
 		_ = json.NewDecoder(r.Body).Decode(&payload)
 		prompt, _ := payload["prompt"].(string)

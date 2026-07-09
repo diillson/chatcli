@@ -147,6 +147,25 @@ type apiCore struct {
 	uploadClient *http.Client
 }
 
+// devinDefaultUserAgent identifies the client to Devin. A CloudFront/AWS-WAF
+// edge in front of api.devin.ai can 403 ("The request could not be
+// satisfied") a request whose User-Agent is Go's default
+// "Go-http-client/…", which bot-reputation rules flag. Sending a stable,
+// identifiable UA sidesteps that. Override with DEVIN_USER_AGENT when a
+// deployment's WAF requires a browser-like string.
+const devinDefaultUserAgent = "ChatCLI/1.0 (+https://github.com/diillson/chatcli)"
+
+// setCommonHeaders applies the bearer credential and the User-Agent shared by
+// every Devin request.
+func (c *apiCore) setCommonHeaders(req *http.Request) {
+	req.Header.Set("Authorization", "Bearer "+c.apiKey)
+	ua := strings.TrimSpace(os.Getenv("DEVIN_USER_AGENT"))
+	if ua == "" {
+		ua = devinDefaultUserAgent
+	}
+	req.Header.Set("User-Agent", ua)
+}
+
 // doJSON performs an authenticated JSON round-trip. A nil `in` sends no body;
 // a nil `out` discards the response body. Non-2xx statuses map to
 // utils.APIError with a sanitized body so callers can branch on status codes.
@@ -163,7 +182,7 @@ func (c *apiCore) doJSON(ctx context.Context, method, path string, in, out any) 
 	if err != nil {
 		return fmt.Errorf("devin: create request: %w", err)
 	}
-	req.Header.Set("Authorization", "Bearer "+c.apiKey)
+	c.setCommonHeaders(req)
 	req.Header.Set("Accept", "application/json")
 	if in != nil {
 		req.Header.Set("Content-Type", "application/json")
@@ -211,7 +230,7 @@ func (c *apiCore) uploadMultipart(ctx context.Context, path, filename string, co
 	if err != nil {
 		return nil, fmt.Errorf("devin: create request: %w", err)
 	}
-	req.Header.Set("Authorization", "Bearer "+c.apiKey)
+	c.setCommonHeaders(req)
 	req.Header.Set("Content-Type", writer.FormDataContentType())
 
 	resp, err := c.uploadClient.Do(req)
