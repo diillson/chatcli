@@ -22,6 +22,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"regexp"
 	"strings"
 	"sync/atomic"
 )
@@ -61,13 +62,87 @@ func currentCompressionAdapter() CompressionAdapter {
 	return h.a
 }
 
-// stripCCRMarker accepts either a bare key or a full "<<ccr:KEY>>" marker and
-// returns the bare key. The model often pastes back exactly what it saw.
-func stripCCRMarker(s string) string {
-	s = strings.TrimSpace(s)
-	s = strings.TrimPrefix(s, "<<ccr:")
-	s = strings.TrimSuffix(s, ">>")
-	return strings.TrimSpace(s)
+// ccrPrefixedKeyRe finds CCR keys in every shape models actually produce:
+// the canonical "<<ccr:KEY>>" marker, a single-bracket "<ccr:KEY>", the bare
+// "ccr:KEY" prefix, spacing quirks and uppercase hex. Keys are 16 lowercase
+// hex chars in the store (SHA-256 prefix — see cli/compress), so hex is
+// matched case-insensitively here and normalized to lowercase before lookup.
+var ccrPrefixedKeyRe = regexp.MustCompile(`(?i)<{0,2}\s*ccr\s*:\s*([0-9a-f]{16})\b`)
+
+// ccrBareKeyRe matches a candidate that is EXACTLY one key, used only as a
+// fallback when nothing ccr-prefixed was found — matching naked hex inside an
+// arbitrary payload would false-positive on hashes in tool output.
+var ccrBareKeyRe = regexp.MustCompile(`(?i)^[0-9a-f]{16}$`)
+
+// extractCCRKeys pulls every distinct CCR key out of a raw @recall payload,
+// in first-seen order. Two tiers:
+//
+//  1. Anything ccr-prefixed anywhere in the payload — this works regardless
+//     of JSON field names ({"key":...}, {"marker":...}, prose around the
+//     marker), because the marker itself is the anchor.
+//  2. When tier 1 finds nothing: the payload (or its JSON "key"/"keys"/
+//     "marker"/"markers"/"ccr"/"id" fields) trimmed of quotes, backticks and
+//     angle brackets, accepted only when it is exactly one bare 16-hex key.
+//
+// Models paste back what they saw with small mutations — "ccr:KEY" without
+// the angle brackets is the most common — and a strict parser here turns a
+// perfectly recoverable request into a dead end.
+func extractCCRKeys(payload string) []string {
+	seen := make(map[string]struct{})
+	var keys []string
+	add := func(k string) {
+		k = strings.ToLower(k)
+		if _, dup := seen[k]; dup {
+			return
+		}
+		seen[k] = struct{}{}
+		keys = append(keys, k)
+	}
+
+	for _, m := range ccrPrefixedKeyRe.FindAllStringSubmatch(payload, -1) {
+		add(m[1])
+	}
+	if len(keys) > 0 {
+		return keys
+	}
+
+	for _, candidate := range bareKeyCandidates(payload) {
+		candidate = strings.Trim(strings.TrimSpace(candidate), "`'\"<> ")
+		if ccrBareKeyRe.MatchString(candidate) {
+			add(candidate)
+		}
+	}
+	return keys
+}
+
+// bareKeyCandidates returns the strings that may hold a bare key: the JSON
+// alias fields when the payload is an object, otherwise the payload itself.
+func bareKeyCandidates(payload string) []string {
+	payload = strings.TrimSpace(payload)
+	if !strings.HasPrefix(payload, "{") {
+		return []string{payload}
+	}
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(payload), &raw); err != nil {
+		return []string{payload}
+	}
+	var out []string
+	for _, field := range []string{"key", "keys", "marker", "markers", "ccr", "id"} {
+		v, ok := raw[field]
+		if !ok {
+			continue
+		}
+		var s string
+		if json.Unmarshal(v, &s) == nil {
+			out = append(out, s)
+			continue
+		}
+		var list []string
+		if json.Unmarshal(v, &list) == nil {
+			out = append(out, list...)
+		}
+	}
+	return out
 }
 
 // RecallToolName is the canonical name of the @recall builtin. It is the
@@ -101,13 +176,17 @@ func (*BuiltinRecallPlugin) Description() string {
 func (*BuiltinRecallPlugin) Usage() string {
 	return `<tool_call name="@recall" args='{"key":"THE_KEY"}' />
 
-Accepts the bare key or the full marker (THE_KEY is the hex id shown in the marker):
+Accepts the bare key or the full marker (THE_KEY is the 16-hex id shown in the marker):
   {"key":"THE_KEY"}
-  {"key":"<<ccr:THE_KEY>>"}`
+  {"key":"<<ccr:THE_KEY>>"}
+
+Lenient on paste-back variants ("ccr:THE_KEY", uppercase hex, extra text around
+the marker) and accepts multiple markers in one call — each original is
+returned in a labeled section.`
 }
 
 // Version is semver; bumped when the surface changes.
-func (*BuiltinRecallPlugin) Version() string { return "1.0.0" }
+func (*BuiltinRecallPlugin) Version() string { return "1.1.0" }
 
 // Path is empty for builtin plugins.
 func (*BuiltinRecallPlugin) Path() string { return "" }
@@ -117,7 +196,7 @@ func (*BuiltinRecallPlugin) Schema() string {
 	schema := map[string]interface{}{
 		"argsFormat": "JSON object {key}",
 		"flags": []map[string]interface{}{
-			{"name": "key", "type": "string", "required": true, "description": "The CCR key from a '<<ccr:KEY>>' marker (bare key or full marker both accepted)."},
+			{"name": "key", "type": "string", "required": true, "description": "The CCR key from a '<<ccr:KEY>>' marker — 16 hex chars. Bare key, 'ccr:KEY' or the full marker all accepted; multiple markers in one call return labeled sections."},
 		},
 		"examples": []string{`{"key":"THE_KEY"}`},
 	}
@@ -137,25 +216,52 @@ func (p *BuiltinRecallPlugin) ExecuteWithStream(_ context.Context, args []string
 		return "", errors.New("@recall: no compression layer wired in this session")
 	}
 	payload := strings.TrimSpace(strings.Join(args, " "))
-	key := ""
-	if strings.HasPrefix(payload, "{") {
-		var in struct {
-			Key string `json:"key"`
+	keys := extractCCRKeys(payload)
+	if len(keys) == 0 {
+		return "", fmt.Errorf(
+			`@recall: no CCR key found in %q — pass the value from a <<ccr:KEY>> marker (16 hex chars), e.g. {"key":"<<ccr:KEY>>"} or {"key":"KEY"}`,
+			truncateForLog(payload, 120))
+	}
+
+	// Single key: return the original verbatim — recall's contract is a
+	// byte-identical restore, and downstream guards (the compression layer's
+	// recall passthrough, the history trimmer) rely on that.
+	if len(keys) == 1 {
+		content, ok := adapter.Recall(keys[0])
+		if !ok {
+			return "", fmt.Errorf("@recall: key %q not found (it may have expired or been evicted from the local store)", keys[0])
 		}
-		if err := json.Unmarshal([]byte(payload), &in); err != nil {
-			return "", fmt.Errorf(`@recall: parse args: %w. Expected {"key":"..."}`, err)
+		return content, nil
+	}
+
+	// Multiple keys in one call: label each section so the model can tell
+	// them apart. Partial hits still return — a missing key is reported in
+	// place instead of failing the whole batch.
+	var b strings.Builder
+	found := 0
+	for i, key := range keys {
+		if i > 0 {
+			b.WriteString("\n\n")
 		}
-		key = in.Key
-	} else {
-		key = payload
+		fmt.Fprintf(&b, "--- @recall <<ccr:%s>> ---\n", key)
+		content, ok := adapter.Recall(key)
+		if !ok {
+			b.WriteString("[not found — expired or evicted from the local store]")
+			continue
+		}
+		b.WriteString(content)
+		found++
 	}
-	key = stripCCRMarker(key)
-	if key == "" {
-		return "", errors.New(`@recall: "key" is required (the value from a <<ccr:KEY>> marker)`)
+	if found == 0 {
+		return "", fmt.Errorf("@recall: none of the %d keys were found (they may have expired or been evicted from the local store)", len(keys))
 	}
-	content, ok := adapter.Recall(key)
-	if !ok {
-		return "", fmt.Errorf("@recall: key %q not found (it may have expired or been evicted from the local store)", key)
+	return b.String(), nil
+}
+
+// truncateForLog clamps a payload echo used in error messages.
+func truncateForLog(s string, maxLen int) string {
+	if len(s) <= maxLen {
+		return s
 	}
-	return content, nil
+	return s[:maxLen] + "..."
 }
