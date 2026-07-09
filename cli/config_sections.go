@@ -643,6 +643,7 @@ func (cli *ChatCLI) showConfigAgent() {
 	kv(p, "CHATCLI_AGENT_EARLY_EXIT", envOr("CHATCLI_AGENT_EARLY_EXIT"))
 	kv(p, "CHATCLI_AGENT_EARLY_EXIT_TURNS", envOr("CHATCLI_AGENT_EARLY_EXIT_TURNS"))
 	kv(p, "CHATCLI_AGENT_SMART_ROUTE", envOr("CHATCLI_AGENT_SMART_ROUTE"))
+	kv(p, skillInjectBudgetEnvVar, envOr(skillInjectBudgetEnvVar))
 
 	fmt.Println(p)
 	subheader(p, "cfg.sub.agent.execution")

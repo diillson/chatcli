@@ -277,6 +277,28 @@ func (l *Layer) CompressHinted(h Hint, content string) (string, Result) {
 	return res.Compressed, res
 }
 
+// Archive stores content in the CCR store verbatim and returns its retrieval
+// key, bypassing the compression router entirely. Compaction paths that
+// build their own stub text (microcompact previews, emergency history
+// shrinking) use this so the bytes they drop from the conversation stay
+// recoverable through @recall. Returns ok=false when the layer is disabled,
+// the content already carries a CCR marker (its original is archived under
+// that key — a second copy would waste store capacity), or the store
+// rejects the entry (e.g. over the per-entry cap).
+func (l *Layer) Archive(content string) (string, bool) {
+	if !l.Enabled() || l.store == nil {
+		return "", false
+	}
+	if ExtractKeys(content) != nil {
+		return "", false
+	}
+	key, err := l.store.Put(content)
+	if err != nil {
+		return "", false
+	}
+	return key, true
+}
+
 // Recall returns the original content stored under a CCR key, or ok=false when
 // the key is unknown/evicted. Used by the @recall tool.
 func (l *Layer) Recall(key string) (string, bool) {

@@ -12,11 +12,42 @@ package cli
 
 import (
 	"fmt"
+	"os"
 	"regexp"
+	"strconv"
 	"strings"
 
 	"github.com/diillson/chatcli/pkg/persona"
 )
+
+// skillInjectBudgetEnvVar caps the total characters of skill BODIES inlined
+// per injection block. Skills beyond the budget degrade to an index entry
+// (name, description, source path) the model reads on demand — nothing is
+// lost, only deferred. 0 disables the cap (legacy inline-everything).
+//
+// Rationale: a burst of auto-activated skills (e.g. nine ServiceNow skills
+// matching one prompt) can add tens of KB to EVERY request — the payload
+// floor that trips corporate proxy/WAF body caps.
+const skillInjectBudgetEnvVar = "CHATCLI_SKILL_INJECT_BUDGET"
+
+// defaultSkillInjectBudget is generous: typical sessions inline every
+// activated skill untouched; only pathological bursts overflow to index
+// entries.
+const defaultSkillInjectBudget = 24_000
+
+// skillInjectBudget resolves the per-block skill body budget from the
+// environment, read live so /config flips apply immediately.
+func skillInjectBudget() int {
+	v := os.Getenv(skillInjectBudgetEnvVar)
+	if v == "" {
+		return defaultSkillInjectBudget
+	}
+	n, err := strconv.Atoi(v)
+	if err != nil || n < 0 {
+		return defaultSkillInjectBudget
+	}
+	return n
+}
 
 // filePathTokenRe matches bare file-like tokens inside a user message.
 //
@@ -110,7 +141,16 @@ func buildSkillInjectionBlock(skills []*persona.Skill) string {
 
 // renderSkillEntries writes the shared per-skill markdown section (name,
 // version, description, content) used by every skill injection block.
+//
+// Bodies are inlined until the per-block budget (skillInjectBudget) is
+// spent; skills past that point keep their header and description but their
+// body degrades to a read-on-demand pointer at the skill's source path.
+// Headers and descriptions are always inlined — the model must know a skill
+// activated even when its body is deferred. Callers pass skills in a stable
+// order, so which skills overflow is deterministic and cache-friendly.
 func renderSkillEntries(b *strings.Builder, skills []*persona.Skill) {
+	budget := skillInjectBudget()
+	spent := 0
 	for _, skill := range skills {
 		fmt.Fprintf(b, "## Skill: %s", skill.Name)
 		if skill.Version != "" {
@@ -121,11 +161,30 @@ func renderSkillEntries(b *strings.Builder, skills []*persona.Skill) {
 			b.WriteString(skill.Description)
 			b.WriteString("\n\n")
 		}
-		if strings.TrimSpace(skill.Content) != "" {
-			b.WriteString(skill.Content)
-			b.WriteString("\n\n")
+		body := strings.TrimSpace(skill.Content)
+		if body == "" {
+			continue
 		}
+		if budget > 0 && spent+len(body) > budget {
+			b.WriteString(renderSkillBodyPointer(skill))
+			continue
+		}
+		b.WriteString(body)
+		b.WriteString("\n\n")
+		spent += len(body)
 	}
+}
+
+// renderSkillBodyPointer emits the deferred-body note for a skill whose
+// content did not fit the injection budget. English on purpose — this is
+// model-facing prompt text, like every other block in this file.
+func renderSkillBodyPointer(skill *persona.Skill) string {
+	if skill.Path != "" {
+		return fmt.Sprintf("_Body not inlined (skill injection budget). "+
+			"Before applying this skill, read its full instructions from: %s_\n\n", skill.Path)
+	}
+	return "_Body not inlined (skill injection budget) and no source file is " +
+		"available. Rely on the description above; do not invent instructions._\n\n"
 }
 
 // buildPinnedSkillInjectionBlock formats user-pinned skills (via `/skill pin`)

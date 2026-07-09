@@ -89,13 +89,27 @@ func (c *BedrockClient) sendPromptConverse(ctx context.Context, prompt string, h
 			zap.String("family", string(familyConverse)),
 		)
 		c.logger.Error(i18n.T("llm.error.get_response_after_retries", "Bedrock"), zap.Error(err))
-		return "", err
+		// The Converse SDK marshals the body internally, so the exact size is
+		// not observable here; annotate with a content-based estimate so
+		// agent-mode payload recovery can still learn an adaptive cap.
+		return "", client.WithRequestSize(err, estimateConversePayloadBytes(prompt, history))
 	}
 	client.LogRequestFinish(c.logger, "BEDROCK", c.model, "success", time.Since(start),
 		zap.String("family", string(familyConverse)),
 		zap.Int("response_chars", len(responseText)),
 	)
 	return responseText, nil
+}
+
+// estimateConversePayloadBytes approximates the serialized Converse request
+// body size. Message content dominates the payload; the fixed overhead
+// covers JSON structure, role fields and inference config.
+func estimateConversePayloadBytes(prompt string, history []models.Message) int {
+	total := len(prompt) + 2048
+	for _, msg := range history {
+		total += len(msg.Content) + 64
+	}
+	return total
 }
 
 // clampInt32 narrows an int into the int32 range Bedrock's Converse API

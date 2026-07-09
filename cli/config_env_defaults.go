@@ -112,6 +112,7 @@ var envDefaults = map[string]envDefault{
 	"CHATCLI_AGENT_SKILL_RESCAN":     {Value: "true", IsBool: true, Source: "skill_rescan.skillRescanEnabled"},
 	"CHATCLI_AGENT_EARLY_EXIT_TURNS": {Value: "3", Source: "agent_earlyexit.defaultStagnationThreshold"},
 	"CHATCLI_AGENT_SMART_ROUTE":      {Value: "hint", Source: "agent_routing.smartRouting"},
+	"CHATCLI_SKILL_INJECT_BUDGET":    {Value: "24000", Source: "skill_activation.skillInjectBudget — 0 = unlimited"},
 
 	// ─── Agent: execution ────────────────────────────────────────
 	"CHATCLI_AGENT_CMD_TIMEOUT":         {Value: "10m", Source: "agent.NewContextManager"},

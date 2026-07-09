@@ -193,7 +193,20 @@ func TestQueue_ConcurrentEnqueueDequeue(t *testing.T) {
 			defer producers.Done()
 			for i := 0; i < N/10; i++ {
 				id := JobID("p" + string(rune('0'+p)) + "-" + padInt(i, 3))
-				_ = q.Enqueue(context.Background(), makeJob(string(id), "t", time.Now()))
+				job := makeJob(string(id), "t", time.Now())
+				// A bounded queue under contention may legitimately
+				// time out with ErrQueueFull — retry until accepted.
+				// Any other error is a real failure and must surface.
+				for {
+					err := q.Enqueue(context.Background(), job)
+					if err == nil {
+						break
+					}
+					if !errors.Is(err, ErrQueueFull) {
+						t.Errorf("producer %d job %s: unexpected enqueue error: %v", p, id, err)
+						return
+					}
+				}
 			}
 		}(p)
 	}

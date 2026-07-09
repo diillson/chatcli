@@ -43,6 +43,7 @@ type StatusCallback func(stage CompactStage, msg string)
 type HistoryCompactor struct {
 	logger   *zap.Logger
 	trimmer  *MessageTrimmer
+	compress *compress.Layer
 	statusMu sync.RWMutex
 	onStatus StatusCallback
 }
@@ -145,6 +146,7 @@ func NewHistoryCompactor(logger *zap.Logger) *HistoryCompactor {
 // embedded trimmer so oversized tool feedback and injected context are reduced
 // reversibly (CCR) during compaction instead of being byte-truncated.
 func (hc *HistoryCompactor) SetCompressionLayer(l *compress.Layer) {
+	hc.compress = l
 	if hc.trimmer != nil {
 		hc.trimmer.SetCompressionLayer(l)
 	}
@@ -272,6 +274,14 @@ func (hc *HistoryCompactor) Compact(
 	// LEVEL 3: Emergency truncation (last resort)
 	hc.emitStatus(CompactStageEmergency, i18n.T("compact.status.emergency"))
 	history = hc.emergencyTruncate(history, cfg)
+
+	// Whole-message dropping is a no-op when the history is short (system +
+	// a handful of huge tool results) — exactly the shape that trips
+	// proxy/WAF payload caps. Shrink message CONTENT until the budget is
+	// met; system messages are never touched.
+	if totalChars(history) > budget {
+		history = shrinkToBudget(history, budget, hc.compress)
+	}
 	hc.logger.Warn("Level 3 (emergency truncation) used",
 		zap.Int("before_chars", before),
 		zap.Int("after_chars", totalChars(history)),
@@ -391,6 +401,77 @@ func (hc *HistoryCompactor) emergencyTruncate(history []models.Message, cfg Comp
 	})
 	result = append(result, history[recentStart:]...)
 
+	return result
+}
+
+// shrinkToBudget hard-truncates the CONTENT of non-system messages, largest
+// first, until the total fits the budget. This is the true last resort:
+// emergencyTruncate drops whole middle messages, but with a short history
+// (agent mode: system prompt + a few huge tool results) there is no middle
+// to drop and it returns the input unchanged — the request then goes out
+// oversized and a proxy/WAF rejects it again. System messages are never
+// touched (they carry the agent charter, skills and tool instructions); if
+// they alone exceed the budget, everything else is shrunk to the floor and
+// the result is returned as-is — the caller's floor diagnostics handle
+// that case.
+//
+// When a CCR layer is available, each message is archived verbatim before
+// its first truncation and the content gains a <<ccr:KEY>> retrieval
+// marker, so even this emergency path loses nothing permanently: the model
+// can expand any shrunk message later with @recall. The marker rides at
+// the tail of the content, which truncatePreservingStructure always keeps.
+func shrinkToBudget(history []models.Message, budget int, ccr *compress.Layer) []models.Message {
+	// Floor per message: enough to keep tool_use/tool_result pairing and the
+	// gist of each exchange meaningful after truncation.
+	const floorChars = 400
+
+	total := totalChars(history)
+	if total <= budget {
+		return history
+	}
+
+	result := make([]models.Message, len(history))
+	copy(result, history)
+
+	for total > budget {
+		// Pick the largest shrinkable (non-system, above-floor) message.
+		idx, maxLen := -1, floorChars
+		for i, msg := range result {
+			if msg.Role == "system" {
+				continue
+			}
+			if len(msg.Content) > maxLen {
+				idx, maxLen = i, len(msg.Content)
+			}
+		}
+		if idx < 0 {
+			break // only system messages / floor-sized content left
+		}
+
+		// Archive before the lossy cut. Archive refuses content that
+		// already carries a marker (a previous round stored the original),
+		// so repeated shrinking never duplicates store entries.
+		if key, ok := ccr.Archive(result[idx].Content); ok {
+			result[idx].Content += "\n[full content recoverable via @recall " +
+				compress.FormatMarker(key) + "]"
+		}
+
+		// truncatePreservingStructure appends an omission banner on top of
+		// the requested length — aim below the deficit so the result lands
+		// within budget instead of hovering just above it.
+		const bannerSlack = 96
+		target := maxLen - (total - budget) - bannerSlack
+		if target < floorChars {
+			target = floorChars
+		}
+		result[idx].Content = truncatePreservingStructure(result[idx].Content, target)
+
+		newTotal := totalChars(result)
+		if newTotal >= total {
+			break // no progress possible (truncation banner overhead)
+		}
+		total = newTotal
+	}
 	return result
 }
 
