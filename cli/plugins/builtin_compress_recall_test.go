@@ -44,17 +44,19 @@ func TestRecallRequiresAdapter(t *testing.T) {
 }
 
 func TestRecallReturnsOriginal(t *testing.T) {
-	fa := &fakeCompressionAdapter{store: map[string]string{"recall-key-1": "THE FULL ORIGINAL"}}
+	// Real CCR keys are always 16 lowercase hex chars (SHA-256 prefix,
+	// boundary-validated by the store) — the fake mirrors that contract.
+	fa := &fakeCompressionAdapter{store: map[string]string{"1111222233334444": "THE FULL ORIGINAL"}}
 	defer withAdapter(fa)()
 	p := NewBuiltinRecallPlugin()
 
 	// Bare key.
-	out, err := p.Execute(context.Background(), []string{`{"key":"recall-key-1"}`})
+	out, err := p.Execute(context.Background(), []string{`{"key":"1111222233334444"}`})
 	if err != nil || out != "THE FULL ORIGINAL" {
 		t.Fatalf("bare key recall failed: out=%q err=%v", out, err)
 	}
 	// Full marker form.
-	out, err = p.Execute(context.Background(), []string{`{"key":"<<ccr:recall-key-1>>"}`})
+	out, err = p.Execute(context.Background(), []string{`{"key":"<<ccr:1111222233334444>>"}`})
 	if err != nil || out != "THE FULL ORIGINAL" {
 		t.Fatalf("marker-form recall failed: out=%q err=%v", out, err)
 	}
@@ -64,7 +66,7 @@ func TestRecallUnknownKey(t *testing.T) {
 	fa := &fakeCompressionAdapter{store: map[string]string{}}
 	defer withAdapter(fa)()
 	p := NewBuiltinRecallPlugin()
-	if _, err := p.Execute(context.Background(), []string{`{"key":"missing-key-x"}`}); err == nil {
+	if _, err := p.Execute(context.Background(), []string{`{"key":"9999888877776666"}`}); err == nil {
 		t.Fatal("expected error for unknown key")
 	}
 }
