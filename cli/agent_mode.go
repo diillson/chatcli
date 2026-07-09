@@ -1729,18 +1729,69 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 
 				// For payload-too-large: also force the compactor to use a
 				// hard byte cap on the next turn. Without a cap hint we would
-				// just retry with the same size and fail again.
-				if isPayloadTooLarge && os.Getenv("CHATCLI_MAX_PAYLOAD") == "" {
-					// Educated guess: assume a 4 MB proxy cap as a sane default
-					// when the user hasn't configured one. Err on the side of
-					// caution — easier to set a higher value than to hit this
-					// error repeatedly.
-					_ = os.Setenv("CHATCLI_MAX_PAYLOAD", "4MB")
-					fmt.Printf("  %s %s\n",
-						renderer.Colorize("ℹ", agent.ColorGray),
-						renderer.Colorize(
-							i18n.T("agent.recovery.assumed_cap"),
-							agent.ColorGray))
+				// just retry with the same size and fail again. Providers
+				// annotate the error with the exact request size the
+				// middlebox rejected (client.WithRequestSize) — learn the cap
+				// from it; fall back to a 4 MB guess only when unknown.
+				rejectedBytes, hasRejectedSize := llmclient.RequestSizeFromError(err)
+				if isPayloadTooLarge {
+					currentCap := ParsePayloadSize(os.Getenv("CHATCLI_MAX_PAYLOAD"))
+					switch {
+					case hasRejectedSize:
+						learnedCap := rejectedBytes * 3 / 4
+						if currentCap == 0 || learnedCap < currentCap {
+							_ = os.Setenv("CHATCLI_MAX_PAYLOAD", fmt.Sprintf("%dB", learnedCap))
+							fmt.Printf("  %s %s\n",
+								renderer.Colorize("ℹ", agent.ColorGray),
+								renderer.Colorize(
+									i18n.T("agent.recovery.learned_cap",
+										FormatPayloadSize(rejectedBytes),
+										FormatPayloadSize(learnedCap)),
+									agent.ColorGray))
+						}
+					case currentCap == 0:
+						// Educated guess: assume a 4 MB proxy cap as a sane
+						// default when the rejected size is unknown and the
+						// user hasn't configured one.
+						_ = os.Setenv("CHATCLI_MAX_PAYLOAD", "4MB")
+						fmt.Printf("  %s %s\n",
+							renderer.Colorize("ℹ", agent.ColorGray),
+							renderer.Colorize(
+								i18n.T("agent.recovery.assumed_cap"),
+								agent.ColorGray))
+					}
+
+					// Floor diagnosis: system messages (agent charter, skills,
+					// personas, MCP tool docs) are never compacted. When they
+					// alone reach the size the gateway just rejected, no
+					// amount of history compaction can produce an acceptable
+					// request — fail fast with an actionable message instead
+					// of burning recovery attempts on identical payloads.
+					if hasRejectedSize {
+						systemChars := 0
+						for _, m := range a.cli.history {
+							if m.Role == "system" {
+								systemChars += len(m.Content)
+							}
+						}
+						if systemChars >= rejectedBytes {
+							diag := i18n.T("agent.recovery.floor_exceeds_cap",
+								FormatPayloadSize(systemChars),
+								FormatPayloadSize(rejectedBytes))
+							fmt.Printf("\r\033[K  %s %s\n",
+								renderer.Colorize("✖", agent.ColorRed),
+								renderer.Colorize(diag, agent.ColorRed))
+							return fmt.Errorf("%s: %w", diag, err)
+						}
+						if systemChars >= rejectedBytes*3/4 {
+							fmt.Printf("  %s %s\n",
+								renderer.Colorize("⚠", agent.ColorYellow),
+								renderer.Colorize(
+									i18n.T("agent.recovery.floor_warn",
+										FormatPayloadSize(systemChars)),
+									agent.ColorYellow))
+						}
+					}
 				}
 
 				recoveredHistory, recovered := contextRecovery.RecoverContextOverflow(a.cli.history)
@@ -1752,11 +1803,13 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 					// triggered the limit, looping through recovery until
 					// MaxRecoveryAttempts is exhausted. A single user-role
 					// instruction steers it toward surgical, line-ranged reads
-					// that fit under the cap.
-					if isPayloadTooLarge {
+					// that fit under the cap. Injected at most once: appending
+					// it on every recovery attempt GROWS the payload while the
+					// middlebox demands it shrink.
+					if isPayloadTooLarge && !historyContainsPayloadHint(a.cli.history) {
 						a.cli.history = append(a.cli.history, models.Message{
 							Role: "user",
-							Content: "[SYSTEM NOTICE — PAYLOAD LIMIT HIT] A proxy/gateway rejected the previous request due to body size. History was compacted to recover. " +
+							Content: payloadRecoveryHintMarker + " A proxy/gateway rejected the previous request due to body size. History was compacted to recover. " +
 								"Going forward: " +
 								"(1) When reading files, prefer targeted reads with line ranges (e.g. sed -n '100,200p' file, or read_file with offset+limit) instead of reading entire files. " +
 								"(2) Prefer grep/ripgrep with specific patterns over full-file reads. " +

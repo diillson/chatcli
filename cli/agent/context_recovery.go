@@ -173,7 +173,19 @@ func (cr *ContextRecovery) level2Recovery(history []models.Message) []models.Mes
 // level3Recovery keeps only system messages + last 2 user-assistant exchanges.
 func (cr *ContextRecovery) level3Recovery(history []models.Message) []models.Message {
 	cr.logger.Info("Context recovery level 3: nuclear truncation")
-	return emergencyTruncate(history, 4) // system + 2 exchanges (user+assistant each)
+	result := emergencyTruncate(history, 4) // system + 2 exchanges (user+assistant each)
+
+	// Nuclear must genuinely shrink the payload: with a short history the
+	// message-drop above is a no-op and the kept tail may still carry the
+	// huge tool result that caused the failure. Hard-cap the content of
+	// every kept non-system message.
+	const nuclearPerMessageCap = 4000
+	for i := range result {
+		if result[i].Role != "system" && len(result[i].Content) > nuclearPerMessageCap {
+			result[i].Content = truncatePreservingEnd(result[i].Content, nuclearPerMessageCap)
+		}
+	}
+	return result
 }
 
 // emergencyTruncate preserves system messages and the last N non-system messages.

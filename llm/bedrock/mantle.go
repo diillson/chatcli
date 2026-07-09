@@ -163,7 +163,9 @@ func (c *BedrockClient) sendPromptAnthropicMantle(ctx context.Context, prompt st
 			zap.String("family", "anthropic-mantle"),
 		)
 		c.logger.Error(i18n.T("llm.error.get_response_after_retries", "Bedrock"), zap.Error(err))
-		return "", err
+		// Annotate with the request size so agent-mode payload recovery can
+		// learn the proxy/WAF cap from the exact size that was rejected.
+		return "", client.WithRequestSize(err, len(payload))
 	}
 	client.LogRequestFinish(c.logger, "BEDROCK", c.model, "success", time.Since(start),
 		zap.String("family", "anthropic-mantle"),
