@@ -1,13 +1,13 @@
 package bedrock
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
-	"github.com/aws/aws-sdk-go-v2/credentials"
 	"github.com/aws/aws-sdk-go-v2/service/bedrockruntime"
 	cliagent "github.com/diillson/chatcli/cli/agent"
 	"github.com/diillson/chatcli/llm/client"
@@ -32,8 +32,13 @@ func TestSendPromptAnthropic_WAF403HTMLBlockPage(t *testing.T) {
 	defer srv.Close()
 
 	cfg := aws.Config{
-		Region:      "us-east-1",
-		Credentials: credentials.NewStaticCredentialsProvider("test-key", "test-secret", ""),
+		Region: "us-east-1",
+		// Inline provider instead of the aws-sdk-go-v2/credentials package:
+		// pulling that package in would promote it to a direct go.mod
+		// dependency for a test-only static credential.
+		Credentials: aws.CredentialsProviderFunc(func(context.Context) (aws.Credentials, error) {
+			return aws.Credentials{AccessKeyID: "test-key", SecretAccessKey: "test-secret"}, nil
+		}),
 	}
 	rt := bedrockruntime.NewFromConfig(cfg, func(o *bedrockruntime.Options) {
 		o.BaseEndpoint = aws.String(srv.URL)
