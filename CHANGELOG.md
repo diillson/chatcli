@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.155.0](https://github.com/diillson/chatcli/compare/v1.154.0...v1.155.0) (2026-07-09)
+
+
+### Features
+
+* **agent:** adaptive payload-cap recovery, bounded prompt floor and zero-loss compaction ([48f3c0c](https://github.com/diillson/chatcli/commit/48f3c0c54a401dc8d292d72883a6c7fe024921d9))
+
+
+### Bug Fixes
+
+* **plugins:** tolerate the CCR key syntax variants models actually produce ([8ebe661](https://github.com/diillson/chatcli/commit/8ebe661e923552ca2d63a06da526ff7cbb21b437))
+
 ## [1.154.0](https://github.com/diillson/chatcli/compare/v1.153.0...v1.154.0) (2026-07-08)
 
 
