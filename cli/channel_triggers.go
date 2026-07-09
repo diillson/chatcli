@@ -241,22 +241,38 @@ func (cli *ChatCLI) renderChannelTriggerBanner() bool {
 		return false
 	}
 
+	// Every content line is width-clamped (uiBoxLine) and long queues are
+	// capped: unclamped lines wrap and break go-prompt's row accounting
+	// (the box renders overlapped/half-hidden), and an unbounded backlog
+	// floods the screen on every prompt cycle.
+	const maxBannerItems = 5
 	fmt.Println()
 	fmt.Println(uiBox("📡", i18n.T("chan.banner.title"), ColorPurple))
 	p := uiPrefix(ColorPurple)
 	if unread > 0 {
-		fmt.Println(p + colorize(i18n.T("chan.banner.unread", unread), ColorYellow))
+		fmt.Println(uiBoxLine(ColorPurple, colorize(i18n.T("chan.banner.unread", unread), ColorYellow)))
 	}
-	for _, a := range notify {
-		fmt.Println(p + renderTriggerLine(a))
+	shownNotify := notify
+	if len(shownNotify) > maxBannerItems {
+		shownNotify = shownNotify[:maxBannerItems]
 	}
-	for _, a := range confirm {
-		fmt.Println(p + colorize("⚠ ", ColorYellow) + renderTriggerLine(a) +
-			colorize(fmt.Sprintf("  /channel confirm %d", a.ID), ColorGray))
+	for _, a := range shownNotify {
+		fmt.Println(uiBoxLine(ColorPurple, renderTriggerLine(a)))
+	}
+	shownConfirm := confirm
+	if len(shownConfirm) > maxBannerItems {
+		shownConfirm = shownConfirm[:maxBannerItems]
+	}
+	for _, a := range shownConfirm {
+		fmt.Println(uiBoxLine(ColorPurple, colorize("⚠ ", ColorYellow)+renderTriggerLine(a)+
+			colorize(fmt.Sprintf("  /channel confirm %d", a.ID), ColorGray)))
+	}
+	if hidden := (len(notify) - len(shownNotify)) + (len(confirm) - len(shownConfirm)); hidden > 0 {
+		fmt.Println(uiBoxLine(ColorPurple, colorize(i18n.T("chan.banner.more", hidden), ColorGray)))
 	}
 	if len(notify)+len(confirm) > 0 {
 		fmt.Println(p)
-		fmt.Println(p + colorize(i18n.T("chan.banner.hint_ack"), ColorGray))
+		fmt.Println(uiBoxLine(ColorPurple, colorize(i18n.T("chan.banner.hint_ack"), ColorGray)))
 	}
 	fmt.Println(uiBoxEnd(ColorPurple))
 	fmt.Println()

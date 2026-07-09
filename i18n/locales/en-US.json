@@ -2411,6 +2411,7 @@
   "chan.banner.title": "MCP CHANNEL INBOX",
   "chan.banner.unread": "%d new channel message(s) since last ack",
   "chan.banner.hint_ack": "Hint: /channel ack to clear, /channel list for full inbox",
+  "chan.banner.more": "… and %d more item(s) — /channel list to see everything",
 
   "chan.trigger.toast_header": "trigger fired (%s) — rule %s",
   "chan.trigger.toast_confirm_hint": "Run /channel confirm %d [yes|no] to resolve",
