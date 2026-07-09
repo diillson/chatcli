@@ -20,6 +20,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+	"unicode/utf8"
 
 	"github.com/c-bata/go-prompt"
 	"github.com/diillson/chatcli/cli/agent"
@@ -1482,6 +1483,9 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 		// results in history. Pure Go, no LLM call. Often keeps us below
 		// budget so the expensive summarization path is never triggered.
 		mcCfg := agent.DefaultMicrocompactConfig()
+		// Route dropped bytes through CCR so every microcompacted tool
+		// result stays recoverable via @recall instead of being lost.
+		mcCfg.CCR = a.cli.compressionLayer
 		if h, report := agent.ApplyMicrocompact(a.cli.history, turn, mcCfg, a.logger); report != nil && (report.Truncated > 0 || report.Summarized > 0) {
 			a.cli.history = h
 			fmt.Printf("\r\033[K  %s %s\n",
@@ -3300,9 +3304,34 @@ func buildMCPToolsSection(tools []models.ToolDefinition, isCoderMode bool) strin
 	}
 	b.WriteString("\n")
 	for _, t := range tools {
-		b.WriteString(fmt.Sprintf("  - %s: %s\n", t.Function.Name, t.Function.Description))
+		b.WriteString(fmt.Sprintf("  - %s: %s\n",
+			t.Function.Name, clampIndexDescription(t.Function.Description)))
 	}
 	return b.String()
+}
+
+// mcpIndexDescMaxChars caps each MCP tool's description in the system-prompt
+// index. Enterprise MCP servers ship multi-paragraph descriptions; with
+// 100+ tools connected they alone add tens of KB to every request — the
+// exact payload floor that trips corporate proxy/WAF body caps. The full
+// description and schema remain one @tools describe away.
+const mcpIndexDescMaxChars = 160
+
+// clampIndexDescription reduces a tool description to its first line,
+// whitespace-collapsed and capped at mcpIndexDescMaxChars, rune-safe.
+func clampIndexDescription(desc string) string {
+	if idx := strings.IndexByte(desc, '\n'); idx >= 0 {
+		desc = desc[:idx]
+	}
+	desc = strings.Join(strings.Fields(desc), " ")
+	if len(desc) <= mcpIndexDescMaxChars {
+		return desc
+	}
+	cut := desc[:mcpIndexDescMaxChars]
+	for !utf8.ValidString(cut) {
+		cut = cut[:len(cut)-1]
+	}
+	return cut + "…"
 }
 
 // buildMCPEmptyNote returns the system-prompt note shown to the model

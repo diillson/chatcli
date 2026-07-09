@@ -4,7 +4,9 @@ import (
 	"context"
 	"reflect"
 	"sort"
+	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/diillson/chatcli/llm/client"
 	"github.com/diillson/chatcli/pkg/persona"
@@ -201,4 +203,67 @@ func containsString(haystack, needle string) bool {
 		}
 	}
 	return false
+}
+
+func TestRenderSkillEntries_BudgetOverflowDefersBody(t *testing.T) {
+	t.Setenv(skillInjectBudgetEnvVar, "1000")
+
+	big := strings.Repeat("instruction line\n", 60) // ~1020 chars each
+	skills := []*persona.Skill{
+		{Name: "first", Description: "fits", Content: strings.Repeat("a", 900), Path: "/skills/first/SKILL.md"},
+		{Name: "second", Description: "overflows", Content: big, Path: "/skills/second/SKILL.md"},
+	}
+
+	var b strings.Builder
+	renderSkillEntries(&b, skills)
+	out := b.String()
+
+	if !strings.Contains(out, strings.Repeat("a", 900)) {
+		t.Error("first skill body fits the budget and must be inlined")
+	}
+	if strings.Contains(out, "instruction line") {
+		t.Error("second skill body exceeds the budget and must NOT be inlined")
+	}
+	if !strings.Contains(out, "/skills/second/SKILL.md") {
+		t.Error("deferred skill must point at its source path for on-demand reading")
+	}
+	if !strings.Contains(out, "## Skill: second") || !strings.Contains(out, "overflows") {
+		t.Error("deferred skill must keep its header and description")
+	}
+}
+
+func TestRenderSkillEntries_ZeroBudgetDisablesCap(t *testing.T) {
+	t.Setenv(skillInjectBudgetEnvVar, "0")
+
+	big := strings.Repeat("full body content\n", 3000)
+	skills := []*persona.Skill{{Name: "huge", Content: big}}
+
+	var b strings.Builder
+	renderSkillEntries(&b, skills)
+	if !strings.Contains(b.String(), big) {
+		t.Error("budget 0 must inline everything (legacy behavior)")
+	}
+}
+
+func TestClampIndexDescription(t *testing.T) {
+	if got := clampIndexDescription("short and sweet"); got != "short and sweet" {
+		t.Errorf("short description must pass through, got %q", got)
+	}
+	multi := "First line summary.\nSecond line with much more detail that nobody needs in the index."
+	if got := clampIndexDescription(multi); got != "First line summary." {
+		t.Errorf("multi-line description must clamp to first line, got %q", got)
+	}
+	long := strings.Repeat("palavra ", 60)
+	got := clampIndexDescription(long)
+	if len(got) > mcpIndexDescMaxChars+len("…") {
+		t.Errorf("long description must cap at %d chars, got %d", mcpIndexDescMaxChars, len(got))
+	}
+	if !strings.HasSuffix(got, "…") {
+		t.Error("capped description must end with ellipsis")
+	}
+	// UTF-8 safety: the cut must never split a rune.
+	acc := strings.Repeat("ação de segurança ", 20)
+	if !utf8.ValidString(clampIndexDescription(acc)) {
+		t.Error("clamp must be rune-safe")
+	}
 }

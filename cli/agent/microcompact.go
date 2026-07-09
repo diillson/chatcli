@@ -25,6 +25,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/diillson/chatcli/cli/compress"
 	"github.com/diillson/chatcli/models"
 	"go.uber.org/zap"
 )
@@ -48,6 +49,12 @@ type MicrocompactConfig struct {
 	// MinContentSize is the minimum content size (chars) to trigger compaction.
 	// Small tool results are never compacted.
 	MinContentSize int
+
+	// CCR, when set, preserves every byte microcompact drops: the original
+	// tool result is archived in the CCR store and the preview/summary stub
+	// embeds a <<ccr:KEY>> marker the model can expand with @recall. Nil
+	// keeps the legacy lossy behavior.
+	CCR *compress.Layer
 }
 
 // DefaultMicrocompactConfig returns the default configuration.
@@ -141,14 +148,16 @@ func ApplyMicrocompact(history []models.Message, currentTurn int, config Microco
 		if age >= config.TurnsBeforeSummarize {
 			// Level 2: Replace with one-line summary
 			original := len(msg.Content)
-			msg.Content = buildToolResultSummary(msg.Content, msg.ToolCallID)
+			stub := buildToolResultSummary(msg.Content, msg.ToolCallID)
+			msg.Content = stub + recallSuffix(config.CCR, msg.Content, stub)
 			report.Summarized++
 			report.CharsSaved += int64(original - len(msg.Content))
 		} else if age >= config.TurnsBeforeTruncate {
 			// Level 1: Truncate to head+tail preview
 			original := len(msg.Content)
-			msg.Content = truncateToolResultPreview(
+			stub := truncateToolResultPreview(
 				msg.Content, config.TruncateHeadChars, config.TruncateTailChars)
+			msg.Content = stub + recallSuffix(config.CCR, msg.Content, stub)
 			report.Truncated++
 			report.CharsSaved += int64(original - len(msg.Content))
 		}
@@ -162,6 +171,41 @@ func ApplyMicrocompact(history []models.Message, currentTurn int, config Microco
 	}
 
 	return history, report
+}
+
+// recallSuffix makes the bytes a compaction stub drops recoverable via
+// @recall. Called with the content as it was BEFORE the lossy rewrite:
+// when that content already carries CCR markers (an earlier truncation or
+// the compression layer archived the original), those markers are carried
+// over onto the stub unless the rewrite kept them; otherwise the content is
+// archived now and a fresh marker is emitted. Returns "" when CCR is
+// disabled (legacy lossy behavior) or every marker survived in the stub.
+func recallSuffix(ccr *compress.Layer, original, stub string) string {
+	keys := compress.ExtractKeys(original)
+	if len(keys) == 0 {
+		key, ok := ccr.Archive(original)
+		if !ok {
+			return ""
+		}
+		keys = []string{key}
+	}
+
+	var b strings.Builder
+	for _, k := range keys {
+		if strings.Contains(stub, compress.FormatMarker(k)) {
+			continue // the rewrite preserved this marker — don't duplicate
+		}
+		if b.Len() == 0 {
+			b.WriteString("\n[full content recoverable via @recall")
+		}
+		b.WriteString(" ")
+		b.WriteString(compress.FormatMarker(k))
+	}
+	if b.Len() == 0 {
+		return ""
+	}
+	b.WriteString("]")
+	return b.String()
 }
 
 // truncateToolResultPreview keeps the head and tail of a tool result.

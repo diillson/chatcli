@@ -169,3 +169,40 @@ func TestNewLayerFromEnvOff(t *testing.T) {
 		t.Fatal("CHATCLI_COMPRESSION=off must disable the layer")
 	}
 }
+
+func TestLayerArchiveRoundTrip(t *testing.T) {
+	l := NewLayer(Config{Mode: ModeLossyWithCCR, Store: NewMemoryStore()})
+	original := strings.Repeat("incident INC0012345 details\n", 200)
+
+	key, ok := l.Archive(original)
+	if !ok {
+		t.Fatal("Archive must accept unmarked content on an enabled layer")
+	}
+	got, found := l.Recall(key)
+	if !found || got != original {
+		t.Fatalf("Recall(%q) must return the archived original verbatim", key)
+	}
+}
+
+func TestLayerArchiveRefusesMarkedContent(t *testing.T) {
+	l := NewLayer(Config{Mode: ModeLossyWithCCR, Store: NewMemoryStore()})
+	key, ok := l.Archive("some content worth keeping")
+	if !ok {
+		t.Fatal("first archive must succeed")
+	}
+	stub := "preview... " + FormatMarker(key)
+	if _, ok := l.Archive(stub); ok {
+		t.Error("content already carrying a marker must not be archived again")
+	}
+}
+
+func TestLayerArchiveDisabledOrNil(t *testing.T) {
+	off := NewLayer(Config{Mode: ModeOff})
+	if _, ok := off.Archive("content"); ok {
+		t.Error("disabled layer must refuse Archive")
+	}
+	var nilLayer *Layer
+	if _, ok := nilLayer.Archive("content"); ok {
+		t.Error("nil layer must refuse Archive")
+	}
+}
