@@ -130,6 +130,9 @@ func (q *Queue) Remove(id JobID) {
 		e.dead = true
 		delete(q.byID, id)
 		q.updateDepthLocked()
+		// Same as the Dequeue pop path: a freed slot must wake
+		// producers blocked on capacity.
+		q.cond.Broadcast()
 	}
 }
 
@@ -165,6 +168,11 @@ func (q *Queue) Dequeue(ctx context.Context) (LessonJob, bool, error) {
 				heap.Pop(q.heap)
 				delete(q.byID, peek.job.ID)
 				q.updateDepthLocked()
+				// A slot just freed — wake producers blocked in
+				// waitForSlotLocked. Without this they only wake at
+				// their own deadline and can return ErrQueueFull while
+				// capacity is available (lost-wakeup starvation).
+				q.cond.Broadcast()
 				return peek.job, true, nil
 			}
 			// Earliest job isn't ready yet — sleep until its time.
