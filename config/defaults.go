@@ -73,6 +73,21 @@ const (
 	OllamaDefaultBaseURL        = "http://localhost:11434"
 	OllamaFilterThinkingDefault = "true"
 
+	// Valores padrão para Devin (Cognition) — provider DEVIN + ferramenta @devin.
+	// DEVIN_API_KEY aceita credenciais das duas gerações da API: apk_user_/apk_
+	// (individual/Teams, v1) e cog_ (service user, v3). DEVIN_API_VERSION
+	// força a geração (auto|v1|v3); em auto, cog_ + DEVIN_ORG_ID → v3.
+	DevinAPIKeyEnv           = "DEVIN_API_KEY"
+	DevinOrgIDEnv            = "DEVIN_ORG_ID"
+	DevinAPIVersionEnv       = "DEVIN_API_VERSION"
+	DevinBaseURLEnv          = "DEVIN_BASE_URL"
+	DevinDefaultBaseURL      = "https://api.devin.ai"
+	DefaultDevinModel        = "devin"
+	DevinPollIntervalEnv     = "DEVIN_POLL_INTERVAL"
+	DevinTurnTimeoutEnv      = "DEVIN_TURN_TIMEOUT"
+	DefaultDevinPollInterval = 10 * time.Second
+	DefaultDevinTurnTimeout  = 45 * time.Minute
+
 	// Provedor padrão
 	DefaultLLMProvider = "OPENAI"
 

@@ -65,6 +65,8 @@ func (cli *ChatCLI) reloadConfiguration(ctx context.Context) {
 		"CLIENT_ID", "CLIENT_KEY", "STACKSPOT_REALM", "STACKSPOT_AGENT_ID",
 		"COPILOT_MODEL", "COPILOT_MAX_TOKENS", "GITHUB_COPILOT_TOKEN",
 		"GITHUB_TOKEN", "GH_TOKEN", "GITHUB_MODELS_TOKEN", "GITHUB_MODELS_MODEL",
+		"DEVIN_API_KEY", "DEVIN_ORG_ID", "DEVIN_API_VERSION", "DEVIN_BASE_URL",
+		"DEVIN_MODEL", "DEVIN_POLL_INTERVAL", "DEVIN_TURN_TIMEOUT",
 		"CHATCLI_WEBFETCH_USER_AGENT", "CHATCLI_WEBFETCH_AUTOSAVE_BYTES",
 		"CHATCLI_WEBFETCH_RENDER", "CHATCLI_WEBFETCH_RENDER_TIMEOUT", "CHATCLI_WEBFETCH_RENDER_AUTOPROVISION",
 		"CHATCLI_WEBFETCH_RENDER_BROWSER",
@@ -194,6 +196,12 @@ func (cli *ChatCLI) configureProviderAndModel() {
 		cli.Model = os.Getenv("GITHUB_MODELS_MODEL")
 		if cli.Model == "" {
 			cli.Model = config.DefaultGitHubModelsModel
+		}
+	}
+	if cli.Provider == "DEVIN" {
+		cli.Model = os.Getenv("DEVIN_MODEL")
+		if cli.Model == "" {
+			cli.Model = config.DefaultDevinModel
 		}
 	}
 }
@@ -329,6 +337,7 @@ func (cli *ChatCLI) showHelp() {
 	printCommand("/schedule <nome> --when <t> --do <a>", i18n.T("help.command.schedule"))
 	printCommand("/wait --until <cond> [--then <a>]", i18n.T("help.command.wait"))
 	printCommand("/jobs {list|show|tree|cancel|logs|…}", i18n.T("help.command.jobs"))
+	printCommand("/devin {run|list|status|watch|…}", i18n.T("help.command.devin"))
 
 	fmt.Printf("\n  %s\n", colorize(i18n.T("help.section.sessions"), ColorLime))
 	printCommand("/session save <nome>", i18n.T("help.command.session_save"))

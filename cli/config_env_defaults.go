@@ -92,6 +92,11 @@ var envDefaults = map[string]envDefault{
 	"MOONSHOT_THINKING":          {Value: "auto", Source: "moonshot client default"},
 	"OPENROUTER_FALLBACK_MODELS": {Value: "(none)", Source: "openrouter client"},
 	"OPENROUTER_PROVIDER_ORDER":  {Value: "(none)", Source: "openrouter client"},
+	"DEVIN_MODEL":                {Value: config.DefaultDevinModel, Source: "config.DefaultDevinModel"},
+	"DEVIN_API_VERSION":          {Value: "auto", Source: "devin.APIConfig.ResolveVersion"},
+	"DEVIN_BASE_URL":             {Value: config.DevinDefaultBaseURL, Source: "config.DevinDefaultBaseURL"},
+	"DEVIN_POLL_INTERVAL":        {Value: config.DefaultDevinPollInterval.String(), Source: "config.DefaultDevinPollInterval"},
+	"DEVIN_TURN_TIMEOUT":         {Value: config.DefaultDevinTurnTimeout.String(), Source: "config.DefaultDevinTurnTimeout"},
 
 	// ─── UI / theme ──────────────────────────────────────────────
 	"CHATCLI_THEME": {Value: config.DefaultTheme, Source: "config.DefaultTheme"},

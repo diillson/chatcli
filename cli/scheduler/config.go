@@ -147,6 +147,7 @@ func DefaultConfig() Config {
 			ActionShell:          true, // gated by CoderMode
 			ActionAgentResume:    true,
 			ActionParkPoll:       true,
+			ActionDevinPoll:      true,
 		},
 
 		RateLimitGlobalRPS:   5.0,

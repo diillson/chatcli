@@ -536,6 +536,12 @@ func NewChatCLI(ctx context.Context, manager manager.LLMManager, logger *zap.Log
 		// (search titles / read an article intro), language-configurable.
 		// A companion to @websearch/@webfetch/@knowledge. Self-contained.
 		pluginMgr.RegisterBuiltinPlugin(plugins.NewBuiltinWikipediaPlugin())
+		// @devin — drives Cognition's Devin (autonomous software engineer):
+		// create/follow/steer sessions, upload attachments, manage org
+		// secrets/knowledge/playbooks. Supports BOTH API generations via
+		// llm/devin (v1 individual/Teams apk_ keys and v3 organizations/
+		// enterprise cog_ service users). Self-contained (HTTP only).
+		pluginMgr.RegisterBuiltinPlugin(plugins.NewBuiltinDevinPlugin())
 		// @diagram — render architecture/dependency/flow diagrams to
 		// PNG/SVG/JPG from Graphviz DOT, with crisp and exactly-correct text
 		// labels. Graphviz is embedded as WASM (go-graphviz + wazero): no cgo,

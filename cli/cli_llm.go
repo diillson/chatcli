@@ -260,6 +260,8 @@ func (cli *ChatCLI) providerDefaultModel(provider string) string {
 		return utils.GetEnvOrDefault("COPILOT_MODEL", config.DefaultCopilotModel)
 	case "GITHUB_MODELS":
 		return utils.GetEnvOrDefault("GITHUB_MODELS_MODEL", config.DefaultGitHubModelsModel)
+	case "DEVIN":
+		return utils.GetEnvOrDefault("DEVIN_MODEL", config.DefaultDevinModel)
 	}
 	return ""
 }

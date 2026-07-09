@@ -90,6 +90,9 @@ func (ch *CommandHandler) HandleCommand(ctx context.Context, userInput string) b
 	case strings.HasPrefix(userInput, "/agent"):
 		// /agent pode ser gerenciamento de personas OU iniciar modo agente
 		if !ch.handleAgentPersonaSubcommand(userInput) {
+			if ch.blockLocalModesForDevin() {
+				return false
+			}
 			// Não é um subcomando, inicia modo agente.
 			// Smart-routing: if the query looks conversational, the
 			// default "hint" mode prints a tip and falls through;
@@ -105,12 +108,21 @@ func (ch *CommandHandler) HandleCommand(ctx context.Context, userInput string) b
 		return false
 	case strings.HasPrefix(userInput, "/run"):
 		// /run inicia o modo agente (com ou sem persona ativa)
+		if ch.blockLocalModesForDevin() {
+			return false
+		}
 		ch.cli.pendingAction = "agent"
 		panic(errAgentModeRequest)
 	case strings.HasPrefix(userInput, "/coder"):
+		if ch.blockLocalModesForDevin() {
+			return false
+		}
 		ch.cli.pendingAction = "coder"
 		panic(errCoderModeRequest)
 	case userInput == "/plan" || strings.HasPrefix(userInput, "/plan "):
+		if ch.blockLocalModesForDevin() {
+			return false
+		}
 		switch ch.cli.handlePlanCommand(userInput) {
 		case planRouteAgent:
 			panic(errAgentModeRequest)
@@ -134,6 +146,19 @@ func (ch *CommandHandler) HandleCommand(ctx context.Context, userInput string) b
 		return fn(ctx, userInput)
 	}
 	return ch.handleDefault(ctx, userInput)
+}
+
+// blockLocalModesForDevin refuses the LOCAL agent/coder/plan loops while the
+// DEVIN provider is active: Devin is itself a remote autonomous agent driven
+// by asynchronous sessions — it does not speak the ReAct tool protocol, and
+// each local turn would burn minutes (and ACUs) per tool call. Chat mode and
+// the @devin tool (under any other provider) are the supported surfaces.
+func (ch *CommandHandler) blockLocalModesForDevin() bool {
+	if !strings.EqualFold(ch.cli.Provider, "DEVIN") {
+		return false
+	}
+	fmt.Println(colorize("  "+i18n.T("devin.cmd.local_modes_blocked"), ColorYellow))
+	return true
 }
 
 // lookup resolves the handler for an input: exact match first, then the
@@ -241,6 +266,7 @@ func (ch *CommandHandler) buildRoutes() {
 		{"/cancel-park", false, func(_ context.Context, in string) bool { c.handleCancelParkCommand(in); return false }},
 		{"/channel", false, func(ctx context.Context, in string) bool { c.handleChannelCommand(ctx, in); return false }},
 		{"/websearch", false, func(_ context.Context, in string) bool { c.handleWebSearchCommand(in); return false }},
+		{"/devin", false, func(ctx context.Context, in string) bool { c.handleDevinCommand(ctx, in); return false }},
 	}
 }
 

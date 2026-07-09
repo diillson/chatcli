@@ -399,6 +399,12 @@ const (
 	// matches success_when (transitions to AgentResume) or the deadline
 	// elapses (also transitions to AgentResume with timeout outcome).
 	ActionParkPoll ActionType = "park_poll"
+	// ActionDevinPoll — durable watcher for a Devin (Cognition) session:
+	// re-enqueues itself at every interval until the session reaches a
+	// turn boundary (waiting for user / finished / error) or the deadline
+	// elapses. Credentials are resolved from the DEVIN_* environment at
+	// fire time so no secret is ever persisted in the WAL.
+	ActionDevinPoll ActionType = "devin_poll"
 )
 
 // Action describes what to execute when the schedule fires (and the

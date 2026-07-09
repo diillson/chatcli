@@ -28,6 +28,7 @@ const (
 	ProviderGitHubModels    = "GITHUB_MODELS"
 	ProviderOpenRouter      = "OPENROUTER"
 	ProviderBedrock         = "BEDROCK"
+	ProviderDevin           = "DEVIN"
 )
 
 // PreferredAPI define qual API é preferida para o modelo
@@ -1500,6 +1501,59 @@ var registry = []ModelMeta{
 		MaxOutputTokens: 128000,
 		PreferredAPI:    APIChatCompletions,
 		Capabilities:    []string{"tools"},
+	},
+
+	// ── Devin (Cognition) ────────────────────────────────────────────
+	// Devin is a session-based autonomous engineer, not a token-window
+	// chat model: ChatCLI ships only the latest turn (Devin keeps its own
+	// server-side state), so ContextWindow/MaxOutputTokens exist purely
+	// for client-side bookkeeping — large values keep local history
+	// compaction from firing pointlessly. Model ids select the v3
+	// devin_mode; the v1 (individual/Teams) generation has a single mode.
+	{
+		ID:              "devin",
+		Aliases:         []string{"devin-normal"},
+		DisplayName:     "Devin",
+		Provider:        ProviderDevin,
+		ContextWindow:   1000000,
+		MaxOutputTokens: 128000,
+		PreferredAPI:    APIChatCompletions,
+	},
+	{
+		ID:              "devin-fast",
+		Aliases:         []string{"fast"},
+		DisplayName:     "Devin Fast",
+		Provider:        ProviderDevin,
+		ContextWindow:   1000000,
+		MaxOutputTokens: 128000,
+		PreferredAPI:    APIChatCompletions,
+	},
+	{
+		ID:              "devin-lite",
+		Aliases:         []string{"lite"},
+		DisplayName:     "Devin Lite",
+		Provider:        ProviderDevin,
+		ContextWindow:   1000000,
+		MaxOutputTokens: 128000,
+		PreferredAPI:    APIChatCompletions,
+	},
+	{
+		ID:              "devin-ultra",
+		Aliases:         []string{"ultra"},
+		DisplayName:     "Devin Ultra",
+		Provider:        ProviderDevin,
+		ContextWindow:   1000000,
+		MaxOutputTokens: 128000,
+		PreferredAPI:    APIChatCompletions,
+	},
+	{
+		ID:              "devin-fusion",
+		Aliases:         []string{"fusion"},
+		DisplayName:     "Devin Fusion",
+		Provider:        ProviderDevin,
+		ContextWindow:   1000000,
+		MaxOutputTokens: 128000,
+		PreferredAPI:    APIChatCompletions,
 	},
 }
 

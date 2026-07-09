@@ -26,6 +26,7 @@ import (
 	"github.com/diillson/chatcli/llm/claudeai"
 	"github.com/diillson/chatcli/llm/client"
 	"github.com/diillson/chatcli/llm/copilot"
+	"github.com/diillson/chatcli/llm/devin"
 	githubmodels "github.com/diillson/chatcli/llm/githubmodels"
 	"github.com/diillson/chatcli/llm/googleai"
 	"github.com/diillson/chatcli/llm/minimax"
@@ -171,6 +172,7 @@ func NewLLMManager(logger *zap.Logger) (LLMManager, error) {
 	manager.configurarGitHubModelsClient(maxRetries, initialBackoff)
 	manager.configurarOpenRouterClient(maxRetries, initialBackoff)
 	manager.configurarBedrockClient(maxRetries, initialBackoff)
+	manager.configurarDevinClient()
 
 	return manager, nil
 }
@@ -560,6 +562,32 @@ func (m *LLMManagerImpl) configurarMiniMaxClient(maxRetries int, initialBackoff 
 	}
 }
 
+// configurarDevinClient registra o provider DEVIN quando há credencial. A
+// credencial decide a geração da API: apk_user_/apk_ (individual/Teams, v1)
+// ou cog_ + DEVIN_ORG_ID (organizations/enterprise, v3); DEVIN_API_VERSION
+// força a escolha. Sem retry/backoff próprios: cada turno do Devin já é um
+// loop de polling com timeout dedicado (DEVIN_TURN_TIMEOUT).
+func (m *LLMManagerImpl) configurarDevinClient() {
+	apiKey := config.Global.GetString(config.DevinAPIKeyEnv)
+	if apiKey == "" {
+		m.logger.Warn(i18n.T("llm.warn.provider_not_available", config.DevinAPIKeyEnv, "DEVIN"))
+		return
+	}
+	m.logger.Info(i18n.T("llm.info.configuring_provider", "Devin"))
+	m.clients["DEVIN"] = func(model string) (client.LLMClient, error) {
+		if model == "" {
+			model = config.DefaultDevinModel
+		}
+		apiCfg := devin.ResolveAPIConfigFromEnv(m.logger)
+		apiCfg.APIKey = apiKey
+		api, err := devin.NewAPI(apiCfg)
+		if err != nil {
+			return nil, err
+		}
+		return devin.NewDevinClient(api, model, m.logger), nil
+	}
+}
+
 func (m *LLMManagerImpl) configurarOllamaClient(maxRetries int, initialBackoff time.Duration) {
 	baseURL := config.Global.GetString("OLLAMA_BASE_URL")
 	enable := config.Global.GetBool("OLLAMA_ENABLED", false)
@@ -855,6 +883,7 @@ func (m *LLMManagerImpl) RefreshProviders() {
 	m.configurarMiniMaxClient(maxRetries, initialBackoff)
 	m.configurarMoonshotClient(maxRetries, initialBackoff)
 	m.configurarOpenRouterClient(maxRetries, initialBackoff)
+	m.configurarDevinClient()
 }
 
 // CreateClientWithKey creates an LLM client using a caller-provided API key
@@ -948,6 +977,18 @@ func (m *LLMManagerImpl) CreateClientWithKey(provider, model, apiKey string) (cl
 			region = config.DefaultBedrockRegion
 		}
 		return bedrock.NewBedrockClient(model, region, resolveAWSProfile(), m.logger, maxRetries, initialBackoff), nil
+
+	case "DEVIN":
+		if model == "" {
+			model = config.DefaultDevinModel
+		}
+		apiCfg := devin.ResolveAPIConfigFromEnv(m.logger)
+		apiCfg.APIKey = apiKey
+		api, err := devin.NewAPI(apiCfg)
+		if err != nil {
+			return nil, err
+		}
+		return devin.NewDevinClient(api, model, m.logger), nil
 
 	default:
 		return nil, fmt.Errorf("%s", i18n.T("llm.manager.create_client_unsupported", provider))

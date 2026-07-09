@@ -17,4 +17,5 @@ func RegisterAll(r *scheduler.ActionRegistry) {
 	r.MustRegister(NewNoop())
 	r.MustRegister(NewAgentResume())
 	r.MustRegister(NewParkPoll())
+	r.MustRegister(NewDevinPoll())
 }

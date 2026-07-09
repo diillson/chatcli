@@ -41,8 +41,10 @@ import (
 	"github.com/diillson/chatcli/cli/coder"
 	"github.com/diillson/chatcli/cli/gateway"
 	"github.com/diillson/chatcli/cli/plugins"
+	"github.com/diillson/chatcli/config"
 	"github.com/diillson/chatcli/i18n"
 	"github.com/diillson/chatcli/llm/catalog"
+	devinapi "github.com/diillson/chatcli/llm/devin"
 	"github.com/diillson/chatcli/llm/imagegen"
 	"github.com/diillson/chatcli/llm/transcription"
 	"github.com/diillson/chatcli/llm/tts"
@@ -105,6 +107,8 @@ func (cli *ChatCLI) routeConfigCommand(ctx context.Context, args []string) {
 		cli.showConfigDiagram(ctx)
 	case "graphview", "graph":
 		cli.showConfigGraphView()
+	case "devin":
+		cli.showConfigDevin()
 	case "quality":
 		cli.showConfigQuality()
 	case "memory", "mem":
@@ -586,6 +590,13 @@ func (cli *ChatCLI) showConfigProviders() {
 	kv(p, "MOONSHOT_API_URL", envOr("MOONSHOT_API_URL"))
 
 	fmt.Println(p)
+	subheader(p, "cfg.sub.prov.devin")
+	kv(p, config.DevinAPIKeyEnv, presence(os.Getenv(config.DevinAPIKeyEnv)))
+	kv(p, config.DevinOrgIDEnv, envOr(config.DevinOrgIDEnv))
+	kv(p, config.DevinAPIVersionEnv, envOr(config.DevinAPIVersionEnv))
+	kv(p, "DEVIN_MODEL", envOr("DEVIN_MODEL"))
+
+	fmt.Println(p)
 	subheader(p, "cfg.sub.prov.stackspot")
 	kv(p, "CLIENT_ID", presence(os.Getenv("CLIENT_ID")))
 	kv(p, "CLIENT_KEY", presence(os.Getenv("CLIENT_KEY")))
@@ -932,6 +943,28 @@ func (cli *ChatCLI) showConfigGraphView() {
 
 	fmt.Println(p)
 	fmt.Println(p + colorize(i18n.T("cfg.graphview.about"), ColorGray))
+	sectionEnd(ColorCyan)
+}
+
+// showConfigDevin renders the Devin integration panorama: credential
+// presence, the resolved API generation (v1 individual/Teams vs v3
+// organizations/enterprise), endpoint override and turn pacing.
+func (cli *ChatCLI) showConfigDevin() {
+	sectionHeader("🤖", "cfg.section.devin.title", ColorCyan)
+	p := uiPrefix(ColorCyan)
+
+	apiCfg := devinapi.ResolveAPIConfigFromEnv(cli.logger)
+	kv(p, config.DevinAPIKeyEnv, presence(apiCfg.APIKey))
+	kv(p, i18n.T("cfg.kv.devin_generation"), apiCfg.ResolveVersion())
+	kv(p, config.DevinOrgIDEnv, envOr(config.DevinOrgIDEnv))
+	kv(p, config.DevinAPIVersionEnv, envOr(config.DevinAPIVersionEnv))
+	kv(p, config.DevinBaseURLEnv, envOr(config.DevinBaseURLEnv))
+	kv(p, "DEVIN_MODEL", envOr("DEVIN_MODEL"))
+	kv(p, config.DevinPollIntervalEnv, envOr(config.DevinPollIntervalEnv))
+	kv(p, config.DevinTurnTimeoutEnv, envOr(config.DevinTurnTimeoutEnv))
+
+	fmt.Println(p)
+	fmt.Println(p + colorize(i18n.T("cfg.devin.about"), ColorGray))
 	sectionEnd(ColorCyan)
 }
 

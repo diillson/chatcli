@@ -54,6 +54,7 @@ var slashPrefixRoutes = []slashPrefixRoute{
 	{"/worktree ", (*ChatCLI).getWorktreeSuggestions},
 	{"/channel ", (*ChatCLI).getChannelSuggestions},
 	{"/websearch", (*ChatCLI).getWebSearchSuggestions},
+	{"/devin", (*ChatCLI).getDevinSuggestions},
 	{"/config", (*ChatCLI).getConfigSuggestions},
 	{"/status", (*ChatCLI).getConfigSuggestions},
 	{"/settings", (*ChatCLI).getConfigSuggestions},
@@ -75,6 +76,33 @@ var slashPrefixRoutes = []slashPrefixRoute{
 	{"/export", (*ChatCLI).getExportSuggestions},
 	{"/gateway", (*ChatCLI).getGatewaySuggestions},
 	{"/lsp", (*ChatCLI).getLSPSuggestions},
+}
+
+// getDevinSuggestions completes the /devin subcommands.
+func (cli *ChatCLI) getDevinSuggestions(d prompt.Document) []prompt.Suggest {
+	line := d.TextBeforeCursor()
+	args := strings.Fields(line)
+	if len(args) == 1 || (len(args) == 2 && !strings.HasSuffix(line, " ")) {
+		return prompt.FilterHasPrefix([]prompt.Suggest{
+			{Text: "run", Description: i18n.T("complete.devin.run")},
+			{Text: "list", Description: i18n.T("complete.devin.list")},
+			{Text: "status", Description: i18n.T("complete.devin.status")},
+			{Text: "wait", Description: i18n.T("complete.devin.wait")},
+			{Text: "watch", Description: i18n.T("complete.devin.watch")},
+			{Text: "message", Description: i18n.T("complete.devin.message")},
+			{Text: "messages", Description: i18n.T("complete.devin.messages")},
+			{Text: "attach", Description: i18n.T("complete.devin.attach")},
+			{Text: "tags", Description: i18n.T("complete.devin.tags")},
+			{Text: "terminate", Description: i18n.T("complete.devin.terminate")},
+			{Text: "archive", Description: i18n.T("complete.devin.archive")},
+			{Text: "secrets", Description: i18n.T("complete.devin.secrets")},
+			{Text: "knowledge", Description: i18n.T("complete.devin.knowledge")},
+			{Text: "playbooks", Description: i18n.T("complete.devin.playbooks")},
+			{Text: "info", Description: i18n.T("complete.devin.info")},
+			{Text: "help", Description: i18n.T("complete.devin.help")},
+		}, d.GetWordBeforeCursor(), true)
+	}
+	return nil
 }
 
 // getLSPSuggestions completes the file path argument of /lsp.
@@ -345,6 +373,7 @@ func (cli *ChatCLI) GetInternalCommands() []prompt.Suggest {
 		{Text: "/memory", Description: i18n.T("complete.root.memory")},
 		{Text: "/graph", Description: i18n.T("complete.root.graph")},
 		{Text: "/websearch", Description: i18n.T("complete.websearch.root_desc")},
+		{Text: "/devin", Description: i18n.T("help.command.devin")},
 		{Text: "/schedule", Description: i18n.T("help.command.schedule")},
 		{Text: "/wait", Description: i18n.T("help.command.wait")},
 		{Text: "/jobs", Description: i18n.T("help.command.jobs")},
@@ -1535,6 +1564,7 @@ func (cli *ChatCLI) getConfigSuggestions(d prompt.Document) []prompt.Suggest {
 			{Text: "image", Description: i18n.T("cfg.section.image.title")},
 			{Text: "diagram", Description: i18n.T("cfg.section.diagram.title")},
 			{Text: "graphview", Description: i18n.T("cfg.section.graphview.title")},
+			{Text: "devin", Description: i18n.T("cfg.section.devin.title")},
 			{Text: "compression", Description: i18n.T("cfg.section.compression.title")},
 			{Text: "output", Description: i18n.T("cfg.section.output.title")},
 			{Text: "scheduler", Description: i18n.T("cfg.section.scheduler.title")},
