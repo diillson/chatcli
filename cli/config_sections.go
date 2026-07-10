@@ -526,6 +526,16 @@ func (cli *ChatCLI) showConfigProviders() {
 	kv(p, "OLLAMA_MAX_TOKENS", envOr("OLLAMA_MAX_TOKENS"))
 
 	fmt.Println(p)
+	subheader(p, "cfg.sub.prov.devin")
+	kv(p, "DEVIN_MODEL", envOr("DEVIN_MODEL"))
+	kv(p, "DEVIN_CLI_PATH", envOr("DEVIN_CLI_PATH"))
+	kv(p, "DEVIN_CLI_PERMISSION_MODE", envOr("DEVIN_CLI_PERMISSION_MODE"))
+	kv(p, "DEVIN_CLI_AGENT_CONFIG", envOr("DEVIN_CLI_AGENT_CONFIG"))
+	kv(p, "DEVIN_CLI_TIMEOUT", envOr("DEVIN_CLI_TIMEOUT"))
+	kv(p, "DEVIN_CLI_SANDBOX", envOr("DEVIN_CLI_SANDBOX"))
+	kv(p, "DEVIN_CLI_EXTRA_ARGS", envOr("DEVIN_CLI_EXTRA_ARGS"))
+
+	fmt.Println(p)
 	subheader(p, "cfg.sub.prov.bedrock")
 	kv(p, "BEDROCK_REGION", envOr("BEDROCK_REGION"))
 	kv(p, "AWS_REGION", envOr("AWS_REGION"))

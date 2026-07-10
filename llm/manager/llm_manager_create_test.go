@@ -1,6 +1,9 @@
 package manager
 
 import (
+	"os"
+	"path/filepath"
+	"runtime"
 	"testing"
 
 	"github.com/diillson/chatcli/i18n"
@@ -96,4 +99,75 @@ func (m *LLMManagerImpl) tokenProviderForTestable() (interface{}, int, error) {
 	n := len(m.tokenProviders)
 	m.tpMu.Unlock()
 	return tp, n, err
+}
+
+// TestDevinCLIProvider covers the DEVIN provider wiring: registration is
+// gated on the binary being present (via DEVIN_CLI_PATH here), the factory
+// resolves the default model, and CreateClientWithConfig builds a client
+// without any credential — auth belongs to the devin binary itself.
+func TestDevinCLIProvider(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("script-based fake devin binary is unix-only")
+	}
+	i18n.Init()
+	fake := filepath.Join(t.TempDir(), "devin")
+	if err := os.WriteFile(fake, []byte("#!/bin/sh\necho ok\n"), 0o700); err != nil {
+		t.Fatalf("write fake devin: %v", err)
+	}
+	setupTestEnv(t, map[string]string{"DEVIN_CLI_PATH": fake})
+
+	logger, _ := zap.NewDevelopment()
+	mgr, err := NewLLMManager(logger)
+	if err != nil {
+		t.Fatalf("NewLLMManager: %v", err)
+	}
+	impl := mgr.(*LLMManagerImpl)
+	defer impl.Close()
+
+	found := false
+	for _, p := range impl.GetAvailableProviders() {
+		if p == "DEVIN" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("DEVIN must be listed when the binary resolves, got %v", impl.GetAvailableProviders())
+	}
+
+	cli, err := impl.GetClient("DEVIN", "")
+	if err != nil {
+		t.Fatalf("GetClient(DEVIN): %v", err)
+	}
+	if got := cli.GetModelName(); got == "" {
+		t.Fatalf("default model must resolve to a display name")
+	}
+
+	viaCfg, err := impl.CreateClientWithConfig("DEVIN", "gpt-5.6-luna", "", nil)
+	if err != nil {
+		t.Fatalf("CreateClientWithConfig(DEVIN): %v", err)
+	}
+	if viaCfg == nil {
+		t.Fatal("CreateClientWithConfig(DEVIN) returned nil client")
+	}
+}
+
+// TestDevinCLIProvider_AbsentBinary pins the negative: no binary, no DEVIN
+// in the provider list — same UX as a provider without credentials.
+func TestDevinCLIProvider_AbsentBinary(t *testing.T) {
+	i18n.Init()
+	setupTestEnv(t, map[string]string{
+		"DEVIN_CLI_PATH": filepath.Join(t.TempDir(), "missing"),
+	})
+	logger, _ := zap.NewDevelopment()
+	mgr, err := NewLLMManager(logger)
+	if err != nil {
+		t.Fatalf("NewLLMManager: %v", err)
+	}
+	impl := mgr.(*LLMManagerImpl)
+	defer impl.Close()
+	for _, p := range impl.GetAvailableProviders() {
+		if p == "DEVIN" {
+			t.Fatal("DEVIN must not be listed when the binary is absent")
+		}
+	}
 }

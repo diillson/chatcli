@@ -2,6 +2,7 @@ package manager
 
 import (
 	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/diillson/chatcli/auth"
@@ -40,6 +41,17 @@ func setupTestEnv(t *testing.T, envs map[string]string) {
 	// Isolate auth store: point to empty temp dir so disk credentials don't leak
 	tmpDir := t.TempDir()
 	os.Setenv("CHATCLI_AUTH_DIR", tmpDir)
+	// Neutralize the DEVIN provider unless the test opts in: a real devin
+	// binary on the dev machine's PATH would otherwise register DEVIN and
+	// break every exact provider-set assertion. Tests that want DEVIN pass
+	// their own DEVIN_CLI_PATH via envs (set after this default).
+	if _, ok := envs["DEVIN_CLI_PATH"]; !ok {
+		if val, has := os.LookupEnv("DEVIN_CLI_PATH"); has {
+			originalEnvs["DEVIN_CLI_PATH"] = val
+		}
+		os.Setenv("DEVIN_CLI_PATH", filepath.Join(tmpDir, "devin-absent"))
+		t.Cleanup(func() { os.Unsetenv("DEVIN_CLI_PATH") })
+	}
 	// Isolate HOME so ~/.aws/{credentials,config} on the dev machine don't
 	// trigger the Bedrock provider auto-detection.
 	originalHome := os.Getenv("HOME")

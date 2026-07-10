@@ -64,6 +64,16 @@ const (
 	DefaultCopilotModel = "gpt-4o"
 	CopilotAPIURL       = "https://api.githubcopilot.com/chat/completions"
 
+	// Valores padrão para o provider DEVIN (wrapper do Devin CLI local).
+	// O binário carrega a própria autenticação (devin auth login / SSO
+	// da empresa); o ChatCLI nunca fala a API HTTP da Cognition.
+	DefaultDevinModel             = "claude-sonnet-4.6"
+	DevinCLIDefaultBinary         = "devin"
+	DevinCLIDefaultPermissionMode = "auto"
+	// Turnos do CLI embutem o overhead do harness do Devin além da geração;
+	// 10min cobre respostas longas sem segurar um turno travado para sempre.
+	DevinCLIDefaultTimeout = 10 * time.Minute
+
 	// Valores padrão para GitHub Models (marketplace)
 	DefaultGitHubModelsModel = "gpt-4o"
 	GitHubModelsAPIURL       = "https://models.inference.ai.azure.com/chat/completions"

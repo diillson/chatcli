@@ -26,6 +26,7 @@ import (
 	"github.com/diillson/chatcli/llm/claudeai"
 	"github.com/diillson/chatcli/llm/client"
 	"github.com/diillson/chatcli/llm/copilot"
+	"github.com/diillson/chatcli/llm/devincli"
 	githubmodels "github.com/diillson/chatcli/llm/githubmodels"
 	"github.com/diillson/chatcli/llm/googleai"
 	"github.com/diillson/chatcli/llm/minimax"
@@ -171,6 +172,7 @@ func NewLLMManager(logger *zap.Logger) (LLMManager, error) {
 	manager.configurarGitHubModelsClient(maxRetries, initialBackoff)
 	manager.configurarOpenRouterClient(maxRetries, initialBackoff)
 	manager.configurarBedrockClient(maxRetries, initialBackoff)
+	manager.configurarDevinCLIClient(maxRetries, initialBackoff)
 
 	return manager, nil
 }
@@ -705,6 +707,29 @@ func (m *LLMManagerImpl) configurarOpenRouterClient(maxRetries int, initialBacko
 	}
 }
 
+// configurarDevinCLIClient registra o provider DEVIN, um wrapper do Devin CLI
+// local (Cognition). Registro é gateado na presença do binário: sem ele o
+// provider simplesmente não aparece, igual aos providers sem credencial.
+// A autenticação é do próprio CLI (devin auth login / SSO da empresa) e é
+// validada em runtime — erro de auth vira mensagem acionável no turno.
+func (m *LLMManagerImpl) configurarDevinCLIClient(maxRetries int, initialBackoff time.Duration) {
+	binPath, err := devincli.ResolveBinary()
+	if err != nil {
+		m.logger.Info(i18n.T("llm.devincli.not_available"), zap.Error(err))
+		return
+	}
+	m.logger.Info(i18n.T("llm.info.configuring_provider", "Devin CLI"), zap.String("bin", binPath))
+	m.clients["DEVIN"] = func(model string) (client.LLMClient, error) {
+		if model == "" {
+			model = config.Global.GetString("DEVIN_MODEL")
+		}
+		if model == "" {
+			model = config.DefaultDevinModel
+		}
+		return devincli.NewClient(binPath, model, m.logger, maxRetries, initialBackoff), nil
+	}
+}
+
 // GetAvailableProviders retorna uma lista de provedores disponíveis configurados
 func (m *LLMManagerImpl) GetAvailableProviders() []string {
 	providers := make([]string, 0, len(m.clients))
@@ -995,6 +1020,18 @@ func (m *LLMManagerImpl) CreateClientWithConfig(provider, model, apiKey string, 
 			model = config.DefaultOllamaModel
 		}
 		return ollama.NewClient(baseURL, model, m.logger, maxRetries, initialBackoff), nil
+
+	case "DEVIN":
+		// Sem credencial própria: a autenticação é do binário devin local
+		// (devin auth login). Só o binário precisa existir na máquina.
+		binPath, err := devincli.ResolveBinary()
+		if err != nil {
+			return nil, fmt.Errorf("%s: %w", i18n.T("llm.devincli.not_available"), err)
+		}
+		if model == "" {
+			model = config.DefaultDevinModel
+		}
+		return devincli.NewClient(binPath, model, m.logger, maxRetries, initialBackoff), nil
 
 	default:
 		// For simple API-key providers, delegate to CreateClientWithKey

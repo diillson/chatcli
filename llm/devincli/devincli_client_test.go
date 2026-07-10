@@ -1,0 +1,175 @@
+/*
+ * ChatCLI - Command Line Interface for LLM interaction
+ * Copyright (c) 2024 Edilson Freitas
+ * License: Apache-2.0
+ */
+package devincli
+
+import (
+	"context"
+	"os"
+	"path/filepath"
+	"runtime"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/diillson/chatcli/i18n"
+	"github.com/diillson/chatcli/models"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+	"go.uber.org/zap"
+)
+
+func TestMain(m *testing.M) {
+	i18n.Init()
+	os.Exit(m.Run())
+}
+
+// fakeDevin writes a shell script that impersonates the devin binary. It
+// records its argv and the prompt-file contents into the given dir, then
+// prints the canned stdout. Skips on Windows (script-based fake).
+func fakeDevin(t *testing.T, script string) string {
+	t.Helper()
+	if runtime.GOOS == "windows" {
+		t.Skip("script-based fake devin binary is unix-only")
+	}
+	dir := t.TempDir()
+	bin := filepath.Join(dir, "devin")
+	full := "#!/bin/sh\n" + script
+	require.NoError(t, os.WriteFile(bin, []byte(full), 0o700))
+	return bin
+}
+
+func TestSendPrompt_ExtractsSentinelReply(t *testing.T) {
+	record := filepath.Join(t.TempDir(), "argv")
+	bin := fakeDevin(t, `
+echo "$@" > `+record+`
+# copy the prompt file (last value after --prompt-file) for inspection
+prev=""
+for a in "$@"; do
+  if [ "$prev" = "--prompt-file" ]; then cp "$a" `+record+`.prompt; fi
+  prev="$a"
+done
+printf 'devin harness banner\n<<<CHATCLI_REPLY_BEGIN>>>\nresposta final\n<<<CHATCLI_REPLY_END>>>\ntrailing chrome\n'
+`)
+
+	logger := zap.NewNop()
+	c := NewClient(bin, "gpt-5.6-terra", logger, 1, 0)
+	history := []models.Message{
+		{Role: "system", Content: "Você é o ChatCLI."},
+		{Role: "user", Content: "oi"},
+		{Role: "assistant", Content: "olá!"},
+	}
+	got, err := c.SendPrompt(context.Background(), "qual é a boa?", history, 0)
+	require.NoError(t, err)
+	assert.Equal(t, "resposta final", got, "only the sentinel-framed reply must survive")
+
+	argv, err := os.ReadFile(record)
+	require.NoError(t, err)
+	args := string(argv)
+	assert.Contains(t, args, "-p", "must run in non-interactive print mode")
+	assert.Contains(t, args, "--model gpt-5.6-terra")
+	assert.Contains(t, args, "--permission-mode auto")
+	assert.Contains(t, args, "--prompt-file")
+	assert.NotContains(t, args, "--resume", "stateless per turn: session state must stay in ChatCLI")
+
+	prompt, err := os.ReadFile(record + ".prompt")
+	require.NoError(t, err)
+	p := string(prompt)
+	assert.Contains(t, p, "System: Você é o ChatCLI.")
+	assert.Contains(t, p, "User: oi")
+	assert.Contains(t, p, "Assistant: olá!")
+	assert.Contains(t, p, "User: qual é a boa?")
+	assert.Contains(t, p, replyBegin, "transport preamble must instruct the sentinel framing")
+}
+
+func TestSendPrompt_FallsBackToFullOutputWithoutSentinels(t *testing.T) {
+	bin := fakeDevin(t, `printf '\033[1mplain\033[0m answer without markers\n'`)
+	c := NewClient(bin, "swe-1.7", zap.NewNop(), 1, 0)
+	got, err := c.SendPrompt(context.Background(), "hi", nil, 0)
+	require.NoError(t, err)
+	assert.Equal(t, "plain answer without markers", got, "ANSI must be stripped and full output returned")
+}
+
+func TestSendPrompt_AuthErrorIsActionable(t *testing.T) {
+	bin := fakeDevin(t, `echo "Not logged in." >&2; exit 1`)
+	c := NewClient(bin, "claude-sonnet-4.6", zap.NewNop(), 1, 0)
+	_, err := c.SendPrompt(context.Background(), "hi", nil, 0)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "devin auth login", "auth failures must tell the user exactly what to run")
+}
+
+func TestSendPrompt_ExecErrorCarriesStderrTail(t *testing.T) {
+	bin := fakeDevin(t, `echo "boom: unknown flag" >&2; exit 2`)
+	c := NewClient(bin, "claude-sonnet-4.6", zap.NewNop(), 1, 0)
+	_, err := c.SendPrompt(context.Background(), "hi", nil, 0)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "boom: unknown flag")
+}
+
+func TestSendPrompt_EmptyOutputIsError(t *testing.T) {
+	bin := fakeDevin(t, `exit 0`)
+	c := NewClient(bin, "claude-sonnet-4.6", zap.NewNop(), 1, 0)
+	_, err := c.SendPrompt(context.Background(), "hi", nil, 0)
+	require.Error(t, err)
+}
+
+func TestSendPrompt_TimeoutKillsSubprocess(t *testing.T) {
+	t.Setenv("DEVIN_CLI_TIMEOUT", "300ms")
+	bin := fakeDevin(t, `sleep 5; echo late`)
+	c := NewClient(bin, "claude-sonnet-4.6", zap.NewNop(), 1, 0)
+	start := time.Now()
+	_, err := c.SendPrompt(context.Background(), "hi", nil, 0)
+	require.Error(t, err)
+	assert.Less(t, time.Since(start), 3*time.Second, "the subprocess must die with the timeout, not linger")
+}
+
+func TestSendPrompt_EnvKnobsReachArgv(t *testing.T) {
+	record := filepath.Join(t.TempDir(), "argv")
+	agentCfg := filepath.Join(t.TempDir(), "agent.json")
+	require.NoError(t, os.WriteFile(agentCfg, []byte("{}"), 0o600))
+	t.Setenv("DEVIN_CLI_PERMISSION_MODE", "accept-edits")
+	t.Setenv("DEVIN_CLI_AGENT_CONFIG", agentCfg)
+	t.Setenv("DEVIN_CLI_SANDBOX", "true")
+	t.Setenv("DEVIN_CLI_EXTRA_ARGS", "--respect-workspace-trust false")
+
+	bin := fakeDevin(t, `echo "$@" > `+record+`; echo ok`)
+	c := NewClient(bin, "kimi-k2.7", zap.NewNop(), 1, 0)
+	_, err := c.SendPrompt(context.Background(), "hi", nil, 0)
+	require.NoError(t, err)
+
+	argv, err := os.ReadFile(record)
+	require.NoError(t, err)
+	args := string(argv)
+	assert.Contains(t, args, "--permission-mode accept-edits")
+	assert.Contains(t, args, "--agent-config "+agentCfg)
+	assert.Contains(t, args, "--sandbox")
+	assert.Contains(t, args, "--respect-workspace-trust false")
+}
+
+func TestResolveBinary_EnvOverrideAndMissing(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("unix-only fake binary")
+	}
+	bin := fakeDevin(t, `echo ok`)
+	t.Setenv("DEVIN_CLI_PATH", bin)
+	got, err := ResolveBinary()
+	require.NoError(t, err)
+	assert.Equal(t, bin, got)
+
+	t.Setenv("DEVIN_CLI_PATH", filepath.Join(t.TempDir(), "nope"))
+	_, err = ResolveBinary()
+	require.Error(t, err, "an explicit DEVIN_CLI_PATH that doesn't exist must fail loudly, not fall back")
+}
+
+func TestExtractReply_TakesLastSentinelPair(t *testing.T) {
+	raw := "noise " + replyBegin + " first " + replyEnd + " middle " + replyBegin + "\nfinal answer\n" + replyEnd + " tail"
+	assert.Equal(t, "final answer", extractReply(raw))
+}
+
+func TestBuildConversation_DoesNotDuplicateLastUserTurn(t *testing.T) {
+	history := []models.Message{{Role: "user", Content: "same prompt"}}
+	flat := buildConversation(history, "same prompt")
+	assert.Equal(t, 1, strings.Count(flat, "User: same prompt"))
+}
