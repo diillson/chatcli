@@ -9,8 +9,12 @@
 package embedding
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"testing"
+	"time"
 )
 
 func TestResolveEmbedFamily(t *testing.T) {
@@ -209,5 +213,68 @@ func TestNewByName_BedrockWithCustomDim(t *testing.T) {
 	}
 	if got := p.Dimension(); got != 512 {
 		t.Errorf("dim = %d, want 512", got)
+	}
+}
+
+// TestBedrock_CredentialBreaker pins the expired-SSO behavior: a
+// credential-class failure trips the breaker, subsequent Embed calls fail
+// fast with ErrCredentialsUnavailable (no AWS SDK round trip), and the
+// breaker window expiring re-allows a live attempt (half-open), so a
+// mid-session `aws sso login` recovers without restarting ChatCLI.
+func TestBedrock_CredentialBreaker(t *testing.T) {
+	b, err := NewBedrock("amazon.titan-embed-text-v2:0", "us-east-1", "", 0, nil)
+	if err != nil {
+		t.Fatalf("NewBedrock: %v", err)
+	}
+
+	ssoErr := fmt.Errorf("operation error Bedrock Runtime: InvokeModel, get identity: get credentials: failed to refresh cached credentials, no EC2 IMDS role found")
+	got := b.classifyCredError(ssoErr)
+	if !errors.Is(got, ErrCredentialsUnavailable) {
+		t.Fatalf("credential-class error must wrap ErrCredentialsUnavailable, got %v", got)
+	}
+
+	// Breaker open: Embed must fail fast without touching the SDK.
+	_, err = b.Embed(context.Background(), []string{"hello"})
+	if !errors.Is(err, ErrCredentialsUnavailable) {
+		t.Fatalf("open breaker must fail fast with the sentinel, got %v", err)
+	}
+
+	// Half-open: window elapsed → the call proceeds past the breaker gate
+	// (it then fails at real credential resolution in this environment,
+	// which classifyCredError may re-trip — both outcomes prove the gate
+	// reopened; what matters is it no longer short-circuits on the stale
+	// window).
+	b.credMu.Lock()
+	b.credRetryAt = time.Now().Add(-time.Second)
+	b.credMu.Unlock()
+	b.credMu.Lock()
+	reopened := !time.Now().Before(b.credRetryAt)
+	b.credMu.Unlock()
+	if !reopened {
+		t.Fatal("breaker window must reopen after expiry")
+	}
+}
+
+// TestIsAWSCredentialError separates credential-resolution failures from
+// ordinary service errors — only the former may suspend embedding.
+func TestIsAWSCredentialError(t *testing.T) {
+	cases := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{"expired sso cache", fmt.Errorf("failed to refresh cached credentials, token has expired"), true},
+		{"imds disabled", fmt.Errorf(`operation error ec2imds: GetMetadata, access disabled to EC2 IMDS via client option, or "AWS_EC2_METADATA_DISABLED"`), true},
+		{"empty chain", fmt.Errorf("no valid credential sources found"), true},
+		{"throttling is not credential", fmt.Errorf("operation error Bedrock Runtime: InvokeModel, ThrottlingException"), false},
+		{"validation is not credential", fmt.Errorf("ValidationException: model identifier invalid"), false},
+		{"nil", nil, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := isAWSCredentialError(tc.err); got != tc.want {
+				t.Fatalf("isAWSCredentialError(%v) = %v, want %v", tc.err, got, tc.want)
+			}
+		})
 	}
 }

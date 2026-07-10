@@ -24,6 +24,7 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/bedrockruntime"
@@ -74,6 +75,14 @@ type Bedrock struct {
 	runtime  *bedrockruntime.Client
 	endpoint string
 	initErr  error
+
+	// Credential circuit breaker. An expired SSO session fails at
+	// credential resolution on EVERY call — slowly (IMDS probing) and
+	// noisily. After a credential-class failure the breaker fails fast
+	// until credRetryAt; the half-open retry window picks up a mid-session
+	// `aws sso login` automatically.
+	credMu      sync.Mutex
+	credRetryAt time.Time
 }
 
 // NewBedrock constructs the provider. region/profile follow the same
@@ -117,8 +126,15 @@ func (b *Bedrock) Embed(ctx context.Context, texts []string) ([][]float32, error
 	if len(texts) == 0 {
 		return nil, nil
 	}
+	b.credMu.Lock()
+	if time.Now().Before(b.credRetryAt) {
+		wait := time.Until(b.credRetryAt).Round(time.Second)
+		b.credMu.Unlock()
+		return nil, fmt.Errorf("%w (aws credential check suspended, retrying in %s)", ErrCredentialsUnavailable, wait)
+	}
+	b.credMu.Unlock()
 	if err := b.ensureRuntime(ctx); err != nil {
-		return nil, err
+		return nil, b.classifyCredError(err)
 	}
 	b.logger.Debug("bedrock embeddings: request",
 		zap.String("model", b.model),
@@ -127,12 +143,82 @@ func (b *Bedrock) Embed(ctx context.Context, texts []string) ([][]float32, error
 		zap.String("endpoint", b.endpoint),
 		zap.Int("batch_size", len(texts)),
 	)
+	var out [][]float32
+	var err error
 	switch b.family {
 	case embedFamilyCohere:
-		return b.embedCohere(ctx, texts)
+		out, err = b.embedCohere(ctx, texts)
 	default:
-		return b.embedTitan(ctx, texts)
+		out, err = b.embedTitan(ctx, texts)
 	}
+	if err != nil {
+		return nil, b.classifyCredError(err)
+	}
+	return out, nil
+}
+
+// bedrockCredBreakerWindow is how long the breaker fails fast after a
+// credential-class failure before allowing a live retry (half-open).
+// Long enough to stop per-call IMDS probing storms, short enough that a
+// mid-session `aws sso login` is picked up without restarting ChatCLI.
+const bedrockCredBreakerWindow = 2 * time.Minute
+
+// classifyCredError trips the breaker and wraps err in
+// ErrCredentialsUnavailable when it is a credential-resolution failure
+// (expired SSO, no IMDS role, missing chain); other errors pass through.
+func (b *Bedrock) classifyCredError(err error) error {
+	if err == nil || !isAWSCredentialError(err) {
+		return err
+	}
+	b.credMu.Lock()
+	tripped := time.Now().Before(b.credRetryAt)
+	b.credRetryAt = time.Now().Add(bedrockCredBreakerWindow)
+	b.credMu.Unlock()
+	if !tripped {
+		b.logger.Warn("bedrock embeddings: AWS credentials unavailable (expired SSO session?) — suspending embedding calls",
+			zap.Duration("retry_in", bedrockCredBreakerWindow),
+			zap.String("hint", "run 'aws sso login"+profileHint(b.profile)+"' to restore vector features; keyword retrieval keeps working"),
+			zap.Error(err),
+		)
+	}
+	return fmt.Errorf("%w: %w", ErrCredentialsUnavailable, err)
+}
+
+func profileHint(profile string) string {
+	if profile == "" {
+		return ""
+	}
+	return " --profile " + profile
+}
+
+// isAWSCredentialError matches the aws-sdk-go-v2 error chain shapes seen
+// when no usable credential source exists: expired SSO token cache, IMDS
+// disabled/absent, or an empty provider chain. String matching is the
+// pragmatic option — the SDK wraps these in fmt-joined chains without
+// stable sentinel types across providers.
+func isAWSCredentialError(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	for _, marker := range []string{
+		"failed to refresh cached credentials",
+		"get credentials:",
+		"no ec2 imds role found",
+		"ec2imds",
+		"sso session",
+		"sso token",
+		"token has expired",
+		"expiredtoken",
+		"invalidclienttokenid",
+		"no valid credential sources",
+		"failed to retrieve credentials",
+	} {
+		if strings.Contains(msg, marker) {
+			return true
+		}
+	}
+	return false
 }
 
 func (b *Bedrock) ensureRuntime(ctx context.Context) error {

@@ -2,6 +2,7 @@ package memory
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"sort"
@@ -9,6 +10,8 @@ import (
 	"sync/atomic"
 
 	"go.uber.org/zap"
+
+	"github.com/diillson/chatcli/llm/embedding"
 )
 
 // Manager is the central orchestrator for the memory system.
@@ -279,7 +282,16 @@ func (m *Manager) GetRelevantContextWithHyDE(ctx context.Context, query string, 
 			go func(items map[string]string) { //#nosec G118 -- detached on purpose; see comment above
 				defer m.backfillInFlight.Store(false)
 				if err := m.vectors.BackfillFacts(bgCtx, items); err != nil {
-					m.logger.Warn("vector backfill failed", zap.Error(err))
+					if errors.Is(err, embedding.ErrCredentialsUnavailable) {
+						// The provider already emitted one actionable
+						// warning and fails fast while its breaker is
+						// open — recurring noise stays at debug so the
+						// session log remains readable. Keyword
+						// retrieval is unaffected.
+						m.logger.Debug("vector backfill skipped: embedding credentials unavailable", zap.Error(err))
+					} else {
+						m.logger.Warn("vector backfill failed", zap.Error(err))
+					}
 				}
 			}(items)
 		}
