@@ -42,6 +42,15 @@ func dispatchSubcommand() bool {
 	case "daemon":
 		runDaemonSubcommand(os.Args[2:])
 		return true
+	case "mcp":
+		// Config-file management only (add/list/get/remove) — no LLM
+		// manager, no full ChatCLI boot; mirrors `claude mcp add`.
+		i18n.Init()
+		if err := cmd.RunMCPConfig(os.Args[2:]); err != nil {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			os.Exit(1)
+		}
+		return true
 	}
 	return false
 }
