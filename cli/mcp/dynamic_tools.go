@@ -28,6 +28,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/diillson/chatcli/i18n"
 	"go.uber.org/zap"
 )
 
@@ -120,7 +121,7 @@ func (m *Manager) RefreshServerTools(serverName string) (added, removed []string
 	}
 	m.mu.RUnlock()
 	if !ok || transport == nil {
-		return nil, nil, fmt.Errorf("MCP server %q is not connected", serverName)
+		return nil, nil, fmt.Errorf("%s", i18n.T("mcp.dynamic.server_not_connected", serverName))
 	}
 
 	// The round-trip happens outside the registry lock: Call blocks until

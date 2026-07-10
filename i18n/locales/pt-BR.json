@@ -2259,6 +2259,7 @@
   "hooks.cmd.suggest_list": "Lista todos os hooks configurados",
   "hooks.cmd.suggest_reload": "Recarrega hooks dos arquivos de configuração",
 
+  "mcp.dynamic.server_not_connected": "Servidor MCP %q não está conectado",
   "mcp.cmd.box_title": "SERVIDORES MCP",
   "mcp.cmd.not_enabled": "MCP não está habilitado.",
   "mcp.cmd.enable_hint": "Para habilitar, crie ~/.chatcli/mcp_servers.json:",
