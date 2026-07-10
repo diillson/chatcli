@@ -86,6 +86,45 @@ func TestMCPConfig_AddListGetRemove(t *testing.T) {
 	}
 }
 
+// TestMCPConfig_TypedAuth pins the secure-remote story: typed auth lands in
+// the config with the ${VAR} reference intact (expansion happens per request
+// in the transport), and conflicting auth flags are rejected.
+func TestMCPConfig_TypedAuth(t *testing.T) {
+	path := withTempMCPHome(t)
+	if err := RunMCPConfig([]string{"add", "--transport", "http", "secure",
+		"https://mcp.example.com/mcp", "--bearer", "${MCP_TOKEN}"}); err != nil {
+		t.Fatalf("bearer add: %v", err)
+	}
+	data, _ := os.ReadFile(path)
+	var file mcpConfigFile
+	if err := json.Unmarshal(data, &file); err != nil {
+		t.Fatal(err)
+	}
+	s := file.Servers[0]
+	if s.Auth == nil || s.Auth.Type != "bearer" || s.Auth.Token != "${MCP_TOKEN}" {
+		t.Fatalf("bearer auth must persist with the env reference intact: %+v", s.Auth)
+	}
+
+	if err := RunMCPConfig([]string{"add", "--transport", "sse", "basic-srv",
+		"https://mcp.example.com/sse", "--basic", "user:${PASS}"}); err != nil {
+		t.Fatalf("basic add: %v", err)
+	}
+	if err := RunMCPConfig([]string{"add", "--transport", "sse", "hdr-srv",
+		"https://mcp.example.com/sse", "--auth-header", "X-API-Key: ${KEY}"}); err != nil {
+		t.Fatalf("auth-header add: %v", err)
+	}
+
+	// Conflicting auth flags and malformed basic are rejected.
+	if err := RunMCPConfig([]string{"add", "--transport", "sse", "x",
+		"https://e.com/sse", "--bearer", "t", "--basic", "u:p"}); err == nil {
+		t.Error("conflicting auth flags must error")
+	}
+	if err := RunMCPConfig([]string{"add", "--transport", "sse", "x",
+		"https://e.com/sse", "--basic", "nopass"}); err == nil {
+		t.Error("malformed basic must error")
+	}
+}
+
 func TestMCPConfig_AddValidation(t *testing.T) {
 	withTempMCPHome(t)
 	cases := [][]string{

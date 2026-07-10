@@ -1412,6 +1412,8 @@
   "mcpcfg.add.url_required": "uma URL http(s) é obrigatória para o transporte %s",
   "mcpcfg.add.bad_env": "--env inválido %q (esperado CHAVE=VALOR)",
   "mcpcfg.add.bad_header": "--header inválido %q (esperado 'Chave: Valor')",
+  "mcpcfg.add.auth_conflict": "use apenas um entre --bearer, --basic ou --auth-header",
+  "mcpcfg.add.bad_basic": "--basic inválido %q (esperado usuario:senha)",
   "mcpcfg.add.bad_transport": "transporte inválido %q (use stdio, sse ou http)",
   "mcpcfg.add.added": "Servidor MCP %q adicionado em %s",
   "mcpcfg.add.updated": "Servidor MCP %q atualizado em %s",

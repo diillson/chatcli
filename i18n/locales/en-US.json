@@ -1412,6 +1412,8 @@
   "mcpcfg.add.url_required": "an http(s) URL is required for %s transport",
   "mcpcfg.add.bad_env": "invalid --env %q (expected KEY=VALUE)",
   "mcpcfg.add.bad_header": "invalid --header %q (expected 'Key: Value')",
+  "mcpcfg.add.auth_conflict": "use only one of --bearer, --basic or --auth-header",
+  "mcpcfg.add.bad_basic": "invalid --basic %q (expected user:pass)",
   "mcpcfg.add.bad_transport": "invalid transport %q (use stdio, sse or http)",
   "mcpcfg.add.added": "Added MCP server %q to %s",
   "mcpcfg.add.updated": "Updated MCP server %q in %s",

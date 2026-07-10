@@ -80,11 +80,15 @@ Flags for add:
   --cwd DIR                    working directory (stdio)
   --description TEXT           human description shown in /mcp status
   --disabled                   add the server disabled (enabled by default)
+  --bearer TOKEN               typed bearer auth for sse/http; use ${VAR} to keep the secret in the shell
+  --basic USER:PASS            typed basic auth for sse/http (supports ${VAR})
+  --auth-header 'Name: value'  typed custom-header auth for sse/http (supports ${VAR})
 
 Examples:
   chatcli mcp add filesystem -- npx -y @modelcontextprotocol/server-filesystem ~/Documents
   chatcli mcp add github --env GITHUB_TOKEN=ghp_xxx -- npx -y @modelcontextprotocol/server-github
   chatcli mcp add --transport sse linear https://mcp.linear.app/sse
+  chatcli mcp add --transport http secure https://mcp.example.com/mcp --bearer '${MCP_TOKEN}'
   chatcli mcp add chatcli-nested -- chatcli mcp-server`)
 }
 
@@ -114,6 +118,9 @@ func mcpAdd(args []string) error {
 	cwd := fs.String("cwd", "", "working directory (stdio)")
 	description := fs.String("description", "", "human description")
 	disabled := fs.Bool("disabled", false, "add the server disabled")
+	bearer := fs.String("bearer", "", "bearer token for sse/http (supports ${VAR} expansion at request time)")
+	basic := fs.String("basic", "", "user:pass basic auth for sse/http (supports ${VAR})")
+	authHeader := fs.String("auth-header", "", "'Header-Name: value' typed auth for sse/http (supports ${VAR})")
 	var envs, headers repeatable
 	fs.Var(&envs, "env", "KEY=VALUE (repeatable)")
 	fs.Var(&headers, "header", "'Key: Value' (repeatable)")
@@ -163,25 +170,14 @@ func mcpAdd(args []string) error {
 			}
 		}
 	case "sse", "http":
-		if strings.ToLower(*transport) == "sse" {
-			cfg.Transport = mcp.TransportSSE
-		} else {
-			cfg.Transport = mcp.TransportStreamableHTTP
+		if err := fillRemoteConfig(&cfg, *transport, pos, headers); err != nil {
+			return err
 		}
-		if len(pos) < 2 || !strings.HasPrefix(pos[1], "http") {
-			return fmt.Errorf("%s", i18n.T("mcpcfg.add.url_required", *transport))
+		auth, err := buildTypedAuth(*bearer, *basic, *authHeader)
+		if err != nil {
+			return err
 		}
-		cfg.URL = pos[1]
-		if len(headers) > 0 {
-			cfg.Headers = map[string]string{}
-			for _, h := range headers {
-				k, v, ok := strings.Cut(h, ":")
-				if !ok || strings.TrimSpace(k) == "" {
-					return fmt.Errorf("%s", i18n.T("mcpcfg.add.bad_header", h))
-				}
-				cfg.Headers[strings.TrimSpace(k)] = strings.TrimSpace(v)
-			}
-		}
+		cfg.Auth = auth
 	default:
 		return fmt.Errorf("%s", i18n.T("mcpcfg.add.bad_transport", *transport))
 	}
@@ -210,6 +206,64 @@ func mcpAdd(args []string) error {
 		fmt.Println(i18n.T("mcpcfg.add.added", name, mcp.DefaultConfigPath()))
 	}
 	return nil
+}
+
+// fillRemoteConfig populates the sse/http fields: URL positional and raw
+// headers (the Claude Code-compatible --header "Authorization: Bearer x").
+func fillRemoteConfig(cfg *mcp.ServerConfig, transport string, pos []string, headers repeatable) error {
+	if strings.ToLower(transport) == "sse" {
+		cfg.Transport = mcp.TransportSSE
+	} else {
+		cfg.Transport = mcp.TransportStreamableHTTP
+	}
+	if len(pos) < 2 || !strings.HasPrefix(pos[1], "http") {
+		return fmt.Errorf("%s", i18n.T("mcpcfg.add.url_required", transport))
+	}
+	cfg.URL = pos[1]
+	if len(headers) == 0 {
+		return nil
+	}
+	cfg.Headers = map[string]string{}
+	for _, h := range headers {
+		k, v, ok := strings.Cut(h, ":")
+		if !ok || strings.TrimSpace(k) == "" {
+			return fmt.Errorf("%s", i18n.T("mcpcfg.add.bad_header", h))
+		}
+		cfg.Headers[strings.TrimSpace(k)] = strings.TrimSpace(v)
+	}
+	return nil
+}
+
+// buildTypedAuth converts at most one of --bearer/--basic/--auth-header into
+// the typed AuthConfig (applied per request with ${VAR} expansion, so the
+// secret can stay in the environment instead of the config file).
+func buildTypedAuth(bearer, basic, authHeader string) (*mcp.AuthConfig, error) {
+	set := 0
+	for _, v := range []string{bearer, basic, authHeader} {
+		if v != "" {
+			set++
+		}
+	}
+	if set > 1 {
+		return nil, fmt.Errorf("%s", i18n.T("mcpcfg.add.auth_conflict"))
+	}
+	switch {
+	case bearer != "":
+		return &mcp.AuthConfig{Type: "bearer", Token: bearer}, nil
+	case basic != "":
+		user, pass, ok := strings.Cut(basic, ":")
+		if !ok || user == "" {
+			return nil, fmt.Errorf("%s", i18n.T("mcpcfg.add.bad_basic", basic))
+		}
+		return &mcp.AuthConfig{Type: "basic", Username: user, Password: pass}, nil
+	case authHeader != "":
+		k, v, ok := strings.Cut(authHeader, ":")
+		if !ok || strings.TrimSpace(k) == "" || strings.TrimSpace(v) == "" {
+			return nil, fmt.Errorf("%s", i18n.T("mcpcfg.add.bad_header", authHeader))
+		}
+		return &mcp.AuthConfig{Type: "header", Header: strings.TrimSpace(k), Token: strings.TrimSpace(v)}, nil
+	}
+	return nil, nil
 }
 
 func mcpList() error {
