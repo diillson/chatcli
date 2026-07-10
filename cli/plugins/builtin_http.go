@@ -307,6 +307,12 @@ func parseHTTPInvocation(args []string) (httpArgs, error) {
 	payload := strings.TrimSpace(strings.Join(args, " "))
 	var in httpArgs
 
+	// A bare invocation (no args at all — e.g. a capability probe) has no
+	// method to resolve; fail closed instead of indexing an empty argv.
+	if payload == "" {
+		return in, fmt.Errorf("no arguments")
+	}
+
 	if strings.HasPrefix(payload, "{") {
 		var raw map[string]json.RawMessage
 		if err := json.Unmarshal([]byte(payload), &raw); err != nil {

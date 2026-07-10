@@ -7,7 +7,7 @@
 <h1 align="center">ChatCLI</h1>
 <p align="center">
   <strong>Unified AI platform for terminal, gRPC server, and Kubernetes.</strong><br>
-  <sub>14 providers · 14 autonomous agents · 7-pattern quality pipeline · one binary.</sub>
+  <sub>15 providers · 14 autonomous agents · 7-pattern quality pipeline · one binary.</sub>
 </p>
 
 <div align="center">
@@ -57,7 +57,7 @@
 
 | | |
 |---|---|
-| **Multi-provider with failover** | 14 LLM providers (OpenAI · OpenAI Responses · Anthropic · Bedrock · Google · xAI · ZAI · MiniMax · Moonshot (Kimi) · Copilot · GitHub Models · StackSpot · OpenRouter · Ollama) with intelligent error classification, exponential backoff, and per-provider cooldown. |
+| **Multi-provider with failover** | 15 LLM providers (OpenAI · OpenAI Responses · Anthropic · Bedrock · Google · xAI · ZAI · MiniMax · Moonshot (Kimi) · Copilot · GitHub Models · StackSpot · OpenRouter · Ollama · Devin CLI) with intelligent error classification, exponential backoff, and per-provider cooldown. The Devin provider wraps the local Devin CLI as an LLM transport — no undocumented Cognition APIs, full ChatCLI harness and headroom on top. |
 | **Autonomous agents** | 14 built-in workers coordinated by a ReAct engine (Reason + Act): 12 orchestration specialists run in parallel + 2 quality agents (refiner, verifier), plus a 7-pattern quality pipeline. |
 | **Quality pipeline** | Self-Refine, Chain-of-Verification (CoVe), Reflexion, RAG + HyDE, Plan-and-Solve (ReWOO), cross-provider reasoning backbone — all composed via a thread-safe state machine with circuit breakers and hot reload. |
 | **Scheduler (Chronos)** | Durable scheduling with cron + wait-until + DAG + daemon mode. `/schedule`, `/wait`, `/jobs` + `@scheduler` tool for agents. CRC32 WAL, snapshots, rate limiter, circuit breakers, JSONL audit, 13 Prometheus metrics. Jobs survive crashes and CLI exit. |
@@ -528,7 +528,7 @@ Credentials are stored with **AES-256-GCM** at `~/.chatcli/auth-profiles.json`.
 | Feature | Description |
 |---|---|
 | **Native tool calling** | Native APIs from OpenAI, Anthropic, Bedrock, Google, ZAI, MiniMax, Moonshot, OpenRouter. `ephemeral` cache for Anthropic. Automatic XML fallback for providers without native support. |
-| **MCP (Model Context Protocol)** | Client via stdio and SSE for expanded context. Server (`chatcli mcp-server`) exposes chat, agent, coder and built-in tools; ACP mode (`chatcli acp`) for editors. |
+| **MCP (Model Context Protocol)** | Client via stdio and SSE for expanded context. Server (`chatcli mcp-server`) exposes the FULL surface: every built-in tool with read-only annotations, the agent/coder loops with per-call provider/model routing and quality-harness toggles, provider discovery, and all installed skills served as MCP prompts. Exposure policy via `CHATCLI_MCP_TOOLS` (all/safe/allowlist). ACP server (`chatcli acp`) with chat/agent/coder session modes, live streaming and cancellation, for editors (Zed) and agent-to-agent use. |
 | **Chat Gateway** | Runs as a messaging daemon (Telegram, Slack, Discord, WhatsApp, webhook): each message runs through the agent loop and progress is streamed back to the chat. Voice messages are transcribed (local-first whisper) and answered in voice by default (`CHATCLI_GATEWAY_VOICE_REPLY=auto\|always\|never`); each conversation controls it by asking in natural language ("answer me in audio" / "stop sending audio") via the `@voice` tool, with the preference persisted. |
 | **Embedded voice (TTS)** | `CHATCLI_TTS_PROVIDER=embedded` — offline Kokoro neural voice, no API key and no cgo: downloads the sherpa-onnx engine + model once (~150MB) and works the same on Linux/macOS/Windows. Routes pt-BR/English by reply language (`CHATCLI_TTS_VOICE=bm_george`, `CHATCLI_TTS_VOICE_PT=pm_alex`); the other backends (say/espeak, self-hosted, OpenAI/Groq/Gemini) remain available. |
 | **Embedded transcription (STT)** | Offline multilingual Whisper via sherpa-onnx, no API key and no cgo — and the automatic fallback: with nothing configured, the gateway downloads the engine + an ONNX model once (~200MB for `base`; `CHATCLI_TRANSCRIPTION_MODEL=tiny\|base\|small\|…`) at startup and transcribes voice notes auto-detecting the spoken language. OGG/Opus voice notes (Telegram/WhatsApp) decode in pure Go — no ffmpeg needed; only residual formats (mp3/m4a) require ffmpeg, and the gateway preflight + `/gateway status` warn with your platform's install command. `CHATCLI_TRANSCRIPTION_PROVIDER=embedded` forces it over the other backends (local whisper CLI, self-hosted, Groq/OpenAI), which remain available. |

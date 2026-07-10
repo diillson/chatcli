@@ -8,31 +8,64 @@ package rpcserve
 import (
 	"context"
 	"encoding/json"
+	"strings"
 )
 
-// MCPProtocolVersion is the MCP revision this server speaks.
-const MCPProtocolVersion = "2024-11-05"
+// mcpSupportedVersions are the MCP revisions this server can speak, newest
+// first. initialize negotiates: if the client requests a known revision the
+// server echoes it, otherwise it answers with the newest supported one.
+var mcpSupportedVersions = []string{"2025-03-26", "2024-11-05"}
+
+// MCPProtocolVersion is the default (newest) MCP revision this server speaks.
+const MCPProtocolVersion = "2025-03-26"
 
 // Backend is the minimal chat capability (used by the ACP server).
 type Backend interface {
 	Prompt(ctx context.Context, session, text string) (string, error)
 }
 
-// ToolInfo describes a built-in tool exposed over MCP.
+// RunOpts parameterizes chat/agent/coder calls made over RPC.
+type RunOpts struct {
+	Provider string
+	Model    string
+	Quality  map[string]string
+	Emit     func(string)
+}
+
+// ToolInfo describes a tool exposed over MCP.
 type ToolInfo struct {
+	Name        string
+	Description string
+	Usage       string
+	Schema      string
+	ReadOnly    bool
+}
+
+// SkillInfo describes a skill served as an MCP prompt.
+type SkillInfo struct {
 	Name        string
 	Description string
 }
 
-// MCPBackend is the full capability surface the MCP server exposes: chat,
-// the agent and coder loops, and the curated built-in tools. Implemented by
-// the CLI so an MCP client can drive ChatCLI's real functionality.
+// MCPBackend is the full capability surface the MCP server exposes: chat
+// with per-call routing, the agent/coder loops with quality toggles, every
+// policy-admitted plugin tool, the skill catalog (prompts), and provider
+// discovery.
 type MCPBackend interface {
 	Backend
-	Agent(ctx context.Context, session, task string) (string, error)
-	Coder(ctx context.Context, session, task string) (string, error)
-	BuiltinTools() []ToolInfo
-	CallBuiltin(ctx context.Context, name, args string) (string, error)
+	// HasLLM reports whether at least one LLM provider is configured in
+	// this ChatCLI instance. Without one, the LLM-backed harness tools
+	// (ask_chatcli / agent_task / coder_task) are hidden from tools/list —
+	// every direct tool keeps working with the caller's own model.
+	HasLLM() bool
+	PromptWith(ctx context.Context, session, text string, opts RunOpts) (string, error)
+	Agent(ctx context.Context, session, task string, opts RunOpts) (string, error)
+	Coder(ctx context.Context, session, task string, opts RunOpts) (string, error)
+	Tools() []ToolInfo
+	CallTool(ctx context.Context, name, args string) (string, error)
+	Skills() []SkillInfo
+	SkillContent(name string) (string, error)
+	ProvidersJSON() (string, error)
 }
 
 // MCP implements the Model Context Protocol server methods over JSON-RPC.
@@ -51,11 +84,7 @@ func NewMCP(backend MCPBackend, name, version string) *MCP {
 func (m *MCP) Handle(ctx context.Context, method string, params json.RawMessage) (interface{}, *RPCError) {
 	switch method {
 	case "initialize":
-		return map[string]interface{}{
-			"protocolVersion": MCPProtocolVersion,
-			"capabilities":    map[string]interface{}{"tools": map[string]interface{}{}},
-			"serverInfo":      map[string]interface{}{"name": m.name, "version": m.version},
-		}, nil
+		return m.initialize(params), nil
 	case "notifications/initialized", "initialized":
 		return nil, nil // notification
 	case "ping":
@@ -64,8 +93,35 @@ func (m *MCP) Handle(ctx context.Context, method string, params json.RawMessage)
 		return map[string]interface{}{"tools": m.toolDefinitions()}, nil
 	case "tools/call":
 		return m.callTool(ctx, params)
+	case "prompts/list":
+		return map[string]interface{}{"prompts": m.promptDefinitions()}, nil
+	case "prompts/get":
+		return m.getPrompt(params)
 	default:
 		return nil, errf(CodeMethodNotFound, "unknown method %q", method)
+	}
+}
+
+// initialize negotiates the protocol revision and advertises capabilities.
+func (m *MCP) initialize(params json.RawMessage) map[string]interface{} {
+	var p struct {
+		ProtocolVersion string `json:"protocolVersion"`
+	}
+	_ = json.Unmarshal(params, &p)
+	version := MCPProtocolVersion
+	for _, v := range mcpSupportedVersions {
+		if p.ProtocolVersion == v {
+			version = v
+			break
+		}
+	}
+	return map[string]interface{}{
+		"protocolVersion": version,
+		"capabilities": map[string]interface{}{
+			"tools":   map[string]interface{}{"listChanged": false},
+			"prompts": map[string]interface{}{"listChanged": false},
+		},
+		"serverInfo": map[string]interface{}{"name": m.name, "version": m.version},
 	}
 }
 
@@ -74,48 +130,139 @@ func textArg(desc string) map[string]interface{} {
 }
 
 func objSchema(props map[string]interface{}, required ...string) map[string]interface{} {
+	// A nil variadic slice marshals as JSON null, and MCP clients (Claude)
+	// validate required as an array — always emit [] when empty.
+	if required == nil {
+		required = []string{}
+	}
 	return map[string]interface{}{"type": "object", "properties": props, "required": required}
 }
 
-// toolDefinitions advertises chat, the agent/coder loops, and each curated
-// built-in tool.
-func (m *MCP) toolDefinitions() []map[string]interface{} {
-	tools := []map[string]interface{}{
-		{
-			"name":        "ask_chatcli",
-			"description": "Ask the model a question (chat, no tools). Keeps a server-side conversation per session.",
-			"inputSchema": objSchema(map[string]interface{}{
-				"prompt":  textArg("The question or instruction."),
-				"session": textArg("Optional conversation id (default: \"mcp\")."),
-			}, "prompt"),
-		},
-		{
-			"name":        "agent_task",
-			"description": "Run ChatCLI's full agent (ReAct) loop on a task. The agent autonomously uses its built-in tools (read, search, shell via coder, web, memory) and returns the transcript. Use for multi-step work.",
-			"inputSchema": objSchema(map[string]interface{}{
-				"task":    textArg("The task for the agent to accomplish."),
-				"session": textArg("Optional conversation id."),
-			}, "task"),
-		},
-		{
-			"name":        "coder_task",
-			"description": "Run ChatCLI's coder loop on a task (focused on reading/editing code in the workspace).",
-			"inputSchema": objSchema(map[string]interface{}{
-				"task":    textArg("The coding task."),
-				"session": textArg("Optional conversation id."),
-			}, "task"),
-		},
+// routingProps are the shared per-call routing/quality parameters accepted
+// by chat/agent/coder.
+func routingProps() map[string]interface{} {
+	return map[string]interface{}{
+		"provider": textArg("Optional LLM provider override for this call (see list_providers)."),
+		"model":    textArg("Optional model override for this call."),
 	}
-	for _, t := range m.backend.BuiltinTools() {
+}
+
+func qualityProp() map[string]interface{} {
+	return map[string]interface{}{
+		"type": "object",
+		"description": "Optional quality-harness toggles for this run, as CHATCLI_QUALITY_* env overrides. " +
+			"Examples: {\"CHATCLI_QUALITY_ENABLED\":\"true\"}, refine/verify/reflexion/plan/convergence knobs.",
+		"additionalProperties": map[string]interface{}{"type": "string"},
+	}
+}
+
+// toolDefinitions advertises the harness tools plus every policy-admitted
+// plugin tool with its capability annotations.
+func (m *MCP) toolDefinitions() []map[string]interface{} {
+	chatProps := map[string]interface{}{
+		"prompt":  textArg("The question or instruction."),
+		"session": textArg("Optional conversation id (default: \"mcp\")."),
+	}
+	for k, v := range routingProps() {
+		chatProps[k] = v
+	}
+	agentProps := map[string]interface{}{
+		"task":    textArg("The task for the agent to accomplish."),
+		"session": textArg("Optional conversation id."),
+		"quality": qualityProp(),
+	}
+	for k, v := range routingProps() {
+		agentProps[k] = v
+	}
+	coderProps := map[string]interface{}{
+		"task":    textArg("The coding task."),
+		"session": textArg("Optional conversation id."),
+		"quality": qualityProp(),
+	}
+	for k, v := range routingProps() {
+		coderProps[k] = v
+	}
+
+	tools := make([]map[string]interface{}, 0, 8)
+	if m.backend.HasLLM() {
+		tools = append(tools, []map[string]interface{}{
+			{
+				"name":        "ask_chatcli",
+				"description": "Ask the model a question (chat, no tools). Keeps a server-side conversation per session. Supports per-call provider/model routing.",
+				"inputSchema": objSchema(chatProps, "prompt"),
+				"annotations": map[string]interface{}{"readOnlyHint": true},
+			},
+			{
+				"name": "agent_task",
+				"description": "Run ChatCLI's full agent (ReAct) loop on a task. The agent autonomously uses every built-in tool " +
+					"(files, shell, web, memory, knowledge, MCP servers ChatCLI is connected to) and returns the transcript. " +
+					"Supports per-call provider/model routing and quality-harness toggles (plan, refine, verify, reflexion, convergence, lessons).",
+				"inputSchema": objSchema(agentProps, "task"),
+				"annotations": map[string]interface{}{"readOnlyHint": false},
+			},
+			{
+				"name":        "coder_task",
+				"description": "Run ChatCLI's coder loop on a task (reading/editing code and running commands in the workspace). Supports per-call provider/model routing and quality toggles.",
+				"inputSchema": objSchema(coderProps, "task"),
+				"annotations": map[string]interface{}{"readOnlyHint": false},
+			},
+		}...)
+	}
+	tools = append(tools, map[string]interface{}{
+		"name":        "list_providers",
+		"description": "List the configured LLM providers, the active provider/model, and each provider's cataloged models — the routing surface for the provider/model parameters.",
+		"inputSchema": objSchema(map[string]interface{}{}),
+		"annotations": map[string]interface{}{"readOnlyHint": true},
+	})
+	for _, t := range m.backend.Tools() {
+		desc := t.Description
+		if u := strings.TrimSpace(t.Usage); u != "" {
+			desc += "\n\nUsage:\n" + u
+		}
 		tools = append(tools, map[string]interface{}{
 			"name":        t.Name,
-			"description": t.Description,
+			"description": desc,
 			"inputSchema": objSchema(map[string]interface{}{
-				"args": textArg("Arguments for the tool (e.g. a path, query, or JSON envelope)."),
-			}, "args"),
+				"args": textArg("Arguments for the tool — a flat string or the JSON envelope the usage describes."),
+			}),
+			"annotations": map[string]interface{}{"readOnlyHint": t.ReadOnly},
 		})
 	}
 	return tools
+}
+
+// promptDefinitions serves the installed skill catalog as MCP prompts.
+func (m *MCP) promptDefinitions() []map[string]interface{} {
+	skills := m.backend.Skills()
+	out := make([]map[string]interface{}, 0, len(skills))
+	for _, s := range skills {
+		out = append(out, map[string]interface{}{
+			"name":        s.Name,
+			"description": s.Description,
+		})
+	}
+	return out
+}
+
+func (m *MCP) getPrompt(params json.RawMessage) (interface{}, *RPCError) {
+	var p struct {
+		Name string `json:"name"`
+	}
+	if err := json.Unmarshal(params, &p); err != nil || p.Name == "" {
+		return nil, errf(CodeInvalidParams, "prompt name is required")
+	}
+	content, err := m.backend.SkillContent(p.Name)
+	if err != nil {
+		return nil, errf(CodeInvalidParams, "unknown prompt %q: %v", p.Name, err)
+	}
+	return map[string]interface{}{
+		"messages": []map[string]interface{}{
+			{
+				"role":    "user",
+				"content": map[string]interface{}{"type": "text", "text": content},
+			},
+		},
+	}, nil
 }
 
 type mcpToolCallParams struct {
@@ -124,10 +271,13 @@ type mcpToolCallParams struct {
 }
 
 type mcpArgs struct {
-	Prompt  string `json:"prompt"`
-	Task    string `json:"task"`
-	Session string `json:"session"`
-	Args    string `json:"args"`
+	Prompt   string            `json:"prompt"`
+	Task     string            `json:"task"`
+	Session  string            `json:"session"`
+	Args     string            `json:"args"`
+	Provider string            `json:"provider"`
+	Model    string            `json:"model"`
+	Quality  map[string]string `json:"quality"`
 }
 
 func (m *MCP) callTool(ctx context.Context, params json.RawMessage) (interface{}, *RPCError) {
@@ -141,26 +291,29 @@ func (m *MCP) callTool(ctx context.Context, params json.RawMessage) (interface{}
 	if session == "" {
 		session = "mcp"
 	}
+	opts := RunOpts{Provider: a.Provider, Model: a.Model, Quality: a.Quality}
 
 	switch p.Name {
 	case "ask_chatcli":
 		if a.Prompt == "" {
 			return nil, errf(CodeInvalidParams, "prompt is required")
 		}
-		return m.result(m.backend.Prompt(ctx, session, a.Prompt))
+		return m.result(m.backend.PromptWith(ctx, session, a.Prompt, opts))
 	case "agent_task":
 		if a.Task == "" {
 			return nil, errf(CodeInvalidParams, "task is required")
 		}
-		return m.result(m.backend.Agent(ctx, session, a.Task))
+		return m.result(m.backend.Agent(ctx, session, a.Task, opts))
 	case "coder_task":
 		if a.Task == "" {
 			return nil, errf(CodeInvalidParams, "task is required")
 		}
-		return m.result(m.backend.Coder(ctx, session, a.Task))
+		return m.result(m.backend.Coder(ctx, session, a.Task, opts))
+	case "list_providers":
+		return m.result(m.backend.ProvidersJSON())
 	default:
-		// A curated built-in tool.
-		return m.result(m.backend.CallBuiltin(ctx, p.Name, a.Args))
+		// Any policy-admitted plugin tool.
+		return m.result(m.backend.CallTool(ctx, p.Name, a.Args))
 	}
 }
 
