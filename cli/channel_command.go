@@ -10,6 +10,7 @@
  *   inject               splice last 10 messages into the next turn
  *                        as a system message (legacy behavior preserved)
  *   ack                  clear unread + pending notify banner
+ *   clear                drain the inbox: empty the ring + ack all state
  *   pause / resume       toggle the trigger engine
  *   rules                show active rule set; `rules reload` re-reads
  *                        ~/.chatcli/mcp/triggers.json
@@ -53,6 +54,8 @@ func (cli *ChatCLI) handleChannelCommand(ctx context.Context, userInput string) 
 		cli.runChannelInject(ch)
 	case "ack":
 		cli.runChannelAck()
+	case "clear":
+		cli.runChannelClear()
 	case "pause":
 		cli.channelTriggerPause()
 		fmt.Println(colorize("  "+i18n.T("chan.cmd.pause_done"), ColorYellow))
@@ -91,6 +94,19 @@ func (cli *ChatCLI) runChannelAck() {
 	notify, unread := cli.channelTriggerAck()
 	fmt.Println(colorize(
 		"  ✓ "+i18n.T("chan.cmd.ack_done", notify, unread),
+		ColorGreen))
+}
+
+// runChannelClear fully drains the live inbox: acknowledges pending
+// notify/unread state AND empties the in-memory ring so /channel list
+// starts fresh. The on-disk audit trail is preserved. Pending confirm
+// actions are NOT dropped — they gate real actions and must be decided
+// explicitly via /channel confirm <id> [no].
+func (cli *ChatCLI) runChannelClear() {
+	notify, _ := cli.channelTriggerAck()
+	dropped := cli.mcpManager.Channels().Clear()
+	fmt.Println(colorize(
+		"  ✓ "+i18n.T("chan.cmd.clear_done", dropped, notify),
 		ColorGreen))
 }
 
@@ -279,6 +295,7 @@ func (cli *ChatCLI) getChannelSuggestions(d prompt.Document) []prompt.Suggest {
 		{Text: "list", Description: i18n.T("chan.cmd.suggest_list")},
 		{Text: "inject", Description: i18n.T("chan.cmd.suggest_inject")},
 		{Text: "ack", Description: i18n.T("chan.cmd.suggest_ack")},
+		{Text: "clear", Description: i18n.T("chan.cmd.suggest_clear")},
 		{Text: "pause", Description: i18n.T("chan.cmd.suggest_pause")},
 		{Text: "resume", Description: i18n.T("chan.cmd.suggest_resume")},
 		{Text: "rules", Description: i18n.T("chan.cmd.suggest_rules")},

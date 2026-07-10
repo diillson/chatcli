@@ -157,3 +157,63 @@ func TestDrainToolListChanges_DrainsOnce(t *testing.T) {
 		t.Errorf("second drain = %d changes, want 0", len(got))
 	}
 }
+
+func TestHandledProtocolEventDoesNotInflateUnread(t *testing.T) {
+	old := dynamicToolRefreshDebounce
+	dynamicToolRefreshDebounce = 5 * time.Millisecond
+	defer func() { dynamicToolRefreshDebounce = old }()
+
+	m, _ := dynamicManager(t, "srv", `{"tools":[{"name":"x"}]}`)
+
+	m.Channels().ProcessSSENotification("srv",
+		[]byte(`{"jsonrpc":"2.0","method":"notifications/tools/list_changed"}`))
+	if got := m.Channels().Unread(); got != 0 {
+		t.Errorf("handled list_changed must not bump unread, got %d", got)
+	}
+	// The event still lands in the ring for audit.
+	if len(m.Channels().GetByChannel("tools/list_changed", 5)) != 1 {
+		t.Error("handled event must remain visible in the ring")
+	}
+
+	// A regular server message still counts.
+	m.Channels().ProcessSSENotification("srv",
+		[]byte(`{"jsonrpc":"2.0","method":"notifications/alerts","params":{"msg":"disk"}}`))
+	if got := m.Channels().Unread(); got != 1 {
+		t.Errorf("regular messages must keep bumping unread, got %d", got)
+	}
+}
+
+func TestListChangedWithKillSwitchStillCountsUnread(t *testing.T) {
+	t.Setenv("CHATCLI_MCP_DYNAMIC_TOOLS", "off")
+	m, _ := dynamicManager(t, "srv", `{"tools":[{"name":"x"}]}`)
+
+	m.Channels().ProcessSSENotification("srv",
+		[]byte(`{"jsonrpc":"2.0","method":"notifications/tools/list_changed"}`))
+	if got := m.Channels().Unread(); got != 1 {
+		t.Errorf("with the refresh disabled nothing handled the event — unread must be %d, got 1", got)
+	}
+}
+
+func TestChannelManagerClear(t *testing.T) {
+	m := NewManagerWithOptions(zap.NewNop(), ChannelManagerOptions{PersistDir: t.TempDir()})
+	for i := 0; i < 3; i++ {
+		m.Channels().Push(ChannelMessage{ServerName: "srv", Channel: "alerts", Content: "msg"})
+	}
+	if m.Channels().Unread() != 3 {
+		t.Fatalf("setup: unread = %d, want 3", m.Channels().Unread())
+	}
+
+	dropped := m.Channels().Clear()
+	if dropped != 3 {
+		t.Errorf("Clear dropped = %d, want 3", dropped)
+	}
+	if m.Channels().Unread() != 0 || len(m.Channels().GetRecent(10)) != 0 {
+		t.Error("Clear must empty the ring and reset unread")
+	}
+
+	// Post-clear pushes behave normally.
+	m.Channels().Push(ChannelMessage{ServerName: "srv", Channel: "alerts", Content: "fresh"})
+	if m.Channels().Unread() != 1 || len(m.Channels().GetRecent(10)) != 1 {
+		t.Error("ring must keep working after Clear")
+	}
+}

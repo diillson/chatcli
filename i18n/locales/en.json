@@ -2412,6 +2412,8 @@
 
   "chan.banner.title": "MCP CHANNEL INBOX",
   "chan.banner.unread": "%d new channel message(s) since last ack",
+  "chan.cmd.clear_done": "Inbox drained: %d message(s) removed from the ring, %d pending notification(s) acknowledged (audit file preserved)",
+  "chan.cmd.suggest_clear": "Drain the inbox (empty ring + ack)",
   "chan.banner.hint_ack": "Hint: /channel ack to clear, /channel list for full inbox",
   "chan.banner.more": "… and %d more item(s) — /channel list to see everything",
 
@@ -3033,6 +3035,8 @@
   "ask.ui.hint_single": "↑/↓ move · space/enter select · esc back/cancel",
   "ask.chat.tool_forbidden": "Only the ask_user tool is available in chat mode; answer in text instead.",
   "ask.chat.continue": "Now answer the user directly using the selections above. Do NOT call any tool again.",
+  "plugins.channels.describe": "MCP channel inbox: %s",
+  "plugins.channels.unknown_cmd": "@channels: unknown subcommand %q — use list, unread or ack",
   "plugins.ask.describe": "Asking you %d question(s)…",
   "cfg.section.chat.title": "Chat",
   "cfg.chat.ask_effective": "ask_user in chat (effective)",

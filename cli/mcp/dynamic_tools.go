@@ -56,11 +56,13 @@ func dynamicToolRefreshEnabled() bool {
 // scheduleToolRefresh is the ChannelManager hook target. Non-blocking:
 // marks the server pending and spawns the debounced refresh goroutine.
 // Repeat notifications inside the debounce window coalesce into one run.
-func (m *Manager) scheduleToolRefresh(serverName string) {
+// Reports whether the event was taken (refresh scheduled or already
+// pending) so the caller can mark the inbox entry audit-only.
+func (m *Manager) scheduleToolRefresh(serverName string) bool {
 	if !dynamicToolRefreshEnabled() {
 		m.logger.Debug("MCP dynamic tool refresh disabled, ignoring list_changed",
 			zap.String("server", serverName))
-		return
+		return false
 	}
 
 	m.refreshMu.Lock()
@@ -69,13 +71,17 @@ func (m *Manager) scheduleToolRefresh(serverName string) {
 	}
 	if m.refreshPending[serverName] {
 		m.refreshMu.Unlock()
-		return
+		return true
 	}
 	m.refreshPending[serverName] = true
 	m.refreshMu.Unlock()
 
+	// Capture the debounce window before spawning: the goroutine must not
+	// read the package variable concurrently with tests (or future config)
+	// mutating it — the window is fixed at schedule time by design.
+	debounce := dynamicToolRefreshDebounce
 	go func() {
-		time.Sleep(dynamicToolRefreshDebounce)
+		time.Sleep(debounce)
 		m.refreshMu.Lock()
 		delete(m.refreshPending, serverName)
 		m.refreshMu.Unlock()
@@ -105,6 +111,7 @@ func (m *Manager) scheduleToolRefresh(serverName string) {
 			zap.Strings("added", added),
 			zap.Strings("removed", removed))
 	}()
+	return true
 }
 
 // RefreshServerTools re-runs tools/list for one server and reconciles the
