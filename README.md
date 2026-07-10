@@ -7,7 +7,7 @@
 <h1 align="center">ChatCLI</h1>
 <p align="center">
   <strong>Unified AI platform for terminal, gRPC server, and Kubernetes.</strong><br>
-  <sub>14 providers · 14 autonomous agents · 7-pattern quality pipeline · one binary.</sub>
+  <sub>15 providers · 14 autonomous agents · 7-pattern quality pipeline · one binary.</sub>
 </p>
 
 <div align="center">
@@ -57,7 +57,7 @@
 
 | | |
 |---|---|
-| **Multi-provider with failover** | 14 LLM providers (OpenAI · OpenAI Responses · Anthropic · Bedrock · Google · xAI · ZAI · MiniMax · Moonshot (Kimi) · Copilot · GitHub Models · StackSpot · OpenRouter · Ollama) with intelligent error classification, exponential backoff, and per-provider cooldown. |
+| **Multi-provider with failover** | 15 LLM providers (OpenAI · OpenAI Responses · Anthropic · Bedrock · Google · xAI · ZAI · MiniMax · Moonshot (Kimi) · Copilot · GitHub Models · StackSpot · OpenRouter · Ollama · Devin CLI) with intelligent error classification, exponential backoff, and per-provider cooldown. The Devin provider wraps the local Devin CLI as an LLM transport — no undocumented Cognition APIs, full ChatCLI harness and headroom on top. |
 | **Autonomous agents** | 14 built-in workers coordinated by a ReAct engine (Reason + Act): 12 orchestration specialists run in parallel + 2 quality agents (refiner, verifier), plus a 7-pattern quality pipeline. |
 | **Quality pipeline** | Self-Refine, Chain-of-Verification (CoVe), Reflexion, RAG + HyDE, Plan-and-Solve (ReWOO), cross-provider reasoning backbone — all composed via a thread-safe state machine with circuit breakers and hot reload. |
 | **Scheduler (Chronos)** | Durable scheduling with cron + wait-until + DAG + daemon mode. `/schedule`, `/wait`, `/jobs` + `@scheduler` tool for agents. CRC32 WAL, snapshots, rate limiter, circuit breakers, JSONL audit, 13 Prometheus metrics. Jobs survive crashes and CLI exit. |
