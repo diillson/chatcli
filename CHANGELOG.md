@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.157.0](https://github.com/diillson/chatcli/compare/v1.156.0...v1.157.0) (2026-07-10)
+
+
+### Features
+
+* GPT-5.6 family (Sol/Terra/Luna) + Codex client headers fix ([#1155](https://github.com/diillson/chatcli/issues/1155)) ([7f112ba](https://github.com/diillson/chatcli/commit/7f112ba7cfb03f97c240320fdec3ecfb0804499c))
+
 ## [1.156.0](https://github.com/diillson/chatcli/compare/v1.155.0...v1.156.0) (2026-07-10)
 
 
