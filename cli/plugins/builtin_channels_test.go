@@ -9,6 +9,8 @@ import (
 	"context"
 	"strings"
 	"testing"
+
+	"github.com/diillson/chatcli/i18n"
 )
 
 // fakeChannelsAdapter scripts the ChannelsAdapter contract for tests.
@@ -96,8 +98,8 @@ func TestChannelsUnreadAndAck(t *testing.T) {
 	if err != nil || !fa.acked {
 		t.Fatalf("ack must reach the adapter: out=%q err=%v", out, err)
 	}
-	if !strings.Contains(out, "7 unread") || !strings.Contains(out, "2 pending") {
-		t.Errorf("ack summary must report cleared counts, got %q", out)
+	if want := i18n.T("plugins.channels.ack_done", 7, 2); out != want {
+		t.Errorf("ack summary = %q, want %q", out, want)
 	}
 }
 

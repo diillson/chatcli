@@ -3035,6 +3035,7 @@
   "ask.ui.hint_single": "↑/↓ mover · espaço/enter selecionar · esc voltar/cancelar",
   "ask.chat.tool_forbidden": "Apenas a ferramenta ask_user está disponível no modo chat; responda em texto.",
   "ask.chat.continue": "Agora responda o usuário diretamente usando as seleções acima. NÃO chame nenhuma ferramenta de novo.",
+  "plugins.channels.ack_done": "Inbox reconhecido: %d mensagem(ns) não lida(s) e %d notificação(ões) pendente(s) limpa(s).",
   "plugins.channels.describe": "Inbox de canais MCP: %s",
   "plugins.channels.unknown_cmd": "@channels: subcomando desconhecido %q — use list, unread ou ack",
   "plugins.ask.describe": "Perguntando %d questão(ões)…",

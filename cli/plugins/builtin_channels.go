@@ -231,7 +231,7 @@ func (p *BuiltinChannelsPlugin) ExecuteWithStream(_ context.Context, args []stri
 		if err != nil {
 			return "", err
 		}
-		return fmt.Sprintf("Inbox acknowledged: %d unread message(s) and %d pending notification(s) cleared.", unread, notify), nil
+		return i18n.T("plugins.channels.ack_done", unread, notify), nil
 	default:
 		return "", fmt.Errorf("%s", i18n.T("plugins.channels.unknown_cmd", inv.Cmd))
 	}
