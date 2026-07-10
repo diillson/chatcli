@@ -485,6 +485,15 @@ func claudePricing(model string) (float64, float64, bool) {
 // ("gpt-4o").
 func openAIPricing(model string) (float64, float64, bool) {
 	switch {
+	// gpt-5.6 (Jul 2026): preços de lista da API por tier. O caso genérico
+	// "gpt-5.6" cobre o alias de família (que o catálogo resolve para Sol)
+	// e precisa vir depois dos tiers específicos.
+	case strings.Contains(model, "gpt-5.6-terra"):
+		return 2.50, 15.0, true
+	case strings.Contains(model, "gpt-5.6-luna"):
+		return 1.0, 6.0, true
+	case strings.Contains(model, "gpt-5.6"):
+		return 5.0, 30.0, true
 	case strings.Contains(model, "gpt-4o-mini"):
 		return 0.15, 0.60, true
 	case strings.Contains(model, "gpt-4o"):
