@@ -21,6 +21,17 @@ const (
 	// OAuth (ChatGPT plan) endpoint — used when authenticated via OAuth instead of API key
 	OpenAIOAuthResponsesURL = "https://chatgpt.com/backend-api/codex/responses"
 
+	// Identificação de cliente exigida pelo backend Codex. O backend roteia
+	// modelos por cliente: slugs novos (ex.: família gpt-5.6) retornam
+	// 404 "Model not found" a menos que a request carregue AMBOS os headers
+	// `originator` e um User-Agent no formato codex_cli_rs/<versão> —
+	// qualquer um deles sozinho não destrava (verificado empiricamente,
+	// Jul 2026). A versão precisa apenas existir no UA; o gate de
+	// minimal_client_version se aplica à listagem /codex/models, não ao
+	// /codex/responses.
+	OpenAICodexOriginator = "codex_cli_rs"
+	OpenAICodexUserAgent  = "codex_cli_rs/0.144.0"
+
 	// Valores padrão para ClaudeAI
 	DefaultClaudeAIModel      = "claude-sonnet-4-6"
 	ClaudeAIAPIURL            = "https://api.anthropic.com/v1/messages"

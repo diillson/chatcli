@@ -65,11 +65,52 @@ type ModelMeta struct {
 // first will silently shadow newer variants whose IDs happen to start
 // with the older entry's alias prefix. The covered_by tests in
 // catalog_test.go pin this contract for the Claude Opus 4.x line and
-// the same applies to GPT-5.x — gpt-5.5 must be listed before gpt-5.4
-// before gpt-5.3-codex before gpt-5 (whose alias list includes "gpt-5.1"
-// and other prefix-y strings).
+// the same applies to GPT-5.x — gpt-5.6-* must be listed before gpt-5.5
+// before gpt-5.4 before gpt-5.3-codex before gpt-5 (whose alias list
+// includes "gpt-5.1" and other prefix-y strings).
 var registry = []ModelMeta{
 	// ── OpenAI GPT-5 family ──────────────────────────────────────────
+	// gpt-5.6 (GA Jul 9 2026): three named tiers — Sol (flagship), Terra
+	// (balanced) and Luna (fast/affordable). Platform API specs: all three
+	// tiers share a 1.05M-token context window with 128K max output (same
+	// profile as 5.5). The Codex OAuth backend serves a smaller runtime
+	// window (372K per /codex/models); the catalog follows the family
+	// precedent and records the platform API limit. OAuth/Codex: all three
+	// slugs require the originator + User-Agent headers
+	// (config.OpenAICodex*) — without both, the backend 404s on Luna.
+	{
+		// The generic "gpt-5.6" alias points at Sol (flagship, priority 1
+		// on Codex). The other tiers' exact IDs win in Resolve()'s tier-1
+		// pass, so this loose alias cannot shadow them.
+		ID:              "gpt-5.6-sol",
+		Aliases:         []string{"gpt-5.6-sol", "gpt-5.6"},
+		DisplayName:     "GPT-5.6 Sol",
+		Provider:        ProviderOpenAI,
+		ContextWindow:   1050000,
+		MaxOutputTokens: 128000,
+		PreferredAPI:    APIResponses,
+		Capabilities:    []string{"vision", "tools", "json_mode"},
+	},
+	{
+		ID:              "gpt-5.6-terra",
+		Aliases:         []string{"gpt-5.6-terra"},
+		DisplayName:     "GPT-5.6 Terra",
+		Provider:        ProviderOpenAI,
+		ContextWindow:   1050000,
+		MaxOutputTokens: 128000,
+		PreferredAPI:    APIResponses,
+		Capabilities:    []string{"vision", "tools", "json_mode"},
+	},
+	{
+		ID:              "gpt-5.6-luna",
+		Aliases:         []string{"gpt-5.6-luna"},
+		DisplayName:     "GPT-5.6 Luna",
+		Provider:        ProviderOpenAI,
+		ContextWindow:   1050000,
+		MaxOutputTokens: 128000,
+		PreferredAPI:    APIResponses,
+		Capabilities:    []string{"vision", "tools", "json_mode"},
+	},
 	{
 		// gpt-5.5 — released Apr 23, 2026. 1,050,000-token context with
 		// 128,000 max output, Responses + Chat Completions + Assistants.

@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/diillson/chatcli/auth"
+	"github.com/diillson/chatcli/config"
 	"github.com/diillson/chatcli/models"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -155,4 +156,63 @@ func TestOpenAIResponsesClient_buildTextFromHistory(t *testing.T) {
 	expected := "System: Be helpful.\nUser: Hello\nAssistant: Hi there!\nUser: How are you?"
 	result := buildTextFromHistory(history, prompt)
 	assert.Equal(t, expected, result)
+}
+
+// O backend Codex (OAuth) roteia modelos pela identificação do cliente: sem
+// os headers originator + User-Agent codex_cli_rs/<ver> ele responde 404
+// "Model not found" para slugs novos (ex.: gpt-5.6-luna). Estes testes pinam
+// que o par de headers vai em toda request OAuth e em nenhuma request de
+// API key (a plataforma api.openai.com não conhece esses headers).
+func TestOpenAIResponsesClient_sendRequest_OAuthSetsCodexHeaders(t *testing.T) {
+	var gotOriginator, gotUA string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotOriginator = r.Header.Get("originator")
+		gotUA = r.Header.Get("User-Agent")
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprint(w, `{}`)
+	}))
+	defer server.Close()
+
+	require.NoError(t, os.Setenv("OPENAI_RESPONSES_API_URL", server.URL))
+	defer os.Unsetenv("OPENAI_RESPONSES_API_URL")
+
+	logger, _ := zap.NewDevelopment()
+	client := NewOpenAIResponsesClient(
+		auth.NewStaticTokenProvider("oauth-token", auth.AuthModeOAuth, ""),
+		"gpt-5.6-luna", logger, 1, 0)
+	// O modo OAuth instala o transport uTLS (fingerprint de navegador), que
+	// não fala HTTP puro com o httptest.Server — troca por um client plano
+	// só para inspecionar os headers montados em sendRequest.
+	client.httpClient = &http.Client{Timeout: 5 * time.Second}
+
+	resp, err := client.sendRequest(context.Background(), []byte(`{}`), "oauth-token")
+	require.NoError(t, err)
+	defer resp.Body.Close()
+
+	assert.Equal(t, config.OpenAICodexOriginator, gotOriginator,
+		"OAuth request must carry the Codex originator header")
+	assert.Equal(t, config.OpenAICodexUserAgent, gotUA,
+		"OAuth request must carry the Codex client User-Agent")
+}
+
+func TestOpenAIResponsesClient_sendRequest_APIKeyOmitsCodexHeaders(t *testing.T) {
+	var gotOriginator string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotOriginator = r.Header.Get("originator")
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprint(w, `{}`)
+	}))
+	defer server.Close()
+
+	require.NoError(t, os.Setenv("OPENAI_RESPONSES_API_URL", server.URL))
+	defer os.Unsetenv("OPENAI_RESPONSES_API_URL")
+
+	logger, _ := zap.NewDevelopment()
+	client := NewOpenAIResponsesClient(testProvider("test-api-key"), "gpt-5.6-luna", logger, 1, 0)
+
+	resp, err := client.sendRequest(context.Background(), []byte(`{}`), "test-api-key")
+	require.NoError(t, err)
+	defer resp.Body.Close()
+
+	assert.Empty(t, gotOriginator, "API-key requests must not impersonate the Codex client")
 }

@@ -374,3 +374,28 @@ func TestGPT55LimitsAndCapabilities(t *testing.T) {
 	assert.Equal(t, 128000, GetMaxTokens(ProviderOpenAI, "gpt-5.5", 0))
 	assert.Equal(t, 128000, GetMaxTokens(ProviderOpenAI, "gpt-5.5-pro", 0))
 }
+
+// gpt-5.6 (Jul 2026): Sol/Terra/Luna compartilham 1.05M de contexto e 128K
+// de output na API de plataforma. O ponto crítico pinado aqui é que os IDs
+// exatos resolvem para as SUAS entradas — antes desta família entrar no
+// catálogo, "gpt-5.6-*" caía por prefixo na entrada gpt-5 (400K de contexto).
+func TestGPT56FamilyEntries(t *testing.T) {
+	for _, id := range []string{"gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"} {
+		meta, ok := Resolve(ProviderOpenAI, id)
+		assert.True(t, ok, "expected %s to resolve", id)
+		assert.Equal(t, id, meta.ID, "%s must resolve to its own entry, not a prefix fallback", id)
+		assert.Equal(t, 1050000, meta.ContextWindow, "%s context window", id)
+		assert.Equal(t, 128000, meta.MaxOutputTokens, "%s max output", id)
+		assert.Equal(t, APIResponses, meta.PreferredAPI, "%s preferred API", id)
+		assert.Contains(t, meta.Capabilities, "tools", "%s should advertise tools", id)
+		assert.Contains(t, meta.Capabilities, "json_mode", "%s should advertise json_mode", id)
+		assert.Contains(t, meta.Capabilities, "vision", "%s should advertise vision", id)
+		assert.Equal(t, 128000, GetMaxTokens(ProviderOpenAI, id, 0), "%s max tokens lookup", id)
+	}
+
+	// Alias genérico da família aponta para o flagship (Sol) sem sombrear
+	// os IDs exatos dos outros tiers.
+	meta, ok := Resolve(ProviderOpenAI, "gpt-5.6")
+	assert.True(t, ok)
+	assert.Equal(t, "gpt-5.6-sol", meta.ID)
+}
