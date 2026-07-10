@@ -89,8 +89,8 @@ func TestMCPConfig_AddListGetRemove(t *testing.T) {
 func TestMCPConfig_AddValidation(t *testing.T) {
 	withTempMCPHome(t)
 	cases := [][]string{
-		{"add"},                                     // no name
-		{"add", "x"},                                // stdio without command
+		{"add"},      // no name
+		{"add", "x"}, // stdio without command
 		{"add", "x", "--env", "notkv", "--", "cmd"}, // bad env
 		{"add", "--transport", "sse", "x"},          // sse without url
 		{"add", "--transport", "weird", "x", "--", "cmd"},
