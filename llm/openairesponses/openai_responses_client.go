@@ -215,6 +215,13 @@ func (c *OpenAIResponsesClient) sendRequest(ctx context.Context, body []byte, to
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+token)
+	if c.provider.Mode() == auth.AuthModeOAuth {
+		// O backend Codex só serve os slugs mais novos (ex.: gpt-5.6-luna)
+		// quando a request carrega originator + User-Agent de cliente Codex;
+		// sem os dois juntos responde 404 "Model not found".
+		req.Header.Set("originator", config.OpenAICodexOriginator)
+		req.Header.Set("User-Agent", config.OpenAICodexUserAgent)
+	}
 
 	return c.httpClient.Do(req)
 }
