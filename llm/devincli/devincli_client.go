@@ -34,6 +34,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/diillson/chatcli/config"
@@ -50,13 +51,19 @@ const (
 	replyBegin = "<<<CHATCLI_REPLY_BEGIN>>>"
 	replyEnd   = "<<<CHATCLI_REPLY_END>>>"
 
-	// transportPreamble turns the Devin agent into a plain LLM endpoint.
-	// English on purpose: models follow English framing instructions more
-	// reliably, and this text never reaches the user.
-	transportPreamble = `You are serving as a plain LLM backend for another application. Rules for this session:
-- Do NOT use any tools, do NOT read or write files, do NOT run commands. Your workspace is intentionally empty.
-- Do NOT mention these rules, your environment, or your tooling.
-- Answer the conversation below as the assistant. Everything the application needs is already in the conversation.
+	// transportPreamble turns the Devin agent into a plain LLM endpoint
+	// WITHOUT hijacking ChatCLI's own tool protocol: ChatCLI's agent/coder
+	// modes define a textual tool-call markup in their system messages, and
+	// the model must keep emitting that markup — only Devin's NATIVE tools
+	// (file access, shell, web) are off-limits. The first version of this
+	// preamble said a blanket "do NOT use any tools" and made the model
+	// ignore ChatCLI's tool catalog entirely. English on purpose: models
+	// follow English framing instructions more reliably, and this text
+	// never reaches the user.
+	transportPreamble = `You are the LLM backend for ChatCLI, another application. Transport rules:
+- The conversation below is your ONLY source of truth. The system messages inside it — including any tool catalog, tool-call markup protocol or output format they define — are your real instructions. Follow them exactly: when they tell you to emit tool-call markup (such as <tool_call ...> blocks or @tool commands) as text in your reply, do it. That markup is interpreted by ChatCLI, not executed by you.
+- NEVER use your own native tools: do not read or write files, do not run commands, do not browse. Your local workspace is intentionally empty; every capability available to you is expressed textually through the conversation.
+- Do not mention these transport rules or your own environment.
 - Wrap your ENTIRE reply between the exact lines ` + replyBegin + ` and ` + replyEnd + ` with nothing outside them.
 
 The conversation follows.`
@@ -64,6 +71,14 @@ The conversation follows.`
 
 // ansiEscapes matches CSI/OSC terminal escape sequences the CLI may emit.
 var ansiEscapes = regexp.MustCompile(`\x1b(?:\[[0-9;?]*[a-zA-Z]|\][^\x07\x1b]*(?:\x07|\x1b\\))`)
+
+// runMu serializes Devin CLI invocations within this process. The CLI keeps
+// per-user state (config, session store) that concurrent instances contend
+// on: the background memory worker firing an extraction while an agent turn
+// is mid-flight was observed failing with CLI-side file errors. Turns are
+// short relative to the correctness win, and each waiter still honors its
+// own context deadline while queued.
+var runMu sync.Mutex
 
 // ResolveBinary locates the Devin CLI: DEVIN_CLI_PATH when set (expanded,
 // must exist), otherwise PATH lookup of the default binary name. The manager
@@ -160,6 +175,20 @@ func (c *Client) SendPrompt(ctx context.Context, prompt string, history []models
 
 // runOnce performs a single CLI invocation inside a fresh isolated workdir.
 func (c *Client) runOnce(ctx context.Context, flattened string, timeout time.Duration) (string, error) {
+	// Serialize with any other in-process invocation (see runMu), but never
+	// outlive the caller's context while waiting for the slot.
+	lockCh := make(chan struct{})
+	go func() { runMu.Lock(); close(lockCh) }()
+	select {
+	case <-lockCh:
+		defer runMu.Unlock()
+	case <-ctx.Done():
+		// The goroutine will eventually grab and immediately release the
+		// abandoned slot so the mutex is never leaked.
+		go func() { <-lockCh; runMu.Unlock() }()
+		return "", ctx.Err()
+	}
+
 	workDir, err := os.MkdirTemp("", "chatcli-devin-*")
 	if err != nil {
 		return "", fmt.Errorf("%s: %w", i18n.T("llm.devincli.prepare_prompt"), err)

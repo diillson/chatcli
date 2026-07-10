@@ -173,3 +173,90 @@ func TestBuildConversation_DoesNotDuplicateLastUserTurn(t *testing.T) {
 	flat := buildConversation(history, "same prompt")
 	assert.Equal(t, 1, strings.Count(flat, "User: same prompt"))
 }
+
+// TestSendPrompt_ToolProtocolSurvivesTransport pins the agent/coder parity
+// contract: ChatCLI's textual tool-call markup must flow both ways intact —
+// the tool catalog in system messages reaches the prompt file, the preamble
+// explicitly defers to it, and markup emitted by the model comes back
+// unmodified for the agent loop to parse.
+func TestSendPrompt_ToolProtocolSurvivesTransport(t *testing.T) {
+	record := filepath.Join(t.TempDir(), "argv")
+	toolCall := `<tool_call name="@coder" args='{"cmd":"read","args":{"file":"main.go"}}' />`
+	bin := fakeDevin(t, `
+prev=""
+for a in "$@"; do
+  if [ "$prev" = "--prompt-file" ]; then cp "$a" `+record+`.prompt; fi
+  prev="$a"
+done
+cat <<'REPLY'
+<<<CHATCLI_REPLY_BEGIN>>>
+Vou ler o arquivo.
+`+toolCall+`
+<<<CHATCLI_REPLY_END>>>
+REPLY
+`)
+	c := NewClient(bin, "gpt-5.6-sol", zap.NewNop(), 1, 0)
+	history := []models.Message{
+		{Role: "system", Content: "Ferramentas disponíveis:\n@coder — read/write/exec\nEmita <tool_call .../> para usar."},
+		{Role: "user", Content: "leia o main.go"},
+	}
+	got, err := c.SendPrompt(context.Background(), "leia o main.go", history, 0)
+	require.NoError(t, err)
+	assert.Contains(t, got, toolCall, "tool-call markup must come back byte-identical for the agent loop")
+
+	prompt, err := os.ReadFile(record + ".prompt")
+	require.NoError(t, err)
+	p := string(prompt)
+	assert.Contains(t, p, "Ferramentas disponíveis", "tool catalog from system messages must reach the model")
+	assert.Contains(t, p, "tool-call markup", "preamble must defer to ChatCLI's tool protocol")
+	assert.NotContains(t, p, "do NOT use any tools", "the old blanket tool ban must be gone — it blinded the model to ChatCLI's catalog")
+}
+
+// TestSendPrompt_SerializesConcurrentInvocations pins the fix for the memory
+// worker racing an agent turn: two in-process calls must never have their
+// devin subprocesses alive at the same time (the CLI contends on per-user
+// state). The fake binary errors if it ever observes an active peer.
+func TestSendPrompt_SerializesConcurrentInvocations(t *testing.T) {
+	lock := filepath.Join(t.TempDir(), "overlap")
+	bin := fakeDevin(t, `
+if [ -e `+lock+` ]; then echo "concurrent invocation detected" >&2; exit 1; fi
+touch `+lock+`
+sleep 0.3
+rm -f `+lock+`
+echo serialized-ok
+`)
+	c := NewClient(bin, "claude-sonnet-4.6", zap.NewNop(), 1, 0)
+	errs := make(chan error, 2)
+	for i := 0; i < 2; i++ {
+		go func() {
+			_, err := c.SendPrompt(context.Background(), "hi", nil, 0)
+			errs <- err
+		}()
+	}
+	for i := 0; i < 2; i++ {
+		require.NoError(t, <-errs, "serialized invocations must both succeed")
+	}
+}
+
+// TestSendPrompt_QueuedCallerHonorsContext pins that a caller waiting for
+// the serialization slot still respects its own deadline instead of hanging
+// behind a long-running peer.
+func TestSendPrompt_QueuedCallerHonorsContext(t *testing.T) {
+	bin := fakeDevin(t, `sleep 2; echo done`)
+	c := NewClient(bin, "claude-sonnet-4.6", zap.NewNop(), 1, 0)
+
+	started := make(chan struct{})
+	go func() {
+		close(started)
+		_, _ = c.SendPrompt(context.Background(), "long", nil, 0)
+	}()
+	<-started
+	time.Sleep(100 * time.Millisecond) // let the first call take the slot
+
+	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer cancel()
+	start := time.Now()
+	_, err := c.SendPrompt(ctx, "queued", nil, 0)
+	require.Error(t, err)
+	assert.Less(t, time.Since(start), time.Second, "queued caller must give up at its own deadline")
+}
