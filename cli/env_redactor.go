@@ -56,7 +56,7 @@ func NewEnvRedactor() *EnvRedactor {
 			"STACKSPOT_CLIENT_SECRET": true, "STACKSPOT_CLIENT_ID": true,
 			"ZHIPU_API_KEY": true, "MINIMAX_API_KEY": true,
 			"MOONSHOT_API_KEY": true, "DEVIN_API_KEY": true,
-			"COHERE_API_KEY":   true, "DEEPSEEK_API_KEY": true,
+			"COHERE_API_KEY": true, "DEEPSEEK_API_KEY": true,
 			"MISTRAL_API_KEY": true, "GROQ_API_KEY": true,
 			// GitHub/Git
 			"GITHUB_TOKEN": true, "GH_TOKEN": true,

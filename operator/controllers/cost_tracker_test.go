@@ -40,6 +40,10 @@ func TestCostTracker_GetTokenPricing(t *testing.T) {
 		{"moonshot upper", "MOONSHOT", 0.95, 4.0},
 		{"moonshot lower", "moonshot", 0.95, 4.0},
 		{"copilot", "COPILOT", 10.0, 30.0},
+		// Devin CLI wrapper: no token usage from the binary, cost lives in
+		// the Cognition subscription — priced at zero like local providers.
+		{"devin upper", "DEVIN", 0.0, 0.0},
+		{"devin lower", "devin", 0.0, 0.0},
 		{"openrouter", "OPENROUTER", 2.0, 8.0},
 		// Unknown provider falls into the conservative default.
 		{"default fallback", "UNKNOWN", 1.0, 3.0},

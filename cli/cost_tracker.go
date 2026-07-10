@@ -439,6 +439,14 @@ func getModelPricing(provider, model string) (inputCost, outputCost float64) {
 	model = strings.ToLower(model)
 	provider = strings.ToLower(provider)
 
+	// DEVIN antes das heurísticas de modelo: o wrapper roteia modelos com
+	// nomes reconhecíveis (claude-*, gpt-*) mas o binário não reporta
+	// tokens e o custo é da assinatura Cognition — sem o curto-circuito,
+	// claudePricing/openAIPricing cobrariam como se fosse API direta.
+	if strings.Contains(provider, "devin") {
+		return 0, 0
+	}
+
 	for _, fn := range []func(string) (float64, float64, bool){
 		claudePricing,
 		openAIPricing,

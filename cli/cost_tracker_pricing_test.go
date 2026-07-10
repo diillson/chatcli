@@ -83,6 +83,10 @@ func TestGetModelPricing(t *testing.T) {
 
 		{"copilot", "COPILOT", "gpt-4o", 2.50, 10.0},
 		{"ollama zero", "OLLAMA", "llama3", 0.0, 0.0},
+		// Devin CLI: o binário não reporta tokens e o custo é da assinatura
+		// Cognition — sempre zero, independente do modelo roteado.
+		{"devin zero", "DEVIN", "claude-sonnet-4.6", 0.0, 0.0},
+		{"devin zero swe", "DEVIN", "swe-1.7-lightning", 0.0, 0.0},
 		{"stackspot zero", "STACKSPOT", "stackspotai", 0.0, 0.0},
 
 		// Unknown provider+model defaults to zero.
