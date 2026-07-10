@@ -7,6 +7,8 @@ package mcp
 
 import (
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"sort"
 	"testing"
 	"time"
@@ -215,5 +217,48 @@ func TestChannelManagerClear(t *testing.T) {
 	m.Channels().Push(ChannelMessage{ServerName: "srv", Channel: "alerts", Content: "fresh"})
 	if m.Channels().Unread() != 1 || len(m.Channels().GetRecent(10)) != 1 {
 		t.Error("ring must keep working after Clear")
+	}
+}
+
+func TestChannelManagerClearAll_TruncatesAuditAndSurvivesRestart(t *testing.T) {
+	dir := t.TempDir()
+	m := NewManagerWithOptions(zap.NewNop(), ChannelManagerOptions{PersistDir: dir})
+	for i := 0; i < 4; i++ {
+		m.Channels().Push(ChannelMessage{ServerName: "srv", Channel: "alerts", Content: "persisted"})
+	}
+	auditPath := filepath.Join(dir, "channels.jsonl")
+	if st, err := os.Stat(auditPath); err != nil || st.Size() == 0 {
+		t.Fatalf("setup: audit file must exist with content (err=%v)", err)
+	}
+	// A rotated backup must be dropped too.
+	rotated := auditPath + ".1"
+	if err := os.WriteFile(rotated, []byte(`{"content":"old"}`+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	dropped, err := m.Channels().ClearAll()
+	if err != nil {
+		t.Fatalf("ClearAll: %v", err)
+	}
+	if dropped != 4 {
+		t.Errorf("dropped = %d, want 4", dropped)
+	}
+	if st, err := os.Stat(auditPath); err != nil || st.Size() != 0 {
+		t.Errorf("audit file must be truncated to zero (size=%d err=%v)", st.Size(), err)
+	}
+	if _, err := os.Stat(rotated); !os.IsNotExist(err) {
+		t.Error("rotated audit backup must be removed")
+	}
+
+	// Restart: a fresh manager on the same dir must replay NOTHING.
+	m2 := NewManagerWithOptions(zap.NewNop(), ChannelManagerOptions{PersistDir: dir})
+	if got := len(m2.Channels().GetRecent(50)); got != 0 {
+		t.Errorf("restart replayed %d message(s), want 0", got)
+	}
+
+	// The audit trail keeps working after the purge.
+	m.Channels().Push(ChannelMessage{ServerName: "srv", Channel: "alerts", Content: "fresh"})
+	if st, err := os.Stat(auditPath); err != nil || st.Size() == 0 {
+		t.Errorf("audit file must keep receiving writes after ClearAll (size=%d err=%v)", st.Size(), err)
 	}
 }

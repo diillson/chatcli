@@ -2412,8 +2412,10 @@
 
   "chan.banner.title": "MCP CHANNEL INBOX",
   "chan.banner.unread": "%d new channel message(s) since last ack",
+  "chan.cmd.clear_all_done": "Inbox fully purged: %d message(s) removed, %d pending notification(s) acknowledged, audit file truncated — nothing will replay on restart",
+  "chan.cmd.clear_all_partial": "Inbox drained (%d message(s) removed) but audit truncation was incomplete: %v",
   "chan.cmd.clear_done": "Inbox drained: %d message(s) removed from the ring, %d pending notification(s) acknowledged (audit file preserved)",
-  "chan.cmd.suggest_clear": "Drain the inbox (empty ring + ack)",
+  "chan.cmd.suggest_clear": "Drain the inbox (empty ring + ack); --all also truncates the audit file",
   "chan.banner.hint_ack": "Hint: /channel ack to clear, /channel list for full inbox",
   "chan.banner.more": "… and %d more item(s) — /channel list to see everything",
 

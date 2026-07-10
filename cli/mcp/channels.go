@@ -362,6 +362,38 @@ func (cm *ChannelManager) Clear() int {
 	return dropped
 }
 
+// ClearAll drains the live inbox like Clear AND truncates the on-disk
+// audit trail (active JSONL plus the rotated backup), so nothing is
+// replayed on the next start. The in-memory drain always succeeds — the
+// ring is the source of truth for the live session; disk cleanup is
+// reported through the returned error so the caller can warn without
+// losing the drain.
+func (cm *ChannelManager) ClearAll() (int, error) {
+	dropped := cm.Clear()
+	if cm.persistPath == "" {
+		return dropped, nil
+	}
+
+	cm.persistMu.Lock()
+	defer cm.persistMu.Unlock()
+
+	var firstErr error
+	if cm.persistFile != nil {
+		// The handle is opened O_APPEND: truncating to zero is enough —
+		// the next write lands at the new end of file.
+		if err := cm.persistFile.Truncate(0); err != nil {
+			firstErr = fmt.Errorf("truncate audit file: %w", err)
+		}
+	} else if err := os.Truncate(cm.persistPath, 0); err != nil && !os.IsNotExist(err) {
+		firstErr = fmt.Errorf("truncate audit file: %w", err)
+	}
+	rotated := cm.persistPath + persistRotatedSuffix
+	if err := os.Remove(rotated); err != nil && !os.IsNotExist(err) && firstErr == nil {
+		firstErr = fmt.Errorf("remove rotated audit file: %w", err)
+	}
+	return dropped, firstErr
+}
+
 // UnreadSince returns the messages received after the last Ack. Used
 // by the prompt-cycle hook so the user only sees the new events on
 // the inbox banner — not the entire history.

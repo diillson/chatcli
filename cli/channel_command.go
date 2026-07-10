@@ -10,7 +10,8 @@
  *   inject               splice last 10 messages into the next turn
  *                        as a system message (legacy behavior preserved)
  *   ack                  clear unread + pending notify banner
- *   clear                drain the inbox: empty the ring + ack all state
+ *   clear [--all]        drain the inbox: empty the ring + ack all state;
+ *                        --all also truncates the on-disk audit trail
  *   pause / resume       toggle the trigger engine
  *   rules                show active rule set; `rules reload` re-reads
  *                        ~/.chatcli/mcp/triggers.json
@@ -29,6 +30,7 @@ import (
 	"github.com/diillson/chatcli/cli/mcp"
 	"github.com/diillson/chatcli/i18n"
 	"github.com/diillson/chatcli/models"
+	"go.uber.org/zap"
 )
 
 func (cli *ChatCLI) handleChannelCommand(ctx context.Context, userInput string) {
@@ -55,7 +57,7 @@ func (cli *ChatCLI) handleChannelCommand(ctx context.Context, userInput string) 
 	case "ack":
 		cli.runChannelAck()
 	case "clear":
-		cli.runChannelClear()
+		cli.runChannelClear(args)
 	case "pause":
 		cli.channelTriggerPause()
 		fmt.Println(colorize("  "+i18n.T("chan.cmd.pause_done"), ColorYellow))
@@ -99,14 +101,31 @@ func (cli *ChatCLI) runChannelAck() {
 
 // runChannelClear fully drains the live inbox: acknowledges pending
 // notify/unread state AND empties the in-memory ring so /channel list
-// starts fresh. The on-disk audit trail is preserved. Pending confirm
-// actions are NOT dropped — they gate real actions and must be decided
-// explicitly via /channel confirm <id> [no].
-func (cli *ChatCLI) runChannelClear() {
+// starts fresh. By default the on-disk audit trail is preserved (and
+// replayed on the next start); `--all` also truncates the audit file
+// plus its rotated backup so the drain survives restarts. Pending
+// confirm actions are NOT dropped either way — they gate real actions
+// and must be decided explicitly via /channel confirm <id> [no].
+func (cli *ChatCLI) runChannelClear(args []string) {
+	all := len(args) >= 3 && (args[2] == "--all" || args[2] == "all")
 	notify, _ := cli.channelTriggerAck()
-	dropped := cli.mcpManager.Channels().Clear()
+
+	if !all {
+		dropped := cli.mcpManager.Channels().Clear()
+		fmt.Println(colorize(
+			"  ✓ "+i18n.T("chan.cmd.clear_done", dropped, notify),
+			ColorGreen))
+		return
+	}
+
+	dropped, err := cli.mcpManager.Channels().ClearAll()
+	if err != nil {
+		cli.logger.Warn("MCP channels: audit truncation incomplete", zap.Error(err))
+		fmt.Println(colorize("  ⚠ "+i18n.T("chan.cmd.clear_all_partial", dropped, err), ColorYellow))
+		return
+	}
 	fmt.Println(colorize(
-		"  ✓ "+i18n.T("chan.cmd.clear_done", dropped, notify),
+		"  ✓ "+i18n.T("chan.cmd.clear_all_done", dropped, notify),
 		ColorGreen))
 }
 

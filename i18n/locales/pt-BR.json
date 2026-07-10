@@ -2412,8 +2412,10 @@
 
   "chan.banner.title": "INBOX DE CHANNELS MCP",
   "chan.banner.unread": "%d mensagem(ns) nova(s) de channel desde o último ack",
+  "chan.cmd.clear_all_done": "Inbox totalmente expurgado: %d mensagem(ns) removida(s), %d notificação(ões) pendente(s) reconhecida(s), arquivo de auditoria truncado — nada será recarregado no restart",
+  "chan.cmd.clear_all_partial": "Inbox drenado (%d mensagem(ns) removida(s)) mas a truncagem da auditoria ficou incompleta: %v",
   "chan.cmd.clear_done": "Inbox drenado: %d mensagem(ns) removida(s) do ring, %d notificação(ões) pendente(s) reconhecida(s) (arquivo de auditoria preservado)",
-  "chan.cmd.suggest_clear": "Drenar o inbox (esvazia ring + ack)",
+  "chan.cmd.suggest_clear": "Drenar o inbox (esvazia ring + ack); --all também trunca o arquivo de auditoria",
   "chan.banner.hint_ack": "Dica: /channel ack pra limpar, /channel list pro inbox completo",
   "chan.banner.more": "… e mais %d item(ns) — /channel list para ver tudo",
 
