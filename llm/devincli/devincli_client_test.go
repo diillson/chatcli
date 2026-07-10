@@ -13,6 +13,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/diillson/chatcli/i18n"
 	"github.com/diillson/chatcli/models"
@@ -259,4 +260,32 @@ func TestSendPrompt_QueuedCallerHonorsContext(t *testing.T) {
 	_, err := c.SendPrompt(ctx, "queued", nil, 0)
 	require.Error(t, err)
 	assert.Less(t, time.Since(start), time.Second, "queued caller must give up at its own deadline")
+}
+
+// TestSendPrompt_SanitizesInvalidUTF8 pins the fix for the memory worker's
+// real-world failure: conversation segments carrying raw non-UTF-8 bytes
+// (tool outputs, binary file reads) made the Rust CLI reject the prompt file
+// with "stream did not contain valid UTF-8". The transport must coerce to
+// valid UTF-8 exactly like encoding/json does for the HTTP providers.
+func TestSendPrompt_SanitizesInvalidUTF8(t *testing.T) {
+	record := filepath.Join(t.TempDir(), "argv")
+	bin := fakeDevin(t, `
+prev=""
+for a in "$@"; do
+  if [ "$prev" = "--prompt-file" ]; then cp "$a" `+record+`.prompt; fi
+  prev="$a"
+done
+echo ok
+`)
+	c := NewClient(bin, "claude-sonnet-4.6", zap.NewNop(), 1, 0)
+	history := []models.Message{
+		{Role: "user", Content: "binário cru: \x80\xfe\xed segue \xc3"},
+	}
+	_, err := c.SendPrompt(context.Background(), "resuma", history, 0)
+	require.NoError(t, err)
+
+	prompt, err := os.ReadFile(record + ".prompt")
+	require.NoError(t, err)
+	assert.True(t, utf8.Valid(prompt), "prompt file must always be valid UTF-8 for the Rust CLI")
+	assert.Contains(t, string(prompt), "binário cru", "surrounding valid text must survive sanitization")
 }

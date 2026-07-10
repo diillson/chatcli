@@ -298,7 +298,13 @@ func buildConversation(history []models.Message, prompt string) string {
 			b.WriteString("\n")
 		}
 	}
-	return b.String()
+	// The Devin CLI (Rust) rejects the prompt file outright on any invalid
+	// UTF-8 byte ("stream did not contain valid UTF-8"). Conversation
+	// segments can carry raw bytes — tool outputs, file reads — and the
+	// HTTP providers never see them because encoding/json silently coerces
+	// invalid sequences to U+FFFD when marshaling. Mirror that exact
+	// behavior at this transport's boundary.
+	return strings.ToValidUTF8(b.String(), "\uFFFD")
 }
 
 // extractReply pulls the model's answer out of the CLI output. Preference
