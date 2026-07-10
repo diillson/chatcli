@@ -1,5 +1,18 @@
 # Changelog
 
+## [1.158.0](https://github.com/diillson/chatcli/compare/v1.157.0...v1.158.0) (2026-07-10)
+
+
+### Features
+
+* DEVIN provider — local Devin CLI as LLM transport ([#1157](https://github.com/diillson/chatcli/issues/1157)) ([695c4f1](https://github.com/diillson/chatcli/commit/695c4f196dd8b84b123221613829bb2bd84571d9))
+* full MCP + ACP server surface — every tool, harness routing, skills as prompts ([#1160](https://github.com/diillson/chatcli/issues/1160)) ([c9d0801](https://github.com/diillson/chatcli/commit/c9d08018f789f663d5678c7f0499a35a9272c7c6))
+
+
+### Bug Fixes
+
+* **embedding:** circuit-break Bedrock credential failures instead of hammering AWS ([#1158](https://github.com/diillson/chatcli/issues/1158)) ([067554e](https://github.com/diillson/chatcli/commit/067554e9d83faf0317cfeb736288060cfa57229f))
+
 ## [1.157.0](https://github.com/diillson/chatcli/compare/v1.156.0...v1.157.0) (2026-07-10)
 
 
