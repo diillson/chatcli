@@ -50,6 +50,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/diillson/chatcli/auth"
 	"github.com/diillson/chatcli/i18n"
 	"go.uber.org/zap"
 )
@@ -95,6 +96,13 @@ type httpTransport struct {
 	initTimeout time.Duration
 	headers     map[string]string
 	auth        *AuthConfig
+
+	// tokenProvider, when set, supplies a refreshable OAuth bearer token and
+	// takes precedence over the static auth config. It is assigned by the
+	// manager after construction when the server has stored MCP OAuth
+	// credentials. A 401 that survives a provider refresh is surfaced as an
+	// *OAuthRequiredError so the agent can trigger re-authorization.
+	tokenProvider auth.TokenProvider
 
 	closed atomic.Bool
 
@@ -191,25 +199,37 @@ func (t *httpTransport) Call(method string, params interface{}) (json.RawMessage
 	reqCtx, cancel := context.WithTimeout(t.ctx, deadline)
 	defer cancel()
 
-	httpReq, err := http.NewRequestWithContext(reqCtx, http.MethodPost, t.endpoint, bytes.NewReader(body))
-	if err != nil {
-		return nil, err
+	// buildAndSend constructs a fresh request for each attempt (the body is
+	// re-read from the same byte slice) and applies auth. It is invoked once
+	// directly, or via auth.DoWithRefresh which retries it once after a
+	// transparent token refresh when a 401/403 comes back.
+	buildAndSend := func(token string) (*http.Response, error) {
+		httpReq, berr := http.NewRequestWithContext(reqCtx, http.MethodPost, t.endpoint, bytes.NewReader(body))
+		if berr != nil {
+			return nil, berr
+		}
+		httpReq.Header.Set("Content-Type", "application/json")
+		// Order matters in the wild. The 2025-03-26 spec just requires
+		// both media types to be listed and a substring/`includes` check
+		// on the server is enough — but several real implementations
+		// (FastMCP, some Cloudflare Workers MCP gateways) interpret the
+		// FIRST listed type as the client's preference and return HTTP
+		// 406 / JSON-RPC -32600 ("Not Acceptable: Client must Accept
+		// text/event-stream") when SSE is not first. Putting SSE first
+		// is compatible with both naive first-match and spec-correct
+		// includes-match servers.
+		httpReq.Header.Set("Accept", "text/event-stream, application/json")
+		t.applyAuth(httpReq, token)
+		t.attachSession(httpReq)
+		return t.httpClient.Do(httpReq)
 	}
-	httpReq.Header.Set("Content-Type", "application/json")
-	// Order matters in the wild. The 2025-03-26 spec just requires
-	// both media types to be listed and a substring/`includes` check
-	// on the server is enough — but several real implementations
-	// (FastMCP, some Cloudflare Workers MCP gateways) interpret the
-	// FIRST listed type as the client's preference and return HTTP
-	// 406 / JSON-RPC -32600 ("Not Acceptable: Client must Accept
-	// text/event-stream") when SSE is not first. Putting SSE first
-	// is compatible with both naive first-match and spec-correct
-	// includes-match servers.
-	httpReq.Header.Set("Accept", "text/event-stream, application/json")
-	t.applyHeaders(httpReq)
-	t.attachSession(httpReq)
 
-	resp, err := t.httpClient.Do(httpReq)
+	var resp *http.Response
+	if t.tokenProvider != nil {
+		resp, err = auth.DoWithRefresh(reqCtx, t.tokenProvider, buildAndSend)
+	} else {
+		resp, err = buildAndSend("")
+	}
 	if err != nil {
 		// Distinguish context-driven cancellation from a real
 		// network error so the caller sees a localized timeout
@@ -233,6 +253,17 @@ func (t *httpTransport) Call(method string, params interface{}) (json.RawMessage
 		// 202 with no body — JSON-RPC notification path.
 		_, _ = io.Copy(io.Discard, resp.Body)
 		return nil, nil
+	}
+
+	if resp.StatusCode == http.StatusUnauthorized {
+		// The server demands OAuth authorization we don't have (or a token
+		// that even a refresh couldn't rescue — DoWithRefresh already retried
+		// once above when a provider was present). Surface an actionable
+		// typed error so the agent can trigger @mcp-login / the user can run
+		// /mcp login. Drain the body first so the connection can be reused.
+		ch := parseWWWAuthenticate(resp.Header.Get("WWW-Authenticate"))
+		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 512))
+		return nil, &OAuthRequiredError{Server: t.serverName, Endpoint: t.endpoint, Challenge: ch}
 	}
 
 	if resp.StatusCode >= 400 {
@@ -368,12 +399,30 @@ func (t *httpTransport) dispatchSSEEvent(eventType, data string, expectedID int6
 	return sseResult{}, false
 }
 
-// applyHeaders mirrors the SSE transport: custom headers first, then
-// auth. The order matches so a user who sets Authorization in
-// Headers (legacy) is still overridden by Auth (typed).
+// applyHeaders applies the custom headers plus static auth. Used by the push
+// GET and session DELETE paths, which fetch the OAuth token best-effort when a
+// provider is configured (they are not on the DoWithRefresh retry path).
 func (t *httpTransport) applyHeaders(req *http.Request) {
+	token := ""
+	if t.tokenProvider != nil {
+		if tok, err := t.tokenProvider.Token(req.Context()); err == nil {
+			token = tok
+		}
+	}
+	t.applyAuth(req, token)
+}
+
+// applyAuth sets custom headers first, then authorization. When token is
+// non-empty (OAuth provider path) it wins; otherwise the static AuthConfig is
+// applied. The order mirrors the SSE transport so a user who sets Authorization
+// in Headers (legacy) is still overridden by the typed credential.
+func (t *httpTransport) applyAuth(req *http.Request, token string) {
 	for k, v := range t.headers {
 		req.Header.Set(k, v)
+	}
+	if token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
+		return
 	}
 	t.auth.ApplyAuth(req)
 }
@@ -418,6 +467,9 @@ func (t *httpTransport) Close(ctx context.Context) error {
 		return nil
 	}
 	t.cancel()
+	if t.tokenProvider != nil {
+		t.tokenProvider.Close()
+	}
 
 	// Wait for the push listener to drain (if it was ever started).
 	// pushDone is nil when StartPushListener was never called —

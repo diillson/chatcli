@@ -25,6 +25,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/diillson/chatcli/auth"
 	"go.uber.org/zap"
 )
 
@@ -199,18 +200,101 @@ func TestHTTPTransport_202NotificationReturnsNilResult(t *testing.T) {
 
 func TestHTTPTransport_HTTPErrorStatusIsLocalized(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.WriteHeader(http.StatusUnauthorized)
-		_, _ = io.WriteString(w, `forbidden`)
+		w.WriteHeader(http.StatusInternalServerError)
+		_, _ = io.WriteString(w, `boom`)
 	}))
 	defer srv.Close()
 
 	tr := newTestTransport(t, srv, nil)
 	_, err := tr.Call("tools/list", nil)
 	if err == nil {
-		t.Fatalf("expected error on 401")
+		t.Fatalf("expected error on 500")
 	}
-	if !strings.Contains(err.Error(), "401") {
-		t.Errorf("error %q should mention status 401", err.Error())
+	if !strings.Contains(err.Error(), "500") {
+		t.Errorf("error %q should mention status 500", err.Error())
+	}
+}
+
+// A 401 is not a generic error: it must surface as an *OAuthRequiredError so
+// the agent can trigger authorization, carrying the parsed WWW-Authenticate
+// challenge for discovery.
+func TestHTTPTransport_UnauthorizedReturnsOAuthRequired(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("WWW-Authenticate", `Bearer resource_metadata="https://as.example.com/.well-known/oauth-protected-resource", scope="mcp"`)
+		w.WriteHeader(http.StatusUnauthorized)
+	}))
+	defer srv.Close()
+
+	tr := newTestTransport(t, srv, nil)
+	_, err := tr.Call("tools/list", nil)
+	oe, ok := IsOAuthRequired(err)
+	if !ok {
+		t.Fatalf("expected *OAuthRequiredError on 401, got %T: %v", err, err)
+	}
+	if oe.Challenge.ResourceMetadata != "https://as.example.com/.well-known/oauth-protected-resource" {
+		t.Errorf("resource_metadata = %q, want the advertised URL", oe.Challenge.ResourceMetadata)
+	}
+	if oe.Challenge.Scope != "mcp" {
+		t.Errorf("scope = %q, want mcp", oe.Challenge.Scope)
+	}
+}
+
+// TestHTTPTransport_RefreshesOn401AndRetries proves the full mid-session
+// recovery path: a stale token gets a 401, DoWithRefresh transparently
+// refreshes it against the discovered token endpoint, and the retried call
+// succeeds — all through the real transport with a real OAuth TokenProvider.
+func TestHTTPTransport_RefreshesOn401AndRetries(t *testing.T) {
+	// Token endpoint: hands out a fresh access token on refresh_token grant.
+	tokenSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = r.ParseForm()
+		if r.PostForm.Get("grant_type") != "refresh_token" {
+			t.Errorf("grant_type = %v", r.PostForm.Get("grant_type"))
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"access_token": "new-token", "refresh_token": "r2", "expires_in": 3600, "token_type": "Bearer",
+		})
+	}))
+	defer tokenSrv.Close()
+
+	// MCP server: 401 for the stale token, valid JSON-RPC for the fresh one.
+	mcpSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "Bearer new-token" {
+			w.Header().Set("WWW-Authenticate", `Bearer resource_metadata="https://as/x"`)
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		var req jsonRPCRequest
+		_ = json.NewDecoder(r.Body).Decode(&req)
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(jsonRPCResponse{JSONRPC: "2.0", ID: req.ID, Result: json.RawMessage(`{"ok":true}`)})
+	}))
+	defer mcpSrv.Close()
+
+	cred := &auth.AuthProfileCredential{
+		CredType: auth.CredentialOAuth,
+		Provider: auth.ProviderMCP,
+		Access:   "stale-token",
+		Refresh:  "r1",
+		// Future expiry so Token() serves the stale token first; the 401 then
+		// drives the invalidate+refresh cycle.
+		Expires: auth.TokenExpiryMilli(3600),
+	}
+	provider := auth.NewOAuthTokenProviderWithRefresh(
+		cred, "", "test",
+		newMCPRefreshFunc(tokenSrv.URL, "client-1", "https://srv/mcp", "mcp"),
+		zap.NewNop(),
+	)
+	defer provider.Close()
+
+	tr := newTestTransport(t, mcpSrv, nil)
+	tr.tokenProvider = provider
+
+	res, err := tr.Call("tools/list", nil)
+	if err != nil {
+		t.Fatalf("Call after refresh should succeed, got: %v", err)
+	}
+	if !strings.Contains(string(res), `"ok":true`) {
+		t.Fatalf("unexpected result: %s", string(res))
 	}
 }
 

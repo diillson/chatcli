@@ -65,7 +65,7 @@
 | **Semantic convergence** | char → Jaccard → embedding cosine cascade for Self-Refine, with LRU/TTL cache and quality regression detection. |
 | **Production-ready** | gRPC + TLS 1.3, JWT + RBAC, AES-256-GCM, rate limiting, audit logging, 50+ Prometheus metrics. |
 | **Kubernetes-native** | Operator with 17 CRDs and an autonomous AIOps pipeline (54+ remediation actions), SLO monitoring, post-mortems. |
-| **Extensible** | Plugins with Ed25519 signature verification, multi-registry skills (skills.sh, ClawHub, ChatCLI.dev), lifecycle hooks, MCP client (stdio + SSE). |
+| **Extensible** | Plugins with Ed25519 signature verification, multi-registry skills (skills.sh, ClawHub, ChatCLI.dev), lifecycle hooks, MCP client (stdio, SSE, HTTP + OAuth). |
 
 ---
 
@@ -528,7 +528,7 @@ Credentials are stored with **AES-256-GCM** at `~/.chatcli/auth-profiles.json`.
 | Feature | Description |
 |---|---|
 | **Native tool calling** | Native APIs from OpenAI, Anthropic, Bedrock, Google, ZAI, MiniMax, Moonshot, OpenRouter. `ephemeral` cache for Anthropic. Automatic XML fallback for providers without native support. |
-| **MCP (Model Context Protocol)** | Client via stdio and SSE for expanded context. Server (`chatcli mcp-server`) exposes the FULL surface: every built-in tool with read-only annotations, the agent/coder loops with per-call provider/model routing and quality-harness toggles, provider discovery, and all installed skills served as MCP prompts. Exposure policy via `CHATCLI_MCP_TOOLS` (all/safe/allowlist). ACP server (`chatcli acp`) with chat/agent/coder session modes, live streaming and cancellation, for editors (Zed) and agent-to-agent use. |
+| **MCP (Model Context Protocol)** | Client via stdio, SSE, and streamable HTTP for expanded context. Remote (HTTP/SSE) servers gated behind OAuth 2.1 are supported end-to-end: on a `401` the client discovers the authorization server (RFC 9728/8414), registers dynamically (RFC 7591), runs a PKCE browser flow, and refreshes tokens transparently (stored AES-256-GCM in the encrypted auth store). Authorize with `/mcp login <server>`, or let the agent call the `@mcp-login` tool when a call reports "authorization required". Server (`chatcli mcp-server`) exposes the FULL surface: every built-in tool with read-only annotations, the agent/coder loops with per-call provider/model routing and quality-harness toggles, provider discovery, and all installed skills served as MCP prompts. Exposure policy via `CHATCLI_MCP_TOOLS` (all/safe/allowlist). ACP server (`chatcli acp`) with chat/agent/coder session modes, live streaming and cancellation, for editors (Zed) and agent-to-agent use. |
 | **Chat Gateway** | Runs as a messaging daemon (Telegram, Slack, Discord, WhatsApp, webhook): each message runs through the agent loop and progress is streamed back to the chat. Voice messages are transcribed (local-first whisper) and answered in voice by default (`CHATCLI_GATEWAY_VOICE_REPLY=auto\|always\|never`); each conversation controls it by asking in natural language ("answer me in audio" / "stop sending audio") via the `@voice` tool, with the preference persisted. |
 | **Embedded voice (TTS)** | `CHATCLI_TTS_PROVIDER=embedded` — offline Kokoro neural voice, no API key and no cgo: downloads the sherpa-onnx engine + model once (~150MB) and works the same on Linux/macOS/Windows. Routes pt-BR/English by reply language (`CHATCLI_TTS_VOICE=bm_george`, `CHATCLI_TTS_VOICE_PT=pm_alex`); the other backends (say/espeak, self-hosted, OpenAI/Groq/Gemini) remain available. |
 | **Embedded transcription (STT)** | Offline multilingual Whisper via sherpa-onnx, no API key and no cgo — and the automatic fallback: with nothing configured, the gateway downloads the engine + an ONNX model once (~200MB for `base`; `CHATCLI_TRANSCRIPTION_MODEL=tiny\|base\|small\|…`) at startup and transcribes voice notes auto-detecting the spoken language. OGG/Opus voice notes (Telegram/WhatsApp) decode in pure Go — no ffmpeg needed; only residual formats (mp3/m4a) require ffmpeg, and the gateway preflight + `/gateway status` warn with your platform's install command. `CHATCLI_TRANSCRIPTION_PROVIDER=embedded` forces it over the other backends (local whisper CLI, self-hosted, Groq/OpenAI), which remain available. |
@@ -565,7 +565,7 @@ chatcli/
         lessonq/            Reflexion durable queue (WAL + worker pool + DLQ)
       workers/              14 agents + dispatcher + FileLockManager
     hooks/                  Lifecycle events (shell/webhook)
-    mcp/                    MCP client (stdio + SSE)
+    mcp/                    MCP client (stdio, SSE, HTTP + OAuth)
     plugins/                Plugin manager + signature verification
     scheduler/              Chronos — durable scheduler (WAL + cron + DAG + daemon)
       condition/            10 evaluators (shell, http, k8s, docker, tcp, llm, ...)

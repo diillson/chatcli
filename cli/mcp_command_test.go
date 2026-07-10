@@ -55,7 +55,7 @@ func withConfiguredServers(t *testing.T, names ...string) *ChatCLI {
 func TestMCPCompleterSubcommandSuggestionsAtRoot(t *testing.T) {
 	cli := withConfiguredServers(t)
 	got := suggestTexts(cli.getMCPSuggestions(docFor("/mcp ")))
-	want := []string{"status", "tools", "restart", "start", "stop", "reload", "logs"}
+	want := []string{"status", "tools", "restart", "start", "stop", "reload", "logs", "login", "logout"}
 	if len(got) != len(want) {
 		t.Fatalf("got %d suggestions, want %d (%v)", len(got), len(want), got)
 	}

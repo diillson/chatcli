@@ -181,4 +181,10 @@ type ServerStatus struct {
 	LastPing  time.Time
 	LastError error
 	StartedAt time.Time
+
+	// AuthRequired is set when the server rejected the connection with an
+	// OAuth challenge (HTTP 401) and no usable credential is available. It
+	// tells /mcp status and the agent prompt to surface a "run /mcp login" /
+	// "@mcp-login" hint instead of a generic connection error.
+	AuthRequired bool
 }

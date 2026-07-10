@@ -82,9 +82,48 @@ func (cli *ChatCLI) handleMCPCommand(ctx context.Context, userInput string) {
 		cli.mcpReload()
 	case "logs":
 		cli.mcpLogs(name)
+	case "login", "auth":
+		cli.mcpLogin(ctx, name)
+	case "logout":
+		cli.mcpLogout(ctx, name)
 	default:
 		fmt.Println(colorize("  "+i18n.T("mcp.cmd.usage"), ColorYellow))
 	}
+}
+
+// mcpLogin runs the interactive OAuth authorization flow for a remote MCP
+// server and reconnects it. Mirrors the @mcp-login agent tool for humans.
+func (cli *ChatCLI) mcpLogin(ctx context.Context, name string) {
+	if strings.TrimSpace(name) == "" {
+		fmt.Println(colorize("  "+i18n.T("mcp.cmd.login_usage"), ColorYellow))
+		return
+	}
+	fmt.Println(colorize("  "+i18n.T("mcp.cmd.login_starting", name), ColorCyan))
+	if err := cli.mcpManager.LoginOAuth(ctx, name); err != nil {
+		fmt.Println(colorize("  "+i18n.T("mcp.cmd.login_failed", err), ColorRed))
+		return
+	}
+	tools := 0
+	for _, s := range cli.mcpManager.GetServerStatus() {
+		if s.Name == name {
+			tools = s.ToolCount
+			break
+		}
+	}
+	fmt.Println(colorize("  "+i18n.T("mcp.cmd.login_ok", name, tools), ColorGreen))
+}
+
+// mcpLogout forgets a server's stored OAuth credential and stops the server.
+func (cli *ChatCLI) mcpLogout(ctx context.Context, name string) {
+	if strings.TrimSpace(name) == "" {
+		fmt.Println(colorize("  "+i18n.T("mcp.cmd.logout_usage"), ColorYellow))
+		return
+	}
+	if err := cli.mcpManager.LogoutOAuth(ctx, name); err != nil {
+		fmt.Println(colorize("  "+i18n.T("mcp.cmd.logout_failed", err), ColorRed))
+		return
+	}
+	fmt.Println(colorize("  "+i18n.T("mcp.cmd.logout_ok", name), ColorGreen))
 }
 
 func (cli *ChatCLI) mcpShowStatus(filter string) {
@@ -117,6 +156,10 @@ func (cli *ChatCLI) mcpShowStatus(filter string) {
 			icon = "◌"
 			statusColor = ColorYellow
 			statusText = i18n.T("mcp.cmd.status_starting")
+		case s.AuthRequired:
+			icon = "🔒"
+			statusColor = ColorYellow
+			statusText = i18n.T("mcp.cmd.status_auth_required")
 		default:
 			icon = "○"
 			statusColor = ColorRed
@@ -137,6 +180,9 @@ func (cli *ChatCLI) mcpShowStatus(filter string) {
 
 		if s.LastError != nil {
 			fmt.Println(p + colorize(fmt.Sprintf("    ↳ %v", s.LastError), ColorRed))
+		}
+		if s.AuthRequired {
+			fmt.Println(p + colorize("    ↳ "+i18n.T("mcp.cmd.auth_required_hint", s.Name), ColorYellow))
 		}
 
 		// Metadata block: description, category+tags, trust flag.
@@ -382,6 +428,8 @@ func (cli *ChatCLI) getMCPSuggestions(d prompt.Document) []prompt.Suggest {
 		{Text: "stop", Description: i18n.T("mcp.cmd.sug_stop")},
 		{Text: "reload", Description: i18n.T("mcp.cmd.sug_reload")},
 		{Text: "logs", Description: i18n.T("mcp.cmd.sug_logs")},
+		{Text: "login", Description: i18n.T("mcp.cmd.sug_login")},
+		{Text: "logout", Description: i18n.T("mcp.cmd.sug_logout")},
 	}
 
 	// Tokenize what the user has typed so far (excluding the leading
@@ -419,7 +467,7 @@ func (cli *ChatCLI) getMCPSuggestions(d prompt.Document) []prompt.Suggest {
 
 func mcpSubcommandTakesServerName(sub string) bool {
 	switch sub {
-	case "start", "stop", "restart", "logs", "status", "tools":
+	case "start", "stop", "restart", "logs", "status", "tools", "login", "logout", "auth":
 		return true
 	}
 	return false

@@ -65,7 +65,7 @@
 | **Convergência semântica** | Cascade char → Jaccard → embedding cosine para Self-Refine, com cache LRU/TTL e quality regression detection. |
 | **Production-ready** | gRPC + TLS 1.3, JWT + RBAC, AES-256-GCM, rate limiting, audit logging, 50+ métricas Prometheus. |
 | **Kubernetes-native** | Operador com 17 CRDs e pipeline AIOps autônomo (54+ ações de remediação), SLO monitoring, post-mortems. |
-| **Extensível** | Plugins com verificação Ed25519, skills multi-registry (skills.sh, ClawHub, ChatCLI.dev), hooks de lifecycle, MCP client (stdio + SSE). |
+| **Extensível** | Plugins com verificação Ed25519, skills multi-registry (skills.sh, ClawHub, ChatCLI.dev), hooks de lifecycle, MCP client (stdio, SSE, HTTP + OAuth). |
 
 ---
 
@@ -527,7 +527,7 @@ Credenciais armazenadas com **AES-256-GCM** em `~/.chatcli/auth-profiles.json`.
 | Feature | Descrição |
 |---|---|
 | **Tool calling nativo** | APIs nativas de OpenAI, Anthropic, Bedrock, Google, ZAI, MiniMax, Moonshot, OpenRouter. Cache `ephemeral` para Anthropic. XML fallback automático para providers sem suporte nativo. |
-| **MCP (Model Context Protocol)** | Client via stdio e SSE para contexto expandido. Server (`chatcli mcp-server`) expõe chat, agent, coder e built-in tools; modo ACP (`chatcli acp`) para editores. |
+| **MCP (Model Context Protocol)** | Client via stdio, SSE e streamable HTTP para contexto expandido. Servidores remotos (HTTP/SSE) protegidos por OAuth 2.1 têm suporte fim-a-fim: num `401` o client descobre o authorization server (RFC 9728/8414), registra-se dinamicamente (RFC 7591), roda o fluxo PKCE no navegador e renova tokens de forma transparente (guardados com AES-256-GCM no cofre de auth criptografado). Autorize com `/mcp login <servidor>`, ou deixe o agente chamar a tool `@mcp-login` quando uma chamada reportar "autorização necessária". Server (`chatcli mcp-server`) expõe chat, agent, coder e built-in tools; modo ACP (`chatcli acp`) para editores. |
 | **Chat Gateway** | Roda como daemon de mensageria (Telegram, Slack, Discord, WhatsApp, webhook): cada mensagem passa pelo agent loop e o progresso é transmitido de volta ao chat. Mensagens de voz são transcritas (whisper local-first) e respondidas em voz por padrão (`CHATCLI_GATEWAY_VOICE_REPLY=auto\|always\|never`); cada conversa controla isso pedindo em linguagem natural ("responde em áudio" / "para de mandar áudio") via tool `@voice`, com preferência persistida. |
 | **Voz embarcada (TTS)** | `CHATCLI_TTS_PROVIDER=embedded` — voz neural Kokoro offline, sem API key e sem cgo: baixa o engine sherpa-onnx + modelo uma única vez (~150MB) e funciona igual em Linux/macOS/Windows. Roteia pt-BR/inglês por idioma da resposta (`CHATCLI_TTS_VOICE=bm_george`, `CHATCLI_TTS_VOICE_PT=pm_alex`); demais backends (say/espeak, self-hosted, OpenAI/Groq/Gemini) seguem disponíveis. |
 | **Transcrição embarcada (STT)** | Whisper multilíngue offline via sherpa-onnx, sem API key e sem cgo — é o fallback automático: sem nada configurado, o gateway baixa o engine + modelo ONNX uma única vez (~200MB no `base`; `CHATCLI_TRANSCRIPTION_MODEL=tiny\|base\|small\|…`) já no startup e transcreve notas de voz detectando o idioma falado. Voice notes OGG/Opus (Telegram/WhatsApp) são decodificadas em puro Go — sem ffmpeg; só formatos residuais (mp3/m4a) pedem ffmpeg, e o preflight do gateway + `/gateway status` avisam com o comando de instalação da sua plataforma. `CHATCLI_TRANSCRIPTION_PROVIDER=embedded` força-o sobre outros backends (whisper CLI local, self-hosted, Groq/OpenAI), que seguem disponíveis. |
@@ -564,7 +564,7 @@ chatcli/
         lessonq/            Reflexion durable queue (WAL + worker pool + DLQ)
       workers/              14 agentes + dispatcher + FileLockManager
     hooks/                  Lifecycle events (shell/webhook)
-    mcp/                    MCP client (stdio + SSE)
+    mcp/                    MCP client (stdio, SSE, HTTP + OAuth)
     plugins/                Plugin manager + signature verification
     scheduler/              Chronos — scheduler durável (WAL + cron + DAG + daemon)
       condition/            10 evaluators (shell, http, k8s, docker, tcp, llm, ...)

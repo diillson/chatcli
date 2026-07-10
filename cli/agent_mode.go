@@ -1286,6 +1286,12 @@ func (a *AgentMode) getToolContextString() string {
 				toolDescriptions = append(toolDescriptions, note)
 			}
 		}
+		// Independently of tool availability, surface any server blocked on
+		// OAuth authorization so the model knows it can run @mcp-login to
+		// unlock it (its tools only appear after a successful login).
+		if note := buildMCPAuthNote(a.cli.mcpManager.GetServerStatus()); note != "" {
+			toolDescriptions = append(toolDescriptions, note)
+		}
 	}
 
 	indexSection := ""
@@ -3368,6 +3374,24 @@ func buildMCPEmptyNote(statuses []mcp.ServerStatus) string {
 		}
 	}
 	return i18n.T("agent.mcp.note_unavailable") + "\n"
+}
+
+// buildMCPAuthNote lists servers currently blocked on OAuth authorization and
+// instructs the model to run @mcp-login for them. It is appended to the tool
+// context in every mode (whether or not other MCP tools are already usable) so
+// a server whose tools never loaded — because it demands authorization — is
+// still discoverable and actionable to the agent.
+func buildMCPAuthNote(statuses []mcp.ServerStatus) string {
+	var pending []string
+	for _, s := range statuses {
+		if s.AuthRequired {
+			pending = append(pending, s.Name)
+		}
+	}
+	if len(pending) == 0 {
+		return ""
+	}
+	return "\n" + i18n.T("agent.mcp.note_auth_required", strings.Join(pending, ", ")) + "\n"
 }
 
 // mcpToolHasRequiredParams reports whether a JSON schema declares any

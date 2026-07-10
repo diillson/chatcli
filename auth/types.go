@@ -25,6 +25,12 @@ const (
 	ProviderOpenAICodex   ProviderID = "openai-codex"
 	ProviderGitHubCopilot ProviderID = "github-copilot"
 	ProviderGitHubModels  ProviderID = "github-models"
+	// ProviderMCP is the base provider id for OAuth credentials minted for
+	// remote MCP servers. Per-server profiles use the id "mcp:<server>" so
+	// each server keeps an independent credential; the token/authorization
+	// endpoints and client_id are discovered at runtime and kept alongside
+	// the credential rather than hard-coded here (see cli/mcp/oauth.go).
+	ProviderMCP ProviderID = "mcp"
 )
 
 // AuthMode indica como a autenticação foi resolvida.
