@@ -125,6 +125,11 @@ func textArg(desc string) map[string]interface{} {
 }
 
 func objSchema(props map[string]interface{}, required ...string) map[string]interface{} {
+	// A nil variadic slice marshals as JSON null, and MCP clients (Claude)
+	// validate required as an array — always emit [] when empty.
+	if required == nil {
+		required = []string{}
+	}
 	return map[string]interface{}{"type": "object", "properties": props, "required": required}
 }
 

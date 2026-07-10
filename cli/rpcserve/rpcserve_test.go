@@ -236,6 +236,11 @@ func TestMCP_ToolsListFullSurface(t *testing.T) {
 	if !strings.Contains(string(body), "Usage:") || !strings.Contains(string(body), "u003cpath") {
 		t.Errorf("plugin usage must be embedded in the description: %s", body)
 	}
+	// Strict MCP clients (Claude) validate inputSchema.required as an
+	// array; a nil Go slice marshaling to null breaks the connection.
+	if strings.Contains(string(body), `"required":null`) {
+		t.Errorf("inputSchema.required must never be null: %s", body)
+	}
 }
 
 func TestMCP_RoutingOptionsPropagate(t *testing.T) {
