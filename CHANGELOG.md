@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.156.0](https://github.com/diillson/chatcli/compare/v1.155.0...v1.156.0) (2026-07-10)
+
+
+### Features
+
+* **mcp:** dynamic tool discovery on tools/list_changed notifications ([#1153](https://github.com/diillson/chatcli/issues/1153)) ([dade143](https://github.com/diillson/chatcli/commit/dade14300d88c4fc1e2a772513236f02922c14d2))
+
 ## [1.155.0](https://github.com/diillson/chatcli/compare/v1.154.0...v1.155.0) (2026-07-09)
 
 
