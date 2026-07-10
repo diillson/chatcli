@@ -256,7 +256,7 @@ helm install chatcli oci://ghcr.io/diillson/charts/chatcli \
 
 ## Supported Providers
 
-> 14 providers with a unified interface. Automatic failover with intelligent error classification, cross-provider extended thinking, and prompt caching where available.
+> 15 providers with a unified interface. Automatic failover with intelligent error classification, cross-provider extended thinking, and prompt caching where available.
 
 | Provider | Default Model | Tool Calling | Vision | Reasoning / Thinking |
 |---|---|---|---|---|
@@ -273,6 +273,7 @@ helm install chatcli oci://ghcr.io/diillson/charts/chatcli \
 | **StackSpot AI** | StackSpotAI | — | — | — |
 | **OpenRouter** | openai/gpt-5.2 | Native | Yes | Passthrough |
 | **Ollama** | (local) | XML fallback | — | `<thinking>` tag normalization |
+| **Devin CLI (Cognition)** | claude-sonnet-4.6 | XML fallback | — | Model-dependent (server-side) |
 | **OpenAI (Responses API)** | gpt-5.4 | Native | Yes | `reasoning_effort` |
 
 ```bash

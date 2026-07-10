@@ -28,6 +28,7 @@ const (
 	ProviderGitHubModels    = "GITHUB_MODELS"
 	ProviderOpenRouter      = "OPENROUTER"
 	ProviderBedrock         = "BEDROCK"
+	ProviderDevin           = "DEVIN"
 )
 
 // PreferredAPI define qual API é preferida para o modelo
@@ -1655,6 +1656,10 @@ func GetMaxTokens(provider, model string, override int) int {
 		return 4096
 	case ProviderOpenRouter:
 		return 16384
+	case ProviderDevin:
+		// Modelos fora do catálogo servidos pelo Devin CLI: teto do lado
+		// do cliente é só bookkeeping (o backend impõe o real).
+		return 32000
 	default:
 		return 50000
 	}
@@ -1703,6 +1708,10 @@ func GetContextWindow(provider, model string) int {
 		return 128000
 	case ProviderOpenRouter:
 		return 128000
+	case ProviderDevin:
+		// Modelo desconhecido servido pelo Devin CLI: janela conservadora;
+		// CHATCLI_CONTEXT_WINDOW é o escape para deployments que diferem.
+		return 200000
 	default:
 		return 50000
 	}

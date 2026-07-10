@@ -15,7 +15,7 @@ type InstanceSpec struct {
 	// +optional
 	Replicas *int32 `json:"replicas,omitempty"`
 
-	// Provider is the LLM provider (OPENAI, OPENAI_ASSISTANT, CLAUDEAI, BEDROCK, GOOGLEAI, XAI, ZAI, MINIMAX, MOONSHOT, STACKSPOT, OLLAMA, COPILOT, GITHUB_MODELS, OPENROUTER).
+	// Provider is the LLM provider (OPENAI, OPENAI_ASSISTANT, CLAUDEAI, BEDROCK, GOOGLEAI, XAI, ZAI, MINIMAX, MOONSHOT, STACKSPOT, OLLAMA, COPILOT, GITHUB_MODELS, OPENROUTER, DEVIN).
 	// BEDROCK uses the AWS credentials chain (IAM role via IRSA, static keys in the Secret, or instance profile).
 	Provider string `json:"provider"`
 
@@ -404,8 +404,8 @@ type FallbackSpec struct {
 
 // FallbackProviderEntry defines a single provider in the fallback chain.
 type FallbackProviderEntry struct {
-	// Name is the provider name (OPENAI, OPENAI_ASSISTANT, CLAUDEAI, BEDROCK, GOOGLEAI, XAI, ZAI, MINIMAX, MOONSHOT, STACKSPOT, OLLAMA, COPILOT, GITHUB_MODELS, OPENROUTER).
-	// +kubebuilder:validation:Enum=OPENAI;OPENAI_ASSISTANT;CLAUDEAI;BEDROCK;GOOGLEAI;XAI;ZAI;MINIMAX;MOONSHOT;STACKSPOT;OLLAMA;COPILOT;GITHUB_MODELS;OPENROUTER
+	// Name is the provider name (OPENAI, OPENAI_ASSISTANT, CLAUDEAI, BEDROCK, GOOGLEAI, XAI, ZAI, MINIMAX, MOONSHOT, STACKSPOT, OLLAMA, COPILOT, GITHUB_MODELS, OPENROUTER, DEVIN).
+	// +kubebuilder:validation:Enum=OPENAI;OPENAI_ASSISTANT;CLAUDEAI;BEDROCK;GOOGLEAI;XAI;ZAI;MINIMAX;MOONSHOT;STACKSPOT;OLLAMA;COPILOT;GITHUB_MODELS;OPENROUTER;DEVIN
 	Name string `json:"name"`
 
 	// Model is the LLM model to use for this provider.

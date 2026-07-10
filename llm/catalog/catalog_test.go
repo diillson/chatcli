@@ -399,3 +399,38 @@ func TestGPT56FamilyEntries(t *testing.T) {
 	assert.True(t, ok)
 	assert.Equal(t, "gpt-5.6-sol", meta.ID)
 }
+
+// DEVIN provider (Devin CLI wrapper): the catalog mirrors the models served
+// by the enterprise CLI. Pins the two things that matter: exact IDs resolve
+// to their own entries (Devin slugs use dots, so "claude-sonnet-4" is a
+// prefix of "claude-sonnet-4.5" — tier-1 exact match must win), and the
+// provider filter keeps DEVIN entries from shadowing other providers.
+func TestDevinCatalogEntries(t *testing.T) {
+	for id, wantCtx := range map[string]int{
+		"claude-sonnet-5":   1000000,
+		"claude-sonnet-4.6": 1000000,
+		"claude-sonnet-4.5": 200000,
+		"claude-sonnet-4":   200000,
+		"gpt-5.6-luna":      1050000,
+		"swe-1.7-lightning": 200000,
+		"kimi-k2.7":         262144,
+		"deepseek-v4-pro":   1000000,
+	} {
+		meta, ok := Resolve(ProviderDevin, id)
+		assert.True(t, ok, "expected %s to resolve for DEVIN", id)
+		assert.Equal(t, id, meta.ID, "%s must resolve to its own entry", id)
+		assert.Equal(t, ProviderDevin, meta.Provider, "%s provider", id)
+		assert.Equal(t, wantCtx, meta.ContextWindow, "%s context window", id)
+	}
+
+	// Cross-provider isolation: the dotted Devin slug must NOT leak into
+	// CLAUDEAI lookups, and the CLAUDEAI dashed ID must not hit DEVIN.
+	meta, ok := Resolve(ProviderClaudeAI, "claude-sonnet-4-6")
+	assert.True(t, ok)
+	assert.Equal(t, ProviderClaudeAI, meta.Provider)
+
+	// Unknown model under DEVIN falls back to the conservative provider
+	// defaults instead of the generic 50K that causes compaction storms.
+	assert.Equal(t, 200000, GetContextWindow(ProviderDevin, "some-future-model"))
+	assert.Equal(t, 32000, GetMaxTokens(ProviderDevin, "some-future-model", 0))
+}
