@@ -21,10 +21,8 @@ package cli
 import (
 	"bufio"
 	"context"
-	"fmt"
 	"os"
 	"regexp"
-	"sort"
 	"strings"
 	"sync"
 
@@ -155,60 +153,6 @@ func (cli *ChatCLI) RunCoderCaptured(ctx context.Context, task string) (string, 
 		out = "(coder produced no textual output)"
 	}
 	return out, nil
-}
-
-// BuiltinTool describes a built-in tool exposed over MCP.
-type BuiltinTool struct {
-	Name        string
-	Description string
-}
-
-// rpcExposedTools is the curated set of built-in tools surfaced over MCP.
-// These are read-only/safe and return their result as a string.
-var rpcExposedTools = []string{"@read", "@search", "@tree", "@websearch", "@webfetch"}
-
-// ListBuiltinTools returns the curated built-in tools available over MCP.
-func (cli *ChatCLI) ListBuiltinTools() []BuiltinTool {
-	if cli.pluginManager == nil {
-		return nil
-	}
-	var out []BuiltinTool
-	for _, name := range rpcExposedTools {
-		if p, ok := cli.pluginManager.GetPlugin(name); ok {
-			out = append(out, BuiltinTool{Name: strings.TrimPrefix(name, "@"), Description: p.Description()})
-		}
-	}
-	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
-	return out
-}
-
-// RunBuiltinTool invokes a curated built-in tool by name (without the '@')
-// with a raw argument string, returning its output. Only tools in
-// rpcExposedTools are allowed.
-func (cli *ChatCLI) RunBuiltinTool(ctx context.Context, name, args string) (string, error) {
-	if cli.pluginManager == nil {
-		return "", fmt.Errorf("plugins not available")
-	}
-	full := "@" + strings.TrimPrefix(name, "@")
-	allowed := false
-	for _, t := range rpcExposedTools {
-		if t == full {
-			allowed = true
-			break
-		}
-	}
-	if !allowed {
-		return "", fmt.Errorf("tool %q is not exposed over MCP", name)
-	}
-	p, ok := cli.pluginManager.GetPlugin(full)
-	if !ok {
-		return "", fmt.Errorf("tool %q not found", name)
-	}
-	var argv []string
-	if strings.TrimSpace(args) != "" {
-		argv = []string{args}
-	}
-	return execBuiltin(ctx, p, argv)
 }
 
 // execBuiltin runs a plugin, capturing any streamed output into the result.

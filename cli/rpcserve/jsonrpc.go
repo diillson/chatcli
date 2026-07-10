@@ -79,6 +79,7 @@ type Server struct {
 	out     io.Writer
 	handler handlerFunc
 	writeMu sync.Mutex
+	wg      sync.WaitGroup
 }
 
 // NewServer builds a server reading requests from in and writing to out.
@@ -99,8 +100,21 @@ func (s *Server) Serve(ctx context.Context) error {
 		if len(line) == 0 {
 			continue
 		}
-		s.dispatch(ctx, line)
+		// Dispatch concurrently: a long-running call (agent_task, a slow
+		// tool) must not block the read loop, or cancellation
+		// notifications could never arrive while a turn is in flight.
+		// scanner.Bytes() reuses its buffer across Scan calls, so the
+		// line is copied before it escapes to the goroutine. Response
+		// writes are serialized by writeMu; heavyweight runs serialize
+		// on their own backend lock.
+		owned := append([]byte(nil), line...)
+		s.wg.Add(1)
+		go func() {
+			defer s.wg.Done()
+			s.dispatch(ctx, owned)
+		}()
 	}
+	s.wg.Wait()
 	return scanner.Err()
 }
 

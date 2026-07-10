@@ -4,6 +4,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/diillson/chatcli/cli/rpcserve"
 	"github.com/diillson/chatcli/llm/client"
 	"github.com/diillson/chatcli/llm/manager"
 	"github.com/diillson/chatcli/models"
@@ -41,17 +42,52 @@ func TestFirstNonEmpty(t *testing.T) {
 
 func TestRPCBackend_NoCLI(t *testing.T) {
 	b := &rpcBackend{mgr: &fakeManager{client: &fakeClient{}}, sessions: map[string][]models.Message{}} // cli is nil
-	if _, err := b.Agent(context.Background(), "s", "t"); err == nil {
+	if _, err := b.Agent(context.Background(), "s", "t", rpcserve.RunOpts{}); err == nil {
 		t.Error("Agent should error when ChatCLI is unavailable")
 	}
-	if _, err := b.Coder(context.Background(), "s", "t"); err == nil {
+	if _, err := b.Coder(context.Background(), "s", "t", rpcserve.RunOpts{}); err == nil {
 		t.Error("Coder should error when ChatCLI is unavailable")
 	}
-	if _, err := b.CallBuiltin(context.Background(), "read", "x"); err == nil {
-		t.Error("CallBuiltin should error when ChatCLI is unavailable")
+	if _, err := b.AgentStream(context.Background(), "s", "t", rpcserve.RunOpts{}); err == nil {
+		t.Error("AgentStream should error when ChatCLI is unavailable")
 	}
-	if b.BuiltinTools() != nil {
-		t.Error("BuiltinTools should be nil when ChatCLI is unavailable")
+	if _, err := b.CallTool(context.Background(), "read", "x"); err == nil {
+		t.Error("CallTool should error when ChatCLI is unavailable")
+	}
+	if b.Tools() != nil {
+		t.Error("Tools should be nil when ChatCLI is unavailable")
+	}
+	if b.Skills() != nil {
+		t.Error("Skills should be nil when ChatCLI is unavailable")
+	}
+	if _, err := b.SkillContent("x"); err == nil {
+		t.Error("SkillContent should error when ChatCLI is unavailable")
+	}
+	if _, err := b.ProvidersJSON(); err == nil {
+		t.Error("ProvidersJSON should error when ChatCLI is unavailable")
+	}
+}
+
+// TestRPCBackend_PromptWithRouting pins the per-call provider/model routing
+// on the chat path: options select a distinct client via the manager while
+// the shared session history is preserved.
+func TestRPCBackend_PromptWithRouting(t *testing.T) {
+	fc := &fakeClient{reply: "routed"}
+	b := &rpcBackend{
+		mgr:      &fakeManager{client: fc},
+		provider: "OPENAI",
+		sessions: map[string][]models.Message{},
+	}
+	out, err := b.PromptWith(context.Background(), "s1", "q", rpcserve.RunOpts{Provider: "DEVIN", Model: "gpt-5.6-sol"})
+	if err != nil || out != "routed" {
+		t.Fatalf("PromptWith: %q %v", out, err)
+	}
+	if len(b.sessions["s1"]) == 0 {
+		t.Error("routed chat must still persist session history")
+	}
+	// No routing options: falls back to the plain Prompt path.
+	if out, err := b.PromptWith(context.Background(), "s1", "q2", rpcserve.RunOpts{}); err != nil || out != "routed" {
+		t.Fatalf("PromptWith default: %q %v", out, err)
 	}
 }
 

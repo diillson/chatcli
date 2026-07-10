@@ -954,6 +954,7 @@ func (cli *ChatCLI) showConfigIntegrations(ctx context.Context) {
 	kv(p, "CHATCLI_MCP_ENABLED", envBool("CHATCLI_MCP_ENABLED"))
 	kv(p, "CHATCLI_MCP_CONFIG", envOr("CHATCLI_MCP_CONFIG"))
 	kv(p, "CHATCLI_MCP_DYNAMIC_TOOLS", envBool("CHATCLI_MCP_DYNAMIC_TOOLS"))
+	kv(p, "CHATCLI_MCP_TOOLS", envOr("CHATCLI_MCP_TOOLS"))
 	if cli.mcpManager != nil {
 		statuses := cli.mcpManager.GetServerStatus()
 		kv(p, i18n.T("cfg.kv.servers"), fmt.Sprintf("%d", len(statuses)))

@@ -138,41 +138,130 @@ func (b *rpcBackend) Prompt(ctx context.Context, session, text string) (string, 
 	return reply, nil
 }
 
-// Agent runs the full agent loop and returns its transcript.
-func (b *rpcBackend) Agent(ctx context.Context, _, task string) (string, error) {
+// PromptWith is chat with optional per-call provider/model routing.
+func (b *rpcBackend) PromptWith(ctx context.Context, session, text string, opts rpcserve.RunOpts) (string, error) {
+	if opts.Provider == "" && opts.Model == "" {
+		return b.Prompt(ctx, session, text)
+	}
+	provider := opts.Provider
+	if provider == "" {
+		provider = b.provider
+	}
+	client, err := b.mgr.GetClient(provider, opts.Model)
+	if err != nil {
+		return "", err
+	}
+
+	b.mu.Lock()
+	hist := append([]models.Message(nil), b.sessions[session]...)
+	b.mu.Unlock()
+
+	hist = append(hist, models.Message{Role: "user", Content: text})
+	reply, err := client.SendPrompt(ctx, text, hist, 0)
+	if err != nil {
+		return "", err
+	}
+	hist = append(hist, models.Message{Role: "assistant", Content: reply})
+
+	b.mu.Lock()
+	if len(hist) > rpcMaxHistory {
+		hist = hist[len(hist)-rpcMaxHistory:]
+	}
+	b.sessions[session] = hist
+	b.mu.Unlock()
+	return reply, nil
+}
+
+// Agent runs the full agent loop with per-call options.
+func (b *rpcBackend) Agent(ctx context.Context, _, task string, opts rpcserve.RunOpts) (string, error) {
 	if b.cli == nil {
 		return "", errCLIUnavailable
 	}
-	return b.cli.RunAgentCaptured(ctx, task)
+	return b.cli.RunAgentRPC(ctx, task, toRunOpts(opts))
 }
 
-// Coder runs the coder loop and returns its transcript.
-func (b *rpcBackend) Coder(ctx context.Context, _, task string) (string, error) {
+// Coder runs the coder loop with per-call options.
+func (b *rpcBackend) Coder(ctx context.Context, _, task string, opts rpcserve.RunOpts) (string, error) {
 	if b.cli == nil {
 		return "", errCLIUnavailable
 	}
-	return b.cli.RunCoderCaptured(ctx, task)
+	return b.cli.RunCoderRPC(ctx, task, toRunOpts(opts))
 }
 
-// BuiltinTools lists the curated built-in tools exposed over MCP.
-func (b *rpcBackend) BuiltinTools() []rpcserve.ToolInfo {
+// AgentStream / CoderStream are the ACP streaming variants.
+func (b *rpcBackend) AgentStream(ctx context.Context, _, task string, opts rpcserve.RunOpts) (string, error) {
+	if b.cli == nil {
+		return "", errCLIUnavailable
+	}
+	return b.cli.RunAgentRPC(ctx, task, toRunOpts(opts))
+}
+
+func (b *rpcBackend) CoderStream(ctx context.Context, _, task string, opts rpcserve.RunOpts) (string, error) {
+	if b.cli == nil {
+		return "", errCLIUnavailable
+	}
+	return b.cli.RunCoderRPC(ctx, task, toRunOpts(opts))
+}
+
+// Tools lists every plugin tool the exposure policy admits.
+func (b *rpcBackend) Tools() []rpcserve.ToolInfo {
 	if b.cli == nil {
 		return nil
 	}
-	tools := b.cli.ListBuiltinTools()
+	tools := b.cli.ListAllRPCTools()
 	out := make([]rpcserve.ToolInfo, 0, len(tools))
 	for _, t := range tools {
-		out = append(out, rpcserve.ToolInfo{Name: t.Name, Description: t.Description})
+		out = append(out, rpcserve.ToolInfo{
+			Name:        t.Name,
+			Description: t.Description,
+			Usage:       t.Usage,
+			Schema:      t.Schema,
+			ReadOnly:    t.ReadOnly,
+		})
 	}
 	return out
 }
 
-// CallBuiltin invokes a curated built-in tool by name.
-func (b *rpcBackend) CallBuiltin(ctx context.Context, name, args string) (string, error) {
+// CallTool invokes any policy-admitted plugin tool by name.
+func (b *rpcBackend) CallTool(ctx context.Context, name, args string) (string, error) {
 	if b.cli == nil {
 		return "", errCLIUnavailable
 	}
-	return b.cli.RunBuiltinTool(ctx, name, args)
+	return b.cli.RunAnyRPCTool(ctx, name, args)
+}
+
+// Skills serves the installed skill catalog (MCP prompts).
+func (b *rpcBackend) Skills() []rpcserve.SkillInfo {
+	if b.cli == nil {
+		return nil
+	}
+	skills := b.cli.ListSkillsRPC()
+	out := make([]rpcserve.SkillInfo, 0, len(skills))
+	for _, s := range skills {
+		out = append(out, rpcserve.SkillInfo{Name: s.Name, Description: s.Description})
+	}
+	return out
+}
+
+// SkillContent returns a skill's body for prompts/get.
+func (b *rpcBackend) SkillContent(name string) (string, error) {
+	if b.cli == nil {
+		return "", errCLIUnavailable
+	}
+	return b.cli.SkillContentRPC(name)
+}
+
+// ProvidersJSON describes providers/models for per-call routing.
+func (b *rpcBackend) ProvidersJSON() (string, error) {
+	if b.cli == nil {
+		return "", errCLIUnavailable
+	}
+	return b.cli.ProvidersRPC()
+}
+
+// toRunOpts converts the wire options into the CLI run options.
+func toRunOpts(o rpcserve.RunOpts) cli.RPCRunOpts {
+	return cli.RPCRunOpts{Provider: o.Provider, Model: o.Model, Quality: o.Quality, Emit: o.Emit}
 }
 
 type errCLI string
