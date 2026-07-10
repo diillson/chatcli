@@ -31,6 +31,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -429,6 +430,22 @@ func (cli *ChatCLI) channelTriggerAck() (int, int) {
 		unread = cli.mcpManager.Channels().Ack()
 	}
 	return notifyCleared, unread
+}
+
+// channelPendingConfirmIDs returns the IDs of confirm actions still
+// awaiting a decision, sorted ascending, for /channel confirm completion.
+func (cli *ChatCLI) channelPendingConfirmIDs() []uint64 {
+	if cli.channelTriggers == nil {
+		return nil
+	}
+	cli.channelTriggers.mu.Lock()
+	ids := make([]uint64, 0, len(cli.channelTriggers.pendingConfirm))
+	for id := range cli.channelTriggers.pendingConfirm {
+		ids = append(ids, id)
+	}
+	cli.channelTriggers.mu.Unlock()
+	sort.Slice(ids, func(i, j int) bool { return ids[i] < ids[j] })
+	return ids
 }
 
 // channelTriggerPause / channelTriggerResume toggle the engine.

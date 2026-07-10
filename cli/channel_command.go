@@ -310,7 +310,7 @@ func defaultIfEmpty(s, fallback string) string {
 }
 
 func (cli *ChatCLI) getChannelSuggestions(d prompt.Document) []prompt.Suggest {
-	suggestions := []prompt.Suggest{
+	subcommands := []prompt.Suggest{
 		{Text: "list", Description: i18n.T("chan.cmd.suggest_list")},
 		{Text: "inject", Description: i18n.T("chan.cmd.suggest_inject")},
 		{Text: "ack", Description: i18n.T("chan.cmd.suggest_ack")},
@@ -321,5 +321,64 @@ func (cli *ChatCLI) getChannelSuggestions(d prompt.Document) []prompt.Suggest {
 		{Text: "confirm", Description: i18n.T("chan.cmd.suggest_confirm")},
 		{Text: "run", Description: i18n.T("chan.cmd.suggest_run")},
 	}
-	return prompt.FilterHasPrefix(suggestions, d.GetWordBeforeCursor(), true)
+
+	// Tokenize past the leading "/channel" so positions line up with
+	// subcommand/argument slots regardless of trailing space.
+	text := d.TextBeforeCursor()
+	fields := strings.Fields(text)
+	if len(fields) > 0 && fields[0] == "/channel" {
+		fields = fields[1:]
+	}
+	endsWithSpace := strings.HasSuffix(text, " ")
+	word := d.GetWordBeforeCursor()
+
+	// Subcommand slot (position 0).
+	if len(fields) == 0 || (len(fields) == 1 && !endsWithSpace) {
+		return prompt.FilterHasPrefix(subcommands, word, true)
+	}
+
+	// Argument slot (position 1+): branch on the subcommand.
+	switch strings.ToLower(fields[0]) {
+	case "clear":
+		return prompt.FilterHasPrefix([]prompt.Suggest{
+			{Text: "--all", Description: i18n.T("chan.cmd.suggest_clear_all")},
+		}, word, true)
+	case "rules":
+		return prompt.FilterHasPrefix([]prompt.Suggest{
+			{Text: "reload", Description: i18n.T("chan.cmd.suggest_rules_reload")},
+		}, word, true)
+	case "confirm":
+		// Position 1: live pending IDs. Position 2: yes/no decision.
+		if (len(fields) == 1 && endsWithSpace) || (len(fields) == 2 && !endsWithSpace) {
+			ids := cli.channelPendingConfirmIDs()
+			out := make([]prompt.Suggest, 0, len(ids))
+			for _, id := range ids {
+				out = append(out, prompt.Suggest{
+					Text:        strconv.FormatUint(id, 10),
+					Description: i18n.T("chan.cmd.suggest_confirm_id"),
+				})
+			}
+			return prompt.FilterHasPrefix(out, word, true)
+		}
+		return prompt.FilterHasPrefix([]prompt.Suggest{
+			{Text: "no", Description: i18n.T("chan.cmd.suggest_confirm_no")},
+		}, word, true)
+	case "run":
+		// Position 1: recent message seqs from the ring.
+		if (len(fields) == 1 && endsWithSpace) || (len(fields) == 2 && !endsWithSpace) {
+			if cli.mcpManager == nil {
+				return nil
+			}
+			msgs := cli.mcpManager.Channels().GetRecent(20)
+			out := make([]prompt.Suggest, 0, len(msgs))
+			for _, m := range msgs {
+				out = append(out, prompt.Suggest{
+					Text:        strconv.FormatUint(m.Seq, 10),
+					Description: fmt.Sprintf("%s/%s %s", m.ServerName, m.Channel, truncateStr(m.Content, 40)),
+				})
+			}
+			return prompt.FilterHasPrefix(out, word, true)
+		}
+	}
+	return nil
 }
