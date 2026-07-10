@@ -110,8 +110,23 @@ type rpcBackend struct {
 
 const rpcMaxHistory = 30
 
+// HasLLM reports whether any LLM provider is configured. The MCP server
+// hides the LLM-backed harness tools when this is false.
+func (b *rpcBackend) HasLLM() bool {
+	return len(b.mgr.GetAvailableProviders()) > 0
+}
+
+// errNoLLM is the actionable no-provider error, sent in-band to the caller
+// (a model): it explains what still works and how to enable the rest.
+var errNoLLM = errCLI("no LLM provider is configured in this ChatCLI instance, so chat/agent/coder tools are unavailable. " +
+	"Every direct tool (read, search, web, memory, knowledge, …) keeps working with your own model. " +
+	"To enable the harness tools, configure a provider in ChatCLI (an API key env var or 'chatcli' + '/auth login <provider>') and restart the server.")
+
 // Prompt implements the chat capability with per-session history.
 func (b *rpcBackend) Prompt(ctx context.Context, session, text string) (string, error) {
+	if !b.HasLLM() {
+		return "", errNoLLM
+	}
 	client, err := b.mgr.GetClient(b.provider, b.model)
 	if err != nil {
 		return "", err
@@ -174,6 +189,9 @@ func (b *rpcBackend) PromptWith(ctx context.Context, session, text string, opts 
 
 // Agent runs the full agent loop with per-call options.
 func (b *rpcBackend) Agent(ctx context.Context, _, task string, opts rpcserve.RunOpts) (string, error) {
+	if !b.HasLLM() {
+		return "", errNoLLM
+	}
 	if b.cli == nil {
 		return "", errCLIUnavailable
 	}
@@ -182,6 +200,9 @@ func (b *rpcBackend) Agent(ctx context.Context, _, task string, opts rpcserve.Ru
 
 // Coder runs the coder loop with per-call options.
 func (b *rpcBackend) Coder(ctx context.Context, _, task string, opts rpcserve.RunOpts) (string, error) {
+	if !b.HasLLM() {
+		return "", errNoLLM
+	}
 	if b.cli == nil {
 		return "", errCLIUnavailable
 	}
@@ -190,6 +211,9 @@ func (b *rpcBackend) Coder(ctx context.Context, _, task string, opts rpcserve.Ru
 
 // AgentStream / CoderStream are the ACP streaming variants.
 func (b *rpcBackend) AgentStream(ctx context.Context, _, task string, opts rpcserve.RunOpts) (string, error) {
+	if !b.HasLLM() {
+		return "", errNoLLM
+	}
 	if b.cli == nil {
 		return "", errCLIUnavailable
 	}
@@ -197,6 +221,9 @@ func (b *rpcBackend) AgentStream(ctx context.Context, _, task string, opts rpcse
 }
 
 func (b *rpcBackend) CoderStream(ctx context.Context, _, task string, opts rpcserve.RunOpts) (string, error) {
+	if !b.HasLLM() {
+		return "", errNoLLM
+	}
 	if b.cli == nil {
 		return "", errCLIUnavailable
 	}

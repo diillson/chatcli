@@ -12,6 +12,7 @@ import (
 
 // fakeBackend echoes prompts and records the last call details.
 type fakeBackend struct {
+	noLLM       bool
 	mu          sync.Mutex
 	lastSession string
 	reply       string
@@ -22,6 +23,8 @@ type fakeBackend struct {
 	lastOpts    RunOpts
 	blockAgent  chan struct{} // when non-nil, AgentStream blocks until ctx cancel or close
 }
+
+func (f *fakeBackend) HasLLM() bool { return !f.noLLM }
 
 func (f *fakeBackend) Prompt(_ context.Context, session, text string) (string, error) {
 	f.mu.Lock()
@@ -283,6 +286,26 @@ func TestMCP_SkillsAsPrompts(t *testing.T) {
 	r = runLines(t, m.Handle, `{"jsonrpc":"2.0","id":3,"method":"prompts/get","params":{"name":"nope"}}`)
 	if r[0].Error == nil {
 		t.Error("unknown prompt must error")
+	}
+}
+
+// TestMCP_NoProviderHidesLLMTools pins the no-credentials surface: without
+// an LLM provider the harness tools disappear from tools/list (the caller's
+// model drives the direct tools itself), while every plugin tool and
+// list_providers remain advertised.
+func TestMCP_NoProviderHidesLLMTools(t *testing.T) {
+	m := NewMCP(&fakeBackend{noLLM: true}, "chatcli", "1.0.0")
+	resps := runLines(t, m.Handle, `{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}`)
+	body, _ := json.Marshal(resps[0].Result)
+	for _, gone := range []string{"ask_chatcli", "agent_task", "coder_task"} {
+		if strings.Contains(string(body), `"`+gone+`"`) {
+			t.Errorf("LLM-backed tool %q must be hidden without a provider: %s", gone, body)
+		}
+	}
+	for _, keep := range []string{"list_providers", `"read"`, `"coder"`} {
+		if !strings.Contains(string(body), keep) {
+			t.Errorf("direct tool %q must remain without a provider: %s", keep, body)
+		}
 	}
 }
 

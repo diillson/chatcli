@@ -53,6 +53,11 @@ type SkillInfo struct {
 // discovery.
 type MCPBackend interface {
 	Backend
+	// HasLLM reports whether at least one LLM provider is configured in
+	// this ChatCLI instance. Without one, the LLM-backed harness tools
+	// (ask_chatcli / agent_task / coder_task) are hidden from tools/list —
+	// every direct tool keeps working with the caller's own model.
+	HasLLM() bool
 	PromptWith(ctx context.Context, session, text string, opts RunOpts) (string, error)
 	Agent(ctx context.Context, session, task string, opts RunOpts) (string, error)
 	Coder(ctx context.Context, session, task string, opts RunOpts) (string, error)
@@ -178,9 +183,11 @@ func (m *MCP) toolDefinitions() []map[string]interface{} {
 		coderProps[k] = v
 	}
 
-	tools := []map[string]interface{}{
-		{
-			"name":        "ask_chatcli",
+	tools := make([]map[string]interface{}, 0, 8)
+	if m.backend.HasLLM() {
+		tools = append(tools, []map[string]interface{}{
+			{
+				"name":        "ask_chatcli",
 			"description": "Ask the model a question (chat, no tools). Keeps a server-side conversation per session. Supports per-call provider/model routing.",
 			"inputSchema": objSchema(chatProps, "prompt"),
 			"annotations": map[string]interface{}{"readOnlyHint": true},
@@ -199,13 +206,14 @@ func (m *MCP) toolDefinitions() []map[string]interface{} {
 			"inputSchema": objSchema(coderProps, "task"),
 			"annotations": map[string]interface{}{"readOnlyHint": false},
 		},
-		{
-			"name":        "list_providers",
-			"description": "List the configured LLM providers, the active provider/model, and each provider's cataloged models — the routing surface for the provider/model parameters.",
-			"inputSchema": objSchema(map[string]interface{}{}),
-			"annotations": map[string]interface{}{"readOnlyHint": true},
-		},
+		}...)
 	}
+	tools = append(tools, map[string]interface{}{
+		"name":        "list_providers",
+		"description": "List the configured LLM providers, the active provider/model, and each provider's cataloged models — the routing surface for the provider/model parameters.",
+		"inputSchema": objSchema(map[string]interface{}{}),
+		"annotations": map[string]interface{}{"readOnlyHint": true},
+	})
 	for _, t := range m.backend.Tools() {
 		desc := t.Description
 		if u := strings.TrimSpace(t.Usage); u != "" {
