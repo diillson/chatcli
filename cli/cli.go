@@ -502,6 +502,7 @@ func NewChatCLI(ctx context.Context, manager manager.LLMManager, logger *zap.Log
 		// model pulls full definitions of indexed tools on demand instead of
 		// every definition riding in every prompt. Adapter wired below.
 		pluginMgr.RegisterBuiltinPlugin(plugins.NewBuiltinToolsPlugin())
+		pluginMgr.RegisterBuiltinPlugin(plugins.NewBuiltinChannelsPlugin())
 		// @proc — background-process supervision: start/status/logs/stop for
 		// long-running commands (dev servers, watchers). Adapter wired below
 		// over a session supervisor sharing the agent exec validator.
@@ -697,6 +698,7 @@ func NewChatCLI(ctx context.Context, manager manager.LLMManager, logger *zap.Log
 	plugins.SetLSPAdapter(&lspToolAdapter{cli: cli})
 	// Wire the @tools meta-tool to the plugin registry (deferred catalog).
 	plugins.SetToolCatalogAdapter(&toolCatalogPluginAdapter{cli: cli})
+	plugins.SetChannelsAdapter(&channelsPluginAdapter{cli: cli})
 	// Wire the @proc tool to the session process supervisor (created lazily
 	// on first use; all processes die with the session).
 	plugins.SetProcAdapter(&procToolAdapter{cli: cli})

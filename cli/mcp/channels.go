@@ -53,6 +53,12 @@ const (
 	defaultPersistLoadLimit = 200      // most recent N replayed on startup
 	persistFileName         = "channels.jsonl"
 	persistRotatedSuffix    = ".1"
+
+	// metadataProtocolKey marks messages that originate from MCP protocol
+	// notifications the client consumed itself; value "handled" keeps them
+	// out of the unread counter (audit-only entries).
+	metadataProtocolKey     = "protocol"
+	metadataProtocolHandled = "handled"
 )
 
 // ChannelMessage represents a push message from an MCP server.
@@ -87,22 +93,23 @@ type ChannelSubscriptionResolver func(serverName, channel string) bool
 
 // ChannelManager manages MCP channel subscriptions and message delivery.
 type ChannelManager struct {
-	mu             sync.RWMutex
-	messages       []ChannelMessage
-	handlers       []ChannelHandler
-	maxMessages    int
-	unread         int
-	lastViewedSeq  uint64
-	seq            atomic.Uint64
-	logger         *zap.Logger
-	resolver       ChannelSubscriptionResolver
-	persistPath    string
-	persistMaxSize int64
-	persistMu      sync.Mutex // serializes file writes / rotation
-	persistFile    *os.File
-	persistFailed  atomic.Bool // latched after a write failure to suppress spam
-	stopOnce       sync.Once
-	closed         atomic.Bool
+	mu               sync.RWMutex
+	messages         []ChannelMessage
+	handlers         []ChannelHandler
+	maxMessages      int
+	unread           int
+	lastViewedSeq    uint64
+	seq              atomic.Uint64
+	logger           *zap.Logger
+	resolver         ChannelSubscriptionResolver
+	toolsChangedHook func(serverName string) bool
+	persistPath      string
+	persistMaxSize   int64
+	persistMu        sync.Mutex // serializes file writes / rotation
+	persistFile      *os.File
+	persistFailed    atomic.Bool // latched after a write failure to suppress spam
+	stopOnce         sync.Once
+	closed           atomic.Bool
 }
 
 // ChannelManagerOptions configures non-default behavior at construction time.
@@ -175,6 +182,21 @@ func (cm *ChannelManager) SetSubscriptionResolver(resolver ChannelSubscriptionRe
 	cm.mu.Unlock()
 }
 
+// SetToolsChangedHook installs the callback fired when a server emits the
+// MCP protocol notification "notifications/tools/list_changed" (dynamic
+// tool lists — e.g. a server that exposes only a bootstrap tool and grows
+// its catalog after it runs). The hook receives the server name and
+// reports whether it actually took ownership of the event (a refresh was
+// scheduled) — only then is the inbox entry marked handled/audit-only.
+// It MUST NOT block — it is invoked on the transport's reader goroutine,
+// where a synchronous round-trip would deadlock the response pump. The
+// Manager wires an async, debounced refresh here. nil disables.
+func (cm *ChannelManager) SetToolsChangedHook(hook func(serverName string) bool) {
+	cm.mu.Lock()
+	cm.toolsChangedHook = hook
+	cm.mu.Unlock()
+}
+
 // OnMessage registers a handler that will be called for each delivered
 // channel message (after filtering). Handlers receive a copy so they
 // can retain the message without aliasing the ring.
@@ -218,7 +240,13 @@ func (cm *ChannelManager) Push(msg ChannelMessage) {
 	if len(cm.messages) > cm.maxMessages {
 		cm.messages = cm.messages[len(cm.messages)-cm.maxMessages:]
 	}
-	cm.unread++
+	// Protocol events the client already handled (e.g. tools/list_changed
+	// consumed by the dynamic-tools refresh) stay in the ring for audit
+	// but must not demand attention: an inbox that refills itself from
+	// machine-to-machine chatter can never be drained by the user.
+	if msg.Metadata[metadataProtocolKey] != metadataProtocolHandled {
+		cm.unread++
+	}
 	handlers := make([]ChannelHandler, len(cm.handlers))
 	copy(handlers, cm.handlers)
 	cm.mu.Unlock()
@@ -317,6 +345,55 @@ func (cm *ChannelManager) Ack() int {
 	return cleared
 }
 
+// Clear empties the in-memory ring and resets the unread counter,
+// returning how many messages were dropped. The JSONL persistence file
+// is intentionally untouched — it is the audit trail; Clear is about
+// draining the live inbox, not rewriting history. The next restart
+// replays only the persistence tail as usual.
+func (cm *ChannelManager) Clear() int {
+	cm.mu.Lock()
+	defer cm.mu.Unlock()
+	dropped := len(cm.messages)
+	cm.messages = nil
+	cm.unread = 0
+	if s := cm.seq.Load(); s > 0 {
+		cm.lastViewedSeq = s
+	}
+	return dropped
+}
+
+// ClearAll drains the live inbox like Clear AND truncates the on-disk
+// audit trail (active JSONL plus the rotated backup), so nothing is
+// replayed on the next start. The in-memory drain always succeeds — the
+// ring is the source of truth for the live session; disk cleanup is
+// reported through the returned error so the caller can warn without
+// losing the drain.
+func (cm *ChannelManager) ClearAll() (int, error) {
+	dropped := cm.Clear()
+	if cm.persistPath == "" {
+		return dropped, nil
+	}
+
+	cm.persistMu.Lock()
+	defer cm.persistMu.Unlock()
+
+	var firstErr error
+	if cm.persistFile != nil {
+		// The handle is opened O_APPEND: truncating to zero is enough —
+		// the next write lands at the new end of file.
+		if err := cm.persistFile.Truncate(0); err != nil {
+			firstErr = fmt.Errorf("truncate audit file: %w", err)
+		}
+	} else if err := os.Truncate(cm.persistPath, 0); err != nil && !os.IsNotExist(err) {
+		firstErr = fmt.Errorf("truncate audit file: %w", err)
+	}
+	rotated := cm.persistPath + persistRotatedSuffix
+	if err := os.Remove(rotated); err != nil && !os.IsNotExist(err) && firstErr == nil {
+		firstErr = fmt.Errorf("remove rotated audit file: %w", err)
+	}
+	return dropped, firstErr
+}
+
 // UnreadSince returns the messages received after the last Ack. Used
 // by the prompt-cycle hook so the user only sees the new events on
 // the inbox banner — not the entire history.
@@ -381,6 +458,20 @@ func (cm *ChannelManager) ProcessSSENotification(serverName string, data []byte)
 
 	switch {
 	case strings.HasPrefix(notification.Method, "notifications/"):
+		// Protocol-level notification with client-side semantics: a dynamic
+		// tool list changed on the server. Fire the refresh hook (async on
+		// the Manager side) AND still surface the event in the channel ring
+		// below, so the inbox keeps its audit trail. When the hook consumed
+		// it, the entry is marked handled so it never inflates unread.
+		var metadata map[string]string
+		if notification.Method == "notifications/tools/list_changed" {
+			cm.mu.RLock()
+			hook := cm.toolsChangedHook
+			cm.mu.RUnlock()
+			if hook != nil && hook(serverName) {
+				metadata = map[string]string{metadataProtocolKey: metadataProtocolHandled}
+			}
+		}
 		channel := strings.TrimPrefix(notification.Method, "notifications/")
 		content := strings.TrimSpace(string(notification.Params))
 		if content == "" || content == "null" {
@@ -390,6 +481,7 @@ func (cm *ChannelManager) ProcessSSENotification(serverName string, data []byte)
 			ServerName: serverName,
 			Channel:    channel,
 			Content:    content,
+			Metadata:   metadata,
 		})
 
 	case notification.Method == "message" || notification.Method == "channel/message":

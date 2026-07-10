@@ -188,6 +188,17 @@ func (cli *ChatCLI) completeAtTokenArgs(args []string, line, word string) ([]pro
 		out := cli.systemCommandCompleter(word)
 		out = append(out, cli.filePathCompleter(word)...)
 		return out, true
+	case "@channels":
+		return prompt.FilterHasPrefix([]prompt.Suggest{
+			{Text: "list", Description: i18n.T("complete.channels.list")},
+			{Text: "unread", Description: i18n.T("complete.channels.unread")},
+			{Text: "ack", Description: i18n.T("complete.channels.ack")},
+		}, word, true), true
+	case "@tools":
+		return prompt.FilterHasPrefix([]prompt.Suggest{
+			{Text: "list", Description: i18n.T("complete.tools.list")},
+			{Text: "describe", Description: i18n.T("complete.tools.describe")},
+		}, word, true), true
 	}
 	return nil, false
 }
