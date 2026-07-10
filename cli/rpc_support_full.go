@@ -152,11 +152,34 @@ func (cli *ChatCLI) RunAnyRPCTool(ctx context.Context, name, args string) (strin
 	if !rpcToolAllowed(p, mode, allow) {
 		return "", fmt.Errorf("tool %q is not exposed under the current CHATCLI_MCP_TOOLS policy (%s)", name, mode)
 	}
-	var argv []string
-	if strings.TrimSpace(args) != "" {
-		argv = []string{args}
+	// Same argv contract as the agent loop: JSON envelopes become the argv
+	// the plugin's parser expects ({"cmd":...} → ["cmd", ...]); flat strings
+	// split like a command line. Wrapping the raw string as a single argv
+	// element broke every subcommand-style tool (coder, memory, session…).
+	argv, parseErr := parseToolArgsWithJSON(args)
+	if parseErr != nil {
+		return "", fmt.Errorf("invalid args for %q: %w", name, parseErr)
 	}
-	return execBuiltin(ctx, p, argv)
+
+	// Capture stdout for the duration: plugins that print progress would
+	// otherwise write raw text into the JSON-RPC protocol stream. Captured
+	// output is appended to the result so nothing the tool said is lost.
+	var result string
+	var execErr error
+	captured, _ := captureRPCStdout(func() error {
+		result, execErr = execBuiltin(ctx, p, argv)
+		return nil
+	})
+	if execErr != nil {
+		return "", execErr
+	}
+	if strings.TrimSpace(captured) != "" && !strings.Contains(result, captured) {
+		if result != "" {
+			result += "\n"
+		}
+		result += captured
+	}
+	return result, nil
 }
 
 // RPCRunOpts parameterizes an agent/coder run driven over RPC.

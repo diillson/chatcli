@@ -115,3 +115,29 @@ func TestAllRPCTools_PolicyModes(t *testing.T) {
 		t.Error("unknown tool must error")
 	}
 }
+
+// TestRunAnyRPCTool_JSONEnvelopeArgv pins the argv contract with
+// subcommand-style tools: a JSON envelope must be parsed exactly like the
+// agent loop parses it, not wrapped as one opaque argv element — wrapping
+// broke every {"cmd":...} tool (coder, memory, session) over MCP.
+func TestRunAnyRPCTool_JSONEnvelopeArgv(t *testing.T) {
+	mgr, err := plugins.NewManager(zap.NewNop())
+	if err != nil {
+		t.Fatal(err)
+	}
+	mgr.RegisterBuiltinPlugin(plugins.NewBuiltinCoderPlugin())
+	c := &ChatCLI{pluginManager: mgr}
+	t.Setenv("CHATCLI_MCP_TOOLS", "all")
+
+	// The coder engine enforces a workspace boundary at the process cwd,
+	// so read a file that genuinely lives inside it (this package's own
+	// source) instead of a temp dir outside the boundary.
+	out, err := c.RunAnyRPCTool(context.Background(),
+		"coder", `{"cmd":"read","args":{"file":"rpc_support_full.go"}}`)
+	if err != nil {
+		t.Fatalf("coder read via MCP envelope: %v", err)
+	}
+	if !strings.Contains(out, "rpcToolPolicy") {
+		t.Fatalf("coder must read through the JSON envelope, got: %.120q", out)
+	}
+}
