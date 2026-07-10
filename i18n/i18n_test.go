@@ -20,13 +20,16 @@ func initFor(t *testing.T, lang string) {
 
 // TestT_ArglessReturnsVerbatimTemplate pins the core invariant behind the
 // "%!s(MISSING)" regression: an argless T must return the catalog string
-// verbatim (modulo %% unescaping), never run it through the formatter — error
-// templates with %w must reach the caller's fmt.Errorf intact.
+// verbatim (modulo %% unescaping), never run it through the formatter —
+// templates with pending verbs must reach the caller's fmt/Sprintf intact.
+// (Catalog strings no longer carry %w: every error call site wraps with
+// fmt.Errorf("%s: %w", i18n.T(key), err), so a %w inside the catalog value
+// rendered as a literal "%w" in user-facing errors and was purged.)
 func TestT_ArglessReturnsVerbatimTemplate(t *testing.T) {
 	initFor(t, "pt-BR")
 
-	if got := T("llm.error.read_stream"); !strings.Contains(got, "%w") || strings.Contains(got, "MISSING") {
-		t.Errorf("argless %%w template must come back verbatim, got %q", got)
+	if got := T("server.listen.failed"); !strings.Contains(got, "%s") || strings.Contains(got, "MISSING") {
+		t.Errorf("argless %%s template must come back verbatim, got %q", got)
 	}
 	if got := T("chan.cmd.box_title_filtered"); !strings.Contains(got, "%s") || strings.Contains(got, "MISSING") {
 		t.Errorf("argless %%s template must come back verbatim, got %q", got)
@@ -76,7 +79,7 @@ func TestT_DiagramDescriptionLocalized(t *testing.T) {
 func TestT_FallbackToDefaultLanguage(t *testing.T) {
 	// A locale that doesn't exist resolves to the default (en) catalog.
 	initFor(t, "fr-FR")
-	if got := T("llm.error.read_stream"); !strings.Contains(got, "%w") {
+	if got := T("llm.error.read_stream"); got != "error reading stream" {
 		t.Errorf("unmatched locale must fall back to en raw catalog, got %q", got)
 	}
 }
