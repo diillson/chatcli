@@ -75,8 +75,16 @@ func ResolveBinary() (string, error) {
 		if err != nil {
 			expanded = custom
 		}
-		if _, err := os.Stat(expanded); err != nil {
+		expanded = filepath.Clean(expanded)
+		// #nosec G703 -- DEVIN_CLI_PATH is operator-supplied configuration
+		// (same trust level as PATH itself); Stat only validates existence
+		// and shape before the manager registers the provider.
+		info, err := os.Stat(expanded)
+		if err != nil {
 			return "", fmt.Errorf("DEVIN_CLI_PATH: %w", err)
+		}
+		if info.IsDir() {
+			return "", fmt.Errorf("DEVIN_CLI_PATH: %s is a directory, expected the devin binary", expanded)
 		}
 		return expanded, nil
 	}
@@ -172,6 +180,10 @@ func (c *Client) runOnce(ctx context.Context, flattened string, timeout time.Dur
 	// CommandContext on purpose (the inverse of the @lsp pool lesson): a
 	// per-turn subprocess must die with the turn, so CTRL+C or the timeout
 	// tears the CLI down instead of leaving an orphaned agent running.
+	// #nosec G204 G702 -- binPath resolves from operator configuration
+	// (PATH lookup or DEVIN_CLI_PATH) and argv is assembled from
+	// operator-supplied env knobs, never from model or network input —
+	// same trust model as llm/transcription's operator-supplied command.
 	cmd := exec.CommandContext(runCtx, c.binPath, args...)
 	// WaitDelay bounds Wait() after the context fires: without it, a
 	// grandchild (the CLI spawns helpers) inheriting the stdout pipe keeps

@@ -592,7 +592,10 @@ func providerFallbackPricing(provider, model string) (float64, float64) {
 		return 2.50, 10.0
 	case strings.Contains(provider, "openrouter"):
 		return getOpenRouterModelPricing(model)
-	case strings.Contains(provider, "ollama"), strings.Contains(provider, "stackspot"):
+	case strings.Contains(provider, "ollama"), strings.Contains(provider, "stackspot"),
+		strings.Contains(provider, "devin"):
+		// Devin CLI: o binário não reporta tokens e o custo é da assinatura
+		// Cognition — zero aqui, como Ollama/StackSpot.
 		return 0, 0
 	}
 	return 0, 0
