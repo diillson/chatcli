@@ -188,24 +188,24 @@ func (m *MCP) toolDefinitions() []map[string]interface{} {
 		tools = append(tools, []map[string]interface{}{
 			{
 				"name":        "ask_chatcli",
-			"description": "Ask the model a question (chat, no tools). Keeps a server-side conversation per session. Supports per-call provider/model routing.",
-			"inputSchema": objSchema(chatProps, "prompt"),
-			"annotations": map[string]interface{}{"readOnlyHint": true},
-		},
-		{
-			"name": "agent_task",
-			"description": "Run ChatCLI's full agent (ReAct) loop on a task. The agent autonomously uses every built-in tool " +
-				"(files, shell, web, memory, knowledge, MCP servers ChatCLI is connected to) and returns the transcript. " +
-				"Supports per-call provider/model routing and quality-harness toggles (plan, refine, verify, reflexion, convergence, lessons).",
-			"inputSchema": objSchema(agentProps, "task"),
-			"annotations": map[string]interface{}{"readOnlyHint": false},
-		},
-		{
-			"name":        "coder_task",
-			"description": "Run ChatCLI's coder loop on a task (reading/editing code and running commands in the workspace). Supports per-call provider/model routing and quality toggles.",
-			"inputSchema": objSchema(coderProps, "task"),
-			"annotations": map[string]interface{}{"readOnlyHint": false},
-		},
+				"description": "Ask the model a question (chat, no tools). Keeps a server-side conversation per session. Supports per-call provider/model routing.",
+				"inputSchema": objSchema(chatProps, "prompt"),
+				"annotations": map[string]interface{}{"readOnlyHint": true},
+			},
+			{
+				"name": "agent_task",
+				"description": "Run ChatCLI's full agent (ReAct) loop on a task. The agent autonomously uses every built-in tool " +
+					"(files, shell, web, memory, knowledge, MCP servers ChatCLI is connected to) and returns the transcript. " +
+					"Supports per-call provider/model routing and quality-harness toggles (plan, refine, verify, reflexion, convergence, lessons).",
+				"inputSchema": objSchema(agentProps, "task"),
+				"annotations": map[string]interface{}{"readOnlyHint": false},
+			},
+			{
+				"name":        "coder_task",
+				"description": "Run ChatCLI's coder loop on a task (reading/editing code and running commands in the workspace). Supports per-call provider/model routing and quality toggles.",
+				"inputSchema": objSchema(coderProps, "task"),
+				"annotations": map[string]interface{}{"readOnlyHint": false},
+			},
 		}...)
 	}
 	tools = append(tools, map[string]interface{}{
