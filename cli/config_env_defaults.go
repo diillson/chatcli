@@ -215,6 +215,7 @@ var envDefaults = map[string]envDefault{
 
 	// ─── Integrations ────────────────────────────────────────────
 	"CHATCLI_MCP_ENABLED":                   {Value: "false", IsBool: true, Source: "mcp manager"},
+	"CHATCLI_MCP_DYNAMIC_TOOLS":             {Value: "true", IsBool: true, Source: "mcp.dynamicToolRefreshEnabled — refresh on tools/list_changed"},
 	"CHATCLI_ALLOW_UNSIGNED_PLUGINS":        {Value: "false", IsBool: true, Source: "plugin manager"},
 	"CHATCLI_REGISTRY_DISABLE":              {Value: "false", IsBool: true, Source: "skill registry"},
 	"CHATCLI_WEBSEARCH_PROVIDER":            {Value: "auto", Source: "websearch_command.go"},

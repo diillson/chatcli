@@ -87,22 +87,23 @@ type ChannelSubscriptionResolver func(serverName, channel string) bool
 
 // ChannelManager manages MCP channel subscriptions and message delivery.
 type ChannelManager struct {
-	mu             sync.RWMutex
-	messages       []ChannelMessage
-	handlers       []ChannelHandler
-	maxMessages    int
-	unread         int
-	lastViewedSeq  uint64
-	seq            atomic.Uint64
-	logger         *zap.Logger
-	resolver       ChannelSubscriptionResolver
-	persistPath    string
-	persistMaxSize int64
-	persistMu      sync.Mutex // serializes file writes / rotation
-	persistFile    *os.File
-	persistFailed  atomic.Bool // latched after a write failure to suppress spam
-	stopOnce       sync.Once
-	closed         atomic.Bool
+	mu               sync.RWMutex
+	messages         []ChannelMessage
+	handlers         []ChannelHandler
+	maxMessages      int
+	unread           int
+	lastViewedSeq    uint64
+	seq              atomic.Uint64
+	logger           *zap.Logger
+	resolver         ChannelSubscriptionResolver
+	toolsChangedHook func(serverName string)
+	persistPath      string
+	persistMaxSize   int64
+	persistMu        sync.Mutex // serializes file writes / rotation
+	persistFile      *os.File
+	persistFailed    atomic.Bool // latched after a write failure to suppress spam
+	stopOnce         sync.Once
+	closed           atomic.Bool
 }
 
 // ChannelManagerOptions configures non-default behavior at construction time.
@@ -172,6 +173,19 @@ func NewChannelManagerWithOptions(logger *zap.Logger, opts ChannelManagerOptions
 func (cm *ChannelManager) SetSubscriptionResolver(resolver ChannelSubscriptionResolver) {
 	cm.mu.Lock()
 	cm.resolver = resolver
+	cm.mu.Unlock()
+}
+
+// SetToolsChangedHook installs the callback fired when a server emits the
+// MCP protocol notification "notifications/tools/list_changed" (dynamic
+// tool lists — e.g. a server that exposes only a bootstrap tool and grows
+// its catalog after it runs). The hook receives the server name; it MUST
+// NOT block — it is invoked on the transport's reader goroutine, where a
+// synchronous round-trip would deadlock the response pump. The Manager
+// wires an async, debounced refresh here. nil disables.
+func (cm *ChannelManager) SetToolsChangedHook(hook func(serverName string)) {
+	cm.mu.Lock()
+	cm.toolsChangedHook = hook
 	cm.mu.Unlock()
 }
 
@@ -381,6 +395,18 @@ func (cm *ChannelManager) ProcessSSENotification(serverName string, data []byte)
 
 	switch {
 	case strings.HasPrefix(notification.Method, "notifications/"):
+		// Protocol-level notification with client-side semantics: a dynamic
+		// tool list changed on the server. Fire the refresh hook (async on
+		// the Manager side) AND still surface the event in the channel ring
+		// below, so the inbox keeps its audit trail.
+		if notification.Method == "notifications/tools/list_changed" {
+			cm.mu.RLock()
+			hook := cm.toolsChangedHook
+			cm.mu.RUnlock()
+			if hook != nil {
+				hook(serverName)
+			}
+		}
 		channel := strings.TrimPrefix(notification.Method, "notifications/")
 		content := strings.TrimSpace(string(notification.Params))
 		if content == "" || content == "null" {

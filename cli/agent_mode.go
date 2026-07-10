@@ -1479,6 +1479,26 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 			pendingSkillBlock = ""
 		}
 
+		// Same turn boundary: surface dynamic MCP tool-list changes
+		// (notifications/tools/list_changed -> registry refresh). Without
+		// this the model never learns about tools that appeared after a
+		// bootstrap call — the system-prompt index was built at start.
+		if a.cli.mcpManager != nil {
+			if changes := a.cli.mcpManager.DrainToolListChanges(); len(changes) > 0 {
+				a.cli.history = append(a.cli.history, models.Message{
+					Role:    "user",
+					Content: buildMCPToolChangeNotice(changes),
+				})
+				if !a.cli.unattended {
+					fmt.Printf("\r\033[K  %s %s\n",
+						renderer.Colorize("🔌", agent.ColorCyan),
+						renderer.Colorize(
+							i18n.T("agent.mcp.tools_refreshed", summarizeMCPToolChanges(changes)),
+							agent.ColorCyan))
+				}
+			}
+		}
+
 		// Microcompact (Level 0): cheap, progressive compaction of OLD tool
 		// results in history. Pure Go, no LLM call. Often keeps us below
 		// budget so the expensive summarization path is never triggered.

@@ -24,6 +24,12 @@ type Manager struct {
 	channels *ChannelManager     // handles push messages from servers
 	mu       sync.RWMutex
 	logger   *zap.Logger
+
+	// Dynamic tool discovery state (see dynamic_tools.go): per-server
+	// debounce flags plus the reconciled deltas awaiting the agent loop.
+	refreshMu       sync.Mutex
+	refreshPending  map[string]bool
+	toolListChanges []ToolListChange
 }
 
 // ServerConnection represents an active MCP server.
@@ -96,6 +102,7 @@ func NewManager(logger *zap.Logger) *Manager {
 		logger:   logger,
 	}
 	channels.SetSubscriptionResolver(m.isChannelSubscribed)
+	channels.SetToolsChangedHook(m.scheduleToolRefresh)
 	return m
 }
 
@@ -111,6 +118,7 @@ func NewManagerWithOptions(logger *zap.Logger, opts ChannelManagerOptions) *Mana
 		logger:   logger,
 	}
 	channels.SetSubscriptionResolver(m.isChannelSubscribed)
+	channels.SetToolsChangedHook(m.scheduleToolRefresh)
 	return m
 }
 
