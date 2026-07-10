@@ -69,6 +69,14 @@ func NormalizeName(s string) string {
 	return strings.ToLower(strings.TrimSpace(s))
 }
 
+// ErrCredentialsUnavailable marks embedding failures caused by unusable
+// provider credentials — the canonical case is an expired AWS SSO session
+// whose credential files still exist on disk, so the provider looks
+// configured but every call fails at credential resolution. Callers use
+// errors.Is to degrade gracefully (keyword-only retrieval, quiet skip)
+// instead of hammering the provider and spamming warnings.
+var ErrCredentialsUnavailable = fmt.Errorf("embedding: provider credentials unavailable")
+
 // ErrUnknownProvider is returned by NewFromEnv / NewByName when the
 // requested provider does not exist.
 var ErrUnknownProvider = fmt.Errorf("embedding: unknown provider")
