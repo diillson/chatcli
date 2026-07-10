@@ -28,6 +28,13 @@ func TestGetModelPricing(t *testing.T) {
 		{"claude haiku legacy", "CLAUDEAI", "claude-3-haiku", 0.25, 1.25},
 
 		// OpenAI — specific before generic.
+		// gpt-5.6 tiers (Jul 2026 list prices): the specific terra/luna
+		// tags must win before the bare gpt-5.6 case, which covers the
+		// family alias that the catalog resolves to Sol.
+		{"gpt-5.6-terra before gpt-5.6", "OPENAI", "gpt-5.6-terra", 2.50, 15.0},
+		{"gpt-5.6-luna before gpt-5.6", "OPENAI", "gpt-5.6-luna", 1.0, 6.0},
+		{"gpt-5.6 generic is sol", "OPENAI", "gpt-5.6-sol", 5.0, 30.0},
+		{"gpt-5.6 bare alias", "OPENAI", "gpt-5.6", 5.0, 30.0},
 		{"gpt-4o-mini before gpt-4o", "OPENAI", "gpt-4o-mini", 0.15, 0.60},
 		{"gpt-4o", "OPENAI", "gpt-4o", 2.50, 10.0},
 		{"gpt-4-turbo", "OPENAI", "gpt-4-turbo", 10.0, 30.0},
