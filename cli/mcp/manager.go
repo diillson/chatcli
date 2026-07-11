@@ -39,6 +39,11 @@ type ServerConnection struct {
 	Process   *os.Process
 	transport mcpTransport // real transport (stdio or SSE)
 	logs      *logRing     // recent stderr/event lines for /mcp logs
+
+	// oauthChallenge caches the WWW-Authenticate challenge parsed from the
+	// last 401, so a subsequent /mcp login (or @mcp-login) can jump straight
+	// to discovery without re-probing the server.
+	oauthChallenge oauthChallenge
 }
 
 // logRing is a tiny bounded ring buffer for a server's recent log
@@ -488,6 +493,99 @@ func (m *Manager) StopOne(ctx context.Context, name string) error {
 	}
 	m.logger.Info("MCP server stopped", zap.String("server", name))
 	return nil
+}
+
+// LoginOAuth runs the interactive OAuth authorization for a remote MCP server
+// and reconnects it so the fresh credential is used and its tools are
+// discovered. It is the programmatic entry point behind both the /mcp login
+// command and the @mcp-login agent tool.
+//
+// It opens a browser and blocks until the user completes the flow, so callers
+// must invoke it from an interactive surface — never from an unattended path.
+func (m *Manager) LoginOAuth(ctx context.Context, serverName string) error {
+	m.mu.RLock()
+	conn, ok := m.servers[serverName]
+	m.mu.RUnlock()
+	if !ok {
+		return fmt.Errorf("%w: %q", ErrServerNotConfigured, serverName)
+	}
+	if conn.Config.Transport != TransportStreamableHTTP && conn.Config.Transport != TransportSSE {
+		return fmt.Errorf("%s", i18n.T("mcp.oauth.not_remote", serverName))
+	}
+	if strings.TrimSpace(conn.Config.URL) == "" {
+		return fmt.Errorf("%s", i18n.T("mcp.oauth.no_url", serverName))
+	}
+
+	m.mu.RLock()
+	ch := conn.oauthChallenge
+	connected := conn.Status.Connected
+	m.mu.RUnlock()
+
+	if err := LoginServer(ctx, serverName, conn.Config.URL, ch, m.logger); err != nil {
+		return err
+	}
+
+	// Reconnect on a context DETACHED from the caller's ctx. The caller's ctx
+	// is cancelled the moment this login call returns (e.g. the @mcp-login
+	// tool's bounded context), and the HTTP/SSE transport ties its whole
+	// lifetime to the context it is built with — so reconnecting on ctx would
+	// kill the transport instantly, surfacing as "context canceled" on the
+	// next tool call. WithoutCancel keeps request values but drops
+	// cancellation and deadline; the transport is instead closed explicitly on
+	// /mcp reload/restart and at session shutdown (StopAll).
+	reconnectCtx := context.WithoutCancel(ctx)
+	if connected {
+		_ = m.StopOne(reconnectCtx, serverName)
+	}
+	return m.StartOne(reconnectCtx, serverName)
+}
+
+// LogoutOAuth forgets a server's stored OAuth credential and metadata AND
+// stops the running server, so the in-memory token (held by the live transport
+// and its background refresher) stops being used immediately and the server's
+// tools disappear. A subsequent /mcp login (or /mcp start) re-authorizes.
+//
+// Without the stop, a running transport keeps serving from its cached token —
+// which is why a bare credential delete appeared to "still work".
+func (m *Manager) LogoutOAuth(ctx context.Context, serverName string) error {
+	m.mu.RLock()
+	conn, ok := m.servers[serverName]
+	connected := ok && conn.Status.Connected
+	m.mu.RUnlock()
+	if !ok {
+		return fmt.Errorf("%w: %q", ErrServerNotConfigured, serverName)
+	}
+	if err := LogoutServer(serverName, m.logger); err != nil {
+		return err
+	}
+	if connected {
+		stopCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+		defer cancel()
+		_ = m.StopOne(stopCtx, serverName)
+	}
+	return nil
+}
+
+// HasOAuthCredential reports whether the named server has a stored MCP OAuth
+// credential from a previous successful login.
+func (m *Manager) HasOAuthCredential(serverName string) bool {
+	return hasStoredMCPOAuth(serverName, m.logger)
+}
+
+// AuthRequiredServers returns, in alphabetical order, the names of servers
+// currently blocked on OAuth authorization. Used by the agent prompt and
+// /mcp status to surface an actionable login hint.
+func (m *Manager) AuthRequiredServers() []string {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	var out []string
+	for name, conn := range m.servers {
+		if conn.Status.AuthRequired {
+			out = append(out, name)
+		}
+	}
+	sort.Strings(out)
+	return out
 }
 
 // ServerNames returns the names of all configured servers in
@@ -964,13 +1062,35 @@ func (m *Manager) startHTTPServer(ctx context.Context, conn *ServerConnection) e
 		return fmt.Errorf("failed to construct HTTP transport: %w", err)
 	}
 
+	// Attach a refreshable OAuth token provider when the server has stored
+	// MCP OAuth credentials from a previous /mcp login. Absent credentials
+	// leave the provider nil and the transport falls back to the static
+	// AuthConfig (bearer/basic/header) exactly as before.
+	if provider, perr := mcpTokenProvider(conn.Config.Name, conn.Config.URL, m.logger); perr == nil && provider != nil {
+		transport.tokenProvider = provider
+	}
+
 	conn.transport = transport
 
 	if err := m.initializeServer(conn); err != nil {
 		_ = transport.Close(ctx)
 		conn.transport = nil
+		// A 401 OAuth challenge is not a hard failure: record it as
+		// "authorization required" so /mcp status and the agent surface an
+		// actionable login hint rather than a generic connection error.
+		if oe, ok := IsOAuthRequired(err); ok {
+			m.mu.Lock()
+			conn.Status.AuthRequired = true
+			conn.oauthChallenge = oe.Challenge
+			m.mu.Unlock()
+		}
 		return fmt.Errorf("%s: %w", i18n.T("mcp.transport.http_initialize_failed"), err)
 	}
+
+	// Successful (re)connect clears any stale auth-required flag.
+	m.mu.Lock()
+	conn.Status.AuthRequired = false
+	m.mu.Unlock()
 
 	if err := m.discoverTools(conn); err != nil {
 		m.logger.Warn("MCP tool discovery failed",

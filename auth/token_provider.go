@@ -221,12 +221,22 @@ type oauthTokenProvider struct {
 // a positive expiry. The returned provider must be Close()'d to release the
 // goroutine.
 func newOAuthTokenProvider(cred *AuthProfileCredential, profileID, source string, logger *zap.Logger) *oauthTokenProvider {
+	return newOAuthTokenProviderWithFn(cred, profileID, source, RefreshOAuth, logger)
+}
+
+// newOAuthTokenProviderWithFn is the shared constructor. The refresh function
+// is captured before the background goroutine launches so it can never race
+// with a proactive refresh firing against the default RefreshOAuth.
+func newOAuthTokenProviderWithFn(cred *AuthProfileCredential, profileID, source string, refresh oauthRefreshFn, logger *zap.Logger) *oauthTokenProvider {
+	if refresh == nil {
+		refresh = RefreshOAuth
+	}
 	p := &oauthTokenProvider{
 		cred:                *cred,
 		profileID:           profileID,
 		source:              source,
 		logger:              logger,
-		refreshFn:           RefreshOAuth,
+		refreshFn:           refresh,
 		refreshLead:         defaultRefreshLead,
 		refreshMinWait:      defaultRefreshMinWait,
 		refreshErrorBackoff: defaultRefreshErrorBackoff,
@@ -237,6 +247,20 @@ func newOAuthTokenProvider(cred *AuthProfileCredential, profileID, source string
 		go p.backgroundLoop()
 	}
 	return p
+}
+
+// NewOAuthTokenProviderWithRefresh builds a refreshable OAuth TokenProvider
+// whose refresh round-trip is supplied by the caller instead of the built-in
+// per-provider switch in RefreshOAuth. It exists for subsystems whose token
+// endpoint and client_id are discovered at runtime — notably MCP OAuth, where
+// each server advertises its own authorization server via RFC 9728/8414
+// discovery and registers a client via RFC 7591. All of the base provider's
+// hardening (single-flight refresh coalescing, proactive background renewal,
+// and persistence back to the encrypted auth store) is retained.
+//
+// The returned provider must be Close()'d to release its background goroutine.
+func NewOAuthTokenProviderWithRefresh(cred *AuthProfileCredential, profileID, source string, refresh func(ctx context.Context, cred *AuthProfileCredential, logger *zap.Logger) (*AuthProfileCredential, error), logger *zap.Logger) TokenProvider {
+	return newOAuthTokenProviderWithFn(cred, profileID, source, refresh, logger)
 }
 
 func (p *oauthTokenProvider) Token(ctx context.Context) (string, error) {

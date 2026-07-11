@@ -498,6 +498,11 @@ func NewChatCLI(ctx context.Context, manager manager.LLMManager, logger *zap.Log
 		// diagnostics, definition, references, symbols, hover. Adapter wired
 		// below over a lazily created, session-scoped server pool.
 		pluginMgr.RegisterBuiltinPlugin(plugins.NewBuiltinLSPPlugin())
+		// @mcp-login — authorize an OAuth-protected remote MCP server so its
+		// tools become usable. The agent invokes it after an mcp_* call fails
+		// with an "authorization required" error. Adapter wired below over the
+		// live MCP manager.
+		pluginMgr.RegisterBuiltinPlugin(plugins.NewBuiltinMCPLoginPlugin())
 		// @tools — tool-catalog meta-tool behind the deferred catalog: the
 		// model pulls full definitions of indexed tools on demand instead of
 		// every definition riding in every prompt. Adapter wired below.
@@ -696,6 +701,8 @@ func NewChatCLI(ctx context.Context, manager manager.LLMManager, logger *zap.Log
 	// Wire the @lsp tool to the session language-server pool (created lazily
 	// on first use; shut down with the session).
 	plugins.SetLSPAdapter(&lspToolAdapter{cli: cli})
+	// Wire the @mcp-login tool to the live MCP manager (OAuth authorization).
+	plugins.SetMCPAuthAdapter(&mcpLoginAdapter{cli: cli})
 	// Wire the @tools meta-tool to the plugin registry (deferred catalog).
 	plugins.SetToolCatalogAdapter(&toolCatalogPluginAdapter{cli: cli})
 	plugins.SetChannelsAdapter(&channelsPluginAdapter{cli: cli})

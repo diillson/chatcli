@@ -39,6 +39,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/diillson/chatcli/auth"
 	"github.com/diillson/chatcli/i18n"
 	"go.uber.org/zap"
 )
@@ -76,6 +77,11 @@ type sseTransport struct {
 	headers     map[string]string
 	auth        *AuthConfig
 
+	// tokenProvider, when set, supplies a refreshable OAuth bearer token that
+	// takes precedence over the static auth config. Assigned by the manager
+	// after construction when the server has stored MCP OAuth credentials.
+	tokenProvider auth.TokenProvider
+
 	closed atomic.Bool
 }
 
@@ -108,6 +114,14 @@ func newSSETransport(ctx context.Context, cfg ServerConfig, logger *zap.Logger, 
 		auth:        cfg.Auth,
 	}
 
+	// Wire a refreshable OAuth token provider when the server has stored MCP
+	// OAuth credentials, BEFORE the supervisor's first connect so the initial
+	// SSE GET already carries the bearer token. No stored credential leaves
+	// the provider nil and the static AuthConfig path is used unchanged.
+	if provider, perr := mcpTokenProvider(cfg.Name, cfg.URL, logger); perr == nil && provider != nil {
+		t.tokenProvider = provider
+	}
+
 	go t.supervisor()
 
 	// Wait for the server to send the messages endpoint URL on the
@@ -133,6 +147,14 @@ func newSSETransport(ctx context.Context, cfg ServerConfig, logger *zap.Logger, 
 func (t *sseTransport) applyHeaders(req *http.Request) {
 	for k, v := range t.headers {
 		req.Header.Set(k, v)
+	}
+	// Prefer the refreshable OAuth token when a provider is wired; otherwise
+	// fall back to the static AuthConfig (bearer/basic/header).
+	if t.tokenProvider != nil {
+		if tok, err := t.tokenProvider.Token(req.Context()); err == nil && tok != "" {
+			req.Header.Set("Authorization", "Bearer "+tok)
+			return
+		}
 	}
 	t.auth.ApplyAuth(req)
 }
@@ -412,6 +434,9 @@ func (t *sseTransport) Call(method string, params interface{}) (json.RawMessage,
 func (t *sseTransport) Close(ctx context.Context) error {
 	t.closed.Store(true)
 	t.cancel()
+	if t.tokenProvider != nil {
+		t.tokenProvider.Close()
+	}
 	select {
 	case <-t.done:
 		return nil
