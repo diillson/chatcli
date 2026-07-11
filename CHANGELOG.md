@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.159.0](https://github.com/diillson/chatcli/compare/v1.158.0...v1.159.0) (2026-07-11)
+
+
+### Features
+
+* **mcp:** OAuth 2.1 authorization for remote MCP servers ([#1161](https://github.com/diillson/chatcli/issues/1161)) ([c41831f](https://github.com/diillson/chatcli/commit/c41831f1b22a4bd25366d335178529b06663a31e))
+
 ## [1.158.0](https://github.com/diillson/chatcli/compare/v1.157.0...v1.158.0) (2026-07-10)
 
 
