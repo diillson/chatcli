@@ -1,5 +1,25 @@
 # Changelog
 
+## [1.160.0](https://github.com/diillson/chatcli/compare/v1.159.0...v1.160.0) (2026-07-12)
+
+
+### Features
+
+* **ui:** add ui/kit presentation components and fix help header styling ([#1164](https://github.com/diillson/chatcli/issues/1164)) ([3d190ac](https://github.com/diillson/chatcli/commit/3d190ac170380fba3258f880da74986448df191f))
+* **ui:** adopt the sóbrio borderless treatment across chat, agent and coder ([#1175](https://github.com/diillson/chatcli/issues/1175)) ([b6c08c0](https://github.com/diillson/chatcli/commit/b6c08c0c214037887049a15f37bf878768bd332d))
+* **ui:** align command surfaces on kit padding, rules and notices ([#1166](https://github.com/diillson/chatcli/issues/1166)) ([59eb0a2](https://github.com/diillson/chatcli/commit/59eb0a2f77598e9ac2c646bfabe5263b7cf51b35))
+* **ui:** make the welcome screen responsive and theme-aware ([#1168](https://github.com/diillson/chatcli/issues/1168)) ([0ac2d33](https://github.com/diillson/chatcli/commit/0ac2d3326177724e33f96006d168b8ac2696657f))
+* **ui:** sweep agent timeline glyphs and rules onto the kit vocabulary ([#1167](https://github.com/diillson/chatcli/issues/1167)) ([9fcc24e](https://github.com/diillson/chatcli/commit/9fcc24e60dc396c57069e03e7937da2721ce5bfd))
+
+
+### Bug Fixes
+
+* **cli:** restore spinner, type-ahead queue and AltGr input in the Windows chat REPL ([#1163](https://github.com/diillson/chatcli/issues/1163)) ([c258cd2](https://github.com/diillson/chatcli/commit/c258cd2f435be4170bcc7a22c71b60a465843e52))
+* **i18n:** honor CHATCLI_LANG from .env and detect the Windows locale ([#1176](https://github.com/diillson/chatcli/issues/1176)) ([829e4f4](https://github.com/diillson/chatcli/commit/829e4f45fc4081ebaecb85c31050da258ce3a04f))
+* **i18n:** sentence-case display titles and notice-based session status ([#1173](https://github.com/diillson/chatcli/issues/1173)) ([754019f](https://github.com/diillson/chatcli/commit/754019f8820b0a846fea21c1cb29a4366a21d02b))
+* **i18n:** strip variation selectors and embedded rules from the catalogs ([#1169](https://github.com/diillson/chatcli/issues/1169)) ([a371ba2](https://github.com/diillson/chatcli/commit/a371ba23f1fdb44e9255f06546ac2fb90bd089c5))
+* **ui:** give warnings their own theme role ([#1174](https://github.com/diillson/chatcli/issues/1174)) ([43558e0](https://github.com/diillson/chatcli/commit/43558e0f923f18ff9c86262e7f5c4ea6540cc67a))
+
 ## [1.159.0](https://github.com/diillson/chatcli/compare/v1.158.0...v1.159.0) (2026-07-11)
 
 
