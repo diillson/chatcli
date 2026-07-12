@@ -110,9 +110,12 @@ func printTipBox() {
 func (cli *ChatCLI) PrintWelcomeScreen() {
 	printLogo()
 
-	v, c, _ := version.GetBuildInfo()
-	if v != "" && v != "dev" && v != "unknown" {
-		versionStr := i18n.T("version.label", v, c)
+	// OfflineReport enriquece o commit/data de builds go install a partir do
+	// cache em disco da release — sem rede, o boot não espera nada. O refresh
+	// do cache vencido roda em background no Start.
+	current := version.OfflineReport().Current
+	if v := current.Version; v != "" && v != "dev" && v != "unknown" {
+		versionStr := i18n.T("version.label", v, current.CommitHash)
 		fmt.Println("  " + colorize(versionStr, ColorGray))
 	}
 	fmt.Println()

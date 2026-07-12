@@ -117,6 +117,7 @@ func TestCheckLatestVersionWithContext_Success(t *testing.T) {
 // partir dos metadados da release — sem mutar estado do pacote e sem exigir
 // ordem de chamadas.
 func TestGetReport_EnrichesFromRelease(t *testing.T) {
+	isolateHome(t)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte(`{"tag_name": "v1.25.0", "target_commitish": "0123456789abcdef", "published_at": "2026-07-01T12:00:00Z"}`))
@@ -146,6 +147,7 @@ func TestGetReport_EnrichesFromRelease(t *testing.T) {
 // TestGetReport_NoEnrichmentOnVersionMismatch garante que metadados de uma
 // release DIFERENTE da versão instalada nunca contaminam o build info.
 func TestGetReport_NoEnrichmentOnVersionMismatch(t *testing.T) {
+	isolateHome(t)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte(`{"tag_name": "v1.26.0", "target_commitish": "0123456789abcdef", "published_at": "2026-07-01T12:00:00Z"}`))
@@ -169,6 +171,7 @@ func TestGetReport_NoEnrichmentOnVersionMismatch(t *testing.T) {
 // TestGetReport_LdflagsWinOverRelease: um build de release (ldflags) já tem
 // commit/data reais — os metadados do GitHub não devem sobrescrevê-los.
 func TestGetReport_LdflagsWinOverRelease(t *testing.T) {
+	isolateHome(t)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte(`{"tag_name": "v1.25.0", "target_commitish": "ffffffffffff", "published_at": "2026-07-01T12:00:00Z"}`))

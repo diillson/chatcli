@@ -536,7 +536,6 @@ func (a *AgentMode) readLineFromGoPrompt() string {
 		"  > ",
 		noopCompleter,
 		prompt.OptionParser(pasteParser),
-		prompt.OptionWriter(newPlatformPromptWriter()),
 		prompt.OptionPrefixTextColor(prompt.Green),
 		prompt.OptionInputTextColor(prompt.White),
 	)
