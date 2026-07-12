@@ -45,6 +45,11 @@ func typewriterPrint(text string, delay time.Duration) {
 }
 
 // ANSI Color codes exportados
+//
+// Legacy path: hue constants (duplicated from cli/colors.go — the
+// duplication is exactly what ui/kit exists to end). They remain because
+// they are exported and load-bearing across cli, but new and migrated code
+// styles through kit.Colorize / kit.Style with a theme.Role.
 const (
 	ColorReset  = "\033[0m"
 	ColorGreen  = "\033[32m"

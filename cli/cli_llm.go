@@ -18,6 +18,8 @@ import (
 	"github.com/diillson/chatcli/llm/catalog"
 	"github.com/diillson/chatcli/llm/client"
 	"github.com/diillson/chatcli/models"
+	"github.com/diillson/chatcli/ui/kit"
+	"github.com/diillson/chatcli/ui/theme"
 	"github.com/diillson/chatcli/utils"
 	"go.uber.org/zap"
 )
@@ -136,10 +138,10 @@ func (cli *ChatCLI) announceQueueDrain() {
 	fmt.Print("\033[0m")
 	_ = os.Stdout.Sync()
 	if remaining > 0 {
-		fmt.Printf("\n  %s\n", colorize(i18n.T("queue.processing_remaining", remaining), ColorGray))
+		fmt.Printf("\n%s\n", kit.NoticeRole(kit.GlyphRunning, i18n.T("queue.processing_remaining", remaining), theme.RoleAction))
 		return
 	}
-	fmt.Printf("\n  %s\n", colorize(i18n.T("queue.processing"), ColorGray))
+	fmt.Printf("\n%s\n", kit.NoticeRole(kit.GlyphRunning, i18n.T("queue.processing"), theme.RoleAction))
 }
 
 // acquireOperationContext creates the cancellable context that drives the

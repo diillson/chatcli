@@ -46,6 +46,7 @@ import (
 	"github.com/diillson/chatcli/llm/manager"
 	"github.com/diillson/chatcli/llm/openaiassistant"
 	"github.com/diillson/chatcli/pkg/persona"
+	"github.com/diillson/chatcli/ui/kit"
 	"github.com/diillson/chatcli/ui/theme"
 	"github.com/fsnotify/fsnotify"
 
@@ -979,10 +980,10 @@ func (cli *ChatCLI) executor(in string) {
 			cli.messageQueue = append(cli.messageQueue, in)
 			queueLen := len(cli.messageQueue)
 			cli.messageQueueMu.Unlock()
-			fmt.Printf("\n  %s\n", colorize(i18n.T("queue.message_queued", queueLen), ColorGray))
+			fmt.Printf("\n%s\n", kit.Notice(kit.LevelInfo, i18n.T("queue.message_queued", queueLen)))
 		} else {
 			cli.messageQueueMu.Unlock()
-			fmt.Printf("\n  %s\n", colorize(i18n.T("queue.full"), ColorYellow))
+			fmt.Printf("\n%s\n", kit.Notice(kit.LevelWarn, i18n.T("queue.full")))
 		}
 		return
 	}
