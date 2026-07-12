@@ -11,6 +11,7 @@ import (
 	"github.com/diillson/chatcli/client/remote"
 	"github.com/diillson/chatcli/i18n"
 	"github.com/diillson/chatcli/models"
+	"github.com/diillson/chatcli/ui/kit"
 )
 
 func (cli *ChatCLI) RunAgentOnce(ctx context.Context, input string, autoExecute bool) error {
@@ -81,7 +82,7 @@ func (cli *ChatCLI) handleSaveSession(ctx context.Context, name string) {
 	if cli.isRemote {
 		rc := cli.getRemoteClient()
 		if rc == nil {
-			fmt.Println(i18n.T("session.error_save", fmt.Errorf("remote client unavailable")))
+			fmt.Println(kit.Notice(kit.LevelError, i18n.T("session.error_save", fmt.Errorf("remote client unavailable"))))
 			return
 		}
 
@@ -135,10 +136,10 @@ func (cli *ChatCLI) handleSaveSession(ctx context.Context, name string) {
 	// Local only (not connected)
 	sd := cli.buildSessionData()
 	if err := cli.sessionManager.SaveSessionV2(name, sd); err != nil {
-		fmt.Println(i18n.T("session.error_save", err))
+		fmt.Println(kit.Notice(kit.LevelError, i18n.T("session.error_save", err)))
 	} else {
 		cli.currentSessionName = name
-		fmt.Println(i18n.T("session.save_success", name))
+		fmt.Println(kit.Notice(kit.LevelSuccess, i18n.T("session.save_success", name)))
 	}
 }
 
@@ -146,7 +147,7 @@ func (cli *ChatCLI) handleLoadSession(ctx context.Context, name string) {
 	if cli.isRemote {
 		rc := cli.getRemoteClient()
 		if rc == nil {
-			fmt.Println(i18n.T("session.error_load", fmt.Errorf("remote client unavailable")))
+			fmt.Println(kit.Notice(kit.LevelError, i18n.T("session.error_load", fmt.Errorf("remote client unavailable"))))
 			return
 		}
 
@@ -194,11 +195,11 @@ func (cli *ChatCLI) handleLoadSession(ctx context.Context, name string) {
 	// Local only
 	sd, err := cli.sessionManager.LoadSessionV2(name)
 	if err != nil {
-		fmt.Println(i18n.T("session.error_load", err))
+		fmt.Println(kit.Notice(kit.LevelError, i18n.T("session.error_load", err)))
 	} else {
 		cli.restoreSessionData(sd)
 		cli.currentSessionName = name
-		fmt.Println(i18n.T("session.load_success", name))
+		fmt.Println(kit.Notice(kit.LevelSuccess, i18n.T("session.load_success", name)))
 	}
 }
 
@@ -322,7 +323,7 @@ func (cli *ChatCLI) handleListSessions(ctx context.Context) {
 	// Local only
 	sessions, err := cli.sessionManager.ListSessions()
 	if err != nil {
-		fmt.Println(i18n.T("session.error_list", err))
+		fmt.Println(kit.Notice(kit.LevelError, i18n.T("session.error_list", err)))
 		return
 	}
 	if len(sessions) == 0 {
@@ -339,7 +340,7 @@ func (cli *ChatCLI) handleDeleteSession(ctx context.Context, name string) {
 	if cli.isRemote {
 		rc := cli.getRemoteClient()
 		if rc == nil {
-			fmt.Println(i18n.T("session.error_delete", fmt.Errorf("remote client unavailable")))
+			fmt.Println(kit.Notice(kit.LevelError, i18n.T("session.error_delete", fmt.Errorf("remote client unavailable"))))
 			return
 		}
 
@@ -432,9 +433,9 @@ func (cli *ChatCLI) handleDeleteSession(ctx context.Context, name string) {
 
 	// Local only
 	if err := cli.sessionManager.DeleteSession(name); err != nil {
-		fmt.Println(i18n.T("session.error_delete", err))
+		fmt.Println(kit.Notice(kit.LevelError, i18n.T("session.error_delete", err)))
 	} else {
-		fmt.Println(i18n.T("session.delete_success", name))
+		fmt.Println(kit.Notice(kit.LevelSuccess, i18n.T("session.delete_success", name)))
 		if cli.currentSessionName == name {
 			cli.clearAllHistories()
 			cli.currentSessionName = ""
