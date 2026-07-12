@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"runtime"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -86,9 +85,7 @@ func (cli *ChatCLI) startProcessingLifecycle() func() {
 			atomic.StoreInt32(&cli.prefixSpinnerIdx, 0)
 		}
 	}
-	if runtime.GOOS != "windows" {
-		go cli.runPrefixSpinner(spinnerDone)
-	}
+	go cli.runPrefixSpinner(spinnerDone)
 	cli.isExecuting.Store(true)
 	return stopSpinner
 }

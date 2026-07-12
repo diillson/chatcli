@@ -122,6 +122,11 @@ func installSignalHandlers(isExecuting func() bool, cancelOperation, cancelRoot 
 }
 
 func main() {
+	// Opt the legacy Windows console into ANSI/VT processing before anything
+	// prints (spinners, colors, \r repaints). No-op elsewhere and on handles
+	// that are not a console.
+	utils.EnableVirtualTerminal()
+
 	// Check for subcommands (server, connect) before processing standard flags.
 	// These subcommands have their own flag sets and should not go through cli.Parse().
 	if dispatchSubcommand() {

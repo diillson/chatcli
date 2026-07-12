@@ -988,15 +988,11 @@ func (cli *ChatCLI) executor(in string) {
 	}
 
 	cli.interactionState = StateProcessing
-	if runtime.GOOS == "windows" {
-		// On Windows, run synchronously so go-prompt naturally redraws the prompt
-		// after the response completes. SIGWINCH doesn't exist on Windows, so the
-		// async approach leaves go-prompt waiting for a keypress before redrawing.
-		// Ctrl+C still works via the OS signal handler (SIGINT) in a separate goroutine.
-		cli.processLLMRequest(context.Background(), in)
-	} else {
-		go cli.processLLMRequest(context.Background(), in)
-	}
+	// Async on every platform: go-prompt keeps reading while the turn runs,
+	// which is what makes the type-ahead queue and the prefix spinner work.
+	// The post-turn prompt redraw is driven by forceRefreshPrompt — SIGWINCH
+	// self-signal on Unix, injected no-op key event on Windows.
+	go cli.processLLMRequest(context.Background(), in)
 }
 
 // IsExecuting retorna true se uma operação está em andamento
@@ -1064,8 +1060,16 @@ func (cli *ChatCLI) Start(ctx context.Context) {
 				}
 			}()
 
+			// On Windows, go-tty turns AltGr characters ("/" on ABNT2, "@"
+			// on German, …) into ESC+rune, which go-prompt would insert
+			// verbatim into the buffer as a stray glyph. Sanitize before the
+			// paste detector sees the stream. See wininput.go.
+			var inputParser prompt.ConsoleParser = prompt.NewStandardInputParser()
+			if runtime.GOOS == "windows" {
+				inputParser = newAltGrParser(inputParser)
+			}
 			pasteParser := paste.NewBracketedPasteParser(
-				prompt.NewStandardInputParser(),
+				inputParser,
 				func(info paste.Info) {
 					cli.lastPasteInfo = &info
 				},
