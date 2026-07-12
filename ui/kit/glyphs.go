@@ -53,7 +53,7 @@ var glyphTable = [...]struct {
 }{
 	GlyphSuccess:   {"✓", "+", theme.RoleToolSuccess},
 	GlyphError:     {"✗", "x", theme.RoleToolError},
-	GlyphWarn:      {"▲", "!", theme.RoleStatus},
+	GlyphWarn:      {"▲", "!", theme.RoleWarning},
 	GlyphInfo:      {"•", "i", theme.RoleMuted},
 	GlyphBullet:    {"·", "-", theme.RoleMuted},
 	GlyphArrow:     {"❯", ">", theme.RoleModelName},
