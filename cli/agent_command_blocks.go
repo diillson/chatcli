@@ -579,8 +579,8 @@ func (a *AgentMode) cmdAddContextContinue(ctx context.Context, renderer *agent.U
 		return false
 	}
 
-	fmt.Println(i18n.T("agent.output_header"))
-	fmt.Println(kit.Rule())
+	fmt.Println()
+	fmt.Println(kit.RuleTitled(i18n.T("agent.output_header")))
 	fmt.Print(outputs[cmdNum-1].Output)
 	fmt.Println(kit.Rule())
 
