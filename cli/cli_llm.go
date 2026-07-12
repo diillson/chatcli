@@ -526,7 +526,9 @@ func (cli *ChatCLI) switchProvider() {
 	fmt.Println(i18n.T("cli.switch.available_providers"))
 	availableProviders := cli.manager.GetAvailableProviders()
 	for i, provider := range availableProviders {
-		fmt.Printf("%d. %s\n", i+1, provider)
+		// Two-space indent matches the model listing in listAvailableModels —
+		// adjacent pickers must share the same grid.
+		fmt.Printf("  %d. %s\n", i+1, provider)
 	}
 	cli.interactionState = StateSwitchingProvider
 }
