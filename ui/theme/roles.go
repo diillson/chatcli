@@ -43,6 +43,11 @@ const (
 	RoleHeader
 	// RoleMuted: secondary text, metrics, "(default)" hints.
 	RoleMuted
+	// RoleWarning: warnings and partial-success states. Added when the kit's
+	// warning glyph landed: every other severity already had a role, and
+	// without this one warnings rendered in the Info hue while the legacy
+	// yellow path went through Palette.Warning — two colors for one meaning.
+	RoleWarning
 )
 
 // ColorFor resolves a role to its palette color under the active theme.
@@ -71,6 +76,8 @@ func (t Theme) ColorFor(r Role) Color {
 		return p.Accent
 	case RoleMuted:
 		return p.Muted
+	case RoleWarning:
+		return p.Warning
 	default: // RoleBorder
 		return p.Border
 	}

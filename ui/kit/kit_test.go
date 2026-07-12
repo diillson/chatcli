@@ -246,3 +246,19 @@ func TestContentWidthFloor(t *testing.T) {
 		t.Fatalf("margin larger than RightMargin without hitting floor: term=%d content=%d", TermWidth(), w)
 	}
 }
+
+// TestWarnGlyphUsesWarningHue guards the severity contract: the warning
+// glyph must resolve to the palette's Warning color, not Info — the exact
+// mismatch that motivated adding theme.RoleWarning.
+func TestWarnGlyphUsesWarningHue(t *testing.T) {
+	pinTheme(t, theme.ProfileTrueColor)
+	warn := theme.Active().ColorFor(theme.RoleWarning)
+	status := theme.Active().ColorFor(theme.RoleStatus)
+	if warn == status {
+		t.Skip("theme maps warning and info to the same color; nothing to distinguish")
+	}
+	got := Sym(GlyphWarn)
+	if !strings.Contains(got, warn.SGR(theme.ProfileTrueColor)) {
+		t.Fatalf("warn glyph not in Warning hue: %q", got)
+	}
+}
