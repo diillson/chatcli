@@ -6,8 +6,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/diillson/chatcli/ui/kit"
 	"github.com/diillson/chatcli/ui/theme"
-	"golang.org/x/term"
 )
 
 // spinnerFrames is the single source of the braille spinner animation, shared
@@ -109,13 +109,10 @@ func (am *AnimationManager) ShowThinkingAnimation(message string) {
 	}()
 }
 
-// terminalCols returns the current stdout width, with a conservative default
-// when stdout is not a terminal or the size cannot be determined.
+// terminalCols returns the current stdout width. Delegates to the kit's
+// single width helper (fallback 100 off-terminal).
 func terminalCols() int {
-	if w, _, err := term.GetSize(int(os.Stdout.Fd())); err == nil && w > 0 {
-		return w
-	}
-	return 100
+	return kit.TermWidth()
 }
 
 // clampSpinnerMessage bounds msg so the rendered spinner line (message +

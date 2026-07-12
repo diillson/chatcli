@@ -24,53 +24,31 @@ package agent
 
 import (
 	"fmt"
-	"os"
 	"strings"
 	"time"
 
 	"github.com/charmbracelet/lipgloss"
-	"github.com/mattn/go-runewidth"
-	"golang.org/x/term"
+	"github.com/diillson/chatcli/ui/kit"
 )
 
-// init normalizes go-runewidth so emoji-bearing content reports its
-// real terminal-cell width. With the library defaults
-// (EastAsianWidth=false, StrictEmojiNeutral=true) emojis such as
-// "🏟️", "⚫", "🔴" are measured as 1 cell while almost every modern
-// terminal renders them as 2 — and the drift compounded into right
-// borders being pushed off the screen. Pinning StrictEmojiNeutral
-// to false makes the measurement match the rendering across iTerm2,
-// Terminal.app, VSCode, Windows Terminal, and Alacritty.
-func init() {
-	runewidth.DefaultCondition.StrictEmojiNeutral = false
-	runewidth.DefaultCondition.EastAsianWidth = false
-}
+// NOTE: the runewidth normalization (StrictEmojiNeutral=false) that used to
+// live in an init() here moved to ui/kit, which this package imports — the
+// emoji-width guarantee is unchanged (kit has a guard test for it).
 
-// TerminalWidth reports the live terminal width in columns, falling
-// back to a safe default when stdout is not a TTY (CI, tests, piped
-// runs). The 100-column fallback is wider than the legacy 87-col
-// constant so piped runs still produce a readable box; callers that
-// need a tighter cap clamp the result themselves.
+// TerminalWidth reports the live terminal width in columns. Delegates to
+// kit.TermWidth — the single width helper (fallback 100 when stdout is not
+// a TTY).
 func TerminalWidth() int {
-	w, _, err := term.GetSize(int(os.Stdout.Fd())) //#nosec G115 -- bounded by domain
-	if err != nil || w <= 0 {
-		return 100
-	}
-	return w
+	return kit.TermWidth()
 }
 
-// EnvelopeWidth returns the width to use for a response envelope on
-// the current terminal. It reserves 2 columns of right-edge margin so
-// iTerm/VSCode native scrollbars never clip the border, and clamps to
-// a minimum of 40 cols so the box never collapses on tiny terminals.
-// No upper cap is applied — full-screen terminals should use their
-// full width (this was a direct user preference).
+// EnvelopeWidth returns the width to use for a response envelope on the
+// current terminal. Delegates to kit.ContentWidth: right-edge margin so
+// native scrollbars never clip the border, clamped to a minimum so the box
+// never collapses on tiny terminals; no upper cap (full-screen terminals
+// use their full width — a direct user preference).
 func EnvelopeWidth() int {
-	w := TerminalWidth() - 2
-	if w < 40 {
-		return 40
-	}
-	return w
+	return kit.ContentWidth()
 }
 
 // ResponseEnvelopeOptions configures a unified bordered envelope. All
@@ -260,51 +238,10 @@ func (r *UIRenderer) RenderResponseEnvelope(opts ResponseEnvelopeOptions) {
 	fmt.Println(bottomLine)
 }
 
-// buildBilateralBorder constructs a horizontal border with optional
-// left and right labels embedded between the corner glyphs:
-//
-//	<lc>─ HeaderLeft ──────── HeaderRight ─<rc>
-//
-// Layout rules (in visible columns):
-//   - <lc> + '─' + leftLabel  if leftLabel != ""   (else <lc> + '─')
-//   - fill of '─' to absorb remaining width
-//   - rightLabel + '─' + <rc> if rightLabel != ""  (else '─' + <rc>)
-//
-// targetWidth is the EXACT visible width we must produce, measured by
-// lipgloss.Width on the matching body. A degenerate case where the
-// labels alone exceed targetWidth falls back to a minimal border (the
-// labels survive; the fill goes to zero).
+// buildBilateralBorder constructs a horizontal border with optional left
+// and right labels embedded between the corner glyphs. Geometry lives in
+// kit.BilateralBorder; coloring stays here so legacy ANSI-constant call
+// sites keep byte-identical output.
 func buildBilateralBorder(lc, rc rune, leftLabel, rightLabel string, targetWidth int, color string, r *UIRenderer) string {
-	const cornerCols = 1    // lc / rc themselves
-	const dashCornerPad = 1 // the "─" that hugs each corner
-
-	leftBlock := string(lc) + "─"
-	rightBlock := "─" + string(rc)
-	reserved := cornerCols*2 + dashCornerPad*2 // 4 cols of "<lc>─...─<rc>"
-
-	leftVis := lipgloss.Width(leftLabel)
-	rightVis := lipgloss.Width(rightLabel)
-
-	fill := targetWidth - reserved - leftVis - rightVis
-	if fill < 0 {
-		// Labels overflow the target — emit minimal border with the
-		// labels intact so callers can still read them. This is a
-		// safety net; in practice the envelope sizes the body to
-		// accommodate normal labels.
-		return r.Colorize(leftBlock+leftLabel+rightLabel+rightBlock, color+ColorBold)
-	}
-
-	dashes := strings.Repeat("─", fill)
-
-	var sb strings.Builder
-	sb.WriteString(leftBlock)
-	if leftVis > 0 {
-		sb.WriteString(leftLabel)
-	}
-	sb.WriteString(dashes)
-	if rightVis > 0 {
-		sb.WriteString(rightLabel)
-	}
-	sb.WriteString(rightBlock)
-	return r.Colorize(sb.String(), color+ColorBold)
+	return r.Colorize(kit.BilateralBorder(lc, rc, leftLabel, rightLabel, targetWidth), color+ColorBold)
 }

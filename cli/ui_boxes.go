@@ -2,24 +2,21 @@ package cli
 
 import (
 	"fmt"
-	"os"
 	"strings"
-	"unicode/utf8"
 
-	"github.com/mattn/go-runewidth"
-	"golang.org/x/term"
+	"github.com/diillson/chatcli/ui/kit"
 )
 
 // ─── Terminal Box Helpers ──────────────────────────────────────
 // Shared UI functions for rendering consistent boxed output
 // across /mcp, /hooks, /cost, /channel, /worktree, etc.
+// Width and truncation math delegate to ui/kit so every surface
+// agrees on geometry; these helpers survive as the legacy color-
+// constant facade until the /config surfaces migrate to kit
+// components directly.
 
 func uiTermWidth() int {
-	w, _, err := term.GetSize(int(os.Stdout.Fd())) //#nosec G115 -- value bounded by domain
-	if err != nil || w <= 0 {
-		return 80
-	}
-	return w
+	return kit.TermWidth()
 }
 
 // uiBox renders a box header: ╭── icon TITLE
@@ -51,30 +48,9 @@ func uiBoxLine(color, text string) string {
 	return uiPrefix(color) + ansiTruncate(text, maxCols)
 }
 
-// ansiTruncate clamps s to at most maxCols visible columns (wide runes count
-// per display cell), preserving ANSI color sequences and appending an
-// ellipsis plus a color reset when content was dropped so styling never
-// bleeds into the next line.
+// ansiTruncate clamps s to at most maxCols visible columns, preserving ANSI
+// sequences and appending an ellipsis when content was dropped. Logic in
+// kit.Truncate.
 func ansiTruncate(s string, maxCols int) string {
-	if visibleLen(s) <= maxCols {
-		return s
-	}
-	var b strings.Builder
-	cols := 0
-	for i := 0; i < len(s); {
-		if loc := ansiRe.FindStringIndex(s[i:]); loc != nil && loc[0] == 0 {
-			b.WriteString(s[i : i+loc[1]])
-			i += loc[1]
-			continue
-		}
-		r, size := utf8.DecodeRuneInString(s[i:])
-		w := runewidth.RuneWidth(r)
-		if cols+w > maxCols-1 { // reserve one column for the ellipsis
-			break
-		}
-		b.WriteRune(r)
-		cols += w
-		i += size
-	}
-	return b.String() + "…" + ColorReset
+	return kit.Truncate(s, maxCols)
 }
