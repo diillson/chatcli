@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/diillson/chatcli/i18n"
+	"github.com/diillson/chatcli/ui/kit"
 	"github.com/diillson/chatcli/utils"
 	"go.uber.org/zap"
 )
@@ -171,10 +172,11 @@ func (e *CommandExecutor) executeInteractive(ctx context.Context, shell, shellFl
 	start := time.Now()
 	result := &ExecutionResult{Command: command}
 
-	fmt.Println(i18n.T("agent.executor.interactive_mode_header"))
+	fmt.Println()
+	fmt.Println(kit.RuleTitled(i18n.T("agent.executor.interactive_mode_header")))
 	fmt.Println(i18n.T("agent.executor.interactive_mode_info"))
 	fmt.Println(i18n.T("agent.executor.interactive_mode_exit_tip"))
-	fmt.Println("----------------------------------------------")
+	fmt.Println(kit.Rule())
 
 	if runtime.GOOS != "windows" {
 		saneCmd := exec.Command("stty", "sane")
@@ -230,7 +232,8 @@ func (e *CommandExecutor) executeInteractive(ctx context.Context, shell, shellFl
 	err := cmd.Run()
 	result.Duration = time.Since(start)
 
-	fmt.Println("\n" + i18n.T("agent.executor.interactive_mode_footer"))
+	fmt.Println()
+	fmt.Println(kit.RuleTitled(i18n.T("agent.executor.interactive_mode_footer")))
 
 	if err != nil {
 		var exitErr *exec.ExitError
