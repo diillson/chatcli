@@ -18,7 +18,6 @@ package cli
 import (
 	"context"
 	"os"
-	"runtime"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -356,9 +355,7 @@ func (cli *ChatCLI) chatAskFollowup(
 	cli.interactionState = StateProcessing
 	cli.isExecuting.Store(true)
 	spinnerDone := make(chan struct{})
-	if runtime.GOOS != "windows" {
-		go cli.runPrefixSpinner(spinnerDone)
-	}
+	go cli.runPrefixSpinner(spinnerDone)
 
 	resp, err := activeClient.SendPrompt(ctx, prompt, follow, effectiveMaxTokens)
 	if cli.refreshClientOnAuthError(err) {

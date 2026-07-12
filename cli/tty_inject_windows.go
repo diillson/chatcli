@@ -51,6 +51,7 @@ const (
 	stdInputHandle = ^uintptr(0) - 9 // STD_INPUT_HANDLE = -10
 	keyEventType   = 0x0001          // KEY_EVENT
 	vkReturn       = 0x0D            // VK_RETURN
+	vkPageUp       = 0x21            // VK_PRIOR (PageUp)
 )
 
 // keyEventRecord mirrors the Win32 KEY_EVENT_RECORD struct used inside
@@ -74,6 +75,47 @@ type inputRecord struct {
 	EventType uint16
 	_         [2]byte // padding for ABI alignment
 	Event     keyEventRecord
+}
+
+// injectPromptWake writes a single no-op key event into the console input
+// buffer so a live go-prompt wakes from ReadConsoleInput and repaints the
+// prompt (re-evaluating the animated live prefix). This is the Windows dual
+// of the SIGWINCH self-signal used on Unix: there is no SIGWINCH here, and
+// go-prompt drops single NUL bytes, so we synthesize a PageUp key press —
+// go-tty translates VK_PRIOR into the full "ESC [ 5 ~" batch, which
+// go-prompt maps to the PageUp key that neither go-prompt nor chatcli binds
+// to any action. Net effect: one render pass, zero buffer mutation.
+//
+// Only a key-down record is sent: go-tty ignores key-up events anyway, and
+// each extra record costs one wasted read cycle on the prompt loop.
+func injectPromptWake() error {
+	hStdin, _, _ := procGetStdHandle.Call(stdInputHandle)
+	if hStdin == 0 || hStdin == ^uintptr(0) {
+		return errTTYInjectUnsupported
+	}
+
+	event := inputRecord{
+		EventType: keyEventType,
+		Event: keyEventRecord{
+			KeyDown:        1,
+			RepeatCount:    1,
+			VirtualKeyCode: vkPageUp,
+		},
+	}
+
+	var written uint32
+	// #nosec G103 -- same contract as injectTTYLine: the kernel copies the
+	// record before the synchronous syscall returns.
+	r1, _, callErr := procWriteConsoleInputW.Call(
+		hStdin,
+		uintptr(unsafe.Pointer(&event)),
+		1,
+		uintptr(unsafe.Pointer(&written)),
+	)
+	if r1 == 0 {
+		return fmt.Errorf("wake injection via WriteConsoleInputW: %v", callErr)
+	}
+	return nil
 }
 
 // injectTTYLine writes line + Enter to the controlling console's input
