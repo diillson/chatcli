@@ -171,7 +171,9 @@ func (r *UIRenderer) StreamOutput(line string) {
 	// contra blocos com \n embutido para nunca emitir uma linha sem prefixo.
 	for _, sub := range strings.Split(line, "\n") {
 		if strings.HasPrefix(sub, "ERR: ") {
-			emit("⚠️  ", strings.TrimPrefix(sub, "ERR: "), ColorYellow)
+			// kit.GlyphWarn é 1 célula fixa (sem VS-16), então o cálculo de
+			// largura nunca deriva — o "⚠️ " antigo media 1 e pintava 2.
+			emit(kit.GlyphWarn.String()+"  ", strings.TrimPrefix(sub, "ERR: "), ColorYellow)
 		} else {
 			emit("  ", sub, ColorGray) // indentação padrão
 		}
@@ -226,12 +228,12 @@ func (r *UIRenderer) ShowInPager(text string) error {
 func (r *UIRenderer) PrintPlanCompact(blocks []CommandBlock, outputs []*CommandOutput) {
 	fmt.Println(r.Colorize(i18n.T("agent.plan.compact_view"), ColorLime+ColorBold))
 	for i, b := range blocks {
-		status := "⏳"
+		status := kit.Sym(kit.GlyphRunning)
 		if i < len(outputs) && outputs[i] != nil {
 			if strings.TrimSpace(outputs[i].ErrorMsg) == "" {
-				status = "✅"
+				status = kit.Sym(kit.GlyphSuccess)
 			} else {
-				status = "❌"
+				status = kit.Sym(kit.GlyphError)
 			}
 		}
 		title := strings.TrimSpace(b.Description)
@@ -358,11 +360,12 @@ func (r *UIRenderer) PrintLastResult(outputs []*CommandOutput, lastIdx int) {
 	fmt.Printf("\n%s\n", tipsMessage)
 }
 
-// PrintHeader imprime o cabeçalho do modo agente
+// PrintHeader imprime o cabeçalho do modo agente: uma régua titulada
+// responsiva (hierarquia título-bold + traços dim) no lugar das duas linhas
+// de ━ com 58 colunas fixas.
 func (r *UIRenderer) PrintHeader() {
-	fmt.Println("\n" + r.Colorize(" "+strings.Repeat("━", 58), ColorGray))
-	fmt.Println(r.Colorize(i18n.T("agent.header.title"), ColorLime+ColorBold))
-	fmt.Println(r.Colorize(" "+strings.Repeat("━", 58), ColorGray))
+	fmt.Println()
+	fmt.Println(kit.RuleTitled(i18n.T("agent.header.title")))
 	fmt.Println(r.Colorize(i18n.T("agent.header.description"), ColorGray))
 }
 
@@ -402,8 +405,8 @@ func (r *UIRenderer) PrintMenu() {
 	// fixed width so descriptions stay vertically aligned.
 	renderColumn := func(title string, entries []entry) string {
 		const keyWidth = 6
-		head := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("10")).Render(title)
-		sep := lipgloss.NewStyle().Foreground(lipgloss.Color("8")).Render(strings.Repeat("─", lipgloss.Width(head)))
+		head := kit.Style(theme.RoleHeader).Bold(true).Render(title)
+		sep := kit.Style(theme.RoleMuted).Render(strings.Repeat("─", lipgloss.Width(head)))
 		rows := []string{head, sep}
 		for _, e := range entries {
 			key := r.Colorize(fmt.Sprintf("%-*s", keyWidth, e.key), ColorYellow)
@@ -421,10 +424,9 @@ func (r *UIRenderer) PrintMenu() {
 	body := lipgloss.JoinHorizontal(lipgloss.Top, col1, col2, col3)
 
 	fmt.Println()
-	fmt.Println(r.Colorize(i18n.T("agent.menu.header"), ColorLime+ColorBold))
-	fmt.Println(r.Colorize(strings.Repeat("─", 60), ColorGray))
+	fmt.Println(kit.RuleTitled(i18n.T("agent.menu.header")))
 	fmt.Println(body)
-	fmt.Println(r.Colorize(strings.Repeat("─", 60), ColorGray))
+	fmt.Println(kit.Rule())
 }
 
 // RenderModeBanner draws the entry-banner used by /coder and /agent.
@@ -452,9 +454,9 @@ func (r *UIRenderer) RenderModeBanner(icon, title string, color string, fields [
 
 	rows := make([]string, 0, len(fields))
 	for _, f := range fields {
-		label := lipgloss.NewStyle().Foreground(lipgloss.Color("8")).Render(
-			fmt.Sprintf("%-*s", maxLabel, f[0]),
-		)
+		// kit.PadRight mede largura visível — "%-*s" contava bytes e
+		// desalinhava labels traduzidos acentuados neste banner.
+		label := kit.Style(theme.RoleMuted).Render(kit.PadRight(f[0], maxLabel))
 		rows = append(rows, label+r.Colorize("  ·  ", ColorGray)+f[1])
 	}
 	r.RenderTimelineEvent(icon, title, strings.Join(rows, "\n"), color)
@@ -687,14 +689,16 @@ func (r *UIRenderer) RenderToolCall(toolName, rawArgs string) {
 	r.RenderTimelineEvent("🔨", i18n.T("agent.ui.action_title"), content, ColorYellow)
 }
 
-// RenderToolResult exibe o resultado da execução
+// RenderToolResult exibe o resultado da execução. O glifo do título vem do
+// vocabulário canônico (✓/✗, 1 célula, sem propriedade Emoji) e herda a cor
+// da borda do card — verde/vermelho continuam carregando o estado.
 func (r *UIRenderer) RenderToolResult(output string, isError bool) {
-	icon := "✅"
+	icon := kit.GlyphSuccess.String()
 	title := i18n.T("agent.ui.result_success")
 	color := ColorGreen
 
 	if isError {
-		icon = "❌"
+		icon = kit.GlyphError.String()
 		title = i18n.T("agent.ui.result_failure")
 		color = ColorRed
 	}
@@ -731,12 +735,12 @@ func (r *UIRenderer) RenderToolCallMinimal(toolName, rawArgs string, current, to
 
 // RenderToolResultMinimal exibe o resultado em modo compacto
 func (r *UIRenderer) RenderToolResultMinimal(output string, isError bool) {
-	icon := "✅"
+	icon := kit.GlyphSuccess.String()
 	title := i18n.T("agent.ui.result_ok")
 	color := ColorGreen
 
 	if isError {
-		icon = "❌"
+		icon = kit.GlyphError.String()
 		title = i18n.T("agent.ui.result_error")
 		color = ColorRed
 	}
@@ -762,23 +766,11 @@ func cleanArgsForDisplay(args string) string {
 	return re.ReplaceAllString(args, "$1=\"[DADOS_BASE64_OCULTOS]\"")
 }
 
-// RenderBatchHeader exibe um cabeçalho indicando o início de um lote
+// RenderBatchHeader exibe um cabeçalho indicando o início de um lote —
+// uma régua titulada responsiva no lugar do sanduíche de ═ em tela cheia.
 func (r *UIRenderer) RenderBatchHeader(totalActions int) {
-	width := kit.TermWidth()
-
-	msg := i18n.T("agent.ui.batch_started", totalActions)
-	line := strings.Repeat("═", width)
-
-	// Centralizar visualmente
-	padding := (width - VisibleLen(msg)) / 2
-	if padding < 0 {
-		padding = 0
-	}
-
 	fmt.Println()
-	fmt.Println(r.Colorize(line, ColorPurple))
-	fmt.Printf("%s%s\n", strings.Repeat(" ", padding), r.Colorize(msg, ColorPurple+ColorBold))
-	fmt.Println(r.Colorize(line, ColorPurple))
+	fmt.Println(kit.RuleTitled(i18n.T("agent.ui.batch_started", totalActions)))
 }
 
 // RenderToolCallWithProgress exibe a chamada da ferramenta em formato de CARD (Box),
@@ -822,7 +814,7 @@ func (r *UIRenderer) RenderBatchSummary(successCount, total int, hasError bool) 
 		msg := i18n.T("agent.ui.batch_completed", total)
 		fmt.Println(r.Colorize(msg, ColorGreen))
 	}
-	fmt.Println(r.Colorize(strings.Repeat("─", 60), ColorGray))
+	fmt.Println(kit.Rule())
 }
 
 // streamBoxHeaderWidth captures the visible width of the header drawn by
@@ -988,7 +980,7 @@ func (r *UIRenderer) CompactAssistantText(text string) {
 	if text == "" {
 		return
 	}
-	icon := r.Colorize("◆", ColorCyan)
+	icon := r.Colorize(kit.GlyphAssistant.String(), ColorCyan)
 	for i, line := range strings.Split(text, "\n") {
 		trimmed := strings.TrimRight(line, " \t")
 		var prefix string

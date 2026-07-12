@@ -58,7 +58,7 @@ var glyphTable = [...]struct {
 	GlyphBullet:    {"·", "-", theme.RoleMuted},
 	GlyphArrow:     {"❯", ">", theme.RoleModelName},
 	GlyphRunning:   {"↻", "~", theme.RoleAction},
-	GlyphAssistant: {"◆", "*", theme.RoleResponse},
+	GlyphAssistant: {"◆", "*", theme.RoleReasoning},
 	GlyphEllipsis:  {"…", "...", theme.RoleMuted},
 }
 
