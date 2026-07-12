@@ -113,7 +113,7 @@ func injectPromptWake() error {
 		uintptr(unsafe.Pointer(&written)),
 	)
 	if r1 == 0 {
-		return fmt.Errorf("WriteConsoleInputW failed: %v", callErr)
+		return fmt.Errorf("wake injection via WriteConsoleInputW: %v", callErr)
 	}
 	return nil
 }
