@@ -7,6 +7,7 @@ package cli
 
 import (
 	"bytes"
+	"errors"
 	"testing"
 
 	prompt "github.com/c-bata/go-prompt"
@@ -127,14 +128,20 @@ func TestStripAltGrEscape(t *testing.T) {
 
 // fakeConsoleParser feeds canned batches to the sanitizer wrapper.
 type fakeConsoleParser struct {
-	batches [][]byte
-	idx     int
+	batches  [][]byte
+	idx      int
+	readErr  error
+	setupped bool
+	toredown bool
 }
 
-func (f *fakeConsoleParser) Setup() error                { return nil }
-func (f *fakeConsoleParser) TearDown() error             { return nil }
+func (f *fakeConsoleParser) Setup() error                { f.setupped = true; return nil }
+func (f *fakeConsoleParser) TearDown() error             { f.toredown = true; return nil }
 func (f *fakeConsoleParser) GetWinSize() *prompt.WinSize { return &prompt.WinSize{Row: 24, Col: 80} }
 func (f *fakeConsoleParser) Read() ([]byte, error) {
+	if f.readErr != nil {
+		return nil, f.readErr
+	}
 	if f.idx >= len(f.batches) {
 		return nil, nil
 	}
@@ -162,5 +169,33 @@ func TestAltGrParserReadSanitizes(t *testing.T) {
 	got3, _ := p.Read()
 	if !bytes.Equal(got3, []byte("plain")) {
 		t.Fatalf("Read #3 = %q, want %q", got3, "plain")
+	}
+}
+
+func TestAltGrParserDelegates(t *testing.T) {
+	inner := &fakeConsoleParser{}
+	p := newAltGrParser(inner)
+
+	if err := p.Setup(); err != nil || !inner.setupped {
+		t.Fatalf("Setup: err=%v, delegated=%v", err, inner.setupped)
+	}
+	if ws := p.GetWinSize(); ws == nil || ws.Col != 80 || ws.Row != 24 {
+		t.Fatalf("GetWinSize = %+v, want 80x24", ws)
+	}
+	if err := p.TearDown(); err != nil || !inner.toredown {
+		t.Fatalf("TearDown: err=%v, delegated=%v", err, inner.toredown)
+	}
+}
+
+func TestAltGrParserReadPropagatesError(t *testing.T) {
+	wantErr := errors.New("EAGAIN")
+	p := newAltGrParser(&fakeConsoleParser{readErr: wantErr})
+
+	data, err := p.Read()
+	if !errors.Is(err, wantErr) {
+		t.Fatalf("Read error = %v, want %v", err, wantErr)
+	}
+	if data != nil {
+		t.Fatalf("Read data = %v, want nil on error", data)
 	}
 }
