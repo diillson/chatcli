@@ -213,7 +213,7 @@ func (cli *ChatCLI) showHelp() {
 		fmt.Printf("    %s    %s\n", colorize(fmt.Sprintf("%-32s", cmd), cmdColor), colorize(desc, descColor))
 	}
 
-	fmt.Println("\n" + colorize(ColorBold, i18n.T("help.header.title")))
+	fmt.Println("\n" + colorize(i18n.T("help.header.title"), ColorBold))
 	fmt.Println(colorize(i18n.T("help.header.subtitle1"), ColorGray))
 	fmt.Println(colorize(i18n.T("help.header.subtitle2"), ColorGray))
 
