@@ -251,8 +251,8 @@ func TestHandleMCPCommandDispatchesToSubcommands(t *testing.T) {
 		input    string
 		expectIn string
 	}{
-		{"/mcp status", "MCP SERVERS"},
-		{"/mcp tools", "MCP TOOLS"},
+		{"/mcp status", "MCP servers"},
+		{"/mcp tools", "MCP tools"},
 		{"/mcp start", "Usage: /mcp start"},
 		{"/mcp stop", "Usage: /mcp stop"},
 		{"/mcp logs", "Usage: /mcp logs"},
