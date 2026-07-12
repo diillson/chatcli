@@ -48,6 +48,7 @@ import (
 	"github.com/diillson/chatcli/pkg/persona"
 	"github.com/diillson/chatcli/ui/kit"
 	"github.com/diillson/chatcli/ui/theme"
+	"github.com/diillson/chatcli/version"
 	"github.com/fsnotify/fsnotify"
 
 	"github.com/diillson/chatcli/models"
@@ -1029,6 +1030,9 @@ func (cli *ChatCLI) dequeueMessage() string {
 func (cli *ChatCLI) Start(ctx context.Context) {
 	cli.sessionCtx = ctx
 	defer cli.cleanup(ctx)
+	// Renova em background o cache de release que alimenta o hash de commit
+	// da tela de boas-vindas (builds go install); o boot não espera rede.
+	go version.RefreshReleaseCacheIfStale(ctx)
 	cli.PrintWelcomeScreen()
 	cli.startHubSync(ctx) // resume the shared cross-channel conversation, if connected
 
@@ -1080,10 +1084,6 @@ func (cli *ChatCLI) Start(ctx context.Context) {
 				cli.executor,
 				cli.completer,
 				prompt.OptionParser(pasteParser),
-				// On Windows+VT the writer compensates the deferred EOL wrap
-				// go-prompt's renderer doesn't expect; elsewhere it is the
-				// standard writer. See promptwrap.go.
-				prompt.OptionWriter(newPlatformPromptWriter()),
 				prompt.OptionTitle("ChatCLI - LLM no seu Terminal"),
 				prompt.OptionLivePrefix(cli.changeLivePrefix),
 				prompt.OptionPrefixTextColor(prompt.Green),
