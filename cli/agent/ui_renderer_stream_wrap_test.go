@@ -7,8 +7,8 @@ import (
 
 // TestStreamOutputWrapsAndPrefixesEveryLine exercita o caminho de streaming
 // ao vivo: toda linha emitida tem que carregar a borda lateral "│" e nenhuma
-// pode exceder a largura do terminal (fallback 80 fora de tty), garantindo
-// que o box não reflui com YAML largo.
+// pode exceder a largura do terminal (fallback unificado do kit fora de
+// tty), garantindo que o box não reflui com YAML largo.
 func TestStreamOutputWrapsAndPrefixesEveryLine(t *testing.T) {
 	r := NewUIRendererWithStyle(nil, UIStyleFull)
 
@@ -23,13 +23,14 @@ func TestStreamOutputWrapsAndPrefixesEveryLine(t *testing.T) {
 	if len(lines) == 0 {
 		t.Fatal("StreamOutput não emitiu nada")
 	}
+	maxCols := TerminalWidth()
 	for i, ln := range lines {
 		plain := stripANSI(ln)
 		if !strings.HasPrefix(plain, "│") {
 			t.Errorf("linha %d sem borda lateral: %q", i, plain)
 		}
-		if w := VisibleLen(plain); w > 80 {
-			t.Errorf("linha %d excedeu 80 cols (got %d): %q", i, w, plain)
+		if w := VisibleLen(plain); w > maxCols {
+			t.Errorf("linha %d excedeu %d cols (got %d): %q", i, maxCols, w, plain)
 		}
 	}
 	// Garante que o bloco multi-linha gerou as duas linhas lógicas.
