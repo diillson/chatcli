@@ -3,13 +3,13 @@ package cli
 import (
 	"fmt"
 	"math/rand"
-	"regexp"
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/diillson/chatcli/i18n"
+	"github.com/diillson/chatcli/ui/kit"
+	"github.com/diillson/chatcli/ui/theme"
 	"github.com/diillson/chatcli/version"
-	"github.com/mattn/go-runewidth"
 )
 
 // Dicas agora contêm as chaves de tradução.
@@ -27,15 +27,22 @@ var tipKeys = []string{ // <-- 2. ALTERADO DE 'tips' PARA 'tipKeys'
 	"tip.agent_last_result",
 }
 
-// screenWidth is the anchor width used to center welcome-screen
-// content (logo, tip box, active-model card, footer). It is a fixed
-// 87 columns by design: anchoring at the terminal width left the
-// banner pushed far to the right on wide terminals and read as
-// awkward — the welcome reads more naturally hugging the left edge
-// like the rest of the prompt does. Keeping a const here means tip
-// box and model card stay centered relative to the logo regardless
-// of how the user has sized their terminal.
-const screenWidth = 87
+// welcomeAnchor is the preferred anchor width used to center welcome-screen
+// content (logo, tip box, active-model card, footer). 87 columns by design:
+// anchoring at the terminal width left the banner pushed far to the right on
+// wide terminals — the welcome reads more naturally hugging the left edge
+// like the rest of the prompt does.
+const welcomeAnchor = 87
+
+// screenWidth resolves the actual anchor for this render: the preferred 87
+// columns, shrunk to the live content width on narrow terminals so the tip
+// box and cards never overflow and tear their borders.
+func screenWidth() int {
+	if w := kit.ContentWidth(); w < welcomeAnchor {
+		return w
+	}
+	return welcomeAnchor
+}
 
 // printLogo exibe o novo logo do ChatCLI em ASCII art, centralizado
 // num bloco virtual de 80 colunas (mesma largura usada antes da
@@ -76,61 +83,21 @@ func printLogo() {
 	}
 }
 
-// --- util: ANSI / largura visível (conta runas, ignora cores) ---
-var ansiRe = regexp.MustCompile(`\x1b\[[0-9;]*m`)
-
-func removeColorCodes(s string) string {
-	return ansiRe.ReplaceAllString(s, "")
-}
-
+// visibleLen mede largura visível em colunas — delegate do caminho único de
+// medição do kit (mantido porque testes do pacote o exercitam diretamente).
 func visibleLen(s string) int {
-	return runewidth.StringWidth(removeColorCodes(s))
+	return kit.VisibleLen(s)
 }
 
-// --- quebra preservando códigos ANSI ---
-func wrapStringWithColor(text string, maxWidth int) []string {
-	if maxWidth <= 0 {
-		return []string{text}
-	}
-	words := strings.Fields(text)
-	if len(words) == 0 {
-		return nil
-	}
-
-	var lines []string
-	var b strings.Builder
-	curr := 0
-
-	for _, w := range words {
-		wlen := visibleLen(w)
-
-		// se não cabe na linha atual, pula pra próxima
-		if curr > 0 && curr+1+wlen > maxWidth {
-			lines = append(lines, b.String())
-			b.Reset()
-			curr = 0
-		}
-		if curr > 0 {
-			b.WriteByte(' ')
-			curr++
-		}
-		b.WriteString(w)
-		curr += wlen
-	}
-	if b.Len() > 0 {
-		lines = append(lines, b.String())
-	}
-	return lines
+// tipBoxBorderStyle is the rounded border used for the welcome tip box and
+// the active-model card. Resolved per render (not a package var) so the
+// border follows the ACTIVE theme's border role — the old hardcoded
+// lipgloss.Color("8") bypassed the theme system entirely.
+func tipBoxBorderStyle() lipgloss.Style {
+	return lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(theme.Lip(theme.RoleBorder))
 }
-
-// tipBoxBorderStyle is the rounded gray border used for the welcome
-// tip box and the active-model card. Defined once so future palette
-// changes touch one spot. lipgloss.Color("8") maps to the terminal's
-// "bright black" ANSI slot — same color the rest of the welcome
-// screen uses for chrome, so it stays themable.
-var tipBoxBorderStyle = lipgloss.NewStyle().
-	Border(lipgloss.RoundedBorder()).
-	BorderForeground(lipgloss.Color("8"))
 
 // printTipBox renders a centered "Did you know?" tip card. lipgloss
 // owns the border drawing and width math so a future change to the
@@ -140,40 +107,36 @@ func printTipBox() {
 	tipKey := tipKeys[rand.Intn(len(tipKeys))] //#nosec G404 -- non-cryptographic: picks a welcome-screen tip
 	tip := i18n.T(tipKey)
 	title := i18n.T("welcome.tip.title")
+	anchor := screenWidth()
 
 	// Inner content width = card width − 2 borders − 2 of padding.
-	innerWidth := screenWidth - 4
+	innerWidth := anchor - 4
 
-	// Title line: " ─── Did you know? ─── " centered above the body.
-	// We bake the title into the body so it appears INSIDE the box at
-	// the top, separated from the tip by a blank line. lipgloss's
-	// default border doesn't natively accept a "title within the top
-	// edge" yet, so this is the cleanest workaround.
-	titleLine := lipgloss.NewStyle().
+	// Title line centered above the body, in the theme's header role —
+	// baked into the body because lipgloss's default border doesn't accept
+	// a "title within the top edge".
+	titleLine := kit.Style(theme.RoleHeader).
 		Width(innerWidth).
 		Align(lipgloss.Center).
 		Bold(true).
-		Foreground(lipgloss.Color("15")).
 		Render(title)
 
-	// Wrap the tip body to the inner width using the existing visible-
-	// length-aware helper. lipgloss's word-wrap is also ANSI-aware but
-	// our wrapStringWithColor already handles the edge cases (color
-	// codes mid-word) so we reuse it.
-	wrapped := strings.Join(wrapStringWithColor(tip, innerWidth), "\n")
+	// Wrap the tip body with the kit's prose word-wrap (ANSI-aware) and
+	// leave the text in the terminal's default color — the tip is content,
+	// not chrome.
+	wrapped := strings.Join(kit.WrapText(tip, innerWidth), "\n")
 	body := lipgloss.NewStyle().
 		Width(innerWidth).
 		Align(lipgloss.Center).
-		Foreground(lipgloss.Color("7")).
 		Render(wrapped)
 
-	card := tipBoxBorderStyle.
+	card := tipBoxBorderStyle().
 		Padding(1, 1).
 		Render(titleLine + "\n\n" + body)
 
-	// Center the card on the configured screenWidth so the overall
-	// welcome layout stays balanced.
-	fmt.Println(lipgloss.PlaceHorizontal(screenWidth, lipgloss.Center, card))
+	// Center the card on the resolved anchor so the overall welcome layout
+	// stays balanced.
+	fmt.Println(lipgloss.PlaceHorizontal(anchor, lipgloss.Center, card))
 }
 
 // PrintWelcomeScreen exibe a tela de boas-vindas completa e traduzida.
@@ -195,11 +158,12 @@ func printTipBox() {
 // centered, which read as "two screens spliced together".
 func (cli *ChatCLI) PrintWelcomeScreen() {
 	printLogo()
+	anchor := screenWidth()
 
 	v, c, _ := version.GetBuildInfo()
 	if v != "" && v != "dev" && v != "unknown" {
 		versionStr := i18n.T("version.label", v, c)
-		fmt.Println(lipgloss.PlaceHorizontal(screenWidth, lipgloss.Center,
+		fmt.Println(lipgloss.PlaceHorizontal(anchor, lipgloss.Center,
 			colorize(versionStr, ColorGray)))
 		fmt.Println()
 	}
@@ -223,10 +187,10 @@ func (cli *ChatCLI) PrintWelcomeScreen() {
 			colorize(i18n.T("welcome.auth_hint"), ColorGray),
 		)
 	}
-	modelCard := tipBoxBorderStyle.
+	modelCard := tipBoxBorderStyle().
 		Padding(0, 2).
 		Render(modelLine)
-	fmt.Println(lipgloss.PlaceHorizontal(screenWidth, lipgloss.Center, modelCard))
+	fmt.Println(lipgloss.PlaceHorizontal(anchor, lipgloss.Center, modelCard))
 
 	// Footer of quick commands, centered to match the rest of the
 	// layout. Plain Bullet (·) instead of the heavier "  •  " for a
@@ -242,6 +206,6 @@ func (cli *ChatCLI) PrintWelcomeScreen() {
 		colorize(" "+i18n.T("welcome.footer.switch_model.desc"), ColorGray),
 	)
 	fmt.Println()
-	fmt.Println(lipgloss.PlaceHorizontal(screenWidth, lipgloss.Center, footer))
+	fmt.Println(lipgloss.PlaceHorizontal(anchor, lipgloss.Center, footer))
 	fmt.Println()
 }
