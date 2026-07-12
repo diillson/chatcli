@@ -99,9 +99,9 @@ func TestRouteConfigCommand(t *testing.T) {
 		args      []string
 		wantToken string // substring expected in captured output
 	}{
-		{"empty → panorama", []string{}, "PANORAMA"},
-		{"general", []string{"general"}, "GENERAL"},
-		{"AGENT caps", []string{"AGENT"}, "AGENT RUNTIME"},
+		{"empty → panorama", []string{}, "Panorama"},
+		{"general", []string{"general"}, "General"},
+		{"AGENT caps", []string{"AGENT"}, "Agent runtime"},
 		{"unknown section", []string{"bogus"}, "Unknown section"},
 	}
 	for _, tt := range tests {
