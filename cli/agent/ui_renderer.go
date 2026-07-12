@@ -148,22 +148,18 @@ func (r *UIRenderer) IsCompact() bool { return r.style == UIStyleCompact }
 // IsMinimal reports whether tool calls render as boxed-but-truncated cards.
 func (r *UIRenderer) IsMinimal() bool { return r.style == UIStyleMinimal }
 
-// imprime a linha COM A BARRA LATERAL para parecer que está dentro
+// StreamOutput emite uma linha de output streamado sob o título da seção
+// (sóbrio: indentação em vez de barra lateral).
 func (r *UIRenderer) StreamOutput(line string) {
-	// A borda lateral tem que ter a mesma cor do Header (ColorPurple geralmente)
-	prefix := r.Colorize("│", ColorPurple) + "  "
+	const prefix = "    "
 
-	// Descobre a largura útil do box para quebrar linhas muito longas
-	// (ex.: `kubectl ... -o yaml` com annotations gigantes / blocos
-	// `last-applied-configuration`). Sem isso, uma linha que estoura a
-	// largura do terminal faz reflow e rasga a borda lateral/rodapé do box.
+	// Largura útil para quebrar linhas muito longas (ex.: `kubectl -o
+	// yaml`). Sem isso, uma linha que estoura a largura faz reflow e
+	// desalinha a indentação da seção.
 	termWidth := kit.TermWidth()
 
-	// Cada linha emitida é: prefix("│  ") + icon + conteúdo. A largura
-	// visível total precisa caber em termWidth-2 (mesma gutter de 2 cols
-	// que o resto do renderer reserva pra scrollbar nativa de terminais).
 	emit := func(icon, text, color string) {
-		avail := termWidth - 2 - VisibleLen("│  ") - VisibleLen(icon)
+		avail := termWidth - 2 - len(prefix) - VisibleLen(icon)
 		if avail < 20 {
 			avail = 20
 		}
@@ -513,8 +509,10 @@ func (r *UIRenderer) RenderAssistantResponseTimelineEvent(icon, title, content, 
 // tool output (YAML/JSON/tables, where indentation and column alignment must
 // survive).
 func (r *UIRenderer) renderTimelineEventInner(icon, title, content, color string, typewrite bool, wrapFn func(string, int) []string) {
-	// kit.ContentWidth already reserves the right-edge gutter for native
-	// scrollbars (iTerm, VSCode) so the box border never gets clipped.
+	// "Sóbrio" treatment: no card frame. A colored bold title line opens
+	// the event; the body sits indented beneath it. The color parameter
+	// keeps carrying the event's semantic hue (action yellow, success
+	// green, …) — it moves from the border to the title.
 	maxCardWidth := kit.ContentWidth()
 	if maxCardWidth < 24 {
 		maxCardWidth = 24
@@ -527,45 +525,30 @@ func (r *UIRenderer) renderTimelineEventInner(icon, title, content, color string
 		content = " " // lipgloss collapses fully-empty content; keep a placeholder so the box still draws
 	}
 
-	// Pre-wrap content to the inner width lipgloss will allow. lipgloss
-	// would happily truncate on overflow rather than wrap, so we own
-	// the wrap math here using the same ANSI-aware helper the previous
-	// renderer used. Inner = card max − borders (2) − padding (4).
-	const innerOverhead = 2 /* borders */ + 4 /* Padding(0,2) */
-	innerWrap := maxCardWidth - innerOverhead
+	// Pre-wrap to the inner width: content indents four columns under the
+	// two-column title indent, so the eye gets title → body nesting from
+	// whitespace alone.
+	const titleIndent = "  "
+	const bodyIndent = "    "
+	innerWrap := maxCardWidth - len(bodyIndent)
 	if innerWrap < 20 {
 		innerWrap = 20
 	}
-	wrapped := strings.Join(wrapFn(content, innerWrap), "\n")
-
-	// Build the body box with lipgloss using a CLOSED border on three
-	// sides (no top — we overwrite it below with the titled variant).
-	// Delegating width math + side+bottom drawing to lipgloss is what
-	// fixes the long-standing emoji misalignment bug (`🧠` rendering
-	// as 2 cols via runewidth but 1 col on some terminals): both edges
-	// agree with each other regardless of the terminal's actual emoji
-	// handling, so the box always reads as balanced.
-	bodyStyle := lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderTop(false).
-		BorderForeground(ansiColorToLip(color)).
-		Padding(0, 2)
-
-	bodyRendered := bodyStyle.Render(wrapped)
-
-	// Drop empty rows from the in-body sequence so paragraph-style
-	// blanks at the edges don't show as ghost rows. We keep middle
-	// blanks intact (author-intended paragraph breaks survive).
-	bodyRendered = trimBlankBoxBodyRows(bodyRendered)
-
-	// cardWidth is whatever lipgloss measured for the rendered body.
-	// Crucially, ANY width drift in the top header below is computed
-	// against this same number, so the visible widths line up even
-	// when emoji rendering disagrees with runewidth.
-	cardWidth := lipgloss.Width(bodyRendered)
+	lines := trimBlankBorderRows(wrapFn(content, innerWrap))
+	var bodyBuilder strings.Builder
+	for i, ln := range lines {
+		if i > 0 {
+			bodyBuilder.WriteString("\n")
+		}
+		if lipgloss.Width(ln) > 0 {
+			bodyBuilder.WriteString(bodyIndent)
+			bodyBuilder.WriteString(ln)
+		}
+	}
+	bodyRendered := bodyBuilder.String()
 
 	header := fmt.Sprintf("%s %s", icon, title)
-	topLine := buildTitledTopBorder(header, cardWidth, color, r)
+	topLine := titleIndent + r.Colorize(header, color+ColorBold)
 
 	fmt.Println()
 	fmt.Println(topLine)
@@ -577,39 +560,10 @@ func (r *UIRenderer) renderTimelineEventInner(icon, title, content, color string
 	}
 }
 
-// buildTitledTopBorder produces a `╭── icon title ─────╮` line whose
-// VISIBLE width equals targetWidth (as measured by lipgloss.Width on
-// the matching body). The two padding rules cover the two ways the
-// header can fall short of the card width:
-//   - normal case: title fits, fill with dashes
-//   - title longer than card: truncate dashes to fit (header may overflow
-//     by 1-2 cols on extreme widths; acceptable degradation)
-func buildTitledTopBorder(header string, targetWidth int, color string, r *UIRenderer) string {
-	// Geometry in kit.TitledTopBorder; coloring stays here so the legacy
-	// ANSI-constant call sites keep byte-identical output.
-	return r.Colorize(kit.TitledTopBorder(header, targetWidth), color+ColorBold)
-}
-
-// trimBlankBoxBodyRows removes empty body rows adjacent to the box borders.
-// Logic in kit.TrimBlankBoxBodyRows.
-func trimBlankBoxBodyRows(rendered string) string {
-	return kit.TrimBlankBoxBodyRows(rendered)
-}
-
 // stripANSIForCard removes CSI color escapes so width and emptiness checks
 // see plain text. Logic in kit.StripANSI.
 func stripANSIForCard(s string) string {
 	return kit.StripANSI(s)
-}
-
-// ansiColorToLip maps the package-local ANSI color constants used by
-// the rest of the renderer into a lipgloss.Color. Callers keep passing
-// the same "\x1b[36m" strings they always have; resolution is delegated
-// to the active theme (theme.LipFromANSI), so a theme swap re-skins every
-// card border without touching a single call site. Unknown values fall
-// back to the terminal default so a typo doesn't make the border disappear.
-func ansiColorToLip(ansiCode string) lipgloss.Color {
-	return theme.LipFromANSI(ansiCode)
 }
 
 // RenderMarkdownTimelineEvent renderiza markdown (já convertido para ANSI fora) dentro do card.
@@ -828,45 +782,20 @@ func (r *UIRenderer) RenderBatchSummary(successCount, total int, hasError bool) 
 // level because the start/end pair runs on the same goroutine inside a
 // tool-execution loop; concurrent streaming boxes are not supported in
 // this renderer, so a sync.Mutex would be ceremonial overhead.
-var streamBoxHeaderWidth int
-
-// RenderStreamBoxStart draws the top edge of an open card whose contents
-// will be streamed in via StreamOutput. The bottom edge is closed by
-// RenderStreamBoxEnd. Header width is recorded so the footer matches it.
+// RenderStreamBoxStart opens a streamed section in the sóbrio treatment: a
+// colored bold title line; the streamed output indents beneath it via
+// StreamOutput. No frame to close, so RenderStreamBoxEnd only restores
+// breathing room.
 func (r *UIRenderer) RenderStreamBoxStart(icon, title, color string) {
-	header := fmt.Sprintf("%s %s", icon, title)
-
-	termWidth := kit.TermWidth()
-
-	// "╭── " (4) + header + " " + minimum 6 dashes for visual weight.
-	const minTail = 6
-	headerLine := "╭── " + header + " " + strings.Repeat("─", minTail)
-	visible := VisibleLen(headerLine)
-	// Extend to a reasonable middle width when the header is short, but
-	// never wider than the terminal minus a 2-col right gutter.
-	target := termWidth - 2
-	if target < visible {
-		target = visible
-	}
-	if extra := target - visible; extra > 0 {
-		headerLine += strings.Repeat("─", extra)
-	}
-	streamBoxHeaderWidth = VisibleLen(headerLine)
-
 	fmt.Println()
-	fmt.Println(r.Colorize(headerLine, color+ColorBold))
+	fmt.Println("  " + r.Colorize(fmt.Sprintf("%s %s", icon, title), color+ColorBold))
 }
 
-// RenderStreamBoxEnd closes the streaming card. Footer length mirrors
-// the header so the box reads as a balanced shape regardless of how
-// many lines the stream produced.
+// RenderStreamBoxEnd closes the streamed section with a blank separator
+// (the sóbrio treatment has no frame to mirror).
 func (r *UIRenderer) RenderStreamBoxEnd(color string) {
-	footerLen := streamBoxHeaderWidth - 1
-	if footerLen < 10 {
-		footerLen = 10
-	}
-	footer := "╰" + strings.Repeat("─", footerLen)
-	fmt.Println(r.Colorize(footer, color))
+	_ = color
+	fmt.Println()
 }
 
 // ─── Compact display (aru-style) ────────────────────────────────────────────

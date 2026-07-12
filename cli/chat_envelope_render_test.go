@@ -75,12 +75,9 @@ func TestChatEnvelopeLabels_NoUsage(t *testing.T) {
 		"missing usage must render as the i18n placeholder, not '0↑ 0↓'")
 }
 
-// TestRenderAssistantResponse_BoxedOutput exercises the full chat
-// envelope through renderAssistantResponse: the body must sit inside
-// a closed box with matching top/side/bottom borders, no dangling
-// dashes, and the model + metrics labels must surface on the top row.
-// This is the end-to-end contract that prevents the regression the
-// user reported (text overflowing outside the envelope).
+// TestRenderAssistantResponse_BoxedOutput exercises the full chat reply
+// through renderAssistantResponse in the sóbrio treatment: titled rule
+// with model + metrics, body on the indent, no frame glyphs.
 func TestRenderAssistantResponse_BoxedOutput(t *testing.T) {
 	cli := &ChatCLI{}
 	out := captureStdout(t, func() {
@@ -93,12 +90,9 @@ func TestRenderAssistantResponse_BoxedOutput(t *testing.T) {
 	})
 	plain := stripANSIWelcome(out)
 
-	assert.Contains(t, plain, "╭", "top-left corner must be drawn")
-	assert.Contains(t, plain, "╮", "top-right corner must be drawn")
-	assert.Contains(t, plain, "╰", "bottom-left corner must be drawn")
-	assert.Contains(t, plain, "╯", "bottom-right corner must be drawn")
-	assert.Contains(t, plain, "│", "vertical side borders must be drawn — body must sit inside the box")
-	assert.Contains(t, plain, "claude-opus-4-7", "model name must surface on the top border")
-	assert.Contains(t, plain, "1.4s", "latency must surface on the top border")
-	assert.Contains(t, plain, "Hello from the assistant.", "body content must survive inside the box")
+	assert.Contains(t, plain, "──", "titled rule must open the reply")
+	assert.NotContains(t, plain, "╭", "sóbrio reply draws no box")
+	assert.Contains(t, plain, "claude-opus-4-7", "model name must surface on the header rule")
+	assert.Contains(t, plain, "1.4s", "latency must surface on the header rule")
+	assert.Contains(t, plain, "  Hello from the assistant.", "body content sits on the indent")
 }

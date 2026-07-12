@@ -6,7 +6,7 @@ import (
 )
 
 // TestStreamOutputWrapsAndPrefixesEveryLine exercita o caminho de streaming
-// ao vivo: toda linha emitida tem que carregar a borda lateral "│" e nenhuma
+// ao vivo: toda linha emitida senta na indentação da seção (sóbrio) e nenhuma
 // pode exceder a largura do terminal (fallback unificado do kit fora de
 // tty), garantindo que o box não reflui com YAML largo.
 func TestStreamOutputWrapsAndPrefixesEveryLine(t *testing.T) {
@@ -26,8 +26,8 @@ func TestStreamOutputWrapsAndPrefixesEveryLine(t *testing.T) {
 	maxCols := TerminalWidth()
 	for i, ln := range lines {
 		plain := stripANSI(ln)
-		if !strings.HasPrefix(plain, "│") {
-			t.Errorf("linha %d sem borda lateral: %q", i, plain)
+		if strings.TrimSpace(plain) != "" && !strings.HasPrefix(plain, "    ") {
+			t.Errorf("linha %d fora da indentação da seção: %q", i, plain)
 		}
 		if w := VisibleLen(plain); w > maxCols {
 			t.Errorf("linha %d excedeu %d cols (got %d): %q", i, maxCols, w, plain)

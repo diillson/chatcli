@@ -42,20 +42,19 @@ func TestRenderModeBanner_FieldsAlignAndIconShows(t *testing.T) {
 	assert.Contains(t, plain, "Workspace")
 	assert.Contains(t, plain, "/tmp/proj")
 
-	// Border invariant: top and bottom must have matching width.
-	var top, bot string
-	for _, ln := range strings.Split(plain, "\n") {
-		if strings.HasPrefix(ln, "╭") {
-			top = ln
+	// Sóbrio invariant: no frame; the two labels land on the same value
+	// column (visible-width padding on translated labels).
+	assert.NotContains(t, plain, "╭", "banner draws no frame")
+	colFor := func(needle string) int {
+		for _, ln := range strings.Split(plain, "\n") {
+			if idx := strings.Index(ln, needle); idx >= 0 {
+				return VisibleLen(ln[:idx])
+			}
 		}
-		if strings.HasPrefix(ln, "╰") {
-			bot = ln
-		}
+		return -1
 	}
-	assert.NotEmpty(t, top, "top border present")
-	assert.NotEmpty(t, bot, "bottom border present")
-	assert.Equal(t, VisibleLen(top), VisibleLen(bot),
-		"top and bottom borders must have equal visible width")
+	assert.Equal(t, colFor("implementar X"), colFor("/tmp/proj"),
+		"field values must share one column")
 }
 
 // TestRenderModeBanner_EmptyFields covers the degenerate case: callers
@@ -69,8 +68,7 @@ func TestRenderModeBanner_EmptyFields(t *testing.T) {
 	})
 	plain := stripANSI(out)
 	assert.Contains(t, plain, "🤖 AGENT MODE")
-	assert.Contains(t, plain, "╭")
-	assert.Contains(t, plain, "╰")
+	assert.NotContains(t, plain, "╭", "banner draws no frame")
 }
 
 // TestPrintMenu_ColumnsAndKeys proves the three-column reorganization

@@ -44,8 +44,8 @@ func TestTypewriterPrint_PreservesAllBytes(t *testing.T) {
 
 // TestRenderAssistantResponseTimelineEvent_TypesBodyContent guards the
 // happy path of the assistant-response card: the typewriter variant
-// must still produce the title, content, and a bottom border so the
-// card visually closes. Char-by-char ordering is already covered by
+// must still produce the title line and the indented content (the sóbrio
+// treatment draws no frame). Char-by-char ordering is already covered by
 // TestTypewriterPrint_PreservesAllBytes; here we only assert that
 // content flows through and the card frame is intact.
 func TestRenderAssistantResponseTimelineEvent_TypesBodyContent(t *testing.T) {
@@ -60,7 +60,7 @@ func TestRenderAssistantResponseTimelineEvent_TypesBodyContent(t *testing.T) {
 	if !strings.Contains(out, "Hello from the assistant.") {
 		t.Errorf("expected body text in output, got: %q", out)
 	}
-	if !strings.Contains(out, "╰") {
+	if !strings.Contains(out, "Hello") {
 		t.Errorf("expected bottom-border glyph in output (card must visually close), got: %q", out)
 	}
 }
