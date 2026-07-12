@@ -68,12 +68,12 @@ func TestHandleCostCommandRendersAllSections(t *testing.T) {
 	out := captureCommandStdout(t, func() { c.handleCostCommand() })
 
 	for _, want := range []string{
-		"CLAUDEAI",     // provider row
-		"model-a",      // per-model cost header
-		"$0.0800",      // input cost
-		"$0.0400",      // output cost
-		"$0.0030",      // cache cost
-		"$0.1234",      // total cost
+		"CLAUDEAI",    // provider row
+		"model-a",     // per-model cost header
+		"$0.0800",     // input cost
+		"$0.0400",     // output cost
+		"$0.0030",     // cache cost
+		"$0.1234",     // total cost
 		"╭", "╰", "│", // box frame survives
 	} {
 		if !strings.Contains(out, want) {
