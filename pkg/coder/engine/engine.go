@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+
+	"github.com/diillson/chatcli/pkg/fspath"
 )
 
 const (
@@ -151,6 +153,11 @@ func (e *Engine) validatePath(target string) error {
 			return fmt.Errorf("access to sensitive path %q is blocked", target)
 		}
 	}
+	for _, sp := range fspath.WindowsSystemRoots() {
+		if fspath.WithinBoundary(resolved, sp) {
+			return fmt.Errorf("access to sensitive path %q is blocked", target)
+		}
+	}
 
 	// Enforce workspace boundary
 	if e.WorkspaceRoot != "" {
@@ -169,7 +176,7 @@ func (e *Engine) validatePath(target string) error {
 			}
 		}
 
-		if !isSystemBin && resolved != boundary && !strings.HasPrefix(resolved, boundary+"/") {
+		if !isSystemBin && !fspath.WithinBoundary(resolved, boundary) {
 			// Check aux allowlist (e.g. session scratch dir, tool-result
 			// overflow). These are registered only by the CLI itself, so
 			// they're trusted.
@@ -177,7 +184,7 @@ func (e *Engine) validatePath(target string) error {
 				if evalAux, err := filepath.EvalSymlinks(aux); err == nil {
 					aux = evalAux
 				}
-				if resolved == aux || strings.HasPrefix(resolved, aux+string(filepath.Separator)) {
+				if fspath.WithinBoundary(resolved, aux) {
 					return nil
 				}
 			}

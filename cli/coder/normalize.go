@@ -52,7 +52,16 @@ func NormalizeCoderArgs(args string) (subcommand string, normalized string) {
 func normalizeJSON(trimmed string) (string, string) {
 	var payload any
 	if err := json.Unmarshal([]byte(trimmed), &payload); err != nil {
-		return "", ""
+		// Windows paths with single backslashes ("C:\Users\x") are invalid
+		// JSON escapes; repair and retry so policy matching still sees the
+		// real subcommand and flags.
+		repaired := utils.RepairJSONInvalidEscapes(trimmed)
+		if repaired == trimmed {
+			return "", ""
+		}
+		if err2 := json.Unmarshal([]byte(repaired), &payload); err2 != nil {
+			return "", ""
+		}
 	}
 
 	switch v := payload.(type) {
@@ -98,26 +107,40 @@ func normalizeJSONMap(m map[string]any) (string, string) {
 	// Build from args/flags maps
 	argsMap := make(map[string]any)
 
-	if raw, ok := m["args"]; ok {
-		if mm, ok := raw.(map[string]any); ok {
-			for k, v := range mm {
-				if k == "command" {
-					argsMap["cmd"] = v
+	for _, envelope := range []string{"args", "flags"} {
+		raw, ok := m[envelope]
+		if !ok {
+			continue
+		}
+		mm, ok := raw.(map[string]any)
+		if !ok {
+			// Models sometimes double-encode the envelope as a JSON string
+			// ({"cmd":"write","args":"{\"file\":...}"}); recover it so the
+			// policy prompt still shows the real flags.
+			s, isStr := raw.(string)
+			if !isStr {
+				continue
+			}
+			trimmed := strings.TrimSpace(s)
+			if !strings.HasPrefix(trimmed, "{") {
+				continue
+			}
+			if err := json.Unmarshal([]byte(trimmed), &mm); err != nil {
+				repaired := utils.RepairJSONInvalidEscapes(trimmed)
+				if repaired == trimmed {
 					continue
 				}
-				argsMap[k] = v
+				if err2 := json.Unmarshal([]byte(repaired), &mm); err2 != nil {
+					continue
+				}
 			}
 		}
-	}
-	if raw, ok := m["flags"]; ok {
-		if mm, ok := raw.(map[string]any); ok {
-			for k, v := range mm {
-				if k == "command" {
-					argsMap["cmd"] = v
-					continue
-				}
-				argsMap[k] = v
+		for k, v := range mm {
+			if k == "command" {
+				argsMap["cmd"] = v
+				continue
 			}
+			argsMap[k] = v
 		}
 	}
 

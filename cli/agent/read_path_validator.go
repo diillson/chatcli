@@ -9,6 +9,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/diillson/chatcli/pkg/fspath"
 )
 
 // SensitiveReadPaths enforces read access control in agent mode.
@@ -27,9 +29,10 @@ func NewSensitiveReadPaths() *SensitiveReadPaths {
 		allowKubeconfig: strings.EqualFold(os.Getenv("CHATCLI_AGENT_ALLOW_KUBECONFIG"), "true"),
 	}
 
-	// Parse extra allowed read paths (colon-separated)
+	// Parse extra allowed read paths (separated by os.PathListSeparator:
+	// ':' on Unix, ';' on Windows — ':' would split drive letters apart)
 	if extra := os.Getenv("CHATCLI_AGENT_EXTRA_READ_PATHS"); extra != "" {
-		for _, p := range strings.Split(extra, ":") {
+		for _, p := range filepath.SplitList(extra) {
 			p = strings.TrimSpace(p)
 			if p != "" {
 				s.extraReadPaths = append(s.extraReadPaths, p)
@@ -72,7 +75,7 @@ func (s *SensitiveReadPaths) IsReadAllowed(path, workspace string) (bool, string
 			}
 
 			// Check if path is within workspace
-			if strings.HasPrefix(resolvedPath, absWorkspace+string(filepath.Separator)) || resolvedPath == absWorkspace {
+			if fspath.WithinBoundary(resolvedPath, absWorkspace) {
 				return true, ""
 			}
 
@@ -82,7 +85,7 @@ func (s *SensitiveReadPaths) IsReadAllowed(path, workspace string) (bool, string
 				if err != nil {
 					continue
 				}
-				if strings.HasPrefix(resolvedPath, extraAbs+string(filepath.Separator)) || resolvedPath == extraAbs {
+				if fspath.WithinBoundary(resolvedPath, extraAbs) {
 					return true, ""
 				}
 			}
@@ -95,7 +98,7 @@ func (s *SensitiveReadPaths) IsReadAllowed(path, workspace string) (bool, string
 				if evalAux, errEval := filepath.EvalSymlinks(aux); errEval == nil {
 					aux = evalAux
 				}
-				if strings.HasPrefix(resolvedPath, aux+string(filepath.Separator)) || resolvedPath == aux {
+				if fspath.WithinBoundary(resolvedPath, aux) {
 					return true, ""
 				}
 			}
@@ -103,10 +106,11 @@ func (s *SensitiveReadPaths) IsReadAllowed(path, workspace string) (bool, string
 			// Allow Go module cache and standard library
 			gopath := os.Getenv("GOPATH")
 			if gopath == "" {
-				gopath = filepath.Join(os.Getenv("HOME"), "go")
+				home, _ := os.UserHomeDir()
+				gopath = filepath.Join(home, "go")
 			}
 			goModCache := filepath.Join(gopath, "pkg", "mod")
-			if strings.HasPrefix(resolvedPath, goModCache) {
+			if strings.HasPrefix(resolvedPath, goModCache+string(filepath.Separator)) {
 				return true, ""
 			}
 
@@ -126,8 +130,11 @@ func (s *SensitiveReadPaths) IsReadAllowed(path, workspace string) (bool, string
 
 // isSensitivePath checks if a path matches known sensitive file patterns.
 func (s *SensitiveReadPaths) isSensitivePath(path string) (bool, string) {
-	home := os.Getenv("HOME")
-	if home == "" {
+	// os.UserHomeDir handles USERPROFILE on Windows; a raw $HOME lookup would
+	// come back empty there and anchor every sensitive-dir check to a path
+	// that never matches, disabling credential-file protection entirely.
+	home, err := os.UserHomeDir()
+	if err != nil || home == "" {
 		home = "/root"
 	}
 
@@ -154,14 +161,14 @@ func (s *SensitiveReadPaths) isSensitivePath(path string) (bool, string) {
 	}
 
 	for dir, reason := range sensitiveGlobs {
-		if strings.HasPrefix(path, dir+string(filepath.Separator)) || path == dir {
+		if fspath.WithinBoundary(path, dir) {
 			return true, reason
 		}
 	}
 
 	// kubeconfig (controlled by CHATCLI_AGENT_ALLOW_KUBECONFIG)
 	kubeconfigPath := filepath.Join(home, ".kube", "config")
-	if !s.allowKubeconfig && path == kubeconfigPath {
+	if !s.allowKubeconfig && fspath.Equal(path, kubeconfigPath) {
 		return true, "kubeconfig access is blocked (set CHATCLI_AGENT_ALLOW_KUBECONFIG=true to allow)"
 	}
 
@@ -176,7 +183,7 @@ func (s *SensitiveReadPaths) isSensitivePath(path string) (bool, string) {
 		filepath.Join(home, ".gradle", "gradle.properties"): "Gradle properties may contain credentials",
 	}
 	for fp, reason := range sensitiveFiles {
-		if path == fp {
+		if fspath.Equal(path, fp) {
 			return true, reason
 		}
 	}
@@ -193,7 +200,7 @@ func (s *SensitiveReadPaths) isSensitivePath(path string) (bool, string) {
 		".pfx": true, ".jks": true, ".keystore": true,
 		".p8": true, ".der": true,
 	}
-	if sensitiveExts[ext] && !strings.HasPrefix(path, home) {
+	if sensitiveExts[ext] && !fspath.WithinBoundary(path, home) {
 		// Only block sensitive extensions outside home directory
 		// (within project they might be test fixtures)
 		return true, "files with extension " + ext + " outside home directory are blocked"

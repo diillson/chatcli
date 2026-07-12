@@ -244,11 +244,7 @@ func extractBaseCommand(fullCommand string) string {
 		return ""
 	}
 
-	baseCmd := fields[0]
-	// Strip path prefix (e.g., /usr/bin/git -> git)
-	if idx := strings.LastIndex(baseCmd, "/"); idx >= 0 {
-		baseCmd = baseCmd[idx+1:]
-	}
-
-	return baseCmd
+	// Strip path prefix and Windows executable extension
+	// (e.g., /usr/bin/git -> git, C:\Git\git.exe -> git)
+	return baseName(fields[0])
 }

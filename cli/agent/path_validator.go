@@ -7,6 +7,7 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/diillson/chatcli/pkg/fspath"
 	"go.uber.org/zap"
 )
 
@@ -30,7 +31,9 @@ var systemBinPaths = []string{
 	"/opt/homebrew/bin/",
 }
 
-var pathTraversalPattern = regexp.MustCompile(`(?:^|/)\.\.(?:/|$)`)
+// Matches "..", delimited by either separator: Windows commands use "\"
+// (e.g. "..\..\secret"), and a slash-only pattern would let those through.
+var pathTraversalPattern = regexp.MustCompile(`(?:^|[/\\])\.\.(?:[/\\]|$)`)
 
 // NewPathValidator creates a new path validator.
 func NewPathValidator(workspace string, logger *zap.Logger) *PathValidator {
@@ -75,6 +78,11 @@ func (pv *PathValidator) DetectPathTraversal(command string) (bool, string) {
 				return true, fmt.Sprintf("command accesses sensitive path: %s", sensitive)
 			}
 		}
+		for _, sensitive := range fspath.WindowsSystemRoots() {
+			if fspath.WithinBoundary(resolved, sensitive) {
+				return true, fmt.Sprintf("command accesses sensitive path: %s", sensitive)
+			}
+		}
 	}
 
 	return false, ""
@@ -103,7 +111,7 @@ func (pv *PathValidator) IsWithinWorkspace(targetPath string) bool {
 		}
 	}
 
-	return strings.HasPrefix(resolved, boundary+"/") || resolved == boundary
+	return fspath.WithinBoundary(resolved, boundary)
 }
 
 // ValidateFilePaths validates all paths in a command against safety rules.

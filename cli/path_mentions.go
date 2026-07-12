@@ -2,6 +2,7 @@ package cli
 
 import (
 	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 )
@@ -20,8 +21,9 @@ var knownAtCommands = map[string]bool{
 // - @src/file.go
 // - @~/home/file
 // - @/absolute/path
+// - @C:\Users\x\file and other backslash/drive-letter forms on Windows
 // Does NOT match @word (no path separators) or known commands.
-var pathMentionRe = regexp.MustCompile(`@((?:\./|~/|/|[a-zA-Z0-9_-]+/)[\w./_~-]+)`)
+var pathMentionRe = regexp.MustCompile(`@((?:\.[/\\]|~[/\\]|[/\\]|[A-Za-z]:[/\\]|[a-zA-Z0-9_-]+[/\\])[\w./\\_~-]+)`)
 
 // expandPathMentions converts @path/to/file patterns into @file path/to/file.
 // This allows users to type @src/main.go directly instead of @file src/main.go.
@@ -31,16 +33,19 @@ func expandPathMentions(input string) string {
 		path := match[1:] // strip leading @
 
 		// Skip known @ commands
-		atWord := "@" + strings.SplitN(path, "/", 2)[0]
-		if knownAtCommands[strings.ToLower(atWord)] {
+		first := path
+		if sepIdx := strings.IndexAny(path, `/\`); sepIdx >= 0 {
+			first = path[:sepIdx]
+		}
+		if knownAtCommands[strings.ToLower("@"+first)] {
 			return match
 		}
 
 		// Expand ~ to home dir
 		expandedPath := path
-		if strings.HasPrefix(expandedPath, "~/") {
+		if strings.HasPrefix(expandedPath, "~/") || strings.HasPrefix(expandedPath, `~\`) {
 			if home, err := os.UserHomeDir(); err == nil {
-				expandedPath = home + expandedPath[1:]
+				expandedPath = filepath.Join(home, expandedPath[2:])
 			}
 		}
 

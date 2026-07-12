@@ -113,7 +113,7 @@ func injectPromptWake() error {
 		uintptr(unsafe.Pointer(&written)),
 	)
 	if r1 == 0 {
-		return fmt.Errorf("wake injection via WriteConsoleInputW: %v", callErr)
+		return fmt.Errorf("wake injection via WriteConsoleInputW: %w", callErr)
 	}
 	return nil
 }
@@ -212,7 +212,7 @@ func injectTTYLine(line string) error {
 		uintptr(unsafe.Pointer(&written)),
 	)
 	if r1 == 0 {
-		return fmt.Errorf("WriteConsoleInputW failed: %v", callErr)
+		return fmt.Errorf("WriteConsoleInputW failed: %w", callErr)
 	}
 	if written != uint32(len(events)) {
 		return fmt.Errorf("WriteConsoleInputW: short write (%d/%d events)", written, len(events))

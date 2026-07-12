@@ -1080,6 +1080,10 @@ func (cli *ChatCLI) Start(ctx context.Context) {
 				cli.executor,
 				cli.completer,
 				prompt.OptionParser(pasteParser),
+				// On Windows+VT the writer compensates the deferred EOL wrap
+				// go-prompt's renderer doesn't expect; elsewhere it is the
+				// standard writer. See promptwrap.go.
+				prompt.OptionWriter(newPlatformPromptWriter()),
 				prompt.OptionTitle("ChatCLI - LLM no seu Terminal"),
 				prompt.OptionLivePrefix(cli.changeLivePrefix),
 				prompt.OptionPrefixTextColor(prompt.Green),
@@ -1286,6 +1290,14 @@ func (cli *ChatCLI) runRequestedPalette() bool {
 		m = palette.NewRoot(cli.paletteSuggest)
 	} else {
 		m = palette.NewScoped(cli.paletteSuggest, target)
+	}
+	// go-prompt's BreakLine committed the trigger line ("❯ /") to the main
+	// buffer right before this runs. On Windows the alt-screen exit does not
+	// reconcile the main buffer the way xterm does, so that line survives as
+	// a ghost above the palette result — erase it before the overlay opens.
+	// The cursor sits at column 0 of the line just below it.
+	if runtime.GOOS == "windows" {
+		fmt.Print("\033[A\033[2K\r")
 	}
 	sel, err := palette.Run(context.Background(), m)
 	if err != nil {
