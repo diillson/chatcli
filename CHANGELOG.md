@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.160.2](https://github.com/diillson/chatcli/compare/v1.160.1...v1.160.2) (2026-07-12)
+
+
+### Bug Fixes
+
+* **windows:** remove writer that broke the completion dropdown; welcome commit hash ([#1179](https://github.com/diillson/chatcli/issues/1179)) ([7712a06](https://github.com/diillson/chatcli/commit/7712a0614b8406d52dff3145b8bc50adcb717ee1))
+
 ## [1.160.1](https://github.com/diillson/chatcli/compare/v1.160.0...v1.160.1) (2026-07-12)
 
 
