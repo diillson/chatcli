@@ -46,6 +46,7 @@ import (
 	"github.com/diillson/chatcli/llm/imagegen"
 	"github.com/diillson/chatcli/llm/transcription"
 	"github.com/diillson/chatcli/llm/tts"
+	"github.com/diillson/chatcli/ui/kit"
 )
 
 // ─── Routing ───────────────────────────────────────────────────
@@ -209,7 +210,7 @@ func kv(prefix, key, value string) {
 		display = strings.TrimPrefix(display, defaultMarker)
 		fmt.Printf("%s%s  %s %s\n",
 			prefix,
-			colorize(fmt.Sprintf("%-32s", key+":"), ColorCyan),
+			colorize(kit.PadRight(key+":", 32), ColorCyan),
 			colorize(display, ColorCyan),
 			colorize(defaultTag, ColorGray))
 		return
@@ -227,9 +228,11 @@ func kv(prefix, key, value string) {
 		display == i18n.T("cfg.val.off"):
 		valueColor = ColorYellow
 	}
+	// kit.PadRight mede largura VISÍVEL — o "%-32s" antigo contava bytes e
+	// desalinhava qualquer label acentuado (pt-BR) nesta coluna.
 	fmt.Printf("%s%s  %s\n",
 		prefix,
-		colorize(fmt.Sprintf("%-32s", key+":"), ColorCyan),
+		colorize(kit.PadRight(key+":", 32), ColorCyan),
 		colorize(display, valueColor))
 }
 

@@ -207,6 +207,27 @@ func TestStripVS16(t *testing.T) {
 	}
 }
 
+func TestPadRightIsVisibleWidthAware(t *testing.T) {
+	// "Custo da sessão" is 15 visible cols but 17 bytes — fmt's %-16s would
+	// pad it short. PadRight must land both labels on the same column.
+	a := PadRight("Custo da sessão", 20)
+	b := PadRight("Model", 20)
+	if VisibleLen(a) != 20 || VisibleLen(b) != 20 {
+		t.Fatalf("PadRight widths: %d vs %d, want 20", VisibleLen(a), VisibleLen(b))
+	}
+	// At-or-past width: unchanged.
+	if got := PadRight("longer-than-width", 5); got != "longer-than-width" {
+		t.Fatalf("PadRight must not truncate: %q", got)
+	}
+	// ANSI-colored input: escapes don't count toward the width.
+	theme.SetProfile(theme.ProfileANSI)
+	t.Cleanup(func() { theme.SetProfile(theme.DetectProfile()) })
+	colored := Colorize("key", theme.RoleStatus)
+	if VisibleLen(PadRight(colored, 10)) != 10 {
+		t.Fatalf("ANSI-aware padding failed: %q", PadRight(colored, 10))
+	}
+}
+
 func TestBadge(t *testing.T) {
 	pinTheme(t, theme.ProfileNoTTY)
 	if got := Badge("api", theme.RoleMuted); got != "[api]" {

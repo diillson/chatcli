@@ -18,6 +18,7 @@ import (
 	"github.com/diillson/chatcli/auth"
 	"github.com/diillson/chatcli/config"
 	"github.com/diillson/chatcli/i18n"
+	"github.com/diillson/chatcli/ui/kit"
 	"github.com/diillson/chatcli/utils"
 )
 
@@ -41,10 +42,10 @@ func (ch *CommandHandler) handleAuthCommand(ctx context.Context, userInput strin
 		case "anthropic", "claude", "claudeai":
 			id, err := auth.LoginAnthropicOAuth(ctx, ch.cli.logger)
 			if err != nil {
-				fmt.Println(i18n.T("auth.login.failed", err))
+				fmt.Println(kit.Notice(kit.LevelError, i18n.T("auth.login.failed", err)))
 				return
 			}
-			fmt.Println(i18n.T("auth.login.success", "Anthropic", id))
+			fmt.Println(kit.Notice(kit.LevelSuccess, i18n.T("auth.login.success", "Anthropic", id)))
 			ch.cli.manager.RefreshProviders()
 			ch.autoSwitchProvider(ctx, "CLAUDEAI",
 				utils.GetEnvOrDefault("ANTHROPIC_MODEL", config.DefaultClaudeAIModel))
@@ -52,10 +53,10 @@ func (ch *CommandHandler) handleAuthCommand(ctx context.Context, userInput strin
 		case "openai-codex", "codex":
 			id, err := auth.LoginOpenAICodexOAuth(ctx, ch.cli.logger)
 			if err != nil {
-				fmt.Println(i18n.T("auth.login.failed", err))
+				fmt.Println(kit.Notice(kit.LevelError, i18n.T("auth.login.failed", err)))
 				return
 			}
-			fmt.Println(i18n.T("auth.login.success", "OpenAI Codex", id))
+			fmt.Println(kit.Notice(kit.LevelSuccess, i18n.T("auth.login.success", "OpenAI Codex", id)))
 			ch.cli.manager.RefreshProviders()
 			ch.autoSwitchProvider(ctx, "OPENAI",
 				utils.GetEnvOrDefault("OPENAI_MODEL", config.DefaultOpenAIModel))
@@ -63,10 +64,10 @@ func (ch *CommandHandler) handleAuthCommand(ctx context.Context, userInput strin
 		case "github-copilot", "copilot", "gh-copilot":
 			id, err := auth.LoginGitHubCopilotOAuth(ctx, ch.cli.logger)
 			if err != nil {
-				fmt.Println(i18n.T("auth.login.failed", err))
+				fmt.Println(kit.Notice(kit.LevelError, i18n.T("auth.login.failed", err)))
 				return
 			}
-			fmt.Println(i18n.T("auth.login.success", "GitHub Copilot", id))
+			fmt.Println(kit.Notice(kit.LevelSuccess, i18n.T("auth.login.success", "GitHub Copilot", id)))
 			ch.cli.manager.RefreshProviders()
 			ch.autoSwitchProvider(ctx, "COPILOT",
 				utils.GetEnvOrDefault("COPILOT_MODEL", config.DefaultCopilotModel))
@@ -74,10 +75,10 @@ func (ch *CommandHandler) handleAuthCommand(ctx context.Context, userInput strin
 		case "github-models", "gh-models":
 			id, err := auth.LoginGitHubModelsPAT(ctx, ch.cli.logger)
 			if err != nil {
-				fmt.Println(i18n.T("auth.login.failed", err))
+				fmt.Println(kit.Notice(kit.LevelError, i18n.T("auth.login.failed", err)))
 				return
 			}
-			fmt.Println(i18n.T("auth.login.success", "GitHub Models", id))
+			fmt.Println(kit.Notice(kit.LevelSuccess, i18n.T("auth.login.success", "GitHub Models", id)))
 			ch.cli.manager.RefreshProviders()
 			ch.autoSwitchProvider(ctx, "GITHUB_MODELS",
 				utils.GetEnvOrDefault("GITHUB_MODELS_MODEL", config.DefaultGitHubModelsModel))
