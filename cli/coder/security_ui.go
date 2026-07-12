@@ -84,7 +84,10 @@ func detectTerminalWidth() int {
 // swallowed: the prompt is best-effort UX and any failure here just
 // degrades to the previous (broken-on-resume) behavior.
 func resetTTYToSane() bool {
-	if runtime.GOOS == "windows" || sttyPath == "" {
+	if runtime.GOOS == "windows" {
+		return restoreCookedModeWindows()
+	}
+	if sttyPath == "" {
 		return false
 	}
 	tty, err := os.OpenFile("/dev/tty", os.O_RDWR, 0)

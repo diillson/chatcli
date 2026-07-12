@@ -68,9 +68,7 @@ func (cli *ChatCLI) helpText() string {
 // network; we layer an extra 2s timeout on top in case the caller's ctx
 // is the long-lived agent loop ctx.
 func (cli *ChatCLI) versionText(parent context.Context) string {
-	versionInfo := version.GetCurrentVersion()
 	ctx, cancel := context.WithTimeout(parent, 2*time.Second)
 	defer cancel()
-	latest, hasUpdate, err := version.CheckLatestVersionWithContext(ctx)
-	return version.FormatVersionInfo(versionInfo, latest, hasUpdate, err)
+	return version.GetReport(ctx).Format()
 }

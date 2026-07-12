@@ -96,11 +96,9 @@ func reportDotenvBootstrap(b dotenvBootstrap) {
 // printVersionInfo prints version details (including update check) and is used
 // for the -version flag.
 func printVersionInfo() {
-	versionInfo := version.GetCurrentVersion()
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	latest, hasUpdate, err := version.CheckLatestVersionWithContext(ctx)
-	fmt.Println(version.FormatVersionInfo(versionInfo, latest, hasUpdate, err))
+	fmt.Println(version.GetReport(ctx).Format())
 }
 
 // applyStackSpotFlags applies StackSpot realm/agent overrides when the target

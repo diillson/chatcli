@@ -96,8 +96,9 @@ type AgentMode struct {
 	qualityPipeline *quality.Pipeline
 	qualityConfig   quality.Config
 	// Centralized stdin reader for type-ahead queue support
-	stdinLines   chan string   // all stdin lines flow through here
-	stdinDone    chan struct{} // signals reader goroutine to stop
+	stdinLines   chan string        // all stdin lines flow through here
+	stdinDone    chan struct{}      // signals reader goroutine to stop
+	stdinCancel  *stdinReadCanceler // aborts a blocking console read (Windows)
 	stdinWg      sync.WaitGroup
 	multilineBuf MultilineBuffer // ``` delimited multiline input
 
@@ -187,10 +188,16 @@ func splitStdinChunk(chunk []byte, lineBuf *strings.Builder) []string {
 func (a *AgentMode) startStdinReader() {
 	a.stdinLines = make(chan string, 10)
 	a.stdinDone = make(chan struct{})
+	a.stdinCancel = newStdinReadCanceler()
 	a.stdinWg.Add(1)
 
 	go func() {
 		defer a.stdinWg.Done()
+		// Pin to an OS thread and publish its handle so stopStdinReader can
+		// abort a blocking console read via CancelSynchronousIo (Windows;
+		// no-op elsewhere).
+		a.stdinCancel.bind()
+		defer a.stdinCancel.unbind()
 		var lineBuf strings.Builder
 		buf := make([]byte, 512)
 		for {
@@ -238,32 +245,64 @@ func (a *AgentMode) startStdinReader() {
 	}()
 }
 
+// Reader shutdown pacing: the clean-exit window covers one full poll cycle
+// with slack; the cancel-retry window gives each CancelSynchronousIo attempt
+// time to land before retrying (retries close the race where the blocking
+// read starts right after a cancel that found no I/O in flight).
+const (
+	stdinStopGrace       = 150 * time.Millisecond
+	stdinCancelRetryWait = 100 * time.Millisecond
+	stdinCancelRetries   = 4
+)
+
 // stopStdinReader signals the stdin reader goroutine to stop and waits for it
 // to exit. On Unix (Linux/macOS), the goroutine exits within ~50ms (one poll
-// cycle). On Windows, it may be blocked in os.Stdin.Read after a
-// WaitForSingleObject false positive; a safety timeout prevents indefinite
-// blocking.
+// cycle). On Windows it may be inside a blocking os.Stdin.Read (console reads
+// have no deadline); left orphaned it would steal the next prompt's
+// keystrokes (no echo until Enter), so the pending read is aborted with
+// CancelSynchronousIo on the reader's thread — the documented mechanism for
+// cancelling synchronous console I/O.
 func (a *AgentMode) stopStdinReader() {
 	if a.stdinDone != nil {
 		close(a.stdinDone)
 
-		// Wait with safety timeout. On Unix the goroutine exits in ~50ms.
-		// On Windows it might be stuck in a blocking Read; don't wait forever.
 		done := make(chan struct{})
 		go func() {
 			a.stdinWg.Wait()
 			close(done)
 		}()
+
 		select {
 		case <-done:
-			// Clean exit
-		case <-time.After(500 * time.Millisecond):
-			// Goroutine stuck on blocking read (Windows edge case).
-			// It will discard any data and exit on the next stdin input.
+			// Clean exit within one poll cycle.
+		case <-time.After(stdinStopGrace):
+			a.abortBlockedStdinRead(done)
 		}
 
 		a.stdinLines = nil
 		a.stdinDone = nil
+	}
+}
+
+// abortBlockedStdinRead unblocks a reader goroutine parked in a blocking
+// console read. On platforms without cancellable synchronous I/O it just
+// waits out the poll cycle; if every attempt fails the goroutine degrades to
+// the old behavior (discards data and exits on the next stdin input).
+func (a *AgentMode) abortBlockedStdinRead(done <-chan struct{}) {
+	for attempt := 0; attempt < stdinCancelRetries; attempt++ {
+		if !a.stdinCancel.cancel() {
+			// No cancellation on this platform; one bounded wait.
+			select {
+			case <-done:
+			case <-time.After(stdinCancelRetryWait * stdinCancelRetries):
+			}
+			return
+		}
+		select {
+		case <-done:
+			return
+		case <-time.After(stdinCancelRetryWait):
+		}
 	}
 }
 
@@ -479,8 +518,15 @@ func readLinePlainFromReader(reader *bufio.Reader) string {
 // not calling readLineWithEditing directly; production code uses it
 // as the one go-prompt-touching path.
 func (a *AgentMode) readLineFromGoPrompt() string {
+	// Same Windows input sanitation as the main REPL (see cli.go): AltGr
+	// chars arrive as ESC+rune and would land as a stray glyph without the
+	// altGrParser wrapper.
+	var inputParser prompt.ConsoleParser = prompt.NewStandardInputParser()
+	if runtime.GOOS == "windows" {
+		inputParser = newAltGrParser(inputParser)
+	}
 	pasteParser := paste.NewBracketedPasteParser(
-		prompt.NewStandardInputParser(),
+		inputParser,
 		func(info paste.Info) {
 			a.cli.lastPasteInfo = &info
 		},
@@ -490,6 +536,7 @@ func (a *AgentMode) readLineFromGoPrompt() string {
 		"  > ",
 		noopCompleter,
 		prompt.OptionParser(pasteParser),
+		prompt.OptionWriter(newPlatformPromptWriter()),
 		prompt.OptionPrefixTextColor(prompt.Green),
 		prompt.OptionInputTextColor(prompt.White),
 	)

@@ -238,10 +238,15 @@ func (s ShellSegment) InlineSource(flagPos int) string {
 }
 
 // baseName strips a directory prefix from an executable path so
-// `/usr/bin/python3` and `python3` are treated identically.
+// `/usr/bin/python3` and `python3` are treated identically. Both separators
+// are handled (`C:\Python\python.exe`), and a Windows executable extension is
+// dropped so `python.exe` matches the same table entry as `python`.
 func baseName(p string) string {
-	if i := strings.LastIndex(p, "/"); i >= 0 {
-		return p[i+1:]
+	p = p[strings.LastIndexAny(p, `/\`)+1:]
+	for _, ext := range []string{".exe", ".bat", ".cmd"} {
+		if len(p) > len(ext) && strings.EqualFold(p[len(p)-len(ext):], ext) {
+			return p[:len(p)-len(ext)]
+		}
 	}
 	return p
 }

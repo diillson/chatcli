@@ -10,7 +10,6 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 )
 
@@ -35,11 +34,11 @@ var sensitivePaths = []string{
 }
 
 // IsSensitivePath checks whether a file path points to a known sensitive location.
+// The comparison is case-insensitive on every OS: Windows filesystems are
+// case-insensitive (".SSH" is the same directory as ".ssh"), and on Unix
+// over-matching an odd-cased lookalike only errs on the safe side.
 func IsSensitivePath(absPath string) bool {
-	normalizedPath := filepath.ToSlash(absPath)
-	if runtime.GOOS != "windows" {
-		normalizedPath = strings.ToLower(normalizedPath)
-	}
+	normalizedPath := strings.ToLower(filepath.ToSlash(absPath))
 	for _, sensitive := range sensitivePaths {
 		sensitive = strings.ToLower(sensitive)
 		if strings.Contains(normalizedPath, "/"+sensitive+"/") ||

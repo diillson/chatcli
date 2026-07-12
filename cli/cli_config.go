@@ -425,13 +425,8 @@ func (cli *ChatCLI) getEnvFilePath() string {
 }
 
 func (ch *CommandHandler) handleVersionCommand(ctx context.Context) {
-	versionInfo := version.GetCurrentVersion()
-
 	// Checagem com timeout
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
-	latest, hasUpdate, err := version.CheckLatestVersionWithContext(ctx)
-
-	// Exibir as informações formatadas
-	fmt.Println(version.FormatVersionInfo(versionInfo, latest, hasUpdate, err))
+	fmt.Println(version.GetReport(ctx).Format())
 }

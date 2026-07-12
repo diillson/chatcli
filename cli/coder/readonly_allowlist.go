@@ -150,12 +150,9 @@ func IsReadOnlyCommand(cmdLine string) bool {
 
 	// Parse the base command and arguments
 	parts := strings.Fields(cmdLine)
-	baseCmd := parts[0]
-
-	// Strip path prefix (e.g., "/usr/bin/git" → "git")
-	if idx := strings.LastIndex(baseCmd, "/"); idx >= 0 {
-		baseCmd = baseCmd[idx+1:]
-	}
+	// Strip path prefix and Windows executable extension
+	// (e.g., "/usr/bin/git" → "git", `C:\Git\git.exe` → "git")
+	baseCmd := stripCommandPath(parts[0])
 
 	for _, entry := range readOnlyAllowlist {
 		if !strings.EqualFold(entry.Name, baseCmd) {
@@ -215,11 +212,20 @@ func containsDangerousPipeTarget(cmdLine string) bool {
 		"sudo":  true,
 	}
 
-	cmd := parts[0]
-	if idx := strings.LastIndex(cmd, "/"); idx >= 0 {
-		cmd = cmd[idx+1:]
+	return dangerousTargets[strings.ToLower(stripCommandPath(parts[0]))]
+}
+
+// stripCommandPath reduces an executable invocation to its bare command name:
+// directory prefixes with either separator are removed, along with a Windows
+// executable extension, so `C:\Git\git.exe` and `/usr/bin/git` both yield "git".
+func stripCommandPath(cmd string) string {
+	cmd = cmd[strings.LastIndexAny(cmd, `/\`)+1:]
+	for _, ext := range []string{".exe", ".bat", ".cmd"} {
+		if len(cmd) > len(ext) && strings.EqualFold(cmd[len(cmd)-len(ext):], ext) {
+			return cmd[:len(cmd)-len(ext)]
+		}
 	}
-	return dangerousTargets[strings.ToLower(cmd)]
+	return cmd
 }
 
 // containsOutputRedirect checks if the command redirects output to a file.

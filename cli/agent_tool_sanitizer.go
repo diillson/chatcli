@@ -578,7 +578,16 @@ func parseToolArgsMaybeJSON(argLine string) ([]string, bool, error) {
 
 	var payload any
 	if err := json.Unmarshal([]byte(trimmed), &payload); err != nil {
-		return nil, true, err
+		// Salvage pass: models emit Windows paths with single backslashes
+		// ("C:\Users\x"), which are invalid JSON escapes. Repair and retry
+		// before surfacing the error (lenient parsing keeps the loop moving).
+		repaired := utils.RepairJSONInvalidEscapes(trimmed)
+		if repaired == trimmed {
+			return nil, true, err
+		}
+		if err2 := json.Unmarshal([]byte(repaired), &payload); err2 != nil {
+			return nil, true, err
+		}
 	}
 
 	switch v := payload.(type) {
@@ -696,13 +705,44 @@ func collectArgsMap(m map[string]any) map[string]any {
 		}
 	}
 	for _, envelope := range []string{"args", "flags"} {
-		if mm, ok := m[envelope].(map[string]any); ok {
+		switch mm := m[envelope].(type) {
+		case map[string]any:
 			for k, v := range mm {
 				put(k, v)
+			}
+		case string:
+			// Models sometimes double-encode the envelope as a JSON string
+			// ({"cmd":"write","args":"{\"file\":...}"}); recover it instead
+			// of dropping every argument.
+			if obj, ok := decodeJSONObjectLenient(mm); ok {
+				for k, v := range obj {
+					put(k, v)
+				}
 			}
 		}
 	}
 	return argsMap
+}
+
+// decodeJSONObjectLenient parses a string that should contain a JSON object,
+// repairing invalid backslash escapes (Windows paths) when a strict parse
+// fails.
+func decodeJSONObjectLenient(s string) (map[string]any, bool) {
+	trimmed := strings.TrimSpace(s)
+	if !strings.HasPrefix(trimmed, "{") {
+		return nil, false
+	}
+	var obj map[string]any
+	if err := json.Unmarshal([]byte(trimmed), &obj); err != nil {
+		repaired := utils.RepairJSONInvalidEscapes(trimmed)
+		if repaired == trimmed {
+			return nil, false
+		}
+		if err2 := json.Unmarshal([]byte(repaired), &obj); err2 != nil {
+			return nil, false
+		}
+	}
+	return obj, true
 }
 
 func normalizeFlagName(name string) string {

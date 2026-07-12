@@ -38,7 +38,10 @@ import (
 // (occasionally-broken-on-resume) behavior, which is what we are
 // trying to improve.
 func RestoreCookedMode() bool {
-	if runtime.GOOS == "windows" || sttyPath == "" {
+	if runtime.GOOS == "windows" {
+		return restoreCookedModeWindows()
+	}
+	if sttyPath == "" {
 		return false
 	}
 	tty, err := os.OpenFile("/dev/tty", os.O_RDWR, 0)
