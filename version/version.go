@@ -361,10 +361,18 @@ type Report struct {
 	CheckErr    error
 }
 
+// normalizeTag remove o prefixo v de uma tag de release.
+func normalizeTag(tag string) string {
+	return strings.TrimPrefix(tag, "v")
+}
+
 // GetReport resolve o build info atual e consulta a release mais recente em
 // uma única composição. Com a checagem desabilitada
 // (CHATCLI_DISABLE_VERSION_CHECK) o relatório carrega apenas o build info,
 // com Latest vazio e CheckErr nil — o mesmo contrato do check isolado.
+// Não muta estado do pacote; o único efeito além do retorno é persistir, em
+// best-effort, o cache em disco da release (ver cache.go) que alimenta o
+// OfflineReport da tela de boas-vindas.
 func GetReport(ctx context.Context) Report {
 	rep := Report{Current: GetCurrentVersion()}
 	if versionCheckDisabled() {
@@ -376,8 +384,9 @@ func GetReport(ctx context.Context) Report {
 		rep.CheckErr = err
 		return rep
 	}
+	saveReleaseCache(release)
 
-	rep.Latest = strings.TrimPrefix(release.TagName, "v")
+	rep.Latest = normalizeTag(release.TagName)
 	rep.NeedsUpdate = NeedsUpdate(ExtractBaseVersion(rep.Current.Version), rep.Latest)
 	rep.Current = rep.Current.enrichedFromRelease(rep.Latest, release)
 	return rep
