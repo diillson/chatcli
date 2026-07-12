@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.160.1](https://github.com/diillson/chatcli/compare/v1.160.0...v1.160.1) (2026-07-12)
+
+
+### Bug Fixes
+
+* **windows:** repair coder mode input, path validation, prompt rendering and version info ([#1177](https://github.com/diillson/chatcli/issues/1177)) ([74c8b6e](https://github.com/diillson/chatcli/commit/74c8b6e92dd24b4daea155f78fa8ef7f0fdda64d))
+
 ## [1.160.0](https://github.com/diillson/chatcli/compare/v1.159.0...v1.160.0) (2026-07-12)
 
 
