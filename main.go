@@ -55,6 +55,44 @@ func dispatchSubcommand() bool {
 	return false
 }
 
+// dotenvBootstrap carries the outcome of the pre-i18n environment load so
+// entrypoints can defer user-facing warnings until translations are up.
+type dotenvBootstrap struct {
+	path      string
+	expandErr error
+	loadErr   error
+}
+
+// loadDotenvThenI18n resolves and loads the dotenv file and only then
+// initializes i18n. Order matters: CHATCLI_LANG is documented as settable in
+// .env and i18n.Init latches the language once (sync.Once) — the old
+// init-first order silently ignored a dotenv-only CHATCLI_LANG, masked on
+// Unix by LANG but pinning Windows cmd/PowerShell (no LANG) to English.
+func loadDotenvThenI18n() dotenvBootstrap {
+	b := dotenvBootstrap{path: os.Getenv("CHATCLI_DOTENV")}
+	if b.path == "" {
+		b.path = ".env"
+	} else if expanded, err := utils.ExpandPath(b.path); err == nil {
+		b.path = expanded
+	} else {
+		b.expandErr = err
+	}
+	b.loadErr = godotenv.Load(b.path)
+	i18n.Init()
+	return b
+}
+
+// reportDotenvBootstrap prints the deferred bootstrap warnings now that
+// i18n is initialized (a missing default .env is not an error).
+func reportDotenvBootstrap(b dotenvBootstrap) {
+	if b.expandErr != nil {
+		fmt.Println(i18n.T("main.warn_expand_path", b.path, b.expandErr))
+	}
+	if b.loadErr != nil && !os.IsNotExist(b.loadErr) {
+		fmt.Println(i18n.T("main.error_dotenv_not_found", b.path))
+	}
+}
+
 // printVersionInfo prints version details (including update check) and is used
 // for the -version flag.
 func printVersionInfo() {
@@ -140,28 +178,11 @@ func main() {
 		os.Exit(2)
 	}
 
-	i18n.Init()
+	reportDotenvBootstrap(loadDotenvThenI18n())
 
 	if opts.Version {
 		printVersionInfo()
 		return
-	}
-
-	envFilePath := os.Getenv("CHATCLI_DOTENV")
-	if envFilePath == "" {
-		envFilePath = ".env"
-	} else {
-		expanded, err := utils.ExpandPath(envFilePath)
-		if err == nil {
-			envFilePath = expanded
-		} else {
-			fmt.Println(i18n.T("main.warn_expand_path", envFilePath, err))
-		}
-	}
-
-	if err := godotenv.Load(envFilePath); err != nil && !os.IsNotExist(err) {
-		// CORREÇÃO: Usar Println com i18n.T
-		fmt.Println(i18n.T("main.error_dotenv_not_found", envFilePath))
 	}
 
 	// Resolve the UI theme now that .env is loaded (CHATCLI_THEME may live
@@ -247,19 +268,7 @@ func main() {
 // runSubcommand handles the 'server' and 'connect' subcommands.
 // These have their own initialization flow separate from the standard CLI.
 func runSubcommand(subcmd string, args []string) {
-	i18n.Init()
-
-	// Load .env
-	envFilePath := os.Getenv("CHATCLI_DOTENV")
-	if envFilePath == "" {
-		envFilePath = ".env"
-	} else {
-		expanded, err := utils.ExpandPath(envFilePath)
-		if err == nil {
-			envFilePath = expanded
-		}
-	}
-	_ = godotenv.Load(envFilePath)
+	_ = loadDotenvThenI18n()
 	theme.InitFromEnv()
 
 	logger, err := utils.InitializeLogger()
@@ -326,15 +335,7 @@ func runSubcommand(subcmd string, args []string) {
 // because the scheduler daemon does not need an LLMManager (it doesn't
 // run agent tasks until a CLI attaches and delegates a bridge).
 func runDaemonSubcommand(args []string) {
-	i18n.Init()
-
-	envFilePath := os.Getenv("CHATCLI_DOTENV")
-	if envFilePath == "" {
-		envFilePath = ".env"
-	} else if expanded, err := utils.ExpandPath(envFilePath); err == nil {
-		envFilePath = expanded
-	}
-	_ = godotenv.Load(envFilePath)
+	_ = loadDotenvThenI18n()
 	theme.InitFromEnv()
 
 	logger, err := utils.InitializeLogger()

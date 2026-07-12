@@ -34,15 +34,19 @@ var defaultLang = language.English
 
 // Init inicializa o sistema de internacionalização (thread-safe, idempotent).
 // Ele detecta o idioma com a seguinte prioridade:
-// 1. Variável de ambiente CHATCLI_LANG (pode ser definida no .env)
-// 2. Variáveis de ambiente do sistema (LC_ALL, LANG)
-// 3. Fallback para o idioma padrão (Inglês)
+//  1. Variável de ambiente CHATCLI_LANG (pode ser definida no .env — o
+//     entrypoint carrega o .env ANTES de chamar Init)
+//  2. Variáveis de ambiente do sistema (LC_ALL, LANG)
+//  3. Locale do sistema operacional (Windows: GetUserDefaultLocaleName —
+//     cmd/PowerShell não exportam LANG, só o Git Bash exporta)
+//  4. Fallback para o idioma padrão (Inglês)
 func Init() {
 	initOnce.Do(initI18n)
 }
 
-func initI18n() {
-	// 1. Detectar o idioma do usuário com prioridade para CHATCLI_LANG
+// detectLangString percorre a cadeia de detecção de idioma na ordem
+// documentada em Init e normaliza o resultado ("pt_BR.UTF-8" → "pt-BR").
+func detectLangString() string {
 	langStr := os.Getenv("CHATCLI_LANG") // Maior prioridade
 	if langStr == "" {
 		langStr = os.Getenv("LC_ALL")
@@ -50,14 +54,20 @@ func initI18n() {
 			langStr = os.Getenv("LANG")
 		}
 	}
+	if langStr == "" {
+		langStr = systemLocale()
+	}
 
 	// Normaliza strings como "pt_BR.UTF-8" para "pt-BR"
 	if idx := strings.Index(langStr, "."); idx != -1 {
 		langStr = langStr[:idx]
 	}
-	langStr = strings.Replace(langStr, "_", "-", 1)
+	return strings.Replace(langStr, "_", "-", 1)
+}
 
-	userLang, err := language.Parse(langStr)
+func initI18n() {
+	// 1. Detectar o idioma do usuário com prioridade para CHATCLI_LANG
+	userLang, err := language.Parse(detectLangString())
 	if err != nil {
 		userLang = defaultLang
 	}

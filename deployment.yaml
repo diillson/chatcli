@@ -1,0 +1,28 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: chatcli
+  labels:
+    app: chatcli
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: chatcli
+  template:
+    metadata:
+      labels:
+        app: chatcli
+    spec:
+      containers:
+        - name: chatcli
+          image: chatcli:latest
+          ports:
+            - containerPort: 8080
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "128Mi"
+            limits:
+              cpu: "500m"
+              memory: "256Mi"
