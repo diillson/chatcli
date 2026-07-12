@@ -65,6 +65,19 @@ func VisibleLen(s string) int {
 	return lipgloss.Width(s)
 }
 
+// PadRight pads s with spaces to the given visible width. Measurement is
+// ANSI/emoji-aware (VisibleLen), unlike fmt's "%-Ns" which counts BYTES and
+// silently misaligns any accented or multibyte label — the root cause of
+// column drift in pt-BR surfaces. Strings already at or past the width are
+// returned unchanged.
+func PadRight(s string, cols int) string {
+	gap := cols - VisibleLen(s)
+	if gap <= 0 {
+		return s
+	}
+	return s + strings.Repeat(" ", gap)
+}
+
 // Truncate clamps s to at most maxCols visible columns, preserving ANSI
 // color sequences and appending an ellipsis plus a reset when content was
 // dropped so styling never bleeds into the next line.

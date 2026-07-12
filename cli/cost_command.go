@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/diillson/chatcli/i18n"
+	"github.com/diillson/chatcli/ui/kit"
 )
 
 func (cli *ChatCLI) handleCostCommand() {
@@ -36,10 +37,33 @@ func (cli *ChatCLI) handleCostCommand() {
 	duration := time.Since(ct.sessionStart).Truncate(time.Second)
 	totalTokens := ct.totalPromptTokens + ct.totalCompletionTokens
 
-	fmt.Println(p + fmt.Sprintf("  %s%s:%s    %s", ColorGray, i18n.T("cost.cmd.provider"), ColorReset, provider))
-	fmt.Println(p + fmt.Sprintf("  %s%s:%s       %s", ColorGray, i18n.T("cost.cmd.model"), ColorReset, model))
-	fmt.Println(p + fmt.Sprintf("  %s%s:%s    %s", ColorGray, i18n.T("cost.cmd.duration"), ColorReset, duration))
-	fmt.Println(p + fmt.Sprintf("  %s%s:%s    %d", ColorGray, i18n.T("cost.cmd.requests"), ColorReset, ct.totalRequests))
+	// Aligned key/value rows: the label column is measured from the
+	// TRANSLATED labels of each group (kit.PadRight is visible-width
+	// aware), replacing the literal spaces that were hand-tuned to the
+	// English label lengths and drifted in pt-BR.
+	row := func(labelW int, label, value string) {
+		fmt.Println(p + "  " + colorize(kit.PadRight(label+":", labelW+1), ColorGray) + "  " + value)
+	}
+	groupWidth := func(labels ...string) int {
+		w := 0
+		for _, l := range labels {
+			if lw := kit.VisibleLen(l); lw > w {
+				w = lw
+			}
+		}
+		return w
+	}
+
+	topLabels := []string{
+		i18n.T("cost.cmd.provider"), i18n.T("cost.cmd.model"),
+		i18n.T("cost.cmd.duration"), i18n.T("cost.cmd.requests"),
+		i18n.T("cost.cmd.source"),
+	}
+	topW := groupWidth(topLabels...)
+	row(topW, i18n.T("cost.cmd.provider"), provider)
+	row(topW, i18n.T("cost.cmd.model"), model)
+	row(topW, i18n.T("cost.cmd.duration"), duration.String())
+	row(topW, i18n.T("cost.cmd.requests"), fmt.Sprintf("%d", ct.totalRequests))
 
 	// Data source indicator
 	hasReal := false
@@ -50,9 +74,9 @@ func (cli *ChatCLI) handleCostCommand() {
 		}
 	}
 	if hasReal {
-		fmt.Println(p + fmt.Sprintf("  %s%s:%s      %s%s%s", ColorGray, i18n.T("cost.cmd.source"), ColorReset, ColorGreen, i18n.T("cost.cmd.source_api"), ColorReset))
+		row(topW, i18n.T("cost.cmd.source"), colorize(i18n.T("cost.cmd.source_api"), ColorGreen))
 	} else {
-		fmt.Println(p + fmt.Sprintf("  %s%s:%s      %s%s%s", ColorGray, i18n.T("cost.cmd.source"), ColorReset, ColorYellow, i18n.T("cost.cmd.source_estimate"), ColorReset))
+		row(topW, i18n.T("cost.cmd.source"), colorize(i18n.T("cost.cmd.source_estimate"), ColorYellow))
 	}
 	fmt.Println(p)
 
@@ -69,30 +93,29 @@ func (cli *ChatCLI) handleCostCommand() {
 		completionBar = strings.Repeat("\u2588", int(ct.totalCompletionTokens*20/maxToken))
 	}
 
+	tokenW := groupWidth(i18n.T("cost.cmd.input"), i18n.T("cost.cmd.output"), i18n.T("cost.cmd.total"))
+	tokenRow := func(label, count, bar string) {
+		line := "    " + kit.PadRight(label, tokenW+2) + ColorBold + kit.PadRight(count, 8) + ColorReset
+		if bar != "" {
+			line += " " + bar
+		}
+		fmt.Println(p + line)
+	}
 	fmt.Println(p + colorize("  "+i18n.T("cost.cmd.tokens_label"), ColorCyan))
-	fmt.Println(p + fmt.Sprintf("    %s      %s%-8s%s %s%s%s",
-		i18n.T("cost.cmd.input"),
-		ColorBold, formatTokenCount64(ct.totalPromptTokens), ColorReset,
-		ColorGreen, promptBar, ColorReset))
-	fmt.Println(p + fmt.Sprintf("    %s     %s%-8s%s %s%s%s",
-		i18n.T("cost.cmd.output"),
-		ColorBold, formatTokenCount64(ct.totalCompletionTokens), ColorReset,
-		ColorPurple, completionBar, ColorReset))
-	fmt.Println(p + fmt.Sprintf("    %s      %s%s%s",
-		i18n.T("cost.cmd.total"),
-		ColorBold, formatTokenCount64(totalTokens), ColorReset))
+	tokenRow(i18n.T("cost.cmd.input"), formatTokenCount64(ct.totalPromptTokens), ColorGreen+promptBar+ColorReset)
+	tokenRow(i18n.T("cost.cmd.output"), formatTokenCount64(ct.totalCompletionTokens), ColorPurple+completionBar+ColorReset)
+	tokenRow(i18n.T("cost.cmd.total"), formatTokenCount64(totalTokens), "")
 
 	// Cache tokens (Anthropic only)
 	if ct.totalCacheCreation > 0 || ct.totalCacheRead > 0 {
+		cacheW := groupWidth(i18n.T("cost.cmd.cache_created"), i18n.T("cost.cmd.cache_read"))
 		fmt.Println(p)
 		fmt.Println(p + colorize("  "+i18n.T("cost.cmd.cache_tokens_label"), ColorCyan))
-		fmt.Println(p + fmt.Sprintf("    %s    %s%s%s",
-			i18n.T("cost.cmd.cache_created"),
-			ColorBold, formatTokenCount64(ct.totalCacheCreation), ColorReset))
-		fmt.Println(p + fmt.Sprintf("    %s       %s%s%s  %s%s%s",
-			i18n.T("cost.cmd.cache_read"),
-			ColorBold, formatTokenCount64(ct.totalCacheRead), ColorReset,
-			ColorGray, i18n.T("cost.cmd.cache_savings"), ColorReset))
+		fmt.Println(p + "    " + kit.PadRight(i18n.T("cost.cmd.cache_created"), cacheW+2) +
+			ColorBold + formatTokenCount64(ct.totalCacheCreation) + ColorReset)
+		fmt.Println(p + "    " + kit.PadRight(i18n.T("cost.cmd.cache_read"), cacheW+2) +
+			ColorBold + formatTokenCount64(ct.totalCacheRead) + ColorReset + "  " +
+			colorize(i18n.T("cost.cmd.cache_savings"), ColorGray))
 	}
 	fmt.Println(p)
 
@@ -101,21 +124,21 @@ func (cli *ChatCLI) handleCostCommand() {
 		fmt.Println(p + colorize("  "+i18n.T("cost.cmd.cost_label"), ColorCyan))
 
 		// Show per-model cost breakdown
+		costW := groupWidth(i18n.T("cost.cmd.input_cost"), i18n.T("cost.cmd.output_cost"), i18n.T("cost.cmd.cache_cost"))
 		for _, rec := range ct.modelUsage {
 			if rec.TotalCostUSD <= 0 {
 				continue
 			}
 			fmt.Println(p + fmt.Sprintf("    %s/%s:", rec.Provider, rec.Model))
-			fmt.Println(p + fmt.Sprintf("      %s    $%.4f", i18n.T("cost.cmd.input_cost"), rec.InputCostUSD))
-			fmt.Println(p + fmt.Sprintf("      %s   $%.4f", i18n.T("cost.cmd.output_cost"), rec.OutputCostUSD))
+			fmt.Println(p + "      " + kit.PadRight(i18n.T("cost.cmd.input_cost"), costW+2) + fmt.Sprintf("$%.4f", rec.InputCostUSD))
+			fmt.Println(p + "      " + kit.PadRight(i18n.T("cost.cmd.output_cost"), costW+2) + fmt.Sprintf("$%.4f", rec.OutputCostUSD))
 			if rec.CacheCostUSD > 0 {
-				fmt.Println(p + fmt.Sprintf("      %s    $%.4f", i18n.T("cost.cmd.cache_cost"), rec.CacheCostUSD))
+				fmt.Println(p + "      " + kit.PadRight(i18n.T("cost.cmd.cache_cost"), costW+2) + fmt.Sprintf("$%.4f", rec.CacheCostUSD))
 			}
 		}
 
 		fmt.Println(p)
-		fmt.Println(p + fmt.Sprintf("    %s%s      %s$%.4f%s",
-			ColorBold, i18n.T("cost.cmd.total"), ColorLime, ct.totalCostUSD, ColorReset))
+		fmt.Println(p + "    " + ColorBold + kit.PadRight(i18n.T("cost.cmd.total"), costW+2) + ColorLime + fmt.Sprintf("$%.4f", ct.totalCostUSD) + ColorReset)
 	} else {
 		fmt.Println(p + colorize("  "+i18n.T("cost.cmd.pricing_unavailable"), ColorGray))
 	}

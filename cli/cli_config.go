@@ -10,6 +10,7 @@ import (
 	"github.com/diillson/chatcli/config"
 	"github.com/diillson/chatcli/i18n"
 	"github.com/diillson/chatcli/llm/manager"
+	"github.com/diillson/chatcli/ui/kit"
 	"github.com/diillson/chatcli/ui/theme"
 	"github.com/diillson/chatcli/utils"
 	"github.com/diillson/chatcli/version"
@@ -210,7 +211,7 @@ func (cli *ChatCLI) showHelp() {
 			cmdColor = ColorGray
 			descColor = ColorGray
 		}
-		fmt.Printf("    %s    %s\n", colorize(fmt.Sprintf("%-32s", cmd), cmdColor), colorize(desc, descColor))
+		fmt.Printf("    %s    %s\n", colorize(kit.PadRight(cmd, 32), cmdColor), colorize(desc, descColor))
 	}
 
 	fmt.Println("\n" + colorize(i18n.T("help.header.title"), ColorBold))

@@ -3216,5 +3216,8 @@
   "complete.configimage.models": "Lista o catálogo de modelos",
   "complete.configimage.reset": "Limpa os overrides de imagem",
   "complete.configimage.val": "valor",
-  "agent.spinner.working": "processando"
+  "agent.spinner.working": "processando",
+
+  "agent.summary.block_ok": "Bloco #%d concluído",
+  "agent.summary.block_failed": "Bloco #%d falhou"
 }

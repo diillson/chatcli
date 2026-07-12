@@ -21,6 +21,7 @@ import (
 	"github.com/diillson/chatcli/i18n"
 	"github.com/diillson/chatcli/llm/openaiassistant"
 	"github.com/diillson/chatcli/models"
+	"github.com/diillson/chatcli/ui/kit"
 	"github.com/diillson/chatcli/utils"
 )
 
@@ -492,11 +493,11 @@ func (a *AgentMode) cmdBatchExecute(ctx context.Context, renderer *agent.UIRende
 	fmt.Println(i18n.T("agent.status.all_commands_executed"))
 	fmt.Println(i18n.T("agent.status.summary"))
 	for i, out := range outputs {
-		status := "OK"
 		if out == nil || strings.TrimSpace(out.ErrorMsg) != "" {
-			status = "ERRO"
+			fmt.Println(kit.Notice(kit.LevelError, i18n.T("agent.summary.block_failed", i+1)))
+			continue
 		}
-		fmt.Printf("- #%d: %s\n", i+1, status)
+		fmt.Println(kit.Notice(kit.LevelSuccess, i18n.T("agent.summary.block_ok", i+1)))
 	}
 	_ = a.getInput(renderer.Colorize(i18n.T("agent.status.press_enter"), agent.ColorGray))
 }
@@ -579,9 +580,9 @@ func (a *AgentMode) cmdAddContextContinue(ctx context.Context, renderer *agent.U
 	}
 
 	fmt.Println(i18n.T("agent.output_header"))
-	fmt.Println("---------------------------------------")
+	fmt.Println(kit.Rule())
 	fmt.Print(outputs[cmdNum-1].Output)
-	fmt.Println("---------------------------------------")
+	fmt.Println(kit.Rule())
 
 	userContext := a.getMultilineInput(i18n.T("agent.prompt.additional_context"))
 
@@ -946,7 +947,7 @@ func (a *AgentMode) askUserIfInteractive(cmd string, contextInfo agent.CommandCo
 // simulateCommandBlock simula execução (dry-run)
 func (a *AgentMode) simulateCommandBlock(ctx context.Context, block agent.CommandBlock) {
 	fmt.Printf(i18n.T("agent.status.simulating_commands", block.Language)+"\n", block.Language)
-	fmt.Println("---------------------------------------")
+	fmt.Println(kit.Rule())
 
 	shell := os.Getenv("SHELL")
 	if shell == "" {
@@ -979,7 +980,7 @@ func (a *AgentMode) simulateCommandBlock(ctx context.Context, block agent.Comman
 			fmt.Println(string(out))
 		}
 	}
-	fmt.Println("---------------------------------------")
+	fmt.Println(kit.Rule())
 }
 
 // editCommandBlock abre comandos em editor
