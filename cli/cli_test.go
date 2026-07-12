@@ -11,19 +11,8 @@ import (
 
 	"github.com/diillson/chatcli/version"
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/mock"
 	"go.uber.org/zap"
 )
-
-// Mock para a função de checagem de versão
-type mockVersionChecker struct {
-	mock.Mock
-}
-
-func (m *mockVersionChecker) Check(ctx context.Context) (string, bool, error) {
-	args := m.Called(ctx)
-	return args.String(0), args.Bool(1), args.Error(2)
-}
 
 // stripANSI remove códigos ANSI de uma string
 func stripANSI(s string) string {
@@ -41,37 +30,38 @@ func TestHandleVersionCommand(t *testing.T) {
 	cliInstance := &ChatCLI{logger: logger}
 	handler := NewCommandHandler(cliInstance)
 
-	originalCheckImpl := version.CheckLatestVersionImpl
+	originalFetchImpl := version.FetchLatestReleaseImpl
 	originalBuildImpl := version.GetBuildInfoImpl
 
-	mockChecker := new(mockVersionChecker)
-
-	version.CheckLatestVersionImpl = func(ctx context.Context) (string, bool, error) {
-		return mockChecker.Check(ctx)
-	}
 	version.GetBuildInfoImpl = func() (string, string, string) {
 		return "1.25.0", "abc1234", "2024-09-15"
 	}
 	defer func() {
-		version.CheckLatestVersionImpl = originalCheckImpl
+		version.FetchLatestReleaseImpl = originalFetchImpl
 		version.GetBuildInfoImpl = originalBuildImpl
 	}()
 
+	// mockLatest alimenta o seam de fetch; "precisa atualizar" é decidido
+	// pela lógica REAL de comparação contra a versão mockada 1.25.0.
 	testCases := []struct {
 		name       string
 		mockLatest string
-		mockUpdate bool
 		mockErr    error
 		expectOut  string
 	}{
-		{"Update available", "1.26.0", true, nil, "Disponível! Atualize"},
-		{"No update", "1.25.0", false, nil, "Você está na versão mais recente."},
-		{"With error", "", false, errors.New("network error"), "Não foi possível verificar: network error"},
+		{"Update available", "1.26.0", nil, "Disponível! Atualize"},
+		{"No update", "1.25.0", nil, "Você está na versão mais recente."},
+		{"With error", "", errors.New("network error"), "Não foi possível verificar: network error"},
 	}
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			mockChecker.On("Check", mock.Anything).Return(tc.mockLatest, tc.mockUpdate, tc.mockErr).Once()
+			version.FetchLatestReleaseImpl = func(ctx context.Context) (version.ReleaseInfo, error) {
+				if tc.mockErr != nil {
+					return version.ReleaseInfo{}, tc.mockErr
+				}
+				return version.ReleaseInfo{TagName: "v" + tc.mockLatest}, nil
+			}
 
 			oldStdout := os.Stdout
 			r, w, _ := os.Pipe()
@@ -87,7 +77,6 @@ func TestHandleVersionCommand(t *testing.T) {
 			normalized := normalizeSpaces(cleanOut)
 
 			assert.Contains(t, normalized, tc.expectOut)
-			mockChecker.AssertExpectations(t)
 		})
 	}
 }

@@ -35,12 +35,15 @@ type ReleaseInfo struct {
 	TargetHash  string `json:"target_commitish"`
 }
 
-// CheckLatestVersionImpl é a implementação injetável para checagem de versão (pode ser mocked)
-var CheckLatestVersionImpl = func(ctx context.Context) (string, bool, error) {
-	if strings.EqualFold(os.Getenv("CHATCLI_DISABLE_VERSION_CHECK"), "true") {
-		return "", false, nil
-	}
+// versionCheckDisabled centraliza o opt-out da checagem de release.
+func versionCheckDisabled() bool {
+	return strings.EqualFold(os.Getenv("CHATCLI_DISABLE_VERSION_CHECK"), "true")
+}
 
+// FetchLatestReleaseImpl é a implementação injetável da consulta à release
+// mais recente (o único seam de rede deste pacote; testes o substituem ou
+// apontam CHATCLI_LATEST_VERSION_URL para um servidor de teste).
+var FetchLatestReleaseImpl = func(ctx context.Context) (ReleaseInfo, error) {
 	client := &http.Client{
 		Timeout: 10 * time.Second,
 	}
@@ -52,14 +55,14 @@ var CheckLatestVersionImpl = func(ctx context.Context) (string, bool, error) {
 
 	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
 	if err != nil {
-		return "", false, err
+		return ReleaseInfo{}, err
 	}
 
 	req.Header.Set("User-Agent", "ChatCLI-Version-Checker")
 
 	resp, err := client.Do(req)
 	if err != nil {
-		return "", false, err
+		return ReleaseInfo{}, err
 	}
 	defer func() {
 		if closeErr := resp.Body.Close(); closeErr != nil {
@@ -68,55 +71,51 @@ var CheckLatestVersionImpl = func(ctx context.Context) (string, bool, error) {
 	}()
 
 	if resp.StatusCode != http.StatusOK {
-		return "", false, fmt.Errorf("erro ao verificar versão: status %d", resp.StatusCode)
+		return ReleaseInfo{}, fmt.Errorf("erro ao verificar versão: status %d", resp.StatusCode)
 	}
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return "", false, err
+		return ReleaseInfo{}, err
 	}
 
 	var releaseInfo ReleaseInfo
 	if err := json.Unmarshal(body, &releaseInfo); err != nil {
-		return "", false, err
+		return ReleaseInfo{}, err
 	}
-
-	latestVersion := strings.TrimPrefix(releaseInfo.TagName, "v")
-	currentVersionFull, _, _ := GetBuildInfo()
-	currentVersionBase := ExtractBaseVersion(currentVersionFull)
-	needsUpdate := NeedsUpdate(currentVersionBase, latestVersion)
-
-	// Enriquecer informações de build quando instalado via go install
-	// (sem ldflags — commit e data ficam "unknown")
-	enrichBuildInfoFromRelease(currentVersionBase, latestVersion, releaseInfo)
-
-	return latestVersion, needsUpdate, nil
+	return releaseInfo, nil
 }
 
-// enrichBuildInfoFromRelease preenche CommitHash e BuildDate a partir da
-// release do GitHub quando estes não foram injetados via ldflags (ex: go install).
-func enrichBuildInfoFromRelease(currentBase, latestBase string, release ReleaseInfo) {
-	if currentBase != latestBase {
-		return // Só enriquece se a versão instalada é a mesma da latest
+// enrichedFromRelease retorna uma cópia de v com CommitHash/BuildDate
+// preenchidos a partir dos metadados da release quando o próprio build não
+// os carimbou (go install baixa do module proxy, sem info de VCS em nenhum
+// SO) — e somente quando a versão instalada é exatamente a release que os
+// metadados descrevem. Função pura: nenhum estado do pacote é alterado.
+func (v VersionInfo) enrichedFromRelease(latestBase string, release ReleaseInfo) VersionInfo {
+	if ExtractBaseVersion(v.Version) != latestBase {
+		return v
 	}
 
-	if CommitHash == "unknown" || CommitHash == "" {
+	if v.CommitHash == "unknown" || v.CommitHash == "" {
 		if release.TargetHash != "" {
 			hash := release.TargetHash
 			if len(hash) > 12 {
 				hash = hash[:12]
 			}
-			CommitHash = hash
+			v.CommitHash = hash
 		}
 	}
 
-	if BuildDate == "unknown" || BuildDate == "" {
-		if release.PublishedAt != "" {
-			if t, err := time.Parse(time.RFC3339, release.PublishedAt); err == nil {
-				BuildDate = t.Format("2006-01-02 15:04:05")
-			}
+	// A data de publicação da release é mais fiel que a aproximação pela
+	// data do binário (que reflete a hora do go install, não a do release).
+	replaceableDate := v.BuildDate == "unknown" || v.BuildDate == "" ||
+		strings.HasSuffix(v.BuildDate, buildDateApproxSuffix)
+	if replaceableDate && release.PublishedAt != "" {
+		if t, err := time.Parse(time.RFC3339, release.PublishedAt); err == nil {
+			v.BuildDate = t.Format("2006-01-02 15:04:05")
 		}
 	}
+	return v
 }
 
 // GetBuildInfoImpl é a implementação injetável para GetBuildInfo (pode ser mocked)
@@ -171,12 +170,17 @@ var GetBuildInfoImpl = func() (string, string, string) {
 		if execPath, err := os.Executable(); err == nil {
 			if info, err := os.Stat(execPath); err == nil {
 				modTime := info.ModTime()
-				buildDate = fmt.Sprintf("%s (aproximado pela data do binário)", modTime.Format("2006-01-02 15:04:05"))
+				buildDate = modTime.Format("2006-01-02 15:04:05") + buildDateApproxSuffix
 			}
 		}
 	}
 	return version, commitHash, buildDate
 }
+
+// buildDateApproxSuffix marca uma BuildDate estimada pela data de modificação
+// do binário. enrichedFromRelease usa o marcador para saber que pode
+// substituí-la pela data real de publicação da release.
+const buildDateApproxSuffix = " (aproximado pela data do binário)"
 
 // Info retorna informações estruturadas sobre a versão atual
 type VersionInfo struct {
@@ -185,12 +189,18 @@ type VersionInfo struct {
 	BuildDate  string `json:"build_date"`
 }
 
-// GetCurrentVersion retorna as informações de versão atuais
+// GetCurrentVersion retorna as informações de versão atuais. Delega em
+// GetBuildInfo (em vez de ler as globais cruas) para que builds sem ldflags —
+// o caso `go install` — ainda apresentem a versão do módulo, o vcs.revision e
+// a data aproximada do binário. Para exibir também o enriquecimento via
+// GitHub release, use GetReport — que compõe tudo sem depender de ordem de
+// chamadas nem de estado mutável do pacote.
 func GetCurrentVersion() VersionInfo {
+	v, commit, date := GetBuildInfo()
 	return VersionInfo{
-		Version:    Version,
-		CommitHash: CommitHash,
-		BuildDate:  BuildDate,
+		Version:    v,
+		CommitHash: commit,
+		BuildDate:  date,
 	}
 }
 
@@ -340,7 +350,56 @@ func GetBuildInfo() (string, string, string) {
 	return GetBuildInfoImpl()
 }
 
-// CheckLatestVersionWithContext é o wrapper exportado (mantém a API inalterada)
+// Report reúne tudo que uma exibição de versão precisa: o build info
+// resolvido (enriquecido com metadados da release quando o build não tem
+// carimbo de VCS) e o resultado da checagem de atualização. Construí-lo não
+// tem efeitos colaterais no pacote nem exige ordem entre resolução e check.
+type Report struct {
+	Current     VersionInfo
+	Latest      string
+	NeedsUpdate bool
+	CheckErr    error
+}
+
+// GetReport resolve o build info atual e consulta a release mais recente em
+// uma única composição. Com a checagem desabilitada
+// (CHATCLI_DISABLE_VERSION_CHECK) o relatório carrega apenas o build info,
+// com Latest vazio e CheckErr nil — o mesmo contrato do check isolado.
+func GetReport(ctx context.Context) Report {
+	rep := Report{Current: GetCurrentVersion()}
+	if versionCheckDisabled() {
+		return rep
+	}
+
+	release, err := FetchLatestReleaseImpl(ctx)
+	if err != nil {
+		rep.CheckErr = err
+		return rep
+	}
+
+	rep.Latest = strings.TrimPrefix(release.TagName, "v")
+	rep.NeedsUpdate = NeedsUpdate(ExtractBaseVersion(rep.Current.Version), rep.Latest)
+	rep.Current = rep.Current.enrichedFromRelease(rep.Latest, release)
+	return rep
+}
+
+// Format renderiza o relatório no formato canônico de exibição.
+func (r Report) Format() string {
+	return FormatVersionInfo(r.Current, r.Latest, r.NeedsUpdate, r.CheckErr)
+}
+
+// CheckLatestVersionWithContext responde apenas "qual é a última versão e
+// preciso atualizar?", sem tocar em estado do pacote. Fluxos de exibição
+// devem preferir GetReport, que também enriquece o build info.
 func CheckLatestVersionWithContext(ctx context.Context) (string, bool, error) {
-	return CheckLatestVersionImpl(ctx)
+	if versionCheckDisabled() {
+		return "", false, nil
+	}
+	release, err := FetchLatestReleaseImpl(ctx)
+	if err != nil {
+		return "", false, err
+	}
+	latest := strings.TrimPrefix(release.TagName, "v")
+	currentVersionFull, _, _ := GetBuildInfo()
+	return latest, NeedsUpdate(ExtractBaseVersion(currentVersionFull), latest), nil
 }
