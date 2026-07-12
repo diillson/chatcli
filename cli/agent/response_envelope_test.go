@@ -73,15 +73,16 @@ func stripANSIEnv(s string) string {
 	return b.String()
 }
 
-// TestRenderResponseEnvelope_BoxIsClosed asserts the envelope draws
-// matching top + side + bottom borders for a simple body. Without
-// this guarantee long bodies could escape on the right.
-func TestRenderResponseEnvelope_BoxIsClosed(t *testing.T) {
+// TestRenderResponseEnvelope_SobrioShape asserts the borderless reply
+// shape: a bilateral titled rule opens the reply, the body sits on the
+// two-space indent, and no box glyph is drawn anywhere.
+func TestRenderResponseEnvelope_SobrioShape(t *testing.T) {
 	r := NewUIRendererWithStyle(zap.NewNop(), UIStyleFull)
 	out := captureEnvStdout(t, func() {
 		r.RenderResponseEnvelope(ResponseEnvelopeOptions{
 			HeaderLeft:  " 💬 RESPOSTA ",
 			HeaderRight: " 1.4s · 312↑ 1.8k↓ ",
+			FooterRight: "$0.004 · ctx 12%",
 			Body:        "Hello, world.",
 			Color:       ColorGray,
 			Width:       80,
@@ -89,21 +90,20 @@ func TestRenderResponseEnvelope_BoxIsClosed(t *testing.T) {
 	})
 	plain := stripANSIEnv(out)
 
-	assert.Contains(t, plain, "╭", "top-left corner present")
-	assert.Contains(t, plain, "╮", "top-right corner present")
-	assert.Contains(t, plain, "╰", "bottom-left corner present")
-	assert.Contains(t, plain, "╯", "bottom-right corner present")
-	assert.Contains(t, plain, "│", "vertical side border present")
 	assert.Contains(t, plain, "RESPOSTA", "header left label surfaces")
 	assert.Contains(t, plain, "1.4s", "header right label surfaces")
-	assert.Contains(t, plain, "Hello, world.", "body content surfaces")
+	assert.Contains(t, plain, "──", "titled rule opens the reply")
+	assert.Contains(t, plain, "\n  Hello, world.", "body sits on the two-space indent")
+	assert.Contains(t, plain, "  $0.004 · ctx 12%", "footer telemetry closes the reply")
+	for _, glyph := range []string{"╭", "╮", "╰", "╯", "│"} {
+		assert.NotContains(t, plain, glyph, "sóbrio treatment draws no box glyphs")
+	}
 }
 
-// TestRenderResponseEnvelope_BordersAlignAcrossWidths verifies that
-// at multiple terminal widths the top, every body row, and the bottom
-// all measure the same visible width. This is the contract that
-// prevents the "text outside the box" regression.
-func TestRenderResponseEnvelope_BordersAlignAcrossWidths(t *testing.T) {
+// TestRenderResponseEnvelope_RuleSpansRequestedWidth verifies the header
+// rule measures exactly the pinned width at several sizes — the successor
+// of the closed-box alignment contract.
+func TestRenderResponseEnvelope_RuleSpansRequestedWidth(t *testing.T) {
 	cases := []int{40, 60, 80, 120, 180}
 	for _, w := range cases {
 		r := NewUIRendererWithStyle(zap.NewNop(), UIStyleFull)
@@ -117,30 +117,17 @@ func TestRenderResponseEnvelope_BordersAlignAcrossWidths(t *testing.T) {
 			})
 		})
 		plain := stripANSIEnv(out)
-		rows := splitNonEmpty(plain)
-
-		// Each row that is part of the box (i.e. starts with one of the
-		// border glyphs) must report the same visible width.
-		var widths []int
-		for _, row := range rows {
-			if startsWithBorder(row) {
-				widths = append(widths, lipgloss.Width(row))
-			}
+		rule := firstRuleRow(plain)
+		if rule == "" {
+			t.Fatalf("width=%d: no rule row found", w)
 		}
-		if len(widths) < 3 {
-			t.Fatalf("width=%d: expected at least top+body+bottom rows, got %d (rows=%v)", w, len(widths), rows)
-		}
-		first := widths[0]
-		for _, got := range widths {
-			assert.Equalf(t, first, got, "width=%d: every border row must agree on visible width", w)
-		}
+		assert.Equalf(t, w, lipgloss.Width(rule), "width=%d: rule must span the pinned width", w)
 	}
 }
 
-// TestRenderResponseEnvelope_EmojiHeavyContent feeds the box the same
-// emoji-heavy body pattern the user reported overflowing in the bug
-// report. After the runewidth.StrictEmojiNeutral normalization, the
-// right border must stay aligned with the rest of the box.
+// TestRenderResponseEnvelope_EmojiHeavyContent feeds the reply the same
+// emoji-heavy body from the historical overflow bug: no row (rule or body)
+// may exceed the pinned width.
 func TestRenderResponseEnvelope_EmojiHeavyContent(t *testing.T) {
 	r := NewUIRendererWithStyle(zap.NewNop(), UIStyleFull)
 	body := strings.Join([]string{
@@ -161,30 +148,14 @@ func TestRenderResponseEnvelope_EmojiHeavyContent(t *testing.T) {
 			Width:       90,
 		})
 	})
-	plain := stripANSIEnv(out)
-
-	rows := splitNonEmpty(plain)
-	var widths []int
-	for _, row := range rows {
-		if startsWithBorder(row) {
-			widths = append(widths, lipgloss.Width(row))
-		}
-	}
-	if len(widths) < 3 {
-		t.Fatalf("expected at least top+body+bottom rows, got rows=%v", rows)
-	}
-	first := widths[0]
-	for _, got := range widths {
-		assert.Equal(t, first, got,
-			"emoji-heavy content must not drift the right border")
+	for _, row := range strings.Split(stripANSIEnv(out), "\n") {
+		assert.LessOrEqualf(t, lipgloss.Width(row), 90,
+			"emoji-heavy row must stay inside the pinned width: %q", row)
 	}
 }
 
-// TestRenderResponseEnvelope_LongLineWraps proves the renderer wraps
-// long single-line bodies inside the inner width so no row ever
-// exceeds the card width. Reproduces the chat-mode failure mode the
-// user described ("não respeita o mesmo tab de linha que o tamanho
-// da box").
+// TestRenderResponseEnvelope_LongLineWraps proves long single-line bodies
+// wrap inside the pinned width on the indent.
 func TestRenderResponseEnvelope_LongLineWraps(t *testing.T) {
 	r := NewUIRendererWithStyle(zap.NewNop(), UIStyleFull)
 	long := strings.Repeat("palavra ", 60)
@@ -196,25 +167,14 @@ func TestRenderResponseEnvelope_LongLineWraps(t *testing.T) {
 			Width:      60,
 		})
 	})
-	plain := stripANSIEnv(out)
-
-	for _, row := range strings.Split(plain, "\n") {
-		if !startsWithBorder(row) {
-			continue
-		}
-		// Borders + padding consume at most 6 cols of the requested
-		// width — every visible row must therefore be ≤ requested width.
-		assert.LessOrEqual(t, lipgloss.Width(row), 60,
-			"long body row must wrap inside the box: %q", row)
+	for _, row := range strings.Split(stripANSIEnv(out), "\n") {
+		assert.LessOrEqualf(t, lipgloss.Width(row), 60,
+			"long body row must wrap inside the width: %q", row)
 	}
 }
 
-// TestRenderResponseEnvelope_ShortBodyLongHeader is the regression
-// test for the bug the user reported on 2026-05-20: when the header
-// bilateral labels (model + latency · tokens) measured wider than the
-// body content, the top border painted wider than the body+bottom and
-// the box read as broken. The envelope must now grow the card to fit
-// the header, padding the body out to match.
+// TestRenderResponseEnvelope_ShortBodyLongHeader: labels wider than the
+// body must be absorbed by the rule without overflowing the pinned width.
 func TestRenderResponseEnvelope_ShortBodyLongHeader(t *testing.T) {
 	r := NewUIRendererWithStyle(zap.NewNop(), UIStyleFull)
 	out := captureEnvStdout(t, func() {
@@ -227,26 +187,14 @@ func TestRenderResponseEnvelope_ShortBodyLongHeader(t *testing.T) {
 		})
 	})
 	plain := stripANSIEnv(out)
-
-	var widths []int
-	for _, row := range strings.Split(plain, "\n") {
-		if startsWithBorder(row) {
-			widths = append(widths, lipgloss.Width(row))
-		}
-	}
-	if len(widths) < 4 {
-		t.Fatalf("expected top + 2 body rows + bottom, got %d rows", len(widths))
-	}
-	first := widths[0]
-	for _, got := range widths {
-		assert.Equal(t, first, got,
-			"short body + long header must produce a closed box — every row same width")
-	}
+	rule := firstRuleRow(plain)
+	assert.Equal(t, 192, lipgloss.Width(rule), "rule spans the pinned width with long labels")
+	assert.Contains(t, plain, "Claude sonnet 4.6")
+	assert.Contains(t, plain, "Como posso ajudar?")
 }
 
-// TestRenderResponseEnvelope_NoLabels covers the minimal-call shape:
-// no labels, just a body and a color. The envelope must still draw a
-// valid closed box (corners + sides + bottom).
+// TestRenderResponseEnvelope_NoLabels covers the minimal-call shape: a
+// bare rule and the indented body.
 func TestRenderResponseEnvelope_NoLabels(t *testing.T) {
 	r := NewUIRendererWithStyle(zap.NewNop(), UIStyleFull)
 	out := captureEnvStdout(t, func() {
@@ -257,13 +205,9 @@ func TestRenderResponseEnvelope_NoLabels(t *testing.T) {
 		})
 	})
 	plain := stripANSIEnv(out)
-
-	assert.Contains(t, plain, "╭")
-	assert.Contains(t, plain, "╮")
-	assert.Contains(t, plain, "╰")
-	assert.Contains(t, plain, "╯")
-	assert.Contains(t, plain, "│")
-	assert.Contains(t, plain, "Plain body, no labels.")
+	rule := firstRuleRow(plain)
+	assert.Equal(t, 50, lipgloss.Width(rule), "label-less rule still spans the width")
+	assert.Contains(t, plain, "  Plain body, no labels.")
 }
 
 // TestRunewidthNormalization_EmojiIsTwoCells locks the init() side
@@ -300,22 +244,13 @@ func TestEnvelopeWidth_FallbackOutsideTTY(t *testing.T) {
 
 // --- small local helpers (avoid leaking into the package surface) ---
 
-func splitNonEmpty(s string) []string {
-	var out []string
-	for _, line := range strings.Split(s, "\n") {
-		if strings.TrimSpace(line) == "" {
-			continue
+// firstRuleRow returns the first row that is a horizontal rule (starts
+// with the dash glyph) — the sóbrio reply header.
+func firstRuleRow(s string) string {
+	for _, row := range strings.Split(s, "\n") {
+		if strings.HasPrefix(strings.TrimLeft(row, " "), "──") {
+			return row
 		}
-		out = append(out, line)
 	}
-	return out
-}
-
-func startsWithBorder(row string) bool {
-	trim := strings.TrimLeft(row, " ")
-	if trim == "" {
-		return false
-	}
-	first := []rune(trim)[0]
-	return first == '╭' || first == '╮' || first == '╰' || first == '╯' || first == '│'
+	return ""
 }

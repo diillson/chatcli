@@ -42,28 +42,23 @@ func TestPrintLogo_EmitsAsciiAndIsCentered(t *testing.T) {
 	}
 }
 
-func TestPrintTipBox_RendersTitleAndBorders(t *testing.T) {
+func TestPrintTipBox_RendersTitleAndBody(t *testing.T) {
 	out := captureStdout(t, printTipBox)
 	plain := stripANSIWelcome(out)
 
-	// Rounded border survives lipgloss rendering.
-	assert.Contains(t, plain, "╭")
-	assert.Contains(t, plain, "╰")
-	// One of the tipKeys must be picked; we don't know which (random),
-	// but the resolved tip text always contains a colon or hyphen and
-	// is non-empty. A regression that swallows the body would leave
-	// the card with only the title row.
+	// Sóbrio: a titled rule opens the section, no frame anywhere, and the
+	// tip body sits on the two-space indent.
+	assert.Contains(t, plain, "──", "titled rule must open the tip section")
+	assert.NotContains(t, plain, "╭", "tip section draws no frame")
 	rows := strings.Split(plain, "\n")
 	bodyFound := false
 	for _, r := range rows {
-		clean := strings.TrimSpace(r)
-		if strings.HasPrefix(clean, "│") && strings.HasSuffix(clean, "│") &&
-			len(strings.TrimSpace(strings.Trim(clean, "│"))) > 0 {
+		if strings.HasPrefix(r, "  ") && strings.TrimSpace(r) != "" && !strings.Contains(r, "──") {
 			bodyFound = true
 			break
 		}
 	}
-	assert.True(t, bodyFound, "tip-box must have at least one non-blank content row")
+	assert.True(t, bodyFound, "tip section must carry at least one indented content row")
 }
 
 // TestPrintWelcomeScreen_HappyPath exercises the full welcome flow
@@ -76,7 +71,8 @@ func TestPrintWelcomeScreen_HappyPath(t *testing.T) {
 	out := captureStdout(t, cli.PrintWelcomeScreen)
 	plain := stripANSIWelcome(out)
 
-	assert.Contains(t, plain, "╭", "logo + boxes must render border glyphs")
+	assert.Contains(t, plain, "██", "logo must render")
+	assert.Contains(t, plain, "◆", "model marker must render")
 	assert.Contains(t, plain, "/help",
 		"footer must list the quick-help command so first-launch users know what to type")
 	assert.Contains(t, plain, "/exit", "footer must list /exit")

@@ -49,6 +49,7 @@ var builtins = map[string]func() Theme{
 	"catppuccin-mocha": CatppuccinMochaTheme,
 	"monokai":          MonokaiTheme,
 	"one-dark":         OneDarkTheme,
+	"grafite":          GrafiteTheme,
 }
 
 // init publishes a safe default (the configured default theme + the detected

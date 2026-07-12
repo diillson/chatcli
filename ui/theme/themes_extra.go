@@ -212,3 +212,28 @@ func OneDarkTheme() Theme {
 		},
 	}
 }
+
+// GrafiteTheme — the sóbrio companion palette: the neon Info green retires
+// in favor of a calm blue, borders sink one step darker, and every accent
+// desaturates a notch so content outshines chrome. Designed alongside the
+// borderless treatment; works with any of them.
+func GrafiteTheme() Theme {
+	return Theme{
+		Name:    "grafite",
+		Variant: VariantDark,
+		Palette: Palette{
+			Primary:    Color{Hex: "#A78BFA", ANSI256: 141, ANSI16: 5},
+			Secondary:  Color{Hex: "#7AA2F7", ANSI256: 111, ANSI16: 4},
+			Accent:     Color{Hex: "#7DD3FC", ANSI256: 117, ANSI16: 6},
+			Muted:      Color{Hex: "#6E7681", ANSI256: 243, ANSI16: 8},
+			Success:    Color{Hex: "#34D399", ANSI256: 78, ANSI16: 2},
+			Warning:    Color{Hex: "#FBBF24", ANSI256: 214, ANSI16: 3},
+			Danger:     Color{Hex: "#F87171", ANSI256: 203, ANSI16: 1},
+			Info:       Color{Hex: "#93C5FD", ANSI256: 153, ANSI16: 12},
+			Border:     Color{Hex: "#3A4149", ANSI256: 238, ANSI16: 8},
+			Text:       Color{Hex: "#D6DAE1", ANSI256: 252, ANSI16: 7},
+			TextStrong: Color{Hex: "#F0F3F7", ANSI256: 255, ANSI16: 15},
+			Background: Color{Hex: "#15171C", ANSI256: 234, ANSI16: 0},
+		},
+	}
+}

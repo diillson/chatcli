@@ -30,9 +30,14 @@ func TestPrintWelcomeScreenRendersCards(t *testing.T) {
 	raw, _ := io.ReadAll(r)
 	out := string(raw)
 
-	for _, want := range []string{"╭", "╰", "│", "◆"} {
+	for _, want := range []string{"──", "◆"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("welcome output missing %q", want)
+		}
+	}
+	for _, frame := range []string{"╭", "╰", "│"} {
+		if strings.Contains(out, frame) {
+			t.Errorf("sóbrio welcome must not draw frame glyph %q", frame)
 		}
 	}
 	// Anchor invariant: no rendered row may exceed the resolved anchor
