@@ -42,10 +42,15 @@ import (
 	"os"
 	"sort"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/diillson/chatcli/cli/mcp"
 	"github.com/diillson/chatcli/cli/plugins"
+	"github.com/diillson/chatcli/i18n"
 	"github.com/diillson/chatcli/llm/catalog"
+	"github.com/diillson/chatcli/llm/client"
+	"github.com/diillson/chatcli/models"
 )
 
 // RPCToolInfo describes one plugin tool exposed over MCP/ACP.
@@ -217,12 +222,25 @@ func rpcMCPToolAllowed(t mcp.MCPTool, mode string, allow map[string]bool) bool {
 	}
 }
 
+// mcpProxyListWait bounds how long ListMCPProxyTools waits for ChatCLI's
+// own MCP servers to finish their initial connect pass. Clients that support
+// tools.listChanged get a notification either way; the wait keeps the
+// catalog complete for clients that only list once. After the initial pass
+// the startup channel is closed and listing is immediate.
+const mcpProxyListWait = 10 * time.Second
+
 // ListMCPProxyTools returns every tool discovered from connected MCP servers
 // that the exposure policy admits (visibility masks from EnabledTools/
-// DisabledTools already honored by VisibleTools). Sorted by name.
+// DisabledTools already honored by VisibleTools). Sorted by name. Waits,
+// bounded, for the initial connect pass so an early listing doesn't miss
+// the aggregated catalog.
 func (cli *ChatCLI) ListMCPProxyTools() []RPCMCPToolInfo {
 	if cli.mcpManager == nil {
 		return nil
+	}
+	select {
+	case <-cli.MCPStartupDone():
+	case <-time.After(mcpProxyListWait):
 	}
 	mode, allow := rpcToolPolicy()
 	visible := cli.mcpManager.VisibleTools()
@@ -249,7 +267,7 @@ func (cli *ChatCLI) ListMCPProxyTools() []RPCMCPToolInfo {
 // origin content, so the RPC layer relays it in-band per the MCP convention.
 func (cli *ChatCLI) RunMCPProxyTool(ctx context.Context, name string, args json.RawMessage) (string, error) {
 	if cli.mcpManager == nil {
-		return "", fmt.Errorf("MCP client is not enabled in this ChatCLI instance")
+		return "", fmt.Errorf("%s", i18n.T("mcp.proxy.not_enabled"))
 	}
 	bare := strings.TrimPrefix(name, "mcp_")
 	var tool *mcp.MCPTool
@@ -261,11 +279,11 @@ func (cli *ChatCLI) RunMCPProxyTool(ctx context.Context, name string, args json.
 		}
 	}
 	if tool == nil {
-		return "", fmt.Errorf("MCP tool %q not found on any connected server", bare)
+		return "", fmt.Errorf("%s", i18n.T("mcp.proxy.tool_not_found", bare))
 	}
 	mode, allow := rpcToolPolicy()
 	if !rpcMCPToolAllowed(*tool, mode, allow) {
-		return "", fmt.Errorf("MCP tool %q is not exposed under the current CHATCLI_MCP_TOOLS policy (%s)", bare, mode)
+		return "", fmt.Errorf("%s", i18n.T("mcp.proxy.policy_blocked", bare, mode))
 	}
 
 	var argMap map[string]interface{}
@@ -395,6 +413,48 @@ func (cli *ChatCLI) applyRPCOverrides(ctx context.Context, o RPCRunOpts) (func()
 	}, nil
 }
 
+// SaveSessionRPC persists a chat history under name in the saved-session
+// store (the same store the REPL /session command uses). Name validation is
+// the store's own (alphanumeric with dash/underscore/dot).
+func (cli *ChatCLI) SaveSessionRPC(name string, history []models.Message) error {
+	if cli.sessionManager == nil {
+		return fmt.Errorf("%s", i18n.T("rpc.session.store_unavailable"))
+	}
+	return cli.sessionManager.SaveSession(name, history)
+}
+
+// LoadSessionRPC returns a saved session's chat history. The name is
+// validated before touching the store — this surface is reachable by
+// remote MCP clients.
+func (cli *ChatCLI) LoadSessionRPC(name string) ([]models.Message, error) {
+	if cli.sessionManager == nil {
+		return nil, fmt.Errorf("%s", i18n.T("rpc.session.store_unavailable"))
+	}
+	if err := validateSessionName(name); err != nil {
+		return nil, err
+	}
+	return cli.sessionManager.LoadSession(name)
+}
+
+// ListSessionsRPC returns the saved session names.
+func (cli *ChatCLI) ListSessionsRPC() ([]string, error) {
+	if cli.sessionManager == nil {
+		return nil, fmt.Errorf("%s", i18n.T("rpc.session.store_unavailable"))
+	}
+	return cli.sessionManager.ListSessions()
+}
+
+// DeleteSessionRPC removes a saved session, validating the name first.
+func (cli *ChatCLI) DeleteSessionRPC(name string) error {
+	if cli.sessionManager == nil {
+		return fmt.Errorf("%s", i18n.T("rpc.session.store_unavailable"))
+	}
+	if err := validateSessionName(name); err != nil {
+		return err
+	}
+	return cli.sessionManager.DeleteSession(name)
+}
+
 // RPCSkillInfo describes one skill served as an MCP prompt.
 type RPCSkillInfo struct {
 	Name        string
@@ -430,14 +490,27 @@ func (cli *ChatCLI) SkillContentRPC(name string) (string, error) {
 	return s.Content, nil
 }
 
+// rpcProviderListTimeout bounds the per-call window for live model listing
+// across every provider. Providers that answer in time contribute their API
+// models (merged with the catalog, like the interactive /model picker);
+// slow or failing ones degrade to the static catalog for this call.
+const rpcProviderListTimeout = 10 * time.Second
+
 // ProvidersRPC returns a JSON document describing the configured providers,
-// the active provider/model, and each provider's cataloged models — the
-// discovery surface for per-call routing.
+// the active provider/model, and each provider's models — the discovery
+// surface for per-call routing. Models come from the same path the
+// interactive picker uses (ListModelsForProvider: API listing when the
+// provider supports it, merged and deduplicated with the catalog), fetched
+// concurrently with a bounded timeout and a catalog fallback per provider.
 func (cli *ChatCLI) ProvidersRPC() (string, error) {
 	type providerInfo struct {
 		Name   string   `json:"name"`
 		Active bool     `json:"active"`
 		Models []string `json:"models"`
+		// ModelsSource is "api+catalog" when the provider answered the
+		// live listing, "catalog" when this call fell back to the static
+		// catalog (unsupported, error, or timeout).
+		ModelsSource string `json:"models_source"`
 	}
 	var out struct {
 		ActiveProvider string         `json:"active_provider"`
@@ -446,13 +519,43 @@ func (cli *ChatCLI) ProvidersRPC() (string, error) {
 	}
 	out.ActiveProvider = cli.Provider
 	out.ActiveModel = cli.Model
-	for _, name := range cli.manager.GetAvailableProviders() {
-		info := providerInfo{Name: name, Active: name == cli.Provider}
-		for _, meta := range catalog.ListByProvider(name) {
-			info.Models = append(info.Models, meta.ID)
-		}
-		out.Providers = append(out.Providers, info)
+
+	names := cli.manager.GetAvailableProviders()
+	infos := make([]providerInfo, len(names))
+
+	ctx, cancel := context.WithTimeout(context.Background(), rpcProviderListTimeout)
+	defer cancel()
+	var wg sync.WaitGroup
+	for i, name := range names {
+		wg.Add(1)
+		go func(i int, name string) {
+			defer wg.Done()
+			info := providerInfo{Name: name, Active: name == cli.Provider}
+			models, err := cli.manager.ListModelsForProvider(ctx, name)
+			if err == nil && len(models) > 0 {
+				sawAPI := false
+				for _, m := range models {
+					info.Models = append(info.Models, m.ID)
+					if m.Source != client.ModelSourceCatalog {
+						sawAPI = true
+					}
+				}
+				info.ModelsSource = "catalog"
+				if sawAPI {
+					info.ModelsSource = "api+catalog"
+				}
+			} else {
+				for _, meta := range catalog.ListByProvider(name) {
+					info.Models = append(info.Models, meta.ID)
+				}
+				info.ModelsSource = "catalog"
+			}
+			infos[i] = info
+		}(i, name)
 	}
+	wg.Wait()
+	out.Providers = infos
+
 	data, err := json.MarshalIndent(out, "", "  ")
 	if err != nil {
 		return "", err

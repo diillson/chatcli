@@ -10,10 +10,11 @@ import (
 	"time"
 )
 
-// fakeBackend echoes prompts and records the last call details.
+// fakeBackend echoes prompts and records the last call details. It
+// deliberately does NOT implement MCPToolProxy — proxyFake adds that
+// capability, so both handler paths stay pinned.
 type fakeBackend struct {
 	noLLM       bool
-	mcpTools    []MCPProxyToolInfo
 	mu          sync.Mutex
 	lastSession string
 	reply       string
@@ -21,8 +22,6 @@ type fakeBackend struct {
 	lastTask    string
 	lastTool    string
 	lastArgs    string
-	lastMCPTool string
-	lastMCPArgs string
 	lastOpts    RunOpts
 	blockAgent  chan struct{} // when non-nil, AgentStream blocks until ctx cancel or close
 }
@@ -105,13 +104,31 @@ func (f *fakeBackend) CallTool(_ context.Context, name, args string) (string, er
 	return "tool:" + name + ":" + args, nil
 }
 
-func (f *fakeBackend) MCPProxyTools() []MCPProxyToolInfo { return f.mcpTools }
+// proxyFake is a fakeBackend that also implements MCPToolProxy (the MCP-hub
+// capability), recording the last proxied call.
+type proxyFake struct {
+	fakeBackend
+	mcpTools      []MCPProxyToolInfo
+	lastMCPTool   string
+	lastMCPArgs   string
+	lastSessionOp string
+}
 
-func (f *fakeBackend) CallMCPProxyTool(_ context.Context, name string, args json.RawMessage) (string, error) {
+func (f *proxyFake) MCPProxyTools() []MCPProxyToolInfo { return f.mcpTools }
+
+func (f *proxyFake) CallMCPProxyTool(_ context.Context, name string, args json.RawMessage) (string, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.lastMCPTool, f.lastMCPArgs = name, string(args)
 	return "mcp-proxied:" + name, nil
+}
+
+// ManageSession implements SessionBackend on the full-capability fake.
+func (f *proxyFake) ManageSession(_ context.Context, action, session, name string) (string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.lastSessionOp = action + ":" + session + ":" + name
+	return "session-managed:" + action, nil
 }
 
 func (f *fakeBackend) Skills() []SkillInfo {
@@ -323,8 +340,8 @@ func TestMCP_NoProviderHidesLLMTools(t *testing.T) {
 
 // proxyBackend returns a fake advertising two proxied MCP tools with a real
 // origin schema, exercising the hub/aggregator surface.
-func proxyBackend() *fakeBackend {
-	return &fakeBackend{mcpTools: []MCPProxyToolInfo{
+func proxyBackend() *proxyFake {
+	return &proxyFake{mcpTools: []MCPProxyToolInfo{
 		{
 			Name:        "list_regions",
 			Server:      "aws",
@@ -379,35 +396,87 @@ func TestMCP_ProxiedToolCallForwardsRawArguments(t *testing.T) {
 	}
 }
 
-// TestMCP_InitializeAdvertisesToolsListChanged pins tools.listChanged=true:
-// proxied tools appear asynchronously as ChatCLI's own MCP client connects,
-// so clients must be told the list can change.
+// TestMCP_InitializeAdvertisesToolsListChanged pins tools.listChanged: true
+// when the backend proxies MCP tools (that catalog is dynamic — it grows as
+// ChatCLI's own client connects), false for a backend without the hub
+// capability (static native surface).
 func TestMCP_InitializeAdvertisesToolsListChanged(t *testing.T) {
 	m := NewMCP(proxyBackend(), "chatcli", "1.0.0")
 	resps := runLines(t, m.Handle, `{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}`)
 	body, _ := json.Marshal(resps[0].Result)
 	if !strings.Contains(string(body), `"tools":{"listChanged":true}`) {
-		t.Errorf("initialize must advertise tools.listChanged=true: %s", body)
+		t.Errorf("proxy-capable backend must advertise tools.listChanged=true: %s", body)
+	}
+
+	m = NewMCP(&fakeBackend{}, "chatcli", "1.0.0")
+	resps = runLines(t, m.Handle, `{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}`)
+	body, _ = json.Marshal(resps[0].Result)
+	if !strings.Contains(string(body), `"tools":{"listChanged":false}`) {
+		t.Errorf("slim backend must advertise tools.listChanged=false: %s", body)
+	}
+	if ToolsListChangedMethod != "notifications/tools/list_changed" {
+		t.Errorf("ToolsListChangedMethod drifted: %q", ToolsListChangedMethod)
 	}
 }
 
-func TestMCP_NotifyToolsChanged(t *testing.T) {
-	m := NewMCP(proxyBackend(), "chatcli", "1.0.0")
-	m.NotifyToolsChanged() // no notifier wired: must be a safe no-op
+// TestMCP_SlimBackendIgnoresMCPPrefix pins the no-capability path: a backend
+// without MCPToolProxy routes mcp_-prefixed names to the plugin dispatcher
+// instead of panicking or dropping the call.
+func TestMCP_SlimBackendIgnoresMCPPrefix(t *testing.T) {
+	be := &fakeBackend{}
+	m := NewMCP(be, "chatcli", "1.0.0")
+	r := runLines(t, m.Handle,
+		`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"mcp_x","arguments":{"args":"y"}}}`,
+	)
+	if b, _ := json.Marshal(r[0].Result); !strings.Contains(string(b), "tool:mcp_x:y") {
+		t.Errorf("slim backend must fall through to CallTool: %s", b)
+	}
+	resps := runLines(t, m.Handle, `{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}`)
+	if b, _ := json.Marshal(resps[0].Result); strings.Contains(string(b), `"mcp_`) {
+		t.Errorf("slim backend must not advertise proxied tools: %s", b)
+	}
+}
 
-	var got []string
-	var mu sync.Mutex
-	m.SetNotifier(func(method string, params interface{}) error {
-		mu.Lock()
-		got = append(got, method)
-		mu.Unlock()
-		return nil
-	})
-	m.NotifyToolsChanged()
-	mu.Lock()
-	defer mu.Unlock()
-	if len(got) != 1 || got[0] != "notifications/tools/list_changed" {
-		t.Errorf("expected one tools/list_changed notification, got %v", got)
+// TestMCP_ManageSession pins the session-management surface: advertised and
+// dispatched only when the backend implements SessionBackend, with the
+// session default applied and action required.
+func TestMCP_ManageSession(t *testing.T) {
+	be := proxyBackend()
+	m := NewMCP(be, "chatcli", "1.0.0")
+
+	resps := runLines(t, m.Handle, `{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}`)
+	if b, _ := json.Marshal(resps[0].Result); !strings.Contains(string(b), `"manage_session"`) {
+		t.Errorf("session-capable backend must advertise manage_session: %s", b)
+	}
+
+	r := runLines(t, m.Handle,
+		`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"manage_session","arguments":{"action":"save","name":"reunion"}}}`,
+	)
+	if b, _ := json.Marshal(r[0].Result); !strings.Contains(string(b), "session-managed:save") {
+		t.Errorf("manage_session dispatch wrong: %s", b)
+	}
+	if be.lastSessionOp != "save:mcp:reunion" {
+		t.Errorf("action/session/name not propagated (session must default to mcp): %q", be.lastSessionOp)
+	}
+
+	r = runLines(t, m.Handle,
+		`{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"manage_session","arguments":{}}}`,
+	)
+	if r[0].Error == nil || r[0].Error.Code != CodeInvalidParams {
+		t.Errorf("missing action must be invalid params, got %+v", r[0])
+	}
+
+	// A backend without the capability neither advertises nor dispatches it.
+	slim := NewMCP(&fakeBackend{}, "chatcli", "1.0.0")
+	resps = runLines(t, slim.Handle, `{"jsonrpc":"2.0","id":4,"method":"tools/list","params":{}}`)
+	if b, _ := json.Marshal(resps[0].Result); strings.Contains(string(b), `"manage_session"`) {
+		t.Errorf("slim backend must not advertise manage_session: %s", b)
+	}
+	r = runLines(t, slim.Handle,
+		`{"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"manage_session","arguments":{"action":"list","args":"x"}}}`,
+	)
+	if b, _ := json.Marshal(r[0].Result); !strings.Contains(string(b), "tool:manage_session") {
+		t.Errorf("slim backend must fall through to the plugin dispatcher: %s", b)
 	}
 }
 

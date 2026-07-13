@@ -75,14 +75,36 @@ type MCPBackend interface {
 	Coder(ctx context.Context, session, task string, opts RunOpts) (string, error)
 	Tools() []ToolInfo
 	CallTool(ctx context.Context, name, args string) (string, error)
-	// MCPProxyTools lists the tools re-exported from the MCP servers the
-	// backend is connected to; CallMCPProxyTool forwards a call to the
-	// origin server with the raw MCP arguments object.
-	MCPProxyTools() []MCPProxyToolInfo
-	CallMCPProxyTool(ctx context.Context, name string, args json.RawMessage) (string, error)
 	Skills() []SkillInfo
 	SkillContent(name string) (string, error)
 	ProvidersJSON() (string, error)
+}
+
+// MCPToolProxy is the optional backend capability for the MCP-hub surface:
+// re-exporting tools from MCP servers the backend is itself connected to.
+// Kept out of MCPBackend so existing implementations stay compatible —
+// the handler upgrades via type assertion (the io.ReaderFrom pattern).
+// MCPProxyTools lists the re-exported tools; CallMCPProxyTool forwards a
+// call to the origin server with the caller's raw MCP arguments object.
+type MCPToolProxy interface {
+	MCPProxyTools() []MCPProxyToolInfo
+	CallMCPProxyTool(ctx context.Context, name string, args json.RawMessage) (string, error)
+}
+
+// ToolsListChangedMethod is the MCP notification a server pushes when its
+// tool catalog changes. Callers wire it to Server.Notify when the backend's
+// proxied catalog is dynamic (servers connecting, refreshes, disconnects).
+const ToolsListChangedMethod = "notifications/tools/list_changed"
+
+// SessionBackend is the optional backend capability for managing chat
+// sessions over MCP: the live per-session histories behind ask_chatcli and
+// the persistent saved-session store (the same store the REPL /session
+// command uses). Optional for the same compatibility reason as
+// MCPToolProxy — the handler upgrades via type assertion.
+type SessionBackend interface {
+	// ManageSession executes one session action (save/load/list/delete/
+	// clear/active) and returns a human-readable outcome.
+	ManageSession(ctx context.Context, action, session, name string) (string, error)
 }
 
 // MCP implements the Model Context Protocol server methods over JSON-RPC.
@@ -90,28 +112,11 @@ type MCP struct {
 	backend MCPBackend
 	name    string
 	version string
-	notify  func(method string, params interface{}) error
 }
 
 // NewMCP builds an MCP handler.
 func NewMCP(backend MCPBackend, name, version string) *MCP {
 	return &MCP{backend: backend, name: name, version: version}
-}
-
-// SetNotifier wires the server's notification writer (call after NewServer)
-// so the handler can push notifications/tools/list_changed to the client.
-func (m *MCP) SetNotifier(fn func(method string, params interface{}) error) {
-	m.notify = fn
-}
-
-// NotifyToolsChanged pushes notifications/tools/list_changed to the client.
-// Safe to call from any goroutine (the server serializes writes); no-op
-// until SetNotifier is wired.
-func (m *MCP) NotifyToolsChanged() {
-	if m.notify == nil {
-		return
-	}
-	_ = m.notify("notifications/tools/list_changed", map[string]interface{}{})
 }
 
 // Handle dispatches an MCP method. Wire it into Server via the handlerFunc type.
@@ -149,13 +154,15 @@ func (m *MCP) initialize(params json.RawMessage) map[string]interface{} {
 			break
 		}
 	}
+	// tools.listChanged is advertised only when the backend proxies MCP
+	// tools: that catalog is dynamic (ChatCLI's own client connects async
+	// at startup; servers refresh and disconnect). The native surface is
+	// static.
+	_, hasProxy := m.backend.(MCPToolProxy)
 	return map[string]interface{}{
 		"protocolVersion": version,
 		"capabilities": map[string]interface{}{
-			// tools.listChanged: proxied MCP tools appear as ChatCLI's own
-			// MCP client connects to its configured servers (async at
-			// startup) and can change on dynamic refresh/disconnect.
-			"tools":   map[string]interface{}{"listChanged": true},
+			"tools":   map[string]interface{}{"listChanged": hasProxy},
 			"prompts": map[string]interface{}{"listChanged": false},
 		},
 		"serverInfo": map[string]interface{}{"name": m.name, "version": m.version},
@@ -247,10 +254,24 @@ func (m *MCP) toolDefinitions() []map[string]interface{} {
 	}
 	tools = append(tools, map[string]interface{}{
 		"name":        "list_providers",
-		"description": "List the configured LLM providers, the active provider/model, and each provider's cataloged models — the routing surface for the provider/model parameters.",
+		"description": "List the configured LLM providers, the active provider/model, and each provider's models — live from the provider API when it supports listing, merged with the static catalog (models_source tells which). The routing surface for the provider/model parameters.",
 		"inputSchema": objSchema(map[string]interface{}{}),
 		"annotations": map[string]interface{}{"readOnlyHint": true},
 	})
+	if _, ok := m.backend.(SessionBackend); ok {
+		tools = append(tools, map[string]interface{}{
+			"name": "manage_session",
+			"description": "Manage chat sessions: persist and restore the server-side conversations behind ask_chatcli's session parameter, and administer the saved-session store shared with ChatCLI's /session command. " +
+				"Actions: save (persist a live session's history under a name), load (restore a saved session into a live session id, continuing that conversation), " +
+				"list (saved sessions in the store), delete (remove a saved session), clear (reset a live session), active (live session ids with message counts).",
+			"inputSchema": objSchema(map[string]interface{}{
+				"action":  textArg("One of: save, load, list, delete, clear, active."),
+				"session": textArg("Live session id (the ask_chatcli session parameter; default \"mcp\"). Used by save, load, clear."),
+				"name":    textArg("Saved-session name in the store. Required for load and delete; defaults to the session id for save."),
+			}, "action"),
+			"annotations": map[string]interface{}{"readOnlyHint": false},
+		})
+	}
 	for _, t := range m.backend.Tools() {
 		desc := t.Description
 		if u := strings.TrimSpace(t.Usage); u != "" {
@@ -268,8 +289,13 @@ func (m *MCP) toolDefinitions() []map[string]interface{} {
 	// Proxied MCP tools: re-exported from the servers this ChatCLI is
 	// connected to, under the same mcp_<tool> names the agent loop uses,
 	// with the origin server's own JSON Schema (arguments pass through
-	// verbatim — no args-string envelope).
-	for _, t := range m.backend.MCPProxyTools() {
+	// verbatim — no args-string envelope). Only when the backend has the
+	// hub capability.
+	proxy, hasProxy := m.backend.(MCPToolProxy)
+	if !hasProxy {
+		return tools
+	}
+	for _, t := range proxy.MCPProxyTools() {
 		schema := t.InputSchema
 		if schema == nil {
 			schema = objSchema(map[string]interface{}{})
@@ -328,6 +354,8 @@ type mcpArgs struct {
 	Task     string            `json:"task"`
 	Session  string            `json:"session"`
 	Args     string            `json:"args"`
+	Action   string            `json:"action"`
+	Name     string            `json:"name"`
 	Provider string            `json:"provider"`
 	Model    string            `json:"model"`
 	Quality  map[string]string `json:"quality"`
@@ -364,12 +392,22 @@ func (m *MCP) callTool(ctx context.Context, params json.RawMessage) (interface{}
 		return m.result(m.backend.Coder(ctx, session, a.Task, opts))
 	case "list_providers":
 		return m.result(m.backend.ProvidersJSON())
+	case "manage_session":
+		if sb, ok := m.backend.(SessionBackend); ok {
+			if a.Action == "" {
+				return nil, errf(CodeInvalidParams, "action is required (save, load, list, delete, clear, active)")
+			}
+			return m.result(sb.ManageSession(ctx, a.Action, session, a.Name))
+		}
+		// No session capability: fall through to the plugin dispatcher,
+		// which reports the tool as unknown.
+		return m.result(m.backend.CallTool(ctx, p.Name, a.Args))
 	default:
 		// Proxied MCP tools carry the caller's arguments object verbatim
 		// to the origin server; everything else is a plugin tool taking
 		// the args-string envelope.
-		if strings.HasPrefix(p.Name, "mcp_") {
-			return m.result(m.backend.CallMCPProxyTool(ctx, p.Name, p.Arguments))
+		if proxy, ok := m.backend.(MCPToolProxy); ok && strings.HasPrefix(p.Name, "mcp_") {
+			return m.result(proxy.CallMCPProxyTool(ctx, p.Name, p.Arguments))
 		}
 		return m.result(m.backend.CallTool(ctx, p.Name, a.Args))
 	}

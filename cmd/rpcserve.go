@@ -26,11 +26,13 @@ package cmd
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"os/signal"
+	"sort"
+	"strings"
 	"sync"
 	"syscall"
-	"time"
 
 	"github.com/diillson/chatcli/cli"
 	"github.com/diillson/chatcli/cli/rpcserve"
@@ -69,6 +71,9 @@ func runRPC(kind string, mgr manager.LLMManager, logger *zap.Logger) error {
 		model:    model,
 		sessions: map[string][]models.Message{},
 	}
+	if chatCLI != nil {
+		backend.store = chatCLI
+	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -84,13 +89,14 @@ func runRPC(kind string, mgr manager.LLMManager, logger *zap.Logger) error {
 	default: // mcp
 		m := rpcserve.NewMCP(backend, "chatcli", ver)
 		srv := rpcserve.NewServer(os.Stdin, os.Stdout, m.Handle)
-		m.SetNotifier(srv.Notify)
 		// Relay catalog changes from ChatCLI's own MCP client (servers
 		// connecting after startup, dynamic refreshes, disconnects) to our
 		// client as notifications/tools/list_changed, so proxied tools show
 		// up without a reconnect.
 		if chatCLI != nil {
-			chatCLI.SetMCPToolsObserver(m.NotifyToolsChanged)
+			chatCLI.SetMCPToolsObserver(func() {
+				_ = srv.Notify(rpcserve.ToolsListChangedMethod, map[string]interface{}{})
+			})
 		}
 		logger.Info("mcp-server: serving over stdio")
 		return srv.Serve(ctx)
@@ -106,11 +112,22 @@ func firstNonEmpty(vals ...string) string {
 	return ""
 }
 
+// sessionStore is the slice of ChatCLI the session actions need: the
+// persistent saved-session store shared with the REPL /session command.
+// An interface so ManageSession is testable without a full ChatCLI.
+type sessionStore interface {
+	SaveSessionRPC(name string, history []models.Message) error
+	LoadSessionRPC(name string) ([]models.Message, error)
+	ListSessionsRPC() ([]string, error)
+	DeleteSessionRPC(name string) error
+}
+
 // rpcBackend implements rpcserve.MCPBackend (and thus Backend). Chat keeps a
 // per-session history; agent/coder/tools delegate to the ChatCLI.
 type rpcBackend struct {
 	mgr      manager.LLMManager
 	cli      *cli.ChatCLI
+	store    sessionStore // nil when ChatCLI failed to initialize
 	provider string
 	model    string
 
@@ -267,23 +284,13 @@ func (b *rpcBackend) CallTool(ctx context.Context, name, args string) (string, e
 	return b.cli.RunAnyRPCTool(ctx, name, args)
 }
 
-// mcpProxyListWait bounds how long the first tools/list waits for ChatCLI's
-// own MCP servers to finish their initial connect pass. Clients that support
-// tools.listChanged get a notification either way; the wait keeps the
-// catalog complete for clients that only list once. After the initial pass
-// the wait channel is closed and listing is immediate.
-const mcpProxyListWait = 10 * time.Second
-
 // MCPProxyTools lists the tools re-exported from the MCP servers ChatCLI is
-// connected to, waiting (bounded) for the initial connect pass so an early
-// tools/list doesn't miss the aggregated catalog.
+// connected to (rpcserve.MCPToolProxy). ListMCPProxyTools itself waits,
+// bounded, for the initial connect pass so an early tools/list doesn't miss
+// the aggregated catalog.
 func (b *rpcBackend) MCPProxyTools() []rpcserve.MCPProxyToolInfo {
 	if b.cli == nil {
 		return nil
-	}
-	select {
-	case <-b.cli.MCPStartupDone():
-	case <-time.After(mcpProxyListWait):
 	}
 	tools := b.cli.ListMCPProxyTools()
 	out := make([]rpcserve.MCPProxyToolInfo, 0, len(tools))
@@ -305,6 +312,107 @@ func (b *rpcBackend) CallMCPProxyTool(ctx context.Context, name string, args jso
 		return "", errCLIUnavailable
 	}
 	return b.cli.RunMCPProxyTool(ctx, name, args)
+}
+
+// ManageSession implements rpcserve.SessionBackend: it administers the live
+// per-session chat histories (the ask_chatcli session parameter) and bridges
+// them to the persistent saved-session store shared with the REPL /session
+// command, so an MCP client can save a conversation and pick it up later —
+// including from an interactive chatcli.
+func (b *rpcBackend) ManageSession(_ context.Context, action, session, name string) (string, error) {
+	switch action {
+	case "active":
+		b.mu.Lock()
+		ids := make([]string, 0, len(b.sessions))
+		for id := range b.sessions {
+			ids = append(ids, id)
+		}
+		sort.Strings(ids)
+		var sb strings.Builder
+		for _, id := range ids {
+			fmt.Fprintf(&sb, "%s (%d messages)\n", id, len(b.sessions[id]))
+		}
+		b.mu.Unlock()
+		if sb.Len() == 0 {
+			return "no live sessions — ask_chatcli creates one per session id", nil
+		}
+		return strings.TrimSpace(sb.String()), nil
+
+	case "clear":
+		b.mu.Lock()
+		_, existed := b.sessions[session]
+		delete(b.sessions, session)
+		b.mu.Unlock()
+		if !existed {
+			return fmt.Sprintf("session %q had no live history", session), nil
+		}
+		return fmt.Sprintf("session %q cleared — the next ask_chatcli call starts fresh", session), nil
+
+	case "save":
+		b.mu.Lock()
+		hist := append([]models.Message(nil), b.sessions[session]...)
+		b.mu.Unlock()
+		if len(hist) == 0 {
+			return "", errCLI(fmt.Sprintf("session %q has no messages to save — talk to ask_chatcli with this session id first", session))
+		}
+		if name == "" {
+			name = session
+		}
+		if b.store == nil {
+			return "", errCLIUnavailable
+		}
+		if err := b.store.SaveSessionRPC(name, hist); err != nil {
+			return "", err
+		}
+		return fmt.Sprintf("saved session %q (%d messages) to the store as %q", session, len(hist), name), nil
+
+	case "load":
+		if name == "" {
+			return "", errCLI("name is required for load — which saved session to restore (see action list)")
+		}
+		if b.store == nil {
+			return "", errCLIUnavailable
+		}
+		hist, err := b.store.LoadSessionRPC(name)
+		if err != nil {
+			return "", err
+		}
+		if len(hist) > rpcMaxHistory {
+			hist = hist[len(hist)-rpcMaxHistory:]
+		}
+		b.mu.Lock()
+		b.sessions[session] = hist
+		b.mu.Unlock()
+		return fmt.Sprintf("loaded saved session %q into live session %q (%d messages) — ask_chatcli with this session id continues that conversation", name, session, len(hist)), nil
+
+	case "list":
+		if b.store == nil {
+			return "", errCLIUnavailable
+		}
+		names, err := b.store.ListSessionsRPC()
+		if err != nil {
+			return "", err
+		}
+		if len(names) == 0 {
+			return "the session store is empty", nil
+		}
+		return strings.Join(names, "\n"), nil
+
+	case "delete":
+		if name == "" {
+			return "", errCLI("name is required for delete — which saved session to remove (see action list)")
+		}
+		if b.store == nil {
+			return "", errCLIUnavailable
+		}
+		if err := b.store.DeleteSessionRPC(name); err != nil {
+			return "", err
+		}
+		return fmt.Sprintf("deleted saved session %q", name), nil
+
+	default:
+		return "", errCLI(fmt.Sprintf("unknown action %q — use save, load, list, delete, clear or active", action))
+	}
 }
 
 // Skills serves the installed skill catalog (MCP prompts).
