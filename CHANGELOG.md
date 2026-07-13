@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.161.0](https://github.com/diillson/chatcli/compare/v1.160.2...v1.161.0) (2026-07-13)
+
+
+### Features
+
+* **mcp:** re-export connected MCP servers' tools on the mcp-server surface ([#1191](https://github.com/diillson/chatcli/issues/1191)) ([d45a006](https://github.com/diillson/chatcli/commit/d45a00665fda69e2ecee4e0743453be511ad344f))
+
 ## [1.160.2](https://github.com/diillson/chatcli/compare/v1.160.1...v1.160.2) (2026-07-12)
 
 
