@@ -13,6 +13,7 @@ import (
 // fakeBackend echoes prompts and records the last call details.
 type fakeBackend struct {
 	noLLM       bool
+	mcpTools    []MCPProxyToolInfo
 	mu          sync.Mutex
 	lastSession string
 	reply       string
@@ -20,6 +21,8 @@ type fakeBackend struct {
 	lastTask    string
 	lastTool    string
 	lastArgs    string
+	lastMCPTool string
+	lastMCPArgs string
 	lastOpts    RunOpts
 	blockAgent  chan struct{} // when non-nil, AgentStream blocks until ctx cancel or close
 }
@@ -100,6 +103,15 @@ func (f *fakeBackend) CallTool(_ context.Context, name, args string) (string, er
 	defer f.mu.Unlock()
 	f.lastTool, f.lastArgs = name, args
 	return "tool:" + name + ":" + args, nil
+}
+
+func (f *fakeBackend) MCPProxyTools() []MCPProxyToolInfo { return f.mcpTools }
+
+func (f *fakeBackend) CallMCPProxyTool(_ context.Context, name string, args json.RawMessage) (string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.lastMCPTool, f.lastMCPArgs = name, string(args)
+	return "mcp-proxied:" + name, nil
 }
 
 func (f *fakeBackend) Skills() []SkillInfo {
@@ -306,6 +318,96 @@ func TestMCP_NoProviderHidesLLMTools(t *testing.T) {
 		if !strings.Contains(string(body), keep) {
 			t.Errorf("direct tool %q must remain without a provider: %s", keep, body)
 		}
+	}
+}
+
+// proxyBackend returns a fake advertising two proxied MCP tools with a real
+// origin schema, exercising the hub/aggregator surface.
+func proxyBackend() *fakeBackend {
+	return &fakeBackend{mcpTools: []MCPProxyToolInfo{
+		{
+			Name:        "list_regions",
+			Server:      "aws",
+			Description: "List AWS regions",
+			InputSchema: map[string]interface{}{
+				"type":       "object",
+				"properties": map[string]interface{}{"partition": map[string]interface{}{"type": "string"}},
+				"required":   []string{"partition"},
+			},
+			ReadOnly: true,
+		},
+		{Name: "no_schema_tool", Server: "other", Description: "Schema-less"},
+	}}
+}
+
+// TestMCP_ProxiedToolsListedWithOriginSchema pins the MCP-hub contract:
+// tools discovered from servers ChatCLI is connected to are re-exported
+// under their mcp_ names, keeping the origin JSON Schema (not the plugin
+// args-string envelope) and the origin readOnlyHint; schema-less tools get
+// a valid empty object schema.
+func TestMCP_ProxiedToolsListedWithOriginSchema(t *testing.T) {
+	m := NewMCP(proxyBackend(), "chatcli", "1.0.0")
+	resps := runLines(t, m.Handle, `{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}`)
+	body, _ := json.Marshal(resps[0].Result)
+	s := string(body)
+	for _, want := range []string{`"mcp_list_regions"`, "[MCP:aws] List AWS regions", `"partition"`, `"required":["partition"]`, `"mcp_no_schema_tool"`} {
+		if !strings.Contains(s, want) {
+			t.Errorf("tools/list missing %q: %s", want, s)
+		}
+	}
+	if strings.Contains(s, `"required":null`) {
+		t.Errorf("inputSchema.required must never be null: %s", s)
+	}
+}
+
+// TestMCP_ProxiedToolCallForwardsRawArguments pins that a proxied call
+// carries the caller's arguments object verbatim — no args-string envelope.
+func TestMCP_ProxiedToolCallForwardsRawArguments(t *testing.T) {
+	be := proxyBackend()
+	m := NewMCP(be, "chatcli", "1.0.0")
+	r := runLines(t, m.Handle,
+		`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"mcp_list_regions","arguments":{"partition":"aws","nested":{"deep":true}}}}`,
+	)
+	if b, _ := json.Marshal(r[0].Result); !strings.Contains(string(b), "mcp-proxied:mcp_list_regions") {
+		t.Errorf("proxied dispatch wrong: %s", b)
+	}
+	if be.lastMCPTool != "mcp_list_regions" {
+		t.Errorf("tool name not forwarded: %q", be.lastMCPTool)
+	}
+	if !strings.Contains(be.lastMCPArgs, `"nested":{"deep":true}`) {
+		t.Errorf("arguments must be forwarded verbatim, got: %s", be.lastMCPArgs)
+	}
+}
+
+// TestMCP_InitializeAdvertisesToolsListChanged pins tools.listChanged=true:
+// proxied tools appear asynchronously as ChatCLI's own MCP client connects,
+// so clients must be told the list can change.
+func TestMCP_InitializeAdvertisesToolsListChanged(t *testing.T) {
+	m := NewMCP(proxyBackend(), "chatcli", "1.0.0")
+	resps := runLines(t, m.Handle, `{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}`)
+	body, _ := json.Marshal(resps[0].Result)
+	if !strings.Contains(string(body), `"tools":{"listChanged":true}`) {
+		t.Errorf("initialize must advertise tools.listChanged=true: %s", body)
+	}
+}
+
+func TestMCP_NotifyToolsChanged(t *testing.T) {
+	m := NewMCP(proxyBackend(), "chatcli", "1.0.0")
+	m.NotifyToolsChanged() // no notifier wired: must be a safe no-op
+
+	var got []string
+	var mu sync.Mutex
+	m.SetNotifier(func(method string, params interface{}) error {
+		mu.Lock()
+		got = append(got, method)
+		mu.Unlock()
+		return nil
+	})
+	m.NotifyToolsChanged()
+	mu.Lock()
+	defer mu.Unlock()
+	if len(got) != 1 || got[0] != "notifications/tools/list_changed" {
+		t.Errorf("expected one tools/list_changed notification, got %v", got)
 	}
 }
 

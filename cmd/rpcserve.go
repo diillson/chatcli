@@ -25,10 +25,12 @@ package cmd
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"os/signal"
 	"sync"
 	"syscall"
+	"time"
 
 	"github.com/diillson/chatcli/cli"
 	"github.com/diillson/chatcli/cli/rpcserve"
@@ -82,6 +84,14 @@ func runRPC(kind string, mgr manager.LLMManager, logger *zap.Logger) error {
 	default: // mcp
 		m := rpcserve.NewMCP(backend, "chatcli", ver)
 		srv := rpcserve.NewServer(os.Stdin, os.Stdout, m.Handle)
+		m.SetNotifier(srv.Notify)
+		// Relay catalog changes from ChatCLI's own MCP client (servers
+		// connecting after startup, dynamic refreshes, disconnects) to our
+		// client as notifications/tools/list_changed, so proxied tools show
+		// up without a reconnect.
+		if chatCLI != nil {
+			chatCLI.SetMCPToolsObserver(m.NotifyToolsChanged)
+		}
 		logger.Info("mcp-server: serving over stdio")
 		return srv.Serve(ctx)
 	}
@@ -255,6 +265,46 @@ func (b *rpcBackend) CallTool(ctx context.Context, name, args string) (string, e
 		return "", errCLIUnavailable
 	}
 	return b.cli.RunAnyRPCTool(ctx, name, args)
+}
+
+// mcpProxyListWait bounds how long the first tools/list waits for ChatCLI's
+// own MCP servers to finish their initial connect pass. Clients that support
+// tools.listChanged get a notification either way; the wait keeps the
+// catalog complete for clients that only list once. After the initial pass
+// the wait channel is closed and listing is immediate.
+const mcpProxyListWait = 10 * time.Second
+
+// MCPProxyTools lists the tools re-exported from the MCP servers ChatCLI is
+// connected to, waiting (bounded) for the initial connect pass so an early
+// tools/list doesn't miss the aggregated catalog.
+func (b *rpcBackend) MCPProxyTools() []rpcserve.MCPProxyToolInfo {
+	if b.cli == nil {
+		return nil
+	}
+	select {
+	case <-b.cli.MCPStartupDone():
+	case <-time.After(mcpProxyListWait):
+	}
+	tools := b.cli.ListMCPProxyTools()
+	out := make([]rpcserve.MCPProxyToolInfo, 0, len(tools))
+	for _, t := range tools {
+		out = append(out, rpcserve.MCPProxyToolInfo{
+			Name:        t.Name,
+			Server:      t.Server,
+			Description: t.Description,
+			InputSchema: t.InputSchema,
+			ReadOnly:    t.ReadOnly,
+		})
+	}
+	return out
+}
+
+// CallMCPProxyTool forwards a proxied tool call to its origin MCP server.
+func (b *rpcBackend) CallMCPProxyTool(ctx context.Context, name string, args json.RawMessage) (string, error) {
+	if b.cli == nil {
+		return "", errCLIUnavailable
+	}
+	return b.cli.RunMCPProxyTool(ctx, name, args)
 }
 
 // Skills serves the installed skill catalog (MCP prompts).

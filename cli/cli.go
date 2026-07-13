@@ -288,6 +288,7 @@ type ChatCLI struct {
 	mcpConfigPath  string             // resolved path to mcp_servers.json
 	mcpWatcher     *fsnotify.Watcher  // hot-reload watcher; nil when disabled
 	mcpWatcherDone chan struct{}      // closed to stop the watcher loop
+	mcpStartupDone chan struct{}      // closed once the initial StartAll pass finishes
 
 	// MCP channel reactive triggers — engine, pending queues, and the
 	// consumer goroutine that fans Actions out into them. Initialized
@@ -1710,7 +1711,9 @@ func (cli *ChatCLI) bootstrapMCP(ctx context.Context, logger *zap.Logger) {
 	cli.mcpCancel = mcpCancelFn
 	cli.mcpConfigPath = mcpConfigPath
 	cli.mcpCtx = mcpCtx
+	cli.mcpStartupDone = make(chan struct{})
 	go func() {
+		defer close(cli.mcpStartupDone)
 		_ = mcpMgr.StartAll(mcpCtx)
 		statuses := mcpMgr.GetServerStatus()
 		tools := mcpMgr.GetTools()

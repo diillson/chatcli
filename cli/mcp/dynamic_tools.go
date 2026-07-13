@@ -162,6 +162,7 @@ func (m *Manager) RefreshServerTools(serverName string) (added, removed []string
 			Name:        t.Name,
 			Description: t.Description,
 			Parameters:  t.InputSchema,
+			Annotations: t.Annotations,
 			ServerName:  serverName,
 		}
 	}
@@ -176,6 +177,10 @@ func (m *Manager) RefreshServerTools(serverName string) (added, removed []string
 
 	sort.Strings(added)
 	sort.Strings(removed)
+	if len(added) > 0 || len(removed) > 0 {
+		// Safe under m.mu: the observer itself runs on its own goroutine.
+		m.notifyCatalogChanged()
+	}
 	return added, removed, nil
 }
 

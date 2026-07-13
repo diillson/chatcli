@@ -30,6 +30,33 @@ type Manager struct {
 	refreshMu       sync.Mutex
 	refreshPending  map[string]bool
 	toolListChanges []ToolListChange
+
+	// catalogObserver, when set, is invoked (on its own goroutine) every
+	// time the tool registry changes — discovery on connect, dynamic
+	// list_changed refreshes, and drops on disconnect/removal. The MCP
+	// server surface uses it to relay notifications/tools/list_changed
+	// to its own clients.
+	catalogObserver func()
+}
+
+// SetCatalogObserver registers the tool-registry change observer. Pass nil
+// to clear. The observer runs on a fresh goroutine so implementations may
+// block (e.g. write to a network peer) without stalling transports.
+func (m *Manager) SetCatalogObserver(fn func()) {
+	m.refreshMu.Lock()
+	m.catalogObserver = fn
+	m.refreshMu.Unlock()
+}
+
+// notifyCatalogChanged fires the registered observer, if any. Never called
+// while holding m.mu — the observer is user code.
+func (m *Manager) notifyCatalogChanged() {
+	m.refreshMu.Lock()
+	fn := m.catalogObserver
+	m.refreshMu.Unlock()
+	if fn != nil {
+		go fn()
+	}
 }
 
 // ServerConnection represents an active MCP server.
@@ -384,14 +411,19 @@ func (m *Manager) removeServer(ctx context.Context, name string) {
 	conn.Process = nil
 	conn.Status.Connected = false
 	conn.Status.Starting = false
+	dropped := 0
 	for tn, t := range m.tools {
 		if t.ServerName == name {
 			delete(m.tools, tn)
+			dropped++
 		}
 	}
 	delete(m.servers, name)
 	m.mu.Unlock()
 
+	if dropped > 0 {
+		m.notifyCatalogChanged()
+	}
 	if transport != nil {
 		_ = transport.Close(ctx)
 	}
@@ -909,13 +941,18 @@ func (m *Manager) markDisconnected(name string, reason error) {
 	if reason != nil {
 		conn.Status.LastError = reason
 	}
+	dropped := 0
 	for tn, t := range m.tools {
 		if t.ServerName == name {
 			delete(m.tools, tn)
+			dropped++
 		}
 	}
 	m.mu.Unlock()
 
+	if dropped > 0 {
+		m.notifyCatalogChanged()
+	}
 	m.logger.Warn("MCP server disconnected",
 		zap.String("server", name),
 		zap.Error(reason))
@@ -1166,12 +1203,16 @@ func (m *Manager) discoverTools(conn *ServerConnection) error {
 			Name:        t.Name,
 			Description: t.Description,
 			Parameters:  t.InputSchema,
+			Annotations: t.Annotations,
 			ServerName:  conn.Config.Name,
 		}
 	}
 	conn.Status.ToolCount = len(toolsList.Tools)
 	m.mu.Unlock()
 
+	if len(toolsList.Tools) > 0 {
+		m.notifyCatalogChanged()
+	}
 	return nil
 }
 

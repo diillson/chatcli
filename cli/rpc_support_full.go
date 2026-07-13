@@ -12,12 +12,22 @@
  * per-call provider/model routing and quality-harness toggles, the skill
  * catalog (served as MCP prompts), and provider discovery.
  *
+ * Beyond plugins, the server re-exports every tool discovered from the MCP
+ * servers ChatCLI itself is connected to (mcp_servers.json), under the same
+ * mcp_<tool> names the agent loop uses — ChatCLI as an MCP hub: one endpoint
+ * aggregating many servers. Proxied tools keep their origin JSON Schema and
+ * receive the caller's arguments verbatim.
+ *
  * Exposure policy (CHATCLI_MCP_TOOLS):
  *   all (default)  every tool, including write/exec — the operator opted in
  *                  by starting the server.
  *   safe           only tools whose capability metadata reports read-only
- *                  for a bare invocation.
- *   <csv>          explicit allowlist of tool names (with or without '@').
+ *                  for a bare invocation. For proxied MCP tools this trusts
+ *                  the origin server's annotations.readOnlyHint — the same
+ *                  trust the operator extended by configuring the server.
+ *   <csv>          explicit allowlist of tool names (with or without '@');
+ *                  proxied MCP tools are named with their mcp_ prefix
+ *                  (e.g. "read,search,mcp_list_regions").
  *
  * Interactive tools that require a live TTY/user (ask, voice, park) are
  * excluded unconditionally: over stdio RPC they would hang the turn waiting
@@ -33,6 +43,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/diillson/chatcli/cli/mcp"
 	"github.com/diillson/chatcli/cli/plugins"
 	"github.com/diillson/chatcli/llm/catalog"
 )
@@ -180,6 +191,120 @@ func (cli *ChatCLI) RunAnyRPCTool(ctx context.Context, name, args string) (strin
 		result += captured
 	}
 	return result, nil
+}
+
+// RPCMCPToolInfo describes one tool proxied from an MCP server ChatCLI is
+// connected to, re-exported on the MCP/ACP server surface.
+type RPCMCPToolInfo struct {
+	Name        string // origin tool name, WITHOUT the mcp_ prefix
+	Server      string // owning MCP server (mcp_servers.json name)
+	Description string
+	InputSchema map[string]interface{} // origin JSON Schema, passed through
+	ReadOnly    bool                   // origin annotations.readOnlyHint
+}
+
+// rpcMCPToolAllowed applies the CHATCLI_MCP_TOOLS exposure policy to one
+// proxied MCP tool. Allowlist entries use the prefixed form ("mcp_<tool>");
+// safe mode trusts the origin server's readOnlyHint annotation.
+func rpcMCPToolAllowed(t mcp.MCPTool, mode string, allow map[string]bool) bool {
+	switch mode {
+	case "all":
+		return true
+	case "safe":
+		return t.ReadOnlyHint()
+	default:
+		return allow["@mcp_"+t.Name]
+	}
+}
+
+// ListMCPProxyTools returns every tool discovered from connected MCP servers
+// that the exposure policy admits (visibility masks from EnabledTools/
+// DisabledTools already honored by VisibleTools). Sorted by name.
+func (cli *ChatCLI) ListMCPProxyTools() []RPCMCPToolInfo {
+	if cli.mcpManager == nil {
+		return nil
+	}
+	mode, allow := rpcToolPolicy()
+	visible := cli.mcpManager.VisibleTools()
+	out := make([]RPCMCPToolInfo, 0, len(visible))
+	for _, t := range visible {
+		if !rpcMCPToolAllowed(t, mode, allow) {
+			continue
+		}
+		out = append(out, RPCMCPToolInfo{
+			Name:        t.Name,
+			Server:      t.ServerName,
+			Description: t.Description,
+			InputSchema: t.Parameters,
+			ReadOnly:    t.ReadOnlyHint(),
+		})
+	}
+	return out
+}
+
+// RunMCPProxyTool executes one proxied MCP tool. name accepts both the
+// prefixed ("mcp_list_regions") and bare ("list_regions") forms; args is the
+// caller's raw MCP arguments object, forwarded verbatim to the origin server.
+// A tool-level error result (isError) is surfaced as a Go error carrying the
+// origin content, so the RPC layer relays it in-band per the MCP convention.
+func (cli *ChatCLI) RunMCPProxyTool(ctx context.Context, name string, args json.RawMessage) (string, error) {
+	if cli.mcpManager == nil {
+		return "", fmt.Errorf("MCP client is not enabled in this ChatCLI instance")
+	}
+	bare := strings.TrimPrefix(name, "mcp_")
+	var tool *mcp.MCPTool
+	for _, t := range cli.mcpManager.VisibleTools() {
+		if t.Name == bare {
+			tt := t
+			tool = &tt
+			break
+		}
+	}
+	if tool == nil {
+		return "", fmt.Errorf("MCP tool %q not found on any connected server", bare)
+	}
+	mode, allow := rpcToolPolicy()
+	if !rpcMCPToolAllowed(*tool, mode, allow) {
+		return "", fmt.Errorf("MCP tool %q is not exposed under the current CHATCLI_MCP_TOOLS policy (%s)", bare, mode)
+	}
+
+	var argMap map[string]interface{}
+	if trimmed := strings.TrimSpace(string(args)); trimmed != "" && trimmed != "null" {
+		if err := json.Unmarshal(args, &argMap); err != nil {
+			return "", fmt.Errorf("invalid arguments for %q: %w", bare, err)
+		}
+	}
+	result, err := cli.mcpManager.ExecuteTool(ctx, bare, argMap)
+	if err != nil {
+		return "", err
+	}
+	if result.IsError {
+		return "", fmt.Errorf("%s", result.Content)
+	}
+	return result.Content, nil
+}
+
+// MCPStartupDone returns a channel closed once the initial StartAll pass
+// over the configured MCP servers has finished (regardless of per-server
+// success). When MCP is disabled the channel is already closed, so callers
+// can always select on it.
+func (cli *ChatCLI) MCPStartupDone() <-chan struct{} {
+	if cli.mcpStartupDone == nil {
+		done := make(chan struct{})
+		close(done)
+		return done
+	}
+	return cli.mcpStartupDone
+}
+
+// SetMCPToolsObserver registers fn to run whenever the MCP tool catalog
+// changes (servers connecting, dynamic list_changed refreshes, disconnects).
+// No-op when MCP is disabled. The RPC server uses it to relay
+// notifications/tools/list_changed to its own clients.
+func (cli *ChatCLI) SetMCPToolsObserver(fn func()) {
+	if cli.mcpManager != nil {
+		cli.mcpManager.SetCatalogObserver(fn)
+	}
 }
 
 // RPCRunOpts parameterizes an agent/coder run driven over RPC.

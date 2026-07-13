@@ -47,6 +47,18 @@ type SkillInfo struct {
 	Description string
 }
 
+// MCPProxyToolInfo describes a tool proxied from an MCP server the backend
+// is itself connected to (ChatCLI as an MCP hub). It is advertised under
+// the prefixed name "mcp_<Name>" with its origin JSON Schema intact, and
+// calls forward the caller's arguments object verbatim.
+type MCPProxyToolInfo struct {
+	Name        string // origin tool name, WITHOUT the mcp_ prefix
+	Server      string
+	Description string
+	InputSchema map[string]interface{}
+	ReadOnly    bool
+}
+
 // MCPBackend is the full capability surface the MCP server exposes: chat
 // with per-call routing, the agent/coder loops with quality toggles, every
 // policy-admitted plugin tool, the skill catalog (prompts), and provider
@@ -63,6 +75,11 @@ type MCPBackend interface {
 	Coder(ctx context.Context, session, task string, opts RunOpts) (string, error)
 	Tools() []ToolInfo
 	CallTool(ctx context.Context, name, args string) (string, error)
+	// MCPProxyTools lists the tools re-exported from the MCP servers the
+	// backend is connected to; CallMCPProxyTool forwards a call to the
+	// origin server with the raw MCP arguments object.
+	MCPProxyTools() []MCPProxyToolInfo
+	CallMCPProxyTool(ctx context.Context, name string, args json.RawMessage) (string, error)
 	Skills() []SkillInfo
 	SkillContent(name string) (string, error)
 	ProvidersJSON() (string, error)
@@ -73,11 +90,28 @@ type MCP struct {
 	backend MCPBackend
 	name    string
 	version string
+	notify  func(method string, params interface{}) error
 }
 
 // NewMCP builds an MCP handler.
 func NewMCP(backend MCPBackend, name, version string) *MCP {
 	return &MCP{backend: backend, name: name, version: version}
+}
+
+// SetNotifier wires the server's notification writer (call after NewServer)
+// so the handler can push notifications/tools/list_changed to the client.
+func (m *MCP) SetNotifier(fn func(method string, params interface{}) error) {
+	m.notify = fn
+}
+
+// NotifyToolsChanged pushes notifications/tools/list_changed to the client.
+// Safe to call from any goroutine (the server serializes writes); no-op
+// until SetNotifier is wired.
+func (m *MCP) NotifyToolsChanged() {
+	if m.notify == nil {
+		return
+	}
+	_ = m.notify("notifications/tools/list_changed", map[string]interface{}{})
 }
 
 // Handle dispatches an MCP method. Wire it into Server via the handlerFunc type.
@@ -118,7 +152,10 @@ func (m *MCP) initialize(params json.RawMessage) map[string]interface{} {
 	return map[string]interface{}{
 		"protocolVersion": version,
 		"capabilities": map[string]interface{}{
-			"tools":   map[string]interface{}{"listChanged": false},
+			// tools.listChanged: proxied MCP tools appear as ChatCLI's own
+			// MCP client connects to its configured servers (async at
+			// startup) and can change on dynamic refresh/disconnect.
+			"tools":   map[string]interface{}{"listChanged": true},
 			"prompts": map[string]interface{}{"listChanged": false},
 		},
 		"serverInfo": map[string]interface{}{"name": m.name, "version": m.version},
@@ -228,6 +265,22 @@ func (m *MCP) toolDefinitions() []map[string]interface{} {
 			"annotations": map[string]interface{}{"readOnlyHint": t.ReadOnly},
 		})
 	}
+	// Proxied MCP tools: re-exported from the servers this ChatCLI is
+	// connected to, under the same mcp_<tool> names the agent loop uses,
+	// with the origin server's own JSON Schema (arguments pass through
+	// verbatim — no args-string envelope).
+	for _, t := range m.backend.MCPProxyTools() {
+		schema := t.InputSchema
+		if schema == nil {
+			schema = objSchema(map[string]interface{}{})
+		}
+		tools = append(tools, map[string]interface{}{
+			"name":        "mcp_" + t.Name,
+			"description": "[MCP:" + t.Server + "] " + t.Description,
+			"inputSchema": schema,
+			"annotations": map[string]interface{}{"readOnlyHint": t.ReadOnly},
+		})
+	}
 	return tools
 }
 
@@ -312,7 +365,12 @@ func (m *MCP) callTool(ctx context.Context, params json.RawMessage) (interface{}
 	case "list_providers":
 		return m.result(m.backend.ProvidersJSON())
 	default:
-		// Any policy-admitted plugin tool.
+		// Proxied MCP tools carry the caller's arguments object verbatim
+		// to the origin server; everything else is a plugin tool taking
+		// the args-string envelope.
+		if strings.HasPrefix(p.Name, "mcp_") {
+			return m.result(m.backend.CallMCPProxyTool(ctx, p.Name, p.Arguments))
+		}
 		return m.result(m.backend.CallTool(ctx, p.Name, a.Args))
 	}
 }

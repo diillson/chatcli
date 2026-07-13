@@ -162,7 +162,20 @@ type MCPTool struct {
 	Name        string                 `json:"name"`
 	Description string                 `json:"description"`
 	Parameters  map[string]interface{} `json:"inputSchema"`
+	Annotations map[string]interface{} `json:"annotations,omitempty"`
 	ServerName  string                 `json:"-"`
+}
+
+// ReadOnlyHint reports whether the origin server annotated this tool as
+// read-only (annotations.readOnlyHint === true). Per the MCP spec this is
+// a hint, not a guarantee — callers that gate exposure on it are trusting
+// the server exactly as much as the operator did by configuring it.
+func (t *MCPTool) ReadOnlyHint() bool {
+	if t.Annotations == nil {
+		return false
+	}
+	ro, _ := t.Annotations["readOnlyHint"].(bool)
+	return ro
 }
 
 // MCPToolResult is the result of executing an MCP tool.

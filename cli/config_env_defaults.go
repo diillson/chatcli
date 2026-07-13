@@ -80,7 +80,7 @@ var envDefaults = map[string]envDefault{
 	"GOOGLEAI_MODEL":             {Value: config.DefaultGoogleAIModel, Source: "config.DefaultGoogleAIModel"},
 	"XAI_MODEL":                  {Value: config.DefaultXAIModel, Source: "config.DefaultXAIModel"},
 	"OLLAMA_MODEL":               {Value: config.DefaultOllamaModel, Source: "config.DefaultOllamaModel"},
-	"CHATCLI_MCP_TOOLS":          {Value: "all", Source: "hardcoded (mcp-server/acp exposure policy: all|safe|csv allowlist)"},
+	"CHATCLI_MCP_TOOLS":          {Value: "all", Source: "hardcoded (mcp-server/acp exposure policy: all|safe|csv allowlist; covers plugins and proxied mcp_* tools)"},
 	"DEVIN_MODEL":                {Value: config.DefaultDevinModel, Source: "config.DefaultDevinModel"},
 	"DEVIN_CLI_PATH":             {Value: config.DevinCLIDefaultBinary + " (PATH lookup)", Source: "config.DevinCLIDefaultBinary"},
 	"DEVIN_CLI_PERMISSION_MODE":  {Value: config.DevinCLIDefaultPermissionMode, Source: "config.DevinCLIDefaultPermissionMode"},

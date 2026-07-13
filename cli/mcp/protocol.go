@@ -69,6 +69,7 @@ type mcpToolDef struct {
 	Name        string                 `json:"name"`
 	Description string                 `json:"description,omitempty"`
 	InputSchema map[string]interface{} `json:"inputSchema"`
+	Annotations map[string]interface{} `json:"annotations,omitempty"`
 }
 
 type toolCallParams struct {
