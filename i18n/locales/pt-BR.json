@@ -2340,6 +2340,10 @@
   "hooks.cmd.suggest_reload": "Recarrega hooks dos arquivos de configuração",
 
   "mcp.dynamic.server_not_connected": "Servidor MCP %q não está conectado",
+  "mcp.proxy.not_enabled": "O client MCP não está habilitado nesta instância do ChatCLI",
+  "mcp.proxy.tool_not_found": "Tool MCP %q não encontrada em nenhum servidor conectado",
+  "rpc.session.store_unavailable": "o armazenamento de sessões não está disponível nesta instância do ChatCLI",
+  "mcp.proxy.policy_blocked": "Tool MCP %q não está exposta sob a política CHATCLI_MCP_TOOLS atual (%s)",
   "mcp.cmd.box_title": "Servidores MCP",
   "mcp.cmd.not_enabled": "MCP não está habilitado.",
   "mcp.cmd.enable_hint": "Para habilitar, crie ~/.chatcli/mcp_servers.json:",

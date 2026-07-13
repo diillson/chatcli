@@ -161,3 +161,180 @@ func TestRPCBackendPrompt_HistoryCap(t *testing.T) {
 		t.Errorf("history should be capped at %d, got %d", rpcMaxHistory, n)
 	}
 }
+
+// fakeStore is an in-memory sessionStore for ManageSession tests.
+type fakeStore struct {
+	saved map[string][]models.Message
+}
+
+func newFakeStore() *fakeStore { return &fakeStore{saved: map[string][]models.Message{}} }
+
+func (s *fakeStore) SaveSessionRPC(name string, history []models.Message) error {
+	s.saved[name] = append([]models.Message(nil), history...)
+	return nil
+}
+
+func (s *fakeStore) LoadSessionRPC(name string) ([]models.Message, error) {
+	h, ok := s.saved[name]
+	if !ok {
+		return nil, errCLI("sessão não encontrada: " + name)
+	}
+	return h, nil
+}
+
+func (s *fakeStore) ListSessionsRPC() ([]string, error) {
+	names := make([]string, 0, len(s.saved))
+	for n := range s.saved {
+		names = append(names, n)
+	}
+	return names, nil
+}
+
+func (s *fakeStore) DeleteSessionRPC(name string) error {
+	if _, ok := s.saved[name]; !ok {
+		return errCLI("sessão não encontrada: " + name)
+	}
+	delete(s.saved, name)
+	return nil
+}
+
+func sessionBackend(store sessionStore) *rpcBackend {
+	return &rpcBackend{store: store, sessions: map[string][]models.Message{}}
+}
+
+func sessionMsgs(n int) []models.Message {
+	out := make([]models.Message, n)
+	for i := range out {
+		out[i] = models.Message{Role: "user", Content: "m"}
+	}
+	return out
+}
+
+// TestManageSession_SaveLoadRoundTrip pins the essential flow: an MCP client
+// saves the live conversation behind a session id and later restores it —
+// including into a different live session — with the live-history cap applied.
+func TestManageSession_SaveLoadRoundTrip(t *testing.T) {
+	store := newFakeStore()
+	b := sessionBackend(store)
+	ctx := context.Background()
+	b.sessions["mcp"] = sessionMsgs(4)
+
+	out, err := b.ManageSession(ctx, "save", "mcp", "projeto-x")
+	if err != nil || !strings.Contains(out, `"projeto-x"`) || !strings.Contains(out, "4 messages") {
+		t.Fatalf("save failed: %q, %v", out, err)
+	}
+	if len(store.saved["projeto-x"]) != 4 {
+		t.Fatalf("store must hold the saved history, got %d", len(store.saved["projeto-x"]))
+	}
+
+	out, err = b.ManageSession(ctx, "load", "outra", "projeto-x")
+	if err != nil || !strings.Contains(out, "4 messages") {
+		t.Fatalf("load failed: %q, %v", out, err)
+	}
+	if len(b.sessions["outra"]) != 4 {
+		t.Fatalf("load must hydrate the live session, got %d", len(b.sessions["outra"]))
+	}
+
+	store.saved["longa"] = sessionMsgs(rpcMaxHistory + 10)
+	if _, err = b.ManageSession(ctx, "load", "mcp", "longa"); err != nil {
+		t.Fatal(err)
+	}
+	if len(b.sessions["mcp"]) != rpcMaxHistory {
+		t.Errorf("load must trim to rpcMaxHistory, got %d", len(b.sessions["mcp"]))
+	}
+}
+
+// TestManageSession_SaveDefaultsNameToSession pins the name fallback.
+func TestManageSession_SaveDefaultsNameToSession(t *testing.T) {
+	store := newFakeStore()
+	b := sessionBackend(store)
+	b.sessions["minha-sessao"] = sessionMsgs(1)
+	if _, err := b.ManageSession(context.Background(), "save", "minha-sessao", ""); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := store.saved["minha-sessao"]; !ok {
+		t.Error("save without a name must persist under the session id")
+	}
+}
+
+func TestManageSession_ActiveAndClear(t *testing.T) {
+	b := sessionBackend(nil) // active/clear need no store
+	ctx := context.Background()
+
+	out, err := b.ManageSession(ctx, "active", "", "")
+	if err != nil || !strings.Contains(out, "no live sessions") {
+		t.Fatalf("empty active wrong: %q, %v", out, err)
+	}
+
+	b.sessions["a"] = sessionMsgs(2)
+	b.sessions["b"] = sessionMsgs(5)
+	out, err = b.ManageSession(ctx, "active", "", "")
+	if err != nil || !strings.Contains(out, "a (2 messages)") || !strings.Contains(out, "b (5 messages)") {
+		t.Fatalf("active listing wrong: %q, %v", out, err)
+	}
+
+	if out, err = b.ManageSession(ctx, "clear", "a", ""); err != nil || !strings.Contains(out, "cleared") {
+		t.Fatalf("clear wrong: %q, %v", out, err)
+	}
+	if _, still := b.sessions["a"]; still {
+		t.Error("clear must drop the live session")
+	}
+	if out, _ = b.ManageSession(ctx, "clear", "ghost", ""); !strings.Contains(out, "no live history") {
+		t.Errorf("clearing an unknown session must say so: %q", out)
+	}
+}
+
+func TestManageSession_ListAndDelete(t *testing.T) {
+	store := newFakeStore()
+	store.saved["s1"] = sessionMsgs(1)
+	b := sessionBackend(store)
+	ctx := context.Background()
+
+	out, err := b.ManageSession(ctx, "list", "", "")
+	if err != nil || !strings.Contains(out, "s1") {
+		t.Fatalf("list wrong: %q, %v", out, err)
+	}
+
+	if out, err = b.ManageSession(ctx, "delete", "", "s1"); err != nil || !strings.Contains(out, "deleted") {
+		t.Fatalf("delete wrong: %q, %v", out, err)
+	}
+	if out, err = b.ManageSession(ctx, "list", "", ""); err != nil || !strings.Contains(out, "empty") {
+		t.Fatalf("post-delete list wrong: %q, %v", out, err)
+	}
+}
+
+// TestManageSession_Guards pins every error path an MCP client can hit.
+func TestManageSession_Guards(t *testing.T) {
+	ctx := context.Background()
+
+	b := sessionBackend(newFakeStore())
+	if _, err := b.ManageSession(ctx, "save", "vazia", ""); err == nil || !strings.Contains(err.Error(), "no messages") {
+		t.Errorf("saving an empty session must fail actionably, got %v", err)
+	}
+	if _, err := b.ManageSession(ctx, "load", "mcp", ""); err == nil || !strings.Contains(err.Error(), "name is required") {
+		t.Errorf("load without name must fail, got %v", err)
+	}
+	if _, err := b.ManageSession(ctx, "delete", "", ""); err == nil || !strings.Contains(err.Error(), "name is required") {
+		t.Errorf("delete without name must fail, got %v", err)
+	}
+	if _, err := b.ManageSession(ctx, "explode", "", ""); err == nil || !strings.Contains(err.Error(), "unknown action") {
+		t.Errorf("unknown action must fail, got %v", err)
+	}
+
+	// Without a store (ChatCLI init failed) every store-backed action fails
+	// with the availability error; the live-session ones keep working.
+	nb := sessionBackend(nil)
+	nb.sessions["x"] = sessionMsgs(1)
+	if _, err := nb.ManageSession(ctx, "save", "x", ""); err == nil {
+		t.Error("save without a store must fail")
+	}
+	if _, err := nb.ManageSession(ctx, "list", "", ""); err == nil {
+		t.Error("list without a store must fail")
+	}
+	if _, err := nb.ManageSession(ctx, "load", "x", "algum"); err == nil {
+		t.Error("load without a store must fail")
+	}
+	if _, err := nb.ManageSession(ctx, "delete", "", "algum"); err == nil {
+		t.Error("delete without a store must fail")
+	}
+}

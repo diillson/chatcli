@@ -10,7 +10,9 @@ import (
 	"time"
 )
 
-// fakeBackend echoes prompts and records the last call details.
+// fakeBackend echoes prompts and records the last call details. It
+// deliberately does NOT implement MCPToolProxy — proxyFake adds that
+// capability, so both handler paths stay pinned.
 type fakeBackend struct {
 	noLLM       bool
 	mu          sync.Mutex
@@ -100,6 +102,33 @@ func (f *fakeBackend) CallTool(_ context.Context, name, args string) (string, er
 	defer f.mu.Unlock()
 	f.lastTool, f.lastArgs = name, args
 	return "tool:" + name + ":" + args, nil
+}
+
+// proxyFake is a fakeBackend that also implements MCPToolProxy (the MCP-hub
+// capability), recording the last proxied call.
+type proxyFake struct {
+	fakeBackend
+	mcpTools      []MCPProxyToolInfo
+	lastMCPTool   string
+	lastMCPArgs   string
+	lastSessionOp string
+}
+
+func (f *proxyFake) MCPProxyTools() []MCPProxyToolInfo { return f.mcpTools }
+
+func (f *proxyFake) CallMCPProxyTool(_ context.Context, name string, args json.RawMessage) (string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.lastMCPTool, f.lastMCPArgs = name, string(args)
+	return "mcp-proxied:" + name, nil
+}
+
+// ManageSession implements SessionBackend on the full-capability fake.
+func (f *proxyFake) ManageSession(_ context.Context, action, session, name string) (string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.lastSessionOp = action + ":" + session + ":" + name
+	return "session-managed:" + action, nil
 }
 
 func (f *fakeBackend) Skills() []SkillInfo {
@@ -306,6 +335,148 @@ func TestMCP_NoProviderHidesLLMTools(t *testing.T) {
 		if !strings.Contains(string(body), keep) {
 			t.Errorf("direct tool %q must remain without a provider: %s", keep, body)
 		}
+	}
+}
+
+// proxyBackend returns a fake advertising two proxied MCP tools with a real
+// origin schema, exercising the hub/aggregator surface.
+func proxyBackend() *proxyFake {
+	return &proxyFake{mcpTools: []MCPProxyToolInfo{
+		{
+			Name:        "list_regions",
+			Server:      "aws",
+			Description: "List AWS regions",
+			InputSchema: map[string]interface{}{
+				"type":       "object",
+				"properties": map[string]interface{}{"partition": map[string]interface{}{"type": "string"}},
+				"required":   []string{"partition"},
+			},
+			ReadOnly: true,
+		},
+		{Name: "no_schema_tool", Server: "other", Description: "Schema-less"},
+	}}
+}
+
+// TestMCP_ProxiedToolsListedWithOriginSchema pins the MCP-hub contract:
+// tools discovered from servers ChatCLI is connected to are re-exported
+// under their mcp_ names, keeping the origin JSON Schema (not the plugin
+// args-string envelope) and the origin readOnlyHint; schema-less tools get
+// a valid empty object schema.
+func TestMCP_ProxiedToolsListedWithOriginSchema(t *testing.T) {
+	m := NewMCP(proxyBackend(), "chatcli", "1.0.0")
+	resps := runLines(t, m.Handle, `{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}`)
+	body, _ := json.Marshal(resps[0].Result)
+	s := string(body)
+	for _, want := range []string{`"mcp_list_regions"`, "[MCP:aws] List AWS regions", `"partition"`, `"required":["partition"]`, `"mcp_no_schema_tool"`} {
+		if !strings.Contains(s, want) {
+			t.Errorf("tools/list missing %q: %s", want, s)
+		}
+	}
+	if strings.Contains(s, `"required":null`) {
+		t.Errorf("inputSchema.required must never be null: %s", s)
+	}
+}
+
+// TestMCP_ProxiedToolCallForwardsRawArguments pins that a proxied call
+// carries the caller's arguments object verbatim — no args-string envelope.
+func TestMCP_ProxiedToolCallForwardsRawArguments(t *testing.T) {
+	be := proxyBackend()
+	m := NewMCP(be, "chatcli", "1.0.0")
+	r := runLines(t, m.Handle,
+		`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"mcp_list_regions","arguments":{"partition":"aws","nested":{"deep":true}}}}`,
+	)
+	if b, _ := json.Marshal(r[0].Result); !strings.Contains(string(b), "mcp-proxied:mcp_list_regions") {
+		t.Errorf("proxied dispatch wrong: %s", b)
+	}
+	if be.lastMCPTool != "mcp_list_regions" {
+		t.Errorf("tool name not forwarded: %q", be.lastMCPTool)
+	}
+	if !strings.Contains(be.lastMCPArgs, `"nested":{"deep":true}`) {
+		t.Errorf("arguments must be forwarded verbatim, got: %s", be.lastMCPArgs)
+	}
+}
+
+// TestMCP_InitializeAdvertisesToolsListChanged pins tools.listChanged: true
+// when the backend proxies MCP tools (that catalog is dynamic — it grows as
+// ChatCLI's own client connects), false for a backend without the hub
+// capability (static native surface).
+func TestMCP_InitializeAdvertisesToolsListChanged(t *testing.T) {
+	m := NewMCP(proxyBackend(), "chatcli", "1.0.0")
+	resps := runLines(t, m.Handle, `{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}`)
+	body, _ := json.Marshal(resps[0].Result)
+	if !strings.Contains(string(body), `"tools":{"listChanged":true}`) {
+		t.Errorf("proxy-capable backend must advertise tools.listChanged=true: %s", body)
+	}
+
+	m = NewMCP(&fakeBackend{}, "chatcli", "1.0.0")
+	resps = runLines(t, m.Handle, `{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}`)
+	body, _ = json.Marshal(resps[0].Result)
+	if !strings.Contains(string(body), `"tools":{"listChanged":false}`) {
+		t.Errorf("slim backend must advertise tools.listChanged=false: %s", body)
+	}
+	if ToolsListChangedMethod != "notifications/tools/list_changed" {
+		t.Errorf("ToolsListChangedMethod drifted: %q", ToolsListChangedMethod)
+	}
+}
+
+// TestMCP_SlimBackendIgnoresMCPPrefix pins the no-capability path: a backend
+// without MCPToolProxy routes mcp_-prefixed names to the plugin dispatcher
+// instead of panicking or dropping the call.
+func TestMCP_SlimBackendIgnoresMCPPrefix(t *testing.T) {
+	be := &fakeBackend{}
+	m := NewMCP(be, "chatcli", "1.0.0")
+	r := runLines(t, m.Handle,
+		`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"mcp_x","arguments":{"args":"y"}}}`,
+	)
+	if b, _ := json.Marshal(r[0].Result); !strings.Contains(string(b), "tool:mcp_x:y") {
+		t.Errorf("slim backend must fall through to CallTool: %s", b)
+	}
+	resps := runLines(t, m.Handle, `{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}`)
+	if b, _ := json.Marshal(resps[0].Result); strings.Contains(string(b), `"mcp_`) {
+		t.Errorf("slim backend must not advertise proxied tools: %s", b)
+	}
+}
+
+// TestMCP_ManageSession pins the session-management surface: advertised and
+// dispatched only when the backend implements SessionBackend, with the
+// session default applied and action required.
+func TestMCP_ManageSession(t *testing.T) {
+	be := proxyBackend()
+	m := NewMCP(be, "chatcli", "1.0.0")
+
+	resps := runLines(t, m.Handle, `{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}`)
+	if b, _ := json.Marshal(resps[0].Result); !strings.Contains(string(b), `"manage_session"`) {
+		t.Errorf("session-capable backend must advertise manage_session: %s", b)
+	}
+
+	r := runLines(t, m.Handle,
+		`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"manage_session","arguments":{"action":"save","name":"reunion"}}}`,
+	)
+	if b, _ := json.Marshal(r[0].Result); !strings.Contains(string(b), "session-managed:save") {
+		t.Errorf("manage_session dispatch wrong: %s", b)
+	}
+	if be.lastSessionOp != "save:mcp:reunion" {
+		t.Errorf("action/session/name not propagated (session must default to mcp): %q", be.lastSessionOp)
+	}
+
+	r = runLines(t, m.Handle,
+		`{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"manage_session","arguments":{}}}`,
+	)
+	if r[0].Error == nil || r[0].Error.Code != CodeInvalidParams {
+		t.Errorf("missing action must be invalid params, got %+v", r[0])
+	}
+
+	// A backend without the capability neither advertises nor dispatches it.
+	slim := NewMCP(&fakeBackend{}, "chatcli", "1.0.0")
+	resps = runLines(t, slim.Handle, `{"jsonrpc":"2.0","id":4,"method":"tools/list","params":{}}`)
+	if b, _ := json.Marshal(resps[0].Result); strings.Contains(string(b), `"manage_session"`) {
+		t.Errorf("slim backend must not advertise manage_session: %s", b)
+	}
+	r = runLines(t, slim.Handle,
+		`{"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"manage_session","arguments":{"action":"list","args":"x"}}}`,
+	)
+	if b, _ := json.Marshal(r[0].Result); !strings.Contains(string(b), "tool:manage_session") {
+		t.Errorf("slim backend must fall through to the plugin dispatcher: %s", b)
 	}
 }
 
