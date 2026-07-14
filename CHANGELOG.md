@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.162.1](https://github.com/diillson/chatcli/compare/v1.162.0...v1.162.1) (2026-07-14)
+
+
+### Bug Fixes
+
+* **scheduler:** re-arm park polling in place to survive rescheduling ([#1196](https://github.com/diillson/chatcli/issues/1196)) ([76066f7](https://github.com/diillson/chatcli/commit/76066f71adef345427c966e18e614aa693ccec6d))
+
 ## [1.162.0](https://github.com/diillson/chatcli/compare/v1.161.0...v1.162.0) (2026-07-14)
 
 
