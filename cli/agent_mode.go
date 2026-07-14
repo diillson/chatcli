@@ -682,16 +682,26 @@ func (a *AgentMode) getInput(promptStr string) string {
 //
 // Neither hint mutates a.cli.Client / a.cli.Provider / a.cli.Model — the
 // user's active choices are preserved across turns.
+//
+// Priority for the turn's model: the AI's own "@model use" route override
+// (an explicit in-task decision) wins over the skill frontmatter hint (a
+// static preference captured at Run() start). The override handle is always
+// the qualified "PROVIDER:model" form, so its resolution is deterministic.
 func (a *AgentMode) clientAndCtxForTurn(ctx context.Context) (llmclient.LLMClient, context.Context) {
 	turnClient := a.cli.Client
-	if a.skillModelHint != "" {
-		resolution := a.cli.resolveSkillClient(a.skillModelHint)
+	hint := a.cli.agentRouteOverrideHandle()
+	if hint == "" {
+		hint = a.skillModelHint
+	}
+	if hint != "" {
+		resolution := a.cli.resolveSkillClient(hint)
 		turnClient = resolution.Client
 		// Log once per turn — the ReAct loop can spin many times and we
 		// don't want to spam. agent_mode.go only calls this helper from
 		// the turn loop, so a single log per turn is acceptable.
 		if resolution.Changed {
-			a.logger.Debug("agent turn: skill model hint honored",
+			a.logger.Debug("agent turn: model routing hint honored",
+				zap.String("hint", hint),
 				zap.String("note", resolution.Note),
 				zap.String("to_provider", resolution.Provider),
 				zap.String("to_model", resolution.Model))
@@ -827,9 +837,12 @@ func (a *AgentMode) Run(ctx context.Context, query string, additionalContext str
 	// across tool iterations.
 	//
 	// Reset hints from any previous Run() so a second `/agent` call
-	// without an active skill does not inherit the old model/effort.
+	// without an active skill does not inherit the old model/effort. The
+	// @model route override is task-scoped for the same reason: the AI's
+	// routing decision must never silently outlive the task it was made for.
 	a.skillModelHint = ""
 	a.skillEffortHint = llmclient.EffortUnset
+	a.cli.clearAgentRouteOverride()
 	a.injectedSkillNames = make(map[string]bool)
 	// Block 4 — skills (pinned + auto-activated + manual) and Orchestrator
 	// catalog. Built last because it's the most volatile (changes per query)
@@ -1728,8 +1741,12 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 			turnUsage = llmclient.GetUsageOrEstimate(turnClient, inputChars, len(aiResponse))
 			effProvider := a.cli.Provider
 			effModel := a.cli.Model
-			if a.skillModelHint != "" {
-				resolution := a.cli.resolveSkillClient(a.skillModelHint)
+			hint := a.cli.agentRouteOverrideHandle()
+			if hint == "" {
+				hint = a.skillModelHint
+			}
+			if hint != "" {
+				resolution := a.cli.resolveSkillClient(hint)
 				effProvider = resolution.Provider
 				effModel = resolution.Model
 			}

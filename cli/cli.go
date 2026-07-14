@@ -305,6 +305,14 @@ type ChatCLI struct {
 	cachedModels   []client.ModelInfo
 	cachedModelsMu sync.RWMutex
 
+	// AI-chosen route override ("PROVIDER:model") set by the @model tool.
+	// Honored per agent/coder turn by clientAndCtxForTurn with priority over
+	// skill model hints; cleared at every Run() start and by "@model reset".
+	// Never mutates Client/Provider/Model — the user's session choice stays
+	// authoritative outside the task.
+	agentRouteOverride   string
+	agentRouteOverrideMu sync.RWMutex
+
 	// Multiline input buffer (--- delimiter toggle)
 	multilineBuf MultilineBuffer
 
@@ -469,6 +477,14 @@ func NewChatCLI(ctx context.Context, manager manager.LLMManager, logger *zap.Log
 		// @moa — Mixture-of-Agents: fan a prompt out to several models and
 		// synthesize one best answer. Wired below to the LLM manager.
 		pluginMgr.RegisterBuiltinPlugin(plugins.NewBuiltinMoaPlugin())
+		// @model — model/provider routing by the AI itself: list providers
+		// and models (tier/price/context/capabilities), switch the rest of
+		// the task to a fitter model, or delegate a self-contained subtask
+		// to a cheaper one. Adapter wired below over the LLM manager.
+		// CHATCLI_AGENT_MODEL_TOOL=false disables it (cost governance).
+		if isModelToolEnabled() {
+			pluginMgr.RegisterBuiltinPlugin(plugins.NewBuiltinModelPlugin())
+		}
 		// @osv — keyless dependency vulnerability scanning via OSV.dev.
 		// Self-contained (HTTP + filesystem), no adapter wiring needed.
 		pluginMgr.RegisterBuiltinPlugin(plugins.NewBuiltinOsvPlugin())
@@ -727,6 +743,10 @@ func NewChatCLI(ctx context.Context, manager manager.LLMManager, logger *zap.Log
 	// Wire the @moa (Mixture-of-Agents) tool to the LLM manager so it can fan
 	// prompts across the configured providers and synthesize a best answer.
 	plugins.SetMoaAdapter(&moaPluginAdapter{cli: cli})
+
+	// Wire the @model tool to the live session (manager + catalog + cost
+	// tables + agent-loop route override).
+	plugins.SetModelRoutingAdapter(&modelRoutingAdapter{cli: cli})
 
 	// Wire the @session tool to the saved-session store so the agent can
 	// search past conversations.
