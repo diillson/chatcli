@@ -17,6 +17,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/diillson/chatcli/cli/scheduler"
 )
 
 func TestClassifyAgentSlash(t *testing.T) {
@@ -220,5 +222,52 @@ func TestAgentModeRunInflight_CASGuard(t *testing.T) {
 	flag.Store(false)
 	if !flag.CompareAndSwap(false, true) {
 		t.Fatal("after Store(false), CAS should succeed again")
+	}
+}
+
+// TestParkWakeupFromEvent covers the PublishEvent safety net that wakes
+// a parked agent when its scheduler job dies outside the executor
+// (retries exhausted, action timeout, breaker) — previously the park
+// failed silently and nothing came back to the user.
+func TestParkWakeupFromEvent(t *testing.T) {
+	parkOwner := scheduler.Owner{Kind: "park", ID: "agent", Tag: "tok-abcdefgh"}
+
+	failed := scheduler.NewEvent(scheduler.EventJobFailed)
+	failed.Owner = parkOwner
+	failed.Name = "park-poll:tok-abcdefgh"
+	failed.Message = "retries exhausted"
+	token, outcome, detail, ok := parkWakeupFromEvent(failed)
+	if !ok || token != "tok-abcdefgh" || outcome != "error" {
+		t.Fatalf("failed park job must wake with error outcome: ok=%v token=%q outcome=%q", ok, token, outcome)
+	}
+	if !strings.Contains(detail, "retries exhausted") {
+		t.Fatalf("detail must carry the failure message, got %q", detail)
+	}
+
+	timedOut := scheduler.NewEvent(scheduler.EventJobTimedOut)
+	timedOut.Owner = parkOwner
+	if _, outcome, _, ok := parkWakeupFromEvent(timedOut); !ok || outcome != "timeout" {
+		t.Fatalf("timed-out park job must wake with timeout outcome: ok=%v outcome=%q", ok, outcome)
+	}
+
+	// Cancellation is /cancel-park's conversation, not the net's.
+	cancelled := scheduler.NewEvent(scheduler.EventJobCancelled)
+	cancelled.Owner = parkOwner
+	if _, _, _, ok := parkWakeupFromEvent(cancelled); ok {
+		t.Fatal("cancelled park job must not trigger the wake-up net")
+	}
+
+	// Non-park owners never trigger it.
+	other := scheduler.NewEvent(scheduler.EventJobFailed)
+	other.Owner = scheduler.Owner{Kind: scheduler.OwnerUser, ID: "tester"}
+	if _, _, _, ok := parkWakeupFromEvent(other); ok {
+		t.Fatal("non-park job failure must not trigger the wake-up net")
+	}
+
+	// A park owner without a token has nothing to resume.
+	noTag := scheduler.NewEvent(scheduler.EventJobFailed)
+	noTag.Owner = scheduler.Owner{Kind: "park", ID: "agent"}
+	if _, _, _, ok := parkWakeupFromEvent(noTag); ok {
+		t.Fatal("park job without a token must not trigger the wake-up net")
 	}
 }

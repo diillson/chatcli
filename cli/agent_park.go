@@ -184,10 +184,19 @@ func (a *AgentMode) enqueueParkJob(ctx context.Context, snap *park.Snapshot) (st
 		} else {
 			payload["command"] = req.Command
 		}
+		// Interval (recurring) on purpose: every poll cycle re-arms the
+		// SAME job in place (same JobID, same name-index entry), so the
+		// snapshot's SchedulerJobID stays valid for /parked and
+		// /cancel-park across cycles. A one-shot job that re-enqueues a
+		// sibling under the same name is rejected by the scheduler's
+		// duplicate-name admission while the current cycle is still
+		// Running — the poll chain died on the first non-matching probe.
+		// ParkPoll ends the recurrence via StopRecurrence when the probe
+		// matches or the deadline elapses.
 		job := scheduler.NewJob(
 			"park-poll:"+snap.Token,
 			owner,
-			scheduler.Schedule{Kind: scheduler.ScheduleRelative, Relative: req.Interval},
+			scheduler.Schedule{Kind: scheduler.ScheduleInterval, Interval: req.Interval},
 			scheduler.Action{Type: scheduler.ActionParkPoll, Payload: payload},
 		)
 		// Park is interactively user-approved before this code runs:

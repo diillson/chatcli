@@ -411,8 +411,10 @@ func (s *Scheduler) runAction(ctx context.Context, j *Job) {
 	if res.Err == nil {
 		// Recurring schedules re-arm here, BEFORE the (terminal)
 		// Completed transition. Non-recurring jobs go straight to
-		// Completed and run unblockDependents / fireTriggers.
-		if j.Schedule.IsRecurring() {
+		// Completed and run unblockDependents / fireTriggers. An
+		// executor that reached its own termination condition opts
+		// out of the re-arm via StopRecurrence.
+		if j.Schedule.IsRecurring() && !res.StopRecurrence {
 			s.rearmRecurring(j, exec)
 			return
 		}

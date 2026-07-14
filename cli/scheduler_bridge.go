@@ -654,8 +654,41 @@ func (b *schedulerBridge) PublishEvent(evt scheduler.Event) {
 	// force-refreshing the go-prompt prefix. Cheap no-op if not in an
 	// interactive loop.
 	b.cli.markSchedulerDirty()
-	_ = evt
+
+	// Safety net: a park job that dies OUTSIDE its executor (action
+	// timeout, breaker open, retries exhausted, WAL write error) never
+	// reaches the executor's own wake-up fallbacks — without this hook
+	// the parked agent stays suspended forever and the user is told
+	// nothing unless they run /parked. Wake the agent with an error
+	// outcome; the resume path is idempotent per token.
+	if token, outcome, detail, ok := parkWakeupFromEvent(evt); ok {
+		if err := b.wakeParkedAgent(token, outcome, detail); err != nil && b.cli.logger != nil {
+			b.cli.logger.Warn("park: failed to wake agent after scheduler job failure",
+				zap.String("token", token),
+				zap.String("job_id", string(evt.JobID)),
+				zap.Error(err))
+		}
+	}
 	_ = time.Now
+}
+
+// parkWakeupFromEvent decides whether a scheduler event represents a
+// park job dying without having resumed its agent, and if so, how to
+// wake it. Park jobs carry the resume token in Owner.Tag. Cancellation
+// is deliberately excluded — /cancel-park owns that conversation.
+func parkWakeupFromEvent(evt scheduler.Event) (token, outcome, detail string, ok bool) {
+	if evt.Type != scheduler.EventJobFailed && evt.Type != scheduler.EventJobTimedOut {
+		return "", "", "", false
+	}
+	if evt.Owner.Kind != "park" || evt.Owner.Tag == "" {
+		return "", "", "", false
+	}
+	outcome = "error"
+	if evt.Type == scheduler.EventJobTimedOut {
+		outcome = "timeout"
+	}
+	detail = fmt.Sprintf("scheduler job %q (%s) ended without resuming: %s", evt.Name, evt.JobID, evt.Message)
+	return evt.Owner.Tag, outcome, detail, true
 }
 
 // truncateBridge mirrors scheduler.truncate but lives here so we
@@ -677,6 +710,14 @@ func truncateBridge(s string, n int) string {
 // agent invocation — the scheduler dispatcher must not block waiting
 // on the user's interactive loop.
 func (b *schedulerBridge) NotifyParkComplete(_ context.Context, token, outcome, detail string) error {
+	return b.wakeParkedAgent(token, outcome, detail)
+}
+
+// wakeParkedAgent is the context-free body of NotifyParkComplete — the
+// operation is fire-and-forget by design (queue + banner + TTY inject)
+// and must never block on a caller's lifetime, so no context
+// participates. PublishEvent's park wake-up net calls this directly.
+func (b *schedulerBridge) wakeParkedAgent(token, outcome, detail string) error {
 	if b.cli == nil {
 		return fmt.Errorf("park: bridge not bound to CLI")
 	}

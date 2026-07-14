@@ -471,20 +471,26 @@ func (s *Scheduler) Enqueue(ctx context.Context, job *Job) (*Job, error) {
 	s.byName[job.Name] = job.ID
 	s.mu.Unlock()
 
-	if job.Status == StatusPending && !job.NextFireAt.IsZero() {
-		s.queue.Enqueue(job.ID, job.NextFireAt)
+	// Snapshot creation-time state BEFORE handing the job to the queue:
+	// a job that is already due (e.g. the 1ms relative park resume) can
+	// be picked up by a worker and transitioned while this function is
+	// still running, so lock-free reads of job fields past the
+	// queue.Enqueue below would race with that transition.
+	clone := job.Clone()
+
+	if clone.Status == StatusPending && !clone.NextFireAt.IsZero() {
+		s.queue.Enqueue(job.ID, clone.NextFireAt)
 	}
 
-	s.metrics.JobsCreated.WithLabelValues(string(job.Owner.Kind), string(job.Action.Type)).Inc()
+	s.metrics.JobsCreated.WithLabelValues(string(clone.Owner.Kind), string(clone.Action.Type)).Inc()
 	s.metrics.ActiveJobs.Set(float64(s.activeCount()))
 	s.metrics.QueueDepth.Set(float64(s.queue.Len()))
 	s.version.Add(1)
 
 	s.emit(NewEvent(EventJobCreated).WithJob(job).
-		WithMessage(fmt.Sprintf("job %q created (status=%s)", job.Name, job.Status)).
-		WithData("action", string(job.Action.Type)))
+		WithMessage(fmt.Sprintf("job %q created (status=%s)", clone.Name, clone.Status)).
+		WithData("action", string(clone.Action.Type)))
 
-	clone := job.Clone()
 	return clone, nil
 }
 
