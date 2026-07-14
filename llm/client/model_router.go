@@ -59,6 +59,7 @@ type ModelRoutingResolution struct {
 	// Note is a short machine-readable tag describing the branch taken.
 	//
 	//   ""                        — no hint / hint == user model
+	//   "explicit-provider"       — hint carried a "PROVIDER:model" prefix
 	//   "api-cached"              — matched user provider's API cache
 	//   "catalog-same-provider"   — catalog hit on user's provider
 	//   "catalog-cross-provider"  — catalog hit on a different provider
@@ -170,6 +171,25 @@ func ResolveModelRouting(in ResolveModelRoutingInput) ModelRoutingResolution {
 		}, true
 	}
 
+	// 0. Explicit "PROVIDER:model" qualified hint — deterministic routing
+	// with no guessing. This is how the @model tool (and skill frontmatter)
+	// disambiguates models that exist on several providers (claude-* on
+	// CLAUDEAI/BEDROCK/OPENROUTER, deepseek on OLLAMA/GITHUB_MODELS, …).
+	// The prefix is only honored when it names a known or configured
+	// provider, so Ollama tags like "qwen2.5:14b" fall through untouched.
+	if qProvider, qModel, ok := SplitQualifiedHint(hint, in.Router.GetAvailableProviders()); ok {
+		hint = qModel
+		if strings.EqualFold(qProvider, in.UserProvider) {
+			if strings.EqualFold(qModel, in.UserModel) {
+				return fallback
+			}
+			r, _ := buildOnUserProvider("explicit-provider")
+			return r
+		}
+		r, _ := buildOnForeignProvider(qProvider, "explicit-provider")
+		return r
+	}
+
 	// 1. API-cached model list (authoritative when available).
 	for _, m := range in.APICache {
 		if strings.EqualFold(m.ID, hint) {
@@ -264,10 +284,42 @@ func FamilyProviderOf(model string) string {
 
 // KnownProviders enumerates the canonical provider ids used by the manager
 // registry. Exported so cli and workers packages can share the same list.
+//
+// Order matters: CatalogProviderOf scans it front-to-back, so for models
+// mirrored on several providers the earliest entry wins bare-hint routing.
+// CLAUDEAI precedes BEDROCK on purpose — shared claude-* ids resolve to the
+// direct Anthropic API unless the hint qualifies BEDROCK explicitly.
 var KnownProviders = []string{
-	"OPENAI", "OPENAI_ASSISTANT", "CLAUDEAI", "GOOGLEAI", "XAI", "ZAI",
-	"MINIMAX", "STACKSPOT", "OLLAMA", "COPILOT", "GITHUB_MODELS",
-	"OPENROUTER",
+	"OPENAI", "OPENAI_ASSISTANT", "CLAUDEAI", "BEDROCK", "GOOGLEAI", "XAI",
+	"ZAI", "MOONSHOT", "MINIMAX", "STACKSPOT", "OLLAMA", "COPILOT",
+	"GITHUB_MODELS", "OPENROUTER", "DEVIN",
+}
+
+// SplitQualifiedHint recognizes the explicit "PROVIDER:model" hint form and
+// returns the canonical provider id plus the bare model id. The prefix is
+// matched (case-insensitively) against the configured providers first, then
+// KnownProviders; anything else — including Ollama model tags such as
+// "qwen2.5:14b", whose prefix is not a provider — returns ok=false so the
+// caller treats the whole hint as a model id. Only the FIRST colon splits,
+// so "OLLAMA:qwen2.5:14b" keeps the tag colon inside the model part.
+func SplitQualifiedHint(hint string, availableProviders []string) (provider, model string, ok bool) {
+	prefix, rest, found := strings.Cut(hint, ":")
+	if !found {
+		return "", "", false
+	}
+	prefix = strings.TrimSpace(prefix)
+	rest = strings.TrimSpace(rest)
+	if prefix == "" || rest == "" {
+		return "", "", false
+	}
+	for _, list := range [][]string{availableProviders, KnownProviders} {
+		for _, p := range list {
+			if strings.EqualFold(p, prefix) {
+				return p, rest, true
+			}
+		}
+	}
+	return "", "", false
 }
 
 // ContainsProvider returns true iff `p` is present in the list (case
