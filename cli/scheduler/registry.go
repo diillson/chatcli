@@ -136,6 +136,13 @@ type ActionResult struct {
 	// Transient mirrors EvalOutcome.Transient — retryable vs permanent.
 	Transient bool
 	Err       error
+	// StopRecurrence asks the dispatcher to finalize a recurring job
+	// after this successful execution instead of re-arming the next
+	// cycle. Executors that own their own termination condition (e.g.
+	// park_poll, which polls until its probe matches or its deadline
+	// elapses) set this on the closing cycle. Ignored when Err != nil
+	// or the schedule is not recurring.
+	StopRecurrence bool
 }
 
 // ActionExecutor is a plug-in that can run one action type.

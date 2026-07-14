@@ -27,6 +27,10 @@ type fakeBridge struct {
 	cmdExit   int
 	cmdErr    error
 	cmdCalls  atomic.Int32
+	// cmdMatchAfter, when > 0, forces exit 0 from that probe count on.
+	// Lets integration tests flip a failing probe to success without a
+	// data race on cmdExit mid-run.
+	cmdMatchAfter atomic.Int32
 
 	notifyCalls atomic.Int32
 	notifyTok   string
@@ -48,8 +52,12 @@ func (f *fakeBridge) SendLLMPrompt(_ context.Context, _, _ string, _ int) (strin
 }
 func (f *fakeBridge) FireHook(_ hooks.HookEvent) *hooks.HookResult { return nil }
 func (f *fakeBridge) RunShell(_ context.Context, _ string, _ map[string]string, _, _ bool) (string, string, int, error) {
-	f.cmdCalls.Add(1)
-	return f.cmdStdout, f.cmdStderr, f.cmdExit, f.cmdErr
+	calls := f.cmdCalls.Add(1)
+	exit := f.cmdExit
+	if after := f.cmdMatchAfter.Load(); after > 0 && calls >= after {
+		exit = 0
+	}
+	return f.cmdStdout, f.cmdStderr, exit, f.cmdErr
 }
 func (f *fakeBridge) ClassifyShellCommand(_ string) scheduler.ShellPolicy {
 	return scheduler.ShellPolicyAllow
@@ -61,8 +69,10 @@ func (f *fakeBridge) LLMClient() client.LLMClient    { return nil }
 func (f *fakeBridge) AppendHistory(_ models.Message) {}
 func (f *fakeBridge) PublishEvent(_ scheduler.Event) {}
 func (f *fakeBridge) NotifyParkComplete(_ context.Context, tok, outcome, detail string) error {
-	f.notifyCalls.Add(1)
+	// Fields first, counter last: the atomic Add is the release edge a
+	// concurrent test observes before reading the fields.
 	f.notifyTok, f.notifyOut, f.notifyDet = tok, outcome, detail
+	f.notifyCalls.Add(1)
 	return nil
 }
 func (f *fakeBridge) RunHTTPProbe(_ context.Context, _, _ string, _ map[string]string, _ time.Duration) (int, string, error) {
@@ -176,8 +186,105 @@ func TestParkPoll_HTTP_RescheduleSelf(t *testing.T) {
 	if len(enq.jobs) != 1 || enq.jobs[0].Action.Type != scheduler.ActionParkPoll {
 		t.Fatalf("expected self-reschedule, got %+v", enq.jobs)
 	}
-	if !res.Transient {
-		t.Fatalf("non-match probe should mark Transient so retry policy applies")
+	// The sibling must NOT reuse the live job's name — the scheduler's
+	// duplicate-name admission would reject it while the current cycle
+	// is still Running.
+	if enq.jobs[0].Name != "park-poll:tok-abcdefgh.i1" {
+		t.Fatalf("sibling must carry a per-iteration unique name, got %q", enq.jobs[0].Name)
+	}
+	if res.StopRecurrence {
+		t.Fatalf("waiting must not stop recurrence")
+	}
+}
+
+func TestParkPoll_RecurringJob_WaitsInPlace(t *testing.T) {
+	b := &fakeBridge{httpStatus: 503}
+	enq := &trackingEnqueue{}
+	env := newEnv(t, b, enq)
+	env.Job.Type = string(scheduler.ScheduleInterval)
+
+	action := scheduler.Action{
+		Type: scheduler.ActionParkPoll,
+		Payload: map[string]any{
+			"resume_token":  "tok-abcdefgh",
+			"mode":          "for_url",
+			"url":           "https://x",
+			"interval":      "30s",
+			"deadline_unix": time.Now().Add(5 * time.Minute).Unix(),
+			"success_when":  "status=200",
+		},
+	}
+	res := ParkPoll{}.Execute(context.Background(), action, env)
+	if res.Err != nil {
+		t.Fatalf("execute err: %v", res.Err)
+	}
+	// Recurring jobs re-arm in the dispatcher: no sibling enqueue, no
+	// StopRecurrence — a plain success carries the cycle forward.
+	if len(enq.jobs) != 0 {
+		t.Fatalf("recurring job must not enqueue a sibling, got %+v", enq.jobs)
+	}
+	if res.StopRecurrence {
+		t.Fatalf("waiting must not stop recurrence")
+	}
+}
+
+func TestParkPoll_Match_StopsRecurrence(t *testing.T) {
+	b := &fakeBridge{httpStatus: 200}
+	enq := &trackingEnqueue{}
+	env := newEnv(t, b, enq)
+	env.Job.Type = string(scheduler.ScheduleInterval)
+
+	action := scheduler.Action{
+		Type: scheduler.ActionParkPoll,
+		Payload: map[string]any{
+			"resume_token":  "tok-abcdefgh",
+			"mode":          "for_url",
+			"url":           "https://x",
+			"interval":      "30s",
+			"deadline_unix": time.Now().Add(5 * time.Minute).Unix(),
+			"success_when":  "status=200",
+		},
+	}
+	res := ParkPoll{}.Execute(context.Background(), action, env)
+	if res.Err != nil {
+		t.Fatalf("execute err: %v", res.Err)
+	}
+	if !res.StopRecurrence {
+		t.Fatalf("matched probe must finalize the recurring poll job")
+	}
+	if len(enq.jobs) != 1 || enq.jobs[0].Action.Type != scheduler.ActionAgentResume {
+		t.Fatalf("expected AgentResume fanout, got %+v", enq.jobs)
+	}
+}
+
+func TestParkPoll_ResumeEnqueueRejected_NotifiesBridgeDirectly(t *testing.T) {
+	b := &fakeBridge{httpStatus: 200}
+	env := newEnv(t, b, &trackingEnqueue{})
+	env.Job.Type = string(scheduler.ScheduleInterval)
+	env.Enqueue = func(_ context.Context, _ *scheduler.Job) (*scheduler.Job, error) {
+		return nil, errors.New("admission rejected")
+	}
+
+	action := scheduler.Action{
+		Type: scheduler.ActionParkPoll,
+		Payload: map[string]any{
+			"resume_token":  "tok-abcdefgh",
+			"mode":          "for_url",
+			"url":           "https://x",
+			"interval":      "30s",
+			"deadline_unix": time.Now().Add(5 * time.Minute).Unix(),
+			"success_when":  "status=200",
+		},
+	}
+	res := ParkPoll{}.Execute(context.Background(), action, env)
+	if res.Err != nil {
+		t.Fatalf("direct-notify fallback must succeed, got err: %v", res.Err)
+	}
+	if !res.StopRecurrence {
+		t.Fatalf("fallback wake-up must still finalize the poll job")
+	}
+	if b.notifyCalls.Load() != 1 || b.notifyOut != "matched" {
+		t.Fatalf("bridge must be notified directly: calls=%d outcome=%q", b.notifyCalls.Load(), b.notifyOut)
 	}
 }
 
