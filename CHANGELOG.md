@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.162.0](https://github.com/diillson/chatcli/compare/v1.161.0...v1.162.0) (2026-07-14)
+
+
+### Features
+
+* **agent:** [@model](https://github.com/model) tool — AI-driven model/provider routing with tiered catalog and delegate ([#1194](https://github.com/diillson/chatcli/issues/1194)) ([5de937d](https://github.com/diillson/chatcli/commit/5de937de26be49a86dae407171851c878454c269))
+
 ## [1.161.0](https://github.com/diillson/chatcli/compare/v1.160.2...v1.161.0) (2026-07-13)
 
 
