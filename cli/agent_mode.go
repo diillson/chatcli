@@ -365,6 +365,14 @@ func (a *AgentMode) handleAgentAsk(ctx context.Context, argsJSON string) (string
 	return ask.FormatResult(answers), nil
 }
 
+// dangerBlocked reports whether a dangerous command must be declined rather
+// than auto-approved: only in unattended mode with the block policy set (MCP
+// server default-off opt-in via CHATCLI_MCP_DANGER=block). Attended runs keep
+// the interactive confirmation; the gateway daemon keeps auto-approve.
+func (a *AgentMode) dangerBlocked() bool {
+	return a.cli != nil && a.cli.unattended && a.cli.dangerBlock
+}
+
 // unattendedConfirmAnswer is what readLine returns in unattended mode (the
 // gateway daemon). It is the explicit phrase the dangerous-command guard in
 // executeCommandsWithOutput expects, so confirmations auto-approve without any
@@ -1239,7 +1247,8 @@ func (a *AgentMode) RunOnce(ctx context.Context, query string, autoExecute bool)
 
 	// Unattended runs (gateway daemon, full-autonomy) skip the danger gate —
 	// the operator opted in and access is controlled at the gateway edge.
-	if !a.cli.unattended {
+	// The MCP server can re-arm it via CHATCLI_MCP_DANGER=block.
+	if !a.cli.unattended || a.dangerBlocked() {
 		for _, cmd := range blockToExecute.Commands {
 			if a.validator.IsDangerous(cmd) {
 				errMsg := i18n.T("agent.oneshot.auto_exec_aborted", cmd)

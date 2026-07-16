@@ -24,6 +24,7 @@
 package cmd
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -63,6 +64,15 @@ func runRPC(kind string, mgr manager.LLMManager, logger *zap.Logger) error {
 	if err != nil {
 		logger.Warn("rpcserve: ChatCLI init failed; agent/coder/tools disabled", zap.Error(err))
 	}
+	if chatCLI != nil {
+		// stdin carries the JSON-RPC protocol: any interactive confirmation
+		// would consume protocol frames and hang the run. Unattended mode
+		// auto-approves every prompt at the source (same regime as the
+		// gateway daemon); CHATCLI_MCP_DANGER=block re-arms the dangerous-
+		// command gate as an in-band refusal instead of a stdin read.
+		chatCLI.SetUnattended(true)
+		chatCLI.SetRPCDangerPolicy(strings.EqualFold(os.Getenv("CHATCLI_MCP_DANGER"), "block"))
+	}
 
 	backend := &rpcBackend{
 		mgr:      mgr,
@@ -83,12 +93,14 @@ func runRPC(kind string, mgr manager.LLMManager, logger *zap.Logger) error {
 	case "acp":
 		a := rpcserve.NewACP(backend, ver)
 		srv := rpcserve.NewServer(os.Stdin, os.Stdout, a.Handle)
+		defer quarantineStdout(logger)()
 		a.SetNotifier(srv.Notify)
 		logger.Info("acp: serving over stdio")
 		return srv.Serve(ctx)
 	default: // mcp
 		m := rpcserve.NewMCP(backend, "chatcli", ver)
 		srv := rpcserve.NewServer(os.Stdin, os.Stdout, m.Handle)
+		defer quarantineStdout(logger)()
 		// Relay catalog changes from ChatCLI's own MCP client (servers
 		// connecting after startup, dynamic refreshes, disconnects) to our
 		// client as notifications/tools/list_changed, so proxied tools show
@@ -100,6 +112,43 @@ func runRPC(kind string, mgr manager.LLMManager, logger *zap.Logger) error {
 		}
 		logger.Info("mcp-server: serving over stdio")
 		return srv.Serve(ctx)
+	}
+}
+
+// quarantineStdout re-points the process-global os.Stdout at a pipe drained
+// into the logger and returns the restore function. The JSON-RPC server
+// captured the real stdout at construction, so the protocol keeps its channel;
+// after this, any stray print outside a captured agent/coder run (memory
+// notices, skill notices, plugins writing directly) lands in the log instead
+// of interleaving with protocol frames. captureStreaming keeps working: it
+// saves and restores the os.Stdout *variable*, which now points at the sink.
+func quarantineStdout(logger *zap.Logger) func() {
+	orig := os.Stdout
+	r, w, err := os.Pipe()
+	if err != nil {
+		logger.Warn("rpcserve: stdout quarantine unavailable", zap.Error(err))
+		return func() {}
+	}
+	os.Stdout = w
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		br := bufio.NewReader(r)
+		for {
+			line, rerr := br.ReadString('\n')
+			if s := strings.TrimSpace(line); s != "" {
+				logger.Debug("stdout quarantined", zap.String("line", s))
+			}
+			if rerr != nil {
+				return
+			}
+		}
+	}()
+	return func() {
+		os.Stdout = orig
+		_ = w.Close()
+		<-done
+		_ = r.Close()
 	}
 }
 

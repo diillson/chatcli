@@ -190,6 +190,7 @@ type ChatCLI struct {
 	lastFailedChunk      *FileChunk  // Referência ao último chunk que falhou
 	agentMode            *AgentMode  // Modo de agente
 	unattended           bool        // when true, the agent runs without any interactive confirmation (gateway daemon)
+	dangerBlock          bool        // when true (with unattended), dangerous commands are declined in-band instead of auto-approved (MCP server opt-in)
 	lastAgentReply       string      // last one-shot agent prose answer (command blocks stripped), captured for unattended callers
 	interactionState     InteractionState
 	mu                   sync.Mutex

@@ -37,6 +37,16 @@ var ansiSeq = regexp.MustCompile(`\x1b\[[0-9;]*[a-zA-Z]`)
 // gateway fanning out messages) block here rather than corrupting each other.
 var rpcStdoutMu sync.Mutex
 
+// SetRPCDangerPolicy toggles the unattended dangerous-command policy. With
+// block=true, a command classified dangerous by the CommandValidator is
+// declined in-band (the model sees the refusal in the transcript and can
+// replan) instead of auto-approved the way the gateway daemon runs. The MCP
+// server sets this from CHATCLI_MCP_DANGER; the gateway never calls it, so
+// its opt-in auto-approve behavior is unchanged.
+func (cli *ChatCLI) SetRPCDangerPolicy(block bool) {
+	cli.dangerBlock = block
+}
+
 // captureRPCStdout runs fn with os.Stdout redirected and returns the captured
 // (ANSI-stripped) output. The pipe is always restored.
 func captureRPCStdout(fn func() error) (string, error) {
