@@ -31,6 +31,7 @@ import (
 	"os"
 	"os/signal"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -184,7 +185,34 @@ type rpcBackend struct {
 	sessions map[string][]models.Message
 }
 
+// rpcMaxHistory is the legacy hard message cap, applied only on the plain
+// passthrough path (no compactor there). The full-pipeline path uses ChatCLI's
+// token-aware history compaction instead. CHATCLI_MCP_MAX_HISTORY overrides
+// the cap for both paths (0 keeps the default behavior).
 const rpcMaxHistory = 30
+
+// historyCap resolves the effective message cap for the given path.
+// full=true: 0 means "no hard cap" (the compactor bounds the history).
+// full=false (plain): 0 means the legacy rpcMaxHistory.
+func historyCap(full bool) int {
+	if v := strings.TrimSpace(os.Getenv("CHATCLI_MCP_MAX_HISTORY")); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			return n
+		}
+	}
+	if full {
+		return 0
+	}
+	return rpcMaxHistory
+}
+
+// capHistory trims hist to the last n messages; n<=0 means no cap.
+func capHistory(hist []models.Message, n int) []models.Message {
+	if n > 0 && len(hist) > n {
+		return hist[len(hist)-n:]
+	}
+	return hist
+}
 
 // HasLLM reports whether any LLM provider is configured. The MCP server
 // hides the LLM-backed harness tools when this is false.
@@ -200,52 +228,57 @@ var errNoLLM = errCLI("no LLM provider is configured in this ChatCLI instance, s
 
 // Prompt implements the chat capability with per-session history.
 func (b *rpcBackend) Prompt(ctx context.Context, session, text string) (string, error) {
+	return b.PromptWith(ctx, session, text, rpcserve.RunOpts{})
+}
+
+// PromptWith is chat with optional per-call provider/model routing. With a
+// full ChatCLI available it runs the SAME enrichment pipeline as an
+// interactive turn (user memory, /context attachments for the session,
+// pinned + trigger-activated skills, knowledge retrieval, token-aware
+// compaction); opts.Plain — or a degraded init — falls back to the bare
+// passthrough.
+func (b *rpcBackend) PromptWith(ctx context.Context, session, text string, opts rpcserve.RunOpts) (string, error) {
 	if !b.HasLLM() {
 		return "", errNoLLM
-	}
-	client, err := b.mgr.GetClient(b.provider, b.model)
-	if err != nil {
-		return "", err
 	}
 
 	b.mu.Lock()
 	hist := append([]models.Message(nil), b.sessions[session]...)
 	b.mu.Unlock()
 
-	hist = append(hist, models.Message{Role: "user", Content: text})
-	reply, err := client.SendPrompt(ctx, text, hist, 0)
-	if err != nil {
-		return "", err
+	if b.cli != nil && !opts.Plain {
+		turn, err := b.cli.RunChatTurnRPC(ctx, session, text, hist,
+			cli.RPCChatOpts{Provider: opts.Provider, Model: opts.Model})
+		if err != nil {
+			return "", err
+		}
+		newHist := capHistory(turn.History, historyCap(true))
+		b.mu.Lock()
+		b.sessions[session] = newHist
+		b.mu.Unlock()
+		b.autosaveSession(session, newHist)
+		return turn.Reply, nil
 	}
-	hist = append(hist, models.Message{Role: "assistant", Content: reply})
 
-	b.mu.Lock()
-	if len(hist) > rpcMaxHistory {
-		hist = hist[len(hist)-rpcMaxHistory:]
-	}
-	b.sessions[session] = hist
-	b.mu.Unlock()
-
-	return reply, nil
+	return b.promptPlain(ctx, session, text, hist, opts)
 }
 
-// PromptWith is chat with optional per-call provider/model routing.
-func (b *rpcBackend) PromptWith(ctx context.Context, session, text string, opts rpcserve.RunOpts) (string, error) {
-	if opts.Provider == "" && opts.Model == "" {
-		return b.Prompt(ctx, session, text)
-	}
+// promptPlain is the bare passthrough chat path: raw per-session history,
+// no enrichment, legacy message cap. Kept for opts.Plain and for the
+// degraded mode where ChatCLI failed to initialize.
+func (b *rpcBackend) promptPlain(ctx context.Context, session, text string, hist []models.Message, opts rpcserve.RunOpts) (string, error) {
 	provider := opts.Provider
 	if provider == "" {
 		provider = b.provider
 	}
-	client, err := b.mgr.GetClient(provider, opts.Model)
+	model := opts.Model
+	if model == "" {
+		model = b.model
+	}
+	client, err := b.mgr.GetClient(provider, model)
 	if err != nil {
 		return "", err
 	}
-
-	b.mu.Lock()
-	hist := append([]models.Message(nil), b.sessions[session]...)
-	b.mu.Unlock()
 
 	hist = append(hist, models.Message{Role: "user", Content: text})
 	reply, err := client.SendPrompt(ctx, text, hist, 0)
@@ -255,12 +288,22 @@ func (b *rpcBackend) PromptWith(ctx context.Context, session, text string, opts 
 	hist = append(hist, models.Message{Role: "assistant", Content: reply})
 
 	b.mu.Lock()
-	if len(hist) > rpcMaxHistory {
-		hist = hist[len(hist)-rpcMaxHistory:]
-	}
-	b.sessions[session] = hist
+	b.sessions[session] = capHistory(hist, historyCap(false))
 	b.mu.Unlock()
 	return reply, nil
+}
+
+// autosaveSession persists the live session to the saved-session store when
+// CHATCLI_MCP_SESSION_AUTOSAVE is on. Best-effort: a store failure logs via
+// the session manager and never fails the turn.
+func (b *rpcBackend) autosaveSession(session string, hist []models.Message) {
+	if b.store == nil || len(hist) == 0 {
+		return
+	}
+	if v := strings.TrimSpace(os.Getenv("CHATCLI_MCP_SESSION_AUTOSAVE")); !strings.EqualFold(v, "true") && v != "1" {
+		return
+	}
+	_ = b.store.SaveSessionRPC("mcp-"+session, hist)
 }
 
 // Agent runs the full agent loop with per-call options.
@@ -426,9 +469,9 @@ func (b *rpcBackend) ManageSession(_ context.Context, action, session, name stri
 		if err != nil {
 			return "", err
 		}
-		if len(hist) > rpcMaxHistory {
-			hist = hist[len(hist)-rpcMaxHistory:]
-		}
+		// Full-pipeline turns compact token-aware, so a whole saved session
+		// can be restored; CHATCLI_MCP_MAX_HISTORY still bounds it if set.
+		hist = capHistory(hist, historyCap(b.cli != nil))
 		b.mu.Lock()
 		b.sessions[session] = hist
 		b.mu.Unlock()
@@ -462,6 +505,27 @@ func (b *rpcBackend) ManageSession(_ context.Context, action, session, name stri
 	default:
 		return "", errCLI(fmt.Sprintf("unknown action %q — use save, load, list, delete, clear or active", action))
 	}
+}
+
+// SearchSessions implements rpcserve.SessionSearchBackend: full-text search
+// across the saved-session store.
+func (b *rpcBackend) SearchSessions(_ context.Context, query string) (string, error) {
+	if b.cli == nil {
+		return "", errCLIUnavailable
+	}
+	return b.cli.SearchSessionsRPC(query)
+}
+
+// ForkSession implements rpcserve.SessionSearchBackend: copy a saved session
+// under a new name.
+func (b *rpcBackend) ForkSession(_ context.Context, source, target string) (string, error) {
+	if b.cli == nil {
+		return "", errCLIUnavailable
+	}
+	if err := b.cli.ForkSessionRPC(source, target); err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("forked saved session %q to %q", source, target), nil
 }
 
 // Skills serves the installed skill catalog (MCP prompts).
