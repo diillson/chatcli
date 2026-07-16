@@ -78,6 +78,33 @@ func (hs *HubSync) startFresh(ctx context.Context) error {
 	return nil
 }
 
+// hubResumeMaxEvents bounds the backlog spliced into history on resume: the
+// newest 24 events (~12 turns), matching the gateway's preamble bound. The
+// rest of the conversation stays in the hub, reachable but not force-fed.
+const hubResumeMaxEvents = 24
+
+// startResume ADOPTS the principal's active shared conversation instead of
+// rotating to a fresh one — the continuity model for the MCP server, where
+// the point is picking up the thread the user has going in the REPL or on
+// the gateway channels. The watermark is advanced so the first pull splices
+// only a bounded tail of the backlog.
+func (hs *HubSync) startResume(ctx context.Context) error {
+	convID, principal, err := hs.client.ResolveActiveConversation(ctx, "")
+	if err != nil {
+		return err
+	}
+	var since int64
+	if events, err := hs.client.ReadConversation(ctx, convID, 0, 0); err == nil && len(events) > hubResumeMaxEvents {
+		since = events[len(events)-hubResumeMaxEvents-1].Seq
+	}
+	hs.mu.Lock()
+	hs.convID = convID
+	hs.principal = principal
+	hs.lastSeq = since
+	hs.mu.Unlock()
+	return nil
+}
+
 // mirrorTurn records a completed local turn (chat, agent or coder) on the shared
 // conversation so other channels — and future sessions — continue from it.
 func (hs *HubSync) mirrorTurn(ctx context.Context, userText, assistantText string) {
@@ -245,6 +272,29 @@ func (cli *ChatCLI) startHubSync(ctx context.Context) {
 		cli.logger.Warn("hub sync: could not start shared session; disabling", zap.Error(err))
 		cli.hubSync = nil
 	}
+}
+
+// StartHubResume joins the shared conversation hub in RESUME mode: it adopts
+// the principal's active conversation (creating it only if none exists)
+// instead of rotating like the interactive Start does. Used by the MCP
+// server so a thread started in the REPL or on a gateway channel continues
+// seamlessly from any MCP client on the machine. principal overrides the
+// hub principal ("" keeps the configured default — the same conversation as
+// the REPL/gateway). Returns the store close function (nil when the hub is
+// unavailable or disabled).
+func (cli *ChatCLI) StartHubResume(ctx context.Context, principal string) func() {
+	var closeFn func()
+	if cli.hubSync == nil {
+		closeFn = cli.maybeEnableLocalHubAs(ctx, principal)
+	}
+	if cli.hubSync == nil {
+		return closeFn
+	}
+	if err := cli.hubSync.startResume(ctx); err != nil {
+		cli.logger.Warn("hub sync: could not resume shared conversation; disabling", zap.Error(err))
+		cli.hubSync = nil
+	}
+	return closeFn
 }
 
 // syncHubContext pulls turns that arrived on other channels since the last turn

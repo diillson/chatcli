@@ -73,6 +73,17 @@ func runRPC(kind string, mgr manager.LLMManager, logger *zap.Logger) error {
 		// command gate as an in-band refusal instead of a stdin read.
 		chatCLI.SetUnattended(true)
 		chatCLI.SetRPCDangerPolicy(strings.EqualFold(os.Getenv("CHATCLI_MCP_DANGER"), "block"))
+
+		// Cross-channel continuity: join the shared conversation hub in
+		// RESUME mode (adopting the REPL/gateway thread, never rotating it)
+		// so a conversation started in ChatCLI continues from any MCP
+		// client. Gated by the hub's own enablement plus the MCP-specific
+		// kill switch; CHATCLI_MCP_HUB_PRINCIPAL isolates the MCP thread.
+		if !strings.EqualFold(os.Getenv("CHATCLI_MCP_HUB"), "off") {
+			if closeHub := chatCLI.StartHubResume(context.Background(), os.Getenv("CHATCLI_MCP_HUB_PRINCIPAL")); closeHub != nil {
+				defer closeHub()
+			}
+		}
 	}
 
 	backend := &rpcBackend{

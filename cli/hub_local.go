@@ -235,6 +235,14 @@ func (l *localHubClient) AllSettings(ctx context.Context) (map[string]string, er
 // `enabled` setting (or CHATCLI_HUB_ENABLED=false) opts out. Returns a closer
 // for the opened database, or nil when local mode is off.
 func (cli *ChatCLI) maybeEnableLocalHub(ctx context.Context) func() {
+	return cli.maybeEnableLocalHubAs(ctx, "")
+}
+
+// maybeEnableLocalHubAs is maybeEnableLocalHub with an optional principal
+// override (used by the MCP server's CHATCLI_MCP_HUB_PRINCIPAL to isolate its
+// thread from the REPL/gateway conversation when the operator wants that).
+// An empty override keeps the configured hub principal.
+func (cli *ChatCLI) maybeEnableLocalHubAs(ctx context.Context, principalOverride string) func() {
 	if cli.hubSync != nil || cli.isRemote {
 		return nil // a /connect session already owns hub sync
 	}
@@ -263,7 +271,10 @@ func (cli *ChatCLI) maybeEnableLocalHub(ctx context.Context) func() {
 	} else if n > 0 {
 		cli.logger.Info("local hub: purged idle conversations", zap.Int("count", n))
 	}
-	principal := resolveHubPrincipal(ctx, store)
+	principal := principalOverride
+	if principal == "" {
+		principal = resolveHubPrincipal(ctx, store)
+	}
 	cli.hubSync = newHubSync(newLocalHubClient(store, principal), cli.logger)
 	cli.logger.Info("local hub mode enabled", zap.String("principal", principal), zap.String("db", dbPath))
 	return func() { _ = store.Close() }
