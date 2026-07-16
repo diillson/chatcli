@@ -338,12 +338,17 @@ type RPCRunOpts struct {
 	// Emit, when non-nil, receives the rendered transcript line by line
 	// as the loop works (ACP streaming).
 	Emit func(string)
+	// Session scopes the run's /context attachments and knowledge bases
+	// (ctxmgr session id). Empty keeps the process default.
+	Session string
 }
 
-// RunAgentRPC runs the agent loop with per-call options.
+// RunAgentRPC runs the FULL agent (ReAct) loop with per-call options — the
+// same engine, tools, skills and workspace context the interactive /agent
+// command gets.
 func (cli *ChatCLI) RunAgentRPC(ctx context.Context, task string, o RPCRunOpts) (string, error) {
 	return cli.runLoopRPC(ctx, o, func(runCtx context.Context) error {
-		return cli.RunAgentOnce(runCtx, "/agent "+task, true)
+		return cli.RunAgentFullOnce(runCtx, task)
 	})
 }
 
@@ -365,6 +370,13 @@ func (cli *ChatCLI) runLoopRPC(ctx context.Context, o RPCRunOpts, fn func(contex
 			return oerr
 		}
 		defer restore()
+		// Scope the run to the caller's session so /context attachments and
+		// knowledge bases resolve like they would in the interactive REPL.
+		if o.Session != "" {
+			prevSession := cli.currentSessionName
+			cli.currentSessionName = o.Session
+			defer func() { cli.currentSessionName = prevSession }()
+		}
 		return fn(ctx)
 	})
 	if err != nil {

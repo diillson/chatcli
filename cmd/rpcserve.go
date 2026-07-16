@@ -306,47 +306,49 @@ func (b *rpcBackend) autosaveSession(session string, hist []models.Message) {
 	_ = b.store.SaveSessionRPC("mcp-"+session, hist)
 }
 
-// Agent runs the full agent loop with per-call options.
-func (b *rpcBackend) Agent(ctx context.Context, _, task string, opts rpcserve.RunOpts) (string, error) {
+// Agent runs the full agent (ReAct) loop with per-call options, scoped to
+// the caller's session (contexts/knowledge).
+func (b *rpcBackend) Agent(ctx context.Context, session, task string, opts rpcserve.RunOpts) (string, error) {
 	if !b.HasLLM() {
 		return "", errNoLLM
 	}
 	if b.cli == nil {
 		return "", errCLIUnavailable
 	}
-	return b.cli.RunAgentRPC(ctx, task, toRunOpts(opts))
+	return b.cli.RunAgentRPC(ctx, task, toRunOpts(session, opts))
 }
 
-// Coder runs the coder loop with per-call options.
-func (b *rpcBackend) Coder(ctx context.Context, _, task string, opts rpcserve.RunOpts) (string, error) {
+// Coder runs the coder loop with per-call options, scoped to the caller's
+// session (contexts/knowledge).
+func (b *rpcBackend) Coder(ctx context.Context, session, task string, opts rpcserve.RunOpts) (string, error) {
 	if !b.HasLLM() {
 		return "", errNoLLM
 	}
 	if b.cli == nil {
 		return "", errCLIUnavailable
 	}
-	return b.cli.RunCoderRPC(ctx, task, toRunOpts(opts))
+	return b.cli.RunCoderRPC(ctx, task, toRunOpts(session, opts))
 }
 
 // AgentStream / CoderStream are the ACP streaming variants.
-func (b *rpcBackend) AgentStream(ctx context.Context, _, task string, opts rpcserve.RunOpts) (string, error) {
+func (b *rpcBackend) AgentStream(ctx context.Context, session, task string, opts rpcserve.RunOpts) (string, error) {
 	if !b.HasLLM() {
 		return "", errNoLLM
 	}
 	if b.cli == nil {
 		return "", errCLIUnavailable
 	}
-	return b.cli.RunAgentRPC(ctx, task, toRunOpts(opts))
+	return b.cli.RunAgentRPC(ctx, task, toRunOpts(session, opts))
 }
 
-func (b *rpcBackend) CoderStream(ctx context.Context, _, task string, opts rpcserve.RunOpts) (string, error) {
+func (b *rpcBackend) CoderStream(ctx context.Context, session, task string, opts rpcserve.RunOpts) (string, error) {
 	if !b.HasLLM() {
 		return "", errNoLLM
 	}
 	if b.cli == nil {
 		return "", errCLIUnavailable
 	}
-	return b.cli.RunCoderRPC(ctx, task, toRunOpts(opts))
+	return b.cli.RunCoderRPC(ctx, task, toRunOpts(session, opts))
 }
 
 // Tools lists every plugin tool the exposure policy admits.
@@ -558,8 +560,8 @@ func (b *rpcBackend) ProvidersJSON() (string, error) {
 }
 
 // toRunOpts converts the wire options into the CLI run options.
-func toRunOpts(o rpcserve.RunOpts) cli.RPCRunOpts {
-	return cli.RPCRunOpts{Provider: o.Provider, Model: o.Model, Quality: o.Quality, Emit: o.Emit}
+func toRunOpts(session string, o rpcserve.RunOpts) cli.RPCRunOpts {
+	return cli.RPCRunOpts{Provider: o.Provider, Model: o.Model, Quality: o.Quality, Emit: o.Emit, Session: session}
 }
 
 type errCLI string

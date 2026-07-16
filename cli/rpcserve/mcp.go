@@ -233,7 +233,7 @@ func (m *MCP) toolDefinitions() []map[string]interface{} {
 	}
 	agentProps := map[string]interface{}{
 		"task":    textArg("The task for the agent to accomplish."),
-		"session": textArg("Optional conversation id."),
+		"session": textArg("Optional session id — scopes which /context attachments and knowledge bases the run sees."),
 		"quality": qualityProp(),
 	}
 	for k, v := range routingProps() {
@@ -241,7 +241,7 @@ func (m *MCP) toolDefinitions() []map[string]interface{} {
 	}
 	coderProps := map[string]interface{}{
 		"task":    textArg("The coding task."),
-		"session": textArg("Optional conversation id."),
+		"session": textArg("Optional session id — scopes which /context attachments and knowledge bases the run sees."),
 		"quality": qualityProp(),
 	}
 	for k, v := range routingProps() {

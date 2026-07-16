@@ -826,6 +826,13 @@ func (a *AgentMode) Run(ctx context.Context, query string, additionalContext str
 	if kb := a.cli.knowledgeAgentBlock(); kb != "" {
 		toolsText += "\n\n" + kb
 	}
+	// The session's /context attachments ride here too (session-stable,
+	// cache-friendly) — the agent-mode counterpart of the chat pipeline's
+	// Part 1, so a context attached in chat is visible to /agent, /coder,
+	// the gateway and the MCP server alike.
+	if cb := a.cli.attachedContextAgentBlock(); cb != "" {
+		toolsText += "\n\n" + cb
+	}
 	// Teach the autonomous documentation pipeline so the model proactively
 	// builds the knowledge it lacks instead of guessing or stalling. Cheap,
 	// deterministic, and rides in the same cacheable block.
@@ -1137,6 +1144,39 @@ func (cli *ChatCLI) RunCoderOnce(ctx context.Context, input string) error {
 // block on a stdin prompt the daemon has no way to answer.
 func (cli *ChatCLI) RunGatewayCoderOnce(ctx context.Context, task string) error {
 	return cli.runCoderQuery(ctx, task, true)
+}
+
+// RunAgentFullOnce runs the FULL agent ReAct loop one-shot on a raw task —
+// the same engine, tools, skills and workspace context the interactive /agent
+// command gets — exiting when the loop reaches its final answer. This is the
+// agent-profile mirror of runCoderQuery, and the entry the MCP server's
+// agent_task tool uses; the legacy single-call RunOnce path remains only for
+// the CLI one-shot (-p "/agent …") whose auto-exec contract predates the loop.
+func (cli *ChatCLI) RunAgentFullOnce(ctx context.Context, task string) error {
+	cli.setExecutionProfile(ProfileAgent)
+	defer cli.setExecutionProfile(ProfileNormal)
+
+	// Processar contextos especiais como @file, @git, etc.
+	query, additionalContext, images := cli.processSpecialCommands(ctx, task)
+	if len(cli.pendingInboundImages) > 0 {
+		images = append(images, cli.pendingInboundImages...)
+		cli.pendingInboundImages = nil
+	}
+	images, visionDesc := cli.gateImagesForModel(ctx, images)
+	additionalContext += visionDesc
+	fullQuery := query
+	if additionalContext != "" {
+		fullQuery = query + "\n\nContexto adicional:\n" + additionalContext
+	}
+
+	if cli.agentMode == nil {
+		cli.agentMode = NewAgentMode(cli, cli.logger)
+	}
+
+	cli.agentMode.pendingUserImages = images
+	cli.agentMode.isCoderMode = false
+	cli.agentMode.isOneShot = true
+	return cli.agentMode.Run(ctx, fullQuery, "", "")
 }
 
 // runCoderQuery is the shared body for the coder one-shot entries. It runs the

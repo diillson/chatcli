@@ -100,11 +100,11 @@ func captureStreaming(emit func(string), fn func() error) (string, error) {
 	return strings.TrimSpace(buf.String()), runErr
 }
 
-// RunAgentCaptured runs the full agent (ReAct) loop one-shot on task with
-// auto-execute, capturing its transcript. Used by the MCP agent_task tool.
+// RunAgentCaptured runs the full agent (ReAct) loop one-shot on task,
+// capturing its transcript. Used by the MCP agent_task tool.
 func (cli *ChatCLI) RunAgentCaptured(ctx context.Context, task string) (string, error) {
 	out, err := captureRPCStdout(func() error {
-		return cli.RunAgentOnce(ctx, "/agent "+task, true)
+		return cli.RunAgentFullOnce(ctx, task)
 	})
 	if err != nil {
 		return out, err
@@ -115,13 +115,13 @@ func (cli *ChatCLI) RunAgentCaptured(ctx context.Context, task string) (string, 
 	return out, nil
 }
 
-// RunAgentStreaming runs the full agent (ReAct) loop one-shot on task with
-// auto-execute, forwarding the agent's rendered progress to emit line by line
-// as it works, and returning the full transcript. Used by the messaging
-// gateway to narrate task execution back to the chat platform.
+// RunAgentStreaming runs the full agent (ReAct) loop one-shot on task,
+// forwarding the agent's rendered progress to emit line by line as it works,
+// and returning the full transcript. Used by the messaging gateway to
+// narrate task execution back to the chat platform.
 func (cli *ChatCLI) RunAgentStreaming(ctx context.Context, task string, emit func(string)) (string, error) {
 	out, err := captureStreaming(emit, func() error {
-		return cli.RunAgentOnce(ctx, "/agent "+task, true)
+		return cli.RunAgentFullOnce(ctx, task)
 	})
 	if err != nil {
 		return out, err
