@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.163.0](https://github.com/diillson/chatcli/compare/v1.162.1...v1.163.0) (2026-07-16)
+
+
+### Features
+
+* **mcp-server:** full ChatCLI experience parity over MCP ([#1198](https://github.com/diillson/chatcli/issues/1198)) ([b3b33d9](https://github.com/diillson/chatcli/commit/b3b33d95da8775950480a8f9e73fdf266648e746))
+
 ## [1.162.1](https://github.com/diillson/chatcli/compare/v1.162.0...v1.162.1) (2026-07-14)
 
 
