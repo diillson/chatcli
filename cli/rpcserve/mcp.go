@@ -30,6 +30,10 @@ type RunOpts struct {
 	Model    string
 	Quality  map[string]string
 	Emit     func(string)
+	// Plain requests the bare chat passthrough (no memory/contexts/skills
+	// enrichment, no compaction) — the pre-parity ask_chatcli behavior, kept
+	// as an escape hatch for callers that want a cheap raw LLM turn.
+	Plain bool
 }
 
 // ToolInfo describes a tool exposed over MCP.
@@ -107,6 +111,44 @@ type SessionBackend interface {
 	ManageSession(ctx context.Context, action, session, name string) (string, error)
 }
 
+// SessionSearchBackend is the optional backend capability for the additive
+// manage_session actions that need parameters beyond (action, session, name):
+// full-text search across the saved-session store and forking a saved
+// session. Kept separate from SessionBackend so existing implementations
+// stay source-compatible — the handler upgrades via type assertion, the same
+// pattern as MCPToolProxy.
+type SessionSearchBackend interface {
+	// SearchSessions runs a full-text search over the saved-session store.
+	SearchSessions(ctx context.Context, query string) (string, error)
+	// ForkSession copies saved session source under the new name target.
+	ForkSession(ctx context.Context, source, target string) (string, error)
+}
+
+// ResourceInfo describes one resource exposed over MCP resources/list.
+type ResourceInfo struct {
+	URI         string
+	Name        string
+	Description string
+	MimeType    string
+}
+
+// ResourceContent is the payload returned by resources/read.
+type ResourceContent struct {
+	URI      string
+	MimeType string
+	Text     string
+}
+
+// ResourceBackend is the optional backend capability for the MCP resources
+// surface: read-only exports of ChatCLI's local state (user memory, contexts,
+// knowledge bases, skills, saved sessions) under chatcli:// URIs. Optional
+// for the same compatibility reason as MCPToolProxy — the handler upgrades
+// via type assertion and advertises the capability only when present.
+type ResourceBackend interface {
+	Resources() []ResourceInfo
+	ReadResource(ctx context.Context, uri string) (ResourceContent, error)
+}
+
 // MCP implements the Model Context Protocol server methods over JSON-RPC.
 type MCP struct {
 	backend MCPBackend
@@ -136,6 +178,10 @@ func (m *MCP) Handle(ctx context.Context, method string, params json.RawMessage)
 		return map[string]interface{}{"prompts": m.promptDefinitions()}, nil
 	case "prompts/get":
 		return m.getPrompt(params)
+	case "resources/list":
+		return m.listResources()
+	case "resources/read":
+		return m.readResource(ctx, params)
 	default:
 		return nil, errf(CodeMethodNotFound, "unknown method %q", method)
 	}
@@ -159,14 +205,70 @@ func (m *MCP) initialize(params json.RawMessage) map[string]interface{} {
 	// at startup; servers refresh and disconnect). The native surface is
 	// static.
 	_, hasProxy := m.backend.(MCPToolProxy)
+	capabilities := map[string]interface{}{
+		"tools":   map[string]interface{}{"listChanged": hasProxy},
+		"prompts": map[string]interface{}{"listChanged": false},
+	}
+	// Resources are advertised only when the backend exports them (read-only
+	// chatcli:// state: memory, contexts, knowledge, skills, sessions).
+	if _, ok := m.backend.(ResourceBackend); ok {
+		capabilities["resources"] = map[string]interface{}{"subscribe": false, "listChanged": false}
+	}
 	return map[string]interface{}{
 		"protocolVersion": version,
-		"capabilities": map[string]interface{}{
-			"tools":   map[string]interface{}{"listChanged": hasProxy},
-			"prompts": map[string]interface{}{"listChanged": false},
-		},
-		"serverInfo": map[string]interface{}{"name": m.name, "version": m.version},
+		"capabilities":    capabilities,
+		"serverInfo":      map[string]interface{}{"name": m.name, "version": m.version},
 	}
+}
+
+// listResources serves resources/list from the optional ResourceBackend.
+func (m *MCP) listResources() (interface{}, *RPCError) {
+	rb, ok := m.backend.(ResourceBackend)
+	if !ok {
+		return nil, errf(CodeMethodNotFound, "this server exposes no resources")
+	}
+	infos := rb.Resources()
+	out := make([]map[string]interface{}, 0, len(infos))
+	for _, r := range infos {
+		mime := r.MimeType
+		if mime == "" {
+			mime = "text/plain"
+		}
+		out = append(out, map[string]interface{}{
+			"uri":         r.URI,
+			"name":        r.Name,
+			"description": r.Description,
+			"mimeType":    mime,
+		})
+	}
+	return map[string]interface{}{"resources": out}, nil
+}
+
+// readResource serves resources/read from the optional ResourceBackend.
+func (m *MCP) readResource(ctx context.Context, params json.RawMessage) (interface{}, *RPCError) {
+	rb, ok := m.backend.(ResourceBackend)
+	if !ok {
+		return nil, errf(CodeMethodNotFound, "this server exposes no resources")
+	}
+	var p struct {
+		URI string `json:"uri"`
+	}
+	if err := json.Unmarshal(params, &p); err != nil || p.URI == "" {
+		return nil, errf(CodeInvalidParams, "uri is required")
+	}
+	content, err := rb.ReadResource(ctx, p.URI)
+	if err != nil {
+		return nil, errf(CodeInvalidParams, "cannot read %q: %v", p.URI, err)
+	}
+	mime := content.MimeType
+	if mime == "" {
+		mime = "text/plain"
+	}
+	return map[string]interface{}{
+		"contents": []map[string]interface{}{
+			{"uri": content.URI, "mimeType": mime, "text": content.Text},
+		},
+	}, nil
 }
 
 func textArg(desc string) map[string]interface{} {
@@ -205,14 +307,18 @@ func qualityProp() map[string]interface{} {
 func (m *MCP) toolDefinitions() []map[string]interface{} {
 	chatProps := map[string]interface{}{
 		"prompt":  textArg("The question or instruction."),
-		"session": textArg("Optional conversation id (default: \"mcp\")."),
+		"session": textArg("Optional conversation id (default: \"mcp\"). Also selects which /context attachments apply — pass \"default\" to see the interactive REPL's default session contexts."),
+		"plain": map[string]interface{}{
+			"type":        "boolean",
+			"description": "Skip the ChatCLI experience pipeline and send the prompt raw (cheaper, no memory/contexts/skills).",
+		},
 	}
 	for k, v := range routingProps() {
 		chatProps[k] = v
 	}
 	agentProps := map[string]interface{}{
 		"task":    textArg("The task for the agent to accomplish."),
-		"session": textArg("Optional conversation id."),
+		"session": textArg("Optional session id — scopes which /context attachments and knowledge bases the run sees."),
 		"quality": qualityProp(),
 	}
 	for k, v := range routingProps() {
@@ -220,7 +326,7 @@ func (m *MCP) toolDefinitions() []map[string]interface{} {
 	}
 	coderProps := map[string]interface{}{
 		"task":    textArg("The coding task."),
-		"session": textArg("Optional conversation id."),
+		"session": textArg("Optional session id — scopes which /context attachments and knowledge bases the run sees."),
 		"quality": qualityProp(),
 	}
 	for k, v := range routingProps() {
@@ -231,8 +337,12 @@ func (m *MCP) toolDefinitions() []map[string]interface{} {
 	if m.backend.HasLLM() {
 		tools = append(tools, []map[string]interface{}{
 			{
-				"name":        "ask_chatcli",
-				"description": "Ask the model a question (chat, no tools). Keeps a server-side conversation per session. Supports per-call provider/model routing.",
+				"name": "ask_chatcli",
+				"description": "Chat with ChatCLI's FULL experience pipeline: the user's long-term memory and profile, " +
+					"/context attachments for the session, pinned and trigger-activated skills, knowledge retrieval, " +
+					"and token-aware history compaction — the same enrichment an interactive ChatCLI turn gets. " +
+					"Keeps a server-side conversation per session. Supports per-call provider/model routing; " +
+					"pass plain=true for a raw passthrough without enrichment.",
 				"inputSchema": objSchema(chatProps, "prompt"),
 				"annotations": map[string]interface{}{"readOnlyHint": true},
 			},
@@ -259,16 +369,23 @@ func (m *MCP) toolDefinitions() []map[string]interface{} {
 		"annotations": map[string]interface{}{"readOnlyHint": true},
 	})
 	if _, ok := m.backend.(SessionBackend); ok {
+		props := map[string]interface{}{
+			"action":  textArg("One of: save, load, list, delete, clear, active" + m.sessionSearchActions() + "."),
+			"session": textArg("Live session id (the ask_chatcli session parameter; default \"mcp\"). Used by save, load, clear."),
+			"name":    textArg("Saved-session name in the store. Required for load and delete; defaults to the session id for save. For fork: the SOURCE saved session."),
+		}
+		desc := "Manage chat sessions: persist and restore the server-side conversations behind ask_chatcli's session parameter, and administer the saved-session store shared with ChatCLI's /session command. " +
+			"Actions: save (persist a live session's history under a name), load (restore a saved session into a live session id, continuing that conversation), " +
+			"list (saved sessions in the store), delete (remove a saved session), clear (reset a live session), active (live session ids with message counts)."
+		if _, ok := m.backend.(SessionSearchBackend); ok {
+			props["query"] = textArg("Full-text query across all saved sessions. Required for search.")
+			props["to"] = textArg("Target name for fork (the new saved-session copy). Required for fork.")
+			desc += " Plus: search (full-text search across saved sessions), fork (copy saved session `name` to `to`)."
+		}
 		tools = append(tools, map[string]interface{}{
-			"name": "manage_session",
-			"description": "Manage chat sessions: persist and restore the server-side conversations behind ask_chatcli's session parameter, and administer the saved-session store shared with ChatCLI's /session command. " +
-				"Actions: save (persist a live session's history under a name), load (restore a saved session into a live session id, continuing that conversation), " +
-				"list (saved sessions in the store), delete (remove a saved session), clear (reset a live session), active (live session ids with message counts).",
-			"inputSchema": objSchema(map[string]interface{}{
-				"action":  textArg("One of: save, load, list, delete, clear, active."),
-				"session": textArg("Live session id (the ask_chatcli session parameter; default \"mcp\"). Used by save, load, clear."),
-				"name":    textArg("Saved-session name in the store. Required for load and delete; defaults to the session id for save."),
-			}, "action"),
+			"name":        "manage_session",
+			"description": desc,
+			"inputSchema": objSchema(props, "action"),
 			"annotations": map[string]interface{}{"readOnlyHint": false},
 		})
 	}
@@ -356,9 +473,12 @@ type mcpArgs struct {
 	Args     string            `json:"args"`
 	Action   string            `json:"action"`
 	Name     string            `json:"name"`
+	Query    string            `json:"query"`
+	To       string            `json:"to"`
 	Provider string            `json:"provider"`
 	Model    string            `json:"model"`
 	Quality  map[string]string `json:"quality"`
+	Plain    bool              `json:"plain"`
 }
 
 func (m *MCP) callTool(ctx context.Context, params json.RawMessage) (interface{}, *RPCError) {
@@ -372,7 +492,7 @@ func (m *MCP) callTool(ctx context.Context, params json.RawMessage) (interface{}
 	if session == "" {
 		session = "mcp"
 	}
-	opts := RunOpts{Provider: a.Provider, Model: a.Model, Quality: a.Quality}
+	opts := RunOpts{Provider: a.Provider, Model: a.Model, Quality: a.Quality, Plain: a.Plain}
 
 	switch p.Name {
 	case "ask_chatcli":
@@ -395,7 +515,21 @@ func (m *MCP) callTool(ctx context.Context, params json.RawMessage) (interface{}
 	case "manage_session":
 		if sb, ok := m.backend.(SessionBackend); ok {
 			if a.Action == "" {
-				return nil, errf(CodeInvalidParams, "action is required (save, load, list, delete, clear, active)")
+				return nil, errf(CodeInvalidParams, "action is required (save, load, list, delete, clear, active%s)", m.sessionSearchActions())
+			}
+			if ssb, ok := m.backend.(SessionSearchBackend); ok {
+				switch a.Action {
+				case "search":
+					if a.Query == "" {
+						return nil, errf(CodeInvalidParams, "query is required for search")
+					}
+					return m.result(ssb.SearchSessions(ctx, a.Query))
+				case "fork":
+					if a.Name == "" || a.To == "" {
+						return nil, errf(CodeInvalidParams, "fork requires name (source saved session) and to (target name)")
+					}
+					return m.result(ssb.ForkSession(ctx, a.Name, a.To))
+				}
 			}
 			return m.result(sb.ManageSession(ctx, a.Action, session, a.Name))
 		}
@@ -411,6 +545,15 @@ func (m *MCP) callTool(ctx context.Context, params json.RawMessage) (interface{}
 		}
 		return m.result(m.backend.CallTool(ctx, p.Name, a.Args))
 	}
+}
+
+// sessionSearchActions returns the action-list suffix for the search/fork
+// capability, empty when the backend does not implement it.
+func (m *MCP) sessionSearchActions() string {
+	if _, ok := m.backend.(SessionSearchBackend); ok {
+		return ", search, fork"
+	}
+	return ""
 }
 
 // result wraps a backend outcome in the MCP tool-result shape, reporting

@@ -959,6 +959,12 @@ func (cli *ChatCLI) showConfigIntegrations(ctx context.Context) {
 	kv(p, "CHATCLI_MCP_CONFIG", envOr("CHATCLI_MCP_CONFIG"))
 	kv(p, "CHATCLI_MCP_DYNAMIC_TOOLS", envBool("CHATCLI_MCP_DYNAMIC_TOOLS"))
 	kv(p, "CHATCLI_MCP_TOOLS", envOr("CHATCLI_MCP_TOOLS"))
+	kv(p, "CHATCLI_MCP_DANGER", envOr("CHATCLI_MCP_DANGER"))
+	kv(p, "CHATCLI_MCP_RESOURCES", envOr("CHATCLI_MCP_RESOURCES"))
+	kv(p, "CHATCLI_MCP_MAX_HISTORY", envOr("CHATCLI_MCP_MAX_HISTORY"))
+	kv(p, "CHATCLI_MCP_SESSION_AUTOSAVE", envBool("CHATCLI_MCP_SESSION_AUTOSAVE"))
+	kv(p, "CHATCLI_MCP_HUB", envOr("CHATCLI_MCP_HUB"))
+	kv(p, "CHATCLI_MCP_HUB_PRINCIPAL", envOr("CHATCLI_MCP_HUB_PRINCIPAL"))
 	if cli.mcpManager != nil {
 		statuses := cli.mcpManager.GetServerStatus()
 		kv(p, i18n.T("cfg.kv.servers"), fmt.Sprintf("%d", len(statuses)))

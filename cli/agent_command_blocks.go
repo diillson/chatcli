@@ -451,6 +451,10 @@ func (a *AgentMode) cmdBatchExecute(ctx context.Context, renderer *agent.UIRende
 	}
 
 	if hasDanger {
+		if a.dangerBlocked() {
+			fmt.Println(i18n.T("agent.status.batch_canceled"))
+			return
+		}
 		fmt.Println(i18n.T("agent.status.batch_warning"))
 		fmt.Println(i18n.T("agent.status.batch_check_individual"))
 	}
@@ -813,6 +817,12 @@ func (a *AgentMode) runSingleCommand(ctx context.Context, block agent.CommandBlo
 	}
 
 	if a.validator.IsDangerous(trimmed) {
+		if a.dangerBlocked() {
+			outText := i18n.T("agent.status.dangerous_command_aborted") + "\n"
+			fmt.Print(renderer.Colorize(outText, agent.ColorYellow))
+			allOutput.WriteString(outText)
+			return
+		}
 		confirmPrompt := i18n.T("agent.status.dangerous_command_confirm")
 		confirm := a.getCriticalInput(confirmPrompt)
 		if confirm != "sim, quero executar conscientemente" {

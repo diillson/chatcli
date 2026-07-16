@@ -37,6 +37,16 @@ var ansiSeq = regexp.MustCompile(`\x1b\[[0-9;]*[a-zA-Z]`)
 // gateway fanning out messages) block here rather than corrupting each other.
 var rpcStdoutMu sync.Mutex
 
+// SetRPCDangerPolicy toggles the unattended dangerous-command policy. With
+// block=true, a command classified dangerous by the CommandValidator is
+// declined in-band (the model sees the refusal in the transcript and can
+// replan) instead of auto-approved the way the gateway daemon runs. The MCP
+// server sets this from CHATCLI_MCP_DANGER; the gateway never calls it, so
+// its opt-in auto-approve behavior is unchanged.
+func (cli *ChatCLI) SetRPCDangerPolicy(block bool) {
+	cli.dangerBlock = block
+}
+
 // captureRPCStdout runs fn with os.Stdout redirected and returns the captured
 // (ANSI-stripped) output. The pipe is always restored.
 func captureRPCStdout(fn func() error) (string, error) {
@@ -90,11 +100,11 @@ func captureStreaming(emit func(string), fn func() error) (string, error) {
 	return strings.TrimSpace(buf.String()), runErr
 }
 
-// RunAgentCaptured runs the full agent (ReAct) loop one-shot on task with
-// auto-execute, capturing its transcript. Used by the MCP agent_task tool.
+// RunAgentCaptured runs the full agent (ReAct) loop one-shot on task,
+// capturing its transcript. Used by the MCP agent_task tool.
 func (cli *ChatCLI) RunAgentCaptured(ctx context.Context, task string) (string, error) {
 	out, err := captureRPCStdout(func() error {
-		return cli.RunAgentOnce(ctx, "/agent "+task, true)
+		return cli.RunAgentFullOnce(ctx, task)
 	})
 	if err != nil {
 		return out, err
@@ -105,13 +115,13 @@ func (cli *ChatCLI) RunAgentCaptured(ctx context.Context, task string) (string, 
 	return out, nil
 }
 
-// RunAgentStreaming runs the full agent (ReAct) loop one-shot on task with
-// auto-execute, forwarding the agent's rendered progress to emit line by line
-// as it works, and returning the full transcript. Used by the messaging
-// gateway to narrate task execution back to the chat platform.
+// RunAgentStreaming runs the full agent (ReAct) loop one-shot on task,
+// forwarding the agent's rendered progress to emit line by line as it works,
+// and returning the full transcript. Used by the messaging gateway to
+// narrate task execution back to the chat platform.
 func (cli *ChatCLI) RunAgentStreaming(ctx context.Context, task string, emit func(string)) (string, error) {
 	out, err := captureStreaming(emit, func() error {
-		return cli.RunAgentOnce(ctx, "/agent "+task, true)
+		return cli.RunAgentFullOnce(ctx, task)
 	})
 	if err != nil {
 		return out, err

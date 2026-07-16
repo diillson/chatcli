@@ -365,6 +365,14 @@ func (a *AgentMode) handleAgentAsk(ctx context.Context, argsJSON string) (string
 	return ask.FormatResult(answers), nil
 }
 
+// dangerBlocked reports whether a dangerous command must be declined rather
+// than auto-approved: only in unattended mode with the block policy set (MCP
+// server default-off opt-in via CHATCLI_MCP_DANGER=block). Attended runs keep
+// the interactive confirmation; the gateway daemon keeps auto-approve.
+func (a *AgentMode) dangerBlocked() bool {
+	return a.cli != nil && a.cli.unattended && a.cli.dangerBlock
+}
+
 // unattendedConfirmAnswer is what readLine returns in unattended mode (the
 // gateway daemon). It is the explicit phrase the dangerous-command guard in
 // executeCommandsWithOutput expects, so confirmations auto-approve without any
@@ -818,6 +826,13 @@ func (a *AgentMode) Run(ctx context.Context, query string, additionalContext str
 	if kb := a.cli.knowledgeAgentBlock(); kb != "" {
 		toolsText += "\n\n" + kb
 	}
+	// The session's /context attachments ride here too (session-stable,
+	// cache-friendly) — the agent-mode counterpart of the chat pipeline's
+	// Part 1, so a context attached in chat is visible to /agent, /coder,
+	// the gateway and the MCP server alike.
+	if cb := a.cli.attachedContextAgentBlock(); cb != "" {
+		toolsText += "\n\n" + cb
+	}
 	// Teach the autonomous documentation pipeline so the model proactively
 	// builds the knowledge it lacks instead of guessing or stalling. Cheap,
 	// deterministic, and rides in the same cacheable block.
@@ -1131,6 +1146,39 @@ func (cli *ChatCLI) RunGatewayCoderOnce(ctx context.Context, task string) error 
 	return cli.runCoderQuery(ctx, task, true)
 }
 
+// RunAgentFullOnce runs the FULL agent ReAct loop one-shot on a raw task —
+// the same engine, tools, skills and workspace context the interactive /agent
+// command gets — exiting when the loop reaches its final answer. This is the
+// agent-profile mirror of runCoderQuery, and the entry the MCP server's
+// agent_task tool uses; the legacy single-call RunOnce path remains only for
+// the CLI one-shot (-p "/agent …") whose auto-exec contract predates the loop.
+func (cli *ChatCLI) RunAgentFullOnce(ctx context.Context, task string) error {
+	cli.setExecutionProfile(ProfileAgent)
+	defer cli.setExecutionProfile(ProfileNormal)
+
+	// Processar contextos especiais como @file, @git, etc.
+	query, additionalContext, images := cli.processSpecialCommands(ctx, task)
+	if len(cli.pendingInboundImages) > 0 {
+		images = append(images, cli.pendingInboundImages...)
+		cli.pendingInboundImages = nil
+	}
+	images, visionDesc := cli.gateImagesForModel(ctx, images)
+	additionalContext += visionDesc
+	fullQuery := query
+	if additionalContext != "" {
+		fullQuery = query + "\n\nContexto adicional:\n" + additionalContext
+	}
+
+	if cli.agentMode == nil {
+		cli.agentMode = NewAgentMode(cli, cli.logger)
+	}
+
+	cli.agentMode.pendingUserImages = images
+	cli.agentMode.isCoderMode = false
+	cli.agentMode.isOneShot = true
+	return cli.agentMode.Run(ctx, fullQuery, "", "")
+}
+
 // runCoderQuery is the shared body for the coder one-shot entries. It runs the
 // AgentMode ReAct loop under the coder profile and system prompt; gatewayPersona
 // toggles the messaging-gateway directive (see AgentMode.gatewayPersona).
@@ -1239,7 +1287,8 @@ func (a *AgentMode) RunOnce(ctx context.Context, query string, autoExecute bool)
 
 	// Unattended runs (gateway daemon, full-autonomy) skip the danger gate —
 	// the operator opted in and access is controlled at the gateway edge.
-	if !a.cli.unattended {
+	// The MCP server can re-arm it via CHATCLI_MCP_DANGER=block.
+	if !a.cli.unattended || a.dangerBlocked() {
 		for _, cmd := range blockToExecute.Commands {
 			if a.validator.IsDangerous(cmd) {
 				errMsg := i18n.T("agent.oneshot.auto_exec_aborted", cmd)

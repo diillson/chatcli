@@ -338,12 +338,17 @@ type RPCRunOpts struct {
 	// Emit, when non-nil, receives the rendered transcript line by line
 	// as the loop works (ACP streaming).
 	Emit func(string)
+	// Session scopes the run's /context attachments and knowledge bases
+	// (ctxmgr session id). Empty keeps the process default.
+	Session string
 }
 
-// RunAgentRPC runs the agent loop with per-call options.
+// RunAgentRPC runs the FULL agent (ReAct) loop with per-call options — the
+// same engine, tools, skills and workspace context the interactive /agent
+// command gets.
 func (cli *ChatCLI) RunAgentRPC(ctx context.Context, task string, o RPCRunOpts) (string, error) {
 	return cli.runLoopRPC(ctx, o, func(runCtx context.Context) error {
-		return cli.RunAgentOnce(runCtx, "/agent "+task, true)
+		return cli.RunAgentFullOnce(runCtx, task)
 	})
 }
 
@@ -365,6 +370,13 @@ func (cli *ChatCLI) runLoopRPC(ctx context.Context, o RPCRunOpts, fn func(contex
 			return oerr
 		}
 		defer restore()
+		// Scope the run to the caller's session so /context attachments and
+		// knowledge bases resolve like they would in the interactive REPL.
+		if o.Session != "" {
+			prevSession := cli.currentSessionName
+			cli.currentSessionName = o.Session
+			defer func() { cli.currentSessionName = prevSession }()
+		}
 		return fn(ctx)
 	})
 	if err != nil {
@@ -453,6 +465,45 @@ func (cli *ChatCLI) DeleteSessionRPC(name string) error {
 		return err
 	}
 	return cli.sessionManager.DeleteSession(name)
+}
+
+// SearchSessionsRPC runs the full-text search across the saved-session store
+// and renders the hits compactly (session name, match count, snippets) for a
+// model-facing tool result.
+func (cli *ChatCLI) SearchSessionsRPC(query string) (string, error) {
+	if cli.sessionManager == nil {
+		return "", fmt.Errorf("%s", i18n.T("rpc.session.store_unavailable"))
+	}
+	hits, err := cli.sessionManager.SearchSessions(query, 3)
+	if err != nil {
+		return "", err
+	}
+	if len(hits) == 0 {
+		return "no saved session matches the query", nil
+	}
+	var sb strings.Builder
+	for _, h := range hits {
+		fmt.Fprintf(&sb, "%s (%d matches)\n", h.Session, h.Matches)
+		for _, s := range h.Snippets {
+			fmt.Fprintf(&sb, "  … %s\n", s)
+		}
+	}
+	return strings.TrimSpace(sb.String()), nil
+}
+
+// ForkSessionRPC copies a saved session under a new name, validating both
+// names first — this surface is reachable by remote MCP clients.
+func (cli *ChatCLI) ForkSessionRPC(sourceName, newName string) error {
+	if cli.sessionManager == nil {
+		return fmt.Errorf("%s", i18n.T("rpc.session.store_unavailable"))
+	}
+	if err := validateSessionName(sourceName); err != nil {
+		return err
+	}
+	if err := validateSessionName(newName); err != nil {
+		return err
+	}
+	return cli.sessionManager.ForkSession(sourceName, newName)
 }
 
 // RPCSkillInfo describes one skill served as an MCP prompt.

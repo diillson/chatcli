@@ -485,15 +485,19 @@ func (cli *ChatCLI) listAvailableModels(ctx context.Context) {
 // refreshModelCache fetches available models for the current provider in background
 // and caches them for autocomplete suggestions.
 func (cli *ChatCLI) refreshModelCache(ctx context.Context) {
+	// Snapshot on the caller's goroutine: the refresh outlives any run lock,
+	// and cli.Provider is written by the next run's override/restore — an
+	// async read here is a data race (two back-to-back RPC runs hit it).
+	provider := cli.Provider
 	go func() {
 		// The warmer must outlive the triggering request; detach
 		// cancellation while inheriting context values.
 		ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 15*time.Second)
 		defer cancel()
 
-		models, err := cli.manager.ListModelsForProvider(ctx, cli.Provider)
+		models, err := cli.manager.ListModelsForProvider(ctx, provider)
 		if err != nil {
-			cli.logger.Debug("Failed to refresh model cache", zap.String("provider", cli.Provider), zap.Error(err))
+			cli.logger.Debug("Failed to refresh model cache", zap.String("provider", provider), zap.Error(err))
 			return
 		}
 
@@ -501,7 +505,7 @@ func (cli *ChatCLI) refreshModelCache(ctx context.Context) {
 		cli.cachedModels = models
 		cli.cachedModelsMu.Unlock()
 
-		cli.logger.Debug("Model cache refreshed", zap.String("provider", cli.Provider), zap.Int("count", len(models)))
+		cli.logger.Debug("Model cache refreshed", zap.String("provider", provider), zap.Int("count", len(models)))
 	}()
 }
 

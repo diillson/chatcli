@@ -60,12 +60,15 @@ func (cli *ChatCLI) ensureModelCacheWarm(ctx context.Context) {
 	if warm {
 		return
 	}
+	// Snapshot on the caller's goroutine: cli.Provider is written by RPC
+	// override/restore paths that may run while this warmer is in flight.
+	provider := cli.Provider
 	go func() {
 		// The warmer must outlive the triggering request; detach
 		// cancellation while inheriting context values.
 		ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Second)
 		defer cancel()
-		models, err := cli.manager.ListModelsForProvider(ctx, cli.Provider)
+		models, err := cli.manager.ListModelsForProvider(ctx, provider)
 		if err != nil || len(models) == 0 {
 			return
 		}

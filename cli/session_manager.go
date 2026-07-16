@@ -72,6 +72,27 @@ func (sm *SessionManager) getSessionPath(name string) string {
 	return filepath.Join(sm.sessionsDir, safeName+".json")
 }
 
+// atomicWriteSessionFile persists data via a same-directory temp file and an
+// atomic rename (the same durability pattern as ctxmgr's context store), so a
+// crash mid-write can never leave a torn session file behind.
+func atomicWriteSessionFile(path string, data []byte) error {
+	tmp, err := os.CreateTemp(filepath.Dir(path), filepath.Base(path)+".*.tmp")
+	if err != nil {
+		return err
+	}
+	tmpName := tmp.Name()
+	_ = tmp.Close()
+	if err := os.WriteFile(tmpName, data, 0o600); err != nil {
+		_ = os.Remove(tmpName)
+		return err
+	}
+	if err := os.Rename(tmpName, path); err != nil {
+		_ = os.Remove(tmpName)
+		return err
+	}
+	return nil
+}
+
 // CleanExpiredSessions removes sessions older than the configured TTL (L6).
 // Default TTL: 90 days, configurable via CHATCLI_SESSION_TTL (in days).
 func (sm *SessionManager) CleanExpiredSessions() int {
@@ -140,7 +161,12 @@ func (sm *SessionManager) SaveSessionV2(name string, sd *SessionData) error {
 		return fmt.Errorf("erro ao serializar a sessão: %w", err)
 	}
 
-	if err := os.WriteFile(filePath, data, 0o600); err != nil {
+	// Atomic same-directory temp + rename: the REPL, the gateway daemon and
+	// the MCP server all share this store, so a plain WriteFile interrupted
+	// mid-write (or two processes saving concurrently) could leave a torn
+	// session file. The unique temp name keeps concurrent savers from
+	// clobbering each other's in-flight write; last rename wins whole-file.
+	if err := atomicWriteSessionFile(filePath, data); err != nil {
 		sm.logger.Error("Erro ao salvar o arquivo da sessão", zap.String("path", filePath), zap.Error(err))
 		return fmt.Errorf("erro ao salvar o arquivo da sessão: %w", err)
 	}

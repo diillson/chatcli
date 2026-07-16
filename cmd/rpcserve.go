@@ -24,12 +24,14 @@
 package cmd
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"fmt"
 	"os"
 	"os/signal"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -63,6 +65,26 @@ func runRPC(kind string, mgr manager.LLMManager, logger *zap.Logger) error {
 	if err != nil {
 		logger.Warn("rpcserve: ChatCLI init failed; agent/coder/tools disabled", zap.Error(err))
 	}
+	if chatCLI != nil {
+		// stdin carries the JSON-RPC protocol: any interactive confirmation
+		// would consume protocol frames and hang the run. Unattended mode
+		// auto-approves every prompt at the source (same regime as the
+		// gateway daemon); CHATCLI_MCP_DANGER=block re-arms the dangerous-
+		// command gate as an in-band refusal instead of a stdin read.
+		chatCLI.SetUnattended(true)
+		chatCLI.SetRPCDangerPolicy(strings.EqualFold(os.Getenv("CHATCLI_MCP_DANGER"), "block"))
+
+		// Cross-channel continuity: join the shared conversation hub in
+		// RESUME mode (adopting the REPL/gateway thread, never rotating it)
+		// so a conversation started in ChatCLI continues from any MCP
+		// client. Gated by the hub's own enablement plus the MCP-specific
+		// kill switch; CHATCLI_MCP_HUB_PRINCIPAL isolates the MCP thread.
+		if !strings.EqualFold(os.Getenv("CHATCLI_MCP_HUB"), "off") {
+			if closeHub := chatCLI.StartHubResume(context.Background(), os.Getenv("CHATCLI_MCP_HUB_PRINCIPAL")); closeHub != nil {
+				defer closeHub()
+			}
+		}
+	}
 
 	backend := &rpcBackend{
 		mgr:      mgr,
@@ -83,12 +105,14 @@ func runRPC(kind string, mgr manager.LLMManager, logger *zap.Logger) error {
 	case "acp":
 		a := rpcserve.NewACP(backend, ver)
 		srv := rpcserve.NewServer(os.Stdin, os.Stdout, a.Handle)
+		defer quarantineStdout(logger)()
 		a.SetNotifier(srv.Notify)
 		logger.Info("acp: serving over stdio")
 		return srv.Serve(ctx)
 	default: // mcp
 		m := rpcserve.NewMCP(backend, "chatcli", ver)
 		srv := rpcserve.NewServer(os.Stdin, os.Stdout, m.Handle)
+		defer quarantineStdout(logger)()
 		// Relay catalog changes from ChatCLI's own MCP client (servers
 		// connecting after startup, dynamic refreshes, disconnects) to our
 		// client as notifications/tools/list_changed, so proxied tools show
@@ -100,6 +124,43 @@ func runRPC(kind string, mgr manager.LLMManager, logger *zap.Logger) error {
 		}
 		logger.Info("mcp-server: serving over stdio")
 		return srv.Serve(ctx)
+	}
+}
+
+// quarantineStdout re-points the process-global os.Stdout at a pipe drained
+// into the logger and returns the restore function. The JSON-RPC server
+// captured the real stdout at construction, so the protocol keeps its channel;
+// after this, any stray print outside a captured agent/coder run (memory
+// notices, skill notices, plugins writing directly) lands in the log instead
+// of interleaving with protocol frames. captureStreaming keeps working: it
+// saves and restores the os.Stdout *variable*, which now points at the sink.
+func quarantineStdout(logger *zap.Logger) func() {
+	orig := os.Stdout
+	r, w, err := os.Pipe()
+	if err != nil {
+		logger.Warn("rpcserve: stdout quarantine unavailable", zap.Error(err))
+		return func() {}
+	}
+	os.Stdout = w
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		br := bufio.NewReader(r)
+		for {
+			line, rerr := br.ReadString('\n')
+			if s := strings.TrimSpace(line); s != "" {
+				logger.Debug("stdout quarantined", zap.String("line", s))
+			}
+			if rerr != nil {
+				return
+			}
+		}
+	}()
+	return func() {
+		os.Stdout = orig
+		_ = w.Close()
+		<-done
+		_ = r.Close()
 	}
 }
 
@@ -135,7 +196,34 @@ type rpcBackend struct {
 	sessions map[string][]models.Message
 }
 
+// rpcMaxHistory is the legacy hard message cap, applied only on the plain
+// passthrough path (no compactor there). The full-pipeline path uses ChatCLI's
+// token-aware history compaction instead. CHATCLI_MCP_MAX_HISTORY overrides
+// the cap for both paths (0 keeps the default behavior).
 const rpcMaxHistory = 30
+
+// historyCap resolves the effective message cap for the given path.
+// full=true: 0 means "no hard cap" (the compactor bounds the history).
+// full=false (plain): 0 means the legacy rpcMaxHistory.
+func historyCap(full bool) int {
+	if v := strings.TrimSpace(os.Getenv("CHATCLI_MCP_MAX_HISTORY")); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			return n
+		}
+	}
+	if full {
+		return 0
+	}
+	return rpcMaxHistory
+}
+
+// capHistory trims hist to the last n messages; n<=0 means no cap.
+func capHistory(hist []models.Message, n int) []models.Message {
+	if n > 0 && len(hist) > n {
+		return hist[len(hist)-n:]
+	}
+	return hist
+}
 
 // HasLLM reports whether any LLM provider is configured. The MCP server
 // hides the LLM-backed harness tools when this is false.
@@ -151,52 +239,57 @@ var errNoLLM = errCLI("no LLM provider is configured in this ChatCLI instance, s
 
 // Prompt implements the chat capability with per-session history.
 func (b *rpcBackend) Prompt(ctx context.Context, session, text string) (string, error) {
+	return b.PromptWith(ctx, session, text, rpcserve.RunOpts{})
+}
+
+// PromptWith is chat with optional per-call provider/model routing. With a
+// full ChatCLI available it runs the SAME enrichment pipeline as an
+// interactive turn (user memory, /context attachments for the session,
+// pinned + trigger-activated skills, knowledge retrieval, token-aware
+// compaction); opts.Plain — or a degraded init — falls back to the bare
+// passthrough.
+func (b *rpcBackend) PromptWith(ctx context.Context, session, text string, opts rpcserve.RunOpts) (string, error) {
 	if !b.HasLLM() {
 		return "", errNoLLM
-	}
-	client, err := b.mgr.GetClient(b.provider, b.model)
-	if err != nil {
-		return "", err
 	}
 
 	b.mu.Lock()
 	hist := append([]models.Message(nil), b.sessions[session]...)
 	b.mu.Unlock()
 
-	hist = append(hist, models.Message{Role: "user", Content: text})
-	reply, err := client.SendPrompt(ctx, text, hist, 0)
-	if err != nil {
-		return "", err
+	if b.cli != nil && !opts.Plain {
+		turn, err := b.cli.RunChatTurnRPC(ctx, session, text, hist,
+			cli.RPCChatOpts{Provider: opts.Provider, Model: opts.Model})
+		if err != nil {
+			return "", err
+		}
+		newHist := capHistory(turn.History, historyCap(true))
+		b.mu.Lock()
+		b.sessions[session] = newHist
+		b.mu.Unlock()
+		b.autosaveSession(session, newHist)
+		return turn.Reply, nil
 	}
-	hist = append(hist, models.Message{Role: "assistant", Content: reply})
 
-	b.mu.Lock()
-	if len(hist) > rpcMaxHistory {
-		hist = hist[len(hist)-rpcMaxHistory:]
-	}
-	b.sessions[session] = hist
-	b.mu.Unlock()
-
-	return reply, nil
+	return b.promptPlain(ctx, session, text, hist, opts)
 }
 
-// PromptWith is chat with optional per-call provider/model routing.
-func (b *rpcBackend) PromptWith(ctx context.Context, session, text string, opts rpcserve.RunOpts) (string, error) {
-	if opts.Provider == "" && opts.Model == "" {
-		return b.Prompt(ctx, session, text)
-	}
+// promptPlain is the bare passthrough chat path: raw per-session history,
+// no enrichment, legacy message cap. Kept for opts.Plain and for the
+// degraded mode where ChatCLI failed to initialize.
+func (b *rpcBackend) promptPlain(ctx context.Context, session, text string, hist []models.Message, opts rpcserve.RunOpts) (string, error) {
 	provider := opts.Provider
 	if provider == "" {
 		provider = b.provider
 	}
-	client, err := b.mgr.GetClient(provider, opts.Model)
+	model := opts.Model
+	if model == "" {
+		model = b.model
+	}
+	client, err := b.mgr.GetClient(provider, model)
 	if err != nil {
 		return "", err
 	}
-
-	b.mu.Lock()
-	hist := append([]models.Message(nil), b.sessions[session]...)
-	b.mu.Unlock()
 
 	hist = append(hist, models.Message{Role: "user", Content: text})
 	reply, err := client.SendPrompt(ctx, text, hist, 0)
@@ -206,55 +299,67 @@ func (b *rpcBackend) PromptWith(ctx context.Context, session, text string, opts 
 	hist = append(hist, models.Message{Role: "assistant", Content: reply})
 
 	b.mu.Lock()
-	if len(hist) > rpcMaxHistory {
-		hist = hist[len(hist)-rpcMaxHistory:]
-	}
-	b.sessions[session] = hist
+	b.sessions[session] = capHistory(hist, historyCap(false))
 	b.mu.Unlock()
 	return reply, nil
 }
 
-// Agent runs the full agent loop with per-call options.
-func (b *rpcBackend) Agent(ctx context.Context, _, task string, opts rpcserve.RunOpts) (string, error) {
-	if !b.HasLLM() {
-		return "", errNoLLM
+// autosaveSession persists the live session to the saved-session store when
+// CHATCLI_MCP_SESSION_AUTOSAVE is on. Best-effort: a store failure logs via
+// the session manager and never fails the turn.
+func (b *rpcBackend) autosaveSession(session string, hist []models.Message) {
+	if b.store == nil || len(hist) == 0 {
+		return
 	}
-	if b.cli == nil {
-		return "", errCLIUnavailable
+	if v := strings.TrimSpace(os.Getenv("CHATCLI_MCP_SESSION_AUTOSAVE")); !strings.EqualFold(v, "true") && v != "1" {
+		return
 	}
-	return b.cli.RunAgentRPC(ctx, task, toRunOpts(opts))
+	_ = b.store.SaveSessionRPC("mcp-"+session, hist)
 }
 
-// Coder runs the coder loop with per-call options.
-func (b *rpcBackend) Coder(ctx context.Context, _, task string, opts rpcserve.RunOpts) (string, error) {
+// Agent runs the full agent (ReAct) loop with per-call options, scoped to
+// the caller's session (contexts/knowledge).
+func (b *rpcBackend) Agent(ctx context.Context, session, task string, opts rpcserve.RunOpts) (string, error) {
 	if !b.HasLLM() {
 		return "", errNoLLM
 	}
 	if b.cli == nil {
 		return "", errCLIUnavailable
 	}
-	return b.cli.RunCoderRPC(ctx, task, toRunOpts(opts))
+	return b.cli.RunAgentRPC(ctx, task, toRunOpts(session, opts))
+}
+
+// Coder runs the coder loop with per-call options, scoped to the caller's
+// session (contexts/knowledge).
+func (b *rpcBackend) Coder(ctx context.Context, session, task string, opts rpcserve.RunOpts) (string, error) {
+	if !b.HasLLM() {
+		return "", errNoLLM
+	}
+	if b.cli == nil {
+		return "", errCLIUnavailable
+	}
+	return b.cli.RunCoderRPC(ctx, task, toRunOpts(session, opts))
 }
 
 // AgentStream / CoderStream are the ACP streaming variants.
-func (b *rpcBackend) AgentStream(ctx context.Context, _, task string, opts rpcserve.RunOpts) (string, error) {
+func (b *rpcBackend) AgentStream(ctx context.Context, session, task string, opts rpcserve.RunOpts) (string, error) {
 	if !b.HasLLM() {
 		return "", errNoLLM
 	}
 	if b.cli == nil {
 		return "", errCLIUnavailable
 	}
-	return b.cli.RunAgentRPC(ctx, task, toRunOpts(opts))
+	return b.cli.RunAgentRPC(ctx, task, toRunOpts(session, opts))
 }
 
-func (b *rpcBackend) CoderStream(ctx context.Context, _, task string, opts rpcserve.RunOpts) (string, error) {
+func (b *rpcBackend) CoderStream(ctx context.Context, session, task string, opts rpcserve.RunOpts) (string, error) {
 	if !b.HasLLM() {
 		return "", errNoLLM
 	}
 	if b.cli == nil {
 		return "", errCLIUnavailable
 	}
-	return b.cli.RunCoderRPC(ctx, task, toRunOpts(opts))
+	return b.cli.RunCoderRPC(ctx, task, toRunOpts(session, opts))
 }
 
 // Tools lists every plugin tool the exposure policy admits.
@@ -377,9 +482,9 @@ func (b *rpcBackend) ManageSession(_ context.Context, action, session, name stri
 		if err != nil {
 			return "", err
 		}
-		if len(hist) > rpcMaxHistory {
-			hist = hist[len(hist)-rpcMaxHistory:]
-		}
+		// Full-pipeline turns compact token-aware, so a whole saved session
+		// can be restored; CHATCLI_MCP_MAX_HISTORY still bounds it if set.
+		hist = capHistory(hist, historyCap(b.cli != nil))
 		b.mu.Lock()
 		b.sessions[session] = hist
 		b.mu.Unlock()
@@ -415,6 +520,52 @@ func (b *rpcBackend) ManageSession(_ context.Context, action, session, name stri
 	}
 }
 
+// SearchSessions implements rpcserve.SessionSearchBackend: full-text search
+// across the saved-session store.
+func (b *rpcBackend) SearchSessions(_ context.Context, query string) (string, error) {
+	if b.cli == nil {
+		return "", errCLIUnavailable
+	}
+	return b.cli.SearchSessionsRPC(query)
+}
+
+// ForkSession implements rpcserve.SessionSearchBackend: copy a saved session
+// under a new name.
+func (b *rpcBackend) ForkSession(_ context.Context, source, target string) (string, error) {
+	if b.cli == nil {
+		return "", errCLIUnavailable
+	}
+	if err := b.cli.ForkSessionRPC(source, target); err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("forked saved session %q to %q", source, target), nil
+}
+
+// Resources implements rpcserve.ResourceBackend: read-only chatcli:// state.
+func (b *rpcBackend) Resources() []rpcserve.ResourceInfo {
+	if b.cli == nil {
+		return nil
+	}
+	infos := b.cli.ListRPCResources()
+	out := make([]rpcserve.ResourceInfo, 0, len(infos))
+	for _, r := range infos {
+		out = append(out, rpcserve.ResourceInfo{URI: r.URI, Name: r.Name, Description: r.Description, MimeType: r.MimeType})
+	}
+	return out
+}
+
+// ReadResource implements rpcserve.ResourceBackend.
+func (b *rpcBackend) ReadResource(ctx context.Context, uri string) (rpcserve.ResourceContent, error) {
+	if b.cli == nil {
+		return rpcserve.ResourceContent{}, errCLIUnavailable
+	}
+	c, err := b.cli.ReadRPCResource(ctx, uri)
+	if err != nil {
+		return rpcserve.ResourceContent{}, err
+	}
+	return rpcserve.ResourceContent{URI: c.URI, MimeType: c.MimeType, Text: c.Text}, nil
+}
+
 // Skills serves the installed skill catalog (MCP prompts).
 func (b *rpcBackend) Skills() []rpcserve.SkillInfo {
 	if b.cli == nil {
@@ -445,8 +596,8 @@ func (b *rpcBackend) ProvidersJSON() (string, error) {
 }
 
 // toRunOpts converts the wire options into the CLI run options.
-func toRunOpts(o rpcserve.RunOpts) cli.RPCRunOpts {
-	return cli.RPCRunOpts{Provider: o.Provider, Model: o.Model, Quality: o.Quality, Emit: o.Emit}
+func toRunOpts(session string, o rpcserve.RunOpts) cli.RPCRunOpts {
+	return cli.RPCRunOpts{Provider: o.Provider, Model: o.Model, Quality: o.Quality, Emit: o.Emit, Session: session}
 }
 
 type errCLI string
