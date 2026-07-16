@@ -530,6 +530,31 @@ func (b *rpcBackend) ForkSession(_ context.Context, source, target string) (stri
 	return fmt.Sprintf("forked saved session %q to %q", source, target), nil
 }
 
+// Resources implements rpcserve.ResourceBackend: read-only chatcli:// state.
+func (b *rpcBackend) Resources() []rpcserve.ResourceInfo {
+	if b.cli == nil {
+		return nil
+	}
+	infos := b.cli.ListRPCResources()
+	out := make([]rpcserve.ResourceInfo, 0, len(infos))
+	for _, r := range infos {
+		out = append(out, rpcserve.ResourceInfo{URI: r.URI, Name: r.Name, Description: r.Description, MimeType: r.MimeType})
+	}
+	return out
+}
+
+// ReadResource implements rpcserve.ResourceBackend.
+func (b *rpcBackend) ReadResource(ctx context.Context, uri string) (rpcserve.ResourceContent, error) {
+	if b.cli == nil {
+		return rpcserve.ResourceContent{}, errCLIUnavailable
+	}
+	c, err := b.cli.ReadRPCResource(ctx, uri)
+	if err != nil {
+		return rpcserve.ResourceContent{}, err
+	}
+	return rpcserve.ResourceContent{URI: c.URI, MimeType: c.MimeType, Text: c.Text}, nil
+}
+
 // Skills serves the installed skill catalog (MCP prompts).
 func (b *rpcBackend) Skills() []rpcserve.SkillInfo {
 	if b.cli == nil {

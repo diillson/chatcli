@@ -139,6 +139,25 @@ func (m *Manager) KnowledgeDocument(sessionID, kb, source string, offset int) (p
 	if err != nil {
 		return "", 0, 0, err
 	}
+	return m.knowledgeDocumentFor(targets, source, offset)
+}
+
+// KnowledgeDocumentByName is the catalog-resolved variant of
+// KnowledgeDocument: it reads from a knowledge base by its stored name,
+// independent of any session attachment. Read-only export surface (MCP
+// resources).
+func (m *Manager) KnowledgeDocumentByName(name, source string, offset int) (page string, total int, nextOffset int, err error) {
+	fc, err := m.knowledgeByName(name)
+	if err != nil {
+		return "", 0, 0, err
+	}
+	return m.knowledgeDocumentFor([]*FileContext{fc}, source, offset)
+}
+
+// knowledgeDocumentFor assembles one page of a source document from the given
+// knowledge bases — the shared body of the session-scoped and catalog-resolved
+// entries.
+func (m *Manager) knowledgeDocumentFor(targets []*FileContext, source string, offset int) (page string, total int, nextOffset int, err error) {
 	source = strings.TrimSpace(source)
 	if source == "" {
 		return "", 0, 0, fmt.Errorf("source is required — use toc to list document paths")
@@ -189,6 +208,35 @@ func (m *Manager) KnowledgeTOC(sessionID, kb, prefix string) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	return m.knowledgeTOCFor(targets, prefix)
+}
+
+// KnowledgeTOCByName is the catalog-resolved variant of KnowledgeTOC: it
+// lists a knowledge base by its stored name, independent of any session
+// attachment. Read-only export surface (MCP resources).
+func (m *Manager) KnowledgeTOCByName(name, prefix string) (string, error) {
+	fc, err := m.knowledgeByName(name)
+	if err != nil {
+		return "", err
+	}
+	return m.knowledgeTOCFor([]*FileContext{fc}, prefix)
+}
+
+// knowledgeByName resolves a knowledge-mode context from the catalog by name.
+func (m *Manager) knowledgeByName(name string) (*FileContext, error) {
+	fc, err := m.GetContextByName(name)
+	if err != nil {
+		return nil, err
+	}
+	if fc.Mode != ModeKnowledge {
+		return nil, fmt.Errorf("context %q is not a knowledge base (mode %s)", name, fc.Mode)
+	}
+	return fc, nil
+}
+
+// knowledgeTOCFor renders the TOC for the given knowledge bases — the shared
+// body of the session-scoped and catalog-resolved entries.
+func (m *Manager) knowledgeTOCFor(targets []*FileContext, prefix string) (string, error) {
 	prefix = strings.TrimSpace(prefix)
 	var b strings.Builder
 	for _, fc := range targets {

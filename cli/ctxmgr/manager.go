@@ -445,6 +445,22 @@ func (m *Manager) GetContextByName(name string) (*FileContext, error) {
 	return nil, fmt.Errorf("contexto com nome '%s' não encontrado", name)
 }
 
+// RenderContext renders one context's content by name for read-only export
+// (MCP resources). Knowledge contexts render their index card — the corpus
+// itself is read per document via KnowledgeTOCByName/KnowledgeDocumentByName.
+func (m *Manager) RenderContext(name string) (string, error) {
+	fc, err := m.GetContextByName(name)
+	if err != nil {
+		return "", err
+	}
+	if fc.Mode == ModeKnowledge {
+		return m.KnowledgeDigest(fc), nil
+	}
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.formatContextContent(fc, FormatOptions{IncludeMetadata: true, Role: "system"}), nil
+}
+
 // ListContexts lista todos os contextos com filtro opcional
 func (m *Manager) ListContexts(filter *ContextFilter) ([]*FileContext, error) {
 	m.mu.RLock()

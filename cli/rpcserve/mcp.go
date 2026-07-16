@@ -124,6 +124,31 @@ type SessionSearchBackend interface {
 	ForkSession(ctx context.Context, source, target string) (string, error)
 }
 
+// ResourceInfo describes one resource exposed over MCP resources/list.
+type ResourceInfo struct {
+	URI         string
+	Name        string
+	Description string
+	MimeType    string
+}
+
+// ResourceContent is the payload returned by resources/read.
+type ResourceContent struct {
+	URI      string
+	MimeType string
+	Text     string
+}
+
+// ResourceBackend is the optional backend capability for the MCP resources
+// surface: read-only exports of ChatCLI's local state (user memory, contexts,
+// knowledge bases, skills, saved sessions) under chatcli:// URIs. Optional
+// for the same compatibility reason as MCPToolProxy — the handler upgrades
+// via type assertion and advertises the capability only when present.
+type ResourceBackend interface {
+	Resources() []ResourceInfo
+	ReadResource(ctx context.Context, uri string) (ResourceContent, error)
+}
+
 // MCP implements the Model Context Protocol server methods over JSON-RPC.
 type MCP struct {
 	backend MCPBackend
@@ -153,6 +178,10 @@ func (m *MCP) Handle(ctx context.Context, method string, params json.RawMessage)
 		return map[string]interface{}{"prompts": m.promptDefinitions()}, nil
 	case "prompts/get":
 		return m.getPrompt(params)
+	case "resources/list":
+		return m.listResources()
+	case "resources/read":
+		return m.readResource(ctx, params)
 	default:
 		return nil, errf(CodeMethodNotFound, "unknown method %q", method)
 	}
@@ -176,14 +205,70 @@ func (m *MCP) initialize(params json.RawMessage) map[string]interface{} {
 	// at startup; servers refresh and disconnect). The native surface is
 	// static.
 	_, hasProxy := m.backend.(MCPToolProxy)
+	capabilities := map[string]interface{}{
+		"tools":   map[string]interface{}{"listChanged": hasProxy},
+		"prompts": map[string]interface{}{"listChanged": false},
+	}
+	// Resources are advertised only when the backend exports them (read-only
+	// chatcli:// state: memory, contexts, knowledge, skills, sessions).
+	if _, ok := m.backend.(ResourceBackend); ok {
+		capabilities["resources"] = map[string]interface{}{"subscribe": false, "listChanged": false}
+	}
 	return map[string]interface{}{
 		"protocolVersion": version,
-		"capabilities": map[string]interface{}{
-			"tools":   map[string]interface{}{"listChanged": hasProxy},
-			"prompts": map[string]interface{}{"listChanged": false},
-		},
-		"serverInfo": map[string]interface{}{"name": m.name, "version": m.version},
+		"capabilities":    capabilities,
+		"serverInfo":      map[string]interface{}{"name": m.name, "version": m.version},
 	}
+}
+
+// listResources serves resources/list from the optional ResourceBackend.
+func (m *MCP) listResources() (interface{}, *RPCError) {
+	rb, ok := m.backend.(ResourceBackend)
+	if !ok {
+		return nil, errf(CodeMethodNotFound, "this server exposes no resources")
+	}
+	infos := rb.Resources()
+	out := make([]map[string]interface{}, 0, len(infos))
+	for _, r := range infos {
+		mime := r.MimeType
+		if mime == "" {
+			mime = "text/plain"
+		}
+		out = append(out, map[string]interface{}{
+			"uri":         r.URI,
+			"name":        r.Name,
+			"description": r.Description,
+			"mimeType":    mime,
+		})
+	}
+	return map[string]interface{}{"resources": out}, nil
+}
+
+// readResource serves resources/read from the optional ResourceBackend.
+func (m *MCP) readResource(ctx context.Context, params json.RawMessage) (interface{}, *RPCError) {
+	rb, ok := m.backend.(ResourceBackend)
+	if !ok {
+		return nil, errf(CodeMethodNotFound, "this server exposes no resources")
+	}
+	var p struct {
+		URI string `json:"uri"`
+	}
+	if err := json.Unmarshal(params, &p); err != nil || p.URI == "" {
+		return nil, errf(CodeInvalidParams, "uri is required")
+	}
+	content, err := rb.ReadResource(ctx, p.URI)
+	if err != nil {
+		return nil, errf(CodeInvalidParams, "cannot read %q: %v", p.URI, err)
+	}
+	mime := content.MimeType
+	if mime == "" {
+		mime = "text/plain"
+	}
+	return map[string]interface{}{
+		"contents": []map[string]interface{}{
+			{"uri": content.URI, "mimeType": mime, "text": content.Text},
+		},
+	}, nil
 }
 
 func textArg(desc string) map[string]interface{} {
