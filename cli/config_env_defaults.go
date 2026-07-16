@@ -223,6 +223,12 @@ var envDefaults = map[string]envDefault{
 	// ─── Integrations ────────────────────────────────────────────
 	"CHATCLI_MCP_ENABLED":                   {Value: "false", IsBool: true, Source: "mcp manager"},
 	"CHATCLI_MCP_DYNAMIC_TOOLS":             {Value: "true", IsBool: true, Source: "mcp.dynamicToolRefreshEnabled — refresh on tools/list_changed"},
+	"CHATCLI_MCP_DANGER":                    {Value: "allow", Source: "cmd/rpcserve.go (mcp-server unattended danger policy: allow|block)"},
+	"CHATCLI_MCP_RESOURCES":                 {Value: "on", Source: "cli/rpc_support_resources.go (chatcli:// read-only resources: on|off)"},
+	"CHATCLI_MCP_MAX_HISTORY":               {Value: "0", Source: "cmd/rpcserve.go (0 = token-aware compaction bounds the history)"},
+	"CHATCLI_MCP_SESSION_AUTOSAVE":          {Value: "false", IsBool: true, Source: "cmd/rpcserve.go (persist live MCP sessions as mcp-<session>)"},
+	"CHATCLI_MCP_HUB":                       {Value: "on", Source: "cmd/rpcserve.go (join the conversation hub in resume mode: on|off)"},
+	"CHATCLI_MCP_HUB_PRINCIPAL":             {Value: "(hub default)", Source: "cmd/rpcserve.go (isolate the MCP thread under another principal)"},
 	"CHATCLI_ALLOW_UNSIGNED_PLUGINS":        {Value: "false", IsBool: true, Source: "plugin manager"},
 	"CHATCLI_REGISTRY_DISABLE":              {Value: "false", IsBool: true, Source: "skill registry"},
 	"CHATCLI_WEBSEARCH_PROVIDER":            {Value: "auto", Source: "websearch_command.go"},

@@ -81,7 +81,7 @@ func TestMCP_SessionSearchAndFork(t *testing.T) {
 	if cb, _ := json.Marshal(resps[0].Result); strings.Contains(string(cb), `"to"`) {
 		t.Errorf("classic backend must not advertise the fork target parameter: %s", cb)
 	}
-	r = runLines(t, mc.Handle,
+	_ = runLines(t, mc.Handle,
 		`{"jsonrpc":"2.0","id":7,"method":"tools/call","params":{"name":"manage_session","arguments":{"action":"search","query":"x"}}}`,
 	)
 	if classic.lastSessionOp != "search:mcp:" {
