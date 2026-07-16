@@ -2,7 +2,9 @@ package cli
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -101,6 +103,68 @@ func (mw *memoryWorker) nudge(ctx context.Context) {
 	// cancellation while inheriting context values.
 	detached := context.WithoutCancel(ctx)
 	go mw.maybeExtract(detached)
+}
+
+// nudgeSegment queues an externally-owned conversation segment (a headless
+// MCP/RPC turn whose live history is swapped back right after the call) and
+// triggers an extraction pass over the queue. nudge() cannot serve this path:
+// it reads cli.history asynchronously, and by the time its goroutine runs the
+// RPC turn has already restored the previous history, so the live-delta gate
+// would never see these messages.
+func (mw *memoryWorker) nudgeSegment(ctx context.Context, segment []models.Message) {
+	if mw.cli.memoryStore == nil || len(segment) == 0 {
+		return
+	}
+	if _, err := mw.persistPending(segment); err != nil {
+		mw.logger.Warn("Memory worker: could not queue RPC segment", zap.Error(err))
+		return
+	}
+	if mw.coord.isRunning() {
+		return
+	}
+	// The cadence delta is the whole queued backlog, not just this segment:
+	// RPC turns accumulate in the WAL until the min-new-messages threshold is
+	// met, mirroring the REPL's "extract every couple of turns" rhythm.
+	detached := context.WithoutCancel(ctx)
+	go mw.extractQueued(detached, mw.pendingBacklogCount())
+}
+
+// pendingBacklogCount sums the messages across every queued segment. The
+// queue is capped (pendingMaxFiles), so the scan stays trivially cheap.
+func (mw *memoryWorker) pendingBacklogCount() int {
+	total := 0
+	for _, path := range mw.pendingFiles() {
+		data, err := os.ReadFile(path) // #nosec G304 -- our own queue dir under ~/.chatcli
+		if err != nil {
+			continue
+		}
+		var seg pendingSegment
+		if err := json.Unmarshal(data, &seg); err != nil {
+			continue
+		}
+		total += len(seg.Messages)
+	}
+	return total
+}
+
+// extractQueued drains the on-disk queue under the same cadence/breaker gate
+// as maybeExtract, counting the queued segment's messages as the new-item
+// delta — for RPC turns the delta lives in the queue, not in cli.history.
+func (mw *memoryWorker) extractQueued(ctx context.Context, newMessages int) {
+	if !mw.coord.tryAcquire(newMessages) {
+		return
+	}
+	defer mw.coord.release()
+	mw.showStatus("updating memory...")
+	if processed := mw.drainPending(ctx); processed > 0 {
+		mw.coord.recordSuccess()
+		if mw.cli.contextBuilder != nil {
+			mw.cli.contextBuilder.InvalidateCache()
+		}
+	} else {
+		mw.coord.recordFailure()
+	}
+	mw.clearStatus()
 }
 
 func (mw *memoryWorker) loop(ctx context.Context) {

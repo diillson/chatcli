@@ -129,9 +129,11 @@ func (cli *ChatCLI) runChatTurnSerialized(
 		cli.costTracker.RecordRealUsage(resProvider, resModel, usage)
 	}
 	// Memory extraction + skill self-evolution ride the same worker the REPL
-	// uses; the nudge is async and budget-gated internally.
+	// uses. The turn is handed over as an owned segment (WAL queue) because
+	// cli.history is restored the moment this function returns — the async
+	// live-history path would never see it.
 	if cli.memWorker != nil {
-		cli.memWorker.nudge(ctx)
+		cli.memWorker.nudgeSegment(ctx, []models.Message{userMessage, {Role: "assistant", Content: reply}})
 	}
 
 	return RPCChatTurn{
