@@ -1123,6 +1123,19 @@ func (a *AgentMode) buildWorkspaceBlocks(ctx context.Context, query string) (str
 	}
 
 	dynamicText := a.cli.contextBuilder.BuildDynamicContext()
+	// Proactive recall (index mode only): the top hint-matching facts ride in
+	// the UNCACHED trailing block with the wall-clock context — hint-driven
+	// text changes every turn, and placing it in the stable workspace block
+	// would poison the prompt cache for everything after it.
+	if mode == memModeIndex {
+		if ar := a.cli.memoryAutoRecallBlock(hints); ar != "" {
+			if dynamicText == "" {
+				dynamicText = ar
+			} else {
+				dynamicText = ar + "\n\n" + dynamicText
+			}
+		}
+	}
 	return workspaceText, dynamicText
 }
 
