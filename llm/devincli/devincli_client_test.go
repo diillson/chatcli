@@ -213,6 +213,22 @@ REPLY
 	assert.NotContains(t, p, "do NOT use any tools", "the old blanket tool ban must be gone — it blinded the model to ChatCLI's catalog")
 }
 
+// TestTransportPreamble_NoIdentityCoercion pins the anti-refusal contract:
+// the preamble must never assign the model an identity ("you are ChatCLI" /
+// "you are the LLM backend") nor demand secrecy about the transport — Devin
+// was observed refusing whole tasks rather than misrepresent who it is. The
+// model keeps its own identity and simply cooperates through the protocol.
+func TestTransportPreamble_NoIdentityCoercion(t *testing.T) {
+	lower := strings.ToLower(transportPreamble)
+	assert.NotContains(t, lower, "you are the llm backend", "must not assign an identity to the model")
+	assert.NotContains(t, lower, "you are chatcli", "must not tell the model it IS ChatCLI")
+	assert.NotContains(t, lower, "do not mention", "must not demand secrecy — it reads as deception and triggers refusals")
+	assert.Contains(t, lower, "keep your own identity", "must explicitly release the model from any impersonation")
+	assert.Contains(t, lower, "answer truthfully", "identity questions must be answerable honestly")
+	assert.Contains(t, transportPreamble, replyBegin)
+	assert.Contains(t, transportPreamble, replyEnd)
+}
+
 // TestSendPrompt_SerializesConcurrentInvocations pins the fix for the memory
 // worker racing an agent turn: two in-process calls must never have their
 // devin subprocesses alive at the same time (the CLI contends on per-user

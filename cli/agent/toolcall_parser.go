@@ -19,6 +19,8 @@ type ToolCall struct {
 // Supported formats:
 //   - XML self-closing: <tool_call name="@x" args="..." />
 //   - XML paired:       <tool_call name="@x" args="..."></tool_call>
+//   - <tool> alias:     <tool name="@x" args="..." /> — models backed by
+//     other agent CLIs (Devin CLI, Codex CLI, Claude Code) shorten the tag
 //   - Attributes in any order, single or double quotes
 //   - Args containing '>' characters (JSON, HTML entities, etc.)
 //   - JSON tool calls:  {"tool_call":"@coder","args":{...}}
@@ -112,20 +114,32 @@ func isDuplicateToolCall(existing []ToolCall, candidate ToolCall) bool {
 
 // parseXMLToolCalls uses a stateful scanner to properly handle quoted attributes
 // containing special characters like '>' that would break regex-based parsing.
+// It recognizes the canonical <tool_call ...> tag and the shorter <tool ...>
+// alias in a single left-to-right pass, so mixed batches keep document order.
 func parseXMLToolCalls(text string) ([]ToolCall, error) {
 	var calls []ToolCall
 	searchFrom := 0
 
 	for searchFrom < len(text) {
-		// Find the start of a <tool_call tag (case-insensitive)
-		idx := indexCaseInsensitive(text[searchFrom:], "<tool_call")
+		// Find the start of a <tool tag (case-insensitive). "<tool" is a
+		// prefix of "<tool_call", so one scan finds both spellings; the tag
+		// name is disambiguated right after.
+		idx := indexCaseInsensitive(text[searchFrom:], "<tool")
 		if idx < 0 {
 			break
 		}
 		tagStart := searchFrom + idx
 
-		// Ensure it's followed by whitespace or '>' (not part of another tag like <tool_caller>)
-		afterTag := tagStart + len("<tool_call")
+		tagName := "tool"
+		const canonical = "<tool_call"
+		if tagStart+len(canonical) <= len(text) &&
+			strings.EqualFold(text[tagStart:tagStart+len(canonical)], canonical) {
+			tagName = "tool_call"
+		}
+
+		// Ensure it's followed by whitespace or '>' (not part of another tag
+		// like <tool_caller> or <toolbox>)
+		afterTag := tagStart + 1 + len(tagName)
 		if afterTag < len(text) {
 			ch := text[afterTag]
 			if ch != ' ' && ch != '\t' && ch != '\n' && ch != '\r' && ch != '>' && ch != '/' {
@@ -146,16 +160,18 @@ func parseXMLToolCalls(text string) ([]ToolCall, error) {
 		var rawEnd int
 
 		if selfClosing {
-			// Self-closing: <tool_call ... />
+			// Self-closing: <tool_call ... /> or <tool ... />
 			rawEnd = tagEnd + 2 // skip "/>"
 		} else {
-			// Opening tag: <tool_call ... >
+			// Opening tag: <tool_call ... > or <tool ... >
 			rawEnd = tagEnd + 1 // skip ">"
 
-			// Look for optional closing </tool_call>
-			closeIdx := indexCaseInsensitive(text[rawEnd:], "</tool_call>")
+			// Look for the optional matching closing tag. The exact-match
+			// search means "</tool>" never swallows a "</tool_call>".
+			closing := "</" + tagName + ">"
+			closeIdx := indexCaseInsensitive(text[rawEnd:], closing)
 			if closeIdx >= 0 {
-				rawEnd = rawEnd + closeIdx + len("</tool_call>")
+				rawEnd = rawEnd + closeIdx + len(closing)
 			}
 		}
 

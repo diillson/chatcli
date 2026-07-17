@@ -975,8 +975,11 @@ func stripAgentCallTags(s string) string {
 	return agentCallTagRe.ReplaceAllString(s, "")
 }
 
-// stripToolCallTags remove tags <tool_call .../> e <tool_call ...>...</tool_call> do texto.
-var toolCallTagRe = regexp.MustCompile(`(?is)<tool_call\b[^>]*/\s*>|<tool_call\b[^>]*>.*?</tool_call>`)
+// stripToolCallTags remove tags <tool_call .../> e <tool_call ...>...</tool_call>
+// do texto, incluindo o alias <tool .../> que modelos apoiados em outros agent
+// CLIs (Devin/Codex/Claude Code) costumam emitir. O `\b` impede que "<tool"
+// case com "<toolbox"; o grupo opcional cobre as duas grafias no fechamento.
+var toolCallTagRe = regexp.MustCompile(`(?is)<tool(?:_call)?\b[^>]*/\s*>|<tool(?:_call)?\b[^>]*>.*?</tool(?:_call)?\s*>`)
 
 func stripToolCallTags(s string) string {
 	return toolCallTagRe.ReplaceAllString(s, "")

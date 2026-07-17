@@ -130,6 +130,7 @@ func isTrivialAgentQuery(query string, explicitAgentInvocation bool) trivialQuer
 	// Mentions of tools or subcommands → agent territory.
 	lower := strings.ToLower(q)
 	if strings.Contains(lower, "<tool_call") ||
+		strings.Contains(lower, "<tool ") ||
 		strings.Contains(lower, "<agent_call") ||
 		strings.Contains(lower, "```") {
 		return trivialQueryClassification{trivial: false, reason: "has_tool_markup"}

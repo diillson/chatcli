@@ -157,7 +157,8 @@ func Classify(prompt string) Complexity {
 		}
 	}
 	// Code fences / tool markup / multiple sentences imply non-trivial work.
-	if strings.Contains(q, "```") || strings.Contains(q, "<tool_call") {
+	// "<tool " also catches the <tool ...> alias of <tool_call ...>.
+	if strings.Contains(q, "```") || strings.Contains(q, "<tool_call") || strings.Contains(q, "<tool ") {
 		return ComplexityComplex
 	}
 	if len(q) > trivialMaxLen {

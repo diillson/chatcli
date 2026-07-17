@@ -51,8 +51,10 @@ func (t *MessageTrimmer) compressOrEmpty(s string) string {
 var (
 	reasoningBlockRe   = regexp.MustCompile(`(?s)<reasoning>.*?</reasoning>`)
 	explanationBlockRe = regexp.MustCompile(`(?s)<explanation>.*?</explanation>`)
-	toolCallRe         = regexp.MustCompile(`(?s)<tool_call\s+name="([^"]*?)"\s+args='([^']*?)'\s*/>`)
-	toolCallAltRe      = regexp.MustCompile(`(?s)<tool_call\s+name="([^"]*?)"\s+args="([^"]*?)"\s*/>`)
+	// (?:_call)? also compacts the <tool ...> alias emitted by CLI-backed
+	// models (Devin/Codex/Claude Code); groups stay 1=name, 2=args.
+	toolCallRe         = regexp.MustCompile(`(?s)<tool(?:_call)?\s+name="([^"]*?)"\s+args='([^']*?)'\s*/>`)
+	toolCallAltRe      = regexp.MustCompile(`(?s)<tool(?:_call)?\s+name="([^"]*?)"\s+args="([^"]*?)"\s*/>`)
 	toolOutputBlockRe  = regexp.MustCompile(`(?s)<tool_output>\n?(.*?)\n?</tool_output>`)
 	// Pattern to detect tool feedback messages (from agent_mode.go format)
 	toolFeedbackPrefixRe = regexp.MustCompile(`^(?:The tool '|A ferramenta '|--- Resultado da Ação)`)
