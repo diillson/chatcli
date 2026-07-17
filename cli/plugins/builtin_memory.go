@@ -25,6 +25,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"sync/atomic"
 )
@@ -56,6 +57,17 @@ type GraphAccessor interface {
 	// GraphNeighbors returns the local graph (backlinks + related notes) of the
 	// subject best matching the query.
 	GraphNeighbors(query string) (string, error)
+}
+
+// TimelineAccessor is an OPTIONAL capability a MemoryAdapter may implement to
+// back the @memory timeline subcommand — the chronological view of episodic
+// memory ("what did we do three months ago?"). Same optional-interface
+// pattern as GraphAccessor so existing adapters keep compiling.
+type TimelineAccessor interface {
+	// Timeline returns dated episodes filtered by project substring, a
+	// from/to window (ISO dates or natural EN/PT expressions) and a content
+	// query. limit <= 0 applies the default.
+	Timeline(project, from, to, query string, limit int) (string, error)
 }
 
 // memAdapterHolder wraps the adapter so atomic.Value always receives a
@@ -93,7 +105,7 @@ func (*BuiltinMemoryPlugin) Name() string { return "@memory" }
 
 // Description surfaces the tool in /plugin list and the help.
 func (*BuiltinMemoryPlugin) Description() string {
-	return "Persist or recall long-term memory, and explore the knowledge graph of how it connects. Use it the moment the user reveals a durable fact about themselves (certifications, skills, role, preferences, goals) or the project — don't wait for background extraction. Use 'recall' to find facts by content, and 'neighbors'/'map' to see how a subject connects (backlinks, related notes)."
+	return "Persist or recall long-term memory, and explore the knowledge graph of how it connects. Use it the moment the user reveals a durable fact about themselves (certifications, skills, role, preferences, goals) or the project — don't wait for background extraction. Use 'recall' to find facts by content, 'timeline' for WHEN questions (\"what did we do 3 months ago?\", per-project work history), and 'neighbors'/'map' to see how a subject connects (backlinks, related notes)."
 }
 
 // Usage explains the canonical invocation forms.
@@ -105,13 +117,17 @@ Subcommands (cmd + args):
   profile  {fields:{certifications:"AWS SAA", role:"SRE", goals:"...", interests:"...", directives:"...", milestone:"...", ...}}
   forget    {match:"<substring of the fact to remove>"}
   recall    {query?:"topic to recall"}
+  timeline  {project?, from?, to?, query?, limit?}   dated episode history (WHEN)
   neighbors {query:"<subject or node id>"}   local graph: backlinks + related notes
   map                                         knowledge-graph overview (counts + hubs)
 
 Prefer 'profile' for stable attributes of the user (name/role/certifications/
 skills/goals/interests/directives/milestone or any key=value), and 'remember'
-for project facts, conventions, and gotchas. Use 'recall' to search by content
-and 'neighbors' to follow relationships from a subject.
+for project facts, conventions, and gotchas. Use 'recall' to search by content,
+'timeline' when the question is about WHEN ("o que fizemos há 3 meses?",
+"what happened in april?") — from/to accept ISO dates (2026-04) or natural
+EN/PT expressions ("3 months ago", "abril") — and 'neighbors' to follow
+relationships from a subject.
 
 Profile LIST fields (certifications/skills/goals/interests/directives) UPSERT
 by default: new items append, and an item restating an existing entry (same
@@ -135,7 +151,7 @@ examples or generated artifacts.`
 }
 
 // Version is semver; bumped when the surface changes.
-func (*BuiltinMemoryPlugin) Version() string { return "1.1.0" }
+func (*BuiltinMemoryPlugin) Version() string { return "1.2.0" }
 
 // Path is empty for builtin plugins.
 func (*BuiltinMemoryPlugin) Path() string { return "" }
@@ -185,6 +201,21 @@ func (*BuiltinMemoryPlugin) Schema() string {
 					{"name": "query", "type": "string", "description": "Optional topic to narrow recall."},
 				},
 				"examples": []string{`{"cmd":"recall","args":{"query":"certifications"}}`},
+			},
+			{
+				"name":        "timeline",
+				"description": "Chronological history of dated work episodes — answers WHEN questions (\"what did we do 3 months ago?\", \"o que fizemos em abril?\") and per-project work history. from/to accept ISO dates (2026-04, 2026-04-12) or natural EN/PT expressions (\"3 months ago\", \"há 3 semanas\", \"abril\"); a time expression inside query works too.",
+				"flags": []map[string]interface{}{
+					{"name": "project", "type": "string", "description": "Filter by project path/name substring."},
+					{"name": "from", "type": "string", "description": "Window start: ISO date or natural expression."},
+					{"name": "to", "type": "string", "description": "Window end: ISO date or natural expression."},
+					{"name": "query", "type": "string", "description": "Content filter; may embed the time expression."},
+					{"name": "limit", "type": "number", "description": "Max episodes returned (default 30, most recent win)."},
+				},
+				"examples": []string{
+					`{"cmd":"timeline","args":{"query":"3 months ago"}}`,
+					`{"cmd":"timeline","args":{"project":"chatcli","from":"2026-04","to":"2026-06"}}`,
+				},
 			},
 			{
 				"name":        "neighbors",
@@ -262,6 +293,20 @@ func (p *BuiltinMemoryPlugin) ExecuteWithStream(_ context.Context, args []string
 		}
 		_ = json.Unmarshal([]byte(inner), &in)
 		return adapter.Recall(in.Query)
+	case "timeline":
+		ta, ok := adapter.(TimelineAccessor)
+		if !ok {
+			return "", errors.New("@memory timeline: episodic timeline not available")
+		}
+		var in struct {
+			Project string          `json:"project"`
+			From    string          `json:"from"`
+			To      string          `json:"to"`
+			Query   string          `json:"query"`
+			Limit   json.RawMessage `json:"limit"`
+		}
+		_ = json.Unmarshal([]byte(inner), &in)
+		return ta.Timeline(in.Project, in.From, in.To, in.Query, lenientInt(in.Limit))
 	case "map":
 		ga, ok := adapter.(GraphAccessor)
 		if !ok {
@@ -283,7 +328,7 @@ func (p *BuiltinMemoryPlugin) ExecuteWithStream(_ context.Context, args []string
 		return ga.GraphNeighbors(in.Query)
 	default:
 		return "", fmt.Errorf(
-			"@memory: unknown cmd %q (valid: remember|profile|forget|recall|neighbors|map)", cmd,
+			"@memory: unknown cmd %q (valid: remember|profile|forget|recall|timeline|neighbors|map)", cmd,
 		)
 	}
 }
@@ -308,7 +353,7 @@ func parseMemoryInvocation(args []string) (string, string, error) {
 		canon := canonicalMemoryCmd(cmdStr)
 		if canon == "" {
 			return "", "", fmt.Errorf(
-				"missing or unknown cmd %q (valid: remember|profile|forget|recall|neighbors|map)", cmdStr,
+				"missing or unknown cmd %q (valid: remember|profile|forget|recall|timeline|neighbors|map)", cmdStr,
 			)
 		}
 		var inner string
@@ -336,7 +381,7 @@ func parseMemoryInvocation(args []string) (string, string, error) {
 	return canon, inner, nil
 }
 
-// canonicalMemoryCmd folds aliases into the four canonical names.
+// canonicalMemoryCmd folds aliases into the canonical subcommand names.
 func canonicalMemoryCmd(s string) string {
 	switch strings.ToLower(strings.TrimSpace(s)) {
 	case "remember", "add", "store", "note":
@@ -351,8 +396,35 @@ func canonicalMemoryCmd(s string) string {
 		return "neighbors"
 	case "map", "graph", "moc", "overview":
 		return "map"
+	case "timeline", "history", "episodes", "chronology":
+		return "timeline"
 	}
 	return ""
+}
+
+// lenientInt reads a JSON number that models sometimes send as a string
+// ("limit":"20") or a float ("limit":20.0). Anything unparseable yields 0 so
+// the caller applies its default — strict parsing here would make the model
+// fail and retry.
+func lenientInt(raw json.RawMessage) int {
+	if len(raw) == 0 {
+		return 0
+	}
+	var n int
+	if json.Unmarshal(raw, &n) == nil {
+		return n
+	}
+	var f float64
+	if json.Unmarshal(raw, &f) == nil {
+		return int(f)
+	}
+	var s string
+	if json.Unmarshal(raw, &s) == nil {
+		if v, err := strconv.Atoi(strings.TrimSpace(s)); err == nil {
+			return v
+		}
+	}
+	return 0
 }
 
 // parseProfileFields extracts the key/value map from a profile invocation.

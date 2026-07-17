@@ -29,6 +29,7 @@ import (
 //	/memory projects     — show tracked projects
 //	/memory stats        — show usage statistics
 //	/memory facts [cat]  — list facts, optionally filtered by category
+//	/memory timeline [q] — dated episode history; q filters by time ("3 meses atrás", "abril", "2026-04") and/or content
 //	/memory compact      — force memory compaction
 func (cli *ChatCLI) handleMemoryCommand(ctx context.Context, input string) {
 	if cli.memoryStore == nil {
@@ -78,6 +79,9 @@ func (cli *ChatCLI) handleMemoryCommand(ctx context.Context, input string) {
 
 	case args == "stats":
 		cli.showMemoryStats()
+
+	case args == "timeline" || strings.HasPrefix(args, "timeline "):
+		cli.showMemoryTimeline(strings.TrimSpace(strings.TrimPrefix(args, "timeline")))
 
 	case strings.HasPrefix(args, "facts"):
 		category := strings.TrimSpace(strings.TrimPrefix(args, "facts"))
@@ -550,6 +554,61 @@ func (cli *ChatCLI) showMemoryFacts(category string) {
 	fmt.Println()
 }
 
+// showMemoryTimeline renders the episodic work history. The free-form query
+// may carry a time expression in EN/PT ("3 meses atrás", "abril", "2026-04")
+// and/or content words; the temporal part sets the window, the rest filters.
+func (cli *ChatCLI) showMemoryTimeline(query string) {
+	mgr := cli.memoryStore.Manager()
+
+	now := time.Now()
+	var from, to time.Time
+	q := strings.TrimSpace(query)
+	windowFromQuery := false
+	if start, end, cleaned, ok := memory.ParseTemporalRange(q, now); ok {
+		from, to, q = start, end, cleaned
+		windowFromQuery = true
+	}
+	var episodes []*memory.Episode
+	if windowFromQuery {
+		episodes = conversationalTimeline(mgr, from, to, "", q, 50)
+	} else {
+		episodes = mgr.Timeline(from, to, "", q, 50)
+	}
+
+	fmt.Println()
+	title := i18n.T("mem.cmd.timeline.title")
+	if !from.IsZero() {
+		title += " " + from.Format("2006-01-02") + " → " + to.Format("2006-01-02")
+	}
+	fmt.Println(colorize("  "+title, ColorCyan+ColorBold))
+	fmt.Println(colorize("  ─────────────────────────────────────────", ColorGray))
+
+	if len(episodes) == 0 {
+		fmt.Println(colorize("  "+i18n.T("mem.cmd.timeline.empty"), ColorGray))
+		fmt.Println()
+		return
+	}
+
+	for _, e := range episodes {
+		line := e.Summary
+		if e.Outcome != "" {
+			line += " — " + e.Outcome
+		}
+		fmt.Printf("  %s %s\n", colorize(e.Date.Format("2006-01-02"), ColorYellow), line)
+		if e.Project != "" || len(e.Refs) > 0 {
+			var meta []string
+			if e.Project != "" {
+				meta = append(meta, e.Project)
+			}
+			meta = append(meta, e.Refs...)
+			fmt.Println(colorize("             "+strings.Join(meta, " · "), ColorGray))
+		}
+	}
+
+	fmt.Printf("\n  %s\n", colorize(i18n.T("mem.cmd.timeline.total", len(episodes)), ColorGray))
+	fmt.Println()
+}
+
 func (cli *ChatCLI) runMemoryCompact(ctx context.Context) {
 	mgr := cli.memoryStore.Manager()
 
@@ -689,6 +748,7 @@ func (cli *ChatCLI) getMemorySuggestions(d prompt.Document) []prompt.Suggest {
 			{Text: "projects", Description: i18n.T("mem.cmd.suggest.projects")},
 			{Text: "stats", Description: i18n.T("mem.cmd.suggest.stats")},
 			{Text: "facts", Description: i18n.T("mem.cmd.suggest.facts")},
+			{Text: "timeline", Description: i18n.T("mem.cmd.suggest.timeline")},
 			{Text: "compact", Description: i18n.T("mem.cmd.suggest.compact")},
 		}
 		return prompt.FilterHasPrefix(suggestions, d.GetWordBeforeCursor(), true)

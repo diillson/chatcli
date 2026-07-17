@@ -83,6 +83,10 @@ func (a *memoryPluginAdapter) Forget(match string) (string, error) {
 // filtered), and when HyDE is enabled in /config quality the query is widened
 // through the same hypothesis + vector-cosine stack the system-prompt path
 // uses. An empty query falls back to the broad memory context.
+//
+// Queries carrying a time expression ("what did we do 3 months ago", "o que
+// fizemos em abril") additionally get the matching slice of the episodic
+// timeline prepended — relevance ranking alone cannot answer "when".
 func (a *memoryPluginAdapter) Recall(query string) (string, error) {
 	if a.cli.memoryStore == nil {
 		return "", fmt.Errorf("memory not enabled")
@@ -94,6 +98,23 @@ func (a *memoryPluginAdapter) Recall(query string) (string, error) {
 	defer cancel()
 
 	q := strings.TrimSpace(query)
+
+	var timelineSection string
+	if q != "" {
+		if from, to, cleaned, ok := memory.ParseTemporalRange(q, time.Now()); ok {
+			if eps := conversationalTimeline(a.cli.memoryStore.Manager(), from, to, "", cleaned, 15); len(eps) > 0 {
+				timelineSection = fmt.Sprintf("## Timeline %s → %s\n\n%s",
+					from.Format("2006-01-02"), to.Format("2006-01-02"), memory.FormatEpisodes(eps))
+			}
+			// The remaining non-temporal words are the content query; a purely
+			// temporal question ("what did we do in april?") keeps the original
+			// so fact recall still has something to rank by.
+			if strings.TrimSpace(cleaned) != "" {
+				q = cleaned
+			}
+		}
+	}
+
 	var out string
 	switch {
 	case q == "":
@@ -112,10 +133,111 @@ func (a *memoryPluginAdapter) Recall(query string) (string, error) {
 		}
 	}
 
+	if timelineSection != "" {
+		if strings.TrimSpace(out) == "" {
+			return timelineSection, nil
+		}
+		return timelineSection + "\n\n" + out, nil
+	}
 	if strings.TrimSpace(out) == "" {
 		return i18n.T("mem.tool.recall.empty"), nil
 	}
 	return out, nil
+}
+
+// conversationalTimeline resolves a timeline query whose window was derived
+// from natural language. The leftover words after removing the time
+// expression are conversational chatter as often as content ("what did we DO
+// three months ago", "o que FIZEMOS há 3 meses"), so they filter through the
+// stop-word-aware keyword extractor first — and when even those keywords
+// match nothing inside the window, the window wins and its episodes return
+// unfiltered: the date was the real signal.
+func conversationalTimeline(mgr *memory.Manager, from, to time.Time, project, cleaned string, limit int) []*memory.Episode {
+	kw := strings.Join(memory.ExtractKeywords([]string{cleaned}), " ")
+	eps := mgr.Timeline(from, to, project, kw, limit)
+	if len(eps) == 0 && kw != "" && (!from.IsZero() || !to.IsZero()) {
+		eps = mgr.Timeline(from, to, project, "", limit)
+	}
+	return eps
+}
+
+// Timeline implements plugins.TimelineAccessor — the chronological view of
+// episodic memory behind `@memory timeline`. from/to accept ISO dates
+// (2026-04, 2026-04-12) or natural expressions in EN/PT ("3 months ago",
+// "abril"); when both are empty, a time expression inside query sets the
+// window instead.
+func (a *memoryPluginAdapter) Timeline(project, from, to, query string, limit int) (string, error) {
+	if a.cli.memoryStore == nil {
+		return "", fmt.Errorf("memory not enabled")
+	}
+
+	now := time.Now()
+	q := strings.TrimSpace(query)
+	var fromT, toT time.Time
+	windowFromQuery := false
+	if start, _, ok := parseTimelineBound(from, now); ok {
+		fromT = start
+	}
+	if _, end, ok := parseTimelineBound(to, now); ok {
+		toT = end
+	}
+	if fromT.IsZero() && toT.IsZero() && q != "" {
+		if start, end, cleaned, ok := memory.ParseTemporalRange(q, now); ok {
+			fromT, toT, q = start, end, cleaned
+			windowFromQuery = true
+		}
+	}
+	if limit <= 0 {
+		limit = 30
+	}
+
+	mgr := a.cli.memoryStore.Manager()
+	var eps []*memory.Episode
+	if windowFromQuery {
+		eps = conversationalTimeline(mgr, fromT, toT, project, q, limit)
+	} else {
+		// Explicit from/to/query arguments are the model speaking precisely —
+		// honor them strictly.
+		eps = mgr.Timeline(fromT, toT, project, q, limit)
+	}
+	if len(eps) == 0 {
+		return i18n.T("mem.tool.timeline.empty"), nil
+	}
+	header := fmt.Sprintf("## Timeline (%d episodes", len(eps))
+	if !fromT.IsZero() || !toT.IsZero() {
+		header += fmt.Sprintf(", %s → %s", boundLabel(fromT), boundLabel(toT))
+	}
+	header += ")"
+	return header + "\n\n" + memory.FormatEpisodes(eps), nil
+}
+
+// parseTimelineBound resolves a single from/to input into its [start, end)
+// day- or month-window. Accepts ISO day, ISO month, and the same natural
+// expressions ParseTemporalRange understands.
+func parseTimelineBound(s string, now time.Time) (time.Time, time.Time, bool) {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return time.Time{}, time.Time{}, false
+	}
+	if t, err := time.ParseInLocation("2006-01-02", s, now.Location()); err == nil {
+		return t, t.AddDate(0, 0, 1), true
+	}
+	if t, err := time.ParseInLocation("2006-01", s, now.Location()); err == nil {
+		return t, t.AddDate(0, 1, 0), true
+	}
+	if from, to, _, ok := memory.ParseTemporalRange(s, now); ok {
+		return from, to, true
+	}
+	return time.Time{}, time.Time{}, false
+}
+
+// boundLabel renders a window bound for the timeline header, tolerating the
+// open ("…") side.
+func boundLabel(t time.Time) string {
+	if t.IsZero() {
+		return "…"
+	}
+	return t.Format("2006-01-02")
 }
 
 // GraphMap and GraphNeighbors expose the knowledge graph as a relational VIEW of

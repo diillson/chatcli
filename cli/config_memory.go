@@ -41,6 +41,10 @@ func (cli *ChatCLI) showConfigMemory() {
 		if longTerm := cli.memoryStore.ReadLongTerm(); longTerm != "" {
 			kv(p, i18n.T("cfg.kv.long_term_size"), fmt.Sprintf("%d bytes", len(longTerm)))
 		}
+		if mgr := cli.memoryStore.Manager(); mgr != nil && mgr.Episodes != nil {
+			kv(p, i18n.T("cfg.kv.memory.episodes"),
+				i18n.T("cfg.kv.memory.episodes_val", mgr.Episodes.Count(), mgr.GetConfig().MaxEpisodesCount))
+		}
 	} else {
 		kv(p, i18n.T("cfg.kv.memory_store"), i18n.T("cfg.val.not_initialized"))
 	}

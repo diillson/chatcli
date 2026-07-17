@@ -140,6 +140,7 @@ type Config struct {
 	CompactionInterval int     `json:"compaction_interval_h"` // hours, default 24
 	RetrievalBudget    int     `json:"retrieval_budget"`      // max chars for system prompt, default 4000
 	DecayHalfLifeDays  float64 `json:"decay_half_life_days"`  // default 30
+	MaxEpisodesCount   int     `json:"max_episodes_count"`    // episodic timeline cap, default 2000
 
 	// Blended-ranking tunables (HyDE retrieval path). These govern how the
 	// semantic (cosine), lexical (keyword) and temporal (recency) signals are
@@ -162,6 +163,7 @@ func DefaultConfig() Config {
 		CompactionInterval: 24,
 		RetrievalBudget:    4000,
 		DecayHalfLifeDays:  30.0,
+		MaxEpisodesCount:   2000,
 		MinCosineScore:     0.25,
 		VectorTopK:         12,
 		BackfillBatchMax:   500,
