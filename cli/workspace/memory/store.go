@@ -6,8 +6,10 @@ import (
 	"fmt"
 	"os"
 	"sort"
+	"strconv"
 	"strings"
 	"sync/atomic"
+	"time"
 
 	"go.uber.org/zap"
 
@@ -30,6 +32,7 @@ type Manager struct {
 	Patterns *PatternDetector
 	Daily    *DailyNoteStore
 	Rollups  *RollupStore
+	Episodes *EpisodeStore
 
 	compactor *Compactor
 	retriever *RelevanceRetriever
@@ -69,10 +72,12 @@ func NewManager(memoryDir string, config Config, logger *zap.Logger) *Manager {
 	m.Patterns = NewPatternDetector(memoryDir, logger)
 	m.Daily = NewDailyNoteStore(memoryDir, logger)
 	m.Rollups = NewRollupStore(memoryDir, logger)
+	m.Episodes = NewEpisodeStore(memoryDir, config.MaxEpisodesCount, logger)
 
 	m.compactor = NewCompactor(m.Facts, m.Daily, config, memoryDir, logger)
 	m.retriever = NewRelevanceRetriever(m.Facts, m.Profile, m.Topics, m.Projects, m.Patterns, m.Daily, config)
 	m.retriever.SetRollups(m.Rollups)
+	m.retriever.SetEpisodes(m.Episodes)
 	m.migration = NewMigration(memoryDir, m.Facts, logger)
 
 	// Auto-migrate if needed
@@ -160,6 +165,13 @@ func (m *Manager) GetMemoryIndex(budget int) string {
 	if m.Facts != nil {
 		if all := m.Facts.GetAll(); len(all) > 0 {
 			lines = append(lines, "Facts: "+factTally(all))
+		}
+	}
+	if m.Episodes != nil {
+		// Model-facing English like the sibling digest lines above — this is
+		// the prompt-injected memory map, not terminal UI.
+		if n := m.Episodes.Count(); n > 0 {
+			lines = append(lines, "Episodes: "+strconv.Itoa(n)+" dated work entries (query with @memory timeline)")
 		}
 	}
 
@@ -470,12 +482,13 @@ type ExtractionSummary struct {
 	ProfileUpdated   bool
 	TopicsRecorded   int
 	ProjectsUpserted int
+	EpisodesAdded    int
 }
 
 // IsEmpty reports whether nothing was persisted.
 func (s ExtractionSummary) IsEmpty() bool {
 	return !s.DailyWritten && s.FactsAdded == 0 && !s.ProfileUpdated &&
-		s.TopicsRecorded == 0 && s.ProjectsUpserted == 0
+		s.TopicsRecorded == 0 && s.ProjectsUpserted == 0 && s.EpisodesAdded == 0
 }
 
 // ProcessExtraction processes the output from the memory extraction LLM,
@@ -488,7 +501,7 @@ func (m *Manager) ProcessExtraction(response string) {
 
 // ProcessExtractionResult is ProcessExtraction with a summary of what changed.
 func (m *Manager) ProcessExtractionResult(response string) ExtractionSummary {
-	daily, longTerm, profileUpdates, topics, projects := parseEnhancedResponse(response)
+	daily, longTerm, profileUpdates, topics, projects, episodes := parseEnhancedResponse(response)
 
 	var sum ExtractionSummary
 
@@ -525,7 +538,65 @@ func (m *Manager) ProcessExtractionResult(response string) ExtractionSummary {
 		}
 	}
 
+	for _, line := range episodes {
+		ep := parseEpisodeLine(line)
+		if ep.Summary == "" {
+			continue
+		}
+		ep.Project = m.workspaceDir
+		ep.Source = ProvenanceExtraction
+		if m.Episodes.Add(ep) {
+			sum.EpisodesAdded++
+		}
+	}
+
 	return sum
+}
+
+// parseEpisodeLine parses one "summary :: outcome :: ref, ref" bullet from
+// the EPISODES extraction section. Outcome and refs are optional; a bare
+// summary line is a valid episode.
+func parseEpisodeLine(line string) Episode {
+	parts := strings.SplitN(line, "::", 3)
+	ep := Episode{Summary: strings.TrimSpace(parts[0])}
+	if len(parts) > 1 {
+		ep.Outcome = strings.TrimSpace(parts[1])
+	}
+	if len(parts) > 2 {
+		for _, r := range strings.Split(parts[2], ",") {
+			if r = strings.TrimSpace(r); r != "" {
+				ep.Refs = append(ep.Refs, r)
+			}
+		}
+	}
+	return ep
+}
+
+// parseBulletLines splits section content into trimmed non-empty lines with
+// any leading bullet markers removed.
+func parseBulletLines(content string) []string {
+	rawLines := strings.Split(content, "\n")
+	out := make([]string, 0, len(rawLines))
+	for _, line := range rawLines {
+		line = strings.TrimSpace(line)
+		line = strings.TrimPrefix(line, "- ")
+		line = strings.TrimPrefix(line, "* ")
+		line = strings.TrimSpace(line)
+		if line == "" || isNothingNew(line) {
+			continue
+		}
+		out = append(out, line)
+	}
+	return out
+}
+
+// Timeline returns the chronological episode view, filtered by an optional
+// [from, to) window, project substring and content query. See EpisodeStore.Range.
+func (m *Manager) Timeline(from, to time.Time, project, query string, limit int) []*Episode {
+	if m.Episodes == nil {
+		return nil
+	}
+	return m.Episodes.Range(from, to, project, query, limit)
 }
 
 // RecordInteraction records a usage event.
@@ -585,7 +656,7 @@ func (m *Manager) Stats() map[string]interface{} {
 // --- Response Parsing ---
 
 // parseEnhancedResponse parses the enhanced extraction prompt response.
-func parseEnhancedResponse(response string) (daily, longTerm string, profile map[string]string, topics map[string]string, projects map[string]string) {
+func parseEnhancedResponse(response string) (daily, longTerm string, profile map[string]string, topics map[string]string, projects map[string]string, episodes []string) {
 	profile = make(map[string]string)
 	projects = make(map[string]string)
 	topics = make(map[string]string)
@@ -604,6 +675,7 @@ func parseEnhancedResponse(response string) (daily, longTerm string, profile map
 		{"PROFILE", findSection(upper, "PROFILE")},
 		{"TOPICS", findSection(upper, "TOPICS")},
 		{"PROJECTS", findSection(upper, "PROJECTS")},
+		{"EPISODES", findSection(upper, "EPISODES")},
 	}
 
 	// Filter found sections and sort by position (stable: PROFILE_UPDATE and
@@ -656,6 +728,8 @@ func parseEnhancedResponse(response string) (daily, longTerm string, profile map
 			topics = parseTopics(content)
 		case "PROJECTS":
 			projects = parseKeyValues(content)
+		case "EPISODES":
+			episodes = parseBulletLines(content)
 		}
 	}
 

@@ -81,6 +81,9 @@ func (c Config) sanitized() Config {
 	if c.DecayHalfLifeDays <= 0 {
 		c.DecayHalfLifeDays = 30.0
 	}
+	if c.MaxEpisodesCount <= 0 {
+		c.MaxEpisodesCount = 2000
+	}
 	// Cosine ∈ [-1,1]; a floor outside [0,1) is nonsensical for text
 	// embeddings and would either admit anti-correlated junk or reject
 	// everything, so fall back to the default.

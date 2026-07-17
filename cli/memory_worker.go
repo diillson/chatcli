@@ -334,6 +334,20 @@ In the ## TOPICS section, prefer one topic per line as "name: <one-line summary
 of what was discussed or decided about it>" instead of bare names, so the topic
 carries what was learned. A bare comma-separated list of names is still accepted.`
 
+// episodeDirective adds the EPISODES section to the extraction pass — the
+// durable work timeline behind "what did we do three months ago?". Rides as
+// an appended directive (like topicSummaryDirective) so the exported base
+// prompt constant stays byte-stable.
+const episodeDirective = `
+## EPISODES
+Also output an ## EPISODES section: one line per COMPLETED unit of real work
+in this segment, as
+- <what was done, one sentence> :: <outcome/result> :: <refs: files, PRs, commands (comma-separated)>
+Outcome and refs are optional — a bare summary line is fine. Only concrete work
+items (bug fixed, feature built, decision made, incident resolved) — never
+greetings, questions or plans that didn't happen. Skip the section entirely if
+no work was completed.`
+
 func (mw *memoryWorker) extractAndSave(ctx context.Context, messages []models.Message) error {
 	if mw.cli.memoryStore == nil {
 		return fmt.Errorf("memory store not available")
@@ -348,7 +362,7 @@ func (mw *memoryWorker) extractAndSave(ctx context.Context, messages []models.Me
 	// Topic threading rides as an appended directive so the base extraction
 	// prompt constant stays byte-stable (an exported const value change reads as
 	// an incompatible API change); the parser accepts both formats.
-	instructions := memory.EnhancedExtractionPromptV3 + "\n" + topicSummaryDirective
+	instructions := memory.EnhancedExtractionPromptV3 + "\n" + topicSummaryDirective + "\n" + episodeDirective
 	if evolveMode != selfEvolveOff {
 		instructions += "\n" + selfEvolveSkillDirective
 		// Inject only the compact skill index (names + descriptions), so the

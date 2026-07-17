@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"time"
 	"unicode/utf8"
 )
 
@@ -16,7 +17,8 @@ type RelevanceRetriever struct {
 	projects     *ProjectTracker
 	patterns     *PatternDetector
 	daily        *DailyNoteStore
-	rollups      *RollupStore // optional; nil → no trajectory section
+	rollups      *RollupStore  // optional; nil → no trajectory section
+	episodes     *EpisodeStore // optional; nil → no episode timeline section
 	config       Config
 	workspaceDir string // current session workspace for disambiguation
 }
@@ -47,6 +49,12 @@ func NewRelevanceRetriever(
 // index attaches) so the constructor signature stays stable.
 func (r *RelevanceRetriever) SetRollups(rs *RollupStore) {
 	r.rollups = rs
+}
+
+// SetEpisodes attaches the episodic timeline so assemble can add a recent-
+// episodes section. Same additive wiring as SetRollups.
+func (r *RelevanceRetriever) SetEpisodes(es *EpisodeStore) {
+	r.episodes = es
 }
 
 // SetWorkspaceDir updates the current workspace directory for disambiguation.
@@ -222,16 +230,19 @@ func (r *RelevanceRetriever) assemble(rankedFacts []*Fact) string {
 		}
 	}
 
+	// 5b. Recent episodes — the durable work timeline. Complements daily
+	// notes (which expire) with permanent dated entries; capped tight so it
+	// informs without crowding out facts.
+	if section, fits := r.episodesSection(remaining); fits {
+		sections = append(sections, section)
+		remaining -= len(section)
+	}
+
 	// 6. Long-range trajectory (latest monthly + recent weekly digests) —
 	// the narrative daily notes lose after their 30-day retention.
-	if r.rollups != nil && remaining > 250 {
-		if traj := r.rollups.FormatTrajectory(remaining / 4); traj != "" {
-			section := "## Trajectory\n\n" + traj
-			if len(section) < remaining {
-				sections = append(sections, section)
-				remaining -= len(section)
-			}
-		}
+	if section, fits := r.trajectorySection(remaining); fits {
+		sections = append(sections, section)
+		remaining -= len(section)
 	}
 
 	// 7. Usage patterns (brief, if budget allows)
@@ -248,6 +259,40 @@ func (r *RelevanceRetriever) assemble(rankedFacts []*Fact) string {
 		return ""
 	}
 	return strings.Join(sections, "\n\n")
+}
+
+// episodesSection renders the recent-episodes block when the store is wired,
+// the budget allows and there is anything to show.
+func (r *RelevanceRetriever) episodesSection(remaining int) (string, bool) {
+	if r.episodes == nil || remaining <= 250 {
+		return "", false
+	}
+	epText := FormatEpisodes(r.episodes.Recent(14*24*time.Hour, 5))
+	if epText == "" {
+		return "", false
+	}
+	section := "## Recent Episodes\n\n" + epText
+	if len(section) >= remaining {
+		return "", false
+	}
+	return section, true
+}
+
+// trajectorySection renders the long-range rollup block under the same
+// wiring/budget/content rules as episodesSection.
+func (r *RelevanceRetriever) trajectorySection(remaining int) (string, bool) {
+	if r.rollups == nil || remaining <= 250 {
+		return "", false
+	}
+	traj := r.rollups.FormatTrajectory(remaining / 4)
+	if traj == "" {
+		return "", false
+	}
+	section := "## Trajectory\n\n" + traj
+	if len(section) >= remaining {
+		return "", false
+	}
+	return section, true
 }
 
 // RetrieveAll returns the full memory dump (used for /memory longterm).

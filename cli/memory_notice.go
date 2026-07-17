@@ -62,6 +62,9 @@ func formatMemoryNotice(s memory.ExtractionSummary) string {
 	if s.TopicsRecorded > 0 {
 		parts = append(parts, i18n.T("mem.notice.topics", s.TopicsRecorded))
 	}
+	if s.EpisodesAdded > 0 {
+		parts = append(parts, i18n.T("mem.notice.episodes", s.EpisodesAdded))
+	}
 	if len(parts) == 0 {
 		return ""
 	}

@@ -171,9 +171,12 @@ Go, Testing
 
 ## PROJECTS
 project_name=myapp
-project_status=active`
+project_status=active
 
-	daily, longTerm, profile, topics, projects := parseEnhancedResponse(response)
+## EPISODES
+- Fixed the OAuth refresh loop :: shipped as PR 1047 :: llm/anthropic/auth.go`
+
+	daily, longTerm, profile, topics, projects, episodes := parseEnhancedResponse(response)
 
 	if !strings.Contains(daily, "Read config") {
 		t.Errorf("expected daily content, got %q", daily)
@@ -190,12 +193,15 @@ project_status=active`
 	if projects["project_name"] != "myapp" {
 		t.Errorf("expected project_name=myapp, got %v", projects)
 	}
+	if len(episodes) != 1 || !strings.Contains(episodes[0], "OAuth refresh loop") {
+		t.Errorf("expected 1 episode line, got %v", episodes)
+	}
 }
 
 func TestParseEnhancedResponse_NothingNew(t *testing.T) {
-	daily, longTerm, profile, topics, projects := parseEnhancedResponse("NOTHING_NEW")
+	daily, longTerm, profile, topics, projects, episodes := parseEnhancedResponse("NOTHING_NEW")
 
-	if daily != "" || longTerm != "" || len(profile) > 0 || len(topics) > 0 || len(projects) > 0 {
+	if daily != "" || longTerm != "" || len(profile) > 0 || len(topics) > 0 || len(projects) > 0 || len(episodes) > 0 {
 		t.Error("expected all empty for NOTHING_NEW")
 	}
 }
