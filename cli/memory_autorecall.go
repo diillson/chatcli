@@ -1,0 +1,93 @@
+/*
+ * ChatCLI - Command Line Interface for LLM interaction
+ * Copyright (c) 2024 Edilson Freitas
+ * License: Apache-2.0
+ */
+/*
+ * ChatCLI - memory_autorecall.go
+ *
+ * Proactive recall for the "index" memory mode. The pull model keeps per-turn
+ * cost bounded, but it relies on the model CHOOSING to call @memory recall —
+ * and models routinely skip the call, answering with a 600-char digest while
+ * the relevant gotcha sits unread in the fact index. Auto-recall closes that
+ * gap: each agent/coder turn, the hints already extracted from recent
+ * messages rank the fact index, and the top few matches (tiny, budget-capped)
+ * ride into the prompt alongside the digest.
+ *
+ * Cache discipline: the block is hint-driven, so it changes turn to turn. It
+ * is therefore injected into the UNCACHED trailing block (with the wall-clock
+ * dynamic context), never into the stable workspace block — a volatile line
+ * placed early would poison every cached block after it (see the chat
+ * pipeline's stable-prefix/volatile-suffix contract).
+ *
+ * Gated by CHATCLI_MEMORY_AUTORECALL (default on; only meaningful in "index"
+ * mode — "full" already injects the whole retrieval, "off" injects nothing).
+ */
+package cli
+
+import (
+	"os"
+	"strings"
+)
+
+const (
+	// autoRecallMaxFacts caps how many facts ride per turn — this is a nudge,
+	// not a retrieval; the model pulls detail via @memory recall.
+	autoRecallMaxFacts = 3
+
+	// autoRecallBudget caps the block size in bytes.
+	autoRecallBudget = 700
+)
+
+// autoRecallHeader is an English model-facing constant, like memoryRecallHint.
+const autoRecallHeader = "[MEMORY AUTO-RECALL]\n" +
+	"Long-term facts matching the current task (pull full detail or more with @memory recall):\n"
+
+// memoryAutoRecallEnabled reads CHATCLI_MEMORY_AUTORECALL; unset means enabled.
+func memoryAutoRecallEnabled() bool {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv("CHATCLI_MEMORY_AUTORECALL"))) {
+	case "false", "0", "off", "no", "disabled":
+		return false
+	}
+	return true
+}
+
+// memoryAutoRecallBlock ranks the fact index against the turn's hints and
+// renders the top matches as a compact block, or "" when there is nothing
+// relevant to say. Injected facts are marked accessed so reinforcement works
+// exactly as it does for full-mode retrieval.
+func (cli *ChatCLI) memoryAutoRecallBlock(hints []string) string {
+	if !memoryAutoRecallEnabled() || cli.memoryStore == nil || len(hints) == 0 {
+		return ""
+	}
+	mgr := cli.memoryStore.Manager()
+	if mgr == nil || mgr.Facts == nil {
+		return ""
+	}
+
+	facts := mgr.Facts.Search(hints)
+	if len(facts) == 0 {
+		return ""
+	}
+	if len(facts) > autoRecallMaxFacts {
+		facts = facts[:autoRecallMaxFacts]
+	}
+
+	var b strings.Builder
+	b.WriteString(autoRecallHeader)
+	accessed := make([]string, 0, len(facts))
+	for _, f := range facts {
+		line := "- [" + f.Category + "] " + f.Content
+		if b.Len()+len(line)+1 > autoRecallBudget {
+			break
+		}
+		b.WriteString(line)
+		b.WriteByte('\n')
+		accessed = append(accessed, f.ID)
+	}
+	if len(accessed) == 0 {
+		return ""
+	}
+	mgr.Facts.MarkAccessed(accessed)
+	return strings.TrimRight(b.String(), "\n")
+}

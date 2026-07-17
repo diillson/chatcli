@@ -33,6 +33,14 @@ func (cli *ChatCLI) showConfigMemory() {
 	}
 	kv(p, "CHATCLI_MEMORY_MODE", desc)
 	kv(p, "CHATCLI_MEMORY_ENABLED", envBool("CHATCLI_MEMORY_ENABLED"))
+	autoRecallVal := i18n.T("cfg.val.enabled")
+	if !memoryAutoRecallEnabled() {
+		autoRecallVal = i18n.T("cfg.val.disabled")
+	}
+	if os.Getenv("CHATCLI_MEMORY_AUTORECALL") == "" {
+		autoRecallVal = defaultMarker + autoRecallVal
+	}
+	kv(p, "CHATCLI_MEMORY_AUTORECALL", autoRecallVal)
 
 	if cli.memoryStore != nil {
 		if idx := cli.memoryStore.GetMemoryIndex(0); idx != "" {
