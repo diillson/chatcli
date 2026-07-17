@@ -21,6 +21,7 @@ package cli
 import (
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -33,13 +34,29 @@ const (
 	// to start with it are indistinguishable by design (docs call it out).
 	autosavePrefix = "autosave-"
 
-	// autosaveKeep bounds how many autosaves survive pruning.
-	autosaveKeep = 10
+	// autosaveKeepDefault bounds how many machine sessions survive pruning.
+	// Retention is primarily TIME-based (the 90-day machine-session TTL, vs
+	// Claude Code's 30-day default) — this count is a generous backstop
+	// against pathological accumulation, not the working limit, so raw
+	// session knowledge is not lost to an aggressive cap.
+	autosaveKeepDefault = 200
 
 	// autosaveMinMessages skips trivial sessions: one prompt and its answer
 	// are worth keeping, a lone /command or an empty boot is not.
 	autosaveMinMessages = 2
 )
+
+// sessionAutosaveKeep resolves the machine-session keep-count backstop.
+// CHATCLI_SESSION_AUTOSAVE_KEEP overrides the default; non-positive or
+// malformed values fall back.
+func sessionAutosaveKeep() int {
+	if v := strings.TrimSpace(os.Getenv("CHATCLI_SESSION_AUTOSAVE_KEEP")); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			return n
+		}
+	}
+	return autosaveKeepDefault
+}
 
 // sessionAutosaveEnabled reads CHATCLI_SESSION_AUTOSAVE; unset means enabled.
 func sessionAutosaveEnabled() bool {
@@ -82,8 +99,8 @@ func (cli *ChatCLI) autosaveSessionOnExit() {
 	cli.pruneAutosaves()
 }
 
-// pruneAutosaves bounds the REPL autosave set to the newest autosaveKeep
+// pruneAutosaves bounds the REPL autosave set to the newest keep-count
 // files, via the shared machine-session pruner.
 func (cli *ChatCLI) pruneAutosaves() {
-	cli.sessionManager.PruneSessionsByPrefix(autosavePrefix, autosaveKeep)
+	cli.sessionManager.PruneSessionsByPrefix(autosavePrefix, sessionAutosaveKeep())
 }

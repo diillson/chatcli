@@ -80,8 +80,12 @@ func TestAutosaveOnExit_SkipsTrivialAndDisabled(t *testing.T) {
 }
 
 func TestPruneAutosaves_KeepsNewest(t *testing.T) {
+	// The keep-count backstop is env-tunable; a small value keeps the test
+	// cheap and covers the override path.
+	t.Setenv("CHATCLI_SESSION_AUTOSAVE_KEEP", "10")
+	keep := sessionAutosaveKeep()
 	cli := newAutosaveCLI(t, 2)
-	for i := 0; i < autosaveKeep+3; i++ {
+	for i := 0; i < keep+3; i++ {
 		name := fmt.Sprintf("%s202601%02d-120000", autosavePrefix, i+1)
 		if err := cli.sessionManager.SaveSessionV2(name, cli.buildSessionData()); err != nil {
 			t.Fatal(err)
@@ -90,12 +94,27 @@ func TestPruneAutosaves_KeepsNewest(t *testing.T) {
 	cli.pruneAutosaves()
 
 	autos := autosaveNames(t, cli)
-	if len(autos) != autosaveKeep {
-		t.Fatalf("expected %d autosaves after prune, got %d", autosaveKeep, len(autos))
+	if len(autos) != keep {
+		t.Fatalf("expected %d autosaves after prune, got %d", keep, len(autos))
 	}
 	for _, n := range autos {
 		if n == autosavePrefix+"20260101-120000" || n == autosavePrefix+"20260102-120000" || n == autosavePrefix+"20260103-120000" {
 			t.Errorf("oldest autosave %s must have been pruned", n)
 		}
+	}
+}
+
+func TestSessionAutosaveKeep_DefaultAndOverride(t *testing.T) {
+	t.Setenv("CHATCLI_SESSION_AUTOSAVE_KEEP", "")
+	if got := sessionAutosaveKeep(); got != autosaveKeepDefault {
+		t.Errorf("default keep must be %d, got %d", autosaveKeepDefault, got)
+	}
+	t.Setenv("CHATCLI_SESSION_AUTOSAVE_KEEP", "500")
+	if got := sessionAutosaveKeep(); got != 500 {
+		t.Errorf("override must apply, got %d", got)
+	}
+	t.Setenv("CHATCLI_SESSION_AUTOSAVE_KEEP", "banana")
+	if got := sessionAutosaveKeep(); got != autosaveKeepDefault {
+		t.Errorf("malformed override must fall back, got %d", got)
 	}
 }

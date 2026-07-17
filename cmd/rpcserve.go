@@ -313,10 +313,23 @@ func (b *rpcBackend) promptPlain(ctx context.Context, session, text string, hist
 	return reply, nil
 }
 
-// mcpAutosaveKeep bounds how many distinct mcp- session mirrors survive
-// pruning — enough for a handful of concurrent MCP clients without letting
-// unique session ids accrete forever.
-const mcpAutosaveKeep = 20
+// mcpAutosaveKeepDefault bounds how many distinct mcp- session mirrors
+// survive pruning. Mirrors are rolling (one file per session id, updated in
+// place), so this counts distinct MCP conversations, not turns. Like the
+// REPL autosaves, retention is primarily the 90-day TTL; the count is a
+// generous backstop, overridable via CHATCLI_SESSION_AUTOSAVE_KEEP.
+const mcpAutosaveKeepDefault = 200
+
+// mcpAutosaveKeep resolves the mirror keep-count (shared env with the REPL
+// autosave backstop so operators tune one knob).
+func mcpAutosaveKeep() int {
+	if v := strings.TrimSpace(os.Getenv("CHATCLI_SESSION_AUTOSAVE_KEEP")); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			return n
+		}
+	}
+	return mcpAutosaveKeepDefault
+}
 
 // mcpSessionAutosaveEnabled resolves the MCP autosave gate. An explicit
 // CHATCLI_MCP_SESSION_AUTOSAVE always wins; otherwise the global
@@ -357,7 +370,7 @@ func (b *rpcBackend) autosaveSession(session string, hist []models.Message) {
 		return
 	}
 	if b.store.SaveSessionRPC("mcp-"+session, hist) == nil {
-		b.store.PruneSessionsRPC("mcp-", mcpAutosaveKeep)
+		b.store.PruneSessionsRPC("mcp-", mcpAutosaveKeep())
 	}
 }
 

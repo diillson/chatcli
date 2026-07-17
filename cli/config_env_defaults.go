@@ -227,6 +227,7 @@ var envDefaults = map[string]envDefault{
 	"CHATCLI_MCP_RESOURCES":                 {Value: "on", Source: "cli/rpc_support_resources.go (chatcli:// read-only resources: on|off)"},
 	"CHATCLI_MCP_MAX_HISTORY":               {Value: "0", Source: "cmd/rpcserve.go (0 = token-aware compaction bounds the history)"},
 	"CHATCLI_MCP_SESSION_AUTOSAVE":          {Value: "true", IsBool: true, Source: "cmd/rpcserve.go (persist live MCP sessions as mcp-<session>; unset follows CHATCLI_SESSION_AUTOSAVE)"},
+	"CHATCLI_SESSION_AUTOSAVE_KEEP":         {Value: "200", Source: "cli/cli_session_autosave.go (machine-session keep-count backstop; TTL is the primary retention)"},
 	"CHATCLI_MCP_HUB":                       {Value: "on", Source: "cmd/rpcserve.go (join the conversation hub in resume mode: on|off)"},
 	"CHATCLI_MCP_HUB_PRINCIPAL":             {Value: "(hub default)", Source: "cmd/rpcserve.go (isolate the MCP thread under another principal)"},
 	"CHATCLI_ALLOW_UNSIGNED_PLUGINS":        {Value: "false", IsBool: true, Source: "plugin manager"},
