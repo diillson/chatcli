@@ -78,6 +78,7 @@ func NewManager(memoryDir string, config Config, logger *zap.Logger) *Manager {
 	m.retriever = NewRelevanceRetriever(m.Facts, m.Profile, m.Topics, m.Projects, m.Patterns, m.Daily, config)
 	m.retriever.SetRollups(m.Rollups)
 	m.retriever.SetEpisodes(m.Episodes)
+	m.Rollups.SetEpisodes(m.Episodes)
 	m.migration = NewMigration(memoryDir, m.Facts, logger)
 
 	// Auto-migrate if needed
