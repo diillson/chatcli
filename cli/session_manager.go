@@ -138,6 +138,112 @@ func (sm *SessionManager) CleanExpiredSessions() int {
 	return cleaned
 }
 
+// machineSessionPrefixes name the session files ChatCLI creates on its own
+// (REPL autosave-on-exit and MCP per-session autosave). Lifecycle policies —
+// prune-by-count, TTL expiry — apply ONLY to these: sessions the USER named
+// are deliberate checkpoints and are never deleted automatically. The
+// distilled layers (facts, episodes, rollups) survive any session cleanup,
+// so pruning bounds disk and search cost without degrading recall.
+var machineSessionPrefixes = []string{"autosave-", "mcp-"}
+
+// isMachineSession reports whether name carries a machine prefix.
+func isMachineSession(name string) bool {
+	for _, p := range machineSessionPrefixes {
+		if strings.HasPrefix(name, p) {
+			return true
+		}
+	}
+	return false
+}
+
+// PruneSessionsByPrefix deletes the OLDEST sessions matching prefix beyond
+// keep, ordered by file modification time (newest survive). Returns how many
+// were removed. Safe on any cadence; missing dir is not an error.
+func (sm *SessionManager) PruneSessionsByPrefix(prefix string, keep int) int {
+	if keep < 0 {
+		keep = 0
+	}
+	entries, err := os.ReadDir(sm.sessionsDir)
+	if err != nil {
+		return 0
+	}
+	type aged struct {
+		name string
+		mod  time.Time
+	}
+	matches := make([]aged, 0, len(entries))
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".json") {
+			continue
+		}
+		name := strings.TrimSuffix(e.Name(), ".json")
+		if !strings.HasPrefix(name, prefix) {
+			continue
+		}
+		info, err := e.Info()
+		if err != nil {
+			continue
+		}
+		matches = append(matches, aged{name: name, mod: info.ModTime()})
+	}
+	if len(matches) <= keep {
+		return 0
+	}
+	sort.Slice(matches, func(i, j int) bool { return matches[i].mod.Before(matches[j].mod) })
+	removed := 0
+	for _, m := range matches[:len(matches)-keep] {
+		if err := sm.DeleteSession(m.name); err == nil {
+			removed++
+		}
+	}
+	if removed > 0 {
+		sm.logger.Info("Machine sessions pruned", zap.String("prefix", prefix), zap.Int("removed", removed))
+	}
+	return removed
+}
+
+// CleanExpiredMachineSessions applies the TTL (CHATCLI_SESSION_TTL, default
+// 90 days) to MACHINE-created sessions only — autosaves and MCP session
+// mirrors. User-named sessions are never expired: a checkpoint someone saved
+// on purpose must outlive any retention policy. This is the lifecycle hook
+// the boot paths call; the broader CleanExpiredSessions remains available
+// for operators who explicitly want full expiry.
+func (sm *SessionManager) CleanExpiredMachineSessions() int {
+	ttlDays := 90
+	if v := os.Getenv("CHATCLI_SESSION_TTL"); v != "" {
+		if n, err := strconv.Atoi(strings.TrimSuffix(v, "d")); err == nil && n > 0 {
+			ttlDays = n
+		}
+	}
+	cutoff := time.Now().Add(-time.Duration(ttlDays) * 24 * time.Hour)
+
+	entries, err := os.ReadDir(sm.sessionsDir)
+	if err != nil {
+		return 0
+	}
+	cleaned := 0
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".json") {
+			continue
+		}
+		name := strings.TrimSuffix(entry.Name(), ".json")
+		if !isMachineSession(name) {
+			continue
+		}
+		info, err := entry.Info()
+		if err != nil || !info.ModTime().Before(cutoff) {
+			continue
+		}
+		if err := os.Remove(filepath.Join(sm.sessionsDir, entry.Name())); err == nil {
+			cleaned++
+		}
+	}
+	if cleaned > 0 {
+		sm.logger.Info("Expired machine sessions cleaned", zap.Int("removed", cleaned), zap.Int("ttl_days", ttlDays))
+	}
+	return cleaned
+}
+
 // SaveSession salva o histórico da conversa em um arquivo JSON.
 // Mantém assinatura original para compatibilidade com remote client.
 func (sm *SessionManager) SaveSession(name string, history []models.Message) error {

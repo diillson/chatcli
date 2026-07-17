@@ -467,6 +467,25 @@ func (cli *ChatCLI) DeleteSessionRPC(name string) error {
 	return cli.sessionManager.DeleteSession(name)
 }
 
+// PruneSessionsRPC bounds a machine-session set (e.g. the mcp- mirrors) to
+// the newest keep files. No-op when the store is unavailable.
+func (cli *ChatCLI) PruneSessionsRPC(prefix string, keep int) int {
+	if cli.sessionManager == nil {
+		return 0
+	}
+	return cli.sessionManager.PruneSessionsByPrefix(prefix, keep)
+}
+
+// CleanExpiredMachineSessionsRPC applies the machine-session TTL. Called by
+// the MCP/ACP server at boot so long-running daemons get the same bounded
+// lifecycle the REPL applies on start.
+func (cli *ChatCLI) CleanExpiredMachineSessionsRPC() int {
+	if cli.sessionManager == nil {
+		return 0
+	}
+	return cli.sessionManager.CleanExpiredMachineSessions()
+}
+
 // SearchSessionsRPC runs the full-text search across the saved-session store
 // and renders the hits compactly (session name, match count, snippets) for a
 // model-facing tool result.

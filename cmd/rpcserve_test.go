@@ -198,6 +198,8 @@ func (s *fakeStore) DeleteSessionRPC(name string) error {
 	return nil
 }
 
+func (s *fakeStore) PruneSessionsRPC(string, int) int { return 0 }
+
 func sessionBackend(store sessionStore) *rpcBackend {
 	return &rpcBackend{store: store, sessions: map[string][]models.Message{}}
 }

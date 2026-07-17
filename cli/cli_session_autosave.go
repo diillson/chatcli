@@ -21,7 +21,6 @@ package cli
 import (
 	"fmt"
 	"os"
-	"sort"
 	"strings"
 	"time"
 
@@ -83,26 +82,8 @@ func (cli *ChatCLI) autosaveSessionOnExit() {
 	cli.pruneAutosaves()
 }
 
-// pruneAutosaves deletes the oldest autosave sessions past the keep-count.
-// Timestamped names sort lexicographically by age, so no stat calls needed.
+// pruneAutosaves bounds the REPL autosave set to the newest autosaveKeep
+// files, via the shared machine-session pruner.
 func (cli *ChatCLI) pruneAutosaves() {
-	names, err := cli.sessionManager.ListSessions()
-	if err != nil {
-		return
-	}
-	autos := make([]string, 0, len(names))
-	for _, n := range names {
-		if strings.HasPrefix(n, autosavePrefix) {
-			autos = append(autos, n)
-		}
-	}
-	if len(autos) <= autosaveKeep {
-		return
-	}
-	sort.Strings(autos) // ascending → oldest first
-	for _, n := range autos[:len(autos)-autosaveKeep] {
-		if err := cli.sessionManager.DeleteSession(n); err != nil {
-			cli.logger.Debug("autosave prune failed", zap.String("session", n), zap.Error(err))
-		}
-	}
+	cli.sessionManager.PruneSessionsByPrefix(autosavePrefix, autosaveKeep)
 }

@@ -95,6 +95,10 @@ func runRPC(kind string, mgr manager.LLMManager, logger *zap.Logger) error {
 	}
 	if chatCLI != nil {
 		backend.store = chatCLI
+		// Same bounded lifecycle the REPL applies on start: expire
+		// machine-created sessions (autosaves, mcp- mirrors) past their TTL.
+		// Background — boot never waits on disk.
+		go chatCLI.CleanExpiredMachineSessionsRPC()
 	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -181,6 +185,7 @@ type sessionStore interface {
 	LoadSessionRPC(name string) ([]models.Message, error)
 	ListSessionsRPC() ([]string, error)
 	DeleteSessionRPC(name string) error
+	PruneSessionsRPC(prefix string, keep int) int
 }
 
 // rpcBackend implements rpcserve.MCPBackend (and thus Backend). Chat keeps a
@@ -299,22 +304,61 @@ func (b *rpcBackend) promptPlain(ctx context.Context, session, text string, hist
 	hist = append(hist, models.Message{Role: "assistant", Content: reply})
 
 	b.mu.Lock()
-	b.sessions[session] = capHistory(hist, historyCap(false))
+	capped := capHistory(hist, historyCap(false))
+	b.sessions[session] = capped
 	b.mu.Unlock()
+	// Same persistence contract as the full-pipeline path: plain passthrough
+	// conversations are sessions too.
+	b.autosaveSession(session, capped)
 	return reply, nil
 }
 
-// autosaveSession persists the live session to the saved-session store when
-// CHATCLI_MCP_SESSION_AUTOSAVE is on. Best-effort: a store failure logs via
-// the session manager and never fails the turn.
+// mcpAutosaveKeep bounds how many distinct mcp- session mirrors survive
+// pruning — enough for a handful of concurrent MCP clients without letting
+// unique session ids accrete forever.
+const mcpAutosaveKeep = 20
+
+// mcpSessionAutosaveEnabled resolves the MCP autosave gate. An explicit
+// CHATCLI_MCP_SESSION_AUTOSAVE always wins; otherwise the global
+// CHATCLI_SESSION_AUTOSAVE gate applies (default ON) — the same default the
+// interactive REPL uses, so both surfaces persist conversations unless the
+// operator opts out.
+func mcpSessionAutosaveEnabled() bool {
+	if v := strings.TrimSpace(os.Getenv("CHATCLI_MCP_SESSION_AUTOSAVE")); v != "" {
+		switch strings.ToLower(v) {
+		case "false", "0", "off", "no", "disabled":
+			return false
+		}
+		return true
+	}
+	switch strings.ToLower(strings.TrimSpace(os.Getenv("CHATCLI_SESSION_AUTOSAVE"))) {
+	case "false", "0", "off", "no", "disabled":
+		return false
+	}
+	return true
+}
+
+// autosaveSession persists the live session to the saved-session store as a
+// rolling "mcp-<session>" mirror (one file per session id, updated in place),
+// then prunes the oldest mirrors past the keep-count. Trivial histories
+// (fewer than 2 non-system messages) are skipped. Best-effort: a store
+// failure never fails the turn.
 func (b *rpcBackend) autosaveSession(session string, hist []models.Message) {
-	if b.store == nil || len(hist) == 0 {
+	if b.store == nil || !mcpSessionAutosaveEnabled() {
 		return
 	}
-	if v := strings.TrimSpace(os.Getenv("CHATCLI_MCP_SESSION_AUTOSAVE")); !strings.EqualFold(v, "true") && v != "1" {
+	nonSystem := 0
+	for _, m := range hist {
+		if m.Role != "system" {
+			nonSystem++
+		}
+	}
+	if nonSystem < 2 {
 		return
 	}
-	_ = b.store.SaveSessionRPC("mcp-"+session, hist)
+	if b.store.SaveSessionRPC("mcp-"+session, hist) == nil {
+		b.store.PruneSessionsRPC("mcp-", mcpAutosaveKeep)
+	}
 }
 
 // Agent runs the full agent (ReAct) loop with per-call options, scoped to
@@ -445,12 +489,15 @@ func (b *rpcBackend) ManageSession(_ context.Context, action, session, name stri
 
 	case "clear":
 		b.mu.Lock()
-		_, existed := b.sessions[session]
+		hist, existed := b.sessions[session]
 		delete(b.sessions, session)
 		b.mu.Unlock()
 		if !existed {
 			return fmt.Sprintf("session %q had no live history", session), nil
 		}
+		// Last-chance autosave: clearing must never be the moment a
+		// conversation silently ceases to exist.
+		b.autosaveSession(session, hist)
 		return fmt.Sprintf("session %q cleared — the next ask_chatcli call starts fresh", session), nil
 
 	case "save":
