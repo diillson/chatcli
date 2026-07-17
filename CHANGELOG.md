@@ -1,5 +1,20 @@
 # Changelog
 
+## [1.164.0](https://github.com/diillson/chatcli/compare/v1.163.0...v1.164.0) (2026-07-17)
+
+
+### Features
+
+* **memory:** derive rollups from the episodic record ([#1205](https://github.com/diillson/chatcli/issues/1205)) ([c90cdd3](https://github.com/diillson/chatcli/commit/c90cdd3716ea82832f88d98953f7470fdfa948c4))
+* **memory:** episodic timeline with temporal recall ([#1202](https://github.com/diillson/chatcli/issues/1202)) ([ba734b9](https://github.com/diillson/chatcli/commit/ba734b968ba8c4d5a40c6476e192723e87c75219))
+* **memory:** proactive auto-recall in index mode ([#1204](https://github.com/diillson/chatcli/issues/1204)) ([0f46f9e](https://github.com/diillson/chatcli/commit/0f46f9e2c619951c94e824a11b4e7fce3a893c1b))
+* **session:** sessions become retrievable memory ([#1203](https://github.com/diillson/chatcli/issues/1203)) ([bfe78d1](https://github.com/diillson/chatcli/commit/bfe78d1f7b1946a1db5c15b3ccb44e8b86bb342f))
+
+
+### Bug Fixes
+
+* **devin:** drop identity coercion and accept tool tag alias ([#1200](https://github.com/diillson/chatcli/issues/1200)) ([1dc0c8e](https://github.com/diillson/chatcli/commit/1dc0c8eb3f9738994c04d3507754623054b15153))
+
 ## [1.163.0](https://github.com/diillson/chatcli/compare/v1.162.1...v1.163.0) (2026-07-16)
 
 
