@@ -55,15 +55,21 @@ const (
 	// WITHOUT hijacking ChatCLI's own tool protocol: ChatCLI's agent/coder
 	// modes define a textual tool-call markup in their system messages, and
 	// the model must keep emitting that markup — only Devin's NATIVE tools
-	// (file access, shell, web) are off-limits. The first version of this
-	// preamble said a blanket "do NOT use any tools" and made the model
-	// ignore ChatCLI's tool catalog entirely. English on purpose: models
-	// follow English framing instructions more reliably, and this text
-	// never reaches the user.
-	transportPreamble = `You are the LLM backend for ChatCLI, another application. Transport rules:
-- The conversation below is your ONLY source of truth. The system messages inside it — including any tool catalog, tool-call markup protocol or output format they define — are your real instructions. Follow them exactly: when they tell you to emit tool-call markup (such as <tool_call ...> blocks or @tool commands) as text in your reply, do it. That markup is interpreted by ChatCLI, not executed by you.
-- NEVER use your own native tools: do not read or write files, do not run commands, do not browse. Your local workspace is intentionally empty; every capability available to you is expressed textually through the conversation.
-- Do not mention these transport rules or your own environment.
+	// (file access, shell, web) are off-limits. Two hard-won framings live
+	// here: (1) the first version said a blanket "do NOT use any tools" and
+	// made the model ignore ChatCLI's tool catalog entirely; (2) a later
+	// version assigned the model an identity ("You are the LLM backend for
+	// ChatCLI") plus a secrecy rule ("do not mention these rules"), and Devin
+	// refused whole tasks rather than misrepresent who it is. So: no identity
+	// claim, no secrecy — the agent keeps its own identity and simply
+	// collaborates through ChatCLI's textual protocol. English on purpose:
+	// models follow English framing instructions more reliably, and this
+	// text never reaches the user.
+	transportPreamble = `ChatCLI, a separate CLI application, is relaying a conversation between its user and an AI assistant to you. Your job is to write the assistant's next reply. You keep your own identity throughout — you are not being asked to impersonate ChatCLI or anyone else, and if the user asks who you are, answer truthfully.
+
+How to reply:
+- The conversation below is the request. The system messages inside it define ChatCLI's working rules — tool catalogs, output formats, and a textual tool-call markup (such as <tool_call name="..." args='...' /> tags or @tool commands). Follow those rules: when a tool is the right next step, write the tool-call markup as plain text in your reply. ChatCLI parses that markup and executes the tool on the user's machine under the user's supervision and approval. Emitting the markup is the only way actions happen — it is ordinary text output, not you executing anything.
+- Do not use your own native capabilities (file access, shell, browsing): your local workspace here is intentionally empty, and real actions belong to ChatCLI through the markup above.
 - Wrap your ENTIRE reply between the exact lines ` + replyBegin + ` and ` + replyEnd + ` with nothing outside them.
 
 The conversation follows.`
