@@ -17,10 +17,18 @@ import (
 	"go.uber.org/zap"
 )
 
-// RollupStore consolidates daily notes into weekly digests and weekly digests
-// into monthly ones — the long-range narrative daily notes cannot provide
-// (they expire after ~30 days). Weeklies keep the recent trajectory sharp;
-// monthlies preserve it indefinitely at low cost.
+// RollupStore consolidates the period's work record into weekly digests and
+// weekly digests into monthly ones — the long-range narrative daily notes
+// cannot provide (they expire after ~30 days). Weeklies keep the recent
+// trajectory sharp; monthlies preserve it indefinitely at low cost.
+//
+// Sources, when the episodic store is attached (SetEpisodes): the period's
+// EPISODES lead each digest's source — they are the durable, dated, factual
+// record of what was actually done — and the daily notes follow as color.
+// Before episodes existed, digests were summaries of summaries (dailies →
+// weekly → monthly), each hop lossy; anchoring on episodes stops the decay,
+// and weeks/months whose daily notes already expired still get a digest from
+// their episodes alone.
 //
 // Layout under the memory dir:
 //
@@ -29,11 +37,19 @@ import (
 type RollupStore struct {
 	memoryDir string
 	logger    *zap.Logger
+	episodes  *EpisodeStore // optional; nil → daily-notes-only sources
 }
 
 // NewRollupStore creates a rollup store rooted at the memory directory.
 func NewRollupStore(memoryDir string, logger *zap.Logger) *RollupStore {
 	return &RollupStore{memoryDir: memoryDir, logger: logger}
+}
+
+// SetEpisodes attaches the episodic timeline as the leading rollup source.
+// Additive wiring (mirrors the retriever's SetEpisodes) so the constructor
+// signature stays stable; nil keeps the legacy daily-notes-only behavior.
+func (rs *RollupStore) SetEpisodes(es *EpisodeStore) {
+	rs.episodes = es
 }
 
 const (
@@ -65,7 +81,7 @@ func (rs *RollupStore) Run(ctx context.Context, summarize SummarizeFunc) (int, e
 
 	now := time.Now()
 	today := now.Format("2006-01-02")
-	for _, wk := range groupByISOWeek(dailies) {
+	for _, wk := range rs.allWeeks(dailies) {
 		// Calendar-date comparison: a week is elapsed only when its Sunday is
 		// strictly before today, regardless of time zone of the parsed dates.
 		if wk.end.Format("2006-01-02") >= today {
@@ -75,7 +91,14 @@ func (rs *RollupStore) Run(ctx context.Context, summarize SummarizeFunc) (int, e
 		if fileExists(path) {
 			continue
 		}
-		digest := rs.digest(ctx, summarize, weeklyPromptHeader(wk), wk.content())
+		// Episodes lead the source: the durable dated record grounds the
+		// digest, the notes add color. A week whose daily notes already
+		// expired still rolls from its episodes alone.
+		source := rs.episodesSection(wk.start, wk.end.AddDate(0, 0, 1)) + wk.content()
+		if strings.TrimSpace(source) == "" {
+			continue
+		}
+		digest := rs.digest(ctx, summarize, weeklyPromptHeader(wk), source)
 		header := fmt.Sprintf("# Week %s (%s – %s)\n\n", wk.label, wk.start.Format("2006-01-02"), wk.end.Format("2006-01-02"))
 		if err := rs.writeDigest(path, header+digest); err != nil {
 			rs.logger.Warn("weekly rollup write failed", zap.String("week", wk.label), zap.Error(err))
@@ -111,11 +134,11 @@ func (rs *RollupStore) rollMonths(ctx context.Context, summarize SummarizeFunc, 
 		if fileExists(path) {
 			continue
 		}
-		source := rs.monthSource(month)
+		source := rs.monthEpisodesSection(month) + rs.monthSource(month)
 		if strings.TrimSpace(source) == "" {
 			continue
 		}
-		prompt := "Condense these work notes from " + month + " into a monthly digest: at most 10 bullets covering achievements, decisions, blockers and themes. Write in the same language as the notes. Output only the bullets.\n\n"
+		prompt := "Condense this work record from " + month + " into a monthly digest: at most 10 bullets covering achievements, decisions, blockers and themes. Lines under the Episodes heading are the durable dated record of completed work — ground the digest in them; the notes and weekly digests add context. Write in the same language as the source. Output only the bullets.\n\n"
 		digest := rs.digest(ctx, summarize, prompt, source)
 		if err := rs.writeDigest(path, "# Month "+month+"\n\n"+digest); err != nil {
 			rs.logger.Warn("monthly rollup write failed", zap.String("month", month), zap.Error(err))
@@ -152,6 +175,48 @@ func (rs *RollupStore) FormatTrajectory(maxChars int) string {
 	return strings.TrimSpace(out)
 }
 
+// episodesSection renders the [from, to) window's episodes as the leading
+// source block for a digest, or "" when the store is absent or the window is
+// empty. FormatEpisodes emits "- " bullets, so the deterministic fallback
+// (condenseBullets) naturally keeps episodes first when no LLM is available.
+func (rs *RollupStore) episodesSection(from, to time.Time) string {
+	if rs.episodes == nil {
+		return ""
+	}
+	eps := rs.episodes.Range(from, to, "", "", 0)
+	if len(eps) == 0 {
+		return ""
+	}
+	return "## Episodes (durable dated work record)\n" + FormatEpisodes(eps) + "\n\n"
+}
+
+// allWeeks merges the weeks that have daily notes with the weeks that have
+// episodes, so a period whose notes already expired still gets its digest.
+// Weeks coming only from episodes carry no files; their source is the
+// episodes section alone.
+func (rs *RollupStore) allWeeks(dailies []dailyFile) []isoWeek {
+	weeks := groupByISOWeek(dailies)
+	if rs.episodes == nil {
+		return weeks
+	}
+	have := make(map[string]bool, len(weeks))
+	for _, wk := range weeks {
+		have[wk.label] = true
+	}
+	for _, e := range rs.episodes.Range(time.Time{}, time.Time{}, "", "", 0) {
+		year, week := e.Date.ISOWeek()
+		label := fmt.Sprintf("%04d-W%02d", year, week)
+		if have[label] {
+			continue
+		}
+		have[label] = true
+		start := startOfISOWeek(e.Date)
+		weeks = append(weeks, isoWeek{label: label, start: start, end: start.AddDate(0, 0, 6)})
+	}
+	sort.Slice(weeks, func(i, j int) bool { return weeks[i].label < weeks[j].label })
+	return weeks
+}
+
 // --- digest production -------------------------------------------------------
 
 // digest asks the LLM for a condensation and falls back to deterministic
@@ -175,9 +240,10 @@ func (rs *RollupStore) digest(ctx context.Context, summarize SummarizeFunc, prom
 }
 
 func weeklyPromptHeader(wk isoWeek) string {
-	return "Condense these daily work notes from week " + wk.label +
+	return "Condense this work record from week " + wk.label +
 		" into a weekly digest: at most 8 bullets covering achievements, decisions, blockers and recurring themes. " +
-		"Write in the same language as the notes. Output only the bullets.\n\n"
+		"Lines under the Episodes heading are the durable dated record of completed work — ground the digest in them; the daily notes add context. " +
+		"Write in the same language as the source. Output only the bullets.\n\n"
 }
 
 // condenseBullets keeps the first maxBullets bullet lines — a lossy but
@@ -300,7 +366,8 @@ func startOfDay(d time.Time) time.Time {
 	return time.Date(d.Year(), d.Month(), d.Day(), 0, 0, 0, 0, d.Location())
 }
 
-// listSourceMonths returns every YYYY-MM that has dailies or weeklies.
+// listSourceMonths returns every YYYY-MM that has dailies, weeklies or
+// episodes.
 func (rs *RollupStore) listSourceMonths() ([]string, error) {
 	months := make(map[string]struct{})
 	dailies, err := rs.listDailyNotes()
@@ -314,6 +381,11 @@ func (rs *RollupStore) listSourceMonths() ([]string, error) {
 		base := strings.TrimSuffix(filepath.Base(w), ".md") // 2026-W27
 		if wk, ok := parseWeekLabel(base); ok {
 			months[wk.Format("2006-01")] = struct{}{}
+		}
+	}
+	if rs.episodes != nil {
+		for _, e := range rs.episodes.Range(time.Time{}, time.Time{}, "", "", 0) {
+			months[e.Date.Format("2006-01")] = struct{}{}
 		}
 	}
 	out := make([]string, 0, len(months))
@@ -356,6 +428,16 @@ func (rs *RollupStore) monthSource(month string) string {
 		}
 	}
 	return sb.String()
+}
+
+// monthEpisodesSection renders the month's episodes as the leading monthly
+// source block, or "" (absent store, unparseable month, empty window).
+func (rs *RollupStore) monthEpisodesSection(month string) string {
+	first, err := time.ParseInLocation("2006-01", month, time.Local)
+	if err != nil {
+		return ""
+	}
+	return rs.episodesSection(first, first.AddDate(0, 1, 0))
 }
 
 // parseWeekLabel converts "2026-W27" to the Monday that starts that week.
