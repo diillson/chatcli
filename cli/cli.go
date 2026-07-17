@@ -207,6 +207,7 @@ type ChatCLI struct {
 	prefixSpinnerIdx    int32      // atomic counter for animated prefix spinner
 	sessionManager      *SessionManager
 	currentSessionName  string
+	sessionAutosaved    bool // autosave-on-exit ran (cleanup can be reached twice)
 	UserMaxTokens       int
 	pluginManager       *plugins.Manager
 	contextHandler      *ContextHandler
@@ -1856,6 +1857,10 @@ func (cli *ChatCLI) cleanup(ctx context.Context) {
 			WorkingDir: wd,
 		})
 	}
+
+	// Auto-save the conversation before anything shuts down, so an exit
+	// never costs the user a retrievable session (see cli_session_autosave.go).
+	cli.autosaveSessionOnExit()
 
 	// Record session end for usage pattern tracking
 	if cli.memoryStore != nil && !cli.sessionStartTime.IsZero() {

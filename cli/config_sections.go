@@ -826,6 +826,14 @@ func (cli *ChatCLI) showConfigSession() {
 		kv(p, i18n.T("cfg.kv.started"), cli.sessionStartTime.Format(time.RFC3339))
 		kv(p, i18n.T("cfg.kv.duration"), humanDuration(time.Since(cli.sessionStartTime)))
 	}
+	autosaveVal := i18n.T("cfg.val.enabled")
+	if !sessionAutosaveEnabled() {
+		autosaveVal = i18n.T("cfg.val.disabled")
+	}
+	if os.Getenv("CHATCLI_SESSION_AUTOSAVE") == "" {
+		autosaveVal = defaultMarker + autosaveVal
+	}
+	kv(p, "CHATCLI_SESSION_AUTOSAVE", autosaveVal)
 
 	fmt.Println(p)
 	subheader(p, "cfg.sub.session.cost")

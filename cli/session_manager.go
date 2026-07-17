@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/diillson/chatcli/cli/ctxmgr"
 	"github.com/diillson/chatcli/models"
 	"github.com/diillson/chatcli/utils"
 	"go.uber.org/zap"
@@ -242,13 +243,30 @@ func (sm *SessionManager) ListSessions() ([]string, error) {
 type SessionSearchHit struct {
 	Session  string
 	Matches  int
+	Score    float64
 	Snippets []string
 }
 
-// SearchSessions performs a full-text search across all persisted sessions,
-// reusing the existing JSON store (no separate index). A message matches
-// when every whitespace-separated query term appears in its content
-// (case-insensitive AND). Results are sorted by match count, descending.
+// sessionSearchDoc maps one BM25 document (a message) back to its session.
+type sessionSearchDoc struct {
+	session string
+	role    string
+	content string
+}
+
+// SearchSessions performs a ranked full-text search across all persisted
+// sessions, reusing the existing JSON store (no separate index). Two-level
+// semantics balance recall and precision:
+//
+//   - A session QUALIFIES when every query term appears somewhere in it —
+//     in ANY message, not necessarily the same one. The old per-message AND
+//     returned nothing for exactly the queries recall exists for ("oauth
+//     refresh decision" discussed across several turns).
+//   - Qualifying sessions RANK by BM25 over their individual messages (the
+//     same keyless scorer the knowledge corpus uses), so the session where
+//     the terms are dense and rare outranks one that mentions them in
+//     passing. Snippets come from each session's top-scoring messages.
+//
 // maxSnippetsPerSession caps how many context snippets each hit carries.
 func (sm *SessionManager) SearchSessions(query string, maxSnippetsPerSession int) ([]SessionSearchHit, error) {
 	terms := strings.Fields(strings.ToLower(strings.TrimSpace(query)))
@@ -264,48 +282,131 @@ func (sm *SessionManager) SearchSessions(query string, maxSnippetsPerSession int
 		return nil, err
 	}
 
-	var hits []SessionSearchHit
+	var docs []sessionSearchDoc
+	sessionText := make(map[string]*strings.Builder)
 	for _, name := range names {
 		sd, err := sm.LoadSessionV2(name)
 		if err != nil || sd == nil {
 			continue // skip unreadable sessions rather than abort the search
 		}
-
-		matches := 0
-		var snippets []string
 		for _, hist := range [][]models.Message{sd.ChatHistory, sd.AgentHistory, sd.CoderHistory, sd.SharedMemory} {
 			for _, msg := range hist {
 				if msg.Content == "" {
 					continue
 				}
-				lower := strings.ToLower(msg.Content)
-				if !containsAllTerms(lower, terms) {
-					continue
+				docs = append(docs, sessionSearchDoc{session: name, role: msg.Role, content: msg.Content})
+				b, ok := sessionText[name]
+				if !ok {
+					b = &strings.Builder{}
+					sessionText[name] = b
 				}
-				matches++
-				if len(snippets) < maxSnippetsPerSession {
-					snippets = append(snippets, msg.Role+": "+snippetAround(msg.Content, lower, terms[0]))
-				}
+				b.WriteString(strings.ToLower(msg.Content))
+				b.WriteByte('\n')
 			}
 		}
+	}
+	if len(docs) == 0 {
+		return nil, nil
+	}
 
-		if matches > 0 {
-			hits = append(hits, SessionSearchHit{Session: name, Matches: matches, Snippets: snippets})
+	// Session-level AND filter: every term somewhere in the conversation.
+	qualifies := make(map[string]bool, len(sessionText))
+	for name, b := range sessionText {
+		text := b.String()
+		all := true
+		for _, t := range terms {
+			if !strings.Contains(text, t) {
+				all = false
+				break
+			}
+		}
+		qualifies[name] = all
+	}
+
+	contents := make([]string, len(docs))
+	for i, d := range docs {
+		contents[i] = d.content
+	}
+	ranked := ctxmgr.RankDocsBM25(contents, query, len(contents))
+
+	// Aggregate message hits per session, preserving BM25 order so each
+	// session's snippets are its strongest messages.
+	bySession := make(map[string]*SessionSearchHit)
+	order := make([]string, 0)
+	for _, h := range ranked {
+		d := docs[h.Index]
+		if !qualifies[d.session] {
+			continue
+		}
+		hit, ok := bySession[d.session]
+		if !ok {
+			hit = &SessionSearchHit{Session: d.session}
+			bySession[d.session] = hit
+			order = append(order, d.session)
+		}
+		hit.Matches++
+		hit.Score += h.Score
+		if len(hit.Snippets) < maxSnippetsPerSession {
+			lower := strings.ToLower(d.content)
+			anchor := terms[0]
+			for _, t := range terms {
+				if strings.Contains(lower, t) {
+					anchor = t
+					break
+				}
+			}
+			hit.Snippets = append(hit.Snippets, d.role+": "+snippetAround(d.content, lower, anchor))
 		}
 	}
 
-	sort.Slice(hits, func(i, j int) bool { return hits[i].Matches > hits[j].Matches })
+	hits := make([]SessionSearchHit, 0, len(order))
+	for _, name := range order {
+		hits = append(hits, *bySession[name])
+	}
+	sort.SliceStable(hits, func(i, j int) bool {
+		if hits[i].Score != hits[j].Score {
+			return hits[i].Score > hits[j].Score
+		}
+		return hits[i].Session < hits[j].Session
+	})
 	return hits, nil
 }
 
-// containsAllTerms reports whether lowerText contains every term.
-func containsAllTerms(lowerText string, terms []string) bool {
-	for _, t := range terms {
-		if !strings.Contains(lowerText, t) {
-			return false
-		}
+// GetSessionMessages returns one page of a saved session's unified message
+// stream plus the total count, so the @session tool can read an old
+// conversation without loading it over the live one. offset is 0-based;
+// limit <= 0 applies a default page size.
+func (sm *SessionManager) GetSessionMessages(name string, offset, limit int) ([]models.Message, int, error) {
+	sd, err := sm.LoadSessionV2(name)
+	if err != nil {
+		return nil, 0, err
 	}
-	return true
+	if sd == nil {
+		return nil, 0, fmt.Errorf("session %q not found", name)
+	}
+
+	// Unified stream in store order: chat history is the live format; the
+	// legacy per-mode histories are appended for old files.
+	var all []models.Message
+	for _, hist := range [][]models.Message{sd.ChatHistory, sd.AgentHistory, sd.CoderHistory, sd.SharedMemory} {
+		all = append(all, hist...)
+	}
+
+	total := len(all)
+	if limit <= 0 {
+		limit = 20
+	}
+	if offset < 0 {
+		offset = 0
+	}
+	if offset >= total {
+		return nil, total, nil
+	}
+	end := offset + limit
+	if end > total {
+		end = total
+	}
+	return all[offset:end], total, nil
 }
 
 // snippetAround returns a trimmed, single-line window of content centered on

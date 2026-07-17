@@ -30,6 +30,18 @@ type SessionAdapter interface {
 	List(ctx context.Context) (string, error)
 }
 
+// SessionReader is an OPTIONAL capability a SessionAdapter may implement to
+// back the @session get subcommand — paginated reading of one saved
+// conversation, so the model can pull past context without loading the
+// session over the live one. Optional-interface pattern (like the memory
+// tool's TimelineAccessor) so existing adapters keep compiling.
+type SessionReader interface {
+	// Get returns one page of the named session's messages. offset is
+	// 0-based; limit <= 0 applies the default. A non-empty query centers the
+	// page on the best-matching message instead of using offset.
+	Get(ctx context.Context, name string, offset, limit int, query string) (string, error)
+}
+
 type sessionAdapterHolder struct{ a SessionAdapter }
 
 var sessionAdapterAtom atomic.Value // stores sessionAdapterHolder
@@ -66,11 +78,15 @@ func (*BuiltinSessionPlugin) Usage() string {
 
 Subcommands (cmd + args):
   search {query, limit?}   search saved sessions; returns matching sessions + snippets
-  list                     list saved session names`
+  get {name, offset?, limit?, query?}   read one saved session page by page; query jumps to the best match
+  list                     list saved session names
+
+Typical recall flow: search finds WHICH session discussed something, get reads
+the relevant part of THAT session.`
 }
 
 // Version is semver.
-func (*BuiltinSessionPlugin) Version() string { return "1.0.0" }
+func (*BuiltinSessionPlugin) Version() string { return "1.1.0" }
 
 // Path is empty for builtin plugins.
 func (*BuiltinSessionPlugin) Path() string { return "" }
@@ -91,6 +107,20 @@ func (*BuiltinSessionPlugin) Schema() string {
 					{"name": "limit", "type": "number", "required": false, "description": "Max snippets per session (default 3)."},
 				},
 				"examples": []string{`{"cmd":"search","args":{"query":"auth refactor"}}`},
+			},
+			{
+				"name":        "get",
+				"description": "Read one saved session's messages page by page. Use after 'search' to pull the actual context from the matching session. A query centers the page on the best-matching message.",
+				"flags": []map[string]interface{}{
+					{"name": "name", "type": "string", "required": true, "description": "Saved session name (from search or list)."},
+					{"name": "offset", "type": "number", "required": false, "description": "0-based message offset (default 0)."},
+					{"name": "limit", "type": "number", "required": false, "description": "Messages per page (default 20)."},
+					{"name": "query", "type": "string", "required": false, "description": "Jump to the best-matching message instead of using offset."},
+				},
+				"examples": []string{
+					`{"cmd":"get","args":{"name":"auth-refactor","query":"refresh token"}}`,
+					`{"cmd":"get","args":{"name":"auth-refactor","offset":20,"limit":20}}`,
+				},
 			},
 			{
 				"name":        "list",
@@ -137,10 +167,26 @@ func (p *BuiltinSessionPlugin) ExecuteWithStream(ctx context.Context, args []str
 			in.Limit = 3
 		}
 		return adapter.Search(ctx, in.Query, in.Limit)
+	case "get":
+		reader, ok := adapter.(SessionReader)
+		if !ok {
+			return "", errors.New("@session get: session reading not available")
+		}
+		var in struct {
+			Name   string          `json:"name"`
+			Offset json.RawMessage `json:"offset"`
+			Limit  json.RawMessage `json:"limit"`
+			Query  string          `json:"query"`
+		}
+		_ = json.Unmarshal([]byte(inner), &in)
+		if strings.TrimSpace(in.Name) == "" {
+			return "", errors.New(`@session get: "name" is required (use search or list first)`)
+		}
+		return reader.Get(ctx, in.Name, lenientInt(in.Offset), lenientInt(in.Limit), in.Query)
 	case "list":
 		return adapter.List(ctx)
 	default:
-		return "", fmt.Errorf("@session: unknown cmd %q (valid: search|list)", cmd)
+		return "", fmt.Errorf("@session: unknown cmd %q (valid: search|get|list)", cmd)
 	}
 }
 
@@ -159,7 +205,7 @@ func parseSessionInvocation(args []string) (string, string, error) {
 		canon := canonicalSessionCmd(cmdStr)
 		if canon == "" {
 			if !isFlatArgs(raw) {
-				return "", "", fmt.Errorf("missing or unknown cmd %q (valid: search|list)", cmdStr)
+				return "", "", fmt.Errorf("missing or unknown cmd %q (valid: search|get|list)", cmdStr)
 			}
 			canon = "search" // flat native args, e.g. {"query":"..."}
 		}
@@ -187,6 +233,8 @@ func canonicalSessionCmd(s string) string {
 	switch strings.ToLower(strings.TrimSpace(s)) {
 	case "search", "find", "recall":
 		return "search"
+	case "get", "read", "show", "open":
+		return "get"
 	case "list", "sessions":
 		return "list"
 	}
