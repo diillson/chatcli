@@ -1053,6 +1053,12 @@ func (cli *ChatCLI) dequeueMessage() string {
 func (cli *ChatCLI) Start(ctx context.Context) {
 	cli.sessionCtx = ctx
 	defer cli.cleanup(ctx)
+	// Bounded session lifecycle: expire MACHINE-created sessions (REPL
+	// autosaves, MCP session mirrors) past their TTL, in the background so
+	// boot never waits on disk. User-named sessions are never touched.
+	if cli.sessionManager != nil {
+		go cli.sessionManager.CleanExpiredMachineSessions()
+	}
 	// Renova em background o cache de release que alimenta o hash de commit
 	// da tela de boas-vindas (builds go install); o boot não espera rede.
 	go version.RefreshReleaseCacheIfStale(ctx)

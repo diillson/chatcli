@@ -21,7 +21,7 @@ package cli
 import (
 	"fmt"
 	"os"
-	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -34,13 +34,29 @@ const (
 	// to start with it are indistinguishable by design (docs call it out).
 	autosavePrefix = "autosave-"
 
-	// autosaveKeep bounds how many autosaves survive pruning.
-	autosaveKeep = 10
+	// autosaveKeepDefault bounds how many machine sessions survive pruning.
+	// Retention is primarily TIME-based (the 90-day machine-session TTL, vs
+	// Claude Code's 30-day default) — this count is a generous backstop
+	// against pathological accumulation, not the working limit, so raw
+	// session knowledge is not lost to an aggressive cap.
+	autosaveKeepDefault = 600
 
 	// autosaveMinMessages skips trivial sessions: one prompt and its answer
 	// are worth keeping, a lone /command or an empty boot is not.
 	autosaveMinMessages = 2
 )
+
+// sessionAutosaveKeep resolves the machine-session keep-count backstop.
+// CHATCLI_SESSION_AUTOSAVE_KEEP overrides the default; non-positive or
+// malformed values fall back.
+func sessionAutosaveKeep() int {
+	if v := strings.TrimSpace(os.Getenv("CHATCLI_SESSION_AUTOSAVE_KEEP")); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			return n
+		}
+	}
+	return autosaveKeepDefault
+}
 
 // sessionAutosaveEnabled reads CHATCLI_SESSION_AUTOSAVE; unset means enabled.
 func sessionAutosaveEnabled() bool {
@@ -83,26 +99,8 @@ func (cli *ChatCLI) autosaveSessionOnExit() {
 	cli.pruneAutosaves()
 }
 
-// pruneAutosaves deletes the oldest autosave sessions past the keep-count.
-// Timestamped names sort lexicographically by age, so no stat calls needed.
+// pruneAutosaves bounds the REPL autosave set to the newest keep-count
+// files, via the shared machine-session pruner.
 func (cli *ChatCLI) pruneAutosaves() {
-	names, err := cli.sessionManager.ListSessions()
-	if err != nil {
-		return
-	}
-	autos := make([]string, 0, len(names))
-	for _, n := range names {
-		if strings.HasPrefix(n, autosavePrefix) {
-			autos = append(autos, n)
-		}
-	}
-	if len(autos) <= autosaveKeep {
-		return
-	}
-	sort.Strings(autos) // ascending → oldest first
-	for _, n := range autos[:len(autos)-autosaveKeep] {
-		if err := cli.sessionManager.DeleteSession(n); err != nil {
-			cli.logger.Debug("autosave prune failed", zap.String("session", n), zap.Error(err))
-		}
-	}
+	cli.sessionManager.PruneSessionsByPrefix(autosavePrefix, sessionAutosaveKeep())
 }

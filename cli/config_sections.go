@@ -834,6 +834,11 @@ func (cli *ChatCLI) showConfigSession() {
 		autosaveVal = defaultMarker + autosaveVal
 	}
 	kv(p, "CHATCLI_SESSION_AUTOSAVE", autosaveVal)
+	keepVal := fmt.Sprintf("%d", sessionAutosaveKeep())
+	if os.Getenv("CHATCLI_SESSION_AUTOSAVE_KEEP") == "" {
+		keepVal = defaultMarker + keepVal
+	}
+	kv(p, "CHATCLI_SESSION_AUTOSAVE_KEEP", keepVal)
 
 	fmt.Println(p)
 	subheader(p, "cfg.sub.session.cost")
