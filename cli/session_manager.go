@@ -203,16 +203,22 @@ func (sm *SessionManager) PruneSessionsByPrefix(prefix string, keep int) int {
 }
 
 // CleanExpiredMachineSessions applies the TTL (CHATCLI_SESSION_TTL, default
-// 90 days) to MACHINE-created sessions only — autosaves and MCP session
-// mirrors. User-named sessions are never expired: a checkpoint someone saved
-// on purpose must outlive any retention policy. This is the lifecycle hook
-// the boot paths call; the broader CleanExpiredSessions remains available
-// for operators who explicitly want full expiry.
+// 90 days; "0" disables expiry entirely, honoring the documented contract)
+// to MACHINE-created sessions only — autosaves and MCP session mirrors.
+// User-named sessions are never expired: a checkpoint someone saved on
+// purpose must outlive any retention policy. This is the lifecycle hook the
+// boot paths call; the broader CleanExpiredSessions remains available for
+// operators who explicitly want full expiry.
 func (sm *SessionManager) CleanExpiredMachineSessions() int {
 	ttlDays := 90
 	if v := os.Getenv("CHATCLI_SESSION_TTL"); v != "" {
-		if n, err := strconv.Atoi(strings.TrimSuffix(v, "d")); err == nil && n > 0 {
-			ttlDays = n
+		if n, err := strconv.Atoi(strings.TrimSuffix(v, "d")); err == nil {
+			if n == 0 {
+				return 0 // documented opt-out: keep every session indefinitely
+			}
+			if n > 0 {
+				ttlDays = n
+			}
 		}
 	}
 	cutoff := time.Now().Add(-time.Duration(ttlDays) * 24 * time.Hour)

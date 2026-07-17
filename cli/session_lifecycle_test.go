@@ -79,3 +79,17 @@ func TestCleanExpiredMachineSessions_SparesUserNamed(t *testing.T) {
 		t.Error("stale machine sessions must be expired")
 	}
 }
+
+func TestCleanExpiredMachineSessions_ZeroTTLDisables(t *testing.T) {
+	sm := newTestSessionManager(t)
+	seedSession(t, sm, "mcp-ancient", 400*24*time.Hour)
+
+	t.Setenv("CHATCLI_SESSION_TTL", "0")
+	if cleaned := sm.CleanExpiredMachineSessions(); cleaned != 0 {
+		t.Fatalf("TTL=0 must disable expiry entirely, cleaned %d", cleaned)
+	}
+	names, _ := sm.ListSessions()
+	if len(names) != 1 {
+		t.Errorf("ancient machine session must survive with TTL=0, have %v", names)
+	}
+}
