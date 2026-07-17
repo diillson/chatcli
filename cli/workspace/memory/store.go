@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"sort"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -167,8 +168,10 @@ func (m *Manager) GetMemoryIndex(budget int) string {
 		}
 	}
 	if m.Episodes != nil {
+		// Model-facing English like the sibling digest lines above — this is
+		// the prompt-injected memory map, not terminal UI.
 		if n := m.Episodes.Count(); n > 0 {
-			lines = append(lines, fmt.Sprintf("Episodes: %d dated work entries (query with @memory timeline)", n))
+			lines = append(lines, "Episodes: "+strconv.Itoa(n)+" dated work entries (query with @memory timeline)")
 		}
 	}
 
