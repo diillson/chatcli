@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.165.0](https://github.com/diillson/chatcli/compare/v1.164.0...v1.165.0) (2026-07-17)
+
+
+### Features
+
+* **session:** MCP session autosave by default and bounded machine-session lifecycle ([#1206](https://github.com/diillson/chatcli/issues/1206)) ([7b81b48](https://github.com/diillson/chatcli/commit/7b81b48a720d390b27918758c21284a21afcacef))
+
 ## [1.164.0](https://github.com/diillson/chatcli/compare/v1.163.0...v1.164.0) (2026-07-17)
 
 
