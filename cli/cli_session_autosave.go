@@ -39,7 +39,7 @@ const (
 	// Claude Code's 30-day default) — this count is a generous backstop
 	// against pathological accumulation, not the working limit, so raw
 	// session knowledge is not lost to an aggressive cap.
-	autosaveKeepDefault = 200
+	autosaveKeepDefault = 600
 
 	// autosaveMinMessages skips trivial sessions: one prompt and its answer
 	// are worth keeping, a lone /command or an empty boot is not.

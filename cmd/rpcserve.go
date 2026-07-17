@@ -318,7 +318,7 @@ func (b *rpcBackend) promptPlain(ctx context.Context, session, text string, hist
 // place), so this counts distinct MCP conversations, not turns. Like the
 // REPL autosaves, retention is primarily the 90-day TTL; the count is a
 // generous backstop, overridable via CHATCLI_SESSION_AUTOSAVE_KEEP.
-const mcpAutosaveKeepDefault = 200
+const mcpAutosaveKeepDefault = 600
 
 // mcpAutosaveKeep resolves the mirror keep-count (shared env with the REPL
 // autosave backstop so operators tune one knob).
