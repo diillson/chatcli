@@ -215,8 +215,10 @@ func (cli *ChatCLI) handleCancelParkCommand(userInput string) {
 	}
 
 	// Drop any pending resume for this token so the auto-resume hook
-	// doesn't fire it after the snapshot is gone.
+	// doesn't fire it after the snapshot is gone, and stop capturing
+	// directives for it.
 	cli.dropPendingResume(token)
+	cli.unregisterActivePark(token)
 
 	fmt.Println(colorize("  ✓ "+i18n.T("park.cancel.ok", token), ColorGreen))
 }
@@ -253,6 +255,10 @@ func (cli *ChatCLI) resolveParkToken(input string) (string, error) {
 // outcome and detail come from either the AgentResume payload (auto)
 // or are fixed strings ("manual", "") for explicit /resume.
 func (cli *ChatCLI) runResumeForToken(ctx context.Context, token, outcome, detail string) bool {
+	// The wait is over regardless of outcome — stop capturing directives
+	// for this token (a re-park inside the resumed run registers anew).
+	cli.unregisterActivePark(token)
+
 	snap, err := park.Load(token)
 	if err != nil {
 		fmt.Println(colorize("  ⚠ "+i18n.T("park.resume.load_failed", err), ColorYellow))
@@ -326,6 +332,32 @@ func (cli *ChatCLI) drainPendingResumes(ctx context.Context) bool {
 		processed = true
 	}
 	return processed
+}
+
+// hasPendingResume reports whether token is already sitting in the
+// pending auto-resume queue. The agent stdin drain uses it to swallow
+// stray "/resume <token>" lines injected by the scheduler bridge that
+// raced with an active run — they must not reach the LLM as user text.
+func (cli *ChatCLI) hasPendingResume(token string) bool {
+	cli.pendingResumeMu.Lock()
+	defer cli.pendingResumeMu.Unlock()
+	for _, t := range cli.pendingResumeQueue {
+		if t == token {
+			return true
+		}
+	}
+	return false
+}
+
+// parsePendingResumeLine extracts the token from a "/resume <token>"
+// line exactly as typed/injected — no prefix resolution, no fuzzy
+// matching. Only the canonical two-field form is accepted.
+func parsePendingResumeLine(line string) (string, bool) {
+	fields := strings.Fields(line)
+	if len(fields) == 2 && fields[0] == "/resume" {
+		return fields[1], true
+	}
+	return "", false
 }
 
 // dropPendingResume removes a token from the pending queue and the

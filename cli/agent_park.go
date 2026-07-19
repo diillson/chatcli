@@ -140,6 +140,11 @@ func (a *AgentMode) handleAgentPark(
 		zap.String("mode", string(req.Mode)),
 		zap.String("scheduler_job_id", jobID))
 
+	// Register the wait with the REPL so plain text typed from now until
+	// the resume is captured as a directive for THIS parked agent.
+	resumeAt, _ := parkResumeETA(req, time.Now())
+	a.cli.registerActivePark(snap.Token, resumeAt)
+
 	return errAgentParkedRequested
 }
 
@@ -351,6 +356,19 @@ func (a *AgentMode) RunResumed(ctx context.Context, snap *park.Snapshot, outcome
 		})
 	}
 
+	// Inject any directives the user typed while this park was waiting —
+	// AFTER the park result (keeps tool pairing adjacency intact) and as a
+	// single user message so the model treats them as fresh instructions
+	// for this cycle. Consumed: the field is cleared before the bookkeeping
+	// save below so a crash-and-reload never re-injects them.
+	if len(snap.PendingUserDirectives) > 0 {
+		a.cli.history = append(a.cli.history, models.Message{
+			Role:    "user",
+			Content: buildParkDirectivesMessage(snap.PendingUserDirectives),
+		})
+		snap.PendingUserDirectives = nil
+	}
+
 	// Banner so the user sees the resume start in their terminal.
 	fmt.Println()
 	fmt.Println(colorize("  ▶️  "+i18n.T("park.banner.resumed", snap.Token, outcome), ColorGreen+ColorBold))
@@ -400,6 +418,21 @@ func (a *AgentMode) RunResumed(ctx context.Context, snap *park.Snapshot, outcome
 	return nil
 }
 
+// buildParkDirectivesMessage renders the user messages captured while the
+// agent was parked as one LLM-facing instruction block. Injected by
+// RunResumed right after the park tool result.
+func buildParkDirectivesMessage(directives []string) string {
+	var db strings.Builder
+	db.WriteString("[user directives received while you were parked]\n")
+	for _, d := range directives {
+		db.WriteString("- ")
+		db.WriteString(d)
+		db.WriteString("\n")
+	}
+	db.WriteString("\nAddress these directives in THIS cycle's report, before scheduling any further @park.")
+	return db.String()
+}
+
 // buildParkResumeMessage builds the synthetic tool result the LLM sees
 // at resume time. Concise and structured so the model can pattern-match.
 func buildParkResumeMessage(req park.Request, outcome, detail string) string {
@@ -417,7 +450,10 @@ func buildParkResumeMessage(req park.Request, outcome, detail string) string {
 		sb.WriteString("\n--- detail ---\n")
 		sb.WriteString(detail)
 	}
-	sb.WriteString("\n\nContinue from where you stopped. Use the detail above to inform your next step.")
+	sb.WriteString("\n\nContinue from where you stopped. Use the detail above to inform your next step. " +
+		"FIRST deliver the report/analysis the user expects from this cycle as plain text in THIS response — " +
+		"a cycle that only runs tools and re-parks delivers nothing to the user. " +
+		"Only after delivering it may you schedule the next @park.")
 	return sb.String()
 }
 

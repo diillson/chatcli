@@ -121,3 +121,87 @@ func TestParkPlugin_ValidationBubblesUp(t *testing.T) {
 		t.Fatalf("validation failure must NOT return as a park sentinel")
 	}
 }
+
+func TestParkPlugin_ListEmpty(t *testing.T) {
+	t.Setenv("CHATCLI_PARK_DIR", t.TempDir())
+	p := NewBuiltinParkPlugin()
+	out, err := p.Execute(context.Background(), []string{`{"cmd":"list"}`})
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if out != "No parked agents." {
+		t.Fatalf("unexpected list output: %q", out)
+	}
+}
+
+func TestParkPlugin_ListAndNote(t *testing.T) {
+	t.Setenv("CHATCLI_PARK_DIR", t.TempDir())
+	snap := &park.Snapshot{
+		Token: park.NewToken(),
+		Park:  park.Request{Mode: park.ModeDelay, Delay: 2 * time.Minute, Note: "reporte #3"},
+	}
+	if err := snap.Save(); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+
+	p := NewBuiltinParkPlugin()
+
+	out, err := p.Execute(context.Background(), []string{`{"cmd":"list"}`})
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if !strings.Contains(out, snap.Token[:8]) || !strings.Contains(out, `note="reporte #3"`) {
+		t.Fatalf("list output missing park info: %q", out)
+	}
+
+	// Note by token prefix.
+	out, err = p.Execute(context.Background(), []string{
+		`{"cmd":"note","args":{"token":"` + snap.Token[:8] + `","text":"mude o ciclo para 5m"}}`,
+	})
+	if err != nil {
+		t.Fatalf("note: %v", err)
+	}
+	if !strings.Contains(out, snap.Token[:8]) {
+		t.Fatalf("note confirmation missing token: %q", out)
+	}
+
+	// Note without token targets the newest park; "message" alias accepted.
+	if _, err = p.Execute(context.Background(), []string{
+		`{"cmd":"note","args":{"message":"o deploy terminou"}}`,
+	}); err != nil {
+		t.Fatalf("note latest: %v", err)
+	}
+
+	got, err := park.Load(snap.Token)
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	want := []string{"mude o ciclo para 5m", "o deploy terminou"}
+	if len(got.PendingUserDirectives) != 2 || got.PendingUserDirectives[0] != want[0] || got.PendingUserDirectives[1] != want[1] {
+		t.Fatalf("directives = %v, want %v", got.PendingUserDirectives, want)
+	}
+}
+
+func TestParkPlugin_NoteErrors(t *testing.T) {
+	t.Setenv("CHATCLI_PARK_DIR", t.TempDir())
+	p := NewBuiltinParkPlugin()
+
+	// No parks at all.
+	if _, err := p.Execute(context.Background(), []string{`{"cmd":"note","args":{"text":"x"}}`}); err == nil {
+		t.Fatal("note without any parked agent must error")
+	}
+
+	snap := &park.Snapshot{Token: park.NewToken(), Park: park.Request{Mode: park.ModeDelay, Delay: time.Minute}}
+	if err := snap.Save(); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+
+	// Missing text.
+	if _, err := p.Execute(context.Background(), []string{`{"cmd":"note","args":{"token":"` + snap.Token[:8] + `"}}`}); err == nil {
+		t.Fatal("note without text must error")
+	}
+	// Unknown token prefix.
+	if _, err := p.Execute(context.Background(), []string{`{"cmd":"note","args":{"token":"zzzz9999","text":"x"}}`}); err == nil {
+		t.Fatal("note with unknown token prefix must error")
+	}
+}

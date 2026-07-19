@@ -766,6 +766,16 @@ func (b *schedulerBridge) wakeParkedAgent(token, outcome, detail string) error {
 	// since Ventura without legacy_pty_emulation, sandboxed envs), the
 	// inject returns errTTYInjectUnsupported; the executor-hook drain
 	// still consumes the queue when the user types any character.
+	// While a run is active (agent/coder loop), skip the injection
+	// entirely: the injected line would land on the ACTIVE loop's stdin
+	// reader and be delivered to the LLM as a bogus user instruction.
+	// The token is already queued, so drainPendingResumes picks it up
+	// as soon as the foreground work returns to the idle prompt.
+	if b.cli.isExecuting.Load() {
+		b.cli.logger.Debug("park: run active, skipping TTY inject (resume stays queued)",
+			zap.String("token", token))
+		return nil
+	}
 	if err := injectTTYLine("/resume " + token); err != nil {
 		b.cli.logger.Debug("park: TTY inject failed (auto-resume requires user keypress)",
 			zap.String("token", token), zap.Error(err))

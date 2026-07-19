@@ -402,6 +402,26 @@ type ChatCLI struct {
 	// enough to never hide a legitimate stale-token error.
 	recentlyResumedMu     sync.Mutex
 	recentlyResumedTokens map[string]time.Time
+
+	// activeParks tracks parks created by THIS session that are still
+	// waiting for their resume. While one exists, plain text typed at the
+	// prompt is captured as a directive for the parked agent (persisted
+	// into its snapshot) instead of being routed to chat mode — where the
+	// agent would never see it and the model answers with tool_call XML
+	// that chat never executes. Ordered oldest→newest; guarded by
+	// activeParkMu (the bridge and the REPL touch it from different
+	// goroutines).
+	activeParkMu sync.Mutex
+	activeParks  []activePark
+}
+
+// activePark is one waiting park owned by this session. ResumeAtDisplay
+// is the preformatted wallclock shown in the /park-note notice; HintShown
+// keeps the discoverability hint to one line per park.
+type activePark struct {
+	Token           string
+	ResumeAtDisplay string
+	HintShown       bool
 }
 
 // parkOutcome carries the resume-time payload from the bridge's
@@ -977,6 +997,14 @@ func (cli *ChatCLI) executor(in string) {
 		return
 	}
 
+	// /park-note <msg>: explicit directive for the parked agent. Plain
+	// text keeps its normal chat behavior even while a park is waiting —
+	// directing the agent is an opt-in action, not a mode change.
+	if in == "/park-note" || strings.HasPrefix(in, "/park-note ") {
+		cli.handleParkNoteCommand(strings.TrimSpace(strings.TrimPrefix(in, "/park-note")))
+		return
+	}
+
 	if strings.HasPrefix(in, "/") || in == "exit" || in == "quit" {
 		exit := cli.commandHandler.HandleCommand(context.Background(), in)
 		if !exit {
@@ -996,6 +1024,11 @@ func (cli *ChatCLI) executor(in string) {
 		fmt.Println(i18n.T("cli.error.no_provider_configured"))
 		return
 	}
+
+	// Discoverability hint (once per park): plain chat still works while
+	// an agent is parked, but the user may actually be talking TO the
+	// parked agent — surface /park-note before the chat turn runs.
+	cli.maybeShowParkNoteHint()
 
 	// If already processing, queue the message for later (type-ahead)
 	if cli.isExecuting.Load() {
