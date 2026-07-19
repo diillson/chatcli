@@ -6,8 +6,15 @@
  * Ensures every tool_use block in the conversation history has a matching
  * tool_result, and every tool_result references a valid tool_use.
  *
- * Inspired by openclaude's ensureToolResultPairing() which cross-message
- * tracks all tool_use IDs and generates synthetic error results for orphans.
+ * Pairing is POSITIONAL (block-scoped), not global: each assistant message
+ * that carries tool_calls owns the stretch of history up to the next
+ * assistant message, and its results are matched only inside that stretch.
+ * This is required for providers whose tool_call IDs are NOT globally
+ * unique — Moonshot/Kimi K3 emits deterministic per-turn IDs such as
+ * "web_fetch:0"/"web_fetch:1" that repeat on every turn, so a global
+ * id→result map silently pairs an old dangling call with a newer turn's
+ * result and ships an invalid history (API 400: "tool_call_ids did not
+ * have response messages").
  */
 package agent
 
@@ -31,7 +38,8 @@ const (
 type PairingRepairReport struct {
 	SyntheticResultsInjected int      // tool_use blocks without matching tool_result
 	OrphanResultsRemoved     int      // tool_result blocks without matching tool_use
-	DuplicateToolUsePruned   int      // duplicate tool_use IDs across messages
+	DuplicateToolUsePruned   int      // duplicate tool_use IDs within a single assistant message
+	ResultsRelocated         int      // results moved next to their tool_call past interposed messages
 	MissingToolUseIDs        []string // IDs of tool calls that had no result
 	OrphanToolResultIDs      []string // IDs of tool results that had no call
 }
@@ -40,21 +48,25 @@ type PairingRepairReport struct {
 func (r *PairingRepairReport) HasRepairs() bool {
 	return r.SyntheticResultsInjected > 0 ||
 		r.OrphanResultsRemoved > 0 ||
-		r.DuplicateToolUsePruned > 0
+		r.DuplicateToolUsePruned > 0 ||
+		r.ResultsRelocated > 0
 }
 
-// EnsureToolResultPairing validates and repairs the conversation history to ensure:
+// EnsureToolResultPairing validates and repairs the conversation history so that
+// every assistant message carrying ToolCalls is immediately followed by exactly
+// one tool result message per call — the shape every native tool API requires.
 //
-//  1. Every assistant message with ToolCalls has corresponding tool result messages
-//     with matching ToolCallIDs following it (before the next assistant message).
-//  2. Every tool result message references a tool_use ID that exists in a preceding
-//     assistant message.
-//  3. No duplicate tool_use IDs exist across the conversation.
+// Scope rules (per assistant block, in order):
 //
-// Repairs:
-//   - Missing tool results: injects synthetic error tool_result messages
-//   - Orphan tool results: removes them from history
-//   - Duplicate tool_use IDs: prunes all but the first occurrence
+//  1. Results are claimed from the stretch between the assistant message and
+//     the NEXT assistant message. A matching result that sits past interposed
+//     user/system messages is relocated to be adjacent to its call.
+//  2. Calls with no claimable result get a synthetic error result injected
+//     directly after the assistant message.
+//  3. Duplicate IDs WITHIN one assistant message are pruned (all but the first).
+//     The same ID reappearing in a LATER assistant message is legal — providers
+//     like Moonshot/Kimi reuse deterministic per-turn IDs.
+//  4. Tool result messages not claimed by any block are orphans and removed.
 //
 // Returns the repaired history and a report of what was changed.
 // If no repairs are needed, returns the original slice unchanged.
@@ -65,74 +77,19 @@ func EnsureToolResultPairing(history []models.Message, logger *zap.Logger) ([]mo
 		return history, report
 	}
 
-	// Phase 1: Collect all tool_use IDs and their positions
-	type toolUseInfo struct {
-		id       string
-		msgIndex int
-		name     string
-	}
+	claimed := make([]bool, len(history)) // tool results claimed by an assistant block
+	repaired := make([]models.Message, 0, len(history))
 
-	allToolUses := make(map[string]toolUseInfo) // id → info (first occurrence)
-	allToolResults := make(map[string]int)      // toolCallID → message index
-	seenToolUseIDs := make(map[string]bool)     // for dedup detection
+	for i := 0; i < len(history); i++ {
+		msg := history[i]
 
-	for i, msg := range history {
-		if msg.Role == "assistant" && len(msg.ToolCalls) > 0 {
-			for _, tc := range msg.ToolCalls {
-				if tc.ID == "" {
-					continue
-				}
-				if seenToolUseIDs[tc.ID] {
-					report.DuplicateToolUsePruned++
-					continue
-				}
-				seenToolUseIDs[tc.ID] = true
-				allToolUses[tc.ID] = toolUseInfo{id: tc.ID, msgIndex: i, name: tc.Name}
+		if msg.Role == "tool" {
+			if claimed[i] {
+				continue // already emitted next to its assistant block
 			}
-		}
-		if msg.Role == "tool" && msg.ToolCallID != "" {
-			allToolResults[msg.ToolCallID] = i
-		}
-	}
-
-	// Phase 2: Find mismatches
-	// tool_use without tool_result
-	missingResults := make(map[string]toolUseInfo)
-	for id, info := range allToolUses {
-		if _, hasResult := allToolResults[id]; !hasResult {
-			missingResults[id] = info
-			report.MissingToolUseIDs = append(report.MissingToolUseIDs, id)
-		}
-	}
-
-	// tool_result without tool_use
-	orphanResults := make(map[string]int)
-	for resultID, idx := range allToolResults {
-		if _, hasUse := allToolUses[resultID]; !hasUse {
-			orphanResults[resultID] = idx
-			report.OrphanToolResultIDs = append(report.OrphanToolResultIDs, resultID)
-		}
-	}
-
-	report.SyntheticResultsInjected = len(missingResults)
-	report.OrphanResultsRemoved = len(orphanResults)
-
-	if !report.HasRepairs() {
-		return history, report
-	}
-
-	// Phase 3: Build repaired history
-	repaired := make([]models.Message, 0, len(history)+len(missingResults))
-
-	// Track which orphan indices to skip
-	orphanIndices := make(map[int]bool)
-	for _, idx := range orphanResults {
-		orphanIndices[idx] = true
-	}
-
-	for i, msg := range history {
-		// Skip orphaned tool results
-		if orphanIndices[i] {
+			// Unclaimed tool result: no preceding block owns this ID → orphan.
+			report.OrphanResultsRemoved++
+			report.OrphanToolResultIDs = append(report.OrphanToolResultIDs, msg.ToolCallID)
 			if logger != nil {
 				logger.Warn("Removed orphaned tool result",
 					zap.String("tool_call_id", msg.ToolCallID),
@@ -141,45 +98,92 @@ func EnsureToolResultPairing(history []models.Message, logger *zap.Logger) ([]mo
 			continue
 		}
 
-		// Handle duplicate tool_use IDs in assistant messages
-		if msg.Role == "assistant" && len(msg.ToolCalls) > 0 && report.DuplicateToolUsePruned > 0 {
-			seen := make(map[string]bool)
-			dedupCalls := make([]models.ToolCall, 0, len(msg.ToolCalls))
-			for _, tc := range msg.ToolCalls {
-				if tc.ID != "" && seen[tc.ID] {
-					continue
-				}
-				seen[tc.ID] = true
-				dedupCalls = append(dedupCalls, tc)
-			}
-			msg.ToolCalls = dedupCalls
+		if msg.Role != "assistant" || len(msg.ToolCalls) == 0 {
+			repaired = append(repaired, msg)
+			continue
 		}
 
+		// Assistant block: prune intra-message duplicate IDs, then claim
+		// results from the stretch up to the next assistant message.
+		seen := make(map[string]bool, len(msg.ToolCalls))
+		calls := make([]models.ToolCall, 0, len(msg.ToolCalls))
+		for _, tc := range msg.ToolCalls {
+			if tc.ID != "" && seen[tc.ID] {
+				report.DuplicateToolUsePruned++
+				continue
+			}
+			seen[tc.ID] = true
+			calls = append(calls, tc)
+		}
+		if len(calls) < len(msg.ToolCalls) {
+			msg.ToolCalls = calls
+		}
 		repaired = append(repaired, msg)
 
-		// After an assistant message with tool calls, inject synthetic results
-		// for any tool_use IDs that have no corresponding tool_result
-		if msg.Role == "assistant" && len(msg.ToolCalls) > 0 {
-			for _, tc := range msg.ToolCalls {
-				if _, missing := missingResults[tc.ID]; missing {
-					synthetic := models.Message{
-						Role:       "tool",
-						Content:    SyntheticToolResultContent,
-						ToolCallID: tc.ID,
-					}
-					repaired = append(repaired, synthetic)
+		// Claim pass: first matching unclaimed result per call ID, scanning
+		// only until the next assistant message (that one owns what follows).
+		found := make(map[string]int, len(calls)) // call ID → history index
+		adjacentEnd := i + 1                      // end of the run of tool messages directly after the block
+		for adjacentEnd < len(history) && history[adjacentEnd].Role == "tool" {
+			adjacentEnd++
+		}
+		for j := i + 1; j < len(history); j++ {
+			if history[j].Role == "assistant" {
+				break
+			}
+			if history[j].Role != "tool" || claimed[j] {
+				continue
+			}
+			id := history[j].ToolCallID
+			if _, want := seen[id]; !want || id == "" {
+				continue
+			}
+			if _, dup := found[id]; dup {
+				continue
+			}
+			found[id] = j
+			claimed[j] = true
+		}
 
+		// Emission pass: one result per call, in call order — real when
+		// claimed, synthetic otherwise.
+		for _, tc := range calls {
+			if tc.ID == "" {
+				continue
+			}
+			if j, ok := found[tc.ID]; ok {
+				repaired = append(repaired, history[j])
+				if j >= adjacentEnd {
+					// It sat past an interposed non-tool message; emitting it
+					// here relocates it next to its call.
+					report.ResultsRelocated++
 					if logger != nil {
-						logger.Warn("Injected synthetic tool result for orphaned tool_use",
+						logger.Warn("Relocated displaced tool result next to its tool_call",
 							zap.String("tool_call_id", tc.ID),
-							zap.String("tool_name", tc.Name),
-							zap.Int("assistant_message_index", i))
+							zap.Int("from_index", j))
 					}
 				}
+				continue
+			}
+			repaired = append(repaired, models.Message{
+				Role:       "tool",
+				Content:    SyntheticToolResultContent,
+				ToolCallID: tc.ID,
+			})
+			report.SyntheticResultsInjected++
+			report.MissingToolUseIDs = append(report.MissingToolUseIDs, tc.ID)
+			if logger != nil {
+				logger.Warn("Injected synthetic tool result for orphaned tool_use",
+					zap.String("tool_call_id", tc.ID),
+					zap.String("tool_name", tc.Name),
+					zap.Int("assistant_message_index", i))
 			}
 		}
 	}
 
+	if !report.HasRepairs() {
+		return history, report
+	}
 	return repaired, report
 }
 

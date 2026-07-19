@@ -44,8 +44,14 @@ const (
 	memoryMinNewMessages = 4
 	// Minimum time between memory extraction runs.
 	memoryCooldown = 2 * time.Minute
-	// Timeout for the LLM call that extracts memory.
-	memoryExtractTimeout = 60 * time.Second
+	// Timeout for the LLM call that extracts memory. Sized for reasoning
+	// ("thinking") models: Kimi K3 / GLM / o-series routinely take 1-3 min
+	// on the extraction prompt (instructions + existing context + segment),
+	// and 60s produced steady "context deadline exceeded" failure streaks
+	// that surfaced as the user-visible "extração falhando" notice. Each
+	// provider attempt gets its own budget, so the chain still bails out of
+	// a truly hung provider.
+	memoryExtractTimeout = 180 * time.Second
 	// How often to check for compaction (6 hours).
 	compactionCheckInterval = 6 * time.Hour
 	// How often to check for daily note cleanup (24 hours).
