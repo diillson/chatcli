@@ -31,6 +31,7 @@ import (
 	"time"
 
 	"github.com/diillson/chatcli/cli/agent/park"
+	"github.com/diillson/chatcli/i18n"
 )
 
 // BuiltinParkPlugin is the @park tool.
@@ -385,8 +386,7 @@ func executeParkNote(inner string) (string, error) {
 	if len(short) > 8 {
 		short = short[:8]
 	}
-	return fmt.Sprintf("Directive recorded for parked agent %s. It will be delivered as a user instruction when that agent resumes; "+
-		"if it asks for a cadence/schedule change, the agent applies it on its next park cycle.", short), nil
+	return fmt.Sprintf(i18n.T("park.note.recorded"), short), nil
 }
 
 // parkFlagsToJSON converts ["--duration","5m","--note","ci"] into a

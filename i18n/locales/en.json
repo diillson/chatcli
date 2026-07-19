@@ -3133,6 +3133,7 @@
   "park.directive.queued": "noted for the parked agent (resumes %s) — /resume %s to wake it now",
   "park.cancel.usage": "Usage: /cancel-park <token>   (use /parked to list)",
   "park.cancel.job_failed": "failed to cancel scheduler job: %v",
+  "park.note.recorded": "Directive recorded for parked agent %s. It will be delivered as a user instruction when that agent resumes; if it asks for a cadence/schedule change, the agent applies it on its next park cycle.",
   "park.cancel.delete_failed": "failed to delete snapshot: %v",
   "park.cancel.ok": "Park %s cancelled and snapshot removed.",
   "park.resolve.empty": "park: empty token (use /parked to list)",

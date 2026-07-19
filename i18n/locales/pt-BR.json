@@ -3133,6 +3133,7 @@
   "park.directive.queued": "anotado para o agent estacionado (retoma %s) — /resume %s para acordar agora",
   "park.cancel.usage": "Uso: /cancel-park <token>   (use /parked para listar)",
   "park.cancel.job_failed": "falha ao cancelar job do scheduler: %v",
+  "park.note.recorded": "Diretiva registrada para o agent em park %s. Será entregue como instrução do usuário quando ele retomar; se pedir mudança de cadência/agenda, o agent aplica no próximo ciclo de park.",
   "park.cancel.delete_failed": "falha ao remover snapshot: %v",
   "park.cancel.ok": "Park %s cancelado e snapshot removido.",
   "park.resolve.empty": "park: token vazio (use /parked para listar)",
