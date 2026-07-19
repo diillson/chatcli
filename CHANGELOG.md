@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.165.1](https://github.com/diillson/chatcli/compare/v1.165.0...v1.165.1) (2026-07-19)
+
+
+### Bug Fixes
+
+* **agent:** close native tool_call batches on park and pair results positionally ([#1208](https://github.com/diillson/chatcli/issues/1208)) ([81eeea9](https://github.com/diillson/chatcli/commit/81eeea96a54793625f32e82ad5ebc37fb564b394))
+
 ## [1.165.0](https://github.com/diillson/chatcli/compare/v1.164.0...v1.165.0) (2026-07-17)
 
 
