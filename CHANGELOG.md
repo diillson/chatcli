@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.166.0](https://github.com/diillson/chatcli/compare/v1.165.1...v1.166.0) (2026-07-19)
+
+
+### Features
+
+* **park:** capture user messages typed while parked as resume directives ([#1210](https://github.com/diillson/chatcli/issues/1210)) ([ac14ea1](https://github.com/diillson/chatcli/commit/ac14ea1162c44122b433b4e5a77e4d5a6b793794))
+
 ## [1.165.1](https://github.com/diillson/chatcli/compare/v1.165.0...v1.165.1) (2026-07-19)
 
 
