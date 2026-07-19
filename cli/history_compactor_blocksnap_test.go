@@ -6,6 +6,7 @@
 package cli
 
 import (
+	"context"
 	"fmt"
 	"testing"
 
@@ -41,6 +42,56 @@ func TestSnapToToolBlockBoundary_MovesCutToOwningAssistant(t *testing.T) {
 	// Cuts on non-tool messages are untouched.
 	assert.Equal(t, 5, snapToToolBlockBoundary(history, 5, 1))
 	assert.Equal(t, 2, snapToToolBlockBoundary(history, 2, 1))
+}
+
+func TestEmergencyTruncate_ShortHistoryUnchanged(t *testing.T) {
+	hc := NewHistoryCompactor(zap.NewNop())
+	cfg := DefaultCompactConfig("MOONSHOT", "kimi-k3")
+	cfg.MinKeepRecent = 10
+
+	history := []models.Message{
+		{Role: "system", Content: "sys"},
+		{Role: "user", Content: "u"},
+		{Role: "assistant", Content: "a"},
+	}
+	out := hc.emergencyTruncate(history, cfg)
+	assert.Equal(t, history, out)
+}
+
+func TestStructuredSummarize_TooSmallReturnsUnchanged(t *testing.T) {
+	hc := NewHistoryCompactor(zap.NewNop())
+	cfg := DefaultCompactConfig("MOONSHOT", "kimi-k3")
+	cfg.MinKeepRecent = 2
+
+	history := []models.Message{
+		{Role: "system", Content: "sys"},
+		{Role: "user", Content: "u"},
+		{Role: "assistant", Content: "a"},
+		{Role: "user", Content: "u2"},
+	}
+	out, err := hc.structuredSummarize(context.Background(), history, nil, cfg)
+	require.NoError(t, err)
+	assert.Equal(t, history, out)
+}
+
+func TestStructuredSummarize_SnapKeepsToolBlockIntact(t *testing.T) {
+	hc := NewHistoryCompactor(zap.NewNop())
+	cfg := DefaultCompactConfig("MOONSHOT", "kimi-k3")
+	cfg.MinKeepRecent = 1
+
+	// Cut would land on the tool result (len-1); the snap must pull the
+	// whole block into the verbatim tail, leaving < 4 middle messages so
+	// summarization is skipped without any LLM call (nil client is safe).
+	history := []models.Message{
+		{Role: "system", Content: "sys"},
+		{Role: "user", Content: "u1"},
+		{Role: "user", Content: "u2"},
+		{Role: "assistant", ToolCalls: []models.ToolCall{{ID: "web_fetch:0", Name: "web_fetch"}}},
+		models.NewToolResultMessage("web_fetch:0", "out", false, ""),
+	}
+	out, err := hc.structuredSummarize(context.Background(), history, nil, cfg)
+	require.NoError(t, err)
+	assert.True(t, agent.ValidateToolResultPairing(out))
 }
 
 func TestEmergencyTruncate_NeverOrphansToolResults(t *testing.T) {
