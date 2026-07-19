@@ -2093,6 +2093,11 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 					renderer.Colorize(
 						i18n.T("agent.early_exit.stagnation", repeats),
 						agent.ColorYellow))
+				// Close the just-persisted native batch first: stagnation
+				// fires BEFORE execution, so without this the run ends with
+				// assistant(tool_calls) + user — the dangling shape strict
+				// providers reject on the next request.
+				a.closeNativeBatch(nativeToolCalls, nil, toolResultNotExecutedStagnation)
 				// Acknowledge the partial assistant text so a later
 				// manual continuation starts from a consistent state.
 				a.cli.history = append(a.cli.history, models.Message{
@@ -2439,9 +2444,13 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 				a.cli.history = append(a.cli.history, models.Message{Role: "user", Content: feedback})
 
 				// If there are also tool_calls in the same response, skip them —
-				// the orchestrator should use agent_calls OR tool_calls, not both in the same turn.
+				// the orchestrator should use agent_calls OR tool_calls, not both
+				// in the same turn. Native calls must still be CLOSED: leaving
+				// them unanswered ships the dangling shape strict providers 400
+				// on whenever the loop terminates right after this turn.
 				if len(toolCalls) > 0 {
 					a.logger.Info("Skipping tool_calls because agent_calls were dispatched in this turn")
+					a.closeNativeBatch(nativeToolCalls, nil, toolResultNotExecutedAgentCalls)
 				}
 				showTurnStats()
 				continue
@@ -2692,6 +2701,12 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 						}
 
 						if ctx.Err() != nil {
+							// Close the batch before bailing: the assistant
+							// tool_calls message is already persisted, and an
+							// unanswered batch left behind is exactly the
+							// dangling shape strict providers 400 on — in
+							// chat mode too, which has no repair pass.
+							a.closeNativeBatch(nativeToolCalls, turnToolResults, toolResultNotExecutedCanceled)
 							return ctx.Err()
 						}
 					} else {
@@ -2874,8 +2889,13 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 								renderer.RenderStreamBoxEnd(agent.ColorPurple)
 							}
 
-							// Se o contexto foi cancelado (Ctrl+C), propaga imediatamente
+							// Se o contexto foi cancelado (Ctrl+C), propaga
+							// imediatamente — fechando o batch antes, para o
+							// histórico durável nunca ficar com tool_calls
+							// sem resposta (o formato que providers estritos
+							// rejeitam com 400, inclusive via chat).
 							if ctx.Err() != nil {
+								a.closeNativeBatch(nativeToolCalls, turnToolResults, toolResultNotExecutedCanceled)
 								return ctx.Err()
 							}
 
@@ -2893,6 +2913,7 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 							// as two `╰────╮` rows.
 							if req, parked := park.AsParkError(execErr); parked {
 								var pendingID string
+								var beforeClosure []models.Message
 								if i < len(nativeToolCalls) {
 									pendingID = nativeToolCalls[i].ID
 									// Close every OTHER native call of this
@@ -2907,10 +2928,20 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 									// park call itself stays pending —
 									// RunResumed pairs it with the real park
 									// outcome.
+									beforeClosure = a.cli.history
 									a.cli.history = insertStructuredToolResults(a.cli.history,
 										buildParkBatchClosure(nativeToolCalls, turnToolResults, i))
 								}
-								return a.handleAgentPark(ctx, req, pendingID, toolName)
+								parkErr := a.handleAgentPark(ctx, req, pendingID, toolName)
+								if parkErr != nil && !errors.Is(parkErr, errAgentParkedRequested) && beforeClosure != nil {
+									// Park never armed (snapshot save / enqueue
+									// failed): the closures claiming "the agent
+									// parked" would be false history. Restore
+									// the pre-closure slice — the next turn's
+									// pairing repair closes the batch honestly.
+									a.cli.history = beforeClosure
+								}
+								return parkErr
 							}
 						}
 					}
@@ -2987,6 +3018,21 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 					toolOutput, _ = a.cli.compressionLayer.CompressToolOutput(tc.Name, toolOutput)
 				}
 
+				// Per-tool truncation (Item 6) BEFORE the structured capture:
+				// turnToolResults feeds the persistent history and park
+				// snapshots via the structured emission paths, so an
+				// untruncated multi-hundred-KB fetch must never be captured.
+				// Plugins that implement plugins.TruncationAware get their
+				// own per-call cap; the rest use the global default. Errors
+				// are left verbatim so the model can debug them in full.
+				if execErr == nil {
+					maxChars := plugins.DefaultMaxResultChars
+					if p, ok := a.cli.pluginManager.GetPlugin(tc.Name); ok && p != nil {
+						maxChars = plugins.EffectiveMaxResultChars(p)
+					}
+					toolOutput = plugins.TruncateForLLM(toolOutput, maxChars)
+				}
+
 				// Capture the structured outcome for downstream phases.
 				// Duration is wall-clock for this single tool — Fase 3 will
 				// also use it to size the per-batch concurrency budget.
@@ -3018,18 +3064,9 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 					break // Fail-Fast: Para a execução do lote
 				}
 
-				// Per-tool truncation (Item 6). Plugins that
-				// implement plugins.TruncationAware get their own
-				// per-call cap; the rest use the global default.
-				// We look the plugin up again here because the
-				// inner-scope `plugin` variable from the dispatch
-				// block is no longer in scope at this site.
-				maxChars := plugins.DefaultMaxResultChars
-				if p, ok := a.cli.pluginManager.GetPlugin(tc.Name); ok && p != nil {
-					maxChars = plugins.EffectiveMaxResultChars(p)
-				}
-				toolOutput = plugins.TruncateForLLM(toolOutput, maxChars)
-
+				// Per-tool truncation already applied above, before the
+				// structured capture — both the legacy concatenation and
+				// turnToolResults see the same bounded output.
 				batchOutputBuilder.WriteString(toolOutput)
 				batchOutputBuilder.WriteString("\n\n")
 				successCount++

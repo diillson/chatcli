@@ -237,11 +237,25 @@ func (mw *memoryWorker) runRollups(ctx context.Context) {
 }
 
 func (mw *memoryWorker) maybeExtract(ctx context.Context) {
+	// Single read of the slice header: the agent loop swaps cli.history for
+	// repaired/compacted (possibly SHORTER) slices mid-run, so re-reading it
+	// between the len check and the slice expression can panic on bounds.
+	// Every access below goes through this snapshot.
+	hist := mw.cli.history
+	historyLen := len(hist)
+
 	mw.mu.Lock()
 	lastIdx := mw.lastProcessedIdx
+	if lastIdx > historyLen {
+		// History shrank behind the watermark (pairing repair removed
+		// orphans, compaction summarized, park resume restored a snapshot).
+		// Clamp both the local and the stored watermark so the next delta
+		// is computed against reality.
+		lastIdx = historyLen
+		mw.lastProcessedIdx = historyLen
+	}
 	mw.mu.Unlock()
 
-	historyLen := len(mw.cli.history)
 	newMessages := historyLen - lastIdx
 
 	// One gate for back-pressure, cadence (cooldown + min new messages) and the
@@ -253,7 +267,7 @@ func (mw *memoryWorker) maybeExtract(ctx context.Context) {
 
 	// Extract the new messages (copy to avoid races)
 	messagesToProcess := make([]models.Message, newMessages)
-	copy(messagesToProcess, mw.cli.history[lastIdx:])
+	copy(messagesToProcess, hist[lastIdx:])
 
 	mw.logger.Debug("Memory worker: extracting annotations",
 		zap.Int("new_messages", newMessages),

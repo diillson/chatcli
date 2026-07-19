@@ -252,21 +252,34 @@ func (cli *ChatCLI) resolveParkToken(input string) (string, error) {
 //
 // outcome and detail come from either the AgentResume payload (auto)
 // or are fixed strings ("manual", "") for explicit /resume.
-func (cli *ChatCLI) runResumeForToken(ctx context.Context, token, outcome, detail string) {
+func (cli *ChatCLI) runResumeForToken(ctx context.Context, token, outcome, detail string) bool {
 	snap, err := park.Load(token)
 	if err != nil {
 		fmt.Println(colorize("  ⚠ "+i18n.T("park.resume.load_failed", err), ColorYellow))
-		return
+		return false
 	}
 	if cli.agentMode == nil {
 		cli.agentMode = NewAgentMode(cli, cli.logger)
 	}
+	var runErr error
 	cli.runWithCancellation(ctx, "Park Resume", func(ctx context.Context) error {
-		return cli.agentMode.RunResumed(ctx, snap, outcome, detail)
+		runErr = cli.agentMode.RunResumed(ctx, snap, outcome, detail)
+		return runErr
 	})
 	if cli.memWorker != nil {
 		cli.memWorker.nudge(ctx)
 	}
+	if runErr != nil && !errors.Is(runErr, context.Canceled) {
+		// RunResumed kept the snapshot for retry — surface the recovery
+		// path, otherwise the user only sees the failure print and has no
+		// idea an immediate /resume works.
+		short := token
+		if len(short) > 8 {
+			short = short[:8]
+		}
+		fmt.Println(colorize("  ⚠ "+i18n.T("park.resume.retry_hint", short), ColorYellow))
+	}
+	return runErr == nil
 }
 
 // drainPendingResumes consumes the bridge-populated queue once. Called
@@ -304,8 +317,12 @@ func (cli *ChatCLI) drainPendingResumes(ctx context.Context) bool {
 			outcome = out.Outcome
 			detail = out.Detail
 		}
-		cli.runResumeForToken(ctx, token, outcome, detail)
-		cli.markRecentlyResumed(token)
+		// Stamp the idempotency guard ONLY on success: a failed resume keeps
+		// its snapshot precisely so the user can retry with /resume, and the
+		// 30s recently-resumed window would silently swallow that retry.
+		if cli.runResumeForToken(ctx, token, outcome, detail) {
+			cli.markRecentlyResumed(token)
+		}
 		processed = true
 	}
 	return processed

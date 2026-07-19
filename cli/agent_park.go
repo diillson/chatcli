@@ -379,9 +379,17 @@ func (a *AgentMode) RunResumed(ctx context.Context, snap *park.Snapshot, outcome
 		return nil
 	}
 	if err != nil {
-		// Real failure (API error, cancel): KEEP the snapshot so the user
-		// can retry with /resume <token> instead of the park dying silently
-		// on a transient error. parkPrune / Sweep collects it if abandoned.
+		// Deliberate abort (Ctrl+C): retire the snapshot. The scheduler job
+		// that fired this resume is already consumed, so a kept snapshot
+		// would show up in /parked looking armed while nothing will ever
+		// auto-fire it — a zombie park lying to the user.
+		if errors.Is(err, context.Canceled) {
+			_ = park.Delete(snap.Token)
+			return err
+		}
+		// Transient failure (API error): KEEP the snapshot so the user can
+		// retry with /resume <token> instead of the park dying silently.
+		// parkPrune / Sweep collects it if abandoned.
 		a.logger.Warn("park: resumed run failed; snapshot kept for manual /resume",
 			zap.String("token", snap.Token), zap.Error(err))
 		return err

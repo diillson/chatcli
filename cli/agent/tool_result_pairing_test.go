@@ -190,6 +190,61 @@ func TestEnsureToolResultPairing_ResultBeyondNextAssistantNotClaimed(t *testing.
 	assert.Equal(t, "interleaved", repaired[2].Content)
 }
 
+func TestEnsureToolResultPairing_SyntheticsAreErrorMarked(t *testing.T) {
+	history := []models.Message{
+		assistantWithCalls("web_fetch:0"),
+	}
+
+	repaired, report := EnsureToolResultPairing(history, nil)
+
+	require.Equal(t, 1, report.SyntheticResultsInjected)
+	require.Len(t, repaired, 2)
+	// The synthetic must surface as an ERROR on the wire (OpenAI [ERROR:...]
+	// marker / Anthropic is_error) so the model never reads an interrupted
+	// call as a success.
+	assert.True(t, repaired[1].IsError)
+	assert.Equal(t, SyntheticToolResultErrorCode, repaired[1].ErrorCode)
+}
+
+func TestEnsureToolResultPairing_EmptyIDCallPruned(t *testing.T) {
+	history := []models.Message{
+		{Role: "assistant", ToolCalls: []models.ToolCall{
+			{ID: "", Name: "web_fetch", Type: "function"},
+			{ID: "web_fetch:1", Name: "web_fetch", Type: "function"},
+		}},
+		toolResult("web_fetch:1", "ok"),
+	}
+
+	repaired, report := EnsureToolResultPairing(history, nil)
+
+	// The empty-ID call can never be paired and would serialize an invalid
+	// empty id — it is pruned, and the history stabilizes (a second pass
+	// reports nothing).
+	assert.Equal(t, 1, report.DuplicateToolUsePruned)
+	require.Len(t, repaired, 2)
+	require.Len(t, repaired[0].ToolCalls, 1)
+	assert.Equal(t, "web_fetch:1", repaired[0].ToolCalls[0].ID)
+
+	again, report2 := EnsureToolResultPairing(repaired, nil)
+	assert.False(t, report2.HasRepairs())
+	assert.Equal(t, repaired, again)
+}
+
+func TestEnsureToolResultPairing_OutOfOrderAdjacentIsValid(t *testing.T) {
+	// Results adjacent but in reverse call order: the API only requires the
+	// set to follow the block, so this must NOT trigger a rewrite.
+	history := []models.Message{
+		assistantWithCalls("web_fetch:0", "web_fetch:1"),
+		toolResult("web_fetch:1", "b"),
+		toolResult("web_fetch:0", "a"),
+	}
+
+	repaired, report := EnsureToolResultPairing(history, nil)
+
+	assert.False(t, report.HasRepairs())
+	assert.Equal(t, history, repaired)
+}
+
 func TestCountPendingToolCalls_LastBlockScoped(t *testing.T) {
 	history := []models.Message{
 		assistantWithCalls("web_fetch:0", "web_fetch:1"),
