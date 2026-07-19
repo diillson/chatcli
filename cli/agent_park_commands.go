@@ -334,6 +334,32 @@ func (cli *ChatCLI) drainPendingResumes(ctx context.Context) bool {
 	return processed
 }
 
+// hasPendingResume reports whether token is already sitting in the
+// pending auto-resume queue. The agent stdin drain uses it to swallow
+// stray "/resume <token>" lines injected by the scheduler bridge that
+// raced with an active run — they must not reach the LLM as user text.
+func (cli *ChatCLI) hasPendingResume(token string) bool {
+	cli.pendingResumeMu.Lock()
+	defer cli.pendingResumeMu.Unlock()
+	for _, t := range cli.pendingResumeQueue {
+		if t == token {
+			return true
+		}
+	}
+	return false
+}
+
+// parsePendingResumeLine extracts the token from a "/resume <token>"
+// line exactly as typed/injected — no prefix resolution, no fuzzy
+// matching. Only the canonical two-field form is accepted.
+func parsePendingResumeLine(line string) (string, bool) {
+	fields := strings.Fields(line)
+	if len(fields) == 2 && fields[0] == "/resume" {
+		return fields[1], true
+	}
+	return "", false
+}
+
 // dropPendingResume removes a token from the pending queue and the
 // outcome map. Used by /cancel-park to undo a queued auto-resume.
 func (cli *ChatCLI) dropPendingResume(token string) {

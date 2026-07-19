@@ -3125,6 +3125,7 @@
   "park.resume.usage": "Uso: /resume <token>   (token pode ser prefixo único; use /parked para listar)",
   "park.resume.load_failed": "falha ao carregar snapshot do park: %v",
   "park.resume.retry_hint": "resume falhou e o snapshot foi mantido — use /resume %s para tentar novamente",
+  "park.resume.queued_while_busy": "resume do park %s enfileirado — dispara automaticamente quando este loop terminar",
   "park.note.usage": "uso: /park-note <mensagem> — envia uma diretiva para o agent estacionado (entregue no resume)",
   "park.note.none": "nenhum agent estacionado nesta sessão — nada para anotar",
   "park.note.failed": "falha ao gravar a diretiva: %v",

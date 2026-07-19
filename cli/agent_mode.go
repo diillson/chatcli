@@ -602,6 +602,16 @@ func (a *AgentMode) drainStdinToQueue() string {
 			if line == "" {
 				continue // skip empty lines (bare Enter presses)
 			}
+			// Swallow scheduler-injected "/resume <token>" lines whose
+			// token is already queued for auto-resume (the bridge may
+			// have injected while this loop was starting, before the
+			// isExecuting guard flipped). The queued resume still fires
+			// via drainPendingResumes once this loop exits — the line
+			// itself must not reach the LLM as a user instruction.
+			if token, ok := parsePendingResumeLine(line); ok && a.cli.hasPendingResume(token) {
+				fmt.Println(colorize(" ⏸ "+i18n.T("park.resume.queued_while_busy", token), ColorCyan))
+				continue
+			}
 			if first == "" {
 				first = line
 			} else {
