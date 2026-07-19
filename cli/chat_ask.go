@@ -110,7 +110,12 @@ func (cli *ChatCLI) executeChatAskNative(
 ) (string, error) {
 	tools := buildChatExceptionTools(askOn, kbOn, gvOn, memOn)
 	prompt := userInput + additionalContext
-	history := tempHistory
+	// The chat temp history copies agent-mode messages verbatim, ToolCalls
+	// included. An agent run that ended on a non-standard exit (cancel,
+	// stagnation) can have left dangling tool_calls that only the AGENT
+	// pipeline repairs — repair the outgoing copy here or strict
+	// OpenAI-compat providers reject the request with a 400.
+	history, _ := agent.EnsureToolResultPairing(tempHistory, cli.logger)
 	gvDone := false
 
 	for round := 0; ; round++ {

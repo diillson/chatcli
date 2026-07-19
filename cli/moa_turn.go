@@ -141,6 +141,11 @@ func (cli *ChatCLI) runMoaTurnNative(
 		tools = append(tools, memoryRecallToolDefinition())
 	}
 
+	// Repair tool_call/tool_result pairing on the outgoing copy: the shared
+	// history can carry dangling tool_calls from an agent run that ended on
+	// a non-standard exit, and this WithTools path has no other repair layer.
+	history, _ = agent.EnsureToolResultPairing(history, cli.logger)
+
 	for round := 0; ; round++ {
 		resp, err := tac.SendPromptWithTools(ctx, prompt, history, tools, 0)
 		if err != nil {

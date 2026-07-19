@@ -370,11 +370,34 @@ func (a *AgentMode) RunResumed(ctx context.Context, snap *park.Snapshot, outcome
 	maxTurns := AgentMaxTurns()
 	err := a.processAIResponseAndAct(ctx, maxTurns)
 
-	// Successful completion (or any non-park error): retire the snapshot.
-	if !errors.Is(err, errAgentParkedRequested) {
-		_ = park.Delete(snap.Token)
+	// Parking again mid-resume is a SUCCESSFUL suspension, exactly like the
+	// sentinel handling in Run(): a new snapshot + scheduler job were just
+	// created for the next cycle. Returning the sentinel here made
+	// runWithCancellation print it as "❌ Erro na execução" on every
+	// monitoring cycle (park → resume → park again).
+	if errors.Is(err, errAgentParkedRequested) {
+		return nil
 	}
-	return err
+	if err != nil {
+		// Deliberate abort (Ctrl+C): retire the snapshot. The scheduler job
+		// that fired this resume is already consumed, so a kept snapshot
+		// would show up in /parked looking armed while nothing will ever
+		// auto-fire it — a zombie park lying to the user.
+		if errors.Is(err, context.Canceled) {
+			_ = park.Delete(snap.Token)
+			return err
+		}
+		// Transient failure (API error): KEEP the snapshot so the user can
+		// retry with /resume <token> instead of the park dying silently.
+		// parkPrune / Sweep collects it if abandoned.
+		a.logger.Warn("park: resumed run failed; snapshot kept for manual /resume",
+			zap.String("token", snap.Token), zap.Error(err))
+		return err
+	}
+
+	// Successful completion: retire the snapshot.
+	_ = park.Delete(snap.Token)
+	return nil
 }
 
 // buildParkResumeMessage builds the synthetic tool result the LLM sees

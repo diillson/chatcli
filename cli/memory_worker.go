@@ -44,8 +44,14 @@ const (
 	memoryMinNewMessages = 4
 	// Minimum time between memory extraction runs.
 	memoryCooldown = 2 * time.Minute
-	// Timeout for the LLM call that extracts memory.
-	memoryExtractTimeout = 60 * time.Second
+	// Timeout for the LLM call that extracts memory. Sized for reasoning
+	// ("thinking") models: Kimi K3 / GLM / o-series routinely take 1-3 min
+	// on the extraction prompt (instructions + existing context + segment),
+	// and 60s produced steady "context deadline exceeded" failure streaks
+	// that surfaced as the user-visible "extração falhando" notice. Each
+	// provider attempt gets its own budget, so the chain still bails out of
+	// a truly hung provider.
+	memoryExtractTimeout = 180 * time.Second
 	// How often to check for compaction (6 hours).
 	compactionCheckInterval = 6 * time.Hour
 	// How often to check for daily note cleanup (24 hours).
@@ -231,11 +237,25 @@ func (mw *memoryWorker) runRollups(ctx context.Context) {
 }
 
 func (mw *memoryWorker) maybeExtract(ctx context.Context) {
+	// Single read of the slice header: the agent loop swaps cli.history for
+	// repaired/compacted (possibly SHORTER) slices mid-run, so re-reading it
+	// between the len check and the slice expression can panic on bounds.
+	// Every access below goes through this snapshot.
+	hist := mw.cli.history
+	historyLen := len(hist)
+
 	mw.mu.Lock()
 	lastIdx := mw.lastProcessedIdx
+	if lastIdx > historyLen {
+		// History shrank behind the watermark (pairing repair removed
+		// orphans, compaction summarized, park resume restored a snapshot).
+		// Clamp both the local and the stored watermark so the next delta
+		// is computed against reality.
+		lastIdx = historyLen
+		mw.lastProcessedIdx = historyLen
+	}
 	mw.mu.Unlock()
 
-	historyLen := len(mw.cli.history)
 	newMessages := historyLen - lastIdx
 
 	// One gate for back-pressure, cadence (cooldown + min new messages) and the
@@ -247,7 +267,7 @@ func (mw *memoryWorker) maybeExtract(ctx context.Context) {
 
 	// Extract the new messages (copy to avoid races)
 	messagesToProcess := make([]models.Message, newMessages)
-	copy(messagesToProcess, mw.cli.history[lastIdx:])
+	copy(messagesToProcess, hist[lastIdx:])
 
 	mw.logger.Debug("Memory worker: extracting annotations",
 		zap.Int("new_messages", newMessages),

@@ -312,6 +312,7 @@ func (hc *HistoryCompactor) structuredSummarize(
 	}
 
 	recentStart := len(history) - cfg.MinKeepRecent
+	recentStart = snapToToolBlockBoundary(history, recentStart, systemEnd)
 	if recentStart <= systemEnd {
 		// Not enough messages to split — nothing to summarize
 		return history, nil
@@ -366,6 +367,33 @@ func (hc *HistoryCompactor) structuredSummarize(
 	return result, nil
 }
 
+// snapToToolBlockBoundary moves a keep-recent cut point so it never splits an
+// assistant tool_calls message from its tool results. A cut landing on a
+// role:"tool" message would summarize/drop the owning assistant message and
+// leave orphan results at the head of the kept tail — which the agent-mode
+// pairing repair then deletes (losing the freshest real outputs) and which
+// chat-mode WithTools serialization has no repair for at all. The cut is
+// moved LEFT to the owning assistant-with-calls message so the whole block
+// stays in the verbatim tail; anything interposed between them belongs to
+// the block and moves with it.
+func snapToToolBlockBoundary(history []models.Message, recentStart, systemEnd int) int {
+	if recentStart <= systemEnd || recentStart >= len(history) {
+		return recentStart
+	}
+	if history[recentStart].Role != "tool" {
+		return recentStart
+	}
+	for i := recentStart - 1; i >= systemEnd; i-- {
+		if history[i].Role == "assistant" {
+			if len(history[i].ToolCalls) > 0 {
+				return i
+			}
+			break // plain assistant: the tool tail is already orphaned upstream
+		}
+	}
+	return recentStart
+}
+
 // emergencyTruncate is the last resort: drops middle messages without summarization.
 func (hc *HistoryCompactor) emergencyTruncate(history []models.Message, cfg CompactConfig) []models.Message {
 	systemEnd := 0
@@ -383,6 +411,7 @@ func (hc *HistoryCompactor) emergencyTruncate(history []models.Message, cfg Comp
 	}
 
 	recentStart := len(history) - keepRecent
+	recentStart = snapToToolBlockBoundary(history, recentStart, systemEnd)
 	if recentStart <= systemEnd {
 		return history
 	}
