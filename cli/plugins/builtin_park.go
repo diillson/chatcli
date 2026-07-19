@@ -5,16 +5,20 @@
  * (cli/agent_mode.go) detects the sentinel, snapshots state, schedules
  * the resume job, and returns to the user prompt.
  *
- * Subcommands (semantically the four park modes):
+ * Subcommands (the four park modes plus management):
  *
  *   delay   {duration}              fixed timer
  *   until   {when}                  wallclock RFC3339 / "in 5m" / "+5m"
  *   for_url {url, interval, deadline, success_when?}  HTTP polling
  *   for_cmd {cmd,  interval, deadline, success_when?} shell polling
+ *   list    —                       inspect waiting parks (any session)
+ *   note    {token?, text}          leave a directive for a parked agent
  *
- * The plugin does NOT touch the scheduler directly — that is the agent
+ * The park modes do NOT touch the scheduler directly — that is the agent
  * loop's responsibility, because only the loop has the live snapshot of
  * the chat history and tool counters at the exact suspension point.
+ * list/note act on the durable snapshots only, which is what makes them
+ * safe from ANY agent, including one running while another is parked.
  */
 package plugins
 
@@ -58,6 +62,10 @@ Subcommands:
             interval:"30s", deadline:"10m",
             success_when?:"exit=0"|"body contains:completed"|"body matches:^success$",
             note?}
+  list     {}                      — inspect parked agents (token, mode, wait, pending directives)
+  note     {token?:"<prefix>", text:"..."} — leave a directive for a parked agent
+            (newest park when token omitted; delivered at its resume — use it to
+            inform, redirect, or ask it to change its park cadence next cycle)
 
 When the park completes (timer fires, probe matches, or deadline passes)
 the agent resumes from where it stopped and a synthetic tool result with
@@ -140,6 +148,25 @@ func (*BuiltinParkPlugin) Schema() string {
 					`{"cmd":"for_cmd","args":{"cmd":"terraform plan -detailed-exitcode -no-color","interval":"45s","deadline":"15m","success_when":"exit=0"}}`,
 				},
 			},
+			{
+				"name":        "list",
+				"description": "List every parked agent (any session): token, mode, wait parameters, pending directive count. Use before note.",
+				"examples": []string{
+					`{"cmd":"list"}`,
+				},
+			},
+			{
+				"name":        "note",
+				"description": "Leave a directive for a parked agent. Delivered as a user instruction when it resumes — use it to inform it of new facts, redirect its task, or ask it to change its park cadence on the next cycle.",
+				"flags": []map[string]interface{}{
+					{"name": "token", "type": "string", "description": "Token prefix from list; newest park when omitted"},
+					{"name": "text", "type": "string", "required": true, "description": "The directive text"},
+				},
+				"examples": []string{
+					`{"cmd":"note","args":{"token":"b733521e","text":"Mude o ciclo para 5m e inclua estatísticas de posse."}}`,
+					`{"cmd":"note","args":{"text":"O deploy terminou — valide e encerre o monitoramento."}}`,
+				},
+			},
 		},
 	}
 	data, _ := json.Marshal(schema)
@@ -162,6 +189,22 @@ func (p *BuiltinParkPlugin) ExecuteWithStream(ctx context.Context, args []string
 	cmd, inner, err := parseParkInvocation(args)
 	if err != nil {
 		return "", fmt.Errorf("@park: %w", err)
+	}
+
+	// Management subcommands act on OTHER parked agents' snapshots and
+	// execute directly — no loop suspension involved. This is what lets a
+	// second agent inspect a waiting park and leave directives for it
+	// (including cadence changes the parked agent applies on its next
+	// cycle) instead of being blind to a sibling's schedule.
+	switch cmd {
+	case "list":
+		return executeParkList()
+	case "note":
+		out, nerr := executeParkNote(inner)
+		if nerr != nil {
+			return "", fmt.Errorf("@park: %w", nerr)
+		}
+		return out, nil
 	}
 
 	req, err := buildParkRequest(cmd, inner)
@@ -198,7 +241,7 @@ func parseParkInvocation(args []string) (string, string, error) {
 		}
 		canon := canonicalParkCmd(cmdStr)
 		if canon == "" {
-			return "", "", fmt.Errorf("missing or unknown cmd %q (valid: delay|until|for_url|for_cmd)", cmdStr)
+			return "", "", fmt.Errorf("missing or unknown cmd %q (valid: delay|until|for_url|for_cmd|list|note)", cmdStr)
 		}
 		var inner string
 		if rargs, ok := raw["args"]; ok && len(rargs) > 0 {
@@ -237,8 +280,113 @@ func canonicalParkCmd(s string) string {
 		return "for_url"
 	case "for_cmd", "cmd", "shell", "poll_cmd":
 		return "for_cmd"
+	case "list", "parked", "status":
+		return "list"
+	case "note", "directive", "tell", "message":
+		return "note"
 	}
 	return ""
+}
+
+// executeParkList renders every waiting park snapshot for the model:
+// token, wait description, note, age and queued directive count. This is
+// how an agent discovers that a sibling loop is parked before deciding to
+// message it with `note`.
+func executeParkList() (string, error) {
+	snaps, _ := park.List()
+	if len(snaps) == 0 {
+		return "No parked agents.", nil
+	}
+	var sb strings.Builder
+	fmt.Fprintf(&sb, "%d parked agent(s), newest first:\n", len(snaps))
+	for _, s := range snaps {
+		short := s.Token
+		if len(short) > 8 {
+			short = short[:8]
+		}
+		fmt.Fprintf(&sb, "- token=%s mode=%s", short, s.Park.Mode)
+		switch s.Park.Mode {
+		case park.ModeDelay:
+			fmt.Fprintf(&sb, " duration=%s", s.Park.Delay)
+		case park.ModeUntil:
+			fmt.Fprintf(&sb, " until=%s", s.Park.Until.Format(time.RFC3339))
+		case park.ModeForURL:
+			fmt.Fprintf(&sb, " url=%s interval=%s deadline=%s", s.Park.URL, s.Park.Interval, s.Park.Deadline.Format(time.RFC3339))
+		case park.ModeForCmd:
+			fmt.Fprintf(&sb, " interval=%s deadline=%s", s.Park.Interval, s.Park.Deadline.Format(time.RFC3339))
+		}
+		if s.Park.Note != "" {
+			fmt.Fprintf(&sb, " note=%q", s.Park.Note)
+		}
+		if len(s.PendingUserDirectives) > 0 {
+			fmt.Fprintf(&sb, " pending_directives=%d", len(s.PendingUserDirectives))
+		}
+		fmt.Fprintf(&sb, " created=%s\n", s.CreatedAt.Format(time.RFC3339))
+	}
+	sb.WriteString("\nUse {\"cmd\":\"note\",\"args\":{\"token\":\"<prefix>\",\"text\":\"...\"}} to leave a directive; it is delivered when that agent resumes.")
+	return sb.String(), nil
+}
+
+// executeParkNote appends a directive to a waiting park's snapshot.
+// Args: {token?: prefix, text}. Without token, the newest park wins.
+// Accepts text/message/msg/directive as the text key — arg parsing is
+// deliberately lenient so a model paraphrase still lands.
+func executeParkNote(inner string) (string, error) {
+	var raw map[string]any
+	if strings.TrimSpace(inner) != "" {
+		if err := json.Unmarshal([]byte(inner), &raw); err != nil {
+			return "", fmt.Errorf(`note: parse args: %w. Expected {"token":"<prefix>","text":"..."}`, err)
+		}
+	}
+	str := func(keys ...string) string {
+		for _, k := range keys {
+			if v, ok := raw[k]; ok {
+				if s, ok := v.(string); ok && strings.TrimSpace(s) != "" {
+					return strings.TrimSpace(s)
+				}
+			}
+		}
+		return ""
+	}
+	text := str("text", "message", "msg", "directive", "note")
+	if text == "" {
+		return "", errors.New(`note: missing text. Expected {"token":"<prefix>","text":"..."}`)
+	}
+	tokenPrefix := str("token", "park", "id")
+
+	snaps, _ := park.List()
+	if len(snaps) == 0 {
+		return "", errors.New("note: no parked agents to message")
+	}
+	var target *park.Snapshot
+	if tokenPrefix == "" {
+		target = snaps[0] // newest first
+	} else {
+		var matches []*park.Snapshot
+		for _, s := range snaps {
+			if strings.HasPrefix(s.Token, tokenPrefix) {
+				matches = append(matches, s)
+			}
+		}
+		switch len(matches) {
+		case 0:
+			return "", fmt.Errorf("note: no parked agent matches token prefix %q (use cmd=list)", tokenPrefix)
+		case 1:
+			target = matches[0]
+		default:
+			return "", fmt.Errorf("note: token prefix %q is ambiguous (%d matches — use cmd=list)", tokenPrefix, len(matches))
+		}
+	}
+
+	if err := park.AppendDirective(target.Token, text); err != nil {
+		return "", fmt.Errorf("note: %w", err)
+	}
+	short := target.Token
+	if len(short) > 8 {
+		short = short[:8]
+	}
+	return fmt.Sprintf("Directive recorded for parked agent %s. It will be delivered as a user instruction when that agent resumes; "+
+		"if it asks for a cadence/schedule change, the agent applies it on its next park cycle.", short), nil
 }
 
 // parkFlagsToJSON converts ["--duration","5m","--note","ci"] into a
