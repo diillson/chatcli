@@ -995,6 +995,21 @@ func (cli *ChatCLI) executor(in string) {
 		return
 	}
 
+	// Explicit chat escape: /chat <msg> always runs ONE normal chat turn,
+	// bypassing the mid-park directive capture — the way to talk to the
+	// LLM about something else while an agent is parked. Harmless without
+	// a park (plain chat either way).
+	chatEscape := false
+	if in == "/chat" || strings.HasPrefix(in, "/chat ") {
+		rest := strings.TrimSpace(strings.TrimPrefix(in, "/chat"))
+		if rest == "" {
+			fmt.Println(colorize("  "+i18n.T("park.chat.usage"), ColorYellow))
+			return
+		}
+		in = rest
+		chatEscape = true
+	}
+
 	if strings.HasPrefix(in, "/") || in == "exit" || in == "quit" {
 		exit := cli.commandHandler.HandleCommand(context.Background(), in)
 		if !exit {
@@ -1019,7 +1034,8 @@ func (cli *ChatCLI) executor(in string) {
 	// waiting, plain text is a message FOR the parked agent — persist it
 	// into the snapshot (RunResumed injects it at wake-up) instead of
 	// spending a confusing tool-less chat turn over the agent's history.
-	if cli.captureParkDirective(in) {
+	// /chat <msg> bypasses the capture for a normal chat turn.
+	if !chatEscape && cli.captureParkDirective(in) {
 		return
 	}
 
