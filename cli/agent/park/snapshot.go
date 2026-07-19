@@ -93,6 +93,15 @@ type Snapshot struct {
 	// LastResumeAt is set when the snapshot is consumed by a resume.
 	// Useful for forensics if the loop crashes mid-resume.
 	LastResumeAt time.Time `json:"last_resume_at,omitempty"`
+
+	// PendingUserDirectives holds plain-text messages the user typed in
+	// the interactive session WHILE this park was waiting. The REPL would
+	// otherwise route them to chat mode, where the agent never sees them
+	// (the model answers with tool_call XML that chat mode does not
+	// execute). Resume injects them as a user message right after the
+	// synthesized park result and clears the field. Additive — older
+	// snapshots simply have none.
+	PendingUserDirectives []string `json:"pending_user_directives,omitempty"`
 }
 
 var (
@@ -185,6 +194,24 @@ func (s *Snapshot) Save() error {
 		return fmt.Errorf("park: rename: %w", err)
 	}
 	return nil
+}
+
+// AppendDirective durably records a user message typed while the park
+// identified by token was waiting. Load-modify-save keeps the atomic-write
+// guarantees of Save; the interactive REPL is single-writer for a given
+// token, so no cross-process locking is needed. maxDirectives caps the
+// queue so a pathological session cannot balloon the snapshot.
+func AppendDirective(token, text string) error {
+	const maxDirectives = 20
+	snap, err := Load(token)
+	if err != nil {
+		return err
+	}
+	if len(snap.PendingUserDirectives) >= maxDirectives {
+		return fmt.Errorf("park: directive queue full (%d)", maxDirectives)
+	}
+	snap.PendingUserDirectives = append(snap.PendingUserDirectives, text)
+	return snap.Save()
 }
 
 // Load reads a snapshot by token. ErrSnapshotNotFound when missing,

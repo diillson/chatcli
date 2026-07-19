@@ -3124,6 +3124,7 @@
   "park.resume.usage": "Usage: /resume <token>   (token may be a unique prefix; use /parked to list)",
   "park.resume.load_failed": "failed to load park snapshot: %v",
   "park.resume.retry_hint": "resume failed and the snapshot was kept — run /resume %s to retry",
+  "park.directive.queued": "noted for the parked agent (resumes %s) — /resume %s to wake it now",
   "park.cancel.usage": "Usage: /cancel-park <token>   (use /parked to list)",
   "park.cancel.job_failed": "failed to cancel scheduler job: %v",
   "park.cancel.delete_failed": "failed to delete snapshot: %v",

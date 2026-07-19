@@ -215,8 +215,10 @@ func (cli *ChatCLI) handleCancelParkCommand(userInput string) {
 	}
 
 	// Drop any pending resume for this token so the auto-resume hook
-	// doesn't fire it after the snapshot is gone.
+	// doesn't fire it after the snapshot is gone, and stop capturing
+	// directives for it.
 	cli.dropPendingResume(token)
+	cli.unregisterActivePark(token)
 
 	fmt.Println(colorize("  ✓ "+i18n.T("park.cancel.ok", token), ColorGreen))
 }
@@ -253,6 +255,10 @@ func (cli *ChatCLI) resolveParkToken(input string) (string, error) {
 // outcome and detail come from either the AgentResume payload (auto)
 // or are fixed strings ("manual", "") for explicit /resume.
 func (cli *ChatCLI) runResumeForToken(ctx context.Context, token, outcome, detail string) bool {
+	// The wait is over regardless of outcome — stop capturing directives
+	// for this token (a re-park inside the resumed run registers anew).
+	cli.unregisterActivePark(token)
+
 	snap, err := park.Load(token)
 	if err != nil {
 		fmt.Println(colorize("  ⚠ "+i18n.T("park.resume.load_failed", err), ColorYellow))
