@@ -3,14 +3,14 @@
  * Copyright (c) 2024 Edilson Freitas
  * License: Apache-2.0
  *
- * While an agent is parked, the REPL is back in chat mode — but the
- * user's plain text is almost always meant for the parked agent ("be
- * more detailed next report"), not for a tool-less chat turn over the
- * same history. This file owns the session-local registry of waiting
- * parks and the capture hook the executor calls for plain input: the
- * text is persisted into the park snapshot as a pending directive and
- * echoed back with the resume ETA, and RunResumed injects it into the
- * agent's context right after the park result.
+ * While an agent is parked the REPL stays in normal chat mode — plain
+ * text keeps its default behavior. Directing the parked agent is an
+ * explicit action: /park-note <msg> persists the text into the park
+ * snapshot as a pending directive, and RunResumed injects it into the
+ * agent's context right after the park result at wake-up. A one-time
+ * hint per park surfaces the command when the user chats while a park
+ * is waiting, covering the "I typed and the agent never saw it" gap
+ * without changing what plain input does.
  */
 package cli
 
@@ -60,29 +60,53 @@ func (cli *ChatCLI) latestActivePark() (activePark, bool) {
 	return cli.activeParks[len(cli.activeParks)-1], true
 }
 
-// captureParkDirective intercepts plain input while a park is waiting.
-// Returns true when the text was captured (the executor must NOT route
-// it to chat). On persistence failure it returns false so the input
-// degrades to the old chat behavior instead of being lost.
-func (cli *ChatCLI) captureParkDirective(in string) bool {
+// handleParkNoteCommand implements /park-note <msg>: persist the text as
+// a directive for the most recently parked agent of this session.
+func (cli *ChatCLI) handleParkNoteCommand(text string) {
+	if text == "" {
+		fmt.Println(colorize("  "+i18n.T("park.note.usage"), ColorYellow))
+		return
+	}
 	p, ok := cli.latestActivePark()
 	if !ok {
-		return false
+		fmt.Println(colorize("  "+i18n.T("park.note.none"), ColorYellow))
+		return
 	}
-	if err := park.AppendDirective(p.Token, in); err != nil {
+	if err := park.AppendDirective(p.Token, text); err != nil {
 		// Snapshot gone (cancelled/pruned behind our back): drop the stale
-		// registry entry and let the input flow to chat.
+		// registry entry and tell the user instead of failing silently.
 		cli.unregisterActivePark(p.Token)
 		if cli.logger != nil {
-			cli.logger.Warn("park: directive capture failed; falling back to chat",
+			cli.logger.Warn("park: directive persist failed",
 				zap.String("token", p.Token), zap.Error(err))
 		}
-		return false
+		fmt.Println(colorize("  ⚠ "+i18n.T("park.note.failed", err), ColorYellow))
+		return
 	}
 	short := p.Token
 	if len(short) > 8 {
 		short = short[:8]
 	}
 	fmt.Println(colorize("  💬 "+i18n.T("park.directive.queued", p.ResumeAtDisplay, short), ColorCyan))
-	return true
+}
+
+// maybeShowParkNoteHint prints a one-line reminder — once per park — when
+// the user sends a plain chat message while an agent is parked, so the
+// /park-note channel is discoverable exactly when it matters.
+func (cli *ChatCLI) maybeShowParkNoteHint() {
+	cli.activeParkMu.Lock()
+	defer cli.activeParkMu.Unlock()
+	if len(cli.activeParks) == 0 {
+		return
+	}
+	last := &cli.activeParks[len(cli.activeParks)-1]
+	if last.HintShown {
+		return
+	}
+	last.HintShown = true
+	short := last.Token
+	if len(short) > 8 {
+		short = short[:8]
+	}
+	fmt.Println(colorize("  ℹ "+i18n.T("park.note.hint", last.ResumeAtDisplay, short), ColorGray))
 }

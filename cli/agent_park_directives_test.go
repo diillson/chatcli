@@ -26,41 +26,52 @@ func newWaitingPark(t *testing.T, cli *ChatCLI) string {
 	return snap.Token
 }
 
-func TestCaptureParkDirective_PersistsAndEchoes(t *testing.T) {
+func TestParkNote_PersistsDirective(t *testing.T) {
 	t.Setenv("CHATCLI_PARK_DIR", t.TempDir())
 	cli := &ChatCLI{logger: zap.NewNop()}
 	token := newWaitingPark(t, cli)
 
-	captured := cli.captureParkDirective("seja mais detalhista na análise")
+	cli.handleParkNoteCommand("seja mais detalhista na análise")
+	cli.handleParkNoteCommand("inclua estatísticas de finalização")
 
-	require.True(t, captured, "plain input with a waiting park must be captured, not sent to chat")
 	snap, err := park.Load(token)
 	require.NoError(t, err)
-	require.Equal(t, []string{"seja mais detalhista na análise"}, snap.PendingUserDirectives)
-
-	// Second directive appends.
-	require.True(t, cli.captureParkDirective("inclua estatísticas de finalização"))
-	snap, err = park.Load(token)
-	require.NoError(t, err)
-	assert.Len(t, snap.PendingUserDirectives, 2)
+	assert.Equal(t, []string{
+		"seja mais detalhista na análise",
+		"inclua estatísticas de finalização",
+	}, snap.PendingUserDirectives)
 }
 
-func TestCaptureParkDirective_NoActivePark(t *testing.T) {
+func TestParkNote_NoActivePark(t *testing.T) {
 	t.Setenv("CHATCLI_PARK_DIR", t.TempDir())
 	cli := &ChatCLI{logger: zap.NewNop()}
 
-	assert.False(t, cli.captureParkDirective("mensagem de chat normal"))
+	// Must not panic and must not create anything — just the notice.
+	cli.handleParkNoteCommand("mensagem sem destino")
+	_, ok := cli.latestActivePark()
+	assert.False(t, ok)
 }
 
-func TestCaptureParkDirective_StaleRegistryFallsBackToChat(t *testing.T) {
+func TestParkNote_EmptyTextShowsUsage(t *testing.T) {
+	t.Setenv("CHATCLI_PARK_DIR", t.TempDir())
+	cli := &ChatCLI{logger: zap.NewNop()}
+	token := newWaitingPark(t, cli)
+
+	cli.handleParkNoteCommand("")
+
+	snap, err := park.Load(token)
+	require.NoError(t, err)
+	assert.Empty(t, snap.PendingUserDirectives, "usage error must not record a directive")
+}
+
+func TestParkNote_StaleSnapshotDropsRegistryEntry(t *testing.T) {
 	t.Setenv("CHATCLI_PARK_DIR", t.TempDir())
 	cli := &ChatCLI{logger: zap.NewNop()}
 	token := newWaitingPark(t, cli)
 	require.NoError(t, park.Delete(token)) // cancelled behind our back
 
-	captured := cli.captureParkDirective("oi")
+	cli.handleParkNoteCommand("oi")
 
-	assert.False(t, captured, "with the snapshot gone the input must degrade to chat")
 	_, ok := cli.latestActivePark()
 	assert.False(t, ok, "the stale registry entry must have been dropped")
 }
@@ -83,6 +94,24 @@ func TestActiveParkRegistry_LatestWinsAndUnregister(t *testing.T) {
 	cli.unregisterActivePark("token-aaa-11111111")
 	_, ok = cli.latestActivePark()
 	assert.False(t, ok)
+}
+
+func TestMaybeShowParkNoteHint_OncePerPark(t *testing.T) {
+	cli := &ChatCLI{logger: zap.NewNop()}
+	cli.registerActivePark("token-aaa-11111111", "10:00:00")
+
+	cli.maybeShowParkNoteHint()
+	p, ok := cli.latestActivePark()
+	require.True(t, ok)
+	assert.True(t, p.HintShown, "first plain chat while parked marks the hint as shown")
+
+	// Second call is a silent no-op (flag already set); a NEW park gets
+	// its own hint.
+	cli.maybeShowParkNoteHint()
+	cli.registerActivePark("token-bbb-22222222", "10:05:00")
+	p, ok = cli.latestActivePark()
+	require.True(t, ok)
+	assert.False(t, p.HintShown)
 }
 
 func TestBuildParkDirectivesMessage_ListsAllAndDemandsReport(t *testing.T) {

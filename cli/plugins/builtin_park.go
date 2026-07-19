@@ -67,8 +67,9 @@ resume via /resume <token> or cancel via /cancel-park <token>.
 IMPORTANT — in report/monitoring cycles: deliver the report or analysis
 the user expects as plain text in the SAME response, BEFORE calling
 @park. A turn that only runs tools and parks delivers nothing to the
-user. Messages the user types while you are parked are handed to you at
-resume time as directives — address them in that cycle's report.`
+user. The user can send you directives with /park-note while you are
+parked; they are handed to you at resume time — address them in that
+cycle's report.`
 }
 
 // Version is bumped whenever the surface changes.

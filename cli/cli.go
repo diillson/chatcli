@@ -416,10 +416,12 @@ type ChatCLI struct {
 }
 
 // activePark is one waiting park owned by this session. ResumeAtDisplay
-// is the preformatted wallclock shown in the capture notice.
+// is the preformatted wallclock shown in the /park-note notice; HintShown
+// keeps the discoverability hint to one line per park.
 type activePark struct {
 	Token           string
 	ResumeAtDisplay string
+	HintShown       bool
 }
 
 // parkOutcome carries the resume-time payload from the bridge's
@@ -995,19 +997,12 @@ func (cli *ChatCLI) executor(in string) {
 		return
 	}
 
-	// Explicit chat escape: /chat <msg> always runs ONE normal chat turn,
-	// bypassing the mid-park directive capture — the way to talk to the
-	// LLM about something else while an agent is parked. Harmless without
-	// a park (plain chat either way).
-	chatEscape := false
-	if in == "/chat" || strings.HasPrefix(in, "/chat ") {
-		rest := strings.TrimSpace(strings.TrimPrefix(in, "/chat"))
-		if rest == "" {
-			fmt.Println(colorize("  "+i18n.T("park.chat.usage"), ColorYellow))
-			return
-		}
-		in = rest
-		chatEscape = true
+	// /park-note <msg>: explicit directive for the parked agent. Plain
+	// text keeps its normal chat behavior even while a park is waiting —
+	// directing the agent is an opt-in action, not a mode change.
+	if in == "/park-note" || strings.HasPrefix(in, "/park-note ") {
+		cli.handleParkNoteCommand(strings.TrimSpace(strings.TrimPrefix(in, "/park-note")))
+		return
 	}
 
 	if strings.HasPrefix(in, "/") || in == "exit" || in == "quit" {
@@ -1030,14 +1025,10 @@ func (cli *ChatCLI) executor(in string) {
 		return
 	}
 
-	// Mid-park directive capture: with a park from this session still
-	// waiting, plain text is a message FOR the parked agent — persist it
-	// into the snapshot (RunResumed injects it at wake-up) instead of
-	// spending a confusing tool-less chat turn over the agent's history.
-	// /chat <msg> bypasses the capture for a normal chat turn.
-	if !chatEscape && cli.captureParkDirective(in) {
-		return
-	}
+	// Discoverability hint (once per park): plain chat still works while
+	// an agent is parked, but the user may actually be talking TO the
+	// parked agent — surface /park-note before the chat turn runs.
+	cli.maybeShowParkNoteHint()
 
 	// If already processing, queue the message for later (type-ahead)
 	if cli.isExecuting.Load() {

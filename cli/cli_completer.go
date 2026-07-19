@@ -362,7 +362,7 @@ func (cli *ChatCLI) GetInternalCommands() []prompt.Suggest {
 		{Text: "/parked", Description: i18n.T("help.command.parked")},
 		{Text: "/resume", Description: i18n.T("help.command.resume")},
 		{Text: "/cancel-park", Description: i18n.T("help.command.cancel_park")},
-		{Text: "/chat", Description: i18n.T("help.command.chat")},
+		{Text: "/park-note", Description: i18n.T("help.command.park_note")},
 	}
 }
 
