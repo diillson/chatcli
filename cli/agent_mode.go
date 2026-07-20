@@ -1717,6 +1717,15 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 		turnAgents := 0
 		turnToolCalls := 0
 
+		// Resolve per-turn client + effort hint from any active "@model use"
+		// route override or skill hints. Model swap is transparent; effort
+		// flows via ctx so the provider's SendPrompt can enable extended
+		// thinking / reasoning. Resolved BEFORE the turn timer starts so the
+		// spinner names the model that actually serves this turn — labeling
+		// it with the session model while an override routes the call
+		// elsewhere makes the UI contradict the logs.
+		turnClient, turnCtx := a.clientAndCtxForTurn(ctx)
+
 		// Inicia o timer do turno (substitui a animação de "Pensando...").
 		// Item 8: indicator reflete TANTO as linhas já drenadas para a
 		// messageQueue QUANTO as linhas em trânsito no channel
@@ -1724,7 +1733,7 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 		// fechou para drenar). Sem essa soma, o usuário pressiona Enter
 		// e nada muda visualmente no spinner — só vê (1 na fila) na
 		// próxima iteração do turn.
-		modelName := a.cli.Client.GetModelName()
+		modelName := turnClient.GetModelName()
 		a.turnTimer.Start(ctx, func(d time.Duration) {
 			msg := "Processando..."
 			a.cli.messageQueueMu.Lock()
@@ -1756,11 +1765,6 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 		// Build the outgoing turn history and enforce budget before sending to API
 		turnHistory := buildTurnHistoryWithAnchor()
 		turnHistory, _ = agent.EnforceToolResultBudget(turnHistory, a.logger)
-
-		// Resolve per-turn client + effort hint from any active skill
-		// hints. Model swap is transparent; effort flows via ctx so the
-		// provider's SendPrompt can enable extended thinking / reasoning.
-		turnClient, turnCtx := a.clientAndCtxForTurn(ctx)
 
 		// Detect native function calling support
 		var nativeToolCalls []models.ToolCall
