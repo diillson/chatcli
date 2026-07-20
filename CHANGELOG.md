@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.166.1](https://github.com/diillson/chatcli/compare/v1.166.0...v1.166.1) (2026-07-20)
+
+
+### Bug Fixes
+
+* **model:** preserve delegate prompt and show routed model in turn spinner ([#1220](https://github.com/diillson/chatcli/issues/1220)) ([70124d2](https://github.com/diillson/chatcli/commit/70124d228bef3b1636d38045d512564be2e123e1))
+
 ## [1.166.0](https://github.com/diillson/chatcli/compare/v1.165.1...v1.166.0) (2026-07-19)
 
 
