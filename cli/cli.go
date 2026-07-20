@@ -1096,6 +1096,7 @@ func (cli *ChatCLI) Start(ctx context.Context) {
 	// da tela de boas-vindas (builds go install); o boot não espera rede.
 	go version.RefreshReleaseCacheIfStale(ctx)
 	cli.PrintWelcomeScreen()
+	cli.printLastSessionNotice()
 	cli.startHubSync(ctx) // resume the shared cross-channel conversation, if connected
 
 	// Mark the interactive REPL as active so the command-palette trigger only

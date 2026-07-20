@@ -304,8 +304,13 @@ func (cli *ChatCLI) handleListSessions(ctx context.Context) {
 
 		if hasLocal {
 			fmt.Println(i18n.T("session.list_header_local"))
+			titles := cli.sessionManager.SessionTitles()
 			for _, s := range localSessions {
-				fmt.Printf("  - %s\n", s)
+				if t := titles[s]; t != "" {
+					fmt.Printf("  - %s %s\n", s, colorize("— "+t, ColorGray))
+				} else {
+					fmt.Printf("  - %s\n", s)
+				}
 			}
 		}
 		if hasRemote {
@@ -331,8 +336,13 @@ func (cli *ChatCLI) handleListSessions(ctx context.Context) {
 		return
 	}
 	fmt.Println(i18n.T("session.list_header"))
+	titles := cli.sessionManager.SessionTitles()
 	for _, session := range sessions {
-		fmt.Printf("- %s\n", session)
+		if t := titles[session]; t != "" {
+			fmt.Printf("- %s %s\n", session, colorize("— "+t, ColorGray))
+		} else {
+			fmt.Printf("- %s\n", session)
+		}
 	}
 }
 

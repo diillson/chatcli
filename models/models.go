@@ -105,7 +105,8 @@ func (r *ResponseData) IsValid() bool {
 // SessionData is the v2 session format that supports scoped histories.
 // It is backward-compatible with the legacy format (plain []Message).
 type SessionData struct {
-	Version      int       `json:"version"` // 2 for the new format
+	Version      int       `json:"version"`         // 2 for the new format
+	Title        string    `json:"title,omitempty"` // short human/model-facing topic label
 	ChatHistory  []Message `json:"chat_history"`
 	AgentHistory []Message `json:"agent_history,omitempty"`
 	CoderHistory []Message `json:"coder_history,omitempty"`

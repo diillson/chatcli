@@ -76,3 +76,61 @@ func TestSessionAdapterGet_MissingSession(t *testing.T) {
 		t.Error("missing session must error")
 	}
 }
+
+// TestSessionAdapterGet_RoleAwareCaps: assistant prose survives past the old
+// flat 600-char cap (the "partial recall" failure), while tool dumps stay
+// tightly bounded.
+func TestSessionAdapterGet_RoleAwareCaps(t *testing.T) {
+	cli := &ChatCLI{sessionManager: newTestSessionManager(t), logger: zap.NewNop()}
+	long := strings.Repeat("análise detalhada do problema ", 60) // ~1800 chars
+	dump := strings.Repeat("tool output line ", 100)             // ~1700 chars
+	if err := cli.sessionManager.SaveSessionV2("caps", &SessionData{
+		Version: 2,
+		ChatHistory: []models.Message{
+			{Role: "assistant", Content: long},
+			{Role: "tool", Content: dump},
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	a := &sessionPluginAdapter{cli: cli}
+
+	out, err := a.Get(context.Background(), "caps", 0, 10, "")
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if strings.Count(out, "análise detalhada") < 50 {
+		t.Errorf("assistant prose should keep ~2000 chars, got %d occurrences", strings.Count(out, "análise detalhada"))
+	}
+	if strings.Count(out, "tool output line") > 40 {
+		t.Errorf("tool dump should stay capped at 600 chars, got %d occurrences", strings.Count(out, "tool output line"))
+	}
+}
+
+// TestSessionAdapterGetMessage: single-message fetch returns the whole entry
+// and rejects out-of-range indices with an actionable error.
+func TestSessionAdapterGetMessage(t *testing.T) {
+	cli := &ChatCLI{sessionManager: newTestSessionManager(t), logger: zap.NewNop()}
+	long := strings.Repeat("linha importante da análise. ", 150) // ~4300 chars
+	if err := cli.sessionManager.SaveSessionV2("full", &SessionData{
+		Version: 2,
+		ChatHistory: []models.Message{
+			{Role: "user", Content: "pergunta"},
+			{Role: "assistant", Content: long},
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	a := &sessionPluginAdapter{cli: cli}
+
+	out, err := a.GetMessage(context.Background(), "full", 1)
+	if err != nil {
+		t.Fatalf("get message: %v", err)
+	}
+	if len(out) < 4000 {
+		t.Errorf("single-message fetch should return the near-full content, got %d bytes", len(out))
+	}
+	if _, err := a.GetMessage(context.Background(), "full", 99); err == nil {
+		t.Error("out-of-range index must error")
+	}
+}

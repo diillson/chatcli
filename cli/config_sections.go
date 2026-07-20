@@ -839,6 +839,14 @@ func (cli *ChatCLI) showConfigSession() {
 		keepVal = defaultMarker + keepVal
 	}
 	kv(p, "CHATCLI_SESSION_AUTOSAVE_KEEP", keepVal)
+	recallVal := i18n.T("cfg.val.enabled")
+	if !sessionAutoRecallEnabled() {
+		recallVal = i18n.T("cfg.val.disabled")
+	}
+	if os.Getenv("CHATCLI_SESSION_AUTORECALL") == "" {
+		recallVal = defaultMarker + recallVal
+	}
+	kv(p, "CHATCLI_SESSION_AUTORECALL", recallVal)
 
 	fmt.Println(p)
 	subheader(p, "cfg.sub.session.cost")

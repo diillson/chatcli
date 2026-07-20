@@ -45,12 +45,15 @@ func TestSearchSessions(t *testing.T) {
 		t.Errorf("expected 1 match with 1 snippet, got %+v", hits[0])
 	}
 
-	// AND semantics: both terms must appear in the SAME message.
+	// AND semantics: both terms somewhere in the same session.
 	if hits, _ := sm.SearchSessions("aws region", 3); len(hits) != 1 {
 		t.Errorf("expected AND match for 'aws region', got %v", hits)
 	}
-	if hits, _ := sm.SearchSessions("bedrock refactor", 3); len(hits) != 0 {
-		t.Errorf("terms spread across sessions must not match, got %v", hits)
+	// Terms spread across sessions: strict AND finds nothing, so the filter
+	// deliberately relaxes to OR and returns both sessions ranked — a
+	// best-effort recall beats an empty answer for the model consumer.
+	if hits, _ := sm.SearchSessions("bedrock refactor", 3); len(hits) != 2 {
+		t.Errorf("expected OR fallback to rank both partial matches, got %v", hits)
 	}
 
 	// Agent history is searched too.
