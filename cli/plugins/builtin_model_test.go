@@ -73,6 +73,14 @@ func TestParseModelInvocation(t *testing.T) {
 		{"flag eq form", []string{"use", "--model=haiku"}, "use", "haiku", "", 0},
 		{"positional delegate joins prompt", []string{"delegate", "GOOGLEAI:gemini-2.5-flash", "summarize", "the", "log"}, "delegate", "GOOGLEAI:gemini-2.5-flash", "summarize the log", 0},
 		{"synonyms", []string{"switch", "haiku"}, "use", "haiku", "", 0},
+		// The agent's tool flattener rewrites {cmd,args} into "--flag value"
+		// argv elements; a multi-word prompt arrives as ONE element and must
+		// reach the delegated model whole, not shattered on whitespace.
+		{"flattener delegate keeps prompt whole", []string{"--cmd", "delegate", "--model", "DEVINCLI:devin", "--prompt", "Summarize the build log into the 3 root errors"}, "delegate", "DEVINCLI:devin", "Summarize the build log into the 3 root errors", 0},
+		{"flattener delegate with max_tokens", []string{"delegate", "--model", "GOOGLEAI:gemini-2.5-flash", "--prompt", "translate this text to English", "--max_tokens", "256"}, "delegate", "GOOGLEAI:gemini-2.5-flash", "translate this text to English", 256},
+		{"flattener prompt with apostrophe", []string{"delegate", "--model", "haiku", "--prompt", "explain the user's stack trace, don't guess"}, "delegate", "haiku", "explain the user's stack trace, don't guess", 0},
+		{"single-string delegate honors quotes", []string{`delegate GOOGLEAI:gemini-2.5-flash --prompt "summarize the whole log"`}, "delegate", "GOOGLEAI:gemini-2.5-flash", "summarize the whole log", 0},
+		{"flattener prompt with newlines", []string{"delegate", "--model", "haiku", "--prompt", "line one\nline two"}, "delegate", "haiku", "line one\nline two", 0},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

@@ -27,6 +27,7 @@ import (
 	"strconv"
 	"strings"
 	"sync/atomic"
+	"unicode"
 )
 
 // ModelRoutingAdapter is the surface the @model tool needs from the live
@@ -273,8 +274,26 @@ func parseModelInvocation(args []string) (modelInvocation, error) {
 
 	// argv / flag form. Scan tokens, honoring --model / --prompt / --cmd /
 	// --max_tokens (and =forms), and collect the rest as positionals.
+	//
+	// Token boundaries matter here: the agent's tool flattener rewrites the
+	// {cmd,args} envelope into "--flag value" argv elements where a value —
+	// notably a delegate prompt — is ONE element that may contain spaces and
+	// newlines. Re-splitting the joined payload on whitespace would shatter
+	// that prompt into words and the delegated model would receive only the
+	// first one. So multi-element argv is consumed element-wise; only a
+	// single free-text argument is tokenized, and even then quoted runs are
+	// kept together so `--prompt "long text"` survives.
 	var positionals []string
-	fields := strings.Fields(payload)
+	var fields []string
+	if len(args) > 1 {
+		for _, a := range args {
+			if t := strings.TrimSpace(a); t != "" {
+				fields = append(fields, t)
+			}
+		}
+	} else {
+		fields = splitArgsRespectingQuotes(payload)
+	}
 	for i := 0; i < len(fields); i++ {
 		f := fields[i]
 		key, val, hasEq := strings.Cut(f, "=")
@@ -330,6 +349,43 @@ func parseModelInvocation(args []string) (modelInvocation, error) {
 		}
 	}
 	return inv, nil
+}
+
+// splitArgsRespectingQuotes tokenizes a single free-text invocation on
+// whitespace while keeping "double" and 'single' quoted runs together, so a
+// one-string `delegate x --prompt "long text"` keeps the prompt whole. A
+// quote only opens a run at a token boundary — apostrophes inside prose
+// (user's, don't) stay literal.
+func splitArgsRespectingQuotes(s string) []string {
+	var (
+		tokens []string
+		cur    strings.Builder
+		quote  rune
+	)
+	flush := func() {
+		if cur.Len() > 0 {
+			tokens = append(tokens, cur.String())
+			cur.Reset()
+		}
+	}
+	for _, r := range s {
+		switch {
+		case quote != 0:
+			if r == quote {
+				quote = 0
+			} else {
+				cur.WriteRune(r)
+			}
+		case (r == '"' || r == '\'') && cur.Len() == 0:
+			quote = r
+		case unicode.IsSpace(r):
+			flush()
+		default:
+			cur.WriteRune(r)
+		}
+	}
+	flush()
+	return tokens
 }
 
 func canonicalModelCmd(cmd string) string {
