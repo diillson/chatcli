@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.167.0](https://github.com/diillson/chatcli/compare/v1.166.1...v1.167.0) (2026-07-20)
+
+
+### Features
+
+* **session:** proactive cross-session recall with tolerant search and titles ([#1223](https://github.com/diillson/chatcli/issues/1223)) ([034c11e](https://github.com/diillson/chatcli/commit/034c11e741e0cc41024c7f46dbcd7a7e649d913f))
+
 ## [1.166.1](https://github.com/diillson/chatcli/compare/v1.166.0...v1.166.1) (2026-07-20)
 
 
