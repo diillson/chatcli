@@ -42,6 +42,16 @@ type SessionReader interface {
 	Get(ctx context.Context, name string, offset, limit int, query string) (string, error)
 }
 
+// SessionMessageReader is an OPTIONAL capability layered on top of
+// SessionReader: fetch ONE message by absolute index with a much larger
+// length ceiling than the paged view. Separate interface (not a new method
+// on SessionReader) so existing adapters keep compiling.
+type SessionMessageReader interface {
+	// GetMessage returns the message at the 0-based absolute index of the
+	// named session, nearly untruncated.
+	GetMessage(ctx context.Context, name string, index int) (string, error)
+}
+
 type sessionAdapterHolder struct{ a SessionAdapter }
 
 var sessionAdapterAtom atomic.Value // stores sessionAdapterHolder
@@ -78,11 +88,14 @@ func (*BuiltinSessionPlugin) Usage() string {
 
 Subcommands (cmd + args):
   search {query, limit?}   search saved sessions; returns matching sessions + snippets
-  get {name, offset?, limit?, query?}   read one saved session page by page; query jumps to the best match
+  get {name, offset?, limit?, query?, message?}   read one saved session page by page;
+                           query jumps to the best match; message=<index> returns that
+                           single message nearly in full (follow up on truncated entries)
   list                     list saved session names
 
 Typical recall flow: search finds WHICH session discussed something, get reads
-the relevant part of THAT session.`
+the relevant part of THAT session, get with message=<index> expands the entries
+that matter.`
 }
 
 // Version is semver.
@@ -110,16 +123,18 @@ func (*BuiltinSessionPlugin) Schema() string {
 			},
 			{
 				"name":        "get",
-				"description": "Read one saved session's messages page by page. Use after 'search' to pull the actual context from the matching session. A query centers the page on the best-matching message.",
+				"description": "Read one saved session's messages page by page. Use after 'search' to pull the actual context from the matching session. A query centers the page on the best-matching message. Long messages are truncated in the page view — pass message=<index> to read a single message nearly in full.",
 				"flags": []map[string]interface{}{
 					{"name": "name", "type": "string", "required": true, "description": "Saved session name (from search or list)."},
 					{"name": "offset", "type": "number", "required": false, "description": "0-based message offset (default 0)."},
 					{"name": "limit", "type": "number", "required": false, "description": "Messages per page (default 20)."},
 					{"name": "query", "type": "string", "required": false, "description": "Jump to the best-matching message instead of using offset."},
+					{"name": "message", "type": "number", "required": false, "description": "Absolute message index: return THAT message alone, nearly untruncated (use when a page shows a cut-off entry you need whole)."},
 				},
 				"examples": []string{
 					`{"cmd":"get","args":{"name":"auth-refactor","query":"refresh token"}}`,
 					`{"cmd":"get","args":{"name":"auth-refactor","offset":20,"limit":20}}`,
+					`{"cmd":"get","args":{"name":"auth-refactor","message":42}}`,
 				},
 			},
 			{
@@ -173,14 +188,22 @@ func (p *BuiltinSessionPlugin) ExecuteWithStream(ctx context.Context, args []str
 			return "", errors.New("@session get: session reading not available")
 		}
 		var in struct {
-			Name   string          `json:"name"`
-			Offset json.RawMessage `json:"offset"`
-			Limit  json.RawMessage `json:"limit"`
-			Query  string          `json:"query"`
+			Name    string          `json:"name"`
+			Offset  json.RawMessage `json:"offset"`
+			Limit   json.RawMessage `json:"limit"`
+			Query   string          `json:"query"`
+			Message json.RawMessage `json:"message"`
 		}
 		_ = json.Unmarshal([]byte(inner), &in)
 		if strings.TrimSpace(in.Name) == "" {
 			return "", errors.New(`@session get: "name" is required (use search or list first)`)
+		}
+		if len(in.Message) > 0 {
+			mr, ok := adapter.(SessionMessageReader)
+			if !ok {
+				return "", errors.New("@session get: single-message reading not available")
+			}
+			return mr.GetMessage(ctx, in.Name, lenientInt(in.Message))
 		}
 		return reader.Get(ctx, in.Name, lenientInt(in.Offset), lenientInt(in.Limit), in.Query)
 	case "list":

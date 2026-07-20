@@ -104,3 +104,25 @@ func (cli *ChatCLI) autosaveSessionOnExit() {
 func (cli *ChatCLI) pruneAutosaves() {
 	cli.sessionManager.PruneSessionsByPrefix(autosavePrefix, sessionAutosaveKeep())
 }
+
+// printLastSessionNotice shows a one-line pointer to the newest saved
+// session at REPL boot, so the user knows their previous conversation is
+// retrievable (by asking about it — session auto-recall — or /session load).
+// Silent when the store is empty.
+func (cli *ChatCLI) printLastSessionNotice() {
+	if cli.sessionManager == nil {
+		return
+	}
+	name, saved, title := cli.sessionManager.LatestSessionInfo()
+	if name == "" {
+		return
+	}
+	when := saved.Format("2006-01-02 15:04")
+	var msg string
+	if title != "" {
+		msg = i18n.T("session.boot.last_titled", name, when, title)
+	} else {
+		msg = i18n.T("session.boot.last", name, when)
+	}
+	fmt.Println(colorize("  "+msg, ColorGray))
+}

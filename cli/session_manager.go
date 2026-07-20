@@ -9,7 +9,9 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
+	"unicode/utf8"
 
 	"github.com/diillson/chatcli/cli/ctxmgr"
 	"github.com/diillson/chatcli/models"
@@ -28,6 +30,12 @@ type SessionData = models.SessionData
 type SessionManager struct {
 	sessionsDir string
 	logger      *zap.Logger
+
+	// Search-corpus cache (see searchCorpus): rebuilt only when the store's
+	// directory signature changes, so per-turn session auto-recall doesn't
+	// re-parse every saved session file.
+	corpusMu sync.Mutex
+	corpus   *sessionCorpus
 }
 
 // NewSessionManager cria uma nova instância do SessionManager.
@@ -267,6 +275,12 @@ func (sm *SessionManager) SaveSessionV2(name string, sd *SessionData) error {
 	}
 
 	sd.Version = 2
+	// Derive a topic title once at save time so machine names
+	// (autosave-20260720-1504) stay recognizable in list/search/recall.
+	// An explicitly set title always wins.
+	if strings.TrimSpace(sd.Title) == "" {
+		sd.Title = deriveSessionTitle(sd)
+	}
 	filePath := sm.getSessionPath(name)
 	data, err := json.MarshalIndent(sd, "", "  ")
 	if err != nil {
@@ -333,6 +347,74 @@ func (sm *SessionManager) LoadSessionV2(name string) (*SessionData, error) {
 	}, nil
 }
 
+// sessionTitleMaxRunes caps derived titles: long enough to state a topic,
+// short enough for one list line.
+const sessionTitleMaxRunes = 60
+
+// deriveSessionTitle picks the first non-empty user message as the session's
+// topic label, whitespace-collapsed and rune-capped. Returns "" for sessions
+// with no user turn.
+func deriveSessionTitle(sd *SessionData) string {
+	for _, hist := range [][]models.Message{sd.ChatHistory, sd.AgentHistory, sd.CoderHistory} {
+		for _, m := range hist {
+			if m.Role != "user" {
+				continue
+			}
+			t := strings.Join(strings.Fields(m.Content), " ")
+			if t == "" {
+				continue
+			}
+			r := []rune(t)
+			if len(r) > sessionTitleMaxRunes {
+				t = string(r[:sessionTitleMaxRunes]) + "…"
+			}
+			return t
+		}
+	}
+	return ""
+}
+
+// LatestSessionInfo returns the newest saved session's name, save time and
+// title, best-effort — a zero name means the store is empty or unreadable.
+// Only the newest file is parsed, so this is cheap enough for the boot path.
+func (sm *SessionManager) LatestSessionInfo() (name string, saved time.Time, title string) {
+	entries, err := os.ReadDir(sm.sessionsDir)
+	if err != nil {
+		return "", time.Time{}, ""
+	}
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".json") {
+			continue
+		}
+		info, err := e.Info()
+		if err != nil {
+			continue
+		}
+		if name == "" || info.ModTime().After(saved) {
+			name = strings.TrimSuffix(e.Name(), ".json")
+			saved = info.ModTime()
+		}
+	}
+	if name == "" {
+		return "", time.Time{}, ""
+	}
+	if sd, err := sm.LoadSessionV2(name); err == nil && sd != nil {
+		title = sd.Title
+	}
+	return name, saved, title
+}
+
+// SessionTitles returns the stored title per session, best-effort ("" or a
+// missing key means no title). Served from the cached search corpus, so
+// callers can decorate listings without re-reading the store.
+func (sm *SessionManager) SessionTitles() map[string]string {
+	corpus, err := sm.searchCorpus()
+	if err != nil || corpus == nil {
+		return nil
+	}
+	return corpus.titles
+}
+
 // ListSessions lista todas as sessões salvas.
 func (sm *SessionManager) ListSessions() ([]string, error) {
 	entries, err := os.ReadDir(sm.sessionsDir)
@@ -357,74 +439,251 @@ type SessionSearchHit struct {
 	Matches  int
 	Score    float64
 	Snippets []string
+	SavedAt  time.Time // session file mtime; zero when unknown
+	Title    string    // stored session title; "" when absent
 }
 
 // sessionSearchDoc maps one BM25 document (a message) back to its session.
+// norm is the normalized (lowercase, accent-folded) view used for ranking
+// and anchor lookup; content keeps the original text for snippets.
 type sessionSearchDoc struct {
 	session string
 	role    string
 	content string
+	norm    string
 }
 
-// SearchSessions performs a ranked full-text search across all persisted
-// sessions, reusing the existing JSON store (no separate index). Two-level
-// semantics balance recall and precision:
-//
-//   - A session QUALIFIES when every query term appears somewhere in it —
-//     in ANY message, not necessarily the same one. The old per-message AND
-//     returned nothing for exactly the queries recall exists for ("oauth
-//     refresh decision" discussed across several turns).
-//   - Qualifying sessions RANK by BM25 over their individual messages (the
-//     same keyless scorer the knowledge corpus uses), so the session where
-//     the terms are dense and rare outranks one that mentions them in
-//     passing. Snippets come from each session's top-scoring messages.
-//
-// maxSnippetsPerSession caps how many context snippets each hit carries.
-func (sm *SessionManager) SearchSessions(query string, maxSnippetsPerSession int) ([]SessionSearchHit, error) {
-	terms := strings.Fields(strings.ToLower(strings.TrimSpace(query)))
-	if len(terms) == 0 {
-		return nil, fmt.Errorf("empty query")
-	}
-	if maxSnippetsPerSession <= 0 {
-		maxSnippetsPerSession = 3
-	}
+// sessionCorpus is the parsed, search-ready view of the session store. It is
+// cached on the SessionManager and invalidated by a cheap directory signature
+// (names + mtimes + sizes), so per-turn callers (session auto-recall) don't
+// re-parse hundreds of JSON files on every agent turn.
+type sessionCorpus struct {
+	sig    string
+	docs   []sessionSearchDoc
+	text   map[string]string    // normalized (lowercase, accent-folded) full text per session
+	saved  map[string]time.Time // session file mtime
+	titles map[string]string    // stored session title ("" when absent)
+	order  []string             // session names, newest first
+}
 
+// searchCorpus returns the cached corpus, rebuilding it only when the store
+// changed. Unreadable sessions are skipped rather than aborting the search.
+func (sm *SessionManager) searchCorpus() (*sessionCorpus, error) {
 	names, err := sm.ListSessions()
 	if err != nil {
 		return nil, err
 	}
 
-	var docs []sessionSearchDoc
-	sessionText := make(map[string]*strings.Builder)
+	type fileInfo struct {
+		name  string
+		mtime time.Time
+	}
+	infos := make([]fileInfo, 0, len(names))
+	var sig strings.Builder
 	for _, name := range names {
-		sd, err := sm.LoadSessionV2(name)
-		if err != nil || sd == nil {
-			continue // skip unreadable sessions rather than abort the search
+		st, err := os.Stat(sm.getSessionPath(name))
+		if err != nil {
+			continue
 		}
+		infos = append(infos, fileInfo{name: name, mtime: st.ModTime()})
+		fmt.Fprintf(&sig, "%s|%d|%d;", name, st.ModTime().UnixNano(), st.Size())
+	}
+
+	sm.corpusMu.Lock()
+	defer sm.corpusMu.Unlock()
+	if sm.corpus != nil && sm.corpus.sig == sig.String() {
+		return sm.corpus, nil
+	}
+
+	sort.Slice(infos, func(i, j int) bool { return infos[i].mtime.After(infos[j].mtime) })
+
+	c := &sessionCorpus{
+		sig:    sig.String(),
+		text:   make(map[string]string, len(infos)),
+		saved:  make(map[string]time.Time, len(infos)),
+		titles: make(map[string]string, len(infos)),
+	}
+	for _, fi := range infos {
+		sd, err := sm.LoadSessionV2(fi.name)
+		if err != nil || sd == nil {
+			continue
+		}
+		var b strings.Builder
+		count := 0
 		for _, hist := range [][]models.Message{sd.ChatHistory, sd.AgentHistory, sd.CoderHistory, sd.SharedMemory} {
 			for _, msg := range hist {
 				if msg.Content == "" {
 					continue
 				}
-				docs = append(docs, sessionSearchDoc{session: name, role: msg.Role, content: msg.Content})
-				b, ok := sessionText[name]
-				if !ok {
-					b = &strings.Builder{}
-					sessionText[name] = b
-				}
-				b.WriteString(strings.ToLower(msg.Content))
+				norm := normalizeForSearch(msg.Content)
+				c.docs = append(c.docs, sessionSearchDoc{session: fi.name, role: msg.Role, content: msg.Content, norm: norm})
+				b.WriteString(norm)
 				b.WriteByte('\n')
+				count++
 			}
+		}
+		if count == 0 {
+			continue
+		}
+		c.text[fi.name] = b.String()
+		c.saved[fi.name] = fi.mtime
+		c.titles[fi.name] = sd.Title
+		c.order = append(c.order, fi.name)
+	}
+	sm.corpus = c
+	return c, nil
+}
+
+// recentSessionHitsCap bounds how many sessions a no-significant-terms
+// query ("o que discutimos?") lists.
+const recentSessionHitsCap = 5
+
+// recentSessionHits lists the most recently saved in-scope sessions, newest
+// first, with the head of their first messages as snippets. Used when the
+// query carries no content-bearing terms and BM25 has nothing to rank on.
+func (sm *SessionManager) recentSessionHits(corpus *sessionCorpus, inScope map[string]bool, maxSnippetsPerSession int) []SessionSearchHit {
+	hits := make([]SessionSearchHit, 0, recentSessionHitsCap)
+	for _, name := range corpus.order { // already newest first
+		if !inScope[name] || len(hits) >= recentSessionHitsCap {
+			continue
+		}
+		hit := SessionSearchHit{
+			Session: name,
+			SavedAt: corpus.saved[name],
+			Title:   corpus.titles[name],
+		}
+		for _, d := range corpus.docs {
+			if d.session != name {
+				continue
+			}
+			hit.Matches++
+			if len(hit.Snippets) < maxSnippetsPerSession {
+				hit.Snippets = append(hit.Snippets, d.role+": "+snippetAround(d.content, d.norm, ""))
+			}
+		}
+		hits = append(hits, hit)
+	}
+	return hits
+}
+
+// sessionRecencyBoost is a bounded multiplier favoring recent sessions when
+// BM25 scores are close: at most +25% for a session saved right now, fading
+// with a one-week half-life. Match density still dominates the ranking.
+func sessionRecencyBoost(saved time.Time) float64 {
+	if saved.IsZero() {
+		return 1
+	}
+	ageWeeks := time.Since(saved).Hours() / (24 * 7)
+	if ageWeeks < 0 {
+		ageWeeks = 0
+	}
+	return 1 + 0.25/(1+ageWeeks)
+}
+
+// SearchSessions performs a ranked full-text search across all persisted
+// sessions, reusing the existing JSON store (no separate index). Semantics,
+// tuned for natural-language recall queries ("o que discutimos sobre X?"):
+//
+//   - Query terms are normalized (lowercase, accent-folded) and reduced to
+//     SIGNIFICANT terms — PT/EN stopwords and recall-framing verbs
+//     ("discutimos", "decided") carry no signal and used to disqualify
+//     every session under the old raw AND filter.
+//   - A session QUALIFIES when every significant term appears somewhere in
+//     it — in ANY message, not necessarily the same one. When no session
+//     qualifies (or the query was all stopwords), the filter relaxes and
+//     BM25 ranks alone rather than returning nothing.
+//   - Qualifying sessions RANK by BM25 over their individual messages (the
+//     same keyless scorer the knowledge corpus uses), with a bounded
+//     recency boost so yesterday's session outranks a months-old one when
+//     match quality is comparable. Snippets come from each session's
+//     top-scoring messages.
+//
+// maxSnippetsPerSession caps how many context snippets each hit carries.
+func (sm *SessionManager) SearchSessions(query string, maxSnippetsPerSession int) ([]SessionSearchHit, error) {
+	return sm.searchSessionsScoped(query, maxSnippetsPerSession, 0)
+}
+
+// searchSessionsScoped implements SearchSessions; recentOnly > 0 restricts
+// the search to the N most recently saved sessions (used by the per-turn
+// session auto-recall's AMBIENT mode, where ranking the whole store every
+// turn would be wasteful). Explicit recall (referential/temporal questions)
+// passes 0 and reaches the whole store.
+func (sm *SessionManager) searchSessionsScoped(query string, maxSnippetsPerSession, recentOnly int) ([]SessionSearchHit, error) {
+	return sm.searchSessionsFiltered(query, maxSnippetsPerSession, recentOnly, time.Time{}, time.Time{})
+}
+
+// searchSessionsFiltered additionally bounds hits to sessions saved within
+// [from, to) when from is non-zero — the backing for temporal recall
+// questions ("o que fizemos há 2 semanas?").
+func (sm *SessionManager) searchSessionsFiltered(query string, maxSnippetsPerSession, recentOnly int, from, to time.Time) ([]SessionSearchHit, error) {
+	normQuery := normalizeForSearch(strings.TrimSpace(query))
+	rawTerms := strings.Fields(normQuery)
+	if len(rawTerms) == 0 {
+		return nil, fmt.Errorf("empty query")
+	}
+	terms := significantSearchTerms(rawTerms)
+	if maxSnippetsPerSession <= 0 {
+		maxSnippetsPerSession = 3
+	}
+
+	corpus, err := sm.searchCorpus()
+	if err != nil {
+		return nil, err
+	}
+
+	inScope := make(map[string]bool, len(corpus.order))
+	for i, name := range corpus.order {
+		if recentOnly > 0 && i >= recentOnly {
+			break
+		}
+		if !from.IsZero() {
+			saved := corpus.saved[name]
+			if saved.Before(from) || (!to.IsZero() && !saved.Before(to)) {
+				continue
+			}
+		}
+		inScope[name] = true
+	}
+
+	var docs []sessionSearchDoc
+	for _, d := range corpus.docs {
+		if inScope[d.session] {
+			docs = append(docs, d)
 		}
 	}
 	if len(docs) == 0 {
 		return nil, nil
 	}
 
-	// Session-level AND filter: every term somewhere in the conversation.
-	qualifies := make(map[string]bool, len(sessionText))
-	for name, b := range sessionText {
-		text := b.String()
+	// A query with no significant terms is pure recall framing ("o que
+	// discutimos?") — BM25 has nothing to rank on, so list the most recent
+	// sessions in scope directly, newest first.
+	if len(terms) == 0 {
+		return sm.recentSessionHits(corpus, inScope, maxSnippetsPerSession), nil
+	}
+
+	qualifies := qualifySessionsByTerms(corpus, inScope, terms)
+
+	// Rank over the normalized view so accents don't break token matching;
+	// indices still map 1:1 onto docs.
+	contents := make([]string, len(docs))
+	for i, d := range docs {
+		contents[i] = d.norm
+	}
+	ranked := ctxmgr.RankDocsBM25(contents, normQuery, len(contents))
+
+	return aggregateSessionHits(corpus, docs, ranked, qualifies, terms, maxSnippetsPerSession), nil
+}
+
+// qualifySessionsByTerms applies the session-level significant-term filter,
+// widening when strictness would return nothing: AND (every term somewhere
+// in the session) → OR (at least one term) when AND finds nothing. A query
+// whose terms appear in NO session still qualifies nothing.
+func qualifySessionsByTerms(corpus *sessionCorpus, inScope map[string]bool, terms []string) map[string]bool {
+	qualifies := make(map[string]bool, len(inScope))
+	anyQualified := false
+	for name := range inScope {
+		text := corpus.text[name]
 		all := true
 		for _, t := range terms {
 			if !strings.Contains(text, t) {
@@ -433,16 +692,25 @@ func (sm *SessionManager) SearchSessions(query string, maxSnippetsPerSession int
 			}
 		}
 		qualifies[name] = all
+		anyQualified = anyQualified || all
 	}
-
-	contents := make([]string, len(docs))
-	for i, d := range docs {
-		contents[i] = d.content
+	if !anyQualified && len(terms) > 1 {
+		for name := range inScope {
+			for _, t := range terms {
+				if strings.Contains(corpus.text[name], t) {
+					qualifies[name] = true
+					break
+				}
+			}
+		}
 	}
-	ranked := ctxmgr.RankDocsBM25(contents, query, len(contents))
+	return qualifies
+}
 
-	// Aggregate message hits per session, preserving BM25 order so each
-	// session's snippets are its strongest messages.
+// aggregateSessionHits folds ranked message hits into per-session results,
+// preserving BM25 order so each session's snippets are its strongest
+// messages, then orders sessions by recency-boosted aggregate score.
+func aggregateSessionHits(corpus *sessionCorpus, docs []sessionSearchDoc, ranked []ctxmgr.DocHit, qualifies map[string]bool, terms []string, maxSnippetsPerSession int) []SessionSearchHit {
 	bySession := make(map[string]*SessionSearchHit)
 	order := make([]string, 0)
 	for _, h := range ranked {
@@ -452,22 +720,29 @@ func (sm *SessionManager) SearchSessions(query string, maxSnippetsPerSession int
 		}
 		hit, ok := bySession[d.session]
 		if !ok {
-			hit = &SessionSearchHit{Session: d.session}
+			hit = &SessionSearchHit{
+				Session: d.session,
+				SavedAt: corpus.saved[d.session],
+				Title:   corpus.titles[d.session],
+			}
 			bySession[d.session] = hit
 			order = append(order, d.session)
 		}
 		hit.Matches++
 		hit.Score += h.Score
 		if len(hit.Snippets) < maxSnippetsPerSession {
-			lower := strings.ToLower(d.content)
+			// Anchor lookup happens on the normalized view; the byte index
+			// only centers a cosmetic window, and snippetAround snaps slice
+			// bounds to rune boundaries, so accent-folding length drift
+			// cannot corrupt the output.
 			anchor := terms[0]
 			for _, t := range terms {
-				if strings.Contains(lower, t) {
+				if strings.Contains(d.norm, t) {
 					anchor = t
 					break
 				}
 			}
-			hit.Snippets = append(hit.Snippets, d.role+": "+snippetAround(d.content, lower, anchor))
+			hit.Snippets = append(hit.Snippets, d.role+": "+snippetAround(d.content, d.norm, anchor))
 		}
 	}
 
@@ -476,12 +751,14 @@ func (sm *SessionManager) SearchSessions(query string, maxSnippetsPerSession int
 		hits = append(hits, *bySession[name])
 	}
 	sort.SliceStable(hits, func(i, j int) bool {
-		if hits[i].Score != hits[j].Score {
-			return hits[i].Score > hits[j].Score
+		si := hits[i].Score * sessionRecencyBoost(hits[i].SavedAt)
+		sj := hits[j].Score * sessionRecencyBoost(hits[j].SavedAt)
+		if si != sj {
+			return si > sj
 		}
 		return hits[i].Session < hits[j].Session
 	})
-	return hits, nil
+	return hits
 }
 
 // GetSessionMessages returns one page of a saved session's unified message
@@ -536,6 +813,18 @@ func snippetAround(content, lowerContent, term string) string {
 	end := idx + window/2
 	if end > len(content) {
 		end = len(content)
+	}
+	// Snap to rune boundaries: the anchor index may come from a normalized
+	// view whose byte offsets drift from the original, and a mid-rune slice
+	// would emit invalid UTF-8 (which some downstream CLIs hard-reject).
+	for start > 0 && start < len(content) && !utf8.RuneStart(content[start]) {
+		start--
+	}
+	for end < len(content) && !utf8.RuneStart(content[end]) {
+		end++
+	}
+	if start > end {
+		start = end
 	}
 	s := strings.TrimSpace(strings.ReplaceAll(content[start:end], "\n", " "))
 	if start > 0 {

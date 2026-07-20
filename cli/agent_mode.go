@@ -1146,6 +1146,16 @@ func (a *AgentMode) buildWorkspaceBlocks(ctx context.Context, query string) (str
 			}
 		}
 	}
+	// Proactive SESSION recall (own gate, orthogonal to the memory mode —
+	// saved sessions are a separate layer neither "index" nor "full"
+	// injects). Same cache discipline: uncached trailing block only.
+	if sr := a.cli.sessionAutoRecallBlock(hints, lastUserMessage(a.cli.history)); sr != "" {
+		if dynamicText == "" {
+			dynamicText = sr
+		} else {
+			dynamicText = sr + "\n\n" + dynamicText
+		}
+	}
 	return workspaceText, dynamicText
 }
 
