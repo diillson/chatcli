@@ -1771,12 +1771,15 @@ func GetContextWindow(provider, model string) int {
 		// opaco, marketplace e lançamentos recentes. Sem este case eles
 		// caíam no default genérico de 50K e a compactação de histórico
 		// disparava em quase todo turno de agent — mesma classe de bug do
-		// StackSpot (PR #1044). Claude é a família dominante no Bedrock e
-		// tem piso real de 200K; o resto do catálogo atual da AWS (Nova,
-		// Llama, Mistral, DeepSeek) senta em 128K.
+		// StackSpot (PR #1044). Claude desconhecido no Bedrock é lançamento
+		// novo — a família atual (Fable 5, Sonnet 5, Opus 4.6+) é toda 1M e
+		// os modelos antigos de 200K têm entrada própria no catálogo; um
+		// overshoot é recuperável (compact + retry no context-too-long),
+		// um undershoot compacta cedo demais em TODO turno. O resto do
+		// catálogo AWS (Nova, Llama, Mistral, DeepSeek) senta em 128K.
 		m := strings.ToLower(model)
 		if strings.Contains(m, "anthropic") || strings.Contains(m, "claude") {
-			return 200000
+			return 1000000
 		}
 		return 128000
 	case ProviderStackSpot:

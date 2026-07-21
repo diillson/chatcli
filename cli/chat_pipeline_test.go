@@ -266,6 +266,21 @@ func TestProviderMaxTokensOverride(t *testing.T) {
 			env:      map[string]string{"OPENAI_MAX_TOKENS": "4096"},
 			want:     4096,
 		},
+		{
+			// The Bedrock client honors BEDROCK_MAX_TOKENS; the table must
+			// agree or /config's effective max tokens diverges from what
+			// the provider actually sends.
+			name:     "bedrock env propagates",
+			provider: "BEDROCK",
+			env:      map[string]string{"BEDROCK_MAX_TOKENS": "16384"},
+			want:     16384,
+		},
+		{
+			name:     "openrouter env propagates",
+			provider: "OPENROUTER",
+			env:      map[string]string{"OPENROUTER_MAX_TOKENS": "12000"},
+			want:     12000,
+		},
 	}
 	// Collect every env var used across the table so each subtest can
 	// reset to a clean slate before applying its own overrides.

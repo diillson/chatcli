@@ -451,9 +451,12 @@ func TestBedrockProviderFallbacks(t *testing.T) {
 	assert.Equal(t, 128000, GetContextWindow(ProviderBedrock, opaque))
 	assert.Equal(t, 4096, GetMaxTokens(ProviderBedrock, opaque, 0))
 
-	// Future Claude model not yet in the registry: the Claude family floor
-	// is 200K input / 64K output, mirroring the CLAUDEAI provider fallback.
-	assert.Equal(t, 200000, GetContextWindow(ProviderBedrock, "anthropic.claude-future-model"))
+	// Future Claude model not yet in the registry: the current family
+	// (Fable 5, Sonnet 5, Opus 4.6+) is all 1M input; the older 200K
+	// models have their own registry entries, so an unknown Claude is a
+	// fresh launch. Output floor stays 64K (some current models cap there
+	// and an over-cap max_tokens is a hard API error).
+	assert.Equal(t, 1000000, GetContextWindow(ProviderBedrock, "anthropic.claude-future-model"))
 	assert.Equal(t, 64000, GetMaxTokens(ProviderBedrock, "anthropic.claude-future-model", 0))
 
 	// Explicit override still has the highest priority.

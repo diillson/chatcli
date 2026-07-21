@@ -232,7 +232,7 @@ func (cli *ChatCLI) sendOutputToAI(output string, aiContext string) {
 	defer cancel()
 
 	//Enviar o output e o contexto para a IA
-	aiResponse, err := cli.Client.SendPrompt(ctx, fmt.Sprintf("Saída do comando:\n%s\n\nContexto: %s", safeOutput, safeContext), cli.history, 0)
+	aiResponse, err := cli.Client.SendPrompt(ctx, fmt.Sprintf("Saída do comando:\n%s\n\nContexto: %s", safeOutput, safeContext), cli.history, cli.UserMaxTokens)
 
 	//parar a animação
 	cli.animation.StopThinkingAnimation()

@@ -2161,6 +2161,7 @@
   "cfg.kv.model_client": "Modelo (client)",
   "cfg.kv.preferred_api": "API preferida",
   "cfg.kv.effective_max_tokens": "Max tokens efetivo",
+  "cfg.val.max_tokens_session_override": "%d (override de sessão via /max-tokens)",
   "cfg.kv.session": "Sessão",
   "cfg.kv.messages": "Mensagens",
   "cfg.kv.tokens_used": "Tokens usados",

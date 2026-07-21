@@ -1268,10 +1268,12 @@ func (a *AgentMode) RunOnce(ctx context.Context, query string, autoExecute bool)
 
 	a.cli.animation.ShowThinkingAnimation(a.cli.Client.GetModelName())
 
-	aiResponse, err := a.cli.Client.SendPrompt(ctx, enrichedQuery, a.cli.history, 0)
+	// Session /max-tokens override (0 = provider default), same as the loop.
+	legacyMaxTokens := a.cli.UserMaxTokens
+	aiResponse, err := a.cli.Client.SendPrompt(ctx, enrichedQuery, a.cli.history, legacyMaxTokens)
 	// Auto-retry on OAuth token expiration (401)
 	if a.cli.refreshClientOnAuthError(err) {
-		aiResponse, err = a.cli.Client.SendPrompt(ctx, enrichedQuery, a.cli.history, 0)
+		aiResponse, err = a.cli.Client.SendPrompt(ctx, enrichedQuery, a.cli.history, legacyMaxTokens)
 	}
 	a.cli.animation.StopThinkingAnimation()
 	if err != nil {
@@ -1449,6 +1451,19 @@ func (a *AgentMode) getToolContextString() string {
 	return toolContext
 }
 
+// adoptSessionMaxTokens reconciles the agent loop's per-turn max-tokens with
+// the session /max-tokens override (cli.UserMaxTokens). The override is
+// adopted whenever the user changes it — raising or lowering — but an
+// unchanged override never clobbers a value the truncation-recovery
+// escalation raised in the meantime. Returns the new (current, lastAdopted)
+// pair.
+func adoptSessionMaxTokens(current, lastAdopted, sessionOverride int) (int, int) {
+	if sessionOverride > 0 && sessionOverride != lastAdopted {
+		return sessionOverride, sessionOverride
+	}
+	return current, lastAdopted
+}
+
 // processAIResponseAndAct is the ReAct main loop. It is deliberately
 // large — it interleaves stdin draining, LLM streaming, tool parsing,
 // policy enforcement, compaction, and UI rendering — and a targeted
@@ -1551,6 +1566,7 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 	contextRecovery := agent.NewContextRecovery(agent.DefaultContextRecoveryConfig(), a.logger)
 	currentMaxTokens := 0           // 0 = use provider default
 	providerMaxTokensCap := 128_000 // conservative default; providers may support more
+	lastSessionMaxTokens := 0       // last /max-tokens override adopted into currentMaxTokens
 
 	// Stagnation detector — breaks out of the ReAct loop when the model
 	// re-emits the SAME batch of tool_calls for N consecutive turns, which
@@ -1579,6 +1595,12 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 			return ctx.Err()
 		default:
 		}
+
+		// Honor the session /max-tokens override exactly like chat mode does.
+		// Re-read every turn (raising OR lowering reflects here), while
+		// preserving any truncation-driven escalation applied meanwhile.
+		currentMaxTokens, lastSessionMaxTokens = adoptSessionMaxTokens(
+			currentMaxTokens, lastSessionMaxTokens, a.cli.UserMaxTokens)
 
 		// Surface background memory/skill writes (auto-extraction ticker,
 		// queued notices) the moment they land instead of holding them until

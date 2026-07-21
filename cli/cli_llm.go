@@ -603,6 +603,10 @@ var providerMaxTokensEnv = map[string]string{
 	"STACKSPOT":     "STACKSPOT_MAX_TOKENS",
 	"COPILOT":       "COPILOT_MAX_TOKENS",
 	"GITHUB_MODELS": "GITHUB_MODELS_MAX_TOKENS",
+	// BEDROCK_MAX_TOKENS is the primary env the Bedrock client reads (it
+	// also accepts ANTHROPIC_MAX_TOKENS as a secondary, handled client-side).
+	"BEDROCK":    "BEDROCK_MAX_TOKENS",
+	"OPENROUTER": "OPENROUTER_MAX_TOKENS",
 }
 
 // getMaxTokensForCurrentLLM picks the per-turn `max_tokens` for the active
@@ -621,6 +625,17 @@ func (cli *ChatCLI) getMaxTokensForCurrentLLM() int {
 	}
 	override := providerMaxTokensOverride(cli.Provider)
 	return catalog.GetMaxTokens(cli.Provider, cli.Model, override)
+}
+
+// effectiveMaxTokensDisplay renders the effective max-tokens for /config,
+// flagging when the number comes from the session /max-tokens override so
+// the display never reads as a static default while an override is live.
+func (cli *ChatCLI) effectiveMaxTokensDisplay() string {
+	effective := cli.getMaxTokensForCurrentLLM()
+	if cli.UserMaxTokens > 0 {
+		return i18n.T("cfg.val.max_tokens_session_override", effective)
+	}
+	return fmt.Sprintf("%d", effective)
 }
 
 // providerMaxTokensOverride reads the configured env var for the provider

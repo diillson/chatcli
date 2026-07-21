@@ -329,7 +329,7 @@ func (cli *ChatCLI) showConfigPanorama() {
 		kv(p, i18n.T("cfg.kv.model_client"), cli.Client.GetModelName())
 	}
 	kv(p, i18n.T("cfg.kv.preferred_api"), string(catalog.GetPreferredAPI(cli.Provider, cli.Model)))
-	kv(p, i18n.T("cfg.kv.effective_max_tokens"), fmt.Sprintf("%d", cli.getMaxTokensForCurrentLLM()))
+	kv(p, i18n.T("cfg.kv.effective_max_tokens"), cli.effectiveMaxTokensDisplay())
 
 	// Session summary
 	fmt.Println(p)
@@ -482,7 +482,7 @@ func (cli *ChatCLI) showConfigProviders() {
 	// Current
 	kv(p, i18n.T("cfg.kv.active_provider"), cli.Provider)
 	kv(p, i18n.T("cfg.kv.active_model"), cli.Model)
-	kv(p, i18n.T("cfg.kv.effective_max_tokens"), fmt.Sprintf("%d", cli.getMaxTokensForCurrentLLM()))
+	kv(p, i18n.T("cfg.kv.effective_max_tokens"), cli.effectiveMaxTokensDisplay())
 
 	// Available (nil-safe — manager may not be wired during early boot/tests)
 	if cli.manager != nil {
