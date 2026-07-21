@@ -218,11 +218,12 @@ func (cli *ChatCLI) sendOutputToAI(output string, aiContext string) {
 
 	safeOutput := utils.SanitizeSensitiveText(output)
 	safeContext := utils.SanitizeSensitiveText(aiContext)
+	outputPrompt := i18n.T("command.output.to_ai_prompt", safeOutput, safeContext)
 
 	// Adicionar o output do comando ao histórico como mensagem do usuário
 	cli.history = append(cli.history, models.Message{
 		Role:    "user",
-		Content: fmt.Sprintf("Saída do comando:\n%s\n\nContexto: %s", safeOutput, safeContext),
+		Content: outputPrompt,
 	})
 	// Exibir mensagem "Pensando..." com animação
 	cli.animation.ShowThinkingAnimation(cli.Client.GetModelName())
@@ -232,7 +233,7 @@ func (cli *ChatCLI) sendOutputToAI(output string, aiContext string) {
 	defer cancel()
 
 	//Enviar o output e o contexto para a IA
-	aiResponse, err := cli.Client.SendPrompt(ctx, fmt.Sprintf("Saída do comando:\n%s\n\nContexto: %s", safeOutput, safeContext), cli.history, cli.UserMaxTokens)
+	aiResponse, err := cli.Client.SendPrompt(ctx, outputPrompt, cli.history, cli.UserMaxTokens)
 
 	//parar a animação
 	cli.animation.StopThinkingAnimation()

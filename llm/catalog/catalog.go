@@ -1775,7 +1775,7 @@ func GetContextWindow(provider, model string) int {
 		// novo — a família atual (Fable 5, Sonnet 5, Opus 4.6+) é toda 1M e
 		// os modelos antigos de 200K têm entrada própria no catálogo; um
 		// overshoot é recuperável (compact + retry no context-too-long),
-		// um undershoot compacta cedo demais em TODO turno. O resto do
+		// um undershoot compacta cedo demais a cada turno. O resto do
 		// catálogo AWS (Nova, Llama, Mistral, DeepSeek) senta em 128K.
 		m := strings.ToLower(model)
 		if strings.Contains(m, "anthropic") || strings.Contains(m, "claude") {

@@ -1387,6 +1387,7 @@
   "command.error.execution": "Error executing command:",
   "command.output.not_captured": "Command output could not be captured for history.",
   "command.output.header": "Command output",
+  "command.output.to_ai_prompt": "Command output:\n%s\n\nContext: %s",
   "command.sending_to_ai": "Sending command output to the AI...",
   "command.error.processing_request": "An error occurred while processing the request.",
   "cli.error.no_provider_configured": "No LLM provider configured. Use /auth login anthropic | openai-codex | github-copilot to authenticate, then /switch to select a provider.",
