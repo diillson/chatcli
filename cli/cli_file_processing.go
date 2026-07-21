@@ -634,7 +634,7 @@ func (cli *ChatCLI) handleNextChunk(ctx context.Context) bool {
 	cli.animation.ShowThinkingAnimation(cli.Client.GetModelName())
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Minute)
 	defer cancel()
-	aiResponse, err := cli.Client.SendPrompt(ctx, prompt+"\n\n"+nextChunk.Content, cli.history, 0)
+	aiResponse, err := cli.Client.SendPrompt(ctx, prompt+"\n\n"+nextChunk.Content, cli.history, cli.UserMaxTokens)
 	cli.animation.StopThinkingAnimation()
 
 	if err != nil {
@@ -689,7 +689,7 @@ func (cli *ChatCLI) handleRetryLastChunk(ctx context.Context) bool {
 	cli.animation.ShowThinkingAnimation(cli.Client.GetModelName())
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Minute)
 	defer cancel()
-	aiResponse, err := cli.Client.SendPrompt(ctx, prompt+"\n\n"+chunk.Content, cli.history, 0)
+	aiResponse, err := cli.Client.SendPrompt(ctx, prompt+"\n\n"+chunk.Content, cli.history, cli.UserMaxTokens)
 	cli.animation.StopThinkingAnimation()
 
 	if err != nil {
