@@ -278,7 +278,6 @@ func (c *BedrockClient) ensureRuntime(ctx context.Context) error {
 	return nil
 }
 
-
 // SendPrompt dispatches to the correct body schema based on the resolved
 // model family (Anthropic Messages vs. OpenAI Chat Completions).
 // Retries are delegated to utils.Retry inside each family-specific path.
