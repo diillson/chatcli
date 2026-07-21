@@ -20,7 +20,6 @@ import (
 	"github.com/aws/aws-sdk-go-v2/aws"
 	awshttp "github.com/aws/aws-sdk-go-v2/aws/transport/http"
 	awsconfig "github.com/aws/aws-sdk-go-v2/config"
-	"github.com/aws/aws-sdk-go-v2/feature/ec2/imds"
 	bedrocksvc "github.com/aws/aws-sdk-go-v2/service/bedrock"
 	bedrocktypes "github.com/aws/aws-sdk-go-v2/service/bedrock/types"
 	"github.com/aws/aws-sdk-go-v2/service/bedrockruntime"
@@ -235,7 +234,7 @@ func (c *BedrockClient) ensureRuntime(ctx context.Context) error {
 	// the embedding provider doesn't need it, which is why LoadBedrockRuntime
 	// returns just the runtime. We rebuild the AWS config locally here only
 	// to construct the bedrock control client with the same credential chain.
-	cfg, err := awsconfig.LoadDefaultConfig(ctx, controlPlaneConfigOptions(c.region, c.profile)...)
+	cfg, err := awsconfig.LoadDefaultConfig(ctx, awsLoadOptions(c.region, c.profile, c.logger)...)
 	if err != nil {
 		return fmt.Errorf("bedrock: failed to load control-plane AWS config: %w", err)
 	}
@@ -279,22 +278,6 @@ func (c *BedrockClient) ensureRuntime(ctx context.Context) error {
 	return nil
 }
 
-// controlPlaneConfigOptions mirrors the LoadOptions used by the runtime
-// helper so the bedrock control-plane client (used for ListModels) sees
-// the same region/profile/IMDS settings as the runtime client.
-func controlPlaneConfigOptions(region, profile string) []func(*awsconfig.LoadOptions) error {
-	opts := []func(*awsconfig.LoadOptions) error{}
-	if region != "" {
-		opts = append(opts, awsconfig.WithRegion(region))
-	}
-	if profile != "" {
-		opts = append(opts, awsconfig.WithSharedConfigProfile(profile))
-	}
-	if shouldDisableIMDS() {
-		opts = append(opts, awsconfig.WithEC2IMDSClientEnableState(imds.ClientDisabled))
-	}
-	return opts
-}
 
 // SendPrompt dispatches to the correct body schema based on the resolved
 // model family (Anthropic Messages vs. OpenAI Chat Completions).
@@ -596,6 +579,18 @@ func buildCorporateHTTPClient(logger *zap.Logger) (aws.HTTPClient, string) {
 // See: https://docs.aws.amazon.com/bedrock/latest/userguide/model-parameters-anthropic-claude-messages.html
 const anthropicBedrockVersion = "bedrock-2023-05-31"
 
+// bedrockListModelsTimeout bounds the whole control-plane listing when the
+// caller supplied no deadline; the /switch catalog fallback makes a slow
+// answer worthless anyway.
+const bedrockListModelsTimeout = 30 * time.Second
+
+// bedrockListEndpointHint travels in the structured warn when control-plane
+// listing fails — the most common corporate cause is the default AWS host
+// being unreachable or TLS-intercepted, both solved by endpoint/CA config.
+const bedrockListEndpointHint = "if your network requires a custom Bedrock endpoint or CA, " +
+	"set BEDROCK_BASE_URL or BEDROCK_CONTROL_BASE_URL, and CHATCLI_BEDROCK_CA_BUNDLE for a private CA; " +
+	"chat keeps working via the model catalog meanwhile"
+
 // ListModels queries Bedrock's control plane for Anthropic models the account
 // has access to. Returns both foundation models (direct on-demand, e.g. Claude
 // 3.x) AND inference profiles (global./us./eu./apac., required for Claude 3.7
@@ -604,6 +599,16 @@ const anthropicBedrockVersion = "bedrock-2023-05-31"
 func (c *BedrockClient) ListModels(ctx context.Context) ([]client.ModelInfo, error) {
 	if err := c.ensureRuntime(ctx); err != nil {
 		return nil, err
+	}
+
+	// Listing is best-effort UX — the catalog is the fallback — so it must
+	// never freeze the REPL. A corporate firewall that blackholes the
+	// control-plane host would otherwise hang through minutes of SDK
+	// connect retries; bound the whole listing when the caller didn't.
+	if _, hasDeadline := ctx.Deadline(); !hasDeadline {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, bedrockListModelsTimeout)
+		defer cancel()
 	}
 
 	seen := make(map[string]bool)
@@ -632,7 +637,8 @@ func (c *BedrockClient) ListModels(ctx context.Context) ([]client.ModelInfo, err
 		ByOutputModality: bedrocktypes.ModelModalityText,
 	})
 	if err != nil {
-		c.logger.Warn("bedrock: ListFoundationModels failed", zap.Error(err))
+		c.logger.Warn("bedrock: ListFoundationModels failed", zap.Error(err),
+			zap.String("hint", bedrockListEndpointHint))
 	} else {
 		for _, s := range fm.ModelSummaries {
 			id, displayName := derefModelSummary(s.ModelId, s.ModelName, s.ProviderName)
@@ -661,7 +667,8 @@ func (c *BedrockClient) ListModels(ctx context.Context) ([]client.ModelInfo, err
 	for paginator.HasMorePages() {
 		page, err := paginator.NextPage(ctx)
 		if err != nil {
-			c.logger.Warn("bedrock: ListInferenceProfiles failed", zap.Error(err))
+			c.logger.Warn("bedrock: ListInferenceProfiles failed", zap.Error(err),
+				zap.String("hint", bedrockListEndpointHint))
 			break
 		}
 		for _, p := range page.InferenceProfileSummaries {
