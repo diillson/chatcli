@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.169.0](https://github.com/diillson/chatcli/compare/v1.168.1...v1.169.0) (2026-07-21)
+
+
+### Features
+
+* **bedrock:** BEDROCK_MODEL selects the default model ([#1230](https://github.com/diillson/chatcli/issues/1230)) ([0563d9f](https://github.com/diillson/chatcli/commit/0563d9f161d163f8f9c10b1158079cab7f611cc8))
+
 ## [1.168.1](https://github.com/diillson/chatcli/compare/v1.168.0...v1.168.1) (2026-07-21)
 
 
