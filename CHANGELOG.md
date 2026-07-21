@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.168.0](https://github.com/diillson/chatcli/compare/v1.167.0...v1.168.0) (2026-07-21)
+
+
+### Features
+
+* **bedrock:** custom endpoint overrides for corporate DNS and VPC ([#1225](https://github.com/diillson/chatcli/issues/1225)) ([e6555fc](https://github.com/diillson/chatcli/commit/e6555fc1074b5a99dce70fb27576b7a84a2ce217))
+
 ## [1.167.0](https://github.com/diillson/chatcli/compare/v1.166.1...v1.167.0) (2026-07-20)
 
 
