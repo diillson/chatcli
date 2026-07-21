@@ -103,6 +103,11 @@ func TestMantleModelID(t *testing.T) {
 		"global.anthropic.claude-fable-5":   "anthropic.claude-fable-5",
 		// Bare first-party id (users type it out of habit).
 		"claude-sonnet-5": "anthropic.claude-sonnet-5",
+		// Catalog canonical is a global. profile for InvokeModel-era models
+		// (Opus 4.8/4.7): forced-mantle routing must still strip it down to
+		// the dateless id the Messages endpoint serves.
+		"claude-opus-4-8":                  "anthropic.claude-opus-4-8",
+		"global.anthropic.claude-opus-4-8": "anthropic.claude-opus-4-8",
 		// Unknown-but-real Claude profile id the catalog can't resolve:
 		// the mechanical prefix strip is the fallback.
 		"us.anthropic.claude-zeta-9-v1:0": "anthropic.claude-zeta-9-v1:0",

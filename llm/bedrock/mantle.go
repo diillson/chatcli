@@ -80,6 +80,20 @@ func usesMantleEndpoint(model string) bool {
 // canonical "anthropic."-prefixed dateless IDs only.
 var mantleProfilePrefixes = []string{"us.", "eu.", "apac.", "jp.", "au.", "global."}
 
+// stripInferenceProfilePrefix removes a cross-region profile prefix from a
+// Claude Bedrock id ("global.anthropic.claude-x" → "anthropic.claude-x").
+// Non-Claude and unprefixed ids come back unchanged.
+func stripInferenceProfilePrefix(id string) string {
+	trimmed := strings.TrimSpace(id)
+	m := strings.ToLower(trimmed)
+	for _, p := range mantleProfilePrefixes {
+		if strings.HasPrefix(m, p) && strings.HasPrefix(m[len(p):], "anthropic.") {
+			return trimmed[len(p):]
+		}
+	}
+	return trimmed
+}
+
 // mantleModelID canonicalizes whatever Bedrock-side spelling the user
 // selected — an inference-profile ID discovered via ListInferenceProfiles
 // ("us.anthropic.claude-sonnet-5", "global.anthropic.claude-sonnet-5-v1:0"),
@@ -88,19 +102,18 @@ var mantleProfilePrefixes = []string{"us.", "eu.", "apac.", "jp.", "au.", "globa
 // returns 404 not_found_error ("model does not exist").
 //
 // Resolution order: the Bedrock catalog first (it owns the invokable
-// Mantle id, and Resolve matches the embedded claude segment inside
-// profile-prefixed IDs); a mechanical profile-prefix strip as fallback
-// for real-but-uncataloged Claude IDs; non-Claude ids pass through.
+// Mantle id; the catalog canonical may itself be a global. profile — for
+// InvokeModel-era models like Opus 4.8 — so its prefix is stripped too);
+// a mechanical profile-prefix strip as fallback for real-but-uncataloged
+// Claude IDs; non-Claude ids pass through.
 func mantleModelID(model string) string {
-	if meta, ok := catalog.Resolve(catalog.ProviderBedrock, model); ok &&
-		strings.HasPrefix(strings.ToLower(meta.ID), "anthropic.") {
-		return meta.ID
-	}
-	m := strings.ToLower(strings.TrimSpace(model))
-	for _, p := range mantleProfilePrefixes {
-		if strings.HasPrefix(m, p) && strings.HasPrefix(m[len(p):], "anthropic.") {
-			return strings.TrimSpace(model)[len(p):]
+	if meta, ok := catalog.Resolve(catalog.ProviderBedrock, model); ok {
+		if id := stripInferenceProfilePrefix(meta.ID); strings.HasPrefix(strings.ToLower(id), "anthropic.") {
+			return id
 		}
+	}
+	if id := stripInferenceProfilePrefix(model); strings.HasPrefix(strings.ToLower(id), "anthropic.") {
+		return id
 	}
 	return model
 }
