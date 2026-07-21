@@ -123,12 +123,33 @@ func TestLoadBedrockRuntimeHonorsSDKNativeEndpointVar(t *testing.T) {
 	assert.Equal(t, "https://vpce.example.internal", *opts.BaseEndpoint)
 }
 
-func TestEnsureRuntimeAppliesControlBaseURL(t *testing.T) {
+func TestEnsureRuntimeControlInheritsBaseURL(t *testing.T) {
+	// One variable covers the whole surface: with only BEDROCK_BASE_URL
+	// set, both the runtime and the control-plane clients point at it.
 	clearEndpointEnv(t)
 	hermeticAWSEnv(t)
-	t.Setenv("BEDROCK_CONTROL_BASE_URL", "https://bedrock-control.internal.example.com/")
-	// The data-plane override must NOT leak into the control plane.
+	t.Setenv("BEDROCK_BASE_URL", "https://bedrock.internal.example.com")
+
+	c := NewBedrockClient("anthropic.claude-sonnet-5", "", "", zap.NewNop(), 1, 0)
+	require.NoError(t, c.ensureRuntime(context.Background()))
+
+	runtimeOpts := c.runtime.Options()
+	require.NotNil(t, runtimeOpts.BaseEndpoint)
+	assert.Equal(t, "https://bedrock.internal.example.com", *runtimeOpts.BaseEndpoint)
+
+	controlOpts := c.control.Options()
+	require.NotNil(t, controlOpts.BaseEndpoint)
+	assert.Equal(t, "https://bedrock.internal.example.com", *controlOpts.BaseEndpoint)
+}
+
+func TestEnsureRuntimeControlOverrideWins(t *testing.T) {
+	// Per-plane override for split hosts (AWS VPC interface endpoints are
+	// created per service): BEDROCK_CONTROL_BASE_URL beats the inherited
+	// BEDROCK_BASE_URL on the control plane only.
+	clearEndpointEnv(t)
+	hermeticAWSEnv(t)
 	t.Setenv("BEDROCK_BASE_URL", "https://bedrock-runtime.internal.example.com")
+	t.Setenv("BEDROCK_CONTROL_BASE_URL", "https://bedrock-control.internal.example.com/")
 
 	c := NewBedrockClient("anthropic.claude-sonnet-5", "", "", zap.NewNop(), 1, 0)
 	require.NoError(t, c.ensureRuntime(context.Background()))

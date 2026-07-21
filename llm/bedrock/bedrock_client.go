@@ -239,21 +239,34 @@ func (c *BedrockClient) ensureRuntime(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("bedrock: failed to load control-plane AWS config: %w", err)
 	}
-	// The control plane (ListModels/ListInferenceProfiles) lives on a
-	// different host than the runtime (bedrock. vs bedrock-runtime.), so
-	// it gets its own override — BEDROCK_CONTROL_BASE_URL — instead of
-	// inheriting BEDROCK_BASE_URL, which points at a data-plane endpoint.
-	// The AWS-standard AWS_ENDPOINT_URL_BEDROCK is honored by the SDK
-	// inside NewFromConfig when the chatcli-native variable is unset.
-	var controlOpts []func(*bedrocksvc.Options)
-	if base, err := envBaseURL("BEDROCK_CONTROL_BASE_URL"); err != nil {
+	// Control plane (ListModels/ListInferenceProfiles): BEDROCK_BASE_URL
+	// covers it too, so one variable is enough for corporate gateways and
+	// custom DNS that front the whole Bedrock surface on a single host.
+	// BEDROCK_CONTROL_BASE_URL is the optional per-plane override for
+	// setups where the control plane genuinely lives on another host —
+	// AWS VPC interface endpoints are created per service (bedrock vs
+	// bedrock-runtime), each with its own DNS name. The AWS-standard
+	// AWS_ENDPOINT_URL_BEDROCK is honored by the SDK inside NewFromConfig
+	// when neither chatcli-native variable is set.
+	controlBase, err := envBaseURL("BEDROCK_CONTROL_BASE_URL")
+	if err != nil {
 		return err
-	} else if base != "" {
+	}
+	controlSource := "BEDROCK_CONTROL_BASE_URL"
+	if controlBase == "" {
+		if controlBase, err = envBaseURL("BEDROCK_BASE_URL"); err != nil {
+			return err
+		}
+		controlSource = "BEDROCK_BASE_URL"
+	}
+	var controlOpts []func(*bedrocksvc.Options)
+	if controlBase != "" {
 		controlOpts = append(controlOpts, func(o *bedrocksvc.Options) {
-			o.BaseEndpoint = aws.String(base)
+			o.BaseEndpoint = aws.String(controlBase)
 		})
-		c.logger.Info("bedrock: custom control-plane endpoint configured via BEDROCK_CONTROL_BASE_URL",
-			zap.String("endpoint", base))
+		c.logger.Info("bedrock: custom control-plane endpoint configured",
+			zap.String("endpoint", controlBase),
+			zap.String("source", controlSource))
 	}
 	c.region = resolvedRegion
 	c.runtime = runtime
