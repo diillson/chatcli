@@ -52,6 +52,14 @@ func ParseToolCalls(text string) ([]ToolCall, error) {
 		calls = append(calls, mdCalls...)
 	}
 
+	// Last-resort fallback: "[tool: @name {args}]" shorthand. Some models
+	// (observed with Claude Opus 4.8 on Bedrock) emit this instead of the
+	// canonical tag. Gated on zero calls so prose that merely mentions the
+	// bracket syntax alongside a real <tool_call> never duplicates a batch.
+	if len(calls) == 0 {
+		calls = append(calls, parseBracketToolCalls(text)...)
+	}
+
 	// Apply JSON recovery/normalization to ALL parsed calls (XML, JSON, markdown).
 	// This fixes single quotes, unquoted keys, and other malformations.
 	// Must run AFTER all parsing stages so that every source benefits from recovery.
@@ -424,6 +432,122 @@ func parseJSONToolCalls(text string) []ToolCall {
 	}
 
 	return calls
+}
+
+// parseBracketToolCalls handles the "[tool: @name {args}]" shorthand:
+//
+//	[tool: @websearch {"query":"golang"}]
+//	[tool_call: @coder {'cmd':'read','args':{...}}]   (single quotes → recovery)
+//	[tool: websearch {"query":"x"}]                    (missing @ → prepended)
+//	[tool: @coder read --file main.go]                 (flat args string)
+//	[tool: @tools]                                     (no args)
+//
+// The "tool:"/"tool_call:" prefix inside the bracket is the intent signal —
+// a bare "[something]" in prose never matches. JSON args are extracted with
+// balanced-brace scanning, so a missing closing bracket (truncated response)
+// still recovers the call.
+func parseBracketToolCalls(text string) []ToolCall {
+	var calls []ToolCall
+	searchFrom := 0
+
+	for searchFrom < len(text) {
+		idx := indexCaseInsensitive(text[searchFrom:], "[tool")
+		if idx < 0 {
+			break
+		}
+		start := searchFrom + idx
+
+		name, pos, ok := parseBracketHeader(text, start+len("[tool"))
+		if !ok {
+			searchFrom = start + 1
+			continue
+		}
+
+		args, end := parseBracketArgs(text, pos)
+
+		// Optional trailing whitespace + closing ']' — tolerated if absent.
+		for end < len(text) && (text[end] == ' ' || text[end] == '\t') {
+			end++
+		}
+		if end < len(text) && text[end] == ']' {
+			end++
+		}
+
+		calls = append(calls, ToolCall{
+			Name: name,
+			Args: args,
+			Raw:  text[start:end],
+		})
+		searchFrom = end
+	}
+
+	return calls
+}
+
+// parseBracketHeader consumes the optional "_call" spelling, the mandatory
+// ":" separator and the tool name, starting right after "[tool". Returns the
+// @-normalized name and the position after it. ok=false means this bracket
+// is prose (no colon, empty name), not a call.
+func parseBracketHeader(text string, pos int) (string, int, bool) {
+	const callSuffix = "_call"
+	if pos+len(callSuffix) <= len(text) && strings.EqualFold(text[pos:pos+len(callSuffix)], callSuffix) {
+		pos += len(callSuffix)
+	}
+
+	// Require ":" (with optional surrounding spaces) — this is what
+	// separates the shorthand from prose like "[tool docs]".
+	pos = skipSpacesTabs(text, pos)
+	if pos >= len(text) || text[pos] != ':' {
+		return "", pos, false
+	}
+	pos = skipSpacesTabs(text, pos+1)
+
+	// Tool name: optional '@' + attribute-name chars.
+	nameStart := pos
+	if pos < len(text) && text[pos] == '@' {
+		pos++
+	}
+	for pos < len(text) && isAttrNameChar(text[pos]) {
+		pos++
+	}
+	name := text[nameStart:pos]
+	if strings.TrimPrefix(name, "@") == "" {
+		return "", pos, false
+	}
+	if !strings.HasPrefix(name, "@") {
+		name = "@" + name
+	}
+	for pos < len(text) && (text[pos] == ' ' || text[pos] == '\t' || text[pos] == '\n' || text[pos] == '\r') {
+		pos++
+	}
+	return name, pos, true
+}
+
+// parseBracketArgs extracts the args portion of a bracket call starting at
+// pos: a balanced JSON object, or a flat string up to the closing ']' (the
+// downstream lenient arg parser understands "exec ls -t file" shapes).
+// Returns the args and the position where they end.
+func parseBracketArgs(text string, pos int) (string, int) {
+	if pos < len(text) && text[pos] == '{' {
+		if obj := extractJSONObject(text, pos); obj != "" {
+			return obj, pos + len(obj)
+		}
+		// Unbalanced braces — fall through to flat-args handling.
+	}
+	if pos < len(text) && text[pos] == ']' {
+		return "", pos
+	}
+	if closeIdx := strings.IndexByte(text[pos:], ']'); closeIdx >= 0 {
+		return strings.TrimSpace(text[pos : pos+closeIdx]), pos + closeIdx
+	}
+	return strings.TrimSpace(text[pos:]), len(text)
+}
+
+func skipSpacesTabs(text string, pos int) int {
+	for pos < len(text) && (text[pos] == ' ' || text[pos] == '\t') {
+		pos++
+	}
+	return pos
 }
 
 // parseMarkdownCodeBlockToolCalls extracts tool calls from markdown code blocks.
