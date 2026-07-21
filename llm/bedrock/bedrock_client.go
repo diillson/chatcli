@@ -194,7 +194,10 @@ func (c *BedrockClient) getMaxTokens() int {
 			return parsed
 		}
 	}
-	return catalog.GetMaxTokens(catalog.ProviderBedrock, c.model, 4096)
+	// Sem override: o terceiro argumento tem prioridade máxima em
+	// GetMaxTokens, então passar 4096 aqui ignorava o catálogo inteiro e
+	// estrangulava modelos com teto de 64K-128K (Fable/Sonnet/Opus).
+	return catalog.GetMaxTokens(catalog.ProviderBedrock, c.model, 0)
 }
 
 // shouldDisableIMDS returns true when the process is clearly NOT running on

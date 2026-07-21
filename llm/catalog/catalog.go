@@ -1545,6 +1545,56 @@ var registry = []ModelMeta{
 		Capabilities:    []string{"tools", "json_mode"},
 	},
 
+	// ── AWS Bedrock — Amazon Nova ────────────────────────────────────
+	// Família nativa da AWS, roteada pela Converse API (que normaliza no
+	// shape chat-completions). Os IDs primários usam o prefixo de
+	// inference profile "us." (exigido para invocação on-demand na
+	// maioria das regiões); os IDs base ficam como aliases. Sem estas
+	// entradas as janelas de 300K/1M caíam no fallback genérico do
+	// provider e a compactação disparava cedo demais. MaxOutputTokens
+	// segue o teto documentado de 5K da família; BEDROCK_MAX_TOKENS
+	// cobre deployments que exponham mais.
+	{
+		ID:              "us.amazon.nova-micro-v1:0",
+		Aliases:         []string{"bedrock-nova-micro", "amazon.nova-micro-v1:0", "nova-micro"},
+		DisplayName:     "Amazon Nova Micro (Bedrock)",
+		Provider:        ProviderBedrock,
+		ContextWindow:   128000,
+		MaxOutputTokens: 5120,
+		PreferredAPI:    APIChatCompletions,
+		Capabilities:    []string{"tools", "json_mode"},
+	},
+	{
+		ID:              "us.amazon.nova-lite-v1:0",
+		Aliases:         []string{"bedrock-nova-lite", "amazon.nova-lite-v1:0", "nova-lite"},
+		DisplayName:     "Amazon Nova Lite (Bedrock)",
+		Provider:        ProviderBedrock,
+		ContextWindow:   300000,
+		MaxOutputTokens: 5120,
+		PreferredAPI:    APIChatCompletions,
+		Capabilities:    []string{"tools", "vision", "json_mode"},
+	},
+	{
+		ID:              "us.amazon.nova-pro-v1:0",
+		Aliases:         []string{"bedrock-nova-pro", "amazon.nova-pro-v1:0", "nova-pro"},
+		DisplayName:     "Amazon Nova Pro (Bedrock)",
+		Provider:        ProviderBedrock,
+		ContextWindow:   300000,
+		MaxOutputTokens: 5120,
+		PreferredAPI:    APIChatCompletions,
+		Capabilities:    []string{"tools", "vision", "json_mode"},
+	},
+	{
+		ID:              "us.amazon.nova-premier-v1:0",
+		Aliases:         []string{"bedrock-nova-premier", "amazon.nova-premier-v1:0", "nova-premier"},
+		DisplayName:     "Amazon Nova Premier (Bedrock, 1M ctx)",
+		Provider:        ProviderBedrock,
+		ContextWindow:   1000000,
+		MaxOutputTokens: 5120,
+		PreferredAPI:    APIChatCompletions,
+		Capabilities:    []string{"tools", "vision", "json_mode"},
+	},
+
 	// ── StackSpot AI ─────────────────────────────────────────────────
 	{
 		// StackSpot's agent chat API does not accept max_tokens — the
@@ -1649,6 +1699,16 @@ func GetMaxTokens(provider, model string, override int) int {
 		// Claude 3+ família toda usa 200K input; output varia 4K-128K.
 		// 64K é o teto comum dos modelos atuais (sonnet 4.x, opus 4.5+).
 		return 64000
+	case ProviderBedrock:
+		// Espelha o racional do CLAUDEAI para modelos Claude fora do
+		// catálogo — modelos com cap menor (3.x) têm entrada própria, então
+		// um desconhecido é lançamento novo com teto ≥64K. Para o resto,
+		// 4096 é o piso seguro do catálogo AWS atual (Converse rejeita
+		// maxTokens acima do cap real do modelo).
+		if m := strings.ToLower(model); strings.Contains(m, "anthropic") || strings.Contains(m, "claude") {
+			return 64000
+		}
+		return 4096
 	case ProviderStackSpot:
 		// The StackSpot agent API ignores client-side max_tokens; this
 		// value only feeds local bookkeeping, so keep it aligned with
@@ -1704,7 +1764,20 @@ func GetContextWindow(provider, model string) int {
 		return 1000000
 	case ProviderClaudeAI:
 		return 200000
-	case ProviderOpenAI:
+	case ProviderOpenAI, ProviderOpenAIAssistant:
+		return 128000
+	case ProviderBedrock:
+		// Modelos fora do catálogo: application inference profiles com ID
+		// opaco, marketplace e lançamentos recentes. Sem este case eles
+		// caíam no default genérico de 50K e a compactação de histórico
+		// disparava em quase todo turno de agent — mesma classe de bug do
+		// StackSpot (PR #1044). Claude é a família dominante no Bedrock e
+		// tem piso real de 200K; o resto do catálogo atual da AWS (Nova,
+		// Llama, Mistral, DeepSeek) senta em 128K.
+		m := strings.ToLower(model)
+		if strings.Contains(m, "anthropic") || strings.Contains(m, "claude") {
+			return 200000
+		}
 		return 128000
 	case ProviderStackSpot:
 		// StackSpot agents sit on top of current frontier models (128K+

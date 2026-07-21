@@ -435,3 +435,53 @@ func TestDevinCatalogEntries(t *testing.T) {
 	assert.Equal(t, 200000, GetContextWindow(ProviderDevin, "some-future-model"))
 	assert.Equal(t, 32000, GetMaxTokens(ProviderDevin, "some-future-model", 0))
 }
+
+// TestBedrockProviderFallbacks pins the Bedrock provider fallbacks for models
+// absent from the registry. Before these cases existed, any unresolvable
+// Bedrock model (application inference profiles with opaque IDs, marketplace
+// or freshly-launched models) fell through to the generic 50K default — the
+// same bug class as StackSpot (PR #1044) — which shrank the agent-mode
+// compaction budget to ~120K chars and made history compaction fire on
+// nearly every turn.
+func TestBedrockProviderFallbacks(t *testing.T) {
+	// Opaque application-inference-profile ARN: nothing in the registry can
+	// match it. Non-Claude current Bedrock models (Nova, Llama, Mistral,
+	// DeepSeek) all sit at 128K — that is the safe generic floor.
+	opaque := "arn:aws:bedrock:us-east-1:000000000000:application-inference-profile/synthetic0000"
+	assert.Equal(t, 128000, GetContextWindow(ProviderBedrock, opaque))
+	assert.Equal(t, 4096, GetMaxTokens(ProviderBedrock, opaque, 0))
+
+	// Future Claude model not yet in the registry: the Claude family floor
+	// is 200K input / 64K output, mirroring the CLAUDEAI provider fallback.
+	assert.Equal(t, 200000, GetContextWindow(ProviderBedrock, "anthropic.claude-future-model"))
+	assert.Equal(t, 64000, GetMaxTokens(ProviderBedrock, "anthropic.claude-future-model", 0))
+
+	// Explicit override still has the highest priority.
+	assert.Equal(t, 9000, GetMaxTokens(ProviderBedrock, opaque, 9000))
+}
+
+// TestOpenAIAssistantContextWindowFallback: assistant mode reports provider
+// OPENAI_ASSISTANT; without its own case it fell into the generic 50K default.
+func TestOpenAIAssistantContextWindowFallback(t *testing.T) {
+	assert.Equal(t, 128000, GetContextWindow(ProviderOpenAIAssistant, "unknown-assistant-model"))
+}
+
+// TestBedrockNovaEntries pins the Amazon Nova family. These are the flagship
+// non-Anthropic Bedrock models; without registry entries their 300K/1M
+// windows collapsed onto the provider fallback.
+func TestBedrockNovaEntries(t *testing.T) {
+	for model, wantCtx := range map[string]int{
+		"amazon.nova-micro-v1:0":      128000,
+		"amazon.nova-lite-v1:0":       300000,
+		"amazon.nova-pro-v1:0":        300000,
+		"amazon.nova-premier-v1:0":    1000000,
+		"us.amazon.nova-pro-v1:0":     300000, // cross-region inference profile spelling
+		"us.amazon.nova-premier-v1:0": 1000000,
+	} {
+		meta, ok := Resolve(ProviderBedrock, model)
+		assert.True(t, ok, "expected %s to resolve for BEDROCK", model)
+		assert.Equal(t, ProviderBedrock, meta.Provider, "%s provider", model)
+		assert.Equal(t, wantCtx, meta.ContextWindow, "%s context window", model)
+		assert.Equal(t, wantCtx, GetContextWindow(ProviderBedrock, model), "%s GetContextWindow", model)
+	}
+}
