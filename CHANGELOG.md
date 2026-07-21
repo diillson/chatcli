@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.168.1](https://github.com/diillson/chatcli/compare/v1.168.0...v1.168.1) (2026-07-21)
+
+
+### Bug Fixes
+
+* **bedrock:** control plane uses the corporate HTTP client and bounded listing ([#1227](https://github.com/diillson/chatcli/issues/1227)) ([6eb8bce](https://github.com/diillson/chatcli/commit/6eb8bce2d64db292865ca12f6d93bd02171c3ea6))
+* **bedrock:** invoke Opus 4.8/4.7 and Sonnet 4 through global inference profiles ([#1228](https://github.com/diillson/chatcli/issues/1228)) ([30f124d](https://github.com/diillson/chatcli/commit/30f124d6f8b1f113df784d962f120d115b76d365))
+
 ## [1.168.0](https://github.com/diillson/chatcli/compare/v1.167.0...v1.168.0) (2026-07-21)
 
 
