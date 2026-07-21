@@ -26,6 +26,7 @@ func setupTestEnv(t *testing.T, envs map[string]string) {
 		"STACKSPOT_REALM", "STACKSPOT_AGENT_ID",
 		"CHATCLI_AUTH_DIR",
 		"AWS_ACCESS_KEY_ID", "AWS_PROFILE", "AWS_REGION", "BEDROCK_REGION",
+		"BEDROCK_MODEL",
 		"AWS_WEB_IDENTITY_TOKEN_FILE",
 		"AWS_CONTAINER_CREDENTIALS_RELATIVE_URI",
 		"AWS_CONTAINER_CREDENTIALS_FULL_URI",
@@ -111,6 +112,50 @@ func TestLLMManager_GetClient(t *testing.T) {
 		assert.NoError(t, err)
 		assert.NotNil(t, client)
 		assert.IsType(t, &stackspotai.StackSpotClient{}, client)
+	})
+
+	t.Run("Bedrock honors BEDROCK_MODEL when no model is passed", func(t *testing.T) {
+		setupTestEnv(t, map[string]string{
+			"AWS_ACCESS_KEY_ID": "AKIAIOSFODNN7EXAMPLE",
+			"BEDROCK_MODEL":     "claude-opus-4-8",
+		})
+
+		mgr, err := NewLLMManager(logger)
+		assert.NoError(t, err)
+
+		client, err := mgr.GetClient("BEDROCK", "")
+		assert.NoError(t, err)
+		assert.NotNil(t, client)
+		// The alias resolves through the catalog to the invokable global
+		// profile, whose display name identifies Opus 4.8.
+		assert.Contains(t, client.GetModelName(), "Opus 4.8")
+	})
+
+	t.Run("Bedrock explicit model wins over BEDROCK_MODEL", func(t *testing.T) {
+		setupTestEnv(t, map[string]string{
+			"AWS_ACCESS_KEY_ID": "AKIAIOSFODNN7EXAMPLE",
+			"BEDROCK_MODEL":     "claude-opus-4-8",
+		})
+
+		mgr, err := NewLLMManager(logger)
+		assert.NoError(t, err)
+
+		client, err := mgr.GetClient("BEDROCK", "claude-haiku-4-5")
+		assert.NoError(t, err)
+		assert.Contains(t, client.GetModelName(), "Haiku 4.5")
+	})
+
+	t.Run("Bedrock falls back to the catalog default without BEDROCK_MODEL", func(t *testing.T) {
+		setupTestEnv(t, map[string]string{
+			"AWS_ACCESS_KEY_ID": "AKIAIOSFODNN7EXAMPLE",
+		})
+
+		mgr, err := NewLLMManager(logger)
+		assert.NoError(t, err)
+
+		client, err := mgr.GetClient("BEDROCK", "")
+		assert.NoError(t, err)
+		assert.Contains(t, client.GetModelName(), "Sonnet 4.5")
 	})
 
 	t.Run("Unsupported Provider", func(t *testing.T) {

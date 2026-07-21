@@ -189,7 +189,7 @@ func (m *LLMManagerImpl) configurarBedrockClient(maxRetries int, initialBackoff 
 	m.logger.Info(i18n.T("llm.info.configuring_provider", "AWS Bedrock"))
 	m.clients["BEDROCK"] = func(model string) (client.LLMClient, error) {
 		if model == "" {
-			model = config.DefaultBedrockModel
+			model = resolveBedrockModel()
 		}
 		region := firstNonEmptyEnv("BEDROCK_REGION", "AWS_REGION")
 		if region == "" {
@@ -334,6 +334,24 @@ func firstNonEmptyEnv(keys ...string) string {
 		}
 	}
 	return ""
+}
+
+// resolveBedrockModel returns the Bedrock model to use when the caller did
+// not pick one explicitly: BEDROCK_MODEL from the environment or .env
+// (every other provider has its *_MODEL counterpart — COPILOT_MODEL,
+// MOONSHOT_MODEL, OLLAMA_MODEL — Bedrock only had the region/schema vars),
+// falling back to the catalog default. Catalog aliases work as values
+// ("claude-opus-4-8" resolves to the invokable global profile id).
+func resolveBedrockModel() string {
+	if v := strings.TrimSpace(os.Getenv("BEDROCK_MODEL")); v != "" {
+		return v
+	}
+	if config.Global != nil {
+		if v := strings.TrimSpace(config.Global.GetString("BEDROCK_MODEL")); v != "" {
+			return v
+		}
+	}
+	return config.DefaultBedrockModel
 }
 
 // configurarGoogleAIClient configura o cliente Google AI (Gemini)
@@ -966,7 +984,7 @@ func (m *LLMManagerImpl) CreateClientWithKey(provider, model, apiKey string) (cl
 
 	case "BEDROCK":
 		if model == "" {
-			model = config.DefaultBedrockModel
+			model = resolveBedrockModel()
 		}
 		region := firstNonEmptyEnv("BEDROCK_REGION", "AWS_REGION")
 		if region == "" {
