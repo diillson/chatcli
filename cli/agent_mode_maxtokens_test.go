@@ -1,9 +1,14 @@
 package cli
 
 import (
+	"context"
+	"errors"
+	"fmt"
 	"testing"
 
+	"github.com/diillson/chatcli/models"
 	"github.com/stretchr/testify/assert"
+	"go.uber.org/zap"
 )
 
 // O loop do agent/coder ignorava o override de sessão do /max-tokens
@@ -76,4 +81,56 @@ func TestAdoptSessionMaxTokens(t *testing.T) {
 			assert.Equal(t, tc.wantAdopted, gotAdopted, "lastAdopted")
 		})
 	}
+}
+
+// maxTokensCaptureFake registra o maxTokens recebido pelo SendPrompt para
+// provar que o override de sessão chega ao provider.
+type maxTokensCaptureFake struct {
+	gotMaxTokens int
+	err          error
+}
+
+func (f *maxTokensCaptureFake) GetModelName() string { return "fake" }
+func (f *maxTokensCaptureFake) SendPrompt(_ context.Context, _ string, _ []models.Message, maxTokens int) (string, error) {
+	f.gotMaxTokens = maxTokens
+	return "ok", f.err
+}
+
+// sendOutputToAI é caminho de chat: o override de sessão do /max-tokens
+// precisa chegar ao SendPrompt em vez do 0 fixo que ignorava o ajuste.
+func TestSendOutputToAI_HonorsSessionMaxTokens(t *testing.T) {
+	fake := &maxTokensCaptureFake{err: errors.New("synthetic: stop before rendering")}
+	c := &ChatCLI{
+		animation:     NewAnimationManager(),
+		logger:        zap.NewNop(),
+		Client:        fake,
+		UserMaxTokens: 32000,
+	}
+	c.animation.SetSuppressed(true)
+
+	c.sendOutputToAI("stdout sample", "extra context")
+
+	assert.Equal(t, 32000, fake.gotMaxTokens,
+		"session /max-tokens override must reach SendPrompt")
+	// O prompt localizado entra no histórico como mensagem de usuário.
+	assert.Len(t, c.history, 1)
+	assert.Equal(t, "user", c.history[0].Role)
+	assert.Contains(t, c.history[0].Content, "stdout sample")
+}
+
+// effectiveMaxTokensDisplay marca quando o número exibido vem do override de
+// sessão, para o /config nunca ler como default estático.
+func TestEffectiveMaxTokensDisplay(t *testing.T) {
+	plain := &ChatCLI{Provider: "OPENAI", Model: "unknown-model"}
+	assert.Equal(t, fmt.Sprintf("%d", plain.getMaxTokensForCurrentLLM()),
+		plain.effectiveMaxTokensDisplay(),
+		"without an override the display is the bare effective number")
+
+	withOverride := &ChatCLI{Provider: "OPENAI", Model: "unknown-model", UserMaxTokens: 64000}
+	got := withOverride.effectiveMaxTokensDisplay()
+	// A camada i18n aplica separador de milhar ao %d ("64,000"), então a
+	// asserção usa o prefixo do número e a annotation, estáveis nos locales.
+	assert.Contains(t, got, "64", "override value must be displayed")
+	assert.Contains(t, got, "/max-tokens",
+		"override display must carry the session-override annotation")
 }
