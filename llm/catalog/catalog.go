@@ -1253,16 +1253,20 @@ var registry = []ModelMeta{
 		Capabilities:    []string{"tools", "vision", "json_mode", "adaptive_thinking", "bedrock_mantle_only"},
 	},
 	// Claude 4.8 (May 28 2026). Opus 4.8 = 1M / 128K per Anthropic.
-	// The previously-shipped dated profile IDs (…-20260528-v1:0) never
-	// existed on AWS; they stay as aliases so pinned configs keep resolving.
+	// Canonical id is the global. inference profile: the bare dateless id
+	// has no on-demand surface — InvokeModel answers ValidationException
+	// "retry with the ID or ARN of an inference profile", same pattern as
+	// Opus 4.6. The previously-shipped dated profile IDs (…-20260528-v1:0)
+	// never existed on AWS; they stay as aliases so pinned configs keep
+	// resolving.
 	{
-		ID: "anthropic.claude-opus-4-8",
+		ID: "global.anthropic.claude-opus-4-8",
 		Aliases: []string{
-			"bedrock-opus-4-8", "global.anthropic.claude-opus-4-8",
+			"bedrock-opus-4-8", "anthropic.claude-opus-4-8",
 			"global.anthropic.claude-opus-4-8-20260528-v1:0",
 			"anthropic.claude-opus-4-8-20260528-v1:0", "claude-opus-4-8",
 		},
-		DisplayName:     "Claude Opus 4.8 (Bedrock, 1M ctx)",
+		DisplayName:     "Claude Opus 4.8 (Bedrock, global, 1M ctx)",
 		Provider:        ProviderBedrock,
 		ContextWindow:   1000000,
 		MaxOutputTokens: 128000,
@@ -1286,13 +1290,13 @@ var registry = []ModelMeta{
 		Capabilities:    []string{"tools", "vision", "json_mode"},
 	},
 	{
-		ID: "anthropic.claude-opus-4-7",
+		ID: "global.anthropic.claude-opus-4-7",
 		Aliases: []string{
-			"bedrock-opus-4-7", "global.anthropic.claude-opus-4-7",
+			"bedrock-opus-4-7", "anthropic.claude-opus-4-7",
 			"global.anthropic.claude-opus-4-7-20260401-v1:0",
 			"anthropic.claude-opus-4-7-20260401-v1:0", "claude-opus-4-7",
 		},
-		DisplayName:     "Claude Opus 4.7 (Bedrock, 1M ctx)",
+		DisplayName:     "Claude Opus 4.7 (Bedrock, global, 1M ctx)",
 		Provider:        ProviderBedrock,
 		ContextWindow:   1000000,
 		MaxOutputTokens: 128000,
@@ -1377,10 +1381,25 @@ var registry = []ModelMeta{
 		Capabilities:    []string{"tools", "vision", "json_mode"},
 	},
 
-	// Claude 4 / 4.1
+	// Claude 4 / 4.1. Sonnet 4 has a real global. inference profile (AWS
+	// launched global cross-region inference with it, Sep 2025) — canonical
+	// goes global so /switch works from any region; the us./eu. regional
+	// profiles stay as their own entries for operators pinning geography.
+	// Opus 4 and 4.1 have NO global profile on AWS — us. remains the
+	// broadest invokable spelling for them.
+	{
+		ID:              "global.anthropic.claude-sonnet-4-20250514-v1:0",
+		Aliases:         []string{"bedrock-sonnet-4", "anthropic.claude-sonnet-4-20250514-v1:0", "claude-sonnet-4"},
+		DisplayName:     "Claude Sonnet 4 (Bedrock, global)",
+		Provider:        ProviderBedrock,
+		ContextWindow:   200000,
+		MaxOutputTokens: 64000,
+		PreferredAPI:    APIAnthropicMessages,
+		Capabilities:    []string{"tools", "vision", "json_mode"},
+	},
 	{
 		ID:              "us.anthropic.claude-sonnet-4-20250514-v1:0",
-		Aliases:         []string{"bedrock-sonnet-4", "anthropic.claude-sonnet-4-20250514-v1:0", "claude-sonnet-4"},
+		Aliases:         []string{"bedrock-sonnet-4-us"},
 		DisplayName:     "Claude Sonnet 4 (Bedrock, us)",
 		Provider:        ProviderBedrock,
 		ContextWindow:   200000,

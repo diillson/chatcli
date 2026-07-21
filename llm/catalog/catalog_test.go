@@ -218,11 +218,12 @@ func TestClaudeOpus48Specs(t *testing.T) {
 			"claude-opus-4-8 should advertise %q capability", capability)
 	}
 
-	// Bedrock mirror — dateless id per Anthropic's Bedrock docs (Opus 4.8
-	// has no ARN-versioned model ID on Bedrock).
+	// Bedrock mirror — canonical is the global. inference profile over the
+	// dateless id (Opus 4.8 has no ARN-versioned model ID on Bedrock and
+	// the bare id is not on-demand invokable).
 	bedMeta, ok := Resolve(ProviderBedrock, "claude-opus-4-8")
 	assert.True(t, ok, "claude-opus-4-8 must resolve via Bedrock alias")
-	assert.Equal(t, "anthropic.claude-opus-4-8", bedMeta.ID)
+	assert.Equal(t, "global.anthropic.claude-opus-4-8", bedMeta.ID)
 	assert.Equal(t, 1000000, bedMeta.ContextWindow)
 	assert.Equal(t, 128000, bedMeta.MaxOutputTokens)
 	assert.True(t,
@@ -232,7 +233,7 @@ func TestClaudeOpus48Specs(t *testing.T) {
 	// resolving for anyone who pinned it in scripts or env.
 	legacy, ok := Resolve(ProviderBedrock, "global.anthropic.claude-opus-4-8-20260528-v1:0")
 	assert.True(t, ok, "legacy dated Bedrock id must still resolve as alias")
-	assert.Equal(t, "anthropic.claude-opus-4-8", legacy.ID)
+	assert.Equal(t, "global.anthropic.claude-opus-4-8", legacy.ID)
 	// fast_mode is a first-party research preview and
 	// mid_conversation_system is not served by Bedrock — neither may be
 	// advertised on the Bedrock mirror or the client would emit
