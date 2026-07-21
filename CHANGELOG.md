@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.169.1](https://github.com/diillson/chatcli/compare/v1.169.0...v1.169.1) (2026-07-21)
+
+
+### Bug Fixes
+
+* Bedrock compaction budget fallbacks and bracket-style tool call parsing ([#1232](https://github.com/diillson/chatcli/issues/1232)) ([21d6d56](https://github.com/diillson/chatcli/commit/21d6d56e1dbdf87b9ee21442bf36ace397f4c2ef))
+
 ## [1.169.0](https://github.com/diillson/chatcli/compare/v1.168.1...v1.169.0) (2026-07-21)
 
 
