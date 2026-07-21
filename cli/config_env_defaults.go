@@ -87,6 +87,7 @@ var envDefaults = map[string]envDefault{
 	"DEVIN_CLI_TIMEOUT":          {Value: config.DevinCLIDefaultTimeout.String(), Source: "config.DevinCLIDefaultTimeout"},
 	"DEVIN_CLI_SANDBOX":          {Value: "false", Source: "hardcoded"},
 	"OLLAMA_BASE_URL":            {Value: config.OllamaDefaultBaseURL, Source: "config.OllamaDefaultBaseURL"},
+	"BEDROCK_MODEL":              {Value: config.DefaultBedrockModel, Source: "config.DefaultBedrockModel"},
 	"BEDROCK_REGION":             {Value: config.DefaultBedrockRegion, Source: "config.DefaultBedrockRegion"},
 	"COPILOT_MODEL":              {Value: config.DefaultCopilotModel, Source: "config.DefaultCopilotModel"},
 	"COPILOT_API_BASE_URL":       {Value: config.CopilotAPIURL, Source: "config.CopilotAPIURL"},

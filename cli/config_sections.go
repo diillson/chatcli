@@ -540,6 +540,7 @@ func (cli *ChatCLI) showConfigProviders() {
 
 	fmt.Println(p)
 	subheader(p, "cfg.sub.prov.bedrock")
+	kv(p, "BEDROCK_MODEL", envOr("BEDROCK_MODEL"))
 	kv(p, "BEDROCK_REGION", envOr("BEDROCK_REGION"))
 	kv(p, "AWS_REGION", envOr("AWS_REGION"))
 	kv(p, "AWS_PROFILE", envOr("AWS_PROFILE"))
