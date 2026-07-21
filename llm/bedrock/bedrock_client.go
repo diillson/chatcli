@@ -239,9 +239,25 @@ func (c *BedrockClient) ensureRuntime(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("bedrock: failed to load control-plane AWS config: %w", err)
 	}
+	// The control plane (ListModels/ListInferenceProfiles) lives on a
+	// different host than the runtime (bedrock. vs bedrock-runtime.), so
+	// it gets its own override — BEDROCK_CONTROL_BASE_URL — instead of
+	// inheriting BEDROCK_BASE_URL, which points at a data-plane endpoint.
+	// The AWS-standard AWS_ENDPOINT_URL_BEDROCK is honored by the SDK
+	// inside NewFromConfig when the chatcli-native variable is unset.
+	var controlOpts []func(*bedrocksvc.Options)
+	if base, err := envBaseURL("BEDROCK_CONTROL_BASE_URL"); err != nil {
+		return err
+	} else if base != "" {
+		controlOpts = append(controlOpts, func(o *bedrocksvc.Options) {
+			o.BaseEndpoint = aws.String(base)
+		})
+		c.logger.Info("bedrock: custom control-plane endpoint configured via BEDROCK_CONTROL_BASE_URL",
+			zap.String("endpoint", base))
+	}
 	c.region = resolvedRegion
 	c.runtime = runtime
-	c.control = bedrocksvc.NewFromConfig(cfg)
+	c.control = bedrocksvc.NewFromConfig(cfg, controlOpts...)
 	c.credentials = cfg.Credentials
 	c.logger.Info(i18n.T("llm.info.configuring_provider", "Bedrock"),
 		zap.String("region", c.region),
