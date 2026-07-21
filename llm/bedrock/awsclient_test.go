@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	awshttp "github.com/aws/aws-sdk-go-v2/aws/transport/http"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
@@ -174,6 +175,45 @@ func TestEnsureRuntimeControlPlaneHonorsSDKNativeVar(t *testing.T) {
 	controlOpts := c.control.Options()
 	require.NotNil(t, controlOpts.BaseEndpoint)
 	assert.Equal(t, "https://bedrock-control.vpc.internal", *controlOpts.BaseEndpoint)
+}
+
+func TestEnsureRuntimeControlPlaneGetsCorporateHTTPClient(t *testing.T) {
+	// Both planes must build from the same LoadOptions: a corporate
+	// TLS override configured for Bedrock has to reach the control-plane
+	// client too, or model listing breaks behind TLS-intercepting proxies
+	// while chat works.
+	clearEndpointEnv(t)
+	hermeticAWSEnv(t)
+	t.Setenv("CHATCLI_BEDROCK_INSECURE_SKIP_VERIFY", "true")
+
+	c := NewBedrockClient("anthropic.claude-sonnet-5", "", "", zap.NewNop(), 1, 0)
+	require.NoError(t, c.ensureRuntime(context.Background()))
+
+	assertCorporateTLS := func(name string, httpClient interface{}) {
+		bc, ok := httpClient.(*awshttp.BuildableClient)
+		require.True(t, ok, "%s: expected the corporate BuildableClient, got %T", name, httpClient)
+		tr := bc.GetTransport()
+		require.NotNil(t, tr.TLSClientConfig, "%s: corporate transport must carry a TLS config", name)
+		assert.True(t, tr.TLSClientConfig.InsecureSkipVerify,
+			"%s: the corporate TLS override did not reach this client", name)
+	}
+	assertCorporateTLS("runtime", c.runtime.Options().HTTPClient)
+	assertCorporateTLS("control", c.control.Options().HTTPClient)
+}
+
+func TestListModelsDegradesGracefullyWhenControlPlaneUnreachable(t *testing.T) {
+	// A corporate network that blocks the control-plane host must not
+	// break /switch: listing warns and returns empty so the manager falls
+	// back to the catalog. Port 9 (discard) refuses immediately, keeping
+	// the test fast while exercising the same failure path.
+	clearEndpointEnv(t)
+	hermeticAWSEnv(t)
+	t.Setenv("BEDROCK_CONTROL_BASE_URL", "http://127.0.0.1:9")
+
+	c := NewBedrockClient("anthropic.claude-sonnet-5", "", "", zap.NewNop(), 1, 0)
+	models, err := c.ListModels(context.Background())
+	require.NoError(t, err, "listing failures must degrade to the catalog, not error out")
+	assert.Empty(t, models)
 }
 
 func TestLoadBedrockRuntimeRejectsInvalidBaseURL(t *testing.T) {

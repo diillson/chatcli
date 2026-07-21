@@ -97,6 +97,32 @@ func RuntimeEndpointURL(region string) string {
 	return "https://bedrock-runtime." + region + ".amazonaws.com"
 }
 
+// awsLoadOptions is the single source of truth for the AWS LoadOptions
+// every Bedrock-side client uses: region/profile resolution, the
+// corporate-CA/proxy HTTP client and IMDS gating. Runtime AND control
+// plane MUST build from this — the two drifting apart is exactly how the
+// control plane once shipped without the corporate HTTP client, breaking
+// model listing behind TLS-intercepting proxies while chat worked fine.
+func awsLoadOptions(region, profile string, logger *zap.Logger) []func(*awsconfig.LoadOptions) error {
+	opts := []func(*awsconfig.LoadOptions) error{}
+	if region != "" {
+		opts = append(opts, awsconfig.WithRegion(region))
+	}
+	if profile != "" {
+		opts = append(opts, awsconfig.WithSharedConfigProfile(profile))
+	}
+	if httpClient, note := buildCorporateHTTPClient(logger); httpClient != nil {
+		opts = append(opts, awsconfig.WithHTTPClient(httpClient))
+		if note != "" {
+			logger.Warn(note)
+		}
+	}
+	if shouldDisableIMDS() {
+		opts = append(opts, awsconfig.WithEC2IMDSClientEnableState(imds.ClientDisabled))
+	}
+	return opts
+}
+
 // LoadBedrockRuntime builds a bedrockruntime.Client using the same
 // credential chain, region resolution, IMDS gating and corporate-CA
 // support that the chat client (BedrockClient) uses. Exported so other
@@ -114,23 +140,7 @@ func LoadBedrockRuntime(ctx context.Context, region, profile string, logger *zap
 	if logger == nil {
 		return nil, "", fmt.Errorf("bedrock: logger is required (pass zap.NewNop() if you don't need logs)")
 	}
-	opts := []func(*awsconfig.LoadOptions) error{}
-	if region != "" {
-		opts = append(opts, awsconfig.WithRegion(region))
-	}
-	if profile != "" {
-		opts = append(opts, awsconfig.WithSharedConfigProfile(profile))
-	}
-	if httpClient, note := buildCorporateHTTPClient(logger); httpClient != nil {
-		opts = append(opts, awsconfig.WithHTTPClient(httpClient))
-		if note != "" {
-			logger.Warn(note)
-		}
-	}
-	if shouldDisableIMDS() {
-		opts = append(opts, awsconfig.WithEC2IMDSClientEnableState(imds.ClientDisabled))
-	}
-	cfg, err := awsconfig.LoadDefaultConfig(ctx, opts...)
+	cfg, err := awsconfig.LoadDefaultConfig(ctx, awsLoadOptions(region, profile, logger)...)
 	if err != nil {
 		return nil, "", fmt.Errorf("bedrock: failed to load AWS config: %w", err)
 	}
