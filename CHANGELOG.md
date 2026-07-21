@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.169.2](https://github.com/diillson/chatcli/compare/v1.169.1...v1.169.2) (2026-07-21)
+
+
+### Bug Fixes
+
+* session /max-tokens override reflects in agent, coder and config ([#1234](https://github.com/diillson/chatcli/issues/1234)) ([c7eb442](https://github.com/diillson/chatcli/commit/c7eb4428558fba516d049805e2d5127ebc19ee71))
+
 ## [1.169.1](https://github.com/diillson/chatcli/compare/v1.169.0...v1.169.1) (2026-07-21)
 
 
