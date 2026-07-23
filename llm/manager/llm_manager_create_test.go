@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 
 	"github.com/diillson/chatcli/i18n"
@@ -51,6 +52,39 @@ func TestCreateClientWithKey_SupportedProviders(t *testing.T) {
 				t.Fatalf("CreateClientWithKey(%s) returned nil client", c.provider)
 			}
 		})
+	}
+}
+
+// OPENROUTER_MODEL is documented on the site's configure-provider guide;
+// an empty model must resolve through it (then the default) instead of
+// silently pinning the default model.
+func TestCreateClientWithKey_OpenRouterModelEnv(t *testing.T) {
+	i18n.Init()
+	setupTestEnv(t, map[string]string{})
+	t.Setenv("OPENROUTER_MODEL", "moonshotai/kimi-k3")
+	logger, _ := zap.NewDevelopment()
+	mgr, err := NewLLMManager(logger)
+	if err != nil {
+		t.Fatalf("NewLLMManager: %v", err)
+	}
+	impl := mgr.(*LLMManagerImpl)
+	defer impl.Close()
+
+	cli, err := impl.CreateClientWithKey("OPENROUTER", "", "or-key")
+	if err != nil {
+		t.Fatalf("CreateClientWithKey: %v", err)
+	}
+	if name := cli.GetModelName(); !strings.Contains(name, "kimi-k3") {
+		t.Fatalf("model name %q must reflect OPENROUTER_MODEL", name)
+	}
+
+	t.Setenv("OPENROUTER_MODEL", "")
+	cli, err = impl.CreateClientWithKey("OPENROUTER", "", "or-key")
+	if err != nil {
+		t.Fatalf("CreateClientWithKey (default): %v", err)
+	}
+	if cli == nil {
+		t.Fatal("nil client for default model")
 	}
 }
 

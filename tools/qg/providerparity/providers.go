@@ -196,6 +196,12 @@ func DefaultTouchPoints() []TouchPoint {
 			Pattern:     "cfg.sub.prov.{lower}",
 		},
 		{
+			ID:          "boot.model",
+			Description: "boot resolves the provider's model env/default via bootModelSources",
+			Path:        "cli/cli_config.go",
+			Pattern:     `"{Upper}":`,
+		},
+		{
 			ID:          "env.redactor",
 			Description: "env redactor marks {Upper}_API_KEY as a secret",
 			Path:        "cli/env_redactor.go",
@@ -288,6 +294,7 @@ func DefaultExemptions() Exemptions {
 			"cost.cli",        // proprietary, no public pricing
 			"operator.cost",   // ditto
 			"manager.refresh", // StackSpot uses TokenManager init path
+			"boot.model",      // model = agent (realm/agent-id), no *_MODEL env
 		},
 		"OLLAMA": {
 			"env.redactor",    // local, no API key
