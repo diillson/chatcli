@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.169.3](https://github.com/diillson/chatcli/compare/v1.169.2...v1.169.3) (2026-07-23)
+
+
+### Bug Fixes
+
+* **docker:** patch grpc-health-probe CVEs in image build ([#1236](https://github.com/diillson/chatcli/issues/1236)) ([958bf05](https://github.com/diillson/chatcli/commit/958bf05df938ef17fc3717af2970fbaaa163a8a9))
+
 ## [1.169.2](https://github.com/diillson/chatcli/compare/v1.169.1...v1.169.2) (2026-07-21)
 
 
