@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.169.5](https://github.com/diillson/chatcli/compare/v1.169.4...v1.169.5) (2026-07-23)
+
+
+### Bug Fixes
+
+* **cli:** resolve provider model at boot for every provider and refresh Gemini and xAI catalogs ([#1240](https://github.com/diillson/chatcli/issues/1240)) ([5841198](https://github.com/diillson/chatcli/commit/58411982e414c677dd33f3d946b89ae16c28de62))
+
 ## [1.169.4](https://github.com/diillson/chatcli/compare/v1.169.3...v1.169.4) (2026-07-23)
 
 
