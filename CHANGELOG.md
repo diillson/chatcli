@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.169.4](https://github.com/diillson/chatcli/compare/v1.169.3...v1.169.4) (2026-07-23)
+
+
+### Bug Fixes
+
+* **bedrock:** catalog-aware max tokens in all dispatch families and application inference profile resolution ([#1238](https://github.com/diillson/chatcli/issues/1238)) ([0cd0f26](https://github.com/diillson/chatcli/commit/0cd0f26e3fc1c1c02868e4f43289ef4503c38e3c))
+
 ## [1.169.3](https://github.com/diillson/chatcli/compare/v1.169.2...v1.169.3) (2026-07-23)
 
 
