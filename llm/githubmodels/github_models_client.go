@@ -71,7 +71,12 @@ func (c *GitHubModelsClient) getMaxTokens() int {
 			return parsed
 		}
 	}
-	return catalog.GetMaxTokens(catalog.ProviderGitHubModels, c.model, 4096)
+	// O terceiro argumento de GetMaxTokens é OVERRIDE de prioridade máxima,
+	// não fallback — passar 4096 aqui bypassava o catálogo inteiro e
+	// estrangulava todo modelo (gpt-4o 16K, DeepSeek-R1 8K) em 4096. O
+	// fallback de provider para modelo fora do catálogo continua 4096
+	// dentro do próprio catálogo.
+	return catalog.GetMaxTokens(catalog.ProviderGitHubModels, c.model, 0)
 }
 
 func (c *GitHubModelsClient) getAPIURL() string {

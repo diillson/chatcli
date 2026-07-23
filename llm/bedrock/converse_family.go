@@ -21,6 +21,7 @@ import (
 	smithy "github.com/aws/smithy-go"
 
 	"github.com/diillson/chatcli/i18n"
+	"github.com/diillson/chatcli/llm/catalog"
 	"github.com/diillson/chatcli/llm/client"
 	"github.com/diillson/chatcli/models"
 	"github.com/diillson/chatcli/utils"
@@ -133,7 +134,11 @@ func (c *BedrockClient) getMaxTokensConverse() int {
 			return parsed
 		}
 	}
-	return 4096
+	// Sem override: mesmo racional do path Anthropic — o catálogo conhece o
+	// teto real do modelo (Nova 5120, DeepSeek 32K, …) ou aplica o fallback
+	// por família. O antigo 4096 fixo estrangulava até modelos catalogados
+	// sempre que o chamador passava maxTokens=0 (agent/coder).
+	return catalog.GetMaxTokens(catalog.ProviderBedrock, c.model, 0)
 }
 
 // buildConverseMessages projects the internal history onto Converse's

@@ -137,7 +137,7 @@ func TestRegisterBedrockModelEnrichment(t *testing.T) {
 		Capabilities:    []string{"tools", "adaptive_thinking", "fast_mode", "mid_conversation_system"},
 	})
 
-	registerBedrockModel("global.anthropic.claude-zeta-9-test", "Claude Zeta 9 (Bedrock)")
+	registerBedrockModel("global.anthropic.claude-zeta-9-test", "Claude Zeta 9 (Bedrock)", "")
 	meta, ok := catalog.Resolve(catalog.ProviderBedrock, "global.anthropic.claude-zeta-9-test")
 	require.True(t, ok)
 	assert.Equal(t, 777000, meta.ContextWindow, "discovered Claude id must inherit the first-party context window")
@@ -148,13 +148,13 @@ func TestRegisterBedrockModelEnrichment(t *testing.T) {
 
 	// Known ids short-circuit: re-registering must not clobber the static
 	// entry's specs.
-	registerBedrockModel("anthropic.claude-fable-5", "should be ignored")
+	registerBedrockModel("anthropic.claude-fable-5", "should be ignored", "")
 	fable, ok := catalog.Resolve(catalog.ProviderBedrock, "anthropic.claude-fable-5")
 	require.True(t, ok)
 	assert.Equal(t, "Claude Fable 5 (Bedrock, 1M ctx)", fable.DisplayName)
 
 	// Non-Claude ids register without first-party inheritance.
-	registerBedrockModel("meta.llama-test-x9", "Meta Llama Test (Bedrock)")
+	registerBedrockModel("meta.llama-test-x9", "Meta Llama Test (Bedrock)", "")
 	llama, ok := catalog.Resolve(catalog.ProviderBedrock, "meta.llama-test-x9")
 	require.True(t, ok)
 	assert.Zero(t, llama.ContextWindow)

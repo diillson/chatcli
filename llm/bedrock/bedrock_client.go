@@ -15,6 +15,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -68,6 +69,16 @@ func resolveFamily(model string) modelFamily {
 		return familyAnthropic
 	case "converse", "auto":
 		return familyConverse
+	}
+	// Um application inference profile carrega um ARN opaco sem nenhuma
+	// pista do provedor na string; o catálogo (alimentado pelo discovery ou
+	// pelo lookup lazy de GetInferenceProfile) sabe qual modelo está por
+	// trás. Só o roteamento Anthropic é decidido aqui — entradas que
+	// preferem ChatCompletions seguem para os sniffs de string, que
+	// separam a família OpenAI da Converse.
+	if meta, ok := catalog.Resolve(catalog.ProviderBedrock, model); ok &&
+		meta.PreferredAPI == catalog.APIAnthropicMessages {
+		return familyAnthropic
 	}
 	m := strings.ToLower(model)
 	if strings.HasPrefix(m, "openai.") || strings.Contains(m, ".openai.") {
@@ -158,6 +169,10 @@ type BedrockClient struct {
 	// comparable type: aws.Config embeds slices and would break any
 	// downstream == comparison of client values.
 	credentials aws.CredentialsProvider
+	// profileLookupDone gates the one-shot GetInferenceProfile call that
+	// resolves an application-inference-profile ARN configured directly
+	// (env/config) without going through /model discovery.
+	profileLookupDone atomic.Bool
 }
 
 // NewBedrockClient creates a client bound to a model id and region.
@@ -281,6 +296,43 @@ func (c *BedrockClient) ensureRuntime(ctx context.Context) error {
 	return nil
 }
 
+// maybeResolveProfileModel resolves the foundation model behind an
+// application inference profile the user configured directly (env/config)
+// without going through /model discovery. One control-plane
+// GetInferenceProfile call, attempted once per client; the result lands in
+// the catalog so max-tokens sizing, context-window sizing and family
+// dispatch see the real model instead of the worst-case fallbacks. A
+// lookup failure (missing bedrock:GetInferenceProfile permission, network)
+// is logged and the conservative fallbacks stay in effect.
+func (c *BedrockClient) maybeResolveProfileModel(ctx context.Context) {
+	if !strings.Contains(strings.ToLower(c.model), "application-inference-profile") {
+		return
+	}
+	if _, ok := catalog.Resolve(catalog.ProviderBedrock, c.model); ok {
+		return
+	}
+	if c.profileLookupDone.Swap(true) {
+		return
+	}
+	out, err := c.control.GetInferenceProfile(ctx, &bedrocksvc.GetInferenceProfileInput{
+		InferenceProfileIdentifier: aws.String(c.model),
+	})
+	if err != nil {
+		c.logger.Warn("bedrock: could not resolve application inference profile; conservative catalog fallbacks stay in effect",
+			zap.String("model", c.model), zap.Error(err))
+		return
+	}
+	displayName := c.model
+	if out.InferenceProfileName != nil && *out.InferenceProfileName != "" {
+		displayName = i18n.T("llm.bedrock.app_profile_display", *out.InferenceProfileName)
+	}
+	underlying := firstProfileModelID(out.Models)
+	registerBedrockModel(c.model, displayName, underlying)
+	c.logger.Info("bedrock: application inference profile resolved",
+		zap.String("profile", c.model),
+		zap.String("underlying_model", underlying))
+}
+
 // SendPrompt dispatches to the correct body schema based on the resolved
 // model family (Anthropic Messages vs. OpenAI Chat Completions).
 // Retries are delegated to utils.Retry inside each family-specific path.
@@ -288,6 +340,7 @@ func (c *BedrockClient) SendPrompt(ctx context.Context, prompt string, history [
 	if err := c.ensureRuntime(ctx); err != nil {
 		return "", err
 	}
+	c.maybeResolveProfileModel(ctx)
 
 	family := resolveFamily(c.model)
 	c.logger.Debug("bedrock: dispatching request", zap.String("model", c.model), zap.String("family", string(family)))
@@ -659,31 +712,47 @@ func (c *BedrockClient) ListModels(ctx context.Context) ([]client.ModelInfo, err
 				DisplayName: displayName,
 				Source:      client.ModelSourceAPI,
 			})
-			registerBedrockModel(id, displayName)
+			registerBedrockModel(id, displayName, "")
 		}
 	}
 
-	// 2) Inference profiles — needed for Claude 3.7, 4.x, 4.5, 4.6, 4.7
-	//    and any cross-region-only profile across other providers.
-	paginator := bedrocksvc.NewListInferenceProfilesPaginator(c.control, &bedrocksvc.ListInferenceProfilesInput{})
+	// 2) System-defined inference profiles — needed for Claude 3.7, 4.x,
+	//    4.5, 4.6, 4.7 and any cross-region-only profile across other
+	//    providers.
+	result = c.appendInferenceProfiles(ctx, bedrocktypes.InferenceProfileTypeSystemDefined, seen, result)
+
+	// 3) Application inference profiles — user-created wrappers for cost
+	//    tracking and routing. Their id is an opaque ARN, so the underlying
+	//    foundation model (from the profile's model list) feeds the catalog
+	//    specs: without it the profile would degrade to worst-case
+	//    fallbacks for output cap, context window and family dispatch.
+	result = c.appendInferenceProfiles(ctx, bedrocktypes.InferenceProfileTypeApplication, seen, result)
+
+	c.logger.Info(i18n.T("llm.info.fetched_models", "Bedrock"), zap.Int("count", len(result)))
+	return result, nil
+}
+
+// appendInferenceProfiles lists the inference profiles of one type and
+// appends the unseen ones to result, registering each in the catalog.
+// System-defined profiles are selected by their id ("us.anthropic.…");
+// application profiles must be selected by ARN — that is the id AWS
+// accepts at invocation time.
+func (c *BedrockClient) appendInferenceProfiles(ctx context.Context, profileType bedrocktypes.InferenceProfileType, seen map[string]bool, result []client.ModelInfo) []client.ModelInfo {
+	paginator := bedrocksvc.NewListInferenceProfilesPaginator(c.control, &bedrocksvc.ListInferenceProfilesInput{
+		TypeEquals: profileType,
+	})
 	for paginator.HasMorePages() {
 		page, err := paginator.NextPage(ctx)
 		if err != nil {
 			c.logger.Warn("bedrock: ListInferenceProfiles failed", zap.Error(err),
+				zap.String("type", string(profileType)),
 				zap.String("hint", bedrockListEndpointHint))
 			break
 		}
 		for _, p := range page.InferenceProfileSummaries {
-			id := ""
-			if p.InferenceProfileId != nil {
-				id = *p.InferenceProfileId
-			}
+			id, displayName, underlying := profileEntry(p, profileType)
 			if id == "" || seen[id] {
 				continue
-			}
-			displayName := id
-			if p.InferenceProfileName != nil && *p.InferenceProfileName != "" {
-				displayName = *p.InferenceProfileName + " (Bedrock profile)"
 			}
 			seen[id] = true
 			result = append(result, client.ModelInfo{
@@ -691,12 +760,33 @@ func (c *BedrockClient) ListModels(ctx context.Context) ([]client.ModelInfo, err
 				DisplayName: displayName,
 				Source:      client.ModelSourceAPI,
 			})
-			registerBedrockModel(id, displayName)
+			registerBedrockModel(id, displayName, underlying)
 		}
 	}
+	return result
+}
 
-	c.logger.Info(i18n.T("llm.info.fetched_models", "Bedrock"), zap.Int("count", len(result)))
-	return result, nil
+// profileEntry projects an InferenceProfileSummary onto the (id,
+// displayName, underlyingModelID) triple the listing needs.
+func profileEntry(p bedrocktypes.InferenceProfileSummary, profileType bedrocktypes.InferenceProfileType) (string, string, string) {
+	id := ""
+	underlying := ""
+	nameKey := "llm.bedrock.profile_display"
+	if profileType == bedrocktypes.InferenceProfileTypeApplication {
+		nameKey = "llm.bedrock.app_profile_display"
+		if p.InferenceProfileArn != nil {
+			id = *p.InferenceProfileArn
+		}
+		underlying = firstProfileModelID(p.Models)
+	}
+	if id == "" && p.InferenceProfileId != nil {
+		id = *p.InferenceProfileId
+	}
+	displayName := id
+	if p.InferenceProfileName != nil && *p.InferenceProfileName != "" {
+		displayName = i18n.T(nameKey, *p.InferenceProfileName)
+	}
+	return id, displayName, underlying
 }
 
 // supportsOnDemand returns true when ON_DEMAND is one of the inference
@@ -727,7 +817,14 @@ func derefModelSummary(id, name, provider *string) (string, string) {
 	return idStr, display
 }
 
-func registerBedrockModel(id, displayName string) {
+// registerBedrockModel adds a discovered model to the catalog. underlyingID
+// names the foundation model behind an application inference profile (empty
+// when the id IS the model). The registered meta inherits context window,
+// output ceiling and capabilities from the underlying model's entry so an
+// opaque profile ARN does not degrade to the conservative fallbacks (tiny
+// output cap, 128K window, Converse routing for Claude — which would drop
+// cache_control markers on the wire).
+func registerBedrockModel(id, displayName, underlyingID string) {
 	if _, ok := catalog.Resolve(catalog.ProviderBedrock, id); ok {
 		return
 	}
@@ -738,19 +835,74 @@ func registerBedrockModel(id, displayName string) {
 		Provider:     catalog.ProviderBedrock,
 		PreferredAPI: preferredAPIFor(id),
 	}
-	// Discovered Claude IDs inherit context window, output ceiling and
-	// capabilities from the first-party catalog entry (Resolve matches the
-	// embedded "claude-…" segment inside profile-prefixed IDs). Without
-	// this, an unknown-but-real Claude id would fall back to the generic
-	// 50K context default and trip auto-compaction on almost every turn.
-	if isClaudeModelID(id) {
-		if fp, ok := catalog.Resolve(catalog.ProviderClaudeAI, id); ok {
-			meta.ContextWindow = fp.ContextWindow
-			meta.MaxOutputTokens = fp.MaxOutputTokens
-			meta.Capabilities = filterBedrockCapabilities(fp.Capabilities)
+	specSource := id
+	if underlyingID != "" {
+		specSource = underlyingID
+		meta.PreferredAPI = preferredAPIFor(underlyingID)
+	}
+	// Discovered IDs inherit context window, output ceiling and
+	// capabilities from the best spec donor (Bedrock catalog, then the
+	// first-party Claude catalog — Resolve matches the embedded "claude-…"
+	// segment inside profile-prefixed IDs). Without this, an
+	// unknown-but-real Claude id would fall back to the generic 50K
+	// context default and trip auto-compaction on almost every turn.
+	if base, ok := underlyingBedrockMeta(specSource); ok {
+		meta.ContextWindow = base.ContextWindow
+		meta.MaxOutputTokens = base.MaxOutputTokens
+		caps := filterBedrockCapabilities(base.Capabilities)
+		if underlyingID != "" {
+			// Profile ARNs are invoked via InvokeModel/Converse; the Mantle
+			// Messages endpoint serves canonical "anthropic." ids only and
+			// would 404 on an ARN.
+			caps = stripCapability(caps, "bedrock_mantle_only")
 		}
+		meta.Capabilities = caps
 	}
 	catalog.Register(meta)
+}
+
+// underlyingBedrockMeta finds the best spec donor for a discovered id: the
+// static Bedrock catalog first, then the first-party Claude catalog (covers
+// brand-new Claude ids Bedrock lists before this catalog ships an entry).
+func underlyingBedrockMeta(id string) (catalog.ModelMeta, bool) {
+	if meta, ok := catalog.Resolve(catalog.ProviderBedrock, id); ok {
+		return meta, true
+	}
+	if isClaudeModelID(id) {
+		if meta, ok := catalog.Resolve(catalog.ProviderClaudeAI, id); ok {
+			return meta, true
+		}
+	}
+	return catalog.ModelMeta{}, false
+}
+
+// stripCapability returns caps without the named capability, preserving order.
+func stripCapability(caps []string, name string) []string {
+	out := make([]string, 0, len(caps))
+	for _, c := range caps {
+		if c != name {
+			out = append(out, c)
+		}
+	}
+	return out
+}
+
+// firstProfileModelID extracts the foundation-model id from the model ARNs
+// an inference profile routes to ("arn:aws:bedrock:us-east-1::foundation-
+// model/anthropic.claude-sonnet-5" → "anthropic.claude-sonnet-5"). Profiles
+// can fan out to several regional copies of the same model — the first
+// entry is representative.
+func firstProfileModelID(profileModels []bedrocktypes.InferenceProfileModel) string {
+	for _, pm := range profileModels {
+		if pm.ModelArn == nil {
+			continue
+		}
+		arn := *pm.ModelArn
+		if idx := strings.LastIndex(arn, "/"); idx >= 0 && idx+1 < len(arn) {
+			return arn[idx+1:]
+		}
+	}
+	return ""
 }
 
 // preferredAPIFor matches the dispatch family to a catalog PreferredAPI so

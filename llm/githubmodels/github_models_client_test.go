@@ -62,6 +62,25 @@ func TestGitHubModelsClient_SendPrompt_HTTPError(t *testing.T) {
 	}
 }
 
+// The third GetMaxTokens argument is a highest-priority OVERRIDE, not a
+// fallback — passing 4096 there bypassed the catalog entirely and strangled
+// every model (gpt-4o's real 16K ceiling included) down to 4096.
+func TestGitHubModelsClient_GetMaxTokensUsesCatalog(t *testing.T) {
+	logger := zap.NewNop()
+	c := NewGitHubModelsClient(testProvider("t"), "gpt-4o", logger, 1, 0)
+	if got := c.getMaxTokens(); got != 16384 {
+		t.Fatalf("gpt-4o must use its catalog ceiling of 16384, got %d", got)
+	}
+	unknown := NewGitHubModelsClient(testProvider("t"), "some-unknown-model", logger, 1, 0)
+	if got := unknown.getMaxTokens(); got != 4096 {
+		t.Fatalf("unknown models keep the provider fallback of 4096, got %d", got)
+	}
+	t.Setenv("GITHUB_MODELS_MAX_TOKENS", "2222")
+	if got := c.getMaxTokens(); got != 2222 {
+		t.Fatalf("env override keeps top precedence, got %d", got)
+	}
+}
+
 func TestGitHubModelsClient_GetModelName(t *testing.T) {
 	logger, _ := zap.NewDevelopment()
 	c := NewGitHubModelsClient(testProvider("t"), "gpt-4o", logger, 1, 0)
