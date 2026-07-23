@@ -17,6 +17,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/bedrockruntime"
 
 	"github.com/diillson/chatcli/i18n"
+	"github.com/diillson/chatcli/llm/catalog"
 	"github.com/diillson/chatcli/llm/client"
 	"github.com/diillson/chatcli/llm/internal/visionwire"
 	"github.com/diillson/chatcli/models"
@@ -100,7 +101,9 @@ func (c *BedrockClient) getMaxTokensOpenAI() int {
 			return parsed
 		}
 	}
-	return 4096
+	// Sem override: o catálogo conhece o teto real (gpt-oss 16K) ou aplica
+	// o fallback por família — o antigo 4096 fixo ignorava ambos.
+	return catalog.GetMaxTokens(catalog.ProviderBedrock, c.model, 0)
 }
 
 // buildOpenAIMessages converts the internal history into the OpenAI

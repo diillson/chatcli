@@ -449,7 +449,7 @@ func TestBedrockProviderFallbacks(t *testing.T) {
 	// DeepSeek) all sit at 128K — that is the safe generic floor.
 	opaque := "arn:aws:bedrock:us-east-1:000000000000:application-inference-profile/synthetic0000"
 	assert.Equal(t, 128000, GetContextWindow(ProviderBedrock, opaque))
-	assert.Equal(t, 4096, GetMaxTokens(ProviderBedrock, opaque, 0))
+	assert.Equal(t, 8192, GetMaxTokens(ProviderBedrock, opaque, 0))
 
 	// Future Claude model not yet in the registry: the current family
 	// (Fable 5, Sonnet 5, Opus 4.6+) is all 1M input; the older 200K
@@ -461,6 +461,32 @@ func TestBedrockProviderFallbacks(t *testing.T) {
 
 	// Explicit override still has the highest priority.
 	assert.Equal(t, 9000, GetMaxTokens(ProviderBedrock, opaque, 9000))
+}
+
+// TestBedrockFallbackMaxTokensFamilies pins the per-family output ceilings
+// for Bedrock models outside the registry. Overshoot is a hard
+// ValidationException, so each sniff sits on the SMALLEST ceiling among the
+// family's current models; families whose real cap is below the generic
+// 8192 keep their own floor.
+func TestBedrockFallbackMaxTokensFamilies(t *testing.T) {
+	cases := map[string]int{
+		"anthropic.claude-hypothetical":        64000,
+		"us.deepseek.v4-hypothetical-v1:0":     32768,
+		"openai.gpt-oss-hypothetical-v1:0":     16384,
+		"us.amazon.nova-hypothetical-v1:0":     5120,
+		"amazon.titan-text-premier-v1:0":       3072,
+		"amazon.titan-text-express-v1:0":       8192,
+		"amazon.titan-tg1-hypothetical":        4096,
+		"cohere.command-hypothetical-v1:0":     4096,
+		"ai21.jamba-hypothetical-v1:0":         4096,
+		"meta.llama9-hypothetical-v1:0":        8192,
+		"mistral.mistral-hypothetical-v2:0":    8192,
+		"qwen.qwen9-hypothetical-v1:0":         8192,
+		"writer.palmyra-hypothetical-x99-v1:0": 8192,
+	}
+	for model, want := range cases {
+		assert.Equal(t, want, bedrockFallbackMaxTokens(model), "model %s", model)
+	}
 }
 
 // TestOpenAIAssistantContextWindowFallback: assistant mode reports provider

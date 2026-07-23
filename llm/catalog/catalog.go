@@ -1700,15 +1700,7 @@ func GetMaxTokens(provider, model string, override int) int {
 		// 64K é o teto comum dos modelos atuais (sonnet 4.x, opus 4.5+).
 		return 64000
 	case ProviderBedrock:
-		// Espelha o racional do CLAUDEAI para modelos Claude fora do
-		// catálogo — modelos com cap menor (3.x) têm entrada própria, então
-		// um desconhecido é lançamento novo com teto ≥64K. Para o resto,
-		// 4096 é o piso seguro do catálogo AWS atual (Converse rejeita
-		// maxTokens acima do cap real do modelo).
-		if m := strings.ToLower(model); strings.Contains(m, "anthropic") || strings.Contains(m, "claude") {
-			return 64000
-		}
-		return 4096
+		return bedrockFallbackMaxTokens(model)
 	case ProviderStackSpot:
 		// The StackSpot agent API ignores client-side max_tokens; this
 		// value only feeds local bookkeeping, so keep it aligned with
@@ -1741,6 +1733,42 @@ func GetMaxTokens(provider, model string, override int) int {
 		return 32000
 	default:
 		return 50000
+	}
+}
+
+// bedrockFallbackMaxTokens escolhe o teto de saída para um modelo Bedrock
+// que NÃO está no registry (application inference profiles com ARN opaco,
+// marketplace, lançamento recém-anunciado). Converse/InvokeModel rejeitam
+// maxTokens acima do cap real do modelo com ValidationException dura, então
+// cada sniff de família assume o MENOR teto entre os modelos atuais daquela
+// família; o default genérico cobre as famílias modernas (Llama, Mistral,
+// Qwen — todas ≥8K) e as famílias com cap real menor (Nova, Titan, Cohere
+// Command, AI21 Jamba) mantêm o próprio piso.
+func bedrockFallbackMaxTokens(model string) int {
+	m := strings.ToLower(model)
+	switch {
+	case strings.Contains(m, "anthropic") || strings.Contains(m, "claude"):
+		// Claude desconhecido no Bedrock é lançamento novo com teto ≥64K —
+		// os modelos 3.x de cap menor têm entrada própria no catálogo.
+		return 64000
+	case strings.Contains(m, "deepseek"):
+		return 32768
+	case strings.Contains(m, "openai") || strings.Contains(m, "gpt-oss"):
+		return 16384
+	case strings.Contains(m, "nova"):
+		return 5120
+	case strings.Contains(m, "titan-text-premier"):
+		// Único da família Titan com cap real ABAIXO do antigo default de
+		// 4096 — sem este sniff qualquer valor maior é erro duro.
+		return 3072
+	case strings.Contains(m, "titan-text-express"):
+		return 8192
+	case strings.Contains(m, "titan"):
+		return 4096
+	case strings.Contains(m, "cohere") || strings.Contains(m, "jamba") || strings.Contains(m, "ai21"):
+		return 4096
+	default:
+		return 8192
 	}
 }
 

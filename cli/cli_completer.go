@@ -11,6 +11,7 @@ import (
 	"github.com/diillson/chatcli/cli/coder"
 	"github.com/diillson/chatcli/cli/plugins"
 	"github.com/diillson/chatcli/i18n"
+	"github.com/diillson/chatcli/llm/catalog"
 	"github.com/diillson/chatcli/pkg/persona"
 	"github.com/diillson/chatcli/ui/theme"
 )
@@ -1462,15 +1463,57 @@ func (cli *ChatCLI) getMaxTokensSuggestions(d prompt.Document) []prompt.Suggest 
 		}
 	}
 
+	return prompt.FilterHasPrefix(cli.maxTokensPresets(), wordBeforeCursor, true)
+}
+
+// maxTokensPresets builds the /max-tokens suggestions from the fixed
+// power-of-two ladder, bounded by the active model's real output ceiling
+// (values above it would be rejected by providers that hard-fail on
+// max_tokens overshoot, e.g. Anthropic/Bedrock). The ceiling itself is
+// always offered and labeled, so a 128K-capable model (Opus 4.8, Sonnet 5)
+// surfaces its full range instead of stopping at the old 32K.
+func (cli *ChatCLI) maxTokensPresets() []prompt.Suggest {
+	ladder := []int{1024, 4096, 8192, 16384, 32768, 65536, 131072}
+	modelCap := catalog.GetMaxTokens(cli.Provider, cli.Model, 0)
+
 	presets := []prompt.Suggest{
 		{Text: "0", Description: i18n.T("complete.maxtokens.default")},
-		{Text: "1024", Description: "1K"},
-		{Text: "4096", Description: "4K"},
-		{Text: "8192", Description: "8K"},
-		{Text: "16384", Description: "16K"},
-		{Text: "32768", Description: "32K"},
 	}
-	return prompt.FilterHasPrefix(presets, wordBeforeCursor, true)
+	capAdded := false
+	for _, n := range ladder {
+		if modelCap > 0 && n > modelCap {
+			break
+		}
+		s := prompt.Suggest{Text: strconv.Itoa(n), Description: humanTokenCount(n)}
+		if n == modelCap {
+			s.Description = i18n.T("complete.maxtokens.model_max", humanTokenCount(n))
+			capAdded = true
+		}
+		presets = append(presets, s)
+	}
+	if modelCap > 0 && !capAdded {
+		presets = append(presets, prompt.Suggest{
+			Text:        strconv.Itoa(modelCap),
+			Description: i18n.T("complete.maxtokens.model_max", humanTokenCount(modelCap)),
+		})
+	}
+	return presets
+}
+
+// humanTokenCount renders a token count in the compact "64K" form used by
+// the /max-tokens suggestions. Decimal thousands win over binary ones so
+// catalog ceilings like 128000 read "128K" (not "125K"); the power-of-two
+// ladder (4096, 65536, …) still gets its conventional "4K"/"64K" label via
+// the 1024 divisor. Anything else keeps the exact number.
+func humanTokenCount(n int) string {
+	switch {
+	case n >= 1000 && n%1000 == 0:
+		return strconv.Itoa(n/1000) + "K"
+	case n >= 1024 && n%1024 == 0:
+		return strconv.Itoa(n/1024) + "K"
+	default:
+		return strconv.Itoa(n)
+	}
 }
 
 func (cli *ChatCLI) getAuthSuggestions(d prompt.Document) []prompt.Suggest {
