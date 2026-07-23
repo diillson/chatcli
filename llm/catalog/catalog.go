@@ -576,11 +576,78 @@ var registry = []ModelMeta{
 		Capabilities:    []string{"vision", "json_mode", "tools"},
 	},
 	// Google Gemini Models. Specs from ai.google.dev model docs:
-	// every Gemini 2.x exposes a 1,048,576-token input window with a
+	// every Gemini 2.x/3.x exposes a 1,048,576-token input window with a
 	// 65,536-token max output (8,192 on the older 2.0 generation). The
 	// previous catalog set MaxOutputTokens equal to ContextWindow, which
 	// is physically impossible — the API rejects requests with output
 	// over the per-model cap.
+	//
+	// Gemini 3.x generation (verified per-model on ai.google.dev, Jul
+	// 2026): 3.6-flash (stable, current default workhorse, Jul 21 2026),
+	// 3.5-flash, 3.5-flash-lite and 3.1-flash-lite stable; 3.1-pro-preview
+	// and 3-flash-preview in preview. The whole generation shares the
+	// uniform 1,048,576 / 65,536 profile. Newest first so generic alias
+	// prefixes ("gemini-3") don't shadow the more specific ids.
+	{
+		ID:              "gemini-3.6-flash",
+		Aliases:         []string{"gemini-3.6-flash", "gemini-3.6-flash-latest"},
+		DisplayName:     "Gemini 3.6 Flash",
+		Provider:        ProviderGoogleAI,
+		ContextWindow:   1048576,
+		MaxOutputTokens: 65536,
+		PreferredAPI:    "gemini_api",
+		Capabilities:    []string{"vision", "tools", "json_mode", "code_execution"},
+	},
+	{
+		ID:              "gemini-3.5-flash",
+		Aliases:         []string{"gemini-3.5-flash", "gemini-3.5-flash-latest"},
+		DisplayName:     "Gemini 3.5 Flash",
+		Provider:        ProviderGoogleAI,
+		ContextWindow:   1048576,
+		MaxOutputTokens: 65536,
+		PreferredAPI:    "gemini_api",
+		Capabilities:    []string{"vision", "tools", "json_mode", "code_execution"},
+	},
+	{
+		ID:              "gemini-3.5-flash-lite",
+		Aliases:         []string{"gemini-3.5-flash-lite"},
+		DisplayName:     "Gemini 3.5 Flash Lite",
+		Provider:        ProviderGoogleAI,
+		ContextWindow:   1048576,
+		MaxOutputTokens: 65536,
+		PreferredAPI:    "gemini_api",
+		Capabilities:    []string{"vision", "tools", "json_mode"},
+	},
+	{
+		ID:              "gemini-3.1-pro-preview",
+		Aliases:         []string{"gemini-3.1-pro-preview", "gemini-3.1-pro", "gemini-3.1-pro-preview-customtools"},
+		DisplayName:     "Gemini 3.1 Pro (preview)",
+		Provider:        ProviderGoogleAI,
+		ContextWindow:   1048576,
+		MaxOutputTokens: 65536,
+		PreferredAPI:    "gemini_api",
+		Capabilities:    []string{"vision", "tools", "json_mode", "code_execution"},
+	},
+	{
+		ID:              "gemini-3.1-flash-lite",
+		Aliases:         []string{"gemini-3.1-flash-lite"},
+		DisplayName:     "Gemini 3.1 Flash Lite",
+		Provider:        ProviderGoogleAI,
+		ContextWindow:   1048576,
+		MaxOutputTokens: 65536,
+		PreferredAPI:    "gemini_api",
+		Capabilities:    []string{"vision", "tools", "json_mode"},
+	},
+	{
+		ID:              "gemini-3-flash-preview",
+		Aliases:         []string{"gemini-3-flash-preview"},
+		DisplayName:     "Gemini 3 Flash (preview)",
+		Provider:        ProviderGoogleAI,
+		ContextWindow:   1048576,
+		MaxOutputTokens: 65536,
+		PreferredAPI:    "gemini_api",
+		Capabilities:    []string{"vision", "tools", "json_mode"},
+	},
 	{
 		ID:              "gemini-2.5-pro",
 		Aliases:         []string{"gemini-2.5-pro", "gemini-2.5-pro-latest"},
@@ -778,6 +845,74 @@ var registry = []ModelMeta{
 	// OpenRouter mirror (which xAI also publishes against). Aliases were
 	// previously written as a single comma-joined string instead of
 	// separate entries — Resolve() never matched them. Fixed here.
+	//
+	// 2026 generation (context windows per docs.x.ai/docs/models, Jul
+	// 2026): grok-4.5 500K, grok-4.3 1M (flagship, Apr 30 2026), the
+	// grok-4.20 family 1M, grok-build 256K. xAI still documents no
+	// separate output cap — the 16K ceiling below follows the same
+	// convention as the older entries. Newest first; the entry carrying
+	// the generic "grok-4.20" alias sits after the more specific 4.20
+	// variants so it cannot shadow them.
+	{
+		ID:              "grok-4.5",
+		Aliases:         []string{"grok-4.5", "grok-4.5-latest"},
+		DisplayName:     "Grok-4.5",
+		Provider:        ProviderXAI,
+		ContextWindow:   500000,
+		MaxOutputTokens: 16384,
+		PreferredAPI:    APIChatCompletions,
+		Capabilities:    []string{"vision", "tools", "json_mode"},
+	},
+	{
+		ID:              "grok-4.3",
+		Aliases:         []string{"grok-4.3", "grok-4.3-latest"},
+		DisplayName:     "Grok-4.3",
+		Provider:        ProviderXAI,
+		ContextWindow:   1000000,
+		MaxOutputTokens: 16384,
+		PreferredAPI:    APIChatCompletions,
+		Capabilities:    []string{"vision", "tools", "json_mode"},
+	},
+	{
+		ID:              "grok-4.20-multi-agent-0309",
+		Aliases:         []string{"grok-4.20-multi-agent-0309", "grok-4.20-multi-agent"},
+		DisplayName:     "Grok-4.20 Multi-Agent",
+		Provider:        ProviderXAI,
+		ContextWindow:   1000000,
+		MaxOutputTokens: 16384,
+		PreferredAPI:    APIChatCompletions,
+		Capabilities:    []string{"vision", "tools", "json_mode"},
+	},
+	{
+		ID:              "grok-4.20-0309-non-reasoning",
+		Aliases:         []string{"grok-4.20-0309-non-reasoning", "grok-4.20-non-reasoning"},
+		DisplayName:     "Grok-4.20 (non-reasoning)",
+		Provider:        ProviderXAI,
+		ContextWindow:   1000000,
+		MaxOutputTokens: 16384,
+		PreferredAPI:    APIChatCompletions,
+		Capabilities:    []string{"vision", "tools", "json_mode"},
+	},
+	{
+		ID:              "grok-4.20-0309-reasoning",
+		Aliases:         []string{"grok-4.20-0309-reasoning", "grok-4.20-reasoning", "grok-4.20"},
+		DisplayName:     "Grok-4.20 (reasoning)",
+		Provider:        ProviderXAI,
+		ContextWindow:   1000000,
+		MaxOutputTokens: 16384,
+		PreferredAPI:    APIChatCompletions,
+		Capabilities:    []string{"vision", "tools", "json_mode"},
+	},
+	{
+		ID:              "grok-build-0.1",
+		Aliases:         []string{"grok-build-0.1", "grok-build"},
+		DisplayName:     "Grok Build 0.1",
+		Provider:        ProviderXAI,
+		ContextWindow:   256000,
+		MaxOutputTokens: 16384,
+		PreferredAPI:    APIChatCompletions,
+		Capabilities:    []string{"vision", "tools", "json_mode"},
+	},
 	{
 		// grok-4-fast: 2M context. xAI does not document a separate output
 		// cap; we ceil at 16K to keep the value comparable to other models

@@ -97,6 +97,7 @@ var envDefaults = map[string]envDefault{
 	"MOONSHOT_MODEL":             {Value: config.DefaultMoonshotModel, Source: "config.DefaultMoonshotModel"},
 	"MOONSHOT_API_URL":           {Value: config.MoonshotAPIURL, Source: "config.MoonshotAPIURL"},
 	"MOONSHOT_THINKING":          {Value: "auto", Source: "moonshot client default"},
+	"OPENROUTER_MODEL":           {Value: config.DefaultOpenRouterModel, Source: "config.DefaultOpenRouterModel"},
 	"OPENROUTER_FALLBACK_MODELS": {Value: "(none)", Source: "openrouter client"},
 	"OPENROUTER_PROVIDER_ORDER":  {Value: "(none)", Source: "openrouter client"},
 

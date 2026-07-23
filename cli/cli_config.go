@@ -126,77 +126,76 @@ func (cli *ChatCLI) reloadConfiguration(ctx context.Context) {
 	}
 }
 
+// bootModelSource declara de onde vem o modelo de cada provider no boot:
+// env primária, env de fallback opcional e o default do config. Cada
+// provider suportado pelo manager PRECISA de uma entrada aqui — um provider
+// ausente deixava cli.Model vazio, o catálogo resolvia (provider, "") para
+// os fallbacks conservadores e a sessão inteira rodava com max-tokens e
+// janela de contexto degradados, mesmo com o client interno falando com o
+// modelo certo (foi o caso do BEDROCK: 128K virando default).
+// STACKSPOT fica de fora por desenho: o "modelo" é o agent (realm/agent-id),
+// e o fallback de provider do catálogo já cobre a sizing.
+type bootModelSource struct {
+	envVar      string
+	fallbackEnv string
+	defaultName string
+}
+
+var bootModelSources = map[string]bootModelSource{
+	"OPENAI":           {envVar: "OPENAI_MODEL", defaultName: config.DefaultOpenAIModel},
+	"OPENAI_ASSISTANT": {envVar: "OPENAI_ASSISTANT_MODEL", fallbackEnv: "OPENAI_MODEL", defaultName: config.DefaultOpenAiAssistModel},
+	"CLAUDEAI":         {envVar: "ANTHROPIC_MODEL", defaultName: config.DefaultClaudeAIModel},
+	"GOOGLEAI":         {envVar: "GOOGLEAI_MODEL", defaultName: config.DefaultGoogleAIModel},
+	"XAI":              {envVar: "XAI_MODEL", defaultName: config.DefaultXAIModel},
+	"ZAI":              {envVar: "ZAI_MODEL", defaultName: config.DefaultZAIModel},
+	"MINIMAX":          {envVar: "MINIMAX_MODEL", defaultName: config.DefaultMiniMaxModel},
+	"MOONSHOT":         {envVar: "MOONSHOT_MODEL", defaultName: config.DefaultMoonshotModel},
+	"OLLAMA":           {envVar: "OLLAMA_MODEL", defaultName: config.DefaultOllamaModel},
+	"COPILOT":          {envVar: "COPILOT_MODEL", defaultName: config.DefaultCopilotModel},
+	"GITHUB_MODELS":    {envVar: "GITHUB_MODELS_MODEL", defaultName: config.DefaultGitHubModelsModel},
+	"BEDROCK":          {envVar: "BEDROCK_MODEL", defaultName: config.DefaultBedrockModel},
+	"OPENROUTER":       {envVar: "OPENROUTER_MODEL", defaultName: config.DefaultOpenRouterModel},
+	"DEVIN":            {envVar: "DEVIN_MODEL", defaultName: config.DefaultDevinModel},
+}
+
+// resolveBootModelEnv resolve uma env de modelo no boot com a mesma
+// precedência que as factories do manager usam: ambiente do processo
+// primeiro, depois o config.Global (.env/config persistido).
+func resolveBootModelEnv(name string) string {
+	if name == "" {
+		return ""
+	}
+	if v := strings.TrimSpace(os.Getenv(name)); v != "" {
+		return v
+	}
+	if config.Global != nil {
+		if v := strings.TrimSpace(config.Global.GetString(name)); v != "" {
+			return v
+		}
+	}
+	return ""
+}
+
 func (cli *ChatCLI) configureProviderAndModel() {
-	cli.Provider = os.Getenv("LLM_PROVIDER")
+	// Normalização de case: LLM_PROVIDER=bedrock (minúsculo) furava todas
+	// as comparações exatas e deixava provider E modelo desalinhados.
+	cli.Provider = strings.ToUpper(strings.TrimSpace(os.Getenv("LLM_PROVIDER")))
 	if cli.Provider == "" {
 		cli.Provider = config.DefaultLLMProvider
 	}
-	if cli.Provider == "OPENAI" {
-		cli.Model = os.Getenv("OPENAI_MODEL")
-		if cli.Model == "" {
-			cli.Model = config.DefaultOpenAIModel
-		}
+	src, ok := bootModelSources[cli.Provider]
+	if !ok {
+		return
 	}
-	if cli.Provider == "OPENAI_ASSISTANT" {
-		cli.Model = os.Getenv("OPENAI_ASSISTANT_MODEL")
-		if cli.Model == "" {
-			cli.Model = utils.GetEnvOrDefault("OPENAI_MODEL", config.DefaultOpenAiAssistModel)
-		}
+	if m := resolveBootModelEnv(src.envVar); m != "" {
+		cli.Model = m
+		return
 	}
-	if cli.Provider == "CLAUDEAI" {
-		cli.Model = os.Getenv("ANTHROPIC_MODEL")
-		if cli.Model == "" {
-			cli.Model = config.DefaultClaudeAIModel
-		}
+	if m := resolveBootModelEnv(src.fallbackEnv); m != "" {
+		cli.Model = m
+		return
 	}
-	if cli.Provider == "GOOGLEAI" {
-		cli.Model = os.Getenv("GOOGLEAI_MODEL")
-		if cli.Model == "" {
-			cli.Model = config.DefaultGoogleAIModel
-		}
-	}
-	if cli.Provider == "XAI" {
-		cli.Model = os.Getenv("XAI_MODEL")
-		if cli.Model == "" {
-			cli.Model = config.DefaultXAIModel
-		}
-	}
-	if cli.Provider == "ZAI" {
-		cli.Model = os.Getenv("ZAI_MODEL")
-		if cli.Model == "" {
-			cli.Model = config.DefaultZAIModel
-		}
-	}
-	if cli.Provider == "MINIMAX" {
-		cli.Model = os.Getenv("MINIMAX_MODEL")
-		if cli.Model == "" {
-			cli.Model = config.DefaultMiniMaxModel
-		}
-	}
-	if cli.Provider == "MOONSHOT" {
-		cli.Model = os.Getenv("MOONSHOT_MODEL")
-		if cli.Model == "" {
-			cli.Model = config.DefaultMoonshotModel
-		}
-	}
-	if cli.Provider == "OLLAMA" {
-		cli.Model = os.Getenv("OLLAMA_MODEL")
-		if cli.Model == "" {
-			cli.Model = config.DefaultOllamaModel
-		}
-	}
-	if cli.Provider == "COPILOT" {
-		cli.Model = os.Getenv("COPILOT_MODEL")
-		if cli.Model == "" {
-			cli.Model = config.DefaultCopilotModel
-		}
-	}
-	if cli.Provider == "GITHUB_MODELS" {
-		cli.Model = os.Getenv("GITHUB_MODELS_MODEL")
-		if cli.Model == "" {
-			cli.Model = config.DefaultGitHubModelsModel
-		}
-	}
+	cli.Model = src.defaultName
 }
 
 func (cli *ChatCLI) setExecutionProfile(p ExecutionProfile) {

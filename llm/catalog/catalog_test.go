@@ -463,6 +463,62 @@ func TestBedrockProviderFallbacks(t *testing.T) {
 	assert.Equal(t, 9000, GetMaxTokens(ProviderBedrock, opaque, 9000))
 }
 
+// TestGemini3FamilyEntries pins the Gemini 3.x generation added Jul 2026.
+// Every model page on ai.google.dev documents the uniform 1,048,576 input /
+// 65,536 output profile; a missing entry would drop these ids onto the
+// GoogleAI provider fallback and undersize the context window.
+func TestGemini3FamilyEntries(t *testing.T) {
+	for _, id := range []string{
+		"gemini-3.6-flash",
+		"gemini-3.5-flash",
+		"gemini-3.5-flash-lite",
+		"gemini-3.1-pro-preview",
+		"gemini-3.1-flash-lite",
+		"gemini-3-flash-preview",
+	} {
+		meta, ok := Resolve(ProviderGoogleAI, id)
+		if !assert.True(t, ok, "missing catalog entry for %s", id) {
+			continue
+		}
+		assert.Equal(t, id, meta.ID, "id %s must resolve to its own entry, not an older generation", id)
+		assert.Equal(t, 1048576, meta.ContextWindow, "%s", id)
+		assert.Equal(t, 65536, meta.MaxOutputTokens, "%s", id)
+	}
+	// The customtools variant and the bare 3.1-pro spelling ride the
+	// preview entry via aliases.
+	meta, ok := Resolve(ProviderGoogleAI, "gemini-3.1-pro-preview-customtools")
+	assert.True(t, ok)
+	assert.Equal(t, "gemini-3.1-pro-preview", meta.ID)
+}
+
+// TestGrok2026Entries pins the 2026 xAI lineup (context windows per
+// docs.x.ai; xAI documents no output cap, so entries keep the repo's 16K
+// ceiling convention).
+func TestGrok2026Entries(t *testing.T) {
+	cases := map[string]int{
+		"grok-4.5":                     500000,
+		"grok-4.3":                     1000000,
+		"grok-4.20-0309-reasoning":     1000000,
+		"grok-4.20-0309-non-reasoning": 1000000,
+		"grok-4.20-multi-agent-0309":   1000000,
+		"grok-build-0.1":               256000,
+	}
+	for id, wantCtx := range cases {
+		meta, ok := Resolve(ProviderXAI, id)
+		if !assert.True(t, ok, "missing catalog entry for %s", id) {
+			continue
+		}
+		assert.Equal(t, id, meta.ID, "id %s must resolve to its own entry", id)
+		assert.Equal(t, wantCtx, meta.ContextWindow, "%s", id)
+		assert.Equal(t, 16384, meta.MaxOutputTokens, "%s", id)
+	}
+	// The generic alias rides the reasoning variant and must not shadow
+	// the more specific 4.20 ids (they sit earlier in the registry).
+	meta, ok := Resolve(ProviderXAI, "grok-4.20")
+	assert.True(t, ok)
+	assert.Equal(t, "grok-4.20-0309-reasoning", meta.ID)
+}
+
 // TestBedrockFallbackMaxTokensFamilies pins the per-family output ceilings
 // for Bedrock models outside the registry. Overshoot is a hard
 // ValidationException, so each sniff sits on the SMALLEST ceiling among the

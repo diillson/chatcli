@@ -574,6 +574,7 @@ func (cli *ChatCLI) showConfigProviders() {
 	fmt.Println(p)
 	subheader(p, "cfg.sub.prov.openrouter")
 	kv(p, "OPENROUTER_API_KEY", presence(os.Getenv("OPENROUTER_API_KEY")))
+	kv(p, "OPENROUTER_MODEL", envOr("OPENROUTER_MODEL"))
 	kv(p, "OPENROUTER_MAX_TOKENS", envOr("OPENROUTER_MAX_TOKENS"))
 	kv(p, "OPENROUTER_FALLBACK_MODELS", envOr("OPENROUTER_FALLBACK_MODELS"))
 	kv(p, "OPENROUTER_PROVIDER_ORDER", envOr("OPENROUTER_PROVIDER_ORDER"))
