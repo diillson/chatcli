@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.170.0](https://github.com/diillson/chatcli/compare/v1.169.5...v1.170.0) (2026-07-24)
+
+
+### Features
+
+* **models:** add Claude Opus 5 to the Anthropic, Bedrock and OpenRouter catalogs ([#1244](https://github.com/diillson/chatcli/issues/1244)) ([2c5a453](https://github.com/diillson/chatcli/commit/2c5a453329bda124d905265344cee0bfa6098ec7))
+* **update:** channel-aware auto-update with /update command and staged background mode ([#1242](https://github.com/diillson/chatcli/issues/1242)) ([9d21544](https://github.com/diillson/chatcli/commit/9d2154481957915db6b4c1a21430eb4b34e3dece))
+
 ## [1.169.5](https://github.com/diillson/chatcli/compare/v1.169.4...v1.169.5) (2026-07-23)
 
 
