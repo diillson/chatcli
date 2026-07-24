@@ -47,11 +47,13 @@ func TestResolveFamilyBareClaudeIDs(t *testing.T) {
 		// ARN-versioned variants on Bedrock).
 		{"anthropic.claude-fable-5", familyAnthropic},
 		{"global.anthropic.claude-fable-5", familyAnthropic},
+		{"anthropic.claude-opus-5", familyAnthropic},
 		{"anthropic.claude-opus-4-8", familyAnthropic},
 		// Bare first-party IDs a user may pick out of habit: still Claude,
 		// still Anthropic schema. Converse would drop the cache markers.
 		{"claude-fable-5", familyAnthropic},
 		{"claude-sonnet-5", familyAnthropic},
+		{"claude-opus-5", familyAnthropic},
 		{"claude-opus-4-8", familyAnthropic},
 		// Non-Claude models keep the Converse default.
 		{"meta.llama3-70b-instruct-v1:0", familyConverse},

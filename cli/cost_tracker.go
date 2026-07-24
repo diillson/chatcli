@@ -470,6 +470,13 @@ func claudePricing(model string) (float64, float64, bool) {
 	case strings.Contains(model, "fable"):
 		// Fable 5: $10/$50 per MTok (tier above Opus).
 		return 10.0, 50.0, true
+	case strings.Contains(model, "opus-5"):
+		// Opus 5 (Jul 2026): keeps the $5/$25 Opus-tier price. Must match
+		// BEFORE the generic "opus" case below, which is the $15/$75
+		// legacy tier — the substring also covers the Bedrock
+		// (anthropic.claude-opus-5) and OpenRouter (anthropic/claude-opus-5)
+		// spellings.
+		return 5.0, 25.0, true
 	case strings.Contains(model, "opus-4-5"), strings.Contains(model, "opus-4-6"),
 		strings.Contains(model, "opus-4-7"), strings.Contains(model, "opus-4-8"):
 		// Opus 4.5 onward dropped to $5/$25 per MTok; the 1M context on
