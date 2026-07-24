@@ -93,7 +93,7 @@ type Options struct {
 // runCommandFn executa um comando externo com a saída plugada — seam para
 // testes não dispararem brew/go de verdade.
 var runCommandFn = func(ctx context.Context, opts Options, name string, args ...string) error {
-	cmd := exec.CommandContext(ctx, name, args...)
+	cmd := exec.CommandContext(ctx, name, args...) //#nosec G204 -- argv vem só dos literais fixos BrewUpgradeArgs/GoInstallArgs, nunca de entrada do usuário
 	cmd.Stdout = opts.Stdout
 	cmd.Stderr = opts.Stderr
 	return cmd.Run()

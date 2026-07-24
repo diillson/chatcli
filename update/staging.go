@@ -123,7 +123,7 @@ func TryAcquireAutoLock() (release func(), ok bool) {
 	path := filepath.Join(dir, "update.lock")
 
 	for attempt := 0; attempt < 2; attempt++ {
-		f, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
+		f, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600) // #nosec G304 -- caminho fixo sob o home do usuário
 		if err == nil {
 			_ = f.Close()
 			return func() { _ = os.Remove(path) }, true
