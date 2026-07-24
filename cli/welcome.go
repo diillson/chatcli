@@ -8,6 +8,7 @@ import (
 	"github.com/diillson/chatcli/i18n"
 	"github.com/diillson/chatcli/ui/kit"
 	"github.com/diillson/chatcli/ui/theme"
+	"github.com/diillson/chatcli/update"
 	"github.com/diillson/chatcli/version"
 )
 
@@ -113,10 +114,19 @@ func (cli *ChatCLI) PrintWelcomeScreen() {
 	// OfflineReport enriquece o commit/data de builds go install a partir do
 	// cache em disco da release — sem rede, o boot não espera nada. O refresh
 	// do cache vencido roda em background no Start.
-	current := version.OfflineReport().Current
+	rep := version.OfflineReport()
+	current := rep.Current
 	if v := current.Version; v != "" && v != "dev" && v != "unknown" {
 		versionStr := i18n.T("version.label", v, current.CommitHash)
 		fmt.Println("  " + colorize(versionStr, ColorGray))
+	}
+	// Primeiro boot após um auto-update em staging: anuncia a versão nova e
+	// consome o registro. Fora disso, cache indicando release mais nova vira
+	// o convite ao /update — suprimido quando a política é off.
+	if rec, ok := update.ConsumeStagedRecord(current.Version); ok {
+		fmt.Println("  " + colorize(i18n.T("welcome.update.applied", rec.To), ColorLime))
+	} else if rep.NeedsUpdate && update.ResolveMode() != update.ModeOff {
+		fmt.Println("  " + colorize(i18n.T("welcome.update.available", rep.Latest), ColorYellow))
 	}
 	fmt.Println()
 

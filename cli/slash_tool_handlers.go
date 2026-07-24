@@ -43,6 +43,7 @@ func (cli *ChatCLI) helpText() string {
 		{"/exit | /quit", i18n.T("help.command.exit")},
 		{"/newsession", i18n.T("help.command.newsession")},
 		{"/version | /v", i18n.T("help.command.version")},
+		{"/update [check]", i18n.T("help.command.update")},
 		{"/compact [instruction]", i18n.T("help.command.compact")},
 		{"/memory [subcommand]", i18n.T("help.command.memory")},
 	})

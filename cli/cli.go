@@ -48,7 +48,6 @@ import (
 	"github.com/diillson/chatcli/pkg/persona"
 	"github.com/diillson/chatcli/ui/kit"
 	"github.com/diillson/chatcli/ui/theme"
-	"github.com/diillson/chatcli/version"
 	"github.com/fsnotify/fsnotify"
 
 	"github.com/diillson/chatcli/models"
@@ -1093,8 +1092,9 @@ func (cli *ChatCLI) Start(ctx context.Context) {
 		go cli.sessionManager.CleanExpiredMachineSessions()
 	}
 	// Renova em background o cache de release que alimenta o hash de commit
-	// da tela de boas-vindas (builds go install); o boot não espera rede.
-	go version.RefreshReleaseCacheIfStale(ctx)
+	// da tela de boas-vindas (builds go install) e, com CHATCLI_AUTO_UPDATE=
+	// auto, aplica o update silencioso por staging; o boot não espera rede.
+	go cli.backgroundUpdateFlow(ctx)
 	cli.PrintWelcomeScreen()
 	cli.printLastSessionNotice()
 	cli.startHubSync(ctx) // resume the shared cross-channel conversation, if connected

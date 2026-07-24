@@ -108,6 +108,8 @@ func (cli *ChatCLI) routeConfigCommand(ctx context.Context, args []string) {
 		cli.showConfigGraphView()
 	case "quality":
 		cli.showConfigQuality()
+	case "update", "updates":
+		cli.showConfigUpdate()
 	case "memory", "mem":
 		cli.showConfigMemory()
 	case "selfevolve", "evolve", "self-evolution":
@@ -423,6 +425,7 @@ func (cli *ChatCLI) showConfigAll(ctx context.Context) {
 	cli.showConfigSecurity()
 	cli.showConfigChat()
 	cli.showConfigQuality()
+	cli.showConfigUpdate()
 	cli.showConfigScheduler(ctx)
 	// server block is conditional (see its own guard)
 	cli.showConfigServer()

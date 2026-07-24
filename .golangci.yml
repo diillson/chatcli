@@ -119,6 +119,8 @@ linters-settings:
       - comando
       - comandos
       - contextos
+      - correspondente
+      - devolvendo
       - duplicatas
       - eles
       - exclusivos
@@ -127,6 +129,7 @@ linters-settings:
       - operacional
       - presentes
       - problemas
+      - processos
       - profissional
       - progresso
       - resolvemos

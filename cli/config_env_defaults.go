@@ -61,6 +61,7 @@ var envDefaults = map[string]envDefault{
 	"CHATCLI_CHAT_ASK":              {Value: "true", IsBool: true, Source: "chat_ask.go"},
 	"CHATCLI_CHAT_KNOWLEDGE":        {Value: "true", IsBool: true, Source: "chat_knowledge.go"},
 	"CHATCLI_DEBUG":                 {Value: "false", IsBool: true, Source: "logger.SetupLogger"},
+	"CHATCLI_AUTO_UPDATE":           {Value: "notify", Source: "update/apply.go"},
 	"CHATCLI_DISABLE_VERSION_CHECK": {Value: "false", IsBool: true, Source: "version_checker.go"},
 	"CHATCLI_LOG_COMPRESS":          {Value: "false", IsBool: true, Source: "logger.go"},
 	"CHATCLI_LANG":                  {Value: "(system locale)", Source: "i18n.LoadLocale"},
