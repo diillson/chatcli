@@ -82,6 +82,13 @@ go install github.com/diillson/chatcli@latest
 # https://github.com/diillson/chatcli/releases
 ```
 
+Once installed, ChatCLI keeps itself current: `/update` upgrades through the
+same channel you installed with (Homebrew, `go install`, or verified binary
+self-replace for release downloads), and `CHATCLI_AUTO_UPDATE=auto` stages
+updates silently in the background — the next start opens on the new version.
+Docker images and source builds are never touched; they get instructions
+instead. See `/config update` for the current policy and detected channel.
+
 <details>
 <summary><strong>Build from source</strong></summary>
 
@@ -505,7 +512,7 @@ Credentials are stored with **AES-256-GCM** at `~/.chatcli/auth-profiles.json`.
 
 | Category | Commands |
 |---|---|
-| **Core** | `/help` · `/version` · `/reload` · `/exit` · `/reset` |
+| **Core** | `/help` · `/version` · `/update [check]` · `/reload` · `/exit` · `/reset` |
 | **Sessions** | `/session {save,load,list,delete,new,fork,search}` · `/export` · `/newsession` · `/rewind` |
 | **Context** | `/context {create,attach,list,remove}` · `@git` · `@file` · `@env` · `@history` · `@command` |
 | **Config** | `/config [section]` · `/status` · `/settings` · `/switch <provider\|model>` |

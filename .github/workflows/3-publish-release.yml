@@ -105,7 +105,16 @@ jobs:
           GOOS=darwin  GOARCH=amd64 go build -ldflags="${LDFLAGS}" -o chatcli-darwin-amd64      ./main.go
           GOOS=darwin  GOARCH=arm64 go build -ldflags="${LDFLAGS}" -o chatcli-darwin-arm64      ./main.go
           GOOS=windows GOARCH=amd64 go build -ldflags="${LDFLAGS}" -o chatcli-windows-amd64.exe ./main.go
-          
+
+          # checksums.txt alimenta a verificação SHA-256 do self-update
+          # (update.SelfReplace) — sem ele, binários baixados não são verificáveis.
+          sha256sum \
+            chatcli-linux-amd64 \
+            chatcli-darwin-amd64 \
+            chatcli-darwin-arm64 \
+            chatcli-windows-amd64.exe > checksums.txt
+          cat checksums.txt
+
           ./chatcli-linux-amd64 --version || true
 
       - name: Wait for release availability
@@ -134,6 +143,7 @@ jobs:
             chatcli-darwin-amd64
             chatcli-darwin-arm64
             chatcli-windows-amd64.exe
+            checksums.txt
           )
           for f in "${files[@]}"; do
             for attempt in {1..4}; do
