@@ -71,6 +71,10 @@ func TestUsesMantleEndpoint(t *testing.T) {
 	assert.True(t, usesMantleEndpoint("anthropic.claude-fable-5"))
 	assert.True(t, usesMantleEndpoint("us.anthropic.claude-fable-5"))
 	assert.True(t, usesMantleEndpoint("global.anthropic.claude-fable-5"))
+	assert.True(t, usesMantleEndpoint("anthropic.claude-opus-5"))
+	assert.True(t, usesMantleEndpoint("claude-opus-5"))
+	assert.True(t, usesMantleEndpoint("us.anthropic.claude-opus-5"))
+	assert.True(t, usesMantleEndpoint("global.anthropic.claude-opus-5"))
 	assert.False(t, usesMantleEndpoint("anthropic.claude-opus-4-8"))
 	assert.False(t, usesMantleEndpoint("global.anthropic.claude-opus-4-6-v1"))
 
@@ -101,8 +105,11 @@ func TestMantleModelID(t *testing.T) {
 		"us.anthropic.claude-sonnet-5-v1:0": "anthropic.claude-sonnet-5",
 		"us.anthropic.claude-fable-5":       "anthropic.claude-fable-5",
 		"global.anthropic.claude-fable-5":   "anthropic.claude-fable-5",
+		"us.anthropic.claude-opus-5":        "anthropic.claude-opus-5",
+		"global.anthropic.claude-opus-5":    "anthropic.claude-opus-5",
 		// Bare first-party id (users type it out of habit).
 		"claude-sonnet-5": "anthropic.claude-sonnet-5",
+		"claude-opus-5":   "anthropic.claude-opus-5",
 		// Catalog canonical is a global. profile for InvokeModel-era models
 		// (Opus 4.8/4.7): forced-mantle routing must still strip it down to
 		// the dateless id the Messages endpoint serves.

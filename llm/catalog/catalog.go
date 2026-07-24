@@ -370,6 +370,28 @@ var registry = []ModelMeta{
 		},
 	},
 	{
+		// Opus 5 (claude-opus-5, Jul 2026): the Opus-tier successor to 4.8,
+		// positioned for complex agentic coding and enterprise work (Fable 5
+		// remains the tier above). 1M context, 128K max output, $5/$25 per
+		// MTok — same price as Opus 4.5-4.8 (see cli/cost_tracker.go
+		// claudePricing, which needs the explicit opus-5 case to avoid the
+		// legacy $15/$75 generic-opus fallthrough). Same API surface as
+		// Opus 4.8: adaptive thinking only (budgeted thinking returns 400),
+		// no temperature/top_p/top_k; effort defaults to "high" server-side.
+		// No fast_mode (not documented for Opus 5) and no
+		// mid_conversation_system (documented for Opus 4.8 only). Dateless
+		// pinned-snapshot ID per the Jul 2026 models overview.
+		ID:              "claude-opus-5",
+		Aliases:         []string{"claude-opus-5", "opus-5", "claude-5-opus"},
+		DisplayName:     "Claude Opus 5 (1M context)",
+		Provider:        ProviderClaudeAI,
+		ContextWindow:   1000000,
+		MaxOutputTokens: 128000,
+		PreferredAPI:    APIAnthropicMessages,
+		APIVersion:      config.ClaudeAIAPIVersionDefault,
+		Capabilities:    []string{"vision", "json_mode", "tools", "adaptive_thinking"},
+	},
+	{
 		// Sonnet 5 (claude-sonnet-5, Jun 2026): the Sonnet-tier successor —
 		// Anthropic skipped a "Sonnet 4.7"/"4.8" and jumped straight to 5.
 		// 1M context, 128K max output, adaptive thinking (effort defaults to
@@ -1260,6 +1282,40 @@ var registry = []ModelMeta{
 		PreferredAPI:    APIChatCompletions,
 		Capabilities:    []string{"vision", "tools", "json_mode"},
 	},
+	// Anthropic 5-family on OpenRouter (dateless slugs, 1M context). Listed
+	// here so context-window sizing is right even before the dynamic
+	// ListModels catalog loads — an uncataloged model falls back to the
+	// 50K default and compacts constantly.
+	{
+		ID:              "anthropic/claude-opus-5",
+		Aliases:         []string{"openrouter-claude-opus-5"},
+		DisplayName:     "Claude Opus 5 (OpenRouter)",
+		Provider:        ProviderOpenRouter,
+		ContextWindow:   1000000,
+		MaxOutputTokens: 128000,
+		PreferredAPI:    APIChatCompletions,
+		Capabilities:    []string{"vision", "tools", "json_mode"},
+	},
+	{
+		ID:              "anthropic/claude-sonnet-5",
+		Aliases:         []string{"openrouter-claude-sonnet-5"},
+		DisplayName:     "Claude Sonnet 5 (OpenRouter)",
+		Provider:        ProviderOpenRouter,
+		ContextWindow:   1000000,
+		MaxOutputTokens: 128000,
+		PreferredAPI:    APIChatCompletions,
+		Capabilities:    []string{"vision", "tools", "json_mode"},
+	},
+	{
+		ID:              "anthropic/claude-fable-5",
+		Aliases:         []string{"openrouter-claude-fable-5"},
+		DisplayName:     "Claude Fable 5 (OpenRouter)",
+		Provider:        ProviderOpenRouter,
+		ContextWindow:   1000000,
+		MaxOutputTokens: 128000,
+		PreferredAPI:    APIChatCompletions,
+		Capabilities:    []string{"vision", "tools", "json_mode"},
+	},
 	{
 		ID:              "anthropic/claude-sonnet-4",
 		Aliases:         []string{"openrouter-claude-sonnet-4"},
@@ -1366,6 +1422,21 @@ var registry = []ModelMeta{
 		ID:              "anthropic.claude-fable-5",
 		Aliases:         []string{"bedrock-fable-5", "global.anthropic.claude-fable-5", "claude-fable-5", "fable-5"},
 		DisplayName:     "Claude Fable 5 (Bedrock, 1M ctx)",
+		Provider:        ProviderBedrock,
+		ContextWindow:   1000000,
+		MaxOutputTokens: 128000,
+		PreferredAPI:    APIAnthropicMessages,
+		Capabilities:    []string{"tools", "vision", "json_mode", "adaptive_thinking", "bedrock_mantle_only"},
+	},
+	// Opus 5 (Jul 2026). Like Sonnet 5 and Fable 5, served through the
+	// Claude-in-Amazon-Bedrock Messages endpoint (the models overview lists
+	// the Bedrock id anthropic.claude-opus-5 with the Messages-API Bedrock
+	// endpoint footnote) — bedrock_mantle_only routes it down the Mantle
+	// path instead of InvokeModel.
+	{
+		ID:              "anthropic.claude-opus-5",
+		Aliases:         []string{"bedrock-opus-5", "global.anthropic.claude-opus-5", "claude-opus-5", "opus-5"},
+		DisplayName:     "Claude Opus 5 (Bedrock, 1M ctx)",
 		Provider:        ProviderBedrock,
 		ContextWindow:   1000000,
 		MaxOutputTokens: 128000,

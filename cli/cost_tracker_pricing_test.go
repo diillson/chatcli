@@ -21,6 +21,11 @@ func TestGetModelPricing(t *testing.T) {
 		{"claude opus 4.7", "CLAUDEAI", "claude-opus-4-7", 5.0, 25.0},
 		{"claude opus 4.6 bedrock id", "BEDROCK", "global.anthropic.claude-opus-4-6-20260115-v1:0", 5.0, 25.0},
 		{"claude opus 4.5", "CLAUDEAI", "claude-opus-4-5", 5.0, 25.0},
+		// Opus 5 keeps the $5/$25 tier in every spelling — the regression
+		// trap is the generic "opus" case right below it at $15/$75.
+		{"claude opus 5", "CLAUDEAI", "claude-opus-5", 5.0, 25.0},
+		{"claude opus 5 bedrock id", "BEDROCK", "anthropic.claude-opus-5", 5.0, 25.0},
+		{"claude opus 5 openrouter slug", "OPENROUTER", "anthropic/claude-opus-5", 5.0, 25.0},
 		{"claude opus legacy", "CLAUDEAI", "claude-3-opus", 15.0, 75.0},
 		{"claude opus 4.1 legacy", "CLAUDEAI", "claude-opus-4-1", 15.0, 75.0},
 		{"claude sonnet", "CLAUDEAI", "claude-sonnet-4-6", 3.0, 15.0},

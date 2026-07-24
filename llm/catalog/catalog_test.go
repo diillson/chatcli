@@ -242,6 +242,40 @@ func TestClaudeOpus48Specs(t *testing.T) {
 	assert.False(t, HasCapability(ProviderBedrock, "claude-opus-4-8", "mid_conversation_system"))
 }
 
+// TestClaudeOpus5Specs pins the published Opus 5 specs (models overview,
+// Jul 2026): 1M context, 128K max output, adaptive thinking, $5/$25 tier.
+// "opus-5" shorthand must resolve to it and must NOT be swallowed by any
+// opus-4.x alias (nor by 4.0's loose "opus-4" prefix).
+func TestClaudeOpus5Specs(t *testing.T) {
+	for _, id := range []string{"claude-opus-5", "opus-5"} {
+		meta, ok := Resolve(ProviderClaudeAI, id)
+		assert.True(t, ok, "expected %s to resolve on ProviderClaudeAI", id)
+		assert.Equal(t, "claude-opus-5", meta.ID, "alias %s must resolve to claude-opus-5", id)
+		assert.Equal(t, 1000000, meta.ContextWindow, "Opus 5 context window is 1M tokens")
+		assert.Equal(t, 128000, meta.MaxOutputTokens, "Opus 5 max output is 128K")
+		assert.Equal(t, APIAnthropicMessages, meta.PreferredAPI)
+	}
+	for _, capability := range []string{"tools", "json_mode", "vision", "adaptive_thinking"} {
+		assert.True(t,
+			HasCapability(ProviderClaudeAI, "claude-opus-5", capability),
+			"claude-opus-5 should advertise %q capability", capability)
+	}
+	assert.False(t,
+		HasCapability(ProviderClaudeAI, "claude-opus-5", "fast_mode"),
+		"claude-opus-5 must not advertise fast_mode (not documented for Opus 5)")
+	assert.False(t,
+		HasCapability(ProviderClaudeAI, "claude-opus-5", "mid_conversation_system"),
+		"mid_conversation_system is documented for Opus 4.8 only")
+	// Regression guards: the opus-4.x lookups must keep resolving to their
+	// own entries after the opus-5 entry lands, and vice-versa.
+	m48, ok := Resolve(ProviderClaudeAI, "claude-opus-4-8")
+	assert.True(t, ok)
+	assert.Equal(t, "claude-opus-4-8", m48.ID)
+	m40, ok := Resolve(ProviderClaudeAI, "opus-4")
+	assert.True(t, ok)
+	assert.NotEqual(t, "claude-opus-5", m40.ID, "generic opus-4 alias must not land on Opus 5")
+}
+
 // TestClaudeSonnet5Specs pins the published Sonnet 5 specs (models
 // overview, Jun 2026): 1M context, 128K max output, adaptive thinking,
 // $3/$15 tier. "sonnet-5" shorthand must resolve to it and must NOT be
@@ -297,6 +331,58 @@ func TestBedrockFable5Entry(t *testing.T) {
 		HasCapability(ProviderBedrock, "anthropic.claude-fable-5", "fast_mode"))
 	assert.False(t,
 		HasCapability(ProviderBedrock, "anthropic.claude-fable-5", "mid_conversation_system"))
+}
+
+// TestBedrockOpus5Entry pins Opus 5 on Bedrock. Like Sonnet 5 and Fable 5
+// it is served through the Claude-in-Amazon-Bedrock Messages endpoint,
+// advertised via bedrock_mantle_only so the client routes it to the
+// Mantle wire instead of InvokeModel.
+func TestBedrockOpus5Entry(t *testing.T) {
+	for _, id := range []string{
+		"anthropic.claude-opus-5",
+		"global.anthropic.claude-opus-5",
+		"claude-opus-5",
+		"bedrock-opus-5",
+	} {
+		meta, ok := Resolve(ProviderBedrock, id)
+		assert.True(t, ok, "expected %s to resolve on ProviderBedrock", id)
+		assert.Equal(t, "anthropic.claude-opus-5", meta.ID, "alias %s must resolve to the Bedrock Opus 5 entry", id)
+		assert.Equal(t, 1000000, meta.ContextWindow)
+		assert.Equal(t, 128000, meta.MaxOutputTokens)
+		assert.Equal(t, APIAnthropicMessages, meta.PreferredAPI)
+	}
+	assert.True(t,
+		HasCapability(ProviderBedrock, "anthropic.claude-opus-5", "adaptive_thinking"))
+	assert.True(t,
+		HasCapability(ProviderBedrock, "anthropic.claude-opus-5", "bedrock_mantle_only"),
+		"Opus 5 must be flagged mantle-only so the client picks the Messages endpoint")
+	assert.False(t,
+		HasCapability(ProviderBedrock, "anthropic.claude-opus-5", "fast_mode"))
+	assert.False(t,
+		HasCapability(ProviderBedrock, "anthropic.claude-opus-5", "mid_conversation_system"))
+	// Regression guard: the Bedrock opus-4.x entries keep resolving to
+	// their own IDs.
+	m48, ok := Resolve(ProviderBedrock, "anthropic.claude-opus-4-8")
+	assert.True(t, ok)
+	assert.Equal(t, "global.anthropic.claude-opus-4-8", m48.ID)
+}
+
+// TestOpenRouterAnthropic5Family pins the OpenRouter static defaults for
+// the Anthropic 5-family slugs. These entries exist so context-window
+// sizing is correct (1M, not the 50K unknown-model fallback) even before
+// the dynamic ListModels catalog loads.
+func TestOpenRouterAnthropic5Family(t *testing.T) {
+	for _, id := range []string{
+		"anthropic/claude-opus-5",
+		"anthropic/claude-sonnet-5",
+		"anthropic/claude-fable-5",
+	} {
+		meta, ok := Resolve(ProviderOpenRouter, id)
+		assert.True(t, ok, "expected %s to resolve on ProviderOpenRouter", id)
+		assert.Equal(t, id, meta.ID)
+		assert.Equal(t, 1000000, meta.ContextWindow, "%s context window is 1M on OpenRouter", id)
+		assert.Equal(t, 128000, meta.MaxOutputTokens)
+	}
 }
 
 // TestBedrockSonnet5Entry pins Sonnet 5 on Bedrock. The model is served
@@ -408,6 +494,7 @@ func TestGPT56FamilyEntries(t *testing.T) {
 // provider filter keeps DEVIN entries from shadowing other providers.
 func TestDevinCatalogEntries(t *testing.T) {
 	for id, wantCtx := range map[string]int{
+		"claude-opus-5":     1000000,
 		"claude-sonnet-5":   1000000,
 		"claude-sonnet-4.6": 1000000,
 		"claude-sonnet-4.5": 200000,

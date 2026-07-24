@@ -31,6 +31,7 @@ func init() {
 	}
 	devinModels := []devinModel{
 		// Anthropic family (specs mirror the CLAUDEAI entries).
+		{"claude-opus-5", 1000000, 128000},
 		{"claude-sonnet-5", 1000000, 128000},
 		{"claude-opus-4.8", 1000000, 128000},
 		{"claude-opus-4.7", 1000000, 128000},
