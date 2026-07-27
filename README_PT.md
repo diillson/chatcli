@@ -129,8 +129,10 @@ OPENAI_API_KEY=sk-xxx
 #### Endpoints customizados e gateways compatíveis com OpenAI
 
 - `OPENAI_API_URL` sobrescreve o endpoint de chat completions da OpenAI. Deve ser a URL **completa** de chat completions (ex.: `https://gateway.example.com/v1/chat/completions`) — a URL de listagem `/models` é derivada dela.
+- A autenticação não muda: as requisições levam `Authorization: Bearer $OPENAI_API_KEY`, então ao redirecionar para um gateway configure `OPENAI_API_KEY` com a key **do gateway**. Não combine URL de terceiros com login OAuth (`/auth login openai`) — o token OAuth seria enviado ao gateway.
 - `OPENAI_RESPONSES_API_URL` sobrescreve o endpoint da Responses API. Atenção: `OPENAI_USE_RESPONSES=false` não força chat completions — logins OAuth e modelos cuja entrada no catálogo prefere a Responses API (ex.: `gpt-5.4`, o default) continuam usando-a. Precedência efetiva: OAuth > `OPENAI_USE_RESPONSES=true` > preferência do catálogo do modelo > `OPENAI_USE_RESPONSES=false`. Ao redirecionar o provider OpenAI para um endpoint compatível, configure **as duas** URLs.
-- Para usar um gateway compatível com OpenAI como provider **separado** da OpenAI (inclusive na fallback chain do modo servidor), aponte o preset OpenRouter para ele: `LLM_PROVIDER=OPENROUTER` com `OPENROUTER_API_KEY` e `OPENROUTER_API_URL=https://gateway.example.com/v1/chat/completions`. Diferente do provider OpenAI, a listagem de modelos dele não filtra por família, então todos os modelos do gateway aparecem no autocomplete.
+- Quando a URL do endpoint aponta para um host customizado, a listagem de modelos **não** é filtrada por família — todos os modelos que o gateway retornar em `/models` aparecem no autocomplete e no `/switch --model`. Contra o endpoint oficial, a listagem mantém apenas as famílias de chat (ocultando embeddings, whisper, tts, dall-e, moderation). A mesma regra vale para `ZAI_API_URL`, `MOONSHOT_API_URL` e `MINIMAX_API_URL`.
+- Para usar um gateway compatível com OpenAI como provider **separado** da OpenAI (inclusive na fallback chain do modo servidor), aponte o preset OpenRouter para ele: `LLM_PROVIDER=OPENROUTER` com `OPENROUTER_API_KEY` e `OPENROUTER_API_URL=https://gateway.example.com/v1/chat/completions`.
 
 </details>
 

@@ -377,6 +377,17 @@ func (c *MiniMaxClient) processAnthropicResponse(resp *http.Response) (string, e
 	return strings.Join(texts, ""), nil
 }
 
+// keepModel reports whether a model id from /models should be listed.
+// The official endpoint is filtered to known chat-capable families; a custom
+// endpoint exposes whatever the gateway serves, so everything is kept.
+func keepModel(id string, custom bool) bool {
+	if custom {
+		return true
+	}
+	id = strings.ToLower(id)
+	return strings.HasPrefix(id, "minimax") || strings.HasPrefix(id, "abab")
+}
+
 // ListModels fetches available models from the MiniMax API.
 func (c *MiniMaxClient) ListModels(ctx context.Context) ([]client.ModelInfo, error) {
 	apiURL := utils.GetEnvOrDefault("MINIMAX_API_URL", c.apiURL)
@@ -423,10 +434,10 @@ func (c *MiniMaxClient) ListModels(ctx context.Context) ([]client.ModelInfo, err
 		return nil, fmt.Errorf("%s: %w", i18n.T("llm.error.decode_response_for", "MiniMax"), err)
 	}
 
+	custom := utils.IsCustomEndpoint(apiURL, config.MiniMaxAPIURL)
 	modelsList := make([]client.ModelInfo, 0, len(result.Data))
 	for _, m := range result.Data {
-		id := strings.ToLower(m.ID)
-		if !strings.HasPrefix(id, "minimax") && !strings.HasPrefix(id, "abab") {
+		if !keepModel(m.ID, custom) {
 			continue
 		}
 		modelsList = append(modelsList, client.ModelInfo{

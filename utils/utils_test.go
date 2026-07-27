@@ -132,3 +132,25 @@ func TestExpandPath(t *testing.T) {
 		})
 	}
 }
+
+func TestIsCustomEndpoint(t *testing.T) {
+	official := "https://api.openai.com/v1/chat/completions"
+	testCases := []struct {
+		name     string
+		resolved string
+		custom   bool
+	}{
+		{"exact official URL", official, false},
+		{"official host, trailing slash", "https://api.openai.com/v1/chat/completions/", false},
+		{"official host, alternate path", "https://api.openai.com/v2/chat/completions", false},
+		{"official host, different scheme", "http://API.OPENAI.COM/v1/chat/completions", false},
+		{"gateway host", "https://gateway.example.com/v1/chat/completions", true},
+		{"localhost mock", "http://127.0.0.1:8080/v1/chat/completions", true},
+		{"unparsable resolved URL", "://bad-url", true},
+	}
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			assert.Equal(t, tc.custom, IsCustomEndpoint(tc.resolved, official))
+		})
+	}
+}

@@ -429,8 +429,8 @@ func TestMoonshotClient_ListModels_Success(t *testing.T) {
 	modelsList, err := c.ListModels(context.Background())
 
 	require.NoError(t, err)
-	// embedding-3 must be filtered (not kimi-/moonshot- prefix).
-	assert.Len(t, modelsList, 3)
+	// custom endpoint (httptest URL) → no family filter, gateway decides
+	assert.Len(t, modelsList, 4)
 
 	// Unknown kimi-* must be registered into the catalog for completion.
 	ids := make(map[string]bool)
@@ -438,6 +438,16 @@ func TestMoonshotClient_ListModels_Success(t *testing.T) {
 		ids[m.ID] = true
 	}
 	assert.True(t, ids["kimi-future-v9"])
+}
+
+func TestKeepModel_OfficialEndpointFiltersFamilies(t *testing.T) {
+	assert.True(t, keepModel("kimi-k2.6", false))
+	assert.True(t, keepModel("moonshot-v1-128k", false))
+	assert.False(t, keepModel("embedding-3", false))
+
+	// custom endpoint keeps everything
+	assert.True(t, keepModel("embedding-3", true))
+	assert.True(t, keepModel("claude-opus-5", true))
 }
 
 func TestMoonshotClient_ListModels_HTTPError(t *testing.T) {

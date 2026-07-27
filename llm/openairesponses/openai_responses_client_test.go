@@ -86,8 +86,20 @@ func TestOpenAIResponsesClient_ListModels_APIKey(t *testing.T) {
 	client := NewOpenAIResponsesClient(testProvider("test-api-key"), "gpt-5", logger, 1, 0)
 	list, err := client.ListModels(context.Background())
 	assert.NoError(t, err)
-	// only gpt-* models pass the prefix filter
-	assert.Equal(t, 1, len(list))
+	// custom endpoint (httptest URL) → no family filter, gateway decides
+	assert.Equal(t, 2, len(list))
+}
+
+func TestKeepModel_OfficialEndpointFiltersFamilies(t *testing.T) {
+	assert.True(t, keepModel("gpt-5", false))
+	assert.True(t, keepModel("o3-mini", false))
+	assert.True(t, keepModel("chatgpt-4o-latest", false))
+	assert.False(t, keepModel("text-embedding-3", false))
+	assert.False(t, keepModel("claude-opus-5", false))
+
+	// custom endpoint keeps everything
+	assert.True(t, keepModel("text-embedding-3", true))
+	assert.True(t, keepModel("claude-opus-5", true))
 }
 
 func TestOpenAIResponsesClient_ListModels_OAuthSkips(t *testing.T) {
