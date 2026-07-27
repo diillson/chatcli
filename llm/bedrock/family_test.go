@@ -43,6 +43,19 @@ func TestResolveFamily(t *testing.T) {
 		{"env override converse", "converse", "anthropic.claude-3-5-sonnet-20241022-v2:0", familyConverse},
 		{"env override auto alias", "auto", "openai.gpt-oss-120b-1:0", familyConverse},
 		{"env invalid value ignored", "bogus", "openai.gpt-oss-120b-1:0", familyOpenAI},
+
+		// A forced anthropic/openai override never applies to vendors that
+		// are Converse-only: their InvokeModel schemas reject the foreign
+		// body outright (Nova: "extraneous key max_tokens is not
+		// permitted"), so honoring the override guarantees a 400.
+		{"env anthropic ignored for nova profile id", "anthropic", "us.amazon.nova-pro-v1:0", familyConverse},
+		{"env anthropic ignored for nova base id", "anthropic", "amazon.nova-lite-v1:0", familyConverse},
+		{"env claude alias ignored for meta llama", "claude", "meta.llama3-70b-instruct-v1:0", familyConverse},
+		{"env anthropic ignored for mistral", "anthropic", "mistral.mistral-large-2407-v1:0", familyConverse},
+		{"env openai ignored for nova", "openai", "us.amazon.nova-micro-v1:0", familyConverse},
+		{"env gpt alias ignored for deepseek", "gpt", "us.deepseek.r1-v1:0", familyConverse},
+		{"env anthropic still honored for claude ids", "anthropic", "anthropic.claude-3-5-sonnet-20241022-v2:0", familyAnthropic},
+		{"env anthropic still honored for opaque ids", "anthropic", "arn:aws:bedrock:us-east-1:123456789012:application-inference-profile/abc123", familyAnthropic},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
