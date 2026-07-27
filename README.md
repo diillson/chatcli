@@ -118,7 +118,7 @@ OPENAI_API_KEY=sk-xxx
 
 | Provider | API Key | Model | Extras |
 |---|---|---|---|
-| OpenAI | `OPENAI_API_KEY` | `OPENAI_MODEL` | `OPENAI_MAX_TOKENS`, `OPENAI_USE_RESPONSES` |
+| OpenAI | `OPENAI_API_KEY` | `OPENAI_MODEL` | `OPENAI_MAX_TOKENS`, `OPENAI_USE_RESPONSES`, `OPENAI_API_URL` |
 | Anthropic | `ANTHROPIC_API_KEY` | `ANTHROPIC_MODEL` | `ANTHROPIC_MAX_TOKENS` |
 | AWS Bedrock | IAM / Profile / credentials chain | `BEDROCK_MODEL` | `AWS_REGION`, `BEDROCK_CROSS_REGION` |
 | Google Gemini | `GOOGLEAI_API_KEY` | `GOOGLEAI_MODEL` | `GOOGLEAI_MAX_TOKENS` |
@@ -129,9 +129,15 @@ OPENAI_API_KEY=sk-xxx
 | GitHub Copilot | `GITHUB_COPILOT_TOKEN` | `COPILOT_MODEL` | or `/auth login github-copilot` |
 | GitHub Models | `GITHUB_TOKEN` | `GITHUB_MODELS_MODEL` | `GH_TOKEN`, `GITHUB_MODELS_TOKEN` |
 | StackSpot | `CLIENT_ID`, `CLIENT_KEY` | — | `STACKSPOT_REALM`, `STACKSPOT_AGENT_ID` |
-| OpenRouter | `OPENROUTER_API_KEY` | — | `OPENROUTER_MAX_TOKENS`, `OPENROUTER_FALLBACK_MODELS` |
+| OpenRouter | `OPENROUTER_API_KEY` | — | `OPENROUTER_MAX_TOKENS`, `OPENROUTER_FALLBACK_MODELS`, `OPENROUTER_API_URL` |
 | Ollama | — | `OLLAMA_MODEL` | `OLLAMA_ENABLED=true`, `OLLAMA_BASE_URL` |
 | OpenAI (Responses API) | `OPENAI_API_KEY` | `OPENAI_MODEL` | `OPENAI_RESPONSES_API_URL` |
+
+#### Custom endpoints and OpenAI-compatible gateways
+
+- `OPENAI_API_URL` overrides the OpenAI chat completions endpoint. It must be the **full** chat completions URL (e.g. `https://gateway.example.com/v1/chat/completions`) — the `/models` listing URL is derived from it.
+- `OPENAI_RESPONSES_API_URL` overrides the Responses API endpoint. Note that `OPENAI_USE_RESPONSES=false` does not force chat completions: OAuth logins and models whose catalog entry prefers the Responses API (e.g. `gpt-5.4`, the default) still use it. Effective precedence: OAuth > `OPENAI_USE_RESPONSES=true` > model catalog preference > `OPENAI_USE_RESPONSES=false`. When redirecting the OpenAI provider to a compatible endpoint, set **both** URLs.
+- To use a third-party OpenAI-compatible gateway as a provider **separate** from OpenAI (including in the server fallback chain), point the OpenRouter preset at it: `LLM_PROVIDER=OPENROUTER` with `OPENROUTER_API_KEY` and `OPENROUTER_API_URL=https://gateway.example.com/v1/chat/completions`. Unlike the OpenAI provider, its model listing does not filter by model family, so all gateway models appear in the autocomplete.
 
 </details>
 
