@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.171.0](https://github.com/diillson/chatcli/compare/v1.170.1...v1.171.0) (2026-07-27)
+
+
+### Features
+
+* **providers:** list all gateway models when endpoint URL is customized ([#1265](https://github.com/diillson/chatcli/issues/1265)) ([406024d](https://github.com/diillson/chatcli/commit/406024d6ee51a794f965a65783907058fc9c7d5b))
+
 ## [1.170.1](https://github.com/diillson/chatcli/compare/v1.170.0...v1.170.1) (2026-07-27)
 
 
