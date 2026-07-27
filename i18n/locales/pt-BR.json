@@ -1517,6 +1517,7 @@
   "llm.minimax.using_anthropic_compat": "MiniMax usando endpoint compatível com Anthropic",
   "llm.info.fetched_models": "Fetched %s models",
   "llm.bedrock.profile_display": "%s (perfil Bedrock)",
+  "llm.bedrock.provider_override_conflict": "BEDROCK_PROVIDER=%s conflita com o modelo %s, que só fala a Converse API; o override foi ignorado nesta chamada",
   "llm.bedrock.app_profile_display": "%s (perfil de aplicação Bedrock)",
   "llm.info.fetched_models_total": "Fetched %s models (total: %d, chat: %d)",
   "llm.info.configuring_provider": "Configurando provedor %s",
@@ -2305,6 +2306,7 @@
   "ws.cmd.persist_unset": "unset CHATCLI_WEBSEARCH_PROVIDER",
   "ws.cmd.persist_set": "export CHATCLI_WEBSEARCH_PROVIDER=%s",
 
+  "complete.config.reload": "Recarrega o .env e reconfigura os providers (igual ao /reload)",
   "complete.config.all": "Dump completo (todas as seções)",
   "complete.config.general": "dotenv, locale, logging, version check",
   "complete.config.providers": "Env vars de todos os providers (OpenAI, Claude, Bedrock, etc)",

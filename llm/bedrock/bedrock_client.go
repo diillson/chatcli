@@ -49,9 +49,35 @@ const (
 	familyConverse  modelFamily = "converse"
 )
 
+// converseOnlyVendors lists Bedrock model-id vendor segments whose models
+// only speak their native (or the Converse) schema — the Anthropic Messages
+// and OpenAI Chat Completions InvokeModel bodies are rejected outright
+// (Nova: `extraneous key [max_tokens] is not permitted`). A BEDROCK_PROVIDER
+// override pointing one of these at another family would guarantee a 400,
+// so resolveFamily ignores the override for them.
+var converseOnlyVendors = []string{
+	"amazon.", "meta.", "mistral.", "cohere.", "ai21.",
+	"stability.", "deepseek.", "writer.", "luma.", "twelvelabs.", "qwen.",
+}
+
+// isConverseOnlyVendor reports whether the model id positively identifies a
+// vendor from converseOnlyVendors, either bare ("amazon.nova-pro-v1:0") or
+// behind an inference-profile prefix ("us.amazon.nova-pro-v1:0"). Opaque ids
+// (application inference profile ARNs) never match.
+func isConverseOnlyVendor(model string) bool {
+	m := strings.ToLower(model)
+	for _, v := range converseOnlyVendors {
+		if strings.HasPrefix(m, v) || strings.Contains(m, "."+v) {
+			return true
+		}
+	}
+	return false
+}
+
 // resolveFamily picks the dispatch path. Precedence:
 //  1. BEDROCK_PROVIDER env var ("anthropic"/"claude", "openai"/"gpt",
-//     "converse"/"auto").
+//     "converse"/"auto") — except for Converse-only vendor ids, where a
+//     forced anthropic/openai schema cannot ever succeed.
 //  2. Model ID content: "openai.*" → OpenAI; any Claude marker (an
 //     "anthropic" segment — bare or behind a global./us./eu./apac.
 //     profile prefix — or a bare "claude"/"fable" first-party id) →
@@ -64,8 +90,14 @@ const (
 func resolveFamily(model string) modelFamily {
 	switch strings.ToLower(strings.TrimSpace(os.Getenv("BEDROCK_PROVIDER"))) {
 	case "openai", "gpt":
+		if isConverseOnlyVendor(model) {
+			return familyConverse
+		}
 		return familyOpenAI
 	case "anthropic", "claude":
+		if isConverseOnlyVendor(model) {
+			return familyConverse
+		}
 		return familyAnthropic
 	case "converse", "auto":
 		return familyConverse
@@ -343,6 +375,10 @@ func (c *BedrockClient) SendPrompt(ctx context.Context, prompt string, history [
 	c.maybeResolveProfileModel(ctx)
 
 	family := resolveFamily(c.model)
+	if override := strings.ToLower(strings.TrimSpace(os.Getenv("BEDROCK_PROVIDER"))); family == familyConverse && isConverseOnlyVendor(c.model) &&
+		(override == "anthropic" || override == "claude" || override == "openai" || override == "gpt") {
+		c.logger.Warn(i18n.T("llm.bedrock.provider_override_conflict", override, c.model))
+	}
 	c.logger.Debug("bedrock: dispatching request", zap.String("model", c.model), zap.String("family", string(family)))
 
 	switch family {
