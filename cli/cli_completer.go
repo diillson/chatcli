@@ -1574,6 +1574,7 @@ func (cli *ChatCLI) getConfigSuggestions(d prompt.Document) []prompt.Suggest {
 	// Subsection slot
 	if len(args) == 1 || (len(args) == 2 && !strings.HasSuffix(line, " ")) {
 		sections := []prompt.Suggest{
+			{Text: "--reload", Description: i18n.T("complete.config.reload")},
 			{Text: "all", Description: i18n.T("complete.config.all")},
 			{Text: "general", Description: i18n.T("complete.config.general")},
 			{Text: "providers", Description: i18n.T("complete.config.providers")},

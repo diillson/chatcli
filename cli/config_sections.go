@@ -67,6 +67,10 @@ func (cli *ChatCLI) routeConfigCommand(ctx context.Context, args []string) {
 		return
 	}
 	switch section {
+	case "--reload", "reload":
+		// Alias de /reload para quem procura a ação dentro de /config; o
+		// mesmo ctx flui para o rebuild do manager e refresh do model cache.
+		cli.reloadConfiguration(ctx)
 	case "all", "full":
 		cli.showConfigAll(ctx)
 	case "general":

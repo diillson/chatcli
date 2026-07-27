@@ -2306,6 +2306,7 @@
   "ws.cmd.persist_unset": "unset CHATCLI_WEBSEARCH_PROVIDER",
   "ws.cmd.persist_set": "export CHATCLI_WEBSEARCH_PROVIDER=%s",
 
+  "complete.config.reload": "Reload .env and reconfigure providers (same as /reload)",
   "complete.config.all": "Full dump (all sections)",
   "complete.config.general": "dotenv, locale, logging, version check",
   "complete.config.providers": "Env vars for all providers (OpenAI, Claude, Bedrock, etc)",
