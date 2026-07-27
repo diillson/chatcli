@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.170.1](https://github.com/diillson/chatcli/compare/v1.170.0...v1.170.1) (2026-07-27)
+
+
+### Bug Fixes
+
+* Bedrock schema override conflicts and provider env reload with /config --reload alias ([#1263](https://github.com/diillson/chatcli/issues/1263)) ([59ad49c](https://github.com/diillson/chatcli/commit/59ad49cfdde10794528f20c7207556d6872d5da1))
+
 ## [1.170.0](https://github.com/diillson/chatcli/compare/v1.169.5...v1.170.0) (2026-07-24)
 
 
