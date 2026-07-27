@@ -238,6 +238,20 @@ func (c *OpenAIClient) processResponse(resp *http.Response) (string, error) {
 	return content, nil
 }
 
+// keepModel reports whether a model id from /models should be listed.
+// The official endpoint also returns non-chat models (embeddings, whisper,
+// tts, dall-e, moderation), so it is filtered to chat-capable families;
+// a custom endpoint exposes whatever the gateway serves, so everything is kept.
+func keepModel(id string, custom bool) bool {
+	if custom {
+		return true
+	}
+	id = strings.ToLower(id)
+	return strings.HasPrefix(id, "gpt-") || strings.HasPrefix(id, "o1") ||
+		strings.HasPrefix(id, "o3") || strings.HasPrefix(id, "o4") ||
+		strings.HasPrefix(id, "chatgpt-")
+}
+
 // ListModels fetches available models from the OpenAI /v1/models endpoint.
 func (c *OpenAIClient) ListModels(ctx context.Context) ([]client.ModelInfo, error) {
 	// Derive base URL from the chat completions URL
@@ -283,13 +297,10 @@ func (c *OpenAIClient) ListModels(ctx context.Context) ([]client.ModelInfo, erro
 		return nil, fmt.Errorf("%s: %w", i18n.T("llm.error.decode_response_for", "OpenAI"), err)
 	}
 
+	custom := utils.IsCustomEndpoint(apiURL, config.OpenAIAPIURL)
 	models := make([]client.ModelInfo, 0, len(result.Data))
 	for _, m := range result.Data {
-		// Filter to chat-capable models (gpt, o1, o3, o4, chatgpt)
-		id := strings.ToLower(m.ID)
-		if !strings.HasPrefix(id, "gpt-") && !strings.HasPrefix(id, "o1") &&
-			!strings.HasPrefix(id, "o3") && !strings.HasPrefix(id, "o4") &&
-			!strings.HasPrefix(id, "chatgpt-") {
+		if !keepModel(m.ID, custom) {
 			continue
 		}
 		models = append(models, client.ModelInfo{

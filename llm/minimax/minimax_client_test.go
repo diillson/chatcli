@@ -373,8 +373,18 @@ func TestMiniMaxClient_ListModels_Success(t *testing.T) {
 	modelsList, err := c.ListModels(context.Background())
 
 	require.NoError(t, err)
-	// speech-2.8-hd should be filtered out (not minimax/abab prefix)
-	assert.Len(t, modelsList, 3)
+	// custom endpoint (httptest URL) → no family filter, gateway decides
+	assert.Len(t, modelsList, 4)
+}
+
+func TestKeepModel_OfficialEndpointFiltersFamilies(t *testing.T) {
+	assert.True(t, keepModel("MiniMax-M2.7", false))
+	assert.True(t, keepModel("abab6.5s-chat", false))
+	assert.False(t, keepModel("speech-2.8-hd", false))
+
+	// custom endpoint keeps everything
+	assert.True(t, keepModel("speech-2.8-hd", true))
+	assert.True(t, keepModel("claude-opus-5", true))
 }
 
 func TestMiniMaxClient_GetModelName(t *testing.T) {

@@ -455,10 +455,24 @@ func (c *OpenAIResponsesClient) ListModels(ctx context.Context) ([]client.ModelI
 	return c.listModelsAPIKey(ctx)
 }
 
+// keepModel reports whether a model id from /models should be listed.
+// The official endpoint also returns non-chat models (embeddings, whisper,
+// tts, dall-e, moderation), so it is filtered to chat-capable families;
+// a custom endpoint exposes whatever the gateway serves, so everything is kept.
+func keepModel(id string, custom bool) bool {
+	if custom {
+		return true
+	}
+	id = strings.ToLower(id)
+	return strings.HasPrefix(id, "gpt-") || strings.HasPrefix(id, "o1") ||
+		strings.HasPrefix(id, "o3") || strings.HasPrefix(id, "o4") ||
+		strings.HasPrefix(id, "chatgpt-")
+}
+
 // listModelsAPIKey fetches models from the standard OpenAI /v1/models endpoint.
 func (c *OpenAIResponsesClient) listModelsAPIKey(ctx context.Context) ([]client.ModelInfo, error) {
-	modelsURL := utils.GetEnvOrDefault("OPENAI_API_URL", config.OpenAIAPIURL)
-	modelsURL = strings.TrimSuffix(modelsURL, "/chat/completions") + "/models"
+	apiURL := utils.GetEnvOrDefault("OPENAI_API_URL", config.OpenAIAPIURL)
+	modelsURL := strings.TrimSuffix(apiURL, "/chat/completions") + "/models"
 
 	resp, err := auth.DoWithRefresh(ctx, c.provider, func(token string) (*http.Response, error) {
 		req, err := http.NewRequestWithContext(ctx, http.MethodGet, modelsURL, nil)
@@ -498,12 +512,10 @@ func (c *OpenAIResponsesClient) listModelsAPIKey(ctx context.Context) ([]client.
 		return nil, fmt.Errorf("%s: %w", i18n.T("llm.error.decode_response_for", "OpenAI"), err)
 	}
 
+	custom := utils.IsCustomEndpoint(apiURL, config.OpenAIAPIURL)
 	modelList := make([]client.ModelInfo, 0, len(result.Data))
 	for _, m := range result.Data {
-		id := strings.ToLower(m.ID)
-		if !strings.HasPrefix(id, "gpt-") && !strings.HasPrefix(id, "o1") &&
-			!strings.HasPrefix(id, "o3") && !strings.HasPrefix(id, "o4") &&
-			!strings.HasPrefix(id, "chatgpt-") {
+		if !keepModel(m.ID, custom) {
 			continue
 		}
 		modelList = append(modelList, client.ModelInfo{

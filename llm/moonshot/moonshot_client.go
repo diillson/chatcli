@@ -264,6 +264,17 @@ func (c *MoonshotClient) processResponse(resp *http.Response) (string, error) {
 	return firstChoice.Message.Content, nil
 }
 
+// keepModel reports whether a model id from /models should be listed.
+// The official endpoint is filtered to known chat-capable families; a custom
+// endpoint exposes whatever the gateway serves, so everything is kept.
+func keepModel(id string, custom bool) bool {
+	if custom {
+		return true
+	}
+	id = strings.ToLower(id)
+	return strings.HasPrefix(id, "kimi") || strings.HasPrefix(id, "moonshot")
+}
+
 // ListModels fetches available models from the Moonshot /models endpoint.
 // Registers any unknown Kimi/Moonshot models into the catalog so they become
 // auto-completable without a code change.
@@ -303,10 +314,10 @@ func (c *MoonshotClient) ListModels(ctx context.Context) ([]client.ModelInfo, er
 		return nil, fmt.Errorf("%s: %w", i18n.T("llm.error.decode_response_for", "MOONSHOT"), err)
 	}
 
+	custom := utils.IsCustomEndpoint(apiURL, config.MoonshotAPIURL)
 	modelsList := make([]client.ModelInfo, 0, len(result.Data))
 	for _, m := range result.Data {
-		id := strings.ToLower(m.ID)
-		if !strings.HasPrefix(id, "kimi") && !strings.HasPrefix(id, "moonshot") {
+		if !keepModel(m.ID, custom) {
 			continue
 		}
 		modelsList = append(modelsList, client.ModelInfo{

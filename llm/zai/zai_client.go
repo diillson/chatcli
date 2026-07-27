@@ -269,6 +269,18 @@ func (c *ZAIClient) processResponse(resp *http.Response) (string, error) {
 	return firstChoice.Message.Content, nil
 }
 
+// keepModel reports whether a model id from /models should be listed.
+// The official endpoint is filtered to known chat-capable families; a custom
+// endpoint exposes whatever the gateway serves, so everything is kept.
+func keepModel(id string, custom bool) bool {
+	if custom {
+		return true
+	}
+	id = strings.ToLower(id)
+	return strings.HasPrefix(id, "glm-") || strings.HasPrefix(id, "codegeex") ||
+		strings.HasPrefix(id, "cogview") || strings.HasPrefix(id, "charglm")
+}
+
 // ListModels fetches available models from the ZAI /models endpoint.
 func (c *ZAIClient) ListModels(ctx context.Context) ([]client.ModelInfo, error) {
 	apiURL := utils.GetEnvOrDefault("ZAI_API_URL", c.apiURL)
@@ -305,11 +317,10 @@ func (c *ZAIClient) ListModels(ctx context.Context) ([]client.ModelInfo, error) 
 		return nil, fmt.Errorf("%s: %w", i18n.T("llm.error.decode_response_for", "ZAI"), err)
 	}
 
+	custom := utils.IsCustomEndpoint(apiURL, config.ZAIAPIURL)
 	modelsList := make([]client.ModelInfo, 0, len(result.Data))
 	for _, m := range result.Data {
-		id := strings.ToLower(m.ID)
-		if !strings.HasPrefix(id, "glm-") && !strings.HasPrefix(id, "codegeex") &&
-			!strings.HasPrefix(id, "cogview") && !strings.HasPrefix(id, "charglm") {
+		if !keepModel(m.ID, custom) {
 			continue
 		}
 		modelsList = append(modelsList, client.ModelInfo{

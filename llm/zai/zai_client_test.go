@@ -315,8 +315,18 @@ func TestZAIClient_ListModels_Success(t *testing.T) {
 	modelsList, err := c.ListModels(context.Background())
 
 	require.NoError(t, err)
-	// embedding-3 should be filtered out (not glm-/codegeex/cogview/charglm prefix)
-	assert.Len(t, modelsList, 3)
+	// custom endpoint (httptest URL) → no family filter, gateway decides
+	assert.Len(t, modelsList, 4)
+}
+
+func TestKeepModel_OfficialEndpointFiltersFamilies(t *testing.T) {
+	assert.True(t, keepModel("glm-5", false))
+	assert.True(t, keepModel("codegeex-4", false))
+	assert.False(t, keepModel("embedding-3", false))
+
+	// custom endpoint keeps everything
+	assert.True(t, keepModel("embedding-3", true))
+	assert.True(t, keepModel("claude-opus-5", true))
 }
 
 func TestZAIClient_GetModelName(t *testing.T) {

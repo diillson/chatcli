@@ -9,6 +9,7 @@ import (
 	"bytes"
 	"fmt"
 	"io"
+	"net/url"
 	"os"
 	"regexp"
 	"runtime"
@@ -26,6 +27,22 @@ func GetEnvOrDefault(key, defaultValue string) string {
 		return defaultValue
 	}
 	return value
+}
+
+// IsCustomEndpoint reporta se uma URL de API resolvida aponta para um endpoint
+// diferente do oficial do provider (ex.: um gateway OpenAI-compatible).
+// Variações cosméticas da URL oficial (esquema, barra final, path alternativo
+// no mesmo host) NÃO contam como custom — apenas host diferente conta.
+func IsCustomEndpoint(resolvedURL, officialURL string) bool {
+	if resolvedURL == officialURL {
+		return false
+	}
+	ru, errResolved := url.Parse(resolvedURL)
+	ou, errOfficial := url.Parse(officialURL)
+	if errResolved != nil || errOfficial != nil {
+		return true
+	}
+	return !strings.EqualFold(ru.Hostname(), ou.Hostname())
 }
 
 // GetEnvVariablesSanitized retorna variáveis de ambiente com valores sensíveis redigidos.
