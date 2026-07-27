@@ -3,7 +3,7 @@ module github.com/diillson/chatcli
 go 1.26.5
 
 require (
-	github.com/aws/aws-sdk-go-v2 v1.42.1
+	github.com/aws/aws-sdk-go-v2 v1.43.0
 	github.com/aws/aws-sdk-go-v2/config v1.32.30
 	github.com/aws/aws-sdk-go-v2/feature/ec2/imds v1.18.30
 	github.com/aws/aws-sdk-go-v2/service/bedrock v1.65.1
