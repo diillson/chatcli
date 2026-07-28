@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.172.0](https://github.com/diillson/chatcli/compare/v1.171.0...v1.172.0) (2026-07-28)
+
+
+### Features
+
+* **update:** announce new releases in-session and revamp version UX ([#1267](https://github.com/diillson/chatcli/issues/1267)) ([a9da50a](https://github.com/diillson/chatcli/commit/a9da50aa7eaebb6469bf08a73ffbbbbb5dd617b9))
+
 ## [1.171.0](https://github.com/diillson/chatcli/compare/v1.170.1...v1.171.0) (2026-07-27)
 
 
