@@ -282,6 +282,16 @@ type ChatCLI struct {
 	memNoticeMu sync.Mutex
 	memNotices  []string
 
+	// Pending update notice produced by backgroundUpdateFlow when the boot
+	// refresh discovers a new release AFTER the welcome screen already
+	// printed. Flushed at the next executor tick (same reason as memNotices:
+	// never race with go-prompt's redraw). welcomeUpdateShown records the
+	// version the welcome banner announced, so the mid-session notice never
+	// repeats what the user just read.
+	updateNoticeMu      sync.Mutex
+	pendingUpdateNotice string
+	welcomeUpdateShown  string
+
 	// MCP (Model Context Protocol) servers for client mode
 	mcpManager     *mcp.Manager
 	mcpCancel      context.CancelFunc // cancel function for MCP server lifecycle
@@ -925,6 +935,11 @@ func (cli *ChatCLI) executor(in string) {
 	// Flush any memory notices the background worker produced since the
 	// last tick, so "memory updated" feedback is visible instead of silent.
 	cli.drainMemoryNotices()
+
+	// Announce a new release the boot-time refresh discovered after the
+	// welcome screen had already printed — without this the user only
+	// learns about it on the NEXT boot.
+	cli.drainUpdateNotice()
 
 	// Handle paste: replace placeholder with real content and show notification
 	if cli.lastPasteInfo != nil {

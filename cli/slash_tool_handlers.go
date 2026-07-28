@@ -71,5 +71,5 @@ func (cli *ChatCLI) helpText() string {
 func (cli *ChatCLI) versionText(parent context.Context) string {
 	ctx, cancel := context.WithTimeout(parent, 2*time.Second)
 	defer cancel()
-	return version.GetReport(ctx).Format()
+	return FormatVersionReport(version.GetReport(ctx))
 }

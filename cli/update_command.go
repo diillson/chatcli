@@ -20,6 +20,8 @@ import (
 	"time"
 
 	"github.com/diillson/chatcli/i18n"
+	"github.com/diillson/chatcli/ui/kit"
+	"github.com/diillson/chatcli/ui/theme"
 	"github.com/diillson/chatcli/update"
 	"github.com/diillson/chatcli/version"
 	"go.uber.org/zap"
@@ -41,6 +43,10 @@ func (cli *ChatCLI) handleUpdateCommand(ctx context.Context, userInput string) {
 	checkOnly := len(args) > 1 && (args[1] == "check" || args[1] == "--check")
 
 	info := detectInstallFn()
+	anchor := screenWidth()
+	fmt.Println()
+	fmt.Println(kit.RuleHeader(" "+kit.Bold(i18n.T("update.card.title"), theme.RoleHeader)+" ", "", anchor))
+	fmt.Println()
 	fmt.Println(colorize("  "+i18n.T("update.checking"), ColorGray))
 
 	rep := version.GetReport(ctx)
@@ -61,8 +67,14 @@ func (cli *ChatCLI) handleUpdateCommand(ctx context.Context, userInput string) {
 		version.ExtractBaseVersion(rep.Current.Version), rep.Latest), ColorGray))
 
 	if !rep.NeedsUpdate {
-		fmt.Println("  " + colorize("✅ "+i18n.T("update.uptodate"), ColorGreen))
+		fmt.Println("  " + colorize("✓ "+i18n.T("update.uptodate"), ColorGreen))
 		return
+	}
+	// O usuário está prestes a atualizar (ou decidir se atualiza): mostra o
+	// que a versão nova traz antes de qualquer ação.
+	if notes := renderReleaseNotes(rep, anchor); notes != "" {
+		fmt.Print(notes)
+		fmt.Println()
 	}
 	if checkOnly {
 		fmt.Println("  " + colorize("⬆ "+i18n.T("update.available_hint"), ColorYellow))
@@ -140,24 +152,41 @@ func methodLabel(m update.Method) string {
 // anteriores, renova o cache de release (que alimenta o welcome e o /version
 // offline) e, no modo auto, aplica o update silencioso por staging — o
 // processo atual segue na versão corrente e o próximo start abre na nova.
+// Quando o refresh descobre uma versão nova que a welcome (impressa antes,
+// com o cache antigo) não anunciou — e nenhum staging vai cobri-la —
+// enfileira o aviso mid-session drenado pelo executor.
 func (cli *ChatCLI) backgroundUpdateFlow(ctx context.Context) {
 	info := detectInstallFn()
 	update.CleanupStaleArtifacts(info.ExecPath)
 
 	version.RefreshReleaseCacheIfStale(ctx)
 
-	if update.ResolveMode() != update.ModeAuto {
+	mode := update.ResolveMode()
+	if mode == update.ModeOff {
 		return
 	}
 	rep := version.OfflineReport()
-	if !rep.NeedsUpdate || !info.Method.AutoApplicable() {
+	if !rep.NeedsUpdate {
 		return
 	}
+	if mode == update.ModeAuto && info.Method.AutoApplicable() {
+		if cli.stageAutoUpdate(ctx, info, rep) {
+			return // staged (aqui ou por outro processo) — o próximo boot anuncia
+		}
+	}
+	cli.queueUpdateNotice(rep.Latest)
+}
+
+// stageAutoUpdate aplica o update silencioso por staging. Retorna true
+// quando a versão nova ficou coberta — staging concluído aqui ou em curso
+// num processo concorrente (que herda o anúncio no próximo boot) — e false
+// quando falhou e o usuário deve ser avisado para atualizar manualmente.
+func (cli *ChatCLI) stageAutoUpdate(ctx context.Context, info update.Info, rep version.Report) bool {
 	// Serializa entre processos chatcli concorrentes; quem perde o lock
 	// simplesmente herda o staging do vencedor no próximo boot.
 	release, ok := update.TryAcquireAutoLock()
 	if !ok {
-		return
+		return true
 	}
 	defer release()
 
@@ -167,7 +196,7 @@ func (cli *ChatCLI) backgroundUpdateFlow(ctx context.Context) {
 	if err := applyUpdateFn(actx, info, rep.Latest, update.Options{}); err != nil {
 		cli.logger.Debug("auto-update: staging em background falhou",
 			zap.String("method", info.Method.String()), zap.Error(err))
-		return
+		return false
 	}
 	update.SaveStagedRecord(update.StagedRecord{
 		From:     rep.Current.Version,
@@ -179,4 +208,5 @@ func (cli *ChatCLI) backgroundUpdateFlow(ctx context.Context) {
 		zap.String("from", rep.Current.Version),
 		zap.String("to", rep.Latest),
 		zap.String("method", info.Method.String()))
+	return true
 }

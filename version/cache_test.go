@@ -44,15 +44,20 @@ func TestReleaseCache_ExpiredAndCorrupted(t *testing.T) {
 	path := filepath.Join(home, ".chatcli", "cache", "latest-release.json")
 	assert.NoError(t, os.MkdirAll(filepath.Dir(path), 0o700))
 
-	// Vencido: FetchedAt além do TTL.
+	// Vencido: continua sendo o último dado conhecido — carrega para
+	// exibição, mas deixa de ser fresco (obriga um novo fetch).
 	stale, err := json.Marshal(releaseCacheEntry{
 		FetchedAt: time.Now().UTC().Add(-releaseCacheTTL - time.Hour),
 		Release:   ReleaseInfo{TagName: "v1.0.0"},
 	})
 	assert.NoError(t, err)
 	assert.NoError(t, os.WriteFile(path, stale, 0o600))
-	_, ok := loadReleaseCache()
-	assert.False(t, ok, "cache vencido deve contar como ausente")
+	release, ok := loadReleaseCache()
+	assert.True(t, ok, "cache vencido ainda alimenta a exibição")
+	assert.Equal(t, "v1.0.0", release.TagName)
+	entry, ok := loadReleaseCacheEntry()
+	assert.True(t, ok)
+	assert.False(t, entry.fresh(), "cache vencido deve exigir novo fetch")
 
 	// Corrompido: JSON truncado.
 	assert.NoError(t, os.WriteFile(path, []byte(`{"fetched_at":`), 0o600))
@@ -140,4 +145,46 @@ func TestRefreshReleaseCacheIfStale(t *testing.T) {
 	// Cache fresco: não busca de novo.
 	RefreshReleaseCacheIfStale(t.Context())
 	assert.EqualValues(t, 1, calls.Load())
+
+	// Cache vencido: exibição continua servida, mas o refresh busca de novo.
+	saveStaleReleaseCache(t, ReleaseInfo{TagName: "v1.161.0"})
+	RefreshReleaseCacheIfStale(t.Context())
+	assert.EqualValues(t, 2, calls.Load())
+}
+
+// saveStaleReleaseCache grava uma entrada de cache já vencida (além do TTL).
+func saveStaleReleaseCache(t *testing.T, release ReleaseInfo) {
+	t.Helper()
+	home, err := os.UserHomeDir()
+	assert.NoError(t, err)
+	path := filepath.Join(home, ".chatcli", "cache", "latest-release.json")
+	assert.NoError(t, os.MkdirAll(filepath.Dir(path), 0o700))
+	data, err := json.Marshal(releaseCacheEntry{
+		FetchedAt: time.Now().UTC().Add(-releaseCacheTTL - time.Hour),
+		Release:   release,
+	})
+	assert.NoError(t, err)
+	assert.NoError(t, os.WriteFile(path, data, 0o600))
+}
+
+func TestOfflineReport_ExpiredCacheStillReportsUpdate(t *testing.T) {
+	isolateHome(t)
+
+	originalBuildImpl := GetBuildInfoImpl
+	GetBuildInfoImpl = func() (string, string, string) {
+		return "1.160.0", "unknown", "unknown"
+	}
+	defer func() { GetBuildInfoImpl = originalBuildImpl }()
+
+	saveStaleReleaseCache(t, ReleaseInfo{
+		TagName: "v1.161.0",
+		Body:    "### Features\n\n* nova feature",
+		HTMLURL: "https://github.com/diillson/chatcli/releases/tag/v1.161.0",
+	})
+
+	rep := OfflineReport()
+	assert.True(t, rep.NeedsUpdate, "cache vencido ainda é o último dado conhecido")
+	assert.Equal(t, "1.161.0", rep.Latest)
+	assert.Contains(t, rep.Notes, "nova feature")
+	assert.Equal(t, "https://github.com/diillson/chatcli/releases/tag/v1.161.0", rep.ReleaseURL)
 }

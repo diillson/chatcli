@@ -49,9 +49,9 @@ func TestHandleVersionCommand(t *testing.T) {
 		mockErr    error
 		expectOut  string
 	}{
-		{"Update available", "1.26.0", nil, "Disponível! Atualize"},
-		{"No update", "1.25.0", nil, "Você está na versão mais recente."},
-		{"With error", "", errors.New("network error"), "Não foi possível verificar: network error"},
+		{"Update available", "1.26.0", nil, "v1.26.0 available — run /update"},
+		{"No update", "1.25.0", nil, "You're already on the latest version."},
+		{"With error", "", errors.New("network error"), "Couldn't check for updates: network error"},
 	}
 
 	for _, tc := range testCases {

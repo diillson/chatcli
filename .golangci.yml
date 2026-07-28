@@ -128,6 +128,7 @@ linters-settings:
       - instal
       - operacional
       - presentes
+      - prestes
       - problemas
       - processos
       - profissional
@@ -135,6 +136,7 @@ linters-settings:
       - resolvemos
       - sucess
       - tradicional
+      - validade
       - variantes
 
 issues:

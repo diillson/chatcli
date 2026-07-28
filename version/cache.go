@@ -67,31 +67,51 @@ func saveReleaseCache(release ReleaseInfo) {
 	}
 }
 
-// loadReleaseCache devolve os metadados cacheados quando existem e estão
-// dentro do TTL. Cache corrompido ou vencido conta como ausente.
-func loadReleaseCache() (ReleaseInfo, bool) {
+// loadReleaseCacheEntry devolve a entrada cacheada quando existe e é
+// parseável, junto com a idade dela — SEM aplicar o TTL. Validade de
+// exibição e throttle de fetch são decisões separadas: um cache vencido
+// ainda é o melhor dado conhecido para exibir, mas obriga um novo fetch.
+// Cache corrompido ou sem tag conta como ausente.
+func loadReleaseCacheEntry() (releaseCacheEntry, bool) {
 	path, err := releaseCachePath()
 	if err != nil {
-		return ReleaseInfo{}, false
+		return releaseCacheEntry{}, false
 	}
 	data, err := os.ReadFile(path) // #nosec G304 -- caminho fixo sob o home do usuário
 	if err != nil {
-		return ReleaseInfo{}, false
+		return releaseCacheEntry{}, false
 	}
 	var entry releaseCacheEntry
 	if err := json.Unmarshal(data, &entry); err != nil {
-		return ReleaseInfo{}, false
+		return releaseCacheEntry{}, false
 	}
-	if entry.Release.TagName == "" || time.Since(entry.FetchedAt) > releaseCacheTTL {
+	if entry.Release.TagName == "" {
+		return releaseCacheEntry{}, false
+	}
+	return entry, true
+}
+
+// fresh informa se a entrada ainda dispensa um novo fetch (dentro do TTL).
+func (e releaseCacheEntry) fresh() bool {
+	return time.Since(e.FetchedAt) <= releaseCacheTTL
+}
+
+// loadReleaseCache devolve os metadados cacheados quando existem, mesmo que
+// vencidos — exibição confia no último dado conhecido. Quem precisa decidir
+// se refaz o fetch usa loadReleaseCacheEntry + fresh.
+func loadReleaseCache() (ReleaseInfo, bool) {
+	entry, ok := loadReleaseCacheEntry()
+	if !ok {
 		return ReleaseInfo{}, false
 	}
 	return entry.Release, true
 }
 
 // OfflineReport monta o relatório só com dados locais: build info resolvido e,
-// quando há cache fresco da release, o mesmo enriquecimento de commit/data do
-// GetReport — sem nenhuma chamada de rede. É o que a tela de boas-vindas usa
-// para mostrar o hash de um build go install sem atrasar o boot.
+// quando há cache da release (mesmo vencido — é o último dado conhecido), o
+// mesmo enriquecimento de commit/data do GetReport — sem nenhuma chamada de
+// rede. É o que a tela de boas-vindas usa para mostrar o hash de um build
+// go install e o banner de atualização sem atrasar o boot.
 func OfflineReport() Report {
 	rep := Report{Current: GetCurrentVersion()}
 	release, ok := loadReleaseCache()
@@ -101,18 +121,24 @@ func OfflineReport() Report {
 	rep.Latest = normalizeTag(release.TagName)
 	rep.NeedsUpdate = NeedsUpdate(ExtractBaseVersion(rep.Current.Version), rep.Latest)
 	rep.Current = rep.Current.enrichedFromRelease(rep.Latest, release)
+	if rep.NeedsUpdate {
+		rep.Notes = release.Body
+		rep.ReleaseURL = release.HTMLURL
+	}
 	return rep
 }
 
 // RefreshReleaseCacheIfStale renova o cache quando vencido/ausente, limitada
 // por um deadline próprio sobre o ctx do chamador — desenhada para rodar em
-// goroutine no boot sem segurar nada. Respeita CHATCLI_DISABLE_VERSION_CHECK
-// e nunca retorna erro: a próxima exibição simplesmente usa o que houver.
+// goroutine no boot sem segurar nada. O TTL aqui é só throttle de rede
+// (≤1 consulta/dia à API do GitHub); a exibição usa o cache em qualquer
+// idade. Respeita CHATCLI_DISABLE_VERSION_CHECK e nunca retorna erro: a
+// próxima exibição simplesmente usa o que houver.
 func RefreshReleaseCacheIfStale(ctx context.Context) {
 	if versionCheckDisabled() {
 		return
 	}
-	if _, ok := loadReleaseCache(); ok {
+	if entry, ok := loadReleaseCacheEntry(); ok && entry.fresh() {
 		return
 	}
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)

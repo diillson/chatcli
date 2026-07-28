@@ -94,11 +94,11 @@ func reportDotenvBootstrap(b dotenvBootstrap) {
 }
 
 // printVersionInfo prints version details (including update check) and is used
-// for the -version flag.
+// for the -version flag. Shares the exact same card as the /version command.
 func printVersionInfo() {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	fmt.Println(version.GetReport(ctx).Format())
+	fmt.Println(cli.FormatVersionReport(version.GetReport(ctx)))
 }
 
 // applyStackSpotFlags applies StackSpot realm/agent overrides when the target

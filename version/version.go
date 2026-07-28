@@ -33,6 +33,8 @@ type ReleaseInfo struct {
 	TagName     string `json:"tag_name"`
 	PublishedAt string `json:"published_at"`
 	TargetHash  string `json:"target_commitish"`
+	Body        string `json:"body"`
+	HTMLURL     string `json:"html_url"`
 }
 
 // versionCheckDisabled centraliza o opt-out da checagem de release.
@@ -359,6 +361,12 @@ type Report struct {
 	Latest      string
 	NeedsUpdate bool
 	CheckErr    error
+	// Notes carrega o corpo (markdown) da release mais recente quando há
+	// atualização disponível — alimenta a seção "novidades" do /version e do
+	// /update sem nenhuma chamada extra (vem no mesmo payload da API).
+	Notes string
+	// ReleaseURL aponta para a página da release no GitHub (quando conhecida).
+	ReleaseURL string
 }
 
 // normalizeTag remove o prefixo v de uma tag de release.
@@ -389,6 +397,10 @@ func GetReport(ctx context.Context) Report {
 	rep.Latest = normalizeTag(release.TagName)
 	rep.NeedsUpdate = NeedsUpdate(ExtractBaseVersion(rep.Current.Version), rep.Latest)
 	rep.Current = rep.Current.enrichedFromRelease(rep.Latest, release)
+	if rep.NeedsUpdate {
+		rep.Notes = release.Body
+		rep.ReleaseURL = release.HTMLURL
+	}
 	return rep
 }
 
