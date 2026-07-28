@@ -440,5 +440,5 @@ func (ch *CommandHandler) handleVersionCommand(ctx context.Context) {
 	// Checagem com timeout
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
-	fmt.Println(version.GetReport(ctx).Format())
+	fmt.Println(FormatVersionReport(version.GetReport(ctx)))
 }

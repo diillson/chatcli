@@ -13,7 +13,7 @@ import (
 )
 
 // Dicas agora contêm as chaves de tradução.
-var tipKeys = []string{ // <-- 2. ALTERADO DE 'tips' PARA 'tipKeys'
+var tipKeys = []string{
 	"tip.add_file",
 	"tip.git_context",
 	"tip.exec_command",
@@ -25,6 +25,22 @@ var tipKeys = []string{ // <-- 2. ALTERADO DE 'tips' PARA 'tipKeys'
 	"tip.agent_toggle_view",
 	"tip.agent_output_actions",
 	"tip.agent_last_result",
+	"tip.coder_mode",
+	"tip.update_cmd",
+	"tip.mcp",
+	"tip.schedule",
+	"tip.memory_cmd",
+	"tip.knowledge",
+	"tip.max_tokens",
+	"tip.resume",
+	"tip.moa",
+	"tip.image_gen",
+	"tip.speak",
+	"tip.voice_note",
+	"tip.diagram",
+	"tip.worktree",
+	"tip.cost",
+	"tip.menu",
 }
 
 // welcomeAnchor is the preferred anchor width used to center welcome-screen
@@ -127,6 +143,7 @@ func (cli *ChatCLI) PrintWelcomeScreen() {
 		fmt.Println("  " + colorize(i18n.T("welcome.update.applied", rec.To), ColorLime))
 	} else if rep.NeedsUpdate && update.ResolveMode() != update.ModeOff {
 		fmt.Println("  " + colorize(i18n.T("welcome.update.available", rep.Latest), ColorYellow))
+		cli.markUpdateAnnounced(rep.Latest)
 	}
 	fmt.Println()
 

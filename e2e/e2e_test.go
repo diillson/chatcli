@@ -151,6 +151,7 @@ func TestE2E_VersionFlag(t *testing.T) {
 	stdout, stderr := runChatCLI(t, args, "", env)
 
 	require.Empty(t, stderr, "Stderr should be empty")
-	// Agora o assert deve passar, pois o binário usará o mock e detectará a atualização.
-	assert.Contains(t, stdout, "Disponível! Atualize para a versão mais recente.")
+	// O binário usa o mock, detecta a atualização e o card novo convida ao /update.
+	assert.Contains(t, stdout, "v1.26.0")
+	assert.Contains(t, stdout, "/update")
 }
