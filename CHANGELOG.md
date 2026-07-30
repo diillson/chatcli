@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.173.0](https://github.com/diillson/chatcli/compare/v1.172.0...v1.173.0) (2026-07-30)
+
+
+### Features
+
+* **acp:** structured session updates, slash commands and IDE permission dialogs ([#1269](https://github.com/diillson/chatcli/issues/1269)) ([729c740](https://github.com/diillson/chatcli/commit/729c740c53414fa3b5d9ea182b85004f0338c415))
+
+
+### Bug Fixes
+
+* **cli:** complete /update check and close completer and palette gaps ([#1271](https://github.com/diillson/chatcli/issues/1271)) ([373949e](https://github.com/diillson/chatcli/commit/373949eece258d11a6b750c708b1c5cf7c6f6b43))
+
 ## [1.172.0](https://github.com/diillson/chatcli/compare/v1.171.0...v1.172.0) (2026-07-28)
 
 
