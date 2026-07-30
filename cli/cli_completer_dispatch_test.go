@@ -62,6 +62,7 @@ func TestRouteSlashPrefix_KnownPrefixesMatch(t *testing.T) {
 		"/plan", "/refine", "/verify", "/reflect",
 		"/thinking", "/schedule", "/wait", "/jobs",
 		"/parked", "/resume foo", "/cancel-park foo",
+		"/update ", "/graph ",
 	}
 	for _, line := range cases {
 		t.Run(line, func(t *testing.T) {
@@ -71,6 +72,30 @@ func TestRouteSlashPrefix_KnownPrefixesMatch(t *testing.T) {
 				t.Errorf("expected route to match for %q", line)
 			}
 		})
+	}
+}
+
+func TestUpdateAndGraphArgumentSuggestions(t *testing.T) {
+	cli := newCompleterTestCLI(t)
+
+	// "/update " must offer the check-only forms.
+	d := docWithCursor("/update ", 8)
+	sugs := cli.getUpdateSuggestions(d)
+	if !containsText(sugs, "check") || !containsText(sugs, "--check") {
+		t.Errorf("/update suggestions missing check forms: %v", extractTexts(sugs))
+	}
+	// Prefix filtering: "--c" narrows to the flag form.
+	d = docWithCursor("/update --c", 11)
+	sugs = cli.getUpdateSuggestions(d)
+	if !containsText(sugs, "--check") || containsText(sugs, "check") {
+		t.Errorf("/update --c should narrow to --check: %v", extractTexts(sugs))
+	}
+
+	// "/graph " must offer the full-graph literals.
+	d = docWithCursor("/graph ", 7)
+	sugs = cli.getGraphSuggestions(d)
+	if !containsText(sugs, "full") || !containsText(sugs, "all") {
+		t.Errorf("/graph suggestions missing full/all: %v", extractTexts(sugs))
 	}
 }
 

@@ -2641,6 +2641,8 @@
   "complete.root.rewind": "Volta a um checkpoint anterior da conversa",
   "complete.root.memory": "Ver/carregar anotações de memória (today, yesterday, week, load <data>, longterm, list)",
   "complete.root.graph": "Visualizar o grafo de conhecimento como imagem (/graph ou /graph <assunto>)",
+  "complete.update.check": "Só verifica se há release nova e mostra as notas, sem aplicar",
+  "complete.graph.full": "Renderiza o grafo de conhecimento completo",
   "graph.cmd.empty": "O grafo de conhecimento ainda está vazio.",
   "graph.cmd.no_node": "Nenhum nó do grafo encontrado para %q.",
   "graph.cmd.rendered": "Grafo de conhecimento renderizado:",

@@ -76,6 +76,28 @@ var slashPrefixRoutes = []slashPrefixRoute{
 	{"/export", (*ChatCLI).getExportSuggestions},
 	{"/gateway", (*ChatCLI).getGatewaySuggestions},
 	{"/lsp", (*ChatCLI).getLSPSuggestions},
+	{"/update", (*ChatCLI).getUpdateSuggestions},
+	{"/graph", (*ChatCLI).getGraphSuggestions},
+}
+
+// getUpdateSuggestions completes `/update <sub>`: check (and its --check
+// alias) previews the available release without applying it.
+func (cli *ChatCLI) getUpdateSuggestions(d prompt.Document) []prompt.Suggest {
+	word := d.GetWordBeforeCursor()
+	return prompt.FilterHasPrefix([]prompt.Suggest{
+		{Text: "check", Description: i18n.T("complete.update.check")},
+		{Text: "--check", Description: i18n.T("complete.update.check")},
+	}, word, true)
+}
+
+// getGraphSuggestions completes `/graph <scope>`: the literal full/all render
+// the whole knowledge graph; any other text seeds a subject search.
+func (cli *ChatCLI) getGraphSuggestions(d prompt.Document) []prompt.Suggest {
+	word := d.GetWordBeforeCursor()
+	return prompt.FilterHasPrefix([]prompt.Suggest{
+		{Text: "full", Description: i18n.T("complete.graph.full")},
+		{Text: "all", Description: i18n.T("complete.graph.full")},
+	}, word, true)
 }
 
 // getLSPSuggestions completes the file path argument of /lsp.
