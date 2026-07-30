@@ -594,7 +594,23 @@ func acpNewSession(t *testing.T, a *ACP) string {
 	if !strings.Contains(string(body), "availableModes") {
 		t.Fatalf("session/new must advertise modes: %s", body)
 	}
+	if !strings.Contains(string(body), `"currentModeId":"coder"`) {
+		t.Fatalf("new sessions must default to coder mode: %s", body)
+	}
 	return nr.SessionID
+}
+
+// acpAgentSession creates a session and switches it to agent mode — tests
+// that pin the AgentStream path opt in explicitly, since the default is coder.
+func acpAgentSession(t *testing.T, a *ACP) string {
+	t.Helper()
+	sid := acpNewSession(t, a)
+	resps := runLines(t, a.Handle,
+		`{"jsonrpc":"2.0","id":90,"method":"session/set_mode","params":{"sessionId":"`+sid+`","modeId":"agent"}}`)
+	if resps[0].Error != nil {
+		t.Fatalf("set_mode agent failed: %+v", resps[0].Error)
+	}
+	return sid
 }
 
 func notesRecorder(a *ACP) (*[]string, *sync.Mutex) {
@@ -614,7 +630,7 @@ func TestACP_AgentStreamsStructuredUpdates(t *testing.T) {
 	be := &fakeBackend{}
 	a := NewACP(be, "1.0.0")
 	notes, nmu := notesRecorder(a)
-	sid := acpNewSession(t, a)
+	sid := acpAgentSession(t, a)
 
 	pr := runLines(t, a.Handle,
 		`{"jsonrpc":"2.0","id":2,"method":"session/prompt","params":{"sessionId":"`+sid+`","prompt":[{"type":"text","text":"build it"}]}}`,
@@ -688,8 +704,8 @@ func TestACP_FinalReplyFallback(t *testing.T) {
 	nmu.Lock()
 	joined := strings.Join(*notes, "\n")
 	nmu.Unlock()
-	if !strings.Contains(joined, "agent-ran:quiet") {
-		t.Errorf("fallback final reply missing: %s", joined)
+	if !strings.Contains(joined, "coder-ran:quiet") {
+		t.Errorf("fallback final reply missing (default mode drives CoderStream): %s", joined)
 	}
 }
 
@@ -928,7 +944,7 @@ func TestACP_OverlappingPromptRejected(t *testing.T) {
 	be := &fakeBackend{blockAgent: make(chan struct{})}
 	a := NewACP(be, "1.0.0")
 	notesRecorder(a)
-	sid := acpNewSession(t, a)
+	sid := acpAgentSession(t, a)
 
 	done := make(chan []Response, 1)
 	go func() {
@@ -968,7 +984,7 @@ func TestACP_CancelMarksOpenToolCallsFailed(t *testing.T) {
 	be := &fakeBackend{blockAgent: make(chan struct{})}
 	a := NewACP(be, "1.0.0")
 	notes, nmu := notesRecorder(a)
-	sid := acpNewSession(t, a)
+	sid := acpAgentSession(t, a)
 
 	done := make(chan []Response, 1)
 	go func() {
@@ -1020,7 +1036,7 @@ func TestACP_RequestPermissionAllowAndReject(t *testing.T) {
 				}
 				return json.RawMessage(tt.outcome), nil
 			})
-			sid := acpNewSession(t, a)
+			sid := acpAgentSession(t, a)
 			runLines(t, a.Handle,
 				`{"jsonrpc":"2.0","id":2,"method":"session/prompt","params":{"sessionId":"`+sid+`","prompt":[{"type":"text","text":"danger"}]}}`,
 			)
@@ -1064,7 +1080,7 @@ func TestACP_CancelInterruptsInFlightPrompt(t *testing.T) {
 	be := &fakeBackend{blockAgent: make(chan struct{})}
 	a := NewACP(be, "1.0.0")
 	notesRecorder(a)
-	sid := acpNewSession(t, a)
+	sid := acpAgentSession(t, a)
 
 	done := make(chan []Response, 1)
 	go func() {

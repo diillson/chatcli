@@ -350,7 +350,10 @@ func buildConversation(history []models.Message, prompt string) string {
 		default:
 			b.WriteString("User: ")
 		}
-		b.WriteString(m.Content)
+		// Scrub any sentinel that leaked into a stored message (from a turn
+		// where the model mangled the framing): replaying it here teaches the
+		// model that replies carry the markers, contaminating every turn after.
+		b.WriteString(stripHistorySentinels(m.Content))
 		b.WriteString("\n")
 	}
 	if len(history) == 0 || history[len(history)-1].Role != "user" || history[len(history)-1].Content != prompt {
@@ -372,17 +375,37 @@ func buildConversation(history []models.Message, prompt string) string {
 // extractReply pulls the model's answer out of the CLI output. Preference
 // order: content between the LAST sentinel pair (the final answer, in case
 // the harness echoed earlier attempts), then everything after a lone begin
-// marker, then the whole ANSI-stripped output.
+// marker, then the whole ANSI-stripped output. Every path runs through
+// stripSentinels: when the model mangles the framing (e.g. emits only the
+// end marker, or fences the begin marker so it no longer matches), the
+// fallback would otherwise leak a literal sentinel to the user — and once a
+// leaked marker lands in the history it self-reinforces, because the model
+// sees it in the flattened conversation and imitates it every turn after.
 func extractReply(raw string) string {
 	out := stripANSI(raw)
 	if i := strings.LastIndex(out, replyBegin); i >= 0 {
 		rest := out[i+len(replyBegin):]
 		if j := strings.Index(rest, replyEnd); j >= 0 {
-			return strings.TrimSpace(rest[:j])
+			return stripSentinels(rest[:j])
 		}
-		return strings.TrimSpace(rest)
+		return stripSentinels(rest)
 	}
-	return strings.TrimSpace(out)
+	return stripSentinels(out)
+}
+
+// stripSentinels removes any residual framing markers from text headed to the
+// user. The markers are transport framing, never content: they are
+// intentionally unusual strings that cannot occur in prose.
+func stripSentinels(s string) string {
+	return strings.TrimSpace(stripHistorySentinels(s))
+}
+
+// stripHistorySentinels removes the framing markers without touching the
+// surrounding whitespace — used when flattening stored messages, where the
+// content must otherwise be replayed verbatim.
+func stripHistorySentinels(s string) string {
+	s = strings.ReplaceAll(s, replyBegin, "")
+	return strings.ReplaceAll(s, replyEnd, "")
 }
 
 func stripANSI(s string) string {

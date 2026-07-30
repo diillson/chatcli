@@ -85,9 +85,9 @@ func (*BuiltinSchedulerPlugin) Description() string {
 //
 // Action DSL (do=) — all forms below fire from a scheduled job:
 //
+//	"/coder <task>"    full agent loop in coder profile (preferred for tasks)
 //	"/run <task>"      task delegated to the agent ReAct loop
 //	"/agent <task>"    same as /run; explicit agent invocation
-//	"/coder <task>"    runs the agent in coder profile (CoderSystemPrompt)
 //	"shell: <cmd>"     raw shell command (policy-classified, captured)
 //	"agent: <task>"    boots the agent loop with the given task (DSL form)
 //	"@<tool> <args>"   invokes a registered tool (e.g. "@coder exec ls")
@@ -100,7 +100,7 @@ func (*BuiltinSchedulerPlugin) Usage() string {
 
 Subcommands (use cmd + args; do/when are required for schedule):
   schedule  {name, when:"+5m"|"in 10s"|"at 14:00"|"@every 1m"|"0 9 * * *",
-             do:"/run <task>"|"/agent <task>"|"/coder <task>"|"shell: <cmd>"|"agent: <task>"|"@<tool> <args>"|"POST <url>"|"noop",
+             do:"/coder <task>"|"/run <task>"|"/agent <task>"|"shell: <cmd>"|"agent: <task>"|"@<tool> <args>"|"POST <url>"|"noop",
              wait?:{condition:"docker:NAME:running"|"http://...==200"|"file:/path"},
              until?:"<condition DSL>", timeout?, poll?, max_polls?,
              max_retries?, depends_on?, triggers?, ttl?, tags?, i_know?}
@@ -141,7 +141,7 @@ func (*BuiltinSchedulerPlugin) Schema() string {
 					{"name": "when", "type": "string", "required": true,
 						"description": "Trigger DSL: \"+5m\", \"in 10s\", \"after 1h\", \"5m\" (bare duration), \"at 14:00\", \"at 2026-04-25T10:00\", \"@every 30s\", \"0 9 * * *\" (cron)"},
 					{"name": "do", "type": "string", "required": true,
-						"description": "Action DSL: \"/run <task>\" (agent loop), \"/agent <task>\" (same), \"/coder <task>\" (agent in coder profile), \"shell: <cmd>\" (raw shell, policy-classified), \"agent: <task>\" (DSL alias), \"@<tool> <args>\" (e.g. \"@coder exec ls\"), \"POST <url> | <body>\" (webhook), \"llm: <prompt>\", \"hook:<event>\", \"/<other slash>\" (e.g. \"/jobs list\"), or \"noop\""},
+						"description": "Action DSL: \"/coder <task>\" (full agent loop in coder profile — preferred for tasks), \"/run <task>\" (agent loop), \"/agent <task>\" (same as /run), \"shell: <cmd>\" (raw shell, policy-classified), \"agent: <task>\" (DSL alias), \"@<tool> <args>\" (e.g. \"@coder exec ls\"), \"POST <url> | <body>\" (webhook), \"llm: <prompt>\", \"hook:<event>\", \"/<other slash>\" (e.g. \"/jobs list\"), or \"noop\""},
 					{"name": "until", "type": "string",
 						"description": "Optional precondition before the action fires (e.g. \"docker:my-container:running\", \"http://host/health==200\", \"file:/tmp/done\", \"tcp://host:5432\")"},
 					{"name": "wait", "type": "object", "description": "Explicit wait spec (condition, timeout, on_timeout). Prefer until= for the common case."},
