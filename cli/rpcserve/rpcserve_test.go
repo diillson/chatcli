@@ -818,6 +818,49 @@ func TestACP_PromptSlashUnknownCommand(t *testing.T) {
 	}
 }
 
+// noCmdBackend implements ACPBackend WITHOUT the optional ACPCommandBackend
+// capability — pins that the capability is truly optional.
+type noCmdBackend struct{ f *fakeBackend }
+
+func (b *noCmdBackend) Prompt(ctx context.Context, session, text string) (string, error) {
+	return b.f.Prompt(ctx, session, text)
+}
+func (b *noCmdBackend) AgentStream(ctx context.Context, session, task string, opts RunOpts) (string, error) {
+	return b.f.AgentStream(ctx, session, task, opts)
+}
+func (b *noCmdBackend) CoderStream(ctx context.Context, session, task string, opts RunOpts) (string, error) {
+	return b.f.CoderStream(ctx, session, task, opts)
+}
+
+func TestACP_BackendWithoutCommandCapability(t *testing.T) {
+	f := &fakeBackend{}
+	a := NewACP(&noCmdBackend{f: f}, "1.0.0")
+	notes, nmu := notesRecorder(a)
+	sid := acpNewSession(t, a)
+
+	nmu.Lock()
+	joined := strings.Join(*notes, "\n")
+	nmu.Unlock()
+	if strings.Contains(joined, "available_commands_update") {
+		t.Errorf("capability-less backend must not advertise commands: %s", joined)
+	}
+
+	// A known REPL command answers "unsupported" (never dispatched)…
+	runLines(t, a.Handle,
+		`{"jsonrpc":"2.0","id":2,"method":"session/prompt","params":{"sessionId":"`+sid+`","prompt":[{"type":"text","text":"/config providers"}]}}`,
+	)
+	if f.lastCmd != "" {
+		t.Errorf("capability-less backend must never receive RunCommand, got %q", f.lastCmd)
+	}
+	// …and the agent loop itself still runs normally.
+	runLines(t, a.Handle,
+		`{"jsonrpc":"2.0","id":3,"method":"session/prompt","params":{"sessionId":"`+sid+`","prompt":[{"type":"text","text":"do work"}]}}`,
+	)
+	if f.lastTask != "do work" {
+		t.Errorf("agent stream must work without the capability, got %q", f.lastTask)
+	}
+}
+
 func TestACP_SlashTokenSplitsOnAnyWhitespace(t *testing.T) {
 	// Editor prompt boxes produce "/coder\nfix it" — the token must still be
 	// recognized as a mode switch and the task must run.

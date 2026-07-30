@@ -2417,6 +2417,7 @@
   "mcp.proxy.tool_not_found": "Tool MCP %q não encontrada em nenhum servidor conectado",
   "rpc.session.store_unavailable": "o armazenamento de sessões não está disponível nesta instância do ChatCLI",
   "acp.mode_switched": "Modo da sessão alterado para %s.",
+  "agent.permission.dangerous_exec": "Comando perigoso detectado no exec do @coder: %s",
   "acp.command_unsupported": "O comando %s não está disponível pela conexão da IDE (ACP). Digite / para ver os comandos suportados.",
   "acp.command_failed": "Falha no comando: %s",
   "acp.command_empty_output": "(o comando não produziu saída)",

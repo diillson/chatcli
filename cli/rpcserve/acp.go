@@ -37,6 +37,13 @@ type ACPBackend interface {
 	Backend
 	AgentStream(ctx context.Context, session, task string, opts RunOpts) (string, error)
 	CoderStream(ctx context.Context, session, task string, opts RunOpts) (string, error)
+}
+
+// ACPCommandBackend is an OPTIONAL capability (checked by type assertion,
+// never required — expanding ACPBackend itself would break every existing
+// implementer): backends that also expose the slash-command surface get
+// available_commands_update advertising and headless execution.
+type ACPCommandBackend interface {
 	// ACPCommands lists the slash commands runnable over ACP (mode switches
 	// plus the headless allowlist).
 	ACPCommands() []CommandInfo
@@ -179,12 +186,14 @@ func (a *ACP) emitCurrentMode(sessionID, modeID string) {
 	})
 }
 
-// sendAvailableCommands advertises the backend's slash-command surface.
+// sendAvailableCommands advertises the backend's slash-command surface,
+// when the backend implements the optional ACPCommandBackend capability.
 func (a *ACP) sendAvailableCommands(sessionID string) {
-	if a.notify == nil || a.backend == nil {
+	cb, ok := a.backend.(ACPCommandBackend)
+	if a.notify == nil || !ok {
 		return
 	}
-	cmds := a.backend.ACPCommands()
+	cmds := cb.ACPCommands()
 	list := make([]map[string]interface{}, 0, len(cmds))
 	for _, c := range cmds {
 		entry := map[string]interface{}{"name": c.Name, "description": c.Description}
@@ -332,8 +341,8 @@ func (a *ACP) prompt(ctx context.Context, params json.RawMessage) (interface{}, 
 			// in the new mode within this same turn.
 			mode = modeID
 			text = rest
-		} else if a.commandAdvertised(token) {
-			out, cmdErr := a.backend.RunCommand(runCtx, p.SessionID, text)
+		} else if cb, isCmd := a.commandAdvertised(token); isCmd {
+			out, cmdErr := cb.RunCommand(runCtx, p.SessionID, text)
 			if cmdErr != nil {
 				a.emitMessageChunk(p.SessionID, i18n.T("acp.command_failed", cmdErr.Error()))
 			} else {
@@ -414,15 +423,20 @@ func splitSlashCommand(text string) (token, rest string) {
 
 // commandAdvertised reports whether token (with leading slash) is in the
 // backend's advertised command surface (mode switches excluded — the caller
-// drains those first).
-func (a *ACP) commandAdvertised(token string) bool {
+// drains those first). Returns the capability so the caller can execute
+// without re-asserting; nil/false when the backend lacks the capability.
+func (a *ACP) commandAdvertised(token string) (ACPCommandBackend, bool) {
+	cb, ok := a.backend.(ACPCommandBackend)
+	if !ok {
+		return nil, false
+	}
 	name := strings.TrimPrefix(token, "/")
-	for _, c := range a.backend.ACPCommands() {
+	for _, c := range cb.ACPCommands() {
 		if c.Name == name {
-			return true
+			return cb, true
 		}
 	}
-	return false
+	return nil, false
 }
 
 // emitMessageChunk sends an ACP session/update with an agent message chunk.

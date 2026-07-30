@@ -2417,6 +2417,7 @@
   "mcp.proxy.tool_not_found": "MCP tool %q not found on any connected server",
   "rpc.session.store_unavailable": "the session store is not available in this ChatCLI instance",
   "acp.mode_switched": "Session mode switched to %s.",
+  "agent.permission.dangerous_exec": "Dangerous command detected in @coder exec: %s",
   "acp.command_unsupported": "The command %s is not available over the IDE (ACP) connection. Type / to see the supported commands.",
   "acp.command_failed": "Command failed: %s",
   "acp.command_empty_output": "(command produced no output)",

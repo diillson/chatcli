@@ -2854,7 +2854,7 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 						if a.isCoderMode && !batchHasError {
 							if dangerous, shellCmd := a.isCoderExecDangerous(toolArgs); dangerous {
 								allowed, asked := a.requestActionPermission(eventTC,
-									fmt.Sprintf("Dangerous command detected in @coder exec: %q", shellCmd))
+									i18n.T("agent.permission.dangerous_exec", shellCmd))
 								if !asked || !allowed {
 									msg := fmt.Sprintf(
 										"BLOCKED: Dangerous command detected in @coder exec: %q. "+
