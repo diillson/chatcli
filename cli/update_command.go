@@ -148,6 +148,27 @@ func methodLabel(m update.Method) string {
 	return i18n.T("update.method." + m.String())
 }
 
+// bootUpdateCheckBudget limita quanto o boot espera pela consulta de release
+// antes de imprimir a welcome screen. Curto de propósito: rede lenta ou
+// ausente não pode segurar a abertura — no timeout, o backgroundUpdateFlow
+// completa o refresh e o aviso drena no turno seguinte. Com cache fresco
+// (≤1 consulta/dia) o custo é zero.
+const bootUpdateCheckBudget = 1500 * time.Millisecond
+
+// preWelcomeUpdateCheck renova o cache de release de forma SÍNCRONA e com
+// orçamento curto, antes da welcome screen ser impressa — é o que permite ao
+// banner anunciar uma release recém-publicada já neste boot, em vez de só no
+// próximo input (aviso drenado) ou no próximo boot. Política off e checagem
+// desabilitada retornam na hora, sem tocar a rede.
+func (cli *ChatCLI) preWelcomeUpdateCheck(ctx context.Context) {
+	if update.ResolveMode() == update.ModeOff {
+		return
+	}
+	ctx, cancel := context.WithTimeout(ctx, bootUpdateCheckBudget)
+	defer cancel()
+	version.RefreshReleaseCacheIfStale(ctx)
+}
+
 // backgroundUpdateFlow roda em goroutine no boot: limpa restos de updates
 // anteriores, renova o cache de release (que alimenta o welcome e o /version
 // offline) e, no modo auto, aplica o update silencioso por staging — o

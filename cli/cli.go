@@ -1112,9 +1112,12 @@ func (cli *ChatCLI) Start(ctx context.Context) {
 	if cli.sessionManager != nil {
 		go cli.sessionManager.CleanExpiredMachineSessions()
 	}
-	// Renova em background o cache de release que alimenta o hash de commit
-	// da tela de boas-vindas (builds go install) e, com CHATCLI_AUTO_UPDATE=
-	// auto, aplica o update silencioso por staging; o boot não espera rede.
+	// Cache de release vencido ganha um refresh síncrono de orçamento curto
+	// para a PRÓPRIA welcome anunciar release nova de imediato; o fluxo em
+	// background cobre o timeout (aviso drenado no turno seguinte), renova o
+	// cache que alimenta o hash de commit de builds go install e, com
+	// CHATCLI_AUTO_UPDATE=auto, aplica o update silencioso por staging.
+	cli.preWelcomeUpdateCheck(ctx)
 	go cli.backgroundUpdateFlow(ctx)
 	cli.PrintWelcomeScreen()
 	cli.printLastSessionNotice()

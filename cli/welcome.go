@@ -138,11 +138,14 @@ func (cli *ChatCLI) PrintWelcomeScreen() {
 	}
 	// Primeiro boot após um auto-update em staging: anuncia a versão nova e
 	// consome o registro. Fora disso, cache indicando release mais nova vira
-	// o convite ao /update — suprimido quando a política é off.
+	// o mesmo convite ao /update do card de versão (linha amarela + comando
+	// do canal) — suprimido quando a política é off. O boot garante cache
+	// atual via preWelcomeUpdateCheck, então uma release recém-publicada
+	// aparece já neste banner, não só no próximo input ou boot.
 	if rec, ok := update.ConsumeStagedRecord(current.Version); ok {
 		fmt.Println("  " + colorize(i18n.T("welcome.update.applied", rec.To), ColorLime))
 	} else if rep.NeedsUpdate && update.ResolveMode() != update.ModeOff {
-		fmt.Println("  " + colorize(i18n.T("welcome.update.available", rep.Latest), ColorYellow))
+		fmt.Print(renderUpdateInvite(rep.Latest))
 		cli.markUpdateAnnounced(rep.Latest)
 	}
 	fmt.Println()

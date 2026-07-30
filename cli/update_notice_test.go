@@ -12,10 +12,12 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/diillson/chatcli/update"
+	"github.com/diillson/chatcli/version"
 )
 
 func TestBackgroundUpdateFlowQueuesNoticeInNotifyMode(t *testing.T) {
@@ -122,6 +124,71 @@ func TestWelcomeAnnouncesUpdateFromExpiredCache(t *testing.T) {
 
 	if !strings.Contains(out, "1.6.0") || !strings.Contains(out, "/update") {
 		t.Fatalf("cache vencido ainda é o último dado conhecido; welcome deve anunciar, saída: %q", out)
+	}
+}
+
+// TestPreWelcomeCheckAnnouncesReleaseOnFirstBoot pina o requisito de
+// imediatismo: sem cache nenhum (primeiro boot após uma release), o check
+// síncrono pré-welcome popula o cache e a PRÓPRIA welcome anuncia a versão
+// nova com o convite completo do /version — linha amarela + comando do canal.
+// Antes, o usuário só descobria no próximo input ou no próximo boot.
+func TestPreWelcomeCheckAnnouncesReleaseOnFirstBoot(t *testing.T) {
+	cli := minimalCLI(t)
+	withUpdateSeams(t, update.MethodHomebrew, "1.5.0", "1.6.0", nil)
+
+	cli.preWelcomeUpdateCheck(context.Background())
+	out := captureStdout(t, func() { cli.PrintWelcomeScreen() })
+
+	if !strings.Contains(out, "1.6.0") || !strings.Contains(out, "/update") {
+		t.Fatalf("welcome deve anunciar a release recém-descoberta, saída: %q", out)
+	}
+	if !strings.Contains(out, "brew upgrade diillson/chatcli/chatcli") {
+		t.Fatalf("welcome deve mostrar o comando do canal de instalação, saída: %q", out)
+	}
+
+	// A welcome anunciou — o fluxo em background não pode repetir no drain.
+	cli.backgroundUpdateFlow(context.Background())
+	if drain := captureStdout(t, cli.drainUpdateNotice); strings.TrimSpace(drain) != "" {
+		t.Fatalf("aviso mid-session seria redundante após o banner, saída: %q", drain)
+	}
+}
+
+// countingFetch instala um contador sobre o seam de fetch de release; o
+// cleanup do withUpdateSeams restaura o original.
+func countingFetch(t *testing.T) *atomic.Int32 {
+	t.Helper()
+	calls := &atomic.Int32{}
+	orig := version.FetchLatestReleaseImpl
+	version.FetchLatestReleaseImpl = func(ctx context.Context) (version.ReleaseInfo, error) {
+		calls.Add(1)
+		return orig(ctx)
+	}
+	return calls
+}
+
+func TestPreWelcomeCheckSkipsNetworkWhenOff(t *testing.T) {
+	cli := minimalCLI(t)
+	withUpdateSeams(t, update.MethodGoInstall, "1.5.0", "1.6.0", nil)
+	t.Setenv("CHATCLI_AUTO_UPDATE", "off")
+	calls := countingFetch(t)
+
+	cli.preWelcomeUpdateCheck(context.Background())
+
+	if calls.Load() != 0 {
+		t.Fatalf("política off não pode custar rede no boot, fetches: %d", calls.Load())
+	}
+}
+
+func TestPreWelcomeCheckFreshCacheSkipsNetwork(t *testing.T) {
+	cli := minimalCLI(t)
+	withUpdateSeams(t, update.MethodGoInstall, "1.5.0", "1.6.0", nil)
+
+	cli.preWelcomeUpdateCheck(context.Background()) // popula o cache
+	calls := countingFetch(t)
+	cli.preWelcomeUpdateCheck(context.Background())
+
+	if calls.Load() != 0 {
+		t.Fatalf("cache fresco dispensa nova consulta no boot, fetches: %d", calls.Load())
 	}
 }
 
