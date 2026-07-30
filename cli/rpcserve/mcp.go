@@ -9,6 +9,8 @@ import (
 	"context"
 	"encoding/json"
 	"strings"
+
+	"github.com/diillson/chatcli/cli/agentevents"
 )
 
 // mcpSupportedVersions are the MCP revisions this server can speak, newest
@@ -30,6 +32,9 @@ type RunOpts struct {
 	Model    string
 	Quality  map[string]string
 	Emit     func(string)
+	// Events, when non-nil, installs a structured event sink for the run
+	// (ACP structured bridge); it takes precedence over Emit.
+	Events agentevents.Sink
 	// Plain requests the bare chat passthrough (no memory/contexts/skills
 	// enrichment, no compaction) — the pre-parity ask_chatcli behavior, kept
 	// as an escape hatch for callers that want a cheap raw LLM turn.

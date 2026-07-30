@@ -6,10 +6,55 @@
 package cli
 
 import (
+	"strings"
+
 	"github.com/diillson/chatcli/cli/agent"
 	"github.com/diillson/chatcli/cli/plugins"
 	"github.com/diillson/chatcli/models"
 )
+
+// toolCallNamesLabel names a batch for the model-facing feedback message
+// using the REAL tools invoked ("@coder", "@coder, @file"). The label lands
+// verbatim inside "The tool '%s' was executed…", and models happily narrate
+// it back to the user — so it must never be an internal placeholder.
+func toolCallNamesLabel(toolCalls []agent.ToolCall) string {
+	seen := map[string]bool{}
+	names := make([]string, 0, len(toolCalls))
+	for _, tc := range toolCalls {
+		name := strings.TrimSpace(tc.Name)
+		if name == "" || seen[name] {
+			continue
+		}
+		seen[name] = true
+		names = append(names, name)
+	}
+	if len(names) == 0 {
+		return "@coder"
+	}
+	return strings.Join(names, ", ")
+}
+
+// commandBlockNamesLabel names an ```execute``` block batch the same way,
+// from the block languages ("shell", "shell, git").
+func commandBlockNamesLabel(blocks []CommandBlock) string {
+	seen := map[string]bool{}
+	names := make([]string, 0, len(blocks))
+	for _, b := range blocks {
+		lang := strings.TrimSpace(b.Language)
+		if lang == "" {
+			lang = "shell"
+		}
+		if seen[lang] {
+			continue
+		}
+		seen[lang] = true
+		names = append(names, lang)
+	}
+	if len(names) == 0 {
+		return "shell"
+	}
+	return strings.Join(names, ", ")
+}
 
 // batchContainsRecall reports whether any tool call in a batch invoked @recall.
 // Recall returns a previously-compressed original verbatim, so a batch that

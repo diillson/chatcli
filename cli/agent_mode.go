@@ -29,6 +29,7 @@ import (
 	"github.com/diillson/chatcli/cli/agent/quality"
 	"github.com/diillson/chatcli/cli/agent/toolguard"
 	"github.com/diillson/chatcli/cli/agent/workers"
+	"github.com/diillson/chatcli/cli/agentevents"
 	"github.com/diillson/chatcli/cli/coder"
 	"github.com/diillson/chatcli/cli/hooks"
 	"github.com/diillson/chatcli/cli/mcp"
@@ -148,6 +149,14 @@ type AgentMode struct {
 	// Kept on the struct (not a local) so debug commands and tests can
 	// inspect it after a turn completes.
 	lastTurnToolResults []agent.ToolResult
+
+	// events is the structured event sink for the CURRENT run, resolved from
+	// cli.agentEventSink at the top of processAIResponseAndAct. Nil for every
+	// interactive/gateway/scheduler run — all emit helpers are no-ops then,
+	// keeping those paths byte-identical. eventToolSeq mints run-unique tool
+	// call ids for the sink channel.
+	events       agentevents.Sink
+	eventToolSeq int
 }
 
 // splitStdinChunk consumes raw bytes from a stdin Read() call and returns
@@ -1484,6 +1493,13 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 	a.startStdinReader()
 	defer a.stopStdinReader()
 
+	// Structured event sink for protocol frontends (ACP). Resolved per call
+	// and restored on exit because this loop is re-entrant (see cancelSignal
+	// note above) — an inner turn must not clear the outer turn's sink.
+	prevEvents := a.events
+	a.events = a.cli.agentEventSink
+	defer func() { a.events = prevEvents }()
+
 	renderer := agent.NewUIRenderer(a.logger)
 
 	// Helper para construir o histórico com a "âncora" (System Prompt reforçado por turno).
@@ -2196,6 +2212,7 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 		isMinimal := renderer.IsMinimal()
 
 		if strings.TrimSpace(reasoning) != "" {
+			a.emitThought(reasoning)
 			switch {
 			case isCompact:
 				renderer.CompactMultiLine("●", "PLANO", reasoning, agent.ColorCyan, 5)
@@ -2210,6 +2227,7 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 			}
 		}
 		if strings.TrimSpace(explanation) != "" {
+			a.emitThought(explanation)
 			switch {
 			case isCompact:
 				renderer.CompactLine("◆", "NOTA", explanation, agent.ColorLime)
@@ -2224,6 +2242,7 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 			if !a.isCoderMode || a.taskTracker == nil || a.taskTracker.GetPlan() == nil {
 				return
 			}
+			a.emitPlan()
 			progress := a.taskTracker.FormatProgress()
 			if strings.TrimSpace(progress) == "" {
 				return
@@ -2248,6 +2267,10 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 			// ReAct/coder path sets this here; the legacy agent one-shot sets it
 			// in RunOnce. Harmless for interactive runs, which never read it.
 			a.cli.lastAgentReply = strings.TrimSpace(remaining)
+			// Structured sinks receive the prose regardless of the terminal
+			// rendering decision below — under ACP the run is unattended, so
+			// without this the final answer never reached the client.
+			a.emitMessage(remaining)
 			switch {
 			case a.cli.unattended:
 				// Gateway/unattended: the captured lastAgentReply is delivered
@@ -2567,6 +2590,7 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 						if action == coder.ActionDeny {
 							msg := "AÇÃO BLOQUEADA (Regra de Segurança)"
 							renderError(msg)
+							a.emitBlockedTool(tc.Name, tc.Args, msg)
 							a.cli.history = append(a.cli.history, models.Message{Role: "user", Content: "ERRO: " + msg})
 							batchHasError = true
 							break
@@ -2671,6 +2695,21 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 				toolArgs, parseErr := parseToolArgsWithJSON(normalizedArgsStr)
 				var toolOutput string
 				var execErr error
+
+				// Structured event: tool call entering execution. The title
+				// mirrors the spinner label logic (DescribeCall when the
+				// plugin offers one) so IDE clients see "Reading: main.go"
+				// instead of a raw args string. eventTC is completed by the
+				// matching emitToolEnd at the structured-capture point below.
+				eventTitle := defaultSpinnerLabel(toolName, toolArgs)
+				if a.events != nil {
+					if p, ok := a.cli.pluginManager.GetPlugin(toolName); ok && p != nil {
+						if d := plugins.DescribeCall(p, toolArgs); d != "" {
+							eventTitle = d
+						}
+					}
+				}
+				eventTC := a.emitToolStart(toolName, eventTitle, normalizedArgsStr, toolArgs)
 
 				// --- Preparação da Execução ---
 				// MCP tools handle their own arg parsing (JSON), so check them BEFORE parseErr
@@ -2808,18 +2847,31 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 						// --- DANGEROUS EXEC GUARD ---
 						// Even if policy says "allow", NEVER auto-execute dangerous commands.
 						// This catches cases where user clicked "Allow Always" for @coder exec.
+						// When a structured sink provides a PermissionRequester (ACP), the
+						// human decides through the client's native dialog instead — an
+						// explicit approval there runs the command; anything else keeps
+						// the block exactly as before.
 						if a.isCoderMode && !batchHasError {
 							if dangerous, shellCmd := a.isCoderExecDangerous(toolArgs); dangerous {
-								msg := fmt.Sprintf(
-									"BLOCKED: Dangerous command detected in @coder exec: %q. "+
-										"This command is forbidden regardless of policy rules. "+
-										"DO NOT retry this command.", shellCmd)
-								renderError(msg)
-								a.cli.history = append(a.cli.history, models.Message{
-									Role: "user", Content: "SECURITY BLOCK: " + msg,
-								})
-								batchHasError = true
-								execErr = fmt.Errorf("dangerous command blocked: %s", shellCmd)
+								allowed, asked := a.requestActionPermission(eventTC,
+									i18n.T("agent.permission.dangerous_exec", shellCmd))
+								if !asked || !allowed {
+									msg := fmt.Sprintf(
+										"BLOCKED: Dangerous command detected in @coder exec: %q. "+
+											"This command is forbidden regardless of policy rules. "+
+											"DO NOT retry this command.", shellCmd)
+									if asked {
+										msg = fmt.Sprintf(
+											"BLOCKED: Dangerous command %q was DENIED by the user. "+
+												"DO NOT retry this command.", shellCmd)
+									}
+									renderError(msg)
+									a.cli.history = append(a.cli.history, models.Message{
+										Role: "user", Content: "SECURITY BLOCK: " + msg,
+									})
+									batchHasError = true
+									execErr = fmt.Errorf("dangerous command blocked: %s", shellCmd)
+								}
 							}
 						}
 						// --- END DANGEROUS EXEC GUARD ---
@@ -3086,6 +3138,12 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 				structured.Duration = time.Since(toolStartTime)
 				turnToolResults = append(turnToolResults, structured)
 
+				// Structured event: terminal state for this tool call, using
+				// the LLM-facing output (already compressed+truncated above) —
+				// never displayForHuman, whose streamed copy the sink client
+				// already renders once.
+				a.emitToolEnd(eventTC, toolOutput, execErr, structured.ErrorCode, structured.Duration)
+
 				// Feed the per-tool failure guard. Guidance (if any) is
 				// injected into history after the batch results below.
 				if toolGuard != nil {
@@ -3192,7 +3250,11 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 				// Legacy path: text-mode dispatch or partially-failed batch.
 				// One user message carries everything; provider adapters
 				// see plain text without tool_result block semantics.
-				feedbackForAI := i18n.T("agent.feedback.tool_output", "batch_execution", batchOutputBuilder.String())
+				// The label lists the REAL tool names: an internal
+				// placeholder ("batch_execution") leaked into the model's
+				// visible prose — it would narrate the made-up tool name
+				// back to the user.
+				feedbackForAI := i18n.T("agent.feedback.tool_output", toolCallNamesLabel(toolCalls), batchOutputBuilder.String())
 				if a.taskTracker != nil && a.taskTracker.NeedsReplanning() {
 					feedbackForAI += "\n\nATENÇÃO: Múltiplas falhas detectadas. Crie um NOVO <reasoning> com uma lista replanejada de tarefas, considerando os erros anteriores."
 				}
@@ -3234,6 +3296,21 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 					Content: "No modo /coder, não use blocos ```execute``` nem comandos shell. " +
 						"Use <reasoning> e então emita <tool_call name=\"@coder\" ... />.",
 				})
+				continue
+			}
+
+			// Unattended runs (ACP, MCP agent_task) have no human at the menu:
+			// handleCommandBlocks would block forever reading a dead stdin —
+			// worse, that stdin is the JSON-RPC channel. Execute the blocks
+			// headless (danger gate + optional IDE permission dialog inside)
+			// and feed the results back so the ReAct loop keeps going.
+			if a.cli.unattended {
+				feedback := a.executeCommandBlocksUnattended(ctx, commandBlocks)
+				a.cli.history = append(a.cli.history, models.Message{
+					Role:    "user",
+					Content: i18n.T("agent.feedback.tool_output", commandBlockNamesLabel(commandBlocks), feedback),
+				})
+				showTurnStats()
 				continue
 			}
 
