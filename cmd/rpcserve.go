@@ -111,6 +111,7 @@ func runRPC(kind string, mgr manager.LLMManager, logger *zap.Logger) error {
 		srv := rpcserve.NewServer(os.Stdin, os.Stdout, a.Handle)
 		defer quarantineStdout(logger)()
 		a.SetNotifier(srv.Notify)
+		a.SetRequester(srv.Request)
 		logger.Info("acp: serving over stdio")
 		return srv.Serve(ctx)
 	default: // mcp
@@ -657,7 +658,28 @@ func (b *rpcBackend) ProvidersJSON() (string, error) {
 
 // toRunOpts converts the wire options into the CLI run options.
 func toRunOpts(session string, o rpcserve.RunOpts) cli.RPCRunOpts {
-	return cli.RPCRunOpts{Provider: o.Provider, Model: o.Model, Quality: o.Quality, Emit: o.Emit, Session: session}
+	return cli.RPCRunOpts{Provider: o.Provider, Model: o.Model, Quality: o.Quality, Emit: o.Emit, Events: o.Events, Session: session}
+}
+
+// ACPCommands lists the slash commands advertised to ACP clients.
+func (b *rpcBackend) ACPCommands() []rpcserve.CommandInfo {
+	if b.cli == nil {
+		return nil
+	}
+	infos := b.cli.ListACPCommands()
+	out := make([]rpcserve.CommandInfo, 0, len(infos))
+	for _, c := range infos {
+		out = append(out, rpcserve.CommandInfo{Name: c.Name, Description: c.Description, InputHint: c.InputHint})
+	}
+	return out
+}
+
+// RunCommand executes one allowlisted slash command headless for ACP.
+func (b *rpcBackend) RunCommand(ctx context.Context, session, line string) (string, error) {
+	if b.cli == nil {
+		return "", errCLIUnavailable
+	}
+	return b.cli.RunSlashCommandRPC(ctx, line)
 }
 
 type errCLI string

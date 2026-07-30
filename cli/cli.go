@@ -31,6 +31,7 @@ import (
 	"github.com/diillson/chatcli/cli/agent/proc"
 	"github.com/diillson/chatcli/cli/agent/quality/lessonq"
 	"github.com/diillson/chatcli/cli/agent/workers"
+	"github.com/diillson/chatcli/cli/agentevents"
 	"github.com/diillson/chatcli/cli/coder"
 	"github.com/diillson/chatcli/cli/compress"
 	"github.com/diillson/chatcli/cli/hooks"
@@ -191,9 +192,14 @@ type ChatCLI struct {
 	unattended           bool        // when true, the agent runs without any interactive confirmation (gateway daemon)
 	dangerBlock          bool        // when true (with unattended), dangerous commands are declined in-band instead of auto-approved (MCP server opt-in)
 	lastAgentReply       string      // last one-shot agent prose answer (command blocks stripped), captured for unattended callers
-	interactionState     InteractionState
-	mu                   sync.Mutex
-	operationCancel      context.CancelFunc
+	// agentEventSink, when set, receives structured events from the agent/
+	// coder ReAct loop (ACP structured bridge). Installed per-run by
+	// runLoopRPC under rpcStdoutMu and cleared on exit; never set by the
+	// interactive REPL, gateway or scheduler paths.
+	agentEventSink   agentevents.Sink
+	interactionState InteractionState
+	mu               sync.Mutex
+	operationCancel  context.CancelFunc
 	// sessionCtx is the process/session-lifetime context, seeded in
 	// NewChatCLI and refreshed by Start. Interactive slash-command handlers
 	// that have no per-request context of their own (e.g. /nextchunk) derive

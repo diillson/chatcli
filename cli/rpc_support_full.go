@@ -45,6 +45,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/diillson/chatcli/cli/agentevents"
 	"github.com/diillson/chatcli/cli/mcp"
 	"github.com/diillson/chatcli/cli/plugins"
 	"github.com/diillson/chatcli/i18n"
@@ -338,6 +339,11 @@ type RPCRunOpts struct {
 	// Emit, when non-nil, receives the rendered transcript line by line
 	// as the loop works (ACP streaming).
 	Emit func(string)
+	// Events, when non-nil, installs a structured event sink for the run
+	// (ACP structured bridge). It takes precedence over Emit: the rendered
+	// transcript is captured and discarded, and the client consumes typed
+	// events plus the returned final answer instead of scraped lines.
+	Events agentevents.Sink
 	// Session scopes the run's /context attachments and knowledge bases
 	// (ctxmgr session id). Empty keeps the process default.
 	Session string
@@ -364,12 +370,38 @@ func (cli *ChatCLI) RunCoderRPC(ctx context.Context, task string, o RPCRunOpts) 
 // the save/mutate/restore of shared state below cannot interleave with
 // another captured run.
 func (cli *ChatCLI) runLoopRPC(ctx context.Context, o RPCRunOpts, fn func(context.Context) error) (string, error) {
-	out, err := captureStreaming(o.Emit, func() error {
+	// Structured runs: the line scraper is off (emit=nil discards the
+	// rendered transcript) and the sink carries everything typed instead.
+	emit := o.Emit
+	if o.Events != nil {
+		emit = nil
+	}
+	// finalReply is captured INSIDE the closure — i.e. while rpcStdoutMu is
+	// still held — because the moment captureStreaming returns, another
+	// queued run may acquire the lock and reset cli.lastAgentReply; reading
+	// the shared field afterwards could observe the other run's state.
+	var finalReply string
+	out, err := captureStreaming(emit, func() error {
 		restore, oerr := cli.applyRPCOverrides(ctx, o)
 		if oerr != nil {
 			return oerr
 		}
 		defer restore()
+		// Install the structured sink for this run only. Safe without extra
+		// locking: captureStreaming holds rpcStdoutMu, which serializes every
+		// captured run process-wide, and the interactive REPL never sets it.
+		// lastAgentReply is reset ONLY on the structured path so the value
+		// left standing is provably this run's final answer; the gateway
+		// path (Events==nil) keeps its historical semantics untouched.
+		if o.Events != nil {
+			prevSink := cli.agentEventSink
+			cli.agentEventSink = o.Events
+			cli.lastAgentReply = ""
+			defer func() {
+				cli.agentEventSink = prevSink
+				finalReply = strings.TrimSpace(cli.lastAgentReply)
+			}()
+		}
 		// Scope the run to the caller's session so /context attachments and
 		// knowledge bases resolve like they would in the interactive REPL.
 		if o.Session != "" {
@@ -381,6 +413,12 @@ func (cli *ChatCLI) runLoopRPC(ctx context.Context, o RPCRunOpts, fn func(contex
 	})
 	if err != nil {
 		return out, err
+	}
+	// Structured runs return the clean final answer when the loop captured
+	// one; the discarded transcript is only a fallback for edge turns that
+	// produced no prose.
+	if o.Events != nil && finalReply != "" {
+		return finalReply, nil
 	}
 	if out == "" {
 		out = "(no textual output)"
