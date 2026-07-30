@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.175.0](https://github.com/diillson/chatcli/compare/v1.174.0...v1.175.0) (2026-07-30)
+
+
+### Features
+
+* **cli:** default to coder mode guidance and scrub Devin reply sentinels ([d36623a](https://github.com/diillson/chatcli/commit/d36623a56b01763176b1edfcbc06367a4d2c425b))
+
 ## [1.174.0](https://github.com/diillson/chatcli/compare/v1.173.0...v1.174.0) (2026-07-30)
 
 
