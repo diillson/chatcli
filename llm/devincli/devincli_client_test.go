@@ -213,6 +213,44 @@ func TestExtractReply_TakesLastSentinelPair(t *testing.T) {
 	assert.Equal(t, "final answer", extractReply(raw))
 }
 
+// TestExtractReply_NeverLeaksSentinels pins the anti-leak contract: when the
+// model mangles the framing (end marker without a begin, begin fenced so it
+// no longer matches, marker mid-text), no path may return a literal sentinel
+// — a leaked marker enters the history and self-reinforces on every
+// subsequent stateless turn.
+func TestExtractReply_NeverLeaksSentinels(t *testing.T) {
+	cases := map[string]string{
+		"end without begin":     "the answer\n" + replyEnd,
+		"begin fenced, end raw": "```\n" + replyBegin + "\n```\nthe answer\n" + replyEnd,
+		"begin without end":     replyBegin + "\nthe answer",
+		"doubled end marker":    replyBegin + "\nthe answer\n" + replyEnd + replyEnd,
+		"marker mid-text":       replyBegin + "\nthe " + replyBegin + "answer\n" + replyEnd,
+	}
+	for name, raw := range cases {
+		got := extractReply(raw)
+		assert.NotContains(t, got, replyBegin, name)
+		assert.NotContains(t, got, replyEnd, name)
+		assert.Contains(t, got, "answer", name)
+	}
+}
+
+// TestBuildConversation_ScrubsLeakedSentinelsFromHistory pins the
+// decontamination contract: a sentinel that leaked into a stored assistant
+// message (from a pre-fix turn or a mangled framing) must not be replayed in
+// the flattened prompt, where the model would imitate it every turn after.
+func TestBuildConversation_ScrubsLeakedSentinelsFromHistory(t *testing.T) {
+	history := []models.Message{
+		{Role: "assistant", Content: "previous reply\n" + replyEnd},
+		{Role: "user", Content: "quoted " + replyBegin + " marker"},
+	}
+	flat := buildConversation(history, "next question")
+	// Exactly the two occurrences from the transport preamble's framing
+	// instruction — none from the replayed history.
+	assert.Equal(t, 1, strings.Count(flat, replyBegin))
+	assert.Equal(t, 1, strings.Count(flat, replyEnd))
+	assert.Contains(t, flat, "Assistant: previous reply")
+}
+
 func TestBuildConversation_DoesNotDuplicateLastUserTurn(t *testing.T) {
 	history := []models.Message{{Role: "user", Content: "same prompt"}}
 	flat := buildConversation(history, "same prompt")
