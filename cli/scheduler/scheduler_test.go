@@ -156,8 +156,13 @@ func TestScheduler_DAG_DependsOn(t *testing.T) {
 	_ = s.Start(ctx)
 	defer s.DrainAndShutdown(2 * time.Second)
 
+	// The parent's fire delay must comfortably outlast the child's Enqueue
+	// and the first Query below: with 50ms, a loaded runner (race detector,
+	// shared CI) let the parent COMPLETE before the child existed, so the
+	// dependency was already satisfied and the child was born pending — the
+	// "child status initial: pending (want blocked)" flake.
 	parent := NewJob("p", Owner{Kind: OwnerUser, ID: "u"},
-		Schedule{Kind: ScheduleRelative, Relative: 50 * time.Millisecond},
+		Schedule{Kind: ScheduleRelative, Relative: 500 * time.Millisecond},
 		Action{Type: ActionType("fake_act")})
 	pc, err := s.Enqueue(ctx, parent)
 	if err != nil {
@@ -177,7 +182,7 @@ func TestScheduler_DAG_DependsOn(t *testing.T) {
 		t.Fatalf("child status initial: %s (want blocked)", q.Status)
 	}
 	// Wait for both to complete.
-	deadline := time.Now().Add(3 * time.Second)
+	deadline := time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
 		pq, _ := s.Query(pc.ID)
 		cq, _ := s.Query(cc.ID)
