@@ -737,7 +737,10 @@ func (m *LLMManagerImpl) configurarOpenRouterClient(maxRetries int, initialBacko
 func (m *LLMManagerImpl) configurarDevinCLIClient(maxRetries int, initialBackoff time.Duration) {
 	binPath, err := devincli.ResolveBinary()
 	if err != nil {
-		m.logger.Info(i18n.T("llm.devincli.not_available"), zap.Error(err))
+		// Warn, não Info: em servidores ACP/MCP spawnados por IDE o PATH é o
+		// mínimo da sessão GUI e este é o único diagnóstico do sumiço do
+		// provider — precisa aparecer no app.log em nível padrão.
+		m.logger.Warn(i18n.T("llm.devincli.not_available"), zap.Error(err))
 		return
 	}
 	m.logger.Info(i18n.T("llm.info.configuring_provider", "Devin CLI"), zap.String("bin", binPath))
@@ -881,7 +884,8 @@ func (m *LLMManagerImpl) GetStackSpotAgentID() string {
 }
 
 // RefreshProviders re-checks auth credentials and registers/updates providers.
-// Called after an OAuth login or token refresh at runtime.
+// Called after an OAuth login or token refresh at runtime, and after env
+// reloads that may change provider availability.
 // Closes the cached TokenProviders so the next call resolves from the fresh
 // store contents and starts a new background refresh goroutine.
 func (m *LLMManagerImpl) RefreshProviders() {
@@ -902,6 +906,11 @@ func (m *LLMManagerImpl) RefreshProviders() {
 	m.configurarMiniMaxClient(maxRetries, initialBackoff)
 	m.configurarMoonshotClient(maxRetries, initialBackoff)
 	m.configurarOpenRouterClient(maxRetries, initialBackoff)
+
+	// Binary-gated provider: re-probe so a runtime env fix (DEVIN_CLI_PATH is
+	// reloadable) surfaces DEVIN without a restart. Like the OAuth set above,
+	// a failed probe preserves an existing registration.
+	m.configurarDevinCLIClient(maxRetries, initialBackoff)
 }
 
 // CreateClientWithKey creates an LLM client using a caller-provided API key
