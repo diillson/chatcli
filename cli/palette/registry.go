@@ -90,6 +90,7 @@ var rootCommands = []RootCommand{
 	{"/switch", CatModel, "complete.root.switch"},
 	{"/provider", CatModel, "complete.root.provider"},
 	{"/model", CatModel, "complete.root.model"},
+	{"/model-image", CatModel, "complete.root.model_image"},
 	{"/max-tokens", CatModel, "complete.root.maxtokens"},
 
 	// ── Session ─────────────────────────────────────────────────────────
@@ -101,6 +102,7 @@ var rootCommands = []RootCommand{
 	// ── Context ─────────────────────────────────────────────────────────
 	{"/context", CatContext, "complete.root.context"},
 	{"/memory", CatContext, "complete.root.memory"},
+	{"/graph", CatContext, "complete.root.graph"},
 
 	// ── Agent / build ───────────────────────────────────────────────────
 	{"/agent", CatAgent, "complete.root.agent"},
@@ -137,6 +139,7 @@ var rootCommands = []RootCommand{
 	{"/parked", CatScheduler, "help.command.parked"},
 	{"/resume", CatScheduler, "help.command.resume"},
 	{"/cancel-park", CatScheduler, "help.command.cancel_park"},
+	{"/park-note", CatScheduler, "help.command.park_note"},
 
 	// ── System ──────────────────────────────────────────────────────────
 	{"/config", CatSystem, "complete.config.root_desc"},

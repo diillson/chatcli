@@ -2641,6 +2641,8 @@
   "complete.root.rewind": "Rewind to a previous conversation checkpoint",
   "complete.root.memory": "View/load memory notes (today, yesterday, week, load <date>, longterm, list)",
   "complete.root.graph": "Visualize the knowledge graph as an image (/graph or /graph <subject>)",
+  "complete.update.check": "Only check for a new release and show its notes, without applying",
+  "complete.graph.full": "Render the full knowledge graph",
   "graph.cmd.empty": "The knowledge graph is empty so far.",
   "graph.cmd.no_node": "No graph node found for %q.",
   "graph.cmd.rendered": "Rendered the knowledge graph:",
