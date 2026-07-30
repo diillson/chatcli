@@ -352,17 +352,19 @@ func (m *MCP) toolDefinitions() []map[string]interface{} {
 				"annotations": map[string]interface{}{"readOnlyHint": true},
 			},
 			{
-				"name": "agent_task",
-				"description": "Run ChatCLI's full agent (ReAct) loop on a task. The agent autonomously uses every built-in tool " +
-					"(files, shell, web, memory, knowledge, MCP servers ChatCLI is connected to) and returns the transcript. " +
+				"name": "coder_task",
+				"description": "Run ChatCLI's full agent loop on a task — the RECOMMENDED tool for anything that needs autonomous work. " +
+					"It reads/edits files, runs commands, and uses every built-in tool (web, memory, knowledge, MCP servers ChatCLI is connected to), then returns the transcript. " +
 					"Supports per-call provider/model routing and quality-harness toggles (plan, refine, verify, reflexion, convergence, lessons).",
-				"inputSchema": objSchema(agentProps, "task"),
+				"inputSchema": objSchema(coderProps, "task"),
 				"annotations": map[string]interface{}{"readOnlyHint": false},
 			},
 			{
-				"name":        "coder_task",
-				"description": "Run ChatCLI's coder loop on a task (reading/editing code and running commands in the workspace). Supports per-call provider/model routing and quality toggles.",
-				"inputSchema": objSchema(coderProps, "task"),
+				"name": "agent_task",
+				"description": "Run ChatCLI's command-oriented agent (ReAct) loop, which works by proposing shell commands step by step. " +
+					"Prefer coder_task for general work; use this only when the caller specifically wants the command-suggestion style loop. " +
+					"Supports per-call provider/model routing and quality-harness toggles (plan, refine, verify, reflexion, convergence, lessons).",
+				"inputSchema": objSchema(agentProps, "task"),
 				"annotations": map[string]interface{}{"readOnlyHint": false},
 			},
 		}...)

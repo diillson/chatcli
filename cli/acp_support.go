@@ -61,9 +61,9 @@ var acpCommandAllow = map[string]bool{
 // CommandHandler. Built per call — i18n resolves at runtime, not init.
 func acpModeCommands() []ACPCommandInfo {
 	return []ACPCommandInfo{
+		{Name: "coder", Description: i18n.T("acp.command.coder_desc"), InputHint: i18n.T("acp.command.task_hint")},
 		{Name: "chat", Description: i18n.T("acp.command.chat_desc")},
 		{Name: "agent", Description: i18n.T("acp.command.agent_desc"), InputHint: i18n.T("acp.command.task_hint")},
-		{Name: "coder", Description: i18n.T("acp.command.coder_desc"), InputHint: i18n.T("acp.command.task_hint")},
 	}
 }
 

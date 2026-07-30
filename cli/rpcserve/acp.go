@@ -55,12 +55,15 @@ type ACPCommandBackend interface {
 // acpModes are the session modes advertised to the client. The mode decides
 // which engine a session/prompt drives.
 var acpModes = []map[string]interface{}{
+	{"id": "coder", "name": "Coder", "description": "Full agent loop with every ChatCLI tool: read/edit files, run commands, web, memory, MCP. Recommended for any task."},
 	{"id": "chat", "name": "Chat", "description": "Direct model conversation, no tools."},
-	{"id": "agent", "name": "Agent", "description": "Full autonomous agent (ReAct) loop with every ChatCLI tool."},
-	{"id": "coder", "name": "Coder", "description": "Coding-focused agent loop: read/edit files and run commands in the workspace."},
+	{"id": "agent", "name": "Agent", "description": "Command-oriented loop that proposes shell commands step by step."},
 }
 
-const acpDefaultMode = "agent"
+// acpDefaultMode is "coder" on purpose: the coder loop covers conversation
+// AND autonomous tool work, so it serves chat-like and agent-like prompts
+// alike; the agent mode remains as an opt-in for step-by-step command flows.
+const acpDefaultMode = "coder"
 
 // acpSession tracks one client session: its mode and, while a prompt is in
 // flight, the cancel function session/cancel fires.

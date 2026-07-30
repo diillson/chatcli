@@ -21,7 +21,6 @@ var tipKeys = []string{
 	"tip.new_session",
 	"tip.view_config",
 	"tip.cancel_request",
-	"tip.agent_mode",
 	"tip.agent_toggle_view",
 	"tip.agent_output_actions",
 	"tip.agent_last_result",
