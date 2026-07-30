@@ -33,6 +33,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -87,9 +88,10 @@ var ansiEscapes = regexp.MustCompile(`\x1b(?:\[[0-9;?]*[a-zA-Z]|\][^\x07\x1b]*(?
 var runMu sync.Mutex
 
 // ResolveBinary locates the Devin CLI: DEVIN_CLI_PATH when set (expanded,
-// must exist), otherwise PATH lookup of the default binary name. The manager
-// gates provider registration on this, so a machine without the CLI simply
-// doesn't list DEVIN — same UX as a provider without credentials.
+// must exist — an explicit path never falls back), otherwise PATH lookup of
+// the default binary name, otherwise a probe of well-known install dirs. The
+// manager gates provider registration on this, so a machine without the CLI
+// simply doesn't list DEVIN — same UX as a provider without credentials.
 func ResolveBinary() (string, error) {
 	if custom := strings.TrimSpace(os.Getenv("DEVIN_CLI_PATH")); custom != "" {
 		expanded, err := utils.ExpandPath(custom)
@@ -109,7 +111,61 @@ func ResolveBinary() (string, error) {
 		}
 		return expanded, nil
 	}
-	return exec.LookPath(config.DevinCLIDefaultBinary)
+	found, lookErr := exec.LookPath(config.DevinCLIDefaultBinary)
+	if lookErr == nil {
+		return found, nil
+	}
+	if probed, ok := probeKnownDirs(config.DevinCLIDefaultBinary, knownInstallDirs()); ok {
+		return probed, nil
+	}
+	return "", lookErr
+}
+
+// knownInstallDirs lists the well-known install locations probed when the
+// PATH lookup misses. The ACP/MCP servers are spawned by IDEs and other GUI
+// hosts that inherit the minimal session PATH (on macOS, launchd's
+// /usr/bin:/bin:…) instead of the user's shell profile, so a devin installed
+// via Homebrew or npm is visible in the terminal REPL but not to the server —
+// probing the standard install dirs keeps the provider available in both
+// without per-IDE env plumbing. Variable so tests can substitute the dirs.
+var knownInstallDirs = func() []string {
+	if runtime.GOOS == "windows" {
+		var dirs []string
+		if lad := os.Getenv("LOCALAPPDATA"); lad != "" {
+			dirs = append(dirs, filepath.Join(lad, "Programs", "devin"))
+		}
+		if ad := os.Getenv("APPDATA"); ad != "" {
+			dirs = append(dirs, filepath.Join(ad, "npm"))
+		}
+		if home, err := os.UserHomeDir(); err == nil {
+			dirs = append(dirs, filepath.Join(home, "scoop", "shims"))
+		}
+		return dirs
+	}
+	var dirs []string
+	if home, err := os.UserHomeDir(); err == nil {
+		dirs = append(dirs,
+			filepath.Join(home, ".local", "bin"),
+			filepath.Join(home, "bin"),
+			filepath.Join(home, ".devin", "bin"),
+		)
+	}
+	return append(dirs, "/opt/homebrew/bin", "/usr/local/bin", "/home/linuxbrew/.linuxbrew/bin")
+}
+
+// probeKnownDirs returns the first dir whose entry resolves to an executable.
+// exec.LookPath on a path containing a separator validates that exact file
+// (applying PATHEXT on Windows), so the same probe works on every platform.
+func probeKnownDirs(name string, dirs []string) (string, bool) {
+	for _, dir := range dirs {
+		if dir == "" {
+			continue
+		}
+		if p, err := exec.LookPath(filepath.Join(dir, name)); err == nil {
+			return p, true
+		}
+	}
+	return "", false
 }
 
 // Client implements client.LLMClient over the local Devin CLI subprocess.

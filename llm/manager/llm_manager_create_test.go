@@ -205,3 +205,46 @@ func TestDevinCLIProvider_AbsentBinary(t *testing.T) {
 		}
 	}
 }
+
+// TestDevinCLIProvider_RefreshRecoversAfterEnvFix pins the runtime recovery
+// path: a manager booted without the devin binary (e.g. an ACP/MCP server
+// spawned with the minimal GUI PATH) must list DEVIN after the env is fixed
+// and RefreshProviders re-probes — no restart required.
+func TestDevinCLIProvider_RefreshRecoversAfterEnvFix(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("script-based fake devin binary is unix-only")
+	}
+	i18n.Init()
+	setupTestEnv(t, map[string]string{
+		"DEVIN_CLI_PATH": filepath.Join(t.TempDir(), "missing"),
+	})
+	logger, _ := zap.NewDevelopment()
+	mgr, err := NewLLMManager(logger)
+	if err != nil {
+		t.Fatalf("NewLLMManager: %v", err)
+	}
+	impl := mgr.(*LLMManagerImpl)
+	defer impl.Close()
+	for _, p := range impl.GetAvailableProviders() {
+		if p == "DEVIN" {
+			t.Fatal("DEVIN must not be listed before the env fix")
+		}
+	}
+
+	fake := filepath.Join(t.TempDir(), "devin")
+	if err := os.WriteFile(fake, []byte("#!/bin/sh\necho ok\n"), 0o700); err != nil {
+		t.Fatalf("write fake devin: %v", err)
+	}
+	t.Setenv("DEVIN_CLI_PATH", fake)
+	impl.RefreshProviders()
+
+	found := false
+	for _, p := range impl.GetAvailableProviders() {
+		if p == "DEVIN" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("DEVIN must be listed after RefreshProviders re-probes, got %v", impl.GetAvailableProviders())
+	}
+}

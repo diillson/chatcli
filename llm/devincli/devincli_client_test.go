@@ -164,6 +164,50 @@ func TestResolveBinary_EnvOverrideAndMissing(t *testing.T) {
 	require.Error(t, err, "an explicit DEVIN_CLI_PATH that doesn't exist must fail loudly, not fall back")
 }
 
+// swapKnownInstallDirs substitutes the probe list for one test. Not parallel-
+// safe, matching the t.Setenv-based tests around it.
+func swapKnownInstallDirs(t *testing.T, dirs []string) {
+	t.Helper()
+	orig := knownInstallDirs
+	knownInstallDirs = func() []string { return dirs }
+	t.Cleanup(func() { knownInstallDirs = orig })
+}
+
+// TestResolveBinary_FallsBackToKnownInstallDirs pins the ACP/MCP scenario:
+// the server inherits the minimal GUI-session PATH (no Homebrew/npm dirs), so
+// the PATH lookup misses even though the CLI is installed — the well-known
+// install dirs probe must still resolve it.
+func TestResolveBinary_FallsBackToKnownInstallDirs(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("unix-only fake binary")
+	}
+	bin := fakeDevin(t, `echo ok`)
+	t.Setenv("DEVIN_CLI_PATH", "")
+	t.Setenv("PATH", t.TempDir())
+	swapKnownInstallDirs(t, []string{"", filepath.Dir(bin)})
+
+	got, err := ResolveBinary()
+	require.NoError(t, err)
+	assert.Equal(t, bin, got)
+}
+
+// TestResolveBinary_MissingEverywhere pins that a non-executable file in a
+// known dir does not resolve and the original PATH lookup error surfaces.
+func TestResolveBinary_MissingEverywhere(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("unix permission bits")
+	}
+	nonexec := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(nonexec, "devin"), []byte("data"), 0o600))
+	t.Setenv("DEVIN_CLI_PATH", "")
+	t.Setenv("PATH", t.TempDir())
+	swapKnownInstallDirs(t, []string{nonexec, filepath.Join(t.TempDir(), "absent")})
+
+	_, err := ResolveBinary()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "PATH", "the PATH lookup error must surface, not a probe artifact")
+}
+
 func TestExtractReply_TakesLastSentinelPair(t *testing.T) {
 	raw := "noise " + replyBegin + " first " + replyEnd + " middle " + replyBegin + "\nfinal answer\n" + replyEnd + " tail"
 	assert.Equal(t, "final answer", extractReply(raw))

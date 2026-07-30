@@ -75,14 +75,24 @@ func FormatVersionReport(rep version.Report) string {
 		row(labels[3], colorize("v"+rep.Latest, ColorGray))
 		b.WriteString("\n")
 		if rep.NeedsUpdate {
-			b.WriteString("  " + colorize(i18n.T("welcome.update.available", rep.Latest), ColorYellow) + "\n")
-			if argv := update.CommandFor(info.Method); argv != nil {
-				b.WriteString("    " + colorize(i18n.T("version.card.channel_cmd", strings.Join(argv, " ")), ColorGray) + "\n")
-			}
+			b.WriteString(renderUpdateInvite(rep.Latest))
 			b.WriteString(renderReleaseNotes(rep, anchor))
 		} else {
 			b.WriteString("  " + colorize("✓ "+i18n.T("update.uptodate"), ColorGreen) + "\n")
 		}
+	}
+	return b.String()
+}
+
+// renderUpdateInvite é o convite de atualização compartilhado pelo /version e
+// pela welcome screen: a linha amarela com a versão nova e o /update, mais o
+// comando do canal de instalação detectado — o usuário sabe na hora COMO
+// atualizar, não só que existe versão nova.
+func renderUpdateInvite(latest string) string {
+	var b strings.Builder
+	b.WriteString("  " + colorize(i18n.T("welcome.update.available", latest), ColorYellow) + "\n")
+	if argv := update.CommandFor(detectInstallFn().Method); argv != nil {
+		b.WriteString("    " + colorize(i18n.T("version.card.channel_cmd", strings.Join(argv, " ")), ColorGray) + "\n")
 	}
 	return b.String()
 }
