@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.174.0](https://github.com/diillson/chatcli/compare/v1.173.0...v1.174.0) (2026-07-30)
+
+
+### Features
+
+* **cli:** announce new release at boot and resolve Devin CLI from known install dirs ([15f8981](https://github.com/diillson/chatcli/commit/15f89817bf215119a798cbe40f087062e43fa785))
+
 ## [1.173.0](https://github.com/diillson/chatcli/compare/v1.172.0...v1.173.0) (2026-07-30)
 
 
