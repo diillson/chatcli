@@ -133,9 +133,18 @@ type AgentSlot struct {
 	Turn     int    // current ReAct turn (0 = unknown)
 	MaxTurns int    // turn budget (0 = unknown)
 	Action   string // current action label, e.g. "read cli/foo.go"
-	// SubLines are pre-formatted, indented lines rendered under this agent
-	// (e.g. live subagents spawned by it). The caller owns the formatting.
-	SubLines []string
+	// SubLines holds pre-formatted, newline-separated lines rendered
+	// indented under this agent (e.g. live subagents spawned by it). Kept
+	// as a single string so AgentSlot stays comparable.
+	SubLines string
+}
+
+// subLineList splits the newline-separated SubLines into displayable lines.
+func (s AgentSlot) subLineList() []string {
+	if s.SubLines == "" {
+		return nil
+	}
+	return strings.Split(s.SubLines, "\n")
 }
 
 // AgentSlotStatus represents the lifecycle state of an agent slot.
@@ -202,7 +211,7 @@ func (p *AgentProgressState) SetLive(callID string, turn, maxTurns int, action s
 			p.Agents[i].Turn = turn
 			p.Agents[i].MaxTurns = maxTurns
 			p.Agents[i].Action = action
-			p.Agents[i].SubLines = subLines
+			p.Agents[i].SubLines = strings.Join(subLines, "\n")
 			return
 		}
 	}
@@ -304,7 +313,7 @@ func FormatDispatchProgress(state *AgentProgressState, model string) string {
 			taskPreview,
 			color, statusText, ColorReset,
 		)
-		for _, sub := range slot.SubLines {
+		for _, sub := range slot.subLineList() {
 			fmt.Fprintf(&b, "      %s%s%s\n", ColorGray, truncateDisplay(sub, 90), ColorReset)
 		}
 	}
@@ -318,7 +327,7 @@ func (p *AgentProgressState) LineCount() int {
 	defer p.mu.Unlock()
 	n := 1 + len(p.Agents) // header + one per agent
 	for _, s := range p.Agents {
-		n += len(s.SubLines)
+		n += len(s.subLineList())
 	}
 	return n
 }
