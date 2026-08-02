@@ -68,6 +68,7 @@ var slashPrefixRoutes = []slashPrefixRoute{
 	{"/wait", (*ChatCLI).getWaitSuggestions},
 	{"/jobs", (*ChatCLI).getJobsSuggestions},
 	{"/board", (*ChatCLI).getBoardSuggestions},
+	{"/mail", (*ChatCLI).getMailSuggestions},
 	{"/parked", (*ChatCLI).getParkedSuggestions},
 	{"/cancel-park", func(c *ChatCLI, d prompt.Document) []prompt.Suggest {
 		return c.getParkTokenSuggestions("/cancel-park", d)
@@ -387,6 +388,7 @@ func (cli *ChatCLI) GetInternalCommands() []prompt.Suggest {
 		{Text: "/jobs", Description: i18n.T("help.command.jobs")},
 		{Text: "/agents", Description: i18n.T("help.command.agents")},
 		{Text: "/board", Description: i18n.T("help.command.board")},
+		{Text: "/mail", Description: i18n.T("help.command.mail")},
 		{Text: "/parked", Description: i18n.T("help.command.parked")},
 		{Text: "/resume", Description: i18n.T("help.command.resume")},
 		{Text: "/cancel-park", Description: i18n.T("help.command.cancel_park")},

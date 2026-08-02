@@ -414,6 +414,40 @@ var nativeToolNameMap = map[string]string{
 	"rollback_file":     "rollback",
 	"clean_backups":     "clean",
 	"delegate_subagent": "delegate",
+	"send_mail":         "mail",
+}
+
+// MailToolDefinition is the native tool definition for squad mail. It is
+// appended to every worker's toolset unconditionally (workers.RunWorkerReAct)
+// so any squad member can message any other regardless of its command
+// allowlist.
+func MailToolDefinition() models.ToolDefinition {
+	return models.ToolDefinition{
+		Type: "function",
+		Function: models.ToolFunctionDef{
+			Name: "send_mail",
+			Description: "Send a short directed message to another squad agent. The recipient receives it at its next turn: use it to hand findings to the orchestrator, ask the coder to fix something you found in review, or flag blockers. " +
+				"Recipients: worker agent type names (coder, reviewer, tester, ...) or \"orchestrator\" for the main loop.",
+			Parameters: map[string]interface{}{
+				"type": "object",
+				"properties": map[string]interface{}{
+					"to": map[string]interface{}{
+						"type":        "string",
+						"description": "Recipient: a worker agent type or \"orchestrator\".",
+					},
+					"text": map[string]interface{}{
+						"type":        "string",
+						"description": "The message. Be specific and actionable.",
+					},
+					"card_id": map[string]interface{}{
+						"type":        "string",
+						"description": "Optional board card this message is about (e.g. card-3).",
+					},
+				},
+				"required": []string{"to", "text"},
+			},
+		},
+	}
 }
 
 // NativeToolNameToSubcmd converts a native tool function name to an engine subcommand.

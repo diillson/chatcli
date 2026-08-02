@@ -648,6 +648,11 @@ func NewChatCLI(ctx context.Context, manager manager.LLMManager, logger *zap.Log
 		// kanban and records review/delivery notes. Humans watch via /board.
 		pluginMgr.RegisterBuiltinPlugin(plugins.NewBuiltinBoardPlugin())
 
+		// @mail — squad messaging for the orchestrator: message workers
+		// (delivered on their next turn), drain its own inbox, audit
+		// traffic. Workers use their native send_mail tool; humans /mail.
+		pluginMgr.RegisterBuiltinPlugin(plugins.NewBuiltinMailPlugin())
+
 		// Slash-as-tool: register the curated subset of slash commands
 		// (currently /help and /version) as plugins so the LLM can invoke
 		// them via the same native tool dispatch path used by @coder,
@@ -853,6 +858,9 @@ func NewChatCLI(ctx context.Context, manager manager.LLMManager, logger *zap.Log
 
 	// Wire the @board plugin adapter over the squad board store.
 	plugins.SetBoardAdapter(newLiveBoardAdapter(nil))
+
+	// Wire the @mail plugin adapter over the squad message bus.
+	plugins.SetMailAdapter(newLiveMailAdapter(nil))
 
 	// Wire the policy_manager's capability resolver (Item 4). When a
 	// tool call hits no explicit policy rule AND the plugin advertises

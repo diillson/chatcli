@@ -107,6 +107,29 @@ func PluginToolDefinitions() []models.ToolDefinition {
 		{
 			Type: "function",
 			Function: models.ToolFunctionDef{
+				Name: "squad_mail",
+				Description: "Squad messaging for the orchestrator: send a directed message to a worker agent (delivered at its next turn), drain your own inbox, or audit recent traffic. " +
+					"Use send to redirect a running worker (e.g. after a review verdict) instead of waiting for it to finish.",
+				Parameters: map[string]interface{}{
+					"type": "object",
+					"properties": map[string]interface{}{
+						"cmd": map[string]interface{}{
+							"type":        "string",
+							"enum":        []string{"send", "inbox", "history"},
+							"description": "mail operation",
+						},
+						"to":      map[string]interface{}{"type": "string", "description": "Recipient worker agent type (send)."},
+						"text":    map[string]interface{}{"type": "string", "description": "Message text (send)."},
+						"card_id": map[string]interface{}{"type": "string", "description": "Board card this message is about (send)."},
+						"limit":   map[string]interface{}{"type": "integer", "description": "Max messages to show (history)."},
+					},
+					"required": []string{"cmd"},
+				},
+			},
+		},
+		{
+			Type: "function",
+			Function: models.ToolFunctionDef{
 				Name: "agents_runs",
 				Description: "Observe and manage live agent executions (the squad): list running workers/subagents/MoA members with their current turn and action, show one run's detail, or cancel a stuck run. " +
 					"Use after dispatching <agent_call> workers to monitor progress, and cancel runs that are looping without progress.",
@@ -203,6 +226,14 @@ var nativePluginToolMap = map[string]struct {
 			// Use the single-JSON-arg form so the webfetch plugin sees the
 			// exact map the LLM sent (easier than threading every flag).
 			payload := map[string]interface{}{"cmd": "fetch", "args": args}
+			raw, _ := jsonMarshalForTool(payload)
+			return []string{string(raw)}
+		},
+	},
+	"squad_mail": {
+		PluginName: "@mail",
+		BuildArgs: func(args map[string]interface{}) []string {
+			payload := map[string]interface{}{"cmd": args["cmd"], "args": args}
 			raw, _ := jsonMarshalForTool(payload)
 			return []string{string(raw)}
 		},

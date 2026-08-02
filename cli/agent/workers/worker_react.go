@@ -3,6 +3,7 @@ package workers
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"strconv"
@@ -11,6 +12,7 @@ import (
 	"time"
 
 	"github.com/diillson/chatcli/cli/agent"
+	"github.com/diillson/chatcli/cli/agent/mail"
 	"github.com/diillson/chatcli/cli/agent/runs"
 	"github.com/diillson/chatcli/llm/client"
 	"github.com/diillson/chatcli/models"
@@ -107,6 +109,9 @@ func RunWorkerReAct(
 	var toolDefs []models.ToolDefinition
 	if useNativeTools {
 		toolDefs = CoderToolDefinitions(config.AllowedCommands)
+		// Squad mail is a universal capability: every worker can message
+		// other agents regardless of its command allowlist.
+		toolDefs = append(toolDefs, MailToolDefinition())
 		logger.Info("Using native function calling",
 			zap.Int("tools", len(toolDefs)),
 			zap.String("callID", callID))
@@ -141,10 +146,12 @@ func RunWorkerReAct(
 	var finalOutput strings.Builder
 	maxParallel := 0
 
-	allowed := make(map[string]bool, len(config.AllowedCommands))
+	allowed := make(map[string]bool, len(config.AllowedCommands)+1)
 	for _, cmd := range config.AllowedCommands {
 		allowed[cmd] = true
 	}
+	// Universal squad-mail capability (see MailToolDefinition).
+	allowed["mail"] = true
 
 	// --- Failure tracking for reflection ---
 	consecutiveFailures := 0
@@ -165,6 +172,16 @@ func RunWorkerReAct(
 
 		liveRun.SetTurn(turn+1, maxTurns)
 		liveRun.SetAction("")
+
+		// Drain this agent's squad mailbox at the turn boundary — the only
+		// point where injecting context cannot split a tool_use/tool_result
+		// pair. Merged into a trailing user message when one exists so
+		// strict-alternation providers never see two user turns in a row.
+		if snap := liveRun.Snapshot(); snap.Agent != "" {
+			if inbox := mail.Default().Drain(snap.Agent); len(inbox) > 0 {
+				history = appendInboxMessage(history, mail.FormatInbox(inbox))
+			}
+		}
 
 		// --- Call LLM (native or text mode) ---
 		responseText, nativeToolCalls, newHistory, err := callWorkerLLM(ctx, useNativeTools, toolAware, llmClient, history, toolDefs)
@@ -355,6 +372,12 @@ func executeToolCall(ctx context.Context, v validatedTC, lockMgr *FileLockManage
 		return executeDelegate(ctx, v)
 	}
 
+	// Special-case: mail is the in-memory squad message bus, not an engine
+	// subcommand.
+	if v.rtc.Subcmd == "mail" {
+		return executeMailSend(ctx, v)
+	}
+
 	filePath := extractFilePathFromResolved(v.rtc)
 	if isWriteCommand(v.rtc.Subcmd) && filePath != "" && lockMgr != nil {
 		lockMgr.Lock(filePath)
@@ -396,6 +419,66 @@ func executeToolCall(ctx context.Context, v validatedTC, lockMgr *FileLockManage
 		out += fmt.Sprintf("[ERROR] %v\n", execErr)
 	}
 	return execResult{index: v.index, record: record, output: out, failed: hasFailed, toolID: v.rtc.ID}
+}
+
+// appendInboxMessage injects drained squad mail into the history. When the
+// last message is already a user turn, the mail is folded into it so
+// strict-alternation providers never see consecutive user messages.
+func appendInboxMessage(history []models.Message, inboxText string) []models.Message {
+	if inboxText == "" {
+		return history
+	}
+	if n := len(history); n > 0 && history[n-1].Role == "user" {
+		history[n-1].Content += "\n\n" + inboxText
+		return history
+	}
+	return append(history, models.Message{Role: "user", Content: inboxText})
+}
+
+// executeMailSend handles the mail tool call: it resolves the sender from
+// the run registry handle on ctx and enqueues the message on the squad bus.
+func executeMailSend(ctx context.Context, v validatedTC) execResult {
+	fail := func(err error) execResult {
+		record := ToolCallRecord{Name: "mail", Args: v.rtc.RawArgs, Error: err}
+		return execResult{index: v.index, record: record, output: fmt.Sprintf("[mail] %v\n", err), failed: true, toolID: v.rtc.ID}
+	}
+
+	args := v.rtc.NativeArgs
+	if len(args) == 0 && v.rtc.RawArgs != "" {
+		var parsed map[string]interface{}
+		if err := json.Unmarshal([]byte(v.rtc.RawArgs), &parsed); err == nil {
+			// Tolerate the {"cmd":"mail","args":{...}} envelope from XML mode.
+			if inner, ok := parsed["args"].(map[string]interface{}); ok {
+				parsed = inner
+			}
+			args = parsed
+		}
+	}
+	getStr := func(keys ...string) string {
+		for _, k := range keys {
+			if s, ok := args[k].(string); ok && strings.TrimSpace(s) != "" {
+				return strings.TrimSpace(s)
+			}
+		}
+		return ""
+	}
+	to := getStr("to", "recipient", "agent")
+	text := getStr("text", "message", "body")
+	if to == "" || text == "" {
+		return fail(errors.New(`mail requires "to" and "text"`))
+	}
+
+	from := "worker"
+	if snap := runs.FromContext(ctx).Snapshot(); snap.Agent != "" {
+		from = snap.Agent
+	}
+	msg, err := mail.Default().Send(from, to, getStr("card_id", "cardId", "card"), text)
+	if err != nil {
+		return fail(err)
+	}
+	out := fmt.Sprintf("mail sent: %s -> %s (%s)", msg.From, msg.To, msg.ID)
+	record := ToolCallRecord{Name: "mail", Args: v.rtc.RawArgs, Output: out}
+	return execResult{index: v.index, record: record, output: "[mail] " + out + "\n", toolID: v.rtc.ID}
 }
 
 // executeDelegate handles the delegate tool call: it parses the delegation

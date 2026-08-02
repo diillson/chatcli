@@ -21,8 +21,9 @@ const (
 // Commands like 'exec' are always serial since they may have arbitrary side effects.
 func ClassifyToolConcurrency(subcmd string) ConcurrencyClass {
 	switch subcmd {
-	// Read-only commands: always safe to parallelize
-	case "read", "tree", "search", "git-status", "git-diff", "git-log", "git-changed", "git-branch":
+	// Read-only commands: always safe to parallelize. Squad mail is an
+	// in-memory enqueue with no file/exec side effects — equally safe.
+	case "read", "tree", "search", "git-status", "git-diff", "git-log", "git-changed", "git-branch", "mail":
 		return ConcurrencySafe
 
 	// File-scoped writes: safe if targeting different files

@@ -25,6 +25,7 @@ import (
 	"github.com/c-bata/go-prompt"
 	"github.com/diillson/chatcli/cli/agent"
 	"github.com/diillson/chatcli/cli/agent/ask"
+	"github.com/diillson/chatcli/cli/agent/mail"
 	"github.com/diillson/chatcli/cli/agent/park"
 	"github.com/diillson/chatcli/cli/agent/quality"
 	"github.com/diillson/chatcli/cli/agent/runs"
@@ -1653,6 +1654,15 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 		// (see memory_notice.go) does not apply inside the agent loop.
 		if !a.cli.unattended {
 			a.cli.drainMemoryNotices()
+		}
+
+		// Drain the orchestrator's squad mailbox: workers (and the user via
+		// /mail send) address it as "orchestrator". Injected at the turn
+		// boundary as user context, same pattern as type-ahead below.
+		if inbox := mail.Default().Drain("orchestrator"); len(inbox) > 0 {
+			a.cli.history = append(a.cli.history, models.Message{
+				Role: "user", Content: mail.FormatInbox(inbox),
+			})
 		}
 
 		// Check for type-ahead messages from user (works in both /agent and
