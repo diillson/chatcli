@@ -10,6 +10,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 )
 
 func TestSendAndDrain(t *testing.T) {
@@ -18,7 +19,7 @@ func TestSendAndDrain(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if msg.ID != "msg-1" || msg.To != "coder" {
+	if !strings.HasPrefix(msg.ID, "msg-") || msg.To != "coder" {
 		t.Fatalf("unexpected message: %+v", msg)
 	}
 
@@ -125,6 +126,67 @@ func TestNilSafety(t *testing.T) {
 	}
 	if r.Drain("x") != nil || r.Peek("x") != nil || r.Recent(1) != nil || r.Pending() != nil {
 		t.Fatal("nil registry reads must be nil")
+	}
+}
+
+func TestOnSendAndOnDrainHooks(t *testing.T) {
+	r := NewRegistry(10)
+	var sent []Message
+	var acked []Message
+	r.OnSend(func(m Message) { sent = append(sent, m) })
+	r.OnDrain(func(ms []Message) { acked = append(acked, ms...) })
+
+	_, _ = r.Send("a", "coder", "", "one")
+	_, _ = r.Send("a", "coder", "", "two")
+	if len(sent) != 2 {
+		t.Fatalf("OnSend not invoked per send: %d", len(sent))
+	}
+	got := r.Drain("coder")
+	if len(got) != 2 || len(acked) != 2 {
+		t.Fatalf("OnDrain mismatch: drained=%d acked=%d", len(got), len(acked))
+	}
+	// Empty drain must not fire the hook.
+	acked = acked[:0]
+	if r.Drain("coder") != nil || len(acked) != 0 {
+		t.Fatal("empty drain fired OnDrain")
+	}
+}
+
+func TestDeliverDedupAndEcho(t *testing.T) {
+	r := NewRegistry(10)
+	// External message delivers once.
+	ext := Message{ID: "msg-remote-1", From: "reviewer", To: "Coder", Text: "fix X", At: time.Now()}
+	if !r.Deliver(ext) {
+		t.Fatal("first Deliver must enqueue")
+	}
+	if r.Deliver(ext) {
+		t.Fatal("duplicate Deliver must be dropped")
+	}
+	// Our own send echoed back by the backend is dropped by ID.
+	own, _ := r.Send("orchestrator", "coder", "", "hello")
+	if r.Deliver(own) {
+		t.Fatal("own echo must be dropped")
+	}
+	got := r.Drain("coder")
+	if len(got) != 2 {
+		t.Fatalf("expected 2 messages (external + own), got %d", len(got))
+	}
+	// Invalid deliveries are rejected.
+	if r.Deliver(Message{ID: "", From: "a", To: "b", Text: "x"}) {
+		t.Fatal("empty ID must be rejected")
+	}
+	if r.Deliver(Message{ID: "i", From: "a", To: "b", Text: "  "}) {
+		t.Fatal("empty text must be rejected")
+	}
+}
+
+func TestGloballyUniqueIDsAcrossRegistries(t *testing.T) {
+	a := NewRegistry(10)
+	b := NewRegistry(10)
+	m1, _ := a.Send("x", "y", "", "1")
+	m2, _ := b.Send("x", "y", "", "1")
+	if m1.ID == m2.ID {
+		t.Fatalf("two registries produced colliding IDs: %s", m1.ID)
 	}
 }
 

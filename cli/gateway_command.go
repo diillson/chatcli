@@ -33,6 +33,7 @@ import (
 	"time"
 	"unicode"
 
+	"github.com/diillson/chatcli/cli/agent/mail"
 	"github.com/diillson/chatcli/cli/gateway"
 	"github.com/diillson/chatcli/cli/plugins"
 	"github.com/diillson/chatcli/i18n"
@@ -242,6 +243,12 @@ func (cli *ChatCLI) runGateway(ctx context.Context, broker hub.Store) error {
 	// separate process that snapshotted .env at boot). Per-message refresh in
 	// gatewayAgentFunc keeps it current after a /switch while the daemon runs.
 	cli.refreshGatewayModel()
+
+	// Squad mail flows through the shared hub store: directives sent from
+	// the REPL process (/mail send) reach agents running in this daemon and
+	// vice versa. No-op when a bridge is already active in this process.
+	stopMailBridge := startMailHubBridge(ctx, broker, mail.Default(), cli.logger)
+	defer stopMailBridge()
 
 	adapters, err := gateway.BuildConfigured()
 	if err != nil {
