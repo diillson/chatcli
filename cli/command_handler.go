@@ -242,6 +242,7 @@ func (ch *CommandHandler) buildRoutes() {
 		{"/wait", false, func(ctx context.Context, in string) bool { c.handleWaitCommand(ctx, in); return false }},
 		{"/jobs", false, func(ctx context.Context, in string) bool { c.handleJobsCommand(ctx, in); return false }},
 		{"/parked", true, func(_ context.Context, in string) bool { c.handleParkedCommand(in); return false }},
+		{"/board", true, func(_ context.Context, in string) bool { c.handleBoardCommand(in); return false }},
 		{"/resume", false, func(ctx context.Context, in string) bool { c.handleResumeCommand(ctx, in); return false }},
 		{"/cancel-park", false, func(_ context.Context, in string) bool { c.handleCancelParkCommand(in); return false }},
 		{"/channel", false, func(ctx context.Context, in string) bool { c.handleChannelCommand(ctx, in); return false }},

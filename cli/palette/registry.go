@@ -106,6 +106,7 @@ var rootCommands = []RootCommand{
 
 	// ── Agent / build ───────────────────────────────────────────────────
 	{"/agents", CatAgent, "help.command.agents"},
+	{"/board", CatAgent, "help.command.board"},
 	{"/agent", CatAgent, "complete.root.agent"},
 	{"/coder", CatAgent, "complete.root.coder"},
 	{"/run", CatAgent, "complete.root.run"},

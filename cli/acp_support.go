@@ -53,7 +53,7 @@ var acpCommandAllow = map[string]bool{
 	"/thinking": true, "/refine": true, "/verify": true, "/reflect": true, "/moa": true,
 	"/mcp": true, "/websearch": true, "/skill": true, "/plugin": true,
 	"/cost": true, "/metrics": true, "/ratelimit": true,
-	"/version": true, "/help": true, "/agents": true,
+	"/version": true, "/help": true, "/agents": true, "/board": true,
 }
 
 // acpModeCommands are advertised alongside the allowlist but handled by the

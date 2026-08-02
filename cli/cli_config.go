@@ -338,6 +338,7 @@ func (cli *ChatCLI) showHelp() {
 	printCommand("/agent status", i18n.T("help.command.persona_status"))
 	printCommand("/agent off", i18n.T("help.command.persona_off"))
 	printCommand("/agents {list|show <id>|cancel <id>}", i18n.T("help.command.agents"))
+	printCommand("/board {list|show|create|move|…}", i18n.T("help.command.board"))
 
 	fmt.Printf("\n  %s\n", colorize(i18n.T("help.section.scheduler"), ColorLime))
 	printCommand("/schedule <nome> --when <t> --do <a>", i18n.T("help.command.schedule"))

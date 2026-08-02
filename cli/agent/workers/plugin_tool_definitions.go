@@ -127,6 +127,36 @@ func PluginToolDefinitions() []models.ToolDefinition {
 				},
 			},
 		},
+		{
+			Type: "function",
+			Function: models.ToolFunctionDef{
+				Name: "board_cards",
+				Description: "Manage the squad work board (kanban: backlog, doing, review, blocked, done). Break the user's goal into cards, assign each to a worker agent type, move cards as work progresses, record review verdicts and delivery notes, link agent runs and scheduler jobs. " +
+					"Use it to coordinate multi-step deliveries end to end without asking the user to track anything.",
+				Parameters: map[string]interface{}{
+					"type": "object",
+					"properties": map[string]interface{}{
+						"cmd": map[string]interface{}{
+							"type":        "string",
+							"enum":        []string{"create", "list", "show", "move", "assign", "note", "link", "archive"},
+							"description": "board operation",
+						},
+						"id":          map[string]interface{}{"type": "string", "description": "Card ID (e.g. card-3). Required for show/move/assign/note/link."},
+						"title":       map[string]interface{}{"type": "string", "description": "Card title (create)."},
+						"description": map[string]interface{}{"type": "string", "description": "Full task description / acceptance criteria (create)."},
+						"assignee":    map[string]interface{}{"type": "string", "description": "Worker agent type: coder, reviewer, tester, … (create/assign)."},
+						"column":      map[string]interface{}{"type": "string", "description": "Column filter (list) or initial column (create)."},
+						"to":          map[string]interface{}{"type": "string", "description": "Target column (move)."},
+						"text":        map[string]interface{}{"type": "string", "description": "Note text (note)."},
+						"author":      map[string]interface{}{"type": "string", "description": "Note author (note); defaults to orchestrator."},
+						"run_id":      map[string]interface{}{"type": "string", "description": "Agent run ID to link (link)."},
+						"job_id":      map[string]interface{}{"type": "string", "description": "Scheduler job ID to link (link)."},
+						"older_than":  map[string]interface{}{"type": "string", "description": "Archive only done cards older than this Go duration (archive)."},
+					},
+					"required": []string{"cmd"},
+				},
+			},
+		},
 	}
 }
 
@@ -173,6 +203,14 @@ var nativePluginToolMap = map[string]struct {
 			// Use the single-JSON-arg form so the webfetch plugin sees the
 			// exact map the LLM sent (easier than threading every flag).
 			payload := map[string]interface{}{"cmd": "fetch", "args": args}
+			raw, _ := jsonMarshalForTool(payload)
+			return []string{string(raw)}
+		},
+	},
+	"board_cards": {
+		PluginName: "@board",
+		BuildArgs: func(args map[string]interface{}) []string {
+			payload := map[string]interface{}{"cmd": args["cmd"], "args": args}
 			raw, _ := jsonMarshalForTool(payload)
 			return []string{string(raw)}
 		},
