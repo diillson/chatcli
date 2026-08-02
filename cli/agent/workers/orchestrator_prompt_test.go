@@ -36,6 +36,17 @@ func TestOrchestratorSystemPrompt(t *testing.T) {
 	if !strings.Contains(prompt, catalog) {
 		t.Error("expected catalog to be embedded in prompt")
 	}
+	if !strings.Contains(prompt, "SQUAD PLAYBOOK") {
+		t.Error("expected 'SQUAD PLAYBOOK' section in prompt")
+	}
+	for _, tool := range []string{"@board", "@agents", "@mail", "@scheduler"} {
+		if !strings.Contains(prompt, tool) {
+			t.Errorf("expected squad tool %q in playbook", tool)
+		}
+	}
+	if !strings.Contains(prompt, "[SQUAD MAIL]") {
+		t.Error("expected the [SQUAD MAIL] inbox marker to be explained")
+	}
 }
 
 func TestOrchestratorSystemPrompt_EmptyCatalog(t *testing.T) {

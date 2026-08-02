@@ -765,20 +765,7 @@ func (a *AgentMode) Run(ctx context.Context, query string, additionalContext str
 	// Workers, subagents and MoA members spawned from this loop inherit the
 	// returned ctx and parent to this run — that is what makes the /agents
 	// tree view possible. A park suspension counts as a clean end.
-	orchAgent := "agent"
-	if systemPromptOverride == CoderSystemPrompt {
-		orchAgent = "coder"
-	}
-	orchOrigin := "repl"
-	if a.cli.unattended {
-		orchOrigin = "gateway"
-	}
-	orchCtx, orchRun := runs.Default().Begin(ctx, runs.Info{
-		Kind:   runs.KindOrchestrator,
-		Agent:  orchAgent,
-		Task:   query,
-		Origin: orchOrigin,
-	})
+	orchCtx, orchRun := a.beginOrchestratorRun(ctx, query, systemPromptOverride)
 	ctx = orchCtx
 	defer func() {
 		orchRun.End(nil)
@@ -1045,6 +1032,26 @@ func (a *AgentMode) Run(ctx context.Context, query string, additionalContext str
 	// deferred End(nil) then no-ops (End is idempotent, first call wins).
 	orchRun.End(err)
 	return err
+}
+
+// beginOrchestratorRun registers the main loop in the run registry, deriving
+// the agent label from the active mode and the origin from the unattended
+// flag. Split out of Run to keep its cyclomatic complexity in budget.
+func (a *AgentMode) beginOrchestratorRun(ctx context.Context, query, systemPromptOverride string) (context.Context, *runs.Run) {
+	orchAgent := "agent"
+	if systemPromptOverride == CoderSystemPrompt {
+		orchAgent = "coder"
+	}
+	orchOrigin := "repl"
+	if a.cli.unattended {
+		orchOrigin = "gateway"
+	}
+	return runs.Default().Begin(ctx, runs.Info{
+		Kind:   runs.KindOrchestrator,
+		Agent:  orchAgent,
+		Task:   query,
+		Origin: orchOrigin,
+	})
 }
 
 // installAgentSystemMessage purges stale mode system messages and installs the

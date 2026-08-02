@@ -282,7 +282,7 @@ func (s *Store) List(col Column) ([]Card, error) {
 	for i, c := range Columns {
 		colOrder[c] = i
 	}
-	var out []Card
+	out := make([]Card, 0, len(doc.Cards))
 	for _, c := range doc.Cards {
 		if col != "" && c.Column != col {
 			continue

@@ -394,6 +394,11 @@ func (d *Dispatcher) executeAgent(ctx context.Context, call AgentCall) AgentResu
 		result.Error = execErr
 	}
 	liveRun.End(result.Error)
+	// Expose the registry run ID so the orchestrator can link this
+	// execution to a board card (@board link) and inspect it (@agents show).
+	if id := liveRun.ID(); id != "" {
+		result.SetMetadata("run_id", id)
+	}
 
 	return *result
 }
@@ -406,6 +411,9 @@ func FormatResults(results []AgentResult) string {
 
 	for i, r := range results {
 		fmt.Fprintf(&b, "[%s] (call %s, %s)\n", r.Agent, r.CallID, r.Duration.Round(time.Millisecond))
+		if runID := r.Metadata["run_id"]; runID != "" {
+			fmt.Fprintf(&b, "Run: %s\n", runID)
+		}
 		fmt.Fprintf(&b, "Task: %s\n", r.Task)
 		if r.Error != nil {
 			fmt.Fprintf(&b, "Status: FAILED — %v\n", r.Error)

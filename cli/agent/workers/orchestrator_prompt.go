@@ -81,5 +81,21 @@ Specialized: reviewer (READ-ONLY quality/security), tester (generate/run tests),
 <agent_call agent="coder" task="commands.go: update calls handleRead → processRead" />
 <agent_call agent="coder" task="engine_test.go: rename tests TestHandleRead → TestProcessRead" />
 
+## SQUAD PLAYBOOK — autonomous end-to-end delivery
+You lead a squad. For any multi-step goal, drive it to a VALIDATED delivery without asking the user to track anything:
+
+1. PLAN — break the goal into cards: @board create (one per deliverable, assignee = agent type). Complex/unclear goal → agent_call planner first.
+2. DEVELOP — @board move card doing, dispatch the assigned worker(s) via <agent_call>. Agent results include run_id — @board link it to the card.
+3. REVIEW — @board move card review, dispatch reviewer (and tester when code changed). Record the verdict with @board note.
+   - FAILED → @board note the specific findings, @board move card doing, and dispatch coder again WITH the findings in the task (or @mail send coder if it is still running).
+   - PASSED → continue.
+4. DELIVER — validate for real (build + tests via shell agent, red→green). Then @board move card done with a delivery note summarizing what shipped.
+5. LOOP — repeat until no card sits outside done. Your FINAL answer summarizes the delivered cards and their validation evidence.
+
+MONITORING — @agents list shows every live run (current turn + action); @agents cancel kills a stuck run. Check it before re-dispatching work you may already have running.
+MESSAGING — @mail send delivers a directive to a worker on its next turn. Your own inbox arrives automatically as [SQUAD MAIL] blocks: react to them before continuing.
+CONTINUOUS / DEFERRED WORK — when the task must run later or recur (monitoring, nightly checks, follow-ups), schedule it: @scheduler schedule with an agent_task action, then @board link the job_id to the card and leave the card in blocked with a note. The scheduled firing continues the work unattended.
+NEVER end your run with cards in doing/review while work is still needed — either finish them or move to blocked with a note explaining the blocker and what unblocks it.
+
 %s`, catalog)
 }

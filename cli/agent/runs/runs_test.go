@@ -200,8 +200,9 @@ func TestNilSafety(t *testing.T) {
 	if r != nil || ctx == nil {
 		t.Fatal("nil registry Begin must return nil run and original ctx")
 	}
-	if FromContext(nil) != nil {
-		t.Fatal("FromContext(nil) must be nil")
+	var nilCtx context.Context
+	if FromContext(nilCtx) != nil {
+		t.Fatal("FromContext on a nil context must be nil")
 	}
 }
 
