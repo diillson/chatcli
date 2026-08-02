@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/diillson/chatcli/cli/agent"
+	"github.com/diillson/chatcli/cli/agent/runs"
 	"github.com/diillson/chatcli/llm/client"
 	"github.com/diillson/chatcli/models"
 	"github.com/diillson/chatcli/pkg/coder/engine"
@@ -80,6 +81,11 @@ func RunWorkerReAct(
 ) (*AgentResult, error) {
 	startTime := time.Now()
 	callID := nextCallID()
+
+	// Live progress handle: registered by whoever spawned this loop
+	// (dispatcher, subagent, MoA, scheduler bridge). Nil-safe — a loop run
+	// without a registered handle simply reports nothing.
+	liveRun := runs.FromContext(ctx)
 
 	maxTurns := config.MaxTurns
 	if maxTurns <= 0 {
@@ -157,6 +163,9 @@ func RunWorkerReAct(
 		default:
 		}
 
+		liveRun.SetTurn(turn+1, maxTurns)
+		liveRun.SetAction("")
+
 		// --- Call LLM (native or text mode) ---
 		responseText, nativeToolCalls, newHistory, err := callWorkerLLM(ctx, useNativeTools, toolAware, llmClient, history, toolDefs)
 		if err != nil {
@@ -208,6 +217,7 @@ func RunWorkerReAct(
 
 		if canParallelize {
 			maxParallel = max(maxParallel, len(runnable))
+			liveRun.SetAction(batchActionLabel(runnableResolved))
 			var wg sync.WaitGroup
 			var mu sync.Mutex
 			for i, v := range validated {
@@ -227,9 +237,13 @@ func RunWorkerReAct(
 			wg.Wait()
 		} else {
 			for i, v := range validated {
+				if !v.blocked {
+					liveRun.SetAction(toolActionLabel(v.rtc))
+				}
 				results[i] = executeToolCall(ctx, v, lockMgr, policyChecker)
 			}
 		}
+		liveRun.AddToolCalls(len(runnable))
 
 		// --- Aggregate results ---
 		agg := aggregateTurnResults(results, validated, blockedCmds)
@@ -610,6 +624,33 @@ func buildReflectionPrompt(turnBlocked, totalValidated, consecutiveFailures int,
 	}
 
 	return reflection.String()
+}
+
+// toolActionLabel builds the short, language-neutral live-progress label for
+// one tool call: the subcommand plus its file argument when there is one
+// (e.g. "read cli/foo.go"). Consumed by the run registry / live panel.
+func toolActionLabel(rtc resolvedToolCall) string {
+	if p := extractFilePathFromResolved(rtc); p != "" {
+		return truncateStr(rtc.Subcmd+" "+p, 60)
+	}
+	return truncateStr(rtc.Subcmd, 60)
+}
+
+// batchActionLabel summarizes a parallel batch for the live-progress label:
+// a single call keeps its full label, larger batches show "N× cmd1+cmd2".
+func batchActionLabel(batch []resolvedToolCall) string {
+	if len(batch) == 1 {
+		return toolActionLabel(batch[0])
+	}
+	seen := make(map[string]bool, len(batch))
+	var cmds []string
+	for _, rtc := range batch {
+		if !seen[rtc.Subcmd] {
+			seen[rtc.Subcmd] = true
+			cmds = append(cmds, rtc.Subcmd)
+		}
+	}
+	return truncateStr(fmt.Sprintf("%d× %s", len(batch), strings.Join(cmds, "+")), 60)
 }
 
 // extractFilePathFromResolved extracts file path from a resolved tool call.

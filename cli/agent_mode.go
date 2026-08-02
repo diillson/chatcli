@@ -27,6 +27,7 @@ import (
 	"github.com/diillson/chatcli/cli/agent/ask"
 	"github.com/diillson/chatcli/cli/agent/park"
 	"github.com/diillson/chatcli/cli/agent/quality"
+	"github.com/diillson/chatcli/cli/agent/runs"
 	"github.com/diillson/chatcli/cli/agent/toolguard"
 	"github.com/diillson/chatcli/cli/agent/workers"
 	"github.com/diillson/chatcli/cli/agentevents"
@@ -759,6 +760,29 @@ func (a *AgentMode) Run(ctx context.Context, query string, additionalContext str
 	}
 	defer a.runInflight.Store(false)
 
+	// Register the orchestrator itself in the process-wide run registry.
+	// Workers, subagents and MoA members spawned from this loop inherit the
+	// returned ctx and parent to this run — that is what makes the /agents
+	// tree view possible. A park suspension counts as a clean end.
+	orchAgent := "agent"
+	if systemPromptOverride == CoderSystemPrompt {
+		orchAgent = "coder"
+	}
+	orchOrigin := "repl"
+	if a.cli.unattended {
+		orchOrigin = "gateway"
+	}
+	orchCtx, orchRun := runs.Default().Begin(ctx, runs.Info{
+		Kind:   runs.KindOrchestrator,
+		Agent:  orchAgent,
+		Task:   query,
+		Origin: orchOrigin,
+	})
+	ctx = orchCtx
+	defer func() {
+		orchRun.End(nil)
+	}()
+
 	// Pull turns that arrived on other channels (Telegram/…) into history so the
 	// agent/coder has cross-channel context. No-op outside local hub/connected
 	// mode (e.g. the gateway daemon, which manages its own context). Silent.
@@ -1016,6 +1040,9 @@ func (a *AgentMode) Run(ctx context.Context, query string, additionalContext str
 	if err == nil && strings.TrimSpace(a.cli.lastAgentReply) != "" {
 		a.cli.mirrorHubTurn(ctx, query, a.cli.lastAgentReply)
 	}
+	// Close the orchestrator's registry entry with the real outcome; the
+	// deferred End(nil) then no-ops (End is idempotent, first call wins).
+	orchRun.End(err)
 	return err
 }
 
@@ -2433,9 +2460,26 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 					if prevLines > 0 {
 						fmt.Print(metrics.ClearLines(prevLines))
 					}
+					// Enrich each slot with live progress from the run
+					// registry: current ReAct turn, action in flight and any
+					// subagents the worker spawned (rendered as sub-lines).
+					reg := runs.Default()
+					for _, ac := range agentCalls {
+						info, ok := reg.ByCallID(ac.ID)
+						if !ok {
+							continue
+						}
+						var subLines []string
+						for _, child := range reg.Children(info.ID) {
+							subLines = append(subLines, formatRunChildLine(child))
+						}
+						progressState.SetLive(ac.ID, info.Turn, info.MaxTurns, info.Action, subLines)
+					}
 					output := metrics.FormatDispatchProgress(progressState, modelName)
 					fmt.Print(output)
-					prevLines = progressState.LineCount()
+					// Count rendered lines directly — sub-lines make the
+					// panel height dynamic between ticks.
+					prevLines = strings.Count(output, "\n")
 				})
 
 				// Give the policy adapter access to the spinner and stdin

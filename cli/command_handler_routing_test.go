@@ -34,7 +34,7 @@ func TestCommandRoutingCoverage(t *testing.T) {
 
 	// Mode-switch commands, /reload and /version|/v are intentionally NOT in
 	// the table (handled by HandleCommand's switch so the per-command ctx flows).
-	for _, in := range []string{"/agent", "/run task", "/coder fix", "/plan x", "/reload", "/version", "/v"} {
+	for _, in := range []string{"/agent", "/agents", "/agents show run-1", "/run task", "/coder fix", "/plan x", "/reload", "/version", "/v"} {
 		if _, ok := ch.lookup(in); ok {
 			t.Errorf("%q should be handled by HandleCommand's switch, not the table", in)
 		}

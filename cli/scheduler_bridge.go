@@ -26,6 +26,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/diillson/chatcli/cli/agent/runs"
 	"github.com/diillson/chatcli/cli/agent/workers"
 	"github.com/diillson/chatcli/cli/coder"
 	"github.com/diillson/chatcli/cli/hooks"
@@ -342,15 +343,17 @@ func (b *schedulerBridge) runHeadlessAgent(ctx context.Context, task, systemPref
 		ReadOnly:        false,
 	}
 
-	// description is informational (job-history label, future telemetry).
-	// Future: pipe through to the worker as a metadata tag so /jobs logs
-	// can render it next to the result. For now the call site just
-	// records it via the scheduler's own emit path.
-	_ = description
-
 	pc := newSchedulerPolicyChecker(b, b.cli.logger, dangerousConfirmed)
+	// Register in the run registry so /agents and @agents can observe (and
+	// cancel) scheduler-driven executions like any other agent run.
+	runCtx, liveRun := runs.Default().Begin(ctx, runs.Info{
+		Kind:   runs.KindHeadless,
+		Agent:  "scheduler",
+		Task:   description + ": " + task,
+		Origin: "scheduler",
+	})
 	res, err := workers.RunWorkerReAct(
-		ctx,
+		runCtx,
 		cfg,
 		task,
 		b.cli.Client,
@@ -359,6 +362,7 @@ func (b *schedulerBridge) runHeadlessAgent(ctx context.Context, task, systemPref
 		pc,
 		b.cli.logger,
 	)
+	liveRun.End(err)
 	if err != nil {
 		return "", err
 	}

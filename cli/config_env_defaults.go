@@ -112,6 +112,7 @@ var envDefaults = map[string]envDefault{
 	"CHATCLI_AGENT_WORKER_MAX_TURNS":     {Value: "30", Source: "workers.DefaultWorkerMaxTurns"},
 	"CHATCLI_AGENT_SUBAGENT_MAX_DEPTH":   {Value: "2", Source: "workers.DefaultSubagentMaxDepth"},
 	"CHATCLI_AGENT_SUBAGENT_MAX_TURNS":   {Value: "15", Source: "workers.DefaultSubagentMaxTurns"},
+	"CHATCLI_AGENT_RUNS_HISTORY":         {Value: "200", Source: "runs.DefaultHistorySize"},
 	"CHATCLI_AGENT_PARALLEL_TOOLS":       {Value: "false", IsBool: true, Source: "agent.ParallelToolsEnabled (Fase 3)"},
 	"CHATCLI_AGENT_MAX_TOOL_CONCURRENCY": {Value: "10", Source: "agent.defaultMaxToolConcurrency (Fase 3)"},
 	"CHATCLI_AGENT_INLINE_CODE_STRICT":   {Value: "false", IsBool: true, Source: "agent.InlineCodeRiskAnalyzer (Fase 1.3)"},

@@ -637,6 +637,12 @@ func NewChatCLI(ctx context.Context, manager manager.LLMManager, logger *zap.Log
 		// TaskTracker.
 		pluginMgr.RegisterBuiltinPlugin(plugins.NewBuiltinTodoPlugin())
 
+		// @agents — squad observability: lets the LLM list live agent runs
+		// (workers, subagents, MoA members, scheduler headless), inspect
+		// per-run progress and cancel a stuck run. Adapter wired below over
+		// the process-wide run registry.
+		pluginMgr.RegisterBuiltinPlugin(plugins.NewBuiltinAgentsPlugin())
+
 		// Slash-as-tool: register the curated subset of slash commands
 		// (currently /help and /version) as plugins so the LLM can invoke
 		// them via the same native tool dispatch path used by @coder,
@@ -836,6 +842,9 @@ func NewChatCLI(ctx context.Context, manager manager.LLMManager, logger *zap.Log
 		}
 		return cli.agentMode.taskTracker
 	}))
+
+	// Wire the @agents plugin adapter over the process-wide run registry.
+	plugins.SetAgentsAdapter(newLiveAgentsAdapter(nil))
 
 	// Wire the policy_manager's capability resolver (Item 4). When a
 	// tool call hits no explicit policy rule AND the plugin advertises

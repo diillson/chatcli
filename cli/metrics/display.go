@@ -129,6 +129,13 @@ type AgentSlot struct {
 	Status   AgentSlotStatus
 	Duration time.Duration
 	Error    string
+	// Live progress (fed from the agent run registry between redraw ticks).
+	Turn     int    // current ReAct turn (0 = unknown)
+	MaxTurns int    // turn budget (0 = unknown)
+	Action   string // current action label, e.g. "read cli/foo.go"
+	// SubLines are pre-formatted, indented lines rendered under this agent
+	// (e.g. live subagents spawned by it). The caller owns the formatting.
+	SubLines []string
 }
 
 // AgentSlotStatus represents the lifecycle state of an agent slot.
@@ -179,6 +186,23 @@ func (p *AgentProgressState) MarkCompleted(callID string, d time.Duration) {
 		if p.Agents[i].CallID == callID {
 			p.Agents[i].Status = SlotCompleted
 			p.Agents[i].Duration = d
+			return
+		}
+	}
+}
+
+// SetLive refreshes a slot's live progress fields (current turn, action and
+// subagent sub-lines). Fed from the agent run registry on each redraw tick;
+// zero/empty values clear the corresponding field.
+func (p *AgentProgressState) SetLive(callID string, turn, maxTurns int, action string, subLines []string) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	for i := range p.Agents {
+		if p.Agents[i].CallID == callID {
+			p.Agents[i].Turn = turn
+			p.Agents[i].MaxTurns = maxTurns
+			p.Agents[i].Action = action
+			p.Agents[i].SubLines = subLines
 			return
 		}
 	}
@@ -256,6 +280,12 @@ func FormatDispatchProgress(state *AgentProgressState, model string) string {
 		case SlotRunning:
 			icon = GetSpinnerFrame()
 			statusText = "executando..."
+			if slot.Turn > 0 && slot.MaxTurns > 0 {
+				statusText = fmt.Sprintf("turno %d/%d", slot.Turn, slot.MaxTurns)
+			}
+			if slot.Action != "" {
+				statusText += fmt.Sprintf(" · %s", truncateDisplay(slot.Action, 44))
+			}
 			color = ColorCyan
 		case SlotCompleted:
 			icon = "✓"
@@ -274,6 +304,9 @@ func FormatDispatchProgress(state *AgentProgressState, model string) string {
 			taskPreview,
 			color, statusText, ColorReset,
 		)
+		for _, sub := range slot.SubLines {
+			fmt.Fprintf(&b, "      %s%s%s\n", ColorGray, truncateDisplay(sub, 90), ColorReset)
+		}
 	}
 
 	return b.String()
@@ -283,7 +316,11 @@ func FormatDispatchProgress(state *AgentProgressState, model string) string {
 func (p *AgentProgressState) LineCount() int {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	return 1 + len(p.Agents) // header + one per agent
+	n := 1 + len(p.Agents) // header + one per agent
+	for _, s := range p.Agents {
+		n += len(s.SubLines)
+	}
+	return n
 }
 
 // renderProgressBar draws a simple ASCII progress bar: [████░░░░░░]

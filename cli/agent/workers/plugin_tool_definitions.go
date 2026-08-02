@@ -104,6 +104,29 @@ func PluginToolDefinitions() []models.ToolDefinition {
 			},
 		},
 		AskUserToolDefinition(),
+		{
+			Type: "function",
+			Function: models.ToolFunctionDef{
+				Name: "agents_runs",
+				Description: "Observe and manage live agent executions (the squad): list running workers/subagents/MoA members with their current turn and action, show one run's detail, or cancel a stuck run. " +
+					"Use after dispatching <agent_call> workers to monitor progress, and cancel runs that are looping without progress.",
+				Parameters: map[string]interface{}{
+					"type": "object",
+					"properties": map[string]interface{}{
+						"cmd": map[string]interface{}{
+							"type":        "string",
+							"enum":        []string{"list", "show", "cancel"},
+							"description": "list = all live + recent runs; show = one run's detail; cancel = request cancellation of a live run",
+						},
+						"id": map[string]interface{}{
+							"type":        "string",
+							"description": "Run ID (e.g. run-3). Required for show and cancel.",
+						},
+					},
+					"required": []string{"cmd"},
+				},
+			},
+		},
 	}
 }
 
@@ -150,6 +173,14 @@ var nativePluginToolMap = map[string]struct {
 			// Use the single-JSON-arg form so the webfetch plugin sees the
 			// exact map the LLM sent (easier than threading every flag).
 			payload := map[string]interface{}{"cmd": "fetch", "args": args}
+			raw, _ := jsonMarshalForTool(payload)
+			return []string{string(raw)}
+		},
+	},
+	"agents_runs": {
+		PluginName: "@agents",
+		BuildArgs: func(args map[string]interface{}) []string {
+			payload := map[string]interface{}{"cmd": args["cmd"], "args": args}
 			raw, _ := jsonMarshalForTool(payload)
 			return []string{string(raw)}
 		},

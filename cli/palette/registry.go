@@ -105,6 +105,7 @@ var rootCommands = []RootCommand{
 	{"/graph", CatContext, "complete.root.graph"},
 
 	// ── Agent / build ───────────────────────────────────────────────────
+	{"/agents", CatAgent, "help.command.agents"},
 	{"/agent", CatAgent, "complete.root.agent"},
 	{"/coder", CatAgent, "complete.root.coder"},
 	{"/run", CatAgent, "complete.root.run"},
