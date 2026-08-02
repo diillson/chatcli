@@ -1113,6 +1113,7 @@ func (cli *ChatCLI) showConfigIntegrations(ctx context.Context) {
 	kv(p, "CHATCLI_TTS_VOICE_PT", envOr("CHATCLI_TTS_VOICE_PT"))
 	kv(p, "CHATCLI_GATEWAY_VOICE_REPLY", envOr("CHATCLI_GATEWAY_VOICE_REPLY"))
 	kv(p, "CHATCLI_GATEWAY_IMAGE_REPLY", envOr("CHATCLI_GATEWAY_IMAGE_REPLY"))
+	kv(p, "CHATCLI_GATEWAY_STRUCTURED_PROGRESS", envBool("CHATCLI_GATEWAY_STRUCTURED_PROGRESS"))
 
 	fmt.Println(p)
 	subheader(p, "cfg.sub.integ.imagegen")
