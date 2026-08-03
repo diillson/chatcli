@@ -45,7 +45,7 @@ require (
 	k8s.io/apimachinery v0.36.3
 	k8s.io/client-go v0.36.3
 	k8s.io/metrics v0.36.3
-	modernc.org/sqlite v1.54.0
+	modernc.org/sqlite v1.55.0
 	mvdan.cc/sh/v3 v3.13.1
 )
 
