@@ -73,6 +73,13 @@ type ToolInput struct {
 	// ran /schedule directly).
 	IKnow bool `json:"i_know,omitempty"`
 
+	// Skills are persona skill NAMES re-resolved at fire time and injected
+	// into headless agent_task runs, so a scheduled card fires with the
+	// same knowledge the creating run had. Names, not content: the daemon
+	// process resolves them against its own skills directory (skill
+	// structs do not serialize their content).
+	Skills []string `json:"skills,omitempty"`
+
 	// query/list/cancel inputs.
 	ID     string     `json:"id,omitempty"`
 	Filter ListFilter `json:"filter,omitempty"`
@@ -284,6 +291,16 @@ func buildJobFromInput(in *ToolInput, owner Owner) (*Job, error) {
 	// Name.
 	if in.Name == "" {
 		in.Name = fmt.Sprintf("job-%d", time.Now().UnixNano())
+	}
+
+	// Skills ride the action payload (JSON-safe by construction) so the
+	// executor — possibly a daemon process with no access to the creating
+	// session — can re-resolve and inject them at fire time.
+	if len(in.Skills) > 0 && act.Type == ActionAgentTask {
+		if act.Payload == nil {
+			act.Payload = make(map[string]any)
+		}
+		act.Payload["skills"] = in.Skills
 	}
 
 	job := NewJob(in.Name, owner, sched, act)

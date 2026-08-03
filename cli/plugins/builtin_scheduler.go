@@ -103,7 +103,10 @@ Subcommands (use cmd + args; do/when are required for schedule):
              do:"/coder <task>"|"/run <task>"|"/agent <task>"|"shell: <cmd>"|"agent: <task>"|"@<tool> <args>"|"POST <url>"|"noop",
              wait?:{condition:"docker:NAME:running"|"http://...==200"|"file:/path"},
              until?:"<condition DSL>", timeout?, poll?, max_polls?,
-             max_retries?, depends_on?, triggers?, ttl?, tags?, i_know?}
+             max_retries?, depends_on?, triggers?, ttl?, tags?, i_know?,
+             skills?:["skill-name",...] (persona skills re-resolved and
+             injected into the headless run at fire time; defaults to the
+             creating run's active skills when omitted)}
   wait      {until:"<condition>", every?, timeout?, max_polls?, async?, name?}
   query     {id}
   list      {filter?:{owner, statuses, tag, name_substr, include_terminal}}

@@ -32,14 +32,24 @@ func (AgentTask) ValidateSpec(payload map[string]any) error {
 	return nil
 }
 
-// Execute delegates to the bridge.
+// Execute delegates to the bridge. When the job carries skill names and
+// the bridge supports skill injection, the run fires with the same
+// knowledge the creating run had.
 func (AgentTask) Execute(ctx context.Context, action scheduler.Action, env *scheduler.ExecEnv) scheduler.ActionResult {
 	task := asString(action.Payload, "task")
 	system := asString(action.Payload, "system_hint")
 	if env == nil || env.Bridge == nil {
 		return scheduler.ActionResult{Err: fmt.Errorf("agent_task: no bridge wired")}
 	}
-	out, err := env.Bridge.RunAgentTask(ctx, task, system, env.Job.DangerousConfirmed)
+	var out string
+	var err error
+	if skills := action.PayloadStringSlice("skills"); len(skills) > 0 {
+		if sb, ok := env.Bridge.(scheduler.SkillAwareBridge); ok {
+			out, err = sb.RunAgentTaskWithSkills(ctx, task, system, env.Job.DangerousConfirmed, skills)
+			return scheduler.ActionResult{Output: truncate(out, 1<<15), Err: err}
+		}
+	}
+	out, err = env.Bridge.RunAgentTask(ctx, task, system, env.Job.DangerousConfirmed)
 	return scheduler.ActionResult{
 		Output: truncate(out, 1<<15),
 		Err:    err,

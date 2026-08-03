@@ -723,6 +723,16 @@ func parseScheduleArgs(args []string) (scheduler.ToolInput, error) {
 			i = ni
 		case "--on-timeout":
 			in.OnTimeout, i = takeString(args, i)
+		case "--skill":
+			// Repeatable: each --skill adds one persona skill name that
+			// the headless agent_task run re-resolves and injects at
+			// fire time. Without the flag, jobs created via @scheduler
+			// inherit the creating run's active skills automatically.
+			val, ni := takeString(args, i)
+			if val != "" {
+				in.Skills = append(in.Skills, val)
+			}
+			i = ni
 		case "--i-know":
 			// Pre-authorize ShellPolicyAsk commands at enqueue
 			// preflight. Propagates to Job.DangerousConfirmed via

@@ -22,6 +22,7 @@ package cli
 
 import (
 	"os"
+	"sort"
 	"strings"
 
 	llmclient "github.com/diillson/chatcli/llm/client"
@@ -136,6 +137,22 @@ func (a *AgentMode) rescanSkillsMidLoop(text string) (string, []string) {
 		zap.String("model_hint", a.skillModelHint),
 		zap.String("effort_hint", string(a.skillEffortHint)))
 	return buildMidLoopSkillBlock(fresh), names
+}
+
+// InjectedSkillNames returns a sorted snapshot of every skill name the
+// current Run() has delivered to the model. Consumers: the park snapshot
+// and the scheduler adapter (so a job scheduled mid-run inherits the
+// creating run's skills).
+func (a *AgentMode) InjectedSkillNames() []string {
+	if a == nil || len(a.injectedSkillNames) == 0 {
+		return nil
+	}
+	names := make([]string, 0, len(a.injectedSkillNames))
+	for name := range a.injectedSkillNames {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
 }
 
 // noteInjectedSkills records skill names already delivered to the model (via
