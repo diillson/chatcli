@@ -18,7 +18,11 @@ package cli
 
 import (
 	"strings"
+	"time"
 	"unicode/utf8"
+
+	"github.com/diillson/chatcli/cli/metrics"
+	"github.com/diillson/chatcli/i18n"
 )
 
 // setTypeaheadPreview publishes the current partial input line (what has
@@ -112,4 +116,27 @@ func sanitizeTypeaheadPreview(s string) string {
 		}
 	}
 	return strings.TrimLeft(b.String(), " ")
+}
+
+// buildTurnSpinnerFrame composes one repaint of the single-line turn
+// spinner: status line (with the queued type-ahead indicator) plus the
+// live input line below when the user is typing. Extracted from the
+// ticker closure so the frame logic is directly testable — the ticker
+// itself only runs against a real TTY.
+func (a *AgentMode) buildTurnSpinnerFrame(d time.Duration, modelName string, hadPreview bool) (string, bool) {
+	msg := "Processando..."
+	a.cli.messageQueueMu.Lock()
+	queued := len(a.cli.messageQueue)
+	a.cli.messageQueueMu.Unlock()
+	if a.stdinLines != nil {
+		queued += len(a.stdinLines)
+	}
+	if queued > 0 {
+		msg = "Processando... " + i18n.T("agent.queue.indicator", queued)
+	}
+	// Live type-ahead: what the user is typing renders on its own line
+	// BELOW the spinner (same placement as the dispatch panel), cursor
+	// returned to the spinner line each tick.
+	suffix, had := formatTypeaheadPreviewBelow(a.typeaheadPreviewSnapshot(), hadPreview)
+	return metrics.FormatTimerStatus(d, modelName, msg) + "\033[K" + suffix, had
 }

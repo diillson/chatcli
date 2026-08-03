@@ -1988,22 +1988,9 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 		// timer mutex); read after Stop() for the final cleanup.
 		spinnerHadPreview := false
 		a.turnTimer.Start(ctx, func(d time.Duration) {
-			msg := "Processando..."
-			a.cli.messageQueueMu.Lock()
-			queued := len(a.cli.messageQueue)
-			a.cli.messageQueueMu.Unlock()
-			if a.stdinLines != nil {
-				queued += len(a.stdinLines)
-			}
-			if queued > 0 {
-				msg = "Processando... " + i18n.T("agent.queue.indicator", queued)
-			}
-			// Live type-ahead: what the user is typing renders on its own
-			// line BELOW the spinner (same placement as the dispatch
-			// panel), cursor returned to the spinner line each tick.
-			suffix, had := formatTypeaheadPreviewBelow(a.typeaheadPreviewSnapshot(), spinnerHadPreview)
-			spinnerHadPreview = had
-			fmt.Print(metrics.FormatTimerStatus(d, modelName, msg) + "\033[K" + suffix)
+			var frame string
+			frame, spinnerHadPreview = a.buildTurnSpinnerFrame(d, modelName, spinnerHadPreview)
+			fmt.Print(frame)
 		})
 
 		// Validate/repair tool result pairing on the PERSISTENT history —

@@ -8,6 +8,9 @@ package cli
 import (
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/diillson/chatcli/i18n"
 )
 
 // TestSplitStdinChunkBackspace pins the cbreak-mode line editing: without
@@ -108,5 +111,45 @@ func TestTypeaheadPreviewSnapshot(t *testing.T) {
 	a.setTypeaheadPreview("/agents")
 	if got := a.typeaheadPreviewSnapshot(); got != "/agents" {
 		t.Errorf("snapshot = %q", got)
+	}
+}
+
+// TestBuildTurnSpinnerFrame pins the extracted spinner frame: queue
+// indicator, preview-below suffix and state threading.
+func TestBuildTurnSpinnerFrame(t *testing.T) {
+	a := &AgentMode{cli: &ChatCLI{}}
+
+	// Quiet: no queue indicator, no preview suffix.
+	frame, had := a.buildTurnSpinnerFrame(2*time.Second, "claude-sonnet-5", false)
+	if had {
+		t.Fatal("quiet frame must not report a preview")
+	}
+	if !strings.Contains(frame, "claude-sonnet-5") || !strings.Contains(frame, "Processando") {
+		t.Errorf("frame must carry model and status: %q", frame)
+	}
+	if strings.Contains(frame, "❯") {
+		t.Errorf("quiet frame must not paint an input line: %q", frame)
+	}
+
+	// Typing: the input line renders below and the cursor returns.
+	a.setTypeaheadPreview("/agents")
+	frame, had = a.buildTurnSpinnerFrame(2*time.Second, "m", false)
+	if !had {
+		t.Fatal("typing must report hadPreview=true")
+	}
+	if !strings.Contains(frame, "\n") || !strings.Contains(frame, "❯ /agents▌") || !strings.HasSuffix(frame, "\033[A\r") {
+		t.Errorf("typing frame must paint below and return the cursor: %q", frame)
+	}
+
+	// Queue indicator counts pending stdin lines and chat-queue items.
+	a.setTypeaheadPreview("")
+	a.stdinLines = make(chan string, 4)
+	a.stdinLines <- "queued line"
+	a.cli.messageQueueMu.Lock()
+	a.cli.messageQueue = append(a.cli.messageQueue, "older")
+	a.cli.messageQueueMu.Unlock()
+	frame, _ = a.buildTurnSpinnerFrame(time.Second, "m", false)
+	if !strings.Contains(frame, i18n.T("agent.queue.indicator", 2)) {
+		t.Errorf("frame must show the combined queue count: %q", frame)
 	}
 }
