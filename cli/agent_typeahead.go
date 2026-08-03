@@ -18,7 +18,11 @@ package cli
 
 import (
 	"strings"
+	"time"
 	"unicode/utf8"
+
+	"github.com/diillson/chatcli/cli/metrics"
+	"github.com/diillson/chatcli/i18n"
 )
 
 // setTypeaheadPreview publishes the current partial input line (what has
@@ -58,18 +62,29 @@ func formatTypeaheadPreviewLine(preview string) string {
 	return "  " + ColorCyan + "❯ " + text + "▌" + ColorReset + "\033[K"
 }
 
-// formatTypeaheadPreviewInline renders a compact suffix for the
-// single-line turn spinner.
-func formatTypeaheadPreviewInline(preview string, width int) string {
-	text := sanitizeTypeaheadPreview(preview)
-	if text == "" {
-		return ""
+// formatTypeaheadPreviewBelow renders the input line UNDER the single-line
+// turn spinner (same placement as the dispatch panel's preview, which
+// users found clearer than an inline suffix competing with the spinner
+// for horizontal space).
+//
+// The suffix paints the line below and returns the cursor to the spinner
+// line, so the spinner's plain `\r` repaint contract is preserved:
+//
+//	\n<preview>\033[A\r   — down, paint, back up
+//
+// hadPreview threads the previous tick's state: when typing stops (Enter
+// or backspace-to-empty) one final `\n\033[K\033[A\r` wipes the stale
+// line, and after that the dance stops entirely — a quiet spinner never
+// touches the row below it (which would scroll the screen when the
+// spinner sits on the terminal's bottom row).
+func formatTypeaheadPreviewBelow(preview string, hadPreview bool) (string, bool) {
+	if line := formatTypeaheadPreviewLine(preview); line != "" {
+		return "\n" + line + "\033[A\r", true
 	}
-	if n := utf8.RuneCountInString(text); n > width {
-		runes := []rune(text)
-		text = "…" + string(runes[n-width:])
+	if hadPreview {
+		return "\n\033[K\033[A\r", false
 	}
-	return " " + ColorCyan + "❯ " + text + "▌" + ColorReset
+	return "", false
 }
 
 // sanitizeTypeaheadPreview drops control bytes AND whole escape sequences
@@ -101,4 +116,37 @@ func sanitizeTypeaheadPreview(s string) string {
 		}
 	}
 	return strings.TrimLeft(b.String(), " ")
+}
+
+// spinnerPreviewWipe returns the sequence that erases a type-ahead line
+// still painted below the spinner when the turn ends mid-typing ("" when
+// nothing was painted).
+func spinnerPreviewWipe(hadPreview bool) string {
+	if hadPreview {
+		return "\n\033[K\033[A\r"
+	}
+	return ""
+}
+
+// buildTurnSpinnerFrame composes one repaint of the single-line turn
+// spinner: status line (with the queued type-ahead indicator) plus the
+// live input line below when the user is typing. Extracted from the
+// ticker closure so the frame logic is directly testable — the ticker
+// itself only runs against a real TTY.
+func (a *AgentMode) buildTurnSpinnerFrame(d time.Duration, modelName string, hadPreview bool) (string, bool) {
+	msg := "Processando..."
+	a.cli.messageQueueMu.Lock()
+	queued := len(a.cli.messageQueue)
+	a.cli.messageQueueMu.Unlock()
+	if a.stdinLines != nil {
+		queued += len(a.stdinLines)
+	}
+	if queued > 0 {
+		msg = "Processando... " + i18n.T("agent.queue.indicator", queued)
+	}
+	// Live type-ahead: what the user is typing renders on its own line
+	// BELOW the spinner (same placement as the dispatch panel), cursor
+	// returned to the spinner line each tick.
+	suffix, had := formatTypeaheadPreviewBelow(a.typeaheadPreviewSnapshot(), hadPreview)
+	return metrics.FormatTimerStatus(d, modelName, msg) + "\033[K" + suffix, had
 }

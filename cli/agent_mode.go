@@ -1983,21 +1983,14 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 		// e nada muda visualmente no spinner — só vê (1 na fila) na
 		// próxima iteração do turn.
 		modelName := turnClient.GetModelName()
+		// Tracks whether the previous tick painted a type-ahead line under
+		// the spinner. Written only by the ticker goroutine (under the
+		// timer mutex); read after Stop() for the final cleanup.
+		spinnerHadPreview := false
 		a.turnTimer.Start(ctx, func(d time.Duration) {
-			msg := "Processando..."
-			a.cli.messageQueueMu.Lock()
-			queued := len(a.cli.messageQueue)
-			a.cli.messageQueueMu.Unlock()
-			if a.stdinLines != nil {
-				queued += len(a.stdinLines)
-			}
-			if queued > 0 {
-				msg = "Processando... " + i18n.T("agent.queue.indicator", queued)
-			}
-			// Live type-ahead: show what the user is typing right now so
-			// they never type blind under the spinner. \033[K clears
-			// leftovers when the preview shrinks (backspace).
-			fmt.Print(metrics.FormatTimerStatus(d, modelName, msg) + formatTypeaheadPreviewInline(a.typeaheadPreviewSnapshot(), 40) + "\033[K")
+			var frame string
+			frame, spinnerHadPreview = a.buildTurnSpinnerFrame(d, modelName, spinnerHadPreview)
+			fmt.Print(frame)
 		})
 
 		// Validate/repair tool result pairing on the PERSISTENT history —
@@ -2091,6 +2084,11 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 		// Para o timer e obtém a duração
 		turnDuration := a.turnTimer.Stop()
 		fmt.Print(metrics.ClearLine()) // Limpa a linha do timer
+		// If the user was mid-typing when the turn ended, a type-ahead line
+		// is still painted below the spinner — wipe it so the response
+		// doesn't interleave with a stale preview. (Safe read: Stop()
+		// already synchronized with the last tick.)
+		fmt.Print(spinnerPreviewWipe(spinnerHadPreview))
 		fmt.Println()
 
 		// Helper para exibir métricas ao final do turno (após execução)

@@ -94,9 +94,9 @@ func TestQueueIndicator_FormatsCount(t *testing.T) {
 	// locale; instead, we verify the call site uses the indicator key and
 	// passes the count via Sprintf semantics. A minimal regex on the
 	// agent_mode.go source code itself catches accidental removals.
-	src := mustReadFile(t, "agent_mode.go")
+	src := mustReadFile(t, "agent_typeahead.go")
 	require.Contains(t, src, `i18n.T("agent.queue.indicator", queued)`,
-		"timer status must include queued count via i18n key")
+		"timer status must include queued count via i18n key (frame logic lives in buildTurnSpinnerFrame)")
 }
 
 // mustReadFile reads a sibling source file relative to the test file.

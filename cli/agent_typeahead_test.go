@@ -8,6 +8,9 @@ package cli
 import (
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/diillson/chatcli/i18n"
 )
 
 // TestSplitStdinChunkBackspace pins the cbreak-mode line editing: without
@@ -66,12 +69,36 @@ func TestFormatTypeaheadPreview(t *testing.T) {
 		t.Errorf("long input must show the tail with ellipsis: %q", tail)
 	}
 
-	inline := formatTypeaheadPreviewInline("hello", 40)
-	if !strings.Contains(inline, "❯ hello▌") {
-		t.Errorf("inline preview must render prompt+cursor: %q", inline)
+}
+
+// TestFormatTypeaheadPreviewBelow pins the below-the-spinner placement: the
+// suffix paints the line under the spinner and restores the cursor; when
+// typing stops it wipes the stale line exactly once, and a quiet spinner
+// never touches the row below (which would scroll at the terminal's
+// bottom row).
+func TestFormatTypeaheadPreviewBelow(t *testing.T) {
+	suffix, had := formatTypeaheadPreviewBelow("/board", false)
+	if !had {
+		t.Fatal("non-empty preview must report hadPreview=true")
 	}
-	if formatTypeaheadPreviewInline("", 40) != "" {
-		t.Error("empty inline preview must render nothing")
+	if !strings.HasPrefix(suffix, "\n") || !strings.HasSuffix(suffix, "\033[A\r") {
+		t.Errorf("suffix must go down, paint and come back up: %q", suffix)
+	}
+	if !strings.Contains(suffix, "❯ /board▌") {
+		t.Errorf("suffix must carry the preview line: %q", suffix)
+	}
+
+	wipe, had := formatTypeaheadPreviewBelow("", true)
+	if had {
+		t.Fatal("cleared preview must report hadPreview=false")
+	}
+	if wipe != "\n\033[K\033[A\r" {
+		t.Errorf("transition to empty must wipe the stale line once: %q", wipe)
+	}
+
+	quiet, had := formatTypeaheadPreviewBelow("", false)
+	if quiet != "" || had {
+		t.Errorf("quiet spinner must not touch the row below, got %q", quiet)
 	}
 }
 
@@ -84,5 +111,55 @@ func TestTypeaheadPreviewSnapshot(t *testing.T) {
 	a.setTypeaheadPreview("/agents")
 	if got := a.typeaheadPreviewSnapshot(); got != "/agents" {
 		t.Errorf("snapshot = %q", got)
+	}
+}
+
+// TestBuildTurnSpinnerFrame pins the extracted spinner frame: queue
+// indicator, preview-below suffix and state threading.
+func TestBuildTurnSpinnerFrame(t *testing.T) {
+	a := &AgentMode{cli: &ChatCLI{}}
+
+	// Quiet: no queue indicator, no preview suffix.
+	frame, had := a.buildTurnSpinnerFrame(2*time.Second, "claude-sonnet-5", false)
+	if had {
+		t.Fatal("quiet frame must not report a preview")
+	}
+	if !strings.Contains(frame, "claude-sonnet-5") || !strings.Contains(frame, "Processando") {
+		t.Errorf("frame must carry model and status: %q", frame)
+	}
+	if strings.Contains(frame, "❯") {
+		t.Errorf("quiet frame must not paint an input line: %q", frame)
+	}
+
+	// Typing: the input line renders below and the cursor returns.
+	a.setTypeaheadPreview("/agents")
+	frame, had = a.buildTurnSpinnerFrame(2*time.Second, "m", false)
+	if !had {
+		t.Fatal("typing must report hadPreview=true")
+	}
+	if !strings.Contains(frame, "\n") || !strings.Contains(frame, "❯ /agents▌") || !strings.HasSuffix(frame, "\033[A\r") {
+		t.Errorf("typing frame must paint below and return the cursor: %q", frame)
+	}
+
+	// Queue indicator counts pending stdin lines and chat-queue items.
+	a.setTypeaheadPreview("")
+	a.stdinLines = make(chan string, 4)
+	a.stdinLines <- "queued line"
+	a.cli.messageQueueMu.Lock()
+	a.cli.messageQueue = append(a.cli.messageQueue, "older")
+	a.cli.messageQueueMu.Unlock()
+	frame, _ = a.buildTurnSpinnerFrame(time.Second, "m", false)
+	if !strings.Contains(frame, i18n.T("agent.queue.indicator", 2)) {
+		t.Errorf("frame must show the combined queue count: %q", frame)
+	}
+}
+
+// TestSpinnerPreviewWipe pins the turn-end cleanup sequence.
+func TestSpinnerPreviewWipe(t *testing.T) {
+	if got := spinnerPreviewWipe(true); got != "\n\033[K\033[A\r" {
+		t.Errorf("mid-typing turn end must wipe the row below: %q", got)
+	}
+	if got := spinnerPreviewWipe(false); got != "" {
+		t.Errorf("no preview means no wipe: %q", got)
 	}
 }
