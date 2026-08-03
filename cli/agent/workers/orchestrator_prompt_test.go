@@ -71,3 +71,23 @@ func TestOrchestratorSystemPrompt_WithFullCatalog(t *testing.T) {
 		}
 	}
 }
+
+// TestOrchestratorSystemPrompt_ResilienceAndBoardRules pins the two rules
+// added after the field report of the orchestrator abandoning the squad
+// flow on its own formatting mistakes and leaving cards stale in doing.
+func TestOrchestratorSystemPrompt_ResilienceAndBoardRules(t *testing.T) {
+	prompt := OrchestratorSystemPrompt("catalog")
+	for _, want := range []string{
+		"RESILIENCE",
+		"NEVER ejects you from the squad flow",
+		"[AGENT_CALL PARSE ERROR]",
+		"RE-DISPATCH",
+		"BOARD DISCIPLINE",
+		"[BOARD SYNC]",
+		"never invent or guess IDs",
+	} {
+		if !strings.Contains(prompt, want) {
+			t.Errorf("orchestrator prompt must contain %q", want)
+		}
+	}
+}

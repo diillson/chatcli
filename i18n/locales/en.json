@@ -1322,6 +1322,7 @@
   "agents.list.recent": "Recent finished runs",
   "agents.list.remote": "Runs in other processes (via hub)",
   "agent.sidecmd.applying": "Applying %d command(s) queued during the run",
+  "agent.squad.malformed_call": "%d malformed agent_call tag(s) — corrective feedback sent to the orchestrator",
   "agents.remote.stale": "no heartbeat — owning process may have died",
   "agents.cancel.remote": "Cancellation forwarded to the owning process of %s — honored on its next sync tick.",
   "agents.field.instance": "instance",

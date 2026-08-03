@@ -84,6 +84,58 @@ func ParseAgentCalls(text string) ([]AgentCall, error) {
 	return calls, nil
 }
 
+// CountAgentCallTags counts every <agent_call opening tag in text —
+// parseable or not. The dispatch loop compares it against the parsed count
+// to detect malformed calls: ParseAgentCalls silently skips tags with a
+// broken end or missing agent/task attributes, and without this signal the
+// orchestrator never learns its dispatch was dropped — it drifts out of
+// the squad flow and starts executing specialists' work with direct tool
+// calls.
+func CountAgentCallTags(text string) int {
+	const open = "<agent_call"
+	n := 0
+	for i := 0; ; {
+		idx := strings.Index(text[i:], open)
+		if idx < 0 {
+			break
+		}
+		pos := i + idx + len(open)
+		if pos >= len(text) {
+			n++
+			break
+		}
+		// Word boundary: "<agent_calls" or similar is not a tag.
+		switch text[pos] {
+		case ' ', '\t', '\n', '\r', '>', '/':
+			n++
+		}
+		i = pos
+	}
+	return n
+}
+
+// MalformedAgentCallFeedback builds the corrective user-role message
+// injected into the orchestrator's history when some of its <agent_call>
+// tags failed to parse. The instruction is explicit about staying in the
+// delegation flow — the observed failure mode is the model silently
+// falling back to doing the specialist's work itself.
+func MalformedAgentCallFeedback(dropped, parsed int) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "[AGENT_CALL PARSE ERROR] %d of your <agent_call> tag(s) were malformed and were NOT dispatched", dropped)
+	if parsed > 0 {
+		fmt.Fprintf(&b, " (%d parsed correctly and did dispatch)", parsed)
+	}
+	b.WriteString(".\n\n")
+	b.WriteString("Required syntax — both attributes are mandatory, quotes required:\n")
+	b.WriteString("  <agent_call agent=\"coder\" task=\"describe the task here\" />\n")
+	b.WriteString("or with a body:\n")
+	b.WriteString("  <agent_call agent=\"coder\" task=\"short title\">detailed instructions</agent_call>\n\n")
+	b.WriteString("In your NEXT response, RE-EMIT the corrected <agent_call> tag(s) for the dropped task(s). ")
+	b.WriteString("Do NOT execute those tasks yourself with direct tool calls and do NOT abandon the squad flow — ")
+	b.WriteString("delegation to the specialized agents remains the default.")
+	return b.String()
+}
+
 // scanAgentTagEnd finds the end of an <agent_call ...> or <agent_call ... /> tag,
 // respecting quotes so that '>' inside attributes doesn't terminate the scan.
 // Returns the index of '>' and whether the tag is self-closing.

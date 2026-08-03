@@ -125,6 +125,11 @@ type AgentMode struct {
 	// executions. Defaults to routing through the command handler.
 	sideCmdExec func(string)
 
+	// lastBoardNudge dedups the [BOARD SYNC] reconciliation block: the
+	// model gets one nudge per distinct stale-board state, not one per
+	// turn. Reset at Run() start.
+	lastBoardNudge string
+
 	// cancelSignal is the Done() channel of the in-flight Run/ReAct loop's
 	// context. Blocking stdin reads (security confirmations, batch prompts)
 	// select on it so a Ctrl+C aborts them the instant the operation is
@@ -971,6 +976,7 @@ func (a *AgentMode) Run(ctx context.Context, query string, additionalContext str
 	a.skillEffortHint = llmclient.EffortUnset
 	a.cli.clearAgentRouteOverride()
 	a.injectedSkillNames = make(map[string]bool)
+	a.lastBoardNudge = ""
 	// Block 4 — skills (pinned + auto-activated + manual) and Orchestrator
 	// catalog. Built last because it's the most volatile (changes per query)
 	// and sits at the tail of the system prompt so earlier blocks stay
@@ -1760,6 +1766,12 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 		// recipient's inbox drain this same turn.
 		a.applySideCommands(ctx)
 
+		// Mechanical board reconciliation: cards in doing whose linked runs
+		// all finished get a [BOARD SYNC] block so the orchestrator moves
+		// them THIS turn (prompt discipline alone reliably decays over a
+		// long ReAct loop).
+		a.injectBoardSyncNotice()
+
 		// Check for type-ahead messages from user (works in both /agent and
 		// /coder modes). Lines typed while the LLM was streaming or while a
 		// tool was running get drained into the conversation as a fresh user
@@ -2494,6 +2506,18 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 		// =========================================================
 		if a.parallelMode && a.agentDispatcher != nil {
 			agentCalls, _ := workers.ParseAgentCalls(aiResponse)
+			// Malformed <agent_call> tags are dropped by the parser without a
+			// trace; left silent, the model never learns its dispatch failed
+			// and drifts out of the squad flow into direct tool calls. Feed
+			// the error back so the NEXT turn re-emits a corrected dispatch.
+			if attempts := workers.CountAgentCallTags(aiResponse); attempts > len(agentCalls) {
+				dropped := attempts - len(agentCalls)
+				fmt.Println(colorize("  ⚠ "+i18n.T("agent.squad.malformed_call", dropped), ColorYellow))
+				a.cli.history = append(a.cli.history, models.Message{
+					Role:    "user",
+					Content: workers.MalformedAgentCallFeedback(dropped, len(agentCalls)),
+				})
+			}
 			if len(agentCalls) > 0 {
 				isCompactUI := renderer.IsCompact()
 				isMinimalUI := renderer.IsMinimal()

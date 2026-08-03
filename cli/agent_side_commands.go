@@ -57,9 +57,13 @@ func (a *AgentMode) onSideCommand(ctx context.Context, line string) {
 	timer := a.turnTimer
 	if timer != nil && timer.IsRunning() {
 		timer.Pause()
-		fmt.Println(colorize("  ⚡ "+line, ColorCyan))
-		a.execSideCommand(ctx, line)
-		timer.Resume()
+		func() {
+			// Resume via defer: with nested pause depths, a handler that
+			// panics mid-print must not leave the display frozen forever.
+			defer timer.Resume()
+			fmt.Println(colorize("  ⚡ "+line, ColorCyan))
+			a.execSideCommand(ctx, line)
+		}()
 		return
 	}
 	a.sideCmdMu.Lock()
