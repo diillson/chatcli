@@ -348,3 +348,31 @@ func TestSortedKeys_Empty(t *testing.T) {
 		t.Errorf("expected empty keys, got %v", keys)
 	}
 }
+
+// TestCustomAgent_InheritModelHint verifies that the Claude Code-style
+// `model: inherit` frontmatter normalizes to the empty-string inherit
+// contract, so the hint never reaches the model router or the
+// orchestrator's agent catalog as a literal model id.
+func TestCustomAgent_InheritModelHint(t *testing.T) {
+	pa := &persona.Agent{
+		Name:  "database-architect",
+		Tools: persona.StringList{"Read"},
+		Model: "inherit",
+	}
+	if got := NewCustomAgent(pa, nil).Model(); got != "" {
+		t.Errorf("model: inherit must normalize to empty, got %q", got)
+	}
+}
+
+// TestCustomAgent_ExplicitModelHintKept guards the inverse: a real model id
+// in frontmatter must survive normalization untouched.
+func TestCustomAgent_ExplicitModelHintKept(t *testing.T) {
+	pa := &persona.Agent{
+		Name:  "reviewer",
+		Tools: persona.StringList{"Read"},
+		Model: " claude-opus-5 ",
+	}
+	if got := NewCustomAgent(pa, nil).Model(); got != "claude-opus-5" {
+		t.Errorf("explicit model hint must be kept trimmed, got %q", got)
+	}
+}

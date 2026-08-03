@@ -179,3 +179,52 @@ func TestResolveModelRoutingQualifiedHint(t *testing.T) {
 		}
 	})
 }
+
+// TestIsInheritHint pins the recognizer for the Claude Code-style
+// `model: inherit` frontmatter marker.
+func TestIsInheritHint(t *testing.T) {
+	for hint, want := range map[string]bool{
+		"inherit":         true,
+		"Inherit":         true,
+		" INHERIT ":       true,
+		"":                false,
+		"inherited":       false,
+		"claude-sonnet-5": false,
+	} {
+		if got := IsInheritHint(hint); got != want {
+			t.Errorf("IsInheritHint(%q) = %v, want %v", hint, got, want)
+		}
+	}
+}
+
+// TestResolveModelRoutingInheritHint pins `model: inherit` to the no-hint
+// fallback. Before this guard the literal string reached the optimistic
+// branch and was sent to the provider API as a model id, failing every
+// squad dispatch with "not_found_error: model: inherit".
+func TestResolveModelRoutingInheritHint(t *testing.T) {
+	for _, hint := range []string{"inherit", "Inherit", " INHERIT "} {
+		t.Run(hint, func(t *testing.T) {
+			router := &fakeRouter{available: []string{"CLAUDEAI"}}
+			user := &MockLLMClient{}
+			r := ResolveModelRouting(ResolveModelRoutingInput{
+				Router:       router,
+				UserProvider: "CLAUDEAI",
+				UserModel:    "claude-sonnet-5",
+				UserClient:   user,
+				Hint:         hint,
+			})
+			if r.Changed {
+				t.Fatalf("Hint=%q must be a no-op, got Changed=true Note=%q Model=%q", hint, r.Note, r.Model)
+			}
+			if r.Client != user || r.Provider != "CLAUDEAI" || r.Model != "claude-sonnet-5" {
+				t.Errorf("fallback must keep the user client/provider/model, got %s/%s", r.Provider, r.Model)
+			}
+			if r.UserMessage != "" {
+				t.Errorf("inherit is not a failure — UserMessage must stay empty, got %q", r.UserMessage)
+			}
+			if len(router.calls) != 0 {
+				t.Errorf("no client must be built for an inherit hint, got %v", router.calls)
+			}
+		})
+	}
+}

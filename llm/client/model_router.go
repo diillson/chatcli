@@ -58,7 +58,7 @@ type ModelRoutingResolution struct {
 
 	// Note is a short machine-readable tag describing the branch taken.
 	//
-	//   ""                        — no hint / hint == user model
+	//   ""                        — no hint / hint == user model / "inherit"
 	//   "explicit-provider"       — hint carried a "PROVIDER:model" prefix
 	//   "api-cached"              — matched user provider's API cache
 	//   "catalog-same-provider"   — catalog hit on user's provider
@@ -93,6 +93,16 @@ type ResolveModelRoutingInput struct {
 	Logger *zap.Logger
 }
 
+// IsInheritHint reports whether a `model:` frontmatter value is the
+// Claude Code-style explicit "inherit" marker. Agent/skill definitions
+// written for Claude Code declare `model: inherit` to mean "use the
+// session's active model" — the value is a routing directive, never a
+// model id, so it must resolve to the no-hint fallback instead of being
+// sent to a provider API as a literal model name.
+func IsInheritHint(hint string) bool {
+	return strings.EqualFold(strings.TrimSpace(hint), "inherit")
+}
+
 // ResolveModelRouting runs the resolution pipeline. See file header for
 // the branch order and contracts.
 func ResolveModelRouting(in ResolveModelRoutingInput) ModelRoutingResolution {
@@ -109,7 +119,7 @@ func ResolveModelRouting(in ResolveModelRoutingInput) ModelRoutingResolution {
 	}
 
 	hint := strings.TrimSpace(in.Hint)
-	if hint == "" {
+	if hint == "" || IsInheritHint(hint) {
 		return fallback
 	}
 	if strings.EqualFold(hint, in.UserModel) {
