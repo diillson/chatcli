@@ -258,9 +258,24 @@ func FormatDispatchProgress(state *AgentProgressState, model string) string {
 
 	elapsed := time.Since(state.StartTime)
 	completed := state.completedCountLocked()
+	// The bar earns fractional credit for RUNNING agents as they burn ReAct
+	// turns. Counting only finished agents froze the bar at 0% for the whole
+	// working phase of a dispatch (minutes with two specialists), then
+	// jumped straight to done — it read as "not loading". Live fractions are
+	// capped below 1 so a worker at its last turn never shows as finished.
+	progress := float64(completed)
+	for _, slot := range state.Agents {
+		if slot.Status == SlotRunning && slot.Turn > 0 && slot.MaxTurns > 0 {
+			f := float64(slot.Turn-1) / float64(slot.MaxTurns)
+			if f > 0.95 {
+				f = 0.95
+			}
+			progress += f
+		}
+	}
 	pct := 0
 	if state.Total > 0 {
-		pct = (completed * 100) / state.Total
+		pct = int(progress * 100 / float64(state.Total))
 	}
 
 	// Header line with spinner, model, elapsed, progress bar

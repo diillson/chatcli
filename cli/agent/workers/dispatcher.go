@@ -409,7 +409,11 @@ func FormatResults(results []AgentResult) string {
 	var b strings.Builder
 	b.WriteString("--- Agent Results ---\n\n")
 
+	failed := 0
 	for i, r := range results {
+		if r.Error != nil {
+			failed++
+		}
 		fmt.Fprintf(&b, "[%s] (call %s, %s)\n", r.Agent, r.CallID, r.Duration.Round(time.Millisecond))
 		if runID := r.Metadata["run_id"]; runID != "" {
 			fmt.Fprintf(&b, "Run: %s\n", runID)
@@ -430,6 +434,17 @@ func FormatResults(results []AgentResult) string {
 		if i < len(results)-1 {
 			b.WriteString("\n---\n\n")
 		}
+	}
+
+	// A failed dispatch must pull the orchestrator BACK into the delegation
+	// flow, not out of it — the observed drift is the model absorbing a
+	// failed specialist's job into its own direct tool calls and never
+	// delegating again.
+	if failed > 0 {
+		fmt.Fprintf(&b, "\n⚠ SQUAD FLOW — %d task(s) FAILED. For EACH failed task: diagnose the cause from its error above, "+
+			"fix the task description (or pick a better-suited agent) and RE-DISPATCH it with a new <agent_call>. "+
+			"Do NOT absorb a failed specialist's task into your own direct tool calls — direct execution is reserved "+
+			"for small glue and verification steps. Update the board card (note + keep it in doing) before re-dispatching.\n", failed)
 	}
 
 	return b.String()

@@ -42,7 +42,11 @@ func TestNudgeSegment_QueuesAndExtractsOwnedTurn(t *testing.T) {
 	// fires and drains the whole queue.
 	mw.nudgeSegment(context.Background(), segment)
 
-	deadline := time.Now().Add(3 * time.Second)
+	// Generous ceiling: extraction runs on a background goroutine and CI
+	// executes this suite under -race with full -coverpkg instrumentation
+	// on shared runners — 3s flaked there while the loop exits in
+	// milliseconds on a healthy run.
+	deadline := time.Now().Add(15 * time.Second)
 	for {
 		if extractor.calls.Load() > 0 {
 			break // extraction consumed the queued segment
@@ -57,7 +61,7 @@ func TestNudgeSegment_QueuesAndExtractsOwnedTurn(t *testing.T) {
 	}
 
 	// After a successful extraction the queue must be empty.
-	deadline = time.Now().Add(3 * time.Second)
+	deadline = time.Now().Add(15 * time.Second)
 	for len(mw.pendingFiles()) > 0 {
 		if time.Now().After(deadline) {
 			t.Fatalf("queue not drained after successful extraction: %v", mw.pendingFiles())
