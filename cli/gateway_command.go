@@ -251,6 +251,12 @@ func (cli *ChatCLI) runGateway(ctx context.Context, broker hub.Store) error {
 	stopMailBridge := startMailHubBridge(ctx, broker, mail.Default(), cli.logger)
 	defer stopMailBridge()
 
+	// Mirror this daemon's agent runs into the hub so a REPL's /agents can
+	// watch (and cancel) them live. No-op when the store lacks the
+	// capability or CHATCLI_HUB_RUNS is off.
+	stopRunsBridge := startRunsHubBridge(ctx, broker, runs.Default(), cli.logger)
+	defer stopRunsBridge()
+
 	adapters, err := gateway.BuildConfigured()
 	if err != nil {
 		return err

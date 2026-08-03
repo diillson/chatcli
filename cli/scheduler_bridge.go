@@ -33,6 +33,7 @@ import (
 	"github.com/diillson/chatcli/cli/scheduler"
 	"github.com/diillson/chatcli/llm/client"
 	"github.com/diillson/chatcli/models"
+	"github.com/diillson/chatcli/pkg/persona"
 	"go.uber.org/zap"
 )
 
@@ -296,7 +297,15 @@ func classifyAgentSlash(line string) (task string, kind agentSlashKind, ok bool)
 // dangerousConfirmed flows to the PolicyChecker so jobs with --i-know
 // can call tools that would otherwise hit ShellPolicyAsk.
 func (b *schedulerBridge) RunAgentTask(ctx context.Context, task, systemHint string, dangerousConfirmed bool) (string, error) {
-	return b.runHeadlessAgent(ctx, task, systemHint, "scheduled /run task", dangerousConfirmed)
+	return b.runHeadlessAgent(ctx, task, systemHint, "scheduled /run task", dangerousConfirmed, nil)
+}
+
+// RunAgentTaskWithSkills implements scheduler.SkillAwareBridge: the job's
+// skill names are re-resolved against this process's skills directory and
+// injected into the headless run, so a scheduled card fires with the same
+// knowledge the creating run had.
+func (b *schedulerBridge) RunAgentTaskWithSkills(ctx context.Context, task, systemHint string, dangerousConfirmed bool, skills []string) (string, error) {
+	return b.runHeadlessAgent(ctx, task, systemHint, "scheduled /run task", dangerousConfirmed, skills)
 }
 
 // RunCoderTask runs a scheduled `/coder` task headless. Same engine as
@@ -306,7 +315,7 @@ func (b *schedulerBridge) RunAgentTask(ctx context.Context, task, systemHint str
 // those are user-session globals and the scheduler dispatcher must not
 // touch them while the user is interactive.
 func (b *schedulerBridge) RunCoderTask(ctx context.Context, task string, dangerousConfirmed bool) (string, error) {
-	return b.runHeadlessAgent(ctx, task, CoderSystemPrompt, "scheduled /coder task", dangerousConfirmed)
+	return b.runHeadlessAgent(ctx, task, CoderSystemPrompt, "scheduled /coder task", dangerousConfirmed, nil)
 }
 
 // runHeadlessAgent runs a scheduler-driven /run|/agent|/coder task as
@@ -323,7 +332,7 @@ func (b *schedulerBridge) RunCoderTask(ctx context.Context, task string, dangero
 // shell-style work, (c) layers in the user's systemPreface (e.g.
 // CoderSystemPrompt for /coder) on top, and (d) lists the same full
 // tool set workers/subagent.go grants for read_only=false runs.
-func (b *schedulerBridge) runHeadlessAgent(ctx context.Context, task, systemPreface, description string, dangerousConfirmed bool) (string, error) {
+func (b *schedulerBridge) runHeadlessAgent(ctx context.Context, task, systemPreface, description string, dangerousConfirmed bool, skillNames []string) (string, error) {
 	if b.cli == nil || b.cli.Client == nil {
 		return "", fmt.Errorf("scheduler: LLM client not initialized")
 	}
@@ -334,6 +343,18 @@ func (b *schedulerBridge) runHeadlessAgent(ctx context.Context, task, systemPref
 	tools := []string{
 		"read", "write", "patch", "tree", "search", "exec",
 		"git-status", "git-diff", "git-log", "git-changed", "git-branch", "test",
+	}
+
+	// Re-resolve the creating run's skill names against this process's
+	// skills directory and layer their content under the preface — the
+	// system prompt is the content-carrying surface for skills in a
+	// worker loop. Unresolvable names are skipped (the skill may only
+	// exist on the machine that scheduled the job).
+	if block := b.resolveSkillBlock(skillNames); block != "" {
+		if strings.TrimSpace(systemPreface) != "" {
+			systemPreface += "\n\n"
+		}
+		systemPreface += block
 	}
 
 	cfg := workers.WorkerReActConfig{
@@ -370,6 +391,27 @@ func (b *schedulerBridge) runHeadlessAgent(ctx context.Context, task, systemPref
 		return "", fmt.Errorf("scheduler: headless agent returned nil result")
 	}
 	return res.Output, nil
+}
+
+// resolveSkillBlock re-resolves persona skill names into an injection
+// block. Names that no longer resolve (skill deleted, or the job was
+// created on another machine) are skipped — skill propagation is
+// best-effort context, never a reason to fail a scheduled run.
+func (b *schedulerBridge) resolveSkillBlock(skillNames []string) string {
+	if len(skillNames) == 0 || b.cli == nil || b.cli.personaHandler == nil {
+		return ""
+	}
+	mgr := b.cli.personaHandler.GetManager()
+	if mgr == nil {
+		return ""
+	}
+	resolved := make([]*persona.Skill, 0, len(skillNames))
+	for _, name := range skillNames {
+		if skill, err := mgr.GetSkillByName(name); err == nil && skill != nil {
+			resolved = append(resolved, skill)
+		}
+	}
+	return buildSkillInjectionBlock(resolved)
 }
 
 // buildSchedulerSystemPrompt frames the LLM correctly for a top-level

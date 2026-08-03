@@ -9,6 +9,8 @@ package cli
 
 import (
 	"context"
+	"encoding/json"
+	"sort"
 
 	"github.com/diillson/chatcli/cli/plugins"
 	"github.com/diillson/chatcli/cli/scheduler"
@@ -17,6 +19,32 @@ import (
 // schedulerPluginAdapter is the concrete plugins.SchedulerAdapter.
 type schedulerPluginAdapter struct {
 	cli *ChatCLI
+}
+
+// activeSkillNames snapshots the skill names active in the current
+// session: pinned skills plus everything the running agent loop has
+// injected so far. Sorted and deduplicated for a stable job payload.
+func (cli *ChatCLI) activeSkillNames() []string {
+	seen := make(map[string]bool)
+	if cli.skillHandler != nil {
+		for _, name := range cli.skillHandler.PinnedNames() {
+			seen[name] = true
+		}
+	}
+	if cli.agentMode != nil {
+		for _, name := range cli.agentMode.InjectedSkillNames() {
+			seen[name] = true
+		}
+	}
+	if len(seen) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(seen))
+	for name := range seen {
+		out = append(out, name)
+	}
+	sort.Strings(out)
+	return out
 }
 
 // Owner picks an Owner based on the current execution profile. Agent
@@ -38,9 +66,36 @@ func (a *schedulerPluginAdapter) Owner() plugins.SchedulerOwner {
 }
 
 func (a *schedulerPluginAdapter) ScheduleJob(ctx context.Context, owner plugins.SchedulerOwner, inputJSON string) (string, error) {
+	inputJSON = a.withDefaultSkills(inputJSON)
 	return a.dispatch(ctx, owner, inputJSON, func(t *scheduler.ToolAdapter, so scheduler.Owner) (string, error) {
 		return t.ScheduleJob(ctx, so, inputJSON)
 	})
+}
+
+// withDefaultSkills injects the creating run's active skill names into a
+// schedule_job input that did not specify its own, so a card the squad
+// schedules fires with the same knowledge the scheduling run had. The
+// caller's explicit skills list (even an empty one) always wins; inputs
+// that fail to parse pass through untouched — buildJobFromInput will
+// surface the real error.
+func (a *schedulerPluginAdapter) withDefaultSkills(inputJSON string) string {
+	var m map[string]any
+	if err := json.Unmarshal([]byte(inputJSON), &m); err != nil {
+		return inputJSON
+	}
+	if _, has := m["skills"]; has {
+		return inputJSON
+	}
+	names := a.cli.activeSkillNames()
+	if len(names) == 0 {
+		return inputJSON
+	}
+	m["skills"] = names
+	out, err := json.Marshal(m)
+	if err != nil {
+		return inputJSON
+	}
+	return string(out)
 }
 
 func (a *schedulerPluginAdapter) WaitUntil(ctx context.Context, owner plugins.SchedulerOwner, inputJSON string) (string, error) {

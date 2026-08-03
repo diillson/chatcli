@@ -10,12 +10,13 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// TestDrainStdinToQueue_FirstMessageReturned verifies the contract used by
-// the ReAct loop (agent_mode.go:1132): the first non-empty stdin line is
-// returned for immediate injection as a new user instruction; the rest go
-// to messageQueue for the next turn. This is what makes "type a follow-up
-// while the agent runs" actually work.
-func TestDrainStdinToQueue_FirstMessageReturned(t *testing.T) {
+// TestDrainStdinToQueue_FoldsAllLines verifies the contract used by the
+// ReAct loop: every pending non-empty stdin line is folded into ONE
+// newline-joined user message for the current turn. The old behavior
+// (first line returned, rest pushed to cli.messageQueue) stranded lines
+// 2..N — agent mode never dequeues that queue; its only consumer is the
+// chat-mode lifecycle.
+func TestDrainStdinToQueue_FoldsAllLines(t *testing.T) {
 	cli := &ChatCLI{
 		messageQueue: nil,
 	}
@@ -27,11 +28,12 @@ func TestDrainStdinToQueue_FirstMessageReturned(t *testing.T) {
 
 	first := a.drainStdinToQueue()
 
-	assert.Equal(t, "primeira linha", first, "first non-empty line is returned for immediate injection")
+	assert.Equal(t, "primeira linha\nsegunda\nterceira", first,
+		"every typed line lands in the current turn's user message")
 	cli.messageQueueMu.Lock()
 	queue := append([]string(nil), cli.messageQueue...)
 	cli.messageQueueMu.Unlock()
-	assert.Equal(t, []string{"segunda", "terceira"}, queue, "remainder lands in the FIFO queue")
+	assert.Empty(t, queue, "no line may be stranded on the chat-mode queue")
 }
 
 // TestDrainStdinToQueue_SkipsEmptyLines ensures bare Enter presses don't
@@ -127,12 +129,15 @@ func TestMessageQueueConcurrency(t *testing.T) {
 	wg.Wait() // ensure all writes complete before drain
 
 	first := a.drainStdinToQueue()
-	assert.True(t, strings.HasPrefix(first, "line-"))
+	lines := strings.Split(first, "\n")
+	assert.Equal(t, n, len(lines), "every input must land in the folded message")
+	for i, line := range lines {
+		assert.Equal(t, "line-"+itoa(i), line, "lines must keep arrival order")
+	}
 
 	cli.messageQueueMu.Lock()
 	defer cli.messageQueueMu.Unlock()
-	assert.Equal(t, n-1, len(cli.messageQueue),
-		"every input must be accounted for (1 returned + N-1 queued)")
+	assert.Empty(t, cli.messageQueue, "nothing may leak onto the chat-mode queue")
 }
 
 func itoa(i int) string {

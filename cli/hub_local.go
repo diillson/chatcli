@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/diillson/chatcli/cli/agent/mail"
+	"github.com/diillson/chatcli/cli/agent/runs"
 	"github.com/diillson/chatcli/models"
 	"github.com/diillson/chatcli/server/hub"
 	"go.uber.org/zap"
@@ -281,7 +282,11 @@ func (cli *ChatCLI) maybeEnableLocalHubAs(ctx context.Context, principalOverride
 	// Persist squad mail through the same hub store: messages survive
 	// restarts and flow between this process and the gateway daemon.
 	stopMailBridge := startMailHubBridge(ctx, store, mail.Default(), cli.logger)
+	// Mirror agent runs through the same store: /agents sees runs executing
+	// in other processes (gateway daemon, scheduler) and can cancel them.
+	stopRunsBridge := startRunsHubBridge(ctx, store, runs.Default(), cli.logger)
 	return func() {
+		stopRunsBridge()
 		stopMailBridge()
 		_ = store.Close()
 	}

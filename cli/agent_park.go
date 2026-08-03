@@ -25,7 +25,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"sort"
 	"strings"
 	"time"
 
@@ -61,25 +60,18 @@ func (a *AgentMode) handleAgentPark(
 	pendingToolName string,
 ) error {
 	snap := &park.Snapshot{
-		Token:           park.NewToken(),
-		History:         append([]models.Message(nil), a.cli.history...),
-		AgentsLaunched:  a.agentsLaunched,
-		ToolCallsExecd:  a.toolCallsExecd,
-		IsCoderMode:     a.isCoderMode,
-		IsOneShot:       a.isOneShot,
-		Provider:        a.cli.Provider,
-		Model:           a.cli.Model,
-		SkillModelHint:  a.skillModelHint,
-		SkillEffortHint: a.skillEffortHint,
-		InjectedSkillNames: func() []string {
-			names := make([]string, 0, len(a.injectedSkillNames))
-			for name := range a.injectedSkillNames {
-				names = append(names, name)
-			}
-			sort.Strings(names)
-			return names
-		}(),
-		Park: req,
+		Token:              park.NewToken(),
+		History:            append([]models.Message(nil), a.cli.history...),
+		AgentsLaunched:     a.agentsLaunched,
+		ToolCallsExecd:     a.toolCallsExecd,
+		IsCoderMode:        a.isCoderMode,
+		IsOneShot:          a.isOneShot,
+		Provider:           a.cli.Provider,
+		Model:              a.cli.Model,
+		SkillModelHint:     a.skillModelHint,
+		SkillEffortHint:    a.skillEffortHint,
+		InjectedSkillNames: a.InjectedSkillNames(),
+		Park:               req,
 	}
 	// Carry the pending native tool_use ID through the snapshot so
 	// resume can synthesize a matching tool_result and avoid Anthropic's

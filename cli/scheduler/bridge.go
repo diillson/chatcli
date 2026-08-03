@@ -27,6 +27,17 @@ import (
 	"github.com/diillson/chatcli/models"
 )
 
+// SkillAwareBridge is an optional CLIBridge capability: bridges that can
+// re-resolve persona skill names and inject their content into headless
+// agent runs implement it. Kept OUT of CLIBridge so adding the capability
+// does not break external implementations of the exported interface;
+// executors type-assert and fall back to RunAgentTask when absent.
+type SkillAwareBridge interface {
+	// RunAgentTaskWithSkills is RunAgentTask plus the skill names the
+	// creating run carried; unresolvable names are skipped, never fatal.
+	RunAgentTaskWithSkills(ctx context.Context, task, systemHint string, dangerousConfirmed bool, skills []string) (string, error)
+}
+
 // CLIBridge is implemented by the top-level cli.ChatCLI so the
 // scheduler can invoke slash commands, dispatch agent tasks, query the
 // LLM, fire hooks, and read K8s / workspace state.
