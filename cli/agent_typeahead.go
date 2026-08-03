@@ -58,18 +58,29 @@ func formatTypeaheadPreviewLine(preview string) string {
 	return "  " + ColorCyan + "❯ " + text + "▌" + ColorReset + "\033[K"
 }
 
-// formatTypeaheadPreviewInline renders a compact suffix for the
-// single-line turn spinner.
-func formatTypeaheadPreviewInline(preview string, width int) string {
-	text := sanitizeTypeaheadPreview(preview)
-	if text == "" {
-		return ""
+// formatTypeaheadPreviewBelow renders the input line UNDER the single-line
+// turn spinner (same placement as the dispatch panel's preview, which
+// users found clearer than an inline suffix competing with the spinner
+// for horizontal space).
+//
+// The suffix paints the line below and returns the cursor to the spinner
+// line, so the spinner's plain `\r` repaint contract is preserved:
+//
+//	\n<preview>\033[A\r   — down, paint, back up
+//
+// hadPreview threads the previous tick's state: when typing stops (Enter
+// or backspace-to-empty) one final `\n\033[K\033[A\r` wipes the stale
+// line, and after that the dance stops entirely — a quiet spinner never
+// touches the row below it (which would scroll the screen when the
+// spinner sits on the terminal's bottom row).
+func formatTypeaheadPreviewBelow(preview string, hadPreview bool) (string, bool) {
+	if line := formatTypeaheadPreviewLine(preview); line != "" {
+		return "\n" + line + "\033[A\r", true
 	}
-	if n := utf8.RuneCountInString(text); n > width {
-		runes := []rune(text)
-		text = "…" + string(runes[n-width:])
+	if hadPreview {
+		return "\n\033[K\033[A\r", false
 	}
-	return " " + ColorCyan + "❯ " + text + "▌" + ColorReset
+	return "", false
 }
 
 // sanitizeTypeaheadPreview drops control bytes AND whole escape sequences

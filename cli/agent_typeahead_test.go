@@ -66,12 +66,36 @@ func TestFormatTypeaheadPreview(t *testing.T) {
 		t.Errorf("long input must show the tail with ellipsis: %q", tail)
 	}
 
-	inline := formatTypeaheadPreviewInline("hello", 40)
-	if !strings.Contains(inline, "❯ hello▌") {
-		t.Errorf("inline preview must render prompt+cursor: %q", inline)
+}
+
+// TestFormatTypeaheadPreviewBelow pins the below-the-spinner placement: the
+// suffix paints the line under the spinner and restores the cursor; when
+// typing stops it wipes the stale line exactly once, and a quiet spinner
+// never touches the row below (which would scroll at the terminal's
+// bottom row).
+func TestFormatTypeaheadPreviewBelow(t *testing.T) {
+	suffix, had := formatTypeaheadPreviewBelow("/board", false)
+	if !had {
+		t.Fatal("non-empty preview must report hadPreview=true")
 	}
-	if formatTypeaheadPreviewInline("", 40) != "" {
-		t.Error("empty inline preview must render nothing")
+	if !strings.HasPrefix(suffix, "\n") || !strings.HasSuffix(suffix, "\033[A\r") {
+		t.Errorf("suffix must go down, paint and come back up: %q", suffix)
+	}
+	if !strings.Contains(suffix, "❯ /board▌") {
+		t.Errorf("suffix must carry the preview line: %q", suffix)
+	}
+
+	wipe, had := formatTypeaheadPreviewBelow("", true)
+	if had {
+		t.Fatal("cleared preview must report hadPreview=false")
+	}
+	if wipe != "\n\033[K\033[A\r" {
+		t.Errorf("transition to empty must wipe the stale line once: %q", wipe)
+	}
+
+	quiet, had := formatTypeaheadPreviewBelow("", false)
+	if quiet != "" || had {
+		t.Errorf("quiet spinner must not touch the row below, got %q", quiet)
 	}
 }
 
