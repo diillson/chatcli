@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.177.0](https://github.com/diillson/chatcli/compare/v1.176.0...v1.177.0) (2026-08-03)
+
+
+### Features
+
+* **agent:** cross-process /agents via hub, mid-run side commands and skills in headless runs ([#1290](https://github.com/diillson/chatcli/issues/1290)) ([7079797](https://github.com/diillson/chatcli/commit/7079797812620ca6b7837d891cd79617685370ec))
+
+
+### Bug Fixes
+
+* **agent:** resolve model inherit hint to the session model in squad dispatch ([#1288](https://github.com/diillson/chatcli/issues/1288)) ([952b46b](https://github.com/diillson/chatcli/commit/952b46b92fbb97492b93e4b1fc142088ef576e4b))
+
 ## [1.176.0](https://github.com/diillson/chatcli/compare/v1.175.0...v1.176.0) (2026-08-03)
 
 
