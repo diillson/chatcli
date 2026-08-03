@@ -6,6 +6,7 @@
 package cli
 
 import (
+	"context"
 	"strings"
 	"testing"
 )
@@ -44,18 +45,19 @@ func TestOnSideCommandQueuesWithoutLiveDisplay(t *testing.T) {
 	var executed []string
 	a := &AgentMode{sideCmdExec: func(line string) { executed = append(executed, line) }}
 
-	a.onSideCommand("/board")
-	a.onSideCommand("/agents")
+	ctx := context.Background()
+	a.onSideCommand(ctx, "/board")
+	a.onSideCommand(ctx, "/agents")
 	if len(executed) != 0 {
 		t.Fatalf("commands must queue while no display is live, got %v", executed)
 	}
 
-	a.applySideCommands()
+	a.applySideCommands(ctx)
 	if len(executed) != 2 || executed[0] != "/board" || executed[1] != "/agents" {
 		t.Errorf("queued commands must apply in order, got %v", executed)
 	}
 
-	a.applySideCommands()
+	a.applySideCommands(ctx)
 	if len(executed) != 2 {
 		t.Error("applySideCommands must drain the queue (no re-execution)")
 	}
@@ -78,7 +80,7 @@ func TestStdinReaderRefcount(t *testing.T) {
 	a.stdinMu.Unlock()
 
 	// Nested entry: start must reuse, not respawn.
-	a.startStdinReader()
+	a.startStdinReader(context.Background())
 	if a.stdinDone != fakeDone {
 		t.Fatal("nested start must reuse the outer reader")
 	}
@@ -98,7 +100,7 @@ func TestStdinReaderRefcount(t *testing.T) {
 		t.Fatal("teardown must close the done channel")
 	}
 	// Resume after the last stop must NOT leak a reader into the REPL.
-	a.resumeStdinReader()
+	a.resumeStdinReader(context.Background())
 	if a.stdinLines != nil {
 		t.Fatal("resume with zero depth must not respawn the reader")
 	}

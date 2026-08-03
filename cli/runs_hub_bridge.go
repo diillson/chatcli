@@ -157,7 +157,7 @@ func startRunsHubBridge(ctx context.Context, store hub.Store, reg *runs.Registry
 
 	setRemoteRunsProvider(&remoteRunsProvider{
 		list: func() []remoteAgentRun {
-			opCtx, opCancel := context.WithTimeout(context.Background(), runsHubOpTimeout)
+			opCtx, opCancel := context.WithTimeout(bridgeCtx, runsHubOpTimeout)
 			defer opCancel()
 			recs, err := runStore.ListAgentRuns(opCtx)
 			if err != nil {
@@ -180,7 +180,7 @@ func startRunsHubBridge(ctx context.Context, store hub.Store, reg *runs.Registry
 			return out
 		},
 		cancel: func(runID string) bool {
-			opCtx, opCancel := context.WithTimeout(context.Background(), runsHubOpTimeout)
+			opCtx, opCancel := context.WithTimeout(bridgeCtx, runsHubOpTimeout)
 			defer opCancel()
 			ok, err := runStore.RequestAgentRunCancel(opCtx, runID)
 			if err != nil {

@@ -216,7 +216,7 @@ func splitStdinChunk(chunk []byte, lineBuf *strings.Builder) []string {
 // check for available input before calling os.Stdin.Read. This ensures the
 // goroutine never blocks for more than ~50ms, so it can check stdinDone and
 // exit cleanly when agent mode ends — without requiring the user to press Enter.
-func (a *AgentMode) startStdinReader() {
+func (a *AgentMode) startStdinReader(ctx context.Context) {
 	a.stdinMu.Lock()
 	defer a.stdinMu.Unlock()
 	a.stdinDepth++
@@ -226,11 +226,13 @@ func (a *AgentMode) startStdinReader() {
 		// both race for the same fd (byte interleaving).
 		return
 	}
-	a.spawnStdinReaderLocked()
+	a.spawnStdinReaderLocked(ctx)
 }
 
 // spawnStdinReaderLocked starts the reader goroutine. Caller holds stdinMu.
-func (a *AgentMode) spawnStdinReaderLocked() {
+// ctx flows to mid-run side command execution (never to the read loop
+// itself — shutdown is via the done channel).
+func (a *AgentMode) spawnStdinReaderLocked(ctx context.Context) {
 	a.stdinLines = make(chan string, 10)
 	a.stdinDone = make(chan struct{})
 	a.stdinCancel = newStdinReadCanceler()
@@ -292,7 +294,7 @@ func (a *AgentMode) spawnStdinReaderLocked() {
 				// where a security prompt would read "/board" as a denial
 				// and the type-ahead drain would hand it to the LLM as text.
 				if isSideCommand(line) {
-					a.onSideCommand(line)
+					a.onSideCommand(ctx, line)
 					continue
 				}
 
@@ -372,11 +374,11 @@ func (a *AgentMode) suspendStdinReader() {
 // resumeStdinReader restarts the reader after a suspend, but only when some
 // loop scope still holds a start reference — resuming after the last stop
 // would leak a reader into the REPL prompt.
-func (a *AgentMode) resumeStdinReader() {
+func (a *AgentMode) resumeStdinReader(ctx context.Context) {
 	a.stdinMu.Lock()
 	defer a.stdinMu.Unlock()
 	if a.stdinDepth > 0 && a.stdinLines == nil {
-		a.spawnStdinReaderLocked()
+		a.spawnStdinReaderLocked(ctx)
 	}
 }
 
@@ -412,7 +414,7 @@ func (a *AgentMode) abortBlockedStdinRead(done <-chan struct{}) {
 //
 // @ask is interactive precisely because the loop paused to ask the user, so the
 // reader is idle here and no type-ahead is lost.
-func (a *AgentMode) withInteractiveStdin(fn func() error) error {
+func (a *AgentMode) withInteractiveStdin(ctx context.Context, fn func() error) error {
 	fd := int(os.Stdin.Fd())
 	a.suspendStdinReader()
 	state, _ := term.GetState(fd)
@@ -420,7 +422,7 @@ func (a *AgentMode) withInteractiveStdin(fn func() error) error {
 	if state != nil {
 		_ = term.Restore(fd, state)
 	}
-	a.resumeStdinReader()
+	a.resumeStdinReader(ctx)
 	return err
 }
 
@@ -442,7 +444,7 @@ func (a *AgentMode) handleAgentAsk(ctx context.Context, argsJSON string) (string
 
 	var answers []ask.Answer
 	var canceled bool
-	runErr := a.withInteractiveStdin(func() error {
+	runErr := a.withInteractiveStdin(ctx, func() error {
 		var e error
 		answers, canceled, e = palette.RunAsk(ctx, palette.NewAsk(qs))
 		return e
@@ -1604,7 +1606,7 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 	defer a.setCancelSignal(prevCancel)
 
 	// Start centralized stdin reader for type-ahead queue support
-	a.startStdinReader()
+	a.startStdinReader(ctx)
 	defer a.stopStdinReader()
 
 	// Structured event sink for protocol frontends (ACP). Resolved per call
@@ -1756,7 +1758,7 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 		// prompt or no live display was active) run now, before the
 		// type-ahead drain — a /mail send applied here still reaches its
 		// recipient's inbox drain this same turn.
-		a.applySideCommands()
+		a.applySideCommands(ctx)
 
 		// Check for type-ahead messages from user (works in both /agent and
 		// /coder modes). Lines typed while the LLM was streaming or while a
@@ -3491,7 +3493,7 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 			userInput, err := a.readLineWithEditing()
 
 			// Restart the stdin reader for subsequent agent turns
-			a.resumeStdinReader()
+			a.resumeStdinReader(ctx)
 			if err != nil {
 				return err
 			}

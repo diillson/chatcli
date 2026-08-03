@@ -53,12 +53,12 @@ func isSideCommand(line string) bool {
 // goroutine: execute now under a paused display, or queue for the next
 // turn boundary when no live display is active (e.g. a security prompt
 // owns the terminal — printing into its card would corrupt it).
-func (a *AgentMode) onSideCommand(line string) {
+func (a *AgentMode) onSideCommand(ctx context.Context, line string) {
 	timer := a.turnTimer
 	if timer != nil && timer.IsRunning() {
 		timer.Pause()
 		fmt.Println(colorize("  ⚡ "+line, ColorCyan))
-		a.execSideCommand(line)
+		a.execSideCommand(ctx, line)
 		timer.Resume()
 		return
 	}
@@ -70,7 +70,7 @@ func (a *AgentMode) onSideCommand(line string) {
 // applySideCommands runs every queued side command. Called at the turn
 // boundary (before the type-ahead drain, so a /mail send lands in this
 // turn's inbox drain).
-func (a *AgentMode) applySideCommands() {
+func (a *AgentMode) applySideCommands(ctx context.Context) {
 	a.sideCmdMu.Lock()
 	queued := a.sideCmdQueue
 	a.sideCmdQueue = nil
@@ -81,14 +81,14 @@ func (a *AgentMode) applySideCommands() {
 	fmt.Println(colorize("  ⚡ "+i18n.T("agent.sidecmd.applying", len(queued)), ColorCyan))
 	for _, line := range queued {
 		fmt.Println(colorize("  ⚡ "+line, ColorCyan))
-		a.execSideCommand(line)
+		a.execSideCommand(ctx, line)
 	}
 }
 
 // execSideCommand routes one line through the command handler (or the test
 // seam). The allowlisted handlers ignore their context and never panic
 // mode-switch sentinels.
-func (a *AgentMode) execSideCommand(line string) {
+func (a *AgentMode) execSideCommand(ctx context.Context, line string) {
 	if a.sideCmdExec != nil {
 		a.sideCmdExec(line)
 		return
@@ -96,5 +96,5 @@ func (a *AgentMode) execSideCommand(line string) {
 	if a.cli == nil || a.cli.commandHandler == nil {
 		return
 	}
-	a.cli.commandHandler.HandleCommand(context.Background(), line)
+	a.cli.commandHandler.HandleCommand(ctx, line)
 }
