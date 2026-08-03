@@ -23,6 +23,8 @@ package runs
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"errors"
 	"os"
 	"sort"
@@ -64,23 +66,26 @@ func (s Status) Terminal() bool {
 }
 
 // Info is an immutable snapshot of one agent execution. Values returned by
-// the registry are copies — callers may retain them freely.
+// the registry are copies — callers may retain them freely. The JSON tags
+// define the wire projection used when a run is mirrored outside the
+// process (hub persistence); Elapsed is derived, so both timestamps travel.
 type Info struct {
-	ID        string
-	CallID    string // dispatcher <agent_call> ID when applicable
-	Kind      Kind
-	Agent     string // agent type name: "coder", "reviewer", ...
-	Task      string
-	ParentID  string
-	Origin    string // "repl", "gateway", "scheduler", "mcp", "acp"
-	Status    Status
-	Turn      int
-	MaxTurns  int
-	Action    string // current action label, e.g. "read cli/foo.go"
-	ToolCalls int
-	StartedAt time.Time
-	EndedAt   time.Time
-	Err       string
+	ID        string    `json:"id"`
+	CallID    string    `json:"call_id,omitempty"` // dispatcher <agent_call> ID when applicable
+	Kind      Kind      `json:"kind"`
+	Agent     string    `json:"agent"` // agent type name: "coder", "reviewer", ...
+	Task      string    `json:"task,omitempty"`
+	ParentID  string    `json:"parent_id,omitempty"`
+	Origin    string    `json:"origin,omitempty"`   // "repl", "gateway", "scheduler", "mcp", "acp"
+	Instance  string    `json:"instance,omitempty"` // owning-process token; set by Begin
+	Status    Status    `json:"status"`
+	Turn      int       `json:"turn,omitempty"`
+	MaxTurns  int       `json:"max_turns,omitempty"`
+	Action    string    `json:"action,omitempty"` // current action label, e.g. "read cli/foo.go"
+	ToolCalls int       `json:"tool_calls,omitempty"`
+	StartedAt time.Time `json:"started_at"`
+	EndedAt   time.Time `json:"ended_at,omitempty"`
+	Err       string    `json:"err,omitempty"`
 }
 
 // Elapsed returns the run's wall-clock duration so far (or total when done).
@@ -117,9 +122,11 @@ func (r *Run) SetTurn(turn, maxTurns int) {
 		return
 	}
 	r.mu.Lock()
-	defer r.mu.Unlock()
 	r.info.Turn = turn
 	r.info.MaxTurns = maxTurns
+	snap, reg := r.info, r.reg
+	r.mu.Unlock()
+	reg.notify(snap)
 }
 
 // SetAction records the human-readable label of the action in flight.
@@ -128,8 +135,10 @@ func (r *Run) SetAction(action string) {
 		return
 	}
 	r.mu.Lock()
-	defer r.mu.Unlock()
 	r.info.Action = action
+	snap, reg := r.info, r.reg
+	r.mu.Unlock()
+	reg.notify(snap)
 }
 
 // AddToolCalls bumps the executed tool call counter by n.
@@ -138,8 +147,10 @@ func (r *Run) AddToolCalls(n int) {
 		return
 	}
 	r.mu.Lock()
-	defer r.mu.Unlock()
 	r.info.ToolCalls += n
+	snap, reg := r.info, r.reg
+	r.mu.Unlock()
+	reg.notify(snap)
 }
 
 // Snapshot returns a copy of the run's current state (zero Info on nil).
@@ -181,6 +192,7 @@ func (r *Run) End(err error) {
 
 	if reg != nil {
 		reg.retire(final)
+		reg.notify(final)
 	}
 }
 
@@ -190,12 +202,16 @@ const DefaultHistorySize = 200
 
 // Registry tracks live and recently finished agent executions.
 type Registry struct {
-	mu      sync.RWMutex
-	active  map[string]*Run
-	order   []string // active runs in start order
-	done    []Info   // ring of finished runs, oldest first
-	doneCap int
-	seq     atomic.Uint64
+	mu       sync.RWMutex
+	active   map[string]*Run
+	order    []string // active runs in start order
+	done     []Info   // ring of finished runs, oldest first
+	doneCap  int
+	seq      atomic.Uint64
+	instance string // random token making run IDs unique across processes
+
+	hookMu  sync.Mutex
+	onEvent func(Info)
 }
 
 // NewRegistry builds an empty registry with the given history capacity
@@ -205,8 +221,56 @@ func NewRegistry(historyCap int) *Registry {
 		historyCap = DefaultHistorySize
 	}
 	return &Registry{
-		active:  make(map[string]*Run),
-		doneCap: historyCap,
+		active:   make(map[string]*Run),
+		doneCap:  historyCap,
+		instance: newInstanceToken(),
+	}
+}
+
+// newInstanceToken returns a short random token namespacing this process's
+// run IDs. Two chatcli processes (REPL + gateway daemon) would otherwise
+// both mint "run-1" and collide once runs are mirrored through the hub.
+// On rand failure we fall back to a constant: degraded uniqueness beats
+// refusing to run.
+func newInstanceToken() string {
+	var b [4]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		return "local"
+	}
+	return hex.EncodeToString(b[:])
+}
+
+// Instance returns the token namespacing this registry's run IDs.
+func (g *Registry) Instance() string {
+	if g == nil {
+		return ""
+	}
+	return g.instance
+}
+
+// OnEvent registers fn to observe every run state change — begin, progress
+// updates and end. Pass nil to detach. fn runs outside registry and run
+// locks with an immutable snapshot; it must be fast and non-blocking
+// (a persistence bridge is expected to coalesce, not to do I/O inline).
+func (g *Registry) OnEvent(fn func(Info)) {
+	if g == nil {
+		return
+	}
+	g.hookMu.Lock()
+	g.onEvent = fn
+	g.hookMu.Unlock()
+}
+
+// notify delivers a snapshot to the registered observer, if any.
+func (g *Registry) notify(snapshot Info) {
+	if g == nil {
+		return
+	}
+	g.hookMu.Lock()
+	fn := g.onEvent
+	g.hookMu.Unlock()
+	if fn != nil {
+		fn(snapshot)
 	}
 }
 
@@ -250,7 +314,8 @@ func (g *Registry) Begin(ctx context.Context, meta Info) (context.Context, *Run)
 	}
 	ctx, cancel := context.WithCancel(ctx)
 
-	meta.ID = "run-" + strconv.FormatUint(g.seq.Add(1), 10)
+	meta.ID = "run-" + g.instance + "-" + strconv.FormatUint(g.seq.Add(1), 10)
+	meta.Instance = g.instance
 	meta.Status = StatusRunning
 	meta.StartedAt = time.Now()
 	meta.EndedAt = time.Time{}
@@ -262,6 +327,7 @@ func (g *Registry) Begin(ctx context.Context, meta Info) (context.Context, *Run)
 	g.order = append(g.order, meta.ID)
 	g.mu.Unlock()
 
+	g.notify(meta)
 	return WithRun(ctx, run), run
 }
 

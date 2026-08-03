@@ -104,6 +104,47 @@ func (cli *ChatCLI) agentsList() {
 	for _, info := range recent {
 		fmt.Println(cli.formatAgentRunHuman(info, 0))
 	}
+
+	cli.printRemoteAgentRuns()
+}
+
+// printRemoteAgentRuns appends the runs mirrored by other chatcli processes
+// (gateway daemon, scheduler) when the hub runs mirror is active.
+func (cli *ChatCLI) printRemoteAgentRuns() {
+	remote := listRemoteAgentRuns()
+	if len(remote) == 0 {
+		return
+	}
+	fmt.Println()
+	fmt.Println(colorize(fmt.Sprintf("  %s (%d)", i18n.T("agents.list.remote"), len(remote)), ColorCyan+ColorBold))
+	for _, r := range remote {
+		fmt.Println(cli.formatRemoteAgentRunHuman(r))
+	}
+}
+
+// formatRemoteAgentRunHuman renders one mirrored run, tagging the owning
+// process and flagging heartbeat silence.
+func (cli *ChatCLI) formatRemoteAgentRunHuman(r remoteAgentRun) string {
+	line := cli.formatAgentRunHuman(r.Info, 0)
+	origin := r.Info.Origin
+	if origin == "" {
+		origin = r.Info.Instance
+	}
+	line += colorize(" ["+origin+"]", ColorPurple)
+	if r.Stale {
+		line += colorize(" ⚠ "+i18n.T("agents.remote.stale"), ColorYellow)
+	}
+	return line
+}
+
+// findRemoteAgentRun looks a mirrored run up by ID.
+func findRemoteAgentRun(id string) (remoteAgentRun, bool) {
+	for _, r := range listRemoteAgentRuns() {
+		if r.Info.ID == id {
+			return r, true
+		}
+	}
+	return remoteAgentRun{}, false
 }
 
 // printAgentRunTree prints one active run and recurses into its children.
@@ -164,6 +205,14 @@ func (cli *ChatCLI) agentsShow(id string) {
 	reg := agentRunsRegistry()
 	info, ok := reg.Get(id)
 	if !ok {
+		if r, found := findRemoteAgentRun(id); found {
+			fmt.Println(cli.formatRemoteAgentRunHuman(r))
+			fmt.Printf("      %s %s\n", colorize(i18n.T("agents.field.instance")+":", ColorGray), r.Info.Instance)
+			if r.Info.Origin != "" {
+				fmt.Printf("      %s %s\n", colorize(i18n.T("agents.field.origin")+":", ColorGray), r.Info.Origin)
+			}
+			return
+		}
 		fmt.Println(colorize("  "+i18n.T("agents.show.notfound", id), ColorYellow))
 		return
 	}
@@ -190,7 +239,9 @@ func (cli *ChatCLI) agentsShow(id string) {
 	}
 }
 
-// agentsCancel requests cancellation of a live run by ID.
+// agentsCancel requests cancellation of a live run by ID — locally when this
+// process owns it, otherwise by flagging the mirrored row so the owning
+// process cancels on its next sync tick.
 func (cli *ChatCLI) agentsCancel(id string) {
 	reg := agentRunsRegistry()
 	if reg.Cancel(id) {
@@ -198,6 +249,14 @@ func (cli *ChatCLI) agentsCancel(id string) {
 		return
 	}
 	if _, ok := reg.Get(id); ok {
+		fmt.Println(colorize("  "+i18n.T("agents.cancel.finished", id), ColorYellow))
+		return
+	}
+	if r, found := findRemoteAgentRun(id); found {
+		if !r.Info.Status.Terminal() && requestRemoteAgentRunCancel(id) {
+			fmt.Println(colorize("  "+i18n.T("agents.cancel.remote", id), ColorGreen))
+			return
+		}
 		fmt.Println(colorize("  "+i18n.T("agents.cancel.finished", id), ColorYellow))
 		return
 	}

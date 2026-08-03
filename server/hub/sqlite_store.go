@@ -65,6 +65,18 @@ CREATE TABLE IF NOT EXISTS settings (
     key   TEXT PRIMARY KEY,
     value TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS agent_runs (
+    run_id           TEXT PRIMARY KEY,
+    instance         TEXT NOT NULL,
+    origin           TEXT NOT NULL DEFAULT '',
+    status           TEXT NOT NULL,
+    payload          TEXT NOT NULL,
+    cancel_requested INTEGER NOT NULL DEFAULT 0,
+    updated_at       INTEGER NOT NULL,
+    ended_at         INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_agent_runs_instance ON agent_runs(instance);
 `
 
 // SQLiteStore is the WAL-backed implementation of Store. It is safe for

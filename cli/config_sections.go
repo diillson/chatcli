@@ -1427,6 +1427,7 @@ func (cli *ChatCLI) showConfigHub(ctx context.Context) {
 	}
 	kv(p, "bindings", presence(os.Getenv("CHATCLI_HUB_BINDINGS")))
 	kv(p, "db", envOr("CHATCLI_HUB_DB"))
+	kv(p, "CHATCLI_HUB_RUNS", envOr("CHATCLI_HUB_RUNS"))
 
 	fmt.Println(p)
 	if mutable {

@@ -55,6 +55,17 @@ func (a *liveAgentsAdapter) List() (string, error) {
 		b.WriteString(formatRunLine(info))
 		b.WriteString("\n")
 	}
+	if remote := listRemoteAgentRuns(); len(remote) > 0 {
+		fmt.Fprintf(&b, "\nOTHER PROCESSES (%d, via hub):\n", len(remote))
+		for _, r := range remote {
+			b.WriteString(formatRunLine(r.Info))
+			fmt.Fprintf(&b, " instance=%s", r.Info.Instance)
+			if r.Stale {
+				b.WriteString(" stale=true")
+			}
+			b.WriteString("\n")
+		}
+	}
 	return b.String(), nil
 }
 
@@ -62,6 +73,13 @@ func (a *liveAgentsAdapter) List() (string, error) {
 func (a *liveAgentsAdapter) Show(id string) (string, error) {
 	info, ok := a.reg.Get(id)
 	if !ok {
+		if r, found := findRemoteAgentRun(id); found {
+			line := formatRunLine(r.Info) + fmt.Sprintf(" instance=%s", r.Info.Instance)
+			if r.Stale {
+				line += " stale=true (owner heartbeat silent — its process may have died)"
+			}
+			return line + "\n", nil
+		}
 		return "", fmt.Errorf("@agents show: no run with id %q (use list to see IDs)", id)
 	}
 	var b strings.Builder
@@ -98,6 +116,12 @@ func (a *liveAgentsAdapter) Cancel(id string) (string, error) {
 		return fmt.Sprintf("cancellation requested for %s (the run ends when it observes the signal)", id), nil
 	}
 	if _, ok := a.reg.Get(id); ok {
+		return "", fmt.Errorf("@agents cancel: run %q already finished", id)
+	}
+	if r, found := findRemoteAgentRun(id); found {
+		if !r.Info.Status.Terminal() && requestRemoteAgentRunCancel(id) {
+			return fmt.Sprintf("cancellation forwarded to the owning process for %s (honored on its next sync tick)", id), nil
+		}
 		return "", fmt.Errorf("@agents cancel: run %q already finished", id)
 	}
 	return "", fmt.Errorf("@agents cancel: no run with id %q (use list to see IDs)", id)
