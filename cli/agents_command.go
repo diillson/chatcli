@@ -23,6 +23,10 @@ import (
 	"github.com/diillson/chatcli/i18n"
 )
 
+// agentRunsRegistry resolves the run registry; a package-level indirection
+// so tests can point the command layer at an isolated registry.
+var agentRunsRegistry = runs.Default
+
 // agentsCommandRecentN caps how many finished runs /agents list shows.
 const agentsCommandRecentN = 10
 
@@ -61,7 +65,7 @@ func (cli *ChatCLI) handleAgentsCommand(userInput string) {
 
 // agentsList renders active runs as a tree, then the recent history.
 func (cli *ChatCLI) agentsList() {
-	reg := runs.Default()
+	reg := agentRunsRegistry()
 	active := reg.Active()
 	recent := reg.Recent(agentsCommandRecentN)
 
@@ -157,7 +161,7 @@ func (cli *ChatCLI) formatAgentRunHuman(info runs.Info, depth int) string {
 
 // agentsShow prints the detail of one run by ID.
 func (cli *ChatCLI) agentsShow(id string) {
-	reg := runs.Default()
+	reg := agentRunsRegistry()
 	info, ok := reg.Get(id)
 	if !ok {
 		fmt.Println(colorize("  "+i18n.T("agents.show.notfound", id), ColorYellow))
@@ -188,7 +192,7 @@ func (cli *ChatCLI) agentsShow(id string) {
 
 // agentsCancel requests cancellation of a live run by ID.
 func (cli *ChatCLI) agentsCancel(id string) {
-	reg := runs.Default()
+	reg := agentRunsRegistry()
 	if reg.Cancel(id) {
 		fmt.Println(colorize("  "+i18n.T("agents.cancel.requested", id), ColorGreen))
 		return

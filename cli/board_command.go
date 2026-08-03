@@ -21,6 +21,10 @@ import (
 	"github.com/diillson/chatcli/i18n"
 )
 
+// squadBoard resolves the board store; a package-level indirection so
+// tests can point the command layer at a temp store.
+var squadBoard = board.Default
+
 // handleBoardCommand routes /board subcommands.
 func (cli *ChatCLI) handleBoardCommand(userInput string) {
 	args := strings.Fields(strings.TrimSpace(userInput))
@@ -28,7 +32,10 @@ func (cli *ChatCLI) handleBoardCommand(userInput string) {
 	if len(args) >= 2 {
 		sub = args[1]
 	}
-	rest := args[2:]
+	var rest []string
+	if len(args) > 2 {
+		rest = args[2:]
+	}
 
 	switch sub {
 	case "list", "ls":
@@ -56,7 +63,7 @@ func (cli *ChatCLI) handleBoardCommand(userInput string) {
 			cli.printBoardUsage()
 			return
 		}
-		card, err := board.Default().Create(title, "", "", "")
+		card, err := squadBoard().Create(title, "", "", "")
 		if err != nil {
 			fmt.Println(colorize("  ❌ "+err.Error(), ColorRed))
 			return
@@ -72,7 +79,7 @@ func (cli *ChatCLI) handleBoardCommand(userInput string) {
 			fmt.Println(colorize("  "+i18n.T("board.column.invalid", rest[1]), ColorYellow))
 			return
 		}
-		if _, err := board.Default().Move(rest[0], col, "user"); err != nil {
+		if _, err := squadBoard().Move(rest[0], col, "user"); err != nil {
 			fmt.Println(colorize("  ❌ "+err.Error(), ColorRed))
 			return
 		}
@@ -82,7 +89,7 @@ func (cli *ChatCLI) handleBoardCommand(userInput string) {
 			fmt.Println(colorize("  "+i18n.T("board.assign.usage"), ColorYellow))
 			return
 		}
-		if _, err := board.Default().Assign(rest[0], rest[1]); err != nil {
+		if _, err := squadBoard().Assign(rest[0], rest[1]); err != nil {
 			fmt.Println(colorize("  ❌ "+err.Error(), ColorRed))
 			return
 		}
@@ -93,7 +100,7 @@ func (cli *ChatCLI) handleBoardCommand(userInput string) {
 			return
 		}
 		text := strings.TrimSpace(strings.Join(rest[1:], " "))
-		if _, err := board.Default().AddNote(rest[0], "user", text); err != nil {
+		if _, err := squadBoard().AddNote(rest[0], "user", text); err != nil {
 			fmt.Println(colorize("  ❌ "+err.Error(), ColorRed))
 			return
 		}
@@ -108,7 +115,7 @@ func (cli *ChatCLI) handleBoardCommand(userInput string) {
 			}
 			age = parsed
 		}
-		n, err := board.Default().Archive(age)
+		n, err := squadBoard().Archive(age)
 		if err != nil {
 			fmt.Println(colorize("  ❌ "+err.Error(), ColorRed))
 			return
@@ -124,7 +131,7 @@ func (cli *ChatCLI) handleBoardCommand(userInput string) {
 
 // boardList renders the kanban grouped by column.
 func (cli *ChatCLI) boardList(filter board.Column) {
-	cards, err := board.Default().List(filter)
+	cards, err := squadBoard().List(filter)
 	if err != nil {
 		fmt.Println(colorize("  ❌ "+err.Error(), ColorRed))
 		return
@@ -145,7 +152,7 @@ func (cli *ChatCLI) boardList(filter board.Column) {
 
 // boardShow renders one card in full.
 func (cli *ChatCLI) boardShow(id string) {
-	card, err := board.Default().Get(id)
+	card, err := squadBoard().Get(id)
 	if err != nil {
 		fmt.Println(colorize("  "+i18n.T("board.show.notfound", id), ColorYellow))
 		return

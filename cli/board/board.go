@@ -171,7 +171,7 @@ func (s *Store) load() (*boardDoc, error) {
 func (s *Store) save(doc *boardDoc) error {
 	doc.SchemaVersion = schemaVersion
 	dir := filepath.Dir(s.path)
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	if err := os.MkdirAll(dir, 0o750); err != nil {
 		return fmt.Errorf("board: mkdir %s: %w", dir, err)
 	}
 	data, err := json.MarshalIndent(doc, "", "  ")

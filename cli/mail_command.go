@@ -22,6 +22,10 @@ import (
 	"github.com/diillson/chatcli/i18n"
 )
 
+// squadMailBus resolves the mail bus; a package-level indirection so tests
+// can point the command layer at an isolated registry.
+var squadMailBus = mail.Default
+
 // mailCommandRecentN caps how many messages /mail list shows.
 const mailCommandRecentN = 20
 
@@ -32,7 +36,10 @@ func (cli *ChatCLI) handleMailCommand(userInput string) {
 	if len(args) >= 2 {
 		sub = args[1]
 	}
-	rest := args[2:]
+	var rest []string
+	if len(args) > 2 {
+		rest = args[2:]
+	}
 
 	switch sub {
 	case "list", "history", "ls":
@@ -44,7 +51,7 @@ func (cli *ChatCLI) handleMailCommand(userInput string) {
 		}
 		to := rest[0]
 		text := strings.TrimSpace(strings.Join(rest[1:], " "))
-		msg, err := mail.Default().Send("user", to, "", text)
+		msg, err := squadMailBus().Send("user", to, "", text)
 		if err != nil {
 			fmt.Println(colorize("  ❌ "+err.Error(), ColorRed))
 			return
@@ -62,7 +69,7 @@ func (cli *ChatCLI) handleMailCommand(userInput string) {
 
 // mailList shows recent traffic, newest first.
 func (cli *ChatCLI) mailList() {
-	msgs := mail.Default().Recent(mailCommandRecentN)
+	msgs := squadMailBus().Recent(mailCommandRecentN)
 	if len(msgs) == 0 {
 		fmt.Println(colorize("  "+i18n.T("mail.list.empty"), ColorGray))
 		return
@@ -80,7 +87,7 @@ func (cli *ChatCLI) mailList() {
 
 // mailPending shows queued (undelivered) message counts per recipient.
 func (cli *ChatCLI) mailPending() {
-	pending := mail.Default().Pending()
+	pending := squadMailBus().Pending()
 	if len(pending) == 0 {
 		fmt.Println(colorize("  "+i18n.T("mail.pending.empty"), ColorGray))
 		return
