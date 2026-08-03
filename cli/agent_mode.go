@@ -2088,9 +2088,7 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 		// is still painted below the spinner — wipe it so the response
 		// doesn't interleave with a stale preview. (Safe read: Stop()
 		// already synchronized with the last tick.)
-		if spinnerHadPreview {
-			fmt.Print("\n\033[K\033[A\r")
-		}
+		fmt.Print(spinnerPreviewWipe(spinnerHadPreview))
 		fmt.Println()
 
 		// Helper para exibir métricas ao final do turno (após execução)

@@ -153,3 +153,13 @@ func TestBuildTurnSpinnerFrame(t *testing.T) {
 		t.Errorf("frame must show the combined queue count: %q", frame)
 	}
 }
+
+// TestSpinnerPreviewWipe pins the turn-end cleanup sequence.
+func TestSpinnerPreviewWipe(t *testing.T) {
+	if got := spinnerPreviewWipe(true); got != "\n\033[K\033[A\r" {
+		t.Errorf("mid-typing turn end must wipe the row below: %q", got)
+	}
+	if got := spinnerPreviewWipe(false); got != "" {
+		t.Errorf("no preview means no wipe: %q", got)
+	}
+}

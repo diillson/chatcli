@@ -118,6 +118,16 @@ func sanitizeTypeaheadPreview(s string) string {
 	return strings.TrimLeft(b.String(), " ")
 }
 
+// spinnerPreviewWipe returns the sequence that erases a type-ahead line
+// still painted below the spinner when the turn ends mid-typing ("" when
+// nothing was painted).
+func spinnerPreviewWipe(hadPreview bool) string {
+	if hadPreview {
+		return "\n\033[K\033[A\r"
+	}
+	return ""
+}
+
 // buildTurnSpinnerFrame composes one repaint of the single-line turn
 // spinner: status line (with the queued type-ahead indicator) plus the
 // live input line below when the user is typing. Extracted from the
