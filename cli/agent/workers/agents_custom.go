@@ -7,6 +7,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/diillson/chatcli/llm/client"
 	"github.com/diillson/chatcli/pkg/coder/engine"
 	"github.com/diillson/chatcli/pkg/persona"
 )
@@ -68,6 +69,15 @@ func NewCustomAgent(pa *persona.Agent, personaSkills []*persona.Skill) *CustomAg
 	systemPrompt := buildCustomSystemPrompt(pa, personaSkills, commands, readOnly)
 	skillSet := buildCustomSkillSet(personaSkills)
 
+	// Claude Code-style `model: inherit` means "use the session's active
+	// model" — normalize it to the empty-string inherit contract so the
+	// hint never reaches the model router or the orchestrator's agent
+	// catalog as a literal model id.
+	modelHint := strings.TrimSpace(pa.Model)
+	if client.IsInheritHint(modelHint) {
+		modelHint = ""
+	}
+
 	return &CustomAgent{
 		agentType:    AgentType(strings.ToLower(pa.Name)),
 		name:         pa.Name,
@@ -76,7 +86,7 @@ func NewCustomAgent(pa *persona.Agent, personaSkills []*persona.Skill) *CustomAg
 		commands:     commands,
 		readOnly:     readOnly,
 		skills:       skillSet,
-		modelHint:    strings.TrimSpace(pa.Model),
+		modelHint:    modelHint,
 		effortHint:   strings.ToLower(strings.TrimSpace(pa.Effort)),
 	}
 }
