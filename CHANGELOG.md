@@ -1,5 +1,18 @@
 # Changelog
 
+## [1.178.0](https://github.com/diillson/chatcli/compare/v1.177.0...v1.178.0) (2026-08-03)
+
+
+### Features
+
+* **agent:** live type-ahead preview while the coder spinner runs ([#1293](https://github.com/diillson/chatcli/issues/1293)) ([54b8dfc](https://github.com/diillson/chatcli/commit/54b8dfc3aea66a5fb0ce793584709724f54afd19))
+
+
+### Bug Fixes
+
+* **agent:** keep the orchestrator in the squad flow and make dispatch progress live ([#1291](https://github.com/diillson/chatcli/issues/1291)) ([5e28d04](https://github.com/diillson/chatcli/commit/5e28d042626988719f0c456c9a05ceecb1c5a463))
+* **agent:** render the turn-spinner type-ahead preview below the line ([#1294](https://github.com/diillson/chatcli/issues/1294)) ([e3ea691](https://github.com/diillson/chatcli/commit/e3ea691e7a386e88c1c9792ef4c00aaee441e27b))
+
 ## [1.177.0](https://github.com/diillson/chatcli/compare/v1.176.0...v1.177.0) (2026-08-03)
 
 
