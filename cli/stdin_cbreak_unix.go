@@ -52,7 +52,7 @@ func enableStdinCbreak() func() {
 
 // sttyOutput runs stty against the tty and returns its stdout.
 func sttyOutput(tty *os.File, args ...string) (string, error) {
-	cmd := exec.Command("stty", args...)
+	cmd := exec.Command("stty", args...) // #nosec G204 -- fixed binary; args are stty mode tokens or the state string previously emitted by `stty -g` on this same tty, never user input
 	cmd.Stdin = tty
 	out, err := cmd.Output()
 	return string(out), err
@@ -60,7 +60,7 @@ func sttyOutput(tty *os.File, args ...string) (string, error) {
 
 // sttyRun runs stty against the tty, discarding output.
 func sttyRun(tty *os.File, args ...string) error {
-	cmd := exec.Command("stty", args...)
+	cmd := exec.Command("stty", args...) // #nosec G204 -- fixed binary; args are stty mode tokens or the state string previously emitted by `stty -g` on this same tty, never user input
 	cmd.Stdin = tty
 	return cmd.Run()
 }
