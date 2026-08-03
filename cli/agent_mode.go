@@ -125,6 +125,16 @@ type AgentMode struct {
 	// executions. Defaults to routing through the command handler.
 	sideCmdExec func(string)
 
+	// Live type-ahead preview: the partial line typed since the last
+	// Enter, published by the reader goroutine and rendered by the spinner
+	// and the dispatch panel. Only populated while the TTY is in cbreak
+	// mode (Unix); empty on Windows and non-TTY runs.
+	typeaheadMu   sync.Mutex
+	typeaheadLine string
+	// stdinCbreakRestore undoes the cbreak TTY state applied when the
+	// reader spawned. Guarded by stdinMu.
+	stdinCbreakRestore func()
+
 	// lastBoardNudge dedups the [BOARD SYNC] reconciliation block: the
 	// model gets one nudge per distinct stale-board state, not one per
 	// turn. Reset at Run() start.
@@ -200,6 +210,18 @@ func splitStdinChunk(chunk []byte, lineBuf *strings.Builder) []string {
 	var lines []string
 	for i := 0; i < len(chunk); i++ {
 		b := chunk[i]
+		if b == 0x08 || b == 0x7f {
+			// Backspace/DEL: in cbreak mode the kernel no longer edits the
+			// line for us, so the reader must — drop the last rune of the
+			// pending partial (rune-safe: multi-byte UTF-8 input is normal
+			// in pt-BR). Without this, "abc<BS>d" would submit "abc\x7fd".
+			if s := lineBuf.String(); s != "" {
+				_, size := utf8.DecodeLastRuneInString(s)
+				lineBuf.Reset()
+				lineBuf.WriteString(s[:len(s)-size])
+			}
+			continue
+		}
 		if b != '\n' && b != '\r' {
 			lineBuf.WriteByte(b)
 			continue
@@ -241,6 +263,10 @@ func (a *AgentMode) spawnStdinReaderLocked(ctx context.Context) {
 	a.stdinLines = make(chan string, 10)
 	a.stdinDone = make(chan struct{})
 	a.stdinCancel = newStdinReadCanceler()
+	// Own the line editing while the loop runs: without cbreak the kernel
+	// echoes typed characters on top of the spinner (where the repaint
+	// eats them) and only delivers the line on Enter.
+	a.stdinCbreakRestore = enableStdinCbreak()
 	a.stdinWg.Add(1)
 
 	// The goroutine works on local copies of the lifecycle values: after a
@@ -280,6 +306,7 @@ func (a *AgentMode) spawnStdinReaderLocked(ctx context.Context) {
 			}
 
 			lines := splitStdinChunk(buf[:n], &lineBuf)
+			a.setTypeaheadPreview(lineBuf.String())
 			for _, rawLine := range lines {
 				// Detect and clean paste content
 				cleaned, pasteInfo := paste.DetectInLine(rawLine)
@@ -365,6 +392,11 @@ func (a *AgentMode) teardownStdinReaderLocked() {
 		a.stdinLines = nil
 		a.stdinDone = nil
 	}
+	if a.stdinCbreakRestore != nil {
+		a.stdinCbreakRestore()
+		a.stdinCbreakRestore = nil
+	}
+	a.setTypeaheadPreview("")
 }
 
 // suspendStdinReader fully releases the stdin fd regardless of the refcount
@@ -429,6 +461,22 @@ func (a *AgentMode) withInteractiveStdin(ctx context.Context, fn func() error) e
 	}
 	a.resumeStdinReader(ctx)
 	return err
+}
+
+// reapplyStdinCbreak re-arms the cbreak TTY state after an interactive
+// consumer (security prompt, command-block menu) deliberately restored
+// cooked mode via stty sane. Cheap (one stty exec) and idempotent; no-op
+// when no reader is active.
+func (a *AgentMode) reapplyStdinCbreak() {
+	a.stdinMu.Lock()
+	defer a.stdinMu.Unlock()
+	if a.stdinLines == nil {
+		return
+	}
+	if a.stdinCbreakRestore != nil {
+		a.stdinCbreakRestore()
+	}
+	a.stdinCbreakRestore = enableStdinCbreak()
 }
 
 // handleAgentAsk drives the @ask / ask_user tool: it parses the question spec,
@@ -781,7 +829,11 @@ func (a *AgentMode) getInput(promptStr string) string {
 	fmt.Print(promptStr)
 
 	// Use centralized stdin reader (paste detection already handled there)
-	return a.readLine()
+	line := a.readLine()
+	// This helper forced cooked mode above for readable menu input; re-arm
+	// cbreak so the live type-ahead preview keeps working afterwards.
+	a.reapplyStdinCbreak()
+	return line
 }
 
 // clientAndCtxForTurn resolves the LLM client and context for a single ReAct
@@ -1766,6 +1818,11 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 		// recipient's inbox drain this same turn.
 		a.applySideCommands(ctx)
 
+		// Interactive consumers (security prompts, menus) restore cooked
+		// mode for themselves; re-arm cbreak each turn so the live
+		// type-ahead preview self-heals.
+		a.reapplyStdinCbreak()
+
 		// Mechanical board reconciliation: cards in doing whose linked runs
 		// all finished get a [BOARD SYNC] block so the orchestrator moves
 		// them THIS turn (prompt discipline alone reliably decays over a
@@ -1937,7 +1994,10 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 			if queued > 0 {
 				msg = "Processando... " + i18n.T("agent.queue.indicator", queued)
 			}
-			fmt.Print(metrics.FormatTimerStatus(d, modelName, msg))
+			// Live type-ahead: show what the user is typing right now so
+			// they never type blind under the spinner. \033[K clears
+			// leftovers when the preview shrinks (backspace).
+			fmt.Print(metrics.FormatTimerStatus(d, modelName, msg) + formatTypeaheadPreviewInline(a.typeaheadPreviewSnapshot(), 40) + "\033[K")
 		})
 
 		// Validate/repair tool result pairing on the PERSISTENT history —
@@ -2605,6 +2665,9 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 						progressState.SetLive(ac.ID, info.Turn, info.MaxTurns, info.Action, subLines)
 					}
 					output := metrics.FormatDispatchProgress(progressState, modelName)
+					if previewLine := formatTypeaheadPreviewLine(a.typeaheadPreviewSnapshot()); previewLine != "" {
+						output += previewLine + "\n"
+					}
 					fmt.Print(output)
 					// Count rendered lines directly — sub-lines make the
 					// panel height dynamic between ticks.
@@ -2617,6 +2680,7 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 				if a.policyAdapter != nil {
 					a.policyAdapter.setSpinner(a.turnTimer)
 					a.policyAdapter.setStdinCh(a.stdinLines)
+					a.policyAdapter.setRestoreInput(a.reapplyStdinCbreak)
 				}
 				agentResults := a.agentDispatcher.DispatchWithProgress(ctx, agentCalls, progressCh)
 				a.turnTimer.Stop()
@@ -2780,6 +2844,10 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 								zap.String("tool", tc.Name))
 						} else if action == coder.ActionAsk {
 							decision := coder.PromptSecurityCheckGuarded(ctx, tc.Name, tc.Args, a.stdinLines)
+							// The prompt forced cooked mode (stty sane); re-arm
+							// cbreak so live type-ahead survives the rest of
+							// the turn instead of degrading until the boundary.
+							a.reapplyStdinCbreak()
 							pattern := coder.GetSuggestedPattern(tc.Name, tc.Args)
 							switch decision {
 							case coder.DecisionAllowAlways:
