@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.176.0](https://github.com/diillson/chatcli/compare/v1.175.0...v1.176.0) (2026-08-03)
+
+
+### Features
+
+* **agent:** agent squad with live run registry, work board, squad mail and autonomous delivery playbook ([793cd44](https://github.com/diillson/chatcli/commit/793cd447af4517e3c113018e97403309fc9af100))
+
 ## [1.175.0](https://github.com/diillson/chatcli/compare/v1.174.0...v1.175.0) (2026-07-30)
 
 
