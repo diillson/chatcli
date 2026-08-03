@@ -38,6 +38,11 @@ type workerPolicyAdapter struct {
 	// forever, so "ask" auto-approves (the operator opted into full autonomy;
 	// access is gated at the messaging edge). ActionDeny still blocks.
 	unattended bool
+
+	// restoreInput, when set, runs after each interactive prompt so the
+	// agent loop can re-arm its cbreak type-ahead TTY state (the prompt
+	// forces cooked mode to render/read cleanly).
+	restoreInput func()
 }
 
 // newWorkerPolicyAdapter creates a PolicyChecker backed by coder.PolicyManager.
@@ -56,6 +61,15 @@ func (a *workerPolicyAdapter) setSpinner(t *metrics.Timer) {
 }
 
 // setStdinCh sets the centralized stdin channel for security prompts.
+// setRestoreInput registers a callback invoked after each interactive
+// prompt finishes (the prompt forces cooked mode; the agent loop re-arms
+// its cbreak type-ahead state through this hook).
+func (a *workerPolicyAdapter) setRestoreInput(fn func()) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.restoreInput = fn
+}
+
 func (a *workerPolicyAdapter) setStdinCh(ch <-chan string) {
 	a.stdinCh = ch
 }
@@ -149,6 +163,9 @@ func (a *workerPolicyAdapter) CheckAndPrompt(ctx context.Context, toolName, args
 		// Clear the prompt area and resume spinner
 		fmt.Print(metrics.ClearLine())
 		a.resumeSpinner()
+		if a.restoreInput != nil {
+			a.restoreInput()
+		}
 
 		switch decision {
 		case coder.DecisionAllowAlways:
