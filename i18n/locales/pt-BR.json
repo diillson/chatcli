@@ -1321,6 +1321,7 @@
   "agents.list.active": "Agents em execução",
   "agents.list.recent": "Execuções recentes",
   "agents.list.remote": "Execuções em outros processos (via hub)",
+  "agent.sidecmd.applying": "Aplicando %d comando(s) enfileirado(s) durante a execução",
   "agents.remote.stale": "sem heartbeat — o processo dono pode ter morrido",
   "agents.cancel.remote": "Cancelamento encaminhado ao processo dono de %s — aplicado no próximo ciclo de sincronização.",
   "agents.field.instance": "instância",

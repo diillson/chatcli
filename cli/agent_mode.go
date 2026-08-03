@@ -105,6 +105,26 @@ type AgentMode struct {
 	stdinWg      sync.WaitGroup
 	multilineBuf MultilineBuffer // ``` delimited multiline input
 
+	// stdinMu guards the reader lifecycle fields above plus stdinDepth.
+	// processAIResponseAndAct is re-entrant (command-block menu, park
+	// resume) and each entry brackets the reader with start/stop; the
+	// depth count keeps the INNER stop from tearing the reader down while
+	// the outer loop still needs it (previously type-ahead silently died
+	// for the rest of the run after any nested entry). Interactive
+	// overlays that need the fd released outright use suspend/resume,
+	// which bypass the refcount.
+	stdinMu    sync.Mutex
+	stdinDepth int
+
+	// Side commands typed mid-run (/agents, /board, /mail, /jobs) that
+	// could not run immediately (live display not active — e.g. a security
+	// prompt owns the terminal). Applied at the next turn boundary.
+	sideCmdMu    sync.Mutex
+	sideCmdQueue []string
+	// sideCmdExec runs one side command line; a seam so tests can capture
+	// executions. Defaults to routing through the command handler.
+	sideCmdExec func(string)
+
 	// cancelSignal is the Done() channel of the in-flight Run/ReAct loop's
 	// context. Blocking stdin reads (security confirmations, batch prompts)
 	// select on it so a Ctrl+C aborts them the instant the operation is
@@ -197,23 +217,44 @@ func splitStdinChunk(chunk []byte, lineBuf *strings.Builder) []string {
 // goroutine never blocks for more than ~50ms, so it can check stdinDone and
 // exit cleanly when agent mode ends — without requiring the user to press Enter.
 func (a *AgentMode) startStdinReader() {
+	a.stdinMu.Lock()
+	defer a.stdinMu.Unlock()
+	a.stdinDepth++
+	if a.stdinLines != nil {
+		// Nested processAIResponseAndAct entry: the outer scope's reader is
+		// already draining stdin — spawning a second goroutine would make
+		// both race for the same fd (byte interleaving).
+		return
+	}
+	a.spawnStdinReaderLocked()
+}
+
+// spawnStdinReaderLocked starts the reader goroutine. Caller holds stdinMu.
+func (a *AgentMode) spawnStdinReaderLocked() {
 	a.stdinLines = make(chan string, 10)
 	a.stdinDone = make(chan struct{})
 	a.stdinCancel = newStdinReadCanceler()
 	a.stdinWg.Add(1)
+
+	// The goroutine works on local copies of the lifecycle values: after a
+	// teardown that timed out waiting (blocked console read), the struct
+	// fields are re-assigned by the next spawn while this goroutine may
+	// still be draining — it must keep talking to ITS channels, not the
+	// successor's.
+	linesCh, doneCh, canceler := a.stdinLines, a.stdinDone, a.stdinCancel
 
 	go func() {
 		defer a.stdinWg.Done()
 		// Pin to an OS thread and publish its handle so stopStdinReader can
 		// abort a blocking console read via CancelSynchronousIo (Windows;
 		// no-op elsewhere).
-		a.stdinCancel.bind()
-		defer a.stdinCancel.unbind()
+		canceler.bind()
+		defer canceler.unbind()
 		var lineBuf strings.Builder
 		buf := make([]byte, 512)
 		for {
 			select {
-			case <-a.stdinDone:
+			case <-doneCh:
 				return
 			default:
 			}
@@ -246,10 +287,19 @@ func (a *AgentMode) startStdinReader() {
 
 				line := strings.TrimSpace(rawLine)
 
+				// Side commands (/agents, /board, /mail, /jobs) are handled
+				// out-of-band: they must never reach the stdinLines channel,
+				// where a security prompt would read "/board" as a denial
+				// and the type-ahead drain would hand it to the LLM as text.
+				if isSideCommand(line) {
+					a.onSideCommand(line)
+					continue
+				}
+
 				select {
-				case <-a.stdinDone:
+				case <-doneCh:
 					return
-				case a.stdinLines <- line:
+				case linesCh <- line:
 				}
 			}
 		}
@@ -274,6 +324,21 @@ const (
 // CancelSynchronousIo on the reader's thread — the documented mechanism for
 // cancelling synchronous console I/O.
 func (a *AgentMode) stopStdinReader() {
+	a.stdinMu.Lock()
+	defer a.stdinMu.Unlock()
+	if a.stdinDepth > 0 {
+		a.stdinDepth--
+	}
+	if a.stdinDepth > 0 {
+		// An outer processAIResponseAndAct scope still owns the reader.
+		return
+	}
+	a.teardownStdinReaderLocked()
+}
+
+// teardownStdinReaderLocked stops the goroutine and clears the lifecycle
+// fields. Caller holds stdinMu.
+func (a *AgentMode) teardownStdinReaderLocked() {
 	if a.stdinDone != nil {
 		close(a.stdinDone)
 
@@ -292,6 +357,26 @@ func (a *AgentMode) stopStdinReader() {
 
 		a.stdinLines = nil
 		a.stdinDone = nil
+	}
+}
+
+// suspendStdinReader fully releases the stdin fd regardless of the refcount
+// so an interactive program (go-prompt line editing, a Bubble Tea overlay)
+// can own the terminal. Pair with resumeStdinReader.
+func (a *AgentMode) suspendStdinReader() {
+	a.stdinMu.Lock()
+	defer a.stdinMu.Unlock()
+	a.teardownStdinReaderLocked()
+}
+
+// resumeStdinReader restarts the reader after a suspend, but only when some
+// loop scope still holds a start reference — resuming after the last stop
+// would leak a reader into the REPL prompt.
+func (a *AgentMode) resumeStdinReader() {
+	a.stdinMu.Lock()
+	defer a.stdinMu.Unlock()
+	if a.stdinDepth > 0 && a.stdinLines == nil {
+		a.spawnStdinReaderLocked()
 	}
 }
 
@@ -329,18 +414,13 @@ func (a *AgentMode) abortBlockedStdinRead(done <-chan struct{}) {
 // reader is idle here and no type-ahead is lost.
 func (a *AgentMode) withInteractiveStdin(fn func() error) error {
 	fd := int(os.Stdin.Fd())
-	hadReader := a.stdinLines != nil
-	if hadReader {
-		a.stopStdinReader()
-	}
+	a.suspendStdinReader()
 	state, _ := term.GetState(fd)
 	err := fn()
 	if state != nil {
 		_ = term.Restore(fd, state)
 	}
-	if hadReader {
-		a.startStdinReader()
-	}
+	a.resumeStdinReader()
 	return err
 }
 
@@ -603,10 +683,15 @@ func (a *AgentMode) runMultilineSession(trigger string, reader *bufio.Reader) (s
 	}
 }
 
-// drainStdinToQueue moves any pending stdin lines into the message queue.
-// Returns the first message if any, for immediate injection into conversation.
+// drainStdinToQueue collects every pending stdin line into ONE newline-joined
+// user message for injection at the turn boundary. Historically only the
+// first line was injected and the rest were pushed onto cli.messageQueue —
+// but agent mode never dequeues that queue (its sole consumer is the
+// chat-mode lifecycle), so lines 2..N were stranded until the user returned
+// to chat. Folding them keeps every typed instruction in the turn it was
+// meant for.
 func (a *AgentMode) drainStdinToQueue() string {
-	var first string
+	var lines []string
 	for {
 		select {
 		case line := <-a.stdinLines:
@@ -623,15 +708,9 @@ func (a *AgentMode) drainStdinToQueue() string {
 				fmt.Println(colorize(" ⏸ "+i18n.T("park.resume.queued_while_busy", token), ColorCyan))
 				continue
 			}
-			if first == "" {
-				first = line
-			} else {
-				a.cli.messageQueueMu.Lock()
-				a.cli.messageQueue = append(a.cli.messageQueue, line)
-				a.cli.messageQueueMu.Unlock()
-			}
+			lines = append(lines, line)
 		default:
-			return first
+			return strings.Join(lines, "\n")
 		}
 	}
 }
@@ -1671,6 +1750,13 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 				Role: "user", Content: mail.FormatInbox(inbox),
 			})
 		}
+
+		// Side commands (/agents, /board, /mail, /jobs) that could not run
+		// the moment they were typed (the terminal was owned by a security
+		// prompt or no live display was active) run now, before the
+		// type-ahead drain — a /mail send applied here still reaches its
+		// recipient's inbox drain this same turn.
+		a.applySideCommands()
 
 		// Check for type-ahead messages from user (works in both /agent and
 		// /coder modes). Lines typed while the LLM was streaming or while a
@@ -3394,21 +3480,18 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 			fmt.Print(renderer.Colorize("  ⏳ "+i18n.T("coder.waiting_for_input"), agent.ColorCyan))
 			fmt.Println() // newline before input for clean cursor positioning
 
-			// Stop the raw stdin reader so we can use line-editing input.
+			// Suspend the raw stdin reader so we can use line-editing input.
 			// The raw reader captures escape sequences as literal bytes (^[[A for arrows),
 			// making it impossible to navigate text. We temporarily switch to
 			// golang.org/x/term which provides full readline support.
-			hadStdinReader := a.stdinLines != nil
-			if hadStdinReader {
-				a.stopStdinReader()
-			}
+			// suspend/resume (not stop/start) so the reader refcount held by
+			// this — possibly nested — loop scope stays balanced.
+			a.suspendStdinReader()
 
 			userInput, err := a.readLineWithEditing()
 
 			// Restart the stdin reader for subsequent agent turns
-			if hadStdinReader {
-				a.startStdinReader()
-			}
+			a.resumeStdinReader()
 			if err != nil {
 				return err
 			}

@@ -24,6 +24,11 @@ type Timer struct {
 	mu           sync.Mutex
 	updateTicker *time.Ticker
 	onPause      func() // called under mu when Pause() is invoked
+	// pauseDepth counts nested Pause calls so two independent consumers of
+	// the terminal (a security prompt and a mid-run side command) cannot
+	// resume each other's display: the repaint only restarts when every
+	// pauser has called Resume.
+	pauseDepth int
 }
 
 // NewTimer cria um novo timer
@@ -39,6 +44,7 @@ func (t *Timer) Start(ctx context.Context, displayFunc func(duration time.Durati
 	t.startTime = time.Now()
 	t.running = true
 	t.displayFunc = displayFunc
+	t.pauseDepth = 0
 
 	// Only animate when stdout is a real terminal. When it is a pipe or file
 	// (gateway capture, `mcp-server`, one-shot/piped runs), the \r repaint is
@@ -124,9 +130,15 @@ func (t *Timer) SetOnPause(f func()) {
 // The elapsed time continues accumulating. Call Resume to restore display.
 // If an onPause callback was registered, it runs under the mutex before
 // pausing, allowing multi-line displays to be properly cleared.
+//
+// Pause/Resume pairs nest: each Pause increments a depth counter and the
+// display only restarts when the counter drains back to zero, so concurrent
+// pausers (security prompt, mid-run side command) never resume each other's
+// display prematurely.
 func (t *Timer) Pause() {
 	t.mu.Lock()
 	defer t.mu.Unlock()
+	t.pauseDepth++
 	if t.running {
 		t.running = false
 		if t.onPause != nil {
@@ -135,11 +147,15 @@ func (t *Timer) Pause() {
 	}
 }
 
-// Resume restores the display output after a Pause.
+// Resume restores the display output after a Pause once every outstanding
+// pauser has resumed.
 func (t *Timer) Resume() {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	if !t.running && t.cancel != nil {
+	if t.pauseDepth > 0 {
+		t.pauseDepth--
+	}
+	if t.pauseDepth == 0 && !t.running && t.cancel != nil {
 		t.running = true
 	}
 }
