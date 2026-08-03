@@ -15,6 +15,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/diillson/chatcli/cli/agent/runs"
 	"github.com/diillson/chatcli/config"
 )
 
@@ -169,4 +170,21 @@ func truncateForUI(s string, maxLen int) string {
 		return s
 	}
 	return s[:maxLen] + "..."
+}
+
+// formatRunChildLine renders one live child run (e.g. a delegate subagent
+// spawned by a worker) as an indented sub-line of the dispatch panel.
+func formatRunChildLine(child runs.Info) string {
+	label := child.Task
+	if label == "" {
+		label = child.Agent
+	}
+	line := fmt.Sprintf("↳ [%s] %s", child.Agent, truncateForUI(label, 48))
+	if child.Turn > 0 && child.MaxTurns > 0 {
+		line += fmt.Sprintf(" — turno %d/%d", child.Turn, child.MaxTurns)
+	}
+	if child.Action != "" {
+		line += " · " + truncateForUI(child.Action, 28)
+	}
+	return line
 }

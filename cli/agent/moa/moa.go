@@ -21,6 +21,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/diillson/chatcli/cli/agent/runs"
 	"github.com/diillson/chatcli/models"
 )
 
@@ -129,7 +130,15 @@ func RunSession(ctx context.Context, prompt string, history []models.Message, re
 		wg.Add(1)
 		go func(i int, ref Ref) {
 			defer wg.Done()
-			out, err := turn(ctx, ref, prompt, history)
+			// Each panel member registers as a run so the /agents view shows
+			// the MoA fan-out alongside worker dispatches.
+			refCtx, liveRun := runs.Default().Begin(ctx, runs.Info{
+				Kind:  runs.KindMoA,
+				Agent: ref.String(),
+				Task:  prompt,
+			})
+			out, err := turn(refCtx, ref, prompt, history)
+			liveRun.End(err)
 			results[i] = RefResult{Ref: ref, Output: out, Err: err}
 		}(i, ref)
 	}

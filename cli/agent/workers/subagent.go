@@ -28,6 +28,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/diillson/chatcli/cli/agent/runs"
 	"github.com/diillson/chatcli/llm/client"
 	"go.uber.org/zap"
 )
@@ -214,6 +215,18 @@ func runSubagent(ctx context.Context, args delegateArgs) (string, error) {
 			zap.Int("tools", len(tools)))
 	}
 
+	// Register in the run registry so the live panel and /agents can see the
+	// delegate (parent run inherited from ctx: worker or orchestrator).
+	task := args.Description
+	if task == "" {
+		task = args.Prompt
+	}
+	subCtx, liveRun := runs.Default().Begin(subCtx, runs.Info{
+		Kind:  runs.KindSubagent,
+		Agent: "subagent",
+		Task:  task,
+	})
+
 	result, err := RunWorkerReAct(
 		subCtx,
 		subConfig,
@@ -224,6 +237,8 @@ func runSubagent(ctx context.Context, args delegateArgs) (string, error) {
 		sc.PolicyChecker,
 		sc.Logger,
 	)
+
+	liveRun.End(err)
 
 	elapsed := time.Since(start)
 	if sc.Logger != nil {

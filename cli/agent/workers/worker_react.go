@@ -3,6 +3,7 @@ package workers
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"strconv"
@@ -11,6 +12,8 @@ import (
 	"time"
 
 	"github.com/diillson/chatcli/cli/agent"
+	"github.com/diillson/chatcli/cli/agent/mail"
+	"github.com/diillson/chatcli/cli/agent/runs"
 	"github.com/diillson/chatcli/llm/client"
 	"github.com/diillson/chatcli/models"
 	"github.com/diillson/chatcli/pkg/coder/engine"
@@ -81,6 +84,11 @@ func RunWorkerReAct(
 	startTime := time.Now()
 	callID := nextCallID()
 
+	// Live progress handle: registered by whoever spawned this loop
+	// (dispatcher, subagent, MoA, scheduler bridge). Nil-safe — a loop run
+	// without a registered handle simply reports nothing.
+	liveRun := runs.FromContext(ctx)
+
 	maxTurns := config.MaxTurns
 	if maxTurns <= 0 {
 		maxTurns = DefaultWorkerMaxTurns
@@ -101,6 +109,9 @@ func RunWorkerReAct(
 	var toolDefs []models.ToolDefinition
 	if useNativeTools {
 		toolDefs = CoderToolDefinitions(config.AllowedCommands)
+		// Squad mail is a universal capability: every worker can message
+		// other agents regardless of its command allowlist.
+		toolDefs = append(toolDefs, MailToolDefinition())
 		logger.Info("Using native function calling",
 			zap.Int("tools", len(toolDefs)),
 			zap.String("callID", callID))
@@ -135,10 +146,12 @@ func RunWorkerReAct(
 	var finalOutput strings.Builder
 	maxParallel := 0
 
-	allowed := make(map[string]bool, len(config.AllowedCommands))
+	allowed := make(map[string]bool, len(config.AllowedCommands)+1)
 	for _, cmd := range config.AllowedCommands {
 		allowed[cmd] = true
 	}
+	// Universal squad-mail capability (see MailToolDefinition).
+	allowed["mail"] = true
 
 	// --- Failure tracking for reflection ---
 	consecutiveFailures := 0
@@ -155,6 +168,19 @@ func RunWorkerReAct(
 				ToolCalls: allToolCalls,
 			}, ctx.Err()
 		default:
+		}
+
+		liveRun.SetTurn(turn+1, maxTurns)
+		liveRun.SetAction("")
+
+		// Drain this agent's squad mailbox at the turn boundary — the only
+		// point where injecting context cannot split a tool_use/tool_result
+		// pair. Merged into a trailing user message when one exists so
+		// strict-alternation providers never see two user turns in a row.
+		if snap := liveRun.Snapshot(); snap.Agent != "" {
+			if inbox := mail.Default().Drain(snap.Agent); len(inbox) > 0 {
+				history = appendInboxMessage(history, mail.FormatInbox(inbox))
+			}
 		}
 
 		// --- Call LLM (native or text mode) ---
@@ -208,6 +234,7 @@ func RunWorkerReAct(
 
 		if canParallelize {
 			maxParallel = max(maxParallel, len(runnable))
+			liveRun.SetAction(batchActionLabel(runnableResolved))
 			var wg sync.WaitGroup
 			var mu sync.Mutex
 			for i, v := range validated {
@@ -227,9 +254,13 @@ func RunWorkerReAct(
 			wg.Wait()
 		} else {
 			for i, v := range validated {
+				if !v.blocked {
+					liveRun.SetAction(toolActionLabel(v.rtc))
+				}
 				results[i] = executeToolCall(ctx, v, lockMgr, policyChecker)
 			}
 		}
+		liveRun.AddToolCalls(len(runnable))
 
 		// --- Aggregate results ---
 		agg := aggregateTurnResults(results, validated, blockedCmds)
@@ -341,6 +372,12 @@ func executeToolCall(ctx context.Context, v validatedTC, lockMgr *FileLockManage
 		return executeDelegate(ctx, v)
 	}
 
+	// Special-case: mail is the in-memory squad message bus, not an engine
+	// subcommand.
+	if v.rtc.Subcmd == "mail" {
+		return executeMailSend(ctx, v)
+	}
+
 	filePath := extractFilePathFromResolved(v.rtc)
 	if isWriteCommand(v.rtc.Subcmd) && filePath != "" && lockMgr != nil {
 		lockMgr.Lock(filePath)
@@ -382,6 +419,66 @@ func executeToolCall(ctx context.Context, v validatedTC, lockMgr *FileLockManage
 		out += fmt.Sprintf("[ERROR] %v\n", execErr)
 	}
 	return execResult{index: v.index, record: record, output: out, failed: hasFailed, toolID: v.rtc.ID}
+}
+
+// appendInboxMessage injects drained squad mail into the history. When the
+// last message is already a user turn, the mail is folded into it so
+// strict-alternation providers never see consecutive user messages.
+func appendInboxMessage(history []models.Message, inboxText string) []models.Message {
+	if inboxText == "" {
+		return history
+	}
+	if n := len(history); n > 0 && history[n-1].Role == "user" {
+		history[n-1].Content += "\n\n" + inboxText
+		return history
+	}
+	return append(history, models.Message{Role: "user", Content: inboxText})
+}
+
+// executeMailSend handles the mail tool call: it resolves the sender from
+// the run registry handle on ctx and enqueues the message on the squad bus.
+func executeMailSend(ctx context.Context, v validatedTC) execResult {
+	fail := func(err error) execResult {
+		record := ToolCallRecord{Name: "mail", Args: v.rtc.RawArgs, Error: err}
+		return execResult{index: v.index, record: record, output: fmt.Sprintf("[mail] %v\n", err), failed: true, toolID: v.rtc.ID}
+	}
+
+	args := v.rtc.NativeArgs
+	if len(args) == 0 && v.rtc.RawArgs != "" {
+		var parsed map[string]interface{}
+		if err := json.Unmarshal([]byte(v.rtc.RawArgs), &parsed); err == nil {
+			// Tolerate the {"cmd":"mail","args":{...}} envelope from XML mode.
+			if inner, ok := parsed["args"].(map[string]interface{}); ok {
+				parsed = inner
+			}
+			args = parsed
+		}
+	}
+	getStr := func(keys ...string) string {
+		for _, k := range keys {
+			if s, ok := args[k].(string); ok && strings.TrimSpace(s) != "" {
+				return strings.TrimSpace(s)
+			}
+		}
+		return ""
+	}
+	to := getStr("to", "recipient", "agent")
+	text := getStr("text", "message", "body")
+	if to == "" || text == "" {
+		return fail(errors.New(`mail requires "to" and "text"`))
+	}
+
+	from := "worker"
+	if snap := runs.FromContext(ctx).Snapshot(); snap.Agent != "" {
+		from = snap.Agent
+	}
+	msg, err := mail.Default().Send(from, to, getStr("card_id", "cardId", "card"), text)
+	if err != nil {
+		return fail(err)
+	}
+	out := fmt.Sprintf("mail sent: %s -> %s (%s)", msg.From, msg.To, msg.ID)
+	record := ToolCallRecord{Name: "mail", Args: v.rtc.RawArgs, Output: out}
+	return execResult{index: v.index, record: record, output: "[mail] " + out + "\n", toolID: v.rtc.ID}
 }
 
 // executeDelegate handles the delegate tool call: it parses the delegation
@@ -610,6 +707,33 @@ func buildReflectionPrompt(turnBlocked, totalValidated, consecutiveFailures int,
 	}
 
 	return reflection.String()
+}
+
+// toolActionLabel builds the short, language-neutral live-progress label for
+// one tool call: the subcommand plus its file argument when there is one
+// (e.g. "read cli/foo.go"). Consumed by the run registry / live panel.
+func toolActionLabel(rtc resolvedToolCall) string {
+	if p := extractFilePathFromResolved(rtc); p != "" {
+		return truncateStr(rtc.Subcmd+" "+p, 60)
+	}
+	return truncateStr(rtc.Subcmd, 60)
+}
+
+// batchActionLabel summarizes a parallel batch for the live-progress label:
+// a single call keeps its full label, larger batches show "N× cmd1+cmd2".
+func batchActionLabel(batch []resolvedToolCall) string {
+	if len(batch) == 1 {
+		return toolActionLabel(batch[0])
+	}
+	seen := make(map[string]bool, len(batch))
+	var cmds []string
+	for _, rtc := range batch {
+		if !seen[rtc.Subcmd] {
+			seen[rtc.Subcmd] = true
+			cmds = append(cmds, rtc.Subcmd)
+		}
+	}
+	return truncateStr(fmt.Sprintf("%d× %s", len(batch), strings.Join(cmds, "+")), 60)
 }
 
 // extractFilePathFromResolved extracts file path from a resolved tool call.

@@ -637,6 +637,22 @@ func NewChatCLI(ctx context.Context, manager manager.LLMManager, logger *zap.Log
 		// TaskTracker.
 		pluginMgr.RegisterBuiltinPlugin(plugins.NewBuiltinTodoPlugin())
 
+		// @agents — squad observability: lets the LLM list live agent runs
+		// (workers, subagents, MoA members, scheduler headless), inspect
+		// per-run progress and cancel a stuck run. Adapter wired below over
+		// the process-wide run registry.
+		pluginMgr.RegisterBuiltinPlugin(plugins.NewBuiltinAgentsPlugin())
+
+		// @board — the squad work board: the orchestrator LLM breaks goals
+		// into cards, assigns worker agent types, moves them across the
+		// kanban and records review/delivery notes. Humans watch via /board.
+		pluginMgr.RegisterBuiltinPlugin(plugins.NewBuiltinBoardPlugin())
+
+		// @mail — squad messaging for the orchestrator: message workers
+		// (delivered on their next turn), drain its own inbox, audit
+		// traffic. Workers use their native send_mail tool; humans /mail.
+		pluginMgr.RegisterBuiltinPlugin(plugins.NewBuiltinMailPlugin())
+
 		// Slash-as-tool: register the curated subset of slash commands
 		// (currently /help and /version) as plugins so the LLM can invoke
 		// them via the same native tool dispatch path used by @coder,
@@ -836,6 +852,15 @@ func NewChatCLI(ctx context.Context, manager manager.LLMManager, logger *zap.Log
 		}
 		return cli.agentMode.taskTracker
 	}))
+
+	// Wire the @agents plugin adapter over the process-wide run registry.
+	plugins.SetAgentsAdapter(newLiveAgentsAdapter(nil))
+
+	// Wire the @board plugin adapter over the squad board store.
+	plugins.SetBoardAdapter(newLiveBoardAdapter(nil))
+
+	// Wire the @mail plugin adapter over the squad message bus.
+	plugins.SetMailAdapter(newLiveMailAdapter(nil))
 
 	// Wire the policy_manager's capability resolver (Item 4). When a
 	// tool call hits no explicit policy rule AND the plugin advertises

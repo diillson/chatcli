@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/diillson/chatcli/cli/agent/runs"
 	"github.com/diillson/chatcli/llm/client"
 	"github.com/diillson/chatcli/llm/manager"
 	"go.uber.org/zap"
@@ -346,8 +347,19 @@ func (d *Dispatcher) executeAgent(ctx context.Context, call AgentCall) AgentResu
 		agentCtx = client.WithEffortHint(agentCtx, effort)
 	}
 
+	// Register this execution in the process-wide run registry so the live
+	// panel, /agents and @agents can observe (and cancel) it. The registry
+	// context sits UNDER the timeout wrapper so Registry.Cancel(id) also
+	// cancels everything this worker spawns (subagents inherit the ctx).
+	runCtx, liveRun := runs.Default().Begin(agentCtx, runs.Info{
+		CallID: call.ID,
+		Kind:   runs.KindWorker,
+		Agent:  string(call.Agent),
+		Task:   call.Task,
+	})
+
 	// Create worker context with timeout
-	workerCtx, cancel := context.WithTimeout(agentCtx, d.config.WorkerTimeout)
+	workerCtx, cancel := context.WithTimeout(runCtx, d.config.WorkerTimeout)
 	defer cancel()
 
 	deps := &WorkerDeps{
@@ -381,6 +393,12 @@ func (d *Dispatcher) executeAgent(ctx context.Context, call AgentCall) AgentResu
 	if execErr != nil && result.Error == nil {
 		result.Error = execErr
 	}
+	liveRun.End(result.Error)
+	// Expose the registry run ID so the orchestrator can link this
+	// execution to a board card (@board link) and inspect it (@agents show).
+	if id := liveRun.ID(); id != "" {
+		result.SetMetadata("run_id", id)
+	}
 
 	return *result
 }
@@ -393,6 +411,9 @@ func FormatResults(results []AgentResult) string {
 
 	for i, r := range results {
 		fmt.Fprintf(&b, "[%s] (call %s, %s)\n", r.Agent, r.CallID, r.Duration.Round(time.Millisecond))
+		if runID := r.Metadata["run_id"]; runID != "" {
+			fmt.Fprintf(&b, "Run: %s\n", runID)
+		}
 		fmt.Fprintf(&b, "Task: %s\n", r.Task)
 		if r.Error != nil {
 			fmt.Fprintf(&b, "Status: FAILED — %v\n", r.Error)

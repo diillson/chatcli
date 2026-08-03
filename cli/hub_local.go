@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/diillson/chatcli/cli/agent/mail"
 	"github.com/diillson/chatcli/models"
 	"github.com/diillson/chatcli/server/hub"
 	"go.uber.org/zap"
@@ -277,5 +278,11 @@ func (cli *ChatCLI) maybeEnableLocalHubAs(ctx context.Context, principalOverride
 	}
 	cli.hubSync = newHubSync(newLocalHubClient(store, principal), cli.logger)
 	cli.logger.Info("local hub mode enabled", zap.String("principal", principal), zap.String("db", dbPath))
-	return func() { _ = store.Close() }
+	// Persist squad mail through the same hub store: messages survive
+	// restarts and flow between this process and the gateway daemon.
+	stopMailBridge := startMailHubBridge(ctx, store, mail.Default(), cli.logger)
+	return func() {
+		stopMailBridge()
+		_ = store.Close()
+	}
 }

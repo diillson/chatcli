@@ -25,8 +25,10 @@ import (
 	"github.com/c-bata/go-prompt"
 	"github.com/diillson/chatcli/cli/agent"
 	"github.com/diillson/chatcli/cli/agent/ask"
+	"github.com/diillson/chatcli/cli/agent/mail"
 	"github.com/diillson/chatcli/cli/agent/park"
 	"github.com/diillson/chatcli/cli/agent/quality"
+	"github.com/diillson/chatcli/cli/agent/runs"
 	"github.com/diillson/chatcli/cli/agent/toolguard"
 	"github.com/diillson/chatcli/cli/agent/workers"
 	"github.com/diillson/chatcli/cli/agentevents"
@@ -759,6 +761,16 @@ func (a *AgentMode) Run(ctx context.Context, query string, additionalContext str
 	}
 	defer a.runInflight.Store(false)
 
+	// Register the orchestrator itself in the process-wide run registry.
+	// Workers, subagents and MoA members spawned from this loop inherit the
+	// returned ctx and parent to this run — that is what makes the /agents
+	// tree view possible. A park suspension counts as a clean end.
+	orchCtx, orchRun := a.beginOrchestratorRun(ctx, query, systemPromptOverride)
+	ctx = orchCtx
+	defer func() {
+		orchRun.End(nil)
+	}()
+
 	// Pull turns that arrived on other channels (Telegram/…) into history so the
 	// agent/coder has cross-channel context. No-op outside local hub/connected
 	// mode (e.g. the gateway daemon, which manages its own context). Silent.
@@ -1016,7 +1028,30 @@ func (a *AgentMode) Run(ctx context.Context, query string, additionalContext str
 	if err == nil && strings.TrimSpace(a.cli.lastAgentReply) != "" {
 		a.cli.mirrorHubTurn(ctx, query, a.cli.lastAgentReply)
 	}
+	// Close the orchestrator's registry entry with the real outcome; the
+	// deferred End(nil) then no-ops (End is idempotent, first call wins).
+	orchRun.End(err)
 	return err
+}
+
+// beginOrchestratorRun registers the main loop in the run registry, deriving
+// the agent label from the active mode and the origin from the unattended
+// flag. Split out of Run to keep its cyclomatic complexity in budget.
+func (a *AgentMode) beginOrchestratorRun(ctx context.Context, query, systemPromptOverride string) (context.Context, *runs.Run) {
+	orchAgent := "agent"
+	if systemPromptOverride == CoderSystemPrompt {
+		orchAgent = "coder"
+	}
+	orchOrigin := "repl"
+	if a.cli.unattended {
+		orchOrigin = "gateway"
+	}
+	return runs.Default().Begin(ctx, runs.Info{
+		Kind:   runs.KindOrchestrator,
+		Agent:  orchAgent,
+		Task:   query,
+		Origin: orchOrigin,
+	})
 }
 
 // installAgentSystemMessage purges stale mode system messages and installs the
@@ -1626,6 +1661,15 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 		// (see memory_notice.go) does not apply inside the agent loop.
 		if !a.cli.unattended {
 			a.cli.drainMemoryNotices()
+		}
+
+		// Drain the orchestrator's squad mailbox: workers (and the user via
+		// /mail send) address it as "orchestrator". Injected at the turn
+		// boundary as user context, same pattern as type-ahead below.
+		if inbox := mail.Default().Drain("orchestrator"); len(inbox) > 0 {
+			a.cli.history = append(a.cli.history, models.Message{
+				Role: "user", Content: mail.FormatInbox(inbox),
+			})
 		}
 
 		// Check for type-ahead messages from user (works in both /agent and
@@ -2433,9 +2477,26 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 					if prevLines > 0 {
 						fmt.Print(metrics.ClearLines(prevLines))
 					}
+					// Enrich each slot with live progress from the run
+					// registry: current ReAct turn, action in flight and any
+					// subagents the worker spawned (rendered as sub-lines).
+					reg := runs.Default()
+					for _, ac := range agentCalls {
+						info, ok := reg.ByCallID(ac.ID)
+						if !ok {
+							continue
+						}
+						var subLines []string
+						for _, child := range reg.Children(info.ID) {
+							subLines = append(subLines, formatRunChildLine(child))
+						}
+						progressState.SetLive(ac.ID, info.Turn, info.MaxTurns, info.Action, subLines)
+					}
 					output := metrics.FormatDispatchProgress(progressState, modelName)
 					fmt.Print(output)
-					prevLines = progressState.LineCount()
+					// Count rendered lines directly — sub-lines make the
+					// panel height dynamic between ticks.
+					prevLines = strings.Count(output, "\n")
 				})
 
 				// Give the policy adapter access to the spinner and stdin

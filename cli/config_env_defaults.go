@@ -112,6 +112,7 @@ var envDefaults = map[string]envDefault{
 	"CHATCLI_AGENT_WORKER_MAX_TURNS":     {Value: "30", Source: "workers.DefaultWorkerMaxTurns"},
 	"CHATCLI_AGENT_SUBAGENT_MAX_DEPTH":   {Value: "2", Source: "workers.DefaultSubagentMaxDepth"},
 	"CHATCLI_AGENT_SUBAGENT_MAX_TURNS":   {Value: "15", Source: "workers.DefaultSubagentMaxTurns"},
+	"CHATCLI_AGENT_RUNS_HISTORY":         {Value: "200", Source: "runs.DefaultHistorySize"},
 	"CHATCLI_AGENT_PARALLEL_TOOLS":       {Value: "false", IsBool: true, Source: "agent.ParallelToolsEnabled (Fase 3)"},
 	"CHATCLI_AGENT_MAX_TOOL_CONCURRENCY": {Value: "10", Source: "agent.defaultMaxToolConcurrency (Fase 3)"},
 	"CHATCLI_AGENT_INLINE_CODE_STRICT":   {Value: "false", IsBool: true, Source: "agent.InlineCodeRiskAnalyzer (Fase 1.3)"},
@@ -186,13 +187,14 @@ var envDefaults = map[string]envDefault{
 	"CHATCLI_GATEWAY_MAX_IMAGE_BYTES": {Value: "20971520", Source: "gateway.defaultMaxImageBytes"},
 
 	// ─── Text-to-speech (@speak + gateway voice replies) ─────────
-	"CHATCLI_TTS_PROVIDER":        {Value: "auto", Source: "tts.NewFromEnv: auto|embedded|command|url|openai|groq|google"},
-	"CHATCLI_TTS_MODEL":           {Value: "tts-1", Source: "tts.defaultTTSModel"},
-	"CHATCLI_TTS_VOICE":           {Value: "alloy", Source: "tts.defaultVoice; embedded default bm_george"},
-	"CHATCLI_TTS_VOICE_PT":        {Value: "pm_alex", Source: "tts embedded voice for Portuguese replies"},
-	"CHATCLI_TTS_CACHE_DIR":       {Value: "(os cache dir)", Source: "tts embedded engine/model cache"},
-	"CHATCLI_GATEWAY_VOICE_REPLY": {Value: "auto", Source: "gateway voice reply: auto|always|never"},
-	"CHATCLI_GATEWAY_IMAGE_REPLY": {Value: "auto", Source: "gateway image reply: auto|never"},
+	"CHATCLI_TTS_PROVIDER":                {Value: "auto", Source: "tts.NewFromEnv: auto|embedded|command|url|openai|groq|google"},
+	"CHATCLI_TTS_MODEL":                   {Value: "tts-1", Source: "tts.defaultTTSModel"},
+	"CHATCLI_TTS_VOICE":                   {Value: "alloy", Source: "tts.defaultVoice; embedded default bm_george"},
+	"CHATCLI_TTS_VOICE_PT":                {Value: "pm_alex", Source: "tts embedded voice for Portuguese replies"},
+	"CHATCLI_TTS_CACHE_DIR":               {Value: "(os cache dir)", Source: "tts embedded engine/model cache"},
+	"CHATCLI_GATEWAY_VOICE_REPLY":         {Value: "auto", Source: "gateway voice reply: auto|always|never"},
+	"CHATCLI_GATEWAY_IMAGE_REPLY":         {Value: "auto", Source: "gateway image reply: auto|never"},
+	"CHATCLI_GATEWAY_STRUCTURED_PROGRESS": {Value: "true", IsBool: true, Source: "gateway_command.go:gatewayStructuredProgressEnabled"},
 
 	// ─── Image generation/editing (@image) ───────────────────────
 	"CHATCLI_IMAGE_PROVIDER":      {Value: "auto", Source: "imagegen.NewFromEnv"},

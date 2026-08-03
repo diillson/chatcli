@@ -41,6 +41,7 @@ var slashPrefixRoutes = []slashPrefixRoute{
 	{"/plugin ", (*ChatCLI).getPluginSuggestions},
 	{"/skill", (*ChatCLI).getSkillSuggestions},
 	{"/memory", (*ChatCLI).getMemorySuggestions},
+	{"/agents", (*ChatCLI).getAgentsSuggestions}, // before "/agent" — it shadows this prefix
 	{"/agent", (*ChatCLI).getAgentSuggestions},
 	{"/switch", (*ChatCLI).getSwitchSuggestions},
 	{"/provider", (*ChatCLI).getProviderSuggestions},
@@ -66,6 +67,8 @@ var slashPrefixRoutes = []slashPrefixRoute{
 	{"/schedule", (*ChatCLI).getScheduleSuggestions},
 	{"/wait", (*ChatCLI).getWaitSuggestions},
 	{"/jobs", (*ChatCLI).getJobsSuggestions},
+	{"/board", (*ChatCLI).getBoardSuggestions},
+	{"/mail", (*ChatCLI).getMailSuggestions},
 	{"/parked", (*ChatCLI).getParkedSuggestions},
 	{"/cancel-park", func(c *ChatCLI, d prompt.Document) []prompt.Suggest {
 		return c.getParkTokenSuggestions("/cancel-park", d)
@@ -383,6 +386,9 @@ func (cli *ChatCLI) GetInternalCommands() []prompt.Suggest {
 		{Text: "/schedule", Description: i18n.T("help.command.schedule")},
 		{Text: "/wait", Description: i18n.T("help.command.wait")},
 		{Text: "/jobs", Description: i18n.T("help.command.jobs")},
+		{Text: "/agents", Description: i18n.T("help.command.agents")},
+		{Text: "/board", Description: i18n.T("help.command.board")},
+		{Text: "/mail", Description: i18n.T("help.command.mail")},
 		{Text: "/parked", Description: i18n.T("help.command.parked")},
 		{Text: "/resume", Description: i18n.T("help.command.resume")},
 		{Text: "/cancel-park", Description: i18n.T("help.command.cancel_park")},

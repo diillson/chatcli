@@ -33,6 +33,8 @@ import (
 	"time"
 	"unicode"
 
+	"github.com/diillson/chatcli/cli/agent/mail"
+	"github.com/diillson/chatcli/cli/agent/runs"
 	"github.com/diillson/chatcli/cli/gateway"
 	"github.com/diillson/chatcli/cli/plugins"
 	"github.com/diillson/chatcli/i18n"
@@ -242,6 +244,12 @@ func (cli *ChatCLI) runGateway(ctx context.Context, broker hub.Store) error {
 	// separate process that snapshotted .env at boot). Per-message refresh in
 	// gatewayAgentFunc keeps it current after a /switch while the daemon runs.
 	cli.refreshGatewayModel()
+
+	// Squad mail flows through the shared hub store: directives sent from
+	// the REPL process (/mail send) reach agents running in this daemon and
+	// vice versa. No-op when a bridge is already active in this process.
+	stopMailBridge := startMailHubBridge(ctx, broker, mail.Default(), cli.logger)
+	defer stopMailBridge()
 
 	adapters, err := gateway.BuildConfigured()
 	if err != nil {
@@ -587,17 +595,36 @@ func (cli *ChatCLI) gatewayAgentFunc(sessions *hubSessions, transcriber transcri
 		}
 
 		emit := gateway.Progress(ctx)
-		var lastSent string
-		stream := func(line string) {
-			s := gatewayCleanLine(line)
-			if s == "" || s == lastSent { // drop noise and consecutive duplicates
-				return
+		if gatewayStructuredProgressEnabled() {
+			// Structured telemetry: typed agent events (reasoning, tool
+			// start/end, plan) plus per-worker run progress from the run
+			// registry replace stdout scraping. Install/restore of the
+			// event sink is safe here: mu serializes every gateway turn
+			// and the daemon runs no other event consumer.
+			sink := newGatewayEventsSink(emit)
+			prevSink := cli.agentEventSink
+			cli.agentEventSink = sink
+			stopWatch := watchRunsProgress(ctx, runs.Default(), emit, gatewayRunsWatchInterval)
+			_, err := cli.RunGatewayCoderStreaming(ctx, task, nil)
+			stopWatch()
+			cli.agentEventSink = prevSink
+			if err != nil {
+				return "", err
 			}
-			lastSent = s
-			emit(s)
-		}
-		if _, err := cli.RunGatewayCoderStreaming(ctx, task, stream); err != nil {
-			return "", err
+		} else {
+			// Legacy path: scrape the rendered stdout line by line.
+			var lastSent string
+			stream := func(line string) {
+				s := gatewayCleanLine(line)
+				if s == "" || s == lastSent { // drop noise and consecutive duplicates
+					return
+				}
+				lastSent = s
+				emit(s)
+			}
+			if _, err := cli.RunGatewayCoderStreaming(ctx, task, stream); err != nil {
+				return "", err
+			}
 		}
 
 		// If the agent generated/edited an image during the run, stash it for
@@ -693,6 +720,14 @@ func logVoicePreflight(logger *zap.Logger, t transcription.Provider) {
 	logger.Warn("gateway: voice preflight — ffmpeg not found; OGG/Opus voice notes decode in pure Go, other formats will be rejected",
 		zap.Strings("needs_ffmpeg", pf.NeedsFFmpegFormats),
 		zap.String("install", transcription.FFmpegInstallHint()))
+}
+
+// gatewayStructuredProgressEnabled reports whether gateway turns emit
+// structured agent-event telemetry (default) instead of scraping stdout.
+// CHATCLI_GATEWAY_STRUCTURED_PROGRESS=false restores the legacy path.
+func gatewayStructuredProgressEnabled() bool {
+	v := strings.ToLower(strings.TrimSpace(os.Getenv("CHATCLI_GATEWAY_STRUCTURED_PROGRESS")))
+	return v != "false" && v != "0" && v != "off"
 }
 
 // gatewayCleanLine trims a streamed line, strips box-drawing/decorative runes,
