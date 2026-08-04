@@ -50,12 +50,19 @@ func init() {
 		{"gpt-5.4", 200000, 100000},
 		{"gpt-5.3-codex", 200000, 100000},
 		{"gpt-5.2", 200000, 100000},
+		{"gpt-5.1", 400000, 128000},
+		{"gpt-4.1", 1047576, 32768},
 		// Google family (Gemini 3.x: 1M window / 65K output).
+		{"gemini-3.6-flash", 1048576, 65536},
 		{"gemini-3.5-flash", 1048576, 65536},
 		{"gemini-3.1-pro", 1048576, 65536},
 		{"gemini-3-flash", 1048576, 65536},
-		// Others with published specs.
+		// Others with published specs. Kimi K3: 1M window (Kimi Delta
+		// Attention); output capped at the K2.x family's 128K — OpenRouter
+		// lists output = context, which is an unbounded-listing artifact,
+		// not a real per-request cap.
 		{"glm-5.2", 1000000, 128000},
+		{"kimi-k3", 1048576, 131072},
 		{"kimi-k2.7", 262144, 131072},
 		{"kimi-k2.6", 262144, 131072},
 		{"deepseek-v4-pro", 1000000, 32000},
@@ -65,7 +72,6 @@ func init() {
 		{"swe-1.7", 200000, 32000},
 		{"swe-1.6-fast", 200000, 32000},
 		{"swe-1.6", 200000, 32000},
-		{"swe-1.5", 200000, 32000},
 	}
 
 	entries := make([]ModelMeta, 0, len(devinModels))
