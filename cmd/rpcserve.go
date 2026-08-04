@@ -584,44 +584,13 @@ func (b *rpcBackend) ManageSession(_ context.Context, action, session, name stri
 		return fmt.Sprintf("loaded saved session %q into live session %q (%d messages) — ask_chatcli with this session id continues that conversation, and turns are written back to %q (cross-surface continuity; use detach to stop)", name, session, len(hist), name), nil
 
 	case "attach":
-		if name == "" {
-			return "", errCLI("name is required for attach — which saved session to bind this live session to")
-		}
-		if b.store == nil {
-			return "", errCLIUnavailable
-		}
-		if b.store.SessionExistsRPC(name) {
-			hist, err := b.store.LoadSessionRPC(name)
-			if err != nil {
-				return "", err
-			}
-			hist = capHistory(hist, historyCap(b.cli != nil))
-			b.mu.Lock()
-			b.sessions[session] = hist
-			b.mu.Unlock()
-		}
-		// Name not in the store: keep the live conversation as the seed —
-		// the first write-through creates the file from it. Dropping it here
-		// would destroy the caller's in-flight context.
-		b.bindSession(session, name)
-		return fmt.Sprintf("live session %q is now bound to saved session %q: every turn is written through, and writes from other surfaces (REPL, gateway, another server) are adopted before each turn", session, name), nil
+		return b.manageAttach(session, name)
 
 	case "detach":
-		if b.boundName(session) == "" {
-			return fmt.Sprintf("live session %q has no binding", session), nil
-		}
-		prev := b.boundName(session)
-		b.unbindSession(session)
-		return fmt.Sprintf("live session %q detached from %q — turns stay in memory only (plus the autosave mirror)", session, prev), nil
+		return b.manageDetach(session)
 
 	case "status":
-		b.mu.Lock()
-		count := len(b.sessions[session])
-		b.mu.Unlock()
-		if name := b.boundName(session); name != "" {
-			return fmt.Sprintf("live session %q: %d messages, bound to saved session %q (write-through on)", session, count, name), nil
-		}
-		return fmt.Sprintf("live session %q: %d messages, not bound to any saved session", session, count), nil
+		return b.manageStatus(session)
 
 	case "list":
 		if b.store == nil {
@@ -651,6 +620,53 @@ func (b *rpcBackend) ManageSession(_ context.Context, action, session, name stri
 	default:
 		return "", errCLI(fmt.Sprintf("unknown action %q — use save, load, attach, detach, status, list, delete, clear or active", action))
 	}
+}
+
+// manageAttach implements the attach action: bind a live session to a saved
+// session, hydrating from the store when the file exists. A name not in the
+// store keeps the live conversation as the seed — the first write-through
+// creates the file from it; dropping it here would destroy the caller's
+// in-flight context.
+func (b *rpcBackend) manageAttach(session, name string) (string, error) {
+	if name == "" {
+		return "", errCLI("name is required for attach — which saved session to bind this live session to")
+	}
+	if b.store == nil {
+		return "", errCLIUnavailable
+	}
+	if b.store.SessionExistsRPC(name) {
+		hist, err := b.store.LoadSessionRPC(name)
+		if err != nil {
+			return "", err
+		}
+		hist = capHistory(hist, historyCap(b.cli != nil))
+		b.mu.Lock()
+		b.sessions[session] = hist
+		b.mu.Unlock()
+	}
+	b.bindSession(session, name)
+	return fmt.Sprintf("live session %q is now bound to saved session %q: every turn is written through, and writes from other surfaces (REPL, gateway, another server) are adopted before each turn", session, name), nil
+}
+
+// manageDetach implements the detach action.
+func (b *rpcBackend) manageDetach(session string) (string, error) {
+	prev := b.boundName(session)
+	if prev == "" {
+		return fmt.Sprintf("live session %q has no binding", session), nil
+	}
+	b.unbindSession(session)
+	return fmt.Sprintf("live session %q detached from %q — turns stay in memory only (plus the autosave mirror)", session, prev), nil
+}
+
+// manageStatus implements the status action.
+func (b *rpcBackend) manageStatus(session string) (string, error) {
+	b.mu.Lock()
+	count := len(b.sessions[session])
+	b.mu.Unlock()
+	if name := b.boundName(session); name != "" {
+		return fmt.Sprintf("live session %q: %d messages, bound to saved session %q (write-through on)", session, count, name), nil
+	}
+	return fmt.Sprintf("live session %q: %d messages, not bound to any saved session", session, count), nil
 }
 
 // SearchSessions implements rpcserve.SessionSearchBackend: full-text search

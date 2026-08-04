@@ -179,19 +179,7 @@ func (b *rpcBackend) runSessionCommand(ctx context.Context, session string, args
 		return "", errCLIUnavailable
 	}
 	if len(args) == 0 {
-		return strings.Join([]string{
-			i18n.T("session.usage_header"),
-			i18n.T("session.usage_save"),
-			i18n.T("session.usage_load"),
-			i18n.T("session.usage_attach"),
-			i18n.T("session.usage_detach"),
-			i18n.T("session.usage_status"),
-			i18n.T("session.usage_list"),
-			i18n.T("session.usage_search"),
-			i18n.T("session.usage_delete"),
-			i18n.T("session.usage_new"),
-			i18n.T("session.usage_fork"),
-		}, "\n"), nil
+		return sessionCommandUsage(), nil
 	}
 	sub := args[0]
 	var name string
@@ -201,9 +189,181 @@ func (b *rpcBackend) runSessionCommand(ctx context.Context, session string, args
 
 	switch sub {
 	case "save":
-		if name == "" {
-			return i18n.T("session.error_name_required_save"), nil
+		return b.sessionCmdSave(session, name)
+	case "load", "attach":
+		return b.sessionCmdLoadAttach(ctx, session, name, sub == "attach")
+	case "detach":
+		return b.sessionCmdDetach(session)
+	case "status":
+		return b.sessionCmdStatus(session)
+	case "list":
+		return b.sessionCmdList()
+	case "search":
+		return b.sessionCmdSearch(strings.TrimSpace(strings.Join(args[1:], " ")))
+	case "delete":
+		return b.sessionCmdDelete(name)
+	case "new":
+		return b.sessionCmdNew(ctx, session)
+	case "fork":
+		return b.sessionCmdFork(session, name)
+	default:
+		return i18n.T("session.unknown_command", sub), nil
+	}
+}
+
+// sessionCommandUsage renders the /session help block (same lines the REPL
+// handler prints).
+func sessionCommandUsage() string {
+	return strings.Join([]string{
+		i18n.T("session.usage_header"),
+		i18n.T("session.usage_save"),
+		i18n.T("session.usage_load"),
+		i18n.T("session.usage_attach"),
+		i18n.T("session.usage_detach"),
+		i18n.T("session.usage_status"),
+		i18n.T("session.usage_list"),
+		i18n.T("session.usage_search"),
+		i18n.T("session.usage_delete"),
+		i18n.T("session.usage_new"),
+		i18n.T("session.usage_fork"),
+	}, "\n")
+}
+
+func (b *rpcBackend) sessionCmdSave(session, name string) (string, error) {
+	if name == "" {
+		return i18n.T("session.error_name_required_save"), nil
+	}
+	b.mu.Lock()
+	hist := append([]models.Message(nil), b.sessions[session]...)
+	b.mu.Unlock()
+	if len(hist) == 0 {
+		return i18n.T("session.rpc.nothing_to_save"), nil
+	}
+	if err := b.store.SaveSessionRPC(name, hist); err != nil {
+		return "", err
+	}
+	b.bindSession(session, name)
+	return i18n.T("session.save_success", name), nil
+}
+
+func (b *rpcBackend) sessionCmdLoadAttach(ctx context.Context, session, name string, isAttach bool) (string, error) {
+	if name == "" {
+		return i18n.T("session.error_name_required_load"), nil
+	}
+	if !b.store.SessionExistsRPC(name) {
+		if !isAttach {
+			return "", errCLI(i18n.T("session.rpc.not_found", name))
 		}
+		// attach to a not-yet-existing session: bind now, keeping the
+		// live conversation as the seed — the file is born from it on
+		// the first written-through turn.
+		b.bindSession(session, name)
+		b.rotateHub(ctx)
+		return i18n.T("session.rpc.attached_new", name), nil
+	}
+	hist, err := b.store.LoadSessionRPC(name)
+	if err != nil {
+		return "", err
+	}
+	hist = capHistory(hist, historyCap(b.cli != nil))
+	b.mu.Lock()
+	b.sessions[session] = hist
+	b.mu.Unlock()
+	b.bindSession(session, name)
+	// A loaded session is a different thread: rotate the shared hub
+	// conversation so its backlog is not spliced on top of it.
+	b.rotateHub(ctx)
+	return i18n.T("session.load_success", name), nil
+}
+
+func (b *rpcBackend) sessionCmdDetach(session string) (string, error) {
+	prev := b.boundName(session)
+	if prev == "" {
+		return i18n.T("session.detach_none"), nil
+	}
+	b.unbindSession(session)
+	return i18n.T("session.detached", prev), nil
+}
+
+func (b *rpcBackend) sessionCmdStatus(session string) (string, error) {
+	b.mu.Lock()
+	count := len(b.sessions[session])
+	b.mu.Unlock()
+	if name := b.boundName(session); name != "" {
+		return i18n.T("session.status_bound", name) + "\n" + i18n.T("session.rpc.live_messages", count), nil
+	}
+	return i18n.T("session.status_unbound") + "\n" + i18n.T("session.rpc.live_messages", count), nil
+}
+
+func (b *rpcBackend) sessionCmdList() (string, error) {
+	names, err := b.store.ListSessionsRPC()
+	if err != nil {
+		return "", err
+	}
+	if len(names) == 0 {
+		return i18n.T("session.list_empty"), nil
+	}
+	return i18n.T("session.list_header") + "\n- " + strings.Join(names, "\n- "), nil
+}
+
+func (b *rpcBackend) sessionCmdSearch(query string) (string, error) {
+	if query == "" {
+		return i18n.T("session.search.usage"), nil
+	}
+	if b.cli == nil {
+		return "", errCLIUnavailable
+	}
+	return b.cli.SearchSessionsRPC(query)
+}
+
+func (b *rpcBackend) sessionCmdDelete(name string) (string, error) {
+	if name == "" {
+		return i18n.T("session.error_name_required_delete"), nil
+	}
+	if err := b.store.DeleteSessionRPC(name); err != nil {
+		return "", err
+	}
+	// Drop any live binding to the deleted name: writing a deleted
+	// session back into existence would resurrect it silently.
+	b.mu.Lock()
+	for id, bound := range b.bindings {
+		if bound == name {
+			delete(b.bindings, id)
+			delete(b.bindSync, id)
+		}
+	}
+	b.mu.Unlock()
+	return i18n.T("session.delete_success", name), nil
+}
+
+func (b *rpcBackend) sessionCmdNew(ctx context.Context, session string) (string, error) {
+	b.mu.Lock()
+	hist := b.sessions[session]
+	delete(b.sessions, session)
+	b.mu.Unlock()
+	// Same last-chance autosave contract as ManageSession's clear.
+	b.autosaveSession(session, hist)
+	b.unbindSession(session)
+	b.rotateHub(ctx)
+	return i18n.T("session.new_session_started"), nil
+}
+
+func (b *rpcBackend) sessionCmdFork(session, name string) (string, error) {
+	if name == "" {
+		return i18n.T("cmd.core.session_fork_usage"), nil
+	}
+	if source := b.boundName(session); source != "" {
+		// File-to-file fork goes through ChatCLI's validated ForkSessionRPC;
+		// the in-memory path below only needs the store, so degraded mode
+		// (cli == nil) keeps it working.
+		if b.cli == nil {
+			return "", errCLIUnavailable
+		}
+		if err := b.cli.ForkSessionRPC(source, name); err != nil {
+			return "", err
+		}
+	} else {
+		// No bound source: fork the live in-memory conversation.
 		b.mu.Lock()
 		hist := append([]models.Message(nil), b.sessions[session]...)
 		b.mu.Unlock()
@@ -213,134 +373,9 @@ func (b *rpcBackend) runSessionCommand(ctx context.Context, session string, args
 		if err := b.store.SaveSessionRPC(name, hist); err != nil {
 			return "", err
 		}
-		b.bindSession(session, name)
-		return i18n.T("session.save_success", name), nil
-
-	case "load", "attach":
-		if name == "" {
-			return i18n.T("session.error_name_required_load"), nil
-		}
-		if !b.store.SessionExistsRPC(name) {
-			if sub != "attach" {
-				return "", errCLI(i18n.T("session.rpc.not_found", name))
-			}
-			// attach to a not-yet-existing session: bind now, keeping the
-			// live conversation as the seed — the file is born from it on
-			// the first written-through turn.
-			b.bindSession(session, name)
-			b.rotateHub(ctx)
-			return i18n.T("session.rpc.attached_new", name), nil
-		}
-		hist, err := b.store.LoadSessionRPC(name)
-		if err != nil {
-			return "", err
-		}
-		hist = capHistory(hist, historyCap(b.cli != nil))
-		b.mu.Lock()
-		b.sessions[session] = hist
-		b.mu.Unlock()
-		b.bindSession(session, name)
-		// A loaded session is a different thread: rotate the shared hub
-		// conversation so its backlog is not spliced on top of it.
-		b.rotateHub(ctx)
-		return i18n.T("session.load_success", name), nil
-
-	case "detach":
-		if b.boundName(session) == "" {
-			return i18n.T("session.detach_none"), nil
-		}
-		prev := b.boundName(session)
-		b.unbindSession(session)
-		return i18n.T("session.detached", prev), nil
-
-	case "status":
-		b.mu.Lock()
-		count := len(b.sessions[session])
-		b.mu.Unlock()
-		if name := b.boundName(session); name != "" {
-			return i18n.T("session.status_bound", name) + "\n" + i18n.T("session.rpc.live_messages", count), nil
-		}
-		return i18n.T("session.status_unbound") + "\n" + i18n.T("session.rpc.live_messages", count), nil
-
-	case "list":
-		names, err := b.store.ListSessionsRPC()
-		if err != nil {
-			return "", err
-		}
-		if len(names) == 0 {
-			return i18n.T("session.list_empty"), nil
-		}
-		return i18n.T("session.list_header") + "\n- " + strings.Join(names, "\n- "), nil
-
-	case "search":
-		query := strings.TrimSpace(strings.Join(args[1:], " "))
-		if query == "" {
-			return i18n.T("session.search.usage"), nil
-		}
-		if b.cli == nil {
-			return "", errCLIUnavailable
-		}
-		return b.cli.SearchSessionsRPC(query)
-
-	case "delete":
-		if name == "" {
-			return i18n.T("session.error_name_required_delete"), nil
-		}
-		if err := b.store.DeleteSessionRPC(name); err != nil {
-			return "", err
-		}
-		// Drop any live binding to the deleted name: writing a deleted
-		// session back into existence would resurrect it silently.
-		b.mu.Lock()
-		for id, bound := range b.bindings {
-			if bound == name {
-				delete(b.bindings, id)
-				delete(b.bindSync, id)
-			}
-		}
-		b.mu.Unlock()
-		return i18n.T("session.delete_success", name), nil
-
-	case "new":
-		b.mu.Lock()
-		hist := b.sessions[session]
-		delete(b.sessions, session)
-		b.mu.Unlock()
-		// Same last-chance autosave contract as ManageSession's clear.
-		b.autosaveSession(session, hist)
-		b.unbindSession(session)
-		b.rotateHub(ctx)
-		return i18n.T("session.new_session_started"), nil
-
-	case "fork":
-		if name == "" {
-			return i18n.T("cmd.core.session_fork_usage"), nil
-		}
-		if b.cli == nil {
-			return "", errCLIUnavailable
-		}
-		if source := b.boundName(session); source != "" {
-			if err := b.cli.ForkSessionRPC(source, name); err != nil {
-				return "", err
-			}
-		} else {
-			// No bound source: fork the live in-memory conversation.
-			b.mu.Lock()
-			hist := append([]models.Message(nil), b.sessions[session]...)
-			b.mu.Unlock()
-			if len(hist) == 0 {
-				return i18n.T("session.rpc.nothing_to_save"), nil
-			}
-			if err := b.store.SaveSessionRPC(name, hist); err != nil {
-				return "", err
-			}
-		}
-		b.bindSession(session, name)
-		return i18n.T("session.rpc.forked", name), nil
-
-	default:
-		return i18n.T("session.unknown_command", sub), nil
 	}
+	b.bindSession(session, name)
+	return i18n.T("session.rpc.forked", name), nil
 }
 
 // rotateHub rotates the shared hub conversation thread (no-op without hub).

@@ -178,93 +178,105 @@ func (cli *ChatCLI) handleGatewaySessionCommand(ctx context.Context, sessions *h
 
 	switch sub {
 	case "attach", "load":
-		if name == "" {
-			return i18n.T("session.error_name_required_load"), true
-		}
-		if err := validateSessionName(name); err != nil {
-			return err.Error(), true
-		}
-		if err := sessions.setSessionBinding(ctx, principal, name); err != nil {
-			cli.logger.Warn("gateway: session attach failed", zap.Error(err))
-			return i18n.T("gateway.session.unavailable"), true
-		}
-		// A different thread from here on: rotate the hub conversation so
-		// the old backlog is not interleaved with the bound session.
-		if _, err := sessions.store.NewConversation(ctx, principal); err != nil {
-			cli.logger.Warn("gateway: hub rotation on attach failed", zap.Error(err))
-		}
-		if cli.sessionManager.SessionExists(name) {
-			return i18n.T("session.status_bound", name), true
-		}
-		return i18n.T("session.rpc.attached_new", name), true
-
+		return cli.gatewaySessionAttach(ctx, sessions, principal, name), true
 	case "detach":
-		if sessions.sessionBindingFor(ctx, principal) == "" {
-			return i18n.T("session.detach_none"), true
-		}
-		prev := sessions.sessionBindingFor(ctx, principal)
-		if err := sessions.clearSessionBinding(ctx, principal); err != nil {
-			cli.logger.Warn("gateway: session detach failed", zap.Error(err))
-			return i18n.T("gateway.session.unavailable"), true
-		}
-		return i18n.T("session.detached", prev), true
-
+		return cli.gatewaySessionDetach(ctx, sessions, principal), true
 	case "status":
 		if bound := sessions.sessionBindingFor(ctx, principal); bound != "" {
 			return i18n.T("session.status_bound", bound), true
 		}
 		return i18n.T("session.status_unbound"), true
-
 	case "save":
-		if name == "" {
-			return i18n.T("session.error_name_required_save"), true
-		}
-		if err := validateSessionName(name); err != nil {
-			return err.Error(), true
-		}
-		// Snapshot the principal's current hub conversation into the store,
-		// then bind so subsequent turns keep it updated.
-		convID, err := sessions.store.Resolve(ctx, principal)
-		if err != nil {
-			return i18n.T("gateway.session.unavailable"), true
-		}
-		events, err := sessions.store.Read(ctx, convID, 0, 0)
-		if err != nil || len(events) == 0 {
-			return i18n.T("session.rpc.nothing_to_save"), true
-		}
-		sd := &SessionData{Version: 2}
-		for _, ev := range events {
-			if m := ev.ToMessage(); strings.TrimSpace(m.Content) != "" {
-				sd.ChatHistory = append(sd.ChatHistory, m)
-			}
-		}
-		if err := cli.sessionManager.SaveSessionV2(name, sd); err != nil {
-			return i18n.T("session.error_save", err), true
-		}
-		if err := sessions.setSessionBinding(ctx, principal, name); err != nil {
-			cli.logger.Warn("gateway: session bind after save failed", zap.Error(err))
-		}
-		return i18n.T("session.save_success", name), true
-
+		return cli.gatewaySessionSave(ctx, sessions, principal, name), true
 	case "list":
 		names, err := cli.sessionManager.ListSessions()
 		if err != nil || len(names) == 0 {
 			return i18n.T("session.list_empty"), true
 		}
 		return i18n.T("session.list_header") + "\n- " + strings.Join(names, "\n- "), true
-
 	case "new":
-		if err := sessions.clearSessionBinding(ctx, principal); err != nil {
-			cli.logger.Warn("gateway: session unbind on new failed", zap.Error(err))
-		}
-		if _, err := sessions.store.NewConversation(ctx, principal); err != nil {
-			cli.logger.Warn("gateway: hub rotation failed", zap.Error(err))
-			return i18n.T("gateway.session.unavailable"), true
-		}
-		return i18n.T("session.new_session_started"), true
-
+		return cli.gatewaySessionNew(ctx, sessions, principal), true
 	default:
 		// Includes delete: not exposed to channels on purpose.
 		return i18n.T("gateway.session.usage"), true
 	}
+}
+
+// gatewaySessionAttach binds the principal to a named session and rotates
+// the hub thread so the old backlog is not interleaved with the bound file.
+func (cli *ChatCLI) gatewaySessionAttach(ctx context.Context, sessions *hubSessions, principal, name string) string {
+	if name == "" {
+		return i18n.T("session.error_name_required_load")
+	}
+	if err := validateSessionName(name); err != nil {
+		return err.Error()
+	}
+	if err := sessions.setSessionBinding(ctx, principal, name); err != nil {
+		cli.logger.Warn("gateway: session attach failed", zap.Error(err))
+		return i18n.T("gateway.session.unavailable")
+	}
+	if _, err := sessions.store.NewConversation(ctx, principal); err != nil {
+		cli.logger.Warn("gateway: hub rotation on attach failed", zap.Error(err))
+	}
+	if cli.sessionManager.SessionExists(name) {
+		return i18n.T("session.status_bound", name)
+	}
+	return i18n.T("session.rpc.attached_new", name)
+}
+
+// gatewaySessionDetach drops the principal's binding.
+func (cli *ChatCLI) gatewaySessionDetach(ctx context.Context, sessions *hubSessions, principal string) string {
+	prev := sessions.sessionBindingFor(ctx, principal)
+	if prev == "" {
+		return i18n.T("session.detach_none")
+	}
+	if err := sessions.clearSessionBinding(ctx, principal); err != nil {
+		cli.logger.Warn("gateway: session detach failed", zap.Error(err))
+		return i18n.T("gateway.session.unavailable")
+	}
+	return i18n.T("session.detached", prev)
+}
+
+// gatewaySessionSave snapshots the principal's current hub conversation into
+// the store under name, then binds so subsequent turns keep it updated.
+func (cli *ChatCLI) gatewaySessionSave(ctx context.Context, sessions *hubSessions, principal, name string) string {
+	if name == "" {
+		return i18n.T("session.error_name_required_save")
+	}
+	if err := validateSessionName(name); err != nil {
+		return err.Error()
+	}
+	convID, err := sessions.store.Resolve(ctx, principal)
+	if err != nil {
+		return i18n.T("gateway.session.unavailable")
+	}
+	events, err := sessions.store.Read(ctx, convID, 0, 0)
+	if err != nil || len(events) == 0 {
+		return i18n.T("session.rpc.nothing_to_save")
+	}
+	sd := &SessionData{Version: 2}
+	for _, ev := range events {
+		if m := ev.ToMessage(); strings.TrimSpace(m.Content) != "" {
+			sd.ChatHistory = append(sd.ChatHistory, m)
+		}
+	}
+	if err := cli.sessionManager.SaveSessionV2(name, sd); err != nil {
+		return i18n.T("session.error_save", err)
+	}
+	if err := sessions.setSessionBinding(ctx, principal, name); err != nil {
+		cli.logger.Warn("gateway: session bind after save failed", zap.Error(err))
+	}
+	return i18n.T("session.save_success", name)
+}
+
+// gatewaySessionNew unbinds and rotates the principal's hub thread.
+func (cli *ChatCLI) gatewaySessionNew(ctx context.Context, sessions *hubSessions, principal string) string {
+	if err := sessions.clearSessionBinding(ctx, principal); err != nil {
+		cli.logger.Warn("gateway: session unbind on new failed", zap.Error(err))
+	}
+	if _, err := sessions.store.NewConversation(ctx, principal); err != nil {
+		cli.logger.Warn("gateway: hub rotation failed", zap.Error(err))
+		return i18n.T("gateway.session.unavailable")
+	}
+	return i18n.T("session.new_session_started")
 }
