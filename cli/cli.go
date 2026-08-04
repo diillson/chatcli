@@ -212,7 +212,9 @@ type ChatCLI struct {
 	prefixSpinnerIdx    int32      // atomic counter for animated prefix spinner
 	sessionManager      *SessionManager
 	currentSessionName  string
-	sessionAutosaved    bool // autosave-on-exit ran (cleanup can be reached twice)
+	boundSessionSync    time.Time // store mtime of the active named session as of our last load/save (cross-surface refresh watermark)
+	boundRemoteOnly     bool      // active named session lives only on the remote server (user's explicit choice): local write-through/refresh stand down
+	sessionAutosaved    bool      // autosave-on-exit ran (cleanup can be reached twice)
 	UserMaxTokens       int
 	pluginManager       *plugins.Manager
 	contextHandler      *ContextHandler

@@ -3,6 +3,7 @@ package cmd
 import (
 	"context"
 	"testing"
+	"time"
 
 	"strings"
 
@@ -162,15 +163,23 @@ func TestRPCBackendPrompt_HistoryCap(t *testing.T) {
 	}
 }
 
-// fakeStore is an in-memory sessionStore for ManageSession tests.
+// fakeStore is an in-memory sessionStore for ManageSession tests. mtimes is
+// settable so binding-refresh tests can simulate another surface's write.
 type fakeStore struct {
-	saved map[string][]models.Message
+	saved  map[string][]models.Message
+	mtimes map[string]time.Time
 }
 
-func newFakeStore() *fakeStore { return &fakeStore{saved: map[string][]models.Message{}} }
+func newFakeStore() *fakeStore {
+	return &fakeStore{saved: map[string][]models.Message{}, mtimes: map[string]time.Time{}}
+}
 
 func (s *fakeStore) SaveSessionRPC(name string, history []models.Message) error {
 	s.saved[name] = append([]models.Message(nil), history...)
+	if s.mtimes == nil {
+		s.mtimes = map[string]time.Time{}
+	}
+	s.mtimes[name] = time.Now()
 	return nil
 }
 
@@ -199,6 +208,18 @@ func (s *fakeStore) DeleteSessionRPC(name string) error {
 }
 
 func (s *fakeStore) PruneSessionsRPC(string, int) int { return 0 }
+
+func (s *fakeStore) SessionModTimeRPC(name string) (time.Time, error) {
+	if _, ok := s.saved[name]; !ok {
+		return time.Time{}, errCLI("sessão não encontrada: " + name)
+	}
+	return s.mtimes[name], nil
+}
+
+func (s *fakeStore) SessionExistsRPC(name string) bool {
+	_, ok := s.saved[name]
+	return ok
+}
 
 func sessionBackend(store sessionStore) *rpcBackend {
 	return &rpcBackend{store: store, sessions: map[string][]models.Message{}}

@@ -11,8 +11,10 @@ import (
 	"testing"
 
 	"github.com/diillson/chatcli/cli/plugins"
+	"github.com/diillson/chatcli/models"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/zap"
 )
 
 // resetSlashRegistry clears the package-level registry between tests so
@@ -172,6 +174,28 @@ func TestSlashToolPlugin_ReadOnlyAndConcurrencyAwareReflectEntry(t *testing.T) {
 	assert.True(t, plugins.IsConcurrencySafe(ro, nil))
 	assert.False(t, plugins.IsReadOnly(rw, nil))
 	assert.False(t, plugins.IsConcurrencySafe(rw, nil))
+}
+
+// TestRegisterBuiltinSlashTools_SessionList pins the /session-list slash
+// tool: registered read-only, and its handler returns the extracted
+// sessionListText output (local names + titles) instead of printing.
+func TestRegisterBuiltinSlashTools_SessionList(t *testing.T) {
+	resetSlashRegistry(t)
+	sm := newTestSessionManager(t)
+	require.NoError(t, sm.SaveSessionV2("proj-x", &SessionData{
+		Version:     2,
+		ChatHistory: []models.Message{{Role: "user", Content: "hi"}},
+	}))
+	cli := &ChatCLI{sessionManager: sm, logger: zap.NewNop()}
+	cli.registerBuiltinSlashTools()
+
+	entry := LookupSlashTool("/session-list")
+	require.NotNil(t, entry, "/session-list must be registered")
+	assert.True(t, entry.ReadOnly, "/session-list is a read-only listing")
+
+	out, err := entry.Handler(context.Background(), map[string]any{})
+	require.NoError(t, err)
+	assert.Contains(t, out, "proj-x")
 }
 
 // TestSlashToolPlugin_PropagatesHandlerError forwards a handler error

@@ -52,6 +52,21 @@ type ACPCommandBackend interface {
 	RunCommand(ctx context.Context, session, line string) (string, error)
 }
 
+// HistoryItem is one conversation message replayed to an ACP client on
+// session/load (system messages and empty content are filtered out upstream).
+type HistoryItem struct {
+	Role    string
+	Content string
+}
+
+// ACPSessionRestoreBackend is an OPTIONAL capability (type assertion, same
+// contract as ACPCommandBackend): backends that can bring a prior session id
+// back to life enable the ACP loadSession capability. RestoreSession returns
+// the conversation to replay, in order.
+type ACPSessionRestoreBackend interface {
+	RestoreSession(ctx context.Context, session string) ([]HistoryItem, error)
+}
+
 // acpModes are the session modes advertised to the client. The mode decides
 // which engine a session/prompt drives.
 var acpModes = []map[string]interface{}{
@@ -104,11 +119,12 @@ func (a *ACP) SetRequester(fn func(ctx context.Context, method string, params in
 func (a *ACP) Handle(ctx context.Context, method string, params json.RawMessage) (interface{}, *RPCError) {
 	switch method {
 	case "initialize":
+		_, canRestore := a.backend.(ACPSessionRestoreBackend)
 		return map[string]interface{}{
 			"protocolVersion": ACPProtocolVersion,
 			"agentInfo":       map[string]interface{}{"name": "chatcli", "version": a.version},
 			"agentCapabilities": map[string]interface{}{
-				"loadSession":        false,
+				"loadSession":        canRestore,
 				"promptCapabilities": map[string]interface{}{"image": false, "audio": false, "embeddedContext": true},
 			},
 			"authMethods": []interface{}{},
@@ -128,6 +144,8 @@ func (a *ACP) Handle(ctx context.Context, method string, params json.RawMessage)
 		// available_commands_update must trail the response on the wire —
 		// PostReplyResult defers the notification until after the write.
 		return PostReplyResult{Result: result, Post: func() { a.sendAvailableCommands(id) }}, nil
+	case "session/load":
+		return a.loadSession(ctx, params)
 	case "session/set_mode":
 		return a.setMode(params)
 	case "session/prompt":
@@ -138,6 +156,70 @@ func (a *ACP) Handle(ctx context.Context, method string, params json.RawMessage)
 	default:
 		return nil, errf(CodeMethodNotFound, "unknown method %q", method)
 	}
+}
+
+// loadSession implements ACP session/load: bring a prior sessionId back to
+// life (live state or the autosave mirror, via the backend capability),
+// replay its conversation as session/update notifications AFTER the response
+// is on the wire, and re-advertise modes/commands. cwd/mcpServers params are
+// accepted and ignored — ChatCLI's workspace is the server process's own.
+func (a *ACP) loadSession(ctx context.Context, params json.RawMessage) (interface{}, *RPCError) {
+	rb, ok := a.backend.(ACPSessionRestoreBackend)
+	if !ok {
+		return nil, errf(CodeMethodNotFound, "session/load is not supported by this backend")
+	}
+	var p struct {
+		SessionID string `json:"sessionId"`
+	}
+	if err := json.Unmarshal(params, &p); err != nil || p.SessionID == "" {
+		return nil, errf(CodeInvalidParams, "sessionId is required")
+	}
+	items, err := rb.RestoreSession(ctx, p.SessionID)
+	if err != nil {
+		return nil, errf(CodeInvalidParams, "%v", err)
+	}
+	a.mu.Lock()
+	if _, exists := a.sessions[p.SessionID]; !exists {
+		a.sessions[p.SessionID] = &acpSession{mode: acpDefaultMode}
+	}
+	// Report the session's REAL mode: an already-live session keeps the
+	// mode the client set, and advertising the default would desync the
+	// client UI from the engine actually serving the prompts.
+	mode := a.sessions[p.SessionID].mode
+	a.mu.Unlock()
+	result := map[string]interface{}{
+		"modes": map[string]interface{}{
+			"currentModeId":  mode,
+			"availableModes": acpModes,
+		},
+	}
+	// Replay must trail the response on the wire (same ordering contract as
+	// session/new's available_commands_update).
+	return PostReplyResult{Result: result, Post: func() {
+		for _, it := range items {
+			a.emitHistoryChunk(p.SessionID, it)
+		}
+		a.sendAvailableCommands(p.SessionID)
+	}}, nil
+}
+
+// emitHistoryChunk replays one restored message: user turns as
+// user_message_chunk, everything else as agent_message_chunk.
+func (a *ACP) emitHistoryChunk(sessionID string, item HistoryItem) {
+	if a.notify == nil || item.Content == "" {
+		return
+	}
+	kind := "agent_message_chunk"
+	if item.Role == "user" {
+		kind = "user_message_chunk"
+	}
+	_ = a.notify("session/update", map[string]interface{}{
+		"sessionId": sessionID,
+		"update": map[string]interface{}{
+			"sessionUpdate": kind,
+			"content":       map[string]interface{}{"type": "text", "text": item.Content},
+		},
+	})
 }
 
 func (a *ACP) setMode(params json.RawMessage) (interface{}, *RPCError) {

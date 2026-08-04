@@ -377,12 +377,14 @@ func (m *MCP) toolDefinitions() []map[string]interface{} {
 	})
 	if _, ok := m.backend.(SessionBackend); ok {
 		props := map[string]interface{}{
-			"action":  textArg("One of: save, load, list, delete, clear, active" + m.sessionSearchActions() + "."),
-			"session": textArg("Live session id (the ask_chatcli session parameter; default \"mcp\"). Used by save, load, clear."),
-			"name":    textArg("Saved-session name in the store. Required for load and delete; defaults to the session id for save. For fork: the SOURCE saved session."),
+			"action":  textArg("One of: save, load, attach, detach, status, list, delete, clear, active" + m.sessionSearchActions() + "."),
+			"session": textArg("Live session id (the ask_chatcli session parameter; default \"mcp\"). Used by save, load, attach, detach, status, clear."),
+			"name":    textArg("Saved-session name in the store. Required for load, attach and delete; defaults to the session id for save. For fork: the SOURCE saved session."),
 		}
 		desc := "Manage chat sessions: persist and restore the server-side conversations behind ask_chatcli's session parameter, and administer the saved-session store shared with ChatCLI's /session command. " +
-			"Actions: save (persist a live session's history under a name), load (restore a saved session into a live session id, continuing that conversation), " +
+			"Actions: save (persist a live session's history under a name and bind to it), load (restore a saved session into a live session id, continuing that conversation with write-through), " +
+			"attach (bind a live session to a saved session — created on first turn if missing — so turns write through and writes from other surfaces are adopted), " +
+			"detach (drop the binding), status (binding and message count), " +
 			"list (saved sessions in the store), delete (remove a saved session), clear (reset a live session), active (live session ids with message counts)."
 		if _, ok := m.backend.(SessionSearchBackend); ok {
 			props["query"] = textArg("Full-text query across all saved sessions. Required for search.")
@@ -522,7 +524,7 @@ func (m *MCP) callTool(ctx context.Context, params json.RawMessage) (interface{}
 	case "manage_session":
 		if sb, ok := m.backend.(SessionBackend); ok {
 			if a.Action == "" {
-				return nil, errf(CodeInvalidParams, "action is required (save, load, list, delete, clear, active%s)", m.sessionSearchActions())
+				return nil, errf(CodeInvalidParams, "action is required (save, load, attach, detach, status, list, delete, clear, active%s)", m.sessionSearchActions())
 			}
 			if ssb, ok := m.backend.(SessionSearchBackend); ok {
 				switch a.Action {

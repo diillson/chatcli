@@ -405,8 +405,12 @@ func (a *AgentMode) RunResumed(ctx context.Context, snap *park.Snapshot, outcome
 		return err
 	}
 
-	// Successful completion: retire the snapshot.
+	// Successful completion: retire the snapshot and write the resumed run
+	// through to the active named session — the run mutated history well
+	// after the original turn's persist, and leaving the file stale would
+	// let another surface's write discard every resumed turn on refresh.
 	_ = park.Delete(snap.Token)
+	a.cli.persistBoundSession()
 	return nil
 }
 

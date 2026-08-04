@@ -302,6 +302,33 @@ func (sm *SessionManager) SaveSessionV2(name string, sd *SessionData) error {
 	return nil
 }
 
+// SessionModTime returns the store file's last-modified time for a saved
+// session. It is the freshness signal for cross-surface continuity: a bound
+// surface (REPL, MCP/ACP session, gateway principal) compares it against its
+// own last sync stamp to decide whether another surface has written the
+// session since, and reloads before the next turn when it has.
+// SessionExists reports whether a saved session file exists under name.
+// Invalid names report false — callers treat them as "nothing to load" and
+// surface the validation error on the write path instead.
+func (sm *SessionManager) SessionExists(name string) bool {
+	if err := validateSessionName(name); err != nil {
+		return false
+	}
+	_, err := os.Stat(sm.getSessionPath(name))
+	return err == nil
+}
+
+func (sm *SessionManager) SessionModTime(name string) (time.Time, error) {
+	if err := validateSessionName(name); err != nil {
+		return time.Time{}, err
+	}
+	info, err := os.Stat(sm.getSessionPath(name))
+	if err != nil {
+		return time.Time{}, err
+	}
+	return info.ModTime(), nil
+}
+
 // LoadSession carrega o histórico de uma conversa de um arquivo JSON.
 // Mantém assinatura original para compatibilidade com remote client.
 // Retorna apenas o chatHistory para uso legado.

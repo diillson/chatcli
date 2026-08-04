@@ -45,8 +45,11 @@ func (cli *ChatCLI) processLLMRequest(parentCtx context.Context, in string) {
 	// fold a textual description into the prompt for text-only models.
 	images, visionDesc := cli.gateImagesForModel(ctx, images)
 	additionalContext += visionDesc
-	// Pull turns that arrived on other channels (Telegram/…) into history so the
-	// model has cross-channel context. Silent — nothing is printed.
+	// Cross-surface continuity: adopt writes another surface (MCP/ACP,
+	// gateway, another terminal) made to the active named session, then pull
+	// turns that arrived on other hub channels (Telegram/…) into history so
+	// the model has cross-channel context. Silent — nothing is printed.
+	cli.refreshBoundSession()
 	cli.syncHubContext(ctx)
 	cli.compactHistoryIfNeeded(ctx)
 

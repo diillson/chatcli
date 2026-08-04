@@ -927,6 +927,9 @@ func (cli *ChatCLI) getSessionSuggestions(d prompt.Document) []prompt.Suggest {
 			{Text: "search", Description: i18n.T("complete.session.sub_search")},
 			{Text: "delete", Description: i18n.T("complete.session.sub_delete")},
 			{Text: "fork", Description: i18n.T("complete.session.sub_fork")},
+			{Text: "attach", Description: i18n.T("complete.session.sub_attach")},
+			{Text: "detach", Description: i18n.T("complete.session.sub_detach")},
+			{Text: "status", Description: i18n.T("complete.session.sub_status")},
 		}
 		return prompt.FilterHasPrefix(suggestions, d.GetWordBeforeCursor(), true)
 	}
@@ -936,7 +939,7 @@ func (cli *ChatCLI) getSessionSuggestions(d prompt.Document) []prompt.Suggest {
 
 	// Subcomandos que precisam de nome de sessão
 	needsSessionName := map[string]bool{
-		"load": true, "delete": true,
+		"load": true, "delete": true, "attach": true,
 	}
 
 	if needsSessionName[subcommand] {

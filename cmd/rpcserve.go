@@ -35,6 +35,7 @@ import (
 	"strings"
 	"sync"
 	"syscall"
+	"time"
 
 	"github.com/diillson/chatcli/cli"
 	"github.com/diillson/chatcli/cli/rpcserve"
@@ -187,6 +188,8 @@ type sessionStore interface {
 	ListSessionsRPC() ([]string, error)
 	DeleteSessionRPC(name string) error
 	PruneSessionsRPC(prefix string, keep int) int
+	SessionModTimeRPC(name string) (time.Time, error)
+	SessionExistsRPC(name string) bool
 }
 
 // rpcBackend implements rpcserve.MCPBackend (and thus Backend). Chat keeps a
@@ -200,6 +203,12 @@ type rpcBackend struct {
 
 	mu       sync.Mutex
 	sessions map[string][]models.Message
+	// bindings maps a live session id to the named saved session it is bound
+	// to (cross-surface continuity); bindSync holds the store mtime as of our
+	// last load/save of that name (the refresh watermark). Lazily initialized
+	// by bindSession. Both guarded by mu.
+	bindings map[string]string
+	bindSync map[string]time.Time
 }
 
 // rpcMaxHistory is the legacy hard message cap, applied only on the plain
@@ -223,12 +232,34 @@ func historyCap(full bool) int {
 	return rpcMaxHistory
 }
 
-// capHistory trims hist to the last n messages; n<=0 means no cap.
+// capHistory trims hist to the last n messages; n<=0 means no cap. The cut
+// is pair-aware at both ends: a leading tool result whose assistant call was
+// cut off, or a trailing assistant tool call whose results never landed
+// (cancelled run), would make native tool-use APIs reject the whole request
+// when the history is replayed — so both are trimmed.
 func capHistory(hist []models.Message, n int) []models.Message {
 	if n > 0 && len(hist) > n {
-		return hist[len(hist)-n:]
+		hist = hist[len(hist)-n:]
 	}
-	return hist
+	return trimDanglingToolPairs(hist)
+}
+
+// trimDanglingToolPairs drops orphaned halves of tool-call exchanges from
+// the history's edges (never from the middle — interior pairs are intact).
+func trimDanglingToolPairs(hist []models.Message) []models.Message {
+	start, end := 0, len(hist)
+	for start < end && hist[start].Role == "tool" {
+		start++
+	}
+	for end > start {
+		last := hist[end-1]
+		if last.Role == "assistant" && len(last.ToolCalls) > 0 {
+			end--
+			continue
+		}
+		break
+	}
+	return hist[start:end]
 }
 
 // HasLLM reports whether any LLM provider is configured. The MCP server
@@ -259,6 +290,9 @@ func (b *rpcBackend) PromptWith(ctx context.Context, session, text string, opts 
 		return "", errNoLLM
 	}
 
+	// Adopt writes another surface made to the bound saved session (no-op
+	// for unbound sessions) before snapshotting the live history.
+	b.refreshBound(session)
 	b.mu.Lock()
 	hist := append([]models.Message(nil), b.sessions[session]...)
 	b.mu.Unlock()
@@ -274,6 +308,7 @@ func (b *rpcBackend) PromptWith(ctx context.Context, session, text string, opts 
 		b.sessions[session] = newHist
 		b.mu.Unlock()
 		b.autosaveSession(session, newHist)
+		b.writeThrough(session, newHist)
 		return turn.Reply, nil
 	}
 
@@ -311,6 +346,7 @@ func (b *rpcBackend) promptPlain(ctx context.Context, session, text string, hist
 	// Same persistence contract as the full-pipeline path: plain passthrough
 	// conversations are sessions too.
 	b.autosaveSession(session, capped)
+	b.writeThrough(session, capped)
 	return reply, nil
 }
 
@@ -376,7 +412,8 @@ func (b *rpcBackend) autosaveSession(session string, hist []models.Message) {
 }
 
 // Agent runs the full agent (ReAct) loop with per-call options, scoped to
-// the caller's session (contexts/knowledge).
+// the caller's session: contexts/knowledge AND the per-session conversation
+// (runLoopSession swaps the history in and persists the update).
 func (b *rpcBackend) Agent(ctx context.Context, session, task string, opts rpcserve.RunOpts) (string, error) {
 	if !b.HasLLM() {
 		return "", errNoLLM
@@ -384,11 +421,13 @@ func (b *rpcBackend) Agent(ctx context.Context, session, task string, opts rpcse
 	if b.cli == nil {
 		return "", errCLIUnavailable
 	}
-	return b.cli.RunAgentRPC(ctx, task, toRunOpts(session, opts))
+	return b.runLoopSession(session, func(o cli.RPCRunOpts) (string, error) {
+		return b.cli.RunAgentRPC(ctx, task, o)
+	}, opts)
 }
 
 // Coder runs the coder loop with per-call options, scoped to the caller's
-// session (contexts/knowledge).
+// session (contexts/knowledge + per-session conversation).
 func (b *rpcBackend) Coder(ctx context.Context, session, task string, opts rpcserve.RunOpts) (string, error) {
 	if !b.HasLLM() {
 		return "", errNoLLM
@@ -396,28 +435,18 @@ func (b *rpcBackend) Coder(ctx context.Context, session, task string, opts rpcse
 	if b.cli == nil {
 		return "", errCLIUnavailable
 	}
-	return b.cli.RunCoderRPC(ctx, task, toRunOpts(session, opts))
+	return b.runLoopSession(session, func(o cli.RPCRunOpts) (string, error) {
+		return b.cli.RunCoderRPC(ctx, task, o)
+	}, opts)
 }
 
 // AgentStream / CoderStream are the ACP streaming variants.
 func (b *rpcBackend) AgentStream(ctx context.Context, session, task string, opts rpcserve.RunOpts) (string, error) {
-	if !b.HasLLM() {
-		return "", errNoLLM
-	}
-	if b.cli == nil {
-		return "", errCLIUnavailable
-	}
-	return b.cli.RunAgentRPC(ctx, task, toRunOpts(session, opts))
+	return b.Agent(ctx, session, task, opts)
 }
 
 func (b *rpcBackend) CoderStream(ctx context.Context, session, task string, opts rpcserve.RunOpts) (string, error) {
-	if !b.HasLLM() {
-		return "", errNoLLM
-	}
-	if b.cli == nil {
-		return "", errCLIUnavailable
-	}
-	return b.cli.RunCoderRPC(ctx, task, toRunOpts(session, opts))
+	return b.Coder(ctx, session, task, opts)
 }
 
 // Tools lists every plugin tool the exposure policy admits.
@@ -506,6 +535,7 @@ func (b *rpcBackend) ManageSession(_ context.Context, action, session, name stri
 		hist, existed := b.sessions[session]
 		delete(b.sessions, session)
 		b.mu.Unlock()
+		b.unbindSession(session)
 		if !existed {
 			return fmt.Sprintf("session %q had no live history", session), nil
 		}
@@ -530,7 +560,8 @@ func (b *rpcBackend) ManageSession(_ context.Context, action, session, name stri
 		if err := b.store.SaveSessionRPC(name, hist); err != nil {
 			return "", err
 		}
-		return fmt.Sprintf("saved session %q (%d messages) to the store as %q", session, len(hist), name), nil
+		b.bindSession(session, name)
+		return fmt.Sprintf("saved session %q (%d messages) to the store as %q — the live session is now bound to it (turns keep it updated)", session, len(hist), name), nil
 
 	case "load":
 		if name == "" {
@@ -549,7 +580,17 @@ func (b *rpcBackend) ManageSession(_ context.Context, action, session, name stri
 		b.mu.Lock()
 		b.sessions[session] = hist
 		b.mu.Unlock()
-		return fmt.Sprintf("loaded saved session %q into live session %q (%d messages) — ask_chatcli with this session id continues that conversation", name, session, len(hist)), nil
+		b.bindSession(session, name)
+		return fmt.Sprintf("loaded saved session %q into live session %q (%d messages) — ask_chatcli with this session id continues that conversation, and turns are written back to %q (cross-surface continuity; use detach to stop)", name, session, len(hist), name), nil
+
+	case "attach":
+		return b.manageAttach(session, name)
+
+	case "detach":
+		return b.manageDetach(session)
+
+	case "status":
+		return b.manageStatus(session)
 
 	case "list":
 		if b.store == nil {
@@ -577,8 +618,55 @@ func (b *rpcBackend) ManageSession(_ context.Context, action, session, name stri
 		return fmt.Sprintf("deleted saved session %q", name), nil
 
 	default:
-		return "", errCLI(fmt.Sprintf("unknown action %q — use save, load, list, delete, clear or active", action))
+		return "", errCLI(fmt.Sprintf("unknown action %q — use save, load, attach, detach, status, list, delete, clear or active", action))
 	}
+}
+
+// manageAttach implements the attach action: bind a live session to a saved
+// session, hydrating from the store when the file exists. A name not in the
+// store keeps the live conversation as the seed — the first write-through
+// creates the file from it; dropping it here would destroy the caller's
+// in-flight context.
+func (b *rpcBackend) manageAttach(session, name string) (string, error) {
+	if name == "" {
+		return "", errCLI("name is required for attach — which saved session to bind this live session to")
+	}
+	if b.store == nil {
+		return "", errCLIUnavailable
+	}
+	if b.store.SessionExistsRPC(name) {
+		hist, err := b.store.LoadSessionRPC(name)
+		if err != nil {
+			return "", err
+		}
+		hist = capHistory(hist, historyCap(b.cli != nil))
+		b.mu.Lock()
+		b.sessions[session] = hist
+		b.mu.Unlock()
+	}
+	b.bindSession(session, name)
+	return fmt.Sprintf("live session %q is now bound to saved session %q: every turn is written through, and writes from other surfaces (REPL, gateway, another server) are adopted before each turn", session, name), nil
+}
+
+// manageDetach implements the detach action.
+func (b *rpcBackend) manageDetach(session string) (string, error) {
+	prev := b.boundName(session)
+	if prev == "" {
+		return fmt.Sprintf("live session %q has no binding", session), nil
+	}
+	b.unbindSession(session)
+	return fmt.Sprintf("live session %q detached from %q — turns stay in memory only (plus the autosave mirror)", session, prev), nil
+}
+
+// manageStatus implements the status action.
+func (b *rpcBackend) manageStatus(session string) (string, error) {
+	b.mu.Lock()
+	count := len(b.sessions[session])
+	b.mu.Unlock()
+	if name := b.boundName(session); name != "" {
+		return fmt.Sprintf("live session %q: %d messages, bound to saved session %q (write-through on)", session, count, name), nil
+	}
+	return fmt.Sprintf("live session %q: %d messages, not bound to any saved session", session, count), nil
 }
 
 // SearchSessions implements rpcserve.SessionSearchBackend: full-text search
@@ -675,9 +763,22 @@ func (b *rpcBackend) ACPCommands() []rpcserve.CommandInfo {
 }
 
 // RunCommand executes one allowlisted slash command headless for ACP.
+// /session and /newsession are intercepted here and served per-session: the
+// REPL handlers they would otherwise reach mutate process-global state, which
+// the per-session chat path either discards (chat mode swaps history per
+// turn) or leaks across every ACP session (agent/coder modes).
 func (b *rpcBackend) RunCommand(ctx context.Context, session, line string) (string, error) {
 	if b.cli == nil {
 		return "", errCLIUnavailable
+	}
+	fields := strings.Fields(line)
+	if len(fields) > 0 {
+		switch fields[0] {
+		case "/session":
+			return b.runSessionCommand(ctx, session, fields[1:])
+		case "/newsession":
+			return b.runSessionCommand(ctx, session, []string{"new"})
+		}
 	}
 	return b.cli.RunSlashCommandRPC(ctx, line)
 }

@@ -96,7 +96,12 @@ func (cli *ChatCLI) handleMoACommand(ctx context.Context, input string) {
 
 	// Record the turn in history so a follow-up /moa or a normal message has the
 	// context — same as a regular chat turn. Mirror onto the cross-channel hub.
+	// Adopt other surfaces' writes BEFORE recording+persisting: /moa is a
+	// turn like any other, and persisting without the refresh would clobber
+	// a bound session's newer file with our stale local history.
+	cli.refreshBoundSession()
 	cli.history = append(cli.history, models.Message{Role: "user", Content: prompt})
 	cli.history = append(cli.history, models.Message{Role: "assistant", Content: final})
 	cli.mirrorHubTurn(ctx, prompt, final)
+	cli.persistBoundSession()
 }
