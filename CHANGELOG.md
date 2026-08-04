@@ -1,5 +1,14 @@
 # Changelog
 
+## [1.179.0](https://github.com/diillson/chatcli/compare/v1.178.0...v1.179.0) (2026-08-04)
+
+
+### Features
+
+* **catalog:** add Kimi K3 to the Moonshot catalog with its own pricing tier ([#1298](https://github.com/diillson/chatcli/issues/1298)) ([c3f0b4b](https://github.com/diillson/chatcli/commit/c3f0b4b7bc9959ddc38a5d50c32c1f253ed43f20))
+* **catalog:** refresh Devin CLI model roster ([#1296](https://github.com/diillson/chatcli/issues/1296)) ([9ab095c](https://github.com/diillson/chatcli/commit/9ab095c6a53b64f272de7b65f570f2c7e9844584))
+* **session:** cross-surface session continuity for REPL, ACP, MCP and gateway ([#1295](https://github.com/diillson/chatcli/issues/1295)) ([c3d6580](https://github.com/diillson/chatcli/commit/c3d6580cc6c803e344b4e7c9c5167d483a6a832b))
+
 ## [1.178.0](https://github.com/diillson/chatcli/compare/v1.177.0...v1.178.0) (2026-08-03)
 
 
