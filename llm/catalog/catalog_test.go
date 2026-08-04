@@ -134,6 +134,19 @@ func TestStackSpotCatalogEntry(t *testing.T) {
 }
 
 func TestMoonshotCatalogEntries(t *testing.T) {
+	// Kimi K3 (flagship, Jul 2026): 1M window via Kimi Delta Attention,
+	// output at the K2.x 128K cap. Alias "k3" must land on this entry and
+	// the dotted K2 ids must not shadow it.
+	k3, ok := Resolve(ProviderMoonshot, "kimi-k3")
+	assert.True(t, ok, "kimi-k3 must resolve")
+	assert.Equal(t, 1048576, k3.ContextWindow)
+	assert.Equal(t, 131072, k3.MaxOutputTokens)
+	assert.Contains(t, k3.Capabilities, "vision")
+	assert.Contains(t, k3.Capabilities, "thinking")
+	short, ok := Resolve(ProviderMoonshot, "k3")
+	assert.True(t, ok)
+	assert.Equal(t, "kimi-k3", short.ID)
+
 	// Pin the public specs of the Kimi K2.6/K2.5 entries so silent drift on
 	// the model card (e.g. catalog edits during a refactor) shows up here
 	// instead of at runtime.

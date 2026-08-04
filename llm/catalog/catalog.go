@@ -1173,11 +1173,24 @@ var registry = []ModelMeta{
 	},
 
 	// Moonshot (Kimi) Models.
-	// Native multimodal MoE family from Moonshot AI. K2.6 is the flagship
-	// (released Apr 2026): 1T total / 32B active params, 256K context, vision +
-	// agent swarm + thinking mode. K2.5 is the previous generation, still
-	// supported. moonshot-v1-* are the classic chat models split by context.
+	// Native multimodal MoE family from Moonshot AI. K3 is the flagship
+	// (released Jul 2026): 2.8T total / 104B active params, 1M context via
+	// Kimi Delta Attention, text+image+video input. Output stays at the
+	// K2.x 128K cap — aggregator listings that show output = context are an
+	// unbounded-listing artifact, not a real per-request cap. K2.6 (Apr
+	// 2026, 1T/32B, 256K) remains supported, K2.5 is the prior generation,
+	// moonshot-v1-* are the classic chat models split by context.
 	// Ordering: newest IDs first so generic aliases don't shadow specific tags.
+	{
+		ID:              "kimi-k3",
+		Aliases:         []string{"kimi-k3", "kimi-k-3", "k3", "k-3"},
+		DisplayName:     "Kimi K3",
+		Provider:        ProviderMoonshot,
+		ContextWindow:   1048576,
+		MaxOutputTokens: 131072,
+		PreferredAPI:    APIChatCompletions,
+		Capabilities:    []string{"tools", "vision", "thinking", "json_mode"},
+	},
 	{
 		ID:              "kimi-k2.6",
 		Aliases:         []string{"kimi-k2.6", "kimi-k2-6", "k2.6", "k2-6"},
