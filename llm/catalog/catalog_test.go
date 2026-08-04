@@ -500,7 +500,11 @@ func TestDevinCatalogEntries(t *testing.T) {
 		"claude-sonnet-4.5": 200000,
 		"claude-sonnet-4":   200000,
 		"gpt-5.6-luna":      1050000,
+		"gpt-5.1":           400000,
+		"gpt-4.1":           1047576,
+		"gemini-3.6-flash":  1048576,
 		"swe-1.7-lightning": 200000,
+		"kimi-k3":           1048576,
 		"kimi-k2.7":         262144,
 		"deepseek-v4-pro":   1000000,
 	} {
@@ -516,6 +520,11 @@ func TestDevinCatalogEntries(t *testing.T) {
 	meta, ok := Resolve(ProviderClaudeAI, "claude-sonnet-4-6")
 	assert.True(t, ok)
 	assert.Equal(t, ProviderClaudeAI, meta.Provider)
+
+	// swe-1.5 left the enterprise CLI roster (Jul 2026): a non-exact
+	// lookup must fall back to provider defaults, not a stale entry.
+	_, ok = Resolve(ProviderDevin, "swe-1.5")
+	assert.False(t, ok, "swe-1.5 was removed from the Devin roster")
 
 	// Unknown model under DEVIN falls back to the conservative provider
 	// defaults instead of the generic 50K that causes compaction storms.
