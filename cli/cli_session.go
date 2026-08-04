@@ -103,6 +103,7 @@ func (cli *ChatCLI) handleSaveSession(ctx context.Context, name string) {
 				fmt.Println(i18n.T("session.error_save", err))
 			} else {
 				cli.currentSessionName = name
+				cli.boundRemoteOnly = true
 				fmt.Println(i18n.T("session.save_success_remote", name))
 			}
 		case "both":
@@ -120,6 +121,7 @@ func (cli *ChatCLI) handleSaveSession(ctx context.Context, name string) {
 			}
 			if localErr == nil && remoteErr == nil {
 				cli.currentSessionName = name
+				cli.boundRemoteOnly = false
 				fmt.Println(i18n.T("session.save_success_both", name))
 			}
 		default: // "local"
@@ -127,6 +129,7 @@ func (cli *ChatCLI) handleSaveSession(ctx context.Context, name string) {
 				fmt.Println(i18n.T("session.error_save", err))
 			} else {
 				cli.currentSessionName = name
+				cli.boundRemoteOnly = false
 				fmt.Println(i18n.T("session.save_success", name))
 			}
 		}
@@ -139,6 +142,7 @@ func (cli *ChatCLI) handleSaveSession(ctx context.Context, name string) {
 		fmt.Println(kit.Notice(kit.LevelError, i18n.T("session.error_save", err)))
 	} else {
 		cli.currentSessionName = name
+		cli.boundRemoteOnly = false
 		fmt.Println(kit.Notice(kit.LevelSuccess, i18n.T("session.save_success", name)))
 	}
 }
@@ -172,19 +176,23 @@ func (cli *ChatCLI) handleLoadSession(ctx context.Context, name string) {
 			if choice == "remote" {
 				cli.restoreSessionData(remoteSD)
 				cli.currentSessionName = name
+				cli.boundRemoteOnly = true
 				fmt.Println(i18n.T("session.load_success_remote", name))
 			} else {
 				cli.restoreSessionData(localSD)
 				cli.currentSessionName = name
+				cli.boundRemoteOnly = false
 				fmt.Println(i18n.T("session.load_success", name))
 			}
 		case foundLocal:
 			cli.restoreSessionData(localSD)
 			cli.currentSessionName = name
+			cli.boundRemoteOnly = false
 			fmt.Println(i18n.T("session.load_success", name))
 		case foundRemote:
 			cli.restoreSessionData(remoteSD)
 			cli.currentSessionName = name
+			cli.boundRemoteOnly = true
 			fmt.Println(i18n.T("session.load_success_remote", name))
 		default:
 			fmt.Println(i18n.T("session.error_load", localErr))
@@ -199,6 +207,7 @@ func (cli *ChatCLI) handleLoadSession(ctx context.Context, name string) {
 	} else {
 		cli.restoreSessionData(sd)
 		cli.currentSessionName = name
+		cli.boundRemoteOnly = false
 		fmt.Println(kit.Notice(kit.LevelSuccess, i18n.T("session.load_success", name)))
 	}
 }
@@ -484,6 +493,7 @@ func (cli *ChatCLI) handleForkSession(newName string) {
 		oldName = i18n.T("sess.cmd.fork_unsaved")
 	}
 	cli.currentSessionName = newName
+	cli.boundRemoteOnly = false
 
 	fmt.Println()
 	fmt.Println(uiBox("✅", i18n.T("sess.cmd.fork_header"), ColorGreen))

@@ -25,6 +25,7 @@ import (
 	"regexp"
 	"strings"
 	"sync"
+	"sync/atomic"
 
 	"github.com/diillson/chatcli/cli/plugins"
 )
@@ -36,6 +37,13 @@ var ansiSeq = regexp.MustCompile(`\x1b\[[0-9;]*[a-zA-Z]`)
 // one captured run may be in flight at a time. Concurrent callers (e.g. the
 // gateway fanning out messages) block here rather than corrupting each other.
 var rpcStdoutMu sync.Mutex
+
+// rpcCaptureActive is true while a captured run (MCP/ACP turn, gateway turn,
+// headless slash command) is in flight. The REPL's session write-through
+// checks it: during captured runs currentSessionName holds a surface session
+// id (e.g. an ACP uuid), not a saved-session name, and the RPC backend owns
+// per-session persistence — the REPL hooks must stand down.
+var rpcCaptureActive atomic.Bool
 
 // SetRPCDangerPolicy toggles the unattended dangerous-command policy. With
 // block=true, a command classified dangerous by the CommandValidator is
@@ -60,6 +68,8 @@ func captureRPCStdout(fn func() error) (string, error) {
 func captureStreaming(emit func(string), fn func() error) (string, error) {
 	rpcStdoutMu.Lock()
 	defer rpcStdoutMu.Unlock()
+	rpcCaptureActive.Store(true)
+	defer rpcCaptureActive.Store(false)
 
 	orig := os.Stdout
 	r, w, perr := os.Pipe()

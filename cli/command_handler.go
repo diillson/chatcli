@@ -288,10 +288,14 @@ func (ch *CommandHandler) handleSessionCommand(ctx context.Context, userInput st
 		fmt.Println(i18n.T("session.usage_header"))
 		fmt.Println(i18n.T("session.usage_save"))
 		fmt.Println(i18n.T("session.usage_load"))
+		fmt.Println(i18n.T("session.usage_attach"))
+		fmt.Println(i18n.T("session.usage_detach"))
+		fmt.Println(i18n.T("session.usage_status"))
 		fmt.Println(i18n.T("session.usage_list"))
 		fmt.Println(i18n.T("session.usage_search"))
 		fmt.Println(i18n.T("session.usage_delete"))
 		fmt.Println(i18n.T("session.usage_new"))
+		fmt.Println(i18n.T("session.usage_fork"))
 		return
 	}
 
@@ -308,12 +312,23 @@ func (ch *CommandHandler) handleSessionCommand(ctx context.Context, userInput st
 			return
 		}
 		ch.cli.handleSaveSession(ctx, name)
-	case "load":
+		ch.cli.stampBoundSession()
+	case "load", "attach":
+		// attach is the cross-surface alias: bind to a named session,
+		// creating it when it does not exist yet (load requires it to).
 		if name == "" {
 			fmt.Println(i18n.T("session.error_name_required_load"))
 			return
 		}
-		ch.cli.handleLoadSession(ctx, name)
+		if command == "attach" && !ch.cli.sessionManager.SessionExists(name) {
+			ch.cli.handleSaveSession(ctx, name)
+		} else {
+			ch.cli.handleLoadSession(ctx, name)
+		}
+		ch.cli.stampBoundSession()
+		// A loaded session is a different thread: rotate the shared hub
+		// conversation so its backlog is not spliced on top of it.
+		ch.cli.rotateHubThread(ctx)
 	case "list":
 		ch.cli.handleListSessions(ctx)
 	case "search":
@@ -332,15 +347,35 @@ func (ch *CommandHandler) handleSessionCommand(ctx context.Context, userInput st
 		}
 		ch.cli.handleDeleteSession(ctx, name)
 	case "new":
+		// Same semantics as /newsession: clear, unbind AND rotate the shared
+		// hub conversation — the two commands diverging here meant a hub
+		// backlog from the old thread leaked into the "new" session.
 		ch.cli.clearAllHistories()
 		ch.cli.currentSessionName = ""
+		ch.cli.rotateHubThread(ctx)
 		fmt.Println(i18n.T("session.new_session_started"))
+	case "detach":
+		// Keep the conversation, drop the binding: turns stop writing
+		// through to the named session.
+		if ch.cli.currentSessionName == "" {
+			fmt.Println(i18n.T("session.detach_none"))
+			return
+		}
+		fmt.Println(i18n.T("session.detached", ch.cli.currentSessionName))
+		ch.cli.currentSessionName = ""
+	case "status":
+		if name := ch.cli.currentSessionName; name != "" {
+			fmt.Println(i18n.T("session.status_bound", name))
+		} else {
+			fmt.Println(i18n.T("session.status_unbound"))
+		}
 	case "fork":
 		if name == "" {
 			fmt.Println(colorize("  "+i18n.T("cmd.core.session_fork_usage"), ColorYellow))
 			return
 		}
 		ch.cli.handleForkSession(name)
+		ch.cli.stampBoundSession()
 	default:
 		// CORREÇÃO: Usar Println com i18n.T
 		fmt.Println(i18n.T("session.unknown_command", command))

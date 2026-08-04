@@ -567,6 +567,16 @@ func (cli *ChatCLI) gatewayAgentFunc(sessions *hubSessions, transcriber transcri
 			msg.Text = transcript
 		}
 
+		// Session control from the channel: "/session attach|detach|status|
+		// save|list|new" binds this sender's principal to a named saved
+		// session (cross-surface continuity with the REPL/MCP/ACP). Handled
+		// before image staging (so an image captioned "/session …" cannot
+		// leak its attachment into the next run) and before the engine ever
+		// sees the text; anything else falls through untouched.
+		if reply, handled := cli.handleGatewaySessionCommand(ctx, sessions, msg); handled {
+			return reply, nil
+		}
+
 		// Image message: stage the attachment(s) for the coder run. The run's
 		// model gating decides native vision vs the describe-fallback. An
 		// image with no caption still gets a default instruction so the engine
@@ -582,6 +592,15 @@ func (cli *ChatCLI) gatewayAgentFunc(sessions *hubSessions, transcriber transcri
 		// before running, so the message survives even if the run fails. preamble
 		// carries the prior dialog (across every channel) as context.
 		conv := sessions.begin(ctx, msg)
+		// Bound principal: the named session file (which carries the turns
+		// other surfaces wrote through) replaces the hub backlog as context,
+		// so the two threads are never interleaved.
+		boundSession := sessions.sessionBindingFor(ctx, conv.principal)
+		if boundSession != "" {
+			if pre := cli.renderNamedSessionPreamble(boundSession); pre != "" {
+				conv.preamble = pre
+			}
+		}
 		task := msg.Text
 		if pre := conv.preamble; pre != "" {
 			task = pre + "\n\nCurrent request: " + msg.Text
@@ -647,6 +666,11 @@ func (cli *ChatCLI) gatewayAgentFunc(sessions *hubSessions, transcriber transcri
 			reply = "✅ " + i18n.T("gateway.task_done")
 		}
 		conv.finish(ctx, reply)
+		// Bound principal: write the completed turn through to the named
+		// session file so the REPL/MCP/ACP pick the thread up from the store.
+		if boundSession != "" {
+			cli.appendNamedSessionTurn(boundSession, msg.Text, reply)
+		}
 		return reply, nil
 	}
 }

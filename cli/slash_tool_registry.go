@@ -186,14 +186,17 @@ func (p *slashToolPlugin) IsConcurrencySafe(_ []string) bool { return p.entry.Re
 // that external plugins do not, and exposing them broadens the model's
 // reach into the CLI's own surface area.
 //
-// Initial set (conservative — read-only metadata commands only):
-//   - /help     → human-readable usage summary
-//   - /version  → build metadata
+// Current set (conservative — read-only metadata commands only):
+//   - /help         → human-readable usage summary
+//   - /version      → build metadata
+//   - /session-list → local saved-session catalog (the `/session list`
+//     handler's listing, extracted into sessionListText; the tool name
+//     is hyphenated because tool names cannot carry a space)
 //
-// /session list, /context list, /memory list will be added once their
-// handlers are extracted into top-level functions returning strings
-// (today they print directly to stdout, which doesn't fit the
-// request-response shape the model expects).
+// /context list and /memory list will be added once their handlers are
+// extracted into top-level functions returning strings (today they print
+// directly to stdout, which doesn't fit the request-response shape the
+// model expects).
 func (cli *ChatCLI) registerBuiltinSlashTools() {
 	RegisterSlashTool(&SlashToolEntry{
 		Name:        "/help",
@@ -209,6 +212,14 @@ func (cli *ChatCLI) registerBuiltinSlashTools() {
 		ReadOnly:    true,
 		Handler: func(ctx context.Context, _ map[string]any) (string, error) {
 			return cli.versionText(ctx), nil
+		},
+	})
+	RegisterSlashTool(&SlashToolEntry{
+		Name:        "/session-list",
+		Description: i18n.T("slash.session_list.description"),
+		ReadOnly:    true,
+		Handler: func(_ context.Context, _ map[string]any) (string, error) {
+			return cli.sessionListText()
 		},
 	})
 }

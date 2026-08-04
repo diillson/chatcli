@@ -909,9 +909,11 @@ func (a *AgentMode) Run(ctx context.Context, query string, additionalContext str
 		orchRun.End(nil)
 	}()
 
-	// Pull turns that arrived on other channels (Telegram/…) into history so the
-	// agent/coder has cross-channel context. No-op outside local hub/connected
-	// mode (e.g. the gateway daemon, which manages its own context). Silent.
+	// Cross-surface continuity first (adopt another surface's writes to the
+	// active named session), then pull turns that arrived on other channels
+	// (Telegram/…) into history so the agent/coder has cross-channel context.
+	// Both no-op where they don't apply (captured RPC runs, gateway). Silent.
+	a.cli.refreshBoundSession()
 	a.cli.syncHubContext(ctx)
 
 	// Item 8: defeat typeahead-in-the-dark. The user may have just
@@ -1166,6 +1168,11 @@ func (a *AgentMode) Run(ctx context.Context, query string, additionalContext str
 	// off; tool execution detail stays local.
 	if err == nil && strings.TrimSpace(a.cli.lastAgentReply) != "" {
 		a.cli.mirrorHubTurn(ctx, query, a.cli.lastAgentReply)
+	}
+	// Write the run through to the active named session (no-op during
+	// captured RPC runs — the backend persists per-session there).
+	if err == nil {
+		a.cli.persistBoundSession()
 	}
 	// Close the orchestrator's registry entry with the real outcome; the
 	// deferred End(nil) then no-ops (End is idempotent, first call wins).

@@ -73,3 +73,35 @@ func (cli *ChatCLI) versionText(parent context.Context) string {
 	defer cancel()
 	return FormatVersionReport(version.GetReport(ctx))
 }
+
+// sessionListText returns the local saved-session catalog (name — title) as
+// plain text, one entry per line. It is the extracted, string-returning core
+// behind both the @session tool's list subcommand and the /session-list
+// slash tool. Remote sessions are deliberately out of scope: they need a
+// live remote client plus interactive disambiguation, which doesn't fit the
+// request-response shape the model expects (handleListSessions keeps owning
+// that interactive path).
+func (cli *ChatCLI) sessionListText() (string, error) {
+	if cli.sessionManager == nil {
+		return "", fmt.Errorf("%s", i18n.T("session.tool.unavailable"))
+	}
+	names, err := cli.sessionManager.ListSessions()
+	if err != nil {
+		return "", err
+	}
+	if len(names) == 0 {
+		return i18n.T("session.tool.list.empty"), nil
+	}
+	titles := cli.sessionManager.SessionTitles()
+	var b strings.Builder
+	b.WriteString(i18n.T("session.tool.list.header"))
+	b.WriteByte('\n')
+	for _, n := range names {
+		line := "  • " + n
+		if t := titles[n]; t != "" {
+			line += " — " + t
+		}
+		b.WriteString(line + "\n")
+	}
+	return strings.TrimRight(b.String(), "\n"), nil
+}

@@ -21,6 +21,7 @@ import (
 
 	"github.com/diillson/chatcli/cli/ctxmgr"
 	"github.com/diillson/chatcli/i18n"
+	"github.com/diillson/chatcli/models"
 )
 
 // sessionPluginAdapter is the concrete plugins.SessionAdapter.
@@ -169,28 +170,145 @@ func truncateRunesafe(s string, capBytes int) string {
 	return s[:cut] + "…"
 }
 
-// List returns the saved session names.
+// List returns the saved session names. Delegates to sessionListText, which
+// is shared with the /session-list slash tool (slash_tool_registry.go).
 func (a *sessionPluginAdapter) List(_ context.Context) (string, error) {
-	if a.cli == nil || a.cli.sessionManager == nil {
+	if a.cli == nil {
 		return "", fmt.Errorf("%s", i18n.T("session.tool.unavailable"))
 	}
-	names, err := a.cli.sessionManager.ListSessions()
+	return a.cli.sessionListText()
+}
+
+// ---------------------------------------------------------------------------
+// Write capability (plugins.SessionWriter) — Phase 3 of session continuity.
+//
+// These methods run on the agent loop's goroutine, mid-turn, inside the tool
+// batch. The plugin declares every write op non-concurrency-safe
+// (builtin_session_caps.go), so the orchestrator serializes them with all
+// other tool calls — that serialization, plus SessionManager's atomic
+// temp+rename file writes, is the whole concurrency story; no extra locking,
+// matching the read paths above and the /session handlers.
+//
+// The surface is non-destructive by design: no delete, no forced reload.
+// ---------------------------------------------------------------------------
+
+// checkSessionWrite validates a write-target: the store must be up and the
+// name must not collide with the machine-owned namespaces (autosave-/mcp-
+// files are rolling mirrors owned by the autosave paths, never live bindings
+// — boundSessionName would silently ignore them; see cli_session_binding.go).
+func (a *sessionPluginAdapter) checkSessionWrite(name string) error {
+	if a.cli == nil || a.cli.sessionManager == nil {
+		return fmt.Errorf("%s", i18n.T("session.tool.unavailable"))
+	}
+	// Captured server/gateway runs: currentSessionName holds a surface
+	// session id there, the REPL write-through is deliberately inert
+	// (rpcCaptureActive), and runLoopRPC restores the name on exit — a bind
+	// made here would silently evaporate while confirming success to the
+	// model. Refuse with a pointer to the surface's own binding controls.
+	if rpcCaptureActive.Load() {
+		return fmt.Errorf("session binding is managed by this surface, not by the @session tool: use the manage_session tool (MCP), the /session command (ACP), or /session in the chat channel (gateway)")
+	}
+	for _, p := range machineSessionPrefixes {
+		if strings.HasPrefix(name, p) {
+			return fmt.Errorf("%s", i18n.T("session.tool.write.reserved_name", name))
+		}
+	}
+	return nil
+}
+
+// Save implements plugins.SessionWriter: persist the current conversation
+// under name and bind to it, so write-through keeps it fresh from now on.
+func (a *sessionPluginAdapter) Save(_ context.Context, name string) (string, error) {
+	if err := a.checkSessionWrite(name); err != nil {
+		return "", err
+	}
+	cli := a.cli
+	if err := cli.sessionManager.SaveSessionV2(name, cli.buildSessionData()); err != nil {
+		return "", err
+	}
+	cli.currentSessionName = name
+	cli.boundRemoteOnly = false
+	cli.stampBoundSession()
+	return i18n.T("session.tool.save.ok", name), nil
+}
+
+// Fork implements plugins.SessionWriter, mirroring handleForkSession: with a
+// bound session the store file is forked; otherwise the in-memory history
+// seeds the new session. Either way the binding moves to the fork.
+func (a *sessionPluginAdapter) Fork(_ context.Context, name string) (string, error) {
+	if err := a.checkSessionWrite(name); err != nil {
+		return "", err
+	}
+	cli := a.cli
+	if cli.currentSessionName != "" {
+		if err := cli.sessionManager.ForkSession(cli.currentSessionName, name); err != nil {
+			return "", err
+		}
+	} else {
+		if err := cli.sessionManager.ForkCurrentToNew(name, cli.buildSessionData()); err != nil {
+			return "", err
+		}
+	}
+	cli.currentSessionName = name
+	cli.boundRemoteOnly = false
+	cli.stampBoundSession()
+	return i18n.T("session.tool.fork.ok", name), nil
+}
+
+// Attach implements plugins.SessionWriter's bind-only contract. When the
+// named session exists and the in-memory conversation is EMPTY its history is
+// loaded immediately; when the conversation already has messages we only
+// record the binding — swapping the history mid-turn would yank the agent's
+// own context out from under it, so convergence happens at the turn boundary
+// instead (persistBoundSession / refreshBoundSession, last-writer-wins on the
+// whole file; see cli_session_binding.go). A missing session is created
+// lazily by the first write-through.
+func (a *sessionPluginAdapter) Attach(_ context.Context, name string) (string, error) {
+	if err := a.checkSessionWrite(name); err != nil {
+		return "", err
+	}
+	cli := a.cli
+	if !cli.sessionManager.SessionExists(name) {
+		cli.currentSessionName = name
+		cli.boundRemoteOnly = false
+		cli.boundRemoteOnly = false
+		return i18n.T("session.tool.attach.new", name), nil
+	}
+	sd, err := cli.sessionManager.LoadSessionV2(name)
 	if err != nil {
 		return "", err
 	}
-	if len(names) == 0 {
-		return i18n.T("session.tool.list.empty"), nil
+	if len(cli.history) == 0 {
+		cli.restoreSessionData(sd)
+		cli.currentSessionName = name
+		cli.boundRemoteOnly = false
+		cli.boundRemoteOnly = false
+		cli.stampBoundSession()
+		return i18n.T("session.tool.attach.loaded", name, len(cli.history)), nil
 	}
-	titles := a.cli.sessionManager.SessionTitles()
-	var b strings.Builder
-	b.WriteString(i18n.T("session.tool.list.header"))
-	b.WriteByte('\n')
-	for _, n := range names {
-		line := "  • " + n
-		if t := titles[n]; t != "" {
-			line += " — " + t
-		}
-		b.WriteString(line + "\n")
+	// Non-empty conversation attaching to an existing session: MERGE — the
+	// target's history is prepended so the end-of-turn write-through writes
+	// the union back. Bind-only here would make that write-through REPLACE
+	// the file with the current conversation, silently destroying the target
+	// session's content (this tool's contract is non-destructive).
+	cli.history = append(append([]models.Message(nil), sd.ChatHistory...), cli.history...)
+	cli.checkpoints = nil
+	cli.currentSessionName = name
+	cli.boundRemoteOnly = false
+	cli.stampBoundSession()
+	return i18n.T("session.tool.attach.bound", name), nil
+}
+
+// Detach implements plugins.SessionWriter: drop the binding. The conversation
+// stays in memory; the saved session keeps whatever was last written through.
+func (a *sessionPluginAdapter) Detach(_ context.Context) (string, error) {
+	if a.cli == nil {
+		return "", fmt.Errorf("%s", i18n.T("session.tool.unavailable"))
 	}
-	return strings.TrimRight(b.String(), "\n"), nil
+	name := a.cli.currentSessionName
+	if name == "" {
+		return i18n.T("session.tool.detach.none"), nil
+	}
+	a.cli.currentSessionName = ""
+	return i18n.T("session.tool.detach.ok", name), nil
 }

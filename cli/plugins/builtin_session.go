@@ -52,6 +52,31 @@ type SessionMessageReader interface {
 	GetMessage(ctx context.Context, name string, index int) (string, error)
 }
 
+// SessionWriter is an OPTIONAL capability a SessionAdapter may implement to
+// back the NON-destructive write subcommands (save/fork/attach/detach) —
+// same optional-interface pattern as SessionReader, so read-only adapters
+// keep compiling. Each method returns the model-facing confirmation text.
+//
+// The surface is deliberately non-destructive: there is no delete and no
+// forced load. In particular, Attach must NOT swap the in-memory history in
+// the middle of an agent turn — the contract is that the adapter records the
+// binding intent and the actual history convergence happens at the turn
+// boundary (write-through / refresh); an immediate load is allowed only when
+// the current conversation is empty.
+type SessionWriter interface {
+	// Save persists the current conversation under name and binds to it.
+	Save(ctx context.Context, name string) (string, error)
+	// Fork copies the current conversation (or its bound session file) into
+	// a new session named name and binds to it.
+	Fork(ctx context.Context, name string) (string, error)
+	// Attach binds the conversation to the named session, creating it lazily
+	// when it does not exist. See the interface comment for the mid-turn
+	// history contract.
+	Attach(ctx context.Context, name string) (string, error)
+	// Detach removes the session binding, leaving the conversation unsaved.
+	Detach(ctx context.Context) (string, error)
+}
+
 type sessionAdapterHolder struct{ a SessionAdapter }
 
 var sessionAdapterAtom atomic.Value // stores sessionAdapterHolder
@@ -79,7 +104,7 @@ func (*BuiltinSessionPlugin) Name() string { return "@session" }
 
 // Description surfaces the tool.
 func (*BuiltinSessionPlugin) Description() string {
-	return "Search past saved conversations and recall what was discussed earlier, or list saved sessions. Use when the user refers to a prior conversation ('what did we decide about X', 'continue where we left off')."
+	return "Search, read and manage saved conversations: recall what was discussed earlier, list sessions, save or fork the current conversation under a name, and attach/detach the live session binding. Use when the user refers to a prior conversation ('what did we decide about X', 'continue where we left off') or asks to keep working under a named session."
 }
 
 // Usage explains the canonical invocation.
@@ -92,20 +117,27 @@ Subcommands (cmd + args):
                            query jumps to the best match; message=<index> returns that
                            single message nearly in full (follow up on truncated entries)
   list                     list saved session names
+  save {name}              save the current conversation under name and bind to it
+                           (later turns write through to the store)
+  fork {name}              fork the current conversation into a new session and bind to it
+  attach {name}            bind to a named session; created lazily when missing. An
+                           existing session's history is loaded only when the current
+                           conversation is empty — otherwise the running conversation is
+                           kept and both converge at the next turn boundary
+  detach                   remove the session binding (the conversation stays in memory)
+
+Sessions can NOT be deleted or destructively reloaded from this tool.
 
 Typical recall flow: search finds WHICH session discussed something, get reads
 the relevant part of THAT session, get with message=<index> expands the entries
-that matter.`
+that matter. To keep working under a name: save (new) or attach (existing).`
 }
 
 // Version is semver.
-func (*BuiltinSessionPlugin) Version() string { return "1.1.0" }
+func (*BuiltinSessionPlugin) Version() string { return "1.2.0" }
 
 // Path is empty for builtin plugins.
 func (*BuiltinSessionPlugin) Path() string { return "" }
-
-// IsConcurrencySafe — read-only over the session store.
-func (*BuiltinSessionPlugin) IsConcurrencySafe() bool { return true }
 
 // Schema describes the subcommands.
 func (*BuiltinSessionPlugin) Schema() string {
@@ -141,6 +173,35 @@ func (*BuiltinSessionPlugin) Schema() string {
 				"name":        "list",
 				"description": "List saved session names.",
 				"examples":    []string{`{"cmd":"list"}`},
+			},
+			{
+				"name":        "save",
+				"description": "Save the current conversation under a name and bind to it; later turns write through to the saved session.",
+				"flags": []map[string]interface{}{
+					{"name": "name", "type": "string", "required": true, "description": "Session name to save the conversation under."},
+				},
+				"examples": []string{`{"cmd":"save","args":{"name":"auth-refactor"}}`},
+			},
+			{
+				"name":        "fork",
+				"description": "Fork the current conversation into a NEW session named name and bind to it. Fails if the target already exists.",
+				"flags": []map[string]interface{}{
+					{"name": "name", "type": "string", "required": true, "description": "Name for the forked session (must not exist yet)."},
+				},
+				"examples": []string{`{"cmd":"fork","args":{"name":"auth-refactor-v2"}}`},
+			},
+			{
+				"name":        "attach",
+				"description": "Bind the conversation to a named session (created lazily when missing). An existing session's history is loaded immediately only when the current conversation is empty; otherwise the binding takes effect at the turn boundary.",
+				"flags": []map[string]interface{}{
+					{"name": "name", "type": "string", "required": true, "description": "Session name to bind to."},
+				},
+				"examples": []string{`{"cmd":"attach","args":{"name":"auth-refactor"}}`},
+			},
+			{
+				"name":        "detach",
+				"description": "Remove the session binding; the conversation stays in memory but is no longer persisted to a named session.",
+				"examples":    []string{`{"cmd":"detach"}`},
 			},
 		},
 	}
@@ -208,8 +269,35 @@ func (p *BuiltinSessionPlugin) ExecuteWithStream(ctx context.Context, args []str
 		return reader.Get(ctx, in.Name, lenientInt(in.Offset), lenientInt(in.Limit), in.Query)
 	case "list":
 		return adapter.List(ctx)
+	case "save", "fork", "attach", "detach":
+		// Write ops require the optional SessionWriter capability. Note the
+		// deliberate absence of delete/load here: the model manages bindings
+		// and creates sessions, it never destroys or force-replaces them.
+		writer, ok := adapter.(SessionWriter)
+		if !ok {
+			return "", fmt.Errorf("@session %s: session writing not available in this session", cmd)
+		}
+		if cmd == "detach" {
+			return writer.Detach(ctx)
+		}
+		var in struct {
+			Name string `json:"name"`
+		}
+		_ = json.Unmarshal([]byte(inner), &in)
+		name := strings.TrimSpace(in.Name)
+		if name == "" {
+			return "", fmt.Errorf(`@session %s: "name" is required`, cmd)
+		}
+		switch cmd {
+		case "save":
+			return writer.Save(ctx, name)
+		case "fork":
+			return writer.Fork(ctx, name)
+		default:
+			return writer.Attach(ctx, name)
+		}
 	default:
-		return "", fmt.Errorf("@session: unknown cmd %q (valid: search|get|list)", cmd)
+		return "", fmt.Errorf("@session: unknown cmd %q (valid: search|get|list|save|fork|attach|detach)", cmd)
 	}
 }
 
@@ -228,7 +316,7 @@ func parseSessionInvocation(args []string) (string, string, error) {
 		canon := canonicalSessionCmd(cmdStr)
 		if canon == "" {
 			if !isFlatArgs(raw) {
-				return "", "", fmt.Errorf("missing or unknown cmd %q (valid: search|get|list)", cmdStr)
+				return "", "", fmt.Errorf("missing or unknown cmd %q (valid: search|get|list|save|fork|attach|detach)", cmdStr)
 			}
 			canon = "search" // flat native args, e.g. {"query":"..."}
 		}
@@ -249,9 +337,19 @@ func parseSessionInvocation(args []string) (string, string, error) {
 	if canon == "" {
 		return "", "", fmt.Errorf("expected JSON envelope or subcommand; got %q", args[0])
 	}
-	return canon, argvInner(args[1:], "query", nil, map[string]bool{"limit": true}), nil
+	// The bare positional maps to the subcommand's natural primary key:
+	// write ops take a session name, the read ops keep the historic "query".
+	primary := "query"
+	switch canon {
+	case "save", "fork", "attach":
+		primary = "name"
+	}
+	return canon, argvInner(args[1:], primary, nil, map[string]bool{"limit": true}), nil
 }
 
+// canonicalSessionCmd maps model spellings to the canonical subcommand.
+// "delete"/"load" are intentionally unmapped: the tool surface is
+// non-destructive by design, so those fall through to the unknown-cmd error.
 func canonicalSessionCmd(s string) string {
 	switch strings.ToLower(strings.TrimSpace(s)) {
 	case "search", "find", "recall":
@@ -260,6 +358,14 @@ func canonicalSessionCmd(s string) string {
 		return "get"
 	case "list", "sessions":
 		return "list"
+	case "save":
+		return "save"
+	case "fork", "branch":
+		return "fork"
+	case "attach", "bind":
+		return "attach"
+	case "detach", "unbind":
+		return "detach"
 	}
 	return ""
 }

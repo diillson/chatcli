@@ -305,7 +305,16 @@ func (cli *ChatCLI) syncHubContext(ctx context.Context) {
 	if cli.hubSync == nil {
 		return
 	}
-	if msgs := cli.hubSync.pull(ctx); len(msgs) > 0 {
+	msgs := cli.hubSync.pull(ctx)
+	// With a named session bound, the session FILE is the cross-surface
+	// carrier: a bound gateway writes its turns both to the hub and to the
+	// file, so splicing the hub copy too would duplicate every turn (and the
+	// write-through would persist the duplicates). The pull still ran, so
+	// the watermark advances and a later detach doesn't splice stale backlog.
+	if cli.boundSessionName() != "" {
+		return
+	}
+	if len(msgs) > 0 {
 		cli.history = append(cli.history, msgs...)
 	}
 }

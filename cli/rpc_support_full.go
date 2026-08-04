@@ -347,6 +347,13 @@ type RPCRunOpts struct {
 	// Session scopes the run's /context attachments and knowledge bases
 	// (ctxmgr session id). Empty keeps the process default.
 	Session string
+	// History, together with a non-nil HistoryOut, swaps the caller's
+	// per-session conversation in for the run — the loop starts from it and
+	// HistoryOut receives the updated conversation on exit (same contract as
+	// RunChatTurnRPC). With HistoryOut nil the run keeps the legacy behavior
+	// of operating on the process-global history.
+	History    []models.Message
+	HistoryOut *[]models.Message
 }
 
 // RunAgentRPC runs the FULL agent (ReAct) loop with per-call options — the
@@ -409,6 +416,21 @@ func (cli *ChatCLI) runLoopRPC(ctx context.Context, o RPCRunOpts, fn func(contex
 			cli.currentSessionName = o.Session
 			defer func() { cli.currentSessionName = prevSession }()
 		}
+		// Per-session conversation swap (mirrors runChatTurnSerialized):
+		// the loop starts from the caller's history and the updated
+		// conversation is handed back through HistoryOut. Checkpoints are
+		// index-coupled to the history, so they swap alongside it. ALWAYS
+		// restored, error included — the REPL invariants depend on it.
+		if o.HistoryOut != nil {
+			prevHistory, prevCheckpoints := cli.history, cli.checkpoints
+			cli.history = append([]models.Message(nil), o.History...)
+			cli.checkpoints = nil
+			defer func() {
+				*o.HistoryOut = append([]models.Message(nil), cli.history...)
+				cli.history = prevHistory
+				cli.checkpoints = prevCheckpoints
+			}()
+		}
 		return fn(ctx)
 	})
 	if err != nil {
@@ -461,6 +483,31 @@ func (cli *ChatCLI) applyRPCOverrides(ctx context.Context, o RPCRunOpts) (func()
 		// AFTER the run's ctx is done — the cache refresh must still happen.
 		cli.refreshModelCache(context.WithoutCancel(ctx))
 	}, nil
+}
+
+// SessionModTimeRPC returns the store mtime of a saved session — the
+// freshness signal the RPC backend's bound sessions use to adopt writes made
+// by other surfaces (REPL, gateway, another server) before a turn.
+func (cli *ChatCLI) SessionModTimeRPC(name string) (time.Time, error) {
+	if cli.sessionManager == nil {
+		return time.Time{}, fmt.Errorf("%s", i18n.T("rpc.session.store_unavailable"))
+	}
+	return cli.sessionManager.SessionModTime(name)
+}
+
+// SessionExistsRPC reports whether a saved session exists in the store.
+func (cli *ChatCLI) SessionExistsRPC(name string) bool {
+	if cli.sessionManager == nil {
+		return false
+	}
+	return cli.sessionManager.SessionExists(name)
+}
+
+// RotateHubThreadRPC rotates the shared cross-channel hub conversation to a
+// fresh thread. The RPC /session handler calls it when a session's identity
+// changes (load/new) so the old thread's backlog is not spliced on top.
+func (cli *ChatCLI) RotateHubThreadRPC(ctx context.Context) {
+	cli.rotateHubThread(ctx)
 }
 
 // SaveSessionRPC persists a chat history under name in the saved-session

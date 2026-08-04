@@ -849,6 +849,17 @@ func (cli *ChatCLI) showConfigSession() {
 		autosaveVal = defaultMarker + autosaveVal
 	}
 	kv(p, "CHATCLI_SESSION_AUTOSAVE", autosaveVal)
+	wtVal := i18n.T("cfg.val.enabled")
+	if !sessionWritethroughEnabled() {
+		wtVal = i18n.T("cfg.val.disabled")
+	}
+	if os.Getenv("CHATCLI_SESSION_WRITETHROUGH") == "" {
+		wtVal = defaultMarker + wtVal
+	}
+	kv(p, "CHATCLI_SESSION_WRITETHROUGH", wtVal)
+	if bound := cli.boundSessionName(); bound != "" {
+		kv(p, i18n.T("cfg.kv.session_bound"), bound)
+	}
 	keepVal := fmt.Sprintf("%d", sessionAutosaveKeep())
 	if os.Getenv("CHATCLI_SESSION_AUTOSAVE_KEEP") == "" {
 		keepVal = defaultMarker + keepVal
