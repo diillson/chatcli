@@ -81,7 +81,10 @@ func TestGetModelPricing(t *testing.T) {
 		{"zai via provider", "ZAI", "anything", 0.50, 0.50},
 		{"zai legacy glm model", "OTHER", "glm-4.5", 0.50, 0.50},
 
-		// Moonshot (Kimi) — K2.6 list price, conservative single tier.
+		// Moonshot (Kimi) — K3 has its own list price (well above the K2
+		// line) and its specific case must win over the generic kimi match;
+		// everything else keeps the conservative K2.6 single tier.
+		{"kimi-k3 own tier", "MOONSHOT", "kimi-k3", 3.00, 15.00},
 		{"moonshot via provider", "MOONSHOT", "kimi-k2.6", 0.95, 4.00},
 		{"kimi-k2.5", "MOONSHOT", "kimi-k2.5", 0.95, 4.00},
 		{"moonshot-v1", "MOONSHOT", "moonshot-v1-128k", 0.95, 4.00},

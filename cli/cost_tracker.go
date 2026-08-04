@@ -590,17 +590,23 @@ func deepseekPricing(model string) (float64, float64, bool) {
 // or where the provider name is the most reliable signal (proprietary
 // wrappers like Copilot, local backends like Ollama).
 //
-// Moonshot (Kimi) — kimi-k2.6 public list price as of 2026-05 is $0.95/M
-// input (cache miss) and $4.00/M output. Cache-hit input is $0.16/M but
-// cost_tracker only models a single tier — we charge the miss price so
-// accounting stays conservative. K2.5 and moonshot-v1-* sit below K2.6;
-// we approximate with K2.6 numbers to avoid under-reporting.
+// Moonshot (Kimi) — kimi-k3 public list price as of 2026-07 is $3.00/M
+// input (cache miss; cache hit is $0.30/M) and $15.00/M output — priced
+// well above the K2 line, so it gets its own case BEFORE the generic kimi
+// match (specific beats generic, same ordering rule as claudePricing).
+// kimi-k2.6 as of 2026-05 is $0.95/M input (cache miss) and $4.00/M
+// output; cache-hit input is $0.16/M but cost_tracker only models a
+// single tier — we charge the miss price so accounting stays
+// conservative. K2.5 and moonshot-v1-* sit below K2.6; we approximate
+// with K2.6 numbers to avoid under-reporting.
 func providerFallbackPricing(provider, model string) (float64, float64) {
 	switch {
 	case strings.Contains(model, "minimax"), strings.Contains(provider, "minimax"):
 		return 0.20, 1.10
 	case strings.Contains(provider, "zai"), strings.Contains(model, "glm"):
 		return 0.50, 0.50
+	case strings.HasPrefix(model, "kimi-k3"):
+		return 3.00, 15.00
 	case strings.Contains(provider, "moonshot"), strings.HasPrefix(model, "kimi"), strings.HasPrefix(model, "moonshot"):
 		return 0.95, 4.00
 	case strings.Contains(provider, "copilot"):
