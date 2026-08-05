@@ -19,7 +19,17 @@
  */
 package agentevents
 
-import "time"
+import (
+	"errors"
+	"time"
+)
+
+// ErrPermissionUnsupported reports that the connected client does not
+// implement the permission round-trip (e.g. an ACP client answering
+// "method not found" to session/request_permission). Callers treat it as
+// "no dialog exists" — the unattended fallback policy applies — which is
+// different from a denial or a transport failure (both fail-safe deny).
+var ErrPermissionUnsupported = errors.New("client does not support permission requests")
 
 // ToolKind classifies what a tool call does, using the ACP spec vocabulary so
 // protocol sinks can forward it verbatim.

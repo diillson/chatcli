@@ -196,7 +196,11 @@ type ChatCLI struct {
 	// coder ReAct loop (ACP structured bridge). Installed per-run by
 	// runLoopRPC under rpcStdoutMu and cleared on exit; never set by the
 	// interactive REPL, gateway or scheduler paths.
-	agentEventSink   agentevents.Sink
+	agentEventSink agentevents.Sink
+	// rpcPermissions, when set, approves policy-gated actions through the
+	// connected client even without an event sink (MCP elicitation bridge).
+	// Installed per-run by runLoopRPC under rpcStdoutMu, like agentEventSink.
+	rpcPermissions   agentevents.PermissionRequester
 	interactionState InteractionState
 	mu               sync.Mutex
 	operationCancel  context.CancelFunc

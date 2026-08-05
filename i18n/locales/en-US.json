@@ -2527,6 +2527,8 @@
   "rpc.session.store_unavailable": "the session store is not available in this ChatCLI instance",
   "acp.mode_switched": "Session mode switched to %s.",
   "agent.permission.dangerous_exec": "Dangerous command detected in @coder exec: %s",
+  "agent.permission.policy_ask": "Security policy requires your approval to run %s",
+  "agent.policy.ask_denied": "ACTION DENIED BY THE USER (security policy): %s",
   "acp.command_unsupported": "The command %s is not available over the IDE (ACP) connection. Type / to see the supported commands.",
   "acp.command_failed": "Command failed: %s",
   "acp.command_empty_output": "(command produced no output)",

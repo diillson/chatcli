@@ -2838,15 +2838,18 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 							break
 						}
 						if action == coder.ActionAsk && a.cli.unattended {
-							// Gateway/unattended: there is no human to answer the
-							// security prompt, and PromptSecurityCheck blocks on a
-							// dead stdin forever — which silently hung the run (the
-							// "started Docker but nothing happened" report). The
-							// operator opted into full autonomy (access is gated at
-							// the messaging edge), so an "ask" rule auto-approves
-							// here. An explicit ActionDeny above still blocks.
-							a.logger.Info("coder policy: 'ask' auto-approved (unattended gateway)",
-								zap.String("tool", tc.Name))
+							// Unattended: PromptSecurityCheck would block on a
+							// dead stdin forever (os.Stdin may even carry the
+							// JSON-RPC channel). When the connected client offers
+							// a permission dialog (ACP request_permission, MCP
+							// elicitation) the human decides there; without one,
+							// the historical contract holds — the operator opted
+							// into autonomy, so "ask" auto-approves. An explicit
+							// ActionDeny above still blocks either way.
+							if a.unattendedAskBlocked(tc.Name, tc.Args, renderError) {
+								batchHasError = true
+								break
+							}
 						} else if action == coder.ActionAsk {
 							decision := coder.PromptSecurityCheckGuarded(ctx, tc.Name, tc.Args, a.stdinLines)
 							// The prompt forced cooked mode (stty sane); re-arm
