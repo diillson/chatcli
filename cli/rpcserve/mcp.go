@@ -166,31 +166,44 @@ type MCP struct {
 	backend MCPBackend
 	name    string
 	version string
+	// rt holds the mutable runtime wiring (server requester, client-declared
+	// capabilities). Kept behind a pointer so the exported struct stays
+	// comparable — a mutex or func field inline would be an incompatible
+	// API change.
+	rt *mcpRuntime
+}
+
+// mcpRuntime is the per-connection mutable state: initialize and tools/call
+// dispatch on concurrent goroutines, so access is mutex-guarded.
+type mcpRuntime struct {
+	mu sync.Mutex
 	// request is the server→client round-trip (Server.Request), used for
 	// elicitation/create. Wired by SetRequester after NewServer.
 	request func(ctx context.Context, method string, params interface{}) (json.RawMessage, error)
-	// mu guards elicits: initialize and tools/call dispatch concurrently.
-	mu      sync.Mutex
+	// elicits records whether the client declared the elicitation
+	// capability during initialize.
 	elicits bool
 }
 
 // NewMCP builds an MCP handler.
 func NewMCP(backend MCPBackend, name, version string) *MCP {
-	return &MCP{backend: backend, name: name, version: version}
+	return &MCP{backend: backend, name: name, version: version, rt: &mcpRuntime{}}
 }
 
 // SetRequester wires the server's client-request round-trip (call after
 // NewServer). Without it, permission elicitation stays off.
 func (m *MCP) SetRequester(fn func(ctx context.Context, method string, params interface{}) (json.RawMessage, error)) {
-	m.request = fn
+	m.rt.mu.Lock()
+	defer m.rt.mu.Unlock()
+	m.rt.request = fn
 }
 
 // clientElicits reports whether the connected client declared the
 // elicitation capability during initialize.
 func (m *MCP) clientElicits() bool {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	return m.elicits
+	m.rt.mu.Lock()
+	defer m.rt.mu.Unlock()
+	return m.rt.elicits
 }
 
 // Handle dispatches an MCP method. Wire it into Server via the handlerFunc type.
@@ -230,9 +243,9 @@ func (m *MCP) initialize(params json.RawMessage) map[string]interface{} {
 	// regardless of the negotiated revision string; anything else (wrapped
 	// CLIs, older clients) never receives a server→client request.
 	_, hasElicit := p.Capabilities["elicitation"]
-	m.mu.Lock()
-	m.elicits = hasElicit
-	m.mu.Unlock()
+	m.rt.mu.Lock()
+	m.rt.elicits = hasElicit
+	m.rt.mu.Unlock()
 	version := MCPProtocolVersion
 	for _, v := range mcpSupportedVersions {
 		if p.ProtocolVersion == v {
@@ -597,10 +610,13 @@ func (m *MCP) callTool(ctx context.Context, params json.RawMessage) (interface{}
 // client did not declare the elicitation capability or the requester is not
 // wired — the run then keeps the historical unattended contract.
 func (m *MCP) permissionsFor(ctx context.Context) agentevents.PermissionRequester {
-	if m.request == nil || !m.clientElicits() {
+	m.rt.mu.Lock()
+	request, elicits := m.rt.request, m.rt.elicits
+	m.rt.mu.Unlock()
+	if request == nil || !elicits {
 		return nil
 	}
-	return &mcpElicitRequester{ctx: ctx, request: m.request}
+	return &mcpElicitRequester{ctx: ctx, request: request}
 }
 
 // mcpElicitRequester implements agentevents.PermissionRequester over MCP
