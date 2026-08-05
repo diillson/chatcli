@@ -18,6 +18,7 @@ package cmd
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 
@@ -55,6 +56,14 @@ func parseToolInvocation(args []string) toolInvocation {
 	return inv
 }
 
+// toolRunner is the slice of ChatCLI the subcommand needs; an interface so
+// the dispatch/rendering logic is testable without a full boot.
+type toolRunner interface {
+	ListAllRPCTools() []cli.RPCToolInfo
+	RunAnyRPCTool(ctx context.Context, name, args string) (string, error)
+	RunAnyRPCToolArgv(ctx context.Context, name string, argv []string) (string, error)
+}
+
 // RunTool executes the `tool` subcommand: list the policy-admitted tool
 // catalog or run one tool and print its output.
 func RunTool(ctx context.Context, args []string, mgr manager.LLMManager, logger *zap.Logger) error {
@@ -64,34 +73,38 @@ func RunTool(ctx context.Context, args []string, mgr manager.LLMManager, logger 
 	}
 	// One-shot, non-interactive: nothing may block reading stdin.
 	chatCLI.SetUnattended(true)
+	return runToolWith(ctx, chatCLI, args, os.Stdout)
+}
 
+// runToolWith is the boot-free body of RunTool.
+func runToolWith(ctx context.Context, r toolRunner, args []string, w io.Writer) error {
 	inv := parseToolInvocation(args)
 	if inv.List {
-		printToolCatalog(chatCLI)
+		printToolCatalog(w, r.ListAllRPCTools())
 		return nil
 	}
 
 	var out string
+	var err error
 	if inv.JSON != "" {
-		out, err = chatCLI.RunAnyRPCTool(ctx, inv.Name, inv.JSON)
+		out, err = r.RunAnyRPCTool(ctx, inv.Name, inv.JSON)
 	} else {
-		out, err = chatCLI.RunAnyRPCToolArgv(ctx, inv.Name, inv.Argv)
+		out, err = r.RunAnyRPCToolArgv(ctx, inv.Name, inv.Argv)
 	}
 	if err != nil {
 		return err
 	}
-	fmt.Println(out)
+	fmt.Fprintln(w, out)
 	return nil
 }
 
 // printToolCatalog lists every tool the exposure policy admits.
-func printToolCatalog(chatCLI *cli.ChatCLI) {
-	tools := chatCLI.ListAllRPCTools()
+func printToolCatalog(w io.Writer, tools []cli.RPCToolInfo) {
 	if len(tools) == 0 {
-		fmt.Println(i18n.T("tool.none"))
+		fmt.Fprintln(w, i18n.T("tool.none"))
 		return
 	}
-	fmt.Println(i18n.T("tool.list_header"))
+	fmt.Fprintln(w, i18n.T("tool.list_header"))
 	for _, t := range tools {
 		tag := ""
 		if t.ReadOnly {
@@ -101,8 +114,8 @@ func printToolCatalog(chatCLI *cli.ChatCLI) {
 		if r := []rune(desc); len(r) > 100 {
 			desc = string(r[:100]) + "…"
 		}
-		fmt.Fprintf(os.Stdout, "  @%s%s — %s\n", t.Name, tag, desc)
+		fmt.Fprintf(w, "  @%s%s — %s\n", t.Name, tag, desc)
 	}
-	fmt.Println()
-	fmt.Println(i18n.T("tool.usage"))
+	fmt.Fprintln(w)
+	fmt.Fprintln(w, i18n.T("tool.usage"))
 }
