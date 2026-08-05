@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.180.0](https://github.com/diillson/chatcli/compare/v1.179.0...v1.180.0) (2026-08-05)
+
+
+### Features
+
+* **cli:** tool subcommand runs built-in tools directly without an LLM turn ([#1302](https://github.com/diillson/chatcli/issues/1302)) ([6380a3f](https://github.com/diillson/chatcli/commit/6380a3fc2c603005c775a144a5a5c829dd54bb1e))
+* **security:** route unattended ask policy through client permission dialogs ([#1300](https://github.com/diillson/chatcli/issues/1300)) ([076a451](https://github.com/diillson/chatcli/commit/076a45172cecab72a46b6d1e91d4e288d099887d))
+
 ## [1.179.0](https://github.com/diillson/chatcli/compare/v1.178.0...v1.179.0) (2026-08-04)
 
 
