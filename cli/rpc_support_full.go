@@ -157,6 +157,21 @@ func (cli *ChatCLI) ListAllRPCTools() []RPCToolInfo {
 // RunAnyRPCTool invokes any policy-admitted plugin by name with a raw
 // argument string (JSON envelope or flat args, exactly as the agent passes).
 func (cli *ChatCLI) RunAnyRPCTool(ctx context.Context, name, args string) (string, error) {
+	// Same argv contract as the agent loop: JSON envelopes become the argv
+	// the plugin's parser expects ({"cmd":...} → ["cmd", ...]); flat strings
+	// split like a command line. Wrapping the raw string as a single argv
+	// element broke every subcommand-style tool (coder, memory, session…).
+	argv, parseErr := parseToolArgsWithJSON(args)
+	if parseErr != nil {
+		return "", fmt.Errorf("invalid args for %q: %w", name, parseErr)
+	}
+	return cli.RunAnyRPCToolArgv(ctx, name, argv)
+}
+
+// RunAnyRPCToolArgv is the argv-native entry: callers that already hold a
+// real argv (the `chatcli tool` subcommand) pass it verbatim — joining and
+// re-splitting would corrupt values containing whitespace.
+func (cli *ChatCLI) RunAnyRPCToolArgv(ctx context.Context, name string, argv []string) (string, error) {
 	if cli.pluginManager == nil {
 		return "", fmt.Errorf("plugins not available")
 	}
@@ -168,14 +183,6 @@ func (cli *ChatCLI) RunAnyRPCTool(ctx context.Context, name, args string) (strin
 	mode, allow := rpcToolPolicy()
 	if !rpcToolAllowed(p, mode, allow) {
 		return "", fmt.Errorf("tool %q is not exposed under the current CHATCLI_MCP_TOOLS policy (%s)", name, mode)
-	}
-	// Same argv contract as the agent loop: JSON envelopes become the argv
-	// the plugin's parser expects ({"cmd":...} → ["cmd", ...]); flat strings
-	// split like a command line. Wrapping the raw string as a single argv
-	// element broke every subcommand-style tool (coder, memory, session…).
-	argv, parseErr := parseToolArgsWithJSON(args)
-	if parseErr != nil {
-		return "", fmt.Errorf("invalid args for %q: %w", name, parseErr)
 	}
 
 	// Capture stdout for the duration: plugins that print progress would

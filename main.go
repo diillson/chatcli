@@ -36,7 +36,7 @@ func dispatchSubcommand() bool {
 	}
 	subcmd := os.Args[1]
 	switch subcmd {
-	case "server", "serve", "connect", "watch", "mcp-server", "mcp-serve", "acp", "gateway":
+	case "server", "serve", "connect", "watch", "mcp-server", "mcp-serve", "acp", "gateway", "tool":
 		runSubcommand(subcmd, os.Args[2:])
 		return true
 	case "daemon":
@@ -325,6 +325,11 @@ func runSubcommand(subcmd string, args []string) {
 	case "gateway":
 		if err := cmd.RunGateway(args, llmMgr, logger); err != nil {
 			logger.Fatal("Gateway failed", zap.Error(err))
+		}
+	case "tool":
+		if err := cmd.RunTool(ctx, args, llmMgr, logger); err != nil {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			os.Exit(1)
 		}
 	}
 }
