@@ -8,7 +8,9 @@ package rpcserve
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"strings"
+	"sync"
 
 	"github.com/diillson/chatcli/cli/agentevents"
 )
@@ -39,6 +41,11 @@ type RunOpts struct {
 	// enrichment, no compaction) — the pre-parity ask_chatcli behavior, kept
 	// as an escape hatch for callers that want a cheap raw LLM turn.
 	Plain bool
+	// Permissions, when non-nil, lets the run ask the connected client to
+	// approve policy-gated actions (coder "ask" rules, dangerous commands)
+	// even without a structured event sink — the MCP elicitation bridge.
+	// Nil keeps the historical unattended contract.
+	Permissions agentevents.PermissionRequester
 }
 
 // ToolInfo describes a tool exposed over MCP.
@@ -159,11 +166,44 @@ type MCP struct {
 	backend MCPBackend
 	name    string
 	version string
+	// rt holds the mutable runtime wiring (server requester, client-declared
+	// capabilities). Kept behind a pointer so the exported struct stays
+	// comparable — a mutex or func field inline would be an incompatible
+	// API change.
+	rt *mcpRuntime
+}
+
+// mcpRuntime is the per-connection mutable state: initialize and tools/call
+// dispatch on concurrent goroutines, so access is mutex-guarded.
+type mcpRuntime struct {
+	mu sync.Mutex
+	// request is the server→client round-trip (Server.Request), used for
+	// elicitation/create. Wired by SetRequester after NewServer.
+	request func(ctx context.Context, method string, params interface{}) (json.RawMessage, error)
+	// elicits records whether the client declared the elicitation
+	// capability during initialize.
+	elicits bool
 }
 
 // NewMCP builds an MCP handler.
 func NewMCP(backend MCPBackend, name, version string) *MCP {
-	return &MCP{backend: backend, name: name, version: version}
+	return &MCP{backend: backend, name: name, version: version, rt: &mcpRuntime{}}
+}
+
+// SetRequester wires the server's client-request round-trip (call after
+// NewServer). Without it, permission elicitation stays off.
+func (m *MCP) SetRequester(fn func(ctx context.Context, method string, params interface{}) (json.RawMessage, error)) {
+	m.rt.mu.Lock()
+	defer m.rt.mu.Unlock()
+	m.rt.request = fn
+}
+
+// clientElicits reports whether the connected client declared the
+// elicitation capability during initialize.
+func (m *MCP) clientElicits() bool {
+	m.rt.mu.Lock()
+	defer m.rt.mu.Unlock()
+	return m.rt.elicits
 }
 
 // Handle dispatches an MCP method. Wire it into Server via the handlerFunc type.
@@ -195,9 +235,17 @@ func (m *MCP) Handle(ctx context.Context, method string, params json.RawMessage)
 // initialize negotiates the protocol revision and advertises capabilities.
 func (m *MCP) initialize(params json.RawMessage) map[string]interface{} {
 	var p struct {
-		ProtocolVersion string `json:"protocolVersion"`
+		ProtocolVersion string                     `json:"protocolVersion"`
+		Capabilities    map[string]json.RawMessage `json:"capabilities"`
 	}
 	_ = json.Unmarshal(params, &p)
+	// A client that declares elicitation understands elicitation/create
+	// regardless of the negotiated revision string; anything else (wrapped
+	// CLIs, older clients) never receives a server→client request.
+	_, hasElicit := p.Capabilities["elicitation"]
+	m.rt.mu.Lock()
+	m.rt.elicits = hasElicit
+	m.rt.mu.Unlock()
 	version := MCPProtocolVersion
 	for _, v := range mcpSupportedVersions {
 		if p.ProtocolVersion == v {
@@ -501,7 +549,8 @@ func (m *MCP) callTool(ctx context.Context, params json.RawMessage) (interface{}
 	if session == "" {
 		session = "mcp"
 	}
-	opts := RunOpts{Provider: a.Provider, Model: a.Model, Quality: a.Quality, Plain: a.Plain}
+	opts := RunOpts{Provider: a.Provider, Model: a.Model, Quality: a.Quality, Plain: a.Plain,
+		Permissions: m.permissionsFor(ctx)}
 
 	switch p.Name {
 	case "ask_chatcli":
@@ -554,6 +603,70 @@ func (m *MCP) callTool(ctx context.Context, params json.RawMessage) (interface{}
 		}
 		return m.result(m.backend.CallTool(ctx, p.Name, a.Args))
 	}
+}
+
+// permissionsFor returns a PermissionRequester bridging approval prompts to
+// MCP elicitation/create, scoped to one tools/call context. Nil when the
+// client did not declare the elicitation capability or the requester is not
+// wired — the run then keeps the historical unattended contract.
+func (m *MCP) permissionsFor(ctx context.Context) agentevents.PermissionRequester {
+	m.rt.mu.Lock()
+	request, elicits := m.rt.request, m.rt.elicits
+	m.rt.mu.Unlock()
+	if request == nil || !elicits {
+		return nil
+	}
+	return &mcpElicitRequester{ctx: ctx, request: request}
+}
+
+// mcpElicitRequester implements agentevents.PermissionRequester over MCP
+// elicitation: the client renders a form with a single "approve" boolean.
+// Anything but an explicit accept+approve denies; a client answering
+// "method not found" maps to ErrPermissionUnsupported (legacy fallback).
+type mcpElicitRequester struct {
+	ctx     context.Context
+	request func(ctx context.Context, method string, params interface{}) (json.RawMessage, error)
+}
+
+func (e *mcpElicitRequester) RequestPermission(tc agentevents.ToolCall, reason string) (bool, error) {
+	action := strings.TrimSpace(tc.Title)
+	if action == "" {
+		action = tc.Name
+	}
+	msg := "ChatCLI requests permission to run: " + action
+	if strings.TrimSpace(reason) != "" {
+		msg += "\n" + reason
+	}
+	raw, err := e.request(e.ctx, "elicitation/create", map[string]interface{}{
+		"message": msg,
+		"requestedSchema": map[string]interface{}{
+			"type": "object",
+			"properties": map[string]interface{}{
+				"approve": map[string]interface{}{
+					"type":        "boolean",
+					"description": "Approve running this action?",
+				},
+			},
+			"required": []string{"approve"},
+		},
+	})
+	if err != nil {
+		var rpcErr *RPCError
+		if errors.As(err, &rpcErr) && rpcErr.Code == CodeMethodNotFound {
+			return false, agentevents.ErrPermissionUnsupported
+		}
+		return false, err
+	}
+	var resp struct {
+		Action  string `json:"action"`
+		Content struct {
+			Approve bool `json:"approve"`
+		} `json:"content"`
+	}
+	if err := json.Unmarshal(raw, &resp); err != nil {
+		return false, err
+	}
+	return resp.Action == "accept" && resp.Content.Approve, nil
 }
 
 // sessionSearchActions returns the action-list suffix for the search/fork

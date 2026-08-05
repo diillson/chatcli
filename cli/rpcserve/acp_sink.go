@@ -19,6 +19,7 @@ package rpcserve
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"strings"
 	"sync"
 	"unicode/utf8"
@@ -148,6 +149,13 @@ func (s *acpSink) RequestPermission(tc agentevents.ToolCall, reason string) (boo
 		},
 	})
 	if err != nil {
+		// Minimal/wrapped clients may not implement the method at all;
+		// surface the typed sentinel so the loop applies its unattended
+		// fallback instead of denying every gated action.
+		var rpcErr *RPCError
+		if errors.As(err, &rpcErr) && rpcErr.Code == CodeMethodNotFound {
+			return false, agentevents.ErrPermissionUnsupported
+		}
 		return false, err
 	}
 	var resp struct {

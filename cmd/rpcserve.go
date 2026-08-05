@@ -119,6 +119,10 @@ func runRPC(kind string, mgr manager.LLMManager, logger *zap.Logger) error {
 		m := rpcserve.NewMCP(backend, "chatcli", ver)
 		srv := rpcserve.NewServer(os.Stdin, os.Stdout, m.Handle)
 		defer quarantineStdout(logger)()
+		// Permission elicitation: server→client approval prompts for
+		// policy-gated actions, used only when the client declared the
+		// elicitation capability at initialize.
+		m.SetRequester(srv.Request)
 		// Relay catalog changes from ChatCLI's own MCP client (servers
 		// connecting after startup, dynamic refreshes, disconnects) to our
 		// client as notifications/tools/list_changed, so proxied tools show
@@ -746,7 +750,7 @@ func (b *rpcBackend) ProvidersJSON() (string, error) {
 
 // toRunOpts converts the wire options into the CLI run options.
 func toRunOpts(session string, o rpcserve.RunOpts) cli.RPCRunOpts {
-	return cli.RPCRunOpts{Provider: o.Provider, Model: o.Model, Quality: o.Quality, Emit: o.Emit, Events: o.Events, Session: session}
+	return cli.RPCRunOpts{Provider: o.Provider, Model: o.Model, Quality: o.Quality, Emit: o.Emit, Events: o.Events, Permissions: o.Permissions, Session: session}
 }
 
 // ACPCommands lists the slash commands advertised to ACP clients.

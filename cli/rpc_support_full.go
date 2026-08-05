@@ -344,6 +344,11 @@ type RPCRunOpts struct {
 	// transcript is captured and discarded, and the client consumes typed
 	// events plus the returned final answer instead of scraped lines.
 	Events agentevents.Sink
+	// Permissions, when non-nil, installs a per-run PermissionRequester so
+	// policy-gated actions can ask the connected client for approval even
+	// without an event sink (MCP elicitation bridge). Sinks implementing
+	// PermissionRequester themselves (ACP) take precedence.
+	Permissions agentevents.PermissionRequester
 	// Session scopes the run's /context attachments and knowledge bases
 	// (ctxmgr session id). Empty keeps the process default.
 	Session string
@@ -408,6 +413,13 @@ func (cli *ChatCLI) runLoopRPC(ctx context.Context, o RPCRunOpts, fn func(contex
 				cli.agentEventSink = prevSink
 				finalReply = strings.TrimSpace(cli.lastAgentReply)
 			}()
+		}
+		// Per-run permission bridge (MCP elicitation): same serialization
+		// argument as the sink — rpcStdoutMu holds for the whole run.
+		if o.Permissions != nil {
+			prevPerms := cli.rpcPermissions
+			cli.rpcPermissions = o.Permissions
+			defer func() { cli.rpcPermissions = prevPerms }()
 		}
 		// Scope the run to the caller's session so /context attachments and
 		// knowledge bases resolve like they would in the interactive REPL.

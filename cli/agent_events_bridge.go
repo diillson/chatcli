@@ -18,6 +18,7 @@ package cli
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -26,6 +27,7 @@ import (
 	"github.com/diillson/chatcli/cli/agentevents"
 	"github.com/diillson/chatcli/cli/plugins"
 	"github.com/diillson/chatcli/i18n"
+	"github.com/diillson/chatcli/models"
 	"go.uber.org/zap"
 )
 
@@ -278,14 +280,21 @@ func (a *AgentMode) executeCommandBlocksUnattended(ctx context.Context, blocks [
 	return strings.TrimSpace(fb.String())
 }
 
-// requestActionPermission asks the sink's PermissionRequester (when the sink
-// provides one) to approve a dangerous action. tc should be the already
-// announced tool call when one exists, so the client can anchor its dialog to
-// the same toolCallId. ok reports whether the sink was consulted; allowed is
-// only meaningful when ok is true. Denials and transport errors both come
-// back allowed=false — fail-safe.
+// requestActionPermission asks the run's PermissionRequester to approve a
+// gated action: the sink's own capability when it has one (ACP), else the
+// per-run requester installed on the ChatCLI (MCP elicitation bridge). tc
+// should be the already announced tool call when one exists, so the client
+// can anchor its dialog to the same toolCallId. ok reports whether a
+// requester was consulted; allowed is only meaningful when ok is true.
+// Denials and transport errors both come back allowed=false — fail-safe. A
+// client that reports the round-trip unsupported (ErrPermissionUnsupported)
+// counts as NOT consulted: no dialog exists, so callers apply the same
+// contract as runs without a requester.
 func (a *AgentMode) requestActionPermission(tc agentevents.ToolCall, reason string) (allowed, ok bool) {
 	pr, has := a.events.(agentevents.PermissionRequester)
+	if !has && a.cli != nil && a.cli.rpcPermissions != nil {
+		pr, has = a.cli.rpcPermissions, true
+	}
 	if !has {
 		return false, false
 	}
@@ -295,10 +304,57 @@ func (a *AgentMode) requestActionPermission(tc agentevents.ToolCall, reason stri
 	tc.Status = agentevents.StatusPending
 	granted, err := pr.RequestPermission(tc, reason)
 	if err != nil {
+		if errors.Is(err, agentevents.ErrPermissionUnsupported) {
+			if a.logger != nil {
+				a.logger.Info("client does not support permission requests; applying unattended fallback")
+			}
+			return false, false
+		}
 		if a.logger != nil {
 			a.logger.Warn("permission request failed; denying action", zap.Error(err))
 		}
 		return false, true
 	}
 	return granted, true
+}
+
+// unattendedAskBlocked resolves a coder-policy ActionAsk verdict in an
+// unattended run. When the connected client offers a permission dialog (ACP
+// session/request_permission, MCP elicitation), the human decides: a denial
+// blocks the action, renders the refusal, tells the model (so it can replan)
+// and closes the tool_call for the client. Without a reachable dialog the
+// historical unattended contract holds — "ask" auto-approves (the operator
+// opted into autonomy; explicit deny rules still block upstream).
+func (a *AgentMode) unattendedAskBlocked(toolName, rawArgs string, renderError func(string)) bool {
+	title := agent.CompactToolLabel(extractSubcmdFromArgs(rawArgs), rawArgs)
+	if strings.TrimSpace(title) == "" {
+		title = toolName
+	}
+	kind, _ := classifyToolCall(toolName, nil)
+	allowed, asked := a.requestActionPermission(agentevents.ToolCall{
+		Name:     toolName,
+		Title:    title,
+		Kind:     kind,
+		RawInput: rawArgs,
+	}, i18n.T("agent.permission.policy_ask", toolName))
+	if !asked {
+		if a.logger != nil {
+			a.logger.Info("coder policy: 'ask' auto-approved (unattended, no permission dialog)",
+				zap.String("tool", toolName))
+		}
+		return false
+	}
+	if allowed {
+		return false
+	}
+	msg := i18n.T("agent.policy.ask_denied", title)
+	renderError(msg)
+	a.emitBlockedTool(toolName, rawArgs, msg)
+	a.cli.history = append(a.cli.history, models.Message{
+		Role: "user",
+		Content: fmt.Sprintf(
+			"SECURITY BLOCK: Action %q was DENIED by the user through the security-policy prompt. DO NOT retry it; choose a different approach or explain what you need.",
+			title),
+	})
+	return true
 }
