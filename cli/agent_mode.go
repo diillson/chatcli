@@ -2846,7 +2846,7 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 							// the historical contract holds — the operator opted
 							// into autonomy, so "ask" auto-approves. An explicit
 							// ActionDeny above still blocks either way.
-							if a.unattendedAskBlocked(tc.Name, tc.Args, renderError) {
+							if a.unattendedAskBlocked(tc.Name, tc.Args, pm, renderError) {
 								batchHasError = true
 								break
 							}

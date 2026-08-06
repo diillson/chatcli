@@ -13,6 +13,7 @@ import (
 	"sync"
 
 	"github.com/diillson/chatcli/cli/agentevents"
+	"github.com/diillson/chatcli/i18n"
 )
 
 // mcpSupportedVersions are the MCP revisions this server can speak, newest
@@ -619,54 +620,121 @@ func (m *MCP) permissionsFor(ctx context.Context) agentevents.PermissionRequeste
 	return &mcpElicitRequester{ctx: ctx, request: request}
 }
 
-// mcpElicitRequester implements agentevents.PermissionRequester over MCP
-// elicitation: the client renders a form with a single "approve" boolean.
-// Anything but an explicit accept+approve denies; a client answering
-// "method not found" maps to ErrPermissionUnsupported (legacy fallback).
+// mcpElicitRequester implements agentevents.PermissionRequester and
+// agentevents.PermissionDecider over MCP elicitation. The boolean surface
+// keeps today's single "approve" checkbox; the decision surface offers the
+// terminal's four-way vocabulary as a string enum when the caller can
+// persist the choice (OfferAlways). Anything but an explicit accept with a
+// recognized value denies; a client answering "method not found" maps to
+// ErrPermissionUnsupported (legacy fallback).
 type mcpElicitRequester struct {
 	ctx     context.Context
 	request func(ctx context.Context, method string, params interface{}) (json.RawMessage, error)
 }
 
+var _ agentevents.PermissionRequester = (*mcpElicitRequester)(nil)
+var _ agentevents.PermissionDecider = (*mcpElicitRequester)(nil)
+
+// mcpDecisionValues is the elicitation enum, ordered like the terminal
+// prompt's choices. Values match agentevents.PermissionDecision verbatim.
+var mcpDecisionValues = []string{
+	string(agentevents.PermissionAllowOnce),
+	string(agentevents.PermissionAllowAlways),
+	string(agentevents.PermissionDenyOnce),
+	string(agentevents.PermissionDenyAlways),
+}
+
 func (e *mcpElicitRequester) RequestPermission(tc agentevents.ToolCall, reason string) (bool, error) {
-	action := strings.TrimSpace(tc.Title)
+	d, err := e.RequestPermissionDecision(agentevents.PermissionRequest{Tool: tc, Reason: reason})
+	return d.Allowed(), err
+}
+
+func (e *mcpElicitRequester) RequestPermissionDecision(req agentevents.PermissionRequest) (agentevents.PermissionDecision, error) {
+	action := strings.TrimSpace(req.Tool.Title)
 	if action == "" {
-		action = tc.Name
+		action = req.Tool.Name
 	}
 	msg := "ChatCLI requests permission to run: " + action
-	if strings.TrimSpace(reason) != "" {
-		msg += "\n" + reason
+	if strings.TrimSpace(req.Reason) != "" {
+		msg += "\n" + req.Reason
 	}
-	raw, err := e.request(e.ctx, "elicitation/create", map[string]interface{}{
-		"message": msg,
-		"requestedSchema": map[string]interface{}{
+	schema := map[string]interface{}{
+		"type": "object",
+		"properties": map[string]interface{}{
+			"approve": map[string]interface{}{
+				"type":        "boolean",
+				"description": "Approve running this action?",
+			},
+		},
+		"required": []string{"approve"},
+	}
+	if req.OfferAlways {
+		schema = map[string]interface{}{
 			"type": "object",
 			"properties": map[string]interface{}{
-				"approve": map[string]interface{}{
-					"type":        "boolean",
-					"description": "Approve running this action?",
+				"decision": map[string]interface{}{
+					"type":        "string",
+					"description": i18n.T("mcp.permission.decision_desc"),
+					"enum":        mcpDecisionValues,
+					"enumNames": []string{
+						i18n.T("acp.permission.allow_once"),
+						i18n.T("acp.permission.allow_always"),
+						i18n.T("acp.permission.reject_once"),
+						i18n.T("acp.permission.reject_always"),
+					},
 				},
 			},
-			"required": []string{"approve"},
-		},
+			"required": []string{"decision"},
+		}
+	}
+	raw, err := e.request(e.ctx, "elicitation/create", map[string]interface{}{
+		"message":         msg,
+		"requestedSchema": schema,
 	})
 	if err != nil {
 		var rpcErr *RPCError
 		if errors.As(err, &rpcErr) && rpcErr.Code == CodeMethodNotFound {
-			return false, agentevents.ErrPermissionUnsupported
+			return agentevents.PermissionDenyOnce, agentevents.ErrPermissionUnsupported
 		}
-		return false, err
+		return agentevents.PermissionDenyOnce, err
 	}
 	var resp struct {
 		Action  string `json:"action"`
 		Content struct {
-			Approve bool `json:"approve"`
+			Approve  bool   `json:"approve"`
+			Decision string `json:"decision"`
 		} `json:"content"`
 	}
 	if err := json.Unmarshal(raw, &resp); err != nil {
-		return false, err
+		return agentevents.PermissionDenyOnce, err
 	}
-	return resp.Action == "accept" && resp.Content.Approve, nil
+	if resp.Action != "accept" {
+		return agentevents.PermissionDenyOnce, nil
+	}
+	// Lenient response handling: prefer the typed decision, fall back to the
+	// legacy approve boolean for clients that render the old form. Anything
+	// unrecognized denies fail-safe.
+	if v := strings.ToLower(strings.TrimSpace(resp.Content.Decision)); v != "" {
+		d := agentevents.PermissionDecision(v)
+		switch d {
+		case agentevents.PermissionAllowOnce, agentevents.PermissionAllowAlways,
+			agentevents.PermissionDenyOnce, agentevents.PermissionDenyAlways:
+			// A persistent choice the form never offered degrades to its
+			// once-only variant — the client cannot widen the caller's scope.
+			if !req.OfferAlways && d.Persistent() {
+				if d.Allowed() {
+					return agentevents.PermissionAllowOnce, nil
+				}
+				return agentevents.PermissionDenyOnce, nil
+			}
+			return d, nil
+		}
+		return agentevents.PermissionDenyOnce, nil
+	}
+	if resp.Content.Approve {
+		return agentevents.PermissionAllowOnce, nil
+	}
+	return agentevents.PermissionDenyOnce, nil
 }
 
 // sessionSearchActions returns the action-list suffix for the search/fork

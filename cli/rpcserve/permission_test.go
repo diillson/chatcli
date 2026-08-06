@@ -120,6 +120,249 @@ func TestMCPNoElicitationNoPermissions(t *testing.T) {
 	}
 }
 
+// TestACPSinkRequestDecision_FourOptionsWhenPersistable: with a persistable
+// policy pattern (OfferAlways), the dialog must reach terminal parity — the
+// four choices of the interactive security prompt, in the same order, using
+// the ACP option-kind vocabulary.
+func TestACPSinkRequestDecision_FourOptionsWhenPersistable(t *testing.T) {
+	a := NewACP(&fakeBackend{}, "test")
+	var captured map[string]interface{}
+	a.SetRequester(func(ctx context.Context, method string, params interface{}) (json.RawMessage, error) {
+		captured = params.(map[string]interface{})
+		return json.RawMessage(`{"outcome":{"outcome":"selected","optionId":"allow-always"}}`), nil
+	})
+	s := newACPSink(a, "sess", context.Background())
+	d, err := s.RequestPermissionDecision(agentevents.PermissionRequest{
+		Tool:        agentevents.ToolCall{ID: "c1", Name: "@coder", Title: "write: x"},
+		Reason:      "policy ask",
+		OfferAlways: true,
+	})
+	if err != nil {
+		t.Fatalf("RequestPermissionDecision: %v", err)
+	}
+	if d != agentevents.PermissionAllowAlways {
+		t.Fatalf("decision = %q, want allow_always", d)
+	}
+	opts, ok := captured["options"].([]map[string]interface{})
+	if !ok {
+		t.Fatalf("options missing or wrong type: %T", captured["options"])
+	}
+	wantKinds := []string{"allow_once", "allow_always", "reject_once", "reject_always"}
+	wantIDs := []string{"allow-once", "allow-always", "reject-once", "reject-always"}
+	if len(opts) != len(wantKinds) {
+		t.Fatalf("got %d options, want %d", len(opts), len(wantKinds))
+	}
+	for i, o := range opts {
+		if o["kind"] != wantKinds[i] || o["optionId"] != wantIDs[i] {
+			t.Errorf("option %d = %v/%v, want %s/%s", i, o["optionId"], o["kind"], wantIDs[i], wantKinds[i])
+		}
+		if name, _ := o["name"].(string); name == "" {
+			t.Errorf("option %d has empty name", i)
+		}
+	}
+}
+
+// TestACPSinkRequestDecision_TwoOptionsWhenNotPersistable: exec commands have
+// no persistable pattern (the terminal hides allow/deny-always for them on
+// purpose) — the dialog must NOT offer privilege the interactive flow denies.
+func TestACPSinkRequestDecision_TwoOptionsWhenNotPersistable(t *testing.T) {
+	a := NewACP(&fakeBackend{}, "test")
+	var captured map[string]interface{}
+	a.SetRequester(func(ctx context.Context, method string, params interface{}) (json.RawMessage, error) {
+		captured = params.(map[string]interface{})
+		return json.RawMessage(`{"outcome":{"outcome":"selected","optionId":"allow-once"}}`), nil
+	})
+	s := newACPSink(a, "sess", context.Background())
+	d, err := s.RequestPermissionDecision(agentevents.PermissionRequest{
+		Tool: agentevents.ToolCall{ID: "c1", Name: "@coder", Title: "exec: rm x"},
+	})
+	if err != nil || d != agentevents.PermissionAllowOnce {
+		t.Fatalf("decision = %q err = %v, want allow_once nil", d, err)
+	}
+	opts := captured["options"].([]map[string]interface{})
+	if len(opts) != 2 {
+		t.Fatalf("got %d options, want 2 (allow-once, reject-once)", len(opts))
+	}
+	if opts[0]["optionId"] != "allow-once" || opts[1]["optionId"] != "reject-once" {
+		t.Fatalf("unexpected option ids: %v, %v", opts[0]["optionId"], opts[1]["optionId"])
+	}
+}
+
+// TestACPSinkRequestDecision_Outcomes: every non-allow outcome must deny
+// fail-safe; reject-always must surface as deny_always so the loop can
+// persist the refusal.
+func TestACPSinkRequestDecision_Outcomes(t *testing.T) {
+	cases := []struct {
+		name string
+		raw  string
+		want agentevents.PermissionDecision
+	}{
+		{"reject always", `{"outcome":{"outcome":"selected","optionId":"reject-always"}}`, agentevents.PermissionDenyAlways},
+		{"reject once", `{"outcome":{"outcome":"selected","optionId":"reject-once"}}`, agentevents.PermissionDenyOnce},
+		{"cancelled", `{"outcome":{"outcome":"cancelled"}}`, agentevents.PermissionDenyOnce},
+		{"unknown option id", `{"outcome":{"outcome":"selected","optionId":"mystery"}}`, agentevents.PermissionDenyOnce},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			a := NewACP(&fakeBackend{}, "test")
+			a.SetRequester(func(ctx context.Context, method string, params interface{}) (json.RawMessage, error) {
+				return json.RawMessage(tc.raw), nil
+			})
+			s := newACPSink(a, "sess", context.Background())
+			d, err := s.RequestPermissionDecision(agentevents.PermissionRequest{
+				Tool:        agentevents.ToolCall{ID: "c1"},
+				OfferAlways: true,
+			})
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if d != tc.want {
+				t.Fatalf("decision = %q, want %q", d, tc.want)
+			}
+			if d.Allowed() {
+				t.Fatal("non-allow outcome must not report Allowed()")
+			}
+		})
+	}
+}
+
+// TestACPSinkRequestDecision_MethodNotFoundMapsUnsupported: the typed
+// sentinel contract must hold on the decision surface exactly as it does on
+// the boolean one — wrapped/minimal clients keep the legacy fallback.
+func TestACPSinkRequestDecision_MethodNotFoundMapsUnsupported(t *testing.T) {
+	a := NewACP(&fakeBackend{}, "test")
+	a.SetRequester(func(ctx context.Context, method string, params interface{}) (json.RawMessage, error) {
+		return nil, errf(CodeMethodNotFound, "no such method")
+	})
+	s := newACPSink(a, "sess", context.Background())
+	d, err := s.RequestPermissionDecision(agentevents.PermissionRequest{
+		Tool: agentevents.ToolCall{ID: "c1"}, OfferAlways: true,
+	})
+	if d.Allowed() {
+		t.Fatal("method-not-found must never allow")
+	}
+	if !errors.Is(err, agentevents.ErrPermissionUnsupported) {
+		t.Fatalf("err = %v, want ErrPermissionUnsupported", err)
+	}
+}
+
+// TestMCPElicitDecision_EnumSchema: with a persistable pattern the
+// elicitation form must offer the four-way decision enum, and the accepted
+// value must round-trip as the typed decision.
+func TestMCPElicitDecision_EnumSchema(t *testing.T) {
+	m := NewMCP(&fakeBackend{}, "chatcli", "test")
+	var captured map[string]interface{}
+	m.SetRequester(func(ctx context.Context, method string, params interface{}) (json.RawMessage, error) {
+		captured = params.(map[string]interface{})
+		return json.RawMessage(`{"action":"accept","content":{"decision":"allow_always"}}`), nil
+	})
+	m.initialize(json.RawMessage(`{"capabilities":{"elicitation":{}}}`))
+	pr := m.permissionsFor(context.Background())
+	dec, ok := pr.(agentevents.PermissionDecider)
+	if !ok {
+		t.Fatal("MCP elicitation requester must implement PermissionDecider")
+	}
+	d, err := dec.RequestPermissionDecision(agentevents.PermissionRequest{
+		Tool:        agentevents.ToolCall{Name: "@coder", Title: "write: x"},
+		Reason:      "policy ask",
+		OfferAlways: true,
+	})
+	if err != nil || d != agentevents.PermissionAllowAlways {
+		t.Fatalf("decision = %q err = %v, want allow_always nil", d, err)
+	}
+	schema := captured["requestedSchema"].(map[string]interface{})
+	props := schema["properties"].(map[string]interface{})
+	decision, ok := props["decision"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("decision property missing: %v", props)
+	}
+	enum, _ := decision["enum"].([]string)
+	want := []string{"allow_once", "allow_always", "deny_once", "deny_always"}
+	if len(enum) != len(want) {
+		t.Fatalf("enum = %v, want %v", enum, want)
+	}
+	for i := range want {
+		if enum[i] != want[i] {
+			t.Fatalf("enum = %v, want %v", enum, want)
+		}
+	}
+	req, _ := schema["required"].([]string)
+	if len(req) != 1 || req[0] != "decision" {
+		t.Fatalf("required = %v, want [decision]", req)
+	}
+}
+
+// TestMCPElicitDecision_LegacySchemaWithoutOfferAlways: without a persistable
+// pattern the wire must stay byte-compatible with today's boolean form —
+// no enum, no new required fields.
+func TestMCPElicitDecision_LegacySchemaWithoutOfferAlways(t *testing.T) {
+	m := NewMCP(&fakeBackend{}, "chatcli", "test")
+	var captured map[string]interface{}
+	m.SetRequester(func(ctx context.Context, method string, params interface{}) (json.RawMessage, error) {
+		captured = params.(map[string]interface{})
+		return json.RawMessage(`{"action":"accept","content":{"approve":true}}`), nil
+	})
+	m.initialize(json.RawMessage(`{"capabilities":{"elicitation":{}}}`))
+	dec := m.permissionsFor(context.Background()).(agentevents.PermissionDecider)
+	d, err := dec.RequestPermissionDecision(agentevents.PermissionRequest{
+		Tool: agentevents.ToolCall{Name: "@coder", Title: "exec: rm x"},
+	})
+	if err != nil || d != agentevents.PermissionAllowOnce {
+		t.Fatalf("decision = %q err = %v, want allow_once nil", d, err)
+	}
+	props := captured["requestedSchema"].(map[string]interface{})["properties"].(map[string]interface{})
+	if _, hasApprove := props["approve"]; !hasApprove {
+		t.Fatal("legacy path must keep the approve boolean schema")
+	}
+	if _, hasDecision := props["decision"]; hasDecision {
+		t.Fatal("legacy path must not grow a decision enum")
+	}
+}
+
+// TestMCPElicitDecision_Outcomes: decision-string handling must be lenient
+// (legacy approve fallback) and fail-safe (decline/cancel/garbage deny).
+func TestMCPElicitDecision_Outcomes(t *testing.T) {
+	cases := []struct {
+		name    string
+		raw     string
+		rpcErr  *RPCError
+		want    agentevents.PermissionDecision
+		wantUns bool
+	}{
+		{"deny always", `{"action":"accept","content":{"decision":"deny_always"}}`, nil, agentevents.PermissionDenyAlways, false},
+		{"deny once", `{"action":"accept","content":{"decision":"deny_once"}}`, nil, agentevents.PermissionDenyOnce, false},
+		{"allow once", `{"action":"accept","content":{"decision":"allow_once"}}`, nil, agentevents.PermissionAllowOnce, false},
+		{"legacy approve true fallback", `{"action":"accept","content":{"approve":true}}`, nil, agentevents.PermissionAllowOnce, false},
+		{"legacy approve false fallback", `{"action":"accept","content":{"approve":false}}`, nil, agentevents.PermissionDenyOnce, false},
+		{"garbage decision denies", `{"action":"accept","content":{"decision":"sudo_everything"}}`, nil, agentevents.PermissionDenyOnce, false},
+		{"decline", `{"action":"decline"}`, nil, agentevents.PermissionDenyOnce, false},
+		{"cancel", `{"action":"cancel"}`, nil, agentevents.PermissionDenyOnce, false},
+		{"method not found", ``, errf(CodeMethodNotFound, "nope"), agentevents.PermissionDenyOnce, true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			m := NewMCP(&fakeBackend{}, "chatcli", "test")
+			m.SetRequester(func(ctx context.Context, method string, params interface{}) (json.RawMessage, error) {
+				if tc.rpcErr != nil {
+					return nil, tc.rpcErr
+				}
+				return json.RawMessage(tc.raw), nil
+			})
+			m.initialize(json.RawMessage(`{"capabilities":{"elicitation":{}}}`))
+			dec := m.permissionsFor(context.Background()).(agentevents.PermissionDecider)
+			d, err := dec.RequestPermissionDecision(agentevents.PermissionRequest{
+				Tool: agentevents.ToolCall{Name: "@coder"}, OfferAlways: true,
+			})
+			if d != tc.want {
+				t.Fatalf("decision = %q, want %q", d, tc.want)
+			}
+			if tc.wantUns != errors.Is(err, agentevents.ErrPermissionUnsupported) {
+				t.Fatalf("err = %v, wantUnsupported=%v", err, tc.wantUns)
+			}
+		})
+	}
+}
+
 // TestMCPElicitOutcomes: decline/cancel/accept-without-approve deny;
 // -32601 maps to the unsupported sentinel (legacy fallback upstream).
 func TestMCPElicitOutcomes(t *testing.T) {
