@@ -426,15 +426,16 @@ func (m *MCP) toolDefinitions() []map[string]interface{} {
 	})
 	if _, ok := m.backend.(SessionBackend); ok {
 		props := map[string]interface{}{
-			"action":  textArg("One of: save, load, attach, detach, status, list, delete, clear, active" + m.sessionSearchActions() + "."),
+			"action":  textArg("One of: save, load, attach, detach, status, list, delete, clear, active, policy_mode" + m.sessionSearchActions() + "."),
 			"session": textArg("Live session id (the ask_chatcli session parameter; default \"mcp\"). Used by save, load, attach, detach, status, clear."),
-			"name":    textArg("Saved-session name in the store. Required for load, attach and delete; defaults to the session id for save. For fork: the SOURCE saved session."),
+			"name":    textArg("Saved-session name in the store. Required for load, attach and delete; defaults to the session id for save. For fork: the SOURCE saved session. For policy_mode: auto | interactive | status."),
 		}
 		desc := "Manage chat sessions: persist and restore the server-side conversations behind ask_chatcli's session parameter, and administer the saved-session store shared with ChatCLI's /session command. " +
 			"Actions: save (persist a live session's history under a name and bind to it), load (restore a saved session into a live session id, continuing that conversation with write-through), " +
 			"attach (bind a live session to a saved session — created on first turn if missing — so turns write through and writes from other surfaces are adopted), " +
 			"detach (drop the binding), status (binding and message count), " +
-			"list (saved sessions in the store), delete (remove a saved session), clear (reset a live session), active (live session ids with message counts)."
+			"list (saved sessions in the store), delete (remove a saved session), clear (reset a live session), active (live session ids with message counts), " +
+			"policy_mode (session security-policy mode for agent/coder runs: name=auto makes coder policy ask rules auto-approve, name=interactive restores prompting, empty name reports the current mode; deny rules and safety-immune operations always keep gating)."
 		if _, ok := m.backend.(SessionSearchBackend); ok {
 			props["query"] = textArg("Full-text query across all saved sessions. Required for search.")
 			props["to"] = textArg("Target name for fork (the new saved-session copy). Required for fork.")
@@ -574,7 +575,7 @@ func (m *MCP) callTool(ctx context.Context, params json.RawMessage) (interface{}
 	case "manage_session":
 		if sb, ok := m.backend.(SessionBackend); ok {
 			if a.Action == "" {
-				return nil, errf(CodeInvalidParams, "action is required (save, load, attach, detach, status, list, delete, clear, active%s)", m.sessionSearchActions())
+				return nil, errf(CodeInvalidParams, "action is required (save, load, attach, detach, status, list, delete, clear, active, policy_mode%s)", m.sessionSearchActions())
 			}
 			if ssb, ok := m.backend.(SessionSearchBackend); ok {
 				switch a.Action {

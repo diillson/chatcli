@@ -2829,6 +2829,17 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 						} else {
 							a.lastPolicyMatch = nil
 						}
+						// Session automode (/policy mode auto): "ask" verdicts
+						// auto-approve. Deny rules were already resolved above
+						// ask by the policy check, and safety-immune operations
+						// never take this shortcut — they keep prompting.
+						if action == coder.ActionAsk && a.askAutoApproved(tc.Name, tc.Args) {
+							if a.logger != nil {
+								a.logger.Info("coder policy: 'ask' auto-approved (session automode)",
+									zap.String("tool", tc.Name))
+							}
+							action = coder.ActionAllow
+						}
 						if action == coder.ActionDeny {
 							msg := "AÇÃO BLOQUEADA (Regra de Segurança)"
 							renderError(msg)

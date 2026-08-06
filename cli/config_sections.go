@@ -1585,6 +1585,7 @@ func (cli *ChatCLI) renderCoderPolicy(p string) {
 			cli.agentMode.lastPolicyMatch.Action)
 	}
 
+	kv(p, i18n.T("cfg.kv.policy_session_mode"), cli.PolicyModeLabel())
 	kv(p, i18n.T("cfg.kv.active_policy"), policyPath)
 	kv(p, i18n.T("cfg.kv.local_override"), localPath)
 	kv(p, i18n.T("cfg.kv.local_merge"), localMerge)

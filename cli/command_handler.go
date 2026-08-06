@@ -248,6 +248,7 @@ func (ch *CommandHandler) buildRoutes() {
 		{"/cancel-park", false, func(_ context.Context, in string) bool { c.handleCancelParkCommand(in); return false }},
 		{"/channel", false, func(ctx context.Context, in string) bool { c.handleChannelCommand(ctx, in); return false }},
 		{"/websearch", false, func(_ context.Context, in string) bool { c.handleWebSearchCommand(in); return false }},
+		{"/policy", true, func(_ context.Context, in string) bool { c.handlePolicyCommand(in); return false }},
 		{"/update", true, func(ctx context.Context, in string) bool { c.handleUpdateCommand(ctx, in); return false }},
 	}
 }
