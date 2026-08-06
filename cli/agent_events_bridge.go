@@ -402,7 +402,7 @@ func (a *AgentMode) unattendedAskBlocked(toolName, rawArgs string, pm *coder.Pol
 	if errors.Is(reqErr, agentevents.ErrPermissionTimeout) {
 		msg := i18n.T("agent.policy.ask_timeout", title)
 		feedback := fmt.Sprintf(
-			"SECURITY BLOCK: The permission request for %q got NO RESPONSE from the user (the approval dialog timed out — the client may not display permission dialogs). The action was NOT executed. DO NOT retry it; continue without it, or tell the user their MCP client did not surface the approval dialog and that they can set CHATCLI_MCP_ELICITATION=off to restore unattended auto-approval.",
+			"SECURITY BLOCK: The permission request for %q got NO RESPONSE from the user (the approval dialog timed out — the client may not display permission dialogs). The action was NOT executed. DO NOT retry it; continue without it, or tell the user their client did not surface the approval dialog and that session policy automode (the /policy command, or the manage_session policy_mode action over MCP) restores unattended auto-approval.",
 			title)
 		renderError(msg)
 		a.emitBlockedTool(toolName, rawArgs, msg)

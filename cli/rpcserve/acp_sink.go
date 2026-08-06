@@ -22,6 +22,7 @@ import (
 	"errors"
 	"strings"
 	"sync"
+	"time"
 	"unicode/utf8"
 
 	"github.com/diillson/chatcli/cli/agentevents"
@@ -40,13 +41,24 @@ type acpSink struct {
 	sessionID string
 	runCtx    context.Context
 
+	// permTimeout bounds each session/request_permission round-trip; 0 waits
+	// until runCtx dies (legacy). Shares the CHATCLI_MCP_PERMISSION_TIMEOUT
+	// knob with the MCP elicitation bridge — like CHATCLI_MCP_TOOLS, the env
+	// governs both RPC surfaces.
+	permTimeout time.Duration
+
 	mu         sync.Mutex
 	open       map[string]bool // tool_call ids announced and not yet closed
 	sawMessage bool
+	// permDead flips after a permission timeout: the client demonstrably does
+	// not answer the dialog, so later requests in this run fail fast instead
+	// of stalling the loop for another timeout per gated action.
+	permDead bool
 }
 
 func newACPSink(a *ACP, sessionID string, runCtx context.Context) *acpSink {
-	return &acpSink{acp: a, sessionID: sessionID, runCtx: runCtx, open: map[string]bool{}}
+	return &acpSink{acp: a, sessionID: sessionID, runCtx: runCtx, open: map[string]bool{},
+		permTimeout: mcpPermissionTimeout()}
 }
 
 var _ agentevents.Sink = (*acpSink)(nil)
@@ -177,11 +189,22 @@ func (s *acpSink) RequestPermissionDecision(req agentevents.PermissionRequest) (
 			map[string]interface{}{"optionId": "reject-always", "name": i18n.T("acp.permission.reject_always"), "kind": "reject_always"})
 	}
 
-	raw, err := s.acp.request(s.runCtx, "session/request_permission", map[string]interface{}{
+	s.mu.Lock()
+	dead := s.permDead
+	s.mu.Unlock()
+	if dead {
+		return agentevents.PermissionDenyOnce, agentevents.ErrPermissionTimeout
+	}
+	ctx, cancel := s.runCtx, func() {}
+	if s.permTimeout > 0 {
+		ctx, cancel = context.WithTimeout(s.runCtx, s.permTimeout)
+	}
+	raw, err := s.acp.request(ctx, "session/request_permission", map[string]interface{}{
 		"sessionId": s.sessionID,
 		"toolCall":  toolCall,
 		"options":   options,
 	})
+	cancel()
 	if err != nil {
 		// Minimal/wrapped clients may not implement the method at all;
 		// surface the typed sentinel so the loop applies its unattended
@@ -189,6 +212,15 @@ func (s *acpSink) RequestPermissionDecision(req agentevents.PermissionRequest) (
 		var rpcErr *RPCError
 		if errors.As(err, &rpcErr) && rpcErr.Code == CodeMethodNotFound {
 			return agentevents.PermissionDenyOnce, agentevents.ErrPermissionUnsupported
+		}
+		// Our own bound expired while the run is still alive: the dialog is
+		// unanswered (likely never rendered). Deny fail-safe and mark it dead
+		// so the run doesn't stall again on every gated action.
+		if errors.Is(err, context.DeadlineExceeded) && s.runCtx.Err() == nil {
+			s.mu.Lock()
+			s.permDead = true
+			s.mu.Unlock()
+			return agentevents.PermissionDenyOnce, agentevents.ErrPermissionTimeout
 		}
 		return agentevents.PermissionDenyOnce, err
 	}

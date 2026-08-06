@@ -231,7 +231,7 @@ var envDefaults = map[string]envDefault{
 	"CHATCLI_MCP_DYNAMIC_TOOLS":             {Value: "true", IsBool: true, Source: "mcp.dynamicToolRefreshEnabled — refresh on tools/list_changed"},
 	"CHATCLI_MCP_DANGER":                    {Value: "allow", Source: "cmd/rpcserve.go (mcp-server unattended danger policy: allow|block)"},
 	"CHATCLI_MCP_ELICITATION":               {Value: "on", Source: "cli/rpcserve/mcp.go (permission dialogs via elicitation/create: on|off; off restores the legacy unattended contract)"},
-	"CHATCLI_MCP_PERMISSION_TIMEOUT":        {Value: "120s", Source: "cli/rpcserve/mcp.go (max wait for the client's permission dialog; duration or seconds; 0|off waits until the call dies)"},
+	"CHATCLI_MCP_PERMISSION_TIMEOUT":        {Value: "600s", Source: "cli/rpcserve (max wait for the client's permission dialog, MCP elicitation and ACP request_permission; duration or seconds; 0|off waits until the call dies; tune below MCP clients' own tools/call timeout)"},
 	"CHATCLI_MCP_RESOURCES":                 {Value: "on", Source: "cli/rpc_support_resources.go (chatcli:// read-only resources: on|off)"},
 	"CHATCLI_MCP_MAX_HISTORY":               {Value: "0", Source: "cmd/rpcserve.go (0 = token-aware compaction bounds the history)"},
 	"CHATCLI_MCP_SESSION_AUTOSAVE":          {Value: "true", IsBool: true, Source: "cmd/rpcserve.go (persist live MCP sessions as mcp-<session>; unset follows CHATCLI_SESSION_AUTOSAVE)"},

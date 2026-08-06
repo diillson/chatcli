@@ -631,15 +631,21 @@ func (m *MCP) permissionsFor(ctx context.Context) agentevents.PermissionRequeste
 	return &mcpElicitRequester{ctx: ctx, request: request, timeout: mcpPermissionTimeout()}
 }
 
-// mcpPermissionTimeoutDefault bounds how long one elicitation round-trip may
-// wait for the human. It must stay comfortably under common MCP client
-// tools/call timeouts (typically 2–5 minutes): if the client kills the call
-// first, the whole run dies with it — the hang this bound exists to prevent.
-const mcpPermissionTimeoutDefault = 120 * time.Second
+// mcpPermissionTimeoutDefault bounds how long one permission round-trip may
+// wait for the human — generous enough to notice a dialog and decide, while
+// still guaranteeing the run never hangs forever on a client that swallowed
+// the request. Caveat for MCP clients that enforce their own tools/call
+// timeout shorter than this: the client kills the whole call first, so tune
+// CHATCLI_MCP_PERMISSION_TIMEOUT below the client's limit to keep the run
+// alive. ACP clients (IDEs) hold the prompt turn open, so the long default
+// is safe there.
+const mcpPermissionTimeoutDefault = 600 * time.Second
 
 // mcpPermissionTimeout resolves CHATCLI_MCP_PERMISSION_TIMEOUT: a Go
 // duration ("90s", "2m") or plain seconds; "0"/"off" disable the bound
 // (wait until the run's context dies). Unset or invalid keeps the default.
+// Like CHATCLI_MCP_TOOLS, the knob governs both RPC surfaces: MCP
+// elicitation/create and ACP session/request_permission (acpSink).
 func mcpPermissionTimeout() time.Duration {
 	v := strings.TrimSpace(os.Getenv("CHATCLI_MCP_PERMISSION_TIMEOUT"))
 	if v == "" {
