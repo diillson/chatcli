@@ -384,6 +384,26 @@ func wellKnownCandidates(issuer string) []string {
 	return out
 }
 
+// loginClientID resolves the client_id for one interactive login. When the AS
+// offers Dynamic Client Registration, it ALWAYS registers a fresh client:
+// dynamic registrations can be expired or purged server-side at any time
+// (observed on AWS signin — the authorize page then fails with an
+// invalid-redirect_uri error AFTER the user logs in, and every retry reuses
+// the same dead client, a loop with no recovery path). Registration is cheap
+// for public PKCE clients and an interactive login is rare, so fresh always
+// wins over stale. Without a registration endpoint the stored client is a
+// manual registration: reuse it when it was registered against this exact
+// redirect_uri, and fail actionably otherwise.
+func loginClientID(ctx context.Context, disc *oauthDiscoverer, asMeta *authServerMetadata, meta *oauthServerMeta, redirectURI, scope string) (string, error) {
+	if strings.TrimSpace(asMeta.RegistrationEndpoint) != "" {
+		return disc.registerClient(ctx, asMeta.RegistrationEndpoint, redirectURI, scope)
+	}
+	if meta != nil && meta.ClientID != "" && meta.RedirectURI == redirectURI {
+		return meta.ClientID, nil
+	}
+	return "", fmt.Errorf("%s", i18n.T("mcp.oauth.no_registration_endpoint"))
+}
+
 // registerClient performs RFC 7591 Dynamic Client Registration against the
 // authorization server, returning the issued client_id. Used only when we have
 // no client_id for the server yet.
@@ -482,17 +502,9 @@ func LoginServer(ctx context.Context, serverName, serverURL string, ch oauthChal
 	}
 	defer listener.Close() //nolint:errcheck // best-effort; server.Shutdown owns the listener
 
-	// Ensure we have a client_id. Reuse the stored one only if it was
-	// registered against the same redirect_uri; otherwise register fresh.
-	clientID := ""
-	if meta != nil && meta.ClientID != "" && meta.RedirectURI == redirectURI {
-		clientID = meta.ClientID
-	}
-	if clientID == "" {
-		clientID, err = disc.registerClient(ctx, asMeta.RegistrationEndpoint, redirectURI, scope)
-		if err != nil {
-			return err
-		}
+	clientID, err := loginClientID(ctx, disc, asMeta, meta, redirectURI, scope)
+	if err != nil {
+		return err
 	}
 
 	code, verifier, err := runLoopbackAuth(ctx, listener, loopbackAuthParams{
