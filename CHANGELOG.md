@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.181.0](https://github.com/diillson/chatcli/compare/v1.180.0...v1.181.0) (2026-08-06)
+
+
+### Features
+
+* **acp:** terminal parity in client permission dialogs and session policy automode ([c693e18](https://github.com/diillson/chatcli/commit/c693e18ec5079a0b28397e4739703e10a60d328d))
+
 ## [1.180.0](https://github.com/diillson/chatcli/compare/v1.179.0...v1.180.0) (2026-08-05)
 
 
