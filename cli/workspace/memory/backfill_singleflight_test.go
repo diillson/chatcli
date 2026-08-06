@@ -64,8 +64,11 @@ func TestVectorBackfillIsSingleFlight(t *testing.T) {
 
 	// Wait for the detached backfill to finish persisting before the test's
 	// TempDir cleanup runs (the goroutine outlives the retrieval on purpose).
+	// The single-flight flag clears only after BackfillFacts returns — i.e.
+	// after persistence — so waiting on Count alone races the final file
+	// write against TempDir's RemoveAll.
 	deadline := time.Now().Add(3 * time.Second)
-	for time.Now().Before(deadline) && v.Count() < 2 {
+	for time.Now().Before(deadline) && (m.backfillInFlight.Load() || v.Count() < 2) {
 		time.Sleep(10 * time.Millisecond)
 	}
 
