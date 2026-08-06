@@ -199,3 +199,62 @@ func TestMCPRefreshFunc(t *testing.T) {
 		t.Errorf("expiry not set")
 	}
 }
+
+// TestLoginClientID_AlwaysRegistersFreshWhenDCRAvailable: a stored dynamic
+// client registration can be expired or purged by the AS at any time
+// (observed on AWS signin: authorize with the stale client_id fails on the
+// AS's own page with an invalid-redirect_uri error AFTER the user logs in,
+// and every retry reuses the same dead client — no recovery path). When the
+// AS offers a registration endpoint, an interactive login must therefore
+// ALWAYS register a fresh client, even when the stored one matches the
+// redirect_uri.
+func TestLoginClientID_AlwaysRegistersFreshWhenDCRAvailable(t *testing.T) {
+	registered := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		registered++
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusCreated)
+		_, _ = w.Write([]byte(`{"client_id":"fresh-123"}`))
+	}))
+	defer srv.Close()
+
+	disc := newOAuthDiscoverer(zap.NewNop())
+	asMeta := &authServerMetadata{RegistrationEndpoint: srv.URL}
+	stored := &oauthServerMeta{ClientID: "stale-999", RedirectURI: "http://127.0.0.1:8765/callback"}
+
+	id, err := loginClientID(context.Background(), disc, asMeta, stored, "http://127.0.0.1:8765/callback", "scope")
+	if err != nil {
+		t.Fatalf("loginClientID: %v", err)
+	}
+	if id != "fresh-123" {
+		t.Fatalf("client id = %q, want fresh-123 (stale stored registration must never be reused when DCR is available)", id)
+	}
+	if registered != 1 {
+		t.Fatalf("registration endpoint hit %d times, want 1", registered)
+	}
+}
+
+// TestLoginClientID_ReusesStoredWithoutDCR: with no registration endpoint the
+// stored client is a manual registration — reuse it when the redirect_uri
+// matches, and fail with the actionable no-DCR error when it does not.
+func TestLoginClientID_ReusesStoredWithoutDCR(t *testing.T) {
+	disc := newOAuthDiscoverer(zap.NewNop())
+	asMeta := &authServerMetadata{} // no RegistrationEndpoint
+
+	stored := &oauthServerMeta{ClientID: "manual-42", RedirectURI: "http://127.0.0.1:8765/callback"}
+	id, err := loginClientID(context.Background(), disc, asMeta, stored, "http://127.0.0.1:8765/callback", "")
+	if err != nil || id != "manual-42" {
+		t.Fatalf("id=%q err=%v, want manual-42 nil (manual client must be reused)", id, err)
+	}
+
+	// redirect mismatch (e.g. fixed port busy, ephemeral fallback): the manual
+	// client cannot serve this redirect and there is no DCR — actionable error.
+	if _, err := loginClientID(context.Background(), disc, asMeta, stored, "http://127.0.0.1:54321/callback", ""); err == nil {
+		t.Fatal("redirect mismatch without DCR must error, not silently reuse a client bound to another redirect_uri")
+	}
+
+	// nothing stored and no DCR: same actionable error.
+	if _, err := loginClientID(context.Background(), disc, asMeta, nil, "http://127.0.0.1:8765/callback", ""); err == nil {
+		t.Fatal("no stored client and no DCR must error")
+	}
+}
