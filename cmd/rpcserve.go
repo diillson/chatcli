@@ -515,8 +515,35 @@ func (b *rpcBackend) CallMCPProxyTool(ctx context.Context, name string, args jso
 // them to the persistent saved-session store shared with the REPL /session
 // command, so an MCP client can save a conversation and pick it up later —
 // including from an interactive chatcli.
+// managePolicyMode implements the manage_session policy_mode action: the
+// session-scoped security-policy mode (the /policy command). Deny rules,
+// the command validator and safety-immune operations keep gating in
+// automode; only "ask" verdicts auto-approve.
+func (b *rpcBackend) managePolicyMode(name string) (string, error) {
+	if b.cli == nil {
+		return "", fmt.Errorf("policy_mode requires the full ChatCLI runtime (degraded server mode)")
+	}
+	switch strings.ToLower(strings.TrimSpace(name)) {
+	case "", "status":
+		// fall through to the status report below
+	case "auto", "automode", "on":
+		b.cli.SetPolicyAutoMode(true)
+	case "interactive", "ask", "manual", "off":
+		b.cli.SetPolicyAutoMode(false)
+	default:
+		return "", fmt.Errorf("unknown policy mode %q — use auto or interactive", name)
+	}
+	if b.cli.PolicyAutoMode() {
+		return "policy mode: auto — coder policy ask rules auto-approve; deny rules and safety-immune operations still gate. Not persisted; new sessions start interactive.", nil
+	}
+	return "policy mode: interactive — coder policy ask rules prompt for approval.", nil
+}
+
 func (b *rpcBackend) ManageSession(_ context.Context, action, session, name string) (string, error) {
 	switch action {
+	case "policy_mode":
+		return b.managePolicyMode(name)
+
 	case "active":
 		b.mu.Lock()
 		ids := make([]string, 0, len(b.sessions))

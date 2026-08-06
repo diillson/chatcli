@@ -23,6 +23,7 @@ import (
 
 	"github.com/diillson/chatcli/cli/palette"
 	"github.com/diillson/chatcli/i18n"
+	"go.uber.org/zap"
 )
 
 // ACPCommandInfo describes one slash command advertised to ACP clients.
@@ -51,7 +52,7 @@ var acpCommandAllow = map[string]bool{
 	"/config": true, "/session": true, "/newsession": true, "/compact": true,
 	"/export": true, "/context": true, "/memory": true,
 	"/thinking": true, "/refine": true, "/verify": true, "/reflect": true, "/moa": true,
-	"/mcp": true, "/websearch": true, "/skill": true, "/plugin": true,
+	"/mcp": true, "/websearch": true, "/skill": true, "/plugin": true, "/policy": true,
 	"/cost": true, "/metrics": true, "/ratelimit": true,
 	"/version": true, "/help": true, "/agents": true, "/board": true, "/mail": true,
 }
@@ -69,7 +70,7 @@ func acpModeCommands() []ACPCommandInfo {
 
 // ListACPCommands returns the commands advertised to ACP clients: the three
 // mode switches plus the headless allowlist, with the palette registry's
-// localized summaries.
+// localized summaries and each command's real subcommands as its input hint.
 func (cli *ChatCLI) ListACPCommands() []ACPCommandInfo {
 	modes := acpModeCommands()
 	out := make([]ACPCommandInfo, 0, len(acpCommandAllow)+len(modes))
@@ -81,10 +82,49 @@ func (cli *ChatCLI) ListACPCommands() []ACPCommandInfo {
 		out = append(out, ACPCommandInfo{
 			Name:        rc.Name[1:], // ACP command names carry no slash
 			Description: rc.Summary(),
-			InputHint:   i18n.T("acp.command.args_hint"),
+			InputHint:   cli.acpCommandHint(rc.Name),
 		})
 	}
 	return out
+}
+
+// acpHintMaxOptions bounds how many next-token options one input hint lists:
+// the ACP hint renders as a single placeholder line in the IDE input, so a
+// long enumeration would be truncated by the client anyway.
+const acpHintMaxOptions = 8
+
+// acpCommandHint derives a command's input hint from the live inline
+// completer (via the palette's suggestion bridge), so the IDE shows the
+// command's REAL subcommands instead of a generic args placeholder. The ACP
+// protocol has no structured completion past the command name — this hint
+// line is the only surface available, so make it count. Falls back to the
+// generic hint when the completer offers nothing concrete (or panics: some
+// suggesters touch optional session state that a headless server may lack).
+func (cli *ChatCLI) acpCommandHint(name string) (hint string) {
+	hint = i18n.T("acp.command.args_hint")
+	defer func() {
+		if rec := recover(); rec != nil && cli.logger != nil {
+			cli.logger.Debug("acp command hint suggester panicked; using generic hint",
+				zap.String("command", name), zap.Any("panic", rec))
+		}
+	}()
+	tokens := make([]string, 0, acpHintMaxOptions)
+	for _, s := range cli.paletteSuggest(name + " ") {
+		t := strings.TrimSpace(s.Text)
+		// Skip self-referential root entries and flag-noise-free empties.
+		if t == "" || strings.HasPrefix(t, "/") {
+			continue
+		}
+		tokens = append(tokens, t)
+		if len(tokens) == acpHintMaxOptions {
+			tokens = append(tokens, "…")
+			break
+		}
+	}
+	if len(tokens) == 0 {
+		return hint
+	}
+	return strings.Join(tokens, " | ")
 }
 
 // IsACPCommandAllowed reports whether a slash token (with leading slash) is

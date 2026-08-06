@@ -113,6 +113,7 @@ var rootCommands = []RootCommand{
 	{"/run", CatAgent, "complete.root.run"},
 	{"/plan", CatAgent, "complete.root.plan"},
 	{"/worktree", CatAgent, "complete.root.worktree"},
+	{"/policy", CatAgent, "complete.root.policy"},
 
 	// ── Quality ─────────────────────────────────────────────────────────
 	{"/thinking", CatQuality, "complete.root.thinking"},

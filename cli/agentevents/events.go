@@ -149,3 +149,52 @@ type Sink interface {
 type PermissionRequester interface {
 	RequestPermission(tc ToolCall, reason string) (bool, error)
 }
+
+// PermissionDecision is the outcome of a permission dialog, mirroring the
+// terminal security prompt's vocabulary so protocol clients reach full
+// parity with the interactive flow: the "always" variants carry the user's
+// intent to persist the choice as a policy rule.
+type PermissionDecision string
+
+const (
+	PermissionAllowOnce   PermissionDecision = "allow_once"
+	PermissionAllowAlways PermissionDecision = "allow_always"
+	PermissionDenyOnce    PermissionDecision = "deny_once"
+	PermissionDenyAlways  PermissionDecision = "deny_always"
+)
+
+// Allowed reports whether the decision permits running the action.
+func (d PermissionDecision) Allowed() bool {
+	return d == PermissionAllowOnce || d == PermissionAllowAlways
+}
+
+// Persistent reports whether the decision should be recorded as a policy
+// rule so future matches never reach a dialog.
+func (d PermissionDecision) Persistent() bool {
+	return d == PermissionAllowAlways || d == PermissionDenyAlways
+}
+
+// PermissionRequest describes one permission round-trip. A struct (rather
+// than positional arguments) so the surface can grow without breaking
+// implementations.
+type PermissionRequest struct {
+	// Tool is the gated call, already announced to the client when possible
+	// so the dialog can anchor to the same tool-call id.
+	Tool ToolCall
+	// Reason is the human-readable explanation shown alongside the dialog.
+	Reason string
+	// OfferAlways adds the persistent allow/deny choices to the dialog.
+	// Callers set it only when a policy pattern exists to persist the
+	// decision against — exec commands, by design, never get one.
+	OfferAlways bool
+}
+
+// PermissionDecider is the four-way refinement of PermissionRequester.
+// Implementations that support the full terminal vocabulary (allow/deny,
+// once/always) implement BOTH interfaces; the loop prefers this one and
+// falls back to the boolean surface. Error contracts are identical:
+// ErrPermissionUnsupported means "no dialog exists" (legacy fallback
+// applies); any other error denies fail-safe.
+type PermissionDecider interface {
+	RequestPermissionDecision(req PermissionRequest) (PermissionDecision, error)
+}

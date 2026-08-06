@@ -25,6 +25,7 @@ import (
 
 	"github.com/diillson/chatcli/cli/agent"
 	"github.com/diillson/chatcli/cli/agentevents"
+	"github.com/diillson/chatcli/cli/coder"
 	"github.com/diillson/chatcli/cli/plugins"
 	"github.com/diillson/chatcli/i18n"
 	"github.com/diillson/chatcli/models"
@@ -280,63 +281,112 @@ func (a *AgentMode) executeCommandBlocksUnattended(ctx context.Context, blocks [
 	return strings.TrimSpace(fb.String())
 }
 
-// requestActionPermission asks the run's PermissionRequester to approve a
-// gated action: the sink's own capability when it has one (ACP), else the
-// per-run requester installed on the ChatCLI (MCP elicitation bridge). tc
-// should be the already announced tool call when one exists, so the client
-// can anchor its dialog to the same toolCallId. ok reports whether a
-// requester was consulted; allowed is only meaningful when ok is true.
-// Denials and transport errors both come back allowed=false — fail-safe. A
-// client that reports the round-trip unsupported (ErrPermissionUnsupported)
-// counts as NOT consulted: no dialog exists, so callers apply the same
-// contract as runs without a requester.
-func (a *AgentMode) requestActionPermission(tc agentevents.ToolCall, reason string) (allowed, ok bool) {
-	pr, has := a.events.(agentevents.PermissionRequester)
-	if !has && a.cli != nil && a.cli.rpcPermissions != nil {
-		pr, has = a.cli.rpcPermissions, true
+// permissionSource resolves the run's permission surface with the historical
+// precedence — the sink's own capability first (ACP), else the per-run
+// requester installed on the ChatCLI (MCP elicitation bridge). A source
+// counts if it implements EITHER the four-way PermissionDecider or the
+// boolean PermissionRequester; requestActionDecision prefers the decider and
+// maps a boolean answer to the once-only decisions.
+func (a *AgentMode) permissionSource() (interface{}, bool) {
+	switch a.events.(type) {
+	case agentevents.PermissionDecider, agentevents.PermissionRequester:
+		return a.events, true
 	}
+	if a.cli != nil && a.cli.rpcPermissions != nil {
+		return a.cli.rpcPermissions, true
+	}
+	return nil, false
+}
+
+// requestActionDecision asks the run's permission surface to resolve a gated
+// action with the terminal prompt's four-way vocabulary. req.Tool should be
+// the already announced tool call when one exists, so the client can anchor
+// its dialog to the same toolCallId. ok reports whether a dialog was
+// consulted; the decision is only meaningful when ok is true. Transport
+// errors deny fail-safe (deny_once, consulted). A client that reports the
+// round-trip unsupported (ErrPermissionUnsupported) counts as NOT consulted:
+// no dialog exists, so callers apply the same contract as runs without a
+// requester.
+func (a *AgentMode) requestActionDecision(req agentevents.PermissionRequest) (decision agentevents.PermissionDecision, ok bool) {
+	pr, has := a.permissionSource()
 	if !has {
-		return false, false
+		return agentevents.PermissionDenyOnce, false
 	}
-	if tc.ID == "" {
-		tc.ID = a.nextEventCallID()
+	if req.Tool.ID == "" {
+		req.Tool.ID = a.nextEventCallID()
 	}
-	tc.Status = agentevents.StatusPending
-	granted, err := pr.RequestPermission(tc, reason)
+	req.Tool.Status = agentevents.StatusPending
+
+	var d agentevents.PermissionDecision
+	var err error
+	switch impl := pr.(type) {
+	case agentevents.PermissionDecider:
+		d, err = impl.RequestPermissionDecision(req)
+	case agentevents.PermissionRequester:
+		req.OfferAlways = false // boolean surface cannot express "always"
+		var granted bool
+		granted, err = impl.RequestPermission(req.Tool, req.Reason)
+		if granted {
+			d = agentevents.PermissionAllowOnce
+		} else {
+			d = agentevents.PermissionDenyOnce
+		}
+	default:
+		return agentevents.PermissionDenyOnce, false
+	}
 	if err != nil {
 		if errors.Is(err, agentevents.ErrPermissionUnsupported) {
 			if a.logger != nil {
 				a.logger.Info("client does not support permission requests; applying unattended fallback")
 			}
-			return false, false
+			return agentevents.PermissionDenyOnce, false
 		}
 		if a.logger != nil {
 			a.logger.Warn("permission request failed; denying action", zap.Error(err))
 		}
-		return false, true
+		return agentevents.PermissionDenyOnce, true
 	}
-	return granted, true
+	return d, true
+}
+
+// requestActionPermission is the boolean view over requestActionDecision,
+// kept for callers with once-only semantics (the dangerous-exec guard).
+func (a *AgentMode) requestActionPermission(tc agentevents.ToolCall, reason string) (allowed, ok bool) {
+	d, ok := a.requestActionDecision(agentevents.PermissionRequest{Tool: tc, Reason: reason})
+	return ok && d.Allowed(), ok
 }
 
 // unattendedAskBlocked resolves a coder-policy ActionAsk verdict in an
 // unattended run. When the connected client offers a permission dialog (ACP
-// session/request_permission, MCP elicitation), the human decides: a denial
-// blocks the action, renders the refusal, tells the model (so it can replan)
-// and closes the tool_call for the client. Without a reachable dialog the
-// historical unattended contract holds — "ask" auto-approves (the operator
-// opted into autonomy; explicit deny rules still block upstream).
-func (a *AgentMode) unattendedAskBlocked(toolName, rawArgs string, renderError func(string)) bool {
+// session/request_permission, MCP elicitation), the human decides with the
+// terminal prompt's full vocabulary: the "always" variants persist a policy
+// rule through pm exactly like the interactive flow, and a denial blocks the
+// action, renders the refusal, tells the model (so it can replan) and closes
+// the tool_call for the client. The persistent choices are only offered when
+// a suggested pattern exists — exec commands never get one, by design.
+// Without a reachable dialog the historical unattended contract holds —
+// "ask" auto-approves (the operator opted into autonomy; explicit deny rules
+// still block upstream).
+func (a *AgentMode) unattendedAskBlocked(toolName, rawArgs string, pm *coder.PolicyManager, renderError func(string)) bool {
 	title := agent.CompactToolLabel(extractSubcmdFromArgs(rawArgs), rawArgs)
 	if strings.TrimSpace(title) == "" {
 		title = toolName
 	}
 	kind, _ := classifyToolCall(toolName, nil)
-	allowed, asked := a.requestActionPermission(agentevents.ToolCall{
-		Name:     toolName,
-		Title:    title,
-		Kind:     kind,
-		RawInput: rawArgs,
-	}, i18n.T("agent.permission.policy_ask", toolName))
+	pattern := ""
+	if pm != nil {
+		pattern = coder.GetSuggestedPattern(toolName, rawArgs)
+	}
+	decision, asked := a.requestActionDecision(agentevents.PermissionRequest{
+		Tool: agentevents.ToolCall{
+			Name:     toolName,
+			Title:    title,
+			Kind:     kind,
+			RawInput: rawArgs,
+		},
+		Reason:      i18n.T("agent.permission.policy_ask", toolName),
+		OfferAlways: pattern != "",
+	})
 	if !asked {
 		if a.logger != nil {
 			a.logger.Info("coder policy: 'ask' auto-approved (unattended, no permission dialog)",
@@ -344,17 +394,33 @@ func (a *AgentMode) unattendedAskBlocked(toolName, rawArgs string, renderError f
 		}
 		return false
 	}
-	if allowed {
+	if decision.Persistent() && pm != nil && pattern != "" {
+		action := coder.ActionDeny
+		if decision.Allowed() {
+			action = coder.ActionAllow
+		}
+		// A persistence failure must not change the run's outcome: the
+		// user's allow/deny still applies this once, so log and continue.
+		if err := pm.AddRule(pattern, action); err != nil && a.logger != nil {
+			a.logger.Warn("failed to persist policy rule from permission dialog",
+				zap.String("pattern", pattern), zap.String("action", string(action)), zap.Error(err))
+		}
+	}
+	if decision.Allowed() {
 		return false
 	}
 	msg := i18n.T("agent.policy.ask_denied", title)
+	feedback := fmt.Sprintf(
+		"SECURITY BLOCK: Action %q was DENIED by the user through the security-policy prompt. DO NOT retry it; choose a different approach or explain what you need.",
+		title)
+	if decision == agentevents.PermissionDenyAlways {
+		msg = i18n.T("agent.policy.ask_denied_always", title)
+		feedback = fmt.Sprintf(
+			"SECURITY BLOCK: Action %q was PERMANENTLY DENIED by the user; a deny rule now blocks it for every future attempt. DO NOT retry it; choose a different approach or explain what you need.",
+			title)
+	}
 	renderError(msg)
 	a.emitBlockedTool(toolName, rawArgs, msg)
-	a.cli.history = append(a.cli.history, models.Message{
-		Role: "user",
-		Content: fmt.Sprintf(
-			"SECURITY BLOCK: Action %q was DENIED by the user through the security-policy prompt. DO NOT retry it; choose a different approach or explain what you need.",
-			title),
-	})
+	a.cli.history = append(a.cli.history, models.Message{Role: "user", Content: feedback})
 	return true
 }

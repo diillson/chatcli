@@ -25,6 +25,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/diillson/chatcli/cli/agentevents"
+	"github.com/diillson/chatcli/i18n"
 )
 
 // acpToolContentCap bounds the content of one tool_call_update. Full outputs
@@ -50,6 +51,7 @@ func newACPSink(a *ACP, sessionID string, runCtx context.Context) *acpSink {
 
 var _ agentevents.Sink = (*acpSink)(nil)
 var _ agentevents.PermissionRequester = (*acpSink)(nil)
+var _ agentevents.PermissionDecider = (*acpSink)(nil)
 
 func (s *acpSink) update(update map[string]interface{}) {
 	if s.acp.notify == nil {
@@ -124,29 +126,61 @@ func (s *acpSink) PlanUpdate(p agentevents.Plan) {
 	})
 }
 
-// RequestPermission → session/request_permission (server→client request).
-// Anything but an explicit allow — reject, cancel, transport error, missing
-// requester — denies (fail-safe).
+// acpPermissionOptions maps the wire optionId of each dialog choice to its
+// typed decision. IDs and kinds follow the ACP option vocabulary.
+var acpPermissionOptions = map[string]agentevents.PermissionDecision{
+	"allow-once":    agentevents.PermissionAllowOnce,
+	"allow-always":  agentevents.PermissionAllowAlways,
+	"reject-once":   agentevents.PermissionDenyOnce,
+	"reject-always": agentevents.PermissionDenyAlways,
+}
+
+// RequestPermission preserves the boolean PermissionRequester surface for
+// callers that cannot persist a decision: a two-choice dialog whose only
+// affirmative outcome is allow-once.
 func (s *acpSink) RequestPermission(tc agentevents.ToolCall, reason string) (bool, error) {
+	d, err := s.RequestPermissionDecision(agentevents.PermissionRequest{Tool: tc, Reason: reason})
+	return d.Allowed(), err
+}
+
+// RequestPermissionDecision → session/request_permission (server→client
+// request). The dialog mirrors the terminal security prompt: allow/reject
+// once always, plus the persistent variants when the caller can record the
+// choice as a policy rule (OfferAlways). Anything but an explicit selection
+// — cancel, transport error, unknown option, missing requester — denies
+// (fail-safe).
+func (s *acpSink) RequestPermissionDecision(req agentevents.PermissionRequest) (agentevents.PermissionDecision, error) {
 	if s.acp.request == nil {
-		return false, nil
+		return agentevents.PermissionDenyOnce, nil
 	}
+	tc := req.Tool
 	title := tc.Title
-	if reason != "" {
-		title = strings.TrimSpace(title + " — " + reason)
+	if req.Reason != "" {
+		title = strings.TrimSpace(title + " — " + req.Reason)
 	}
 	toolCall := toolCallPayload(tc, true)
 	delete(toolCall, "sessionUpdate")
 	toolCall["title"] = title
 	toolCall["status"] = "pending"
 
+	options := []map[string]interface{}{
+		{"optionId": "allow-once", "name": i18n.T("acp.permission.allow_once"), "kind": "allow_once"},
+	}
+	if req.OfferAlways {
+		options = append(options,
+			map[string]interface{}{"optionId": "allow-always", "name": i18n.T("acp.permission.allow_always"), "kind": "allow_always"})
+	}
+	options = append(options,
+		map[string]interface{}{"optionId": "reject-once", "name": i18n.T("acp.permission.reject_once"), "kind": "reject_once"})
+	if req.OfferAlways {
+		options = append(options,
+			map[string]interface{}{"optionId": "reject-always", "name": i18n.T("acp.permission.reject_always"), "kind": "reject_always"})
+	}
+
 	raw, err := s.acp.request(s.runCtx, "session/request_permission", map[string]interface{}{
 		"sessionId": s.sessionID,
 		"toolCall":  toolCall,
-		"options": []map[string]interface{}{
-			{"optionId": "allow-once", "name": "Allow", "kind": "allow_once"},
-			{"optionId": "reject-once", "name": "Reject", "kind": "reject_once"},
-		},
+		"options":   options,
 	})
 	if err != nil {
 		// Minimal/wrapped clients may not implement the method at all;
@@ -154,9 +188,9 @@ func (s *acpSink) RequestPermission(tc agentevents.ToolCall, reason string) (boo
 		// fallback instead of denying every gated action.
 		var rpcErr *RPCError
 		if errors.As(err, &rpcErr) && rpcErr.Code == CodeMethodNotFound {
-			return false, agentevents.ErrPermissionUnsupported
+			return agentevents.PermissionDenyOnce, agentevents.ErrPermissionUnsupported
 		}
-		return false, err
+		return agentevents.PermissionDenyOnce, err
 	}
 	var resp struct {
 		Outcome struct {
@@ -165,9 +199,24 @@ func (s *acpSink) RequestPermission(tc agentevents.ToolCall, reason string) (boo
 		} `json:"outcome"`
 	}
 	if err := json.Unmarshal(raw, &resp); err != nil {
-		return false, err
+		return agentevents.PermissionDenyOnce, err
 	}
-	return resp.Outcome.Outcome == "selected" && resp.Outcome.OptionID == "allow-once", nil
+	if resp.Outcome.Outcome != "selected" {
+		return agentevents.PermissionDenyOnce, nil
+	}
+	d, known := acpPermissionOptions[resp.Outcome.OptionID]
+	if !known {
+		return agentevents.PermissionDenyOnce, nil
+	}
+	// A persistent choice the dialog never offered must degrade to its
+	// once-only form: never let a client answer widen what the caller can do.
+	if !req.OfferAlways && d.Persistent() {
+		if d.Allowed() {
+			return agentevents.PermissionAllowOnce, nil
+		}
+		return agentevents.PermissionDenyOnce, nil
+	}
+	return d, nil
 }
 
 // closeOpen fails every still-open tool call — run on cancellation so the

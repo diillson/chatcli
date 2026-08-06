@@ -190,8 +190,14 @@ type ChatCLI struct {
 	lastFailedChunk      *FileChunk  // Referência ao último chunk que falhou
 	agentMode            *AgentMode  // Modo de agente
 	unattended           bool        // when true, the agent runs without any interactive confirmation (gateway daemon)
-	dangerBlock          bool        // when true (with unattended), dangerous commands are declined in-band instead of auto-approved (MCP server opt-in)
-	lastAgentReply       string      // last one-shot agent prose answer (command blocks stripped), captured for unattended callers
+	// policyAutoMode is the session-scoped /policy mode: when true, coder
+	// policy "ask" verdicts auto-approve (deny rules, the command validator
+	// and safety-immune operations still gate). Atomic because command
+	// surfaces (REPL, ACP slash, MCP manage_session) may toggle it while an
+	// agent loop reads it. Never persisted — new sessions start interactive.
+	policyAutoMode atomic.Bool
+	dangerBlock    bool   // when true (with unattended), dangerous commands are declined in-band instead of auto-approved (MCP server opt-in)
+	lastAgentReply string // last one-shot agent prose answer (command blocks stripped), captured for unattended callers
 	// agentEventSink, when set, receives structured events from the agent/
 	// coder ReAct loop (ACP structured bridge). Installed per-run by
 	// runLoopRPC under rpcStdoutMu and cleared on exit; never set by the
