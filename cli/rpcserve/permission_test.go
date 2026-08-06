@@ -519,3 +519,74 @@ func TestMCPPermissionTimeoutParsing(t *testing.T) {
 		})
 	}
 }
+
+// TestACPSinkRequestDecision_TimeoutDeniesAndFailsFast: an ACP client that
+// implements session/request_permission but never renders or answers the
+// dialog must not wedge the run until the runCtx dies — the same "stuck in
+// the dark" hang fixed for MCP elicitation. The wait is bounded by the same
+// CHATCLI_MCP_PERMISSION_TIMEOUT knob (it governs both RPC surfaces, like
+// CHATCLI_MCP_TOOLS); on expiry the decision denies fail-safe with the typed
+// sentinel and later requests in the same run fail fast.
+func TestACPSinkRequestDecision_TimeoutDeniesAndFailsFast(t *testing.T) {
+	t.Setenv("CHATCLI_MCP_PERMISSION_TIMEOUT", "30ms")
+	a := NewACP(&fakeBackend{}, "test")
+	calls := 0
+	a.SetRequester(func(ctx context.Context, method string, params interface{}) (json.RawMessage, error) {
+		calls++
+		<-ctx.Done() // client never answers; only the ctx bounds the wait
+		return nil, ctx.Err()
+	})
+	s := newACPSink(a, "sess", context.Background())
+
+	start := time.Now()
+	d, err := s.RequestPermissionDecision(agentevents.PermissionRequest{
+		Tool: agentevents.ToolCall{ID: "c1", Name: "@coder", Title: "exec: rm x"},
+	})
+	if d.Allowed() {
+		t.Fatal("an unanswered dialog must never allow")
+	}
+	if !errors.Is(err, agentevents.ErrPermissionTimeout) {
+		t.Fatalf("err = %v, want ErrPermissionTimeout", err)
+	}
+	if elapsed := time.Since(start); elapsed > 5*time.Second {
+		t.Fatalf("timeout took %v, must be bounded by the configured 30ms", elapsed)
+	}
+
+	start = time.Now()
+	d, err = s.RequestPermissionDecision(agentevents.PermissionRequest{
+		Tool: agentevents.ToolCall{ID: "c2", Name: "@coder", Title: "write: y"},
+	})
+	if d.Allowed() || !errors.Is(err, agentevents.ErrPermissionTimeout) {
+		t.Fatalf("dead dialog must deny with timeout sentinel, got d=%q err=%v", d, err)
+	}
+	if calls != 1 {
+		t.Fatalf("dead dialog must not be consulted again, requester calls = %d", calls)
+	}
+	if elapsed := time.Since(start); elapsed > 10*time.Millisecond {
+		t.Fatalf("fail-fast took %v", elapsed)
+	}
+}
+
+// TestACPSinkRequestDecision_ContextCanceledStaysOpaque: the run's own
+// context dying (prompt turn cancelled via session/cancel, client gone) is
+// NOT a dialog timeout — the error stays opaque so upstream treats it as a
+// transport failure, exactly like the MCP bridge.
+func TestACPSinkRequestDecision_ContextCanceledStaysOpaque(t *testing.T) {
+	a := NewACP(&fakeBackend{}, "test")
+	a.SetRequester(func(ctx context.Context, method string, params interface{}) (json.RawMessage, error) {
+		<-ctx.Done()
+		return nil, ctx.Err()
+	})
+	runCtx, cancel := context.WithCancel(context.Background())
+	s := newACPSink(a, "sess", runCtx)
+	go func() { time.Sleep(10 * time.Millisecond); cancel() }()
+	d, err := s.RequestPermissionDecision(agentevents.PermissionRequest{
+		Tool: agentevents.ToolCall{ID: "c1", Name: "@coder"},
+	})
+	if d.Allowed() {
+		t.Fatal("cancelled run must never allow")
+	}
+	if errors.Is(err, agentevents.ErrPermissionTimeout) || errors.Is(err, agentevents.ErrPermissionUnsupported) {
+		t.Fatalf("run cancellation must stay an opaque transport error, got %v", err)
+	}
+}
