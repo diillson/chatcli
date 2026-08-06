@@ -1,5 +1,14 @@
 # Changelog
 
+## [1.181.1](https://github.com/diillson/chatcli/compare/v1.181.0...v1.181.1) (2026-08-06)
+
+
+### Bug Fixes
+
+* **acp:** bound the permission dialog wait and raise the default to ten minutes ([#1307](https://github.com/diillson/chatcli/issues/1307)) ([49d8b20](https://github.com/diillson/chatcli/commit/49d8b20d9a60b32f8f194cea601ca8ffdbc8ad52))
+* **mcp:** always register a fresh OAuth client when the server supports dynamic registration ([#1308](https://github.com/diillson/chatcli/issues/1308)) ([37e8eeb](https://github.com/diillson/chatcli/commit/37e8eeb43299b4f615e6c8902b5956b273566f0c))
+* **mcp:** bound permission elicitation wait so unanswered dialogs cannot hang the run ([#1305](https://github.com/diillson/chatcli/issues/1305)) ([ec9761d](https://github.com/diillson/chatcli/commit/ec9761df82c38bc8946663f21f8e1198e0c43c01))
+
 ## [1.181.0](https://github.com/diillson/chatcli/compare/v1.180.0...v1.181.0) (2026-08-06)
 
 
