@@ -31,6 +31,13 @@ import (
 // different from a denial or a transport failure (both fail-safe deny).
 var ErrPermissionUnsupported = errors.New("client does not support permission requests")
 
+// ErrPermissionTimeout reports that the permission round-trip was sent but no
+// user response arrived within the configured bound — typically a client that
+// declared the capability without actually rendering a dialog. Callers deny
+// fail-safe (the user may have wanted to say no) but should tell the model
+// the request went UNANSWERED, not that the user denied it.
+var ErrPermissionTimeout = errors.New("permission request timed out without a user response")
+
 // ToolKind classifies what a tool call does, using the ACP spec vocabulary so
 // protocol sinks can forward it verbatim.
 type ToolKind string

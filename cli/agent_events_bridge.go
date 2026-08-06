@@ -303,14 +303,15 @@ func (a *AgentMode) permissionSource() (interface{}, bool) {
 // the already announced tool call when one exists, so the client can anchor
 // its dialog to the same toolCallId. ok reports whether a dialog was
 // consulted; the decision is only meaningful when ok is true. Transport
-// errors deny fail-safe (deny_once, consulted). A client that reports the
-// round-trip unsupported (ErrPermissionUnsupported) counts as NOT consulted:
-// no dialog exists, so callers apply the same contract as runs without a
-// requester.
-func (a *AgentMode) requestActionDecision(req agentevents.PermissionRequest) (decision agentevents.PermissionDecision, ok bool) {
+// errors deny fail-safe (deny_once, consulted) and surface as reqErr so
+// callers can distinguish an unanswered dialog (ErrPermissionTimeout) from a
+// human denial. A client that reports the round-trip unsupported
+// (ErrPermissionUnsupported) counts as NOT consulted: no dialog exists, so
+// callers apply the same contract as runs without a requester.
+func (a *AgentMode) requestActionDecision(req agentevents.PermissionRequest) (decision agentevents.PermissionDecision, ok bool, reqErr error) {
 	pr, has := a.permissionSource()
 	if !has {
-		return agentevents.PermissionDenyOnce, false
+		return agentevents.PermissionDenyOnce, false, nil
 	}
 	if req.Tool.ID == "" {
 		req.Tool.ID = a.nextEventCallID()
@@ -332,27 +333,27 @@ func (a *AgentMode) requestActionDecision(req agentevents.PermissionRequest) (de
 			d = agentevents.PermissionDenyOnce
 		}
 	default:
-		return agentevents.PermissionDenyOnce, false
+		return agentevents.PermissionDenyOnce, false, nil
 	}
 	if err != nil {
 		if errors.Is(err, agentevents.ErrPermissionUnsupported) {
 			if a.logger != nil {
 				a.logger.Info("client does not support permission requests; applying unattended fallback")
 			}
-			return agentevents.PermissionDenyOnce, false
+			return agentevents.PermissionDenyOnce, false, nil
 		}
 		if a.logger != nil {
 			a.logger.Warn("permission request failed; denying action", zap.Error(err))
 		}
-		return agentevents.PermissionDenyOnce, true
+		return agentevents.PermissionDenyOnce, true, err
 	}
-	return d, true
+	return d, true, nil
 }
 
 // requestActionPermission is the boolean view over requestActionDecision,
 // kept for callers with once-only semantics (the dangerous-exec guard).
 func (a *AgentMode) requestActionPermission(tc agentevents.ToolCall, reason string) (allowed, ok bool) {
-	d, ok := a.requestActionDecision(agentevents.PermissionRequest{Tool: tc, Reason: reason})
+	d, ok, _ := a.requestActionDecision(agentevents.PermissionRequest{Tool: tc, Reason: reason})
 	return ok && d.Allowed(), ok
 }
 
@@ -377,7 +378,7 @@ func (a *AgentMode) unattendedAskBlocked(toolName, rawArgs string, pm *coder.Pol
 	if pm != nil {
 		pattern = coder.GetSuggestedPattern(toolName, rawArgs)
 	}
-	decision, asked := a.requestActionDecision(agentevents.PermissionRequest{
+	decision, asked, reqErr := a.requestActionDecision(agentevents.PermissionRequest{
 		Tool: agentevents.ToolCall{
 			Name:     toolName,
 			Title:    title,
@@ -393,6 +394,20 @@ func (a *AgentMode) unattendedAskBlocked(toolName, rawArgs string, pm *coder.Pol
 				zap.String("tool", toolName))
 		}
 		return false
+	}
+	// An unanswered dialog (client declared the capability but never
+	// rendered/answered it) is not a human denial: block fail-safe, but tell
+	// the model the truth so it explains the situation instead of inventing a
+	// refusal — its reply is the one surface the user is guaranteed to see.
+	if errors.Is(reqErr, agentevents.ErrPermissionTimeout) {
+		msg := i18n.T("agent.policy.ask_timeout", title)
+		feedback := fmt.Sprintf(
+			"SECURITY BLOCK: The permission request for %q got NO RESPONSE from the user (the approval dialog timed out — the client may not display permission dialogs). The action was NOT executed. DO NOT retry it; continue without it, or tell the user their MCP client did not surface the approval dialog and that they can set CHATCLI_MCP_ELICITATION=off to restore unattended auto-approval.",
+			title)
+		renderError(msg)
+		a.emitBlockedTool(toolName, rawArgs, msg)
+		a.cli.history = append(a.cli.history, models.Message{Role: "user", Content: feedback})
+		return true
 	}
 	if decision.Persistent() && pm != nil && pattern != "" {
 		action := coder.ActionDeny

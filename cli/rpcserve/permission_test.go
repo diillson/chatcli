@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/diillson/chatcli/cli/agentevents"
 )
@@ -400,6 +401,120 @@ func TestMCPElicitOutcomes(t *testing.T) {
 			}
 			if tc.wantUns != errors.Is(err, agentevents.ErrPermissionUnsupported) {
 				t.Fatalf("err = %v, wantUnsupported=%v", err, tc.wantUns)
+			}
+		})
+	}
+}
+
+// TestMCPElicitDecision_TimeoutDeniesAndFailsFast: a client that declared the
+// elicitation capability but never answers elicitation/create must not wedge
+// the run until the outer context dies (the "stuck in the dark" hang). The
+// round-trip is bounded by CHATCLI_MCP_PERMISSION_TIMEOUT; on expiry the
+// decision denies fail-safe with the typed timeout sentinel, and subsequent
+// requests in the same run fail fast without waiting again.
+func TestMCPElicitDecision_TimeoutDeniesAndFailsFast(t *testing.T) {
+	t.Setenv("CHATCLI_MCP_PERMISSION_TIMEOUT", "30ms")
+	m := NewMCP(&fakeBackend{}, "chatcli", "test")
+	calls := 0
+	m.SetRequester(func(ctx context.Context, method string, params interface{}) (json.RawMessage, error) {
+		calls++
+		<-ctx.Done() // client never answers; only the ctx bounds the wait
+		return nil, ctx.Err()
+	})
+	m.initialize(json.RawMessage(`{"capabilities":{"elicitation":{}}}`))
+	dec := m.permissionsFor(context.Background()).(agentevents.PermissionDecider)
+
+	start := time.Now()
+	d, err := dec.RequestPermissionDecision(agentevents.PermissionRequest{
+		Tool: agentevents.ToolCall{Name: "@coder", Title: "exec: rm x"},
+	})
+	if d.Allowed() {
+		t.Fatal("an unanswered dialog must never allow")
+	}
+	if !errors.Is(err, agentevents.ErrPermissionTimeout) {
+		t.Fatalf("err = %v, want ErrPermissionTimeout", err)
+	}
+	if elapsed := time.Since(start); elapsed > 5*time.Second {
+		t.Fatalf("timeout took %v, must be bounded by the configured 30ms", elapsed)
+	}
+
+	// Second request: the dialog is known-dead — fail fast, no second wait.
+	start = time.Now()
+	d, err = dec.RequestPermissionDecision(agentevents.PermissionRequest{
+		Tool: agentevents.ToolCall{Name: "@coder", Title: "write: y"},
+	})
+	if d.Allowed() || !errors.Is(err, agentevents.ErrPermissionTimeout) {
+		t.Fatalf("dead dialog must deny with timeout sentinel, got d=%q err=%v", d, err)
+	}
+	if calls != 1 {
+		t.Fatalf("dead dialog must not be consulted again, requester calls = %d", calls)
+	}
+	if elapsed := time.Since(start); elapsed > 10*time.Millisecond {
+		t.Fatalf("fail-fast took %v", elapsed)
+	}
+}
+
+// TestMCPElicitDecision_ContextCanceledStaysOpaque: the run's own context
+// dying (client cancelled/killed the call) is NOT a dialog timeout — the
+// error stays opaque so upstream treats it as a transport failure.
+func TestMCPElicitDecision_ContextCanceledStaysOpaque(t *testing.T) {
+	m := NewMCP(&fakeBackend{}, "chatcli", "test")
+	m.SetRequester(func(ctx context.Context, method string, params interface{}) (json.RawMessage, error) {
+		<-ctx.Done()
+		return nil, ctx.Err()
+	})
+	m.initialize(json.RawMessage(`{"capabilities":{"elicitation":{}}}`))
+	ctx, cancel := context.WithCancel(context.Background())
+	dec := m.permissionsFor(ctx).(agentevents.PermissionDecider)
+	go func() { time.Sleep(10 * time.Millisecond); cancel() }()
+	d, err := dec.RequestPermissionDecision(agentevents.PermissionRequest{
+		Tool: agentevents.ToolCall{Name: "@coder"},
+	})
+	if d.Allowed() {
+		t.Fatal("cancelled run must never allow")
+	}
+	if errors.Is(err, agentevents.ErrPermissionTimeout) || errors.Is(err, agentevents.ErrPermissionUnsupported) {
+		t.Fatalf("run cancellation must stay an opaque transport error, got %v", err)
+	}
+}
+
+// TestMCPPermissionsElicitationKillSwitch: CHATCLI_MCP_ELICITATION=off must
+// disable the bridge even when the client declares the capability — the
+// escape hatch for clients that declare elicitation but never render it.
+func TestMCPPermissionsElicitationKillSwitch(t *testing.T) {
+	t.Setenv("CHATCLI_MCP_ELICITATION", "off")
+	m := NewMCP(&fakeBackend{}, "chatcli", "test")
+	m.SetRequester(func(ctx context.Context, method string, params interface{}) (json.RawMessage, error) {
+		t.Fatal("requester must never be consulted with the kill switch on")
+		return nil, nil
+	})
+	m.initialize(json.RawMessage(`{"capabilities":{"elicitation":{}}}`))
+	if pr := m.permissionsFor(context.Background()); pr != nil {
+		t.Fatalf("permissionsFor = %T, want nil with CHATCLI_MCP_ELICITATION=off", pr)
+	}
+}
+
+// TestMCPPermissionTimeoutParsing: env accepts Go durations and plain
+// seconds; 0/off disable the bound; garbage falls back to the default.
+func TestMCPPermissionTimeoutParsing(t *testing.T) {
+	cases := []struct {
+		env  string
+		want time.Duration
+	}{
+		{"", mcpPermissionTimeoutDefault},
+		{"90s", 90 * time.Second},
+		{"2m", 2 * time.Minute},
+		{"45", 45 * time.Second},
+		{"0", 0},
+		{"off", 0},
+		{"garbage", mcpPermissionTimeoutDefault},
+		{"-5s", mcpPermissionTimeoutDefault},
+	}
+	for _, tc := range cases {
+		t.Run("env="+tc.env, func(t *testing.T) {
+			t.Setenv("CHATCLI_MCP_PERMISSION_TIMEOUT", tc.env)
+			if got := mcpPermissionTimeout(); got != tc.want {
+				t.Fatalf("mcpPermissionTimeout() = %v, want %v", got, tc.want)
 			}
 		})
 	}
