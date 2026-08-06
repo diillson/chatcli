@@ -302,3 +302,35 @@ func TestRequestActionPermission_FallbackRequester(t *testing.T) {
 		t.Fatalf("requester consulted %d times, want 1", len(rec.asked))
 	}
 }
+
+// TestUnattendedAskBlocked_TimeoutDeniesWithDistinctFeedback: an unanswered
+// permission dialog (ErrPermissionTimeout) must deny fail-safe — but the
+// model must be told the request went unanswered, NOT that the user denied
+// it, so it can explain the situation instead of inventing a refusal.
+func TestUnattendedAskBlocked_TimeoutDeniesWithDistinctFeedback(t *testing.T) {
+	rec := &decisionRecorder{err: agentevents.ErrPermissionTimeout}
+	a, c := newUnattendedAgent(rec)
+
+	blocked := a.unattendedAskBlocked("@coder", `{"cmd":"exec","args":{"cmd":"docker rm x"}}`, nil, func(string) {})
+	if !blocked {
+		t.Fatal("an unanswered dialog must block the action fail-safe")
+	}
+	var feedback string
+	for _, m := range c.history {
+		if strings.Contains(m.Content, "SECURITY BLOCK") {
+			feedback = m.Content
+		}
+	}
+	if feedback == "" {
+		t.Fatal("timeout must reach the model through history so it can replan")
+	}
+	if !strings.Contains(feedback, "NO RESPONSE") {
+		t.Fatalf("feedback must say the request went unanswered, got: %s", feedback)
+	}
+	if strings.Contains(feedback, "DENIED by the user") {
+		t.Fatalf("timeout must not be reported as a user denial, got: %s", feedback)
+	}
+	if len(rec.ends) != 1 || !rec.ends[0].IsError {
+		t.Fatalf("blocked tool_call must close as error for the client, ends: %+v", rec.ends)
+	}
+}

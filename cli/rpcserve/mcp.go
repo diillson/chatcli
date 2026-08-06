@@ -9,8 +9,11 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"os"
+	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/diillson/chatcli/cli/agentevents"
 	"github.com/diillson/chatcli/i18n"
@@ -609,16 +612,49 @@ func (m *MCP) callTool(ctx context.Context, params json.RawMessage) (interface{}
 
 // permissionsFor returns a PermissionRequester bridging approval prompts to
 // MCP elicitation/create, scoped to one tools/call context. Nil when the
-// client did not declare the elicitation capability or the requester is not
-// wired — the run then keeps the historical unattended contract.
+// client did not declare the elicitation capability, the requester is not
+// wired, or CHATCLI_MCP_ELICITATION=off — the run then keeps the historical
+// unattended contract. The kill switch exists for clients that declare the
+// capability without actually rendering dialogs: every gated action would
+// otherwise stall for the permission timeout and deny.
 func (m *MCP) permissionsFor(ctx context.Context) agentevents.PermissionRequester {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv("CHATCLI_MCP_ELICITATION"))) {
+	case "off", "false", "0", "no", "disabled":
+		return nil
+	}
 	m.rt.mu.Lock()
 	request, elicits := m.rt.request, m.rt.elicits
 	m.rt.mu.Unlock()
 	if request == nil || !elicits {
 		return nil
 	}
-	return &mcpElicitRequester{ctx: ctx, request: request}
+	return &mcpElicitRequester{ctx: ctx, request: request, timeout: mcpPermissionTimeout()}
+}
+
+// mcpPermissionTimeoutDefault bounds how long one elicitation round-trip may
+// wait for the human. It must stay comfortably under common MCP client
+// tools/call timeouts (typically 2–5 minutes): if the client kills the call
+// first, the whole run dies with it — the hang this bound exists to prevent.
+const mcpPermissionTimeoutDefault = 120 * time.Second
+
+// mcpPermissionTimeout resolves CHATCLI_MCP_PERMISSION_TIMEOUT: a Go
+// duration ("90s", "2m") or plain seconds; "0"/"off" disable the bound
+// (wait until the run's context dies). Unset or invalid keeps the default.
+func mcpPermissionTimeout() time.Duration {
+	v := strings.TrimSpace(os.Getenv("CHATCLI_MCP_PERMISSION_TIMEOUT"))
+	if v == "" {
+		return mcpPermissionTimeoutDefault
+	}
+	if strings.EqualFold(v, "off") {
+		return 0
+	}
+	if d, err := time.ParseDuration(v); err == nil && d >= 0 {
+		return d
+	}
+	if secs, err := strconv.Atoi(v); err == nil && secs >= 0 {
+		return time.Duration(secs) * time.Second
+	}
+	return mcpPermissionTimeoutDefault
 }
 
 // mcpElicitRequester implements agentevents.PermissionRequester and
@@ -631,6 +667,13 @@ func (m *MCP) permissionsFor(ctx context.Context) agentevents.PermissionRequeste
 type mcpElicitRequester struct {
 	ctx     context.Context
 	request func(ctx context.Context, method string, params interface{}) (json.RawMessage, error)
+	// timeout bounds each round-trip; 0 waits until ctx dies (legacy).
+	timeout time.Duration
+	// dialogDead flips after a timeout: the client demonstrably does not
+	// answer elicitation, so later requests in this run fail fast instead of
+	// stalling the loop for another timeout per gated action. The agent loop
+	// is sequential, so no locking is needed.
+	dialogDead bool
 }
 
 var _ agentevents.PermissionRequester = (*mcpElicitRequester)(nil)
@@ -688,14 +731,29 @@ func (e *mcpElicitRequester) RequestPermissionDecision(req agentevents.Permissio
 			"required": []string{"decision"},
 		}
 	}
-	raw, err := e.request(e.ctx, "elicitation/create", map[string]interface{}{
+	if e.dialogDead {
+		return agentevents.PermissionDenyOnce, agentevents.ErrPermissionTimeout
+	}
+	ctx, cancel := e.ctx, func() {}
+	if e.timeout > 0 {
+		ctx, cancel = context.WithTimeout(e.ctx, e.timeout)
+	}
+	raw, err := e.request(ctx, "elicitation/create", map[string]interface{}{
 		"message":         msg,
 		"requestedSchema": schema,
 	})
+	cancel()
 	if err != nil {
 		var rpcErr *RPCError
 		if errors.As(err, &rpcErr) && rpcErr.Code == CodeMethodNotFound {
 			return agentevents.PermissionDenyOnce, agentevents.ErrPermissionUnsupported
+		}
+		// Our own bound expired while the run's context is still alive: the
+		// dialog is unanswered (likely never rendered). Deny fail-safe and
+		// mark it dead so the run doesn't stall again on every gated action.
+		if errors.Is(err, context.DeadlineExceeded) && e.ctx.Err() == nil {
+			e.dialogDead = true
+			return agentevents.PermissionDenyOnce, agentevents.ErrPermissionTimeout
 		}
 		return agentevents.PermissionDenyOnce, err
 	}
