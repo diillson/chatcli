@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.181.3](https://github.com/diillson/chatcli/compare/v1.181.2...v1.181.3) (2026-08-07)
+
+
+### Bug Fixes
+
+* **agent:** recover ACP/MCP turns from dead OAuth tokens, orphaned parks and stdin contention ([#1311](https://github.com/diillson/chatcli/issues/1311)) ([1ddcbea](https://github.com/diillson/chatcli/commit/1ddcbead3bee4c7c44b15fa73286d25ed7897f94))
+
 ## [1.181.2](https://github.com/diillson/chatcli/compare/v1.181.1...v1.181.2) (2026-08-07)
 
 
