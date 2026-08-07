@@ -2540,6 +2540,7 @@
   "agent.policy.ask_denied": "ACTION DENIED BY THE USER (security policy): %s",
   "agent.policy.ask_denied_always": "ACTION PERMANENTLY BLOCKED BY THE USER (deny rule recorded): %s",
   "agent.policy.ask_timeout": "ACTION BLOCKED \u2014 the permission request timed out with no user response (the client may not display approval dialogs): %s",
+  "agent.policy.ask_failed": "ACTION BLOCKED \u2014 the permission request failed before the user could answer (transport error or cancelled turn): %s",
   "acp.permission.allow_once": "Allow",
   "acp.permission.allow_always": "Always allow",
   "acp.permission.reject_once": "Reject",

@@ -334,3 +334,27 @@ func TestUnattendedAskBlocked_TimeoutDeniesWithDistinctFeedback(t *testing.T) {
 		t.Fatalf("blocked tool_call must close as error for the client, ends: %+v", rec.ends)
 	}
 }
+
+// TestUnattendedAskBlocked_TransportErrorIsNotUserDenial: a dialog round-trip
+// failure (client disconnected, write error, cancelled turn) blocks fail-safe
+// but must never be reported to the model as an explicit user denial — the
+// user never saw the dialog, and the misattribution made the model tell them
+// they refused something they were never shown.
+func TestUnattendedAskBlocked_TransportErrorIsNotUserDenial(t *testing.T) {
+	rec := &permRecorder{err: errFixed("client disconnected")}
+	a, c := newUnattendedAgent(rec)
+	if !a.unattendedAskBlocked("@coder", `{"cmd":"exec"}`, nil, func(string) {}) {
+		t.Fatal("transport error must deny fail-safe")
+	}
+	var feedback strings.Builder
+	for _, m := range c.history {
+		feedback.WriteString(m.Content)
+		feedback.WriteString("\n")
+	}
+	if strings.Contains(feedback.String(), "DENIED by the user") {
+		t.Fatal("transport failure must not be attributed to the user")
+	}
+	if !strings.Contains(feedback.String(), "could not be delivered") {
+		t.Fatalf("model feedback must state the dialog round-trip failed, got: %q", feedback.String())
+	}
+}

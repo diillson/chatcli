@@ -1685,9 +1685,18 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 	a.setCancelSignal(ctx.Done())
 	defer a.setCancelSignal(prevCancel)
 
-	// Start centralized stdin reader for type-ahead queue support
-	a.startStdinReader(ctx)
-	defer a.stopStdinReader()
+	// Start centralized stdin reader for type-ahead queue support.
+	// NEVER on unattended surfaces: on the ACP/MCP stdio servers os.Stdin
+	// IS the JSON-RPC channel, and this reader would race the protocol
+	// scanner for bytes — swallowing the client's permission answers and
+	// cancel frames, then feeding the stolen JSON to the LLM as bogus user
+	// type-ahead. Same quarantine rationale as RunSlashCommandRPC, which
+	// swaps stdin for /dev/null on those surfaces. There is no human on
+	// the other side of stdin to type ahead there anyway.
+	if !a.cli.unattended {
+		a.startStdinReader(ctx)
+		defer a.stopStdinReader()
+	}
 
 	// Structured event sink for protocol frontends (ACP). Resolved per call
 	// and restored on exit because this loop is re-entrant (see cancelSignal

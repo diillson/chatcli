@@ -2540,6 +2540,7 @@
   "agent.policy.ask_denied": "AÇÃO NEGADA PELO USUÁRIO (política de segurança): %s",
   "agent.policy.ask_denied_always": "AÇÃO BLOQUEADA PERMANENTEMENTE PELO USUÁRIO (regra de negação registrada): %s",
   "agent.policy.ask_timeout": "AÇÃO BLOQUEADA — a solicitação de permissão expirou sem resposta do usuário (o cliente pode não exibir dialogs de aprovação): %s",
+  "agent.policy.ask_failed": "AÇÃO BLOQUEADA — a solicitação de permissão falhou antes de o usuário responder (erro de transporte ou turno cancelado): %s",
   "acp.permission.allow_once": "Permitir",
   "acp.permission.allow_always": "Permitir sempre",
   "acp.permission.reject_once": "Negar",
