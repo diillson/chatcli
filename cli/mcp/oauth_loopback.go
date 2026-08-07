@@ -33,6 +33,28 @@ type loopbackAuthParams struct {
 	redirectURI           string
 	scope                 string
 	resource              string
+	// serverName is the MCP server being authorized, shown on the callback page.
+	serverName string
+}
+
+// buildAuthorizeURL assembles the authorization request. Split out from the
+// browser flow so the exact wire parameters are unit-testable.
+func buildAuthorizeURL(p loopbackAuthParams, challenge, state string) string {
+	q := url.Values{}
+	q.Set("response_type", "code")
+	q.Set("client_id", p.clientID)
+	q.Set("redirect_uri", p.redirectURI)
+	q.Set("code_challenge", challenge)
+	q.Set("code_challenge_method", "S256")
+	q.Set("state", state)
+	if p.scope != "" {
+		q.Set("scope", p.scope)
+	}
+	if p.resource != "" {
+		// RFC 8707 resource indicator — binds the token to this MCP server.
+		q.Set("resource", p.resource)
+	}
+	return p.authorizationEndpoint + "?" + q.Encode()
 }
 
 // runLoopbackAuth opens the browser at the authorization endpoint and waits for
@@ -49,21 +71,7 @@ func runLoopbackAuth(ctx context.Context, listener net.Listener, p loopbackAuthP
 		return "", "", fmt.Errorf("%s: %w", i18n.T("mcp.oauth.state_failed"), err)
 	}
 
-	q := url.Values{}
-	q.Set("response_type", "code")
-	q.Set("client_id", p.clientID)
-	q.Set("redirect_uri", p.redirectURI)
-	q.Set("code_challenge", pkce.Challenge)
-	q.Set("code_challenge_method", "S256")
-	q.Set("state", state)
-	if p.scope != "" {
-		q.Set("scope", p.scope)
-	}
-	if p.resource != "" {
-		// RFC 8707 resource indicator — binds the token to this MCP server.
-		q.Set("resource", p.resource)
-	}
-	authURL := p.authorizationEndpoint + "?" + q.Encode()
+	authURL := buildAuthorizeURL(p, pkce.Challenge, state)
 
 	codeCh := make(chan string, 1)
 	errCh := make(chan error, 1)
@@ -75,7 +83,7 @@ func runLoopbackAuth(ctx context.Context, listener net.Listener, p loopbackAuthP
 	srv.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("X-Content-Type-Options", "nosniff")
 		w.Header().Set("X-Frame-Options", "DENY")
-		w.Header().Set("Content-Security-Policy", "default-src 'none'")
+		w.Header().Set("Content-Security-Policy", callbackCSP)
 		w.Header().Set("Cache-Control", "no-store")
 
 		if r.URL.Path != "/callback" {
@@ -83,23 +91,32 @@ func runLoopbackAuth(ctx context.Context, listener net.Listener, p loopbackAuthP
 			return
 		}
 		if r.URL.Query().Get("state") != state {
-			writeCallbackHTML(w, http.StatusForbidden, i18n.T("mcp.oauth.callback_csrf_html"))
+			writeCallbackHTML(w, http.StatusForbidden, callbackPage(toneFailure,
+				i18n.T("mcp.oauth.page.failed_title"), i18n.T("mcp.oauth.page.csrf_body"),
+				i18n.T("mcp.oauth.page.close_hint")))
 			errCh <- fmt.Errorf("%s", i18n.T("mcp.oauth.callback_csrf"))
 			return
 		}
 		if oauthErr := r.URL.Query().Get("error"); oauthErr != "" {
 			desc := r.URL.Query().Get("error_description")
-			writeCallbackHTML(w, http.StatusBadRequest, i18n.T("mcp.oauth.callback_error_html"))
+			writeCallbackHTML(w, http.StatusBadRequest, callbackPage(toneFailure,
+				i18n.T("mcp.oauth.page.failed_title"), i18n.T("mcp.oauth.page.error_body"),
+				i18n.T("mcp.oauth.page.retry_hint")))
 			errCh <- fmt.Errorf("%s", i18n.T("mcp.oauth.callback_server_error", oauthErr, desc))
 			return
 		}
 		c := r.URL.Query().Get("code")
 		if c == "" {
-			writeCallbackHTML(w, http.StatusBadRequest, i18n.T("mcp.oauth.callback_nocode_html"))
+			writeCallbackHTML(w, http.StatusBadRequest, callbackPage(toneFailure,
+				i18n.T("mcp.oauth.page.failed_title"), i18n.T("mcp.oauth.page.nocode_body"),
+				i18n.T("mcp.oauth.page.retry_hint")))
 			errCh <- fmt.Errorf("%s", i18n.T("mcp.oauth.callback_nocode"))
 			return
 		}
-		writeCallbackHTML(w, http.StatusOK, i18n.T("mcp.oauth.callback_success_html"))
+		writeCallbackHTML(w, http.StatusOK, callbackPage(toneSuccess,
+			i18n.T("mcp.oauth.page.success_title"),
+			i18n.T("mcp.oauth.page.success_body", p.serverName),
+			i18n.T("mcp.oauth.page.close_hint")))
 		codeCh <- c
 	})
 
@@ -122,6 +139,13 @@ func runLoopbackAuth(ctx context.Context, listener net.Listener, p loopbackAuthP
 		fmt.Println(i18n.T("mcp.oauth.browser_hint"))
 		fmt.Println(authURL)
 	}
+	// Authorization servers route the browser by its existing session cookies:
+	// AWS signin, for one, sends a browser with a live IAM session down a
+	// different path that answers 400 for this flow, while an anonymous browser
+	// authorizes fine. Nothing in the request distinguishes the two, so the
+	// only recovery is on the human's side — say so up front instead of
+	// waiting silently while the user stares at the provider's error page.
+	fmt.Println(i18n.T("mcp.oauth.stale_session_hint"))
 	fmt.Println(i18n.T("mcp.oauth.waiting"))
 
 	timeoutTimer := time.NewTimer(mcpOAuthCallbackTimeout)
@@ -133,10 +157,19 @@ func runLoopbackAuth(ctx context.Context, listener net.Listener, p loopbackAuthP
 	case cbErr := <-errCh:
 		return "", "", fmt.Errorf("%s: %w", i18n.T("mcp.oauth.callback_failed"), cbErr)
 	case <-timeoutTimer.C:
-		return "", "", fmt.Errorf("%s", i18n.T("mcp.oauth.callback_timeout", mcpOAuthCallbackTimeout))
+		return "", "", callbackTimeoutError(mcpOAuthCallbackTimeout)
 	case <-ctx.Done():
 		return "", "", ctx.Err()
 	}
+}
+
+// callbackTimeoutError builds the "nobody completed the flow" error. The most
+// common cause is the provider refusing the authorization page under the
+// browser's existing session, so the recovery hint travels with the error too:
+// the printed hint scrolls away while the user is off in the browser, and this
+// error is what the model relays back to them.
+func callbackTimeoutError(d time.Duration) error {
+	return fmt.Errorf("%s — %s", i18n.T("mcp.oauth.callback_timeout", d), i18n.T("mcp.oauth.stale_session_hint"))
 }
 
 func writeCallbackHTML(w http.ResponseWriter, status int, body string) {

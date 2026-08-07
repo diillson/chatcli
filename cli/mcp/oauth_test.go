@@ -10,9 +10,13 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/diillson/chatcli/auth"
+	"github.com/diillson/chatcli/i18n"
 	"go.uber.org/zap"
 )
 
@@ -256,5 +260,110 @@ func TestLoginClientID_ReusesStoredWithoutDCR(t *testing.T) {
 	// nothing stored and no DCR: same actionable error.
 	if _, err := loginClientID(context.Background(), disc, asMeta, nil, "http://127.0.0.1:8765/callback", ""); err == nil {
 		t.Fatal("no stored client and no DCR must error")
+	}
+}
+
+// TestCallbackTimeoutErrorCarriesRecoveryHint: when nobody completes the
+// browser flow, the most common real-world cause is the provider rejecting
+// the authorization page under the browser's existing session (observed on
+// AWS signin: a live IAM session gets routed to a path that answers 400,
+// while an anonymous browser authorizes fine). The timeout error must carry
+// the recovery hint — the printed one has long scrolled away, and this error
+// is what the tool relays back to the user.
+func TestCallbackTimeoutErrorCarriesRecoveryHint(t *testing.T) {
+	err := callbackTimeoutError(5 * time.Minute)
+	if err == nil {
+		t.Fatal("timeout must produce an error")
+	}
+	msg := err.Error()
+	if !strings.Contains(msg, i18n.T("mcp.oauth.callback_timeout", 5*time.Minute)) {
+		t.Fatalf("timeout error lost its base message: %s", msg)
+	}
+	if !strings.Contains(msg, i18n.T("mcp.oauth.stale_session_hint")) {
+		t.Fatalf("timeout error must carry the stale-session recovery hint: %s", msg)
+	}
+}
+
+// TestBuildAuthorizeURL_CarriesEveryRequiredParam: the authorization request
+// must keep every parameter the server requires — AWS rejects the request
+// outright without the RFC 8707 resource indicator, and answers 400 when the
+// redirect does not match the registered one byte for byte.
+func TestBuildAuthorizeURL_CarriesEveryRequiredParam(t *testing.T) {
+	p := loopbackAuthParams{
+		authorizationEndpoint: "https://as.example/v1/authorize",
+		clientID:              "client-1",
+		redirectURI:           "http://127.0.0.1:8765/callback",
+		resource:              "https://mcp.example/mcp",
+		scope:                 "read",
+	}
+	u, err := url.Parse(buildAuthorizeURL(p, "chal", "st8"))
+	if err != nil {
+		t.Fatalf("authorize URL is not parseable: %v", err)
+	}
+	q := u.Query()
+	for k, want := range map[string]string{
+		"response_type": "code", "client_id": "client-1",
+		"redirect_uri": "http://127.0.0.1:8765/callback", "code_challenge": "chal",
+		"code_challenge_method": "S256", "state": "st8", "scope": "read",
+		"resource": "https://mcp.example/mcp",
+	} {
+		if got := q.Get(k); got != want {
+			t.Errorf("%s = %q, want %q", k, got, want)
+		}
+	}
+
+}
+
+// TestCallbackPage_RendersAndEscapes: the callback page is the only chatcli UI
+// outside the terminal, and it renders values that come from the provider, so
+// it must be a complete document that never lets those values become markup.
+func TestCallbackPage_RendersAndEscapes(t *testing.T) {
+	html := callbackPage(toneSuccess, "Authorized", `server "aws-mcp" <ok>`, "close this tab")
+	for _, want := range []string{"<!doctype html>", "<title>", "Authorized", "close this tab"} {
+		if !strings.Contains(html, want) {
+			t.Errorf("page is missing %q", want)
+		}
+	}
+	if strings.Contains(html, `<ok>`) {
+		t.Error("provider-supplied text must be escaped, not rendered as markup")
+	}
+	if !strings.Contains(html, "&lt;ok&gt;") {
+		t.Errorf("escaped text missing from page: %s", html)
+	}
+	// Strict CSP: the page must never reach the network for an asset.
+	for _, forbidden := range []string{"<script", "http://", "https://", "@import", "src="} {
+		if strings.Contains(html, forbidden) {
+			t.Errorf("page must be self-contained, found %q", forbidden)
+		}
+	}
+}
+
+// TestCallbackPage_ToneSwitchesAccent: failures must not look like successes —
+// the failure tone carries its own accent class and glyph.
+func TestCallbackPage_ToneSwitchesAccent(t *testing.T) {
+	ok := callbackPage(toneSuccess, "t", "m", "d")
+	bad := callbackPage(toneFailure, "t", "m", "d")
+	if strings.Contains(ok, `class="card failure"`) {
+		t.Error("success page must not carry the failure accent")
+	}
+	if !strings.Contains(bad, `class="card failure"`) {
+		t.Errorf("failure page must carry the failure accent")
+	}
+	if strings.Contains(bad, ">✓<") {
+		t.Error("failure page must not show the success glyph")
+	}
+}
+
+// TestCallbackCSPAllowsOnlyInlineStyle: the page needs inline styles to look
+// like anything at all; everything else must stay denied.
+func TestCallbackCSPAllowsOnlyInlineStyle(t *testing.T) {
+	if !strings.Contains(callbackCSP, "default-src 'none'") {
+		t.Fatalf("CSP must deny by default: %s", callbackCSP)
+	}
+	if !strings.Contains(callbackCSP, "style-src 'unsafe-inline'") {
+		t.Fatalf("CSP must allow the inline styles the page depends on: %s", callbackCSP)
+	}
+	if strings.Contains(callbackCSP, "script-src") {
+		t.Fatalf("CSP must not grant scripts: %s", callbackCSP)
 	}
 }
