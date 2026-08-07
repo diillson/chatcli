@@ -418,6 +418,14 @@ type ChatCLI struct {
 	parkOutcomeMu sync.Mutex
 	parkOutcomes  map[string]parkOutcome
 
+	// parkWaiters holds the in-turn wake channels registered by parks taken
+	// on unattended surfaces (ACP / MCP server / gateway), where no REPL
+	// loop exists to drain pendingResumeQueue. The bridge delivers the wake
+	// directly to the blocked turn instead of queueing it. Keyed by token;
+	// channels are buffered(1) so the scheduler dispatcher never blocks.
+	parkWaiterMu sync.Mutex
+	parkWaiters  map[string]chan parkOutcome
+
 	// recentlyResumedTokens tracks tokens that drainPendingResumes
 	// just consumed, so the auto-injected "/resume <token>" command
 	// (fired by NotifyParkComplete via TTY inject) can short-circuit

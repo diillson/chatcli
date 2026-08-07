@@ -70,6 +70,14 @@ type AgentMode struct {
 	isCoderMode      bool
 	isOneShot        bool
 	coderBannerShown bool
+	// inlineParkToken names the park this run is waiting on IN-TURN, set by
+	// handleAgentPark on unattended surfaces (ACP / MCP server / gateway)
+	// where no REPL exists to drain the resume queue. Run() sees the park
+	// sentinel, finds this token, and blocks in runParkedInline until the
+	// scheduler delivers the wake — keeping the client's request open and
+	// the event sink streaming instead of ending the turn into a resume
+	// that could never be delivered.
+	inlineParkToken string
 	// pendingUserImages carries vision attachments for the NEXT user turn,
 	// set by the caller right before Run/RunOnce and consumed (then cleared)
 	// when the user message is appended. Transient per-turn state — the Run
@@ -1158,10 +1166,17 @@ func (a *AgentMode) Run(ctx context.Context, query string, additionalContext str
 
 	// --- 2. O LOOP DE RACIOCÍNIO-AÇÃO (ReAct) ---
 	err := a.processAIResponseAndAct(ctx, maxTurns)
-	// Park is a successful suspension, not an error. The user is back at
-	// the prompt; the scheduler will fire the resume in due time.
+	// Park is a successful suspension, not an error. On the REPL the user
+	// is back at the prompt and the scheduler fires the resume in due time.
+	// Unattended surfaces (ACP / MCP server / gateway) have no prompt loop
+	// to deliver that resume into — keep the turn open and wait for the
+	// wake in-process instead, streaming the resumed cycles on the same
+	// client request.
 	if errors.Is(err, errAgentParkedRequested) {
-		return nil
+		if !a.cli.unattended {
+			return nil
+		}
+		err = a.runParkedInline(ctx)
 	}
 	// Mirror the user request + final answer onto the shared conversation so
 	// the turn shows up as context on other channels. No-op when hub sync is

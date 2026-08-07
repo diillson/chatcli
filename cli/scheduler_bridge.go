@@ -767,6 +767,25 @@ func (b *schedulerBridge) wakeParkedAgent(token, outcome, detail string) error {
 	if b.cli == nil {
 		return fmt.Errorf("park: bridge not bound to CLI")
 	}
+
+	// In-turn waiter first (unattended surfaces): the park's own turn is
+	// blocked in runParkedInline waiting for this wake — deliver directly
+	// and skip the REPL machinery (queue, banner, TTY inject), none of
+	// which can reach a remote client. Buffered(1) send never blocks; a
+	// duplicate wake for the same token is dropped on the floor, matching
+	// the idempotent-resume semantics of the queue path.
+	if ch := b.cli.parkWaiter(token); ch != nil {
+		select {
+		case ch <- parkOutcome{Outcome: outcome, Detail: detail}:
+		default:
+		}
+		b.cli.logger.Info("park: wake delivered to in-turn waiter",
+			zap.String("token", token),
+			zap.String("outcome", outcome))
+		b.cli.markSchedulerDirty()
+		return nil
+	}
+
 	b.cli.pendingResumeMu.Lock()
 	b.cli.pendingResumeQueue = append(b.cli.pendingResumeQueue, token)
 	b.cli.pendingResumeMu.Unlock()
@@ -786,12 +805,16 @@ func (b *schedulerBridge) wakeParkedAgent(token, outcome, detail string) error {
 	// Print a banner so the user sees the readiness immediately. fmt
 	// writes from this goroutine appear above the go-prompt input line
 	// — go-prompt redraws the prompt at the bottom on its next tick.
-	fmt.Println()
-	fmt.Println(colorize("  🔔 "+
-		fmt.Sprintf("park ready: token=%s outcome=%s — auto-resuming…",
-			token, outcome),
-		ColorCyan+ColorBold))
-	fmt.Println()
+	// Never on unattended surfaces: there stdout is a protocol channel
+	// or a quarantine pipe, and there is no prompt to redraw.
+	if !b.cli.unattended {
+		fmt.Println()
+		fmt.Println(colorize("  🔔 "+
+			fmt.Sprintf("park ready: token=%s outcome=%s — auto-resuming…",
+				token, outcome),
+			ColorCyan+ColorBold))
+		fmt.Println()
+	}
 
 	b.cli.markSchedulerDirty()
 	b.cli.logger.Info("park: notified ready",
@@ -819,6 +842,13 @@ func (b *schedulerBridge) wakeParkedAgent(token, outcome, detail string) error {
 	// as soon as the foreground work returns to the idle prompt.
 	if b.cli.isExecuting.Load() {
 		b.cli.logger.Debug("park: run active, skipping TTY inject (resume stays queued)",
+			zap.String("token", token))
+		return nil
+	}
+	if b.cli.unattended {
+		// No controlling TTY and no REPL drain — the token stays queued for
+		// forensics, but injecting would write into the protocol channel.
+		b.cli.logger.Debug("park: unattended surface, skipping TTY inject",
 			zap.String("token", token))
 		return nil
 	}
