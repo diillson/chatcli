@@ -1166,17 +1166,9 @@ func (a *AgentMode) Run(ctx context.Context, query string, additionalContext str
 
 	// --- 2. O LOOP DE RACIOCÍNIO-AÇÃO (ReAct) ---
 	err := a.processAIResponseAndAct(ctx, maxTurns)
-	// Park is a successful suspension, not an error. On the REPL the user
-	// is back at the prompt and the scheduler fires the resume in due time.
-	// Unattended surfaces (ACP / MCP server / gateway) have no prompt loop
-	// to deliver that resume into — keep the turn open and wait for the
-	// wake in-process instead, streaming the resumed cycles on the same
-	// client request.
-	if errors.Is(err, errAgentParkedRequested) {
-		if !a.cli.unattended {
-			return nil
-		}
-		err = a.runParkedInline(ctx)
+	endRun, err := a.settleParkSentinel(ctx, err)
+	if endRun {
+		return err
 	}
 	// Mirror the user request + final answer onto the shared conversation so
 	// the turn shows up as context on other channels. No-op when hub sync is

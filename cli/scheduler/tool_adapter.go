@@ -104,8 +104,10 @@ type ToolOutput struct {
 type ToolAdapter struct {
 	s *Scheduler
 	// progress, when set, receives a heartbeat during synchronous WaitUntil
-	// so long waits are visible instead of minutes of dead silence.
-	progress func(id JobID, status JobStatus, elapsed, remaining time.Duration)
+	// so long waits are visible instead of minutes of dead silence. Held
+	// behind a pointer so the exported struct stays comparable (a bare func
+	// field would be a breaking API change).
+	progress *func(id JobID, status JobStatus, elapsed, remaining time.Duration)
 }
 
 // NewToolAdapter builds the adapter.
@@ -113,7 +115,7 @@ func NewToolAdapter(s *Scheduler) *ToolAdapter { return &ToolAdapter{s: s} }
 
 // WithWaitProgress installs the synchronous-wait heartbeat callback.
 func (t *ToolAdapter) WithWaitProgress(fn func(id JobID, status JobStatus, elapsed, remaining time.Duration)) *ToolAdapter {
-	t.progress = fn
+	t.progress = &fn
 	return t
 }
 
@@ -216,7 +218,7 @@ func (t *ToolAdapter) WaitUntil(ctx context.Context, owner Owner, rawIn string) 
 			if t.progress != nil && time.Now().After(nextBeat) {
 				elapsed := time.Since(start).Round(time.Second)
 				remaining := (timeout - time.Since(start)).Round(time.Second)
-				t.progress(j.ID, j.Status, elapsed, remaining)
+				(*t.progress)(j.ID, j.Status, elapsed, remaining)
 				nextBeat = time.Now().Add(waitProgressInterval)
 			}
 		}

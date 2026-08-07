@@ -26,7 +26,9 @@ func TestSseTransport_ApplyHeaders_InjectsCustomHeadersAndAuth(t *testing.T) {
 		auth: &AuthConfig{Type: "bearer", Token: "${MY_TOKEN}"},
 	}
 	req, _ := http.NewRequest("GET", "http://example/sse", nil)
-	tp.applyHeaders(req)
+	if err := tp.applyHeaders(req); err != nil {
+		t.Fatalf("applyHeaders: %v", err)
+	}
 
 	if got := req.Header.Get("X-Static"); got != "literal" {
 		t.Errorf("X-Static = %q, want literal", got)
@@ -42,7 +44,9 @@ func TestSseTransport_ApplyHeaders_InjectsCustomHeadersAndAuth(t *testing.T) {
 func TestSseTransport_ApplyHeaders_NoConfigIsNoop(t *testing.T) {
 	tp := &sseTransport{}
 	req, _ := http.NewRequest("GET", "http://example/sse", nil)
-	tp.applyHeaders(req) // must not panic
+	if err := tp.applyHeaders(req); err != nil { // must not panic
+		t.Fatalf("applyHeaders: %v", err)
+	}
 	if len(req.Header) != 0 {
 		t.Errorf("empty config should not add headers; got %v", req.Header)
 	}

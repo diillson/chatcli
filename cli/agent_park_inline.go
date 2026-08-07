@@ -55,6 +55,23 @@ func (cli *ChatCLI) unregisterParkWaiter(token string) {
 	cli.parkWaiterMu.Unlock()
 }
 
+// settleParkSentinel resolves the park sentinel for the current surface.
+// Park is a successful suspension, not an error: on the REPL the run ends
+// (the prompt loop owns the resume and the scheduler fires it in due time),
+// so endRun reports that Run must return immediately with the given error.
+// Unattended surfaces (ACP / MCP server / gateway) have no prompt loop to
+// deliver that resume into — the turn stays open and waits for the wake
+// in-process, streaming the resumed cycles on the same client request.
+func (a *AgentMode) settleParkSentinel(ctx context.Context, err error) (endRun bool, out error) {
+	if !errors.Is(err, errAgentParkedRequested) {
+		return false, err
+	}
+	if !a.cli.unattended {
+		return true, nil
+	}
+	return false, a.runParkedInline(ctx)
+}
+
 // runParkedInline blocks the current run on the registered park waiter and
 // re-enters the loop when the scheduler delivers the wake. Re-parks inside
 // the resumed loop (the normal monitoring cycle) land back here, so one
