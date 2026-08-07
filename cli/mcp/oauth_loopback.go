@@ -35,6 +35,26 @@ type loopbackAuthParams struct {
 	resource              string
 }
 
+// buildAuthorizeURL assembles the authorization request. Split out from the
+// browser flow so the exact wire parameters are unit-testable.
+func buildAuthorizeURL(p loopbackAuthParams, challenge, state string) string {
+	q := url.Values{}
+	q.Set("response_type", "code")
+	q.Set("client_id", p.clientID)
+	q.Set("redirect_uri", p.redirectURI)
+	q.Set("code_challenge", challenge)
+	q.Set("code_challenge_method", "S256")
+	q.Set("state", state)
+	if p.scope != "" {
+		q.Set("scope", p.scope)
+	}
+	if p.resource != "" {
+		// RFC 8707 resource indicator — binds the token to this MCP server.
+		q.Set("resource", p.resource)
+	}
+	return p.authorizationEndpoint + "?" + q.Encode()
+}
+
 // runLoopbackAuth opens the browser at the authorization endpoint and waits for
 // the callback, returning the authorization code and the PKCE verifier used.
 // The listener is owned by the caller for binding, but this function serves and
@@ -49,21 +69,7 @@ func runLoopbackAuth(ctx context.Context, listener net.Listener, p loopbackAuthP
 		return "", "", fmt.Errorf("%s: %w", i18n.T("mcp.oauth.state_failed"), err)
 	}
 
-	q := url.Values{}
-	q.Set("response_type", "code")
-	q.Set("client_id", p.clientID)
-	q.Set("redirect_uri", p.redirectURI)
-	q.Set("code_challenge", pkce.Challenge)
-	q.Set("code_challenge_method", "S256")
-	q.Set("state", state)
-	if p.scope != "" {
-		q.Set("scope", p.scope)
-	}
-	if p.resource != "" {
-		// RFC 8707 resource indicator — binds the token to this MCP server.
-		q.Set("resource", p.resource)
-	}
-	authURL := p.authorizationEndpoint + "?" + q.Encode()
+	authURL := buildAuthorizeURL(p, pkce.Challenge, state)
 
 	codeCh := make(chan string, 1)
 	errCh := make(chan error, 1)

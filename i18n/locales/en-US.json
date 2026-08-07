@@ -29,7 +29,7 @@
   "mcp.oauth.browser_failed": "Could not open a browser automatically. Open this URL manually:",
   "mcp.oauth.browser_hint": "If your browser did not open, visit this URL:",
   "mcp.oauth.waiting": "Waiting for authorization to complete…",
-  "mcp.oauth.stale_session_hint": "If the provider page shows \"400 Bad Request\" or an outdated-link error, an existing session for that provider in your browser is blocking the flow: open the URL above in a private/incognito window, or sign out of the provider and retry.",
+  "mcp.oauth.stale_session_hint": "If the provider page shows \"400 Bad Request\" or an outdated-link error, the session your browser already holds for that provider is blocking the flow: sign out of the provider and sign in again, then retry — or open the URL above in a private/incognito window.",
   "mcp.oauth.callback_failed": "OAuth callback failed",
   "mcp.oauth.callback_timeout": "timed out waiting for OAuth authorization after %s",
   "mcp.oauth.not_enabled": "MCP is not enabled in this session",

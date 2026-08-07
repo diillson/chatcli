@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 	"time"
@@ -281,4 +282,34 @@ func TestCallbackTimeoutErrorCarriesRecoveryHint(t *testing.T) {
 	if !strings.Contains(msg, i18n.T("mcp.oauth.stale_session_hint")) {
 		t.Fatalf("timeout error must carry the stale-session recovery hint: %s", msg)
 	}
+}
+
+// TestBuildAuthorizeURL_CarriesEveryRequiredParam: the authorization request
+// must keep every parameter the server requires — AWS rejects the request
+// outright without the RFC 8707 resource indicator, and answers 400 when the
+// redirect does not match the registered one byte for byte.
+func TestBuildAuthorizeURL_CarriesEveryRequiredParam(t *testing.T) {
+	p := loopbackAuthParams{
+		authorizationEndpoint: "https://as.example/v1/authorize",
+		clientID:              "client-1",
+		redirectURI:           "http://127.0.0.1:8765/callback",
+		resource:              "https://mcp.example/mcp",
+		scope:                 "read",
+	}
+	u, err := url.Parse(buildAuthorizeURL(p, "chal", "st8"))
+	if err != nil {
+		t.Fatalf("authorize URL is not parseable: %v", err)
+	}
+	q := u.Query()
+	for k, want := range map[string]string{
+		"response_type": "code", "client_id": "client-1",
+		"redirect_uri": "http://127.0.0.1:8765/callback", "code_challenge": "chal",
+		"code_challenge_method": "S256", "state": "st8", "scope": "read",
+		"resource": "https://mcp.example/mcp",
+	} {
+		if got := q.Get(k); got != want {
+			t.Errorf("%s = %q, want %q", k, got, want)
+		}
+	}
+
 }
