@@ -206,6 +206,12 @@ type oauthTokenProvider struct {
 	lastErr     error
 	invalidated bool
 
+	// terminalErr latches the first refresh failure that retrying cannot fix
+	// (expired/revoked refresh token). Once set, Token fails fast without
+	// another network round-trip and the background loop stops — recovery
+	// requires a new interactive login, which builds a fresh provider.
+	terminalErr error
+
 	refreshLead         time.Duration
 	refreshMinWait      time.Duration
 	refreshErrorBackoff time.Duration
@@ -271,6 +277,12 @@ func (p *oauthTokenProvider) Token(ctx context.Context) (string, error) {
 		return token, nil
 	}
 
+	if p.terminalErr != nil {
+		err := p.terminalErr
+		p.mu.Unlock()
+		return "", err
+	}
+
 	if p.refreshing != nil {
 		done := p.refreshing
 		p.mu.Unlock()
@@ -301,6 +313,8 @@ func (p *oauthTokenProvider) Token(ctx context.Context) (string, error) {
 	p.lastErr = err
 	if err == nil {
 		p.invalidated = false
+	} else if IsTerminalTokenError(err) {
+		p.terminalErr = err
 	}
 	close(done)
 	token := p.cred.Access
@@ -384,6 +398,19 @@ func (p *oauthTokenProvider) backgroundLoop() {
 		}
 
 		if _, err := p.Token(p.bgCtx); err != nil {
+			p.mu.Lock()
+			terminal := p.terminalErr != nil
+			p.mu.Unlock()
+			if terminal {
+				// The refresh token is dead — retrying only hammers the
+				// authorization server. Stop; a new login builds a new provider.
+				if p.logger != nil {
+					p.logger.Warn(i18n.T("auth.token_provider.background_refresh_terminal"),
+						zap.String("provider", string(p.cred.Provider)),
+						zap.Error(err))
+				}
+				return
+			}
 			if p.logger != nil {
 				p.logger.Warn(i18n.T("auth.token_provider.background_refresh_failed"),
 					zap.String("provider", string(p.cred.Provider)),

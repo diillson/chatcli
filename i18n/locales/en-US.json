@@ -1999,6 +1999,7 @@
   "auth.token_provider.empty_token": "auth token is empty",
   "auth.token_provider.persist_failed": "Failed to persist refreshed OAuth token to auth store",
   "auth.token_provider.background_refresh_failed": "Proactive OAuth refresh failed; will retry",
+  "auth.token_provider.background_refresh_terminal": "OAuth refresh token was rejected (expired or revoked); automatic renewal stopped — log in again to recover",
   "auth.login.anthropic_opening": "\nAUTH [Anthropic] Opening browser for authentication...",
   "auth.login.browser_failed": "Could not open browser automatically. Open this URL manually:",
   "auth.login.anthropic_browser_ok": "Browser opened. After authorizing, copy the code shown on the page and paste it below.",

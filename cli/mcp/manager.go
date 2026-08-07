@@ -1229,6 +1229,15 @@ func (m *Manager) callTool(ctx context.Context, conn *ServerConnection, toolName
 
 	result, err := conn.transport.Call("tools/call", params)
 	if err != nil {
+		// A mid-session OAuth failure (dead refresh token, revoked grant)
+		// flags the server so /mcp status and the agent's auth note surface
+		// the login hint instead of advertising tools that can only fail.
+		if oe, ok := IsOAuthRequired(err); ok {
+			m.mu.Lock()
+			conn.Status.AuthRequired = true
+			conn.oauthChallenge = oe.Challenge
+			m.mu.Unlock()
+		}
 		return nil, err
 	}
 

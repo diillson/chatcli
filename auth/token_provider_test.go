@@ -349,3 +349,119 @@ func TestOAuthTokenProvider_CloseStopsBackground(t *testing.T) {
 	// Close is idempotent.
 	p.Close()
 }
+
+func terminalRefreshErr() error {
+	return fmt.Errorf("mcp refresh failed: %w", &TokenExchangeError{
+		StatusCode: http.StatusUnauthorized,
+		Status:     "401 Unauthorized",
+		Code:       "TOKEN_EXPIRED",
+		Body:       `{"error":"TOKEN_EXPIRED"}`,
+	})
+}
+
+func TestOAuthTokenProvider_TerminalErrorFailsFast(t *testing.T) {
+	var refreshCount int32
+	p := &oauthTokenProvider{
+		cred: AuthProfileCredential{
+			Provider: ProviderAnthropic,
+			Access:   "stale",
+			Refresh:  "rt",
+			Expires:  time.Now().Add(-1 * time.Hour).UnixMilli(),
+		},
+		logger: zap.NewNop(),
+		refreshFn: func(_ context.Context, _ *AuthProfileCredential, _ *zap.Logger) (*AuthProfileCredential, error) {
+			atomic.AddInt32(&refreshCount, 1)
+			return nil, terminalRefreshErr()
+		},
+	}
+
+	if _, err := p.Token(context.Background()); !IsTerminalTokenError(err) {
+		t.Fatalf("first Token error = %v, want terminal token error", err)
+	}
+	// Subsequent calls must not hit the network again — the latched terminal
+	// error is returned without invoking refreshFn.
+	if _, err := p.Token(context.Background()); !IsTerminalTokenError(err) {
+		t.Fatalf("second Token error = %v, want terminal token error", err)
+	}
+	if got := atomic.LoadInt32(&refreshCount); got != 1 {
+		t.Errorf("refreshes = %d, want 1 (terminal error latched)", got)
+	}
+	// Invalidate must not clear the latch: the refresh token is dead until a
+	// new login builds a new provider.
+	p.Invalidate()
+	if _, err := p.Token(context.Background()); !IsTerminalTokenError(err) {
+		t.Fatalf("post-Invalidate Token error = %v, want terminal token error", err)
+	}
+	if got := atomic.LoadInt32(&refreshCount); got != 1 {
+		t.Errorf("refreshes after Invalidate = %d, want still 1", got)
+	}
+}
+
+func TestOAuthTokenProvider_TerminalErrorStopsBackgroundLoop(t *testing.T) {
+	var refreshCount int32
+	p := &oauthTokenProvider{
+		cred: AuthProfileCredential{
+			Provider: ProviderAnthropic,
+			Access:   "v1",
+			Refresh:  "rt",
+			Expires:  time.Now().Add(50 * time.Millisecond).UnixMilli(),
+		},
+		logger:              zap.NewNop(),
+		refreshLead:         10 * time.Millisecond,
+		refreshMinWait:      10 * time.Millisecond,
+		refreshErrorBackoff: 10 * time.Millisecond,
+		refreshFn: func(_ context.Context, _ *AuthProfileCredential, _ *zap.Logger) (*AuthProfileCredential, error) {
+			atomic.AddInt32(&refreshCount, 1)
+			return nil, terminalRefreshErr()
+		},
+	}
+	p.bgCtx, p.bgCancel = context.WithCancel(context.Background())
+	p.bgDone = make(chan struct{})
+	go p.backgroundLoop()
+	defer p.Close()
+
+	// The loop must exit on its own after the first terminal failure —
+	// without Close being called.
+	select {
+	case <-p.bgDone:
+	case <-time.After(5 * time.Second):
+		t.Fatal("background loop kept retrying a terminal refresh error")
+	}
+	if got := atomic.LoadInt32(&refreshCount); got != 1 {
+		t.Errorf("refreshes = %d, want 1 (no retry on terminal error)", got)
+	}
+}
+
+func TestOAuthTokenProvider_TransientErrorKeepsRetrying(t *testing.T) {
+	var refreshCount int32
+	retried := make(chan struct{})
+	var once sync.Once
+	p := &oauthTokenProvider{
+		cred: AuthProfileCredential{
+			Provider: ProviderAnthropic,
+			Access:   "v1",
+			Refresh:  "rt",
+			Expires:  time.Now().Add(50 * time.Millisecond).UnixMilli(),
+		},
+		logger:              zap.NewNop(),
+		refreshLead:         10 * time.Millisecond,
+		refreshMinWait:      10 * time.Millisecond,
+		refreshErrorBackoff: 10 * time.Millisecond,
+		refreshFn: func(_ context.Context, _ *AuthProfileCredential, _ *zap.Logger) (*AuthProfileCredential, error) {
+			if atomic.AddInt32(&refreshCount, 1) >= 2 {
+				once.Do(func() { close(retried) })
+			}
+			return nil, errors.New("connection reset by peer")
+		},
+	}
+	p.bgCtx, p.bgCancel = context.WithCancel(context.Background())
+	p.bgDone = make(chan struct{})
+	go p.backgroundLoop()
+	defer p.Close()
+
+	select {
+	case <-retried:
+	case <-time.After(5 * time.Second):
+		t.Fatal("background loop did not retry a transient refresh error")
+	}
+}

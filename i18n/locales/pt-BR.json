@@ -1999,6 +1999,7 @@
   "auth.token_provider.empty_token": "token de autenticação vazio",
   "auth.token_provider.persist_failed": "Falha ao persistir token OAuth renovado no auth store",
   "auth.token_provider.background_refresh_failed": "Refresh proativo de OAuth falhou; tentando de novo",
+  "auth.token_provider.background_refresh_terminal": "O refresh token OAuth foi rejeitado (expirado ou revogado); renovação automática interrompida — faça login novamente para recuperar",
   "auth.login.anthropic_opening": "\nAUTH [Anthropic] Abrindo o navegador para autenticação...",
   "auth.login.browser_failed": "Não foi possível abrir o navegador automaticamente. Abra esta URL manualmente:",
   "auth.login.anthropic_browser_ok": "Navegador aberto. Após autorizar, copie o código mostrado na página e cole abaixo.",

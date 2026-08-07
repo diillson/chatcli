@@ -154,3 +154,34 @@ func TestAuthRequiredServersAndHasCredential(t *testing.T) {
 		t.Fatalf("expected no stored credential")
 	}
 }
+
+// oauthFailTransport always fails Call with the configured error. Stands in
+// for a live transport whose stored refresh token died mid-session.
+type oauthFailTransport struct{ err error }
+
+func (f *oauthFailTransport) Call(string, interface{}) (json.RawMessage, error) { return nil, f.err }
+func (f *oauthFailTransport) Close(context.Context) error                       { return nil }
+
+// TestCallToolMarksAuthRequiredOnOAuthError guards the mid-session path: when
+// a tool call fails because the OAuth refresh token is dead, the server must
+// be flagged AuthRequired so /mcp status and the agent's auth note offer the
+// login hint — previously only the startup handshake ever set the flag.
+func TestCallToolMarksAuthRequiredOnOAuthError(t *testing.T) {
+	m := managerWithServer(t, ServerConfig{
+		Name: "aws", Transport: TransportStreamableHTTP, URL: "http://unused", Enabled: true,
+	})
+	conn := m.servers["aws"]
+	conn.Status.Connected = true
+	conn.transport = &oauthFailTransport{err: &OAuthRequiredError{Server: "aws"}}
+
+	_, err := m.callTool(context.Background(), conn, "ping", nil)
+	if _, ok := IsOAuthRequired(err); !ok {
+		t.Fatalf("callTool error = %v, want *OAuthRequiredError", err)
+	}
+	if !conn.Status.AuthRequired {
+		t.Error("server must be flagged AuthRequired after a mid-session OAuth failure")
+	}
+	if got := m.AuthRequiredServers(); len(got) != 1 || got[0] != "aws" {
+		t.Errorf("AuthRequiredServers() = %v, want [aws]", got)
+	}
+}

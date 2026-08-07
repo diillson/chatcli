@@ -456,3 +456,46 @@ func TestTransportStreamableHTTPConstant(t *testing.T) {
 		t.Errorf("TransportStreamableHTTP = %q, want \"http\"", TransportStreamableHTTP)
 	}
 }
+
+// TestHTTPTransport_TerminalRefreshFailureReturnsOAuthRequired guards the
+// dead-refresh-token path: when the token endpoint rejects the refresh token
+// terminally (401 TOKEN_EXPIRED), the call must surface the actionable
+// *OAuthRequiredError — not a generic network failure — and must not retry
+// against the MCP server.
+func TestHTTPTransport_TerminalRefreshFailureReturnsOAuthRequired(t *testing.T) {
+	tokenSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusUnauthorized)
+		_, _ = w.Write([]byte(`{"error":"TOKEN_EXPIRED","message":"The refresh token has expired."}`))
+	}))
+	defer tokenSrv.Close()
+
+	// The MCP server must never be reached — the token refresh fails first.
+	mcpSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		t.Error("MCP server must not be called when the refresh token is dead")
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer mcpSrv.Close()
+
+	cred := &auth.AuthProfileCredential{
+		CredType: auth.CredentialOAuth,
+		Provider: auth.ProviderMCP,
+		Access:   "stale-token",
+		Refresh:  "r1",
+		Expires:  1, // long expired → Token() must refresh before the call
+	}
+	provider := auth.NewOAuthTokenProviderWithRefresh(
+		cred, "", "test",
+		newMCPRefreshFunc(tokenSrv.URL, "client-1", "https://srv/mcp", "mcp"),
+		zap.NewNop(),
+	)
+	defer provider.Close()
+
+	tr := newTestTransport(t, mcpSrv, nil)
+	tr.tokenProvider = provider
+
+	_, err := tr.Call("tools/list", nil)
+	if _, ok := IsOAuthRequired(err); !ok {
+		t.Fatalf("Call error = %v, want *OAuthRequiredError", err)
+	}
+}
