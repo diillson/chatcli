@@ -24,7 +24,6 @@ import (
 	"os"
 	"regexp"
 	"strings"
-	"sync"
 	"sync/atomic"
 
 	"github.com/diillson/chatcli/cli/plugins"
@@ -32,11 +31,28 @@ import (
 
 var ansiSeq = regexp.MustCompile(`\x1b\[[0-9;]*[a-zA-Z]`)
 
-// rpcStdoutMu serializes os.Stdout redirection. os.Stdout is process-global and
-// the agent/coder loops mutate shared ChatCLI state (e.g. cli.history), so only
-// one captured run may be in flight at a time. Concurrent callers (e.g. the
-// gateway fanning out messages) block here rather than corrupting each other.
-var rpcStdoutMu sync.Mutex
+// rpcStdoutSem serializes os.Stdout redirection. os.Stdout is process-global
+// and the agent/coder loops mutate shared ChatCLI state (e.g. cli.history), so
+// only one captured run may be in flight at a time. Concurrent callers (e.g.
+// the gateway fanning out messages) queue here rather than corrupting each
+// other. A channel semaphore instead of a mutex so QUEUED callers honor their
+// context: one session pinned in a long run (or an unanswered permission
+// dialog) must not make another session's cancel unresponsive — a queued
+// caller gives up when its ctx dies instead of blocking forever head-of-line.
+var rpcStdoutSem = make(chan struct{}, 1)
+
+// acquireRPCStdout takes the capture slot, or fails when ctx dies first.
+func acquireRPCStdout(ctx context.Context) error {
+	select {
+	case rpcStdoutSem <- struct{}{}:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+// releaseRPCStdout frees the capture slot taken by acquireRPCStdout.
+func releaseRPCStdout() { <-rpcStdoutSem }
 
 // rpcCaptureActive is true while a captured run (MCP/ACP turn, gateway turn,
 // headless slash command) is in flight. The REPL's session write-through
@@ -56,18 +72,22 @@ func (cli *ChatCLI) SetRPCDangerPolicy(block bool) {
 }
 
 // captureRPCStdout runs fn with os.Stdout redirected and returns the captured
-// (ANSI-stripped) output. The pipe is always restored.
-func captureRPCStdout(fn func() error) (string, error) {
-	return captureStreaming(nil, fn)
+// (ANSI-stripped) output. The pipe is always restored. ctx bounds only the
+// WAIT for the capture slot — once acquired, fn owns its own lifetime.
+func captureRPCStdout(ctx context.Context, fn func() error) (string, error) {
+	return captureStreaming(ctx, nil, fn)
 }
 
 // captureStreaming runs fn with os.Stdout redirected to a pipe. As fn writes
 // lines, each is ANSI-stripped, appended to the returned transcript, and — when
 // emit is non-nil — forwarded to emit so callers can stream progress live. The
-// original stdout is always restored. Runs are serialized via rpcStdoutMu.
-func captureStreaming(emit func(string), fn func() error) (string, error) {
-	rpcStdoutMu.Lock()
-	defer rpcStdoutMu.Unlock()
+// original stdout is always restored. Runs are serialized via rpcStdoutSem;
+// ctx bounds only the wait for that slot.
+func captureStreaming(ctx context.Context, emit func(string), fn func() error) (string, error) {
+	if err := acquireRPCStdout(ctx); err != nil {
+		return "", err
+	}
+	defer releaseRPCStdout()
 	rpcCaptureActive.Store(true)
 	defer rpcCaptureActive.Store(false)
 
@@ -113,7 +133,7 @@ func captureStreaming(emit func(string), fn func() error) (string, error) {
 // RunAgentCaptured runs the full agent (ReAct) loop one-shot on task,
 // capturing its transcript. Used by the MCP agent_task tool.
 func (cli *ChatCLI) RunAgentCaptured(ctx context.Context, task string) (string, error) {
-	out, err := captureRPCStdout(func() error {
+	out, err := captureRPCStdout(ctx, func() error {
 		return cli.RunAgentFullOnce(ctx, task)
 	})
 	if err != nil {
@@ -130,7 +150,7 @@ func (cli *ChatCLI) RunAgentCaptured(ctx context.Context, task string) (string, 
 // and returning the full transcript. Used by the messaging gateway to
 // narrate task execution back to the chat platform.
 func (cli *ChatCLI) RunAgentStreaming(ctx context.Context, task string, emit func(string)) (string, error) {
-	out, err := captureStreaming(emit, func() error {
+	out, err := captureStreaming(ctx, emit, func() error {
 		return cli.RunAgentFullOnce(ctx, task)
 	})
 	if err != nil {
@@ -149,7 +169,7 @@ func (cli *ChatCLI) RunAgentStreaming(ctx context.Context, task string, emit fun
 // while answering as concise chat prose. The clean final answer is captured
 // into cli.lastAgentReply during the run.
 func (cli *ChatCLI) RunGatewayCoderStreaming(ctx context.Context, task string, emit func(string)) (string, error) {
-	out, err := captureStreaming(emit, func() error {
+	out, err := captureStreaming(ctx, emit, func() error {
 		return cli.RunGatewayCoderOnce(ctx, task)
 	})
 	if err != nil {
@@ -163,7 +183,7 @@ func (cli *ChatCLI) RunGatewayCoderStreaming(ctx context.Context, task string, e
 
 // RunCoderCaptured runs the coder loop one-shot on task, capturing output.
 func (cli *ChatCLI) RunCoderCaptured(ctx context.Context, task string) (string, error) {
-	out, err := captureRPCStdout(func() error {
+	out, err := captureRPCStdout(ctx, func() error {
 		return cli.RunCoderOnce(ctx, "/coder "+task)
 	})
 	if err != nil {

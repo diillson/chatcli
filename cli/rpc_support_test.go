@@ -11,7 +11,7 @@ import (
 )
 
 func TestCaptureRPCStdout(t *testing.T) {
-	out, err := captureRPCStdout(func() error {
+	out, err := captureRPCStdout(context.Background(), func() error {
 		fmt.Print("hello\x1b[31m world\x1b[0m") // includes ANSI codes
 		return nil
 	})
@@ -28,7 +28,7 @@ func TestCaptureRPCStdout(t *testing.T) {
 
 func TestCaptureStreaming_ForwardsLines(t *testing.T) {
 	var got []string
-	out, err := captureStreaming(func(s string) { got = append(got, s) }, func() error {
+	out, err := captureStreaming(context.Background(), func(s string) { got = append(got, s) }, func() error {
 		fmt.Println("first line")
 		fmt.Print("\x1b[32msecond\x1b[0m line\n") // ANSI must be stripped
 		fmt.Println("   ")                        // whitespace-only: emitted? no
@@ -140,4 +140,36 @@ func TestRunAnyRPCTool_JSONEnvelopeArgv(t *testing.T) {
 	if !strings.Contains(out, "rpcToolPolicy") {
 		t.Fatalf("coder must read through the JSON envelope, got: %.120q", out)
 	}
+}
+
+// TestCaptureStreaming_QueuedCallerHonorsContext: with the capture slot held
+// by another run, a queued caller must give up when its ctx dies instead of
+// blocking forever head-of-line — that cancel-immunity is how one stuck ACP
+// session used to wedge every other session in the process.
+func TestCaptureStreaming_QueuedCallerHonorsContext(t *testing.T) {
+	release := make(chan struct{})
+	holderDone := make(chan struct{})
+	holderIn := make(chan struct{})
+	go func() {
+		defer close(holderDone)
+		_, _ = captureStreaming(context.Background(), nil, func() error {
+			close(holderIn)
+			<-release
+			return nil
+		})
+	}()
+	<-holderIn // slot is now held
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	_, err := captureStreaming(ctx, nil, func() error {
+		t.Error("queued fn must not run after its ctx died")
+		return nil
+	})
+	if err == nil || !strings.Contains(err.Error(), "context canceled") {
+		t.Fatalf("queued caller error = %v, want context canceled", err)
+	}
+
+	close(release)
+	<-holderDone
 }

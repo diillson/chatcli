@@ -163,7 +163,11 @@ func (s *acpSink) RequestPermission(tc agentevents.ToolCall, reason string) (boo
 // (fail-safe).
 func (s *acpSink) RequestPermissionDecision(req agentevents.PermissionRequest) (agentevents.PermissionDecision, error) {
 	if s.acp.request == nil {
-		return agentevents.PermissionDenyOnce, nil
+		// No client requester wired (embedders/tests): there is no dialog to
+		// consult, so report "unsupported" — the loop then applies the same
+		// unattended fallback as a client without the method, instead of
+		// counting a dialog nobody saw as an explicit user denial.
+		return agentevents.PermissionDenyOnce, agentevents.ErrPermissionUnsupported
 	}
 	tc := req.Tool
 	title := tc.Title

@@ -495,7 +495,9 @@ func TestMCPPermissionsElicitationKillSwitch(t *testing.T) {
 }
 
 // TestMCPPermissionTimeoutParsing: env accepts Go durations and plain
-// seconds; 0/off disable the bound; garbage falls back to the default.
+// seconds; 0/off lift the bound to the 24h ceiling (a truly unbounded wait
+// let a dead-but-connected client pin the turn and the process-wide capture
+// slot forever); garbage falls back to the default.
 func TestMCPPermissionTimeoutParsing(t *testing.T) {
 	cases := []struct {
 		env  string
@@ -505,8 +507,10 @@ func TestMCPPermissionTimeoutParsing(t *testing.T) {
 		{"90s", 90 * time.Second},
 		{"2m", 2 * time.Minute},
 		{"45", 45 * time.Second},
-		{"0", 0},
-		{"off", 0},
+		{"0", mcpPermissionTimeoutDisabledCeiling},
+		{"0s", mcpPermissionTimeoutDisabledCeiling},
+		{"off", mcpPermissionTimeoutDisabledCeiling},
+		{"OFF", mcpPermissionTimeoutDisabledCeiling},
 		{"garbage", mcpPermissionTimeoutDefault},
 		{"-5s", mcpPermissionTimeoutDefault},
 	}

@@ -10,10 +10,13 @@ package cli
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"sort"
+	"time"
 
 	"github.com/diillson/chatcli/cli/plugins"
 	"github.com/diillson/chatcli/cli/scheduler"
+	"github.com/diillson/chatcli/i18n"
 )
 
 // schedulerPluginAdapter is the concrete plugins.SchedulerAdapter.
@@ -138,7 +141,14 @@ func (a *schedulerPluginAdapter) dispatch(
 		Tag:  owner.Tag,
 	}
 	if a.cli.scheduler != nil {
-		tool := scheduler.NewToolAdapter(a.cli.scheduler)
+		// The heartbeat prints through stdout: on the REPL it lands above the
+		// spinner; on RPC surfaces captureStreaming forwards it live to the
+		// client, so a long synchronous wait shows life signs instead of
+		// minutes of "thinking" silence.
+		tool := scheduler.NewToolAdapter(a.cli.scheduler).WithWaitProgress(
+			func(id scheduler.JobID, status scheduler.JobStatus, elapsed, remaining time.Duration) {
+				fmt.Println(colorize("  ⏳ "+i18n.T("scheduler.wait.progress", string(id), string(status), elapsed, remaining), ColorGray))
+			})
 		return local(tool, so)
 	}
 	if a.cli.schedulerRemote != nil {

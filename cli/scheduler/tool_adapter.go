@@ -103,10 +103,24 @@ type ToolOutput struct {
 // callable tools. Used by the ReAct loop and (via IPC) by the daemon.
 type ToolAdapter struct {
 	s *Scheduler
+	// progress, when set, receives a heartbeat during synchronous WaitUntil
+	// so long waits are visible instead of minutes of dead silence. Held
+	// behind a pointer so the exported struct stays comparable (a bare func
+	// field would be a breaking API change).
+	progress *func(id JobID, status JobStatus, elapsed, remaining time.Duration)
 }
 
 // NewToolAdapter builds the adapter.
 func NewToolAdapter(s *Scheduler) *ToolAdapter { return &ToolAdapter{s: s} }
+
+// WithWaitProgress installs the synchronous-wait heartbeat callback.
+func (t *ToolAdapter) WithWaitProgress(fn func(id JobID, status JobStatus, elapsed, remaining time.Duration)) *ToolAdapter {
+	t.progress = &fn
+	return t
+}
+
+// waitProgressInterval paces the WaitUntil heartbeat.
+const waitProgressInterval = 30 * time.Second
 
 // ScheduleJob implements the schedule_job tool.
 func (t *ToolAdapter) ScheduleJob(ctx context.Context, owner Owner, rawIn string) (string, error) {
@@ -169,10 +183,23 @@ func (t *ToolAdapter) WaitUntil(ctx context.Context, owner Owner, rawIn string) 
 	defer cancel()
 	ticker := time.NewTicker(500 * time.Millisecond)
 	defer ticker.Stop()
+	start := time.Now()
+	nextBeat := start.Add(waitProgressInterval)
 	for {
 		select {
 		case <-ctx2.Done():
-			return jsonError(ctx2.Err())
+			// Caller cancelled (Ctrl+C, IDE Stop): report the plain cause.
+			if ctx.Err() != nil {
+				return jsonError(ctx.Err())
+			}
+			// Our own wait budget elapsed. The job was NOT cancelled — it
+			// keeps running in the scheduler — so tell the model exactly how
+			// to pick it up instead of a bare "context deadline exceeded".
+			status := created.Status
+			if j, qerr := t.s.Query(created.ID); qerr == nil {
+				status = j.Status
+			}
+			return jsonError(waitGaveUpError(timeout, created.ID, status))
 		case <-ticker.C:
 			j, err := t.s.Query(created.ID)
 			if err != nil {
@@ -185,6 +212,14 @@ func (t *ToolAdapter) WaitUntil(ctx context.Context, owner Owner, rawIn string) 
 					out.Details = j.LastResult.Output
 				}
 				return jsonOK(out)
+			}
+			// Heartbeat: a synchronous wait can legitimately run for many
+			// minutes — surface life signs instead of dead silence.
+			if t.progress != nil && time.Now().After(nextBeat) {
+				elapsed := time.Since(start).Round(time.Second)
+				remaining := (timeout - time.Since(start)).Round(time.Second)
+				(*t.progress)(j.ID, j.Status, elapsed, remaining)
+				nextBeat = time.Now().Add(waitProgressInterval)
 			}
 		}
 	}
@@ -359,6 +394,15 @@ func jsonOK(v ToolOutput) (string, error) {
 		return "", err
 	}
 	return string(b), nil
+}
+
+// waitGaveUpError builds the actionable wait_until timeout message: the job
+// keeps running, so the model must learn how to pick the result up later —
+// a bare "context deadline exceeded" taught it nothing.
+func waitGaveUpError(timeout time.Duration, id JobID, status JobStatus) error {
+	return fmt.Errorf(
+		"wait_until: gave up waiting after %s; job %s is still %s and KEEPS RUNNING in background. Check it later with query_job {\"id\":%q}, or re-issue the wait with \"async\":true and react to the job event in a future turn",
+		timeout.Round(time.Second), id, status, id)
 }
 
 func jsonError(err error) (string, error) {

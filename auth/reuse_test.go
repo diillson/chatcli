@@ -8,8 +8,10 @@ package auth
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"go.uber.org/zap"
@@ -155,5 +157,73 @@ func TestNewOAuthTokenProviderNilRefreshFallback(t *testing.T) {
 	tok, err := p.Token(context.Background())
 	if err != nil || tok != "tok" {
 		t.Fatalf("Token = %q err=%v", tok, err)
+	}
+}
+
+func TestExchangeTokenForm_TypedErrorOnFailure(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusUnauthorized)
+		_, _ = w.Write([]byte(`{"error":"TOKEN_EXPIRED","message":"The refresh token has expired."}`))
+	}))
+	defer srv.Close()
+
+	_, err := ExchangeTokenForm(context.Background(), zap.NewNop(), srv.URL, TokenExchangeRequest{
+		GrantType:    "refresh_token",
+		ClientID:     "cid",
+		RefreshToken: "rt",
+	})
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	var te *TokenExchangeError
+	if !errors.As(err, &te) {
+		t.Fatalf("error %T is not *TokenExchangeError: %v", err, err)
+	}
+	if te.StatusCode != http.StatusUnauthorized || te.Code != "TOKEN_EXPIRED" {
+		t.Errorf("got status=%d code=%q, want 401 TOKEN_EXPIRED", te.StatusCode, te.Code)
+	}
+	if !IsTerminalTokenError(err) {
+		t.Error("401 TOKEN_EXPIRED must classify as terminal")
+	}
+	// The rendered message keeps the historical format so logs stay stable.
+	if want := "token exchange failed ("; !strings.Contains(err.Error(), want) {
+		t.Errorf("error %q does not contain %q", err.Error(), want)
+	}
+}
+
+func TestTokenExchangeError_TerminalClassification(t *testing.T) {
+	cases := []struct {
+		name     string
+		status   int
+		code     string
+		terminal bool
+	}{
+		{"401 any", http.StatusUnauthorized, "", true},
+		{"403 any", http.StatusForbidden, "", true},
+		{"400 invalid_grant", http.StatusBadRequest, "invalid_grant", true},
+		{"400 invalid_client", http.StatusBadRequest, "invalid_client", true},
+		{"400 unknown code", http.StatusBadRequest, "slow_down", false},
+		{"400 vendor token_expired", http.StatusBadRequest, "token_expired", true},
+		{"429 throttled", http.StatusTooManyRequests, "", false},
+		{"500 server error", http.StatusInternalServerError, "", false},
+		{"503 unavailable", http.StatusServiceUnavailable, "", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			e := &TokenExchangeError{StatusCode: tc.status, Code: tc.code}
+			if got := e.Terminal(); got != tc.terminal {
+				t.Errorf("Terminal() = %v, want %v", got, tc.terminal)
+			}
+		})
+	}
+}
+
+func TestIsTerminalTokenError_NonTokenErrors(t *testing.T) {
+	if IsTerminalTokenError(nil) {
+		t.Error("nil must not be terminal")
+	}
+	if IsTerminalTokenError(errors.New("dial tcp: connection refused")) {
+		t.Error("plain network error must not be terminal")
 	}
 }

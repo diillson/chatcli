@@ -237,6 +237,15 @@ func (t *httpTransport) Call(method string, params interface{}) (json.RawMessage
 		if reqCtx.Err() == context.DeadlineExceeded {
 			return nil, fmt.Errorf("%s", i18n.T("mcp.transport.call_timeout", method, deadline))
 		}
+		if auth.IsTerminalTokenError(err) {
+			// The stored refresh token is dead; no retry can fix it. Surface
+			// the typed error so the agent gets the @mcp-login hint and the
+			// manager can flag the server as auth-required.
+			t.logger.Warn("MCP OAuth refresh token rejected; re-authorization required",
+				zap.String("server", t.serverName),
+				zap.Error(err))
+			return nil, &OAuthRequiredError{Server: t.serverName, Endpoint: t.endpoint}
+		}
 		return nil, fmt.Errorf("%s: %w", i18n.T("mcp.transport.http_post_failed"), err)
 	}
 	defer resp.Body.Close()

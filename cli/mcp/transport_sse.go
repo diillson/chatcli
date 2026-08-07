@@ -142,21 +142,39 @@ func newSSETransport(ctx context.Context, cfg ServerConfig, logger *zap.Logger, 
 }
 
 // applyHeaders attaches the configured custom headers and auth to a
-// request. Safe on nil receivers — used for both the initial SSE GET
-// and the per-call POST so users only declare the header set once.
-func (t *sseTransport) applyHeaders(req *http.Request) {
+// request. Used for both the initial SSE GET and the per-call POST so
+// users only declare the header set once. Returns *OAuthRequiredError
+// when the stored OAuth refresh token is terminally dead — sending the
+// request without auth would only bounce off the server, so callers
+// surface the actionable re-login hint instead.
+func (t *sseTransport) applyHeaders(req *http.Request) error {
 	for k, v := range t.headers {
 		req.Header.Set(k, v)
 	}
 	// Prefer the refreshable OAuth token when a provider is wired; otherwise
 	// fall back to the static AuthConfig (bearer/basic/header).
 	if t.tokenProvider != nil {
-		if tok, err := t.tokenProvider.Token(req.Context()); err == nil && tok != "" {
+		tok, err := t.tokenProvider.Token(req.Context())
+		if err == nil && tok != "" {
 			req.Header.Set("Authorization", "Bearer "+tok)
-			return
+			return nil
+		}
+		if auth.IsTerminalTokenError(err) {
+			t.logger.Warn("MCP OAuth refresh token rejected; re-authorization required",
+				zap.String("server", t.serverName),
+				zap.Error(err))
+			return &OAuthRequiredError{Server: t.serverName, Endpoint: t.baseURL}
+		}
+		if err != nil {
+			// Transient refresh failure: fall through to the static auth so a
+			// network blip doesn't kill the stream; the server 401s if it matters.
+			t.logger.Warn("MCP OAuth token unavailable; falling back to static auth",
+				zap.String("server", t.serverName),
+				zap.Error(err))
 		}
 	}
 	t.auth.ApplyAuth(req)
+	return nil
 }
 
 // maxDuration returns the greater of a and b.
@@ -193,6 +211,15 @@ func (t *sseTransport) supervisor() {
 		if t.ctx.Err() != nil {
 			return
 		}
+		if _, required := IsOAuthRequired(err); required {
+			// Reconnecting cannot mint a new refresh token — stop instead of
+			// hammering the server. A new /mcp login rebuilds the transport.
+			t.logger.Warn("MCP SSE stream stopped: OAuth re-authorization required",
+				zap.String("server", t.serverName),
+				zap.Error(err))
+			t.failPendingLocked(err)
+			return
+		}
 		if err != nil {
 			t.logger.Warn("MCP SSE stream ended; reconnecting",
 				zap.String("server", t.serverName),
@@ -226,7 +253,9 @@ func (t *sseTransport) runOnce(ctx context.Context) error {
 		return fmt.Errorf("sse request build: %w", err)
 	}
 	req.Header.Set("Accept", "text/event-stream")
-	t.applyHeaders(req)
+	if err := t.applyHeaders(req); err != nil {
+		return err
+	}
 
 	// Use the package's default Transport so the connection respects
 	// HTTP_PROXY / NO_PROXY just like every other HTTP call. The
@@ -397,7 +426,9 @@ func (t *sseTransport) Call(method string, params interface{}) (json.RawMessage,
 		return nil, err
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
-	t.applyHeaders(httpReq)
+	if err := t.applyHeaders(httpReq); err != nil {
+		return nil, err
+	}
 
 	httpResp, err := t.httpClient.Do(httpReq)
 	if err != nil {

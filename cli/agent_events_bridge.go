@@ -409,6 +409,21 @@ func (a *AgentMode) unattendedAskBlocked(toolName, rawArgs string, pm *coder.Pol
 		a.cli.history = append(a.cli.history, models.Message{Role: "user", Content: feedback})
 		return true
 	}
+	// Any other round-trip failure (client disconnected mid-dialog, write
+	// error, the turn being cancelled) is not a human decision either — the
+	// user never saw or never answered the dialog. Block fail-safe, but never
+	// claim the USER denied it: that misattribution makes the model tell the
+	// user they refused something they were never shown.
+	if reqErr != nil {
+		msg := i18n.T("agent.policy.ask_failed", title)
+		feedback := fmt.Sprintf(
+			"SECURITY BLOCK: The permission request for %q could not be delivered or answered (the dialog round-trip failed: %v). This was NOT a user denial. The action was NOT executed. DO NOT retry it; continue without it, or tell the user the approval dialog failed and that session policy automode (the /policy command, or the manage_session policy_mode action over MCP) restores unattended auto-approval.",
+			title, reqErr)
+		renderError(msg)
+		a.emitBlockedTool(toolName, rawArgs, msg)
+		a.cli.history = append(a.cli.history, models.Message{Role: "user", Content: feedback})
+		return true
+	}
 	if decision.Persistent() && pm != nil && pattern != "" {
 		action := coder.ActionDeny
 		if decision.Allowed() {

@@ -82,6 +82,15 @@ func (a *AgentMode) handleAgentPark(
 		return fmt.Errorf("park: save snapshot: %w", err)
 	}
 
+	// Unattended surfaces (ACP / MCP server / gateway) have no REPL loop to
+	// drain the resume queue — register the in-turn waiter BEFORE the job is
+	// enqueued so even an immediately-firing job cannot race the wake past
+	// the waiter. Run() blocks on it in runParkedInline.
+	if a.cli.unattended {
+		a.cli.registerParkWaiter(snap.Token)
+		a.inlineParkToken = snap.Token
+	}
+
 	// Enqueue the matching scheduler job. For pure timer parks we go
 	// straight to AgentResume; for polling parks we use ParkPoll which
 	// fans out to AgentResume on success/timeout.
@@ -89,6 +98,10 @@ func (a *AgentMode) handleAgentPark(
 	if err != nil {
 		// Cleanup: a snapshot without a scheduler job is dead weight.
 		_ = park.Delete(snap.Token)
+		if a.cli.unattended {
+			a.cli.unregisterParkWaiter(snap.Token)
+			a.inlineParkToken = ""
+		}
 		return fmt.Errorf("park: enqueue resume job: %w", err)
 	}
 	snap.SchedulerJobID = jobID
@@ -115,7 +128,12 @@ func (a *AgentMode) handleAgentPark(
 	//
 	// The box uses the same Unicode rounded-box characters as the agent
 	// renderer for visual consistency with the rest of the /coder UI.
-	renderParkBanner(snap, req)
+	// Unattended surfaces skip it: the turn stays open in runParkedInline,
+	// and the /resume - /cancel-park hints it advertises are REPL commands
+	// the remote client cannot type.
+	if !a.cli.unattended {
+		renderParkBanner(snap, req)
+	}
 
 	// Bus event so /jobs and /parked stay coherent (the scheduler bridge
 	// owns publication; we route through it instead of the scheduler
@@ -302,6 +320,23 @@ func (a *AgentMode) RunResumed(ctx context.Context, snap *park.Snapshot, outcome
 	}
 	defer a.runInflight.Store(false)
 
+	err := a.runResumedCore(ctx, snap, outcome, detail)
+	// Parking again mid-resume is a SUCCESSFUL suspension, exactly like the
+	// sentinel handling in Run(): a new snapshot + scheduler job were just
+	// created for the next cycle. Returning the sentinel here made
+	// runWithCancellation print it as "❌ Erro na execução" on every
+	// monitoring cycle (park → resume → park again).
+	if errors.Is(err, errAgentParkedRequested) {
+		return nil
+	}
+	return err
+}
+
+// runResumedCore is RunResumed without the reentrancy guard and without the
+// park-sentinel-to-nil mapping. runParkedInline calls it from INSIDE a Run()
+// that already holds runInflight, and needs the raw sentinel to know the
+// monitoring cycle re-parked.
+func (a *AgentMode) runResumedCore(ctx context.Context, snap *park.Snapshot, outcome, detail string) error {
 	a.logger.Info("agent resuming from park",
 		zap.String("token", snap.Token),
 		zap.String("outcome", outcome),
@@ -361,10 +396,15 @@ func (a *AgentMode) RunResumed(ctx context.Context, snap *park.Snapshot, outcome
 		snap.PendingUserDirectives = nil
 	}
 
-	// Banner so the user sees the resume start in their terminal.
-	fmt.Println()
-	fmt.Println(colorize("  ▶️  "+i18n.T("park.banner.resumed", snap.Token, outcome), ColorGreen+ColorBold))
-	fmt.Println()
+	// Banner so the user sees the resume start in their terminal. Skipped
+	// on unattended surfaces, where stdout is either captured transcript or
+	// a protocol channel — the resumed loop's own streaming reaches the
+	// client through the event sink.
+	if !a.cli.unattended {
+		fmt.Println()
+		fmt.Println(colorize("  ▶️  "+i18n.T("park.banner.resumed", snap.Token, outcome), ColorGreen+ColorBold))
+		fmt.Println()
+	}
 
 	// Audit checkpoint and snapshot bookkeeping. We keep the snapshot
 	// file on disk (with LastResumeAt updated) for forensic purposes;
@@ -380,13 +420,11 @@ func (a *AgentMode) RunResumed(ctx context.Context, snap *park.Snapshot, outcome
 	maxTurns := AgentMaxTurns()
 	err := a.processAIResponseAndAct(ctx, maxTurns)
 
-	// Parking again mid-resume is a SUCCESSFUL suspension, exactly like the
-	// sentinel handling in Run(): a new snapshot + scheduler job were just
-	// created for the next cycle. Returning the sentinel here made
-	// runWithCancellation print it as "❌ Erro na execução" on every
-	// monitoring cycle (park → resume → park again).
+	// Parking again mid-resume: propagate the sentinel untouched — the next
+	// cycle's snapshot + scheduler job already exist. RunResumed maps it to
+	// nil for the REPL drain; runParkedInline uses it to keep waiting.
 	if errors.Is(err, errAgentParkedRequested) {
-		return nil
+		return err
 	}
 	if err != nil {
 		// Deliberate abort (Ctrl+C): retire the snapshot. The scheduler job

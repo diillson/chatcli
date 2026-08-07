@@ -190,7 +190,7 @@ func (cli *ChatCLI) RunAnyRPCToolArgv(ctx context.Context, name string, argv []s
 	// output is appended to the result so nothing the tool said is lost.
 	var result string
 	var execErr error
-	captured, _ := captureRPCStdout(func() error {
+	captured, _ := captureRPCStdout(ctx, func() error {
 		result, execErr = execBuiltin(ctx, p, argv)
 		return nil
 	})
@@ -385,7 +385,7 @@ func (cli *ChatCLI) RunCoderRPC(ctx context.Context, task string, o RPCRunOpts) 
 }
 
 // runLoopRPC wraps a captured loop run with provider/model and quality-env
-// overrides. captureStreaming serializes runs process-wide (rpcStdoutMu), so
+// overrides. captureStreaming serializes runs process-wide (rpcStdoutSem), so
 // the save/mutate/restore of shared state below cannot interleave with
 // another captured run.
 func (cli *ChatCLI) runLoopRPC(ctx context.Context, o RPCRunOpts, fn func(context.Context) error) (string, error) {
@@ -395,19 +395,19 @@ func (cli *ChatCLI) runLoopRPC(ctx context.Context, o RPCRunOpts, fn func(contex
 	if o.Events != nil {
 		emit = nil
 	}
-	// finalReply is captured INSIDE the closure — i.e. while rpcStdoutMu is
+	// finalReply is captured INSIDE the closure — i.e. while rpcStdoutSem is
 	// still held — because the moment captureStreaming returns, another
 	// queued run may acquire the lock and reset cli.lastAgentReply; reading
 	// the shared field afterwards could observe the other run's state.
 	var finalReply string
-	out, err := captureStreaming(emit, func() error {
+	out, err := captureStreaming(ctx, emit, func() error {
 		restore, oerr := cli.applyRPCOverrides(ctx, o)
 		if oerr != nil {
 			return oerr
 		}
 		defer restore()
 		// Install the structured sink for this run only. Safe without extra
-		// locking: captureStreaming holds rpcStdoutMu, which serializes every
+		// locking: captureStreaming holds rpcStdoutSem, which serializes every
 		// captured run process-wide, and the interactive REPL never sets it.
 		// lastAgentReply is reset ONLY on the structured path so the value
 		// left standing is provably this run's final answer; the gateway
@@ -422,7 +422,7 @@ func (cli *ChatCLI) runLoopRPC(ctx context.Context, o RPCRunOpts, fn func(contex
 			}()
 		}
 		// Per-run permission bridge (MCP elicitation): same serialization
-		// argument as the sink — rpcStdoutMu holds for the whole run.
+		// argument as the sink — rpcStdoutSem holds for the whole run.
 		if o.Permissions != nil {
 			prevPerms := cli.rpcPermissions
 			cli.rpcPermissions = o.Permissions

@@ -4,14 +4,55 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/diillson/chatcli/utils"
 	"go.uber.org/zap"
 )
+
+// TokenExchangeError is returned by the token-endpoint round-trip when the
+// server answers with a non-2xx status. It preserves the HTTP status and the
+// OAuth error code from the JSON body so callers can distinguish a terminal
+// refresh failure (expired/revoked refresh token — only a new interactive
+// login can recover) from a transient one (network blip, 5xx, throttling).
+type TokenExchangeError struct {
+	StatusCode int
+	Status     string
+	Code       string // OAuth "error" field, e.g. "invalid_grant" or vendor codes like "TOKEN_EXPIRED"
+	Body       string // sanitized response body
+}
+
+func (e *TokenExchangeError) Error() string {
+	return fmt.Sprintf("token exchange failed (%s): %s", e.Status, e.Body)
+}
+
+// Terminal reports whether retrying the same exchange can ever succeed.
+// 401/403 mean the credential itself was rejected; the listed 400-codes are
+// the RFC 6749 §5.2 permanent failures. "TOKEN_EXPIRED" is the vendor code
+// AWS sign-in returns for a dead refresh token.
+func (e *TokenExchangeError) Terminal() bool {
+	if e.StatusCode == http.StatusUnauthorized || e.StatusCode == http.StatusForbidden {
+		return true
+	}
+	switch e.Code {
+	case "invalid_grant", "invalid_client", "unauthorized_client", "unsupported_grant_type", "invalid_scope":
+		return true
+	}
+	return strings.EqualFold(e.Code, "TOKEN_EXPIRED")
+}
+
+// IsTerminalTokenError reports whether err wraps a token-exchange failure
+// that retrying cannot fix, i.e. the stored refresh token is dead and the
+// user must log in again.
+func IsTerminalTokenError(err error) bool {
+	var te *TokenExchangeError
+	return errors.As(err, &te) && te.Terminal()
+}
 
 // exchangeOAuthToken sends a token exchange request with JSON body.
 // Used by providers that accept application/json (e.g. OpenAI).
@@ -68,7 +109,16 @@ func doTokenExchange(hc *http.Client, req *http.Request) (*OAuthTokenResponse, e
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		// Sanitize response body to prevent leaking tokens in error messages
 		sanitized := utils.SanitizeSensitiveText(string(raw))
-		return nil, fmt.Errorf("token exchange failed (%s): %s", resp.Status, sanitized)
+		var oauthErr struct {
+			Error string `json:"error"`
+		}
+		_ = json.Unmarshal(raw, &oauthErr)
+		return nil, &TokenExchangeError{
+			StatusCode: resp.StatusCode,
+			Status:     resp.Status,
+			Code:       strings.TrimSpace(oauthErr.Error),
+			Body:       sanitized,
+		}
 	}
 	var tr OAuthTokenResponse
 
