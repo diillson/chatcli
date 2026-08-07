@@ -641,23 +641,38 @@ func (m *MCP) permissionsFor(ctx context.Context) agentevents.PermissionRequeste
 // is safe there.
 const mcpPermissionTimeoutDefault = 600 * time.Second
 
+// mcpPermissionTimeoutDisabledCeiling is what "off"/"0" resolve to. A wait
+// with no bound at all left the turn pinned forever when a client kept the
+// pipe open but died without EOF (no dialog, no cancel, no disconnect) —
+// 24h is unlimited for any human decision while guaranteeing the run
+// eventually frees its resources (and, process-wide, the capture slot that
+// serializes RPC runs).
+const mcpPermissionTimeoutDisabledCeiling = 24 * time.Hour
+
 // mcpPermissionTimeout resolves CHATCLI_MCP_PERMISSION_TIMEOUT: a Go
-// duration ("90s", "2m") or plain seconds; "0"/"off" disable the bound
-// (wait until the run's context dies). Unset or invalid keeps the default.
-// Like CHATCLI_MCP_TOOLS, the knob governs both RPC surfaces: MCP
-// elicitation/create and ACP session/request_permission (acpSink).
+// duration ("90s", "2m") or plain seconds; "0"/"off" lift the bound to a
+// 24h ceiling (effectively "wait for the human", never "wait forever").
+// Unset or invalid keeps the default. Like CHATCLI_MCP_TOOLS, the knob
+// governs both RPC surfaces: MCP elicitation/create and ACP
+// session/request_permission (acpSink).
 func mcpPermissionTimeout() time.Duration {
 	v := strings.TrimSpace(os.Getenv("CHATCLI_MCP_PERMISSION_TIMEOUT"))
 	if v == "" {
 		return mcpPermissionTimeoutDefault
 	}
 	if strings.EqualFold(v, "off") {
-		return 0
+		return mcpPermissionTimeoutDisabledCeiling
 	}
 	if d, err := time.ParseDuration(v); err == nil && d >= 0 {
+		if d == 0 {
+			return mcpPermissionTimeoutDisabledCeiling
+		}
 		return d
 	}
 	if secs, err := strconv.Atoi(v); err == nil && secs >= 0 {
+		if secs == 0 {
+			return mcpPermissionTimeoutDisabledCeiling
+		}
 		return time.Duration(secs) * time.Second
 	}
 	return mcpPermissionTimeoutDefault

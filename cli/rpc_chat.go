@@ -17,7 +17,7 @@
  *
  * Concurrency: the pipeline reads and writes shared ChatCLI state
  * (cli.history, cli.currentSessionName), so turns run under the same
- * process-wide serialization as the captured agent/coder runs (rpcStdoutMu via
+ * process-wide serialization as the captured agent/coder runs (rpcStdoutSem via
  * captureRPCStdout). The backend owns the per-session histories; this method
  * swaps one in for the duration of the turn and always restores the previous
  * state, even on error.
@@ -61,7 +61,7 @@ func (cli *ChatCLI) RunChatTurnRPC(
 	history []models.Message, o RPCChatOpts,
 ) (RPCChatTurn, error) {
 	var turn RPCChatTurn
-	_, err := captureRPCStdout(func() error {
+	_, err := captureRPCStdout(ctx, func() error {
 		var innerErr error
 		turn, innerErr = cli.runChatTurnSerialized(ctx, sessionID, userInput, history, o)
 		return innerErr
@@ -69,7 +69,7 @@ func (cli *ChatCLI) RunChatTurnRPC(
 	return turn, err
 }
 
-// runChatTurnSerialized is the turn body. The caller holds rpcStdoutMu (via
+// runChatTurnSerialized is the turn body. The caller holds rpcStdoutSem (via
 // captureRPCStdout), so the shared-state swap below cannot interleave with
 // another captured run.
 func (cli *ChatCLI) runChatTurnSerialized(

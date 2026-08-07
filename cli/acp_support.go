@@ -146,16 +146,16 @@ func (cli *ChatCLI) RunSlashCommandRPC(ctx context.Context, line string) (string
 		line = "/provider"
 	}
 
-	// captureRPCStdout holds rpcStdoutMu, so a command can never interleave
+	// captureRPCStdout holds rpcStdoutSem, so a command can never interleave
 	// with an in-flight captured agent/coder run.
 	var panicErr error
-	out, err := captureRPCStdout(func() error {
+	out, err := captureRPCStdout(ctx, func() error {
 		// Stdin quarantine: on the ACP/MCP server, os.Stdin IS the JSON-RPC
 		// channel. Any handler that prompts for confirmation would fight the
-		// protocol scanner for bytes and block forever holding rpcStdoutMu —
+		// protocol scanner for bytes and block forever holding rpcStdoutSem —
 		// wedging every session. Swapping in /dev/null makes every stdin
 		// read return EOF instantly, and all confirm sites treat EOF as
-		// "no" (fail-safe deny). Serialized by rpcStdoutMu like the stdout
+		// "no" (fail-safe deny). Serialized by rpcStdoutSem like the stdout
 		// swap; the REPL is never inside a captured run.
 		if devnull, derr := os.Open(os.DevNull); derr == nil {
 			origStdin := os.Stdin

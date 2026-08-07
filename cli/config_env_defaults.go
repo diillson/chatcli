@@ -231,7 +231,7 @@ var envDefaults = map[string]envDefault{
 	"CHATCLI_MCP_DYNAMIC_TOOLS":             {Value: "true", IsBool: true, Source: "mcp.dynamicToolRefreshEnabled — refresh on tools/list_changed"},
 	"CHATCLI_MCP_DANGER":                    {Value: "allow", Source: "cmd/rpcserve.go (mcp-server unattended danger policy: allow|block)"},
 	"CHATCLI_MCP_ELICITATION":               {Value: "on", Source: "cli/rpcserve/mcp.go (permission dialogs via elicitation/create: on|off; off restores the legacy unattended contract)"},
-	"CHATCLI_MCP_PERMISSION_TIMEOUT":        {Value: "600s", Source: "cli/rpcserve (max wait for the client's permission dialog, MCP elicitation and ACP request_permission; duration or seconds; 0|off waits until the call dies; tune below MCP clients' own tools/call timeout)"},
+	"CHATCLI_MCP_PERMISSION_TIMEOUT":        {Value: "600s", Source: "cli/rpcserve (max wait for the client's permission dialog, MCP elicitation and ACP request_permission; duration or seconds; 0|off lifts the bound to a 24h ceiling — never truly unbounded; tune below MCP clients' own tools/call timeout)"},
 	"CHATCLI_MCP_OAUTH_PORT":                {Value: "8765", Source: "cli/mcp/oauth.go (fixed loopback port for the OAuth callback; keeps redirect_uri and client registration stable; falls back to an ephemeral port when busy)"},
 	"CHATCLI_MCP_RESOURCES":                 {Value: "on", Source: "cli/rpc_support_resources.go (chatcli:// read-only resources: on|off)"},
 	"CHATCLI_MCP_MAX_HISTORY":               {Value: "0", Source: "cmd/rpcserve.go (0 = token-aware compaction bounds the history)"},
