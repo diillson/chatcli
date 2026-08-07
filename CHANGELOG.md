@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.181.2](https://github.com/diillson/chatcli/compare/v1.181.1...v1.181.2) (2026-08-07)
+
+
+### Bug Fixes
+
+* **mcp:** explain the browser-session failure and give the OAuth callback a real page ([#1309](https://github.com/diillson/chatcli/issues/1309)) ([16498f2](https://github.com/diillson/chatcli/commit/16498f2ce5c830f315f72a14cdb46a6d0cbf3073))
+
 ## [1.181.1](https://github.com/diillson/chatcli/compare/v1.181.0...v1.181.1) (2026-08-06)
 
 
