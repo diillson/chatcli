@@ -513,6 +513,7 @@ func LoginServer(ctx context.Context, serverName, serverURL string, ch oauthChal
 		redirectURI:           redirectURI,
 		scope:                 scope,
 		resource:              resource,
+		serverName:            serverName,
 	}, logger)
 	if err != nil {
 		return err
