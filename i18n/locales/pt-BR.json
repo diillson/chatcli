@@ -29,6 +29,7 @@
   "mcp.oauth.browser_failed": "Não foi possível abrir o navegador automaticamente. Abra esta URL manualmente:",
   "mcp.oauth.browser_hint": "Se o navegador não abriu, acesse esta URL:",
   "mcp.oauth.waiting": "Aguardando a conclusão da autorização…",
+  "mcp.oauth.stale_session_hint": "Se a página do provedor mostrar \"400 Bad Request\" ou erro de link desatualizado, uma sessão já existente daquele provedor no seu navegador está bloqueando o fluxo: abra a URL acima numa janela anônima, ou saia da sessão do provedor e tente de novo.",
   "mcp.oauth.callback_failed": "falha no callback OAuth",
   "mcp.oauth.callback_timeout": "tempo esgotado aguardando a autorização OAuth após %s",
   "mcp.oauth.not_enabled": "o MCP não está habilitado nesta sessão",

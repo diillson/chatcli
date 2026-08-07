@@ -122,6 +122,13 @@ func runLoopbackAuth(ctx context.Context, listener net.Listener, p loopbackAuthP
 		fmt.Println(i18n.T("mcp.oauth.browser_hint"))
 		fmt.Println(authURL)
 	}
+	// Authorization servers route the browser by its existing session cookies:
+	// AWS signin, for one, sends a browser with a live IAM session down a
+	// different path that answers 400 for this flow, while an anonymous browser
+	// authorizes fine. Nothing in the request distinguishes the two, so the
+	// only recovery is on the human's side — say so up front instead of
+	// waiting silently while the user stares at the provider's error page.
+	fmt.Println(i18n.T("mcp.oauth.stale_session_hint"))
 	fmt.Println(i18n.T("mcp.oauth.waiting"))
 
 	timeoutTimer := time.NewTimer(mcpOAuthCallbackTimeout)
@@ -133,10 +140,19 @@ func runLoopbackAuth(ctx context.Context, listener net.Listener, p loopbackAuthP
 	case cbErr := <-errCh:
 		return "", "", fmt.Errorf("%s: %w", i18n.T("mcp.oauth.callback_failed"), cbErr)
 	case <-timeoutTimer.C:
-		return "", "", fmt.Errorf("%s", i18n.T("mcp.oauth.callback_timeout", mcpOAuthCallbackTimeout))
+		return "", "", callbackTimeoutError(mcpOAuthCallbackTimeout)
 	case <-ctx.Done():
 		return "", "", ctx.Err()
 	}
+}
+
+// callbackTimeoutError builds the "nobody completed the flow" error. The most
+// common cause is the provider refusing the authorization page under the
+// browser's existing session, so the recovery hint travels with the error too:
+// the printed hint scrolls away while the user is off in the browser, and this
+// error is what the model relays back to them.
+func callbackTimeoutError(d time.Duration) error {
+	return fmt.Errorf("%s — %s", i18n.T("mcp.oauth.callback_timeout", d), i18n.T("mcp.oauth.stale_session_hint"))
 }
 
 func writeCallbackHTML(w http.ResponseWriter, status int, body string) {

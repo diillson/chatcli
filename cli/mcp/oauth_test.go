@@ -10,9 +10,12 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/diillson/chatcli/auth"
+	"github.com/diillson/chatcli/i18n"
 	"go.uber.org/zap"
 )
 
@@ -256,5 +259,26 @@ func TestLoginClientID_ReusesStoredWithoutDCR(t *testing.T) {
 	// nothing stored and no DCR: same actionable error.
 	if _, err := loginClientID(context.Background(), disc, asMeta, nil, "http://127.0.0.1:8765/callback", ""); err == nil {
 		t.Fatal("no stored client and no DCR must error")
+	}
+}
+
+// TestCallbackTimeoutErrorCarriesRecoveryHint: when nobody completes the
+// browser flow, the most common real-world cause is the provider rejecting
+// the authorization page under the browser's existing session (observed on
+// AWS signin: a live IAM session gets routed to a path that answers 400,
+// while an anonymous browser authorizes fine). The timeout error must carry
+// the recovery hint — the printed one has long scrolled away, and this error
+// is what the tool relays back to the user.
+func TestCallbackTimeoutErrorCarriesRecoveryHint(t *testing.T) {
+	err := callbackTimeoutError(5 * time.Minute)
+	if err == nil {
+		t.Fatal("timeout must produce an error")
+	}
+	msg := err.Error()
+	if !strings.Contains(msg, i18n.T("mcp.oauth.callback_timeout", 5*time.Minute)) {
+		t.Fatalf("timeout error lost its base message: %s", msg)
+	}
+	if !strings.Contains(msg, i18n.T("mcp.oauth.stale_session_hint")) {
+		t.Fatalf("timeout error must carry the stale-session recovery hint: %s", msg)
 	}
 }
