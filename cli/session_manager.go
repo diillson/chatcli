@@ -484,6 +484,20 @@ type sessionSearchDoc struct {
 // cached on the SessionManager and invalidated by a cheap directory signature
 // (names + mtimes + sizes), so per-turn callers (session auto-recall) don't
 // re-parse hundreds of JSON files on every agent turn.
+// warmTitles returns the cached session-title map when the search corpus is
+// already built, or nil — it NEVER triggers a corpus build (the first build
+// parses every session JSON, a cost the graph derivation must not add to
+// chat turns). The returned map is a read-only snapshot: corpus rebuilds
+// swap in a fresh map rather than mutating this one.
+func (sm *SessionManager) warmTitles() map[string]string {
+	sm.corpusMu.Lock()
+	defer sm.corpusMu.Unlock()
+	if sm.corpus == nil {
+		return nil
+	}
+	return sm.corpus.titles
+}
+
 type sessionCorpus struct {
 	sig    string
 	docs   []sessionSearchDoc

@@ -11,6 +11,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/diillson/chatcli/pkg/knowledge"
 	"go.uber.org/zap"
 
 	"github.com/diillson/chatcli/llm/embedding"
@@ -49,6 +50,12 @@ type Manager struct {
 	// launch overlapping backfills embedding the same facts — double the
 	// embedding bill for zero benefit.
 	backfillInFlight atomic.Bool
+
+	// graph is the persisted knowledge-graph cache (graph_cache.go). Always
+	// constructed; inert until the CLI layer wires a builder through
+	// SetGraphSource (the derivation needs skill/session/context stores the
+	// memory package must not import).
+	graph *GraphCache
 }
 
 // NewManager creates a new memory manager. The memoryDir should be the
@@ -80,6 +87,19 @@ func NewManager(memoryDir string, config Config, logger *zap.Logger) *Manager {
 	m.retriever.SetEpisodes(m.Episodes)
 	m.Rollups.SetEpisodes(m.Episodes)
 	m.migration = NewMigration(memoryDir, m.Facts, logger)
+
+	// Knowledge-graph cache: inert until the CLI layer wires a builder via
+	// SetGraphSource. Every content mutation in the source stores marks it
+	// dirty; fact deletions ride the keyed removal hook so the graph and
+	// the vector index drop derived state in lockstep.
+	m.graph = NewGraphCache(memoryDir, logger)
+	m.Facts.SetOnChanged(m.graph.MarkDirty)
+	m.Facts.SetRemovalHook("graph", func([]string) { m.graph.MarkDirty() })
+	m.Topics.SetOnChanged(m.graph.MarkDirty)
+	m.Projects.SetOnChanged(m.graph.MarkDirty)
+	m.Profile.SetOnChanged(m.graph.MarkDirty)
+	m.Episodes.SetOnChanged(m.graph.MarkDirty)
+	m.retriever.SetGraph(m.graph)
 
 	// Auto-migrate if needed
 	if m.migration.NeedsMigration() {
@@ -324,10 +344,37 @@ func (m *Manager) GetRelevantContextWithHyDE(ctx context.Context, query string, 
 func (m *Manager) AttachVectorIndex(v *VectorIndex) {
 	m.vectors = v
 	if v == nil {
-		m.Facts.SetOnRemoved(nil)
+		// Detach only the vector hook — other keyed consumers (the graph
+		// cache) must survive a vector re-attach on /config reload.
+		m.Facts.SetRemovalHook("vector", nil)
 		return
 	}
-	m.Facts.SetOnRemoved(func(ids []string) { v.Forget(ids...) })
+	m.Facts.SetRemovalHook("vector", func(ids []string) { v.Forget(ids...) })
+}
+
+// SetGraphSource wires the knowledge-graph builder and fingerprint into the
+// cache (see GraphCache.SetSource). Called once at CLI startup when the
+// persisted-graph feature is enabled.
+func (m *Manager) SetGraphSource(build func() *knowledge.Graph, fingerprint func() string) {
+	m.graph.SetSource(build, fingerprint)
+}
+
+// KnowledgeGraph returns the cached graph snapshot, rebuilding if stale.
+// nil when no builder was wired (feature off).
+func (m *Manager) KnowledgeGraph() *knowledge.Graph {
+	return m.graph.Snapshot()
+}
+
+// MarkGraphDirty flags the graph cache stale — for CLI-side mutations the
+// memory stores cannot observe (session saved, skill installed, context
+// created).
+func (m *Manager) MarkGraphDirty() {
+	m.graph.MarkDirty()
+}
+
+// GraphStats reports the cached graph's size without triggering a build.
+func (m *Manager) GraphStats() (nodes, edges int, ok bool) {
+	return m.graph.Stats()
 }
 
 // VectorIndex returns the attached vector index (may be nil).

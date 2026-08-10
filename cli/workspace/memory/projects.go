@@ -17,6 +17,10 @@ type ProjectTracker struct {
 	mu       sync.RWMutex
 	path     string
 	logger   *zap.Logger
+
+	// changeNotifier marks derived caches (knowledge graph) stale on
+	// content mutations. See change_notify.go for the non-caller list.
+	changeNotifier
 }
 
 // NewProjectTracker creates a new project tracker.
@@ -79,6 +83,7 @@ func (pt *ProjectTracker) Upsert(updates map[string]string) bool {
 
 	if changed || !exists {
 		p.LastActive = time.Now()
+		pt.notifyChanged()
 		pt.persist()
 	}
 	return changed || !exists

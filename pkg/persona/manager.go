@@ -205,6 +205,12 @@ func (m *Manager) ListAgents() ([]*Agent, error) {
 	return m.loader.ListAgents()
 }
 
+// SkillDirs returns the directories the skill catalog is loaded from
+// (project-local first). Stat-only fingerprinting helper — see Loader.SkillDirs.
+func (m *Manager) SkillDirs() []string {
+	return m.loader.SkillDirs()
+}
+
 // ListSkills returns all available skills
 func (m *Manager) ListSkills() ([]*Skill, error) {
 	return m.loader.ListSkills()

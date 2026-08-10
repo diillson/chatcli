@@ -214,11 +214,22 @@ func (ch *CommandHandler) buildRoutes() {
 		{"/config", true, ch.cmdConfig},
 		{"/status", true, ch.cmdConfig},
 		{"/settings", true, ch.cmdConfig},
-		{"/session", false, func(ctx context.Context, in string) bool { ch.handleSessionCommand(ctx, in); return false }},
+		// /session and /skill mark the graph cache dirty after running: both
+		// mutate sources the graph derives from (session files, the skill
+		// catalog). Same human-frequency rationale as the /context tap.
+		{"/session", false, func(ctx context.Context, in string) bool {
+			ch.handleSessionCommand(ctx, in)
+			ch.cli.markGraphDirty()
+			return false
+		}},
 		{"/context", false, func(ctx context.Context, in string) bool { ch.handleContextCommand(ctx, in); return false }},
 		{"/auth", false, func(ctx context.Context, in string) bool { ch.handleAuthCommand(ctx, in); return false }},
 		{"/plugin", false, func(_ context.Context, in string) bool { ch.handlePluginCommand(in); return false }},
-		{"/skill", false, func(ctx context.Context, in string) bool { ch.handleSkillCommand(ctx, in); return false }},
+		{"/skill", false, func(ctx context.Context, in string) bool {
+			ch.handleSkillCommand(ctx, in)
+			ch.cli.markGraphDirty()
+			return false
+		}},
 		{"/connect", false, func(ctx context.Context, in string) bool { ch.handleConnectCommand(ctx, in); return false }},
 		{"/hub", false, func(ctx context.Context, in string) bool { c.handleHubCommand(ctx, in); return false }},
 		{"/watch", false, func(ctx context.Context, in string) bool { ch.handleWatchCommand(ctx, in); return false }},
@@ -280,6 +291,11 @@ func (ch *CommandHandler) handleContextCommand(ctx context.Context, userInput st
 	if err := ch.cli.contextHandler.HandleContextCommand(ctx, sessionID, userInput); err != nil {
 		fmt.Println(colorize(fmt.Sprintf(" ❌ %s", err.Error()), ColorYellow))
 	}
+	// Any /context subcommand may have created/updated/deleted a context the
+	// knowledge graph derives kb nodes from. Human-frequency command, so a
+	// spurious mark on a read-only subcommand costs at most one cheap
+	// rebuild — far simpler than re-parsing the subcommand here.
+	ch.cli.markGraphDirty()
 }
 
 // handleSessionCommand foi movido para cá para consolidar a lógica do handler

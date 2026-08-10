@@ -37,7 +37,7 @@ const (
 func (cli *ChatCLI) handleGraphCommand(ctx context.Context, input string) {
 	arg := strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(input), "/graph"))
 
-	g := cli.buildKnowledgeGraph()
+	g := cli.knowledgeGraph()
 	if g.Len() == 0 {
 		fmt.Println(colorize("  "+i18n.T("graph.cmd.empty"), ColorYellow))
 		return
@@ -130,27 +130,12 @@ func graphToDOT(g *knowledge.Graph, include map[string]bool, title string) strin
 		fmt.Fprintf(&b, "  %q [label=%q, fillcolor=%q];\n", n.ID, wrapLabel(truncateForLog(label, 48), graphVizLabelWrap), kindColor(n.Kind))
 	}
 
-	seen := make(map[string]bool)
-	for _, n := range g.Nodes() {
-		if !include[n.ID] {
+	for _, e := range g.EdgeList() {
+		if !include[e.A] || !include[e.B] {
 			continue
 		}
-		for _, nb := range g.Neighbors(n.ID) {
-			if !include[nb.ID] {
-				continue
-			}
-			a, c := n.ID, nb.ID
-			if a > c {
-				a, c = c, a
-			}
-			key := a + "|" + c
-			if seen[key] {
-				continue
-			}
-			seen[key] = true
-			pw := 1.0 + math.Min(nb.Weight, 4.0)
-			fmt.Fprintf(&b, "  %q -- %q [penwidth=%.1f];\n", a, c, pw)
-		}
+		pw := 1.0 + math.Min(e.Weight, 4.0)
+		fmt.Fprintf(&b, "  %q -- %q [penwidth=%.1f];\n", e.A, e.B, pw)
 	}
 	b.WriteString("}\n")
 	return b.String()
