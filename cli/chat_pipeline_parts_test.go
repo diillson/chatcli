@@ -14,6 +14,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/diillson/chatcli/cli/workspace"
 	"github.com/diillson/chatcli/models"
 	"go.uber.org/zap"
 )
@@ -34,9 +35,64 @@ func TestModeAndLanguagePart_HasCacheHintAndLanguageDirective(t *testing.T) {
 
 func TestWorkspaceContextPart_NilBuilderReturnsFalse(t *testing.T) {
 	cli := &ChatCLI{}
-	_, ok := cli.workspaceContextPart(testCtx(), "anything")
+	_, ok := cli.workspaceContextPart(testCtx(), "anything", nil)
 	if ok {
 		t.Error("nil contextBuilder must return ok=false")
+	}
+}
+
+func TestChatEffectiveMemoryMode(t *testing.T) {
+	tests := []struct {
+		name       string
+		memoryMode string
+		chatMemory string
+		withStore  bool
+		want       string
+	}{
+		{"index with pull path stays index", "index", "", true, memModeIndex},
+		{"index without store degrades to full", "index", "", false, memModeFull},
+		{"index with exception disabled degrades to full", "index", "off", true, memModeFull},
+		{"full passes through", "full", "", true, memModeFull},
+		{"off passes through", "off", "", true, memModeOff},
+		{"default (unset) is index with pull path", "", "", true, memModeIndex},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv("CHATCLI_MEMORY_MODE", tt.memoryMode)
+			t.Setenv(chatMemoryEnvVar, tt.chatMemory)
+			cli := &ChatCLI{}
+			if tt.withStore {
+				cli.memoryStore = &workspace.MemoryStore{}
+			}
+			if got := cli.chatEffectiveMemoryMode(); got != tt.want {
+				t.Fatalf("chatEffectiveMemoryMode() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestAssembleChatSystemPrompt_VolatileSuffixCarriesNoCacheHint(t *testing.T) {
+	// Invariant behind the stable-prefix contract: once the first hint-less
+	// part appears, no later part may carry a CacheControl hint — a cached
+	// block after a volatile one never earns a warm read and poisons the
+	// prefix. The new memory/session recall parts (8b/8c) must obey this.
+	cli, _ := newPipelineCLI(t, nil)
+	ch, err := NewContextHandler(zap.NewNop())
+	if err != nil {
+		t.Skipf("NewContextHandler unavailable in this environment: %v", err)
+	}
+	cli.contextHandler = ch
+	out := cli.assembleChatSystemPrompt(testCtx(), "hello there", "")
+
+	volatileSeen := false
+	for i, p := range out.parts {
+		if p.CacheControl == nil {
+			volatileSeen = true
+			continue
+		}
+		if volatileSeen {
+			t.Fatalf("part %d carries a cache hint after a volatile part — stable prefix broken", i)
+		}
 	}
 }
 

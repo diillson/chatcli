@@ -59,10 +59,22 @@ const (
 )
 
 // sessionAutoRecallHeader is an English model-facing constant, like
-// autoRecallHeader in memory_autorecall.go.
+// autoRecallHeader in memory_autorecall.go. Agent/coder wording: those modes
+// carry the @session tool and can read the sessions themselves.
 const sessionAutoRecallHeader = "[SESSION RECALL]\n" +
 	"Saved past conversations that look relevant. Read them with " +
 	`@session get {"name":"...","query":"..."} before claiming you lack that context:` + "\n"
+
+// chatSessionAutoRecallHeader is the chat-mode wording. Chat has NO @session
+// tool (it is not part of the sanctioned chat exceptions), so the block must
+// never instruct the model to call one — an uncallable-tool directive
+// degrades answer quality. Instead the model surfaces the pointer to the
+// user, who can attach the session in one command.
+const chatSessionAutoRecallHeader = "[SESSION RECALL]\n" +
+	"Saved past conversations that look relevant. You cannot open them " +
+	"yourself in chat mode: when one matters for the answer, tell the user " +
+	"it exists and suggest attaching it with /session attach <name>. Never " +
+	"claim the past context is lost:\n"
 
 // sessionReferentialRe detects the user explicitly asking about a past
 // conversation (PT/EN). A match widens the recall and switches the search
@@ -90,8 +102,20 @@ func sessionAutoRecallEnabled() bool {
 // renders the top matches as a compact pointer block, or "" when nothing
 // relevant (or the gate is off). lastUserMsg is the newest user message —
 // when it explicitly references a past conversation, it becomes the query
-// and the evidence floor is waived.
+// and the evidence floor is waived. Uses the agent/coder header (@session
+// pull); chat mode goes through chatSessionAutoRecallBlock.
 func (cli *ChatCLI) sessionAutoRecallBlock(hints []string, lastUserMsg string) string {
+	return cli.sessionAutoRecallBlockWithHeader(hints, lastUserMsg, sessionAutoRecallHeader)
+}
+
+// chatSessionAutoRecallBlock is the chat-mode variant: same ranking, but the
+// header instructs the model to surface the pointer to the user instead of
+// calling a tool chat does not have.
+func (cli *ChatCLI) chatSessionAutoRecallBlock(hints []string, lastUserMsg string) string {
+	return cli.sessionAutoRecallBlockWithHeader(hints, lastUserMsg, chatSessionAutoRecallHeader)
+}
+
+func (cli *ChatCLI) sessionAutoRecallBlockWithHeader(hints []string, lastUserMsg, header string) string {
 	if !sessionAutoRecallEnabled() || cli.sessionManager == nil {
 		return ""
 	}
@@ -135,7 +159,7 @@ func (cli *ChatCLI) sessionAutoRecallBlock(hints []string, lastUserMsg string) s
 	}
 
 	var b strings.Builder
-	b.WriteString(sessionAutoRecallHeader)
+	b.WriteString(header)
 	written := 0
 	for _, h := range hits {
 		if written >= maxHits {

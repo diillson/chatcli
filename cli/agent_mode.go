@@ -176,6 +176,17 @@ type AgentMode struct {
 	// the start of each Run() alongside the skill hints.
 	injectedSkillNames map[string]bool
 
+	// skillCollapseTurn maps a skill name to the loop turn at which skill
+	// aging collapsed its injection block (releaseCollapsedSkills). Used as
+	// a re-injection cooldown by rescanSkillsMidLoop. Reset per Run().
+	skillCollapseTurn map[string]int
+
+	// skillCharsInjected accumulates the characters of skill guidance this
+	// Run() has injected (startup blocks + mid-loop injections). Once it
+	// crosses skillRunBudget, later mid-loop activations degrade their
+	// bodies to read-on-demand pointers. Reset per Run().
+	skillCharsInjected int
+
 	// Session-scoped flag: true once we have warned the user that the
 	// history is approaching likely corporate-proxy payload limits and
 	// no explicit CHATCLI_MAX_PAYLOAD is configured. Prevents the warning
@@ -1038,6 +1049,8 @@ func (a *AgentMode) Run(ctx context.Context, query string, additionalContext str
 	a.skillEffortHint = llmclient.EffortUnset
 	a.cli.clearAgentRouteOverride()
 	a.injectedSkillNames = make(map[string]bool)
+	a.skillCollapseTurn = make(map[string]int)
+	a.skillCharsInjected = 0
 	a.lastBoardNudge = ""
 	// Block 4 — skills (pinned + auto-activated + manual) and Orchestrator
 	// catalog. Built last because it's the most volatile (changes per query)
@@ -1065,6 +1078,9 @@ func (a *AgentMode) Run(ctx context.Context, query string, additionalContext str
 			a.skillEffortHint = llmclient.NormalizeEffort(e)
 		}
 	}
+	// Seed the per-Run skill budget with everything the startup blocks
+	// already spent, so mid-loop injections account against the same pool.
+	a.skillCharsInjected = len(skillsText)
 
 	// If we captured a skill model hint, pre-resolve it once so the user
 	// sees exactly what will run (or why their preference is being
@@ -1757,13 +1773,17 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 		renderer.RenderAssistantResponseTimelineEvent(icon, title, rendered, color)
 	}
 
-	// Mid-loop skill re-activation (skill_rescan.go). pendingSkillBlock holds
-	// a skill block matched against the ASSISTANT's output; it is flushed into
+	// Mid-loop skill re-activation (skill_rescan.go). pendingSkill holds a
+	// skill block matched against the ASSISTANT's output; it is flushed into
 	// history only at the next turn boundary so the injected user-role message
 	// can never land between an assistant tool_use and its tool_result (which
 	// would corrupt native tool protocols). User follow-ups inject in place —
-	// their slot is already a safe turn boundary.
-	var pendingSkillBlock string
+	// their slot is already a safe turn boundary. The names ride along so the
+	// flushed message carries Meta.SkillNames for skill aging.
+	var pendingSkill struct {
+		content string
+		names   []string
+	}
 	notifySkillActivation := func(names []string) {
 		if len(names) == 0 || a.cli.unattended {
 			return
@@ -1873,8 +1893,12 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 			})
 			// A type-ahead follow-up is a fresh trigger surface: activate its
 			// skills NOW so they shape the very next turn, not one turn late.
-			if block, names := a.rescanSkillsMidLoop(userMsg); block != "" {
-				a.cli.history = append(a.cli.history, models.Message{Role: "user", Content: block})
+			if block, names := a.rescanSkillsMidLoop(userMsg, turn); block != "" {
+				a.cli.history = append(a.cli.history, models.Message{
+					Role:    "user",
+					Content: block,
+					Meta:    &models.MessageMeta{SkillNames: models.JoinSkillNames(names)},
+				})
 				notifySkillActivation(names)
 			}
 		}
@@ -1883,9 +1907,13 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 		// re-scan. This is a turn boundary: the previous turn's tool results
 		// are already in history, so the injection cannot split a tool_use
 		// from its tool_result.
-		if pendingSkillBlock != "" {
-			a.cli.history = append(a.cli.history, models.Message{Role: "user", Content: pendingSkillBlock})
-			pendingSkillBlock = ""
+		if pendingSkill.content != "" {
+			a.cli.history = append(a.cli.history, models.Message{
+				Role:    "user",
+				Content: pendingSkill.content,
+				Meta:    &models.MessageMeta{SkillNames: models.JoinSkillNames(pendingSkill.names)},
+			})
+			pendingSkill.content, pendingSkill.names = "", nil
 		}
 
 		// Same turn boundary: surface dynamic MCP tool-list changes
@@ -1925,6 +1953,24 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 					agent.ColorGray))
 		}
 
+		// Skill aging (same turn boundary as microcompact, so both passes
+		// share a single prefix-cache invalidation event): mid-loop skill
+		// blocks the model has already absorbed collapse to CCR-recoverable
+		// stubs, and the collapsed skills leave the dedup set so they can
+		// re-trigger after the cooldown.
+		saCfg := agent.DefaultSkillAgingConfig()
+		saCfg.CCR = a.cli.compressionLayer
+		if h, report := agent.ApplySkillAging(a.cli.history, saCfg, a.logger); report != nil && report.Collapsed > 0 {
+			a.cli.history = h
+			a.releaseCollapsedSkills(report.CollapsedSkills, turn)
+			fmt.Printf("\r\033[K  %s %s\n",
+				renderer.Colorize("🗜", agent.ColorGray),
+				renderer.Colorize(
+					i18n.T("agent.skills.aged",
+						report.Collapsed, FormatPayloadSize(int(report.CharsSaved))),
+					agent.ColorGray))
+		}
+
 		// Compact history if over budget (before building turn history)
 		cfg := DefaultCompactConfig(a.cli.Provider, a.cli.Model)
 		cfg.BudgetRatio = 0.60 // tighter budget — tool outputs are large
@@ -1938,10 +1984,7 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 		//       one-shot hint about the env var. Corporate proxies usually
 		//       cap at 5 MB and the error they return is obscure (403/EOF),
 		//       so flagging this early saves the user a painful surprise.
-		totalHistoryChars := 0
-		for _, m := range a.cli.history {
-			totalHistoryChars += len(m.Content)
-		}
+		totalHistoryChars := totalChars(a.cli.history)
 		if cfg.MaxPayloadBytes > 0 && totalHistoryChars > int(float64(cfg.MaxPayloadBytes)*0.85) {
 			cfg.BudgetRatio = 0.40 // force harder compaction
 			a.logger.Warn("Pre-flight: history near payload cap, forcing aggressive compact",
@@ -2317,8 +2360,8 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 		// just started touching — is injected at the next turn boundary, in
 		// time to improve the remaining work. Deduped per Run, so a skill the
 		// user's query already activated never re-fires here.
-		if block, names := a.rescanSkillsMidLoop(aiResponse); block != "" {
-			pendingSkillBlock = block
+		if block, names := a.rescanSkillsMidLoop(aiResponse, turn); block != "" {
+			pendingSkill.content, pendingSkill.names = block, names
 			notifySkillActivation(names)
 		}
 
@@ -3649,8 +3692,12 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 			})
 			// Same contract as the type-ahead path: a mid-session follow-up
 			// activates its skills before the next turn is sent.
-			if block, names := a.rescanSkillsMidLoop(userInput); block != "" {
-				a.cli.history = append(a.cli.history, models.Message{Role: "user", Content: block})
+			if block, names := a.rescanSkillsMidLoop(userInput, turn); block != "" {
+				a.cli.history = append(a.cli.history, models.Message{
+					Role:    "user",
+					Content: block,
+					Meta:    &models.MessageMeta{SkillNames: models.JoinSkillNames(names)},
+				})
 				notifySkillActivation(names)
 			}
 			continue

@@ -79,11 +79,13 @@ type chatSystemAssembly struct {
 //	Part 2  — pinned skills (`/skill pin`) — stable across turns
 //	Part 3  — MCP tools catalog (name+description only)
 //	── Volatile suffix (no cache hint; changes per turn) ──
-//	Part 4  — workspace context (SOUL/USER/RULES + MEMORY, hint-driven)
+//	Part 4  — workspace context (SOUL/USER/RULES + MEMORY digest/retrieval + graph card)
 //	Part 5  — manually invoked skill (`/<skill-name>`) — consumed once
 //	Part 6  — auto-activated skills (triggers + path globs)
 //	Part 7  — MCP channel messages (push ring)
 //	Part 8  — K8s watcher context
+//	Part 8b — proactive memory auto-recall (index mode only)
+//	Part 8c — proactive session recall
 //	Part 9  — dynamic context (wall-clock time + cwd disambiguation)
 //
 // The function also captures the skill model/effort hints so the caller can
@@ -118,7 +120,10 @@ func (cli *ChatCLI) assembleChatSystemPrompt(
 	}
 
 	// ── Volatile suffix (no cache hints) ──
-	if part, ok := cli.workspaceContextPart(ctx, userInput); ok { // Part 4
+	// Hints are shared by the workspace retrieval (Part 4) and the proactive
+	// recall blocks (Parts 8b/8c) — computed once per turn.
+	hints := cli.recentHistoryHints()
+	if part, ok := cli.workspaceContextPart(ctx, userInput, hints); ok { // Part 4
 		out.parts = append(out.parts, part)
 	}
 	// Part 4b: semantic /context retrieval (--rag). Query-driven, so it lives
@@ -138,6 +143,23 @@ func (cli *ChatCLI) assembleChatSystemPrompt(
 	}
 	if part, ok := cli.watcherContextPart(); ok { // Part 8
 		out.parts = append(out.parts, part)
+	}
+	// Part 8b: proactive memory auto-recall — top hint-matching facts, only
+	// meaningful in index mode (full mode already pushes the whole
+	// retrieval). Mirrors the agent/coder wiring; own env gate inside.
+	if cli.chatEffectiveMemoryMode() == memModeIndex {
+		if ar := cli.memoryAutoRecallBlock(hints); ar != "" {
+			out.parts = append(out.parts, models.ContentBlock{Type: "text", Text: ar})
+		}
+	}
+	// Part 8c: proactive SESSION recall (own gate, orthogonal to the memory
+	// mode — saved sessions are a layer neither "index" nor "full" injects).
+	// The current turn's input is the reference text: unlike agent mode, the
+	// user message is not yet in cli.history at assembly time. Chat variant
+	// header: chat has no @session tool, so the model surfaces the pointer
+	// to the user instead of pulling.
+	if sr := cli.chatSessionAutoRecallBlock(hints, userInput); sr != "" {
+		out.parts = append(out.parts, models.ContentBlock{Type: "text", Text: sr})
 	}
 	if part, ok := cli.dynamicContextPart(); ok { // Part 9
 		out.parts = append(out.parts, part)
@@ -168,12 +190,23 @@ func modeAndLanguagePart() models.ContentBlock {
 // poison any cached block placed after it. The wall-clock timestamp that used
 // to be appended here now lives in its own trailing block (dynamicContextPart)
 // so it can't bust the prefix cache.
-func (cli *ChatCLI) workspaceContextPart(ctx context.Context, userInput string) (models.ContentBlock, bool) {
+func (cli *ChatCLI) workspaceContextPart(ctx context.Context, userInput string, hints []string) (models.ContentBlock, bool) {
 	if cli.contextBuilder == nil {
 		return models.ContentBlock{}, false
 	}
-	hints := cli.recentHistoryHints()
 	wsCtx := cli.retrieveWorkspaceContext(ctx, userInput, hints)
+	// Knowledge-graph map-of-content card, mirroring agent/coder placement:
+	// tiny, deterministic, and pull-oriented (the memory tool exception can
+	// expand any hub on demand). Skipped only when memory is off entirely.
+	if cli.chatEffectiveMemoryMode() != memModeOff {
+		if gb := cli.graphIndexBlock(); gb != "" {
+			if strings.TrimSpace(wsCtx) == "" {
+				wsCtx = gb
+			} else {
+				wsCtx = strings.TrimRight(wsCtx, "\n") + "\n\n" + gb
+			}
+		}
+	}
 	if wsCtx == "" {
 		return models.ContentBlock{}, false
 	}
@@ -196,19 +229,35 @@ func (cli *ChatCLI) dynamicContextPart() (models.ContentBlock, bool) {
 	return models.ContentBlock{Type: "text", Text: dyn}, true
 }
 
-// retrieveWorkspaceContext assembles the workspace context for a chat turn,
-// honoring the memory injection mode. Chat is tool-less by design, so it
-// cannot pull on demand: "index" degrades to "full" here, and only "off"
-// suppresses memory (bootstrap files still apply). HyDE augmentation is wired
-// when /config quality has it enabled, matching the historical behavior for
-// users on the default "full" mode.
-func (cli *ChatCLI) retrieveWorkspaceContext(ctx context.Context, userInput string, hints []string) string {
+// chatEffectiveMemoryMode resolves the memory injection mode a chat turn can
+// actually honor. "index" is a pull contract: it only works when the chat
+// memory tool exception (chat_memory.go) is active so the model can recall
+// the detail behind the digest. With the exception disabled
+// (CHATCLI_CHAT_MEMORY=off) chat has no pull path, and starving it of memory
+// would be a regression — so "index" degrades to "full" (the historical push
+// model). "full" and "off" pass through unchanged.
+func (cli *ChatCLI) chatEffectiveMemoryMode() string {
 	mode := loadMemoryMode()
+	if mode == memModeIndex && !cli.chatMemoryActive() {
+		return memModeFull
+	}
+	return mode
+}
+
+// retrieveWorkspaceContext assembles the workspace context for a chat turn,
+// honoring the effective memory injection mode. In "index" mode the block
+// carries only the compact memory digest plus the recall hint — the chat
+// memory tool pulls detail on demand, exactly like agent/coder. HyDE
+// augmentation is wired when /config quality has it enabled, matching the
+// historical behavior for users on the default "full" mode.
+func (cli *ChatCLI) retrieveWorkspaceContext(ctx context.Context, userInput string, hints []string) string {
+	mode := cli.chatEffectiveMemoryMode()
+	recallHint := ""
 	if mode == memModeIndex {
-		mode = memModeFull // chat cannot recall; fall back to the push model
+		recallHint = chatMemoryRecallHint
 	}
 	aug := cli.hydeAugmenterFor(quality.LoadFromEnv())
-	return cli.contextBuilder.BuildWorkspaceContextMode(ctx, userInput, hints, aug, mode, "")
+	return cli.contextBuilder.BuildWorkspaceContextMode(ctx, userInput, hints, aug, mode, recallHint)
 }
 
 // recentHistoryHints returns up to three keyword hints extracted from the

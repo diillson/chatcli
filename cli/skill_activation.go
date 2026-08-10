@@ -149,7 +149,16 @@ func buildSkillInjectionBlock(skills []*persona.Skill) string {
 // activated even when its body is deferred. Callers pass skills in a stable
 // order, so which skills overflow is deterministic and cache-friendly.
 func renderSkillEntries(b *strings.Builder, skills []*persona.Skill) {
-	budget := skillInjectBudget()
+	renderSkillEntriesLimited(b, skills, skillInjectBudget(), false)
+}
+
+// renderSkillEntriesLimited is renderSkillEntries with the budget made
+// explicit and an optional deferAll switch that forces every body into the
+// read-on-demand pointer form. deferAll serves the per-Run skill budget in
+// agent mode: once a run has already injected its quota of skill bytes,
+// later activations still announce themselves (header + description +
+// source) without paying for another full body.
+func renderSkillEntriesLimited(b *strings.Builder, skills []*persona.Skill, budget int, deferAll bool) {
 	spent := 0
 	for _, skill := range skills {
 		fmt.Fprintf(b, "## Skill: %s", skill.Name)
@@ -161,11 +170,17 @@ func renderSkillEntries(b *strings.Builder, skills []*persona.Skill) {
 			b.WriteString(skill.Description)
 			b.WriteString("\n\n")
 		}
+		// Always cite the source file: the model (and any later reader of an
+		// aged/collapsed copy of this block) can re-read the full guidance
+		// on demand. Stable per skill, so the line is cache-friendly.
+		if skill.Path != "" {
+			fmt.Fprintf(b, "_Source: %s_\n\n", skill.Path)
+		}
 		body := strings.TrimSpace(skill.Content)
 		if body == "" {
 			continue
 		}
-		if budget > 0 && spent+len(body) > budget {
+		if deferAll || (budget > 0 && spent+len(body) > budget) {
 			b.WriteString(renderSkillBodyPointer(skill))
 			continue
 		}

@@ -210,18 +210,15 @@ func (cli *ChatCLI) warnIfHistoryExceedsProxyCap(cfg CompactConfig) {
 	if cfg.MaxPayloadBytes != 0 || cli.proxyPayloadWarned {
 		return
 	}
-	totalChars := 0
-	for _, m := range cli.history {
-		totalChars += len(m.Content)
-	}
-	if totalChars <= 2_500_000 {
+	total := totalChars(cli.history)
+	if total <= 2_500_000 {
 		return
 	}
 	cli.proxyPayloadWarned = true
 	cli.logger.Warn("Chat history exceeds 2.5 MB, no payload cap set",
-		zap.Int("total_chars", totalChars))
+		zap.Int("total_chars", total))
 	fmt.Printf("\r\033[K  ℹ %s\n",
-		i18n.T("agent.preflight.warn_no_cap", FormatPayloadSize(totalChars)))
+		i18n.T("agent.preflight.warn_no_cap", FormatPayloadSize(total)))
 	_ = os.Stdout.Sync()
 }
 

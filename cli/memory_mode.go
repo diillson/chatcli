@@ -3,18 +3,20 @@
  * Copyright (c) 2024 Edilson Freitas
  * License: Apache-2.0
  *
- * Controls how long-term memory reaches the model in agent/coder mode:
+ * Controls how long-term memory reaches the model in every mode:
  *
  *   full  — inject the full hint-driven retrieval every turn (the push
  *           model; cost grows with memory size and is paid each turn).
  *   index — inject only a small, stable digest of what memory knows and
- *           let the agent pull detail on demand via the @memory recall
+ *           let the model pull detail on demand via the memory recall
  *           tool (the pull model; per-turn cost is bounded regardless of
  *           how large memory grows). Default.
  *   off   — inject no memory (bootstrap files still apply).
  *
- * Chat mode is tool-less by design, so it cannot pull: there "index"
- * degrades to "full" and only "off" suppresses memory.
+ * Agent/coder honor the mode verbatim (@memory tool). Chat honors "index"
+ * through the sanctioned memory tool exception (chat_memory.go); when that
+ * exception is disabled (CHATCLI_CHAT_MEMORY=off) chat has no pull path and
+ * "index" degrades to "full" — see ChatCLI.chatEffectiveMemoryMode.
  */
 package cli
 
@@ -40,6 +42,14 @@ const (
 const memoryRecallHint = "Only a compact index of long-term memory is shown above to save tokens. " +
 	"When you need the full detail behind any profile attribute, topic, or project, " +
 	`call the @memory tool with {"cmd":"recall","args":{"query":"<topic>"}} to pull the relevant facts on demand.`
+
+// chatMemoryRecallHint is the chat-mode counterpart of memoryRecallHint. Chat
+// reaches memory through the sanctioned "memory" tool exception
+// (chat_memory.go) rather than the agent's @memory plugin, so the wording
+// points at that surface. English constant for the same model-facing reason.
+const chatMemoryRecallHint = "Only a compact index of long-term memory is shown above to save tokens. " +
+	"When you need the full detail behind any profile attribute, topic, or project, " +
+	`call the memory tool with {"cmd":"recall","args":{"query":"<topic>"}} to pull the relevant facts on demand.`
 
 // loadMemoryMode reads CHATCLI_MEMORY_MODE, normalizing to one of the three
 // valid modes and falling back to the production default on empty/unknown.

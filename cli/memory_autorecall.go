@@ -10,9 +10,9 @@
  * cost bounded, but it relies on the model CHOOSING to call @memory recall —
  * and models routinely skip the call, answering with a 600-char digest while
  * the relevant gotcha sits unread in the fact index. Auto-recall closes that
- * gap: each agent/coder turn, the hints already extracted from recent
- * messages rank the fact index, and the top few matches (tiny, budget-capped)
- * ride into the prompt alongside the digest.
+ * gap: each chat/agent/coder turn running in index mode, the hints already
+ * extracted from recent messages rank the fact index, and the top few matches
+ * (tiny, budget-capped) ride into the prompt alongside the digest.
  *
  * Cache discipline: the block is hint-driven, so it changes turn to turn. It
  * is therefore injected into the UNCACHED trailing block (with the wall-clock
