@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.182.1](https://github.com/diillson/chatcli/compare/v1.182.0...v1.182.1) (2026-08-10)
+
+
+### Bug Fixes
+
+* **memory:** graph expansion line in the auto-recall block ([#1324](https://github.com/diillson/chatcli/issues/1324)) ([78eafc0](https://github.com/diillson/chatcli/commit/78eafc07ddcf6ac0987a690bcb7ef819c10d6d8a))
+
 ## [1.182.0](https://github.com/diillson/chatcli/compare/v1.181.3...v1.182.0) (2026-08-10)
 
 
