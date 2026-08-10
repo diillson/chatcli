@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.182.0](https://github.com/diillson/chatcli/compare/v1.181.3...v1.182.0) (2026-08-10)
+
+
+### Features
+
+* **context:** leaner context window across chat and coder modes ([#1321](https://github.com/diillson/chatcli/issues/1321)) ([08eaf0d](https://github.com/diillson/chatcli/commit/08eaf0d95f88cd673eb2622fda9c7dfa80524e95))
+* **memory:** persisted knowledge graph participating in recall ([#1322](https://github.com/diillson/chatcli/issues/1322)) ([832e625](https://github.com/diillson/chatcli/commit/832e625bdc860d706f55ce1de1d39ffc1fa93050))
+
 ## [1.181.3](https://github.com/diillson/chatcli/compare/v1.181.2...v1.181.3) (2026-08-07)
 
 
