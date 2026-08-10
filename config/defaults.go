@@ -155,6 +155,15 @@ const (
 	// tool regardless of this flag.
 	GraphIndexEnv = "CHATCLI_GRAPH_INDEX"
 
+	// Persisted memory graph: serve every graph consumer from the cached,
+	// disk-persisted derivation (~/.chatcli/memory/graph.json) and expand
+	// recall with graph neighborhoods. On by default; a falsey value
+	// restores the legacy derive-per-call behavior with no recall
+	// expansion. Deliberately distinct from GraphIndexEnv: that one gates
+	// the per-turn CARD payload, this one gates the cache + recall
+	// expansion — "card off, expansion on" is a valid lean-prompt setup.
+	MemoryGraphEnv = "CHATCLI_MEMORY_GRAPH"
+
 	// UI / theme configuration. ThemeEnv selects the color theme applied
 	// across chat, coder and agent surfaces (cards, borders, markdown,
 	// spinners). DefaultTheme is the value used when ThemeEnv is unset.

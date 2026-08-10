@@ -40,7 +40,7 @@ type graphViewPluginAdapter struct {
 
 // KnowledgeGraph converts the in-core knowledge graph to renderable data.
 func (a *graphViewPluginAdapter) KnowledgeGraph() (plugins.GraphData, error) {
-	g := a.cli.buildKnowledgeGraph()
+	g := a.cli.knowledgeGraph()
 	data := plugins.GraphData{
 		Nodes: make([]plugins.GraphNode, 0, g.Len()),
 		Edges: make([]plugins.GraphEdge, 0, g.Edges()),
@@ -58,20 +58,8 @@ func (a *graphViewPluginAdapter) KnowledgeGraph() (plugins.GraphData, error) {
 			Weight:  n.Weight,
 		})
 	}
-	seen := make(map[string]bool)
-	for _, n := range g.Nodes() {
-		for _, nb := range g.Neighbors(n.ID) {
-			x, y := n.ID, nb.ID
-			if x > y {
-				x, y = y, x
-			}
-			key := x + "\x00" + y
-			if seen[key] {
-				continue
-			}
-			seen[key] = true
-			data.Edges = append(data.Edges, plugins.GraphEdge{Source: x, Target: y, Weight: nb.Weight})
-		}
+	for _, e := range g.EdgeList() {
+		data.Edges = append(data.Edges, plugins.GraphEdge{Source: e.A, Target: e.B, Weight: e.Weight})
 	}
 	return data, nil
 }

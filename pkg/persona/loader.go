@@ -42,6 +42,17 @@ func NewLoader(logger *zap.Logger) *Loader {
 	}
 }
 
+// SkillDirs returns every directory ListSkills scans, project-local first.
+// Exposed so callers can fingerprint the skill catalog (stat-only) without
+// paying the full frontmatter-parsing walk.
+func (l *Loader) SkillDirs() []string {
+	var dirs []string
+	if l.projectDir != "" {
+		dirs = append(dirs, filepath.Join(l.projectDir, ".agent", "skills"))
+	}
+	return append(dirs, l.skillsDir)
+}
+
 // SetProjectDir sets an optional project-local directory for skills lookup
 // Priority: Project Local > Global
 func (l *Loader) SetProjectDir(dir string) {

@@ -7,6 +7,8 @@ import (
 	"strings"
 	"time"
 	"unicode/utf8"
+
+	"github.com/diillson/chatcli/pkg/knowledge"
 )
 
 // RelevanceRetriever selects the most relevant memories for the current conversation.
@@ -21,6 +23,19 @@ type RelevanceRetriever struct {
 	episodes     *EpisodeStore // optional; nil → no episode timeline section
 	config       Config
 	workspaceDir string // current session workspace for disambiguation
+
+	// graph, when set, supplies the knowledge-graph snapshot for the
+	// Related-section neighborhood expansion. Optional; nil (or a source
+	// yielding nil) → no graph section, no behavior change. An interface,
+	// not a func field, so RelevanceRetriever stays comparable (API
+	// contract checked by apidiff).
+	graph GraphSource
+}
+
+// GraphSource supplies an immutable knowledge-graph snapshot. Implemented by
+// GraphCache; test fixtures provide static stand-ins.
+type GraphSource interface {
+	Snapshot() *knowledge.Graph
 }
 
 // NewRelevanceRetriever creates a new retriever.
@@ -60,6 +75,13 @@ func (r *RelevanceRetriever) SetEpisodes(es *EpisodeStore) {
 // SetWorkspaceDir updates the current workspace directory for disambiguation.
 func (r *RelevanceRetriever) SetWorkspaceDir(dir string) {
 	r.workspaceDir = dir
+}
+
+// SetGraph attaches the knowledge-graph snapshot source so assemble can
+// add the Related (graph) expansion section. Same additive wiring as
+// SetRollups/SetEpisodes.
+func (r *RelevanceRetriever) SetGraph(src GraphSource) {
+	r.graph = src
 }
 
 // RetrieveWithHyDE runs the full HyDE retrieval path — Phase 3a
@@ -238,6 +260,14 @@ func (r *RelevanceRetriever) assemble(rankedFacts []*Fact) string {
 		remaining -= len(section)
 	}
 
+	// 5c. Graph neighborhood expansion — structurally adjacent memories the
+	// lexical/semantic ranking missed. Purely additive: it never displaces a
+	// ranked fact, only spends leftover budget.
+	if section, fits := r.relatedGraphSection(rankedFacts, remaining); fits {
+		sections = append(sections, section)
+		remaining -= len(section)
+	}
+
 	// 6. Long-range trajectory (latest monthly + recent weekly digests) —
 	// the narrative daily notes lose after their 30-day retention.
 	if section, fits := r.trajectorySection(remaining); fits {
@@ -276,6 +306,113 @@ func (r *RelevanceRetriever) episodesSection(remaining int) (string, bool) {
 		return "", false
 	}
 	return section, true
+}
+
+// Related-section tuning. Seeds are the strongest ranked facts (the model's
+// working set), the expansion stays at 1 hop so every surfaced item is a
+// direct structural neighbor, and the line cap keeps the section a nudge —
+// detail is pulled on demand.
+const (
+	relatedGraphSeeds    = 3
+	relatedGraphPerSeed  = 8
+	relatedGraphMaxLines = 6
+	relatedLineTrunc     = 160
+)
+
+// relatedGraphSection expands the top-ranked facts through the knowledge
+// graph and renders the structurally adjacent memories that lexical/semantic
+// ranking did NOT already surface. Additive by construction: everything the
+// ranking selected stays untouched; this section only spends leftover budget
+// on neighbors. Pointers use only surfaces every mode has (@memory) — never
+// mode-specific tools.
+func (r *RelevanceRetriever) relatedGraphSection(ranked []*Fact, remaining int) (string, bool) {
+	if r.graph == nil || remaining <= 250 || len(ranked) == 0 {
+		return "", false
+	}
+	g := r.graph.Snapshot()
+	if g == nil || g.Len() == 0 {
+		return "", false
+	}
+
+	rankedSet := make(map[string]bool, len(ranked))
+	for _, f := range ranked {
+		rankedSet[f.ID] = true
+	}
+
+	seeds := ranked
+	if len(seeds) > relatedGraphSeeds {
+		seeds = seeds[:relatedGraphSeeds]
+	}
+
+	var lines []string
+	var accessedIDs []string
+	seen := make(map[string]bool)
+	for _, seed := range seeds {
+		for _, n := range g.Neighborhood("fact:"+seed.ID, 1, relatedGraphPerSeed) {
+			if len(lines) >= relatedGraphMaxLines {
+				break
+			}
+			if seen[n.ID] {
+				continue
+			}
+			seen[n.ID] = true
+			switch n.Kind {
+			case knowledge.KindTag, knowledge.KindProfile:
+				// Tags are keyword glue and the profile is an always-present
+				// hub — neither adds information the model lacks.
+				continue
+			case knowledge.KindFact:
+				bareID := strings.TrimPrefix(n.ID, "fact:")
+				if rankedSet[bareID] {
+					continue // ranking already surfaced it
+				}
+				f, ok := r.facts.GetByID(bareID)
+				if !ok {
+					continue // graph snapshot older than the fact store
+				}
+				lines = append(lines, fmt.Sprintf("- [%s] %s", f.Category, truncateRunes(f.Content, relatedLineTrunc)))
+				accessedIDs = append(accessedIDs, f.ID)
+			case knowledge.KindEpisode:
+				lines = append(lines, fmt.Sprintf("- [episode] %s (details: @memory timeline)", truncateRunes(n.Title, relatedLineTrunc)))
+			default:
+				title := strings.TrimSpace(n.Title)
+				if title == "" {
+					title = n.ID
+				}
+				line := fmt.Sprintf("- [%s] %s", n.Kind, title)
+				if s := strings.TrimSpace(n.Summary); s != "" {
+					line += " — " + truncateRunes(s, relatedLineTrunc)
+				}
+				line += fmt.Sprintf(" (expand: @memory neighbors %s)", title)
+				lines = append(lines, line)
+			}
+		}
+		if len(lines) >= relatedGraphMaxLines {
+			break
+		}
+	}
+	if len(lines) == 0 {
+		return "", false
+	}
+
+	section := "## Related (graph)\n\n" + strings.Join(lines, "\n")
+	if len(section) >= remaining {
+		return "", false
+	}
+	if len(accessedIDs) > 0 {
+		r.facts.MarkAccessed(accessedIDs)
+	}
+	return section, true
+}
+
+// truncateRunes clips s to at most limit runes, appending an ellipsis when
+// it cut anything. Rune-safe so multi-byte content never splits mid-character.
+func truncateRunes(s string, limit int) string {
+	if utf8.RuneCountInString(s) <= limit {
+		return s
+	}
+	runes := []rune(s)
+	return string(runes[:limit]) + "…"
 }
 
 // trajectorySection renders the long-range rollup block under the same

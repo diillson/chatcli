@@ -17,6 +17,10 @@ type TopicTracker struct {
 	mu     sync.RWMutex
 	path   string
 	logger *zap.Logger
+
+	// changeNotifier marks derived caches (knowledge graph) stale on
+	// content mutations. See change_notify.go for the non-caller list.
+	changeNotifier
 }
 
 // NewTopicTracker creates a new topic tracker.
@@ -63,6 +67,7 @@ func (tt *TopicTracker) Record(topicNames []string) {
 	}
 
 	if changed {
+		tt.notifyChanged()
 		tt.persist()
 	}
 }
@@ -110,6 +115,7 @@ func (tt *TopicTracker) RecordWithSummary(topics map[string]string) {
 	}
 
 	if changed {
+		tt.notifyChanged()
 		tt.persist()
 	}
 }
@@ -135,6 +141,7 @@ func (tt *TopicTracker) LinkFact(topicName string, factID string) {
 		}
 	}
 	t.RelatedFacts = append(t.RelatedFacts, factID)
+	tt.notifyChanged()
 	tt.persist()
 }
 

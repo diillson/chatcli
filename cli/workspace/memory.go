@@ -103,31 +103,42 @@ func (ms *MemoryStore) GetRecentDailyNotes(days int) []DailyNote {
 // GetMemoryContext builds the memory section for the system prompt.
 // Uses smart retrieval when no hints are provided.
 func (ms *MemoryStore) GetMemoryContext() string {
-	return ms.sanitizeForPrompt(ms.manager.GetMemoryContext())
+	return ms.threatscanPrompt(ms.manager.GetMemoryContext())
 }
 
 // GetRelevantContext returns memory tailored to conversation hints.
 func (ms *MemoryStore) GetRelevantContext(hints []string) string {
-	return ms.sanitizeForPrompt(ms.manager.GetRelevantContext(hints))
+	return ms.threatscanPrompt(ms.manager.GetRelevantContext(hints))
 }
 
 // GetMemoryIndex returns the compact, stable memory digest. See
 // memory.Manager.GetMemoryIndex.
 func (ms *MemoryStore) GetMemoryIndex(budget int) string {
-	return ms.sanitizeForPrompt(ms.manager.GetMemoryIndex(budget))
+	return ms.threatscanPrompt(ms.manager.GetMemoryIndex(budget))
 }
 
 // GetRelevantContextWithHyDE delegates to the manager's HyDE-aware
 // retrieval. See memory.Manager.GetRelevantContextWithHyDE.
 func (ms *MemoryStore) GetRelevantContextWithHyDE(ctx context.Context, query string, hints []string, augmenter *memory.HyDEAugmenter) string {
-	return ms.sanitizeForPrompt(ms.manager.GetRelevantContextWithHyDE(ctx, query, hints, augmenter))
+	return ms.threatscanPrompt(ms.manager.GetRelevantContextWithHyDE(ctx, query, hints, augmenter))
 }
 
-// sanitizeForPrompt neutralizes prompt-injection / exec / persistence
+// SanitizeForPrompt exposes the threatscan pass for graph text assembled at
+// the cli layer (index card, @memory neighbors output) — fact summaries flow
+// into both, and every other memory injection already goes through this.
+// Nil-safe so callers without a memory store pass text through unchanged.
+func (ms *MemoryStore) SanitizeForPrompt(s string) string {
+	if ms == nil {
+		return s
+	}
+	return ms.threatscanPrompt(s)
+}
+
+// threatscanPrompt neutralizes prompt-injection / exec / persistence
 // payloads in memory before it is injected into the system prompt. Memory
 // is auto-curated and should never carry shell scripts, so it uses the
 // stricter ScopeMemory. The on-disk store is never modified.
-func (ms *MemoryStore) sanitizeForPrompt(s string) string {
+func (ms *MemoryStore) threatscanPrompt(s string) string {
 	if s == "" || !threatscan.Enabled() {
 		return s
 	}
