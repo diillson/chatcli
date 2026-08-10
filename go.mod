@@ -3,12 +3,12 @@ module github.com/diillson/chatcli
 go 1.26.5
 
 require (
-	github.com/aws/aws-sdk-go-v2 v1.43.2
+	github.com/aws/aws-sdk-go-v2 v1.43.4
 	github.com/aws/aws-sdk-go-v2/config v1.32.33
 	github.com/aws/aws-sdk-go-v2/feature/ec2/imds v1.18.33
 	github.com/aws/aws-sdk-go-v2/service/bedrock v1.66.2
 	github.com/aws/aws-sdk-go-v2/service/bedrockruntime v1.56.2
-	github.com/aws/smithy-go v1.27.5
+	github.com/aws/smithy-go v1.27.6
 	github.com/c-bata/go-prompt v0.2.6
 	github.com/charmbracelet/bubbletea v1.3.10
 	github.com/charmbracelet/colorprofile v0.2.3-0.20250311203215-f60798e515dc
