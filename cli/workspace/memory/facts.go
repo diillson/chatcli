@@ -48,12 +48,22 @@ type FactIndex struct {
 	lastAccessFlush     time.Time
 	accessDirty         bool
 
-	// onRemoved, when set, is invoked for every explicit fact removal
-	// (forget, archive, replace/compaction, supersede, cap prune) so derived
-	// per-fact state — today the vector index — is dropped in lockstep and
-	// never orphans. Invoked synchronously with fi.mu held; the callback must
-	// not call back into the FactIndex.
-	onRemoved func(ids []string)
+	// removalHooks are invoked for every explicit fact removal (forget,
+	// archive, replace/compaction, supersede, cap prune) so derived
+	// per-fact state — the vector index, the knowledge-graph cache — is
+	// dropped in lockstep and never orphans. Keyed so independent consumers
+	// can attach and detach without clobbering each other (the vector index
+	// re-attaches on /config reload and must not silently drop the graph
+	// hook). Invoked synchronously with fi.mu held, in sorted key order for
+	// determinism; callbacks must not call back into the FactIndex.
+	removalHooks map[string]func(ids []string)
+
+	// changeNotifier fires after content mutations (add, reinforce,
+	// supersede, compaction replace) so derived caches can mark themselves
+	// stale. Deliberately NOT fired by access-metadata bumps (MarkAccessed)
+	// or bare persists — those happen every retrieval and would thrash the
+	// cache.
+	changeNotifier
 }
 
 // factAccessFlushInterval bounds how often bare access-metadata bumps rewrite
@@ -142,6 +152,7 @@ func (fi *FactIndex) AddFactWithMeta(content, category string, tags []string, so
 	// Exact duplicate (same content hash) — reinforce.
 	if existing, ok := fi.facts[id]; ok {
 		fi.reinforceLocked(existing, sourceProject, confidence, provenance)
+		fi.notifyChanged()
 		fi.persistLocked()
 		return false
 	}
@@ -150,6 +161,7 @@ func (fi *FactIndex) AddFactWithMeta(content, category string, tags []string, so
 	switch outcome, target := fi.reconcileLocked(content, category, confidence); outcome {
 	case reconcileReinforce:
 		fi.reinforceLocked(target, sourceProject, confidence, provenance)
+		fi.notifyChanged()
 		fi.persistLocked()
 		return false
 	case reconcileSupersede:
@@ -189,6 +201,7 @@ func (fi *FactIndex) AddFactWithMeta(content, category string, tags []string, so
 		fi.pruneLowestLocked(len(fi.facts) - fi.config.MaxFactsCount)
 	}
 
+	fi.notifyChanged()
 	fi.persistLocked()
 	return true
 }
@@ -519,6 +532,9 @@ func (fi *FactIndex) ReplaceFacts(facts []*Fact) {
 	}
 	fi.facts = next
 	fi.recordTombstonesLocked(droppedIDs...)
+	// The removal hook covers the dropped side; the consolidated facts that
+	// replaced them are a content change of their own.
+	fi.notifyChanged()
 	fi.persistLocked()
 }
 
@@ -981,13 +997,28 @@ func (fi *FactIndex) mergeFromDiskLocked() {
 	}
 }
 
-// SetOnRemoved registers the removal hook (see the field doc). Pass nil to
-// detach. Not safe to call concurrently with index operations — wire it at
-// construction/attach time.
+// SetOnRemoved registers the default removal hook. Pass nil to detach.
+// Kept for API stability — it delegates to SetRemovalHook under a fixed
+// key, so it composes with keyed consumers instead of clobbering them.
 func (fi *FactIndex) SetOnRemoved(fn func(ids []string)) {
+	fi.SetRemovalHook("default", fn)
+}
+
+// SetRemovalHook registers (fn != nil) or removes (fn == nil) a keyed
+// removal hook (see the removalHooks field doc). Not safe to call
+// concurrently with index operations — wire hooks at construction/attach
+// time.
+func (fi *FactIndex) SetRemovalHook(key string, fn func(ids []string)) {
 	fi.mu.Lock()
-	fi.onRemoved = fn
-	fi.mu.Unlock()
+	defer fi.mu.Unlock()
+	if fn == nil {
+		delete(fi.removalHooks, key)
+		return
+	}
+	if fi.removalHooks == nil {
+		fi.removalHooks = make(map[string]func(ids []string))
+	}
+	fi.removalHooks[key] = fn
 }
 
 // recordTombstonesLocked marks ids as explicitly deleted, persists the
@@ -999,8 +1030,15 @@ func (fi *FactIndex) recordTombstonesLocked(ids ...string) {
 	if len(ids) == 0 {
 		return
 	}
-	if fi.onRemoved != nil {
-		fi.onRemoved(ids)
+	if len(fi.removalHooks) > 0 {
+		keys := make([]string, 0, len(fi.removalHooks))
+		for k := range fi.removalHooks {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		for _, k := range keys {
+			fi.removalHooks[k](ids)
+		}
 	}
 	now := time.Now()
 	for _, id := range ids {

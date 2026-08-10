@@ -33,6 +33,18 @@ const (
 	KindSkill   Kind = "skill"
 	KindProfile Kind = "profile"
 	KindTag     Kind = "tag"
+
+	// KindEpisode is a timeline entry from the episodic memory layer
+	// (id prefix "episode:", keyed by Episode.ID).
+	KindEpisode Kind = "episode"
+	// KindSession is a saved conversation (id prefix "session:", keyed by
+	// session name — the name IS the identity; renames orphan the node,
+	// which is acceptable because the graph is a rebuildable derivation).
+	KindSession Kind = "session"
+	// KindKB is a knowledge-mode context at CONTEXT granularity (id prefix
+	// "kb:", keyed by FileContext.ID). Never chunk-level: a corpus can hold
+	// tens of thousands of chunks and would drown the graph.
+	KindKB Kind = "kbcontext"
 )
 
 // Node is one vertex. ID is unique and namespaced by kind (e.g. "topic:auth").

@@ -177,6 +177,7 @@ var envDefaults = map[string]envDefault{
 	// ─── Memory / bootstrap ──────────────────────────────────────
 	"CHATCLI_MEMORY_ENABLED":    {Value: "true", IsBool: true, Source: "memory.go"},
 	"CHATCLI_MEMORY_MODE":       {Value: "index", Source: "memory_mode.go"},
+	"CHATCLI_MEMORY_GRAPH":      {Value: "true", IsBool: true, Source: "knowledge_graph.memoryGraphEnabled — persisted graph cache (graph.json) + recall neighborhood expansion; off = legacy derive-per-call"},
 	"CHATCLI_BOOTSTRAP_ENABLED": {Value: "true", IsBool: true, Source: "bootstrap.go"},
 
 	// ─── Gateway: voice transcription ────────────────────────────

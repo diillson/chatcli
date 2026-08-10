@@ -54,6 +54,10 @@ type EpisodeStore struct {
 	path     string
 	logger   *zap.Logger
 	maxCount int
+
+	// changeNotifier marks derived caches (knowledge graph) stale on
+	// content mutations. See change_notify.go for the non-caller list.
+	changeNotifier
 }
 
 // NewEpisodeStore creates the store and loads episodes.json from memoryDir.
@@ -103,12 +107,14 @@ func (es *EpisodeStore) Add(e Episode) bool {
 			changed = true
 		}
 		if changed {
+			es.notifyChanged()
 			es.persistLocked()
 		}
 		return false
 	}
 
 	es.episodes[e.ID] = &e
+	es.notifyChanged()
 	es.persistLocked()
 	return true
 }

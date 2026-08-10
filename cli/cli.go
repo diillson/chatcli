@@ -760,6 +760,9 @@ func NewChatCLI(ctx context.Context, manager manager.LLMManager, logger *zap.Log
 		// Wire the @memory tool to this session's store so the agent can
 		// persist facts deterministically.
 		plugins.SetMemoryAdapter(&memoryPluginAdapter{cli: cli})
+		// Persisted knowledge-graph cache: adopt graph.json when current,
+		// rebuild on store mutations (see wireMemoryGraph).
+		cli.wireMemoryGraph()
 	}
 
 	// Build the content-aware compression layer (CCR store under ~/.chatcli/ccr)

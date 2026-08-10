@@ -86,6 +86,9 @@ func (a *contextPluginAdapter) Create(name, mode string, paths []string, descrip
 	if err != nil {
 		return "", err
 	}
+	// Tool-path mutation: the AI created a context without going through the
+	// /context command dispatch, so the graph cache must be marked here.
+	a.cli.markGraphDirty()
 	var b strings.Builder
 	fmt.Fprintf(&b, "Created context %q (mode=%s) — %d unit(s), %s.",
 		fc.Name, fc.Mode, fc.FileCount, humanMB(fc.TotalSize))
@@ -242,6 +245,8 @@ func (a *contextPluginAdapter) Delete(name string) (string, error) {
 	if err := mgr.DeleteContext(fc.ID); err != nil {
 		return "", err
 	}
+	// Tool-path mutation — same rationale as Create.
+	a.cli.markGraphDirty()
 	var b strings.Builder
 	fmt.Fprintf(&b, "Deleted context %q permanently.", fc.Name)
 	return b.String(), nil

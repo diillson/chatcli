@@ -73,5 +73,20 @@ func (cli *ChatCLI) showConfigMemory() {
 	}
 	kv(p, config.GraphIndexEnv, graphVal)
 
+	// Persisted graph cache + recall expansion (PR: memory graph).
+	memGraphVal := i18n.T("cfg.val.disabled")
+	if memoryGraphEnabled() {
+		memGraphVal = i18n.T("cfg.val.enabled")
+	}
+	if os.Getenv(config.MemoryGraphEnv) == "" {
+		memGraphVal = defaultMarker + memGraphVal
+	}
+	kv(p, config.MemoryGraphEnv, memGraphVal)
+	if cli.memoryStore != nil {
+		if nodes, edges, ok := cli.memoryStore.Manager().GraphStats(); ok {
+			kv(p, i18n.T("cfg.kv.memory.graph_size"), i18n.T("cfg.kv.memory.graph_size_val", nodes, edges))
+		}
+	}
+
 	sectionEnd(ColorBlue)
 }

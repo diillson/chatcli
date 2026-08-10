@@ -2163,6 +2163,8 @@
   "cfg.kv.memory.mode_off": "off — inject no memory (bootstrap still applies)",
   "cfg.kv.memory.index_size": "Current index size",
   "cfg.kv.memory.episodes": "Episodic timeline",
+  "cfg.kv.memory.graph_size": "Graph cache",
+  "cfg.kv.memory.graph_size_val": "%d nodes, %d links (graph.json)",
   "cfg.kv.memory.episodes_val": "%d episode(s) stored (cap %d)",
   "cfg.section.hub.title": "Conversation Hub (cross-channel continuity)",
   "cfg.sub.hub.local": "Local mode (same machine, no /connect)",

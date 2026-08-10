@@ -17,6 +17,10 @@ type UserProfileStore struct {
 	mu      sync.RWMutex
 	path    string
 	logger  *zap.Logger
+
+	// changeNotifier marks derived caches (knowledge graph) stale on
+	// content mutations. See change_notify.go for the non-caller list.
+	changeNotifier
 }
 
 // NewUserProfileStore creates a new profile store and loads existing data.
@@ -113,6 +117,7 @@ func (ps *UserProfileStore) UpdateWithSource(updates map[string]string, source s
 		ps.profile.LastUpdated = time.Now()
 	}
 	if changed || metaDirty {
+		ps.notifyChanged()
 		ps.persist()
 	}
 	return changed

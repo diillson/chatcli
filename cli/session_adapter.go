@@ -229,6 +229,9 @@ func (a *sessionPluginAdapter) Save(_ context.Context, name string) (string, err
 	cli.currentSessionName = name
 	cli.boundRemoteOnly = false
 	cli.stampBoundSession()
+	// Tool-path mutation: a new/updated session file feeds the knowledge
+	// graph's session nodes; the /session command tap never sees this path.
+	cli.markGraphDirty()
 	return i18n.T("session.tool.save.ok", name), nil
 }
 
@@ -252,6 +255,8 @@ func (a *sessionPluginAdapter) Fork(_ context.Context, name string) (string, err
 	cli.currentSessionName = name
 	cli.boundRemoteOnly = false
 	cli.stampBoundSession()
+	// Tool-path mutation — same rationale as Save.
+	cli.markGraphDirty()
 	return i18n.T("session.tool.fork.ok", name), nil
 }
 

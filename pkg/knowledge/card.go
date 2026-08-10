@@ -18,7 +18,11 @@ import (
 )
 
 // kindOrder fixes the display order so the card is byte-stable across turns.
-var kindOrder = []Kind{KindProfile, KindProject, KindTopic, KindSkill, KindFact, KindTag}
+var kindOrder = []Kind{
+	KindProfile, KindProject, KindTopic, KindSkill,
+	KindEpisode, KindSession, KindKB,
+	KindFact, KindTag,
+}
 
 // IndexCard renders the map of content: a one-line tally by kind plus up to
 // maxHubs hub titles. Returns "" for an empty graph. The output is deterministic
