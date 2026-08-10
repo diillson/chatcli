@@ -697,6 +697,8 @@ func contextAttachFlagSuggestions() []prompt.Suggest {
 		{Text: "--rag", Description: i18n.T("complete.context.flag_rag")},
 		{Text: "--retrieve", Description: i18n.T("complete.context.flag_rag")},
 		{Text: "-r", Description: i18n.T("complete.context.flag_rag_short")},
+		{Text: "--full", Description: i18n.T("complete.context.flag_full")},
+		{Text: "-f", Description: i18n.T("complete.context.flag_full")},
 	}
 }
 

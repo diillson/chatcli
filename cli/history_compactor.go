@@ -190,11 +190,46 @@ func (hc *HistoryCompactor) CharBudget(cfg CompactConfig) int {
 	return budget
 }
 
-// totalChars sums the character count of all message contents.
+// weightCharsPerToken converts token-priced payload (images) back into the
+// same character currency the budget math uses. Keep in lock-step with
+// CompactConfig.CharsPerToken's default (DefaultCompactConfig): the budget
+// multiplies tokens by 4 to get chars, so token-priced weight must do the same.
+const weightCharsPerToken = 4
+
+// messageWeight returns the request-payload weight of a message in characters.
+// It is a proxy for what the message actually costs on the wire, not an exact
+// token count: besides Content it charges native tool-call arguments and
+// vision input, which len(Content) alone is blind to. A tool-heavy or
+// image-heavy history must trigger compaction just like a text-heavy one.
+func messageWeight(msg models.Message) int {
+	w := len(msg.Content)
+	for _, tc := range msg.ToolCalls {
+		w += len(tc.Name) + len(tc.ArgumentsJSON())
+	}
+	for _, img := range msg.Images {
+		w += models.EstimateImageTokens(img) * weightCharsPerToken
+	}
+	// SystemParts normally duplicate Content (Content is the flattened join
+	// of the parts), so charge only the excess — max(Content, parts), never
+	// the sum of both.
+	if len(msg.SystemParts) > 0 {
+		partsSum := 0
+		for _, p := range msg.SystemParts {
+			partsSum += len(p.Text)
+		}
+		if partsSum > len(msg.Content) {
+			w += partsSum - len(msg.Content)
+		}
+	}
+	return w
+}
+
+// totalChars sums the payload weight of all messages. See messageWeight for
+// what counts toward the weight beyond len(Content).
 func totalChars(history []models.Message) int {
 	total := 0
 	for _, msg := range history {
-		total += len(msg.Content)
+		total += messageWeight(msg)
 	}
 	return total
 }
@@ -474,7 +509,11 @@ func shrinkToBudget(history []models.Message, budget int, ccr *compress.Layer) [
 			}
 		}
 		if idx < 0 {
-			break // only system messages / floor-sized content left
+			// Only system messages / floor-sized content left. With weighted
+			// totals (messageWeight) the residual may still exceed the budget
+			// when the bulk is unshrinkable payload — tool-call arguments or
+			// images have no Content to cut — so bail out rather than spin.
+			break
 		}
 
 		// Archive before the lossy cut. Archive refuses content that

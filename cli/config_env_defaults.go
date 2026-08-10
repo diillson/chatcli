@@ -124,7 +124,8 @@ var envDefaults = map[string]envDefault{
 	"CHATCLI_AGENT_EARLY_EXIT_TURNS": {Value: "3", Source: "agent_earlyexit.defaultStagnationThreshold"},
 	"CHATCLI_AGENT_SMART_ROUTE":      {Value: "hint", Source: "agent_routing.smartRouting"},
 	"CHATCLI_AGENT_MODEL_TOOL":       {Value: "true", IsBool: true, Source: "model_tool_adapter.isModelToolEnabled"},
-	"CHATCLI_SKILL_INJECT_BUDGET":    {Value: "24000", Source: "skill_activation.skillInjectBudget — 0 = unlimited"},
+	"CHATCLI_SKILL_INJECT_BUDGET":    {Value: "24000", Source: "skill_activation.skillInjectBudget — 0 = unlimited; run cap = 2x this"},
+	"CHATCLI_SKILL_AGE_TURNS":        {Value: "6", Source: "agent.DefaultSkillAgingConfig — turns before a mid-loop skill block collapses to a stub (also the re-inject cooldown)"},
 
 	// ─── Agent: execution ────────────────────────────────────────
 	"CHATCLI_AGENT_CMD_TIMEOUT":         {Value: "10m", Source: "agent.NewContextManager"},
@@ -212,7 +213,8 @@ var envDefaults = map[string]envDefault{
 	"CHATCLI_GRAPHVIEW_OPEN":  {Value: "true", IsBool: true, Source: "plugins.graphViewOpenEnvEnabled: open the rendered HTML in the browser"},
 	"CHATCLI_GRAPHVIEW_THEME": {Value: "dark", Source: "plugins.graphViewDefaultTheme: dark|light"},
 	"CHATCLI_CHAT_GRAPHVIEW":  {Value: "true", IsBool: true, Source: "chat_graphview.go: chat-mode @graphview exception"},
-	"CHATCLI_CHAT_MEMORY":     {Value: "true", IsBool: true, Source: "chat_memory.go: chat-mode @memory exception (profile/facts persistence)"},
+	"CHATCLI_CHAT_MEMORY":     {Value: "true", IsBool: true, Source: "chat_memory.go: chat-mode @memory exception (profile/facts persistence; also enables index memory mode in chat)"},
+	"CHATCLI_ATTACH_AUTO_RAG": {Value: "true", IsBool: true, Source: "context_autorag.go: /context attach auto-upgrades large contexts (>=32KiB) to semantic retrieval; --full opts out per call"},
 
 	// ─── Vision input (image understanding / describe-fallback) ───
 	"CHATCLI_VISION_INPUT":    {Value: "auto", Source: "vision input mode: auto|native|describe|off"},
@@ -237,7 +239,7 @@ var envDefaults = map[string]envDefault{
 	"CHATCLI_MCP_MAX_HISTORY":               {Value: "0", Source: "cmd/rpcserve.go (0 = token-aware compaction bounds the history)"},
 	"CHATCLI_MCP_SESSION_AUTOSAVE":          {Value: "true", IsBool: true, Source: "cmd/rpcserve.go (persist live MCP sessions as mcp-<session>; unset follows CHATCLI_SESSION_AUTOSAVE)"},
 	"CHATCLI_SESSION_AUTOSAVE_KEEP":         {Value: "600", Source: "cli/cli_session_autosave.go (machine-session keep-count backstop; TTL is the primary retention)"},
-	"CHATCLI_SESSION_AUTORECALL":            {Value: "true", IsBool: true, Source: "cli/session_autorecall.go (proactive saved-session recall block in agent/coder turns)"},
+	"CHATCLI_SESSION_AUTORECALL":            {Value: "true", IsBool: true, Source: "cli/session_autorecall.go (proactive saved-session recall block in chat/agent/coder turns)"},
 	"CHATCLI_SESSION_WRITETHROUGH":          {Value: "true", IsBool: true, Source: "cli/cli_session_binding.go (write each turn through to the active named session + adopt other surfaces' writes)"},
 	"CHATCLI_MCP_HUB":                       {Value: "on", Source: "cmd/rpcserve.go (join the conversation hub in resume mode: on|off)"},
 	"CHATCLI_MCP_HUB_PRINCIPAL":             {Value: "(hub default)", Source: "cmd/rpcserve.go (isolate the MCP thread under another principal)"},

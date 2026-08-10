@@ -1,6 +1,10 @@
 package models
 
-import "github.com/diillson/chatcli/config"
+import (
+	"strings"
+
+	"github.com/diillson/chatcli/config"
+)
 
 // MessageMeta carries non-content metadata for history management.
 type MessageMeta struct {
@@ -15,6 +19,43 @@ type MessageMeta struct {
 	// recall. A structural flag avoids coupling the trimmer to any content
 	// format. See cli.MessageTrimmer.trimMessage.
 	PreserveVerbatim bool `json:"preserve_verbatim,omitempty"`
+
+	// SkillNames marks a mid-loop skill injection block (agent/coder mode)
+	// and records which skills it carries, comma-separated. Identification
+	// is structural on purpose: compaction may rewrite the content, but
+	// Meta survives every rewrite, park snapshot and session save. A flat
+	// string (not a slice) keeps MessageMeta comparable — external
+	// consumers may compare metas with ==. Read via SkillNameList, write
+	// via JoinSkillNames. Consumed by agent.ApplySkillAging to collapse
+	// stale skill guidance.
+	SkillNames string `json:"skill_names,omitempty"`
+
+	// SkillCollapsed is true once ApplySkillAging reduced this skill block
+	// to a stub, so the pass never collapses the same block twice.
+	SkillCollapsed bool `json:"skill_collapsed,omitempty"`
+}
+
+// SkillNameList splits the comma-separated SkillNames marker into the
+// individual skill names. Returns nil when the meta is absent or unmarked.
+func (m *MessageMeta) SkillNameList() []string {
+	if m == nil || m.SkillNames == "" {
+		return nil
+	}
+	parts := strings.Split(m.SkillNames, ",")
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		if p = strings.TrimSpace(p); p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
+// JoinSkillNames is the write-side counterpart of SkillNameList. Skill
+// names are kebab-case identifiers (persona frontmatter contract), so the
+// comma join is unambiguous.
+func JoinSkillNames(names []string) string {
+	return strings.Join(names, ",")
 }
 
 // Message representa uma mensagem trocada com o modelo de linguagem.

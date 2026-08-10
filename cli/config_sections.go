@@ -778,6 +778,7 @@ func (cli *ChatCLI) showConfigResilience() {
 	kv(p, "CHATCLI_MICROCOMPACT_HEAD_CHARS", envOr("CHATCLI_MICROCOMPACT_HEAD_CHARS"))
 	kv(p, "CHATCLI_MICROCOMPACT_TAIL_CHARS", envOr("CHATCLI_MICROCOMPACT_TAIL_CHARS"))
 	kv(p, "CHATCLI_MICROCOMPACT_MIN_CONTENT", envOr("CHATCLI_MICROCOMPACT_MIN_CONTENT"))
+	kv(p, "CHATCLI_SKILL_AGE_TURNS", envOr("CHATCLI_SKILL_AGE_TURNS"))
 	kv(p, "CHATCLI_TOOL_RESULT_BUDGET_CHARS", envOr("CHATCLI_TOOL_RESULT_BUDGET_CHARS"))
 	kv(p, "CHATCLI_TOOL_RESULT_MAX_CHARS", envOr("CHATCLI_TOOL_RESULT_MAX_CHARS"))
 
@@ -890,6 +891,7 @@ func (cli *ChatCLI) showConfigSession() {
 
 	fmt.Println(p)
 	subheader(p, "cfg.sub.session.attached")
+	kv(p, "CHATCLI_ATTACH_AUTO_RAG", envBool("CHATCLI_ATTACH_AUTO_RAG"))
 	attachedCount := 0
 	if cli.contextHandler != nil {
 		sessionID := cli.currentSessionName

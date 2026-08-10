@@ -32,6 +32,10 @@ func (h *ContextHandler) handleAttach(sessionID string, args []string) error {
 	if flags.retrievalTopK > 0 && len(flags.selectedChunks) > 0 {
 		return fmt.Errorf("%s", i18n.T("context.io.error.rag_with_chunks"))
 	}
+	// --full forces whole-content injection; --rag asks for retrieval.
+	if flags.full && flags.retrievalTopK > 0 {
+		return fmt.Errorf("%s", i18n.T("context.io.error.full_with_rag"))
+	}
 
 	ctx, err := h.manager.GetContextByName(contextName)
 	if err != nil {
@@ -40,6 +44,18 @@ func (h *ContextHandler) handleAttach(sessionID string, args []string) error {
 
 	if err := validateSelectedChunks(ctx, flags.selectedChunks); err != nil {
 		return err
+	}
+
+	// Auto-RAG upgrade: a large context attached with no explicit injection
+	// choice becomes a semantic-retrieval attachment when embeddings are
+	// available — parity with the agent-side @context tool (context_adapter),
+	// which has upgraded unconditionally since PR #1058. The manual path
+	// keeps a size threshold so small contexts stay verbatim (zero recall
+	// risk), plus three opt-outs: the --full flag, the env kill switch, and
+	// simply having no embedding provider.
+	if h.shouldAutoRag(ctx, flags) {
+		flags.retrievalTopK = ctxmgr.DefaultRetrievalTopK
+		flags.autoRag = true
 	}
 
 	attachOpts := ctxmgr.AttachOptions{
@@ -60,6 +76,8 @@ type attachFlags struct {
 	priority       int
 	selectedChunks []int
 	retrievalTopK  int
+	full           bool // --full: force whole-content injection, opt out of auto-RAG
+	autoRag        bool // set by handleAttach when the RAG upgrade was automatic
 }
 
 // parseAttachFlags parses the flag tail of `/context attach`. Extracted from
@@ -114,6 +132,11 @@ func parseAttachFlags(args []string) (attachFlags, error) {
 				}
 			}
 
+		case arg == "--full" || arg == "-f":
+			// Whole-content injection, explicitly: opts out of the automatic
+			// RAG upgrade for large contexts (attachAutoRag).
+			f.full = true
+
 		default:
 			return f, fmt.Errorf("%s", i18n.T("context.io.error.unknown_flag", arg))
 		}
@@ -166,6 +189,12 @@ func (h *ContextHandler) printAttachFeedback(ctx *ctxmgr.FileContext, flags atta
 			// Provider absent: the attachment still works, but as whole content.
 			fmt.Println(colorize(i18n.T("context.io.warn.rag_no_provider"), ColorYellow))
 		}
+	}
+	if flags.autoRag {
+		fmt.Println(colorize(
+			i18n.T("context.io.auto_rag_notice",
+				float64(ctx.TotalSize)/1024, flags.retrievalTopK),
+			ColorYellow))
 	}
 
 	if ctx.Mode == ctxmgr.ModeKnowledge {
