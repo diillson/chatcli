@@ -28,6 +28,8 @@ package cli
 import (
 	"os"
 	"strings"
+
+	"github.com/diillson/chatcli/pkg/knowledge"
 )
 
 const (
@@ -35,8 +37,16 @@ const (
 	// not a retrieval; the model pulls detail via @memory recall.
 	autoRecallMaxFacts = 3
 
-	// autoRecallBudget caps the block size in bytes.
+	// autoRecallBudget caps the fact lines in bytes.
 	autoRecallBudget = 700
+
+	// autoRecallRelatedBudget is the extra allowance for the one-line graph
+	// expansion appended after the facts. Separate from autoRecallBudget so
+	// the graph line never displaces a fact.
+	autoRecallRelatedBudget = 220
+
+	// autoRecallRelatedMax caps how many graph neighbors the line names.
+	autoRecallRelatedMax = 3
 )
 
 // autoRecallHeader is an English model-facing constant, like memoryRecallHint.
@@ -89,5 +99,58 @@ func (cli *ChatCLI) memoryAutoRecallBlock(hints []string) string {
 		return ""
 	}
 	mgr.Facts.MarkAccessed(accessed)
+
+	// Graph expansion: one compact line naming what is structurally adjacent
+	// to the facts above, so the model knows there is MORE to pull before it
+	// claims ignorance. Cache-only on purpose — Manager().KnowledgeGraph()
+	// is nil when the persisted graph is off (CHATCLI_MEMORY_GRAPH), and this
+	// nudge must never pay a derive-per-call rebuild.
+	if line := autoRecallRelatedLine(mgr.KnowledgeGraph(), accessed); line != "" &&
+		len(line)+1 <= autoRecallRelatedBudget {
+		b.WriteString(line)
+		b.WriteByte('\n')
+	}
 	return strings.TrimRight(b.String(), "\n")
+}
+
+// autoRecallRelatedLine renders "Related (graph): ..." from the 1-hop
+// neighborhood of the shown facts. Tag and profile nodes are filtered (glue
+// and ever-present hub), already-shown facts are skipped, and the pointer
+// uses only surfaces every mode has (@memory neighbors) — never @session.
+// Returns "" when there is nothing new to point at.
+func autoRecallRelatedLine(g *knowledge.Graph, shownFactIDs []string) string {
+	if g == nil || g.Len() == 0 {
+		return ""
+	}
+	shown := make(map[string]bool, len(shownFactIDs))
+	for _, id := range shownFactIDs {
+		shown["fact:"+id] = true
+	}
+	var names []string
+	seen := make(map[string]bool)
+	for _, id := range shownFactIDs {
+		for _, n := range g.Neighborhood("fact:"+id, 1, autoRecallRelatedMax*2) {
+			if len(names) >= autoRecallRelatedMax {
+				break
+			}
+			if seen[n.ID] || shown[n.ID] ||
+				n.Kind == knowledge.KindTag || n.Kind == knowledge.KindProfile {
+				continue
+			}
+			seen[n.ID] = true
+			title := strings.TrimSpace(n.Title)
+			if title == "" {
+				title = n.ID
+			}
+			names = append(names, title+" ("+string(n.Kind)+")")
+		}
+		if len(names) >= autoRecallRelatedMax {
+			break
+		}
+	}
+	if len(names) == 0 {
+		return ""
+	}
+	return "Related (graph): " + strings.Join(names, ", ") +
+		" — expand with @memory neighbors <title>."
 }
