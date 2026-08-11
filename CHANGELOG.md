@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.183.0](https://github.com/diillson/chatcli/compare/v1.182.1...v1.183.0) (2026-08-11)
+
+
+### Features
+
+* **memory:** make cross-session memory visible and recallable from turn one ([#1326](https://github.com/diillson/chatcli/issues/1326)) ([4b28f65](https://github.com/diillson/chatcli/commit/4b28f65cc73feb7101b7d327b4d01d44fdacd629))
+
 ## [1.182.1](https://github.com/diillson/chatcli/compare/v1.182.0...v1.182.1) (2026-08-10)
 
 
