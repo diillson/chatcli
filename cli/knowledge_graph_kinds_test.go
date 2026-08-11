@@ -136,6 +136,9 @@ func TestKnowledgeGraphAccessor_ServesCachedSnapshotWhenWired(t *testing.T) {
 	cli := newTestCLIWithMemory(t)
 	cli.memoryStore.Manager().Facts.AddFact("cached snapshot fact", "general", nil)
 	cli.wireMemoryGraph()
+	// The rebuild below schedules an async graph.json persist into the
+	// TempDir; quiesce it before cleanup or RemoveAll races the writer.
+	t.Cleanup(cli.memoryStore.Manager().WaitGraphPersist)
 
 	g1 := cli.knowledgeGraph()
 	g2 := cli.knowledgeGraph()
