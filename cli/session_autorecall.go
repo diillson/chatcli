@@ -49,7 +49,9 @@ const (
 	// on every turn would be wasteful. Explicit recall questions (referential
 	// or temporal) search the ENTIRE store: "lembra do que fizemos há 2
 	// semanas?" must reach a two-week-old autosave, not just the tail.
-	sessionAutoRecallRecentWindow = 30
+	// 60, not 30: with autosave-per-exit plus MCP mirrors, 30 files can be
+	// just a few days of use — too short for "that thing from last week".
+	sessionAutoRecallRecentWindow = 60
 
 	// sessionAutoRecallMinMatches is the evidence floor for HINT-driven
 	// recall (no explicit reference by the user): at least this many

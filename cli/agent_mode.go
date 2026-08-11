@@ -1298,6 +1298,14 @@ func (a *AgentMode) composeCoreText(isCoder, hasActivePersona bool) string {
 	// directive so the model drops preamble/restatement/ceremony. Empty when
 	// CHATCLI_OUTPUT_VERBOSITY=full.
 	coreText += verbosityDirectiveBlock()
+	// Persistent-memory bootstrap card: counts snapshot + navigation routes
+	// (@memory/@session/@board). Session-start stable, so it belongs in this
+	// CACHED core block. The gateway keeps its own GatewayMemoryDirective on
+	// top — the card adds the live counts and the saved-sessions route that
+	// directive predates.
+	if card := a.cli.memoryBootstrapCardAgent(); card != "" {
+		coreText += "\n\n" + card
+	}
 	return coreText
 }
 
@@ -1313,11 +1321,20 @@ func (a *AgentMode) buildWorkspaceBlocks(ctx context.Context, query string) (str
 	if len(a.cli.history) < hintWindow {
 		hintWindow = len(a.cli.history)
 	}
+	var recentTexts []string
 	if hintWindow > 0 {
-		var recentTexts []string
 		for _, msg := range a.cli.history[len(a.cli.history)-hintWindow:] {
 			recentTexts = append(recentTexts, msg.Content)
 		}
+	}
+	// The current query is appended to history only AFTER the system prompt
+	// is assembled, so it must feed the hints explicitly — otherwise the
+	// first turn of a fresh session (the moment recall matters most) runs
+	// hintless and every proactive recall block stays mute.
+	if q := strings.TrimSpace(query); q != "" {
+		recentTexts = append(recentTexts, q)
+	}
+	if len(recentTexts) > 0 {
 		hints = memory.ExtractKeywords(recentTexts)
 	}
 	// Memory injection mode: "index" (pull) keeps the per-turn payload
@@ -1362,7 +1379,15 @@ func (a *AgentMode) buildWorkspaceBlocks(ctx context.Context, query string) (str
 	// Proactive SESSION recall (own gate, orthogonal to the memory mode —
 	// saved sessions are a separate layer neither "index" nor "full"
 	// injects). Same cache discipline: uncached trailing block only.
-	if sr := a.cli.sessionAutoRecallBlock(hints, lastUserMessage(a.cli.history)); sr != "" {
+	// The CURRENT query is the referential text — lastUserMessage(history)
+	// here would test the referential regex against the PREVIOUS turn (or a
+	// synthetic tool-feedback message), so "lembra do que fizemos ontem?" as
+	// the opening /coder query never fired.
+	refText := strings.TrimSpace(query)
+	if refText == "" {
+		refText = lastUserMessage(a.cli.history)
+	}
+	if sr := a.cli.sessionAutoRecallBlock(hints, refText); sr != "" {
 		if dynamicText == "" {
 			dynamicText = sr
 		} else {
@@ -1370,6 +1395,32 @@ func (a *AgentMode) buildWorkspaceBlocks(ctx context.Context, query string) (str
 		}
 	}
 	return workspaceText, dynamicText
+}
+
+// followUpRecallBlocks re-runs the proactive recall surfaces for a mid-loop
+// user follow-up. The agent system prompt is assembled ONCE per Run, so the
+// boot-time [SESSION RECALL] / [MEMORY AUTO-RECALL] blocks freeze at their
+// turn-one state — a follow-up like "lembra do que fizemos ontem?" typed
+// mid-session would otherwise never trigger recall. Returns "" when nothing
+// matched. The caller injects the result append-only as a user-role message
+// at the turn boundary, the same protocol-safety contract as the mid-loop
+// skill blocks (never between a tool_use and its tool_result).
+func (a *AgentMode) followUpRecallBlocks(userMsg string) string {
+	userMsg = strings.TrimSpace(userMsg)
+	if userMsg == "" {
+		return ""
+	}
+	hints := memory.ExtractKeywords([]string{userMsg})
+	var parts []string
+	if loadMemoryMode() == memModeIndex {
+		if ar := a.cli.memoryAutoRecallBlock(hints); ar != "" {
+			parts = append(parts, ar)
+		}
+	}
+	if sr := a.cli.sessionAutoRecallBlock(hints, userMsg); sr != "" {
+		parts = append(parts, sr)
+	}
+	return strings.Join(parts, "\n\n")
 }
 
 // RunCoderOnce executa o modo coder de forma não-interativa (one-shot),
@@ -1900,6 +1951,11 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 					Meta:    &models.MessageMeta{SkillNames: models.JoinSkillNames(names)},
 				})
 				notifySkillActivation(names)
+			}
+			// Same trigger surface for proactive recall: a follow-up asking
+			// about past work re-ranks memory/sessions against ITS words.
+			if rb := a.followUpRecallBlocks(userMsg); rb != "" {
+				a.cli.history = append(a.cli.history, models.Message{Role: "user", Content: rb})
 			}
 		}
 
@@ -3699,6 +3755,11 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 					Meta:    &models.MessageMeta{SkillNames: models.JoinSkillNames(names)},
 				})
 				notifySkillActivation(names)
+			}
+			// And proactive recall against the follow-up's own words — the
+			// system prompt's recall blocks froze at Run() time.
+			if rb := a.followUpRecallBlocks(userInput); rb != "" {
+				a.cli.history = append(a.cli.history, models.Message{Role: "user", Content: rb})
 			}
 			continue
 		}

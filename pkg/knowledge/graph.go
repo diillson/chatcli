@@ -45,6 +45,11 @@ const (
 	// "kb:", keyed by FileContext.ID). Never chunk-level: a corpus can hold
 	// tens of thousands of chunks and would drown the graph.
 	KindKB Kind = "kbcontext"
+	// KindCard is a work-board card (id prefix "card:", keyed by Card.ID).
+	// Board state used to be a silo invisible to every memory surface; the
+	// card tally in the index card is how a fresh session learns in-flight
+	// work exists at all.
+	KindCard Kind = "card"
 )
 
 // Node is one vertex. ID is unique and namespaced by kind (e.g. "topic:auth").

@@ -19,6 +19,11 @@ import (
 // command renders its own i18n view for humans.
 type liveBoardAdapter struct {
 	store *board.Store
+	// onMutate fires after every successful board mutation. Wired to
+	// markGraphDirty so card nodes in the knowledge graph refresh promptly —
+	// the tool path never crosses the command handler, so without its own
+	// tap the graph would serve stale board state until the fingerprint TTL.
+	onMutate func()
 }
 
 // newLiveBoardAdapter builds the adapter (nil store = board.Default()).
@@ -27,6 +32,13 @@ func newLiveBoardAdapter(store *board.Store) *liveBoardAdapter {
 		store = board.Default()
 	}
 	return &liveBoardAdapter{store: store}
+}
+
+// mutated invokes the mutation tap, if any.
+func (a *liveBoardAdapter) mutated() {
+	if a.onMutate != nil {
+		a.onMutate()
+	}
 }
 
 // Create implements plugins.BoardAdapter.
@@ -43,6 +55,7 @@ func (a *liveBoardAdapter) Create(title, description, assignee, column string) (
 	if err != nil {
 		return "", err
 	}
+	a.mutated()
 	return "created " + formatCardLine(*card), nil
 }
 
@@ -126,6 +139,7 @@ func (a *liveBoardAdapter) Move(id, to, by string) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	a.mutated()
 	return "moved " + formatCardLine(card), nil
 }
 
@@ -135,6 +149,7 @@ func (a *liveBoardAdapter) Assign(id, assignee string) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	a.mutated()
 	return "assigned " + formatCardLine(card), nil
 }
 
@@ -147,6 +162,7 @@ func (a *liveBoardAdapter) Note(id, author, text string) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	a.mutated()
 	return fmt.Sprintf("note added to %s (%d notes total)", card.ID, len(card.Notes)), nil
 }
 
@@ -164,6 +180,7 @@ func (a *liveBoardAdapter) Link(id, runID, jobID string) (string, error) {
 			return "", err
 		}
 	}
+	a.mutated()
 	return fmt.Sprintf("linked %s (runs=%s jobs=%s)", card.ID,
 		strings.Join(card.RunIDs, ","), strings.Join(card.JobIDs, ",")), nil
 }
@@ -182,6 +199,7 @@ func (a *liveBoardAdapter) Archive(olderThan string) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	a.mutated()
 	return fmt.Sprintf("archived %d done card(s)", n), nil
 }
 

@@ -264,6 +264,15 @@ type ChatCLI struct {
 	contextBuilder *workspace.ContextBuilder
 	memoryStore    *workspace.MemoryStore
 
+	// Session-start snapshot of the persistent-memory bootstrap card
+	// (memory_bootstrap.go). Computed once per process so the card stays
+	// byte-stable across turns — it rides in the CACHED prefix of every
+	// surface's system prompt, and a per-turn count drift would bust that
+	// cache for no informational gain.
+	bootstrapCardOnce  sync.Once
+	bootstrapCardChat  string
+	bootstrapCardAgent string
+
 	// Content-aware, reversible context compression (CCR). Reduces verbose
 	// tool output (search/log/diff/JSON) before it reaches the model while
 	// keeping the full original recoverable via @recall. Shared across modes.
@@ -880,7 +889,9 @@ func NewChatCLI(ctx context.Context, manager manager.LLMManager, logger *zap.Log
 	plugins.SetAgentsAdapter(newLiveAgentsAdapter(nil))
 
 	// Wire the @board plugin adapter over the squad board store.
-	plugins.SetBoardAdapter(newLiveBoardAdapter(nil))
+	boardAdapter := newLiveBoardAdapter(nil)
+	boardAdapter.onMutate = cli.markGraphDirty
+	plugins.SetBoardAdapter(boardAdapter)
 
 	// Wire the @mail plugin adapter over the squad message bus.
 	plugins.SetMailAdapter(newLiveMailAdapter(nil))

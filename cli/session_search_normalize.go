@@ -82,6 +82,15 @@ var sessionSearchStopwords = map[string]struct{}{
 	"fez": {}, "faz": {}, "fazer": {}, "fizeram": {}, "falou": {}, "disse": {},
 	"vimos": {}, "combinamos": {}, "resolvemos": {}, "trocamos": {}, "papo": {},
 	"lembra": {}, "lembrar": {}, "sessao": {}, "sessoes": {}, "conversa": {}, "conversas": {},
+	// PT referential framing — words that point AT a past conversation
+	// without naming its content ("o que falamos anteriormente?"). Left in
+	// the query, a lone survivor like "anteriormente" makes BM25 rank the
+	// whole store on a framing word and surface months-old sessions over
+	// yesterday's; stripped, the query correctly degrades to the
+	// recent-sessions listing (newest first).
+	"anteriormente": {}, "anterior": {}, "anteriores": {}, "passada": {}, "passadas": {},
+	"passado": {}, "passados": {}, "ultima": {}, "ultimo": {}, "ultimas": {}, "ultimos": {},
+	"paramos": {}, "retomar": {}, "continuar": {}, "recente": {}, "recentes": {},
 	// EN grammatical
 	"the": {}, "an": {}, "of": {}, "in": {}, "on": {}, "at": {}, "to": {}, "for": {},
 	"with": {}, "without": {}, "and": {}, "or": {}, "but": {}, "that": {}, "this": {},
@@ -98,6 +107,8 @@ var sessionSearchStopwords = map[string]struct{}{
 	"discussed": {}, "talked": {}, "decided": {}, "mentioned": {}, "said": {},
 	"remember": {}, "recall": {}, "session": {}, "sessions": {}, "conversation": {},
 	"conversations": {}, "chat": {}, "left": {}, "off": {},
+	// EN referential framing — same rationale as the PT set above.
+	"previous": {}, "previously": {}, "last": {}, "prior": {}, "recent": {}, "recently": {},
 }
 
 // significantSearchTerms filters normalized query terms down to the ones

@@ -20,7 +20,7 @@ import (
 )
 
 func TestModeAndLanguagePart_HasCacheHintAndLanguageDirective(t *testing.T) {
-	part := modeAndLanguagePart()
+	part := (&ChatCLI{}).modeAndLanguagePart()
 	if part.Type != "text" {
 		t.Errorf("Type = %q, want text", part.Type)
 	}

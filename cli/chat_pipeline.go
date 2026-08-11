@@ -110,7 +110,7 @@ func (cli *ChatCLI) assembleChatSystemPrompt(
 	}
 
 	// ── Stable cached prefix ──
-	out.parts = append(out.parts, modeAndLanguagePart())         // Part 0
+	out.parts = append(out.parts, cli.modeAndLanguagePart())     // Part 0
 	out.parts = append(out.parts, cli.attachedContextParts()...) // Part 1
 	if block, ok := pinnedSkillBlock(pinned); ok {               // Part 2
 		out.parts = append(out.parts, block)
@@ -121,8 +121,10 @@ func (cli *ChatCLI) assembleChatSystemPrompt(
 
 	// ── Volatile suffix (no cache hints) ──
 	// Hints are shared by the workspace retrieval (Part 4) and the proactive
-	// recall blocks (Parts 8b/8c) — computed once per turn.
-	hints := cli.recentHistoryHints()
+	// recall blocks (Parts 8b/8c) — computed once per turn, from recent
+	// history PLUS the current input. History alone left the first turn of a
+	// fresh session hintless — exactly when proactive recall matters most.
+	hints := cli.turnHints(userInput)
 	if part, ok := cli.workspaceContextPart(ctx, userInput, hints); ok { // Part 4
 		out.parts = append(out.parts, part)
 	}
@@ -168,13 +170,19 @@ func (cli *ChatCLI) assembleChatSystemPrompt(
 }
 
 // modeAndLanguagePart returns the Part 0 block — mode-awareness banner
-// concatenated with the i18n response-language directive. Always cacheable.
-func modeAndLanguagePart() models.ContentBlock {
+// concatenated with the i18n response-language directive and the
+// persistent-memory bootstrap card. Always cacheable: the card is a
+// session-start snapshot (memory_bootstrap.go), byte-stable across turns.
+func (cli *ChatCLI) modeAndLanguagePart() models.ContentBlock {
 	// Output-token reduction: the verbosity directive is a static string per
 	// level, so appending it keeps this Part 0 block cacheable.
+	text := ChatModeSystemHint + "\n" + i18n.T("ai.response_language") + verbosityDirectiveBlock()
+	if card := cli.memoryBootstrapCardChat(); card != "" {
+		text += "\n\n" + card
+	}
 	return models.ContentBlock{
 		Type:         "text",
-		Text:         ChatModeSystemHint + "\n" + i18n.T("ai.response_language") + verbosityDirectiveBlock(),
+		Text:         text,
 		CacheControl: &models.CacheControl{Type: "ephemeral"},
 	}
 }
@@ -263,17 +271,30 @@ func (cli *ChatCLI) retrieveWorkspaceContext(ctx context.Context, userInput stri
 // recentHistoryHints returns up to three keyword hints extracted from the
 // tail of cli.history. Empty slice when history is empty.
 func (cli *ChatCLI) recentHistoryHints() []string {
+	return cli.turnHints("")
+}
+
+// turnHints extracts keyword hints from the tail of cli.history PLUS the
+// current (not-yet-appended) user input. The history-only version left the
+// very first turn of a fresh session hintless — the user's opening question
+// is the only signal that exists at that point, and skipping it made
+// [MEMORY AUTO-RECALL] and ambient [SESSION RECALL] structurally mute on
+// turn one of every new session.
+func (cli *ChatCLI) turnHints(userInput string) []string {
 	const hintWindow = 3
 	window := hintWindow
 	if len(cli.history) < window {
 		window = len(cli.history)
 	}
-	if window == 0 {
-		return nil
-	}
-	texts := make([]string, 0, window)
+	texts := make([]string, 0, window+1)
 	for _, msg := range cli.history[len(cli.history)-window:] {
 		texts = append(texts, msg.Content)
+	}
+	if s := strings.TrimSpace(userInput); s != "" {
+		texts = append(texts, s)
+	}
+	if len(texts) == 0 {
+		return nil
 	}
 	return memory.ExtractKeywords(texts)
 }

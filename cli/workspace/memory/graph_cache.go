@@ -69,6 +69,7 @@ type GraphCache struct {
 
 	path            string
 	persistInFlight atomic.Bool
+	persistWG       sync.WaitGroup
 	logger          *zap.Logger
 }
 
@@ -203,6 +204,17 @@ func (gc *GraphCache) Snapshot() *knowledge.Graph {
 	return g
 }
 
+// WaitPersist blocks until any in-flight graph.json write has finished.
+// The persist is deliberately async off the hot path; tests (and orderly
+// shutdown) need a way to quiesce it — a TempDir cleanup racing the writer
+// fails with "directory not empty" when the file lands mid-removal.
+func (gc *GraphCache) WaitPersist() {
+	if gc == nil {
+		return
+	}
+	gc.persistWG.Wait()
+}
+
 // checkFingerprintTTL recomputes the source fingerprint at most once per
 // graphFingerprintTTL (stat-only, no parsing) and marks the cache dirty on
 // change — the backstop for edits made outside this process.
@@ -235,7 +247,9 @@ func (gc *GraphCache) persistAsync(g *knowledge.Graph, fp string) {
 	if !gc.persistInFlight.CompareAndSwap(false, true) {
 		return
 	}
+	gc.persistWG.Add(1)
 	go func() {
+		defer gc.persistWG.Done()
 		defer gc.persistInFlight.Store(false)
 		payload, err := g.MarshalGraph()
 		if err != nil {

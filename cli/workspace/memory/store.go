@@ -365,6 +365,13 @@ func (m *Manager) KnowledgeGraph() *knowledge.Graph {
 	return m.graph.Snapshot()
 }
 
+// WaitGraphPersist quiesces any in-flight graph.json write. Tests that hand
+// the manager a TempDir must call this before cleanup — the async persist
+// otherwise races the directory removal.
+func (m *Manager) WaitGraphPersist() {
+	m.graph.WaitPersist()
+}
+
 // MarkGraphDirty flags the graph cache stale — for CLI-side mutations the
 // memory stores cannot observe (session saved, skill installed, context
 // created).
