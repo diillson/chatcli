@@ -98,7 +98,7 @@ func TestFollowUpRecallBlocks_RefiresRecallMidLoop(t *testing.T) {
 		Version: 2,
 		ChatHistory: []models.Message{
 			{Role: "user", Content: "o pairing do kimi quebrou de novo"},
-			{Role: "assistant", Content: "corrigido com pairing posicional"},
+			{Role: "assistant", Content: "corrigido com pairing por ordem dos ids"},
 		},
 	}); err != nil {
 		t.Fatal(err)
