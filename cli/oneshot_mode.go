@@ -140,6 +140,14 @@ func (cli *ChatCLI) RunOnce(ctx context.Context, input string, disableAnimation 
 	images, visionDesc := cli.gateImagesForModel(ctx, images)
 	additionalContext += visionDesc
 
+	// One-shot used to send the bare user prompt with NO system message at
+	// all — no mode hint, no language directive, no memory. A user with
+	// months of persisted facts got a model with total amnesia ("each
+	// session starts fresh"). Inject the chat-mode baseline plus memory.
+	if sys := cli.oneShotSystemMessage(ctx, userInput); sys != "" {
+		cli.history = append(cli.history, models.Message{Role: "system", Content: sys})
+	}
+
 	cli.history = append(cli.history, models.Message{
 		Role:    "user",
 		Content: userInput + additionalContext,
@@ -192,6 +200,32 @@ func (cli *ChatCLI) RunOnce(ctx context.Context, input string, disableAnimation 
 		fmt.Println(rendered)
 	}
 	return nil
+}
+
+// oneShotSystemMessage builds the single system message for -p one-shot
+// chat. One-shot has NO pull surface (no tool loop), so the "index" memory
+// mode would inject a digest plus a directive to call a tool that cannot be
+// called — it therefore promotes to "full" (push the hint-relevant
+// retrieval), while "off" still suppresses memory entirely. Saved-session
+// pointers ride along with the chat-variant header, whose contract (surface
+// the pointer, suggest /session attach) needs no tools either.
+func (cli *ChatCLI) oneShotSystemMessage(ctx context.Context, userInput string) string {
+	sys := ChatModeSystemHint + "\n" + i18n.T("ai.response_language")
+
+	hints := cli.turnHints(userInput)
+	if cli.contextBuilder != nil {
+		mode := loadMemoryMode()
+		if mode == memModeIndex {
+			mode = memModeFull
+		}
+		if ws := cli.contextBuilder.BuildWorkspaceContextMode(ctx, userInput, hints, nil, mode, ""); strings.TrimSpace(ws) != "" {
+			sys += "\n\n" + ws
+		}
+	}
+	if sr := cli.chatSessionAutoRecallBlock(hints, userInput); sr != "" {
+		sys += "\n\n" + sr
+	}
+	return sys
 }
 
 // NewFlagSet cria um FlagSet isolado e as Options para parsing

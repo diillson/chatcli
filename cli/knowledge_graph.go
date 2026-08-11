@@ -34,6 +34,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/diillson/chatcli/cli/board"
 	"github.com/diillson/chatcli/cli/ctxmgr"
 	"github.com/diillson/chatcli/config"
 	"github.com/diillson/chatcli/i18n"
@@ -128,8 +129,39 @@ func (cli *ChatCLI) buildKnowledgeGraph() *knowledge.Graph {
 	cli.addSessionNodes(g, st)
 	cli.addKBNodes(g)
 	cli.addSkillNodes(g)
+	addBoardNodes(g)
 	linkWikilinks(g)
 	return g
+}
+
+// addBoardNodes joins the work board ("card:" + Card.ID). The board used to
+// be a durable-on-disk silo no memory surface could see — a card left in
+// doing at the end of a session was invisible to the next one. Nodes carry
+// the column in the title so the index-card tally plus one neighbors call
+// tells the model what is in flight; @board show has the rest. Edges:
+// card↔tag(assignee) (1.0) so squad cards cluster by worker.
+func addBoardNodes(g *knowledge.Graph) {
+	cards, err := boardStore().List("")
+	if err != nil {
+		return
+	}
+	for _, c := range cards {
+		id := "card:" + c.ID
+		weight := 1.0
+		if c.Column == board.ColDoing {
+			weight = 2.0
+		}
+		g.AddNode(knowledge.Node{
+			ID: id, Kind: knowledge.KindCard,
+			Title:   "[" + string(c.Column) + "] " + graphTitle(c.Title),
+			Summary: c.Description,
+			Weight:  weight,
+		})
+		if c.Assignee != "" {
+			addTag(g, c.Assignee)
+			g.AddEdge(id, tagID(c.Assignee), 1)
+		}
+	}
 }
 
 func (cli *ChatCLI) addMemoryNodes(g *knowledge.Graph) *graphBuildState {
@@ -514,6 +546,7 @@ func (cli *ChatCLI) graphFingerprint() string {
 			statDir(mgr.Storage.GetStoragePath())
 		}
 	}
+	statFile(board.DefaultPath())
 	return hex.EncodeToString(h.Sum(nil))
 }
 

@@ -86,6 +86,22 @@ func getMessageCapFor(role string) int {
 	}
 }
 
+// sessionSystemOmitted replaces stored system prompts in @session output.
+// They are internal instructions, not conversation: echoing them wastes the
+// reply budget and — worse — reads as an answer ("here is what the session
+// contains: You are a senior software engineer…") while saying nothing about
+// what was actually discussed.
+const sessionSystemOmitted = "[system prompt omitted — internal instructions, not conversation]"
+
+// renderSessionMessage renders one message for @session output, masking
+// system prompts and truncating rune-safely to the role's cap.
+func renderSessionMessage(m models.Message, capBytes int) string {
+	if strings.EqualFold(m.Role, "system") {
+		return sessionSystemOmitted
+	}
+	return truncateRunesafe(strings.TrimSpace(m.Content), capBytes)
+}
+
 // Get implements plugins.SessionReader: one page of a saved session's
 // messages, with absolute indices so the model can paginate deterministically.
 // A non-empty query centers the page on the BM25-best-matching message.
@@ -103,8 +119,15 @@ func (a *sessionPluginAdapter) Get(_ context.Context, name string, offset, limit
 		if err != nil {
 			return "", err
 		}
+		// System messages are masked out of the ranking: a stored system
+		// prompt is huge and generic, so BM25 loved to center the page on it
+		// — the model asked "what did we discuss?" and got its own prompt
+		// back. Indices stay aligned because masking keeps positions.
 		contents := make([]string, len(all))
 		for i, m := range all {
+			if m.Role == "system" {
+				continue
+			}
 			contents[i] = m.Content
 		}
 		if hits := ctxmgr.RankDocsBM25(contents, q, 1); len(hits) > 0 {
@@ -127,7 +150,7 @@ func (a *sessionPluginAdapter) Get(_ context.Context, name string, offset, limit
 	b.WriteString(i18n.T("session.tool.get.header", name, offset, offset+len(page)-1, total))
 	b.WriteByte('\n')
 	for i, m := range page {
-		content := truncateRunesafe(strings.TrimSpace(m.Content), getMessageCapFor(m.Role))
+		content := renderSessionMessage(m, getMessageCapFor(m.Role))
 		fmt.Fprintf(&b, "\n[%d] %s: %s\n", offset+i, m.Role, content)
 	}
 	if next := offset + len(page); next < total {
@@ -152,7 +175,7 @@ func (a *sessionPluginAdapter) GetMessage(_ context.Context, name string, index 
 		return "", fmt.Errorf("%s", i18n.T("session.tool.get.bad_index", index, total, name))
 	}
 	m := all[index]
-	content := truncateRunesafe(strings.TrimSpace(m.Content), getSingleMessageCap)
+	content := renderSessionMessage(m, getSingleMessageCap)
 	header := i18n.T("session.tool.get.one_header", name, index, m.Role, total)
 	return header + "\n\n" + content, nil
 }

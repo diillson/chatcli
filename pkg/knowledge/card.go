@@ -20,7 +20,7 @@ import (
 // kindOrder fixes the display order so the card is byte-stable across turns.
 var kindOrder = []Kind{
 	KindProfile, KindProject, KindTopic, KindSkill,
-	KindEpisode, KindSession, KindKB,
+	KindEpisode, KindSession, KindKB, KindCard,
 	KindFact, KindTag,
 }
 

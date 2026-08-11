@@ -40,15 +40,16 @@ const (
 // which follows English directives most reliably — the same rationale behind
 // the other system-prompt constants.
 const memoryRecallHint = "Only a compact index of long-term memory is shown above to save tokens. " +
-	"When you need the full detail behind any profile attribute, topic, or project, " +
-	`call the @memory tool with {"cmd":"recall","args":{"query":"<topic>"}} to pull the relevant facts on demand.`
+	"When you need the full detail behind any profile attribute, topic, project, stored fact or episode, " +
+	`call the @memory tool with {"cmd":"recall","args":{"query":"<topic>"}} to pull the relevant facts on demand ` +
+	`({"cmd":"timeline"} for dated episodes).`
 
 // chatMemoryRecallHint is the chat-mode counterpart of memoryRecallHint. Chat
 // reaches memory through the sanctioned "memory" tool exception
 // (chat_memory.go) rather than the agent's @memory plugin, so the wording
 // points at that surface. English constant for the same model-facing reason.
 const chatMemoryRecallHint = "Only a compact index of long-term memory is shown above to save tokens. " +
-	"When you need the full detail behind any profile attribute, topic, or project, " +
+	"When you need the full detail behind any profile attribute, topic, project, stored fact or episode, " +
 	`call the memory tool with {"cmd":"recall","args":{"query":"<topic>"}} to pull the relevant facts on demand.`
 
 // loadMemoryMode reads CHATCLI_MEMORY_MODE, normalizing to one of the three

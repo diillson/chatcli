@@ -556,6 +556,14 @@ func (sm *SessionManager) searchCorpus() (*sessionCorpus, error) {
 				if msg.Content == "" {
 					continue
 				}
+				// System messages are stored prompts, not conversation: they
+				// are near-identical across sessions and dense with generic
+				// words, so they both pollute BM25 ranking and let framing
+				// terms qualify every session. Recall searches conversation
+				// only.
+				if msg.Role == "system" {
+					continue
+				}
 				norm := normalizeForSearch(msg.Content)
 				c.docs = append(c.docs, sessionSearchDoc{session: fi.name, role: msg.Role, content: msg.Content, norm: norm})
 				b.WriteString(norm)
