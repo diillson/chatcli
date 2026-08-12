@@ -75,7 +75,7 @@ func (cli *ChatCLI) ListACPCommands() []ACPCommandInfo {
 	modes := acpModeCommands()
 	out := make([]ACPCommandInfo, 0, len(acpCommandAllow)+len(modes))
 	out = append(out, modes...)
-	for _, rc := range palette.RootCommands() {
+	for _, rc := range palette.AllRootCommands() {
 		if !acpCommandAllow[rc.Name] {
 			continue
 		}

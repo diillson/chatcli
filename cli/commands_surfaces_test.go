@@ -81,7 +81,7 @@ func TestPaletteProvider_CommandsAndSkillsAppear(t *testing.T) {
 	cli.registerCommandPaletteProvider()
 
 	var found *palette.RootCommand
-	for _, rc := range palette.RootCommands() {
+	for _, rc := range palette.AllRootCommands() {
 		if rc.Name == "/release" {
 			c := rc
 			found = &c

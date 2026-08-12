@@ -190,9 +190,13 @@ func RegisterProvider(p Provider) {
 	providersMu.Unlock()
 }
 
-// RootCommands returns the categorized top-level command list: the static
-// registry plus every dynamic provider's entries (deduped, static wins).
-func RootCommands() []RootCommand {
+// RootCommands returns the categorized top-level command list.
+func RootCommands() []RootCommand { return rootCommands }
+
+// AllRootCommands returns the full listing: the static registry plus every
+// dynamic provider's entries (deduped, static always wins a name collision —
+// a user file must never replace a built-in's palette entry).
+func AllRootCommands() []RootCommand {
 	providersMu.Lock()
 	provs := make([]Provider, len(providers))
 	copy(provs, providers)
@@ -222,7 +226,7 @@ func RootCommands() []RootCommand {
 // whether it is a known root command. Used to describe what a bare command
 // does on the palette's "run as-is" entry.
 func RootSummary(name string) (string, bool) {
-	for _, rc := range RootCommands() {
+	for _, rc := range AllRootCommands() {
 		if rc.Name == name {
 			return rc.Summary(), true
 		}

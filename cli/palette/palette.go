@@ -144,9 +144,10 @@ func newModel(suggest SuggestFunc, root level) Model {
 // Result returns the composed command line, or "" if the user canceled.
 func (m Model) Result() string { return m.result }
 
-// rootItems builds the categorized root command rows from the registry.
+// rootItems builds the categorized root command rows from the registry,
+// including dynamic provider entries (slash commands + skills).
 func rootItems() []item {
-	cmds := RootCommands()
+	cmds := AllRootCommands()
 	out := make([]item, 0, len(cmds))
 	for _, c := range cmds {
 		out = append(out, item{
