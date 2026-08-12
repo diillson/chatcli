@@ -17,6 +17,35 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+// flexString is a YAML string that tolerates the shapes humans (and other
+// tools' files) actually write. `argument-hint: [days]` is the canonical
+// trap: YAML reads a bare bracketed token as a flow SEQUENCE, and a strict
+// string field fails the whole unmarshal — silently dropping the command.
+// Scalars pass through; sequences re-render as "[a, b]" (the literal the
+// author saw); anything else re-serializes to its YAML text.
+type flexString string
+
+// UnmarshalYAML implements yaml.Unmarshaler.
+func (f *flexString) UnmarshalYAML(value *yaml.Node) error {
+	switch value.Kind {
+	case yaml.ScalarNode:
+		*f = flexString(value.Value)
+	case yaml.SequenceNode:
+		parts := make([]string, 0, len(value.Content))
+		for _, n := range value.Content {
+			parts = append(parts, n.Value)
+		}
+		*f = flexString("[" + strings.Join(parts, ", ") + "]")
+	default:
+		raw, err := yaml.Marshal(value)
+		if err != nil {
+			return err
+		}
+		*f = flexString(strings.TrimSpace(string(raw)))
+	}
+	return nil
+}
+
 // maxCommandFileBytes bounds a single command file. Prompt templates are
 // text; anything past this is a mistake (or an attack via a shared repo)
 // and is rejected rather than silently truncated.
@@ -49,7 +78,7 @@ func parseCommandFile(path string, source Source, namespace string) (*Command, e
 		}
 	}
 
-	name := strings.TrimSpace(fm.Name)
+	name := strings.TrimSpace(string(fm.Name))
 	if name == "" {
 		name = strings.TrimSuffix(filepath.Base(path), filepath.Ext(path))
 	}
@@ -61,11 +90,11 @@ func parseCommandFile(path string, source Source, namespace string) (*Command, e
 	return &Command{
 		Name:         name,
 		Namespace:    normalizeName(namespace),
-		Description:  strings.TrimSpace(fm.Description),
-		ArgumentHint: strings.TrimSpace(fm.ArgumentHint),
-		Model:        strings.TrimSpace(fm.Model),
-		Effort:       strings.TrimSpace(fm.Effort),
-		AllowedTools: splitAllowedTools(fm.AllowedTools),
+		Description:  strings.TrimSpace(string(fm.Description)),
+		ArgumentHint: strings.TrimSpace(string(fm.ArgumentHint)),
+		Model:        strings.TrimSpace(string(fm.Model)),
+		Effort:       strings.TrimSpace(string(fm.Effort)),
+		AllowedTools: splitAllowedTools(string(fm.AllowedTools)),
 		Content:      strings.TrimSpace(body),
 		Path:         path,
 		Source:       source,

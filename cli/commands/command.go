@@ -78,14 +78,17 @@ func (c *Command) InvocationName() string {
 }
 
 // frontmatter is the YAML header of a command file. Field names follow the
-// Claude Code convention so interop files parse unchanged.
+// Claude Code convention so interop files parse unchanged. Every field is a
+// flexString: real-world frontmatter writes `argument-hint: [days]`, which
+// YAML parses as a SEQUENCE — a plain string field would fail the unmarshal
+// and silently drop the whole command.
 type frontmatter struct {
-	Name         string `yaml:"name"`
-	Description  string `yaml:"description"`
-	ArgumentHint string `yaml:"argument-hint"`
-	Model        string `yaml:"model"`
-	Effort       string `yaml:"effort"`
-	AllowedTools string `yaml:"allowed-tools"`
+	Name         flexString `yaml:"name"`
+	Description  flexString `yaml:"description"`
+	ArgumentHint flexString `yaml:"argument-hint"`
+	Model        flexString `yaml:"model"`
+	Effort       flexString `yaml:"effort"`
+	AllowedTools flexString `yaml:"allowed-tools"`
 }
 
 // splitAllowedTools parses the comma-separated allowed-tools list.

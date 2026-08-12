@@ -94,6 +94,11 @@ const acpDefaultMode = "coder"
 type acpSession struct {
 	mode   string
 	cancel context.CancelFunc
+	// cmdsSig is the signature of the command list last advertised to this
+	// session. The catalog is dynamic (slash-command files edited, /reload):
+	// each prompt turn re-checks and re-advertises on change, so the IDE's
+	// completion never drifts from reality.
+	cmdsSig string
 }
 
 // ACP implements the Agent Client Protocol server methods, letting editors
@@ -282,12 +287,53 @@ func (a *ACP) emitCurrentMode(sessionID, modeID string) {
 
 // sendAvailableCommands advertises the backend's slash-command surface,
 // when the backend implements the optional ACPCommandBackend capability.
+// commandsSignature folds the advertised command surface into a cheap
+// comparison key (names + descriptions + hints).
+func commandsSignature(cmds []CommandInfo) string {
+	var b strings.Builder
+	for _, c := range cmds {
+		b.WriteString(c.Name)
+		b.WriteByte('\x1f')
+		b.WriteString(c.Description)
+		b.WriteByte('\x1f')
+		b.WriteString(c.InputHint)
+		b.WriteByte('\x1e')
+	}
+	return b.String()
+}
+
+// refreshAvailableCommands re-advertises the command list to a session when
+// it changed since the last send — command files edited mid-session (or a
+// /reload) reach the IDE without reconnecting.
+func (a *ACP) refreshAvailableCommands(sessionID string) {
+	cb, ok := a.backend.(ACPCommandBackend)
+	if a.notify == nil || !ok {
+		return
+	}
+	sig := commandsSignature(cb.ACPCommands())
+	a.mu.Lock()
+	s := a.sessions[sessionID]
+	changed := s != nil && s.cmdsSig != sig
+	if changed {
+		s.cmdsSig = sig
+	}
+	a.mu.Unlock()
+	if changed {
+		a.sendAvailableCommands(sessionID)
+	}
+}
+
 func (a *ACP) sendAvailableCommands(sessionID string) {
 	cb, ok := a.backend.(ACPCommandBackend)
 	if a.notify == nil || !ok {
 		return
 	}
 	cmds := cb.ACPCommands()
+	a.mu.Lock()
+	if s := a.sessions[sessionID]; s != nil {
+		s.cmdsSig = commandsSignature(cmds)
+	}
+	a.mu.Unlock()
 	list := make([]map[string]interface{}, 0, len(cmds))
 	for _, c := range cmds {
 		entry := map[string]interface{}{"name": c.Name, "description": c.Description}
@@ -413,6 +459,11 @@ func (a *ACP) prompt(ctx context.Context, params json.RawMessage) (interface{}, 
 		s.cancel = nil
 		a.mu.Unlock()
 	}()
+
+	// The command surface is dynamic (slash-command files edited, /reload):
+	// re-advertise to this session when it changed, so IDE completion never
+	// drifts mid-session.
+	a.refreshAvailableCommands(p.SessionID)
 
 	// Slash interception: mode switches are handled here; allowlisted
 	// commands run headless through the backend; a KNOWN REPL command that

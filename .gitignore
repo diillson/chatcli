@@ -39,3 +39,4 @@ testclio
 
 # build output
 /bin/
+*.bak

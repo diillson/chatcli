@@ -44,6 +44,10 @@ type Catalog struct {
 	// refused records name→path of commands rejected for shadowing a
 	// built-in, for /config commands diagnostics.
 	refused map[string]string
+	// skipped records path→reason for files that failed to parse. Surfaced
+	// in /config commands: a silently dropped file (broken frontmatter,
+	// oversized, bad name) is otherwise invisible to the user.
+	skipped map[string]string
 }
 
 // NewCatalog builds a catalog. globalDir is ~/.chatcli/commands (created
@@ -130,6 +134,15 @@ func (c *Catalog) Refused() map[string]string {
 	return refused
 }
 
+// Skipped returns the path→reason map of files that failed to parse
+// (diagnostics for /config commands).
+func (c *Catalog) Skipped() map[string]string {
+	c.snapshot()
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.skipped
+}
+
 // Invalidate forces a re-scan on the next read (wired to /reload).
 func (c *Catalog) Invalidate() {
 	c.mu.Lock()
@@ -150,6 +163,7 @@ func (c *Catalog) snapshot() (map[string]*Command, map[string]string) {
 
 	snap := make(map[string]*Command)
 	refused := make(map[string]string)
+	c.skipped = make(map[string]string)
 	for _, spec := range c.sourceDirs() {
 		c.loadDirLocked(snap, refused, spec)
 	}
@@ -187,6 +201,7 @@ func (c *Catalog) loadDirLocked(snap map[string]*Command, refused map[string]str
 func (c *Catalog) mergeFileLocked(snap map[string]*Command, refused map[string]string, path string, source Source, namespace string) {
 	cmd, err := parseCommandFile(path, source, namespace)
 	if err != nil {
+		c.skipped[path] = err.Error()
 		c.logger.Warn("slash command skipped", zap.String("path", path), zap.Error(err))
 		return
 	}
