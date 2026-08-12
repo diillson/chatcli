@@ -631,8 +631,9 @@ func (cli *ChatCLI) ForkSessionRPC(sourceName, newName string) error {
 
 // RPCSkillInfo describes one skill served as an MCP prompt.
 type RPCSkillInfo struct {
-	Name        string
-	Description string
+	Name         string
+	Description  string
+	ArgumentHint string
 }
 
 // ListSkillsRPC returns the installed skill catalog.
@@ -646,7 +647,7 @@ func (cli *ChatCLI) ListSkillsRPC() []RPCSkillInfo {
 	}
 	out := make([]RPCSkillInfo, 0, len(skills))
 	for _, s := range skills {
-		out = append(out, RPCSkillInfo{Name: s.Name, Description: s.Description})
+		out = append(out, RPCSkillInfo{Name: s.Name, Description: s.Description, ArgumentHint: s.ArgumentHint})
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
 	return out

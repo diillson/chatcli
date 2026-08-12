@@ -108,6 +108,16 @@ func (cli *ChatCLI) assembleChatSystemPrompt(
 	if manualSkill != nil {
 		applyManualSkillHints(manualSkill, &out.modelHint, &out.effort)
 	}
+	// Slash-command hints outrank everything: the user invoked the command
+	// explicitly, and its frontmatter routing is part of that contract.
+	if m, e := cli.consumePendingCommandHints(); m != "" || e != "" {
+		if m != "" {
+			out.modelHint = m
+		}
+		if e != "" {
+			out.effort = client.NormalizeEffort(e)
+		}
+	}
 
 	// ── Stable cached prefix ──
 	out.parts = append(out.parts, cli.modeAndLanguagePart())     // Part 0

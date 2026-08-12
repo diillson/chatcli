@@ -488,16 +488,21 @@ func (cli *ChatCLI) refreshModelCache(ctx context.Context) {
 	// Snapshot on the caller's goroutine: the refresh outlives any run lock,
 	// and cli.Provider is written by the next run's override/restore — an
 	// async read here is a data race (two back-to-back RPC runs hit it).
+	// logger and manager are snapshotted for the same reason: /reload
+	// replaces both (reconfigureLogger, NewLLMManager) while a previous
+	// refresh goroutine may still be running.
 	provider := cli.Provider
+	logger := cli.logger
+	mgr := cli.manager
 	go func() {
 		// The warmer must outlive the triggering request; detach
 		// cancellation while inheriting context values.
 		ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 15*time.Second)
 		defer cancel()
 
-		models, err := cli.manager.ListModelsForProvider(ctx, provider)
+		models, err := mgr.ListModelsForProvider(ctx, provider)
 		if err != nil {
-			cli.logger.Debug("Failed to refresh model cache", zap.String("provider", provider), zap.Error(err))
+			logger.Debug("Failed to refresh model cache", zap.String("provider", provider), zap.Error(err))
 			return
 		}
 
@@ -505,7 +510,7 @@ func (cli *ChatCLI) refreshModelCache(ctx context.Context) {
 		cli.cachedModels = models
 		cli.cachedModelsMu.Unlock()
 
-		cli.logger.Debug("Model cache refreshed", zap.String("provider", provider), zap.Int("count", len(models)))
+		logger.Debug("Model cache refreshed", zap.String("provider", provider), zap.Int("count", len(models)))
 	}()
 }
 

@@ -75,7 +75,7 @@ func (cli *ChatCLI) ListACPCommands() []ACPCommandInfo {
 	modes := acpModeCommands()
 	out := make([]ACPCommandInfo, 0, len(acpCommandAllow)+len(modes))
 	out = append(out, modes...)
-	for _, rc := range palette.RootCommands() {
+	for _, rc := range palette.AllRootCommands() {
 		if !acpCommandAllow[rc.Name] {
 			continue
 		}
@@ -84,6 +84,22 @@ func (cli *ChatCLI) ListACPCommands() []ACPCommandInfo {
 			Description: rc.Summary(),
 			InputHint:   cli.acpCommandHint(rc.Name),
 		})
+	}
+	// Slash-command templates: advertised so the IDE completes them; the
+	// prompt handler expands them via the SlashCommandExpander capability
+	// (they never route through RunCommand).
+	if cat := cli.slashCommandCatalog(); cat != nil {
+		for _, cmd := range cat.List() {
+			hint := cmd.ArgumentHint
+			if hint == "" {
+				hint = i18n.T("acp.command.args_hint")
+			}
+			out = append(out, ACPCommandInfo{
+				Name:        cmd.InvocationName(),
+				Description: cmd.Description,
+				InputHint:   hint,
+			})
+		}
 	}
 	return out
 }

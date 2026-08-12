@@ -157,6 +157,7 @@ func (cli *ChatCLI) routeHierarchicalConfig(section string, rest []string) bool 
 		"compress":    {cli.showConfigCompression, cli.routeConfigCompression},
 		"output":      {cli.showConfigOutput, cli.routeConfigOutput},
 		"verbosity":   {cli.showConfigOutput, cli.routeConfigOutput},
+		"commands":    {cli.showConfigCommands, cli.routeConfigCommands},
 	}
 	h, ok := table[section]
 	if !ok {

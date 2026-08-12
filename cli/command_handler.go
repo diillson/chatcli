@@ -44,6 +44,12 @@ func (r prefixRoute) matches(input string) bool {
 type commandRoutes struct {
 	exact    map[string]cmdFunc
 	prefixes []prefixRoute
+	// reserved is the derived set of bare built-in names (no slash): every
+	// exact key, every prefix root, and the sentinel commands handled
+	// outside the table. THE single source of truth for "may a skill or a
+	// slash command claim this name?" — the former hand-maintained
+	// reservedSlashCommands map had drifted ~25 commands out of date.
+	reserved map[string]bool
 }
 
 type CommandHandler struct {
@@ -132,6 +138,15 @@ func (ch *CommandHandler) HandleCommand(ctx context.Context, userInput string) b
 		// Handled here (not in the route table) so the per-command ctx flows
 		// into the update-check HTTP request.
 		ch.handleVersionCommand(ctx)
+		return false
+	}
+
+	// Slash-command catalog: exact first-token match, BEFORE the prefix
+	// routes. The catalog refuses names that collide with built-ins (see
+	// isReservedSlashName), so this cannot shadow a route — but checking
+	// first is what lets "/context-review" reach its command instead of
+	// being swallowed by the raw "/context" prefix route.
+	if ch.tryInvokeSlashCommand(ctx, userInput) {
 		return false
 	}
 
@@ -262,6 +277,48 @@ func (ch *CommandHandler) buildRoutes() {
 		{"/policy", true, func(_ context.Context, in string) bool { c.handlePolicyCommand(in); return false }},
 		{"/update", true, func(ctx context.Context, in string) bool { c.handleUpdateCommand(ctx, in); return false }},
 	}
+
+	ch.routes.reserved = ch.deriveReservedNames()
+}
+
+// deriveReservedNames flattens the dispatch surface into bare names: exact
+// keys, prefix roots, and the sentinel commands HandleCommand (and the
+// executor) intercept before the table. Derived, never hand-listed — a new
+// route is automatically protected from being shadowed.
+func (ch *CommandHandler) deriveReservedNames() map[string]bool {
+	reserved := make(map[string]bool, len(ch.routes.exact)+len(ch.routes.prefixes)+16)
+	add := func(name string) {
+		name = strings.ToLower(strings.TrimPrefix(strings.TrimSpace(name), "/"))
+		if name != "" {
+			reserved[name] = true
+		}
+	}
+	for key := range ch.routes.exact {
+		add(key)
+	}
+	for _, r := range ch.routes.prefixes {
+		add(r.prefix)
+	}
+	// Sentinels dispatched outside the table: the mode switches and
+	// ctx-bound cases in HandleCommand, the executor's early intercepts
+	// (cli.go), and the palette triggers.
+	for _, s := range []string{
+		"agents", "agent", "run", "coder", "plan", "reload", "version", "v",
+		"park-note", "menu", "commands", "palette", "fast",
+	} {
+		add(s)
+	}
+	return reserved
+}
+
+// isReservedSlashName reports whether a bare name (no slash) collides with
+// a built-in command. Used by the skill router and the slash-command
+// catalog so neither can ever shadow a built-in.
+func (ch *CommandHandler) isReservedSlashName(name string) bool {
+	if ch == nil || ch.routes == nil {
+		return false
+	}
+	return ch.routes.reserved[strings.ToLower(strings.TrimSpace(name))]
 }
 
 // cmdConfig routes /config, /status and /settings to the config sections.

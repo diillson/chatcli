@@ -79,6 +79,15 @@ func (cli *ChatCLI) HandleOneShotOrFatal(ctx context.Context, opts *Options) boo
 	ctxOne, cancelOne := context.WithTimeout(ctx, opts.Timeout)
 	defer cancelOne()
 
+	// Slash-command expansion: `chatcli -p "/review-pr 12"` resolves the
+	// template before mode routing, so a command behaves identically in
+	// scripts and in the REPL. Interactive only when stdin is a real
+	// terminal — a piped stdin cannot answer a pre-exec approval prompt,
+	// so the gate resolves through policy there (fail-safe deny on ask).
+	if expanded, isCmd := cli.expandSlashCommandInput(ctxOne, input, !HasStdin()); isCmd {
+		input = expanded
+	}
+
 	if strings.HasPrefix(input, "/agent ") || strings.HasPrefix(input, "/run ") {
 		if err := cli.RunAgentOnce(ctxOne, input, opts.AgentAutoExec); err != nil {
 			fmt.Fprintln(os.Stderr, i18n.T("oneshot.error.agent_failed")+"\n\n"+i18n.T("oneshot.details_label")+":\n```\n"+err.Error()+"\n```")

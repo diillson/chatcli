@@ -754,9 +754,40 @@ func (b *rpcBackend) Skills() []rpcserve.SkillInfo {
 	skills := b.cli.ListSkillsRPC()
 	out := make([]rpcserve.SkillInfo, 0, len(skills))
 	for _, s := range skills {
-		out = append(out, rpcserve.SkillInfo{Name: s.Name, Description: s.Description})
+		out = append(out, rpcserve.SkillInfo{Name: s.Name, Description: s.Description, ArgumentHint: s.ArgumentHint})
 	}
 	return out
+}
+
+// CommandPrompts implements rpcserve.CommandPrompter: the slash-command
+// catalog served through the MCP prompts primitive.
+func (b *rpcBackend) CommandPrompts() []rpcserve.CommandPromptInfo {
+	if b.cli == nil {
+		return nil
+	}
+	list := b.cli.ListCommandPromptsRPC()
+	out := make([]rpcserve.CommandPromptInfo, 0, len(list))
+	for _, c := range list {
+		out = append(out, rpcserve.CommandPromptInfo{Name: c[0], Description: c[1], ArgumentHint: c[2]})
+	}
+	return out
+}
+
+// CommandPromptRender implements rpcserve.CommandPrompter.
+func (b *rpcBackend) CommandPromptRender(ctx context.Context, name, args string) (string, bool) {
+	if b.cli == nil {
+		return "", false
+	}
+	return b.cli.RenderCommandPromptRPC(ctx, name, args)
+}
+
+// ExpandSlashCommand implements rpcserve.SlashCommandExpander for ACP
+// prompt-side template expansion.
+func (b *rpcBackend) ExpandSlashCommand(ctx context.Context, _ string, text string) (string, bool) {
+	if b.cli == nil {
+		return "", false
+	}
+	return b.cli.ExpandSlashCommandRPC(ctx, text)
 }
 
 // SkillContent returns a skill's body for prompts/get.

@@ -169,6 +169,13 @@ type AgentMode struct {
 	skillModelHint  string
 	skillEffortHint llmclient.SkillEffort
 
+	// commandToolScope is the allowed-tools overlay staged by a slash
+	// command's frontmatter for the run it initiated. Non-empty scope: a
+	// tool call outside the list escalates allow→ask at the security gate
+	// (never a silent deny — the human arbitrates, and unattended surfaces
+	// resolve it through the existing policy path). Empty: no effect.
+	commandToolScope []string
+
 	// injectedSkillNames tracks every skill already delivered to the model
 	// during the current Run() — via the startup system-prompt blocks
 	// (pinned/auto/manual) or a mid-loop re-scan injection — so the per-turn
@@ -1052,6 +1059,10 @@ func (a *AgentMode) Run(ctx context.Context, query string, additionalContext str
 	a.skillCollapseTurn = make(map[string]int)
 	a.skillCharsInjected = 0
 	a.lastBoardNudge = ""
+	// Slash-command allowed-tools overlay: staged by the expansion that
+	// initiated this run (gateway, ACP, one-shot, coder). Consumed here so
+	// it is scoped to THIS run and can never leak into the next one.
+	a.commandToolScope = a.cli.consumePendingCommandToolScope()
 	// Block 4 — skills (pinned + auto-activated + manual) and Orchestrator
 	// catalog. Built last because it's the most volatile (changes per query)
 	// and sits at the tail of the system prompt so earlier blocks stay
@@ -1059,25 +1070,7 @@ func (a *AgentMode) Run(ctx context.Context, query string, additionalContext str
 	// model/effort ties via pickSkillModelAndEffort's "first non-empty wins"
 	// rule.
 	skillsText := a.buildAgentSkillBlocks(query, additionalContext)
-	if a.cli.pendingManualSkill != nil {
-		manual := a.cli.pendingManualSkill
-		manualArgs := a.cli.pendingManualSkillArgs
-		a.cli.pendingManualSkill = nil
-		a.cli.pendingManualSkillArgs = ""
-		a.noteInjectedSkills(manual)
-		if block := renderManualSkillBlock(manual, manualArgs); block != "" {
-			if skillsText != "" {
-				skillsText += "\n\n"
-			}
-			skillsText += block
-		}
-		if m := strings.TrimSpace(manual.Model); m != "" {
-			a.skillModelHint = m
-		}
-		if e := strings.TrimSpace(manual.Effort); e != "" {
-			a.skillEffortHint = llmclient.NormalizeEffort(e)
-		}
-	}
+	skillsText = a.applyManualSkillAndCommandHints(skillsText)
 	// Seed the per-Run skill budget with everything the startup blocks
 	// already spent, so mid-loop injections account against the same pool.
 	a.skillCharsInjected = len(skillsText)
@@ -1395,6 +1388,80 @@ func (a *AgentMode) buildWorkspaceBlocks(ctx context.Context, query string) (str
 		}
 	}
 	return workspaceText, dynamicText
+}
+
+// applyManualSkillAndCommandHints consumes the pending manual-skill
+// invocation and the slash-command hints staged for this run: the manual
+// skill's block is appended to skillsText, and model/effort hints land on
+// the run (command hints outrank the skill's — the command invocation is
+// the more explicit user intent). Extracted from Run for cyclomatic budget.
+func (a *AgentMode) applyManualSkillAndCommandHints(skillsText string) string {
+	if a.cli.pendingManualSkill != nil {
+		manual := a.cli.pendingManualSkill
+		manualArgs := a.cli.pendingManualSkillArgs
+		a.cli.pendingManualSkill = nil
+		a.cli.pendingManualSkillArgs = ""
+		a.noteInjectedSkills(manual)
+		if block := renderManualSkillBlock(manual, manualArgs); block != "" {
+			if skillsText != "" {
+				skillsText += "\n\n"
+			}
+			skillsText += block
+		}
+		if m := strings.TrimSpace(manual.Model); m != "" {
+			a.skillModelHint = m
+		}
+		if e := strings.TrimSpace(manual.Effort); e != "" {
+			a.skillEffortHint = llmclient.NormalizeEffort(e)
+		}
+	}
+	if m, e := a.cli.consumePendingCommandHints(); m != "" || e != "" {
+		if m != "" {
+			a.skillModelHint = m
+		}
+		if e != "" {
+			a.skillEffortHint = llmclient.NormalizeEffort(e)
+		}
+	}
+	return skillsText
+}
+
+// commandScopeAllows reports whether toolName fits the active slash-command
+// allowed-tools overlay. Matching is by bare tool name, tolerant of the "@"
+// prefix on either side ("read" matches "@read"). Empty scope = no
+// restriction.
+func (a *AgentMode) commandScopeAllows(toolName string) bool {
+	if len(a.commandToolScope) == 0 {
+		return true
+	}
+	name := strings.TrimPrefix(strings.ToLower(strings.TrimSpace(toolName)), "@")
+	for _, allowed := range a.commandToolScope {
+		if strings.TrimPrefix(strings.ToLower(strings.TrimSpace(allowed)), "@") == name {
+			return true
+		}
+	}
+	return false
+}
+
+// expandFollowUpCommand resolves a mid-run user follow-up against the slash
+// command catalog. Mid-run semantics differ from a turn-initiating
+// expansion: the provider/model cannot change mid-loop, so model/effort
+// hints are consumed and dropped; the allowed-tools overlay however
+// re-arms for the remainder of the run — the user just narrowed the scope
+// on purpose.
+func (a *AgentMode) expandFollowUpCommand(ctx context.Context, text string) string {
+	if !strings.HasPrefix(text, "/") {
+		return text
+	}
+	expanded, ok := a.cli.expandSlashCommandInput(ctx, text, !a.cli.unattended)
+	if !ok {
+		return text
+	}
+	a.cli.consumePendingCommandHints() // unusable mid-run; never leak into the next Run
+	if scope := a.cli.consumePendingCommandToolScope(); len(scope) > 0 {
+		a.commandToolScope = scope
+	}
+	return expanded
 }
 
 // followUpRecallBlocks re-runs the proactive recall surfaces for a mid-loop
@@ -1938,6 +2005,7 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 		if userMsg := a.drainStdinToQueue(); userMsg != "" {
 			label := i18n.T("agent.queue.new_user_instruction")
 			fmt.Printf("\n  %s\n\n", renderer.Colorize("📨 "+label, agent.ColorCyan))
+			userMsg = a.expandFollowUpCommand(ctx, userMsg)
 			a.cli.history = append(a.cli.history, models.Message{
 				Role:    "user",
 				Content: userMsg,
@@ -2944,6 +3012,19 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 						} else {
 							a.lastPolicyMatch = nil
 						}
+						// Slash-command allowed-tools overlay: a tool outside
+						// the command's declared list escalates to "ask" even
+						// when policy would allow — the command author scoped
+						// the run, the human (or policy automode) arbitrates
+						// the exception. Never a silent widen, never a silent
+						// deny.
+						if action == coder.ActionAllow && !a.commandScopeAllows(tc.Name) {
+							if a.logger != nil {
+								a.logger.Info("tool outside slash-command allowed-tools scope, escalating to ask",
+									zap.String("tool", tc.Name))
+							}
+							action = coder.ActionAsk
+						}
 						// Session automode (/policy mode auto): "ask" verdicts
 						// auto-approve. Deny rules were already resolved above
 						// ask by the policy check, and safety-immune operations
@@ -3742,6 +3823,7 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 				renderer.EchoUserInput(userInput)
 			}
 
+			userInput = a.expandFollowUpCommand(ctx, userInput)
 			a.cli.history = append(a.cli.history, models.Message{
 				Role:    "user",
 				Content: userInput,

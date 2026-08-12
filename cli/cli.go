@@ -33,6 +33,7 @@ import (
 	"github.com/diillson/chatcli/cli/agent/workers"
 	"github.com/diillson/chatcli/cli/agentevents"
 	"github.com/diillson/chatcli/cli/coder"
+	"github.com/diillson/chatcli/cli/commands"
 	"github.com/diillson/chatcli/cli/compress"
 	"github.com/diillson/chatcli/cli/hooks"
 	"github.com/diillson/chatcli/cli/mcp"
@@ -361,6 +362,15 @@ type ChatCLI struct {
 	pendingManualSkill     *persona.Skill
 	pendingManualSkillArgs string
 
+	// Slash command catalog (.chatcli/commands + interop dirs) and the
+	// single-turn hints staged by an expansion: model/effort route the
+	// turn (same plumbing as manual-skill hints), allowed-tools becomes an
+	// ephemeral security-gate overlay on the next agent/coder run.
+	slashCommands              *commands.Catalog
+	pendingCommandModel        string
+	pendingCommandEffort       string
+	pendingCommandAllowedTools []string
+
 	// Session-level reasoning override set by /thinking. When override.set
 	// is true the value of override.effort wins over skill hints and
 	// per-agent defaults for the next chat-turn LLM call. EffortUnset
@@ -534,6 +544,9 @@ func NewChatCLI(ctx context.Context, manager manager.LLMManager, logger *zap.Log
 		pluginMgr.RegisterBuiltinPlugin(plugins.NewBuiltinSchedulerPlugin())
 		pluginMgr.RegisterBuiltinPlugin(plugins.NewBuiltinParkPlugin())
 		pluginMgr.RegisterBuiltinPlugin(plugins.NewBuiltinAskPlugin())
+		// @commands — model-facing discovery/expansion of the slash-command
+		// template catalog (the user-facing side is the /name dispatch).
+		pluginMgr.RegisterBuiltinPlugin(plugins.NewBuiltinCommandsPlugin())
 		// @send — proactive outbound messaging through the gateway
 		// platform adapters (Telegram/WhatsApp/Discord/Slack/webhook).
 		// The adapter is wired below; gateway.BuildConfigured() reads the
@@ -872,6 +885,11 @@ func NewChatCLI(ctx context.Context, manager manager.LLMManager, logger *zap.Log
 
 	cli.Client = client
 	cli.commandHandler = NewCommandHandler(cli)
+	// Slash command catalog: needs the command handler (reserved names
+	// derive from its live route table) and the project dir.
+	cli.initSlashCommands(detectProjectDir())
+	cli.registerCommandPaletteProvider()
+	plugins.SetCommandsAdapter(&commandsPluginAdapter{cli: cli})
 	cli.agentMode = NewAgentMode(cli, logger)
 
 	// Wire the @todo plugin adapter (Item 2). The getter returns the
