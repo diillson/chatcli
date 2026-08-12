@@ -28,21 +28,6 @@ import (
 	"go.uber.org/zap"
 )
 
-// reservedSlashCommands is the set of built-in slash commands that must NEVER
-// be shadowed by a skill, regardless of whether a skill with the same name
-// exists. The list mirrors command_handler.go's dispatch table.
-var reservedSlashCommands = map[string]bool{
-	"agent": true, "run": true, "coder": true, "switch": true, "help": true,
-	"config": true, "status": true, "settings": true, "version": true, "v": true,
-	"nextchunk": true, "retry": true, "retryall": true, "skipchunk": true,
-	"newsession": true, "session": true, "context": true, "auth": true,
-	"plugin": true, "skill": true, "connect": true, "disconnect": true,
-	"watch": true, "compact": true, "rewind": true, "memory": true, "metrics": true,
-	"mcp": true, "hooks": true, "cost": true, "worktree": true, "channel": true,
-	"reset": true, "redraw": true, "clear": true, "exit": true, "quit": true,
-	"reload": true, "fast": true,
-}
-
 // tryInvokeUserSkill inspects userInput for a `/<name> [args]` pattern and,
 // if `<name>` resolves to a user-invocable skill, stages the skill for the
 // next LLM turn and kicks off processLLMRequest. Returns true when the input
@@ -64,7 +49,9 @@ func (ch *CommandHandler) tryInvokeUserSkill(ctx context.Context, userInput stri
 	trimmed := strings.TrimPrefix(userInput, "/")
 	parts := strings.SplitN(trimmed, " ", 2)
 	name := strings.TrimSpace(parts[0])
-	if name == "" || reservedSlashCommands[strings.ToLower(name)] {
+	// Reserved names derive from the LIVE dispatch table (plus sentinels) —
+	// the former hand-maintained mirror here had drifted ~25 commands stale.
+	if name == "" || ch.isReservedSlashName(name) {
 		return false
 	}
 

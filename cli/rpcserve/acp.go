@@ -52,6 +52,15 @@ type ACPCommandBackend interface {
 	RunCommand(ctx context.Context, session, line string) (string, error)
 }
 
+// SlashCommandExpander is an OPTIONAL backend capability (type assertion,
+// same contract as ACPCommandBackend — never a method on the required
+// interface): backends that carry a slash-command template catalog expand
+// "/name args" prompts into their template body, which then flows through
+// the session's normal mode.
+type SlashCommandExpander interface {
+	ExpandSlashCommand(ctx context.Context, session, text string) (string, bool)
+}
+
 // HistoryItem is one conversation message replayed to an ACP client on
 // session/load (system messages and empty content are filtered out upstream).
 type HistoryItem struct {
@@ -413,6 +422,17 @@ func (a *ACP) prompt(ctx context.Context, params json.RawMessage) (interface{}, 
 	// user input is never hijacked.
 	if strings.HasPrefix(text, "/") {
 		token, rest := splitSlashCommand(text)
+		// Slash-command templates expand FIRST (they can never collide with
+		// a built-in name — the catalog refuses those): the expanded prompt
+		// then flows through the session's normal mode below, exactly like
+		// typed user text. Optional capability so older backends keep
+		// working unchanged.
+		if expander, hasExp := a.backend.(SlashCommandExpander); hasExp {
+			if expanded, isTemplate := expander.ExpandSlashCommand(runCtx, p.SessionID, text); isTemplate {
+				text = expanded
+				token = "" // neutralize the built-in interception below
+			}
+		}
 		if modeID, isMode := acpSlashModes[token]; isMode {
 			a.mu.Lock()
 			s.mode = modeID

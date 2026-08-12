@@ -85,6 +85,22 @@ func (cli *ChatCLI) ListACPCommands() []ACPCommandInfo {
 			InputHint:   cli.acpCommandHint(rc.Name),
 		})
 	}
+	// Slash-command templates: advertised so the IDE completes them; the
+	// prompt handler expands them via the SlashCommandExpander capability
+	// (they never route through RunCommand).
+	if cat := cli.slashCommandCatalog(); cat != nil {
+		for _, cmd := range cat.List() {
+			hint := cmd.ArgumentHint
+			if hint == "" {
+				hint = i18n.T("acp.command.args_hint")
+			}
+			out = append(out, ACPCommandInfo{
+				Name:        cmd.InvocationName(),
+				Description: cmd.Description,
+				InputHint:   hint,
+			})
+		}
+	}
 	return out
 }
 

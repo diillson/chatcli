@@ -241,6 +241,7 @@ var envDefaults = map[string]envDefault{
 	"CHATCLI_MCP_SESSION_AUTOSAVE":          {Value: "true", IsBool: true, Source: "cmd/rpcserve.go (persist live MCP sessions as mcp-<session>; unset follows CHATCLI_SESSION_AUTOSAVE)"},
 	"CHATCLI_SESSION_AUTOSAVE_KEEP":         {Value: "600", Source: "cli/cli_session_autosave.go (machine-session keep-count backstop; TTL is the primary retention)"},
 	"CHATCLI_SESSION_AUTORECALL":            {Value: "true", IsBool: true, Source: "cli/session_autorecall.go (proactive saved-session recall block in chat/agent/coder turns)"},
+	"CHATCLI_COMMANDS":                      {Value: "true", IsBool: true, Source: "cli/commands_integration.go (slash-command templates: .chatcli/commands + ~/.chatcli/commands + .claude/commands + .devin/workflows)"},
 	"CHATCLI_SESSION_WRITETHROUGH":          {Value: "true", IsBool: true, Source: "cli/cli_session_binding.go (write each turn through to the active named session + adopt other surfaces' writes)"},
 	"CHATCLI_MCP_HUB":                       {Value: "on", Source: "cmd/rpcserve.go (join the conversation hub in resume mode: on|off)"},
 	"CHATCLI_MCP_HUB_PRINCIPAL":             {Value: "(hub default)", Source: "cmd/rpcserve.go (isolate the MCP thread under another principal)"},

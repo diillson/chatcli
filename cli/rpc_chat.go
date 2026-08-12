@@ -92,6 +92,13 @@ func (cli *ChatCLI) runChatTurnSerialized(
 
 	cli.fireUserPromptSubmitHook(ctx, userInput)
 
+	// Slash-command expansion first: an MCP/ACP chat turn invoking
+	// "/review-pr 12" gets the same template expansion as the REPL, with
+	// the pre-exec gate resolving through policy (non-interactive).
+	if expanded, isCmd := cli.expandSlashCommandInput(ctx, userInput, false); isCmd {
+		userInput = expanded
+	}
+
 	// Same pre-flight as the REPL turn: @file/@git/… special contexts, vision
 	// gating, cross-channel hub pull, token-aware compaction (this replaces
 	// the old hard 30-message cap).

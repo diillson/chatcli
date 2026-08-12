@@ -65,6 +65,29 @@ type ToolInfo struct {
 type SkillInfo struct {
 	Name        string
 	Description string
+	// ArgumentHint documents the expected invocation arguments; emitted as
+	// the MCP prompt's "arguments" entry so spec-compliant clients render
+	// an input field instead of a bare prompt name.
+	ArgumentHint string
+}
+
+// CommandPromptInfo describes one slash-command template served through the
+// MCP prompts primitive.
+type CommandPromptInfo struct {
+	Name         string
+	Description  string
+	ArgumentHint string
+}
+
+// CommandPrompter is an OPTIONAL backend capability (type assertion, the
+// TimelineAccessor pattern — extending the required backend interface would
+// break every existing implementer): backends with a slash-command catalog
+// serve it as MCP prompts alongside skills.
+type CommandPrompter interface {
+	CommandPrompts() []CommandPromptInfo
+	// CommandPromptRender expands one command with the provided argument
+	// string. ok=false when the name is unknown.
+	CommandPromptRender(ctx context.Context, name, args string) (string, bool)
 }
 
 // MCPProxyToolInfo describes a tool proxied from an MCP server the backend
@@ -226,7 +249,7 @@ func (m *MCP) Handle(ctx context.Context, method string, params json.RawMessage)
 	case "prompts/list":
 		return map[string]interface{}{"prompts": m.promptDefinitions()}, nil
 	case "prompts/get":
-		return m.getPrompt(params)
+		return m.getPrompt(ctx, params)
 	case "resources/list":
 		return m.listResources()
 	case "resources/read":
@@ -489,30 +512,70 @@ func (m *MCP) toolDefinitions() []map[string]interface{} {
 	return tools
 }
 
-// promptDefinitions serves the installed skill catalog as MCP prompts.
+// promptArgumentsField renders the MCP-spec "arguments" list for a prompt
+// that takes a free-form argument string.
+func promptArgumentsField(hint string) []map[string]interface{} {
+	desc := hint
+	if desc == "" {
+		desc = "Arguments for the prompt"
+	}
+	return []map[string]interface{}{
+		{"name": "args", "description": desc, "required": false},
+	}
+}
+
+// promptDefinitions serves the installed skill catalog — plus the
+// slash-command catalog when the backend has one — as MCP prompts.
 func (m *MCP) promptDefinitions() []map[string]interface{} {
 	skills := m.backend.Skills()
 	out := make([]map[string]interface{}, 0, len(skills))
 	for _, s := range skills {
-		out = append(out, map[string]interface{}{
+		def := map[string]interface{}{
 			"name":        s.Name,
 			"description": s.Description,
-		})
+		}
+		if s.ArgumentHint != "" {
+			def["arguments"] = promptArgumentsField(s.ArgumentHint)
+		}
+		out = append(out, def)
+	}
+	if cp, ok := m.backend.(CommandPrompter); ok {
+		for _, c := range cp.CommandPrompts() {
+			out = append(out, map[string]interface{}{
+				"name":        c.Name,
+				"description": c.Description,
+				"arguments":   promptArgumentsField(c.ArgumentHint),
+			})
+		}
 	}
 	return out
 }
 
-func (m *MCP) getPrompt(params json.RawMessage) (interface{}, *RPCError) {
+func (m *MCP) getPrompt(ctx context.Context, params json.RawMessage) (interface{}, *RPCError) {
 	var p struct {
-		Name string `json:"name"`
+		Name      string            `json:"name"`
+		Arguments map[string]string `json:"arguments"`
 	}
 	if err := json.Unmarshal(params, &p); err != nil || p.Name == "" {
 		return nil, errf(CodeInvalidParams, "prompt name is required")
+	}
+	// Slash commands resolve first: their names are namespaced by the
+	// catalog and can never shadow a built-in, and expansion honors the
+	// "args" argument from the MCP request.
+	if cp, ok := m.backend.(CommandPrompter); ok {
+		if content, found := cp.CommandPromptRender(ctx, p.Name, p.Arguments["args"]); found {
+			return promptResult(content), nil
+		}
 	}
 	content, err := m.backend.SkillContent(p.Name)
 	if err != nil {
 		return nil, errf(CodeInvalidParams, "unknown prompt %q: %v", p.Name, err)
 	}
+	return promptResult(content), nil
+}
+
+// promptResult wraps prompt text in the MCP prompts/get response shape.
+func promptResult(content string) map[string]interface{} {
 	return map[string]interface{}{
 		"messages": []map[string]interface{}{
 			{
@@ -520,7 +583,7 @@ func (m *MCP) getPrompt(params json.RawMessage) (interface{}, *RPCError) {
 				"content": map[string]interface{}{"type": "text", "text": content},
 			},
 		},
-	}, nil
+	}
 }
 
 type mcpToolCallParams struct {

@@ -577,6 +577,14 @@ func (cli *ChatCLI) gatewayAgentFunc(sessions *hubSessions, transcriber transcri
 			return reply, nil
 		}
 
+		// Slash-command expansion: a channel message invoking "/deploy prod"
+		// expands to its template before the coder engine sees it. Gateway is
+		// unattended — the pre-exec gate resolves through policy/automode,
+		// never a prompt.
+		if expanded, isCmd := cli.expandSlashCommandInput(ctx, msg.Text, false); isCmd {
+			msg.Text = expanded
+		}
+
 		// Image message: stage the attachment(s) for the coder run. The run's
 		// model gating decides native vision vs the describe-fallback. An
 		// image with no caption still gets a default instruction so the engine

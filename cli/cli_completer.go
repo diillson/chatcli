@@ -250,19 +250,51 @@ func (cli *ChatCLI) completeBareSlash(line, word string) ([]prompt.Suggest, bool
 		return nil, false
 	}
 	suggestions := cli.GetInternalCommands()
-	skillSuggestions := cli.getUserInvocableSkillSuggestions()
-	if len(skillSuggestions) > 0 {
+	extra := cli.getUserInvocableSkillSuggestions()
+	extra = append(extra, cli.getSlashCommandSuggestions()...)
+	if len(extra) > 0 {
 		existing := make(map[string]bool, len(suggestions))
 		for _, s := range suggestions {
 			existing[s.Text] = true
 		}
-		for _, s := range skillSuggestions {
+		for _, s := range extra {
 			if !existing[s.Text] {
+				existing[s.Text] = true
 				suggestions = append(suggestions, s)
 			}
 		}
 	}
 	return prompt.FilterHasPrefix(suggestions, word, true), true
+}
+
+// getSlashCommandSuggestions surfaces the slash-command catalog in the
+// top-level "/" completion, mirroring the skill entries: description plus
+// argument-hint when present.
+func (cli *ChatCLI) getSlashCommandSuggestions() []prompt.Suggest {
+	cat := cli.slashCommandCatalog()
+	if cat == nil {
+		return nil
+	}
+	list := cat.List()
+	if len(list) == 0 {
+		return nil
+	}
+	out := make([]prompt.Suggest, 0, len(list))
+	for _, cmd := range list {
+		desc := cmd.Description
+		if cmd.ArgumentHint != "" {
+			if desc != "" {
+				desc += "  " + cmd.ArgumentHint
+			} else {
+				desc = cmd.ArgumentHint
+			}
+		}
+		if desc == "" {
+			desc = i18n.T("complete.command.template_fallback")
+		}
+		out = append(out, prompt.Suggest{Text: "/" + cmd.InvocationName(), Description: desc})
+	}
+	return out
 }
 
 // completeCommandFlags drives the value-then-flag suggestion flow for any
@@ -1629,6 +1661,7 @@ func (cli *ChatCLI) getConfigSuggestions(d prompt.Document) []prompt.Suggest {
 			{Text: "diagram", Description: i18n.T("cfg.section.diagram.title")},
 			{Text: "graphview", Description: i18n.T("cfg.section.graphview.title")},
 			{Text: "compression", Description: i18n.T("cfg.section.compression.title")},
+			{Text: "commands", Description: i18n.T("cfg.section.commands.title")},
 			{Text: "output", Description: i18n.T("cfg.section.output.title")},
 			{Text: "scheduler", Description: i18n.T("cfg.section.scheduler.title")},
 			{Text: "server", Description: i18n.T("complete.config.server")},

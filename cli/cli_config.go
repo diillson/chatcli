@@ -94,6 +94,13 @@ func (cli *ChatCLI) reloadConfiguration(ctx context.Context) {
 		cli.logger.Error("Erro ao carregar o arquivo .env", zap.Error(err))
 	}
 
+	// Slash-command catalog: force a re-scan so /reload picks up command
+	// files created or edited since boot (the stat fingerprint would catch
+	// them within a turn anyway; this makes it immediate and explicit).
+	if cli.slashCommands != nil {
+		cli.slashCommands.Invalidate()
+	}
+
 	// Re-apply the UI theme so a CHATCLI_THEME change in .env takes effect on
 	// reload, mirroring how the provider/model are re-resolved below.
 	theme.InitFromEnv()
