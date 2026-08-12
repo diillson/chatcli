@@ -48,6 +48,13 @@ func (cli *ChatCLI) showConfigCommands() {
 		}
 	}
 
+	if skipped := cat.Skipped(); len(skipped) > 0 {
+		fmt.Printf("\n  %s\n", colorize(i18n.T("cfg.commands.skipped"), ColorYellow))
+		for path, reason := range skipped {
+			fmt.Printf("      %s\n        %s\n", path, colorize(reason, ColorGray))
+		}
+	}
+
 	fmt.Printf("\n  %s\n", colorize(i18n.T("cfg.commands.dirs"), ColorGray))
 	for _, d := range cat.Dirs() {
 		fmt.Printf("      %s\n", d)
