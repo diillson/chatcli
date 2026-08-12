@@ -53,6 +53,12 @@ func slashCommandsEnabled() bool {
 	return true
 }
 
+// commandEmptyBodyPrompt is the model-facing fallback when a template
+// expands to nothing (e.g. every line was a denied pre-exec). English
+// constant, not i18n — it is an instruction to the model, same rationale
+// as memoryRecallHint.
+const commandEmptyBodyPrompt = "Run the %q command."
+
 // preExec limits: one template line must not hang a turn or flood the
 // prompt. Output is truncated rune-safe at the cap.
 const (
@@ -130,7 +136,7 @@ func (cli *ChatCLI) expandSlashCommandInput(ctx context.Context, input string, i
 
 	expanded := commands.Expand(cmd, args, cli.commandPreExecRunner(ctx, cmd, args, interactive))
 	if strings.TrimSpace(expanded) == "" {
-		expanded = fmt.Sprintf("Run the %q command.", cmd.InvocationName())
+		expanded = fmt.Sprintf(commandEmptyBodyPrompt, cmd.InvocationName())
 	}
 
 	cli.pendingCommandModel = cmd.Model
