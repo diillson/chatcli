@@ -36,6 +36,27 @@ const (
 	SourceClaude Source = "claude-interop"
 	// SourceDevin is <project>/.devin/workflows — Devin workflow interop.
 	SourceDevin Source = "devin-interop"
+	// SourceWindsurf is <project>/.windsurf/workflows — Windsurf Cascade
+	// workflows (same family as Devin's since the Cognition merge).
+	SourceWindsurf Source = "windsurf-interop"
+	// SourceCursor is .cursor/commands (project) and ~/.cursor/commands
+	// (personal library) — plain markdown commands.
+	SourceCursor Source = "cursor-interop"
+	// SourceOpencode is .opencode/commands (project) and
+	// ~/.config/opencode/commands (global) — markdown with frontmatter.
+	SourceOpencode Source = "opencode-interop"
+	// SourceCodex is ~/.codex/prompts — OpenAI Codex custom prompts.
+	// Global-only and top-level-only by that CLI's own contract.
+	SourceCodex Source = "codex-interop"
+	// SourceGemini is .gemini/commands (project) and ~/.gemini/commands
+	// (global) — TOML files with prompt/description keys.
+	SourceGemini Source = "gemini-interop"
+	// SourceQwen is .qwen/commands / ~/.qwen/commands — Qwen Code, a
+	// Gemini CLI fork with the same TOML shape.
+	SourceQwen Source = "qwen-interop"
+	// SourceCopilot is <project>/.github/prompts/*.prompt.md — GitHub
+	// Copilot prompt files.
+	SourceCopilot Source = "copilot-interop"
 )
 
 // Command is one loaded slash command.
