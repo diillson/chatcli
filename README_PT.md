@@ -65,7 +65,7 @@
 | **Convergência semântica** | Cascade char → Jaccard → embedding cosine para Self-Refine, com cache LRU/TTL e quality regression detection. |
 | **Production-ready** | gRPC + TLS 1.3, JWT + RBAC, AES-256-GCM, rate limiting, audit logging, 50+ métricas Prometheus. |
 | **Kubernetes-native** | Operador com 17 CRDs e pipeline AIOps autônomo (54+ ações de remediação), SLO monitoring, post-mortems. |
-| **Extensível** | Plugins com verificação Ed25519, skills multi-registry (skills.sh, ClawHub, ChatCLI.dev), hooks de lifecycle, MCP client (stdio, SSE, HTTP + OAuth). |
+| **Extensível** | Plugins com verificação Ed25519, skills multi-registry (skills.sh, ClawHub, ChatCLI.dev), templates de slash commands com interop de 9 CLIs (Claude Code, Devin, Gemini, Codex, …), hooks de lifecycle, MCP client (stdio, SSE, HTTP + OAuth). |
 
 ---
 
@@ -550,6 +550,7 @@ Credenciais armazenadas com **AES-256-GCM** em `~/.chatcli/auth-profiles.json`.
 | **Grafo de conhecimento (Obsidian no core)** | Facts, tópicos, projetos, skills e tags viram um grafo derivado on-demand: `@memory neighbors <assunto>` / `map` puxam backlinks e notas conectadas, um index card minúsculo entra por turno, e `/graph [assunto]` renderiza o grafo em imagem (go-graphviz embarcado). `CHATCLI_GRAPH_INDEX=on\|off`. |
 | **Plugins** | Auto-detecção, schema validation, assinatura Ed25519, plugins remotos. |
 | **Skills** | Auto-autoria (`@skill`), registry multi-source (skills.sh, ClawHub, ChatCLI.dev), busca fuzzy, auditorias de segurança, preferências e instalação atômica. |
+| **Slash commands** | Templates de prompt em markdown invocados como `/nome args` em TODAS as superfícies (REPL, coder mid-run, one-shot, gateway, ACP, MCP prompts) e com qualquer provider — a expansão é pura reescrita de prompt. Projeto `.chatcli/commands/` + pessoal `~/.chatcli/commands/`, com **interop de migração zero** para arquivos de comando do Claude Code, Devin, Windsurf, Cursor, opencode, Codex, Gemini CLI, Qwen Code e GitHub Copilot (incluindo seus dialetos de placeholder e TOML). Pré-execução `!` passa pelo gate de segurança do coder; `allowed-tools` escopa o run; o modelo descobre o catálogo via `@commands`. Painel em `/config commands`. |
 | **Personas customizáveis** | Markdown com frontmatter YAML (model, tools, skills). |
 | **Hooks** | PreToolUse, PostToolUse, SessionStart/End, UserPromptSubmit, Compact pre/post — shell ou webhook. |
 | **WebFetch / WebSearch** | DuckDuckGo + fetch com extração de texto. |
