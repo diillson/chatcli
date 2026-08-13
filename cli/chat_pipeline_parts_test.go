@@ -96,6 +96,24 @@ func TestAssembleChatSystemPrompt_VolatileSuffixCarriesNoCacheHint(t *testing.T)
 	}
 }
 
+func TestAssembleChatSystemPrompt_DiscardsCommandToolScope(t *testing.T) {
+	// The allowed-tools overlay only means something to the agent/coder
+	// gate. A chat turn (e.g. a mode:chat command that still declares
+	// allowed-tools) must discard it, or it would leak into whatever
+	// /coder run the user starts next.
+	cli, _ := newPipelineCLI(t, nil)
+	ch, err := NewContextHandler(zap.NewNop())
+	if err != nil {
+		t.Skipf("NewContextHandler unavailable in this environment: %v", err)
+	}
+	cli.contextHandler = ch
+	cli.pendingCommandAllowedTools = []string{"exec_command"}
+	_ = cli.assembleChatSystemPrompt(testCtx(), "hello", "")
+	if scope := cli.consumePendingCommandToolScope(); scope != nil {
+		t.Errorf("chat turn must discard the staged allowed-tools overlay, got %v", scope)
+	}
+}
+
 func TestRecentHistoryHints_EmptyHistory(t *testing.T) {
 	cli := &ChatCLI{}
 	if got := cli.recentHistoryHints(); got != nil {

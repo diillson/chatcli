@@ -118,6 +118,13 @@ func (cli *ChatCLI) assembleChatSystemPrompt(
 			out.effort = client.NormalizeEffort(e)
 		}
 	}
+	// The allowed-tools overlay only means something to the agent/coder
+	// security gate; on a chat turn it must be discarded here or it would
+	// leak into whatever /coder run the user starts next.
+	if leaked := cli.consumePendingCommandToolScope(); len(leaked) > 0 {
+		cli.logger.Debug("discarding slash-command tool scope on chat turn",
+			zap.Int("allowed_tools", len(leaked)))
+	}
 
 	// ── Stable cached prefix ──
 	out.parts = append(out.parts, cli.modeAndLanguagePart())     // Part 0
