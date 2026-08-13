@@ -60,28 +60,17 @@ func TestCommandsAutorouteEnabled_EnvValues(t *testing.T) {
 	}
 }
 
-func TestMaybeAutorouteCoderCommand_PanicsWithSentinelAndStagesInput(t *testing.T) {
+func TestMaybeAutorouteCoderCommand_RoutesAndStagesInput(t *testing.T) {
 	cli, project := newCommandsTestCLI(t)
 	writeCommandFile(t, project, "deploy.md", "---\nmode: coder\n---\nrun the deploy")
 	cli.replActive = true
 
-	defer func() {
-		r := recover()
-		if r == nil {
-			t.Fatal("coder command on the interactive REPL must unwind via the sentinel panic")
-		}
-		err, ok := r.(error)
-		if !ok || !errors.Is(err, errCoderModeRequest) {
-			t.Fatalf("panic value must be errCoderModeRequest, got %v", r)
-		}
-		if cli.pendingCoderCommandInput != "/deploy prod" {
-			t.Errorf("raw invocation must be staged, got %q", cli.pendingCoderCommandInput)
-		}
-		if cli.pendingAction != "coder" {
-			t.Errorf("pendingAction fallback (Windows panic clobber) must be set, got %q", cli.pendingAction)
-		}
-	}()
-	cli.commandHandler.maybeAutorouteCoderCommand("/deploy prod")
+	if got := cli.commandHandler.maybeAutorouteCoderCommand("/deploy prod"); got != autorouteCoder {
+		t.Fatalf("coder command on the interactive REPL must classify as autorouteCoder, got %v", got)
+	}
+	if cli.pendingCoderCommandInput != "/deploy prod" {
+		t.Errorf("raw invocation must be staged, got %q", cli.pendingCoderCommandInput)
+	}
 }
 
 func TestMaybeAutorouteCoderCommand_InferredFromAllowedTools(t *testing.T) {
@@ -89,12 +78,9 @@ func TestMaybeAutorouteCoderCommand_InferredFromAllowedTools(t *testing.T) {
 	writeCommandFile(t, project, "audit.md", "---\nallowed-tools: exec_command\n---\naudit the repo")
 	cli.replActive = true
 
-	defer func() {
-		if recover() == nil {
-			t.Fatal("allowed-tools without mode must infer coder and unwind")
-		}
-	}()
-	cli.commandHandler.maybeAutorouteCoderCommand("/audit")
+	if got := cli.commandHandler.maybeAutorouteCoderCommand("/audit"); got != autorouteCoder {
+		t.Fatalf("allowed-tools without mode must infer coder, got %v", got)
+	}
 }
 
 func TestMaybeAutorouteCoderCommand_HeadlessKeepsChatPath(t *testing.T) {
@@ -102,12 +88,12 @@ func TestMaybeAutorouteCoderCommand_HeadlessKeepsChatPath(t *testing.T) {
 	writeCommandFile(t, project, "deploy.md", "---\nmode: coder\n---\nrun the deploy")
 
 	cli.replActive = false // scheduler/ACP/MCP surfaces
-	if cli.commandHandler.maybeAutorouteCoderCommand("/deploy") {
-		t.Error("headless dispatch must keep today's chat path (no sentinel panic)")
+	if got := cli.commandHandler.maybeAutorouteCoderCommand("/deploy"); got != autorouteNone {
+		t.Errorf("headless dispatch must keep today's chat path, got %v", got)
 	}
 	cli.replActive, cli.unattended = true, true
-	if cli.commandHandler.maybeAutorouteCoderCommand("/deploy") {
-		t.Error("unattended dispatch must keep today's chat path")
+	if got := cli.commandHandler.maybeAutorouteCoderCommand("/deploy"); got != autorouteNone {
+		t.Errorf("unattended dispatch must keep today's chat path, got %v", got)
 	}
 	if cli.pendingCoderCommandInput != "" {
 		t.Error("nothing may be staged on the headless path")
@@ -120,8 +106,8 @@ func TestMaybeAutorouteCoderCommand_BusyRefusesWithoutQueueing(t *testing.T) {
 	cli.replActive = true
 	cli.isExecuting.Store(true)
 
-	if !cli.commandHandler.maybeAutorouteCoderCommand("/deploy") {
-		t.Fatal("busy REPL must consume the invocation (refusal), not fall through to chat")
+	if got := cli.commandHandler.maybeAutorouteCoderCommand("/deploy"); got != autorouteConsumed {
+		t.Fatalf("busy REPL must consume the invocation (refusal), got %v", got)
 	}
 	cli.messageQueueMu.Lock()
 	queued := len(cli.messageQueue)
@@ -140,11 +126,11 @@ func TestMaybeAutorouteCoderCommand_ChatModeCommandUntouched(t *testing.T) {
 	writeCommandFile(t, project, "vetoed.md", "---\nmode: chat\nallowed-tools: exec_command\n---\nbody")
 	cli.replActive = true
 
-	if cli.commandHandler.maybeAutorouteCoderCommand("/summary") {
-		t.Error("chat-mode command must follow the normal chat expansion path")
+	if got := cli.commandHandler.maybeAutorouteCoderCommand("/summary"); got != autorouteNone {
+		t.Errorf("chat-mode command must follow the normal chat expansion path, got %v", got)
 	}
-	if cli.commandHandler.maybeAutorouteCoderCommand("/vetoed") {
-		t.Error("explicit mode: chat must veto the allowed-tools inference")
+	if got := cli.commandHandler.maybeAutorouteCoderCommand("/vetoed"); got != autorouteNone {
+		t.Errorf("explicit mode: chat must veto the allowed-tools inference, got %v", got)
 	}
 }
 
@@ -154,8 +140,8 @@ func TestMaybeAutorouteCoderCommand_DisabledEnvKeepsChat(t *testing.T) {
 	cli.replActive = true
 	t.Setenv(commandsAutorouteEnv, "off")
 
-	if cli.commandHandler.maybeAutorouteCoderCommand("/deploy") {
-		t.Error("with autoroute off the invocation must fall through to the chat path")
+	if got := cli.commandHandler.maybeAutorouteCoderCommand("/deploy"); got != autorouteNone {
+		t.Errorf("with autoroute off the invocation must fall through to the chat path, got %v", got)
 	}
 	if cli.pendingCoderCommandInput != "" {
 		t.Error("nothing may be staged when autoroute is off")

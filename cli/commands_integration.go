@@ -415,9 +415,6 @@ func (cli *ChatCLI) RenderCommandPromptRPC(ctx context.Context, name, args strin
 // when busy, same scheduling rules). Returns true when the input was a
 // known command.
 func (ch *CommandHandler) tryInvokeSlashCommand(ctx context.Context, userInput string) bool {
-	if ch.maybeAutorouteCoderCommand(userInput) {
-		return true
-	}
 	expanded, ok := ch.cli.expandSlashCommandInput(ctx, userInput, !ch.cli.unattended)
 	if !ok {
 		return false
@@ -441,39 +438,57 @@ func (ch *CommandHandler) tryInvokeSlashCommand(ctx context.Context, userInput s
 	return true
 }
 
-// maybeAutorouteCoderCommand intercepts a chat-surface invocation of a
-// command whose resolved mode is coder and reroutes it through the coder
-// one-shot engine instead of letting it become a tool-less chat turn the
-// model would refuse. Returns true when the input was consumed here.
+// autorouteOutcome is the decision maybeAutorouteCoderCommand hands back
+// to the dispatch in HandleCommand.
+type autorouteOutcome int
+
+const (
+	// autorouteNone: not a coder-mode command invocation — follow the
+	// normal dispatch (expansion as a chat turn).
+	autorouteNone autorouteOutcome = iota
+	// autorouteConsumed: the invocation was handled here (refusal notice
+	// printed); the dispatch must not process it further.
+	autorouteConsumed
+	// autorouteCoder: the raw invocation is staged in
+	// pendingCoderCommandInput; the dispatch reroutes it through the
+	// existing /coder mode-switch case, whose unwind hands control to
+	// runPendingCoderCommand after go-prompt is torn down.
+	autorouteCoder
+)
+
+// maybeAutorouteCoderCommand classifies a chat-surface invocation of a
+// command whose resolved mode is coder, so it runs through the coder
+// one-shot engine instead of becoming a tool-less chat turn the model
+// would refuse.
 //
-// The reroute reuses the /coder panic-unwind: the go-prompt instance must
-// be torn down before the agent's stdin reader starts, so the coder run
-// can never be launched from inside the executor. Only the RAW invocation
-// is staged — expansion (pre-exec prompts included) happens after the
-// unwind, in runPendingCoderCommand, with the terminal back in cooked mode.
-func (ch *CommandHandler) maybeAutorouteCoderCommand(userInput string) bool {
+// The reroute reuses the /coder mode-switch unwind: the go-prompt
+// instance must be torn down before the agent's stdin reader starts, so
+// the coder run can never be launched from inside the executor. Only the
+// RAW invocation is staged — expansion (pre-exec prompts included)
+// happens after the unwind, in runPendingCoderCommand, with the terminal
+// back in cooked mode.
+func (ch *CommandHandler) maybeAutorouteCoderCommand(userInput string) autorouteOutcome {
 	cmd, _, ok := ch.cli.peekSlashCommand(userInput)
 	if !ok || cmd.ResolvedMode() != commands.ExecModeCoder {
-		return false
+		return autorouteNone
 	}
 	if !commandsAutorouteEnabled() {
 		fmt.Printf("  %s\n", colorize(i18n.T("commands.autoroute.disabled_hint", cmd.InvocationName()), ColorGray))
-		return false
+		return autorouteNone
 	}
 	if !ch.cli.replActive || ch.cli.unattended {
 		// Headless surfaces (scheduler slash_cmd, ACP, MCP, gateway) keep
 		// today's behavior: their recover handlers must never see the
 		// mode-switch sentinel.
-		return false
+		return autorouteNone
 	}
 	if ch.cli.isExecuting.Load() {
 		// Refuse instead of queueing: messageQueue replays entries as chat
 		// turns, which would silently strip the coder routing.
 		fmt.Printf("  %s\n", colorize(i18n.T("commands.autoroute.busy", cmd.InvocationName()), ColorYellow))
-		return true
+		return autorouteConsumed
 	}
 	fmt.Printf("  %s\n", colorize(i18n.T("commands.autoroute.notice", cmd.InvocationName()), ColorCyan))
 	ch.cli.pendingCoderCommandInput = userInput
-	ch.cli.pendingAction = "coder"
-	panic(errCoderModeRequest)
+	return autorouteCoder
 }

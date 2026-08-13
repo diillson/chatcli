@@ -89,6 +89,18 @@ func (ch *CommandHandler) HandleCommand(ctx context.Context, userInput string) b
 		return false
 	}
 
+	// Catalog commands whose resolved mode is coder become a /coder request:
+	// the raw invocation is staged for the post-unwind dispatcher and the
+	// input is rewritten so the existing mode-switch case below performs
+	// the sentinel unwind. Must run before the switch — the rewrite is what
+	// routes it. (Catalog names can never shadow the reserved "coder".)
+	switch ch.maybeAutorouteCoderCommand(userInput) {
+	case autorouteConsumed:
+		return false
+	case autorouteCoder:
+		userInput = "/coder"
+	}
+
 	// Mode-switch commands raise a sentinel to unwind out of the go-prompt
 	// loop (a plain return cannot escape it), so they stay as explicit cases
 	// rather than table entries.
