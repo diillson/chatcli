@@ -1,5 +1,18 @@
 # Changelog
 
+## [1.184.0](https://github.com/diillson/chatcli/compare/v1.183.0...v1.184.0) (2026-08-13)
+
+
+### Features
+
+* **commands:** interop matrix v2 — Codex, Gemini, Qwen, Cursor, Windsurf, opencode and Copilot ([#1331](https://github.com/diillson/chatcli/issues/1331)) ([abc6ae6](https://github.com/diillson/chatcli/commit/abc6ae69d4ad2c11157de7ff057c78a6187fa651))
+* **commands:** universal slash-command templates across every surface ([#1328](https://github.com/diillson/chatcli/issues/1328)) ([42632c5](https://github.com/diillson/chatcli/commit/42632c5313c1690bb56c6521521167906bf2aaef))
+
+
+### Bug Fixes
+
+* **commands:** tolerate real-world frontmatter, surface skipped files, refresh ACP command list mid-session ([#1330](https://github.com/diillson/chatcli/issues/1330)) ([da4d8d7](https://github.com/diillson/chatcli/commit/da4d8d7ca381e1d4534489638774abca328d8822))
+
 ## [1.183.0](https://github.com/diillson/chatcli/compare/v1.182.1...v1.183.0) (2026-08-11)
 
 
