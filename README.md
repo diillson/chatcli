@@ -65,7 +65,7 @@
 | **Semantic convergence** | char → Jaccard → embedding cosine cascade for Self-Refine, with LRU/TTL cache and quality regression detection. |
 | **Production-ready** | gRPC + TLS 1.3, JWT + RBAC, AES-256-GCM, rate limiting, audit logging, 50+ Prometheus metrics. |
 | **Kubernetes-native** | Operator with 17 CRDs and an autonomous AIOps pipeline (54+ remediation actions), SLO monitoring, post-mortems. |
-| **Extensible** | Plugins with Ed25519 signature verification, multi-registry skills (skills.sh, ClawHub, ChatCLI.dev), lifecycle hooks, MCP client (stdio, SSE, HTTP + OAuth). |
+| **Extensible** | Plugins with Ed25519 signature verification, multi-registry skills (skills.sh, ClawHub, ChatCLI.dev), slash-command templates with 9-CLI interop (Claude Code, Devin, Gemini, Codex, …), lifecycle hooks, MCP client (stdio, SSE, HTTP + OAuth). |
 
 ---
 
@@ -559,6 +559,7 @@ Credentials are stored with **AES-256-GCM** at `~/.chatcli/auth-profiles.json`.
 | **Knowledge graph (Obsidian in the core)** | Facts, topics, projects, skills and tags become an on-demand graph: `@memory neighbors <subject>` / `map` pull backlinks and related notes, a tiny index card rides each turn, and `/graph [subject]` renders the graph to an image (embedded go-graphviz). `CHATCLI_GRAPH_INDEX=on\|off`. |
 | **Plugins** | Auto-detection, schema validation, Ed25519 signatures, remote plugins. |
 | **Skills** | Self-authoring (`@skill`), multi-registry (skills.sh, ClawHub, ChatCLI.dev), fuzzy search, security audits, source preferences, atomic install. |
+| **Slash commands** | Markdown prompt templates invoked as `/name args` on EVERY surface (REPL, coder mid-run, one-shot, gateway, ACP, MCP prompts) and with every provider — expansion is pure prompt rewriting. Project `.chatcli/commands/` + personal `~/.chatcli/commands/`, with **zero-migration interop** for Claude Code, Devin, Windsurf, Cursor, opencode, Codex, Gemini CLI, Qwen Code and GitHub Copilot command files (their placeholder and TOML dialects included). `!` pre-execution runs through the coder security gate; `allowed-tools` scopes the run; the model discovers the catalog via `@commands`. Panel under `/config commands`. |
 | **Custom personas** | Markdown with YAML frontmatter (model, tools, skills). |
 | **Hooks** | PreToolUse, PostToolUse, SessionStart/End, UserPromptSubmit, Pre/PostCompact — shell or webhook. |
 | **WebFetch / WebSearch** | DuckDuckGo + fetch with text extraction. |
