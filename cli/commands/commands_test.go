@@ -29,6 +29,7 @@ func newTestCatalog(t *testing.T, reserved ...string) (*Catalog, string, string)
 		res[r] = true
 	}
 	cat := NewCatalog(project, global, func(n string) bool { return res[n] }, nil)
+	cat.SetHomeDir(t.TempDir()) // never read the developer's real interop dirs
 	return cat, project, global
 }
 
@@ -148,6 +149,10 @@ func TestInterpolate(t *testing.T) {
 		{"missing $3 end", "one two", "missing  end"},
 		{"cost $$5 and $UNKNOWN", "x", "cost $5 and $UNKNOWN"},
 		{"unicode $1", "ação", "unicode ação"},
+		{"gemini: {{args}}!", "make a plan", "gemini: make a plan!"},
+		{"title $TITLE files $FILES", `TITLE="Add hero" FILES=src/a.ts`, "title Add hero files src/a.ts"},
+		{"pos $1 named $KEY pos $2", `a KEY=v b`, "pos a named v pos b"},
+		{"unset $NOPE stays", "x", "unset $NOPE stays"},
 	}
 	for _, tc := range cases {
 		if got := interpolate(tc.body, tc.args); got != tc.want {

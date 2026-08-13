@@ -23,6 +23,7 @@ func newCommandsTestCLI(t *testing.T) (*ChatCLI, string) {
 	cli.commandHandler = NewCommandHandler(cli)
 	project := t.TempDir()
 	cli.slashCommands = commands.NewCatalog(project, t.TempDir(), cli.commandHandler.isReservedSlashName, zap.NewNop())
+	cli.slashCommands.SetHomeDir(t.TempDir()) // hermetic: no real ~/.codex, ~/.gemini, …
 	return cli, project
 }
 

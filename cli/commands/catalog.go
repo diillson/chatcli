@@ -16,10 +16,24 @@ import (
 	"go.uber.org/zap"
 )
 
-// dirSpec pairs a directory with the source family it belongs to.
+// fileFormat selects the parser for a source directory.
+type fileFormat int
+
+const (
+	formatMarkdown fileFormat = iota // *.md with optional YAML frontmatter
+	formatTOML                       // *.toml with prompt/description keys (Gemini/Qwen)
+	formatPromptMD                   // *.prompt.md (GitHub Copilot prompt files)
+)
+
+// dirSpec pairs a directory with the source family it belongs to and how
+// its files parse.
 type dirSpec struct {
 	dir    string
 	source Source
+	format fileFormat
+	// topLevelOnly skips namespace subdirectories — Codex's own contract
+	// ("scans only top-level Markdown files").
+	topLevelOnly bool
 }
 
 // Catalog loads and serves the slash-command set. Reads are served from an
@@ -33,6 +47,8 @@ type Catalog struct {
 
 	projectDir string
 	globalDir  string
+	// homeDir roots the global interop dirs (~/.codex/prompts etc.).
+	homeDir string
 
 	// isReserved reports whether a name would shadow a built-in slash
 	// command. Injected by the CLI (derived from the live dispatch table)
@@ -60,11 +76,26 @@ func NewCatalog(projectDir, globalDir string, isReserved func(string) bool, logg
 	if isReserved == nil {
 		isReserved = func(string) bool { return false }
 	}
+	home, _ := os.UserHomeDir()
 	return &Catalog{
 		logger:     logger,
 		projectDir: projectDir,
 		globalDir:  globalDir,
+		homeDir:    home,
 		isReserved: isReserved,
+	}
+}
+
+// SetHomeDir re-roots the global interop directories (~/.codex/prompts,
+// ~/.gemini/commands, …). Production uses the real home; hermetic tests
+// point this at a temp dir so the developer's actual prompt libraries can
+// never leak into assertions.
+func (c *Catalog) SetHomeDir(dir string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.homeDir != dir {
+		c.homeDir = dir
+		c.sig = ""
 	}
 }
 
@@ -80,19 +111,36 @@ func (c *Catalog) SetProjectDir(dir string) {
 }
 
 // dirs returns the source directories in PRECEDENCE order: first hit for a
-// name wins. Project beats personal; native beats interop.
+// name wins. Native beats interop; within each family, project beats
+// personal. The interop order is deliberate and stable: agentic-CLI
+// ecosystems whose files are most commonly committed to repos come first.
 func (c *Catalog) sourceDirs() []dirSpec {
 	var out []dirSpec
 	if c.projectDir != "" {
-		out = append(out, dirSpec{filepath.Join(c.projectDir, ".chatcli", "commands"), SourceProject})
+		out = append(out, dirSpec{dir: filepath.Join(c.projectDir, ".chatcli", "commands"), source: SourceProject})
 	}
 	if c.globalDir != "" {
-		out = append(out, dirSpec{c.globalDir, SourceGlobal})
+		out = append(out, dirSpec{dir: c.globalDir, source: SourceGlobal})
 	}
 	if c.projectDir != "" {
 		out = append(out,
-			dirSpec{filepath.Join(c.projectDir, ".claude", "commands"), SourceClaude},
-			dirSpec{filepath.Join(c.projectDir, ".devin", "workflows"), SourceDevin},
+			dirSpec{dir: filepath.Join(c.projectDir, ".claude", "commands"), source: SourceClaude},
+			dirSpec{dir: filepath.Join(c.projectDir, ".devin", "workflows"), source: SourceDevin},
+			dirSpec{dir: filepath.Join(c.projectDir, ".windsurf", "workflows"), source: SourceWindsurf},
+			dirSpec{dir: filepath.Join(c.projectDir, ".cursor", "commands"), source: SourceCursor},
+			dirSpec{dir: filepath.Join(c.projectDir, ".opencode", "commands"), source: SourceOpencode},
+			dirSpec{dir: filepath.Join(c.projectDir, ".gemini", "commands"), source: SourceGemini, format: formatTOML},
+			dirSpec{dir: filepath.Join(c.projectDir, ".qwen", "commands"), source: SourceQwen, format: formatTOML},
+			dirSpec{dir: filepath.Join(c.projectDir, ".github", "prompts"), source: SourceCopilot, format: formatPromptMD},
+		)
+	}
+	if c.homeDir != "" {
+		out = append(out,
+			dirSpec{dir: filepath.Join(c.homeDir, ".codex", "prompts"), source: SourceCodex, topLevelOnly: true},
+			dirSpec{dir: filepath.Join(c.homeDir, ".cursor", "commands"), source: SourceCursor},
+			dirSpec{dir: filepath.Join(c.homeDir, ".config", "opencode", "commands"), source: SourceOpencode},
+			dirSpec{dir: filepath.Join(c.homeDir, ".gemini", "commands"), source: SourceGemini, format: formatTOML},
+			dirSpec{dir: filepath.Join(c.homeDir, ".qwen", "commands"), source: SourceQwen, format: formatTOML},
 		)
 	}
 	return out
@@ -181,25 +229,28 @@ func (c *Catalog) loadDirLocked(snap map[string]*Command, refused map[string]str
 	}
 	for _, e := range entries {
 		if e.IsDir() {
+			if spec.topLevelOnly {
+				continue
+			}
 			subEntries, err := os.ReadDir(filepath.Join(spec.dir, e.Name()))
 			if err != nil {
 				continue
 			}
 			for _, se := range subEntries {
-				if !se.IsDir() && strings.HasSuffix(se.Name(), ".md") {
-					c.mergeFileLocked(snap, refused, filepath.Join(spec.dir, e.Name(), se.Name()), spec.source, e.Name())
+				if !se.IsDir() && matchesFormat(se.Name(), spec.format) {
+					c.mergeFileLocked(snap, refused, filepath.Join(spec.dir, e.Name(), se.Name()), spec, e.Name())
 				}
 			}
 			continue
 		}
-		if strings.HasSuffix(e.Name(), ".md") {
-			c.mergeFileLocked(snap, refused, filepath.Join(spec.dir, e.Name()), spec.source, "")
+		if matchesFormat(e.Name(), spec.format) {
+			c.mergeFileLocked(snap, refused, filepath.Join(spec.dir, e.Name()), spec, "")
 		}
 	}
 }
 
-func (c *Catalog) mergeFileLocked(snap map[string]*Command, refused map[string]string, path string, source Source, namespace string) {
-	cmd, err := parseCommandFile(path, source, namespace)
+func (c *Catalog) mergeFileLocked(snap map[string]*Command, refused map[string]string, path string, spec dirSpec, namespace string) {
+	cmd, err := parseCommandFileAs(path, spec, namespace)
 	if err != nil {
 		c.skipped[path] = err.Error()
 		c.logger.Warn("slash command skipped", zap.String("path", path), zap.Error(err))
