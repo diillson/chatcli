@@ -31,6 +31,7 @@ import (
 type geminiCommandTOML struct {
 	Prompt      string
 	Description string
+	Mode        string
 }
 
 // parseCommandTOML extracts prompt/description from a Gemini-style command
@@ -66,6 +67,8 @@ func parseCommandTOML(content string) (geminiCommandTOML, error) {
 			out.Prompt = value
 		case "description":
 			out.Description = value
+		case "mode":
+			out.Mode = value
 		}
 	}
 	if strings.TrimSpace(out.Prompt) == "" {

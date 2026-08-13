@@ -96,6 +96,7 @@ func parseCommandFileTOML(path string, source Source, namespace string) (*Comman
 		Name:        name,
 		Namespace:   normalizeName(namespace),
 		Description: strings.TrimSpace(parsed.Description),
+		Mode:        strings.TrimSpace(parsed.Mode),
 		Content:     strings.TrimSpace(parsed.Prompt),
 		Path:        path,
 		Source:      source,
@@ -156,6 +157,7 @@ func parseCommandFile(path string, source Source, namespace string) (*Command, e
 		Model:        strings.TrimSpace(string(fm.Model)),
 		Effort:       strings.TrimSpace(string(fm.Effort)),
 		AllowedTools: splitAllowedTools(string(fm.AllowedTools)),
+		Mode:         strings.TrimSpace(string(fm.Mode)),
 		Content:      strings.TrimSpace(body),
 		Path:         path,
 		Source:       source,
@@ -186,6 +188,8 @@ func parseFrontmatterLoose(fmRaw string) frontmatter {
 			fm.Effort = value
 		case "allowed-tools":
 			fm.AllowedTools = value
+		case "mode":
+			fm.Mode = value
 		}
 	}
 	return fm

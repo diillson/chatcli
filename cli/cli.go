@@ -371,6 +371,14 @@ type ChatCLI struct {
 	pendingCommandEffort       string
 	pendingCommandAllowedTools []string
 
+	// pendingCoderCommandInput holds the RAW "/name args" invocation of a
+	// mode:coder slash command captured by the chat auto-route. Consumed
+	// exactly once by the Start dispatcher after the panic-unwind, which
+	// expands it there (not before: pre-exec approval prompts need the
+	// terminal in cooked mode, and the staged hints must land immediately
+	// before the AgentMode.Run that consumes them).
+	pendingCoderCommandInput string
+
 	// Session-level reasoning override set by /thinking. When override.set
 	// is true the value of override.effort wins over skill hints and
 	// per-agent defaults for the next chat-turn LLM call. EffortUnset
@@ -1409,7 +1417,11 @@ func (cli *ChatCLI) Start(ctx context.Context) {
 
 			// /plan coder <task> routes to coder; /plan [agent] <task> routes to agent.
 			planCoder := strings.HasPrefix(lastCmd, "/plan coder ") || lastCmd == "/plan coder"
-			if strings.HasPrefix(lastCmd, "/coder") || planCoder {
+			if cli.pendingCoderCommandInput != "" {
+				// A mode:coder slash command auto-routed from chat: the
+				// task lives in the pending field, not in commandHistory.
+				cli.runPendingCoderCommand(ctx)
+			} else if strings.HasPrefix(lastCmd, "/coder") || planCoder {
 				cli.runCoderLogic(ctx)
 			} else if strings.HasPrefix(lastCmd, "/run") || strings.HasPrefix(lastCmd, "/agent") || strings.HasPrefix(lastCmd, "/plan") {
 				cli.runAgentLogic(ctx)

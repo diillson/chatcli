@@ -19,6 +19,7 @@ func TestReloadableEnvVarsCoverCriticalProviderVars(t *testing.T) {
 		"OPENAI_API_URL", "OPENAI_RESPONSES_API_URL",
 		"OPENROUTER_API_KEY", "OPENROUTER_API_URL", "OPENROUTER_MODEL",
 		"DEVIN_API_KEY", "ZAI_API_URL", "MINIMAX_API_URL", "GITHUB_MODELS_API_URL",
+		"CHATCLI_COMMANDS", "CHATCLI_COMMANDS_AUTOROUTE",
 	}
 	have := make(map[string]bool, len(reloadableEnvVars))
 	for _, v := range reloadableEnvVars {

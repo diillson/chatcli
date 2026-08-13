@@ -82,6 +82,11 @@ type Command struct {
 	// ephemeral overlay on the security-gate check: a tool outside the
 	// list escalates to an interactive ask, it is never silently allowed.
 	AllowedTools []string
+	// Mode is the raw `mode:` frontmatter value ("chat" | "coder", empty
+	// when absent). It declares which surface the command is written for;
+	// resolution — including the allowed-tools inference for files that
+	// never declare a mode — lives in ResolvedMode.
+	Mode string
 	// Content is the template body (frontmatter stripped).
 	Content string
 	// Path is the absolute file path (diagnostics + /config listing).
@@ -110,6 +115,7 @@ type frontmatter struct {
 	Model        flexString `yaml:"model"`
 	Effort       flexString `yaml:"effort"`
 	AllowedTools flexString `yaml:"allowed-tools"`
+	Mode         flexString `yaml:"mode"`
 }
 
 // splitAllowedTools parses the comma-separated allowed-tools list.

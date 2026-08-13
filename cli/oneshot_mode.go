@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/diillson/chatcli/cli/commands"
 	"github.com/diillson/chatcli/i18n"
 	"github.com/diillson/chatcli/llm/client"
 	"github.com/diillson/chatcli/models"
@@ -84,8 +85,14 @@ func (cli *ChatCLI) HandleOneShotOrFatal(ctx context.Context, opts *Options) boo
 	// scripts and in the REPL. Interactive only when stdin is a real
 	// terminal — a piped stdin cannot answer a pre-exec approval prompt,
 	// so the gate resolves through policy there (fail-safe deny on ask).
-	if expanded, isCmd := cli.expandSlashCommandInput(ctxOne, input, !HasStdin()); isCmd {
-		input = expanded
+	input, coderRoute := cli.resolveOneShotCommand(ctxOne, input)
+	if coderRoute {
+		// mode:coder command: same engine and error contract as -p "/coder …".
+		if err := cli.runCoderQuery(ctxOne, input, false); err != nil {
+			fmt.Fprintln(os.Stderr, i18n.T("oneshot.error.coder_failed")+"\n\n"+i18n.T("oneshot.details_label")+":\n```\n"+err.Error()+"\n```")
+			cli.logger.Fatal("Erro no modo coder one-shot", zap.Error(err))
+		}
+		return true
 	}
 
 	if strings.HasPrefix(input, "/agent ") || strings.HasPrefix(input, "/run ") {
@@ -107,6 +114,27 @@ func (cli *ChatCLI) HandleOneShotOrFatal(ctx context.Context, opts *Options) boo
 	}
 
 	return true
+}
+
+// resolveOneShotCommand expands a slash-command input for the -p surface
+// and decides its route. coderRoute is true when the command's resolved
+// mode is coder and the auto-route is enabled: the caller then runs the
+// expanded prompt through the coder one-shot engine instead of prefix
+// routing. Non-command input passes through unchanged.
+func (cli *ChatCLI) resolveOneShotCommand(ctx context.Context, input string) (string, bool) {
+	cmd, _, ok := cli.peekSlashCommand(input)
+	if !ok {
+		return input, false
+	}
+	coderRoute := cmd.ResolvedMode() == commands.ExecModeCoder && commandsAutorouteEnabled()
+	expanded, isCmd := cli.expandSlashCommandInput(ctx, input, !HasStdin())
+	if !isCmd {
+		return input, false
+	}
+	if coderRoute {
+		fmt.Fprintln(os.Stderr, i18n.T("commands.autoroute.notice_oneshot", cmd.InvocationName()))
+	}
+	return expanded, coderRoute
 }
 
 // Detecta se há dados no stdin (pipe/arquivo ao invés de TTY).

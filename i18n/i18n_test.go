@@ -76,6 +76,30 @@ func TestT_DiagramDescriptionLocalized(t *testing.T) {
 	}
 }
 
+// TestT_CommandAutorouteKeysExist pins the chat→coder auto-route strings in
+// both shipped locales: a missing key would surface the raw key in the REPL
+// exactly at the moment the mode switch needs to be legible.
+func TestT_CommandAutorouteKeysExist(t *testing.T) {
+	keys := []string{
+		"commands.autoroute.notice",
+		"commands.autoroute.notice_oneshot",
+		"commands.autoroute.busy",
+		"commands.autoroute.disabled_hint",
+		"commands.autoroute.expand_failed",
+		"commands.autoroute.banner_mode",
+		"commands.autoroute.returned_to_chat",
+		"complete.command.coder_marker",
+	}
+	for _, lang := range []string{"en-US", "pt-BR"} {
+		initFor(t, lang)
+		for _, key := range keys {
+			if got := T(key); got == key || got == "" {
+				t.Errorf("[%s] %s not in catalog, got raw key", lang, key)
+			}
+		}
+	}
+}
+
 func TestT_FallbackToDefaultLanguage(t *testing.T) {
 	// A locale that doesn't exist resolves to the default (en) catalog.
 	initFor(t, "fr-FR")

@@ -292,6 +292,7 @@ func (cli *ChatCLI) getSlashCommandSuggestions() []prompt.Suggest {
 		if desc == "" {
 			desc = i18n.T("complete.command.template_fallback")
 		}
+		desc = commandCoderMarkerPrefix(cmd, desc)
 		out = append(out, prompt.Suggest{Text: "/" + cmd.InvocationName(), Description: desc})
 	}
 	return out

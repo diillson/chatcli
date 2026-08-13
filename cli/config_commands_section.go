@@ -65,6 +65,7 @@ var commandSourceOrder = []commands.Source{
 func (cli *ChatCLI) showConfigCommands() {
 	sectionHeader("⌘", "cfg.section.commands.title", ColorCyan)
 	kv("  ", commandsEnabledEnv, envBool(commandsEnabledEnv))
+	kv("  ", commandsAutorouteEnv, envBool(commandsAutorouteEnv))
 
 	cat := cli.slashCommandCatalog()
 	if cat == nil {
@@ -105,6 +106,9 @@ func (cli *ChatCLI) showConfigCommands() {
 			fmt.Printf("%s %s", colorize(line, ColorGreen), desc)
 			if cmd.ArgumentHint != "" {
 				fmt.Printf("  %s", colorize(cmd.ArgumentHint, ColorCyan))
+			}
+			if cmd.ResolvedMode() == commands.ExecModeCoder {
+				fmt.Printf("  %s", colorize(i18n.T("complete.command.coder_marker"), ColorYellow))
 			}
 			fmt.Println()
 		}
