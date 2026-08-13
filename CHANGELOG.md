@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.185.0](https://github.com/diillson/chatcli/compare/v1.184.0...v1.185.0) (2026-08-13)
+
+
+### Features
+
+* **commands:** auto-route coder-mode slash commands from chat to a coder one-shot run ([#1333](https://github.com/diillson/chatcli/issues/1333)) ([6941165](https://github.com/diillson/chatcli/commit/6941165aff14d45d49d979c38d02190d4b6eca37))
+
 ## [1.184.0](https://github.com/diillson/chatcli/compare/v1.183.0...v1.184.0) (2026-08-13)
 
 
