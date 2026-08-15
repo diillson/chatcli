@@ -61,7 +61,7 @@ type Agent struct {
 	Description string     `json:"description" yaml:"description"`
 	Skills      StringList `json:"skills" yaml:"skills"`   // Usando StringList para robustez
 	Plugins     StringList `json:"plugins" yaml:"plugins"` // Usando StringList para robustez
-	Tools       StringList `json:"tools" yaml:"tools"`     // Allowed tools for worker mode (Read, Grep, Glob, Bash, Write, Edit)
+	Tools       StringList `json:"tools" yaml:"tools"`     // Allowed tools for worker mode (Read, Grep, Glob, Bash, Write, Edit, Agent, Memory, Session, Knowledge; case-insensitive, aliases and Bash(...) specifiers accepted)
 
 	// Per-agent LLM preferences (Fase: multi-agent parity with skills).
 	// Model declares the ideal model id for when this agent runs as a
