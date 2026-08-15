@@ -15,6 +15,7 @@ import (
 func seedManager(t *testing.T) *Manager {
 	t.Helper()
 	mgr := NewManager(t.TempDir(), DefaultConfig(), testLogger())
+	t.Cleanup(mgr.WaitGraphPersist)
 	mgr.ProcessExtraction(`## LONGTERM
 - ChatCLI uses Go with a plugin system
 - embed.FS needs '/' separators on Windows
@@ -74,6 +75,7 @@ func TestGetMemoryIndex_BudgetCap(t *testing.T) {
 
 func TestGetMemoryIndex_EmptyMemory(t *testing.T) {
 	mgr := NewManager(t.TempDir(), DefaultConfig(), testLogger())
+	t.Cleanup(mgr.WaitGraphPersist)
 	if idx := mgr.GetMemoryIndex(0); idx != "" {
 		t.Errorf("empty memory should yield empty index, got %q", idx)
 	}

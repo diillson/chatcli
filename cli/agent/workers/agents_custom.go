@@ -55,17 +55,27 @@ type CustomAgent struct {
 	skills       *SkillSet
 	modelHint    string
 	effortHint   string
+
+	// unknownTools are frontmatter tools: tokens that matched no known tool
+	// name; fellBackReadOnly marks a non-empty tools: list that produced zero
+	// commands (silent-degradation case). Both exist so LoadCustomAgents can
+	// warn the user instead of silently registering a crippled agent.
+	unknownTools     []string
+	fellBackReadOnly bool
 }
 
 // NewCustomAgent creates a CustomAgent from a persona Agent and its resolved skills.
 func NewCustomAgent(pa *persona.Agent, personaSkills []*persona.Skill) *CustomAgent {
-	commands := MapToolsToCommands(pa.Tools)
+	mapping := mapPersonaTools(pa.Tools)
+	commands := mapping.commands
+	fellBack := false
 	if len(commands) == 0 {
 		// Default: read-only if no tools specified
 		commands = []string{"read", "search", "tree"}
+		fellBack = len(pa.Tools) > 0
 	}
 
-	readOnly := isReadOnlyToolSet(pa.Tools)
+	readOnly := !mapping.writable
 	systemPrompt := buildCustomSystemPrompt(pa, personaSkills, commands, readOnly)
 	skillSet := buildCustomSkillSet(personaSkills)
 
@@ -79,15 +89,17 @@ func NewCustomAgent(pa *persona.Agent, personaSkills []*persona.Skill) *CustomAg
 	}
 
 	return &CustomAgent{
-		agentType:    AgentType(strings.ToLower(pa.Name)),
-		name:         pa.Name,
-		description:  pa.Description,
-		systemPrompt: systemPrompt,
-		commands:     commands,
-		readOnly:     readOnly,
-		skills:       skillSet,
-		modelHint:    modelHint,
-		effortHint:   strings.ToLower(strings.TrimSpace(pa.Effort)),
+		agentType:        AgentType(strings.ToLower(pa.Name)),
+		name:             pa.Name,
+		description:      pa.Description,
+		systemPrompt:     systemPrompt,
+		commands:         commands,
+		readOnly:         readOnly,
+		skills:           skillSet,
+		modelHint:        modelHint,
+		effortHint:       strings.ToLower(strings.TrimSpace(pa.Effort)),
+		unknownTools:     mapping.unknown,
+		fellBackReadOnly: fellBack,
 	}
 }
 
@@ -128,54 +140,101 @@ func (a *CustomAgent) Execute(ctx context.Context, task string, deps *WorkerDeps
 //	Write → write
 //	Edit  → patch
 //	Agent → ignored (meta-tool)
+//
+// Matching is case-insensitive, tolerates common aliases (Shell → Bash,
+// Patch/MultiEdit → Edit) and Claude Code argument specifiers
+// ("Bash(go build:*)" counts as Bash). Memory/Session/Knowledge grant the
+// read-only worker context tools (memory-recall, session-search/get,
+// knowledge-search/get).
 func MapToolsToCommands(tools []string) []string {
+	return mapPersonaTools(tools).commands
+}
+
+// personaToolMapping is the detailed result of parsing a persona frontmatter
+// tools: list. commands is sorted; unknown preserves input order.
+type personaToolMapping struct {
+	commands []string
+	unknown  []string
+	writable bool
+}
+
+// canonicalPersonaTool normalizes one frontmatter tool token: whitespace is
+// trimmed, a Claude Code argument specifier ("Bash(go build:*)") is stripped,
+// and the result is lowercased. Empty tokens normalize to "".
+func canonicalPersonaTool(tool string) string {
+	name := strings.TrimSpace(tool)
+	if idx := strings.IndexByte(name, '('); idx >= 0 {
+		name = name[:idx]
+	}
+	return strings.ToLower(strings.TrimSpace(name))
+}
+
+// mapPersonaTools is the tolerant engine behind MapToolsToCommands: it maps
+// each recognized token to its worker subcommands, records write capability,
+// and collects unrecognized tokens so callers can warn instead of silently
+// degrading the agent to the read-only default.
+func mapPersonaTools(tools []string) personaToolMapping {
 	cmdSet := make(map[string]bool)
-	hasBash := false
+	var mapping personaToolMapping
 
 	for _, tool := range tools {
-		switch strings.TrimSpace(tool) {
-		case "Read":
+		switch canonicalPersonaTool(tool) {
+		case "":
+			// Empty token (stray comma) — not worth a warning.
+		case "read":
 			cmdSet["read"] = true
-		case "Grep":
+		case "grep", "search":
 			cmdSet["search"] = true
-		case "Glob":
+		case "glob":
 			cmdSet["tree"] = true
-		case "Bash":
+		case "bash", "shell", "exec", "run", "terminal":
 			cmdSet["exec"] = true
 			cmdSet["test"] = true
-			hasBash = true
-		case "Write":
+			for _, gc := range []string{"git-status", "git-diff", "git-log", "git-changed", "git-branch"} {
+				cmdSet[gc] = true
+			}
+			mapping.writable = true
+		case "write":
 			cmdSet["write"] = true
-		case "Edit":
+			mapping.writable = true
+		case "edit", "patch":
 			cmdSet["patch"] = true
-		case "Agent":
+			mapping.writable = true
+		case "multiedit":
+			// Docs contract: MultiEdit grants the transactional multi-file
+			// edit (multipatch) plus the single-file patch it builds on.
+			cmdSet["patch"] = true
+			cmdSet["multipatch"] = true
+			mapping.writable = true
+		case "agent", "task":
 			// Meta-tool, ignored for worker commands
+		case "memory":
+			cmdSet[ContextToolMemoryRecall] = true
+		case "session":
+			cmdSet[ContextToolSessionSearch] = true
+			cmdSet[ContextToolSessionGet] = true
+		case "knowledge":
+			cmdSet[ContextToolKnowledgeSearch] = true
+			cmdSet[ContextToolKnowledgeGet] = true
+		default:
+			mapping.unknown = append(mapping.unknown, strings.TrimSpace(tool))
 		}
 	}
 
-	if hasBash {
-		for _, gc := range []string{"git-status", "git-diff", "git-log", "git-changed", "git-branch"} {
-			cmdSet[gc] = true
-		}
-	}
-
-	result := make([]string, 0, len(cmdSet))
+	mapping.commands = make([]string, 0, len(cmdSet))
 	for cmd := range cmdSet {
-		result = append(result, cmd)
+		mapping.commands = append(mapping.commands, cmd)
 	}
-	sort.Strings(result)
-	return result
+	sort.Strings(mapping.commands)
+	if len(mapping.commands) == 0 {
+		mapping.commands = nil
+	}
+	return mapping
 }
 
 // isReadOnlyToolSet returns true if the tools list contains only read-related tools.
 func isReadOnlyToolSet(tools []string) bool {
-	for _, tool := range tools {
-		switch strings.TrimSpace(tool) {
-		case "Write", "Edit", "Bash":
-			return false
-		}
-	}
-	return true
+	return !mapPersonaTools(tools).writable
 }
 
 // buildCustomSystemPrompt assembles the system prompt for a custom persona agent
@@ -207,18 +266,24 @@ func buildCustomSystemPrompt(
 	b.WriteString("Use <tool_call name=\"@coder\" args='{\"cmd\":\"COMMAND\",\"args\":{...}}' /> syntax.\n\n")
 
 	cmdDescriptions := map[string]string{
-		"read":        "Read file contents. Args: {\"file\":\"path/to/file\"}",
-		"write":       "Create/overwrite file. Args: {\"file\":\"path\",\"content\":\"BASE64\",\"encoding\":\"base64\"}",
-		"patch":       "Search/replace edit. Args: {\"file\":\"path\",\"search\":\"old\",\"replace\":\"new\"}",
-		"tree":        "Directory listing. Args: {\"dir\":\".\",\"max-depth\":3}",
-		"search":      "Search patterns in files. Args: {\"term\":\"pattern\",\"dir\":\".\"}",
-		"exec":        "Execute command. Args: {\"cmd\":\"go build ./...\"}",
-		"test":        "Run tests. Args: {\"dir\":\".\"}",
-		"git-status":  "Git status. Args: {\"dir\":\".\"}",
-		"git-diff":    "Git diff. Args: {\"staged\":true}",
-		"git-log":     "Git log. Args: {\"limit\":10}",
-		"git-changed": "Git changed files. Args: {}",
-		"git-branch":  "Git branch operations. Args: {}",
+		"read":                     "Read file contents. Args: {\"file\":\"path/to/file\"}",
+		"write":                    "Create/overwrite file. Args: {\"file\":\"path\",\"content\":\"BASE64\",\"encoding\":\"base64\"}",
+		"patch":                    "Search/replace edit. Args: {\"file\":\"path\",\"search\":\"old\",\"replace\":\"new\"}",
+		"multipatch":               "Transactional multi-file edit (all-or-nothing). Args: {\"edits\":\"[{\\\"file\\\":\\\"path\\\",\\\"search\\\":\\\"old\\\",\\\"replace\\\":\\\"new\\\"}]\"}",
+		"tree":                     "Directory listing. Args: {\"dir\":\".\",\"max-depth\":3}",
+		"search":                   "Search patterns in files. Args: {\"term\":\"pattern\",\"dir\":\".\"}",
+		"exec":                     "Execute command. Args: {\"cmd\":\"go build ./...\"}",
+		"test":                     "Run tests. Args: {\"dir\":\".\"}",
+		"git-status":               "Git status. Args: {\"dir\":\".\"}",
+		"git-diff":                 "Git diff. Args: {\"staged\":true}",
+		"git-log":                  "Git log. Args: {\"limit\":10}",
+		"git-changed":              "Git changed files. Args: {}",
+		"git-branch":               "Git branch operations. Args: {}",
+		ContextToolMemoryRecall:    "Search persistent cross-session memory (read-only). Args: {\"query\":\"what to look for\"}",
+		ContextToolSessionSearch:   "Search saved past conversations (read-only). Args: {\"query\":\"topic\"}",
+		ContextToolSessionGet:      "Read one saved session page by page (read-only). Args: {\"name\":\"session\",\"query\":\"topic\"} or {\"name\":\"session\",\"message\":42}",
+		ContextToolKnowledgeSearch: "Search attached knowledge bases (read-only). Args: {\"query\":\"topic\",\"top_k\":5}",
+		ContextToolKnowledgeGet:    "Read a knowledge-base document paginated (read-only). Args: {\"source\":\"doc\",\"offset\":0}",
 	}
 
 	for _, cmd := range commands {

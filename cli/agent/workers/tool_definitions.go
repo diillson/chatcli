@@ -415,6 +415,12 @@ var nativeToolNameMap = map[string]string{
 	"clean_backups":     "clean",
 	"delegate_subagent": "delegate",
 	"send_mail":         "mail",
+	"recall_output":     recallSubcmd,
+	"memory_recall":     ContextToolMemoryRecall,
+	"session_search":    ContextToolSessionSearch,
+	"session_get":       ContextToolSessionGet,
+	"knowledge_search":  ContextToolKnowledgeSearch,
+	"knowledge_get":     ContextToolKnowledgeGet,
 }
 
 // MailToolDefinition is the native tool definition for squad mail. It is

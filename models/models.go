@@ -20,6 +20,14 @@ type MessageMeta struct {
 	// format. See cli.MessageTrimmer.trimMessage.
 	PreserveVerbatim bool `json:"preserve_verbatim,omitempty"`
 
+	// AgentFeedback marks a user-role message that carries aggregated squad
+	// worker results (workers.FormatResults). These are tool output in user
+	// clothing — up to MaxWorkers × 30KB in one message — and the flag lets
+	// agent.ApplyMicrocompact age them like regular tool results instead of
+	// treating them as untouchable user text. Structural on purpose: the
+	// flag survives compaction rewrites, park snapshots and session saves.
+	AgentFeedback bool `json:"agent_feedback,omitempty"`
+
 	// SkillNames marks a mid-loop skill injection block (agent/coder mode)
 	// and records which skills it carries, comma-separated. Identification
 	// is structural on purpose: compaction may rewrite the content, but

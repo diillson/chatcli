@@ -386,12 +386,23 @@ func (hc *HistoryCompactor) structuredSummarize(
 		return nil, fmt.Errorf("structured summarization LLM call failed: %w", err)
 	}
 
+	// Archive the FULL middle segment (untruncated, unlike the summarizer
+	// input above) before replacing it: level 1 (trim) and level 3
+	// (emergency) already preserve what they drop via CCR, and this was the
+	// pipeline's only irreversible cut. Best-effort — a disabled layer or an
+	// over-cap segment keeps the legacy lossy behavior.
+	recallNote := ""
+	if key, ok := hc.compress.Archive(renderMessagesForArchive(middleMessages)); ok {
+		recallNote = "\n\n[full transcript of the summarized segment recoverable via @recall " +
+			compress.FormatMarker(key) + "]"
+	}
+
 	// Reconstruct: system + summary message + recent messages
 	result := make([]models.Message, 0, systemEnd+1+cfg.MinKeepRecent)
 	result = append(result, history[:systemEnd]...)
 	result = append(result, models.Message{
 		Role:    "user",
-		Content: fmt.Sprintf("[STRUCTURED SUMMARY — covering %d earlier messages]\n\n%s", len(middleMessages), response),
+		Content: fmt.Sprintf("[STRUCTURED SUMMARY — covering %d earlier messages]\n\n%s%s", len(middleMessages), response, recallNote),
 		Meta: &models.MessageMeta{
 			IsSummary: true,
 			SummaryOf: len(middleMessages),
@@ -400,6 +411,20 @@ func (hc *HistoryCompactor) structuredSummarize(
 	result = append(result, history[recentStart:]...)
 
 	return result, nil
+}
+
+// renderMessagesForArchive renders a message segment for verbatim CCR
+// archival: role-tagged, full content, no truncation.
+func renderMessagesForArchive(msgs []models.Message) string {
+	var sb strings.Builder
+	for _, msg := range msgs {
+		sb.WriteString("[")
+		sb.WriteString(msg.Role)
+		sb.WriteString("]: ")
+		sb.WriteString(msg.Content)
+		sb.WriteString("\n\n")
+	}
+	return sb.String()
 }
 
 // snapToToolBlockBoundary moves a keep-recent cut point so it never splits an

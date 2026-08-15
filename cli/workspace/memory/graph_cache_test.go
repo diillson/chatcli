@@ -271,6 +271,7 @@ func TestGraphCache_StatsNeverBuilds(t *testing.T) {
 
 func TestDirtyTaps_ContentMutationsMark(t *testing.T) {
 	mgr := NewManager(t.TempDir(), DefaultConfig(), zap.NewNop())
+	t.Cleanup(mgr.WaitGraphPersist)
 	// Wire a counting builder so we can observe dirtiness through Snapshot.
 	var builds atomic.Int32
 	mgr.SetGraphSource(func() *knowledge.Graph {

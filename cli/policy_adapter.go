@@ -39,6 +39,13 @@ type workerPolicyAdapter struct {
 	// access is gated at the messaging edge). ActionDeny still blocks.
 	unattended bool
 
+	// autoApprove, when set, is consulted on an "ask" verdict before any
+	// interactive prompt: it reports whether the session's /policy automode
+	// admits this call (safety-immune operations excluded — see
+	// AgentMode.askAutoApproved). Without it, automode only reached the
+	// orchestrator's own tool calls and workers kept prompting on stdin.
+	autoApprove func(toolName, args string) bool
+
 	// restoreInput, when set, runs after each interactive prompt so the
 	// agent loop can re-arm its cbreak type-ahead TTY state (the prompt
 	// forces cooked mode to render/read cleanly).
@@ -125,6 +132,13 @@ func (a *workerPolicyAdapter) CheckAndPrompt(ctx context.Context, toolName, args
 			// Gateway: no human to answer; blocking on stdin would hang the
 			// worker silently. Auto-approve (see field doc).
 			a.logger.Info("Worker tool call auto-approved (unattended gateway)",
+				zap.String("tool", toolName))
+			return true, ""
+		}
+		if a.autoApprove != nil && a.autoApprove(toolName, args) {
+			// Session automode (/policy mode auto): same convenience the
+			// orchestrator's loop gets, with the same safety-immunity carve-out.
+			a.logger.Info("Worker tool call auto-approved (policy automode)",
 				zap.String("tool", toolName))
 			return true, ""
 		}

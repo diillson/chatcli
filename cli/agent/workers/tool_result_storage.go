@@ -112,28 +112,44 @@ func TruncateToolResult(subcmd, result string) string {
 	if fn := currentToolOutputCompressor(); fn != nil {
 		result = fn(subcmd, result)
 	}
-	if len(result) <= MaxInlineResultBytes {
-		return result
+	return overflowToDisk(subcmd, result, InlinePreviewBytes)
+}
+
+// overflowToDisk persists content past MaxInlineResultBytes to a result_*.txt
+// file and returns a previewBytes-sized preview plus the file reference. It
+// never runs the CCR compressor — callers that want compression apply it
+// first (TruncateToolResult). Content within the inline limit is returned
+// unchanged; when the disk write fails the content is hard-truncated at the
+// preview size so the caller never ships an oversized result.
+func overflowToDisk(label, content string, previewBytes int) string {
+	if len(content) <= MaxInlineResultBytes {
+		return content
+	}
+	if previewBytes <= 0 {
+		previewBytes = InlinePreviewBytes
+	}
+	if previewBytes >= len(content) {
+		return content
 	}
 
-	// Save full result to disk
+	// Save full content to disk
 	n := atomic.AddUint64(&resultCounter, 1)
-	filename := fmt.Sprintf("result_%s_%d.txt", subcmd, n)
+	filename := fmt.Sprintf("result_%s_%d.txt", label, n)
 	fullPath := filepath.Join(getResultDir(), filename)
 
-	if err := os.WriteFile(fullPath, []byte(result), 0o600); err != nil {
+	if err := os.WriteFile(fullPath, []byte(content), 0o600); err != nil {
 		// If we can't save, just truncate hard
-		return result[:MaxInlineResultBytes] + "\n... [output truncated — write to disk failed]"
+		return content[:MaxInlineResultBytes] + "\n... [output truncated — write to disk failed]"
 	}
 
 	// Return preview + reference
-	preview := result[:InlinePreviewBytes]
+	preview := content[:previewBytes]
 	// Try to cut at a newline boundary for cleaner output
-	if lastNL := strings.LastIndex(preview, "\n"); lastNL > InlinePreviewBytes/2 {
+	if lastNL := strings.LastIndex(preview, "\n"); lastNL > previewBytes/2 {
 		preview = preview[:lastNL+1]
 	}
 
-	return preview + fmt.Sprintf(TruncatedResultSuffix, fullPath, len(result))
+	return preview + fmt.Sprintf(TruncatedResultSuffix, fullPath, len(content))
 }
 
 // CleanupResultFiles removes all temporary result files.

@@ -2933,9 +2933,16 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 						agent.ColorGray)
 				}
 
-				// Inject results as feedback for the orchestrator
+				// Inject results as feedback for the orchestrator. The
+				// AgentFeedback meta lets microcompact age this block like
+				// tool output — as a plain user message it was invisible to
+				// every reduction mechanism short of full compaction.
 				feedback := workers.FormatResults(agentResults)
-				a.cli.history = append(a.cli.history, models.Message{Role: "user", Content: feedback})
+				a.cli.history = append(a.cli.history, models.Message{
+					Role:    "user",
+					Content: feedback,
+					Meta:    &models.MessageMeta{AgentFeedback: true},
+				})
 
 				// If there are also tool_calls in the same response, skip them —
 				// the orchestrator should use agent_calls OR tool_calls, not both
@@ -3930,6 +3937,14 @@ func (a *AgentMode) initMultiAgent(ctx context.Context) bool {
 	// the user switched providers at runtime.
 	if a.agentRegistry != nil {
 		a.parallelMode = true
+		// Re-sync session-scoped policy state: unattended and automode may
+		// have changed since the registry was first built (this branch used
+		// to freeze the boot-time values for the whole process lifetime).
+		if a.policyAdapter != nil {
+			a.policyAdapter.unattended = a.cli.unattended
+			a.policyAdapter.autoApprove = a.askAutoApproved
+		}
+		workers.RegisterWorkerContextProvider(a.followUpRecallBlocks)
 		if a.agentDispatcher != nil {
 			provider := a.cli.Provider
 			if provider == "" {
@@ -4004,12 +4019,18 @@ func (a *AgentMode) initMultiAgent(ctx context.Context) bool {
 	// Attach policy enforcement so parallel workers respect security rules
 	if pa, err := newWorkerPolicyAdapter(a.logger); err == nil {
 		pa.unattended = a.cli.unattended // gateway: auto-approve "ask" instead of blocking on stdin
+		pa.autoApprove = a.askAutoApproved
 		a.policyAdapter = pa
 		a.agentDispatcher.SetPolicyChecker(pa)
 		a.logger.Info("Policy enforcement enabled for parallel workers")
 	} else {
 		a.logger.Warn("Failed to initialize policy checker for parallel workers", zap.Error(err))
 	}
+
+	// Proactive recall for workers: each dispatched task gets the same
+	// [MEMORY AUTO-RECALL] / [SESSION RECALL] surfaces the orchestrator's
+	// system prompt carries, keyed off the task text.
+	workers.RegisterWorkerContextProvider(a.followUpRecallBlocks)
 
 	// Attach the seven-pattern quality pipeline (Self-Refine, CoVe,
 	// Reflexion, …). Pipeline starts with the hooks selected by the

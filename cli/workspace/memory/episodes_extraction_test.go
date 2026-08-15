@@ -14,6 +14,7 @@ import (
 
 func TestProcessExtractionResult_Episodes(t *testing.T) {
 	m := NewManager(t.TempDir(), DefaultConfig(), zap.NewNop())
+	t.Cleanup(m.WaitGraphPersist)
 	m.SetWorkspaceDir("/home/u/chatcli")
 
 	sum := m.ProcessExtractionResult(`## DAILY
@@ -62,6 +63,7 @@ func TestProcessExtractionResult_Episodes(t *testing.T) {
 
 func TestProcessExtractionResult_EpisodesNothingNew(t *testing.T) {
 	m := NewManager(t.TempDir(), DefaultConfig(), zap.NewNop())
+	t.Cleanup(m.WaitGraphPersist)
 	sum := m.ProcessExtractionResult("## EPISODES\nNOTHING_NEW\n")
 	if sum.EpisodesAdded != 0 {
 		t.Errorf("NOTHING_NEW section must add nothing, got %d", sum.EpisodesAdded)
@@ -73,6 +75,7 @@ func TestProcessExtractionResult_EpisodesNothingNew(t *testing.T) {
 
 func TestGetMemoryIndex_IncludesEpisodes(t *testing.T) {
 	m := NewManager(t.TempDir(), DefaultConfig(), zap.NewNop())
+	t.Cleanup(m.WaitGraphPersist)
 	m.Episodes.Add(Episode{Date: time.Now(), Summary: "Shipped the exporter"})
 
 	idx := m.GetMemoryIndex(600)
@@ -83,6 +86,7 @@ func TestGetMemoryIndex_IncludesEpisodes(t *testing.T) {
 
 func TestRetriever_RecentEpisodesSection(t *testing.T) {
 	m := NewManager(t.TempDir(), DefaultConfig(), zap.NewNop())
+	t.Cleanup(m.WaitGraphPersist)
 	m.Episodes.Add(Episode{Date: time.Now().Add(-24 * time.Hour), Summary: "Hardened the parser", Outcome: "merged"})
 
 	out := m.GetMemoryContext()

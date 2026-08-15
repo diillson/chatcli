@@ -67,6 +67,7 @@ func TestSetOnRemovedLegacyDelegateStillWorks(t *testing.T) {
 
 func TestAttachVectorIndexNilPreservesGraphHook(t *testing.T) {
 	mgr := NewManager(t.TempDir(), DefaultConfig(), zap.NewNop())
+	t.Cleanup(mgr.WaitGraphPersist)
 	var graph int
 	mgr.Facts.SetRemovalHook("graph", func([]string) { graph++ })
 

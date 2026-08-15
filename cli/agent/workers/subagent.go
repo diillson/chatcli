@@ -341,6 +341,11 @@ func subagentSystemPrompt(preface string, readOnly bool, tools []string) string 
 	}
 	sb.WriteString(fmt.Sprintf("\nAllowed tools: %s\n", strings.Join(tools, ", ")))
 
+	// Same truncated/compressed-output navigation guidance every worker gets.
+	sb.WriteString("\n")
+	sb.WriteString(workerContextGuidance)
+	sb.WriteString("\n")
+
 	// Knowledge: point the subagent at the session scratch dir in case it
 	// needs to stage intermediate files.
 	if tmp := os.Getenv("CHATCLI_AGENT_TMPDIR"); tmp != "" {

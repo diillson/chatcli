@@ -89,15 +89,7 @@ func RunWorkerReAct(
 	// without a registered handle simply reports nothing.
 	liveRun := runs.FromContext(ctx)
 
-	maxTurns := config.MaxTurns
-	if maxTurns <= 0 {
-		maxTurns = DefaultWorkerMaxTurns
-		if envVal := os.Getenv("CHATCLI_AGENT_WORKER_MAX_TURNS"); envVal != "" {
-			if v, err := strconv.Atoi(envVal); err == nil && v > 0 {
-				maxTurns = v
-			}
-		}
-	}
+	maxTurns := resolveWorkerMaxTurns(config)
 
 	// Detect if we can use native function calling
 	toolAware, useNativeTools := client.AsToolAware(llmClient)
@@ -108,20 +100,13 @@ func RunWorkerReAct(
 	// Build tool definitions for native mode
 	var toolDefs []models.ToolDefinition
 	if useNativeTools {
-		toolDefs = CoderToolDefinitions(config.AllowedCommands)
-		// Squad mail is a universal capability: every worker can message
-		// other agents regardless of its command allowlist.
-		toolDefs = append(toolDefs, MailToolDefinition())
+		toolDefs = buildWorkerToolDefs(config)
 		logger.Info("Using native function calling",
 			zap.Int("tools", len(toolDefs)),
 			zap.String("callID", callID))
 	}
 
-	// Adjust system prompt for native tool mode (no XML instructions needed)
-	systemPrompt := config.SystemPrompt
-	if useNativeTools {
-		systemPrompt = nativeToolSystemPrompt(config)
-	}
+	systemPrompt := buildWorkerSystemPrompt(config, useNativeTools, task)
 
 	history := []models.Message{
 		{Role: "system", Content: systemPrompt},
@@ -146,12 +131,23 @@ func RunWorkerReAct(
 	var finalOutput strings.Builder
 	maxParallel := 0
 
-	allowed := make(map[string]bool, len(config.AllowedCommands)+1)
+	allowed := make(map[string]bool, len(config.AllowedCommands)+2)
 	for _, cmd := range config.AllowedCommands {
 		allowed[cmd] = true
 	}
 	// Universal squad-mail capability (see MailToolDefinition).
 	allowed["mail"] = true
+	// Universal CCR recall (see RecallToolDefinition) — only when wired.
+	if currentCCRRecaller() != nil {
+		allowed[recallSubcmd] = true
+	}
+
+	// Worker-loop microcompact: long runs (up to maxTurns) accumulate tool
+	// results with no other reduction mechanism. Same engine and knobs as
+	// the orchestrator's, sharing the session CCR layer so every dropped
+	// byte stays recoverable via the recall tool.
+	mcCfg := agent.DefaultMicrocompactConfig()
+	mcCfg.CCR = currentSquadCompressionLayer()
 
 	// --- Failure tracking for reflection ---
 	consecutiveFailures := 0
@@ -182,6 +178,12 @@ func RunWorkerReAct(
 				history = appendInboxMessage(history, mail.FormatInbox(inbox))
 			}
 		}
+
+		// Progressively compact old tool results (turn boundary only, so a
+		// tool_use/tool_result pair is never split). CCR-backed when the
+		// session layer is registered — otherwise same legacy behavior the
+		// orchestrator had before CCR.
+		history, _ = agent.ApplyMicrocompact(history, turn, mcCfg, logger)
 
 		// --- Call LLM (native or text mode) ---
 		responseText, nativeToolCalls, newHistory, err := callWorkerLLM(ctx, useNativeTools, toolAware, llmClient, history, toolDefs)
@@ -303,7 +305,12 @@ func RunWorkerReAct(
 
 	output := finalOutput.String()
 	if len(output) > MaxWorkerOutputBytes {
-		output = output[:MaxWorkerOutputBytes] + "\n... [output truncated]"
+		// Persist the full output and keep (almost) the same inline budget as
+		// before — the tail is now recoverable via the referenced overflow
+		// file instead of silently lost. The margin keeps preview + reference
+		// suffix within the historical MaxWorkerOutputBytes bound.
+		const suffixMargin = 256
+		output = overflowToDisk("worker", output, MaxWorkerOutputBytes-suffixMargin)
 	}
 
 	return &AgentResult{
@@ -313,6 +320,63 @@ func RunWorkerReAct(
 		ToolCalls:     allToolCalls,
 		ParallelCalls: maxParallel,
 	}, nil
+}
+
+// resolveWorkerMaxTurns resolves the effective turn budget for a worker:
+// config wins, then CHATCLI_AGENT_WORKER_MAX_TURNS, then the default.
+func resolveWorkerMaxTurns(config WorkerReActConfig) int {
+	if config.MaxTurns > 0 {
+		return config.MaxTurns
+	}
+	if envVal := os.Getenv("CHATCLI_AGENT_WORKER_MAX_TURNS"); envVal != "" {
+		if v, err := strconv.Atoi(envVal); err == nil && v > 0 {
+			return v
+		}
+	}
+	return DefaultWorkerMaxTurns
+}
+
+// buildWorkerToolDefs assembles the native tool definitions for a worker:
+// its allowlisted engine subcommands, the read-only context tools granted
+// through the same allowlist, universal squad mail, and (when a recaller is
+// wired) universal CCR recall.
+func buildWorkerToolDefs(config WorkerReActConfig) []models.ToolDefinition {
+	toolDefs := CoderToolDefinitions(config.AllowedCommands)
+	// Read-only context tools (memory/session/knowledge) granted via the
+	// allowlist — CoderToolDefinitions only knows engine subcommands.
+	toolDefs = append(toolDefs, ContextToolDefinitions(config.AllowedCommands)...)
+	// Squad mail is a universal capability: every worker can message
+	// other agents regardless of its command allowlist.
+	toolDefs = append(toolDefs, MailToolDefinition())
+	// CCR recall is universal too: compressed/truncated results carry
+	// <<ccr:KEY>> markers every worker must be able to expand.
+	if currentCCRRecaller() != nil {
+		toolDefs = append(toolDefs, RecallToolDefinition())
+	}
+	return toolDefs
+}
+
+// buildWorkerSystemPrompt composes the worker's effective system prompt:
+// mode-appropriate charter + context-navigation guidance + the proactive
+// recall block for this task (best-effort, "" when nothing matched).
+func buildWorkerSystemPrompt(config WorkerReActConfig, useNativeTools bool, task string) string {
+	systemPrompt := config.SystemPrompt
+	if useNativeTools {
+		systemPrompt = nativeToolSystemPrompt(config)
+	} else if strings.TrimSpace(systemPrompt) != "" {
+		// XML mode keeps the specialist prompt and gains the same
+		// context-navigation guidance native mode embeds.
+		systemPrompt += "\n\n" + workerContextGuidance
+	}
+
+	// Proactive recall: give the worker the same [MEMORY AUTO-RECALL] /
+	// [SESSION RECALL] surfaces the orchestrator gets, keyed off its task.
+	if provider := currentWorkerContextProvider(); provider != nil {
+		if block := provider(task); strings.TrimSpace(block) != "" {
+			systemPrompt += "\n\n## SESSION CONTEXT (proactive recall)\n" + block
+		}
+	}
+	return systemPrompt
 }
 
 // callWorkerLLM performs one LLM round trip in either native function-calling
@@ -352,8 +416,13 @@ func executeToolCall(ctx context.Context, v validatedTC, lockMgr *FileLockManage
 		return execResult{index: v.index, output: v.msg + "\n", failed: true, toolID: v.rtc.ID}
 	}
 
-	if policyChecker != nil {
-		policyAllowed, msg := policyChecker.CheckAndPrompt(ctx, v.rtc.Name, v.rtc.RawArgs)
+	// In-process tools (squad mail, CCR recall, read-only context views) have
+	// no filesystem/shell/network side effects — the security policy exists
+	// to gate those, so these skip the check instead of tripping an "ask"
+	// prompt that no rule pattern can ever whitelist.
+	if policyChecker != nil && !isPolicyExemptSubcmd(v.rtc.Subcmd) {
+		policyName, policyArgs := policyCallSurface(v.rtc)
+		policyAllowed, msg := policyChecker.CheckAndPrompt(ctx, policyName, policyArgs)
 		if !policyAllowed {
 			blockedMsg := fmt.Sprintf("[BLOCKED BY POLICY] %s", msg)
 			record := ToolCallRecord{
@@ -376,6 +445,15 @@ func executeToolCall(ctx context.Context, v validatedTC, lockMgr *FileLockManage
 	// subcommand.
 	if v.rtc.Subcmd == "mail" {
 		return executeMailSend(ctx, v)
+	}
+
+	// Special-case: recall expands CCR markers via the registered session
+	// layer; context tools are served by the registered read-only runner.
+	if v.rtc.Subcmd == recallSubcmd {
+		return executeRecall(v)
+	}
+	if isContextToolSubcmd(v.rtc.Subcmd) {
+		return executeContextTool(ctx, v)
 	}
 
 	filePath := extractFilePathFromResolved(v.rtc)
@@ -651,7 +729,8 @@ func appendTurnFeedback(history []models.Message, useNativeTools bool, results [
 	// Text mode: append feedback as user message (legacy behavior)
 	feedback := turnOutput
 	if len(feedback) > MaxWorkerOutputBytes {
-		feedback = feedback[:MaxWorkerOutputBytes] + "\n... [feedback truncated]"
+		const suffixMargin = 256
+		feedback = overflowToDisk("feedback", feedback, MaxWorkerOutputBytes-suffixMargin)
 	}
 
 	// --- REFLECTION MECHANISM ---
@@ -662,10 +741,49 @@ func appendTurnFeedback(history []models.Message, useNativeTools bool, results [
 	return append(history, models.Message{Role: "user", Content: feedback})
 }
 
-// nativeToolSystemPrompt builds a cleaner system prompt for native tool calling mode.
-// No XML syntax instructions needed — the LLM calls tools via the API directly.
-func nativeToolSystemPrompt(config WorkerReActConfig) string {
-	return `You are a specialized coding agent in ChatCLI.
+// isPolicyExemptSubcmd reports whether a subcommand runs entirely in-process
+// with no filesystem/shell/network side effects, and therefore skips the
+// security policy check (there is nothing for a rule to gate, and the "ask"
+// fallback would block workers on prompts no pattern can whitelist).
+func isPolicyExemptSubcmd(subcmd string) bool {
+	return subcmd == "mail" || subcmd == recallSubcmd || isContextToolSubcmd(subcmd)
+}
+
+// policyCallSurface returns the (toolName, args) pair presented to the
+// security policy for a resolved tool call. Native calls are canonicalized
+// to the same "@coder" + {"cmd":subcmd,"args":{...}} envelope XML mode
+// produces — without this, PolicyManager.Check saw toolName "run_command"
+// and read the SHELL command out of args["cmd"] as if it were the
+// subcommand, so rules like "@coder exec" never matched and the read-only
+// exec auto-allow never fired (every worker exec degraded to "ask").
+func policyCallSurface(rtc resolvedToolCall) (string, string) {
+	if !rtc.Native {
+		return rtc.Name, rtc.RawArgs
+	}
+	envelope := map[string]interface{}{"cmd": rtc.Subcmd}
+	if len(rtc.NativeArgs) > 0 {
+		envelope["args"] = rtc.NativeArgs
+	}
+	data, err := json.Marshal(envelope)
+	if err != nil {
+		return rtc.Name, rtc.RawArgs
+	}
+	return "@coder", string(data)
+}
+
+// workerContextGuidance teaches every worker how to navigate truncated and
+// compressed context — the same affordances the orchestrator's prompt has.
+// Model-facing: English on purpose.
+const workerContextGuidance = `## TRUNCATED & COMPRESSED OUTPUT
+Large tool results are reduced before you see them; nothing is lost:
+- "[full output saved to /path/result_*.txt — N bytes total]": the COMPLETE output is in that file. Read it with the read tool (use start/end line ranges to page through big files).
+- "<<ccr:KEY>>" markers: the original content is archived. Expand markers with the recall tool (pass the marker(s) in "keys").
+- File reads truncated at a byte limit: re-read the same file with start/end (or head/tail) to get the remaining ranges.
+Prefer recalling/reading the stored original over guessing about content you cannot see.`
+
+// nativeToolCoreRules is the generic native-mode charter used when a worker
+// has no specialist system prompt of its own.
+const nativeToolCoreRules = `You are a specialized coding agent in ChatCLI.
 
 ## RULES
 1. ALWAYS read a file before modifying it — never edit blind.
@@ -681,6 +799,29 @@ func nativeToolSystemPrompt(config WorkerReActConfig) string {
 - Verify critical changes by reading the result
 
 Content is always plain text — no base64 encoding needed.`
+
+// nativeModeOverride supersedes any XML tool-call syntax instructions that a
+// specialist prompt (built-in agent or custom persona) carries — native
+// function calling replaces that surface entirely, but the specialist
+// identity, expertise, skills and review rules above it must be preserved.
+const nativeModeOverride = `## NATIVE TOOL CALLING MODE (overrides any syntax above)
+Native function calling is ACTIVE. Any earlier instructions describing <tool_call> XML syntax, <reasoning> tags, JSON envelopes or base64 content are OBSOLETE for this run:
+1. Call the provided tools directly through the function-calling API. Content is plain text — no base64.
+2. Do NOT narrate your actions between tool calls.
+3. Only output text AFTER all tool calls are done, for the final result or if blocked.
+Everything else above (your role, expertise, constraints, response structure) still applies.`
+
+// nativeToolSystemPrompt builds the system prompt for native tool calling
+// mode. The specialist prompt (built-in agent role or custom persona) is
+// PRESERVED — discarding it made every worker a generic coder — with a
+// trailing override that retires the XML syntax instructions it may carry.
+// Workers without a specialist prompt get the generic charter.
+func nativeToolSystemPrompt(config WorkerReActConfig) string {
+	specialist := strings.TrimSpace(config.SystemPrompt)
+	if specialist == "" {
+		return nativeToolCoreRules + "\n\n" + workerContextGuidance
+	}
+	return specialist + "\n\n" + nativeModeOverride + "\n\n" + workerContextGuidance
 }
 
 // buildReflectionPrompt constructs reflection guidance based on failure severity.
@@ -939,7 +1080,7 @@ If you cannot complete the task with your available tools, say so clearly — do
 // isWriteCommand returns true if the subcommand modifies files.
 func isWriteCommand(cmd string) bool {
 	switch cmd {
-	case "write", "patch", "exec", "test", "rollback", "clean":
+	case "write", "patch", "multipatch", "exec", "test", "rollback", "clean":
 		return true
 	}
 	return false
