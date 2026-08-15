@@ -108,3 +108,58 @@ func TestApplyMicrocompact_NilCCRKeepsLegacyBehavior(t *testing.T) {
 		t.Error("without a CCR layer no marker must be emitted")
 	}
 }
+
+func TestApplyMicrocompact_AgentFeedbackAged(t *testing.T) {
+	// Squad results are injected as a user-role message flagged AgentFeedback;
+	// microcompact must age them like tool results.
+	layer := compress.NewLayer(compress.Config{Mode: compress.ModeLossyWithCCR, Store: compress.NewMemoryStore()})
+	cfg := DefaultMicrocompactConfig()
+	cfg.CCR = layer
+
+	original := "--- Agent Results ---\n\n" + strings.Repeat("[coder] finding line\n", 400)
+	h := []models.Message{
+		{Role: "user", Content: "do the task"},
+		{Role: "assistant", Content: "dispatching"},
+		{Role: "user", Content: original, Meta: &models.MessageMeta{AgentFeedback: true}},
+	}
+	for i := 0; i < cfg.TurnsBeforeTruncate; i++ {
+		h = append(h,
+			models.Message{Role: "user", Content: "next"},
+			models.Message{Role: "assistant", Content: "ok"},
+		)
+	}
+
+	got, report := ApplyMicrocompact(h, cfg.TurnsBeforeTruncate, cfg, zap.NewNop())
+	if report.Truncated != 1 {
+		t.Fatalf("agent feedback must be truncated at level 1, got %+v", report)
+	}
+	keys := compress.ExtractKeys(got[2].Content)
+	if len(keys) != 1 {
+		t.Fatalf("stub must carry a recall marker, got %q", got[2].Content)
+	}
+	if recovered, ok := layer.Recall(keys[0]); !ok || recovered != original {
+		t.Error("original squad feedback must be recoverable via the marker")
+	}
+}
+
+func TestApplyMicrocompact_PlainUserMessageUntouched(t *testing.T) {
+	cfg := DefaultMicrocompactConfig()
+	long := strings.Repeat("user context the model must keep seeing\n", 400)
+	h := []models.Message{
+		{Role: "user", Content: long},
+		{Role: "assistant", Content: "ok"},
+	}
+	for i := 0; i < cfg.TurnsBeforeSummarize; i++ {
+		h = append(h,
+			models.Message{Role: "user", Content: "next"},
+			models.Message{Role: "assistant", Content: "ok"},
+		)
+	}
+	got, report := ApplyMicrocompact(h, cfg.TurnsBeforeSummarize, cfg, zap.NewNop())
+	if report.Truncated != 0 || report.Summarized != 0 {
+		t.Fatalf("plain user messages must never be compacted, got %+v", report)
+	}
+	if got[0].Content != long {
+		t.Error("plain user message content changed")
+	}
+}

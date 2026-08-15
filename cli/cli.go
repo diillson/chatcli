@@ -819,6 +819,14 @@ func NewChatCLI(ctx context.Context, manager manager.LLMManager, logger *zap.Log
 		out, _ := cli.compressionLayer.CompressToolOutput(toolName, output)
 		return out
 	})
+	// The reverse direction: workers get a recall tool over the same store,
+	// so compression is no longer a one-way door inside a worker's loop.
+	workers.RegisterCCRRecaller(cli.compressionLayer.Recall)
+	// Worker-loop microcompact archives dropped bytes into the same store.
+	workers.RegisterSquadCompressionLayer(cli.compressionLayer)
+	// Read-only memory/session/knowledge views for workers that opt in
+	// (persona frontmatter tools: Memory, Session, Knowledge).
+	workers.RegisterContextToolRunner(cli.runWorkerContextTool)
 
 	// Wire the @knowledge tool to this session's context manager so the agent
 	// can interrogate attached knowledge bases on demand.

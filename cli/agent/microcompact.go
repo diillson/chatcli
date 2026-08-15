@@ -132,10 +132,12 @@ func ApplyMicrocompact(history []models.Message, currentTurn int, config Microco
 		turnMap[i] = turnNumber
 	}
 
-	// Process each tool result
+	// Process each tool result — plus squad feedback blocks, which are tool
+	// output injected under a user role (see models.MessageMeta.AgentFeedback).
 	for i := range history {
 		msg := &history[i]
-		if msg.Role != "tool" {
+		isAgentFeedback := msg.Role == "user" && msg.Meta != nil && msg.Meta.AgentFeedback
+		if msg.Role != "tool" && !isAgentFeedback {
 			continue
 		}
 		if len(msg.Content) < config.MinContentSize {

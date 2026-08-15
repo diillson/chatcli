@@ -185,6 +185,23 @@ func LoadCustomAgents(registry *Registry, mgr *persona.Manager, logger *zap.Logg
 		registry.Register(customAgent)
 		loaded++
 
+		// Surface frontmatter tools: problems instead of silently degrading
+		// the agent — an unmatched "bash" (case/alias) used to strip exec
+		// with no trace beyond a read-only agent the user didn't ask for.
+		if len(customAgent.unknownTools) > 0 {
+			logger.Warn("Custom agent has unrecognized frontmatter tools (check spelling/case; known: Read, Grep, Glob, Bash, Write, Edit, Agent, Memory, Session, Knowledge)",
+				zap.String("agent", pa.Name),
+				zap.Strings("unknown_tools", customAgent.unknownTools),
+			)
+		}
+		if customAgent.fellBackReadOnly {
+			logger.Warn("Custom agent tools list matched nothing — agent degraded to the read-only default command set",
+				zap.String("agent", pa.Name),
+				zap.Strings("tools", pa.Tools),
+				zap.Strings("fallback_commands", customAgent.AllowedCommands()),
+			)
+		}
+
 		logger.Info("Registered custom persona agent as worker",
 			zap.String("agent", pa.Name),
 			zap.String("type", string(agentType)),
