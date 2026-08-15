@@ -23,6 +23,7 @@ func (s staticGraphSource) Snapshot() *knowledge.Graph { return s.g }
 func graphFixture(t *testing.T) (*Manager, string, string) {
 	t.Helper()
 	mgr := NewManager(t.TempDir(), DefaultConfig(), zap.NewNop())
+	t.Cleanup(mgr.WaitGraphPersist)
 	mgr.Facts.AddFact("the gateway daemon auto-approves tool calls", "architecture", nil)
 	mgr.Facts.AddFact("bedrock payload cap is learned from rejections", "gotcha", nil)
 
@@ -58,6 +59,7 @@ func graphFixture(t *testing.T) (*Manager, string, string) {
 
 func TestRelatedGraphSection_NilGraphAbsent(t *testing.T) {
 	mgr := NewManager(t.TempDir(), DefaultConfig(), zap.NewNop())
+	t.Cleanup(mgr.WaitGraphPersist)
 	mgr.Facts.AddFact("some fact", "general", nil)
 	mgr.retriever.SetGraph(nil)
 	out := mgr.GetRelevantContext([]string{"some"})

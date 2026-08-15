@@ -112,6 +112,7 @@ func TestRollup_NilEpisodesKeepsLegacyBehavior(t *testing.T) {
 
 func TestManager_RollupsWiredToEpisodes(t *testing.T) {
 	m := NewManager(t.TempDir(), DefaultConfig(), zap.NewNop())
+	t.Cleanup(m.WaitGraphPersist)
 	monday := pastMonday(5)
 	m.Episodes.Add(Episode{Date: monday, Summary: "Wired the rollup pipeline"})
 
