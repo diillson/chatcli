@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.186.1](https://github.com/diillson/chatcli/compare/v1.186.0...v1.186.1) (2026-08-15)
+
+
+### Bug Fixes
+
+* **agents:** stop the loose-code guard from swallowing valid agent_call dispatches ([#1338](https://github.com/diillson/chatcli/issues/1338)) ([d7e0bbc](https://github.com/diillson/chatcli/commit/d7e0bbc8d3b78861560899437c5d5c4ed79a1fa4))
+
 ## [1.186.0](https://github.com/diillson/chatcli/compare/v1.185.0...v1.186.0) (2026-08-15)
 
 
