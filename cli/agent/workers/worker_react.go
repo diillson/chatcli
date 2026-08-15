@@ -1080,7 +1080,7 @@ If you cannot complete the task with your available tools, say so clearly — do
 // isWriteCommand returns true if the subcommand modifies files.
 func isWriteCommand(cmd string) bool {
 	switch cmd {
-	case "write", "patch", "exec", "test", "rollback", "clean":
+	case "write", "patch", "multipatch", "exec", "test", "rollback", "clean":
 		return true
 	}
 	return false

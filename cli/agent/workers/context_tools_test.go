@@ -289,3 +289,16 @@ func toSet(list []string) map[string]bool {
 	}
 	return set
 }
+
+func TestMapToolsToCommands_MultiEditGrantsMultipatch(t *testing.T) {
+	set := toSet(MapToolsToCommands([]string{"MultiEdit"}))
+	if !set["patch"] || !set["multipatch"] {
+		t.Errorf("MultiEdit must grant patch and multipatch, got %v", MapToolsToCommands([]string{"MultiEdit"}))
+	}
+}
+
+func TestIsWriteCommand_Multipatch(t *testing.T) {
+	if !isWriteCommand("multipatch") {
+		t.Error("multipatch modifies files and must be classified as a write command")
+	}
+}

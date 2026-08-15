@@ -197,8 +197,14 @@ func mapPersonaTools(tools []string) personaToolMapping {
 		case "write":
 			cmdSet["write"] = true
 			mapping.writable = true
-		case "edit", "patch", "multiedit":
+		case "edit", "patch":
 			cmdSet["patch"] = true
+			mapping.writable = true
+		case "multiedit":
+			// Docs contract: MultiEdit grants the transactional multi-file
+			// edit (multipatch) plus the single-file patch it builds on.
+			cmdSet["patch"] = true
+			cmdSet["multipatch"] = true
 			mapping.writable = true
 		case "agent", "task":
 			// Meta-tool, ignored for worker commands
@@ -263,6 +269,7 @@ func buildCustomSystemPrompt(
 		"read":                     "Read file contents. Args: {\"file\":\"path/to/file\"}",
 		"write":                    "Create/overwrite file. Args: {\"file\":\"path\",\"content\":\"BASE64\",\"encoding\":\"base64\"}",
 		"patch":                    "Search/replace edit. Args: {\"file\":\"path\",\"search\":\"old\",\"replace\":\"new\"}",
+		"multipatch":               "Transactional multi-file edit (all-or-nothing). Args: {\"edits\":\"[{\\\"file\\\":\\\"path\\\",\\\"search\\\":\\\"old\\\",\\\"replace\\\":\\\"new\\\"}]\"}",
 		"tree":                     "Directory listing. Args: {\"dir\":\".\",\"max-depth\":3}",
 		"search":                   "Search patterns in files. Args: {\"term\":\"pattern\",\"dir\":\".\"}",
 		"exec":                     "Execute command. Args: {\"cmd\":\"go build ./...\"}",
