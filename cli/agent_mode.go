@@ -2737,7 +2737,7 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 
 			// Prohibit loose code blocks in coder mode
 			if len(toolCalls) == 0 {
-				if strings.Contains(aiResponse, "```") || strings.Contains(aiResponse, "```execute:") || regexp.MustCompile(`(?m)^[$#]\s+`).MatchString(aiResponse) {
+				if looksLikeLooseCode(aiResponse) {
 					a.cli.history = append(a.cli.history, models.Message{
 						Role: "user",
 						Content: "FORMAT ERROR: Code blocks and shell commands are NOT allowed in /coder mode. " +

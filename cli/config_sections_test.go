@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 
+	"path/filepath"
+
 	"github.com/diillson/chatcli/i18n"
 	"go.uber.org/zap"
 )
@@ -17,8 +19,25 @@ import (
 func TestMain(m *testing.M) {
 	// Force English for stable, locale-independent test assertions.
 	_ = os.Setenv("CHATCLI_LANG", "en")
+
+	// Hermetic work board: surfaces like the knowledge graph and the memory
+	// bootstrap card read the process-wide board store, whose Default()
+	// latches its path (the developer's real ~/.chatcli/board.json) on first
+	// use. Without this redirect, tests asserting on graph/board contents
+	// pass or fail depending on whatever cards the developer's live board
+	// happens to hold. Must run before any test touches the store — the
+	// latch is a sync.Once.
+	boardDir, boardDirErr := os.MkdirTemp("", "chatcli-test-board-*")
+	if boardDirErr == nil {
+		_ = os.Setenv("CHATCLI_BOARD_PATH", filepath.Join(boardDir, "board.json"))
+	}
+
 	i18n.Init()
-	os.Exit(m.Run())
+	code := m.Run()
+	if boardDirErr == nil {
+		_ = os.RemoveAll(boardDir)
+	}
+	os.Exit(code)
 }
 
 // captureStdout swaps os.Stdout for a pipe, runs fn, and returns the
