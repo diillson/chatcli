@@ -1,6 +1,7 @@
 package workers
 
 import (
+	"strings"
 	"testing"
 )
 
@@ -163,5 +164,64 @@ func TestParseAgentCalls_UniqueIDs(t *testing.T) {
 			t.Fatalf("duplicate ID: %s", c.ID)
 		}
 		ids[c.ID] = true
+	}
+}
+
+// TestParseAgentCalls_MultilineCodePayload reproduces the field failure
+// shape: several self-closing agent_call tags whose task attributes embed
+// multiline source code — Python comparison operators (< / >), arrow
+// returns, hash-comment lines at column zero, f-strings and single quotes.
+// All calls must parse with their tasks intact.
+func TestParseAgentCalls_MultilineCodePayload(t *testing.T) {
+	text := `<agent_call agent="coder" task="Crie os arquivos em /tmp/api.
+
+ARQUIVO app/database.py - conteudo:
+async def get_db() -> AsyncSession:
+    async with AsyncSessionLocal() as session:
+        yield session
+
+ARQUIVO app/models/user.py - conteudo:
+class User(Base):
+    email: Mapped[str] = mapped_column(String(255), unique=True)" />
+
+<agent_call agent="coder" task="Crie os arquivos em /tmp/api.
+
+ARQUIVO app/core/init.py - conteudo:
+
+# core
+ARQUIVO app/routers/products.py - conteudo:
+if product.stock < data.quantity:
+    raise HTTPException(status_code=400)
+filters.append(Product.price >= min_price)
+filters.append(Product.name.ilike(f'%{search}%'))" />
+
+<agent_call agent="coder" task="ARQUIVO pytest.ini - conteudo:
+[pytest]
+asyncio_mode = auto
+python_functions = test_*" />`
+
+	calls, err := ParseAgentCalls(text)
+	if err != nil {
+		t.Fatalf("ParseAgentCalls: %v", err)
+	}
+	if len(calls) != 3 {
+		t.Fatalf("parsed %d calls, want 3", len(calls))
+	}
+	if got := CountAgentCallTags(text); got != 3 {
+		t.Fatalf("CountAgentCallTags = %d, want 3", got)
+	}
+	for i, c := range calls {
+		if c.Agent != "coder" {
+			t.Errorf("call %d agent = %q", i, c.Agent)
+		}
+	}
+	if !strings.Contains(calls[0].Task, "-> AsyncSession") {
+		t.Errorf("call 0 task lost the arrow-return content: %q", calls[0].Task)
+	}
+	if !strings.Contains(calls[1].Task, "# core") || !strings.Contains(calls[1].Task, "stock < data.quantity") {
+		t.Errorf("call 1 task lost hash-comment or comparison content")
+	}
+	if !strings.Contains(calls[2].Task, "python_functions = test_*") {
+		t.Errorf("call 2 task truncated: %q", calls[2].Task)
 	}
 }
