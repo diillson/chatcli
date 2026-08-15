@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.186.0](https://github.com/diillson/chatcli/compare/v1.185.0...v1.186.0) (2026-08-15)
+
+
+### Features
+
+* **agents:** squad worker context navigation, recall and policy parity ([#1335](https://github.com/diillson/chatcli/issues/1335)) ([6dfbf05](https://github.com/diillson/chatcli/commit/6dfbf0509679dd0807665ac07a3744ffdd91dcd4))
+
 ## [1.185.0](https://github.com/diillson/chatcli/compare/v1.184.0...v1.185.0) (2026-08-13)
 
 
