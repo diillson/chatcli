@@ -53,8 +53,9 @@ var (
 	// ccrRecaller expands one CCR key to its original content.
 	ccrRecaller func(key string) (string, bool)
 
-	// contextToolRunner executes one read-only context tool call.
-	contextToolRunner func(ctx context.Context, tool string, args map[string]interface{}) (string, error)
+	// contextToolRunner executes one read-only context tool call. Args travel
+	// as a JSON object string so the hook boundary stays on concrete types.
+	contextToolRunner func(ctx context.Context, tool string, argsJSON string) (string, error)
 
 	// workerContextProvider returns the proactive recall block ([MEMORY
 	// AUTO-RECALL] / [SESSION RECALL]) for a worker task, or "".
@@ -74,8 +75,9 @@ func RegisterCCRRecaller(fn func(key string) (string, bool)) {
 }
 
 // RegisterContextToolRunner wires (or clears, with nil) the executor for the
-// read-only worker context tools (memory/session/knowledge).
-func RegisterContextToolRunner(fn func(ctx context.Context, tool string, args map[string]interface{}) (string, error)) {
+// read-only worker context tools (memory/session/knowledge). argsJSON is the
+// tool call's argument object serialized as JSON.
+func RegisterContextToolRunner(fn func(ctx context.Context, tool string, argsJSON string) (string, error)) {
 	workerHooksMu.Lock()
 	contextToolRunner = fn
 	workerHooksMu.Unlock()
@@ -103,7 +105,7 @@ func currentCCRRecaller() func(string) (string, bool) {
 	return ccrRecaller
 }
 
-func currentContextToolRunner() func(context.Context, string, map[string]interface{}) (string, error) {
+func currentContextToolRunner() func(context.Context, string, string) (string, error) {
 	workerHooksMu.RLock()
 	defer workerHooksMu.RUnlock()
 	return contextToolRunner
@@ -409,7 +411,13 @@ func executeContextTool(ctx context.Context, v validatedTC) execResult {
 		return execResult{index: v.index, record: record, output: fmt.Sprintf("[%s] %v\n", v.rtc.Subcmd, err), failed: true, toolID: v.rtc.ID}
 	}
 
-	output, err := runner(ctx, v.rtc.Subcmd, resolvedCallArgs(v.rtc))
+	argsJSON := "{}"
+	if args := resolvedCallArgs(v.rtc); len(args) > 0 {
+		if data, err := json.Marshal(args); err == nil {
+			argsJSON = string(data)
+		}
+	}
+	output, err := runner(ctx, v.rtc.Subcmd, argsJSON)
 	if err != nil {
 		record := ToolCallRecord{Name: v.rtc.Subcmd, Args: v.rtc.RawArgs, Error: err}
 		return execResult{index: v.index, record: record, output: fmt.Sprintf("[%s] %v\n", v.rtc.Subcmd, err), failed: true, toolID: v.rtc.ID}

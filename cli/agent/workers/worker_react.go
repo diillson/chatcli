@@ -89,15 +89,7 @@ func RunWorkerReAct(
 	// without a registered handle simply reports nothing.
 	liveRun := runs.FromContext(ctx)
 
-	maxTurns := config.MaxTurns
-	if maxTurns <= 0 {
-		maxTurns = DefaultWorkerMaxTurns
-		if envVal := os.Getenv("CHATCLI_AGENT_WORKER_MAX_TURNS"); envVal != "" {
-			if v, err := strconv.Atoi(envVal); err == nil && v > 0 {
-				maxTurns = v
-			}
-		}
-	}
+	maxTurns := resolveWorkerMaxTurns(config)
 
 	// Detect if we can use native function calling
 	toolAware, useNativeTools := client.AsToolAware(llmClient)
@@ -108,41 +100,13 @@ func RunWorkerReAct(
 	// Build tool definitions for native mode
 	var toolDefs []models.ToolDefinition
 	if useNativeTools {
-		toolDefs = CoderToolDefinitions(config.AllowedCommands)
-		// Read-only context tools (memory/session/knowledge) granted via the
-		// allowlist — CoderToolDefinitions only knows engine subcommands.
-		toolDefs = append(toolDefs, ContextToolDefinitions(config.AllowedCommands)...)
-		// Squad mail is a universal capability: every worker can message
-		// other agents regardless of its command allowlist.
-		toolDefs = append(toolDefs, MailToolDefinition())
-		// CCR recall is universal too: compressed/truncated results carry
-		// <<ccr:KEY>> markers every worker must be able to expand.
-		if currentCCRRecaller() != nil {
-			toolDefs = append(toolDefs, RecallToolDefinition())
-		}
+		toolDefs = buildWorkerToolDefs(config)
 		logger.Info("Using native function calling",
 			zap.Int("tools", len(toolDefs)),
 			zap.String("callID", callID))
 	}
 
-	// Adjust system prompt for native tool mode (no XML instructions needed)
-	systemPrompt := config.SystemPrompt
-	if useNativeTools {
-		systemPrompt = nativeToolSystemPrompt(config)
-	} else if strings.TrimSpace(systemPrompt) != "" {
-		// XML mode keeps the specialist prompt and gains the same
-		// context-navigation guidance native mode embeds.
-		systemPrompt += "\n\n" + workerContextGuidance
-	}
-
-	// Proactive recall: give the worker the same [MEMORY AUTO-RECALL] /
-	// [SESSION RECALL] surfaces the orchestrator gets, keyed off its task.
-	// Best-effort and bounded — "" when nothing matched or no provider.
-	if provider := currentWorkerContextProvider(); provider != nil {
-		if block := provider(task); strings.TrimSpace(block) != "" {
-			systemPrompt += "\n\n## SESSION CONTEXT (proactive recall)\n" + block
-		}
-	}
+	systemPrompt := buildWorkerSystemPrompt(config, useNativeTools, task)
 
 	history := []models.Message{
 		{Role: "system", Content: systemPrompt},
@@ -356,6 +320,63 @@ func RunWorkerReAct(
 		ToolCalls:     allToolCalls,
 		ParallelCalls: maxParallel,
 	}, nil
+}
+
+// resolveWorkerMaxTurns resolves the effective turn budget for a worker:
+// config wins, then CHATCLI_AGENT_WORKER_MAX_TURNS, then the default.
+func resolveWorkerMaxTurns(config WorkerReActConfig) int {
+	if config.MaxTurns > 0 {
+		return config.MaxTurns
+	}
+	if envVal := os.Getenv("CHATCLI_AGENT_WORKER_MAX_TURNS"); envVal != "" {
+		if v, err := strconv.Atoi(envVal); err == nil && v > 0 {
+			return v
+		}
+	}
+	return DefaultWorkerMaxTurns
+}
+
+// buildWorkerToolDefs assembles the native tool definitions for a worker:
+// its allowlisted engine subcommands, the read-only context tools granted
+// through the same allowlist, universal squad mail, and (when a recaller is
+// wired) universal CCR recall.
+func buildWorkerToolDefs(config WorkerReActConfig) []models.ToolDefinition {
+	toolDefs := CoderToolDefinitions(config.AllowedCommands)
+	// Read-only context tools (memory/session/knowledge) granted via the
+	// allowlist — CoderToolDefinitions only knows engine subcommands.
+	toolDefs = append(toolDefs, ContextToolDefinitions(config.AllowedCommands)...)
+	// Squad mail is a universal capability: every worker can message
+	// other agents regardless of its command allowlist.
+	toolDefs = append(toolDefs, MailToolDefinition())
+	// CCR recall is universal too: compressed/truncated results carry
+	// <<ccr:KEY>> markers every worker must be able to expand.
+	if currentCCRRecaller() != nil {
+		toolDefs = append(toolDefs, RecallToolDefinition())
+	}
+	return toolDefs
+}
+
+// buildWorkerSystemPrompt composes the worker's effective system prompt:
+// mode-appropriate charter + context-navigation guidance + the proactive
+// recall block for this task (best-effort, "" when nothing matched).
+func buildWorkerSystemPrompt(config WorkerReActConfig, useNativeTools bool, task string) string {
+	systemPrompt := config.SystemPrompt
+	if useNativeTools {
+		systemPrompt = nativeToolSystemPrompt(config)
+	} else if strings.TrimSpace(systemPrompt) != "" {
+		// XML mode keeps the specialist prompt and gains the same
+		// context-navigation guidance native mode embeds.
+		systemPrompt += "\n\n" + workerContextGuidance
+	}
+
+	// Proactive recall: give the worker the same [MEMORY AUTO-RECALL] /
+	// [SESSION RECALL] surfaces the orchestrator gets, keyed off its task.
+	if provider := currentWorkerContextProvider(); provider != nil {
+		if block := provider(task); strings.TrimSpace(block) != "" {
+			systemPrompt += "\n\n## SESSION CONTEXT (proactive recall)\n" + block
+		}
+	}
+	return systemPrompt
 }
 
 // callWorkerLLM performs one LLM round trip in either native function-calling

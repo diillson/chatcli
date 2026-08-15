@@ -20,7 +20,14 @@ import (
 // process-global), but exposes ONLY their read verbs: the envelope is built
 // here from a fixed cmd per tool, so a worker can never reach save/fork/
 // attach/remember/forget through this surface.
-func (cli *ChatCLI) runWorkerContextTool(ctx context.Context, tool string, args map[string]interface{}) (string, error) {
+func (cli *ChatCLI) runWorkerContextTool(ctx context.Context, tool string, argsJSON string) (string, error) {
+	var args map[string]interface{}
+	if argsJSON != "" {
+		// Lenient on purpose: a malformed args object degrades to the empty
+		// set and the plugin's own parser reports what is actually required.
+		_ = json.Unmarshal([]byte(argsJSON), &args)
+	}
+
 	envelope := func(cmd string, inner map[string]interface{}) (string, error) {
 		payload := map[string]interface{}{"cmd": cmd}
 		if len(inner) > 0 {

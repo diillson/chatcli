@@ -211,7 +211,7 @@ func TestContextToolDefinitions_RequiresRunner(t *testing.T) {
 		t.Errorf("no runner registered → no defs, got %d", len(defs))
 	}
 
-	RegisterContextToolRunner(func(context.Context, string, map[string]interface{}) (string, error) {
+	RegisterContextToolRunner(func(context.Context, string, string) (string, error) {
 		return "", nil
 	})
 	defer RegisterContextToolRunner(nil)
@@ -224,9 +224,9 @@ func TestContextToolDefinitions_RequiresRunner(t *testing.T) {
 
 func TestExecuteContextTool_RoutesToRunner(t *testing.T) {
 	var gotTool string
-	RegisterContextToolRunner(func(_ context.Context, tool string, args map[string]interface{}) (string, error) {
+	RegisterContextToolRunner(func(_ context.Context, tool string, argsJSON string) (string, error) {
 		gotTool = tool
-		if args["query"] != "auth" {
+		if !strings.Contains(argsJSON, `"query":"auth"`) {
 			return "", errors.New("missing query")
 		}
 		return "HIT", nil
