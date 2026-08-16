@@ -1682,6 +1682,7 @@
   "llm.minimax.using_anthropic_compat": "MiniMax usando endpoint compatível com Anthropic",
   "llm.info.fetched_models": "Fetched %s models",
   "llm.bedrock.profile_display": "%s (perfil Bedrock)",
+  "llm.bedrock.mantle_fallback_invoke": "endpoint bedrock-mantle falhou para %s; usando fallback pelo endpoint runtime InvokeModel como %s (defina BEDROCK_ANTHROPIC_ENDPOINT=mantle para desativar o fallback)",
   "llm.bedrock.provider_override_conflict": "BEDROCK_PROVIDER=%s conflita com o modelo %s, que só fala a Converse API; o override foi ignorado nesta chamada",
   "llm.bedrock.app_profile_display": "%s (perfil de aplicação Bedrock)",
   "llm.info.fetched_models_total": "Fetched %s models (total: %d, chat: %d)",

@@ -155,7 +155,7 @@ func TestLLMManager_GetClient(t *testing.T) {
 
 		client, err := mgr.GetClient("BEDROCK", "")
 		assert.NoError(t, err)
-		assert.Contains(t, client.GetModelName(), "Sonnet 4.5")
+		assert.Contains(t, client.GetModelName(), "Sonnet 4.6")
 	})
 
 	t.Run("Unsupported Provider", func(t *testing.T) {

@@ -500,13 +500,17 @@ func claudePricing(model string) (float64, float64, bool) {
 // ("gpt-4o").
 func openAIPricing(model string) (float64, float64, bool) {
 	switch {
-	// gpt-5.6 (Jul 2026): preços de lista da API por tier. O caso genérico
-	// "gpt-5.6" cobre o alias de família (que o catálogo resolve para Sol)
-	// e precisa vir depois dos tiers específicos.
+	// gpt-5.6 (Jul 2026): preços de lista da API por tier, já refletindo
+	// os cortes de 30/Jul/2026 (terra −20%, luna −80%; Sol inalterado —
+	// developers.openai.com/docs/pricing). O caso genérico "gpt-5.6"
+	// cobre o alias de família (que o catálogo resolve para Sol) e
+	// precisa vir depois dos tiers específicos. O surcharge de
+	// long-context (>272K input = 2×/1,5×) não é modelado — cost_tracker
+	// trabalha com um único tier por modelo.
 	case strings.Contains(model, "gpt-5.6-terra"):
-		return 2.50, 15.0, true
+		return 2.0, 12.0, true
 	case strings.Contains(model, "gpt-5.6-luna"):
-		return 1.0, 6.0, true
+		return 0.20, 1.20, true
 	case strings.Contains(model, "gpt-5.6"):
 		return 5.0, 30.0, true
 	case strings.Contains(model, "gpt-4o-mini"):
@@ -533,12 +537,35 @@ func openAIPricing(model string) (float64, float64, bool) {
 	return 0, 0, false
 }
 
+// googlePricing cobre as gerações Gemini 3.x/2.x/1.5 (ai.google.dev
+// pricing, Aug 2026). Ordering: tags específicas antes das genéricas —
+// "gemini-3" (Pro/preview) por último no bloco 3.x porque é substring de
+// todos os ids 3.x; "gemini-2.5-flash-lite" antes de "gemini-2.5-flash".
+// 3.7/3.6-flash usam o preço introdutório vigente ($0.75/$3.75 até
+// 31/Dez/2026; dobra a partir de Jan/2027 — revisar na virada).
 func googlePricing(model string) (float64, float64, bool) {
 	switch {
+	case strings.Contains(model, "gemini-3.7-flash"), strings.Contains(model, "gemini-3.6-flash"):
+		return 0.75, 3.75, true
+	case strings.Contains(model, "gemini-3.5-flash-lite"):
+		return 0.30, 2.50, true
+	case strings.Contains(model, "gemini-3.5-flash"):
+		return 1.50, 9.0, true
+	case strings.Contains(model, "gemini-3.1-pro"):
+		return 2.0, 12.0, true
+	case strings.Contains(model, "gemini-3.1-flash-lite"):
+		return 0.25, 1.50, true
+	case strings.Contains(model, "gemini-3-flash"):
+		return 0.50, 3.0, true
+	case strings.Contains(model, "gemini-3"):
+		// gemini-3 / gemini-3-pro(-preview) — mesmo tier do 3.1 Pro.
+		return 2.0, 12.0, true
 	case strings.Contains(model, "gemini-2.5-pro"):
 		return 1.25, 10.0, true
+	case strings.Contains(model, "gemini-2.5-flash-lite"):
+		return 0.10, 0.40, true
 	case strings.Contains(model, "gemini-2.5-flash"):
-		return 0.15, 0.60, true
+		return 0.30, 2.50, true
 	case strings.Contains(model, "gemini-2.0"):
 		return 0.075, 0.30, true
 	case strings.Contains(model, "gemini-1.5-pro"):
@@ -549,8 +576,19 @@ func googlePricing(model string) (float64, float64, bool) {
 	return 0, 0, false
 }
 
+// grokPricing cobre a geração 2026 (docs.x.ai/docs/pricing, Aug 2026).
+// A xAI cobra por tier de prompt (<200K / ≥200K); cost_tracker modela um
+// único tier, então usamos o tier base (<200K) — consistente com o
+// tratamento de long-context da OpenAI acima. Específicos antes do
+// genérico "grok".
 func grokPricing(model string) (float64, float64, bool) {
 	switch {
+	case strings.Contains(model, "grok-4.6"), strings.Contains(model, "grok-4.5"):
+		return 2.0, 6.0, true
+	case strings.Contains(model, "grok-4.3"), strings.Contains(model, "grok-4.20"):
+		return 1.25, 2.50, true
+	case strings.Contains(model, "grok-build"):
+		return 1.0, 2.0, true
 	case strings.Contains(model, "grok-3"):
 		return 3.0, 15.0, true
 	case strings.Contains(model, "grok-2"):
@@ -570,14 +608,27 @@ func zaiPricing(model string) (float64, float64, bool) {
 	switch {
 	case strings.Contains(model, "glm-5.2"), strings.Contains(model, "glm-5-2"):
 		return 1.40, 4.40, true
+	case strings.Contains(model, "glm-5.1"), strings.Contains(model, "glm-5-1"):
+		// GLM-5.1: mesmo tier da 5.2 no pricing oficial (docs.z.ai).
+		return 1.40, 4.40, true
+	case strings.Contains(model, "glm-5-turbo"), strings.Contains(model, "glm-5v-turbo"):
+		return 1.20, 4.00, true
 	case strings.Contains(model, "glm-5"):
 		return 1.00, 3.20, true
 	}
 	return 0, 0, false
 }
 
+// deepseekPricing — geração V4 (api-docs.deepseek.com, Aug 2026). A
+// DeepSeek cobra peak/off-peak (off-peak = metade); cost_tracker usa o
+// preço de pico para não sub-reportar. V4 específicos antes dos legados.
 func deepseekPricing(model string) (float64, float64, bool) {
 	switch {
+	case strings.Contains(model, "deepseek-v4-pro"):
+		return 1.32, 3.96, true
+	case strings.Contains(model, "deepseek-v4"):
+		// deepseek-v4-flash e futuros ids v4 sem tier próprio.
+		return 0.44, 1.32, true
 	case strings.Contains(model, "deepseek-r1"):
 		return 0.55, 2.19, true
 	case strings.Contains(model, "deepseek"):
@@ -607,7 +658,13 @@ func providerFallbackPricing(provider, model string) (float64, float64) {
 		return 0.50, 0.50
 	case strings.HasPrefix(model, "kimi-k3"):
 		return 3.00, 15.00
+	case strings.HasPrefix(model, "kimi-k2.7-code-highspeed"):
+		// K2.7 Code highspeed (platform.kimi.ai pricing, Aug 2026): 2× o
+		// tier padrão K2.x — specific beats generic, senão o match "kimi"
+		// abaixo cobraria a metade.
+		return 1.90, 8.00
 	case strings.Contains(provider, "moonshot"), strings.HasPrefix(model, "kimi"), strings.HasPrefix(model, "moonshot"):
+		// Cobre também kimi-k2.7-code ($0.95/$4.00 — mesmo tier do K2.6).
 		return 0.95, 4.00
 	case strings.Contains(provider, "copilot"):
 		return 2.50, 10.0

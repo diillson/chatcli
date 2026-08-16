@@ -49,6 +49,38 @@ func mantleMessagesURL(region string) string {
 	return strings.TrimSuffix(base, "/") + "/anthropic/v1/messages"
 }
 
+// anthropicEndpointMode is the operator's routing choice for Anthropic
+// requests on Bedrock, read from BEDROCK_ANTHROPIC_ENDPOINT.
+type anthropicEndpointMode int
+
+const (
+	// endpointModeAuto (default / "auto"): catalog decides — models
+	// flagged bedrock_mantle_only go to Mantle with an automatic
+	// fallback to InvokeModel when the Mantle call fails; everything
+	// else stays on InvokeModel.
+	endpointModeAuto anthropicEndpointMode = iota
+	// endpointModeMantle ("mantle"): every Anthropic request pinned to
+	// the Mantle Messages endpoint — no fallback (the operator asked
+	// for this surface explicitly).
+	endpointModeMantle
+	// endpointModeInvoke ("invoke"/"invokemodel"/"legacy"): every
+	// Anthropic request pinned to InvokeModel.
+	endpointModeInvoke
+)
+
+// resolveAnthropicEndpointMode parses BEDROCK_ANTHROPIC_ENDPOINT.
+// Unknown values fall back to auto so a typo degrades to the default
+// routing instead of silently pinning a surface.
+func resolveAnthropicEndpointMode() anthropicEndpointMode {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv("BEDROCK_ANTHROPIC_ENDPOINT"))) {
+	case "mantle":
+		return endpointModeMantle
+	case "invoke", "invokemodel", "legacy":
+		return endpointModeInvoke
+	}
+	return endpointModeAuto
+}
+
 // usesMantleEndpoint decides whether an Anthropic-family request must go
 // through the Mantle Messages endpoint instead of legacy InvokeModel.
 //
@@ -63,12 +95,13 @@ func mantleMessagesURL(region string) string {
 // picked from ListInferenceProfiles routes the same as the canonical id.
 // BEDROCK_ANTHROPIC_ENDPOINT overrides for operators: "mantle" forces
 // every Anthropic request onto the Messages endpoint, "invoke"/"legacy"
-// pins them all to InvokeModel.
+// pins them all to InvokeModel. In the default "auto" mode, a Mantle
+// failure additionally falls back to InvokeModel (see SendPrompt).
 func usesMantleEndpoint(model string) bool {
-	switch strings.ToLower(strings.TrimSpace(os.Getenv("BEDROCK_ANTHROPIC_ENDPOINT"))) {
-	case "mantle":
+	switch resolveAnthropicEndpointMode() {
+	case endpointModeMantle:
 		return true
-	case "invoke", "invokemodel", "legacy":
+	case endpointModeInvoke:
 		return false
 	}
 	return catalog.HasCapability(catalog.ProviderBedrock, model, "bedrock_mantle_only")
@@ -116,6 +149,27 @@ func mantleModelID(model string) string {
 		return id
 	}
 	return model
+}
+
+// invokeFallbackModelID maps the model id the Mantle path was serving
+// onto an id the legacy InvokeModel surface accepts on-demand. Recent
+// Claude generations have no bare-ID on-demand surface — InvokeModel
+// requires an inference-profile id — so a canonical "anthropic.claude-*"
+// id gets the global. profile prefix (the profile AWS publishes for every
+// family-5 model). Ids that already carry a profile prefix, application-
+// profile ARNs and non-Claude ids pass through unchanged.
+func invokeFallbackModelID(model string) string {
+	trimmed := strings.TrimSpace(model)
+	m := strings.ToLower(trimmed)
+	for _, p := range mantleProfilePrefixes {
+		if strings.HasPrefix(m, p) && strings.HasPrefix(m[len(p):], "anthropic.") {
+			return trimmed
+		}
+	}
+	if strings.HasPrefix(m, "anthropic.") {
+		return "global." + trimmed
+	}
+	return trimmed
 }
 
 // sendPromptAnthropicMantle sends a Messages API request to the
