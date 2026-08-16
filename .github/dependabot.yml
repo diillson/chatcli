@@ -32,6 +32,11 @@ updates:
     labels:
       - "docker"
       - "dependencies"
+    ignore:
+      # Never bump build images to Go pre-release tags (rc/beta/alpha);
+      # stable releases are picked up automatically.
+      - dependency-name: "golang"
+        versions: ["*rc*", "*beta*", "*alpha*"]
 
   # Go module dependencies (operator — separate go.mod)
   - package-ecosystem: "gomod"
@@ -54,3 +59,8 @@ updates:
     labels:
       - "docker"
       - "dependencies"
+    ignore:
+      # Never bump build images to Go pre-release tags (rc/beta/alpha);
+      # stable releases are picked up automatically.
+      - dependency-name: "golang"
+        versions: ["*rc*", "*beta*", "*alpha*"]
