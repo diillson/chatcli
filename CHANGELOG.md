@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.187.0](https://github.com/diillson/chatcli/compare/v1.186.1...v1.187.0) (2026-08-16)
+
+
+### Features
+
+* **models:** refresh provider catalogs and add Bedrock Mantle-to-runtime fallback ([#1343](https://github.com/diillson/chatcli/issues/1343)) ([674865a](https://github.com/diillson/chatcli/commit/674865a094ff4834416b4a35186cf23837c18ad6))
+
+
+### Bug Fixes
+
+* **deps:** batch bump AWS SDK, x libraries and protobuf across both modules ([#1358](https://github.com/diillson/chatcli/issues/1358)) ([8db64b2](https://github.com/diillson/chatcli/commit/8db64b27ac90c3282f703d5fccb669207463a94b))
+
 ## [1.186.1](https://github.com/diillson/chatcli/compare/v1.186.0...v1.186.1) (2026-08-15)
 
 
