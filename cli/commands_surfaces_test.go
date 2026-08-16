@@ -124,7 +124,16 @@ func TestSplitSlashInvocation(t *testing.T) {
 	if tok, args, ok := splitSlashInvocation("/review-pr 1 2"); !ok || tok != "review-pr" || args != "1 2" {
 		t.Errorf("split mismatch: %q %q %v", tok, args, ok)
 	}
-	for _, bad := range []string{"", "/", "no-slash", "/ "} {
+	// The token ends at ANY whitespace: piped stdin arrives appended after
+	// a newline (`git diff | chatcli -p "/review"`), and the pipe body
+	// becomes args.
+	if tok, args, ok := splitSlashInvocation("/review\ndiff --git a/x b/x\n+foo"); !ok || tok != "review" || args != "diff --git a/x b/x\n+foo" {
+		t.Errorf("newline split mismatch: %q %q %v", tok, args, ok)
+	}
+	if tok, args, ok := splitSlashInvocation("/review\targs"); !ok || tok != "review" || args != "args" {
+		t.Errorf("tab split mismatch: %q %q %v", tok, args, ok)
+	}
+	for _, bad := range []string{"", "/", "no-slash", "/ ", "/\nbody"} {
 		if _, _, ok := splitSlashInvocation(bad); ok {
 			t.Errorf("%q must not parse as an invocation", bad)
 		}

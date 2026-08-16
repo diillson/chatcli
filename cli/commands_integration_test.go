@@ -211,3 +211,20 @@ func TestOneShotExpansion_GoldenPath(t *testing.T) {
 		t.Errorf("one-shot expansion mismatch: %q ok=%v", expanded, ok)
 	}
 }
+
+func TestOneShotExpansion_PipedStdinBody(t *testing.T) {
+	cli, project := newCommandsTestCLI(t)
+	writeCommandFile(t, project, "review.md", "Review this change:\n$ARGUMENTS")
+
+	// runOneShotIfRequested appends piped stdin to the prompt after a
+	// newline; the bare command must still resolve and take the body as
+	// $ARGUMENTS.
+	input := "/review\ndiff --git a/x b/x\n+foo"
+	expanded, ok := cli.expandSlashCommandInput(context.Background(), input, false)
+	if !ok {
+		t.Fatal("bare command with piped body must expand")
+	}
+	if !strings.Contains(expanded, "diff --git a/x b/x\n+foo") {
+		t.Errorf("piped body must interpolate into $ARGUMENTS: %q", expanded)
+	}
+}

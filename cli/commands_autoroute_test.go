@@ -159,6 +159,17 @@ func TestResolveOneShotCommand_CoderRoute(t *testing.T) {
 	if expanded != "deploy prod now" {
 		t.Errorf("expansion mismatch: %q", expanded)
 	}
+
+	// `git diff | chatcli -p "/deploy"`: piped stdin is appended after a
+	// newline before resolution — the bare command must still route and
+	// take the body as $ARGUMENTS.
+	expanded, coderRoute = cli.resolveOneShotCommand(context.Background(), "/deploy\ndiff --git a/x b/x")
+	if !coderRoute {
+		t.Fatal("bare mode:coder command with piped body must still route")
+	}
+	if expanded != "deploy diff --git a/x b/x now" {
+		t.Errorf("piped-body expansion mismatch: %q", expanded)
+	}
 }
 
 func TestResolveOneShotCommand_ChatRouteAndPassthrough(t *testing.T) {
