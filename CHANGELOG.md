@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.187.1](https://github.com/diillson/chatcli/compare/v1.187.0...v1.187.1) (2026-08-16)
+
+
+### Bug Fixes
+
+* **commands:** resolve slash token when piped stdin follows the invocation ([#1359](https://github.com/diillson/chatcli/issues/1359)) ([7cba266](https://github.com/diillson/chatcli/commit/7cba2661e81b9cd387c2818de11bea44422b9700))
+
 ## [1.187.0](https://github.com/diillson/chatcli/compare/v1.186.1...v1.187.0) (2026-08-16)
 
 
