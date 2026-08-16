@@ -379,3 +379,122 @@ func TestSendPromptAnthropicMantleAPIError(t *testing.T) {
 	assert.Contains(t, err.Error(), "invalid_request_error")
 	assert.Contains(t, err.Error(), "boom")
 }
+
+// The Mantle→InvokeModel fallback re-routes the configured model under an
+// inference-profile spelling InvokeModel accepts on-demand. Canonical
+// "anthropic." ids gain the global. profile; ids already carrying a
+// profile prefix, application-profile ARNs and non-Claude ids pass
+// through unchanged.
+func TestInvokeFallbackModelID(t *testing.T) {
+	assert.Equal(t, "global.anthropic.claude-sonnet-5", invokeFallbackModelID("anthropic.claude-sonnet-5"))
+	assert.Equal(t, "global.anthropic.claude-fable-5", invokeFallbackModelID("anthropic.claude-fable-5"))
+	assert.Equal(t, "global.anthropic.claude-opus-5", invokeFallbackModelID("anthropic.claude-opus-5"))
+	// Profile spellings stay as configured.
+	assert.Equal(t, "us.anthropic.claude-sonnet-5", invokeFallbackModelID("us.anthropic.claude-sonnet-5"))
+	assert.Equal(t, "global.anthropic.claude-opus-4-8", invokeFallbackModelID("global.anthropic.claude-opus-4-8"))
+	// ARNs and non-Claude ids pass through untouched.
+	arn := "arn:aws:bedrock:us-east-1:123456789012:application-inference-profile/abcdef"
+	assert.Equal(t, arn, invokeFallbackModelID(arn))
+	assert.Equal(t, "openai.gpt-oss-120b-1:0", invokeFallbackModelID("openai.gpt-oss-120b-1:0"))
+}
+
+// BEDROCK_ANTHROPIC_ENDPOINT parsing: unset/"auto"/typos → auto (catalog
+// decides, with fallback); "mantle" and "invoke"/"legacy" pin a surface.
+func TestResolveAnthropicEndpointMode(t *testing.T) {
+	setEnvForTest(t, "BEDROCK_ANTHROPIC_ENDPOINT", "")
+	assert.Equal(t, endpointModeAuto, resolveAnthropicEndpointMode())
+
+	setEnvForTest(t, "BEDROCK_ANTHROPIC_ENDPOINT", "auto")
+	assert.Equal(t, endpointModeAuto, resolveAnthropicEndpointMode())
+
+	setEnvForTest(t, "BEDROCK_ANTHROPIC_ENDPOINT", "MANTLE")
+	assert.Equal(t, endpointModeMantle, resolveAnthropicEndpointMode())
+
+	setEnvForTest(t, "BEDROCK_ANTHROPIC_ENDPOINT", "invoke")
+	assert.Equal(t, endpointModeInvoke, resolveAnthropicEndpointMode())
+	setEnvForTest(t, "BEDROCK_ANTHROPIC_ENDPOINT", "invokemodel")
+	assert.Equal(t, endpointModeInvoke, resolveAnthropicEndpointMode())
+	setEnvForTest(t, "BEDROCK_ANTHROPIC_ENDPOINT", "legacy")
+	assert.Equal(t, endpointModeInvoke, resolveAnthropicEndpointMode())
+
+	// A typo degrades to auto instead of silently pinning a surface.
+	setEnvForTest(t, "BEDROCK_ANTHROPIC_ENDPOINT", "mantel")
+	assert.Equal(t, endpointModeAuto, resolveAnthropicEndpointMode())
+}
+
+// End-to-end: the Mantle endpoint fails after its retries, and SendPrompt
+// re-routes the same request through the runtime InvokeModel endpoint
+// under the global. inference-profile spelling.
+func TestSendPromptMantleFallsBackToInvoke(t *testing.T) {
+	mantleCalls := 0
+	mantleSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mantleCalls++
+		w.Header().Set("content-type", "application/json")
+		w.WriteHeader(http.StatusServiceUnavailable)
+		_, _ = w.Write([]byte(`{"type":"error","error":{"type":"overloaded_error","message":"mantle indisponível"}}`))
+	}))
+	defer mantleSrv.Close()
+
+	var invokePath string
+	runtimeSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		invokePath = r.URL.Path
+		w.Header().Set("content-type", "application/json")
+		_, _ = w.Write([]byte(`{"content":[{"type":"text","text":"via-invoke"}]}`))
+	}))
+	defer runtimeSrv.Close()
+
+	setEnvForTest(t, "BEDROCK_ANTHROPIC_ENDPOINT", "")
+	setEnvForTest(t, "BEDROCK_MANTLE_BASE_URL", mantleSrv.URL)
+	setEnvForTest(t, "BEDROCK_BASE_URL", runtimeSrv.URL)
+	// SigV4 on both surfaces: the runtime SDK refuses bearer tokens over
+	// plain HTTP, and httptest serves HTTP — static env creds sign fine.
+	setEnvForTest(t, "AWS_BEARER_TOKEN_BEDROCK", "")
+	setEnvForTest(t, "AWS_REGION", "us-east-1")
+	setEnvForTest(t, "AWS_ACCESS_KEY_ID", "test-access-key")
+	setEnvForTest(t, "AWS_SECRET_ACCESS_KEY", "test-secret-key")
+	setEnvForTest(t, "AWS_SESSION_TOKEN", "")
+	setEnvForTest(t, "AWS_PROFILE", "")
+
+	c := NewBedrockClient("anthropic.claude-sonnet-5", "us-east-1", "", zap.NewNop(), 1, 0)
+	out, err := c.SendPrompt(t.Context(), "ping", nil, 128)
+	require.NoError(t, err)
+	assert.Equal(t, "via-invoke", out)
+	assert.Positive(t, mantleCalls, "the Mantle surface must be tried first")
+	assert.Contains(t, invokePath, "global.anthropic.claude-sonnet-5",
+		"the fallback must invoke under the inference-profile spelling")
+}
+
+// Operator-pinned "mantle" means no fallback: the Mantle error surfaces
+// and the runtime endpoint is never touched.
+func TestSendPromptMantlePinnedDoesNotFallBack(t *testing.T) {
+	mantleSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("content-type", "application/json")
+		w.WriteHeader(http.StatusServiceUnavailable)
+		_, _ = w.Write([]byte(`{"type":"error","error":{"type":"overloaded_error","message":"mantle indisponível"}}`))
+	}))
+	defer mantleSrv.Close()
+
+	runtimeCalls := 0
+	runtimeSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		runtimeCalls++
+		w.Header().Set("content-type", "application/json")
+		_, _ = w.Write([]byte(`{"content":[{"type":"text","text":"via-invoke"}]}`))
+	}))
+	defer runtimeSrv.Close()
+
+	setEnvForTest(t, "BEDROCK_ANTHROPIC_ENDPOINT", "mantle")
+	setEnvForTest(t, "BEDROCK_MANTLE_BASE_URL", mantleSrv.URL)
+	setEnvForTest(t, "BEDROCK_BASE_URL", runtimeSrv.URL)
+	// SigV4 on both surfaces: the runtime SDK refuses bearer tokens over
+	// plain HTTP, and httptest serves HTTP — static env creds sign fine.
+	setEnvForTest(t, "AWS_BEARER_TOKEN_BEDROCK", "")
+	setEnvForTest(t, "AWS_REGION", "us-east-1")
+	setEnvForTest(t, "AWS_ACCESS_KEY_ID", "test-access-key")
+	setEnvForTest(t, "AWS_SECRET_ACCESS_KEY", "test-secret-key")
+
+	c := NewBedrockClient("anthropic.claude-sonnet-5", "us-east-1", "", zap.NewNop(), 1, 0)
+	_, err := c.SendPrompt(t.Context(), "ping", nil, 128)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "overloaded_error")
+	assert.Zero(t, runtimeCalls, "pinned mantle must never touch InvokeModel")
+}

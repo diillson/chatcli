@@ -604,12 +604,22 @@ var registry = []ModelMeta{
 	// is physically impossible — the API rejects requests with output
 	// over the per-model cap.
 	//
-	// Gemini 3.x generation (verified per-model on ai.google.dev, Jul
-	// 2026): 3.6-flash (stable, current default workhorse, Jul 21 2026),
+	// Gemini 3.x generation (verified per-model on ai.google.dev, Aug
+	// 2026): 3.7-flash (GA Aug 13 2026), 3.6-flash (Jul 21 2026),
 	// 3.5-flash, 3.5-flash-lite and 3.1-flash-lite stable; 3.1-pro-preview
 	// and 3-flash-preview in preview. The whole generation shares the
 	// uniform 1,048,576 / 65,536 profile. Newest first so generic alias
 	// prefixes ("gemini-3") don't shadow the more specific ids.
+	{
+		ID:              "gemini-3.7-flash",
+		Aliases:         []string{"gemini-3.7-flash", "gemini-3.7-flash-latest"},
+		DisplayName:     "Gemini 3.7 Flash",
+		Provider:        ProviderGoogleAI,
+		ContextWindow:   1048576,
+		MaxOutputTokens: 65536,
+		PreferredAPI:    "gemini_api",
+		Capabilities:    []string{"vision", "tools", "json_mode", "code_execution"},
+	},
 	{
 		ID:              "gemini-3.6-flash",
 		Aliases:         []string{"gemini-3.6-flash", "gemini-3.6-flash-latest"},
@@ -868,13 +878,25 @@ var registry = []ModelMeta{
 	// previously written as a single comma-joined string instead of
 	// separate entries — Resolve() never matched them. Fixed here.
 	//
-	// 2026 generation (context windows per docs.x.ai/docs/models, Jul
-	// 2026): grok-4.5 500K, grok-4.3 1M (flagship, Apr 30 2026), the
-	// grok-4.20 family 1M, grok-build 256K. xAI still documents no
-	// separate output cap — the 16K ceiling below follows the same
-	// convention as the older entries. Newest first; the entry carrying
-	// the generic "grok-4.20" alias sits after the more specific 4.20
-	// variants so it cannot shadow them.
+	// 2026 generation (context windows per docs.x.ai/developers/models,
+	// Aug 2026): grok-4.6 500K (flagship, Aug 12 2026), grok-4.5 500K,
+	// grok-4.3 1M, the grok-4.20 family 1M, grok-build 256K. xAI still
+	// documents no separate output cap — the 16K ceiling below follows
+	// the same convention as the older entries. Newest first; the entry
+	// carrying the generic "grok-4.20" alias sits after the more specific
+	// 4.20 variants so it cannot shadow them. The announced "fast"
+	// variant of 4.6 has no published model id yet — do not add it until
+	// docs.x.ai lists one.
+	{
+		ID:              "grok-4.6",
+		Aliases:         []string{"grok-4.6", "grok-4.6-latest"},
+		DisplayName:     "Grok-4.6",
+		Provider:        ProviderXAI,
+		ContextWindow:   500000,
+		MaxOutputTokens: 16384,
+		PreferredAPI:    APIChatCompletions,
+		Capabilities:    []string{"vision", "tools", "json_mode"},
+	},
 	{
 		ID:              "grok-4.5",
 		Aliases:         []string{"grok-4.5", "grok-4.5-latest"},
@@ -1177,10 +1199,18 @@ var registry = []ModelMeta{
 	// (released Jul 2026): 2.8T total / 104B active params, 1M context via
 	// Kimi Delta Attention, text+image+video input. Output stays at the
 	// K2.x 128K cap — aggregator listings that show output = context are an
-	// unbounded-listing artifact, not a real per-request cap. K2.6 (Apr
-	// 2026, 1T/32B, 256K) remains supported, K2.5 is the prior generation,
-	// moonshot-v1-* are the classic chat models split by context.
-	// Ordering: newest IDs first so generic aliases don't shadow specific tags.
+	// unbounded-listing artifact, not a real per-request cap. The
+	// kimi-k2.7-code line (Jun 2026) is the coding-tuned K2.x: 256K
+	// context, 32,768 default output per platform.kimi.ai/docs/pricing.
+	// K2.6 (Apr 2026, 1T/32B, 256K) remains supported. Sunsets announced
+	// on platform.kimi.ai/docs/models (Aug 2026): kimi-k2.5 and the
+	// moonshot-v1-* series retire 2026-08-31, kimi-latest deprecated since
+	// 2026-01-28 — entries stay until the dates pass so pinned configs
+	// keep resolving.
+	// Ordering: newest IDs first so generic aliases don't shadow specific
+	// tags — "kimi-k2.7-code-highspeed" MUST precede "kimi-k2.7-code",
+	// whose alias set would otherwise swallow it (Resolve matches aliases
+	// by prefix/contains in registry order).
 	{
 		ID:              "kimi-k3",
 		Aliases:         []string{"kimi-k3", "kimi-k-3", "k3", "k-3"},
@@ -1190,6 +1220,26 @@ var registry = []ModelMeta{
 		MaxOutputTokens: 131072,
 		PreferredAPI:    APIChatCompletions,
 		Capabilities:    []string{"tools", "vision", "thinking", "json_mode"},
+	},
+	{
+		ID:              "kimi-k2.7-code-highspeed",
+		Aliases:         []string{"kimi-k2.7-code-highspeed", "kimi-k2-7-code-highspeed"},
+		DisplayName:     "Kimi K2.7 Code (highspeed)",
+		Provider:        ProviderMoonshot,
+		ContextWindow:   262144,
+		MaxOutputTokens: 32768,
+		PreferredAPI:    APIChatCompletions,
+		Capabilities:    []string{"tools", "thinking", "json_mode"},
+	},
+	{
+		ID:              "kimi-k2.7-code",
+		Aliases:         []string{"kimi-k2.7-code", "kimi-k2-7-code", "kimi-k2.7", "kimi-k2-7", "k2.7", "k2-7"},
+		DisplayName:     "Kimi K2.7 Code",
+		Provider:        ProviderMoonshot,
+		ContextWindow:   262144,
+		MaxOutputTokens: 32768,
+		PreferredAPI:    APIChatCompletions,
+		Capabilities:    []string{"tools", "thinking", "json_mode"},
 	},
 	{
 		ID:              "kimi-k2.6",
@@ -1433,7 +1483,7 @@ var registry = []ModelMeta{
 	// same as Sonnet 5.
 	{
 		ID:              "anthropic.claude-fable-5",
-		Aliases:         []string{"bedrock-fable-5", "global.anthropic.claude-fable-5", "claude-fable-5", "fable-5"},
+		Aliases:         []string{"bedrock-fable-5", "global.anthropic.claude-fable-5", "us.anthropic.claude-fable-5", "claude-fable-5", "fable-5"},
 		DisplayName:     "Claude Fable 5 (Bedrock, 1M ctx)",
 		Provider:        ProviderBedrock,
 		ContextWindow:   1000000,
@@ -1448,7 +1498,7 @@ var registry = []ModelMeta{
 	// path instead of InvokeModel.
 	{
 		ID:              "anthropic.claude-opus-5",
-		Aliases:         []string{"bedrock-opus-5", "global.anthropic.claude-opus-5", "claude-opus-5", "opus-5"},
+		Aliases:         []string{"bedrock-opus-5", "global.anthropic.claude-opus-5", "us.anthropic.claude-opus-5", "eu.anthropic.claude-opus-5", "au.anthropic.claude-opus-5", "claude-opus-5", "opus-5"},
 		DisplayName:     "Claude Opus 5 (Bedrock, 1M ctx)",
 		Provider:        ProviderBedrock,
 		ContextWindow:   1000000,
@@ -1463,7 +1513,7 @@ var registry = []ModelMeta{
 	// this id to InvokeModel would return a ValidationException.
 	{
 		ID:              "anthropic.claude-sonnet-5",
-		Aliases:         []string{"bedrock-sonnet-5", "global.anthropic.claude-sonnet-5", "claude-sonnet-5", "sonnet-5"},
+		Aliases:         []string{"bedrock-sonnet-5", "global.anthropic.claude-sonnet-5", "us.anthropic.claude-sonnet-5", "eu.anthropic.claude-sonnet-5", "au.anthropic.claude-sonnet-5", "claude-sonnet-5", "sonnet-5"},
 		DisplayName:     "Claude Sonnet 5 (Bedrock, 1M ctx)",
 		Provider:        ProviderBedrock,
 		ContextWindow:   1000000,

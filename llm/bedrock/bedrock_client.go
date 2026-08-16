@@ -388,7 +388,30 @@ func (c *BedrockClient) SendPrompt(ctx context.Context, prompt string, history [
 		return c.sendPromptConverse(ctx, prompt, history, maxTokens)
 	default:
 		if usesMantleEndpoint(c.model) {
-			return c.sendPromptAnthropicMantle(ctx, prompt, history, maxTokens)
+			resp, err := c.sendPromptAnthropicMantle(ctx, prompt, history, maxTokens)
+			if err == nil || resolveAnthropicEndpointMode() != endpointModeAuto || ctx.Err() != nil {
+				// Success, operator-pinned "mantle", or the caller is gone:
+				// nothing to fall back to.
+				return resp, err
+			}
+			// Auto mode: the Mantle surface failed after its own retries —
+			// re-route the same request through the legacy InvokeModel
+			// runtime under an inference-profile id. Same Messages payload,
+			// different endpoint; regional outages, VPC gaps and account-
+			// level Mantle restrictions recover here. Genuinely invalid
+			// requests fail again on the runtime side and surface that
+			// error (annotated with the original Mantle failure).
+			fallbackModel := invokeFallbackModelID(c.model)
+			c.logger.Warn(i18n.T("llm.bedrock.mantle_fallback_invoke", c.model, fallbackModel), zap.Error(err))
+			resp, invokeErr := c.sendPromptAnthropicModel(ctx, fallbackModel, prompt, history, maxTokens)
+			if invokeErr != nil {
+				// Both chains stay inspectable (%w twice): errors.As walks
+				// invokeErr first, so payload-recovery reads the InvokeModel
+				// request size, while the Mantle failure stays visible for
+				// WAF/proxy classification.
+				return "", fmt.Errorf("%w (bedrock-mantle previously failed: %w)", invokeErr, err)
+			}
+			return resp, nil
 		}
 		return c.sendPromptAnthropic(ctx, prompt, history, maxTokens)
 	}
@@ -396,6 +419,14 @@ func (c *BedrockClient) SendPrompt(ctx context.Context, prompt string, history [
 
 // sendPromptAnthropic uses the Anthropic Messages body schema on Bedrock.
 func (c *BedrockClient) sendPromptAnthropic(ctx context.Context, prompt string, history []models.Message, maxTokens int) (string, error) {
+	return c.sendPromptAnthropicModel(ctx, c.model, prompt, history, maxTokens)
+}
+
+// sendPromptAnthropicModel is sendPromptAnthropic with an explicit wire
+// model id — the Mantle→InvokeModel fallback re-routes the configured
+// model under its inference-profile spelling without mutating c.model
+// (the next call still tries Mantle first; a healthy Mantle wins again).
+func (c *BedrockClient) sendPromptAnthropicModel(ctx context.Context, wireModel, prompt string, history []models.Message, maxTokens int) (string, error) {
 	effectiveMaxTokens := maxTokens
 	if effectiveMaxTokens <= 0 {
 		effectiveMaxTokens = c.getMaxTokens()
@@ -412,7 +443,7 @@ func (c *BedrockClient) sendPromptAnthropic(ctx context.Context, prompt string, 
 		reqBody["system"] = systemObj
 	}
 
-	applyAnthropicThinkingForEffort(reqBody, c.model, ctx)
+	applyAnthropicThinkingForEffort(reqBody, wireModel, ctx)
 
 	enforceCacheControlBudget(reqBody, anthropicMaxCacheBreakpoints)
 
@@ -422,7 +453,7 @@ func (c *BedrockClient) sendPromptAnthropic(ctx context.Context, prompt string, 
 	}
 
 	start := time.Now()
-	client.LogRequestStart(c.logger, "BEDROCK", c.model,
+	client.LogRequestStart(c.logger, "BEDROCK", wireModel,
 		zap.String("family", string(familyAnthropic)),
 		zap.String("region", c.region),
 		zap.String("endpoint", RuntimeEndpointURL(c.region)),
@@ -434,19 +465,19 @@ func (c *BedrockClient) sendPromptAnthropic(ctx context.Context, prompt string, 
 
 	responseText, err := utils.Retry(ctx, c.logger, c.maxAttempts, c.backoff, func(ctx context.Context) (string, error) {
 		out, err := c.runtime.InvokeModel(ctx, &bedrockruntime.InvokeModelInput{
-			ModelId:     stringPtr(c.model),
+			ModelId:     stringPtr(wireModel),
 			ContentType: stringPtr("application/json"),
 			Accept:      stringPtr("application/json"),
 			Body:        payload,
 		})
 		if err != nil {
-			return "", wrapBedrockInferenceProfileError(c.model, err)
+			return "", wrapBedrockInferenceProfileError(wireModel, err)
 		}
 		return parseAnthropicBody(out.Body)
 	})
 
 	if err != nil {
-		client.LogRequestFinish(c.logger, "BEDROCK", c.model, "error", time.Since(start),
+		client.LogRequestFinish(c.logger, "BEDROCK", wireModel, "error", time.Since(start),
 			zap.String("family", string(familyAnthropic)),
 		)
 		c.logger.Error(i18n.T("llm.error.get_response_after_retries", "Bedrock"), zap.Error(err))
@@ -454,7 +485,7 @@ func (c *BedrockClient) sendPromptAnthropic(ctx context.Context, prompt string, 
 		// learn the proxy/WAF cap from the exact size that was rejected.
 		return "", client.WithRequestSize(err, len(payload))
 	}
-	client.LogRequestFinish(c.logger, "BEDROCK", c.model, "success", time.Since(start),
+	client.LogRequestFinish(c.logger, "BEDROCK", wireModel, "success", time.Since(start),
 		zap.String("family", string(familyAnthropic)),
 		zap.Int("response_chars", len(responseText)),
 	)

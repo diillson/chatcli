@@ -147,6 +147,27 @@ func TestMoonshotCatalogEntries(t *testing.T) {
 	assert.True(t, ok)
 	assert.Equal(t, "kimi-k3", short.ID)
 
+	// Kimi K2.7 Code line (Jun 2026): 256K context, 32,768 default output
+	// per platform.kimi.ai/docs/pricing. The highspeed entry sits BEFORE
+	// the plain -code entry in the registry — Resolve matches aliases by
+	// prefix/contains in registry order, so the plain entry's aliases
+	// would otherwise swallow the highspeed id.
+	hs, ok := Resolve(ProviderMoonshot, "kimi-k2.7-code-highspeed")
+	assert.True(t, ok, "kimi-k2.7-code-highspeed must resolve")
+	assert.Equal(t, "kimi-k2.7-code-highspeed", hs.ID, "highspeed must not be shadowed by kimi-k2.7-code")
+	assert.Equal(t, 262144, hs.ContextWindow)
+	assert.Equal(t, 32768, hs.MaxOutputTokens)
+
+	code, ok := Resolve(ProviderMoonshot, "kimi-k2.7-code")
+	assert.True(t, ok, "kimi-k2.7-code must resolve")
+	assert.Equal(t, "kimi-k2.7-code", code.ID)
+	assert.Equal(t, 262144, code.ContextWindow)
+	assert.Equal(t, 32768, code.MaxOutputTokens)
+	// The bare k2.7 spellings ride the -code entry via aliases.
+	bare, ok := Resolve(ProviderMoonshot, "kimi-k2.7")
+	assert.True(t, ok)
+	assert.Equal(t, "kimi-k2.7-code", bare.ID)
+
 	// Pin the public specs of the Kimi K2.6/K2.5 entries so silent drift on
 	// the model card (e.g. catalog edits during a refactor) shows up here
 	// instead of at runtime.
@@ -578,6 +599,7 @@ func TestBedrockProviderFallbacks(t *testing.T) {
 // GoogleAI provider fallback and undersize the context window.
 func TestGemini3FamilyEntries(t *testing.T) {
 	for _, id := range []string{
+		"gemini-3.7-flash",
 		"gemini-3.6-flash",
 		"gemini-3.5-flash",
 		"gemini-3.5-flash-lite",
@@ -605,6 +627,7 @@ func TestGemini3FamilyEntries(t *testing.T) {
 // ceiling convention).
 func TestGrok2026Entries(t *testing.T) {
 	cases := map[string]int{
+		"grok-4.6":                     500000,
 		"grok-4.5":                     500000,
 		"grok-4.3":                     1000000,
 		"grok-4.20-0309-reasoning":     1000000,
@@ -677,5 +700,32 @@ func TestBedrockNovaEntries(t *testing.T) {
 		assert.Equal(t, ProviderBedrock, meta.Provider, "%s provider", model)
 		assert.Equal(t, wantCtx, meta.ContextWindow, "%s context window", model)
 		assert.Equal(t, wantCtx, GetContextWindow(ProviderBedrock, model), "%s GetContextWindow", model)
+	}
+}
+
+// TestBedrockFamily5ProfileAliases pins the geo/global inference-profile
+// spellings AWS publishes for the family-5 models (model cards, Aug 2026):
+// every profile id must resolve back to the canonical Mantle-servable
+// entry so routing (bedrock_mantle_only) and specs stay consistent
+// whatever spelling the operator configured.
+func TestBedrockFamily5ProfileAliases(t *testing.T) {
+	cases := map[string]string{
+		"us.anthropic.claude-fable-5":      "anthropic.claude-fable-5",
+		"global.anthropic.claude-fable-5":  "anthropic.claude-fable-5",
+		"us.anthropic.claude-opus-5":       "anthropic.claude-opus-5",
+		"eu.anthropic.claude-opus-5":       "anthropic.claude-opus-5",
+		"au.anthropic.claude-opus-5":       "anthropic.claude-opus-5",
+		"us.anthropic.claude-sonnet-5":     "anthropic.claude-sonnet-5",
+		"eu.anthropic.claude-sonnet-5":     "anthropic.claude-sonnet-5",
+		"au.anthropic.claude-sonnet-5":     "anthropic.claude-sonnet-5",
+		"global.anthropic.claude-sonnet-5": "anthropic.claude-sonnet-5",
+	}
+	for id, want := range cases {
+		meta, ok := Resolve(ProviderBedrock, id)
+		if !assert.True(t, ok, "profile id %s must resolve", id) {
+			continue
+		}
+		assert.Equal(t, want, meta.ID, "profile id %s", id)
+		assert.Contains(t, meta.Capabilities, "bedrock_mantle_only", "profile id %s keeps Mantle routing", id)
 	}
 }

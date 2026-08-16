@@ -33,11 +33,12 @@ func TestGetModelPricing(t *testing.T) {
 		{"claude haiku legacy", "CLAUDEAI", "claude-3-haiku", 0.25, 1.25},
 
 		// OpenAI — specific before generic.
-		// gpt-5.6 tiers (Jul 2026 list prices): the specific terra/luna
-		// tags must win before the bare gpt-5.6 case, which covers the
-		// family alias that the catalog resolves to Sol.
-		{"gpt-5.6-terra before gpt-5.6", "OPENAI", "gpt-5.6-terra", 2.50, 15.0},
-		{"gpt-5.6-luna before gpt-5.6", "OPENAI", "gpt-5.6-luna", 1.0, 6.0},
+		// gpt-5.6 tiers (list prices after the Jul 30 2026 cuts: terra
+		// −20%, luna −80%): the specific terra/luna tags must win before
+		// the bare gpt-5.6 case, which covers the family alias that the
+		// catalog resolves to Sol.
+		{"gpt-5.6-terra before gpt-5.6", "OPENAI", "gpt-5.6-terra", 2.0, 12.0},
+		{"gpt-5.6-luna before gpt-5.6", "OPENAI", "gpt-5.6-luna", 0.20, 1.20},
 		{"gpt-5.6 generic is sol", "OPENAI", "gpt-5.6-sol", 5.0, 30.0},
 		{"gpt-5.6 bare alias", "OPENAI", "gpt-5.6", 5.0, 30.0},
 		{"gpt-4o-mini before gpt-4o", "OPENAI", "gpt-4o-mini", 0.15, 0.60},
@@ -52,19 +53,40 @@ func TestGetModelPricing(t *testing.T) {
 		{"o1-mini before o1", "OPENAI", "o1-mini", 3.0, 12.0},
 		{"o1", "OPENAI", "o1", 15.0, 60.0},
 
-		// Google
+		// Google — Gemini 3.x (ai.google.dev pricing, Aug 2026). The
+		// generic "gemini-3" (Pro) case is a substring of every 3.x id,
+		// so the specific tags must win first; same for the flash-lite
+		// vs flash pairs.
+		{"gemini 3.7 flash", "GOOGLEAI", "gemini-3.7-flash", 0.75, 3.75},
+		{"gemini 3.6 flash", "GOOGLEAI", "gemini-3.6-flash", 0.75, 3.75},
+		{"gemini 3.5 flash-lite before flash", "GOOGLEAI", "gemini-3.5-flash-lite", 0.30, 2.50},
+		{"gemini 3.5 flash", "GOOGLEAI", "gemini-3.5-flash", 1.50, 9.0},
+		{"gemini 3.1 pro preview", "GOOGLEAI", "gemini-3.1-pro-preview", 2.0, 12.0},
+		{"gemini 3.1 flash-lite", "GOOGLEAI", "gemini-3.1-flash-lite", 0.25, 1.50},
+		{"gemini 3 flash preview", "GOOGLEAI", "gemini-3-flash-preview", 0.50, 3.0},
+		{"gemini 3 pro generic last", "GOOGLEAI", "gemini-3-pro-preview", 2.0, 12.0},
 		{"gemini 2.5 pro", "GOOGLEAI", "gemini-2.5-pro", 1.25, 10.0},
-		{"gemini 2.5 flash", "GOOGLEAI", "gemini-2.5-flash", 0.15, 0.60},
+		{"gemini 2.5 flash-lite before flash", "GOOGLEAI", "gemini-2.5-flash-lite", 0.10, 0.40},
+		{"gemini 2.5 flash", "GOOGLEAI", "gemini-2.5-flash", 0.30, 2.50},
 		{"gemini 2.0", "GOOGLEAI", "gemini-2.0-flash", 0.075, 0.30},
 		{"gemini 1.5 pro", "GOOGLEAI", "gemini-1.5-pro", 1.25, 5.0},
 		{"gemini 1.5 flash", "GOOGLEAI", "gemini-1.5-flash", 0.075, 0.30},
 
-		// xAI Grok
+		// xAI Grok — 2026 generation (docs.x.ai pricing, base <200K tier).
+		{"grok-4.6", "XAI", "grok-4.6", 2.0, 6.0},
+		{"grok-4.5", "XAI", "grok-4.5", 2.0, 6.0},
+		{"grok-4.3", "XAI", "grok-4.3", 1.25, 2.50},
+		{"grok-4.20 reasoning", "XAI", "grok-4.20-0309-reasoning", 1.25, 2.50},
+		{"grok-build", "XAI", "grok-build-0.1", 1.0, 2.0},
 		{"grok-3", "XAI", "grok-3", 3.0, 15.0},
 		{"grok-2", "XAI", "grok-2", 2.0, 10.0},
 		{"grok generic", "XAI", "grok-4", 5.0, 15.0},
 
-		// DeepSeek
+		// DeepSeek — V4 (Aug 2026) uses the peak-hour list price (the
+		// off-peak halves are not modeled); specific v4 tags before the
+		// legacy r1/generic cases.
+		{"deepseek-v4-pro", "OPENROUTER", "deepseek-v4-pro", 1.32, 3.96},
+		{"deepseek-v4-flash", "OPENROUTER", "deepseek-v4-flash", 0.44, 1.32},
 		{"deepseek-r1 before deepseek", "OPENROUTER", "deepseek-r1", 0.55, 2.19},
 		{"deepseek bare", "OPENROUTER", "deepseek-chat", 0.27, 1.10},
 
@@ -77,14 +99,21 @@ func TestGetModelPricing(t *testing.T) {
 		// GLM/ZAI ids keep the conservative flat fallback.
 		{"glm-5.2", "ZAI", "glm-5.2", 1.40, 4.40},
 		{"glm-5.2 via model on other provider", "OTHER", "glm-5.2", 1.40, 4.40},
+		{"glm-5.1 same tier as 5.2", "ZAI", "glm-5.1", 1.40, 4.40},
+		{"glm-5-turbo own tier", "ZAI", "glm-5-turbo", 1.20, 4.00},
+		{"glm-5v-turbo own tier", "ZAI", "glm-5v-turbo", 1.20, 4.00},
 		{"glm-5 via glm model", "OTHER", "glm-5", 1.00, 3.20},
 		{"zai via provider", "ZAI", "anything", 0.50, 0.50},
 		{"zai legacy glm model", "OTHER", "glm-4.5", 0.50, 0.50},
 
 		// Moonshot (Kimi) — K3 has its own list price (well above the K2
 		// line) and its specific case must win over the generic kimi match;
-		// everything else keeps the conservative K2.6 single tier.
+		// the K2.7 Code highspeed tier is 2× the K2.x standard and must
+		// also win before the generic match. Everything else keeps the
+		// conservative K2.6 single tier.
 		{"kimi-k3 own tier", "MOONSHOT", "kimi-k3", 3.00, 15.00},
+		{"kimi-k2.7-code-highspeed own tier", "MOONSHOT", "kimi-k2.7-code-highspeed", 1.90, 8.00},
+		{"kimi-k2.7-code standard tier", "MOONSHOT", "kimi-k2.7-code", 0.95, 4.00},
 		{"moonshot via provider", "MOONSHOT", "kimi-k2.6", 0.95, 4.00},
 		{"kimi-k2.5", "MOONSHOT", "kimi-k2.5", 0.95, 4.00},
 		{"moonshot-v1", "MOONSHOT", "moonshot-v1-128k", 0.95, 4.00},

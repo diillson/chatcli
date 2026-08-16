@@ -252,7 +252,7 @@ spec:
   provider: BEDROCK
   # Modern Claude on Bedrock requires an inference profile id
   # (prefix global./us./eu./apac.). For Claude 3/3.5 the base id also works.
-  model: global.anthropic.claude-sonnet-4-5-20250929-v1:0
+  model: global.anthropic.claude-sonnet-4-6
   replicas: 1
   apiKeys:
     name: chatcli-bedrock-keys
