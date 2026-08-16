@@ -46,7 +46,7 @@ spec:
   # Default model already uses a global inference profile required for modern Claude.
   # For older models (3, 3.5) the base id works; for 3.7+/4.x/4.5/4.6 you MUST use
   # a prefix like "global.", "us.", "eu.", or "apac.".
-  model: global.anthropic.claude-sonnet-4-5-20250929-v1:0
+  model: global.anthropic.claude-sonnet-4-6
   image:
     repository: ghcr.io/diillson/chatcli
     tag: latest
