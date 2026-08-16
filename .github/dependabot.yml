@@ -32,11 +32,14 @@ updates:
     labels:
       - "docker"
       - "dependencies"
-    ignore:
-      # Never bump build images to Go pre-release tags (rc/beta/alpha);
-      # stable releases are picked up automatically.
-      - dependency-name: "golang"
-        versions: ["*rc*", "*beta*", "*alpha*"]
+    # NOTE: no `ignore.versions` for Go pre-release tags here. The docker
+    # ecosystem parses `versions` as Bundler requirements (globs like
+    # "*rc*" are a config error that breaks parsing repo-wide), and
+    # requirement matching compares the tag's release part — 1.27rc2 and
+    # the stable 1.27.0 evaluate identically, so an rc-only ignore is
+    # inexpressible. The guard lives in
+    # .github/workflows/dependabot-guard.yml instead: any PR that puts an
+    # rc/beta/alpha golang base-image tag in a Dockerfile fails visibly.
 
   # Go module dependencies (operator — separate go.mod)
   - package-ecosystem: "gomod"
@@ -59,8 +62,11 @@ updates:
     labels:
       - "docker"
       - "dependencies"
-    ignore:
-      # Never bump build images to Go pre-release tags (rc/beta/alpha);
-      # stable releases are picked up automatically.
-      - dependency-name: "golang"
-        versions: ["*rc*", "*beta*", "*alpha*"]
+    # NOTE: no `ignore.versions` for Go pre-release tags here. The docker
+    # ecosystem parses `versions` as Bundler requirements (globs like
+    # "*rc*" are a config error that breaks parsing repo-wide), and
+    # requirement matching compares the tag's release part — 1.27rc2 and
+    # the stable 1.27.0 evaluate identically, so an rc-only ignore is
+    # inexpressible. The guard lives in
+    # .github/workflows/dependabot-guard.yml instead: any PR that puts an
+    # rc/beta/alpha golang base-image tag in a Dockerfile fails visibly.

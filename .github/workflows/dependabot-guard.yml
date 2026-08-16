@@ -1,0 +1,39 @@
+# Dependabot Guard — blocks Go pre-release base-image tags.
+#
+# Why a workflow and not dependabot.yml `ignore.versions`: the docker
+# ecosystem parses `versions` as Bundler requirements — globs ("*rc*")
+# are a parse error that invalidates the whole config, and requirement
+# matching strips the pre-release part of a tag (1.27rc2 evaluates as
+# 1.27, equal to the stable 1.27.0), so "ignore rc but allow stable" is
+# inexpressible there. Dependabot's own pre-release filter also misses
+# golang's dotless rc form (it proposed 1.26.6 → 1.27rc2 in the past).
+# This check is the enforcement point: an rc/beta/alpha golang tag in a
+# Dockerfile fails the PR visibly instead of sailing through a green CI.
+name: Dependabot Guard
+
+on:
+  pull_request:
+    paths:
+      - "**/Dockerfile*"
+
+permissions:
+  contents: read
+
+jobs:
+  block-go-prerelease-tags:
+    name: Block Go pre-release image tags
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Fail on golang rc/beta/alpha base-image tags
+        run: |
+          set -euo pipefail
+          matches=$(grep -RInE '^[[:space:]]*FROM[[:space:]]+[^[:space:]]*golang:[^[:space:]]*(rc|beta|alpha)[0-9]*' \
+            --include='Dockerfile*' . || true)
+          if [ -n "$matches" ]; then
+            echo "::error::Go pre-release base-image tag detected — rc/beta/alpha tags are never merged (they pass CI but are not production Go releases):"
+            echo "$matches"
+            exit 1
+          fi
+          echo "No Go pre-release base-image tags found."
