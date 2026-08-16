@@ -3,7 +3,7 @@
 # License: MIT
 
 # --- Build stage ---
-FROM golang:1.26.6-alpine AS builder
+FROM golang:1.27rc2-alpine AS builder
 
 RUN apk add --no-cache git ca-certificates
 
