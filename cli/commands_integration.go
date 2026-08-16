@@ -31,6 +31,7 @@ import (
 	"runtime"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/diillson/chatcli/cli/coder"
 	"github.com/diillson/chatcli/cli/commands"
@@ -125,20 +126,23 @@ func (cli *ChatCLI) slashCommandCatalog() *commands.Catalog {
 }
 
 // splitSlashInvocation splits "/token args" → (token, args, true) when the
-// input is shaped like a slash invocation.
+// input is shaped like a slash invocation. The token ends at the first
+// whitespace of any kind — piped stdin arrives appended after a newline
+// (`git diff | chatcli -p "/review"`), so a space-only split would fold the
+// pipe's first line into the token and miss the catalog.
 func splitSlashInvocation(input string) (string, string, bool) {
 	if !strings.HasPrefix(input, "/") || len(input) < 2 {
 		return "", "", false
 	}
 	trimmed := strings.TrimPrefix(input, "/")
-	parts := strings.SplitN(trimmed, " ", 2)
-	token := strings.TrimSpace(parts[0])
+	token := trimmed
+	args := ""
+	if cut := strings.IndexFunc(trimmed, unicode.IsSpace); cut >= 0 {
+		token = trimmed[:cut]
+		args = strings.TrimSpace(trimmed[cut:])
+	}
 	if token == "" {
 		return "", "", false
-	}
-	args := ""
-	if len(parts) > 1 {
-		args = strings.TrimSpace(parts[1])
 	}
 	return token, args, true
 }
