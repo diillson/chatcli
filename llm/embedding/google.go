@@ -1,5 +1,7 @@
 /*
  * ChatCLI - Google Gemini embeddings provider.
+ * Copyright (c) 2024 Edilson Freitas
+ * License: Apache-2.0
  *
  * Defaults to gemini-embedding-2 (3072 dim, multimodal-ready, GA as of
  * Aug 2026 — gemini-embedding-001 is superseded and shuts down

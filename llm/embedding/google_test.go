@@ -1,5 +1,7 @@
 /*
  * ChatCLI - Google Gemini embeddings tests.
+ * Copyright (c) 2024 Edilson Freitas
+ * License: Apache-2.0
  *
  * Network-free: a local httptest server plays the :batchEmbedContents
  * endpoint, pinning the request shape (models/ prefix, parts, the
