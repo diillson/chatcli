@@ -2,8 +2,11 @@
  * ChatCLI - Voyage AI embeddings provider (Anthropic-recommended).
  *
  * Voyage offers strong quality/$ for retrieval. Default model is
- * `voyage-3` (1024 dim) which is the recommended general-purpose model
- * as of 2026; override via CHATCLI_EMBED_MODEL.
+ * `voyage-4` (1024 dim), the general-purpose tier of the voyage-4
+ * family (Jan 2026; same price as voyage-3, strictly better, and the
+ * whole family shares one embedding space). Override via
+ * CHATCLI_EMBED_MODEL — e.g. voyage-4-large (quality flagship),
+ * voyage-4-lite (cheapest) or voyage-code-4 (code retrieval).
  */
 package embedding
 
@@ -19,7 +22,7 @@ import (
 )
 
 const (
-	voyageDefaultModel = "voyage-3"
+	voyageDefaultModel = "voyage-4"
 	voyageDefaultDim   = 1024
 	voyageEndpoint     = "https://api.voyageai.com/v1/embeddings"
 )

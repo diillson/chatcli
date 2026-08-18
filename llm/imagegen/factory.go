@@ -15,7 +15,7 @@
  *   2. CHATCLI_IMAGE_URL              → an OpenAI-compatible /images/generations
  *      endpoint. Keyless (unless CHATCLI_IMAGE_KEY is set).
  *   3. OPENAI_API_KEY                 → OpenAI images (paid).
- *   4. GOOGLEAI_API_KEY/GEMINI_API_KEY → native Google Imagen.
+ *   4. GOOGLEAI_API_KEY/GEMINI_API_KEY → native Google Gemini image models.
  *   5. XAI_API_KEY                    → native xAI grok-image.
  *   6. ZAI_API_KEY                    → Z.AI CogView-4 / GLM-Image.
  *   7. MINIMAX_API_KEY               → MiniMax Image-01.
@@ -41,9 +41,10 @@ const (
 	openAIBaseURL = "https://api.openai.com/v1"
 	xaiBaseURL    = "https://api.x.ai/v1"
 	// defaultXAIModel is xAI's current image model. grok-2-image was retired
-	// (404s now); grok-imagine-image is the current Grok Imagine generator
-	// (OpenAI-shaped /images/generations, returns an image URL).
-	defaultXAIModel = "grok-imagine-image"
+	// (404s now); grok-imagine-image-2.0 is the newest Grok Imagine generator
+	// and the one xAI's docs recommend (OpenAI-shaped /images/generations,
+	// returns an image URL). grok-imagine-image remains as the cheaper tier.
+	defaultXAIModel = "grok-imagine-image-2.0"
 
 	// Z.AI (Zhipu) CogView / GLM-Image: OpenAI-shaped /images/generations, but
 	// the response carries image URLs and the "n" field is rejected.
@@ -74,8 +75,8 @@ func NewFromEnvContext(ctx context.Context, logger *zap.Logger) Provider {
 		return selfHostedOrNull(url, model, logger)
 	case "openai":
 		// CHATCLI_IMAGE_API=responses routes OpenAI through the Responses API
-		// (a chat model like gpt-5.5 generates the image) instead of the
-		// Images API (gpt-image-1).
+		// (a chat model like gpt-5.6-sol generates the image) instead of the
+		// Images API (gpt-image-2).
 		if openAIWantsResponses() {
 			return responsesOrNull(model, logger, "CHATCLI_IMAGE_PROVIDER=openai + API=responses but OPENAI_API_KEY is empty")
 		}
@@ -129,7 +130,7 @@ func NewFromEnvContext(ctx context.Context, logger *zap.Logger) Provider {
 		return bedrockOrNull(ctx, model, logger)
 	}
 	// Cloud fallbacks: any provider whose key is present. OpenAI first for
-	// back-compat, then Google (native Imagen) — so @image is not limited to a
+	// back-compat, then Google (Gemini image) — so @image is not limited to a
 	// single provider.
 	if key := strings.TrimSpace(os.Getenv("OPENAI_API_KEY")); key != "" {
 		if openAIWantsResponses() {
@@ -155,7 +156,7 @@ func NewFromEnvContext(ctx context.Context, logger *zap.Logger) Provider {
 // ResolveEditor returns an edit-capable provider for image editing. It first
 // honors the CONFIGURED backend (the one /model-image / CHATCLI_IMAGE_* selects)
 // so a single model choice serves both generation and editing. Only when that
-// backend cannot edit (xAI, Z.AI, MiniMax, Imagen-predict) does it route to an
+// backend cannot edit (xAI, Z.AI, MiniMax) does it route to an
 // edit-capable fallback, reporting the backend actually used so the caller can
 // tell the user a switch happened. Returns ok=false when no editor is reachable.
 func ResolveEditor(ctx context.Context, primary Provider, logger *zap.Logger) (ed Editor, used string, fellBack bool, ok bool) {

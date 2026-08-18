@@ -166,8 +166,8 @@ var envDefaults = map[string]envDefault{
 	// the model/dimensions defaults so /config can show what each provider
 	// would use if selected.
 	"CHATCLI_EMBED_PROVIDER":   {Value: "(off)", Source: "llm/embedding/factory.go (empty == null)"},
-	"CHATCLI_EMBED_MODEL":      {Value: "(provider-specific)", Source: "voyage-3 / text-embedding-3-small / amazon.titan-embed-text-v2:0"},
-	"CHATCLI_EMBED_DIMENSIONS": {Value: "(provider-default)", Source: "openai 1536, titan-v2 1024 (256/512/1024), titan-v1 1536, cohere-v3 1024"},
+	"CHATCLI_EMBED_MODEL":      {Value: "(provider-specific)", Source: "voyage-4 / text-embedding-3-small / gemini-embedding-2 / amazon.titan-embed-text-v2:0"},
+	"CHATCLI_EMBED_DIMENSIONS": {Value: "(provider-default)", Source: "openai 1536, google 3072 (128-3072), titan-v2 1024 (256/512/1024), titan-v1 1536, cohere-v3 1024, cohere-v4 1536, nova-mme 3072 (256/384/1024/3072)"},
 
 	// ─── Cost / budget ───────────────────────────────────────────
 	"CHATCLI_SESSION_BUDGET_USD": {Value: "(no budget)", Source: "cost_tracker.go"},
@@ -203,7 +203,7 @@ var envDefaults = map[string]envDefault{
 	"CHATCLI_IMAGE_PROVIDER":      {Value: "auto", Source: "imagegen.NewFromEnv"},
 	"CHATCLI_IMAGE_API":           {Value: "images", Source: "imagegen (images|responses)"},
 	"CHATCLI_IMAGE_URL":           {Value: "(none)", Source: "imagegen self-hosted endpoint"},
-	"CHATCLI_IMAGE_MODEL":         {Value: "gpt-image-1", Source: "imagegen.defaultImageModel"},
+	"CHATCLI_IMAGE_MODEL":         {Value: "gpt-image-2", Source: "imagegen.defaultImageModel"},
 	"CHATCLI_IMAGE_EDIT_PROVIDER": {Value: "(inherit)", Source: "imagegen edit fallback when active provider can't edit"},
 	"CHATCLI_IMAGE_EDIT_MODEL":    {Value: "(default)", Source: "imagegen edit fallback model"},
 

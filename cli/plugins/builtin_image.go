@@ -224,7 +224,7 @@ func (p *BuiltinImagePlugin) ExecuteWithStream(ctx context.Context, args []strin
 		// edit-capable fallback — reported below so the switch is explicit.
 		editor, used, fellBack, ok := imagegen.ResolveEditor(ctx, provider, nil)
 		if !ok {
-			return "", fmt.Errorf("@image: backend %q does not support image editing and no edit-capable fallback is configured. Editing backends: sdwebui (img2img, keyless), openai (gpt-image-1), google (Gemini image), bedrock (Stability/Nova). Set CHATCLI_IMAGE_EDIT_PROVIDER or switch the image provider. Generation-only: xai, zai, minimax", provider.Name())
+			return "", fmt.Errorf("@image: backend %q does not support image editing and no edit-capable fallback is configured. Editing backends: sdwebui (img2img, keyless), openai (gpt-image-2), google (Gemini image), bedrock (Stability/Nova). Set CHATCLI_IMAGE_EDIT_PROVIDER or switch the image provider. Generation-only: xai, zai, minimax", provider.Name())
 		}
 		inputs, err := loadInputImages(paths)
 		if err != nil {

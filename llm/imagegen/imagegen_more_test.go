@@ -161,7 +161,7 @@ func TestAspectRatio(t *testing.T) {
 }
 
 func TestKnownModels_NewIDs(t *testing.T) {
-	want := map[string]bool{"gpt-image-2": false, "gpt-image-1-mini": false, "grok-imagine-image": false, "imagen-4.0-generate-001": false, "gemini-2.5-flash-image": false, "amazon.nova-canvas-v1:0": false, "stability.sd3-5-large-v1:0": false}
+	want := map[string]bool{"gpt-image-2": false, "gpt-image-1-mini": false, "gpt-5.6-sol": false, "grok-imagine-image-2.0": false, "grok-imagine-image": false, "gemini-3.1-flash-image": false, "gemini-3.1-flash-lite-image": false, "gemini-2.5-flash-image": false, "amazon.nova-canvas-v1:0": false, "stability.sd3-5-large-v1:0": false}
 	for _, m := range KnownModels() {
 		if _, ok := want[m.Name]; ok {
 			want[m.Name] = true
