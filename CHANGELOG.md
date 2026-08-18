@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.188.0](https://github.com/diillson/chatcli/compare/v1.187.1...v1.188.0) (2026-08-18)
+
+
+### Features
+
+* **agent:** add [@embed](https://github.com/embed) tool for semantic text operations ([#1366](https://github.com/diillson/chatcli/issues/1366)) ([d0f5006](https://github.com/diillson/chatcli/commit/d0f5006758b5f231f356d017dedd3a1f60122a47))
+* **models:** refresh image and embedding catalogs for Aug 2026 ([#1363](https://github.com/diillson/chatcli/issues/1363)) ([9c4be6b](https://github.com/diillson/chatcli/commit/9c4be6b6bc085dc46798605d3f21945d9b43ebd9))
+
 ## [1.187.1](https://github.com/diillson/chatcli/compare/v1.187.0...v1.187.1) (2026-08-16)
 
 
