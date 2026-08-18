@@ -251,11 +251,11 @@ func parseEmbedTextArgs(inner string) ([]string, string, error) {
 // line, creating parent directories as needed.
 func writeVectorsJSONL(path string, texts []string, vecs [][]float32) error {
 	if dir := filepath.Dir(path); dir != "" && dir != "." {
-		if err := os.MkdirAll(dir, 0o755); err != nil {
+		if err := os.MkdirAll(dir, 0o750); err != nil {
 			return err
 		}
 	}
-	f, err := os.Create(path)
+	f, err := os.Create(path) // #nosec G304 -- caller-chosen output path; writing vectors where the user asked is the subcommand's purpose (same policy as @image/@diagram outputs)
 	if err != nil {
 		return err
 	}
