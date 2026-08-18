@@ -588,6 +588,11 @@ func NewChatCLI(ctx context.Context, manager manager.LLMManager, logger *zap.Log
 		// @image — text-to-image generation to a file (self-hosted/keyless
 		// first via Stable Diffusion WebUI). Self-contained via llm/imagegen.
 		pluginMgr.RegisterBuiltinPlugin(plugins.NewBuiltinImagePlugin())
+		// @embed — ad-hoc semantic text operations (similarity, ranking,
+		// raw vectors) over the configured embedding backend. Persistent
+		// RAG stays with @context/@knowledge. Self-contained via
+		// llm/embedding; no adapter wiring needed.
+		pluginMgr.RegisterBuiltinPlugin(plugins.NewBuiltinEmbedPlugin())
 		// @skill — self-authoring skills: the agent writes/evolves its own
 		// skills from what it learns, persisted to the global skills dir and
 		// auto-activated in future sessions. Self-contained.
