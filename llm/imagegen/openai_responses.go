@@ -4,11 +4,11 @@
  * License: Apache-2.0
  *
  * Unlike the Images API (/images/generations, used by the dedicated image
- * models like gpt-image-1), the Responses API lets a general chat/reasoning
- * model (e.g. gpt-5.5) generate images via the built-in image_generation tool:
+ * models like gpt-image-2), the Responses API lets a general chat/reasoning
+ * model (e.g. gpt-5.6-sol) generate images via the built-in image_generation tool:
  *
  *   POST {base}/responses
- *   { "model": "gpt-5.5", "input": "<prompt>", "tools": [{"type":"image_generation"}] }
+ *   { "model": "gpt-5.6-sol", "input": "<prompt>", "tools": [{"type":"image_generation"}] }
  *
  * The response's output array contains an "image_generation_call" item whose
  * "result" is a base64 PNG. This backend covers that path so users can pick
@@ -55,7 +55,7 @@ func NewOpenAIResponses(baseURL, apiKey, model string, logger *zap.Logger) (*Ope
 		return nil, fmt.Errorf("imagegen: API key is required for the Responses API")
 	}
 	if strings.TrimSpace(model) == "" {
-		model = "gpt-5.5"
+		model = "gpt-5.6-sol"
 	}
 	if logger == nil {
 		logger = zap.NewNop()

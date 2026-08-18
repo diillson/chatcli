@@ -10,11 +10,17 @@
  *
  *   - Titan v1 / v2 (amazon.titan-embed-text-*): single text per call,
  *     dimension knob on v2 (256 / 512 / 1024).
- *   - Cohere v3 (cohere.embed-*): batch-native, 1024-dim fixed.
+ *   - Cohere v3 (cohere.embed-*-v3): batch-native, 1024-dim fixed.
+ *   - Cohere v4 (cohere.embed-v4:0, optionally us./eu./global. profile):
+ *     batch-native, embeddings come back keyed by type ({"float": [...]}),
+ *     1536-dim default.
+ *   - Nova Multimodal Embeddings (amazon.nova-2-multimodal-embeddings-*):
+ *     single text per call (SINGLE_EMBEDDING task), dimension knob
+ *     (256 / 384 / 1024 / 3072).
  *
- * For Titan, batches are parallelized with a small worker pool to
- * stay within Bedrock's per-account InvokeModel concurrency budget
- * without serializing IO.
+ * For the single-text families, batches are parallelized with a small
+ * worker pool to stay within Bedrock's per-account InvokeModel
+ * concurrency budget without serializing IO.
  */
 package embedding
 
@@ -42,12 +48,15 @@ const (
 	titanV2DefaultDim = 1024
 	titanV1Dim        = 1536
 	cohereV3Dim       = 1024
-	// bedrockTitanBatchConcurrency caps how many parallel InvokeModel
-	// calls the provider issues for Titan when the caller hands in a
-	// batch. 8 is a defensive default that lands well under typical
-	// Bedrock account quotas while still hiding most of the per-call
-	// latency behind concurrency.
-	bedrockTitanBatchConcurrency = 8
+	cohereV4Dim       = 1536
+	novaMMEDefaultDim = 3072
+	// bedrockSingleBatchConcurrency caps how many parallel InvokeModel
+	// calls the provider issues for the single-text-per-call families
+	// (Titan, Nova MME) when the caller hands in a batch. 8 is a
+	// defensive default that lands well under typical Bedrock account
+	// quotas while still hiding most of the per-call latency behind
+	// concurrency.
+	bedrockSingleBatchConcurrency = 8
 )
 
 // embedFamily identifies the body schema for a Bedrock embedding model.
@@ -56,6 +65,7 @@ type embedFamily string
 const (
 	embedFamilyTitan  embedFamily = "titan"
 	embedFamilyCohere embedFamily = "cohere"
+	embedFamilyNova   embedFamily = "nova"
 )
 
 // Bedrock is the AWS Bedrock embeddings provider.
@@ -88,7 +98,8 @@ type Bedrock struct {
 // NewBedrock constructs the provider. region/profile follow the same
 // precedence as the chat client (caller resolves env vars). When dim
 // is 0, the family default is used (Titan v2: 1024, Titan v1: 1536,
-// Cohere v3: 1024). A nil logger is replaced with zap.NewNop().
+// Cohere v3: 1024, Cohere v4: 1536, Nova MME: 3072). A nil logger is
+// replaced with zap.NewNop().
 func NewBedrock(model, region, profile string, dim int, logger *zap.Logger) (*Bedrock, error) {
 	if logger == nil {
 		logger = zap.NewNop()
@@ -102,6 +113,9 @@ func NewBedrock(model, region, profile string, dim int, logger *zap.Logger) (*Be
 	}
 	if family == embedFamilyTitan && !isValidTitanDim(model, dim) {
 		return nil, fmt.Errorf("bedrock embeddings: invalid dimension %d for %s (Titan v2 supports 256/512/1024; v1 fixed at 1536)", dim, model)
+	}
+	if family == embedFamilyNova && !isValidNovaDim(dim) {
+		return nil, fmt.Errorf("bedrock embeddings: invalid dimension %d for %s (Nova Multimodal Embeddings supports 256/384/1024/3072)", dim, model)
 	}
 	return &Bedrock{
 		model:   model,
@@ -119,9 +133,9 @@ func (b *Bedrock) Name() string { return "bedrock:" + b.model }
 // Dimension returns the vector dimensionality.
 func (b *Bedrock) Dimension() int { return b.dim }
 
-// Embed converts the batch to vectors. Titan models loop with bounded
-// parallelism (one InvokeModel per text); Cohere ships the whole batch
-// in a single call.
+// Embed converts the batch to vectors. Titan and Nova MME models loop
+// with bounded parallelism (one InvokeModel per text); Cohere ships the
+// whole batch in a single call.
 func (b *Bedrock) Embed(ctx context.Context, texts []string) ([][]float32, error) {
 	if len(texts) == 0 {
 		return nil, nil
@@ -148,8 +162,10 @@ func (b *Bedrock) Embed(ctx context.Context, texts []string) ([][]float32, error
 	switch b.family {
 	case embedFamilyCohere:
 		out, err = b.embedCohere(ctx, texts)
+	case embedFamilyNova:
+		out, err = b.embedPerText(ctx, texts, "nova", b.invokeNova)
 	default:
-		out, err = b.embedTitan(ctx, texts)
+		out, err = b.embedPerText(ctx, texts, "titan", b.invokeTitan)
 	}
 	if err != nil {
 		return nil, b.classifyCredError(err)
@@ -242,24 +258,15 @@ func (b *Bedrock) ensureRuntime(ctx context.Context) error {
 	return b.initErr
 }
 
-// ── Titan family ────────────────────────────────────────────────────
+// ── Single-text families (Titan, Nova MME) ──────────────────────────
 
-type titanRequest struct {
-	InputText  string `json:"inputText"`
-	Dimensions int    `json:"dimensions,omitempty"`
-	Normalize  bool   `json:"normalize,omitempty"`
-}
-
-type titanResponse struct {
-	Embedding           []float32 `json:"embedding"`
-	InputTextTokenCount int       `json:"inputTextTokenCount"`
-}
-
-func (b *Bedrock) embedTitan(ctx context.Context, texts []string) ([][]float32, error) {
+// embedPerText fans the batch out over invoke with bounded parallelism
+// for the families whose API takes one text per InvokeModel call.
+func (b *Bedrock) embedPerText(ctx context.Context, texts []string, label string, invoke func(context.Context, string) ([]float32, error)) ([][]float32, error) {
 	out := make([][]float32, len(texts))
 	errs := make([]error, len(texts))
 
-	concurrency := bedrockTitanBatchConcurrency
+	concurrency := bedrockSingleBatchConcurrency
 	if concurrency > len(texts) {
 		concurrency = len(texts)
 	}
@@ -271,7 +278,7 @@ func (b *Bedrock) embedTitan(ctx context.Context, texts []string) ([][]float32, 
 		go func(idx int, in string) {
 			defer wg.Done()
 			defer func() { <-sem }()
-			vec, err := b.invokeTitan(ctx, in)
+			vec, err := invoke(ctx, in)
 			if err != nil {
 				errs[idx] = err
 				return
@@ -282,10 +289,23 @@ func (b *Bedrock) embedTitan(ctx context.Context, texts []string) ([][]float32, 
 	wg.Wait()
 	for i, err := range errs {
 		if err != nil {
-			return nil, fmt.Errorf("bedrock titan: index %d: %w", i, err)
+			return nil, fmt.Errorf("bedrock %s: index %d: %w", label, i, err)
 		}
 	}
 	return out, nil
+}
+
+// ── Titan family ────────────────────────────────────────────────────
+
+type titanRequest struct {
+	InputText  string `json:"inputText"`
+	Dimensions int    `json:"dimensions,omitempty"`
+	Normalize  bool   `json:"normalize,omitempty"`
+}
+
+type titanResponse struct {
+	Embedding           []float32 `json:"embedding"`
+	InputTextTokenCount int       `json:"inputTextTokenCount"`
 }
 
 func (b *Bedrock) invokeTitan(ctx context.Context, text string) ([]float32, error) {
@@ -316,16 +336,98 @@ func (b *Bedrock) invokeTitan(ctx context.Context, text string) ([]float32, erro
 	return parsed.Embedding, nil
 }
 
+// ── Nova Multimodal Embeddings family ───────────────────────────────
+
+// novaRequest is the SINGLE_EMBEDDING task shape of Nova Multimodal
+// Embeddings (amazon.nova-2-multimodal-embeddings). Only the text
+// modality is used here; segmentation and audio/video need the async
+// API and are out of scope for retrieval embeddings.
+type novaRequest struct {
+	TaskType              string              `json:"taskType"`
+	SingleEmbeddingParams novaEmbeddingParams `json:"singleEmbeddingParams"`
+}
+
+type novaEmbeddingParams struct {
+	EmbeddingPurpose   string       `json:"embeddingPurpose"`
+	EmbeddingDimension int          `json:"embeddingDimension"`
+	Text               novaTextSpec `json:"text"`
+}
+
+type novaTextSpec struct {
+	TruncationMode string `json:"truncationMode"`
+	Value          string `json:"value"`
+}
+
+type novaResponse struct {
+	Embeddings []struct {
+		EmbeddingType string    `json:"embeddingType"`
+		Embedding     []float32 `json:"embedding"`
+	} `json:"embeddings"`
+}
+
+func (b *Bedrock) invokeNova(ctx context.Context, text string) ([]float32, error) {
+	body := novaRequest{
+		TaskType: "SINGLE_EMBEDDING",
+		SingleEmbeddingParams: novaEmbeddingParams{
+			EmbeddingPurpose:   "GENERIC_INDEX",
+			EmbeddingDimension: b.dim,
+			Text:               novaTextSpec{TruncationMode: "END", Value: text},
+		},
+	}
+	payload, err := json.Marshal(body)
+	if err != nil {
+		return nil, fmt.Errorf("nova marshal: %w", err)
+	}
+	out, err := b.runtime.InvokeModel(ctx, &bedrockruntime.InvokeModelInput{
+		ModelId:     aws.String(b.model),
+		ContentType: aws.String("application/json"),
+		Accept:      aws.String("application/json"),
+		Body:        payload,
+	})
+	if err != nil {
+		return nil, err
+	}
+	var parsed novaResponse
+	if err := json.Unmarshal(out.Body, &parsed); err != nil {
+		return nil, fmt.Errorf("nova decode: %w", err)
+	}
+	if len(parsed.Embeddings) == 0 || len(parsed.Embeddings[0].Embedding) == 0 {
+		return nil, fmt.Errorf("nova: empty embedding in response")
+	}
+	return parsed.Embeddings[0].Embedding, nil
+}
+
 // ── Cohere family ───────────────────────────────────────────────────
 
 type cohereRequest struct {
 	Texts     []string `json:"texts"`
 	InputType string   `json:"input_type"`
 	Truncate  string   `json:"truncate,omitempty"`
+	// EmbeddingTypes is required by Embed v4 (whose response keys the
+	// vectors by type); v3 works without it and keeps its flat response,
+	// so it is only sent for v4.
+	EmbeddingTypes []string `json:"embedding_types,omitempty"`
 }
 
+// cohereResponse tolerates both Cohere response generations: v3 returns
+// "embeddings" as a plain array of vectors, v4 (embedding_types) keys
+// them by type ({"embeddings": {"float": [...]}}).
 type cohereResponse struct {
-	Embeddings [][]float32 `json:"embeddings"`
+	Embeddings json.RawMessage `json:"embeddings"`
+}
+
+func (r *cohereResponse) vectors() ([][]float32, error) {
+	var flat [][]float32
+	if err := json.Unmarshal(r.Embeddings, &flat); err == nil {
+		return flat, nil
+	}
+	var keyed struct {
+		Float [][]float32 `json:"float"`
+	}
+	if err := json.Unmarshal(r.Embeddings, &keyed); err != nil {
+		return nil, err
+	}
+	return keyed.Float, nil
 }
 
 func (b *Bedrock) embedCohere(ctx context.Context, texts []string) ([][]float32, error) {
@@ -333,6 +435,9 @@ func (b *Bedrock) embedCohere(ctx context.Context, texts []string) ([][]float32,
 		Texts:     texts,
 		InputType: "search_document",
 		Truncate:  "END",
+	}
+	if isCohereV4ID(b.model) {
+		body.EmbeddingTypes = []string{"float"}
 	}
 	payload, err := json.Marshal(body)
 	if err != nil {
@@ -351,10 +456,14 @@ func (b *Bedrock) embedCohere(ctx context.Context, texts []string) ([][]float32,
 	if err := json.Unmarshal(out.Body, &parsed); err != nil {
 		return nil, fmt.Errorf("cohere decode: %w", err)
 	}
-	if len(parsed.Embeddings) != len(texts) {
-		return nil, fmt.Errorf("cohere returned %d vectors for %d inputs", len(parsed.Embeddings), len(texts))
+	vecs, err := parsed.vectors()
+	if err != nil {
+		return nil, fmt.Errorf("cohere decode embeddings: %w", err)
 	}
-	return parsed.Embeddings, nil
+	if len(vecs) != len(texts) {
+		return nil, fmt.Errorf("cohere returned %d vectors for %d inputs", len(vecs), len(texts))
+	}
+	return vecs, nil
 }
 
 // ── Family + dim helpers ────────────────────────────────────────────
@@ -364,18 +473,43 @@ func resolveEmbedFamily(model string) embedFamily {
 	if strings.Contains(m, "cohere.embed") || strings.Contains(m, "cohere-embed") {
 		return embedFamilyCohere
 	}
+	// amazon.nova-2-multimodal-embeddings-v1:0, optionally behind an
+	// inference-profile prefix (us./eu./global.).
+	if strings.Contains(m, "nova") && strings.Contains(m, "embed") {
+		return embedFamilyNova
+	}
 	return embedFamilyTitan
 }
 
 func defaultDim(model string, family embedFamily) int {
 	switch family {
 	case embedFamilyCohere:
+		if isCohereV4ID(model) {
+			return cohereV4Dim
+		}
 		return cohereV3Dim
+	case embedFamilyNova:
+		return novaMMEDefaultDim
 	}
 	if isTitanV1ID(model) {
 		return titanV1Dim
 	}
 	return titanV2DefaultDim
+}
+
+// isCohereV4ID reports whether the model is Cohere Embed v4
+// (cohere.embed-v4:0, possibly profile-prefixed) as opposed to the v3
+// pair (cohere.embed-english-v3 / cohere.embed-multilingual-v3).
+func isCohereV4ID(model string) bool {
+	return strings.Contains(strings.ToLower(model), "embed-v4")
+}
+
+func isValidNovaDim(dim int) bool {
+	switch dim {
+	case 256, 384, 1024, 3072:
+		return true
+	}
+	return false
 }
 
 func (b *Bedrock) isTitanV2() bool {

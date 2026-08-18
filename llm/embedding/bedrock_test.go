@@ -24,8 +24,12 @@ func TestResolveEmbedFamily(t *testing.T) {
 		"amazon.titan-embed-image-v1":   embedFamilyTitan,
 		"cohere.embed-english-v3":       embedFamilyCohere,
 		"cohere.embed-multilingual-v3":  embedFamilyCohere,
+		"cohere.embed-v4:0":             embedFamilyCohere,
+		"global.cohere.embed-v4:0":      embedFamilyCohere,
 		"us.amazon.titan-embed-text-v2": embedFamilyTitan,
-		"":                              embedFamilyTitan, // default safety
+		"amazon.nova-2-multimodal-embeddings-v1:0":    embedFamilyNova,
+		"us.amazon.nova-2-multimodal-embeddings-v1:0": embedFamilyNova,
+		"": embedFamilyTitan, // default safety
 	}
 	for id, want := range cases {
 		if got := resolveEmbedFamily(id); got != want {
@@ -42,6 +46,8 @@ func TestDefaultDim(t *testing.T) {
 		{"amazon.titan-embed-text-v2:0", titanV2DefaultDim},
 		{"amazon.titan-embed-text-v1", titanV1Dim},
 		{"cohere.embed-english-v3", cohereV3Dim},
+		{"cohere.embed-v4:0", cohereV4Dim},
+		{"amazon.nova-2-multimodal-embeddings-v1:0", novaMMEDefaultDim},
 	}
 	for _, tc := range cases {
 		family := resolveEmbedFamily(tc.model)
@@ -94,6 +100,25 @@ func TestNewBedrock_DefaultsAndOverrides(t *testing.T) {
 func TestNewBedrock_RejectsInvalidTitanDim(t *testing.T) {
 	if _, err := NewBedrock("amazon.titan-embed-text-v2:0", "us-east-1", "", 999, nil); err == nil {
 		t.Fatal("expected error for invalid Titan v2 dimension")
+	}
+}
+
+func TestNewBedrock_NovaDims(t *testing.T) {
+	p, err := NewBedrock("amazon.nova-2-multimodal-embeddings-v1:0", "us-east-1", "", 0, nil)
+	if err != nil {
+		t.Fatalf("nova constructor: %v", err)
+	}
+	if p.family != embedFamilyNova {
+		t.Errorf("expected nova family; got %q", p.family)
+	}
+	if p.Dimension() != novaMMEDefaultDim {
+		t.Errorf("nova dim = %d, want %d", p.Dimension(), novaMMEDefaultDim)
+	}
+	if _, err := NewBedrock("amazon.nova-2-multimodal-embeddings-v1:0", "us-east-1", "", 384, nil); err != nil {
+		t.Errorf("384 must be a valid Nova dimension: %v", err)
+	}
+	if _, err := NewBedrock("amazon.nova-2-multimodal-embeddings-v1:0", "us-east-1", "", 512, nil); err == nil {
+		t.Error("expected error for invalid Nova dimension 512")
 	}
 }
 
@@ -154,6 +179,58 @@ func TestCohereRequestShape(t *testing.T) {
 	if got["input_type"] != "search_document" {
 		t.Errorf("input_type missing or wrong: %v", got["input_type"])
 	}
+	// v3 requests must NOT carry embedding_types (only v4 gets it).
+	if _, present := got["embedding_types"]; present {
+		t.Errorf("embedding_types must be omitted when unset: %v", got)
+	}
+}
+
+// TestNovaRequestShape pins the SINGLE_EMBEDDING body of Nova Multimodal
+// Embeddings — taskType + singleEmbeddingParams with purpose, dimension
+// and the text spec. AWS rejects malformed bodies, so shape drift would
+// break embeddings without us noticing.
+func TestNovaRequestShape(t *testing.T) {
+	body := novaRequest{
+		TaskType: "SINGLE_EMBEDDING",
+		SingleEmbeddingParams: novaEmbeddingParams{
+			EmbeddingPurpose:   "GENERIC_INDEX",
+			EmbeddingDimension: 3072,
+			Text:               novaTextSpec{TruncationMode: "END", Value: "hello"},
+		},
+	}
+	raw, err := json.Marshal(body)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	var got map[string]interface{}
+	if err := json.Unmarshal(raw, &got); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if got["taskType"] != "SINGLE_EMBEDDING" {
+		t.Errorf("taskType missing or wrong: %v", got["taskType"])
+	}
+	params, ok := got["singleEmbeddingParams"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("singleEmbeddingParams missing: %v", got)
+	}
+	if params["embeddingPurpose"] != "GENERIC_INDEX" || params["embeddingDimension"].(float64) != 3072 {
+		t.Errorf("params wrong: %v", params)
+	}
+	text, ok := params["text"].(map[string]interface{})
+	if !ok || text["value"] != "hello" || text["truncationMode"] != "END" {
+		t.Errorf("text spec wrong: %v", params["text"])
+	}
+}
+
+func TestNovaResponseDecode(t *testing.T) {
+	raw := []byte(`{"embeddings":[{"embeddingType":"TEXT","embedding":[0.1,0.2,0.3]}]}`)
+	var parsed novaResponse
+	if err := json.Unmarshal(raw, &parsed); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(parsed.Embeddings) != 1 || len(parsed.Embeddings[0].Embedding) != 3 {
+		t.Errorf("nova response wrong: %+v", parsed)
+	}
 }
 
 // TestTitanResponseDecode pins the parser against the canonical Titan v2
@@ -173,13 +250,32 @@ func TestTitanResponseDecode(t *testing.T) {
 }
 
 func TestCohereResponseDecode(t *testing.T) {
+	// v3 shape: embeddings is a plain array of vectors.
 	raw := []byte(`{"embeddings":[[0.1,0.2],[0.3,0.4]]}`)
 	var parsed cohereResponse
 	if err := json.Unmarshal(raw, &parsed); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
-	if len(parsed.Embeddings) != 2 {
-		t.Errorf("expected 2 vectors; got %d", len(parsed.Embeddings))
+	vecs, err := parsed.vectors()
+	if err != nil {
+		t.Fatalf("vectors: %v", err)
+	}
+	if len(vecs) != 2 {
+		t.Errorf("expected 2 vectors; got %d", len(vecs))
+	}
+
+	// v4 shape (embedding_types): vectors keyed by type.
+	raw = []byte(`{"embeddings":{"float":[[0.1,0.2],[0.3,0.4],[0.5,0.6]]}}`)
+	parsed = cohereResponse{}
+	if err := json.Unmarshal(raw, &parsed); err != nil {
+		t.Fatalf("decode v4: %v", err)
+	}
+	vecs, err = parsed.vectors()
+	if err != nil {
+		t.Fatalf("vectors v4: %v", err)
+	}
+	if len(vecs) != 3 || vecs[2][1] != 0.6 {
+		t.Errorf("v4 vectors wrong: %v", vecs)
 	}
 }
 

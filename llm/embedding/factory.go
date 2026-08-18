@@ -20,13 +20,14 @@ import (
 // ErrUnknownProvider.
 //
 // Required env vars per provider:
-//   - voyage: VOYAGE_API_KEY (model: CHATCLI_EMBED_MODEL or "voyage-3")
+//   - voyage: VOYAGE_API_KEY (model: CHATCLI_EMBED_MODEL or "voyage-4")
 //   - openai: OPENAI_API_KEY (model: CHATCLI_EMBED_MODEL or
 //     "text-embedding-3-small"; dim: CHATCLI_EMBED_DIMENSIONS)
 //   - bedrock: AWS credential chain (AWS_PROFILE / AWS_ACCESS_KEY_ID /
 //     IAM role); model: CHATCLI_EMBED_MODEL or "amazon.titan-embed-text-v2:0";
-//     dim: CHATCLI_EMBED_DIMENSIONS (Titan v2: 256/512/1024); region:
-//     BEDROCK_REGION or AWS_REGION; profile: AWS_PROFILE.
+//     dim: CHATCLI_EMBED_DIMENSIONS (Titan v2: 256/512/1024; Nova MME:
+//     256/384/1024/3072); region: BEDROCK_REGION or AWS_REGION;
+//     profile: AWS_PROFILE.
 func NewByName(name string) (Provider, error) {
 	switch NormalizeName(name) {
 	case "", "null", "off":

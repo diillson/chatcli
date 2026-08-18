@@ -27,10 +27,11 @@ import (
 )
 
 const (
-	// defaultImageModel is OpenAI's current image model. dall-e-3 is legacy and
-	// not available on newer accounts; gpt-image-1 is the current default and
-	// returns b64_json (no response_format needed).
-	defaultImageModel = "gpt-image-1"
+	// defaultImageModel is OpenAI's current image model. dall-e was retired and
+	// the rest of the gpt-image family is deprecated (gpt-image-1 shuts down
+	// 2026-10-23; 1.5/1-mini 2026-12-01) — gpt-image-2 is the replacement for
+	// all of them and returns b64_json (no response_format needed).
+	defaultImageModel = "gpt-image-2"
 	imageGenTimeout   = 180 * time.Second
 	imagesPath        = "/images/generations"
 	imagesEditPath    = "/images/edits"

@@ -36,27 +36,33 @@ type ModelInfo struct {
 func KnownModels() []ModelInfo {
 	return []ModelInfo{
 		// OpenAI Images API (gpt-image family). May require org verification.
-		// DALL-E 2/3 were retired (dall-e-3 on 2026-03-04; both shut down
-		// 2026-05-12) — removed, they only error now. Use the gpt-image family.
-		{Name: "gpt-image-2", Provider: "openai", API: "images", Note: "Newest OpenAI image model — adds reasoning (Images API)."},
-		{Name: "gpt-image-1.5", Provider: "openai", API: "images", Note: "OpenAI Images API."},
-		{Name: "gpt-image-1", Provider: "openai", API: "images", Note: "OpenAI Images API (broadly available; default)."},
-		{Name: "gpt-image-1-mini", Provider: "openai", API: "images", Note: "Smaller/cheaper OpenAI image model."},
-		// OpenAI Responses API (a chat model generates via the image_generation tool).
+		// DALL-E 2/3 were retired (shut down 2026-05-12) — removed, they only
+		// error now. The rest of the gpt-image family is deprecated in favor of
+		// gpt-image-2: gpt-image-1 shuts down 2026-10-23; gpt-image-1.5,
+		// gpt-image-1-mini and chatgpt-image-latest shut down 2026-12-01.
+		{Name: "gpt-image-2", Provider: "openai", API: "images", Note: "Newest OpenAI image model — adds reasoning (Images API; default)."},
+		{Name: "gpt-image-1.5", Provider: "openai", API: "images", Note: "OpenAI Images API (deprecated; shuts down 2026-12-01)."},
+		{Name: "gpt-image-1", Provider: "openai", API: "images", Note: "OpenAI Images API (deprecated; shuts down 2026-10-23)."},
+		{Name: "gpt-image-1-mini", Provider: "openai", API: "images", Note: "Smaller/cheaper OpenAI image model (deprecated; shuts down 2026-12-01)."},
+		// OpenAI Responses API (a chat model generates via the image_generation
+		// tool). gpt-5 base models are deprecated (shutdown 2026-12-11) —
+		// replaced by the gpt-5.6 family (sol/terra/luna), all image-capable.
+		{Name: "gpt-5.6-sol", Provider: "openai", API: "responses", Note: "OpenAI flagship w/ image_generation tool (Responses API; default)."},
+		{Name: "gpt-5.6-terra", Provider: "openai", API: "responses", Note: "Mid-tier gpt-5.6 w/ image_generation tool (Responses API)."},
+		{Name: "gpt-5.6-luna", Provider: "openai", API: "responses", Note: "Cheapest gpt-5.6 w/ image_generation tool (Responses API)."},
 		{Name: "gpt-5.5", Provider: "openai", API: "responses", Note: "Chat model w/ image_generation tool (Responses API)."},
-		{Name: "gpt-5", Provider: "openai", API: "responses", Note: "gpt-5 and newer support the image_generation tool."},
-		// Google Imagen (:predict, generation-only). Imagen 3 was retired from the
-		// Gemini API (only 404s now) — Imagen 4 is the current family.
-		{Name: "imagen-4.0-generate-001", Provider: "google", API: "native", Note: "Google Imagen 4 (predict; default)."},
-		{Name: "imagen-4.0-ultra-generate-001", Provider: "google", API: "native", Note: "Google Imagen 4 Ultra (predict; highest quality)."},
-		{Name: "imagen-4.0-fast-generate-001", Provider: "google", API: "native", Note: "Google Imagen 4 Fast (predict; cheapest/fast)."},
-		// Google Gemini image models (:generateContent — text-to-image AND editing).
-		{Name: "gemini-2.5-flash-image", Provider: "google", API: "gemini", Note: "Gemini 2.5 Flash Image (gen + edit; default editor)."},
-		{Name: "gemini-3-pro-image", Provider: "google", API: "gemini", Note: "Gemini 3 Pro Image (gen + edit; highest quality)."},
-		{Name: "gemini-3.1-flash-image", Provider: "google", API: "gemini", Note: "Gemini 3.1 Flash Image (gen + edit; fast)."},
+		// Google Gemini image models (:generateContent — text-to-image AND
+		// editing, "Nano Banana"). The whole Imagen :predict family was shut
+		// down on 2026-08-17 (Google's stated replacement is
+		// gemini-3.1-flash-image) — Imagen entries removed, they only 404 now.
+		{Name: "gemini-3.1-flash-image", Provider: "google", API: "gemini", Note: "Gemini 3.1 Flash Image / Nano Banana 2 (gen + edit; default)."},
+		{Name: "gemini-3.1-flash-lite-image", Provider: "google", API: "gemini", Note: "Gemini 3.1 Flash-Lite Image (gen + edit; fastest/cheapest)."},
+		{Name: "gemini-3-pro-image", Provider: "google", API: "gemini", Note: "Gemini 3 Pro Image (gen + edit; studio-quality 4K)."},
+		{Name: "gemini-2.5-flash-image", Provider: "google", API: "gemini", Note: "Gemini 2.5 Flash Image (deprecated; shuts down 2026-10-02)."},
 		// xAI. grok-2-image was retired and grok-imagine-image-quality is async
 		// (it resets the connection on /images/generations → EOF) — removed.
-		{Name: "grok-imagine-image", Provider: "xai", API: "native", Note: "xAI Grok Imagine (OpenAI-shaped /images/generations, no size; URL response)."},
+		{Name: "grok-imagine-image-2.0", Provider: "xai", API: "native", Note: "xAI Grok Imagine 2.0 (newest; OpenAI-shaped /images/generations, no size; URL response; default)."},
+		{Name: "grok-imagine-image", Provider: "xai", API: "native", Note: "xAI Grok Imagine (cheaper; OpenAI-shaped /images/generations, no size; URL response)."},
 		// Z.AI (Zhipu) — OpenAI-shaped /images/generations, returns image URLs.
 		// cogview-3-flash is China-only (open.bigmodel.cn) and not on api.z.ai — omitted.
 		{Name: "glm-image", Provider: "zai", API: "images", Note: "Z.AI GLM-Image (newest; bilingual text-in-image; default)."},
@@ -64,13 +70,13 @@ func KnownModels() []ModelInfo {
 		// MiniMax (Hailuo) — custom /v1/image_generation endpoint, base64 response.
 		{Name: "image-01", Provider: "minimax", API: "native", Note: "MiniMax Image-01 (text-to-image, up to 9 images)."},
 		// AWS Bedrock (InvokeModel). Current Stability models use the text-to-image
-		// shape; the Amazon TEXT_IMAGE models are legacy (AWS recommends migrating
-		// to Stability Core/Ultra/SD3.5 — Nova Canvas EOL 2026-09-30).
+		// shape; the Amazon TEXT_IMAGE models are legacy with no first-party
+		// successor (the Nova 2 family has no image-gen model). Titan Image v2
+		// hit EOL 2026-06-30 (requests fail) — removed.
 		{Name: "stability.stable-image-core-v1:1", Provider: "bedrock", API: "stability", Note: "Bedrock Stability Stable Image Core (current; cheapest, fast; default)."},
 		{Name: "stability.stable-image-ultra-v1:1", Provider: "bedrock", API: "stability", Note: "Bedrock Stability Stable Image Ultra (current; highest quality)."},
 		{Name: "stability.sd3-5-large-v1:0", Provider: "bedrock", API: "stability", Note: "Bedrock Stability SD3.5 Large (current; flagship)."},
 		{Name: "amazon.nova-canvas-v1:0", Provider: "bedrock", API: "native", Note: "Bedrock Nova Canvas (TEXT_IMAGE; LEGACY, EOL 2026-09-30)."},
-		{Name: "amazon.titan-image-generator-v2:0", Provider: "bedrock", API: "native", Note: "Bedrock Titan Image v2 (TEXT_IMAGE; LEGACY, EOL 2026-06-30)."},
 	}
 }
 

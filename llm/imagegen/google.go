@@ -4,10 +4,12 @@
  * License: Apache-2.0
  *
  * Google's image API does NOT speak the OpenAI shape, so it needs its own
- * backend: POST {base}/v1beta/models/{model}:predict?key=KEY with
- * {instances:[{prompt}], parameters:{sampleCount}} returning
- * {predictions:[{bytesBase64Encoded, mimeType}]}. This is what lets @image use
- * Gemini/Imagen instead of being limited to OpenAI-shaped backends.
+ * backend. Gemini image models ("Nano Banana", the current family) generate
+ * and edit via :generateContent with an IMAGE response modality; the legacy
+ * Imagen :predict path ({instances:[{prompt}]} → {predictions:[...]}) is kept
+ * only for pinned imagen-* ids — Google shut the Imagen family down on
+ * 2026-08-17. This is what lets @image use Gemini instead of being limited to
+ * OpenAI-shaped backends.
  */
 package imagegen
 
@@ -28,14 +30,12 @@ import (
 
 const (
 	googleImageBase = "https://generativelanguage.googleapis.com"
-	// defaultImagenModel is the current Imagen generation model. Imagen 3
-	// (imagen-3.0-generate-002) was retired from the Gemini API and only 404s
-	// now; Imagen 4 is the current family.
-	defaultImagenModel = "imagen-4.0-generate-001"
-	// defaultGeminiImageModel is a Gemini image model ("Nano Banana") that
-	// edits via :generateContent with an inline input image. Imagen's :predict
-	// endpoint is generation-only, so editing routes through this model.
-	defaultGeminiImageModel = "gemini-2.5-flash-image"
+	// defaultGeminiImageModel is the current Gemini image model ("Nano Banana
+	// 2"), generating AND editing via :generateContent. It is the default for
+	// both because the whole Imagen :predict family was shut down on
+	// 2026-08-17 (Google's stated replacement is this model); pinned imagen-*
+	// ids still route to :predict and surface Google's own error.
+	defaultGeminiImageModel = "gemini-3.1-flash-image"
 )
 
 // Google generates images via the Imagen predict endpoint.
@@ -52,7 +52,7 @@ func NewGoogle(apiKey, model string, logger *zap.Logger) (*Google, error) {
 		return nil, fmt.Errorf("imagegen: Google API key is required")
 	}
 	if strings.TrimSpace(model) == "" {
-		model = defaultImagenModel
+		model = defaultGeminiImageModel
 	}
 	if logger == nil {
 		logger = zap.NewNop()
