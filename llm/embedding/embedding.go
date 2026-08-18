@@ -9,8 +9,10 @@
  * Providers wired in this package:
  *   - voyage  : Voyage AI (Anthropic-recommended, best quality/$)
  *   - openai  : OpenAI text-embedding-3-small (256/512/1024/1536 dim)
- *   - bedrock : AWS Bedrock — Titan v1/v2 (single-text) and Cohere v3
- *               (batch); reuses the chat client's AWS credential chain.
+ *   - google  : Gemini API gemini-embedding-2 (128–3072 dim, Matryoshka)
+ *   - bedrock : AWS Bedrock — Titan v1/v2 and Nova MME (single-text),
+ *               Cohere v3/v4 (batch); reuses the chat client's AWS
+ *               credential chain.
  *   - null    : default no-op (returned when no provider is configured)
  */
 package embedding

@@ -135,7 +135,7 @@ func (cli *ChatCLI) ensureHyDEVectors(qcfg quality.Config) {
 	provider := cli.hydeProviderForSession()
 	if embedding.IsNull(provider) {
 		cli.logger.Info("HyDE vectors requested but no embedding provider configured; using keyword-only retrieval",
-			zap.String("hint", "set CHATCLI_EMBED_PROVIDER=voyage|openai|bedrock"))
+			zap.String("hint", "set CHATCLI_EMBED_PROVIDER=voyage|openai|google|bedrock"))
 		return
 	}
 	memDir := ""

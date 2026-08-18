@@ -13,20 +13,25 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"net/url"
+	"strings"
 	"testing"
 	"time"
 )
 
 func TestResolveEmbedFamily(t *testing.T) {
 	cases := map[string]embedFamily{
-		"amazon.titan-embed-text-v2:0":  embedFamilyTitan,
-		"amazon.titan-embed-text-v1":    embedFamilyTitan,
-		"amazon.titan-embed-image-v1":   embedFamilyTitan,
-		"cohere.embed-english-v3":       embedFamilyCohere,
-		"cohere.embed-multilingual-v3":  embedFamilyCohere,
-		"cohere.embed-v4:0":             embedFamilyCohere,
-		"global.cohere.embed-v4:0":      embedFamilyCohere,
-		"us.amazon.titan-embed-text-v2": embedFamilyTitan,
+		"amazon.titan-embed-text-v2:0":                embedFamilyTitan,
+		"amazon.titan-embed-text-v1":                  embedFamilyTitan,
+		"amazon.titan-embed-image-v1":                 embedFamilyTitan,
+		"cohere.embed-english-v3":                     embedFamilyCohere,
+		"cohere.embed-multilingual-v3":                embedFamilyCohere,
+		"cohere.embed-v4:0":                           embedFamilyCohere,
+		"global.cohere.embed-v4:0":                    embedFamilyCohere,
+		"us.amazon.titan-embed-text-v2":               embedFamilyTitan,
 		"amazon.nova-2-multimodal-embeddings-v1:0":    embedFamilyNova,
 		"us.amazon.nova-2-multimodal-embeddings-v1:0": embedFamilyNova,
 		"": embedFamilyTitan, // default safety
@@ -230,6 +235,93 @@ func TestNovaResponseDecode(t *testing.T) {
 	}
 	if len(parsed.Embeddings) != 1 || len(parsed.Embeddings[0].Embedding) != 3 {
 		t.Errorf("nova response wrong: %+v", parsed)
+	}
+}
+
+// TestEmbed_EndToEnd exercises the real InvokeModel path of every
+// family against a local httptest server via BEDROCK_BASE_URL. Static
+// SigV4 env creds are used because the runtime SDK refuses bearer
+// tokens over plain HTTP (httptest serves HTTP).
+func TestEmbed_EndToEnd(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		path, _ := url.PathUnescape(r.URL.Path)
+		w.Header().Set("content-type", "application/json")
+		switch {
+		case strings.Contains(path, "titan-embed"):
+			if !strings.Contains(string(body), "inputText") {
+				w.WriteHeader(http.StatusBadRequest)
+				return
+			}
+			_, _ = w.Write([]byte(`{"embedding":[0.1,0.2],"inputTextTokenCount":2}`))
+		case strings.Contains(path, "nova-2-multimodal"):
+			if !strings.Contains(string(body), "SINGLE_EMBEDDING") {
+				w.WriteHeader(http.StatusBadRequest)
+				return
+			}
+			_, _ = w.Write([]byte(`{"embeddings":[{"embeddingType":"TEXT","embedding":[0.5,0.6]}]}`))
+		case strings.Contains(path, "embed-v4"):
+			// v4 must request typed embeddings and gets the keyed shape.
+			if !strings.Contains(string(body), "embedding_types") {
+				w.WriteHeader(http.StatusBadRequest)
+				return
+			}
+			_, _ = w.Write([]byte(`{"embeddings":{"float":[[0.1],[0.2]]}}`))
+		case strings.Contains(path, "embed-english-v3"):
+			// v3 must NOT send embedding_types and gets the flat shape.
+			if strings.Contains(string(body), "embedding_types") {
+				w.WriteHeader(http.StatusBadRequest)
+				return
+			}
+			_, _ = w.Write([]byte(`{"embeddings":[[0.1],[0.2]]}`))
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer srv.Close()
+
+	t.Setenv("BEDROCK_BASE_URL", srv.URL)
+	t.Setenv("AWS_BEARER_TOKEN_BEDROCK", "")
+	t.Setenv("AWS_REGION", "us-east-1")
+	t.Setenv("AWS_ACCESS_KEY_ID", "test-access-key")
+	t.Setenv("AWS_SECRET_ACCESS_KEY", "test-secret-key")
+	t.Setenv("AWS_SESSION_TOKEN", "")
+	t.Setenv("AWS_PROFILE", "")
+
+	cases := []struct {
+		name    string
+		model   string
+		n       int
+		wantDim int
+	}{
+		{"titan", "amazon.titan-embed-text-v2:0", 3, 2},
+		{"nova", "amazon.nova-2-multimodal-embeddings-v1:0", 2, 2},
+		{"cohere-v3", "cohere.embed-english-v3", 2, 1},
+		{"cohere-v4", "cohere.embed-v4:0", 2, 1},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			p, err := NewBedrock(tc.model, "us-east-1", "", 0, nil)
+			if err != nil {
+				t.Fatalf("constructor: %v", err)
+			}
+			texts := make([]string, tc.n)
+			for i := range texts {
+				texts[i] = fmt.Sprintf("text %d", i)
+			}
+			vecs, err := p.Embed(context.Background(), texts)
+			if err != nil {
+				t.Fatalf("embed: %v", err)
+			}
+			if len(vecs) != tc.n {
+				t.Fatalf("got %d vectors for %d inputs", len(vecs), tc.n)
+			}
+			for i, v := range vecs {
+				if len(v) != tc.wantDim {
+					t.Errorf("vector %d has dim %d, want %d", i, len(v), tc.wantDim)
+				}
+			}
+		})
 	}
 }
 
