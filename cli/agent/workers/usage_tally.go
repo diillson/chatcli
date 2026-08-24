@@ -8,22 +8,34 @@ package workers
 import (
 	"context"
 	"fmt"
-	"sync"
 
 	"github.com/diillson/chatcli/llm/client"
 	"github.com/diillson/chatcli/models"
 )
 
-// UsageRecorder receives the summed token usage of one worker run so the
+// UsageRecorder receives the token usage of ONE worker LLM call so the
 // session cost tracker can account for subagent spend — historically the
-// largest untracked slice of an agent-mode session.
+// largest untracked slice of an agent-mode session. Called per call, not
+// per worker run: merging N calls into one UsageInfo would collapse the
+// tracker's per-call provider-billed accounting (one call carrying
+// usage.cost would mark ALL merged tokens as billed), and per-call
+// recording also keeps the tracker live mid-run so the budget gate sees
+// spend as it happens instead of only when the worker finishes.
 type UsageRecorder func(provider, model string, usage *models.UsageInfo)
+
+// BudgetGate is consulted before every worker LLM call; a non-nil error
+// refuses the call (the session budget hard stop). Kept as a callback so
+// the workers package stays decoupled from the CLI's cost tracker.
+type BudgetGate func() error
 
 // usageRecorderBox wraps the recorder func so Dispatcher can hold it via a
 // comparable pointer field.
 type usageRecorderBox struct{ fn UsageRecorder }
 
-// SetUsageRecorder wires the callback that receives each worker's summed
+// budgetGateBox wraps the gate func so Dispatcher stays comparable.
+type budgetGateBox struct{ fn BudgetGate }
+
+// SetUsageRecorder wires the callback that receives each worker LLM call's
 // usage, attributed to the provider+model that actually served the worker.
 // Nil disables recording (the default).
 func (d *Dispatcher) SetUsageRecorder(fn UsageRecorder) {
@@ -34,75 +46,71 @@ func (d *Dispatcher) SetUsageRecorder(fn UsageRecorder) {
 	d.usageRecorder = &usageRecorderBox{fn: fn}
 }
 
-// usageTally accumulates the usage of every LLM call a worker makes.
-type usageTally struct {
-	mu    sync.Mutex
-	total models.UsageInfo
-	calls int
-}
-
-func (t *usageTally) add(u *models.UsageInfo) {
-	if u == nil {
+// SetBudgetGate wires the session budget hard stop into every worker LLM
+// call. Without it a dispatch wave in flight kept spending after the
+// budget was exhausted — up to a full ReAct loop per worker, times the
+// parallel wave. Nil disables the gate (the default).
+func (d *Dispatcher) SetBudgetGate(fn BudgetGate) {
+	if fn == nil {
+		d.budgetGate = nil
 		return
 	}
-	t.mu.Lock()
-	t.total.Merge(u)
-	t.calls++
-	t.mu.Unlock()
+	d.budgetGate = &budgetGateBox{fn: fn}
 }
 
-// take returns the accumulated usage, or nil when no call completed.
-func (t *usageTally) take() *models.UsageInfo {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	if t.calls == 0 {
-		return nil
+// recordingClient decorates a worker's LLM client so every SendPrompt /
+// SendPromptWithTools round-trip is (a) refused when the budget gate says
+// so and (b) recorded immediately — real API usage when the inner client
+// reports it, a character estimate otherwise. It preserves the tool-use
+// capability of the inner client (SupportsNativeTools answers for it), so
+// RunWorkerReAct routes exactly as it would undecorated.
+type recordingClient struct {
+	inner  client.LLMClient
+	record func(*models.UsageInfo) // never nil
+	gate   func() error            // may be nil (no budget gate)
+}
+
+func wrapWithUsageRecording(inner client.LLMClient, record func(*models.UsageInfo), gate func() error) client.LLMClient {
+	return &recordingClient{inner: inner, record: record, gate: gate}
+}
+
+func (rc *recordingClient) GetModelName() string { return rc.inner.GetModelName() }
+
+func (rc *recordingClient) SendPrompt(ctx context.Context, prompt string, history []models.Message, maxTokens int) (string, error) {
+	if rc.gate != nil {
+		if err := rc.gate(); err != nil {
+			return "", err
+		}
 	}
-	cp := t.total
-	return &cp
-}
-
-// tallyClient decorates an LLM client so every SendPrompt /
-// SendPromptWithTools round-trip lands in the tally — real API usage when
-// the inner client reports it, a character estimate otherwise. It preserves
-// the tool-use capability of the inner client (SupportsNativeTools answers
-// for it), so RunWorkerReAct routes exactly as it would undecorated.
-type tallyClient struct {
-	inner client.LLMClient
-	tally *usageTally
-}
-
-func wrapWithUsageTally(inner client.LLMClient, tally *usageTally) client.LLMClient {
-	return &tallyClient{inner: inner, tally: tally}
-}
-
-func (tc *tallyClient) GetModelName() string { return tc.inner.GetModelName() }
-
-func (tc *tallyClient) SendPrompt(ctx context.Context, prompt string, history []models.Message, maxTokens int) (string, error) {
-	resp, err := tc.inner.SendPrompt(ctx, prompt, history, maxTokens)
+	resp, err := rc.inner.SendPrompt(ctx, prompt, history, maxTokens)
 	if err == nil {
-		tc.tally.add(client.GetUsageOrEstimate(tc.inner, promptChars(prompt, history), len(resp)))
+		rc.record(client.GetUsageOrEstimate(rc.inner, promptChars(prompt, history), len(resp)))
 	}
 	return resp, err
 }
 
 // SendPromptWithTools delegates to the inner client's native tool path.
 // Only reachable when SupportsNativeTools() returned true.
-func (tc *tallyClient) SendPromptWithTools(ctx context.Context, prompt string, history []models.Message, tools []models.ToolDefinition, maxTokens int) (*models.LLMResponse, error) {
-	tac, ok := client.AsToolAware(tc.inner)
+func (rc *recordingClient) SendPromptWithTools(ctx context.Context, prompt string, history []models.Message, tools []models.ToolDefinition, maxTokens int) (*models.LLMResponse, error) {
+	tac, ok := client.AsToolAware(rc.inner)
 	if !ok {
 		return nil, fmt.Errorf("worker LLM client does not support native tools")
+	}
+	if rc.gate != nil {
+		if err := rc.gate(); err != nil {
+			return nil, err
+		}
 	}
 	resp, err := tac.SendPromptWithTools(ctx, prompt, history, tools, maxTokens)
 	if err == nil {
 		if resp != nil && resp.Usage != nil {
-			tc.tally.add(resp.Usage)
+			rc.record(resp.Usage)
 		} else {
 			outChars := 0
 			if resp != nil {
 				outChars = len(resp.Content)
 			}
-			tc.tally.add(client.GetUsageOrEstimate(tc.inner, promptChars(prompt, history), outChars))
+			rc.record(client.GetUsageOrEstimate(rc.inner, promptChars(prompt, history), outChars))
 		}
 	}
 	return resp, err
@@ -110,8 +118,8 @@ func (tc *tallyClient) SendPromptWithTools(ctx context.Context, prompt string, h
 
 // SupportsNativeTools answers for the inner client so the decorated client
 // keeps its exact routing behavior.
-func (tc *tallyClient) SupportsNativeTools() bool {
-	if tac, ok := client.AsToolAware(tc.inner); ok {
+func (rc *recordingClient) SupportsNativeTools() bool {
+	if tac, ok := client.AsToolAware(rc.inner); ok {
 		return tac.SupportsNativeTools()
 	}
 	return false
@@ -119,8 +127,8 @@ func (tc *tallyClient) SupportsNativeTools() bool {
 
 // LastUsage forwards the inner client's real usage so nested consumers of
 // the decorated client still see it.
-func (tc *tallyClient) LastUsage() *models.UsageInfo {
-	if uac, ok := client.AsUsageAware(tc.inner); ok {
+func (rc *recordingClient) LastUsage() *models.UsageInfo {
+	if uac, ok := client.AsUsageAware(rc.inner); ok {
 		return uac.LastUsage()
 	}
 	return nil
@@ -128,8 +136,8 @@ func (tc *tallyClient) LastUsage() *models.UsageInfo {
 
 // LastStopReason forwards the inner client's stop reason (the ReAct loop
 // uses it to detect max_tokens truncation).
-func (tc *tallyClient) LastStopReason() string {
-	if src, ok := client.AsStopReasonAware(tc.inner); ok {
+func (rc *recordingClient) LastStopReason() string {
+	if src, ok := client.AsStopReasonAware(rc.inner); ok {
 		return src.LastStopReason()
 	}
 	return ""

@@ -34,6 +34,10 @@ func (c *OpenAIClient) SupportsNativeTools() bool {
 
 // SendPromptWithTools sends a prompt with tool definitions via OpenAI's native tool calling API.
 func (c *OpenAIClient) SendPromptWithTools(ctx context.Context, prompt string, history []models.Message, tools []models.ToolDefinition, maxTokens int) (*models.LLMResponse, error) {
+	// Clear per-call usage so a call that reports none falls back to
+	// estimation instead of re-counting a previous call's tokens.
+	c.usageState.StoreUsage(nil)
+
 	effectiveMaxTokens := maxTokens
 	if effectiveMaxTokens <= 0 {
 		effectiveMaxTokens = c.getMaxTokens()
@@ -110,7 +114,13 @@ func (c *OpenAIClient) SendPromptWithTools(ctx context.Context, prompt string, h
 		zap.String("path", "tool_use"),
 		zap.Int("response_chars", len(resp)),
 	)
-	return parseToolResponse(resp, c.logger)
+	response, err := parseToolResponse(resp, c.logger)
+	if err == nil && response != nil && response.Usage != nil {
+		// Mirror the tool-path usage into the client state so LastUsage()
+		// reflects THIS call — agent mode reads it via GetUsageOrEstimate.
+		c.usageState.StoreUsage(response.Usage)
+	}
+	return response, err
 }
 
 // buildToolMessages constructs the messages array supporting tool calls and results.

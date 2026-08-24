@@ -772,7 +772,11 @@ func (cli *ChatCLI) handleChatTurnResult(
 	cli.persistBoundSession()
 
 	usage := client.GetUsageOrEstimate(activeClient, len(userInput+additionalContext), len(aiResponse))
-	if cli.costTracker != nil && !client.IsStreamingCapable(activeClient) {
+	// Skip the record when the chat-ask/knowledge exception already booked
+	// this turn per tool round — usage stays in hand for the envelope only.
+	alreadyRecorded := cli.turnUsageRecorded
+	cli.turnUsageRecorded = false
+	if cli.costTracker != nil && !client.IsStreamingCapable(activeClient) && !alreadyRecorded {
 		cli.costTracker.RecordRealUsage(resolution.Provider, resolution.Model, usage)
 	}
 	cli.renderAssistantResponse(activeClient, aiResponse, elapsed, usage, resolution.Provider, resolution.Model)

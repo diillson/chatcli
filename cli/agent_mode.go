@@ -4024,13 +4024,16 @@ func (a *AgentMode) initMultiAgent(ctx context.Context) bool {
 
 	a.agentDispatcher = workers.NewDispatcher(a.agentRegistry, a.cli.manager, cfg, a.logger)
 
-	// Every worker's LLM spend lands in the session cost tracker, attributed
-	// to the provider+model that served the worker — /cost covers subagents.
+	// Every worker's LLM spend lands in the session cost tracker per call,
+	// attributed to the provider+model that served the worker — /cost covers
+	// subagents live, and the budget hard stop reaches into in-flight
+	// dispatch waves instead of only gating the orchestrator's next turn.
 	if a.cli.costTracker != nil {
 		tracker := a.cli.costTracker
 		a.agentDispatcher.SetUsageRecorder(func(provider, model string, usage *models.UsageInfo) {
 			tracker.RecordRealUsage(provider, model, usage)
 		})
+		a.agentDispatcher.SetBudgetGate(a.cli.budgetBlockedErr)
 	}
 
 	// Attach policy enforcement so parallel workers respect security rules

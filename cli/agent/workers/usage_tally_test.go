@@ -1,5 +1,5 @@
 /*
- * ChatCLI - worker usage tally tests
+ * ChatCLI - worker usage recording tests
  * Copyright (c) 2024 Edilson Freitas
  * License: Apache-2.0
  */
@@ -7,6 +7,7 @@ package workers
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/diillson/chatcli/llm/client"
@@ -30,15 +31,17 @@ func (f *fakeWorkerClient) SupportsNativeTools() bool    { return f.tools }
 func (f *fakeWorkerClient) LastUsage() *models.UsageInfo { return f.usage }
 func (f *fakeWorkerClient) LastStopReason() string       { return "end_turn" }
 
-// TestTallyClientSumsEveryCall: two rounds through the wrapped client must
-// accumulate into one total the recorder can attribute.
-func TestTallyClientSumsEveryCall(t *testing.T) {
+// TestRecordingClientRecordsEveryCallSeparately: two rounds through the
+// wrapped client must land as TWO records — per-call recording is what
+// keeps the tracker's provider-billed accounting correct (a merged total
+// would let one billed call mark all tokens as billed).
+func TestRecordingClientRecordsEveryCallSeparately(t *testing.T) {
 	inner := &fakeWorkerClient{
 		usage: &models.UsageInfo{PromptTokens: 100, CompletionTokens: 20, TotalTokens: 120, IsReal: true},
 		tools: true,
 	}
-	tally := &usageTally{}
-	wrapped := wrapWithUsageTally(inner, tally)
+	var recorded []*models.UsageInfo
+	wrapped := wrapWithUsageRecording(inner, func(u *models.UsageInfo) { recorded = append(recorded, u) }, nil)
 
 	if _, err := wrapped.SendPrompt(context.Background(), "p", nil, 0); err != nil {
 		t.Fatal(err)
@@ -51,32 +54,55 @@ func TestTallyClientSumsEveryCall(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	total := tally.take()
-	if total == nil || total.PromptTokens != 200 || total.CompletionTokens != 40 || !total.IsReal {
-		t.Fatalf("tally = %+v, want 200/40 real", total)
+	if len(recorded) != 2 {
+		t.Fatalf("recorded %d calls, want 2 (per-call recording)", len(recorded))
+	}
+	for i, u := range recorded {
+		if u.PromptTokens != 100 || u.CompletionTokens != 20 || !u.IsReal {
+			t.Fatalf("call %d usage = %+v, want 100/20 real", i, u)
+		}
 	}
 }
 
-// TestTallyClientEstimatesWhenInnerSilent: a usage-less inner client still
-// produces a character estimate instead of zero.
-func TestTallyClientEstimatesWhenInnerSilent(t *testing.T) {
+// TestRecordingClientEstimatesWhenInnerSilent: a usage-less inner client
+// still produces a character estimate instead of zero.
+func TestRecordingClientEstimatesWhenInnerSilent(t *testing.T) {
 	inner := &fakeWorkerClient{usage: nil}
-	tally := &usageTally{}
-	wrapped := wrapWithUsageTally(inner, tally)
+	var recorded []*models.UsageInfo
+	wrapped := wrapWithUsageRecording(inner, func(u *models.UsageInfo) { recorded = append(recorded, u) }, nil)
 
 	if _, err := wrapped.SendPrompt(context.Background(), "a 40-character prompt string goes here!!", nil, 0); err != nil {
 		t.Fatal(err)
 	}
-	total := tally.take()
-	if total == nil || total.PromptTokens == 0 || total.IsReal {
-		t.Fatalf("estimate fallback broken: %+v", total)
+	if len(recorded) != 1 || recorded[0].PromptTokens == 0 || recorded[0].IsReal {
+		t.Fatalf("estimate fallback broken: %+v", recorded)
 	}
 }
 
-// TestTallyClientHidesToolsWhenInnerLacksThem: capability parity.
-func TestTallyClientHidesToolsWhenInnerLacksThem(t *testing.T) {
+// TestRecordingClientBudgetGateRefusesCalls: once the gate errors, no
+// provider call happens — the in-flight dispatch wave stops mid-run.
+func TestRecordingClientBudgetGateRefusesCalls(t *testing.T) {
+	inner := &fakeWorkerClient{tools: true}
+	blocked := errors.New("budget exhausted")
+	calls := 0
+	wrapped := wrapWithUsageRecording(inner, func(*models.UsageInfo) { calls++ }, func() error { return blocked })
+
+	if _, err := wrapped.SendPrompt(context.Background(), "p", nil, 0); !errors.Is(err, blocked) {
+		t.Fatalf("SendPrompt not gated: %v", err)
+	}
+	tac, _ := client.AsToolAware(wrapped)
+	if _, err := tac.SendPromptWithTools(context.Background(), "p", nil, nil, 0); !errors.Is(err, blocked) {
+		t.Fatalf("SendPromptWithTools not gated: %v", err)
+	}
+	if calls != 0 {
+		t.Fatalf("gated calls still recorded usage: %d", calls)
+	}
+}
+
+// TestRecordingClientHidesToolsWhenInnerLacksThem: capability parity.
+func TestRecordingClientHidesToolsWhenInnerLacksThem(t *testing.T) {
 	inner := &fakeWorkerClient{tools: false}
-	wrapped := wrapWithUsageTally(inner, &usageTally{})
+	wrapped := wrapWithUsageRecording(inner, func(*models.UsageInfo) {}, nil)
 	if tac, ok := client.AsToolAware(wrapped); ok && tac.SupportsNativeTools() {
 		t.Fatal("wrapper claims native tools the inner client lacks")
 	}

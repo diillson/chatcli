@@ -37,6 +37,10 @@ func (c *MoonshotClient) SupportsNativeTools() bool {
 // SendPromptWithTools sends a prompt with tool definitions via Moonshot's
 // native tool calling API.
 func (c *MoonshotClient) SendPromptWithTools(ctx context.Context, prompt string, history []models.Message, tools []models.ToolDefinition, maxTokens int) (*models.LLMResponse, error) {
+	// Clear per-call usage so a call whose response carries no usage block
+	// falls back to estimation instead of re-counting the previous call.
+	c.usageState.StoreUsage(nil)
+
 	effectiveMaxTokens := maxTokens
 	if effectiveMaxTokens <= 0 {
 		effectiveMaxTokens = c.getMaxTokens()

@@ -138,6 +138,88 @@ func TestMixedBilledAndTableCallsAddUp(t *testing.T) {
 	}
 }
 
+// TestZeroRateFamiliesNeverGetFreeCache: for families without a published
+// cache discount (getCachePricing returns 0), cached tokens must stay
+// billed at the plain input price — the subset carve-out with a zero read
+// rate would make them free and under-report spend.
+func TestZeroRateFamiliesNeverGetFreeCache(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	ct := NewCostTracker()
+	// GLM-5.2 ($1.40/M input, no cache rate): 100K prompt incl. 80K cached.
+	ct.RecordRealUsage("ZAI", "glm-5.2", &models.UsageInfo{
+		PromptTokens:         100_000,
+		CacheReadInputTokens: 80_000,
+		IsReal:               true,
+	})
+	// Full input price on ALL 100K: 0.1 × $1.40 = $0.14.
+	if got := ct.TotalCost(); !almostEqual(got, 0.14) {
+		t.Fatalf("zero-rate cache carve-out leaked: total = %v, want 0.14", got)
+	}
+}
+
+// TestCacheSemanticsFollowReportingSchema: a Claude model served through an
+// OpenAI-compatible gateway (OpenRouter) reports cached_tokens as a SUBSET
+// of prompt_tokens — the additive Anthropic branch would bill them twice.
+func TestCacheSemanticsFollowReportingSchema(t *testing.T) {
+	if cacheTokensAdditive("OPENROUTER", "anthropic/claude-sonnet-5") {
+		t.Fatal("openrouter-served claude treated as additive (double-bills cache)")
+	}
+	if !cacheTokensAdditive("CLAUDEAI", "claude-sonnet-5") {
+		t.Fatal("native claude lost additive semantics")
+	}
+	if !cacheTokensAdditive("BEDROCK", "anthropic.claude-sonnet-5") {
+		t.Fatal("bedrock claude lost additive semantics")
+	}
+
+	t.Setenv("HOME", t.TempDir())
+	ct := NewCostTracker()
+	// 100K prompt (90K cached subset) via openrouter: 10K at $3/M + 90K at
+	// the claude cache-read rate ($0.30/M) = 0.03 + 0.027.
+	ct.RecordRealUsage("OPENROUTER", "anthropic/claude-sonnet-5", &models.UsageInfo{
+		PromptTokens:         100_000,
+		CacheReadInputTokens: 90_000,
+		IsReal:               true,
+	})
+	if got := ct.TotalCost(); !almostEqual(got, 0.03+0.027) {
+		t.Fatalf("openrouter claude cache math = %v, want 0.057", got)
+	}
+}
+
+// TestOpenRouterUnknownFamilyModelStaysUnpriced: a slug matching a family
+// substring but no pricing entry must propagate known=false so /cost lists
+// it as unpriced instead of silently free.
+func TestOpenRouterUnknownFamilyModelStaysUnpriced(t *testing.T) {
+	_, _, known := lookupModelPricing("OPENROUTER", "anthropic/claude-nonexistent-99")
+	if known {
+		t.Fatal("family-substring match without a pricing entry reported known=true")
+	}
+}
+
+// TestTurnAndSessionCacheMathAgree: estimateTurnCostUSD delegates to the
+// record formula — cache-bearing turns must price identically both ways.
+func TestTurnAndSessionCacheMathAgree(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	usage := &models.UsageInfo{
+		PromptTokens:             200_000,
+		CompletionTokens:         30_000,
+		CacheReadInputTokens:     150_000,
+		CacheCreationInputTokens: 10_000,
+		IsReal:                   true,
+	}
+	for _, tc := range []struct{ provider, model string }{
+		{"CLAUDEAI", "claude-sonnet-5"},
+		{"OPENAI", "gpt-4o"},
+		{"ZAI", "glm-5.2"},
+		{"OPENROUTER", "anthropic/claude-sonnet-5"},
+	} {
+		ct := NewCostTracker()
+		ct.RecordRealUsage(tc.provider, tc.model, usage)
+		if got, want := estimateTurnCostUSD(tc.provider, tc.model, usage), ct.TotalCost(); !almostEqual(got, want) {
+			t.Errorf("%s/%s: turn cost %v != session cost %v", tc.provider, tc.model, got, want)
+		}
+	}
+}
+
 // TestReasoningTokensAccumulate covers the informational reasoning total.
 func TestReasoningTokensAccumulate(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())

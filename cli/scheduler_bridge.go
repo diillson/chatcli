@@ -543,14 +543,23 @@ func (b *schedulerBridge) DispatchWorker(_ context.Context, agentType, task stri
 // SendLLMPrompt runs a single LLM call using the currently-configured
 // client.
 func (b *schedulerBridge) SendLLMPrompt(ctx context.Context, system, prompt string, maxTokens int) (string, int, float64, error) {
-	c := b.cli.Client
-	if c == nil {
-		return "", 0, 0, fmt.Errorf("scheduler: no LLM client configured")
-	}
 	// Budget hard stop covers scheduled runs too — unattended recurring
 	// jobs are exactly the runaway-spend case the gate exists for.
 	if err := b.cli.budgetBlockedErr(); err != nil {
 		return "", 0, 0, err
+	}
+	// A DEDICATED client instance, never the interactive session's: provider
+	// clients keep last-write usage state, and a scheduled call sharing
+	// b.cli.Client would clobber (and be clobbered by) a concurrent
+	// interactive turn's usage — cross-recording each other's tokens.
+	c, err := b.cli.manager.GetClient(b.cli.Provider, b.cli.Model)
+	if err != nil || c == nil {
+		// Fall back to the shared client rather than failing the job; usage
+		// below is a self-contained estimate, so accounting stays correct.
+		c = b.cli.Client
+	}
+	if c == nil {
+		return "", 0, 0, fmt.Errorf("scheduler: no LLM client configured")
 	}
 	if maxTokens <= 0 {
 		maxTokens = 512
@@ -566,9 +575,8 @@ func (b *schedulerBridge) SendLLMPrompt(ctx context.Context, system, prompt stri
 	// Token/cost accounting: scheduled runs spend real money like any other
 	// turn — record them in the session tracker and report the figures back
 	// to the scheduler. Deliberately a character estimate, NOT
-	// GetUsageOrEstimate: the bridge shares b.cli.Client with the
-	// interactive session, and LastUsage is last-write state — reading it
-	// here could re-record a concurrent interactive turn's tokens.
+	// GetUsageOrEstimate: even on a dedicated client the estimate is
+	// self-contained and immune to any state sharing a fallback path keeps.
 	usage := models.EstimateFromChars(len(system)+len(prompt), len(text))
 	cost := estimateTurnCostUSD(b.cli.Provider, b.cli.Model, usage)
 	if b.cli.costTracker != nil {

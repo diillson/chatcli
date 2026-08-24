@@ -339,6 +339,11 @@ type ChatCLI struct {
 
 	// Cost tracking for the current session
 	costTracker *CostTracker
+	// turnUsageRecorded marks that the current turn's usage already landed
+	// in the tracker (the chat-ask/knowledge exception records per tool
+	// round) so handleChatTurnResult must not record the turn a second
+	// time. Set and cleared on the single-threaded REPL turn path.
+	turnUsageRecorded bool
 
 	// Cached provider models for autocomplete (populated asynchronously)
 	cachedModels   []client.ModelInfo

@@ -252,7 +252,7 @@ func (ct *CostTracker) RecordRealUsage(provider, model string, usage *models.Usa
 	}
 
 	// Compute cost for this increment
-	ct.recomputeCost(rec)
+	recomputeRecordCost(rec)
 	ct.recomputeAggregates()
 
 	ct.lastProvider = provider
@@ -494,13 +494,30 @@ func (ct *CostTracker) SaveSession() error {
 		return fmt.Errorf("marshal cost session: %w", err)
 	}
 
-	// Atomic write: a crash mid-write must never corrupt the snapshot.
+	// Atomic write with a UNIQUE temp name: concurrent saves (worker
+	// recorder goroutines race the main turn) must never interleave writes
+	// into one shared temp file, and a crash mid-write must never corrupt
+	// the snapshot.
 	path := filepath.Join(dir, data.SessionID+".json")
-	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, b, 0o600); err != nil {
+	tmp, err := os.CreateTemp(dir, data.SessionID+"-*.tmp")
+	if err != nil {
 		return err
 	}
-	if err := os.Rename(tmp, path); err != nil {
+	if _, err := tmp.Write(b); err != nil {
+		_ = tmp.Close()
+		_ = os.Remove(tmp.Name())
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		_ = os.Remove(tmp.Name())
+		return err
+	}
+	if err := os.Chmod(tmp.Name(), 0o600); err != nil {
+		_ = os.Remove(tmp.Name())
+		return err
+	}
+	if err := os.Rename(tmp.Name(), path); err != nil {
+		_ = os.Remove(tmp.Name())
 		return err
 	}
 
@@ -591,15 +608,23 @@ func pruneCostSnapshots(dir string) {
 		return
 	}
 	cutoff := time.Now().Add(-costSnapshotRetention)
+	// Stray .tmp files (a crash between write and rename) age out on a much
+	// shorter fuse — they are garbage the moment their writer is gone.
+	tmpCutoff := time.Now().Add(-time.Hour)
 	for _, e := range entries {
-		if e.IsDir() || !strings.HasSuffix(e.Name(), ".json") {
+		if e.IsDir() {
+			continue
+		}
+		isJSON := strings.HasSuffix(e.Name(), ".json")
+		isTmp := strings.HasSuffix(e.Name(), ".tmp")
+		if !isJSON && !isTmp {
 			continue
 		}
 		info, err := e.Info()
 		if err != nil {
 			continue
 		}
-		if info.ModTime().Before(cutoff) {
+		if (isJSON && info.ModTime().Before(cutoff)) || (isTmp && info.ModTime().Before(tmpCutoff)) {
 			_ = os.Remove(filepath.Join(dir, e.Name()))
 		}
 	}
@@ -619,7 +644,10 @@ func (ct *CostTracker) getOrCreateRecord(key, provider, model string) *ModelUsag
 	return rec
 }
 
-func (ct *CostTracker) recomputeCost(rec *ModelUsageRecord) {
+// recomputeRecordCost prices one record in place — the ONLY cost formula
+// in the tracker; estimateTurnCostUSD delegates here so per-turn and
+// per-session math can never disagree.
+func recomputeRecordCost(rec *ModelUsageRecord) {
 	inputCost, outputCost, known := lookupModelPricing(rec.Provider, rec.Model)
 	rec.PricingKnown = known
 	cacheWriteCost, cacheReadCost := getCachePricing(rec.Provider, rec.Model)
@@ -641,10 +669,13 @@ func (ct *CostTracker) recomputeCost(rec *ModelUsageRecord) {
 	cacheCreation := unbilled(rec.CacheCreationTokens, rec.BilledCacheCreationTokens)
 
 	billableInput := promptTokens
-	if !cacheTokensAdditive(rec.Model) && cacheRead > 0 {
+	if !cacheTokensAdditive(rec.Provider, rec.Model) && cacheRead > 0 && cacheReadCost > 0 {
 		// OpenAI/Gemini-style usage reports cached tokens as a SUBSET of the
 		// prompt count — carve them out so they are billed once, at the
-		// discounted cache-read rate, instead of twice.
+		// discounted cache-read rate, instead of twice. Only when a discount
+		// rate exists: for families without a published cache rate the
+		// carve-out would make cached tokens FREE, so they stay billed at
+		// the plain input price instead (conservative).
 		billableInput -= cacheRead
 		if billableInput < 0 {
 			billableInput = 0
@@ -735,24 +766,19 @@ func estimateTurnCostUSD(provider, model string, usage *models.UsageInfo) float6
 	if usage.CostUSD > 0 {
 		return usage.CostUSD
 	}
-	inputCost, outputCost, _ := lookupModelPricing(provider, model)
-	_, cacheReadCost := getCachePricing(provider, model)
-
-	billableInput := usage.PromptTokens
-	if !cacheTokensAdditive(model) && usage.CacheReadInputTokens > 0 {
-		billableInput -= usage.CacheReadInputTokens
-		if billableInput < 0 {
-			billableInput = 0
-		}
+	// Single source of truth: run the turn through the exact record math the
+	// session tracker applies — a second hand-rolled formula here is how the
+	// footer and /cost drift apart.
+	rec := &ModelUsageRecord{
+		Provider:            provider,
+		Model:               model,
+		PromptTokens:        int64(usage.PromptTokens),
+		CompletionTokens:    int64(usage.CompletionTokens),
+		CacheReadTokens:     int64(usage.CacheReadInputTokens),
+		CacheCreationTokens: int64(usage.CacheCreationInputTokens),
 	}
-	cost := float64(billableInput)/1_000_000*inputCost +
-		float64(usage.CompletionTokens)/1_000_000*outputCost +
-		float64(usage.CacheReadInputTokens)/1_000_000*cacheReadCost
-	if usage.CacheCreationInputTokens > 0 {
-		writeCost, _ := getCachePricing(provider, model)
-		cost += float64(usage.CacheCreationInputTokens) / 1_000_000 * writeCost
-	}
-	return cost
+	recomputeRecordCost(rec)
+	return rec.TotalCostUSD
 }
 
 // --- Pricing tables ---
@@ -1022,11 +1048,17 @@ func providerFallbackPricing(provider, model string) (float64, float64, bool) {
 	return 0, 0, false
 }
 
-// cacheTokensAdditive reports whether the model's usage payload counts
-// cache tokens ALONGSIDE the prompt count (Anthropic Messages schema:
-// input_tokens excludes cache reads/writes) rather than as a subset of it
-// (OpenAI cached_tokens, Gemini cachedContentTokenCount).
-func cacheTokensAdditive(model string) bool {
+// cacheTokensAdditive reports whether the usage payload counts cache tokens
+// ALONGSIDE the prompt count (Anthropic Messages schema: input_tokens
+// excludes cache reads/writes) rather than as a subset of it (OpenAI
+// cached_tokens, Gemini cachedContentTokenCount). The semantics belong to
+// the REPORTING SCHEMA, not the model name: a Claude model served through
+// an OpenAI-compatible gateway (OpenRouter) reports subset-style
+// cached_tokens, so the provider decides when it implies the schema.
+func cacheTokensAdditive(provider, model string) bool {
+	if strings.Contains(strings.ToLower(provider), "openrouter") {
+		return false // OpenAI-compatible schema regardless of the model
+	}
 	return strings.Contains(strings.ToLower(model), "claude")
 }
 
@@ -1068,21 +1100,19 @@ func getCachePricing(provider, model string) (cacheWriteCost, cacheReadCost floa
 // Table-derived estimates only — when the OpenRouter response carries
 // usage.cost, that actual billed amount overrides these numbers entirely.
 func getOpenRouterModelPricing(model string) (inputCost, outputCost float64, known bool) {
-	// OpenRouter passes through pricing from upstream providers.
-	// Try to match the underlying model.
+	// OpenRouter passes through pricing from upstream providers. The known
+	// flag PROPAGATES from the family lookup: a slug that matches a family
+	// substring but no actual pricing entry stays "unpriced" so /cost lists
+	// it instead of silently reporting it as free.
 	switch {
 	case strings.Contains(model, "claude"):
-		in, out := getModelPricing("anthropic", model)
-		return in, out, true
+		return lookupModelPricing("anthropic", model)
 	case strings.Contains(model, "gpt"):
-		in, out := getModelPricing("openai", model)
-		return in, out, true
+		return lookupModelPricing("openai", model)
 	case strings.Contains(model, "gemini"):
-		in, out := getModelPricing("google", model)
-		return in, out, true
+		return lookupModelPricing("google", model)
 	case strings.Contains(model, "deepseek"):
-		in, out := getModelPricing("deepseek", model)
-		return in, out, true
+		return lookupModelPricing("deepseek", model)
 	case strings.Contains(model, "llama"):
 		return 0.20, 0.20, true
 	case strings.Contains(model, "mistral"):
