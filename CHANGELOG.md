@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.189.0](https://github.com/diillson/chatcli/compare/v1.188.0...v1.189.0) (2026-08-24)
+
+
+### Features
+
+* **cost:** real usage across all providers, /cost subcommands, budget gates and session persistence ([#1385](https://github.com/diillson/chatcli/issues/1385)) ([e47e944](https://github.com/diillson/chatcli/commit/e47e944e44cfbd881540d9d82505659f43377f15))
+
 ## [1.188.0](https://github.com/diillson/chatcli/compare/v1.187.1...v1.188.0) (2026-08-18)
 
 
