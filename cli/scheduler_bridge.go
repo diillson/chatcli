@@ -547,6 +547,11 @@ func (b *schedulerBridge) SendLLMPrompt(ctx context.Context, system, prompt stri
 	if c == nil {
 		return "", 0, 0, fmt.Errorf("scheduler: no LLM client configured")
 	}
+	// Budget hard stop covers scheduled runs too — unattended recurring
+	// jobs are exactly the runaway-spend case the gate exists for.
+	if err := b.cli.budgetBlockedErr(); err != nil {
+		return "", 0, 0, err
+	}
 	if maxTokens <= 0 {
 		maxTokens = 512
 	}
@@ -558,10 +563,18 @@ func (b *schedulerBridge) SendLLMPrompt(ctx context.Context, system, prompt stri
 	if err != nil {
 		return "", 0, 0, err
 	}
-	// Token/cost accounting — if a cost tracker is wired, the
-	// underlying provider will have updated it; we leave the numbers
-	// at zero from the bridge's point of view.
-	return text, 0, 0, nil
+	// Token/cost accounting: scheduled runs spend real money like any other
+	// turn — record them in the session tracker and report the figures back
+	// to the scheduler. Deliberately a character estimate, NOT
+	// GetUsageOrEstimate: the bridge shares b.cli.Client with the
+	// interactive session, and LastUsage is last-write state — reading it
+	// here could re-record a concurrent interactive turn's tokens.
+	usage := models.EstimateFromChars(len(system)+len(prompt), len(text))
+	cost := estimateTurnCostUSD(b.cli.Provider, b.cli.Model, usage)
+	if b.cli.costTracker != nil {
+		b.cli.costTracker.RecordRealUsage(b.cli.Provider, b.cli.Model, usage)
+	}
+	return text, usage.TotalTokens, cost, nil
 }
 
 // FireHook dispatches a hook event synchronously.

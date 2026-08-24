@@ -53,6 +53,7 @@ var slashPrefixRoutes = []slashPrefixRoute{
 	{"/watch", (*ChatCLI).getWatchSuggestions},
 	{"/mcp", (*ChatCLI).getMCPSuggestions},
 	{"/hooks ", (*ChatCLI).getHooksSuggestions},
+	{"/cost ", (*ChatCLI).getCostSuggestions},
 	{"/worktree ", (*ChatCLI).getWorktreeSuggestions},
 	{"/channel ", (*ChatCLI).getChannelSuggestions},
 	{"/websearch", (*ChatCLI).getWebSearchSuggestions},
@@ -111,6 +112,21 @@ func (cli *ChatCLI) getLSPSuggestions(d prompt.Document) []prompt.Suggest {
 		return nil // still typing the command name itself
 	}
 	return cli.filePathCompleter(d.GetWordBeforeCursor())
+}
+
+// getCostSuggestions completes the /cost subcommands.
+func (cli *ChatCLI) getCostSuggestions(d prompt.Document) []prompt.Suggest {
+	line := d.TextBeforeCursor()
+	args := strings.Fields(line)
+	if len(args) == 1 || (len(args) == 2 && !strings.HasSuffix(line, " ")) {
+		return prompt.FilterHasPrefix([]prompt.Suggest{
+			{Text: "reset", Description: i18n.T("complete.cost.reset")},
+			{Text: "last", Description: i18n.T("complete.cost.last")},
+			{Text: "sessions", Description: i18n.T("complete.cost.sessions")},
+			{Text: "export", Description: i18n.T("complete.cost.export")},
+		}, d.GetWordBeforeCursor(), true)
+	}
+	return nil
 }
 
 // getGatewaySuggestions completes the /gateway subcommands.

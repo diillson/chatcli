@@ -105,17 +105,26 @@ func historyHasCCRMarkers(history []models.Message) bool {
 // exchange, with bounded tool rounds when the toolset grants any.
 func (cli *ChatCLI) moaTurn(ts moaToolset) moa.Turn {
 	return func(ctx context.Context, ref moa.Ref, prompt string, history []models.Message) (string, error) {
+		// Budget hard stop applies per participant: a MoA panel is N paid
+		// calls in parallel — the most expensive surface to leave ungated.
+		if err := cli.budgetBlockedErr(); err != nil {
+			return "", err
+		}
 		c, err := cli.moaClientFor(ref.Provider, ref.Model)
 		if err != nil {
 			return "", err
 		}
 		if !ts.any() {
-			return c.SendPrompt(ctx, prompt, history, 0)
+			out, err := c.SendPrompt(ctx, prompt, history, 0)
+			if err == nil {
+				cli.recordMoaUsage(ref, c, prompt, history, out)
+			}
+			return out, err
 		}
 		if tac, ok := client.AsToolAware(c); ok && tac.SupportsNativeTools() {
 			return cli.runMoaTurnNative(ctx, tac, ref, prompt, history, ts)
 		}
-		return cli.runMoaTurnXML(ctx, c, prompt, history, ts)
+		return cli.runMoaTurnXML(ctx, c, ref, prompt, history, ts)
 	}
 }
 
@@ -194,6 +203,7 @@ func (cli *ChatCLI) runMoaTurnNative(
 func (cli *ChatCLI) runMoaTurnXML(
 	ctx context.Context,
 	c moa.Client,
+	ref moa.Ref,
 	prompt string,
 	history []models.Message,
 	ts moaToolset,
@@ -215,6 +225,7 @@ func (cli *ChatCLI) runMoaTurnXML(
 		if err != nil {
 			return "", err
 		}
+		cli.recordMoaUsage(ref, c, prompt, history, resp)
 
 		calls, _ := agent.ParseToolCalls(resp)
 		var kbArgs, rcArgs, memArgs string
@@ -389,4 +400,24 @@ func moaRecallXMLInstruction() string {
 		"If — and only if — you need the full original behind a marker, reply with EXACTLY one tag and nothing else:\n" +
 		`<tool_call name="@recall" args='{"key":"<the KEY from the marker>"}' />` + "\n" +
 		"You will receive the original verbatim and may then answer. If you do not need it, just answer normally."
+}
+
+// recordMoaUsage accounts one MoA participant exchange in the session cost
+// tracker, attributed to the participant's own provider+model — real API
+// usage when the client reports it, a character estimate otherwise.
+func (cli *ChatCLI) recordMoaUsage(ref moa.Ref, c moa.Client, prompt string, history []models.Message, out string) {
+	if cli.costTracker == nil {
+		return
+	}
+	inChars := len(prompt)
+	for _, m := range history {
+		inChars += len(m.Content)
+	}
+	var usage *models.UsageInfo
+	if lc, ok := c.(client.LLMClient); ok {
+		usage = client.GetUsageOrEstimate(lc, inChars, len(out))
+	} else {
+		usage = models.EstimateFromChars(inChars, len(out))
+	}
+	cli.costTracker.RecordRealUsage(ref.Provider, ref.Model, usage)
 }

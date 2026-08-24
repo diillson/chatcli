@@ -129,6 +129,7 @@ func (cli *ChatCLI) executeChatAskNative(
 		}
 		if resp != nil && resp.Usage != nil && cli.costTracker != nil {
 			cli.costTracker.RecordRealUsage(resolution.Provider, resolution.Model, resp.Usage)
+			cli.maybeAnnounceBudget()
 		}
 
 		var calls chatExceptionCalls

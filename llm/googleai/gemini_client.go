@@ -273,6 +273,11 @@ func (c *GeminiClient) parseResponse(bodyBytes []byte) (string, error) {
 			PromptTokenCount     int `json:"promptTokenCount"`
 			CandidatesTokenCount int `json:"candidatesTokenCount"`
 			TotalTokenCount      int `json:"totalTokenCount"`
+			// Context-cache hits — a SUBSET of promptTokenCount, billed at
+			// the discounted cache rate.
+			CachedContentTokenCount int `json:"cachedContentTokenCount"`
+			// Thinking tokens — billed as output, informational here.
+			ThoughtsTokenCount int `json:"thoughtsTokenCount"`
 		} `json:"usageMetadata"`
 		Error struct {
 			Code    int    `json:"code"`
@@ -317,10 +322,12 @@ func (c *GeminiClient) parseResponse(bodyBytes []byte) (string, error) {
 	// Store usage info
 	if result.UsageMetadata.TotalTokenCount > 0 || result.UsageMetadata.PromptTokenCount > 0 {
 		c.usageState.StoreUsage(&models.UsageInfo{
-			PromptTokens:     result.UsageMetadata.PromptTokenCount,
-			CompletionTokens: result.UsageMetadata.CandidatesTokenCount,
-			TotalTokens:      result.UsageMetadata.TotalTokenCount,
-			IsReal:           true,
+			PromptTokens:         result.UsageMetadata.PromptTokenCount,
+			CompletionTokens:     result.UsageMetadata.CandidatesTokenCount,
+			TotalTokens:          result.UsageMetadata.TotalTokenCount,
+			CacheReadInputTokens: result.UsageMetadata.CachedContentTokenCount,
+			ReasoningTokens:      result.UsageMetadata.ThoughtsTokenCount,
+			IsReal:               true,
 		})
 	}
 

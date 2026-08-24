@@ -83,7 +83,11 @@ func (c *BedrockClient) sendPromptConverse(ctx context.Context, prompt string, h
 		if err != nil {
 			return "", wrapBedrockInferenceProfileError(c.model, err)
 		}
-		return parseConverseOutput(out)
+		text, perr := parseConverseOutput(out)
+		if perr == nil {
+			c.captureConverseUsage(out)
+		}
+		return text, perr
 	})
 	if err != nil {
 		client.LogRequestFinish(c.logger, "BEDROCK", c.model, "error", time.Since(start),

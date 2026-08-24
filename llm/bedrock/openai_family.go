@@ -72,7 +72,11 @@ func (c *BedrockClient) sendPromptOpenAI(ctx context.Context, prompt string, his
 		if err != nil {
 			return "", wrapBedrockInferenceProfileError(c.model, err)
 		}
-		return parseOpenAIBody(out.Body)
+		text, perr := parseOpenAIBody(out.Body)
+		if perr == nil {
+			c.captureOpenAIUsage(out.Body)
+		}
+		return text, perr
 	})
 	if err != nil {
 		client.LogRequestFinish(c.logger, "BEDROCK", c.model, "error", time.Since(start),

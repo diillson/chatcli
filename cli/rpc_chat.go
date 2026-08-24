@@ -119,6 +119,12 @@ func (cli *ChatCLI) runChatTurnSerialized(
 	ctx = cli.applyChatEffortHint(ctx, routeEffortForPrompt(input, assembly.effort))
 	maxTokens := cli.getMaxTokensForCurrentLLM()
 
+	// Budget hard stop applies to gateway/RPC surfaces too — long-lived
+	// unattended sessions are exactly where a runaway spend hurts most.
+	if err := cli.budgetBlockedErr(); err != nil {
+		return RPCChatTurn{}, err
+	}
+
 	reply, err := activeClient.SendPrompt(ctx, input+additionalContext, tempHistory, maxTokens)
 	if cli.refreshClientOnAuthError(err) {
 		reply, err = activeClient.SendPrompt(ctx, input+additionalContext, tempHistory, maxTokens)

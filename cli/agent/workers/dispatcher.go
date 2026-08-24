@@ -36,6 +36,9 @@ type Dispatcher struct {
 	config        DispatcherConfig
 	policyChecker PolicyChecker
 	pipeline      ExecutionPipeline
+	// usageRecorder is boxed behind a pointer so Dispatcher stays a
+	// comparable type (a bare func field would break that contract).
+	usageRecorder *usageRecorderBox
 	logger        *zap.Logger
 }
 
@@ -361,6 +364,20 @@ func (d *Dispatcher) executeAgent(ctx context.Context, call AgentCall) AgentResu
 	// Create worker context with timeout
 	workerCtx, cancel := context.WithTimeout(runCtx, d.config.WorkerTimeout)
 	defer cancel()
+
+	// Decorate the worker's client so every LLM round-trip it makes lands in
+	// the session cost tracker, attributed to the provider+model that served
+	// this worker. Recorded even when the worker errors out — the spend
+	// already happened.
+	tally := &usageTally{}
+	if rec := d.usageRecorder; rec != nil {
+		llmClient = wrapWithUsageTally(llmClient, tally)
+		defer func() {
+			if usage := tally.take(); usage != nil {
+				rec.fn(effProvider, effModel, usage)
+			}
+		}()
+	}
 
 	deps := &WorkerDeps{
 		LLMClient:     llmClient,

@@ -180,9 +180,15 @@ type UsageInfo struct {
 	// Reasoning tokens emitted by o-series / GPT-5 reasoning models.
 	// Reported by OpenAI under usage.completion_tokens_details.reasoning_tokens
 	// (Chat Completions) or usage.output_tokens_details.reasoning_tokens
-	// (Responses API). Billed as output tokens and already counted in
-	// CompletionTokens — this field is informational only.
+	// (Responses API), and by Gemini under usageMetadata.thoughtsTokenCount.
+	// Billed as output tokens and already counted in CompletionTokens —
+	// this field is informational only.
 	ReasoningTokens int `json:"reasoning_tokens,omitempty"`
+
+	// CostUSD is the actual billed cost reported by the provider for this
+	// call, when the API surfaces one (OpenRouter's usage.cost). Zero means
+	// "not reported" — cost is then derived from the local pricing tables.
+	CostUSD float64 `json:"cost_usd,omitempty"`
 
 	// Whether these values came from the API (true) or were estimated (false).
 	// Callers can use this to decide display precision and cost accuracy.
@@ -201,6 +207,7 @@ func (u *UsageInfo) Merge(other *UsageInfo) {
 	u.CacheCreationInputTokens += other.CacheCreationInputTokens
 	u.CacheReadInputTokens += other.CacheReadInputTokens
 	u.ReasoningTokens += other.ReasoningTokens
+	u.CostUSD += other.CostUSD
 	if other.IsReal {
 		u.IsReal = true
 	}

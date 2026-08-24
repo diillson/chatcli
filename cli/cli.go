@@ -2090,6 +2090,14 @@ func (cli *ChatCLI) cleanup(ctx context.Context) {
 	if ws := agent.GetSessionWorkspace(); ws != nil {
 		ws.Cleanup()
 	}
+	// Final cost snapshot so /cost last in the next session sees this one
+	// complete (the write-through during the session is throttled).
+	if cli.costTracker != nil {
+		cli.costTracker.SetSessionName(cli.currentSessionName)
+		if err := cli.costTracker.SaveSession(); err != nil {
+			cli.logger.Debug("cost snapshot save on shutdown failed", zap.Error(err))
+		}
+	}
 	if err := cli.logger.Sync(); err != nil {
 		msg := err.Error()
 		if !strings.Contains(msg, "/dev/stdout") &&

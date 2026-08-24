@@ -1947,6 +1947,13 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 		default:
 		}
 
+		// Budget hard stop: end the run before the next provider call when
+		// the session budget is exhausted and CHATCLI_BUDGET_HARD_STOP is on.
+		if err := a.cli.budgetBlockedErr(); err != nil {
+			fmt.Println(colorize("  "+err.Error(), ColorRed))
+			return err
+		}
+
 		// Honor the session /max-tokens override exactly like chat mode does.
 		// Re-read every turn (raising OR lowering reflects here), while
 		// preserving any truncation-driven escalation applied meanwhile.
@@ -2269,6 +2276,7 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 				effModel = resolution.Model
 			}
 			a.cli.costTracker.RecordRealUsage(effProvider, effModel, turnUsage)
+			a.cli.maybeAnnounceBudget()
 		}
 
 		// Para o timer e obtém a duração
@@ -4015,6 +4023,15 @@ func (a *AgentMode) initMultiAgent(ctx context.Context) bool {
 	}
 
 	a.agentDispatcher = workers.NewDispatcher(a.agentRegistry, a.cli.manager, cfg, a.logger)
+
+	// Every worker's LLM spend lands in the session cost tracker, attributed
+	// to the provider+model that served the worker — /cost covers subagents.
+	if a.cli.costTracker != nil {
+		tracker := a.cli.costTracker
+		a.agentDispatcher.SetUsageRecorder(func(provider, model string, usage *models.UsageInfo) {
+			tracker.RecordRealUsage(provider, model, usage)
+		})
+	}
 
 	// Attach policy enforcement so parallel workers respect security rules
 	if pa, err := newWorkerPolicyAdapter(a.logger); err == nil {

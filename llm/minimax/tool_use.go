@@ -112,7 +112,13 @@ func (c *MiniMaxClient) SendPromptWithTools(ctx context.Context, prompt string, 
 		zap.String("path", "tool_use"),
 		zap.Int("response_chars", len(resp)),
 	)
-	return parseToolResponse(resp, c.logger)
+	response, err := parseToolResponse(resp, c.logger)
+	if err == nil && response != nil && response.Usage != nil {
+		// Mirror the tool-path usage into the client state so LastUsage()
+		// reflects THIS call instead of a stale buffered one.
+		c.usageState.StoreUsage(response.Usage)
+	}
+	return response, err
 }
 
 // buildToolMessages constructs the messages array supporting tool calls and results.
@@ -254,19 +260,11 @@ func parseToolResponse(body string, logger *zap.Logger) (*models.LLMResponse, er
 		}
 	}
 
-	// Extract usage
-	if usage, ok := result["usage"].(map[string]interface{}); ok {
-		response.Usage = &models.UsageInfo{}
-		if pt, ok := usage["prompt_tokens"].(float64); ok {
-			response.Usage.PromptTokens = int(pt)
-		}
-		if ct, ok := usage["completion_tokens"].(float64); ok {
-			response.Usage.CompletionTokens = int(ct)
-		}
-		if tt, ok := usage["total_tokens"].(float64); ok {
-			response.Usage.TotalTokens = int(tt)
-		}
-	}
+	// Extract usage via the shared OpenAI-compatible parser: marks the data
+	// as real API usage (IsReal) and also surfaces cached/reasoning token
+	// details — the hand-rolled block it replaces silently dropped IsReal,
+	// making /cost label real counts as "character estimate".
+	response.Usage = client.ParseOpenAIUsage(result)
 
 	return response, nil
 }

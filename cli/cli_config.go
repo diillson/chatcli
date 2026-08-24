@@ -68,6 +68,7 @@ var reloadableEnvVars = []string{
 	"CHATCLI_WEBFETCH_RENDER_BROWSER",
 	"CHATCLI_EMBED_PROVIDER", "CHATCLI_EMBED_MODEL", "CHATCLI_EMBED_DIMENSIONS",
 	"CHATCLI_COMMANDS", "CHATCLI_COMMANDS_AUTOROUTE",
+	"CHATCLI_SESSION_BUDGET_USD", "CHATCLI_BUDGET_WARNING_PCT", "CHATCLI_BUDGET_HARD_STOP",
 }
 
 // reloadConfiguration recarrega as variáveis de ambiente e reconfigura o LLMManager
@@ -107,6 +108,13 @@ func (cli *ChatCLI) reloadConfiguration(ctx context.Context) {
 	theme.InitFromEnv()
 
 	config.Global.Reload(cli.logger)
+
+	// Budget envs are read once by NewCostTracker; re-read them here so a
+	// .env change to CHATCLI_SESSION_BUDGET_USD / _WARNING_PCT / _HARD_STOP
+	// takes effect on /reload without restarting the process.
+	if cli.costTracker != nil {
+		cli.costTracker.ReloadBudget()
+	}
 
 	cli.reconfigureLogger()
 

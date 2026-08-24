@@ -86,6 +86,7 @@ func TestRenderAssistantResponse_BoxedOutput(t *testing.T) {
 			"Hello from the assistant.",
 			1400*time.Millisecond,
 			&models.UsageInfo{PromptTokens: 312, CompletionTokens: 1800},
+			"CLAUDEAI", "claude-opus-4-7",
 		)
 	})
 	plain := stripANSIWelcome(out)
