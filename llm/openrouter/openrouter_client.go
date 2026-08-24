@@ -136,6 +136,17 @@ func (c *OpenRouterClient) buildPayload(messages []map[string]interface{}, maxTo
 		"max_tokens": maxTokens,
 	}
 
+	// Ask OpenRouter to attach accounting to the response: usage.cost is
+	// the actually-billed amount in USD credits — authoritative over any
+	// local pricing table, and the only correct source for the long tail
+	// of models OpenRouter serves. ONLY on the official host: the
+	// "usage" field is OpenRouter-proprietary, and OPENROUTER_API_URL is
+	// the sanctioned generic-gateway path (strict OpenAI-compatible
+	// backends reject unknown request fields).
+	if !utils.IsCustomEndpoint(c.getAPIURL(), config.OpenRouterAPIURL) {
+		payload["usage"] = map[string]interface{}{"include": true}
+	}
+
 	// OpenRouter-specific: fallback models (try primary, then fallbacks)
 	if fallbackModels := os.Getenv("OPENROUTER_FALLBACK_MODELS"); fallbackModels != "" {
 		modelList := strings.Split(fallbackModels, ",")
@@ -341,18 +352,28 @@ func (c *OpenRouterClient) processResponse(resp *http.Response) (string, error) 
 		return "", errors.New(i18n.T("llm.error.empty_response_unspecified", "OpenRouter"))
 	}
 
-	// Store and log usage metadata for cost tracking
+	// Store and log usage metadata for cost tracking — including the
+	// actually-billed cost (usage.cost) which overrides local table math.
 	if result.Usage != nil {
-		c.usageState.StoreUsage(&models.UsageInfo{
+		info := &models.UsageInfo{
 			PromptTokens:     result.Usage.PromptTokens,
 			CompletionTokens: result.Usage.CompletionTokens,
 			TotalTokens:      result.Usage.TotalTokens,
+			CostUSD:          result.Usage.Cost,
 			IsReal:           true,
-		})
+		}
+		if result.Usage.PromptTokensDetails != nil {
+			info.CacheReadInputTokens = result.Usage.PromptTokensDetails.CachedTokens
+		}
+		if result.Usage.CompletionTokensDetails != nil {
+			info.ReasoningTokens = result.Usage.CompletionTokensDetails.ReasoningTokens
+		}
+		c.usageState.StoreUsage(info)
 		c.logger.Debug("OpenRouter usage",
 			zap.Int("prompt_tokens", result.Usage.PromptTokens),
 			zap.Int("completion_tokens", result.Usage.CompletionTokens),
-			zap.Int("total_tokens", result.Usage.TotalTokens))
+			zap.Int("total_tokens", result.Usage.TotalTokens),
+			zap.Float64("cost_usd", result.Usage.Cost))
 	}
 	c.usageState.StoreStopReason(firstChoice.FinishReason)
 
@@ -443,9 +464,16 @@ type openRouterResponse struct {
 		FinishReason string `json:"finish_reason"`
 	} `json:"choices"`
 	Usage *struct {
-		PromptTokens     int `json:"prompt_tokens"`
-		CompletionTokens int `json:"completion_tokens"`
-		TotalTokens      int `json:"total_tokens"`
+		PromptTokens        int     `json:"prompt_tokens"`
+		CompletionTokens    int     `json:"completion_tokens"`
+		TotalTokens         int     `json:"total_tokens"`
+		Cost                float64 `json:"cost"`
+		PromptTokensDetails *struct {
+			CachedTokens int `json:"cached_tokens"`
+		} `json:"prompt_tokens_details,omitempty"`
+		CompletionTokensDetails *struct {
+			ReasoningTokens int `json:"reasoning_tokens"`
+		} `json:"completion_tokens_details,omitempty"`
 	} `json:"usage,omitempty"`
 	Error *struct {
 		Message string `json:"message"`

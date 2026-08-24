@@ -20,6 +20,14 @@ var paletteModeSwitch = map[string]bool{
 	"/agent": true, "/run": true, "/coder": true, "/plan": true,
 }
 
+// paletteDirectRun lists commands whose bare invocation has a meaningful
+// action of its own (their subcommands are optional refinements): they run
+// as typed instead of opening the per-command palette. Their subcommands
+// still complete inline and appear in the palette when scoped explicitly.
+var paletteDirectRun = map[string]bool{
+	"/cost": true,
+}
+
 // paletteSuggest returns the next-token suggestions for a command line by
 // running the live inline completer against a synthesized document. The
 // palette and the prompt therefore share one source of truth for every
@@ -71,7 +79,7 @@ func (cli *ChatCLI) paletteTrigger(userInput string) (target string, ok bool) {
 // palette: not a mode switch, and offering at least one concrete next-token
 // option (subcommand, flag or value).
 func (cli *ChatCLI) commandIsPickable(cmd string) bool {
-	if paletteModeSwitch[cmd] {
+	if paletteModeSwitch[cmd] || paletteDirectRun[cmd] {
 		return false
 	}
 	return palette.HasConcreteOption(cli.paletteSuggest(cmd + " "))

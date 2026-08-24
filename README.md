@@ -563,7 +563,7 @@ Credentials are stored with **AES-256-GCM** at `~/.chatcli/auth-profiles.json`.
 | **Custom personas** | Markdown with YAML frontmatter (model, tools, skills). |
 | **Hooks** | PreToolUse, PostToolUse, SessionStart/End, UserPromptSubmit, Pre/PostCompact — shell or webhook. |
 | **WebFetch / WebSearch** | DuckDuckGo + fetch with text extraction. |
-| **Cost tracking** | Per-session cost with per-provider pricing tables. |
+| **Cost tracking** | Real API usage across all providers, `/cost` (+ `reset`, `last`, `sessions`, `export`), session budgets with optional hard stop, persisted snapshots. |
 | **Git Worktrees** | Isolated work on parallel branches. |
 | **K8s Watcher** | Multi-target: metrics, logs, events, Prometheus scraping. |
 | **i18n** | Portuguese and English with automatic detection. |

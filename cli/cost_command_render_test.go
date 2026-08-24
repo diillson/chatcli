@@ -65,7 +65,7 @@ func TestHandleCostCommandRendersAllSections(t *testing.T) {
 	pinPlainProfile(t)
 	c := &ChatCLI{costTracker: newCostTrackerFixture(), Provider: "CLAUDEAI"}
 
-	out := captureCommandStdout(t, func() { c.handleCostCommand() })
+	out := captureCommandStdout(t, func() { c.handleCostCommand("") })
 
 	for _, want := range []string{
 		"CLAUDEAI",    // provider row
@@ -90,7 +90,7 @@ func TestHandleCostCommandAlignsTopGroup(t *testing.T) {
 	pinPlainProfile(t)
 	c := &ChatCLI{costTracker: newCostTrackerFixture(), Provider: "CLAUDEAI"}
 
-	out := captureCommandStdout(t, func() { c.handleCostCommand() })
+	out := captureCommandStdout(t, func() { c.handleCostCommand("") })
 
 	cols := map[int]bool{}
 	for _, ln := range strings.Split(out, "\n") {
@@ -112,7 +112,7 @@ func TestHandleCostCommandAlignsTopGroup(t *testing.T) {
 func TestHandleCostCommandWithoutTracker(t *testing.T) {
 	pinPlainProfile(t)
 	c := &ChatCLI{}
-	out := captureCommandStdout(t, func() { c.handleCostCommand() })
+	out := captureCommandStdout(t, func() { c.handleCostCommand("") })
 	if strings.TrimSpace(out) == "" {
 		t.Fatal("missing not-initialized notice")
 	}

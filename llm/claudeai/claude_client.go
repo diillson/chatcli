@@ -41,6 +41,12 @@ type ClaudeClient struct {
 	maxAttempts int
 	backoff     time.Duration
 	apiURL      string
+
+	// usage holds THIS instance's most recent API usage. Read-side only:
+	// populated from response bodies/SSE events after the original
+	// processing, so the OAuth-sensitive request path stays untouched.
+	// See usage_tracker.go for the accessors.
+	usage client.UsageState
 }
 
 const (
@@ -224,6 +230,10 @@ func applyFastModeIfRequested(reqBody map[string]interface{}, model string) bool
 
 // SendPrompt com exponential backoff usando utils.Retry
 func (c *ClaudeClient) SendPrompt(ctx context.Context, prompt string, history []models.Message, maxTokens int) (string, error) {
+	// Clear per-instance usage so a call that reports none falls back to
+	// estimation instead of re-counting the previous call's tokens.
+	c.resetUsage()
+
 	effectiveMaxTokens := maxTokens
 	if effectiveMaxTokens <= 0 {
 		effectiveMaxTokens = c.getMaxTokens()
@@ -310,7 +320,7 @@ func (c *ClaudeClient) SendPrompt(ctx context.Context, prompt string, history []
 		}
 		defer func() { _ = resp.Body.Close() }()
 		if isOAuth {
-			return c.processStreamResponse(resp)
+			return c.processStreamResponse(resp, true)
 		}
 		return c.processResponse(resp)
 	})
@@ -373,6 +383,10 @@ func (c *ClaudeClient) processResponse(resp *http.Response) (string, error) {
 		return "", fmt.Errorf("%s", i18n.T("llm.error.no_response", "ClaudeAI"))
 	}
 
+	// Read-side usage capture: separate parse of the already-read bytes so
+	// /cost gets real counts on the buffered path too (see usage_tracker.go).
+	c.recordUsageFromBody(bodyBytes)
+
 	return responseText, nil
 }
 
@@ -382,7 +396,12 @@ func isClaudeSonnet(model string) bool {
 	return claudeSonnetRe.MatchString(model)
 }
 
-func (c *ClaudeClient) processStreamResponse(resp *http.Response) (string, error) {
+// processStreamResponse decodes one Anthropic SSE stream. captureUsage
+// gates the read-side token accounting: true for the user's actual turn,
+// false for auxiliary calls (the OAuth title request) whose tiny usage
+// would otherwise clobber the turn's numbers — the title request fires
+// AFTER the main response, so it would win the last-write race.
+func (c *ClaudeClient) processStreamResponse(resp *http.Response, captureUsage bool) (string, error) {
 	decodedBody, err := decodeResponseBody(resp)
 	if err != nil {
 		_ = resp.Body.Close()
@@ -396,6 +415,10 @@ func (c *ClaudeClient) processStreamResponse(resp *http.Response) (string, error
 	}
 
 	var out strings.Builder
+	// Read-side usage capture: message_start/message_delta SSE events carry
+	// the real token counts (see usage_tracker.go). Fed alongside the text
+	// decode below; committed once the stream ends.
+	var usageAcc streamUsageAccumulator
 	reader := bufio.NewReader(decodedBody)
 	for {
 		line, err := reader.ReadString('\n')
@@ -419,6 +442,7 @@ func (c *ClaudeClient) processStreamResponse(resp *http.Response) (string, error
 			}
 			continue
 		}
+		usageAcc.observe([]byte(data))
 		var evt struct {
 			Type  string `json:"type"`
 			Delta *struct {
@@ -447,6 +471,10 @@ func (c *ClaudeClient) processStreamResponse(resp *http.Response) (string, error
 	if responseText == "" {
 		c.logger.Error(i18n.T("llm.error.no_text_content_stream", "ClaudeAI"))
 		return "", fmt.Errorf("%s", i18n.T("llm.error.no_response", "ClaudeAI"))
+	}
+
+	if captureUsage {
+		usageAcc.commit(c)
 	}
 
 	return responseText, nil
@@ -617,7 +645,7 @@ func (c *ClaudeClient) sendOAuthTitleRequest(ctx context.Context, userText strin
 		return err
 	}
 	defer func() { _ = resp.Body.Close() }()
-	_, err = c.processStreamResponse(resp)
+	_, err = c.processStreamResponse(resp, false)
 	return err
 }
 

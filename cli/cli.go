@@ -339,6 +339,11 @@ type ChatCLI struct {
 
 	// Cost tracking for the current session
 	costTracker *CostTracker
+	// turnUsageRecorded marks that the current turn's usage already landed
+	// in the tracker (the chat-ask/knowledge exception records per tool
+	// round) so handleChatTurnResult must not record the turn a second
+	// time. Set and cleared on the single-threaded REPL turn path.
+	turnUsageRecorded bool
 
 	// Cached provider models for autocomplete (populated asynchronously)
 	cachedModels   []client.ModelInfo
@@ -2089,6 +2094,14 @@ func (cli *ChatCLI) cleanup(ctx context.Context) {
 	// CHATCLI_AGENT_KEEP_TMPDIR=true for debugging (files are left behind).
 	if ws := agent.GetSessionWorkspace(); ws != nil {
 		ws.Cleanup()
+	}
+	// Final cost snapshot so /cost last in the next session sees this one
+	// complete (the write-through during the session is throttled).
+	if cli.costTracker != nil {
+		cli.costTracker.SetSessionName(cli.currentSessionName)
+		if err := cli.costTracker.SaveSession(); err != nil {
+			cli.logger.Debug("cost snapshot save on shutdown failed", zap.Error(err))
+		}
 	}
 	if err := cli.logger.Sync(); err != nil {
 		msg := err.Error()

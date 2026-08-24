@@ -205,6 +205,10 @@ type BedrockClient struct {
 	// resolves an application-inference-profile ARN configured directly
 	// (env/config) without going through /model discovery.
 	profileLookupDone atomic.Bool
+	// usage holds the most recent call's real token usage (see usage.go).
+	// client.UsageState is a comparable struct, preserving the comparable
+	// contract documented above.
+	usage client.UsageState
 }
 
 // NewBedrockClient creates a client bound to a model id and region.
@@ -369,6 +373,10 @@ func (c *BedrockClient) maybeResolveProfileModel(ctx context.Context) {
 // model family (Anthropic Messages vs. OpenAI Chat Completions).
 // Retries are delegated to utils.Retry inside each family-specific path.
 func (c *BedrockClient) SendPrompt(ctx context.Context, prompt string, history []models.Message, maxTokens int) (string, error) {
+	// Clear per-call usage so an errored or usage-less response falls back
+	// to estimation instead of re-counting the previous call (see usage.go).
+	c.resetUsage()
+
 	if err := c.ensureRuntime(ctx); err != nil {
 		return "", err
 	}
@@ -473,7 +481,11 @@ func (c *BedrockClient) sendPromptAnthropicModel(ctx context.Context, wireModel,
 		if err != nil {
 			return "", wrapBedrockInferenceProfileError(wireModel, err)
 		}
-		return parseAnthropicBody(out.Body)
+		text, perr := parseAnthropicBody(out.Body)
+		if perr == nil {
+			c.captureAnthropicUsage(out.Body)
+		}
+		return text, perr
 	})
 
 	if err != nil {

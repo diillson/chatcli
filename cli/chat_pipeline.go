@@ -652,6 +652,13 @@ func (cli *ChatCLI) executeLLMTurn(
 	resolution SkillClientResolution,
 	stopSpinner func(),
 ) (string, error) {
+	// Budget hard stop: refuse the turn before any provider call when the
+	// session budget is exhausted and CHATCLI_BUDGET_HARD_STOP is armed.
+	if err := cli.budgetBlockedErr(); err != nil {
+		stopSpinner()
+		return "", err
+	}
+
 	// Controlled chat exception: when CHATCLI_CHAT_ASK is on and the provider
 	// supports native tools, chat may use ONLY ask_user (no execution tools).
 	// Off by default, so chat keeps streaming on every turn.
@@ -703,6 +710,7 @@ func (cli *ChatCLI) executeStreamingTurn(
 	}
 	if result.Usage != nil && cli.costTracker != nil {
 		cli.costTracker.RecordRealUsage(resolution.Provider, resolution.Model, result.Usage)
+		cli.maybeAnnounceBudget()
 	}
 	return result.Text, nil
 }
@@ -764,10 +772,15 @@ func (cli *ChatCLI) handleChatTurnResult(
 	cli.persistBoundSession()
 
 	usage := client.GetUsageOrEstimate(activeClient, len(userInput+additionalContext), len(aiResponse))
-	if cli.costTracker != nil && !client.IsStreamingCapable(activeClient) {
+	// Skip the record when the chat-ask/knowledge exception already booked
+	// this turn per tool round — usage stays in hand for the envelope only.
+	alreadyRecorded := cli.turnUsageRecorded
+	cli.turnUsageRecorded = false
+	if cli.costTracker != nil && !client.IsStreamingCapable(activeClient) && !alreadyRecorded {
 		cli.costTracker.RecordRealUsage(resolution.Provider, resolution.Model, usage)
 	}
-	cli.renderAssistantResponse(activeClient, aiResponse, elapsed, usage)
+	cli.renderAssistantResponse(activeClient, aiResponse, elapsed, usage, resolution.Provider, resolution.Model)
+	cli.maybeAnnounceBudget()
 
 	if cli.memWorker != nil {
 		cli.memWorker.nudge(ctx)
@@ -797,6 +810,7 @@ func (cli *ChatCLI) renderAssistantResponse(
 	aiResponse string,
 	elapsed time.Duration,
 	usage *models.UsageInfo,
+	servedProvider, servedModel string,
 ) {
 	rendered := ensureANSIReset(cli.renderMarkdown(aiResponse))
 	if client.IsStreamingCapable(activeClient) {
@@ -805,7 +819,7 @@ func (cli *ChatCLI) renderAssistantResponse(
 	}
 
 	left, right := chatEnvelopeLabels(activeClient, elapsed, usage)
-	footerRight := cli.chatEnvelopeFooter(usage)
+	footerRight := cli.chatEnvelopeFooter(servedProvider, servedModel, usage)
 	renderer := agent.NewUIRendererWithStyle(cli.logger, agent.UIStyleFull)
 	renderer.RenderResponseEnvelope(agent.ResponseEnvelopeOptions{
 		HeaderLeft:  left,
@@ -824,14 +838,22 @@ func (cli *ChatCLI) renderAssistantResponse(
 // usage counts plus the model's pricing/context-window from the catalog — so
 // the footer adds no new bookkeeping. It returns "" (no footer drawn) when
 // usage is unreported, keeping the box clean for providers that omit counts.
-func (cli *ChatCLI) chatEnvelopeFooter(usage *models.UsageInfo) string {
+func (cli *ChatCLI) chatEnvelopeFooter(servedProvider, servedModel string, usage *models.UsageInfo) string {
 	if usage == nil || (usage.PromptTokens == 0 && usage.CompletionTokens == 0) {
 		return ""
 	}
 
-	inputCost, outputCost := getModelPricing(cli.Provider, cli.Model)
-	turnCost := float64(usage.PromptTokens)/1_000_000*inputCost +
-		float64(usage.CompletionTokens)/1_000_000*outputCost
+	// Price the turn against the provider+model pair that actually served
+	// it — the SAME pair the tracker records under (a skill hint or route
+	// override may have swapped both), with the same cache semantics. The
+	// footer and /cost must never disagree about the same turn.
+	if servedProvider == "" {
+		servedProvider = cli.Provider
+	}
+	if servedModel == "" {
+		servedModel = cli.Model
+	}
+	turnCost := estimateTurnCostUSD(servedProvider, servedModel, usage)
 
 	parts := cli.telemetryParts(usage, turnCost, false)
 	if len(parts) == 0 {

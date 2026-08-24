@@ -285,6 +285,12 @@ func (c *BedrockClient) doMantleRequest(ctx context.Context, endpoint string, pa
 		return "", fmt.Errorf("bedrock-mantle: read response: %w", err)
 	}
 
+	if resp.StatusCode < 300 {
+		if text, perr := parseAnthropicBody(body); perr == nil {
+			c.captureAnthropicUsage(body)
+			return text, nil
+		}
+	}
 	if resp.StatusCode >= 300 {
 		// The endpoint answers with the standard Anthropic error envelope;
 		// parseAnthropicBody surfaces type+message when present.

@@ -19,8 +19,8 @@ import (
 
 func TestChatEnvelopeFooter_EmptyWithoutUsage(t *testing.T) {
 	cli := &ChatCLI{}
-	assert.Equal(t, "", cli.chatEnvelopeFooter(nil), "no usage → no footer")
-	assert.Equal(t, "", cli.chatEnvelopeFooter(&models.UsageInfo{}), "zero usage → no footer")
+	assert.Equal(t, "", cli.chatEnvelopeFooter("", "", nil), "no usage → no footer")
+	assert.Equal(t, "", cli.chatEnvelopeFooter("", "", &models.UsageInfo{}), "zero usage → no footer")
 }
 
 func TestChatEnvelopeFooter_ShowsCostAndContext(t *testing.T) {
@@ -28,7 +28,7 @@ func TestChatEnvelopeFooter_ShowsCostAndContext(t *testing.T) {
 	theme.SetProfile(theme.ProfileANSI) // keep ANSI so colorize doesn't strip in test
 
 	cli := &ChatCLI{Provider: "OPENAI", Model: "gpt-4o"}
-	footer := cli.chatEnvelopeFooter(&models.UsageInfo{PromptTokens: 1000, CompletionTokens: 500})
+	footer := cli.chatEnvelopeFooter("OPENAI", "gpt-4o", &models.UsageInfo{PromptTokens: 1000, CompletionTokens: 500})
 
 	// A known-priced model yields a cost token and a context percentage.
 	assert.Contains(t, footer, "$", "footer shows a cost")

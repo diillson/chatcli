@@ -10,6 +10,7 @@ import (
 	"github.com/diillson/chatcli/cli/agent/runs"
 	"github.com/diillson/chatcli/llm/client"
 	"github.com/diillson/chatcli/llm/manager"
+	"github.com/diillson/chatcli/models"
 	"go.uber.org/zap"
 )
 
@@ -36,6 +37,10 @@ type Dispatcher struct {
 	config        DispatcherConfig
 	policyChecker PolicyChecker
 	pipeline      ExecutionPipeline
+	// usageRecorder/budgetGate are boxed behind pointers so Dispatcher
+	// stays a comparable type (bare func fields would break that contract).
+	usageRecorder *usageRecorderBox
+	budgetGate    *budgetGateBox
 	logger        *zap.Logger
 }
 
@@ -361,6 +366,25 @@ func (d *Dispatcher) executeAgent(ctx context.Context, call AgentCall) AgentResu
 	// Create worker context with timeout
 	workerCtx, cancel := context.WithTimeout(runCtx, d.config.WorkerTimeout)
 	defer cancel()
+
+	// Decorate the worker's client so every LLM round-trip it makes lands in
+	// the session cost tracker AS IT HAPPENS, attributed to the
+	// provider+model that served this worker — per-call recording keeps the
+	// provider-billed accounting correct and lets the budget gate see live
+	// spend. The gate itself refuses further calls once the session budget
+	// hard stop trips, so an in-flight dispatch wave stops mid-run instead
+	// of finishing its ReAct loops on borrowed money.
+	if rec, gate := d.usageRecorder, d.budgetGate; rec != nil || gate != nil {
+		record := func(*models.UsageInfo) {}
+		if rec != nil {
+			record = func(u *models.UsageInfo) { rec.fn(effProvider, effModel, u) }
+		}
+		var gateFn func() error
+		if gate != nil {
+			gateFn = gate.fn
+		}
+		llmClient = wrapWithUsageRecording(llmClient, record, gateFn)
+	}
 
 	deps := &WorkerDeps{
 		LLMClient:     llmClient,

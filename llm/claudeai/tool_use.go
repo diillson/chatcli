@@ -37,6 +37,10 @@ func (c *ClaudeClient) SupportsNativeTools() bool {
 
 // SendPromptWithTools sends a prompt with tool definitions via Anthropic's native tool use API.
 func (c *ClaudeClient) SendPromptWithTools(ctx context.Context, prompt string, history []models.Message, tools []models.ToolDefinition, maxTokens int) (*models.LLMResponse, error) {
+	// Clear per-instance usage so a call that reports none falls back to
+	// estimation instead of re-counting the previous call's tokens.
+	c.resetUsage()
+
 	effectiveMaxTokens := maxTokens
 	if effectiveMaxTokens <= 0 {
 		effectiveMaxTokens = c.getMaxTokens()
@@ -153,7 +157,16 @@ func (c *ClaudeClient) SendPromptWithTools(ctx context.Context, prompt string, h
 		zap.Int("response_bytes", len(respBody)),
 	)
 
-	return parseClaudeToolResponse(respBody, c.logger)
+	response, err := parseClaudeToolResponse(respBody, c.logger)
+	if err == nil && response != nil && response.Usage != nil {
+		// Per-instance mirror of what parseClaudeToolResponse recorded in the
+		// legacy global — parallel clients must not cross-attribute tokens.
+		c.usage.StoreUsage(response.Usage)
+		if response.StopReason != "" {
+			c.usage.StoreStopReason(response.StopReason)
+		}
+	}
+	return response, err
 }
 
 // buildSystemBlocks creates system prompt blocks with cache_control:ephemeral for KV cache reuse.

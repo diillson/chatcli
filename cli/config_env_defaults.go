@@ -172,6 +172,7 @@ var envDefaults = map[string]envDefault{
 	// ─── Cost / budget ───────────────────────────────────────────
 	"CHATCLI_SESSION_BUDGET_USD": {Value: "(no budget)", Source: "cost_tracker.go"},
 	"CHATCLI_BUDGET_WARNING_PCT": {Value: "0.80", Source: "cost_tracker.go"},
+	"CHATCLI_BUDGET_HARD_STOP":   {Value: "false", IsBool: true, Source: "cost_tracker.go (refuse turns once budget exceeded)"},
 	"CHATCLI_SESSION_TTL":        {Value: "90", Source: "session_manager.go (days)"},
 	"CHATCLI_DISABLE_HISTORY":    {Value: "false", IsBool: true, Source: "history_manager.go"},
 

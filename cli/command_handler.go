@@ -210,7 +210,6 @@ func (ch *CommandHandler) buildRoutes() {
 		"/disconnect": func(ctx context.Context, _ string) bool { ch.handleDisconnectCommand(ctx); return false },
 		"/rewind":     func(_ context.Context, _ string) bool { c.showRewindMenu(); return false },
 		"/metrics":    func(_ context.Context, _ string) bool { ch.handleMetricsCommand(); return false },
-		"/cost":       func(_ context.Context, _ string) bool { c.handleCostCommand(); return false },
 		"/newsession": func(ctx context.Context, _ string) bool {
 			c.clearAllHistories()
 			c.currentSessionName = ""
@@ -232,6 +231,10 @@ func (ch *CommandHandler) buildRoutes() {
 	// Order preserved from the historical switch. word=true entries match
 	// "exact or +space"; word=false entries are raw-prefix sub-command groups.
 	ch.routes.prefixes = []prefixRoute{
+		{"/cost", true, func(_ context.Context, in string) bool {
+			c.handleCostCommand(strings.TrimSpace(strings.TrimPrefix(in, "/cost")))
+			return false
+		}},
 		{"/switch", false, func(ctx context.Context, in string) bool { c.handleSwitchCommand(ctx, in); return false }},
 		{"/provider", false, func(ctx context.Context, in string) bool { c.handleProviderCommand(ctx, in); return false }},
 		// Must precede "/model" (raw-prefix) so it isn't shadowed by it.

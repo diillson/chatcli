@@ -129,6 +129,11 @@ func (cli *ChatCLI) executeChatAskNative(
 		}
 		if resp != nil && resp.Usage != nil && cli.costTracker != nil {
 			cli.costTracker.RecordRealUsage(resolution.Provider, resolution.Model, resp.Usage)
+			// Flag the turn as recorded: handleChatTurnResult would otherwise
+			// record the SAME usage again via LastUsage() on the buffered
+			// path, doubling every chat-ask turn's tokens and dollars.
+			cli.turnUsageRecorded = true
+			cli.maybeAnnounceBudget()
 		}
 
 		var calls chatExceptionCalls

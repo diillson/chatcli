@@ -73,6 +73,11 @@ type Chain struct {
 	mu      sync.RWMutex
 	logger  *zap.Logger
 
+	// lastServed remembers which entry answered the most recent successful
+	// request, so usage/cost is attributed to the provider that actually
+	// billed it — not to whichever entry sits first in the chain.
+	lastServed *FallbackEntry
+
 	// Configuration
 	maxRetries     int
 	cooldownBase   time.Duration
@@ -143,6 +148,7 @@ func (c *Chain) SendPrompt(ctx context.Context, prompt string, history []models.
 			resp, err := entry.Client.SendPrompt(ctx, prompt, history, maxTokens)
 			if err == nil {
 				c.markSuccess(entry.Provider)
+				c.setLastServed(entry)
 				return resp, nil
 			}
 
@@ -210,6 +216,7 @@ func (c *Chain) SendPromptWithTools(ctx context.Context, prompt string, history 
 			resp, err := tac.SendPromptWithTools(ctx, prompt, history, tools, maxTokens)
 			if err == nil {
 				c.markSuccess(entry.Provider)
+				c.setLastServed(entry)
 				return resp, nil
 			}
 
@@ -333,6 +340,56 @@ func ClassifyError(err error) ErrorClass {
 	default:
 		return ErrorClassUnknown
 	}
+}
+
+// setLastServed records the entry that answered the last successful call.
+func (c *Chain) setLastServed(entry FallbackEntry) {
+	c.mu.Lock()
+	e := entry
+	c.lastServed = &e
+	c.mu.Unlock()
+}
+
+// LastServedEntry returns the provider+model that answered the most recent
+// successful request. ok is false before the first success.
+func (c *Chain) LastServedEntry() (provider, model string, ok bool) {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	if c.lastServed == nil {
+		return "", "", false
+	}
+	return c.lastServed.Provider, c.lastServed.Model, true
+}
+
+// LastUsage forwards the served client's real usage so the chain satisfies
+// client.UsageAwareClient — without this, any provider behind a fallback
+// chain silently degraded to character estimates.
+func (c *Chain) LastUsage() *models.UsageInfo {
+	c.mu.RLock()
+	served := c.lastServed
+	c.mu.RUnlock()
+	if served == nil {
+		return nil
+	}
+	if uac, ok := client.AsUsageAware(served.Client); ok {
+		return uac.LastUsage()
+	}
+	return nil
+}
+
+// LastStopReason forwards the served client's stop reason (max_tokens
+// escalation detection keeps working through the chain).
+func (c *Chain) LastStopReason() string {
+	c.mu.RLock()
+	served := c.lastServed
+	c.mu.RUnlock()
+	if served == nil {
+		return ""
+	}
+	if src, ok := client.AsStopReasonAware(served.Client); ok {
+		return src.LastStopReason()
+	}
+	return ""
 }
 
 // GetModelName returns the model name of the first available provider.
