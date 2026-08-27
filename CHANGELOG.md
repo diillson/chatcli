@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.189.1](https://github.com/diillson/chatcli/compare/v1.189.0...v1.189.1) (2026-08-27)
+
+
+### Bug Fixes
+
+* **security:** zero image CVEs, GLM-5.3 catalog, /update pinned to detected release ([#1387](https://github.com/diillson/chatcli/issues/1387)) ([aa772a3](https://github.com/diillson/chatcli/commit/aa772a393e753a14bc5b919ea6eef367acd795bf))
+
 ## [1.189.0](https://github.com/diillson/chatcli/compare/v1.188.0...v1.189.0) (2026-08-24)
 
 
