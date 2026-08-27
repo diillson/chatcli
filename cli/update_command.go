@@ -19,11 +19,14 @@ import (
 	"strings"
 	"time"
 
+	"github.com/diillson/chatcli/config"
 	"github.com/diillson/chatcli/i18n"
 	"github.com/diillson/chatcli/ui/kit"
 	"github.com/diillson/chatcli/ui/theme"
 	"github.com/diillson/chatcli/update"
+	"github.com/diillson/chatcli/utils"
 	"github.com/diillson/chatcli/version"
+	"github.com/joho/godotenv"
 	"go.uber.org/zap"
 )
 
@@ -41,7 +44,75 @@ var (
 func (cli *ChatCLI) handleUpdateCommand(ctx context.Context, userInput string) {
 	args := strings.Fields(userInput)
 	checkOnly := len(args) > 1 && (args[1] == "check" || args[1] == "--check")
+	_ = runUpdateFlow(ctx, cli.logger, checkOnly)
+}
 
+// RunUpdateOneShot é a superfície one-shot do /update (`chatcli update`),
+// para scripts e automação: mesmo fluxo, mesma saída, sem boot do REPL. O
+// erro devolvido vira exit code no main — nil cobre "atualizado" e "já na
+// última versão"; falha de checagem, canal manual com update pendente e
+// falha de aplicação retornam o erro já impresso.
+func RunUpdateOneShot(ctx context.Context, logger *zap.Logger, checkOnly bool) error {
+	return runUpdateFlow(ctx, logger, checkOnly)
+}
+
+// UpdateSubcommandMain é o entrypoint completo do subcomando `chatcli update`:
+// boot mínimo (dotenv+i18n+tema+logger+config — sem LLM manager) seguido do
+// contrato de exit code de RunUpdateSubcommand. Vive no pacote cli para boot
+// e contrato ficarem sob teste — no main resta apenas o os.Exit.
+func UpdateSubcommandMain(args []string) int {
+	envFilePath := os.Getenv("CHATCLI_DOTENV")
+	if envFilePath == "" {
+		envFilePath = ".env"
+	} else if expanded, err := utils.ExpandPath(envFilePath); err == nil {
+		envFilePath = expanded
+	}
+	_ = godotenv.Load(envFilePath)
+	i18n.Init()
+	theme.InitFromEnv()
+
+	logger, err := utils.InitializeLogger()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to initialize logger: %v\n", err)
+		return 1
+	}
+	// Sync roda no return da função (diferente de um defer atrás de os.Exit,
+	// que nunca executaria); falha de sync em stdout é ruído conhecido do zap.
+	defer func() { _ = logger.Sync() }()
+
+	config.InitGlobal(logger)
+	config.Global.Load()
+	utils.ApplyGlobalTLSTrust(logger)
+
+	return RunUpdateSubcommand(context.Background(), logger, args)
+}
+
+// RunUpdateSubcommand é o corpo do subcomando `chatcli update [check]`:
+// parseia os args e mapeia o desfecho no exit code do processo — 0 atualizado
+// ou já na última versão (check incluso), 1 falha de checagem/aplicação ou
+// canal manual com update pendente, 2 uso inválido. Vive no pacote cli (e não
+// no main) para o contrato ficar sob teste; o main só faz o boot e repassa.
+func RunUpdateSubcommand(ctx context.Context, logger *zap.Logger, args []string) int {
+	checkOnly := false
+	for _, a := range args {
+		switch a {
+		case "check", "--check", "-check":
+			checkOnly = true
+		default:
+			fmt.Fprintln(os.Stderr, i18n.T("update.oneshot.usage"))
+			return 2
+		}
+	}
+	if err := RunUpdateOneShot(ctx, logger, checkOnly); err != nil {
+		return 1
+	}
+	return 0
+}
+
+// runUpdateFlow é o núcleo compartilhado entre o /update interativo e o
+// subcomando one-shot: checa a release, compara com o binário atual e aplica
+// pelo canal detectado, imprimindo cada passo.
+func runUpdateFlow(ctx context.Context, logger *zap.Logger, checkOnly bool) error {
 	info := detectInstallFn()
 	anchor := screenWidth()
 	fmt.Println()
@@ -52,14 +123,14 @@ func (cli *ChatCLI) handleUpdateCommand(ctx context.Context, userInput string) {
 	rep := version.GetReport(ctx)
 	if rep.CheckErr != nil {
 		fmt.Println(colorize("  ❌ "+i18n.T("update.err.check", rep.CheckErr.Error()), ColorYellow))
-		return
+		return rep.CheckErr
 	}
 	// Latest vazio sem erro = checagem desabilitada por política
 	// (CHATCLI_DISABLE_VERSION_CHECK); sem release para comparar, não há
 	// o que aplicar — informa em vez de exibir uma comparação vazia.
 	if rep.Latest == "" {
 		fmt.Println("  " + colorize(i18n.T("update.check_disabled"), ColorYellow))
-		return
+		return errors.New(i18n.T("update.check_disabled"))
 	}
 
 	fmt.Println("  " + colorize(i18n.T("update.method_label", methodLabel(info.Method)), ColorGray))
@@ -68,7 +139,7 @@ func (cli *ChatCLI) handleUpdateCommand(ctx context.Context, userInput string) {
 
 	if !rep.NeedsUpdate {
 		fmt.Println("  " + colorize("✓ "+i18n.T("update.uptodate"), ColorGreen))
-		return
+		return nil
 	}
 	// O usuário está prestes a atualizar (ou decidir se atualiza): mostra o
 	// que a versão nova traz antes de qualquer ação.
@@ -78,19 +149,19 @@ func (cli *ChatCLI) handleUpdateCommand(ctx context.Context, userInput string) {
 	}
 	if checkOnly {
 		fmt.Println("  " + colorize("⬆ "+i18n.T("update.available_hint"), ColorYellow))
-		return
+		return nil
 	}
 
 	switch info.Method {
 	case update.MethodDocker:
 		fmt.Println("  " + colorize(i18n.T("update.manual.docker"), ColorYellow))
-		return
+		return update.ErrManualMethod
 	case update.MethodSourceBuild:
 		fmt.Println("  " + colorize(i18n.T("update.manual.source"), ColorYellow))
-		return
+		return update.ErrManualMethod
 	case update.MethodUnknown:
 		fmt.Println("  " + colorize(i18n.T("update.manual.unknown"), ColorYellow))
-		return
+		return update.ErrManualMethod
 	}
 
 	if argv := update.CommandForVersion(info.Method, rep.Latest); argv != nil {
@@ -106,15 +177,16 @@ func (cli *ChatCLI) handleUpdateCommand(ctx context.Context, userInput string) {
 		}
 	})}
 	if err := applyUpdateFn(ctx, info, rep.Latest, opts); err != nil {
-		cli.printUpdateError(err, info, rep.Latest)
-		return
+		printUpdateError(logger, err, info, rep.Latest)
+		return err
 	}
 	fmt.Println("  " + colorize(i18n.T("update.success_restart", rep.Latest), ColorGreen))
+	return nil
 }
 
 // printUpdateError converte os erros tipados do pacote update em mensagens
 // acionáveis — cada modo de falha diz exatamente o que fazer em seguida.
-func (cli *ChatCLI) printUpdateError(err error, info update.Info, latest string) {
+func printUpdateError(logger *zap.Logger, err error, info update.Info, latest string) {
 	var notWritable *update.NotWritableError
 	var missingTool *update.MissingToolError
 	var unsupported *update.UnsupportedPlatformError
@@ -139,7 +211,7 @@ func (cli *ChatCLI) printUpdateError(err error, info update.Info, latest string)
 			"https://github.com/diillson/chatcli/releases/latest"))
 	case errors.As(err, &mismatch):
 		warn(i18n.T("update.err.mismatch"))
-		cli.logger.Warn("self-update: checksum mismatch",
+		logger.Warn("self-update: checksum mismatch",
 			zap.String("asset", mismatch.Asset),
 			zap.String("expected", mismatch.Expected),
 			zap.String("actual", mismatch.Actual))

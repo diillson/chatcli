@@ -42,6 +42,9 @@ func dispatchSubcommand() bool {
 	case "daemon":
 		runDaemonSubcommand(os.Args[2:])
 		return true
+	case "update":
+		runUpdateSubcommand(os.Args[2:])
+		return true
 	case "mcp":
 		// Config-file management only (add/list/get/remove) — no LLM
 		// manager, no full ChatCLI boot; mirrors `claude mcp add`.
@@ -331,6 +334,15 @@ func runSubcommand(subcmd string, args []string) {
 			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 			os.Exit(1)
 		}
+	}
+}
+
+// runUpdateSubcommand handles `chatcli update [check]` — a superfície
+// one-shot do /update para scripts e automação. Boot e contrato de exit code
+// vivem em cli.UpdateSubcommandMain (testável); aqui resta só o os.Exit.
+func runUpdateSubcommand(args []string) {
+	if code := cli.UpdateSubcommandMain(args); code != 0 {
+		os.Exit(code)
 	}
 }
 

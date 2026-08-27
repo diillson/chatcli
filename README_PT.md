@@ -82,6 +82,18 @@ go install github.com/diillson/chatcli@latest
 # https://github.com/diillson/chatcli/releases
 ```
 
+Uma vez instalado, o ChatCLI se mantém atualizado: `/update` atualiza pelo
+mesmo canal da instalação (Homebrew, `go install` ou self-replace verificado
+do binário de release), e `CHATCLI_AUTO_UPDATE=auto` prepara updates em
+silêncio no background — o próximo start já abre na versão nova. Imagens
+Docker e builds locais nunca são tocados; recebem instruções. Veja
+`/config update` para a política atual e o canal detectado.
+
+Para scripts e automação existe a superfície one-shot: `chatcli update`
+aplica o mesmo fluxo sem entrar no REPL, e `chatcli update check` só
+reporta. Exit codes: `0` atualizado ou já na última versão, `1` falha de
+checagem/aplicação ou canal manual com update pendente, `2` uso inválido.
+
 <details>
 <summary><strong>Compilação a partir do código-fonte</strong></summary>
 
