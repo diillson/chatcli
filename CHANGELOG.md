@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.190.0](https://github.com/diillson/chatcli/compare/v1.189.1...v1.190.0) (2026-08-27)
+
+
+### Features
+
+* **zai:** first-class GLM Coding Plan support and custom endpoint routing fix ([#1389](https://github.com/diillson/chatcli/issues/1389)) ([898bdbb](https://github.com/diillson/chatcli/commit/898bdbb3548373cfe4d57cafa6396cbd48eaffba))
+
 ## [1.189.1](https://github.com/diillson/chatcli/compare/v1.189.0...v1.189.1) (2026-08-27)
 
 
