@@ -77,9 +77,9 @@ var goInstallTagRe = regexp.MustCompile(`^\d+\.\d+\.\d+(?:[-.][0-9A-Za-z.-]+)?$`
 
 // GoInstallArgsVersion pina o go install na versão exata que a checagem de
 // release viu como mais recente (@vX.Y.Z), em vez de delegar ao @latest do
-// module proxy — que pode estar defasado em relação ao GitHub e instalar
-// silenciosamente uma versão diferente da anunciada. Tag vazia ou fora do
-// formato semver cai no comando canônico @latest.
+// module proxy — que pode estar atrás do GitHub e instalar silenciosamente
+// uma versão diferente da anunciada. Tag vazia ou fora do formato semver
+// cai no comando canônico @latest.
 func GoInstallArgsVersion(latestTag string) []string {
 	tag := strings.TrimPrefix(strings.TrimSpace(latestTag), "v")
 	if !goInstallTagRe.MatchString(tag) {

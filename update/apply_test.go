@@ -56,7 +56,7 @@ func TestCommandFor(t *testing.T) {
 
 // O go install deve instalar exatamente a versão que a checagem anunciou
 // (@vX.Y.Z), nunca delegar ao @latest do module proxy — que pode estar
-// defasado em relação ao GitHub. Tag ausente ou malformada cai no @latest.
+// atrás do GitHub. Tag ausente ou malformada cai no @latest.
 func TestGoInstallArgsVersionPinsDetectedTag(t *testing.T) {
 	cases := []struct {
 		tag  string
