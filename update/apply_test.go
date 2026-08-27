@@ -118,6 +118,105 @@ func TestApplyRunsChannelTool(t *testing.T) {
 	}
 }
 
+// A recusa do `go install module@version` para go.mod com replace/exclude
+// não tem conserto do lado do cliente (travou os updates da v1.189.1) — o
+// canal precisa cair para o binário oficial da release, avisando via Notify.
+func TestApplyGoInstallDirectiveRefusalFallsBackToSelfReplace(t *testing.T) {
+	origRun, origLook, origSelf := runCommandFn, lookPathFn, selfReplaceFn
+	t.Cleanup(func() { runCommandFn, lookPathFn, selfReplaceFn = origRun, origLook, origSelf })
+
+	lookPathFn = func(name string) (string, error) { return "/usr/bin/" + name, nil }
+	runCommandFn = func(_ context.Context, opts Options, _ string, _ ...string) error {
+		_, _ = opts.Stderr.Write([]byte("go: github.com/diillson/chatcli@v1.189.1: The go.mod file for the module providing named packages contains one or\nmore replace directives. It must not contain directives that would cause it\nto be interpreted differently than if it were the main module.\n"))
+		return errors.New("exit status 1")
+	}
+	var gotPath, gotTag string
+	selfReplaceFn = func(_ context.Context, execPath, tag string) error {
+		gotPath, gotTag = execPath, tag
+		return nil
+	}
+	var notified []Notice
+	opts := Options{Notify: NotifierFunc(func(n Notice) { notified = append(notified, n) })}
+
+	err := Apply(context.Background(), Info{Method: MethodGoInstall, ExecPath: "/home/u/go/bin/chatcli"}, "v1.190.1", opts)
+	if err != nil {
+		t.Fatalf("Apply deveria cair no self-replace, veio erro: %v", err)
+	}
+	if gotPath != "/home/u/go/bin/chatcli" || gotTag != "v1.190.1" {
+		t.Fatalf("self-replace com args errados: path=%q tag=%q", gotPath, gotTag)
+	}
+	if len(notified) != 1 || notified[0] != NoticeGoInstallDirectiveFallback {
+		t.Fatalf("Notify esperado com NoticeGoInstallDirectiveFallback, veio %v", notified)
+	}
+}
+
+// Qualquer outra falha do go install (rede, compilação, toolchain) NÃO pode
+// virar self-replace silencioso — o erro sobe intacto para a camada cli.
+func TestApplyGoInstallOtherFailureDoesNotFallBack(t *testing.T) {
+	origRun, origLook, origSelf := runCommandFn, lookPathFn, selfReplaceFn
+	t.Cleanup(func() { runCommandFn, lookPathFn, selfReplaceFn = origRun, origLook, origSelf })
+
+	lookPathFn = func(name string) (string, error) { return "/usr/bin/" + name, nil }
+	wantErr := errors.New("exit status 1")
+	runCommandFn = func(_ context.Context, opts Options, _ string, _ ...string) error {
+		_, _ = opts.Stderr.Write([]byte("go: module github.com/diillson/chatcli: Get: dial tcp: lookup proxy.golang.org: no such host\n"))
+		return wantErr
+	}
+	selfReplaceCalled := false
+	selfReplaceFn = func(context.Context, string, string) error {
+		selfReplaceCalled = true
+		return nil
+	}
+
+	err := Apply(context.Background(), Info{Method: MethodGoInstall, ExecPath: "/x/chatcli"}, "v1.190.1", Options{})
+	if !errors.Is(err, wantErr) {
+		t.Fatalf("erro original deveria subir intacto, veio: %v", err)
+	}
+	if selfReplaceCalled {
+		t.Fatal("self-replace não pode rodar em falha genérica do go install")
+	}
+}
+
+// O stderr do go install continua chegando ao writer do chamador mesmo com o
+// tee interno de detecção — o usuário vê a saída real da ferramenta.
+func TestApplyGoInstallTeesStderrToCaller(t *testing.T) {
+	origRun, origLook := runCommandFn, lookPathFn
+	t.Cleanup(func() { runCommandFn, lookPathFn = origRun, origLook })
+
+	lookPathFn = func(name string) (string, error) { return "/usr/bin/" + name, nil }
+	runCommandFn = func(_ context.Context, opts Options, _ string, _ ...string) error {
+		_, _ = opts.Stderr.Write([]byte("go: downloading github.com/diillson/chatcli v1.190.1\n"))
+		return nil
+	}
+
+	var callerStderr strings.Builder
+	err := Apply(context.Background(), Info{Method: MethodGoInstall}, "v1.190.1", Options{Stderr: &callerStderr})
+	if err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
+	if !strings.Contains(callerStderr.String(), "downloading") {
+		t.Fatalf("stderr do go install não chegou ao chamador: %q", callerStderr.String())
+	}
+}
+
+func TestGoInstallDirectiveRefusal(t *testing.T) {
+	refusals := []string{
+		"contains one or\nmore replace directives.",
+		"It must not contain directives that would cause it to be interpreted differently",
+		"contains one or more exclude directives",
+	}
+	for _, s := range refusals {
+		if !goInstallDirectiveRefusal(s) {
+			t.Fatalf("deveria detectar recusa em %q", s)
+		}
+	}
+	for _, s := range []string{"", "dial tcp: lookup proxy.golang.org: no such host", "build constraints exclude all Go files"} {
+		if goInstallDirectiveRefusal(s) {
+			t.Fatalf("falso positivo em %q", s)
+		}
+	}
+}
+
 func TestApplyReportsMissingTool(t *testing.T) {
 	origLook := lookPathFn
 	t.Cleanup(func() { lookPathFn = origLook })

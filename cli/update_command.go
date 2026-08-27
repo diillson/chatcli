@@ -100,7 +100,12 @@ func (cli *ChatCLI) handleUpdateCommand(ctx context.Context, userInput string) {
 		fmt.Println("  " + colorize(i18n.T("update.downloading", rep.Latest, asset), ColorCyan))
 	}
 
-	if err := applyUpdateFn(ctx, info, rep.Latest, update.Options{Stdout: os.Stdout, Stderr: os.Stderr}); err != nil {
+	opts := update.Options{Stdout: os.Stdout, Stderr: os.Stderr, Notify: update.NotifierFunc(func(n update.Notice) {
+		if n == update.NoticeGoInstallDirectiveFallback {
+			fmt.Println("  " + colorize(i18n.T("update.goinstall_fallback"), ColorYellow))
+		}
+	})}
+	if err := applyUpdateFn(ctx, info, rep.Latest, opts); err != nil {
 		cli.printUpdateError(err, info, rep.Latest)
 		return
 	}
