@@ -90,8 +90,8 @@ func TestHandleUpdateCommandAppliesOnAutomatableChannel(t *testing.T) {
 	if applied.Load() != 1 {
 		t.Fatal("canal go install com versão nova deveria aplicar")
 	}
-	if !strings.Contains(out, "go install github.com/diillson/chatcli@latest") {
-		t.Fatalf("deve mostrar o comando do canal, saída: %q", out)
+	if !strings.Contains(out, "go install github.com/diillson/chatcli@v1.6.0") {
+		t.Fatalf("deve mostrar o comando do canal pinado na versão detectada, saída: %q", out)
 	}
 	if !strings.Contains(out, "restart") {
 		t.Fatalf("sucesso deve pedir restart, saída: %q", out)

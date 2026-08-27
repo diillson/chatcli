@@ -91,7 +91,7 @@ func FormatVersionReport(rep version.Report) string {
 func renderUpdateInvite(latest string) string {
 	var b strings.Builder
 	b.WriteString("  " + colorize(i18n.T("welcome.update.available", latest), ColorYellow) + "\n")
-	if argv := update.CommandFor(detectInstallFn().Method); argv != nil {
+	if argv := update.CommandForVersion(detectInstallFn().Method, latest); argv != nil {
 		b.WriteString("    " + colorize(i18n.T("version.card.channel_cmd", strings.Join(argv, " ")), ColorGray) + "\n")
 	}
 	return b.String()
