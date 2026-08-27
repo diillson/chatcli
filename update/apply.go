@@ -6,6 +6,7 @@
 package update
 
 import (
+	"bytes"
 	"context"
 	"io"
 	"os"
@@ -113,12 +114,38 @@ func CommandForVersion(m Method, latestTag string) []string {
 	return CommandFor(m)
 }
 
+// Notice identifica avisos não-fatais emitidos por Apply via Options.Notify.
+// O pacote não formata mensagem de usuário — a camada cli traduz cada aviso
+// pela chave i18n correspondente, mantendo este pacote livre de i18n.
+type Notice int
+
+const (
+	// NoticeGoInstallDirectiveFallback: o `go install module@version` recusou
+	// a tag alvo (go.mod com diretivas replace/exclude) e o update caiu para
+	// o binário oficial da release no mesmo caminho do executável.
+	NoticeGoInstallDirectiveFallback Notice = iota
+)
+
+// Notifier recebe avisos não-fatais de Apply. É uma interface (e não um
+// campo func) para Options continuar comparável — apidiff trata a perda de
+// comparabilidade de um struct exportado como breaking change.
+type Notifier interface {
+	Notify(Notice)
+}
+
+// NotifierFunc adapta uma função a Notifier, no padrão http.HandlerFunc.
+type NotifierFunc func(Notice)
+
+// Notify implementa Notifier.
+func (f NotifierFunc) Notify(n Notice) { f(n) }
+
 // Options parametriza Apply. Stdout/Stderr recebem a saída dos comandos
 // externos (brew/go install); nil descarta — o modo auto em background usa
-// nil para nunca sujar o prompt.
+// nil para nunca sujar o prompt. Notify (opcional) recebe avisos não-fatais.
 type Options struct {
 	Stdout io.Writer
 	Stderr io.Writer
+	Notify Notifier
 }
 
 // runCommandFn executa um comando externo com a saída plugada — seam para
@@ -133,6 +160,21 @@ var runCommandFn = func(ctx context.Context, opts Options, name string, args ...
 // lookPathFn resolve a ferramenta no PATH — seam para testes.
 var lookPathFn = exec.LookPath
 
+// selfReplaceFn — seam para testes exercitarem os caminhos que terminam em
+// self-replace sem baixar uma release de verdade.
+var selfReplaceFn = SelfReplace
+
+// goInstallDirectiveRefusal detecta a recusa do `go install module@version`
+// para tags cujo go.mod carrega diretivas replace/exclude. O texto vem do
+// toolchain Go (nunca localizado): "The go.mod file ... contains one or more
+// replace directives. It must not contain directives that would cause it to
+// be interpreted differently than if it were the main module."
+func goInstallDirectiveRefusal(stderr string) bool {
+	return strings.Contains(stderr, "must not contain directives") ||
+		strings.Contains(stderr, "replace directives") ||
+		strings.Contains(stderr, "exclude directives")
+}
+
 // Apply atualiza pelo canal detectado em info, para a versão latestTag
 // (com ou sem prefixo "v"). O self-replace baixa o asset dessa tag e o go
 // install instala pinado nela (@vX.Y.Z) — instalar exatamente o que a
@@ -145,12 +187,40 @@ func Apply(ctx context.Context, info Info, latestTag string, opts Options) error
 	case MethodHomebrew:
 		return runTool(ctx, opts, BrewUpgradeArgs())
 	case MethodGoInstall:
-		return runTool(ctx, opts, GoInstallArgsVersion(latestTag))
+		return applyGoInstall(ctx, info, latestTag, opts)
 	case MethodReleaseBinary:
-		return SelfReplace(ctx, info.ExecPath, latestTag)
+		return selfReplaceFn(ctx, info.ExecPath, latestTag)
 	default:
 		return ErrManualMethod
 	}
+}
+
+// applyGoInstall roda o canal go install com fallback: se a tag alvo tiver
+// go.mod com replace/exclude, o `go install module@version` recusa por design
+// do Go — sem conserto do lado do cliente (foi o que travou os updates a
+// partir da v1.189.1). Nesse caso específico o update cai para o binário
+// oficial da release, que ignora go.mod por completo; qualquer outra falha
+// sobe intacta para a camada de erros tipados.
+func applyGoInstall(ctx context.Context, info Info, latestTag string, opts Options) error {
+	var stderrTail bytes.Buffer
+	teed := opts
+	if opts.Stderr != nil {
+		teed.Stderr = io.MultiWriter(opts.Stderr, &stderrTail)
+	} else {
+		teed.Stderr = &stderrTail
+	}
+
+	err := runTool(ctx, teed, GoInstallArgsVersion(latestTag))
+	if err == nil {
+		return nil
+	}
+	if !goInstallDirectiveRefusal(stderrTail.String()) {
+		return err
+	}
+	if opts.Notify != nil {
+		opts.Notify.Notify(NoticeGoInstallDirectiveFallback)
+	}
+	return selfReplaceFn(ctx, info.ExecPath, latestTag)
 }
 
 // runTool valida a presença da ferramenta e executa o comando do canal.

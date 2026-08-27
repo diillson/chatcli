@@ -90,7 +90,6 @@ require (
 	github.com/josharian/intern v1.0.0 // indirect
 	github.com/json-iterator/go v1.1.12 // indirect
 	github.com/klauspost/compress v1.19.1 // indirect
-	github.com/kovidgoyal/imaging v1.8.23 // indirect
 	github.com/lucasb-eyer/go-colorful v1.3.0 // indirect
 	github.com/mailru/easyjson v0.7.7 // indirect
 	github.com/mattn/go-colorable v0.1.13 // indirect
@@ -143,9 +142,9 @@ require (
 	sigs.k8s.io/yaml v1.6.0 // indirect
 )
 
-// CVE-2023-36308: disintegration/imaging está abandonado (última release
-// 2019) e nunca publicou o fix do panic no decode de TIFF malformado. O
-// fork do kovidgoyal (usado pelo kitty e pelo mailpit) é mantido, API
-// drop-in e carrega o patch — o replace tira o CVE do binário de verdade,
-// não só do relatório.
-replace github.com/disintegration/imaging => github.com/kovidgoyal/imaging v1.6.5
+// NUNCA adicionar diretivas replace neste arquivo: `go install module@version`
+// recusa módulos com replace (erro "must not contain directives..."), o que
+// quebra a instalação via go install E o canal go install do /update — foi o
+// que travou as releases v1.189.1/v1.190.0. O CVE-2023-36308 do
+// disintegration/imaging (transitivo via go-graphviz, upstream sem fix,
+// unfixed → não falha o gate Trivy) é risco aceito em vez de replace p/ fork.
