@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.191.0](https://github.com/diillson/chatcli/compare/v1.190.1...v1.191.0) (2026-08-27)
+
+
+### Features
+
+* **update:** one-shot chatcli update subcommand for scripts and automation ([#1393](https://github.com/diillson/chatcli/issues/1393)) ([d336a4a](https://github.com/diillson/chatcli/commit/d336a4a480b47d46637cff9619c52fb841a44efb))
+
 ## [1.190.1](https://github.com/diillson/chatcli/compare/v1.190.0...v1.190.1) (2026-08-27)
 
 
