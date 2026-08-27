@@ -93,7 +93,7 @@ func (cli *ChatCLI) handleUpdateCommand(ctx context.Context, userInput string) {
 		return
 	}
 
-	if argv := update.CommandFor(info.Method); argv != nil {
+	if argv := update.CommandForVersion(info.Method, rep.Latest); argv != nil {
 		fmt.Println("  " + colorize(i18n.T("update.running", strings.Join(argv, " ")), ColorCyan))
 	} else {
 		asset, _ := update.AssetName()

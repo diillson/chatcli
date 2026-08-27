@@ -453,6 +453,38 @@ func TestBedrockSonnet5Entry(t *testing.T) {
 	assert.Equal(t, "global.anthropic.claude-sonnet-4-6", m46.ID)
 }
 
+// TestGLM53Entries pins GLM-5.3 (Z.AI, Aug 14 2026) and GLM-5.3-Flash
+// (Aug 26 2026): both 1M-token context / 128K max output per
+// docs.z.ai/guides/llm/glm-5.3{,-flash}. The flash entry must sit ahead
+// of glm-5.3, and both ahead of glm-5.2/glm-5, so the more specific ids
+// are never shadowed by shorter alias prefixes.
+func TestGLM53Entries(t *testing.T) {
+	for _, id := range []string{"glm-5.3", "glm-5-3"} {
+		meta, ok := Resolve(ProviderZAI, id)
+		assert.True(t, ok, "expected %s to resolve on ProviderZAI", id)
+		assert.Equal(t, "glm-5.3", meta.ID, "alias %s must resolve to glm-5.3", id)
+		assert.Equal(t, 1000000, meta.ContextWindow, "GLM-5.3 context window is 1M tokens")
+		assert.Equal(t, 128000, meta.MaxOutputTokens, "GLM-5.3 max output is 128K")
+		assert.Equal(t, APIChatCompletions, meta.PreferredAPI)
+	}
+	for _, id := range []string{"glm-5.3-flash", "glm-5-3-flash"} {
+		meta, ok := Resolve(ProviderZAI, id)
+		assert.True(t, ok, "expected %s to resolve on ProviderZAI", id)
+		assert.Equal(t, "glm-5.3-flash", meta.ID, "alias %s must resolve to glm-5.3-flash", id)
+		assert.Equal(t, 1000000, meta.ContextWindow, "GLM-5.3-Flash context window is 1M tokens")
+		assert.Equal(t, 128000, meta.MaxOutputTokens, "GLM-5.3-Flash max output is 128K")
+		assert.Contains(t, meta.Capabilities, "vision", "GLM-5.3-Flash is natively multimodal")
+	}
+	// glm-5.2 and glm-5 must keep resolving to their own entries.
+	m52, ok := Resolve(ProviderZAI, "glm-5.2")
+	assert.True(t, ok)
+	assert.Equal(t, "glm-5.2", m52.ID)
+	// The DEVIN catalog mirrors the family specs for client-side sizing.
+	mdv, ok := Resolve(ProviderDevin, "glm-5.3")
+	assert.True(t, ok)
+	assert.Equal(t, 1000000, mdv.ContextWindow)
+}
+
 // TestGLM52Entry pins GLM-5.2 (Z.AI, Jun 13 2026): 1M-token context and
 // 128K max output per docs.z.ai/guides/llm/glm-5.2. The entry must sit
 // ahead of the glm-5 / glm-5.1 entries so the more specific id is never

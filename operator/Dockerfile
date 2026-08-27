@@ -34,8 +34,8 @@ RUN CGO_ENABLED=0 GOOS=linux GOARCH=${TARGETARCH} go build -a -o manager main.go
 FROM alpine:3.24.1 AS runtime
 RUN apk update && apk upgrade --no-cache && \
     apk add --no-cache \
-        "libcrypto3>=3.5.6-r0" \
-        "libssl3>=3.5.6-r0" \
+        "libcrypto3>=3.5.8-r0" \
+        "libssl3>=3.5.8-r0" \
         git ca-certificates tzdata && \
     adduser -D -u 65532 -g 65532 nonroot
 WORKDIR /

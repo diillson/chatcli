@@ -1022,6 +1022,35 @@ var registry = []ModelMeta{
 	// so generic alias prefixes ("glm-5") don't shadow the more specific
 	// "glm-5.1" / "glm-5-turbo" tags.
 	{
+		// GLM-5.3-Flash (Aug 26 2026): 1M-token context, 128K max output
+		// (docs.z.ai/guides/llm/glm-5.3-flash). Natively multimodal
+		// (images/videos/files), MIT license, thinking cannot be disabled.
+		// Must sit ahead of glm-5.3 so the "-flash" tag is never shadowed
+		// by the shorter alias in tier-2 (contains) matching.
+		ID:              "glm-5.3-flash",
+		Aliases:         []string{"glm-5.3-flash", "glm-5-3-flash"},
+		DisplayName:     "GLM-5.3 Flash",
+		Provider:        ProviderZAI,
+		ContextWindow:   1000000,
+		MaxOutputTokens: 128000,
+		PreferredAPI:    APIChatCompletions,
+		Capabilities:    []string{"tools", "json_mode", "vision"},
+	},
+	{
+		// GLM-5.3 (Aug 14 2026): 1M-token context, 128K max output
+		// (docs.z.ai/guides/llm/glm-5.3). Same base model as GLM-5.2 with
+		// scaled-up post-training (coding/agentic focus). Text-only input;
+		// reasoning always on. Tool calling and structured output.
+		ID:              "glm-5.3",
+		Aliases:         []string{"glm-5.3", "glm-5-3"},
+		DisplayName:     "GLM-5.3 (1M context)",
+		Provider:        ProviderZAI,
+		ContextWindow:   1000000,
+		MaxOutputTokens: 128000,
+		PreferredAPI:    APIChatCompletions,
+		Capabilities:    []string{"tools", "json_mode"},
+	},
+	{
 		// GLM-5.2 (Jun 13 2026): 1M-token context, 128K max output
 		// (docs.z.ai/guides/llm/glm-5.2). Open-weight MoE, MIT license,
 		// tuned for coding/agentic workloads with thinking mode, function
