@@ -226,6 +226,7 @@
   "update.running": "Running: %s",
   "update.downloading": "Downloading v%s (%s)...",
   "update.goinstall_fallback": "go install rejected this version (replace/exclude directives in its go.mod) — downloading the official release binary instead.",
+  "update.oneshot.usage": "Usage: chatcli update [check]",
   "update.success_restart": "Updated to v%s — restart chatcli to start using the new version.",
   "version.card.title": "ChatCLI · Version",
   "version.card.installed": "Installed",

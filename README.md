@@ -89,6 +89,11 @@ updates silently in the background — the next start opens on the new version.
 Docker images and source builds are never touched; they get instructions
 instead. See `/config update` for the current policy and detected channel.
 
+For scripts and automation there is a one-shot surface: `chatcli update`
+applies the same flow without entering the REPL, and `chatcli update check`
+only reports. Exit codes: `0` updated or already current, `1` check/apply
+failure or a manual channel with a pending update, `2` invalid usage.
+
 <details>
 <summary><strong>Build from source</strong></summary>
 
