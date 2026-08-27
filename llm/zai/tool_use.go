@@ -66,6 +66,7 @@ func (c *ZAIClient) SendPromptWithTools(ctx context.Context, prompt string, hist
 		"messages":   messages,
 		"max_tokens": effectiveMaxTokens,
 	}
+	c.applyThinking(payload)
 	if len(toolDefs) > 0 {
 		payload["tools"] = toolDefs
 	}

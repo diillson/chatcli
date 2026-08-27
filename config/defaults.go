@@ -47,8 +47,11 @@ const (
 	XAIAPIURL       = "https://api.x.ai/v1/chat/completions"
 
 	// Valores padrão para ZAI (Zhipu AI / z.ai)
-	DefaultZAIModel  = "glm-5"
-	ZAIAPIURL        = "https://api.z.ai/api/paas/v4/chat/completions"
+	DefaultZAIModel = "glm-5"
+	ZAIAPIURL       = "https://api.z.ai/api/paas/v4/chat/completions"
+	// Endpoint do GLM Coding Plan (assinatura): mesma key do platform, mas o
+	// caminho /coding/ é o que debita do plano em vez dos créditos da API.
+	ZAICodingAPIURL  = "https://api.z.ai/api/coding/paas/v4/chat/completions"
 	DefaultZAIJWTTTL = 30 * time.Minute // JWT token validity for ZAI auth
 
 	// Valores padrão para MiniMax

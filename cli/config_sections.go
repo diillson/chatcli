@@ -508,6 +508,8 @@ func (cli *ChatCLI) showConfigProviders() {
 	kv(p, "OPENAI_MODEL", envOr("OPENAI_MODEL"))
 	kv(p, "OPENAI_ASSISTANT_MODEL", envOr("OPENAI_ASSISTANT_MODEL"))
 	kv(p, "OPENAI_USE_RESPONSES", envOr("OPENAI_USE_RESPONSES"))
+	kv(p, "OPENAI_API_URL", envOr("OPENAI_API_URL"))
+	kv(p, "OPENAI_RESPONSES_API_URL", envOr("OPENAI_RESPONSES_API_URL"))
 	kv(p, "OPENAI_MAX_TOKENS", envOr("OPENAI_MAX_TOKENS"))
 
 	fmt.Println(p)
@@ -596,6 +598,9 @@ func (cli *ChatCLI) showConfigProviders() {
 	kv(p, "ZAI_API_KEY", presence(os.Getenv("ZAI_API_KEY")))
 	kv(p, "ZAI_MODEL", envOr("ZAI_MODEL"))
 	kv(p, "ZAI_MAX_TOKENS", envOr("ZAI_MAX_TOKENS"))
+	kv(p, "ZAI_API_URL", envOr("ZAI_API_URL"))
+	kv(p, "ZAI_USE_CODING_PLAN", envOr("ZAI_USE_CODING_PLAN"))
+	kv(p, "ZAI_THINKING", envOr("ZAI_THINKING"))
 
 	fmt.Println(p)
 	subheader(p, "cfg.sub.prov.minimax")

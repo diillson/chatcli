@@ -41,6 +41,7 @@ import (
 	"github.com/diillson/chatcli/llm/token"
 	"github.com/diillson/chatcli/llm/xai"
 	"github.com/diillson/chatcli/llm/zai"
+	"github.com/diillson/chatcli/utils"
 	"go.uber.org/zap"
 )
 
@@ -405,11 +406,7 @@ func (m *LLMManagerImpl) configurarOpenAIClient(maxRetries int, initialBackoff t
 		// OAuth tokens always use the Responses API (ChatGPT backend only speaks Responses format)
 		isOAuth := tp.Mode() == auth.AuthModeOAuth
 
-		useResponses := isOAuth || config.Global.GetBool("OPENAI_USE_RESPONSES", false)
-
-		if !useResponses && catalog.GetPreferredAPI(catalog.ProviderOpenAI, model) == catalog.APIResponses {
-			useResponses = true
-		}
+		useResponses := openAIPreferResponses(isOAuth, model)
 
 		if useResponses {
 			m.logger.Info(i18n.T("llm.manager.using_responses_api"), zap.String("model", model), zap.Bool("oauth", isOAuth))
@@ -434,6 +431,25 @@ func (m *LLMManagerImpl) configurarOpenAIClient(maxRetries int, initialBackoff t
 		}
 		return openaiassistant.NewOpenAIAssistantClient(m.baseCtx, tp, model, m.logger)
 	}
+}
+
+// openAIPreferResponses decide entre as superfícies Responses e
+// chat-completions do provider OPENAI. A preferência do catálogo (gpt-5.x →
+// Responses) só vale no host oficial: uma OPENAI_API_URL custom aponta para
+// um gateway OpenAI-compatible que fala chat-completions, e o client
+// Responses ignoraria essa URL — mandando a key do gateway para
+// api.openai.com (401 garantido). OPENAI_USE_RESPONSES=true explícito ainda
+// vence, para gateways que exponham a Responses API (requer
+// OPENAI_RESPONSES_API_URL apontando para eles).
+func openAIPreferResponses(isOAuth bool, model string) bool {
+	if isOAuth || config.Global.GetBool("OPENAI_USE_RESPONSES", false) {
+		return true
+	}
+	chatURL := utils.GetEnvOrDefault("OPENAI_API_URL", config.OpenAIAPIURL)
+	if utils.IsCustomEndpoint(chatURL, config.OpenAIAPIURL) {
+		return false
+	}
+	return catalog.GetPreferredAPI(catalog.ProviderOpenAI, model) == catalog.APIResponses
 }
 
 // configurarStackSpotClient configura o cliente StackSpot

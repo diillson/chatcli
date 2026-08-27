@@ -123,7 +123,7 @@ OPENAI_API_KEY=sk-xxx
 | AWS Bedrock | IAM / Profile / credentials chain | `BEDROCK_MODEL` | `AWS_REGION`, `BEDROCK_CROSS_REGION` |
 | Google Gemini | `GOOGLEAI_API_KEY` | `GOOGLEAI_MODEL` | `GOOGLEAI_MAX_TOKENS` |
 | xAI | `XAI_API_KEY` | `XAI_MODEL` | `XAI_MAX_TOKENS` |
-| ZAI | `ZAI_API_KEY` | `ZAI_MODEL` | `ZAI_MAX_TOKENS` |
+| ZAI | `ZAI_API_KEY` | `ZAI_MODEL` | `ZAI_MAX_TOKENS`, `ZAI_USE_CODING_PLAN`, `ZAI_THINKING`, `ZAI_API_URL` |
 | MiniMax | `MINIMAX_API_KEY` | `MINIMAX_MODEL` | `MINIMAX_MAX_TOKENS` |
 | Moonshot (Kimi) | `MOONSHOT_API_KEY` | `MOONSHOT_MODEL` | `MOONSHOT_MAX_TOKENS`, `MOONSHOT_THINKING` |
 | GitHub Copilot | `GITHUB_COPILOT_TOKEN` | `COPILOT_MODEL` | or `/auth login github-copilot` |
@@ -137,9 +137,16 @@ OPENAI_API_KEY=sk-xxx
 
 - `OPENAI_API_URL` overrides the OpenAI chat completions endpoint. It must be the **full** chat completions URL (e.g. `https://gateway.example.com/v1/chat/completions`) — the `/models` listing URL is derived from it.
 - Authentication is unchanged: requests carry `Authorization: Bearer $OPENAI_API_KEY`, so when redirecting to a gateway set `OPENAI_API_KEY` to the **gateway's** key. Do not combine a third-party URL with an OAuth login (`/auth login openai`) — the OAuth token would be sent to the gateway.
-- `OPENAI_RESPONSES_API_URL` overrides the Responses API endpoint. Note that `OPENAI_USE_RESPONSES=false` does not force chat completions: OAuth logins and models whose catalog entry prefers the Responses API (e.g. `gpt-5.4`, the default) still use it. Effective precedence: OAuth > `OPENAI_USE_RESPONSES=true` > model catalog preference > `OPENAI_USE_RESPONSES=false`. When redirecting the OpenAI provider to a compatible endpoint, set **both** URLs.
+- `OPENAI_RESPONSES_API_URL` overrides the Responses API endpoint. A **custom** `OPENAI_API_URL` (different host) forces the chat completions surface — the catalog preference for the Responses API (e.g. `gpt-5.4`, the default) only applies on the official host, so a gateway key is never sent to `api.openai.com`. Effective precedence: OAuth > `OPENAI_USE_RESPONSES=true` > custom `OPENAI_API_URL` host (chat completions) > model catalog preference > `OPENAI_USE_RESPONSES=false`. If your gateway does expose the Responses API, opt in with `OPENAI_USE_RESPONSES=true` and set `OPENAI_RESPONSES_API_URL` too.
 - When the endpoint URL points to a custom host, the model listing is **not** filtered by model family — every model the gateway returns on `/models` appears in the autocomplete and `/switch --model`. Against the official endpoint, the listing keeps only chat-capable families (hiding embeddings, whisper, tts, dall-e, moderation). The same rule applies to `ZAI_API_URL`, `MOONSHOT_API_URL` and `MINIMAX_API_URL`.
 - To use a third-party OpenAI-compatible gateway as a provider **separate** from OpenAI (including in the server fallback chain), point the OpenRouter preset at it: `LLM_PROVIDER=OPENROUTER` with `OPENROUTER_API_KEY` and `OPENROUTER_API_URL=https://gateway.example.com/v1/chat/completions`.
+
+#### Z.AI GLM Coding Plan (subscription)
+
+- `ZAI_USE_CODING_PLAN=true` points the ZAI provider at the subscription endpoint (`https://api.z.ai/api/coding/paas/v4/chat/completions`). The **same** platform API key works on both endpoints — the `/coding/` path is what makes requests draw from the plan instead of pay-as-you-go credits.
+- The plan serves `glm-5.3` and `glm-5.3-flash`; requests for older GLM ids are routed to them server-side. `/cost` reports these calls at $0: usage is covered by the subscription, not billed per token.
+- An explicit `ZAI_API_URL` always wins over the toggle — set it to the full chat completions URL (e.g. the mainland endpoint `https://open.bigmodel.cn/api/coding/paas/v4/chat/completions`). Any URL with an `/api/coding/` path is treated as plan usage.
+- `ZAI_THINKING=enabled|disabled` controls the GLM thinking mode on both the plain and tool-calling paths (unset keeps the backend default; `enabled` also preserves interleaved reasoning across turns).
 
 </details>
 
@@ -280,7 +287,7 @@ helm install chatcli oci://ghcr.io/diillson/charts/chatcli \
 | **AWS Bedrock** | claude-sonnet-4-5 | Native | Yes | Thinking budget (Anthropic models) |
 | **Google Gemini** | gemini-2.5-flash | Native | Yes | — |
 | **xAI (Grok)** | grok-4-1 | XML fallback | — | — |
-| **ZAI (Zhipu AI)** | glm-5 | Native | Yes | — |
+| **ZAI (Zhipu AI)** | glm-5 | Native | Yes | `ZAI_THINKING=enabled\|disabled` · GLM Coding Plan via `ZAI_USE_CODING_PLAN` |
 | **MiniMax** | MiniMax-M2.7 | Native | Yes | — |
 | **Moonshot (Kimi)** | kimi-k2.6 | Native | Yes | `MOONSHOT_THINKING=enabled\|disabled\|auto` |
 | **GitHub Copilot** | gpt-4o | Native | Yes | — |
