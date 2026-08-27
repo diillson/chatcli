@@ -97,6 +97,8 @@ func TestGetModelPricing(t *testing.T) {
 		// GLM-5.2 $1.40/$4.40, GLM-5 $1.00/$3.20 per MTok. The specific
 		// "glm-5.2" tag must win before the bare "glm-5" prefix; unknown
 		// GLM/ZAI ids keep the conservative flat fallback.
+		{"glm-5.3-flash before glm-5.3", "ZAI", "glm-5.3-flash", 0.15, 0.50},
+		{"glm-5.3 same tier as 5.2", "ZAI", "glm-5.3", 1.40, 4.40},
 		{"glm-5.2", "ZAI", "glm-5.2", 1.40, 4.40},
 		{"glm-5.2 via model on other provider", "OTHER", "glm-5.2", 1.40, 4.40},
 		{"glm-5.1 same tier as 5.2", "ZAI", "glm-5.1", 1.40, 4.40},

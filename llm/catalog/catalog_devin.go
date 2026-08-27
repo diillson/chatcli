@@ -61,6 +61,7 @@ func init() {
 		// Attention); output capped at the K2.x family's 128K — OpenRouter
 		// lists output = context, which is an unbounded-listing artifact,
 		// not a real per-request cap.
+		{"glm-5.3", 1000000, 128000},
 		{"glm-5.2", 1000000, 128000},
 		{"kimi-k3", 1048576, 131072},
 		{"kimi-k2.7", 262144, 131072},

@@ -965,12 +965,18 @@ func grokPricing(model string) (float64, float64, bool) {
 }
 
 // zaiPricing covers Z.AI's GLM-5 family. Public list prices (docs.z.ai,
-// Jun 2026): GLM-5.2 $1.40/$4.40, GLM-5 $1.00/$3.20 per MTok. Ordering
-// matters: the specific "glm-5.2" tag must win before the bare "glm-5"
-// prefix. GLM-4.x and other Z.AI ids fall through to the conservative
-// flat rate in providerFallbackPricing.
+// Aug 2026): GLM-5.3/GLM-5.2 $1.40/$4.40, GLM-5.3-Flash $0.15/$0.50
+// (list price; launch promo até 09/set/2026 não é refletida para não
+// sub-reportar), GLM-5 $1.00/$3.20 per MTok. Ordering matters: the
+// "-flash" tag must win before "glm-5.3", and the specific "glm-5.x"
+// tags before the bare "glm-5" prefix. GLM-4.x and other Z.AI ids fall
+// through to the conservative flat rate in providerFallbackPricing.
 func zaiPricing(model string) (float64, float64, bool) {
 	switch {
+	case strings.Contains(model, "glm-5.3-flash"), strings.Contains(model, "glm-5-3-flash"):
+		return 0.15, 0.50, true
+	case strings.Contains(model, "glm-5.3"), strings.Contains(model, "glm-5-3"):
+		return 1.40, 4.40, true
 	case strings.Contains(model, "glm-5.2"), strings.Contains(model, "glm-5-2"):
 		return 1.40, 4.40, true
 	case strings.Contains(model, "glm-5.1"), strings.Contains(model, "glm-5-1"):
