@@ -19,7 +19,7 @@ func setupTestEnv(t *testing.T, envs map[string]string) {
 	originalEnvs := make(map[string]string)
 
 	keysToClear := []string{
-		"OPENAI_API_KEY", "CLIENT_ID", "CLIENT_KEY",
+		"OPENAI_API_KEY", "OPENAI_API_URL", "OPENAI_USE_RESPONSES", "CLIENT_ID", "CLIENT_KEY",
 		"ANTHROPIC_API_KEY", "ANTHROPIC_OAUTH_TOKEN",
 		"GOOGLEAI_API_KEY", "XAI_API_KEY",
 		"OLLAMA_ENABLED", "OLLAMA_BASE_URL",

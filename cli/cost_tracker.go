@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/diillson/chatcli/i18n"
+	"github.com/diillson/chatcli/llm/zai"
 	"github.com/diillson/chatcli/models"
 )
 
@@ -809,6 +810,13 @@ func lookupModelPricing(provider, model string) (inputCost, outputCost float64, 
 	// tokens e o custo é da assinatura Cognition — sem o curto-circuito,
 	// claudePricing/openAIPricing cobrariam como se fosse API direta.
 	if strings.Contains(provider, "devin") {
+		return 0, 0, true
+	}
+
+	// GLM Coding Plan: o endpoint /coding/ debita da assinatura, não dos
+	// créditos por token — tarifa zero, como Devin/Ollama/StackSpot. Sem o
+	// curto-circuito, zaiPricing cobraria como se fosse a API paga.
+	if strings.Contains(provider, "zai") && zai.CodingPlanActive() {
 		return 0, 0, true
 	}
 

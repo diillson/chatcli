@@ -123,6 +123,7 @@ linters-settings:
       - devolvendo
       - duplicatas
       - eles
+      - essencial
       - exclusivos
       - exponencial
       - instal

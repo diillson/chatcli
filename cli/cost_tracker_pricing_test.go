@@ -153,3 +153,29 @@ func TestGetModelPricing_CaseInsensitive(t *testing.T) {
 	assert.Equal(t, 15.0, in)
 	assert.Equal(t, 75.0, out)
 }
+
+// TestLookupModelPricing_ZAICodingPlan: com o plano ativo (toggle ou URL
+// /coding/), tokens ZAI são da assinatura — tarifa zero com known=true,
+// nunca "preço desconhecido". Sem o plano, a tabela normal volta a valer.
+func TestLookupModelPricing_ZAICodingPlan(t *testing.T) {
+	t.Setenv("ZAI_API_URL", "")
+	t.Setenv("ZAI_USE_CODING_PLAN", "true")
+
+	in, out, known := lookupModelPricing("ZAI", "glm-5.3")
+	assert.True(t, known)
+	assert.Zero(t, in)
+	assert.Zero(t, out)
+
+	// O curto-circuito é do provider ZAI: um glm servido via OPENAI
+	// (gateway) continua na tabela normal.
+	in, out, known = lookupModelPricing("OPENAI", "glm-5.3")
+	assert.True(t, known)
+	assert.Equal(t, 1.40, in)
+	assert.Equal(t, 4.40, out)
+
+	t.Setenv("ZAI_USE_CODING_PLAN", "")
+	in, out, known = lookupModelPricing("ZAI", "glm-5.3")
+	assert.True(t, known)
+	assert.Equal(t, 1.40, in)
+	assert.Equal(t, 4.40, out)
+}

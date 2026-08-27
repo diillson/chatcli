@@ -31,16 +31,43 @@ import (
 // ZAIClient implementa o cliente para interagir com a API da ZAI (Zhipu AI / z.ai).
 // A API é compatível com o formato OpenAI (chat/completions).
 type ZAIClient struct {
-	provider    auth.TokenProvider
-	model       string
-	logger      *zap.Logger
-	client      *http.Client
-	maxAttempts int
-	backoff     time.Duration
-	apiURL      string
-	useJWT      bool
-	jwtAuth     *jwtCache
-	usageState  client.UsageState
+	provider     auth.TokenProvider
+	model        string
+	logger       *zap.Logger
+	client       *http.Client
+	maxAttempts  int
+	backoff      time.Duration
+	apiURL       string
+	useJWT       bool
+	jwtAuth      *jwtCache
+	thinkingMode string // "" (backend default), "enabled", "disabled"
+	usageState   client.UsageState
+}
+
+// ResolveAPIURL retorna o endpoint efetivo de chat completions da ZAI.
+// Precedência: ZAI_API_URL explícita > ZAI_USE_CODING_PLAN (endpoint da
+// assinatura GLM Coding Plan) > o fallback informado (endpoint oficial
+// pay-as-you-go). A mesma key do platform vale nos dois endpoints; é o
+// caminho /coding/ que decide se a request debita do plano ou dos créditos.
+func ResolveAPIURL(fallback string) string {
+	if v := strings.TrimSpace(os.Getenv("ZAI_API_URL")); v != "" {
+		return v
+	}
+	if v := strings.TrimSpace(os.Getenv("ZAI_USE_CODING_PLAN")); v != "" {
+		if b, err := strconv.ParseBool(v); err == nil && b {
+			return config.ZAICodingAPIURL
+		}
+	}
+	return fallback
+}
+
+// CodingPlanActive reporta se as requests estão indo para um endpoint do GLM
+// Coding Plan — seja via ZAI_USE_CODING_PLAN, seja via ZAI_API_URL apontando
+// para um caminho /api/coding/ (api.z.ai ou open.bigmodel.cn). Tokens da
+// assinatura não são faturados por token; o cost tracker usa isto para
+// zerar a tarifa (mesmo curto-circuito do Devin/Ollama).
+func CodingPlanActive() bool {
+	return strings.Contains(ResolveAPIURL(config.ZAIAPIURL), "/api/coding/")
 }
 
 // LastUsage returns the token usage from the most recent API call.
@@ -55,13 +82,14 @@ func (c *ZAIClient) LastStopReason() string { return c.usageState.LastStopReason
 func NewZAIClient(ctx context.Context, provider auth.TokenProvider, model string, logger *zap.Logger, maxAttempts int, backoff time.Duration) *ZAIClient {
 	httpClient := utils.NewHTTPClient(logger, 900*time.Second)
 	c := &ZAIClient{
-		provider:    provider,
-		model:       strings.ToLower(model),
-		logger:      logger,
-		client:      httpClient,
-		maxAttempts: maxAttempts,
-		backoff:     backoff,
-		apiURL:      config.ZAIAPIURL,
+		provider:     provider,
+		model:        strings.ToLower(model),
+		logger:       logger,
+		client:       httpClient,
+		maxAttempts:  maxAttempts,
+		backoff:      backoff,
+		apiURL:       config.ZAIAPIURL,
+		thinkingMode: normalizeThinkingMode(os.Getenv("ZAI_THINKING")),
 	}
 
 	// Detect the id.secret JWT format from the current token. ZAI keys are
@@ -109,6 +137,32 @@ func (c *ZAIClient) getAuthToken(ctx context.Context) string {
 	return token
 }
 
+// normalizeThinkingMode reduz os aliases aceitos em ZAI_THINKING para os
+// dois modos da API; qualquer outro valor (inclusive vazio/"auto") mantém
+// o default do backend, sem injetar o campo.
+func normalizeThinkingMode(raw string) string {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "enabled", "on", "true", "1":
+		return "enabled"
+	case "disabled", "off", "false", "0":
+		return "disabled"
+	}
+	return ""
+}
+
+// applyThinking injeta o controle top-level `thinking` da API GLM quando o
+// usuário pediu um modo explícito via ZAI_THINKING. clear_thinking=false
+// preserva o reasoning intercalado entre turnos (o backend por default o
+// descarta do contexto), essencial em sessões de coding longas.
+func (c *ZAIClient) applyThinking(payload map[string]interface{}) {
+	switch c.thinkingMode {
+	case "enabled":
+		payload["thinking"] = map[string]interface{}{"type": "enabled", "clear_thinking": false}
+	case "disabled":
+		payload["thinking"] = map[string]interface{}{"type": "disabled"}
+	}
+}
+
 // GetModelName retorna o nome amigável do modelo ZAI via catálogo.
 func (c *ZAIClient) GetModelName() string {
 	return catalog.GetDisplayName(catalog.ProviderZAI, c.model)
@@ -154,6 +208,7 @@ func (c *ZAIClient) SendPrompt(ctx context.Context, prompt string, history []mod
 		"messages":   messages,
 		"max_tokens": effectiveMaxTokens,
 	}
+	c.applyThinking(payload)
 
 	jsonValue, err := json.Marshal(payload)
 	if err != nil {
@@ -191,7 +246,7 @@ func (c *ZAIClient) SendPrompt(ctx context.Context, prompt string, history []mod
 
 // sendRequest envia a requisição para a API da ZAI.
 func (c *ZAIClient) sendRequest(ctx context.Context, jsonValue []byte) (*http.Response, error) {
-	apiURL := utils.GetEnvOrDefault("ZAI_API_URL", c.apiURL)
+	apiURL := ResolveAPIURL(c.apiURL)
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, apiURL, utils.NewJSONReader(jsonValue))
 	if err != nil {
@@ -283,7 +338,7 @@ func keepModel(id string, custom bool) bool {
 
 // ListModels fetches available models from the ZAI /models endpoint.
 func (c *ZAIClient) ListModels(ctx context.Context) ([]client.ModelInfo, error) {
-	apiURL := utils.GetEnvOrDefault("ZAI_API_URL", c.apiURL)
+	apiURL := ResolveAPIURL(c.apiURL)
 	modelsURL := strings.TrimSuffix(apiURL, "/chat/completions") + "/models"
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, modelsURL, nil)

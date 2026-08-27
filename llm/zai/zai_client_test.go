@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/diillson/chatcli/auth"
+	"github.com/diillson/chatcli/config"
 	"github.com/diillson/chatcli/models"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -375,6 +376,133 @@ func TestBuildToolMessages_WithAllRoles(t *testing.T) {
 	toolMsg := msgs[5].(map[string]interface{})
 	assert.Equal(t, "tool", toolMsg["role"])
 	assert.Equal(t, "tc1", toolMsg["tool_call_id"])
+}
+
+func TestResolveAPIURL_Precedence(t *testing.T) {
+	t.Setenv("ZAI_API_URL", "")
+	t.Setenv("ZAI_USE_CODING_PLAN", "")
+	assert.Equal(t, config.ZAIAPIURL, ResolveAPIURL(config.ZAIAPIURL))
+
+	t.Setenv("ZAI_USE_CODING_PLAN", "true")
+	assert.Equal(t, config.ZAICodingAPIURL, ResolveAPIURL(config.ZAIAPIURL))
+
+	// Valor não-booleano no toggle não ativa o plano.
+	t.Setenv("ZAI_USE_CODING_PLAN", "banana")
+	assert.Equal(t, config.ZAIAPIURL, ResolveAPIURL(config.ZAIAPIURL))
+
+	// ZAI_API_URL explícita vence o toggle.
+	t.Setenv("ZAI_USE_CODING_PLAN", "true")
+	t.Setenv("ZAI_API_URL", "https://gateway.example/v1/chat/completions")
+	assert.Equal(t, "https://gateway.example/v1/chat/completions", ResolveAPIURL(config.ZAIAPIURL))
+}
+
+func TestCodingPlanActive(t *testing.T) {
+	t.Setenv("ZAI_API_URL", "")
+	t.Setenv("ZAI_USE_CODING_PLAN", "")
+	assert.False(t, CodingPlanActive())
+
+	t.Setenv("ZAI_USE_CODING_PLAN", "1")
+	assert.True(t, CodingPlanActive())
+
+	// URL explícita apontando para o caminho /coding/ também conta como
+	// plano (inclusive a variante mainland open.bigmodel.cn).
+	t.Setenv("ZAI_USE_CODING_PLAN", "")
+	t.Setenv("ZAI_API_URL", "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions")
+	assert.True(t, CodingPlanActive())
+
+	t.Setenv("ZAI_API_URL", "https://api.z.ai/api/paas/v4/chat/completions")
+	assert.False(t, CodingPlanActive())
+}
+
+func TestNormalizeThinkingMode(t *testing.T) {
+	for _, raw := range []string{"enabled", "ON", "true", "1", " Enabled "} {
+		assert.Equal(t, "enabled", normalizeThinkingMode(raw), "raw=%q", raw)
+	}
+	for _, raw := range []string{"disabled", "off", "FALSE", "0"} {
+		assert.Equal(t, "disabled", normalizeThinkingMode(raw), "raw=%q", raw)
+	}
+	for _, raw := range []string{"", "auto", "whatever"} {
+		assert.Equal(t, "", normalizeThinkingMode(raw), "raw=%q", raw)
+	}
+}
+
+func TestZAIClient_ThinkingModeInjection(t *testing.T) {
+	var payload map[string]interface{}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		payload = nil
+		_ = json.NewDecoder(r.Body).Decode(&payload)
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"choices": [{"message": {"content": "ok"}, "finish_reason": "stop"}]}`))
+	}))
+	defer server.Close()
+
+	logger, _ := zap.NewDevelopment()
+	history := []models.Message{{Role: "user", Content: "Hi"}}
+
+	newClient := func() *ZAIClient {
+		c := NewZAIClient(context.Background(), testProvider("k"), "glm-5.3", logger, 1, 0)
+		c.apiURL = server.URL
+		return c
+	}
+
+	t.Run("enabled", func(t *testing.T) {
+		t.Setenv("ZAI_THINKING", "enabled")
+		c := newClient()
+
+		_, err := c.SendPrompt(context.Background(), "Hi", history, 100)
+		require.NoError(t, err)
+		thinking, ok := payload["thinking"].(map[string]interface{})
+		require.True(t, ok, "thinking deve estar no payload")
+		assert.Equal(t, "enabled", thinking["type"])
+		assert.Equal(t, false, thinking["clear_thinking"])
+
+		// Mesmo controle no caminho de tool use.
+		_, err = c.SendPromptWithTools(context.Background(), "Hi", history, nil, 100)
+		require.NoError(t, err)
+		thinking, ok = payload["thinking"].(map[string]interface{})
+		require.True(t, ok, "thinking deve estar no payload de tools")
+		assert.Equal(t, "enabled", thinking["type"])
+	})
+
+	t.Run("disabled", func(t *testing.T) {
+		t.Setenv("ZAI_THINKING", "off")
+		c := newClient()
+
+		_, err := c.SendPrompt(context.Background(), "Hi", history, 100)
+		require.NoError(t, err)
+		thinking, ok := payload["thinking"].(map[string]interface{})
+		require.True(t, ok)
+		assert.Equal(t, "disabled", thinking["type"])
+	})
+
+	t.Run("unset keeps backend default", func(t *testing.T) {
+		t.Setenv("ZAI_THINKING", "")
+		c := newClient()
+
+		_, err := c.SendPrompt(context.Background(), "Hi", history, 100)
+		require.NoError(t, err)
+		_, present := payload["thinking"]
+		assert.False(t, present, "sem ZAI_THINKING o campo não deve ser enviado")
+	})
+}
+
+func TestZAIClient_CodingPlanEndpointUsed(t *testing.T) {
+	var gotPath string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"choices": [{"message": {"content": "ok"}, "finish_reason": "stop"}]}`))
+	}))
+	defer server.Close()
+
+	// ZAI_API_URL explícita é usada verbatim pelo sendRequest.
+	t.Setenv("ZAI_API_URL", server.URL+"/api/coding/paas/v4/chat/completions")
+	c := newTestClient("http://unused.invalid")
+
+	_, err := c.SendPrompt(context.Background(), "Hi", []models.Message{{Role: "user", Content: "Hi"}}, 100)
+	require.NoError(t, err)
+	assert.Equal(t, "/api/coding/paas/v4/chat/completions", gotPath)
+	assert.True(t, CodingPlanActive())
 }
 
 func TestParseToolResponse_WithUsage(t *testing.T) {
