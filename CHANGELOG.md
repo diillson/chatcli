@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.190.1](https://github.com/diillson/chatcli/compare/v1.190.0...v1.190.1) (2026-08-27)
+
+
+### Bug Fixes
+
+* **update:** drop imaging replace that broke go install and add release-binary fallback ([#1391](https://github.com/diillson/chatcli/issues/1391)) ([296bb66](https://github.com/diillson/chatcli/commit/296bb66d8b747e1055f09bfd6951214ad7d516ad))
+
 ## [1.190.0](https://github.com/diillson/chatcli/compare/v1.189.1...v1.190.0) (2026-08-27)
 
 
