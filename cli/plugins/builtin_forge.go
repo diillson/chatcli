@@ -48,7 +48,7 @@ var forgeRunner = func(ctx context.Context, bin string, args []string) (string, 
 		if text == "" {
 			return "", err
 		}
-		return "", fmt.Errorf("%s: %s", err, text)
+		return "", fmt.Errorf("%w: %s", err, text)
 	}
 	return text, nil
 }
@@ -165,7 +165,7 @@ func (p *BuiltinForgePlugin) ExecuteWithStream(ctx context.Context, args []strin
 
 	bin, why := detectForgeCLI(opCtx, inv.host)
 	if inv.cmd == "detect" {
-		return fmt.Sprintf("Forge CLI: %s (%s)", bin, why), nil
+		return fmt.Sprintf(forgeMsgDetectFmt, bin, why), nil
 	}
 	cliArgs, err := buildForgeArgs(bin, inv)
 	if err != nil {
@@ -200,105 +200,147 @@ func detectForgeCLI(ctx context.Context, host string) (bin, why string) {
 	return "gh", "origin remote: " + remote
 }
 
-// buildForgeArgs maps one invocation to the forge CLI's argv. Commands are an
-// allowlist — anything else was already rejected by the parser.
-func buildForgeArgs(bin string, inv forgeInvocation) ([]string, error) {
-	needNumber := func() error {
-		if strings.TrimSpace(inv.number) == "" {
-			return fmt.Errorf("@forge %s: missing number", inv.cmd)
-		}
-		return nil
-	}
-	limit := inv.limit
-	if limit <= 0 {
-		limit = 20
-	}
+// forgeMsgDetectFmt is the model-facing detect result (named per house style).
+const forgeMsgDetectFmt = "Forge CLI: %s (%s)"
 
+// buildForgeArgs maps one invocation to the forge CLI's argv. Commands are an
+// allowlist — anything else was already rejected by the parser. Split per
+// family to keep each mapper trivially readable.
+func buildForgeArgs(bin string, inv forgeInvocation) ([]string, error) {
+	switch {
+	case strings.HasPrefix(inv.cmd, "pr-"):
+		return buildForgePRArgs(bin, inv)
+	case strings.HasPrefix(inv.cmd, "issue-"):
+		return buildForgeIssueArgs(bin, inv)
+	case strings.HasPrefix(inv.cmd, "ci-"):
+		return buildForgeCIArgs(bin, inv)
+	default:
+		return nil, fmt.Errorf("@forge: unknown cmd %q (valid: pr-list|pr-view|pr-diff|pr-checks|pr-create|pr-comment|issue-list|issue-view|issue-comment|ci-status|ci-logs|detect)", inv.cmd)
+	}
+}
+
+// forgeNeedNumber validates the target number common to view/diff/comment.
+func forgeNeedNumber(inv forgeInvocation) error {
+	if strings.TrimSpace(inv.number) == "" {
+		return fmt.Errorf("@forge %s: missing number", inv.cmd)
+	}
+	return nil
+}
+
+// forgeLimit normalizes the list limit.
+func forgeLimit(inv forgeInvocation) string {
+	if inv.limit <= 0 {
+		return "20"
+	}
+	return fmt.Sprint(inv.limit)
+}
+
+// buildForgePRArgs maps the pr-* family.
+func buildForgePRArgs(bin string, inv forgeInvocation) ([]string, error) {
+	gh := bin == "gh"
 	switch inv.cmd {
 	case "pr-list":
-		return []string{"pr", "list", "--limit", fmt.Sprint(limit)}, nil
+		return []string{"pr", "list", "--limit", forgeLimit(inv)}, nil
 	case "pr-view":
-		if err := needNumber(); err != nil {
+		if err := forgeNeedNumber(inv); err != nil {
 			return nil, err
 		}
-		if bin == "gh" {
+		if gh {
 			return []string{"pr", "view", inv.number, "--comments"}, nil
 		}
 		return []string{"mr", "view", inv.number}, nil
 	case "pr-diff":
-		if err := needNumber(); err != nil {
+		if err := forgeNeedNumber(inv); err != nil {
 			return nil, err
 		}
-		if bin == "gh" {
+		if gh {
 			return []string{"pr", "diff", inv.number}, nil
 		}
 		return []string{"mr", "diff", inv.number}, nil
 	case "pr-checks":
-		if err := needNumber(); err != nil {
+		if err := forgeNeedNumber(inv); err != nil {
 			return nil, err
 		}
-		if bin == "gh" {
+		if gh {
 			return []string{"pr", "checks", inv.number}, nil
 		}
 		return []string{"ci", "status", "--live=false"}, nil
 	case "pr-create":
-		if strings.TrimSpace(inv.title) == "" {
-			return nil, errors.New("@forge pr-create: missing title")
-		}
-		var args []string
-		if bin == "gh" {
-			args = []string{"pr", "create", "--title", inv.title, "--body", inv.body}
-			if inv.base != "" {
-				args = append(args, "--base", inv.base)
-			}
-			if inv.draft {
-				args = append(args, "--draft")
-			}
-		} else {
-			args = []string{"mr", "create", "--title", inv.title, "--description", inv.body}
-			if inv.base != "" {
-				args = append(args, "--target-branch", inv.base)
-			}
-			if inv.draft {
-				args = append(args, "--draft")
-			}
-		}
-		return args, nil
+		return buildForgePRCreateArgs(gh, inv)
 	case "pr-comment":
-		if err := needNumber(); err != nil {
+		if err := forgeNeedNumber(inv); err != nil {
 			return nil, err
 		}
 		if strings.TrimSpace(inv.body) == "" {
 			return nil, errors.New("@forge pr-comment: missing body")
 		}
-		if bin == "gh" {
+		if gh {
 			return []string{"pr", "comment", inv.number, "--body", inv.body}, nil
 		}
 		return []string{"mr", "note", inv.number, "--message", inv.body}, nil
+	}
+	return nil, fmt.Errorf("@forge: unknown cmd %q", inv.cmd)
+}
+
+// buildForgePRCreateArgs maps pr-create for both CLIs.
+func buildForgePRCreateArgs(gh bool, inv forgeInvocation) ([]string, error) {
+	if strings.TrimSpace(inv.title) == "" {
+		return nil, errors.New("@forge pr-create: missing title")
+	}
+	var args []string
+	if gh {
+		args = []string{"pr", "create", "--title", inv.title, "--body", inv.body}
+		if inv.base != "" {
+			args = append(args, "--base", inv.base)
+		}
+	} else {
+		args = []string{"mr", "create", "--title", inv.title, "--description", inv.body}
+		if inv.base != "" {
+			args = append(args, "--target-branch", inv.base)
+		}
+	}
+	if inv.draft {
+		args = append(args, "--draft")
+	}
+	return args, nil
+}
+
+// buildForgeIssueArgs maps the issue-* family.
+func buildForgeIssueArgs(bin string, inv forgeInvocation) ([]string, error) {
+	gh := bin == "gh"
+	switch inv.cmd {
 	case "issue-list":
-		return []string{"issue", "list", "--limit", fmt.Sprint(limit)}, nil
+		return []string{"issue", "list", "--limit", forgeLimit(inv)}, nil
 	case "issue-view":
-		if err := needNumber(); err != nil {
+		if err := forgeNeedNumber(inv); err != nil {
 			return nil, err
 		}
-		if bin == "gh" {
+		if gh {
 			return []string{"issue", "view", inv.number, "--comments"}, nil
 		}
 		return []string{"issue", "view", inv.number}, nil
 	case "issue-comment":
-		if err := needNumber(); err != nil {
+		if err := forgeNeedNumber(inv); err != nil {
 			return nil, err
 		}
 		if strings.TrimSpace(inv.body) == "" {
 			return nil, errors.New("@forge issue-comment: missing body")
 		}
-		if bin == "gh" {
+		if gh {
 			return []string{"issue", "comment", inv.number, "--body", inv.body}, nil
 		}
 		return []string{"issue", "note", inv.number, "--message", inv.body}, nil
+	}
+	return nil, fmt.Errorf("@forge: unknown cmd %q", inv.cmd)
+}
+
+// buildForgeCIArgs maps the ci-* family.
+func buildForgeCIArgs(bin string, inv forgeInvocation) ([]string, error) {
+	gh := bin == "gh"
+	switch inv.cmd {
 	case "ci-status":
-		if bin == "gh" {
-			args := []string{"run", "list", "--limit", fmt.Sprint(limit)}
+		if gh {
+			args := []string{"run", "list", "--limit", forgeLimit(inv)}
 			if inv.branch != "" {
 				args = append(args, "--branch", inv.branch)
 			}
@@ -309,13 +351,12 @@ func buildForgeArgs(bin string, inv forgeInvocation) ([]string, error) {
 		if strings.TrimSpace(inv.run) == "" {
 			return nil, errors.New("@forge ci-logs: missing run id (from ci-status)")
 		}
-		if bin == "gh" {
+		if gh {
 			return []string{"run", "view", inv.run, "--log-failed"}, nil
 		}
 		return []string{"ci", "trace", inv.run}, nil
-	default:
-		return nil, fmt.Errorf("@forge: unknown cmd %q (valid: pr-list|pr-view|pr-diff|pr-checks|pr-create|pr-comment|issue-list|issue-view|issue-comment|ci-status|ci-logs|detect)", inv.cmd)
 	}
+	return nil, fmt.Errorf("@forge: unknown cmd %q", inv.cmd)
 }
 
 // parseForgeInvocation understands the JSON envelope and flat argv forms,

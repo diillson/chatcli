@@ -142,3 +142,119 @@ func TestForge_UnknownCmd(t *testing.T) {
 		t.Fatal("unknown cmd must error")
 	}
 }
+
+func TestForge_ArgMappingMatrix(t *testing.T) {
+	inv := func(cmd, number, body, title, run, branch string) forgeInvocation {
+		return forgeInvocation{cmd: cmd, number: number, body: body, title: title, run: run, branch: branch}
+	}
+	cases := []struct {
+		bin  string
+		inv  forgeInvocation
+		want string
+	}{
+		{"gh", inv("pr-list", "", "", "", "", ""), "pr list --limit 20"},
+		{"glab", inv("pr-list", "", "", "", "", ""), "pr list --limit 20"},
+		{"glab", inv("pr-view", "9", "", "", "", ""), "mr view 9"},
+		{"glab", inv("pr-diff", "9", "", "", "", ""), "mr diff 9"},
+		{"gh", inv("pr-diff", "9", "", "", "", ""), "pr diff 9"},
+		{"glab", inv("pr-checks", "9", "", "", "", ""), "ci status --live=false"},
+		{"gh", inv("pr-comment", "9", "hi", "", "", ""), "pr comment 9 --body hi"},
+		{"glab", inv("pr-comment", "9", "hi", "", "", ""), "mr note 9 --message hi"},
+		{"glab", inv("pr-create", "", "d", "t", "", ""), "mr create --title t --description d"},
+		{"gh", inv("issue-list", "", "", "", "", ""), "issue list --limit 20"},
+		{"gh", inv("issue-view", "7", "", "", "", ""), "issue view 7 --comments"},
+		{"glab", inv("issue-view", "7", "", "", "", ""), "issue view 7"},
+		{"gh", inv("issue-comment", "7", "x", "", "", ""), "issue comment 7 --body x"},
+		{"glab", inv("issue-comment", "7", "x", "", "", ""), "issue note 7 --message x"},
+		{"gh", inv("ci-status", "", "", "", "", "dev"), "run list --limit 20 --branch dev"},
+		{"glab", inv("ci-status", "", "", "", "", ""), "ci status --live=false"},
+		{"gh", inv("ci-logs", "", "", "", "55", ""), "run view 55 --log-failed"},
+		{"glab", inv("ci-logs", "", "", "", "55", ""), "ci trace 55"},
+	}
+	for _, tc := range cases {
+		got, err := buildForgeArgs(tc.bin, tc.inv)
+		if err != nil {
+			t.Fatalf("%s %s: %v", tc.bin, tc.inv.cmd, err)
+		}
+		if strings.Join(got, " ") != tc.want {
+			t.Fatalf("%s %s: got %q want %q", tc.bin, tc.inv.cmd, strings.Join(got, " "), tc.want)
+		}
+	}
+}
+
+func TestForge_ValidationErrors(t *testing.T) {
+	for _, inv := range []forgeInvocation{
+		{cmd: "pr-view"}, {cmd: "pr-diff"}, {cmd: "pr-checks"},
+		{cmd: "pr-comment", number: "1"}, {cmd: "issue-view"},
+		{cmd: "issue-comment", number: "1"}, {cmd: "ci-logs"},
+		{cmd: "pr-create"}, {cmd: "yolo"}, {cmd: "pr-weird"}, {cmd: "issue-weird"}, {cmd: "ci-weird"},
+	} {
+		if _, err := buildForgeArgs("gh", inv); err == nil {
+			t.Fatalf("%q must error", inv.cmd)
+		}
+	}
+}
+
+func TestForge_FlatFlagParsing(t *testing.T) {
+	inv, err := parseForgeInvocation([]string{"pr-create", "--title", "fix: y", "--body", "b", "--base", "main", "--draft", "--host", "gitlab"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if inv.title != "fix: y" || inv.body != "b" || inv.base != "main" || !inv.draft || inv.host != "gitlab" {
+		t.Fatalf("flat flags broken: %+v", inv)
+	}
+	inv, err = parseForgeInvocation([]string{"ci-status", "--branch=dev", "--limit=5"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if inv.branch != "dev" || inv.limit != 5 {
+		t.Fatalf("inline flags broken: %+v", inv)
+	}
+	if _, err := parseForgeInvocation(nil); err == nil {
+		t.Fatal("empty args must error")
+	}
+	if _, err := parseForgeInvocation([]string{"{not json"}); err == nil {
+		t.Fatal("bad envelope must error")
+	}
+}
+
+func TestForge_RunnerErrorSurfacesOutput(t *testing.T) {
+	prevRun, prevRemote := forgeRunner, forgeRemoteURL
+	forgeRunner = func(context.Context, string, []string) (string, error) {
+		return "", errContains("exit status 1: no pull requests found")
+	}
+	forgeRemoteURL = func(context.Context) string { return "" }
+	t.Cleanup(func() { forgeRunner, forgeRemoteURL = prevRun, prevRemote })
+
+	p := NewBuiltinForgePlugin()
+	_, err := p.Execute(context.Background(), []string{"pr-list"})
+	if err == nil || !strings.Contains(err.Error(), "no pull requests found") {
+		t.Fatalf("runner error must surface, got %v", err)
+	}
+}
+
+// errContains builds a plain error carrying the given text.
+func errContains(msg string) error { return &forgeTestError{msg} }
+
+type forgeTestError struct{ msg string }
+
+func (e *forgeTestError) Error() string { return e.msg }
+
+func TestForge_DescribeCallAndMeta(t *testing.T) {
+	p := NewBuiltinForgePlugin()
+	if p.Name() != "@forge" || !strings.Contains(p.Usage(), "pr-checks") || !strings.Contains(p.Schema(), "ci-logs") {
+		t.Fatal("plugin identity/usage/schema incomplete")
+	}
+	for _, args := range [][]string{
+		{"pr-list"}, {"pr-view", "1"}, {"pr-checks", "1"}, {"pr-create", "--title", "t"},
+		{"pr-comment", "1", "--body", "b"}, {"issue-list"}, {"issue-view", "2"},
+		{"ci-status"}, {"ci-logs", "9"}, {"nope"},
+	} {
+		if strings.TrimSpace(p.DescribeCall(args)) == "" {
+			t.Fatalf("DescribeCall(%v) empty", args)
+		}
+	}
+	if !p.IsConcurrencySafe([]string{"pr-list"}) || p.IsConcurrencySafe([]string{"pr-create", "--title", "t"}) {
+		t.Fatal("concurrency caps must mirror read-only")
+	}
+}
