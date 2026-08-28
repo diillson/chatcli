@@ -36,15 +36,21 @@ func buildBwrapArgs(mode SandboxMode, workspace string) []string {
 	return args
 }
 
-// wrapWithSandbox prepends the bwrap invocation to (shell, shellFlag,
-// cmdLine). Returns the unchanged trio when confinement is off or bwrap is
-// unavailable, plus a note for the caller to log.
+// wrapWithSandbox confines (shell, shellFlag, cmdLine). Selection order:
+// an explicit container request wins; otherwise native bubblewrap is used;
+// if bwrap is unavailable, the portable container backend takes over,
+// degrading to unconfined only when no backend exists at all.
 func wrapWithSandbox(mode SandboxMode, workspace, shell, shellFlag, cmdLine string) (name string, args []string, note string) {
 	if mode == SandboxOff {
 		return shell, []string{shellFlag, cmdLine}, ""
 	}
+	if dockerForced() {
+		return dockerOrDegrade(mode, workspace, shell, shellFlag, cmdLine,
+			"container sandbox requested but no docker/podman found — running unconfined")
+	}
 	if _, err := exec.LookPath(sandboxBinary); err != nil {
-		return shell, []string{shellFlag, cmdLine}, "sandbox requested but bwrap not found — running unconfined"
+		return dockerOrDegrade(mode, workspace, shell, shellFlag, cmdLine,
+			"no bwrap and no docker/podman found — running unconfined")
 	}
 	args = append(buildBwrapArgs(mode, workspace), shell, shellFlag, cmdLine)
 	return sandboxBinary, args, "sandboxed (" + mode.String() + ")"

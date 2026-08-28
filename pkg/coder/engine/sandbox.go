@@ -23,11 +23,26 @@ package engine
 
 import (
 	"os"
+	"os/exec"
 	"strings"
 )
 
 // SandboxEnv selects the confinement level for exec.
 const SandboxEnv = "CHATCLI_CODER_SANDBOX"
+
+// SandboxImageEnv overrides the container image used by the portable Docker/
+// Podman backend. Default: a small image with sh. NOTE: host toolchains
+// (go, node…) are NOT available inside the container unless the image ships
+// them — the container backend is for confinement-first workflows.
+const SandboxImageEnv = "CHATCLI_CODER_SANDBOX_IMAGE"
+
+// defaultSandboxImage is the fallback container image. Alpine is tiny and
+// carries a POSIX sh; operators pointing at their own toolchain image set
+// CHATCLI_CODER_SANDBOX_IMAGE.
+const defaultSandboxImage = "alpine:3"
+
+// containerWorkdir is where the workspace is mounted inside the container.
+const containerWorkdir = "/workspace"
 
 // SandboxMode is the resolved confinement level.
 type SandboxMode int
@@ -41,10 +56,13 @@ const (
 	SandboxStrict
 )
 
-// resolveSandboxMode reads CHATCLI_CODER_SANDBOX. Unknown/empty → off.
+// resolveSandboxMode reads CHATCLI_CODER_SANDBOX. Unknown/empty → off. The
+// container aliases (docker/podman/container) select the portable backend at
+// the workspace confinement level; pair with strict via
+// CHATCLI_CODER_SANDBOX=strict on a host whose only backend is a container.
 func resolveSandboxMode() SandboxMode {
 	switch strings.ToLower(strings.TrimSpace(os.Getenv(SandboxEnv))) {
-	case "workspace", "write", "on":
+	case "workspace", "write", "on", "docker", "podman", "container":
 		return SandboxWorkspace
 	case "strict", "no-network", "nonet":
 		return SandboxStrict
@@ -103,4 +121,67 @@ func dedupPaths(in []string) []string {
 		out = append(out, p)
 	}
 	return out
+}
+
+// sandboxImage resolves the container image for the Docker/Podman backend.
+func sandboxImage() string {
+	if v := strings.TrimSpace(os.Getenv(SandboxImageEnv)); v != "" {
+		return v
+	}
+	return defaultSandboxImage
+}
+
+// containerRuntime returns the available container CLI ("docker" or "podman")
+// and whether one exists. Docker is preferred; podman is a drop-in fallback.
+func containerRuntime() (string, bool) {
+	for _, bin := range []string{"docker", "podman"} {
+		if _, err := exec.LookPath(bin); err == nil {
+			return bin, true
+		}
+	}
+	return "", false
+}
+
+// dockerForced reports whether the operator explicitly selected the container
+// backend (CHATCLI_CODER_SANDBOX=docker|podman|container).
+func dockerForced() bool {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv(SandboxEnv))) {
+	case "docker", "podman", "container":
+		return true
+	}
+	return false
+}
+
+// buildContainerArgs renders the container-runtime arguments that run cmdLine
+// under confinement: the workspace bind-mounted read-write, the rest of the
+// container's filesystem ephemeral (--rm), and (strict) no network. This is
+// the portable backend — identical on Windows, macOS and Linux — used when a
+// native OS sandbox is unavailable or explicitly requested.
+//
+// The command runs as `sh -c cmdLine` INSIDE the image, so host absolute
+// paths and host toolchains are not visible; the workspace lives at
+// containerWorkdir. Deterministic and unit-testable without a running daemon.
+func buildContainerArgs(mode SandboxMode, workspace, cmdLine string) []string {
+	args := []string{
+		"run", "--rm",
+		"--volume", workspace + ":" + containerWorkdir,
+		"--workdir", containerWorkdir,
+	}
+	if mode == SandboxStrict {
+		args = append(args, "--network", "none")
+	}
+	args = append(args, sandboxImage(), "sh", "-c", cmdLine)
+	return args
+}
+
+// dockerOrDegrade is the shared tail every platform's wrapWithSandbox falls
+// back to when its native sandbox binary is absent: use the container runtime
+// if one exists (real confinement on ANY OS, Windows included), otherwise run
+// unconfined with a note. missingNative is the note to emit when neither a
+// native sandbox nor a container runtime is available.
+func dockerOrDegrade(mode SandboxMode, workspace, shell, shellFlag, cmdLine, missingNative string) (name string, args []string, note string) {
+	if rt, ok := containerRuntime(); ok {
+		return rt, buildContainerArgs(mode, workspace, cmdLine), "sandboxed via " + rt + " (" + mode.String() + ")"
+	}
+	return shell, []string{shellFlag, cmdLine}, missingNative
 }

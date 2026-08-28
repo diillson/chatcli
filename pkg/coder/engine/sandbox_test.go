@@ -122,3 +122,89 @@ func TestSandboxEndToEndEcho(t *testing.T) {
 		t.Fatalf("sandboxed command output missing:\n%s", out.String())
 	}
 }
+
+func TestBuildContainerArgs(t *testing.T) {
+	t.Setenv(SandboxImageEnv, "")
+	ws := "/work/ws"
+
+	work := strings.Join(buildContainerArgs(SandboxWorkspace, ws, "echo hi"), " ")
+	for _, want := range []string{"run --rm", "--volume /work/ws:/workspace", "--workdir /workspace", "alpine:3", "sh -c echo hi"} {
+		if !strings.Contains(work, want) {
+			t.Fatalf("container args missing %q:\n%s", want, work)
+		}
+	}
+	if strings.Contains(work, "--network none") {
+		t.Fatal("workspace mode must NOT cut the network")
+	}
+
+	strict := strings.Join(buildContainerArgs(SandboxStrict, ws, "echo hi"), " ")
+	if !strings.Contains(strict, "--network none") {
+		t.Fatalf("strict container must cut the network:\n%s", strict)
+	}
+}
+
+func TestSandboxImageOverride(t *testing.T) {
+	t.Setenv(SandboxImageEnv, "myrepo/toolchain:latest")
+	if got := sandboxImage(); got != "myrepo/toolchain:latest" {
+		t.Fatalf("image override ignored: %s", got)
+	}
+	t.Setenv(SandboxImageEnv, "")
+	if got := sandboxImage(); got != defaultSandboxImage {
+		t.Fatalf("default image wrong: %s", got)
+	}
+}
+
+func TestDockerForcedAndModeAliases(t *testing.T) {
+	for _, alias := range []string{"docker", "podman", "container"} {
+		t.Setenv(SandboxEnv, alias)
+		if !dockerForced() {
+			t.Fatalf("%q must force the container backend", alias)
+		}
+		if resolveSandboxMode() != SandboxWorkspace {
+			t.Fatalf("%q must resolve to a confinement mode", alias)
+		}
+	}
+	t.Setenv(SandboxEnv, "workspace")
+	if dockerForced() {
+		t.Fatal("workspace mode must not force docker")
+	}
+}
+
+func TestDockerOrDegrade_NoRuntime(t *testing.T) {
+	// This unit runs regardless of whether docker is installed: when it is,
+	// the container path is exercised; when not, the degrade path is. Both
+	// are valid — assert the invariant that SOMETHING runnable comes back.
+	name, args, note := dockerOrDegrade(SandboxStrict, "/ws", "sh", "-c", "echo hi", "none-found")
+	if name == "" || len(args) == 0 {
+		t.Fatalf("must always return a runnable command: %s %v", name, args)
+	}
+	if _, ok := containerRuntime(); !ok {
+		if name != "sh" || note != "none-found" {
+			t.Fatalf("without a runtime it must degrade to the shell: %s %q", name, note)
+		}
+	}
+}
+
+func TestSandboxContainerEndToEnd(t *testing.T) {
+	rt, ok := containerRuntime()
+	if !ok {
+		t.Skip("no docker/podman available")
+	}
+	// A trivial daemon liveness probe; skip if the runtime is installed but
+	// the daemon is not reachable (common in CI).
+	if err := exec.Command(rt, "info").Run(); err != nil {
+		t.Skipf("%s daemon not reachable", rt)
+	}
+	t.Setenv(SandboxEnv, "docker")
+	t.Setenv(SandboxImageEnv, "alpine:3")
+
+	ws := t.TempDir()
+	var out bytes.Buffer
+	e := NewEngine(&out, &out, ws)
+	if err := e.handleExec(context.Background(), []string{"--cmd", "echo container-ok", "--timeout", "120"}); err != nil {
+		t.Fatalf("containerized echo failed: %v\n%s", err, out.String())
+	}
+	if !strings.Contains(out.String(), "container-ok") {
+		t.Fatalf("container command output missing:\n%s", out.String())
+	}
+}

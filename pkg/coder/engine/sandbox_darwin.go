@@ -37,15 +37,22 @@ func buildSandboxProfile(mode SandboxMode, workspace string) string {
 	return b.String()
 }
 
-// wrapWithSandbox prepends the sandbox-exec invocation to (shell, shellFlag,
-// cmdLine). Returns the unchanged trio when confinement is off or the binary
-// is unavailable, plus a note for the caller to log.
+// wrapWithSandbox confines (shell, shellFlag, cmdLine). Selection order:
+// an explicit container request wins; otherwise the native sandbox-exec is
+// used; if it is somehow unavailable, the portable container backend takes
+// over (real confinement on any host), degrading to unconfined only when no
+// backend exists at all.
 func wrapWithSandbox(mode SandboxMode, workspace, shell, shellFlag, cmdLine string) (name string, args []string, note string) {
 	if mode == SandboxOff {
 		return shell, []string{shellFlag, cmdLine}, ""
 	}
+	if dockerForced() {
+		return dockerOrDegrade(mode, workspace, shell, shellFlag, cmdLine,
+			"container sandbox requested but no docker/podman found — running unconfined")
+	}
 	if _, err := exec.LookPath(sandboxBinary); err != nil {
-		return shell, []string{shellFlag, cmdLine}, "sandbox requested but sandbox-exec not found — running unconfined"
+		return dockerOrDegrade(mode, workspace, shell, shellFlag, cmdLine,
+			"no sandbox-exec and no docker/podman found — running unconfined")
 	}
 	profile := buildSandboxProfile(mode, workspace)
 	return sandboxBinary, []string{"-p", profile, shell, shellFlag, cmdLine}, "sandboxed (" + mode.String() + ")"

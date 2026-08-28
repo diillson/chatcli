@@ -7,15 +7,19 @@
  */
 package engine
 
-// sandboxBinary has no meaning on platforms without a supported sandbox.
+// sandboxBinary has no native meaning on platforms without a built-in
+// sandbox (Windows, *BSD): confinement there is delivered by the portable
+// container backend.
 const sandboxBinary = ""
 
-// wrapWithSandbox is a no-op on unsupported platforms (Windows, *BSD): exec
-// runs unconfined. A requested sandbox degrades with a note rather than
-// failing — the confinement is a hardening layer, not a gate.
-func wrapWithSandbox(mode SandboxMode, _ /*workspace*/, shell, shellFlag, cmdLine string) (name string, args []string, note string) {
+// wrapWithSandbox confines (shell, shellFlag, cmdLine) on platforms with no
+// native sandbox — Windows above all — through the portable Docker/Podman
+// backend, so the feature genuinely confines on ANY OS instead of silently
+// running unconfined. Degrades only when no container runtime is installed.
+func wrapWithSandbox(mode SandboxMode, workspace, shell, shellFlag, cmdLine string) (name string, args []string, note string) {
 	if mode == SandboxOff {
 		return shell, []string{shellFlag, cmdLine}, ""
 	}
-	return shell, []string{shellFlag, cmdLine}, "sandbox not supported on this platform — running unconfined"
+	return dockerOrDegrade(mode, workspace, shell, shellFlag, cmdLine,
+		"sandbox requested but no docker/podman found on this platform — running unconfined")
 }
