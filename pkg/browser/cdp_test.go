@@ -19,6 +19,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -36,10 +37,18 @@ func startFakeCDP(t *testing.T, respond func(msg cdpMessage) cdpMessage) (wsURL 
 		if err != nil {
 			return
 		}
+		// One writer mutex: the event pusher and the responder both write
+		// to the same socket (gorilla allows at most one concurrent writer).
+		var wmu sync.Mutex
+		write := func(v cdpMessage) {
+			data, _ := json.Marshal(v)
+			wmu.Lock()
+			_ = ws.WriteMessage(websocket.TextMessage, data)
+			wmu.Unlock()
+		}
 		go func() {
 			for ev := range events {
-				data, _ := json.Marshal(ev)
-				_ = ws.WriteMessage(websocket.TextMessage, data)
+				write(ev)
 			}
 		}()
 		for {
@@ -53,8 +62,7 @@ func startFakeCDP(t *testing.T, respond func(msg cdpMessage) cdpMessage) (wsURL 
 			}
 			resp := respond(msg)
 			resp.ID = msg.ID
-			out, _ := json.Marshal(resp)
-			_ = ws.WriteMessage(websocket.TextMessage, out)
+			write(resp)
 		}
 	}))
 	t.Cleanup(srv.Close)
