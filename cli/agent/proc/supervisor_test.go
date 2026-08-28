@@ -215,3 +215,61 @@ func TestSupervisorRemoveAndUnknownID(t *testing.T) {
 		t.Fatalf("unknown-id error must list tracked ids, got %v", err)
 	}
 }
+
+func TestStartPTYAndStdin(t *testing.T) {
+	if !ptySupported {
+		t.Skip("pty not supported on this platform")
+	}
+	s := NewSupervisor(nil, nil)
+	t.Cleanup(s.CloseAll)
+
+	info, err := s.StartPTY("cat", "")
+	if err != nil {
+		t.Fatalf("StartPTY: %v", err)
+	}
+	if !info.PTY || info.PID == 0 {
+		t.Fatalf("unexpected info: %+v", info)
+	}
+
+	if _, err := s.Stdin(info.ID, "hello-pty", true); err != nil {
+		t.Fatalf("Stdin: %v", err)
+	}
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		logs, _, err := s.Logs(info.ID, 50)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(logs, "hello-pty") {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("pty echo never captured, logs:\n%s", logs)
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+
+	if _, err := s.Stop(info.ID); err != nil {
+		t.Fatalf("Stop: %v", err)
+	}
+	if _, err := s.Stdin(info.ID, "late", true); err == nil {
+		t.Fatal("Stdin after exit must error")
+	}
+}
+
+func TestStdinRejectsNonPTYAndUnknown(t *testing.T) {
+	s := NewSupervisor(nil, nil)
+	t.Cleanup(s.CloseAll)
+
+	info, err := s.Start("sleep 5", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Stdin(info.ID, "x", true); err == nil || !strings.Contains(err.Error(), "pty") {
+		t.Fatalf("non-pty process must reject stdin, got %v", err)
+	}
+	if _, err := s.Stdin("p999", "x", true); err == nil {
+		t.Fatal("unknown id must error")
+	}
+	_, _ = s.Stop(info.ID)
+}

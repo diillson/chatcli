@@ -44,6 +44,8 @@ func (p *BuiltinProcPlugin) DescribeCall(args []string) string {
 	switch cmd {
 	case "start":
 		return i18n.T("plugins.proc.describe_start", describeTrim(in.Command))
+	case "stdin":
+		return i18n.T("plugins.proc.describe_stdin", in.ID)
 	case "status":
 		return i18n.T("plugins.proc.describe_status", in.ID)
 	case "logs":

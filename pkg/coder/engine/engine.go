@@ -208,6 +208,10 @@ func (e *Engine) Execute(ctx context.Context, cmd string, args []string) error {
 		return e.handleMultipatch(args)
 	case "tree":
 		return e.handleTree(args)
+	case "outline":
+		return e.handleOutline(args)
+	case "map":
+		return e.handleMap(args)
 	case "search":
 		return e.handleSearch(ctx, args)
 	case "exec":

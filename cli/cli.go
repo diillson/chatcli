@@ -645,6 +645,10 @@ func NewChatCLI(ctx context.Context, manager manager.LLMManager, logger *zap.Log
 		// agent can LOOK at screenshots, mocks and diagrams mid-task.
 		// Adapter wired below over the session vision pipeline.
 		pluginMgr.RegisterBuiltinPlugin(plugins.NewBuiltinViewPlugin())
+		// @forge — pull requests, issues and CI through the user's own
+		// authenticated gh/glab CLI (keyless: no stored credentials).
+		// Reads are auto-approved; pr-create/comments hit the security gate.
+		pluginMgr.RegisterBuiltinPlugin(plugins.NewBuiltinForgePlugin())
 		// @docs-flatten — push-side companion of @knowledge: flattens a
 		// Markdown/MDX docs tree (local dir or git repo) into the JSONL
 		// corpus /context --mode knowledge ingests. Self-contained.

@@ -23,6 +23,7 @@ import (
 	"testing"
 
 	llmclient "github.com/diillson/chatcli/llm/client"
+	"github.com/diillson/chatcli/models"
 	"github.com/diillson/chatcli/pkg/persona"
 	"go.uber.org/zap"
 )
@@ -242,5 +243,35 @@ func TestRescanSkillsMidLoop_RunBudgetDegradesToPointer(t *testing.T) {
 	}
 	if !strings.Contains(block, "guidance for writing Helm charts") {
 		t.Fatalf("description must always be visible:\n%s", block)
+	}
+}
+
+func TestRescanSurface_AppendsNativeToolCallArgs(t *testing.T) {
+	calls := []models.ToolCall{
+		{Name: "write_file", Arguments: map[string]interface{}{"file": "deploy/chart/values.yaml"}},
+		{Name: "read_file", Arguments: map[string]interface{}{"file": "main.go"}},
+	}
+	surface := rescanSurface("I'll update the chart values now.", calls)
+	for _, want := range []string{"I'll update the chart values now.", "deploy/chart/values.yaml", "main.go", "write_file"} {
+		if !strings.Contains(surface, want) {
+			t.Fatalf("surface missing %q:\n%s", want, surface)
+		}
+	}
+	// Path tokens inside native args must reach the path-glob matcher.
+	paths := extractFilePaths(surface)
+	found := false
+	for _, p := range paths {
+		if p == "deploy/chart/values.yaml" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("native tool arg path not extracted, got %v", paths)
+	}
+}
+
+func TestRescanSurface_NoNativeCallsIsIdentity(t *testing.T) {
+	if got := rescanSurface("plain response", nil); got != "plain response" {
+		t.Fatalf("identity expected, got %q", got)
 	}
 }
