@@ -47,7 +47,12 @@ func newSkillTestHandler(t *testing.T) *Handler {
 	writeServerTestSkill(t, home, "helm-runbook", "helm, crashloopbackoff", "Always check values.yaml first.")
 
 	h := NewHandler(nil, nil, zap.NewNop(), "OPENAI", "gpt-test")
-	h.SetPersonaManager(persona.NewManager(zap.NewNop()))
+	pm := persona.NewManager(zap.NewNop())
+	// Usage analytics are written asynchronously under HOME; wait for the
+	// flush before t.TempDir removes the fake home, or cleanup flakes with
+	// "directory not empty".
+	t.Cleanup(pm.WaitUsageFlush)
+	h.SetPersonaManager(pm)
 	return h
 }
 
