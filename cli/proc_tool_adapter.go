@@ -50,6 +50,30 @@ func (a *procToolAdapter) Start(command, dir string) (string, error) {
 		info.ID, info.PID, info.Command, info.ID), nil
 }
 
+// StartPTY implements plugins.ProcInteractive: same lifecycle as Start, on a
+// real pseudo-terminal.
+func (a *procToolAdapter) StartPTY(command, dir string) (string, error) {
+	if dir != "" {
+		if expanded, err := utils.ExpandPath(dir); err == nil {
+			dir = expanded
+		}
+	}
+	info, err := a.supervisor().StartPTY(command, dir)
+	if err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("started %s on a pty (pid %d): %s\nDrive it with @proc stdin {\"id\":%q,\"text\":\"…\"} and read the terminal with @proc logs.",
+		info.ID, info.PID, info.Command, info.ID), nil
+}
+
+// Stdin implements plugins.ProcInteractive.
+func (a *procToolAdapter) Stdin(id, text string, pressEnter bool) (string, error) {
+	if _, err := a.supervisor().Stdin(id, text, pressEnter); err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("sent to %s. Read the terminal's reaction with @proc logs {\"id\":%q}.", id, id), nil
+}
+
 // Status implements plugins.ProcAdapter.
 func (a *procToolAdapter) Status(id string) (string, error) {
 	info, err := a.supervisor().Status(id)

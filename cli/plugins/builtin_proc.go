@@ -33,6 +33,19 @@ type ProcAdapter interface {
 	List() (string, error)
 }
 
+// ProcInteractive is an OPTIONAL capability of the wired ProcAdapter:
+// interactive pseudo-terminal sessions. A separate interface (not new
+// ProcAdapter methods) because ProcAdapter is exported API — extending it
+// would break existing implementers.
+type ProcInteractive interface {
+	// StartPTY launches the command attached to a pseudo-terminal, so
+	// TTY-demanding programs (REPLs, debuggers, ssh) run for real.
+	StartPTY(command, dir string) (string, error)
+	// Stdin writes text into a PTY process's terminal; pressEnter appends
+	// the terminal's Enter key.
+	Stdin(id, text string, pressEnter bool) (string, error)
+}
+
 type procAdapterHolder struct{ a ProcAdapter }
 
 var procAdapterAtom atomic.Value // procAdapterHolder
@@ -71,7 +84,11 @@ func (*BuiltinProcPlugin) Usage() string {
 	return `<tool_call name="@proc" args='{"cmd":"start","args":{"command":"npm run dev","dir":"./web"}}' />
 
 Subcommands (cmd + args):
-  start  {command, dir?}      launch a background process, returns its id
+  start  {command, dir?, pty?}  launch a background process, returns its id;
+                                pty:true attaches a real pseudo-terminal so
+                                REPLs/debuggers/ssh run for real (Unix)
+  stdin  {id, text, no_enter?}  type into a pty process's terminal (Enter is
+                                pressed unless no_enter:true)
   status {id}                 running/exited, pid, uptime, exit code
   logs   {id, tail?:1-1000}   last lines of combined stdout+stderr
   stop   {id}                 terminate the process tree (TERM → grace → KILL)
@@ -79,8 +96,10 @@ Subcommands (cmd + args):
   list   {}                   every tracked process
 
 Workflow: start the server, poll logs until it is ready, exercise it (e.g.
-@coder exec curl), read logs again, stop it when done. Everything still
-running dies with the session.`
+@coder exec curl), read logs again, stop it when done. Interactive flow:
+start {"command":"python3","pty":true} → stdin {"id":"p1","text":"1+1"} →
+logs to read the REPL's answer. Everything still running dies with the
+session.`
 }
 
 // Version is semver; bumped when the surface changes.
@@ -101,8 +120,18 @@ func (*BuiltinProcPlugin) Schema() string {
 				"flags": []map[string]interface{}{
 					{"name": "command", "description": "shell command to run", "type": "string", "required": true},
 					{"name": "dir", "description": "working directory (default: current)", "type": "string"},
+					{"name": "pty", "description": "attach a pseudo-terminal so interactive programs (REPLs, debuggers, ssh) run for real; drive them with stdin (Unix only)", "type": "bool"},
 				},
-				"examples": []string{`{"cmd":"start","args":{"command":"go run ./cmd/server","dir":"."}}`},
+				"examples": []string{`{"cmd":"start","args":{"command":"go run ./cmd/server","dir":"."}}`, `{"cmd":"start","args":{"command":"python3","pty":true}}`},
+			},
+			{
+				"name":        "stdin",
+				"description": "type into a pty process's terminal (presses Enter unless no_enter)",
+				"flags": []map[string]interface{}{idFlag,
+					{"name": "text", "description": "text to type", "type": "string", "required": true},
+					{"name": "no_enter", "description": "do not press Enter after the text", "type": "bool"},
+				},
+				"examples": []string{`{"cmd":"stdin","args":{"id":"p1","text":"import os"}}`},
 			},
 			{
 				"name":        "status",
@@ -166,6 +195,9 @@ func (p *BuiltinProcPlugin) ExecuteWithStream(_ context.Context, args []string, 
 		Dir     string `json:"dir"`
 		ID      string `json:"id"`
 		Tail    int    `json:"tail"`
+		PTY     bool   `json:"pty"`
+		Text    string `json:"text"`
+		NoEnter bool   `json:"no_enter"`
 	}
 	_ = json.Unmarshal([]byte(inner), &in)
 
@@ -174,7 +206,23 @@ func (p *BuiltinProcPlugin) ExecuteWithStream(_ context.Context, args []string, 
 		if strings.TrimSpace(in.Command) == "" {
 			return "", errors.New(`@proc start: "command" is required`)
 		}
+		if in.PTY {
+			ia, ok := adapter.(ProcInteractive)
+			if !ok {
+				return "", errors.New("@proc start: pty sessions are not available in this session")
+			}
+			return ia.StartPTY(in.Command, in.Dir)
+		}
 		return adapter.Start(in.Command, in.Dir)
+	case "stdin":
+		if err := requireProcID(in.ID); err != nil {
+			return "", err
+		}
+		ia, ok := adapter.(ProcInteractive)
+		if !ok {
+			return "", errors.New("@proc stdin: pty sessions are not available in this session")
+		}
+		return ia.Stdin(in.ID, in.Text, !in.NoEnter)
 	case "status":
 		if err := requireProcID(in.ID); err != nil {
 			return "", err
@@ -198,7 +246,7 @@ func (p *BuiltinProcPlugin) ExecuteWithStream(_ context.Context, args []string, 
 	case "list":
 		return adapter.List()
 	default:
-		return "", fmt.Errorf("@proc: unknown cmd %q (valid: start|status|logs|stop|remove|list)", cmd)
+		return "", fmt.Errorf("@proc: unknown cmd %q (valid: start|stdin|status|logs|stop|remove|list)", cmd)
 	}
 }
 
@@ -294,6 +342,8 @@ func canonicalProcCmd(cmd string) string {
 	switch strings.ToLower(strings.TrimSpace(cmd)) {
 	case "start", "run", "spawn", "launch":
 		return "start"
+	case "stdin", "input", "send", "type":
+		return "stdin"
 	case "status", "stat", "info":
 		return "status"
 	case "logs", "log", "tail", "output":
