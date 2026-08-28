@@ -41,9 +41,10 @@ func ExtractPathTokens(text string) []string {
 	if text == "" {
 		return nil
 	}
-	seen := make(map[string]bool)
-	var out []string
-	for _, tok := range pathTokenRe.FindAllString(text, -1) {
+	matches := pathTokenRe.FindAllString(text, -1)
+	seen := make(map[string]bool, len(matches))
+	out := make([]string, 0, len(matches))
+	for _, tok := range matches {
 		tok = strings.ReplaceAll(strings.TrimSpace(tok), "\\", "/")
 		tok = strings.Trim(tok, ".,;:()[]{}\"'`")
 		if tok == "" || seen[tok] {

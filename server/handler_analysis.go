@@ -66,7 +66,7 @@ func (h *Handler) AnalyzeIssue(ctx context.Context, req *pb.AnalyzeIssueRequest)
 	// analysis) in the RPC request. enrichPrompt() is for interactive CLI sessions only
 	// and would duplicate/conflict with the operator's context. Skills are a
 	// different matter: server-side skill guidance (runbooks, conventions)
-	// must reach operator analyses too, so only applySkills runs.
+	// must reach operator analysis prompts too, so only applySkills runs.
 	response, err := llmClient.SendPrompt(ctx, h.applySkills(prompt), nil, 0)
 	if err != nil {
 		h.logger.Error(i18n.T("server.analysis.llm_failed"), zap.Error(err), zap.String("issue", req.IssueName))

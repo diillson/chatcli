@@ -489,7 +489,7 @@ func historyTailDelta(before, after []models.Message) []models.Message {
 		before[lcp].Role == after[lcp].Role && before[lcp].Content == after[lcp].Content {
 		lcp++
 	}
-	var delta []models.Message
+	delta := make([]models.Message, 0, len(after)-lcp)
 	for _, m := range after[lcp:] {
 		if m.Role == "system" {
 			continue
