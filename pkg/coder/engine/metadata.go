@@ -43,7 +43,7 @@ func GetMetadata() Metadata {
 	return Metadata{
 		Name:        "@coder",
 		Description: "Suite de engenharia completa (IO, Search, Exec, Git, Test, Backup, Rollback, Patch).",
-		Usage:       `@coder <read|write|patch|tree|search|exec|git-status|git-diff|git-log|git-changed|git-branch|test|rollback|clean> [flags]`,
+		Usage:       `@coder <read|write|patch|tree|search|outline|map|exec|git-status|git-diff|git-log|git-changed|git-branch|test|rollback|clean> [flags]`,
 		Version:     Version,
 	}
 }
@@ -78,6 +78,27 @@ func GetSchema() string {
 				},
 				Examples: []string{
 					"read --file main.go --start 1 --end 120",
+				},
+			},
+			{
+				Name:        "outline",
+				Description: "Esqueleto de símbolos de um arquivo (declarações + linhas): go/ast para Go, padrões para outras linguagens.",
+				Flags: []FlagDefinition{
+					{Name: "--file", Type: "string", Description: "Caminho do arquivo.", Required: true},
+				},
+				Examples: []string{
+					"outline --file cli/cli.go",
+				},
+			},
+			{
+				Name:        "map",
+				Description: "Mapa estrutural do repositório dentro de um budget de caracteres: arquivos ranqueados por estrutura, cada um com seu esqueleto de declarações. Use para se orientar em codebases grandes sem ler arquivos inteiros.",
+				Flags: []FlagDefinition{
+					{Name: "--dir", Type: "string", Default: ".", Description: "Diretório raiz."},
+					{Name: "--budget", Type: "int", Default: strconv.Itoa(DefaultMapBudget), Description: "Limite de caracteres do mapa."},
+				},
+				Examples: []string{
+					"map --dir . --budget 8000",
 				},
 			},
 			{
