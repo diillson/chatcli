@@ -17,13 +17,13 @@ import (
 // clean.
 
 // IsReadOnly reports whether the @coder subcommand is read-only for
-// the given args. Only `read`, `search`, `tree`, `list`, `stat` are
-// pure reads — every other subcommand (`exec`, `write`, `patch`,
-// `test`) mutates state.
+// the given args. Only `read`, `search`, `tree`, `list`, `stat`,
+// `outline` and `map` are pure reads — every other subcommand (`exec`,
+// `write`, `patch`, `test`) mutates state.
 func (p *BuiltinCoderPlugin) IsReadOnly(args []string) bool {
 	sub := coderSubcommand(args)
 	switch sub {
-	case "read", "search", "tree", "list", "stat":
+	case "read", "search", "tree", "list", "stat", "outline", "map":
 		return true
 	}
 	return false
