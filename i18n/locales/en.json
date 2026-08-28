@@ -1483,6 +1483,8 @@
   "plugins.tools.describe_list": "Listing available tools",
   "plugins.tools.describe_describe": "Loading tool definition: %s",
   "plugins.proc.describe_generic": "Managing background processes",
+  "plugins.view.describe_generic": "Viewing an image",
+  "plugins.view.describe_file": "Viewing image %s",
   "plugins.proc.describe_stdin": "Process: typing into %s",
   "plugins.proc.describe_start": "Starting background process: %s",
   "plugins.proc.describe_status": "Checking process %s",

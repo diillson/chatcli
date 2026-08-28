@@ -648,6 +648,11 @@ func NewChatCLI(ctx context.Context, manager manager.LLMManager, logger *zap.Log
 		// websocket client already shipped — no driver, no new dependency;
 		// requires a locally installed Chromium-family browser.
 		pluginMgr.RegisterBuiltinPlugin(plugins.NewBuiltinBrowserPlugin())
+		// @view — attach a local image to the conversation through the
+		// vision pipeline (native multimodal or describe-fallback), so the
+		// agent can LOOK at screenshots, mocks and diagrams mid-task.
+		// Adapter wired below over the session vision pipeline.
+		pluginMgr.RegisterBuiltinPlugin(plugins.NewBuiltinViewPlugin())
 		// @forge — pull requests, issues and CI through the user's own
 		// authenticated gh/glab CLI (keyless: no stored credentials).
 		// Reads are auto-approved; pr-create/comments hit the security gate.
@@ -864,6 +869,10 @@ func NewChatCLI(ctx context.Context, manager manager.LLMManager, logger *zap.Log
 	// Wire the @proc tool to the session process supervisor (created lazily
 	// on first use; all processes die with the session).
 	plugins.SetProcAdapter(&procToolAdapter{cli: cli})
+
+	// Wire the @view tool to the session vision pipeline (image loading,
+	// compression, native-vs-describe gating and agent-loop staging).
+	plugins.SetViewAdapter(&viewToolAdapter{cli: cli})
 	// @context adapter — lets the agent create/attach/detach/inspect its own
 	// context bases over the same live manager.
 	plugins.SetContextAdapter(&contextPluginAdapter{cli: cli})
