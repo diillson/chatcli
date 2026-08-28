@@ -15,6 +15,28 @@ import (
 	"time"
 )
 
+// sandboxedCommand resolves the actual (name, args) to exec for a shell
+// command line, applying OS-level confinement when CHATCLI_CODER_SANDBOX
+// selects it. Off (the default) returns the bare shell invocation unchanged.
+// A one-line note is emitted to the error stream the first time confinement
+// engages or degrades, so the operator can see it took effect.
+func (e *Engine) sandboxedCommand(cmdLine, workDir string) (string, []string) {
+	shell, shellFlag := resolveShell()
+	mode := resolveSandboxMode()
+	if mode == SandboxOff {
+		return shell, []string{shellFlag, cmdLine}
+	}
+	ws := workDir
+	if ws == "" {
+		ws = e.WorkspaceRoot
+	}
+	name, args, note := wrapWithSandbox(mode, ws, shell, shellFlag, cmdLine)
+	if note != "" {
+		e.errorf("[sandbox] %s\n", note)
+	}
+	return name, args
+}
+
 // resolveShell returns the shell binary and its command flag for the current OS.
 // On Windows it checks SHELL (set by Git Bash/MSYS2), then COMSPEC, then falls back
 // to the absolute path of cmd.exe.
@@ -69,8 +91,12 @@ func (e *Engine) handleExec(ctx context.Context, args []string) error {
 	execCtx, cancel := context.WithTimeout(ctx, time.Duration(*timeout)*time.Second)
 	defer cancel()
 
-	shell, shellFlag := resolveShell()
-	cmd := exec.CommandContext(execCtx, shell, shellFlag, finalCmd) //#nosec G204 -- agent/CLI tool execution; commands validated by command_validator + policy_manager upstream
+	workDir := *dir
+	if workDir == "" {
+		workDir = e.WorkspaceRoot
+	}
+	name, cmdArgs := e.sandboxedCommand(finalCmd, workDir)
+	cmd := exec.CommandContext(execCtx, name, cmdArgs...) //#nosec G204 -- agent/CLI tool execution; commands validated by command_validator + policy_manager upstream, optionally OS-sandboxed
 	if *dir != "" {
 		if err := e.validatePath(*dir); err != nil {
 			return err
