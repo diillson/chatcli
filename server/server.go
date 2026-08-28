@@ -322,6 +322,11 @@ func (s *Server) SetPersonaLoader(pl *persona.Loader) {
 	s.handler.SetPersonaLoader(pl)
 }
 
+// SetPersonaManager enables skill auto-activation on server-side prompts.
+func (s *Server) SetPersonaManager(pm *persona.Manager) {
+	s.handler.SetPersonaManager(pm)
+}
+
 // SetFallbackChain configures the provider fallback chain for automatic failover.
 func (s *Server) SetFallbackChain(chain *fallback.Chain) {
 	s.handler.SetFallbackChain(chain)

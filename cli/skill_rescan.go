@@ -27,6 +27,7 @@ import (
 
 	"github.com/diillson/chatcli/cli/agent"
 	llmclient "github.com/diillson/chatcli/llm/client"
+	"github.com/diillson/chatcli/models"
 	"github.com/diillson/chatcli/pkg/persona"
 	"go.uber.org/zap"
 )
@@ -95,6 +96,27 @@ func rescanNewSkills(mgr *persona.Manager, injected map[string]bool, cooldown ma
 		out = append(out, s)
 	}
 	return out
+}
+
+// rescanSurface composes the text scanned by the mid-loop skill re-activation
+// for one assistant turn: the response text plus the JSON arguments of every
+// NATIVE tool call. XML-fallback calls are already embedded in the response
+// text; native calls arrive in a separate struct, so without this append a
+// `paths:`-glob skill would never see the files the agent is touching when
+// the provider uses native tool calling.
+func rescanSurface(aiResponse string, nativeToolCalls []models.ToolCall) string {
+	if len(nativeToolCalls) == 0 {
+		return aiResponse
+	}
+	var b strings.Builder
+	b.WriteString(aiResponse)
+	for _, tc := range nativeToolCalls {
+		b.WriteString("\n")
+		b.WriteString(tc.Name)
+		b.WriteString(" ")
+		b.WriteString(tc.ArgumentsJSON())
+	}
+	return b.String()
 }
 
 // skillRunBudget is the cumulative per-Run cap on skill characters injected

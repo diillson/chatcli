@@ -41,6 +41,11 @@ type Config struct {
 	// once an identical tool+args has failed this many times. 0 disables
 	// hard halt (advisory only). Default 0.
 	HaltAfterSameSig int
+	// WarnAfterRepeatSuccess is the number of SUCCESSFUL executions of the
+	// exact same tool+args — with no state change in between (see
+	// NoteStateChange) — before doom-loop guidance is emitted: the result
+	// cannot differ, so re-running it only burns turns. Default 3.
+	WarnAfterRepeatSuccess int
 }
 
 func (c Config) withDefaults() Config {
@@ -49,6 +54,9 @@ func (c Config) withDefaults() Config {
 	}
 	if c.WarnAfterSameSig <= 0 {
 		c.WarnAfterSameSig = 2
+	}
+	if c.WarnAfterRepeatSuccess <= 0 {
+		c.WarnAfterRepeatSuccess = 3
 	}
 	return c
 }
@@ -72,6 +80,8 @@ type Guard struct {
 	sigFails  map[string]int    // tool+args signature -> consecutive failures
 	lastErr   map[string]string // tool name -> last error message
 	warnedSig map[string]bool   // signature -> already warned (avoid spam)
+	sigOK     map[string]int    // signature -> successes since last state change
+	warnedOK  map[string]bool   // signature -> repeat-success already warned
 }
 
 // New returns a Guard with the given config (defaults applied).
@@ -82,7 +92,20 @@ func New(cfg Config) *Guard {
 		sigFails:  map[string]int{},
 		lastErr:   map[string]string{},
 		warnedSig: map[string]bool{},
+		sigOK:     map[string]int{},
+		warnedOK:  map[string]bool{},
 	}
+}
+
+// NoteStateChange resets the repeat-success tracking. Callers invoke it after
+// any tool with side effects runs (a write, a patch, an exec): once the world
+// changed, re-running a read legitimately yields new data, so earlier repeats
+// stop counting.
+func (g *Guard) NoteStateChange() {
+	g.mu.Lock()
+	g.sigOK = map[string]int{}
+	g.warnedOK = map[string]bool{}
+	g.mu.Unlock()
 }
 
 // Signature builds a stable identity for a tool call: name plus
@@ -111,6 +134,15 @@ func (g *Guard) Observe(tool, args, errMsg string, failed bool) Decision {
 				delete(g.sigFails, s)
 				delete(g.warnedSig, s)
 			}
+		}
+		// Doom-loop detection: the exact same successful call repeated with
+		// no state change in between cannot yield anything new. Interleaved
+		// repeats (read A, read B, read A, …) count too — the counter is
+		// per signature, reset only by NoteStateChange.
+		g.sigOK[sig]++
+		if g.sigOK[sig] >= g.cfg.WarnAfterRepeatSuccess && !g.warnedOK[sig] {
+			g.warnedOK[sig] = true
+			return Decision{Guidance: g.repeatSuccessMessage(tool, g.sigOK[sig])}
 		}
 		return Decision{}
 	}
@@ -176,6 +208,13 @@ func (g *Guard) toolDriftMessage(tool string, n int) string {
 		b.WriteString(e)
 	}
 	return b.String()
+}
+
+func (g *Guard) repeatSuccessMessage(tool string, n int) string {
+	return "[tool-loop] you have executed EXACTLY this " + tool + " call " +
+		plural(n, "time") + " with no state change in between — the result " +
+		"cannot differ. Reuse the earlier output instead of calling it again; " +
+		"if you need different data, change the arguments or the approach."
 }
 
 func (g *Guard) haltMessage(tool string, n int) string {

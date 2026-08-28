@@ -2491,8 +2491,11 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 		// Helm chart for this") — or whose path glob matches a file the agent
 		// just started touching — is injected at the next turn boundary, in
 		// time to improve the remaining work. Deduped per Run, so a skill the
-		// user's query already activated never re-fires here.
-		if block, names := a.rescanSkillsMidLoop(aiResponse, turn); block != "" {
+		// user's query already activated never re-fires here. Native tool
+		// calls carry their args OUTSIDE the response text, so they are
+		// appended to the scanned surface explicitly — otherwise path-glob
+		// skills would only ever fire on the XML fallback.
+		if block, names := a.rescanSkillsMidLoop(rescanSurface(aiResponse, nativeToolCalls), turn); block != "" {
 			pendingSkill.content, pendingSkill.names = block, names
 			notifySkillActivation(names)
 		}
@@ -3618,6 +3621,19 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 				// Feed the per-tool failure guard. Guidance (if any) is
 				// injected into history after the batch results below.
 				if toolGuard != nil {
+					// A successful tool WITH side effects resets the
+					// repeat-success (doom-loop) tracking: the world changed,
+					// so re-running a read may legitimately differ now.
+					// plugins.IsReadOnly fails closed (unknown = mutating).
+					if execErr == nil {
+						if p, ok := a.cli.pluginManager.GetPlugin(tc.Name); ok {
+							if !plugins.IsReadOnly(p, []string{normalizedArgsStr}) {
+								toolGuard.NoteStateChange()
+							}
+						} else {
+							toolGuard.NoteStateChange()
+						}
+					}
 					errMsg := ""
 					if execErr != nil {
 						errMsg = execErr.Error()

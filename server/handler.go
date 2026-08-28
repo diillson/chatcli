@@ -60,6 +60,10 @@ type Handler struct {
 	pluginManager *plugins.Manager
 	personaLoader *persona.Loader
 
+	// Skill auto-activation for server-side prompts (optional, nil when not
+	// configured). Set via SetPersonaManager.
+	personaManager *persona.Manager
+
 	// Provider fallback chain (optional, nil when not configured)
 	fallbackChain *fallback.Chain
 
@@ -138,16 +142,44 @@ func (h *Handler) SetWatcher(cfg WatcherConfig) {
 	h.watcherNamespace = cfg.Namespace
 }
 
-// enrichPrompt prepends K8s watcher context to the prompt if available.
+// enrichPrompt prepends auto-activated skills and K8s watcher context to the
+// prompt if available.
 func (h *Handler) enrichPrompt(prompt string) string {
+	enriched := h.applySkills(prompt)
 	if h.watcherContextFunc == nil {
-		return prompt
+		return enriched
 	}
 	ctx := h.watcherContextFunc()
 	if ctx == "" {
+		return enriched
+	}
+	return ctx + i18n.T("server.handler.user_question_prefix") + enriched
+}
+
+// applySkills matches the request text against the skill catalog (trigger
+// keywords + path globs) and, when skills fire, prepends their guidance block
+// — the same auto-activation contract every interactive surface has. No-op
+// when no persona manager is configured or nothing matches. Exposed to the
+// analysis path too, which deliberately skips enrichPrompt (the operator
+// sends its own watcher context) but must not skip skills.
+func (h *Handler) applySkills(prompt string) string {
+	if h.personaManager == nil || strings.TrimSpace(prompt) == "" {
 		return prompt
 	}
-	return ctx + i18n.T("server.handler.user_question_prefix") + prompt
+	skills := h.personaManager.FindAutoActivatedSkills(prompt, persona.ExtractPathTokens(prompt))
+	if len(skills) == 0 {
+		return prompt
+	}
+	block := persona.BuildActivationPromptBlock(skills, persona.DefaultActivationBudget)
+	if block == "" {
+		return prompt
+	}
+	names := make([]string, 0, len(skills))
+	for _, s := range skills {
+		names = append(names, s.Name)
+	}
+	h.logger.Info(i18n.T("server.handler.skills_activated"), zap.Strings("skills", names))
+	return block + "\n" + i18n.T("server.handler.user_question_prefix") + prompt
 }
 
 // getClient resolves the LLM client to use, optionally overriding provider/model.
@@ -308,6 +340,12 @@ func protoSessionDataToModels(psd *pb.SessionDataV2) *models.SessionData {
 
 func (h *Handler) SetPluginManager(pm *plugins.Manager) {
 	h.pluginManager = pm
+}
+
+// SetPersonaManager enables skill auto-activation on server-side prompts
+// (SendPrompt/StreamPrompt/InteractiveSession and the operator analysis RPCs).
+func (h *Handler) SetPersonaManager(pm *persona.Manager) {
+	h.personaManager = pm
 }
 
 // SetPersonaLoader sets the persona loader for remote agent/skill discovery.

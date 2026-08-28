@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"html"
+	"regexp"
 	"strings"
 )
 
@@ -25,11 +26,25 @@ type ToolCall struct {
 //   - Args containing '>' characters (JSON, HTML entities, etc.)
 //   - JSON tool calls:  {"tool_call":"@coder","args":{...}}
 //   - Multiple tool calls in a single response
+//
+// Quoted-context rule: tool-call syntax inside inline code spans (`...`) is
+// always illustrative and never parsed. Fenced code blocks are illustrative by
+// default too — a model DESCRIBING a tool (e.g. echoing @tools describe usage
+// examples) must not trigger an execution — with one recovery exception: when
+// the response contains no call outside a fence, fences whose info string is
+// empty/xml/json are re-scanned, because some models wrap their one real call
+// in such a fence. Fenced calls whose args are documentation placeholders
+// ("...") are still rejected there.
 func ParseToolCalls(text string) ([]ToolCall, error) {
 	var calls []ToolCall
 
+	// Split quoted contexts out first: fenced blocks are collected for the
+	// recovery pass below, and the scannable copy has fenced lines and
+	// inline code spans blanked so the primary parsers never see them.
+	fences, scannable := maskQuotedSegments(text)
+
 	// Try XML-style parsing first (primary format)
-	xmlCalls, xmlErr := parseXMLToolCalls(text)
+	xmlCalls, xmlErr := parseXMLToolCalls(scannable)
 	if xmlErr == nil && len(xmlCalls) > 0 {
 		calls = append(calls, xmlCalls...)
 	}
@@ -39,17 +54,18 @@ func ParseToolCalls(text string) ([]ToolCall, error) {
 	// The JSON scanner can pick up JSON embedded inside XML args attributes
 	// (e.g. the {"cmd":"read",...} inside args='{"cmd":"read",...}'), which
 	// would cause the same tool call to appear twice in the batch.
-	jsonCalls := parseJSONToolCalls(text)
+	jsonCalls := parseJSONToolCalls(scannable)
 	for _, jc := range jsonCalls {
 		if !isDuplicateToolCall(calls, jc) {
 			calls = append(calls, jc)
 		}
 	}
 
-	// Try extracting from markdown code blocks (```xml or ```json)
+	// Recovery pass: no call found outside a fence — re-scan executable
+	// fences (```xml / ```json / bare ```), where some models wrap their
+	// actual call. Documentation fences (```bash, ```text, …) never execute.
 	if len(calls) == 0 {
-		mdCalls := parseMarkdownCodeBlockToolCalls(text)
-		calls = append(calls, mdCalls...)
+		calls = append(calls, parseFencedToolCalls(fences)...)
 	}
 
 	// Last-resort fallback: "[tool: @name {args}]" shorthand. Some models
@@ -57,8 +73,14 @@ func ParseToolCalls(text string) ([]ToolCall, error) {
 	// canonical tag. Gated on zero calls so prose that merely mentions the
 	// bracket syntax alongside a real <tool_call> never duplicates a batch.
 	if len(calls) == 0 {
-		calls = append(calls, parseBracketToolCalls(text)...)
+		calls = append(calls, parseBracketToolCalls(scannable)...)
 	}
+
+	// Drop documentation examples that leaked through: a call whose args are
+	// a bare placeholder ("...", "{...}") is usage-syntax being described,
+	// never an executable request. Applied to every stage so an unfenced
+	// prose echo of a usage line is rejected the same way a fenced one is.
+	calls = rejectUsageExamples(calls)
 
 	// Apply JSON recovery/normalization to ALL parsed calls (XML, JSON, markdown).
 	// This fixes single quotes, unquoted keys, and other malformations.
@@ -550,47 +572,239 @@ func skipSpacesTabs(text string, pos int) int {
 	return pos
 }
 
-// parseMarkdownCodeBlockToolCalls extracts tool calls from markdown code blocks.
-// LLMs sometimes wrap tool calls in ```xml or ```json blocks.
-func parseMarkdownCodeBlockToolCalls(text string) []ToolCall {
-	var calls []ToolCall
+// fencedBlock is one markdown code fence collected by maskQuotedSegments:
+// its info string (the word after the opening backticks) and raw content.
+type fencedBlock struct {
+	info    string
+	content string
+}
 
-	// Find ```xml ... ``` or ```json ... ``` blocks
-	searchFrom := 0
-	for searchFrom < len(text) {
-		startIdx := strings.Index(text[searchFrom:], "```")
-		if startIdx < 0 {
-			break
+// maskQuotedSegments walks text line by line collecting fenced code blocks
+// and producing a "scannable" copy where fenced lines and inline code spans
+// are blanked out (byte-for-byte, so no offset shifts). The primary parsers
+// run on the scannable copy — syntax the model merely QUOTES (a usage example
+// in a fence, a tag in `inline code`) is invisible to them — while the
+// collected fences feed the executable-fence recovery pass.
+func maskQuotedSegments(text string) ([]fencedBlock, string) {
+	var blocks []fencedBlock
+	var masked strings.Builder
+	masked.Grow(len(text))
+
+	inFence := false
+	var fenceMarker byte
+	var fenceLen int
+	var info string
+	var content strings.Builder
+
+	rest := text
+	for len(rest) > 0 {
+		line := rest
+		if nl := strings.IndexByte(rest, '\n'); nl >= 0 {
+			line = rest[:nl+1]
+			rest = rest[nl+1:]
+		} else {
+			rest = ""
 		}
-		startIdx += searchFrom
+		trimmed := strings.TrimLeft(line, " \t")
 
-		// Find the end of the opening fence line
-		lineEnd := strings.Index(text[startIdx+3:], "\n")
-		if lineEnd < 0 {
-			break
+		if inFence {
+			if fenceCloses(trimmed, fenceMarker, fenceLen) {
+				inFence = false
+				blocks = append(blocks, fencedBlock{info: info, content: content.String()})
+			} else {
+				content.WriteString(line)
+			}
+			masked.WriteString(blankPreservingNewlines(line))
+			continue
 		}
-		lineEnd += startIdx + 3
 
-		// Find closing ```
-		closeIdx := strings.Index(text[lineEnd:], "```")
-		if closeIdx < 0 {
-			break
+		if marker, mlen, rem, ok := fenceOpens(trimmed); ok {
+			inFence = true
+			fenceMarker, fenceLen = marker, mlen
+			info = strings.TrimSpace(rem)
+			content.Reset()
+			masked.WriteString(blankPreservingNewlines(line))
+			continue
 		}
-		closeIdx += lineEnd
 
-		blockContent := text[lineEnd:closeIdx]
-
-		// Try parsing the block content as tool calls
-		xmlCalls, _ := parseXMLToolCalls(blockContent)
-		calls = append(calls, xmlCalls...)
-
-		jsonCalls := parseJSONToolCalls(blockContent)
-		calls = append(calls, jsonCalls...)
-
-		searchFrom = closeIdx + 3
+		masked.WriteString(maskInlineCodeSpans(line))
 	}
+	if inFence {
+		// Unterminated fence (truncated response): still counts as fenced.
+		blocks = append(blocks, fencedBlock{info: info, content: content.String()})
+	}
+	return blocks, masked.String()
+}
 
+// fenceOpens reports whether a (left-trimmed) line opens a code fence: a run
+// of three or more '`' or '~'. Returns the marker, run length and the info
+// string remainder.
+func fenceOpens(trimmed string) (byte, int, string, bool) {
+	if len(trimmed) < 3 {
+		return 0, 0, "", false
+	}
+	marker := trimmed[0]
+	if marker != '`' && marker != '~' {
+		return 0, 0, "", false
+	}
+	n := 0
+	for n < len(trimmed) && trimmed[n] == marker {
+		n++
+	}
+	if n < 3 {
+		return 0, 0, "", false
+	}
+	return marker, n, strings.TrimRight(trimmed[n:], "\r\n"), true
+}
+
+// fenceCloses reports whether a (left-trimmed) line closes the open fence:
+// a run of at least fenceLen of the same marker with nothing else after it.
+func fenceCloses(trimmed string, marker byte, fenceLen int) bool {
+	n := 0
+	for n < len(trimmed) && trimmed[n] == marker {
+		n++
+	}
+	if n < fenceLen {
+		return false
+	}
+	return strings.TrimSpace(trimmed[n:]) == ""
+}
+
+// blankPreservingNewlines replaces every byte of s with a space except CR/LF,
+// keeping the masked copy byte-aligned with the original.
+func blankPreservingNewlines(s string) string {
+	b := []byte(s)
+	for i, ch := range b {
+		if ch != '\n' && ch != '\r' {
+			b[i] = ' '
+		}
+	}
+	return string(b)
+}
+
+// maskInlineCodeSpans blanks `inline code` spans within a single line. A span
+// is a backtick run and the next run of the same length; unmatched backticks
+// are left untouched.
+func maskInlineCodeSpans(line string) string {
+	if !strings.Contains(line, "`") {
+		return line
+	}
+	b := []byte(line)
+	i := 0
+	for i < len(b) {
+		if b[i] != '`' {
+			i++
+			continue
+		}
+		runLen := 0
+		for i+runLen < len(b) && b[i+runLen] == '`' {
+			runLen++
+		}
+		delim := strings.Repeat("`", runLen)
+		closeIdx := indexDelimiterRun(string(b[i+runLen:]), delim)
+		if closeIdx < 0 {
+			i += runLen
+			continue
+		}
+		for j := i; j < i+runLen+closeIdx+runLen; j++ {
+			if b[j] != '\n' && b[j] != '\r' {
+				b[j] = ' '
+			}
+		}
+		i += runLen + closeIdx + runLen
+	}
+	return string(b)
+}
+
+// indexDelimiterRun finds delim in s where the match is not part of a longer
+// backtick run (CommonMark: a 1-backtick span cannot close on a 2-backtick
+// run). Returns the index or -1.
+func indexDelimiterRun(s, delim string) int {
+	from := 0
+	for {
+		idx := strings.Index(s[from:], delim)
+		if idx < 0 {
+			return -1
+		}
+		pos := from + idx
+		end := pos + len(delim)
+		if end < len(s) && s[end] == '`' {
+			// Longer run — skip past it entirely.
+			for end < len(s) && s[end] == '`' {
+				end++
+			}
+			from = end
+			continue
+		}
+		return pos
+	}
+}
+
+// executableFenceInfo reports whether a fence's info string marks content the
+// recovery pass may treat as a real call. Only the shapes models actually use
+// to WRAP a call qualify; anything else (```bash, ```text, ```markdown, a
+// natural-language label…) is documentation and never executes.
+func executableFenceInfo(info string) bool {
+	switch strings.ToLower(strings.TrimSpace(info)) {
+	case "", "xml", "json", "tool", "tool_call", "toolcall":
+		return true
+	}
+	return false
+}
+
+// parseFencedToolCalls extracts tool calls from collected fenced blocks. Runs
+// only when nothing was found outside a fence (see ParseToolCalls), and only
+// over executable fences.
+func parseFencedToolCalls(fences []fencedBlock) []ToolCall {
+	var calls []ToolCall
+	for _, f := range fences {
+		if !executableFenceInfo(f.info) {
+			continue
+		}
+		xmlCalls, _ := parseXMLToolCalls(f.content)
+		calls = append(calls, xmlCalls...)
+		// Same dedup rule as the top-level flow: the JSON scanner re-finds
+		// the object embedded in an XML args attribute.
+		for _, jc := range parseJSONToolCalls(f.content) {
+			if !isDuplicateToolCall(calls, jc) {
+				calls = append(calls, jc)
+			}
+		}
+	}
 	return calls
+}
+
+// usageExamplePlaceholderRe matches an args value that is entirely an
+// ellipsis placeholder, e.g. "query": "..." — the shape documentation and
+// @tools describe output use for "fill this in".
+var usageExamplePlaceholderRe = regexp.MustCompile(`:\s*['"](?:\.\.\.|…)['"]`)
+
+// isUsageExampleArgs reports whether args reads as documentation placeholder
+// syntax rather than an executable request.
+func isUsageExampleArgs(args string) bool {
+	t := strings.TrimSpace(args)
+	switch t {
+	case "...", "…", "{...}", "{…}":
+		return true
+	}
+	if strings.Contains(t, "<...>") {
+		return true
+	}
+	return usageExamplePlaceholderRe.MatchString(t)
+}
+
+// rejectUsageExamples filters out calls whose args are documentation
+// placeholders. A described call ("use it like <tool_call name=… args='…'/>")
+// must never reach the execution gate.
+func rejectUsageExamples(calls []ToolCall) []ToolCall {
+	out := calls[:0]
+	for _, c := range calls {
+		if isUsageExampleArgs(c.Args) {
+			continue
+		}
+		out = append(out, c)
+	}
+	return out
 }
 
 // extractJSONObject attempts to extract a balanced JSON object starting at pos.

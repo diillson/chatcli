@@ -689,6 +689,8 @@ func (cli *ChatCLI) showConfigAgent() {
 	kv(p, "CHATCLI_MAX_COMMAND_OUTPUT", envOr("CHATCLI_MAX_COMMAND_OUTPUT"))
 	kv(p, "CHATCLI_BROWSER_BIN", envOr("CHATCLI_BROWSER_BIN"))
 	kv(p, "CHATCLI_BROWSER_HEADLESS", envBool("CHATCLI_BROWSER_HEADLESS"))
+	kv(p, "CHATCLI_CODER_CHECKPOINTS", envBool("CHATCLI_CODER_CHECKPOINTS"))
+	kv(p, "CHATCLI_CODER_AUTODIAG", envBool("CHATCLI_CODER_AUTODIAG"))
 
 	fmt.Println(p)
 	subheader(p, "cfg.sub.agent.coder_denial")

@@ -27,6 +27,9 @@ type Manager struct {
 
 	// usage records which skills get auto-activated, for analytics.
 	usage *usage.Store
+	// usageWG tracks the in-flight asynchronous usage writes so callers
+	// (tests above all) can wait for them — see WaitUsageFlush.
+	usageWG sync.WaitGroup
 }
 
 // NewManager creates a new persona manager
@@ -302,14 +305,27 @@ func (m *Manager) FindAutoActivatedSkills(text string, filePaths []string) []*Sk
 		}
 	}
 	// Record activations asynchronously so analytics never slow a turn.
+	// Tracked by usageWG: an untracked goroutine writing under the user's
+	// home races test TempDir cleanup (and process exit on one-shot).
 	if m.usage != nil && len(out) > 0 {
 		names := make([]string, 0, len(out))
 		for _, s := range out {
 			names = append(names, s.Name)
 		}
-		go m.usage.Record(names...)
+		m.usageWG.Add(1)
+		go func() {
+			defer m.usageWG.Done()
+			m.usage.Record(names...)
+		}()
 	}
 	return out
+}
+
+// WaitUsageFlush blocks until every in-flight asynchronous usage-analytics
+// write has finished. Callers that redirect HOME to a temporary directory
+// (tests) must invoke it before the directory is removed.
+func (m *Manager) WaitUsageFlush() {
+	m.usageWG.Wait()
 }
 
 // UsageRanking returns skill activation analytics, most-used first.

@@ -22,6 +22,7 @@ package proc
 import (
 	"errors"
 	"fmt"
+	"os"
 	"os/exec"
 	"sort"
 	"strings"
@@ -70,6 +71,7 @@ type Info struct {
 	ExitCode int // valid when State == StateExited
 	Started  time.Time
 	Ended    time.Time // zero while running
+	PTY      bool      // started on a pseudo-terminal (accepts Stdin)
 }
 
 // Validator vets a command before it runs — injected so @proc shares the
@@ -93,6 +95,11 @@ type managedProcess struct {
 
 	outMu sync.Mutex
 	out   []byte // ring-ish buffer, trimmed from the front at cap
+
+	// ptmx is the pseudo-terminal master for PTY-started processes (nil
+	// otherwise): the write side of Stdin and the read side of the ring.
+	ptmx   *os.File
+	ptmxMu sync.Mutex
 
 	done chan struct{}
 }
@@ -169,6 +176,124 @@ func (s *Supervisor) Start(command, dir string) (Info, error) {
 
 	s.logger.Info("proc: started", zap.String("id", id), zap.Int("pid", mp.info.PID), zap.String("cmd", command))
 	return mp.info, nil
+}
+
+// StartPTY launches command on a pseudo-terminal, so programs that demand a
+// TTY (REPLs, debuggers, ssh, prompts) run for real and Stdin can drive
+// them. Same vetting, limits and lifecycle as Start; Unix only.
+func (s *Supervisor) StartPTY(command, dir string) (Info, error) {
+	command = strings.TrimSpace(command)
+	if command == "" {
+		return Info{}, fmt.Errorf("empty command")
+	}
+	if !ptySupported {
+		_, err := startWithPTY(nil)
+		return Info{}, err
+	}
+	if s.validate != nil {
+		if err := s.validate(command); err != nil {
+			return Info{}, err
+		}
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.closed {
+		return Info{}, fmt.Errorf("supervisor closed")
+	}
+	if running := s.runningLocked(); running >= maxRunning {
+		return Info{}, fmt.Errorf("%d processes already running (limit %d) — stop one first (@proc stop)", running, maxRunning)
+	}
+
+	cmd := shellCommand(command)
+	if dir != "" {
+		cmd.Dir = dir
+	}
+	// No setProcessGroup here: the PTY start gives the child its own
+	// session (Setsid + controlling terminal), which also makes pgid == pid
+	// — the group-signal helpers in Stop keep working unchanged.
+
+	ptmx, err := startWithPTY(cmd)
+	if err != nil {
+		return Info{}, fmt.Errorf("start pty: %w", err)
+	}
+
+	s.seq++
+	id := fmt.Sprintf("p%d", s.seq)
+	mp := &managedProcess{
+		info: Info{ID: id, Command: command, Dir: dir, State: StateRunning, Started: time.Now(), PTY: true},
+		cmd:  cmd,
+		ptmx: ptmx,
+		done: make(chan struct{}),
+	}
+	mp.info.PID = cmd.Process.Pid
+
+	s.evictOldestExitedLocked()
+	s.procs[id] = mp
+
+	// The master side is the only reader of the terminal's output.
+	go func() {
+		buf := make([]byte, 4096)
+		w := ringWriter{mp}
+		for {
+			n, rerr := ptmx.Read(buf)
+			if n > 0 {
+				_, _ = w.Write(buf[:n])
+			}
+			if rerr != nil {
+				return
+			}
+		}
+	}()
+	go func() {
+		err := cmd.Wait()
+		s.mu.Lock()
+		mp.info.State = StateExited
+		mp.info.Ended = time.Now()
+		mp.info.ExitCode = exitCodeOf(err)
+		s.mu.Unlock()
+		mp.ptmxMu.Lock()
+		_ = ptmx.Close()
+		mp.ptmxMu.Unlock()
+		close(mp.done)
+	}()
+
+	s.logger.Info("proc: started (pty)", zap.String("id", id), zap.Int("pid", mp.info.PID), zap.String("cmd", command))
+	return mp.info, nil
+}
+
+// Stdin writes text to a PTY-started process's terminal; pressEnter appends
+// carriage return (what a terminal's Enter key sends).
+func (s *Supervisor) Stdin(id, text string, pressEnter bool) (Info, error) {
+	s.mu.Lock()
+	mp, ok := s.procs[id]
+	if !ok {
+		s.mu.Unlock()
+		return Info{}, fmt.Errorf("unknown process id %q (see list)", id)
+	}
+	info := mp.info
+	s.mu.Unlock()
+
+	if !info.PTY {
+		return info, fmt.Errorf("%s was not started with a pty — restart it via start with pty:true to drive its stdin", id)
+	}
+	if info.State != StateRunning {
+		return info, fmt.Errorf("%s already exited (code %d)", id, info.ExitCode)
+	}
+
+	payload := text
+	if pressEnter {
+		payload += "\r"
+	}
+	mp.ptmxMu.Lock()
+	defer mp.ptmxMu.Unlock()
+	if mp.ptmx == nil {
+		return info, fmt.Errorf("%s: terminal already closed", id)
+	}
+	if _, err := mp.ptmx.WriteString(payload); err != nil {
+		return info, fmt.Errorf("write to %s: %w", id, err)
+	}
+	return info, nil
 }
 
 // Status returns the snapshot for one process.
