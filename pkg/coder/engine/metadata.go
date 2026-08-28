@@ -81,6 +81,20 @@ func GetSchema() string {
 				},
 			},
 			{
+				Name:        "checkpoint",
+				Description: "Snapshots shadow-git do workspace (automáticos antes de write/patch/multipatch/exec): list, create e restore para rebobinar a árvore a qualquer snapshot sem tocar o .git do usuário.",
+				Flags: []FlagDefinition{
+					{Name: "--list", Type: "bool", Description: "Lista os snapshots (default)."},
+					{Name: "--create", Type: "bool", Description: "Grava um snapshot agora."},
+					{Name: "--restore", Type: "string", Description: "Hash do snapshot para restaurar o workspace."},
+					{Name: "--label", Type: "string", Default: "manual", Description: "Rótulo do snapshot em --create."},
+				},
+				Examples: []string{
+					"checkpoint --list",
+					"checkpoint --restore a1b2c3d",
+				},
+			},
+			{
 				Name:        "write",
 				Description: "Escreve arquivo (com backup) com suporte a base64 e append.",
 				Flags: []FlagDefinition{
