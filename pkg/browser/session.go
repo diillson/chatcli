@@ -94,7 +94,7 @@ func NewSession(ctx context.Context) (*Session, error) {
 	s.conn = conn
 
 	if err := s.attachFreshTarget(ctx); err != nil {
-		s.Close()
+		s.Close(ctx)
 		return nil, err
 	}
 	return s, nil
@@ -560,11 +560,12 @@ func (s *Session) NetworkTail(n int) []NetworkEntry {
 }
 
 // Close tears down the connection, the browser process and its throwaway
-// profile. Idempotent.
-func (s *Session) Close() {
+// profile. Idempotent; ctx bounds the polite Browser.close attempt (the
+// process is killed regardless).
+func (s *Session) Close(ctx context.Context) {
 	if s.conn != nil {
-		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-		_, _ = s.conn.call(ctx, "", "Browser.close", nil)
+		closeCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+		_, _ = s.conn.call(closeCtx, "", "Browser.close", nil)
 		cancel()
 		s.conn.close()
 	}
@@ -610,7 +611,7 @@ func Acquire(ctx context.Context) (*Session, error) {
 		return defaultSession, nil
 	}
 	if defaultSession != nil {
-		defaultSession.Close()
+		defaultSession.Close(ctx)
 	}
 	s, err := NewSession(ctx)
 	if err != nil {
@@ -638,11 +639,11 @@ func DefaultStatus(ctx context.Context) (running bool, title, url string) {
 
 // Shutdown closes the process-wide session if one is running. Wired into the
 // CLI teardown so a headless browser never outlives ChatCLI.
-func Shutdown() {
+func Shutdown(ctx context.Context) {
 	defaultMu.Lock()
 	defer defaultMu.Unlock()
 	if defaultSession != nil {
-		defaultSession.Close()
+		defaultSession.Close(ctx)
 		defaultSession = nil
 	}
 }

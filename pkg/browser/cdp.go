@@ -18,6 +18,7 @@ package browser
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sync"
 	"sync/atomic"
@@ -137,7 +138,10 @@ func (c *cdpConn) close() { c.shutdown(nil) }
 func (c *cdpConn) call(ctx context.Context, sessionID, method string, params interface{}) (json.RawMessage, error) {
 	select {
 	case <-c.closed:
-		return nil, fmt.Errorf("browser connection closed: %v", c.closeErr)
+		if c.closeErr != nil {
+			return nil, fmt.Errorf("browser connection closed: %w", c.closeErr)
+		}
+		return nil, errors.New("browser connection closed")
 	default:
 	}
 

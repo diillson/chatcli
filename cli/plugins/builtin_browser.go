@@ -138,6 +138,21 @@ type browserInvocation struct {
 	max    int
 }
 
+// Model-facing result strings, named per house style (never inline literals).
+const (
+	browserMsgClosed        = "Browser session closed."
+	browserMsgScrolled      = "Scrolled."
+	browserMsgNoValue       = "(no value)"
+	browserMsgNoConsole     = "No console messages captured on this page."
+	browserMsgNoNetwork     = "No network responses captured on this page."
+	browserMsgNotRunning    = "No browser session running — `open` launches one."
+	browserMsgNoIdentity    = "Browser session running (page identity unavailable)."
+	browserMsgTypedFmt      = "Typed %q into %s."
+	browserMsgScreenshotFmt = "Screenshot saved to %s"
+	browserMsgBackFmt       = "Went back to: %s (%s)"
+	browserMsgRunningFmt    = "Browser session running on: %s (%s)"
+)
+
 // Execute dispatches a @browser invocation.
 func (p *BuiltinBrowserPlugin) Execute(ctx context.Context, args []string) (string, error) {
 	return p.ExecuteWithStream(ctx, args, nil)
@@ -152,8 +167,8 @@ func (p *BuiltinBrowserPlugin) ExecuteWithStream(ctx context.Context, args []str
 	}
 
 	if inv.cmd == "close" {
-		browser.Shutdown()
-		return "Browser session closed.", nil
+		browser.Shutdown(ctx)
+		return browserMsgClosed, nil
 	}
 	if inv.cmd == "status" {
 		return browserStatus(ctx)
@@ -173,111 +188,136 @@ func (p *BuiltinBrowserPlugin) ExecuteWithStream(ctx context.Context, args []str
 
 	switch inv.cmd {
 	case "open":
-		if inv.url == "" {
-			return "", errors.New(`@browser open: missing url. Example: {"cmd":"open","args":{"url":"http://localhost:3000"}}`)
-		}
-		if !strings.Contains(inv.url, "://") {
-			inv.url = "https://" + inv.url
-		}
-		if _, _, err := b.Navigate(opCtx, inv.url); err != nil {
-			return "", fmt.Errorf("@browser open: %w", err)
-		}
-		return b.Snapshot(opCtx, inv.max)
-
+		return browserCmdOpen(opCtx, b, inv)
 	case "snapshot":
 		return b.Snapshot(opCtx, inv.max)
-
 	case "click":
-		if inv.target == "" {
-			return "", errors.New(`@browser click: missing target — a [n] ref from the last snapshot or a CSS selector`)
-		}
-		if err := b.Click(opCtx, inv.target); err != nil {
-			return "", fmt.Errorf("@browser click: %w", err)
-		}
-		// The click may have navigated or mutated the page — show the result.
-		time.Sleep(600 * time.Millisecond)
-		return b.Snapshot(opCtx, inv.max)
-
+		return browserCmdClick(opCtx, b, inv)
 	case "type":
-		if inv.target == "" {
-			return "", errors.New(`@browser type: missing target — a [n] ref from the last snapshot or a CSS selector`)
-		}
-		if err := b.Type(opCtx, inv.target, inv.text, inv.submit); err != nil {
-			return "", fmt.Errorf("@browser type: %w", err)
-		}
-		if inv.submit {
-			time.Sleep(800 * time.Millisecond)
-			return b.Snapshot(opCtx, inv.max)
-		}
-		return fmt.Sprintf("Typed %q into %s.", inv.text, inv.target), nil
-
+		return browserCmdType(opCtx, b, inv)
 	case "scroll":
 		if err := b.Scroll(opCtx, inv.dir, inv.target); err != nil {
 			return "", fmt.Errorf("@browser scroll: %w", err)
 		}
-		return "Scrolled.", nil
-
+		return browserMsgScrolled, nil
 	case "eval":
-		if strings.TrimSpace(inv.js) == "" {
-			return "", errors.New(`@browser eval: missing js expression`)
-		}
-		out, err := b.Eval(opCtx, inv.js)
-		if err != nil {
-			return "", fmt.Errorf("@browser eval: %w", err)
-		}
-		if len(out) > 8000 {
-			out = out[:8000] + "\n… (result truncated)"
-		}
-		if strings.TrimSpace(out) == "" {
-			out = "(no value)"
-		}
-		return out, nil
-
+		return browserCmdEval(opCtx, b, inv)
 	case "screenshot":
-		path := inv.file
-		if path == "" {
-			path = filepath.Join(os.TempDir(), "chatcli-browser",
-				fmt.Sprintf("screenshot-%d.png", time.Now().UnixMilli()))
-		}
-		if err := b.Screenshot(opCtx, path); err != nil {
-			return "", fmt.Errorf("@browser screenshot: %w", err)
-		}
-		return fmt.Sprintf("Screenshot saved to %s", path), nil
-
+		return browserCmdScreenshot(opCtx, b, inv)
 	case "console":
-		entries := b.ConsoleTail(inv.tail)
-		if len(entries) == 0 {
-			return "No console messages captured on this page.", nil
-		}
-		var sb strings.Builder
-		fmt.Fprintf(&sb, "Last %d console message(s):\n", len(entries))
-		for _, e := range entries {
-			fmt.Fprintf(&sb, "[%s] %s\n", e.Kind, e.Text)
-		}
-		return strings.TrimRight(sb.String(), "\n"), nil
-
+		return renderConsoleEntries(b.ConsoleTail(inv.tail)), nil
 	case "network":
-		entries := b.NetworkTail(inv.tail)
-		if len(entries) == 0 {
-			return "No network responses captured on this page.", nil
-		}
-		var sb strings.Builder
-		fmt.Fprintf(&sb, "Last %d network response(s):\n", len(entries))
-		for _, e := range entries {
-			fmt.Fprintf(&sb, "%d %s %s (%s)\n", e.Status, e.Method, e.URL, e.Type)
-		}
-		return strings.TrimRight(sb.String(), "\n"), nil
-
+		return renderNetworkEntries(b.NetworkTail(inv.tail)), nil
 	case "back":
 		title, url, err := b.Back(opCtx)
 		if err != nil {
 			return "", fmt.Errorf("@browser back: %w", err)
 		}
-		return fmt.Sprintf("Went back to: %s (%s)", title, url), nil
-
+		return fmt.Sprintf(browserMsgBackFmt, title, url), nil
 	default:
 		return "", fmt.Errorf("@browser: unknown cmd %q (valid: open|snapshot|click|type|scroll|eval|screenshot|console|network|back|status|close)", inv.cmd)
 	}
+}
+
+// browserCmdOpen navigates and returns the landing snapshot.
+func browserCmdOpen(ctx context.Context, b BrowserBackend, inv browserInvocation) (string, error) {
+	if inv.url == "" {
+		return "", errors.New(`@browser open: missing url. Example: {"cmd":"open","args":{"url":"http://localhost:3000"}}`)
+	}
+	if !strings.Contains(inv.url, "://") {
+		inv.url = "https://" + inv.url
+	}
+	if _, _, err := b.Navigate(ctx, inv.url); err != nil {
+		return "", fmt.Errorf("@browser open: %w", err)
+	}
+	return b.Snapshot(ctx, inv.max)
+}
+
+// browserCmdClick clicks and returns the resulting page (the click may have
+// navigated or mutated it).
+func browserCmdClick(ctx context.Context, b BrowserBackend, inv browserInvocation) (string, error) {
+	if inv.target == "" {
+		return "", errors.New(`@browser click: missing target — a [n] ref from the last snapshot or a CSS selector`)
+	}
+	if err := b.Click(ctx, inv.target); err != nil {
+		return "", fmt.Errorf("@browser click: %w", err)
+	}
+	time.Sleep(600 * time.Millisecond)
+	return b.Snapshot(ctx, inv.max)
+}
+
+// browserCmdType types into an input; with submit it also shows the page the
+// submission produced.
+func browserCmdType(ctx context.Context, b BrowserBackend, inv browserInvocation) (string, error) {
+	if inv.target == "" {
+		return "", errors.New(`@browser type: missing target — a [n] ref from the last snapshot or a CSS selector`)
+	}
+	if err := b.Type(ctx, inv.target, inv.text, inv.submit); err != nil {
+		return "", fmt.Errorf("@browser type: %w", err)
+	}
+	if inv.submit {
+		time.Sleep(800 * time.Millisecond)
+		return b.Snapshot(ctx, inv.max)
+	}
+	return fmt.Sprintf(browserMsgTypedFmt, inv.text, inv.target), nil
+}
+
+// browserCmdEval evaluates a JS expression with a bounded result.
+func browserCmdEval(ctx context.Context, b BrowserBackend, inv browserInvocation) (string, error) {
+	if strings.TrimSpace(inv.js) == "" {
+		return "", errors.New(`@browser eval: missing js expression`)
+	}
+	out, err := b.Eval(ctx, inv.js)
+	if err != nil {
+		return "", fmt.Errorf("@browser eval: %w", err)
+	}
+	if len(out) > 8000 {
+		out = out[:8000] + "\n… (result truncated)"
+	}
+	if strings.TrimSpace(out) == "" {
+		out = browserMsgNoValue
+	}
+	return out, nil
+}
+
+// browserCmdScreenshot captures the viewport, defaulting the path under the
+// temp dir.
+func browserCmdScreenshot(ctx context.Context, b BrowserBackend, inv browserInvocation) (string, error) {
+	path := inv.file
+	if path == "" {
+		path = filepath.Join(os.TempDir(), "chatcli-browser",
+			fmt.Sprintf("screenshot-%d.png", time.Now().UnixMilli()))
+	}
+	if err := b.Screenshot(ctx, path); err != nil {
+		return "", fmt.Errorf("@browser screenshot: %w", err)
+	}
+	return fmt.Sprintf(browserMsgScreenshotFmt, path), nil
+}
+
+// renderConsoleEntries formats the console tail for the model.
+func renderConsoleEntries(entries []browser.ConsoleEntry) string {
+	if len(entries) == 0 {
+		return browserMsgNoConsole
+	}
+	var sb strings.Builder
+	fmt.Fprintf(&sb, "Last %d console message(s):\n", len(entries))
+	for _, e := range entries {
+		fmt.Fprintf(&sb, "[%s] %s\n", e.Kind, e.Text)
+	}
+	return strings.TrimRight(sb.String(), "\n")
+}
+
+// renderNetworkEntries formats the network tail for the model.
+func renderNetworkEntries(entries []browser.NetworkEntry) string {
+	if len(entries) == 0 {
+		return browserMsgNoNetwork
+	}
+	var sb strings.Builder
+	fmt.Fprintf(&sb, "Last %d network response(s):\n", len(entries))
+	for _, e := range entries {
+		fmt.Fprintf(&sb, "%d %s %s (%s)\n", e.Status, e.Method, e.URL, e.Type)
+	}
+	return strings.TrimRight(sb.String(), "\n")
 }
 
 // browserStatus reports the session state without launching a browser.
@@ -287,12 +327,12 @@ var browserStatus = func(ctx context.Context) (string, error) {
 	defer cancel()
 	running, title, url := browser.DefaultStatus(opCtx)
 	if !running {
-		return "No browser session running — `open` launches one.", nil
+		return browserMsgNotRunning, nil
 	}
 	if title == "" && url == "" {
-		return "Browser session running (page identity unavailable).", nil
+		return browserMsgNoIdentity, nil
 	}
-	return fmt.Sprintf("Browser session running on: %s (%s)", title, url), nil
+	return fmt.Sprintf(browserMsgRunningFmt, title, url), nil
 }
 
 // parseBrowserInvocation understands the JSON envelope and flat argv forms,

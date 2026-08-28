@@ -2099,7 +2099,7 @@ func (cli *ChatCLI) cleanup(ctx context.Context) {
 	cli.shutdownProcSupervisor()
 	// Close the browser session the @browser tool may have launched — a
 	// headless Chrome must never outlive ChatCLI.
-	browser.Shutdown()
+	browser.Shutdown(ctx)
 
 	// Tear down the session scratch workspace. Respects
 	// CHATCLI_AGENT_KEEP_TMPDIR=true for debugging (files are left behind).

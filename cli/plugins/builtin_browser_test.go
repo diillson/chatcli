@@ -207,3 +207,117 @@ func TestBrowserCaps_ReadOnlySplit(t *testing.T) {
 		t.Fatal("browser is a single stateful session — never concurrency-safe")
 	}
 }
+
+func TestBrowserExecute_ScreenshotScrollBackNetwork(t *testing.T) {
+	fake := withFakeBrowser(t)
+	fake.network = []browser.NetworkEntry{{Method: "GET", URL: "http://api/y", Status: 404, Type: "Fetch"}}
+	p := NewBuiltinBrowserPlugin()
+
+	out, err := p.Execute(context.Background(), []string{"screenshot", "--file", "/tmp/x.png"})
+	if err != nil || !strings.Contains(out, "/tmp/x.png") {
+		t.Fatalf("screenshot: out=%q err=%v", out, err)
+	}
+	if fake.lastTarget != "/tmp/x.png" {
+		t.Fatalf("path not forwarded: %q", fake.lastTarget)
+	}
+
+	out, err = p.Execute(context.Background(), []string{"screenshot"})
+	if err != nil || !strings.Contains(out, "screenshot-") {
+		t.Fatalf("default screenshot path missing: out=%q err=%v", out, err)
+	}
+
+	if _, err := p.Execute(context.Background(), []string{"scroll", "down"}); err != nil {
+		t.Fatal(err)
+	}
+	if fake.lastTarget != "down|" {
+		t.Fatalf("scroll args wrong: %q", fake.lastTarget)
+	}
+	if _, err := p.Execute(context.Background(), []string{"scroll", "--to", "#footer"}); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasSuffix(fake.lastTarget, "|#footer") {
+		t.Fatalf("scroll --to not forwarded: %q", fake.lastTarget)
+	}
+
+	out, err = p.Execute(context.Background(), []string{"back"})
+	if err != nil || !strings.Contains(out, "http://prev") {
+		t.Fatalf("back: out=%q err=%v", out, err)
+	}
+
+	out, err = p.Execute(context.Background(), []string{"network", "--tail", "10"})
+	if err != nil || !strings.Contains(out, "404 GET http://api/y (Fetch)") {
+		t.Fatalf("network render wrong: out=%q err=%v", out, err)
+	}
+}
+
+func TestBrowserExecute_TypeClickSnapshotFlows(t *testing.T) {
+	fake := withFakeBrowser(t)
+	p := NewBuiltinBrowserPlugin()
+
+	out, err := p.Execute(context.Background(), []string{"type", "2", "hello"})
+	if err != nil || !strings.Contains(out, `Typed "hello" into 2.`) {
+		t.Fatalf("type: out=%q err=%v", out, err)
+	}
+	out, err = p.Execute(context.Background(), []string{`{"cmd":"type","args":{"target":"2","text":"q","submit":true}}`})
+	if err != nil || !strings.Contains(out, "Page: Example") {
+		t.Fatalf("type --submit must return snapshot: out=%q err=%v", out, err)
+	}
+	if !fake.lastSubmit {
+		t.Fatal("submit flag not forwarded")
+	}
+
+	out, err = p.Execute(context.Background(), []string{"click", "#go"})
+	if err != nil || !strings.Contains(out, "Page: Example") {
+		t.Fatalf("click must return snapshot: out=%q err=%v", out, err)
+	}
+	out, err = p.Execute(context.Background(), []string{"snapshot"})
+	if err != nil || !strings.Contains(out, "Interactive elements") {
+		t.Fatalf("snapshot: out=%q err=%v", out, err)
+	}
+
+	out, err = p.Execute(context.Background(), []string{"console"})
+	if err != nil || out != browserMsgNoConsole {
+		t.Fatalf("empty console message wrong: out=%q err=%v", out, err)
+	}
+	if _, err := p.Execute(context.Background(), []string{"type"}); err == nil {
+		t.Fatal("type without target must error")
+	}
+	if _, err := p.Execute(context.Background(), []string{"eval", "   "}); err == nil {
+		t.Fatal("eval without js must error")
+	}
+	if _, err := p.Execute(context.Background(), []string{"open"}); err == nil {
+		t.Fatal("open without url must error")
+	}
+}
+
+func TestBrowserStatusAndCloseCmds(t *testing.T) {
+	p := NewBuiltinBrowserPlugin()
+	// Real status probe: no session running in the test process.
+	out, err := p.Execute(context.Background(), []string{"status"})
+	if err != nil || !strings.Contains(out, "No browser session running") {
+		t.Fatalf("status: out=%q err=%v", out, err)
+	}
+	out, err = p.Execute(context.Background(), []string{"close"})
+	if err != nil || out != browserMsgClosed {
+		t.Fatalf("close: out=%q err=%v", out, err)
+	}
+}
+
+func TestBrowserDescribeCallAndMeta(t *testing.T) {
+	p := NewBuiltinBrowserPlugin()
+	if p.Name() != "@browser" || p.Version() == "" || p.Path() == "" {
+		t.Fatal("plugin identity incomplete")
+	}
+	if !strings.Contains(p.Usage(), "snapshot") || !strings.Contains(p.Schema(), "screenshot") ||
+		!strings.Contains(p.Description(), "Chrome") {
+		t.Fatal("usage/schema/description incomplete")
+	}
+	for _, args := range [][]string{
+		{"open", "http://x"}, {"snapshot"}, {"click", "1"}, {"type", "1", "x"},
+		{"eval", "1"}, {"screenshot"}, {"console"}, {"network"}, {"whatever"},
+	} {
+		if strings.TrimSpace(p.DescribeCall(args)) == "" {
+			t.Fatalf("DescribeCall(%v) empty", args)
+		}
+	}
+}

@@ -77,7 +77,7 @@ func newE2ESession(t *testing.T) *Session {
 	if err != nil {
 		t.Skipf("browser failed to launch in this environment: %v", err)
 	}
-	t.Cleanup(s.Close)
+	t.Cleanup(func() { s.Close(context.Background()) })
 	return s
 }
 
