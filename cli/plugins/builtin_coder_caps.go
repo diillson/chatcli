@@ -25,6 +25,11 @@ func (p *BuiltinCoderPlugin) IsReadOnly(args []string) bool {
 	switch sub {
 	case "read", "search", "tree", "list", "stat", "outline", "map":
 		return true
+	case "checkpoint":
+		// Listing/creating snapshots only records state; restore REWRITES
+		// the working tree and must face the security gate. Fail closed on
+		// any mention of restore.
+		return !strings.Contains(strings.ToLower(strings.Join(args, " ")), "restore")
 	}
 	return false
 }
