@@ -83,6 +83,14 @@ type AgentMode struct {
 	// when the user message is appended. Transient per-turn state — the Run
 	// reentrancy guard ensures it is never read across concurrent runs.
 	pendingUserImages []models.ImageContent
+
+	// stagedViewImages carries images the @view tool attached mid-run; they
+	// are drained into a user message at the next turn boundary (the same
+	// protocol-safety point as the mid-loop skill blocks). Mutex-guarded:
+	// @view is read-only and may run inside a parallel batch.
+	stagedViewMu     sync.Mutex
+	stagedViewImages []models.ImageContent
+	stagedViewNames  []string
 	// gatewayPersona layers a messaging-gateway directive on top of the coder
 	// system prompt: keep the coder engine's full tool capability (create/edit
 	// files, run commands, iterate) but answer concisely in plain chat-friendly
@@ -1443,6 +1451,24 @@ func (a *AgentMode) commandScopeAllows(toolName string) bool {
 	return false
 }
 
+// stageViewedImage queues an image the @view tool attached mid-run for the
+// next turn boundary.
+func (a *AgentMode) stageViewedImage(img models.ImageContent, name string) {
+	a.stagedViewMu.Lock()
+	defer a.stagedViewMu.Unlock()
+	a.stagedViewImages = append(a.stagedViewImages, img)
+	a.stagedViewNames = append(a.stagedViewNames, name)
+}
+
+// drainViewedImages returns and clears the staged @view attachments.
+func (a *AgentMode) drainViewedImages() ([]models.ImageContent, []string) {
+	a.stagedViewMu.Lock()
+	defer a.stagedViewMu.Unlock()
+	imgs, names := a.stagedViewImages, a.stagedViewNames
+	a.stagedViewImages, a.stagedViewNames = nil, nil
+	return imgs, names
+}
+
 // expandFollowUpCommand resolves a mid-run user follow-up against the slash
 // command catalog. Mid-run semantics differ from a turn-initiating
 // expansion: the provider/model cannot change mid-loop, so model/effort
@@ -2032,6 +2058,17 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 			if rb := a.followUpRecallBlocks(userMsg); rb != "" {
 				a.cli.history = append(a.cli.history, models.Message{Role: "user", Content: rb})
 			}
+		}
+
+		// Flush images the @view tool staged during the previous turn. Same
+		// turn-boundary contract as the skill blocks below: the attachment
+		// can never split a tool_use from its tool_result.
+		if imgs, names := a.drainViewedImages(); len(imgs) > 0 {
+			a.cli.history = append(a.cli.history, models.Message{
+				Role:    "user",
+				Content: "[Viewed image(s) attached: " + strings.Join(names, ", ") + "] Analyze what is visible.",
+				Images:  imgs,
+			})
 		}
 
 		// Flush the skill block queued by the previous turn's assistant-output
