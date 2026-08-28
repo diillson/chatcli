@@ -237,7 +237,7 @@ func fieldListText(fl *ast.FieldList) string {
 	if fl == nil {
 		return ""
 	}
-	var parts []string
+	parts := make([]string, 0, len(fl.List))
 	for _, f := range fl.List {
 		t := typeText(f.Type)
 		if n := len(f.Names); n > 1 {
