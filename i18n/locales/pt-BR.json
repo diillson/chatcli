@@ -1464,6 +1464,8 @@
   "plugins.tools.describe_list": "Listando tools disponíveis",
   "plugins.tools.describe_describe": "Carregando definição da tool: %s",
   "plugins.proc.describe_generic": "Gerenciando processos em background",
+  "plugins.view.describe_generic": "Visualizando uma imagem",
+  "plugins.view.describe_file": "Visualizando imagem %s",
   "plugins.proc.describe_start": "Iniciando processo em background: %s",
   "plugins.proc.describe_status": "Verificando processo %s",
   "plugins.proc.describe_logs": "Lendo logs de %s",

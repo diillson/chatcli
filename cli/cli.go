@@ -640,6 +640,11 @@ func NewChatCLI(ctx context.Context, manager manager.LLMManager, logger *zap.Log
 		// schemas. Read-only (GET/HEAD/OPTIONS + GraphQL introspection).
 		// Self-contained: shares the hardened proxy/TLS/SSRF web client.
 		pluginMgr.RegisterBuiltinPlugin(plugins.NewBuiltinAPIExplorerPlugin())
+		// @view — attach a local image to the conversation through the
+		// vision pipeline (native multimodal or describe-fallback), so the
+		// agent can LOOK at screenshots, mocks and diagrams mid-task.
+		// Adapter wired below over the session vision pipeline.
+		pluginMgr.RegisterBuiltinPlugin(plugins.NewBuiltinViewPlugin())
 		// @docs-flatten — push-side companion of @knowledge: flattens a
 		// Markdown/MDX docs tree (local dir or git repo) into the JSONL
 		// corpus /context --mode knowledge ingests. Self-contained.
@@ -852,6 +857,10 @@ func NewChatCLI(ctx context.Context, manager manager.LLMManager, logger *zap.Log
 	// Wire the @proc tool to the session process supervisor (created lazily
 	// on first use; all processes die with the session).
 	plugins.SetProcAdapter(&procToolAdapter{cli: cli})
+
+	// Wire the @view tool to the session vision pipeline (image loading,
+	// compression, native-vs-describe gating and agent-loop staging).
+	plugins.SetViewAdapter(&viewToolAdapter{cli: cli})
 	// @context adapter — lets the agent create/attach/detach/inspect its own
 	// context bases over the same live manager.
 	plugins.SetContextAdapter(&contextPluginAdapter{cli: cli})
