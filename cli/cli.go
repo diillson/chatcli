@@ -640,6 +640,10 @@ func NewChatCLI(ctx context.Context, manager manager.LLMManager, logger *zap.Log
 		// schemas. Read-only (GET/HEAD/OPTIONS + GraphQL introspection).
 		// Self-contained: shares the hardened proxy/TLS/SSRF web client.
 		pluginMgr.RegisterBuiltinPlugin(plugins.NewBuiltinAPIExplorerPlugin())
+		// @forge — pull requests, issues and CI through the user's own
+		// authenticated gh/glab CLI (keyless: no stored credentials).
+		// Reads are auto-approved; pr-create/comments hit the security gate.
+		pluginMgr.RegisterBuiltinPlugin(plugins.NewBuiltinForgePlugin())
 		// @docs-flatten — push-side companion of @knowledge: flattens a
 		// Markdown/MDX docs tree (local dir or git repo) into the JSONL
 		// corpus /context --mode knowledge ingests. Self-contained.
