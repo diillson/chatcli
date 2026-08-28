@@ -82,5 +82,10 @@ func (p *BuiltinCoderPlugin) ExecuteWithStream(ctx context.Context, args []strin
 	if err != nil {
 		return output, fmt.Errorf("plugin execution failed: %w", err)
 	}
+	// Post-edit diagnostics: a successful mutation immediately reports any
+	// language-server findings on the touched files (see coder_autodiag.go).
+	// This is the single chokepoint every surface funnels through — agent
+	// loop, squad workers, MCP/ACP tool passthrough and `chatcli tool`.
+	output = appendAutoDiagnostics(subcmd, subArgs, output)
 	return output, nil
 }
