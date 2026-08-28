@@ -16,6 +16,7 @@ package engine
 import (
 	"bytes"
 	"context"
+	"os"
 	"os/exec"
 	"runtime"
 	"strings"
@@ -186,12 +187,18 @@ func TestDockerOrDegrade_NoRuntime(t *testing.T) {
 }
 
 func TestSandboxContainerEndToEnd(t *testing.T) {
+	// Opt-in: this pulls and runs a real container. CI runners often have a
+	// reachable daemon yet block image pulls / nested runs, so gate it
+	// behind CHATCLI_TEST_CONTAINER=1 — the arg-construction and selection
+	// logic is covered deterministically above. Run locally with:
+	//   CHATCLI_TEST_CONTAINER=1 go test ./pkg/coder/engine -run Container
+	if os.Getenv("CHATCLI_TEST_CONTAINER") == "" {
+		t.Skip("set CHATCLI_TEST_CONTAINER=1 to run the real container e2e")
+	}
 	rt, ok := containerRuntime()
 	if !ok {
 		t.Skip("no docker/podman available")
 	}
-	// A trivial daemon liveness probe; skip if the runtime is installed but
-	// the daemon is not reachable (common in CI).
 	if err := exec.Command(rt, "info").Run(); err != nil {
 		t.Skipf("%s daemon not reachable", rt)
 	}
