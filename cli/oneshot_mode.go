@@ -92,6 +92,7 @@ func (cli *ChatCLI) HandleOneShotOrFatal(ctx context.Context, opts *Options) boo
 			fmt.Fprintln(os.Stderr, i18n.T("oneshot.error.coder_failed")+"\n\n"+i18n.T("oneshot.details_label")+":\n```\n"+err.Error()+"\n```")
 			cli.logger.Fatal("Erro no modo coder one-shot", zap.Error(err))
 		}
+		cli.queueOneShotMemory()
 		return true
 	}
 
@@ -113,7 +114,28 @@ func (cli *ChatCLI) HandleOneShotOrFatal(ctx context.Context, opts *Options) boo
 		}
 	}
 
+	cli.queueOneShotMemory()
 	return true
+}
+
+// queueOneShotMemory persists the one-shot conversation (chat turn or full
+// agent/coder transcript) to the memory worker's pending WAL. One-shot exits
+// immediately, so no extraction pass runs here — the NEXT session's worker
+// drains the backlog, giving `-p` invocations the same long-term memory and
+// self-evolve treatment every other surface gets. System messages are prompt
+// scaffolding and are skipped.
+func (cli *ChatCLI) queueOneShotMemory() {
+	if cli.memWorker == nil || len(cli.history) == 0 {
+		return
+	}
+	seg := make([]models.Message, 0, len(cli.history))
+	for _, m := range cli.history {
+		if m.Role == "system" {
+			continue
+		}
+		seg = append(seg, m)
+	}
+	cli.memWorker.queueSegmentForNextSession(seg)
 }
 
 // resolveOneShotCommand expands a slash-command input for the -p surface
@@ -177,13 +199,34 @@ func (cli *ChatCLI) RunOnce(ctx context.Context, input string, disableAnimation 
 	images, visionDesc := cli.gateImagesForModel(ctx, images)
 	additionalContext += visionDesc
 
+	// Skill parity with the interactive chat turn: pinned skills and
+	// trigger/path auto-activation fire on the one-shot prompt exactly like
+	// they would in the REPL (`-p "/coder …"` already had them through the
+	// agent engine; plain `-p` chat was the one surface without any).
+	pinned, autoSkills, filePaths := cli.resolveSkillsForTurn(userInput, additionalContext)
+	modelHint, skillEffort := cli.pickSkillHints(pinned, autoSkills, filePaths)
+
 	// One-shot used to send the bare user prompt with NO system message at
 	// all — no mode hint, no language directive, no memory. A user with
 	// months of persisted facts got a model with total amnesia ("each
 	// session starts fresh"). Inject the chat-mode baseline plus memory.
 	if sys := cli.oneShotSystemMessage(ctx, userInput); sys != "" {
+		if sb := concatSkillBlocks(pinned, autoSkills); sb != "" {
+			sys += "\n\n" + sb
+		}
 		cli.history = append(cli.history, models.Message{Role: "system", Content: sys})
 	}
+
+	// Skill model/effort routing, same precedence as the interactive turn
+	// and the MCP/ACP chat turn (explicit CLI flags already resolved
+	// cli.Client, and a hint failure degrades to the session client).
+	activeClient := cli.Client
+	if modelHint != "" {
+		if c, _, _, err := cli.resolveRPCChatClient(modelHint, RPCChatOpts{}); err == nil && c != nil {
+			activeClient = c
+		}
+	}
+	ctx = cli.applyChatEffortHint(ctx, routeEffortForPrompt(userInput, skillEffort))
 
 	cli.history = append(cli.history, models.Message{
 		Role:    "user",
@@ -199,21 +242,21 @@ func (cli *ChatCLI) RunOnce(ctx context.Context, input string, disableAnimation 
 		cli.historyCompactor.SetStatusCallback(func(stage CompactStage, msg string) {
 			fmt.Fprintf(os.Stderr, "  %s\n", msg)
 		})
-		if compacted, compactErr := cli.historyCompactor.Compact(ctx, cli.history, cli.Client, cfg); compactErr == nil {
+		if compacted, compactErr := cli.historyCompactor.Compact(ctx, cli.history, activeClient, cfg); compactErr == nil {
 			cli.history = compacted
 		}
 		cli.historyCompactor.SetStatusCallback(nil)
 	}
 
 	if !disableAnimation {
-		cli.animation.ShowThinkingAnimation(cli.Client.GetModelName())
+		cli.animation.ShowThinkingAnimation(activeClient.GetModelName())
 	}
 
 	effectiveMaxTokens := cli.getMaxTokensForCurrentLLM()
-	aiResponse, err := cli.Client.SendPrompt(ctx, userInput+additionalContext, cli.history, effectiveMaxTokens)
+	aiResponse, err := activeClient.SendPrompt(ctx, userInput+additionalContext, cli.history, effectiveMaxTokens)
 	// Auto-retry on OAuth token expiration (401)
 	if cli.refreshClientOnAuthError(err) {
-		aiResponse, err = cli.Client.SendPrompt(ctx, userInput+additionalContext, cli.history, effectiveMaxTokens)
+		aiResponse, err = activeClient.SendPrompt(ctx, userInput+additionalContext, cli.history, effectiveMaxTokens)
 	}
 
 	if !disableAnimation {
@@ -226,9 +269,13 @@ func (cli *ChatCLI) RunOnce(ctx context.Context, input string, disableAnimation 
 
 	// Track cost for one-shot mode — prefer real API usage
 	if cli.costTracker != nil {
-		usage := client.GetUsageOrEstimate(cli.Client, len(userInput+additionalContext), len(aiResponse))
+		usage := client.GetUsageOrEstimate(activeClient, len(userInput+additionalContext), len(aiResponse))
 		cli.costTracker.RecordRealUsage(cli.Provider, cli.Model, usage)
 	}
+
+	// Keep the assistant reply in the (process-local) history so the
+	// dispatcher can queue the complete turn for memory extraction.
+	cli.history = append(cli.history, models.Message{Role: "assistant", Content: aiResponse})
 
 	if rawOutput {
 		fmt.Println(aiResponse) // Imprime texto limpo

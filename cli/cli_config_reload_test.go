@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -43,6 +44,11 @@ func TestReloadableEnvVarsCoverCriticalProviderVars(t *testing.T) {
 // TestRouteConfigReloadAlias garante que /config --reload (e a forma sem
 // hífens) despacha para o mesmo reloadConfiguration do /reload.
 func TestRouteConfigReloadAlias(t *testing.T) {
+	// Hermeticidade: reloadConfiguration carrega CHATCLI_DOTENV (ou ./.env)
+	// via godotenv.Overload — apontado para o .env REAL do dev, ele injetava
+	// as variáveis pessoais (ex.: ZAI_USE_CODING_PLAN=true) no processo de
+	// teste e quebrava os testes de pricing que rodam depois.
+	t.Setenv("CHATCLI_DOTENV", filepath.Join(t.TempDir(), ".env"))
 	c := minimalCLI(t)
 	config.InitGlobal(c.logger)
 	for _, alias := range []string{"--reload", "reload"} {

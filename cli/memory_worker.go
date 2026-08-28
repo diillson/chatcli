@@ -111,6 +111,19 @@ func (mw *memoryWorker) nudge(ctx context.Context) {
 	go mw.maybeExtract(detached)
 }
 
+// queueSegmentForNextSession persists a conversation segment to the pending
+// WAL WITHOUT triggering an extraction pass. The one-shot surface exits
+// right after its turn, so an async extraction could never finish — it only
+// enqueues, and the next session's worker drains the backlog.
+func (mw *memoryWorker) queueSegmentForNextSession(segment []models.Message) {
+	if mw.cli.memoryStore == nil || len(segment) == 0 {
+		return
+	}
+	if _, err := mw.persistPending(segment); err != nil {
+		mw.logger.Warn("Memory worker: could not queue one-shot segment", zap.Error(err))
+	}
+}
+
 // nudgeSegment queues an externally-owned conversation segment (a headless
 // MCP/RPC turn whose live history is swapped back right after the call) and
 // triggers an extraction pass over the queue. nudge() cannot serve this path:
