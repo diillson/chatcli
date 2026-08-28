@@ -149,6 +149,11 @@ func RunServer(args []string, llmMgr manager.LLMManager, logger *zap.Logger) err
 		)
 	}
 
+	// Skill auto-activation for server-side prompts: remote SendPrompt/
+	// StreamPrompt/InteractiveSession turns and the operator's analysis RPCs
+	// get the same trigger/path skill matching the interactive surfaces have.
+	srv.SetPersonaManager(persona.NewManager(logger))
+
 	// Initialize fallback chain if configured.
 	initFallbackChain(opts, llmMgr, srv, logger)
 

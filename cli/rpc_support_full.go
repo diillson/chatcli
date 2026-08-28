@@ -455,6 +455,16 @@ func (cli *ChatCLI) runLoopRPC(ctx context.Context, o RPCRunOpts, fn func(contex
 	if err != nil {
 		return out, err
 	}
+	// Session-swapped runs are invisible to the memory worker's live-delta
+	// gate (the history is restored before its goroutine ever looks), so —
+	// mirroring runChatTurnSerialized — the run's new messages are queued
+	// explicitly. Without this, coder/agent sessions driven over MCP/ACP
+	// never feed memory extraction nor self-evolve skill authoring.
+	if o.HistoryOut != nil && cli.memWorker != nil {
+		if delta := historyTailDelta(o.History, *o.HistoryOut); len(delta) > 0 {
+			cli.memWorker.nudgeSegment(ctx, delta)
+		}
+	}
 	// Structured runs return the clean final answer when the loop captured
 	// one; the discarded transcript is only a fallback for edge turns that
 	// produced no prose.
@@ -465,6 +475,28 @@ func (cli *ChatCLI) runLoopRPC(ctx context.Context, o RPCRunOpts, fn func(contex
 		out = "(no textual output)"
 	}
 	return out, nil
+}
+
+// historyTailDelta returns the messages of `after` that were produced on top
+// of `before`: everything past the longest common prefix, minus system-role
+// entries (prompt scaffolding, not conversation). Comparing role+content —
+// not just lengths — keeps the delta correct when mid-run compaction
+// rewrote part of the prefix: the rewritten tail then counts as new, which
+// over-includes (extraction dedups) rather than silently dropping the run.
+func historyTailDelta(before, after []models.Message) []models.Message {
+	lcp := 0
+	for lcp < len(before) && lcp < len(after) &&
+		before[lcp].Role == after[lcp].Role && before[lcp].Content == after[lcp].Content {
+		lcp++
+	}
+	var delta []models.Message
+	for _, m := range after[lcp:] {
+		if m.Role == "system" {
+			continue
+		}
+		delta = append(delta, m)
+	}
+	return delta
 }
 
 // applyRPCOverrides mutates provider/model and quality env for one run and

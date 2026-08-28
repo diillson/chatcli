@@ -64,8 +64,10 @@ func (h *Handler) AnalyzeIssue(ctx context.Context, req *pb.AnalyzeIssueRequest)
 	// NOTE: Do NOT call enrichPrompt() here. The operator sends its own enriched
 	// kubernetes_context (up to 30KB with logs, metrics, GitOps, source code, cascade
 	// analysis) in the RPC request. enrichPrompt() is for interactive CLI sessions only
-	// and would duplicate/conflict with the operator's context.
-	response, err := llmClient.SendPrompt(ctx, prompt, nil, 0)
+	// and would duplicate/conflict with the operator's context. Skills are a
+	// different matter: server-side skill guidance (runbooks, conventions)
+	// must reach operator analyses too, so only applySkills runs.
+	response, err := llmClient.SendPrompt(ctx, h.applySkills(prompt), nil, 0)
 	if err != nil {
 		h.logger.Error(i18n.T("server.analysis.llm_failed"), zap.Error(err), zap.String("issue", req.IssueName))
 		return nil, status.Errorf(codes.Internal, "%s", i18n.T("server.analysis.llm_error", err))
@@ -549,7 +551,9 @@ func (h *Handler) AgenticStep(ctx context.Context, req *pb.AgenticStepRequest) (
 	}
 
 	prompt := buildAgenticStepPrompt(req)
-	response, err := llmClient.SendPrompt(ctx, prompt, nil, 0)
+	// Same contract as AnalyzeIssue: no enrichPrompt (operator owns the k8s
+	// context), but server-side skills still activate on the step prompt.
+	response, err := llmClient.SendPrompt(ctx, h.applySkills(prompt), nil, 0)
 	if err != nil {
 		h.logger.Error(i18n.T("server.agentic.llm_failed"), zap.Error(err), zap.String("issue", req.IssueName), zap.Int32("step", req.CurrentStep))
 		return nil, status.Errorf(codes.Internal, "%s", i18n.T("server.agentic.llm_error", err))

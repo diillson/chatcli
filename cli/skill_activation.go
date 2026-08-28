@@ -49,18 +49,6 @@ func skillInjectBudget() int {
 	return n
 }
 
-// filePathTokenRe matches bare file-like tokens inside a user message.
-//
-// It is intentionally stricter than pathMentionRe: here we do not require a
-// leading "@" because the intent is to detect casual mentions like
-// "run go test on pkg/foo/bar_test.go" or "look at src/index.ts". To avoid
-// false positives on prose, a token must contain either:
-//   - a slash (so we're clearly looking at a path), OR
-//   - a recognized extension (.go, .ts, .py, .md, etc.) with no whitespace
-//
-// We match a superset and filter in code for extension validity.
-var filePathTokenRe = regexp.MustCompile(`(?:\./|~/|/)?[A-Za-z0-9_.\-]+(?:/[A-Za-z0-9_.\-]+)+|[A-Za-z0-9_.\-]+\.(?:go|ts|tsx|js|jsx|py|rs|java|kt|rb|php|cs|cpp|cc|c|h|hpp|md|mdx|json|ya?ml|toml|sh|bash|zsh|sql|proto|tf|dockerfile|lock|mod|sum|css|scss|html?)`)
-
 // extractFilePaths returns a deduplicated, forward-slash-normalized list of
 // file-path tokens present in the input. It looks at three sources:
 //
@@ -112,8 +100,9 @@ func extractFilePaths(input string) []string {
 		}
 	}
 
-	// 3. Bare tokens with a slash or known extension.
-	for _, tok := range filePathTokenRe.FindAllString(input, -1) {
+	// 3. Bare tokens with a slash or known extension — shared with the
+	//    flat-prompt surfaces (gRPC server/operator) via pkg/persona.
+	for _, tok := range persona.ExtractPathTokens(input) {
 		add(tok)
 	}
 

@@ -1850,6 +1850,7 @@
   "server.stopped": "Servidor gRPC ChatCLI parado",
   "server.handler.client_config": "Usando configuração fornecida pelo cliente",
   "server.handler.client_api_key": "Usando chave API fornecida pelo cliente",
+  "server.handler.skills_activated": "Servidor: skills auto-ativadas para o prompt",
   "server.handler.user_question_prefix": "\n\nUser Question: ",
   "server.analysis.issue_name_required": "issue_name is required",
   "server.analysis.llm_client_failed": "Falha ao obter cliente LLM para análise",

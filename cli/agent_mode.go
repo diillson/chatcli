@@ -2491,8 +2491,11 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 		// Helm chart for this") — or whose path glob matches a file the agent
 		// just started touching — is injected at the next turn boundary, in
 		// time to improve the remaining work. Deduped per Run, so a skill the
-		// user's query already activated never re-fires here.
-		if block, names := a.rescanSkillsMidLoop(aiResponse, turn); block != "" {
+		// user's query already activated never re-fires here. Native tool
+		// calls carry their args OUTSIDE the response text, so they are
+		// appended to the scanned surface explicitly — otherwise path-glob
+		// skills would only ever fire on the XML fallback.
+		if block, names := a.rescanSkillsMidLoop(rescanSurface(aiResponse, nativeToolCalls), turn); block != "" {
 			pendingSkill.content, pendingSkill.names = block, names
 			notifySkillActivation(names)
 		}
