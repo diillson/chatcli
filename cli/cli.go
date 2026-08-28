@@ -47,6 +47,7 @@ import (
 	"github.com/diillson/chatcli/llm/client"
 	"github.com/diillson/chatcli/llm/manager"
 	"github.com/diillson/chatcli/llm/openaiassistant"
+	"github.com/diillson/chatcli/pkg/browser"
 	"github.com/diillson/chatcli/pkg/persona"
 	"github.com/diillson/chatcli/ui/kit"
 	"github.com/diillson/chatcli/ui/theme"
@@ -640,6 +641,13 @@ func NewChatCLI(ctx context.Context, manager manager.LLMManager, logger *zap.Log
 		// schemas. Read-only (GET/HEAD/OPTIONS + GraphQL introspection).
 		// Self-contained: shares the hardened proxy/TLS/SSRF web client.
 		pluginMgr.RegisterBuiltinPlugin(plugins.NewBuiltinAPIExplorerPlugin())
+		// @browser — drive a real local Chrome/Chromium over the DevTools
+		// protocol: open, snapshot (numbered interactive elements), click,
+		// type, eval, screenshot, console and network capture. The web
+		// verification loop. Self-contained: speaks CDP directly over the
+		// websocket client already shipped — no driver, no new dependency;
+		// requires a locally installed Chromium-family browser.
+		pluginMgr.RegisterBuiltinPlugin(plugins.NewBuiltinBrowserPlugin())
 		// @docs-flatten — push-side companion of @knowledge: flattens a
 		// Markdown/MDX docs tree (local dir or git repo) into the JSONL
 		// corpus /context --mode knowledge ingests. Self-contained.
@@ -2089,6 +2097,9 @@ func (cli *ChatCLI) cleanup(ctx context.Context) {
 	cli.shutdownLSPPool()
 	// Stop any background processes the @proc tool started.
 	cli.shutdownProcSupervisor()
+	// Close the browser session the @browser tool may have launched — a
+	// headless Chrome must never outlive ChatCLI.
+	browser.Shutdown()
 
 	// Tear down the session scratch workspace. Respects
 	// CHATCLI_AGENT_KEEP_TMPDIR=true for debugging (files are left behind).

@@ -687,6 +687,8 @@ func (cli *ChatCLI) showConfigAgent() {
 	kv(p, "CHATCLI_AGENT_TMPDIR", envOr("CHATCLI_AGENT_TMPDIR"))
 	kv(p, "CHATCLI_AGENT_KEEP_TMPDIR", envBool("CHATCLI_AGENT_KEEP_TMPDIR"))
 	kv(p, "CHATCLI_MAX_COMMAND_OUTPUT", envOr("CHATCLI_MAX_COMMAND_OUTPUT"))
+	kv(p, "CHATCLI_BROWSER_BIN", envOr("CHATCLI_BROWSER_BIN"))
+	kv(p, "CHATCLI_BROWSER_HEADLESS", envBool("CHATCLI_BROWSER_HEADLESS"))
 
 	fmt.Println(p)
 	subheader(p, "cfg.sub.agent.coder_denial")
