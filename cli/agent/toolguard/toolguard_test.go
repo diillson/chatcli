@@ -77,3 +77,62 @@ func TestSignatureNormalizesWhitespace(t *testing.T) {
 		t.Error("signature should collapse whitespace")
 	}
 }
+
+func TestRepeatSuccessDoomLoop(t *testing.T) {
+	g := New(Config{})
+
+	// Two identical successful reads: silent.
+	for i := 0; i < 2; i++ {
+		if d := g.Observe("@coder", `{"cmd":"read","args":{"file":"main.go"}}`, "", false); d.Guidance != "" {
+			t.Fatalf("run %d must be silent, got %q", i+1, d.Guidance)
+		}
+	}
+	// Third identical success: doom-loop guidance, once.
+	d := g.Observe("@coder", `{"cmd":"read","args":{"file":"main.go"}}`, "", false)
+	if d.Guidance == "" || !strings.Contains(d.Guidance, "cannot differ") {
+		t.Fatalf("expected doom-loop guidance on 3rd repeat, got %q", d.Guidance)
+	}
+	if d := g.Observe("@coder", `{"cmd":"read","args":{"file":"main.go"}}`, "", false); d.Guidance != "" {
+		t.Fatalf("must warn only once per signature, got %q", d.Guidance)
+	}
+}
+
+func TestRepeatSuccessInterleavedCounts(t *testing.T) {
+	g := New(Config{})
+	for i := 0; i < 2; i++ {
+		g.Observe("@coder", `read A`, "", false)
+		g.Observe("@coder", `read B`, "", false)
+	}
+	// Third A, interleaved with B: still detected.
+	if d := g.Observe("@coder", `read A`, "", false); !strings.Contains(d.Guidance, "cannot differ") {
+		t.Fatalf("interleaved repeats must be detected, got %q", d.Guidance)
+	}
+}
+
+func TestNoteStateChangeResetsRepeatTracking(t *testing.T) {
+	g := New(Config{})
+	g.Observe("@coder", `read X`, "", false)
+	g.Observe("@coder", `read X`, "", false)
+	// A write happened: re-reading X is legitimate again.
+	g.NoteStateChange()
+	if d := g.Observe("@coder", `read X`, "", false); d.Guidance != "" {
+		t.Fatalf("state change must reset repeat tracking, got %q", d.Guidance)
+	}
+	g.Observe("@coder", `read X`, "", false)
+	if d := g.Observe("@coder", `read X`, "", false); d.Guidance == "" {
+		t.Fatal("repeats after the reset must be counted fresh")
+	}
+}
+
+func TestRepeatSuccessDoesNotAffectFailureTracking(t *testing.T) {
+	g := New(Config{})
+	g.Observe("@coder", `read Y`, "", false)
+	g.Observe("@coder", `read Y`, "", false)
+	// Failures on the same signature still follow the failure path.
+	if d := g.Observe("@coder", `read Y`, "boom", true); d.Guidance != "" {
+		t.Fatalf("first failure must be silent, got %q", d.Guidance)
+	}
+	if d := g.Observe("@coder", `read Y`, "boom", true); !strings.Contains(d.Guidance, "same arguments") {
+		t.Fatalf("expected same-sig failure guidance, got %q", d.Guidance)
+	}
+}

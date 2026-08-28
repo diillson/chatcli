@@ -107,8 +107,14 @@ func (a *lspToolAdapter) Diagnostics(file string) (string, error) {
 	if len(diags) == 0 {
 		return fmt.Sprintf("%s: no diagnostics — the file is clean.", relPath(sess.Root, "file://"+abs)), nil
 	}
+	return renderDiagnosticsList(sess.Root, abs, diags), nil
+}
+
+// renderDiagnosticsList formats a non-empty diagnostics slice as bounded,
+// model-facing text. Shared by Diagnostics and QuickDiagnostics.
+func renderDiagnosticsList(root, abs string, diags []lsp.Diagnostic) string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "%d diagnostic(s) in %s:\n", len(diags), relPath(sess.Root, "file://"+abs))
+	fmt.Fprintf(&b, "%d diagnostic(s) in %s:\n", len(diags), relPath(root, "file://"+abs))
 	for _, d := range diags {
 		src := d.Source
 		if src != "" {
@@ -117,7 +123,23 @@ func (a *lspToolAdapter) Diagnostics(file string) (string, error) {
 		fmt.Fprintf(&b, "- L%d:%d [%s] %s%s\n",
 			d.Range.Start.Line+1, d.Range.Start.Character+1, d.SeverityLabel(), d.Message, src)
 	}
-	return strings.TrimRight(b.String(), "\n"), nil
+	return strings.TrimRight(b.String(), "\n")
+}
+
+// QuickDiagnostics implements plugins.LSPQuickDiagnoser: same findings as
+// Diagnostics, plus an explicit hasIssues flag so the post-edit auto-check
+// can stay silent on clean (or inconclusive) files instead of spending
+// tokens announcing cleanliness.
+func (a *lspToolAdapter) QuickDiagnostics(file string) (string, bool, error) {
+	sess, abs, err := a.acquire(file)
+	if err != nil {
+		return "", false, err
+	}
+	diags, ok := sess.Client.Diagnostics(sess.URI, lspDiagnosticsWait)
+	if !ok || len(diags) == 0 {
+		return "", false, nil
+	}
+	return renderDiagnosticsList(sess.Root, abs, diags), true, nil
 }
 
 // Definition implements plugins.LSPAdapter. line/column are 1-based.
