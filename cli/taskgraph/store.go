@@ -162,7 +162,7 @@ func ListRuns(baseDir string) ([]RunSummary, error) {
 	if err != nil {
 		return nil, err
 	}
-	var out []RunSummary
+	out := make([]RunSummary, 0, len(entries))
 	for _, e := range entries {
 		if !e.IsDir() || !strings.HasPrefix(e.Name(), "tg-") {
 			continue

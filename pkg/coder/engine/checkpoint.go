@@ -119,12 +119,12 @@ func snapshotWorkspace(root, label string) error {
 	return err
 }
 
-// SnapshotWorkspace exposes one shadow-git checkpoint of root for external
+// CheckpointWorkspace exposes one shadow-git checkpoint of root for external
 // orchestrators (the task-graph engine snapshots before each executor task).
 // Honors the checkpoint kill switch; best-effort semantics belong to the
 // caller. Unlike autoCheckpoint it is NOT throttled — call it per meaningful
 // boundary, never in a loop.
-func SnapshotWorkspace(root, label string) error {
+func CheckpointWorkspace(root, label string) error {
 	if !checkpointsEnabled() {
 		return nil
 	}
