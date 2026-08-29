@@ -62,7 +62,7 @@ func (a *AgentMode) workerSkillBlock(task string) string {
 	}
 
 	seen := make(map[string]bool)
-	var skills []*persona.Skill
+	skills := make([]*persona.Skill, 0, maxWorkerSkills+2)
 
 	// Pinned skills always reach the worker (explicit user intent), no
 	// trigger needed and not subject to the trigger-match cap.

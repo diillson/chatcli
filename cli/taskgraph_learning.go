@@ -33,6 +33,12 @@ import (
 // truncates the middle of any message past this, so the digest must fit.
 const taskGraphDigestMaxChars = 1400
 
+// digestUserFmt frames the digest for the memory extractor. This is NOT
+// user-facing UI text — it is the synthetic "user" turn of a memory
+// segment the extractor reads, so it stays a plain English const (not
+// i18n) like the rest of the model-facing digest strings.
+const digestUserFmt = "I orchestrated the @taskgraph run %s (%s) — record what it delivered and what to remember."
+
 // queueLearningDigest enqueues a memory segment for the finished run and a
 // Reflexion lesson per failed task. Best-effort throughout.
 func (a *taskGraphAdapter) queueLearningDigest(ctx context.Context, g *taskgraph.Graph) {
@@ -42,7 +48,7 @@ func (a *taskGraphAdapter) queueLearningDigest(ctx context.Context, g *taskgraph
 	if a.cli.memWorker != nil {
 		digest := formatTaskGraphDigest(g)
 		a.cli.memWorker.nudgeSegment(ctx, []models.Message{
-			{Role: "user", Content: fmt.Sprintf("I orchestrated the @taskgraph run %s (%s) — record what it delivered and what to remember.", g.RunID, g.Name)},
+			{Role: "user", Content: fmt.Sprintf(digestUserFmt, g.RunID, g.Name)},
 			{Role: "assistant", Content: digest},
 		})
 	}

@@ -6,6 +6,7 @@
 package cli
 
 import (
+	"context"
 	"strings"
 	"testing"
 
@@ -47,6 +48,6 @@ func TestFormatTaskGraphDigestTruncatesManyTasks(t *testing.T) {
 }
 
 func TestQueueLearningDigestNilMemWorker(t *testing.T) {
-	a := &taskGraphAdapter{cli: &ChatCLI{}}                 // memWorker nil, agentMode nil
-	a.queueLearningDigest(nil, &taskgraph.Graph{Name: "x"}) // must not panic
+	a := &taskGraphAdapter{cli: &ChatCLI{}}                                  // memWorker nil, agentMode nil
+	a.queueLearningDigest(context.Background(), &taskgraph.Graph{Name: "x"}) // must not panic
 }
