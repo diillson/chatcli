@@ -119,6 +119,21 @@ func snapshotWorkspace(root, label string) error {
 	return err
 }
 
+// CheckpointWorkspace exposes one shadow-git checkpoint of root for external
+// orchestrators (the task-graph engine snapshots before each executor task).
+// Honors the checkpoint kill switch; best-effort semantics belong to the
+// caller. Unlike autoCheckpoint it is NOT throttled — call it per meaningful
+// boundary, never in a loop.
+func CheckpointWorkspace(root, label string) error {
+	if !checkpointsEnabled() {
+		return nil
+	}
+	if _, err := exec.LookPath("git"); err != nil {
+		return nil
+	}
+	return snapshotWorkspace(root, label)
+}
+
 // autoCheckpoint snapshots the workspace before a mutating subcommand:
 // best-effort, throttled, and silent on success. Failures are reported to
 // the human stream once but never block the edit.

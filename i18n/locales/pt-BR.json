@@ -3598,5 +3598,25 @@
   "agent.spinner.working": "processando",
 
   "agent.summary.block_ok": "Bloco #%d concluído",
-  "agent.summary.block_failed": "Bloco #%d falhou"
+  "agent.summary.block_failed": "Bloco #%d falhou",
+
+  "plugins.taskgraph.describe_generic": "Operação no task graph",
+  "plugins.taskgraph.describe_plan": "Validando e persistindo um plano de task graph",
+  "plugins.taskgraph.describe_run": "Executando um task graph (workers paralelos + review independente)",
+  "plugins.taskgraph.describe_retry": "Repetindo a task %s do task graph",
+  "plugins.taskgraph.describe_cancel": "Cancelando a run ativa do task graph",
+  "plugins.taskgraph.describe_status": "Inspecionando o estado do task graph",
+  "help.command.taskgraph": "Runs de task graph: status [id], show <task> [id], list, cancel",
+  "complete.taskgraph.status": "Estado atual da run: status por task, vereditos, custo",
+  "complete.taskgraph.show": "Uma task completa: tentativas, saídas do gate, evidências",
+  "complete.taskgraph.list": "Lista runs persistidas, mais recentes primeiro",
+  "complete.taskgraph.cancel": "Para a run ativa",
+  "complete.taskgraph.help": "Mostra o uso de /taskgraph",
+  "taskgraph.unavailable": "Engine de task graph indisponível nesta sessão",
+  "taskgraph.task.missing": "Faltou o ID da task (ex.: /taskgraph show T3)",
+  "taskgraph.subcommand.unknown": "Subcomando desconhecido %s",
+  "taskgraph.usage.title": "/taskgraph — observe runs de task graph",
+  "taskgraph.usage.body": "status [id] · show <task> [id] · list · cancel — as runs são criadas e executadas pelo modelo via @taskgraph; uma task só conta como done após o gate de validação do engine e o veredito de um reviewer independente.",
+  "cfg.section.taskgraph.title": "Task graph (@taskgraph)",
+  "cfg.taskgraph.about": "Executa planos multi-task aprovados como um DAG: squad workers paralelos, gates de validação executados pelo engine, vereditos de reviewer independente. Sem envs dedicadas — o paralelismo reusa CHATCLI_AGENT_MAX_WORKERS e o review é definido por plano (require_review, default true). Acompanhe runs com /taskgraph."
 }
