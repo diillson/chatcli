@@ -225,3 +225,22 @@ python_functions = test_*" />`
 		t.Errorf("call 2 task truncated: %q", calls[2].Task)
 	}
 }
+
+func TestParseAgentCallsToolsAttr(t *testing.T) {
+	calls, _ := ParseAgentCalls(`<agent_call agent="coder" task="check the page" tools="@browser, websearch, @ask" />`)
+	if len(calls) != 1 {
+		t.Fatalf("want 1 call, got %d", len(calls))
+	}
+	if calls[0].Plugins == nil {
+		t.Fatal("tools attr must populate Plugins")
+	}
+	got := calls[0].Plugins.Plugins
+	if len(got) != 2 || got[0] != "@browser" || got[1] != "@websearch" {
+		t.Fatalf("normalized grant wrong (denylisted @ask must drop): %v", got)
+	}
+	// No tools attr → nil grant.
+	plain, _ := ParseAgentCalls(`<agent_call agent="coder" task="x" />`)
+	if plain[0].Plugins != nil {
+		t.Fatal("no tools attr → nil Plugins")
+	}
+}

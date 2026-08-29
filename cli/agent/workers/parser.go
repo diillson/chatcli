@@ -76,6 +76,13 @@ func ParseAgentCalls(text string) ([]AgentCall, error) {
 			ID:    nextCallID(),
 			Raw:   raw,
 		}
+		// Optional per-task session-plugin grant:
+		// <agent_call agent="coder" task="..." tools="@browser,@websearch" />
+		if toolsAttr := extractAgentAttr(tagContent, "tools"); toolsAttr != "" {
+			if grant := NormalizePluginGrant(strings.Split(toolsAttr, ",")); len(grant) > 0 {
+				call.Plugins = &PluginGrant{Plugins: grant}
+			}
+		}
 
 		calls = append(calls, call)
 		remaining = remaining[len(raw):]

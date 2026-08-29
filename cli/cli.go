@@ -864,6 +864,11 @@ func NewChatCLI(ctx context.Context, manager manager.LLMManager, logger *zap.Log
 	// Read-only memory/session/knowledge views for workers that opt in
 	// (persona frontmatter tools: Memory, Session, Knowledge).
 	workers.RegisterContextToolRunner(cli.runWorkerContextTool)
+	// Per-task plugin grants: workers can be granted session plugins
+	// (@browser, @websearch, mcp_*) opt-in per task; these wire the executor
+	// and the grant-name → native-def translator.
+	workers.RegisterPluginToolRunner(cli.runWorkerPluginTool)
+	workers.RegisterPluginToolDefiner(cli.workerPluginToolDefs)
 
 	// Wire the @knowledge tool to this session's context manager so the agent
 	// can interrogate attached knowledge bases on demand.

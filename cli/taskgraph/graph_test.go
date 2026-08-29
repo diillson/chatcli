@@ -112,3 +112,14 @@ func TestCountByStatusAndCost(t *testing.T) {
 		t.Fatalf("total cost: %v", got)
 	}
 }
+
+func TestParseGraphNormalizesTaskTools(t *testing.T) {
+	g, err := ParseGraph(`{"name":"x","tasks":[{"id":"T1","prompt":"p","tools":["@browser"," websearch ","@ask"]}]}`)
+	if err != nil {
+		t.Fatalf("ParseGraph: %v", err)
+	}
+	got := g.Tasks[0].Tools
+	if len(got) != 2 || got[0] != "@browser" || got[1] != "@websearch" {
+		t.Fatalf("task tools not normalized (denylist @ask): %v", got)
+	}
+}

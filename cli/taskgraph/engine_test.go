@@ -27,6 +27,7 @@ type fakeDispatcher struct {
 	failExecutorOnce map[string]bool
 	reviewFailOnce   map[string]bool
 	reviewOutput     string
+	grants           map[string][]string
 }
 
 func newFakeDispatcher() *fakeDispatcher {
@@ -42,6 +43,12 @@ func (f *fakeDispatcher) Dispatch(_ context.Context, calls []workers.AgentCall) 
 	for _, c := range calls {
 		f.mu.Lock()
 		f.order = append(f.order, c.ID)
+		if c.Plugins != nil {
+			if f.grants == nil {
+				f.grants = map[string][]string{}
+			}
+			f.grants[c.ID] = c.Plugins.Plugins
+		}
 		execFail := f.failExecutorOnce[c.ID]
 		delete(f.failExecutorOnce, c.ID)
 		reviewFail := f.reviewFailOnce[c.ID]
@@ -423,5 +430,20 @@ func TestHeartbeatLabel(t *testing.T) {
 		if got := heartbeatLabel(c.callID, c.agent); got != c.want {
 			t.Fatalf("heartbeatLabel(%q,%q) = %q, want %q", c.callID, c.agent, got, c.want)
 		}
+	}
+}
+
+func TestEngineGrantsToolsToExecutorNotReviewer(t *testing.T) {
+	g, store := testGraph(t, `{"name":"x","tasks":[{"id":"T1","prompt":"work","tools":["@browser"]}]}`)
+	disp := newFakeDispatcher()
+	e := newTestEngine(t, g, store, disp, &fakeGate{})
+	if _, err := e.Run(context.Background()); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if got := disp.grants["tg:T1:e1"]; len(got) != 1 || got[0] != "@browser" {
+		t.Fatalf("executor must receive the task grant: %v", got)
+	}
+	if _, ok := disp.grants["tg:T1:r1"]; ok {
+		t.Fatal("reviewer must NEVER receive a plugin grant")
 	}
 }

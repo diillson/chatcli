@@ -4062,7 +4062,7 @@ func (a *AgentMode) initMultiAgent(ctx context.Context) bool {
 			a.policyAdapter.unattended = a.cli.unattended
 			a.policyAdapter.autoApprove = a.askAutoApproved
 		}
-		workers.RegisterWorkerContextProvider(a.followUpRecallBlocks)
+		workers.RegisterWorkerContextProvider(a.workerTaskContext)
 		if a.agentDispatcher != nil {
 			provider := a.cli.Provider
 			if provider == "" {
@@ -4160,7 +4160,7 @@ func (a *AgentMode) initMultiAgent(ctx context.Context) bool {
 	// Proactive recall for workers: each dispatched task gets the same
 	// [MEMORY AUTO-RECALL] / [SESSION RECALL] surfaces the orchestrator's
 	// system prompt carries, keyed off the task text.
-	workers.RegisterWorkerContextProvider(a.followUpRecallBlocks)
+	workers.RegisterWorkerContextProvider(a.workerTaskContext)
 
 	// Attach the seven-pattern quality pipeline (Self-Refine, CoVe,
 	// Reflexion, …). Pipeline starts with the hooks selected by the

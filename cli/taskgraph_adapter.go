@@ -411,7 +411,11 @@ func (a *taskGraphAdapter) execute(ctx context.Context, g *taskgraph.Graph, stor
 		a.mu.Unlock()
 	}()
 
-	return engine.Run(ctx)
+	report, runErr := engine.Run(ctx)
+	// Feed what the graph learned back into long-term memory (best-effort;
+	// WithoutCancel so a digest of a canceled run still enqueues).
+	a.queueLearningDigest(context.WithoutCancel(ctx), g)
+	return report, runErr
 }
 
 // loadRun opens runID, or the most recent run when empty.

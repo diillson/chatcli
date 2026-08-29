@@ -516,11 +516,16 @@ func (e *Engine) dispatchExecutor(ctx context.Context, t *Task, attempt int, fee
 	e.trackCall(callID, t.ID)
 	defer e.untrackCall(callID)
 	prompt := e.buildExecutorPrompt(t, attempt, feedback)
-	batch := e.cfg.Dispatcher.Dispatch(ctx, []workers.AgentCall{{
+	call := workers.AgentCall{
 		Agent: workers.AgentType(t.Agent),
 		Task:  prompt,
 		ID:    callID,
-	}})
+	}
+	// The executor (never the reviewer) inherits this task's plugin grant.
+	if len(t.Tools) > 0 {
+		call.Plugins = &workers.PluginGrant{Plugins: t.Tools}
+	}
+	batch := e.cfg.Dispatcher.Dispatch(ctx, []workers.AgentCall{call})
 	if len(batch) == 0 {
 		return workers.AgentResult{CallID: callID, Error: errors.New("dispatcher returned no result")}
 	}
