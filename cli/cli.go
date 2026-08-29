@@ -2129,11 +2129,13 @@ func (cli *ChatCLI) cleanup(ctx context.Context) {
 	// Close the browser session the @browser tool may have launched — a
 	// headless Chrome must never outlive ChatCLI.
 	browser.Shutdown(ctx)
-	// Cancel an in-flight task graph run so its workers stop with the session.
+	// Cancel an in-flight task graph run so its workers stop with the
+	// session, and stop the dashboard server if one was opened.
 	if cli.taskGraphAdapter != nil {
 		if _, err := cli.taskGraphAdapter.Cancel(); err == nil {
 			cli.logger.Info("task graph run canceled on shutdown")
 		}
+		cli.taskGraphAdapter.shutdownDash(ctx)
 	}
 
 	// Tear down the session scratch workspace. Respects

@@ -78,6 +78,7 @@ Rules that matter:
 {"cmd":"retry","args":{"task":"T3"}}     re-open a failed task (+1 attempt) and resume
 {"cmd":"cancel"}                         stop the active run
 {"cmd":"list"}                           persisted runs
+{"cmd":"dash"}                           serve the live browser dashboard, returns its URL
 ```
 
 ## Discipline
@@ -85,7 +86,7 @@ Rules that matter:
 - **You never declare a task done.** The engine promotes it after gate + reviewer PASS.
   Relay the engine's report; do not soften a FAIL.
 - `run` executes the whole graph in one tool call — watch the streamed events instead of
-  polling. The user can watch too via `/taskgraph` (it is a mid-run side command).
+  polling. The user can watch too via `/taskgraph` (a mid-run side command) or the live browser dashboard (`/taskgraph dash`).
 - A failed run is not the end: fix what the verdicts name (or improve the prompts) and
   use `retry`/`run` to resume — completed tasks stay done.
 - Tasks run in the SAME workspace. Design tasks to touch disjoint files; the engine

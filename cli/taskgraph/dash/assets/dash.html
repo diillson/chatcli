@@ -1,0 +1,510 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ChatCLI · Task Graph</title>
+<style>
+  :root {
+    --bg: #0e1116; --panel: #161b23; --panel2: #1c2330; --line: #2a3446;
+    --fg: #dbe4f0; --dim: #8b93a7; --accent: #4da3ff;
+    --pending: #8b93a7; --running: #4da3ff; --reviewing: #c792ea;
+    --done: #4cd97b; --failed: #ff5c69; --blocked: #f0a840;
+  }
+  html[data-theme="light"] {
+    --bg: #f4f6fa; --panel: #ffffff; --panel2: #eef1f6; --line: #d4dbe6;
+    --fg: #1c2330; --dim: #66708a; --accent: #2374d8;
+  }
+  * { box-sizing: border-box; margin: 0; }
+  body { background: var(--bg); color: var(--fg); font: 13px/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; height: 100vh; display: flex; flex-direction: column; overflow: hidden; }
+  header { display: flex; align-items: center; gap: 14px; padding: 10px 16px; background: var(--panel); border-bottom: 1px solid var(--line); flex-wrap: wrap; }
+  header h1 { font-size: 15px; font-weight: 600; }
+  header .status-pill { padding: 2px 10px; border-radius: 999px; font-size: 11px; text-transform: uppercase; letter-spacing: .06em; border: 1px solid var(--line); }
+  .counters { display: flex; gap: 10px; color: var(--dim); font-size: 12px; }
+  .counters b { color: var(--fg); }
+  header .spacer { flex: 1; }
+  select, button.hbtn { background: var(--panel2); color: var(--fg); border: 1px solid var(--line); border-radius: 6px; padding: 4px 8px; font: inherit; cursor: pointer; }
+  .tabs { display: flex; gap: 2px; }
+  .tabs button { background: transparent; border: 1px solid transparent; color: var(--dim); padding: 4px 10px; border-radius: 6px; font: inherit; cursor: pointer; }
+  .tabs button.active { background: var(--panel2); color: var(--fg); border-color: var(--line); }
+  main { flex: 1; display: flex; min-height: 0; }
+  #canvasWrap { flex: 1; position: relative; min-width: 0; }
+  canvas { display: block; width: 100%; height: 100%; cursor: grab; }
+  canvas.dragging { cursor: grabbing; }
+  aside { width: 320px; border-left: 1px solid var(--line); background: var(--panel); display: flex; flex-direction: column; min-height: 0; }
+  aside h2 { font-size: 11px; text-transform: uppercase; letter-spacing: .08em; color: var(--dim); padding: 10px 12px 6px; }
+  #events { flex: 1; overflow-y: auto; padding: 0 12px 12px; }
+  .ev { padding: 4px 6px; border-left: 2px solid var(--line); margin-bottom: 4px; color: var(--dim); word-break: break-word; }
+  .ev b { color: var(--fg); font-weight: 600; }
+  .ev time { color: var(--dim); margin-right: 6px; }
+  #results { flex: 1; overflow: auto; padding: 14px 16px; display: none; background: var(--bg); }
+  #results table { border-collapse: collapse; width: 100%; margin-bottom: 22px; }
+  #results th, #results td { text-align: left; padding: 6px 10px; border-bottom: 1px solid var(--line); font-size: 12px; }
+  #results th { color: var(--dim); text-transform: uppercase; font-size: 10px; letter-spacing: .07em; }
+  #results .metric { display: inline-block; margin: 0 26px 16px 0; }
+  #results .metric .v { font-size: 21px; font-weight: 600; }
+  #results .metric .k { color: var(--dim); font-size: 11px; text-transform: uppercase; letter-spacing: .06em; }
+  #popover { position: absolute; max-width: 460px; max-height: 60%; overflow-y: auto; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; box-shadow: 0 10px 34px rgba(0,0,0,.45); display: none; z-index: 10; }
+  #popover h3 { font-size: 13px; margin-bottom: 6px; }
+  #popover .sec { margin-top: 8px; color: var(--dim); font-size: 12px; }
+  #popover .sec b { color: var(--fg); }
+  #popover pre { white-space: pre-wrap; word-break: break-word; background: var(--panel2); border-radius: 6px; padding: 6px 8px; margin-top: 4px; color: var(--fg); font-size: 11px; max-height: 130px; overflow-y: auto; }
+  #popover .verdict-PASS { color: var(--done); font-weight: 700; }
+  #popover .verdict-FAIL { color: var(--failed); font-weight: 700; }
+  .hint { position: absolute; left: 12px; bottom: 10px; color: var(--dim); font-size: 11px; pointer-events: none; }
+  .legend { position: absolute; right: 12px; bottom: 10px; display: flex; gap: 10px; color: var(--dim); font-size: 11px; pointer-events: none; }
+  .legend i { display: inline-block; width: 9px; height: 9px; border-radius: 3px; margin-right: 4px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Task Graph</h1>
+  <span id="runName" style="color:var(--dim)"></span>
+  <span id="runStatus" class="status-pill"></span>
+  <div class="counters" id="counters"></div>
+  <span class="spacer"></span>
+  <div class="tabs">
+    <button id="tabGraph" class="active">Graph</button>
+    <button id="tabResults">Results</button>
+  </div>
+  <select id="runPicker" title="run"></select>
+  <button class="hbtn" id="themeBtn" title="toggle theme">◐</button>
+</header>
+<main>
+  <div id="canvasWrap">
+    <canvas id="cv"></canvas>
+    <div id="popover"></div>
+    <div class="hint">drag to pan · ctrl/⌘+wheel to zoom · 0 to fit · click a task for evidence</div>
+    <div class="legend">
+      <span><i style="background:var(--pending)"></i>pending</span>
+      <span><i style="background:var(--running)"></i>running</span>
+      <span><i style="background:var(--reviewing)"></i>reviewing</span>
+      <span><i style="background:var(--done)"></i>done</span>
+      <span><i style="background:var(--failed)"></i>failed</span>
+      <span><i style="background:var(--blocked)"></i>blocked</span>
+    </div>
+    <div id="results"></div>
+  </div>
+  <aside>
+    <h2>Events</h2>
+    <div id="events"></div>
+  </aside>
+</main>
+<script>
+'use strict';
+/* ChatCLI task-graph dashboard — read-only observer over /api/state and
+   /api/events. Killing this page never affects the run. */
+
+const $ = id => document.getElementById(id);
+const cv = $('cv'), ctx = cv.getContext('2d');
+const state = {
+  run: new URLSearchParams(location.search).get('run') || '',
+  graph: null, layout: null,
+  cam: { x: 40, y: 40, k: 1 },
+  hover: null, selected: null,
+  eventsNext: 0, anim: 0, fitPending: true,
+};
+
+/* ── theme ─────────────────────────────────────────────────────────── */
+function cssVar(name) { return getComputedStyle(document.documentElement).getPropertyValue(name).trim(); }
+$('themeBtn').onclick = () => {
+  const root = document.documentElement;
+  root.dataset.theme = root.dataset.theme === 'light' ? '' : 'light';
+  draw();
+};
+
+/* ── data polling ──────────────────────────────────────────────────── */
+async function fetchJSON(url) {
+  const r = await fetch(url);
+  if (!r.ok) throw new Error(url + ': ' + r.status);
+  return r.json();
+}
+
+async function refreshRuns() {
+  try {
+    const runs = await fetchJSON('/api/runs');
+    const pick = $('runPicker');
+    const prev = state.run;
+    pick.innerHTML = '';
+    for (const r of runs) {
+      const o = document.createElement('option');
+      o.value = r.run_id;
+      o.textContent = r.run_id + ' · ' + (r.name || '?') + ' (' + r.status + ')';
+      pick.appendChild(o);
+    }
+    if (!prev && runs.length) state.run = runs[0].run_id;
+    pick.value = state.run;
+  } catch (e) { /* keep last */ }
+}
+$('runPicker').onchange = e => {
+  state.run = e.target.value;
+  state.graph = null; state.layout = null; state.selected = null;
+  state.eventsNext = 0; state.fitPending = true;
+  $('events').innerHTML = '';
+  tick();
+};
+
+async function tick() {
+  if (!state.run) await refreshRuns();
+  if (!state.run) return;
+  try {
+    const g = await fetchJSON('/api/state?run=' + encodeURIComponent(state.run));
+    state.graph = g;
+    state.layout = computeLayout(g);
+    renderHeader(g);
+    if ($('results').style.display !== 'none') renderResults(g);
+    if (state.fitPending) { fit(); state.fitPending = false; }
+    const ev = await fetchJSON('/api/events?run=' + encodeURIComponent(state.run) + '&since=' + state.eventsNext);
+    if (ev.events && ev.events.length) {
+      state.eventsNext = ev.next;
+      appendEvents(ev.events);
+    }
+  } catch (e) { /* transient — next poll retries */ }
+}
+setInterval(tick, 1000);
+setInterval(refreshRuns, 5000);
+
+/* ── header ────────────────────────────────────────────────────────── */
+function statusColor(s) { return cssVar('--' + s) || cssVar('--dim'); }
+function renderHeader(g) {
+  $('runName').textContent = g.run_id + ' · ' + (g.name || '');
+  const pill = $('runStatus');
+  pill.textContent = g.status;
+  pill.style.color = statusColor(g.status === 'done' ? 'done' : g.status === 'failed' ? 'failed' : 'running');
+  const c = { pending: 0, running: 0, reviewing: 0, done: 0, failed: 0, blocked: 0 };
+  let cost = 0;
+  for (const t of g.tasks) { c[t.status] = (c[t.status] || 0) + 1; cost += t.cost_usd || 0; }
+  $('counters').innerHTML =
+    '<span><b>' + g.tasks.length + '</b> tasks</span>' +
+    '<span style="color:var(--done)"><b>' + c.done + '</b> done</span>' +
+    '<span style="color:var(--running)"><b>' + (c.running + c.reviewing) + '</b> active</span>' +
+    '<span style="color:var(--failed)"><b>' + (c.failed + c.blocked) + '</b> failed/blocked</span>' +
+    (cost > 0 ? '<span><b>$' + cost.toFixed(4) + '</b> cost</span>' : '');
+}
+
+/* ── events feed ───────────────────────────────────────────────────── */
+function appendEvents(events) {
+  const box = $('events');
+  for (const e of events) {
+    const d = document.createElement('div');
+    d.className = 'ev';
+    const t = new Date(e.ts).toTimeString().slice(0, 8);
+    d.innerHTML = '<time>' + t + '</time>' + (e.task ? '<b>[' + esc(e.task) + ']</b> ' : '') +
+      esc(e.event) + (e.detail ? ': ' + esc(e.detail) : '');
+    const col = { task_done: '--done', task_failed: '--failed', task_blocked: '--blocked', review_verdict: '--reviewing', task_retry: '--blocked' }[e.event];
+    if (col) d.style.borderLeftColor = cssVar(col);
+    box.appendChild(d);
+  }
+  box.scrollTop = box.scrollHeight;
+}
+function esc(s) { const d = document.createElement('span'); d.textContent = String(s); return d.innerHTML; }
+
+/* ── layout: swimlanes by phase, columns by dependency depth ───────── */
+const NODE_W = 190, NODE_H = 64, GAP_X = 90, GAP_Y = 26, LANE_PAD = 46;
+function computeLayout(g) {
+  const byId = {}; g.tasks.forEach(t => byId[t.id] = t);
+  const depth = {};
+  const depthOf = id => {
+    if (id in depth) return depth[id];
+    const t = byId[id];
+    depth[id] = !t || !t.deps || !t.deps.length ? 0 : Math.max(...t.deps.map(depthOf)) + 1;
+    return depth[id];
+  };
+  g.tasks.forEach(t => depthOf(t.id));
+
+  const laneIds = (g.phases && g.phases.length) ? g.phases.map(p => p.id) : [''];
+  const laneTitle = {};
+  (g.phases || []).forEach(p => laneTitle[p.id] = p.title || p.id);
+  const lanes = laneIds.map(id => ({ id, title: laneTitle[id] || '', rows: {} }));
+  const laneIdx = {}; laneIds.forEach((id, i) => laneIdx[id] = i);
+  for (const t of g.tasks) {
+    const li = laneIdx[t.phase] !== undefined ? laneIdx[t.phase] : 0;
+    const d = depth[t.id];
+    (lanes[li].rows[d] = lanes[li].rows[d] || []).push(t.id);
+  }
+  const pos = {}; let laneY = 0; const laneBounds = [];
+  for (const lane of lanes) {
+    const depths = Object.keys(lane.rows).map(Number);
+    const laneRows = depths.length ? Math.max(...depths.map(d => lane.rows[d].length)) : 0;
+    const laneH = Math.max(1, laneRows) * (NODE_H + GAP_Y) + LANE_PAD;
+    for (const d of depths) {
+      lane.rows[d].forEach((id, i) => {
+        pos[id] = { x: d * (NODE_W + GAP_X), y: laneY + LANE_PAD + i * (NODE_H + GAP_Y) };
+      });
+    }
+    laneBounds.push({ y: laneY, h: laneH, title: lane.title, any: depths.length > 0 });
+    laneY += laneH + 14;
+  }
+  const maxDepth = Math.max(0, ...Object.values(depth));
+  return { pos, depth, laneBounds, w: (maxDepth + 1) * (NODE_W + GAP_X), h: laneY };
+}
+
+/* ── canvas drawing ────────────────────────────────────────────────── */
+function resize() {
+  const r = cv.parentElement.getBoundingClientRect();
+  cv.width = r.width * devicePixelRatio; cv.height = r.height * devicePixelRatio;
+  draw();
+}
+addEventListener('resize', resize);
+
+function worldToScreen(p) { return { x: (p.x + state.cam.x) * state.cam.k, y: (p.y + state.cam.y) * state.cam.k }; }
+function screenToWorld(p) { return { x: p.x / state.cam.k - state.cam.x, y: p.y / state.cam.k - state.cam.y }; }
+
+function fit() {
+  if (!state.layout) return;
+  const r = cv.parentElement.getBoundingClientRect();
+  const k = Math.min(1.25, (r.width - 60) / Math.max(1, state.layout.w), (r.height - 60) / Math.max(1, state.layout.h));
+  state.cam.k = Math.max(0.15, k);
+  state.cam.x = 30 / state.cam.k; state.cam.y = 30 / state.cam.k;
+  draw();
+}
+
+function lineage(id) {
+  const g = state.graph; if (!g) return new Set();
+  const byId = {}; g.tasks.forEach(t => byId[t.id] = t);
+  const up = new Set(), down = new Set([id]);
+  const walkUp = i => (byId[i].deps || []).forEach(d => { if (!up.has(d)) { up.add(d); walkUp(d); } });
+  walkUp(id);
+  let grew = true;
+  while (grew) {
+    grew = false;
+    for (const t of g.tasks) if (!down.has(t.id) && (t.deps || []).some(d => down.has(d))) { down.add(t.id); grew = true; }
+  }
+  up.forEach(x => down.add(x));
+  return down;
+}
+
+function draw() {
+  const g = state.graph, L = state.layout;
+  ctx.setTransform(devicePixelRatio, 0, 0, devicePixelRatio, 0, 0);
+  ctx.clearRect(0, 0, cv.width, cv.height);
+  if (!g || !L) return;
+  const k = state.cam.k;
+  ctx.setTransform(devicePixelRatio * k, 0, 0, devicePixelRatio * k, devicePixelRatio * state.cam.x * k, devicePixelRatio * state.cam.y * k);
+
+  // Swimlanes
+  for (const lane of L.laneBounds) {
+    if (!lane.any && L.laneBounds.length === 1) continue;
+    ctx.fillStyle = cssVar('--panel');
+    ctx.globalAlpha = 0.45;
+    roundRect(-24, lane.y, L.w + 60, lane.h, 12); ctx.fill();
+    ctx.globalAlpha = 1;
+    if (lane.title) {
+      ctx.fillStyle = cssVar('--dim');
+      ctx.font = '600 12px ui-monospace, monospace';
+      ctx.fillText(lane.title.toUpperCase(), -12, lane.y + 20);
+    }
+  }
+
+  const focus = state.hover ? lineage(state.hover) : null;
+  const byId = {}; g.tasks.forEach(t => byId[t.id] = t);
+
+  // Edges — cubic beziers dep→task; animated dashes into active tasks.
+  const now = performance.now() / 1000;
+  for (const t of g.tasks) {
+    for (const d of (t.deps || [])) {
+      const a = L.pos[d], b = L.pos[t.id];
+      if (!a || !b) continue;
+      const x1 = a.x + NODE_W, y1 = a.y + NODE_H / 2, x2 = b.x, y2 = b.y + NODE_H / 2;
+      const cxo = Math.max(40, (x2 - x1) / 2);
+      const dimmed = focus && !(focus.has(d) && focus.has(t.id));
+      const active = t.status === 'running' || t.status === 'reviewing';
+      ctx.beginPath();
+      ctx.moveTo(x1, y1);
+      ctx.bezierCurveTo(x1 + cxo, y1, x2 - cxo, y2, x2, y2);
+      ctx.lineWidth = active ? 2.2 : 1.4;
+      ctx.strokeStyle = dimmed ? cssVar('--line') : (active ? statusColor(t.status) : (byId[d].status === 'done' ? cssVar('--done') : cssVar('--line')));
+      ctx.globalAlpha = dimmed ? 0.35 : 0.9;
+      if (active) { ctx.setLineDash([7, 6]); ctx.lineDashOffset = -now * 26; } else ctx.setLineDash([]);
+      ctx.stroke();
+      ctx.setLineDash([]); ctx.globalAlpha = 1;
+    }
+  }
+
+  // Nodes
+  for (const t of g.tasks) {
+    const p = L.pos[t.id]; if (!p) continue;
+    const dimmed = focus && !focus.has(t.id);
+    const col = statusColor(t.status);
+    ctx.globalAlpha = dimmed ? 0.35 : 1;
+    ctx.fillStyle = cssVar('--panel2');
+    ctx.strokeStyle = (state.selected === t.id) ? cssVar('--accent') : col;
+    ctx.lineWidth = (state.selected === t.id || state.hover === t.id) ? 2.4 : 1.5;
+    roundRect(p.x, p.y, NODE_W, NODE_H, 10); ctx.fill(); ctx.stroke();
+    // Status stripe + pulse for active tasks.
+    ctx.fillStyle = col;
+    if (t.status === 'running' || t.status === 'reviewing') ctx.globalAlpha = (dimmed ? 0.3 : 1) * (0.55 + 0.45 * Math.abs(Math.sin(now * 2.4)));
+    roundRect(p.x, p.y, 5, NODE_H, 3); ctx.fill();
+    ctx.globalAlpha = dimmed ? 0.35 : 1;
+    // Text
+    ctx.fillStyle = cssVar('--fg');
+    ctx.font = '700 12px ui-monospace, monospace';
+    ctx.fillText(t.id, p.x + 14, p.y + 18);
+    ctx.font = '11px ui-monospace, monospace';
+    ctx.fillStyle = cssVar('--dim');
+    ctx.fillText(clip(t.title || '', 24), p.x + 14, p.y + 34);
+    let meta = t.status;
+    if ((t.attempts || []).length) meta += ' · a' + t.attempts.length + '/' + (t.max_attempts || 3);
+    if (t.cost_usd) meta += ' · $' + t.cost_usd.toFixed(3);
+    ctx.fillStyle = col;
+    ctx.fillText(clip(meta, 26), p.x + 14, p.y + 51);
+    ctx.globalAlpha = 1;
+  }
+}
+function roundRect(x, y, w, h, r) {
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.arcTo(x + w, y, x + w, y + h, r); ctx.arcTo(x + w, y + h, x, y + h, r);
+  ctx.arcTo(x, y + h, x, y, r); ctx.arcTo(x, y, x + w, y, r);
+  ctx.closePath();
+}
+function clip(s, n) { return s.length > n ? s.slice(0, n - 1) + '…' : s; }
+
+(function loop() {
+  const g = state.graph;
+  if (g && g.tasks.some(t => t.status === 'running' || t.status === 'reviewing')) draw();
+  requestAnimationFrame(loop);
+})();
+
+/* ── interaction: pan, zoom, hover, popover ────────────────────────── */
+let drag = null;
+cv.addEventListener('mousedown', e => { drag = { x: e.offsetX, y: e.offsetY, moved: false }; cv.classList.add('dragging'); });
+addEventListener('mouseup', () => { if (drag && !drag.moved) select(hitTest(drag.x, drag.y)); drag = null; cv.classList.remove('dragging'); });
+cv.addEventListener('mousemove', e => {
+  if (drag) {
+    const dx = e.offsetX - drag.x, dy = e.offsetY - drag.y;
+    if (Math.abs(dx) + Math.abs(dy) > 3) drag.moved = true;
+    state.cam.x += dx / state.cam.k; state.cam.y += dy / state.cam.k;
+    drag.x = e.offsetX; drag.y = e.offsetY;
+    draw();
+  } else {
+    const h = hitTest(e.offsetX, e.offsetY);
+    if (h !== state.hover) { state.hover = h; cv.style.cursor = h ? 'pointer' : 'grab'; draw(); }
+  }
+});
+cv.addEventListener('wheel', e => {
+  if (!(e.ctrlKey || e.metaKey)) return;
+  e.preventDefault();
+  const before = screenToWorld({ x: e.offsetX, y: e.offsetY });
+  state.cam.k = Math.min(3, Math.max(0.15, state.cam.k * (e.deltaY < 0 ? 1.12 : 0.89)));
+  const after = screenToWorld({ x: e.offsetX, y: e.offsetY });
+  state.cam.x += after.x - before.x; state.cam.y += after.y - before.y;
+  draw();
+}, { passive: false });
+addEventListener('keydown', e => { if (e.key === '0' && document.activeElement.tagName !== 'SELECT') fit(); });
+
+function hitTest(sx, sy) {
+  const L = state.layout; if (!L) return null;
+  const w = screenToWorld({ x: sx, y: sy });
+  for (const t of (state.graph.tasks || [])) {
+    const p = L.pos[t.id];
+    if (p && w.x >= p.x && w.x <= p.x + NODE_W && w.y >= p.y && w.y <= p.y + NODE_H) return t.id;
+  }
+  return null;
+}
+
+function select(id) {
+  state.selected = id;
+  const pop = $('popover');
+  if (!id) { pop.style.display = 'none'; draw(); return; }
+  const t = state.graph.tasks.find(x => x.id === id);
+  const p = worldToScreen({ x: state.layout.pos[id].x + NODE_W, y: state.layout.pos[id].y });
+  let html = '<h3>[' + esc(t.id) + '] ' + esc(t.title || '') + '</h3>';
+  html += '<div class="sec">status <b style="color:' + statusColor(t.status) + '">' + t.status + '</b>';
+  if (t.agent) html += ' · agent <b>' + esc(t.agent) + '</b>';
+  if (t.cost_usd) html += ' · cost <b>$' + t.cost_usd.toFixed(4) + '</b>';
+  html += '</div>';
+  if (t.prompt) html += '<div class="sec">prompt<pre>' + esc(clip(t.prompt, 700)) + '</pre></div>';
+  if ((t.validation || []).length) {
+    html += '<div class="sec">contract<pre>' + esc(t.validation.map(v => (v.run ? '$ ' + v.run + (v.expect ? '  # ' + v.expect : '') : v.expect)).join('\n')) + '</pre></div>';
+  }
+  for (const a of (t.attempts || [])) {
+    html += '<div class="sec"><b>attempt ' + a.n + '</b>';
+    if (a.cost_usd) html += ' · $' + a.cost_usd.toFixed(4);
+    if (a.executor_run_id) html += ' · exec ' + esc(a.executor_run_id);
+    if (a.reviewer_run_id) html += ' · review ' + esc(a.reviewer_run_id);
+    for (const gr of (a.gate || [])) {
+      html += '<pre>$ ' + esc(gr.run) + ' → ' + (gr.passed ? 'PASS' : 'FAIL') + (gr.output ? '\n' + esc(clip(gr.output, 400)) : '') + '</pre>';
+    }
+    if (a.verdict) html += '<div>verdict <span class="verdict-' + esc(a.verdict) + '">' + esc(a.verdict) + '</span>' + (a.evidence ? '<pre>' + esc(clip(a.evidence, 400)) + '</pre>' : '') + '</div>';
+    if (a.failure_reason) html += '<pre>' + esc(clip(a.failure_reason, 400)) + '</pre>';
+    html += '</div>';
+  }
+  pop.innerHTML = html;
+  pop.style.display = 'block';
+  const wrap = cv.parentElement.getBoundingClientRect();
+  pop.style.left = Math.min(wrap.width - 480, Math.max(8, p.x + 12)) + 'px';
+  pop.style.top = Math.min(wrap.height - 120, Math.max(8, p.y)) + 'px';
+  draw();
+}
+
+/* ── results tab: critical path, times, cost breakdown ─────────────── */
+$('tabGraph').onclick = () => setTab(true);
+$('tabResults').onclick = () => setTab(false);
+function setTab(graph) {
+  $('tabGraph').classList.toggle('active', graph);
+  $('tabResults').classList.toggle('active', !graph);
+  cv.style.display = graph ? 'block' : 'none';
+  $('results').style.display = graph ? 'none' : 'block';
+  $('popover').style.display = 'none';
+  if (!graph && state.graph) renderResults(state.graph);
+}
+
+function taskDur(t) {
+  let ms = 0;
+  for (const a of (t.attempts || [])) {
+    if (a.started_at && a.ended_at) ms += new Date(a.ended_at) - new Date(a.started_at);
+  }
+  return ms;
+}
+function criticalPath(g) {
+  const byId = {}; g.tasks.forEach(t => byId[t.id] = t);
+  const memo = {};
+  const best = id => {
+    if (memo[id]) return memo[id];
+    const t = byId[id];
+    let head = { ms: 0, path: [] };
+    for (const d of (t.deps || [])) { const b = best(d); if (b.ms > head.ms) head = b; }
+    return memo[id] = { ms: head.ms + taskDur(t), path: head.path.concat(id) };
+  };
+  let top = { ms: 0, path: [] };
+  for (const t of g.tasks) { const b = best(t.id); if (b.ms > top.ms) top = b; }
+  return top;
+}
+function fmtDur(ms) {
+  if (ms <= 0) return '—';
+  const s = Math.round(ms / 1000);
+  return s >= 60 ? Math.floor(s / 60) + 'm' + String(s % 60).padStart(2, '0') + 's' : s + 's';
+}
+function renderResults(g) {
+  const wall = (g.started_at ? ((g.ended_at && new Date(g.ended_at) > new Date(g.started_at) ? new Date(g.ended_at) : new Date()) - new Date(g.started_at)) : 0);
+  const agentMs = g.tasks.reduce((s, t) => s + taskDur(t), 0);
+  const cp = criticalPath(g);
+  const totalCost = g.tasks.reduce((s, t) => s + (t.cost_usd || 0), 0);
+  let html = '';
+  html += '<span class="metric"><div class="v">' + fmtDur(wall) + '</div><div class="k">wall-clock</div></span>';
+  html += '<span class="metric"><div class="v">' + fmtDur(agentMs) + '</div><div class="k">agent time</div></span>';
+  html += '<span class="metric"><div class="v">' + (wall > 0 ? (agentMs / Math.max(1, wall)).toFixed(2) + '×' : '—') + '</div><div class="k">parallelism</div></span>';
+  html += '<span class="metric"><div class="v">' + fmtDur(cp.ms) + '</div><div class="k">critical path</div></span>';
+  html += '<span class="metric"><div class="v">' + (totalCost > 0 ? '$' + totalCost.toFixed(4) : '—') + '</div><div class="k">total cost</div></span>';
+  html += '<div class="sec" style="color:var(--dim);margin:4px 0 18px">critical path: ' + (cp.path.length ? cp.path.map(esc).join(' → ') : '—') + '</div>';
+  html += '<table><tr><th>task</th><th>status</th><th>attempts</th><th>verdict</th><th>time</th><th>cost</th></tr>';
+  for (const t of g.tasks) {
+    const last = (t.attempts || [])[Math.max(0, (t.attempts || []).length - 1)] || {};
+    html += '<tr><td><b>' + esc(t.id) + '</b> ' + esc(clip(t.title || '', 40)) + '</td>' +
+      '<td style="color:' + statusColor(t.status) + '">' + t.status + '</td>' +
+      '<td>' + (t.attempts || []).length + '/' + (t.max_attempts || 3) + '</td>' +
+      '<td>' + (last.verdict ? '<span class="verdict-' + esc(last.verdict) + '">' + esc(last.verdict) + '</span>' : '—') + '</td>' +
+      '<td>' + fmtDur(taskDur(t)) + '</td>' +
+      '<td>' + (t.cost_usd ? '$' + t.cost_usd.toFixed(4) : '—') + '</td></tr>';
+  }
+  html += '</table>';
+  $('results').innerHTML = html;
+}
+
+/* ── boot ──────────────────────────────────────────────────────────── */
+resize();
+refreshRuns().then(tick);
+</script>
+</body>
+</html>

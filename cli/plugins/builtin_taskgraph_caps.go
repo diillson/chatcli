@@ -52,6 +52,8 @@ func (p *BuiltinTaskGraphPlugin) DescribeCall(args []string) string {
 		return i18n.T("plugins.taskgraph.describe_retry", describeTrim(jsonString(payload, "task", "task_id", "taskId")))
 	case "cancel", "stop", "abort":
 		return i18n.T("plugins.taskgraph.describe_cancel")
+	case "dash", "dashboard", "ui":
+		return i18n.T("plugins.taskgraph.describe_dash")
 	default:
 		return i18n.T("plugins.taskgraph.describe_status")
 	}

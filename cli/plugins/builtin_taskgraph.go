@@ -46,6 +46,14 @@ type TaskGraphAdapter interface {
 	List() (string, error)
 }
 
+// TaskGraphDashboarder is the OPTIONAL dashboard capability of a
+// TaskGraphAdapter (kept out of the base interface so existing
+// implementations stay valid). Dash serves the live browser dashboard and
+// returns its URL, opening the browser when a TTY is present.
+type TaskGraphDashboarder interface {
+	Dash(runID string) (string, error)
+}
+
 type taskGraphAdapterHolder struct{ a TaskGraphAdapter }
 
 var taskGraphAdapterAtom atomic.Value // taskGraphAdapterHolder
@@ -81,11 +89,11 @@ func (*BuiltinTaskGraphPlugin) Description() string {
 
 // Usage explains the canonical invocation forms.
 func (*BuiltinTaskGraphPlugin) Usage() string {
-	return `@taskgraph plan|run|status|show|retry|cancel|list
+	return `@taskgraph plan|run|status|show|retry|cancel|list|dash
 
 <tool_call name="@taskgraph" args='{"cmd":"run","args":{"graph":{"name":"my-feature","tasks":[{"id":"T1","title":"...","prompt":"...","validation":[{"run":"go test ./...","expect":"all green"}]},{"id":"T2","prompt":"...","deps":["T1"]}]}}}' />
 
-run executes the WHOLE graph (streamed); status/show/list inspect; retry re-opens a failed task; cancel stops the active run.`
+run executes the WHOLE graph (streamed); status/show/list inspect; retry re-opens a failed task; cancel stops the active run; dash serves the live browser dashboard.`
 }
 
 // Version returns the plugin contract version.
@@ -156,6 +164,14 @@ func (*BuiltinTaskGraphPlugin) Schema() string {
 				"description": "List persisted runs, newest first.",
 				"examples":    []string{`{"cmd":"list"}`},
 			},
+			{
+				"name":        "dash",
+				"description": "Serve the live browser dashboard (animated DAG, swimlanes, per-task evidence and cost) and return its local URL.",
+				"flags": []map[string]interface{}{
+					{"name": "id", "type": "string", "required": false, "description": "run id to focus (default: latest)"},
+				},
+				"examples": []string{`{"cmd":"dash"}`},
+			},
 		},
 	}
 	data, _ := json.Marshal(schema)
@@ -206,8 +222,14 @@ func (p *BuiltinTaskGraphPlugin) ExecuteWithStream(ctx context.Context, args []s
 		return adapter.Cancel()
 	case "list", "ls", "runs":
 		return adapter.List()
+	case "dash", "dashboard", "ui":
+		d, ok := adapter.(TaskGraphDashboarder)
+		if !ok {
+			return "", errors.New("@taskgraph dash: dashboard not available in this session")
+		}
+		return d.Dash(get("id", "run_id", "runId", "run"))
 	default:
-		return "", fmt.Errorf("@taskgraph: unknown subcommand %q (expected plan|run|status|show|retry|cancel|list)", sub)
+		return "", fmt.Errorf("@taskgraph: unknown subcommand %q (expected plan|run|status|show|retry|cancel|list|dash)", sub)
 	}
 }
 
