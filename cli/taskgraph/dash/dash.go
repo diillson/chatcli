@@ -110,17 +110,22 @@ func (s *Server) handleRuns(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, out)
 }
 
-// resolveRun validates the run parameter (default: latest run).
+// resolveRun maps the run parameter to a store (default: latest run). The
+// requested id is only ever COMPARED against ids enumerated from disk —
+// no path is built from request input, so a hostile "run" value can at
+// most fail to match.
 func (s *Server) resolveRun(r *http.Request) (*taskgraph.RunStore, error) {
-	runID := r.URL.Query().Get("run")
-	if runID == "" {
-		rows, err := taskgraph.ListRuns(s.baseDir)
-		if err != nil || len(rows) == 0 {
-			return nil, fmt.Errorf("no task graph runs")
-		}
-		runID = rows[0].RunID
+	want := r.URL.Query().Get("run")
+	rows, err := taskgraph.ListRuns(s.baseDir)
+	if err != nil || len(rows) == 0 {
+		return nil, fmt.Errorf("no task graph runs")
 	}
-	return taskgraph.OpenRun(s.baseDir, runID)
+	for _, row := range rows {
+		if want == "" || row.RunID == want {
+			return taskgraph.OpenRun(s.baseDir, row.RunID)
+		}
+	}
+	return nil, fmt.Errorf("no task graph run %q", want)
 }
 
 // handleState returns the run's persisted graph verbatim.
@@ -150,7 +155,7 @@ func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
 	if since < 0 {
 		since = 0
 	}
-	data, err := os.ReadFile(store.EventsPath()) // #nosec G304 -- path is the validated run's store dir + fixed filename
+	data, err := os.ReadFile(store.EventsPath()) // path derives from disk-enumerated run ids, never from the request
 	if err != nil && !os.IsNotExist(err) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
