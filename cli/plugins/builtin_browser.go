@@ -353,65 +353,25 @@ func parseBrowserInvocation(args []string) (browserInvocation, error) {
 
 	// The agent loop flattens a JSON envelope {"cmd":"open","args":{"url":X}}
 	// into argv ["open","--url",X], so every args-map key arrives as a
-	// `--flag value` (or `--flag=value`) pair. Collect those generically —
-	// treating an unknown --flag as its own key — plus bare positionals, then
-	// map both onto the invocation. A strict parser that ignored these flags
-	// mistook "--url" itself for the URL (navigating to a bogus host).
-	flags := map[string]string{}
-	bools := map[string]bool{}
-	var positionals []string
-	for i := 0; i < len(rest); i++ {
-		a := rest[i]
-		if strings.HasPrefix(a, "--") {
-			name := strings.TrimPrefix(a, "--")
-			if eq := strings.IndexByte(name, '='); eq >= 0 {
-				flags[strings.ToLower(name[:eq])] = name[eq+1:]
-				continue
-			}
-			key := strings.ToLower(name)
-			// A flag followed by another flag (or nothing) is a boolean.
-			if i+1 < len(rest) && !strings.HasPrefix(rest[i+1], "--") {
-				flags[key] = rest[i+1]
-				i++
-			} else {
-				bools[key] = true
-			}
-			continue
-		}
-		positionals = append(positionals, a)
-	}
-	flagAny := func(keys ...string) string {
-		for _, k := range keys {
-			if v, ok := flags[k]; ok {
-				return v
-			}
-		}
-		return ""
-	}
+	// `--flag value` (or `--flag=value`) pair. splitFlatArgs collects those
+	// generically (an unknown --flag is kept, not mistaken for a positional),
+	// then the keys are mapped onto the invocation. A strict parser that
+	// ignored these flags mistook "--url" itself for the URL.
+	flags, bools, positionals := splitFlatArgs(rest)
 	inv.submit = bools["submit"]
-	if v := flagAny("file", "path"); v != "" {
-		inv.file = v
+	inv.file = firstFlag(flags, "file", "path")
+	inv.url = firstFlag(flags, "url", "href")
+	inv.target = firstFlag(flags, "target", "selector", "ref", "to")
+	inv.text = firstFlag(flags, "text", "value")
+	inv.js = firstFlag(flags, "js", "expression", "script", "code")
+	if v := firstFlag(flags, "direction", "dir"); v != "" {
+		inv.dir = strings.ToLower(v)
 	}
-	if v := flagAny("tail"); v != "" {
+	if v := firstFlag(flags, "tail"); v != "" {
 		inv.tail = atoiDefault(v, browserDefaultTail)
 	}
-	if v := flagAny("max"); v != "" {
+	if v := firstFlag(flags, "max"); v != "" {
 		inv.max = atoiDefault(v, 0)
-	}
-	if v := flagAny("url", "href"); v != "" {
-		inv.url = v
-	}
-	if v := flagAny("target", "selector", "ref", "to"); v != "" {
-		inv.target = v
-	}
-	if v := flagAny("text", "value"); v != "" {
-		inv.text = v
-	}
-	if v := flagAny("js", "expression", "script", "code"); v != "" {
-		inv.js = v
-	}
-	if v := flagAny("direction", "dir"); v != "" {
-		inv.dir = strings.ToLower(v)
 	}
 
 	switch inv.cmd {

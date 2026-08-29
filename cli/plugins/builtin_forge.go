@@ -379,62 +379,28 @@ func parseForgeInvocation(args []string) (forgeInvocation, error) {
 		rest = rest[1:]
 	}
 
-	var positionals []string
-	for i := 0; i < len(rest); i++ {
-		a := rest[i]
-		next := func() string {
-			if i+1 < len(rest) {
-				i++
-				return rest[i]
-			}
-			return ""
-		}
-		switch {
-		case a == "--draft":
-			inv.draft = true
-		case a == "--title":
-			inv.title = next()
-		case a == "--body":
-			inv.body = next()
-		case a == "--base":
-			inv.base = next()
-		case a == "--branch":
-			inv.branch = next()
-		case a == "--limit":
-			inv.limit = forgeAtoi(next(), 0)
-		case a == "--host":
-			inv.host = next()
-		// The agent loop flattens {"cmd":"pr-view","args":{"number":42}} into
-		// argv ["pr-view","--number","42"], so number/run arrive as flags too
-		// — recognize them or they'd be mistaken for the positional target.
-		case a == "--number" || a == "--id" || a == "--pr" || a == "--mr":
-			inv.number = next()
-		case a == "--run" || a == "--run-id" || a == "--runid":
-			inv.run = next()
-		case strings.HasPrefix(a, "--number=") || strings.HasPrefix(a, "--id=") || strings.HasPrefix(a, "--pr=") || strings.HasPrefix(a, "--mr="):
-			inv.number = a[strings.IndexByte(a, '=')+1:]
-		case strings.HasPrefix(a, "--run=") || strings.HasPrefix(a, "--run-id=") || strings.HasPrefix(a, "--runid="):
-			inv.run = a[strings.IndexByte(a, '=')+1:]
-		case strings.HasPrefix(a, "--title="):
-			inv.title = strings.TrimPrefix(a, "--title=")
-		case strings.HasPrefix(a, "--body="):
-			inv.body = strings.TrimPrefix(a, "--body=")
-		case strings.HasPrefix(a, "--base="):
-			inv.base = strings.TrimPrefix(a, "--base=")
-		case strings.HasPrefix(a, "--branch="):
-			inv.branch = strings.TrimPrefix(a, "--branch=")
-		case strings.HasPrefix(a, "--limit="):
-			inv.limit = forgeAtoi(strings.TrimPrefix(a, "--limit="), 0)
-		case strings.HasPrefix(a, "--host="):
-			inv.host = strings.TrimPrefix(a, "--host=")
-		default:
-			positionals = append(positionals, a)
-		}
+	// The agent loop flattens {"cmd":"pr-view","args":{"number":42}} into argv
+	// ["pr-view","--number","42"], so every args-map key arrives as a flag.
+	// splitFlatArgs collects them generically; number/run must be recognized
+	// here or they'd be mistaken for the positional target.
+	flags, bools, positionals := splitFlatArgs(rest)
+	inv.draft = bools["draft"]
+	inv.title = firstFlag(flags, "title")
+	inv.body = firstFlag(flags, "body")
+	inv.base = firstFlag(flags, "base")
+	inv.branch = firstFlag(flags, "branch")
+	inv.host = firstFlag(flags, "host")
+	inv.number = firstFlag(flags, "number", "id", "pr", "mr")
+	inv.run = firstFlag(flags, "run", "run-id", "runid")
+	if v := firstFlag(flags, "limit"); v != "" {
+		inv.limit = forgeAtoi(v, 0)
 	}
 	if len(positionals) > 0 {
 		if inv.cmd == "ci-logs" {
-			inv.run = positionals[0]
-		} else {
+			if inv.run == "" {
+				inv.run = positionals[0]
+			}
+		} else if inv.number == "" {
 			inv.number = positionals[0]
 		}
 	}
