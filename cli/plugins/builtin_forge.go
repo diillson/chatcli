@@ -109,7 +109,8 @@ func (*BuiltinForgePlugin) Schema() string {
 	schema := map[string]interface{}{
 		"name":        "@forge",
 		"description": "Pull requests, issues and CI via the user's authenticated gh/glab CLI.",
-		"commands": []map[string]interface{}{
+		"argsFormat":  "JSON envelope {cmd, args} (e.g. {\"cmd\":\"pr-view\",\"args\":{\"number\":42}}); two-token (pr view 42) and flat argv also accepted.",
+		"subcommands": []map[string]interface{}{
 			{"name": "pr-list", "description": "open pull requests", "examples": []string{`{"cmd":"pr-list"}`}},
 			{"name": "pr-view", "description": "one PR in detail", "examples": []string{`{"cmd":"pr-view","args":{"number":42}}`}},
 			{"name": "pr-diff", "description": "the PR's diff", "examples": []string{`{"cmd":"pr-diff","args":{"number":42}}`}},

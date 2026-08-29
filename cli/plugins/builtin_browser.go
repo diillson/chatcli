@@ -104,8 +104,9 @@ func (*BuiltinBrowserPlugin) Path() string { return "[builtin]" }
 func (*BuiltinBrowserPlugin) Schema() string {
 	schema := map[string]interface{}{
 		"name":        "@browser",
-		"description": "Drive a real local browser over the DevTools protocol: navigate, snapshot, click, type, eval, screenshot, console, network.",
-		"commands": []map[string]interface{}{
+		"description": "Drive a real local browser over the DevTools protocol.",
+		"argsFormat":  "JSON envelope {cmd, args} preferred (e.g. {\"cmd\":\"open\",\"args\":{\"url\":\"...\"}}); flat argv also accepted.",
+		"subcommands": []map[string]interface{}{
 			{"name": "open", "description": "navigate to a URL and return a page snapshot", "examples": []string{`{"cmd":"open","args":{"url":"http://localhost:3000"}}`}},
 			{"name": "snapshot", "description": "current page as text with numbered interactive elements", "examples": []string{`{"cmd":"snapshot"}`}},
 			{"name": "click", "description": "click an element by snapshot ref or CSS selector", "examples": []string{`{"cmd":"click","args":{"target":"3"}}`, `{"cmd":"click","args":{"target":"#submit"}}`}},

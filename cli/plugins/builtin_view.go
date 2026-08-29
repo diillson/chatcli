@@ -90,7 +90,8 @@ func (*BuiltinViewPlugin) Schema() string {
 	schema := map[string]interface{}{
 		"name":        "@view",
 		"description": "Attach a local image to the conversation through the vision pipeline.",
-		"commands": []map[string]interface{}{
+		"argsFormat":  "JSON envelope {cmd, args} (e.g. {\"cmd\":\"view\",\"args\":{\"file\":\"shot.png\"}}); a bare path also works.",
+		"subcommands": []map[string]interface{}{
 			{"name": "view", "description": "attach a local image (png, jpeg, gif, webp)", "examples": []string{`{"cmd":"view","args":{"file":"shot.png"}}`}},
 		},
 	}
