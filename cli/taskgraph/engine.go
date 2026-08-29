@@ -279,6 +279,8 @@ func (e *Engine) startHeartbeat(ctx context.Context, parentRunID string) func() 
 	go func() {
 		ticker := time.NewTicker(heartbeatInterval)
 		defer ticker.Stop()
+		lastDetail := ""
+		lastPrint := time.Now()
 		for {
 			select {
 			case <-hbCtx.Done():
@@ -286,7 +288,7 @@ func (e *Engine) startHeartbeat(ctx context.Context, parentRunID string) func() 
 			case <-ticker.C:
 				var parts []string
 				for _, child := range runs.Default().Children(parentRunID) {
-					line := fmt.Sprintf("[%s]", child.Agent)
+					line := "[" + heartbeatLabel(child.CallID, child.Agent) + "]"
 					if child.Turn > 0 {
 						line += fmt.Sprintf(" turn %d/%d", child.Turn, child.MaxTurns)
 					}
@@ -295,13 +297,40 @@ func (e *Engine) startHeartbeat(ctx context.Context, parentRunID string) func() 
 					}
 					parts = append(parts, line)
 				}
-				if len(parts) > 0 {
-					e.cfg.OnEvent(Event{TS: time.Now(), Type: EventProgress, Detail: strings.Join(parts, "  ")})
+				if len(parts) == 0 {
+					continue
 				}
+				detail := strings.Join(parts, "  ")
+				// Only print on change (or as a rare keepalive): an unchanged
+				// line every tick is noise, not signal.
+				if detail == lastDetail && time.Since(lastPrint) < heartbeatKeepalive {
+					continue
+				}
+				lastDetail = detail
+				lastPrint = time.Now()
+				e.cfg.OnEvent(Event{TS: time.Now(), Type: EventProgress, Detail: detail})
 			}
 		}
 	}()
 	return cancel
+}
+
+// heartbeatKeepalive bounds the silence between identical heartbeats.
+const heartbeatKeepalive = 30 * time.Second
+
+// heartbeatLabel names a worker in the heartbeat line: the task id from the
+// engine's call-ID scheme (tg:<task>:e<n>/r<n>) plus the agent type, so two
+// parallel coders are distinguishable.
+func heartbeatLabel(callID, agent string) string {
+	parts := strings.Split(callID, ":")
+	if len(parts) == 3 && parts[0] == "tg" {
+		role := "exec"
+		if strings.HasPrefix(parts[2], "r") {
+			role = "review"
+		}
+		return parts[1] + " " + role + "·" + agent
+	}
+	return agent
 }
 
 // readyTasks returns pending tasks whose deps are all done.

@@ -411,3 +411,17 @@ func TestEngineHeartbeatStreamsChildProgress(t *testing.T) {
 		t.Fatalf("heartbeat detail: %q", progress[0])
 	}
 }
+
+func TestHeartbeatLabel(t *testing.T) {
+	cases := []struct{ callID, agent, want string }{
+		{"tg:T3:e2", "coder", "T3 exec·coder"},
+		{"tg:T3:r1", "reviewer", "T3 review·reviewer"},
+		{"call-7", "coder", "coder"},
+		{"", "tester", "tester"},
+	}
+	for _, c := range cases {
+		if got := heartbeatLabel(c.callID, c.agent); got != c.want {
+			t.Fatalf("heartbeatLabel(%q,%q) = %q, want %q", c.callID, c.agent, got, c.want)
+		}
+	}
+}

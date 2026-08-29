@@ -307,7 +307,9 @@ func (a *taskGraphAdapter) execute(ctx context.Context, g *taskgraph.Graph, stor
 		Logger: a.logger,
 	}
 	if onOutput != nil {
-		cfg.OnEvent = func(ev taskgraph.Event) { onOutput(taskgraph.FormatEvent(ev) + "\n") }
+		// No trailing newline: the stream renderer prints one line per
+		// callback and an extra \n renders as a blank spacer line.
+		cfg.OnEvent = func(ev taskgraph.Event) { onOutput(taskgraph.FormatEvent(ev)) }
 	}
 
 	engine, err := taskgraph.NewEngine(g, store, cfg)
