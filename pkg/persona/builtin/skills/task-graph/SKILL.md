@@ -67,10 +67,25 @@ Rules that matter:
 - `require_review` (graph or per task) defaults to **true**. Waive it only for trivial
   mechanical tasks, and say so in the delivery summary.
 
+## Invoking with a real graph: file first
+
+Inline `graph` args longer than ~2KB get **truncated by output-token limits**
+("Args parsing error: unexpected end of JSON input"). For any real graph, write the
+plan to a file and run from it — two calls, zero truncation risk:
+
+```
+<tool_call name="@coder" args='{"cmd":"write","args":{"file":"/tmp/plan.json","encoding":"base64","content":"<base64 of the plan JSON>"}}' />
+<tool_call name="@taskgraph" args='{"cmd":"run","args":{"file":"/tmp/plan.json"}}' />
+```
+
+The file may hold the bare plan object, `{"graph":{...}}`, or the full envelope —
+all three parse. Keep the inline form only for tiny graphs.
+
 ## Subcommands
 
 ```
-{"cmd":"run","args":{"graph":{...}}}     plan + execute in one call (streams progress)
+{"cmd":"run","args":{"file":"/tmp/plan.json"}}  run a plan from a file (RECOMMENDED)
+{"cmd":"run","args":{"graph":{...}}}     plan + execute in one call (small graphs only)
 {"cmd":"run","args":{"id":"tg-..."}}     run/resume a persisted plan (also resumes after failures)
 {"cmd":"plan","args":{"graph":{...}}}    validate + persist only (returns the run id)
 {"cmd":"status"}                         per-task status, attempts, verdicts, cost
