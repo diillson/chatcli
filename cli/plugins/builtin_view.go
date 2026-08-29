@@ -154,7 +154,21 @@ func parseViewInvocation(args []string) (string, error) {
 	if strings.EqualFold(args[0], "view") {
 		rest = args[1:]
 	}
-	if len(rest) == 0 || strings.TrimSpace(rest[0]) == "" {
+	// The agent loop flattens {"cmd":"view","args":{"file":X}} into argv
+	// ["view","--file",X]; pull the value out of the --file/--path/--image
+	// flag so it is not mistaken for a literal path like "--file X".
+	for i := 0; i < len(rest); i++ {
+		a := rest[i]
+		for _, fl := range []string{"--file", "--path", "--image"} {
+			if a == fl && i+1 < len(rest) {
+				return strings.TrimSpace(rest[i+1]), nil
+			}
+			if v, ok := strings.CutPrefix(a, fl+"="); ok && strings.TrimSpace(v) != "" {
+				return strings.TrimSpace(v), nil
+			}
+		}
+	}
+	if len(rest) == 0 || strings.TrimSpace(rest[0]) == "" || strings.HasPrefix(rest[0], "--") {
 		return "", errors.New("@view: missing file path")
 	}
 	return strings.TrimSpace(strings.Join(rest, " ")), nil

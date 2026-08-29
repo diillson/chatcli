@@ -127,3 +127,45 @@ func argvInner(tail []string, primaryKey string, arrayKeys, intKeys map[string]b
 	}
 	return inner
 }
+
+// splitFlatArgs generically parses the flag-style argv tail the agent produces
+// from a flattened {cmd,args} envelope: "--key value" and "--key=value" pairs
+// become entries in flags (lowercased keys), a "--key" with no following value
+// becomes a true entry in bools, and bare tokens accumulate in positionals.
+// Shared by the hand-rolled tool parsers (@browser, @forge) so their command
+// mappers stay small — a flag they do not recognize is preserved in the map
+// rather than mistaken for a positional value.
+func splitFlatArgs(rest []string) (flags map[string]string, bools map[string]bool, positionals []string) {
+	flags = map[string]string{}
+	bools = map[string]bool{}
+	for i := 0; i < len(rest); i++ {
+		a := rest[i]
+		if !strings.HasPrefix(a, "--") {
+			positionals = append(positionals, a)
+			continue
+		}
+		name := strings.TrimPrefix(a, "--")
+		if eq := strings.IndexByte(name, '='); eq >= 0 {
+			flags[strings.ToLower(name[:eq])] = name[eq+1:]
+			continue
+		}
+		key := strings.ToLower(name)
+		if i+1 < len(rest) && !strings.HasPrefix(rest[i+1], "--") {
+			flags[key] = rest[i+1]
+			i++
+		} else {
+			bools[key] = true
+		}
+	}
+	return flags, bools, positionals
+}
+
+// firstFlag returns the first present value among keys, or "".
+func firstFlag(flags map[string]string, keys ...string) string {
+	for _, k := range keys {
+		if v, ok := flags[k]; ok {
+			return v
+		}
+	}
+	return ""
+}

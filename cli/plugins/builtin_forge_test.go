@@ -258,3 +258,25 @@ func TestForge_DescribeCallAndMeta(t *testing.T) {
 		t.Fatal("concurrency caps must mirror read-only")
 	}
 }
+
+func TestForge_FlattenedEnvelopeArgv(t *testing.T) {
+	// The agent loop flattens {"cmd":"pr-view","args":{"number":42}} to
+	// ["pr-view","--number","42"] — number/run must not become the target.
+	inv, err := parseForgeInvocation([]string{"pr-view", "--number", "42"})
+	if err != nil || inv.number != "42" {
+		t.Fatalf("flattened pr-view number: %q (%v)", inv.number, err)
+	}
+	inv, _ = parseForgeInvocation([]string{"ci-logs", "--run", "9987"})
+	if inv.run != "9987" {
+		t.Fatalf("flattened ci-logs run: %q", inv.run)
+	}
+	inv, _ = parseForgeInvocation([]string{"pr-comment", "--number=7", "--body", "hi"})
+	if inv.number != "7" || inv.body != "hi" {
+		t.Fatalf("flattened pr-comment: %+v", inv)
+	}
+	// Positional still works.
+	inv, _ = parseForgeInvocation([]string{"pr", "view", "5"})
+	if inv.number != "5" {
+		t.Fatalf("positional pr view regressed: %q", inv.number)
+	}
+}

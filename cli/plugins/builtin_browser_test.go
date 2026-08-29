@@ -321,3 +321,43 @@ func TestBrowserDescribeCallAndMeta(t *testing.T) {
 		}
 	}
 }
+
+// TestParseBrowserInvocation_FlattenedEnvelopeArgv reproduces the real agent
+// bug: the loop flattens {"cmd":"open","args":{"url":X}} into argv
+// ["open","--url",X], which the strict parser mistook for the URL "--url".
+func TestParseBrowserInvocation_FlattenedEnvelopeArgv(t *testing.T) {
+	url := "file:///tmp/form.html"
+	inv, err := parseBrowserInvocation([]string{"open", "--url", url})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if inv.cmd != "open" || inv.url != url {
+		t.Fatalf("flattened open broke: cmd=%q url=%q (want open/%q)", inv.cmd, inv.url, url)
+	}
+
+	inv, _ = parseBrowserInvocation([]string{"click", "--target", "3"})
+	if inv.target != "3" {
+		t.Fatalf("flattened click target: %q", inv.target)
+	}
+	inv, _ = parseBrowserInvocation([]string{"type", "--target", "2", "--text", "golang", "--submit"})
+	if inv.target != "2" || inv.text != "golang" || !inv.submit {
+		t.Fatalf("flattened type: %+v", inv)
+	}
+	inv, _ = parseBrowserInvocation([]string{"eval", "--js", "document.title"})
+	if inv.js != "document.title" {
+		t.Fatalf("flattened eval js: %q", inv.js)
+	}
+	inv, _ = parseBrowserInvocation([]string{"scroll", "--direction", "down"})
+	if inv.dir != "down" {
+		t.Fatalf("flattened scroll dir: %q", inv.dir)
+	}
+	inv, _ = parseBrowserInvocation([]string{"screenshot", "--file", "/tmp/s.png"})
+	if inv.file != "/tmp/s.png" {
+		t.Fatalf("flattened screenshot file: %q", inv.file)
+	}
+	// Bare positional still works (open example.com).
+	inv, _ = parseBrowserInvocation([]string{"open", "example.com"})
+	if inv.url != "example.com" {
+		t.Fatalf("positional open regressed: %q", inv.url)
+	}
+}
