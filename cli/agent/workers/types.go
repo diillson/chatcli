@@ -36,6 +36,10 @@ type AgentCall struct {
 	Task  string    // natural language task description
 	ID    string    // unique call ID for tracking
 	Raw   string    // raw XML for logging/debugging
+	// Plugins is the optional per-task session-plugin grant. A POINTER on
+	// purpose: AgentCall must stay comparable (Floor 13 treats losing
+	// comparability as a breaking API change).
+	Plugins *PluginGrant
 }
 
 // AgentResult is the output of a single agent execution.

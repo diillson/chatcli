@@ -26,6 +26,7 @@ import (
 	"time"
 
 	"github.com/diillson/chatcli/cli/agent/quality"
+	"github.com/diillson/chatcli/cli/agent/workers"
 )
 
 // Status is the lifecycle state of a task (and, at run level, of the graph).
@@ -140,6 +141,9 @@ type Task struct {
 	Validation    ValidationList `json:"validation,omitempty"`
 	RequireReview *bool          `json:"require_review,omitempty"` // nil = inherit graph default
 	MaxAttempts   int            `json:"max_attempts,omitempty"`   // default defaultMaxAttempts
+	// Tools grants the EXECUTOR worker session plugins for this task
+	// (@browser, @websearch, mcp_*). Opt-in; the reviewer never gets them.
+	Tools []string `json:"tools,omitempty"`
 
 	// Runtime state — owned by the engine, persisted with the graph.
 	Status    Status    `json:"status,omitempty"`
@@ -229,6 +233,9 @@ func (g *Graph) Normalize() {
 		t.Agent = strings.ToLower(strings.TrimSpace(t.Agent))
 		if t.Agent == "" {
 			t.Agent = "coder"
+		}
+		if len(t.Tools) > 0 {
+			t.Tools = workers.NormalizePluginGrant(t.Tools)
 		}
 		if strings.TrimSpace(t.Title) == "" {
 			t.Title = firstLine(t.Prompt)

@@ -30,6 +30,10 @@ type resolvedToolCall struct {
 	RawArgs    string                 // original args string for display/logging
 	Native     bool                   // true if from native function calling
 	NativeArgs map[string]interface{} // structured args (native only)
+	// pluginName is the canonical grant ("@browser", "mcp_x") when this
+	// call targets a granted session plugin; empty otherwise. Set during
+	// resolution so classification, policy and execution route on it.
+	pluginName string
 }
 
 // validatedTC is a resolved tool call after policy/allowlist classification.
@@ -54,7 +58,10 @@ type WorkerReActConfig struct {
 	MaxTurns        int
 	SystemPrompt    string
 	AllowedCommands []string // which @coder subcommands this worker can use
-	ReadOnly        bool     // if true, only read/search/tree/git-read allowed
+	// PluginTools are per-task session-plugin grants (canonical names, see
+	// NormalizePluginGrant). Usually injected from the dispatch context.
+	PluginTools []string
+	ReadOnly    bool // if true, only read/search/tree/git-read allowed
 }
 
 // DefaultWorkerMaxTurns is the default maximum number of ReAct turns per worker.
@@ -90,6 +97,16 @@ func RunWorkerReAct(
 	liveRun := runs.FromContext(ctx)
 
 	maxTurns := resolveWorkerMaxTurns(config)
+
+	// Per-task plugin grants ride the dispatch context so every agent type
+	// inherits them without signature changes. Read-only workers never
+	// receive grants: their contract is inspection, and plugin side effects
+	// (@browser click, @forge create) would bypass isWriteCommand.
+	if !config.ReadOnly {
+		if grant := grantFromContext(ctx); len(grant) > 0 {
+			config.PluginTools = NormalizePluginGrant(append(append([]string{}, config.PluginTools...), grant...))
+		}
+	}
 
 	// Detect if we can use native function calling
 	toolAware, useNativeTools := client.AsToolAware(llmClient)
@@ -140,6 +157,11 @@ func RunWorkerReAct(
 	// Universal CCR recall (see RecallToolDefinition) — only when wired.
 	if currentCCRRecaller() != nil {
 		allowed[recallSubcmd] = true
+	}
+	// Granted session plugins (resolution canonicalizes both native and XML
+	// calls to the def name — see resolveToolCalls).
+	for _, grant := range config.PluginTools {
+		allowed[pluginDefName(grant)] = true
 	}
 
 	// Worker-loop microcompact: long runs (up to maxTurns) accumulate tool
@@ -199,7 +221,7 @@ func RunWorkerReAct(
 		history = newHistory
 
 		// --- Resolve tool calls to unified format ---
-		resolved, parseErrRecords := resolveToolCalls(useNativeTools, nativeToolCalls, responseText, turn)
+		resolved, parseErrRecords := resolveToolCalls(useNativeTools, nativeToolCalls, responseText, turn, config.PluginTools)
 		allToolCalls = append(allToolCalls, parseErrRecords...)
 
 		if len(resolved) == 0 {
@@ -353,6 +375,8 @@ func buildWorkerToolDefs(config WorkerReActConfig) []models.ToolDefinition {
 	if currentCCRRecaller() != nil {
 		toolDefs = append(toolDefs, RecallToolDefinition())
 	}
+	// Per-task plugin grants (nil without a registered runner+definer).
+	toolDefs = append(toolDefs, PluginToolDefinitionsFor(config.PluginTools)...)
 	return toolDefs
 }
 
@@ -367,6 +391,12 @@ func buildWorkerSystemPrompt(config WorkerReActConfig, useNativeTools bool, task
 		// XML mode keeps the specialist prompt and gains the same
 		// context-navigation guidance native mode embeds.
 		systemPrompt += "\n\n" + workerContextGuidance
+	}
+
+	// Granted session plugins: name them so the model knows the surface
+	// exists (definitions alone are easy to overlook mid-task).
+	if len(config.PluginTools) > 0 {
+		systemPrompt += "\n\n" + grantedPluginsPromptHeader + strings.Join(config.PluginTools, ", ") + grantedPluginsPromptUsage
 	}
 
 	// Proactive recall: give the worker the same [MEMORY AUTO-RECALL] /
@@ -454,6 +484,11 @@ func executeToolCall(ctx context.Context, v validatedTC, lockMgr *FileLockManage
 	}
 	if isContextToolSubcmd(v.rtc.Subcmd) {
 		return executeContextTool(ctx, v)
+	}
+	// Granted session plugins (policy already checked above — plugin calls
+	// are never in isPolicyExemptSubcmd).
+	if v.rtc.pluginName != "" {
+		return executePluginTool(ctx, v)
 	}
 
 	filePath := extractFilePathFromResolved(v.rtc)
@@ -585,7 +620,7 @@ func executeDelegate(ctx context.Context, v validatedTC) execResult {
 // into the unified resolvedToolCall representation. It returns the resolved
 // calls plus any ToolCallRecords for parse failures that the caller should
 // append to its running log.
-func resolveToolCalls(useNativeTools bool, nativeToolCalls []models.ToolCall, responseText string, turn int) ([]resolvedToolCall, []ToolCallRecord) {
+func resolveToolCalls(useNativeTools bool, nativeToolCalls []models.ToolCall, responseText string, turn int, pluginTools []string) ([]resolvedToolCall, []ToolCallRecord) {
 	var resolved []resolvedToolCall
 	var parseErrRecords []ToolCallRecord
 
@@ -594,6 +629,11 @@ func resolveToolCalls(useNativeTools bool, nativeToolCalls []models.ToolCall, re
 			subcmd, found := NativeToolNameToSubcmd(ntc.Name)
 			if !found {
 				subcmd = ntc.Name
+			}
+			pluginName := ""
+			if grant, ok := pluginGrantForName(pluginTools, ntc.Name); ok {
+				pluginName = grant
+				subcmd = pluginDefName(grant)
 			}
 			flags := NativeToolArgsToFlags(subcmd, ntc.Arguments)
 			argsJSON, _ := json.Marshal(ntc.Arguments)
@@ -606,6 +646,7 @@ func resolveToolCalls(useNativeTools bool, nativeToolCalls []models.ToolCall, re
 				RawArgs:    string(argsJSON),
 				Native:     true,
 				NativeArgs: ntc.Arguments,
+				pluginName: pluginName,
 			})
 		}
 	} else if !useNativeTools {
@@ -617,13 +658,21 @@ func resolveToolCalls(useNativeTools bool, nativeToolCalls []models.ToolCall, re
 				parseErrRecords = append(parseErrRecords, ToolCallRecord{Name: tc.Name, Args: tc.Args, Error: parseErr})
 				continue
 			}
-			resolved = append(resolved, resolvedToolCall{
+			rtc := resolvedToolCall{
 				ID:      fmt.Sprintf("xml_%d", turn),
 				Name:    tc.Name,
 				Subcmd:  subcmd,
 				Args:    args,
 				RawArgs: tc.Args,
-			})
+			}
+			// XML mode keeps the plugin identity in tc.Name ("@browser") —
+			// the envelope's inner cmd landed in Subcmd and would otherwise
+			// be blocked by the allowlist.
+			if grant, ok := pluginGrantForName(pluginTools, tc.Name); ok {
+				rtc.pluginName = grant
+				rtc.Subcmd = pluginDefName(grant)
+			}
+			resolved = append(resolved, rtc)
 		}
 	}
 
@@ -757,6 +806,13 @@ func isPolicyExemptSubcmd(subcmd string) bool {
 // subcommand, so rules like "@coder exec" never matched and the read-only
 // exec auto-allow never fired (every worker exec degraded to "ask").
 func policyCallSurface(rtc resolvedToolCall) (string, string) {
+	// Granted plugin calls surface under their REAL name so user rules
+	// ("@browser eval"), the read-only capability auto-allow and safety
+	// immunity all match — canonicalizing them to "@coder" would show the
+	// wrong prompt and consult the wrong rules.
+	if rtc.pluginName != "" {
+		return rtc.pluginName, pluginEnvelopeJSON(rtc)
+	}
 	if !rtc.Native {
 		return rtc.Name, rtc.RawArgs
 	}

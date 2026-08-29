@@ -348,6 +348,9 @@ func (d *Dispatcher) executeAgent(ctx context.Context, call AgentCall) AgentResu
 	// meaningful context (agent name, task description) in security prompts.
 	agentCtx := context.WithValue(ctx, CtxKeyAgentName, string(call.Agent))
 	agentCtx = context.WithValue(agentCtx, CtxKeyAgentTask, call.Task)
+	if call.Plugins != nil && len(call.Plugins.Plugins) > 0 {
+		agentCtx = context.WithValue(agentCtx, CtxKeyPluginGrant, call.Plugins)
+	}
 
 	// Attach effort hint to ctx (no-op when agent.Effort() is empty).
 	if effort := client.NormalizeEffort(agent.Effort()); effort != client.EffortUnset {

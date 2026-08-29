@@ -154,6 +154,10 @@ async function tick() {
     renderHeader(g);
     if ($('results').style.display !== 'none') renderResults(g);
     if (state.fitPending) { fit(); state.fitPending = false; }
+    // Always repaint on fresh state: the rAF loop only animates while tasks
+    // are active, so without this the final transition (last task → done)
+    // would stay invisible until a manual reload.
+    draw();
     const ev = await fetchJSON('/api/events?run=' + encodeURIComponent(state.run) + '&since=' + state.eventsNext);
     if (ev.events && ev.events.length) {
       state.eventsNext = ev.next;
