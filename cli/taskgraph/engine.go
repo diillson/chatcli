@@ -37,6 +37,10 @@ type Event struct {
 
 // Event types emitted by the engine.
 const (
+	// EventProgress is a TRANSIENT heartbeat (streamed, never persisted):
+	// which workers are alive, their turn and current action — so a long
+	// executor loop never reads as a frozen terminal.
+	EventProgress      = "progress"
 	EventRunStarted    = "run_started"
 	EventTaskStarted   = "task_started"
 	EventGateResult    = "gate_result"
@@ -206,6 +210,9 @@ func (e *Engine) Run(ctx context.Context) (string, error) {
 	e.mu.Unlock()
 	e.emit(Event{Type: EventRunStarted, Detail: e.graph.Name})
 
+	stopHeartbeat := e.startHeartbeat(regCtx, liveRun.ID())
+	defer stopHeartbeat()
+
 	type doneMsg struct{ id string }
 	doneCh := make(chan doneMsg)
 	inFlight := 0
@@ -255,6 +262,46 @@ func (e *Engine) Run(ctx context.Context) (string, error) {
 		return report, fmt.Errorf("task graph run canceled: %w", err)
 	}
 	return report, nil
+}
+
+// heartbeatInterval paces the transient worker-progress stream (var: test seam).
+var heartbeatInterval = 5 * time.Second
+
+// startHeartbeat polls the run registry for this run's live children and
+// streams a transient progress line while any are active. Polling (instead
+// of Registry.OnEvent) is deliberate: the registry has a single observer
+// slot and the hub bridge owns it.
+func (e *Engine) startHeartbeat(ctx context.Context, parentRunID string) func() {
+	if e.cfg.OnEvent == nil || parentRunID == "" {
+		return func() {}
+	}
+	hbCtx, cancel := context.WithCancel(ctx)
+	go func() {
+		ticker := time.NewTicker(heartbeatInterval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-hbCtx.Done():
+				return
+			case <-ticker.C:
+				var parts []string
+				for _, child := range runs.Default().Children(parentRunID) {
+					line := fmt.Sprintf("[%s]", child.Agent)
+					if child.Turn > 0 {
+						line += fmt.Sprintf(" turn %d/%d", child.Turn, child.MaxTurns)
+					}
+					if child.Action != "" {
+						line += " · " + child.Action
+					}
+					parts = append(parts, line)
+				}
+				if len(parts) > 0 {
+					e.cfg.OnEvent(Event{TS: time.Now(), Type: EventProgress, Detail: strings.Join(parts, "  ")})
+				}
+			}
+		}
+	}()
+	return cancel
 }
 
 // readyTasks returns pending tasks whose deps are all done.
