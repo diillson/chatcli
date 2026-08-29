@@ -1,5 +1,27 @@
 # Changelog
 
+## [1.192.0](https://github.com/diillson/chatcli/compare/v1.191.0...v1.192.0) (2026-08-29)
+
+
+### Features
+
+* **agent:** doom-loop guard for identical repeated successful tool calls ([#1399](https://github.com/diillson/chatcli/issues/1399)) ([407d3a4](https://github.com/diillson/chatcli/commit/407d3a4d53eb7469fd52de8c792c60980bc8bf10))
+* **browser:** [@browser](https://github.com/browser) — Chrome real via DevTools protocol, zero deps novas ([#1397](https://github.com/diillson/chatcli/issues/1397)) ([0301946](https://github.com/diillson/chatcli/commit/0301946d269f55fb4d6da0ca88ea6b50f6f1268f))
+* **coder:** outline e map — orientação estrutural sem ler arquivos inteiros ([#1400](https://github.com/diillson/chatcli/issues/1400)) ([41fad0a](https://github.com/diillson/chatcli/commit/41fad0afa52b1cb2c77c717daded513a7eb94b1f))
+* **coder:** post-edit diagnostics injected into the tool result ([#1396](https://github.com/diillson/chatcli/issues/1396)) ([9fe3526](https://github.com/diillson/chatcli/commit/9fe3526a7f623ec53fbfecb70192154b45a18028))
+* **coder:** sandbox opt-in de exec no OS — macOS, Linux, degrade nos demais ([#1404](https://github.com/diillson/chatcli/issues/1404)) ([59ea1b9](https://github.com/diillson/chatcli/commit/59ea1b99ad9e9920ae7d8c0af8535bdb35048d19))
+* **coder:** shadow-git checkpoints with automatic snapshots and restore ([#1403](https://github.com/diillson/chatcli/issues/1403)) ([6927b13](https://github.com/diillson/chatcli/commit/6927b1365ffd3a9008964f92079c7a5c35344a07))
+* **forge:** [@forge](https://github.com/forge) — PRs, issues e CI via gh/glab autenticados ([#1398](https://github.com/diillson/chatcli/issues/1398)) ([89413c6](https://github.com/diillson/chatcli/commit/89413c63d6a6deb38ade823dfa6e6cc4401c46aa))
+* **proc:** interactive pseudo-terminal sessions with stdin driving ([#1401](https://github.com/diillson/chatcli/issues/1401)) ([7de0eb4](https://github.com/diillson/chatcli/commit/7de0eb48bc1ad1673c4727d0686650b5ac4af84a))
+* **skills:** activation and memory parity across every surface + parser describe-leak fix ([#1395](https://github.com/diillson/chatcli/issues/1395)) ([ff1bc22](https://github.com/diillson/chatcli/commit/ff1bc22a87f8b7dd4ea9e65abf03ab932f8b07bd))
+* **view:** [@view](https://github.com/view) — o agente enxerga imagens locais no meio da tarefa ([#1402](https://github.com/diillson/chatcli/issues/1402)) ([700115a](https://github.com/diillson/chatcli/commit/700115a5eeb77124c4631d5b90573da0ca86fe44))
+
+
+### Bug Fixes
+
+* **tools:** [@tools](https://github.com/tools) describe now renders @browser/@forge/[@view](https://github.com/view) subcommands ([#1408](https://github.com/diillson/chatcli/issues/1408)) ([5333de4](https://github.com/diillson/chatcli/commit/5333de4096fb2c54ac2b4a0456e27d5a1a0d2a5a))
+* **tools:** honor flattened --flag args in @browser/@forge/[@view](https://github.com/view) parsers ([#1407](https://github.com/diillson/chatcli/issues/1407)) ([f0d3ac4](https://github.com/diillson/chatcli/commit/f0d3ac463abdaf66fe7c7e7b7e691c4c379e376b))
+
 ## [1.191.0](https://github.com/diillson/chatcli/compare/v1.190.1...v1.191.0) (2026-08-27)
 
 
