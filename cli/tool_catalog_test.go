@@ -127,3 +127,27 @@ func TestFirstSentenceBounds(t *testing.T) {
 		t.Fatalf("unterminated description not bounded: %d bytes", len(got))
 	}
 }
+
+// TestNewToolsRenderSubcommands guards the Schema contract: @tools describe
+// renders a plugin's subcommands only when its Schema() uses the "subcommands"
+// key. The first cut of @browser/@forge/@view used "commands", so describe
+// showed an empty subcommand list and the model could not learn the format.
+func TestNewToolsRenderSubcommands(t *testing.T) {
+	cases := []struct {
+		p    plugins.Plugin
+		want string // a subcommand that must appear in the rendered block
+	}{
+		{plugins.NewBuiltinBrowserPlugin(), "open"},
+		{plugins.NewBuiltinForgePlugin(), "pr-view"},
+		{plugins.NewBuiltinViewPlugin(), "view"},
+	}
+	for _, tc := range cases {
+		block := renderToolBlock(tc.p, false)
+		if !strings.Contains(block, "Subcomandos Disponíveis") {
+			t.Fatalf("%s: describe block has no subcommand section:\n%s", tc.p.Name(), block)
+		}
+		if !strings.Contains(block, tc.want) {
+			t.Fatalf("%s: describe block missing subcommand %q — Schema() likely uses \"commands\" not \"subcommands\":\n%s", tc.p.Name(), tc.want, block)
+		}
+	}
+}
