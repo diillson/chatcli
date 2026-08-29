@@ -3606,7 +3606,7 @@
   "plugins.taskgraph.describe_retry": "Retrying task graph task %s",
   "plugins.taskgraph.describe_cancel": "Canceling the active task graph run",
   "plugins.taskgraph.describe_status": "Inspecting task graph state",
-  "help.command.taskgraph": "Task graph runs: status [id], show <task> [id], list, dash, cancel",
+  "help.command.taskgraph": "Task graph runs: status [id], show <task> [id], list, dash, prune, cancel",
   "complete.taskgraph.status": "Current run state: per-task status, verdicts, cost",
   "complete.taskgraph.show": "One task in full: attempts, gate outputs, evidence",
   "complete.taskgraph.list": "List persisted runs, newest first",
@@ -3616,9 +3616,11 @@
   "taskgraph.task.missing": "Missing task ID (e.g. /taskgraph show T3)",
   "taskgraph.subcommand.unknown": "Unknown subcommand %s",
   "taskgraph.usage.title": "/taskgraph — observe task graph runs",
-  "taskgraph.usage.body": "status [id] · show <task> [id] · list · dash [id] · cancel — runs are created and executed by the model via @taskgraph; tasks only count as done after the engine's validation gate and an independent reviewer verdict.",
+  "taskgraph.usage.body": "status [id] · show <task> [id] · list · dash [id] · prune [30d|all] · cancel — runs are created and executed by the model via @taskgraph; tasks only count as done after the engine's validation gate and an independent reviewer verdict.",
   "cfg.section.taskgraph.title": "Task graph (@taskgraph)",
   "cfg.taskgraph.about": "Executes approved multi-task plans as a DAG: parallel squad workers, engine-run validation gates, independent reviewer verdicts. No dedicated envs — parallelism reuses CHATCLI_AGENT_MAX_WORKERS and review is set per plan (require_review, default true). Watch runs with /taskgraph or the live browser dashboard (/taskgraph dash).",
   "complete.taskgraph.dash": "Open the live browser dashboard (animated DAG, evidence, cost)",
-  "plugins.taskgraph.describe_dash": "Serving the task graph dashboard"
+  "plugins.taskgraph.describe_dash": "Serving the task graph dashboard",
+  "complete.taskgraph.prune": "Remove old runs (default 30d; \"all\" clears everything but the active run)",
+  "plugins.taskgraph.describe_prune": "Pruning old task graph runs"
 }

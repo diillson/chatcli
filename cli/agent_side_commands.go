@@ -54,16 +54,40 @@ func isSideCommand(line string) bool {
 // turn boundary when no live display is active (e.g. a security prompt
 // owns the terminal — printing into its card would corrupt it).
 func (a *AgentMode) onSideCommand(ctx context.Context, line string) {
-	timer := a.turnTimer
-	if timer != nil && timer.IsRunning() {
-		timer.Pause()
-		func() {
+	// runNow pauses a live display (nested-pause safe), prints and executes.
+	runNow := func() {
+		timer := a.turnTimer
+		if timer != nil && timer.IsRunning() {
+			timer.Pause()
 			// Resume via defer: with nested pause depths, a handler that
 			// panics mid-print must not leave the display frozen forever.
 			defer timer.Resume()
-			fmt.Println(colorize("  ⚡ "+line, ColorCyan))
-			a.execSideCommand(ctx, line)
-		}()
+		}
+		fmt.Println(colorize("  ⚡ "+line, ColorCyan))
+		a.execSideCommand(ctx, line)
+	}
+
+	// Execute now under the prompt gate so the output serializes with both
+	// streamed tool lines and worker security prompts (a graph run streams
+	// for minutes — a silently queued command reads as a dead keyboard).
+	// The gate is taken with TryLock, NEVER a blocking lock: this runs on
+	// the stdin reader goroutine, and a security prompt holds the gate
+	// while waiting for a line only this goroutine can deliver.
+	if pa := a.policyAdapter; pa != nil {
+		if pa.tryPromptGate(runNow) {
+			return
+		}
+		// Gate contended (a security prompt owns the screen and the
+		// keyboard): queue for the turn boundary, as before.
+		a.sideCmdMu.Lock()
+		a.sideCmdQueue = append(a.sideCmdQueue, line)
+		a.sideCmdMu.Unlock()
+		return
+	}
+
+	// No policy adapter wired (tests, minimal sessions): pre-gate behavior.
+	if timer := a.turnTimer; timer != nil && timer.IsRunning() {
+		runNow()
 		return
 	}
 	a.sideCmdMu.Lock()

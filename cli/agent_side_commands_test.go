@@ -9,6 +9,7 @@ import (
 	"context"
 	"strings"
 	"testing"
+	"time"
 )
 
 // TestIsSideCommand pins the mid-run allowlist: observation commands match
@@ -119,5 +120,46 @@ func TestSideCommandRootsRouteSafely(t *testing.T) {
 		case "/agent", "/coder", "/run", "/plan", "/exit":
 			t.Errorf("mode-switch command %q must never be side-runnable", root)
 		}
+	}
+}
+
+// TestOnSideCommandExecutesImmediatelyUnderFreeGate pins the streaming-run
+// responsiveness fix: with no live display but a free prompt gate, the
+// command runs NOW (serialized with stream output); with the gate held by a
+// security prompt, it queues — and never blocks the caller, because this
+// path runs on the stdin reader goroutine the prompt depends on.
+func TestOnSideCommandExecutesImmediatelyUnderFreeGate(t *testing.T) {
+	var executed []string
+	pa := &workerPolicyAdapter{}
+	a := &AgentMode{
+		policyAdapter: pa,
+		sideCmdExec:   func(line string) { executed = append(executed, line) },
+	}
+	ctx := context.Background()
+
+	a.onSideCommand(ctx, "/taskgraph status")
+	if len(executed) != 1 || executed[0] != "/taskgraph status" {
+		t.Fatalf("free gate must execute immediately, got %v", executed)
+	}
+
+	// Gate held (a prompt on screen): must queue without blocking.
+	pa.mu.Lock()
+	done := make(chan struct{})
+	go func() {
+		a.onSideCommand(ctx, "/agents")
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("onSideCommand must never block on a held prompt gate")
+	}
+	pa.mu.Unlock()
+	if len(executed) != 1 {
+		t.Fatalf("held gate must queue, not execute, got %v", executed)
+	}
+	a.applySideCommands(ctx)
+	if len(executed) != 2 || executed[1] != "/agents" {
+		t.Fatalf("queued command must run at the boundary, got %v", executed)
 	}
 }

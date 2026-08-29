@@ -65,10 +65,21 @@ func resolveShell() (shell, flag string) {
 	return `C:\Windows\System32\cmd.exe`, "/C"
 }
 
+// registerDirAliases makes the working-directory flag lenient: models keep
+// inventing --workingDir/--workdir/--cwd spellings, and a strict parser
+// turns each one into a failed call plus a retry loop. All aliases write
+// into the same destination; the last one parsed wins.
+func registerDirAliases(fs *flag.FlagSet, dir *string) {
+	fs.Func("workingDir", "", func(v string) error { *dir = v; return nil })
+	fs.Func("workdir", "", func(v string) error { *dir = v; return nil })
+	fs.Func("cwd", "", func(v string) error { *dir = v; return nil })
+}
+
 func (e *Engine) handleExec(ctx context.Context, args []string) error {
 	fs := flag.NewFlagSet("exec", flag.ContinueOnError)
 	cmdStr := fs.String("cmd", "", "")
 	dir := fs.String("dir", "", "")
+	registerDirAliases(fs, dir)
 	timeout := fs.Int("timeout", 600, "")
 	allowUnsafe := fs.Bool("allow-unsafe", false, "")
 	allowSudo := fs.Bool("allow-sudo", false, "")
@@ -140,6 +151,7 @@ func (e *Engine) handleExec(ctx context.Context, args []string) error {
 func (e *Engine) handleTest(ctx context.Context, args []string) error {
 	fs := flag.NewFlagSet("test", flag.ContinueOnError)
 	dir := fs.String("dir", ".", "")
+	registerDirAliases(fs, dir)
 	cmd := fs.String("cmd", "", "")
 	timeout := fs.Int("timeout", 1800, "")
 	if err := parseFlags(fs, args); err != nil {

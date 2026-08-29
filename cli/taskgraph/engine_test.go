@@ -11,7 +11,9 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
+	"github.com/diillson/chatcli/cli/agent/runs"
 	"github.com/diillson/chatcli/cli/agent/workers"
 	"github.com/diillson/chatcli/models"
 )
@@ -364,5 +366,62 @@ func TestEngineCancelMidRun(t *testing.T) {
 	}
 	if g.Status != StatusFailed {
 		t.Fatalf("graph after cancel: %s", g.Status)
+	}
+}
+
+func TestEngineHeartbeatStreamsChildProgress(t *testing.T) {
+	old := heartbeatInterval
+	heartbeatInterval = 20 * time.Millisecond
+	defer func() { heartbeatInterval = old }()
+
+	g, store := testGraph(t, `{"name":"x","tasks":[{"id":"T1","prompt":"work"}]}`)
+	var mu sync.Mutex
+	var progress []string
+	e, err := NewEngine(g, store, Config{
+		Dispatcher: newFakeDispatcher(),
+		OnEvent: func(ev Event) {
+			if ev.Type == EventProgress {
+				mu.Lock()
+				progress = append(progress, ev.Detail)
+				mu.Unlock()
+			}
+		},
+	})
+	if err != nil {
+		t.Fatalf("NewEngine: %v", err)
+	}
+
+	parentCtx, parent := runs.Default().Begin(context.Background(), runs.Info{Kind: runs.KindTaskGraph, Agent: "taskgraph", Task: "hb"})
+	_, child := runs.Default().Begin(parentCtx, runs.Info{Kind: runs.KindWorker, Agent: "coder", Task: "t"})
+	child.SetTurn(3, 30)
+	child.SetAction("patch main.go")
+
+	stop := e.startHeartbeat(parentCtx, parent.ID())
+	time.Sleep(120 * time.Millisecond)
+	stop()
+	child.End(nil)
+	parent.End(nil)
+
+	mu.Lock()
+	defer mu.Unlock()
+	if len(progress) == 0 {
+		t.Fatal("heartbeat must stream progress while a child is live")
+	}
+	if !strings.Contains(progress[0], "[coder]") || !strings.Contains(progress[0], "turn 3/30") || !strings.Contains(progress[0], "patch main.go") {
+		t.Fatalf("heartbeat detail: %q", progress[0])
+	}
+}
+
+func TestHeartbeatLabel(t *testing.T) {
+	cases := []struct{ callID, agent, want string }{
+		{"tg:T3:e2", "coder", "T3 exec·coder"},
+		{"tg:T3:r1", "reviewer", "T3 review·reviewer"},
+		{"call-7", "coder", "coder"},
+		{"", "tester", "tester"},
+	}
+	for _, c := range cases {
+		if got := heartbeatLabel(c.callID, c.agent); got != c.want {
+			t.Fatalf("heartbeatLabel(%q,%q) = %q, want %q", c.callID, c.agent, got, c.want)
+		}
 	}
 }

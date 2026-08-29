@@ -29,6 +29,15 @@ import (
 	"go.uber.org/zap"
 )
 
+// queryInvokesTaskGraph reports whether the user explicitly asked for the
+// task-graph orchestrator ("@taskgraph", "taskgraph", "task graph").
+func queryInvokesTaskGraph(query string) bool {
+	lower := strings.ToLower(query)
+	return strings.Contains(lower, "@taskgraph") ||
+		strings.Contains(lower, "taskgraph") ||
+		strings.Contains(lower, "task graph")
+}
+
 // runPlanFirstIfApplicable checks the quality config and the one-shot
 // /plan flag, then optionally runs a structured Plan-and-Solve cycle.
 //
@@ -56,6 +65,17 @@ func (a *AgentMode) runPlanFirstIfApplicable(ctx context.Context, userQuery stri
 	dryRun := a.cli.pendingPlanDryRun
 	a.cli.pendingPlanFirst = false
 	a.cli.pendingPlanDryRun = false
+
+	// A query that explicitly asks for the task-graph orchestrator must not
+	// be hijacked by auto plan-first: @taskgraph carries its own plan,
+	// parallelism and verification (executor ≠ reviewer), and running the
+	// PlanRunner here would execute the work outside the graph — no gates,
+	// no verdicts, and a confusing "who did this?" for the user. An explicit
+	// /plan still wins (forced).
+	if !forced && !dryRun && queryInvokesTaskGraph(userQuery) {
+		a.logger.Info("Plan-First deferred to @taskgraph (explicitly requested in the query)")
+		return
+	}
 
 	if !forced && !dryRun && !quality.ShouldPlanFirst(a.qualityConfig.PlanFirst, userQuery) {
 		return

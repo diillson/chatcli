@@ -96,6 +96,31 @@ func (a *workerPolicyAdapter) resumeSpinner() {
 	}
 }
 
+// withPromptGate runs fn serialized on the same mutex the interactive
+// security prompts hold for their whole render-and-read lifetime. Live
+// stream output printed through it can never interleave with a prompt box
+// or pollute the line the user is typing the answer on; while a prompt is
+// on screen the printing goroutine simply waits.
+func (a *workerPolicyAdapter) withPromptGate(fn func()) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	fn()
+}
+
+// tryPromptGate is the non-blocking variant for callers that MUST NOT wait
+// on the gate — the stdin reader goroutine above all: a security prompt
+// holds the mutex while waiting for a line that only that goroutine can
+// deliver, so blocking there would deadlock the prompt forever. Returns
+// false (fn not run) when the gate is contended.
+func (a *workerPolicyAdapter) tryPromptGate(fn func()) bool {
+	if !a.mu.TryLock() {
+		return false
+	}
+	defer a.mu.Unlock()
+	fn()
+	return true
+}
+
 // buildSecurityContext extracts agent metadata from the context to provide
 // rich information in security prompts.
 func buildSecurityContext(ctx context.Context) *coder.SecurityContext {

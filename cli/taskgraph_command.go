@@ -63,6 +63,8 @@ func (cli *ChatCLI) handleTaskGraphCommand(userInput string) {
 		out, err = adapter.List()
 	case "dash", "dashboard", "ui":
 		out, err = adapter.Dash(arg)
+	case "prune", "gc":
+		out, err = adapter.Prune(arg)
 	case "cancel", "stop":
 		out, err = adapter.Cancel()
 	case "help":

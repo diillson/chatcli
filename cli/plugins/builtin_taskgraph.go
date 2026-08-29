@@ -22,6 +22,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync/atomic"
 )
@@ -52,6 +54,13 @@ type TaskGraphAdapter interface {
 // returns its URL, opening the browser when a TTY is present.
 type TaskGraphDashboarder interface {
 	Dash(runID string) (string, error)
+}
+
+// TaskGraphPruner is the OPTIONAL retention capability: remove persisted
+// runs older than a retention ("30d", "72h", "all"); the active run is
+// never removed.
+type TaskGraphPruner interface {
+	Prune(olderThan string) (string, error)
 }
 
 type taskGraphAdapterHolder struct{ a TaskGraphAdapter }
@@ -89,11 +98,11 @@ func (*BuiltinTaskGraphPlugin) Description() string {
 
 // Usage explains the canonical invocation forms.
 func (*BuiltinTaskGraphPlugin) Usage() string {
-	return `@taskgraph plan|run|status|show|retry|cancel|list|dash
+	return `@taskgraph plan|run|status|show|retry|cancel|list|dash|prune
 
 <tool_call name="@taskgraph" args='{"cmd":"run","args":{"graph":{"name":"my-feature","tasks":[{"id":"T1","title":"...","prompt":"...","validation":[{"run":"go test ./...","expect":"all green"}]},{"id":"T2","prompt":"...","deps":["T1"]}]}}}' />
 
-run executes the WHOLE graph (streamed); status/show/list inspect; retry re-opens a failed task; cancel stops the active run; dash serves the live browser dashboard.`
+For real graphs write the plan JSON to a file first and pass {"cmd":"run","args":{"file":"/tmp/plan.json"}} — long inline args get truncated. run executes the WHOLE graph (streamed); status/show/list inspect; retry re-opens a failed task; cancel stops the active run; dash serves the live browser dashboard.`
 }
 
 // Version returns the plugin contract version.
@@ -115,18 +124,20 @@ func (*BuiltinTaskGraphPlugin) Schema() string {
 				"name":        "plan",
 				"description": "Validate and persist a graph plan without executing (returns the run id).",
 				"flags": []map[string]interface{}{
-					{"name": "graph", "type": "object", "required": true, "description": graphDesc},
+					{"name": "graph", "type": "object", "required": false, "description": graphDesc},
+					{"name": "file", "type": "string", "required": false, "description": "path to a JSON file holding the plan — REQUIRED in practice for real graphs (long inline args get truncated); write the plan with @coder write first"},
 				},
-				"examples": []string{`{"cmd":"plan","args":{"graph":{"name":"feature-x","tasks":[{"id":"T1","prompt":"..."}]}}}`},
+				"examples": []string{`{"cmd":"plan","args":{"file":"/tmp/plan.json"}}`, `{"cmd":"plan","args":{"graph":{"name":"feature-x","tasks":[{"id":"T1","prompt":"..."}]}}}`},
 			},
 			{
 				"name":        "run",
 				"description": "Execute a graph to completion (streams progress; the call returns the final report). Give a graph to plan+run in one call, or an id to run/resume a persisted plan (latest when omitted).",
 				"flags": []map[string]interface{}{
-					{"name": "graph", "type": "object", "required": false, "description": graphDesc},
+					{"name": "file", "type": "string", "required": false, "description": "path to a JSON file holding the plan — the RELIABLE form for real graphs: write it with @coder write, then run with file (long inline args get truncated into 'unexpected end of JSON input')"},
+					{"name": "graph", "type": "object", "required": false, "description": graphDesc + " (inline form — only for small graphs)"},
 					{"name": "id", "type": "string", "required": false, "description": "run id from plan/list (default: latest)"},
 				},
-				"examples": []string{`{"cmd":"run","args":{"graph":{"name":"feature-x","tasks":[...]}}}`, `{"cmd":"run","args":{"id":"tg-20260829-153000"}}`},
+				"examples": []string{`{"cmd":"run","args":{"file":"/tmp/plan.json"}}`, `{"cmd":"run","args":{"id":"tg-20260829-153000"}}`},
 			},
 			{
 				"name":        "status",
@@ -165,6 +176,14 @@ func (*BuiltinTaskGraphPlugin) Schema() string {
 				"examples":    []string{`{"cmd":"list"}`},
 			},
 			{
+				"name":        "prune",
+				"description": "Remove persisted runs older than a retention (default 30d; the active run is never removed). Runs also auto-prune at 30d.",
+				"flags": []map[string]interface{}{
+					{"name": "older_than", "type": "string", "required": false, "description": "retention: Go duration, Nd days, or all (default 30d)"},
+				},
+				"examples": []string{`{"cmd":"prune"}`, `{"cmd":"prune","args":{"older_than":"7d"}}`, `{"cmd":"prune","args":{"older_than":"all"}}`},
+			},
+			{
 				"name":        "dash",
 				"description": "Serve the live browser dashboard (animated DAG, swimlanes, per-task evidence and cost) and return its local URL.",
 				"flags": []map[string]interface{}{
@@ -195,6 +214,14 @@ func (p *BuiltinTaskGraphPlugin) ExecuteWithStream(ctx context.Context, args []s
 	}
 	get := func(keys ...string) string { return strings.TrimSpace(jsonString(payload, keys...)) }
 	graphJSON := taskGraphPlanJSON(payload)
+	switch sub {
+	case "plan", "create", "validate", "run", "start", "resume", "exec":
+		if graphJSON == "" {
+			if graphJSON, err = taskGraphPlanFromFile(get("file", "path", "graph_file", "graphFile", "plan_file")); err != nil {
+				return "", err
+			}
+		}
+	}
 
 	switch sub {
 	case "plan", "create", "validate":
@@ -222,6 +249,12 @@ func (p *BuiltinTaskGraphPlugin) ExecuteWithStream(ctx context.Context, args []s
 		return adapter.Cancel()
 	case "list", "ls", "runs":
 		return adapter.List()
+	case "prune", "gc", "clean":
+		pr, ok := adapter.(TaskGraphPruner)
+		if !ok {
+			return "", errors.New("@taskgraph prune: retention not available in this session")
+		}
+		return pr.Prune(get("older_than", "olderThan", "age", "retention"))
 	case "dash", "dashboard", "ui":
 		d, ok := adapter.(TaskGraphDashboarder)
 		if !ok {
@@ -229,8 +262,56 @@ func (p *BuiltinTaskGraphPlugin) ExecuteWithStream(ctx context.Context, args []s
 		}
 		return d.Dash(get("id", "run_id", "runId", "run"))
 	default:
-		return "", fmt.Errorf("@taskgraph: unknown subcommand %q (expected plan|run|status|show|retry|cancel|list|dash)", sub)
+		return "", fmt.Errorf("@taskgraph: unknown subcommand %q (expected plan|run|status|show|retry|cancel|list|dash|prune)", sub)
 	}
+}
+
+// taskGraphMaxPlanFileBytes bounds a plan file read.
+const taskGraphMaxPlanFileBytes = 1 << 20
+
+// taskGraphPlanFromFile loads a graph plan from a JSON file — the reliable
+// path for real graphs: long inline args get truncated by output-token
+// limits ("unexpected end of JSON input"), a file never does. The file may
+// contain the bare graph, {"graph":{...}}, or a full {cmd,args} envelope.
+func taskGraphPlanFromFile(path string) (string, error) {
+	if path == "" {
+		return "", nil
+	}
+	if strings.HasPrefix(path, "~/") {
+		if home, err := os.UserHomeDir(); err == nil {
+			path = filepath.Join(home, path[2:])
+		}
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		return "", fmt.Errorf("@taskgraph: plan file %q: %w", path, err)
+	}
+	if info.Size() > taskGraphMaxPlanFileBytes {
+		return "", fmt.Errorf("@taskgraph: plan file %q too large (%d bytes, max %d)", path, info.Size(), taskGraphMaxPlanFileBytes)
+	}
+	data, err := os.ReadFile(path) // #nosec G304 -- explicit plan-file path requested by the tool call; size-capped above
+	if err != nil {
+		return "", fmt.Errorf("@taskgraph: read plan file %q: %w", path, err)
+	}
+	var top map[string]json.RawMessage
+	if err := json.Unmarshal(data, &top); err != nil {
+		return "", fmt.Errorf("@taskgraph: plan file %q is not valid JSON: %w", path, err)
+	}
+	// Unwrap {cmd,args:{graph}} and {graph:{...}} shapes down to the plan.
+	for range [2]struct{}{} {
+		if inner, ok := top["args"]; ok {
+			var next map[string]json.RawMessage
+			if json.Unmarshal(inner, &next) == nil {
+				top = next
+				continue
+			}
+		}
+		break
+	}
+	if g := taskGraphPlanJSON(top); g != "" {
+		return g, nil
+	}
+	return "", fmt.Errorf("@taskgraph: plan file %q has no graph (expected a plan object with \"tasks\")", path)
 }
 
 // taskGraphPlanJSON extracts the graph plan object (aliases tolerated) as a
@@ -318,6 +399,8 @@ func parseTaskGraphInvocation(args []string) (string, map[string]json.RawMessage
 	switch sub {
 	case "show", "task", "inspect", "get", "retry", "reopen":
 		setIfMissing("task", positional)
+	case "prune", "gc", "clean":
+		setIfMissing("older_than", positional)
 	default:
 		setIfMissing("id", positional)
 	}

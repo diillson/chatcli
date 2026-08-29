@@ -103,3 +103,51 @@ func TestAppendEventAndOpenRunValidation(t *testing.T) {
 		t.Fatal("missing run must error")
 	}
 }
+
+func TestPruneRuns(t *testing.T) {
+	base := t.TempDir()
+	mk := func(name string) *RunStore {
+		g := &Graph{Name: name, Tasks: []*Task{{ID: "T1", Prompt: "p", Status: StatusDone}}}
+		s, err := CreateRun(base, g)
+		if err != nil {
+			t.Fatalf("CreateRun: %v", err)
+		}
+		return s
+	}
+	old1, old2, fresh, active := mk("old1"), mk("old2"), mk("fresh"), mk("active")
+	past := time.Now().Add(-48 * time.Hour)
+	for _, s := range []*RunStore{old1, old2, active} {
+		if err := os.Chtimes(filepath.Join(s.Dir(), stateFileName), past, past); err != nil {
+			t.Fatalf("chtimes: %v", err)
+		}
+	}
+
+	removed, err := PruneRuns(base, 24*time.Hour, active.RunID())
+	if err != nil {
+		t.Fatalf("PruneRuns: %v", err)
+	}
+	if removed != 2 {
+		t.Fatalf("want 2 removed, got %d", removed)
+	}
+	rows, _ := ListRuns(base)
+	left := map[string]bool{}
+	for _, r := range rows {
+		left[r.RunID] = true
+	}
+	if !left[fresh.RunID()] || !left[active.RunID()] || len(rows) != 2 {
+		t.Fatalf("survivors wrong: %+v", rows)
+	}
+
+	// olderThan<=0 removes everything except the skip id.
+	removed, err = PruneRuns(base, 0, active.RunID())
+	if err != nil || removed != 1 {
+		t.Fatalf("prune all: %d %v", removed, err)
+	}
+	if rows, _ := ListRuns(base); len(rows) != 1 || rows[0].RunID != active.RunID() {
+		t.Fatalf("active run must survive prune all: %+v", rows)
+	}
+
+	if n, err := PruneRuns(filepath.Join(base, "missing"), time.Hour, ""); err != nil || n != 0 {
+		t.Fatalf("missing dir must be a no-op: %d %v", n, err)
+	}
+}

@@ -21,6 +21,7 @@ func taskGraphSubcommandSuggestions() []prompt.Suggest {
 		{Text: "show", Description: i18n.T("complete.taskgraph.show")},
 		{Text: "list", Description: i18n.T("complete.taskgraph.list")},
 		{Text: "dash", Description: i18n.T("complete.taskgraph.dash")},
+		{Text: "prune", Description: i18n.T("complete.taskgraph.prune")},
 		{Text: "cancel", Description: i18n.T("complete.taskgraph.cancel")},
 		{Text: "help", Description: i18n.T("complete.taskgraph.help")},
 	}

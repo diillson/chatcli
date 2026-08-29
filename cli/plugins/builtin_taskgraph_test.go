@@ -8,6 +8,8 @@ package plugins
 import (
 	"context"
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -245,5 +247,91 @@ func TestTaskGraphDashCapability(t *testing.T) {
 	}
 	if p.IsReadOnly([]string{`{"cmd":"dash"}`}) {
 		t.Fatal("dash starts a server and opens a browser — never read-only")
+	}
+}
+
+func TestTaskGraphPlanFromFile(t *testing.T) {
+	dir := t.TempDir()
+	plan := `{"name":"x","tasks":[{"id":"T1","prompt":"p"}]}`
+	shapes := map[string]string{
+		"bare.json":     plan,
+		"graph.json":    `{"graph":` + plan + `}`,
+		"envelope.json": `{"cmd":"run","args":{"graph":` + plan + `}}`,
+	}
+	for name, content := range shapes {
+		path := filepath.Join(dir, name)
+		if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+			t.Fatalf("write %s: %v", name, err)
+		}
+		got, err := taskGraphPlanFromFile(path)
+		if err != nil {
+			t.Fatalf("plan from %s: %v", name, err)
+		}
+		if !strings.Contains(got, `"tasks"`) {
+			t.Fatalf("plan from %s: %q", name, got)
+		}
+	}
+	if _, err := taskGraphPlanFromFile(filepath.Join(dir, "missing.json")); err == nil {
+		t.Fatal("missing file must error")
+	}
+	noGraph := filepath.Join(dir, "nograph.json")
+	_ = os.WriteFile(noGraph, []byte(`{"cmd":"status"}`), 0o600)
+	if _, err := taskGraphPlanFromFile(noGraph); err == nil {
+		t.Fatal("file without a plan must error")
+	}
+	if got, err := taskGraphPlanFromFile(""); err != nil || got != "" {
+		t.Fatalf("empty path must be a no-op: %q %v", got, err)
+	}
+}
+
+func TestTaskGraphRunFromFileRouting(t *testing.T) {
+	rec := &recordingTaskGraphAdapter{}
+	SetTaskGraphAdapter(rec)
+	t.Cleanup(func() { SetTaskGraphAdapter(nil) })
+	path := filepath.Join(t.TempDir(), "plan.json")
+	if err := os.WriteFile(path, []byte(`{"name":"x","tasks":[{"id":"T1","prompt":"p"}]}`), 0o600); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	p := NewBuiltinTaskGraphPlugin()
+	if _, err := p.Execute(context.Background(), []string{`{"cmd":"run","args":{"file":"` + path + `"}}`}); err != nil {
+		t.Fatalf("run from file: %v", err)
+	}
+	if rec.method != "run" || !strings.Contains(rec.graphJSON, `"tasks"`) {
+		t.Fatalf("file plan not threaded to Run: %q %q", rec.method, rec.graphJSON)
+	}
+	// A status call carrying a stray file param must not attempt a read.
+	if _, err := p.Execute(context.Background(), []string{`{"cmd":"status","args":{"file":"/nope.json"}}`}); err != nil {
+		t.Fatalf("status must ignore file param: %v", err)
+	}
+}
+
+// pruneRecordingAdapter layers the optional retention capability.
+type pruneRecordingAdapter struct {
+	recordingTaskGraphAdapter
+	pruneArg string
+}
+
+func (p *pruneRecordingAdapter) Prune(olderThan string) (string, error) {
+	p.pruneArg, p.method = olderThan, "prune"
+	return "pruned", nil
+}
+
+func TestTaskGraphPruneCapability(t *testing.T) {
+	SetTaskGraphAdapter(&recordingTaskGraphAdapter{})
+	t.Cleanup(func() { SetTaskGraphAdapter(nil) })
+	p := NewBuiltinTaskGraphPlugin()
+	if _, err := p.Execute(context.Background(), []string{`{"cmd":"prune"}`}); err == nil {
+		t.Fatal("prune without the capability must error")
+	}
+	rec := &pruneRecordingAdapter{}
+	SetTaskGraphAdapter(rec)
+	if _, err := p.Execute(context.Background(), []string{"prune", "7d"}); err != nil {
+		t.Fatalf("prune: %v", err)
+	}
+	if rec.method != "prune" || rec.pruneArg != "7d" {
+		t.Fatalf("prune routing: %q %q", rec.method, rec.pruneArg)
+	}
+	if p.IsReadOnly([]string{`{"cmd":"prune"}`}) {
+		t.Fatal("prune deletes runs — never read-only")
 	}
 }

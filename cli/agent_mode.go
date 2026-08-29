@@ -3437,13 +3437,63 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 								// First real output ends the spinner so streamed
 								// lines don't clash with its carriage-return repaint.
 								a.cli.animation.StopThinkingAnimation()
-								if !isCompact {
-									renderer.StreamOutput(line)
+								if isCompact {
+									return
 								}
+								// Serialize with worker security prompts: a tool
+								// that dispatches workers (@taskgraph) streams from
+								// background goroutines, and an ungated print lands
+								// on top of the prompt box — corrupting both the
+								// render and the answer the user is typing. When
+								// the turn spinner is live (taskgraph runs), the
+								// print also pauses/resumes it so event lines and
+								// the spinner/preview repaint never interleave.
+								if a.policyAdapter != nil {
+									a.policyAdapter.withPromptGate(func() {
+										if t := a.turnTimer; t != nil && t.IsRunning() {
+											t.Pause()
+											renderer.StreamOutput(line)
+											t.Resume()
+											return
+										}
+										renderer.StreamOutput(line)
+									})
+									return
+								}
+								renderer.StreamOutput(line)
 							}
 
 							// Marca tarefa como em andamento ANTES de executar
 							agent.MarkTaskInProgress(a.taskTracker)
+
+							// @taskgraph dispatches workers whose security
+							// prompts run on the shared policy adapter — re-arm
+							// its spinner/stdin/cbreak hooks exactly like the
+							// <agent_call> dispatch path does, otherwise the
+							// prompts race the central stdin reader for keys and
+							// typed answers get mangled into denials. The turn
+							// spinner also runs for the whole graph execution so
+							// the user's typing renders as the live ❯ …▌ preview
+							// (streamed event lines pause/resume it — see
+							// streamCallback) instead of a dead keyboard.
+							taskGraphTimerStarted := false
+							tgHadPreview := false
+							if strings.EqualFold(strings.TrimSpace(toolName), "@taskgraph") && a.policyAdapter != nil {
+								a.policyAdapter.setSpinner(a.turnTimer)
+								a.policyAdapter.setStdinCh(a.stdinLines)
+								a.policyAdapter.setRestoreInput(a.reapplyStdinCbreak)
+								a.turnTimer.SetOnPause(func() {
+									fmt.Print(metrics.ClearLine())
+									fmt.Print(spinnerPreviewWipe(tgHadPreview))
+									tgHadPreview = false
+								})
+								a.turnTimer.Start(ctx, func(d time.Duration) {
+									var frame string
+									frame, tgHadPreview = a.buildTurnSpinnerFrame(d, taskGraphSpinnerLabel, tgHadPreview)
+									fmt.Print(frame)
+								})
+								taskGraphTimerStarted = true
+							}
 
 							// Delegate interception: if this is an @coder call with
 							// cmd=delegate, it's a subagent spawn — NOT a plugin
@@ -3492,6 +3542,13 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 									toolOutput, execErr = plugin.ExecuteWithStream(ctx, toolArgs, streamCallback)
 									a.cli.animation.StopThinkingAnimation()
 								}
+							}
+
+							if taskGraphTimerStarted {
+								a.turnTimer.Stop()
+								a.turnTimer.SetOnPause(nil)
+								fmt.Print(metrics.ClearLine())
+								fmt.Print(spinnerPreviewWipe(tgHadPreview))
 							}
 
 							if !isCompact {

@@ -23,6 +23,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/diillson/chatcli/cli/agent/workers"
 	"github.com/diillson/chatcli/cli/taskgraph"
@@ -56,9 +57,13 @@ type taskGraphAdapter struct {
 	baseDirFn    func() (string, error)
 	dispatcherFn func() (taskGraphDispatcher, error)
 
-	mu      sync.Mutex
-	active  *taskgraph.Engine
-	dashSrv *dash.Server
+	mu       sync.Mutex
+	active   *taskgraph.Engine
+	activeID string
+	dashSrv  *dash.Server
+
+	// pruneOnce runs the automatic retention sweep on first store access.
+	pruneOnce sync.Once
 }
 
 // newTaskGraphAdapter builds the adapter.
@@ -80,10 +85,82 @@ func (a *taskGraphAdapter) dispatcher() (taskGraphDispatcher, error) {
 }
 
 func (a *taskGraphAdapter) baseDir() (string, error) {
+	base, err := a.resolveBaseDir()
+	if err != nil {
+		return "", err
+	}
+	// Bounded store: runs are working state, not an archive. One sweep per
+	// session removes anything older than the default retention.
+	a.pruneOnce.Do(func() {
+		if n, pruneErr := taskgraph.PruneRuns(base, taskgraph.DefaultRetention, a.activeRunID()); pruneErr != nil {
+			a.logger.Warn("taskgraph auto-prune failed", zap.Error(pruneErr))
+		} else if n > 0 {
+			a.logger.Info("taskgraph auto-prune", zap.Int("removed", n))
+		}
+	})
+	return base, nil
+}
+
+func (a *taskGraphAdapter) resolveBaseDir() (string, error) {
 	if a.baseDirFn != nil {
 		return a.baseDirFn()
 	}
 	return taskgraph.DefaultBaseDir()
+}
+
+// activeRunID names the in-flight run (never pruned), or "".
+func (a *taskGraphAdapter) activeRunID() string {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.active == nil {
+		return ""
+	}
+	return a.activeID
+}
+
+// Prune implements plugins.TaskGraphPruner: removes persisted runs older
+// than the given retention ("30d", "72h", "all" = every run). The active
+// run is never removed. Empty input uses the default retention.
+func (a *taskGraphAdapter) Prune(olderThan string) (string, error) {
+	base, err := a.baseDir()
+	if err != nil {
+		return "", err
+	}
+	retention, err := parseRetention(olderThan)
+	if err != nil {
+		return "", err
+	}
+	n, err := taskgraph.PruneRuns(base, retention, a.activeRunID())
+	if err != nil {
+		return "", fmt.Errorf("@taskgraph prune: %w", err)
+	}
+	scope := "older than " + retention.String()
+	if retention <= 0 {
+		scope = "all (active run kept)"
+	}
+	return fmt.Sprintf("pruned %d run(s), scope: %s", n, scope), nil
+}
+
+// parseRetention accepts "", "all", Go durations ("72h") and day suffixes
+// ("30d") — lenient like every tool-arg parser in the house.
+func parseRetention(s string) (time.Duration, error) {
+	s = strings.ToLower(strings.TrimSpace(s))
+	switch s {
+	case "":
+		return taskgraph.DefaultRetention, nil
+	case "all", "everything", "0":
+		return 0, nil
+	}
+	if strings.HasSuffix(s, "d") {
+		if days, err := strconv.Atoi(strings.TrimSuffix(s, "d")); err == nil && days > 0 {
+			return time.Duration(days) * 24 * time.Hour, nil
+		}
+	}
+	d, err := time.ParseDuration(s)
+	if err != nil || d < 0 {
+		return 0, fmt.Errorf("@taskgraph prune: invalid retention %q (use \"30d\", \"72h\" or \"all\")", s)
+	}
+	return d, nil
 }
 
 // Plan implements plugins.TaskGraphAdapter.
@@ -307,7 +384,9 @@ func (a *taskGraphAdapter) execute(ctx context.Context, g *taskgraph.Graph, stor
 		Logger: a.logger,
 	}
 	if onOutput != nil {
-		cfg.OnEvent = func(ev taskgraph.Event) { onOutput(taskgraph.FormatEvent(ev) + "\n") }
+		// No trailing newline: the stream renderer prints one line per
+		// callback and an extra \n renders as a blank spacer line.
+		cfg.OnEvent = func(ev taskgraph.Event) { onOutput(taskgraph.FormatEvent(ev)) }
 	}
 
 	engine, err := taskgraph.NewEngine(g, store, cfg)
@@ -321,12 +400,14 @@ func (a *taskGraphAdapter) execute(ctx context.Context, g *taskgraph.Graph, stor
 		return "", errors.New("@taskgraph: a run is already active in this session (cancel it or wait)")
 	}
 	a.active = engine
+	a.activeID = store.RunID()
 	a.mu.Unlock()
 	disp.SetCallUsageRecorder(engine.RecordCallUsage)
 	defer func() {
 		disp.SetCallUsageRecorder(nil)
 		a.mu.Lock()
 		a.active = nil
+		a.activeID = ""
 		a.mu.Unlock()
 	}()
 
