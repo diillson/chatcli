@@ -76,3 +76,23 @@ func TestViewWithoutAdapterErrors(t *testing.T) {
 		t.Fatal("missing adapter must error")
 	}
 }
+
+func TestViewParse_FlattenedEnvelopeArgv(t *testing.T) {
+	// ["view","--file",X] from the flattened envelope must yield X, not "--file X".
+	got, err := parseViewInvocation([]string{"view", "--file", "/tmp/shot.png"})
+	if err != nil || got != "/tmp/shot.png" {
+		t.Fatalf("flattened view --file: %q (%v)", got, err)
+	}
+	got, _ = parseViewInvocation([]string{"view", "--path=/tmp/a b.png"})
+	if got != "/tmp/a b.png" {
+		t.Fatalf("flattened --path=: %q", got)
+	}
+	if _, err := parseViewInvocation([]string{"view", "--file"}); err == nil {
+		t.Fatal("dangling --file must error, not return a bogus path")
+	}
+	// Bare positional still works.
+	got, _ = parseViewInvocation([]string{"shot.png"})
+	if got != "shot.png" {
+		t.Fatalf("bare path regressed: %q", got)
+	}
+}

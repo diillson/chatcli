@@ -351,61 +351,92 @@ func parseBrowserInvocation(args []string) (browserInvocation, error) {
 	inv.cmd = strings.ToLower(strings.TrimSpace(args[0]))
 	rest := args[1:]
 
-	// Flags anywhere in the tail; positionals fill the per-command slots.
+	// The agent loop flattens a JSON envelope {"cmd":"open","args":{"url":X}}
+	// into argv ["open","--url",X], so every args-map key arrives as a
+	// `--flag value` (or `--flag=value`) pair. Collect those generically —
+	// treating an unknown --flag as its own key — plus bare positionals, then
+	// map both onto the invocation. A strict parser that ignored these flags
+	// mistook "--url" itself for the URL (navigating to a bogus host).
+	flags := map[string]string{}
+	bools := map[string]bool{}
 	var positionals []string
 	for i := 0; i < len(rest); i++ {
 		a := rest[i]
-		next := func() string {
-			if i+1 < len(rest) {
-				i++
-				return rest[i]
+		if strings.HasPrefix(a, "--") {
+			name := strings.TrimPrefix(a, "--")
+			if eq := strings.IndexByte(name, '='); eq >= 0 {
+				flags[strings.ToLower(name[:eq])] = name[eq+1:]
+				continue
 			}
-			return ""
+			key := strings.ToLower(name)
+			// A flag followed by another flag (or nothing) is a boolean.
+			if i+1 < len(rest) && !strings.HasPrefix(rest[i+1], "--") {
+				flags[key] = rest[i+1]
+				i++
+			} else {
+				bools[key] = true
+			}
+			continue
 		}
-		switch {
-		case a == "--submit":
-			inv.submit = true
-		case a == "--file":
-			inv.file = next()
-		case strings.HasPrefix(a, "--file="):
-			inv.file = strings.TrimPrefix(a, "--file=")
-		case a == "--tail":
-			inv.tail = atoiDefault(next(), browserDefaultTail)
-		case strings.HasPrefix(a, "--tail="):
-			inv.tail = atoiDefault(strings.TrimPrefix(a, "--tail="), browserDefaultTail)
-		case a == "--max":
-			inv.max = atoiDefault(next(), 0)
-		case strings.HasPrefix(a, "--max="):
-			inv.max = atoiDefault(strings.TrimPrefix(a, "--max="), 0)
-		case a == "--to":
-			inv.target = next()
-		case strings.HasPrefix(a, "--to="):
-			inv.target = strings.TrimPrefix(a, "--to=")
-		default:
-			positionals = append(positionals, a)
+		positionals = append(positionals, a)
+	}
+	flagAny := func(keys ...string) string {
+		for _, k := range keys {
+			if v, ok := flags[k]; ok {
+				return v
+			}
 		}
+		return ""
+	}
+	inv.submit = bools["submit"]
+	if v := flagAny("file", "path"); v != "" {
+		inv.file = v
+	}
+	if v := flagAny("tail"); v != "" {
+		inv.tail = atoiDefault(v, browserDefaultTail)
+	}
+	if v := flagAny("max"); v != "" {
+		inv.max = atoiDefault(v, 0)
+	}
+	if v := flagAny("url", "href"); v != "" {
+		inv.url = v
+	}
+	if v := flagAny("target", "selector", "ref", "to"); v != "" {
+		inv.target = v
+	}
+	if v := flagAny("text", "value"); v != "" {
+		inv.text = v
+	}
+	if v := flagAny("js", "expression", "script", "code"); v != "" {
+		inv.js = v
+	}
+	if v := flagAny("direction", "dir"); v != "" {
+		inv.dir = strings.ToLower(v)
 	}
 
 	switch inv.cmd {
 	case "open":
-		if len(positionals) > 0 {
+		if inv.url == "" && len(positionals) > 0 {
 			inv.url = positionals[0]
 		}
 	case "click":
-		if len(positionals) > 0 {
+		if inv.target == "" && len(positionals) > 0 {
 			inv.target = positionals[0]
 		}
 	case "type":
-		if len(positionals) > 0 {
+		if inv.target == "" && len(positionals) > 0 {
 			inv.target = positionals[0]
+			positionals = positionals[1:]
 		}
-		if len(positionals) > 1 {
-			inv.text = strings.Join(positionals[1:], " ")
+		if inv.text == "" && len(positionals) > 0 {
+			inv.text = strings.Join(positionals, " ")
 		}
 	case "eval":
-		inv.js = strings.Join(positionals, " ")
+		if inv.js == "" {
+			inv.js = strings.Join(positionals, " ")
+		}
 	case "scroll":
-		if len(positionals) > 0 {
+		if inv.dir == "" && len(positionals) > 0 {
 			inv.dir = strings.ToLower(positionals[0])
 		}
 	case "console", "network":

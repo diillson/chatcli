@@ -404,6 +404,17 @@ func parseForgeInvocation(args []string) (forgeInvocation, error) {
 			inv.limit = forgeAtoi(next(), 0)
 		case a == "--host":
 			inv.host = next()
+		// The agent loop flattens {"cmd":"pr-view","args":{"number":42}} into
+		// argv ["pr-view","--number","42"], so number/run arrive as flags too
+		// — recognize them or they'd be mistaken for the positional target.
+		case a == "--number" || a == "--id" || a == "--pr" || a == "--mr":
+			inv.number = next()
+		case a == "--run" || a == "--run-id" || a == "--runid":
+			inv.run = next()
+		case strings.HasPrefix(a, "--number=") || strings.HasPrefix(a, "--id=") || strings.HasPrefix(a, "--pr=") || strings.HasPrefix(a, "--mr="):
+			inv.number = a[strings.IndexByte(a, '=')+1:]
+		case strings.HasPrefix(a, "--run=") || strings.HasPrefix(a, "--run-id=") || strings.HasPrefix(a, "--runid="):
+			inv.run = a[strings.IndexByte(a, '=')+1:]
 		case strings.HasPrefix(a, "--title="):
 			inv.title = strings.TrimPrefix(a, "--title=")
 		case strings.HasPrefix(a, "--body="):

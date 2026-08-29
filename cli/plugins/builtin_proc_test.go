@@ -235,3 +235,26 @@ func TestProcStdinCapsNotReadOnly(t *testing.T) {
 		t.Fatal("DescribeCall(stdin) empty")
 	}
 }
+
+func TestProcPTYFlattenedArgv(t *testing.T) {
+	fake := &fakeInteractiveProcAdapter{}
+	SetProcAdapter(fake)
+	t.Cleanup(func() { SetProcAdapter(nil) })
+	p := NewBuiltinProcPlugin()
+
+	// The agent flattener turns {"cmd":"start","args":{"command":"python3",
+	// "pty":true}} into ["start","--command","python3","--pty"].
+	if _, err := p.Execute(context.Background(), []string{"start", "--command", "python3", "--pty"}); err != nil {
+		t.Fatal(err)
+	}
+	if fake.lastCall != "startpty" || fake.ptyCommand != "python3" {
+		t.Fatalf("flattened pty start not routed: %+v", fake)
+	}
+	// stdin flattened: ["stdin","--id","p1","--text","1+1"].
+	if _, err := p.Execute(context.Background(), []string{"stdin", "--id", "p1", "--text", "1+1"}); err != nil {
+		t.Fatal(err)
+	}
+	if fake.stdinID != "p1" || fake.stdinText != "1+1" {
+		t.Fatalf("flattened stdin not routed: %+v", fake)
+	}
+}
