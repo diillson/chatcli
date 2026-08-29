@@ -16,16 +16,21 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/url"
 	"os"
+	"os/exec"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
 
 	"github.com/diillson/chatcli/cli/agent/workers"
 	"github.com/diillson/chatcli/cli/taskgraph"
+	"github.com/diillson/chatcli/cli/taskgraph/dash"
 	"github.com/diillson/chatcli/models"
 	coderengine "github.com/diillson/chatcli/pkg/coder/engine"
 	"go.uber.org/zap"
+	"golang.org/x/term"
 )
 
 // agentMaxWorkersEnv is the SQUAD's existing parallelism cap — the graph
@@ -51,8 +56,9 @@ type taskGraphAdapter struct {
 	baseDirFn    func() (string, error)
 	dispatcherFn func() (taskGraphDispatcher, error)
 
-	mu     sync.Mutex
-	active *taskgraph.Engine
+	mu      sync.Mutex
+	active  *taskgraph.Engine
+	dashSrv *dash.Server
 }
 
 // newTaskGraphAdapter builds the adapter.
@@ -204,6 +210,61 @@ func (a *taskGraphAdapter) Cancel() (string, error) {
 	}
 	engine.Cancel()
 	return "cancellation requested; tasks end when they observe the signal", nil
+}
+
+// Dash implements plugins.TaskGraphDashboarder: serves the read-only live
+// dashboard (one server per session, ephemeral 127.0.0.1 port) and opens the
+// browser only on a real terminal — never from a daemon or pipe.
+func (a *taskGraphAdapter) Dash(runID string) (string, error) {
+	base, err := a.baseDir()
+	if err != nil {
+		return "", err
+	}
+	a.mu.Lock()
+	if a.dashSrv == nil {
+		srv, startErr := dash.Start(base)
+		if startErr != nil {
+			a.mu.Unlock()
+			return "", fmt.Errorf("@taskgraph dash: %w", startErr)
+		}
+		a.dashSrv = srv
+	}
+	srv := a.dashSrv
+	a.mu.Unlock()
+
+	dashURL := srv.URL()
+	if runID = strings.TrimSpace(runID); runID != "" {
+		dashURL += "?run=" + url.QueryEscape(runID)
+	}
+	if term.IsTerminal(int(os.Stdout.Fd())) {
+		_ = openBrowserURL(dashURL)
+	}
+	return "task graph dashboard: " + dashURL + " (read-only; closing it never affects the run)", nil
+}
+
+// shutdownDash stops the dashboard server, if one is up.
+func (a *taskGraphAdapter) shutdownDash(ctx context.Context) {
+	a.mu.Lock()
+	srv := a.dashSrv
+	a.dashSrv = nil
+	a.mu.Unlock()
+	if srv != nil {
+		_ = srv.Shutdown(ctx)
+	}
+}
+
+// openBrowserURL opens a URL in the OS default browser.
+func openBrowserURL(rawURL string) error {
+	switch runtime.GOOS {
+	case "darwin":
+		return exec.Command("open", rawURL).Start() //#nosec G204 -- local dashboard URL built by this process, not user/model input
+	case "linux":
+		return exec.Command("xdg-open", rawURL).Start() //#nosec G204 -- local dashboard URL built by this process, not user/model input
+	case "windows":
+		return exec.Command("rundll32", "url.dll,FileProtocolHandler", rawURL).Start() //#nosec G204 -- local dashboard URL built by this process, not user/model input
+	default:
+		return fmt.Errorf("unsupported platform for browser open: %s", runtime.GOOS)
+	}
 }
 
 // List implements plugins.TaskGraphAdapter.

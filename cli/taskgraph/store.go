@@ -52,6 +52,10 @@ func (s *RunStore) RunID() string { return s.runID }
 // Dir returns the run directory path.
 func (s *RunStore) Dir() string { return s.dir }
 
+// EventsPath returns the run's append-only event log path (read by the
+// dashboard's incremental feed).
+func (s *RunStore) EventsPath() string { return filepath.Join(s.dir, eventsFileName) }
+
 // CreateRun allocates a fresh run directory, stamps the graph with the run id
 // and persists the initial state.
 func CreateRun(baseDir string, g *Graph) (*RunStore, error) {

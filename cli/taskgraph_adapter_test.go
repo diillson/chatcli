@@ -209,3 +209,30 @@ func mustBaseDir(t *testing.T, a *taskGraphAdapter) string {
 	}
 	return base
 }
+
+func TestTaskGraphAdapterDashServesAndReuses(t *testing.T) {
+	a := newTestTaskGraphAdapter(t)
+	if _, err := a.Plan(testPlanJSON); err != nil {
+		t.Fatalf("Plan: %v", err)
+	}
+	out1, err := a.Dash("")
+	if err != nil {
+		t.Fatalf("Dash: %v", err)
+	}
+	if !strings.Contains(out1, "http://127.0.0.1:") {
+		t.Fatalf("Dash must return the local URL: %q", out1)
+	}
+	out2, err := a.Dash("tg-something")
+	if err != nil {
+		t.Fatalf("Dash 2: %v", err)
+	}
+	if !strings.Contains(out2, "?run=tg-something") {
+		t.Fatalf("run focus must land in the URL: %q", out2)
+	}
+	u1 := out1[strings.Index(out1, "http") : strings.Index(out1, "/ ")+1]
+	if !strings.Contains(out2, u1[:strings.LastIndex(u1, "/")]) {
+		t.Fatalf("second Dash must reuse the same server: %q vs %q", out1, out2)
+	}
+	a.shutdownDash(context.Background())
+	a.shutdownDash(context.Background()) // idempotent
+}

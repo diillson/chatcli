@@ -20,6 +20,7 @@ func taskGraphSubcommandSuggestions() []prompt.Suggest {
 		{Text: "status", Description: i18n.T("complete.taskgraph.status")},
 		{Text: "show", Description: i18n.T("complete.taskgraph.show")},
 		{Text: "list", Description: i18n.T("complete.taskgraph.list")},
+		{Text: "dash", Description: i18n.T("complete.taskgraph.dash")},
 		{Text: "cancel", Description: i18n.T("complete.taskgraph.cancel")},
 		{Text: "help", Description: i18n.T("complete.taskgraph.help")},
 	}
@@ -54,7 +55,7 @@ func (cli *ChatCLI) getTaskGraphSuggestions(d prompt.Document) []prompt.Suggest 
 	}
 
 	switch args[0] {
-	case "status", "st":
+	case "status", "st", "dash":
 		return prompt.FilterHasPrefix(runIDSuggestions(), current, true)
 	case "show", "task":
 		// First arg is a task id (unknown here); the second is a run id.

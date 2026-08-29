@@ -213,3 +213,37 @@ func TestTaskGraphPluginIdentity(t *testing.T) {
 		t.Fatal("description/usage must describe the review contract and subcommands")
 	}
 }
+
+// dashRecordingAdapter layers the optional dashboard capability on top of
+// the recording adapter.
+type dashRecordingAdapter struct {
+	recordingTaskGraphAdapter
+	dashRunID string
+}
+
+func (d *dashRecordingAdapter) Dash(runID string) (string, error) {
+	d.dashRunID, d.method = runID, "dash"
+	return "http://127.0.0.1:1/", nil
+}
+
+func TestTaskGraphDashCapability(t *testing.T) {
+	// Base adapter without the capability: explicit refusal.
+	SetTaskGraphAdapter(&recordingTaskGraphAdapter{})
+	t.Cleanup(func() { SetTaskGraphAdapter(nil) })
+	p := NewBuiltinTaskGraphPlugin()
+	if _, err := p.Execute(context.Background(), []string{`{"cmd":"dash"}`}); err == nil {
+		t.Fatal("dash without the capability must error")
+	}
+	// With the capability: routed, run id threaded.
+	rec := &dashRecordingAdapter{}
+	SetTaskGraphAdapter(rec)
+	if _, err := p.Execute(context.Background(), []string{`{"cmd":"dash","args":{"id":"tg-9"}}`}); err != nil {
+		t.Fatalf("dash: %v", err)
+	}
+	if rec.method != "dash" || rec.dashRunID != "tg-9" {
+		t.Fatalf("dash routing: %q %q", rec.method, rec.dashRunID)
+	}
+	if p.IsReadOnly([]string{`{"cmd":"dash"}`}) {
+		t.Fatal("dash starts a server and opens a browser — never read-only")
+	}
+}
