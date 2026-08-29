@@ -48,6 +48,9 @@ const (
 	KindMoA Kind = "moa"
 	// KindHeadless is a scheduler-driven run without a TTY.
 	KindHeadless Kind = "headless"
+	// KindTaskGraph is the parent run of a @taskgraph DAG execution; its
+	// executor and reviewer workers register as children.
+	KindTaskGraph Kind = "taskgraph"
 )
 
 // Status is the lifecycle state of an agent execution.

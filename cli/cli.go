@@ -191,7 +191,10 @@ type ChatCLI struct {
 	failedChunks         []FileChunk // Chunks que falharam no processamento
 	lastFailedChunk      *FileChunk  // Referência ao último chunk que falhou
 	agentMode            *AgentMode  // Modo de agente
-	unattended           bool        // when true, the agent runs without any interactive confirmation (gateway daemon)
+	// taskGraphAdapter backs the @taskgraph builtin and /taskgraph; kept on
+	// the struct so cleanup can cancel an in-flight graph run.
+	taskGraphAdapter *taskGraphAdapter
+	unattended       bool // when true, the agent runs without any interactive confirmation (gateway daemon)
 	// policyAutoMode is the session-scoped /policy mode: when true, coder
 	// policy "ask" verdicts auto-approve (deny rules, the command validator
 	// and safety-immune operations still gate). Atomic because command
@@ -730,6 +733,13 @@ func NewChatCLI(ctx context.Context, manager manager.LLMManager, logger *zap.Log
 		// traffic. Workers use their native send_mail tool; humans /mail.
 		pluginMgr.RegisterBuiltinPlugin(plugins.NewBuiltinMailPlugin())
 
+		// @taskgraph — DAG orchestration for approved multi-task plans:
+		// parallel squad workers per task, validation gates run by the
+		// engine itself and an independent reviewer verdict before any
+		// task counts as done. Adapter wired below over the live
+		// dispatcher; humans watch via /taskgraph.
+		pluginMgr.RegisterBuiltinPlugin(plugins.NewBuiltinTaskGraphPlugin())
+
 		// Slash-as-tool: register the curated subset of slash commands
 		// (currently /help and /version) as plugins so the LLM can invoke
 		// them via the same native tool dispatch path used by @coder,
@@ -960,6 +970,12 @@ func NewChatCLI(ctx context.Context, manager manager.LLMManager, logger *zap.Log
 
 	// Wire the @mail plugin adapter over the squad message bus.
 	plugins.SetMailAdapter(newLiveMailAdapter(nil))
+
+	// Wire the @taskgraph plugin adapter. It resolves the CURRENT
+	// AgentMode's dispatcher at call time (the AgentMode is re-created
+	// across sessions), so wiring once at boot is safe.
+	cli.taskGraphAdapter = newTaskGraphAdapter(cli, cli.logger)
+	plugins.SetTaskGraphAdapter(cli.taskGraphAdapter)
 
 	// Wire the policy_manager's capability resolver (Item 4). When a
 	// tool call hits no explicit policy rule AND the plugin advertises
@@ -2113,6 +2129,12 @@ func (cli *ChatCLI) cleanup(ctx context.Context) {
 	// Close the browser session the @browser tool may have launched — a
 	// headless Chrome must never outlive ChatCLI.
 	browser.Shutdown(ctx)
+	// Cancel an in-flight task graph run so its workers stop with the session.
+	if cli.taskGraphAdapter != nil {
+		if _, err := cli.taskGraphAdapter.Cancel(); err == nil {
+			cli.logger.Info("task graph run canceled on shutdown")
+		}
+	}
 
 	// Tear down the session scratch workspace. Respects
 	// CHATCLI_AGENT_KEEP_TMPDIR=true for debugging (files are left behind).

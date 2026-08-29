@@ -107,3 +107,22 @@ func TestRecordingClientHidesToolsWhenInnerLacksThem(t *testing.T) {
 		t.Fatal("wrapper claims native tools the inner client lacks")
 	}
 }
+
+// TestCallUsageRecorderToggle: the call-attributed recorder is boxed behind
+// a pointer (Dispatcher stays comparable) and nil detaches it.
+func TestCallUsageRecorderToggle(t *testing.T) {
+	d := &Dispatcher{}
+	var gotCall string
+	d.SetCallUsageRecorder(func(callID, _, _ string, _ *models.UsageInfo) { gotCall = callID })
+	if d.callUsageRecorder == nil {
+		t.Fatal("recorder must be installed")
+	}
+	d.callUsageRecorder.fn("call-1", "openai", "gpt", &models.UsageInfo{})
+	if gotCall != "call-1" {
+		t.Fatalf("recorder not invoked: %q", gotCall)
+	}
+	d.SetCallUsageRecorder(nil)
+	if d.callUsageRecorder != nil {
+		t.Fatal("nil must detach the recorder")
+	}
+}

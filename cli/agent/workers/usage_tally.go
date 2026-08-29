@@ -28,9 +28,22 @@ type UsageRecorder func(provider, model string, usage *models.UsageInfo)
 // the workers package stays decoupled from the CLI's cost tracker.
 type BudgetGate func() error
 
+// CallUsageRecorder receives the token usage of ONE worker LLM call together
+// with the dispatch call ID that spawned the worker, so an orchestration layer
+// (the task-graph engine) can attribute real spend to the specific node that
+// incurred it. Complementary to UsageRecorder — the session-level tracker and
+// a per-call attributor observe the same stream independently; a recorder that
+// does not recognize a call ID must ignore the call, because the shared
+// dispatcher also serves dispatch waves the orchestration layer did not start.
+type CallUsageRecorder func(callID, provider, model string, usage *models.UsageInfo)
+
 // usageRecorderBox wraps the recorder func so Dispatcher can hold it via a
 // comparable pointer field.
 type usageRecorderBox struct{ fn UsageRecorder }
+
+// callUsageRecorderBox wraps the call-attributed recorder so Dispatcher stays
+// comparable.
+type callUsageRecorderBox struct{ fn CallUsageRecorder }
 
 // budgetGateBox wraps the gate func so Dispatcher stays comparable.
 type budgetGateBox struct{ fn BudgetGate }
@@ -44,6 +57,18 @@ func (d *Dispatcher) SetUsageRecorder(fn UsageRecorder) {
 		return
 	}
 	d.usageRecorder = &usageRecorderBox{fn: fn}
+}
+
+// SetCallUsageRecorder wires the callback that receives each worker LLM
+// call's usage attributed to its dispatch call ID. Independent of
+// SetUsageRecorder (both fire when both are set). Nil disables it (the
+// default).
+func (d *Dispatcher) SetCallUsageRecorder(fn CallUsageRecorder) {
+	if fn == nil {
+		d.callUsageRecorder = nil
+		return
+	}
+	d.callUsageRecorder = &callUsageRecorderBox{fn: fn}
 }
 
 // SetBudgetGate wires the session budget hard stop into every worker LLM

@@ -37,11 +37,13 @@ type Dispatcher struct {
 	config        DispatcherConfig
 	policyChecker PolicyChecker
 	pipeline      ExecutionPipeline
-	// usageRecorder/budgetGate are boxed behind pointers so Dispatcher
-	// stays a comparable type (bare func fields would break that contract).
-	usageRecorder *usageRecorderBox
-	budgetGate    *budgetGateBox
-	logger        *zap.Logger
+	// usageRecorder/callUsageRecorder/budgetGate are boxed behind pointers
+	// so Dispatcher stays a comparable type (bare func fields would break
+	// that contract).
+	usageRecorder     *usageRecorderBox
+	callUsageRecorder *callUsageRecorderBox
+	budgetGate        *budgetGateBox
+	logger            *zap.Logger
 }
 
 // NewDispatcher creates a Dispatcher with the given dependencies.
@@ -374,10 +376,17 @@ func (d *Dispatcher) executeAgent(ctx context.Context, call AgentCall) AgentResu
 	// spend. The gate itself refuses further calls once the session budget
 	// hard stop trips, so an in-flight dispatch wave stops mid-run instead
 	// of finishing its ReAct loops on borrowed money.
-	if rec, gate := d.usageRecorder, d.budgetGate; rec != nil || gate != nil {
+	if rec, callRec, gate := d.usageRecorder, d.callUsageRecorder, d.budgetGate; rec != nil || callRec != nil || gate != nil {
 		record := func(*models.UsageInfo) {}
-		if rec != nil {
-			record = func(u *models.UsageInfo) { rec.fn(effProvider, effModel, u) }
+		if rec != nil || callRec != nil {
+			record = func(u *models.UsageInfo) {
+				if rec != nil {
+					rec.fn(effProvider, effModel, u)
+				}
+				if callRec != nil {
+					callRec.fn(call.ID, effProvider, effModel, u)
+				}
+			}
 		}
 		var gateFn func() error
 		if gate != nil {

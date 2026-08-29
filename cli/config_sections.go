@@ -110,6 +110,8 @@ func (cli *ChatCLI) routeConfigCommand(ctx context.Context, args []string) {
 		cli.showConfigDiagram(ctx)
 	case "graphview", "graph":
 		cli.showConfigGraphView()
+	case "taskgraph", "tg":
+		cli.showConfigTaskGraph()
 	case "quality":
 		cli.showConfigQuality()
 	case "update", "updates":
@@ -1008,6 +1010,20 @@ func (cli *ChatCLI) showConfigGraphView() {
 
 	fmt.Println(p)
 	fmt.Println(p + colorize(i18n.T("cfg.graphview.about"), ColorGray))
+	sectionEnd(ColorCyan)
+}
+
+// showConfigTaskGraph renders the @taskgraph panorama. No dedicated envs:
+// parallelism reuses the squad's CHATCLI_AGENT_MAX_WORKERS and the review
+// requirement lives in each plan (require_review, default true).
+func (cli *ChatCLI) showConfigTaskGraph() {
+	sectionHeader("🗺", "cfg.section.taskgraph.title", ColorCyan)
+	p := uiPrefix(ColorCyan)
+
+	kv(p, agentMaxWorkersEnv, envOr(agentMaxWorkersEnv))
+
+	fmt.Println(p)
+	fmt.Println(p + colorize(i18n.T("cfg.taskgraph.about"), ColorGray))
 	sectionEnd(ColorCyan)
 }
 

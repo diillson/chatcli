@@ -70,6 +70,7 @@ var slashPrefixRoutes = []slashPrefixRoute{
 	{"/wait", (*ChatCLI).getWaitSuggestions},
 	{"/jobs", (*ChatCLI).getJobsSuggestions},
 	{"/board", (*ChatCLI).getBoardSuggestions},
+	{"/taskgraph", (*ChatCLI).getTaskGraphSuggestions},
 	{"/mail", (*ChatCLI).getMailSuggestions},
 	{"/parked", (*ChatCLI).getParkedSuggestions},
 	{"/cancel-park", func(c *ChatCLI, d prompt.Document) []prompt.Suggest {
@@ -439,6 +440,7 @@ func (cli *ChatCLI) GetInternalCommands() []prompt.Suggest {
 		{Text: "/jobs", Description: i18n.T("help.command.jobs")},
 		{Text: "/agents", Description: i18n.T("help.command.agents")},
 		{Text: "/board", Description: i18n.T("help.command.board")},
+		{Text: "/taskgraph", Description: i18n.T("help.command.taskgraph")},
 		{Text: "/mail", Description: i18n.T("help.command.mail")},
 		{Text: "/parked", Description: i18n.T("help.command.parked")},
 		{Text: "/resume", Description: i18n.T("help.command.resume")},
@@ -1677,6 +1679,7 @@ func (cli *ChatCLI) getConfigSuggestions(d prompt.Document) []prompt.Suggest {
 			{Text: "image", Description: i18n.T("cfg.section.image.title")},
 			{Text: "diagram", Description: i18n.T("cfg.section.diagram.title")},
 			{Text: "graphview", Description: i18n.T("cfg.section.graphview.title")},
+			{Text: "taskgraph", Description: i18n.T("cfg.section.taskgraph.title")},
 			{Text: "compression", Description: i18n.T("cfg.section.compression.title")},
 			{Text: "commands", Description: i18n.T("cfg.section.commands.title")},
 			{Text: "output", Description: i18n.T("cfg.section.output.title")},
