@@ -94,6 +94,7 @@ all three parse. Keep the inline form only for tiny graphs.
 {"cmd":"cancel"}                         stop the active run
 {"cmd":"list"}                           persisted runs
 {"cmd":"dash"}                           serve the live browser dashboard, returns its URL
+{"cmd":"prune","args":{"older_than":"7d"}}  remove old runs (auto-prune at 30d; "all" keeps only the active run)
 ```
 
 ## Discipline

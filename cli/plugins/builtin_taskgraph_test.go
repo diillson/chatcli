@@ -304,3 +304,34 @@ func TestTaskGraphRunFromFileRouting(t *testing.T) {
 		t.Fatalf("status must ignore file param: %v", err)
 	}
 }
+
+// pruneRecordingAdapter layers the optional retention capability.
+type pruneRecordingAdapter struct {
+	recordingTaskGraphAdapter
+	pruneArg string
+}
+
+func (p *pruneRecordingAdapter) Prune(olderThan string) (string, error) {
+	p.pruneArg, p.method = olderThan, "prune"
+	return "pruned", nil
+}
+
+func TestTaskGraphPruneCapability(t *testing.T) {
+	SetTaskGraphAdapter(&recordingTaskGraphAdapter{})
+	t.Cleanup(func() { SetTaskGraphAdapter(nil) })
+	p := NewBuiltinTaskGraphPlugin()
+	if _, err := p.Execute(context.Background(), []string{`{"cmd":"prune"}`}); err == nil {
+		t.Fatal("prune without the capability must error")
+	}
+	rec := &pruneRecordingAdapter{}
+	SetTaskGraphAdapter(rec)
+	if _, err := p.Execute(context.Background(), []string{"prune", "7d"}); err != nil {
+		t.Fatalf("prune: %v", err)
+	}
+	if rec.method != "prune" || rec.pruneArg != "7d" {
+		t.Fatalf("prune routing: %q %q", rec.method, rec.pruneArg)
+	}
+	if p.IsReadOnly([]string{`{"cmd":"prune"}`}) {
+		t.Fatal("prune deletes runs — never read-only")
+	}
+}

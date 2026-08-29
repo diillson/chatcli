@@ -9,6 +9,7 @@ import (
 	"context"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/diillson/chatcli/cli/agent/workers"
 	"github.com/diillson/chatcli/cli/taskgraph"
@@ -235,4 +236,41 @@ func TestTaskGraphAdapterDashServesAndReuses(t *testing.T) {
 	}
 	a.shutdownDash(context.Background())
 	a.shutdownDash(context.Background()) // idempotent
+}
+
+func TestParseRetention(t *testing.T) {
+	cases := []struct {
+		in   string
+		want time.Duration
+	}{
+		{"", taskgraph.DefaultRetention},
+		{"all", 0},
+		{"7d", 7 * 24 * time.Hour},
+		{"72h", 72 * time.Hour},
+	}
+	for _, c := range cases {
+		got, err := parseRetention(c.in)
+		if err != nil || got != c.want {
+			t.Fatalf("parseRetention(%q) = %v, %v", c.in, got, err)
+		}
+	}
+	for _, bad := range []string{"bogus", "-2h", "0d"} {
+		if _, err := parseRetention(bad); err == nil {
+			t.Fatalf("parseRetention(%q) must error", bad)
+		}
+	}
+}
+
+func TestTaskGraphAdapterPrune(t *testing.T) {
+	a := newTestTaskGraphAdapter(t)
+	if _, err := a.Plan(testPlanJSON); err != nil {
+		t.Fatalf("Plan: %v", err)
+	}
+	out, err := a.Prune("all")
+	if err != nil || !strings.Contains(out, "pruned 1 run(s)") {
+		t.Fatalf("Prune: %q %v", out, err)
+	}
+	if _, err := a.Prune("bogus"); err == nil {
+		t.Fatal("invalid retention must error")
+	}
 }

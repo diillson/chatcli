@@ -191,6 +191,42 @@ func ListRuns(baseDir string) ([]RunSummary, error) {
 	return out, nil
 }
 
+// DefaultRetention is how long runs are kept before the automatic prune
+// removes them (age = last state write). Matches the house pattern of
+// bounded on-disk stores (cost snapshots, hub purge).
+const DefaultRetention = 30 * 24 * time.Hour
+
+// PruneRuns removes run directories whose state was last written before
+// olderThan ago. skipRunID (the session's active run) is never removed.
+// olderThan <= 0 means "prune every run except skipRunID". Returns how many
+// runs were removed; unreadable entries are skipped, not fatal.
+func PruneRuns(baseDir string, olderThan time.Duration, skipRunID string) (int, error) {
+	entries, err := os.ReadDir(baseDir)
+	if os.IsNotExist(err) {
+		return 0, nil
+	}
+	if err != nil {
+		return 0, err
+	}
+	cutoff := time.Now().Add(-olderThan)
+	removed := 0
+	for _, e := range entries {
+		if !e.IsDir() || !strings.HasPrefix(e.Name(), "tg-") || e.Name() == skipRunID {
+			continue
+		}
+		if olderThan > 0 {
+			info, statErr := os.Stat(filepath.Join(baseDir, e.Name(), stateFileName))
+			if statErr != nil || info.ModTime().After(cutoff) {
+				continue
+			}
+		}
+		if err := os.RemoveAll(filepath.Join(baseDir, e.Name())); err == nil {
+			removed++
+		}
+	}
+	return removed, nil
+}
+
 // atomicWriteFile writes via a same-directory temp file and rename, so a
 // crash mid-write can never leave a torn state.json under the real name.
 func atomicWriteFile(path string, data []byte, perm os.FileMode) error {

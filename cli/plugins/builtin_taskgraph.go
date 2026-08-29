@@ -56,6 +56,13 @@ type TaskGraphDashboarder interface {
 	Dash(runID string) (string, error)
 }
 
+// TaskGraphPruner is the OPTIONAL retention capability: remove persisted
+// runs older than a retention ("30d", "72h", "all"); the active run is
+// never removed.
+type TaskGraphPruner interface {
+	Prune(olderThan string) (string, error)
+}
+
 type taskGraphAdapterHolder struct{ a TaskGraphAdapter }
 
 var taskGraphAdapterAtom atomic.Value // taskGraphAdapterHolder
@@ -91,7 +98,7 @@ func (*BuiltinTaskGraphPlugin) Description() string {
 
 // Usage explains the canonical invocation forms.
 func (*BuiltinTaskGraphPlugin) Usage() string {
-	return `@taskgraph plan|run|status|show|retry|cancel|list|dash
+	return `@taskgraph plan|run|status|show|retry|cancel|list|dash|prune
 
 <tool_call name="@taskgraph" args='{"cmd":"run","args":{"graph":{"name":"my-feature","tasks":[{"id":"T1","title":"...","prompt":"...","validation":[{"run":"go test ./...","expect":"all green"}]},{"id":"T2","prompt":"...","deps":["T1"]}]}}}' />
 
@@ -169,6 +176,14 @@ func (*BuiltinTaskGraphPlugin) Schema() string {
 				"examples":    []string{`{"cmd":"list"}`},
 			},
 			{
+				"name":        "prune",
+				"description": "Remove persisted runs older than a retention (default 30d; the active run is never removed). Runs also auto-prune at 30d.",
+				"flags": []map[string]interface{}{
+					{"name": "older_than", "type": "string", "required": false, "description": "retention: Go duration, Nd days, or all (default 30d)"},
+				},
+				"examples": []string{`{"cmd":"prune"}`, `{"cmd":"prune","args":{"older_than":"7d"}}`, `{"cmd":"prune","args":{"older_than":"all"}}`},
+			},
+			{
 				"name":        "dash",
 				"description": "Serve the live browser dashboard (animated DAG, swimlanes, per-task evidence and cost) and return its local URL.",
 				"flags": []map[string]interface{}{
@@ -234,6 +249,12 @@ func (p *BuiltinTaskGraphPlugin) ExecuteWithStream(ctx context.Context, args []s
 		return adapter.Cancel()
 	case "list", "ls", "runs":
 		return adapter.List()
+	case "prune", "gc", "clean":
+		pr, ok := adapter.(TaskGraphPruner)
+		if !ok {
+			return "", errors.New("@taskgraph prune: retention not available in this session")
+		}
+		return pr.Prune(get("older_than", "olderThan", "age", "retention"))
 	case "dash", "dashboard", "ui":
 		d, ok := adapter.(TaskGraphDashboarder)
 		if !ok {
@@ -241,7 +262,7 @@ func (p *BuiltinTaskGraphPlugin) ExecuteWithStream(ctx context.Context, args []s
 		}
 		return d.Dash(get("id", "run_id", "runId", "run"))
 	default:
-		return "", fmt.Errorf("@taskgraph: unknown subcommand %q (expected plan|run|status|show|retry|cancel|list|dash)", sub)
+		return "", fmt.Errorf("@taskgraph: unknown subcommand %q (expected plan|run|status|show|retry|cancel|list|dash|prune)", sub)
 	}
 }
 
@@ -378,6 +399,8 @@ func parseTaskGraphInvocation(args []string) (string, map[string]json.RawMessage
 	switch sub {
 	case "show", "task", "inspect", "get", "retry", "reopen":
 		setIfMissing("task", positional)
+	case "prune", "gc", "clean":
+		setIfMissing("older_than", positional)
 	default:
 		setIfMissing("id", positional)
 	}
