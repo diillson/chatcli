@@ -150,3 +150,7 @@ func (a *AgentMode) buildTurnSpinnerFrame(d time.Duration, modelName string, had
 	suffix, had := formatTypeaheadPreviewBelow(a.typeaheadPreviewSnapshot(), hadPreview)
 	return metrics.FormatTimerStatus(d, modelName, msg) + "\033[K" + suffix, had
 }
+
+// taskGraphSpinnerLabel names the live turn spinner while a @taskgraph run
+// holds the turn (rendered where the model name usually goes).
+const taskGraphSpinnerLabel = "@taskgraph"
