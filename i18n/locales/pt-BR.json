@@ -2301,6 +2301,7 @@
   "plan_first.orchestrator_handoff": "Use o relatório acima como verdade absoluta para a resposta final; não re-execute passos já concluídos.",
   "plan_first.spinner_planning": "planejando estrutura (Plan-and-Solve)...",
   "plan_first.spinner_executing": "executando plano estruturado...",
+  "plan_first.routed_taskgraph": "tarefa grande — roteando para o @taskgraph verificado (gates do engine + review independente)",
   "plan_first.preview_header": "Plano gerado (dry-run — nada será executado)",
   "plan_first.preview_task": "Resumo",
   "plan_first.preview_parallel": "Grupos paralelizáveis",

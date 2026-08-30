@@ -5,7 +5,13 @@
  */
 package cli
 
-import "testing"
+import (
+	"strings"
+	"testing"
+
+	"github.com/diillson/chatcli/models"
+	"go.uber.org/zap"
+)
 
 // TestQueryInvokesTaskGraph: an explicit task-graph request must defer
 // auto plan-first to the @taskgraph orchestrator (executor ≠ reviewer),
@@ -29,5 +35,26 @@ func TestQueryInvokesTaskGraph(t *testing.T) {
 		if queryInvokesTaskGraph(q) {
 			t.Fatalf("must NOT defer: %q", q)
 		}
+	}
+}
+
+// TestSteerToTaskGraphAppendsHint verifies the auto-routing hint is folded
+// into the existing user turn (single message, no alternation break) and
+// carries the @taskgraph steer.
+func TestSteerToTaskGraphAppendsHint(t *testing.T) {
+	cli := &ChatCLI{}
+	cli.history = append(cli.history, models.Message{Role: "user", Content: "build the whole feature"})
+	a := &AgentMode{cli: cli, logger: zap.NewNop()}
+	a.steerToTaskGraph("build the whole feature")
+
+	if len(cli.history) != 1 {
+		t.Fatalf("must not add a new turn, got %d messages", len(cli.history))
+	}
+	last := cli.history[len(cli.history)-1]
+	if last.Role != "user" {
+		t.Fatalf("last turn must stay user, got %q", last.Role)
+	}
+	if !strings.Contains(last.Content, "@taskgraph") || !strings.Contains(last.Content, "build the whole feature") {
+		t.Fatalf("hint must ride the user turn: %q", last.Content)
 	}
 }

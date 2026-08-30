@@ -29,6 +29,32 @@ import (
 	"go.uber.org/zap"
 )
 
+// taskGraphSteerDirective is the model-facing instruction appended to the
+// user turn when auto plan-first routes a substantial task to @taskgraph.
+// It steers without forcing: the model still judges whether the work truly
+// decomposes (the task-graph skill teaches "<5 independent tasks → dispatch
+// workers directly"), so genuinely serial work is not shoehorned into a graph.
+const taskGraphSteerDirective = "\n\n[ORCHESTRATION HINT] This looks like a substantial, multi-step delivery. Strongly prefer the @taskgraph tool: decompose it into a DAG of tasks with per-task validation contracts (`validation` commands), and let the engine verify each task with an independent reviewer before it counts as done. If — and only if — the work is actually serial or fewer than ~5 genuinely independent tasks, skip the graph and proceed directly. Do not mention this hint to the user."
+
+// steerToTaskGraph nudges the orchestrator toward @taskgraph for an
+// auto-triggered substantial task, by appending the hint to the just-added
+// user turn (single user message — no alternation break) and letting the
+// ReAct loop run. The task-graph skill's full guidance arrives via the
+// mid-loop rescan once the model commits to the tool.
+func (a *AgentMode) steerToTaskGraph(userQuery string) {
+	a.logger.Info("Plan-First routed to @taskgraph",
+		zap.Int("complexity", quality.ComplexityScore(userQuery)))
+	fmt.Println(colorize("  "+i18n.T("plan_first.routed_taskgraph"), ColorCyan))
+	n := len(a.cli.history)
+	if n == 0 {
+		return
+	}
+	last := &a.cli.history[n-1]
+	if last.Role == "user" {
+		last.Content += taskGraphSteerDirective
+	}
+}
+
 // queryInvokesTaskGraph reports whether the user explicitly asked for the
 // task-graph orchestrator ("@taskgraph", "taskgraph", "task graph").
 func queryInvokesTaskGraph(query string) bool {
@@ -78,6 +104,16 @@ func (a *AgentMode) runPlanFirstIfApplicable(ctx context.Context, userQuery stri
 	}
 
 	if !forced && !dryRun && !quality.ShouldPlanFirst(a.qualityConfig.PlanFirst, userQuery) {
+		return
+	}
+
+	// Auto/always trigger fired. By default a substantial task routes to the
+	// VERIFIED @taskgraph DAG (engine-run gates + independent reviewer)
+	// instead of the legacy in-loop Plan-and-Solve, which has neither. An
+	// explicit /plan (forced/dryRun) still uses the planner preview/runner,
+	// and CHATCLI_QUALITY_PLAN_FIRST_STRATEGY=plan-solve opts back out.
+	if !forced && !dryRun && a.qualityConfig.PlanFirst.Strategy != quality.PlanStrategyPlanSolve {
+		a.steerToTaskGraph(userQuery)
 		return
 	}
 
