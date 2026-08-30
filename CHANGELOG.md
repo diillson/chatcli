@@ -1,5 +1,20 @@
 # Changelog
 
+## [1.193.0](https://github.com/diillson/chatcli/compare/v1.192.0...v1.193.0) (2026-08-30)
+
+
+### Features
+
+* **quality:** route high-complexity auto plan-first to [@taskgraph](https://github.com/taskgraph) ([#1414](https://github.com/diillson/chatcli/issues/1414)) ([57ea1d5](https://github.com/diillson/chatcli/commit/57ea1d5d21deb274716f544c38970261005e9812))
+* **taskgraph:** [@taskgraph](https://github.com/taskgraph) DAG orchestrator with executor-reviewer separation ([#1409](https://github.com/diillson/chatcli/issues/1409)) ([f82ad60](https://github.com/diillson/chatcli/commit/f82ad60b6810c9288d909ae69a62746c1cde29fc))
+* **taskgraph:** live browser dashboard for graph runs ([#1411](https://github.com/diillson/chatcli/issues/1411)) ([87bc987](https://github.com/diillson/chatcli/commit/87bc9877aea622cc6dc976a6b2429b06a5819a2e))
+* **workers:** capability parity — plugin grants, per-task skills, learning digest ([#1413](https://github.com/diillson/chatcli/issues/1413)) ([b3da359](https://github.com/diillson/chatcli/commit/b3da359ad94ad2ae861aca7e33b1893a40ad3ac0))
+
+
+### Bug Fixes
+
+* **taskgraph:** field-test hardening — plan-first deferral, prompt-safe streaming, plan-from-file ([#1412](https://github.com/diillson/chatcli/issues/1412)) ([6957c36](https://github.com/diillson/chatcli/commit/6957c3602770a9b98549f550d5018802b420cb42))
+
 ## [1.192.0](https://github.com/diillson/chatcli/compare/v1.191.0...v1.192.0) (2026-08-29)
 
 
