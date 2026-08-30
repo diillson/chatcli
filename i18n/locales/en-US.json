@@ -2301,6 +2301,7 @@
   "plan_first.orchestrator_handoff": "Use the report above as ground truth for the user-facing answer; do not re-run completed steps.",
   "plan_first.spinner_planning": "planning structured steps (Plan-and-Solve)...",
   "plan_first.spinner_executing": "executing structured plan...",
+  "plan_first.routed_taskgraph": "substantial task — routing to the verified @taskgraph DAG (engine gates + independent review)",
   "plan_first.preview_header": "Generated plan (dry-run — nothing will be executed)",
   "plan_first.preview_task": "Summary",
   "plan_first.preview_parallel": "Parallel groups",

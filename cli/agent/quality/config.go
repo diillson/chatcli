@@ -132,7 +132,20 @@ type ReflexionQueueConfig struct {
 type PlanFirstConfig struct {
 	Mode                string // "off" | "auto" | "always"
 	ComplexityThreshold int    // 0..10; auto triggers when score >= threshold
+	// Strategy chooses what an auto/always trigger routes to:
+	//   "taskgraph"  → steer the orchestrator to the verified @taskgraph DAG
+	//                  (default; the engine runs gates, an independent
+	//                  reviewer signs done).
+	//   "plan-solve" → the legacy in-loop Plan-and-Solve runner (no gates,
+	//                  no reviewer). Kept for parity / opt-out.
+	Strategy string
 }
+
+// PlanFirst strategy values.
+const (
+	PlanStrategyTaskGraph = "taskgraph"
+	PlanStrategyPlanSolve = "plan-solve"
+)
 
 // HyDEConfig controls Hypothetical Document Embeddings retrieval (#4).
 //
@@ -205,6 +218,7 @@ func Defaults() Config {
 		PlanFirst: PlanFirstConfig{
 			Mode:                "auto",
 			ComplexityThreshold: 6,
+			Strategy:            PlanStrategyTaskGraph,
 		},
 		HyDE: HyDEConfig{
 			Enabled:     false,
@@ -370,6 +384,9 @@ func loadPlanFirstEnv(c *PlanFirstConfig) {
 	}
 	if v := os.Getenv("CHATCLI_QUALITY_PLAN_FIRST_THRESHOLD"); v != "" {
 		c.ComplexityThreshold = parseInt(v, c.ComplexityThreshold)
+	}
+	if v := os.Getenv("CHATCLI_QUALITY_PLAN_FIRST_STRATEGY"); v != "" {
+		c.Strategy = normalizeMode(v, c.Strategy, []string{PlanStrategyTaskGraph, PlanStrategyPlanSolve})
 	}
 }
 

@@ -97,6 +97,7 @@ func (cli *ChatCLI) showConfigQuality() {
 	subheader(p, "cfg.sub.quality.plan_first")
 	kv(p, "CHATCLI_QUALITY_PLAN_FIRST_MODE", cfg.PlanFirst.Mode)
 	kv(p, "CHATCLI_QUALITY_PLAN_FIRST_THRESHOLD", fmt.Sprintf("%d", cfg.PlanFirst.ComplexityThreshold))
+	kv(p, "CHATCLI_QUALITY_PLAN_FIRST_STRATEGY", cfg.PlanFirst.Strategy)
 
 	// HyDE
 	fmt.Println(p)
