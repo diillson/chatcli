@@ -194,3 +194,86 @@ func TestFindProjectRootPrefersMarkers(t *testing.T) {
 		t.Fatalf("markerless root = %q, want file dir", got)
 	}
 }
+
+// TestAcquireReadyColdPoolWarmsInBackground pins the non-blocking contract:
+// a cold pool reports not-ready immediately, warms the server in the
+// background exactly once, and a later call finds it ready.
+func TestAcquireReadyColdPoolWarmsInBackground(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module x\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	file := writeGoFile(t, dir, "a.go", "package x\n")
+
+	var spawns atomic.Int32
+	p := NewPool(zap.NewNop())
+	p.spawn = pipeSpawner(t, &spawns)
+	defer p.Close()
+
+	if _, ready := p.AcquireReady(file); ready {
+		t.Fatal("cold pool must report not-ready, never spawn synchronously")
+	}
+	// Second immediate call must not start a second warm-up (single-flight).
+	_, _ = p.AcquireReady(file)
+
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		if sess, ready := p.AcquireReady(file); ready {
+			if sess.Client == nil || sess.Root != dir {
+				t.Fatalf("warm session malformed: %+v", sess)
+			}
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("background warm-up never produced a ready server")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if spawns.Load() != 1 {
+		t.Fatalf("spawned %d servers, want 1 (single-flight warm-up)", spawns.Load())
+	}
+}
+
+// TestAcquireReadyUnsupportedAndMissing pins the cheap-refusal paths: no
+// server for the extension and an unreadable file are not-ready, no spawn.
+func TestAcquireReadyUnsupportedAndMissing(t *testing.T) {
+	var spawns atomic.Int32
+	p := NewPool(zap.NewNop())
+	p.spawn = pipeSpawner(t, &spawns)
+	defer p.Close()
+
+	if _, ready := p.AcquireReady(writeGoFile(t, t.TempDir(), "notes.txt", "x")); ready {
+		t.Fatal("unsupported extension must be not-ready")
+	}
+	if _, ready := p.AcquireReady(filepath.Join(t.TempDir(), "gone.go")); ready {
+		t.Fatal("missing file must be not-ready")
+	}
+	if spawns.Load() != 0 {
+		t.Fatalf("cheap refusals must not spawn, got %d", spawns.Load())
+	}
+}
+
+// TestPoolClosedRefusesAcquire pins the shutdown guard: after Close, both
+// acquire surfaces refuse and no server can leak into a dead pool.
+func TestPoolClosedRefusesAcquire(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module x\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	file := writeGoFile(t, dir, "a.go", "package x\n")
+
+	var spawns atomic.Int32
+	p := NewPool(zap.NewNop())
+	p.spawn = pipeSpawner(t, &spawns)
+	p.Close()
+
+	if _, err := p.Acquire(context.Background(), file); err == nil {
+		t.Fatal("Acquire on a closed pool must error")
+	}
+	if _, ready := p.AcquireReady(file); ready {
+		t.Fatal("AcquireReady on a closed pool must be not-ready")
+	}
+	if spawns.Load() != 0 {
+		t.Fatalf("closed pool must never spawn, got %d", spawns.Load())
+	}
+}

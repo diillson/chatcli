@@ -17,8 +17,12 @@
  *
  * Degrades to a no-op when: the env kill switch is set, no LSP adapter is
  * wired (one-shot surfaces without a pool), the adapter lacks the quick
- * capability, or the language has no server. A clean file appends nothing —
- * silence means clean, keeping the happy path at zero token cost.
+ * capability, the language has no server, or the session pool is still cold
+ * (the adapter then warms it in the background and the NEXT edit gets real
+ * findings). A clean file appends nothing — silence means clean, keeping
+ * the happy path at zero token cost. The whole pass also runs under a
+ * wall-clock budget: this hook sits between the edit and its tool result,
+ * so a slow language server must degrade the check, never the edit.
  */
 package plugins
 
@@ -27,6 +31,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
 )
 
 // coderAutoDiagEnv is the kill switch for post-edit diagnostics. Unset or
@@ -63,6 +68,12 @@ const (
 	// thousand parse errors) cannot flood the tool result.
 	maxAutoDiagBytes = 3000
 )
+
+// autoDiagPassBudget caps the WHOLE post-edit pass in wall-clock time. Each
+// file's check already has a per-file publish wait in the adapter; this is
+// the defense in depth for a multipatch over several slow files. A var, not
+// a const, purely as a test seam.
+var autoDiagPassBudget = 8 * time.Second
 
 // mutatingCoderSubcommands are the @coder subcommands whose success means
 // file content changed on disk.
@@ -142,7 +153,12 @@ func appendAutoDiagnostics(subcmd string, args []string, output string) string {
 	}
 
 	var b strings.Builder
-	for _, file := range targets {
+	started := time.Now()
+	for i, file := range targets {
+		if time.Since(started) > autoDiagPassBudget {
+			b.WriteString(fmt.Sprintf("- %d file(s) not checked (diagnostics time budget) — run @lsp diagnostics on them if needed.\n", len(targets)-i))
+			break
+		}
 		text, hasIssues, err := qd.QuickDiagnostics(file)
 		if err != nil || !hasIssues || strings.TrimSpace(text) == "" {
 			continue

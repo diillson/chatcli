@@ -16,6 +16,7 @@ package plugins
 import (
 	"strings"
 	"testing"
+	"time"
 )
 
 // fakeDiagAdapter implements LSPAdapter plus the LSPQuickDiagnoser capability.
@@ -168,5 +169,39 @@ func TestAppendAutoDiagnostics_FileCap(t *testing.T) {
 	appendAutoDiagnostics("multipatch", []string{"--edits", edits}, "done")
 	if len(fake.calls) != maxAutoDiagFiles {
 		t.Fatalf("expected at most %d diagnostics calls, got %d", maxAutoDiagFiles, len(fake.calls))
+	}
+}
+
+// slowDiagAdapter is a fakeDiagAdapter whose every QuickDiagnostics call burns
+// wall-clock time, to exercise the pass-level budget.
+type slowDiagAdapter struct {
+	fakeDiagAdapter
+	delay time.Duration
+}
+
+func (s *slowDiagAdapter) QuickDiagnostics(file string) (string, bool, error) {
+	time.Sleep(s.delay)
+	return s.fakeDiagAdapter.QuickDiagnostics(file)
+}
+
+func TestAppendAutoDiagnostics_TimeBudget(t *testing.T) {
+	prev := autoDiagPassBudget
+	autoDiagPassBudget = 50 * time.Millisecond
+	t.Cleanup(func() { autoDiagPassBudget = prev })
+
+	slow := &slowDiagAdapter{
+		fakeDiagAdapter: fakeDiagAdapter{findings: map[string]string{}},
+		delay:           40 * time.Millisecond,
+	}
+	withLSPAdapter(t, slow)
+
+	edits := `[{"file":"a.go"},{"file":"b.go"},{"file":"c.go"},{"file":"d.go"},{"file":"e.go"}]`
+	out := appendAutoDiagnostics("multipatch", []string{"--edits", edits}, "done")
+
+	if len(slow.calls) >= 5 {
+		t.Fatalf("time budget must stop the pass early, but all %d files were checked", len(slow.calls))
+	}
+	if !strings.Contains(out, "not checked (diagnostics time budget)") {
+		t.Fatalf("skipped files must be reported explicitly, got:\n%s", out)
 	}
 }
