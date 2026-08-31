@@ -429,6 +429,14 @@ func snapshotWorkspace(ctx context.Context, root, label string) error {
 // caller. Unlike autoCheckpoint it is NOT throttled — call it per meaningful
 // boundary, never in a loop.
 func CheckpointWorkspace(root, label string) error {
+	return CheckpointWorkspaceCtx(context.Background(), root, label)
+}
+
+// CheckpointWorkspaceCtx is CheckpointWorkspace with caller-owned
+// cancellation: the snapshot deadline is layered onto ctx, so an
+// orchestrator abort also aborts the snapshot. Prefer this from any call
+// site that already holds a context.
+func CheckpointWorkspaceCtx(ctx context.Context, root, label string) error {
 	if !checkpointsEnabled() {
 		return nil
 	}
@@ -440,9 +448,9 @@ func CheckpointWorkspace(root, label string) error {
 		// not an error, and the alternative (hashing the whole disk) is.
 		return nil
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), resolveCheckpointTimeout(checkpointManualTimeout))
+	snapCtx, cancel := context.WithTimeout(ctx, resolveCheckpointTimeout(checkpointManualTimeout))
 	defer cancel()
-	return snapshotWorkspace(ctx, root, label)
+	return snapshotWorkspace(snapCtx, root, label)
 }
 
 // autoCheckpoint snapshots the workspace before a mutating subcommand:
