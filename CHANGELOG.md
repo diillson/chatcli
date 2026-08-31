@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.193.1](https://github.com/diillson/chatcli/compare/v1.193.0...v1.193.1) (2026-08-31)
+
+
+### Bug Fixes
+
+* **coder:** bound shadow-git checkpoints with root guard, deadline and circuit breaker ([#1429](https://github.com/diillson/chatcli/issues/1429)) ([9ca51d5](https://github.com/diillson/chatcli/commit/9ca51d5c3cb5a0e6be4315bddb76d166539f0a08))
+
+
+### Performance Improvements
+
+* **coder:** make post-edit diagnostics non-blocking with background LSP warm-up ([#1431](https://github.com/diillson/chatcli/issues/1431)) ([45be17a](https://github.com/diillson/chatcli/commit/45be17a901eeae99c109b60c7de90a40b57b53fa))
+
 ## [1.193.0](https://github.com/diillson/chatcli/compare/v1.192.0...v1.193.0) (2026-08-30)
 
 
