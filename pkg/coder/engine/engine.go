@@ -201,18 +201,18 @@ func (e *Engine) Execute(ctx context.Context, cmd string, args []string) error {
 	case "read":
 		return e.handleRead(args)
 	case "write":
-		e.autoCheckpoint("write")
+		e.autoCheckpoint(ctx, "write")
 		return e.handleWrite(args)
 	case "patch":
-		e.autoCheckpoint("patch")
+		e.autoCheckpoint(ctx, "patch")
 		return e.handlePatch(args)
 	case "multipatch":
-		e.autoCheckpoint("multipatch")
+		e.autoCheckpoint(ctx, "multipatch")
 		return e.handleMultipatch(args)
 	case "tree":
 		return e.handleTree(args)
 	case "checkpoint":
-		return e.handleCheckpoint(args)
+		return e.handleCheckpoint(ctx, args)
 	case "outline":
 		return e.handleOutline(args)
 	case "map":
@@ -220,7 +220,7 @@ func (e *Engine) Execute(ctx context.Context, cmd string, args []string) error {
 	case "search":
 		return e.handleSearch(ctx, args)
 	case "exec":
-		e.autoCheckpoint("exec")
+		e.autoCheckpoint(ctx, "exec")
 		return e.handleExec(ctx, args)
 	case "rollback":
 		return e.handleRollback(args)

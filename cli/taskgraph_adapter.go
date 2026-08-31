@@ -374,7 +374,7 @@ func (a *taskGraphAdapter) execute(ctx context.Context, g *taskgraph.Graph, stor
 		MaxParallel: taskGraphMaxParallel(),
 		Workspace:   workspace,
 		Checkpoint: func(label string) {
-			if err := coderengine.CheckpointWorkspace(workspace, label); err != nil {
+			if err := coderengine.CheckpointWorkspaceCtx(ctx, workspace, label); err != nil {
 				a.logger.Debug("taskgraph checkpoint failed", zap.Error(err))
 			}
 		},
