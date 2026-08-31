@@ -34,6 +34,14 @@ const (
 	// server's publish after (re)opening a document.
 	lspDiagnosticsWait = 12 * time.Second
 
+	// lspQuickDiagnosticsWait bounds the publish wait for the ADVISORY
+	// post-edit check. A warm, indexed server publishes in well under a
+	// second; one that takes longer is still indexing, and an advisory
+	// block must report "inconclusive" quickly rather than tax every write
+	// with the full explicit-diagnostics wait. Field post-mortem: 12s per
+	// touched file, silently, before the tool result rendered.
+	lspQuickDiagnosticsWait = 4 * time.Second
+
 	// lspDefaultRefLimit / lspMaxRefLimit bound reference listings so one
 	// popular symbol cannot flood the conversation.
 	lspDefaultRefLimit = 50
@@ -130,12 +138,26 @@ func renderDiagnosticsList(root, abs string, diags []lsp.Diagnostic) string {
 // Diagnostics, plus an explicit hasIssues flag so the post-edit auto-check
 // can stay silent on clean (or inconclusive) files instead of spending
 // tokens announcing cleanliness.
+//
+// Unlike the explicit tool surfaces it NEVER cold-spawns a server: the check
+// is advisory and runs inline before every write's tool result, so a cold
+// pool means "inconclusive now" — AcquireReady warms the server in the
+// background and the NEXT edit gets real findings. The publish wait is the
+// short quick-check budget for the same reason.
 func (a *lspToolAdapter) QuickDiagnostics(file string) (string, bool, error) {
-	sess, abs, err := a.acquire(file)
+	expanded, err := utils.ExpandPath(file)
+	if err != nil {
+		expanded = file
+	}
+	abs, err := filepath.Abs(expanded)
 	if err != nil {
 		return "", false, err
 	}
-	diags, ok := sess.Client.Diagnostics(sess.URI, lspDiagnosticsWait)
+	sess, ready := a.pool().AcquireReady(abs)
+	if !ready {
+		return "", false, nil
+	}
+	diags, ok := sess.Client.Diagnostics(sess.URI, lspQuickDiagnosticsWait)
 	if !ok || len(diags) == 0 {
 		return "", false, nil
 	}

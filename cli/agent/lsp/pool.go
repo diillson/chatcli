@@ -32,13 +32,21 @@ const (
 	// poolIdleTTL is how long an unused language server stays alive. Long
 	// enough to survive a conversation lull; short enough that a session
 	// that moved on from Rust doesn't keep rust-analyzer resident forever.
-	poolIdleTTL = 5 * time.Minute
+	// Field data moved this from 5 to 15 minutes: agent sessions routinely
+	// pause longer than 5 minutes between edits (model turns, the user
+	// reading output), and every reap re-bills the next post-edit check
+	// with a full cold start and re-index.
+	poolIdleTTL = 15 * time.Minute
 
 	// maxDocumentBytes bounds one didOpen/didChange payload. Files past this
 	// are almost certainly generated artifacts a language server would choke
 	// on anyway; the tool reports a clear error instead of stalling.
 	maxDocumentBytes = 2 << 20 // 2MiB
 
+	// warmupTimeout bounds one background warm-up spawn kicked off by
+	// AcquireReady. Generous — nothing waits on it — but finite, so a hung
+	// server binary cannot pin a goroutine for the whole session.
+	warmupTimeout = 30 * time.Second
 )
 
 // rootMarkers, in priority order, identify a project root when walking up
@@ -53,6 +61,11 @@ type Pool struct {
 
 	mu      sync.Mutex
 	entries map[string]*poolEntry
+	// warming tracks in-flight background warm-ups (single-flight per key).
+	warming map[string]bool
+	// closed marks a pool torn down by Close: no further spawns, so a
+	// warm-up racing session shutdown can never leak a live server.
+	closed bool
 
 	// spawn is the client factory — swapped by tests for a pipe-backed fake.
 	spawn func(ctx context.Context, spec ServerSpec, logger *zap.Logger) (*Client, error)
@@ -120,6 +133,9 @@ func (p *Pool) Acquire(ctx context.Context, absPath string) (*Session, error) {
 
 	p.mu.Lock()
 	defer p.mu.Unlock()
+	if p.closed {
+		return nil, fmt.Errorf("lsp: pool is closed")
+	}
 	p.reapIdleLocked()
 
 	entry, ok := p.entries[key]
@@ -156,6 +172,76 @@ func (p *Pool) Acquire(ctx context.Context, absPath string) (*Session, error) {
 		return nil, syncErr
 	}
 	return &Session{Client: entry.client, URI: uri, Root: root}, nil
+}
+
+// AcquireReady returns a ready Session for absPath only when the pooled
+// server for its (project root, language) is ALREADY initialized — it never
+// spawns synchronously. A cold pool instead kicks off a single-flight
+// background warm-up and reports not-ready, so advisory callers (the
+// post-edit diagnostics hook above all) skip cheaply now and find a warm
+// server on their next call. TryLock keeps the same promise against a busy
+// pool: if another caller holds it — typically a cold spawn in flight —
+// report not-ready rather than queue behind seconds of initialization.
+func (p *Pool) AcquireReady(absPath string) (*Session, bool) {
+	spec, ok := ServerForFile(absPath)
+	if !ok {
+		return nil, false
+	}
+	data, err := os.ReadFile(absPath) //#nosec G304 -- agent-requested source file, same trust boundary as Acquire
+	if err != nil || len(data) > maxDocumentBytes {
+		return nil, false
+	}
+	root := findProjectRoot(absPath)
+	key := root + "\x00" + strings.Join(spec.Command, " ")
+
+	if !p.mu.TryLock() {
+		return nil, false
+	}
+	defer p.mu.Unlock()
+	if p.closed {
+		return nil, false
+	}
+	p.reapIdleLocked()
+
+	entry, ok := p.entries[key]
+	if !ok {
+		p.warmLocked(key, absPath)
+		return nil, false
+	}
+	entry.lastUse = p.now()
+
+	uri := "file://" + absPath
+	if syncErr := entry.syncDocument(uri, spec.LanguageID, string(data)); syncErr != nil {
+		return nil, false
+	}
+	return &Session{Client: entry.client, URI: uri, Root: root}, true
+}
+
+// warmLocked starts one background warm-up for key unless one is already in
+// flight. Caller holds p.mu. The goroutine reuses Acquire wholesale — same
+// spawn, same initialization, same entry bookkeeping — and discards the
+// session; only the pooled server matters. Acquire's own closed-pool guard
+// makes a warm-up racing Close shut down cleanly instead of leaking.
+func (p *Pool) warmLocked(key, absPath string) {
+	if p.warming == nil {
+		p.warming = map[string]bool{}
+	}
+	if p.warming[key] {
+		return
+	}
+	p.warming[key] = true
+	go func() {
+		defer func() {
+			p.mu.Lock()
+			delete(p.warming, key)
+			p.mu.Unlock()
+		}()
+		ctx, cancel := context.WithTimeout(context.Background(), warmupTimeout)
+		defer cancel()
+		if _, err := p.Acquire(ctx, absPath); err != nil {
+			p.logger.Debug("lsp: background warm-up failed", zap.Error(err))
+		}
+	}()
 }
 
 // syncDocument opens the document on first use and sends a versioned full
@@ -201,6 +287,7 @@ func (p *Pool) reapIdleLocked() {
 func (p *Pool) Close() {
 	p.mu.Lock()
 	defer p.mu.Unlock()
+	p.closed = true
 	for key, e := range p.entries {
 		e.shutdown = true
 		e.client.Shutdown()
