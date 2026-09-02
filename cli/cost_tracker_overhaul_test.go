@@ -19,7 +19,7 @@ func TestLookupModelPricingKnownFlag(t *testing.T) {
 		wantKnown       bool
 		wantIn          float64
 	}{
-		{"CLAUDEAI", "claude-sonnet-5", true, 3.0},
+		{"CLAUDEAI", "claude-sonnet-5", true, 2.0}, // $2/$10 became the permanent Sonnet 5 price
 		{"OPENAI", "gpt-4o", true, 2.50},
 		{"DEEPSEEK", "deepseek-reasoner", true, 0.55}, // API alias of R1 — not the $0.27 generic tier
 		{"OLLAMA", "llama3.3", true, 0},               // unmetered by design
@@ -43,11 +43,19 @@ func TestGetCachePricingFamilies(t *testing.T) {
 		provider, model     string
 		wantWrite, wantRead float64
 	}{
-		{"CLAUDEAI", "claude-sonnet-5", 3.0 * 1.25, 3.0 * 0.10},
+		{"CLAUDEAI", "claude-sonnet-5", 2.0 * 1.25, 2.0 * 0.10},
+		// Fable 5.1 reads at 2.5% of input ($0.25), writes keep 1.25x.
+		{"CLAUDEAI", "claude-fable-5-1", 10.0 * 1.25, 10.0 * 0.025},
+		{"BEDROCK", "anthropic.claude-fable-5-1", 10.0 * 1.25, 10.0 * 0.025},
+		{"CLAUDEAI", "claude-fable-5", 10.0 * 1.25, 10.0 * 0.10}, // Fable 5 keeps the 10% rule
 		{"OPENAI", "gpt-4o", 0, 2.50 * 0.50},
 		{"GOOGLEAI", "gemini-2.5-pro", 0, 1.25 * 0.25},
 		{"DEEPSEEK", "deepseek-chat", 0, 0.27 * 0.25},
-		{"XAI", "grok-4.6", 0, 0}, // no published cache rate → no discount
+		// xAI cached input (docs.x.ai pricing, Sep 2026): $0.50 on 4.6,
+		// $0.30 on 4.5, $0.20 on the 4.3/4.20 tier.
+		{"XAI", "grok-4.6", 0, 0.50},
+		{"XAI", "grok-4.5", 0, 0.30},
+		{"XAI", "grok-4.3", 0, 1.25 * 0.16},
 		{"UNKNOWN", "no-such-model", 0, 0},
 	}
 	for _, c := range cases {
@@ -91,9 +99,9 @@ func TestRecomputeCostCacheSubsetSemantics(t *testing.T) {
 		IsReal:               true,
 	})
 	rec2 := ct2.modelUsage[modelKey("CLAUDEAI", "claude-sonnet-5")]
-	// 1M at $3.00 + 400K at $0.30 = 3.00 + 0.12
-	if !almostEqual(rec2.TotalCostUSD, 3.12) {
-		t.Fatalf("additive cache cost = %v, want 3.12", rec2.TotalCostUSD)
+	// 1M at $2.00 + 400K at $0.20 = 2.00 + 0.08
+	if !almostEqual(rec2.TotalCostUSD, 2.08) {
+		t.Fatalf("additive cache cost = %v, want 2.08", rec2.TotalCostUSD)
 	}
 }
 
@@ -173,15 +181,15 @@ func TestCacheSemanticsFollowReportingSchema(t *testing.T) {
 
 	t.Setenv("HOME", t.TempDir())
 	ct := NewCostTracker()
-	// 100K prompt (90K cached subset) via openrouter: 10K at $3/M + 90K at
-	// the claude cache-read rate ($0.30/M) = 0.03 + 0.027.
+	// 100K prompt (90K cached subset) via openrouter: 10K at $2/M + 90K at
+	// the claude cache-read rate ($0.20/M) = 0.02 + 0.018.
 	ct.RecordRealUsage("OPENROUTER", "anthropic/claude-sonnet-5", &models.UsageInfo{
 		PromptTokens:         100_000,
 		CacheReadInputTokens: 90_000,
 		IsReal:               true,
 	})
-	if got := ct.TotalCost(); !almostEqual(got, 0.03+0.027) {
-		t.Fatalf("openrouter claude cache math = %v, want 0.057", got)
+	if got := ct.TotalCost(); !almostEqual(got, 0.02+0.018) {
+		t.Fatalf("openrouter claude cache math = %v, want 0.038", got)
 	}
 }
 

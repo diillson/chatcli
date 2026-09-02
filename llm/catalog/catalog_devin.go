@@ -30,7 +30,11 @@ func init() {
 		out int
 	}
 	devinModels := []devinModel{
-		// Anthropic family (specs mirror the CLAUDEAI entries).
+		// Anthropic family (specs mirror the CLAUDEAI entries). Fable 5.1
+		// (Cognition blog, Aug 31 2026) and Fable 5 are back in the Devin
+		// model table; 5.1 MUST precede 5 (dotted prefix rule above).
+		{"claude-fable-5.1", 1000000, 128000},
+		{"claude-fable-5", 1000000, 128000},
 		{"claude-opus-5", 1000000, 128000},
 		{"claude-sonnet-5", 1000000, 128000},
 		{"claude-opus-4.8", 1000000, 128000},
@@ -53,6 +57,7 @@ func init() {
 		{"gpt-5.1", 400000, 128000},
 		{"gpt-4.1", 1047576, 32768},
 		// Google family (Gemini 3.x: 1M window / 65K output).
+		{"gemini-3.7-flash", 1048576, 65536},
 		{"gemini-3.6-flash", 1048576, 65536},
 		{"gemini-3.5-flash", 1048576, 65536},
 		{"gemini-3.1-pro", 1048576, 65536},
@@ -67,6 +72,12 @@ func init() {
 		{"kimi-k2.7", 262144, 131072},
 		{"kimi-k2.6", 262144, 131072},
 		{"deepseek-v4-pro", 1000000, 32000},
+		{"deepseek-v4-flash", 1000000, 32000},
+		// xAI (docs.devin.ai/desktop/models: grok-4-6-* / grok-4-5-*):
+		// 500K window per docs.x.ai; output follows the XAI block's 16K
+		// convention since xAI publishes no cap.
+		{"grok-4.6", 500000, 16384},
+		{"grok-4.5", 500000, 16384},
 		// Cognition in-house (Windsurf SWE line): no published specs —
 		// conservative profile until Cognition documents them.
 		{"swe-1.7-lightning", 200000, 32000},

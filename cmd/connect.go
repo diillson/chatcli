@@ -85,7 +85,7 @@ func RunConnect(ctx context.Context, args []string, llmMgr manager.LLMManager, l
 	fs.StringVar(&opts.ClientAPIKey, "llm-key", os.Getenv("CHATCLI_CLIENT_API_KEY"), "Your own LLM API key/OAuth token (forwarded to server)")
 	fs.BoolVar(&opts.UseLocalAuth, "use-local-auth", false, "Use OAuth/API key from local auth store (~/.chatcli/auth-profiles.json)")
 	fs.StringVar(&opts.Provider, "provider", "", "Override server's default LLM provider (e.g., OPENAI, CLAUDEAI, GOOGLEAI, XAI, ZAI, MINIMAX, STACKSPOT, OLLAMA, COPILOT)")
-	fs.StringVar(&opts.Model, "model", "", "Override server's default LLM model (e.g., gpt-4, gemini-2.0-flash)")
+	fs.StringVar(&opts.Model, "model", "", "Override server's default LLM model (e.g., gpt-5.6-sol, gemini-2.5-flash)")
 	fs.StringVar(&opts.ClientID, "client-id", "", "StackSpot: Client ID for authentication")
 	fs.StringVar(&opts.ClientKey, "client-key", "", "StackSpot: Client Key for authentication")
 	fs.StringVar(&opts.Realm, "realm", "", "StackSpot: Realm/Tenant")
@@ -266,7 +266,7 @@ Flags:
   --addr <host:port>    Server address (env: CHATCLI_REMOTE_ADDR)
   --token <string>      Server auth token (env: CHATCLI_REMOTE_TOKEN)
   --provider <string>   Override LLM provider (OPENAI, CLAUDEAI, GOOGLEAI, XAI, ZAI, MINIMAX, STACKSPOT, OLLAMA, COPILOT)
-  --model <string>      Override LLM model (e.g., gpt-4, gemini-2.0-flash)
+  --model <string>      Override LLM model (e.g., gpt-5.6-sol, gemini-2.5-flash)
   --llm-key <string>    Your own LLM API key/OAuth token (env: CHATCLI_CLIENT_API_KEY)
   --use-local-auth      Use OAuth credentials from local auth store (from /auth login)
   --tls                 Enable TLS connection

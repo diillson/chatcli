@@ -23,6 +23,15 @@ func TestResolveFamily(t *testing.T) {
 		{"openai gpt-oss 120b", "", "openai.gpt-oss-120b-1:0", familyOpenAI},
 		{"openai gpt-oss 20b", "", "openai.gpt-oss-20b-1:0", familyOpenAI},
 		{"openai via regional profile", "", "us.openai.gpt-oss-120b-1:0", familyOpenAI},
+		// GPT-5.6 on Bedrock has no InvokeModel surface: the catalog flags
+		// the ids bedrock_converse_only and they must skip the "openai."
+		// vendor sniff — with or without the BEDROCK_PROVIDER override.
+		{"gpt-5.6 sol global profile is converse", "", "global.openai.gpt-5.6-sol", familyConverse},
+		{"gpt-5.6 terra bare id is converse", "", "openai.gpt-5.6-terra", familyConverse},
+		{"gpt-5.6 luna us profile is converse", "", "us.openai.gpt-5.6-luna", familyConverse},
+		{"env openai ignored for gpt-5.6", "openai", "global.openai.gpt-5.6-sol", familyConverse},
+		{"env anthropic ignored for gpt-5.6", "anthropic", "openai.gpt-5.6-terra", familyConverse},
+		{"grok on bedrock is converse", "", "global.xai.grok-4.6", familyConverse},
 
 		// Unknown / non-Anthropic / non-OpenAI prefixes route to Converse —
 		// one schema covers Llama, Nova, Mistral, Cohere, AI21, DeepSeek,

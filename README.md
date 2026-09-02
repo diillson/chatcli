@@ -291,7 +291,7 @@ helm install chatcli oci://ghcr.io/diillson/charts/chatcli \
 | **Anthropic (Claude)** | claude-sonnet-4-6 | Native | Yes | Extended thinking with cache |
 | **AWS Bedrock** | claude-sonnet-4-5 | Native | Yes | Thinking budget (Anthropic models) |
 | **Google Gemini** | gemini-2.5-flash | Native | Yes | — |
-| **xAI (Grok)** | grok-4-1 | XML fallback | — | — |
+| **xAI (Grok)** | grok-4.3 | XML fallback | — | — |
 | **ZAI (Zhipu AI)** | glm-5 | Native | Yes | `ZAI_THINKING=enabled\|disabled` · GLM Coding Plan via `ZAI_USE_CODING_PLAN` |
 | **MiniMax** | MiniMax-M2.7 | Native | Yes | — |
 | **Moonshot (Kimi)** | kimi-k2.6 | Native | Yes | `MOONSHOT_THINKING=enabled\|disabled\|auto` |

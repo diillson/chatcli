@@ -15,27 +15,45 @@ func TestResolve(t *testing.T) {
 		shouldFind bool
 	}{
 		{"Exact Match OpenAI", ProviderOpenAI, "gpt-4o-mini", "gpt-4o-mini", true},
-		{"Alias Match ClaudeAI", ProviderClaudeAI, "claude-3-5-sonnet", "claude-sonnet-3-5-20241022", true},
-		{"Prefix Match ClaudeAI", ProviderClaudeAI, "claude-3-5-sonnet-20241022-preview", "claude-sonnet-3-5-20241022", true},
+		{"Alias Match ClaudeAI", ProviderClaudeAI, "claude-4-5-sonnet", "claude-sonnet-4-5", true},
+		{"Prefix Match ClaudeAI", ProviderClaudeAI, "claude-sonnet-4-5-20250929", "claude-sonnet-4-5", true},
 		{"Case Insensitive", ProviderOpenAI, "GPT-4O", "gpt-4o", true},
-		{"Gemini Flash Lite", ProviderGoogleAI, "gemini-2.0-flash-lite", "gemini-2.0-flash-lite", true},
+		{"Gemini Flash Lite", ProviderGoogleAI, "gemini-3.5-flash-lite", "gemini-3.5-flash-lite", true},
 		{"GPT-5 Alias", ProviderOpenAI, "gpt-5-mini", "gpt-5", true},
 		{"Not Found", ProviderOpenAI, "gpt-nonexistent", "", false},
 		{"Wrong Provider", ProviderStackSpot, "gpt-4o", "", false},
-		// Regression: the bare "opus-4" alias on the 4.0 entry is a prefix
-		// of all opus-4-X shortcuts. Newer entries MUST be declared first
-		// in the registry so their exact-alias match wins over 4.0's
-		// loose prefix match. Each of these silently resolved to the 4.0
-		// entry (ctx=20K) before the fix.
+		// Regression: newer entries MUST be declared first in the registry
+		// so their exact-alias match wins over an older entry's loose
+		// prefix match ("fable-5" ⊂ "fable-5-1", "gpt-5.4" ⊂ "gpt-5.4-mini").
 		{"Claude Opus 4.5 shortcut", ProviderClaudeAI, "opus-4-5", "claude-opus-4-5", true},
 		{"Claude Opus 4.6 shortcut", ProviderClaudeAI, "opus-4-6", "claude-opus-4-6", true},
 		{"Claude Opus 4.7 shortcut", ProviderClaudeAI, "opus-4-7", "claude-opus-4-7", true},
 		{"Claude Opus 4.7 full ID", ProviderClaudeAI, "claude-opus-4-7", "claude-opus-4-7", true},
 		{"Claude Opus 4.8 shortcut", ProviderClaudeAI, "opus-4-8", "claude-opus-4-8", true},
 		{"Claude Opus 4.8 full ID", ProviderClaudeAI, "claude-opus-4-8", "claude-opus-4-8", true},
-		{"Claude Sonnet 4.7 shortcut", ProviderClaudeAI, "sonnet-4-7", "claude-sonnet-4-7", true},
-		// Backward compat: bare "opus-4" still resolves to the 4.0 entry
-		{"Claude Opus 4 bare alias", ProviderClaudeAI, "opus-4", "claude-opus-4-20250514", true},
+		{"Claude Fable 5.1 shortcut", ProviderClaudeAI, "fable-5-1", "claude-fable-5-1", true},
+		{"Claude Fable 5.1 dotted", ProviderClaudeAI, "claude-fable-5.1", "claude-fable-5-1", true},
+		{"Claude Fable 5 stays pinned", ProviderClaudeAI, "fable-5", "claude-fable-5", true},
+		// Retired on the Claude API (Sep 2026) and removed: a stale pin
+		// must NOT silently land on another entry.
+		{"Claude Sonnet 4.7 never shipped", ProviderClaudeAI, "sonnet-4-7", "", false},
+		{"Claude Opus 4 retired", ProviderClaudeAI, "claude-opus-4-20250514", "", false},
+		{"Claude Sonnet 4 retired", ProviderClaudeAI, "claude-sonnet-4-20250514", "", false},
+		{"Claude 3.5 Sonnet retired", ProviderClaudeAI, "claude-3-5-sonnet-20241022", "", false},
+		// "gpt-5.3" (never a real model) rides the gpt-5 generation entry
+		// by prefix — same 400K / 128K profile, so the loose match is
+		// harmless; what matters is that it no longer lands on a bogus
+		// 200K / 100K entry.
+		{"GPT-5.3 bare rides gpt-5 by prefix", ProviderOpenAI, "gpt-5.3", "gpt-5", true},
+		{"GPT-5.4 mini own entry", ProviderOpenAI, "gpt-5.4-mini", "gpt-5.4-mini", true},
+		{"GPT-5.4 nano rides mini", ProviderOpenAI, "gpt-5.4-nano", "gpt-5.4-mini", true},
+		{"GPT-5.4 pro rides base", ProviderOpenAI, "gpt-5.4-pro", "gpt-5.4", true},
+		{"Gemini 2.0 shut down", ProviderGoogleAI, "gemini-2.0-flash", "", false},
+		{"Gemini 3 Pro preview shut down", ProviderGoogleAI, "gemini-3-pro-preview", "", false},
+		{"Grok 3 retired", ProviderXAI, "grok-3", "", false},
+		{"Grok code fast rides build", ProviderXAI, "grok-code-fast-1", "grok-build-0.1", true},
+		{"Kimi K2.5 retired", ProviderMoonshot, "kimi-k2.5", "", false},
+		{"moonshot-v1 retired", ProviderMoonshot, "moonshot-v1-128k", "", false},
 		// gpt-5.5 family — released Apr 23 2026. Pin both the base and
 		// the pro variant; the registry order also matters here so 5.5
 		// is not shadowed by an earlier 5.x prefix match.
@@ -59,11 +77,15 @@ func TestGetMaxTokens(t *testing.T) {
 	tokens := GetMaxTokens(ProviderOpenAI, "gpt-4o", 12345)
 	assert.Equal(t, 12345, tokens, "Override should have the highest priority")
 
-	// Caso 2: Valor do catálogo. Haiku 3 expõe 4096 tokens de output
-	// (limite real publicado pela Anthropic, não o número conservador
-	// inflado de 42K que o catálogo carregava antes da auditoria).
+	// Caso 2: Valor do catálogo. Haiku 4.5 expõe 64K tokens de output
+	// (limite real publicado pela Anthropic).
+	tokens = GetMaxTokens(ProviderClaudeAI, "claude-haiku-4-5", 0)
+	assert.Equal(t, 64000, tokens, "Should get value from catalog for claude-haiku-4-5")
+
+	// Caso 2b: modelo Claude aposentado (removido do catálogo) cai no
+	// fallback do provider em vez de um valor obsoleto.
 	tokens = GetMaxTokens(ProviderClaudeAI, "claude-3-haiku", 0)
-	assert.Equal(t, 4096, tokens, "Should get value from catalog for claude-3-haiku")
+	assert.Equal(t, 64000, tokens, "retired claude-3-haiku must use the ClaudeAI fallback")
 
 	// Caso 3: Fallback para modelo desconhecido. Após a auditoria de
 	// catálogo (Abr 2026) os fallbacks foram alinhados com os limites
@@ -168,25 +190,34 @@ func TestMoonshotCatalogEntries(t *testing.T) {
 	assert.True(t, ok)
 	assert.Equal(t, "kimi-k2.7-code", bare.ID)
 
-	// Pin the public specs of the Kimi K2.6/K2.5 entries so silent drift on
-	// the model card (e.g. catalog edits during a refactor) shows up here
+	// Pin the public specs of the Kimi K2.6 entry so silent drift on the
+	// model card (e.g. catalog edits during a refactor) shows up here
 	// instead of at runtime.
-	for _, id := range []string{"kimi-k2.6", "kimi-k2.5", "kimi-latest"} {
-		meta, ok := Resolve(ProviderMoonshot, id)
-		assert.True(t, ok, "expected %s to resolve", id)
-		assert.Equal(t, 262144, meta.ContextWindow, "%s context window", id)
-		assert.Contains(t, meta.Capabilities, "tools", "%s should advertise tools", id)
-		assert.Contains(t, meta.Capabilities, "thinking", "%s should advertise thinking", id)
+	k26, ok := Resolve(ProviderMoonshot, "kimi-k2.6")
+	assert.True(t, ok, "expected kimi-k2.6 to resolve")
+	assert.Equal(t, 262144, k26.ContextWindow)
+	assert.Contains(t, k26.Capabilities, "tools")
+	assert.Contains(t, k26.Capabilities, "thinking")
+
+	// Retired by Moonshot (kimi-k2.5 + moonshot-v1-* on Aug 31 2026, the
+	// K2 previews on May 25 2026, kimi-latest on Jan 28 2026,
+	// kimi-thinking-preview on Nov 11 2025): the API answers 404, so the
+	// catalog must not resolve them to anything — the provider fallback
+	// (256K / 128K) is the honest answer for a stale pin.
+	for _, id := range []string{
+		"kimi-k2.5", "kimi-latest", "kimi-k2-turbo-preview", "kimi-thinking-preview",
+		"moonshot-v1-8k", "moonshot-v1-32k", "moonshot-v1-128k",
+	} {
+		_, ok := Resolve(ProviderMoonshot, id)
+		assert.False(t, ok, "%s was retired by Moonshot and must not resolve", id)
+		assert.Equal(t, 262144, GetContextWindow(ProviderMoonshot, id), "%s fallback window", id)
 	}
-
-	// moonshot-v1-* family is the classic split — verify both ends.
-	v18k, ok := Resolve(ProviderMoonshot, "moonshot-v1-8k")
-	assert.True(t, ok)
-	assert.Equal(t, 8192, v18k.ContextWindow)
-
-	v1128k, ok := Resolve(ProviderMoonshot, "moonshot-v1-128k")
-	assert.True(t, ok)
-	assert.Equal(t, 131072, v1128k.ContextWindow)
+	// The registry must hold exactly the four ids Moonshot still serves.
+	var ids []string
+	for _, m := range ListByProvider(ProviderMoonshot) {
+		ids = append(ids, m.ID)
+	}
+	assert.ElementsMatch(t, []string{"kimi-k3", "kimi-k2.7-code-highspeed", "kimi-k2.7-code", "kimi-k2.6"}, ids)
 }
 
 func TestGetPreferredAPI(t *testing.T) {
@@ -212,8 +243,52 @@ func TestGetPreferredAPI(t *testing.T) {
 // fast_mode must NOT be advertised — the speed parameter is not documented
 // for Fable 5, and advertising it would make the claudeai client emit
 // `speed:"fast"` on a model that may reject it.
+// TestClaudeFable51Specs pins Fable 5.1 (Sep 1 2026): same 1M / 128K
+// profile and capability flags as Fable 5, listed AHEAD of it because
+// "fable-5" is a prefix of "fable-5-1" in Resolve's alias pass. The bare
+// "fable" shortcut now tracks 5.1 (the newest Fable), while "fable-5"
+// stays pinned on the legacy entry.
+func TestClaudeFable51Specs(t *testing.T) {
+	for _, id := range []string{"claude-fable-5-1", "fable-5-1", "claude-fable-5.1", "fable-5.1", "fable"} {
+		meta, ok := Resolve(ProviderClaudeAI, id)
+		if !assert.True(t, ok, "expected %s to resolve on ProviderClaudeAI", id) {
+			continue
+		}
+		assert.Equal(t, "claude-fable-5-1", meta.ID, "alias %s must resolve to claude-fable-5-1", id)
+		assert.Equal(t, 1000000, meta.ContextWindow, "Fable 5.1 context window is 1M tokens")
+		assert.Equal(t, 128000, meta.MaxOutputTokens, "Fable 5.1 max output is 128K")
+		assert.Equal(t, APIAnthropicMessages, meta.PreferredAPI)
+	}
+	for _, capability := range []string{
+		"tools", "json_mode", "vision", "adaptive_thinking", "mid_conversation_system",
+	} {
+		assert.True(t,
+			HasCapability(ProviderClaudeAI, "claude-fable-5-1", capability),
+			"claude-fable-5-1 should advertise %q capability", capability)
+	}
+	assert.False(t,
+		HasCapability(ProviderClaudeAI, "claude-fable-5-1", "fast_mode"),
+		"claude-fable-5-1 must not advertise fast_mode (Opus 5 / 4.8 only)")
+	assert.Equal(t, 1000000, GetContextWindow(ProviderClaudeAI, "claude-fable-5-1"))
+	assert.Equal(t, 128000, GetMaxTokens(ProviderClaudeAI, "claude-fable-5-1", 0))
+}
+
+// TestClaudeSonnet46Output pins the Sep 2026 correction: Sonnet 4.6 is
+// 128K max output on the synchronous Claude API (model page), while its
+// Bedrock mirror stays at the 64K the AWS model card documents.
+func TestClaudeSonnet46Output(t *testing.T) {
+	meta, ok := Resolve(ProviderClaudeAI, "claude-sonnet-4-6")
+	assert.True(t, ok)
+	assert.Equal(t, 1000000, meta.ContextWindow)
+	assert.Equal(t, 128000, meta.MaxOutputTokens, "Sonnet 4.6 output on the Claude API is 128K")
+
+	bedrock, ok := Resolve(ProviderBedrock, "global.anthropic.claude-sonnet-4-6")
+	assert.True(t, ok)
+	assert.Equal(t, 64000, bedrock.MaxOutputTokens, "Sonnet 4.6 output on Bedrock is 64K per the AWS card")
+}
+
 func TestClaudeFable5Specs(t *testing.T) {
-	for _, id := range []string{"claude-fable-5", "fable-5", "fable"} {
+	for _, id := range []string{"claude-fable-5", "fable-5"} {
 		meta, ok := Resolve(ProviderClaudeAI, id)
 		assert.True(t, ok, "expected %s to resolve on ProviderClaudeAI", id)
 		assert.Equal(t, "claude-fable-5", meta.ID, "alias %s must resolve to claude-fable-5", id)
@@ -305,9 +380,11 @@ func TestClaudeOpus5Specs(t *testing.T) {
 	m48, ok := Resolve(ProviderClaudeAI, "claude-opus-4-8")
 	assert.True(t, ok)
 	assert.Equal(t, "claude-opus-4-8", m48.ID)
+	// Opus 4 was retired (Jun 15 2026) and its entry removed: the bare
+	// "opus-4" alias must resolve to nothing rather than to Opus 5 or to
+	// an opus-4.x entry by loose prefix.
 	m40, ok := Resolve(ProviderClaudeAI, "opus-4")
-	assert.True(t, ok)
-	assert.NotEqual(t, "claude-opus-5", m40.ID, "generic opus-4 alias must not land on Opus 5")
+	assert.False(t, ok, "retired opus-4 must not resolve (got %q)", m40.ID)
 }
 
 // TestClaudeSonnet5Specs pins the published Sonnet 5 specs (models
@@ -409,6 +486,7 @@ func TestOpenRouterAnthropic5Family(t *testing.T) {
 	for _, id := range []string{
 		"anthropic/claude-opus-5",
 		"anthropic/claude-sonnet-5",
+		"anthropic/claude-fable-5.1",
 		"anthropic/claude-fable-5",
 	} {
 		meta, ok := Resolve(ProviderOpenRouter, id)
@@ -560,9 +638,14 @@ func TestGPT56FamilyEntries(t *testing.T) {
 // provider filter keeps DEVIN entries from shadowing other providers.
 func TestDevinCatalogEntries(t *testing.T) {
 	for id, wantCtx := range map[string]int{
+		"claude-fable-5.1":  1000000,
+		"claude-fable-5":    1000000,
 		"claude-opus-5":     1000000,
 		"claude-sonnet-5":   1000000,
 		"claude-sonnet-4.6": 1000000,
+		"gemini-3.7-flash":  1048576,
+		"grok-4.6":          500000,
+		"deepseek-v4-flash": 1000000,
 		"claude-sonnet-4.5": 200000,
 		"claude-sonnet-4":   200000,
 		"gpt-5.6-luna":      1050000,
@@ -720,12 +803,13 @@ func TestOpenAIAssistantContextWindowFallback(t *testing.T) {
 // windows collapsed onto the provider fallback.
 func TestBedrockNovaEntries(t *testing.T) {
 	for model, wantCtx := range map[string]int{
-		"amazon.nova-micro-v1:0":      128000,
-		"amazon.nova-lite-v1:0":       300000,
-		"amazon.nova-pro-v1:0":        300000,
-		"amazon.nova-premier-v1:0":    1000000,
-		"us.amazon.nova-pro-v1:0":     300000, // cross-region inference profile spelling
-		"us.amazon.nova-premier-v1:0": 1000000,
+		"amazon.nova-micro-v1:0":         128000,
+		"amazon.nova-lite-v1:0":          300000,
+		"amazon.nova-pro-v1:0":           300000,
+		"us.amazon.nova-pro-v1:0":        300000, // cross-region inference profile spelling
+		"amazon.nova-2-lite-v1:0":        1000000,
+		"global.amazon.nova-2-lite-v1:0": 1000000,
+		"eu.amazon.nova-2-lite-v1:0":     1000000,
 	} {
 		meta, ok := Resolve(ProviderBedrock, model)
 		assert.True(t, ok, "expected %s to resolve for BEDROCK", model)
@@ -742,15 +826,18 @@ func TestBedrockNovaEntries(t *testing.T) {
 // whatever spelling the operator configured.
 func TestBedrockFamily5ProfileAliases(t *testing.T) {
 	cases := map[string]string{
-		"us.anthropic.claude-fable-5":      "anthropic.claude-fable-5",
-		"global.anthropic.claude-fable-5":  "anthropic.claude-fable-5",
-		"us.anthropic.claude-opus-5":       "anthropic.claude-opus-5",
-		"eu.anthropic.claude-opus-5":       "anthropic.claude-opus-5",
-		"au.anthropic.claude-opus-5":       "anthropic.claude-opus-5",
-		"us.anthropic.claude-sonnet-5":     "anthropic.claude-sonnet-5",
-		"eu.anthropic.claude-sonnet-5":     "anthropic.claude-sonnet-5",
-		"au.anthropic.claude-sonnet-5":     "anthropic.claude-sonnet-5",
-		"global.anthropic.claude-sonnet-5": "anthropic.claude-sonnet-5",
+		"us.anthropic.claude-fable-5-1":     "anthropic.claude-fable-5-1",
+		"global.anthropic.claude-fable-5-1": "anthropic.claude-fable-5-1",
+		"claude-fable-5-1":                  "anthropic.claude-fable-5-1",
+		"us.anthropic.claude-fable-5":       "anthropic.claude-fable-5",
+		"global.anthropic.claude-fable-5":   "anthropic.claude-fable-5",
+		"us.anthropic.claude-opus-5":        "anthropic.claude-opus-5",
+		"eu.anthropic.claude-opus-5":        "anthropic.claude-opus-5",
+		"au.anthropic.claude-opus-5":        "anthropic.claude-opus-5",
+		"us.anthropic.claude-sonnet-5":      "anthropic.claude-sonnet-5",
+		"eu.anthropic.claude-sonnet-5":      "anthropic.claude-sonnet-5",
+		"au.anthropic.claude-sonnet-5":      "anthropic.claude-sonnet-5",
+		"global.anthropic.claude-sonnet-5":  "anthropic.claude-sonnet-5",
 	}
 	for id, want := range cases {
 		meta, ok := Resolve(ProviderBedrock, id)
