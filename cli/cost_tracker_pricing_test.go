@@ -16,7 +16,16 @@ func TestGetModelPricing(t *testing.T) {
 		wantIn, wantOut float64
 	}{
 		// Anthropic
+		{"claude fable 5.1", "CLAUDEAI", "claude-fable-5-1", 10.0, 50.0},
+		{"claude fable 5.1 bedrock id", "BEDROCK", "anthropic.claude-fable-5-1", 10.0, 50.0},
+		{"claude fable 5.1 openrouter slug", "OPENROUTER", "anthropic/claude-fable-5.1", 10.0, 50.0},
 		{"claude fable 5", "CLAUDEAI", "claude-fable-5", 10.0, 50.0},
+		// Sonnet 5 kept its $2/$10 launch price permanently (Anthropic
+		// cancelled the Sep 2026 increase) — the specific case must win
+		// before the generic $3/$15 sonnet tier in every spelling.
+		{"claude sonnet 5", "CLAUDEAI", "claude-sonnet-5", 2.0, 10.0},
+		{"claude sonnet 5 bedrock id", "BEDROCK", "global.anthropic.claude-sonnet-5", 2.0, 10.0},
+		{"claude sonnet 5 openrouter slug", "OPENROUTER", "anthropic/claude-sonnet-5", 2.0, 10.0},
 		{"claude opus 4.8", "CLAUDEAI", "claude-opus-4-8", 5.0, 25.0},
 		{"claude opus 4.7", "CLAUDEAI", "claude-opus-4-7", 5.0, 25.0},
 		{"claude opus 4.6 bedrock id", "BEDROCK", "global.anthropic.claude-opus-4-6-20260115-v1:0", 5.0, 25.0},
@@ -39,8 +48,28 @@ func TestGetModelPricing(t *testing.T) {
 		// catalog resolves to Sol.
 		{"gpt-5.6-terra before gpt-5.6", "OPENAI", "gpt-5.6-terra", 2.0, 12.0},
 		{"gpt-5.6-luna before gpt-5.6", "OPENAI", "gpt-5.6-luna", 0.20, 1.20},
-		{"gpt-5.6 generic is sol", "OPENAI", "gpt-5.6-sol", 5.0, 30.0},
-		{"gpt-5.6 bare alias", "OPENAI", "gpt-5.6", 5.0, 30.0},
+		// Sol dropped to $4/$20 on Aug 21 2026 (promotional "at least
+		// through Nov 21 2026").
+		{"gpt-5.6 generic is sol", "OPENAI", "gpt-5.6-sol", 4.0, 20.0},
+		{"gpt-5.6 bare alias", "OPENAI", "gpt-5.6", 4.0, 20.0},
+		{"gpt-5.6 sol bedrock id", "BEDROCK", "global.openai.gpt-5.6-sol", 4.0, 20.0},
+		// gpt-5.5 … gpt-5: every id below 5.6 used to fall through to
+		// "unknown" (zero). Pro/mini/nano before the base of each
+		// generation.
+		{"gpt-5.5-pro before gpt-5.5", "OPENAI", "gpt-5.5-pro", 30.0, 180.0},
+		{"gpt-5.5", "OPENAI", "gpt-5.5", 5.0, 30.0},
+		{"gpt-5.4-pro before gpt-5.4", "OPENAI", "gpt-5.4-pro", 30.0, 180.0},
+		{"gpt-5.4-mini", "OPENAI", "gpt-5.4-mini", 0.75, 4.50},
+		{"gpt-5.4-nano", "OPENAI", "gpt-5.4-nano", 0.20, 1.25},
+		{"gpt-5.4", "OPENAI", "gpt-5.4", 2.50, 15.0},
+		{"gpt-5.3-codex", "OPENAI", "gpt-5.3-codex", 1.75, 14.0},
+		{"gpt-5.2-pro before gpt-5.2", "OPENAI", "gpt-5.2-pro", 21.0, 168.0},
+		{"gpt-5.2", "OPENAI", "gpt-5.2", 1.75, 14.0},
+		{"gpt-5-pro before gpt-5", "OPENAI", "gpt-5-pro", 15.0, 120.0},
+		{"gpt-5-mini", "OPENAI", "gpt-5-mini", 0.25, 2.0},
+		{"gpt-5-nano", "OPENAI", "gpt-5-nano", 0.05, 0.40},
+		{"gpt-5.1 same tier as gpt-5", "OPENAI", "gpt-5.1", 1.25, 10.0},
+		{"gpt-5", "OPENAI", "gpt-5", 1.25, 10.0},
 		{"gpt-4o-mini before gpt-4o", "OPENAI", "gpt-4o-mini", 0.15, 0.60},
 		{"gpt-4o", "OPENAI", "gpt-4o", 2.50, 10.0},
 		{"gpt-4-turbo", "OPENAI", "gpt-4-turbo", 10.0, 30.0},
@@ -78,7 +107,12 @@ func TestGetModelPricing(t *testing.T) {
 		{"grok-4.3", "XAI", "grok-4.3", 1.25, 2.50},
 		{"grok-4.20 reasoning", "XAI", "grok-4.20-0309-reasoning", 1.25, 2.50},
 		{"grok-build", "XAI", "grok-build-0.1", 1.0, 2.0},
-		{"grok-3", "XAI", "grok-3", 3.0, 15.0},
+		// Retired May 15 2026: xAI redirects these slugs to grok-4.3 and
+		// bills grok-4.3 rates; grok-code-fast-1 is now grok-build-0.1.
+		{"grok-3 redirected to 4.3 rates", "XAI", "grok-3", 1.25, 2.50},
+		{"grok-4-fast redirected to 4.3 rates", "XAI", "grok-4-fast-reasoning", 1.25, 2.50},
+		{"grok-code-fast-1 is grok-build", "XAI", "grok-code-fast-1", 1.0, 2.0},
+		{"grok-4.6 on bedrock", "BEDROCK", "global.xai.grok-4.6", 2.0, 6.0},
 		{"grok-2", "XAI", "grok-2", 2.0, 10.0},
 		{"grok generic", "XAI", "grok-4", 5.0, 15.0},
 
@@ -106,7 +140,15 @@ func TestGetModelPricing(t *testing.T) {
 		{"glm-5v-turbo own tier", "ZAI", "glm-5v-turbo", 1.20, 4.00},
 		{"glm-5 via glm model", "OTHER", "glm-5", 1.00, 3.20},
 		{"zai via provider", "ZAI", "anything", 0.50, 0.50},
-		{"zai legacy glm model", "OTHER", "glm-4.5", 0.50, 0.50},
+		// GLM-4.x list prices (docs.z.ai, Sep 2026): flash tiers are free,
+		// flashx/air/airx/x have their own rows ahead of the family base.
+		{"glm-4.7-flashx before glm-4.7-flash", "ZAI", "glm-4.7-flashx", 0.07, 0.40},
+		{"glm-4.7-flash is free", "ZAI", "glm-4.7-flash", 0.0, 0.0},
+		{"glm-4.5-airx before air", "ZAI", "glm-4.5-airx", 1.10, 4.50},
+		{"glm-4.5-air", "ZAI", "glm-4.5-air", 0.20, 1.10},
+		{"glm-4.5v vision tier", "ZAI", "glm-4.5v", 0.60, 1.80},
+		{"glm-4.7 base", "ZAI", "glm-4.7", 0.60, 2.20},
+		{"glm-4.5 base via other provider", "OTHER", "glm-4.5", 0.60, 2.20},
 
 		// Moonshot (Kimi) — K3 has its own list price (well above the K2
 		// line) and its specific case must win over the generic kimi match;
@@ -117,8 +159,10 @@ func TestGetModelPricing(t *testing.T) {
 		{"kimi-k2.7-code-highspeed own tier", "MOONSHOT", "kimi-k2.7-code-highspeed", 1.90, 8.00},
 		{"kimi-k2.7-code standard tier", "MOONSHOT", "kimi-k2.7-code", 0.95, 4.00},
 		{"moonshot via provider", "MOONSHOT", "kimi-k2.6", 0.95, 4.00},
-		{"kimi-k2.5", "MOONSHOT", "kimi-k2.5", 0.95, 4.00},
-		{"moonshot-v1", "MOONSHOT", "moonshot-v1-128k", 0.95, 4.00},
+		// Retired ids (Aug 31 2026) keep the generic tier so a stale
+		// session log still prices instead of reporting zero.
+		{"kimi-k2.5 retired keeps generic tier", "MOONSHOT", "kimi-k2.5", 0.95, 4.00},
+		{"moonshot-v1 retired keeps generic tier", "MOONSHOT", "moonshot-v1-128k", 0.95, 4.00},
 
 		{"copilot", "COPILOT", "gpt-4o", 2.50, 10.0},
 		{"ollama zero", "OLLAMA", "llama3", 0.0, 0.0},

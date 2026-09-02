@@ -858,6 +858,12 @@ func claudePricing(model string) (float64, float64, bool) {
 	case strings.Contains(model, "opus"):
 		// Opus 3 / 4.0 / 4.1 legacy pricing.
 		return 15.0, 75.0, true
+	case strings.Contains(model, "sonnet-5"):
+		// Sonnet 5: the $2/$10 launch rate became the permanent list price
+		// (Anthropic cancelled the Sep 1 2026 increase). Must precede the
+		// generic "sonnet" tier below; the substring also covers the
+		// Bedrock (anthropic.claude-sonnet-5) and OpenRouter spellings.
+		return 2.0, 10.0, true
 	case strings.Contains(model, "sonnet"):
 		return 3.0, 15.0, true
 	case strings.Contains(model, "haiku-4-5"):
@@ -873,19 +879,52 @@ func claudePricing(model string) (float64, float64, bool) {
 // ("gpt-4o").
 func openAIPricing(model string) (float64, float64, bool) {
 	switch {
-	// gpt-5.6 (Jul 2026): preços de lista da API por tier, já refletindo
-	// os cortes de 30/Jul/2026 (terra −20%, luna −80%; Sol inalterado —
-	// developers.openai.com/docs/pricing). O caso genérico "gpt-5.6"
-	// cobre o alias de família (que o catálogo resolve para Sol) e
-	// precisa vir depois dos tiers específicos. O surcharge de
+	// gpt-5.6 (Jul 2026): preços de lista da API por tier
+	// (developers.openai.com/api/docs/pricing, Set/2026): terra e luna
+	// desde o corte de 30/Jul; Sol caiu para $4/$20 em 21/Ago ("pelo
+	// menos até 21/Nov/2026" — revisar na virada). O caso genérico
+	// "gpt-5.6" cobre o alias de família (que o catálogo resolve para
+	// Sol) e precisa vir depois dos tiers específicos. O surcharge de
 	// long-context (>272K input = 2×/1,5×) não é modelado — cost_tracker
-	// trabalha com um único tier por modelo.
+	// trabalha com um único tier por modelo. Os mesmos casos cobrem os
+	// ids do Bedrock (global.openai.gpt-5.6-*), que a AWS cobra igual no
+	// endpoint global.
 	case strings.Contains(model, "gpt-5.6-terra"):
 		return 2.0, 12.0, true
 	case strings.Contains(model, "gpt-5.6-luna"):
 		return 0.20, 1.20, true
 	case strings.Contains(model, "gpt-5.6"):
+		return 4.0, 20.0, true
+	// gpt-5.5 … gpt-5 (developers.openai.com/api/docs/pricing, Set/2026).
+	// Antes desta tabela todo id 5.x abaixo do 5.6 caía em "desconhecido"
+	// e o /cost reportava zero. Pro/mini/nano específicos antes do tier
+	// base de cada geração; "gpt-5.1" compartilha a tarifa do gpt-5.
+	case strings.Contains(model, "gpt-5.5-pro"):
+		return 30.0, 180.0, true
+	case strings.Contains(model, "gpt-5.5"):
 		return 5.0, 30.0, true
+	case strings.Contains(model, "gpt-5.4-pro"):
+		return 30.0, 180.0, true
+	case strings.Contains(model, "gpt-5.4-mini"):
+		return 0.75, 4.50, true
+	case strings.Contains(model, "gpt-5.4-nano"):
+		return 0.20, 1.25, true
+	case strings.Contains(model, "gpt-5.4"):
+		return 2.50, 15.0, true
+	case strings.Contains(model, "gpt-5.3-codex"):
+		return 1.75, 14.0, true
+	case strings.Contains(model, "gpt-5.2-pro"):
+		return 21.0, 168.0, true
+	case strings.Contains(model, "gpt-5.2"):
+		return 1.75, 14.0, true
+	case strings.Contains(model, "gpt-5-pro"):
+		return 15.0, 120.0, true
+	case strings.Contains(model, "gpt-5-mini"):
+		return 0.25, 2.0, true
+	case strings.Contains(model, "gpt-5-nano"):
+		return 0.05, 0.40, true
+	case strings.Contains(model, "gpt-5.1"), strings.Contains(model, "gpt-5"):
+		return 1.25, 10.0, true
 	case strings.Contains(model, "gpt-4o-mini"):
 		return 0.15, 0.60, true
 	case strings.Contains(model, "gpt-4o"):
@@ -960,10 +999,15 @@ func grokPricing(model string) (float64, float64, bool) {
 		return 2.0, 6.0, true
 	case strings.Contains(model, "grok-4.3"), strings.Contains(model, "grok-4.20"):
 		return 1.25, 2.50, true
-	case strings.Contains(model, "grok-build"):
+	case strings.Contains(model, "grok-build"), strings.Contains(model, "grok-code-fast"):
+		// grok-code-fast-1 became an alias of grok-build-0.1 on May 15 2026.
 		return 1.0, 2.0, true
-	case strings.Contains(model, "grok-3"):
-		return 3.0, 15.0, true
+	case strings.Contains(model, "grok-3"), strings.Contains(model, "grok-4-"):
+		// Retired May 15 2026 (grok-3, grok-3-mini, grok-4-0709,
+		// grok-4-fast-*, grok-4-1-fast-*): xAI keeps the slugs alive but
+		// redirects them to grok-4.3 and bills grok-4.3 rates
+		// (docs.x.ai/developers/migration/may-15-retirement).
+		return 1.25, 2.50, true
 	case strings.Contains(model, "grok-2"):
 		return 2.0, 10.0, true
 	case strings.Contains(model, "grok"):
@@ -994,6 +1038,29 @@ func zaiPricing(model string) (float64, float64, bool) {
 		return 1.20, 4.00, true
 	case strings.Contains(model, "glm-5"):
 		return 1.00, 3.20, true
+	// GLM-4.x list prices (docs.z.ai/guides/overview/pricing, Set/2026).
+	// Variantes "-flash" são gratuitas (known=true com tarifa zero, como
+	// Ollama); "-flashx" e "-air/-airx/-x" têm tier próprio e precisam
+	// vir antes do id base da geração, que é prefixo delas.
+	case strings.Contains(model, "glm-4.7-flashx"):
+		return 0.07, 0.40, true
+	case strings.Contains(model, "glm-4.7-flash"), strings.Contains(model, "glm-4.5-flash"),
+		strings.Contains(model, "glm-4.6v-flash") && !strings.Contains(model, "flashx"):
+		return 0, 0, true
+	case strings.Contains(model, "glm-4.6v-flashx"):
+		return 0.04, 0.40, true
+	case strings.Contains(model, "glm-4.6v"):
+		return 0.30, 0.90, true
+	case strings.Contains(model, "glm-4.5-airx"):
+		return 1.10, 4.50, true
+	case strings.Contains(model, "glm-4.5-air"):
+		return 0.20, 1.10, true
+	case strings.Contains(model, "glm-4.5-x"):
+		return 2.20, 8.90, true
+	case strings.Contains(model, "glm-4.5v"):
+		return 0.60, 1.80, true
+	case strings.Contains(model, "glm-4.7"), strings.Contains(model, "glm-4.6"), strings.Contains(model, "glm-4.5"):
+		return 0.60, 2.20, true
 	}
 	return 0, 0, false
 }
@@ -1031,8 +1098,8 @@ func deepseekPricing(model string) (float64, float64, bool) {
 // kimi-k2.6 as of 2026-05 is $0.95/M input (cache miss) and $4.00/M
 // output; cache-hit input is $0.16/M but cost_tracker only models a
 // single tier — we charge the miss price so accounting stays
-// conservative. K2.5 and moonshot-v1-* sit below K2.6; we approximate
-// with K2.6 numbers to avoid under-reporting.
+// conservative. Retired ids (kimi-k2.5, moonshot-v1-*) keep this
+// tier so old session logs still price instead of reporting zero.
 func providerFallbackPricing(provider, model string) (float64, float64, bool) {
 	switch {
 	case strings.Contains(model, "minimax"), strings.Contains(provider, "minimax"):
@@ -1089,9 +1156,26 @@ func getCachePricing(provider, model string) (cacheWriteCost, cacheReadCost floa
 	}
 
 	switch {
+	case strings.Contains(model, "fable-5-1"), strings.Contains(model, "fable-5.1"):
+		// Fable 5.1: cache reads at $0.25/MTok = 2.5% of the $10 input
+		// price (platform.claude.com/docs/en/models/fable-5-1/overview);
+		// writes keep the 1.25x rule ($12.50). Must precede the generic
+		// Claude case, which would bill reads at 10% ($1).
+		return inputCost * 1.25, inputCost * 0.025
 	case strings.Contains(model, "claude"):
 		// Anthropic: write = 1.25x input, read = 0.1x input.
 		return inputCost * 1.25, inputCost * 0.10
+	case strings.Contains(model, "grok"):
+		// xAI (docs.x.ai/developers/pricing, Set/2026): cached input
+		// $0.50 em grok-4.6 (25% do input), $0.30 em grok-4.5 (15%),
+		// $0.20 nos demais (16% de $1.25). Sem surcharge de escrita.
+		switch {
+		case strings.Contains(model, "grok-4.6"):
+			return 0, inputCost * 0.25
+		case strings.Contains(model, "grok-4.5"):
+			return 0, inputCost * 0.15
+		}
+		return 0, inputCost * 0.16
 	case strings.Contains(model, "gemini"):
 		// Google implicit/context caching: reads at 25% of input.
 		return 0, inputCost * 0.25

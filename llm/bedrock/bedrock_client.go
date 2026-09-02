@@ -74,6 +74,15 @@ func isConverseOnlyVendor(model string) bool {
 	return false
 }
 
+// isConverseOnlyModel extends the vendor list with per-model catalog
+// knowledge: some ids under an otherwise InvokeModel-capable vendor prefix
+// (openai.gpt-5.6-*) only exist on Converse, and the catalog marks them
+// with the bedrock_converse_only capability.
+func isConverseOnlyModel(model string) bool {
+	return isConverseOnlyVendor(model) ||
+		catalog.HasCapability(catalog.ProviderBedrock, model, "bedrock_converse_only")
+}
+
 // resolveFamily picks the dispatch path. Precedence:
 //  1. BEDROCK_PROVIDER env var ("anthropic"/"claude", "openai"/"gpt",
 //     "converse"/"auto") — except for Converse-only vendor ids, where a
@@ -90,16 +99,23 @@ func isConverseOnlyVendor(model string) bool {
 func resolveFamily(model string) modelFamily {
 	switch strings.ToLower(strings.TrimSpace(os.Getenv("BEDROCK_PROVIDER"))) {
 	case "openai", "gpt":
-		if isConverseOnlyVendor(model) {
+		if isConverseOnlyModel(model) {
 			return familyConverse
 		}
 		return familyOpenAI
 	case "anthropic", "claude":
-		if isConverseOnlyVendor(model) {
+		if isConverseOnlyModel(model) {
 			return familyConverse
 		}
 		return familyAnthropic
 	case "converse", "auto":
+		return familyConverse
+	}
+	// Catalog entries flagged bedrock_converse_only (GPT-5.6 Sol/Terra/
+	// Luna: Converse/Responses/Chat Completions on AWS, InvokeModel
+	// unsupported) must never reach the vendor sniff below, which would
+	// route the "openai." prefix down the gpt-oss InvokeModel path.
+	if catalog.HasCapability(catalog.ProviderBedrock, model, "bedrock_converse_only") {
 		return familyConverse
 	}
 	// Um application inference profile carrega um ARN opaco sem nenhuma

@@ -43,7 +43,10 @@ const (
 	DefaultGoogleAITimeout = 5 * time.Minute
 
 	// Valores padrão para xAI
-	DefaultXAIModel = "grok-4-1"
+	// grok-4.3: xAI retired the grok-4-1-fast line on May 15 2026 and now
+	// redirects those slugs to grok-4.3 (1M context, $1.25/$2.50) — the
+	// default follows the redirect target instead of a dead id.
+	DefaultXAIModel = "grok-4.3"
 	XAIAPIURL       = "https://api.x.ai/v1/chat/completions"
 
 	// Valores padrão para ZAI (Zhipu AI / z.ai)
@@ -86,7 +89,7 @@ const (
 	OpenRouterAPIURL       = "https://openrouter.ai/api/v1/chat/completions"
 
 	// Valores padrão para AWS Bedrock (modelos Anthropic Claude)
-	// Model ids seguem o formato Bedrock (ex.: "anthropic.claude-3-5-sonnet-20241022-v2:0").
+	// Model ids seguem o formato Bedrock (ex.: "global.anthropic.claude-sonnet-4-6").
 	// Para inference profiles regionais, use o prefixo apropriado (ex.: "us.anthropic.claude-sonnet-4-20250514-v1:0").
 	// Default usa inference profile global (exigido por modelos 3.7+ / 4.x+).
 	// Sonnet 4.6 espelha o DefaultClaudeAIModel — mesmo tier de preço do

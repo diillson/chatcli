@@ -143,43 +143,61 @@ var registry = []ModelMeta{
 		PreferredAPI:    APIResponses,
 		Capabilities:    []string{"vision", "tools", "json_mode"},
 	},
+	// gpt-5.4 family — specs re-verified on developers.openai.com/api/docs/
+	// models (Sep 2026): the base model runs the same 1,050,000 / 128K
+	// profile as 5.5/5.6 (plus gpt-5.4-pro, Responses-only, $30/$180),
+	// while mini and nano sit on the 400K / 128K profile — so the tiers
+	// need their own entry. The mini entry MUST precede the base one:
+	// "gpt-5.4" is a prefix of "gpt-5.4-mini" and would swallow it in the
+	// tier-2 alias pass. The previous 200K / 100K values were guesses
+	// inherited from the o-series and undersized every 5.x request.
 	{
-		ID:              "gpt-5.4",
-		Aliases:         []string{"gpt-5.4", "gpt-5.4-mini", "gpt-5.4-nano"},
-		DisplayName:     "GPT-5.4",
+		ID:              "gpt-5.4-mini",
+		Aliases:         []string{"gpt-5.4-mini", "gpt-5.4-nano"},
+		DisplayName:     "GPT-5.4 mini",
 		Provider:        ProviderOpenAI,
-		ContextWindow:   200000,
-		MaxOutputTokens: 100000,
+		ContextWindow:   400000,
+		MaxOutputTokens: 128000,
 		PreferredAPI:    APIResponses,
 		Capabilities:    []string{"vision", "json_mode", "tools"},
 	},
 	{
+		ID:              "gpt-5.4",
+		Aliases:         []string{"gpt-5.4", "gpt-5.4-pro"},
+		DisplayName:     "GPT-5.4",
+		Provider:        ProviderOpenAI,
+		ContextWindow:   1050000,
+		MaxOutputTokens: 128000,
+		PreferredAPI:    APIResponses,
+		Capabilities:    []string{"vision", "json_mode", "tools"},
+	},
+	{
+		// gpt-5.3-codex: 400K context (272K max input) / 128K output,
+		// Responses-only. The bare "gpt-5.3" / "-mini" / "-nano" aliases
+		// were dropped: no such models exist on the API (404 on the model
+		// docs, absent from /models/all). gpt-5.3-codex-spark was removed
+		// for the same reason — it is a Codex-app-only model
+		// ("API Access: false"), never a platform id.
 		ID:              "gpt-5.3-codex",
-		Aliases:         []string{"gpt-5.3-codex", "gpt-5.3", "gpt-5.3-mini", "gpt-5.3-nano"},
+		Aliases:         []string{"gpt-5.3-codex"},
 		DisplayName:     "GPT-5.3 Codex",
 		Provider:        ProviderOpenAI,
-		ContextWindow:   200000,
-		MaxOutputTokens: 100000,
+		ContextWindow:   400000,
+		MaxOutputTokens: 128000,
 		PreferredAPI:    APIResponses,
 		Capabilities:    []string{"json_mode", "tools"},
 	},
 	{
-		ID:              "gpt-5.3-codex-spark",
-		Aliases:         []string{"gpt-5.3-codex-spark"},
-		DisplayName:     "GPT-5.3 Codex Spark (Pro)",
-		Provider:        ProviderOpenAI,
-		ContextWindow:   200000,
-		MaxOutputTokens: 100000,
-		PreferredAPI:    APIResponses,
-		Capabilities:    []string{"json_mode", "tools"},
-	},
-	{
+		// gpt-5.2 (Dec 11 2025): 400K context / 128K output, Chat
+		// Completions + Responses. gpt-5.2-pro shares the window
+		// (Responses-only, $21/$168). No mini/nano tier was ever
+		// published for 5.2 — those aliases were removed.
 		ID:              "gpt-5.2",
-		Aliases:         []string{"gpt-5.2", "gpt-5.2-mini", "gpt-5.2-nano"},
+		Aliases:         []string{"gpt-5.2", "gpt-5.2-pro"},
 		DisplayName:     "GPT-5.2",
 		Provider:        ProviderOpenAI,
-		ContextWindow:   200000,
-		MaxOutputTokens: 100000,
+		ContextWindow:   400000,
+		MaxOutputTokens: 128000,
 		PreferredAPI:    APIResponses,
 		Capabilities:    []string{"vision", "json_mode", "tools"},
 	},
@@ -281,21 +299,14 @@ var registry = []ModelMeta{
 	},
 	// Claude 4 e 4.1 (sonnet/opus). Specs grounded in Anthropic's official
 	// models page (platform.claude.com/docs/en/docs/about-claude/models/overview).
-	{
-		// Sonnet 4 (claude-sonnet-4-20250514): deprecated, retires Jun 15
-		// 2026. Real specs: 200K context, 64K max output. Previous catalog
-		// value (50K/50K) was a conservative override that masked the model's
-		// actual capacity and caused premature compaction.
-		ID:              "claude-sonnet-4",
-		Aliases:         []string{"claude-4-sonnet", "sonnet-4-20250514", "claude-4-sonnet-"},
-		DisplayName:     "Claude sonnet 4",
-		Provider:        ProviderClaudeAI,
-		ContextWindow:   200000,
-		MaxOutputTokens: 64000,
-		PreferredAPI:    APIAnthropicMessages,
-		APIVersion:      config.ClaudeAIAPIVersionDefault,
-		Capabilities:    []string{"vision", "json_mode", "tools"},
-	},
+	// Retired on the Claude API (platform.claude.com/docs/en/about-claude/
+	// model-deprecations, checked Sep 2 2026) and therefore removed from
+	// the first-party block: Sonnet 4 and Opus 4 (Jun 15 2026), Opus 4.1
+	// (Aug 5 2026) and every 3.x model (Sonnet 3.5 Oct 2025, Opus 3 Jan
+	// 2026, Sonnet 3.7 / Haiku 3.5 Feb 2026, Haiku 3 Apr 2026). Requests
+	// naming them fail server-side, so a catalog entry only misleads
+	// sizing. Bedrock keeps its own lifecycle — the ones AWS still serves
+	// stay in the ProviderBedrock block.
 	{
 		// Sonnet 4.5: 200K context, 64K max output. 1M context available
 		// via beta header; default registry tracks the GA limit.
@@ -310,14 +321,17 @@ var registry = []ModelMeta{
 		Capabilities:    []string{"vision", "json_mode", "tools"},
 	},
 	{
-		// Sonnet 4.6: 1M context, 64K max output (per Anthropic). Previous
-		// catalog (200K/128K) had output inflated and ctx undersized.
+		// Sonnet 4.6: 1M context, 128K max output on the synchronous
+		// Messages API (platform.claude.com/docs/en/models/sonnet-4-6/
+		// overview, Sep 2026; 300K on Batch with the output-300k beta).
+		// The earlier 64K value was the pre-Mar-2026 limit and throttled
+		// long agent turns for no reason.
 		ID:              "claude-sonnet-4-6",
 		Aliases:         []string{"claude-4-6-sonnet", "sonnet-4-6", "claude-4-6-sonnet-", "claude-sonnet-4-6-"},
 		DisplayName:     "Claude sonnet 4.6 (1M context)",
 		Provider:        ProviderClaudeAI,
 		ContextWindow:   1000000,
-		MaxOutputTokens: 64000,
+		MaxOutputTokens: 128000,
 		PreferredAPI:    APIAnthropicMessages,
 		APIVersion:      config.ClaudeAIAPIVersionDefault,
 		Capabilities:    []string{"vision", "json_mode", "tools"},
@@ -336,16 +350,48 @@ var registry = []ModelMeta{
 		APIVersion:      config.ClaudeAIAPIVersionDefault,
 		Capabilities:    []string{"vision", "json_mode", "tools"},
 	},
-	// NOTE: Claude 4.x entries are ordered newest-first below. The Resolve()
-	// tier-2 alias match iterates the registry in order and returns on first
-	// hit. Because the 4.0 entry carries the generic alias "opus-4", which
-	// is a prefix of "opus-4-5/6/7/8", the newer entries MUST be iterated
-	// first so their exact aliases (e.g. "opus-4-8") win before 4.0's
-	// loose prefix match fires. Reversing this order reintroduces a latent
-	// bug where "opus-4-6" silently resolves to the 4.0 entry (20K ctx).
+	// NOTE: Claude 5.x/4.x entries are ordered newest-first below. The
+	// Resolve() tier-2 alias match iterates the registry in order and
+	// returns on the first prefix/contains hit, so an older entry whose
+	// alias is a prefix of a newer id ("fable-5" ⊂ "fable-5-1") MUST come
+	// after the newer one. Reversing this order silently resolves
+	// "fable-5-1" to the Fable 5 entry (wrong cache price, wrong
+	// capability flags).
 	{
-		// Fable 5 (claude-fable-5): Anthropic's most capable model — a new
-		// tier ABOVE Opus. 1M context, 128K max output, $10/$50 per MTok
+		// Fable 5.1 (claude-fable-5-1, Sep 1 2026): successor to Fable 5 in
+		// the same tier above Opus, same $10/$50 per MTok, but cache reads
+		// at $0.25/MTok (2.5% of input instead of the usual 10% — see
+		// cli/cost_tracker.go getCachePricing). 1M context, 128K max
+		// output, thinking ALWAYS on (adaptive; an explicit
+		// thinking:{type:"disabled"} or budget_tokens returns 400 — the
+		// claudeai client omits the field unless effort routing fires).
+		// Three breaking changes vs Fable 5 (platform.claude.com/docs/en/
+		// models/fable-5-1/whats-new-fable-5-1): forced tool_choice
+		// ("any"/"tool") returns 400 — this client only ever sends
+		// tool_choice auto; thinking blocks are bound to the producing
+		// model (other models drop them silently); editing earlier turns
+		// invalidates thinking blocks. mid_conversation_system is served
+		// (same as Fable 5 / Opus 5). No fast_mode, no Priority Tier.
+		// Requires 30-day data retention (ZDR orgs get 400).
+		// The bare "fable" shortcut tracks the newest Fable release.
+		ID:              "claude-fable-5-1",
+		Aliases:         []string{"claude-fable-5-1", "fable-5-1", "claude-fable-5.1", "fable-5.1", "fable"},
+		DisplayName:     "Claude Fable 5.1 (1M context)",
+		Provider:        ProviderClaudeAI,
+		ContextWindow:   1000000,
+		MaxOutputTokens: 128000,
+		PreferredAPI:    APIAnthropicMessages,
+		APIVersion:      config.ClaudeAIAPIVersionDefault,
+		Capabilities: []string{
+			"vision",
+			"json_mode", "tools",
+			"adaptive_thinking", "mid_conversation_system",
+		},
+	},
+	{
+		// Fable 5 (claude-fable-5, Jun 9 2026): legacy since Fable 5.1
+		// shipped, still served (retirement not before Jun 9 2027). Same
+		// tier above Opus: 1M context, 128K max output, $10/$50 per MTok
 		// (see cli/cost_tracker.go claudePricing). Same API surface as
 		// Opus 4.7/4.8 (no temperature/top_p/top_k; adaptive thinking only —
 		// budgeted thinking returns 400) with one extra constraint: an
@@ -354,9 +400,10 @@ var registry = []ModelMeta{
 		// already complies: it only attaches a thinking block when effort
 		// routing fires, and adaptive_thinking routes that to
 		// {type:"adaptive"}. No fast_mode: the speed parameter is not
-		// documented for Fable 5.
+		// documented for Fable 5. "fable-5" stays pinned here; the bare
+		// "fable" shortcut moved to 5.1.
 		ID:              "claude-fable-5",
-		Aliases:         []string{"claude-fable-5", "fable-5", "fable"},
+		Aliases:         []string{"claude-fable-5", "fable-5"},
 		DisplayName:     "Claude Fable 5 (1M context)",
 		Provider:        ProviderClaudeAI,
 		ContextWindow:   1000000,
@@ -395,8 +442,11 @@ var registry = []ModelMeta{
 		// Sonnet 5 (claude-sonnet-5, Jun 2026): the Sonnet-tier successor —
 		// Anthropic skipped a "Sonnet 4.7"/"4.8" and jumped straight to 5.
 		// 1M context, 128K max output, adaptive thinking (effort defaults to
-		// "high" server-side on the Claude API). $3/$15 per MTok (intro
-		// $2/$10 through Aug 31 2026 — cost_tracker uses the standard rate).
+		// "high" server-side on the Claude API). $2/$10 per MTok: the
+		// launch "introductory" rate became the permanent list price —
+		// Anthropic cancelled the Sep 1 2026 increase to $3/$15
+		// (platform.claude.com/docs/en/about-claude/pricing), so
+		// cost_tracker's claudePricing has an explicit sonnet-5 case.
 		// No fast_mode (Opus-tier research preview only) and no
 		// mid_conversation_system (documented for Opus 4.8 only). Dateless
 		// pinned-snapshot ID per the Jun 2026 models overview.
@@ -456,25 +506,10 @@ var registry = []ModelMeta{
 		APIVersion:      config.ClaudeAIAPIVersionDefault,
 		Capabilities:    []string{"vision", "json_mode", "tools", "adaptive_thinking"},
 	},
-	{
-		// Sonnet 4.7: NOT in the Anthropic GA matrix as of Apr 2026 (the
-		// current shipping line is Opus 4.7 + Sonnet 4.6 + Haiku 4.5,
-		// per https://platform.claude.com/docs/en/about-claude/models/overview).
-		// This entry is a forward-projected alias placeholder so existing
-		// tests and any caller pinning the tag don't break; the profile
-		// mirrors Sonnet 4.6 (1M / 64K). Replace with real specs the
-		// moment Anthropic publishes them — do not treat this as ground
-		// truth.
-		ID:              "claude-sonnet-4-7",
-		Aliases:         []string{"claude-4-7-sonnet", "sonnet-4-7", "claude-sonnet-4-7-"},
-		DisplayName:     "Claude sonnet 4.7",
-		Provider:        ProviderClaudeAI,
-		ContextWindow:   1000000,
-		MaxOutputTokens: 64000,
-		PreferredAPI:    APIAnthropicMessages,
-		APIVersion:      config.ClaudeAIAPIVersionDefault,
-		Capabilities:    []string{"vision", "json_mode", "tools"},
-	},
+	// There is no Sonnet 4.7: Anthropic went from Sonnet 4.6 straight to
+	// Sonnet 5. The forward-projected placeholder that used to sit here
+	// was removed once the Sep 2026 models overview confirmed it never
+	// shipped — "sonnet-4-7" now resolves to nothing, as it should.
 	{
 		// Opus 4.6: 1M context, 128K max output (per Anthropic legacy
 		// table). Previous 400K/64K underrepresented both dimensions.
@@ -500,103 +535,9 @@ var registry = []ModelMeta{
 		APIVersion:      config.ClaudeAIAPIVersionDefault,
 		Capabilities:    []string{"vision", "json_mode", "tools"},
 	},
-	{
-		// Opus 4.1: 200K context, 32K max output. Previous 20K/20K was a
-		// holdover from an early conservative override and made the model
-		// trip auto-compact at ~80K chars unnecessarily.
-		ID:              "claude-opus-4-1-20250805",
-		Aliases:         []string{"claude-opus-4-1", "opus-4-1", "claude-opus-4-1-20250805"},
-		DisplayName:     "Claude opus 4.1",
-		Provider:        ProviderClaudeAI,
-		ContextWindow:   200000,
-		MaxOutputTokens: 32000,
-		PreferredAPI:    APIAnthropicMessages,
-		APIVersion:      config.ClaudeAIAPIVersionDefault,
-		Capabilities:    []string{"vision", "json_mode", "tools"},
-	},
-	{
-		// Opus 4.0 (deprecated, retires Jun 15 2026): 200K context, 32K
-		// max output. Same correction rationale as 4.1.
-		ID:              "claude-opus-4-20250514",
-		Aliases:         []string{"opus-4", "claude-opus-4-20250514"},
-		DisplayName:     "Claude opus 4",
-		Provider:        ProviderClaudeAI,
-		ContextWindow:   200000,
-		MaxOutputTokens: 32000,
-		PreferredAPI:    APIAnthropicMessages,
-		APIVersion:      config.ClaudeAIAPIVersionDefault,
-		Capabilities:    []string{"vision", "json_mode", "tools"},
-	},
-	// Claude 3.x — specs from Anthropic's legacy/3.x docs. All 3.x models
-	// share the 200K input window; max output varies by version.
-	{
-		// Sonnet 3.5 (claude-3-5-sonnet-20241022, "v2"): 200K / 8192.
-		ID:              "claude-sonnet-3-5-20241022",
-		Aliases:         []string{"claude-3-5-sonnet", "claude-3-5-sonnet-20241022"},
-		DisplayName:     "Claude sonnet 3.5",
-		Provider:        ProviderClaudeAI,
-		ContextWindow:   200000,
-		MaxOutputTokens: 8192,
-		PreferredAPI:    APIAnthropicMessages,
-		APIVersion:      config.ClaudeAIAPIVersionDefault,
-		Capabilities:    []string{"vision", "json_mode", "tools"},
-	},
-	{
-		// Haiku 3.5 (claude-3-5-haiku-20241022): 200K / 8192. Was missing
-		// from the ProviderClaudeAI side; only Bedrock had it.
-		ID:              "claude-haiku-3-5-20241022",
-		Aliases:         []string{"claude-3-5-haiku", "claude-3-5-haiku-20241022"},
-		DisplayName:     "Claude haiku 3.5",
-		Provider:        ProviderClaudeAI,
-		ContextWindow:   200000,
-		MaxOutputTokens: 8192,
-		PreferredAPI:    APIAnthropicMessages,
-		APIVersion:      config.ClaudeAIAPIVersionDefault,
-		Capabilities:    []string{"json_mode", "tools"},
-	},
-	{
-		// Sonnet 3.7 (claude-3-7-sonnet-20250219): 200K context / 8192 max
-		// output on the synchronous Messages API (the default any client
-		// hits without opt-in headers). Extended thinking can raise
-		// output to 64K, but only when the caller explicitly sends the
-		// `output-128k-2025-02-19` beta header — pinning the catalog at
-		// 64K silently throws 400 errors for every regular call. We
-		// track the safe default; callers that opt into extended
-		// thinking can override at request time.
-		ID:              "claude-sonnet-3-7-20250219",
-		Aliases:         []string{"claude-3-7-sonnet", "claude-3-7-sonnet-20250219"},
-		DisplayName:     "Claude sonnet 3.7",
-		Provider:        ProviderClaudeAI,
-		ContextWindow:   200000,
-		MaxOutputTokens: 8192,
-		PreferredAPI:    APIAnthropicMessages,
-		APIVersion:      config.ClaudeAIAPIVersionDefault,
-		Capabilities:    []string{"vision", "json_mode", "tools"},
-	},
-	{
-		// Haiku 3 (claude-3-haiku-20240307): 200K / 4096.
-		ID:              "claude-haiku-3",
-		Aliases:         []string{"claude-3-haiku", "claude-3-haiku-20240307"},
-		DisplayName:     "Claude haiku 3",
-		Provider:        ProviderClaudeAI,
-		ContextWindow:   200000,
-		MaxOutputTokens: 4096,
-		PreferredAPI:    APIAnthropicMessages,
-		APIVersion:      config.ClaudeAIAPIVersionDefault,
-		Capabilities:    []string{"vision", "json_mode"},
-	},
-	{
-		// Opus 3 (claude-3-opus-20240229): 200K / 4096.
-		ID:              "claude-opus-3",
-		Aliases:         []string{"claude-3-opus", "claude-3-opus-20240229"},
-		DisplayName:     "Claude opus 3",
-		Provider:        ProviderClaudeAI,
-		ContextWindow:   200000,
-		MaxOutputTokens: 4096,
-		PreferredAPI:    APIAnthropicMessages,
-		APIVersion:      config.ClaudeAIAPIVersionDefault,
-		Capabilities:    []string{"vision", "json_mode", "tools"},
-	},
+	// Opus 4.1 (retired Aug 5 2026), Opus 4 (Jun 15 2026) and the whole
+	// Claude 3.x line used to sit here — see the retirement note above
+	// the Sonnet 4.5 entry.
 	// Google Gemini Models. Specs from ai.google.dev model docs:
 	// every Gemini 2.x/3.x exposes a 1,048,576-token input window with a
 	// 65,536-token max output (8,192 on the older 2.0 generation). The
@@ -604,12 +545,14 @@ var registry = []ModelMeta{
 	// is physically impossible — the API rejects requests with output
 	// over the per-model cap.
 	//
-	// Gemini 3.x generation (verified per-model on ai.google.dev, Aug
-	// 2026): 3.7-flash (GA Aug 13 2026), 3.6-flash (Jul 21 2026),
-	// 3.5-flash, 3.5-flash-lite and 3.1-flash-lite stable; 3.1-pro-preview
-	// and 3-flash-preview in preview. The whole generation shares the
-	// uniform 1,048,576 / 65,536 profile. Newest first so generic alias
-	// prefixes ("gemini-3") don't shadow the more specific ids.
+	// Gemini 3.x generation (re-verified per-model on ai.google.dev, Sep 2
+	// 2026 — nothing newer than 3.7 Flash has shipped): 3.7-flash (GA Aug
+	// 13 2026), 3.6-flash (Jul 21 2026), 3.5-flash, 3.5-flash-lite and
+	// 3.1-flash-lite stable; 3.1-pro-preview and 3-flash-preview in
+	// preview. "gemini-3.1-pro" without -preview is NOT a real model code
+	// (kept only as an alias). The whole generation shares the uniform
+	// 1,048,576 / 65,536 profile. Newest first so generic alias prefixes
+	// don't shadow the more specific ids.
 	{
 		ID:              "gemini-3.7-flash",
 		Aliases:         []string{"gemini-3.7-flash", "gemini-3.7-flash-latest"},
@@ -691,18 +634,6 @@ var registry = []ModelMeta{
 		Capabilities:    []string{"vision", "tools", "json_mode", "code_execution"},
 	},
 	{
-		// Gemini 3 Pro (preview): 1M context, 65K output. Conservative
-		// projection until Google publishes 3.x specs.
-		ID:              "gemini-3",
-		Aliases:         []string{"gemini-3-pro", "gemini-3-pro-preview"},
-		DisplayName:     "Gemini 3 Pro",
-		Provider:        ProviderGoogleAI,
-		ContextWindow:   1048576,
-		MaxOutputTokens: 65536,
-		PreferredAPI:    "gemini_api",
-		Capabilities:    []string{"vision", "tools", "json_mode", "code_execution"},
-	},
-	{
 		ID:              "gemini-2.5-flash",
 		Aliases:         []string{"gemini-2.5-flash"},
 		DisplayName:     "Gemini 2.5 Flash",
@@ -722,28 +653,13 @@ var registry = []ModelMeta{
 		PreferredAPI:    "gemini_api",
 		Capabilities:    []string{"vision", "tools", "json_mode", "multimodal_live"},
 	},
-	{
-		// Gemini 2.0 Flash (deprecated): 1,048,576 input / 8,192 output.
-		ID:              "gemini-2.0-flash",
-		Aliases:         []string{"gemini-2.0-flash"},
-		DisplayName:     "Gemini 2.0 Flash",
-		Provider:        ProviderGoogleAI,
-		ContextWindow:   1048576,
-		MaxOutputTokens: 8192,
-		PreferredAPI:    "gemini_api",
-		Capabilities:    []string{"vision", "tools", "json_mode"},
-	},
-	{
-		// Gemini 2.0 Flash Lite (deprecated): 1,048,576 input / 8,192 output.
-		ID:              "gemini-2.0-flash-lite",
-		Aliases:         []string{"gemini-2.0-flash-lite"},
-		DisplayName:     "Gemini 2.0 Flash Lite",
-		Provider:        ProviderGoogleAI,
-		ContextWindow:   1048576,
-		MaxOutputTokens: 8192,
-		PreferredAPI:    "gemini_api",
-		Capabilities:    []string{"vision", "tools", "json_mode", "multimodal_live"},
-	},
+	// Shut down by Google (ai.google.dev/gemini-api/docs/deprecations,
+	// checked Sep 2 2026) and removed from ProviderGoogleAI:
+	// gemini-2.0-flash / gemini-2.0-flash-lite (Jun 1 2026) and
+	// gemini-3-pro-preview (Mar 9 2026, replaced by gemini-3.1-pro-preview).
+	// Next scheduled: gemini-3.1-flash-lite retires May 7 2027 → migrate
+	// to gemini-3.5-flash-lite. The Copilot-side gemini-2.0-flash entries
+	// below follow GitHub's lifecycle, not Google's, and stay.
 	// GitHub Copilot Models (accessible via Copilot subscription)
 	{
 		ID:              "gpt-4o",
@@ -899,7 +815,7 @@ var registry = []ModelMeta{
 	},
 	{
 		ID:              "grok-4.5",
-		Aliases:         []string{"grok-4.5", "grok-4.5-latest"},
+		Aliases:         []string{"grok-4.5", "grok-4.5-latest", "grok-build-latest"},
 		DisplayName:     "Grok-4.5",
 		Provider:        ProviderXAI,
 		ContextWindow:   500000,
@@ -949,7 +865,7 @@ var registry = []ModelMeta{
 	},
 	{
 		ID:              "grok-build-0.1",
-		Aliases:         []string{"grok-build-0.1", "grok-build"},
+		Aliases:         []string{"grok-build-0.1", "grok-build-0", "grok-code-fast-1", "grok-code-fast"},
 		DisplayName:     "Grok Build 0.1",
 		Provider:        ProviderXAI,
 		ContextWindow:   256000,
@@ -957,64 +873,13 @@ var registry = []ModelMeta{
 		PreferredAPI:    APIChatCompletions,
 		Capabilities:    []string{"vision", "tools", "json_mode"},
 	},
-	{
-		// grok-4-fast: 2M context. xAI does not document a separate output
-		// cap; we ceil at 16K to keep the value comparable to other models
-		// and avoid runaway generations on retry.
-		ID:              "grok-4-fast",
-		Aliases:         []string{"grok-4-fast-reasoning-latest", "grok-4-fast-reasoning", "grok-4-0709"},
-		DisplayName:     "Grok-4 Fast",
-		Provider:        ProviderXAI,
-		ContextWindow:   2000000,
-		MaxOutputTokens: 16384,
-		PreferredAPI:    APIChatCompletions,
-		Capabilities:    []string{"vision", "tools", "json_mode"},
-	},
-	{
-		// grok-4-1: forward variant; tracked at the same 2M / 16K profile
-		// until xAI publishes distinct specs.
-		ID:              "grok-4-1",
-		Aliases:         []string{"grok-4-1-fast", "grok-4-1-fast-reasoning-latest"},
-		DisplayName:     "Grok-4-1",
-		Provider:        ProviderXAI,
-		ContextWindow:   2000000,
-		MaxOutputTokens: 16384,
-		PreferredAPI:    APIChatCompletions,
-		Capabilities:    []string{"vision", "tools", "json_mode"},
-	},
-	{
-		// grok-3: 131,072 context (128K), 16K max output.
-		ID:              "grok-3",
-		Aliases:         []string{"grok-3"},
-		DisplayName:     "Grok-3",
-		Provider:        ProviderXAI,
-		ContextWindow:   131072,
-		MaxOutputTokens: 16384,
-		PreferredAPI:    APIChatCompletions,
-		Capabilities:    []string{"json_mode"},
-	},
-	{
-		// grok-3-mini: same 131,072 / 16K profile as grok-3.
-		ID:              "grok-3-mini",
-		Aliases:         []string{"grok-3-mini"},
-		DisplayName:     "Grok-3 Mini",
-		Provider:        ProviderXAI,
-		ContextWindow:   131072,
-		MaxOutputTokens: 16384,
-		PreferredAPI:    APIChatCompletions,
-		Capabilities:    []string{"json_mode"},
-	},
-	{
-		// grok-code-fast-1: 256K context. Coding-tuned variant.
-		ID:              "grok-code-fast-1",
-		Aliases:         []string{"grok-code-fast-1"},
-		DisplayName:     "Grok Code Fast 1",
-		Provider:        ProviderXAI,
-		ContextWindow:   256000,
-		MaxOutputTokens: 16384,
-		PreferredAPI:    APIChatCompletions,
-		Capabilities:    []string{"json_mode"},
-	},
+	// Retired by xAI on May 15 2026 (docs.x.ai/developers/migration/
+	// may-15-retirement) and removed from ProviderXAI: grok-3, grok-3-mini,
+	// grok-4-0709, grok-4-fast-* and grok-4-1-fast-* (the API now redirects
+	// those slugs to grok-4.3 and bills grok-4.3 rates) and grok-code-fast-1
+	// (now an alias of grok-build-0.1 — kept on that entry above so pinned
+	// configs still size correctly). None of them has a model page or a
+	// pricing row anymore.
 
 	// ZAI (Zhipu AI / z.ai) Models
 	// GLM-5 family. All entries below verified against Z.AI's per-model
@@ -1037,7 +902,7 @@ var registry = []ModelMeta{
 		Capabilities:    []string{"tools", "json_mode", "vision"},
 	},
 	{
-		// GLM-5.3 (Aug 14 2026): 1M-token context, 128K max output
+		// GLM-5.3 (Aug 18 2026): 1M-token context, 128K max output
 		// (docs.z.ai/guides/llm/glm-5.3). Same base model as GLM-5.2 with
 		// scaled-up post-training (coding/agentic focus). Text-only input;
 		// reasoning always on. Tool calling and structured output.
@@ -1160,16 +1025,11 @@ var registry = []ModelMeta{
 		PreferredAPI:    APIChatCompletions,
 		Capabilities:    []string{"vision"},
 	},
-	{
-		ID:              "codegeex-4",
-		Aliases:         []string{"codegeex-4", "codegeex"},
-		DisplayName:     "CodeGeeX-4",
-		Provider:        ProviderZAI,
-		ContextWindow:   128000,
-		MaxOutputTokens: 16384,
-		PreferredAPI:    APIChatCompletions,
-		Capabilities:    []string{"tools"},
-	},
+	// codegeex-4 was removed: it is not served by the Z.AI international
+	// API anymore (no pricing row, no model page — docs.z.ai 404s, Sep
+	// 2026). GLM-4.x variants without an entry (glm-4.7-flash/-flashx,
+	// glm-4.5-air/-airx/-x) resolve by prefix to their family entry
+	// above, which already carries the right window.
 
 	// MiniMax Models
 	{
@@ -1280,76 +1140,13 @@ var registry = []ModelMeta{
 		PreferredAPI:    APIChatCompletions,
 		Capabilities:    []string{"tools", "vision", "thinking", "json_mode"},
 	},
-	{
-		ID:              "kimi-k2.5",
-		Aliases:         []string{"kimi-k2.5", "kimi-k2-5", "k2.5", "k2-5"},
-		DisplayName:     "Kimi K2.5",
-		Provider:        ProviderMoonshot,
-		ContextWindow:   262144,
-		MaxOutputTokens: 98304,
-		PreferredAPI:    APIChatCompletions,
-		Capabilities:    []string{"tools", "vision", "thinking", "json_mode"},
-	},
-	{
-		ID:              "kimi-latest",
-		Aliases:         []string{"kimi-latest"},
-		DisplayName:     "Kimi (latest)",
-		Provider:        ProviderMoonshot,
-		ContextWindow:   262144,
-		MaxOutputTokens: 131072,
-		PreferredAPI:    APIChatCompletions,
-		Capabilities:    []string{"tools", "vision", "thinking", "json_mode"},
-	},
-	{
-		ID:              "kimi-k2-turbo-preview",
-		Aliases:         []string{"kimi-k2-turbo-preview", "kimi-k2-turbo"},
-		DisplayName:     "Kimi K2 Turbo (preview)",
-		Provider:        ProviderMoonshot,
-		ContextWindow:   262144,
-		MaxOutputTokens: 65536,
-		PreferredAPI:    APIChatCompletions,
-		Capabilities:    []string{"tools", "json_mode"},
-	},
-	{
-		ID:              "kimi-thinking-preview",
-		Aliases:         []string{"kimi-thinking-preview"},
-		DisplayName:     "Kimi Thinking (preview)",
-		Provider:        ProviderMoonshot,
-		ContextWindow:   131072,
-		MaxOutputTokens: 65536,
-		PreferredAPI:    APIChatCompletions,
-		Capabilities:    []string{"tools", "thinking", "json_mode"},
-	},
-	{
-		ID:              "moonshot-v1-128k",
-		Aliases:         []string{"moonshot-v1-128k"},
-		DisplayName:     "Moonshot v1 (128k)",
-		Provider:        ProviderMoonshot,
-		ContextWindow:   131072,
-		MaxOutputTokens: 32768,
-		PreferredAPI:    APIChatCompletions,
-		Capabilities:    []string{"tools", "json_mode"},
-	},
-	{
-		ID:              "moonshot-v1-32k",
-		Aliases:         []string{"moonshot-v1-32k"},
-		DisplayName:     "Moonshot v1 (32k)",
-		Provider:        ProviderMoonshot,
-		ContextWindow:   32768,
-		MaxOutputTokens: 16384,
-		PreferredAPI:    APIChatCompletions,
-		Capabilities:    []string{"tools", "json_mode"},
-	},
-	{
-		ID:              "moonshot-v1-8k",
-		Aliases:         []string{"moonshot-v1-8k"},
-		DisplayName:     "Moonshot v1 (8k)",
-		Provider:        ProviderMoonshot,
-		ContextWindow:   8192,
-		MaxOutputTokens: 4096,
-		PreferredAPI:    APIChatCompletions,
-		Capabilities:    []string{"tools", "json_mode"},
-	},
+	// Retired by Moonshot (platform.kimi.ai/docs/models, platform
+	// changelog — checked Sep 2 2026) and removed from ProviderMoonshot:
+	// kimi-k2.5 and the whole moonshot-v1-* series (Aug 31 2026, now 404
+	// "model not found"), kimi-k2-turbo-preview and the other K2
+	// previews (May 25 2026), kimi-latest (Jan 28 2026) and
+	// kimi-thinking-preview (Nov 11 2025). Migration target for all of
+	// them is kimi-k3. Closes the dated follow-up in issue #1344.
 
 	// OpenRouter Models (multi-provider gateway)
 	// Models use provider/model-name format. Only popular defaults are listed;
@@ -1392,6 +1189,18 @@ var registry = []ModelMeta{
 		ID:              "anthropic/claude-sonnet-5",
 		Aliases:         []string{"openrouter-claude-sonnet-5"},
 		DisplayName:     "Claude Sonnet 5 (OpenRouter)",
+		Provider:        ProviderOpenRouter,
+		ContextWindow:   1000000,
+		MaxOutputTokens: 128000,
+		PreferredAPI:    APIChatCompletions,
+		Capabilities:    []string{"vision", "tools", "json_mode"},
+	},
+	{
+		// OpenRouter spells the 5.1 slug with a dot; listed before the
+		// Fable 5 slug because "anthropic/claude-fable-5" is its prefix.
+		ID:              "anthropic/claude-fable-5.1",
+		Aliases:         []string{"openrouter-claude-fable-5.1", "openrouter-claude-fable-5-1", "anthropic/claude-fable-5-1"},
+		DisplayName:     "Claude Fable 5.1 (OpenRouter)",
 		Provider:        ProviderOpenRouter,
 		ContextWindow:   1000000,
 		MaxOutputTokens: 128000,
@@ -1500,6 +1309,25 @@ var registry = []ModelMeta{
 	// Claude on Bedrock; only the top-level automatic cache parameter is
 	// first-party-only, and this client never emits it.
 
+	// Fable 5.1 (Sep 1 2026, AWS what's-new 2026/09 + Bedrock model card
+	// anthropic-claude-fable-5-1). Same shape as Fable 5: dateless id,
+	// us./global. profiles only, 1M / 128K, $10/$50 with $0.25 cache
+	// reads, mandatory 30-day (aws_review) data retention — so the same
+	// bedrock_mantle_only routing applies (InvokeModel under default
+	// retention answers the same ValidationException Fable 5 does; the
+	// Mantle→runtime fallback still covers accounts that opted in). MUST
+	// precede the Fable 5 entry: "claude-fable-5" is a prefix of
+	// "claude-fable-5-1" in the tier-2 alias pass.
+	{
+		ID:              "anthropic.claude-fable-5-1",
+		Aliases:         []string{"bedrock-fable-5-1", "global.anthropic.claude-fable-5-1", "us.anthropic.claude-fable-5-1", "claude-fable-5-1", "fable-5-1", "claude-fable-5.1", "fable-5.1"},
+		DisplayName:     "Claude Fable 5.1 (Bedrock, 1M ctx)",
+		Provider:        ProviderBedrock,
+		ContextWindow:   1000000,
+		MaxOutputTokens: 128000,
+		PreferredAPI:    APIAnthropicMessages,
+		Capabilities:    []string{"tools", "vision", "json_mode", "adaptive_thinking", "bedrock_mantle_only"},
+	},
 	// Fable 5 (Jun 9 2026). Dateless ID per Anthropic's Bedrock docs —
 	// Fable 5, Opus 4.8 and Opus 4.7 have NO ARN-versioned model IDs on
 	// Bedrock. Fable 5 is served EXCLUSIVELY by the Claude-in-Amazon-
@@ -1575,18 +1403,10 @@ var registry = []ModelMeta{
 		},
 	},
 
-	// Claude 4.7. Sonnet 4.7 mirrors 4.6's profile (forward-projected),
-	// Opus 4.7 = 1M / 128K per Anthropic (dateless id, same rule as 4.8).
-	{
-		ID:              "global.anthropic.claude-sonnet-4-7-20260401-v1:0",
-		Aliases:         []string{"bedrock-sonnet-4-7", "anthropic.claude-sonnet-4-7-20260401-v1:0", "claude-sonnet-4-7"},
-		DisplayName:     "Claude Sonnet 4.7 (Bedrock, global)",
-		Provider:        ProviderBedrock,
-		ContextWindow:   1000000,
-		MaxOutputTokens: 64000,
-		PreferredAPI:    APIAnthropicMessages,
-		Capabilities:    []string{"tools", "vision", "json_mode"},
-	},
+	// Claude 4.7: Opus only — there is no Sonnet 4.7 on Bedrock (absent
+	// from the model-cards index and from Anthropic's pricing table); the
+	// forward-projected placeholder was dropped. Opus 4.7 = 1M / 128K
+	// per Anthropic (dateless id, same rule as 4.8).
 	{
 		ID: "global.anthropic.claude-opus-4-7",
 		Aliases: []string{
@@ -1602,8 +1422,10 @@ var registry = []ModelMeta{
 		Capabilities:    []string{"tools", "vision", "json_mode", "adaptive_thinking"},
 	},
 
-	// Claude 4.6 (abr 2026). Bedrock specs follow the Anthropic models
-	// page: Sonnet 4.6 = 1M / 64K, Opus 4.6 = 1M / 128K. Real Bedrock IDs
+	// Claude 4.6 (abr 2026). Bedrock specs follow the AWS model cards:
+	// Sonnet 4.6 = 1M / 64K ON BEDROCK (the first-party API raised it to
+	// 128K in Mar 2026 but the Bedrock card still lists 64K — do not
+	// mirror the CLAUDEAI value here), Opus 4.6 = 1M / 128K. Real Bedrock IDs
 	// per the docs: anthropic.claude-sonnet-4-6 and
 	// anthropic.claude-opus-4-6-v1 behind a global. inference profile.
 	// The previously-shipped dated IDs (…-20260115-v1:0) never existed on
@@ -1669,8 +1491,11 @@ var registry = []ModelMeta{
 		Capabilities:    []string{"tools", "vision", "json_mode"},
 	},
 	{
-		ID:              "global.anthropic.claude-opus-4-5-20251001-v1:0",
-		Aliases:         []string{"bedrock-opus-4-5", "anthropic.claude-opus-4-5-20251001-v1:0", "claude-opus-4-5"},
+		// Opus 4.5 snapshot date is 20251101 (Bedrock model card and the
+		// Anthropic overview). The previously shipped 20251001 spelling
+		// never existed on AWS; it stays as an alias for pinned configs.
+		ID:              "global.anthropic.claude-opus-4-5-20251101-v1:0",
+		Aliases:         []string{"bedrock-opus-4-5", "anthropic.claude-opus-4-5-20251101-v1:0", "global.anthropic.claude-opus-4-5-20251001-v1:0", "anthropic.claude-opus-4-5-20251001-v1:0", "claude-opus-4-5"},
 		DisplayName:     "Claude Opus 4.5 (Bedrock, global)",
 		Provider:        ProviderBedrock,
 		ContextWindow:   200000,
@@ -1715,16 +1540,11 @@ var registry = []ModelMeta{
 		PreferredAPI:    APIAnthropicMessages,
 		Capabilities:    []string{"tools", "vision", "json_mode"},
 	},
-	{
-		ID:              "us.anthropic.claude-opus-4-20250514-v1:0",
-		Aliases:         []string{"bedrock-opus-4", "anthropic.claude-opus-4-20250514-v1:0", "claude-opus-4"},
-		DisplayName:     "Claude Opus 4 (Bedrock, us)",
-		Provider:        ProviderBedrock,
-		ContextWindow:   200000,
-		MaxOutputTokens: 32000,
-		PreferredAPI:    APIAnthropicMessages,
-		Capabilities:    []string{"tools", "vision", "json_mode"},
-	},
+	// Bedrock lifecycle (docs.aws.amazon.com/bedrock/latest/userguide/
+	// model-lifecycle.html, Sep 2 2026): Sonnet 4 is Legacy with EOL Oct
+	// 14 2026 and Opus 4.1 is Legacy with EOL Jan 8 2027 — both still
+	// invokable today, so they stay. Opus 4 is retired on Bedrock and was
+	// removed.
 	{
 		ID:              "us.anthropic.claude-opus-4-1-20250805-v1:0",
 		Aliases:         []string{"bedrock-opus-4-1", "anthropic.claude-opus-4-1-20250805-v1:0", "claude-opus-4-1"},
@@ -1736,86 +1556,13 @@ var registry = []ModelMeta{
 		Capabilities:    []string{"tools", "vision", "json_mode"},
 	},
 
-	// Claude 3.7 Sonnet (Bedrock mirrors). Same correction as the
-	// upstream ProviderClaudeAI entry: synchronous Messages API caps
-	// output at 8192. The 64K ceiling only unlocks via the
-	// `output-128k-2025-02-19` extended-thinking beta header. Pinning
-	// the catalog at the safe default keeps regular calls from being
-	// rejected with 400 errors.
-	{
-		ID:              "us.anthropic.claude-3-7-sonnet-20250219-v1:0",
-		Aliases:         []string{"bedrock-sonnet-3-7", "anthropic.claude-3-7-sonnet-20250219-v1:0", "claude-3-7-sonnet"},
-		DisplayName:     "Claude 3.7 Sonnet (Bedrock, us)",
-		Provider:        ProviderBedrock,
-		ContextWindow:   200000,
-		MaxOutputTokens: 8192,
-		PreferredAPI:    APIAnthropicMessages,
-		Capabilities:    []string{"tools", "vision", "json_mode"},
-	},
-	{
-		ID:              "eu.anthropic.claude-3-7-sonnet-20250219-v1:0",
-		Aliases:         []string{"bedrock-sonnet-3-7-eu"},
-		DisplayName:     "Claude 3.7 Sonnet (Bedrock, eu)",
-		Provider:        ProviderBedrock,
-		ContextWindow:   200000,
-		MaxOutputTokens: 8192,
-		PreferredAPI:    APIAnthropicMessages,
-		Capabilities:    []string{"tools", "vision", "json_mode"},
-	},
-
-	// Claude 3.5 — aceitam on-demand direto (sem prefixo)
-	{
-		ID:              "anthropic.claude-3-5-sonnet-20241022-v2:0",
-		Aliases:         []string{"bedrock-sonnet-3-5-v2", "claude-3-5-sonnet-v2"},
-		DisplayName:     "Claude 3.5 Sonnet v2 (Bedrock)",
-		Provider:        ProviderBedrock,
-		ContextWindow:   200000,
-		MaxOutputTokens: 8192,
-		PreferredAPI:    APIAnthropicMessages,
-		Capabilities:    []string{"tools", "vision", "json_mode"},
-	},
-	{
-		ID:              "anthropic.claude-3-5-sonnet-20240620-v1:0",
-		Aliases:         []string{"bedrock-sonnet-3-5-v1"},
-		DisplayName:     "Claude 3.5 Sonnet v1 (Bedrock)",
-		Provider:        ProviderBedrock,
-		ContextWindow:   200000,
-		MaxOutputTokens: 8192,
-		PreferredAPI:    APIAnthropicMessages,
-		Capabilities:    []string{"tools", "vision", "json_mode"},
-	},
-	{
-		ID:              "anthropic.claude-3-5-haiku-20241022-v1:0",
-		Aliases:         []string{"bedrock-haiku-3-5", "claude-3-5-haiku"},
-		DisplayName:     "Claude 3.5 Haiku (Bedrock)",
-		Provider:        ProviderBedrock,
-		ContextWindow:   200000,
-		MaxOutputTokens: 8192,
-		PreferredAPI:    APIAnthropicMessages,
-		Capabilities:    []string{"tools", "json_mode"},
-	},
-
-	// Claude 3 — legado (ainda suportado on-demand)
-	{
-		ID:              "anthropic.claude-3-opus-20240229-v1:0",
-		Aliases:         []string{"bedrock-opus-3", "claude-3-opus"},
-		DisplayName:     "Claude 3 Opus (Bedrock)",
-		Provider:        ProviderBedrock,
-		ContextWindow:   200000,
-		MaxOutputTokens: 4096,
-		PreferredAPI:    APIAnthropicMessages,
-		Capabilities:    []string{"tools", "vision", "json_mode"},
-	},
-	{
-		ID:              "anthropic.claude-3-haiku-20240307-v1:0",
-		Aliases:         []string{"bedrock-haiku-3", "claude-3-haiku"},
-		DisplayName:     "Claude 3 Haiku (Bedrock)",
-		Provider:        ProviderBedrock,
-		ContextWindow:   200000,
-		MaxOutputTokens: 4096,
-		PreferredAPI:    APIAnthropicMessages,
-		Capabilities:    []string{"tools", "vision", "json_mode"},
-	},
+	// Claude 3.x on Bedrock — all gone (model-cards index + lifecycle
+	// table, Sep 2 2026): Sonnet 3.7 and Opus 3 retired, Haiku 3.5 past
+	// its Jun 19 2026 EOL, Sonnet 3.5 v1/v2 off the cards (only a
+	// "public extended access" pricing row remains), Haiku 3 EOL Sep 10
+	// 2026. Their entries were removed; a stray 3.x id now falls back to
+	// bedrockFallbackMaxTokens (64K for anthropic ids), which AWS rejects
+	// with a clear ValidationException instead of silently sizing wrong.
 
 	// ── AWS Bedrock — OpenAI GPT-OSS (open-weights) ──────────────────
 	// Modelos OpenAI open-weights hospedados no Bedrock. Usam schema
@@ -1841,6 +1588,47 @@ var registry = []ModelMeta{
 		MaxOutputTokens: 16384,
 		PreferredAPI:    APIChatCompletions,
 		Capabilities:    []string{"tools", "json_mode"},
+	},
+
+	// ── AWS Bedrock — OpenAI GPT-5.6 (frontier, Jul 13 2026) ──────────
+	// Sol/Terra/Luna on Bedrock (model cards openai-gpt-5-6-*) speak
+	// Converse, Responses and Chat Completions but NOT InvokeModel, and
+	// are served only through inference profiles (Sol: us./global.;
+	// Terra/Luna: us./in./global.). The "openai." vendor prefix would
+	// normally send them down the gpt-oss InvokeModel path, so these
+	// entries carry bedrock_converse_only, which resolveFamily honors
+	// ahead of the vendor sniff. 1,050,000 context / 128K output as on
+	// the platform API (AWS lists "1M" and no output cap); prices per
+	// card: Sol $4/$20, Terra $2/$12, Luna $0.20/$1.20 (global, ≤272K).
+	{
+		ID:              "global.openai.gpt-5.6-sol",
+		Aliases:         []string{"bedrock-gpt-5.6-sol", "openai.gpt-5.6-sol", "us.openai.gpt-5.6-sol"},
+		DisplayName:     "GPT-5.6 Sol (Bedrock, global)",
+		Provider:        ProviderBedrock,
+		ContextWindow:   1050000,
+		MaxOutputTokens: 128000,
+		PreferredAPI:    APIChatCompletions,
+		Capabilities:    []string{"tools", "vision", "json_mode", "bedrock_converse_only"},
+	},
+	{
+		ID:              "global.openai.gpt-5.6-terra",
+		Aliases:         []string{"bedrock-gpt-5.6-terra", "openai.gpt-5.6-terra", "us.openai.gpt-5.6-terra", "in.openai.gpt-5.6-terra"},
+		DisplayName:     "GPT-5.6 Terra (Bedrock, global)",
+		Provider:        ProviderBedrock,
+		ContextWindow:   1050000,
+		MaxOutputTokens: 128000,
+		PreferredAPI:    APIChatCompletions,
+		Capabilities:    []string{"tools", "vision", "json_mode", "bedrock_converse_only"},
+	},
+	{
+		ID:              "global.openai.gpt-5.6-luna",
+		Aliases:         []string{"bedrock-gpt-5.6-luna", "openai.gpt-5.6-luna", "us.openai.gpt-5.6-luna", "in.openai.gpt-5.6-luna"},
+		DisplayName:     "GPT-5.6 Luna (Bedrock, global)",
+		Provider:        ProviderBedrock,
+		ContextWindow:   1050000,
+		MaxOutputTokens: 128000,
+		PreferredAPI:    APIChatCompletions,
+		Capabilities:    []string{"tools", "vision", "json_mode", "bedrock_converse_only"},
 	},
 
 	// ── AWS Bedrock — Amazon Nova ────────────────────────────────────
@@ -1882,13 +1670,39 @@ var registry = []ModelMeta{
 		PreferredAPI:    APIChatCompletions,
 		Capabilities:    []string{"tools", "vision", "json_mode"},
 	},
+	// Nova Premier (us.amazon.nova-premier-v1:0) is Legacy since Mar 13
+	// 2026 with EOL Sep 14 2026 — removed. Its successor on Bedrock is
+	// Nova 2 Lite (model card amazon-nova-2-lite, Dec 2025): 1M context,
+	// 64K max output, Converse + InvokeModel, served ONLY through
+	// inference profiles (us./eu./jp./global. — no bare in-region id), so
+	// the canonical spelling carries the global. prefix. Nova 2 Pro/Omni
+	// are not on Bedrock (Nova Forge preview only) and stay out.
 	{
-		ID:              "us.amazon.nova-premier-v1:0",
-		Aliases:         []string{"bedrock-nova-premier", "amazon.nova-premier-v1:0", "nova-premier"},
-		DisplayName:     "Amazon Nova Premier (Bedrock, 1M ctx)",
+		ID:              "global.amazon.nova-2-lite-v1:0",
+		Aliases:         []string{"bedrock-nova-2-lite", "amazon.nova-2-lite-v1:0", "us.amazon.nova-2-lite-v1:0", "eu.amazon.nova-2-lite-v1:0", "jp.amazon.nova-2-lite-v1:0", "nova-2-lite"},
+		DisplayName:     "Amazon Nova 2 Lite (Bedrock, global, 1M ctx)",
 		Provider:        ProviderBedrock,
 		ContextWindow:   1000000,
-		MaxOutputTokens: 5120,
+		MaxOutputTokens: 65536,
+		PreferredAPI:    APIChatCompletions,
+		Capabilities:    []string{"tools", "vision", "json_mode"},
+	},
+
+	// ── AWS Bedrock — xAI Grok ────────────────────────────────────────
+	// Grok 4.6 landed on Bedrock on Aug 18 2026 (model card xai-grok-4-6):
+	// Converse + InvokeModel + Responses, served only through us./global.
+	// inference profiles. The "xai." vendor is not a Converse-only
+	// vendor string, but resolveFamily already routes every non-Anthropic,
+	// non-OpenAI id through Converse, which is the surface AWS documents
+	// for it. 500K context; xAI publishes no output cap, so the 16K
+	// convention from the ProviderXAI block applies.
+	{
+		ID:              "global.xai.grok-4.6",
+		Aliases:         []string{"bedrock-grok-4.6", "xai.grok-4.6", "us.xai.grok-4.6", "bedrock-grok-4-6"},
+		DisplayName:     "Grok 4.6 (Bedrock, global)",
+		Provider:        ProviderBedrock,
+		ContextWindow:   500000,
+		MaxOutputTokens: 16384,
 		PreferredAPI:    APIChatCompletions,
 		Capabilities:    []string{"tools", "vision", "json_mode"},
 	},
@@ -1933,14 +1747,29 @@ func Resolve(provider, model string) (ModelMeta, bool) {
 		}
 	}
 
-	// 2) match por provedor + aliases (contém/prefixo)
+	// 2a) match por provedor + alias EXATO. Roda antes do passe frouxo
+	// para que um apelido curto de uma entrada anterior ("fable" na
+	// Fable 5.1, que precisa vir antes da Fable 5) nunca engula, por
+	// Contains, o apelido exato de outra entrada ("fable-5").
+	for _, meta := range registry {
+		if meta.Provider != "" && meta.Provider != p {
+			continue
+		}
+		for _, alias := range meta.Aliases {
+			if m == strings.ToLower(alias) {
+				return meta, true
+			}
+		}
+	}
+
+	// 2b) match por provedor + aliases (contém/prefixo)
 	for _, meta := range registry {
 		if meta.Provider != "" && meta.Provider != p {
 			continue
 		}
 		for _, alias := range meta.Aliases {
 			a := strings.ToLower(alias)
-			if m == a || strings.HasPrefix(m, a) || strings.Contains(m, a) {
+			if strings.HasPrefix(m, a) || strings.Contains(m, a) {
 				return meta, true
 			}
 		}

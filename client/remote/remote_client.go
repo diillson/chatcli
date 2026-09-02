@@ -46,7 +46,7 @@ type Config struct {
 	CertFile       string            // CA certificate file for TLS (optional)
 	ClientAPIKey   string            // optional: client's own LLM API key/OAuth token (forwarded to server)
 	Provider       string            // optional: override server's default provider (e.g., "GOOGLEAI")
-	Model          string            // optional: override server's default model (e.g., "gemini-2.0-flash")
+	Model          string            // optional: override server's default model (e.g., "gemini-2.5-flash")
 	ProviderConfig map[string]string // optional: provider-specific config (StackSpot, Ollama, etc.)
 }
 
