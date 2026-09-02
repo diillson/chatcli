@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.194.0](https://github.com/diillson/chatcli/compare/v1.193.1...v1.194.0) (2026-09-02)
+
+
+### Features
+
+* **models:** refresh provider catalogs for September 2026 ([#1432](https://github.com/diillson/chatcli/issues/1432)) ([6ddadf0](https://github.com/diillson/chatcli/commit/6ddadf0a691ad3cf3e53ce2269e1c4b8f1080b2a))
+
+
+### Bug Fixes
+
+* **operator:** pin libexpat 2.8.4-r0 in the runtime image to clear CVE-2026-66046, CVE-2026-76641, CVE-2026-76956 and CVE-2026-76957 ([#1433](https://github.com/diillson/chatcli/issues/1433)) ([5c474ba](https://github.com/diillson/chatcli/commit/5c474ba13f39e8d0b228dde3635605be1acd5a9c))
+
 ## [1.193.1](https://github.com/diillson/chatcli/compare/v1.193.0...v1.193.1) (2026-08-31)
 
 
