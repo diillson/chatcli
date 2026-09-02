@@ -1596,7 +1596,7 @@ var registry = []ModelMeta{
 	// are served only through inference profiles (Sol: us./global.;
 	// Terra/Luna: us./in./global.). The "openai." vendor prefix would
 	// normally send them down the gpt-oss InvokeModel path, so these
-	// entries carry bedrock_converse_only, which resolveFamily honours
+	// entries carry bedrock_converse_only, which resolveFamily honors
 	// ahead of the vendor sniff. 1,050,000 context / 128K output as on
 	// the platform API (AWS lists "1M" and no output cap); prices per
 	// card: Sol $4/$20, Terra $2/$12, Luna $0.20/$1.20 (global, ≤272K).
