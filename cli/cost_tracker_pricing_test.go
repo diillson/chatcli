@@ -1,6 +1,9 @@
 package cli
 
 import (
+	"github.com/diillson/chatcli/llm/catalog"
+	"github.com/diillson/chatcli/llm/pricing"
+
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -222,4 +225,34 @@ func TestLookupModelPricing_ZAICodingPlan(t *testing.T) {
 	assert.True(t, known)
 	assert.Equal(t, 1.40, in)
 	assert.Equal(t, 4.40, out)
+}
+
+// Devin: the per-account rate the CLI listed wins over the zero default,
+// exact id first, then the catalog family a variant or alias resolves to.
+func TestLookupModelPricing_DevinListedRates(t *testing.T) {
+	t.Cleanup(func() { pricing.ResetProvider(catalog.ProviderDevin) })
+
+	in, out, known := lookupModelPricing("DEVIN", "claude-opus-5")
+	assert.True(t, known)
+	assert.Zero(t, in)
+	assert.Zero(t, out)
+
+	pricing.Register(catalog.ProviderDevin, "claude-opus-5", pricing.Rate{InputPerMTok: 5, OutputPerMTok: 25})
+	in, out, known = lookupModelPricing("DEVIN", "claude-opus-5")
+	assert.True(t, known)
+	assert.Equal(t, 5.0, in)
+	assert.Equal(t, 25.0, out)
+
+	// Unlisted reasoning suffix resolves to the family through the catalog.
+	in, _, _ = lookupModelPricing("DEVIN", "claude-opus-5-xhigh")
+	assert.Equal(t, 5.0, in)
+
+	// A routed claude-* id never falls through to the direct-API table.
+	in, _, known = lookupModelPricing("DEVIN", "claude-sonnet-4.6")
+	assert.True(t, known)
+	assert.Zero(t, in)
+
+	// The routing tier follows the listed rate instead of "unmetered".
+	tier, _, _ := modelRoutingTier("DEVIN", "claude-opus-5")
+	assert.Equal(t, "frontier", tier)
 }

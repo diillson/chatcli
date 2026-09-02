@@ -36,11 +36,13 @@ import (
 	"runtime"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/diillson/chatcli/config"
 	"github.com/diillson/chatcli/i18n"
 	"github.com/diillson/chatcli/llm/catalog"
+	"github.com/diillson/chatcli/llm/client"
 	"github.com/diillson/chatcli/models"
 	"github.com/diillson/chatcli/utils"
 	"go.uber.org/zap"
@@ -86,6 +88,22 @@ var ansiEscapes = regexp.MustCompile(`\x1b(?:\[[0-9;?]*[a-zA-Z]|\][^\x07\x1b]*(?
 // short relative to the correctness win, and each waiter still honors its
 // own context deadline while queued.
 var runMu sync.Mutex
+
+// acquireRunSlot takes runMu without outliving ctx while waiting. On
+// success the returned func releases the slot; on ctx expiry the helper
+// goroutine eventually grabs and immediately releases the abandoned slot
+// so the mutex is never leaked.
+func acquireRunSlot(ctx context.Context) (func(), error) {
+	lockCh := make(chan struct{})
+	go func() { runMu.Lock(); close(lockCh) }()
+	select {
+	case <-lockCh:
+		return runMu.Unlock, nil
+	case <-ctx.Done():
+		go func() { <-lockCh; runMu.Unlock() }()
+		return nil, ctx.Err()
+	}
+}
 
 // ResolveBinary locates the Devin CLI: DEVIN_CLI_PATH when set (expanded,
 // must exist — an explicit path never falls back), otherwise PATH lookup of
@@ -168,8 +186,46 @@ func probeKnownDirs(name string, dirs []string) (string, bool) {
 	return "", false
 }
 
+// exportUnsupported latches, process-wide, a Devin CLI build that rejects
+// the --export flag: the first rejection retries the turn without it and
+// every later turn skips the flag up front, so an older binary keeps
+// working at the cost of estimated (chars/4) usage.
+var exportUnsupported atomic.Bool
+
+// usageExportEnabled reports whether turns request the per-turn ATIF
+// export that carries real token usage. DEVIN_CLI_USAGE_EXPORT=false
+// opts out (a locked-down deployment may forbid trajectory files).
+func usageExportEnabled() bool {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv("DEVIN_CLI_USAGE_EXPORT"))) {
+	case "false", "0", "off", "no":
+		return false
+	}
+	return !exportUnsupported.Load()
+}
+
+// exportFlagRejected recognizes the CLI refusing the --export flag (an
+// older build) so the turn can be retried without it. The match is
+// deliberately narrow: only an argument-parsing error that names the
+// flag counts, never a turn that failed for another reason.
+func exportFlagRejected(detail string) bool {
+	d := strings.ToLower(detail)
+	if !strings.Contains(d, "--export") {
+		return false
+	}
+	return strings.Contains(d, "unexpected argument") ||
+		strings.Contains(d, "unrecognized") ||
+		strings.Contains(d, "unknown argument") ||
+		strings.Contains(d, "found argument") ||
+		strings.Contains(d, "wasn't expected")
+}
+
 // Client implements client.LLMClient over the local Devin CLI subprocess.
 type Client struct {
+	// UsageState exposes the token usage read back from the turn's ATIF
+	// export (LastUsage), satisfying client.UsageAwareClient so the cost
+	// tracker gets real numbers instead of the chars/4 estimate.
+	client.UsageState
+
 	binPath     string
 	model       string
 	logger      *zap.Logger
@@ -183,6 +239,10 @@ func NewClient(binPath, model string, logger *zap.Logger, maxAttempts int, backo
 	if model == "" {
 		model = config.DefaultDevinModel
 	}
+	// Replay the last persisted listing (context windows, output caps,
+	// per-account rates) so the very first turn — one-shot runs included —
+	// prices and budgets correctly before any surface lists models.
+	restoreSnapshotOnce()
 	return &Client{
 		binPath:     binPath,
 		model:       strings.ToLower(model),
@@ -208,6 +268,9 @@ func (c *Client) SendPrompt(ctx context.Context, prompt string, history []models
 			timeout = d
 		}
 	}
+	// A turn that yields no export must fall back to estimation, never
+	// re-count the previous turn's usage.
+	c.StoreUsage(nil)
 	start := time.Now()
 	c.logger.Info("llm: send",
 		zap.String("provider", "DEVIN"),
@@ -239,17 +302,11 @@ func (c *Client) SendPrompt(ctx context.Context, prompt string, history []models
 func (c *Client) runOnce(ctx context.Context, flattened string, timeout time.Duration) (string, error) {
 	// Serialize with any other in-process invocation (see runMu), but never
 	// outlive the caller's context while waiting for the slot.
-	lockCh := make(chan struct{})
-	go func() { runMu.Lock(); close(lockCh) }()
-	select {
-	case <-lockCh:
-		defer runMu.Unlock()
-	case <-ctx.Done():
-		// The goroutine will eventually grab and immediately release the
-		// abandoned slot so the mutex is never leaked.
-		go func() { <-lockCh; runMu.Unlock() }()
-		return "", ctx.Err()
+	release, err := acquireRunSlot(ctx)
+	if err != nil {
+		return "", err
 	}
+	defer release()
 
 	workDir, err := os.MkdirTemp("", "chatcli-devin-*")
 	if err != nil {
@@ -264,10 +321,30 @@ func (c *Client) runOnce(ctx context.Context, flattened string, timeout time.Dur
 		return "", fmt.Errorf("%s: %w", i18n.T("llm.devincli.prepare_prompt"), err)
 	}
 
+	withExport := usageExportEnabled()
+	reply, err := c.execTurn(ctx, workDir, promptFile, timeout, withExport)
+	if err != nil && withExport && exportFlagRejected(err.Error()) {
+		// Older CLI: no --export. Latch it and run the turn again plainly;
+		// usage degrades to the chars/4 estimate for this process.
+		exportUnsupported.Store(true)
+		c.logger.Warn("devincli: this devin build rejects --export; real token usage unavailable, retrying without it",
+			zap.String("bin", c.binPath))
+		return c.execTurn(ctx, workDir, promptFile, timeout, false)
+	}
+	return reply, err
+}
+
+// execTurn runs one CLI invocation for an already prepared prompt file and,
+// when withExport is set, reads the turn's usage back from the ATIF export.
+func (c *Client) execTurn(ctx context.Context, workDir, promptFile string, timeout time.Duration, withExport bool) (string, error) {
 	runCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
-	args := c.buildArgs(promptFile)
+	exportPath := ""
+	if withExport {
+		exportPath = filepath.Join(workDir, trajectoryFileName)
+	}
+	args := c.buildArgs(promptFile, exportPath)
 	// CommandContext on purpose (the inverse of the @lsp pool lesson): a
 	// per-turn subprocess must die with the turn, so CTRL+C or the timeout
 	// tears the CLI down instead of leaving an orphaned agent running.
@@ -310,14 +387,55 @@ func (c *Client) runOnce(ctx context.Context, flattened string, timeout time.Dur
 	if reply == "" {
 		return "", fmt.Errorf("%s", i18n.T("llm.devincli.empty_response"))
 	}
+	if exportPath != "" {
+		c.captureExportedUsage(exportPath)
+	}
 	return reply, nil
+}
+
+// captureExportedUsage reads the turn's ATIF export and stores the usage it
+// carries. Every failure is soft: no file, unreadable JSON or a document
+// without metrics all leave LastUsage nil, which the caller treats as
+// "estimate", exactly as before the export existed.
+func (c *Client) captureExportedUsage(exportPath string) {
+	// #nosec G304 -- path is inside the per-turn temp workdir this client created.
+	data, err := os.ReadFile(exportPath)
+	if err != nil {
+		c.logger.Debug("devincli: no trajectory export after the turn; usage will be estimated",
+			zap.String("path", exportPath), zap.Error(err))
+		return
+	}
+	parsed, err := parseTrajectoryUsage(data)
+	if err != nil {
+		c.logger.Debug("devincli: trajectory export unreadable; usage will be estimated", zap.Error(err))
+		return
+	}
+	if parsed.Usage == nil {
+		c.logger.Debug("devincli: trajectory export carries no token metrics; usage will be estimated")
+		return
+	}
+	c.StoreUsage(parsed.Usage)
+	c.logger.Debug("devincli: usage from trajectory export",
+		zap.Int("prompt_tokens", parsed.Usage.PromptTokens),
+		zap.Int("completion_tokens", parsed.Usage.CompletionTokens),
+		zap.Int("cache_read_tokens", parsed.Usage.CacheReadInputTokens),
+		zap.Int("cache_creation_tokens", parsed.Usage.CacheCreationInputTokens),
+		zap.Float64("cost_usd", parsed.Usage.CostUSD),
+		zap.Float64("acu_cost", parsed.ACUCost),
+		zap.String("generation_model", parsed.Model))
 }
 
 // buildArgs assembles the CLI invocation. Every knob is overridable by env
 // so enterprise setups (custom permission modes, hardened agent-config,
 // sandboxing) work without code changes.
-func (c *Client) buildArgs(promptFile string) []string {
+func (c *Client) buildArgs(promptFile, exportPath string) []string {
 	args := []string{"-p", "--prompt-file", promptFile, "--model", c.model}
+	if exportPath != "" {
+		// ATIF trajectory of the turn: the only place the CLI reports
+		// token usage. Written into the isolated workdir and read back
+		// right after the run (captureExportedUsage).
+		args = append(args, "--export", exportPath)
+	}
 
 	permMode := utils.GetEnvOrDefault("DEVIN_CLI_PERMISSION_MODE", config.DevinCLIDefaultPermissionMode)
 	args = append(args, "--permission-mode", permMode)
