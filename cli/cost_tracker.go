@@ -1161,10 +1161,43 @@ func providerFallbackPricing(provider, model string) (float64, float64, bool) {
 // an OpenAI-compatible gateway (OpenRouter) reports subset-style
 // cached_tokens, so the provider decides when it implies the schema.
 func cacheTokensAdditive(provider, model string) bool {
-	if strings.Contains(strings.ToLower(provider), "openrouter") {
+	p := strings.ToLower(provider)
+	m := strings.ToLower(model)
+	if strings.Contains(p, "openrouter") {
 		return false // OpenAI-compatible schema regardless of the model
 	}
-	return strings.Contains(strings.ToLower(model), "claude")
+	if strings.Contains(p, "bedrock") {
+		// Converse TokenUsage and the InvokeModel/Mantle Anthropic envelope
+		// both report inputTokens as the NON-cached input only ("total
+		// input tokens = inputTokens + cacheReadInputTokens +
+		// cacheWriteInputTokens", Bedrock prompt-caching guide) — for
+		// every vendor served through Converse, not just Claude. The
+		// OpenAI family on Bedrock (gpt-oss InvokeModel, GPT-5.x on the
+		// Responses/Chat Completions surface) keeps OpenAI's subset
+		// semantics (input_tokens includes cached_tokens).
+		return !strings.Contains(m, "gpt") && !strings.Contains(m, "openai")
+	}
+	return strings.Contains(m, "claude")
+}
+
+// contextTokens is the input the model actually held for the turn — what
+// the ctx% figure must measure against the window. Additive schemas
+// (Anthropic, Bedrock Converse) report cache reads and writes ALONGSIDE
+// PromptTokens, so a long cached conversation shows a tiny PromptTokens
+// (only the uncached delta) while the model is holding the whole
+// history; subset schemas (OpenAI, Gemini, OpenRouter) already include
+// cached tokens in PromptTokens. Without this, a Bedrock session at 60%
+// of a 1M window rendered "ctx 2%" right before auto-compaction fired —
+// the compactor sizes the real history, the footer sized the delta.
+func contextTokens(provider, model string, usage *models.UsageInfo) int {
+	if usage == nil {
+		return 0
+	}
+	n := usage.PromptTokens
+	if cacheTokensAdditive(provider, model) {
+		n += usage.CacheReadInputTokens + usage.CacheCreationInputTokens
+	}
+	return n
 }
 
 // getCachePricing returns cache write and cache read cost per 1M tokens.
