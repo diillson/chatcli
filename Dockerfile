@@ -25,8 +25,8 @@ RUN git clone --depth 1 https://github.com/grpc-ecosystem/grpc-health-probe /tmp
     cd /tmp/ghp && \
     go get github.com/go-jose/go-jose/v4@v4.1.4 \
         google.golang.org/grpc@v1.83.2 \
-        golang.org/x/net@v0.57.0 \
-        golang.org/x/text@v0.40.0 && \
+        golang.org/x/net@v0.58.0 \
+        golang.org/x/text@v0.41.0 && \
     go mod tidy && \
     CGO_ENABLED=0 GOOS=linux GOARCH=${TARGETARCH} go build -ldflags="-s -w" -o /usr/local/bin/grpc-health-probe . && \
     rm -rf /tmp/ghp

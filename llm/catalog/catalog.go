@@ -902,7 +902,7 @@ var registry = []ModelMeta{
 		Capabilities:    []string{"tools", "json_mode", "vision"},
 	},
 	{
-		// GLM-5.3 (Aug 14 2026): 1M-token context, 128K max output
+		// GLM-5.3 (Aug 18 2026): 1M-token context, 128K max output
 		// (docs.z.ai/guides/llm/glm-5.3). Same base model as GLM-5.2 with
 		// scaled-up post-training (coding/agentic focus). Text-only input;
 		// reasoning always on. Tool calling and structured output.
