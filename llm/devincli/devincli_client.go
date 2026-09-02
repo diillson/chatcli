@@ -87,6 +87,22 @@ var ansiEscapes = regexp.MustCompile(`\x1b(?:\[[0-9;?]*[a-zA-Z]|\][^\x07\x1b]*(?
 // own context deadline while queued.
 var runMu sync.Mutex
 
+// acquireRunSlot takes runMu without outliving ctx while waiting. On
+// success the returned func releases the slot; on ctx expiry the helper
+// goroutine eventually grabs and immediately releases the abandoned slot
+// so the mutex is never leaked.
+func acquireRunSlot(ctx context.Context) (func(), error) {
+	lockCh := make(chan struct{})
+	go func() { runMu.Lock(); close(lockCh) }()
+	select {
+	case <-lockCh:
+		return runMu.Unlock, nil
+	case <-ctx.Done():
+		go func() { <-lockCh; runMu.Unlock() }()
+		return nil, ctx.Err()
+	}
+}
+
 // ResolveBinary locates the Devin CLI: DEVIN_CLI_PATH when set (expanded,
 // must exist — an explicit path never falls back), otherwise PATH lookup of
 // the default binary name, otherwise a probe of well-known install dirs. The
@@ -239,17 +255,11 @@ func (c *Client) SendPrompt(ctx context.Context, prompt string, history []models
 func (c *Client) runOnce(ctx context.Context, flattened string, timeout time.Duration) (string, error) {
 	// Serialize with any other in-process invocation (see runMu), but never
 	// outlive the caller's context while waiting for the slot.
-	lockCh := make(chan struct{})
-	go func() { runMu.Lock(); close(lockCh) }()
-	select {
-	case <-lockCh:
-		defer runMu.Unlock()
-	case <-ctx.Done():
-		// The goroutine will eventually grab and immediately release the
-		// abandoned slot so the mutex is never leaked.
-		go func() { <-lockCh; runMu.Unlock() }()
-		return "", ctx.Err()
+	release, err := acquireRunSlot(ctx)
+	if err != nil {
+		return "", err
 	}
+	defer release()
 
 	workDir, err := os.MkdirTemp("", "chatcli-devin-*")
 	if err != nil {
