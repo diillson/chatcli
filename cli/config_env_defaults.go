@@ -89,6 +89,7 @@ var envDefaults = map[string]envDefault{
 	"DEVIN_CLI_PERMISSION_MODE":  {Value: config.DevinCLIDefaultPermissionMode, Source: "config.DevinCLIDefaultPermissionMode"},
 	"DEVIN_CLI_TIMEOUT":          {Value: config.DevinCLIDefaultTimeout.String(), Source: "config.DevinCLIDefaultTimeout"},
 	"DEVIN_CLI_SANDBOX":          {Value: "false", Source: "hardcoded"},
+	"DEVIN_CLI_USAGE_EXPORT":     {Value: "true", IsBool: true, Source: "hardcoded (per-turn ATIF --export read back for real token usage; false = chars/4 estimate)"},
 	"OLLAMA_BASE_URL":            {Value: config.OllamaDefaultBaseURL, Source: "config.OllamaDefaultBaseURL"},
 	"BEDROCK_MODEL":              {Value: config.DefaultBedrockModel, Source: "config.DefaultBedrockModel"},
 	"BEDROCK_REGION":             {Value: config.DefaultBedrockRegion, Source: "config.DefaultBedrockRegion"},

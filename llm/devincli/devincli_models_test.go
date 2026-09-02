@@ -15,6 +15,7 @@ import (
 
 	"github.com/diillson/chatcli/llm/catalog"
 	"github.com/diillson/chatcli/llm/client"
+	"github.com/diillson/chatcli/llm/pricing"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
@@ -76,6 +77,23 @@ const sampleListing = `{
   ]
 }`
 
+// isolateSnapshot points the listing snapshot at a per-test file so tests
+// never touch (or depend on) the user's ~/.chatcli state.
+func isolateSnapshot(t *testing.T) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "devin_models.json")
+	prev := snapshotPath
+	snapshotPath = func() (string, error) { return path, nil }
+	// The pricing registry is process-global: start every listing test
+	// from an empty DEVIN slate and leave none behind.
+	pricing.ResetProvider(catalog.ProviderDevin)
+	t.Cleanup(func() {
+		snapshotPath = prev
+		pricing.ResetProvider(catalog.ProviderDevin)
+	})
+	return path
+}
+
 func ids(models []client.ModelInfo) []string {
 	out := make([]string, 0, len(models))
 	for _, m := range models {
@@ -85,6 +103,7 @@ func ids(models []client.ModelInfo) []string {
 }
 
 func TestListModels_ProjectsFamiliesThenVariants(t *testing.T) {
+	isolateSnapshot(t)
 	fixture := filepath.Join(t.TempDir(), "listing.json")
 	require.NoError(t, os.WriteFile(fixture, []byte(sampleListing), 0o600))
 	record := filepath.Join(t.TempDir(), "argv")
@@ -114,6 +133,7 @@ func TestListModels_ProjectsFamiliesThenVariants(t *testing.T) {
 }
 
 func TestListModels_RegistersDiscoveredSpecsInCatalog(t *testing.T) {
+	isolateSnapshot(t)
 	fixture := filepath.Join(t.TempDir(), "listing.json")
 	require.NoError(t, os.WriteFile(fixture, []byte(sampleListing), 0o600))
 	bin := fakeDevin(t, `cat `+fixture)
@@ -160,6 +180,7 @@ func TestListModels_RegistersDiscoveredSpecsInCatalog(t *testing.T) {
 }
 
 func TestListModels_RealCLIFixture(t *testing.T) {
+	isolateSnapshot(t)
 	// testdata/models_list.json is a verbatim `devin models list --format
 	// json` capture (Sep 2026): 37 families / 168 variants, 19 of which
 	// carry legacy enum-style uids and one ("adaptive") repeats its slug.
@@ -208,7 +229,7 @@ func TestParseDevinModels_ToleratesBannerAndFlatShapes(t *testing.T) {
 	require.Len(t, families, 1)
 	assert.Equal(t, "kimi-k3-high", families[0].Slug)
 
-	models := projectDevinModels(families, zap.NewNop())
+	models, _ := projectDevinModels(families, zap.NewNop())
 	assert.Equal(t, []string{"kimi-k3-high"}, ids(models))
 
 	_, err = parseDevinModels([]byte("Error: something unexpected"))
@@ -249,6 +270,7 @@ func TestListModels_TimeoutKillsSubprocess(t *testing.T) {
 }
 
 func TestListModels_EmptyListingIsNotAnError(t *testing.T) {
+	isolateSnapshot(t)
 	bin := fakeDevin(t, `echo '{"families":[]}'`)
 	models, err := NewClient(bin, "", zap.NewNop(), 1, 0).ListModels(context.Background())
 	require.NoError(t, err)
@@ -267,4 +289,81 @@ func TestListModels_QueuedCallerHonorsContext(t *testing.T) {
 
 func TestClientImplementsModelLister(t *testing.T) {
 	var _ client.ModelLister = (*Client)(nil)
+}
+
+func TestParseCostSummary(t *testing.T) {
+	r, ok := parseCostSummary("$5 / MTok In · $25 / MTok Out")
+	require.True(t, ok)
+	assert.Equal(t, 5.0, r.InputPerMTok)
+	assert.Equal(t, 25.0, r.OutputPerMTok)
+
+	r, ok = parseCostSummary("$0.15 / MTok In · $0.5 / MTok Out")
+	require.True(t, ok)
+	assert.Equal(t, 0.15, r.InputPerMTok)
+	assert.Equal(t, 0.5, r.OutputPerMTok)
+
+	r, ok = parseCostSummary("$1.2/1M in, $6/1M out")
+	require.True(t, ok)
+	assert.Equal(t, 1.2, r.InputPerMTok)
+	assert.Equal(t, 6.0, r.OutputPerMTok)
+
+	_, ok = parseCostSummary("")
+	assert.False(t, ok)
+	_, ok = parseCostSummary("High cost")
+	assert.False(t, ok)
+}
+
+func TestListModels_RegistersAccountRatesAndSnapshot(t *testing.T) {
+	path := isolateSnapshot(t)
+	t.Cleanup(func() { pricing.ResetProvider(catalog.ProviderDevin) })
+	fixture := filepath.Join(t.TempDir(), "listing.json")
+	require.NoError(t, os.WriteFile(fixture, []byte(sampleListing), 0o600))
+	bin := fakeDevin(t, `cat `+fixture)
+
+	_, err := NewClient(bin, "", zap.NewNop(), 1, 0).ListModels(context.Background())
+	require.NoError(t, err)
+
+	// Family rate = default (first) variant's cost_summary; a variant
+	// without cost_summary stays unlisted (never "known free").
+	r, ok := pricing.Lookup(catalog.ProviderDevin, "claude-opus-5")
+	require.True(t, ok)
+	assert.Equal(t, pricing.Rate{InputPerMTok: 5, OutputPerMTok: 25}, r)
+	r, ok = pricing.Lookup(catalog.ProviderDevin, "claude-opus-5-medium")
+	require.True(t, ok)
+	assert.Equal(t, 25.0, r.OutputPerMTok)
+	_, ok = pricing.Lookup(catalog.ProviderDevin, "claude-opus-5-high-fast")
+	assert.False(t, ok)
+	_, ok = pricing.Lookup(catalog.ProviderDevin, "adaptive")
+	assert.False(t, ok)
+
+	// Snapshot persisted with rates and specs, owner-only.
+	info, err := os.Stat(path)
+	require.NoError(t, err)
+	assert.Equal(t, os.FileMode(0o600), info.Mode().Perm())
+	data, err := os.ReadFile(path)
+	require.NoError(t, err)
+	assert.Contains(t, string(data), `"input_usd_per_mtok": 5`)
+	assert.Contains(t, string(data), `"id": "glm-5-2-1m"`)
+
+	// A fresh process (empty registries) restores everything from disk.
+	pricing.ResetProvider(catalog.ProviderDevin)
+	require.NoError(t, restoreSnapshot())
+	r, ok = pricing.Lookup(catalog.ProviderDevin, "claude-opus-5")
+	require.True(t, ok)
+	assert.Equal(t, 5.0, r.InputPerMTok)
+	assert.Equal(t, 1000000, catalog.GetContextWindow(catalog.ProviderDevin, "glm-5-2-1m"))
+	meta, ok := catalog.Resolve(catalog.ProviderDevin, "opus")
+	require.True(t, ok)
+	assert.Equal(t, "claude-opus-5", meta.ID)
+}
+
+func TestRestoreSnapshot_MissingFileIsNotAnError(t *testing.T) {
+	isolateSnapshot(t)
+	require.NoError(t, restoreSnapshot())
+}
+
+func TestRestoreSnapshot_CorruptFileIsAnError(t *testing.T) {
+	path := isolateSnapshot(t)
+	require.NoError(t, os.WriteFile(path, []byte("{not json"), 0o600))
+	require.Error(t, restoreSnapshot())
 }

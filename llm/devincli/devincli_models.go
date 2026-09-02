@@ -14,12 +14,14 @@ import (
 	"os"
 	"os/exec"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/diillson/chatcli/i18n"
 	"github.com/diillson/chatcli/llm/catalog"
 	"github.com/diillson/chatcli/llm/client"
+	"github.com/diillson/chatcli/llm/pricing"
 	"github.com/diillson/chatcli/utils"
 	"go.uber.org/zap"
 )
@@ -64,6 +66,30 @@ type devinVariant struct {
 	// Pointers on purpose: the "adaptive" router reports null limits.
 	MaxContext *int `json:"max_context_tokens"`
 	MaxOutput  *int `json:"max_output_tokens"`
+	// CostSummary is the per-account rate as the CLI prints it, e.g.
+	// "$5 / MTok In · $25 / MTok Out"; absent on the adaptive router.
+	CostSummary string `json:"cost_summary"`
+}
+
+// costSummaryIn / costSummaryOut pull the two USD-per-million figures out
+// of the CLI's cost_summary string. Tolerant of spacing, "MTok" / "1M"
+// spellings and the separator glyph; anything else leaves the rate unset.
+var (
+	costSummaryIn  = regexp.MustCompile(`(?i)\$\s*([0-9]+(?:\.[0-9]+)?)\s*/\s*(?:MTok|1M)\b[^$]*?\bIn\b`)
+	costSummaryOut = regexp.MustCompile(`(?i)\$\s*([0-9]+(?:\.[0-9]+)?)\s*/\s*(?:MTok|1M)\b[^$]*?\bOut\b`)
+)
+
+// parseCostSummary returns the input/output USD-per-MTok rate encoded in
+// a cost_summary string, ok=false when neither figure parses.
+func parseCostSummary(summary string) (pricing.Rate, bool) {
+	var r pricing.Rate
+	if m := costSummaryIn.FindStringSubmatch(summary); m != nil {
+		r.InputPerMTok, _ = strconv.ParseFloat(m[1], 64)
+	}
+	if m := costSummaryOut.FindStringSubmatch(summary); m != nil {
+		r.OutputPerMTok, _ = strconv.ParseFloat(m[1], 64)
+	}
+	return r, r.InputPerMTok > 0 || r.OutputPerMTok > 0
 }
 
 // ListModels runs `devin models list --format json` and returns every model
@@ -131,7 +157,12 @@ func (c *Client) ListModels(ctx context.Context) ([]client.ModelInfo, error) {
 		return nil, fmt.Errorf("%s: %w", i18n.T("llm.devincli.list_decode"), err)
 	}
 
-	result := projectDevinModels(families, c.logger)
+	result, snapshot := projectDevinModels(families, c.logger)
+	if err := saveSnapshot(snapshot); err != nil {
+		// The listing itself succeeded; a snapshot miss only means the next
+		// process starts from the static catalog until it lists again.
+		c.logger.Warn("devincli: could not persist the model listing snapshot", zap.Error(err))
+	}
 	c.logger.Info(i18n.T("llm.info.fetched_models", "Devin CLI"),
 		zap.Int("families", len(families)), zap.Int("count", len(result)))
 	return result, nil
@@ -180,10 +211,13 @@ func synthesizeFamilies(variants []devinVariant) []devinFamily {
 
 // projectDevinModels flattens the families into the listing order the UI
 // shows — family slug first (what --model examples use), then its
-// variants — deduplicated by id, and registers every entry in the catalog.
-func projectDevinModels(families []devinFamily, logger *zap.Logger) []client.ModelInfo {
+// variants — deduplicated by id, and registers every entry in the catalog
+// and, when the CLI printed a cost_summary, in the pricing registry. The
+// second return value is the same set as snapshot entries for persistence.
+func projectDevinModels(families []devinFamily, logger *zap.Logger) ([]client.ModelInfo, []snapshotModel) {
 	seen := make(map[string]bool)
 	var result []client.ModelInfo
+	var snapshot []snapshotModel
 	add := func(id, display string) bool {
 		key := strings.ToLower(id)
 		if id == "" || seen[key] {
@@ -201,34 +235,45 @@ func projectDevinModels(families []devinFamily, logger *zap.Logger) []client.Mod
 		result = append(result, client.ModelInfo{ID: id, DisplayName: display, Source: client.ModelSourceAPI})
 		return true
 	}
+	record := func(id, display string, aliases []string, ctxWin, outCap int, summary string) {
+		registerDevinModel(id, display, aliases, ctxWin, outCap)
+		entry := snapshotModel{ID: id, DisplayName: strings.TrimSpace(display), Aliases: aliases, ContextWindow: ctxWin, MaxOutputTokens: outCap}
+		if rate, ok := parseCostSummary(summary); ok {
+			pricing.Register(catalog.ProviderDevin, id, rate)
+			entry.InputUSDPerMTok = rate.InputPerMTok
+			entry.OutputUSDPerMTk = rate.OutputPerMTok
+		}
+		snapshot = append(snapshot, entry)
+	}
 
 	for _, f := range families {
 		slug := strings.TrimSpace(f.Slug)
 		if slug == "" && len(f.Variants) == 1 {
 			slug = strings.TrimSpace(f.Variants[0].UID)
 		}
-		// The family's own specs are the default variant's — the CLI lists
-		// it first (medium reasoning, no suffix).
-		ctxWin, outCap := 0, 0
+		// The family's own specs and rate are the default variant's — the
+		// CLI lists it first (medium reasoning, no suffix).
+		ctxWin, outCap, summary := 0, 0, ""
 		if len(f.Variants) > 0 {
 			ctxWin, outCap = variantLimits(f.Variants[0])
+			summary = f.Variants[0].CostSummary
 		}
 		if add(slug, strings.TrimSpace(f.Label)) {
 			aliases := append([]string{}, f.Aliases...)
 			if uid := strings.TrimSpace(f.UID); uid != "" && !strings.EqualFold(uid, slug) && devinModelIDPattern.MatchString(uid) {
 				aliases = append(aliases, uid)
 			}
-			registerDevinModel(slug, f.Label, aliases, ctxWin, outCap)
+			record(slug, f.Label, aliases, ctxWin, outCap, summary)
 		}
 		for _, v := range f.Variants {
 			uid := strings.TrimSpace(v.UID)
 			if add(uid, strings.TrimSpace(v.Label)) {
 				vctx, vout := variantLimits(v)
-				registerDevinModel(uid, v.Label, nil, vctx, vout)
+				record(uid, v.Label, nil, vctx, vout, v.CostSummary)
 			}
 		}
 	}
-	return result
+	return result, snapshot
 }
 
 func variantLimits(v devinVariant) (int, int) {

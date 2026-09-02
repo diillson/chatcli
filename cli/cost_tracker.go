@@ -18,6 +18,8 @@ import (
 	"time"
 
 	"github.com/diillson/chatcli/i18n"
+	"github.com/diillson/chatcli/llm/catalog"
+	"github.com/diillson/chatcli/llm/pricing"
 	"github.com/diillson/chatcli/llm/zai"
 	"github.com/diillson/chatcli/models"
 )
@@ -806,10 +808,15 @@ func lookupModelPricing(provider, model string) (inputCost, outputCost float64, 
 	provider = strings.ToLower(provider)
 
 	// DEVIN antes das heurísticas de modelo: o wrapper roteia modelos com
-	// nomes reconhecíveis (claude-*, gpt-*) mas o binário não reporta
-	// tokens e o custo é da assinatura Cognition — sem o curto-circuito,
-	// claudePricing/openAIPricing cobrariam como se fosse API direta.
+	// nomes reconhecíveis (claude-*, gpt-*) mas a tarifa é a da conta
+	// Cognition, não a da API direta — sem o curto-circuito,
+	// claudePricing/openAIPricing cobrariam errado. A tarifa por modelo
+	// vem da própria listagem do CLI (cost_summary) via llm/pricing; sem
+	// listagem (CLI antigo, sem login) continua zero-conhecido, como antes.
 	if strings.Contains(provider, "devin") {
+		if in, out, ok := devinListedPricing(model); ok {
+			return in, out, true
+		}
 		return 0, 0, true
 	}
 
@@ -1084,6 +1091,22 @@ func deepseekPricing(model string) (float64, float64, bool) {
 	return 0, 0, false
 }
 
+// devinListedPricing returns the per-account rate the Devin CLI reported
+// for model (exact id first, then the catalog family a variant or alias
+// resolves to, so "opus" or an unlisted reasoning suffix still price at
+// the family rate). ok=false when the account listing never ran.
+func devinListedPricing(model string) (float64, float64, bool) {
+	if r, ok := pricing.Lookup(catalog.ProviderDevin, model); ok {
+		return r.InputPerMTok, r.OutputPerMTok, true
+	}
+	if meta, ok := catalog.Resolve(catalog.ProviderDevin, model); ok && !strings.EqualFold(meta.ID, model) {
+		if r, ok := pricing.Lookup(catalog.ProviderDevin, meta.ID); ok {
+			return r.InputPerMTok, r.OutputPerMTok, true
+		}
+	}
+	return 0, 0, false
+}
+
 // providerFallbackPricing handles families whose model IDs are ambiguous
 // or where the provider name is the most reliable signal (proprietary
 // wrappers like Copilot, local backends like Ollama). The known flag is
@@ -1122,8 +1145,9 @@ func providerFallbackPricing(provider, model string) (float64, float64, bool) {
 		return getOpenRouterModelPricing(model)
 	case strings.Contains(provider, "ollama"), strings.Contains(provider, "stackspot"),
 		strings.Contains(provider, "devin"):
-		// Devin CLI: o binário não reporta tokens e o custo é da assinatura
-		// Cognition — zero aqui, como Ollama/StackSpot.
+		// Devin CLI sem listagem da conta: tarifa desconhecida mas
+		// "conhecida-zero", como Ollama/StackSpot (o ramo DEVIN acima já
+		// devolveu a tarifa listada quando ela existe).
 		return 0, 0, true
 	}
 	return 0, 0, false
