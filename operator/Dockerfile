@@ -36,6 +36,7 @@ RUN apk update && apk upgrade --no-cache && \
     apk add --no-cache \
         "libcrypto3>=3.5.8-r0" \
         "libssl3>=3.5.8-r0" \
+        "libexpat>=2.8.4-r0" \
         git ca-certificates tzdata && \
     adduser -D -u 65532 -g 65532 nonroot
 WORKDIR /
