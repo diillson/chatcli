@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.195.0](https://github.com/diillson/chatcli/compare/v1.194.0...v1.195.0) (2026-09-02)
+
+
+### Features
+
+* **devin:** list the models the account can invoke via the Devin CLI ([#1435](https://github.com/diillson/chatcli/issues/1435)) ([09d5b06](https://github.com/diillson/chatcli/commit/09d5b067552620ea7d3ffab295563c37dbf5f405))
+
+
+### Bug Fixes
+
+* **chat:** count cached input tokens in the ctx% footer ([#1436](https://github.com/diillson/chatcli/issues/1436)) ([aece465](https://github.com/diillson/chatcli/commit/aece4650935094ff542f846b5b016591f1819e4f))
+
 ## [1.194.0](https://github.com/diillson/chatcli/compare/v1.193.1...v1.194.0) (2026-09-02)
 
 
