@@ -881,7 +881,9 @@ func (cli *ChatCLI) telemetryParts(usage *models.UsageInfo, costUSD float64, inc
 		parts = append(parts, formatTurnCost(costUSD))
 	}
 	if window := catalog.GetContextWindow(cli.Provider, cli.Model); window > 0 {
-		pct := float64(usage.PromptTokens) / float64(window) * 100
+		// Cached input counts: see contextTokens — PromptTokens alone is
+		// only the uncached delta on Anthropic/Bedrock schemas.
+		pct := float64(contextTokens(cli.Provider, cli.Model, usage)) / float64(window) * 100
 		parts = append(parts, i18n.T("chat.envelope.context_pct", clampPct(pct)))
 	}
 	// Compression savings SINCE THE LAST RENDER — per-turn, matching the cost

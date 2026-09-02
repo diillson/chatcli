@@ -175,6 +175,15 @@ func TestCacheSemanticsFollowReportingSchema(t *testing.T) {
 	if !cacheTokensAdditive("CLAUDEAI", "claude-sonnet-5") {
 		t.Fatal("native claude lost additive semantics")
 	}
+	if !cacheTokensAdditive("BEDROCK", "amazon.nova-pro-v1:0") {
+		t.Fatal("Bedrock Converse reports inputTokens as uncached-only for every vendor: additive")
+	}
+	if cacheTokensAdditive("BEDROCK", "openai.gpt-5.6-terra") {
+		t.Fatal("OpenAI family on Bedrock reports OpenAI-style subset usage: not additive")
+	}
+	if cacheTokensAdditive("BEDROCK", "openai.gpt-oss-120b-1:0") {
+		t.Fatal("gpt-oss on Bedrock InvokeModel is OpenAI-schema: not additive")
+	}
 	if !cacheTokensAdditive("BEDROCK", "anthropic.claude-sonnet-5") {
 		t.Fatal("bedrock claude lost additive semantics")
 	}

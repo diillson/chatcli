@@ -113,3 +113,34 @@ func TestClampPct_Bounds(t *testing.T) {
 	assert.Equal(t, 12, clampPct(12.4))
 	assert.Equal(t, 13, clampPct(12.6))
 }
+
+// TestTelemetryParts_ContextPctCountsCachedInput pins the ctx% semantics
+// per usage schema. Bedrock Converse / Anthropic report inputTokens as the
+// uncached delta only, so a 1M-window session holding 600K tokens with
+// prompt caching active reports ~20K PromptTokens and ~580K cache reads:
+// the footer must say 60%, not 2% (which is what users saw right before
+// auto-compaction fired, and read as compaction at "2% usage").
+func TestTelemetryParts_ContextPctCountsCachedInput(t *testing.T) {
+	bedrock := &ChatCLI{Provider: "BEDROCK", Model: "global.anthropic.claude-sonnet-5"}
+	usage := &models.UsageInfo{PromptTokens: 20000, CompletionTokens: 800, CacheReadInputTokens: 570000, CacheCreationInputTokens: 10000, IsReal: true}
+	joined := strings.Join(bedrock.telemetryParts(usage, 0, false), " · ")
+	assert.Contains(t, joined, "ctx 60%", "additive schema: prompt + cache read + cache write over the 1M window")
+
+	// Subset schema: OpenAI's prompt_tokens already includes cached_tokens,
+	// so adding them again would double count.
+	openai := &ChatCLI{Provider: "OPENAI", Model: "gpt-4o"}
+	sub := &models.UsageInfo{PromptTokens: 64000, CompletionTokens: 100, CacheReadInputTokens: 60000, IsReal: true}
+	joined = strings.Join(openai.telemetryParts(sub, 0, false), " · ")
+	assert.Contains(t, joined, "ctx 50%", "subset schema: prompt tokens alone over the 128K window")
+}
+
+func TestContextTokens_SchemaAware(t *testing.T) {
+	u := &models.UsageInfo{PromptTokens: 100, CacheReadInputTokens: 900, CacheCreationInputTokens: 50}
+	assert.Equal(t, 1050, contextTokens("CLAUDEAI", "claude-sonnet-5", u))
+	assert.Equal(t, 1050, contextTokens("BEDROCK", "us.anthropic.claude-opus-5", u))
+	assert.Equal(t, 1050, contextTokens("BEDROCK", "amazon.nova-pro-v1:0", u), "Converse reports every vendor's inputTokens as uncached-only")
+	assert.Equal(t, 100, contextTokens("BEDROCK", "openai.gpt-5.6-sol", u), "OpenAI family on Bedrock keeps subset semantics")
+	assert.Equal(t, 100, contextTokens("OPENAI", "gpt-5.5", u))
+	assert.Equal(t, 100, contextTokens("OPENROUTER", "anthropic/claude-sonnet-5", u))
+	assert.Equal(t, 0, contextTokens("OPENAI", "gpt-5.5", nil))
+}
