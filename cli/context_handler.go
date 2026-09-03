@@ -38,6 +38,16 @@ func NewContextHandler(logger *zap.Logger) (*ContextHandler, error) {
 	}, nil
 }
 
+// NewContextHandlerAt is NewContextHandler over an explicit contexts
+// directory (per-tenant store sets in the gateway, tests).
+func NewContextHandlerAt(basePath string, logger *zap.Logger) (*ContextHandler, error) {
+	manager, err := ctxmgr.NewManagerWithBasePath(basePath, logger)
+	if err != nil {
+		return nil, fmt.Errorf("%s: %w", i18n.T("ctx.cmd.init_manager_error"), err)
+	}
+	return &ContextHandler{manager: manager, logger: logger}, nil
+}
+
 // HandleContextCommand processa comandos /context
 func (h *ContextHandler) HandleContextCommand(ctx context.Context, sessionID, input string) error {
 	parts := strings.Fields(input)

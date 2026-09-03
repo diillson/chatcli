@@ -291,6 +291,15 @@ type ChatCLI struct {
 	// path is not configured.
 	llmAudit *llmAuditWriter
 
+	// stateRoot is the directory the durable stores live under
+	// (~/.chatcli by default; a tenant root while a per-principal store set
+	// is active — see tenant_scope.go). bootstrapLoader and workspaceDir are
+	// kept so tenant store sets can rebuild the context builder.
+	stateRoot       string
+	bootstrapLoader *workspace.BootstrapLoader
+	workspaceDir    string
+	tenants         *tenantPool
+
 	// Latest assembled system-prompt breakdown (chat and agent paths write
 	// it, /context status reads it).
 	promptBreakdowns promptBreakdownStore
@@ -810,6 +819,7 @@ func NewChatCLI(ctx context.Context, manager manager.LLMManager, logger *zap.Log
 	// Initialize workspace context (bootstrap files + memory)
 	homeDir, _ := os.UserHomeDir()
 	globalDir := filepath.Join(homeDir, ".chatcli")
+	cli.stateRoot = globalDir
 	workspaceDir := detectProjectDir()
 	if workspaceDir == "" {
 		workspaceDir, _ = os.Getwd()
@@ -933,6 +943,8 @@ func NewChatCLI(ctx context.Context, manager manager.LLMManager, logger *zap.Log
 	// search past conversations.
 	plugins.SetSessionAdapter(&sessionPluginAdapter{cli: cli})
 	cli.contextBuilder = workspace.NewContextBuilder(bootstrapLoader, memStore, workspaceDir)
+	cli.bootstrapLoader = bootstrapLoader
+	cli.workspaceDir = workspaceDir
 
 	// Start background memory annotation worker
 	if memoryEnabled {

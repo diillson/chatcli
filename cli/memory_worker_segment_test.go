@@ -80,7 +80,7 @@ func TestNudgeSegment_EmptyAndNoStoreAreNoops(t *testing.T) {
 		t.Fatalf("empty segment must not queue anything; got %d files", got)
 	}
 
-	mw.cli.memoryStore = nil
+	mw.store = nil // the worker owns its store handle (tenant sets swap it per principal)
 	mw.nudgeSegment(context.Background(), []models.Message{{Role: "user", Content: "x"}})
 	if got := len(mw.pendingFiles()); got != 0 {
 		t.Fatalf("no memory store must be a no-op; got %d files", got)

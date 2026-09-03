@@ -178,12 +178,13 @@ var envDefaults = map[string]envDefault{
 	"CHATCLI_EMBED_DIMENSIONS": {Value: "(provider-default)", Source: "openai 1536, google 3072 (128-3072), titan-v2 1024 (256/512/1024), titan-v1 1536, cohere-v3 1024, cohere-v4 1536, nova-mme 3072 (256/384/1024/3072)"},
 
 	// ─── Cost / budget ───────────────────────────────────────────
-	"CHATCLI_SESSION_BUDGET_USD": {Value: "(no budget)", Source: "cost_tracker.go"},
-	"CHATCLI_BUDGET_WARNING_PCT": {Value: "0.80", Source: "cost_tracker.go"},
-	"CHATCLI_BUDGET_HARD_STOP":   {Value: "false", IsBool: true, Source: "cost_tracker.go (refuse turns once budget exceeded)"},
-	"CHATCLI_SESSION_TTL":        {Value: "90", Source: "session_manager.go (days)"},
-	"CHATCLI_SESSION_TRANSCRIPT": {Value: "true", IsBool: true, Source: "transcript_journal.go (append-only ~/.chatcli/transcripts/<id>.jsonl)"},
-	"CHATCLI_DISABLE_HISTORY":    {Value: "false", IsBool: true, Source: "history_manager.go"},
+	"CHATCLI_SESSION_BUDGET_USD":  {Value: "(no budget)", Source: "cost_tracker.go"},
+	"CHATCLI_BUDGET_WARNING_PCT":  {Value: "0.80", Source: "cost_tracker.go"},
+	"CHATCLI_BUDGET_HARD_STOP":    {Value: "false", IsBool: true, Source: "cost_tracker.go (refuse turns once budget exceeded)"},
+	"CHATCLI_SESSION_TTL":         {Value: "90", Source: "session_manager.go (days)"},
+	"CHATCLI_GATEWAY_MAX_TENANTS": {Value: "16", Source: "tenant_scope.go (resident per-principal store sets, hub isolation)"},
+	"CHATCLI_SESSION_TRANSCRIPT":  {Value: "true", IsBool: true, Source: "transcript_journal.go (append-only ~/.chatcli/transcripts/<id>.jsonl)"},
+	"CHATCLI_DISABLE_HISTORY":     {Value: "false", IsBool: true, Source: "history_manager.go"},
 
 	// ─── Memory / bootstrap ──────────────────────────────────────
 	"CHATCLI_MEMORY_ENABLED":    {Value: "true", IsBool: true, Source: "memory.go"},

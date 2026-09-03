@@ -22,7 +22,7 @@ import (
 // unextractedSegment returns the live messages the memory worker has not
 // processed yet (system messages excluded — they carry no episodic content).
 func (cli *ChatCLI) unextractedSegment() []models.Message {
-	if cli == nil || cli.memWorker == nil || cli.memWorker.cli == nil || cli.memWorker.cli.memoryStore == nil {
+	if cli == nil || cli.memWorker == nil || cli.memWorker.store == nil {
 		return nil
 	}
 	start := cli.memWorker.lastProcessedIdx

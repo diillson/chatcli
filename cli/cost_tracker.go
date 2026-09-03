@@ -114,6 +114,10 @@ type SessionCostData struct {
 type CostTracker struct {
 	mu sync.RWMutex
 
+	// storeDir overrides the snapshot directory (per-tenant store sets);
+	// empty means the process default (costStoreDir).
+	storeDir string
+
 	sessionID    string
 	sessionName  string
 	sessionStart time.Time
@@ -153,7 +157,14 @@ type CostTracker struct {
 
 // NewCostTracker creates a new cost tracker with optional budget limit.
 func NewCostTracker() *CostTracker {
+	return NewCostTrackerAt("")
+}
+
+// NewCostTrackerAt is NewCostTracker persisting snapshots under dir
+// (empty = process default).
+func NewCostTrackerAt(dir string) *CostTracker {
 	ct := &CostTracker{
+		storeDir:     dir,
 		sessionID:    newCostSessionID(time.Now()),
 		sessionStart: time.Now(),
 		lastUpdate:   time.Now(),
@@ -497,7 +508,10 @@ func (ct *CostTracker) SaveSession() error {
 		return nil // nothing worth persisting
 	}
 
-	dir := costStoreDir()
+	dir := ct.storeDir
+	if dir == "" {
+		dir = costStoreDir()
+	}
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return fmt.Errorf("create cost store dir: %w", err)
 	}
