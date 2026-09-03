@@ -13,6 +13,7 @@ import (
 	"os/exec"
 	"runtime"
 	"strings"
+	"sync"
 
 	"github.com/diillson/chatcli/cli/ctxmgr"
 	"github.com/diillson/chatcli/i18n"
@@ -23,6 +24,12 @@ import (
 type ContextHandler struct {
 	manager *ctxmgr.Manager
 	logger  *zap.Logger
+
+	// watcher drives /context watch (lazily created); notify receives
+	// watcher-driven refresh outcomes for the REPL to print at its tick.
+	watchMu sync.Mutex
+	watcher *ctxmgr.ContextWatcher
+	notify  func(string)
 }
 
 // NewContextHandler cria um novo handler de contextos
@@ -97,6 +104,12 @@ func (h *ContextHandler) HandleContextCommand(ctx context.Context, sessionID, in
 
 	case "metrics", "stats":
 		return h.handleMetrics()
+
+	case "refresh", "reindex":
+		return h.handleRefresh(ctx, parts[2:])
+
+	case "watch", "unwatch":
+		return h.handleWatch(subcommand, parts[2:])
 
 	case "help", "?":
 		h.showContextHelp()
@@ -275,10 +288,11 @@ func (h *ContextHandler) handleUpdate(ctx context.Context, args []string) error 
 	if modeStr != "" {
 		mode = ctxmgr.ProcessingMode(strings.ToLower(modeStr))
 		validModes := map[ctxmgr.ProcessingMode]bool{
-			ctxmgr.ModeFull:    true,
-			ctxmgr.ModeSummary: true,
-			ctxmgr.ModeChunked: true,
-			ctxmgr.ModeSmart:   true,
+			ctxmgr.ModeFull:      true,
+			ctxmgr.ModeSummary:   true,
+			ctxmgr.ModeChunked:   true,
+			ctxmgr.ModeSmart:     true,
+			ctxmgr.ModeKnowledge: true,
 		}
 		if !validModes[mode] {
 			return fmt.Errorf("%s", i18n.T("context.handler.error.invalid_mode", modeStr))

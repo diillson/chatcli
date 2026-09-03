@@ -181,6 +181,7 @@ func (cli *ChatCLI) buildTenantStores(ctx context.Context, principal string) (*t
 	}
 	ch.GetManager().AttachEmbeddingProvider(cli.hydeProviderForSession())
 	cli.attachKnowledgeReranker(ch.GetManager())
+	ch.SetRefreshNotifier(cli.pushMemoryNotice)
 	ts.contextHandler = ch
 
 	if cli.memoryStore != nil { // memory enabled for the process
@@ -289,6 +290,9 @@ func (cli *ChatCLI) evictTenantsLocked() {
 		}
 		if oldest.memWorker != nil {
 			oldest.memWorker.stop()
+		}
+		if oldest.contextHandler != nil {
+			oldest.contextHandler.Close()
 		}
 		delete(pool.items, oldest.principal)
 	}

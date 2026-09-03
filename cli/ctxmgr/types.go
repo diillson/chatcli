@@ -6,6 +6,7 @@
 package ctxmgr
 
 import (
+	"fmt"
 	"time"
 
 	"github.com/diillson/chatcli/utils"
@@ -45,7 +46,18 @@ type FileContext struct {
 	Chunks        []FileChunk `json:"chunks,omitempty"`         // Chunks divididos (se modo chunked)
 	IsChunked     bool        `json:"is_chunked"`               // Se foi dividido em chunks
 	ChunkStrategy string      `json:"chunk_strategy,omitempty"` // Estratégia usada
+
+	// SourcePaths are the (expanded) paths the context was built from and
+	// FileStamps the per-file stamps of the last scan — what /context
+	// refresh and /context watch diff against (refresh.go). Contexts
+	// saved before these existed have neither and refresh only after a
+	// /context update <name> <paths>.
+	SourcePaths []string             `json:"source_paths,omitempty"`
+	FileStamps  map[string]FileStamp `json:"file_stamps,omitempty"`
 }
+
+// ErrContextNotFound marks a lookup by name that matched nothing.
+var ErrContextNotFound = fmt.Errorf("context not found")
 
 // ScanOptionsMetadata contém versão serializável das opções de scan
 type ScanOptionsMetadata struct {
