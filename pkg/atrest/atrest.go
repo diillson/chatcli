@@ -251,15 +251,15 @@ func ResealFile(path string) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	info, err := os.Stat(path)
+	info, err := os.Stat(path) // #nosec G703 -- operator-owned store path
 	if err != nil {
 		return false, err
 	}
 	tmp := path + ".reseal.tmp"
-	if err := os.WriteFile(tmp, sealed, info.Mode().Perm()); err != nil {
+	if err := os.WriteFile(tmp, sealed, info.Mode().Perm()); err != nil { // #nosec G304 G703 -- same operator-owned store path as the read above
 		return false, err
 	}
-	if err := os.Rename(tmp, path); err != nil {
+	if err := os.Rename(tmp, path); err != nil { // #nosec G703 -- same operator-owned store path
 		_ = os.Remove(tmp)
 		return false, err
 	}
@@ -301,15 +301,15 @@ func ResealLines(path, linePrefix string) (int, error) {
 	if changed == 0 {
 		return 0, nil
 	}
-	info, err := os.Stat(path)
+	info, err := os.Stat(path) // #nosec G703 -- operator-owned store path
 	if err != nil {
 		return 0, err
 	}
 	tmp := path + ".reseal.tmp"
-	if err := os.WriteFile(tmp, []byte(strings.Join(lines, "\n")), info.Mode().Perm()); err != nil {
+	if err := os.WriteFile(tmp, []byte(strings.Join(lines, "\n")), info.Mode().Perm()); err != nil { // #nosec G304 G703 -- same operator-owned store path as the read above
 		return 0, err
 	}
-	if err := os.Rename(tmp, path); err != nil {
+	if err := os.Rename(tmp, path); err != nil { // #nosec G703 -- same operator-owned store path
 		_ = os.Remove(tmp)
 		return 0, err
 	}

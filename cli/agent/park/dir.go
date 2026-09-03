@@ -60,7 +60,7 @@ func currentBaseDir() string {
 // the input so the on-disk layout matches user expectation.
 func Dir() (string, error) {
 	if base := currentBaseDir(); base != "" {
-		if err := os.MkdirAll(base, 0o700); err != nil {
+		if err := os.MkdirAll(base, 0o700); err != nil { // #nosec G703 -- tenant root set by the gateway (see above)
 			return "", err
 		}
 		return base, nil
@@ -73,7 +73,7 @@ func Dir() (string, error) {
 		// and stays inside the operator's trust boundary. The path is
 		// normalized via filepath.Clean above; no traversal escape is
 		// possible because there is no privileged target to escape to.
-		if err := os.MkdirAll(clean, 0o700); err != nil {
+		if err := os.MkdirAll(clean, 0o700); err != nil { // #nosec G304 G703 -- operator-owned CHATCLI_PARK_DIR (see above)
 			return "", err
 		}
 		return clean, nil
