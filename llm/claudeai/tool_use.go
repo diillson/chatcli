@@ -88,6 +88,11 @@ func (c *ClaudeClient) SendPromptWithTools(ctx context.Context, prompt string, h
 	if len(toolDefs) > 0 {
 		reqBody["tools"] = toolDefs
 	}
+	// Provider context engine: let Anthropic clear stale tool results
+	// server-side (context editing beta) on top of the local compaction.
+	if cm := client.AnthropicContextManagement(); cm != nil && len(toolDefs) > 0 {
+		reqBody["context_management"] = cm
+	}
 
 	// Skill effort hint → thinking (tool-use path). Opus 4.7+ uses adaptive,
 	// older models use budgeted extended thinking — see applyThinkingForEffort.
@@ -370,6 +375,13 @@ func parseClaudeToolResponse(body string, logger *zap.Logger) (*models.LLMRespon
 	}
 
 	response.Content = strings.Join(textParts, "\n")
+
+	// Server-side context edits applied by the provider context engine.
+	if cm, ok := result["context_management"].(map[string]interface{}); ok {
+		if edits, ok := cm["applied_edits"].([]interface{}); ok && len(edits) > 0 && logger != nil {
+			logger.Info("anthropic context editing applied", zap.Int("edits", len(edits)))
+		}
+	}
 
 	// Extract usage
 	if _, ok := result["usage"].(map[string]interface{}); ok {

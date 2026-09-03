@@ -25,6 +25,56 @@ import (
 	"sync/atomic"
 )
 
+// ContextEngineEnv selects the context engine (cli reads builtin|mcp:<server>|
+// provider); "provider" asks the model's own server-side context editing
+// (Anthropic context management) to drop stale tool results before they
+// are billed, in addition to ChatCLI's local compaction.
+const ContextEngineEnv = "CHATCLI_CONTEXT_ENGINE"
+
+// ContextManagementBeta is the Anthropic beta that enables context editing.
+const ContextManagementBeta = "context-management-2025-06-27"
+
+// ProviderContextEngine reports whether CHATCLI_CONTEXT_ENGINE=provider.
+func ProviderContextEngine() bool {
+	return strings.EqualFold(strings.TrimSpace(os.Getenv(ContextEngineEnv)), "provider")
+}
+
+// ContextThreshold is a typed amount in an Anthropic context edit
+// ("input_tokens" or "tool_uses" with a value).
+type ContextThreshold struct {
+	Type  string `json:"type"`
+	Value int    `json:"value"`
+}
+
+// ContextEdit is one Anthropic context-editing strategy.
+type ContextEdit struct {
+	Type         string            `json:"type"`
+	Trigger      *ContextThreshold `json:"trigger,omitempty"`
+	Keep         *ContextThreshold `json:"keep,omitempty"`
+	ClearAtLeast *ContextThreshold `json:"clear_at_least,omitempty"`
+}
+
+// ContextManagement is the context_management request block.
+type ContextManagement struct {
+	Edits []ContextEdit `json:"edits"`
+}
+
+// AnthropicContextManagement returns the context_management request block
+// for the provider context engine: clear the oldest tool results once the
+// prompt passes 100K input tokens, keeping the five most recent tool uses
+// and freeing at least 20K tokens per edit. Nil when the engine is off.
+func AnthropicContextManagement() *ContextManagement {
+	if !ProviderContextEngine() {
+		return nil
+	}
+	return &ContextManagement{Edits: []ContextEdit{{
+		Type:         "clear_tool_uses_20250919",
+		Trigger:      &ContextThreshold{Type: "input_tokens", Value: 100000},
+		Keep:         &ContextThreshold{Type: "tool_uses", Value: 5},
+		ClearAtLeast: &ContextThreshold{Type: "input_tokens", Value: 20000},
+	}}}
+}
+
 // PromptCacheTTLEnv selects the Anthropic cache lifetime: "5m" (default) or
 // "1h". The hour keeps the prefix warm through longer idle gaps at a higher
 // write rate (2x input instead of 1.25x), so it pays off for sessions that

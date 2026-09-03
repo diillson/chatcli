@@ -1355,7 +1355,7 @@
   "auth.logout.success": "Logout realizado",
   "auth.error.unknown_subcommand": "Subcomando desconhecido. Use: status | login | logout",
   "memory.error.not_available": "Sistema de memória não disponível.",
-  "memory.usage": "Uso: /memory [today|yesterday|week|longterm|list|load <data>|profile|profile set <k>=<v>|remember [cat] <fato>|forget <trecho>|facts|topics|projects|stats|timeline [q]|compact|<AAAA-MM-DD>]",
+  "memory.usage": "Uso: /memory [today|yesterday|week|longterm|list|load <data>|profile|profile set <k>=<v>|remember [cat] <fato>|forget <trecho>|facts|topics|projects|stats|timeline [q]|compact|export [caminho]|import <caminho>|recall <consulta>|why|<YYYY-MM-DD>]",
   "memory.no_notes_for": "Nenhuma nota encontrada para",
   "memory.notes_for": "Notas de memória para",
   "memory.no_notes_week": "Nenhuma nota nos últimos 7 dias.",
@@ -3536,7 +3536,7 @@
   "park.resolve.empty": "park: token vazio (use /parked para listar)",
   "park.resolve.not_found": "park: nenhum snapshot bate com %q (use /parked para listar)",
   "park.resolve.ambiguous": "park: prefixo %q ambíguo (bate com: %s) — use um prefixo mais longo",
-  "sec.cmd.usage_header": "Uso: /config security {rules|allow|deny|forget|reload|reseal|verify-audit [caminho]} [args]",
+  "sec.cmd.usage_header": "Uso: /config security {rules|allow|deny|forget|reload} [args]",
   "sec.cmd.usage_note_pattern": "Patterns usam prefix match sobre \"<toolName> <args>\" (ex: \"@coder exec kubectl get\"). Deny bate Allow.",
   "sec.cmd.usage_note_scope": "Mudanças persistem em ~/.chatcli/coder_policy.json e valem para /coder e para o scheduler no próximo fire.",
   "sec.cmd.unknown_sub": "Subcomando de /config security desconhecido: %s",
@@ -3751,5 +3751,6 @@
   "cfg.sub.sec.atrest": "Criptografia em repouso",
   "cfg.kv.sec.atrest_key": "Fingerprint da chave",
   "cfg.kv.sec.atrest_covers": "Cobre",
-  "cfg.kv.sec.atrest_covers_list": "sessões, transcripts, park snapshots, memória de longo prazo (stores JSON), contextos de conhecimento, arquivo CCR, snapshots de custo, exportações de memória"
+  "cfg.kv.sec.atrest_covers_list": "sessões, transcripts, park snapshots, memória de longo prazo (stores JSON), contextos de conhecimento, arquivo CCR, snapshots de custo, exportações de memória",
+  "cfg.sub.server.otel": "Exportação OpenTelemetry"
 }

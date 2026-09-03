@@ -41,6 +41,7 @@ import (
 	"github.com/diillson/chatcli/cli/paste"
 	"github.com/diillson/chatcli/cli/plugins"
 	"github.com/diillson/chatcli/cli/scheduler"
+	"github.com/diillson/chatcli/cli/telemetry"
 	"github.com/diillson/chatcli/cli/workspace"
 	"github.com/diillson/chatcli/client/remote"
 	"github.com/diillson/chatcli/i18n"
@@ -353,7 +354,9 @@ type ChatCLI struct {
 	// lastRecallTrace is what the last auto-recall injected and why (/memory why).
 	recallTraceMu   sync.Mutex
 	lastRecallTrace *memoryRecallTrace
-	lastEscTime     time.Time // for Esc+Esc double-press detection
+	// otlp is the OpenTelemetry metrics exporter (nil unless OTEL_* is set).
+	otlp        *telemetry.Exporter
+	lastEscTime time.Time // for Esc+Esc double-press detection
 
 	// Background memory annotation worker
 	memWorker        *memoryWorker
@@ -898,6 +901,7 @@ func NewChatCLI(ctx context.Context, manager manager.LLMManager, logger *zap.Log
 	// layer is also consulted by the agent/coder loop to compress tool output.
 	cli.initTranscriptJournal("")
 	cli.initLLMAudit("repl")
+	cli.initTelemetry(ctx, "repl")
 	cli.initCacheResourceCosting()
 	// GPT models count tokens locally: warm the vocabulary in the
 	// background so the first exact count is ready by the first turn.
@@ -2136,9 +2140,11 @@ func (cli *ChatCLI) cleanup(ctx context.Context) {
 		cli.hubLocalClose = nil
 	}
 
-	// Learned token ratios and today's spend outlive the process.
+	// Learned token ratios and today's spend outlive the process; the last
+	// metrics snapshot leaves with them.
 	cli.calibrator().flushCalibration()
 	cli.costTracker.FlushDailySpend()
+	cli.shutdownTelemetry(ctx)
 
 	// Stop context watchers before the stores go away.
 	if cli.contextHandler != nil {
