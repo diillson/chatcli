@@ -25,9 +25,15 @@ type ContextHandler struct {
 	manager *ctxmgr.Manager
 	logger  *zap.Logger
 
-	// watcher drives /context watch (lazily created); notify receives
-	// watcher-driven refresh outcomes for the REPL to print at its tick.
-	watchMu sync.Mutex
+	// watch holds the /context watch state (lazily created watcher and
+	// the notice sink). A pointer so the handler type stays comparable.
+	watch     *contextWatchState
+	watchOnce sync.Once
+}
+
+// contextWatchState is the mutable watch state of a ContextHandler.
+type contextWatchState struct {
+	mu      sync.Mutex
 	watcher *ctxmgr.ContextWatcher
 	notify  func(string)
 }

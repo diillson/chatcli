@@ -22,30 +22,43 @@ import (
 
 // SetRefreshNotifier installs the sink for watcher-driven refresh notices.
 func (h *ContextHandler) SetRefreshNotifier(fn func(string)) {
-	h.watchMu.Lock()
-	h.notify = fn
-	h.watchMu.Unlock()
+	st := h.watchState()
+	st.mu.Lock()
+	st.notify = fn
+	st.mu.Unlock()
+}
+
+// watchState returns the handler's watch state, creating it on first use.
+func (h *ContextHandler) watchState() *contextWatchState {
+	h.watchOnce.Do(func() {
+		if h.watch == nil {
+			h.watch = &contextWatchState{}
+		}
+	})
+	return h.watch
 }
 
 // Close stops the watcher (session end / tenant release).
 func (h *ContextHandler) Close() {
-	h.watchMu.Lock()
-	w := h.watcher
-	h.watcher = nil
-	h.watchMu.Unlock()
+	st := h.watchState()
+	st.mu.Lock()
+	w := st.watcher
+	st.watcher = nil
+	st.mu.Unlock()
 	if w != nil {
 		w.Close()
 	}
 }
 
 func (h *ContextHandler) contextWatcher() *ctxmgr.ContextWatcher {
-	h.watchMu.Lock()
-	defer h.watchMu.Unlock()
-	if h.watcher == nil {
-		h.watcher = ctxmgr.NewContextWatcher(h.manager, h.logger, func(name string, rep ctxmgr.RefreshReport, err error) {
-			h.watchMu.Lock()
-			notify := h.notify
-			h.watchMu.Unlock()
+	st := h.watchState()
+	st.mu.Lock()
+	defer st.mu.Unlock()
+	if st.watcher == nil {
+		st.watcher = ctxmgr.NewContextWatcher(h.manager, h.logger, func(name string, rep ctxmgr.RefreshReport, err error) {
+			st.mu.Lock()
+			notify := st.notify
+			st.mu.Unlock()
 			if notify == nil {
 				return
 			}
@@ -56,7 +69,7 @@ func (h *ContextHandler) contextWatcher() *ctxmgr.ContextWatcher {
 			notify(i18n.T("context.refresh.done", name, rep.Changed, rep.Added, rep.Removed))
 		})
 	}
-	return h.watcher
+	return st.watcher
 }
 
 // handleRefresh is /context refresh <name>.
