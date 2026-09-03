@@ -256,6 +256,7 @@ func (tt *TopicTracker) load() {
 }
 
 func (tt *TopicTracker) persist() {
+	tt.mergeFromDiskLocked()
 	topics := make([]Topic, 0, len(tt.topics))
 	for _, t := range tt.topics {
 		topics = append(topics, *t)
