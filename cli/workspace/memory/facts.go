@@ -425,6 +425,24 @@ func (fi *FactIndex) Search(keywords []string) []*Fact {
 // are empty it falls back to all facts by temporal score, matching Search's
 // empty-query behavior.
 func (fi *FactIndex) SearchBlended(keywords []string, semantic map[string]float64, w RankWeights) []*Fact {
+	return fi.SearchBlendedMin(keywords, semantic, w, 0)
+}
+
+// reinforcedLexicalHit is the raw computeRelevance score (before keyword
+// normalization) that clears the lexical floor on its own: one content hit
+// (1.0) reinforced by a tag hit (0.5), or two content hits.
+const reinforcedLexicalHit = 1.5
+
+// SearchBlendedMin is SearchBlended with a lexical relevance floor for
+// facts found by keywords alone: the fact must either match at least
+// minLexical of the keywords (computeRelevance scale, 1.0 = every keyword
+// hit in the content) or carry a reinforced hit — a raw score of 1.5, i.e.
+// a content hit backed by a tag hit, or two content hits — so a long
+// natural-language query with one strong term still recalls its fact
+// while one incidental token cannot. Semantic hits are unaffected (the
+// vector floor is MinCosineScore, applied by the caller). A floor of 0
+// keeps every keyword hit, which is what the pull tool wants.
+func (fi *FactIndex) SearchBlendedMin(keywords []string, semantic map[string]float64, w RankWeights, minLexical float64) []*Fact {
 	fi.mu.RLock()
 	defer fi.mu.RUnlock()
 
@@ -435,9 +453,14 @@ func (fi *FactIndex) SearchBlended(keywords []string, semantic map[string]float6
 
 	if len(keywords) > 0 {
 		for _, f := range fi.facts {
-			if rel := fi.computeRelevance(f, keywords); rel > 0 {
-				cands[f.ID] = &candidate{fact: f, lexical: rel, temporal: fi.scoreOf(f, now)}
+			rel := fi.computeRelevance(f, keywords)
+			if rel <= 0 {
+				continue
 			}
+			if minLexical > 0 && rel < minLexical && rel*float64(len(keywords)) < reinforcedLexicalHit {
+				continue
+			}
+			cands[f.ID] = &candidate{fact: f, lexical: rel, temporal: fi.scoreOf(f, now)}
 		}
 	}
 

@@ -174,5 +174,6 @@ func (cli *ChatCLI) refreshBoundSession() {
 		return
 	}
 	cli.restoreSessionData(sd)
+	cli.applySessionAttachments(sd, name)
 	cli.boundSessionSync = mt
 }

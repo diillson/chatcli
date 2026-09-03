@@ -176,22 +176,26 @@ func (cli *ChatCLI) handleLoadSession(ctx context.Context, name string) {
 			if choice == "remote" {
 				cli.restoreSessionData(remoteSD)
 				cli.currentSessionName = name
+				cli.applySessionAttachments(remoteSD, name)
 				cli.boundRemoteOnly = true
 				fmt.Println(i18n.T("session.load_success_remote", name))
 			} else {
 				cli.restoreSessionData(localSD)
 				cli.currentSessionName = name
+				cli.applySessionAttachments(localSD, name)
 				cli.boundRemoteOnly = false
 				fmt.Println(i18n.T("session.load_success", name))
 			}
 		case foundLocal:
 			cli.restoreSessionData(localSD)
 			cli.currentSessionName = name
+			cli.applySessionAttachments(localSD, name)
 			cli.boundRemoteOnly = false
 			fmt.Println(i18n.T("session.load_success", name))
 		case foundRemote:
 			cli.restoreSessionData(remoteSD)
 			cli.currentSessionName = name
+			cli.applySessionAttachments(remoteSD, name)
 			cli.boundRemoteOnly = true
 			fmt.Println(i18n.T("session.load_success_remote", name))
 		default:
@@ -207,6 +211,7 @@ func (cli *ChatCLI) handleLoadSession(ctx context.Context, name string) {
 	} else {
 		cli.restoreSessionData(sd)
 		cli.currentSessionName = name
+		cli.applySessionAttachments(sd, name)
 		cli.boundRemoteOnly = false
 		fmt.Println(kit.Notice(kit.LevelSuccess, i18n.T("session.load_success", name)))
 	}
@@ -225,6 +230,7 @@ func (cli *ChatCLI) buildSessionData() *SessionData {
 		Version:      2,
 		ChatHistory:  cli.history,
 		TranscriptID: cli.transcriptID(),
+		Attachments:  cli.sessionAttachments(),
 	}
 }
 

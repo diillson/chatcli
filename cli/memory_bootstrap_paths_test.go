@@ -105,14 +105,14 @@ func TestFollowUpRecallBlocks_RefiresRecallMidLoop(t *testing.T) {
 	}
 	a := &AgentMode{cli: cli}
 
-	block := a.followUpRecallBlocks("lembra do problema do kimi que resolvemos?")
+	block := a.followUpRecallBlocks(context.Background(), "lembra do problema do kimi que resolvemos?")
 	if !strings.Contains(block, "[MEMORY AUTO-RECALL]") {
 		t.Errorf("mid-loop follow-up must re-rank facts, got %q", block)
 	}
 	if !strings.Contains(block, "[SESSION RECALL]") {
 		t.Errorf("mid-loop follow-up must re-rank sessions, got %q", block)
 	}
-	if got := a.followUpRecallBlocks("   "); got != "" {
+	if got := a.followUpRecallBlocks(context.Background(), "   "); got != "" {
 		t.Errorf("blank follow-up must inject nothing, got %q", got)
 	}
 }

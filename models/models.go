@@ -165,6 +165,18 @@ type SessionData struct {
 	// session keeps writing to the same file. Empty for sessions saved before
 	// journals existed or with the journal disabled.
 	TranscriptID string `json:"transcript_id,omitempty"`
+	// Attachments are the /context attach records active when the session
+	// was saved, so loading it re-attaches the same contexts (same chunks
+	// and retrieval mode). Attach state was process-local before.
+	Attachments []SessionAttachment `json:"attachments,omitempty"`
+}
+
+// SessionAttachment mirrors one /context attach record for persistence.
+type SessionAttachment struct {
+	ContextID      string `json:"context_id"`
+	Priority       int    `json:"priority,omitempty"`
+	SelectedChunks []int  `json:"selected_chunks,omitempty"`
+	RetrievalTopK  int    `json:"retrieval_top_k,omitempty"`
 }
 
 // UsageInfo represents token usage information returned by LLM APIs.

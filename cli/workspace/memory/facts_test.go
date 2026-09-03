@@ -2,6 +2,7 @@ package memory
 
 import (
 	"os"
+	"strings"
 	"testing"
 
 	"go.uber.org/zap"
@@ -137,4 +138,44 @@ func containsStr(haystack, needle string) bool {
 				}
 				return false
 			})())
+}
+
+// A lexical floor drops facts that match only an incidental token while
+// keeping semantic hits and strong keyword matches.
+func TestSearchBlendedMin_LexicalFloor(t *testing.T) {
+	fi := NewFactIndex(t.TempDir(), DefaultConfig(), zap.NewNop())
+	if !fi.AddFact("The deploy pipeline uses helm charts from the infra repo", "project", []string{"deploy", "helm"}) {
+		t.Fatal("add fact")
+	}
+	if !fi.AddFact("Coffee machine on floor two is broken", "misc", nil) {
+		t.Fatal("add fact")
+	}
+	keywords := []string{"deploy", "helm", "pipeline", "two"}
+
+	all := fi.SearchBlended(keywords, nil, DefaultRankWeights())
+	if len(all) != 2 {
+		t.Fatalf("no floor must keep both keyword hits, got %d", len(all))
+	}
+	floored := fi.SearchBlendedMin(keywords, nil, DefaultRankWeights(), 0.34)
+	if len(floored) != 1 || !strings.Contains(floored[0].Content, "helm") {
+		t.Fatalf("floor must keep only the strong match, got %d: %+v", len(floored), floored)
+	}
+	// A semantic hit survives the lexical floor regardless of keywords.
+	var coffeeID string
+	for _, f := range fi.GetAll() {
+		if strings.Contains(f.Content, "Coffee") {
+			coffeeID = f.ID
+		}
+	}
+	sem := map[string]float64{coffeeID: 0.9}
+	withSem := fi.SearchBlendedMin([]string{"deploy"}, sem, DefaultRankWeights(), 0.34)
+	found := false
+	for _, f := range withSem {
+		if f.ID == coffeeID {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("semantic hit must not be dropped by the lexical floor")
+	}
 }
