@@ -208,7 +208,7 @@ func (ch *CommandHandler) buildRoutes() {
 		"/retryall":   func(_ context.Context, _ string) bool { return c.handleRetryAllChunks() },
 		"/skipchunk":  func(_ context.Context, _ string) bool { return c.handleSkipChunk() },
 		"/disconnect": func(ctx context.Context, _ string) bool { ch.handleDisconnectCommand(ctx); return false },
-		"/rewind":     func(_ context.Context, _ string) bool { c.showRewindMenu(); return false },
+		"/rewind":     func(_ context.Context, in string) bool { c.handleRewindCommand(in); return false },
 		"/metrics":    func(_ context.Context, _ string) bool { ch.handleMetricsCommand(); return false },
 		"/newsession": func(ctx context.Context, _ string) bool {
 			c.clearAllHistories()
@@ -394,6 +394,8 @@ func (ch *CommandHandler) handleSessionCommand(ctx context.Context, userInput st
 		fmt.Println(i18n.T("session.usage_delete"))
 		fmt.Println(i18n.T("session.usage_new"))
 		fmt.Println(i18n.T("session.usage_fork"))
+		fmt.Println(i18n.T("session.usage_export"))
+		fmt.Println(i18n.T("session.usage_transcript"))
 		return
 	}
 
@@ -474,6 +476,16 @@ func (ch *CommandHandler) handleSessionCommand(ctx context.Context, userInput st
 		}
 		ch.cli.handleForkSession(name)
 		ch.cli.stampBoundSession()
+	case "export":
+		path := ""
+		if len(args) > 3 {
+			path = args[3]
+		}
+		ch.cli.handleSessionExport(name, path)
+	case "transcript":
+		rest := strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(userInput), args[0]))
+		rest = strings.TrimSpace(strings.TrimPrefix(rest, "transcript"))
+		ch.cli.handleSessionTranscript(args[2:], rest)
 	default:
 		// CORREÇÃO: Usar Println com i18n.T
 		fmt.Println(i18n.T("session.unknown_command", command))

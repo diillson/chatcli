@@ -260,6 +260,7 @@ func (cli *ChatCLI) showHelp() {
 	printCommand("/version | /v", i18n.T("help.command.version"))
 	printCommand("/compact [instruction]", i18n.T("help.command.compact"))
 	printCommand("/rewind", i18n.T("help.command.rewind"))
+	printCommand("/rewind compact", i18n.T("help.command.rewind_compact"))
 	printCommand("Esc+Esc", i18n.T("help.command.quick_rewind"))
 	printCommand("/memory [subcommand]", i18n.T("help.command.memory"))
 
@@ -373,6 +374,8 @@ func (cli *ChatCLI) showHelp() {
 	printCommand("/session save <nome>", i18n.T("help.command.session_save"))
 	printCommand("/session load <nome>", i18n.T("help.command.session_load"))
 	printCommand("/session list", i18n.T("help.command.session_list"))
+	printCommand("/session export <md|jsonl> [path]", i18n.T("help.command.session_export"))
+	printCommand("/session transcript <search|show|stats>", i18n.T("help.command.session_transcript"))
 	printCommand("/session delete <nome>", i18n.T("help.command.session_delete"))
 	printCommand("/session new", i18n.T("help.command.session_new"))
 	printCommand("/hub", i18n.T("help.command.hub"))

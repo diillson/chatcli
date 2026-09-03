@@ -2291,7 +2291,7 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 					renderer.Colorize("│", agent.ColorCyan),
 					renderer.Colorize(msg, agent.ColorGray))
 			})
-			a.cli.firePreCompact(ctx, compactTriggerAuto)
+			a.cli.beforeCompaction(ctx, compactTriggerAuto)
 			compacted, compactErr := a.cli.historyCompactor.Compact(ctx, a.cli.history, a.cli.Client, cfg)
 			a.cli.historyCompactor.SetStatusCallback(nil)
 			if compactErr == nil {
@@ -2573,7 +2573,7 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 				// the dropped messages to CCR and account for the rebuild —
 				// the same guarantees as a planned compaction.
 				a.cli.flushMemoryBeforeCompaction(ctx)
-				a.cli.firePreCompact(ctx, compactTriggerRecovery)
+				a.cli.beforeCompaction(ctx, compactTriggerRecovery)
 				recoveredHistory, recovered := contextRecovery.RecoverContextOverflow(a.cli.history)
 				if recovered {
 					if note := archiveDroppedMessages(a.cli.compressionLayer, a.cli.history, recoveredHistory); note != "" {
