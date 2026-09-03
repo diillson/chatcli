@@ -52,6 +52,10 @@ import (
 
 // AgentMode representa a funcionalidade de agente autônomo no ChatCLI
 type AgentMode struct {
+	// toolDefsChars is the serialized size of this run's native tool
+	// definitions — request weight outside the history that the compaction
+	// budget must still reserve (CompactConfig.ReservedChars).
+	toolDefsChars       int
 	cli                 *ChatCLI
 	logger              *zap.Logger
 	executor            *agent.CommandExecutor
@@ -1201,6 +1205,7 @@ func (a *AgentMode) Run(ctx context.Context, query string, additionalContext str
 		currentModeName = ModeCoder
 	}
 	a.installAgentSystemMessage(sysMsg, currentModeName)
+	a.toolDefsChars = a.estimateToolDefsChars()
 
 	currentQuery := query
 	if additionalContext != "" {
@@ -2181,6 +2186,16 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 		// re-trigger after the cooldown.
 		saCfg := agent.DefaultSkillAgingConfig()
 		saCfg.CCR = a.cli.compressionLayer
+		// Repeated reads of the same file: keep the newest, stub the rest
+		// (recoverable via @recall). Same turn boundary as microcompact so
+		// the two rewrites share one prefix-cache invalidation.
+		if h, report := agent.DedupRepeatedReads(a.cli.history, mcCfg.CCR, a.logger); report != nil && report.Superseded > 0 {
+			a.cli.history = h
+			a.cli.costTracker.NoteExpectedCacheRebuild()
+			fmt.Printf("\r\033[K  %s %s\n",
+				renderer.Colorize("│", agent.ColorGray),
+				renderer.Colorize(i18n.T("agent.dedup_reads.applied", report.Superseded, FormatPayloadSize(int(report.CharsSaved))), agent.ColorGray))
+		}
 		if h, report := agent.ApplySkillAging(a.cli.history, saCfg, a.logger); report != nil && report.Collapsed > 0 {
 			a.cli.history = h
 			a.cli.costTracker.NoteExpectedCacheRebuild()
@@ -2194,7 +2209,8 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 		}
 
 		// Compact history if over budget (before building turn history)
-		cfg := DefaultCompactConfig(a.cli.Provider, a.cli.Model)
+		cfg := a.cli.compactConfig(a.cli.Provider, a.cli.Model)
+		cfg.ReservedChars = a.toolDefsChars
 		cfg.BudgetRatio = 0.60 // tighter budget — tool outputs are large
 		cfg.MinKeepRecent = 8  // ~4 tool call cycles
 
@@ -4565,4 +4581,27 @@ func extractDelegateArgs(argsJSON string) (map[string]interface{}, string) {
 		return inner, string(outer.Args)
 	}
 	return nil, string(outer.Args)
+}
+
+// estimateToolDefsChars measures the native tool definitions this run ships
+// on every request (coder tools, granted plugins, MCP tools). They are not
+// part of the history slice, so the compaction budget reserves them
+// explicitly instead of discovering the overflow at the provider.
+func (a *AgentMode) estimateToolDefsChars() int {
+	var defs []models.ToolDefinition
+	if a.isCoderMode {
+		defs = workers.CoderToolDefinitions(nil)
+	}
+	defs = append(defs, workers.PluginToolDefinitions()...)
+	if a.cli != nil && a.cli.mcpManager != nil && a.cli.mcpManager.ToolCount() > 0 {
+		defs = append(defs, a.cli.mcpManager.GetTools()...)
+	}
+	if len(defs) == 0 {
+		return 0
+	}
+	raw, err := json.Marshal(defs)
+	if err != nil {
+		return 0
+	}
+	return len(raw)
 }

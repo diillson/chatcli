@@ -186,7 +186,7 @@ func (cli *ChatCLI) fireUserPromptSubmitHook(ctx context.Context, in string) {
 // configured budget. Compaction errors leave cli.history untouched so the
 // turn can still proceed with the un-compacted history.
 func (cli *ChatCLI) compactHistoryIfNeeded(ctx context.Context) {
-	cfg := DefaultCompactConfig(cli.Provider, cli.Model)
+	cfg := cli.compactConfig(cli.Provider, cli.Model)
 	cli.warnIfHistoryExceedsProxyCap(cfg)
 	if !cli.historyCompactor.NeedsCompaction(cli.history, cfg) {
 		return

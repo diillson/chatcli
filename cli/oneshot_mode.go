@@ -237,7 +237,7 @@ func (cli *ChatCLI) RunOnce(ctx context.Context, input string, disableAnimation 
 	// Compact history if over budget. In one-shot mode we keep the status
 	// output on stderr so it doesn't pollute the stdout result (which may
 	// be piped into other tools).
-	cfg := DefaultCompactConfig(cli.Provider, cli.Model)
+	cfg := cli.compactConfig(cli.Provider, cli.Model)
 	if cli.historyCompactor.NeedsCompaction(cli.history, cfg) {
 		cli.historyCompactor.SetStatusCallback(func(stage CompactStage, msg string) {
 			fmt.Fprintf(os.Stderr, "  %s\n", msg)
