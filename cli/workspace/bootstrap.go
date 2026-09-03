@@ -25,6 +25,7 @@ var BootstrapFiles = []string{
 type BootstrapLoader struct {
 	workspaceDir string
 	globalDir    string // ~/.chatcli/
+	workingDir   string // end of the AGENTS.md hierarchy walk (cwd by default)
 	cache        map[string]cachedFile
 	mu           sync.RWMutex
 	logger       *zap.Logger
@@ -51,7 +52,17 @@ func (bl *BootstrapLoader) LoadBootstrapContent() string {
 	var parts []string
 
 	for _, filename := range BootstrapFiles {
-		content, ok := bl.LoadFile(filename)
+		var (
+			content string
+			ok      bool
+		)
+		if filename == "AGENTS.md" {
+			// Project root → cwd hierarchy (CHATCLI.md / CLAUDE.md as
+			// per-directory fallbacks), global file when the project has none.
+			content, ok = bl.loadInstructionHierarchy()
+		} else if content, ok = bl.LoadFile(filename); ok {
+			content = bl.expandImports(content, bl.dirOfLoaded(filename), 1, map[string]bool{})
+		}
 		if ok && strings.TrimSpace(content) != "" {
 			parts = append(parts, fmt.Sprintf("## %s\n\n%s", filename, content))
 		}
@@ -91,6 +102,14 @@ func (bl *BootstrapLoader) LoadFile(filename string) (string, bool) {
 	}
 
 	return "", false
+}
+
+// dirOfLoaded returns the directory LoadFile resolved filename from.
+func (bl *BootstrapLoader) dirOfLoaded(filename string) string {
+	if _, err := os.Stat(filepath.Join(bl.workspaceDir, filename)); err == nil {
+		return bl.workspaceDir
+	}
+	return bl.globalDir
 }
 
 // IsStale checks if any cached file has been modified on disk.

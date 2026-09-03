@@ -192,9 +192,16 @@ func (w *ContextWatcher) schedule(path string) {
 		return
 	}
 	if info, err := os.Stat(path); err == nil && info.IsDir() && !utils.ShouldSkipDir(filepath.Base(path)) {
-		if err := w.watcher.Add(path); err == nil {
-			w.byDir[path] = name
-			w.names[name] = append(w.names[name], path)
+		// A created directory may already hold a subtree (mkdir -p, a
+		// checkout, an unpack): watch all of it, not just the top.
+		for _, d := range watchDirsFor([]string{path}) {
+			if _, already := w.byDir[d]; already {
+				continue
+			}
+			if err := w.watcher.Add(d); err == nil {
+				w.byDir[d] = name
+				w.names[name] = append(w.names[name], d)
+			}
 		}
 	}
 	if t := w.timers[name]; t != nil {
