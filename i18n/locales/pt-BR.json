@@ -3735,5 +3735,6 @@
   "mem.cmd.suggest.export": "Exporta fatos, episódios, tópicos, projetos e perfil como JSONL",
   "mem.cmd.suggest.import": "Mescla uma exportação de memória na memória desta máquina",
   "mem.cmd.suggest.recall": "Simula o auto-recall para uma consulta, com os motivos",
-  "mem.cmd.suggest.why": "Por que o último turno lembrou o que lembrou"
+  "mem.cmd.suggest.why": "Por que o último turno lembrou o que lembrou",
+  "cost.cmd.daily_budget": "Hoje: %s de %s do budget diário (%s)"
 }

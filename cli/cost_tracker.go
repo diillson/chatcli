@@ -148,6 +148,14 @@ type CostTracker struct {
 	budgetLimitUSD   float64 // 0 = no limit
 	budgetWarningPct float64 // fraction (0.8 = 80%)
 	budgetHardStop   bool    // refuse new LLM turns once exceeded
+	// Daily budget (CHATCLI_DAILY_BUDGET_USD): spend across every session
+	// of the calendar day under this store dir (the tenant root under the
+	// gateway), persisted in daily-spend.json.
+	dailyLimitUSD  float64
+	dailySpentUSD  float64
+	dailyDate      string
+	dailyBaseline  float64 // totalCostUSD already folded into dailySpentUSD
+	dailySaveTimer *time.Timer
 
 	// lastAnnouncedLevel arms the one-shot proactive budget notice: a
 	// transition is reported once per escalation, not on every turn.
@@ -188,6 +196,7 @@ func NewCostTrackerAt(dir string) *CostTracker {
 		modelUsage:   make(map[string]*ModelUsageRecord),
 	}
 	ct.loadBudgetFromEnvLocked()
+	ct.loadDailySpendLocked()
 	return ct
 }
 
@@ -220,6 +229,13 @@ func (ct *CostTracker) loadBudgetFromEnvLocked() {
 	if v := os.Getenv("CHATCLI_BUDGET_WARNING_PCT"); v != "" {
 		if f, err := strconv.ParseFloat(v, 64); err == nil && f > 0 {
 			ct.budgetWarningPct = f
+		}
+	}
+
+	ct.dailyLimitUSD = 0
+	if v := os.Getenv("CHATCLI_DAILY_BUDGET_USD"); v != "" {
+		if f, err := strconv.ParseFloat(v, 64); err == nil && f > 0 {
+			ct.dailyLimitUSD = f
 		}
 	}
 
@@ -364,7 +380,13 @@ func (ct *CostTracker) CheckBudget() BudgetLevel {
 func (ct *CostTracker) BudgetBlocked() bool {
 	ct.mu.RLock()
 	defer ct.mu.RUnlock()
-	return ct.budgetHardStop && ct.budgetLimitUSD > 0 && ct.totalCostUSD >= ct.budgetLimitUSD
+	if !ct.budgetHardStop {
+		return false
+	}
+	if ct.budgetLimitUSD > 0 && ct.totalCostUSD >= ct.budgetLimitUSD {
+		return true
+	}
+	return ct.dailyLimitUSD > 0 && ct.dailySpentUSD >= ct.dailyLimitUSD
 }
 
 // BudgetHardStopEnabled reports whether the hard-stop gate is armed.
@@ -773,19 +795,28 @@ func (ct *CostTracker) recomputeAggregates() {
 		ct.totalCostUSD += rec.TotalCostUSD
 	}
 	ct.totalCostUSD += ct.cacheStorageUSD
+	ct.accrueDailyLocked()
 }
 
 func (ct *CostTracker) budgetLevelLocked() BudgetLevel {
-	if ct.budgetLimitUSD <= 0 {
-		return BudgetOK
+	level := BudgetOK
+	if ct.budgetLimitUSD > 0 {
+		switch {
+		case ct.totalCostUSD >= ct.budgetLimitUSD:
+			level = BudgetExceeded
+		case ct.totalCostUSD >= ct.budgetLimitUSD*ct.budgetWarningPct:
+			level = BudgetWarning
+		}
 	}
-	if ct.totalCostUSD >= ct.budgetLimitUSD {
-		return BudgetExceeded
+	if ct.dailyLimitUSD > 0 {
+		switch {
+		case ct.dailySpentUSD >= ct.dailyLimitUSD:
+			level = BudgetExceeded
+		case ct.dailySpentUSD >= ct.dailyLimitUSD*ct.budgetWarningPct && level == BudgetOK:
+			level = BudgetWarning
+		}
 	}
-	if ct.totalCostUSD >= ct.budgetLimitUSD*ct.budgetWarningPct {
-		return BudgetWarning
-	}
-	return BudgetOK
+	return level
 }
 
 func (ct *CostTracker) budgetMessageLocked() string {

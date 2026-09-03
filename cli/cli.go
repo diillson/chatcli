@@ -2136,8 +2136,9 @@ func (cli *ChatCLI) cleanup(ctx context.Context) {
 		cli.hubLocalClose = nil
 	}
 
-	// Learned token ratios outlive the process.
+	// Learned token ratios and today's spend outlive the process.
 	cli.calibrator().flushCalibration()
+	cli.costTracker.FlushDailySpend()
 
 	// Stop context watchers before the stores go away.
 	if cli.contextHandler != nil {

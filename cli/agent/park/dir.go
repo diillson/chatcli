@@ -15,11 +15,36 @@ package park
 import (
 	"os"
 	"path/filepath"
+	"sync"
 )
 
 // envOverride lets tests redirect the snapshot directory without
 // touching $HOME. Production callers should not set this.
 const envOverride = "CHATCLI_PARK_DIR"
+
+var (
+	baseDirMu sync.RWMutex
+	baseDir   string
+)
+
+// SetBaseDir pins the snapshot directory for the process from now on
+// (empty restores the default resolution). The gateway points it at the
+// active tenant's root, so one principal's parked runs never land in
+// another's directory; it wins over CHATCLI_PARK_DIR.
+func SetBaseDir(dir string) {
+	baseDirMu.Lock()
+	if dir != "" {
+		dir = filepath.Clean(dir)
+	}
+	baseDir = dir
+	baseDirMu.Unlock()
+}
+
+func currentBaseDir() string {
+	baseDirMu.RLock()
+	defer baseDirMu.RUnlock()
+	return baseDir
+}
 
 // Dir returns the on-disk directory used to persist snapshots. It honors
 // CHATCLI_PARK_DIR for tests; otherwise it resolves to
@@ -34,6 +59,12 @@ const envOverride = "CHATCLI_PARK_DIR"
 // crossed by honoring it. We still apply filepath.Clean to normalize
 // the input so the on-disk layout matches user expectation.
 func Dir() (string, error) {
+	if base := currentBaseDir(); base != "" {
+		if err := os.MkdirAll(base, 0o700); err != nil {
+			return "", err
+		}
+		return base, nil
+	}
 	if override := os.Getenv(envOverride); override != "" {
 		clean := filepath.Clean(override)
 		// #nosec G304 -- the override path comes from CHATCLI_PARK_DIR

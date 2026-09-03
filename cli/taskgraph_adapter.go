@@ -68,7 +68,11 @@ type taskGraphAdapter struct {
 
 // newTaskGraphAdapter builds the adapter.
 func newTaskGraphAdapter(cli *ChatCLI, logger *zap.Logger) *taskGraphAdapter {
-	return &taskGraphAdapter{cli: cli, logger: logger}
+	a := &taskGraphAdapter{cli: cli, logger: logger}
+	if cli != nil {
+		a.baseDirFn = cli.taskGraphBaseDir // tenant root under the gateway
+	}
+	return a
 }
 
 // dispatcher resolves the CURRENT agent dispatcher at call time — the
