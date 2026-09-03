@@ -17,6 +17,9 @@ type UserProfileStore struct {
 	mu      sync.RWMutex
 	path    string
 	logger  *zap.Logger
+	// loadedAt is when the file was last read or written by this process;
+	// a file newer than that carries another process's changes to merge.
+	loadedAt time.Time
 
 	// changeNotifier marks derived caches (knowledge graph) stale on
 	// content mutations. See change_notify.go for the non-caller list.
@@ -662,6 +665,7 @@ func (ps *UserProfileStore) load() {
 	// and never resurfaces.
 	healed := normalizeLoadedProfile(&p)
 	ps.profile = p
+	ps.loadedAt = nowForMerge()
 	if healed {
 		ps.profile.LastUpdated = time.Now()
 		ps.persist()
@@ -669,6 +673,7 @@ func (ps *UserProfileStore) load() {
 }
 
 func (ps *UserProfileStore) persist() {
+	ps.mergeFromDiskLocked()
 	data, err := json.MarshalIndent(ps.profile, "", "  ")
 	if err != nil {
 		ps.logger.Warn("failed to marshal user profile", zap.Error(err))
@@ -676,7 +681,9 @@ func (ps *UserProfileStore) persist() {
 	}
 	if err := atomicWriteFile(ps.path, data, 0o600); err != nil {
 		ps.logger.Warn("failed to write user profile", zap.Error(err))
+		return
 	}
+	ps.loadedAt = nowForMerge()
 }
 
 func normalizeExpertise(level string) string {

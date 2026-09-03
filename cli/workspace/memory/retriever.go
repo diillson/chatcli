@@ -204,8 +204,8 @@ func (r *RelevanceRetriever) assemble(rankedFacts []*Fact) string {
 		for _, f := range relevantFacts {
 			line := fmt.Sprintf("- [%s] %s", f.Category, f.Content)
 			// Annotate facts from other projects so the model knows they're not from CWD
-			if f.SourceProject != "" && r.workspaceDir != "" && f.SourceProject != r.workspaceDir {
-				line += fmt.Sprintf(" (from: %s)", f.SourceProject)
+			if label := ProjectLabel(f.SourceProject, r.workspaceDir); label != "" {
+				line += fmt.Sprintf(" (from: %s)", label)
 			}
 			if usedChars+len(line)+1 > remaining {
 				break

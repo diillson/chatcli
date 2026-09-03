@@ -90,6 +90,18 @@ func (cli *ChatCLI) handleMemoryCommand(ctx context.Context, input string) {
 	case args == "compact":
 		cli.runMemoryCompact(ctx)
 
+	case args == "export" || strings.HasPrefix(args, "export "):
+		cli.exportMemory(strings.TrimSpace(strings.TrimPrefix(args, "export")))
+
+	case args == "import" || strings.HasPrefix(args, "import "):
+		cli.importMemory(strings.TrimSpace(strings.TrimPrefix(args, "import")))
+
+	case args == "recall" || strings.HasPrefix(args, "recall "):
+		cli.recallMemory(ctx, strings.TrimSpace(strings.TrimPrefix(args, "recall")))
+
+	case args == "why":
+		cli.explainLastRecall()
+
 	default:
 		// Try to parse as a date
 		date, err := parseFlexibleDate(args)
@@ -750,6 +762,10 @@ func (cli *ChatCLI) getMemorySuggestions(d prompt.Document) []prompt.Suggest {
 			{Text: "facts", Description: i18n.T("mem.cmd.suggest.facts")},
 			{Text: "timeline", Description: i18n.T("mem.cmd.suggest.timeline")},
 			{Text: "compact", Description: i18n.T("mem.cmd.suggest.compact")},
+			{Text: "export", Description: i18n.T("mem.cmd.suggest.export")},
+			{Text: "import", Description: i18n.T("mem.cmd.suggest.import")},
+			{Text: "recall", Description: i18n.T("mem.cmd.suggest.recall")},
+			{Text: "why", Description: i18n.T("mem.cmd.suggest.why")},
 		}
 		return prompt.FilterHasPrefix(suggestions, d.GetWordBeforeCursor(), true)
 	}

@@ -445,7 +445,18 @@ const reinforcedLexicalHit = 1.5
 func (fi *FactIndex) SearchBlendedMin(keywords []string, semantic map[string]float64, w RankWeights, minLexical float64) []*Fact {
 	fi.mu.RLock()
 	defer fi.mu.RUnlock()
+	list := fi.blendedCandidatesLocked(keywords, semantic, w, minLexical)
+	out := make([]*Fact, len(list))
+	for i, c := range list {
+		out[i] = c.fact
+	}
+	return out
+}
 
+// blendedCandidatesLocked is the ranking core shared by SearchBlendedMin
+// and SearchBlendedMinRanked. Caller holds the read lock. An empty query
+// yields every fact by temporal score as plain candidates.
+func (fi *FactIndex) blendedCandidatesLocked(keywords []string, semantic map[string]float64, w RankWeights, minLexical float64) []*candidate {
 	now := time.Now()
 	w = w.normalized()
 
@@ -478,7 +489,12 @@ func (fi *FactIndex) SearchBlendedMin(keywords []string, semantic map[string]flo
 
 	if len(cands) == 0 {
 		if len(keywords) == 0 && len(semantic) == 0 {
-			return fi.sortedByScoreLocked()
+			all := fi.sortedByScoreLocked()
+			list := make([]*candidate, len(all))
+			for i, f := range all {
+				list[i] = &candidate{fact: f, temporal: fi.scoreOf(f, now), final: fi.scoreOf(f, now)}
+			}
+			return list
 		}
 		return nil
 	}
@@ -488,6 +504,11 @@ func (fi *FactIndex) SearchBlendedMin(keywords []string, semantic map[string]flo
 		list = append(list, c)
 	}
 	blendCandidates(list, w)
+	if len(list) == 1 {
+		// Min-max normalization over one candidate is all zeros; a lone
+		// hit is by definition the top of its ranking.
+		list[0].final = 1
+	}
 
 	sort.Slice(list, func(i, j int) bool {
 		if list[i].final != list[j].final {
@@ -495,12 +516,7 @@ func (fi *FactIndex) SearchBlendedMin(keywords []string, semantic map[string]flo
 		}
 		return list[i].fact.ID < list[j].fact.ID // deterministic tie-break
 	})
-
-	out := make([]*Fact, len(list))
-	for i, c := range list {
-		out[i] = c.fact
-	}
-	return out
+	return list
 }
 
 // MarkAccessed updates access metadata for retrieved facts. Bumps are

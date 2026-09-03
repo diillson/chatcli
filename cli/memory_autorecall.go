@@ -129,16 +129,17 @@ func (cli *ChatCLI) memoryAutoRecallBlockCtx(ctx context.Context, hints []string
 	return block
 }
 
-// builtinAutoRecallBlock is the embedded facts + episodes recall.
-func (cli *ChatCLI) builtinAutoRecallBlock(ctx context.Context, hints []string, query string) string {
-	if cli.memoryStore == nil {
-		return ""
+// rankedAutoRecall ranks the facts auto-recall would inject for the turn
+// (lexical + semantic + temporal blend, floors applied, capped), with the
+// signals that ranked them. Shared by the block builder and /memory recall.
+func (cli *ChatCLI) rankedAutoRecall(ctx context.Context, hints []string, query string) []memory.RankedFact {
+	if cli == nil || cli.memoryStore == nil {
+		return nil
 	}
 	mgr := cli.memoryStore.Manager()
 	if mgr == nil || mgr.Facts == nil {
-		return ""
+		return nil
 	}
-
 	cfg := mgr.GetConfig()
 	var semantic map[string]float64
 	if vectors := mgr.VectorIndex(); vectors != nil && vectors.Enabled() && len(strings.TrimSpace(query)) >= autoRecallMinQueryChars {
@@ -156,13 +157,33 @@ func (cli *ChatCLI) builtinAutoRecallBlock(ctx context.Context, hints []string, 
 			}
 		}
 	}
-	facts := mgr.Facts.SearchBlendedMin(hints, semantic, cfg.RankWeights, autoRecallMinLexical)
-	if len(facts) == 0 {
+	ranked := mgr.Facts.SearchBlendedMinRanked(hints, semantic, cfg.RankWeights, autoRecallMinLexical)
+	if len(ranked) > autoRecallMaxFacts {
+		ranked = ranked[:autoRecallMaxFacts]
+	}
+	return ranked
+}
+
+// builtinAutoRecallBlock is the embedded facts + episodes recall.
+func (cli *ChatCLI) builtinAutoRecallBlock(ctx context.Context, hints []string, query string) string {
+	if cli.memoryStore == nil {
 		return ""
 	}
-	if len(facts) > autoRecallMaxFacts {
-		facts = facts[:autoRecallMaxFacts]
+	mgr := cli.memoryStore.Manager()
+	if mgr == nil || mgr.Facts == nil {
+		return ""
 	}
+
+	ranked := cli.rankedAutoRecall(ctx, hints, query)
+	if len(ranked) == 0 {
+		return ""
+	}
+	facts := make([]*memory.Fact, len(ranked))
+	for i, r := range ranked {
+		facts[i] = r.Fact
+	}
+	cli.rememberRecallTrace(query, ranked)
+	workspace := mgr.WorkspaceDir()
 
 	var b strings.Builder
 	b.WriteString(autoRecallHeader)
@@ -170,6 +191,11 @@ func (cli *ChatCLI) builtinAutoRecallBlock(ctx context.Context, hints []string, 
 	shown := make([]*memory.Fact, 0, len(facts))
 	for _, f := range facts {
 		line := "- [" + f.Category + "] " + f.Content
+		// A fact learned in another project is labeled so the model does
+		// not apply it as if it were about the current one.
+		if label := memory.ProjectLabel(f.SourceProject, workspace); label != "" {
+			line += " (from: " + label + ")"
+		}
 		if b.Len()+len(line)+1 > autoRecallBudget {
 			break
 		}

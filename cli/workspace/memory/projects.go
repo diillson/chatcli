@@ -236,6 +236,7 @@ func (pt *ProjectTracker) load() {
 }
 
 func (pt *ProjectTracker) persist() {
+	pt.mergeFromDiskLocked()
 	projects := make([]Project, 0, len(pt.projects))
 	for _, p := range pt.projects {
 		projects = append(projects, *p)

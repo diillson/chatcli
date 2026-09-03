@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"go.uber.org/zap"
@@ -15,6 +16,7 @@ import (
 type DailyNoteStore struct {
 	memoryDir string
 	logger    *zap.Logger
+	writeMu   sync.Mutex
 }
 
 // NewDailyNoteStore creates a new daily note store.
@@ -36,15 +38,20 @@ func (d *DailyNoteStore) WriteDailyNote(entry string) error {
 		return fmt.Errorf("creating daily notes dir: %w", err)
 	}
 
-	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600) //#nosec G304 -- path supplied by user/agent through validated tool surface (boundary check upstream)
-	if err != nil {
-		return fmt.Errorf("opening daily note: %w", err)
+	// Read-modify-write through an atomic rename: a crash mid-append can
+	// never leave a torn note, and readers only ever see a whole file.
+	d.writeMu.Lock()
+	defer d.writeMu.Unlock()
+	existing, err := os.ReadFile(path) //#nosec G304 -- path under the memory dir
+	if err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("reading daily note: %w", err)
 	}
-	defer f.Close()
-
 	ts := time.Now().Format("15:04")
-	_, err = f.WriteString(fmt.Sprintf("\n## %s\n\n%s\n", ts, entry))
-	return err
+	next := append(existing, []byte(fmt.Sprintf("\n## %s\n\n%s\n", ts, entry))...)
+	if err := atomicWriteFile(path, next, 0o600); err != nil {
+		return fmt.Errorf("writing daily note: %w", err)
+	}
+	return nil
 }
 
 // GetRecentDailyNotes returns the last N days of notes.

@@ -350,7 +350,10 @@ type ChatCLI struct {
 	// preCompaction is the undo stack for /rewind compact: the histories
 	// the latest rewrites replaced (newest last).
 	preCompaction [][]models.Message
-	lastEscTime   time.Time // for Esc+Esc double-press detection
+	// lastRecallTrace is what the last auto-recall injected and why (/memory why).
+	recallTraceMu   sync.Mutex
+	lastRecallTrace *memoryRecallTrace
+	lastEscTime     time.Time // for Esc+Esc double-press detection
 
 	// Background memory annotation worker
 	memWorker        *memoryWorker
