@@ -60,6 +60,9 @@ func currentBaseDir() string {
 // the input so the on-disk layout matches user expectation.
 func Dir() (string, error) {
 	if base := currentBaseDir(); base != "" {
+		// #nosec G703 -- base is set by the gateway from its own tenant root
+		// (operator-owned state under ~/.chatcli), never from model or
+		// network input; cleaned in SetBaseDir.
 		if err := os.MkdirAll(base, 0o700); err != nil {
 			return "", err
 		}
@@ -67,7 +70,7 @@ func Dir() (string, error) {
 	}
 	if override := os.Getenv(envOverride); override != "" {
 		clean := filepath.Clean(override)
-		// #nosec G304 -- the override path comes from CHATCLI_PARK_DIR
+		// #nosec G304 G703 -- the override path comes from CHATCLI_PARK_DIR
 		// in the chatcli process's own environment; gosec's taint
 		// analysis cannot model that the variable is operator-supplied
 		// and stays inside the operator's trust boundary. The path is
