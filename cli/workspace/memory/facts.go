@@ -30,6 +30,7 @@ type FactIndex struct {
 	// for that revision (IDF weights in computeRelevance).
 	rev, dfRev, dfCount int
 	dfCache             map[string]int
+	dfMu                sync.Mutex
 	facts               map[string]*Fact // keyed by ID
 	mu                  sync.RWMutex
 	path                string // path to memory_index.json
@@ -856,8 +857,12 @@ func (fi *FactIndex) keywordWeightsLocked(keywords []string) []float64 {
 }
 
 // docFreqLocked returns token → number of facts containing it, cached per
-// index revision (every mutation bumps fi.rev in persistLocked).
+// index revision (every mutation bumps fi.rev in persistLocked). The cache
+// has its own mutex: relevance runs under the index read lock, which
+// several searches hold at once, so the cache write must not race.
 func (fi *FactIndex) docFreqLocked() map[string]int {
+	fi.dfMu.Lock()
+	defer fi.dfMu.Unlock()
 	if fi.dfCache != nil && fi.dfRev == fi.rev && fi.dfCount == len(fi.facts) {
 		return fi.dfCache
 	}
