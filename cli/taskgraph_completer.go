@@ -40,7 +40,7 @@ func (cli *ChatCLI) getTaskGraphSuggestions(d prompt.Document) []prompt.Suggest 
 	}
 
 	runIDSuggestions := func() []prompt.Suggest {
-		base, err := taskgraph.DefaultBaseDir()
+		base, err := cli.taskGraphBaseDir()
 		if err != nil {
 			return nil
 		}

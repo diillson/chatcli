@@ -148,10 +148,13 @@ func (cli *ChatCLI) applyStores(ts *tenantStores) {
 	cli.boundSessionSync = ts.boundSessionSync
 	cli.boundRemoteOnly = ts.boundRemoteOnly
 	if cli.stateRoot != ts.root {
-		// The outgoing root's learned ratios are written before the swap.
+		// The outgoing root's learned ratios and daily spend are written
+		// before the swap.
 		calibratorFor(cli.stateRoot).flushCalibration()
+		cli.costTracker.FlushDailySpend()
 	}
 	cli.stateRoot = ts.root
+	cli.applyTenantPaths()
 	if cli.historyCompactor != nil {
 		cli.historyCompactor.SetCompressionLayer(ts.compressionLayer)
 	}

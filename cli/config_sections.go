@@ -945,6 +945,11 @@ func (cli *ChatCLI) showConfigSession() {
 		kv(p, i18n.T("cfg.kv.total_cost_usd"), fmt.Sprintf("$%.4f", cli.costTracker.TotalCost()))
 		kv(p, i18n.T("cfg.kv.total_tokens"), fmt.Sprintf("%d", cli.costTracker.TotalTokens()))
 		kv(p, i18n.T("cfg.kv.budget_status"), budgetLevelString(cli.costTracker.CheckBudget()))
+		if spent, limit := cli.costTracker.DailyBudget(); limit > 0 {
+			kv(p, "CHATCLI_DAILY_BUDGET_USD", fmt.Sprintf("$%.4f / $%.2f", spent, limit))
+		} else {
+			kv(p, "CHATCLI_DAILY_BUDGET_USD", envOr("CHATCLI_DAILY_BUDGET_USD"))
+		}
 	} else {
 		kv(p, i18n.T("cfg.kv.cost_tracker"), i18n.T("cfg.val.not_initialized"))
 	}

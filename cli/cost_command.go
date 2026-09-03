@@ -321,6 +321,8 @@ func (cli *ChatCLI) renderCostSummary() {
 		fmt.Println(p + colorize("  "+i18n.T("cost.cmd.pricing_unknown_models", strings.Join(unpriced, ", ")), ColorYellow))
 	}
 
+	printDailyBudgetLine(p, ct)
+
 	// Budget status
 	if msg := ct.budgetMessageLocked(); msg != "" {
 		fmt.Println(p)
