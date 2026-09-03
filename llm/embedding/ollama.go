@@ -1,5 +1,9 @@
 /*
- * ChatCLI - Ollama embeddings provider (keyless, local).
+ * ChatCLI - Command Line Interface for LLM interaction
+ * Copyright (c) 2024 Edilson Freitas
+ * License: Apache-2.0
+ *
+ * Ollama embeddings provider (keyless, local).
  *
  * Talks to a local Ollama server (OLLAMA_HOST, default
  * http://localhost:11434) through POST /api/embed. No key, no metering:

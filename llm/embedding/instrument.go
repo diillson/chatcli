@@ -1,5 +1,9 @@
 /*
- * ChatCLI - Embedding usage instrumentation.
+ * ChatCLI - Command Line Interface for LLM interaction
+ * Copyright (c) 2024 Edilson Freitas
+ * License: Apache-2.0
+ *
+ * Embedding usage instrumentation.
  *
  * Embedding calls cost money on every hosted provider and were invisible
  * to the cost tracker. Providers do not all report usage, so the
