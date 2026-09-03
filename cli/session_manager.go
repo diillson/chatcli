@@ -46,12 +46,15 @@ func NewSessionManager(logger *zap.Logger) (*SessionManager, error) {
 	if err != nil {
 		return nil, fmt.Errorf("não foi possível obter o diretório home: %w", err)
 	}
+	return NewSessionManagerAt(filepath.Join(homeDir, ".chatcli", "sessions"), logger)
+}
 
-	sessionsDir := filepath.Join(homeDir, ".chatcli", "sessions")
+// NewSessionManagerAt is NewSessionManager over an explicit store directory
+// (per-tenant store sets in the gateway, tests).
+func NewSessionManagerAt(sessionsDir string, logger *zap.Logger) (*SessionManager, error) {
 	if err := os.MkdirAll(sessionsDir, 0o700); err != nil {
 		return nil, fmt.Errorf("não foi possível criar o diretório de sessões: %w", err)
 	}
-
 	return &SessionManager{
 		sessionsDir: sessionsDir,
 		logger:      logger,

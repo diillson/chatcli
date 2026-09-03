@@ -278,6 +278,19 @@ func transcriptTTL() time.Duration {
 	return sessionTTLDuration()
 }
 
+// transcriptDirForRoot resolves the journal directory under the active
+// state root (per-tenant store sets rebase it), defaulting to ~/.chatcli.
+func (cli *ChatCLI) transcriptDirForRoot() (string, error) {
+	if cli != nil && cli.stateRoot != "" {
+		dir := filepath.Join(cli.stateRoot, transcriptDirName)
+		if err := os.MkdirAll(dir, 0o700); err != nil {
+			return "", err
+		}
+		return dir, nil
+	}
+	return transcriptDir()
+}
+
 // --- ChatCLI wiring ---
 
 // initTranscriptJournal opens the session journal at boot (or adopts an
@@ -286,7 +299,7 @@ func (cli *ChatCLI) initTranscriptJournal(id string) {
 	if !transcriptEnabled() {
 		return
 	}
-	dir, err := transcriptDir()
+	dir, err := cli.transcriptDirForRoot()
 	if err != nil {
 		if cli.logger != nil {
 			cli.logger.Warn("transcript journal unavailable", zap.Error(err))

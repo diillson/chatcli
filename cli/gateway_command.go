@@ -567,6 +567,14 @@ func (cli *ChatCLI) gatewayAgentFunc(sessions *hubSessions, transcriber transcri
 			msg.Text = transcript
 		}
 
+		// Multi-tenant gateway: with hub isolation on, this sender's own
+		// store set (sessions, memory, contexts, CCR, costs, transcript and
+		// live history) is installed for the turn and the shared set is
+		// restored afterwards. No-op for the shared principal.
+		if leave := cli.enterGatewayTenant(ctx, sessions, msg.Platform, msg.UserID); leave != nil {
+			defer leave()
+		}
+
 		// Session control from the channel: "/session attach|detach|status|
 		// save|list|new" binds this sender's principal to a named saved
 		// session (cross-surface continuity with the REPL/MCP/ACP). Handled

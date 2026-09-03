@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/diillson/chatcli/cli/workspace"
 	"os"
 	"strings"
 	"sync"
@@ -19,8 +20,15 @@ import (
 // memoryWorker runs in the background, periodically analyzing conversation
 // history and writing structured annotations to the MemoryStore.
 type memoryWorker struct {
-	cli              *ChatCLI
-	logger           *zap.Logger
+	cli    *ChatCLI
+	logger *zap.Logger
+	// store and history are bound at construction so a worker always
+	// distills into the store it was built for and reads the history it was
+	// built over — required once the gateway swaps per-tenant store sets on
+	// the shared ChatCLI (see tenant_scope.go): an extraction goroutine
+	// that fires after a tenant switch must not read another tenant's turn.
+	store            *workspace.MemoryStore
+	history          func() []models.Message
 	lastProcessedIdx int // index of last message processed for memory
 	mu               sync.Mutex
 	stopCh           chan struct{}
@@ -62,11 +70,19 @@ const (
 )
 
 func newMemoryWorker(cli *ChatCLI) *memoryWorker {
+	return newMemoryWorkerFor(cli, cli.memoryStore, defaultPendingDir(), func() []models.Message { return cli.history })
+}
+
+// newMemoryWorkerFor builds a worker over an explicit store, pending queue
+// directory and history source (per-tenant store sets in the gateway).
+func newMemoryWorkerFor(cli *ChatCLI, store *workspace.MemoryStore, pendingDir string, history func() []models.Message) *memoryWorker {
 	mw := &memoryWorker{
 		cli:        cli,
 		logger:     cli.logger,
+		store:      store,
+		history:    history,
 		stopCh:     make(chan struct{}),
-		pendingDir: defaultPendingDir(),
+		pendingDir: pendingDir,
 		coord:      newRunCoordinator(memoryCooldown, memoryMinNewMessages),
 	}
 	mw.lookupFallback = func(provider string) (client.LLMClient, error) {
@@ -98,7 +114,7 @@ func (mw *memoryWorker) stop() {
 // nudge is called after each LLM response to check if memory extraction should run.
 // It runs in a goroutine — non-blocking to the main flow.
 func (mw *memoryWorker) nudge(ctx context.Context) {
-	if mw.cli.memoryStore == nil {
+	if mw.store == nil {
 		return
 	}
 	// Don't queue multiple runs
@@ -116,7 +132,7 @@ func (mw *memoryWorker) nudge(ctx context.Context) {
 // right after its turn, so an async extraction could never finish — it only
 // enqueues, and the next session's worker drains the backlog.
 func (mw *memoryWorker) queueSegmentForNextSession(segment []models.Message) {
-	if mw.cli.memoryStore == nil || len(segment) == 0 {
+	if mw.store == nil || len(segment) == 0 {
 		return
 	}
 	if _, err := mw.persistPending(segment); err != nil {
@@ -131,7 +147,7 @@ func (mw *memoryWorker) queueSegmentForNextSession(segment []models.Message) {
 // RPC turn has already restored the previous history, so the live-delta gate
 // would never see these messages.
 func (mw *memoryWorker) nudgeSegment(ctx context.Context, segment []models.Message) {
-	if mw.cli.memoryStore == nil || len(segment) == 0 {
+	if mw.store == nil || len(segment) == 0 {
 		return
 	}
 	if _, err := mw.persistPending(segment); err != nil {
@@ -223,10 +239,10 @@ func (mw *memoryWorker) loop(ctx context.Context) {
 // when a digest is actually due, and its absence degrades to deterministic
 // condensation.
 func (mw *memoryWorker) runRollups(ctx context.Context) {
-	if mw.cli.memoryStore == nil {
+	if mw.store == nil {
 		return
 	}
-	mgr := mw.cli.memoryStore.Manager()
+	mgr := mw.store.Manager()
 
 	var sendPrompt func(ctx context.Context, prompt string) (string, error)
 	if llmClient := mw.cli.getClient(); llmClient != nil {
@@ -254,7 +270,7 @@ func (mw *memoryWorker) maybeExtract(ctx context.Context) {
 	// repaired/compacted (possibly SHORTER) slices mid-run, so re-reading it
 	// between the len check and the slice expression can panic on bounds.
 	// Every access below goes through this snapshot.
-	hist := mw.cli.history
+	hist := mw.history()
 	historyLen := len(hist)
 
 	mw.mu.Lock()
@@ -288,8 +304,8 @@ func (mw *memoryWorker) maybeExtract(ctx context.Context) {
 	)
 
 	// Record interaction event
-	if mw.cli.memoryStore != nil {
-		mw.cli.memoryStore.RecordInteraction(memory.InteractionEvent{
+	if mw.store != nil {
+		mw.store.RecordInteraction(memory.InteractionEvent{
 			Timestamp: time.Now(),
 			Feature:   mw.detectFeature(),
 		})
@@ -399,11 +415,11 @@ func buildExtractionSnippet(messages []models.Message) strings.Builder {
 }
 
 func (mw *memoryWorker) extractAndSave(ctx context.Context, messages []models.Message) error {
-	if mw.cli.memoryStore == nil {
+	if mw.store == nil {
 		return fmt.Errorf("memory store not available")
 	}
 
-	mgr := mw.cli.memoryStore.Manager()
+	mgr := mw.store.Manager()
 
 	// Self-evolution piggybacks on this same extraction pass (no extra LLM
 	// call): when enabled, the prompt asks for SKILL_CANDIDATES alongside the
@@ -475,7 +491,7 @@ func (mw *memoryWorker) extractAndSave(ctx context.Context, messages []models.Me
 	// Use enhanced processing that populates profile, topics, projects.
 	// A non-empty summary becomes a visible one-line notice so the user
 	// can tell the system actually learned something this turn.
-	summary := mw.cli.memoryStore.ProcessExtractionResult(response)
+	summary := mw.store.ProcessExtractionResult(response)
 	if !summary.IsEmpty() {
 		mw.cli.pushMemoryNotice(formatMemoryNotice(summary))
 	}
@@ -498,11 +514,11 @@ func (mw *memoryWorker) extractAndSave(ctx context.Context, messages []models.Me
 
 // maybeCompact checks if memory compaction should run and executes it.
 func (mw *memoryWorker) maybeCompact(ctx context.Context) {
-	if mw.cli.memoryStore == nil {
+	if mw.store == nil {
 		return
 	}
 
-	mgr := mw.cli.memoryStore.Manager()
+	mgr := mw.store.Manager()
 	if !mgr.NeedsCompaction() {
 		return
 	}
@@ -536,11 +552,11 @@ func (mw *memoryWorker) maybeCompact(ctx context.Context) {
 
 // cleanupDailyNotes removes old daily notes.
 func (mw *memoryWorker) cleanupDailyNotes() {
-	if mw.cli.memoryStore == nil {
+	if mw.store == nil {
 		return
 	}
 
-	mgr := mw.cli.memoryStore.Manager()
+	mgr := mw.store.Manager()
 	deleted, err := mgr.CleanupDailyNotes()
 	if err != nil {
 		mw.logger.Warn("Memory worker: daily cleanup failed", zap.Error(err))
@@ -552,13 +568,13 @@ func (mw *memoryWorker) cleanupDailyNotes() {
 // detectFeature detects the current mode for usage stats.
 func (mw *memoryWorker) detectFeature() string {
 	// Check recent messages for mode hints
-	histLen := len(mw.cli.history)
+	histLen := len(mw.history())
 	if histLen == 0 {
 		return "chat"
 	}
 
 	for i := histLen - 1; i >= 0 && i >= histLen-5; i-- {
-		content := mw.cli.history[i].Content
+		content := mw.history()[i].Content
 		if strings.Contains(content, "/agent") || strings.Contains(content, "agent mode") {
 			return "agent"
 		}
