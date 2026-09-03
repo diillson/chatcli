@@ -128,3 +128,28 @@ func TestBuildParkBatchClosure_SingleParkCallEmpty(t *testing.T) {
 	calls := []models.ToolCall{{ID: "park:0", Name: "park"}}
 	assert.Empty(t, buildParkBatchClosure(calls, nil, 0))
 }
+
+// A native @recall result must carry PreserveVerbatim (the XML feedback path
+// already does via buildBatchFeedbackMessage): it is an archived original the
+// model asked to see in full, and trimming/microcompact would otherwise force
+// another recall.
+func TestBuildNativeBatchResults_RecallMarkedPreserveVerbatim(t *testing.T) {
+	calls := []models.ToolCall{
+		{ID: "c1", Name: "@recall"},
+		{ID: "c2", Name: "@read"},
+	}
+	executed := []agent.ToolResult{
+		{Output: "original bytes"},
+		{Output: "file bytes"},
+	}
+	results := buildNativeBatchResults(calls, executed, toolResultNotExecutedBatchError)
+	if len(results) != 2 {
+		t.Fatalf("expected 2 results, got %d", len(results))
+	}
+	if results[0].Meta == nil || !results[0].Meta.PreserveVerbatim {
+		t.Fatalf("@recall result must be PreserveVerbatim, got meta=%+v", results[0].Meta)
+	}
+	if results[1].Meta != nil {
+		t.Fatalf("non-recall result must not carry meta, got %+v", results[1].Meta)
+	}
+}

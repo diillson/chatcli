@@ -22,26 +22,14 @@ import (
 // silently on every start.
 var errContextCorrupt = errors.New("context file corrupt")
 
-// atomicWrite persists data via a same-directory temp file and an atomic
-// rename. Context files embed the whole corpus (multi-MB for knowledge
-// bases); a plain WriteFile interrupted mid-write leaves a torn file and the
-// knowledge base silently vanishes from the next load.
+// atomicWrite persists data via a same-directory temp file, fsync and an
+// atomic rename (utils.AtomicWriteFile). Context files embed the whole corpus
+// (multi-MB for knowledge bases); a plain WriteFile interrupted mid-write
+// leaves a torn file and the knowledge base silently vanishes from the next
+// load, and a rename without fsync can survive a crash while the bytes it
+// points to do not.
 func atomicWrite(path string, data []byte) error {
-	tmp, err := os.CreateTemp(filepath.Dir(path), filepath.Base(path)+".*.tmp")
-	if err != nil {
-		return err
-	}
-	tmpName := tmp.Name()
-	_ = tmp.Close()
-	if err := os.WriteFile(tmpName, data, 0o600); err != nil {
-		_ = os.Remove(tmpName)
-		return err
-	}
-	if err := os.Rename(tmpName, path); err != nil {
-		_ = os.Remove(tmpName)
-		return err
-	}
-	return nil
+	return utils.AtomicWriteFile(path, data, 0o600)
 }
 
 // Storage gerencia a persistência de contextos em disco

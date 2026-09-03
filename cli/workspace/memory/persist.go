@@ -20,41 +20,16 @@ package memory
 import (
 	"fmt"
 	"os"
-	"path/filepath"
 	"time"
+
+	"github.com/diillson/chatcli/utils"
 )
 
-// atomicWriteFile writes data to path via a same-directory temp file and an
-// atomic rename, so readers (and crashes) only ever observe the old or the new
-// content — never a torn write.
+// atomicWriteFile writes data to path via a same-directory temp file, fsync
+// and an atomic rename (utils.AtomicWriteFile), so readers, crashes and power
+// loss only ever observe the old or the new content — never a torn write.
 func atomicWriteFile(path string, data []byte, perm os.FileMode) error {
-	dir := filepath.Dir(path)
-	tmp, err := os.CreateTemp(dir, filepath.Base(path)+".*.tmp")
-	if err != nil {
-		return err
-	}
-	tmpName := tmp.Name()
-	cleanup := func() { _ = os.Remove(tmpName) }
-
-	if _, err := tmp.Write(data); err != nil {
-		_ = tmp.Close()
-		cleanup()
-		return err
-	}
-	if err := tmp.Chmod(perm); err != nil {
-		_ = tmp.Close()
-		cleanup()
-		return err
-	}
-	if err := tmp.Close(); err != nil {
-		cleanup()
-		return err
-	}
-	if err := os.Rename(tmpName, path); err != nil {
-		cleanup()
-		return err
-	}
-	return nil
+	return utils.AtomicWriteFile(path, data, perm)
 }
 
 // quarantineCorrupt moves an unparseable store file aside as

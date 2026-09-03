@@ -15,6 +15,7 @@ package cli
 
 import (
 	"github.com/diillson/chatcli/cli/agent"
+	"github.com/diillson/chatcli/cli/plugins"
 	"github.com/diillson/chatcli/models"
 )
 
@@ -94,7 +95,15 @@ func buildBatchResults(
 		}
 		if idx < len(executed) {
 			res := executed[idx]
-			results = append(results, models.NewToolResultMessage(ntc.ID, res.Output, res.IsError, res.ErrorCode))
+			msg := models.NewToolResultMessage(ntc.ID, res.Output, res.IsError, res.ErrorCode)
+			// Native-protocol counterpart of buildBatchFeedbackMessage: a
+			// @recall result returns an archived original verbatim, so it
+			// must survive trimming and microcompact intact (otherwise the
+			// model is forced to recall it again).
+			if plugins.IsRecallTool(ntc.Name) {
+				msg.Meta = &models.MessageMeta{PreserveVerbatim: true}
+			}
+			results = append(results, msg)
 			continue
 		}
 		results = append(results, models.NewToolResultMessage(

@@ -14,8 +14,13 @@
  *   - Tool results 2+ turns old: truncated to head+tail preview
  *   - Tool results 4+ turns old: replaced with one-line summary
  *
- * Only applies to read-only tool results (file reads, search, git status, etc.).
- * Write/exec results are preserved as they contain critical error information.
+ * Applies to every tool result (and squad feedback block) above MinContentSize,
+ * regardless of the tool that produced it: exec/test output is the bulkiest
+ * content in a long coder loop, and with a CCR layer configured nothing is
+ * lost — the stub carries a <<ccr:KEY>> marker the model expands with @recall.
+ * The only exemption is structural: a message flagged
+ * MessageMeta.PreserveVerbatim (the output of @recall itself) is never
+ * re-reduced, otherwise the model would be forced into a recall loop.
  */
 package agent
 
@@ -138,6 +143,12 @@ func ApplyMicrocompact(history []models.Message, currentTurn int, config Microco
 		msg := &history[i]
 		isAgentFeedback := msg.Role == "user" && msg.Meta != nil && msg.Meta.AgentFeedback
 		if msg.Role != "tool" && !isAgentFeedback {
+			continue
+		}
+		// @recall output is the model explicitly asking to see an archived
+		// original in full; reducing it again would just trigger another
+		// recall. Same structural flag the history trimmer honors.
+		if msg.Meta != nil && msg.Meta.PreserveVerbatim {
 			continue
 		}
 		if len(msg.Content) < config.MinContentSize {

@@ -22,6 +22,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/diillson/chatcli/utils"
 )
 
 const (
@@ -227,35 +229,11 @@ func PruneRuns(baseDir string, olderThan time.Duration, skipRunID string) (int, 
 	return removed, nil
 }
 
-// atomicWriteFile writes via a same-directory temp file and rename, so a
-// crash mid-write can never leave a torn state.json under the real name.
+// atomicWriteFile writes via a same-directory temp file, fsync and rename
+// (utils.AtomicWriteFile), so a crash mid-write can never leave a torn or
+// unflushed state.json under the real name.
 func atomicWriteFile(path string, data []byte, perm os.FileMode) error {
-	dir := filepath.Dir(path)
-	tmp, err := os.CreateTemp(dir, filepath.Base(path)+".*.tmp")
-	if err != nil {
-		return err
-	}
-	tmpName := tmp.Name()
-	cleanup := func() { _ = os.Remove(tmpName) }
-	if _, err := tmp.Write(data); err != nil {
-		_ = tmp.Close()
-		cleanup()
-		return err
-	}
-	if err := tmp.Chmod(perm); err != nil {
-		_ = tmp.Close()
-		cleanup()
-		return err
-	}
-	if err := tmp.Close(); err != nil {
-		cleanup()
-		return err
-	}
-	if err := os.Rename(tmpName, path); err != nil {
-		cleanup()
-		return err
-	}
-	return nil
+	return utils.AtomicWriteFile(path, data, perm)
 }
 
 // quarantineCorrupt renames an unparseable state file aside so the original
