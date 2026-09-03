@@ -64,6 +64,7 @@ type dotenvBootstrap struct {
 	path      string
 	expandErr error
 	loadErr   error
+	managed   config.ManagedReport
 }
 
 // loadDotenvThenI18n resolves and loads the dotenv file and only then
@@ -81,6 +82,10 @@ func loadDotenvThenI18n() dotenvBootstrap {
 		b.expandErr = err
 	}
 	b.loadErr = godotenv.Load(b.path)
+	// Organization-managed defaults and locked policies (config/managed.go):
+	// after the user's .env so defaults fill only what is unset, and before
+	// i18n so a managed CHATCLI_LANG is honored too.
+	b.managed = config.ApplyManaged()
 	i18n.Init()
 	return b
 }
@@ -93,6 +98,9 @@ func reportDotenvBootstrap(b dotenvBootstrap) {
 	}
 	if b.loadErr != nil && !os.IsNotExist(b.loadErr) {
 		fmt.Println(i18n.T("main.error_dotenv_not_found", b.path))
+	}
+	if b.managed.Err != nil {
+		fmt.Println(i18n.T("main.warn_managed_config", b.managed.Path, b.managed.Err))
 	}
 }
 

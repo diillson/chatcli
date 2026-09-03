@@ -41,6 +41,7 @@ import (
 	"github.com/diillson/chatcli/cli/coder"
 	"github.com/diillson/chatcli/cli/gateway"
 	"github.com/diillson/chatcli/cli/plugins"
+	"github.com/diillson/chatcli/config"
 	"github.com/diillson/chatcli/i18n"
 	"github.com/diillson/chatcli/llm/catalog"
 	"github.com/diillson/chatcli/llm/imagegen"
@@ -92,6 +93,8 @@ func (cli *ChatCLI) routeConfigCommand(ctx context.Context, args []string) {
 		cli.routeConfigUI(args)
 	case "resilience", "proxy":
 		cli.showConfigResilience()
+	case "managed", "policy":
+		cli.showConfigManaged()
 	case "retention", "lifecycle":
 		cli.showConfigRetention()
 	case "session":
@@ -197,6 +200,14 @@ func sectionEnd(color string) {
 // channel out-of-band from any legitimate env value the user could set.
 const defaultMarker = "\x01"
 
+// managedMarker / managedLockedMarker tag a value that comes from the
+// organization-managed file (config/managed.go): a default the file
+// filled, or a locked policy the file enforces over the user's own value.
+const (
+	managedMarker       = "\x02"
+	managedLockedMarker = "\x03"
+)
+
 // kv prints a key/value line inside a section with automatic coloring.
 // key is an i18n-translated label (the caller passes i18n.T(...)) or a
 // literal env var name when no translation applies.
@@ -224,6 +235,20 @@ func kv(prefix, key, value string) {
 			colorize(kit.PadRight(key+":", 32), ColorCyan),
 			colorize(display, ColorCyan),
 			colorize(defaultTag, ColorGray))
+		return
+	}
+	// Managed path: the organization file supplied (or enforces) the value.
+	if strings.HasPrefix(display, managedMarker) || strings.HasPrefix(display, managedLockedMarker) {
+		tag := i18n.T("cfg.val.managed_tag")
+		if strings.HasPrefix(display, managedLockedMarker) {
+			tag = i18n.T("cfg.val.managed_locked_tag")
+		}
+		display = strings.TrimPrefix(strings.TrimPrefix(display, managedMarker), managedLockedMarker)
+		fmt.Printf("%s%s  %s %s\n",
+			prefix,
+			colorize(kit.PadRight(key+":", 32), ColorCyan),
+			colorize(display, ColorPurple),
+			colorize(tag, ColorGray))
 		return
 	}
 
@@ -256,6 +281,12 @@ func kv(prefix, key, value string) {
 // (matching pre-registry behavior).
 func envOr(name string) string {
 	if v := strings.TrimSpace(os.Getenv(name)); v != "" {
+		if e, managed := config.ManagedEntryFor(name); managed && e.Value == v {
+			if e.Locked {
+				return managedLockedMarker + v
+			}
+			return managedMarker + v
+		}
 		return v
 	}
 	if d, ok := lookupEnvDefault(name); ok && !d.IsBool {
