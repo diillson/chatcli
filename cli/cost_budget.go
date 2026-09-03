@@ -41,3 +41,15 @@ func (cli *ChatCLI) budgetBlockedErr() error {
 	}
 	return nil
 }
+
+// maybeAnnounceCacheMisses prints the one-shot notice armed by the cost
+// tracker when the prompt cache missed several turns in a row — the
+// signature of a stable prefix that changes every turn (model or effort
+// switch, MCP tool set churn, a refreshed attachment, a timestamp in a
+// cached block). Silent otherwise.
+func (cli *ChatCLI) maybeAnnounceCacheMisses() {
+	if cli.costTracker == nil || !cli.costTracker.TakeCacheMissAlert() {
+		return
+	}
+	fmt.Println(colorize("  "+i18n.T("cost.cache.miss_streak", cacheMissStreakAlert), ColorYellow))
+}

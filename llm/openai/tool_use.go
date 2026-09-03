@@ -70,6 +70,10 @@ func (c *OpenAIClient) SendPromptWithTools(ctx context.Context, prompt string, h
 	if len(toolDefs) > 0 {
 		payload["tools"] = toolDefs
 	}
+	// Automatic prompt caching routing hint (see client.PromptCacheKey).
+	if key := client.PromptCacheKey(history); key != "" {
+		payload["prompt_cache_key"] = key
+	}
 
 	jsonValue, err := json.Marshal(payload)
 	if err != nil {

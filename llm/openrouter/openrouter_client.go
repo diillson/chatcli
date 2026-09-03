@@ -125,7 +125,73 @@ func (c *OpenRouterClient) buildMessages(prompt string, history []models.Message
 		}
 	}
 
+	if openRouterSupportsCacheControl(c.model) {
+		applyOpenRouterCacheControl(messages)
+	}
 	return messages
+}
+
+// openRouterSupportsCacheControl reports whether the routed model honors
+// explicit cache_control breakpoints on OpenRouter. Anthropic and Google
+// models do (OpenRouter forwards the marker to the upstream cache); the
+// rest either cache automatically (OpenAI, DeepSeek, Grok) or not at all,
+// and an unexpected field there would be dropped or rejected.
+func openRouterSupportsCacheControl(model string) bool {
+	m := strings.ToLower(strings.TrimSpace(model))
+	return strings.HasPrefix(m, "anthropic/") || strings.HasPrefix(m, "google/")
+}
+
+// applyOpenRouterCacheControl marks the system messages (stable prefix) and
+// the last user message (rolling conversation breakpoint) with
+// cache_control, converting string content into the multipart shape the
+// marker requires. Tool messages are left alone.
+func applyOpenRouterCacheControl(messages []map[string]interface{}) {
+	marker := map[string]string{"type": "ephemeral"}
+	var mark func(msg map[string]interface{})
+	mark = func(msg map[string]interface{}) {
+		switch content := msg["content"].(type) {
+		case string:
+			if strings.TrimSpace(content) == "" {
+				return
+			}
+			msg["content"] = []map[string]interface{}{{"type": "text", "text": content, "cache_control": marker}}
+		case []map[string]interface{}:
+			for i := len(content) - 1; i >= 0; i-- {
+				if t, _ := content[i]["type"].(string); t == "text" {
+					content[i]["cache_control"] = marker
+					return
+				}
+			}
+		case []interface{}:
+			for i := len(content) - 1; i >= 0; i-- {
+				if part, ok := content[i].(map[string]interface{}); ok {
+					if t, _ := part["type"].(string); t == "text" {
+						part["cache_control"] = marker
+						return
+					}
+				}
+			}
+		default:
+			// The vision wire content type marshals to a string or a parts
+			// array; normalize it to plain data first, then mark.
+			if normalized, ok := normalizeWireContent(content); ok {
+				msg["content"] = normalized
+				mark(msg)
+			}
+		}
+	}
+	lastUser := -1
+	for i, msg := range messages {
+		switch msg["role"] {
+		case "system":
+			mark(msg)
+		case "user":
+			lastUser = i
+		}
+	}
+	if lastUser >= 0 {
+		mark(messages[lastUser])
+	}
 }
 
 // buildPayload assembles the request payload with OpenRouter-specific options.
@@ -508,4 +574,23 @@ type openRouterModelEntry struct {
 	TopProvider struct {
 		MaxCompletionTokens int `json:"max_completion_tokens"`
 	} `json:"top_provider"`
+}
+
+// normalizeWireContent round-trips the vision wire content type through
+// its JSON form into the plain string / parts-array shapes the marker
+// logic handles. ok is false for anything else.
+func normalizeWireContent(content interface{}) (interface{}, bool) {
+	raw, err := json.Marshal(content)
+	if err != nil {
+		return nil, false
+	}
+	var asString string
+	if json.Unmarshal(raw, &asString) == nil {
+		return asString, true
+	}
+	var asParts []interface{}
+	if json.Unmarshal(raw, &asParts) == nil {
+		return asParts, true
+	}
+	return nil, false
 }

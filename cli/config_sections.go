@@ -521,6 +521,7 @@ func (cli *ChatCLI) showConfigProviders() {
 	kv(p, "ANTHROPIC_BASE_URL", envOr("ANTHROPIC_BASE_URL"))
 	kv(p, "ANTHROPIC_API_VERSION", envOr("ANTHROPIC_API_VERSION"))
 	kv(p, "ANTHROPIC_MAX_TOKENS", envOr("ANTHROPIC_MAX_TOKENS"))
+	kv(p, "CHATCLI_PROMPT_CACHE_TTL", envOr("CHATCLI_PROMPT_CACHE_TTL"))
 
 	fmt.Println(p)
 	subheader(p, "cfg.sub.prov.googleai")

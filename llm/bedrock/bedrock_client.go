@@ -469,6 +469,9 @@ func (c *BedrockClient) sendPromptAnthropicModel(ctx context.Context, wireModel,
 
 	applyAnthropicThinkingForEffort(reqBody, wireModel, ctx)
 
+	// Rolling conversation breakpoint (5-minute marker: the InvokeModel wire
+	// keeps the provider default TTL). See client.MarkAnthropicHistoryBreakpoint.
+	client.MarkAnthropicHistoryBreakpoint(client.AnthropicMessages{Maps: messages}, client.AnthropicCacheMarkerWithTTL(false))
 	enforceCacheControlBudget(reqBody, anthropicMaxCacheBreakpoints)
 
 	payload, err := json.Marshal(reqBody)

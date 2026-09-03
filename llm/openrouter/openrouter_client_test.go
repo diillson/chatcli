@@ -2,6 +2,7 @@ package openrouter
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -117,5 +118,77 @@ func TestOpenRouterClient_ListModels(t *testing.T) {
 	}
 	if len(list) != 1 {
 		t.Errorf("got %d models, want 1", len(list))
+	}
+}
+
+func TestOpenRouterCacheControl_OnlyForCachingVendors(t *testing.T) {
+	if !openRouterSupportsCacheControl("anthropic/claude-sonnet-5") || !openRouterSupportsCacheControl("google/gemini-2.5-pro") {
+		t.Fatal("anthropic/ and google/ models honor cache_control")
+	}
+	if openRouterSupportsCacheControl("openai/gpt-5.6") || openRouterSupportsCacheControl("deepseek/deepseek-chat") {
+		t.Fatal("automatic-caching vendors must not receive the marker")
+	}
+}
+
+func TestApplyOpenRouterCacheControl_MarksSystemAndLastUser(t *testing.T) {
+	messages := []map[string]interface{}{
+		{"role": "system", "content": "stable prefix"},
+		{"role": "user", "content": "first"},
+		{"role": "assistant", "content": "ok"},
+		{"role": "tool", "content": "result", "tool_call_id": "t1"},
+		{"role": "user", "content": []interface{}{
+			map[string]interface{}{"type": "image_url", "image_url": map[string]interface{}{"url": "data:..."}},
+			map[string]interface{}{"type": "text", "text": "what is it"},
+		}},
+	}
+	applyOpenRouterCacheControl(messages)
+
+	sys := messages[0]["content"].([]map[string]interface{})
+	if len(sys) != 1 || sys[0]["cache_control"] == nil || sys[0]["text"] != "stable prefix" {
+		t.Fatalf("system not converted+marked: %#v", messages[0]["content"])
+	}
+	if _, isStr := messages[1]["content"].(string); !isStr {
+		t.Fatal("earlier user turns must stay untouched")
+	}
+	if _, isStr := messages[3]["content"].(string); !isStr {
+		t.Fatal("tool messages must stay untouched")
+	}
+	parts := messages[4]["content"].([]interface{})
+	if parts[1].(map[string]interface{})["cache_control"] == nil {
+		t.Fatal("last user text part must be marked")
+	}
+	if parts[0].(map[string]interface{})["cache_control"] != nil {
+		t.Fatal("image part must not be marked")
+	}
+}
+
+// The real builder wraps content in the vision wire type; the marker must
+// see through it on both the system and the last user message.
+func TestBuildMessages_CacheControlOnRealWireContent(t *testing.T) {
+	c := &OpenRouterClient{model: "anthropic/claude-sonnet-5"}
+	history := []models.Message{
+		{Role: "system", Content: "stable prefix"},
+		{Role: "user", Content: "first"},
+		{Role: "assistant", Content: "ok"},
+		{Role: "user", Content: "second"},
+	}
+	messages := c.buildMessages("second", history)
+	sys, ok := messages[0]["content"].([]map[string]interface{})
+	if !ok || sys[0]["cache_control"] == nil {
+		t.Fatalf("system content not marked: %#v", messages[0]["content"])
+	}
+	last, ok := messages[len(messages)-1]["content"].([]map[string]interface{})
+	if !ok || last[0]["cache_control"] == nil || last[0]["text"] != "second" {
+		t.Fatalf("last user content not marked: %#v", messages[len(messages)-1]["content"])
+	}
+	if raw, _ := json.Marshal(messages[1]["content"]); string(raw) != `"first"` {
+		t.Fatalf("earlier user turn must keep its wire bytes, got %s", raw)
+	}
+
+	// Non-caching vendor: bytes unchanged.
+	plain := &OpenRouterClient{model: "openai/gpt-5.6"}
+	pm := plain.buildMessages("second", history)
+	if raw, _ := json.Marshal(pm[0]["content"]); string(raw) != `"stable prefix"` {
+		t.Fatalf("openai/ must not receive markers, got %s", raw)
 	}
 }

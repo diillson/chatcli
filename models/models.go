@@ -177,6 +177,12 @@ type UsageInfo struct {
 	CacheCreationInputTokens int `json:"cache_creation_input_tokens,omitempty"`
 	CacheReadInputTokens     int `json:"cache_read_input_tokens,omitempty"`
 
+	// CacheCreation1hInputTokens is the share of CacheCreationInputTokens
+	// written with the 1-hour TTL (Anthropic usage.cache_creation.
+	// ephemeral_1h_input_tokens). Billed at 2x input instead of 1.25x; the
+	// remainder of CacheCreationInputTokens is the 5-minute share.
+	CacheCreation1hInputTokens int `json:"cache_creation_1h_input_tokens,omitempty"`
+
 	// Reasoning tokens emitted by o-series / GPT-5 reasoning models.
 	// Reported by OpenAI under usage.completion_tokens_details.reasoning_tokens
 	// (Chat Completions) or usage.output_tokens_details.reasoning_tokens
@@ -206,6 +212,7 @@ func (u *UsageInfo) Merge(other *UsageInfo) {
 	u.TotalTokens += other.TotalTokens
 	u.CacheCreationInputTokens += other.CacheCreationInputTokens
 	u.CacheReadInputTokens += other.CacheReadInputTokens
+	u.CacheCreation1hInputTokens += other.CacheCreation1hInputTokens
 	u.ReasoningTokens += other.ReasoningTokens
 	u.CostUSD += other.CostUSD
 	if other.IsReal {

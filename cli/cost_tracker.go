@@ -60,6 +60,9 @@ type ModelUsageRecord struct {
 	// prompt count — recomputeCost handles both semantics.
 	CacheCreationTokens int64 `json:"cache_creation_tokens,omitempty"`
 	CacheReadTokens     int64 `json:"cache_read_tokens,omitempty"`
+	// CacheCreation1hTokens is the share of CacheCreationTokens written with
+	// the 1-hour TTL (billed at 2x input instead of 1.25x).
+	CacheCreation1hTokens int64 `json:"cache_creation_1h_tokens,omitempty"`
 
 	// Reasoning tokens (o-series / GPT-5 / Gemini thinking). Informational:
 	// already billed inside CompletionTokens.
@@ -136,6 +139,9 @@ type CostTracker struct {
 	// lastAnnouncedLevel arms the one-shot proactive budget notice: a
 	// transition is reported once per escalation, not on every turn.
 	lastAnnouncedLevel BudgetLevel
+
+	// Prompt-cache telemetry (provider-neutral, fed by RecordRealUsage).
+	cache cacheTelemetry
 
 	// Persistence write-through throttle.
 	lastSave time.Time
@@ -239,7 +245,11 @@ func (ct *CostTracker) RecordRealUsage(provider, model string, usage *models.Usa
 	rec.TotalTokens += int64(totalTokens)
 	rec.CacheCreationTokens += int64(usage.CacheCreationInputTokens)
 	rec.CacheReadTokens += int64(usage.CacheReadInputTokens)
+	rec.CacheCreation1hTokens += int64(usage.CacheCreation1hInputTokens)
 	rec.ReasoningTokens += int64(usage.ReasoningTokens)
+	if usage.IsReal {
+		ct.cache.observe(provider, model, usage, time.Now())
+	}
 	if usage.CostUSD > 0 {
 		// This call's tokens are covered by the provider-billed amount —
 		// remember them so recomputeCost prices only the uncovered rest.
@@ -687,7 +697,15 @@ func recomputeRecordCost(rec *ModelUsageRecord) {
 
 	rec.InputCostUSD = float64(billableInput) / 1_000_000 * inputCost
 	rec.OutputCostUSD = float64(completionTokens) / 1_000_000 * outputCost
-	rec.CacheCostUSD = float64(cacheCreation)/1_000_000*cacheWriteCost +
+	// The 1-hour TTL share of the write is billed at a higher rate (2x
+	// input on Anthropic versus 1.25x for the 5-minute default).
+	creation1h := rec.CacheCreation1hTokens
+	if creation1h > cacheCreation {
+		creation1h = cacheCreation
+	}
+	creation5m := cacheCreation - creation1h
+	rec.CacheCostUSD = float64(creation5m)/1_000_000*cacheWriteCost +
+		float64(creation1h)/1_000_000*cacheWrite1hCost(rec.Provider, rec.Model, cacheWriteCost) +
 		float64(cacheRead)/1_000_000*cacheReadCost
 	rec.TotalCostUSD = rec.InputCostUSD + rec.OutputCostUSD + rec.CacheCostUSD + rec.ProviderCostUSD
 }
@@ -773,12 +791,13 @@ func estimateTurnCostUSD(provider, model string, usage *models.UsageInfo) float6
 	// session tracker applies — a second hand-rolled formula here is how the
 	// footer and /cost drift apart.
 	rec := &ModelUsageRecord{
-		Provider:            provider,
-		Model:               model,
-		PromptTokens:        int64(usage.PromptTokens),
-		CompletionTokens:    int64(usage.CompletionTokens),
-		CacheReadTokens:     int64(usage.CacheReadInputTokens),
-		CacheCreationTokens: int64(usage.CacheCreationInputTokens),
+		Provider:              provider,
+		Model:                 model,
+		PromptTokens:          int64(usage.PromptTokens),
+		CompletionTokens:      int64(usage.CompletionTokens),
+		CacheReadTokens:       int64(usage.CacheReadInputTokens),
+		CacheCreationTokens:   int64(usage.CacheCreationInputTokens),
+		CacheCreation1hTokens: int64(usage.CacheCreation1hInputTokens),
 	}
 	recomputeRecordCost(rec)
 	return rec.TotalCostUSD
@@ -1276,4 +1295,17 @@ func getOpenRouterModelPricing(model string) (inputCost, outputCost float64, kno
 		return 0.15, 0.15, true
 	}
 	return 0, 0, false
+}
+
+// cacheWrite1hCost is the per-1M price of a cache write with the 1-hour TTL.
+// Anthropic bills it at 2x the input price (versus 1.25x for 5 minutes);
+// every other family has no extended TTL and keeps its regular write rate.
+func cacheWrite1hCost(provider, model string, write5m float64) float64 {
+	m := strings.ToLower(model)
+	if strings.Contains(m, "claude") || strings.Contains(m, "fable") || strings.Contains(strings.ToLower(provider), "claudeai") {
+		if inputCost, _, known := lookupModelPricing(provider, model); known && inputCost > 0 {
+			return inputCost * 2.0
+		}
+	}
+	return write5m
 }

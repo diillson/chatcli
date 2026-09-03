@@ -2152,6 +2152,7 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 		mcCfg.CCR = a.cli.compressionLayer
 		if h, report := agent.ApplyMicrocompact(a.cli.history, turn, mcCfg, a.logger); report != nil && (report.Truncated > 0 || report.Summarized > 0) {
 			a.cli.history = h
+			a.cli.costTracker.NoteExpectedCacheRebuild()
 			fmt.Printf("\r\033[K  %s %s\n",
 				renderer.Colorize("🗜", agent.ColorGray),
 				renderer.Colorize(
@@ -2169,6 +2170,7 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 		saCfg.CCR = a.cli.compressionLayer
 		if h, report := agent.ApplySkillAging(a.cli.history, saCfg, a.logger); report != nil && report.Collapsed > 0 {
 			a.cli.history = h
+			a.cli.costTracker.NoteExpectedCacheRebuild()
 			a.releaseCollapsedSkills(report.CollapsedSkills, turn)
 			fmt.Printf("\r\033[K  %s %s\n",
 				renderer.Colorize("🗜", agent.ColorGray),
@@ -2228,6 +2230,7 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 			a.cli.historyCompactor.SetStatusCallback(nil)
 			if compactErr == nil {
 				a.cli.history = compacted
+				a.cli.costTracker.NoteExpectedCacheRebuild()
 			} else if errors.Is(compactErr, context.Canceled) {
 				return compactErr
 			}
@@ -2352,6 +2355,7 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 			effProvider, effModel := a.effectiveRoute()
 			a.cli.costTracker.RecordRealUsage(effProvider, effModel, turnUsage)
 			a.cli.maybeAnnounceBudget()
+			a.cli.maybeAnnounceCacheMisses()
 		}
 
 		// Para o timer e obtém a duração

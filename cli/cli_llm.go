@@ -199,6 +199,7 @@ func (cli *ChatCLI) compactHistoryIfNeeded(ctx context.Context) {
 	cli.historyCompactor.SetStatusCallback(nil)
 	if err == nil {
 		cli.history = compacted
+		cli.costTracker.NoteExpectedCacheRebuild()
 	}
 }
 

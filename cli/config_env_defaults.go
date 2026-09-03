@@ -150,6 +150,7 @@ var envDefaults = map[string]envDefault{
 
 	// ─── Resilience: compaction ──────────────────────────────────
 	"CHATCLI_CONTEXT_WINDOW":               {Value: "(auto from catalog)", Source: "catalog.GetContextWindow"},
+	"CHATCLI_PROMPT_CACHE_TTL":             {Value: "5m", Source: "llm/client/cache_prefix.go (5m|1h, Anthropic direct)"},
 	"CHATCLI_MICROCOMPACT_TRUNCATE_TURNS":  {Value: "2", Source: "agent.DefaultMicrocompactConfig"},
 	"CHATCLI_MICROCOMPACT_SUMMARIZE_TURNS": {Value: "4", Source: "agent.DefaultMicrocompactConfig"},
 	"CHATCLI_MICROCOMPACT_HEAD_CHARS":      {Value: "2000", Source: "agent.DefaultMicrocompactConfig"},

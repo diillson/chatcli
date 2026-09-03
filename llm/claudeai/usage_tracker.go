@@ -113,6 +113,9 @@ type anthropicStreamUsage struct {
 	OutputTokens             int `json:"output_tokens"`
 	CacheCreationInputTokens int `json:"cache_creation_input_tokens"`
 	CacheReadInputTokens     int `json:"cache_read_input_tokens"`
+	CacheCreation            *struct {
+		Ephemeral1h int `json:"ephemeral_1h_input_tokens"`
+	} `json:"cache_creation"`
 }
 
 // observe folds one SSE data payload into the accumulator. Cheap no-op for
@@ -131,6 +134,9 @@ func (a *streamUsageAccumulator) observe(data []byte) {
 			a.info.CompletionTokens = u.OutputTokens
 			a.info.CacheCreationInputTokens = u.CacheCreationInputTokens
 			a.info.CacheReadInputTokens = u.CacheReadInputTokens
+			if u.CacheCreation != nil {
+				a.info.CacheCreation1hInputTokens = u.CacheCreation.Ephemeral1h
+			}
 			a.seen = true
 		}
 	case "message_delta":

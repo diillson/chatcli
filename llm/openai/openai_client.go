@@ -129,6 +129,11 @@ func (c *OpenAIClient) SendPrompt(ctx context.Context, prompt string, history []
 		"messages":   messages,
 		"max_tokens": effectiveMaxTokens,
 	}
+	// Automatic prompt caching: the key steers every turn of this session
+	// to the same cache shard (see client.PromptCacheKey).
+	if key := client.PromptCacheKey(history); key != "" {
+		payload["prompt_cache_key"] = key
+	}
 
 	// Skill effort hint → reasoning_effort (only for reasoning-capable models).
 	if eff := client.ReasoningEffortForOpenAI(client.EffortFromContext(ctx)); eff != "" && supportsOpenAIReasoningEffort(c.model) {
@@ -370,6 +375,9 @@ func (c *OpenAIClient) SendPromptStream(ctx context.Context, prompt string, hist
 		payload["reasoning_effort"] = eff
 	}
 
+	if key := client.PromptCacheKey(history); key != "" {
+		payload["prompt_cache_key"] = key
+	}
 	jsonValue, err := json.Marshal(payload)
 	if err != nil {
 		return nil, fmt.Errorf("marshal stream request: %w", err)
