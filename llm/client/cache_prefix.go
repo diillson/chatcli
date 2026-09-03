@@ -39,22 +39,40 @@ func ProviderContextEngine() bool {
 	return strings.EqualFold(strings.TrimSpace(os.Getenv(ContextEngineEnv)), "provider")
 }
 
+// ContextThreshold is a typed amount in an Anthropic context edit
+// ("input_tokens" or "tool_uses" with a value).
+type ContextThreshold struct {
+	Type  string `json:"type"`
+	Value int    `json:"value"`
+}
+
+// ContextEdit is one Anthropic context-editing strategy.
+type ContextEdit struct {
+	Type         string            `json:"type"`
+	Trigger      *ContextThreshold `json:"trigger,omitempty"`
+	Keep         *ContextThreshold `json:"keep,omitempty"`
+	ClearAtLeast *ContextThreshold `json:"clear_at_least,omitempty"`
+}
+
+// ContextManagement is the context_management request block.
+type ContextManagement struct {
+	Edits []ContextEdit `json:"edits"`
+}
+
 // AnthropicContextManagement returns the context_management request block
 // for the provider context engine: clear the oldest tool results once the
 // prompt passes 100K input tokens, keeping the five most recent tool uses
 // and freeing at least 20K tokens per edit. Nil when the engine is off.
-func AnthropicContextManagement() map[string]interface{} {
+func AnthropicContextManagement() *ContextManagement {
 	if !ProviderContextEngine() {
 		return nil
 	}
-	return map[string]interface{}{
-		"edits": []map[string]interface{}{{
-			"type":           "clear_tool_uses_20250919",
-			"trigger":        map[string]interface{}{"type": "input_tokens", "value": 100000},
-			"keep":           map[string]interface{}{"type": "tool_uses", "value": 5},
-			"clear_at_least": map[string]interface{}{"type": "input_tokens", "value": 20000},
-		}},
-	}
+	return &ContextManagement{Edits: []ContextEdit{{
+		Type:         "clear_tool_uses_20250919",
+		Trigger:      &ContextThreshold{Type: "input_tokens", Value: 100000},
+		Keep:         &ContextThreshold{Type: "tool_uses", Value: 5},
+		ClearAtLeast: &ContextThreshold{Type: "input_tokens", Value: 20000},
+	}}}
 }
 
 // PromptCacheTTLEnv selects the Anthropic cache lifetime: "5m" (default) or
