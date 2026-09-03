@@ -121,3 +121,16 @@ func TestCountChat_RealVocabulary(t *testing.T) {
 		t.Fatalf("count=%d err=%v", n, err)
 	}
 }
+
+func TestCountText_ColdCacheLoadsInBackgroundOrCounts(t *testing.T) {
+	t.Setenv("HOME", t.TempDir()) // cold vocabulary cache
+	n, err := CountText("gpt-5.6-terra", "hello world")
+	if err != nil && !errors.Is(err, ErrTokenizerLoading) {
+		t.Fatalf("cold cache must load in the background, got %v", err)
+	}
+	if err == nil && n <= 0 {
+		t.Fatalf("a warm count must be positive, got %d", n)
+	}
+	Prefetch("gpt-4o") // idempotent, never blocks
+	_ = Ready(EncodingO200k)
+}

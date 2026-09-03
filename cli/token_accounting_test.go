@@ -112,3 +112,18 @@ func TestRenderSegmentForSummary_RestoresStubsAndKeepsHeadTail(t *testing.T) {
 		t.Fatal("nil layer must be safe")
 	}
 }
+
+func TestContextStatusReport_ExactHistoryFromCounter(t *testing.T) {
+	cli := newTenantTestCLI(t)
+	cli.Provider, cli.Model = "TESTPROV", "status-model"
+	cli.history = []models.Message{{Role: "user", Content: strings.Repeat("q", 800)}}
+	cli.Client = &countingClient{tokens: 200}
+	r := cli.buildContextStatusReport(context.Background())
+	if r.ExactHistoryTokens != 200 {
+		t.Fatalf("exact history must come from the provider count, got %d", r.ExactHistoryTokens)
+	}
+	if r.CalibrationSamples == 0 || r.CharsPerToken < 3.99 || r.CharsPerToken > 4.01 {
+		t.Fatalf("the count must refresh the ratio: %.2f (%d samples)", r.CharsPerToken, r.CalibrationSamples)
+	}
+	cli.showContextStatus(context.Background()) // renders the exact line without panicking
+}
