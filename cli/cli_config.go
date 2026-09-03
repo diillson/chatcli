@@ -97,6 +97,11 @@ func (cli *ChatCLI) reloadConfiguration(ctx context.Context) {
 	if err != nil && !os.IsNotExist(err) {
 		cli.logger.Error("Erro ao carregar o arquivo .env", zap.Error(err))
 	}
+	// Managed policy survives a reload: locked values are re-asserted and
+	// defaults re-filled after the user's .env has been applied.
+	if rep := config.ApplyManaged(); rep.Err != nil {
+		cli.logger.Warn("managed config unreadable; ignored", zap.String("path", rep.Path), zap.Error(rep.Err))
+	}
 
 	// Slash-command catalog: force a re-scan so /reload picks up command
 	// files created or edited since boot (the stat fingerprint would catch

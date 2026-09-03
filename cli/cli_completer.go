@@ -1678,6 +1678,7 @@ func (cli *ChatCLI) getConfigSuggestions(d prompt.Document) []prompt.Suggest {
 			{Text: "selfevolve", Description: i18n.T("cfg.section.selfevolve.title")},
 			{Text: "resilience", Description: i18n.T("complete.config.resilience")},
 			{Text: "retention", Description: i18n.T("complete.config.retention")},
+			{Text: "managed", Description: i18n.T("complete.config.managed")},
 			{Text: "session", Description: i18n.T("complete.config.session")},
 			{Text: "integrations", Description: i18n.T("complete.config.integrations")},
 			{Text: "auth", Description: i18n.T("complete.config.auth")},
