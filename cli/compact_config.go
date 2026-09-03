@@ -138,6 +138,11 @@ func (cli *ChatCLI) compactConfig(provider, model string) CompactConfig {
 	if cli == nil {
 		return cfg
 	}
+	// The session's (tenant-scoped, persisted) calibrator wins over the
+	// process-wide default the constructor consulted.
+	if ratio, samples := cli.calibrator().CharsPerToken(provider, model); samples > 0 {
+		cfg.CharsPerTokenPrecise = ratio
+	}
 	if r := cli.autoCompact.get(); r > 0 {
 		cfg.BudgetRatio = r
 	}

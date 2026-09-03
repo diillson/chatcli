@@ -844,6 +844,7 @@ func NewChatCLI(ctx context.Context, manager manager.LLMManager, logger *zap.Log
 	homeDir, _ := os.UserHomeDir()
 	globalDir := filepath.Join(homeDir, ".chatcli")
 	cli.stateRoot = globalDir
+	cli.installTokenEstimator()
 	workspaceDir := detectProjectDir()
 	if workspaceDir == "" {
 		workspaceDir, _ = os.Getwd()
@@ -2125,6 +2126,9 @@ func (cli *ChatCLI) cleanup(ctx context.Context) {
 		cli.hubLocalClose()
 		cli.hubLocalClose = nil
 	}
+
+	// Learned token ratios outlive the process.
+	cli.calibrator().flushCalibration()
 
 	// Stop context watchers before the stores go away.
 	if cli.contextHandler != nil {

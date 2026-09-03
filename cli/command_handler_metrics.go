@@ -44,7 +44,7 @@ func (ch *CommandHandler) handleMetricsCommand() {
 	}
 	tokenUsed := 0
 	for _, msg := range c.history {
-		tokenUsed += len(msg.Content) / 4 // rough estimate: ~4 chars per token
+		tokenUsed += c.estimateTokens(len(msg.Content))
 	}
 	tokenPct := 0.0
 	if tokenLimit > 0 {

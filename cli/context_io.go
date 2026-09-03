@@ -226,7 +226,7 @@ func (h *ContextHandler) printAttachFeedback(ctx *ctxmgr.FileContext, flags atta
 // attachment: the corpus stays out of the prompt, only the digest plus the
 // per-turn retrieved passages are paid for.
 func printKnowledgeAttachFeedback(ctx *ctxmgr.FileContext) {
-	digestTokens := int64(len(ctxmgr.BuildKnowledgeDigest(ctx, 0))) / 4
+	digestTokens := ctxmgr.EstimateTokens64(int64(len(ctxmgr.BuildKnowledgeDigest(ctx, 0))))
 	fmt.Printf("  %s %s\n",
 		colorize(i18n.T("context.io.label.attached"), ColorCyan),
 		i18n.T("context.io.knowledge_attached", ctx.FileCount, float64(ctx.TotalSize)/1024/1024))
@@ -270,7 +270,7 @@ func printWholeContextFeedback(ctx *ctxmgr.FileContext) {
 }
 
 func printTokenCostFeedback(ctx *ctxmgr.FileContext) {
-	estimatedTokens := ctx.TotalSize / 4
+	estimatedTokens := ctxmgr.EstimateTokens64(ctx.TotalSize)
 	fmt.Printf("  %s ~%s tokens/turno %s\n",
 		colorize(i18n.T("context.io.label.estimated_cost"), ColorGray),
 		formatTokenCount(estimatedTokens),

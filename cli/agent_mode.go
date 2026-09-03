@@ -2423,7 +2423,7 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 			// Learn the real chars-per-token ratio for this provider/model
 			// from what was actually sent and what the API counted.
 			if turnUsage != nil && turnUsage.IsReal {
-				globalTokenCalibrator.Observe(effProvider, effModel, promptCharsOf(turnHistory), contextTokens(effProvider, effModel, turnUsage))
+				a.cli.calibrator().Observe(effProvider, effModel, promptCharsOf(turnHistory), contextTokens(effProvider, effModel, turnUsage))
 			}
 			a.cli.maybeAnnounceBudget()
 			a.cli.maybeAnnounceCacheMisses()
@@ -4153,7 +4153,7 @@ func (a *AgentMode) emitSessionSummary() {
 	}
 	if a.cli.compressionLayer != nil {
 		if s, _ := a.cli.compressionLayer.Stats(); s.SavedBytes() > 0 {
-			if savedTok := s.SavedBytes() / 4; savedTok > 0 {
+			if savedTok := a.cli.estimateTokens64(s.SavedBytes()); savedTok > 0 {
 				parts = append(parts, i18n.T("chat.envelope.compression_saved", formatTokenCount(savedTok)))
 			}
 		}

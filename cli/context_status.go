@@ -103,7 +103,7 @@ func summarizeHistory(history []models.Message) historyStats {
 func (cli *ChatCLI) buildContextStatusReport(ctx context.Context) contextStatusReport {
 	r := contextStatusReport{Provider: cli.Provider, Model: cli.Model}
 	r.Window = catalog.GetContextWindow(cli.Provider, cli.Model)
-	r.CharsPerToken, r.CalibrationSamples = globalTokenCalibrator.CharsPerToken(cli.Provider, cli.Model)
+	r.CharsPerToken, r.CalibrationSamples = cli.calibrator().CharsPerToken(cli.Provider, cli.Model)
 	r.Prompt = cli.promptBreakdowns.latest()
 	r.History = summarizeHistory(cli.history)
 
@@ -137,7 +137,7 @@ func (cli *ChatCLI) buildContextStatusReport(ctx context.Context) contextStatusR
 	// calibration sample as a side effect.
 	if exact, ok := cli.calibrateExactWithTimeout(ctx); ok {
 		r.ExactHistoryTokens = exact
-		r.CharsPerToken, r.CalibrationSamples = globalTokenCalibrator.CharsPerToken(cli.Provider, cli.Model)
+		r.CharsPerToken, r.CalibrationSamples = cli.calibrator().CharsPerToken(cli.Provider, cli.Model)
 	}
 	if r.Window > 0 {
 		r.ProjectedPct = float64(r.TotalTokens) / float64(r.Window) * 100

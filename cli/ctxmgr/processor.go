@@ -196,7 +196,7 @@ func (p *Processor) EstimateTokenCount(files []utils.FileInfo) int {
 		totalChars += len(file.Content)
 	}
 
-	estimatedTokens := totalChars / 4
+	estimatedTokens := EstimateTokens(totalChars)
 
 	p.logger.Debug("Tokens estimados",
 		zap.Int("total_chars", totalChars),

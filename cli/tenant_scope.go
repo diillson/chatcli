@@ -147,6 +147,10 @@ func (cli *ChatCLI) applyStores(ts *tenantStores) {
 	cli.currentSessionName = ts.currentSessionName
 	cli.boundSessionSync = ts.boundSessionSync
 	cli.boundRemoteOnly = ts.boundRemoteOnly
+	if cli.stateRoot != ts.root {
+		// The outgoing root's learned ratios are written before the swap.
+		calibratorFor(cli.stateRoot).flushCalibration()
+	}
 	cli.stateRoot = ts.root
 	if cli.historyCompactor != nil {
 		cli.historyCompactor.SetCompressionLayer(ts.compressionLayer)
