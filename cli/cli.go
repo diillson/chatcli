@@ -287,6 +287,10 @@ type ChatCLI struct {
 	// one. Session totals live in /config compression stats.
 	compressionSavedShown int64
 
+	// LLM request audit trail writer (llm_audit.go); nil when the audit
+	// path is not configured.
+	llmAudit *llmAuditWriter
+
 	// Latest assembled system-prompt breakdown (chat and agent paths write
 	// it, /context status reads it).
 	promptBreakdowns promptBreakdownStore
@@ -849,6 +853,7 @@ func NewChatCLI(ctx context.Context, manager manager.LLMManager, logger *zap.Log
 	// from environment config, and wire the @compress/@recall tools to it. The
 	// layer is also consulted by the agent/coder loop to compress tool output.
 	cli.initTranscriptJournal("")
+	cli.initLLMAudit("repl")
 	cli.compressionLayer = compress.NewLayerFromEnv(filepath.Join(homeDir, ".chatcli"))
 	if err := cli.compressionLayer.StoreFallback(); err != nil {
 		// The layer already degraded to a bounded in-memory store; surface the
@@ -2074,6 +2079,12 @@ func (cli *ChatCLI) cleanup(ctx context.Context) {
 	if cli.hubLocalClose != nil {
 		cli.hubLocalClose()
 		cli.hubLocalClose = nil
+	}
+
+	// Flush and detach the LLM request audit trail.
+	if cli.llmAudit != nil {
+		cli.llmAudit.close()
+		cli.llmAudit = nil
 	}
 
 	// Fire SessionEnd hook

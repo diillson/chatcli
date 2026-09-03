@@ -106,6 +106,7 @@ func redactSecretsWithMode(text string, mode contentRedactMode) string {
 	if mode == contentRedactOff || text == "" {
 		return text
 	}
+	original := text
 	redactor := envRedactorFor(mode)
 
 	// Layer 1: name-based KEY=VALUE redaction, line by line. Only lines
@@ -136,5 +137,9 @@ func redactSecretsWithMode(text string, mode contentRedactMode) string {
 	}
 
 	// Layer 2: value-shape scan over the whole text.
-	return utils.SanitizeSensitiveText(text)
+	out := utils.SanitizeSensitiveText(text)
+	if out != original {
+		redactionsTotal.Add(1)
+	}
+	return out
 }
