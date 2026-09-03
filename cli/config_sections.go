@@ -824,6 +824,11 @@ func (cli *ChatCLI) showConfigResilience() {
 	subheader(p, "cfg.sub.resil.compaction")
 	kv(p, "CHATCLI_CONTEXT_WINDOW", envOr("CHATCLI_CONTEXT_WINDOW"))
 	kv(p, "CHATCLI_COMPACT_MODEL", envOr("CHATCLI_COMPACT_MODEL"))
+	engineVal := extensionStatus(os.Getenv(ContextEngineEnv))
+	if os.Getenv(ContextEngineEnv) == "" {
+		engineVal = defaultMarker + engineVal
+	}
+	kv(p, ContextEngineEnv, engineVal)
 	kv(p, "CHATCLI_MICROCOMPACT_TRUNCATE_TURNS", envOr("CHATCLI_MICROCOMPACT_TRUNCATE_TURNS"))
 	kv(p, "CHATCLI_MICROCOMPACT_SUMMARIZE_TURNS", envOr("CHATCLI_MICROCOMPACT_SUMMARIZE_TURNS"))
 	kv(p, "CHATCLI_MICROCOMPACT_HEAD_CHARS", envOr("CHATCLI_MICROCOMPACT_HEAD_CHARS"))

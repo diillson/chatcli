@@ -305,6 +305,11 @@ type ChatCLI struct {
 	// the ones the reply evidently used get reinforced.
 	recalled recallEvidence
 
+	// extToolCaller overrides the MCP manager for the extension points
+	// (tests); extForward tracks what was forwarded to the memory provider.
+	extToolCaller serverToolCaller
+	extForward    extForwardState
+
 	// Latest assembled system-prompt breakdown (chat and agent paths write
 	// it, /context status reads it).
 	promptBreakdowns promptBreakdownStore

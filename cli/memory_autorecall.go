@@ -114,7 +114,24 @@ func autoRecallEpisodeLine(e *memory.Episode) string {
 }
 
 func (cli *ChatCLI) memoryAutoRecallBlockCtx(ctx context.Context, hints []string, query string) string {
-	if !memoryAutoRecallEnabled() || cli.memoryStore == nil || len(hints) == 0 {
+	if !memoryAutoRecallEnabled() || len(hints) == 0 {
+		return ""
+	}
+	block := cli.builtinAutoRecallBlock(ctx, hints, query)
+	// External memory provider (CHATCLI_MEMORY_PROVIDER=mcp:<server>): its
+	// answer rides after the embedded block, bounded, never blocking.
+	if ext := cli.externalMemoryRecall(ctx, query, hints); ext != "" {
+		if block == "" {
+			return autoRecallHeader + ext
+		}
+		return block + "\n" + ext
+	}
+	return block
+}
+
+// builtinAutoRecallBlock is the embedded facts + episodes recall.
+func (cli *ChatCLI) builtinAutoRecallBlock(ctx context.Context, hints []string, query string) string {
+	if cli.memoryStore == nil {
 		return ""
 	}
 	mgr := cli.memoryStore.Manager()

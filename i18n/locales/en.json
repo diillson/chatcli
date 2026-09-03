@@ -803,6 +803,7 @@
   "context.create.success": " ✅ Context created successfully!",
   "context.attach.usage": "Usage: /context attach <name> [--priority <number>] [--weight <n>] [--rag [K] | --full | --chunks 1,2,3]",
   "context.attach.error.invalid_weight": "Invalid --weight: use a number between 0 and 10 (1.0 is neutral)",
+  "mcp.error.server_not_connected": "MCP server %s not connected",
   "context.attach.error.invalid_priority": "Invalid priority. Must be an integer.",
   "context.attach.error.not_found": "Context '%s' not found",
   "context.attach.error.failed": "Error attaching context: %v",
