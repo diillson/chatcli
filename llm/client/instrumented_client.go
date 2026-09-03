@@ -22,6 +22,37 @@ type MetricsRecorder interface {
 	RecordError(provider, model, errorType string)
 }
 
+// TokenRecorder is the optional capability a MetricsRecorder implements to
+// receive token counts per call. kind is one of input, output, cache_read,
+// cache_write (Anthropic-style additive creation tokens).
+type TokenRecorder interface {
+	RecordTokens(provider, model, kind string, count int64)
+}
+
+// recordUsage exports the inner client's last usage when both sides can.
+func (c *InstrumentedClient) recordUsage(model string) {
+	tr, ok := c.recorder.(TokenRecorder)
+	if !ok {
+		return
+	}
+	ua, ok := c.inner.(UsageAwareClient)
+	if !ok {
+		return
+	}
+	u := ua.LastUsage()
+	if u == nil {
+		return
+	}
+	tr.RecordTokens(c.provider, model, "input", int64(u.PromptTokens))
+	tr.RecordTokens(c.provider, model, "output", int64(u.CompletionTokens))
+	if u.CacheReadInputTokens > 0 {
+		tr.RecordTokens(c.provider, model, "cache_read", int64(u.CacheReadInputTokens))
+	}
+	if u.CacheCreationInputTokens > 0 {
+		tr.RecordTokens(c.provider, model, "cache_write", int64(u.CacheCreationInputTokens))
+	}
+}
+
 // InstrumentedClient wraps an LLMClient and records metrics for each call.
 type InstrumentedClient struct {
 	inner    LLMClient
@@ -59,6 +90,7 @@ func (c *InstrumentedClient) SendPrompt(ctx context.Context, prompt string, hist
 	}
 
 	c.recorder.RecordRequest(c.provider, model, "success", duration)
+	c.recordUsage(model)
 	return response, nil
 }
 
@@ -83,6 +115,7 @@ func (c *InstrumentedClient) SendPromptWithTools(ctx context.Context, prompt str
 	}
 
 	c.recorder.RecordRequest(c.provider, model, "success", duration)
+	c.recordUsage(model)
 	return response, nil
 }
 

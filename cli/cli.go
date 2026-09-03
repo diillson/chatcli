@@ -864,6 +864,7 @@ func NewChatCLI(ctx context.Context, manager manager.LLMManager, logger *zap.Log
 	// layer is also consulted by the agent/coder loop to compress tool output.
 	cli.initTranscriptJournal("")
 	cli.initLLMAudit("repl")
+	cli.initCacheResourceCosting()
 	cli.compressionLayer = compress.NewLayerFromEnv(filepath.Join(homeDir, ".chatcli"))
 	if err := cli.compressionLayer.StoreFallback(); err != nil {
 		// The layer already degraded to a bounded in-memory store; surface the
@@ -2094,6 +2095,12 @@ func (cli *ChatCLI) cleanup(ctx context.Context) {
 	if cli.hubLocalClose != nil {
 		cli.hubLocalClose()
 		cli.hubLocalClose = nil
+	}
+
+	// Release explicit cache resources so their storage stops with the
+	// session (best effort, bounded).
+	if n := client.ReleaseCacheResources(ctx); n > 0 && cli.logger != nil {
+		cli.logger.Debug("released explicit cache resources", zap.Int("count", n))
 	}
 
 	// Flush and detach the LLM request audit trail.

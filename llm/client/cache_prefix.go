@@ -22,6 +22,7 @@ import (
 	"encoding/json"
 	"os"
 	"strings"
+	"sync/atomic"
 )
 
 // PromptCacheTTLEnv selects the Anthropic cache lifetime: "5m" (default) or
@@ -34,13 +35,35 @@ const PromptCacheTTLEnv = "CHATCLI_PROMPT_CACHE_TTL"
 // still travels under on the Messages API.
 const ExtendedCacheTTLBeta = "extended-cache-ttl-2025-04-11"
 
+// promptCacheTTLHint is the lifetime the running surface asks for when the
+// env says "auto": the coder/agent loop sets "1h" for its turns (long
+// sessions that pause between tool rounds) and restores "5m" after; chat
+// and one-shot never touch it. Read only when the env is "auto".
+var promptCacheTTLHint atomic.Value // string
+
+// SetPromptCacheTTLHint records the surface preference honored by
+// CHATCLI_PROMPT_CACHE_TTL=auto ("5m" or "1h"; anything else resets to
+// the 5-minute default).
+func SetPromptCacheTTLHint(ttl string) {
+	if ttl != "1h" {
+		ttl = "5m"
+	}
+	promptCacheTTLHint.Store(ttl)
+}
+
 // AnthropicCacheTTL returns the configured cache lifetime, normalized to
-// "5m" or "1h". Anything else resolves to the 5-minute default so a typo
-// can never disable caching or send an invalid ttl.
+// "5m" or "1h". "auto" defers to the surface hint (SetPromptCacheTTLHint);
+// anything else resolves to the 5-minute default so a typo can never
+// disable caching or send an invalid ttl.
 func AnthropicCacheTTL() string {
 	switch strings.ToLower(strings.TrimSpace(os.Getenv(PromptCacheTTLEnv))) {
 	case "1h", "60m", "hour":
 		return "1h"
+	case "auto":
+		if v, _ := promptCacheTTLHint.Load().(string); v == "1h" {
+			return "1h"
+		}
+		return "5m"
 	default:
 		return "5m"
 	}

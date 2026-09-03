@@ -2840,6 +2840,7 @@
   "cost.budget.blocked": "Orçamento da sessão esgotado — turno bloqueado (CHATCLI_BUDGET_HARD_STOP). Aumente CHATCLI_SESSION_BUDGET_USD ou rode /cost reset.",
   "cost.cmd.cache_tokens_label": "Tokens de Cache:",
   "cost.cmd.cache_created": "Criados:",
+  "cost.cmd.cache_storage": "Storage de cache: %d recurso(s) · %s",
   "cost.cmd.cache_read": "Lidos:",
   "cost.cmd.cache_savings": "(economiza ~90%% do custo de input)",
   "cost.cmd.cost_label": "Custo:",

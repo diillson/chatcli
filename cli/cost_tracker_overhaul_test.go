@@ -49,7 +49,7 @@ func TestGetCachePricingFamilies(t *testing.T) {
 		{"BEDROCK", "anthropic.claude-fable-5-1", 10.0 * 1.25, 10.0 * 0.025},
 		{"CLAUDEAI", "claude-fable-5", 10.0 * 1.25, 10.0 * 0.10}, // Fable 5 keeps the 10% rule
 		{"OPENAI", "gpt-4o", 0, 2.50 * 0.50},
-		{"GOOGLEAI", "gemini-2.5-pro", 0, 1.25 * 0.25},
+		{"GOOGLEAI", "gemini-2.5-pro", 0, 1.25 * 0.10}, // cached reads 10% of input (Sep/2026 pricing)
 		{"DEEPSEEK", "deepseek-chat", 0, 0.27 * 0.25},
 		// xAI cached input (docs.x.ai pricing, Sep 2026): $0.50 on 4.6,
 		// $0.30 on 4.5, $0.20 on the 4.3/4.20 tier.

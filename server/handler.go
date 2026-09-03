@@ -253,6 +253,15 @@ func (a *llmMetricsAdapter) RecordError(provider, model, errorType string) {
 	a.m.ErrorsTotal.WithLabelValues(provider, model, errorType).Inc()
 }
 
+// RecordTokens implements client.TokenRecorder: token counts by kind
+// (input, output, cache_read, cache_write) land in chatcli_llm_tokens_total.
+func (a *llmMetricsAdapter) RecordTokens(provider, model, kind string, count int64) {
+	if count <= 0 {
+		return
+	}
+	a.m.TokensUsed.WithLabelValues(provider, model, kind).Add(float64(count))
+}
+
 func protoToHistory(msgs []*pb.ChatMessage) []models.Message {
 	history := make([]models.Message, 0, len(msgs))
 	for _, m := range msgs {

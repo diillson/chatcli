@@ -150,7 +150,8 @@ var envDefaults = map[string]envDefault{
 
 	// ─── Resilience: compaction ──────────────────────────────────
 	"CHATCLI_CONTEXT_WINDOW":               {Value: "(auto from catalog)", Source: "catalog.GetContextWindow"},
-	"CHATCLI_PROMPT_CACHE_TTL":             {Value: "5m", Source: "llm/client/cache_prefix.go (5m|1h, Anthropic direct)"},
+	"CHATCLI_PROMPT_CACHE_TTL":             {Value: "5m", Source: "llm/client/cache_prefix.go (5m|1h|auto; auto = 1h in agent/coder turns)"},
+	"CHATCLI_PROMPT_CACHE_EXPLICIT":        {Value: "false", Source: "llm/client/cache_resources.go (Gemini cachedContents; bills storage per token-hour)"},
 	"CHATCLI_COMPACT_MODEL":                {Value: "(session client)", Source: "compact_config.go (PROVIDER:model for Level 2 summaries)"},
 	"CHATCLI_MICROCOMPACT_TRUNCATE_TURNS":  {Value: "2", Source: "agent.DefaultMicrocompactConfig"},
 	"CHATCLI_MICROCOMPACT_SUMMARIZE_TURNS": {Value: "4", Source: "agent.DefaultMicrocompactConfig"},
