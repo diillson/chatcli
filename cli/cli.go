@@ -825,6 +825,9 @@ func NewChatCLI(ctx context.Context, manager manager.LLMManager, logger *zap.Log
 		return nil, fmt.Errorf("erro ao inicializar o ContextHandler: %w", err)
 	}
 	cli.contextHandler = contextHandler
+	// Watcher-driven context refreshes print at the REPL tick, never from
+	// the watcher goroutine.
+	cli.contextHandler.SetRefreshNotifier(cli.pushMemoryNotice)
 	// Wire the shared embedding provider so `/context attach --rag` can retrieve
 	// only the passages relevant to each turn instead of dumping whole files. A
 	// Null/absent provider (no CHATCLI_EMBED_PROVIDER) leaves retrieval disabled,
@@ -2116,6 +2119,11 @@ func (cli *ChatCLI) cleanup(ctx context.Context) {
 	if cli.hubLocalClose != nil {
 		cli.hubLocalClose()
 		cli.hubLocalClose = nil
+	}
+
+	// Stop context watchers before the stores go away.
+	if cli.contextHandler != nil {
+		cli.contextHandler.Close()
 	}
 
 	// Release explicit cache resources so their storage stops with the

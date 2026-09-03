@@ -236,6 +236,8 @@ func (m *Manager) CreateContext(ctx context.Context, name, description string, p
 			ExcludePatterns:   scanOpts.ExcludePatterns,
 			IncludeHidden:     scanOpts.IncludeHidden,
 		},
+		SourcePaths: expandSourcePaths(paths),
+		FileStamps:  stampFiles(files),
 	}
 
 	// NOVO: Se modo chunked, dividir em chunks
@@ -655,6 +657,8 @@ func (m *Manager) UpdateContext(ctx context.Context, name string, newPaths []str
 		existingCtx.Mode = mode
 		existingCtx.TotalSize = totalSize
 		existingCtx.FileCount = len(files)
+		existingCtx.SourcePaths = expandSourcePaths(newPaths)
+		existingCtx.FileStamps = stampFiles(files)
 		existingCtx.ScanOptions = scanOpts
 		existingCtx.ScanOptionsMetadata = ScanOptionsMetadata{
 			MaxTotalSize:      scanOpts.MaxTotalSize,
