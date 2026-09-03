@@ -52,7 +52,7 @@ type ClaudeClient struct {
 }
 
 const (
-	oauthUserAgent         = "claude-cli/2.1.2 (external, cli)"
+	oauthUserAgent         = auth.ClaudeCodeUserAgent
 	oauthAnthropicBeta     = "oauth-2025-04-20,interleaved-thinking-2025-05-14,claude-code-20250219,fine-grained-tool-streaming-2025-05-14"
 	oauthSonnet1MBeta      = "context-1m-2025-08-07"
 	oauthBaseSystemPrompt  = "You are Claude Code, Anthropic's official CLI for Claude."
