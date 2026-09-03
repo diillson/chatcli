@@ -291,6 +291,12 @@ type ChatCLI struct {
 	// it, /context status reads it).
 	promptBreakdowns promptBreakdownStore
 
+	// Session compaction controls: /autocompact threshold override and the
+	// lazily resolved CHATCLI_COMPACT_MODEL summarizer (see compact_config.go).
+	autoCompact           autoCompactControl
+	compactSummarizer     client.LLMClient
+	compactSummarizerOnce sync.Once
+
 	// Session language-server pool behind the @lsp tool. Created lazily on
 	// the first @lsp call (starting gopls for sessions that never navigate
 	// code would be waste) and shut down with the session.
