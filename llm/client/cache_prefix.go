@@ -25,6 +25,38 @@ import (
 	"sync/atomic"
 )
 
+// ContextEngineEnv selects the context engine (cli reads builtin|mcp:<server>|
+// provider); "provider" asks the model's own server-side context editing
+// (Anthropic context management) to drop stale tool results before they
+// are billed, in addition to ChatCLI's local compaction.
+const ContextEngineEnv = "CHATCLI_CONTEXT_ENGINE"
+
+// ContextManagementBeta is the Anthropic beta that enables context editing.
+const ContextManagementBeta = "context-management-2025-06-27"
+
+// ProviderContextEngine reports whether CHATCLI_CONTEXT_ENGINE=provider.
+func ProviderContextEngine() bool {
+	return strings.EqualFold(strings.TrimSpace(os.Getenv(ContextEngineEnv)), "provider")
+}
+
+// AnthropicContextManagement returns the context_management request block
+// for the provider context engine: clear the oldest tool results once the
+// prompt passes 100K input tokens, keeping the five most recent tool uses
+// and freeing at least 20K tokens per edit. Nil when the engine is off.
+func AnthropicContextManagement() map[string]interface{} {
+	if !ProviderContextEngine() {
+		return nil
+	}
+	return map[string]interface{}{
+		"edits": []map[string]interface{}{{
+			"type":           "clear_tool_uses_20250919",
+			"trigger":        map[string]interface{}{"type": "input_tokens", "value": 100000},
+			"keep":           map[string]interface{}{"type": "tool_uses", "value": 5},
+			"clear_at_least": map[string]interface{}{"type": "input_tokens", "value": 20000},
+		}},
+	}
+}
+
 // PromptCacheTTLEnv selects the Anthropic cache lifetime: "5m" (default) or
 // "1h". The hour keeps the prefix warm through longer idle gaps at a higher
 // write rate (2x input instead of 1.25x), so it pays off for sessions that

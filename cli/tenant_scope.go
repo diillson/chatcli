@@ -155,6 +155,7 @@ func (cli *ChatCLI) applyStores(ts *tenantStores) {
 	}
 	cli.stateRoot = ts.root
 	cli.applyTenantPaths()
+	cli.telemetryTenant(ts.principal)
 	if cli.historyCompactor != nil {
 		cli.historyCompactor.SetCompressionLayer(ts.compressionLayer)
 	}

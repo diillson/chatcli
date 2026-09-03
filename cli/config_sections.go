@@ -1467,6 +1467,10 @@ func (cli *ChatCLI) showConfigServer() {
 	kv(p, "CHATCLI_AUDIT_LOG_PATH", envOr("CHATCLI_AUDIT_LOG_PATH"))
 
 	fmt.Println(p)
+	subheader(p, "cfg.sub.server.otel")
+	cli.renderTelemetryStatus(p)
+
+	fmt.Println(p)
 	subheader(p, "cfg.sub.server.operator")
 	kv(p, "CHATCLI_AIOPS_PORT", envOr("CHATCLI_AIOPS_PORT"))
 	kv(p, "CHATCLI_OPERATOR_DEV_MODE", envBool("CHATCLI_OPERATOR_DEV_MODE"))

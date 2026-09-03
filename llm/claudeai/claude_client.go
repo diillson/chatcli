@@ -685,16 +685,24 @@ func (c *ClaudeClient) applyAuthHeaders(req *http.Request, token string) {
 // requires on the Messages API. Only when the TTL is configured — the
 // default 5-minute cache needs no flag.
 func applyExtendedCacheTTLBeta(req *http.Request) {
-	if client.AnthropicCacheTTL() != "1h" {
-		return
+	if client.AnthropicCacheTTL() == "1h" {
+		addAnthropicBeta(req, client.ExtendedCacheTTLBeta)
 	}
+	if client.ProviderContextEngine() {
+		addAnthropicBeta(req, client.ContextManagementBeta)
+	}
+}
+
+// addAnthropicBeta appends one beta flag to the anthropic-beta header
+// without duplicating it.
+func addAnthropicBeta(req *http.Request, beta string) {
 	if existing := req.Header.Get("anthropic-beta"); existing != "" {
-		if !strings.Contains(existing, client.ExtendedCacheTTLBeta) {
-			req.Header.Set("anthropic-beta", existing+","+client.ExtendedCacheTTLBeta)
+		if !strings.Contains(existing, beta) {
+			req.Header.Set("anthropic-beta", existing+","+beta)
 		}
 		return
 	}
-	req.Header.Set("anthropic-beta", client.ExtendedCacheTTLBeta)
+	req.Header.Set("anthropic-beta", beta)
 }
 
 func oauthTextBlock(text string) map[string]interface{} {
@@ -720,6 +728,9 @@ func applyOAuthHeaders(req *http.Request, token string) {
 	}
 	if client.AnthropicCacheTTL() == "1h" {
 		betas = betas + "," + client.ExtendedCacheTTLBeta
+	}
+	if client.ProviderContextEngine() {
+		betas = betas + "," + client.ContextManagementBeta
 	}
 	req.Header.Set("anthropic-beta", betas)
 	req.Header.Set("anthropic-version", "2023-06-01")

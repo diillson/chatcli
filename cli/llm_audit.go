@@ -142,7 +142,11 @@ func (w *llmAuditWriter) setSurface(surface string) {
 
 // SetAuditSurface names the process role on every audit line from now on.
 func (cli *ChatCLI) SetAuditSurface(surface string) {
-	if cli == nil || cli.llmAudit == nil {
+	if cli == nil {
+		return
+	}
+	cli.telemetrySurface(surface)
+	if cli.llmAudit == nil {
 		return
 	}
 	cli.llmAudit.setSurface(surface)

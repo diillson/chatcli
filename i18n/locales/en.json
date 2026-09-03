@@ -1355,7 +1355,7 @@
   "auth.logout.success": "Logout ok",
   "auth.error.unknown_subcommand": "Unknown subcommand. Use: status | login | logout",
   "memory.error.not_available": "Memory system not available.",
-  "memory.usage": "Usage: /memory [today|yesterday|week|longterm|list|load <date>|profile|profile set <k>=<v>|remember [cat] <fact>|forget <substr>|facts|topics|projects|stats|timeline [q]|compact|<YYYY-MM-DD>]",
+  "memory.usage": "Usage: /memory [today|yesterday|week|longterm|list|load <date>|profile|profile set <k>=<v>|remember [cat] <fact>|forget <substr>|facts|topics|projects|stats|timeline [q]|compact|export [path]|import <path>|recall <query>|why|<YYYY-MM-DD>]",
   "memory.no_notes_for": "No notes found for",
   "memory.notes_for": "Memory notes for",
   "memory.no_notes_week": "No notes in the last 7 days.",
@@ -3536,7 +3536,7 @@
   "park.resolve.empty": "park: empty token (use /parked to list)",
   "park.resolve.not_found": "park: no snapshot matching %q (use /parked to list)",
   "park.resolve.ambiguous": "park: token prefix %q is ambiguous (matches: %s) — use a longer prefix",
-  "sec.cmd.usage_header": "Usage: /config security {rules|allow|deny|forget|reload|reseal|verify-audit [path]} [args]",
+  "sec.cmd.usage_header": "Usage: /config security {rules|allow|deny|forget|reload} [args]",
   "sec.cmd.usage_note_pattern": "Patterns use prefix match against \"<toolName> <args>\" (e.g. \"@coder exec kubectl get\"). Deny beats Allow.",
   "sec.cmd.usage_note_scope": "Changes persist to ~/.chatcli/coder_policy.json and take effect for /coder and the scheduler on the next fire.",
   "sec.cmd.unknown_sub": "Unknown /config security subcommand: %s",
@@ -3751,5 +3751,6 @@
   "cfg.sub.sec.atrest": "Encryption at rest",
   "cfg.kv.sec.atrest_key": "Key fingerprint",
   "cfg.kv.sec.atrest_covers": "Covers",
-  "cfg.kv.sec.atrest_covers_list": "sessions, transcripts, park snapshots, long-term memory (JSON stores), knowledge contexts, CCR archive, cost snapshots, memory exports"
+  "cfg.kv.sec.atrest_covers_list": "sessions, transcripts, park snapshots, long-term memory (JSON stores), knowledge contexts, CCR archive, cost snapshots, memory exports",
+  "cfg.sub.server.otel": "OpenTelemetry export"
 }
