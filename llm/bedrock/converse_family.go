@@ -50,7 +50,7 @@ func (c *BedrockClient) sendPromptConverse(ctx context.Context, prompt string, h
 		return "", fmt.Errorf("%s", i18n.T("llm.error.no_response", "Bedrock"))
 	}
 	if converseSupportsCachePoint(c.model) {
-		system, messages = applyConverseCachePoints(system, messages)
+		system, messages = applyConverseCachePoints(system, messages, converseCacheTTL(c.model))
 	}
 
 	input := &bedrockruntime.ConverseInput{
@@ -343,21 +343,34 @@ func converseSupportsCachePoint(model string) bool {
 	return strings.Contains(m, "amazon.nova") || strings.Contains(m, "anthropic.") || strings.Contains(m, "claude")
 }
 
+// converseCacheTTL returns the cachePoint ttl for the model: the configured
+// lifetime on Claude 4.5+ ("ttl":"1h" per the Bedrock prompt-caching
+// guide), empty (wire default, 5 minutes) for Nova and older Claude.
+func converseCacheTTL(model string) bedrockruntimetypes.CacheTTL {
+	if !supportsExtendedCacheTTL(model) || client.AnthropicCacheTTL() != "1h" {
+		return ""
+	}
+	return bedrockruntimetypes.CacheTTLOneHour
+}
+
 // applyConverseCachePoints is the Converse counterpart of the Anthropic
 // cache planner: one cachePoint after the system blocks (stable prefix) and
 // one at the end of the last user message (rolling conversation
 // breakpoint), so the next turn reads the whole prefix from cache instead
 // of re-tokenizing it at full price.
-func applyConverseCachePoints(system []bedrockruntimetypes.SystemContentBlock, messages []bedrockruntimetypes.Message) ([]bedrockruntimetypes.SystemContentBlock, []bedrockruntimetypes.Message) {
-	point := func() *bedrockruntimetypes.ContentBlockMemberCachePoint {
-		return &bedrockruntimetypes.ContentBlockMemberCachePoint{
-			Value: bedrockruntimetypes.CachePointBlock{Type: bedrockruntimetypes.CachePointTypeDefault},
+func applyConverseCachePoints(system []bedrockruntimetypes.SystemContentBlock, messages []bedrockruntimetypes.Message, ttl bedrockruntimetypes.CacheTTL) ([]bedrockruntimetypes.SystemContentBlock, []bedrockruntimetypes.Message) {
+	block := func() bedrockruntimetypes.CachePointBlock {
+		b := bedrockruntimetypes.CachePointBlock{Type: bedrockruntimetypes.CachePointTypeDefault}
+		if ttl != "" {
+			b.Ttl = ttl
 		}
+		return b
+	}
+	point := func() *bedrockruntimetypes.ContentBlockMemberCachePoint {
+		return &bedrockruntimetypes.ContentBlockMemberCachePoint{Value: block()}
 	}
 	if len(system) > 0 {
-		system = append(system, &bedrockruntimetypes.SystemContentBlockMemberCachePoint{
-			Value: bedrockruntimetypes.CachePointBlock{Type: bedrockruntimetypes.CachePointTypeDefault},
-		})
+		system = append(system, &bedrockruntimetypes.SystemContentBlockMemberCachePoint{Value: block()})
 	}
 	if n := len(messages); n > 0 && messages[n-1].Role == bedrockruntimetypes.ConversationRoleUser && len(messages[n-1].Content) > 0 {
 		messages[n-1].Content = append(messages[n-1].Content, point())

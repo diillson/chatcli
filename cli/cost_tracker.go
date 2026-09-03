@@ -112,6 +112,9 @@ type SessionCostData struct {
 	CacheResources         int     `json:"cache_resources,omitempty"`
 	CacheStorageTokenHours float64 `json:"cache_storage_token_hours,omitempty"`
 	CacheStorageCostUSD    float64 `json:"cache_storage_cost_usd,omitempty"`
+	Compactions            int     `json:"compactions,omitempty"`
+	CompactionsLevel3      int     `json:"compactions_level3,omitempty"`
+	CompactionCostUSD      float64 `json:"compaction_cost_usd,omitempty"`
 }
 
 // CostTracker tracks token usage and estimated cost for the current session,
@@ -157,6 +160,9 @@ type CostTracker struct {
 	cacheResources         int
 	cacheStorageTokenHours float64
 	cacheStorageUSD        float64
+	compactions            int
+	compactionsLevel3      int
+	compactionCostUSD      float64
 
 	// Persistence write-through throttle.
 	lastSave time.Time
@@ -438,6 +444,9 @@ func (ct *CostTracker) snapshotLocked() SessionCostData {
 		CacheResources:         ct.cacheResources,
 		CacheStorageTokenHours: ct.cacheStorageTokenHours,
 		CacheStorageCostUSD:    ct.cacheStorageUSD,
+		Compactions:            ct.compactions,
+		CompactionsLevel3:      ct.compactionsLevel3,
+		CompactionCostUSD:      ct.compactionCostUSD,
 	}
 }
 
@@ -588,6 +597,9 @@ func (ct *CostTracker) RestoreSession(sessionID string) error {
 	ct.cacheResources = data.CacheResources
 	ct.cacheStorageTokenHours = data.CacheStorageTokenHours
 	ct.cacheStorageUSD = data.CacheStorageCostUSD
+	ct.compactions = data.Compactions
+	ct.compactionsLevel3 = data.CompactionsLevel3
+	ct.compactionCostUSD = data.CompactionCostUSD
 	ct.recomputeAggregates()
 	return nil
 }

@@ -21,7 +21,7 @@ type summarizerStub struct{ calls int }
 func (s *summarizerStub) GetModelName() string { return "stub" }
 func (s *summarizerStub) SendPrompt(context.Context, string, []models.Message, int) (string, error) {
 	s.calls++
-	return "EMBEDDED SUMMARY", nil
+	return "EMBEDDED SUMMARY\n## Files Read\n- none of note\n## Current Task State\n- the user asked for a refactor of the parser and the assistant delivered it", nil
 }
 
 func compactableHistory() []models.Message {
@@ -48,7 +48,7 @@ func TestStructuredSummarize_ContextEngineReplacesAndFallsBack(t *testing.T) {
 		if budget <= 0 || instruction != "" {
 			t.Fatalf("budget=%d instruction=%q", budget, instruction)
 		}
-		return "ENGINE SUMMARY", nil
+		return "ENGINE SUMMARY\n## Files Read\n- none of note\n## Current Task State\n- the user asked for a refactor of the parser and the assistant delivered it", nil
 	})
 	out, err := hc.structuredSummarize(context.Background(), compactableHistory(), stub, cfg)
 	if err != nil {

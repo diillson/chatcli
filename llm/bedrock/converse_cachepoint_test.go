@@ -33,7 +33,7 @@ func TestApplyConverseCachePoints_SystemAndLastUser(t *testing.T) {
 		{Role: "user", Content: "second"},
 	}
 	messages, system := buildConverseMessages("second", history)
-	system, messages = applyConverseCachePoints(system, messages)
+	system, messages = applyConverseCachePoints(system, messages, "")
 
 	if len(system) != 2 {
 		t.Fatalf("expected text + cachePoint system blocks, got %d", len(system))

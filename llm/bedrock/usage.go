@@ -16,6 +16,7 @@ import (
 	"encoding/json"
 
 	"github.com/aws/aws-sdk-go-v2/service/bedrockruntime"
+	bedrockruntimetypes "github.com/aws/aws-sdk-go-v2/service/bedrockruntime/types"
 	"github.com/diillson/chatcli/llm/client"
 	"github.com/diillson/chatcli/models"
 )
@@ -79,6 +80,13 @@ func (c *BedrockClient) captureConverseUsage(out *bedrockruntime.ConverseOutput)
 	}
 	if info.TotalTokens == 0 {
 		info.TotalTokens = info.PromptTokens + info.CompletionTokens
+	}
+	// The 1-hour share of the cache write is billed at 2x: cacheDetails
+	// splits the write by ttl (1h entries first).
+	for _, d := range out.Usage.CacheDetails {
+		if d.Ttl == bedrockruntimetypes.CacheTTLOneHour {
+			info.CacheCreation1hInputTokens += deref(d.InputTokens)
+		}
 	}
 	c.usage.StoreUsage(info)
 	if out.StopReason != "" {

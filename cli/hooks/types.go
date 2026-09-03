@@ -103,6 +103,10 @@ type HookEvent struct {
 	SessionID string `json:"sessionId,omitempty"`
 	// WorkingDir is the current working directory.
 	WorkingDir string `json:"workingDir,omitempty"`
+	// Trigger says what caused a compaction event: "auto" (window/payload
+	// pressure at a turn boundary), "manual" (/compact) or "recovery"
+	// (context-overflow recovery after a rejected request).
+	Trigger string `json:"trigger,omitempty"`
 }
 
 // HookResult is the result of a hook execution.
