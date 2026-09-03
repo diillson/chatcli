@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"os"
 	"path/filepath"
 	"strings"
 	"time"
@@ -58,7 +57,7 @@ func NewCompactor(facts *FactIndex, daily *DailyNoteStore, config Config, memDir
 // loadState restores lastCompaction from disk. Any read/parse failure just
 // leaves the zero value — the worst case is one extra compaction check.
 func (c *Compactor) loadState() {
-	data, err := os.ReadFile(filepath.Join(c.memDir, compactorStateFile))
+	data, err := readStoreFile(filepath.Join(c.memDir, compactorStateFile))
 	if err != nil {
 		return
 	}

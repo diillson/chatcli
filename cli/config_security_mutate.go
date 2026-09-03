@@ -61,6 +61,10 @@ func (cli *ChatCLI) routeConfigSecurity(args []string) {
 		cli.configSecurityForget(rest)
 	case "reload":
 		cli.configSecurityReload()
+	case "reseal", "rotate-key":
+		cli.configSecurityReseal()
+	case "verify-audit", "audit-verify":
+		cli.configSecurityVerifyAudit(rest)
 	default:
 		fmt.Println(colorize("  "+i18n.T("sec.cmd.unknown_sub", sub), ColorYellow))
 		cli.printConfigSecurityUsage()

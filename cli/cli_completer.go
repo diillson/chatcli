@@ -1979,6 +1979,8 @@ func (cli *ChatCLI) getConfigSecuritySuggestions(d prompt.Document) []prompt.Sug
 			{Text: "deny", Description: i18n.T("sec.cmd.added_deny")},
 			{Text: "forget", Description: i18n.T("sec.cmd.rules_word")},
 			{Text: "reload", Description: i18n.T("sec.cmd.reloaded")},
+			{Text: "reseal", Description: i18n.T("sec.cmd.suggest_reseal")},
+			{Text: "verify-audit", Description: i18n.T("sec.cmd.suggest_verify_audit")},
 			{Text: "help", Description: i18n.T("sec.cmd.usage_header")},
 		}
 		return prompt.FilterHasPrefix(subs, word, true)

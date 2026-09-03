@@ -4,8 +4,8 @@
  * License: Apache-2.0
  *
  * Every memory substore (facts, profile, topics, projects, patterns) persists
- * as a small JSON file. Two disciplines keep those files from ever costing the
- * user their accumulated memory:
+ * as a small JSON file, sealed when encryption at rest is on. Two disciplines
+ * keep those files from ever costing the user their accumulated memory:
  *
  *   1. Writes are atomic (temp file + rename in the same directory), so a
  *      crash mid-write can never leave a half-written file under the store's
@@ -22,6 +22,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/diillson/chatcli/pkg/atrest"
 	"github.com/diillson/chatcli/utils"
 )
 
@@ -29,7 +30,21 @@ import (
 // and an atomic rename (utils.AtomicWriteFile), so readers, crashes and power
 // loss only ever observe the old or the new content — never a torn write.
 func atomicWriteFile(path string, data []byte, perm os.FileMode) error {
-	return utils.AtomicWriteFile(path, data, perm)
+	sealed, err := atrest.Seal(data)
+	if err != nil {
+		return err
+	}
+	return utils.AtomicWriteFile(path, sealed, perm)
+}
+
+// readStoreFile reads a store file and opens it when it is sealed
+// (encryption at rest, CHATCLI_ENCRYPTION_KEY). Plaintext passes through.
+func readStoreFile(path string) ([]byte, error) {
+	data, err := os.ReadFile(path) // #nosec G304 -- fixed store filename under the memory dir
+	if err != nil {
+		return nil, err
+	}
+	return atrest.Open(data)
 }
 
 // quarantineCorrupt moves an unparseable store file aside as

@@ -2,7 +2,6 @@ package memory
 
 import (
 	"encoding/json"
-	"os"
 	"sort"
 	"strings"
 	"sync"
@@ -234,7 +233,7 @@ func normalizeTopic(name string) string {
 }
 
 func (tt *TopicTracker) load() {
-	data, err := os.ReadFile(tt.path)
+	data, err := readStoreFile(tt.path)
 	if err != nil {
 		return
 	}

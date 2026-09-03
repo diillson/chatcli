@@ -2,7 +2,6 @@ package memory
 
 import (
 	"encoding/json"
-	"os"
 	"sort"
 	"strings"
 	"sync"
@@ -214,7 +213,7 @@ func stringSliceEqual(a, b []string) bool {
 }
 
 func (pt *ProjectTracker) load() {
-	data, err := os.ReadFile(pt.path)
+	data, err := readStoreFile(pt.path)
 	if err != nil {
 		return
 	}

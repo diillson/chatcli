@@ -26,10 +26,12 @@ import (
 	"crypto/cipher"
 	"crypto/rand"
 	"crypto/sha256"
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"io"
 	"os"
+	"strings"
 
 	"golang.org/x/crypto/hkdf"
 )
@@ -40,6 +42,11 @@ const (
 	// EnvKey is the environment variable that opts a process into
 	// encryption at rest and supplies the master secret.
 	EnvKey = "CHATCLI_ENCRYPTION_KEY"
+	// EnvPreviousKeys lists retired secrets (comma-separated) that Open may
+	// still use to read payloads sealed before a rotation. Seal never uses
+	// them; re-sealing every store with the current key (Reseal) retires
+	// them for good.
+	EnvPreviousKeys = "CHATCLI_ENCRYPTION_KEY_PREVIOUS"
 	// SessionInfo is the HKDF info string for session-class stores.
 	SessionInfo = "chatcli-session-encryption"
 )
@@ -153,7 +160,9 @@ func Seal(plaintext []byte) ([]byte, error) {
 
 // Open decrypts an encrypted payload and passes plaintext through untouched.
 // Stores call it right after reading, so a plaintext file written before the
-// key was configured keeps loading (and is sealed on its next save).
+// key was configured keeps loading (and is sealed on its next save). After a
+// rotation, payloads sealed with a retired key listed in EnvPreviousKeys
+// still open; they are sealed with the current key on their next save.
 func Open(data []byte) ([]byte, error) {
 	if !IsEncrypted(data) {
 		return data, nil
@@ -162,5 +171,147 @@ func Open(data []byte) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	return enc.Decrypt(data)
+	plain, err := enc.Decrypt(data)
+	if err == nil {
+		return plain, nil
+	}
+	for _, secret := range previousSecrets() {
+		master := sha256.Sum256([]byte(secret))
+		old, derr := NewFromMaster(master[:], SessionInfo)
+		if derr != nil {
+			continue
+		}
+		if plain, perr := old.Decrypt(data); perr == nil {
+			return plain, nil
+		}
+	}
+	return nil, err
+}
+
+// previousSecrets parses EnvPreviousKeys (comma-separated, blanks skipped).
+func previousSecrets() []string {
+	raw := os.Getenv(EnvPreviousKeys)
+	if raw == "" {
+		return nil
+	}
+	var out []string
+	for _, s := range strings.Split(raw, ",") {
+		if s = strings.TrimSpace(s); s != "" {
+			out = append(out, s)
+		}
+	}
+	return out
+}
+
+// SealedWithCurrentKey reports whether data opens with the current key
+// alone (false for plaintext and for payloads only a retired key opens).
+func SealedWithCurrentKey(data []byte) bool {
+	if !IsEncrypted(data) {
+		return false
+	}
+	enc, err := fromEnv()
+	if err != nil {
+		return false
+	}
+	_, err = enc.Decrypt(data)
+	return err == nil
+}
+
+// KeyFingerprint identifies the current key for display (first 8 hex of
+// SHA-256 of the derived key), "" when encryption is off.
+func KeyFingerprint() string {
+	enc, err := fromEnv()
+	if err != nil {
+		return ""
+	}
+	sum := sha256.Sum256(enc.key)
+	return fmt.Sprintf("%x", sum[:4])
+}
+
+// ResealFile rewrites path sealed with the current key when it is plaintext
+// or sealed with a retired key. Returns whether the file was rewritten. A
+// file that cannot be opened with any known key is left untouched and
+// reported as an error.
+func ResealFile(path string) (bool, error) {
+	if !Enabled() {
+		return false, ErrKeyMissing
+	}
+	data, err := os.ReadFile(path) // #nosec G304 -- store path chosen by the caller (operator-owned state)
+	if err != nil {
+		return false, err
+	}
+	if len(data) == 0 || SealedWithCurrentKey(data) {
+		return false, nil
+	}
+	plain, err := Open(data)
+	if err != nil {
+		return false, err
+	}
+	sealed, err := Seal(plain)
+	if err != nil {
+		return false, err
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		return false, err
+	}
+	tmp := path + ".reseal.tmp"
+	if err := os.WriteFile(tmp, sealed, info.Mode().Perm()); err != nil {
+		return false, err
+	}
+	if err := os.Rename(tmp, path); err != nil {
+		_ = os.Remove(tmp)
+		return false, err
+	}
+	return true, nil
+}
+
+// ResealLines rewrites a line-oriented store (one sealed record per line,
+// prefixed by linePrefix and base64-encoded) with the current key. Lines
+// that are plaintext or already current are copied as they are.
+func ResealLines(path, linePrefix string) (int, error) {
+	if !Enabled() {
+		return 0, ErrKeyMissing
+	}
+	data, err := os.ReadFile(path) // #nosec G304 -- store path chosen by the caller (operator-owned state)
+	if err != nil {
+		return 0, err
+	}
+	lines := strings.Split(string(data), "\n")
+	changed := 0
+	for i, line := range lines {
+		if !strings.HasPrefix(line, linePrefix) {
+			continue
+		}
+		raw, err := base64.StdEncoding.DecodeString(line[len(linePrefix):])
+		if err != nil || SealedWithCurrentKey(raw) {
+			continue
+		}
+		plain, err := Open(raw)
+		if err != nil {
+			return changed, fmt.Errorf("line %d: %w", i+1, err)
+		}
+		sealed, err := Seal(plain)
+		if err != nil {
+			return changed, err
+		}
+		lines[i] = linePrefix + base64.StdEncoding.EncodeToString(sealed)
+		changed++
+	}
+	if changed == 0 {
+		return 0, nil
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		return 0, err
+	}
+	tmp := path + ".reseal.tmp"
+	if err := os.WriteFile(tmp, []byte(strings.Join(lines, "\n")), info.Mode().Perm()); err != nil {
+		return 0, err
+	}
+	if err := os.Rename(tmp, path); err != nil {
+		_ = os.Remove(tmp)
+		return 0, err
+	}
+	return changed, nil
 }

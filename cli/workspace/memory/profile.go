@@ -2,7 +2,6 @@ package memory
 
 import (
 	"encoding/json"
-	"os"
 	"sort"
 	"strings"
 	"sync"
@@ -638,7 +637,7 @@ func sortedKeys[V any](m map[string]V) []string {
 // --- internal ---
 
 func (ps *UserProfileStore) load() {
-	data, err := os.ReadFile(ps.path)
+	data, err := readStoreFile(ps.path)
 	if err != nil {
 		return
 	}

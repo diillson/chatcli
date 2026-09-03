@@ -258,6 +258,7 @@ var envDefaults = map[string]envDefault{
 	"CHATCLI_MCP_MAX_HISTORY":               {Value: "0", Source: "cmd/rpcserve.go (0 = token-aware compaction bounds the history)"},
 	"CHATCLI_MCP_SESSION_AUTOSAVE":          {Value: "true", IsBool: true, Source: "cmd/rpcserve.go (persist live MCP sessions as mcp-<session>; unset follows CHATCLI_SESSION_AUTOSAVE)"},
 	"CHATCLI_SESSION_AUTOSAVE_KEEP":         {Value: "600", Source: "cli/cli_session_autosave.go (machine-session keep-count backstop; TTL is the primary retention)"},
+	"CHATCLI_ENCRYPTION_KEY_PREVIOUS":       {Value: "", Source: "pkg/atrest (comma-separated retired keys that still open sealed stores after a rotation; /config security reseal migrates them)"},
 	"CHATCLI_SESSION_AUTORECALL":            {Value: "true", IsBool: true, Source: "cli/session_autorecall.go (proactive saved-session recall block in chat/agent/coder turns)"},
 	"CHATCLI_COMMANDS":                      {Value: "true", IsBool: true, Source: "cli/commands_integration.go (slash-command templates: .chatcli/commands + ~/.chatcli/commands + .claude/commands + .devin/workflows)"},
 	"CHATCLI_COMMANDS_AUTOROUTE":            {Value: "true", IsBool: true, Source: "cli/commands_integration.go (auto-route mode:coder slash commands from chat into a coder one-shot run)"},

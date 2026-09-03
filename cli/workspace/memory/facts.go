@@ -967,7 +967,7 @@ func (fi *FactIndex) pruneLowestLocked(n int) {
 }
 
 func (fi *FactIndex) load() {
-	data, err := os.ReadFile(fi.path)
+	data, err := readStoreFile(fi.path)
 	if err != nil {
 		if !os.IsNotExist(err) {
 			fi.logger.Debug("failed to load fact index", zap.Error(err))
@@ -1091,7 +1091,7 @@ func (fi *FactIndex) mergeFromDiskLocked() {
 		}
 	}
 
-	data, err := os.ReadFile(fi.path)
+	data, err := readStoreFile(fi.path)
 	if err != nil {
 		return
 	}
@@ -1186,7 +1186,7 @@ func (fi *FactIndex) recordTombstonesLocked(ids ...string) {
 // loadTombstonesLocked unions the sidecar's tombstones into memory (the other
 // process may have recorded deletions since our last read).
 func (fi *FactIndex) loadTombstonesLocked() {
-	data, err := os.ReadFile(fi.tombstonePath)
+	data, err := readStoreFile(fi.tombstonePath)
 	if err != nil {
 		return
 	}

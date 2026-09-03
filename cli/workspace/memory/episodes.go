@@ -253,7 +253,7 @@ func mergeRefs(a, b []string) []string {
 }
 
 func (es *EpisodeStore) load() {
-	data, err := os.ReadFile(es.path)
+	data, err := readStoreFile(es.path)
 	if err != nil {
 		if !os.IsNotExist(err) {
 			es.logger.Debug("failed to load episode store", zap.Error(err))
@@ -312,7 +312,7 @@ func (es *EpisodeStore) persistLocked() {
 // OLDEST episodes past the cap. Read failures leave the current view
 // untouched. Caller must hold the write lock.
 func (es *EpisodeStore) mergeFromDiskLocked() {
-	data, err := os.ReadFile(es.path)
+	data, err := readStoreFile(es.path)
 	if err == nil {
 		var onDisk []*Episode
 		if json.Unmarshal(data, &onDisk) == nil {
