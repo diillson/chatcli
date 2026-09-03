@@ -21,6 +21,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -178,7 +179,19 @@ func (m *Manager) RefreshContext(ctx context.Context, name string) (*FileContext
 		return nil, RefreshReport{}, fmt.Errorf("contexto '%s' não encontrado", name)
 	}
 	if len(fc.SourcePaths) == 0 {
-		return fc, RefreshReport{}, ErrNoSourcePaths
+		// Contexts saved before source paths were recorded: the files they
+		// hold still name where they came from. Adopt those paths (each
+		// file, not their directories — the original selection is what
+		// the context meant) and persist them so the next refresh and the
+		// watcher find them.
+		inferred := inferSourcePaths(fc)
+		if len(inferred) == 0 {
+			return fc, RefreshReport{}, ErrNoSourcePaths
+		}
+		fc.SourcePaths = inferred
+		if err := m.Storage.SaveContext(fc); err == nil {
+			m.logger.Info("context: source paths migrated from its files", zap.String("context", name), zap.Int("paths", len(inferred)))
+		}
 	}
 	files, knowledgeMeta, scanOpts, err := m.scanSources(ctx, fc.SourcePaths, fc.Mode)
 	if err != nil {
@@ -237,17 +250,51 @@ func (m *Manager) RefreshContext(ctx context.Context, name string) (*FileContext
 	return fc, rep, nil
 }
 
+// inferSourcePaths derives source paths for a legacy context from its
+// files: absolute paths that still exist (synthetic "#chunk" entries and
+// relative paths are skipped). Empty when nothing usable remains.
+func inferSourcePaths(fc *FileContext) []string {
+	if fc == nil {
+		return nil
+	}
+	seen := make(map[string]bool, len(fc.Files))
+	out := make([]string, 0, len(fc.Files))
+	for _, f := range fc.Files {
+		p := f.Path
+		if i := strings.Index(p, "#"); i >= 0 {
+			p = p[:i]
+		}
+		if p == "" || !filepath.IsAbs(p) || seen[p] {
+			continue
+		}
+		if info, err := os.Stat(p); err != nil || info.IsDir() {
+			continue
+		}
+		seen[p] = true
+		out = append(out, p)
+	}
+	return out
+}
+
 // ErrNoSourcePaths marks a context that predates source-path recording.
 var ErrNoSourcePaths = fmt.Errorf("context has no recorded source paths")
 
-// SourcePathsOf returns the recorded source paths of a context by name.
+// SourcePathsOf returns the recorded source paths of a context by name,
+// inferring (and persisting) them for a legacy context.
 func (m *Manager) SourcePathsOf(name string) ([]string, bool) {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	for _, c := range m.contexts {
-		if c.Name == name {
-			return append([]string(nil), c.SourcePaths...), true
+		if c.Name != name {
+			continue
 		}
+		if len(c.SourcePaths) == 0 {
+			if inferred := inferSourcePaths(c); len(inferred) > 0 {
+				c.SourcePaths = inferred
+				_ = m.Storage.SaveContext(c)
+			}
+		}
+		return append([]string(nil), c.SourcePaths...), true
 	}
 	return nil, false
 }

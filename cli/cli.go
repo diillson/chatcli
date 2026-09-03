@@ -863,6 +863,9 @@ func NewChatCLI(ctx context.Context, manager manager.LLMManager, logger *zap.Log
 	var bootstrapLoader *workspace.BootstrapLoader
 	if bootstrapEnabled {
 		bootstrapLoader = workspace.NewBootstrapLoader(workspaceDir, globalDir, logger)
+		if cwd, err := os.Getwd(); err == nil {
+			bootstrapLoader.SetWorkingDir(cwd)
+		}
 	} else {
 		bootstrapLoader = workspace.NewBootstrapLoader("", "", logger) // noop
 		logger.Info("Bootstrap disabled via CHATCLI_BOOTSTRAP_ENABLED=false")
