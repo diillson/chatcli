@@ -921,6 +921,34 @@ func (a *AgentMode) clientAndCtxForTurn(ctx context.Context) (llmclient.LLMClien
 	return turnClient, ctx
 }
 
+// effectiveRoute reports the provider and model that actually serve the
+// current turn: the AI's @model route override first, then the skill
+// frontmatter hint, then the session's own pair (with the same env/config
+// fallbacks initMultiAgent applies when the session provider is unset).
+// Every consumer that must follow a mid-task model switch — cost
+// attribution, the squad dispatcher, subagent delegation — reads this
+// instead of the frozen session fields.
+func (a *AgentMode) effectiveRoute() (provider, model string) {
+	hint := a.cli.agentRouteOverrideHandle()
+	if hint == "" {
+		hint = a.skillModelHint
+	}
+	if hint != "" {
+		resolution := a.cli.resolveSkillClient(hint)
+		if resolution.Provider != "" && resolution.Model != "" {
+			return resolution.Provider, resolution.Model
+		}
+	}
+	provider = a.cli.Provider
+	if provider == "" {
+		provider = os.Getenv("LLM_PROVIDER")
+	}
+	if provider == "" {
+		provider = config.Global.GetString("LLM_PROVIDER")
+	}
+	return provider, a.cli.Model
+}
+
 // Run inicia o modo agente com uma consulta do usuário, utilizando um loop de Raciocínio-Ação (ReAct).
 // Agora aceita systemPromptOverride para definir personas específicas (ex: Coder).
 func (a *AgentMode) Run(ctx context.Context, query string, additionalContext string, systemPromptOverride string) error {
@@ -2288,6 +2316,14 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 		if canUseNativeTools && len(nativeToolDefs) > 0 {
 			llmResp, err = toolAwareClient.SendPromptWithTools(turnCtx, "", turnHistory, nativeToolDefs, currentMaxTokens)
 			if a.cli.refreshClientOnAuthError(err) {
+				// The refresh rebuilt the session client; re-resolve the
+				// turn client so the retry runs on a fresh handle for the
+				// provider that actually served this turn (route override
+				// included) instead of the stale pre-refresh wrapper.
+				turnClient, turnCtx = a.clientAndCtxForTurn(ctx)
+				if tac, ok := llmclient.AsToolAware(turnClient); ok && tac.SupportsNativeTools() {
+					toolAwareClient = tac
+				}
 				llmResp, err = toolAwareClient.SendPromptWithTools(turnCtx, "", turnHistory, nativeToolDefs, currentMaxTokens)
 			}
 			if err == nil && llmResp != nil {
@@ -2297,6 +2333,7 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 		} else {
 			aiResponse, err = turnClient.SendPrompt(turnCtx, "", turnHistory, currentMaxTokens)
 			if a.cli.refreshClientOnAuthError(err) {
+				turnClient, turnCtx = a.clientAndCtxForTurn(ctx)
 				aiResponse, err = turnClient.SendPrompt(turnCtx, "", turnHistory, currentMaxTokens)
 			}
 		}
@@ -2312,17 +2349,7 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 				inputChars += len(m.Content)
 			}
 			turnUsage = llmclient.GetUsageOrEstimate(turnClient, inputChars, len(aiResponse))
-			effProvider := a.cli.Provider
-			effModel := a.cli.Model
-			hint := a.cli.agentRouteOverrideHandle()
-			if hint == "" {
-				hint = a.skillModelHint
-			}
-			if hint != "" {
-				resolution := a.cli.resolveSkillClient(hint)
-				effProvider = resolution.Provider
-				effModel = resolution.Model
-			}
+			effProvider, effModel := a.effectiveRoute()
 			a.cli.costTracker.RecordRealUsage(effProvider, effModel, turnUsage)
 			a.cli.maybeAnnounceBudget()
 		}
@@ -2501,7 +2528,9 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 		stopReason := ""
 		if llmResp != nil && llmResp.StopReason != "" {
 			stopReason = llmResp.StopReason
-		} else if src, ok := llmclient.AsStopReasonAware(a.cli.Client); ok {
+		} else if src, ok := llmclient.AsStopReasonAware(turnClient); ok {
+			// turnClient served this call; under a route override the
+			// session client's last stop reason belongs to another turn.
 			stopReason = src.LastStopReason()
 		}
 		if stopReason == "max_tokens" || stopReason == "length" {
@@ -2929,6 +2958,12 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 					a.policyAdapter.setStdinCh(a.stdinLines)
 					a.policyAdapter.setRestoreInput(a.reapplyStdinCbreak)
 				}
+				// Workers must follow the model that serves THIS turn. The
+				// dispatcher's pair was captured at Run() start, before the
+				// AI could take a @model route override mid-task; without
+				// this refresh every delegated worker kept talking to the
+				// model the orchestrator had just switched away from.
+				a.agentDispatcher.UpdateProviderModel(a.effectiveRoute())
 				agentResults := a.agentDispatcher.DispatchWithProgress(ctx, agentCalls, progressCh)
 				a.turnTimer.Stop()
 				// Clear the live progress display
@@ -3519,11 +3554,15 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 								toolOutput, execErr = a.handleAgentAsk(ctx, normalizedArgsStr)
 							} else if strings.EqualFold(strings.TrimSpace(toolName), "@coder") && isDelegateInvocation(normalizedArgsStr) {
 								nativeArgs, rawInner := extractDelegateArgs(normalizedArgsStr)
+								// turnClient, not a.cli.Client: the subagent must
+								// run on the model serving this turn (route
+								// override / skill hint included), not on the
+								// session client the orchestrator switched away from.
 								toolOutput, execErr = workers.RunDelegate(
 									ctx,
 									nativeArgs,
 									rawInner,
-									a.cli.Client,
+									turnClient,
 									nil, // no file lock manager at top level — subagent uses its own
 									nil, // no skills propagation for now
 									nil, // policy handled upstream already

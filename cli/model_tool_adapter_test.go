@@ -304,3 +304,30 @@ func TestModelToolEndToEndSwitch(t *testing.T) {
 		t.Fatalf("after reset turn client = %s, want the session model", turnClient.GetModelName())
 	}
 }
+
+// effectiveRoute is what the squad dispatcher and subagent delegation follow:
+// it must track the AI's @model override and fall back to the session pair.
+func TestEffectiveRouteFollowsModelOverride(t *testing.T) {
+	cliObj, _ := newRoutingTestCLI()
+	plugins.SetModelRoutingAdapter(&modelRoutingAdapter{cli: cliObj})
+	t.Cleanup(func() { plugins.SetModelRoutingAdapter(nil) })
+	p := plugins.NewBuiltinModelPlugin()
+	a := &AgentMode{cli: cliObj, logger: zap.NewNop()}
+	ctx := context.Background()
+
+	if prov, model := a.effectiveRoute(); prov != "CLAUDEAI" || model != "claude-sonnet-5" {
+		t.Fatalf("baseline route = %s/%s, want the session pair", prov, model)
+	}
+	if _, err := p.Execute(ctx, []string{`{"cmd":"use","args":{"model":"GOOGLEAI:gemini-2.5-flash"}}`}); err != nil {
+		t.Fatalf("@model use failed: %v", err)
+	}
+	if prov, model := a.effectiveRoute(); prov != "GOOGLEAI" || model != "gemini-2.5-flash" {
+		t.Fatalf("route after @model use = %s/%s, want GOOGLEAI/gemini-2.5-flash", prov, model)
+	}
+	if _, err := p.Execute(ctx, []string{`{"cmd":"reset"}`}); err != nil {
+		t.Fatalf("@model reset failed: %v", err)
+	}
+	if prov, model := a.effectiveRoute(); prov != "CLAUDEAI" || model != "claude-sonnet-5" {
+		t.Fatalf("route after reset = %s/%s, want the session pair", prov, model)
+	}
+}

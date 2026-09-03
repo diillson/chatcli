@@ -44,6 +44,9 @@ type Dispatcher struct {
 	callUsageRecorder *callUsageRecorderBox
 	budgetGate        *budgetGateBox
 	logger            *zap.Logger
+	// configMu guards config.Provider/Model: written by UpdateProviderModel
+	// from the orchestrator goroutine, read by executeAgent from workers.
+	configMu sync.RWMutex
 }
 
 // NewDispatcher creates a Dispatcher with the given dependencies.
@@ -74,10 +77,23 @@ func (d *Dispatcher) MaxWorkers() int {
 }
 
 // UpdateProviderModel updates the provider and model used by worker instances.
-// This ensures that runtime provider/model changes are respected by parallel agents.
+// The orchestrator calls it before every dispatch wave so runtime changes —
+// /switch, /model, and the AI's own @model route override taken mid-task —
+// reach the workers instead of freezing the values captured at Run() start.
+// Guarded because executeAgent reads the pair from worker goroutines.
 func (d *Dispatcher) UpdateProviderModel(provider, model string) {
+	d.configMu.Lock()
 	d.config.Provider = provider
 	d.config.Model = model
+	d.configMu.Unlock()
+}
+
+// ProviderModel returns the provider and model the next dispatched worker
+// will be built on (absent a per-agent model hint).
+func (d *Dispatcher) ProviderModel() (provider, model string) {
+	d.configMu.RLock()
+	defer d.configMu.RUnlock()
+	return d.config.Provider, d.config.Model
 }
 
 // SetPolicyChecker sets the policy checker for enforcing security policies
@@ -299,16 +315,18 @@ func (d *Dispatcher) executeAgent(ctx context.Context, call AgentCall) AgentResu
 	//     reasoning_effort for every LLM call in this worker's ReAct loop.
 	//
 	// The dispatcher's config.Provider/Model are NOT mutated — swap is
-	// scoped to this single worker invocation.
-	effProvider := d.config.Provider
-	effModel := d.config.Model
+	// scoped to this single worker invocation. Snapshot the session pair
+	// under the lock: the orchestrator refreshes it before each wave.
+	sessionProvider, sessionModel := d.ProviderModel()
+	effProvider := sessionProvider
+	effModel := sessionModel
 
 	var llmClient client.LLMClient
 	if hint := strings.TrimSpace(agent.Model()); hint != "" {
 		resolution := client.ResolveModelRouting(client.ResolveModelRoutingInput{
 			Router:       d.llmMgr,
-			UserProvider: d.config.Provider,
-			UserModel:    d.config.Model,
+			UserProvider: sessionProvider,
+			UserModel:    sessionModel,
 			Hint:         hint,
 			Logger:       d.logger,
 		})
@@ -319,9 +337,9 @@ func (d *Dispatcher) executeAgent(ctx context.Context, call AgentCall) AgentResu
 			d.logger.Info("worker model hint honored",
 				zap.String("agent", string(call.Agent)),
 				zap.String("note", resolution.Note),
-				zap.String("from_provider", d.config.Provider),
+				zap.String("from_provider", sessionProvider),
 				zap.String("to_provider", effProvider),
-				zap.String("from_model", d.config.Model),
+				zap.String("from_model", sessionModel),
 				zap.String("to_model", effModel))
 		} else if resolution.UserMessage != "" {
 			d.logger.Warn("worker model hint fell back",
@@ -447,7 +465,13 @@ func FormatResults(results []AgentResult) string {
 
 	failed := 0
 	for i, r := range results {
-		if r.Error != nil {
+		// A worker that ended with neither an error nor any output did not
+		// do the task; rendering it as OK told the orchestrator the
+		// delegation succeeded with nothing to show, which is exactly the
+		// shape that made it loop or absorb the work itself. It counts as a
+		// failure so the re-dispatch nudge below fires.
+		emptyOK := r.Error == nil && strings.TrimSpace(r.Output) == ""
+		if r.Error != nil || emptyOK {
 			failed++
 		}
 		fmt.Fprintf(&b, "[%s] (call %s, %s)\n", r.Agent, r.CallID, r.Duration.Round(time.Millisecond))
@@ -455,9 +479,12 @@ func FormatResults(results []AgentResult) string {
 			fmt.Fprintf(&b, "Run: %s\n", runID)
 		}
 		fmt.Fprintf(&b, "Task: %s\n", r.Task)
-		if r.Error != nil {
+		switch {
+		case r.Error != nil:
 			fmt.Fprintf(&b, "Status: FAILED — %v\n", r.Error)
-		} else {
+		case emptyOK:
+			b.WriteString("Status: EMPTY — the worker returned no output (no text, no tool calls); treat as failed\n")
+		default:
 			b.WriteString("Status: OK\n")
 		}
 		if r.Output != "" {

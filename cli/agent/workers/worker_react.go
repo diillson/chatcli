@@ -174,6 +174,9 @@ func RunWorkerReAct(
 	// --- Failure tracking for reflection ---
 	consecutiveFailures := 0
 	blockedCmds := make(map[string]int)
+	// Empty completions (no text, no tool calls) tolerated before the
+	// worker fails loudly — see the guard after resolveToolCalls.
+	emptyTurns := 0
 
 	for turn := 0; turn < maxTurns; turn++ {
 		select {
@@ -208,7 +211,7 @@ func RunWorkerReAct(
 		history, _ = agent.ApplyMicrocompact(history, turn, mcCfg, logger)
 
 		// --- Call LLM (native or text mode) ---
-		responseText, nativeToolCalls, newHistory, err := callWorkerLLM(ctx, useNativeTools, toolAware, llmClient, history, toolDefs)
+		responseText, nativeToolCalls, stopReason, newHistory, err := callWorkerLLM(ctx, useNativeTools, toolAware, llmClient, history, toolDefs)
 		if err != nil {
 			return &AgentResult{
 				CallID:    callID,
@@ -225,10 +228,32 @@ func RunWorkerReAct(
 		allToolCalls = append(allToolCalls, parseErrRecords...)
 
 		if len(resolved) == 0 {
+			if strings.TrimSpace(responseText) == "" {
+				// An empty completion is NOT a final answer — see
+				// handleEmptyWorkerTurn for the recovery policy.
+				var retry bool
+				var emptyErr error
+				history, retry, emptyErr = handleEmptyWorkerTurn(history, emptyWorkerTurn{
+					stopReason: stopReason,
+					modelName:  llmClient.GetModelName(),
+					turn:       turn,
+					maxTurns:   maxTurns,
+					attempts:   &emptyTurns,
+					logger:     logger,
+				})
+				if emptyErr != nil {
+					return emptyWorkerResult(callID, finalOutput.String(), emptyErr, startTime, allToolCalls), emptyErr
+				}
+				if retry {
+					continue
+				}
+			}
 			// No tool calls — worker is done
 			finalOutput.WriteString(responseText)
 			break
 		}
+		// A productive turn resets the empty-completion tolerance.
+		emptyTurns = 0
 
 		// --- Pre-validate and classify ---
 		validated, classifyRecords := classifyToolCalls(resolved, allowed, blockedCmds, config)
@@ -409,14 +434,88 @@ func buildWorkerSystemPrompt(config WorkerReActConfig, useNativeTools bool, task
 	return systemPrompt
 }
 
+// maxEmptyWorkerTurns bounds how many consecutive empty completions a worker
+// nudges through before failing. Two covers the transient shapes (a
+// thinking-only turn, a hiccup) without letting a model that has genuinely
+// nothing to say burn the whole turn budget.
+const maxEmptyWorkerTurns = 2
+
+// workerEmptyTurnNudge is the model-facing recovery instruction folded into
+// the trailing user message after an empty completion.
+const workerEmptyTurnNudge = "[Your previous turn returned no text and no tool calls. " +
+	"Either produce your final answer for the delegated task now, or call a tool. " +
+	"An empty reply is not a valid completion.]"
+
+// emptyWorkerTurn carries what handleEmptyWorkerTurn needs to decide.
+type emptyWorkerTurn struct {
+	stopReason string
+	modelName  string
+	turn       int
+	maxTurns   int
+	attempts   *int // running count of consecutive empty completions
+	logger     *zap.Logger
+}
+
+// handleEmptyWorkerTurn applies the recovery policy for a completion with no
+// text and no tool calls. Providers return that shape with err == nil in
+// several legitimate cases (a thinking-only turn truncated at max_tokens,
+// content null, a model that emits nothing under a tool schema it dislikes);
+// treating it as "done" produced Status: OK with no output back at the
+// orchestrator, which then looped or absorbed the task itself.
+//
+// Returns the (possibly rewritten) history, whether the loop should retry,
+// and a terminal error when the worker must fail:
+//   - a truncated empty turn fails immediately with the stop reason — a
+//     retry on the same budget cannot help;
+//   - otherwise up to maxEmptyWorkerTurns consecutive empties are nudged:
+//     the empty assistant turn is dropped (strict providers reject empty
+//     text blocks) and the nudge is folded into the trailing user message
+//     so alternation is preserved;
+//   - past that, the worker fails naming the model that served the call.
+func handleEmptyWorkerTurn(history []models.Message, et emptyWorkerTurn) ([]models.Message, bool, error) {
+	if et.stopReason == "max_tokens" || et.stopReason == "length" {
+		return history, false, fmt.Errorf("turn %d: worker LLM (%s) returned no text and no tool calls: output truncated (stop_reason=%s)",
+			et.turn+1, et.modelName, et.stopReason)
+	}
+	*et.attempts++
+	if *et.attempts > maxEmptyWorkerTurns || et.turn >= et.maxTurns-1 {
+		return history, false, fmt.Errorf("worker LLM (%s) returned an empty response (no text, no tool calls) after %d attempt(s)",
+			et.modelName, *et.attempts)
+	}
+	history = appendInboxMessage(history[:len(history)-1], workerEmptyTurnNudge)
+	if et.logger != nil {
+		et.logger.Warn("worker returned an empty response — nudging",
+			zap.Int("turn", et.turn+1),
+			zap.Int("attempt", *et.attempts),
+			zap.String("model", et.modelName))
+	}
+	return history, true, nil
+}
+
+// emptyWorkerResult builds the failure result for an empty-completion exit so
+// both exit branches produce the same shape.
+func emptyWorkerResult(callID, output string, err error, startTime time.Time, calls []ToolCallRecord) *AgentResult {
+	return &AgentResult{
+		CallID:    callID,
+		Output:    output,
+		Error:     err,
+		Duration:  time.Since(startTime),
+		ToolCalls: calls,
+	}
+}
+
 // callWorkerLLM performs one LLM round trip in either native function-calling
 // mode or text mode, appends the assistant turn to history, and returns the
-// response text, any native tool calls, the updated history and an error.
-func callWorkerLLM(ctx context.Context, useNativeTools bool, toolAware client.ToolAwareClient, llmClient client.LLMClient, history []models.Message, toolDefs []models.ToolDefinition) (string, []models.ToolCall, []models.Message, error) {
+// response text, any native tool calls, the provider's stop reason (when it
+// reports one), the updated history and an error.
+func callWorkerLLM(ctx context.Context, useNativeTools bool, toolAware client.ToolAwareClient, llmClient client.LLMClient, history []models.Message, toolDefs []models.ToolDefinition) (string, []models.ToolCall, string, []models.Message, error) {
 	if useNativeTools {
 		llmResp, err := toolAware.SendPromptWithTools(ctx, "", history, toolDefs, 0)
 		if err != nil {
-			return "", nil, history, err
+			return "", nil, "", history, err
+		}
+		if llmResp == nil {
+			llmResp = &models.LLMResponse{}
 		}
 		responseText := llmResp.Content
 		nativeToolCalls := llmResp.ToolCalls
@@ -427,15 +526,19 @@ func callWorkerLLM(ctx context.Context, useNativeTools bool, toolAware client.To
 			Content:   responseText,
 			ToolCalls: nativeToolCalls,
 		})
-		return responseText, nativeToolCalls, history, nil
+		return responseText, nativeToolCalls, llmResp.StopReason, history, nil
 	}
 
 	responseText, err := llmClient.SendPrompt(ctx, "", history, 0)
 	if err != nil {
-		return "", nil, history, err
+		return "", nil, "", history, err
+	}
+	stopReason := ""
+	if src, ok := client.AsStopReasonAware(llmClient); ok {
+		stopReason = src.LastStopReason()
 	}
 	history = append(history, models.Message{Role: "assistant", Content: responseText})
-	return responseText, nil, history, nil
+	return responseText, nil, stopReason, history, nil
 }
 
 // executeToolCall runs a single (possibly blocked) tool call: it enforces the
@@ -649,8 +752,13 @@ func resolveToolCalls(useNativeTools bool, nativeToolCalls []models.ToolCall, re
 				pluginName: pluginName,
 			})
 		}
-	} else if !useNativeTools {
-		// XML/JSON parsing fallback
+	} else {
+		// XML/JSON parsing fallback — also taken in native mode when the
+		// provider returned zero structured calls, mirroring the
+		// orchestrator loop: a model that answers a native tool schema with
+		// a textual <tool_call> block must not have that block silently
+		// taken as its final answer (or, when the text is empty, as
+		// "nothing to do").
 		xmlToolCalls, _ := agent.ParseToolCalls(responseText)
 		for _, tc := range xmlToolCalls {
 			subcmd, args, parseErr := parseCoderToolCall(tc)
