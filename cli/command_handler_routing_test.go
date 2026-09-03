@@ -20,7 +20,7 @@ func TestCommandRoutingCoverage(t *testing.T) {
 		"/reset", "/redraw", "/clear", "/switch openai",
 		"/config", "/config providers", "/status", "/settings",
 		"/session list", "/context show", "/auth login", "/plugin list",
-		"/skill list", "/connect host", "/watch x", "/compact", "/memory",
+		"/skill list", "/connect host", "/watch x", "/compact", "/autocompact 60%", "/memory",
 		"/mcp", "/hooks", "/ratelimit", "/limits", "/export", "/export f.jsonl",
 		"/moa hi", "/thinking", "/refine", "/verify", "/reflect",
 		"/worktree", "/schedule x", "/wait x", "/jobs", "/parked", "/resume x",

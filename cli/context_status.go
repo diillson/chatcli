@@ -116,7 +116,7 @@ func (cli *ChatCLI) buildContextStatusReport() contextStatusReport {
 	r.TotalTokens = r.PromptTokens + r.HistoryTokens
 	if r.Window > 0 {
 		r.ProjectedPct = float64(r.TotalTokens) / float64(r.Window) * 100
-		cfg := DefaultCompactConfig(cli.Provider, cli.Model)
+		cfg := cli.compactConfig(cli.Provider, cli.Model)
 		r.CompactBudgetTokens = int(float64(r.Window) * cfg.BudgetRatio)
 		r.CompactAtPct = cfg.BudgetRatio * 100
 	}

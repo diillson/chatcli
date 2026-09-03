@@ -60,6 +60,17 @@ type CompactConfig struct {
 	// over the integer default in the budget math.
 	CharsPerTokenPrecise float64
 
+	// ReservedChars is request weight that lives OUTSIDE the history slice
+	// (native tool definitions, wire overhead) and still counts against the
+	// model window. Subtracted from the history budget, floored at a quarter
+	// of it so a huge tool catalog can never starve the conversation.
+	ReservedChars int
+
+	// SummarizerClient, when set, serves the Level 2 structured summary
+	// instead of the session client — a cheaper/faster model configured via
+	// CHATCLI_COMPACT_MODEL. Nil keeps the session client.
+	SummarizerClient client.LLMClient
+
 	// MaxPayloadBytes caps the serialized request body size in bytes.
 	// When > 0, overrides the context-window budget if it would yield
 	// a larger payload than the corporate proxy / gateway accepts
@@ -191,6 +202,14 @@ func (hc *HistoryCompactor) CharBudget(cfg CompactConfig) int {
 		charsPerToken = cfg.CharsPerTokenPrecise
 	}
 	budget := int(float64(tokenBudget) * charsPerToken)
+	if cfg.ReservedChars > 0 {
+		floor := budget / 4
+		if budget-cfg.ReservedChars < floor {
+			budget = floor
+		} else {
+			budget -= cfg.ReservedChars
+		}
+	}
 
 	// Proxy / gateway payload cap. Leave 30% headroom for system prompt,
 	// tool definitions and JSON serialization overhead.
@@ -394,7 +413,11 @@ func (hc *HistoryCompactor) structuredSummarize(
 	summarizeCtx, cancel := context.WithTimeout(ctx, 10*time.Minute)
 	defer cancel()
 
-	response, err := llmClient.SendPrompt(summarizeCtx, prompt, summaryHistory, 0)
+	summarizer := llmClient
+	if cfg.SummarizerClient != nil {
+		summarizer = cfg.SummarizerClient
+	}
+	response, err := summarizer.SendPrompt(summarizeCtx, prompt, summaryHistory, 0)
 	if err != nil {
 		return nil, fmt.Errorf("structured summarization LLM call failed: %w", err)
 	}

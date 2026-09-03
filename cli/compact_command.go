@@ -46,7 +46,7 @@ func (cli *ChatCLI) handleCompactCommand(ctx context.Context, userInput string) 
 		}
 
 		// Automatic compaction
-		cfg := DefaultCompactConfig(cli.Provider, cli.Model)
+		cfg := cli.compactConfig(cli.Provider, cli.Model)
 		cfg.BudgetRatio = 0.50 // more aggressive for explicit /compact
 
 		// Live progress so the user knows what's happening, especially

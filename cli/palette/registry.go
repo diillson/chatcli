@@ -114,6 +114,7 @@ var rootCommands = []RootCommand{
 	{"/session", CatSession, "complete.root.session", ""},
 	{"/newsession", CatSession, "complete.root.newsession", ""},
 	{"/compact", CatSession, "complete.root.compact", ""},
+	{"/autocompact", CatSession, "complete.root.autocompact", ""},
 	{"/export", CatSession, "complete.root.export", ""},
 
 	// ── Context ─────────────────────────────────────────────────────────
