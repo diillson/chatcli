@@ -37,6 +37,7 @@ type lexicalIndex struct {
 	postings map[string]map[int]int // term → segment index → term frequency
 	docLen   []int                  // tokens per segment
 	avgLen   float64
+	mode     NormalizeMode // tokenization the postings were built with
 }
 
 // newLexicalIndex tokenizes every segment once and builds the inverted index.
@@ -44,10 +45,11 @@ func newLexicalIndex(segs []Segment) *lexicalIndex {
 	idx := &lexicalIndex{
 		postings: make(map[string]map[int]int),
 		docLen:   make([]int, len(segs)),
+		mode:     KnowledgeNormalizeMode(),
 	}
 	var total int
 	for i, s := range segs {
-		terms := tokenizeLexical(s.Content)
+		terms := tokenizeLexicalMode(s.Content, idx.mode)
 		idx.docLen[i] = len(terms)
 		total += len(terms)
 		for _, t := range terms {
@@ -69,7 +71,7 @@ func newLexicalIndex(segs []Segment) *lexicalIndex {
 // descending score order. Ties break by ascending segment index so results
 // are deterministic.
 func (l *lexicalIndex) search(query string, k int) []lexHit {
-	terms := tokenizeLexical(query)
+	terms := tokenizeLexicalMode(query, l.mode)
 	if len(terms) == 0 || len(l.docLen) == 0 || k <= 0 {
 		return nil
 	}
@@ -121,12 +123,18 @@ func (l *lexicalIndex) search(query string, k int) []lexHit {
 // split is case-based only (no letter↔digit boundary) so tokens like "s3" or
 // "oauth2" survive intact.
 func tokenizeLexical(text string) []string {
+	return tokenizeLexicalMode(text, KnowledgeNormalizeMode())
+}
+
+// tokenizeLexicalMode is tokenizeLexical with an explicit normalization
+// mode (index build and query must use the same one).
+func tokenizeLexicalMode(text string, mode NormalizeMode) []string {
 	fields := strings.FieldsFunc(text, func(r rune) bool {
 		return !unicode.IsLetter(r) && !unicode.IsDigit(r)
 	})
 	out := make([]string, 0, len(fields))
 	for _, f := range fields {
-		if full := strings.ToLower(f); len(full) > 1 {
+		if full := normalizeTerm(strings.ToLower(f), mode); len(full) > 1 {
 			out = append(out, full)
 		}
 		parts := splitCamelCase(f)
@@ -134,7 +142,7 @@ func tokenizeLexical(text string) []string {
 			continue // no case boundary — the whole field already covers it
 		}
 		for _, p := range parts {
-			if lp := strings.ToLower(p); len(lp) > 1 {
+			if lp := normalizeTerm(strings.ToLower(p), mode); len(lp) > 1 {
 				out = append(out, lp)
 			}
 		}

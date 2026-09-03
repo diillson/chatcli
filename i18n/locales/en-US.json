@@ -1355,7 +1355,7 @@
   "auth.logout.success": "Logout ok",
   "auth.error.unknown_subcommand": "Unknown subcommand. Use: status | login | logout",
   "memory.error.not_available": "Memory system not available.",
-  "memory.usage": "Usage: /memory [today|yesterday|week|longterm|list|load <date>|profile|profile set <k>=<v>|remember [cat] <fact>|forget <substr>|facts|topics|projects|stats|timeline [q]|compact|export [path]|import <path>|recall <query>|why|<YYYY-MM-DD>]",
+  "memory.usage": "Usage: /memory [today|yesterday|week|longterm|list|load <date>|profile|profile set <k>=<v>|remember [cat] <fact>|forget <substr>|facts|topics|projects|stats|timeline [q]|compact|<YYYY-MM-DD>]",
   "memory.no_notes_for": "No notes found for",
   "memory.notes_for": "Memory notes for",
   "memory.no_notes_week": "No notes in the last 7 days.",
@@ -3736,5 +3736,6 @@
   "mem.cmd.suggest.import": "Merge a memory export into this machine's memory",
   "mem.cmd.suggest.recall": "Dry-run auto-recall for a query, with the reasons",
   "mem.cmd.suggest.why": "Why the last turn recalled what it recalled",
-  "cost.cmd.daily_budget": "Today: %s of %s daily budget (%s)"
+  "cost.cmd.daily_budget": "Today: %s of %s daily budget (%s)",
+  "cost.cmd.embeddings": "Embeddings: %d call(s) · ~%s tokens (estimated from characters) · %s"
 }
