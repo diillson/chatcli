@@ -1017,6 +1017,7 @@
   "context.status.total_history": "History",
   "context.status.prefix_budget": "Prefix budget (½ window)",
   "context.status.degraded": "Folded for budget: %s",
+  "context.status.exact_history": "Exact history (provider count)",
   "context.status.total_projected": "Projected next request",
   "context.status.compact_at": "Auto-compact fires at",
   "context.status.compact_at_value": "%s of the window (≈%s tok of history)",

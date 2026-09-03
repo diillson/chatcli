@@ -47,6 +47,7 @@ import (
 	"github.com/diillson/chatcli/llm/client"
 	"github.com/diillson/chatcli/llm/manager"
 	"github.com/diillson/chatcli/llm/openaiassistant"
+	"github.com/diillson/chatcli/llm/tokenizer"
 	"github.com/diillson/chatcli/pkg/browser"
 	"github.com/diillson/chatcli/pkg/persona"
 	"github.com/diillson/chatcli/ui/kit"
@@ -313,8 +314,18 @@ type ChatCLI struct {
 
 	// Session compaction controls: /autocompact threshold override and the
 	// lazily resolved CHATCLI_COMPACT_MODEL summarizer (see compact_config.go).
-	autoCompact           autoCompactControl
-	compactSummarizer     client.LLMClient
+	autoCompact       autoCompactControl
+	compactSummarizer client.LLMClient
+	// compactSummarizerProvider/Model name the summarizer's route so the
+	// compactor can size its input against THAT model's window.
+	compactSummarizerProvider string
+	compactSummarizerModel    string
+	// lastPromptChars is the character weight of the last chat request as
+	// it went out (temp history + turn input): the calibrator's chars side.
+	lastPromptChars int
+	// calibrationTurns counts chat turns to pace exact (count_tokens)
+	// calibration.
+	calibrationTurns      int
 	compactSummarizerOnce sync.Once
 
 	// Session language-server pool behind the @lsp tool. Created lazily on
@@ -870,6 +881,11 @@ func NewChatCLI(ctx context.Context, manager manager.LLMManager, logger *zap.Log
 	cli.initTranscriptJournal("")
 	cli.initLLMAudit("repl")
 	cli.initCacheResourceCosting()
+	// GPT models count tokens locally: warm the vocabulary in the
+	// background so the first exact count is ready by the first turn.
+	if tokenizer.IsGPTModel(cli.Model) {
+		tokenizer.Prefetch(cli.Model)
+	}
 	cli.compressionLayer = compress.NewLayerFromEnv(filepath.Join(homeDir, ".chatcli"))
 	if err := cli.compressionLayer.StoreFallback(); err != nil {
 		// The layer already degraded to a bounded in-memory store; surface the

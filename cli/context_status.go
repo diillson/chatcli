@@ -12,9 +12,11 @@
 package cli
 
 import (
+	"context"
 	"fmt"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/diillson/chatcli/cli/compress"
 	"github.com/diillson/chatcli/i18n"
@@ -41,6 +43,9 @@ type historyStats struct {
 // contextStatusReport is the assembled view; kept as data so it can be
 // tested without capturing stdout.
 type contextStatusReport struct {
+	// ExactHistoryTokens is the provider-counted size of the live history
+	// (0 when the client cannot count).
+	ExactHistoryTokens  int
 	Provider, Model     string
 	Window              int
 	CharsPerToken       float64
@@ -95,7 +100,7 @@ func summarizeHistory(history []models.Message) historyStats {
 }
 
 // buildContextStatusReport assembles the report from live state.
-func (cli *ChatCLI) buildContextStatusReport() contextStatusReport {
+func (cli *ChatCLI) buildContextStatusReport(ctx context.Context) contextStatusReport {
 	r := contextStatusReport{Provider: cli.Provider, Model: cli.Model}
 	r.Window = catalog.GetContextWindow(cli.Provider, cli.Model)
 	r.CharsPerToken, r.CalibrationSamples = globalTokenCalibrator.CharsPerToken(cli.Provider, cli.Model)
@@ -127,6 +132,13 @@ func (cli *ChatCLI) buildContextStatusReport() contextStatusReport {
 			r.Degraded = r.Prompt.Degraded
 		}
 	}
+	// Exact count from the provider when it offers one (Anthropic
+	// count_tokens): the history as the model would bill it, and a fresh
+	// calibration sample as a side effect.
+	if exact, ok := cli.calibrateExactWithTimeout(ctx); ok {
+		r.ExactHistoryTokens = exact
+		r.CharsPerToken, r.CalibrationSamples = globalTokenCalibrator.CharsPerToken(cli.Provider, cli.Model)
+	}
 	if r.Window > 0 {
 		r.ProjectedPct = float64(r.TotalTokens) / float64(r.Window) * 100
 		cfg := cli.compactConfig(cli.Provider, cli.Model)
@@ -140,8 +152,8 @@ func (cli *ChatCLI) buildContextStatusReport() contextStatusReport {
 }
 
 // showContextStatus renders the inspector.
-func (cli *ChatCLI) showContextStatus() {
-	r := cli.buildContextStatusReport()
+func (cli *ChatCLI) showContextStatus(ctx context.Context) {
+	r := cli.buildContextStatusReport(ctx)
 	p := uiPrefix(ColorCyan)
 
 	fmt.Println(colorize(i18n.T("context.status.header"), ColorLime+ColorBold))
@@ -193,6 +205,9 @@ func (cli *ChatCLI) showContextStatus() {
 	fmt.Printf("\n  %s\n", colorize(i18n.T("context.status.totals_header"), ColorCyan))
 	fmt.Printf("    %s ≈%s tok\n", kitPad(i18n.T("context.status.total_prompt")), formatTokenCount(int64(r.PromptTokens)))
 	fmt.Printf("    %s ≈%s tok\n", kitPad(i18n.T("context.status.total_history")), formatTokenCount(int64(r.HistoryTokens)))
+	if r.ExactHistoryTokens > 0 {
+		fmt.Printf("    %s %s tok\n", kitPad(i18n.T("context.status.exact_history")), formatTokenCount(int64(r.ExactHistoryTokens)))
+	}
 	if r.Window > 0 {
 		fmt.Printf("    %s ≈%s tok (%s)\n", kitPad(i18n.T("context.status.total_projected")),
 			formatTokenCount(int64(r.TotalTokens)), colorize(fmt.Sprintf("%.0f%%", r.ProjectedPct), pctColor(r.ProjectedPct)))
@@ -237,4 +252,11 @@ func pctColor(pct float64) string {
 	default:
 		return ColorGreen
 	}
+}
+
+// calibrateExactWithTimeout is calibrateExact bounded for the inspector.
+func (cli *ChatCLI) calibrateExactWithTimeout(ctx context.Context) (int, bool) {
+	opCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	return cli.calibrateExact(opCtx)
 }

@@ -1017,6 +1017,7 @@
   "context.status.total_history": "Histórico",
   "context.status.prefix_budget": "Orçamento do prefixo (½ janela)",
   "context.status.degraded": "Dobrado por orçamento: %s",
+  "context.status.exact_history": "Histórico exato (contagem do provedor)",
   "context.status.total_projected": "Próxima requisição projetada",
   "context.status.compact_at": "Auto-compact dispara em",
   "context.status.compact_at_value": "%s da janela (≈%s tok de histórico)",

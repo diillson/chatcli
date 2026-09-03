@@ -6,6 +6,7 @@
 package cli
 
 import (
+	"context"
 	"math"
 	"strings"
 	"testing"
@@ -121,7 +122,7 @@ func TestBuildContextStatusReport_ProjectsWindowUse(t *testing.T) {
 		{Role: "user", Content: strings.Repeat("u", 2000)},
 		{Role: "assistant", Content: strings.Repeat("a", 2000)},
 	}
-	r := cli.buildContextStatusReport()
+	r := cli.buildContextStatusReport(context.Background())
 	if r.PromptTokens != 1100 || r.HistoryTokens != 1000 || r.TotalTokens != 2100 {
 		t.Fatalf("tokens = prompt %d history %d total %d", r.PromptTokens, r.HistoryTokens, r.TotalTokens)
 	}
@@ -132,6 +133,6 @@ func TestBuildContextStatusReport_ProjectsWindowUse(t *testing.T) {
 		t.Fatalf("compact budget = %d for window %d", r.CompactBudgetTokens, r.Window)
 	}
 	// Rendering must not panic on a populated report or on an empty session.
-	cli.showContextStatus()
-	(&ChatCLI{Provider: "OPENAI", Model: "gpt-5.6"}).showContextStatus()
+	cli.showContextStatus(context.Background())
+	(&ChatCLI{Provider: "OPENAI", Model: "gpt-5.6"}).showContextStatus(context.Background())
 }

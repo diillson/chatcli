@@ -70,6 +70,10 @@ type CompactConfig struct {
 	// instead of the session client — a cheaper/faster model configured via
 	// CHATCLI_COMPACT_MODEL. Nil keeps the session client.
 	SummarizerClient client.LLMClient
+	// SummarizerProvider/SummarizerModel name the summarizer's route so its
+	// input can be sized against its own window (empty = session model).
+	SummarizerProvider string
+	SummarizerModel    string
 
 	// MaxPayloadBytes caps the serialized request body size in bytes.
 	// When > 0, overrides the context-window budget if it would yield
@@ -395,17 +399,13 @@ func (hc *HistoryCompactor) structuredSummarize(
 		return history, nil
 	}
 
-	// Build input for the summarizer
-	var sb strings.Builder
-	for _, msg := range middleMessages {
-		content := msg.Content
-		if len(content) > 2000 {
-			content = content[:1500] + "\n... [truncated for summarization] ...\n" + content[len(content)-300:]
-		}
-		sb.WriteString(fmt.Sprintf("[%s]: %s\n\n", msg.Role, content))
-	}
+	// Build input for the summarizer: budgeted against the summarizer's
+	// own window, with CCR stubs restored to their originals when they fit
+	// (the summary then extracts from what actually happened, not from a
+	// one-line stub).
+	segment := renderSegmentForSummary(hc.compress, middleMessages, summarizerInputBudget(cfg))
 
-	prompt := structuredSummaryPrompt + "\n\nCONVERSATION SEGMENT TO EXTRACT FROM:\n\n" + sb.String()
+	prompt := structuredSummaryPrompt + "\n\nCONVERSATION SEGMENT TO EXTRACT FROM:\n\n" + segment
 
 	summaryHistory := []models.Message{
 		{Role: "user", Content: prompt},
@@ -452,6 +452,94 @@ func (hc *HistoryCompactor) structuredSummarize(
 	result = append(result, history[recentStart:]...)
 
 	return result, nil
+}
+
+// Summarizer input sizing: the segment text may take this share of the
+// summarizer model's window (chars), every message gets a fair allowance
+// of it (never below summaryMinPerMessage), and an over-long message keeps
+// its head and tail in summaryHeadShare proportion.
+const (
+	summaryInputShare    = 0.5
+	summaryInputFloor    = 20000
+	summaryMinPerMessage = 600
+	summaryHeadShare     = 0.75
+	summaryCutMarker     = "\n... [truncated for summarization] ...\n"
+)
+
+// summarizerInputBudget is the character budget for the segment text sent
+// to the summarizer: sized against the summarizer's window when one is
+// configured, the session model's otherwise.
+func summarizerInputBudget(cfg CompactConfig) int {
+	provider, model := cfg.SummarizerProvider, cfg.SummarizerModel
+	if provider == "" || model == "" {
+		provider, model = cfg.Provider, cfg.Model
+	}
+	window := catalog.GetContextWindow(provider, model)
+	cpt := float64(cfg.CharsPerToken)
+	if cfg.CharsPerTokenPrecise > 0 {
+		cpt = cfg.CharsPerTokenPrecise
+	}
+	if cpt <= 0 {
+		cpt = 4
+	}
+	budget := int(float64(window)*summaryInputShare*cpt) - len(structuredSummaryPrompt) - 2000
+	if budget < summaryInputFloor {
+		budget = summaryInputFloor
+	}
+	return budget
+}
+
+// renderSegmentForSummary renders a message segment for the summarizer
+// within budget. Each message gets budget/len (at least
+// summaryMinPerMessage); a message that is a CCR stub is restored from the
+// archive when the original fits its allowance; anything longer keeps its
+// head and tail. Native tool calls are named so the summary can list the
+// commands executed.
+func renderSegmentForSummary(layer *compress.Layer, msgs []models.Message, budget int) string {
+	if len(msgs) == 0 {
+		return ""
+	}
+	allowance := budget / len(msgs)
+	if allowance < summaryMinPerMessage {
+		allowance = summaryMinPerMessage
+	}
+	var sb strings.Builder
+	for _, msg := range msgs {
+		content := restoreStubForSummary(layer, msg.Content, allowance)
+		if len(content) > allowance {
+			head := int(float64(allowance) * summaryHeadShare)
+			tail := allowance - head - len(summaryCutMarker)
+			if tail < 0 {
+				tail = 0
+			}
+			content = content[:head] + summaryCutMarker + content[len(content)-tail:]
+		}
+		if len(msg.ToolCalls) > 0 {
+			names := make([]string, 0, len(msg.ToolCalls))
+			for _, tc := range msg.ToolCalls {
+				names = append(names, tc.Name)
+			}
+			content += "\n[tool_calls: " + strings.Join(names, ", ") + "]"
+		}
+		sb.WriteString(fmt.Sprintf("[%s]: %s\n\n", msg.Role, content))
+	}
+	return sb.String()
+}
+
+// restoreStubForSummary swaps a CCR stub for the archived original when the
+// original fits the allowance; otherwise the stub (which already carries a
+// preview) stands.
+func restoreStubForSummary(layer *compress.Layer, content string, allowance int) string {
+	if layer == nil {
+		return content
+	}
+	for _, key := range compress.ExtractKeys(content) {
+		full, ok := layer.Recall(key)
+		if ok && len(full) > len(content) && len(full) <= allowance {
+			return full
+		}
+	}
+	return content
 }
 
 // renderMessagesForArchive renders a message segment for verbatim CCR

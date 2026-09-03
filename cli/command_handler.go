@@ -365,7 +365,7 @@ func (ch *CommandHandler) handleContextCommand(ctx context.Context, userInput st
 	// "status" reads live session state (history, last assembled prompt,
 	// calibration, cache) that the store-scoped ContextHandler never sees.
 	if fields := strings.Fields(userInput); len(fields) >= 2 && strings.EqualFold(fields[1], "status") {
-		ch.cli.showContextStatus()
+		ch.cli.showContextStatus(ctx)
 		return
 	}
 
