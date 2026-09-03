@@ -174,34 +174,46 @@ func (cli *ChatCLI) externalMemoryStore(ctx context.Context, session string, msg
 	}()
 }
 
-// ExternalSummarizer is the context-engine seam: given the rendered
-// segment, the character budget and an optional user instruction, return
-// the summary that replaces the segment.
-type ExternalSummarizer func(ctx context.Context, segment string, budgetChars int, instruction string) (string, error)
+// ContextEngine is the context-engine seam: given the rendered segment,
+// the character budget and an optional user instruction, return the
+// summary that replaces the segment. An interface (not a func) so the
+// config structs carrying it stay comparable.
+type ContextEngine interface {
+	Compact(ctx context.Context, segment string, budgetChars int, instruction string) (string, error)
+}
 
-// externalSummarizer returns the context engine's compact function when
-// one is configured, nil otherwise. The compactor calls it with the
+// mcpContextEngine binds ContextEngine to one MCP server's context_compact tool.
+type mcpContextEngine struct {
+	cli    *ChatCLI
+	server string
+}
+
+// Compact implements ContextEngine.
+func (e *mcpContextEngine) Compact(ctx context.Context, segment string, budgetChars int, instruction string) (string, error) {
+	out, err := e.cli.callExtTool(ctx, e.server, extContextCompactTool, map[string]interface{}{
+		"segment":      segment,
+		"budget_chars": budgetChars,
+		"instruction":  instruction,
+	}, extCompactTimeout)
+	if err != nil {
+		return "", err
+	}
+	if out == "" {
+		return "", errors.New("context engine returned an empty summary")
+	}
+	return out, nil
+}
+
+// externalSummarizer returns the configured context engine, nil when the
+// embedded summarizer is in charge. The compactor calls it with the
 // rendered segment and its character budget and falls back to the
 // embedded summarizer on error or empty output.
-func (cli *ChatCLI) externalSummarizer() ExternalSummarizer {
+func (cli *ChatCLI) externalSummarizer() ContextEngine {
 	server, ok := contextEngineServer()
 	if !ok || cli == nil || cli.extCaller() == nil {
 		return nil
 	}
-	return func(ctx context.Context, segment string, budgetChars int, instruction string) (string, error) {
-		out, err := cli.callExtTool(ctx, server, extContextCompactTool, map[string]interface{}{
-			"segment":      segment,
-			"budget_chars": budgetChars,
-			"instruction":  instruction,
-		}, extCompactTimeout)
-		if err != nil {
-			return "", err
-		}
-		if out == "" {
-			return "", errors.New("context engine returned an empty summary")
-		}
-		return out, nil
-	}
+	return &mcpContextEngine{cli: cli, server: server}
 }
 
 // extForwardState tracks what the memory worker already forwarded to the

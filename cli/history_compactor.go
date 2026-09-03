@@ -78,7 +78,7 @@ type CompactConfig struct {
 	// ExternalSummarizer, when set, is the context engine that produces
 	// the Level 2 summary (CHATCLI_CONTEXT_ENGINE); an error or empty
 	// output falls back to the embedded summarizer.
-	ExternalSummarizer ExternalSummarizer
+	ExternalSummarizer ContextEngine
 
 	// MaxPayloadBytes caps the serialized request body size in bytes.
 	// When > 0, overrides the context-window budget if it would yield
@@ -430,7 +430,7 @@ func (hc *HistoryCompactor) structuredSummarize(
 	var response string
 	var err error
 	if cfg.ExternalSummarizer != nil {
-		response, err = cfg.ExternalSummarizer(summarizeCtx, segment, summarizerInputBudget(cfg), "")
+		response, err = cfg.ExternalSummarizer.Compact(summarizeCtx, segment, summarizerInputBudget(cfg), "")
 		if err != nil && hc.logger != nil {
 			hc.logger.Warn("context engine failed; falling back to the embedded summarizer", zap.Error(err))
 		}

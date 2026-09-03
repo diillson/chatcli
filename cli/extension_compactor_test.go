@@ -43,13 +43,13 @@ func TestStructuredSummarize_ContextEngineReplacesAndFallsBack(t *testing.T) {
 	cfg.MinKeepRecent = 4
 
 	var gotSegment string
-	cfg.ExternalSummarizer = func(_ context.Context, segment string, budget int, instruction string) (string, error) {
+	cfg.ExternalSummarizer = engineFunc(func(_ context.Context, segment string, budget int, instruction string) (string, error) {
 		gotSegment = segment
 		if budget <= 0 || instruction != "" {
 			t.Fatalf("budget=%d instruction=%q", budget, instruction)
 		}
 		return "ENGINE SUMMARY", nil
-	}
+	})
 	out, err := hc.structuredSummarize(context.Background(), compactableHistory(), stub, cfg)
 	if err != nil {
 		t.Fatal(err)
@@ -58,9 +58,16 @@ func TestStructuredSummarize_ContextEngineReplacesAndFallsBack(t *testing.T) {
 		t.Fatalf("engine must produce the summary without the embedded call: calls=%d first=%q", stub.calls, out[0].Content[:40])
 	}
 
-	cfg.ExternalSummarizer = func(context.Context, string, int, string) (string, error) { return "", errors.New("engine down") }
+	cfg.ExternalSummarizer = engineFunc(func(context.Context, string, int, string) (string, error) { return "", errors.New("engine down") })
 	out, err = hc.structuredSummarize(context.Background(), compactableHistory(), stub, cfg)
 	if err != nil || stub.calls != 1 || !strings.Contains(out[0].Content, "EMBEDDED SUMMARY") {
 		t.Fatalf("engine failure must fall back: err=%v calls=%d", err, stub.calls)
 	}
+}
+
+// engineFunc adapts a func to ContextEngine for tests.
+type engineFunc func(ctx context.Context, segment string, budget int, instruction string) (string, error)
+
+func (f engineFunc) Compact(ctx context.Context, segment string, budget int, instruction string) (string, error) {
+	return f(ctx, segment, budget, instruction)
 }

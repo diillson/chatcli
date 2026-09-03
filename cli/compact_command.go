@@ -161,7 +161,7 @@ CONVERSATION TO COMPACT:
 	var response string
 	var err error
 	if ext := cli.externalSummarizer(); ext != nil {
-		response, err = ext(ctx, sb.String(), summarizerInputBudget(cli.compactConfig(cli.Provider, cli.Model)), instruction)
+		response, err = ext.Compact(ctx, sb.String(), summarizerInputBudget(cli.compactConfig(cli.Provider, cli.Model)), instruction)
 		if err != nil {
 			cli.logger.Warn("context engine failed on guided compaction; using the session model", zap.Error(err))
 		}

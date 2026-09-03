@@ -147,16 +147,16 @@ func TestExternalSummarizer_ConfiguredAndFallbackSignals(t *testing.T) {
 	if ext == nil {
 		t.Fatal("configured engine must yield a summarizer")
 	}
-	out, err := ext(context.Background(), "[user]: hello", 5000, "keep names")
+	out, err := ext.Compact(context.Background(), "[user]: hello", 5000, "keep names")
 	if err != nil || out != "SUMMARY" || f.args[0]["instruction"] != "keep names" || f.args[0]["budget_chars"] != 5000 {
 		t.Fatalf("out=%q err=%v args=%v", out, err, f.args[0])
 	}
 	f.answers["engine/context_compact"] = ""
-	if _, err := ext(context.Background(), "x", 1, ""); err == nil {
+	if _, err := ext.Compact(context.Background(), "x", 1, ""); err == nil {
 		t.Fatal("an empty summary must be an error so the compactor falls back")
 	}
 	f.fail["engine/context_compact"] = true
-	if _, err := ext(context.Background(), "x", 1, ""); err == nil {
+	if _, err := ext.Compact(context.Background(), "x", 1, ""); err == nil {
 		t.Fatal("a failing engine must surface the error")
 	}
 }
