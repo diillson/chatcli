@@ -21,6 +21,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/andybalholm/brotli"
 	"github.com/diillson/chatcli/auth"
 	"github.com/diillson/chatcli/config"
 	"github.com/diillson/chatcli/i18n"
@@ -29,6 +30,7 @@ import (
 	"github.com/diillson/chatcli/llm/internal/visionwire"
 	"github.com/diillson/chatcli/models"
 	"github.com/diillson/chatcli/utils"
+	"github.com/klauspost/compress/zstd"
 	"go.uber.org/zap"
 )
 
@@ -50,7 +52,7 @@ type ClaudeClient struct {
 }
 
 const (
-	oauthUserAgent         = "claude-cli/2.1.2 (external, cli)"
+	oauthUserAgent         = auth.ClaudeCodeUserAgent
 	oauthAnthropicBeta     = "oauth-2025-04-20,interleaved-thinking-2025-05-14,claude-code-20250219,fine-grained-tool-streaming-2025-05-14"
 	oauthSonnet1MBeta      = "context-1m-2025-08-07"
 	oauthBaseSystemPrompt  = "You are Claude Code, Anthropic's official CLI for Claude."
@@ -454,12 +456,23 @@ func (c *ClaudeClient) processStreamResponse(resp *http.Response, captureUsage b
 				Type string `json:"type"`
 				Text string `json:"text"`
 			} `json:"delta"`
+			Error *struct {
+				Type    string `json:"type"`
+				Message string `json:"message"`
+			} `json:"error"`
 		}
 		if jsonErr := json.Unmarshal([]byte(data), &evt); jsonErr != nil {
 			if err == io.EOF {
 				break
 			}
 			continue
+		}
+		if evt.Type == "error" && evt.Error != nil {
+			// The API delivers errors that occur after the 200 headers went
+			// out (overloaded, rate limit, internal) as an SSE event. Surface
+			// them as the APIError they are so the retry policy applies and
+			// the user sees the provider's message, not "no text".
+			return "", streamErrorToAPIError(evt.Error.Type, evt.Error.Message)
 		}
 		if evt.Type == "content_block_delta" && evt.Delta != nil && evt.Delta.Type == "text_delta" {
 			out.WriteString(evt.Delta.Text)
@@ -830,6 +843,25 @@ func decodeResponseBody(resp *http.Response) (io.ReadCloser, error) {
 				return resp.Body.Close()
 			},
 		}, nil
+	case "br":
+		// The OAuth fingerprint advertises br/zstd (claude-cli parity) and
+		// Cloudflare takes the offer on non-stream endpoints (/v1/models).
+		return &multiCloser{
+			reader: brotli.NewReader(resp.Body),
+			close:  resp.Body.Close,
+		}, nil
+	case "zstd":
+		zr, err := zstd.NewReader(resp.Body)
+		if err != nil {
+			return nil, err
+		}
+		return &multiCloser{
+			reader: zr,
+			close: func() error {
+				zr.Close()
+				return resp.Body.Close()
+			},
+		}, nil
 	case "deflate":
 		fr := flate.NewReader(resp.Body)
 		return &multiCloser{
@@ -843,4 +875,33 @@ func decodeResponseBody(resp *http.Response) (io.ReadCloser, error) {
 		_ = resp.Body.Close()
 		return nil, fmt.Errorf("%s", i18n.T("llm.error.content_encoding_unsupported", encoding))
 	}
+}
+
+// streamErrorToAPIError maps an SSE error event to the HTTP status the
+// same failure carries on a non-streaming call, so utils.IsTemporaryError
+// retries overloads, rate limits and server errors exactly as before.
+func streamErrorToAPIError(errType, message string) error {
+	status := http.StatusInternalServerError
+	switch errType {
+	case "overloaded_error":
+		status = 529
+	case "rate_limit_error":
+		status = http.StatusTooManyRequests
+	case "authentication_error":
+		status = http.StatusUnauthorized
+	case "permission_error":
+		status = http.StatusForbidden
+	case "not_found_error":
+		status = http.StatusNotFound
+	case "request_too_large":
+		status = http.StatusRequestEntityTooLarge
+	case "invalid_request_error":
+		status = http.StatusBadRequest
+	case "billing_error":
+		status = http.StatusPaymentRequired
+	}
+	if message == "" {
+		message = errType
+	}
+	return &utils.APIError{StatusCode: status, Message: utils.SanitizeSensitiveText(errType + ": " + message)}
 }

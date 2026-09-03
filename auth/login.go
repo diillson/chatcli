@@ -86,7 +86,7 @@ func exchangeAnthropicToken(ctx context.Context, tokenURL string, payload map[st
 		return nil, err
 	}
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("User-Agent", "claude-cli/2.1.2 (external, cli)")
+	req.Header.Set("User-Agent", ClaudeCodeUserAgent)
 	req.Header.Set("Accept", "application/json")
 
 	return doTokenExchange(hc, req)
@@ -131,18 +131,24 @@ func doTokenExchange(hc *http.Client, req *http.Request) (*OAuthTokenResponse, e
 // fetchAnthropicEmail calls the OAuth profile endpoint to retrieve the user's
 // email. Best-effort: returns "" on any failure (logged at debug level).
 func fetchAnthropicEmail(ctx context.Context, accessToken string, logger *zap.Logger) string {
+	return fetchAnthropicEmailFrom(ctx, AnthropicProfileURL, accessToken, logger)
+}
+
+// fetchAnthropicEmailFrom is fetchAnthropicEmail against an explicit
+// profile endpoint (tests point it at a local server).
+func fetchAnthropicEmailFrom(ctx context.Context, profileURL, accessToken string, logger *zap.Logger) string {
 	if accessToken == "" {
 		return ""
 	}
 	hc := &http.Client{Timeout: 15 * time.Second}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, AnthropicProfileURL, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, profileURL, nil)
 	if err != nil {
 		logger.Debug("anthropic profile fetch: request build failed", zap.Error(err))
 		return ""
 	}
 	req.Header.Set("Authorization", "Bearer "+accessToken)
 	req.Header.Set("Accept", "application/json")
-	req.Header.Set("User-Agent", "claude-cli/2.1.2 (external, cli)")
+	req.Header.Set("User-Agent", ClaudeCodeUserAgent)
 
 	resp, err := hc.Do(req) //#nosec G704 -- public Anthropic profile endpoint
 	if err != nil {
