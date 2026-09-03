@@ -372,21 +372,11 @@ func parseClaudeToolResponse(body string, logger *zap.Logger) (*models.LLMRespon
 	response.Content = strings.Join(textParts, "\n")
 
 	// Extract usage
-	if usage, ok := result["usage"].(map[string]interface{}); ok {
-		response.Usage = &models.UsageInfo{IsReal: true}
-		if it, ok := usage["input_tokens"].(float64); ok {
-			response.Usage.PromptTokens = int(it)
-		}
-		if ot, ok := usage["output_tokens"].(float64); ok {
-			response.Usage.CompletionTokens = int(ot)
-		}
-		if cc, ok := usage["cache_creation_input_tokens"].(float64); ok {
-			response.Usage.CacheCreationInputTokens = int(cc)
-		}
-		if cr, ok := usage["cache_read_input_tokens"].(float64); ok {
-			response.Usage.CacheReadInputTokens = int(cr)
-		}
-		response.Usage.TotalTokens = response.Usage.PromptTokens + response.Usage.CompletionTokens
+	if _, ok := result["usage"].(map[string]interface{}); ok {
+		// One parser for both surfaces: the 1-hour cache-write share
+		// (cache_creation.ephemeral_1h_input_tokens) is billed at 2x and
+		// was dropped here, under-pricing coder sessions on the hour TTL.
+		response.Usage = client.ParseAnthropicUsage(result)
 		// Store in global tracker so LastUsage() works
 		RecordClaudeUsage(response.Usage)
 	}

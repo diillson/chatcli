@@ -14,6 +14,7 @@ package cli
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -26,8 +27,9 @@ import (
 
 // retentionReport is what one boot pass removed.
 type retentionReport struct {
-	Parks int
-	Costs int
+	Transcripts int // tenant transcripts removed (the shared set prunes on open)
+	Parks       int
+	Costs       int
 }
 
 // runRetentionPass expires park snapshots and cost snapshots older than the
@@ -50,6 +52,13 @@ func (cli *ChatCLI) runRetentionPass() retentionReport {
 	}
 	if dir := costStoreDir(); dir != "" {
 		rep.Costs = pruneCostSnapshotsOlderThan(dir, cutoff)
+	}
+	// Tenant store sets (gateway isolation) follow the same policy.
+	if cli != nil && cli.stateRoot != "" {
+		for _, root := range tenantRoots(cli.stateRoot) {
+			rep.Costs += pruneCostSnapshotsOlderThan(filepath.Join(root, "costs"), cutoff)
+			rep.Transcripts += pruneTranscripts(filepath.Join(root, transcriptDirName), ttl)
+		}
 	}
 	if cli != nil && cli.logger != nil && (rep.Parks > 0 || rep.Costs > 0) {
 		cli.logger.Info("retention pass", zap.Int("parks_removed", rep.Parks), zap.Int("cost_snapshots_removed", rep.Costs))

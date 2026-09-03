@@ -95,13 +95,40 @@ func TestApplyManaged_MissingFileIsNotAnError(t *testing.T) {
 	}
 }
 
-func TestManagedConfigPath_EnvOverride(t *testing.T) {
+func TestManagedConfigPaths_EnvAddsASecondFileNeverReplacesTheSystemOne(t *testing.T) {
 	t.Setenv(ManagedConfigEnv, "/tmp/x.env")
-	if ManagedConfigPath() != "/tmp/x.env" {
-		t.Fatal("env override must win")
+	paths := ManagedConfigPaths()
+	if len(paths) != 2 || paths[0] != ManagedConfigPath() || paths[1] != "/tmp/x.env" {
+		t.Fatalf("paths = %v", paths)
 	}
 	t.Setenv(ManagedConfigEnv, "")
-	if p := ManagedConfigPath(); p == "" {
-		t.Fatal("a platform default must exist")
+	if p := ManagedConfigPaths(); len(p) != 1 || p[0] == "" {
+		t.Fatalf("a platform default must exist: %v", p)
+	}
+}
+
+func TestApplyManaged_SystemLockedKeysCannotBeOverriddenByTheEnvFile(t *testing.T) {
+	// The system file is a fixed path we cannot write in a test, so the
+	// merge logic is exercised directly: entries from a later file never
+	// redefine a key the first (system) file locked.
+	dir := t.TempDir()
+	sys := filepath.Join(dir, "system.env")
+	extra := filepath.Join(dir, "extra.env")
+	if err := os.WriteFile(sys, []byte("!CHATCLI_TEST_POLICY=locked\nCHATCLI_TEST_DEF=sys\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(extra, []byte("CHATCLI_TEST_POLICY=hijack\nCHATCLI_TEST_DEF=extra\nCHATCLI_TEST_NEW=1\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	merged := mergeManagedFiles([]string{sys, extra})
+	got := map[string]ManagedEntry{}
+	for _, e := range merged {
+		got[e.Key] = e
+	}
+	if got["CHATCLI_TEST_POLICY"].Value != "locked" || !got["CHATCLI_TEST_POLICY"].Locked {
+		t.Fatalf("system lock must survive: %+v", got["CHATCLI_TEST_POLICY"])
+	}
+	if got["CHATCLI_TEST_DEF"].Value != "extra" || got["CHATCLI_TEST_NEW"].Value != "1" {
+		t.Fatalf("unlocked defaults may be redefined and new keys added: %+v", got)
 	}
 }

@@ -48,6 +48,7 @@ func (cli *ChatCLI) HandleOneShotOrFatal(ctx context.Context, opts *Options) boo
 	if !opts.PromptFlagUsed && !HasStdin() {
 		return false
 	}
+	cli.SetAuditSurface("oneshot")
 
 	// Aplica overrides de provider/model
 	if err := cli.ApplyOverrides(ctx, cli.manager, opts.Provider, opts.Model); err != nil {

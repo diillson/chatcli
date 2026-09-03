@@ -61,11 +61,11 @@ var (
 	managedPresent bool
 )
 
-// ManagedConfigPath returns the managed file location for this process.
+// ManagedConfigPath returns the system managed file location for this
+// platform. CHATCLI_MANAGED_CONFIG names an ADDITIONAL file (see
+// ManagedConfigPaths); it can never replace the system file, so a shell
+// variable cannot switch off a locked policy.
 func ManagedConfigPath() string {
-	if p := strings.TrimSpace(os.Getenv(ManagedConfigEnv)); p != "" {
-		return p
-	}
 	if runtime.GOOS == "windows" {
 		base := os.Getenv("ProgramData")
 		if base == "" {
@@ -138,24 +138,81 @@ func unquote(v string) string {
 	return v
 }
 
-// ApplyManaged loads the managed file and applies it to the process
+// ManagedConfigPaths lists the managed files in precedence order: the
+// system file first, then the CHATCLI_MANAGED_CONFIG file when set. A
+// key the system file LOCKS cannot be redefined by the second file.
+func ManagedConfigPaths() []string {
+	paths := []string{ManagedConfigPath()}
+	if p := strings.TrimSpace(os.Getenv(ManagedConfigEnv)); p != "" && p != paths[0] {
+		paths = append(paths, p)
+	}
+	return paths
+}
+
+// mergeManagedFiles reads the given files in precedence order and merges
+// their entries: a later file may redefine unlocked keys and add new
+// ones, but never a key the FIRST (system) file locked. Missing files
+// are skipped; the returned error is the first read failure.
+func mergeManagedFiles(paths []string) []ManagedEntry {
+	merged, _, _, _ := mergeManagedFilesReport(paths)
+	return merged
+}
+
+func mergeManagedFilesReport(paths []string) (entries []ManagedEntry, read []string, present bool, err error) {
+	var merged []ManagedEntry
+	index := map[string]int{}
+	systemLocked := map[string]bool{}
+	for i, p := range paths {
+		data, rerr := os.ReadFile(p) // #nosec G304 -- fixed system path or operator-provided CHATCLI_MANAGED_CONFIG
+		if rerr != nil {
+			if !os.IsNotExist(rerr) && err == nil {
+				err = rerr
+			}
+			continue
+		}
+		read = append(read, p)
+		for _, e := range ParseManaged(string(data)) {
+			if i > 0 && systemLocked[e.Key] {
+				continue // the system policy is not overridable
+			}
+			if j, ok := index[e.Key]; ok {
+				merged[j] = e
+			} else {
+				index[e.Key] = len(merged)
+				merged = append(merged, e)
+			}
+			if i == 0 && e.Locked {
+				systemLocked[e.Key] = true
+			}
+		}
+	}
+	return merged, read, len(read) > 0, err
+}
+
+// loadManagedEntries merges the configured managed files (system first).
+func loadManagedEntries() (entries []ManagedEntry, present bool, path string, err error) {
+	entries, read, present, err := mergeManagedFilesReport(ManagedConfigPaths())
+	path = strings.Join(read, "; ")
+	if path == "" {
+		path = ManagedConfigPath()
+	}
+	return entries, present, path, err
+}
+
+// ApplyManaged loads the managed files and applies them to the process
 // environment: locked entries always, defaults only where the variable
 // is unset. Safe to call again (reload): locked values are re-asserted,
 // defaults re-filled. A missing file is not an error.
 func ApplyManaged() ManagedReport {
-	rep := ManagedReport{Path: ManagedConfigPath()}
-	data, err := os.ReadFile(rep.Path) // #nosec G304 -- fixed system path or operator-provided CHATCLI_MANAGED_CONFIG
-	if err != nil {
-		if !os.IsNotExist(err) {
-			rep.Err = err
-		}
+	entries, present, path, err := loadManagedEntries()
+	rep := ManagedReport{Path: path, Err: err}
+	if !present {
 		managedMu.Lock()
 		managedEntries, managedPath, managedPresent = nil, rep.Path, false
 		managedMu.Unlock()
 		return rep
 	}
 	rep.Present = true
-	entries := ParseManaged(string(data))
 	byKey := make(map[string]ManagedEntry, len(entries))
 	for _, e := range entries {
 		byKey[e.Key] = e

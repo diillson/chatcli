@@ -66,6 +66,7 @@ func runRPC(kind string, mgr manager.LLMManager, logger *zap.Logger) error {
 	if err != nil {
 		logger.Warn("rpcserve: ChatCLI init failed; agent/coder/tools disabled", zap.Error(err))
 	}
+	chatCLI.SetAuditSurface("acp")
 	if chatCLI != nil {
 		// stdin carries the JSON-RPC protocol: any interactive confirmation
 		// would consume protocol frames and hang the run. Unattended mode

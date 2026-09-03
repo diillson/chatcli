@@ -38,6 +38,7 @@ func RunGateway(args []string, mgr manager.LLMManager, logger *zap.Logger) error
 	if err != nil {
 		return err
 	}
+	chatCLI.SetAuditSurface("gateway")
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()

@@ -480,6 +480,7 @@
   "session.rpc.live_messages": "Conversa ativa: %d mensagem(ns).",
   "session.rpc.forked": "Fork criado em '%s' — esta sessão agora está vinculada a ela.",
   "gateway.session.unavailable": "Gestão de sessão indisponível no momento (sem store de sessões ou hub).",
+  "gateway.tenant_unavailable": "Este chat não conseguiu obter seu store isolado; a solicitação não foi processada. Peça ao operador para verificar o log do gateway.",
   "gateway.session.usage": "Comandos de sessão: /session attach <nome> · /session detach · /session status · /session save <nome> · /session list · /session new",
   "session.error_save": "Erro ao salvar sessão: %v",
   "session.save_success": "Sessão '%s' salva com sucesso.",

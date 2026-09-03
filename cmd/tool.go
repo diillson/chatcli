@@ -71,6 +71,7 @@ func RunTool(ctx context.Context, args []string, mgr manager.LLMManager, logger 
 	if err != nil {
 		return fmt.Errorf("chatcli init failed: %w", err)
 	}
+	chatCLI.SetAuditSurface("tool")
 	// One-shot, non-interactive: nothing may block reading stdin.
 	chatCLI.SetUnattended(true)
 	return runToolWith(ctx, chatCLI, args, os.Stdout)

@@ -197,6 +197,7 @@ func RunConnect(ctx context.Context, args []string, llmMgr manager.LLMManager, l
 	if err != nil {
 		return fmt.Errorf("%s: %w", i18n.T("cmd.connect.init_failed"), err)
 	}
+	chatCLI.SetAuditSurface("remote")
 
 	// Override the LLM client with the remote client
 	chatCLI.Client = remoteClient

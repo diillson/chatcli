@@ -571,7 +571,14 @@ func (cli *ChatCLI) gatewayAgentFunc(sessions *hubSessions, transcriber transcri
 		// store set (sessions, memory, contexts, CCR, costs, transcript and
 		// live history) is installed for the turn and the shared set is
 		// restored afterwards. No-op for the shared principal.
-		if leave := cli.enterGatewayTenant(ctx, sessions, msg.Platform, msg.UserID); leave != nil {
+		leave, tenantErr := cli.enterGatewayTenant(ctx, sessions, msg.Platform, msg.UserID)
+		if tenantErr != nil {
+			// Isolation is a promise: a principal whose store set cannot be
+			// built is answered with an error, never served from the
+			// shared stores.
+			return i18n.T("gateway.tenant_unavailable"), nil
+		}
+		if leave != nil {
 			defer leave()
 		}
 
