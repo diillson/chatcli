@@ -1355,7 +1355,7 @@
   "auth.logout.success": "Logout realizado",
   "auth.error.unknown_subcommand": "Subcomando desconhecido. Use: status | login | logout",
   "memory.error.not_available": "Sistema de memória não disponível.",
-  "memory.usage": "Uso: /memory [today|yesterday|week|longterm|list|load <data>|profile|profile set <k>=<v>|remember [cat] <fato>|forget <trecho>|facts|topics|projects|stats|timeline [q]|compact|export [caminho]|import <caminho>|recall <consulta>|why|<YYYY-MM-DD>]",
+  "memory.usage": "Uso: /memory [today|yesterday|week|longterm|list|load <data>|profile|profile set <k>=<v>|remember [cat] <fato>|forget <trecho>|facts|topics|projects|stats|timeline [q]|compact|<AAAA-MM-DD>]",
   "memory.no_notes_for": "Nenhuma nota encontrada para",
   "memory.notes_for": "Notas de memória para",
   "memory.no_notes_week": "Nenhuma nota nos últimos 7 dias.",
@@ -3736,5 +3736,6 @@
   "mem.cmd.suggest.import": "Mescla uma exportação de memória na memória desta máquina",
   "mem.cmd.suggest.recall": "Simula o auto-recall para uma consulta, com os motivos",
   "mem.cmd.suggest.why": "Por que o último turno lembrou o que lembrou",
-  "cost.cmd.daily_budget": "Hoje: %s de %s do budget diário (%s)"
+  "cost.cmd.daily_budget": "Hoje: %s de %s do budget diário (%s)",
+  "cost.cmd.embeddings": "Embeddings: %d chamada(s) · ~%s tokens (estimados por caracteres) · %s"
 }

@@ -24,6 +24,12 @@ import (
 
 // Manager gerencia contextos de forma thread-safe
 type Manager struct {
+	// retrievedBudgetChars bounds the retrieved passages per turn (0 = default).
+	retrievedBudgetChars int
+	// warming single-flights WarmContext per context id.
+	warmMu           sync.Mutex
+	warming          map[string]bool
+	warmCtx          context.Context
 	contexts         map[string]*FileContext      // ID -> FileContext
 	attachedContexts map[string][]AttachedContext // SessionID -> AttachedContexts
 	Storage          *Storage
@@ -914,39 +920,202 @@ func (m *Manager) BuildRetrievedContextMessages(ctx context.Context, sessionID, 
 		return attachments[i].Priority < attachments[j].Priority
 	})
 
+	// One character budget for everything retrieved this turn, shared by
+	// the attachments in priority order: top-K × attachments used to grow
+	// without bound. Passages already emitted by a higher-priority
+	// attachment (same id, or same content at the same place) are dropped.
+	budget := m.retrievedBudget()
+	used := 0
+	seen := make(map[string]struct{}, 64)
 	messages := make([]models.Message, 0, len(wanted))
 	for _, a := range attachments {
 		fc, ok := wanted[a.ContextID]
 		if !ok {
 			continue
 		}
-		var block string
-		if fc.Mode == ModeKnowledge {
-			segs, err := engine.RetrieveHybrid(ctx, fc, query, a.RetrievalTopK)
+		if used >= budget {
+			m.logger.Info("retrieved block budget exhausted; skipping attachment", zap.String("context", fc.Name), zap.Int("budget_chars", budget))
+			break
+		}
+		var segs []Segment
+		var err error
+		knowledge := fc.Mode == ModeKnowledge
+		if knowledge {
+			segs, err = engine.RetrieveHybrid(ctx, fc, query, a.RetrievalTopK)
 			if err != nil {
 				m.logger.Warn("knowledge retrieval failed; skipping",
 					zap.String("context", fc.Name), zap.Error(err))
 				continue
 			}
-			block = FormatKnowledgeSegmentsBlock(fc.Name, segs)
 		} else {
 			if !engine.Enabled() {
 				continue // --rag sem provider: degradou para conteúdo inteiro no prefixo
 			}
-			segs, err := engine.Retrieve(ctx, fc, query, a.RetrievalTopK)
+			segs, err = engine.Retrieve(ctx, fc, query, a.RetrievalTopK)
 			if err != nil {
 				m.logger.Warn("context semantic retrieval failed; skipping",
 					zap.String("context", fc.Name), zap.Error(err))
 				continue
 			}
+		}
+		segs = dedupSegments(segs, seen)
+		segs = fitSegments(segs, budget-used)
+		if len(segs) == 0 {
+			continue
+		}
+		var block string
+		if knowledge {
+			block = FormatKnowledgeSegmentsBlock(fc.Name, segs)
+		} else {
 			block = FormatSegmentsBlock(fc.Name, query, segs)
 		}
 		if block == "" {
 			continue
 		}
+		used += len(block)
 		messages = append(messages, models.Message{Role: "system", Content: block})
 	}
 	return messages, nil
+}
+
+// warmAfterAttach starts the embedding warm-up for attachments that will
+// be retrieved per turn (knowledge contexts and --rag attachments).
+func (m *Manager) warmAfterAttach(contextID string, opts AttachOptions) {
+	m.mu.RLock()
+	fc := m.contexts[contextID]
+	m.mu.RUnlock()
+	if fc == nil || (fc.Mode != ModeKnowledge && opts.RetrievalTopK <= 0) {
+		return
+	}
+	m.WarmContext(contextID)
+}
+
+// warmBase is the root context of background warm-ups started from
+// callers that carry no context of their own (attach is synchronous and
+// context-free by API); the warm-up is bounded by the manager's lifetime,
+// not by any request.
+var warmBase = context.Background()
+
+// DefaultRetrievedBudgetChars bounds the retrieved passages of one turn
+// across every attachment (~6K tokens): enough for eight full passages,
+// small next to any model window.
+const DefaultRetrievedBudgetChars = 24_000
+
+// SetRetrievedBudget overrides the per-turn retrieved-passages budget
+// (chars); <= 0 restores the default.
+func (m *Manager) SetRetrievedBudget(chars int) {
+	m.mu.Lock()
+	m.retrievedBudgetChars = chars
+	m.mu.Unlock()
+}
+
+func (m *Manager) retrievedBudget() int {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	if m.retrievedBudgetChars > 0 {
+		return m.retrievedBudgetChars
+	}
+	return DefaultRetrievedBudgetChars
+}
+
+// dedupSegments drops passages already emitted this turn (by id, or by
+// content at the same file position) and records the survivors.
+func dedupSegments(segs []Segment, seen map[string]struct{}) []Segment {
+	out := segs[:0:0]
+	for _, s := range segs {
+		keys := []string{s.ID, s.FilePath + "\x00" + itoa(s.StartLine) + "\x00" + s.Content}
+		dup := false
+		for _, k := range keys {
+			if _, ok := seen[k]; ok {
+				dup = true
+				break
+			}
+		}
+		if dup {
+			continue
+		}
+		for _, k := range keys {
+			seen[k] = struct{}{}
+		}
+		out = append(out, s)
+	}
+	return out
+}
+
+// fitSegments keeps the leading passages that fit in remaining chars
+// (rendering overhead included); the first passage always fits when the
+// budget is not already exhausted, truncated to the remaining room.
+func fitSegments(segs []Segment, remaining int) []Segment {
+	if remaining <= 0 {
+		return nil
+	}
+	const overhead = 96 // header line + fences per passage
+	out := make([]Segment, 0, len(segs))
+	for _, s := range segs {
+		cost := len(s.Content) + overhead
+		if cost > remaining {
+			if len(out) == 0 && remaining > overhead+200 {
+				s.Content = s.Content[:remaining-overhead-1] + "…"
+				out = append(out, s)
+			}
+			break
+		}
+		remaining -= cost
+		out = append(out, s)
+	}
+	return out
+}
+
+// WarmContext embeds the passages of a context that the vector index does
+// not hold yet, in the background (single-flight per context). It is what
+// attach and refresh call so the first query after them does not pay the
+// corpus embedding in the turn. The work is bounded by the manager's
+// lifetime, not by any request. No-op without a provider.
+func (m *Manager) WarmContext(contextID string) {
+	m.warmMu.Lock()
+	if m.warmCtx == nil {
+		m.warmCtx = warmBase
+	}
+	ctx := m.warmCtx
+	m.warmMu.Unlock()
+	m.warmContextCtx(ctx, contextID)
+}
+
+// warmContextCtx is WarmContext bounded by ctx (refresh passes a
+// cancellation-free derivative of its own).
+func (m *Manager) warmContextCtx(ctx context.Context, contextID string) {
+	m.mu.RLock()
+	engine := m.retrieval
+	fc := m.contexts[contextID]
+	m.mu.RUnlock()
+	if engine == nil || !engine.Enabled() || fc == nil {
+		return
+	}
+	m.warmMu.Lock()
+	if m.warming == nil {
+		m.warming = map[string]bool{}
+	}
+	if m.warming[contextID] {
+		m.warmMu.Unlock()
+		return
+	}
+	m.warming[contextID] = true
+	m.warmMu.Unlock()
+	go func() {
+		defer func() {
+			m.warmMu.Lock()
+			delete(m.warming, contextID)
+			m.warmMu.Unlock()
+		}()
+		n, err := engine.Warm(ctx, fc)
+		if err != nil {
+			m.logger.Warn("knowledge: embedding warm-up stopped", zap.String("context", fc.Name), zap.Int("embedded", n), zap.Error(err))
+			return
+		}
+		if n > 0 {
+			m.logger.Info("knowledge: embeddings warmed", zap.String("context", fc.Name), zap.Int("embedded", n))
+		}
+	}()
 }
 
 // GetMetrics retorna métricas sobre os contextos
@@ -1113,6 +1282,7 @@ func (m *Manager) loadContexts() error {
 // CORREÇÃO 1: Função refatorada para usar a estrutura de dados correta do Manager.
 // AttachContextWithOptions anexa contexto com opções avançadas
 func (m *Manager) AttachContextWithOptions(sessionID, contextID string, opts AttachOptions) error {
+	defer m.warmAfterAttach(contextID, opts)
 	m.mu.Lock()
 	defer m.mu.Unlock()
 

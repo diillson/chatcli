@@ -177,10 +177,11 @@ var envDefaults = map[string]envDefault{
 	// is purely opt-in (empty == null provider, no embeddings); we register
 	// the model/dimensions defaults so /config can show what each provider
 	// would use if selected.
-	"CHATCLI_EMBED_PROVIDER":   {Value: "(off)", Source: "llm/embedding/factory.go (empty == null)"},
-	"CHATCLI_KNOWLEDGE_RERANK": {Value: "off", Source: "cli/knowledge_rerank.go (off|mmr|llm; rerank stage over hybrid knowledge retrieval)"},
-	"CHATCLI_EMBED_MODEL":      {Value: "(provider-specific)", Source: "voyage-4 / text-embedding-3-small / gemini-embedding-2 / amazon.titan-embed-text-v2:0"},
-	"CHATCLI_EMBED_DIMENSIONS": {Value: "(provider-default)", Source: "openai 1536, google 3072 (128-3072), titan-v2 1024 (256/512/1024), titan-v1 1536, cohere-v3 1024, cohere-v4 1536, nova-mme 3072 (256/384/1024/3072)"},
+	"CHATCLI_EMBED_PROVIDER":      {Value: "(off)", Source: "llm/embedding/factory.go (empty == null; voyage|openai|google|bedrock|ollama)"},
+	"CHATCLI_KNOWLEDGE_RERANK":    {Value: "off", Source: "cli/knowledge_rerank.go (off|mmr|llm; rerank stage over hybrid knowledge retrieval)"},
+	"CHATCLI_KNOWLEDGE_NORMALIZE": {Value: "off", Source: "cli/ctxmgr/lexical_normalize.go (off|fold|stem; accent folding and light pt/en stemming for the BM25 index; changing it reindexes)"},
+	"CHATCLI_EMBED_MODEL":         {Value: "(provider-specific)", Source: "voyage-4 / text-embedding-3-small / gemini-embedding-2 / amazon.titan-embed-text-v2:0 / nomic-embed-text (ollama, OLLAMA_HOST)"},
+	"CHATCLI_EMBED_DIMENSIONS":    {Value: "(provider-default)", Source: "openai 1536, google 3072 (128-3072), titan-v2 1024 (256/512/1024), titan-v1 1536, cohere-v3 1024, cohere-v4 1536, nova-mme 3072 (256/384/1024/3072)"},
 
 	// ─── Cost / budget ───────────────────────────────────────────
 	"CHATCLI_SESSION_BUDGET_USD":  {Value: "(no budget)", Source: "cost_tracker.go"},

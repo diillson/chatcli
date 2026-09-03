@@ -440,10 +440,54 @@ func (e *RetrievalEngine) buildEntry(fc *FileContext, fp string) *lexCacheEntry 
 	return entry
 }
 
+// warmBatch bounds one embedding request during warm-up.
+const warmBatch = 64
+
+// Warm embeds every passage of fc missing from its vector index, in
+// batches, incrementally: passages whose ids (content hashes) are already
+// stored are skipped, so a refresh only embeds what changed. Returns how
+// many passages were embedded; stops at the first failure or when ctx
+// ends.
+func (e *RetrievalEngine) Warm(ctx context.Context, fc *FileContext) (int, error) {
+	if !e.Enabled() || fc == nil {
+		return 0, nil
+	}
+	entry := e.entryFor(fc)
+	if entry.vec == nil || len(entry.segs) == 0 {
+		return 0, nil
+	}
+	ids := make([]string, 0, len(entry.segs))
+	byID := make(map[string]string, len(entry.segs))
+	for _, s := range entry.segs {
+		ids = append(ids, s.ID)
+		byID[s.ID] = s.Content
+	}
+	missing := entry.vec.MissingFor(ids)
+	embedded := 0
+	for start := 0; start < len(missing); start += warmBatch {
+		if err := ctx.Err(); err != nil {
+			return embedded, err
+		}
+		end := start + warmBatch
+		if end > len(missing) {
+			end = len(missing)
+		}
+		batch := make(map[string]string, end-start)
+		for _, id := range missing[start:end] {
+			batch[id] = byID[id]
+		}
+		if err := entry.vec.Upsert(ctx, batch); err != nil {
+			return embedded, err
+		}
+		embedded += len(batch)
+	}
+	return embedded, nil
+}
+
 // contextFingerprint identifies one revision of a context's content; caches
 // keyed by it invalidate exactly when the context is updated.
 func contextFingerprint(fc *FileContext) string {
-	return fmt.Sprintf("%s|%d|%d", fc.UpdatedAt.UTC().Format("20060102T150405.000"), fc.FileCount, fc.TotalSize)
+	return fmt.Sprintf("%s|%d|%d|%s", fc.UpdatedAt.UTC().Format("20060102T150405.000"), fc.FileCount, fc.TotalSize, KnowledgeNormalizeMode())
 }
 
 // normalizeHits min-max-normalizes BM25 scores to [0,1] by segment index.
@@ -494,7 +538,8 @@ func FormatSegmentsBlock(contextName, query string, segs []Segment) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "🔎 CONTEXT (semantic retrieval): %s — %d relevant passage(s)\n", contextName, len(segs))
 	b.WriteString("Only the passages most relevant to the current request are shown; ")
-	b.WriteString("ask for more or attach without --rag to see the full context.\n\n")
+	b.WriteString("ask for more or attach without --rag to see the full context. ")
+	b.WriteString(citationHint)
 	writeSegments(&b, segs)
 	return b.String()
 }
@@ -509,16 +554,25 @@ func FormatKnowledgeSegmentsBlock(contextName string, segs []Segment) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "📚 KNOWLEDGE (retrieved): %s — %d relevant passage(s)\n", contextName, len(segs))
 	b.WriteString("Auto-retrieved from the knowledge base for the current request; ")
-	b.WriteString("the full corpus stays out of context and is searched per turn.\n\n")
+	b.WriteString("the full corpus stays out of context and is searched per turn. ")
+	b.WriteString(citationHint)
 	writeSegments(&b, segs)
 	return b.String()
+}
+
+// citationHint tells the model how to reference a passage.
+const citationHint = "When you rely on a passage, cite it as [path:start-end] exactly as shown on its header line.\n\n"
+
+// Citation renders the structured reference of a passage: [path:l1-l2].
+func Citation(s Segment) string {
+	return fmt.Sprintf("[%s:%d-%d]", s.FilePath, s.StartLine, s.EndLine)
 }
 
 // writeSegments renders the shared passage list: source annotation, position
 // and fenced content, so the model can cite and the user can trace injections.
 func writeSegments(b *strings.Builder, segs []Segment) {
 	for i, s := range segs {
-		fmt.Fprintf(b, "📄 %s (lines %d-%d) [%d/%d]\n", s.FilePath, s.StartLine, s.EndLine, i+1, len(segs))
+		fmt.Fprintf(b, "📄 %s (lines %d-%d) [%d/%d] cite as %s\n", s.FilePath, s.StartLine, s.EndLine, i+1, len(segs), Citation(s))
 		b.WriteString("```\n")
 		b.WriteString(s.Content)
 		b.WriteString("\n```\n\n")

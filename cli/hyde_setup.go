@@ -52,7 +52,9 @@ func (cli *ChatCLI) buildEmbeddingProviderLocked() embedding.Provider {
 			zap.Error(err))
 		return embedding.NewNull()
 	}
-	return p
+	// Every Embed call is metered into the cost tracker.
+	cli.installEmbeddingUsageObserver()
+	return embedding.Instrument(p)
 }
 
 // refreshEmbeddingProvider rebuilds the embedding provider from the

@@ -263,6 +263,10 @@ func (cli *ChatCLI) renderCostSummary() {
 		fmt.Println(p + "    " + colorize(i18n.T("cost.cmd.cache_storage",
 			ct.cacheResources, fmt.Sprintf("$%.4f", ct.cacheStorageUSD)), ColorGray))
 	}
+	if ct.embeddingCalls > 0 {
+		fmt.Println(p + "    " + colorize(i18n.T("cost.cmd.embeddings",
+			ct.embeddingCalls, formatTokenCount(ct.embeddingTokens), fmt.Sprintf("$%.4f", ct.embeddingCostUSD)), ColorGray))
+	}
 	if ct.compactions > 0 {
 		fmt.Println(p + "    " + colorize(i18n.T("cost.cmd.compactions",
 			ct.compactions, ct.compactionsLevel3, fmt.Sprintf("$%.4f", ct.compactionCostUSD)), ColorGray))

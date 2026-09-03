@@ -16,8 +16,8 @@ import (
 )
 
 // NewByName returns a provider by short name. Supported names: "voyage",
-// "openai", "google", "bedrock", "null", "" (== "null"). Unknown names
-// return ErrUnknownProvider.
+// "openai", "google", "bedrock", "ollama" (keyless, local), "null", ""
+// (== "null"). Unknown names return ErrUnknownProvider.
 //
 // Required env vars per provider:
 //   - voyage: VOYAGE_API_KEY (model: CHATCLI_EMBED_MODEL or "voyage-4")
@@ -26,6 +26,8 @@ import (
 //   - google: GEMINI_API_KEY / GOOGLEAI_API_KEY / GOOGLE_API_KEY (model:
 //     CHATCLI_EMBED_MODEL or "gemini-embedding-2"; dim:
 //     CHATCLI_EMBED_DIMENSIONS, 128–3072 via Matryoshka, default 3072)
+//   - ollama: no key; OLLAMA_HOST (default http://localhost:11434), model:
+//     CHATCLI_EMBED_MODEL or "nomic-embed-text"; dimension learned on first use.
 //   - bedrock: AWS credential chain (AWS_PROFILE / AWS_ACCESS_KEY_ID /
 //     IAM role); model: CHATCLI_EMBED_MODEL or "amazon.titan-embed-text-v2:0";
 //     dim: CHATCLI_EMBED_DIMENSIONS (Titan v2: 256/512/1024; Nova MME:
@@ -54,6 +56,14 @@ func NewByName(name string) (Provider, error) {
 		}
 		key := firstNonEmpty(os.Getenv("GEMINI_API_KEY"), os.Getenv("GOOGLEAI_API_KEY"), os.Getenv("GOOGLE_API_KEY"))
 		return NewGoogle(key, os.Getenv("CHATCLI_EMBED_MODEL"), dim)
+	case "ollama", "local":
+		dim := 0
+		if v := os.Getenv("CHATCLI_EMBED_DIMENSIONS"); v != "" {
+			if n, err := strconv.Atoi(v); err == nil {
+				dim = n
+			}
+		}
+		return NewOllama(ollamaHostFromEnv(), os.Getenv("CHATCLI_EMBED_MODEL"), dim)
 	case "bedrock":
 		dim := 0
 		if v := os.Getenv("CHATCLI_EMBED_DIMENSIONS"); v != "" {

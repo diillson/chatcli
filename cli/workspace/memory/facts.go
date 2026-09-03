@@ -26,11 +26,16 @@ import (
 // and applies tombstones (facts explicitly forgotten by either process)
 // before rewriting the file. See mergeFromDiskLocked.
 type FactIndex struct {
-	facts  map[string]*Fact // keyed by ID
-	mu     sync.RWMutex
-	path   string // path to memory_index.json
-	logger *zap.Logger
-	config Config
+	// rev counts mutations; dfCache is the token document-frequency table
+	// for that revision (IDF weights in computeRelevance).
+	rev, dfRev, dfCount int
+	dfCache             map[string]int
+	dfMu                sync.Mutex
+	facts               map[string]*Fact // keyed by ID
+	mu                  sync.RWMutex
+	path                string // path to memory_index.json
+	logger              *zap.Logger
+	config              Config
 
 	// tombstones records explicit deletions (id → when) so reconciliation
 	// never resurrects a forgotten fact from the shared file — and so the
@@ -774,21 +779,105 @@ func (fi *FactIndex) computeRelevance(f *Fact, keywords []string) float64 {
 	contentToks := allTokens(f.Content)
 	tagToks := allTokens(strings.Join(f.Tags, " "))
 
-	var score float64
-	for _, kw := range keywords {
+	// Keywords are weighted by their rarity across the fact index (an
+	// IDF-style weight normalized around 1.0 and clamped), so a term that
+	// appears in half the facts no longer counts as much as a term that
+	// names one of them. The weights are normalized back to the
+	// keyword-count scale the lexical floors are defined on.
+	weights := fi.keywordWeightsLocked(keywords)
+	var score, total float64
+	for i, kw := range keywords {
 		kwLower := strings.ToLower(strings.TrimSpace(kw))
 		if kwLower == "" {
 			continue
 		}
+		w := weights[i]
+		total += w
 		if anyTokenMatches(contentToks, kwLower) {
-			score += 1.0
+			score += w
 		}
 		if anyTokenMatches(tagToks, kwLower) {
-			score += 0.5
+			score += 0.5 * w
 		}
 	}
-	// Normalize by number of keywords
-	return score / float64(len(keywords))
+	if total == 0 {
+		return 0
+	}
+	// Normalize by the (weighted) number of keywords
+	return score / total
+}
+
+// keywordWeightsLocked returns one IDF-style weight per keyword: log-scaled
+// rarity over the facts' token vocabulary, normalized so the mean is 1 and
+// clamped to [0.5, 2]. Facts unseen by the vocabulary (few facts, empty
+// index) weigh 1. The vocabulary is rebuilt lazily when the index changed.
+func (fi *FactIndex) keywordWeightsLocked(keywords []string) []float64 {
+	w := make([]float64, len(keywords))
+	for i := range w {
+		w[i] = 1
+	}
+	n := len(fi.facts)
+	if n < 4 {
+		return w
+	}
+	df := fi.docFreqLocked()
+	var sum float64
+	var count int
+	for i, kw := range keywords {
+		kwLower := strings.ToLower(strings.TrimSpace(kw))
+		if kwLower == "" {
+			continue
+		}
+		hits := df[kwLower]
+		if hits == 0 && utf8.RuneCountInString(kwLower) >= minRunesForPrefixMatch {
+			for tok, c := range df {
+				if strings.HasPrefix(tok, kwLower) {
+					hits += c
+				}
+			}
+		}
+		w[i] = math.Log(1 + float64(n)/float64(hits+1))
+		sum += w[i]
+		count++
+	}
+	if count == 0 || sum == 0 {
+		return w
+	}
+	mean := sum / float64(count)
+	for i := range w {
+		v := w[i] / mean
+		if v < 0.5 {
+			v = 0.5
+		} else if v > 2 {
+			v = 2
+		}
+		w[i] = v
+	}
+	return w
+}
+
+// docFreqLocked returns token → number of facts containing it, cached per
+// index revision (every mutation bumps fi.rev in persistLocked). The cache
+// has its own mutex: relevance runs under the index read lock, which
+// several searches hold at once, so the cache write must not race.
+func (fi *FactIndex) docFreqLocked() map[string]int {
+	fi.dfMu.Lock()
+	defer fi.dfMu.Unlock()
+	if fi.dfCache != nil && fi.dfRev == fi.rev && fi.dfCount == len(fi.facts) {
+		return fi.dfCache
+	}
+	df := make(map[string]int, 256)
+	for _, f := range fi.facts {
+		seen := map[string]bool{}
+		for _, tok := range allTokens(f.Content + " " + strings.Join(f.Tags, " ")) {
+			if !seen[tok] {
+				seen[tok] = true
+				df[tok]++
+			}
+		}
+	}
+	fi.dfCache, fi.dfRev, fi.dfCount = df, fi.rev, len(fi.facts)
+	return df
 }
 
 // allTokens returns every lowercased letter/digit run of content — unfiltered
@@ -951,6 +1040,7 @@ func legacyConfidence(accessCount int) float64 {
 }
 
 func (fi *FactIndex) persistLocked() {
+	fi.rev++
 	// Reconcile with the shared file first: adopt facts the other process
 	// persisted and honor tombstones from either side, so a rewrite never
 	// erases the other process's learning.

@@ -247,6 +247,10 @@ func (m *Manager) RefreshContext(ctx context.Context, name string) (*FileContext
 		return fc, rep, fmt.Errorf("erro ao salvar contexto: %w", err)
 	}
 	m.logger.Info("context refreshed", zap.String("context", name), zap.String("report", rep.String()))
+	// Changed passages get new ids; embed them now rather than in the next turn.
+	if fc.Mode == ModeKnowledge {
+		m.warmContextCtx(context.WithoutCancel(ctx), fc.ID)
+	}
 	return fc, rep, nil
 }
 

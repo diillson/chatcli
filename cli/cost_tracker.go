@@ -112,6 +112,9 @@ type SessionCostData struct {
 	CacheResources         int     `json:"cache_resources,omitempty"`
 	CacheStorageTokenHours float64 `json:"cache_storage_token_hours,omitempty"`
 	CacheStorageCostUSD    float64 `json:"cache_storage_cost_usd,omitempty"`
+	EmbeddingCalls         int     `json:"embedding_calls,omitempty"`
+	EmbeddingTokens        int64   `json:"embedding_tokens,omitempty"`
+	EmbeddingCostUSD       float64 `json:"embedding_cost_usd,omitempty"`
 	Compactions            int     `json:"compactions,omitempty"`
 	CompactionsLevel3      int     `json:"compactions_level3,omitempty"`
 	CompactionCostUSD      float64 `json:"compaction_cost_usd,omitempty"`
@@ -169,6 +172,9 @@ type CostTracker struct {
 	cacheStorageTokenHours float64
 	cacheStorageUSD        float64
 	compactions            int
+	embeddingCalls         int
+	embeddingTokens        int64
+	embeddingCostUSD       float64
 	compactionsLevel3      int
 	compactionCostUSD      float64
 
@@ -466,6 +472,9 @@ func (ct *CostTracker) snapshotLocked() SessionCostData {
 		CacheResources:         ct.cacheResources,
 		CacheStorageTokenHours: ct.cacheStorageTokenHours,
 		CacheStorageCostUSD:    ct.cacheStorageUSD,
+		EmbeddingCalls:         ct.embeddingCalls,
+		EmbeddingTokens:        ct.embeddingTokens,
+		EmbeddingCostUSD:       ct.embeddingCostUSD,
 		Compactions:            ct.compactions,
 		CompactionsLevel3:      ct.compactionsLevel3,
 		CompactionCostUSD:      ct.compactionCostUSD,
@@ -619,6 +628,9 @@ func (ct *CostTracker) RestoreSession(sessionID string) error {
 	ct.cacheResources = data.CacheResources
 	ct.cacheStorageTokenHours = data.CacheStorageTokenHours
 	ct.cacheStorageUSD = data.CacheStorageCostUSD
+	ct.embeddingCalls = data.EmbeddingCalls
+	ct.embeddingTokens = data.EmbeddingTokens
+	ct.embeddingCostUSD = data.EmbeddingCostUSD
 	ct.compactions = data.Compactions
 	ct.compactionsLevel3 = data.CompactionsLevel3
 	ct.compactionCostUSD = data.CompactionCostUSD
@@ -795,6 +807,7 @@ func (ct *CostTracker) recomputeAggregates() {
 		ct.totalCostUSD += rec.TotalCostUSD
 	}
 	ct.totalCostUSD += ct.cacheStorageUSD
+	ct.totalCostUSD += ct.embeddingCostUSD
 	ct.accrueDailyLocked()
 }
 
