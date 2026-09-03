@@ -2,6 +2,7 @@ package models
 
 import (
 	"strings"
+	"time"
 
 	"github.com/diillson/chatcli/config"
 )
@@ -169,6 +170,18 @@ type SessionData struct {
 	// was saved, so loading it re-attaches the same contexts (same chunks
 	// and retrieval mode). Attach state was process-local before.
 	Attachments []SessionAttachment `json:"attachments,omitempty"`
+	// Checkpoints are the /rewind points of the conversation, persisted as
+	// ordered message hashes resolved against the transcript journal on
+	// load (the journal keeps every message ever seen; the session file
+	// stays small).
+	Checkpoints []SessionCheckpoint `json:"checkpoints,omitempty"`
+}
+
+// SessionCheckpoint is one persisted /rewind point.
+type SessionCheckpoint struct {
+	Timestamp time.Time `json:"ts"`
+	Label     string    `json:"label,omitempty"`
+	Hashes    []string  `json:"hashes"`
 }
 
 // SessionAttachment mirrors one /context attach record for persistence.

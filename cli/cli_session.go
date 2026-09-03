@@ -221,6 +221,7 @@ func (cli *ChatCLI) handleLoadSession(ctx context.Context, name string) {
 func (cli *ChatCLI) clearAllHistories() {
 	cli.history = make([]models.Message, 0)
 	cli.checkpoints = nil
+	cli.preCompaction = nil
 }
 
 // clearConversation is /clear: the conversation restarts empty while the
@@ -255,6 +256,7 @@ func (cli *ChatCLI) buildSessionData() *SessionData {
 		ChatHistory:  cli.history,
 		TranscriptID: cli.transcriptID(),
 		Attachments:  cli.sessionAttachments(),
+		Checkpoints:  cli.checkpointRecords(),
 	}
 }
 
@@ -282,7 +284,8 @@ func (cli *ChatCLI) restoreSessionData(sd *SessionData) {
 		}
 	}
 
-	cli.checkpoints = nil
+	cli.checkpoints = cli.restoreCheckpoints(sd.Checkpoints)
+	cli.preCompaction = nil
 }
 
 // handleSearchSessions runs a full-text search across saved sessions and
@@ -500,8 +503,10 @@ func (cli *ChatCLI) handleDeleteSession(ctx context.Context, name string) {
 func (cli *ChatCLI) handleForkSession(newName string) {
 	// Build session data from current state
 	sd := &SessionData{
-		Version:     2,
-		ChatHistory: make([]models.Message, len(cli.history)),
+		Version:      2,
+		ChatHistory:  make([]models.Message, len(cli.history)),
+		TranscriptID: cli.transcriptID(),
+		Checkpoints:  cli.checkpointRecords(),
 	}
 	copy(sd.ChatHistory, cli.history)
 

@@ -28,10 +28,15 @@ const (
 	compactTriggerRecovery = "recovery"
 )
 
-// firePreCompact runs the PreCompact hooks synchronously (they may want to
-// snapshot the history before it changes).
-func (cli *ChatCLI) firePreCompact(ctx context.Context, trigger string) {
-	if cli == nil || cli.hookManager == nil {
+// beforeCompaction runs right before any rewrite of the history: it keeps
+// the pre-compaction history for /rewind compact and runs the PreCompact
+// hooks synchronously (they may want to snapshot the transcript too).
+func (cli *ChatCLI) beforeCompaction(ctx context.Context, trigger string) {
+	if cli == nil {
+		return
+	}
+	cli.rememberPreCompaction()
+	if cli.hookManager == nil {
 		return
 	}
 	cli.hookManager.Fire(ctx, cli.compactionEvent(hooks.EventPreCompact, trigger))

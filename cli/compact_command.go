@@ -35,7 +35,7 @@ func (cli *ChatCLI) handleCompactCommand(ctx context.Context, userInput string) 
 	defer cancel()
 
 	if instruction == "" {
-		cli.firePreCompact(ctx, compactTriggerManual)
+		cli.beforeCompaction(ctx, compactTriggerManual)
 
 		// Automatic compaction
 		cfg := cli.compactConfig(cli.Provider, cli.Model)
@@ -136,7 +136,7 @@ CONVERSATION TO COMPACT:
 		colorize(instruction, ColorCyan),
 	)
 
-	cli.firePreCompact(ctx, compactTriggerManual)
+	cli.beforeCompaction(ctx, compactTriggerManual)
 
 	// Same route and bound as the automatic pipeline: the configured
 	// summarizer (CHATCLI_COMPACT_SUMMARIZER_*) when there is one, else the

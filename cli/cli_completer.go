@@ -991,8 +991,25 @@ func (cli *ChatCLI) getSessionSuggestions(d prompt.Document) []prompt.Suggest {
 			{Text: "attach", Description: i18n.T("complete.session.sub_attach")},
 			{Text: "detach", Description: i18n.T("complete.session.sub_detach")},
 			{Text: "status", Description: i18n.T("complete.session.sub_status")},
+			{Text: "export", Description: i18n.T("complete.session.sub_export")},
+			{Text: "transcript", Description: i18n.T("complete.session.sub_transcript")},
 		}
 		return prompt.FilterHasPrefix(suggestions, d.GetWordBeforeCursor(), true)
+	}
+
+	if args[1] == "export" && (len(args) == 2 || (len(args) == 3 && !strings.HasSuffix(line, " "))) {
+		return prompt.FilterHasPrefix([]prompt.Suggest{
+			{Text: "md", Description: i18n.T("complete.session.export_md")},
+			{Text: "jsonl", Description: i18n.T("complete.session.export_jsonl")},
+		}, d.GetWordBeforeCursor(), true)
+	}
+	if args[1] == "transcript" && (len(args) == 2 || (len(args) == 3 && !strings.HasSuffix(line, " "))) {
+		return prompt.FilterHasPrefix([]prompt.Suggest{
+			{Text: "search", Description: i18n.T("complete.session.transcript_search")},
+			{Text: "show", Description: i18n.T("complete.session.transcript_show")},
+			{Text: "export", Description: i18n.T("complete.session.sub_export")},
+			{Text: "stats", Description: i18n.T("complete.session.transcript_stats")},
+		}, d.GetWordBeforeCursor(), true)
 	}
 
 	// A partir daqui, já temos subcomando definido

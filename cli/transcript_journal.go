@@ -54,17 +54,22 @@ type transcriptEvent struct {
 	Message *models.Message `json:"message,omitempty"`
 	Before  int             `json:"before,omitempty"` // rewrite: messages before
 	After   int             `json:"after,omitempty"`  // rewrite: messages after
+	// Hashes (rewrite events) is the ordered hash list of the history the
+	// rewrite replaced, so the pre-rewrite conversation can be rebuilt
+	// from the journaled messages (/rewind compact after a resume).
+	Hashes []string `json:"hashes,omitempty"`
 }
 
 // transcriptJournal appends the live history to one file per session.
 type transcriptJournal struct {
-	mu        sync.Mutex
-	id        string
-	path      string
-	lastCount int
-	lastHash  string          // hash of the last journaled message
-	seen      map[string]bool // hashes journaled so far (rewrite dedup)
-	disabled  bool
+	mu         sync.Mutex
+	id         string
+	path       string
+	lastCount  int
+	lastHash   string          // hash of the last journaled message
+	lastHashes []string        // ordered hashes of the last synced history
+	seen       map[string]bool // hashes journaled so far (rewrite dedup)
+	disabled   bool
 }
 
 // transcriptEnabled honors CHATCLI_SESSION_TRANSCRIPT (default on).
@@ -141,7 +146,7 @@ func (j *transcriptJournal) Sync(history []models.Message) error {
 	var events []transcriptEvent
 	now := time.Now()
 	if !extends && j.lastCount > 0 {
-		events = append(events, transcriptEvent{TS: now, Kind: "rewrite", Before: j.lastCount, After: len(history)})
+		events = append(events, transcriptEvent{TS: now, Kind: "rewrite", Before: j.lastCount, After: len(history), Hashes: append([]string(nil), j.lastHashes...)})
 	}
 	start := 0
 	if extends {
@@ -162,8 +167,12 @@ func (j *transcriptJournal) Sync(history []models.Message) error {
 		}
 	}
 	j.lastCount = len(history)
+	j.lastHashes = make([]string, len(history))
+	for i := range history {
+		j.lastHashes[i] = messageHash(history[i])
+	}
 	if len(history) > 0 {
-		j.lastHash = messageHash(history[len(history)-1])
+		j.lastHash = j.lastHashes[len(history)-1]
 	} else {
 		j.lastHash = ""
 	}
@@ -211,12 +220,66 @@ func (j *transcriptJournal) appendEvents(events []transcriptEvent) error {
 // readTranscript returns every journaled message in order (rewrite events
 // are skipped: the journal is the full record, not the compacted view).
 func readTranscript(path string) ([]models.Message, error) {
+	events, err := readTranscriptEvents(path)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]models.Message, 0, len(events))
+	for _, ev := range events {
+		if ev.Kind == "msg" && ev.Message != nil {
+			out = append(out, *ev.Message)
+		}
+	}
+	return out, nil
+}
+
+// transcriptIndex maps message hash → message over the journaled
+// messages (first occurrence wins; the journal dedups on append anyway).
+func transcriptIndex(events []transcriptEvent) map[string]models.Message {
+	idx := make(map[string]models.Message, len(events))
+	for _, ev := range events {
+		if ev.Kind != "msg" || ev.Message == nil {
+			continue
+		}
+		h := messageHash(*ev.Message)
+		if _, ok := idx[h]; !ok {
+			idx[h] = *ev.Message
+		}
+	}
+	return idx
+}
+
+// resolveHashes rebuilds a history from ordered hashes; ok is false when
+// any hash is missing from the index (the journal was pruned or rotated).
+func resolveHashes(idx map[string]models.Message, hashes []string) ([]models.Message, bool) {
+	out := make([]models.Message, 0, len(hashes))
+	for _, h := range hashes {
+		m, ok := idx[h]
+		if !ok {
+			return nil, false
+		}
+		out = append(out, m)
+	}
+	return out, true
+}
+
+// transcriptEvents reads the active journal's events ("" path when the
+// journal is off).
+func (cli *ChatCLI) transcriptEvents() ([]transcriptEvent, error) {
+	if cli == nil || cli.transcript == nil || cli.transcript.disabled || cli.transcript.path == "" {
+		return nil, os.ErrNotExist
+	}
+	return readTranscriptEvents(cli.transcript.path)
+}
+
+// readTranscriptEvents returns every journal event in order.
+func readTranscriptEvents(path string) ([]transcriptEvent, error) {
 	f, err := os.Open(path) // #nosec G304 -- journal path under ~/.chatcli/transcripts
 	if err != nil {
 		return nil, err
 	}
 	defer func() { _ = f.Close() }()
-	var out []models.Message
+	var out []transcriptEvent
 	sc := bufio.NewScanner(f)
 	sc.Buffer(make([]byte, 0, 1024*1024), 64*1024*1024)
 	for sc.Scan() {
@@ -237,9 +300,7 @@ func readTranscript(path string) ([]models.Message, error) {
 		if err := json.Unmarshal(line, &ev); err != nil {
 			return nil, fmt.Errorf("transcript: corrupt line: %w", err)
 		}
-		if ev.Kind == "msg" && ev.Message != nil {
-			out = append(out, *ev.Message)
-		}
+		out = append(out, ev)
 	}
 	return out, sc.Err()
 }

@@ -347,7 +347,10 @@ type ChatCLI struct {
 
 	// Conversation checkpoints for rewind
 	checkpoints []conversationCheckpoint
-	lastEscTime time.Time // for Esc+Esc double-press detection
+	// preCompaction is the undo stack for /rewind compact: the histories
+	// the latest rewrites replaced (newest last).
+	preCompaction [][]models.Message
+	lastEscTime   time.Time // for Esc+Esc double-press detection
 
 	// Background memory annotation worker
 	memWorker        *memoryWorker

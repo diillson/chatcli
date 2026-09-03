@@ -205,7 +205,7 @@ func (cli *ChatCLI) compactHistoryIfNeeded(ctx context.Context) {
 		_ = os.Stdout.Sync()
 	})
 	cli.flushMemoryBeforeCompaction(ctx)
-	cli.firePreCompact(ctx, compactTriggerAuto)
+	cli.beforeCompaction(ctx, compactTriggerAuto)
 	compacted, err := cli.historyCompactor.Compact(ctx, cli.history, cli.Client, cfg)
 	cli.historyCompactor.SetStatusCallback(nil)
 	if err == nil {
