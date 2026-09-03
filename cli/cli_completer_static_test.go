@@ -45,7 +45,7 @@ func TestContextSubcommands_Membership(t *testing.T) {
 		"create": true, "update": true, "attach": true, "detach": true,
 		"list": true, "show": true, "inspect": true, "delete": true,
 		"merge": true, "attached": true, "export": true, "import": true,
-		"metrics": true, "help": true,
+		"metrics": true, "status": true, "help": true,
 	}
 	if len(got) != len(want) {
 		t.Errorf("len = %d, want %d", len(got), len(want))

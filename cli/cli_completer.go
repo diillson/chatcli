@@ -668,6 +668,7 @@ func contextSubcommands() []prompt.Suggest {
 		{Text: "export", Description: i18n.T("complete.context.sub_export")},
 		{Text: "import", Description: i18n.T("complete.context.sub_import")},
 		{Text: "metrics", Description: i18n.T("complete.context.sub_metrics")},
+		{Text: "status", Description: i18n.T("complete.context.sub_status")},
 		{Text: "help", Description: i18n.T("complete.context.sub_help")},
 	}
 }

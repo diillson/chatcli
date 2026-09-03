@@ -491,6 +491,7 @@ func (h *ContextHandler) showContextHelp() {
 
         ` + colorize(i18n.T("context.help.metrics_header"), ColorCyan) + `
           /context metrics               ` + i18n.T("context.help.metrics_desc") + `
+          /context status                ` + i18n.T("context.help.status_desc") + `
 
         ` + colorize(i18n.T("context.help.notes_label"), ColorGray) + `
           ` + i18n.T("context.help.note1") + `
