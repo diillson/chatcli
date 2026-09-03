@@ -160,6 +160,11 @@ type SessionData struct {
 	AgentHistory []Message `json:"agent_history,omitempty"`
 	CoderHistory []Message `json:"coder_history,omitempty"`
 	SharedMemory []Message `json:"shared_memory,omitempty"`
+	// TranscriptID names the append-only transcript journal this session's
+	// full record lives in (~/.chatcli/transcripts/<id>.jsonl), so a resumed
+	// session keeps writing to the same file. Empty for sessions saved before
+	// journals existed or with the journal disabled.
+	TranscriptID string `json:"transcript_id,omitempty"`
 }
 
 // UsageInfo represents token usage information returned by LLM APIs.

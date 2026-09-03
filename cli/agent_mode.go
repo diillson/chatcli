@@ -952,6 +952,8 @@ func (a *AgentMode) effectiveRoute() (provider, model string) {
 // Run inicia o modo agente com uma consulta do usuário, utilizando um loop de Raciocínio-Ação (ReAct).
 // Agora aceita systemPromptOverride para definir personas específicas (ex: Coder).
 func (a *AgentMode) Run(ctx context.Context, query string, additionalContext string, systemPromptOverride string) error {
+	// The journal must hold whatever the loop produced, however it exits.
+	defer a.cli.syncTranscript()
 	// Reentrancy guard. AgentMode is not safe to Run concurrently on the
 	// same instance — see runInflight comment in the struct. We CAS so
 	// that any caller stepping on an in-flight Run gets a clean error
@@ -2159,6 +2161,10 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 		// Microcompact (Level 0): cheap, progressive compaction of OLD tool
 		// results in history. Pure Go, no LLM call. Often keeps us below
 		// budget so the expensive summarization path is never triggered.
+		// Journal the previous turn's messages (tool results included) BEFORE
+		// this turn's rewrites can stub them — durability against a hard
+		// kill mid-run.
+		a.cli.syncTranscript()
 		mcCfg := agent.DefaultMicrocompactConfig()
 		// Route dropped bytes through CCR so every microcompacted tool
 		// result stays recoverable via @recall instead of being lost.
@@ -2231,6 +2237,7 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 					agent.ColorYellow))
 		}
 		if a.cli.historyCompactor.NeedsCompaction(a.cli.history, cfg) {
+			a.cli.flushMemoryBeforeCompaction(ctx)
 			// Emit live status during compaction so the terminal is never
 			// silent. Without this, Level 2 (LLM summarization) can block
 			// for 30-90s with zero feedback — users assume a freeze.

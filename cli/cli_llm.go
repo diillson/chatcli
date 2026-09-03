@@ -195,6 +195,7 @@ func (cli *ChatCLI) compactHistoryIfNeeded(ctx context.Context) {
 		fmt.Printf("\r\033[K  %s\n", msg)
 		_ = os.Stdout.Sync()
 	})
+	cli.flushMemoryBeforeCompaction(ctx)
 	compacted, err := cli.historyCompactor.Compact(ctx, cli.history, cli.Client, cfg)
 	cli.historyCompactor.SetStatusCallback(nil)
 	if err == nil {
