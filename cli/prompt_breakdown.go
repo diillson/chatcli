@@ -34,6 +34,8 @@ type promptBreakdown struct {
 	Mode     string // "chat", "agent" or "coder"
 	Sections []promptSection
 	At       time.Time
+	// Degraded names the sections the prefix budget folded (prompt_budget.go).
+	Degraded []string
 }
 
 // TotalChars sums every section.
@@ -65,19 +67,30 @@ func (b *promptBreakdown) CachedChars() int {
 // promptBreakdownStore keeps the latest snapshot per process; the chat
 // pipeline and the agent loop write it, /context status reads it.
 type promptBreakdownStore struct {
-	mu   sync.RWMutex
-	last *promptBreakdown
+	mu     sync.RWMutex
+	last   *promptBreakdown
+	byMode map[string]*promptBreakdown
 }
 
 func (s *promptBreakdownStore) record(mode string, sections []promptSection) {
+	s.recordDegraded(mode, nil, sections)
+}
+
+// recordDegraded is record with the sections the prefix budget folded.
+func (s *promptBreakdownStore) recordDegraded(mode string, degraded []string, sections []promptSection) {
 	kept := make([]promptSection, 0, len(sections))
 	for _, sec := range sections {
 		if sec.Chars > 0 {
 			kept = append(kept, sec)
 		}
 	}
+	b := &promptBreakdown{Mode: mode, Sections: kept, At: time.Now(), Degraded: append([]string(nil), degraded...)}
 	s.mu.Lock()
-	s.last = &promptBreakdown{Mode: mode, Sections: kept, At: time.Now()}
+	s.last = b
+	if s.byMode == nil {
+		s.byMode = map[string]*promptBreakdown{}
+	}
+	s.byMode[mode] = b
 	s.mu.Unlock()
 }
 
@@ -85,6 +98,14 @@ func (s *promptBreakdownStore) latest() *promptBreakdown {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return s.last
+}
+
+// latestNamed returns the last breakdown recorded for one mode (nil when
+// that mode has not assembled a prompt yet).
+func (s *promptBreakdownStore) latestNamed(mode string) *promptBreakdown {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.byMode[mode]
 }
 
 // add appends blocks to the chat assembly under a section label, so the

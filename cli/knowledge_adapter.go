@@ -122,8 +122,16 @@ func (a *knowledgePluginAdapter) List() (string, error) {
 // knowledge context is attached — the block then costs nothing. Deterministic
 // for a given attachment set, so it can live in a cacheable prompt block.
 func (cli *ChatCLI) knowledgeAgentBlock() string {
+	block, _ := cli.knowledgeAgentBlockBudgeted(0)
+	return block
+}
+
+// knowledgeAgentBlockBudgeted is knowledgeAgentBlock under a character
+// budget (0 = unbounded): digests past the budget shrink to their compact
+// card. Reports whether anything folded.
+func (cli *ChatCLI) knowledgeAgentBlockBudgeted(maxChars int) (string, bool) {
 	if cli.contextHandler == nil {
-		return ""
+		return "", false
 	}
 	sessionID := cli.currentSessionName
 	if sessionID == "" {
@@ -132,13 +140,23 @@ func (cli *ChatCLI) knowledgeAgentBlock() string {
 	mgr := cli.contextHandler.GetManager()
 	kbs := mgr.AttachedKnowledge(sessionID)
 	if len(kbs) == 0 {
-		return ""
+		return "", false
 	}
 	var b strings.Builder
+	folded := false
 	for _, fc := range kbs {
-		b.WriteString(mgr.KnowledgeDigest(fc))
+		digest := mgr.KnowledgeDigest(fc)
+		if maxChars > 0 && b.Len()+len(digest) > maxChars {
+			digest = ctxmgr.BuildKnowledgeDigest(fc, foldedKnowledgeDigestBudget)
+			folded = true
+		}
+		b.WriteString(digest)
 		b.WriteString("\n")
 	}
 	b.WriteString("Use the @knowledge tool to work with these bases: search passages, read full documents with get (paged), inspect coverage with toc. Ground answers in retrieved content and cite source paths.")
-	return b.String()
+	return b.String(), folded
 }
+
+// foldedKnowledgeDigestBudget is the compact card size used when the
+// prompt budget cannot hold the full digest.
+const foldedKnowledgeDigestBudget = 900

@@ -128,13 +128,45 @@ func (cli *ChatCLI) assembleChatSystemPrompt(
 	}
 
 	// ── Stable cached prefix ──
-	out.add("mode", cli.modeAndLanguagePart())         // Part 0
-	out.add("attached", cli.attachedContextParts()...) // Part 1
-	if block, ok := pinnedSkillBlock(pinned); ok {     // Part 2
+	// The prefix budget (prompt_budget.go) sizes the sections that can
+	// grow without bound — attachments, digests, skills — against the
+	// window, degrading in the declared order: skills → digests → attach.
+	budget := cli.newPrefixBudget(cli.Provider, cli.Model)
+	mode := cli.modeAndLanguagePart()
+	out.add("mode", mode) // Part 0
+	budget.spend(len(mode.Text))
+	// Attachments are measured raw first so the skill budget knows what is
+	// left; they fold only when even bodiless skills would not fit.
+	attachedRaw := cli.attachedContextParts()
+	attachedChars := 0
+	for _, p := range attachedRaw {
+		attachedChars += len(p.Text)
+	}
+	skillBudget := 0
+	if attachedChars < budget.remaining() {
+		skillBudget = budget.remaining() - attachedChars
+		if skillBudget > skillInjectBudget() {
+			skillBudget = skillInjectBudget()
+		}
+	}
+	attached := attachedRaw
+	if attachedChars > budget.remaining() {
+		attached = cli.attachedContextPartsBudgeted(budget)
+	}
+	out.add("attached", attached...) // Part 1
+	for _, p := range attached {
+		budget.spend(len(p.Text))
+	}
+	if skillBudget < skillInjectBudget() && len(pinned)+len(autoActivated) > 0 {
+		budget.noteDegraded("skills")
+	}
+	if block, ok := pinnedSkillBlockLimited(pinned, skillBudget); ok { // Part 2
 		out.add("skills_pinned", block)
+		budget.spend(len(block.Text))
 	}
 	if part, ok := cli.mcpToolsPart(); ok { // Part 3
 		out.add("mcp_tools", part)
+		budget.spend(len(part.Text))
 	}
 
 	// ── Volatile suffix (no cache hints) ──
@@ -155,7 +187,7 @@ func (cli *ChatCLI) assembleChatSystemPrompt(
 			out.add("skill_manual", models.ContentBlock{Type: "text", Text: block})
 		}
 	}
-	if block, ok := autoSkillBlock(autoActivated); ok { // Part 6
+	if block, ok := autoSkillBlockLimited(autoActivated, skillBudget); ok { // Part 6
 		out.add("skills_auto", block)
 	}
 	if part, ok := cli.mcpChannelPart(); ok { // Part 7
@@ -184,7 +216,7 @@ func (cli *ChatCLI) assembleChatSystemPrompt(
 	if part, ok := cli.dynamicContextPart(); ok { // Part 9
 		out.add("dynamic", part)
 	}
-	cli.promptBreakdowns.record("chat", out.sections)
+	cli.promptBreakdowns.recordDegraded("chat", budget.Degraded(), out.sections)
 	return out
 }
 
@@ -321,11 +353,25 @@ func (cli *ChatCLI) turnHints(userInput string) []string {
 // attachedContextParts collects every `/context attach`ed entry for the
 // current session and turns each into its own cacheable ContentBlock.
 func (cli *ChatCLI) attachedContextParts() []models.ContentBlock {
+	return cli.attachedContextPartsBudgeted(nil)
+}
+
+// attachedContextPartsBudgeted is attachedContextParts under the prefix
+// budget (nil = unbounded): digests shrink and whole-content attachments
+// fold into index cards past what remains, recorded as "attached".
+func (cli *ChatCLI) attachedContextPartsBudgeted(budget *prefixBudget) []models.ContentBlock {
 	sessionID := cli.currentSessionName
 	if sessionID == "" {
 		sessionID = "default"
 	}
-	contextMessages, err := cli.contextHandler.GetManager().BuildPromptMessages(
+	maxChars := 0
+	if budget != nil {
+		maxChars = budget.remaining()
+		if maxChars == 0 {
+			maxChars = 1 // fold everything, never "unbounded"
+		}
+	}
+	contextMessages, folded, err := cli.contextHandler.GetManager().BuildPromptMessagesBudgeted(
 		sessionID,
 		ctxmgr.FormatOptions{
 			IncludeMetadata:  true,
@@ -333,7 +379,11 @@ func (cli *ChatCLI) attachedContextParts() []models.ContentBlock {
 			Compact:          false,
 			Role:             "system",
 		},
+		maxChars,
 	)
+	if len(folded) > 0 {
+		budget.noteDegraded("attached")
+	}
 	if err != nil {
 		cli.logger.Warn("Erro ao construir mensagens de contexto", zap.Error(err))
 		return nil
@@ -411,10 +461,15 @@ func (cli *ChatCLI) resolveSkillsForTurn(
 // cached prefix and carries a cache_control:ephemeral hint. Returns ok=false
 // when there are no pinned skills (or they render empty).
 func pinnedSkillBlock(pinned []*persona.Skill) (models.ContentBlock, bool) {
+	return pinnedSkillBlockLimited(pinned, skillInjectBudget())
+}
+
+// pinnedSkillBlockLimited is pinnedSkillBlock under an explicit body budget.
+func pinnedSkillBlockLimited(pinned []*persona.Skill, budget int) (models.ContentBlock, bool) {
 	if len(pinned) == 0 {
 		return models.ContentBlock{}, false
 	}
-	block := buildPinnedSkillInjectionBlock(pinned)
+	block := buildPinnedSkillInjectionBlockLimited(pinned, budget)
 	if block == "" {
 		return models.ContentBlock{}, false
 	}
@@ -430,10 +485,15 @@ func pinnedSkillBlock(pinned []*persona.Skill) (models.ContentBlock, bool) {
 // NO cache hint and belongs in the volatile suffix. Returns ok=false when no
 // skills auto-activated (or they render empty).
 func autoSkillBlock(autoActivated []*persona.Skill) (models.ContentBlock, bool) {
+	return autoSkillBlockLimited(autoActivated, skillInjectBudget())
+}
+
+// autoSkillBlockLimited is autoSkillBlock under an explicit body budget.
+func autoSkillBlockLimited(autoActivated []*persona.Skill, budget int) (models.ContentBlock, bool) {
 	if len(autoActivated) == 0 {
 		return models.ContentBlock{}, false
 	}
-	block := buildSkillInjectionBlock(autoActivated)
+	block := buildSkillInjectionBlockLimited(autoActivated, budget)
 	if block == "" {
 		return models.ContentBlock{}, false
 	}
@@ -891,7 +951,13 @@ func (cli *ChatCLI) telemetryParts(usage *models.UsageInfo, costUSD float64, inc
 		// Cached input counts: see contextTokens — PromptTokens alone is
 		// only the uncached delta on Anthropic/Bedrock schemas.
 		pct := float64(contextTokens(cli.Provider, cli.Model, usage)) / float64(window) * 100
-		parts = append(parts, i18n.T("chat.envelope.context_pct", clampPct(pct)))
+		// Prefer the projection for the NEXT request (current history plus
+		// the prefix that will front it): that is what decides whether the
+		// next turn compacts, and it may legitimately exceed 100%.
+		if proj, ok := cli.projectedContextPct(window); ok {
+			pct = proj
+		}
+		parts = append(parts, i18n.T("chat.envelope.context_pct", roundPct(pct)))
 	}
 	// Prompt-cache share of this turn's input, on every provider that
 	// reports cache tokens (Anthropic/Bedrock additive counts, OpenAI/
@@ -924,6 +990,46 @@ func formatTurnCost(usd float64) string {
 		return fmt.Sprintf("$%.4f", usd)
 	}
 	return fmt.Sprintf("$%.2f", usd)
+}
+
+// projectedContextPct estimates the share of the window the next request
+// will occupy: the live history (which holds the system message in agent
+// mode) plus the chat prefix when the history carries no system message.
+func (cli *ChatCLI) projectedContextPct(window int) (float64, bool) {
+	if window <= 0 || cli == nil {
+		return 0, false
+	}
+	chars := promptCharsOf(cli.history)
+	if !historyHasSystem(cli.history) {
+		chars += cli.promptBreakdowns.latestNamed("chat").TotalChars()
+	}
+	if chars <= 0 {
+		return 0, false
+	}
+	tokens := globalTokenCalibrator.EstimateTokens(cli.Provider, cli.Model, chars)
+	if tokens <= 0 {
+		return 0, false
+	}
+	return float64(tokens) / float64(window) * 100, true
+}
+
+func historyHasSystem(history []models.Message) bool {
+	for _, m := range history {
+		if strings.EqualFold(m.Role, "system") {
+			return true
+		}
+	}
+	return false
+}
+
+// roundPct rounds a percentage to an int, floored at 0 and deliberately
+// NOT capped at 100: a projected 104% is the signal that the next turn
+// compacts, and hiding it as 100% would take that signal away.
+func roundPct(p float64) int {
+	if p < 0 {
+		return 0
+	}
+	return int(p + 0.5)
 }
 
 // clampPct bounds a percentage to [0,100] so an over-window prompt (possible

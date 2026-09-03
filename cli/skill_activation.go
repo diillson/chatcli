@@ -116,6 +116,13 @@ func extractFilePaths(input string) []string {
 // The block uses a stable header so provider-level caching can reuse it across
 // turns when the same skills fire.
 func buildSkillInjectionBlock(skills []*persona.Skill) string {
+	return buildSkillInjectionBlockLimited(skills, skillInjectBudget())
+}
+
+// buildSkillInjectionBlockLimited is buildSkillInjectionBlock under an
+// explicit body budget (the prompt budget may hand it less than the
+// per-block default).
+func buildSkillInjectionBlockLimited(skills []*persona.Skill, budget int) string {
 	if len(skills) == 0 {
 		return ""
 	}
@@ -124,7 +131,7 @@ func buildSkillInjectionBlock(skills []*persona.Skill) string {
 	b.WriteString("The following skills were automatically activated based on ")
 	b.WriteString("your input (matched via `triggers:` keywords or `paths:` globs ")
 	b.WriteString("in the skill frontmatter). Follow their guidance when relevant.\n\n")
-	renderSkillEntries(&b, skills)
+	renderSkillEntriesLimited(&b, skills, budget, false)
 	return b.String()
 }
 
@@ -200,6 +207,12 @@ func renderSkillBodyPointer(skill *persona.Skill) string {
 //
 // Caller must pass a slice already sorted by Name for cache stability.
 func buildPinnedSkillInjectionBlock(skills []*persona.Skill) string {
+	return buildPinnedSkillInjectionBlockLimited(skills, skillInjectBudget())
+}
+
+// buildPinnedSkillInjectionBlockLimited is buildPinnedSkillInjectionBlock
+// under an explicit body budget.
+func buildPinnedSkillInjectionBlockLimited(skills []*persona.Skill, budget int) string {
 	if len(skills) == 0 {
 		return ""
 	}
@@ -208,7 +221,7 @@ func buildPinnedSkillInjectionBlock(skills []*persona.Skill) string {
 	b.WriteString("The user pinned the following skills for this session via ")
 	b.WriteString("`/skill pin <name>`. They apply to every turn regardless of ")
 	b.WriteString("input triggers or file paths — treat them as standing instructions.\n\n")
-	renderSkillEntries(&b, skills)
+	renderSkillEntriesLimited(&b, skills, budget, false)
 	return b.String()
 }
 

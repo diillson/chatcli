@@ -54,6 +54,12 @@ type contextStatusReport struct {
 	CompactBudgetTokens int
 	CompactAtPct        float64
 	Cache               CacheStats
+
+	// Prefix budget (prompt_budget.go): the share of the window the
+	// system prefix may take before sections fold, and what folded.
+	PrefixBudgetTokens int
+	PrefixPct          float64
+	Degraded           []string
 }
 
 // summarizeHistory computes the role breakdown of the live history. Weight
@@ -114,6 +120,13 @@ func (cli *ChatCLI) buildContextStatusReport() contextStatusReport {
 	r.PromptTokens = toTokens(r.Prompt.TotalChars())
 	r.HistoryTokens = toTokens(historyChars)
 	r.TotalTokens = r.PromptTokens + r.HistoryTokens
+	if pb := cli.newPrefixBudget(cli.Provider, cli.Model); pb != nil && pb.MaxChars > 0 {
+		r.PrefixBudgetTokens = toTokens(pb.MaxChars)
+		if r.Prompt != nil {
+			r.PrefixPct = float64(r.Prompt.TotalChars()) / float64(pb.MaxChars) * 100
+			r.Degraded = r.Prompt.Degraded
+		}
+	}
 	if r.Window > 0 {
 		r.ProjectedPct = float64(r.TotalTokens) / float64(r.Window) * 100
 		cfg := cli.compactConfig(cli.Provider, cli.Model)
@@ -183,6 +196,13 @@ func (cli *ChatCLI) showContextStatus() {
 	if r.Window > 0 {
 		fmt.Printf("    %s ≈%s tok (%s)\n", kitPad(i18n.T("context.status.total_projected")),
 			formatTokenCount(int64(r.TotalTokens)), colorize(fmt.Sprintf("%.0f%%", r.ProjectedPct), pctColor(r.ProjectedPct)))
+		if r.PrefixBudgetTokens > 0 {
+			fmt.Printf("    %s ≈%s tok (%s)\n", kitPad(i18n.T("context.status.prefix_budget")),
+				formatTokenCount(int64(r.PrefixBudgetTokens)), colorize(fmt.Sprintf("%.0f%%", r.PrefixPct), pctColor(r.PrefixPct)))
+		}
+		if len(r.Degraded) > 0 {
+			fmt.Printf("    %s\n", colorize(i18n.T("context.status.degraded", strings.Join(r.Degraded, ", ")), ColorYellow))
+		}
 		fmt.Printf("    %s %s\n", kitPad(i18n.T("context.status.compact_at")),
 			i18n.T("context.status.compact_at_value", fmt.Sprintf("%.0f%%", r.CompactAtPct), formatTokenCount(int64(r.CompactBudgetTokens))))
 	}
