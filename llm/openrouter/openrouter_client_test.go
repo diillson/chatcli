@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"github.com/diillson/chatcli/llm/client"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -190,5 +191,18 @@ func TestBuildMessages_CacheControlOnRealWireContent(t *testing.T) {
 	pm := plain.buildMessages("second", history)
 	if raw, _ := json.Marshal(pm[0]["content"]); string(raw) != `"stable prefix"` {
 		t.Fatalf("openai/ must not receive markers, got %s", raw)
+	}
+}
+
+func TestOpenRouterCacheMarker_TTLOnlyForAnthropic(t *testing.T) {
+	t.Setenv(client.PromptCacheTTLEnv, "1h")
+	if m := openRouterCacheMarker("anthropic/claude-sonnet-5"); m["ttl"] != "1h" {
+		t.Fatalf("anthropic marker must carry the configured ttl: %v", m)
+	}
+	if m := openRouterCacheMarker("google/gemini-2.5-pro"); m["ttl"] != "" {
+		t.Fatalf("google marker is fixed at 5 minutes: %v", m)
+	}
+	if !openRouterUsesPromptCacheKey("openai/gpt-5.6-terra") || openRouterUsesPromptCacheKey("anthropic/claude-sonnet-5") {
+		t.Fatal("prompt_cache_key applies to openai/ models only")
 	}
 }

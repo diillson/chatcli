@@ -126,7 +126,7 @@ func (c *OpenRouterClient) buildMessages(prompt string, history []models.Message
 	}
 
 	if openRouterSupportsCacheControl(c.model) {
-		applyOpenRouterCacheControl(messages)
+		applyOpenRouterCacheControlMarker(messages, openRouterCacheMarker(c.model))
 	}
 	return messages
 }
@@ -146,7 +146,28 @@ func openRouterSupportsCacheControl(model string) bool {
 // cache_control, converting string content into the multipart shape the
 // marker requires. Tool messages are left alone.
 func applyOpenRouterCacheControl(messages []map[string]interface{}) {
-	marker := map[string]string{"type": "ephemeral"}
+	applyOpenRouterCacheControlMarker(messages, map[string]string{"type": "ephemeral"})
+}
+
+// openRouterCacheMarker is the cache_control value for a model: the
+// configured TTL on anthropic/ models (OpenRouter forwards "ttl":"1h");
+// google/ models keep the fixed 5-minute marker (openrouter.ai/docs/
+// features/prompt-caching).
+func openRouterCacheMarker(model string) map[string]string {
+	if strings.HasPrefix(strings.ToLower(strings.TrimSpace(model)), "anthropic/") {
+		return client.AnthropicCacheMarker()
+	}
+	return map[string]string{"type": "ephemeral"}
+}
+
+// openRouterUsesPromptCacheKey reports whether the model routes through
+// OpenAI, where prompt_cache_key is the sticky-routing key OpenRouter
+// forwards for automatic caching.
+func openRouterUsesPromptCacheKey(model string) bool {
+	return strings.HasPrefix(strings.ToLower(strings.TrimSpace(model)), "openai/")
+}
+
+func applyOpenRouterCacheControlMarker(messages []map[string]interface{}, marker map[string]string) {
 	var mark func(msg map[string]interface{})
 	mark = func(msg map[string]interface{}) {
 		switch content := msg["content"].(type) {
@@ -294,6 +315,11 @@ func (c *OpenRouterClient) SendPrompt(ctx context.Context, prompt string, histor
 
 	messages := c.buildMessages(prompt, history)
 	payload := c.buildPayload(messages, effectiveMaxTokens)
+	if openRouterUsesPromptCacheKey(c.model) {
+		if key := client.PromptCacheKey(history); key != "" {
+			payload["prompt_cache_key"] = key
+		}
+	}
 
 	jsonValue, err := json.Marshal(payload)
 	if err != nil {

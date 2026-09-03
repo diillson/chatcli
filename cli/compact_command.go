@@ -3,12 +3,10 @@ package cli
 import (
 	"context"
 	"fmt"
-	"os"
 	"strings"
 	"time"
 
 	"github.com/diillson/chatcli/cli/compress"
-	"github.com/diillson/chatcli/cli/hooks"
 	"github.com/diillson/chatcli/i18n"
 	"github.com/diillson/chatcli/models"
 	"go.uber.org/zap"
@@ -30,20 +28,14 @@ func (cli *ChatCLI) handleCompactCommand(ctx context.Context, userInput string) 
 		return
 	}
 
-	ctx, cancel := context.WithTimeout(ctx, 60*time.Second)
+	// The pipeline's Level 2 summary can take minutes on a long history;
+	// the summarizer call carries its own bound (structuredSummarize), so
+	// the command only needs a generous outer one.
+	ctx, cancel := context.WithTimeout(ctx, 15*time.Minute)
 	defer cancel()
 
 	if instruction == "" {
-		// Fire PreCompact hook
-		if cli.hookManager != nil {
-			wd, _ := os.Getwd()
-			cli.hookManager.Fire(ctx, hooks.HookEvent{
-				Type:       hooks.EventPreCompact,
-				Timestamp:  time.Now(),
-				SessionID:  cli.currentSessionName,
-				WorkingDir: wd,
-			})
-		}
+		cli.firePreCompact(ctx, compactTriggerManual)
 
 		// Automatic compaction
 		cfg := cli.compactConfig(cli.Provider, cli.Model)
@@ -64,24 +56,10 @@ func (cli *ChatCLI) handleCompactCommand(ctx context.Context, userInput string) 
 
 		before := len(cli.history)
 		cli.history = compacted
-		cli.costTracker.NoteExpectedCacheRebuild()
+		cli.noteCompactionApplied(ctx, compactTriggerManual)
 		after := len(cli.history)
 		fmt.Printf("  %s %s\n",
 			colorize("📦", ""), i18n.T("compact.success", before, after))
-
-		// Fire PostCompact hook
-		if cli.hookManager != nil {
-			wd, _ := os.Getwd()
-			// Detached: the async hook must outlive this command (and the
-			// 60s timeout ctx that defer-cancels on return), so we strip
-			// cancellation but keep inherited values.
-			cli.hookManager.FireAsync(context.WithoutCancel(ctx), hooks.HookEvent{
-				Type:       hooks.EventPostCompact,
-				Timestamp:  time.Now(),
-				SessionID:  cli.currentSessionName,
-				WorkingDir: wd,
-			})
-		}
 		return
 	}
 
@@ -118,7 +96,7 @@ func (cli *ChatCLI) guidedCompact(ctx context.Context, instruction string) {
 		return
 	}
 
-	middleMessages := cli.history[systemEnd:recentStart]
+	middleMessages, verbatim := splitVerbatim(cli.history[systemEnd:recentStart])
 	if len(middleMessages) < 2 {
 		fmt.Println(colorize("  "+i18n.T("compact.error.not_enough_middle"), ColorGray))
 		return
@@ -158,24 +136,43 @@ CONVERSATION TO COMPACT:
 		colorize(instruction, ColorCyan),
 	)
 
+	cli.firePreCompact(ctx, compactTriggerManual)
+
+	// Same route and bound as the automatic pipeline: the configured
+	// summarizer (CHATCLI_COMPACT_SUMMARIZER_*) when there is one, else the
+	// session client, with the summary's own 10-minute allowance.
+	cfg := cli.compactConfig(cli.Provider, cli.Model)
+	summarizer, usingSession := cli.Client, true
+	if cfg.SummarizerClient != nil {
+		summarizer, usingSession = cfg.SummarizerClient, false
+	}
+	summarizeCtx, cancelSummary := context.WithTimeout(ctx, 10*time.Minute)
+	defer cancelSummary()
+
 	var response string
 	var err error
 	if ext := cli.externalSummarizer(); ext != nil {
-		response, err = ext.Compact(ctx, sb.String(), summarizerInputBudget(cli.compactConfig(cli.Provider, cli.Model)), instruction)
+		response, err = ext.Compact(summarizeCtx, sb.String(), summarizerInputBudget(cfg), instruction)
 		if err != nil {
 			cli.logger.Warn("context engine failed on guided compaction; using the session model", zap.Error(err))
 		}
 	}
 	if strings.TrimSpace(response) == "" {
-		response, err = cli.Client.SendPrompt(ctx, prompt, summaryHistory, 0)
+		response, err = summarizer.SendPrompt(summarizeCtx, prompt, summaryHistory, 0)
 		// Auto-retry on OAuth token expiration (401)
-		if cli.refreshClientOnAuthError(err) {
-			response, err = cli.Client.SendPrompt(ctx, prompt, summaryHistory, 0)
+		if usingSession && cli.refreshClientOnAuthError(err) {
+			summarizer = cli.Client
+			response, err = summarizer.SendPrompt(summarizeCtx, prompt, summaryHistory, 0)
 		}
 	}
 	if err != nil {
 		cli.logger.Warn("Guided compaction failed", zap.Error(err))
 		fmt.Println(colorize(fmt.Sprintf("  %s", i18n.T("compact.error.failed", err)), ColorYellow))
+		return
+	}
+	if !summaryPassesGate(response, sb.Len()) {
+		cli.logger.Warn("Guided compaction summary rejected by the quality gate", zap.Int("chars", len(strings.TrimSpace(response))))
+		fmt.Println(colorize("  "+i18n.T("compact.error.summary_rejected"), ColorYellow))
 		return
 	}
 
@@ -204,10 +201,17 @@ CONVERSATION TO COMPACT:
 			SummaryOf: len(middleMessages),
 		},
 	})
+	result = append(result, verbatim...)
 	result = append(result, cli.history[recentStart:]...)
 
 	cli.history = result
+	rep := CompactReport{Level: 2, SummaryUsage: summarizerUsage(cli.Client, cfg), SummaryProvider: cfg.SummarizerProvider, SummaryModel: cfg.SummarizerModel}
+	if rep.SummaryProvider == "" {
+		rep.SummaryProvider, rep.SummaryModel = cli.Provider, cli.Model
+	}
+	cli.costTracker.RecordCompaction(rep)
 	cli.costTracker.NoteExpectedCacheRebuild()
+	cli.firePostCompact(ctx, compactTriggerManual)
 	after := len(cli.history)
 
 	fmt.Printf("  %s %s (%s: %s)\n",

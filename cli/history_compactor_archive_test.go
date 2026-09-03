@@ -20,7 +20,7 @@ type summarizerFake struct{}
 
 func (summarizerFake) GetModelName() string { return "fake" }
 func (summarizerFake) SendPrompt(_ context.Context, _ string, _ []models.Message, _ int) (string, error) {
-	return "## Files Read\n- none", nil
+	return "## Files Read\n- none of note\n## Current Task State\n- the user asked for a refactor of the parser and the assistant delivered it\n## Decisions\n- keep the lexer stateful", nil
 }
 
 func summarizeFixtureHistory(minKeepRecent int) []models.Message {

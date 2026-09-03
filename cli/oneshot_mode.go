@@ -244,9 +244,10 @@ func (cli *ChatCLI) RunOnce(ctx context.Context, input string, disableAnimation 
 		cli.historyCompactor.SetStatusCallback(func(stage CompactStage, msg string) {
 			fmt.Fprintf(os.Stderr, "  %s\n", msg)
 		})
+		cli.firePreCompact(ctx, compactTriggerAuto)
 		if compacted, compactErr := cli.historyCompactor.Compact(ctx, cli.history, activeClient, cfg); compactErr == nil {
 			cli.history = compacted
-			cli.costTracker.NoteExpectedCacheRebuild()
+			cli.noteCompactionApplied(ctx, compactTriggerAuto)
 		}
 		cli.historyCompactor.SetStatusCallback(nil)
 	}

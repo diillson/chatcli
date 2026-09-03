@@ -469,9 +469,11 @@ func (c *BedrockClient) sendPromptAnthropicModel(ctx context.Context, wireModel,
 
 	applyAnthropicThinkingForEffort(reqBody, wireModel, ctx)
 
-	// Rolling conversation breakpoint (5-minute marker: the InvokeModel wire
-	// keeps the provider default TTL). See client.MarkAnthropicHistoryBreakpoint.
-	client.MarkAnthropicHistoryBreakpoint(client.AnthropicMessages{Maps: messages}, client.AnthropicCacheMarkerWithTTL(false))
+	// Rolling conversation breakpoint. Bedrock accepts "ttl":"1h" in the
+	// cache_control object for Claude 4.5+ (docs.aws.amazon.com/bedrock/
+	// latest/userguide/prompt-caching.html), so the configured TTL applies
+	// there; older Claude keeps the 5-minute wire default.
+	client.MarkAnthropicHistoryBreakpoint(client.AnthropicMessages{Maps: messages}, client.AnthropicCacheMarkerWithTTL(supportsExtendedCacheTTL(wireModel)))
 	enforceCacheControlBudget(reqBody, anthropicMaxCacheBreakpoints)
 
 	payload, err := json.Marshal(reqBody)
@@ -599,6 +601,23 @@ func (c *BedrockClient) buildMessagesAndSystem(prompt string, history []models.M
 		return messages, strings.Join(plainSystemParts, "\n\n")
 	}
 	return messages, nil
+}
+
+// supportsExtendedCacheTTL reports whether Bedrock honors the 1-hour
+// cache TTL for the model: every Claude from the 4.5 generation on
+// (Sonnet/Opus 4.5+, Haiku 4.5, the 5.x line, Fable/Mythos). Claude 3.x
+// and non-Anthropic vendors keep the 5-minute default.
+func supportsExtendedCacheTTL(model string) bool {
+	m := strings.ToLower(model)
+	if !strings.Contains(m, "claude") {
+		return false
+	}
+	for _, old := range []string{"claude-3", "claude-v2", "claude-instant", "sonnet-4-20", "opus-4-20", "opus-4-1", "claude-sonnet-4-v", "claude-opus-4-v"} {
+		if strings.Contains(m, old) {
+			return false
+		}
+	}
+	return true
 }
 
 func supportsExtendedThinking(model string) bool {

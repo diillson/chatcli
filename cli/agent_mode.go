@@ -2291,11 +2291,12 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 					renderer.Colorize("│", agent.ColorCyan),
 					renderer.Colorize(msg, agent.ColorGray))
 			})
+			a.cli.firePreCompact(ctx, compactTriggerAuto)
 			compacted, compactErr := a.cli.historyCompactor.Compact(ctx, a.cli.history, a.cli.Client, cfg)
 			a.cli.historyCompactor.SetStatusCallback(nil)
 			if compactErr == nil {
 				a.cli.history = compacted
-				a.cli.costTracker.NoteExpectedCacheRebuild()
+				a.cli.noteCompactionApplied(ctx, compactTriggerAuto)
 			} else if errors.Is(compactErr, context.Canceled) {
 				return compactErr
 			}
@@ -2567,9 +2568,20 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 					}
 				}
 
+				// Recovery drops whole messages without a summary: flush what
+				// the memory worker has not seen yet, tell the hooks, archive
+				// the dropped messages to CCR and account for the rebuild —
+				// the same guarantees as a planned compaction.
+				a.cli.flushMemoryBeforeCompaction(ctx)
+				a.cli.firePreCompact(ctx, compactTriggerRecovery)
 				recoveredHistory, recovered := contextRecovery.RecoverContextOverflow(a.cli.history)
 				if recovered {
+					if note := archiveDroppedMessages(a.cli.compressionLayer, a.cli.history, recoveredHistory); note != "" {
+						recoveredHistory = append(recoveredHistory, models.Message{Role: "user", Content: note})
+					}
 					a.cli.history = recoveredHistory
+					a.cli.costTracker.NoteExpectedCacheRebuild()
+					a.cli.firePostCompact(ctx, compactTriggerRecovery)
 
 					// Post-recovery hint for payload-related failures: without
 					// this, the model tends to re-read the same huge file that

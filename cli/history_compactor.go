@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"strconv"
@@ -46,7 +47,47 @@ type HistoryCompactor struct {
 	compress *compress.Layer
 	statusMu sync.RWMutex
 	onStatus StatusCallback
+
+	// l2Backoff counts the compactions that skip Level 2: set when a
+	// summary did not bring the history under budget (the next turns would
+	// pay a summarizer call each to land in Level 3 anyway).
+	l2Backoff  int
+	lastReport CompactReport
 }
+
+// CompactReport describes the last Compact run: the level that produced
+// the result and what the Level 2 summarizer consumed (nil when no
+// summary was produced), so the caller can account for it.
+type CompactReport struct {
+	Level             int
+	SummaryUsage      *models.UsageInfo
+	SummaryProvider   string
+	SummaryModel      string
+	Level2SkippedByBO bool
+}
+
+// LastReport returns the report of the most recent Compact call.
+func (hc *HistoryCompactor) LastReport() CompactReport {
+	hc.statusMu.RLock()
+	defer hc.statusMu.RUnlock()
+	return hc.lastReport
+}
+
+func (hc *HistoryCompactor) setReport(rep CompactReport) {
+	hc.statusMu.Lock()
+	hc.lastReport = rep
+	hc.statusMu.Unlock()
+}
+
+// l2BackoffTurns is how many compactions skip Level 2 after a summary
+// failed to converge.
+const l2BackoffTurns = 2
+
+// minSummaryChars caps the quality floor for a Level 2 summary: the floor
+// scales with the segment (segment/40) up to this many characters, so a
+// one-line answer for a hundred-kilobyte segment is a refusal, a truncated
+// stream or an empty answer — not a summary — and must not replace it.
+const minSummaryChars = 80
 
 // CompactConfig holds parameters for a compaction operation.
 type CompactConfig struct {
@@ -317,12 +358,30 @@ func (hc *HistoryCompactor) Compact(
 		)
 		hc.emitStatus(CompactStageDone, i18n.T("compact.status.trim_sufficient",
 			FormatPayloadSize(before), FormatPayloadSize(current)))
+		hc.setReport(CompactReport{Level: 1})
 		return history, nil
 	}
 
 	// LEVEL 2: Structured summarization of old messages (requires LLM call)
-	hc.emitStatus(CompactStageSummarize, i18n.T("compact.status.summarize"))
-	summarized, err := hc.structuredSummarize(ctx, history, llmClient, cfg)
+	rep := CompactReport{Level: 2, SummaryProvider: cfg.SummarizerProvider, SummaryModel: cfg.SummarizerModel}
+	if rep.SummaryProvider == "" {
+		rep.SummaryProvider, rep.SummaryModel = cfg.Provider, cfg.Model
+	}
+	var (
+		summarized []models.Message
+		err        error
+	)
+	if hc.l2Backoff > 0 {
+		hc.l2Backoff--
+		rep.Level2SkippedByBO = true
+		err = errL2Backoff
+		hc.logger.Info("Level 2 skipped: back-off after a non-converging summary",
+			zap.Int("remaining", hc.l2Backoff))
+	} else {
+		hc.emitStatus(CompactStageSummarize, i18n.T("compact.status.summarize"))
+		summarized, err = hc.structuredSummarize(ctx, history, llmClient, cfg)
+		rep.SummaryUsage = summarizerUsage(llmClient, cfg)
+	}
 	if err != nil {
 		// A cancellation from the user should propagate, not silently fall
 		// through to emergency truncation — the user's own choice to abort
@@ -340,6 +399,7 @@ func (hc *HistoryCompactor) Compact(
 		history = summarized
 		current = totalChars(history)
 		if current <= budget {
+			hc.l2Backoff = 0
 			hc.logger.Info("Level 2 (structured summarization) sufficient",
 				zap.Int("before_chars", before),
 				zap.Int("after_chars", current),
@@ -348,8 +408,14 @@ func (hc *HistoryCompactor) Compact(
 			)
 			hc.emitStatus(CompactStageDone, i18n.T("compact.status.summarize_applied",
 				beforeMsgs, len(history), FormatPayloadSize(before), FormatPayloadSize(current)))
+			hc.setReport(rep)
 			return history, nil
 		}
+		// The summary alone did not fit: the next compactions go straight
+		// to Level 3 instead of paying a summarizer call per turn.
+		hc.l2Backoff = l2BackoffTurns
+		hc.logger.Warn("Level 2 did not converge; backing off the summarizer",
+			zap.Int("after_chars", current), zap.Int("budget_chars", budget), zap.Int("skip_turns", l2BackoffTurns))
 	}
 
 	// LEVEL 3: Emergency truncation (last resort)
@@ -370,8 +436,41 @@ func (hc *HistoryCompactor) Compact(
 		zap.Int("after_msgs", len(history)),
 	)
 	hc.emitStatus(CompactStageDone, i18n.T("compact.status.truncated", beforeMsgs, len(history)))
+	rep.Level = 3
+	hc.setReport(rep)
 
 	return history, nil
+}
+
+// errL2Backoff marks a Level 2 skipped by the back-off (not a failure).
+var errL2Backoff = errors.New("level 2 skipped by back-off")
+
+// summarizerUsage reads what the Level 2 call consumed from the client
+// that served it (the configured summarizer, else the session client).
+func summarizerUsage(llmClient client.LLMClient, cfg CompactConfig) *models.UsageInfo {
+	c := llmClient
+	if cfg.SummarizerClient != nil {
+		c = cfg.SummarizerClient
+	}
+	if ua, ok := c.(client.UsageAwareClient); ok && ua != nil {
+		return ua.LastUsage()
+	}
+	return nil
+}
+
+// splitVerbatim separates the messages flagged PreserveVerbatim from a
+// segment about to be summarized or dropped: they are re-appended after
+// the summary, in order, so the model keeps seeing exactly what it asked
+// to see in full.
+func splitVerbatim(segment []models.Message) (compactable, verbatim []models.Message) {
+	for _, m := range segment {
+		if m.Meta != nil && m.Meta.PreserveVerbatim {
+			verbatim = append(verbatim, m)
+			continue
+		}
+		compactable = append(compactable, m)
+	}
+	return compactable, verbatim
 }
 
 // structuredSummarize summarizes the "middle" block of messages using
@@ -399,7 +498,7 @@ func (hc *HistoryCompactor) structuredSummarize(
 		return history, nil
 	}
 
-	middleMessages := history[systemEnd:recentStart]
+	middleMessages, verbatim := splitVerbatim(history[systemEnd:recentStart])
 	if len(middleMessages) < 4 {
 		return history, nil
 	}
@@ -441,6 +540,21 @@ func (hc *HistoryCompactor) structuredSummarize(
 			return nil, fmt.Errorf("structured summarization LLM call failed: %w", err)
 		}
 	}
+	// Quality gate: a refusal, an empty or a truncated answer must never
+	// replace the segment. One retry, then the caller falls back to Level
+	// 3 (which archives the segment to CCR instead of losing it).
+	if !summaryPassesGate(response, len(segment)) {
+		hc.logger.Warn("Level 2 summary rejected by the quality gate; retrying once",
+			zap.Int("chars", len(strings.TrimSpace(response))))
+		hc.emitStatus(CompactStageSummarize, i18n.T("compact.status.summary_retry"))
+		response, err = summarizer.SendPrompt(summarizeCtx, prompt, summaryHistory, 0)
+		if err != nil {
+			return nil, fmt.Errorf("structured summarization retry failed: %w", err)
+		}
+		if !summaryPassesGate(response, len(segment)) {
+			return nil, errSummaryRejected
+		}
+	}
 
 	// Archive the FULL middle segment (untruncated, unlike the summarizer
 	// input above) before replacing it: level 1 (trim) and level 3
@@ -464,9 +578,36 @@ func (hc *HistoryCompactor) structuredSummarize(
 			SummaryOf: len(middleMessages),
 		},
 	})
+	result = append(result, verbatim...)
 	result = append(result, history[recentStart:]...)
 
 	return result, nil
+}
+
+// errSummaryRejected marks a summary that failed the quality gate twice.
+var errSummaryRejected = errors.New("summary rejected by the quality gate")
+
+// summaryPassesGate is the Level 2 quality gate: a length floor relative
+// to the summarized segment and no refusal/placeholder opening.
+func summaryPassesGate(response string, segmentChars int) bool {
+	text := strings.TrimSpace(response)
+	floor := segmentChars / 40
+	if floor > minSummaryChars {
+		floor = minSummaryChars
+	}
+	if text == "" || len(text) < floor {
+		return false
+	}
+	head := strings.ToLower(text)
+	if len(head) > 160 {
+		head = head[:160]
+	}
+	for _, refusal := range []string{"i'm sorry", "i am sorry", "i cannot", "i can't", "as an ai", "não posso", "desculpe"} {
+		if strings.HasPrefix(head, refusal) {
+			return false
+		}
+	}
+	return true
 }
 
 // Summarizer input sizing: the segment text may take this share of the
@@ -620,18 +761,32 @@ func (hc *HistoryCompactor) emergencyTruncate(history []models.Message, cfg Comp
 		return history
 	}
 
-	droppedCount := recentStart - systemEnd
+	dropped, verbatim := splitVerbatim(history[systemEnd:recentStart])
+	droppedCount := len(dropped)
+	if droppedCount == 0 {
+		return history
+	}
 
-	result := make([]models.Message, 0, systemEnd+1+keepRecent)
+	// Level 3 was the pipeline's lossy floor: archive what it drops so
+	// @recall can bring any of it back (best-effort, like Level 2).
+	recallNote := ""
+	if hc.compress != nil {
+		if key, ok := hc.compress.Archive(renderMessagesForArchive(dropped)); ok {
+			recallNote = " Full transcript of the removed messages recoverable via @recall " + compress.FormatMarker(key) + "."
+		}
+	}
+
+	result := make([]models.Message, 0, systemEnd+1+len(verbatim)+keepRecent)
 	result = append(result, history[:systemEnd]...)
 	result = append(result, models.Message{
 		Role:    "user",
-		Content: fmt.Sprintf("[CONTEXT TRUNCATED: %d messages removed due to context window limit. Recent context preserved below.]", droppedCount),
+		Content: fmt.Sprintf("[CONTEXT TRUNCATED: %d messages removed due to context window limit. Recent context preserved below.%s]", droppedCount, recallNote),
 		Meta: &models.MessageMeta{
 			IsSummary: true,
 			SummaryOf: droppedCount,
 		},
 	})
+	result = append(result, verbatim...)
 	result = append(result, history[recentStart:]...)
 
 	return result
@@ -670,7 +825,7 @@ func shrinkToBudget(history []models.Message, budget int, ccr *compress.Layer) [
 		// Pick the largest shrinkable (non-system, above-floor) message.
 		idx, maxLen := -1, floorChars
 		for i, msg := range result {
-			if msg.Role == "system" {
+			if msg.Role == "system" || (msg.Meta != nil && msg.Meta.PreserveVerbatim) {
 				continue
 			}
 			if len(msg.Content) > maxLen {

@@ -2204,10 +2204,8 @@
   "llm.zai.jwt_cached": "Using cached ZAI JWT token",
   "llm.zai.jwt_invalid_key": "Invalid ZAI API key format for JWT (expected id.secret), using raw key",
   "llm.info.using_custom_base_url": "Using custom base URL for %s: %s",
-
   "cfg.route.unknown_section": "Unknown section: %s",
   "cfg.route.hint": "Sections: all, general, providers, agent, resilience, session, integrations, auth, security, server",
-
   "cfg.val.default": "(default)",
   "cfg.val.managed_tag": "(managed)",
   "cfg.val.managed_locked_tag": "(managed · locked)",
@@ -2243,11 +2241,9 @@
   "cfg.val.budget_ok": "OK",
   "cfg.val.budget_warning": "Warning",
   "cfg.val.budget_exceeded": "Exceeded",
-
   "cfg.panorama.title": "ChatCLI — Panorama",
   "cfg.panorama.drill_down": "Drill-down:",
   "cfg.panorama.sections_hint": "Sections: providers, agent, resilience, session, integrations, auth, security, server",
-
   "cfg.section.general.title": "General",
   "cfg.section.providers.title": "Providers",
   "cfg.section.agent.title": "Agent runtime",
@@ -2331,7 +2327,6 @@
   "cfg.hub.principal": "principal",
   "cfg.hub.conversation": "conversation",
   "cfg.section.server.title": "Server / operator",
-
   "cfg.sub.quality.refine": "── Self-Refine (#5)",
   "cfg.sub.quality.verify": "── Chain-of-Verification / CoVe (#6)",
   "cfg.sub.quality.reflexion": "── Reflexion (#3)",
@@ -2344,7 +2339,6 @@
   "cfg.kv.quality.vector_count": "Vector entries",
   "cfg.kv.quality.vector_state": "Vector index",
   "cfg.val.not_attached": "(not attached)",
-
   "complete.root.thinking": "Override extended thinking / reasoning_effort for the next turn (cross-provider)",
   "complete.root.plan": "Force Plan-and-Solve / ReWOO on the next /agent or /coder run",
   "complete.root.refine": "Toggle Self-Refine post-processing for the session (on|off|auto)",
@@ -2412,7 +2406,6 @@
   "thinking.state_auto": "thinking: auto (no override active)",
   "thinking.state_off": "thinking: explicitly off (override active)",
   "thinking.state_set": "thinking: %s (override active)",
-
   "cfg.sub.general.locale": "── Locale & version",
   "cfg.sub.general.logging": "── Logging",
   "cfg.sub.general.history": "── Command history",
@@ -2486,7 +2479,6 @@
   "cfg.sub.server.watcher": "── K8s watcher (server)",
   "cfg.sub.server.audit": "── Audit",
   "cfg.sub.server.operator": "── Operator / AIOps",
-
   "cfg.kv.provider": "Provider",
   "cfg.kv.model": "Model",
   "cfg.kv.model_client": "Model (client)",
@@ -2557,7 +2549,6 @@
   "cfg.kv.last_match": "Last match",
   "cfg.kv.dotenv_path": ".env file path",
   "cfg.kv.history_file": "History file",
-
   "cfg.msg.skip_server": "No server-mode env vars detected — skipping (CLI context).",
   "cfg.msg.server_hint": "This section is only meaningful when running `chatcli server` or the operator.",
   "cfg.msg.auth_hint": "Run /auth login <provider> to authenticate.",
@@ -2569,7 +2560,6 @@
   "cfg.msg.no_contexts_attached": "(none — /context attach <name>)",
   "cfg.msg.no_persona": "(none — /agent load <name>)",
   "cfg.msg.manager_not_init": "(manager not initialized)",
-
   "ws.cmd.usage_provider": "Usage: /websearch provider <searxng|duckduckgo|auto>",
   "ws.cmd.unknown_sub": "Unknown subcommand: %s",
   "ws.cmd.usage_hint": "Usage: /websearch [list|provider <name>|reset|status]",
@@ -2596,7 +2586,6 @@
   "ws.cmd.persist_hint": "To persist, add to your shell/.env:",
   "ws.cmd.persist_unset": "unset CHATCLI_WEBSEARCH_PROVIDER",
   "ws.cmd.persist_set": "export CHATCLI_WEBSEARCH_PROVIDER=%s",
-
   "complete.config.reload": "Reload .env and reconfigure providers (same as /reload)",
   "complete.config.all": "Full dump (all sections)",
   "complete.config.general": "dotenv, locale, logging, version check",
@@ -2611,7 +2600,6 @@
   "complete.config.quality": "Seven-pattern agent quality pipeline (Self-Refine, CoVe, Reflexion, Plan-First, HyDE, Reasoning)",
   "complete.config.root_desc": "Configuration panorama (sections: all, general, providers, agent, quality, resilience, session, integrations, auth, security, server)",
   "complete.config.status_alias": "Alias of /config — configuration panorama",
-
   "complete.thinking.auto": "Clear override — defer to skill hints + quality.reasoning auto-agents",
   "complete.thinking.off": "Force NO thinking / reasoning_effort for next turn",
   "complete.thinking.on": "Alias for /thinking high — enable high-tier reasoning next turn",
@@ -2622,25 +2610,21 @@
   "complete.thinking.budget_medium": "Tier closest to 4096 thinking tokens → medium",
   "complete.thinking.budget_high": "Tier closest to 8000 thinking tokens → high (default)",
   "complete.thinking.budget_max": "Tier closest to 16384 thinking tokens → max",
-
   "complete.refine.on": "Force Self-Refine ON for this session (overrides /config quality)",
   "complete.refine.off": "Force Self-Refine OFF for this session",
   "complete.refine.once": "Arm Self-Refine for the next turn only",
   "complete.refine.auto": "Clear session override — use /config quality setting",
   "complete.refine.clear": "Alias for auto — clear session override",
-
   "complete.verify.on": "Force Chain-of-Verification ON for this session",
   "complete.verify.off": "Force Chain-of-Verification OFF for this session",
   "complete.verify.once": "Arm CoVe for the next turn only",
   "complete.verify.auto": "Clear session override — use /config quality setting",
   "complete.verify.clear": "Alias for auto — clear session override",
-
   "complete.plan.hint": "Free-text task. Without args, arms plan-first flag for the next /agent or /coder run.",
   "complete.plan.agent": "Explicit: plan-first + agent mode (same as /plan <task>)",
   "complete.plan.coder": "Plan-first + coder mode (software engineer with tools)",
   "complete.plan.preview": "Dry-run: generate and render the plan without executing anything",
   "complete.plan.dry": "Alias of preview — dry-run without execution",
-
   "complete.reflect.hint": "Free-text lesson. Persists directly to memory.Fact (category=lesson, trigger=manual) without LLM call.",
   "complete.reflect.list": "Show pending reflexion queue + DLQ entries",
   "complete.reflect.failed": "List dead-letter entries (failed lessons needing review)",
@@ -2648,8 +2632,6 @@
   "complete.reflect.purge": "Permanently delete a DLQ entry by job ID (requires <id>)",
   "complete.reflect.drain": "Force replay of WAL-pending lessons from a previous session",
   "complete.reflect.id_placeholder": "Job ID from /reflect failed (16 hex chars)",
-
-
   "complete.websearch.root_desc": "Configure web search provider (list, provider, reset, status)",
   "complete.websearch.sub_status": "Show current provider + active fallback chain",
   "complete.websearch.sub_list": "List known providers and which are configured",
@@ -2660,7 +2642,6 @@
   "complete.websearch.prov_brave": "HTML scraping, independent index, no API key",
   "complete.websearch.prov_mojeek": "HTML scraping, independent index, no API key",
   "complete.websearch.prov_auto": "Auto: DuckDuckGo first, SearxNG as fallback if configured",
-
   "hooks.cmd.not_initialized": "Hooks not initialized.",
   "hooks.cmd.box_title": "HOOKS",
   "hooks.cmd.none_configured": "No hooks configured.",
@@ -2674,7 +2655,6 @@
   "hooks.cmd.total_summary": "%d hooks (%s%d active%s)",
   "hooks.cmd.suggest_list": "List all configured hooks",
   "hooks.cmd.suggest_reload": "Reload hooks from configuration files",
-
   "mcp.dynamic.server_not_connected": "MCP server %q is not connected",
   "mcp.proxy.not_enabled": "MCP client is not enabled in this ChatCLI instance",
   "mcp.proxy.tool_not_found": "MCP tool %q not found on any connected server",
@@ -2687,8 +2667,8 @@
   "tool.usage": "Run one with: chatcli tool <name> --flag value ...  (or a single JSON envelope). No LLM call is made.",
   "agent.policy.ask_denied": "ACTION DENIED BY THE USER (security policy): %s",
   "agent.policy.ask_denied_always": "ACTION PERMANENTLY BLOCKED BY THE USER (deny rule recorded): %s",
-  "agent.policy.ask_timeout": "ACTION BLOCKED \u2014 the permission request timed out with no user response (the client may not display approval dialogs): %s",
-  "agent.policy.ask_failed": "ACTION BLOCKED \u2014 the permission request failed before the user could answer (transport error or cancelled turn): %s",
+  "agent.policy.ask_timeout": "ACTION BLOCKED — the permission request timed out with no user response (the client may not display approval dialogs): %s",
+  "agent.policy.ask_failed": "ACTION BLOCKED — the permission request failed before the user could answer (transport error or cancelled turn): %s",
   "scheduler.wait.progress": "wait_until: job %s still %s — %v elapsed, giving up in %v",
   "acp.permission.allow_once": "Allow",
   "acp.permission.allow_always": "Always allow",
@@ -2784,7 +2764,6 @@
   "mcp.cmd.usage_logs": "Usage: /mcp logs <server-name>",
   "mcp.cmd.box_logs_title": "MCP LOGS — %s",
   "mcp.cmd.no_logs": "No log lines captured yet.",
-
   "wt.cmd.usage_create": "Usage: /worktree create <branch-name>",
   "wt.cmd.usage_remove": "Usage: /worktree remove <path-or-branch>",
   "wt.cmd.err_not_git_repo": "Error: not inside a git repository.",
@@ -2815,7 +2794,6 @@
   "wt.cmd.sugg_list": "List active worktrees",
   "wt.cmd.sugg_remove": "Remove a worktree",
   "wt.cmd.sugg_status": "Show current worktree info",
-
   "cost.cmd.not_initialized": "Cost tracker not initialized.",
   "cost.cmd.box_title": "Session cost",
   "cost.cmd.provider": "Provider",
@@ -2866,7 +2844,6 @@
   "cost.cmd.output_cost": "Output: ",
   "cost.cmd.cache_cost": "Cache:",
   "cost.cmd.pricing_unavailable": "Pricing not available for this model.",
-
   "chan.cmd.box_title": "MCP channels",
   "chan.cmd.box_title_filtered": "CHANNEL: %s",
   "chan.cmd.mcp_disabled": "MCP not enabled. Channels require MCP servers.",
@@ -2897,7 +2874,6 @@
   "chan.cmd.confirm_denied": "Confirm action #%d denied.",
   "chan.cmd.run_usage": "Usage: /channel run <seq>",
   "chan.cmd.run_bad_seq": "Invalid seq number.",
-
   "chan.banner.title": "MCP channel inbox",
   "chan.banner.unread": "%d new channel message(s) since last ack",
   "chan.cmd.clear_all_done": "Inbox fully purged: %d message(s) removed, %d pending notification(s) acknowledged, audit file truncated — nothing will replay on restart",
@@ -2915,12 +2891,10 @@
   "chan.cmd.suggest_clear": "Drain the inbox (empty ring + ack); --all also truncates the audit file",
   "chan.banner.hint_ack": "Hint: /channel ack to clear, /channel list for full inbox",
   "chan.banner.more": "… and %d more item(s) — /channel list to see everything",
-
   "chan.trigger.toast_header": "trigger fired (%s) — rule %s",
   "chan.trigger.toast_confirm_hint": "Run /channel confirm %d [yes|no] to resolve",
   "chan.trigger.toast_auto_hint": "Will run on next prompt cycle. Press Esc to abort once started.",
   "chan.trigger.auto_header": "AUTO-AGENT ▶ %s   (%s/%s)",
-
   "complete.root.exit": "Exit ChatCLI",
   "complete.root.quit": "Alias of /exit - Exit ChatCLI",
   "complete.root.switch": "Switch the LLM provider; followed by --model changes the model",
@@ -2974,7 +2948,6 @@
   "graph.cmd.rendered": "Rendered the knowledge graph:",
   "graph.cmd.error": "Could not render the graph: %s",
   "graph.tool.no_node": "No graph node found for %q.",
-
   "complete.generic.flag_mode": "Set file processing mode (full, summary, chunked, smart, knowledge)",
   "complete.generic.flag_model": "Switch the model (runtime) based on the current provider (gpt-5, grok-4, etc.)",
   "complete.generic.flag_max_tokens": "Set the max tokens for the next responses (0 for default)",
@@ -2984,7 +2957,6 @@
   "complete.generic.flag_ai": "Send the command output directly to the AI to analyze; for additional context type ( @command --ai <command> > <context>)",
   "complete.generic.option_for": "Option for %s",
   "complete.generic.values_suffix": "(values: %s)",
-
   "complete.skill.user_invocable_fallback": "user-invocable skill",
   "complete.skill.sub_search": "Search for skills across registries",
   "complete.skill.sub_install": "Install a skill from a registry",
@@ -3004,7 +2976,6 @@
   "complete.skill.sub_registry_disable": "Disable a registry",
   "complete.skill.flag_reset": "Remove preference (use default order)",
   "complete.skill.prefer_local": "Prefer local version",
-
   "complete.connect.token": "Server authentication token",
   "complete.connect.provider": "LLM provider (OPENAI, CLAUDEAI, GOOGLEAI, XAI, ZAI, MINIMAX, MOONSHOT, STACKSPOT, OLLAMA, COPILOT, GITHUB_MODELS, OPENROUTER)",
   "complete.connect.model": "LLM model (gpt-4, claude-3, etc.)",
@@ -3017,7 +2988,6 @@
   "complete.connect.realm": "StackSpot: Realm/Tenant",
   "complete.connect.agent_id": "StackSpot: Agent ID",
   "complete.connect.ollama_url": "Ollama: Server base URL (e.g. http://localhost:11434)",
-
   "complete.watch.flag_deployment": "K8s deployment to monitor (required)",
   "complete.watch.flag_namespace": "Deployment namespace (default: default)",
   "complete.watch.flag_interval": "Collection interval (e.g. 10s, 1m)",
@@ -3027,7 +2997,6 @@
   "complete.watch.sub_start": "Start K8s monitoring (e.g. /watch start --deployment myapp)",
   "complete.watch.sub_stop": "Stop K8s monitoring",
   "complete.watch.sub_status": "Show active watcher status",
-
   "complete.context.root_desc": "📦 Manage persistent contexts (create, attach, detach, list, show, inspect, etc)",
   "complete.context.sub_create": "Create a context from files/directories (use --mode, --description, --tags)",
   "complete.context.sub_update": "Update an existing context (use --mode, --description, --tags)",
@@ -3089,7 +3058,6 @@
   "complete.context.name_chunks_fmt": "%d chunks",
   "complete.context.name_files_fmt": "%d files",
   "complete.context.name_tags_fmt": "tags:%s",
-
   "complete.session.root_desc": "Manage sessions (new, save, list, load, delete)",
   "complete.session.sub_new": "Create new session (clears current history)",
   "complete.session.sub_save": "Save current session with a name",
@@ -3102,14 +3070,12 @@
   "complete.session.sub_detach": "Drop the named-session binding (stop write-through)",
   "complete.session.sub_status": "Show the active session binding",
   "complete.session.saved_session": "Saved session",
-
   "complete.plugin.sub_list": "List all installed plugins.",
   "complete.plugin.sub_install": "Install a new plugin from a Git repository.",
   "complete.plugin.sub_reload": "Force reload of all installed plugins.",
   "complete.plugin.sub_show": "Show details of a specific plugin.",
   "complete.plugin.sub_inspect": "Show debug information for a plugin.",
   "complete.plugin.sub_uninstall": "Remove an installed plugin.",
-
   "complete.agent.sub_list": "List available agents",
   "complete.agent.sub_load": "Load a specific agent",
   "complete.agent.sub_attach": "Attach multiple agents to the existing session",
@@ -3120,13 +3086,11 @@
   "complete.agent.sub_off": "Disable the current agent",
   "complete.agent.sub_help": "Help for the /agent command",
   "complete.agent.flag_full": "Show full agent details",
-
   "complete.switch.root_desc": "Switch the LLM provider; followed by --model changes the model",
   "complete.switch.flag_model": "Switch the model (runtime) based on the current provider",
   "complete.switch.flag_max_tokens": "Set max tokens for the next responses (0 for default)",
   "complete.switch.flag_realm": "Change the Realm/Tenant at runtime",
   "complete.switch.flag_agent_id": "Change the agent at runtime",
-
   "complete.auth.root_desc": "Manage OAuth credentials (status, login, logout)",
   "complete.auth.sub_status": "Show authentication status for all providers",
   "complete.auth.sub_login": "Authenticate with a provider (anthropic, openai-codex, github-copilot, github-models)",
@@ -3135,7 +3099,6 @@
   "complete.auth.provider_openai_codex": "OpenAI (GPT Plus / Codex)",
   "complete.auth.provider_github_copilot": "GitHub Copilot",
   "complete.auth.provider_github_models": "GitHub Models (GPT-4o, Llama, Mistral, DeepSeek...)",
-
   "skill.cmd.installs_suffix": "installs",
   "skill.cmd.by_author": "by",
   "skill.cmd.status_enabled": "enabled",
@@ -3147,14 +3110,12 @@
   "skill.cmd.err_timeout": "unavailable (timeout)",
   "skill.cmd.err_tls": "TLS certificate error",
   "skill.cmd.err_not_found": "API endpoint not found",
-
   "persona.cmd.skills_count": "[%d skills]",
   "persona.cmd.skills_label": "Skills",
   "persona.cmd.arg_name": "<name>",
   "persona.cmd.arg_task": "<task>",
   "persona.cmd.example_agent": "create an HTTP server",
   "persona.cmd.example_coder": "refactor the code",
-
   "mem.cmd.no_notes_found_for": "No notes found for",
   "mem.cmd.profile.title": "User Profile",
   "mem.cmd.profile.empty": "No profile data yet. Interact more and the system will learn about you.",
@@ -3350,13 +3311,11 @@
   "mem.cmd.suggest.cat_project": "Project details",
   "mem.cmd.suggest.cat_personal": "Personal information",
   "mem.cmd.suggest.cat_general": "General facts",
-
   "sw.cmd.skill_swap_provider": "skill requested %s/%s — swapping for this turn",
   "sw.cmd.stream_stalled": "[Stream stalled — partial response shown]",
   "sw.cmd.could_not_list_models": "Could not list models for %s: %v",
   "sw.cmd.no_models_found": "No models found for %s",
   "sw.cmd.available_models_header": "Available models for %s (%s):",
-
   "sess.cmd.invalid_one_shot_input": "invalid input for one-shot agent mode: %s",
   "sess.cmd.fork_error": "Fork error: %v",
   "sess.cmd.fork_unsaved": "(unsaved)",
@@ -3365,12 +3324,9 @@
   "sess.cmd.fork_to": "To:",
   "sess.cmd.fork_messages": "Messages:",
   "sess.cmd.fork_footer": "Now working on the fork. The original remains intact.",
-
   "ctx.cmd.init_manager_error": "failed to initialize context manager",
   "ctx.cmd.read_response_error": "failed to read response",
-
   "cmd.core.session_fork_usage": "Usage: /session fork <new-name>",
-
   "scheduler.disabled": "Scheduler disabled for this session (CHATCLI_SCHEDULER_ENABLED=false or init failed).",
   "scheduler.created": "Job %s created (%s).",
   "scheduler.wait_async": "Wait registered in background as job %s.",
@@ -3433,12 +3389,10 @@
   "scheduler.wait.usage_example_2": "Example: /wait --until \"k8s:pod/prod/api:Ready\" --async",
   "scheduler.wait.usage_flags": "Flags: --until --then --every --timeout --max-polls --on-timeout --async --name",
   "scheduler.jobs.usage_header": "Usage: /jobs <subcommand> [args]",
-
   "help.section.scheduler": "Scheduler — Scheduling & wait-until",
   "help.command.schedule": "Schedules a job to fire at a time or cron expression. Ex: /schedule bk --cron \"0 2 * * *\" --do \"/run backup\"",
   "help.command.wait": "Waits until a condition is satisfied and optionally runs an action. Ex: /wait --until http://x/health==200 --then \"/run tests\"",
   "help.command.jobs": "Manage scheduled jobs: list, show, tree, cancel, pause, resume, logs, history, daemon, gc.",
-
   "cfg.section.scheduler.title": "Scheduler (Chronos) — Scheduling & Wait-Until",
   "cfg.sub.sched.core": "Core",
   "cfg.sub.sched.budget": "Default Budget",
@@ -3451,7 +3405,6 @@
   "cfg.kv.scheduler_queue_depth": "Queue depth",
   "cfg.kv.scheduler_audit_path": "Audit log",
   "cfg.kv.scheduler_daemon": "Daemon",
-
   "sched.complete.help": "Show command examples and flags",
   "sched.status.pending": "Waiting for next fire window",
   "sched.status.blocked": "Blocked by dependencies",
@@ -3549,7 +3502,6 @@
   "sched.jobs.daemon.start": "(use the binary: chatcli daemon start)",
   "sched.jobs.daemon.stop": "(use the binary: chatcli daemon stop)",
   "sched.jobs.daemon.restart": "(use the binary: chatcli daemon stop && start)",
-
   "help.command.parked": "list parked agents (/parked prune | gc <dur>)",
   "help.command.park_note": "send a directive to the parked agent (delivered at resume)",
   "help.command.resume": "force-resume a parked agent: /resume <token>",
@@ -3584,7 +3536,6 @@
   "park.resolve.empty": "park: empty token (use /parked to list)",
   "park.resolve.not_found": "park: no snapshot matching %q (use /parked to list)",
   "park.resolve.ambiguous": "park: token prefix %q is ambiguous (matches: %s) — use a longer prefix",
-
   "sec.cmd.usage_header": "Usage: /config security {rules|allow|deny|forget|reload} [args]",
   "sec.cmd.usage_note_pattern": "Patterns use prefix match against \"<toolName> <args>\" (e.g. \"@coder exec kubectl get\"). Deny beats Allow.",
   "sec.cmd.usage_note_scope": "Changes persist to ~/.chatcli/coder_policy.json and take effect for /coder and the scheduler on the next fire.",
@@ -3715,10 +3666,8 @@
   "complete.configimage.reset": "Clear image overrides",
   "complete.configimage.val": "value",
   "agent.spinner.working": "working",
-
   "agent.summary.block_ok": "Block #%d completed",
   "agent.summary.block_failed": "Block #%d failed",
-
   "plugins.taskgraph.describe_generic": "Task graph operation",
   "plugins.taskgraph.describe_plan": "Validating and persisting a task graph plan",
   "plugins.taskgraph.describe_run": "Executing a task graph (parallel workers + independent review)",
@@ -3741,5 +3690,8 @@
   "complete.taskgraph.dash": "Open the live browser dashboard (animated DAG, evidence, cost)",
   "plugins.taskgraph.describe_dash": "Serving the task graph dashboard",
   "complete.taskgraph.prune": "Remove old runs (default 30d; \"all\" clears everything but the active run)",
-  "plugins.taskgraph.describe_prune": "Pruning old task graph runs"
+  "plugins.taskgraph.describe_prune": "Pruning old task graph runs",
+  "cost.cmd.compactions": "Compactions: %d (level 3: %d) · summarizer %s",
+  "compact.status.summary_retry": "⚠ Summary rejected by the quality gate — retrying once",
+  "compact.error.summary_rejected": "The summary failed the quality gate (too short or a refusal); history left untouched. Try again or rephrase the instruction."
 }
