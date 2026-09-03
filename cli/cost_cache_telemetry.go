@@ -158,6 +158,10 @@ func cacheTTLFor(provider, model string) string {
 		}
 		return llmclient.AnthropicCacheTTL()
 	}
+	if (strings.Contains(p, "googleai") || strings.Contains(m, "gemini")) && llmclient.ExplicitCacheEnabled() {
+		// Explicit cachedContents live for the configured lifetime.
+		return llmclient.AnthropicCacheTTL()
+	}
 	return "5m"
 }
 

@@ -258,6 +258,11 @@ func (cli *ChatCLI) renderCostSummary() {
 		fmt.Println(p + "    " + kit.PadRight(i18n.T("cost.cmd.cache_read"), cacheW+2) +
 			ColorBold + formatTokenCount64(ct.totalCacheRead) + ColorReset + savings)
 	}
+	// Explicit cache resources: storage bought for the granted lifetimes.
+	if ct.cacheResources > 0 {
+		fmt.Println(p + "    " + colorize(i18n.T("cost.cmd.cache_storage",
+			ct.cacheResources, fmt.Sprintf("$%.4f", ct.cacheStorageUSD)), ColorGray))
+	}
 	// Session prompt-cache telemetry: hit share, misses, rebuilds ChatCLI
 	// itself caused (compaction), and whether the prefix is still warm.
 	if stats := ct.cacheStatsLocked(); stats.Reported() {

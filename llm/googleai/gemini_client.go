@@ -15,6 +15,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/diillson/chatcli/auth"
@@ -38,6 +39,11 @@ type GeminiClient struct {
 	backoff     time.Duration
 	baseURL     string
 	usageState  client.UsageState
+
+	// explicit is the cachedContents state (explicit_cache.go); lazily
+	// built so clients that never opt in pay nothing.
+	explicit     *explicitCache
+	explicitOnce sync.Once
 }
 
 // LastUsage returns the token usage from the most recent API call.
@@ -92,7 +98,7 @@ func (c *GeminiClient) SendPrompt(ctx context.Context, prompt string, history []
 		zap.Int("history_length", len(history)),
 		zap.Int("prompt_length", len(prompt)))
 
-	contents, systemInstruction := c.buildContentsAndSystem(history, prompt)
+	contents, systemInstruction, systemParts := c.buildContentsAndSystem(history, prompt)
 
 	if len(contents) == 0 && strings.TrimSpace(prompt) != "" {
 		contents = []map[string]interface{}{
@@ -117,8 +123,17 @@ func (c *GeminiClient) SendPrompt(ctx context.Context, prompt string, history []
 		"generationConfig": generationConfig,
 		"safetySettings":   c.getSafetySettings(),
 	}
+	// Explicit cache: when a cachedContents resource holds the system
+	// instruction the request references it and omits the instruction;
+	// otherwise the instruction travels inline as always.
+	cacheName := ""
 	if systemInstruction != nil {
-		reqBody["system_instruction"] = systemInstruction
+		cacheName = c.explicitCacheFor(ctx, systemParts)
+		if cacheName != "" {
+			reqBody["cachedContent"] = cacheName
+		} else {
+			reqBody["system_instruction"] = systemInstruction
+		}
 	}
 
 	jsonValue, err := json.Marshal(reqBody)
@@ -145,6 +160,22 @@ func (c *GeminiClient) SendPrompt(ctx context.Context, prompt string, history []
 		return response, nil
 	})
 
+	if err != nil && cacheName != "" && isExplicitCacheRejection(err) {
+		// The resource is gone (expired, deleted, model changed): drop it
+		// and send this very request with the instruction inline. The turn
+		// must never fail because of a cache.
+		c.logger.Warn("Gemini rejected the explicit cache; retrying with the system instruction inline",
+			zap.String("cache", cacheName), zap.Error(err))
+		c.invalidateExplicitCache(cacheName)
+		delete(reqBody, "cachedContent")
+		reqBody["system_instruction"] = systemInstruction
+		if jsonValue, err = json.Marshal(reqBody); err == nil {
+			response, err = utils.Retry(ctx, c.logger, c.maxAttempts, c.backoff, func(ctx context.Context) (string, error) {
+				return c.executeRequest(ctx, jsonValue)
+			})
+		}
+	}
+
 	if err != nil {
 		client.LogRequestFinish(c.logger, "GOOGLEAI", c.model, "error", time.Since(start))
 		c.logger.Error(i18n.T("llm.error.get_response_after_retries", "Google AI"), zap.Error(err))
@@ -159,7 +190,7 @@ func (c *GeminiClient) SendPrompt(ctx context.Context, prompt string, history []
 	return response, nil
 }
 
-func (c *GeminiClient) buildContentsAndSystem(history []models.Message, prompt string) ([]map[string]interface{}, map[string]interface{}) {
+func (c *GeminiClient) buildContentsAndSystem(history []models.Message, prompt string) ([]map[string]interface{}, map[string]interface{}, []map[string]string) {
 	var contents []map[string]interface{}
 	var systemParts []map[string]string
 
@@ -189,7 +220,7 @@ func (c *GeminiClient) buildContentsAndSystem(history []models.Message, prompt s
 		}
 	}
 
-	return contents, systemInstruction
+	return contents, systemInstruction, systemParts
 }
 
 // executeRequest executa a requisição HTTP para a API do Gemini

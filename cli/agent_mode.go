@@ -973,6 +973,12 @@ func (a *AgentMode) Run(ctx context.Context, query string, additionalContext str
 	// tree view possible. A park suspension counts as a clean end.
 	orchCtx, orchRun := a.beginOrchestratorRun(ctx, query, systemPromptOverride)
 	ctx = orchCtx
+
+	// CHATCLI_PROMPT_CACHE_TTL=auto: the agent/coder loop prefers the hour
+	// (long sessions that pause between tool rounds); chat and one-shot
+	// keep the 5-minute default, restored when this run ends.
+	llmclient.SetPromptCacheTTLHint("1h")
+	defer llmclient.SetPromptCacheTTLHint("5m")
 	defer func() {
 		orchRun.End(nil)
 	}()

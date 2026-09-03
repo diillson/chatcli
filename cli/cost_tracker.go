@@ -106,6 +106,12 @@ type SessionCostData struct {
 	TotalCostUSD  float64                      `json:"total_cost_usd"`
 	TotalRequests int                          `json:"total_requests"`
 	TotalTokens   int64                        `json:"total_tokens,omitempty"`
+
+	// Explicit cache resources (Gemini cachedContents): storage billed per
+	// token-hour, priced from lifecycle events (cost_cache_resources.go).
+	CacheResources         int     `json:"cache_resources,omitempty"`
+	CacheStorageTokenHours float64 `json:"cache_storage_token_hours,omitempty"`
+	CacheStorageCostUSD    float64 `json:"cache_storage_cost_usd,omitempty"`
 }
 
 // CostTracker tracks token usage and estimated cost for the current session,
@@ -146,6 +152,11 @@ type CostTracker struct {
 
 	// Prompt-cache telemetry (provider-neutral, fed by RecordRealUsage).
 	cache cacheTelemetry
+
+	// Explicit cache resources: storage cost outside any usage record.
+	cacheResources         int
+	cacheStorageTokenHours float64
+	cacheStorageUSD        float64
 
 	// Persistence write-through throttle.
 	lastSave time.Time
@@ -423,6 +434,10 @@ func (ct *CostTracker) snapshotLocked() SessionCostData {
 		TotalCostUSD:  ct.totalCostUSD,
 		TotalRequests: ct.totalRequests,
 		TotalTokens:   ct.totalPromptTokens + ct.totalCompletionTokens,
+
+		CacheResources:         ct.cacheResources,
+		CacheStorageTokenHours: ct.cacheStorageTokenHours,
+		CacheStorageCostUSD:    ct.cacheStorageUSD,
 	}
 }
 
@@ -570,6 +585,9 @@ func (ct *CostTracker) RestoreSession(sessionID string) error {
 	if ct.modelUsage == nil {
 		ct.modelUsage = make(map[string]*ModelUsageRecord)
 	}
+	ct.cacheResources = data.CacheResources
+	ct.cacheStorageTokenHours = data.CacheStorageTokenHours
+	ct.cacheStorageUSD = data.CacheStorageCostUSD
 	ct.recomputeAggregates()
 	return nil
 }
@@ -742,6 +760,7 @@ func (ct *CostTracker) recomputeAggregates() {
 		ct.totalRequests += rec.Requests
 		ct.totalCostUSD += rec.TotalCostUSD
 	}
+	ct.totalCostUSD += ct.cacheStorageUSD
 }
 
 func (ct *CostTracker) budgetLevelLocked() BudgetLevel {
@@ -1267,8 +1286,12 @@ func getCachePricing(provider, model string) (cacheWriteCost, cacheReadCost floa
 		}
 		return 0, inputCost * 0.16
 	case strings.Contains(model, "gemini"):
-		// Google implicit/context caching: reads at 25% of input.
-		return 0, inputCost * 0.25
+		// Google context caching (implicit or explicit): cached reads at
+		// 10% of input across the 2.5/3.x families
+		// (ai.google.dev/gemini-api/docs/pricing, Sep/2026). Explicit
+		// resources add storage per token-hour, priced separately from
+		// lifecycle events (cost_cache_resources.go).
+		return 0, inputCost * 0.10
 	case strings.Contains(model, "gpt"), strings.Contains(model, "o1"),
 		strings.Contains(model, "o3"), strings.Contains(model, "o4"):
 		// OpenAI automatic prompt caching: hits at 50% of input, no write
