@@ -236,7 +236,7 @@ func ResealFile(path string) (bool, error) {
 	if !Enabled() {
 		return false, ErrKeyMissing
 	}
-	data, err := os.ReadFile(path) // #nosec G304 -- store path chosen by the caller (operator-owned state)
+	data, err := os.ReadFile(path) // #nosec G304 G703 -- store path enumerated by the caller's walk of the operator-owned state root, never model or network input
 	if err != nil {
 		return false, err
 	}
@@ -273,7 +273,7 @@ func ResealLines(path, linePrefix string) (int, error) {
 	if !Enabled() {
 		return 0, ErrKeyMissing
 	}
-	data, err := os.ReadFile(path) // #nosec G304 -- store path chosen by the caller (operator-owned state)
+	data, err := os.ReadFile(path) // #nosec G304 G703 -- store path enumerated by the caller's walk of the operator-owned state root, never model or network input
 	if err != nil {
 		return 0, err
 	}

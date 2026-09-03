@@ -213,7 +213,7 @@ func auditEntryHash(e llmAuditEntry) string {
 // existing trail (0, "" for a new or legacy file), so a restarted process
 // continues the chain instead of starting a new one.
 func auditChainTail(path string) (int64, string) {
-	f, err := os.Open(path) // #nosec G304 -- operator-configured audit path, cleaned by the caller
+	f, err := os.Open(path) // #nosec G304 G703 -- operator-configured audit path (env), cleaned and required absolute by the caller
 	if err != nil {
 		return 0, ""
 	}
@@ -248,7 +248,7 @@ func (r AuditChainReport) Intact() bool { return r.BrokenAt == 0 }
 // or previous-hash link does not match.
 func VerifyAuditChain(path string) (AuditChainReport, error) {
 	var rep AuditChainReport
-	f, err := os.Open(path) // #nosec G304 -- operator-supplied audit path
+	f, err := os.Open(path) // #nosec G304 G703 -- operator-supplied audit path (env or /config security verify-audit argument typed by the operator)
 	if err != nil {
 		return rep, err
 	}
