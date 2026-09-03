@@ -1309,3 +1309,11 @@ func cacheWrite1hCost(provider, model string, write5m float64) float64 {
 	}
 	return write5m
 }
+
+// sessionIDSnapshot returns the current cost-session id (reset by /cost
+// reset); the audit trail keys its lines by it.
+func (ct *CostTracker) sessionIDSnapshot() string {
+	ct.mu.RLock()
+	defer ct.mu.RUnlock()
+	return ct.sessionID
+}
