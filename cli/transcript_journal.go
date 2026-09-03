@@ -271,21 +271,11 @@ func pruneTranscripts(dir string, ttl time.Duration) int {
 	return removed
 }
 
-// transcriptTTL mirrors the machine-session policy (CHATCLI_SESSION_TTL in
-// days, 90 by default, 0 disables expiry).
+// transcriptTTL mirrors the machine-session policy (see sessionTTLDuration
+// in retention.go): CHATCLI_SESSION_TTL in days, 90 by default, 0 disables
+// expiry.
 func transcriptTTL() time.Duration {
-	days := 90
-	if v := os.Getenv("CHATCLI_SESSION_TTL"); v != "" {
-		if n, err := strconv.Atoi(strings.TrimSuffix(v, "d")); err == nil {
-			if n == 0 {
-				return 0
-			}
-			if n > 0 {
-				days = n
-			}
-		}
-	}
-	return time.Duration(days) * 24 * time.Hour
+	return sessionTTLDuration()
 }
 
 // --- ChatCLI wiring ---

@@ -1273,6 +1273,9 @@ func (cli *ChatCLI) Start(ctx context.Context) {
 	if cli.sessionManager != nil {
 		go cli.sessionManager.CleanExpiredMachineSessions()
 	}
+	// Same TTL for the stores that never expired on their own (park
+	// snapshots, cost snapshots); see retention.go and /config retention.
+	go cli.runRetentionPass()
 	// Cache de release vencido ganha um refresh síncrono de orçamento curto
 	// para a PRÓPRIA welcome anunciar release nova de imediato; o fluxo em
 	// background cobre o timeout (aviso drenado no turno seguinte), renova o

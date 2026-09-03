@@ -92,6 +92,8 @@ func (cli *ChatCLI) routeConfigCommand(ctx context.Context, args []string) {
 		cli.routeConfigUI(args)
 	case "resilience", "proxy":
 		cli.showConfigResilience()
+	case "retention", "lifecycle":
+		cli.showConfigRetention()
 	case "session":
 		cli.showConfigSession()
 	case "integrations", "integration":
