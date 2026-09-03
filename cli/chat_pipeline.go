@@ -52,6 +52,7 @@ import (
 // emitted to debug logs and consumed by tests.
 type chatSystemAssembly struct {
 	parts     []models.ContentBlock
+	sections  []promptSection // parallel labels for /context status
 	modelHint string
 	effort    client.SkillEffort
 	pinnedHit int
@@ -127,13 +128,13 @@ func (cli *ChatCLI) assembleChatSystemPrompt(
 	}
 
 	// ── Stable cached prefix ──
-	out.parts = append(out.parts, cli.modeAndLanguagePart())     // Part 0
-	out.parts = append(out.parts, cli.attachedContextParts()...) // Part 1
-	if block, ok := pinnedSkillBlock(pinned); ok {               // Part 2
-		out.parts = append(out.parts, block)
+	out.add("mode", cli.modeAndLanguagePart())         // Part 0
+	out.add("attached", cli.attachedContextParts()...) // Part 1
+	if block, ok := pinnedSkillBlock(pinned); ok {     // Part 2
+		out.add("skills_pinned", block)
 	}
 	if part, ok := cli.mcpToolsPart(); ok { // Part 3
-		out.parts = append(out.parts, part)
+		out.add("mcp_tools", part)
 	}
 
 	// ── Volatile suffix (no cache hints) ──
@@ -143,32 +144,32 @@ func (cli *ChatCLI) assembleChatSystemPrompt(
 	// fresh session hintless — exactly when proactive recall matters most.
 	hints := cli.turnHints(userInput)
 	if part, ok := cli.workspaceContextPart(ctx, userInput, hints); ok { // Part 4
-		out.parts = append(out.parts, part)
+		out.add("workspace_memory", part)
 	}
 	// Part 4b: semantic /context retrieval (--rag). Query-driven, so it lives
 	// here in the volatile zone — never the cached prefix it would otherwise
 	// poison for every block after it.
-	out.parts = append(out.parts, cli.retrievedContextParts(ctx, userInput)...)
+	out.add("retrieved", cli.retrievedContextParts(ctx, userInput)...)
 	if manualSkill != nil { // Part 5
 		if block := renderManualSkillBlock(manualSkill, manualSkillArgs); block != "" {
-			out.parts = append(out.parts, models.ContentBlock{Type: "text", Text: block})
+			out.add("skill_manual", models.ContentBlock{Type: "text", Text: block})
 		}
 	}
 	if block, ok := autoSkillBlock(autoActivated); ok { // Part 6
-		out.parts = append(out.parts, block)
+		out.add("skills_auto", block)
 	}
 	if part, ok := cli.mcpChannelPart(); ok { // Part 7
-		out.parts = append(out.parts, part)
+		out.add("mcp_channels", part)
 	}
 	if part, ok := cli.watcherContextPart(); ok { // Part 8
-		out.parts = append(out.parts, part)
+		out.add("watcher", part)
 	}
 	// Part 8b: proactive memory auto-recall — top hint-matching facts, only
 	// meaningful in index mode (full mode already pushes the whole
 	// retrieval). Mirrors the agent/coder wiring; own env gate inside.
 	if cli.chatEffectiveMemoryMode() == memModeIndex {
 		if ar := cli.memoryAutoRecallBlock(hints); ar != "" {
-			out.parts = append(out.parts, models.ContentBlock{Type: "text", Text: ar})
+			out.add("memory_recall", models.ContentBlock{Type: "text", Text: ar})
 		}
 	}
 	// Part 8c: proactive SESSION recall (own gate, orthogonal to the memory
@@ -178,11 +179,12 @@ func (cli *ChatCLI) assembleChatSystemPrompt(
 	// header: chat has no @session tool, so the model surfaces the pointer
 	// to the user instead of pulling.
 	if sr := cli.chatSessionAutoRecallBlock(hints, userInput); sr != "" {
-		out.parts = append(out.parts, models.ContentBlock{Type: "text", Text: sr})
+		out.add("session_recall", models.ContentBlock{Type: "text", Text: sr})
 	}
 	if part, ok := cli.dynamicContextPart(); ok { // Part 9
-		out.parts = append(out.parts, part)
+		out.add("dynamic", part)
 	}
+	cli.promptBreakdowns.record("chat", out.sections)
 	return out
 }
 
@@ -710,6 +712,7 @@ func (cli *ChatCLI) executeStreamingTurn(
 	}
 	if result.Usage != nil && cli.costTracker != nil {
 		cli.costTracker.RecordRealUsage(resolution.Provider, resolution.Model, result.Usage)
+		cli.observeTokenCalibration(resolution.Provider, resolution.Model, result.Usage)
 		cli.maybeAnnounceBudget()
 		cli.maybeAnnounceCacheMisses()
 	}
@@ -779,6 +782,7 @@ func (cli *ChatCLI) handleChatTurnResult(
 	cli.turnUsageRecorded = false
 	if cli.costTracker != nil && !client.IsStreamingCapable(activeClient) && !alreadyRecorded {
 		cli.costTracker.RecordRealUsage(resolution.Provider, resolution.Model, usage)
+		cli.observeTokenCalibration(resolution.Provider, resolution.Model, usage)
 	}
 	cli.renderAssistantResponse(activeClient, aiResponse, elapsed, usage, resolution.Provider, resolution.Model)
 	cli.maybeAnnounceBudget()

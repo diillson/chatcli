@@ -1173,6 +1173,19 @@ func (a *AgentMode) Run(ctx context.Context, query string, additionalContext str
 	}
 
 	sysMsg := buildAgentSystemMessage(coreText, toolsText, workspaceText, skillsText, orchestratorText, channelsText, dynamicText)
+	breakdownMode := "agent"
+	if isCoder {
+		breakdownMode = "coder"
+	}
+	a.cli.promptBreakdowns.record(breakdownMode, []promptSection{
+		{Name: "core", Chars: len(strings.TrimSpace(coreText)), Cached: true},
+		{Name: "tools", Chars: len(strings.TrimSpace(toolsText)), Cached: true},
+		{Name: "orchestrator", Chars: len(strings.TrimSpace(orchestratorText)), Cached: true},
+		{Name: "workspace_memory", Chars: len(strings.TrimSpace(workspaceText))},
+		{Name: "skills", Chars: len(strings.TrimSpace(skillsText))},
+		{Name: "mcp_channels", Chars: len(strings.TrimSpace(channelsText))},
+		{Name: "dynamic", Chars: len(strings.TrimSpace(dynamicText))},
+	})
 
 	// Inicializa ou atualiza o histórico com o System Prompt correto.
 	//
@@ -2354,6 +2367,11 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 			turnUsage = llmclient.GetUsageOrEstimate(turnClient, inputChars, len(aiResponse))
 			effProvider, effModel := a.effectiveRoute()
 			a.cli.costTracker.RecordRealUsage(effProvider, effModel, turnUsage)
+			// Learn the real chars-per-token ratio for this provider/model
+			// from what was actually sent and what the API counted.
+			if turnUsage != nil && turnUsage.IsReal {
+				globalTokenCalibrator.Observe(effProvider, effModel, promptCharsOf(turnHistory), contextTokens(effProvider, effModel, turnUsage))
+			}
 			a.cli.maybeAnnounceBudget()
 			a.cli.maybeAnnounceCacheMisses()
 		}

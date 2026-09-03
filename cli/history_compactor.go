@@ -55,6 +55,10 @@ type CompactConfig struct {
 	BudgetRatio   float64 // fraction of context window to use (default 0.75)
 	MinKeepRecent int     // minimum recent messages to keep verbatim (default 10)
 	CharsPerToken int     // character-to-token ratio estimate (default 4)
+	// CharsPerTokenPrecise, when > 0, is the learned chars-per-token ratio
+	// for the provider/model (see tokenCalibrator) and takes precedence
+	// over the integer default in the budget math.
+	CharsPerTokenPrecise float64
 
 	// MaxPayloadBytes caps the serialized request body size in bytes.
 	// When > 0, overrides the context-window budget if it would yield
@@ -125,6 +129,11 @@ func DefaultCompactConfig(provider, model string) CompactConfig {
 		MinKeepRecent: 10,
 		CharsPerToken: 4,
 	}
+	// Learned ratio from the provider's own token counts, when a session
+	// has produced one — the budget then measures what the model measures.
+	if ratio, samples := globalTokenCalibrator.CharsPerToken(provider, model); samples > 0 {
+		cfg.CharsPerTokenPrecise = ratio
+	}
 	// Human-friendly env: CHATCLI_MAX_PAYLOAD=5MB / 512KB / 2.5MB.
 	if v := os.Getenv("CHATCLI_MAX_PAYLOAD"); v != "" {
 		if n := ParsePayloadSize(v); n > 0 {
@@ -177,7 +186,11 @@ func (hc *HistoryCompactor) emitStatus(stage CompactStage, msg string) {
 func (hc *HistoryCompactor) CharBudget(cfg CompactConfig) int {
 	contextWindow := catalog.GetContextWindow(cfg.Provider, cfg.Model)
 	tokenBudget := int(float64(contextWindow) * cfg.BudgetRatio)
-	budget := tokenBudget * cfg.CharsPerToken
+	charsPerToken := float64(cfg.CharsPerToken)
+	if cfg.CharsPerTokenPrecise > 0 {
+		charsPerToken = cfg.CharsPerTokenPrecise
+	}
+	budget := int(float64(tokenBudget) * charsPerToken)
 
 	// Proxy / gateway payload cap. Leave 30% headroom for system prompt,
 	// tool definitions and JSON serialization overhead.

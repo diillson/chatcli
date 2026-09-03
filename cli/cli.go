@@ -287,6 +287,10 @@ type ChatCLI struct {
 	// one. Session totals live in /config compression stats.
 	compressionSavedShown int64
 
+	// Latest assembled system-prompt breakdown (chat and agent paths write
+	// it, /context status reads it).
+	promptBreakdowns promptBreakdownStore
+
 	// Session language-server pool behind the @lsp tool. Created lazily on
 	// the first @lsp call (starting gopls for sessions that never navigate
 	// code would be waste) and shut down with the session.
