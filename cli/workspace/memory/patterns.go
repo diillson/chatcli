@@ -3,7 +3,6 @@ package memory
 import (
 	"encoding/json"
 	"fmt"
-	"os"
 	"sort"
 	"strings"
 	"sync"
@@ -299,7 +298,7 @@ func formatStat(format string, args ...interface{}) string {
 }
 
 func (pd *PatternDetector) load() {
-	data, err := os.ReadFile(pd.path)
+	data, err := readStoreFile(pd.path)
 	if err != nil {
 		return
 	}

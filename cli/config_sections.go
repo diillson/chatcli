@@ -1374,6 +1374,10 @@ func (cli *ChatCLI) showConfigSecurity() {
 	cli.renderCoderPolicy(p)
 
 	fmt.Println(p)
+	subheader(p, "cfg.sub.sec.atrest")
+	cli.renderAtRestStatus(p)
+
+	fmt.Println(p)
 	subheader(p, "cfg.sub.sec.tls")
 	kv(p, "CHATCLI_ALLOW_HTTP_PROVIDERS", envBool("CHATCLI_ALLOW_HTTP_PROVIDERS"))
 	kv(p, "CHATCLI_ALLOW_INSECURE", envBool("CHATCLI_ALLOW_INSECURE"))

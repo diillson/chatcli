@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/diillson/chatcli/pkg/atrest"
 	"github.com/diillson/chatcli/utils"
 	"go.uber.org/zap"
 )
@@ -29,6 +30,16 @@ var errContextCorrupt = errors.New("context file corrupt")
 // load, and a rename without fsync can survive a crash while the bytes it
 // points to do not.
 func atomicWrite(path string, data []byte) error {
+	sealed, err := atrest.Seal(data)
+	if err != nil {
+		return err
+	}
+	return utils.AtomicWriteFile(path, sealed, 0o600)
+}
+
+// atomicWritePlain is atomicWrite without the seal, for exports meant to
+// leave the machine readable.
+func atomicWritePlain(path string, data []byte) error {
 	return utils.AtomicWriteFile(path, data, 0o600)
 }
 
@@ -84,6 +95,9 @@ func (s *Storage) LoadContext(contextID string) (*FileContext, error) {
 	filePath := s.getContextPath(contextID)
 
 	data, err := os.ReadFile(filePath) //#nosec G304 -- path supplied by user/agent through validated tool surface (boundary check upstream)
+	if err == nil {
+		data, err = atrest.Open(data)
+	}
 	if err != nil {
 		return nil, fmt.Errorf("erro ao ler contexto: %w", err)
 	}
@@ -183,7 +197,7 @@ func (s *Storage) ExportContext(ctx *FileContext, targetPath string) error {
 		return fmt.Errorf("erro ao serializar contexto para exportação: %w", err)
 	}
 
-	if err := atomicWrite(targetPath, data); err != nil {
+	if err := atomicWritePlain(targetPath, data); err != nil {
 		return fmt.Errorf("erro ao exportar contexto: %w", err)
 	}
 

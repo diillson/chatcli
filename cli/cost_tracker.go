@@ -8,6 +8,7 @@ package cli
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/diillson/chatcli/pkg/atrest"
 	"os"
 	"path/filepath"
 	"sort"
@@ -575,6 +576,9 @@ func (ct *CostTracker) SaveSession() error {
 	if err != nil {
 		return fmt.Errorf("marshal cost session: %w", err)
 	}
+	if b, err = atrest.Seal(b); err != nil {
+		return fmt.Errorf("seal cost session: %w", err)
+	}
 
 	// Atomic write with a UNIQUE temp name: concurrent saves (worker
 	// recorder goroutines race the main turn) must never interleave writes
@@ -642,6 +646,9 @@ func (ct *CostTracker) RestoreSession(sessionID string) error {
 func LoadCostSnapshot(sessionID string) (*SessionCostData, error) {
 	path := filepath.Join(costStoreDir(), filepath.Base(sessionID)+".json")
 	b, err := os.ReadFile(filepath.Clean(path))
+	if err == nil {
+		b, err = atrest.Open(b)
+	}
 	if err != nil {
 		return nil, err
 	}

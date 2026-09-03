@@ -125,7 +125,7 @@ func (gc *GraphCache) SetSource(build func() *knowledge.Graph, fingerprint func(
 // (missing, corrupt, wrong schema, stale fingerprint) discards the file —
 // the graph is re-derivable, so there is nothing to preserve.
 func (gc *GraphCache) loadPersisted(currentFP string) (*knowledge.Graph, bool) {
-	data, err := os.ReadFile(gc.path)
+	data, err := readStoreFile(gc.path)
 	if err != nil {
 		return nil, false // missing is the common first-boot case
 	}

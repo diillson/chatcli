@@ -17,6 +17,10 @@
 package cli
 
 import (
+	"bufio"
+	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -60,18 +64,27 @@ type llmAuditEntry struct {
 	OutputTokens     int    `json:"output_tokens,omitempty"`
 	CacheReadTokens  int    `json:"cache_read_tokens,omitempty"`
 	CacheWriteTokens int    `json:"cache_write_tokens,omitempty"`
+
+	// Seq, PrevHash and Hash chain the trail: Hash = SHA-256(PrevHash ‖
+	// canonical JSON of the entry without Hash). A removed, edited or
+	// reordered line breaks the chain from that point on (VerifyAuditChain).
+	Seq      int64  `json:"seq"`
+	PrevHash string `json:"prev_hash,omitempty"`
+	Hash     string `json:"hash"`
 }
 
 // llmAuditWriter appends entries to the audit file.
 type llmAuditWriter struct {
-	mu      sync.Mutex
-	f       *os.File
-	enc     *json.Encoder
-	surface string
-	session func() string
-	tenant  func() string
-	usage   func() *models.UsageInfo
-	logger  *zap.Logger
+	mu       sync.Mutex
+	f        *os.File
+	enc      *json.Encoder
+	seq      int64
+	lastHash string
+	surface  string
+	session  func() string
+	tenant   func() string
+	usage    func() *models.UsageInfo
+	logger   *zap.Logger
 }
 
 // initLLMAudit installs the request auditor when the audit path is
@@ -98,6 +111,7 @@ func (cli *ChatCLI) initLLMAudit(surface string) {
 		return
 	}
 	w := &llmAuditWriter{f: f, enc: json.NewEncoder(f), surface: surface, logger: cli.logger}
+	w.seq, w.lastHash = auditChainTail(clean)
 	w.session = func() string {
 		if cli.costTracker == nil {
 			return ""
@@ -169,9 +183,107 @@ func (w *llmAuditWriter) record(ev client.RequestAuditEvent) {
 	}
 	w.mu.Lock()
 	defer w.mu.Unlock()
+	w.seq++
+	entry.Seq = w.seq
+	entry.PrevHash = w.lastHash
+	entry.Hash = auditEntryHash(entry)
 	if err := w.enc.Encode(entry); err != nil && w.logger != nil {
 		w.logger.Warn("audit log write failed", zap.Error(err))
+		return
 	}
+	w.lastHash = entry.Hash
+}
+
+// auditEntryHash computes the chain hash of an entry (its Hash field
+// excluded, PrevHash included).
+func auditEntryHash(e llmAuditEntry) string {
+	e.Hash = ""
+	canonical, err := json.Marshal(e)
+	if err != nil {
+		return ""
+	}
+	h := sha256.New()
+	h.Write([]byte(e.PrevHash))
+	h.Write([]byte{0})
+	h.Write(canonical)
+	return hex.EncodeToString(h.Sum(nil))
+}
+
+// auditChainTail returns the last sequence number and hash recorded in an
+// existing trail (0, "" for a new or legacy file), so a restarted process
+// continues the chain instead of starting a new one.
+func auditChainTail(path string) (int64, string) {
+	f, err := os.Open(path) // #nosec G304 G703 -- operator-configured audit path (env), cleaned and required absolute by the caller
+	if err != nil {
+		return 0, ""
+	}
+	defer func() { _ = f.Close() }()
+	var seq int64
+	var last string
+	sc := bufio.NewScanner(f)
+	sc.Buffer(make([]byte, 0, 256*1024), 16*1024*1024)
+	for sc.Scan() {
+		var e llmAuditEntry
+		if err := json.Unmarshal(sc.Bytes(), &e); err != nil || e.Hash == "" {
+			continue
+		}
+		seq, last = e.Seq, e.Hash
+	}
+	return seq, last
+}
+
+// AuditChainReport is the outcome of VerifyAuditChain.
+type AuditChainReport struct {
+	Entries  int
+	Chained  int // entries carrying a hash
+	Legacy   int // entries written before the chain existed
+	BrokenAt int // 1-based line of the first break (0 = intact)
+	Err      string
+}
+
+// Intact reports whether every chained entry verified.
+func (r AuditChainReport) Intact() bool { return r.BrokenAt == 0 }
+
+// VerifyAuditChain re-hashes a trail and reports the first line whose hash
+// or previous-hash link does not match.
+func VerifyAuditChain(path string) (AuditChainReport, error) {
+	var rep AuditChainReport
+	f, err := os.Open(path) // #nosec G304 G703 -- operator-supplied audit path (env or /config security verify-audit argument typed by the operator)
+	if err != nil {
+		return rep, err
+	}
+	defer func() { _ = f.Close() }()
+	sc := bufio.NewScanner(f)
+	sc.Buffer(make([]byte, 0, 256*1024), 16*1024*1024)
+	prev := ""
+	line := 0
+	for sc.Scan() {
+		line++
+		if len(bytes.TrimSpace(sc.Bytes())) == 0 {
+			continue
+		}
+		rep.Entries++
+		var e llmAuditEntry
+		if err := json.Unmarshal(sc.Bytes(), &e); err != nil {
+			rep.BrokenAt, rep.Err = line, "unparseable entry"
+			return rep, nil
+		}
+		if e.Hash == "" {
+			rep.Legacy++
+			continue
+		}
+		rep.Chained++
+		if e.PrevHash != prev {
+			rep.BrokenAt, rep.Err = line, "previous-hash link mismatch"
+			return rep, nil
+		}
+		if auditEntryHash(e) != e.Hash {
+			rep.BrokenAt, rep.Err = line, "entry hash mismatch"
+			return rep, nil
+		}
+		prev = e.Hash
+	}
+	return rep, sc.Err()
 }
 
 // close detaches the sink and closes the file.

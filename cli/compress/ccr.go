@@ -10,6 +10,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"github.com/diillson/chatcli/pkg/atrest"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -424,7 +425,13 @@ func (s *DiskStore) Put(content string) (string, error) {
 		return "", err
 	}
 	tmpName := tmp.Name()
-	if _, werr := tmp.WriteString(content); werr != nil {
+	payload, serr := atrest.Seal([]byte(content))
+	if serr != nil {
+		_ = tmp.Close()
+		_ = os.Remove(tmpName)
+		return "", serr
+	}
+	if _, werr := tmp.Write(payload); werr != nil {
 		_ = tmp.Close()
 		_ = os.Remove(tmpName)
 		return "", werr
@@ -493,6 +500,9 @@ func (s *DiskStore) Get(key string) (string, bool, error) {
 		}
 		return "", false, err
 	}
+	if data, err = atrest.Open(data); err != nil {
+		return "", false, err
+	}
 	now := time.Now()
 	e.lastAccess = now
 	_ = os.Chtimes(s.path(key), now, now)
@@ -517,6 +527,9 @@ func (s *DiskStore) adoptFromDiskLocked(key string) (string, bool, error) {
 	s.entries[key] = &diskEntry{size: int64(len(data)), lastAccess: now}
 	s.totalBytes += int64(len(data))
 	_ = os.Chtimes(s.path(key), now, now)
+	if data, err = atrest.Open(data); err != nil {
+		return "", false, err
+	}
 	return string(data), true, nil
 }
 
