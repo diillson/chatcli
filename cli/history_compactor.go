@@ -140,6 +140,11 @@ func DefaultCompactConfig(provider, model string) CompactConfig {
 		MinKeepRecent: 10,
 		CharsPerToken: 4,
 	}
+	// Catalog-declared threshold for this model (the session /autocompact
+	// override is applied by the caller and wins).
+	if r := catalog.GetCompactRatio(provider, model); r > 0 {
+		cfg.BudgetRatio = r
+	}
 	// Learned ratio from the provider's own token counts, when a session
 	// has produced one — the budget then measures what the model measures.
 	if ratio, samples := globalTokenCalibrator.CharsPerToken(provider, model); samples > 0 {

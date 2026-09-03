@@ -225,7 +225,7 @@ func (ch *CommandHandler) buildRoutes() {
 		},
 		"/reset":  ch.resetTerminal,
 		"/redraw": ch.resetTerminal,
-		"/clear":  ch.resetTerminal,
+		"/clear":  func(ctx context.Context, _ string) bool { c.clearConversation(ctx); return false },
 	}
 
 	// Order preserved from the historical switch. word=true entries match

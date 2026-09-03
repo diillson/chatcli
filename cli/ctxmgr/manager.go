@@ -707,6 +707,20 @@ func (m *Manager) UpdateContext(ctx context.Context, name string, newPaths []str
 // CORREÇÃO 2: Refatorada para usar a estrutura de dados correta e lidar com chunks selecionados.
 // BuildPromptMessages agora considera chunks selecionados
 func (m *Manager) BuildPromptMessages(sessionID string, opts FormatOptions) ([]models.Message, error) {
+	msgs, _, err := m.BuildPromptMessagesBudgeted(sessionID, opts, 0)
+	return msgs, err
+}
+
+// foldedDigestBudget is the compact index card a knowledge base shrinks to
+// when the prompt budget is tight.
+const foldedDigestBudget = 900
+
+// BuildPromptMessagesBudgeted is BuildPromptMessages under a character
+// budget (0 = unbounded). When the running total would cross maxChars,
+// knowledge digests shrink to their compact card and whole-content
+// attachments fold into an index card naming the files and how to pull
+// them. Returns the names of the contexts that folded.
+func (m *Manager) BuildPromptMessagesBudgeted(sessionID string, opts FormatOptions, maxChars int) ([]models.Message, []string, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
@@ -717,8 +731,11 @@ func (m *Manager) BuildPromptMessages(sessionID string, opts FormatOptions) ([]m
 	// different method, not something this read path may lean on.
 	attachments := append([]AttachedContext(nil), m.attachedContexts[sessionID]...)
 	if len(attachments) == 0 {
-		return nil, nil
+		return nil, nil, nil
 	}
+	used := 0
+	var folded []string
+	over := func(n int) bool { return maxChars > 0 && used+n > maxChars }
 
 	// Ordenar por prioridade (menor primeiro)
 	sort.Slice(attachments, func(i, j int) bool {
@@ -740,9 +757,15 @@ func (m *Manager) BuildPromptMessages(sessionID string, opts FormatOptions) ([]m
 		// hybrid-retrieval block. This is what keeps a multi-MB corpus at a
 		// fixed few-hundred-token cost.
 		if ctx.Mode == ModeKnowledge {
+			digest := m.KnowledgeDigest(ctx)
+			if over(len(digest)) {
+				digest = BuildKnowledgeDigest(ctx, foldedDigestBudget)
+				folded = append(folded, ctx.Name)
+			}
+			used += len(digest)
 			messages = append(messages, models.Message{
 				Role:    promptRole(opts.Role),
-				Content: m.KnowledgeDigest(ctx),
+				Content: digest,
 			})
 			continue
 		}
@@ -778,13 +801,39 @@ func (m *Manager) BuildPromptMessages(sessionID string, opts FormatOptions) ([]m
 			content = m.formatContextContent(ctx, opts)
 		}
 
+		if over(len(content)) {
+			content = foldedContextCard(ctx, maxChars-used)
+			folded = append(folded, ctx.Name)
+		}
+		used += len(content)
 		messages = append(messages, models.Message{
 			Role:    promptRole(opts.Role),
 			Content: content,
 		})
 	}
 
-	return messages, nil
+	return messages, folded, nil
+}
+
+// foldedContextCard is what a whole-content attachment becomes when the
+// prompt budget cannot hold it: the file list (as far as budget allows)
+// and the ways to pull the content on demand.
+func foldedContextCard(fc *FileContext, budget int) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "📦 CONTEXT: %s (folded: %d file(s), ~%s tokens exceed the prompt budget — content NOT inlined)\n", fc.Name, fc.FileCount, approxTokens(fc.TotalSize))
+	b.WriteString("Pull it on demand: /context attach ")
+	b.WriteString(fc.Name)
+	b.WriteString(" --rag retrieves only the passages relevant to each turn; /context detach frees the slot.\n")
+	b.WriteString("Files:\n")
+	for _, f := range fc.Files {
+		line := fmt.Sprintf("- %s (%d B)\n", f.Path, f.Size)
+		if budget > 0 && b.Len()+len(line)+24 > budget {
+			b.WriteString("- …\n")
+			break
+		}
+		b.WriteString(line)
+	}
+	return b.String()
 }
 
 // promptRole normaliza o role das mensagens de contexto: default seguro "user"

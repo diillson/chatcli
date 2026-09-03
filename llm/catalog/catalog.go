@@ -56,6 +56,10 @@ type ModelMeta struct {
 	PreferredAPI    PreferredAPI // API preferida
 	APIVersion      string       // versão de API (Anthropic), se aplicável
 	Capabilities    []string     // ex.: ["tools","vision","json_mode"]
+	// CompactRatio, when set, is the share of ContextWindow at which the
+	// history compactor fires for this model (0 = mode default; the
+	// session's /autocompact override always wins).
+	CompactRatio float64
 }
 
 // registry: lista plana para facilitar matching por provedor + id/alias
@@ -1905,6 +1909,15 @@ func bedrockFallbackMaxTokens(model string) int {
 // window differs from the catalog (e.g. a StackSpot agent backed by a
 // larger or smaller foundation model). Otherwise falls back to a
 // conservative per-provider default when the model is not in the registry.
+// GetCompactRatio returns the catalog's per-model auto-compact threshold as
+// a share of the window, 0 when the entry sets none.
+func GetCompactRatio(provider, model string) float64 {
+	if meta, ok := Resolve(provider, model); ok && meta.CompactRatio > 0 && meta.CompactRatio <= 1 {
+		return meta.CompactRatio
+	}
+	return 0
+}
+
 func GetContextWindow(provider, model string) int {
 	if raw := os.Getenv("CHATCLI_CONTEXT_WINDOW"); raw != "" {
 		if n, err := strconv.Atoi(strings.TrimSpace(raw)); err == nil && n > 0 {

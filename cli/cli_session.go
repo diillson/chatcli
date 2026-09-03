@@ -223,6 +223,30 @@ func (cli *ChatCLI) clearAllHistories() {
 	cli.checkpoints = nil
 }
 
+// clearConversation is /clear: the conversation restarts empty while the
+// session binding, attachments, memory and checkpoints stay — /rewind
+// brings the cleared turns back. The screen itself is /redraw's job.
+func (cli *ChatCLI) clearConversation(ctx context.Context) {
+	n := 0
+	for _, m := range cli.history {
+		if !strings.EqualFold(m.Role, "system") {
+			n++
+		}
+	}
+	if n == 0 {
+		fmt.Println(colorize(i18n.T("chat.clear_empty"), ColorGray))
+		return
+	}
+	cli.saveCheckpoint()
+	cli.history = make([]models.Message, 0)
+	cli.syncTranscript()
+	if cli.costTracker != nil {
+		cli.costTracker.NoteExpectedCacheRebuild()
+	}
+	_ = ctx
+	fmt.Println(colorize(i18n.T("chat.cleared", n), ColorGray))
+}
+
 // buildSessionData builds a SessionData from the current CLI state.
 // Uses ChatHistory field to store the unified history for backwards compatibility.
 func (cli *ChatCLI) buildSessionData() *SessionData {

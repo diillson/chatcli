@@ -42,6 +42,7 @@ import (
 	"github.com/diillson/chatcli/cli/workspace/memory"
 	"github.com/diillson/chatcli/config"
 	"github.com/diillson/chatcli/i18n"
+	"github.com/diillson/chatcli/llm/catalog"
 	llmclient "github.com/diillson/chatcli/llm/client"
 	"github.com/diillson/chatcli/models"
 	"github.com/diillson/chatcli/pkg/persona"
@@ -1064,19 +1065,32 @@ func (a *AgentMode) Run(ctx context.Context, query string, additionalContext str
 	// Block 2 — tool descriptions (plugins) + session workspace hint.
 	// Merged into one cacheable block since they're always emitted as a pair.
 	toolsText := a.getToolContextString() + buildSessionWorkspaceHint()
+	// The prefix budget (prompt_budget.go) sizes the unbounded sections —
+	// knowledge digests, then attachments — against the window; skills
+	// have their own run budget further down.
+	promptBudget := a.cli.newPrefixBudget(a.cli.Provider, a.cli.Model)
+	promptBudget.spend(len(coreText) + len(toolsText))
 	// Attached knowledge bases ride in the same cacheable block: their index
 	// cards are deterministic (change only on attach/detach, like the plugin
 	// catalog) and they tell the model what the @knowledge tool can reach —
 	// the agent-mode counterpart of the chat pipeline's digest injection.
-	if kb := a.cli.knowledgeAgentBlock(); kb != "" {
+	if kb, folded := a.cli.knowledgeAgentBlockBudgeted(promptBudget.remaining()); kb != "" {
 		toolsText += "\n\n" + kb
+		promptBudget.spend(len(kb))
+		if folded {
+			promptBudget.noteDegraded("knowledge")
+		}
 	}
 	// The session's /context attachments ride here too (session-stable,
 	// cache-friendly) — the agent-mode counterpart of the chat pipeline's
 	// Part 1, so a context attached in chat is visible to /agent, /coder,
 	// the gateway and the MCP server alike.
-	if cb := a.cli.attachedContextAgentBlock(); cb != "" {
+	if cb, folded := a.cli.attachedContextAgentBlockBudgeted(promptBudget.remaining()); cb != "" {
 		toolsText += "\n\n" + cb
+		promptBudget.spend(len(cb))
+		if len(folded) > 0 {
+			promptBudget.noteDegraded("attached")
+		}
 	}
 	// Teach the autonomous documentation pipeline so the model proactively
 	// builds the knowledge it lacks instead of guessing or stalling. Cheap,
@@ -1189,7 +1203,7 @@ func (a *AgentMode) Run(ctx context.Context, query string, additionalContext str
 	if isCoder {
 		breakdownMode = "coder"
 	}
-	a.cli.promptBreakdowns.record(breakdownMode, []promptSection{
+	a.cli.promptBreakdowns.recordDegraded(breakdownMode, promptBudget.Degraded(), []promptSection{
 		{Name: "core", Chars: len(strings.TrimSpace(coreText)), Cached: true},
 		{Name: "tools", Chars: len(strings.TrimSpace(toolsText)), Cached: true},
 		{Name: "orchestrator", Chars: len(strings.TrimSpace(orchestratorText)), Cached: true},
@@ -2227,8 +2241,12 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 		// Compact history if over budget (before building turn history)
 		cfg := a.cli.compactConfig(a.cli.Provider, a.cli.Model)
 		cfg.ReservedChars = a.toolDefsChars
-		cfg.BudgetRatio = 0.60 // tighter budget — tool outputs are large
-		cfg.MinKeepRecent = 8  // ~4 tool call cycles
+		// Tighter mode default (tool outputs are large) — unless the user
+		// (/autocompact) or the catalog declared a threshold, which wins.
+		if a.cli.autoCompact.get() <= 0 && catalog.GetCompactRatio(a.cli.Provider, a.cli.Model) <= 0 {
+			cfg.BudgetRatio = 0.60
+		}
+		cfg.MinKeepRecent = 8 // ~4 tool call cycles
 
 		// Pre-flight: measure the current history and react BEFORE the
 		// request goes out. Two paths:

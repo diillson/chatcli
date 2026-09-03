@@ -89,6 +89,7 @@ var rootCommands = []RootCommand{
 	{"/help", CatCore, "complete.root.help", ""},
 	{"/menu", CatCore, "complete.root.menu", ""},
 	{"/clear", CatCore, "complete.root.clear", ""},
+	{"/redraw", CatCore, "complete.root.redraw", ""},
 	{"/reload", CatCore, "complete.root.reload", ""},
 	{"/version", CatCore, "complete.root.version", ""},
 	{"/update", CatCore, "complete.root.update", ""},

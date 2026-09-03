@@ -30,14 +30,22 @@ import (
 // no attachments — knowledge bases are excluded here because they already
 // ride as index cards via knowledgeAgentBlock.
 func (cli *ChatCLI) attachedContextAgentBlock() string {
+	block, _ := cli.attachedContextAgentBlockBudgeted(0)
+	return block
+}
+
+// attachedContextAgentBlockBudgeted is attachedContextAgentBlock under a
+// character budget (0 = unbounded); attachments past the budget fold into
+// index cards. Returns the folded context names.
+func (cli *ChatCLI) attachedContextAgentBlockBudgeted(maxChars int) (string, []string) {
 	if cli.contextHandler == nil {
-		return ""
+		return "", nil
 	}
 	sessionID := cli.currentSessionName
 	if sessionID == "" {
 		sessionID = "default"
 	}
-	msgs, err := cli.contextHandler.GetManager().BuildPromptMessages(
+	msgs, folded, err := cli.contextHandler.GetManager().BuildPromptMessagesBudgeted(
 		sessionID,
 		ctxmgr.FormatOptions{
 			IncludeMetadata:  true,
@@ -45,13 +53,14 @@ func (cli *ChatCLI) attachedContextAgentBlock() string {
 			Compact:          false,
 			Role:             "system",
 		},
+		maxChars,
 	)
 	if err != nil {
 		cli.logger.Warn("agent: failed to build attached-context block", zap.Error(err))
-		return ""
+		return "", nil
 	}
 	if len(msgs) == 0 {
-		return ""
+		return "", nil
 	}
 	var sb strings.Builder
 	for i, msg := range msgs {
@@ -60,5 +69,5 @@ func (cli *ChatCLI) attachedContextAgentBlock() string {
 		}
 		sb.WriteString(msg.Content)
 	}
-	return sb.String()
+	return sb.String(), folded
 }

@@ -409,6 +409,7 @@ func (cli *ChatCLI) GetInternalCommands() []prompt.Suggest {
 		{Text: "/plugin", Description: i18n.T("complete.root.plugin")},
 		{Text: "/skill", Description: i18n.T("complete.root.skill")},
 		{Text: "/clear", Description: i18n.T("complete.root.clear")},
+		{Text: "/redraw", Description: i18n.T("complete.root.redraw")},
 		{Text: "/auth", Description: i18n.T("complete.root.auth")},
 		{Text: "/connect", Description: i18n.T("complete.root.connect")},
 		{Text: "/disconnect", Description: i18n.T("complete.root.disconnect")},
