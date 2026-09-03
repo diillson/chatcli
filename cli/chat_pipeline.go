@@ -772,7 +772,7 @@ func (cli *ChatCLI) executeStreamingTurn(
 	}
 	if result.Usage != nil && cli.costTracker != nil {
 		cli.costTracker.RecordRealUsage(resolution.Provider, resolution.Model, result.Usage)
-		cli.observeTokenCalibration(resolution.Provider, resolution.Model, result.Usage)
+		cli.observeTokenCalibrationChars(resolution.Provider, resolution.Model, cli.lastPromptChars, result.Usage)
 		cli.maybeAnnounceBudget()
 		cli.maybeAnnounceCacheMisses()
 	}
@@ -843,7 +843,7 @@ func (cli *ChatCLI) handleChatTurnResult(
 	cli.turnUsageRecorded = false
 	if cli.costTracker != nil && !client.IsStreamingCapable(activeClient) && !alreadyRecorded {
 		cli.costTracker.RecordRealUsage(resolution.Provider, resolution.Model, usage)
-		cli.observeTokenCalibration(resolution.Provider, resolution.Model, usage)
+		cli.observeTokenCalibrationChars(resolution.Provider, resolution.Model, cli.lastPromptChars, usage)
 	}
 	cli.renderAssistantResponse(activeClient, aiResponse, elapsed, usage, resolution.Provider, resolution.Model)
 	cli.maybeAnnounceBudget()

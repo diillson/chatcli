@@ -55,6 +55,8 @@ func (cli *ChatCLI) processLLMRequest(parentCtx context.Context, in string) {
 
 	assembly := cli.assembleChatSystemPrompt(ctx, userInput, additionalContext)
 	tempHistory := cli.buildChatTempHistory(assembly.parts, userInput, additionalContext, images)
+	// What the wire carries this turn — the calibrator's chars side.
+	cli.lastPromptChars = promptCharsOf(tempHistory) + len(userInput+additionalContext)
 	userMessage := models.Message{Role: "user", Content: userInput + additionalContext, Images: images}
 
 	effectiveMaxTokens := cli.getMaxTokensForCurrentLLM()
@@ -186,6 +188,9 @@ func (cli *ChatCLI) fireUserPromptSubmitHook(ctx context.Context, in string) {
 // configured budget. Compaction errors leave cli.history untouched so the
 // turn can still proceed with the un-compacted history.
 func (cli *ChatCLI) compactHistoryIfNeeded(ctx context.Context) {
+	// Anchor the chars-per-token ratio on the provider's own count now and
+	// then, so the budget below measures what the model measures.
+	cli.maybeCalibrateExact(ctx)
 	cfg := cli.compactConfig(cli.Provider, cli.Model)
 	// The chat prefix never enters cli.history (it is spliced into a temp
 	// slice per turn), so reserve what the last assembled prefix took —

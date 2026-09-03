@@ -16,8 +16,12 @@
 package cli
 
 import (
+	"context"
+	"github.com/diillson/chatcli/llm/client"
+	"go.uber.org/zap"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/diillson/chatcli/models"
 )
@@ -115,13 +119,59 @@ func promptCharsOf(history []models.Message) int {
 	return total
 }
 
-// observeTokenCalibration feeds one chat turn into the calibrator: the
-// request carried the live history (system message included) and the
-// provider counted the tokens it held (cache reads and writes included on
-// additive schemas — see contextTokens).
-func (cli *ChatCLI) observeTokenCalibration(provider, model string, usage *models.UsageInfo) {
-	if usage == nil || !usage.IsReal {
+// observeTokenCalibrationChars feeds one chat turn into the calibrator with
+// the request weight measured by the caller — the chat pipeline passes what the wire
+// actually carried (temp history plus the turn input), which cli.history
+// does not reflect at either end of a chat turn.
+func (cli *ChatCLI) observeTokenCalibrationChars(provider, model string, chars int, usage *models.UsageInfo) {
+	if usage == nil || !usage.IsReal || chars <= 0 {
 		return
 	}
-	globalTokenCalibrator.Observe(provider, model, promptCharsOf(cli.history), contextTokens(provider, model, usage))
+	globalTokenCalibrator.Observe(provider, model, chars, contextTokens(provider, model, usage))
+}
+
+// calibrateExactEvery paces exact calibration: one count_tokens call per
+// this many chat turns keeps the ratio anchored without a round trip on
+// every turn.
+const calibrateExactEvery = 8
+
+// calibrateExact counts the live history with the provider's own counter
+// (client.TokenCounter) and folds the exact pair into the calibrator.
+// Returns the counted tokens; ok is false when the client cannot count or
+// the call failed — callers fall back to the learned ratio.
+func (cli *ChatCLI) calibrateExact(ctx context.Context) (int, bool) {
+	if cli == nil || cli.Client == nil || len(cli.history) == 0 {
+		return 0, false
+	}
+	tc, ok := client.AsTokenCounter(cli.Client)
+	if !ok {
+		return 0, false
+	}
+	tokens, err := tc.CountTokens(ctx, "", cli.history)
+	if err != nil || tokens <= 0 {
+		if err != nil && cli.logger != nil {
+			cli.logger.Debug("exact token count unavailable; keeping the learned ratio", zap.Error(err))
+		}
+		return 0, false
+	}
+	globalTokenCalibrator.Observe(cli.Provider, cli.Model, promptCharsOf(cli.history), tokens)
+	return tokens, true
+}
+
+// maybeCalibrateExact runs calibrateExact every calibrateExactEvery chat
+// turns (and on the first), bounded so it never stalls a turn.
+func (cli *ChatCLI) maybeCalibrateExact(ctx context.Context) {
+	if cli == nil {
+		return
+	}
+	cli.calibrationTurns++
+	if (cli.calibrationTurns-1)%calibrateExactEvery != 0 {
+		return
+	}
+	if _, ok := client.AsTokenCounter(cli.Client); !ok {
+		return
+	}
+	opCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	cli.calibrateExact(opCtx)
 }

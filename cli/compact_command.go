@@ -124,15 +124,12 @@ func (cli *ChatCLI) guidedCompact(ctx context.Context, instruction string) {
 		return
 	}
 
-	// Build conversation text for the summarizer
+	// Build conversation text for the summarizer (same budgeted rendering
+	// as auto-compaction: CCR stubs restored when they fit, fair allowance
+	// per message against the summarizer's window).
 	var sb strings.Builder
-	for _, msg := range middleMessages {
-		content := msg.Content
-		if len(content) > 2000 {
-			content = content[:1500] + "\n... [truncated] ...\n" + content[len(content)-300:]
-		}
-		sb.WriteString(fmt.Sprintf("[%s]: %s\n\n", msg.Role, content))
-	}
+	sb.WriteString(renderSegmentForSummary(cli.compressionLayer, middleMessages,
+		summarizerInputBudget(cli.compactConfig(cli.Provider, cli.Model))))
 
 	prompt := fmt.Sprintf(`You are a conversation compactor. Summarize the conversation below into a concise structured note.
 

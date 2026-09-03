@@ -142,6 +142,9 @@ func (cli *ChatCLI) compactConfig(provider, model string) CompactConfig {
 		cfg.BudgetRatio = r
 	}
 	cfg.SummarizerClient = cli.compactSummarizerClient()
+	if cfg.SummarizerClient != nil {
+		cfg.SummarizerProvider, cfg.SummarizerModel = cli.compactSummarizerProvider, cli.compactSummarizerModel
+	}
 	return cfg
 }
 
@@ -163,6 +166,7 @@ func (cli *ChatCLI) compactSummarizerClient() client.LLMClient {
 			return
 		}
 		cli.compactSummarizer = resolution.Client
+		cli.compactSummarizerProvider, cli.compactSummarizerModel = resolution.Provider, resolution.Model
 	})
 	return cli.compactSummarizer
 }
