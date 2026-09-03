@@ -26,6 +26,7 @@
 package cli
 
 import (
+	"context"
 	"os"
 	"strings"
 
@@ -47,6 +48,16 @@ const (
 
 	// autoRecallRelatedMax caps how many graph neighbors the line names.
 	autoRecallRelatedMax = 3
+
+	// autoRecallMinLexical is the keyword-relevance floor for a fact found
+	// by keywords alone (computeRelevance scale): roughly a third of the
+	// turn's hints must hit the fact. Semantic hits are gated by the cosine
+	// floor instead.
+	autoRecallMinLexical = 0.34
+
+	// autoRecallMinQueryChars skips the embedding call for queries too
+	// short to carry meaning ("ok", "sim").
+	autoRecallMinQueryChars = 8
 )
 
 // autoRecallHeader is an English model-facing constant, like memoryRecallHint.
@@ -62,11 +73,29 @@ func memoryAutoRecallEnabled() bool {
 	return true
 }
 
-// memoryAutoRecallBlock ranks the fact index against the turn's hints and
-// renders the top matches as a compact block, or "" when there is nothing
-// relevant to say. Injected facts are marked accessed so reinforcement works
-// exactly as it does for full-mode retrieval.
+// memoryAutoRecallBlock is the context-free form kept for callers that have
+// no query text; it ranks by keywords only (see memoryAutoRecallBlockCtx).
 func (cli *ChatCLI) memoryAutoRecallBlock(hints []string) string {
+	return cli.memoryAutoRecallBlockCtx(context.Background(), hints, "")
+}
+
+// memoryAutoRecallBlockCtx ranks the fact index against the turn's hints —
+// and, when a vector index is wired, against the query's embedding — and
+// renders the top matches as a compact block, or "" when nothing clears the
+// relevance floor. Two changes from the original lexical-only nudge:
+//
+//   - the blended ranker (semantic + lexical + temporal) is used whenever
+//     vectors exist, so a paraphrase with zero keyword overlap can surface;
+//     keyless setups keep the lexical path unchanged;
+//   - a lexical floor (autoRecallMinLexical) and the cosine floor
+//     (MinCosineScore) gate candidates, so one incidental token no longer
+//     injects an unrelated fact into every turn.
+//
+// Injected facts are NOT marked accessed: reinforcing a fact merely for
+// being pushed was self-entrenching (a spuriously surfaced fact climbed its
+// own ranking). Access is reinforced when the model actually pulls detail
+// through the memory tool, as the pull path already does.
+func (cli *ChatCLI) memoryAutoRecallBlockCtx(ctx context.Context, hints []string, query string) string {
 	if !memoryAutoRecallEnabled() || cli.memoryStore == nil || len(hints) == 0 {
 		return ""
 	}
@@ -75,7 +104,24 @@ func (cli *ChatCLI) memoryAutoRecallBlock(hints []string) string {
 		return ""
 	}
 
-	facts := mgr.Facts.Search(hints)
+	cfg := mgr.GetConfig()
+	var semantic map[string]float64
+	if vectors := mgr.VectorIndex(); vectors != nil && vectors.Enabled() && len(strings.TrimSpace(query)) >= autoRecallMinQueryChars {
+		if vec, err := vectors.EmbedQuery(ctx, query); err == nil {
+			topK := cfg.VectorTopK
+			if topK <= 0 {
+				topK = 12
+			}
+			hits := vectors.SimilarFactsScored(vec, topK, cfg.MinCosineScore)
+			if len(hits) > 0 {
+				semantic = make(map[string]float64, len(hits))
+				for _, h := range hits {
+					semantic[h.ID] = h.Score
+				}
+			}
+		}
+	}
+	facts := mgr.Facts.SearchBlendedMin(hints, semantic, cfg.RankWeights, autoRecallMinLexical)
 	if len(facts) == 0 {
 		return ""
 	}
@@ -98,7 +144,6 @@ func (cli *ChatCLI) memoryAutoRecallBlock(hints []string) string {
 	if len(accessed) == 0 {
 		return ""
 	}
-	mgr.Facts.MarkAccessed(accessed)
 
 	// Graph expansion: one compact line naming what is structurally adjacent
 	// to the facts above, so the model knows there is MORE to pull before it

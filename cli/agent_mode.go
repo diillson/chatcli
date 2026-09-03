@@ -1428,7 +1428,7 @@ func (a *AgentMode) buildWorkspaceBlocks(ctx context.Context, query string) (str
 	// text changes every turn, and placing it in the stable workspace block
 	// would poison the prompt cache for everything after it.
 	if mode == memModeIndex {
-		if ar := a.cli.memoryAutoRecallBlock(hints); ar != "" {
+		if ar := a.cli.memoryAutoRecallBlockCtx(ctx, hints, query); ar != "" {
 			if dynamicText == "" {
 				dynamicText = ar
 			} else {
@@ -1557,7 +1557,7 @@ func (a *AgentMode) expandFollowUpCommand(ctx context.Context, text string) stri
 // matched. The caller injects the result append-only as a user-role message
 // at the turn boundary, the same protocol-safety contract as the mid-loop
 // skill blocks (never between a tool_use and its tool_result).
-func (a *AgentMode) followUpRecallBlocks(userMsg string) string {
+func (a *AgentMode) followUpRecallBlocks(ctx context.Context, userMsg string) string {
 	userMsg = strings.TrimSpace(userMsg)
 	if userMsg == "" {
 		return ""
@@ -1565,7 +1565,11 @@ func (a *AgentMode) followUpRecallBlocks(userMsg string) string {
 	hints := memory.ExtractKeywords([]string{userMsg})
 	var parts []string
 	if loadMemoryMode() == memModeIndex {
-		if ar := a.cli.memoryAutoRecallBlock(hints); ar != "" {
+		// Bounded so the (optional) embedding call can never stall a turn.
+		recallCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+		ar := a.cli.memoryAutoRecallBlockCtx(recallCtx, hints, userMsg)
+		cancel()
+		if ar != "" {
 			parts = append(parts, ar)
 		}
 	}
@@ -2114,7 +2118,7 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 			}
 			// Same trigger surface for proactive recall: a follow-up asking
 			// about past work re-ranks memory/sessions against ITS words.
-			if rb := a.followUpRecallBlocks(userMsg); rb != "" {
+			if rb := a.followUpRecallBlocks(ctx, userMsg); rb != "" {
 				a.cli.history = append(a.cli.history, models.Message{Role: "user", Content: rb})
 			}
 		}
@@ -4065,7 +4069,7 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 			}
 			// And proactive recall against the follow-up's own words — the
 			// system prompt's recall blocks froze at Run() time.
-			if rb := a.followUpRecallBlocks(userInput); rb != "" {
+			if rb := a.followUpRecallBlocks(ctx, userInput); rb != "" {
 				a.cli.history = append(a.cli.history, models.Message{Role: "user", Content: rb})
 			}
 			continue

@@ -168,7 +168,7 @@ func (cli *ChatCLI) assembleChatSystemPrompt(
 	// meaningful in index mode (full mode already pushes the whole
 	// retrieval). Mirrors the agent/coder wiring; own env gate inside.
 	if cli.chatEffectiveMemoryMode() == memModeIndex {
-		if ar := cli.memoryAutoRecallBlock(hints); ar != "" {
+		if ar := cli.memoryAutoRecallBlockCtx(ctx, hints, userInput); ar != "" {
 			out.add("memory_recall", models.ContentBlock{Type: "text", Text: ar})
 		}
 	}

@@ -8,6 +8,7 @@ package ctxmgr
 import (
 	"context"
 	"fmt"
+	"os"
 	"regexp"
 	"sort"
 	"strings"
@@ -82,6 +83,26 @@ func NewManager(logger *zap.Logger) (*Manager, error) {
 		logger.Warn("Erro ao carregar contextos do disco", zap.Error(err))
 	}
 
+	return manager, nil
+}
+
+// NewManagerWithBasePath is NewManager over an explicit storage directory —
+// for surfaces and tests that must not touch the user's ~/.chatcli.
+func NewManagerWithBasePath(basePath string, logger *zap.Logger) (*Manager, error) {
+	if err := os.MkdirAll(basePath, 0o700); err != nil {
+		return nil, fmt.Errorf("erro ao inicializar storage: %w", err)
+	}
+	manager := &Manager{
+		contexts:         make(map[string]*FileContext),
+		attachedContexts: make(map[string][]AttachedContext),
+		Storage:          &Storage{basePath: basePath, logger: logger},
+		validator:        NewValidator(logger),
+		processor:        NewProcessor(logger),
+		logger:           logger,
+	}
+	if err := manager.loadContexts(); err != nil {
+		logger.Warn("Erro ao carregar contextos do disco", zap.Error(err))
+	}
 	return manager, nil
 }
 
@@ -486,6 +507,27 @@ func (m *Manager) ListContexts(filter *ContextFilter) ([]*FileContext, error) {
 }
 
 // GetAttachedContexts retorna os contextos anexados a uma sessão
+// AttachedRecords returns copies of the attachment records (context id,
+// priority, selected chunks, retrieval mode) bound to sessionID — what a
+// saved session needs to re-attach the same contexts on load. Attach state
+// is otherwise process-local and was lost on every restart.
+func (m *Manager) AttachedRecords(sessionID string) []AttachedContext {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	src := m.attachedContexts[sessionID]
+	if len(src) == 0 {
+		return nil
+	}
+	out := make([]AttachedContext, len(src))
+	for i, a := range src {
+		out[i] = a
+		if len(a.SelectedChunks) > 0 {
+			out[i].SelectedChunks = append([]int(nil), a.SelectedChunks...)
+		}
+	}
+	return out
+}
+
 func (m *Manager) GetAttachedContexts(sessionID string) ([]*FileContext, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()

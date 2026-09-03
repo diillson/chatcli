@@ -25,6 +25,7 @@
 package cli
 
 import (
+	"context"
 	"strings"
 
 	"github.com/diillson/chatcli/pkg/persona"
@@ -41,7 +42,7 @@ const (
 // proactive recall block plus the trigger-matched skill block for one task.
 func (a *AgentMode) workerTaskContext(task string) string {
 	var parts []string
-	if rb := a.followUpRecallBlocks(task); strings.TrimSpace(rb) != "" {
+	if rb := a.followUpRecallBlocks(context.Background(), task); strings.TrimSpace(rb) != "" {
 		parts = append(parts, rb)
 	}
 	if sb := a.workerSkillBlock(task); strings.TrimSpace(sb) != "" {
