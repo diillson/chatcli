@@ -23,6 +23,7 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
+	"github.com/diillson/chatcli/cli/ctxmgr"
 	"os"
 	"sort"
 	"strings"
@@ -342,4 +343,81 @@ func (es *EpisodeStore) mergeFromDiskLocked() {
 			delete(es.episodes, e.ID)
 		}
 	}
+}
+
+// Search ranks episodes by BM25 relevance to query (title, summary,
+// project and tags) and returns up to k, best first. Episodes sharing no
+// term with the query are absent, so callers that need "the window wins"
+// semantics fall back to Range with an empty query. Keyless: the transient
+// index over a session-sized store builds in microseconds.
+func (es *EpisodeStore) Search(query string, k int) []*Episode {
+	q := strings.TrimSpace(query)
+	if q == "" || k <= 0 {
+		return nil
+	}
+	es.mu.RLock()
+	eps := make([]*Episode, 0, len(es.episodes))
+	for _, e := range es.episodes {
+		eps = append(eps, e)
+	}
+	es.mu.RUnlock()
+	if len(eps) == 0 {
+		return nil
+	}
+	// Deterministic input order so BM25 ties resolve the same way every call.
+	sort.Slice(eps, func(i, j int) bool {
+		if !eps[i].Date.Equal(eps[j].Date) {
+			return eps[i].Date.Before(eps[j].Date)
+		}
+		return eps[i].ID < eps[j].ID
+	})
+	docs := make([]string, len(eps))
+	for i, e := range eps {
+		docs[i] = episodeSearchText(e)
+	}
+	hits := ctxmgr.RankDocsBM25(docs, q, k)
+	out := make([]*Episode, 0, len(hits))
+	for _, h := range hits {
+		out = append(out, eps[h.Index])
+	}
+	return out
+}
+
+func episodeSearchText(e *Episode) string {
+	var b strings.Builder
+	b.WriteString(e.Summary)
+	b.WriteByte('\n')
+	b.WriteString(e.Outcome)
+	b.WriteByte('\n')
+	b.WriteString(e.Project)
+	for _, r := range e.Refs {
+		b.WriteByte(' ')
+		b.WriteString(r)
+	}
+	return b.String()
+}
+
+// SearchWithin is Search restricted to a [from, to) window and project
+// (zero time / empty project disable that bound): the timeline tool's
+// "what did we do about X in April" — ranked by relevance inside the
+// window, returned best first.
+func (es *EpisodeStore) SearchWithin(from, to time.Time, project, query string, k int) []*Episode {
+	q := strings.TrimSpace(query)
+	if q == "" || k <= 0 {
+		return nil
+	}
+	window := es.Range(from, to, project, "", 0)
+	if len(window) == 0 {
+		return nil
+	}
+	docs := make([]string, len(window))
+	for i, e := range window {
+		docs[i] = episodeSearchText(e)
+	}
+	hits := ctxmgr.RankDocsBM25(docs, q, k)
+	out := make([]*Episode, 0, len(hits))
+	for _, h := range hits {
+		out = append(out, window[h.Index])
+	}
+	return out
 }

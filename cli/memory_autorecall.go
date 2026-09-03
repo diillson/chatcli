@@ -27,6 +27,7 @@ package cli
 
 import (
 	"context"
+	"github.com/diillson/chatcli/cli/workspace/memory"
 	"os"
 	"strings"
 
@@ -58,6 +59,11 @@ const (
 	// autoRecallMinQueryChars skips the embedding call for queries too
 	// short to carry meaning ("ok", "sim").
 	autoRecallMinQueryChars = 8
+	// autoRecallMaxEpisodes / autoRecallEpisodeBudget bound the timeline
+	// hits appended after the facts (BM25 over episodes).
+	autoRecallMaxEpisodes    = 2
+	autoRecallEpisodeBudget  = 360
+	autoRecallEpisodeLineMax = 160
 )
 
 // autoRecallHeader is an English model-facing constant, like memoryRecallHint.
@@ -95,6 +101,18 @@ func (cli *ChatCLI) memoryAutoRecallBlock(hints []string) string {
 // being pushed was self-entrenching (a spuriously surfaced fact climbed its
 // own ranking). Access is reinforced when the model actually pulls detail
 // through the memory tool, as the pull path already does.
+// autoRecallEpisodeLine renders one timeline hit as a dated bullet.
+func autoRecallEpisodeLine(e *memory.Episode) string {
+	text := strings.TrimSpace(e.Summary)
+	if e.Outcome != "" {
+		text += " → " + strings.TrimSpace(e.Outcome)
+	}
+	if len(text) > autoRecallEpisodeLineMax {
+		text = text[:autoRecallEpisodeLineMax] + "…"
+	}
+	return "- [episode " + e.Date.Format("2006-01-02") + "] " + text
+}
+
 func (cli *ChatCLI) memoryAutoRecallBlockCtx(ctx context.Context, hints []string, query string) string {
 	if !memoryAutoRecallEnabled() || cli.memoryStore == nil || len(hints) == 0 {
 		return ""
@@ -132,6 +150,7 @@ func (cli *ChatCLI) memoryAutoRecallBlockCtx(ctx context.Context, hints []string
 	var b strings.Builder
 	b.WriteString(autoRecallHeader)
 	accessed := make([]string, 0, len(facts))
+	shown := make([]*memory.Fact, 0, len(facts))
 	for _, f := range facts {
 		line := "- [" + f.Category + "] " + f.Content
 		if b.Len()+len(line)+1 > autoRecallBudget {
@@ -140,9 +159,27 @@ func (cli *ChatCLI) memoryAutoRecallBlockCtx(ctx context.Context, hints []string
 		b.WriteString(line)
 		b.WriteByte('\n')
 		accessed = append(accessed, f.ID)
+		shown = append(shown, f)
 	}
 	if len(accessed) == 0 {
 		return ""
+	}
+	// Reinforcement waits for evidence: the reply must draw on a fact
+	// before its access counter moves (memory_recall_evidence.go).
+	cli.noteRecalledFacts(shown)
+
+	// Episodes: the dated work units the query evidently refers to, ranked
+	// by BM25 over the timeline. Bounded to a couple of lines so the block
+	// stays a nudge; the timeline tool has the full view.
+	if len(strings.TrimSpace(query)) >= autoRecallMinQueryChars {
+		for _, e := range mgr.Episodes.Search(query, autoRecallMaxEpisodes) {
+			line := autoRecallEpisodeLine(e)
+			if b.Len()+len(line)+1 > autoRecallBudget+autoRecallEpisodeBudget {
+				break
+			}
+			b.WriteString(line)
+			b.WriteByte('\n')
+		}
 	}
 
 	// Graph expansion: one compact line naming what is structurally adjacent

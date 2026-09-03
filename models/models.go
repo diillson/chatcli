@@ -173,10 +173,11 @@ type SessionData struct {
 
 // SessionAttachment mirrors one /context attach record for persistence.
 type SessionAttachment struct {
-	ContextID      string `json:"context_id"`
-	Priority       int    `json:"priority,omitempty"`
-	SelectedChunks []int  `json:"selected_chunks,omitempty"`
-	RetrievalTopK  int    `json:"retrieval_top_k,omitempty"`
+	ContextID      string  `json:"context_id"`
+	Priority       int     `json:"priority,omitempty"`
+	SelectedChunks []int   `json:"selected_chunks,omitempty"`
+	RetrievalTopK  int     `json:"retrieval_top_k,omitempty"`
+	Weight         float64 `json:"weight,omitempty"`
 }
 
 // UsageInfo represents token usage information returned by LLM APIs.

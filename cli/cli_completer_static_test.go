@@ -67,8 +67,8 @@ func TestContextSubcommands_Membership(t *testing.T) {
 func TestContextAttachFlagSuggestions_AllPairsPresent(t *testing.T) {
 	// /context attach exposes priority, chunk and chunks (each with a long and
 	// short form), semantic retrieval (--rag/--retrieve/-r) and whole-content
-	// opt-out (--full/-f). Every spelling must be present so users can
-	// tab-complete any of them.
+	// opt-out (--full/-f) and the corpus weight (--weight). Every spelling
+	// must be present so users can tab-complete any of them.
 	got := contextAttachFlagSuggestions()
 	wantFlags := map[string]bool{
 		"--priority": true, "-p": true,
@@ -76,6 +76,7 @@ func TestContextAttachFlagSuggestions_AllPairsPresent(t *testing.T) {
 		"--chunks": true, "-C": true,
 		"--rag": true, "--retrieve": true, "-r": true,
 		"--full": true, "-f": true,
+		"--weight": true,
 	}
 	if len(got) != len(wantFlags) {
 		t.Errorf("len = %d, want %d", len(got), len(wantFlags))

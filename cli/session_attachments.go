@@ -44,6 +44,7 @@ func (cli *ChatCLI) sessionAttachments() []models.SessionAttachment {
 			Priority:       r.Priority,
 			SelectedChunks: r.SelectedChunks,
 			RetrievalTopK:  r.RetrievalTopK,
+			Weight:         r.Weight,
 		})
 	}
 	return out
@@ -66,6 +67,7 @@ func (cli *ChatCLI) applySessionAttachments(sd *models.SessionData, key string) 
 			Priority:       a.Priority,
 			SelectedChunks: a.SelectedChunks,
 			RetrievalTopK:  a.RetrievalTopK,
+			Weight:         a.Weight,
 		})
 		if err != nil && cli.logger != nil {
 			cli.logger.Debug("session attachment not restored",

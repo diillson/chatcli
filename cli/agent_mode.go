@@ -1731,6 +1731,7 @@ func (a *AgentMode) RunOnce(ctx context.Context, query string, autoExecute bool)
 		// No terminal to paint to; capture the clean prose so the gateway can
 		// deliver it as the final answer, and keep stdout to the action feed.
 		a.cli.lastAgentReply = stripCommandBlocksText(aiResponse, commandBlocks)
+		a.cli.reinforceRecalledFacts(a.cli.lastAgentReply)
 	} else {
 		a.displayResponseWithoutCommands(aiResponse, commandBlocks)
 	}
@@ -2820,6 +2821,7 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 			// ReAct/coder path sets this here; the legacy agent one-shot sets it
 			// in RunOnce. Harmless for interactive runs, which never read it.
 			a.cli.lastAgentReply = strings.TrimSpace(remaining)
+			a.cli.reinforceRecalledFacts(a.cli.lastAgentReply)
 			// Structured sinks receive the prose regardless of the terminal
 			// rendering decision below — under ACP the run is unattended, so
 			// without this the final answer never reached the client.

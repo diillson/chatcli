@@ -68,6 +68,9 @@ type AttachedContext struct {
 	// to the current turn are injected (query-driven, so it lives in the
 	// volatile prompt zone, never the cached prefix). 0 = legacy whole-content.
 	RetrievalTopK int `json:"retrieval_top_k,omitempty"`
+	// Weight scales this corpus's scores when knowledge hits from several
+	// attached bases are merged (1.0 = neutral; 0 means unset = 1.0).
+	Weight float64 `json:"weight,omitempty"`
 }
 
 // ContextMetrics contém métricas sobre o uso de contextos
@@ -118,6 +121,7 @@ type FormatOptions struct {
 // AttachOptions define opções para anexar contextos
 type AttachOptions struct {
 	Priority       int
-	SelectedChunks []int // Vazio = todos os chunks
-	RetrievalTopK  int   // > 0 ativa retrieval semântico (top-K trechos por turno)
+	SelectedChunks []int   // Vazio = todos os chunks
+	RetrievalTopK  int     // > 0 ativa retrieval semântico (top-K trechos por turno)
+	Weight         float64 // peso do corpus na fusão entre bases (0 = 1.0)
 }

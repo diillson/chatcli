@@ -59,6 +59,8 @@ type RetrievalEngine struct {
 	provider embedding.Provider
 	baseDir  string
 	segOpts  SegmentOptions
+	rerankMu sync.RWMutex
+	reranker Reranker
 	logger   *zap.Logger
 
 	// lex memoizes per-context segment lists + BM25 indexes, reused across
@@ -176,6 +178,45 @@ func (e *RetrievalEngine) Retrieve(ctx context.Context, fc *FileContext, query s
 // 60MB corpus is never embedded wholesale, and the vector cache only ever
 // holds passages that some query actually surfaced.
 func (e *RetrievalEngine) RetrieveHybrid(ctx context.Context, fc *FileContext, query string, k int) ([]Segment, error) {
+	scored, err := e.RetrieveHybridScored(ctx, fc, query, k)
+	if err != nil || len(scored) == 0 {
+		return nil, err
+	}
+	out := make([]Segment, 0, len(scored))
+	for _, s := range scored {
+		out = append(out, s.Segment)
+	}
+	return out, nil
+}
+
+// SetReranker installs the optional rerank stage (nil clears it).
+func (e *RetrievalEngine) SetReranker(r Reranker) {
+	if e == nil {
+		return
+	}
+	e.rerankMu.Lock()
+	e.reranker = r
+	e.rerankMu.Unlock()
+}
+
+func (e *RetrievalEngine) currentReranker() Reranker {
+	e.rerankMu.RLock()
+	defer e.rerankMu.RUnlock()
+	return e.reranker
+}
+
+// ScoredSegment is a retrieved passage with its fused relevance in [0,1].
+type ScoredSegment struct {
+	Segment Segment
+	Score   float64
+}
+
+// RetrieveHybridScored is RetrieveHybrid keeping the fused score of every
+// passage, so callers merging several corpora can weigh them. The optional
+// reranker reorders the head of the pool before truncation; the score
+// reported stays the fused one (the reranker changes order, not the
+// relevance estimate).
+func (e *RetrievalEngine) RetrieveHybridScored(ctx context.Context, fc *FileContext, query string, k int) ([]ScoredSegment, error) {
 	if e == nil || fc == nil || strings.TrimSpace(query) == "" {
 		return nil, nil
 	}
@@ -196,12 +237,12 @@ func (e *RetrievalEngine) RetrieveHybrid(ctx context.Context, fc *FileContext, q
 		pool = hybridMaxPool
 	}
 
-	lexHits := entry.lex.search(query, pool)
+	lexHits := applyLexicalFloor(entry.lex.search(query, pool))
 	if len(lexHits) == 0 {
 		// No lexical signal at all (query terms absent from the corpus): fall
 		// back to cosine over the vectors already cached by past queries.
 		// Cheap — one query embedding, zero new passage embeddings.
-		return e.semanticOnly(ctx, entry, query, k), nil
+		return e.semanticOnlyScored(ctx, entry, query, k), nil
 	}
 	lexScores := normalizeHits(lexHits)
 	vecScores := e.rerankCandidates(ctx, entry, lexHits, query)
@@ -228,14 +269,59 @@ func (e *RetrievalEngine) RetrieveHybrid(ctx context.Context, fc *FileContext, q
 		}
 		return order[a] < order[b]
 	})
+	order = e.applyReranker(ctx, entry, query, order, fused)
 	if len(order) > k {
 		order = order[:k]
 	}
-	out := make([]Segment, 0, len(order))
+	out := make([]ScoredSegment, 0, len(order))
 	for _, i := range order {
-		out = append(out, entry.segs[i])
+		out = append(out, ScoredSegment{Segment: entry.segs[i], Score: fused[i]})
 	}
 	return out, nil
+}
+
+// applyReranker hands the head of the fused order to the reranker and
+// splices its answer back; any failure keeps the fused order.
+func (e *RetrievalEngine) applyReranker(ctx context.Context, entry *lexCacheEntry, query string, order []int, fused map[int]float64) []int {
+	r := e.currentReranker()
+	if r == nil || len(order) < 2 {
+		return order
+	}
+	head := len(order)
+	if head > rerankPoolCap {
+		head = rerankPoolCap
+	}
+	cands := make([]RerankCandidate, 0, head)
+	for _, i := range order[:head] {
+		content := entry.segs[i].Content
+		if len(content) > rerankSnippetChars {
+			content = content[:rerankSnippetChars]
+		}
+		cands = append(cands, RerankCandidate{ID: entry.segs[i].ID, FilePath: entry.segs[i].FilePath, Content: content, Score: fused[i]})
+	}
+	ranked, err := r.Rerank(ctx, query, cands)
+	if err != nil {
+		e.logger.Debug("knowledge: reranker failed; keeping the fused order", zap.String("reranker", r.Name()), zap.Error(err))
+		return order
+	}
+	byID := make(map[string]int, head)
+	for _, i := range order[:head] {
+		byID[entry.segs[i].ID] = i
+	}
+	out := make([]int, 0, len(order))
+	seen := make(map[int]bool, head)
+	for _, c := range ranked {
+		if i, ok := byID[c.ID]; ok && !seen[i] {
+			seen[i] = true
+			out = append(out, i)
+		}
+	}
+	for _, i := range order[:head] {
+		if !seen[i] {
+			out = append(out, i)
+		}
+	}
+	return append(out, order[head:]...)
 }
 
 // rerankCandidates embeds ONLY the BM25 candidates still missing from the
@@ -290,7 +376,7 @@ func (e *RetrievalEngine) rerankCandidates(ctx context.Context, entry *lexCacheE
 
 // semanticOnly answers queries with zero lexical overlap using the vectors
 // already accumulated by previous queries. It never embeds new passages.
-func (e *RetrievalEngine) semanticOnly(ctx context.Context, entry *lexCacheEntry, query string, k int) []Segment {
+func (e *RetrievalEngine) semanticOnlyScored(ctx context.Context, entry *lexCacheEntry, query string, k int) []ScoredSegment {
 	if !e.Enabled() || entry.vec == nil || entry.vec.Count() == 0 {
 		return nil
 	}
@@ -304,10 +390,10 @@ func (e *RetrievalEngine) semanticOnly(ctx context.Context, entry *lexCacheEntry
 		byID[s.ID] = s
 	}
 	hits := entry.vec.Search(qv, k, segmentScoreFloor)
-	out := make([]Segment, 0, len(hits))
+	out := make([]ScoredSegment, 0, len(hits))
 	for _, h := range hits {
 		if s, ok := byID[h.ID]; ok {
-			out = append(out, s)
+			out = append(out, ScoredSegment{Segment: s, Score: h.Score})
 		}
 	}
 	return out
@@ -337,7 +423,7 @@ func (e *RetrievalEngine) entryFor(fc *FileContext) *lexCacheEntry {
 // so a multi-second first call on a large corpus is explainable, not mysterious.
 func (e *RetrievalEngine) buildEntry(fc *FileContext, fp string) *lexCacheEntry {
 	start := time.Now()
-	segs := SegmentFiles(fc.Files, e.segOpts)
+	segs := SegmentFiles(fc.Files, segmentOptionsFor(fc, e.segOpts))
 	entry := &lexCacheEntry{fingerprint: fp, segs: segs, lex: newLexicalIndex(segs)}
 	if e.Enabled() {
 		entry.vec = vindex.New(e.vectorPath(fc.ID), e.provider, vindex.WithLogger(e.logger))

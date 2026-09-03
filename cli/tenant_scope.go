@@ -180,6 +180,7 @@ func (cli *ChatCLI) buildTenantStores(ctx context.Context, principal string) (*t
 		return nil, err
 	}
 	ch.GetManager().AttachEmbeddingProvider(cli.hydeProviderForSession())
+	cli.attachKnowledgeReranker(ch.GetManager())
 	ts.contextHandler = ch
 
 	if cli.memoryStore != nil { // memory enabled for the process

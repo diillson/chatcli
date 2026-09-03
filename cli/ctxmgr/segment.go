@@ -37,6 +37,31 @@ type Segment struct {
 type SegmentOptions struct {
 	MaxChars     int // soft cap per segment (~4 chars/token); default 1200 ≈ 300 tokens
 	OverlapLines int // lines replayed at the start of the next segment; default 2
+	// Boundaries makes the cut prefer a structural line (heading, blank
+	// line, declaration) inside the last part of the window instead of
+	// the exact size limit — passages then start and end on units the
+	// file type reads by. Only contexts created with the v2 segmenter
+	// (see segmentOptionsFor) opt in, so existing corpora keep their ids.
+	Boundaries bool
+}
+
+// segmenterV2 tags contexts created after boundary-aware segmentation
+// shipped; older contexts keep the fixed-window cut (and their vectors).
+const (
+	segmenterMetaKey = "segmenter"
+	segmenterV2      = "v2"
+)
+
+// segmentOptionsFor derives the segmenter options for one context from the
+// engine defaults and the context's own tag.
+func segmentOptionsFor(fc *FileContext, base SegmentOptions) SegmentOptions {
+	if fc != nil && fc.Metadata != nil && fc.Metadata[segmenterMetaKey] == segmenterV2 {
+		base.Boundaries = true
+		if base.OverlapLines < 3 {
+			base.OverlapLines = 3
+		}
+	}
+	return base
 }
 
 const (
@@ -94,6 +119,15 @@ func segmentOne(f utils.FileInfo, opts SegmentOptions) []Segment {
 			size += lineLen
 			end++
 		}
+		// A boundary cut ends the window early and the boundary line opens
+		// the next segment verbatim — no overlap, or the structure would be
+		// replayed inside the previous passage.
+		cutAtBoundary := false
+		if opts.Boundaries && end < len(lines) {
+			if b := boundaryCut(lines, f.Type, start, end); b < end {
+				end, cutAtBoundary = b, true
+			}
+		}
 
 		body := strings.Join(lines[start:end], "\n")
 		if strings.TrimSpace(body) != "" {
@@ -113,7 +147,7 @@ func segmentOne(f utils.FileInfo, opts SegmentOptions) []Segment {
 		// Advance with overlap, but never stall: the next start must move past
 		// the current one even when overlap >= window height.
 		next := end - opts.OverlapLines
-		if next <= start {
+		if cutAtBoundary || next <= start {
 			next = end
 		}
 		start = next
@@ -157,4 +191,51 @@ func itoa(n int) string {
 		buf[i] = '-'
 	}
 	return string(buf[i:])
+}
+
+// boundaryCut pulls a window end back to the best structural boundary in
+// its last 40% (never below start+1). Boundary strength by file type:
+// markdown headings and code declarations outrank blank lines, which
+// outrank closing braces; among equals the latest line wins so windows
+// stay as full as the structure allows. The returned end is exclusive
+// and the boundary line opens the next segment.
+func boundaryCut(lines []string, fileType string, start, end int) int {
+	span := end - start
+	if span < 4 {
+		return end
+	}
+	lookback := span * 2 / 5
+	if lookback < 1 {
+		lookback = 1
+	}
+	best, bestScore := end, 0
+	for i := end - 1; i > end-1-lookback && i > start; i-- {
+		if s := boundaryScore(lines[i], fileType); s > bestScore {
+			best, bestScore = i, s
+		}
+	}
+	return best
+}
+
+func boundaryScore(line, fileType string) int {
+	t := strings.TrimSpace(line)
+	if t == "" {
+		return 2
+	}
+	switch strings.ToLower(strings.TrimPrefix(fileType, ".")) {
+	case "md", "markdown", "mdx", "txt", "rst", "adoc":
+		if strings.HasPrefix(t, "#") {
+			return 3
+		}
+		return 0
+	}
+	for _, kw := range []string{"func ", "def ", "class ", "type ", "impl ", "fn ", "interface ", "struct ", "public ", "private ", "protected ", "static ", "export ", "module ", "package "} {
+		if strings.HasPrefix(t, kw) {
+			return 3
+		}
+	}
+	if t == "}" || t == "};" || t == "end" {
+		return 1
+	}
+	return 0
 }

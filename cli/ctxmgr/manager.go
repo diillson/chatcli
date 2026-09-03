@@ -36,6 +36,9 @@ type Manager struct {
 	// via AttachEmbeddingProvider. nil/disabled → --rag attachments degrade to the
 	// legacy whole-content path, so retrieval is purely additive.
 	retrieval *RetrievalEngine
+	// reranker is the optional rerank stage (AttachReranker); it survives
+	// engine rebuilds because AttachEmbeddingProvider re-applies it.
+	reranker Reranker
 
 	// digestMu/digestCache memoize the knowledge index card per context
 	// revision: prompt assembly runs every turn and the digest walk is
@@ -49,10 +52,37 @@ type Manager struct {
 // engine: Enabled() stays false (so --rag attachments degrade to whole content
 // exactly as before), while knowledge-mode hybrid retrieval keeps its keyless
 // BM25 floor. Safe to call once at startup; provider-agnostic across backends.
+// AttachReranker installs (or clears, with nil) the rerank stage applied to
+// every hybrid retrieval. Purely additive: with nil the fused order stands.
+func (m *Manager) AttachReranker(r Reranker) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.reranker = r
+	if m.retrieval != nil {
+		m.retrieval.SetReranker(r)
+	}
+}
+
+// AttachWeight returns the merge weight of an attached corpus (1.0 when
+// unset or not attached).
+func (m *Manager) AttachWeight(sessionID, contextID string) float64 {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	for _, a := range m.attachedContexts[sessionID] {
+		if a.ContextID == contextID && a.Weight > 0 {
+			return a.Weight
+		}
+	}
+	return 1.0
+}
+
 func (m *Manager) AttachEmbeddingProvider(provider embedding.Provider) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.retrieval = NewRetrievalEngine(provider, m.Storage.basePath, m.logger)
+	if m.reranker != nil {
+		m.retrieval.SetReranker(m.reranker)
+	}
 }
 
 // RetrievalEnabled reports whether a real embedding provider backs retrieval.
@@ -138,7 +168,7 @@ func (m *Manager) CreateContext(ctx context.Context, name, description string, p
 	// são corpora docs-flatten e entram pelo parser nativo (um FileInfo por
 	// chunk, preservando source/título/proveniência); demais caminhos seguem
 	// pelo scanner normal, então diretórios de docs também viram knowledge.
-	knowledgeMeta := map[string]string{}
+	knowledgeMeta := map[string]string{segmenterMetaKey: segmenterV2}
 	var files []utils.FileInfo
 	var scanPaths []string
 	if mode == ModeKnowledge {
@@ -1101,6 +1131,7 @@ func (m *Manager) AttachContextWithOptions(sessionID, contextID string, opts Att
 		Priority:       opts.Priority,
 		SelectedChunks: opts.SelectedChunks,
 		RetrievalTopK:  opts.RetrievalTopK,
+		Weight:         opts.Weight,
 	}
 
 	// Adicionar à lista de anexos da sessão
