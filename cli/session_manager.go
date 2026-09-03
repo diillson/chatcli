@@ -14,7 +14,9 @@ import (
 	"unicode/utf8"
 
 	"github.com/diillson/chatcli/cli/ctxmgr"
+	"github.com/diillson/chatcli/i18n"
 	"github.com/diillson/chatcli/models"
+	"github.com/diillson/chatcli/pkg/atrest"
 	"github.com/diillson/chatcli/utils"
 	"go.uber.org/zap"
 )
@@ -276,6 +278,16 @@ func (sm *SessionManager) SaveSessionV2(name string, sd *SessionData) error {
 		return fmt.Errorf("erro ao serializar a sessão: %w", err)
 	}
 
+	// Encryption at rest (opt-in via CHATCLI_ENCRYPTION_KEY): sealed right
+	// before the write so every producer of this store — REPL save, exit
+	// autosave, MCP session mirrors, write-through — is covered by the one
+	// call. A no-op when no key is configured.
+	data, err = atrest.Seal(data)
+	if err != nil {
+		sm.logger.Error("Erro ao criptografar a sessão", zap.String("session", name), zap.Error(err))
+		return fmt.Errorf("%s: %w", i18n.T("session.encrypt_failed"), err)
+	}
+
 	// Atomic same-directory temp + rename: the REPL, the gateway daemon and
 	// the MCP server all share this store, so a plain WriteFile interrupted
 	// mid-write (or two processes saving concurrently) could leave a torn
@@ -339,6 +351,16 @@ func (sm *SessionManager) LoadSessionV2(name string) (*SessionData, error) {
 	if err != nil {
 		sm.logger.Error("Erro ao ler o arquivo da sessão", zap.String("path", filePath), zap.Error(err))
 		return nil, fmt.Errorf("erro ao ler o arquivo da sessão: %w", err)
+	}
+
+	// Transparent at-rest handling: plaintext files (written before a key
+	// was configured) pass through and are sealed on their next save; an
+	// encrypted file with no key present is a clear error, never a silently
+	// empty or "corrupt" session.
+	data, err = atrest.Open(data)
+	if err != nil {
+		sm.logger.Error("Erro ao decriptar a sessão", zap.String("session", name), zap.Error(err))
+		return nil, fmt.Errorf("%s: %w", i18n.T("session.decrypt_failed", name), err)
 	}
 
 	// Try v2 format first

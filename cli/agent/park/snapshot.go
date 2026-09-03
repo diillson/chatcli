@@ -24,6 +24,7 @@ import (
 
 	llmclient "github.com/diillson/chatcli/llm/client"
 	"github.com/diillson/chatcli/models"
+	"github.com/diillson/chatcli/pkg/atrest"
 )
 
 // SchemaVersion bumps when the on-disk shape of Snapshot changes in a
@@ -167,6 +168,11 @@ func (s *Snapshot) Save() error {
 	if err != nil {
 		return fmt.Errorf("park: marshal snapshot: %w", err)
 	}
+	// The snapshot embeds the whole conversation history; it follows the
+	// same opt-in encryption at rest as saved sessions.
+	if data, err = atrest.Seal(data); err != nil {
+		return fmt.Errorf("park: encrypt snapshot: %w", err)
+	}
 
 	// #nosec G304 -- tmp path is built from s.Token which is validated
 	// against tokenRegexp ([a-zA-Z0-9._-]{8,128}) before reaching here;
@@ -232,6 +238,9 @@ func Load(token string) (*Snapshot, error) {
 			return nil, ErrSnapshotNotFound
 		}
 		return nil, fmt.Errorf("park: read: %w", err)
+	}
+	if data, err = atrest.Open(data); err != nil {
+		return nil, fmt.Errorf("park: decrypt: %w", err)
 	}
 	var s Snapshot
 	if err := json.Unmarshal(data, &s); err != nil {

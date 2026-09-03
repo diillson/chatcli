@@ -381,6 +381,23 @@ items (bug fixed, feature built, decision made, incident resolved) — never
 greetings, questions or plans that didn't happen. Skip the section entirely if
 no work was completed.`
 
+// buildExtractionSnippet renders the conversation segment the memory
+// extractor sees. Secrets are redacted BEFORE truncation and before the
+// text reaches the extraction LLM, so a token pasted into the chat can
+// neither be sent out again nor be distilled into a persisted fact.
+func buildExtractionSnippet(messages []models.Message) strings.Builder {
+	var sb strings.Builder
+	for _, msg := range messages {
+		content := redactSecretsForLLM(msg.Content)
+		// Truncate very long messages to keep the extraction prompt small
+		if len(content) > 1500 {
+			content = content[:1200] + "\n... [truncated] ...\n" + content[len(content)-200:]
+		}
+		sb.WriteString(fmt.Sprintf("[%s]: %s\n\n", msg.Role, content))
+	}
+	return sb
+}
+
 func (mw *memoryWorker) extractAndSave(ctx context.Context, messages []models.Message) error {
 	if mw.cli.memoryStore == nil {
 		return fmt.Errorf("memory store not available")
@@ -407,15 +424,7 @@ func (mw *memoryWorker) extractAndSave(ctx context.Context, messages []models.Me
 	}
 
 	// Build conversation snippet for extraction
-	var sb strings.Builder
-	for _, msg := range messages {
-		content := msg.Content
-		// Truncate very long messages to keep the extraction prompt small
-		if len(content) > 1500 {
-			content = content[:1200] + "\n... [truncated] ...\n" + content[len(content)-200:]
-		}
-		sb.WriteString(fmt.Sprintf("[%s]: %s\n\n", msg.Role, content))
-	}
+	sb := buildExtractionSnippet(messages)
 
 	// Build enhanced prompt with existing context
 	var fullPrompt strings.Builder

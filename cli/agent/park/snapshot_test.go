@@ -4,10 +4,12 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/diillson/chatcli/models"
+	"github.com/diillson/chatcli/pkg/atrest"
 )
 
 // withTempDir redirects the snapshot directory to a temp dir for the
@@ -187,5 +189,43 @@ func TestAsParkError(t *testing.T) {
 	_, ok = AsParkError(errors.New("boring"))
 	if ok {
 		t.Fatalf("AsParkError matched non-park error")
+	}
+}
+
+// Park snapshots embed the whole conversation; with CHATCLI_ENCRYPTION_KEY set
+// they must be sealed on disk and still round-trip through Load.
+func TestSnapshot_EncryptedAtRestWhenKeySet(t *testing.T) {
+	dir := withTempDir(t)
+	t.Setenv(atrest.EnvKey, "park-test-key")
+
+	s := &Snapshot{
+		Token:         NewToken(),
+		History:       []models.Message{{Role: "user", Content: "secret plan alpha-bravo"}},
+		OriginalQuery: "do the thing",
+	}
+	if err := s.Save(); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+	raw, err := os.ReadFile(filepath.Join(dir, s.Token+".json"))
+	if err != nil {
+		t.Fatalf("read raw: %v", err)
+	}
+	if !atrest.IsEncrypted(raw) {
+		t.Fatal("snapshot must be encrypted at rest when the key is set")
+	}
+	if strings.Contains(string(raw), "alpha-bravo") {
+		t.Fatal("plaintext leaked into the snapshot file")
+	}
+	got, err := Load(s.Token)
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if len(got.History) != 1 || got.History[0].Content != "secret plan alpha-bravo" {
+		t.Fatalf("round trip mismatch: %+v", got.History)
+	}
+
+	t.Setenv(atrest.EnvKey, "")
+	if _, err := Load(s.Token); err == nil {
+		t.Fatal("loading an encrypted snapshot without the key must fail")
 	}
 }
