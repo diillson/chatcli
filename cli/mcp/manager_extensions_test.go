@@ -267,3 +267,23 @@ func sliceEq(a, b []string) bool {
 // shim documents what we're filtering on.
 var _ = defsToNames
 var _ = toolNames
+
+// GetToolsSummary feeds the cached system-prompt prefix in both chat and
+// agent mode; a map-derived order would reshuffle between turns and bust the
+// prompt cache, so the catalog must come out sorted by name.
+func TestManager_GetToolsSummary_SortedByName(t *testing.T) {
+	m := newMgrWithFixture(t, ServerConfig{}, ServerConfig{})
+	for i := 0; i < 5; i++ {
+		defs := m.GetToolsSummary()
+		names := make([]string, 0, len(defs))
+		for _, d := range defs {
+			names = append(names, d.Function.Name)
+		}
+		if !sort.StringsAreSorted(names) {
+			t.Fatalf("iteration %d: catalog not sorted: %v", i, names)
+		}
+		if len(names) != 5 {
+			t.Fatalf("expected 5 tools, got %v", names)
+		}
+	}
+}

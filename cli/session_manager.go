@@ -81,25 +81,13 @@ func (sm *SessionManager) getSessionPath(name string) string {
 	return filepath.Join(sm.sessionsDir, safeName+".json")
 }
 
-// atomicWriteSessionFile persists data via a same-directory temp file and an
-// atomic rename (the same durability pattern as ctxmgr's context store), so a
-// crash mid-write can never leave a torn session file behind.
+// atomicWriteSessionFile persists data via a same-directory temp file, fsync
+// and an atomic rename (the shared durability contract in
+// utils.AtomicWriteFile, also used by the context store, memory and task
+// graphs), so a crash or power loss mid-write can never leave a torn or
+// unflushed session file behind.
 func atomicWriteSessionFile(path string, data []byte) error {
-	tmp, err := os.CreateTemp(filepath.Dir(path), filepath.Base(path)+".*.tmp")
-	if err != nil {
-		return err
-	}
-	tmpName := tmp.Name()
-	_ = tmp.Close()
-	if err := os.WriteFile(tmpName, data, 0o600); err != nil {
-		_ = os.Remove(tmpName)
-		return err
-	}
-	if err := os.Rename(tmpName, path); err != nil {
-		_ = os.Remove(tmpName)
-		return err
-	}
-	return nil
+	return utils.AtomicWriteFile(path, data, 0o600)
 }
 
 // CleanExpiredSessions removes sessions older than the configured TTL (L6).

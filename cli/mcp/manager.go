@@ -739,6 +739,11 @@ func (m *Manager) GetToolsSummary() []models.ToolDefinition {
 			},
 		})
 	}
+	// m.tools is a map: without an explicit order the catalog could reshuffle
+	// between turns, and both consumers (chat Part 3, agent MCP section) place
+	// it inside the cached system-prompt prefix, where any reordering busts
+	// the prompt cache for everything after it.
+	sort.Slice(defs, func(i, j int) bool { return defs[i].Function.Name < defs[j].Function.Name })
 	return defs
 }
 

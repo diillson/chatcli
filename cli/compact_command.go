@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/diillson/chatcli/cli/compress"
 	"github.com/diillson/chatcli/cli/hooks"
 	"github.com/diillson/chatcli/i18n"
 	"github.com/diillson/chatcli/models"
@@ -105,6 +106,15 @@ func (cli *ChatCLI) guidedCompact(ctx context.Context, instruction string) {
 		fmt.Println(colorize("  "+i18n.T("compact.error.not_enough_with_instruction"), ColorGray))
 		return
 	}
+	// Never split an assistant tool_calls message from its tool results —
+	// same boundary rule as the automatic pipeline (structuredSummarize).
+	// A cut landing on a tool result would leave orphan results at the head
+	// of the kept tail, which strict tool-pairing providers reject outright.
+	recentStart = snapToToolBlockBoundary(cli.history, recentStart, systemEnd)
+	if recentStart <= systemEnd {
+		fmt.Println(colorize("  "+i18n.T("compact.error.not_enough_with_instruction"), ColorGray))
+		return
+	}
 
 	middleMessages := cli.history[systemEnd:recentStart]
 	if len(middleMessages) < 2 {
@@ -160,13 +170,25 @@ CONVERSATION TO COMPACT:
 		return
 	}
 
+	// Archive the FULL middle segment before replacing it, exactly as the
+	// automatic pipeline does: guided compaction was the last irreversible
+	// cut in the codebase. Best-effort — a disabled CCR layer keeps the
+	// legacy lossy behavior.
+	recallNote := ""
+	if cli.compressionLayer != nil {
+		if key, ok := cli.compressionLayer.Archive(renderMessagesForArchive(middleMessages)); ok {
+			recallNote = "\n\n[full transcript of the summarized segment recoverable via @recall " +
+				compress.FormatMarker(key) + "]"
+		}
+	}
+
 	// Reconstruct: system + summary + recent
 	before := len(cli.history)
-	result := make([]models.Message, 0, systemEnd+1+minKeepRecent)
+	result := make([]models.Message, 0, systemEnd+1+(len(cli.history)-recentStart))
 	result = append(result, cli.history[:systemEnd]...)
 	result = append(result, models.Message{
 		Role:    "user",
-		Content: fmt.Sprintf("[COMPACTED CONTEXT — %d messages summarized per user instruction: \"%s\"]\n\n%s", len(middleMessages), instruction, response),
+		Content: fmt.Sprintf("[COMPACTED CONTEXT — %d messages summarized per user instruction: \"%s\"]\n\n%s%s", len(middleMessages), instruction, response, recallNote),
 		Meta: &models.MessageMeta{
 			IsSummary: true,
 			SummaryOf: len(middleMessages),

@@ -163,3 +163,30 @@ func TestApplyMicrocompact_PlainUserMessageUntouched(t *testing.T) {
 		t.Error("plain user message content changed")
 	}
 }
+
+// A @recall result is the model explicitly asking to see an archived original
+// in full; microcompact must leave it alone (structural PreserveVerbatim flag,
+// the same one the history trimmer honors) or the model is pushed into a
+// recall loop.
+func TestApplyMicrocompact_PreserveVerbatimIsExempt(t *testing.T) {
+	cfg := DefaultMicrocompactConfig()
+	content := strings.Repeat("recalled line\n", 600)
+	history := microcompactHistory(content, cfg.TurnsBeforeSummarize)
+	history[2].Meta = &models.MessageMeta{PreserveVerbatim: true}
+
+	got, report := ApplyMicrocompact(history, cfg.TurnsBeforeSummarize, cfg, zap.NewNop())
+	if got[2].Content != content {
+		t.Fatalf("PreserveVerbatim tool result was reduced:\n%q", got[2].Content[:80])
+	}
+	if report.Truncated != 0 || report.Summarized != 0 {
+		t.Fatalf("report should be empty, got %+v", report)
+	}
+
+	// Same history without the flag IS compacted — proves the exemption is
+	// what protected the message, not the fixture.
+	plain := microcompactHistory(content, cfg.TurnsBeforeSummarize)
+	got, report = ApplyMicrocompact(plain, cfg.TurnsBeforeSummarize, cfg, zap.NewNop())
+	if got[2].Content == content || report.Summarized != 1 {
+		t.Fatalf("unflagged control was not summarized, report=%+v", report)
+	}
+}

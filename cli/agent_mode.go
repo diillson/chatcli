@@ -1133,6 +1133,17 @@ func (a *AgentMode) Run(ctx context.Context, query string, additionalContext str
 		channelsText = a.cli.mcpManager.Channels().FormatForPrompt(5)
 	}
 
+	// The scratch dir path is per-process, so it rides in the uncached
+	// dynamic tail rather than the cacheable tools block (see
+	// buildSessionWorkspaceHint).
+	if wsLine := sessionWorkspaceDynamicLine(); wsLine != "" {
+		if dynamicText == "" {
+			dynamicText = wsLine
+		} else {
+			dynamicText = strings.TrimRight(dynamicText, "\n") + "\n" + wsLine
+		}
+	}
+
 	sysMsg := buildAgentSystemMessage(coreText, toolsText, workspaceText, skillsText, orchestratorText, channelsText, dynamicText)
 
 	// Inicializa ou atualiza o histórico com o System Prompt correto.
@@ -4222,7 +4233,18 @@ func (a *AgentMode) initMultiAgent(ctx context.Context) bool {
 	return true
 }
 
-// buildSessionWorkspaceHint returns a compact prompt block that teaches the
+// sessionWorkspaceDynamicLine states the session scratch directory's concrete
+// path. It belongs to the UNCACHED dynamic block: the path changes on every
+// process start, so keeping it out of the stable tools prefix is what lets
+// that prefix cache-hit across CLI restarts.
+func sessionWorkspaceDynamicLine() string {
+	ws := agent.GetSessionWorkspace()
+	if ws == nil || ws.ScratchDir == "" {
+		return ""
+	}
+	return "Session scratch directory (CHATCLI_AGENT_TMPDIR): " + ws.ScratchDir
+}
+
 // buildMCPToolsSection renders the system-prompt block listing MCP
 // tools available this turn, plus the routing hint that biases the
 // model toward `mcp_*` when an MCP server covers the requested op.
@@ -4321,6 +4343,7 @@ func mcpToolHasRequiredParams(schema map[string]interface{}) bool {
 	return true
 }
 
+// buildSessionWorkspaceHint returns a compact prompt block that teaches the
 // model how to use the per-session scratch dir and how to recover data from
 // truncated tool results. Returns an empty string when the session workspace
 // hasn't been initialized (shouldn't happen during normal startup).
@@ -4329,10 +4352,16 @@ func buildSessionWorkspaceHint() string {
 	if ws == nil {
 		return ""
 	}
+	// The concrete path is deliberately NOT embedded here: this block lives
+	// in the cacheable tools prefix, and the scratch dir is random per
+	// process, so interpolating it guaranteed a cold prompt cache on every
+	// new CLI start. The literal path rides in the uncached dynamic block
+	// (sessionWorkspaceDynamicLine) instead.
 	return "\n\n## SESSION WORKSPACE & LARGE OUTPUTS\n" +
 		"\n" +
 		"You have an isolated scratch directory for this session, exposed via the\n" +
-		"environment variable `CHATCLI_AGENT_TMPDIR` (current value: `" + ws.ScratchDir + "`).\n" +
+		"environment variable `CHATCLI_AGENT_TMPDIR` (its current path is stated in the\n" +
+		"dynamic context at the end of this prompt).\n" +
 		"Both read and write are ALLOWED in this directory and in its subtree —\n" +
 		"use it whenever you need to:\n" +
 		"- stage a temporary shell script before exec'ing it;\n" +
