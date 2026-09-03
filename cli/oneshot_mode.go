@@ -239,6 +239,7 @@ func (cli *ChatCLI) RunOnce(ctx context.Context, input string, disableAnimation 
 	// be piped into other tools).
 	cfg := cli.compactConfig(cli.Provider, cli.Model)
 	if cli.historyCompactor.NeedsCompaction(cli.history, cfg) {
+		cli.queueMemoryBeforeCompaction()
 		cli.historyCompactor.SetStatusCallback(func(stage CompactStage, msg string) {
 			fmt.Fprintf(os.Stderr, "  %s\n", msg)
 		})

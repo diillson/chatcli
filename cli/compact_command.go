@@ -54,6 +54,7 @@ func (cli *ChatCLI) handleCompactCommand(ctx context.Context, userInput string) 
 		cli.historyCompactor.SetStatusCallback(func(stage CompactStage, msg string) {
 			fmt.Printf("  %s %s\n", colorize("│", ColorCyan), colorize(msg, ColorGray))
 		})
+		cli.flushMemoryBeforeCompaction(ctx)
 		compacted, err := cli.historyCompactor.Compact(ctx, cli.history, cli.Client, cfg)
 		cli.historyCompactor.SetStatusCallback(nil)
 		if err != nil {
@@ -171,6 +172,7 @@ CONVERSATION TO COMPACT:
 		return
 	}
 
+	cli.flushMemoryBeforeCompaction(ctx)
 	// Archive the FULL middle segment before replacing it, exactly as the
 	// automatic pipeline does: guided compaction was the last irreversible
 	// cut in the codebase. Best-effort — a disabled CCR layer keeps the

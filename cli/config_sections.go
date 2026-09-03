@@ -878,6 +878,14 @@ func (cli *ChatCLI) showConfigSession() {
 	if bound := cli.boundSessionName(); bound != "" {
 		kv(p, i18n.T("cfg.kv.session_bound"), bound)
 	}
+	trVal := i18n.T("cfg.val.disabled")
+	if id := cli.transcriptID(); id != "" {
+		trVal = id
+	}
+	if os.Getenv(TranscriptEnv) == "" {
+		trVal = defaultMarker + trVal
+	}
+	kv(p, TranscriptEnv, trVal)
 	keepVal := fmt.Sprintf("%d", sessionAutosaveKeep())
 	if os.Getenv("CHATCLI_SESSION_AUTOSAVE_KEEP") == "" {
 		keepVal = defaultMarker + keepVal

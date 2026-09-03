@@ -222,14 +222,16 @@ func (cli *ChatCLI) clearAllHistories() {
 // Uses ChatHistory field to store the unified history for backwards compatibility.
 func (cli *ChatCLI) buildSessionData() *SessionData {
 	return &SessionData{
-		Version:     2,
-		ChatHistory: cli.history,
+		Version:      2,
+		ChatHistory:  cli.history,
+		TranscriptID: cli.transcriptID(),
 	}
 }
 
 // restoreSessionData restores history from a SessionData.
 // Merges legacy separate histories into the unified history for backwards compatibility.
 func (cli *ChatCLI) restoreSessionData(sd *SessionData) {
+	cli.adoptTranscript(sd.TranscriptID)
 	cli.history = sd.ChatHistory
 	if cli.history == nil {
 		cli.history = make([]models.Message, 0)

@@ -290,6 +290,9 @@ type ChatCLI struct {
 	// Latest assembled system-prompt breakdown (chat and agent paths write
 	// it, /context status reads it).
 	promptBreakdowns promptBreakdownStore
+	// Append-only transcript journal (transcript_journal.go): the durable
+	// full record behind the compacted in-memory window.
+	transcript *transcriptJournal
 
 	// Session compaction controls: /autocompact threshold override and the
 	// lazily resolved CHATCLI_COMPACT_MODEL summarizer (see compact_config.go).
@@ -845,6 +848,7 @@ func NewChatCLI(ctx context.Context, manager manager.LLMManager, logger *zap.Log
 	// Build the content-aware compression layer (CCR store under ~/.chatcli/ccr)
 	// from environment config, and wire the @compress/@recall tools to it. The
 	// layer is also consulted by the agent/coder loop to compress tool output.
+	cli.initTranscriptJournal("")
 	cli.compressionLayer = compress.NewLayerFromEnv(filepath.Join(homeDir, ".chatcli"))
 	if err := cli.compressionLayer.StoreFallback(); err != nil {
 		// The layer already degraded to a bounded in-memory store; surface the

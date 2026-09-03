@@ -774,6 +774,7 @@ func (cli *ChatCLI) handleChatTurnResult(
 	// the active named session so other surfaces can pick the thread up.
 	cli.mirrorHubTurn(ctx, userMessage.Content, aiResponse)
 	cli.persistBoundSession()
+	cli.syncTranscript()
 
 	usage := client.GetUsageOrEstimate(activeClient, len(userInput+additionalContext), len(aiResponse))
 	// Skip the record when the chat-ask/knowledge exception already booked

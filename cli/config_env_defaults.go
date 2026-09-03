@@ -182,6 +182,7 @@ var envDefaults = map[string]envDefault{
 	"CHATCLI_BUDGET_WARNING_PCT": {Value: "0.80", Source: "cost_tracker.go"},
 	"CHATCLI_BUDGET_HARD_STOP":   {Value: "false", IsBool: true, Source: "cost_tracker.go (refuse turns once budget exceeded)"},
 	"CHATCLI_SESSION_TTL":        {Value: "90", Source: "session_manager.go (days)"},
+	"CHATCLI_SESSION_TRANSCRIPT": {Value: "true", IsBool: true, Source: "transcript_journal.go (append-only ~/.chatcli/transcripts/<id>.jsonl)"},
 	"CHATCLI_DISABLE_HISTORY":    {Value: "false", IsBool: true, Source: "history_manager.go"},
 
 	// ─── Memory / bootstrap ──────────────────────────────────────
