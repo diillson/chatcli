@@ -107,6 +107,7 @@ func (cli *ChatCLI) showConfigQuality() {
 	kv(p, "CHATCLI_EMBED_PROVIDER", envOr("CHATCLI_EMBED_PROVIDER"))
 	kv(p, "CHATCLI_EMBED_MODEL", envOr("CHATCLI_EMBED_MODEL"))
 	kv(p, "CHATCLI_EMBED_DIMENSIONS", envOr("CHATCLI_EMBED_DIMENSIONS"))
+	kv(p, KnowledgeRerankEnv, envOr(KnowledgeRerankEnv))
 	kv(p, "CHATCLI_QUALITY_HYDE_NUM_KEYWORDS", fmt.Sprintf("%d", cfg.HyDE.NumKeywords))
 	if cli.memoryStore != nil {
 		if vi := cli.memoryStore.VectorIndex(); vi != nil {

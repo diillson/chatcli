@@ -154,7 +154,12 @@ func (a *memoryPluginAdapter) Recall(query string) (string, error) {
 // unfiltered: the date was the real signal.
 func conversationalTimeline(mgr *memory.Manager, from, to time.Time, project, cleaned string, limit int) []*memory.Episode {
 	kw := strings.Join(memory.ExtractKeywords([]string{cleaned}), " ")
-	eps := mgr.Timeline(from, to, project, kw, limit)
+	// Relevance-ranked inside the window first (BM25 over summary, outcome,
+	// project and refs), then the legacy token filter, then the window.
+	eps := mgr.TimelineRanked(from, to, project, kw, limit)
+	if len(eps) == 0 {
+		eps = mgr.Timeline(from, to, project, kw, limit)
+	}
 	if len(eps) == 0 && kw != "" && (!from.IsZero() || !to.IsZero()) {
 		eps = mgr.Timeline(from, to, project, "", limit)
 	}

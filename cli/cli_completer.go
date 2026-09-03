@@ -752,6 +752,7 @@ func contextAttachFlagSuggestions() []prompt.Suggest {
 		{Text: "-r", Description: i18n.T("complete.context.flag_rag_short")},
 		{Text: "--full", Description: i18n.T("complete.context.flag_full")},
 		{Text: "-f", Description: i18n.T("complete.context.flag_full")},
+		{Text: "--weight", Description: i18n.T("complete.context.flag_weight")},
 	}
 }
 

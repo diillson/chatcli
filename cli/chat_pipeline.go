@@ -788,6 +788,7 @@ func (cli *ChatCLI) handleChatTurnResult(
 	cli.renderAssistantResponse(activeClient, aiResponse, elapsed, usage, resolution.Provider, resolution.Model)
 	cli.maybeAnnounceBudget()
 	cli.maybeAnnounceCacheMisses()
+	cli.reinforceRecalledFacts(aiResponse)
 
 	if cli.memWorker != nil {
 		cli.memWorker.nudge(ctx)

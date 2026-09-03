@@ -62,6 +62,7 @@ func (h *ContextHandler) handleAttach(sessionID string, args []string) error {
 		Priority:       flags.priority,
 		SelectedChunks: flags.selectedChunks,
 		RetrievalTopK:  flags.retrievalTopK,
+		Weight:         flags.weight,
 	}
 	if err := h.manager.AttachContextWithOptions(sessionID, ctx.ID, attachOpts); err != nil {
 		return fmt.Errorf("%s", i18n.T("context.attach.error.failed", err))
@@ -76,8 +77,9 @@ type attachFlags struct {
 	priority       int
 	selectedChunks []int
 	retrievalTopK  int
-	full           bool // --full: force whole-content injection, opt out of auto-RAG
-	autoRag        bool // set by handleAttach when the RAG upgrade was automatic
+	weight         float64 // --weight: corpus weight when merging knowledge hits (1.0 neutral)
+	full           bool    // --full: force whole-content injection, opt out of auto-RAG
+	autoRag        bool    // set by handleAttach when the RAG upgrade was automatic
 }
 
 // parseAttachFlags parses the flag tail of `/context attach`. Extracted from
@@ -86,6 +88,16 @@ func parseAttachFlags(args []string) (attachFlags, error) {
 	f := attachFlags{priority: 100}
 	for i := 1; i < len(args); i++ {
 		switch arg := args[i]; {
+		case arg == "--weight" || arg == "-w":
+			if i+1 >= len(args) {
+				return f, fmt.Errorf("%s", i18n.T("context.attach.error.invalid_weight"))
+			}
+			i++
+			w, err := strconv.ParseFloat(args[i], 64)
+			if err != nil || w <= 0 || w > 10 {
+				return f, fmt.Errorf("%s", i18n.T("context.attach.error.invalid_weight"))
+			}
+			f.weight = w
 		case arg == "--priority" || arg == "-p":
 			if i+1 >= len(args) {
 				return f, fmt.Errorf("%s", i18n.T("context.attach.error.invalid_priority"))

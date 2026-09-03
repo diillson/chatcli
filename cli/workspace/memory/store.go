@@ -647,6 +647,16 @@ func parseBulletLines(content string) []string {
 
 // Timeline returns the chronological episode view, filtered by an optional
 // [from, to) window, project substring and content query. See EpisodeStore.Range.
+// TimelineRanked is Timeline with BM25 relevance instead of substring
+// matching: the episodes inside the window that best match query, best
+// first. Empty when no episode shares a term with the query.
+func (m *Manager) TimelineRanked(from, to time.Time, project, query string, limit int) []*Episode {
+	if m.Episodes == nil {
+		return nil
+	}
+	return m.Episodes.SearchWithin(from, to, project, query, limit)
+}
+
 func (m *Manager) Timeline(from, to time.Time, project, query string, limit int) []*Episode {
 	if m.Episodes == nil {
 		return nil

@@ -300,6 +300,10 @@ type ChatCLI struct {
 	workspaceDir    string
 	tenants         *tenantPool
 
+	// recalled tracks the facts auto-recall injected this turn so only
+	// the ones the reply evidently used get reinforced.
+	recalled recallEvidence
+
 	// Latest assembled system-prompt breakdown (chat and agent paths write
 	// it, /context status reads it).
 	promptBreakdowns promptBreakdownStore
@@ -815,6 +819,7 @@ func NewChatCLI(ctx context.Context, manager manager.LLMManager, logger *zap.Log
 	// Null/absent provider (no CHATCLI_EMBED_PROVIDER) leaves retrieval disabled,
 	// and --rag attachments transparently fall back to whole-content injection.
 	cli.contextHandler.GetManager().AttachEmbeddingProvider(cli.hydeProviderForSession())
+	cli.attachKnowledgeReranker(cli.contextHandler.GetManager())
 
 	// Initialize workspace context (bootstrap files + memory)
 	homeDir, _ := os.UserHomeDir()

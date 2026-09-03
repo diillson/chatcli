@@ -32,7 +32,8 @@ const (
 // KnowledgeHit is one retrieved passage tagged with its knowledge base.
 type KnowledgeHit struct {
 	ContextName string
-	Seg         Segment
+	Seg         Segment // Score is the fused relevance scaled by the corpus weight.
+	Score       float64
 }
 
 // knowledgeDigestEntry memoizes one rendered index card per context revision.
@@ -117,16 +118,21 @@ func (m *Manager) KnowledgeSearch(ctx context.Context, sessionID, kb, query stri
 	}
 	var hits []KnowledgeHit
 	for _, fc := range targets {
-		segs, err := engine.RetrieveHybrid(ctx, fc, query, k)
+		scored, err := engine.RetrieveHybridScored(ctx, fc, query, k)
 		if err != nil {
 			m.logger.Warn("knowledge search failed for context; skipping",
 				zap.String("context", fc.Name), zap.Error(err))
 			continue
 		}
-		for _, s := range segs {
-			hits = append(hits, KnowledgeHit{ContextName: fc.Name, Seg: s})
+		weight := m.AttachWeight(sessionID, fc.ID)
+		for _, s := range scored {
+			hits = append(hits, KnowledgeHit{ContextName: fc.Name, Seg: s.Segment, Score: s.Score * weight})
 		}
 	}
+	// Across bases, the corpus weight decides who leads: a 1.5 base's
+	// passages outrank a 1.0 base's at equal relevance. Stable so equal
+	// scores keep base order (targets are sorted by name).
+	sort.SliceStable(hits, func(i, j int) bool { return hits[i].Score > hits[j].Score })
 	return hits, nil
 }
 

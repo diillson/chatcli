@@ -72,6 +72,7 @@ func (cli *ChatCLI) refreshEmbeddingProvider() (oldName, newName string) {
 	if cli.contextHandler != nil {
 		if mgr := cli.contextHandler.GetManager(); mgr != nil {
 			mgr.AttachEmbeddingProvider(fresh)
+			cli.attachKnowledgeReranker(mgr)
 		}
 	}
 
