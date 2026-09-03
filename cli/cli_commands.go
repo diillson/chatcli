@@ -36,6 +36,11 @@ func (cli *ChatCLI) processSpecialCommands(ctx context.Context, userInput string
 	userInput, context, images := cli.processFileCommand(ctx, userInput)
 	additionalContext += context
 
+	// Everything assembled above (git/env/file context) is content the
+	// model receives without the user retyping it — same redaction
+	// chokepoint as agent tool outputs.
+	additionalContext = redactSecretsForLLM(additionalContext)
+
 	// Processar '>' como um operador para adicionar contexto
 	if idx := strings.Index(userInput, ">"); idx != -1 {
 		additionalContext += userInput[idx+1:] + "\n"

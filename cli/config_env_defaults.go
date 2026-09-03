@@ -269,7 +269,7 @@ var envDefaults = map[string]envDefault{
 	"CHATCLI_BLOCK_TMP_WRITES":       {Value: "false", IsBool: true, Source: "session_workspace.go:150"},
 	"CHATCLI_ALLOW_HTTP_PROVIDERS":   {Value: "false", IsBool: true, Source: "TLS posture"},
 	"CHATCLI_ALLOW_INSECURE":         {Value: "false", IsBool: true, Source: "TLS posture"},
-	"CHATCLI_ENV_REDACT_MODE":        {Value: "normal", Source: "env_redactor.go (strict|normal)"},
+	"CHATCLI_ENV_REDACT_MODE":        {Value: "permissive", Source: "content_redactor.go (off|permissive|strict)"},
 
 	// ─── Server mode ─────────────────────────────────────────────
 	"CHATCLI_GRPC_REFLECTION":   {Value: "false", IsBool: true, Source: "server.go"},

@@ -3730,6 +3730,11 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 				// Errors are left verbatim so the model can debug them in full.
 				// CompressToolOutput is nil-safe and a no-op when disabled or
 				// below the size threshold.
+				// Secret redaction on the model's copy (CHATCLI_ENV_REDACT_MODE):
+				// name-based KEY=VALUE masking plus value-shape scan, applied to
+				// every tool output — file reads and plugin results included,
+				// not only exec — and to error text, which quotes inputs.
+				toolOutput = redactSecretsForLLM(toolOutput)
 				if execErr == nil && a.cli != nil {
 					toolOutput, _ = a.cli.compressionLayer.CompressToolOutput(tc.Name, toolOutput)
 				}

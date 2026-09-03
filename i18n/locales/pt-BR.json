@@ -3148,6 +3148,8 @@
   "model.tool.status.no_override": "Modelo da sessão: %s. Nenhum override de rota ativo.",
   "model.tool.delegate.failed": "chamada delegada a %s falhou",
   "model.tool.delegate.empty": "o modelo retornou uma resposta vazia (sem texto)",
+  "session.encrypt_failed": "falha ao criptografar a sessão",
+  "session.decrypt_failed": "falha ao decriptar a sessão %s",
   "model.tool.delegate.header": "Resposta delegada a %s:",
   "plugins.model.describe.use": "Roteando tarefa para %s",
   "plugins.model.describe.delegate": "Delegando sub-tarefa a %s",

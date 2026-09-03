@@ -852,8 +852,10 @@ func NewChatCLI(ctx context.Context, manager manager.LLMManager, logger *zap.Log
 	// Share the same compression engine with delegated sub-agents/workers so
 	// their tool output is compressed too, and identical content read by
 	// sibling agents dedupes against the one content-addressed CCR store.
+	// Workers share the same secret-redaction chokepoint as the
+	// orchestrator (redaction first, then reversible compression).
 	workers.RegisterToolOutputCompressor(func(toolName, output string) string {
-		out, _ := cli.compressionLayer.CompressToolOutput(toolName, output)
+		out, _ := cli.compressionLayer.CompressToolOutput(toolName, redactSecretsForLLM(output))
 		return out
 	})
 	// The reverse direction: workers get a recall tool over the same store,
