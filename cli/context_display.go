@@ -129,8 +129,7 @@ func (h *ContextHandler) handleShowAttached(sessionID string) error {
 
 	var totalTokens int64
 	for i, ctx := range contexts {
-		// Estimate tokens: ~4 chars per token (conservative)
-		estimatedTokens := ctx.TotalSize / 4
+		estimatedTokens := ctxmgr.EstimateTokens64(ctx.TotalSize)
 		totalTokens += estimatedTokens
 
 		fmt.Printf("\n%s %s\n",

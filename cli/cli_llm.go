@@ -553,11 +553,12 @@ func (cli *ChatCLI) switchProvider() {
 	cli.interactionState = StateSwitchingProvider
 }
 
+// getTokenEstimatorForCurrentLLM returns the estimator every file/context
+// budget uses: the learned chars-per-token ratio for the session's
+// provider/model (4.0 until the calibrator has a sample).
 func (cli *ChatCLI) getTokenEstimatorForCurrentLLM() func(string) int {
-	// Função padrão - estimativa conservadora
 	return func(text string) int {
-		// Aproximadamente 4 caracteres por token para a maioria dos modelos
-		return len(text) / 4
+		return cli.estimateTokens(len(text))
 	}
 }
 

@@ -47,6 +47,10 @@ type tokenCalibrator struct {
 	mu      sync.RWMutex
 	ratios  map[string]float64
 	samples map[string]int
+	// path is the persistence file ("" = memory only, the process-wide
+	// default); saveTimer debounces writes.
+	path      string
+	saveTimer *time.Timer
 }
 
 // globalTokenCalibrator is process-wide: the REPL, the gateway daemon and
@@ -81,6 +85,7 @@ func (c *tokenCalibrator) Observe(provider, model string, chars, tokens int) {
 		c.ratios[key] = ratio
 	}
 	c.samples[key]++
+	c.scheduleSave()
 }
 
 // CharsPerToken returns the learned ratio and how many samples produced it;
@@ -127,7 +132,7 @@ func (cli *ChatCLI) observeTokenCalibrationChars(provider, model string, chars i
 	if usage == nil || !usage.IsReal || chars <= 0 {
 		return
 	}
-	globalTokenCalibrator.Observe(provider, model, chars, contextTokens(provider, model, usage))
+	cli.calibrator().Observe(provider, model, chars, contextTokens(provider, model, usage))
 }
 
 // calibrateExactEvery paces exact calibration: one count_tokens call per
@@ -154,7 +159,7 @@ func (cli *ChatCLI) calibrateExact(ctx context.Context) (int, bool) {
 		}
 		return 0, false
 	}
-	globalTokenCalibrator.Observe(cli.Provider, cli.Model, promptCharsOf(cli.history), tokens)
+	cli.calibrator().Observe(cli.Provider, cli.Model, promptCharsOf(cli.history), tokens)
 	return tokens, true
 }
 

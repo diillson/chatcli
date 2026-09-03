@@ -160,9 +160,9 @@ func firstHeading(content string) string {
 	return ""
 }
 
-// approxTokens renders the standard 4-chars-per-token estimate with K/M units.
+// approxTokens renders the token estimate (learned ratio) with K/M units.
 func approxTokens(bytes int64) string {
-	t := bytes / 4
+	t := EstimateTokens64(bytes)
 	switch {
 	case t >= 1_000_000:
 		return fmt.Sprintf("%.1fM", float64(t)/1_000_000)

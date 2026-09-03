@@ -40,7 +40,7 @@ func TestCalibrateExact_FeedsTheCalibratorFromTheProviderCount(t *testing.T) {
 	if !ok || n != 2000 || cc.calls != 1 {
 		t.Fatalf("exact count: n=%d ok=%v calls=%d", n, ok, cc.calls)
 	}
-	ratio, samples := globalTokenCalibrator.CharsPerToken("TESTPROV", "exact-model")
+	ratio, samples := cli.calibrator().CharsPerToken("TESTPROV", "exact-model")
 	if samples != 1 || ratio < 1.99 || ratio > 2.01 {
 		t.Fatalf("ratio must come from the exact count: %.2f (%d samples)", ratio, samples)
 	}
@@ -57,12 +57,12 @@ func TestCalibrateExact_FeedsTheCalibratorFromTheProviderCount(t *testing.T) {
 func TestObserveTokenCalibrationChars_UsesMeasuredChars(t *testing.T) {
 	cli := newTenantTestCLI(t)
 	cli.observeTokenCalibrationChars("TESTPROV", "chars-model", 3000, &models.UsageInfo{PromptTokens: 1000, IsReal: true})
-	ratio, samples := globalTokenCalibrator.CharsPerToken("TESTPROV", "chars-model")
+	ratio, samples := cli.calibrator().CharsPerToken("TESTPROV", "chars-model")
 	if samples != 1 || ratio < 2.99 || ratio > 3.01 {
 		t.Fatalf("ratio must use the measured chars: %.2f (%d)", ratio, samples)
 	}
 	cli.observeTokenCalibrationChars("TESTPROV", "chars-model", 0, &models.UsageInfo{PromptTokens: 1000, IsReal: true})
-	if _, samples := globalTokenCalibrator.CharsPerToken("TESTPROV", "chars-model"); samples != 1 {
+	if _, samples := cli.calibrator().CharsPerToken("TESTPROV", "chars-model"); samples != 1 {
 		t.Fatal("zero chars must be ignored")
 	}
 }

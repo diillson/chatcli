@@ -975,7 +975,7 @@ func (cli *ChatCLI) telemetryParts(usage *models.UsageInfo, costUSD float64, inc
 		if s, _ := cli.compressionLayer.Stats(); s.SavedBytes() > cli.compressionSavedShown {
 			delta := s.SavedBytes() - cli.compressionSavedShown
 			cli.compressionSavedShown = s.SavedBytes()
-			if savedTok := delta / 4; savedTok > 0 {
+			if savedTok := cli.estimateTokens64(delta); savedTok > 0 {
 				parts = append(parts, i18n.T("chat.envelope.compression_saved", formatTokenCount(savedTok)))
 			}
 		}
@@ -1007,7 +1007,7 @@ func (cli *ChatCLI) projectedContextPct(window int) (float64, bool) {
 	if chars <= 0 {
 		return 0, false
 	}
-	tokens := globalTokenCalibrator.EstimateTokens(cli.Provider, cli.Model, chars)
+	tokens := cli.calibrator().EstimateTokens(cli.Provider, cli.Model, chars)
 	if tokens <= 0 {
 		return 0, false
 	}

@@ -334,9 +334,8 @@ func (c *Chunker) estimateTokens(files []utils.FileInfo) int {
 }
 
 func (c *Chunker) estimateTokensForFile(file utils.FileInfo) int {
-	// Estimativa: ~4 caracteres por token
-	// Adicionar overhead para formatação (~20%)
-	baseTokens := len(file.Content) / 4
+	// Learned chars-per-token ratio, plus ~20% formatting overhead.
+	baseTokens := EstimateTokens(len(file.Content))
 	overhead := int(float64(baseTokens) * 0.2)
 	return baseTokens + overhead
 }

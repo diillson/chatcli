@@ -189,7 +189,7 @@ func (v *Validator) ValidateContext(ctx *FileContext) *ValidationResult {
 		}
 
 		// Uso estimado de tokens
-		estimatedTokens := int(ctx.TotalSize / 4) // ~4 chars por token
+		estimatedTokens := int(EstimateTokens64(ctx.TotalSize))
 		if estimatedTokens > 50000 {
 			result.Warnings = append(result.Warnings,
 				fmt.Sprintf("uso estimado de ~%d tokens pode exceder limites de alguns modelos",
