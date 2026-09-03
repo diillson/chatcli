@@ -303,9 +303,19 @@ func (a *modelRoutingAdapter) Delegate(ctx context.Context, handle, prompt strin
 		maxTokens = 0
 	}
 
+	if resolution.Client == nil {
+		return "", errors.New(i18n.T("model.tool.delegate.failed", resolution.Provider+":"+resolution.Model))
+	}
 	answer, err := resolution.Client.SendPrompt(ctx, prompt, nil, maxTokens)
 	if err != nil {
 		return "", fmt.Errorf("%s: %w", i18n.T("model.tool.delegate.failed", resolution.Provider+":"+resolution.Model), err)
+	}
+	if strings.TrimSpace(answer) == "" {
+		// An empty completion must surface as a failure, not as a header
+		// with nothing under it — the calling model would otherwise take
+		// it as a legitimate (blank) answer.
+		return "", fmt.Errorf("%s: %s", i18n.T("model.tool.delegate.failed", resolution.Provider+":"+resolution.Model),
+			i18n.T("model.tool.delegate.empty"))
 	}
 
 	if cli.costTracker != nil {

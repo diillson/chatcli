@@ -3147,6 +3147,7 @@
   "model.tool.status.override": "Modelo da sessão: %s. Override de rota ativo: %s (definido por @model use).",
   "model.tool.status.no_override": "Modelo da sessão: %s. Nenhum override de rota ativo.",
   "model.tool.delegate.failed": "chamada delegada a %s falhou",
+  "model.tool.delegate.empty": "o modelo retornou uma resposta vazia (sem texto)",
   "model.tool.delegate.header": "Resposta delegada a %s:",
   "plugins.model.describe.use": "Roteando tarefa para %s",
   "plugins.model.describe.delegate": "Delegando sub-tarefa a %s",

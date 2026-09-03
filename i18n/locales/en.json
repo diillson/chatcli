@@ -3147,6 +3147,7 @@
   "model.tool.status.override": "Session model: %s. Active route override: %s (set by @model use).",
   "model.tool.status.no_override": "Session model: %s. No route override active.",
   "model.tool.delegate.failed": "delegated call to %s failed",
+  "model.tool.delegate.empty": "the model returned an empty response (no text)",
   "model.tool.delegate.header": "Answer delegated to %s:",
   "plugins.model.describe.use": "Routing task to %s",
   "plugins.model.describe.delegate": "Delegating subtask to %s",
