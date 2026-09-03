@@ -58,4 +58,9 @@ func TestFetchAnthropicEmail_SendsClaudeCodeFingerprint(t *testing.T) {
 	if fetchAnthropicEmailFrom(context.Background(), srv.URL, "", zap.NewNop()) != "" {
 		t.Fatal("empty token yields no email")
 	}
+	// The public wrapper routes to the real endpoint; with no token it
+	// never leaves the process.
+	if fetchAnthropicEmail(context.Background(), "", zap.NewNop()) != "" {
+		t.Fatal("wrapper with empty token yields no email")
+	}
 }
