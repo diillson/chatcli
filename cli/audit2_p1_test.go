@@ -113,8 +113,8 @@ func TestSummaryPassesGate(t *testing.T) {
 	}{
 		{"", 100, false},
 		{"   ", 100, false},
-		{"SUMMARY", 200, true},                // tiny segment: tiny floor
-		{"SUMMARY", 100_000, false},           // huge segment: 7 chars is not a summary
+		{"SUMMARY", 200, true},      // tiny segment: tiny floor
+		{"SUMMARY", 100_000, false}, // huge segment: 7 chars is not a summary
 		{"I'm sorry, I cannot help with that " + long, 100_000, false},
 		{"Desculpe, não posso resumir " + long, 100_000, false},
 		{long, 100_000, true},
