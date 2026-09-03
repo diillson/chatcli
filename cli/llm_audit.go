@@ -78,7 +78,7 @@ func (cli *ChatCLI) initLLMAudit(surface string) {
 		}
 		return
 	}
-	f, err := os.OpenFile(clean, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600) // #nosec G304 -- operator-configured absolute path
+	f, err := os.OpenFile(clean, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600) // #nosec G304 G703 -- operator-configured absolute path (env), cleaned and required absolute above
 	if err != nil {
 		if cli.logger != nil {
 			cli.logger.Error("failed to open audit log for LLM requests", zap.String("path", clean), zap.Error(err))
