@@ -158,7 +158,9 @@ func (cli *ChatCLI) externalMemoryStore(ctx context.Context, session string, msg
 		if strings.TrimSpace(m.Content) == "" {
 			continue
 		}
-		payload = append(payload, map[string]string{"role": m.Role, "content": m.Content})
+		// The same secret redaction the embedded extractor applies: an
+		// external provider never receives raw keys or tokens.
+		payload = append(payload, map[string]string{"role": m.Role, "content": redactSecretsForLLM(m.Content)})
 	}
 	if len(payload) == 0 {
 		return

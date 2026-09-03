@@ -144,6 +144,7 @@ func RunWatch(ctx context.Context, args []string, llmMgr manager.LLMManager, log
 	if err != nil {
 		return fmt.Errorf("%s: %w", i18n.T("cmd.watch.init_failed"), err)
 	}
+	chatCLI.SetAuditSurface("watch")
 
 	if err := chatCLI.ApplyOverrides(ctx, llmMgr, opts.Provider, opts.Model); err != nil {
 		return fmt.Errorf("%s: %w", i18n.T("cmd.watch.override_failed"), err)

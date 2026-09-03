@@ -297,6 +297,7 @@ func startColocatedGateway(llmMgr manager.LLMManager, srv *server.Server, logger
 		logger.Warn(i18n.T("cmd.server.gateway_init_failed"), zap.Error(err))
 		return nil
 	}
+	gwCLI.SetAuditSurface("gateway")
 	ctx, cancel := context.WithCancel(context.Background())
 	go func() {
 		if err := gwCLI.RunGatewayWithBroker(ctx, broker); err != nil && ctx.Err() == nil {

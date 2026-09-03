@@ -224,8 +224,16 @@ func (cli *ChatCLI) buildTenantStores(ctx context.Context, principal string) (*t
 // swaps the base set back. Nil for the shared principal (no-op). Callers
 // hold the gateway turn mutex, which is what makes the swap safe.
 func (cli *ChatCLI) enterTenant(ctx context.Context, principal string) func() {
+	leave, _ := cli.enterTenantChecked(ctx, principal)
+	return leave
+}
+
+// enterTenantChecked is enterTenant reporting why a principal could not
+// get its own store set. Callers that must not serve one tenant's turn
+// from the shared stores refuse the turn on error.
+func (cli *ChatCLI) enterTenantChecked(ctx context.Context, principal string) (func(), error) {
 	if principal == "" || principal == defaultHubPrincipal {
-		return nil
+		return nil, nil
 	}
 	if cli.tenants == nil {
 		cli.tenants = &tenantPool{max: gatewayMaxTenants(), items: map[string]*tenantStores{}}
@@ -241,9 +249,9 @@ func (cli *ChatCLI) enterTenant(ctx context.Context, principal string) func() {
 		built, err := cli.buildTenantStores(ctx, principal)
 		if err != nil {
 			if cli.logger != nil {
-				cli.logger.Error("tenant store set unavailable; serving from the shared stores", zap.String("principal", principal), zap.Error(err))
+				cli.logger.Error("tenant store set unavailable; refusing to serve from the shared stores", zap.String("principal", principal), zap.Error(err))
 			}
-			return nil
+			return nil, err
 		}
 		ts = built
 		ts.lastUsed = time.Now()
@@ -268,7 +276,7 @@ func (cli *ChatCLI) enterTenant(ctx context.Context, principal string) func() {
 		pool.active = ""
 		pool.mu.Unlock()
 		cli.applyStores(pool.base)
-	}
+	}, nil
 }
 
 // evictTenantsLocked releases least recently used sets beyond the cap.
@@ -300,11 +308,26 @@ func (cli *ChatCLI) evictTenantsLocked() {
 
 // enterGatewayTenant is the gateway hook: swaps the sender's store set in
 // when hub isolation is on and the sender is not the shared principal.
-func (cli *ChatCLI) enterGatewayTenant(ctx context.Context, sessions *hubSessions, platform, userID string) func() {
+func (cli *ChatCLI) enterGatewayTenant(ctx context.Context, sessions *hubSessions, platform, userID string) (func(), error) {
 	if sessions == nil || sessions.store == nil || !resolveHubIsolate(ctx, sessions.store) {
+		return nil, nil
+	}
+	return cli.enterTenantChecked(ctx, sessions.principalFor(ctx, platform, userID))
+}
+
+// tenantRoots lists the on-disk roots of every principal's store set.
+func tenantRoots(stateRoot string) []string {
+	entries, err := os.ReadDir(filepath.Join(stateRoot, "tenants"))
+	if err != nil {
 		return nil
 	}
-	return cli.enterTenant(ctx, sessions.principalFor(ctx, platform, userID))
+	var roots []string
+	for _, e := range entries {
+		if e.IsDir() {
+			roots = append(roots, filepath.Join(stateRoot, "tenants", e.Name()))
+		}
+	}
+	return roots
 }
 
 // activeTenant reports the principal whose store set is installed ("" for

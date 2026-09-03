@@ -25,6 +25,7 @@ import (
 	"time"
 
 	"github.com/diillson/chatcli/llm/client"
+	"github.com/diillson/chatcli/models"
 	"go.uber.org/zap"
 )
 
@@ -50,6 +51,15 @@ type llmAuditEntry struct {
 	DurationMS int64             `json:"duration_ms,omitempty"`
 	Redactions int64             `json:"redactions_total"`
 	Fields     map[string]string `json:"fields,omitempty"`
+
+	// Tenant is the gateway principal whose store set served the request
+	// ("" for the shared set); the token counts are the provider's own
+	// usage for the answered request (recv lines only).
+	Tenant           string `json:"tenant,omitempty"`
+	InputTokens      int    `json:"input_tokens,omitempty"`
+	OutputTokens     int    `json:"output_tokens,omitempty"`
+	CacheReadTokens  int    `json:"cache_read_tokens,omitempty"`
+	CacheWriteTokens int    `json:"cache_write_tokens,omitempty"`
 }
 
 // llmAuditWriter appends entries to the audit file.
@@ -59,6 +69,8 @@ type llmAuditWriter struct {
 	enc     *json.Encoder
 	surface string
 	session func() string
+	tenant  func() string
+	usage   func() *models.UsageInfo
 	logger  *zap.Logger
 }
 
@@ -92,17 +104,46 @@ func (cli *ChatCLI) initLLMAudit(surface string) {
 		}
 		return cli.costTracker.sessionIDSnapshot()
 	}
+	w.tenant = cli.activeTenant
+	w.usage = func() *models.UsageInfo {
+		if ua, ok := cli.Client.(client.UsageAwareClient); ok && cli.Client != nil {
+			return ua.LastUsage()
+		}
+		return nil
+	}
 	cli.llmAudit = w
 	client.RegisterRequestAuditor(w.record)
 }
 
+// setSurface renames the surface for entries from now on (the gateway,
+// ACP, tool and watch entrypoints share NewChatCLI with the REPL).
+func (w *llmAuditWriter) setSurface(surface string) {
+	if w == nil || surface == "" {
+		return
+	}
+	w.mu.Lock()
+	w.surface = surface
+	w.mu.Unlock()
+}
+
+// SetAuditSurface names the process role on every audit line from now on.
+func (cli *ChatCLI) SetAuditSurface(surface string) {
+	if cli == nil || cli.llmAudit == nil {
+		return
+	}
+	cli.llmAudit.setSurface(surface)
+}
+
 // record is the RequestAuditor callback.
 func (w *llmAuditWriter) record(ev client.RequestAuditEvent) {
+	w.mu.Lock()
+	surface := w.surface
+	w.mu.Unlock()
 	entry := llmAuditEntry{
 		Timestamp:  ev.Time.UTC().Format(time.RFC3339Nano),
 		Kind:       "llm",
 		Phase:      ev.Phase,
-		Surface:    w.surface,
+		Surface:    surface,
 		Provider:   ev.Provider,
 		Model:      ev.Model,
 		Status:     ev.Status,
@@ -114,6 +155,17 @@ func (w *llmAuditWriter) record(ev client.RequestAuditEvent) {
 	}
 	if w.session != nil {
 		entry.Session = w.session()
+	}
+	if w.tenant != nil {
+		entry.Tenant = w.tenant()
+	}
+	if ev.Phase == "recv" && ev.Status == "success" && w.usage != nil {
+		if u := w.usage(); u != nil {
+			entry.InputTokens = u.PromptTokens
+			entry.OutputTokens = u.CompletionTokens
+			entry.CacheReadTokens = u.CacheReadInputTokens
+			entry.CacheWriteTokens = u.CacheCreationInputTokens
+		}
 	}
 	w.mu.Lock()
 	defer w.mu.Unlock()
