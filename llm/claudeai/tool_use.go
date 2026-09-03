@@ -71,7 +71,7 @@ func (c *ClaudeClient) SendPromptWithTools(ctx context.Context, prompt string, h
 			"input_schema": t.Function.Parameters,
 		}
 		if i == len(sortedTools)-1 {
-			toolDef["cache_control"] = map[string]string{"type": "ephemeral"}
+			toolDef["cache_control"] = client.AnthropicCacheMarker()
 		}
 		toolDefs = append(toolDefs, toolDef)
 	}
@@ -96,6 +96,11 @@ func (c *ClaudeClient) SendPromptWithTools(ctx context.Context, prompt string, h
 	// Opus 4.8 fast mode opt-in via ANTHROPIC_SPEED=fast.
 	applyFastModeIfRequested(reqBody, c.model)
 
+	// Rolling conversation breakpoint on the last user/tool_result message —
+	// in a tool loop this is the bulk of every request and was re-tokenized
+	// at full price each turn. Before the budget pass so the LATEST markers
+	// survive when the cap is exceeded.
+	client.MarkAnthropicHistoryBreakpoint(client.AnthropicMessages{List: messages}, client.AnthropicCacheMarker())
 	enforceCacheControlBudget(reqBody, anthropicMaxCacheBreakpoints)
 
 	jsonValue, err := json.Marshal(reqBody)
@@ -186,20 +191,16 @@ func buildSystemBlocks(history []models.Message) []map[string]interface{} {
 					"text": part.Text,
 				}
 				if part.CacheControl != nil {
-					block["cache_control"] = map[string]string{
-						"type": part.CacheControl.Type,
-					}
+					block["cache_control"] = client.AnthropicCacheMarker()
 				}
 				blocks = append(blocks, block)
 			}
 		} else {
 			// Single system message — mark as ephemeral for KV cache reuse
 			blocks = append(blocks, map[string]interface{}{
-				"type": "text",
-				"text": msg.Content,
-				"cache_control": map[string]string{
-					"type": "ephemeral",
-				},
+				"type":          "text",
+				"text":          msg.Content,
+				"cache_control": client.AnthropicCacheMarker(),
 			})
 		}
 	}

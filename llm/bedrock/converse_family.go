@@ -49,6 +49,9 @@ func (c *BedrockClient) sendPromptConverse(ctx context.Context, prompt string, h
 	if len(messages) == 0 {
 		return "", fmt.Errorf("%s", i18n.T("llm.error.no_response", "Bedrock"))
 	}
+	if converseSupportsCachePoint(c.model) {
+		system, messages = applyConverseCachePoints(system, messages)
+	}
 
 	input := &bedrockruntime.ConverseInput{
 		ModelId:  stringPtr(c.model),
@@ -329,4 +332,35 @@ func suggestInferenceProfilePrefix(model string) string {
 		return fmt.Sprintf("a different inference profile for %q", m)
 	}
 	return fmt.Sprintf("\"global.%s\", \"us.%s\", \"eu.%s\", or \"apac.%s\"", m, m, m, m)
+}
+
+// converseSupportsCachePoint reports whether the model family behind a
+// Converse call honors cachePoint blocks. Amazon Nova and Claude do; the
+// other Converse vendors (Llama, Mistral, Cohere, AI21, DeepSeek, …) reject
+// the block with a ValidationException, so the marker must stay off there.
+func converseSupportsCachePoint(model string) bool {
+	m := strings.ToLower(model)
+	return strings.Contains(m, "amazon.nova") || strings.Contains(m, "anthropic.") || strings.Contains(m, "claude")
+}
+
+// applyConverseCachePoints is the Converse counterpart of the Anthropic
+// cache planner: one cachePoint after the system blocks (stable prefix) and
+// one at the end of the last user message (rolling conversation
+// breakpoint), so the next turn reads the whole prefix from cache instead
+// of re-tokenizing it at full price.
+func applyConverseCachePoints(system []bedrockruntimetypes.SystemContentBlock, messages []bedrockruntimetypes.Message) ([]bedrockruntimetypes.SystemContentBlock, []bedrockruntimetypes.Message) {
+	point := func() *bedrockruntimetypes.ContentBlockMemberCachePoint {
+		return &bedrockruntimetypes.ContentBlockMemberCachePoint{
+			Value: bedrockruntimetypes.CachePointBlock{Type: bedrockruntimetypes.CachePointTypeDefault},
+		}
+	}
+	if len(system) > 0 {
+		system = append(system, &bedrockruntimetypes.SystemContentBlockMemberCachePoint{
+			Value: bedrockruntimetypes.CachePointBlock{Type: bedrockruntimetypes.CachePointTypeDefault},
+		})
+	}
+	if n := len(messages); n > 0 && messages[n-1].Role == bedrockruntimetypes.ConversationRoleUser && len(messages[n-1].Content) > 0 {
+		messages[n-1].Content = append(messages[n-1].Content, point())
+	}
+	return system, messages
 }

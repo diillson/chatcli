@@ -199,6 +199,13 @@ func ParseAnthropicUsage(result map[string]interface{}) *models.UsageInfo {
 	if cr, ok := usage["cache_read_input_tokens"].(float64); ok {
 		info.CacheReadInputTokens = int(cr)
 	}
+	// TTL breakdown of the cache write (present when the request used the
+	// extended TTL): ephemeral_1h_input_tokens is billed at a higher rate.
+	if cc, ok := usage["cache_creation"].(map[string]interface{}); ok {
+		if h, ok := cc["ephemeral_1h_input_tokens"].(float64); ok {
+			info.CacheCreation1hInputTokens = int(h)
+		}
+	}
 
 	info.TotalTokens = info.PromptTokens + info.CompletionTokens
 	return info

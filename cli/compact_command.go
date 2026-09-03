@@ -63,6 +63,7 @@ func (cli *ChatCLI) handleCompactCommand(ctx context.Context, userInput string) 
 
 		before := len(cli.history)
 		cli.history = compacted
+		cli.costTracker.NoteExpectedCacheRebuild()
 		after := len(cli.history)
 		fmt.Printf("  %s %s\n",
 			colorize("📦", ""), i18n.T("compact.success", before, after))
@@ -197,6 +198,7 @@ CONVERSATION TO COMPACT:
 	result = append(result, cli.history[recentStart:]...)
 
 	cli.history = result
+	cli.costTracker.NoteExpectedCacheRebuild()
 	after := len(cli.history)
 
 	fmt.Printf("  %s %s (%s: %s)\n",

@@ -53,6 +53,9 @@ type ContentBlock struct {
 // CacheControl for Anthropic KV cache optimization.
 type CacheControl struct {
 	Type string `json:"type"` // "ephemeral"
+	// TTL is the optional cache lifetime ("5m" default, "1h" extended).
+	// Empty means the provider default.
+	TTL string `json:"ttl,omitempty"`
 }
 
 // LLMResponse is the structured response from tool-aware providers.

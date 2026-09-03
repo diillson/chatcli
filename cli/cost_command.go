@@ -258,6 +258,18 @@ func (cli *ChatCLI) renderCostSummary() {
 		fmt.Println(p + "    " + kit.PadRight(i18n.T("cost.cmd.cache_read"), cacheW+2) +
 			ColorBold + formatTokenCount64(ct.totalCacheRead) + ColorReset + savings)
 	}
+	// Session prompt-cache telemetry: hit share, misses, rebuilds ChatCLI
+	// itself caused (compaction), and whether the prefix is still warm.
+	if stats := ct.cacheStatsLocked(); stats.Reported() {
+		fmt.Println(p)
+		state := i18n.T("cost.cmd.cache_cold", stats.TTL, formatIdle(time.Since(stats.LastActivity)))
+		if stats.Warm {
+			state = i18n.T("cost.cmd.cache_warm", stats.TTL, formatIdle(time.Since(stats.LastActivity)))
+		}
+		fmt.Println(p + colorize("  "+i18n.T("cost.cmd.cache_stats",
+			stats.Requests, fmt.Sprintf("%.0f%%", stats.HitPct), stats.Misses, stats.Rebuilds), ColorCyan) +
+			" " + colorize(state, ColorGray))
+	}
 	fmt.Println(p)
 
 	// Cost estimation

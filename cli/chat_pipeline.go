@@ -711,6 +711,7 @@ func (cli *ChatCLI) executeStreamingTurn(
 	if result.Usage != nil && cli.costTracker != nil {
 		cli.costTracker.RecordRealUsage(resolution.Provider, resolution.Model, result.Usage)
 		cli.maybeAnnounceBudget()
+		cli.maybeAnnounceCacheMisses()
 	}
 	return result.Text, nil
 }
@@ -781,6 +782,7 @@ func (cli *ChatCLI) handleChatTurnResult(
 	}
 	cli.renderAssistantResponse(activeClient, aiResponse, elapsed, usage, resolution.Provider, resolution.Model)
 	cli.maybeAnnounceBudget()
+	cli.maybeAnnounceCacheMisses()
 
 	if cli.memWorker != nil {
 		cli.memWorker.nudge(ctx)
@@ -885,6 +887,12 @@ func (cli *ChatCLI) telemetryParts(usage *models.UsageInfo, costUSD float64, inc
 		// only the uncached delta on Anthropic/Bedrock schemas.
 		pct := float64(contextTokens(cli.Provider, cli.Model, usage)) / float64(window) * 100
 		parts = append(parts, i18n.T("chat.envelope.context_pct", clampPct(pct)))
+	}
+	// Prompt-cache share of this turn's input, on every provider that
+	// reports cache tokens (Anthropic/Bedrock additive counts, OpenAI/
+	// Gemini/Grok/Kimi subset counts). Omitted when nothing was reported.
+	if hit, ok := TurnCacheHitPct(cli.Provider, cli.Model, usage); ok {
+		parts = append(parts, i18n.T("chat.envelope.cache_pct", clampPct(hit)))
 	}
 	// Compression savings SINCE THE LAST RENDER — per-turn, matching the cost
 	// and ctx% figures beside it (the session total lives in /config

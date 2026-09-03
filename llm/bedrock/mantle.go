@@ -202,6 +202,8 @@ func (c *BedrockClient) sendPromptAnthropicMantle(ctx context.Context, prompt st
 	}
 
 	applyAnthropicThinkingForEffort(reqBody, c.model, ctx)
+	// Rolling conversation breakpoint (5-minute marker on the Bedrock wire).
+	client.MarkAnthropicHistoryBreakpoint(client.AnthropicMessages{Maps: messages}, client.AnthropicCacheMarkerWithTTL(false))
 	enforceCacheControlBudget(reqBody, anthropicMaxCacheBreakpoints)
 
 	payload, err := json.Marshal(reqBody)

@@ -240,7 +240,7 @@ func (c *ClaudeClient) SendPrompt(ctx context.Context, prompt string, history []
 	}
 
 	isOAuth := c.provider.Mode() == auth.AuthModeOAuth
-	var messages interface{}
+	var messages []map[string]interface{}
 	var systemObj interface{}
 	if isOAuth {
 		messages, systemObj = c.buildOAuthMessagesAndSystem(prompt, history)
@@ -276,6 +276,11 @@ func (c *ClaudeClient) SendPrompt(ctx context.Context, prompt string, history []
 			zap.String("model", c.model))
 	}
 
+	// Rolling conversation breakpoint: the last user message carries a
+	// marker so the whole history is a cacheable prefix on the next turn
+	// (see client.MarkAnthropicHistoryBreakpoint). Placed before the budget
+	// pass, which keeps the LATEST markers when the cap is exceeded.
+	client.MarkAnthropicHistoryBreakpoint(client.AnthropicMessages{Maps: messages}, client.AnthropicCacheMarker())
 	enforceCacheControlBudget(reqBody, anthropicMaxCacheBreakpoints)
 
 	jsonValue, err := json.Marshal(reqBody)
@@ -500,9 +505,7 @@ func (c *ClaudeClient) buildMessagesAndSystem(prompt string, history []models.Me
 						"text": part.Text,
 					}
 					if part.CacheControl != nil {
-						block["cache_control"] = map[string]string{
-							"type": part.CacheControl.Type,
-						}
+						block["cache_control"] = client.AnthropicCacheMarker()
 					}
 					systemBlocks = append(systemBlocks, block)
 				}
@@ -560,9 +563,7 @@ func (c *ClaudeClient) buildOAuthMessagesAndSystem(prompt string, history []mode
 						"text": part.Text,
 					}
 					if part.CacheControl != nil {
-						block["cache_control"] = map[string]string{
-							"type": part.CacheControl.Type,
-						}
+						block["cache_control"] = client.AnthropicCacheMarker()
 					}
 					structuredParts = append(structuredParts, block)
 				}
@@ -659,10 +660,28 @@ func (c *ClaudeClient) applyAuthHeaders(req *http.Request, token string) {
 	case auth.AuthModeToken:
 		req.Header.Set("Authorization", "Bearer "+token)
 		req.Header.Set("anthropic-version", catalog.GetAnthropicAPIVersion(c.model))
+		applyExtendedCacheTTLBeta(req)
 	default:
 		req.Header.Set("x-api-key", token)
 		req.Header.Set("anthropic-version", catalog.GetAnthropicAPIVersion(c.model))
+		applyExtendedCacheTTLBeta(req)
 	}
+}
+
+// applyExtendedCacheTTLBeta adds the beta flag the 1-hour cache TTL still
+// requires on the Messages API. Only when the TTL is configured — the
+// default 5-minute cache needs no flag.
+func applyExtendedCacheTTLBeta(req *http.Request) {
+	if client.AnthropicCacheTTL() != "1h" {
+		return
+	}
+	if existing := req.Header.Get("anthropic-beta"); existing != "" {
+		if !strings.Contains(existing, client.ExtendedCacheTTLBeta) {
+			req.Header.Set("anthropic-beta", existing+","+client.ExtendedCacheTTLBeta)
+		}
+		return
+	}
+	req.Header.Set("anthropic-beta", client.ExtendedCacheTTLBeta)
 }
 
 func oauthTextBlock(text string) map[string]interface{} {
@@ -685,6 +704,9 @@ func applyOAuthHeaders(req *http.Request, token string) {
 		if m, ok := req.Context().Value(oauthModelKey{}).(string); ok && isClaudeSonnet(m) {
 			betas = betas + "," + oauthSonnet1MBeta
 		}
+	}
+	if client.AnthropicCacheTTL() == "1h" {
+		betas = betas + "," + client.ExtendedCacheTTLBeta
 	}
 	req.Header.Set("anthropic-beta", betas)
 	req.Header.Set("anthropic-version", "2023-06-01")

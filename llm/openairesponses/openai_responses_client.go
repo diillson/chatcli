@@ -145,6 +145,15 @@ func (c *OpenAIResponsesClient) SendPrompt(ctx context.Context, prompt string, h
 		}
 	}
 
+	// Automatic prompt caching routing hint on the API-key paths (the
+	// ChatGPT OAuth backend is not the public Responses API and gets no
+	// extra fields). See client.PromptCacheKey.
+	if !isOAuth {
+		if key := client.PromptCacheKey(history); key != "" {
+			reqBody["prompt_cache_key"] = key
+		}
+	}
+
 	// Skill effort hint → reasoning.effort.
 	// Applies to both OAuth and API key paths; the ChatGPT backend quietly
 	// ignores the field for non-reasoning models, so this is safe.
