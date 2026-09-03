@@ -158,10 +158,20 @@ CONVERSATION TO COMPACT:
 		colorize(instruction, ColorCyan),
 	)
 
-	response, err := cli.Client.SendPrompt(ctx, prompt, summaryHistory, 0)
-	// Auto-retry on OAuth token expiration (401)
-	if cli.refreshClientOnAuthError(err) {
+	var response string
+	var err error
+	if ext := cli.externalSummarizer(); ext != nil {
+		response, err = ext.Compact(ctx, sb.String(), summarizerInputBudget(cli.compactConfig(cli.Provider, cli.Model)), instruction)
+		if err != nil {
+			cli.logger.Warn("context engine failed on guided compaction; using the session model", zap.Error(err))
+		}
+	}
+	if strings.TrimSpace(response) == "" {
 		response, err = cli.Client.SendPrompt(ctx, prompt, summaryHistory, 0)
+		// Auto-retry on OAuth token expiration (401)
+		if cli.refreshClientOnAuthError(err) {
+			response, err = cli.Client.SendPrompt(ctx, prompt, summaryHistory, 0)
+		}
 	}
 	if err != nil {
 		cli.logger.Warn("Guided compaction failed", zap.Error(err))

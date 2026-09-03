@@ -41,6 +41,11 @@ func (cli *ChatCLI) showConfigMemory() {
 		autoRecallVal = defaultMarker + autoRecallVal
 	}
 	kv(p, "CHATCLI_MEMORY_AUTORECALL", autoRecallVal)
+	providerVal := extensionStatus(os.Getenv(MemoryProviderEnv))
+	if os.Getenv(MemoryProviderEnv) == "" {
+		providerVal = defaultMarker + providerVal
+	}
+	kv(p, MemoryProviderEnv, providerVal)
 
 	if cli.memoryStore != nil {
 		if idx := cli.memoryStore.GetMemoryIndex(0); idx != "" {

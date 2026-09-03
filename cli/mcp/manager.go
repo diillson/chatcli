@@ -860,6 +860,19 @@ func (m *Manager) ShouldAutoApprove(toolName string) bool {
 }
 
 // ExecuteTool executes an MCP tool by name.
+// ExecuteServerTool calls a tool on a specific server by name — the
+// binding the extension points (memory provider, context engine) use, so
+// a tool name shared by two servers cannot be confused.
+func (m *Manager) ExecuteServerTool(ctx context.Context, server, toolName string, args map[string]interface{}) (*MCPToolResult, error) {
+	m.mu.RLock()
+	conn, ok := m.servers[server]
+	m.mu.RUnlock()
+	if !ok || !conn.Status.Connected {
+		return nil, fmt.Errorf("%s", i18n.T("mcp.error.server_not_connected", server))
+	}
+	return m.callTool(ctx, conn, toolName, args)
+}
+
 func (m *Manager) ExecuteTool(ctx context.Context, toolName string, args map[string]interface{}) (*MCPToolResult, error) {
 	m.mu.RLock()
 	tool, ok := m.tools[toolName]

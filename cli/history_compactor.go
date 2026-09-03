@@ -75,6 +75,11 @@ type CompactConfig struct {
 	SummarizerProvider string
 	SummarizerModel    string
 
+	// ExternalSummarizer, when set, is the context engine that produces
+	// the Level 2 summary (CHATCLI_CONTEXT_ENGINE); an error or empty
+	// output falls back to the embedded summarizer.
+	ExternalSummarizer ContextEngine
+
 	// MaxPayloadBytes caps the serialized request body size in bytes.
 	// When > 0, overrides the context-window budget if it would yield
 	// a larger payload than the corporate proxy / gateway accepts
@@ -422,9 +427,19 @@ func (hc *HistoryCompactor) structuredSummarize(
 	if cfg.SummarizerClient != nil {
 		summarizer = cfg.SummarizerClient
 	}
-	response, err := summarizer.SendPrompt(summarizeCtx, prompt, summaryHistory, 0)
-	if err != nil {
-		return nil, fmt.Errorf("structured summarization LLM call failed: %w", err)
+	var response string
+	var err error
+	if cfg.ExternalSummarizer != nil {
+		response, err = cfg.ExternalSummarizer.Compact(summarizeCtx, segment, summarizerInputBudget(cfg), "")
+		if err != nil && hc.logger != nil {
+			hc.logger.Warn("context engine failed; falling back to the embedded summarizer", zap.Error(err))
+		}
+	}
+	if strings.TrimSpace(response) == "" {
+		response, err = summarizer.SendPrompt(summarizeCtx, prompt, summaryHistory, 0)
+		if err != nil {
+			return nil, fmt.Errorf("structured summarization LLM call failed: %w", err)
+		}
 	}
 
 	// Archive the FULL middle segment (untruncated, unlike the summarizer

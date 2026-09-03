@@ -114,6 +114,9 @@ func (mw *memoryWorker) stop() {
 // nudge is called after each LLM response to check if memory extraction should run.
 // It runs in a goroutine — non-blocking to the main flow.
 func (mw *memoryWorker) nudge(ctx context.Context) {
+	if mw.cli != nil {
+		mw.cli.forwardNewHistory(ctx, &mw.cli.extForward, mw.history(), mw.cli.currentSessionName)
+	}
 	if mw.store == nil {
 		return
 	}
@@ -147,6 +150,9 @@ func (mw *memoryWorker) queueSegmentForNextSession(segment []models.Message) {
 // RPC turn has already restored the previous history, so the live-delta gate
 // would never see these messages.
 func (mw *memoryWorker) nudgeSegment(ctx context.Context, segment []models.Message) {
+	if mw.cli != nil && len(segment) > 0 {
+		mw.cli.externalMemoryStore(ctx, mw.cli.currentSessionName, segment)
+	}
 	if mw.store == nil || len(segment) == 0 {
 		return
 	}
