@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.196.1](https://github.com/diillson/chatcli/compare/v1.196.0...v1.196.1) (2026-09-04)
+
+
+### Bug Fixes
+
+* **config:** a reload keeps what the client provided and reaches the servers ([#1500](https://github.com/diillson/chatcli/issues/1500)) ([780f68e](https://github.com/diillson/chatcli/commit/780f68e192ad710a674353afc503654ef238a9d2))
+* **config:** environment file discovery for editor-spawned servers and Bedrock profile parity ([#1498](https://github.com/diillson/chatcli/issues/1498)) ([402f8d2](https://github.com/diillson/chatcli/commit/402f8d27973c671fc3e1724914bb17239c8bffbc))
+
 ## [1.196.0](https://github.com/diillson/chatcli/compare/v1.195.0...v1.196.0) (2026-09-04)
 
 
