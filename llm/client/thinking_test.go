@@ -99,3 +99,47 @@ func TestAnthropicContextManagementOffByDefault(t *testing.T) {
 		t.Errorf("builtin engine must send no context_management, got %+v", cm)
 	}
 }
+
+// The compaction engine is the editing engine plus a summarizing edit,
+// never a replacement: a prompt on its way to the window limit is still
+// trimmed of stale tool results and old reasoning first, because those
+// edits are lossless and a summary is not.
+func TestProviderCompactionEngineAddsCompactLast(t *testing.T) {
+	t.Setenv(ContextEngineEnv, "provider-compact")
+	if !ProviderContextEngine() {
+		t.Fatal("the compaction engine must also enable context editing")
+	}
+	if !ProviderCompactionEngine() {
+		t.Fatal("provider-compact must select server-side compaction")
+	}
+	cm := AnthropicContextManagement()
+	if cm == nil || len(cm.Edits) != 3 {
+		t.Fatalf("want three edits, got %+v", cm)
+	}
+	if cm.Edits[len(cm.Edits)-1].Type != "compact_20260112" {
+		t.Errorf("summarizing must run after the lossless edits: %+v", cm.Edits)
+	}
+}
+
+func TestProviderEngineWithoutCompaction(t *testing.T) {
+	t.Setenv(ContextEngineEnv, "provider")
+	if ProviderCompactionEngine() {
+		t.Error("plain provider must not ask the server to summarize")
+	}
+	cm := AnthropicContextManagement()
+	if cm == nil {
+		t.Fatal("plain provider still edits context")
+	}
+	for _, e := range cm.Edits {
+		if e.Type == "compact_20260112" {
+			t.Errorf("unexpected compaction edit: %+v", cm.Edits)
+		}
+	}
+}
+
+func TestBuiltinEngineSelectsNothing(t *testing.T) {
+	t.Setenv(ContextEngineEnv, "builtin")
+	if ProviderContextEngine() || ProviderCompactionEngine() {
+		t.Error("builtin must ask the provider for nothing")
+	}
+}

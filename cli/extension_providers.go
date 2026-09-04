@@ -16,6 +16,13 @@
  *     memory_store(messages[{role,content}], session) ← every turn's new
  *       messages, forwarded asynchronously and best-effort.
  *
+ *   CHATCLI_CONTEXT_ENGINE=provider-compact
+ *     the provider's own context editing plus its server-side
+ *     compaction — it summarizes the older conversation itself instead of
+ *     the client spending a turn on a summarizer. Opt-in and never the
+ *     default: what ChatCLI's own compaction cuts is archived and can be
+ *     recalled, and a server-side summary cannot.
+ *
  *   CHATCLI_CONTEXT_ENGINE=mcp:<server>
  *     context_compact(segment, budget_chars, instruction) → the summary
  *       that replaces the compacted segment (auto-compact and guided
