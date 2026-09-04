@@ -35,6 +35,7 @@ func TestCacheStoragePerMTokenHour(t *testing.T) {
 func TestRecordCacheStorage_PricesGrantedLifetimeAndPersistsInSnapshot(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	ct := NewCostTracker()
+	t.Cleanup(ct.FlushDailySpend)                         // the debounced daily-spend timer must not write during TempDir cleanup
 	ct.RecordUsage("GOOGLEAI", "gemini-2.5-flash", 10, 1) // makes the snapshot persistable
 	base := ct.TotalCost()
 

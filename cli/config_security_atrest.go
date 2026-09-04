@@ -147,6 +147,7 @@ func (cli *ChatCLI) renderAtRestStatus(p string) {
 	}
 	kv(p, atrest.EnvPreviousKeys, fmt.Sprintf("%d", previous))
 	kv(p, i18n.T("cfg.kv.sec.atrest_covers"), i18n.T("cfg.kv.sec.atrest_covers_list"))
+	kv(p, i18n.T("cfg.kv.sec.tenant_shared"), i18n.T("cfg.kv.sec.tenant_shared_list"))
 	if locked := memory.LockedStores(); len(locked) > 0 {
 		names := make([]string, 0, len(locked))
 		for _, l := range locked {
