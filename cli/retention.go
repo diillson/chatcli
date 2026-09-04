@@ -12,6 +12,7 @@
 package cli
 
 import (
+	"context"
 	"fmt"
 	"github.com/diillson/chatcli/pkg/auditchain"
 	"os"
@@ -29,6 +30,8 @@ import (
 // retentionReport is what one boot pass removed.
 type retentionReport struct {
 	Transcripts int // tenant transcripts removed (the shared set prunes on open)
+	Sessions    int // tenant sessions past the window (the shared set's sessions are the user's)
+	Pending     int // queued memory segments older than the window
 	AuditFiles  int // rotated audit trail files past the retention window
 	Parks       int
 	Costs       int
@@ -55,11 +58,19 @@ func (cli *ChatCLI) runRetentionPass() retentionReport {
 	if dir := costStoreDir(); dir != "" {
 		rep.Costs = pruneCostSnapshotsOlderThan(dir, cutoff)
 	}
-	// Tenant store sets (gateway isolation) follow the same policy.
+	// Queued memory segments are a buffer, not an archive: past the
+	// window they are stale conversation nobody will distill.
+	rep.Pending += pruneFilesOlderThan(defaultPendingDir(), cutoff, ".json")
+	// Tenant store sets (gateway isolation) follow the same policy, and
+	// their parks and sessions expire too: a gateway principal's state is
+	// transient by contract, unlike the user's own named sessions.
 	if cli != nil && cli.stateRoot != "" {
 		for _, root := range tenantRoots(cli.stateRoot) {
 			rep.Costs += pruneCostSnapshotsOlderThan(filepath.Join(root, "costs"), cutoff)
 			rep.Transcripts += pruneTranscripts(filepath.Join(root, transcriptDirName), ttl)
+			rep.Parks += pruneFilesOlderThan(filepath.Join(root, "parked"), cutoff, "")
+			rep.Sessions += pruneFilesOlderThan(filepath.Join(root, "sessions"), cutoff, ".json")
+			rep.Pending += pruneFilesOlderThan(filepath.Join(root, "memory", "pending"), cutoff, ".json")
 		}
 	}
 	// Rotated audit trails (the live file is never touched) follow the
@@ -67,10 +78,57 @@ func (cli *ChatCLI) runRetentionPass() retentionReport {
 	if path := os.Getenv(AuditLogPathEnv); path != "" && filepath.IsAbs(filepath.Clean(path)) {
 		rep.AuditFiles = auditchain.PruneRotated(filepath.Clean(path), cutoff)
 	}
-	if cli != nil && cli.logger != nil && (rep.Parks > 0 || rep.Costs > 0 || rep.AuditFiles > 0) {
-		cli.logger.Info("retention pass", zap.Int("parks_removed", rep.Parks), zap.Int("cost_snapshots_removed", rep.Costs), zap.Int("audit_files_removed", rep.AuditFiles))
+	if cli != nil && cli.logger != nil && (rep.Parks > 0 || rep.Costs > 0 || rep.AuditFiles > 0 || rep.Sessions > 0 || rep.Pending > 0) {
+		cli.logger.Info("retention pass", zap.Int("parks_removed", rep.Parks), zap.Int("cost_snapshots_removed", rep.Costs), zap.Int("audit_files_removed", rep.AuditFiles), zap.Int("sessions_removed", rep.Sessions), zap.Int("pending_removed", rep.Pending))
 	}
 	return rep
+}
+
+// pruneFilesOlderThan removes the regular files of dir (with the given
+// extension, any when "") modified before cutoff; missing dir = 0.
+func pruneFilesOlderThan(dir string, cutoff time.Time, ext string) int {
+	if dir == "" {
+		return 0
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return 0
+	}
+	n := 0
+	for _, e := range entries {
+		if e.IsDir() || (ext != "" && filepath.Ext(e.Name()) != ext) {
+			continue
+		}
+		info, err := e.Info()
+		if err != nil || !info.ModTime().Before(cutoff) {
+			continue
+		}
+		if os.Remove(filepath.Join(dir, e.Name())) == nil {
+			n++
+		}
+	}
+	return n
+}
+
+// retentionInterval is how often a long-lived process (the gateway
+// daemon) re-runs the pass; the REPL runs it once at boot.
+const retentionInterval = 6 * time.Hour
+
+// runRetentionLoop repeats the retention pass until ctx ends.
+func (cli *ChatCLI) runRetentionLoop(ctx context.Context, every time.Duration) {
+	if every <= 0 {
+		every = retentionInterval
+	}
+	t := time.NewTicker(every)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+			cli.runRetentionPass()
+		}
+	}
 }
 
 // pruneCostSnapshotsOlderThan removes cost snapshots modified before cutoff.

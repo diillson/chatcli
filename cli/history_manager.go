@@ -7,7 +7,9 @@ package cli
 
 import (
 	"bufio"
+	"encoding/base64"
 	"fmt"
+	"github.com/diillson/chatcli/pkg/atrest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -91,6 +93,15 @@ func (hm *HistoryManager) LoadHistory() ([]string, error) {
 	scanner := bufio.NewScanner(f)
 	for scanner.Scan() {
 		line := scanner.Text()
+		if strings.HasPrefix(line, historySealedPrefix) {
+			plain, err := openHistoryLine(line)
+			if err != nil {
+				// Sealed with a key this process does not hold: skip the
+				// entry rather than surface ciphertext as a command.
+				continue
+			}
+			line = plain
+		}
 		history = append(history, line)
 	}
 
@@ -100,6 +111,31 @@ func (hm *HistoryManager) LoadHistory() ([]string, error) {
 	}
 
 	return history, nil
+}
+
+// historySealedPrefix marks a history line sealed with the at-rest key.
+const historySealedPrefix = "enc:"
+
+// sealHistoryLine encrypts one history entry for disk.
+func sealHistoryLine(cmd string) (string, error) {
+	sealed, err := atrest.Seal([]byte(cmd))
+	if err != nil {
+		return "", err
+	}
+	return historySealedPrefix + base64.StdEncoding.EncodeToString(sealed), nil
+}
+
+// openHistoryLine decrypts a sealed history entry.
+func openHistoryLine(line string) (string, error) {
+	raw, err := base64.StdEncoding.DecodeString(strings.TrimPrefix(line, historySealedPrefix))
+	if err != nil {
+		return "", err
+	}
+	plain, err := atrest.Open(raw)
+	if err != nil {
+		return "", err
+	}
+	return string(plain), nil
 }
 
 // AppendAndRotateHistory salva o histórico no arquivo e faz backup se o tamanho exceder o limite
@@ -191,6 +227,16 @@ func (hm *HistoryManager) AppendAndRotateHistory(newCommands []string) error {
 
 	writer := bufio.NewWriter(f)
 	for _, cmd := range redacted {
+		// Encryption at rest covers the prompt history too: every line is
+		// sealed like the memory WAL and the transcript journal.
+		if atrest.Enabled() {
+			sealed, err := sealHistoryLine(cmd)
+			if err != nil {
+				hm.logger.Warn("Erro ao selar linha do histórico", zap.Error(err))
+				continue
+			}
+			cmd = sealed
+		}
 		if _, err := fmt.Fprintln(writer, cmd); err != nil {
 			// Ignorar erro de escrita individual, mas logar
 			hm.logger.Warn("Erro ao escrever comando no histórico", zap.String("command", cmd), zap.Error(err))

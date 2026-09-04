@@ -272,6 +272,16 @@ func (sm *SessionManager) SaveSessionV2(name string, sd *SessionData) error {
 	}
 
 	sd.Version = 2
+	// Strict redaction policy: what reaches disk is masked (a copy; the
+	// live history stays intact for the running session).
+	if persistRedactEnabled() {
+		clone := *sd
+		clone.ChatHistory = persistRedactMessages(sd.ChatHistory)
+		clone.AgentHistory = persistRedactMessages(sd.AgentHistory)
+		clone.CoderHistory = persistRedactMessages(sd.CoderHistory)
+		clone.SharedMemory = persistRedactMessages(sd.SharedMemory)
+		sd = &clone
+	}
 	// Derive a topic title once at save time so machine names
 	// (autosave-20260720-1504) stay recognizable in list/search/recall.
 	// An explicitly set title always wins.

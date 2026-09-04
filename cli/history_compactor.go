@@ -514,7 +514,7 @@ func (hc *HistoryCompactor) capVerbatim(history []models.Message, budget int) []
 		}
 		stub := "[recalled original aged out of the window (" + FormatPayloadSize(len(m.Content)) + ")"
 		if hc.compress != nil {
-			if key, ok := hc.compress.Archive(m.Content); ok {
+			if key, ok := hc.compress.Archive(persistRedact(m.Content)); ok {
 				stub += "; recover again with @recall " + compress.FormatMarker(key)
 			}
 		}
