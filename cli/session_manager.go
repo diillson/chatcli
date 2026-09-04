@@ -2,6 +2,7 @@ package cli
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -48,6 +49,9 @@ func NewSessionManager(logger *zap.Logger) (*SessionManager, error) {
 	}
 	return NewSessionManagerAt(filepath.Join(homeDir, ".chatcli", "sessions"), logger)
 }
+
+// ErrSessionSchemaNewer marks a session file written by a newer ChatCLI.
+var ErrSessionSchemaNewer = errors.New("session schema newer than this build")
 
 // NewSessionManagerAt is NewSessionManager over an explicit store directory
 // (per-tenant store sets in the gateway, tests).
@@ -366,9 +370,14 @@ func (sm *SessionManager) LoadSessionV2(name string) (*SessionData, error) {
 		return nil, fmt.Errorf("%s: %w", i18n.T("session.decrypt_failed", name), err)
 	}
 
-	// Try v2 format first
+	// Try v2 format first. A file written by a newer schema is refused:
+	// loading it would silently rewrite it minus every field this build
+	// does not know.
 	var sd SessionData
 	if err := json.Unmarshal(data, &sd); err == nil && sd.Version >= 2 {
+		if sd.Version > models.SessionSchemaVersion {
+			return nil, fmt.Errorf("%w: %s", ErrSessionSchemaNewer, i18n.T("session.schema_newer", name, sd.Version, models.SessionSchemaVersion))
+		}
 		sm.logger.Info("Sessão v2 carregada com sucesso", zap.String("session", name))
 		return &sd, nil
 	}

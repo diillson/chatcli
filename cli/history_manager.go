@@ -252,5 +252,5 @@ func (hm *HistoryManager) AppendAndRotateHistory(newCommands []string) error {
 	recentHistory := lines[startIndex:]
 
 	// Escrever as linhas recentes de volta no arquivo de histórico principal (agora vazio)
-	return os.WriteFile(hm.historyFile, []byte(strings.Join(recentHistory, "\n")), 0o600) //#nosec G703 -- path validated by engine.validatePath / SensitiveReadPaths.IsReadAllowed
+	return utils.AtomicWriteFile(hm.historyFile, []byte(strings.Join(recentHistory, "\n")), 0o600) //#nosec G703 -- path validated by engine.validatePath / SensitiveReadPaths.IsReadAllowed
 }

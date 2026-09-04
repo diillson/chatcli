@@ -37,6 +37,7 @@ import (
 
 	"github.com/diillson/chatcli/models"
 	"github.com/diillson/chatcli/pkg/atrest"
+	"github.com/diillson/chatcli/utils"
 	"go.uber.org/zap"
 )
 
@@ -488,6 +489,32 @@ func (cli *ChatCLI) transcriptID() string {
 		return ""
 	}
 	return cli.transcript.id
+}
+
+// forkTranscriptJournal copies the live journal to a fresh id (the fork's
+// own timeline, seeded with the parent's events) and returns that id;
+// "" when journaling is off. The parent keeps writing to its own file.
+func (cli *ChatCLI) forkTranscriptJournal() string {
+	if cli == nil || cli.transcript == nil || cli.transcript.path == "" {
+		return ""
+	}
+	id := newTranscriptID(time.Now())
+	src := cli.transcript.path
+	dst := filepath.Join(filepath.Dir(src), id+filepath.Ext(src))
+	data, err := os.ReadFile(src) // #nosec G304 -- our own journal path under the state root
+	if err != nil && !os.IsNotExist(err) {
+		if cli.logger != nil {
+			cli.logger.Warn("transcript fork: cannot read the parent journal", zap.Error(err))
+		}
+		return ""
+	}
+	if err := utils.AtomicWriteFile(dst, data, 0o600); err != nil {
+		if cli.logger != nil {
+			cli.logger.Warn("transcript fork: cannot seed the new journal", zap.Error(err))
+		}
+		return ""
+	}
+	return id
 }
 
 // adoptTranscript switches the journal to the id a loaded session carries,

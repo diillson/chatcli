@@ -6,6 +6,7 @@
 package registry
 
 import (
+	"github.com/diillson/chatcli/utils"
 	"os"
 	"path/filepath"
 	"strings"
@@ -130,7 +131,7 @@ func SaveConfig(cfg RegistriesConfig) error {
 		return err
 	}
 
-	return os.WriteFile(configPath, data, 0o600)
+	return utils.AtomicWriteFile(configPath, data, 0o600)
 }
 
 // applyEnvOverrides applies environment variable overrides to the config.

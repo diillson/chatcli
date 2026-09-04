@@ -1,0 +1,3 @@
+{
+  "session.schema_newer": "a sessão %q foi gravada por um ChatCLI mais novo (schema v%d; este build lê até v%d) — atualize o ChatCLI para abri-la"
+}

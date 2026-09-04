@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"regexp"
 	"strings"
 	"time"
 
@@ -251,13 +252,37 @@ func (cli *ChatCLI) clearConversation(ctx context.Context) {
 // buildSessionData builds a SessionData from the current CLI state.
 // Uses ChatHistory field to store the unified history for backwards compatibility.
 func (cli *ChatCLI) buildSessionData() *SessionData {
-	return &SessionData{
-		Version:      2,
+	sd := &SessionData{
+		Version:      models.SessionSchemaVersion,
 		ChatHistory:  cli.history,
 		TranscriptID: cli.transcriptID(),
 		Attachments:  cli.sessionAttachments(),
 		Checkpoints:  cli.checkpointRecords(),
+		CCRKeys:      ccrKeysIn(cli.history),
 	}
+	if cli.costTracker != nil {
+		sd.CostSessionID = cli.costTracker.Snapshot().SessionID
+	}
+	return sd
+}
+
+// ccrMarkerRe matches the <<ccr:KEY>> markers the compression layer leaves
+// in place of archived content.
+var ccrMarkerRe = regexp.MustCompile(`<<ccr:([A-Za-z0-9_.-]+)>>`)
+
+// ccrKeysIn lists the distinct CCR keys the history references, in order.
+func ccrKeysIn(history []models.Message) []string {
+	seen := map[string]bool{}
+	var keys []string
+	for _, m := range history {
+		for _, sub := range ccrMarkerRe.FindAllStringSubmatch(m.Content, -1) {
+			if !seen[sub[1]] {
+				seen[sub[1]] = true
+				keys = append(keys, sub[1])
+			}
+		}
+	}
+	return keys
 }
 
 // restoreSessionData restores history from a SessionData.
@@ -502,19 +527,26 @@ func (cli *ChatCLI) handleDeleteSession(ctx context.Context, name string) {
 // If a session is loaded, forks from that. Otherwise, forks from in-memory history.
 func (cli *ChatCLI) handleForkSession(newName string) {
 	// Build session data from current state
-	sd := &SessionData{
-		Version:      2,
-		ChatHistory:  make([]models.Message, len(cli.history)),
-		TranscriptID: cli.transcriptID(),
-		Checkpoints:  cli.checkpointRecords(),
-	}
+	sd := cli.buildSessionData()
+	sd.ChatHistory = make([]models.Message, len(cli.history))
 	copy(sd.ChatHistory, cli.history)
+	// A fork is its own timeline: it gets a new transcript journal seeded
+	// from the parent's events (two sessions appending to one journal made
+	// undo pick whichever fork rewrote last) and keeps the attachments.
+	sd.TranscriptID = cli.forkTranscriptJournal()
 
 	// If the current session has a name (was loaded/saved), we can fork from file
 	if cli.currentSessionName != "" {
 		if err := cli.sessionManager.ForkSession(cli.currentSessionName, newName); err != nil {
 			fmt.Println(colorize(fmt.Sprintf("  %s", i18n.T("sess.cmd.fork_error", err)), ColorRed))
 			return
+		}
+		if forked, err := cli.sessionManager.LoadSessionV2(newName); err == nil {
+			forked.TranscriptID = sd.TranscriptID
+			forked.Attachments = sd.Attachments
+			forked.CostSessionID = sd.CostSessionID
+			forked.CCRKeys = sd.CCRKeys
+			_ = cli.sessionManager.SaveSessionV2(newName, forked)
 		}
 	} else {
 		// Fork from in-memory state

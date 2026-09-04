@@ -21,6 +21,7 @@ package registry
 
 import (
 	"fmt"
+	"github.com/diillson/chatcli/utils"
 	"os"
 	"path/filepath"
 	"sync"
@@ -80,7 +81,7 @@ func (sp *SkillPreferences) Save() error {
 		return err
 	}
 
-	return os.WriteFile(sp.filePath, data, 0o600)
+	return utils.AtomicWriteFile(sp.filePath, data, 0o600)
 }
 
 // SetPreference sets the preferred source for a base skill name.

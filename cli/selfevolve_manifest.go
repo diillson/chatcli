@@ -20,6 +20,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"github.com/diillson/chatcli/utils"
 	"os"
 	"path/filepath"
 
@@ -84,7 +85,7 @@ func (m *selfEvolveManifest) save() {
 	if err != nil {
 		return
 	}
-	_ = os.WriteFile(m.path, data, 0o600)
+	_ = utils.AtomicWriteFile(m.path, data, 0o600)
 }
 
 func hashContent(s string) string {

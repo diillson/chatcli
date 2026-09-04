@@ -184,7 +184,20 @@ type SessionData struct {
 	// load (the journal keeps every message ever seen; the session file
 	// stays small).
 	Checkpoints []SessionCheckpoint `json:"checkpoints,omitempty"`
+	// CostSessionID references the cost snapshot the conversation was
+	// billed under (~/.chatcli/costs/<id>.json) so a resumed session can
+	// show what it already spent.
+	CostSessionID string `json:"cost_session_id,omitempty"`
+	// CCRKeys are the compression-archive keys the history references
+	// (<<ccr:KEY>> markers), so a resumed session knows which archives it
+	// depends on and retention can keep them.
+	CCRKeys []string `json:"ccr_keys,omitempty"`
 }
+
+// SessionSchemaVersion is the session file schema this build writes and
+// the newest it reads; a newer file is refused rather than rewritten
+// minus the fields this build does not know.
+const SessionSchemaVersion = 2
 
 // IsTurnContext reports whether the message is ChatCLI-injected turn
 // context rather than user text (see MessageMeta.TurnContext).
