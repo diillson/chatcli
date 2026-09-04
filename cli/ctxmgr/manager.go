@@ -175,7 +175,14 @@ func (m *Manager) CreateContext(ctx context.Context, name, description string, p
 	// são corpora docs-flatten e entram pelo parser nativo (um FileInfo por
 	// chunk, preservando source/título/proveniência); demais caminhos seguem
 	// pelo scanner normal, então diretórios de docs também viram knowledge.
-	knowledgeMeta := map[string]string{segmenterMetaKey: segmenterV2}
+	// Every context created from here on is segmented boundary-aware and
+	// indexed with a situating header. Both are tagged rather than global
+	// so corpora indexed before them keep the ids and vectors they already
+	// paid for; a /context refresh re-indexes into the new shape.
+	knowledgeMeta := map[string]string{
+		segmenterMetaKey: segmenterV2,
+		situatedMetaKey:  situatedV1,
+	}
 	var files []utils.FileInfo
 	var scanPaths []string
 	if mode == ModeKnowledge {
