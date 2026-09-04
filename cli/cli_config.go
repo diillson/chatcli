@@ -71,6 +71,16 @@ var reloadableEnvVars = []string{
 	"CHATCLI_EMBED_PROVIDER", "CHATCLI_EMBED_MODEL", "CHATCLI_EMBED_DIMENSIONS",
 	"CHATCLI_COMMANDS", "CHATCLI_COMMANDS_AUTOROUTE",
 	"CHATCLI_SESSION_BUDGET_USD", "CHATCLI_DAILY_BUDGET_USD", "CHATCLI_BUDGET_WARNING_PCT", "CHATCLI_BUDGET_HARD_STOP",
+	// Security, sessions, memory, hub, telemetry: a value removed from
+	// .env must not survive /reload.
+	"CHATCLI_ENCRYPTION_KEY", "CHATCLI_AUDIT_LOG_PATH", "CHATCLI_ENV_REDACT_MODE", "CHATCLI_MANAGED_CONFIG",
+	"CHATCLI_SESSION_TRANSCRIPT", "CHATCLI_SESSION_TTL", "CHATCLI_GATEWAY_MAX_TENANTS", "CHATCLI_HUB_TTL_HOURS",
+	"CHATCLI_MEMORY_MODE", "CHATCLI_MEMORY_ENABLED", "CHATCLI_MEMORY_AUTORECALL", "CHATCLI_SESSION_AUTORECALL",
+	"CHATCLI_MEMORY_FALLBACK_PROVIDERS", "CHATCLI_MEMORY_MAX_FACTS", "CHATCLI_MEMORY_MAX_SIZE",
+	"CHATCLI_MEMORY_RETENTION_DAYS", "CHATCLI_MEMORY_RETRIEVAL_BUDGET",
+	"CHATCLI_COMPRESSION_CCR_TTL", "CHATCLI_COMPRESSION_CCR_MAX_MB", "OLLAMA_HOST",
+	"OTEL_EXPORTER_OTLP_ENDPOINT", "OTEL_EXPORTER_OTLP_METRICS_ENDPOINT", "OTEL_EXPORTER_OTLP_HEADERS",
+	"OTEL_METRIC_EXPORT_INTERVAL", "OTEL_RESOURCE_ATTRIBUTES", "OTEL_SERVICE_NAME",
 }
 
 // reloadConfiguration recarrega as variáveis de ambiente e reconfigura o LLMManager
@@ -257,6 +267,12 @@ func (cli *ChatCLI) showHelp() {
 	printCommand("/help", i18n.T("help.command.help"))
 	printCommand("/exit | /quit", i18n.T("help.command.exit"))
 	printCommand("/newsession", i18n.T("help.command.newsession"))
+	printCommand("/context status | refresh | watch | unwatch", i18n.T("help.command.context_lifecycle"))
+	printCommand("/memory export | import | recall | why", i18n.T("help.command.memory_tools"))
+	printCommand("/autocompact", i18n.T("help.command.autocompact"))
+	printCommand("/cost [reset | last | sessions | export]", i18n.T("help.command.cost"))
+	printCommand("/config managed | retention", i18n.T("help.command.config_ops"))
+	printCommand("/config security reseal | verify-audit", i18n.T("help.command.config_security_ops"))
 	printCommand("/version | /v", i18n.T("help.command.version"))
 	printCommand("/compact [instruction]", i18n.T("help.command.compact"))
 	printCommand("/rewind", i18n.T("help.command.rewind"))

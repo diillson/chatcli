@@ -54,6 +54,15 @@ import (
 
 // routeConfigCommand dispatches /config [section]. Args comes without the
 // leading "/config" token.
+// configSectionNames are the /config sections routeConfigCommand exposes
+// (canonical names, aliases omitted); the panorama hint is built from it
+// so it never lists fewer sections than the router accepts.
+var configSectionNames = []string{
+	"providers", "agent", "security", "chat", "compression", "output", "commands", "ui", "resilience",
+	"proxy", "managed", "policy", "retention", "session", "integrations", "auth", "image", "diagram",
+	"graphview", "taskgraph", "quality", "update", "memory", "selfevolve", "scheduler", "server", "hub",
+}
+
 func (cli *ChatCLI) routeConfigCommand(ctx context.Context, args []string) {
 	if len(args) == 0 {
 		cli.showConfigPanorama()
@@ -445,7 +454,7 @@ func (cli *ChatCLI) showConfigPanorama() {
 	// Footer
 	fmt.Println(p)
 	fmt.Println(p + colorize(i18n.T("cfg.panorama.drill_down"), ColorGray) + "  " + colorize("/config all · /config <section>", ColorBold))
-	fmt.Println(p + colorize(i18n.T("cfg.panorama.sections_hint"), ColorGray))
+	fmt.Println(p + colorize(i18n.T("cfg.panorama.sections_hint", strings.Join(configSectionNames, ", ")), ColorGray))
 	sectionEnd(ColorCyan)
 }
 
