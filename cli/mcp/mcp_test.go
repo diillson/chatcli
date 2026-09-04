@@ -1649,3 +1649,32 @@ func TestLogRingSnapshotIsCopy(t *testing.T) {
 		t.Errorf("ring corrupted by snapshot mutation: got %q, want %q", got, "hello")
 	}
 }
+
+func TestBuildProcessEnvScrubsChatCLISecretsUnlessPassedThrough(t *testing.T) {
+	parent := []string{"PATH=/bin", "CHATCLI_ENCRYPTION_KEY=master", "CHATCLI_JWT_SECRET=jwt", "GH_TOKEN=abc"}
+	env := buildProcessEnv(parent, nil)
+	for _, kv := range env {
+		if strings.HasPrefix(kv, "CHATCLI_ENCRYPTION_KEY=") || strings.HasPrefix(kv, "CHATCLI_JWT_SECRET=") {
+			t.Fatalf("server must not inherit ChatCLI secrets: %v", env)
+		}
+	}
+	if len(env) != 2 {
+		t.Fatalf("env = %v", env)
+	}
+	// A server that names the variable in its env map opts in.
+	env = buildProcessEnv(parent, map[string]string{"CHATCLI_JWT_SECRET": "${CHATCLI_JWT_SECRET}"})
+	got := ""
+	for _, kv := range env {
+		if strings.HasPrefix(kv, "CHATCLI_JWT_SECRET=") {
+			got = kv
+		}
+	}
+	if got != "CHATCLI_JWT_SECRET=jwt" {
+		t.Fatalf("opt-in passthrough must expand against the parent: %v", env)
+	}
+	for _, kv := range env {
+		if strings.HasPrefix(kv, "CHATCLI_ENCRYPTION_KEY=") {
+			t.Fatal("the other secrets stay scrubbed")
+		}
+	}
+}

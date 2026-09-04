@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/diillson/chatcli/utils"
 	"io"
 	"os"
 	"os/exec"
@@ -308,6 +309,9 @@ func (t *stdioTransport) drainStderr(name string, r io.ReadCloser) {
 // override wins (last assignment in cmd.Env takes precedence on Unix
 // and Windows).
 func buildProcessEnv(parent []string, overrides map[string]string) []string {
+	// ChatCLI's own secrets (encryption key, JWT secret, auth dir, audit
+	// path) never cross into a server unless its env map names them.
+	parent = utils.ScrubSecretEnv(parent, overrides)
 	if len(overrides) == 0 {
 		// Return the parent slice as-is — exec.Cmd treats nil as
 		// "inherit", but we want explicit inheritance regardless of

@@ -74,6 +74,9 @@ func (p *ExecutablePlugin) ExecuteWithStream(ctx context.Context, args []string,
 	defer cancel()
 
 	cmd := exec.CommandContext(execCtx, p.path, args...) //#nosec G204 -- agent/CLI tool execution; commands validated by command_validator + policy_manager upstream
+	// Executable plugins inherit the environment minus ChatCLI's own
+	// secrets (encryption key, JWT secret, auth dir, audit path).
+	cmd.Env = utils.ScrubSecretEnv(os.Environ(), nil)
 
 	stdoutPipe, err := cmd.StdoutPipe()
 	if err != nil {
