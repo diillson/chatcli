@@ -135,7 +135,7 @@ func (e *Engine) handleMultipatch(args []string) error {
 		if err != nil {
 			return fmt.Errorf("edit #%d: resolve path: %w", idx, err)
 		}
-		if err := e.validatePath(abs); err != nil {
+		if err := e.validateWritePath(abs); err != nil {
 			return fmt.Errorf("edit #%d: %w", idx, err)
 		}
 

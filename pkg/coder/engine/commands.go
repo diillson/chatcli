@@ -95,7 +95,7 @@ func (e *Engine) handleWrite(args []string) error {
 	if *content == "" {
 		return fmt.Errorf("--content vazio")
 	}
-	if err := e.validatePath(*file); err != nil {
+	if err := e.validateWritePath(*file); err != nil {
 		return err
 	}
 
@@ -149,7 +149,7 @@ func (e *Engine) handlePatch(args []string) error {
 	if *file == "" || *search == "" {
 		return fmt.Errorf("--file e --search requeridos")
 	}
-	if err := e.validatePath(*file); err != nil {
+	if err := e.validateWritePath(*file); err != nil {
 		return err
 	}
 
@@ -197,7 +197,7 @@ func (e *Engine) handleRollback(args []string) error {
 	if *file == "" {
 		return fmt.Errorf("--file requerido")
 	}
-	if err := e.validatePath(*file); err != nil {
+	if err := e.validateWritePath(*file); err != nil {
 		return err
 	}
 	c, err := os.ReadFile(*file + ".bak")

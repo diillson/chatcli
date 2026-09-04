@@ -128,6 +128,14 @@ func (s *SensitiveReadPaths) IsReadAllowed(path, workspace string) (bool, string
 	return true, ""
 }
 
+// resolvedSensitiveReadPaths are the exact files never readable, in both
+// the literal and the symlink-resolved spelling.
+var resolvedSensitiveReadPaths = resolveDenyList([]string{
+	"/etc/shadow",
+	"/etc/gshadow",
+	"/etc/master.passwd",
+})
+
 // isSensitivePath checks if a path matches known sensitive file patterns.
 func (s *SensitiveReadPaths) isSensitivePath(path string) (bool, string) {
 	// os.UserHomeDir handles USERPROFILE on Windows; a raw $HOME lookup would
@@ -138,13 +146,10 @@ func (s *SensitiveReadPaths) isSensitivePath(path string) (bool, string) {
 		home = "/root"
 	}
 
-	// Exact sensitive paths
-	sensitivePaths := []string{
-		"/etc/shadow",
-		"/etc/gshadow",
-		"/etc/master.passwd",
-	}
-	for _, sp := range sensitivePaths {
+	// Exact sensitive paths. Compared in both spellings: the candidate has
+	// already been through EvalSymlinks, and on macOS /etc resolves to
+	// /private/etc — where the shadow file actually lives.
+	for _, sp := range resolvedSensitiveReadPaths {
 		if path == sp {
 			return true, "access to " + sp + " is blocked for security"
 		}
