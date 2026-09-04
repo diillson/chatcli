@@ -3751,7 +3751,7 @@
   "cfg.sub.sec.atrest": "Encryption at rest",
   "cfg.kv.sec.atrest_key": "Key fingerprint",
   "cfg.kv.sec.atrest_covers": "Covers",
-  "cfg.kv.sec.atrest_covers_list": "sessions, transcripts, park snapshots, long-term memory (JSON stores), knowledge contexts, CCR archive, cost snapshots, memory exports",
+  "cfg.kv.sec.atrest_covers_list": "sessions, transcripts, park snapshots, long-term memory (JSON stores), knowledge contexts, CCR archive, cost snapshots, memory exports, audit trail (per line)",
   "cfg.sub.server.otel": "OpenTelemetry export",
   "mem.cmd.stats.locked_store": "LOCKED read-only: %s store (%s) is sealed and this process cannot open it — %s. Set CHATCLI_ENCRYPTION_KEY (or CHATCLI_ENCRYPTION_KEY_PREVIOUS after a rotation); nothing is written until it opens.",
   "cfg.kv.sec.atrest_locked": "Locked stores",
@@ -3759,5 +3759,9 @@
   "compact.nothing_to_compact": "Nothing to compact: the history already fits.",
   "cost.cmd.memory_worker": "Memory worker: %d call(s) · %s (extraction, rollups, memory compaction)",
   "cfg.kv.sec.tenant_shared": "Shared across tenants",
-  "cfg.kv.sec.tenant_shared_list": "hooks, MCP manager (servers and OAuth), reflexion runner, REPL history file, hub database, scheduler — everything else is per tenant"
+  "cfg.kv.sec.tenant_shared_list": "hooks, MCP manager (servers and OAuth), reflexion runner, REPL history file, hub database, scheduler — everything else is per tenant",
+  "sec.cmd.verify_audit_rotated_files": "%d rotated trail file(s) next to this one; verify each with its own path.",
+  "sec.cmd.verify_audit_rotated_from": "This file continues the chain of %s (rotated).",
+  "sec.cmd.verify_audit_sealed": "%d entries are stored encrypted (opened with the at-rest key).",
+  "sec.cmd.verify_audit_torn": "The last line is incomplete (a write was interrupted); it is not tampering and the next entry continues from the last complete line."
 }

@@ -7,8 +7,7 @@ package server
 
 import (
 	"context"
-	"encoding/json"
-	"io"
+	"github.com/diillson/chatcli/pkg/auditchain"
 	"os"
 	"path/filepath"
 	"strings"
@@ -25,6 +24,7 @@ import (
 // AuditEntry is a structured audit log event for security-relevant operations.
 type AuditEntry struct {
 	Timestamp   string            `json:"timestamp"`
+	Kind        string            `json:"kind,omitempty"` // "grpc" (LLM entries in the same trail carry "llm")
 	RequestID   string            `json:"request_id"`
 	ClientID    string            `json:"client_id"`
 	ClientAddr  string            `json:"client_addr,omitempty"`
@@ -38,10 +38,9 @@ type AuditEntry struct {
 
 // AuditLogger provides structured audit logging for gRPC server operations.
 type AuditLogger struct {
-	mu         sync.Mutex
-	zapLogger  *zap.Logger
-	fileWriter io.WriteCloser
-	encoder    *json.Encoder
+	mu        sync.Mutex
+	zapLogger *zap.Logger
+	chain     *auditchain.Writer
 }
 
 // NewAuditLogger creates an audit logger. If CHATCLI_AUDIT_LOG_PATH is set,
@@ -53,12 +52,17 @@ func NewAuditLogger(logger *zap.Logger) *AuditLogger {
 
 	if path := os.Getenv("CHATCLI_AUDIT_LOG_PATH"); path != "" {
 		cleanPath := filepath.Clean(path)
-		f, err := os.OpenFile(cleanPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
+		if !filepath.IsAbs(cleanPath) {
+			logger.Error("audit log path must be absolute; file audit disabled", zap.String("path", path))
+			return al
+		}
+		// The same hash-chained, file-locked trail the LLM auditor writes:
+		// gRPC entries interleave with LLM entries in one verifiable chain.
+		w, err := auditchain.Open(cleanPath, auditchain.Options{})
 		if err != nil {
 			logger.Error("failed to open audit log file", zap.String("path", path), zap.Error(err))
 		} else {
-			al.fileWriter = f
-			al.encoder = json.NewEncoder(f)
+			al.chain = w
 		}
 	}
 
@@ -80,17 +84,22 @@ func (al *AuditLogger) Log(entry AuditEntry) {
 		zap.String("duration", entry.Duration),
 	)
 
-	if al.encoder != nil {
+	if al.chain != nil {
+		if entry.Kind == "" {
+			entry.Kind = "grpc"
+		}
 		al.mu.Lock()
-		_ = al.encoder.Encode(entry)
+		if err := al.chain.Append(entry); err != nil {
+			al.zapLogger.Warn("audit log write failed", zap.Error(err))
+		}
 		al.mu.Unlock()
 	}
 }
 
 // Close shuts down the audit file writer.
 func (al *AuditLogger) Close() {
-	if al.fileWriter != nil {
-		if err := al.fileWriter.Close(); err != nil {
+	if al.chain != nil {
+		if err := al.chain.Close(); err != nil {
 			al.zapLogger.Error("failed to close audit log file", zap.Error(err))
 		}
 	}

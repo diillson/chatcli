@@ -3751,7 +3751,7 @@
   "cfg.sub.sec.atrest": "Criptografia em repouso",
   "cfg.kv.sec.atrest_key": "Fingerprint da chave",
   "cfg.kv.sec.atrest_covers": "Cobre",
-  "cfg.kv.sec.atrest_covers_list": "sessões, transcripts, park snapshots, memória de longo prazo (stores JSON), contextos de conhecimento, arquivo CCR, snapshots de custo, exportações de memória",
+  "cfg.kv.sec.atrest_covers_list": "sessões, transcripts, park snapshots, memória de longo prazo (stores JSON), contextos de conhecimento, arquivo CCR, snapshots de custo, exportações de memória, trilha de auditoria (por linha)",
   "cfg.sub.server.otel": "Exportação OpenTelemetry",
   "mem.cmd.stats.locked_store": "TRAVADO somente leitura: store %s (%s) está selado e este processo não consegue abri-lo — %s. Defina CHATCLI_ENCRYPTION_KEY (ou CHATCLI_ENCRYPTION_KEY_PREVIOUS após rotação); nada é gravado até abrir.",
   "cfg.kv.sec.atrest_locked": "Stores travados",
@@ -3759,5 +3759,9 @@
   "compact.nothing_to_compact": "Nada a compactar: o histórico já cabe.",
   "cost.cmd.memory_worker": "Memory worker: %d chamada(s) · %s (extração, rollups, compactação de memória)",
   "cfg.kv.sec.tenant_shared": "Compartilhado entre tenants",
-  "cfg.kv.sec.tenant_shared_list": "hooks, MCP manager (servidores e OAuth), reflexion runner, arquivo de histórico do REPL, banco do hub, scheduler — todo o resto é por tenant"
+  "cfg.kv.sec.tenant_shared_list": "hooks, MCP manager (servidores e OAuth), reflexion runner, arquivo de histórico do REPL, banco do hub, scheduler — todo o resto é por tenant",
+  "sec.cmd.verify_audit_rotated_files": "%d arquivo(s) de trilha rotacionados ao lado deste; verifique cada um pelo próprio caminho.",
+  "sec.cmd.verify_audit_rotated_from": "Este arquivo continua a cadeia de %s (rotacionado).",
+  "sec.cmd.verify_audit_sealed": "%d entradas estão gravadas cifradas (abertas com a chave at-rest).",
+  "sec.cmd.verify_audit_torn": "A última linha está incompleta (uma escrita foi interrompida); não é adulteração e a próxima entrada continua a partir da última linha completa."
 }
