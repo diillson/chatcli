@@ -19,15 +19,20 @@ import (
 type countingSummarizer struct {
 	calls   int
 	summary string
-	usage   *models.UsageInfo
+	usage   *models.UsageInfo // template; a fresh copy is stored per call, like real clients
+	last    *models.UsageInfo
 }
 
 func (c *countingSummarizer) GetModelName() string { return "counting" }
 func (c *countingSummarizer) SendPrompt(context.Context, string, []models.Message, int) (string, error) {
 	c.calls++
+	if c.usage != nil {
+		u := *c.usage
+		c.last = &u
+	}
 	return c.summary, nil
 }
-func (c *countingSummarizer) LastUsage() *models.UsageInfo { return c.usage }
+func (c *countingSummarizer) LastUsage() *models.UsageInfo { return c.last }
 
 func verbatimFixture() []models.Message {
 	h := []models.Message{{Role: "system", Content: "charter"}}
@@ -57,7 +62,7 @@ func hasVerbatim(h []models.Message) (int, bool) {
 func TestStructuredSummarize_KeepsPreserveVerbatimAfterSummary(t *testing.T) {
 	hc := NewHistoryCompactor(zap.NewNop())
 	cfg := CompactConfig{MinKeepRecent: 2}
-	got, err := hc.structuredSummarize(context.Background(), verbatimFixture(), &countingSummarizer{summary: strings.Repeat("## Summary\n- point ", 8)}, cfg)
+	got, _, err := hc.structuredSummarize(context.Background(), verbatimFixture(), &countingSummarizer{summary: strings.Repeat("## Summary\n- point ", 8)}, cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -129,7 +134,7 @@ func TestSummaryPassesGate(t *testing.T) {
 func TestStructuredSummarize_QualityGateRetriesThenFails(t *testing.T) {
 	hc := NewHistoryCompactor(zap.NewNop())
 	s := &countingSummarizer{summary: "I'm sorry, I cannot summarize this conversation for you today."}
-	_, err := hc.structuredSummarize(context.Background(), summarizeFixtureHistory(2), s, CompactConfig{MinKeepRecent: 2})
+	_, _, err := hc.structuredSummarize(context.Background(), summarizeFixtureHistory(2), s, CompactConfig{MinKeepRecent: 2})
 	if err == nil || s.calls != 2 {
 		t.Fatalf("a refusal must be retried once then rejected: err=%v calls=%d", err, s.calls)
 	}

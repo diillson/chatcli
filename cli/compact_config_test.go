@@ -99,11 +99,11 @@ func TestStructuredSummarize_UsesConfiguredSummarizer(t *testing.T) {
 	}
 	cfg := CompactConfig{Provider: "CLAUDEAI", Model: "claude-sonnet-5", BudgetRatio: 0.75, MinKeepRecent: 4, CharsPerToken: 4}
 
-	if _, err := hc.structuredSummarize(context.Background(), history, session, cfg); err != nil {
+	if _, _, err := hc.structuredSummarize(context.Background(), history, session, cfg); err != nil {
 		t.Fatalf("summarize: %v", err)
 	}
 	cfg.SummarizerClient = cheap
-	if _, err := hc.structuredSummarize(context.Background(), history, session, cfg); err != nil {
+	if _, _, err := hc.structuredSummarize(context.Background(), history, session, cfg); err != nil {
 		t.Fatalf("summarize with cheap model: %v", err)
 	}
 	if len(calls) != 2 || calls[0] != "session" || calls[1] != "cheap" {

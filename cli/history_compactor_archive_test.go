@@ -46,7 +46,7 @@ func TestStructuredSummarize_ArchivesMiddleSegment(t *testing.T) {
 	cfg := CompactConfig{MinKeepRecent: 2}
 	history := summarizeFixtureHistory(cfg.MinKeepRecent)
 
-	got, err := hc.structuredSummarize(context.Background(), history, summarizerFake{}, cfg)
+	got, _, err := hc.structuredSummarize(context.Background(), history, summarizerFake{}, cfg)
 	if err != nil {
 		t.Fatalf("structuredSummarize: %v", err)
 	}
@@ -80,7 +80,7 @@ func TestStructuredSummarize_NoLayerKeepsLegacyBehavior(t *testing.T) {
 	hc := NewHistoryCompactor(zap.NewNop())
 	cfg := CompactConfig{MinKeepRecent: 2}
 
-	got, err := hc.structuredSummarize(context.Background(), summarizeFixtureHistory(cfg.MinKeepRecent), summarizerFake{}, cfg)
+	got, _, err := hc.structuredSummarize(context.Background(), summarizeFixtureHistory(cfg.MinKeepRecent), summarizerFake{}, cfg)
 	if err != nil {
 		t.Fatalf("structuredSummarize: %v", err)
 	}

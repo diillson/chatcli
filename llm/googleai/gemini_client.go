@@ -87,6 +87,9 @@ func (c *GeminiClient) GetModelName() string {
 
 // SendPrompt envia um prompt para o Gemini e retorna a resposta
 func (c *GeminiClient) SendPrompt(ctx context.Context, prompt string, history []models.Message, maxTokens int) (string, error) {
+	// A response without a usage block must not re-book the previous
+	// call's tokens as this call's: reset before the request.
+	c.usageState.StoreUsage(nil)
 	effectiveMaxTokens := maxTokens
 	if effectiveMaxTokens <= 0 {
 		effectiveMaxTokens = c.getMaxTokens() // Fallback para a lógica antiga se nada for passado

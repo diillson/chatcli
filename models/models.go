@@ -218,8 +218,9 @@ type UsageInfo struct {
 	// Reported by OpenAI under usage.completion_tokens_details.reasoning_tokens
 	// (Chat Completions) or usage.output_tokens_details.reasoning_tokens
 	// (Responses API), and by Gemini under usageMetadata.thoughtsTokenCount.
-	// Billed as output tokens and already counted in CompletionTokens —
-	// this field is informational only.
+	// OpenAI counts them inside CompletionTokens (informational there);
+	// Gemini reports them OUTSIDE candidatesTokenCount and bills them as
+	// output, so the cost tracker adds them for Gemini.
 	ReasoningTokens int `json:"reasoning_tokens,omitempty"`
 
 	// CostUSD is the actual billed cost reported by the provider for this

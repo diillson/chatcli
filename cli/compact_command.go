@@ -162,12 +162,17 @@ CONVERSATION TO COMPACT:
 			cli.logger.Warn("context engine failed on guided compaction; using the session model", zap.Error(err))
 		}
 	}
+	var guidedUsage *models.UsageInfo
 	if strings.TrimSpace(response) == "" {
+		before := usageSnapshot(summarizer)
 		response, err = summarizer.SendPrompt(summarizeCtx, prompt, summaryHistory, 0)
+		guidedUsage = usageOfCall(summarizer, before)
 		// Auto-retry on OAuth token expiration (401)
 		if usingSession && cli.refreshClientOnAuthError(err) {
 			summarizer = cli.Client
+			before = usageSnapshot(summarizer)
 			response, err = summarizer.SendPrompt(summarizeCtx, prompt, summaryHistory, 0)
+			guidedUsage = usageOfCall(summarizer, before)
 		}
 	}
 	if err != nil {
@@ -212,7 +217,7 @@ CONVERSATION TO COMPACT:
 	result = append(result, cli.history[recentStart:]...)
 
 	cli.history = result
-	rep := CompactReport{Level: 2, SummaryUsage: summarizerUsage(cli.Client, cfg), SummaryProvider: cfg.SummarizerProvider, SummaryModel: cfg.SummarizerModel}
+	rep := CompactReport{Level: 2, SummaryUsage: guidedUsage, SummaryProvider: cfg.SummarizerProvider, SummaryModel: cfg.SummarizerModel}
 	if rep.SummaryProvider == "" {
 		rep.SummaryProvider, rep.SummaryModel = cli.Provider, cli.Model
 	}

@@ -116,6 +116,8 @@ type SessionCostData struct {
 	EmbeddingCalls         int     `json:"embedding_calls,omitempty"`
 	EmbeddingTokens        int64   `json:"embedding_tokens,omitempty"`
 	EmbeddingCostUSD       float64 `json:"embedding_cost_usd,omitempty"`
+	MemoryCalls            int     `json:"memory_calls,omitempty"`
+	MemoryCostUSD          float64 `json:"memory_cost_usd,omitempty"`
 	Compactions            int     `json:"compactions,omitempty"`
 	CompactionsLevel3      int     `json:"compactions_level3,omitempty"`
 	CompactionCostUSD      float64 `json:"compaction_cost_usd,omitempty"`
@@ -173,6 +175,8 @@ type CostTracker struct {
 	cacheStorageTokenHours float64
 	cacheStorageUSD        float64
 	compactions            int
+	memoryCalls            int
+	memoryCostUSD          float64
 	embeddingCalls         int
 	embeddingTokens        int64
 	embeddingCostUSD       float64
@@ -476,6 +480,8 @@ func (ct *CostTracker) snapshotLocked() SessionCostData {
 		EmbeddingCalls:         ct.embeddingCalls,
 		EmbeddingTokens:        ct.embeddingTokens,
 		EmbeddingCostUSD:       ct.embeddingCostUSD,
+		MemoryCalls:            ct.memoryCalls,
+		MemoryCostUSD:          ct.memoryCostUSD,
 		Compactions:            ct.compactions,
 		CompactionsLevel3:      ct.compactionsLevel3,
 		CompactionCostUSD:      ct.compactionCostUSD,
@@ -635,6 +641,8 @@ func (ct *CostTracker) RestoreSession(sessionID string) error {
 	ct.embeddingCalls = data.EmbeddingCalls
 	ct.embeddingTokens = data.EmbeddingTokens
 	ct.embeddingCostUSD = data.EmbeddingCostUSD
+	ct.memoryCalls = data.MemoryCalls
+	ct.memoryCostUSD = data.MemoryCostUSD
 	ct.compactions = data.Compactions
 	ct.compactionsLevel3 = data.CompactionsLevel3
 	ct.compactionCostUSD = data.CompactionCostUSD
@@ -742,6 +750,17 @@ func (ct *CostTracker) getOrCreateRecord(key, provider, model string) *ModelUsag
 	return rec
 }
 
+// reasoningTokensAdditive reports whether a provider's reasoning tokens are
+// reported outside the completion count (Gemini) and must be billed on
+// top of it.
+func reasoningTokensAdditive(provider string) bool {
+	switch strings.ToUpper(strings.TrimSpace(provider)) {
+	case "GOOGLEAI", "GEMINI", "GOOGLE":
+		return true
+	}
+	return false
+}
+
 // recomputeRecordCost prices one record in place — the ONLY cost formula
 // in the tracker; estimateTurnCostUSD delegates here so per-turn and
 // per-session math can never disagree.
@@ -765,6 +784,13 @@ func recomputeRecordCost(rec *ModelUsageRecord) {
 	completionTokens := unbilled(rec.CompletionTokens, rec.BilledCompletionTokens)
 	cacheRead := unbilled(rec.CacheReadTokens, rec.BilledCacheReadTokens)
 	cacheCreation := unbilled(rec.CacheCreationTokens, rec.BilledCacheCreationTokens)
+
+	// Gemini reports thinking tokens (thoughtsTokenCount) OUTSIDE the
+	// candidates count and bills them as output; OpenAI's reasoning tokens
+	// are already inside completion_tokens. Add them only where additive.
+	if reasoningTokensAdditive(rec.Provider) {
+		completionTokens += unbilled(rec.ReasoningTokens, 0)
+	}
 
 	billableInput := promptTokens
 	if !cacheTokensAdditive(rec.Provider, rec.Model) && cacheRead > 0 && cacheReadCost > 0 {
@@ -887,6 +913,7 @@ func estimateTurnCostUSD(provider, model string, usage *models.UsageInfo) float6
 	// session tracker applies — a second hand-rolled formula here is how the
 	// footer and /cost drift apart.
 	rec := &ModelUsageRecord{
+		ReasoningTokens:       int64(usage.ReasoningTokens),
 		Provider:              provider,
 		Model:                 model,
 		PromptTokens:          int64(usage.PromptTokens),

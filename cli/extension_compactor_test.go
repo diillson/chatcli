@@ -50,7 +50,7 @@ func TestStructuredSummarize_ContextEngineReplacesAndFallsBack(t *testing.T) {
 		}
 		return "ENGINE SUMMARY\n## Files Read\n- none of note\n## Current Task State\n- the user asked for a refactor of the parser and the assistant delivered it", nil
 	})
-	out, err := hc.structuredSummarize(context.Background(), compactableHistory(), stub, cfg)
+	out, _, err := hc.structuredSummarize(context.Background(), compactableHistory(), stub, cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -59,7 +59,7 @@ func TestStructuredSummarize_ContextEngineReplacesAndFallsBack(t *testing.T) {
 	}
 
 	cfg.ExternalSummarizer = engineFunc(func(context.Context, string, int, string) (string, error) { return "", errors.New("engine down") })
-	out, err = hc.structuredSummarize(context.Background(), compactableHistory(), stub, cfg)
+	out, _, err = hc.structuredSummarize(context.Background(), compactableHistory(), stub, cfg)
 	if err != nil || stub.calls != 1 || !strings.Contains(out[0].Content, "EMBEDDED SUMMARY") {
 		t.Fatalf("engine failure must fall back: err=%v calls=%d", err, stub.calls)
 	}

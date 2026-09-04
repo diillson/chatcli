@@ -53,12 +53,21 @@ const (
 type pendingSegment struct {
 	CreatedAt time.Time        `json:"created_at"`
 	Messages  []models.Message `json:"messages"`
+	// Attempts counts drains that failed on this segment; it is dropped
+	// after pendingMaxAttempts so an unparseable reply cannot wedge the
+	// queue forever (one requeue, then gone).
+	Attempts int `json:"attempts,omitempty"`
 }
+
+// pendingMaxAttempts is how many failed drains a queued segment survives.
+const pendingMaxAttempts = 2
 
 // extractionClient pairs a provider name with its client for the fallback walk.
 type extractionClient struct {
-	name string
+	name string // provider name, for the fallback dedup and the logs
 	llm  client.LLMClient
+	// provider/model the usage is booked under ("" = the session's)
+	provider, model string
 }
 
 // extractionClients returns the clients to try for one extraction, in order:
@@ -68,8 +77,8 @@ type extractionClient struct {
 func (mw *memoryWorker) extractionClients() []extractionClient {
 	out := make([]extractionClient, 0, 4)
 	active := strings.ToUpper(strings.TrimSpace(mw.cli.Provider))
-	if c := mw.cli.getClient(); c != nil {
-		out = append(out, extractionClient{name: active, llm: c})
+	if c, provider, model := mw.backgroundClient(); c != nil {
+		out = append(out, extractionClient{name: active, llm: c, provider: provider, model: model})
 	}
 	raw := strings.TrimSpace(os.Getenv(envMemoryFallbackProviders))
 	if raw == "" {
@@ -95,6 +104,11 @@ func (mw *memoryWorker) extractionClients() []extractionClient {
 // returning the first success. Each attempt gets its own timeout so a hung
 // provider cannot consume the whole budget of the ones behind it.
 func (mw *memoryWorker) callExtraction(parent context.Context, prompt string, history []models.Message) (string, error) {
+	// Background spend is spend: the same budget gate the interactive turns
+	// and the scheduler honor.
+	if err := mw.cli.budgetBlockedErr(); err != nil {
+		return "", err
+	}
 	clients := mw.extractionClients()
 	if len(clients) == 0 {
 		return "", fmt.Errorf("no LLM client available for memory extraction")
@@ -102,10 +116,14 @@ func (mw *memoryWorker) callExtraction(parent context.Context, prompt string, hi
 	errs := make([]string, 0, len(clients))
 	for i, ec := range clients {
 		ctx, cancel := context.WithTimeout(parent, memoryExtractTimeout)
+		before := usageSnapshot(ec.llm)
 		response, err := ec.llm.SendPrompt(ctx, prompt, history, 0)
+		mw.recordUsage(ec, usageOfCall(ec.llm, before))
 		if mw.cli.refreshClientOnAuthError(err) {
 			if c := mw.cli.getClient(); c != nil {
+				before = usageSnapshot(c)
 				response, err = c.SendPrompt(ctx, prompt, history, 0)
+				mw.recordUsage(ec, usageOfCall(c, before))
 			}
 		}
 		cancel()
@@ -161,6 +179,72 @@ func (mw *memoryWorker) persistPending(messages []models.Message) (string, error
 	return path, nil
 }
 
+// rewritePending persists an updated segment (attempt counter) in place.
+func (mw *memoryWorker) rewritePending(path string, seg pendingSegment) {
+	data, err := json.Marshal(seg)
+	if err != nil {
+		return
+	}
+	if data, err = atrest.Seal(data); err != nil {
+		return
+	}
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, data, 0o600); err != nil { // #nosec G304 -- our own queue dir
+		return
+	}
+	_ = os.Rename(tmp, path)
+}
+
+// backgroundClient returns the client the memory worker's own calls use:
+// the configured compaction/summarizer model (CHATCLI_COMPACT_MODEL) when
+// there is one, else a DEDICATED instance of the session's provider/model.
+// Never the interactive session's client: provider clients keep sticky
+// usage state, and a background call sharing it clobbers (and is
+// clobbered by) the concurrent interactive turn's usage.
+func (mw *memoryWorker) backgroundClient() (client.LLMClient, string, string) {
+	cli := mw.cli
+	if cli == nil {
+		return nil, "", ""
+	}
+	if c := cli.compactSummarizerClient(); c != nil {
+		return c, cli.compactSummarizerProvider, cli.compactSummarizerModel
+	}
+	mw.mu.Lock()
+	key := cli.Provider + ":" + cli.Model
+	if mw.dedicated != nil && mw.dedicatedKey == key {
+		c := mw.dedicated
+		mw.mu.Unlock()
+		return c, cli.Provider, cli.Model
+	}
+	mw.mu.Unlock()
+	var c client.LLMClient
+	if cli.manager != nil {
+		if fresh, err := cli.manager.GetClient(cli.Provider, cli.Model); err == nil && fresh != nil {
+			c = fresh
+		}
+	}
+	if c == nil {
+		c = cli.getClient() // no manager (tests, degraded boot): share, but still record
+	}
+	mw.mu.Lock()
+	mw.dedicated, mw.dedicatedKey = c, key
+	mw.mu.Unlock()
+	return c, cli.Provider, cli.Model
+}
+
+// recordUsage books a background call under the memory slice of the cost
+// tracker (provider:model parsed from the chain entry's name).
+func (mw *memoryWorker) recordUsage(ec extractionClient, usage *models.UsageInfo) {
+	if usage == nil || mw.cli == nil || mw.cli.costTracker == nil {
+		return
+	}
+	provider, model := ec.provider, ec.model
+	if provider == "" || model == "" {
+		provider, model = mw.cli.Provider, mw.cli.Model
+	}
+	mw.cli.costTracker.RecordMemoryUsage(provider, model, usage)
+}
+
 // enforcePendingCap drops the oldest queued segments beyond pendingMaxFiles.
 func (mw *memoryWorker) enforcePendingCap() {
 	files := mw.pendingFiles()
@@ -208,8 +292,16 @@ func (mw *memoryWorker) drainPending(ctx context.Context) int {
 			continue
 		}
 		if err := mw.extractAndSave(ctx, seg.Messages); err != nil {
+			seg.Attempts++
+			if seg.Attempts >= pendingMaxAttempts {
+				mw.logger.Warn("Memory worker: pending segment failed repeatedly; dropping it",
+					zap.String("file", path), zap.Int("attempts", seg.Attempts), zap.Error(err))
+				_ = os.Remove(path)
+				continue
+			}
+			mw.rewritePending(path, seg)
 			mw.logger.Warn("Memory worker: pending segment still failing; will retry later",
-				zap.String("file", path), zap.Error(err))
+				zap.String("file", path), zap.Int("attempts", seg.Attempts), zap.Error(err))
 			break
 		}
 		_ = os.Remove(path)

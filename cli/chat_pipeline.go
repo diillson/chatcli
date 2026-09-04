@@ -770,9 +770,16 @@ func (cli *ChatCLI) executeStreamingTurn(
 	if result.WasStalled {
 		fmt.Printf("\n%s\n", colorize(i18n.T("sw.cmd.stream_stalled"), ColorYellow))
 	}
-	if result.Usage != nil && cli.costTracker != nil {
-		cli.costTracker.RecordRealUsage(resolution.Provider, resolution.Model, result.Usage)
-		cli.observeTokenCalibrationChars(resolution.Provider, resolution.Model, cli.lastPromptChars, result.Usage)
+	if cli.costTracker != nil {
+		usage := result.Usage
+		if usage == nil {
+			// A stream that ended without a usage block (a gateway that
+			// ignores stream_options, a cancelled or stalled stream) is not
+			// free: book a character estimate, flagged as such.
+			usage = models.EstimateFromChars(cli.lastPromptChars, len(result.Text))
+		}
+		cli.costTracker.RecordRealUsage(resolution.Provider, resolution.Model, usage)
+		cli.observeTokenCalibrationChars(resolution.Provider, resolution.Model, cli.lastPromptChars, usage)
 		cli.maybeAnnounceBudget()
 		cli.maybeAnnounceCacheMisses()
 	}
