@@ -171,7 +171,10 @@ func (cli *ChatCLI) compactSummarizerClient() client.LLMClient {
 		return cli.compactSummarizer
 	}
 	resolution := cli.resolveSkillClient(handle)
-	if resolution.Client == nil || (!resolution.Changed && resolution.UserMessage != "") {
+	// Usable means a DIFFERENT client than the session's: a handle that
+	// resolves to nothing (unknown model, provider down) falls back to the
+	// session client silently, and caching that would pin the fallback.
+	if resolution.Client == nil || !resolution.Changed {
 		if cli.logger != nil {
 			cli.logger.Warn("compact summarizer model not usable, keeping the session client",
 				zap.String("handle", handle), zap.String("reason", resolution.UserMessage))
