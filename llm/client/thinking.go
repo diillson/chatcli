@@ -172,3 +172,49 @@ func AnthropicThinkingBlocks(blocks []models.ThinkingBlock) AnthropicThinkingWir
 	}
 	return wire
 }
+
+// ParseGeminiThoughtBody extracts the thought parts of a Gemini
+// generateContent response together with the signature each carries.
+//
+// Gemini's signature is an encrypted handle to the model's reasoning
+// state, and the stateless path this client uses must resend every thought
+// part exactly as received or multi-turn reasoning — and multi-turn
+// function calling with it — breaks. A part with no signature is not
+// replayable, so it is left out rather than sent half-formed.
+//
+// Both field spellings are accepted: the part-level thoughtSignature and
+// the signature carried inside a thought step.
+func ParseGeminiThoughtBody(body []byte) []models.ThinkingBlock {
+	var generic struct {
+		Candidates []struct {
+			Content struct {
+				Parts []struct {
+					Text             string `json:"text"`
+					Thought          bool   `json:"thought"`
+					ThoughtSignature string `json:"thoughtSignature"`
+					Signature        string `json:"signature"`
+				} `json:"parts"`
+			} `json:"content"`
+		} `json:"candidates"`
+	}
+	if err := json.Unmarshal(body, &generic); err != nil || len(generic.Candidates) == 0 {
+		return nil
+	}
+	out := make([]models.ThinkingBlock, 0, len(generic.Candidates[0].Content.Parts))
+	for _, part := range generic.Candidates[0].Content.Parts {
+		sig := part.ThoughtSignature
+		if sig == "" {
+			sig = part.Signature
+		}
+		if !part.Thought || sig == "" {
+			continue
+		}
+		out = append(out, models.ThinkingBlock{Type: "thought", Thinking: part.Text, Signature: sig})
+	}
+	if len(out) == 0 {
+		// nil, not an empty slice: callers treat nil as "nothing to
+		// replay" and an empty non-nil slice would read as state.
+		return nil
+	}
+	return out
+}

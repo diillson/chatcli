@@ -44,6 +44,36 @@ type GeminiClient struct {
 	// built so clients that never opt in pay nothing.
 	explicit     *explicitCache
 	explicitOnce sync.Once
+
+	// thinking holds the thought parts of the most recent response so the
+	// next request can resend them verbatim, which the stateless path
+	// requires to keep the model's reasoning continuous. Behind a pointer:
+	// client.ThinkingState carries a slice and would make GeminiClient
+	// incomparable.
+	thinking *client.ThinkingState
+}
+
+// LastThinking implements client.ThinkingAwareClient.
+func (c *GeminiClient) LastThinking() []models.ThinkingBlock {
+	if c.thinking == nil {
+		return nil
+	}
+	return c.thinking.LastThinking()
+}
+
+// LastThinkingModel implements client.ThinkingAwareClient.
+func (c *GeminiClient) LastThinkingModel() string {
+	if c.thinking == nil {
+		return ""
+	}
+	return c.thinking.LastThinkingModel()
+}
+
+func (c *GeminiClient) storeThinking(blocks []models.ThinkingBlock) {
+	if c.thinking == nil {
+		return
+	}
+	c.thinking.StoreThinking(c.model, blocks)
 }
 
 // LastUsage returns the token usage from the most recent API call.
@@ -77,6 +107,7 @@ func NewGeminiClient(provider auth.TokenProvider, model string, logger *zap.Logg
 		maxAttempts: maxAttempts,
 		backoff:     backoff,
 		baseURL:     config.GoogleAIAPIURL,
+		thinking:    &client.ThinkingState{},
 	}
 }
 
@@ -203,7 +234,7 @@ func (c *GeminiClient) buildContentsAndSystem(history []models.Message, prompt s
 		case "assistant":
 			contents = append(contents, map[string]interface{}{
 				"role":  "model",
-				"parts": visionwire.GeminiParts(msg.Content, msg.Images),
+				"parts": visionwire.GeminiParts(msg.Content, msg.Images).PrependThought(msg.Thinking),
 			})
 		case "system":
 			// Gemini v1beta aceita system_instruction como top-level.
@@ -319,6 +350,12 @@ func (c *GeminiClient) parseResponse(bodyBytes []byte) (string, error) {
 			Status  string `json:"status"`
 		} `json:"error,omitempty"`
 	}
+
+	// Thought parts ride out through the instance: this path returns a
+	// string, so the caller reads them back with LastThinking and attaches
+	// them to the model turn it stores. Stored before the decode check so
+	// a malformed body clears the previous turn's rather than replaying it.
+	c.storeThinking(client.ParseGeminiThoughtBody(bodyBytes))
 
 	if err := json.Unmarshal(bodyBytes, &result); err != nil {
 		sanitizedResponse := c.sanitizeErrorResponse(string(bodyBytes))

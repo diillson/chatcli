@@ -125,6 +125,33 @@ func AnthropicOAuthContent(text string, imgs []models.ImageContent) Content {
 	return Content{parts: anthropicBlocks(text, validImages(imgs)), array: true}
 }
 
+// PrependThought places Gemini thought parts ahead of the turn's existing
+// parts. Gemini's stateless path requires every thought part to come back
+// exactly as received — the signature is an encrypted handle to the
+// model's reasoning state — so a part without one is skipped instead of
+// being sent unsigned. A turn with no thoughts is returned untouched.
+func (c Content) PrependThought(blocks []models.ThinkingBlock) Content {
+	shaped := make([]any, 0, len(blocks))
+	for _, b := range blocks {
+		if b.Type != "thought" || b.Signature == "" {
+			continue
+		}
+		shaped = append(shaped, map[string]interface{}{
+			"text":             b.Thinking,
+			"thought":          true,
+			"thoughtSignature": b.Signature,
+		})
+	}
+	if len(shaped) == 0 {
+		return c
+	}
+	parts := c.parts
+	if parts == nil {
+		parts = []any{map[string]interface{}{"text": c.text}}
+	}
+	return Content{parts: append(shaped, parts...), array: true}
+}
+
 // PrependThinking places provider-native reasoning blocks ahead of the
 // turn's existing parts, forcing the array form. Anthropic requires the
 // thinking that produced a tool call to lead the assistant turn it is

@@ -260,6 +260,12 @@ func (c *OpenAIResponsesClient) processResponse(resp *http.Response) (string, er
 		IncompleteDetails *struct {
 			Reason string `json:"reason"`
 		} `json:"incomplete_details"`
+		// Reasoning items are read past for their text only. Replaying
+		// them (as claudeai and googleai now do for their own reasoning
+		// blocks) additionally needs include: reasoning.encrypted_content
+		// on the request and the item echoed back in the input array —
+		// verified against the live API before it ships, since sending an
+		// item the endpoint does not expect fails the turn outright.
 		Output []struct {
 			Type    string `json:"type"` // "message" ou "reasoning"
 			Content []struct {
