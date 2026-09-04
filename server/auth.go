@@ -8,6 +8,7 @@ package server
 import (
 	"context"
 	"crypto/subtle"
+	"net"
 	"os"
 	"strings"
 	"sync"
@@ -198,13 +199,15 @@ func (a *TokenAuthInterceptor) validateJWT(tokenStr string) (*UserInfo, error) {
 
 	now := time.Now().Unix()
 
-	// Check expiry with clock skew tolerance
-	if exp, ok := claims["exp"]; ok {
-		if expFloat, ok := exp.(float64); ok {
-			if now > int64(expFloat)+jwtClockSkew {
-				return nil, status.Errorf(codes.Unauthenticated, "token expired")
-			}
-		}
+	// Expiry is required, not optional. A token without exp — or with one
+	// that is not a number — never expires, which turns a leaked
+	// credential into a permanent one.
+	exp, ok := claims["exp"].(float64)
+	if !ok {
+		return nil, status.Errorf(codes.Unauthenticated, "authentication failed")
+	}
+	if now > int64(exp)+jwtClockSkew {
+		return nil, status.Errorf(codes.Unauthenticated, "token expired")
 	}
 
 	// Check not-before with clock skew tolerance
@@ -294,9 +297,20 @@ func (a *TokenAuthInterceptor) recordFailure(peerAddr string) {
 	// This is a no-op placeholder for additional failure tracking (metrics, alerting)
 }
 
+// extractPeerAddress identifies the caller for rate limiting.
+//
+// The host alone, never host:port: a peer address carries the ephemeral
+// port, so keying on it gave every new connection a fresh limiter and the
+// failure limit counted to five per connection instead of per client —
+// which is no limit at all against a caller willing to reconnect.
 func extractPeerAddress(ctx context.Context) string {
-	if p, ok := peer.FromContext(ctx); ok {
-		return p.Addr.String()
+	p, ok := peer.FromContext(ctx)
+	if !ok || p.Addr == nil {
+		return "unknown"
 	}
-	return "unknown"
+	addr := p.Addr.String()
+	if host, _, err := net.SplitHostPort(addr); err == nil {
+		return host
+	}
+	return addr
 }

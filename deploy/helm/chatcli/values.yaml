@@ -18,7 +18,14 @@ server:
   port: 50051
   # Prometheus metrics HTTP port (0 = disabled)
   metricsPort: 9090
-  # Authentication token for gRPC server (leave empty to disable auth)
+  # Authentication token for the gRPC server.
+  #
+  # REQUIRED for any in-cluster install. Inside Kubernetes the server binds
+  # every interface, and it refuses to start unauthenticated on a reachable
+  # address — every caller that could reach it would otherwise be admitted
+  # as an administrator. Set this, or security.jwtSecret / jwtSecretRef for
+  # per-user JWTs. Leaving both empty is only valid when the server is
+  # bound to loopback (security.bindAddress: "127.0.0.1").
   token: ""
   # Enable gRPC reflection for debugging
   grpcReflection: false
