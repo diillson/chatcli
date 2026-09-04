@@ -38,18 +38,20 @@ func (cli *ChatCLI) reconfigureLogger() {
 // reloadableEnvVars são as variáveis limpas do ambiente do processo antes do
 // godotenv.Overload em reloadConfiguration — sem constar aqui, um valor
 // removido do .env sobrevive ao /reload até o processo reiniciar. Toda env
-// nova de provider precisa entrar nesta lista. AWS_REGION/AWS_PROFILE ficam
-// de fora de propósito: são ambientais do SDK e podem vir do shell, não do
-// .env — unsetá-las derrubaria a cadeia de credenciais no reload
-// (TestReloadableEnvVarsCoverCriticalProviderVars trava isso). Use
-// BEDROCK_PROFILE/BEDROCK_REGION quando quiser um valor que o /reload
-// releia do arquivo.
+// nova de provider precisa entrar nesta lista.
 //
-// O que entra aqui é limpo mesmo quando NÃO veio do .env — o bloco env de
-// uma IDE/cliente MCP é a única fonte em superfícies não interativas. Por
-// isso reloadConfiguration chama config.RestoreBootEnv depois do Overload:
-// o arquivo continua mandando no que ele declara, e o que o shell/cliente
-// entregou no boot volta em vez de sumir.
+// AWS_PROFILE/AWS_REGION ficaram fora daqui por muito tempo com uma razão
+// legítima: são ambientais do SDK, costumam vir do shell e não do .env, e
+// unsetá-las derrubava a cadeia de credenciais no /reload. O que mudou é que
+// limpar deixou de significar perder — reloadConfiguration chama
+// config.RestoreBootEnv depois do Overload (devolve o que o shell ou o bloco
+// env da IDE/cliente MCP entregou no boot e que o arquivo não redefine) e
+// config.ReapplyProjectDotenv (devolve o que o .env do projeto contribuiu).
+// Com as duas redes no lugar, remover a variável do arquivo passa a valer
+// sem reiniciar, que é a razão de existir desta lista, sem que um valor de
+// fora do arquivo seja perdido. O contrato de comportamento está travado em
+// TestReload_KeepsClientProvidedVariables (pacote config) e no caso AWS de
+// TestReloadableEnvVarsCoverCriticalProviderVars.
 var reloadableEnvVars = []string{
 	"LOG_LEVEL", "ENV", "LLM_PROVIDER", "LOG_FILE", "LOG_MAX_SIZE", "HISTORY_MAX_SIZE",
 	"OPENAI_API_KEY", "OPENAI_MODEL", "OPENAI_ASSISTANT_MODEL",
@@ -67,6 +69,7 @@ var reloadableEnvVars = []string{
 	"COPILOT_MODEL", "COPILOT_MAX_TOKENS", "GITHUB_COPILOT_TOKEN",
 	"GITHUB_TOKEN", "GH_TOKEN", "GITHUB_MODELS_TOKEN", "GITHUB_MODELS_MODEL", "GITHUB_MODELS_API_URL",
 	"BEDROCK_PROVIDER", "BEDROCK_MODEL", "BEDROCK_MAX_TOKENS", "BEDROCK_REGION", "BEDROCK_PROFILE",
+	"AWS_PROFILE", "AWS_REGION", "AWS_DEFAULT_REGION",
 	"BEDROCK_BASE_URL", "BEDROCK_CONTROL_BASE_URL", "BEDROCK_MANTLE_BASE_URL",
 	"BEDROCK_ANTHROPIC_ENDPOINT", "BEDROCK_TEMPERATURE", "BEDROCK_TOP_P",
 	"OPENROUTER_API_KEY", "OPENROUTER_MODEL", "OPENROUTER_MAX_TOKENS", "OPENROUTER_API_URL",

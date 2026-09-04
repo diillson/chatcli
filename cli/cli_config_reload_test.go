@@ -2,12 +2,14 @@ package cli
 
 import (
 	"context"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/diillson/chatcli/config"
 	"github.com/diillson/chatcli/i18n"
+	"github.com/joho/godotenv"
 )
 
 // TestReloadableEnvVarsCoverCriticalProviderVars trava na lista de reload as
@@ -34,10 +36,55 @@ func TestReloadableEnvVarsCoverCriticalProviderVars(t *testing.T) {
 			t.Errorf("reloadableEnvVars is missing %s", v)
 		}
 	}
-	for _, v := range []string{"AWS_REGION", "AWS_PROFILE"} {
-		if have[v] {
-			t.Errorf("reloadableEnvVars must not unset ambient AWS SDK var %s", v)
+	// As ambientais do SDK entraram na lista quando limpar deixou de
+	// significar perder: reloadConfiguration restaura, depois do Overload, o
+	// que o shell/cliente entregou no boot e o que o .env do projeto
+	// contribuiu. A exclusão anterior existia só para não derrubar a cadeia
+	// de credenciais — esse comportamento agora é garantido pelo teste
+	// abaixo, e não mais pela ausência delas aqui.
+	for _, v := range []string{"AWS_REGION", "AWS_PROFILE", "AWS_DEFAULT_REGION"} {
+		if !have[v] {
+			t.Errorf("reloadableEnvVars is missing ambient AWS SDK var %s", v)
 		}
+	}
+}
+
+// TestReloadKeepsShellProvidedAWSProfile trava o motivo pelo qual
+// AWS_PROFILE ficava fora da lista de reload: um profile vindo do shell (ou
+// do bloco env de uma IDE/cliente MCP), que o .env não repete, NÃO pode
+// sumir no /reload — era assim que a cadeia de credenciais caía. O ciclo
+// aqui é o mesmo de reloadConfiguration: limpa, relê o arquivo, restaura.
+func TestReloadKeepsShellProvidedAWSProfile(t *testing.T) {
+	config.ResetBootEnvForTest()
+	config.ResetProjectDotenvForTest()
+	t.Cleanup(func() {
+		config.ResetBootEnvForTest()
+		config.ResetProjectDotenvForTest()
+	})
+
+	dir := t.TempDir()
+	dotenv := filepath.Join(dir, ".env")
+	if err := os.WriteFile(dotenv, []byte("BEDROCK_MODEL=claude-sonnet-4-6\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("CHATCLI_DOTENV", dotenv)
+	t.Setenv("AWS_PROFILE", "corp-sso") // do shell, ausente do arquivo
+	config.CaptureBootEnv()
+
+	for _, v := range reloadableEnvVars {
+		_ = os.Unsetenv(v)
+	}
+	if err := godotenv.Overload(dotenv); err != nil {
+		t.Fatal(err)
+	}
+	config.RestoreBootEnv(reloadableEnvVars)
+	config.ReapplyProjectDotenv()
+
+	if got := os.Getenv("AWS_PROFILE"); got != "corp-sso" {
+		t.Fatalf("AWS_PROFILE do shell precisa sobreviver ao /reload, got %q", got)
+	}
+	if got := os.Getenv("BEDROCK_MODEL"); got != "claude-sonnet-4-6" {
+		t.Fatalf("o arquivo precisa continuar valendo, got %q", got)
 	}
 }
 
