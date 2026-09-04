@@ -30,12 +30,16 @@ import (
 //	tools        — plugin tool catalog + session workspace hint
 //	orchestrator — agent registry catalog (multi-agent prompt)
 //
-// Volatile per turn → NO cache hint, appended after the cached prefix:
+// Volatile per RUN → NO cache hint, appended after the cached prefix:
 //
 //	workspace    — bootstrap files + MEMORY retrieval (hint-driven)
 //	skills       — pinned + auto-activated + manual skills (query-driven)
-//	channels     — MCP push ring (newest messages each turn)
-//	dynamic      — wall-clock timestamp + cwd disambiguation
+//
+// The per-TURN context (date, proactive recall, MCP channel pushes) is not
+// a system block at all any more: it rides as a flagged user-role message
+// before the query (turn_context.go), so the system message is byte-stable
+// across runs. channels/dynamic stay as parameters for compatibility and
+// are empty in production.
 //
 // Two representations are produced and kept in sync:
 //

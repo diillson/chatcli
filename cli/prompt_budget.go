@@ -58,15 +58,39 @@ type prefixBudget struct {
 // window and the learned chars-per-token ratio.
 func (cli *ChatCLI) newPrefixBudget(provider, model string) *prefixBudget {
 	window := catalog.GetContextWindow(provider, model)
-	cpt, _ := globalTokenCalibrator.CharsPerToken(provider, model)
-	if cpt <= 0 {
-		cpt = defaultCharsPerToken
-	}
+	cpt := cli.frozenPrefixRatio(provider, model)
 	limit := int(float64(window) * prefixMaxShare * cpt)
 	if limit < prefixFloorChars {
 		limit = prefixFloorChars
 	}
 	return &prefixBudget{Window: window, MaxChars: limit}
+}
+
+// frozenPrefixRatio returns the chars-per-token ratio the prefix budget
+// uses for provider/model, fixed at first use for the session: the learned
+// ratio keeps moving by EMA on every request, and a budget that follows it
+// folds and unfolds cached sections (attachments, digests, pinned skills)
+// between turns — a prefix rebuild each time. A model switch keys a fresh
+// ratio.
+func (cli *ChatCLI) frozenPrefixRatio(provider, model string) float64 {
+	if cli == nil {
+		return defaultCharsPerToken
+	}
+	key := calibrationKey(provider, model)
+	cli.prefixRatiosMu.Lock()
+	defer cli.prefixRatiosMu.Unlock()
+	if r, ok := cli.prefixRatios[key]; ok && r > 0 {
+		return r
+	}
+	cpt, _ := cli.calibrator().CharsPerToken(provider, model)
+	if cpt <= 0 {
+		cpt = defaultCharsPerToken
+	}
+	if cli.prefixRatios == nil {
+		cli.prefixRatios = map[string]float64{}
+	}
+	cli.prefixRatios[key] = cpt
+	return cpt
 }
 
 // spend records chars already placed in the prefix.

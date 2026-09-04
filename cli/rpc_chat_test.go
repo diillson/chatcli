@@ -104,9 +104,20 @@ func TestRunChatTurnRPC_FullPipelineParity(t *testing.T) {
 	if len(fake.lastHist) == 0 || fake.lastHist[0].Role != "system" {
 		t.Fatalf("first message sent to the LLM must be the assembled system prompt; got %+v", fake.lastHist)
 	}
-	sys := fake.lastHist[0].Content
-	if !strings.Contains(sys, "ZETA-SKILL-BODY") && !strings.Contains(sys, "zeta-skill") {
-		t.Errorf("trigger-activated skill missing from system prompt:\n%s", sys)
+	// Trigger-activated skills are per-turn context: they ride in the
+	// flagged turn context message right before the user's turn, never in
+	// the (byte-stable) system message.
+	var sent strings.Builder
+	for _, m := range fake.lastHist {
+		if m.IsTurnContext() {
+			sent.WriteString(m.Content)
+		}
+	}
+	if !strings.Contains(sent.String(), "ZETA-SKILL-BODY") && !strings.Contains(sent.String(), "zeta-skill") {
+		t.Errorf("trigger-activated skill missing from the turn context:\n%v", fake.lastHist)
+	}
+	if strings.Contains(fake.lastHist[0].Content, "ZETA-SKILL-BODY") {
+		t.Error("auto skills must not be in the system message any more")
 	}
 	if len(fake.lastHist[0].SystemParts) == 0 {
 		t.Error("SystemParts must be populated (Anthropic cache-control path)")
@@ -120,9 +131,17 @@ func TestRunChatTurnRPC_FullPipelineParity(t *testing.T) {
 		t.Errorf("prior session history missing from the LLM call:\n%s", joined)
 	}
 
-	// Returned history = prior + user + assistant.
-	if len(turn.History) != len(prior)+2 {
-		t.Fatalf("history len = %d, want %d", len(turn.History), len(prior)+2)
+	// Returned history = prior + user + assistant, plus the flagged turn
+	// context message the pipeline persists so the next request replays
+	// the same bytes (it is not user text and is excluded from the count).
+	real := 0
+	for _, m := range turn.History {
+		if !m.IsTurnContext() {
+			real++
+		}
+	}
+	if real != len(prior)+2 {
+		t.Fatalf("history len = %d (non-context), want %d", real, len(prior)+2)
 	}
 	last := turn.History[len(turn.History)-1]
 	if last.Role != "assistant" || last.Content != "hello from fake" {

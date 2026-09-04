@@ -46,8 +46,8 @@ func TestBuildWorkspaceBlocks_InjectsAutoRecallInIndexMode(t *testing.T) {
 	if strings.Contains(workspaceText, "[MEMORY AUTO-RECALL]") {
 		t.Errorf("auto-recall must NEVER land in the cacheable workspace block: %s", workspaceText)
 	}
-	if !strings.Contains(dynamicText, "Current date and time") {
-		t.Errorf("wall-clock context must survive alongside auto-recall: %s", dynamicText)
+	if !strings.Contains(dynamicText, "Current date:") {
+		t.Errorf("the date context must survive alongside auto-recall: %s", dynamicText)
 	}
 	_ = cli
 }

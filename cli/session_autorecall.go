@@ -218,7 +218,7 @@ func formatSessionAge(saved time.Time) string {
 // or "" when there is none.
 func lastUserMessage(history []models.Message) string {
 	for i := len(history) - 1; i >= 0; i-- {
-		if history[i].Role == "user" {
+		if history[i].Role == "user" && !history[i].IsTurnContext() {
 			return history[i].Content
 		}
 	}

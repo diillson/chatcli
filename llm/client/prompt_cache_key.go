@@ -26,13 +26,27 @@ func PromptCacheKey(history []models.Message) string {
 		if !strings.EqualFold(strings.TrimSpace(msg.Role), "system") {
 			continue
 		}
-		text := msg.Content
-		if text == "" && len(msg.SystemParts) > 0 {
+		// Only the cache-marked (stable) parts feed the key: hashing the flat
+		// content pulled every volatile block in, so the key changed each
+		// turn and the shard affinity it exists for was never earned.
+		text := ""
+		if len(msg.SystemParts) > 0 {
 			var b strings.Builder
 			for _, p := range msg.SystemParts {
-				b.WriteString(p.Text)
+				if p.CacheControl != nil {
+					b.WriteString(p.Text)
+				}
 			}
 			text = b.String()
+			if text == "" {
+				for _, p := range msg.SystemParts {
+					b.WriteString(p.Text)
+				}
+				text = b.String()
+			}
+		}
+		if text == "" {
+			text = msg.Content
 		}
 		if strings.TrimSpace(text) == "" {
 			return ""

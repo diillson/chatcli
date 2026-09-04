@@ -39,6 +39,15 @@ type MessageMeta struct {
 	// stale skill guidance.
 	SkillNames string `json:"skill_names,omitempty"`
 
+	// TurnContext marks a user-role message ChatCLI itself injected at a
+	// turn boundary with per-turn context (date, proactive recall, active
+	// skills, channel pushes) — the Claude Code "system reminder" pattern.
+	// Keeping it OUT of the system message keeps the system prompt
+	// byte-stable across turns, which is what lets every provider's
+	// prefix cache hit. Structural so consumers (memory extraction, hint
+	// builders, exports) can tell it from what the user typed.
+	TurnContext bool `json:"turn_context,omitempty"`
+
 	// SkillCollapsed is true once ApplySkillAging reduced this skill block
 	// to a stub, so the pass never collapses the same block twice.
 	SkillCollapsed bool `json:"skill_collapsed,omitempty"`
@@ -175,6 +184,18 @@ type SessionData struct {
 	// load (the journal keeps every message ever seen; the session file
 	// stays small).
 	Checkpoints []SessionCheckpoint `json:"checkpoints,omitempty"`
+}
+
+// IsTurnContext reports whether the message is ChatCLI-injected turn
+// context rather than user text (see MessageMeta.TurnContext).
+func (m Message) IsTurnContext() bool {
+	return m.Meta != nil && m.Meta.TurnContext
+}
+
+// TurnContextMessage builds the flagged user-role message that carries
+// per-turn context.
+func TurnContextMessage(text string) Message {
+	return Message{Role: "user", Content: text, Meta: &MessageMeta{TurnContext: true}}
 }
 
 // SessionCheckpoint is one persisted /rewind point.

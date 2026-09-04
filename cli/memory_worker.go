@@ -410,6 +410,9 @@ no work was completed.`
 func buildExtractionSnippet(messages []models.Message) strings.Builder {
 	var sb strings.Builder
 	for _, msg := range messages {
+		if msg.IsTurnContext() {
+			continue // ChatCLI's own recall/date block is not something to learn from
+		}
 		content := redactSecretsForLLM(msg.Content)
 		// Truncate very long messages to keep the extraction prompt small
 		if len(content) > 1500 {

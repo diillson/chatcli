@@ -54,7 +54,8 @@ func (cli *ChatCLI) processLLMRequest(parentCtx context.Context, in string) {
 	cli.compactHistoryIfNeeded(ctx)
 
 	assembly := cli.assembleChatSystemPrompt(ctx, userInput, additionalContext)
-	tempHistory := cli.buildChatTempHistory(assembly.parts, userInput, additionalContext, images)
+	tempHistory := cli.buildChatTempHistoryWithContext(assembly.parts, assembly.turnContext, userInput, additionalContext, images)
+	cli.setPendingTurnContext(turnContextText(assembly.turnContext))
 	// What the wire carries this turn — the calibrator's chars side.
 	cli.lastPromptChars = promptCharsOf(tempHistory) + len(userInput+additionalContext)
 	userMessage := models.Message{Role: "user", Content: userInput + additionalContext, Images: images}

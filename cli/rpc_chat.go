@@ -109,7 +109,8 @@ func (cli *ChatCLI) runChatTurnSerialized(
 	cli.compactHistoryIfNeeded(ctx)
 
 	assembly := cli.assembleChatSystemPrompt(ctx, input, additionalContext)
-	tempHistory := cli.buildChatTempHistory(assembly.parts, input, additionalContext, images)
+	tempHistory := cli.buildChatTempHistoryWithContext(assembly.parts, assembly.turnContext, input, additionalContext, images)
+	turnCtx := turnContextText(assembly.turnContext)
 
 	activeClient, resProvider, resModel, err := cli.resolveRPCChatClient(assembly.modelHint, o)
 	if err != nil {
@@ -134,6 +135,9 @@ func (cli *ChatCLI) runChatTurnSerialized(
 	}
 
 	userMessage := models.Message{Role: "user", Content: input + additionalContext, Images: images}
+	if turnCtx != "" {
+		cli.history = append(cli.history, models.TurnContextMessage(turnCtx))
+	}
 	cli.history = append(cli.history, userMessage, models.Message{Role: "assistant", Content: reply})
 	cli.mirrorHubTurn(ctx, userMessage.Content, reply)
 
