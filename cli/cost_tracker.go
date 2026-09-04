@@ -313,6 +313,14 @@ func (ct *CostTracker) RecordRealUsage(provider, model string, usage *models.Usa
 	if usage == nil {
 		return
 	}
+	// Long-context tiers are per call (the record only knows totals): a
+	// call past the provider's threshold is booked at its tier price as a
+	// billed amount, so the table math never averages it away.
+	if tiered := tieredCallCostUSD(provider, model, usage); tiered > 0 {
+		u := *usage
+		u.CostUSD = tiered
+		usage = &u
+	}
 	ct.mu.Lock()
 
 	key := modelKey(provider, model)
@@ -937,6 +945,9 @@ func estimateTurnCostUSD(provider, model string, usage *models.UsageInfo) float6
 	if usage.CostUSD > 0 {
 		return usage.CostUSD
 	}
+	if tiered := tieredCallCostUSD(provider, model, usage); tiered > 0 {
+		return tiered
+	}
 	// Single source of truth: run the turn through the exact record math the
 	// session tracker applies — a second hand-rolled formula here is how the
 	// footer and /cost drift apart.
@@ -996,6 +1007,12 @@ func lookupModelPricing(provider, model string) (inputCost, outputCost float64, 
 	if strings.Contains(provider, "zai") && zai.CodingPlanActive() {
 		return 0, 0, true
 	}
+	// GitHub Copilot is a subscription: requests debit the plan's premium
+	// request allowance, not a per-token invoice — before the model-name
+	// heuristics, which would price gpt-*/claude-* at API rates.
+	if strings.Contains(provider, "copilot") {
+		return 0, 0, true
+	}
 
 	for _, fn := range []func(string) (float64, float64, bool){
 		claudePricing,
@@ -1004,6 +1021,7 @@ func lookupModelPricing(provider, model string) (inputCost, outputCost float64, 
 		grokPricing,
 		deepseekPricing,
 		zaiPricing,
+		novaPricing,
 	} {
 		if in, out, ok := fn(model); ok {
 			return in, out, true
@@ -1310,7 +1328,10 @@ func providerFallbackPricing(provider, model string) (float64, float64, bool) {
 		// Cobre também kimi-k2.7-code ($0.95/$4.00 — mesmo tier do K2.6).
 		return 0.95, 4.00, true
 	case strings.Contains(provider, "copilot"):
-		return 2.50, 10.0, true
+		// GitHub Copilot is a subscription: requests debit the plan's
+		// premium-request allowance, not a per-token invoice. Known-zero
+		// like Devin/Ollama/StackSpot; /cost labels it as such.
+		return 0, 0, true
 	case strings.Contains(provider, "openrouter"):
 		return getOpenRouterModelPricing(model)
 	case strings.Contains(provider, "ollama"), strings.Contains(provider, "stackspot"),
@@ -1321,6 +1342,82 @@ func providerFallbackPricing(provider, model string) (float64, float64, bool) {
 		return 0, 0, true
 	}
 	return 0, 0, false
+}
+
+// novaPricing prices the Amazon Nova family on Bedrock (on-demand, us-east-1
+// list prices per 1M tokens: Micro $0.035/$0.14, Lite $0.06/$0.24, Pro
+// $0.80/$3.20, Premier $2.50/$12.50). Nova 2 generations are reported as
+// unpriced until their list price is verified — never a guess.
+func novaPricing(model string) (float64, float64, bool) {
+	if !strings.Contains(model, "nova") {
+		return 0, 0, false
+	}
+	switch {
+	case strings.Contains(model, "nova-2"):
+		return 0, 0, false
+	case strings.Contains(model, "nova-micro"):
+		return 0.035, 0.14, true
+	case strings.Contains(model, "nova-lite"):
+		return 0.06, 0.24, true
+	case strings.Contains(model, "nova-pro"):
+		return 0.80, 3.20, true
+	case strings.Contains(model, "nova-premier"):
+		return 2.50, 12.50, true
+	}
+	return 0, 0, false
+}
+
+// longContextThresholdTokens is the prompt size above which the providers
+// below switch to their long-context tier.
+const (
+	longContextAnthropicTokens = 200_000
+	longContextGeminiTokens    = 200_000
+	longContextGrokTokens      = 128_000
+)
+
+// longContextMultipliers returns the input and output price multipliers a
+// call with promptTokens of context pays: Anthropic (Claude 4+ with the
+// 1M window) and Gemini 2.5 Pro bill 2× input and 1.5× output past 200K;
+// xAI Grok 4 bills 2× both past 128K. 1/1 elsewhere.
+func longContextMultipliers(provider, model string, promptTokens int) (in, out float64) {
+	p, m := strings.ToLower(provider), strings.ToLower(model)
+	switch {
+	case strings.Contains(m, "claude") && promptTokens > longContextAnthropicTokens:
+		return 2, 1.5
+	case strings.Contains(m, "gemini-2.5-pro") && promptTokens > longContextGeminiTokens:
+		return 2, 1.5
+	case (strings.Contains(p, "xai") || strings.HasPrefix(m, "grok-4")) && strings.HasPrefix(m, "grok-4") && promptTokens > longContextGrokTokens:
+		return 2, 2
+	}
+	return 1, 1
+}
+
+// tieredCallCostUSD prices one call with its long-context tier applied; 0
+// when the call is not in a tier (the record math prices it normally).
+func tieredCallCostUSD(provider, model string, usage *models.UsageInfo) float64 {
+	if usage == nil || usage.CostUSD > 0 {
+		return 0
+	}
+	context := usage.PromptTokens + usage.CacheReadInputTokens + usage.CacheCreationInputTokens
+	in, out := longContextMultipliers(provider, model, context)
+	if in == 1 && out == 1 {
+		return 0
+	}
+	rec := &ModelUsageRecord{
+		ReasoningTokens:       int64(usage.ReasoningTokens),
+		Provider:              provider,
+		Model:                 model,
+		PromptTokens:          int64(usage.PromptTokens),
+		CompletionTokens:      int64(usage.CompletionTokens),
+		CacheReadTokens:       int64(usage.CacheReadInputTokens),
+		CacheCreationTokens:   int64(usage.CacheCreationInputTokens),
+		CacheCreation1hTokens: int64(usage.CacheCreation1hInputTokens),
+	}
+	recomputeRecordCost(rec)
+	if !rec.PricingKnown {
+		return 0
+	}
+	return (rec.InputCostUSD+rec.CacheCostUSD)*in + rec.OutputCostUSD*out
 }
 
 // cacheTokensAdditive reports whether the usage payload counts cache tokens

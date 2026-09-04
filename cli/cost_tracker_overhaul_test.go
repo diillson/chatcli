@@ -93,15 +93,17 @@ func TestRecomputeCostCacheSubsetSemantics(t *testing.T) {
 
 	// Anthropic reports cache tokens ALONGSIDE input_tokens — additive.
 	ct2 := NewCostTracker()
+	// 100K + 40K: under the 200K long-context tier, so the additive
+	// semantics are what is measured (1.4M would be tier-priced).
 	ct2.RecordRealUsage("CLAUDEAI", "claude-sonnet-5", &models.UsageInfo{
-		PromptTokens:         1_000_000,
-		CacheReadInputTokens: 400_000,
+		PromptTokens:         100_000,
+		CacheReadInputTokens: 40_000,
 		IsReal:               true,
 	})
 	rec2 := ct2.modelUsage[modelKey("CLAUDEAI", "claude-sonnet-5")]
-	// 1M at $2.00 + 400K at $0.20 = 2.00 + 0.08
-	if !almostEqual(rec2.TotalCostUSD, 2.08) {
-		t.Fatalf("additive cache cost = %v, want 2.08", rec2.TotalCostUSD)
+	// 100K at $2.00 + 40K at $0.20 = 0.20 + 0.008
+	if !almostEqual(rec2.TotalCostUSD, 0.208) {
+		t.Fatalf("additive cache cost = %v, want 0.208", rec2.TotalCostUSD)
 	}
 }
 

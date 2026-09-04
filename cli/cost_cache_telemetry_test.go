@@ -146,18 +146,20 @@ func TestCacheWrite1hPricing(t *testing.T) {
 	if !known || input <= 0 {
 		t.Skip("pricing table entry missing")
 	}
-	u := &models.UsageInfo{PromptTokens: 0, CacheCreationInputTokens: 1_000_000, CacheCreation1hInputTokens: 1_000_000, IsReal: true}
+	// 100K tokens: under the 200K long-context tier, so only the TTL
+	// multiplier applies (a 1M write would also be long-context priced).
+	u := &models.UsageInfo{PromptTokens: 0, CacheCreationInputTokens: 100_000, CacheCreation1hInputTokens: 100_000, IsReal: true}
 	got := estimateTurnCostUSD("CLAUDEAI", "claude-sonnet-5", u)
-	if math.Abs(got-input*2.0) > 1e-9 {
-		t.Fatalf("1h write cost = %.6f, want %.6f (2x input)", got, input*2.0)
+	if math.Abs(got-input*2.0*0.1) > 1e-9 {
+		t.Fatalf("1h write cost = %.6f, want %.6f (2x input)", got, input*2.0*0.1)
 	}
-	u5 := &models.UsageInfo{CacheCreationInputTokens: 1_000_000, IsReal: true}
-	if got := estimateTurnCostUSD("CLAUDEAI", "claude-sonnet-5", u5); math.Abs(got-input*1.25) > 1e-9 {
-		t.Fatalf("5m write cost = %.6f, want %.6f (1.25x input)", got, input*1.25)
+	u5 := &models.UsageInfo{CacheCreationInputTokens: 100_000, IsReal: true}
+	if got := estimateTurnCostUSD("CLAUDEAI", "claude-sonnet-5", u5); math.Abs(got-input*1.25*0.1) > 1e-9 {
+		t.Fatalf("5m write cost = %.6f, want %.6f (1.25x input)", got, input*1.25*0.1)
 	}
 	ct := NewCostTracker()
 	ct.RecordRealUsage("CLAUDEAI", "claude-sonnet-5", u)
-	if s := ct.TotalCost(); math.Abs(s-input*2.0) > 1e-9 {
-		t.Fatalf("session cost = %.6f, want %.6f", s, input*2.0)
+	if s := ct.TotalCost(); math.Abs(s-input*2.0*0.1) > 1e-9 {
+		t.Fatalf("session cost = %.6f, want %.6f", s, input*2.0*0.1)
 	}
 }
