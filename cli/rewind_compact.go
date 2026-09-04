@@ -43,6 +43,15 @@ func (cli *ChatCLI) rememberPreCompaction() {
 	}
 }
 
+// dropPreCompactionSnapshot pops the newest undo snapshot (a compaction
+// that changed nothing has nothing to undo).
+func (cli *ChatCLI) dropPreCompactionSnapshot() {
+	if cli == nil || len(cli.preCompaction) == 0 {
+		return
+	}
+	cli.preCompaction = cli.preCompaction[:len(cli.preCompaction)-1]
+}
+
 // errNoCompactionToUndo marks a /rewind compact with nothing to restore.
 var errNoCompactionToUndo = errors.New("no compaction to undo")
 
@@ -85,10 +94,7 @@ func (cli *ChatCLI) undoCompaction() bool {
 	before := len(cli.history)
 	cli.saveCheckpoint()
 	cli.history = history
-	cli.syncTranscript()
-	if cli.costTracker != nil {
-		cli.costTracker.NoteExpectedCacheRebuild()
-	}
+	cli.afterHistoryRestore()
 	fmt.Printf("  %s %s\n", colorize("↩", ColorGreen), i18n.T("rewind.compact.restored", before, len(cli.history), source))
 	return true
 }

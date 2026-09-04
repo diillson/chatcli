@@ -2294,11 +2294,15 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 			a.cli.beforeCompaction(ctx, compactTriggerAuto)
 			compacted, compactErr := a.cli.historyCompactor.Compact(ctx, a.cli.history, a.cli.Client, cfg)
 			a.cli.historyCompactor.SetStatusCallback(nil)
-			if compactErr == nil {
+			switch {
+			case compactErr == nil && !historiesEqual(compacted, a.cli.history):
 				a.cli.history = compacted
 				a.cli.noteCompactionApplied(ctx, compactTriggerAuto)
-			} else if errors.Is(compactErr, context.Canceled) {
+			case errors.Is(compactErr, context.Canceled):
+				a.cli.compactionSkipped(ctx, compactTriggerAuto)
 				return compactErr
+			default:
+				a.cli.compactionSkipped(ctx, compactTriggerAuto)
 			}
 		}
 
@@ -2575,6 +2579,9 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 				a.cli.flushMemoryBeforeCompaction(ctx)
 				a.cli.beforeCompaction(ctx, compactTriggerRecovery)
 				recoveredHistory, recovered := contextRecovery.RecoverContextOverflow(a.cli.history)
+				if !recovered {
+					a.cli.compactionSkipped(ctx, compactTriggerRecovery)
+				}
 				if recovered {
 					if note := archiveDroppedMessages(a.cli.compressionLayer, a.cli.history, recoveredHistory); note != "" {
 						recoveredHistory = append(recoveredHistory, models.Message{Role: "user", Content: note})

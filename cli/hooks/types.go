@@ -107,6 +107,10 @@ type HookEvent struct {
 	// pressure at a turn boundary), "manual" (/compact) or "recovery"
 	// (context-overflow recovery after a rejected request).
 	Trigger string `json:"trigger,omitempty"`
+	// Outcome says what a compaction event produced: "applied" (the history
+	// changed) or "skipped" (nothing changed: no-op, rejected summary,
+	// failure). Every PreCompact is paired with exactly one PostCompact.
+	Outcome string `json:"outcome,omitempty"`
 }
 
 // HookResult is the result of a hook execution.

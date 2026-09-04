@@ -208,10 +208,12 @@ func (cli *ChatCLI) compactHistoryIfNeeded(ctx context.Context) {
 	cli.beforeCompaction(ctx, compactTriggerAuto)
 	compacted, err := cli.historyCompactor.Compact(ctx, cli.history, cli.Client, cfg)
 	cli.historyCompactor.SetStatusCallback(nil)
-	if err == nil {
-		cli.history = compacted
-		cli.noteCompactionApplied(ctx, compactTriggerAuto)
+	if err != nil || historiesEqual(compacted, cli.history) {
+		cli.compactionSkipped(ctx, compactTriggerAuto)
+		return
 	}
+	cli.history = compacted
+	cli.noteCompactionApplied(ctx, compactTriggerAuto)
 }
 
 // warnIfHistoryExceedsProxyCap fires a once-per-session notice when the

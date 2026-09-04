@@ -362,6 +362,17 @@ func (hc *HistoryCompactor) Compact(
 		return history, nil
 	}
 
+	// Verbatim cap: a growing pile of recalled originals must not keep the
+	// history above budget forever (they are exempt from every level).
+	history = hc.capVerbatim(history, budget)
+	current = totalChars(history)
+	if current <= budget {
+		hc.emitStatus(CompactStageDone, i18n.T("compact.status.trim_sufficient",
+			FormatPayloadSize(before), FormatPayloadSize(current)))
+		hc.setReport(CompactReport{Level: 1})
+		return history, nil
+	}
+
 	// LEVEL 2: Structured summarization of old messages (requires LLM call)
 	rep := CompactReport{Level: 2, SummaryProvider: cfg.SummarizerProvider, SummaryModel: cfg.SummarizerModel}
 	if rep.SummaryProvider == "" {
@@ -456,6 +467,79 @@ func summarizerUsage(llmClient client.LLMClient, cfg CompactConfig) *models.Usag
 		return ua.LastUsage()
 	}
 	return nil
+}
+
+// verbatimBudgetShare is the share of the character budget the
+// PreserveVerbatim messages may hold in total. Beyond it the oldest
+// verbatim results are archived to CCR (recoverable with @recall) and
+// stubbed, so a pile of recalled originals can never keep the history
+// above budget forever — the compactor must converge.
+const verbatimBudgetShare = 0.25
+
+// capVerbatim enforces verbatimBudgetShare: oldest verbatim messages past
+// the cap are archived (when a CCR layer exists), replaced by a short stub
+// and lose the flag. Returns the history (a copy when anything changed).
+func (hc *HistoryCompactor) capVerbatim(history []models.Message, budget int) []models.Message {
+	limit := int(float64(budget) * verbatimBudgetShare)
+	total := 0
+	for _, m := range history {
+		if m.Meta != nil && m.Meta.PreserveVerbatim {
+			total += len(m.Content)
+		}
+	}
+	if total <= limit {
+		return history
+	}
+	out := make([]models.Message, len(history))
+	copy(out, history)
+	for i := range out {
+		if total <= limit {
+			break
+		}
+		m := out[i]
+		if m.Meta == nil || !m.Meta.PreserveVerbatim || m.Role == "system" {
+			continue
+		}
+		stub := "[recalled original aged out of the window (" + FormatPayloadSize(len(m.Content)) + ")"
+		if hc.compress != nil {
+			if key, ok := hc.compress.Archive(m.Content); ok {
+				stub += "; recover again with @recall " + compress.FormatMarker(key)
+			}
+		}
+		stub += "]"
+		total -= len(m.Content)
+		meta := *m.Meta
+		meta.PreserveVerbatim = false
+		m.Content = stub
+		m.Meta = &meta
+		out[i] = m
+		hc.logger.Info("verbatim cap: archived and stubbed an aged recall result", zap.Int("index", i))
+	}
+	return out
+}
+
+// downgradeVerbatimResults turns verbatim tool results that are about to be
+// re-appended without their owning assistant tool_calls message into
+// user-role messages: the tool-result pairing repair would otherwise delete
+// them as orphans, defeating PreserveVerbatim for native tools.
+func downgradeVerbatimResults(verbatim []models.Message) []models.Message {
+	out := make([]models.Message, len(verbatim))
+	for i, m := range verbatim {
+		if m.Role == "tool" || m.ToolCallID != "" {
+			body := m.Content
+			if id := m.ToolCallID; id != "" {
+				body = "[recalled original — tool result " + id + ", kept verbatim through compaction]\n" + body
+			}
+			meta := models.MessageMeta{PreserveVerbatim: true}
+			if m.Meta != nil {
+				meta = *m.Meta
+				meta.PreserveVerbatim = true
+			}
+			m = models.Message{Role: "user", Content: body, Meta: &meta}
+		}
+		out[i] = m
+	}
+	return out
 }
 
 // splitVerbatim separates the messages flagged PreserveVerbatim from a
@@ -578,7 +662,7 @@ func (hc *HistoryCompactor) structuredSummarize(
 			SummaryOf: len(middleMessages),
 		},
 	})
-	result = append(result, verbatim...)
+	result = append(result, downgradeVerbatimResults(verbatim)...)
 	result = append(result, history[recentStart:]...)
 
 	return result, nil
@@ -786,7 +870,7 @@ func (hc *HistoryCompactor) emergencyTruncate(history []models.Message, cfg Comp
 			SummaryOf: droppedCount,
 		},
 	})
-	result = append(result, verbatim...)
+	result = append(result, downgradeVerbatimResults(verbatim)...)
 	result = append(result, history[recentStart:]...)
 
 	return result

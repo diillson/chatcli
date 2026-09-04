@@ -124,6 +124,7 @@ func (cli *ChatCLI) showRewindMenu() bool {
 
 	// Trim checkpoints to the restored point
 	cli.checkpoints = cli.checkpoints[:cpIdx+1]
+	cli.afterHistoryRestore()
 
 	fmt.Printf("  %s %s\n",
 		colorize("↩", ColorGreen),
