@@ -123,7 +123,8 @@ func TestBuildContextStatusReport_ProjectsWindowUse(t *testing.T) {
 		{Role: "assistant", Content: strings.Repeat("a", 2000)},
 	}
 	r := cli.buildContextStatusReport(context.Background())
-	if r.PromptTokens != 1100 || r.HistoryTokens != 1000 || r.TotalTokens != 2100 {
+	// Total counts the answer reserve too (the fourth category).
+	if r.PromptTokens != 1100 || r.HistoryTokens != 1000 || r.ReserveTokens <= 0 || r.TotalTokens != 2100+r.ReserveTokens {
 		t.Fatalf("tokens = prompt %d history %d total %d", r.PromptTokens, r.HistoryTokens, r.TotalTokens)
 	}
 	if r.Window <= 0 || r.ProjectedPct <= 0 || r.CompactAtPct != 75 {

@@ -357,6 +357,9 @@ type ChatCLI struct {
 	// pendingTurnContext is the chat turn's injected context text between
 	// assembly and commit (turn_context.go).
 	pendingTurnContext string
+	// toolDefsChars is the serialized size of the native tool definitions
+	// the agent/coder loop sends (0 in chat); part of the context estimate.
+	toolDefsChars int
 	// prefixRatios freezes the chars-per-token ratio the prefix budget uses
 	// per provider:model for the session, so cached sections never fold or
 	// unfold because the calibrator moved by a few percent (prompt_budget.go).

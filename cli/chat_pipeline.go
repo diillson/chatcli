@@ -138,6 +138,7 @@ func (cli *ChatCLI) assembleChatSystemPrompt(
 	// grow without bound — attachments, digests, skills — against the
 	// window, degrading in the declared order: skills → digests → attach.
 	budget := cli.newPrefixBudget(cli.Provider, cli.Model)
+	cli.applyRetrievedBudget(budget)
 	mode := cli.modeAndLanguagePart()
 	out.add("mode", mode) // Part 0
 	budget.spend(len(mode.Text))
@@ -1057,27 +1058,12 @@ func (cli *ChatCLI) projectedContextPct(window int) (float64, bool) {
 	if window <= 0 || cli == nil {
 		return 0, false
 	}
-	chars := promptCharsOf(cli.history)
-	if !historyHasSystem(cli.history) {
-		chars += cli.promptBreakdowns.latestNamed("chat").TotalChars()
-	}
-	if chars <= 0 {
-		return 0, false
-	}
-	tokens := cli.calibrator().EstimateTokens(cli.Provider, cli.Model, chars)
-	if tokens <= 0 {
-		return 0, false
-	}
-	return float64(tokens) / float64(window) * 100, true
-}
-
-func historyHasSystem(history []models.Message) bool {
-	for _, m := range history {
-		if strings.EqualFold(m.Role, "system") {
-			return true
-		}
-	}
-	return false
+	// One estimate for the footer, the compactor and /context status; the
+	// answer reserve is capped against the window the caller measures.
+	e := cli.contextEstimate()
+	e.Window = window
+	e.ReserveTokens = answerReserveTokens(cli.getMaxTokensForCurrentLLM(), window)
+	return e.Pct()
 }
 
 // roundPct rounds a percentage to an int, floored at 0 and deliberately
