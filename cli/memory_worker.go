@@ -74,7 +74,27 @@ const (
 )
 
 func newMemoryWorker(cli *ChatCLI) *memoryWorker {
-	return newMemoryWorkerFor(cli, cli.memoryStore, defaultPendingDir(), func() []models.Message { return cli.history })
+	return newMemoryWorkerFor(cli, cli.memoryStore, defaultPendingDir(), cli.baseHistory)
+}
+
+// baseHistory is the history source of the BASE (shared) store set: the
+// live conversation while no tenant is active, the base set's own history
+// while a tenant's set is installed. Read at goroutine time, so a base
+// extraction that fires after a gateway swap can never distill tenant B's
+// turn into the shared store.
+func (cli *ChatCLI) baseHistory() []models.Message {
+	if cli == nil {
+		return nil
+	}
+	if cli.tenants != nil {
+		cli.tenants.mu.Lock()
+		active, base := cli.tenants.active, cli.tenants.base
+		cli.tenants.mu.Unlock()
+		if active != "" && base != nil {
+			return base.history
+		}
+	}
+	return cli.history
 }
 
 // newMemoryWorkerFor builds a worker over an explicit store, pending queue
@@ -119,7 +139,7 @@ func (mw *memoryWorker) stop() {
 // It runs in a goroutine — non-blocking to the main flow.
 func (mw *memoryWorker) nudge(ctx context.Context) {
 	if mw.cli != nil {
-		mw.cli.forwardNewHistory(ctx, &mw.cli.extForward, mw.history(), mw.cli.currentSessionName)
+		mw.cli.forwardNewHistory(ctx, mw.cli.extForwardState(), mw.history(), mw.cli.currentSessionName)
 	}
 	if mw.store == nil {
 		return

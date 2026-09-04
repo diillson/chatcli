@@ -35,6 +35,7 @@ package cli
 import (
 	"fmt"
 	"strings"
+	"sync"
 
 	"github.com/diillson/chatcli/cli/board"
 )
@@ -83,7 +84,8 @@ const bootstrapCardChatDirective = "Never claim you have no memory of past sessi
 // memory surface is empty (a fresh install has nothing to navigate) or when
 // memory injection is off entirely.
 func (cli *ChatCLI) memoryBootstrapCards() (chatCard, agentCard string) {
-	cli.bootstrapCardOnce.Do(func() {
+	st := cli.bootstrapCardState()
+	st.once.Do(func() {
 		if loadMemoryMode() == memModeOff {
 			return
 		}
@@ -92,10 +94,29 @@ func (cli *ChatCLI) memoryBootstrapCards() (chatCard, agentCard string) {
 			return
 		}
 		body := bootstrapCardHeader + strings.Join(lines, "\n") + "\n"
-		cli.bootstrapCardChat = body + bootstrapCardChatDirective
-		cli.bootstrapCardAgent = body + bootstrapCardAgentDirective
+		st.chat = body + bootstrapCardChatDirective
+		st.agent = body + bootstrapCardAgentDirective
 	})
-	return cli.bootstrapCardChat, cli.bootstrapCardAgent
+	return st.chat, st.agent
+}
+
+// bootstrapCardState is the session-start memory card, frozen once per
+// STORE SET: under the gateway every tenant gets its own (its facts, its
+// sessions), and the swap installs it with the rest of the set — a
+// process-wide card leaked tenant A's counts and session title into
+// tenant B's cached system prompt.
+type bootstrapCardState struct {
+	once  sync.Once
+	chat  string
+	agent string
+}
+
+// bootstrapCardState returns the active set's card state, creating it.
+func (cli *ChatCLI) bootstrapCardState() *bootstrapCardState {
+	if cli.bootstrapCard == nil {
+		cli.bootstrapCard = &bootstrapCardState{}
+	}
+	return cli.bootstrapCard
 }
 
 // memoryBootstrapCardChat is the chat-surface accessor.

@@ -99,27 +99,27 @@ func TestForwardNewHistory_TracksTheMark(t *testing.T) {
 	cli.extToolCaller = f
 	t.Setenv(MemoryProviderEnv, "mcp:memsvc")
 	hist := []models.Message{{Role: "system", Content: "sys"}, {Role: "user", Content: "q1"}, {Role: "assistant", Content: "a1"}}
-	cli.forwardNewHistory(context.Background(), &cli.extForward, hist, "work")
+	cli.forwardNewHistory(context.Background(), cli.extForwardState(), hist, "work")
 	waitCalls(t, f, "memsvc/memory_store", 1)
 	if msgs, _ := f.args[0]["messages"].([]map[string]string); len(msgs) != 2 || msgs[0]["content"] != "q1" {
 		t.Fatalf("system messages are skipped, turns forwarded: %v", f.args[0])
 	}
 	// Nothing new: no call.
-	cli.forwardNewHistory(context.Background(), &cli.extForward, hist, "work")
+	cli.forwardNewHistory(context.Background(), cli.extForwardState(), hist, "work")
 	time.Sleep(50 * time.Millisecond)
 	if f.count("memsvc/memory_store") != 1 {
 		t.Fatal("no new messages must mean no call")
 	}
 	// New turn: only the delta.
 	hist = append(hist, models.Message{Role: "user", Content: "q2"})
-	cli.forwardNewHistory(context.Background(), &cli.extForward, hist, "work")
+	cli.forwardNewHistory(context.Background(), cli.extForwardState(), hist, "work")
 	waitCalls(t, f, "memsvc/memory_store", 2)
 	if msgs, _ := f.args[1]["messages"].([]map[string]string); len(msgs) != 1 || msgs[0]["content"] != "q2" {
 		t.Fatalf("delta = %v", f.args[1])
 	}
 	// Shrunk history (compaction/clear) resets the mark instead of skipping.
-	cli.forwardNewHistory(context.Background(), &cli.extForward, hist[:1], "work")
-	cli.forwardNewHistory(context.Background(), &cli.extForward, append(hist[:1], models.Message{Role: "user", Content: "after clear"}), "work")
+	cli.forwardNewHistory(context.Background(), cli.extForwardState(), hist[:1], "work")
+	cli.forwardNewHistory(context.Background(), cli.extForwardState(), append(hist[:1], models.Message{Role: "user", Content: "after clear"}), "work")
 	waitCalls(t, f, "memsvc/memory_store", 3)
 }
 

@@ -276,9 +276,7 @@ type ChatCLI struct {
 	// byte-stable across turns — it rides in the CACHED prefix of every
 	// surface's system prompt, and a per-turn count drift would bust that
 	// cache for no informational gain.
-	bootstrapCardOnce  sync.Once
-	bootstrapCardChat  string
-	bootstrapCardAgent string
+	bootstrapCard *bootstrapCardState // per store set: swapped with the tenant
 
 	// Content-aware, reversible context compression (CCR). Reduces verbose
 	// tool output (search/log/diff/JSON) before it reaches the model while
@@ -309,7 +307,7 @@ type ChatCLI struct {
 	// extToolCaller overrides the MCP manager for the extension points
 	// (tests); extForward tracks what was forwarded to the memory provider.
 	extToolCaller serverToolCaller
-	extForward    extForwardState
+	extForward    *extForwardState // per store set: swapped with the tenant
 
 	// Latest assembled system-prompt breakdown (chat and agent paths write
 	// it, /context status reads it).

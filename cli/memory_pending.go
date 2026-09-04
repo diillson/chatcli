@@ -57,6 +57,10 @@ type pendingSegment struct {
 	// after pendingMaxAttempts so an unparseable reply cannot wedge the
 	// queue forever (one requeue, then gone).
 	Attempts int `json:"attempts,omitempty"`
+	// Workspace is the project the segment was recorded in, so a drain in
+	// another directory labels episodes and resolves paths for the right
+	// project.
+	Workspace string `json:"workspace,omitempty"`
 }
 
 // pendingMaxAttempts is how many failed drains a queued segment survives.
@@ -159,7 +163,11 @@ func (mw *memoryWorker) persistPending(messages []models.Message) (string, error
 		redacted[i] = m
 		redacted[i].Content = redactSecretsForLLM(m.Content)
 	}
-	data, err := json.Marshal(pendingSegment{CreatedAt: time.Now(), Messages: redacted})
+	workspace := ""
+	if mw.store != nil && mw.store.Manager() != nil {
+		workspace = mw.store.Manager().WorkspaceDir()
+	}
+	data, err := json.Marshal(pendingSegment{CreatedAt: time.Now(), Messages: redacted, Workspace: workspace})
 	if err != nil {
 		return "", err
 	}
@@ -245,6 +253,22 @@ func (mw *memoryWorker) recordUsage(ec extractionClient, usage *models.UsageInfo
 	mw.cli.costTracker.RecordMemoryUsage(provider, model, usage)
 }
 
+// enterSegmentWorkspace points the store at the segment's workspace for
+// the extraction and returns the restore; a no-op when it is unknown or
+// already current.
+func (mw *memoryWorker) enterSegmentWorkspace(workspace string) func() {
+	if workspace == "" || mw.store == nil || mw.store.Manager() == nil {
+		return func() {}
+	}
+	mgr := mw.store.Manager()
+	prev := mgr.WorkspaceDir()
+	if prev == workspace {
+		return func() {}
+	}
+	mgr.SetWorkspaceDir(workspace)
+	return func() { mgr.SetWorkspaceDir(prev) }
+}
+
 // enforcePendingCap drops the oldest queued segments beyond pendingMaxFiles.
 func (mw *memoryWorker) enforcePendingCap() {
 	files := mw.pendingFiles()
@@ -291,7 +315,10 @@ func (mw *memoryWorker) drainPending(ctx context.Context) int {
 			_ = os.Remove(path)
 			continue
 		}
-		if err := mw.extractAndSave(ctx, seg.Messages); err != nil {
+		restore := mw.enterSegmentWorkspace(seg.Workspace)
+		err = mw.extractAndSave(ctx, seg.Messages)
+		restore()
+		if err != nil {
 			seg.Attempts++
 			if seg.Attempts >= pendingMaxAttempts {
 				mw.logger.Warn("Memory worker: pending segment failed repeatedly; dropping it",

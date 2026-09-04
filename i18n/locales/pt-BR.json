@@ -3757,5 +3757,7 @@
   "cfg.kv.sec.atrest_locked": "Stores travados",
   "cfg.val.sec.atrest_locked": "%s — selados com uma chave que este processo não tem; escritas recusadas para protegê-los",
   "compact.nothing_to_compact": "Nada a compactar: o histórico já cabe.",
-  "cost.cmd.memory_worker": "Memory worker: %d chamada(s) · %s (extração, rollups, compactação de memória)"
+  "cost.cmd.memory_worker": "Memory worker: %d chamada(s) · %s (extração, rollups, compactação de memória)",
+  "cfg.kv.sec.tenant_shared": "Compartilhado entre tenants",
+  "cfg.kv.sec.tenant_shared_list": "hooks, MCP manager (servidores e OAuth), reflexion runner, arquivo de histórico do REPL, banco do hub, scheduler — todo o resto é por tenant"
 }

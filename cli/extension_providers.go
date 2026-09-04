@@ -131,6 +131,7 @@ func (cli *ChatCLI) externalMemoryRecall(ctx context.Context, query string, hint
 	text, err := cli.callExtTool(ctx, server, extMemoryRecallTool, map[string]interface{}{
 		"query":        query,
 		"hints":        hints,
+		"tenant":       cli.activeTenant(),
 		"budget_chars": extRecallBudget,
 	}, extRecallTimeout)
 	if err != nil {
@@ -170,6 +171,7 @@ func (cli *ChatCLI) externalMemoryStore(ctx context.Context, session string, msg
 		if _, err := cli.callExtTool(detached, server, extMemoryStoreTool, map[string]interface{}{
 			"messages": payload,
 			"session":  session,
+			"tenant":   cli.activeTenant(),
 		}, extStoreTimeout); err != nil && cli.logger != nil && !errors.Is(err, errExtUnavailable) {
 			cli.logger.Debug("external memory store failed", zap.String("server", server), zap.Error(err))
 		}
@@ -223,6 +225,14 @@ func (cli *ChatCLI) externalSummarizer() ContextEngine {
 type extForwardState struct {
 	mu        sync.Mutex
 	forwarded int
+}
+
+// extForwardState returns the active set's forward watermark, creating it.
+func (cli *ChatCLI) extForwardState() *extForwardState {
+	if cli.extForward == nil {
+		cli.extForward = &extForwardState{}
+	}
+	return cli.extForward
 }
 
 // forwardNewHistory forwards history[forwarded:] to the provider and

@@ -65,6 +65,20 @@ type tenantStores struct {
 	boundSessionSync   time.Time
 	boundRemoteOnly    bool
 
+	// Per-conversation state that used to stay process-wide across a swap
+	// (Audit III SEC-3/SEC-4/MEM-5): every one of these is either derived
+	// from one tenant's history or would carry one tenant's data into
+	// another's turn.
+	bootstrapCard        *bootstrapCardState
+	extForward           *extForwardState
+	preCompaction        [][]models.Message
+	lastRecallTrace      *memoryRecallTrace
+	recalledFacts        []recalledFact
+	promptBreakdownLast  *promptBreakdown
+	promptBreakdownModes map[string]*promptBreakdown
+	pendingInboundImages []models.ImageContent
+	lastAgentReply       string
+
 	graphWired bool
 	lastUsed   time.Time
 }
@@ -127,6 +141,20 @@ func (cli *ChatCLI) captureStores(into *tenantStores) {
 	into.boundSessionSync = cli.boundSessionSync
 	into.boundRemoteOnly = cli.boundRemoteOnly
 	into.root = cli.stateRoot
+	into.bootstrapCard = cli.bootstrapCard
+	into.extForward = cli.extForward
+	into.preCompaction = cli.preCompaction
+	into.pendingInboundImages = cli.pendingInboundImages
+	into.lastAgentReply = cli.lastAgentReply
+	cli.recallTraceMu.Lock()
+	into.lastRecallTrace = cli.lastRecallTrace
+	cli.recallTraceMu.Unlock()
+	cli.recalled.mu.Lock()
+	into.recalledFacts = cli.recalled.facts
+	cli.recalled.mu.Unlock()
+	cli.promptBreakdowns.mu.Lock()
+	into.promptBreakdownLast, into.promptBreakdownModes = cli.promptBreakdowns.last, cli.promptBreakdowns.byMode
+	cli.promptBreakdowns.mu.Unlock()
 }
 
 // applyStores installs a set on the ChatCLI and re-registers the process
@@ -147,6 +175,20 @@ func (cli *ChatCLI) applyStores(ts *tenantStores) {
 	cli.currentSessionName = ts.currentSessionName
 	cli.boundSessionSync = ts.boundSessionSync
 	cli.boundRemoteOnly = ts.boundRemoteOnly
+	cli.bootstrapCard = ts.bootstrapCard
+	cli.extForward = ts.extForward
+	cli.preCompaction = ts.preCompaction
+	cli.pendingInboundImages = ts.pendingInboundImages
+	cli.lastAgentReply = ts.lastAgentReply
+	cli.recallTraceMu.Lock()
+	cli.lastRecallTrace = ts.lastRecallTrace
+	cli.recallTraceMu.Unlock()
+	cli.recalled.mu.Lock()
+	cli.recalled.facts = ts.recalledFacts
+	cli.recalled.mu.Unlock()
+	cli.promptBreakdowns.mu.Lock()
+	cli.promptBreakdowns.last, cli.promptBreakdowns.byMode = ts.promptBreakdownLast, ts.promptBreakdownModes
+	cli.promptBreakdowns.mu.Unlock()
 	if cli.stateRoot != ts.root {
 		// The outgoing root's learned ratios and daily spend are written
 		// before the swap.
