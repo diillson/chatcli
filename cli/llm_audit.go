@@ -20,6 +20,10 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
+	"fmt"
+	"github.com/diillson/chatcli/config"
+	"github.com/diillson/chatcli/i18n"
 	"os"
 	"path/filepath"
 	"sync"
@@ -88,23 +92,51 @@ type llmAuditWriter struct {
 // gateway, mcp, ...). Failures are logged and leave auditing off — the
 // trail must never block a session from starting.
 func (cli *ChatCLI) initLLMAudit(surface string) {
+	if err := cli.initLLMAuditErr(surface); err != nil {
+		// A locked managed audit policy fails CLOSED: the operator pinned
+		// the trail and it cannot be written, so the session must not
+		// run unaudited.
+		fmt.Fprintln(os.Stderr, colorize("  "+i18n.T("audit.locked_unavailable", err), ColorRed))
+		os.Exit(1)
+	}
+}
+
+// errAuditLocked marks a locked managed audit path that cannot be opened.
+var errAuditLocked = errors.New("locked audit path unavailable")
+
+// auditPathLocked reports whether the audit path is pinned by managed.env.
+func auditPathLocked() bool {
+	entry, managed := config.ManagedEntryFor(AuditLogPathEnv)
+	return managed && entry.Locked
+}
+
+// initLLMAuditErr installs the auditor; the error is non-nil only when the
+// managed policy locks the path and the trail cannot be opened (an
+// unlocked path that fails still logs and leaves auditing off).
+func (cli *ChatCLI) initLLMAuditErr(surface string) error {
 	path := os.Getenv(AuditLogPathEnv)
 	if path == "" {
-		return
+		return nil
 	}
 	clean := filepath.Clean(path)
 	if !filepath.IsAbs(clean) {
 		if cli.logger != nil {
 			cli.logger.Error("audit log path must be absolute; LLM audit disabled", zap.String("path", path))
 		}
-		return
+		if auditPathLocked() {
+			return fmt.Errorf("%w: %s is not absolute", errAuditLocked, path)
+		}
+		return nil
 	}
 	chain, err := auditchain.Open(clean, auditchain.Options{})
 	if err != nil {
 		if cli.logger != nil {
 			cli.logger.Error("failed to open audit log for LLM requests", zap.String("path", clean), zap.Error(err))
 		}
-		return
+		if auditPathLocked() {
+			return fmt.Errorf("%w: %s: %s", errAuditLocked, clean, err.Error())
+		}
+		return nil
 	}
 	w := &llmAuditWriter{chain: chain, surface: surface, logger: cli.logger}
 	w.session = func() string {
@@ -122,6 +154,7 @@ func (cli *ChatCLI) initLLMAudit(surface string) {
 	}
 	cli.llmAudit = w
 	client.RegisterRequestAuditor(w.record)
+	return nil
 }
 
 // setSurface renames the surface for entries from now on (the gateway,

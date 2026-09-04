@@ -329,8 +329,9 @@ type ChatCLI struct {
 	lastPromptChars int
 	// calibrationTurns counts chat turns to pace exact (count_tokens)
 	// calibration.
-	calibrationTurns      int
-	compactSummarizerOnce sync.Once
+	calibrationTurns        int
+	compactSummarizerMu     sync.Mutex
+	compactSummarizerHandle string // env value the cached summarizer was resolved from
 
 	// Session language-server pool behind the @lsp tool. Created lazily on
 	// the first @lsp call (starting gopls for sessions that never navigate

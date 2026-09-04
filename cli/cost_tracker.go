@@ -410,6 +410,17 @@ func (ct *CostTracker) Reset() {
 	ct.sessionStart = now
 	ct.lastUpdate = now
 	ct.modelUsage = make(map[string]*ModelUsageRecord)
+	// Every aggregate the model map does not own: cache storage, memory
+	// worker, embeddings, compaction, cache resources and provider context
+	// edits — otherwise the total stays above zero and a hard stop armed
+	// by the old session survives the reset.
+	ct.cacheStorageUSD = 0
+	ct.cacheResources = 0
+	ct.memoryCostUSD = 0
+	ct.memoryCalls = 0
+	ct.embeddingCostUSD = 0
+	ct.compactionCostUSD = 0
+	ct.contextEditsApplied, ct.contextEditsToolUses, ct.contextEditsTokens = 0, 0, 0
 	ct.recomputeAggregates()
 	ct.lastAnnouncedLevel = BudgetOK
 	ct.lastSave = time.Time{}
@@ -902,6 +913,20 @@ func (ct *CostTracker) budgetLevelLocked() BudgetLevel {
 }
 
 func (ct *CostTracker) budgetMessageLocked() string {
+	// The daily limit speaks for itself when it tripped (or when it is the
+	// only limit configured); the session limit otherwise.
+	if ct.dailyLimitUSD > 0 && (ct.budgetLimitUSD <= 0 || ct.dailySpentUSD >= ct.dailyLimitUSD*ct.budgetWarningPct) {
+		dailyPct := ct.dailySpentUSD / ct.dailyLimitUSD * 100
+		switch {
+		case ct.dailySpentUSD >= ct.dailyLimitUSD:
+			if ct.budgetHardStop {
+				return i18n.T("cost.budget.daily_exceeded_hard", ct.dailySpentUSD, ct.dailyLimitUSD, dailyPct)
+			}
+			return i18n.T("cost.budget.daily_exceeded", ct.dailySpentUSD, ct.dailyLimitUSD, dailyPct)
+		case ct.dailySpentUSD >= ct.dailyLimitUSD*ct.budgetWarningPct:
+			return i18n.T("cost.budget.daily_warning", ct.dailySpentUSD, ct.dailyLimitUSD, dailyPct)
+		}
+	}
 	if ct.budgetLimitUSD <= 0 {
 		return ""
 	}

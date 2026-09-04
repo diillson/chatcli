@@ -1,0 +1,6 @@
+{
+  "cost.budget.daily_warning": "⚠ Orçamento diário: $%.4f de $%.2f gastos hoje (%.0f%%).",
+  "cost.budget.daily_exceeded": "⛔ Orçamento diário excedido: $%.4f de $%.2f (%.0f%%).",
+  "cost.budget.daily_exceeded_hard": "⛔ Orçamento diário excedido: $%.4f de $%.2f (%.0f%%) — novos turnos de LLM ficam bloqueados até amanhã ou até /cost budget subir o limite.",
+  "audit.locked_unavailable": "A configuração gerenciada trava o caminho da trilha de auditoria e ele não pode ser escrito; recusando iniciar sem auditoria: %v"
+}
