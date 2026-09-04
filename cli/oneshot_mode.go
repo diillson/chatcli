@@ -245,9 +245,11 @@ func (cli *ChatCLI) RunOnce(ctx context.Context, input string, disableAnimation 
 			fmt.Fprintf(os.Stderr, "  %s\n", msg)
 		})
 		cli.beforeCompaction(ctx, compactTriggerAuto)
-		if compacted, compactErr := cli.historyCompactor.Compact(ctx, cli.history, activeClient, cfg); compactErr == nil {
+		if compacted, compactErr := cli.historyCompactor.Compact(ctx, cli.history, activeClient, cfg); compactErr == nil && !historiesEqual(compacted, cli.history) {
 			cli.history = compacted
 			cli.noteCompactionApplied(ctx, compactTriggerAuto)
+		} else {
+			cli.compactionSkipped(ctx, compactTriggerAuto)
 		}
 		cli.historyCompactor.SetStatusCallback(nil)
 	}

@@ -197,6 +197,7 @@ func (m *Manager) executeCommandHook(ctx context.Context, hook HookConfig, event
 		"CHATCLI_HOOK_TOOL="+event.ToolName,
 		"CHATCLI_HOOK_SESSION="+event.SessionID,
 		"CHATCLI_HOOK_TRIGGER="+event.Trigger,
+		"CHATCLI_HOOK_OUTCOME="+event.Outcome,
 	)
 
 	err := cmd.Run()

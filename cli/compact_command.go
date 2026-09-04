@@ -49,8 +49,13 @@ func (cli *ChatCLI) handleCompactCommand(ctx context.Context, userInput string) 
 		cli.flushMemoryBeforeCompaction(ctx)
 		compacted, err := cli.historyCompactor.Compact(ctx, cli.history, cli.Client, cfg)
 		cli.historyCompactor.SetStatusCallback(nil)
-		if err != nil {
-			fmt.Println(colorize(fmt.Sprintf("  %s", i18n.T("compact.error.failed", err)), ColorYellow))
+		if err != nil || historiesEqual(compacted, cli.history) {
+			cli.compactionSkipped(ctx, compactTriggerManual)
+			if err != nil {
+				fmt.Println(colorize(fmt.Sprintf("  %s", i18n.T("compact.error.failed", err)), ColorYellow))
+			} else {
+				fmt.Println(colorize("  "+i18n.T("compact.nothing_to_compact"), ColorGray))
+			}
 			return
 		}
 
@@ -167,11 +172,13 @@ CONVERSATION TO COMPACT:
 	}
 	if err != nil {
 		cli.logger.Warn("Guided compaction failed", zap.Error(err))
+		cli.compactionSkipped(ctx, compactTriggerManual)
 		fmt.Println(colorize(fmt.Sprintf("  %s", i18n.T("compact.error.failed", err)), ColorYellow))
 		return
 	}
 	if !summaryPassesGate(response, sb.Len()) {
 		cli.logger.Warn("Guided compaction summary rejected by the quality gate", zap.Int("chars", len(strings.TrimSpace(response))))
+		cli.compactionSkipped(ctx, compactTriggerManual)
 		fmt.Println(colorize("  "+i18n.T("compact.error.summary_rejected"), ColorYellow))
 		return
 	}
@@ -201,7 +208,7 @@ CONVERSATION TO COMPACT:
 			SummaryOf: len(middleMessages),
 		},
 	})
-	result = append(result, verbatim...)
+	result = append(result, downgradeVerbatimResults(verbatim)...)
 	result = append(result, cli.history[recentStart:]...)
 
 	cli.history = result
