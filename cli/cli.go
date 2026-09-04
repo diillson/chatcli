@@ -945,6 +945,7 @@ func NewChatCLI(ctx context.Context, manager manager.LLMManager, logger *zap.Log
 	workers.RegisterCCRRecaller(cli.compressionLayer.Recall)
 	// Worker-loop microcompact archives dropped bytes into the same store.
 	workers.RegisterSquadCompressionLayer(cli.compressionLayer)
+	workers.RegisterWorkerWindow(&workerWindow{cli: cli})
 	// Read-only memory/session/knowledge views for workers that opt in
 	// (persona frontmatter tools: Memory, Session, Knowledge).
 	workers.RegisterContextToolRunner(cli.runWorkerContextTool)

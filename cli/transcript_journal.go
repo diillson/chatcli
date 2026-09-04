@@ -54,8 +54,12 @@ type transcriptEvent struct {
 	TS      time.Time       `json:"ts"`
 	Kind    string          `json:"kind"` // "msg" | "rewrite"
 	Message *models.Message `json:"message,omitempty"`
-	Before  int             `json:"before,omitempty"` // rewrite: messages before
-	After   int             `json:"after,omitempty"`  // rewrite: messages after
+	// Worker names the squad/taskgraph worker whose turn this is; worker
+	// events are journaled under the parent session for the record but
+	// never rebuilt into the parent's history.
+	Worker string `json:"worker,omitempty"`
+	Before int    `json:"before,omitempty"` // rewrite: messages before
+	After  int    `json:"after,omitempty"`  // rewrite: messages after
 	// Hashes (rewrite events) is the ordered hash list of the history the
 	// rewrite replaced, so the pre-rewrite conversation can be rebuilt
 	// from the journaled messages (/rewind compact after a resume).
@@ -223,6 +227,22 @@ func (j *transcriptJournal) Sync(history []models.Message) error {
 	return nil
 }
 
+// appendWorkerTurn journals one worker's turn under the parent session.
+func (j *transcriptJournal) appendWorkerTurn(worker string, turn []models.Message) error {
+	if j == nil || j.disabled || worker == "" || len(turn) == 0 {
+		return nil
+	}
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	now := time.Now()
+	events := make([]transcriptEvent, 0, len(turn))
+	for i := range turn {
+		m := turn[i]
+		events = append(events, transcriptEvent{TS: now, Kind: "msg", Worker: worker, Message: &m})
+	}
+	return j.appendEvents(events)
+}
+
 // appendEvents writes events as JSON lines (sealed when encryption at rest
 // is on) and fsyncs.
 func (j *transcriptJournal) appendEvents(events []transcriptEvent) error {
@@ -279,8 +299,24 @@ func readTranscript(path string) ([]models.Message, error) {
 	}
 	out := make([]models.Message, 0, len(events))
 	for _, ev := range events {
-		if ev.Kind == "msg" && ev.Message != nil {
+		if ev.Kind == "msg" && ev.Message != nil && ev.Worker == "" {
 			out = append(out, *ev.Message)
+		}
+	}
+	return out, nil
+}
+
+// readWorkerTranscript returns the worker turns journaled under the
+// parent session (worker name, message), in order.
+func readWorkerTranscript(path string) ([]transcriptEvent, error) {
+	events, err := readTranscriptEvents(path)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]transcriptEvent, 0, len(events))
+	for _, ev := range events {
+		if ev.Kind == "msg" && ev.Message != nil && ev.Worker != "" {
+			out = append(out, ev)
 		}
 	}
 	return out, nil
@@ -291,7 +327,7 @@ func readTranscript(path string) ([]models.Message, error) {
 func transcriptIndex(events []transcriptEvent) map[string]models.Message {
 	idx := make(map[string]models.Message, len(events))
 	for _, ev := range events {
-		if ev.Kind != "msg" || ev.Message == nil {
+		if ev.Kind != "msg" || ev.Message == nil || ev.Worker != "" {
 			continue
 		}
 		h := messageHash(*ev.Message)
