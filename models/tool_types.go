@@ -64,6 +64,19 @@ type LLMResponse struct {
 	ToolCalls  []ToolCall `json:"tool_calls,omitempty"`
 	Usage      *UsageInfo `json:"usage,omitempty"`
 	StopReason string     `json:"stop_reason,omitempty"`
+	// ContextEdits reports what the provider's context engine removed
+	// from the request server-side (Anthropic context editing); nil when
+	// nothing was edited.
+	ContextEdits *ContextEdits `json:"context_edits,omitempty"`
+}
+
+// ContextEdits sums the server-side edits a provider applied to one
+// request: how many tool results it cleared and how many input tokens
+// that freed. The local history still holds those results until the
+// caller stubs them (cli.mirrorContextEdits).
+type ContextEdits struct {
+	ClearedToolUses    int `json:"cleared_tool_uses"`
+	ClearedInputTokens int `json:"cleared_input_tokens"`
 }
 
 // HasToolCalls returns true if the response contains tool calls.

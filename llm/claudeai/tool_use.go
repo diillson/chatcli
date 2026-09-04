@@ -326,6 +326,25 @@ func (c *ClaudeClient) buildToolRequest(ctx context.Context, jsonValue []byte, t
 	return req, nil
 }
 
+// parseAppliedEdits sums the applied_edits entries of a context_management
+// response block ({type, cleared_tool_uses, cleared_input_tokens}).
+func parseAppliedEdits(edits []interface{}) *models.ContextEdits {
+	out := &models.ContextEdits{}
+	for _, raw := range edits {
+		e, ok := raw.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		if v, ok := e["cleared_tool_uses"].(float64); ok {
+			out.ClearedToolUses += int(v)
+		}
+		if v, ok := e["cleared_input_tokens"].(float64); ok {
+			out.ClearedInputTokens += int(v)
+		}
+	}
+	return out
+}
+
 // parseClaudeToolResponse parses the Anthropic API response with tool use support.
 func parseClaudeToolResponse(body string, logger *zap.Logger) (*models.LLMResponse, error) {
 	var result map[string]interface{}
@@ -376,10 +395,17 @@ func parseClaudeToolResponse(body string, logger *zap.Logger) (*models.LLMRespon
 
 	response.Content = strings.Join(textParts, "\n")
 
-	// Server-side context edits applied by the provider context engine.
+	// Server-side context edits applied by the provider context engine:
+	// parsed into the response so the caller can mirror them locally
+	// (stub the cleared results, skip calibration, note the rebuild).
 	if cm, ok := result["context_management"].(map[string]interface{}); ok {
-		if edits, ok := cm["applied_edits"].([]interface{}); ok && len(edits) > 0 && logger != nil {
-			logger.Info("anthropic context editing applied", zap.Int("edits", len(edits)))
+		if edits, ok := cm["applied_edits"].([]interface{}); ok && len(edits) > 0 {
+			response.ContextEdits = parseAppliedEdits(edits)
+			if logger != nil {
+				logger.Info("anthropic context editing applied", zap.Int("edits", len(edits)),
+					zap.Int("cleared_tool_uses", response.ContextEdits.ClearedToolUses),
+					zap.Int("cleared_input_tokens", response.ContextEdits.ClearedInputTokens))
+			}
 		}
 	}
 
