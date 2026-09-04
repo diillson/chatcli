@@ -66,7 +66,7 @@ func runRPC(kind string, mgr manager.LLMManager, logger *zap.Logger) error {
 	if err != nil {
 		logger.Warn("rpcserve: ChatCLI init failed; agent/coder/tools disabled", zap.Error(err))
 	}
-	// The surface is the server actually running: labelling an
+	// The surface is the server actually running: labeling an
 	// `mcp-server` run as "acp" mislabels its audit trail and telemetry.
 	chatCLI.SetAuditSurface(kind)
 	if chatCLI != nil {

@@ -175,7 +175,8 @@ func TestExplainCredentialError_AnnotatesAndPreservesChain(t *testing.T) {
 
 	// Non-credential errors are returned untouched.
 	other := errors.New("ValidationException")
-	if got := ExplainCredentialError(other); got != other {
+	got := ExplainCredentialError(other)
+	if !errors.Is(got, other) || got.Error() != other.Error() {
 		t.Fatalf("non-credential errors must pass through unchanged, got %v", got)
 	}
 	if ExplainCredentialError(nil) != nil {

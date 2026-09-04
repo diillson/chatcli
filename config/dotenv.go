@@ -90,6 +90,9 @@ func expandHome(path string) (string, error) {
 
 // fileExists reports whether path is an existing regular file.
 func fileExists(path string) bool {
+	// #nosec G703 -- the path is the operator's own configuration ($CHATCLI_DOTENV
+	// or a fixed candidate under the working directory / home); stat only, and
+	// pointing ChatCLI at your own file is the documented feature.
 	info, err := os.Stat(path)
 	return err == nil && info.Mode().IsRegular()
 }
