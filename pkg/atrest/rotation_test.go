@@ -50,7 +50,8 @@ func TestRotation_PreviousKeyOpensAndResealMigrates(t *testing.T) {
 		t.Fatalf("reseal: %v %v", err, changed)
 	}
 	data, _ := os.ReadFile(file)
-	if !SealedWithCurrentKey(data) {
+	// Resealed at its path: bound to the store, current key.
+	if !sealedWithCurrentKeyAt(file, data) {
 		t.Fatal("file must now be sealed with the current key")
 	}
 	if changed, _ := ResealFile(file); changed {
@@ -69,7 +70,7 @@ func TestRotation_PreviousKeyOpensAndResealMigrates(t *testing.T) {
 	}
 	// Retire the old key: everything still opens.
 	t.Setenv(EnvPreviousKeys, "")
-	if _, err := Open(mustRead(t, file)); err != nil {
+	if _, err := OpenAt(file, mustRead(t, file)); err != nil {
 		t.Fatal("resealed store must open with the current key alone")
 	}
 	t.Setenv(EnvKey, "")

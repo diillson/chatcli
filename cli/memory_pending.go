@@ -152,7 +152,7 @@ func (mw *memoryWorker) persistPending(messages []models.Message) (string, error
 	if dir == "" {
 		return "", fmt.Errorf("pending dir not configured")
 	}
-	if err := os.MkdirAll(dir, 0o750); err != nil {
+	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return "", err
 	}
 	// The queue holds raw conversation on disk until extraction runs:

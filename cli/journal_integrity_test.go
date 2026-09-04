@@ -122,5 +122,5 @@ func readJournalWithSkips(t *testing.T, path string) ([]transcriptEvent, int, er
 		return nil, 0, err
 	}
 	defer func() { _ = f.Close() }()
-	return decodeTranscriptEvents(f)
+	return decodeTranscriptEvents(f, path)
 }

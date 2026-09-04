@@ -7,6 +7,7 @@ package cli
 
 import (
 	"context"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -28,7 +29,8 @@ func TestTenantRootFor_SafeAndDistinct(t *testing.T) {
 		t.Fatalf("unsafe characters in %s", a)
 	}
 	long := tenantRootFor("/base", strings.Repeat("x", 200))
-	if len(filepath.Base(long)) > 48+1+8 {
+	// 48-char slug + "-" + 16-byte digest as hex (32 chars).
+	if len(filepath.Base(long)) > 48+1+32 {
 		t.Fatalf("slug not capped: %s", filepath.Base(long))
 	}
 }
@@ -119,4 +121,21 @@ func TestEnterTenant_EvictsLeastRecentlyUsed(t *testing.T) {
 		t.Fatalf("rebuilt tenant store = %s", cli.sessionManager.sessionsDir)
 	}
 	leave()
+}
+
+func TestTenantRootFor_KeepsLegacyDigestRoots(t *testing.T) {
+	base := t.TempDir()
+	fresh := tenantRootFor(base, "slack:u1")
+	if len(filepath.Base(fresh)) != len("slack_u1-")+32 {
+		t.Fatalf("new roots carry the 16-byte digest: %s", filepath.Base(fresh))
+	}
+	// A root created by an earlier build (32-bit digest) keeps being used
+	// so an upgrade never orphans a tenant's state.
+	legacy := filepath.Join(base, "tenants", "slack_u1-"+filepath.Base(fresh)[len("slack_u1-"):len("slack_u1-")+8])
+	if err := os.MkdirAll(legacy, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if got := tenantRootFor(base, "slack:u1"); got != legacy {
+		t.Fatalf("legacy root must win while it exists: %s", got)
+	}
 }

@@ -121,7 +121,16 @@ func tenantRootFor(base, principal string) string {
 		safe = safe[:48]
 	}
 	sum := sha256.Sum256([]byte(principal))
-	return filepath.Join(base, "tenants", safe+"-"+hex.EncodeToString(sum[:4]))
+	root := filepath.Join(base, "tenants", safe+"-"+hex.EncodeToString(sum[:16]))
+	// Roots created by earlier builds carried a 32-bit digest; keep using
+	// them so a gateway upgrade never orphans a tenant's state.
+	legacy := filepath.Join(base, "tenants", safe+"-"+hex.EncodeToString(sum[:4]))
+	if _, err := os.Stat(root); err != nil {
+		if _, lerr := os.Stat(legacy); lerr == nil {
+			return legacy
+		}
+	}
+	return root
 }
 
 // captureStores snapshots the ChatCLI's current store handles and live

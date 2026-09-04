@@ -273,7 +273,7 @@ func (j *transcriptJournal) appendEvents(events []transcriptEvent) error {
 			return err
 		}
 		if atrest.Enabled() {
-			sealed, err := atrest.Seal(line)
+			sealed, err := atrest.SealAt(j.path, line)
 			if err != nil {
 				_ = f.Close()
 				return err
@@ -374,7 +374,7 @@ func readTranscriptEvents(path string) ([]transcriptEvent, error) {
 		return nil, err
 	}
 	defer func() { _ = f.Close() }()
-	events, _, err := decodeTranscriptEvents(f)
+	events, _, err := decodeTranscriptEvents(f, path)
 	return events, err
 }
 
@@ -384,7 +384,7 @@ func readTranscriptEvents(path string) ([]transcriptEvent, error) {
 // disable undo, checkpoints and export for the session). A sealed line
 // this process cannot open is an error: that is a key problem, not a
 // corrupt journal. Returns the events and how many lines were skipped.
-func decodeTranscriptEvents(r io.Reader) ([]transcriptEvent, int, error) {
+func decodeTranscriptEvents(r io.Reader, path string) ([]transcriptEvent, int, error) {
 	br := bufio.NewReaderSize(r, 1024*1024)
 	var out []transcriptEvent
 	skipped := 0
@@ -393,7 +393,7 @@ func decodeTranscriptEvents(r io.Reader) ([]transcriptEvent, int, error) {
 		torn := rerr != nil && len(line) > 0 // no trailing newline: partial write
 		line = bytes.TrimRight(line, "\r\n")
 		if len(line) > 0 && !torn {
-			ev, ok, oerr := decodeTranscriptLine(line)
+			ev, ok, oerr := decodeTranscriptLine(line, path)
 			if oerr != nil {
 				return out, skipped, oerr
 			}
@@ -416,13 +416,13 @@ func decodeTranscriptEvents(r io.Reader) ([]transcriptEvent, int, error) {
 
 // decodeTranscriptLine parses one line; ok is false for a line that is not
 // a journal event.
-func decodeTranscriptLine(line []byte) (transcriptEvent, bool, error) {
+func decodeTranscriptLine(line []byte, path string) (transcriptEvent, bool, error) {
 	if bytes.HasPrefix(line, []byte(sealedLinePrefix)) {
 		raw, err := base64.StdEncoding.DecodeString(string(line[len(sealedLinePrefix):]))
 		if err != nil {
 			return transcriptEvent{}, false, nil
 		}
-		plain, err := atrest.Open(raw)
+		plain, err := atrest.OpenAt(path, raw)
 		if err != nil {
 			return transcriptEvent{}, false, err
 		}

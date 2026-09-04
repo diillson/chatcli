@@ -31,7 +31,7 @@ var errContextCorrupt = errors.New("context file corrupt")
 // load, and a rename without fsync can survive a crash while the bytes it
 // points to do not.
 func atomicWrite(path string, data []byte) error {
-	sealed, err := atrest.Seal(data)
+	sealed, err := atrest.SealAt(path, data)
 	if err != nil {
 		return err
 	}
@@ -102,7 +102,7 @@ func (s *Storage) LoadContext(contextID string) (*FileContext, error) {
 
 	data, err := os.ReadFile(filePath) //#nosec G304 -- path supplied by user/agent through validated tool surface (boundary check upstream)
 	if err == nil {
-		data, err = atrest.Open(data)
+		data, err = atrest.OpenAt(filePath, data)
 	}
 	if err != nil {
 		return nil, fmt.Errorf("erro ao ler contexto: %w", err)
