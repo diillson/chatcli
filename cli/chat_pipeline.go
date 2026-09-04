@@ -885,7 +885,15 @@ func (cli *ChatCLI) handleChatTurnResult(
 		cli.history = append(cli.history, models.TurnContextMessage(text))
 	}
 	cli.history = append(cli.history, userMessage)
-	cli.history = append(cli.history, models.Message{Role: "assistant", Content: aiResponse})
+	cli.history = append(cli.history, models.Message{
+		Role:    "assistant",
+		Content: aiResponse,
+		// Reasoning blocks belong to the turn that produced them: chat is
+		// tool-less, but the replay contract is the same one the agent
+		// loop follows, and a session that switches to /coder mid-thread
+		// carries a correct history into it.
+		Thinking: turnThinkingBlocks(nil, activeClient),
+	})
 
 	// Mirror the turn onto the shared cross-channel conversation so other
 	// channels (Telegram/Slack) see it as context, and write it through to

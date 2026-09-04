@@ -225,6 +225,27 @@ type BedrockClient struct {
 	// client.UsageState is a comparable struct, preserving the comparable
 	// contract documented above.
 	usage client.UsageState
+	// thinking holds the reasoning blocks of the most recent response.
+	// Behind a pointer on purpose: client.ThinkingState carries a slice,
+	// so embedding it by value would make BedrockClient incomparable and
+	// break the contract documented above.
+	thinking *client.ThinkingState
+}
+
+// LastThinking implements client.ThinkingAwareClient.
+func (c *BedrockClient) LastThinking() []models.ThinkingBlock {
+	if c.thinking == nil {
+		return nil
+	}
+	return c.thinking.LastThinking()
+}
+
+// LastThinkingModel implements client.ThinkingAwareClient.
+func (c *BedrockClient) LastThinkingModel() string {
+	if c.thinking == nil {
+		return ""
+	}
+	return c.thinking.LastThinkingModel()
 }
 
 // NewBedrockClient creates a client bound to a model id and region.
@@ -243,6 +264,7 @@ func NewBedrockClient(model, region, profile string, logger *zap.Logger, maxAtte
 		logger:      logger,
 		maxAttempts: maxAttempts,
 		backoff:     backoff,
+		thinking:    &client.ThinkingState{},
 	}
 }
 
@@ -512,6 +534,7 @@ func (c *BedrockClient) sendPromptAnthropicModel(ctx context.Context, wireModel,
 		if err != nil {
 			return "", wrapBedrockInferenceProfileError(wireModel, err)
 		}
+		c.storeThinkingFromBody(out.Body)
 		text, perr := parseAnthropicBody(out.Body)
 		if perr == nil {
 			c.captureAnthropicUsage(out.Body)
@@ -574,7 +597,10 @@ func (c *BedrockClient) buildMessagesAndSystem(prompt string, history []models.M
 	for _, msg := range history {
 		switch strings.ToLower(strings.TrimSpace(msg.Role)) {
 		case "assistant":
-			messages = append(messages, map[string]interface{}{"role": "assistant", "content": visionwire.AnthropicContent(msg.Content, msg.Images)})
+			messages = append(messages, map[string]interface{}{
+				"role":    "assistant",
+				"content": visionwire.AnthropicContent(msg.Content, msg.Images).PrependThinking(msg.Thinking),
+			})
 		case "system":
 			if len(msg.SystemParts) > 0 {
 				for _, part := range msg.SystemParts {
@@ -1061,3 +1087,14 @@ var _ client.ModelLister = (*BedrockClient)(nil)
 
 // Keep config import used for defaults.
 var _ = config.DefaultMaxRetries
+
+// storeThinkingFromBody records the reasoning blocks of an Anthropic
+// InvokeModel response so the next assistant turn can replay them. The
+// typed body parser above reads only text blocks, so this walks the
+// generic shape once rather than widening it.
+func (c *BedrockClient) storeThinkingFromBody(body []byte) {
+	if c.thinking == nil {
+		return
+	}
+	c.thinking.StoreThinking(c.model, client.ParseAnthropicThinkingBody(body))
+}

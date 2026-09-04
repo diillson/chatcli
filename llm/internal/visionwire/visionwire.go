@@ -125,6 +125,76 @@ func AnthropicOAuthContent(text string, imgs []models.ImageContent) Content {
 	return Content{parts: anthropicBlocks(text, validImages(imgs)), array: true}
 }
 
+// PrependThought places Gemini thought parts ahead of the turn's existing
+// parts. Gemini's stateless path requires every thought part to come back
+// exactly as received — the signature is an encrypted handle to the
+// model's reasoning state — so a part without one is skipped instead of
+// being sent unsigned. A turn with no thoughts is returned untouched.
+func (c Content) PrependThought(blocks []models.ThinkingBlock) Content {
+	shaped := make([]any, 0, len(blocks))
+	for _, b := range blocks {
+		if b.Type != "thought" || b.Signature == "" {
+			continue
+		}
+		shaped = append(shaped, map[string]interface{}{
+			"text":             b.Thinking,
+			"thought":          true,
+			"thoughtSignature": b.Signature,
+		})
+	}
+	if len(shaped) == 0 {
+		return c
+	}
+	parts := c.parts
+	if parts == nil {
+		parts = []any{map[string]interface{}{"text": c.text}}
+	}
+	return Content{parts: append(shaped, parts...), array: true}
+}
+
+// PrependThinking places provider-native reasoning blocks ahead of the
+// turn's existing parts, forcing the array form. Anthropic requires the
+// thinking that produced a tool call to lead the assistant turn it is
+// replayed in; a turn with no blocks is returned untouched, so the wire
+// bytes of every existing path stay identical.
+//
+// The blocks are emitted verbatim — text with its signature, or the
+// encrypted payload of a redacted block. One missing its signature (or
+// payload) is skipped rather than sent, because an unsigned block is
+// rejected and losing the turn is worse than losing the reasoning.
+func (c Content) PrependThinking(blocks []models.ThinkingBlock) Content {
+	shaped := make([]any, 0, len(blocks))
+	for _, b := range blocks {
+		switch b.Type {
+		case "thinking":
+			if b.Signature == "" {
+				continue
+			}
+			shaped = append(shaped, map[string]interface{}{
+				"type":      "thinking",
+				"thinking":  b.Thinking,
+				"signature": b.Signature,
+			})
+		case "redacted_thinking":
+			if b.Data == "" {
+				continue
+			}
+			shaped = append(shaped, map[string]interface{}{
+				"type": "redacted_thinking",
+				"data": b.Data,
+			})
+		}
+	}
+	if len(shaped) == 0 {
+		return c
+	}
+	parts := c.parts
+	if parts == nil {
+		parts = []any{map[string]interface{}{"type": "text", "text": c.text}}
+	}
+	return Content{parts: append(shaped, parts...), array: true}
+}
+
 // anthropicBlocks builds the image-first, text-last blocks slice shared by the
 // API-key (when images present) and OAuth (always) Anthropic paths.
 func anthropicBlocks(text string, valid []models.ImageContent) []any {

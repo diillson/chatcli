@@ -67,12 +67,23 @@ func AnthropicContextManagement() *ContextManagement {
 	if !ProviderContextEngine() {
 		return nil
 	}
-	return &ContextManagement{Edits: []ContextEdit{{
+	edits := []ContextEdit{{
 		Type:         "clear_tool_uses_20250919",
 		Trigger:      &ContextThreshold{Type: "input_tokens", Value: 100000},
 		Keep:         &ContextThreshold{Type: "tool_uses", Value: 5},
 		ClearAtLeast: &ContextThreshold{Type: "input_tokens", Value: 20000},
-	}}}
+	}}
+	// Once reasoning blocks are replayed they occupy the window like any
+	// other content, so the engine needs a way to retire the old ones. The
+	// thresholds mirror the tool-use edit: same trigger, so one pass over
+	// the prompt clears both, and a keep count that leaves the recent
+	// reasoning the model is still building on.
+	edits = append(edits, ContextEdit{
+		Type:    "clear_thinking_20251015",
+		Trigger: &ContextThreshold{Type: "input_tokens", Value: 100000},
+		Keep:    &ContextThreshold{Type: "thinking_turns", Value: 3},
+	})
+	return &ContextManagement{Edits: edits}
 }
 
 // PromptCacheTTLEnv selects the Anthropic cache lifetime: "5m" (default) or

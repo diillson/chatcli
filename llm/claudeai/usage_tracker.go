@@ -58,6 +58,9 @@ func (c *ClaudeClient) LastStopReason() string {
 func (c *ClaudeClient) resetUsage() {
 	c.usage.StoreUsage(nil)
 	c.usage.StoreStopReason("")
+	// Reasoning blocks belong to one response. Clearing them here means a
+	// response that carries none can never replay the previous turn's.
+	c.storeThinking(nil)
 }
 
 // storeUsage records usage on this instance (and mirrors to the legacy

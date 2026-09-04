@@ -85,6 +85,13 @@ type Message struct {
 	ToolCallID  string         `json:"tool_call_id,omitempty"` // ID when this message is a tool result.
 	SystemParts []ContentBlock `json:"system_parts,omitempty"` // Structured system prompt parts (for cache control).
 
+	// Thinking carries the provider-native reasoning blocks that preceded
+	// this assistant turn's text and tool calls. Providers that enable
+	// extended thinking require them back, unchanged and first, in the
+	// assistant turn that carries a tool_use; adapters without the concept
+	// ignore the field. Only meaningful when Role == "assistant".
+	Thinking []ThinkingBlock `json:"thinking,omitempty"`
+
 	// Images carries vision input attached to this turn. Populated for
 	// user messages (an attached/pasted/forwarded image) and consumed by
 	// vision-capable provider adapters, which serialize each entry into
