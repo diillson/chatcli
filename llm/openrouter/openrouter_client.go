@@ -251,11 +251,22 @@ func capOpenRouterCacheMarkers(messages []map[string]interface{}, limit int) {
 }
 
 // buildPayload assembles the request payload with OpenRouter-specific options.
-func (c *OpenRouterClient) buildPayload(messages []map[string]interface{}, maxTokens int) map[string]interface{} {
+func (c *OpenRouterClient) buildPayload(ctx context.Context, messages []map[string]interface{}, maxTokens int) map[string]interface{} {
 	payload := map[string]interface{}{
 		"model":      c.model,
 		"messages":   messages,
 		"max_tokens": maxTokens,
+	}
+
+	// Per-turn effort. OpenRouter normalizes reasoning across vendors
+	// behind one object, so a single field carries the level whatever the
+	// upstream is. Gated to the official host for the same reason as the
+	// accounting field below: a strict OpenAI-compatible backend rejects
+	// request fields it does not know.
+	if !utils.IsCustomEndpoint(c.getAPIURL(), config.OpenRouterAPIURL) {
+		if eff := client.ReasoningEffortForOpenAI(client.EffortFromContext(ctx)); eff != "" {
+			payload["reasoning"] = map[string]interface{}{"effort": eff}
+		}
 	}
 
 	// Ask OpenRouter to attach accounting to the response: usage.cost is
@@ -352,7 +363,7 @@ func (c *OpenRouterClient) SendPrompt(ctx context.Context, prompt string, histor
 	}
 
 	messages := c.buildMessages(prompt, history)
-	payload := c.buildPayload(messages, effectiveMaxTokens)
+	payload := c.buildPayload(ctx, messages, effectiveMaxTokens)
 	if openRouterUsesPromptCacheKey(c.model) {
 		if key := client.PromptCacheKey(history); key != "" {
 			payload["prompt_cache_key"] = key

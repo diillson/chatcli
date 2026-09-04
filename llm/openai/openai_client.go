@@ -80,12 +80,10 @@ func (c *OpenAIClient) getMaxTokens() int {
 // supportsOpenAIReasoningEffort reports whether the chat-completions model id
 // accepts the `reasoning_effort` field (o-series / GPT-5 reasoning models).
 func supportsOpenAIReasoningEffort(model string) bool {
-	m := strings.ToLower(model)
-	return strings.HasPrefix(m, "o1") ||
-		strings.HasPrefix(m, "o3") ||
-		strings.HasPrefix(m, "o4") ||
-		strings.HasPrefix(m, "gpt-5") ||
-		strings.Contains(m, "-reasoning")
+	// One list for the whole OpenAI-compatible family (see
+	// client.SupportsOpenAIReasoningEffort): this used to be duplicated
+	// per client and drifted.
+	return client.SupportsOpenAIReasoningEffort(model)
 }
 
 func (c *OpenAIClient) SendPrompt(ctx context.Context, prompt string, history []models.Message, maxTokens int) (string, error) {

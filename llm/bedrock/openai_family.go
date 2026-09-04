@@ -41,6 +41,12 @@ func (c *BedrockClient) sendPromptOpenAI(ctx context.Context, prompt string, his
 		"messages":              messages,
 		"max_completion_tokens": effectiveMaxTokens,
 	}
+
+	// Per-turn effort: the OpenAI models served through Bedrock take the
+	// same reasoning_effort field as the first-party endpoint.
+	if eff := client.OpenAIReasoningEffort(c.model, client.EffortFromContext(ctx)); eff != "" {
+		reqBody["reasoning_effort"] = eff
+	}
 	if t := os.Getenv("BEDROCK_TEMPERATURE"); t != "" {
 		if f, err := strconv.ParseFloat(t, 64); err == nil {
 			reqBody["temperature"] = f

@@ -133,6 +133,11 @@ func (c *Client) SendPrompt(ctx context.Context, prompt string, history []models
 		"store":    false, // Copilot API: don't store conversations
 	}
 
+	// Per-turn effort: same chat schema as OpenAI, same field.
+	if eff := client.OpenAIReasoningEffort(c.model, client.EffortFromContext(ctx)); eff != "" {
+		payload["reasoning_effort"] = eff
+	}
+
 	// Automatic prompt caching routing hint on OpenAI-compatible upstreams
 	// (ignored by those that do not route on it). See client.PromptCacheKey.
 	if key := client.PromptCacheKey(history); key != "" {

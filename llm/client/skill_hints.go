@@ -21,6 +21,7 @@ const (
 	EffortLow    SkillEffort = "low"
 	EffortMedium SkillEffort = "medium"
 	EffortHigh   SkillEffort = "high"
+	EffortXHigh  SkillEffort = "xhigh"
 	EffortMax    SkillEffort = "max"
 )
 
@@ -34,6 +35,8 @@ func NormalizeEffort(raw string) SkillEffort {
 		return EffortMedium
 	case "high", "High", "HIGH":
 		return EffortHigh
+	case "xhigh", "XHigh", "XHIGH", "x-high", "X-High", "extra-high", "extra_high":
+		return EffortXHigh
 	case "max", "Max", "MAX", "maximum", "Maximum", "MAXIMUM":
 		return EffortMax
 	}
@@ -73,6 +76,8 @@ func ThinkingBudgetForEffort(e SkillEffort) int {
 		return 4096
 	case EffortHigh:
 		return 16384
+	case EffortXHigh:
+		return 24576
 	case EffortMax:
 		return 32768
 	}
@@ -88,8 +93,44 @@ func ReasoningEffortForOpenAI(e SkillEffort) string {
 		return "low"
 	case EffortMedium:
 		return "medium"
-	case EffortHigh, EffortMax:
+	case EffortHigh, EffortXHigh, EffortMax:
 		return "high"
 	}
 	return ""
+}
+
+// AnthropicEffortLevel maps the canonical level to the string Anthropic's
+// output_config.effort accepts. Effort is the lever that decides how much
+// the model thinks and spends; the thinking block only says whether it
+// thinks at all, so a client that sends the block alone collapses every
+// level into one request.
+//
+// Returns "" when nothing should be sent, which is also what an unset hint
+// means: the provider's own default (high) then applies, unchanged from
+// the behavior before effort was wired.
+func AnthropicEffortLevel(e SkillEffort) string {
+	switch e {
+	case EffortLow:
+		return "low"
+	case EffortMedium:
+		return "medium"
+	case EffortHigh:
+		return "high"
+	case EffortXHigh:
+		return "xhigh"
+	case EffortMax:
+		return "max"
+	}
+	return ""
+}
+
+// AnthropicOutputConfig builds the output_config request block for one
+// effort level. Empty when the level carries nothing to send, so callers
+// can assign it without a nil check.
+func AnthropicOutputConfig(e SkillEffort) map[string]string {
+	level := AnthropicEffortLevel(e)
+	if level == "" {
+		return nil
+	}
+	return map[string]string{"effort": level}
 }
