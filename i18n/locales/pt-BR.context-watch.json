@@ -1,0 +1,3 @@
+{
+  "context.watch.partial": "watch do contexto %q é parcial: %d diretórios observados, %d não puderam ser observados, teto %d (árvores grandes: anexe um subdiretório ou coloque diretórios de ruído no .gitignore)"
+}

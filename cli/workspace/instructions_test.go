@@ -41,8 +41,13 @@ func TestInstructionHierarchy_RootToCwdWithFallbacks(t *testing.T) {
 			t.Fatalf("missing %q in:\n%s", want, out)
 		}
 	}
-	if strings.Contains(out, "GLOBAL RULES") || strings.Contains(out, "must not win") {
-		t.Fatalf("project files must shadow the global one and CHATCLI.md must beat CLAUDE.md:\n%s", out)
+	if strings.Contains(out, "must not win") {
+		t.Fatalf("CHATCLI.md must beat CLAUDE.md:\n%s", out)
+	}
+	// The global file is always merged, first (Claude Code semantics); it
+	// used to be a fallback only when the project had none.
+	if !strings.Contains(out, "GLOBAL RULES") || strings.Index(out, "GLOBAL RULES") > strings.Index(out, "ROOT RULES") {
+		t.Fatalf("global file must merge first:\n%s", out)
 	}
 	if strings.Index(out, "ROOT RULES") > strings.Index(out, "API RULES") {
 		t.Fatal("root file must come first (least specific → most specific)")

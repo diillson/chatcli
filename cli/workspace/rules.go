@@ -90,6 +90,10 @@ func (rl *RulesLoader) loadAllRules() []*Rule {
 	globalRulesDir := filepath.Join(rl.globalDir, "rules")
 	rl.scanRulesDir(globalRulesDir, seen)
 
+	// Claude Code's .claude/rules are honored too (lower priority than
+	// .chatcli/rules, which overwrites a rule of the same name).
+	rl.scanRulesDir(filepath.Join(rl.workspaceDir, ".claude", "rules"), seen)
+
 	// Load workspace rules (higher priority — overwrites global)
 	workspaceRulesDir := filepath.Join(rl.workspaceDir, ".chatcli", "rules")
 	rl.scanRulesDir(workspaceRulesDir, seen)
