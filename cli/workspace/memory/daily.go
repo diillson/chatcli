@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/diillson/chatcli/utils"
 	"go.uber.org/zap"
 )
 
@@ -48,7 +49,9 @@ func (d *DailyNoteStore) WriteDailyNote(entry string) error {
 	}
 	ts := time.Now().Format("15:04")
 	next := append(existing, []byte(fmt.Sprintf("\n## %s\n\n%s\n", ts, entry))...)
-	if err := atomicWriteFile(path, next, 0o600); err != nil {
+	// Daily notes are human-editable Markdown by contract (never sealed):
+	// the plain atomic writer, not the sealing one.
+	if err := utils.AtomicWriteFile(path, next, 0o600); err != nil {
 		return fmt.Errorf("writing daily note: %w", err)
 	}
 	return nil

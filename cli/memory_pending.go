@@ -18,6 +18,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/diillson/chatcli/pkg/atrest"
 	"os"
 	"path/filepath"
 	"sort"
@@ -132,8 +133,19 @@ func (mw *memoryWorker) persistPending(messages []models.Message) (string, error
 	if err := os.MkdirAll(dir, 0o750); err != nil {
 		return "", err
 	}
-	data, err := json.Marshal(pendingSegment{CreatedAt: time.Now(), Messages: messages})
+	// The queue holds raw conversation on disk until extraction runs:
+	// redact secrets first (extraction redacts again, harmlessly) and seal
+	// when encryption at rest is on, exactly like every other store.
+	redacted := make([]models.Message, len(messages))
+	for i, m := range messages {
+		redacted[i] = m
+		redacted[i].Content = redactSecretsForLLM(m.Content)
+	}
+	data, err := json.Marshal(pendingSegment{CreatedAt: time.Now(), Messages: redacted})
 	if err != nil {
+		return "", err
+	}
+	if data, err = atrest.Seal(data); err != nil {
 		return "", err
 	}
 	// Zero-padded so lexicographic file order is chronological order.
@@ -183,6 +195,9 @@ func (mw *memoryWorker) drainPending(ctx context.Context) int {
 			break
 		}
 		data, err := os.ReadFile(path) // #nosec G304 -- our own queue dir under ~/.chatcli
+		if err == nil {
+			data, err = atrest.Open(data)
+		}
 		if err != nil {
 			continue
 		}

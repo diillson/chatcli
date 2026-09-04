@@ -13,6 +13,7 @@ import (
 
 // PatternDetector tracks usage patterns, common errors, and skill evolution.
 type PatternDetector struct {
+	latch  storeLatch // read-only once a sealed file could not be opened
 	stats  UsageStats
 	mu     sync.RWMutex
 	path   string
@@ -299,7 +300,7 @@ func formatStat(format string, args ...interface{}) string {
 
 func (pd *PatternDetector) load() {
 	data, err := readStoreFile(pd.path)
-	if err != nil {
+	if pd.latch.lockIfSealed(err, pd.logger, "patterns") || err != nil {
 		return
 	}
 	var s UsageStats
@@ -324,6 +325,9 @@ func (pd *PatternDetector) load() {
 }
 
 func (pd *PatternDetector) persist() {
+	if pd.latch.locked() {
+		return
+	}
 	data, err := json.MarshalIndent(pd.stats, "", "  ")
 	if err != nil {
 		return

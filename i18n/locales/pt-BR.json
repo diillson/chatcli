@@ -3752,5 +3752,8 @@
   "cfg.kv.sec.atrest_key": "Fingerprint da chave",
   "cfg.kv.sec.atrest_covers": "Cobre",
   "cfg.kv.sec.atrest_covers_list": "sessões, transcripts, park snapshots, memória de longo prazo (stores JSON), contextos de conhecimento, arquivo CCR, snapshots de custo, exportações de memória",
-  "cfg.sub.server.otel": "Exportação OpenTelemetry"
+  "cfg.sub.server.otel": "Exportação OpenTelemetry",
+  "mem.cmd.stats.locked_store": "TRAVADO somente leitura: store %s (%s) está selado e este processo não consegue abri-lo — %s. Defina CHATCLI_ENCRYPTION_KEY (ou CHATCLI_ENCRYPTION_KEY_PREVIOUS após rotação); nada é gravado até abrir.",
+  "cfg.kv.sec.atrest_locked": "Stores travados",
+  "cfg.val.sec.atrest_locked": "%s — selados com uma chave que este processo não tem; escritas recusadas para protegê-los"
 }

@@ -57,6 +57,7 @@ type graphFile struct {
 // GraphCache owns the cached graph snapshot and its persistence. Inert (all
 // methods no-ops returning nil) until SetSource attaches a builder.
 type GraphCache struct {
+	latch       storeLatch // read-only once a sealed file could not be opened
 	mu          sync.Mutex // guards rebuild + fingerprint bookkeeping
 	snap        atomic.Pointer[knowledge.Graph]
 	dirty       atomic.Bool
@@ -126,7 +127,7 @@ func (gc *GraphCache) SetSource(build func() *knowledge.Graph, fingerprint func(
 // the graph is re-derivable, so there is nothing to preserve.
 func (gc *GraphCache) loadPersisted(currentFP string) (*knowledge.Graph, bool) {
 	data, err := readStoreFile(gc.path)
-	if err != nil {
+	if gc.latch.lockIfSealed(err, gc.logger, "graph") || err != nil {
 		return nil, false // missing is the common first-boot case
 	}
 	discard := func(reason string) {
@@ -244,6 +245,9 @@ func (gc *GraphCache) checkFingerprintTTL() {
 // a skipped write is harmless (the next rebuild persists again) and the
 // atomic rename keeps readers from ever seeing a partial file.
 func (gc *GraphCache) persistAsync(g *knowledge.Graph, fp string) {
+	if gc.latch.locked() {
+		return // sealed cache we cannot read: never overwrite it
+	}
 	if !gc.persistInFlight.CompareAndSwap(false, true) {
 		return
 	}

@@ -3752,5 +3752,8 @@
   "cfg.kv.sec.atrest_key": "Key fingerprint",
   "cfg.kv.sec.atrest_covers": "Covers",
   "cfg.kv.sec.atrest_covers_list": "sessions, transcripts, park snapshots, long-term memory (JSON stores), knowledge contexts, CCR archive, cost snapshots, memory exports",
-  "cfg.sub.server.otel": "OpenTelemetry export"
+  "cfg.sub.server.otel": "OpenTelemetry export",
+  "mem.cmd.stats.locked_store": "LOCKED read-only: %s store (%s) is sealed and this process cannot open it — %s. Set CHATCLI_ENCRYPTION_KEY (or CHATCLI_ENCRYPTION_KEY_PREVIOUS after a rotation); nothing is written until it opens.",
+  "cfg.kv.sec.atrest_locked": "Locked stores",
+  "cfg.val.sec.atrest_locked": "%s — sealed with a key this process does not have; writes refused to protect them"
 }

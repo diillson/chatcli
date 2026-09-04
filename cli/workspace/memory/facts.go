@@ -26,6 +26,7 @@ import (
 // and applies tombstones (facts explicitly forgotten by either process)
 // before rewriting the file. See mergeFromDiskLocked.
 type FactIndex struct {
+	latch storeLatch // read-only once a sealed file could not be opened
 	// rev counts mutations; dfCache is the token document-frequency table
 	// for that revision (IDF weights in computeRelevance).
 	rev, dfRev, dfCount int
@@ -968,6 +969,9 @@ func (fi *FactIndex) pruneLowestLocked(n int) {
 
 func (fi *FactIndex) load() {
 	data, err := readStoreFile(fi.path)
+	if fi.latch.lockIfSealed(err, fi.logger, "facts") {
+		return
+	}
 	if err != nil {
 		if !os.IsNotExist(err) {
 			fi.logger.Debug("failed to load fact index", zap.Error(err))
@@ -1041,6 +1045,9 @@ func legacyConfidence(accessCount int) float64 {
 
 func (fi *FactIndex) persistLocked() {
 	fi.rev++
+	if fi.latch.locked() {
+		return // sealed file we cannot read: never overwrite it
+	}
 	// Reconcile with the shared file first: adopt facts the other process
 	// persisted and honor tombstones from either side, so a rewrite never
 	// erases the other process's learning.
@@ -1092,7 +1099,7 @@ func (fi *FactIndex) mergeFromDiskLocked() {
 	}
 
 	data, err := readStoreFile(fi.path)
-	if err != nil {
+	if fi.latch.lockIfSealed(err, fi.logger, "facts") || err != nil {
 		return
 	}
 	var onDisk []*Fact
@@ -1187,7 +1194,7 @@ func (fi *FactIndex) recordTombstonesLocked(ids ...string) {
 // process may have recorded deletions since our last read).
 func (fi *FactIndex) loadTombstonesLocked() {
 	data, err := readStoreFile(fi.tombstonePath)
-	if err != nil {
+	if fi.latch.lockIfSealed(err, fi.logger, "facts") || err != nil {
 		return
 	}
 	var onDisk map[string]time.Time
