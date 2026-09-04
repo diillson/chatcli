@@ -29,9 +29,12 @@ type memoryWorker struct {
 	// that fires after a tenant switch must not read another tenant's turn.
 	store            *workspace.MemoryStore
 	history          func() []models.Message
-	lastProcessedIdx int // index of last message processed for memory
+	lastProcessedIdx int // index of last message processed for memory (guarded by mu)
 	mu               sync.Mutex
 	stopCh           chan struct{}
+	// wg tracks the loop and every extraction goroutine so shutdown can
+	// wait (bounded) for an in-flight pass instead of killing it mid-write.
+	wg sync.WaitGroup
 
 	// coord owns cadence, back-pressure and the circuit breaker for the
 	// extraction pass; the worker keeps only the memory-specific watermark and
@@ -122,7 +125,53 @@ func newMemoryWorkerFor(cli *ChatCLI, store *workspace.MemoryStore, pendingDir s
 // detached (cancellation governed by stopCh) and inherited by every
 // background-driven extraction/compaction.
 func (mw *memoryWorker) start(ctx context.Context) {
-	go mw.loop(context.WithoutCancel(ctx))
+	mw.spawn(func() { mw.loop(context.WithoutCancel(ctx)) })
+}
+
+// spawn runs fn on a tracked goroutine.
+func (mw *memoryWorker) spawn(fn func()) {
+	mw.wg.Add(1)
+	go func() {
+		defer mw.wg.Done()
+		fn()
+	}()
+}
+
+// watermark returns the index of the last live message already distilled.
+func (mw *memoryWorker) watermark() int {
+	mw.mu.Lock()
+	defer mw.mu.Unlock()
+	return mw.lastProcessedIdx
+}
+
+// setWatermark moves the distilled-up-to index.
+func (mw *memoryWorker) setWatermark(n int) {
+	mw.mu.Lock()
+	mw.lastProcessedIdx = n
+	mw.mu.Unlock()
+}
+
+// memoryStopWait bounds how long shutdown waits for an in-flight pass.
+const memoryStopWait = 5 * time.Second
+
+// stopAndWait signals the worker to stop and waits up to timeout for the
+// loop and any in-flight extraction to finish (a pass mid-write is
+// allowed to complete; a hung provider call is not allowed to hold the
+// exit). Reports whether everything finished in time.
+func (mw *memoryWorker) stopAndWait(timeout time.Duration) bool {
+	mw.stop()
+	done := make(chan struct{})
+	go func() {
+		mw.wg.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+		return true
+	case <-time.After(timeout):
+		mw.logger.Warn("Memory worker: shutdown timed out with a pass still running", zap.Duration("waited", timeout))
+		return false
+	}
 }
 
 // stop signals the worker to stop.
@@ -151,7 +200,7 @@ func (mw *memoryWorker) nudge(ctx context.Context) {
 	// The extraction goroutine outlives the triggering request; detach
 	// cancellation while inheriting context values.
 	detached := context.WithoutCancel(ctx)
-	go mw.maybeExtract(detached)
+	mw.spawn(func() { mw.maybeExtract(detached) })
 }
 
 // queueSegmentForNextSession persists a conversation segment to the pending
@@ -191,7 +240,8 @@ func (mw *memoryWorker) nudgeSegment(ctx context.Context, segment []models.Messa
 	// RPC turns accumulate in the WAL until the min-new-messages threshold is
 	// met, mirroring the REPL's "extract every couple of turns" rhythm.
 	detached := context.WithoutCancel(ctx)
-	go mw.extractQueued(detached, mw.pendingBacklogCount())
+	backlog := mw.pendingBacklogCount()
+	mw.spawn(func() { mw.extractQueued(detached, backlog) })
 }
 
 // pendingBacklogCount sums the messages across every queued segment. The
@@ -246,11 +296,19 @@ func (mw *memoryWorker) loop(ctx context.Context) {
 	defer rollupTimer.Stop()
 	defer rollupTicker.Stop()
 
+	// Boot drain: segments queued by earlier sessions (one-shot turns,
+	// failed extractions, the tail of the previous REPL exit) are
+	// distilled now instead of waiting for enough live messages — a user
+	// who only ever runs -p would otherwise fill the queue and lose the
+	// oldest segments silently.
+	mw.drainBacklog(ctx)
+
 	for {
 		select {
 		case <-mw.stopCh:
 			return
 		case <-extractTicker.C:
+			mw.drainBacklog(ctx)
 			mw.maybeExtract(ctx)
 		case <-compactTicker.C:
 			mw.maybeCompact(ctx)
@@ -262,6 +320,23 @@ func (mw *memoryWorker) loop(ctx context.Context) {
 			mw.runRollups(ctx)
 		}
 	}
+}
+
+// drainBacklog runs a queued-segment pass when the on-disk queue is not
+// empty. The backlog counts as the new-work delta (at least the minimum,
+// so a single queued segment is enough); cooldown and breaker still apply.
+func (mw *memoryWorker) drainBacklog(ctx context.Context) {
+	if mw.store == nil || mw.pendingDir == "" {
+		return
+	}
+	n := mw.pendingBacklogCount()
+	if n == 0 {
+		return
+	}
+	if n < memoryMinNewMessages {
+		n = memoryMinNewMessages
+	}
+	mw.extractQueued(ctx, n)
 }
 
 // runRollups consolidates elapsed weeks/months into digests. Rollup passes

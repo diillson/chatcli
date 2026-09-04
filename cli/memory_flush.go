@@ -25,7 +25,7 @@ func (cli *ChatCLI) unextractedSegment() []models.Message {
 	if cli == nil || cli.memWorker == nil || cli.memWorker.store == nil {
 		return nil
 	}
-	start := cli.memWorker.lastProcessedIdx
+	start := cli.memWorker.watermark()
 	if start < 0 || start >= len(cli.history) {
 		return nil
 	}
@@ -51,7 +51,7 @@ func (cli *ChatCLI) flushMemoryBeforeCompaction(ctx context.Context) {
 		return
 	}
 	cli.memWorker.nudgeSegment(ctx, seg)
-	cli.memWorker.lastProcessedIdx = len(cli.history)
+	cli.memWorker.setWatermark(len(cli.history))
 }
 
 // queueMemoryBeforeCompaction is the one-shot variant: the process exits
@@ -62,5 +62,5 @@ func (cli *ChatCLI) queueMemoryBeforeCompaction() {
 		return
 	}
 	cli.memWorker.queueSegmentForNextSession(seg)
-	cli.memWorker.lastProcessedIdx = len(cli.history)
+	cli.memWorker.setWatermark(len(cli.history))
 }
