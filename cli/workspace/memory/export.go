@@ -29,6 +29,13 @@ import (
 	"github.com/diillson/chatcli/pkg/atrest"
 )
 
+// exportVersion is the schema of the files this build writes and the
+// newest it reads.
+const exportVersion = 1
+
+// ErrExportVersion marks an export written by a newer schema.
+var ErrExportVersion = errors.New("memory import: unsupported export version")
+
 // exportSealedPrefix marks a sealed export line (same scheme as the
 // transcript journal).
 const exportSealedPrefix = "enc:"
@@ -83,7 +90,7 @@ func (m *Manager) Export(w io.Writer) (ExportReport, error) {
 		}
 		return bw.WriteByte('\n')
 	}
-	if err := write(ExportRecord{Kind: "header", Version: 1, At: time.Now()}); err != nil {
+	if err := write(ExportRecord{Kind: "header", Version: exportVersion, At: time.Now()}); err != nil {
 		return rep, err
 	}
 	if m.Profile != nil && !m.Profile.IsEmpty() {
@@ -199,6 +206,12 @@ func (m *Manager) Import(r io.Reader) (ImportReport, error) {
 			return rep, fmt.Errorf("memory import: corrupt line %d: %w", rep.Lines, err)
 		}
 		switch rec.Kind {
+		case "header":
+			// A file written by a newer schema is refused rather than
+			// half-read; older and header-less (legacy) files are fine.
+			if rec.Version > exportVersion {
+				return rep, fmt.Errorf("%w: file version %d, this build reads up to %d", ErrExportVersion, rec.Version, exportVersion)
+			}
 		case "fact":
 			if rec.Fact != nil {
 				facts = append(facts, rec.Fact)
@@ -256,11 +269,24 @@ func (fi *FactIndex) ImportFacts(facts []*Fact) (added, known int) {
 	defer fi.mu.Unlock()
 	fi.mergeFromDiskLocked()
 	for _, f := range facts {
-		if f == nil || strings.TrimSpace(f.Content) == "" {
+		if f == nil {
 			continue
 		}
-		if f.ID == "" {
-			f.ID = fi.hashContent(f.Content)
+		// Imported facts are untrusted input: one line, bounded, secrets
+		// masked, the id re-derived from the content (an id chosen by the
+		// file could smuggle the same content past dedup), confidence
+		// clamped, tags and category validated.
+		f.Content = SanitizeFactContent(f.Content)
+		if f.Content == "" {
+			continue
+		}
+		f.ID = fi.hashContent(f.Content)
+		f.Confidence = clampConfidence(f.Confidence)
+		if len(f.Tags) > maxFactTags {
+			f.Tags = f.Tags[:maxFactTags]
+		}
+		if f.Category != "" && !isKnownCategory(strings.ToLower(strings.TrimSpace(f.Category))) {
+			f.Category = ""
 		}
 		if ts, dead := fi.tombstones[f.ID]; dead && ts.After(f.CreatedAt) {
 			known++

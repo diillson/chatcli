@@ -473,7 +473,7 @@ func (m *Manager) appendLongTermCounted(entry string) (int, error) {
 // Returns true when a new fact was added (false on duplicate/empty).
 // Backs the /memory remember command and the @memory tool.
 func (m *Manager) RememberFact(content, category string) bool {
-	content = strings.TrimSpace(content)
+	content = SanitizeFactContent(content)
 	if content == "" {
 		return false
 	}
