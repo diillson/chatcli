@@ -37,6 +37,7 @@ type slashPrefixRoute struct {
 var slashPrefixRoutes = []slashPrefixRoute{
 	{"/context", (*ChatCLI).getContextSuggestions},
 	{"/session", (*ChatCLI).getSessionSuggestions},
+	{"/rewind", (*ChatCLI).getRewindSuggestions},
 	{"/hub", (*ChatCLI).getHubSuggestions},
 	{"/plugin ", (*ChatCLI).getPluginSuggestions},
 	{"/skill", (*ChatCLI).getSkillSuggestions},
@@ -88,6 +89,12 @@ var slashPrefixRoutes = []slashPrefixRoute{
 
 // getUpdateSuggestions completes `/update <sub>`: check (and its --check
 // alias) previews the available release without applying it.
+// getRewindSuggestions completes the /rewind subcommands.
+func (cli *ChatCLI) getRewindSuggestions(d prompt.Document) []prompt.Suggest {
+	subs := []prompt.Suggest{{Text: "compact", Description: i18n.T("complete.rewind.sub_compact")}}
+	return prompt.FilterHasPrefix(subs, d.GetWordBeforeCursor(), true)
+}
+
 func (cli *ChatCLI) getUpdateSuggestions(d prompt.Document) []prompt.Suggest {
 	word := d.GetWordBeforeCursor()
 	return prompt.FilterHasPrefix([]prompt.Suggest{
@@ -672,6 +679,7 @@ func contextSubcommands() []prompt.Suggest {
 		{Text: "metrics", Description: i18n.T("complete.context.sub_metrics")},
 		{Text: "refresh", Description: i18n.T("complete.context.sub_refresh")},
 		{Text: "watch", Description: i18n.T("complete.context.sub_watch")},
+		{Text: "unwatch", Description: i18n.T("complete.context.sub_unwatch")},
 		{Text: "status", Description: i18n.T("complete.context.sub_status")},
 		{Text: "help", Description: i18n.T("complete.context.sub_help")},
 	}

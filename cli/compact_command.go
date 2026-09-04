@@ -144,7 +144,7 @@ CONVERSATION TO COMPACT:
 	cli.beforeCompaction(ctx, compactTriggerManual)
 
 	// Same route and bound as the automatic pipeline: the configured
-	// summarizer (CHATCLI_COMPACT_SUMMARIZER_*) when there is one, else the
+	// summarizer (CHATCLI_COMPACT_MODEL) when there is one, else the
 	// session client, with the summary's own 10-minute allowance.
 	cfg := cli.compactConfig(cli.Provider, cli.Model)
 	summarizer, usingSession := cli.Client, true

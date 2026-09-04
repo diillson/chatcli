@@ -41,6 +41,9 @@ func (cli *ChatCLI) showConfigMemory() {
 		autoRecallVal = defaultMarker + autoRecallVal
 	}
 	kv(p, "CHATCLI_MEMORY_AUTORECALL", autoRecallVal)
+	for _, name := range []string{"CHATCLI_MEMORY_FALLBACK_PROVIDERS", "CHATCLI_MEMORY_MAX_FACTS", "CHATCLI_MEMORY_MAX_SIZE", "CHATCLI_MEMORY_RETENTION_DAYS", "CHATCLI_MEMORY_RETRIEVAL_BUDGET"} {
+		kv(p, name, envOr(name))
+	}
 	providerVal := extensionStatus(os.Getenv(MemoryProviderEnv))
 	if os.Getenv(MemoryProviderEnv) == "" {
 		providerVal = defaultMarker + providerVal

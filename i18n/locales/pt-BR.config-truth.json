@@ -1,0 +1,11 @@
+{
+  "complete.context.sub_unwatch": "Parar de observar mudanças de arquivo de um contexto anexado",
+  "complete.rewind.sub_compact": "Desfazer a última compactação (restaura o histórico pré-compactação)",
+  "cfg.panorama.sections_hint": "Seções: %s",
+  "help.command.context_lifecycle": "Ciclo de vida do contexto: o que está na janela agora, reler as fontes, observar/parar de observar um contexto.",
+  "help.command.memory_tools": "Ferramentas da memória de longo prazo: exportar/importar os stores, lembrar fatos sob demanda, explicar por que um fato foi lembrado.",
+  "help.command.autocompact": "Mostrar ou definir o limiar de compactação automática (fração da janela de contexto).",
+  "help.command.cost": "Gasto da sessão e do dia por provedor/modelo, telemetria de cache; reset, última sessão, histórico, exportação (JSON ou CSV).",
+  "help.command.config_ops": "Configuração gerenciada (org) e a política de retenção de sessões, transcripts, parks e filas de memória.",
+  "help.command.config_security_ops": "Re-selar todos os stores com a chave de criptografia atual; verificar a trilha de auditoria à prova de adulteração."
+}

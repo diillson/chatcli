@@ -1,0 +1,11 @@
+{
+  "complete.context.sub_unwatch": "Stop watching an attached context for file changes",
+  "complete.rewind.sub_compact": "Undo the latest compaction (restore the pre-compaction history)",
+  "cfg.panorama.sections_hint": "Sections: %s",
+  "help.command.context_lifecycle": "Context lifecycle: what is in the window now, re-read the sources, watch/unwatch a context for changes.",
+  "help.command.memory_tools": "Long-term memory tools: export/import the stores, recall facts on demand, explain why a fact was recalled.",
+  "help.command.autocompact": "Show or set the automatic compaction threshold (share of the context window).",
+  "help.command.cost": "Session and daily spend per provider/model, cache telemetry; reset, last session, history, export (JSON or CSV).",
+  "help.command.config_ops": "Managed (org) configuration and the retention policy for sessions, transcripts, parks and memory queues.",
+  "help.command.config_security_ops": "Re-seal every store with the current encryption key; verify the tamper-evident audit trail."
+}
