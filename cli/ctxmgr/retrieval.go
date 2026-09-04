@@ -85,6 +85,10 @@ type lexCacheEntry struct {
 	segs        []Segment
 	lex         *lexicalIndex
 	vec         *vindex.Index
+	// embedMu single-flights the embedding of missing passages: a Retrieve
+	// that lands while Warm is running waits for it instead of sending the
+	// same ids to the provider a second time.
+	embedMu sync.Mutex
 }
 
 // NewRetrievalEngine wires an engine over an embedding provider. baseDir is the
@@ -141,14 +145,16 @@ func (e *RetrievalEngine) Retrieve(ctx context.Context, fc *FileContext, query s
 
 	idx := entry.vec // built and pruned by entryFor when the engine is enabled
 
-	if missing := idx.MissingFor(allIDs); len(missing) > 0 {
-		sub := make(map[string]string, len(missing))
-		for _, id := range missing {
-			sub[id] = byID[id].Content
-		}
-		if err := idx.Upsert(ctx, sub); err != nil {
-			return nil, fmt.Errorf("embed segments: %w", err)
-		}
+	// Missing passages are embedded in bounded batches (the same loop
+	// Warm uses), behind the entry's single-flight: a failing batch is
+	// skipped, the rest still land, and the search runs over what is
+	// embedded. Only a run that embedded nothing at all is an error.
+	byContent := make(map[string]string, len(segs))
+	for _, s := range segs {
+		byContent[s.ID] = s.Content
+	}
+	if embedded, err := e.embedMissing(ctx, entry, allIDs, byContent); err != nil && embedded == 0 && len(idx.MissingFor(allIDs)) == len(allIDs) {
+		return nil, fmt.Errorf("embed segments: %w", err)
 	}
 
 	qv, err := idx.EmbedQuery(ctx, query)
@@ -295,7 +301,7 @@ func (e *RetrievalEngine) applyReranker(ctx context.Context, entry *lexCacheEntr
 	for _, i := range order[:head] {
 		content := entry.segs[i].Content
 		if len(content) > rerankSnippetChars {
-			content = content[:rerankSnippetChars]
+			content = content[:alignRuneBefore(content, rerankSnippetChars)]
 		}
 		cands = append(cands, RerankCandidate{ID: entry.segs[i].ID, FilePath: entry.segs[i].FilePath, Content: content, Score: fused[i]})
 	}
@@ -462,8 +468,24 @@ func (e *RetrievalEngine) Warm(ctx context.Context, fc *FileContext) (int, error
 		ids = append(ids, s.ID)
 		byID[s.ID] = s.Content
 	}
+	return e.embedMissing(ctx, entry, ids, byID)
+}
+
+// embedMissing embeds the passages of ids missing from the entry's index
+// in warmBatch-sized requests, under the entry's single-flight. A batch
+// the provider rejects (400/413 on one poisonous passage, a transient
+// failure) is skipped and the remaining batches still go through; the
+// first error is returned with the count that did land. Cancellation
+// stops the loop.
+func (e *RetrievalEngine) embedMissing(ctx context.Context, entry *lexCacheEntry, ids []string, byID map[string]string) (int, error) {
+	if entry == nil || entry.vec == nil {
+		return 0, nil
+	}
+	entry.embedMu.Lock()
+	defer entry.embedMu.Unlock()
 	missing := entry.vec.MissingFor(ids)
 	embedded := 0
+	var firstErr error
 	for start := 0; start < len(missing); start += warmBatch {
 		if err := ctx.Err(); err != nil {
 			return embedded, err
@@ -477,11 +499,16 @@ func (e *RetrievalEngine) Warm(ctx context.Context, fc *FileContext) (int, error
 			batch[id] = byID[id]
 		}
 		if err := entry.vec.Upsert(ctx, batch); err != nil {
-			return embedded, err
+			if firstErr == nil {
+				firstErr = err
+			}
+			e.logger.Warn("embedding batch failed; skipping it and continuing",
+				zap.Int("batch_start", start), zap.Int("batch_size", len(batch)), zap.Error(err))
+			continue
 		}
 		embedded += len(batch)
 	}
-	return embedded, nil
+	return embedded, firstErr
 }
 
 // contextFingerprint identifies one revision of a context's content; caches

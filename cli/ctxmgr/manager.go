@@ -1055,7 +1055,11 @@ func fitSegments(segs []Segment, remaining int) []Segment {
 		cost := len(s.Content) + overhead
 		if cost > remaining {
 			if len(out) == 0 && remaining > overhead+200 {
-				s.Content = s.Content[:remaining-overhead-1] + "…"
+				// Rune-safe cut, and the citation range shrinks with it so
+				// the line numbers in the header stay true.
+				cut := alignRuneBefore(s.Content, remaining-overhead-1)
+				s.Content = s.Content[:cut] + "…"
+				s.EndLine = s.StartLine + strings.Count(s.Content, "\n")
 				out = append(out, s)
 			}
 			break

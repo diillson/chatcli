@@ -216,7 +216,7 @@ func buildRerankPrompt(query string, cands []RerankCandidate) string {
 	for i, c := range cands {
 		snippet := strings.TrimSpace(c.Content)
 		if len(snippet) > rerankSnippetChars {
-			snippet = snippet[:rerankSnippetChars]
+			snippet = snippet[:alignRuneBefore(snippet, rerankSnippetChars)]
 		}
 		fmt.Fprintf(&b, "[%d] (%s) %s\n\n", i+1, c.FilePath, strings.ReplaceAll(snippet, "\n", " "))
 	}
