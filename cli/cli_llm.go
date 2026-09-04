@@ -211,7 +211,9 @@ func (cli *ChatCLI) compactHistoryIfNeeded(ctx context.Context) {
 	// The chat prefix never enters cli.history (it is spliced into a temp
 	// slice per turn), so reserve what the last assembled prefix took —
 	// otherwise the budget would be measured as if the prefix were free.
-	cfg.ReservedChars = cli.promptBreakdowns.latestNamed("chat").TotalChars()
+	// Prefix + tool definitions + answer reserve, the same categories the
+	// footer and /context status count (context_estimate.go).
+	cfg.ReservedChars = cli.contextEstimate().ReservedChars()
 	cli.warnIfHistoryExceedsProxyCap(cfg)
 	if !cli.historyCompactor.NeedsCompaction(cli.history, cfg) {
 		return

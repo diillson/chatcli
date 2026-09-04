@@ -54,6 +54,8 @@ type contextStatusReport struct {
 	History             historyStats
 	PromptTokens        int
 	HistoryTokens       int
+	ToolDefTokens       int // native tool definitions (agent/coder)
+	ReserveTokens       int // max_tokens reserved for the answer
 	TotalTokens         int
 	ProjectedPct        float64
 	CompactBudgetTokens int
@@ -124,7 +126,11 @@ func (cli *ChatCLI) buildContextStatusReport(ctx context.Context) contextStatusR
 	}
 	r.PromptTokens = toTokens(r.Prompt.TotalChars())
 	r.HistoryTokens = toTokens(historyChars)
-	r.TotalTokens = r.PromptTokens + r.HistoryTokens
+	// The same four categories the footer and the compactor use.
+	est := cli.contextEstimate()
+	r.ToolDefTokens = toTokens(est.ToolDefChars)
+	r.ReserveTokens = est.ReserveTokens
+	r.TotalTokens = r.PromptTokens + r.HistoryTokens + r.ToolDefTokens + r.ReserveTokens
 	if pb := cli.newPrefixBudget(cli.Provider, cli.Model); pb != nil && pb.MaxChars > 0 {
 		r.PrefixBudgetTokens = toTokens(pb.MaxChars)
 		if r.Prompt != nil {
@@ -207,6 +213,12 @@ func (cli *ChatCLI) showContextStatus(ctx context.Context) {
 	fmt.Printf("    %s ≈%s tok\n", kitPad(i18n.T("context.status.total_history")), formatTokenCount(int64(r.HistoryTokens)))
 	if r.ExactHistoryTokens > 0 {
 		fmt.Printf("    %s %s tok\n", kitPad(i18n.T("context.status.exact_history")), formatTokenCount(int64(r.ExactHistoryTokens)))
+	}
+	if r.ToolDefTokens > 0 {
+		fmt.Printf("    %s ≈%s tok\n", kitPad(i18n.T("context.status.total_tooldefs")), formatTokenCount(int64(r.ToolDefTokens)))
+	}
+	if r.ReserveTokens > 0 {
+		fmt.Printf("    %s %s tok\n", kitPad(i18n.T("context.status.total_reserve")), formatTokenCount(int64(r.ReserveTokens)))
 	}
 	if edits, toolUses, tokens := cli.costTracker.ContextEditStats(); edits > 0 {
 		fmt.Printf("    %s\n", colorize(i18n.T("context.status.provider_edits", edits, toolUses, formatTokenCount(tokens)), ColorGray))

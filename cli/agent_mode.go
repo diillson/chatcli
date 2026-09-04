@@ -1069,6 +1069,7 @@ func (a *AgentMode) Run(ctx context.Context, query string, additionalContext str
 	// knowledge digests, then attachments — against the window; skills
 	// have their own run budget further down.
 	promptBudget := a.cli.newPrefixBudget(a.cli.Provider, a.cli.Model)
+	a.cli.applyRetrievedBudget(promptBudget)
 	promptBudget.spend(len(coreText) + len(toolsText))
 	// Attached knowledge bases ride in the same cacheable block: their index
 	// cards are deterministic (change only on attach/detach, like the plugin
@@ -1227,6 +1228,7 @@ func (a *AgentMode) Run(ctx context.Context, query string, additionalContext str
 	}
 	a.installAgentSystemMessage(sysMsg, currentModeName)
 	a.toolDefsChars = a.estimateToolDefsChars()
+	a.cli.toolDefsChars = a.toolDefsChars
 
 	currentQuery := query
 	if additionalContext != "" {
@@ -2263,7 +2265,8 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 
 		// Compact history if over budget (before building turn history)
 		cfg := a.cli.compactConfig(a.cli.Provider, a.cli.Model)
-		cfg.ReservedChars = a.toolDefsChars
+		a.cli.toolDefsChars = a.toolDefsChars
+		cfg.ReservedChars = a.cli.contextEstimate().ReservedChars()
 		// Tighter mode default (tool outputs are large) — unless the user
 		// (/autocompact) or the catalog declared a threshold, which wins.
 		if a.cli.autoCompact.get() <= 0 && catalog.GetCompactRatio(a.cli.Provider, a.cli.Model) <= 0 {

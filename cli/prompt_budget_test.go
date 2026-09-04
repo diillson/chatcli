@@ -88,18 +88,20 @@ func TestProjectedContextPct_UnclampedAndAddsChatPrefix(t *testing.T) {
 	if !ok {
 		t.Fatal("projection must be available with history")
 	}
-	// (3000+1000+2000 chars) / 4 = 1500 tokens on a 1000 window = 150%
-	if pct < 149 || pct > 151 {
-		t.Fatalf("projected pct = %.1f, want ≈150", pct)
+	// (3000+1000+2000 chars) / 4 = 1500 tokens on a 1000 window = 150%,
+	// plus the answer reserve (max_tokens capped at 25% of the window).
+	want := 150 + float64(answerReserveTokens(cli.getMaxTokensForCurrentLLM(), window))/float64(window)*100
+	if pct < want-1 || pct > want+1 {
+		t.Fatalf("projected pct = %.1f, want ≈%.0f", pct, want)
 	}
-	if roundPct(pct) != 150 || clampPct(pct) != 100 {
+	if roundPct(pct) != int(want+0.5) || clampPct(pct) != 100 {
 		t.Fatal("roundPct must not clamp, clampPct must")
 	}
 	// Agent mode: the system message lives in the history — no prefix added.
 	cli.history = append([]models.Message{{Role: "system", Content: strings.Repeat("s", 4000)}}, cli.history...)
 	pct2, _ := cli.projectedContextPct(window)
-	if pct2 < 199 || pct2 > 201 {
-		t.Fatalf("with a system message the chat prefix is not added twice: %.1f", pct2)
+	if want2 := want + 50; pct2 < want2-1 || pct2 > want2+1 {
+		t.Fatalf("with a system message the chat prefix is not added twice: %.1f (want ≈%.0f)", pct2, want2)
 	}
 	if _, ok := cli.projectedContextPct(0); ok {
 		t.Fatal("no window, no projection")
