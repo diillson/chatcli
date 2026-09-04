@@ -1,0 +1,3 @@
+{
+  "chat.recovery.retrying": "⚠ A requisição não coube na janela de contexto do modelo; o histórico foi compactado (%s) e o turno está sendo reenviado."
+}

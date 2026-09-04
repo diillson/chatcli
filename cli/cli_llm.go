@@ -71,6 +71,21 @@ func (cli *ChatCLI) processLLMRequest(parentCtx context.Context, in string) {
 		ctx, resolution.Client, userInput, additionalContext,
 		tempHistory, effectiveMaxTokens, resolution, stopSpinner,
 	)
+	// Context overflow / payload rejection: compact (bounded) and resend
+	// with the prefix rebuilt over the recovered history — the same
+	// recovery the agent loop has, now on the chat surface.
+	rec := cli.newOverflowRecovery("chat", func(msg string) {
+		fmt.Printf("\r\033[K  %s\n", colorize(msg, ColorYellow))
+	})
+	for llmErr != nil && cli.recoverOverflow(ctx, rec, llmErr) {
+		tempHistory = cli.buildChatTempHistoryWithContext(assembly.parts, assembly.turnContext, userInput, additionalContext, images)
+		cli.lastPromptChars = promptCharsOf(tempHistory) + len(userInput+additionalContext)
+		cli.animation.ShowThinkingAnimation(resolution.Client.GetModelName())
+		aiResponse, llmErr = cli.executeLLMTurn(
+			ctx, resolution.Client, userInput, additionalContext,
+			tempHistory, effectiveMaxTokens, resolution, stopSpinner,
+		)
+	}
 	cli.handleChatTurnResult(
 		ctx, llmErr, userMessage, aiResponse, resolution.Client, resolution,
 		userInput, additionalContext, time.Since(turnStart),
