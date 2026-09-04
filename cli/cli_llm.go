@@ -225,6 +225,14 @@ func (cli *ChatCLI) compactHistoryIfNeeded(ctx context.Context) {
 	if !cli.historyCompactor.NeedsCompaction(cli.history, cfg) {
 		return
 	}
+	// A rewrite forces the provider to cache the whole prefix again. While
+	// the prefix is still warm and the history is only modestly over
+	// budget, the turn is cheaper run against the cache it already paid
+	// for; the pass happens once that cache has gone cold anyway.
+	if cli.deferCompactionForWarmCache(cli.history, cfg) {
+		cli.logger.Debug("compaction deferred while the prefix cache is warm")
+		return
+	}
 	cli.historyCompactor.SetStatusCallback(func(stage CompactStage, msg string) {
 		fmt.Printf("\r\033[K  %s\n", msg)
 		_ = os.Stdout.Sync()

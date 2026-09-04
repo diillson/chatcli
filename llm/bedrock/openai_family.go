@@ -42,6 +42,13 @@ func (c *BedrockClient) sendPromptOpenAI(ctx context.Context, prompt string, his
 		"max_completion_tokens": effectiveMaxTokens,
 	}
 
+	// Automatic prompt caching routing hint: the OpenAI models served
+	// through Bedrock speak the same chat schema as the first-party
+	// endpoint, so the same shard hint applies.
+	if key := client.PromptCacheKey(history); key != "" {
+		reqBody["prompt_cache_key"] = key
+	}
+
 	// Per-turn effort: the OpenAI models served through Bedrock take the
 	// same reasoning_effort field as the first-party endpoint.
 	if eff := client.OpenAIReasoningEffort(c.model, client.EffortFromContext(ctx)); eff != "" {

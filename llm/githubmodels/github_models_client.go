@@ -127,6 +127,12 @@ func (c *GitHubModelsClient) SendPrompt(ctx context.Context, prompt string, hist
 		"max_tokens": effectiveMaxTokens,
 	}
 
+	// Automatic prompt caching routing hint on OpenAI-compatible upstreams
+	// (ignored by those that do not route on it). See client.PromptCacheKey.
+	if key := client.PromptCacheKey(history); key != "" {
+		payload["prompt_cache_key"] = key
+	}
+
 	// Per-turn effort: same chat schema as OpenAI, same field.
 	if eff := client.OpenAIReasoningEffort(c.model, client.EffortFromContext(ctx)); eff != "" {
 		payload["reasoning_effort"] = eff

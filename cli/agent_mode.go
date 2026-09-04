@@ -2342,7 +2342,11 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 					i18n.T("agent.preflight.warn_no_cap", FormatPayloadSize(totalHistoryChars)),
 					agent.ColorYellow))
 		}
-		if a.cli.historyCompactor.NeedsCompaction(a.cli.history, cfg) {
+		// A rewrite forces the provider to cache the whole prefix again,
+		// so an advisable pass waits while the prefix is warm and the
+		// history is only modestly over budget. A necessary one does not.
+		if a.cli.historyCompactor.NeedsCompaction(a.cli.history, cfg) &&
+			!a.cli.deferCompactionForWarmCache(a.cli.history, cfg) {
 			a.cli.flushMemoryBeforeCompaction(ctx)
 			// Emit live status during compaction so the terminal is never
 			// silent. Without this, Level 2 (LLM summarization) can block
