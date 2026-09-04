@@ -70,7 +70,7 @@ func TestContextBuilder_DynamicContext(t *testing.T) {
 	cb := NewContextBuilder(bl, ms, wsDir)
 
 	dyn := cb.BuildDynamicContext()
-	if !strings.Contains(dyn, "Current date and time") {
+	if !strings.Contains(dyn, "Current date: ") || strings.Contains(dyn, ":00") {
 		t.Errorf("expected dynamic context with date, got %q", dyn)
 	}
 	if !strings.Contains(dyn, "Current working directory: "+wsDir) {

@@ -1187,18 +1187,18 @@ func (a *AgentMode) Run(ctx context.Context, query string, additionalContext str
 		channelsText = a.cli.mcpManager.Channels().FormatForPrompt(5)
 	}
 
-	// The scratch dir path is per-process, so it rides in the uncached
-	// dynamic tail rather than the cacheable tools block (see
-	// buildSessionWorkspaceHint).
+	// The scratch dir path is fixed for the process, so it belongs to the
+	// cacheable tools block: stable for the session, never in the tail.
 	if wsLine := sessionWorkspaceDynamicLine(); wsLine != "" {
-		if dynamicText == "" {
-			dynamicText = wsLine
-		} else {
-			dynamicText = strings.TrimRight(dynamicText, "\n") + "\n" + wsLine
-		}
+		toolsText = strings.TrimRight(toolsText, "\n") + "\n\n" + wsLine
 	}
 
-	sysMsg := buildAgentSystemMessage(coreText, toolsText, workspaceText, skillsText, orchestratorText, channelsText, dynamicText)
+	// The per-turn context (date, proactive recall, channel pushes) never
+	// enters the system message: it rides as a flagged user-role message
+	// before the query (turn_context.go), so the system prompt stays
+	// byte-stable and the prefix cache keeps hitting across runs.
+	turnContextText := composeTurnContext(channelsText, dynamicText)
+	sysMsg := buildAgentSystemMessage(coreText, toolsText, workspaceText, skillsText, orchestratorText, "", "")
 	breakdownMode := "agent"
 	if isCoder {
 		breakdownMode = "coder"
@@ -1209,8 +1209,7 @@ func (a *AgentMode) Run(ctx context.Context, query string, additionalContext str
 		{Name: "orchestrator", Chars: len(strings.TrimSpace(orchestratorText)), Cached: true},
 		{Name: "workspace_memory", Chars: len(strings.TrimSpace(workspaceText))},
 		{Name: "skills", Chars: len(strings.TrimSpace(skillsText))},
-		{Name: "mcp_channels", Chars: len(strings.TrimSpace(channelsText))},
-		{Name: "dynamic", Chars: len(strings.TrimSpace(dynamicText))},
+		{Name: "turn_context", Chars: len(strings.TrimSpace(turnContextText))},
 	})
 
 	// Inicializa ou atualiza o histórico com o System Prompt correto.
@@ -1241,6 +1240,7 @@ func (a *AgentMode) Run(ctx context.Context, query string, additionalContext str
 		}
 	}
 
+	a.appendTurnContext(turnContextText)
 	a.cli.history = append(a.cli.history, models.Message{Role: "user", Content: currentQuery, Images: a.pendingUserImages})
 	a.pendingUserImages = nil
 
@@ -1301,6 +1301,28 @@ func (a *AgentMode) beginOrchestratorRun(ctx context.Context, query, systemPromp
 		Task:   query,
 		Origin: orchOrigin,
 	})
+}
+
+// composeTurnContext joins the per-turn blocks (MCP channel pushes first,
+// then date/recall) into the text of the run's turn context message.
+func composeTurnContext(channelsText, dynamicText string) string {
+	out := strings.TrimSpace(dynamicText)
+	if c := strings.TrimSpace(channelsText); c != "" {
+		if out == "" {
+			return c
+		}
+		out = c + "\n\n" + out
+	}
+	return out
+}
+
+// appendTurnContext appends the flagged turn context message (no-op when
+// empty).
+func (a *AgentMode) appendTurnContext(text string) {
+	if strings.TrimSpace(text) == "" {
+		return
+	}
+	a.cli.history = append(a.cli.history, models.TurnContextMessage(turnContextHeader+text))
 }
 
 // installAgentSystemMessage purges stale mode system messages and installs the
@@ -2140,7 +2162,7 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 			// Same trigger surface for proactive recall: a follow-up asking
 			// about past work re-ranks memory/sessions against ITS words.
 			if rb := a.followUpRecallBlocks(ctx, userMsg); rb != "" {
-				a.cli.history = append(a.cli.history, models.Message{Role: "user", Content: rb})
+				a.cli.history = append(a.cli.history, models.TurnContextMessage(turnContextHeader+rb))
 			}
 		}
 

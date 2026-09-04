@@ -355,8 +355,16 @@ type ChatCLI struct {
 	recallTraceMu   sync.Mutex
 	lastRecallTrace *memoryRecallTrace
 	// otlp is the OpenTelemetry metrics exporter (nil unless OTEL_* is set).
-	otlp        *telemetry.Exporter
-	lastEscTime time.Time // for Esc+Esc double-press detection
+	otlp *telemetry.Exporter
+	// pendingTurnContext is the chat turn's injected context text between
+	// assembly and commit (turn_context.go).
+	pendingTurnContext string
+	// prefixRatios freezes the chars-per-token ratio the prefix budget uses
+	// per provider:model for the session, so cached sections never fold or
+	// unfold because the calibrator moved by a few percent (prompt_budget.go).
+	prefixRatiosMu sync.Mutex
+	prefixRatios   map[string]float64
+	lastEscTime    time.Time // for Esc+Esc double-press detection
 
 	// Background memory annotation worker
 	memWorker        *memoryWorker

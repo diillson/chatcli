@@ -16,6 +16,7 @@
 package cli
 
 import (
+	"strings"
 	"sync"
 	"time"
 
@@ -115,5 +116,18 @@ func (a *chatSystemAssembly) add(label string, blocks ...models.ContentBlock) {
 	for _, b := range blocks {
 		a.parts = append(a.parts, b)
 		a.sections = append(a.sections, promptSection{Name: label, Chars: len(b.Text), Cached: b.CacheControl != nil})
+	}
+}
+
+// addTurn records a volatile section and routes its blocks to the turn
+// context message instead of the system message (turn_context.go).
+func (a *chatSystemAssembly) addTurn(label string, blocks ...models.ContentBlock) {
+	for _, b := range blocks {
+		if strings.TrimSpace(b.Text) == "" {
+			continue
+		}
+		b.CacheControl = nil
+		a.turnContext = append(a.turnContext, b)
+		a.sections = append(a.sections, promptSection{Name: label, Chars: len(b.Text)})
 	}
 }

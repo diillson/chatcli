@@ -51,14 +51,20 @@ import (
 // model resolver. The *Hit and filePaths fields are diagnostic only —
 // emitted to debug logs and consumed by tests.
 type chatSystemAssembly struct {
-	parts     []models.ContentBlock
-	sections  []promptSection // parallel labels for /context status
-	modelHint string
-	effort    client.SkillEffort
-	pinnedHit int
-	autoHit   int
-	manualHit bool
-	filePaths []string
+	parts    []models.ContentBlock
+	sections []promptSection // parallel labels for /context status
+	// turnContext holds the per-turn volatile blocks (recall, skills,
+	// channels, watcher, date). They never enter the system message: they
+	// ride as a flagged user-role message right before the user's turn,
+	// so the system prompt stays byte-stable and the provider prefix cache
+	// keeps hitting (see models.TurnContextMessage).
+	turnContext []models.ContentBlock
+	modelHint   string
+	effort      client.SkillEffort
+	pinnedHit   int
+	autoHit     int
+	manualHit   bool
+	filePaths   []string
 }
 
 // assembleChatSystemPrompt builds every structured system-prompt block for a
@@ -176,32 +182,32 @@ func (cli *ChatCLI) assembleChatSystemPrompt(
 	// fresh session hintless — exactly when proactive recall matters most.
 	hints := cli.turnHints(userInput)
 	if part, ok := cli.workspaceContextPart(ctx, userInput, hints); ok { // Part 4
-		out.add("workspace_memory", part)
+		out.addTurn("workspace_memory", part)
 	}
 	// Part 4b: semantic /context retrieval (--rag). Query-driven, so it lives
 	// here in the volatile zone — never the cached prefix it would otherwise
 	// poison for every block after it.
-	out.add("retrieved", cli.retrievedContextParts(ctx, userInput)...)
+	out.addTurn("retrieved", cli.retrievedContextParts(ctx, userInput)...)
 	if manualSkill != nil { // Part 5
 		if block := renderManualSkillBlock(manualSkill, manualSkillArgs); block != "" {
-			out.add("skill_manual", models.ContentBlock{Type: "text", Text: block})
+			out.addTurn("skill_manual", models.ContentBlock{Type: "text", Text: block})
 		}
 	}
 	if block, ok := autoSkillBlockLimited(autoActivated, skillBudget); ok { // Part 6
-		out.add("skills_auto", block)
+		out.addTurn("skills_auto", block)
 	}
 	if part, ok := cli.mcpChannelPart(); ok { // Part 7
-		out.add("mcp_channels", part)
+		out.addTurn("mcp_channels", part)
 	}
 	if part, ok := cli.watcherContextPart(); ok { // Part 8
-		out.add("watcher", part)
+		out.addTurn("watcher", part)
 	}
 	// Part 8b: proactive memory auto-recall — top hint-matching facts, only
 	// meaningful in index mode (full mode already pushes the whole
 	// retrieval). Mirrors the agent/coder wiring; own env gate inside.
 	if cli.chatEffectiveMemoryMode() == memModeIndex {
 		if ar := cli.memoryAutoRecallBlockCtx(ctx, hints, userInput); ar != "" {
-			out.add("memory_recall", models.ContentBlock{Type: "text", Text: ar})
+			out.addTurn("memory_recall", models.ContentBlock{Type: "text", Text: ar})
 		}
 	}
 	// Part 8c: proactive SESSION recall (own gate, orthogonal to the memory
@@ -211,10 +217,10 @@ func (cli *ChatCLI) assembleChatSystemPrompt(
 	// header: chat has no @session tool, so the model surfaces the pointer
 	// to the user instead of pulling.
 	if sr := cli.chatSessionAutoRecallBlock(hints, userInput); sr != "" {
-		out.add("session_recall", models.ContentBlock{Type: "text", Text: sr})
+		out.addTurn("session_recall", models.ContentBlock{Type: "text", Text: sr})
 	}
 	if part, ok := cli.dynamicContextPart(); ok { // Part 9
-		out.add("dynamic", part)
+		out.addTurn("dynamic", part)
 	}
 	cli.promptBreakdowns.recordDegraded("chat", budget.Degraded(), out.sections)
 	return out
@@ -339,6 +345,9 @@ func (cli *ChatCLI) turnHints(userInput string) []string {
 	}
 	texts := make([]string, 0, window+1)
 	for _, msg := range cli.history[len(cli.history)-window:] {
+		if msg.IsTurnContext() {
+			continue // injected context is not a hint about what the user wants
+		}
 		texts = append(texts, msg.Content)
 	}
 	if s := strings.TrimSpace(userInput); s != "" {
@@ -613,6 +622,38 @@ func (cli *ChatCLI) watcherContextPart() (models.ContentBlock, bool) {
 func (cli *ChatCLI) buildChatTempHistory(
 	parts []models.ContentBlock, userInput, additionalContext string, images []models.ImageContent,
 ) []models.Message {
+	return cli.buildChatTempHistoryWithContext(parts, nil, userInput, additionalContext, images)
+}
+
+// turnContextText joins the volatile blocks into the text of the turn
+// context message ("" when there is nothing volatile this turn).
+func turnContextText(blocks []models.ContentBlock) string {
+	var b strings.Builder
+	for _, blk := range blocks {
+		t := strings.TrimSpace(blk.Text)
+		if t == "" {
+			continue
+		}
+		if b.Len() > 0 {
+			b.WriteString("\n\n")
+		}
+		b.WriteString(t)
+	}
+	if b.Len() == 0 {
+		return ""
+	}
+	return turnContextHeader + b.String()
+}
+
+// turnContextHeader tells the model what the injected message is. English
+// on purpose: it is model-facing, like the mode banners.
+const turnContextHeader = "[TURN CONTEXT — injected by ChatCLI for this turn, not written by the user]\n"
+
+// buildChatTempHistoryWithContext is buildChatTempHistory with the turn
+// context message spliced right before the user's turn.
+func (cli *ChatCLI) buildChatTempHistoryWithContext(
+	parts []models.ContentBlock, turnContext []models.ContentBlock, userInput, additionalContext string, images []models.ImageContent,
+) []models.Message {
 	// Purge stale `[ACTIVE MODE: …]` system messages left behind by a
 	// previous /agent or /coder run in the same session. Without this,
 	// the chat LLM call would receive the fresh ChatModeSystemHint in
@@ -635,6 +676,9 @@ func (cli *ChatCLI) buildChatTempHistory(
 		if msg.Role != "system" {
 			tempHistory = append(tempHistory, msg)
 		}
+	}
+	if text := turnContextText(turnContext); text != "" {
+		tempHistory = append(tempHistory, models.TurnContextMessage(text))
 	}
 	tempHistory = append(tempHistory, models.Message{
 		Role:    "user",
@@ -826,6 +870,12 @@ func (cli *ChatCLI) handleChatTurnResult(
 		return
 	}
 
+	// The turn context message is persisted too: the next request must
+	// replay exactly the bytes this one sent, or the prefix cache misses at
+	// this position. Flagged, so exports and extraction can tell it apart.
+	if text := cli.takePendingTurnContext(); text != "" {
+		cli.history = append(cli.history, models.TurnContextMessage(text))
+	}
 	cli.history = append(cli.history, userMessage)
 	cli.history = append(cli.history, models.Message{Role: "assistant", Content: aiResponse})
 
