@@ -64,6 +64,7 @@ var (
 	// squadCompressionLayer is the session CCR layer, shared so worker-loop
 	// microcompact preserves dropped bytes exactly like the orchestrator's.
 	squadCompressionLayer *compress.Layer
+	workerWindow          WindowManager
 )
 
 // RegisterCCRRecaller wires (or clears, with nil) the CCR key expander used
@@ -97,6 +98,33 @@ func RegisterSquadCompressionLayer(layer *compress.Layer) {
 	workerHooksMu.Lock()
 	squadCompressionLayer = layer
 	workerHooksMu.Unlock()
+}
+
+// WindowManager is the orchestrator's window management shared with the
+// worker loop: the same compactor (with the tenant's CCR), so a long
+// worker run gets compaction, not only the L0 microcompact, and its turns
+// are journaled under the parent session.
+type WindowManager interface {
+	// NeedsCompaction reports whether history crossed the compaction budget.
+	NeedsCompaction(history []models.Message) bool
+	// Compact rewrites history under the budget; an error keeps it as is.
+	Compact(ctx context.Context, history []models.Message) ([]models.Message, error)
+	// NoteTurn journals the messages one worker turn appended.
+	NoteTurn(worker string, turn []models.Message)
+}
+
+// RegisterWorkerWindow installs the orchestrator's window manager for
+// every worker loop of this process (nil clears it).
+func RegisterWorkerWindow(wm WindowManager) {
+	workerHooksMu.Lock()
+	workerWindow = wm
+	workerHooksMu.Unlock()
+}
+
+func currentWorkerWindow() WindowManager {
+	workerHooksMu.RLock()
+	defer workerHooksMu.RUnlock()
+	return workerWindow
 }
 
 func currentCCRRecaller() func(string) (string, bool) {

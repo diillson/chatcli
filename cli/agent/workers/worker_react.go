@@ -170,6 +170,13 @@ func RunWorkerReAct(
 	// byte stays recoverable via the recall tool.
 	mcCfg := agent.DefaultMicrocompactConfig()
 	mcCfg.CCR = currentSquadCompressionLayer()
+	// The orchestrator's window management (compactor with the tenant's
+	// CCR, journal) and the same bounded overflow recovery the main loop
+	// has: a worker no longer fails its task when the provider says the
+	// context is too long.
+	window := currentWorkerWindow()
+	recovery := agent.NewContextRecovery(agent.DefaultContextRecoveryConfig(), logger)
+	workerName := liveRun.Snapshot().Agent
 
 	// --- Failure tracking for reflection ---
 	consecutiveFailures := 0
@@ -179,8 +186,7 @@ func RunWorkerReAct(
 	emptyTurns := 0
 
 	for turn := 0; turn < maxTurns; turn++ {
-		select {
-		case <-ctx.Done():
+		if ctx.Err() != nil {
 			return &AgentResult{
 				CallID:    callID,
 				Output:    finalOutput.String(),
@@ -188,7 +194,6 @@ func RunWorkerReAct(
 				Duration:  time.Since(startTime),
 				ToolCalls: allToolCalls,
 			}, ctx.Err()
-		default:
 		}
 
 		liveRun.SetTurn(turn+1, maxTurns)
@@ -198,20 +203,21 @@ func RunWorkerReAct(
 		// point where injecting context cannot split a tool_use/tool_result
 		// pair. Merged into a trailing user message when one exists so
 		// strict-alternation providers never see two user turns in a row.
-		if snap := liveRun.Snapshot(); snap.Agent != "" {
-			if inbox := mail.Default().Drain(snap.Agent); len(inbox) > 0 {
-				history = appendInboxMessage(history, mail.FormatInbox(inbox))
-			}
-		}
+		history = drainWorkerInbox(liveRun, history)
 
 		// Progressively compact old tool results (turn boundary only, so a
 		// tool_use/tool_result pair is never split). CCR-backed when the
 		// session layer is registered — otherwise same legacy behavior the
 		// orchestrator had before CCR.
 		history, _ = agent.ApplyMicrocompact(history, turn, mcCfg, logger)
+		history = applyWorkerWindow(ctx, window, history, logger)
 
 		// --- Call LLM (native or text mode) ---
 		responseText, nativeToolCalls, stopReason, newHistory, err := callWorkerLLM(ctx, useNativeTools, toolAware, llmClient, history, toolDefs)
+		if recovered, retry := recoverWorkerOverflow(err, recovery, history, turn, logger); retry {
+			history = recovered
+			continue
+		}
 		if err != nil {
 			return &AgentResult{
 				CallID:    callID,
@@ -221,6 +227,7 @@ func RunWorkerReAct(
 				ToolCalls: allToolCalls,
 			}, err
 		}
+		noteWorkerTurn(window, workerName, history, newHistory)
 		history = newHistory
 
 		// --- Resolve tool calls to unified format ---
@@ -367,6 +374,60 @@ func RunWorkerReAct(
 		ToolCalls:     allToolCalls,
 		ParallelCalls: maxParallel,
 	}, nil
+}
+
+// drainWorkerInbox merges the agent's squad mailbox into the history at
+// the turn boundary (nil-safe).
+func drainWorkerInbox(liveRun *runs.Run, history []models.Message) []models.Message {
+	snap := liveRun.Snapshot()
+	if snap.Agent == "" {
+		return history
+	}
+	inbox := mail.Default().Drain(snap.Agent)
+	if len(inbox) == 0 {
+		return history
+	}
+	return appendInboxMessage(history, mail.FormatInbox(inbox))
+}
+
+// applyWorkerWindow runs the shared compactor when the window says the
+// history crossed the budget; a failure keeps the history as is.
+func applyWorkerWindow(ctx context.Context, window WindowManager, history []models.Message, logger *zap.Logger) []models.Message {
+	if window == nil || !window.NeedsCompaction(history) {
+		return history
+	}
+	compacted, err := window.Compact(ctx, history)
+	if err != nil {
+		logger.Warn("worker compaction failed; continuing with the full history", zap.Error(err))
+		return history
+	}
+	if len(compacted) == 0 {
+		return history
+	}
+	return compacted
+}
+
+// recoverWorkerOverflow applies the bounded overflow recovery to a turn
+// that failed with a context-too-long error; retry is true when the caller
+// should resend with the recovered history.
+func recoverWorkerOverflow(err error, recovery *agent.ContextRecovery, history []models.Message, turn int, logger *zap.Logger) ([]models.Message, bool) {
+	if err == nil || !agent.IsContextTooLongError(err) || !recovery.CanRecoverContextOverflow() {
+		return history, false
+	}
+	recovered, ok := recovery.RecoverContextOverflow(history)
+	if !ok {
+		return history, false
+	}
+	logger.Warn("worker context overflow; compacted and retrying the turn", zap.Int("turn", turn+1), zap.Int("history", len(recovered)))
+	return recovered, true
+}
+
+// noteWorkerTurn journals what the turn appended (nil-safe).
+func noteWorkerTurn(window WindowManager, worker string, before, after []models.Message) {
+	if window == nil || len(after) <= len(before) {
+		return
+	}
+	window.NoteTurn(worker, after[len(before):])
 }
 
 // resolveWorkerMaxTurns resolves the effective turn budget for a worker:
