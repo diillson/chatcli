@@ -56,7 +56,15 @@ type AgentMode struct {
 	// toolDefsChars is the serialized size of this run's native tool
 	// definitions — request weight outside the history that the compaction
 	// budget must still reserve (CompactConfig.ReservedChars).
-	toolDefsChars       int
+	toolDefsChars int
+	// activatedTools names the deferred tools the model asked for. They
+	// travel on every later turn of the run: a tool it needed once is
+	// usually needed again, and re-searching for it would cost a round
+	// trip each time.
+	activatedTools map[string]bool
+	// deferrableTools is the set the index advertises, kept so a
+	// find_tools call can be answered without rebuilding it.
+	deferrableTools     []models.ToolDefinition
 	cli                 *ChatCLI
 	logger              *zap.Logger
 	executor            *agent.CommandExecutor
@@ -1097,6 +1105,13 @@ func (a *AgentMode) Run(ctx context.Context, query string, additionalContext str
 	// builds the knowledge it lacks instead of guessing or stalling. Cheap,
 	// deterministic, and rides in the same cacheable block.
 	toolsText += "\n\n" + contextPipelineHint()
+	// The deferred-tool index is part of the cached prefix: it is fixed
+	// for the run, while which schemas travel changes only when the model
+	// asks for one. Building it here (not per turn) keeps the prefix
+	// stable even as tools are activated.
+	if idx := a.prepareDeferredTools(); idx != "" {
+		toolsText += "\n\n" + idx
+	}
 	// Pilar 1A: nudge proactive in-turn skill authoring/evolution (cacheable,
 	// empty when self-evolution is off).
 	if sh := skillAuthoringHint(); sh != "" {
@@ -2410,13 +2425,17 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 		// than relying on text-only XML dispatch.
 		var nativeToolDefs []models.ToolDefinition
 		if canUseNativeTools {
+			var core []models.ToolDefinition
 			if a.isCoderMode {
-				nativeToolDefs = workers.CoderToolDefinitions(nil)
+				core = workers.CoderToolDefinitions(nil)
 			}
-			nativeToolDefs = append(nativeToolDefs, workers.PluginToolDefinitions()...)
-			if a.cli.mcpManager != nil && a.cli.mcpManager.ToolCount() > 0 {
-				nativeToolDefs = append(nativeToolDefs, a.cli.mcpManager.GetTools()...)
-			}
+			core = append(core, workers.PluginToolDefinitions()...)
+			// MCP is the unbounded half. Past the threshold its schemas
+			// stop traveling and are advertised through the index built
+			// once for this run; the model pulls what it needs and keeps
+			// it for the rest of the run.
+			plan := workers.PlanToolDefs(core, a.deferrableTools, a.activatedTools, a.toolDeferThreshold())
+			nativeToolDefs = plan.Defs
 		}
 
 		// Chamada à LLM (native tools or text)
@@ -2731,6 +2750,16 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 			// Plugin tools (web_search, web_fetch) map to their respective plugins.
 			// Coder tools (read_file, write_file, etc.) map to @coder.
 			for _, ntc := range nativeToolCalls {
+				// The tool-search call is answered here: it loads schemas
+				// this run deferred and never leaves the process.
+				if result, handled := a.handleFindTools(ntc); handled {
+					a.cli.history = append(a.cli.history, models.Message{
+						Role:       "tool",
+						ToolCallID: ntc.ID,
+						Content:    result,
+					})
+					continue
+				}
 				if pluginName, pluginArgs, isPlugin := workers.ResolveNativePluginTool(ntc.Name, ntc.Arguments); isPlugin {
 					// Plugin tool: map to the plugin's CLI args format
 					argsStr := strings.Join(pluginArgs, " ")
@@ -4701,14 +4730,19 @@ func extractDelegateArgs(argsJSON string) (map[string]interface{}, string) {
 // part of the history slice, so the compaction budget reserves them
 // explicitly instead of discovering the overflow at the provider.
 func (a *AgentMode) estimateToolDefsChars() int {
-	var defs []models.ToolDefinition
+	var core []models.ToolDefinition
 	if a.isCoderMode {
-		defs = workers.CoderToolDefinitions(nil)
+		core = workers.CoderToolDefinitions(nil)
 	}
-	defs = append(defs, workers.PluginToolDefinitions()...)
+	core = append(core, workers.PluginToolDefinitions()...)
+	var deferrable []models.ToolDefinition
 	if a.cli != nil && a.cli.mcpManager != nil && a.cli.mcpManager.ToolCount() > 0 {
-		defs = append(defs, a.cli.mcpManager.GetTools()...)
+		deferrable = a.cli.mcpManager.GetTools()
 	}
+	// Measure what the turn actually ships, not what it could: reserving
+	// room for schemas that are deferred would take the space back from
+	// the conversation the deferral just freed it for.
+	defs := workers.PlanToolDefs(core, deferrable, a.activatedTools, a.toolDeferThreshold()).Defs
 	if len(defs) == 0 {
 		return 0
 	}
