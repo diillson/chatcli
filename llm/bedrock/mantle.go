@@ -204,7 +204,7 @@ func (c *BedrockClient) sendPromptAnthropicMantle(ctx context.Context, prompt st
 	applyAnthropicThinkingForEffort(reqBody, c.model, ctx)
 	// Rolling conversation breakpoint; the configured TTL applies on Claude
 	// 4.5+ (Bedrock accepts "ttl":"1h" in cache_control).
-	client.MarkAnthropicHistoryBreakpoint(client.AnthropicMessages{Maps: messages}, client.AnthropicCacheMarkerWithTTL(supportsExtendedCacheTTL(c.model)))
+	client.MarkAnthropicHistoryBreakpoint(client.AnthropicMessages{Maps: messages}, client.AnthropicCacheMarkerWithTTL(extendedCacheTTLModel(c.model)))
 	enforceCacheControlBudget(reqBody, anthropicMaxCacheBreakpoints)
 
 	payload, err := json.Marshal(reqBody)

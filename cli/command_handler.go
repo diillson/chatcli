@@ -369,6 +369,13 @@ func (ch *CommandHandler) handleContextCommand(ctx context.Context, userInput st
 		return
 	}
 
+	if f := strings.Fields(userInput); len(f) > 1 {
+		switch strings.ToLower(f[1]) {
+		case "attach", "add", "detach", "remove":
+			// Attached contexts are part of the stable prefix.
+			defer ch.cli.notePrefixChanged("context " + strings.ToLower(f[1]))
+		}
+	}
 	if err := ch.cli.contextHandler.HandleContextCommand(ctx, sessionID, userInput); err != nil {
 		fmt.Println(colorize(fmt.Sprintf(" ❌ %s", err.Error()), ColorYellow))
 	}
@@ -424,6 +431,7 @@ func (ch *CommandHandler) handleSessionCommand(ctx context.Context, userInput st
 			ch.cli.handleSaveSession(ctx, name)
 		} else {
 			ch.cli.handleLoadSession(ctx, name)
+			ch.cli.notePrefixChanged("session " + command) // a loaded history is a new prefix
 		}
 		ch.cli.stampBoundSession()
 		// A loaded session is a different thread: rotate the shared hub

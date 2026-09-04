@@ -130,6 +130,9 @@ func (ch *CommandHandler) handleSkillCommand(ctx context.Context, userInput stri
 		return
 	}
 	ch.cli.skillHandler.HandleCommand(ctx, userInput)
+	if f := strings.Fields(userInput); len(f) > 1 && (f[1] == "pin" || f[1] == "unpin") {
+		ch.cli.notePrefixChanged("skill " + f[1]) // pinned skills live in the stable prefix
+	}
 }
 
 func (ch *CommandHandler) handlePluginCommand(userInput string) {
@@ -359,6 +362,7 @@ func (ch *CommandHandler) handleAgentPersonaSubcommand(userInput string) bool {
 			return true
 		}
 		ch.cli.personaHandler.AttachAgent(args[2])
+		ch.cli.notePrefixChanged("agent attach")
 		return true
 	case "detach", "remove", "rm":
 		if len(args) < 3 {
@@ -366,6 +370,7 @@ func (ch *CommandHandler) handleAgentPersonaSubcommand(userInput string) bool {
 			return true
 		}
 		ch.cli.personaHandler.DetachAgent(args[2])
+		ch.cli.notePrefixChanged("agent detach")
 		return true
 	case "show":
 		full := false

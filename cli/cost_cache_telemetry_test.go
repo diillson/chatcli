@@ -116,11 +116,17 @@ func TestCacheStats_TTLFollowsConfiguredAnthropicTTL(t *testing.T) {
 	if s := ct.CacheStats(); s.TTL != "1h" || !s.Warm {
 		t.Fatalf("stats = %+v", s)
 	}
-	// Bedrock keeps the wire default.
+	// Bedrock reports the marker it actually sent: 1h on Claude 4.5+, the
+	// wire default on older Claude.
 	ct2 := NewCostTracker()
 	ct2.RecordRealUsage("BEDROCK", "global.anthropic.claude-sonnet-5", realUsage(500, 100, 100))
-	if s := ct2.CacheStats(); s.TTL != "5m" {
+	if s := ct2.CacheStats(); s.TTL != "1h" {
 		t.Fatalf("bedrock ttl = %s", s.TTL)
+	}
+	ct3 := NewCostTracker()
+	ct3.RecordRealUsage("BEDROCK", "anthropic.claude-3-7-sonnet-20250219-v1:0", realUsage(500, 100, 100))
+	if s := ct3.CacheStats(); s.TTL != "5m" {
+		t.Fatalf("older Claude on bedrock ttl = %s", s.TTL)
 	}
 }
 
