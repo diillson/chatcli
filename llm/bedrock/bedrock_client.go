@@ -573,7 +573,11 @@ func (c *BedrockClient) buildMessagesAndSystem(prompt string, history []models.M
 						"text": part.Text,
 					}
 					if part.CacheControl != nil {
-						block["cache_control"] = map[string]string{"type": part.CacheControl.Type}
+						// Same marker (and ttl) as the history breakpoint:
+						// Anthropic requires longer-lived breakpoints to
+						// precede shorter ones, so system and history must
+						// carry one lifetime.
+						block["cache_control"] = client.AnthropicCacheMarkerWithTTL(supportsExtendedCacheTTL(c.model))
 					}
 					systemBlocks = append(systemBlocks, block)
 				}

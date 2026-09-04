@@ -155,6 +155,9 @@ func (c *OpenAIResponsesClient) SendPrompt(ctx context.Context, prompt string, h
 		if key := client.PromptCacheKey(history); key != "" {
 			reqBody["prompt_cache_key"] = key
 		}
+		if r := client.OpenAIPromptCacheRetention(c.model); r != "" {
+			reqBody["prompt_cache_retention"] = r
+		}
 	}
 
 	// Skill effort hint → reasoning.effort.

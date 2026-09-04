@@ -213,6 +213,41 @@ func applyOpenRouterCacheControlMarker(messages []map[string]interface{}, marker
 	if lastUser >= 0 {
 		mark(messages[lastUser])
 	}
+	capOpenRouterCacheMarkers(messages, anthropicMaxCacheMarkers)
+}
+
+// anthropicMaxCacheMarkers is the upstream cap on cache_control blocks per
+// request; more is a 400 from Anthropic behind OpenRouter.
+const anthropicMaxCacheMarkers = 4
+
+// capOpenRouterCacheMarkers keeps at most limit markers: the last user
+// message's marker (the rolling breakpoint) and the latest system markers;
+// earlier system markers are removed. Mirrors enforceCacheControlBudget on
+// the direct Anthropic and Bedrock paths.
+func capOpenRouterCacheMarkers(messages []map[string]interface{}, limit int) {
+	type slot struct{ part map[string]interface{} }
+	var marked []slot
+	for _, msg := range messages {
+		switch content := msg["content"].(type) {
+		case []map[string]interface{}:
+			for _, part := range content {
+				if _, ok := part["cache_control"]; ok {
+					marked = append(marked, slot{part})
+				}
+			}
+		case []interface{}:
+			for _, raw := range content {
+				if part, ok := raw.(map[string]interface{}); ok {
+					if _, ok := part["cache_control"]; ok {
+						marked = append(marked, slot{part})
+					}
+				}
+			}
+		}
+	}
+	for i := 0; len(marked)-i > limit; i++ {
+		delete(marked[i].part, "cache_control")
+	}
 }
 
 // buildPayload assembles the request payload with OpenRouter-specific options.
