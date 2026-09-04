@@ -13,6 +13,7 @@ package cli
 
 import (
 	"fmt"
+	"github.com/diillson/chatcli/pkg/auditchain"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -28,6 +29,7 @@ import (
 // retentionReport is what one boot pass removed.
 type retentionReport struct {
 	Transcripts int // tenant transcripts removed (the shared set prunes on open)
+	AuditFiles  int // rotated audit trail files past the retention window
 	Parks       int
 	Costs       int
 }
@@ -60,8 +62,13 @@ func (cli *ChatCLI) runRetentionPass() retentionReport {
 			rep.Transcripts += pruneTranscripts(filepath.Join(root, transcriptDirName), ttl)
 		}
 	}
-	if cli != nil && cli.logger != nil && (rep.Parks > 0 || rep.Costs > 0) {
-		cli.logger.Info("retention pass", zap.Int("parks_removed", rep.Parks), zap.Int("cost_snapshots_removed", rep.Costs))
+	// Rotated audit trails (the live file is never touched) follow the
+	// same window; the operator keeps them elsewhere for longer retention.
+	if path := os.Getenv(AuditLogPathEnv); path != "" && filepath.IsAbs(filepath.Clean(path)) {
+		rep.AuditFiles = auditchain.PruneRotated(filepath.Clean(path), cutoff)
+	}
+	if cli != nil && cli.logger != nil && (rep.Parks > 0 || rep.Costs > 0 || rep.AuditFiles > 0) {
+		cli.logger.Info("retention pass", zap.Int("parks_removed", rep.Parks), zap.Int("cost_snapshots_removed", rep.Costs), zap.Int("audit_files_removed", rep.AuditFiles))
 	}
 	return rep
 }

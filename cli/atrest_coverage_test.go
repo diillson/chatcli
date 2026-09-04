@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/diillson/chatcli/cli/compress"
 	"github.com/diillson/chatcli/cli/ctxmgr"
@@ -185,4 +186,47 @@ func readFileString(t *testing.T, p string) string {
 		t.Fatal(err)
 	}
 	return string(b)
+}
+
+func TestVerifyAuditChain_LegacyTrailStillVerifies(t *testing.T) {
+	// A trail written by the version-1 writer (struct-order hash) verifies
+	// line by line, and a new entry appended by the chain writer links to
+	// its last hash.
+	path := filepath.Join(t.TempDir(), "audit.jsonl")
+	var lines []string
+	prev := ""
+	for i := 1; i <= 2; i++ {
+		e := llmAuditEntry{Timestamp: "t", Kind: "llm", Phase: "send", Provider: "p", Model: "m", Seq: int64(i), PrevHash: prev}
+		e.Hash = auditEntryHash(e)
+		b, _ := json.Marshal(e)
+		lines = append(lines, string(b))
+		prev = e.Hash
+	}
+	if err := os.WriteFile(path, []byte(strings.Join(lines, "\n")+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	rep, err := VerifyAuditChain(path)
+	if err != nil || !rep.Intact() || rep.Chained != 2 {
+		t.Fatalf("legacy trail: %+v err=%v", rep, err)
+	}
+	t.Setenv(AuditLogPathEnv, path)
+	t.Setenv("CHATCLI_ENCRYPTION_KEY", "")
+	cli := &ChatCLI{logger: zap.NewNop()}
+	cli.initLLMAudit("test")
+	if cli.llmAudit == nil {
+		t.Fatal("auditor must start")
+	}
+	cli.llmAudit.record(client.RequestAuditEvent{Time: time.Now(), Phase: "send", Provider: "p", Model: "m"})
+	cli.llmAudit.close()
+	rep, _ = VerifyAuditChain(path)
+	if !rep.Intact() || rep.Chained != 3 {
+		t.Fatalf("new entry must continue the legacy chain: %+v", rep)
+	}
+	// Tampering with a legacy line still breaks the chain at that line.
+	raw, _ := os.ReadFile(path)
+	tampered := strings.Replace(string(raw), `"phase":"send"`, `"phase":"SEND"`, 1)
+	_ = os.WriteFile(path, []byte(tampered), 0o600)
+	if rep, _ := VerifyAuditChain(path); rep.Intact() || rep.BrokenAt != 1 {
+		t.Fatalf("legacy tamper: %+v", rep)
+	}
 }

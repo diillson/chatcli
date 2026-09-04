@@ -17,8 +17,6 @@
 package cli
 
 import (
-	"bufio"
-	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -30,6 +28,7 @@ import (
 
 	"github.com/diillson/chatcli/llm/client"
 	"github.com/diillson/chatcli/models"
+	"github.com/diillson/chatcli/pkg/auditchain"
 	"go.uber.org/zap"
 )
 
@@ -75,16 +74,13 @@ type llmAuditEntry struct {
 
 // llmAuditWriter appends entries to the audit file.
 type llmAuditWriter struct {
-	mu       sync.Mutex
-	f        *os.File
-	enc      *json.Encoder
-	seq      int64
-	lastHash string
-	surface  string
-	session  func() string
-	tenant   func() string
-	usage    func() *models.UsageInfo
-	logger   *zap.Logger
+	mu      sync.Mutex
+	chain   *auditchain.Writer
+	surface string
+	session func() string
+	tenant  func() string
+	usage   func() *models.UsageInfo
+	logger  *zap.Logger
 }
 
 // initLLMAudit installs the request auditor when the audit path is
@@ -103,15 +99,14 @@ func (cli *ChatCLI) initLLMAudit(surface string) {
 		}
 		return
 	}
-	f, err := os.OpenFile(clean, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600) // #nosec G304 G703 -- operator-configured absolute path (env), cleaned and required absolute above
+	chain, err := auditchain.Open(clean, auditchain.Options{})
 	if err != nil {
 		if cli.logger != nil {
 			cli.logger.Error("failed to open audit log for LLM requests", zap.String("path", clean), zap.Error(err))
 		}
 		return
 	}
-	w := &llmAuditWriter{f: f, enc: json.NewEncoder(f), surface: surface, logger: cli.logger}
-	w.seq, w.lastHash = auditChainTail(clean)
+	w := &llmAuditWriter{chain: chain, surface: surface, logger: cli.logger}
 	w.session = func() string {
 		if cli.costTracker == nil {
 			return ""
@@ -185,21 +180,16 @@ func (w *llmAuditWriter) record(ev client.RequestAuditEvent) {
 			entry.CacheWriteTokens = u.CacheCreationInputTokens
 		}
 	}
-	w.mu.Lock()
-	defer w.mu.Unlock()
-	w.seq++
-	entry.Seq = w.seq
-	entry.PrevHash = w.lastHash
-	entry.Hash = auditEntryHash(entry)
-	if err := w.enc.Encode(entry); err != nil && w.logger != nil {
+	// The chain writer assigns seq/prev_hash/hash under the file lock, so
+	// several processes (REPL, gateway, gRPC server) share one trail.
+	if err := w.chain.Append(entry); err != nil && w.logger != nil {
 		w.logger.Warn("audit log write failed", zap.Error(err))
-		return
 	}
-	w.lastHash = entry.Hash
 }
 
-// auditEntryHash computes the chain hash of an entry (its Hash field
-// excluded, PrevHash included).
+// auditEntryHash computes the version-1 chain hash of an entry (its Hash
+// field excluded, PrevHash included): struct-order canonical JSON. Kept
+// to verify trails written before the shared chain writer.
 func auditEntryHash(e llmAuditEntry) string {
 	e.Hash = ""
 	canonical, err := json.Marshal(e)
@@ -213,27 +203,16 @@ func auditEntryHash(e llmAuditEntry) string {
 	return hex.EncodeToString(h.Sum(nil))
 }
 
-// auditChainTail returns the last sequence number and hash recorded in an
-// existing trail (0, "" for a new or legacy file), so a restarted process
-// continues the chain instead of starting a new one.
-func auditChainTail(path string) (int64, string) {
-	f, err := os.Open(path) // #nosec G304 G703 -- operator-configured audit path (env), cleaned and required absolute by the caller
-	if err != nil {
-		return 0, ""
+// verifyLegacyAuditLine verifies one version-1 line (struct-order hash).
+func verifyLegacyAuditLine(line []byte, prev string) (string, bool) {
+	var e llmAuditEntry
+	if err := json.Unmarshal(line, &e); err != nil || e.PrevHash != prev {
+		return "", false
 	}
-	defer func() { _ = f.Close() }()
-	var seq int64
-	var last string
-	sc := bufio.NewScanner(f)
-	sc.Buffer(make([]byte, 0, 256*1024), 16*1024*1024)
-	for sc.Scan() {
-		var e llmAuditEntry
-		if err := json.Unmarshal(sc.Bytes(), &e); err != nil || e.Hash == "" {
-			continue
-		}
-		seq, last = e.Seq, e.Hash
+	if auditEntryHash(e) != e.Hash {
+		return "", false
 	}
-	return seq, last
+	return e.Hash, true
 }
 
 // AuditChainReport is the outcome of VerifyAuditChain.
@@ -243,51 +222,26 @@ type AuditChainReport struct {
 	Legacy   int // entries written before the chain existed
 	BrokenAt int // 1-based line of the first break (0 = intact)
 	Err      string
+	// Sealed counts entries stored encrypted; Torn flags an incomplete
+	// last line (a crash mid-write, not tampering); RotatedFrom names the
+	// file this trail continues when it starts mid-chain.
+	Sealed      int
+	Torn        bool
+	RotatedFrom string
 }
 
 // Intact reports whether every chained entry verified.
 func (r AuditChainReport) Intact() bool { return r.BrokenAt == 0 }
 
 // VerifyAuditChain re-hashes a trail and reports the first line whose hash
-// or previous-hash link does not match.
+// or previous-hash link does not match. Version-1 lines (written before
+// the shared chain writer) verify with the struct-order hash.
 func VerifyAuditChain(path string) (AuditChainReport, error) {
-	var rep AuditChainReport
-	f, err := os.Open(path) // #nosec G304 G703 -- operator-supplied audit path (env or /config security verify-audit argument typed by the operator)
-	if err != nil {
-		return rep, err
-	}
-	defer func() { _ = f.Close() }()
-	sc := bufio.NewScanner(f)
-	sc.Buffer(make([]byte, 0, 256*1024), 16*1024*1024)
-	prev := ""
-	line := 0
-	for sc.Scan() {
-		line++
-		if len(bytes.TrimSpace(sc.Bytes())) == 0 {
-			continue
-		}
-		rep.Entries++
-		var e llmAuditEntry
-		if err := json.Unmarshal(sc.Bytes(), &e); err != nil {
-			rep.BrokenAt, rep.Err = line, "unparseable entry"
-			return rep, nil
-		}
-		if e.Hash == "" {
-			rep.Legacy++
-			continue
-		}
-		rep.Chained++
-		if e.PrevHash != prev {
-			rep.BrokenAt, rep.Err = line, "previous-hash link mismatch"
-			return rep, nil
-		}
-		if auditEntryHash(e) != e.Hash {
-			rep.BrokenAt, rep.Err = line, "entry hash mismatch"
-			return rep, nil
-		}
-		prev = e.Hash
-	}
-	return rep, sc.Err()
+	rep, err := auditchain.Verify(path, verifyLegacyAuditLine)
+	return AuditChainReport{
+		Entries: rep.Entries, Chained: rep.Chained, Legacy: rep.Legacy, BrokenAt: rep.BrokenAt, Err: rep.Err,
+		Sealed: rep.Sealed, Torn: rep.Torn, RotatedFrom: rep.RotatedFrom,
+	}, err
 }
 
 // close detaches the sink and closes the file.
@@ -298,9 +252,8 @@ func (w *llmAuditWriter) close() {
 	client.RegisterRequestAuditor(nil)
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	if w.f != nil {
-		_ = w.f.Sync()
-		_ = w.f.Close()
-		w.f = nil
+	if w.chain != nil {
+		_ = w.chain.Close()
+		w.chain = nil
 	}
 }

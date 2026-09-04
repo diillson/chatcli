@@ -10,6 +10,7 @@ package cli
 
 import (
 	"fmt"
+	"github.com/diillson/chatcli/pkg/auditchain"
 	"os"
 	"path/filepath"
 	"strings"
@@ -128,9 +129,21 @@ func (cli *ChatCLI) configSecurityVerifyAudit(args []string) {
 	}
 	if rep.Intact() {
 		fmt.Println(colorize("  "+i18n.T("sec.cmd.verify_audit_ok", rep.Entries, rep.Chained, rep.Legacy), ColorGreen))
-		return
+	} else {
+		fmt.Println(colorize("  "+i18n.T("sec.cmd.verify_audit_broken", rep.BrokenAt, rep.Err, rep.Chained), ColorRed))
 	}
-	fmt.Println(colorize("  "+i18n.T("sec.cmd.verify_audit_broken", rep.BrokenAt, rep.Err, rep.Chained), ColorRed))
+	if rep.Sealed > 0 {
+		fmt.Println(colorize("  "+i18n.T("sec.cmd.verify_audit_sealed", rep.Sealed), ColorGray))
+	}
+	if rep.RotatedFrom != "" {
+		fmt.Println(colorize("  "+i18n.T("sec.cmd.verify_audit_rotated_from", rep.RotatedFrom), ColorGray))
+	}
+	if rep.Torn {
+		fmt.Println(colorize("  "+i18n.T("sec.cmd.verify_audit_torn"), ColorYellow))
+	}
+	if rotated := auditchain.Rotated(path); len(rotated) > 0 {
+		fmt.Println(colorize("  "+i18n.T("sec.cmd.verify_audit_rotated_files", len(rotated)), ColorGray))
+	}
 }
 
 // renderAtRestStatus prints the encryption-at-rest rows of /config security.
