@@ -125,6 +125,12 @@ func (c *MiniMaxClient) SendPrompt(ctx context.Context, prompt string, history [
 			"messages":   messages,
 			"max_tokens": effectiveMaxTokens,
 		}
+
+		// Automatic prompt caching routing hint on OpenAI-compatible upstreams
+		// (ignored by those that do not route on it). See client.PromptCacheKey.
+		if key := client.PromptCacheKey(history); key != "" {
+			payload["prompt_cache_key"] = key
+		}
 	}
 
 	jsonValue, err := json.Marshal(payload)

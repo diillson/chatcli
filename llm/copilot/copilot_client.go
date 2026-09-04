@@ -133,6 +133,12 @@ func (c *Client) SendPrompt(ctx context.Context, prompt string, history []models
 		"store":    false, // Copilot API: don't store conversations
 	}
 
+	// Automatic prompt caching routing hint on OpenAI-compatible upstreams
+	// (ignored by those that do not route on it). See client.PromptCacheKey.
+	if key := client.PromptCacheKey(history); key != "" {
+		payload["prompt_cache_key"] = key
+	}
+
 	// Copilot API: do NOT send max_tokens / maxOutputTokens
 	// as per the API contract. The API manages token limits internally.
 	// Only set if user explicitly configured it.

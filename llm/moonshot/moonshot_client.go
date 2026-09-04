@@ -146,6 +146,12 @@ func (c *MoonshotClient) SendPrompt(ctx context.Context, prompt string, history 
 	}
 	c.applyThinking(payload)
 
+	// Automatic prompt caching routing hint on OpenAI-compatible upstreams
+	// (ignored by those that do not route on it). See client.PromptCacheKey.
+	if key := client.PromptCacheKey(history); key != "" {
+		payload["prompt_cache_key"] = key
+	}
+
 	jsonValue, err := json.Marshal(payload)
 	if err != nil {
 		c.logger.Error(i18n.T("llm.error.marshal_payload_for", "MOONSHOT"), zap.Error(err))

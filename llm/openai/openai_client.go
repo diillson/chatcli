@@ -134,6 +134,9 @@ func (c *OpenAIClient) SendPrompt(ctx context.Context, prompt string, history []
 	if key := client.PromptCacheKey(history); key != "" {
 		payload["prompt_cache_key"] = key
 	}
+	if r := client.OpenAIPromptCacheRetention(c.model); r != "" {
+		payload["prompt_cache_retention"] = r
+	}
 
 	// Skill effort hint → reasoning_effort (only for reasoning-capable models).
 	if eff := client.ReasoningEffortForOpenAI(client.EffortFromContext(ctx)); eff != "" && supportsOpenAIReasoningEffort(c.model) {
@@ -377,6 +380,9 @@ func (c *OpenAIClient) SendPromptStream(ctx context.Context, prompt string, hist
 
 	if key := client.PromptCacheKey(history); key != "" {
 		payload["prompt_cache_key"] = key
+	}
+	if r := client.OpenAIPromptCacheRetention(c.model); r != "" {
+		payload["prompt_cache_retention"] = r
 	}
 	jsonValue, err := json.Marshal(payload)
 	if err != nil {

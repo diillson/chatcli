@@ -74,6 +74,9 @@ func (c *OpenAIClient) SendPromptWithTools(ctx context.Context, prompt string, h
 	if key := client.PromptCacheKey(history); key != "" {
 		payload["prompt_cache_key"] = key
 	}
+	if r := client.OpenAIPromptCacheRetention(c.model); r != "" {
+		payload["prompt_cache_retention"] = r
+	}
 
 	jsonValue, err := json.Marshal(payload)
 	if err != nil {

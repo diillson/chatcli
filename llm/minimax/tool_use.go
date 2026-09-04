@@ -73,6 +73,12 @@ func (c *MiniMaxClient) SendPromptWithTools(ctx context.Context, prompt string, 
 		payload["tools"] = toolDefs
 	}
 
+	// Automatic prompt caching routing hint on OpenAI-compatible upstreams
+	// (ignored by those that do not route on it). See client.PromptCacheKey.
+	if key := client.PromptCacheKey(history); key != "" {
+		payload["prompt_cache_key"] = key
+	}
+
 	jsonValue, err := json.Marshal(payload)
 	if err != nil {
 		return nil, fmt.Errorf("%s: %w", i18n.T("llm.tool.error.marshaling_payload"), err)
