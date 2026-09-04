@@ -235,6 +235,15 @@ func (cli *ChatCLI) modeAndLanguagePart() models.ContentBlock {
 	// Output-token reduction: the verbosity directive is a static string per
 	// level, so appending it keeps this Part 0 block cacheable.
 	text := ChatModeSystemHint + "\n" + i18n.T("ai.response_language") + verbosityDirectiveBlock()
+	// Where the session is rooted and how to read a relative path against
+	// it is fixed for the whole session, so it belongs in the cached
+	// prefix. It used to ride in the per-turn context message, which paid
+	// for the same paragraph again on every request.
+	if cli.contextBuilder != nil {
+		if dir := cli.contextBuilder.BuildWorkspaceDirective(); dir != "" {
+			text += "\n\n" + dir
+		}
+	}
 	if card := cli.memoryBootstrapCardChat(); card != "" {
 		text += "\n\n" + card
 	}

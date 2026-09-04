@@ -1045,7 +1045,7 @@ func (a *AgentMode) Run(ctx context.Context, query string, additionalContext str
 	//      context) — varies between runs but stable within one Run().
 	//   4. Skills injection (auto-activated + manual) + Orchestrator
 	//      catalog. Added further down after auto-activation is decided.
-	coreText := a.composeCoreText(isCoder, hasActivePersona)
+	coreText := a.withWorkspaceDirective(a.composeCoreText(isCoder, hasActivePersona))
 
 	a.isCoderMode = isCoder
 	// isOneShot is set by the caller before Run (false for the interactive
@@ -1324,7 +1324,14 @@ func (a *AgentMode) appendTurnContext(text string) {
 	if strings.TrimSpace(text) == "" {
 		return
 	}
-	a.cli.history = append(a.cli.history, models.TurnContextMessage(turnContextHeader+text))
+	full := turnContextHeader + text
+	// A block that would repeat the last one still in history is not
+	// appended: the model already read it, and a run of thirty turns used
+	// to carry thirty copies of the same date line into the window.
+	if turnContextIsRedundant(a.cli.history, full) {
+		return
+	}
+	a.cli.history = append(a.cli.history, models.TurnContextMessage(full))
 }
 
 // installAgentSystemMessage purges stale mode system messages and installs the
@@ -1352,6 +1359,22 @@ func (a *AgentMode) installAgentSystemMessage(sysMsg models.Message, currentMode
 // composeCoreText builds Block 1 of the agent system prompt (the stable core
 // behavior block): persona/coder/default base plus the language and gateway
 // directives. Split out of Run to keep its cyclomatic complexity in check.
+// withWorkspaceDirective appends the session-invariant workspace text to
+// the cached core. Where the run is rooted and how to read a relative path
+// against it never change during a session, so they belong in the prefix
+// the cache holds rather than in the per-turn context message that used to
+// repeat them.
+func (a *AgentMode) withWorkspaceDirective(coreText string) string {
+	if a.cli == nil || a.cli.contextBuilder == nil {
+		return coreText
+	}
+	dir := a.cli.contextBuilder.BuildWorkspaceDirective()
+	if dir == "" {
+		return coreText
+	}
+	return strings.TrimRight(coreText, "\n") + "\n\n" + dir
+}
+
 func (a *AgentMode) composeCoreText(isCoder, hasActivePersona bool) string {
 	var coreText string
 	if hasActivePersona {
@@ -2177,7 +2200,7 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 			// Same trigger surface for proactive recall: a follow-up asking
 			// about past work re-ranks memory/sessions against ITS words.
 			if rb := a.followUpRecallBlocks(ctx, userMsg); rb != "" {
-				a.cli.history = append(a.cli.history, models.TurnContextMessage(turnContextHeader+rb))
+				a.appendTurnContext(rb)
 			}
 		}
 
@@ -4172,7 +4195,7 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 				// Tagged like every other injected block: excluded from
 				// extraction, autosave indexing and session search, so the
 				// recall never feeds itself back into memory.
-				a.cli.history = append(a.cli.history, models.TurnContextMessage(turnContextHeader+rb))
+				a.appendTurnContext(rb)
 			}
 			continue
 		}
