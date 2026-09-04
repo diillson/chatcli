@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/c-bata/go-prompt"
 	"github.com/diillson/chatcli/i18n"
 )
 
@@ -50,5 +51,17 @@ func TestConfigTruth_RegistryReloadablesAndHint(t *testing.T) {
 	}
 	if !found {
 		t.Fatal("/context unwatch must complete")
+	}
+}
+
+func TestConfigTruth_RewindSuggestionsAndDeprecatedSummary(t *testing.T) {
+	c := &ChatCLI{}
+	got := c.getRewindSuggestions(prompt.Document{Text: "/rewind c"})
+	if len(got) != 1 || got[0].Text != "compact" {
+		t.Fatalf("rewind suggestions = %+v", got)
+	}
+	ct := NewCostTracker()
+	if s := ct.GetSummary("OPENAI", "gpt-5.6", 3); !strings.Contains(s, "OPENAI/gpt-5.6") {
+		t.Fatalf("summary = %q", s)
 	}
 }
