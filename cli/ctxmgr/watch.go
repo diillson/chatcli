@@ -15,9 +15,11 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
+	"github.com/diillson/chatcli/i18n"
 	"github.com/diillson/chatcli/utils"
 	"github.com/fsnotify/fsnotify"
 	"go.uber.org/zap"
@@ -86,7 +88,7 @@ func (w *ContextWatcher) Watch(name string) error {
 	if err := w.ensureStarted(); err != nil {
 		return err
 	}
-	dirs := watchDirsFor(paths)
+	dirs, truncated := watchDirsForCapped(paths, maxWatchedDirs)
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	if w.closed {
@@ -96,8 +98,10 @@ func (w *ContextWatcher) Watch(name string) error {
 		return nil
 	}
 	added := make([]string, 0, len(dirs))
+	failed := 0
 	for _, d := range dirs {
 		if err := w.watcher.Add(d); err != nil {
+			failed++
 			w.logger.Debug("context watch: cannot watch dir", zap.String("dir", d), zap.Error(err))
 			continue
 		}
@@ -105,6 +109,12 @@ func (w *ContextWatcher) Watch(name string) error {
 		added = append(added, d)
 	}
 	w.names[name] = added
+	if truncated || failed > 0 {
+		// The user believes the context is watched; say exactly how much of
+		// it is.
+		w.logger.Warn(i18n.T("context.watch.partial", name, len(added), failed, maxWatchedDirs),
+			zap.Bool("truncated", truncated), zap.Int("failed", failed))
+	}
 	return nil
 }
 
@@ -241,13 +251,32 @@ func (w *ContextWatcher) refresh(name string) {
 // watchDirsFor turns source paths into the directories to watch: a file's
 // parent, a directory and all its subdirectories (noise dirs skipped).
 func watchDirsFor(paths []string) []string {
+	dirs, _ := watchDirsForCapped(paths, maxWatchedDirs)
+	return dirs
+}
+
+// maxWatchedDirs bounds the directories one context may watch: every
+// watched directory costs a file descriptor (one per dir on kqueue), and
+// a monorepo used to exhaust them silently while the user believed the
+// context was watched.
+const maxWatchedDirs = 2000
+
+// watchDirsForCapped is watchDirsFor with an explicit cap; truncated
+// reports whether the walk stopped at it. Directories matched by the root's
+// .gitignore are skipped like the built-in noise directories.
+func watchDirsForCapped(paths []string, limit int) (dirs []string, truncated bool) {
 	seen := map[string]bool{}
 	var out []string
-	add := func(d string) {
-		if !seen[d] {
-			seen[d] = true
-			out = append(out, d)
+	add := func(d string) bool {
+		if seen[d] {
+			return true
 		}
+		if limit > 0 && len(out) >= limit {
+			return false
+		}
+		seen[d] = true
+		out = append(out, d)
+		return true
 	}
 	for _, p := range paths {
 		info, err := os.Stat(p)
@@ -255,19 +284,64 @@ func watchDirsFor(paths []string) []string {
 			continue
 		}
 		if !info.IsDir() {
-			add(filepath.Dir(p))
+			if !add(filepath.Dir(p)) {
+				truncated = true
+			}
 			continue
 		}
+		ignore := loadGitignoreDirs(p)
 		_ = filepath.WalkDir(p, func(path string, d os.DirEntry, err error) error {
 			if err != nil || !d.IsDir() {
 				return nil
 			}
-			if path != p && utils.ShouldSkipDir(d.Name()) {
+			if path != p && (utils.ShouldSkipDir(d.Name()) || ignore.matches(p, path)) {
 				return filepath.SkipDir
 			}
-			add(path)
+			if !add(path) {
+				truncated = true
+				return filepath.SkipAll
+			}
 			return nil
 		})
 	}
-	return out
+	return out, truncated
+}
+
+// gitignoreDirs is the subset of a .gitignore that names directories or
+// simple globs (no negation, no anchored multi-segment patterns).
+type gitignoreDirs struct{ patterns []string }
+
+// loadGitignoreDirs reads root/.gitignore; missing = empty.
+func loadGitignoreDirs(root string) gitignoreDirs {
+	data, err := os.ReadFile(filepath.Join(root, ".gitignore")) // #nosec G304 -- the watched root the user attached
+	if err != nil {
+		return gitignoreDirs{}
+	}
+	var g gitignoreDirs
+	for _, line := range strings.Split(string(data), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") || strings.HasPrefix(line, "!") {
+			continue
+		}
+		line = strings.TrimPrefix(strings.TrimSuffix(line, "/"), "/")
+		if line == "" || strings.Contains(line, "/") {
+			continue // multi-segment patterns are out of scope
+		}
+		g.patterns = append(g.patterns, line)
+	}
+	return g
+}
+
+// matches reports whether the directory at path (under root) is ignored.
+func (g gitignoreDirs) matches(root, path string) bool {
+	if len(g.patterns) == 0 {
+		return false
+	}
+	name := filepath.Base(path)
+	for _, p := range g.patterns {
+		if ok, _ := filepath.Match(p, name); ok {
+			return true
+		}
+	}
+	return false
 }
