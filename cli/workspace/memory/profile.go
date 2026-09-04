@@ -2,6 +2,7 @@ package memory
 
 import (
 	"encoding/json"
+	"github.com/diillson/chatcli/pkg/flock"
 	"sort"
 	"strings"
 	"sync"
@@ -673,6 +674,10 @@ func (ps *UserProfileStore) load() {
 }
 
 func (ps *UserProfileStore) persist() {
+	// One process merges and writes at a time: the other processes'
+	// new entries can no longer be lost between our read and our write.
+	unlock := flock.Lock(ps.path)
+	defer unlock()
 	if ps.latch.locked() {
 		return // sealed file we cannot read: never overwrite it
 	}

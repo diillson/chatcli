@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/diillson/chatcli/pkg/flock"
 	"os"
 	"path/filepath"
 	"time"
@@ -79,7 +80,12 @@ func (s *Storage) SaveContext(ctx *FileContext) error {
 		return fmt.Errorf("erro ao serializar contexto: %w", err)
 	}
 
-	if err := atomicWrite(filePath, data); err != nil {
+	// Cross-process: the REPL, the gateway and the MCP server share the
+	// context store; last-writer-wins used to drop one side's changes.
+	unlock := flock.Lock(filePath)
+	err = atomicWrite(filePath, data)
+	unlock()
+	if err != nil {
 		return fmt.Errorf("erro ao salvar contexto: %w", err)
 	}
 

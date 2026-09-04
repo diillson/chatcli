@@ -24,6 +24,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"github.com/diillson/chatcli/cli/ctxmgr"
+	"github.com/diillson/chatcli/pkg/flock"
 	"os"
 	"sort"
 	"strings"
@@ -293,6 +294,10 @@ func (es *EpisodeStore) load() {
 // union: adopt every episode the other process appended, keep ours, and only
 // then apply the cap. Caller must hold the write lock.
 func (es *EpisodeStore) persistLocked() {
+	// One process merges and writes at a time: the other processes'
+	// new entries can no longer be lost between our read and our write.
+	unlock := flock.Lock(es.path)
+	defer unlock()
 	if es.latch.locked() {
 		return // sealed file we cannot read: never overwrite it
 	}

@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
+	"github.com/diillson/chatcli/pkg/flock"
 	"math"
 	"os"
 	"sort"
@@ -1044,6 +1045,10 @@ func legacyConfidence(accessCount int) float64 {
 }
 
 func (fi *FactIndex) persistLocked() {
+	// One process merges and writes at a time: the other processes'
+	// new entries can no longer be lost between our read and our write.
+	unlock := flock.Lock(fi.path)
+	defer unlock()
 	fi.rev++
 	if fi.latch.locked() {
 		return // sealed file we cannot read: never overwrite it
