@@ -25,7 +25,14 @@ maintainers:
     email: diillson@hotmail.com
 annotations:
   artifacthub.io/license: Apache-2.0
-  artifacthub.io/containsSecurityUpdates: 'false'
+  artifacthub.io/containsSecurityUpdates: 'true'
+  artifacthub.io/changes: |
+    - kind: changed
+      description: An Instance whose server would listen on a reachable address with no credential is no longer provisioned; the operator raises the AuthenticationConfigured condition on it instead
+    - kind: security
+      description: The server refuses to start unauthenticated on a reachable address, so spec.server.token or spec.server.security.jwtSecretRef is required unless bindAddress is loopback
+    - kind: fixed
+      description: The bindAddress field documented a 127.0.0.1 default it never had; unset means every interface inside a cluster
   artifacthub.io/prerelease: 'false'
   artifacthub.io/operator: 'true'
   artifacthub.io/operatorCapabilities: Seamless Upgrades

@@ -884,25 +884,6 @@
         }
       }
     },
-    "safety": {
-      "type": "object",
-      "description": "Safety guardrails configuration.",
-      "additionalProperties": false,
-      "properties": {
-        "enabled": {
-          "type": "boolean",
-          "description": "Enable safety guardrails."
-        },
-        "config": {
-          "type": "object",
-          "description": "Safety configuration object. Structure depends on the safety implementation."
-        },
-        "existingConfigMap": {
-          "type": "string",
-          "description": "Name of an existing ConfigMap containing safety configuration."
-        }
-      }
-    },
     "skillRegistry": {
       "type": "object",
       "description": "Skill registry configuration for discovering and installing skills.",
