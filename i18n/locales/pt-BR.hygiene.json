@@ -1,0 +1,5 @@
+{
+  "session.export.plaintext_notice": "Atenção: o journal fica selado em repouso, mas esta exportação é texto puro — guarde-a onde o conteúdo possa ficar.",
+  "complete.root.rewind": "Voltar a um checkpoint; \"/rewind compact\" desfaz a última compactação",
+  "context.status.ccr_skips": "⚠ O arquivo CCR recusou %d corte(s) grande(s) demais nesta sessão — esses originais não são recuperáveis via @recall (aumente CHATCLI_COMPRESSION_CCR_MAX_MB)."
+}

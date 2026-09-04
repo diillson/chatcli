@@ -67,10 +67,15 @@ func extensionTarget(raw string) (server string, ok bool) {
 	if v == "" || strings.EqualFold(v, "builtin") {
 		return "", false
 	}
-	if !strings.HasPrefix(strings.ToLower(v), "mcp:") {
+	lower := strings.ToLower(v)
+	switch {
+	case strings.HasPrefix(lower, "mcp-only:"):
+		server = strings.TrimSpace(v[len("mcp-only:"):])
+	case strings.HasPrefix(lower, "mcp:"):
+		server = strings.TrimSpace(v[4:])
+	default:
 		return "", false
 	}
-	server = strings.TrimSpace(v[4:])
 	return server, server != ""
 }
 
@@ -141,7 +146,7 @@ func (cli *ChatCLI) externalMemoryRecall(ctx context.Context, query string, hint
 		return ""
 	}
 	if len(text) > extRecallBudget {
-		text = text[:extRecallBudget] + "…"
+		text = truncateRunesafe(text, extRecallBudget) + "…"
 	}
 	return text
 }
@@ -264,7 +269,20 @@ func (cli *ChatCLI) forwardNewHistory(ctx context.Context, st *extForwardState, 
 // extensionStatus renders the configured extension points for /config.
 func extensionStatus(raw string) string {
 	if server, ok := extensionTarget(raw); ok {
+		if memoryProviderExclusive(raw) {
+			return "mcp-only:" + server
+		}
 		return "mcp:" + server
 	}
+	if strings.EqualFold(strings.TrimSpace(raw), "provider") {
+		return "provider"
+	}
 	return "builtin"
+}
+
+// memoryProviderExclusive reports whether raw selects the external memory
+// provider ALONE ("mcp-only:<server>"): the embedded recall block is not
+// built, only the provider's answer rides in the auto-recall block.
+func memoryProviderExclusive(raw string) bool {
+	return strings.HasPrefix(strings.ToLower(strings.TrimSpace(raw)), "mcp-only:")
 }

@@ -55,10 +55,21 @@ func (e *Engine) handleRead(args []string) error {
 			e.printf("❌ Range inválido para '%s'\n", f)
 			continue
 		}
+		// No range asked: a whole-file read is capped at DefaultMaxLines
+		// (the byte cap stays the ceiling), the way Claude Code pages
+		// reads — 200 KB in one read was ~50K tokens of a 200K window.
+		lineCapped := false
+		if *start == 0 && *end == 0 && *head == 0 && *tail == 0 && endIdx-startIdx > DefaultMaxLines {
+			endIdx = startIdx + DefaultMaxLines
+			lineCapped = true
+		}
 
 		e.printf("<<< INÍCIO DO ARQUIVO: %s >>>\n", f)
 		for i := startIdx; i < endIdx; i++ {
 			e.printf("%4d | %s\n", i+1, lines[i])
+		}
+		if lineCapped {
+			e.printf("... [%d de %d linhas; continue com --start %d] ...\n", DefaultMaxLines, len(lines), endIdx+1)
 		}
 		if truncated {
 			e.printf("... [TRUNCADO EM %d BYTES] ...\n", *maxBytes)

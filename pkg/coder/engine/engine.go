@@ -20,6 +20,10 @@ const (
 	// DefaultMaxBytes is the default byte limit for file reads.
 	DefaultMaxBytes = 200_000
 
+	// DefaultMaxLines caps a read that asked for no range (the byte cap
+	// stays the ceiling); the model pages with --start/--end.
+	DefaultMaxLines = 2_000
+
 	// DefaultMaxEntries is the default entry limit for tree listings.
 	DefaultMaxEntries = 2_000
 )
