@@ -21,6 +21,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/diillson/chatcli/pkg/flock"
 	"os"
 	"path/filepath"
 	"sort"
@@ -415,6 +416,8 @@ func (x *Index) persist() error {
 	// utils.AtomicWriteFile fsyncs the temp file before the rename (and the
 	// directory after), so a power loss cannot leave an empty or truncated
 	// index behind the new name.
+	unlock := flock.Lock(x.path)
+	defer unlock()
 	return utils.AtomicWriteFile(x.path, data, 0o600)
 }
 
