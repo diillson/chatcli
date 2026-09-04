@@ -142,9 +142,15 @@ func (w *WebhookAdapter) Start(ctx context.Context, inbound chan<- InboundMessag
 	return nil
 }
 
+// authorized checks the shared secret on an inbound delivery.
+//
+// Fail closed: an adapter with no secret configured cannot tell a real
+// caller from anyone who found the address, and what it reaches is an
+// agent that approves its own tool calls. It used to accept everything in
+// that case, which made the secret optional in name only.
 func (w *WebhookAdapter) authorized(r *http.Request) bool {
 	if w.secret == "" {
-		return true
+		return false
 	}
 	got := r.Header.Get("X-ChatCLI-Secret")
 	return subtle.ConstantTimeCompare([]byte(got), []byte(w.secret)) == 1
