@@ -25,6 +25,10 @@ func setupTestEnv(t *testing.T, envs map[string]string) {
 		"OLLAMA_ENABLED", "OLLAMA_BASE_URL",
 		"STACKSPOT_REALM", "STACKSPOT_AGENT_ID",
 		"CHATCLI_AUTH_DIR",
+		// The environment file must not leak into provider assertions: with
+		// CHATCLI_DOTENV exported (a common developer setup) the resolver
+		// would load the real file and register every provider it configures.
+		"CHATCLI_DOTENV", "CHATCLI_PROJECT_ENV",
 		"AWS_ACCESS_KEY_ID", "AWS_PROFILE", "AWS_REGION", "BEDROCK_REGION",
 		"BEDROCK_MODEL",
 		"AWS_WEB_IDENTITY_TOKEN_FILE",

@@ -125,7 +125,7 @@ OPENAI_API_KEY=sk-xxx
 |---|---|---|---|
 | OpenAI | `OPENAI_API_KEY` | `OPENAI_MODEL` | `OPENAI_MAX_TOKENS`, `OPENAI_USE_RESPONSES`, `OPENAI_API_URL` |
 | Anthropic | `ANTHROPIC_API_KEY` | `ANTHROPIC_MODEL` | `ANTHROPIC_MAX_TOKENS` |
-| AWS Bedrock | IAM / Profile / credentials chain | `BEDROCK_MODEL` | `AWS_REGION`, `BEDROCK_CROSS_REGION` |
+| AWS Bedrock | IAM / SSO / `aws login` / credentials chain | `BEDROCK_MODEL` | `BEDROCK_PROFILE` or `AWS_PROFILE`, `BEDROCK_REGION` or `AWS_REGION`, `BEDROCK_CROSS_REGION` |
 | Google Gemini | `GOOGLEAI_API_KEY` | `GOOGLEAI_MODEL` | `GOOGLEAI_MAX_TOKENS` |
 | xAI | `XAI_API_KEY` | `XAI_MODEL` | `XAI_MAX_TOKENS` |
 | ZAI | `ZAI_API_KEY` | `ZAI_MODEL` | `ZAI_MAX_TOKENS`, `ZAI_USE_CODING_PLAN`, `ZAI_THINKING`, `ZAI_API_URL` |
@@ -137,6 +137,19 @@ OPENAI_API_KEY=sk-xxx
 | OpenRouter | `OPENROUTER_API_KEY` | — | `OPENROUTER_MAX_TOKENS`, `OPENROUTER_FALLBACK_MODELS`, `OPENROUTER_API_URL` |
 | Ollama | — | `OLLAMA_MODEL` | `OLLAMA_ENABLED=true`, `OLLAMA_BASE_URL` |
 | OpenAI (Responses API) | `OPENAI_API_KEY` | `OPENAI_MODEL` | `OPENAI_RESPONSES_API_URL` |
+
+#### Environment file (.env) discovery
+
+ChatCLI looks for its environment file in this order, and the **first file that exists wins**:
+
+1. `$CHATCLI_DOTENV` (explicit; honored even when missing, so a typo is reported instead of silently ignored)
+2. `./.env` — the working directory
+3. `~/.chatcli/.env`
+4. `~/.env`
+
+The home fallbacks matter for the **non-interactive surfaces**: an editor spawning `chatcli acp`, or an MCP client spawning `chatcli mcp-server`, does **not** run your shell profile — `CHATCLI_DOTENV` and any variable you export from `.zshrc`/`.bashrc` never reach the child process, and its working directory is the project, which usually has no `.env`. Before this fallback existed those servers ran with no environment file at all: providers keyed by an env var disappeared and `AWS_PROFILE` went missing, so Bedrock authenticated as the `default` profile instead of the account you logged into. Keep your file at `~/.chatcli/.env` (or `~/.env`) and every surface agrees. `/config` shows the file in effect, its origin, and the effective AWS profile.
+
+Per-project settings: the ACP server also layers the `.env` of the project the editor opened (`session/new`'s `cwd`) on top, **fill-only** — it can add variables you have not set, never override one already in effect, and only the first project announced applies. Because a project directory is untrusted input, `CHATCLI_PROJECT_ENV=safe` (the default) refuses credential and endpoint variables (`*_API_KEY`, `*_TOKEN`, `*_BASE_URL`, `*_API_URL`, …) from that file; `all` accepts everything, `off` disables the overlay.
 
 #### Custom endpoints and OpenAI-compatible gateways
 

@@ -101,10 +101,22 @@ func (cm *ConfigManager) loadDefaults() {
 }
 
 // loadEnvFile carrega configurações do arquivo .env.
+//
+// O caminho vem de ActiveDotenv (CHATCLI_DOTENV → ./.env → ~/.chatcli/.env →
+// ~/.env), NUNCA do godotenv.Read() sem argumento: aquele lia sempre "./.env"
+// e ignorava CHATCLI_DOTENV, então o fallback ".env-sourced" que o manager de
+// LLM usa (config.Global.GetString("AWS_PROFILE"), modelos de boot, …) ficava
+// vazio sempre que o arquivo de ambiente não estava no diretório atual — o
+// caso normal de `chatcli acp`/`mcp-server` lançado por uma IDE.
 func (cm *ConfigManager) loadEnvFile() {
-	envMap, err := godotenv.Read() // Não sobrepõe vars de ambiente existentes
+	path := ActiveDotenv().Path
+	if path == "" {
+		path = ".env"
+	}
+	envMap, err := godotenv.Read(path) // Não sobrepõe vars de ambiente existentes
 	if err != nil {
-		cm.logger.Debug("Arquivo .env não encontrado ou erro na leitura", zap.Error(err))
+		cm.logger.Debug("Arquivo .env não encontrado ou erro na leitura",
+			zap.String("path", path), zap.Error(err))
 		return
 	}
 	for key, value := range envMap {

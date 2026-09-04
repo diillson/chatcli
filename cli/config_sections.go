@@ -43,6 +43,7 @@ import (
 	"github.com/diillson/chatcli/cli/plugins"
 	"github.com/diillson/chatcli/config"
 	"github.com/diillson/chatcli/i18n"
+	"github.com/diillson/chatcli/llm/bedrock"
 	"github.com/diillson/chatcli/llm/catalog"
 	"github.com/diillson/chatcli/llm/imagegen"
 	"github.com/diillson/chatcli/llm/transcription"
@@ -489,7 +490,14 @@ func (cli *ChatCLI) showConfigGeneral() {
 	p := uiPrefix(ColorCyan)
 
 	kv(p, i18n.T("cfg.kv.dotenv_path"), cli.getEnvFilePath())
+	kv(p, i18n.T("cfg.kv.dotenv_origin"), cli.dotenvOriginLabel())
 	kv(p, "CHATCLI_DOTENV", envOr("CHATCLI_DOTENV"))
+	kv(p, "CHATCLI_PROJECT_ENV", string(config.ProjectDotenvPolicy()))
+	for _, overlay := range config.ProjectDotenvOverlays() {
+		kv(p, i18n.T("cfg.kv.dotenv_project"),
+			fmt.Sprintf("%s (%s: %s)", overlay.Path,
+				i18n.T("cfg.kv.dotenv_project_applied"), strings.Join(overlay.Applied, ", ")))
+	}
 	kv(p, "ENV", envOr("ENV"))
 	kv(p, "CHATCLI_ENV", envOr("CHATCLI_ENV"))
 	kv(p, "CHATCLI_DEBUG", envBool("CHATCLI_DEBUG"))
@@ -600,7 +608,13 @@ func (cli *ChatCLI) showConfigProviders() {
 	kv(p, "BEDROCK_MODEL", envOr("BEDROCK_MODEL"))
 	kv(p, "BEDROCK_REGION", envOr("BEDROCK_REGION"))
 	kv(p, "AWS_REGION", envOr("AWS_REGION"))
+	kv(p, "BEDROCK_PROFILE", envOr("BEDROCK_PROFILE"))
 	kv(p, "AWS_PROFILE", envOr("AWS_PROFILE"))
+	// The identity actually used, and which variable decided it: env vars
+	// alone do not tell the story once the value comes from the .env, and
+	// "which account is this?" is the first question when Bedrock answers
+	// from the wrong one.
+	kv(p, i18n.T("cfg.kv.aws_profile_effective"), effectiveAWSProfile())
 	kv(p, "BEDROCK_PROVIDER", envOr("BEDROCK_PROVIDER"))
 	kv(p, "BEDROCK_MAX_TOKENS", envOr("BEDROCK_MAX_TOKENS"))
 	kv(p, "BEDROCK_TEMPERATURE", envOr("BEDROCK_TEMPERATURE"))
@@ -1702,4 +1716,16 @@ func (cli *ChatCLI) renderCoderPolicy(p string) {
 	kv(p, i18n.T("cfg.kv.local_merge"), localMerge)
 	kv(p, i18n.T("cfg.kv.rule_count"), rulesCount)
 	kv(p, i18n.T("cfg.kv.last_match"), lastRule)
+}
+
+// effectiveAWSProfile renders the profile every Bedrock surface resolves to,
+// naming the variable it came from — "(none)" means the AWS SDK falls back
+// to its own `default` profile, which is exactly the state that makes an
+// editor-spawned acp/mcp-server answer from the wrong account.
+func effectiveAWSProfile() string {
+	profile, source := bedrock.ResolveProfile()
+	if profile == "" {
+		return i18n.T("cfg.kv.aws_profile_none")
+	}
+	return fmt.Sprintf("%s (%s)", profile, source)
 }

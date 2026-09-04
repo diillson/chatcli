@@ -389,6 +389,16 @@ func (c *BedrockClient) maybeResolveProfileModel(ctx context.Context) {
 // model family (Anthropic Messages vs. OpenAI Chat Completions).
 // Retries are delegated to utils.Retry inside each family-specific path.
 func (c *BedrockClient) SendPrompt(ctx context.Context, prompt string, history []models.Message, maxTokens int) (string, error) {
+	resp, err := c.sendPromptDispatch(ctx, prompt, history, maxTokens)
+	// A credential-chain failure reaches the user as "no EC2 IMDS role
+	// found", which explains nothing on a laptop. Annotate it with the
+	// profile in use and the environment file in effect (the error keeps its
+	// original chain for errors.As/Is).
+	return resp, ExplainCredentialError(err)
+}
+
+// sendPromptDispatch is SendPrompt without the credential-error annotation.
+func (c *BedrockClient) sendPromptDispatch(ctx context.Context, prompt string, history []models.Message, maxTokens int) (string, error) {
 	// Clear per-call usage so an errored or usage-less response falls back
 	// to estimation instead of re-counting the previous call (see usage.go).
 	c.resetUsage()
@@ -818,7 +828,7 @@ func (c *BedrockClient) ListModels(ctx context.Context) ([]client.ModelInfo, err
 		ByOutputModality: bedrocktypes.ModelModalityText,
 	})
 	if err != nil {
-		c.logger.Warn("bedrock: ListFoundationModels failed", zap.Error(err),
+		c.logger.Warn("bedrock: ListFoundationModels failed", zap.Error(ExplainCredentialError(err)),
 			zap.String("hint", bedrockListEndpointHint))
 	} else {
 		for _, s := range fm.ModelSummaries {
@@ -870,7 +880,7 @@ func (c *BedrockClient) appendInferenceProfiles(ctx context.Context, profileType
 	for paginator.HasMorePages() {
 		page, err := paginator.NextPage(ctx)
 		if err != nil {
-			c.logger.Warn("bedrock: ListInferenceProfiles failed", zap.Error(err),
+			c.logger.Warn("bedrock: ListInferenceProfiles failed", zap.Error(ExplainCredentialError(err)),
 				zap.String("type", string(profileType)),
 				zap.String("hint", bedrockListEndpointHint))
 			break

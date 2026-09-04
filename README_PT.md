@@ -125,7 +125,7 @@ OPENAI_API_KEY=sk-xxx
 |---|---|---|---|
 | OpenAI | `OPENAI_API_KEY` | `OPENAI_MODEL` | `OPENAI_MAX_TOKENS`, `OPENAI_USE_RESPONSES`, `OPENAI_API_URL` |
 | Anthropic | `ANTHROPIC_API_KEY` | `ANTHROPIC_MODEL` | `ANTHROPIC_MAX_TOKENS` |
-| AWS Bedrock | IAM / Profile / credentials chain | `BEDROCK_MODEL` | `AWS_REGION`, `BEDROCK_CROSS_REGION` |
+| AWS Bedrock | IAM / SSO / `aws login` / credentials chain | `BEDROCK_MODEL` | `BEDROCK_PROFILE` or `AWS_PROFILE`, `BEDROCK_REGION` or `AWS_REGION`, `BEDROCK_CROSS_REGION` |
 | Google Gemini | `GOOGLEAI_API_KEY` | `GOOGLEAI_MODEL` | `GOOGLEAI_MAX_TOKENS` |
 | xAI | `XAI_API_KEY` | `XAI_MODEL` | `XAI_MAX_TOKENS` |
 | ZAI | `ZAI_API_KEY` | `ZAI_MODEL` | `ZAI_MAX_TOKENS`, `ZAI_USE_CODING_PLAN`, `ZAI_THINKING`, `ZAI_API_URL` |
@@ -137,6 +137,19 @@ OPENAI_API_KEY=sk-xxx
 | OpenRouter | `OPENROUTER_API_KEY` | — | `OPENROUTER_MAX_TOKENS`, `OPENROUTER_FALLBACK_MODELS`, `OPENROUTER_API_URL` |
 | Ollama | — | `OLLAMA_MODEL` | `OLLAMA_ENABLED=true`, `OLLAMA_BASE_URL` |
 | OpenAI (Responses API) | `OPENAI_API_KEY` | `OPENAI_MODEL` | `OPENAI_RESPONSES_API_URL` |
+
+#### Descoberta do arquivo de ambiente (.env)
+
+O ChatCLI procura o arquivo de ambiente nesta ordem, e o **primeiro que existir vence**:
+
+1. `$CHATCLI_DOTENV` (explícito; respeitado mesmo se não existir, para que um caminho errado seja avisado em vez de ignorado em silêncio)
+2. `./.env` — o diretório atual
+3. `~/.chatcli/.env`
+4. `~/.env`
+
+Os fallbacks no home existem por causa das **superfícies não interativas**: uma IDE que sobe `chatcli acp`, ou um cliente MCP que sobe `chatcli mcp-server`, **não** executa o seu shell profile — nem `CHATCLI_DOTENV` nem nada que você exporta no `.zshrc`/`.bashrc` chega no processo filho, e o diretório de trabalho é o projeto, que normalmente não tem `.env`. Sem esse fallback esses servidores rodavam sem nenhum arquivo de ambiente: providers configurados por env var sumiam e o `AWS_PROFILE` faltava, então o Bedrock autenticava com o profile `default` em vez da conta em que você fez login. Mantenha o arquivo em `~/.chatcli/.env` (ou `~/.env`) e todas as superfícies concordam. O `/config` mostra o arquivo em efeito, a origem dele e o profile AWS efetivo.
+
+Configuração por projeto: o servidor ACP também sobrepõe o `.env` do projeto aberto na IDE (o `cwd` do `session/new`), **somente preenchendo** — pode adicionar variáveis que você não definiu, nunca sobrescreve uma já em efeito, e só o primeiro projeto anunciado se aplica. Como o diretório do projeto é entrada não confiável, `CHATCLI_PROJECT_ENV=safe` (padrão) recusa variáveis de credencial e de endpoint (`*_API_KEY`, `*_TOKEN`, `*_BASE_URL`, `*_API_URL`, …) vindas desse arquivo; `all` aceita tudo e `off` desliga a sobreposição.
 
 #### Endpoints customizados e gateways compatíveis com OpenAI
 

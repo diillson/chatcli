@@ -74,6 +74,7 @@ var reloadableEnvVars = []string{
 	// Security, sessions, memory, hub, telemetry: a value removed from
 	// .env must not survive /reload.
 	"CHATCLI_ENCRYPTION_KEY", "CHATCLI_AUDIT_LOG_PATH", "CHATCLI_ENV_REDACT_MODE", "CHATCLI_MANAGED_CONFIG",
+	"CHATCLI_PROJECT_ENV",
 	"CHATCLI_SESSION_TRANSCRIPT", "CHATCLI_SESSION_TTL", "CHATCLI_GATEWAY_MAX_TENANTS", "CHATCLI_HUB_TTL_HOURS",
 	"CHATCLI_MEMORY_MODE", "CHATCLI_MEMORY_ENABLED", "CHATCLI_MEMORY_AUTORECALL", "CHATCLI_SESSION_AUTORECALL",
 	"CHATCLI_MEMORY_FALLBACK_PROVIDERS", "CHATCLI_MEMORY_MAX_FACTS", "CHATCLI_MEMORY_MAX_SIZE",
@@ -90,16 +91,15 @@ func (cli *ChatCLI) reloadConfiguration(ctx context.Context) {
 	prevProvider := cli.Provider
 	prevModel := cli.Model
 
-	envFilePath := os.Getenv("CHATCLI_DOTENV")
-	if envFilePath == "" {
-		envFilePath = ".env"
-	} else {
-		if expanded, err := utils.ExpandPath(envFilePath); err == nil {
-			envFilePath = expanded
-		} else {
-			fmt.Println(i18n.T("main.warn_expand_path", envFilePath, err))
-		}
+	// Same discovery rule as boot (CHATCLI_DOTENV → ./.env → ~/.chatcli/.env
+	// → ~/.env), re-run here so /reload picks up a file created since boot
+	// and every later reader agrees on which file is in effect.
+	res := config.ResolveDotenv()
+	config.SetActiveDotenv(res)
+	if res.ExpandErr != nil {
+		fmt.Println(i18n.T("main.warn_expand_path", res.Path, res.ExpandErr))
 	}
+	envFilePath := res.Path
 	for _, variable := range reloadableEnvVars {
 		_ = os.Unsetenv(variable)
 	}
@@ -467,18 +467,29 @@ func firstNonEmptyEnvVal(names ...string) string {
 	return ""
 }
 
-// getEnvFilePath retorna o caminho do arquivo .env configurado (expandido).
+// getEnvFilePath retorna o caminho do arquivo .env em efeito (expandido),
+// pela mesma descoberta do boot — não apenas CHATCLI_DOTENV/"./.env".
 func (cli *ChatCLI) getEnvFilePath() string {
-	envFilePath := os.Getenv("CHATCLI_DOTENV")
-	if envFilePath == "" {
-		envFilePath = ".env"
+	res := config.ActiveDotenv()
+	if res.ExpandErr != nil {
+		cli.logger.Warn("Não foi possível expandir o caminho do .env", zap.Error(res.ExpandErr))
 	}
-	expanded, err := utils.ExpandPath(envFilePath)
-	if err != nil {
-		cli.logger.Warn("Não foi possível expandir o caminho do .env", zap.Error(err))
-		return envFilePath // Retorna o original se falhar
+	return res.Path
+}
+
+// dotenvOriginLabel descreve, em uma palavra, de onde veio o arquivo de
+// ambiente em efeito — a informação que separa "o .env não foi lido" de
+// "o .env foi lido e a variável não está lá".
+func (cli *ChatCLI) dotenvOriginLabel() string {
+	res := config.ActiveDotenv()
+	switch {
+	case !res.Exists && res.Origin == config.DotenvNotFound:
+		return i18n.T("cfg.dotenv.origin_none")
+	case !res.Exists:
+		return i18n.T("cfg.dotenv.origin_missing", string(res.Origin))
+	default:
+		return string(res.Origin)
 	}
-	return expanded
 }
 
 func (ch *CommandHandler) handleVersionCommand(ctx context.Context) {

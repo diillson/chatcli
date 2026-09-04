@@ -66,7 +66,9 @@ func runRPC(kind string, mgr manager.LLMManager, logger *zap.Logger) error {
 	if err != nil {
 		logger.Warn("rpcserve: ChatCLI init failed; agent/coder/tools disabled", zap.Error(err))
 	}
-	chatCLI.SetAuditSurface("acp")
+	// The surface is the server actually running: labeling an
+	// `mcp-server` run as "acp" mislabels its audit trail and telemetry.
+	chatCLI.SetAuditSurface(kind)
 	if chatCLI != nil {
 		// stdin carries the JSON-RPC protocol: any interactive confirmation
 		// would consume protocol frames and hang the run. Unattended mode
@@ -205,6 +207,10 @@ type sessionStore interface {
 // rpcBackend implements rpcserve.MCPBackend (and thus Backend). Chat keeps a
 // per-session history; agent/coder/tools delegate to the ChatCLI.
 type rpcBackend struct {
+	// mgr is swapped when a project .env unlocks providers (AdoptWorkspace),
+	// so every read goes through manager() under mgrMu — JSON-RPC requests
+	// are served concurrently.
+	mgrMu    sync.RWMutex
 	mgr      manager.LLMManager
 	cli      *cli.ChatCLI
 	store    sessionStore // nil when ChatCLI failed to initialize
@@ -272,10 +278,38 @@ func trimDanglingToolPairs(hist []models.Message) []models.Message {
 	return hist[start:end]
 }
 
+// manager returns the live LLM manager.
+func (b *rpcBackend) manager() manager.LLMManager {
+	b.mgrMu.RLock()
+	defer b.mgrMu.RUnlock()
+	return b.mgr
+}
+
+// AdoptWorkspace implements rpcserve.ACPWorkspaceBackend: the editor told us
+// which project it opened, so layer that project's .env over the process
+// configuration (fill-only, once per process).
+//
+// This is also the recovery path for the environment an editor never passes
+// on: a client that spawns `chatcli acp` without the user's shell gets no
+// CHATCLI_DOTENV and no exported provider variables, and the project file is
+// then the only per-repository configuration ChatCLI can still see.
+func (b *rpcBackend) AdoptWorkspace(dir string) {
+	if b.cli == nil {
+		return
+	}
+	rebuilt, _ := b.cli.ApplyProjectEnv(dir)
+	if rebuilt == nil {
+		return
+	}
+	b.mgrMu.Lock()
+	b.mgr = rebuilt
+	b.mgrMu.Unlock()
+}
+
 // HasLLM reports whether any LLM provider is configured. The MCP server
 // hides the LLM-backed harness tools when this is false.
 func (b *rpcBackend) HasLLM() bool {
-	return len(b.mgr.GetAvailableProviders()) > 0
+	return len(b.manager().GetAvailableProviders()) > 0
 }
 
 // errNoLLM is the actionable no-provider error, sent in-band to the caller
@@ -337,7 +371,7 @@ func (b *rpcBackend) promptPlain(ctx context.Context, session, text string, hist
 	if model == "" {
 		model = b.model
 	}
-	client, err := b.mgr.GetClient(provider, model)
+	client, err := b.manager().GetClient(provider, model)
 	if err != nil {
 		return "", err
 	}

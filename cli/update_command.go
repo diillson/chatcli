@@ -26,7 +26,6 @@ import (
 	"github.com/diillson/chatcli/update"
 	"github.com/diillson/chatcli/utils"
 	"github.com/diillson/chatcli/version"
-	"github.com/joho/godotenv"
 	"go.uber.org/zap"
 )
 
@@ -61,13 +60,9 @@ func RunUpdateOneShot(ctx context.Context, logger *zap.Logger, checkOnly bool) e
 // contrato de exit code de RunUpdateSubcommand. Vive no pacote cli para boot
 // e contrato ficarem sob teste — no main resta apenas o os.Exit.
 func UpdateSubcommandMain(args []string) int {
-	envFilePath := os.Getenv("CHATCLI_DOTENV")
-	if envFilePath == "" {
-		envFilePath = ".env"
-	} else if expanded, err := utils.ExpandPath(envFilePath); err == nil {
-		envFilePath = expanded
-	}
-	_ = godotenv.Load(envFilePath)
+	// Mesma descoberta do boot: CHATCLI_DOTENV → ./.env → ~/.chatcli/.env →
+	// ~/.env (o canal/pin de update mora no arquivo de ambiente).
+	_, _ = config.LoadDotenv()
 	i18n.Init()
 	theme.InitFromEnv()
 
