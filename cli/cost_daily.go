@@ -106,6 +106,17 @@ func (ct *CostTracker) saveDailySpendTo(path string) {
 	_ = utils.AtomicWriteFile(path, data, 0o600)
 }
 
+// DailySpend returns today's spend and the configured daily limit (0 when
+// unset).
+func (ct *CostTracker) DailySpend() (spent, limit float64) {
+	if ct == nil {
+		return 0, 0
+	}
+	ct.mu.RLock()
+	defer ct.mu.RUnlock()
+	return ct.dailySpentUSD, ct.dailyLimitUSD
+}
+
 // FlushDailySpend writes today's spend now (session end, tenant swap).
 func (ct *CostTracker) FlushDailySpend() {
 	if ct == nil {

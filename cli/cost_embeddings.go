@@ -28,6 +28,8 @@ func (ct *CostTracker) RecordEmbeddingUsage(provider string, chars int) {
 	ct.embeddingTokens += tokens
 	ct.embeddingCostUSD += cost
 	ct.totalCostUSD += cost
+	// Embedding spend counts against the daily budget like any other.
+	ct.accrueDailyLocked()
 	ct.mu.Unlock()
 }
 
