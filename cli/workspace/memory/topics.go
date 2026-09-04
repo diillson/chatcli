@@ -12,6 +12,7 @@ import (
 
 // TopicTracker tracks recurring topics across conversations.
 type TopicTracker struct {
+	latch  storeLatch // read-only once a sealed file could not be opened
 	topics map[string]*Topic
 	mu     sync.RWMutex
 	path   string
@@ -234,7 +235,7 @@ func normalizeTopic(name string) string {
 
 func (tt *TopicTracker) load() {
 	data, err := readStoreFile(tt.path)
-	if err != nil {
+	if tt.latch.lockIfSealed(err, tt.logger, "topics") || err != nil {
 		return
 	}
 	var topics []Topic
@@ -255,6 +256,9 @@ func (tt *TopicTracker) load() {
 }
 
 func (tt *TopicTracker) persist() {
+	if tt.latch.locked() {
+		return // sealed file we cannot read: never overwrite it
+	}
 	tt.mergeFromDiskLocked()
 	topics := make([]Topic, 0, len(tt.topics))
 	for _, t := range tt.topics {

@@ -50,6 +50,7 @@ type Episode struct {
 // EpisodeStore manages the append-only episodic timeline with JSON
 // persistence shared across processes.
 type EpisodeStore struct {
+	latch    storeLatch // read-only once a sealed file could not be opened
 	mu       sync.RWMutex
 	episodes map[string]*Episode // keyed by ID
 	path     string
@@ -254,6 +255,9 @@ func mergeRefs(a, b []string) []string {
 
 func (es *EpisodeStore) load() {
 	data, err := readStoreFile(es.path)
+	if es.latch.lockIfSealed(err, es.logger, "episodes") {
+		return
+	}
 	if err != nil {
 		if !os.IsNotExist(err) {
 			es.logger.Debug("failed to load episode store", zap.Error(err))
@@ -289,6 +293,9 @@ func (es *EpisodeStore) load() {
 // union: adopt every episode the other process appended, keep ours, and only
 // then apply the cap. Caller must hold the write lock.
 func (es *EpisodeStore) persistLocked() {
+	if es.latch.locked() {
+		return // sealed file we cannot read: never overwrite it
+	}
 	es.mergeFromDiskLocked()
 
 	episodes := make([]*Episode, 0, len(es.episodes))
@@ -313,6 +320,9 @@ func (es *EpisodeStore) persistLocked() {
 // untouched. Caller must hold the write lock.
 func (es *EpisodeStore) mergeFromDiskLocked() {
 	data, err := readStoreFile(es.path)
+	if es.latch.lockIfSealed(err, es.logger, "episodes") {
+		return
+	}
 	if err == nil {
 		var onDisk []*Episode
 		if json.Unmarshal(data, &onDisk) == nil {

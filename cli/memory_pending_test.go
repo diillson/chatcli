@@ -18,6 +18,7 @@ import (
 	"github.com/diillson/chatcli/cli/workspace"
 	"github.com/diillson/chatcli/llm/client"
 	"github.com/diillson/chatcli/models"
+	"github.com/diillson/chatcli/pkg/atrest"
 	"go.uber.org/zap"
 )
 
@@ -189,5 +190,33 @@ func TestPersistPending_EnforcesCap(t *testing.T) {
 	}
 	if got := len(mw.pendingFiles()); got > pendingMaxFiles {
 		t.Fatalf("pending files = %d, want <= %d", got, pendingMaxFiles)
+	}
+}
+
+func TestPersistPending_RedactsAndSealsAtRest(t *testing.T) {
+	t.Setenv("CHATCLI_ENCRYPTION_KEY", "wal-key")
+	active := &scriptedClient{name: "claude", response: "NOTHING_NEW"}
+	mw := newResilienceWorker(t, active)
+	segment := []models.Message{{Role: "user", Content: "token is sk-abcdefghijklmnopqrstuvwxyz1234567890ABCD and the deploy freeze ends friday"}}
+	path, err := mw.persistPending(segment)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, _ := os.ReadFile(path)
+	if !atrest.IsEncrypted(raw) {
+		t.Fatal("the pending queue must be sealed when the key is set")
+	}
+	plain, err := atrest.Open(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(plain), "sk-abcdefghijklmnopqrstuvwxyz1234567890ABCD") {
+		t.Fatal("secrets must be redacted before the segment reaches disk")
+	}
+	if !strings.Contains(string(plain), "deploy freeze") {
+		t.Fatal("the conversation itself must survive")
+	}
+	if got := mw.drainPending(context.Background()); got != 1 {
+		t.Fatalf("sealed segments must drain: %d", got)
 	}
 }

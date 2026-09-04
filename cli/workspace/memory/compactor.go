@@ -26,6 +26,7 @@ const compactorStateFile = "compactor_state.json"
 
 // Compactor handles LLM-based memory consolidation and cleanup.
 type Compactor struct {
+	latch  storeLatch // read-only once a sealed file could not be opened
 	facts  *FactIndex
 	daily  *DailyNoteStore
 	config Config
@@ -58,7 +59,7 @@ func NewCompactor(facts *FactIndex, daily *DailyNoteStore, config Config, memDir
 // leaves the zero value — the worst case is one extra compaction check.
 func (c *Compactor) loadState() {
 	data, err := readStoreFile(filepath.Join(c.memDir, compactorStateFile))
-	if err != nil {
+	if c.latch.lockIfSealed(err, c.logger, "compactor") || err != nil {
 		return
 	}
 	var s compactorState

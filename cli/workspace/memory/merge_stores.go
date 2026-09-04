@@ -24,8 +24,8 @@ import (
 // mergeFromDiskLocked adopts topics the other process recorded and keeps
 // the stronger signal for topics both know.
 func (tt *TopicTracker) mergeFromDiskLocked() {
-	data, err := os.ReadFile(tt.path)
-	if err != nil {
+	data, err := readStoreFile(tt.path)
+	if tt.latch.lockIfSealed(err, tt.logger, "topics") || err != nil {
 		return
 	}
 	var onDisk []Topic
@@ -64,8 +64,8 @@ func (tt *TopicTracker) mergeFromDiskLocked() {
 // project both know, the more recently active record's scalars win and the
 // lists and metadata are unioned.
 func (pt *ProjectTracker) mergeFromDiskLocked() {
-	data, err := os.ReadFile(pt.path)
-	if err != nil {
+	data, err := readStoreFile(pt.path)
+	if pt.latch.lockIfSealed(err, pt.logger, "projects") || err != nil {
 		return
 	}
 	var onDisk []Project
@@ -129,8 +129,8 @@ func (ps *UserProfileStore) mergeFromDiskLocked() {
 	if err != nil || !info.ModTime().After(ps.loadedAt) {
 		return
 	}
-	data, err := os.ReadFile(ps.path)
-	if err != nil {
+	data, err := readStoreFile(ps.path)
+	if ps.latch.lockIfSealed(err, ps.logger, "profile") || err != nil {
 		return
 	}
 	var d UserProfile

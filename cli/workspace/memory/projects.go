@@ -12,6 +12,7 @@ import (
 
 // ProjectTracker tracks active projects with context.
 type ProjectTracker struct {
+	latch    storeLatch // read-only once a sealed file could not be opened
 	projects map[string]*Project
 	mu       sync.RWMutex
 	path     string
@@ -214,7 +215,7 @@ func stringSliceEqual(a, b []string) bool {
 
 func (pt *ProjectTracker) load() {
 	data, err := readStoreFile(pt.path)
-	if err != nil {
+	if pt.latch.lockIfSealed(err, pt.logger, "projects") || err != nil {
 		return
 	}
 	var projects []Project
@@ -235,6 +236,9 @@ func (pt *ProjectTracker) load() {
 }
 
 func (pt *ProjectTracker) persist() {
+	if pt.latch.locked() {
+		return // sealed file we cannot read: never overwrite it
+	}
 	pt.mergeFromDiskLocked()
 	projects := make([]Project, 0, len(pt.projects))
 	for _, p := range pt.projects {

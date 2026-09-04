@@ -12,6 +12,7 @@ import (
 
 // UserProfileStore manages the user profile on disk.
 type UserProfileStore struct {
+	latch   storeLatch // read-only once a sealed file could not be opened
 	profile UserProfile
 	mu      sync.RWMutex
 	path    string
@@ -638,7 +639,7 @@ func sortedKeys[V any](m map[string]V) []string {
 
 func (ps *UserProfileStore) load() {
 	data, err := readStoreFile(ps.path)
-	if err != nil {
+	if ps.latch.lockIfSealed(err, ps.logger, "profile") || err != nil {
 		return
 	}
 	var p UserProfile
@@ -672,6 +673,9 @@ func (ps *UserProfileStore) load() {
 }
 
 func (ps *UserProfileStore) persist() {
+	if ps.latch.locked() {
+		return // sealed file we cannot read: never overwrite it
+	}
 	ps.mergeFromDiskLocked()
 	data, err := json.MarshalIndent(ps.profile, "", "  ")
 	if err != nil {

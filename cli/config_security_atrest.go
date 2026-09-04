@@ -14,6 +14,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/diillson/chatcli/cli/workspace/memory"
 	"github.com/diillson/chatcli/i18n"
 	"github.com/diillson/chatcli/pkg/atrest"
 )
@@ -146,4 +147,11 @@ func (cli *ChatCLI) renderAtRestStatus(p string) {
 	}
 	kv(p, atrest.EnvPreviousKeys, fmt.Sprintf("%d", previous))
 	kv(p, i18n.T("cfg.kv.sec.atrest_covers"), i18n.T("cfg.kv.sec.atrest_covers_list"))
+	if locked := memory.LockedStores(); len(locked) > 0 {
+		names := make([]string, 0, len(locked))
+		for _, l := range locked {
+			names = append(names, l.Store)
+		}
+		kv(p, i18n.T("cfg.kv.sec.atrest_locked"), colorize(i18n.T("cfg.val.sec.atrest_locked", strings.Join(names, ", ")), ColorRed))
+	}
 }

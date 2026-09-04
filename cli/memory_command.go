@@ -437,6 +437,9 @@ func (cli *ChatCLI) showMemoryStats() {
 
 	fmt.Println()
 	fmt.Println(colorize("  "+i18n.T("mem.cmd.stats.title"), ColorCyan+ColorBold))
+	for _, l := range memory.LockedStores() {
+		fmt.Println(colorize("  "+i18n.T("mem.cmd.stats.locked_store", l.Store, l.Path, l.Reason), ColorRed))
+	}
 	fmt.Println(colorize("  ─────────────────────────────────────────", ColorGray))
 
 	fmt.Printf("  %s  %d\n", colorize(i18n.T("mem.cmd.stats.facts_stored"), ColorYellow), mgr.Facts.Count())
