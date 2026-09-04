@@ -335,7 +335,7 @@ func ClassifyError(err error) ErrorClass {
 		return ErrorClassServerError
 	case strings.Contains(msg, "model not found") || strings.Contains(msg, "404"):
 		return ErrorClassModelNotFound
-	case strings.Contains(msg, "context length") || strings.Contains(msg, "too long") || strings.Contains(msg, "max tokens"):
+	case client.IsContextOverflowError(err) || strings.Contains(msg, "max tokens"):
 		return ErrorClassContextTooLong
 	default:
 		return ErrorClassUnknown

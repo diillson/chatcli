@@ -23,6 +23,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/diillson/chatcli/llm/client"
 	"github.com/diillson/chatcli/models"
 	"go.uber.org/zap"
 )
@@ -140,17 +141,12 @@ func (cr *ContextRecovery) level1Recovery(history []models.Message) []models.Mes
 	// Step 1: Tool result pairing cleanup
 	history, _ = EnsureToolResultPairing(history, cr.logger)
 
-	// Step 2: Halve the budget limits
-	origTurnBudget := DefaultTurnBudgetChars
-	origPerResult := DefaultPerResultMaxChars
-	DefaultTurnBudgetChars = int(float64(origTurnBudget) * cr.config.AggressiveBudgetRatio)
-	DefaultPerResultMaxChars = int(float64(origPerResult) * cr.config.AggressiveBudgetRatio)
-
-	history, _ = EnforceToolResultBudget(history, cr.logger)
-
-	// Restore original limits
-	DefaultTurnBudgetChars = origTurnBudget
-	DefaultPerResultMaxChars = origPerResult
+	// Step 2: Halve the budget limits — for this session only. The
+	// package defaults are shared by every session of a gateway/rpcserve
+	// process and must never be mutated from a recovery.
+	turnBudget := int(float64(DefaultTurnBudgetChars) * cr.config.AggressiveBudgetRatio)
+	perResult := int(float64(DefaultPerResultMaxChars) * cr.config.AggressiveBudgetRatio)
+	history, _ = EnforceToolResultBudgetWith(history, turnBudget, perResult, cr.logger)
 
 	// Step 3: Truncate large assistant messages (reasoning, explanations)
 	for i := range history {
@@ -276,15 +272,7 @@ func IsContextTooLongError(err error) bool {
 	if err == nil {
 		return false
 	}
-	msg := strings.ToLower(err.Error())
-	return strings.Contains(msg, "context length") ||
-		strings.Contains(msg, "too long") ||
-		strings.Contains(msg, "maximum context") ||
-		strings.Contains(msg, "prompt is too long") ||
-		strings.Contains(msg, "request too large") ||
-		strings.Contains(msg, "max_tokens") && strings.Contains(msg, "exceed") ||
-		strings.Contains(msg, "input too long") ||
-		strings.Contains(msg, "token limit")
+	return client.IsContextOverflowError(err)
 }
 
 // IsPayloadTooLargeError detects HTTP 413 responses and proxy-level body

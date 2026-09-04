@@ -25,6 +25,8 @@ type Locale struct {
 	Name string            // basename without extension, e.g. "en-US"
 	Path string            // full path to the JSON file
 	Keys map[string]string // top-level flat keys (this project's convention)
+	// Fragments are the <tag>.<feature>.json files merged into Keys.
+	Fragments []string
 }
 
 // LoadLocales reads every *.json under dir into a slice of Locale. The
@@ -38,10 +40,23 @@ func LoadLocales(dir string) ([]Locale, error) {
 	}
 
 	locales := make([]Locale, 0, len(entries))
-	for _, e := range entries {
-		if e.IsDir() || !strings.HasSuffix(e.Name(), ".json") {
-			continue
+	byName := map[string]int{}
+	// Base files first, fragments after — a fragment sorts before its base
+	// ("en.feature.json" < "en.json") and must merge into it, not the
+	// other way round.
+	ordered := make([]os.DirEntry, 0, len(entries))
+	for pass := 0; pass < 2; pass++ {
+		for _, e := range entries {
+			if e.IsDir() || !strings.HasSuffix(e.Name(), ".json") {
+				continue
+			}
+			fragment := strings.Contains(strings.TrimSuffix(e.Name(), ".json"), ".")
+			if (pass == 0) != fragment {
+				ordered = append(ordered, e)
+			}
 		}
+	}
+	for _, e := range ordered {
 		path := filepath.Join(dir, e.Name())
 		// #nosec G304 -- path is dir (caller-controlled at the CLI flag)
 		// plus a directory entry returned by os.ReadDir; cannot escape dir.
@@ -63,11 +78,22 @@ func LoadLocales(dir string) ([]Locale, error) {
 				keys[k] = s
 			}
 		}
-		locales = append(locales, Locale{
-			Name: strings.TrimSuffix(e.Name(), ".json"),
-			Path: path,
-			Keys: keys,
-		})
+		// A locale is its base file plus its fragments (<tag>.<feature>.json),
+		// exactly as the runtime loader merges them.
+		name, _, isFragment := strings.Cut(strings.TrimSuffix(e.Name(), ".json"), ".")
+		if idx, ok := byName[name]; ok {
+			for k, v := range keys {
+				locales[idx].Keys[k] = v
+			}
+			locales[idx].Fragments = append(locales[idx].Fragments, path)
+			continue
+		}
+		loc := Locale{Name: name, Path: path, Keys: keys}
+		if isFragment {
+			loc.Fragments = []string{path}
+		}
+		byName[name] = len(locales)
+		locales = append(locales, loc)
 	}
 
 	if len(locales) == 0 {

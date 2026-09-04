@@ -100,6 +100,20 @@ type BudgetReport struct {
 //
 // Returns the (possibly modified) history and a report.
 func EnforceToolResultBudget(history []models.Message, logger *zap.Logger) ([]models.Message, *BudgetReport) {
+	return EnforceToolResultBudgetWith(history, DefaultTurnBudgetChars, DefaultPerResultMaxChars, logger)
+}
+
+// EnforceToolResultBudgetWith is EnforceToolResultBudget with explicit
+// budgets, so a session can tighten its own limits (context recovery)
+// without touching the package defaults shared by every other session
+// of the process.
+func EnforceToolResultBudgetWith(history []models.Message, turnBudget, perResult int, logger *zap.Logger) ([]models.Message, *BudgetReport) {
+	if turnBudget <= 0 {
+		turnBudget = DefaultTurnBudgetChars
+	}
+	if perResult <= 0 {
+		perResult = DefaultPerResultMaxChars
+	}
 	report := &BudgetReport{}
 
 	if len(history) == 0 {
@@ -142,9 +156,9 @@ func EnforceToolResultBudget(history []models.Message, logger *zap.Logger) ([]mo
 			report.TotalToolResults++
 			report.TotalOriginalChars += int64(len(msg.Content))
 
-			if len(msg.Content) > DefaultPerResultMaxChars {
+			if len(msg.Content) > perResult {
 				history[idx].Content = truncateWithDiskPersist(
-					msg.Content, msg.ToolCallID, DefaultPerResultMaxChars, logger)
+					msg.Content, msg.ToolCallID, perResult, logger)
 				report.ResultsTruncated++
 				report.ResultsPersistedDisk++
 				report.BytesSavedToDisk += int64(len(msg.Content)) - int64(len(history[idx].Content))
@@ -159,7 +173,7 @@ func EnforceToolResultBudget(history []models.Message, logger *zap.Logger) ([]mo
 			turnSize += len(history[idx].Content)
 		}
 
-		if turnSize <= DefaultTurnBudgetChars {
+		if turnSize <= turnBudget {
 			continue
 		}
 
@@ -178,13 +192,13 @@ func EnforceToolResultBudget(history []models.Message, logger *zap.Logger) ([]mo
 
 		// Progressively truncate the largest results until under budget
 		for _, sr := range sorted {
-			if turnSize <= DefaultTurnBudgetChars {
+			if turnSize <= turnBudget {
 				break
 			}
 
 			content := history[sr.idx].Content
 			// Target: reduce this result to bring turn under budget
-			excess := turnSize - DefaultTurnBudgetChars
+			excess := turnSize - turnBudget
 			targetSize := len(content) - excess
 			if targetSize < PreviewHeadChars+PreviewTailChars+200 {
 				targetSize = PreviewHeadChars + PreviewTailChars + 200

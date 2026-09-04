@@ -264,6 +264,11 @@ func (cli *ChatCLI) RunOnce(ctx context.Context, input string, disableAnimation 
 	if cli.refreshClientOnAuthError(err) {
 		aiResponse, err = activeClient.SendPrompt(ctx, userInput+additionalContext, cli.history, effectiveMaxTokens)
 	}
+	// Overflow recovery (bounded), notices on stderr so stdout stays pipeable.
+	rec := cli.newOverflowRecovery("oneshot", func(msg string) { fmt.Fprintf(os.Stderr, "  %s\n", msg) })
+	for err != nil && cli.recoverOverflow(ctx, rec, err) {
+		aiResponse, err = activeClient.SendPrompt(ctx, userInput+additionalContext, cli.history, effectiveMaxTokens)
+	}
 
 	if !disableAnimation {
 		cli.animation.StopThinkingAnimation()

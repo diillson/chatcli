@@ -80,20 +80,36 @@ func initI18n() {
 	}
 
 	registeredTags := []language.Tag{defaultLang}
+	seen := map[language.Tag]bool{defaultLang: true}
 
+	// A locale is the union of its base file (en.json) and its fragments
+	// (en.<feature>.json): a feature ships its strings in its own small
+	// file instead of editing the shared catalog, so parallel changes
+	// never conflict. Base files load first (whatever ReadDir's order),
+	// so a fragment may override the base deliberately.
+	ordered := make([]string, 0, len(files))
 	for _, file := range files {
-		fileName := file.Name()
-		if !strings.HasSuffix(fileName, ".json") {
-			continue
+		if strings.HasSuffix(file.Name(), ".json") && !isLocaleFragment(file.Name()) {
+			ordered = append(ordered, file.Name())
 		}
+	}
+	for _, file := range files {
+		if strings.HasSuffix(file.Name(), ".json") && isLocaleFragment(file.Name()) {
+			ordered = append(ordered, file.Name())
+		}
+	}
+	for _, fileName := range ordered {
 
-		tagStr := strings.TrimSuffix(fileName, ".json")
+		tagStr, _, _ := strings.Cut(strings.TrimSuffix(fileName, ".json"), ".")
 		tag, err := language.Parse(tagStr)
 		if err != nil {
 			continue
 		}
 
-		registeredTags = append(registeredTags, tag)
+		if !seen[tag] {
+			seen[tag] = true
+			registeredTags = append(registeredTags, tag)
+		}
 
 		content, err := localesFS.ReadFile("locales/" + fileName)
 		if err != nil {
@@ -105,7 +121,12 @@ func initI18n() {
 			continue
 		}
 
-		rawByTag[tag] = translations
+		if rawByTag[tag] == nil {
+			rawByTag[tag] = make(map[string]string, len(translations))
+		}
+		for key, value := range translations {
+			rawByTag[tag][key] = value
+		}
 		for key, value := range translations {
 			if err := message.SetString(tag, key, value); err != nil {
 				fmt.Printf("aviso i18n: falha ao definir a string para a chave '%s': %v\n", key, err)
@@ -125,6 +146,11 @@ func initI18n() {
 		rawTag = registeredTags[idx]
 	}
 	printer = message.NewPrinter(bestTag)
+}
+
+// isLocaleFragment reports whether name is <tag>.<feature>.json.
+func isLocaleFragment(name string) bool {
+	return strings.Contains(strings.TrimSuffix(name, ".json"), ".")
 }
 
 // ActiveTag returns the resolved language tag (e.g. "pt-BR", "en-US", "en").

@@ -130,6 +130,13 @@ func (cli *ChatCLI) runChatTurnSerialized(
 	if cli.refreshClientOnAuthError(err) {
 		reply, err = activeClient.SendPrompt(ctx, input+additionalContext, tempHistory, maxTokens)
 	}
+	// Overflow recovery (bounded): the unattended surfaces used to fail
+	// the turn outright where the REPL agent loop recovered.
+	rec := cli.newOverflowRecovery("rpc", nil)
+	for err != nil && cli.recoverOverflow(ctx, rec, err) {
+		tempHistory = cli.buildChatTempHistoryWithContext(assembly.parts, assembly.turnContext, input, additionalContext, images)
+		reply, err = activeClient.SendPrompt(ctx, input+additionalContext, tempHistory, maxTokens)
+	}
 	if err != nil {
 		return RPCChatTurn{}, err
 	}

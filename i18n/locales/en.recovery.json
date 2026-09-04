@@ -1,0 +1,3 @@
+{
+  "chat.recovery.retrying": "⚠ The request did not fit the model's context window; history was compacted (%s) and the turn is being retried."
+}

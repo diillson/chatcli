@@ -116,6 +116,17 @@ func (cli *ChatCLI) moaTurn(ts moaToolset) moa.Turn {
 		}
 		if !ts.any() {
 			out, err := c.SendPrompt(ctx, prompt, history, 0)
+			// A participant's thread is its own: overflow recovery compacts
+			// that thread (bounded) and retries instead of failing the panel.
+			rec := cli.newOverflowRecovery("moa", nil)
+			for err != nil {
+				h, ok := rec.recoverHistory(err, history)
+				if !ok {
+					break
+				}
+				history = h
+				out, err = c.SendPrompt(ctx, prompt, history, 0)
+			}
 			if err == nil {
 				cli.recordMoaUsage(ref, c, prompt, history, out)
 			}
@@ -220,8 +231,17 @@ func (cli *ChatCLI) runMoaTurnXML(
 	}
 	prompt += instruction
 
+	rec := cli.newOverflowRecovery("moa", nil)
 	for round := 0; ; round++ {
 		resp, err := c.SendPrompt(ctx, prompt, history, 0)
+		for err != nil {
+			h, ok := rec.recoverHistory(err, history)
+			if !ok {
+				break
+			}
+			history = h
+			resp, err = c.SendPrompt(ctx, prompt, history, 0)
+		}
 		if err != nil {
 			return "", err
 		}
