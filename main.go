@@ -78,6 +78,10 @@ func loadDotenvThenI18n() dotenvBootstrap {
 	// entrypoint: $CHATCLI_DOTENV, else ./.env, ~/.chatcli/.env, ~/.env.
 	// The home fallbacks are what keep `chatcli acp` / `mcp-server` working
 	// when an editor spawns them without the user's shell environment.
+	// Snapshot what the shell — or the editor/MCP client's env block — gave
+	// us, BEFORE the file is loaded: /reload restores from it so a
+	// client-provided variable is not lost when the file does not repeat it.
+	config.CaptureBootEnv()
 	res := config.ResolveDotenv()
 	config.SetActiveDotenv(res)
 	b := dotenvBootstrap{path: res.Path, expandErr: res.ExpandErr, resolution: res}

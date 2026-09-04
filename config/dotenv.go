@@ -149,9 +149,13 @@ func ResolveDotenv() DotenvResolution {
 }
 
 var (
-	dotenvMu       sync.RWMutex
-	dotenvActive   DotenvResolution
-	dotenvOverlays []ProjectDotenvReport
+	dotenvMu     sync.RWMutex
+	dotenvActive DotenvResolution
+	// dotenvOverlays records the project files applied (for /config);
+	// dotenvOverlayApplied keeps their contributed values so a /reload can
+	// put them back — the overlay itself runs only once per process.
+	dotenvOverlays       []ProjectDotenvReport
+	dotenvOverlayApplied = map[string]string{}
 )
 
 // SetActiveDotenv records the resolution the process actually loaded, so
@@ -180,6 +184,7 @@ func ActiveDotenv() DotenvResolution {
 // godotenv.Load never overrides a variable already present in the process
 // environment, so a value exported by the shell keeps winning over the file.
 func LoadDotenv() (DotenvResolution, error) {
+	CaptureBootEnv()
 	res := ResolveDotenv()
 	SetActiveDotenv(res)
 	return res, godotenv.Load(res.Path)
@@ -306,6 +311,9 @@ func ApplyProjectDotenv(dir string) ProjectDotenvReport {
 		default:
 			_ = os.Setenv(key, value)
 			rep.Applied = append(rep.Applied, key)
+			dotenvMu.Lock()
+			dotenvOverlayApplied[key] = value
+			dotenvMu.Unlock()
 		}
 	}
 	sort.Strings(rep.Applied)
@@ -330,10 +338,109 @@ func ResetProjectDotenvForTest() {
 	dotenvMu.Lock()
 	defer dotenvMu.Unlock()
 	dotenvOverlays = nil
+	dotenvOverlayApplied = map[string]string{}
 	dotenvActive = DotenvResolution{}
 }
 
 func isEnvSet(key string) bool {
 	v, ok := os.LookupEnv(key)
 	return ok && v != ""
+}
+
+// ─── Boot environment snapshot ────────────────────────────────────────
+//
+// /reload clears every reloadable variable before re-reading the
+// environment file, so that a value REMOVED from the file stops applying
+// without a restart. That rule assumes the file is where those values came
+// from — true in a terminal, false for an editor-spawned `acp` or an
+// MCP client: there the client's own `env` block is often the only source,
+// and clearing it made a single /reload silently drop the provider, model
+// or AWS profile the client had pinned.
+//
+// CaptureBootEnv records the process environment BEFORE the environment
+// file is loaded, so it holds exactly what the shell or the client passed
+// in — never a value that came from the file. RestoreBootEnv puts those
+// back after the reload cycle, and only for variables the file did not
+// define, which keeps the file authoritative on /reload while a
+// client-provided value survives instead of vanishing.
+
+var (
+	bootEnvOnce sync.Once
+	bootEnvMu   sync.RWMutex
+	bootEnv     map[string]string
+)
+
+// CaptureBootEnv snapshots the process environment. It is idempotent: only
+// the first call (before any dotenv load) is recorded.
+func CaptureBootEnv() {
+	bootEnvOnce.Do(func() {
+		snapshot := make(map[string]string, len(os.Environ()))
+		for _, entry := range os.Environ() {
+			if key, value, ok := strings.Cut(entry, "="); ok {
+				snapshot[key] = value
+			}
+		}
+		bootEnvMu.Lock()
+		bootEnv = snapshot
+		bootEnvMu.Unlock()
+	})
+}
+
+// BootEnv returns the value a variable had when the process started.
+func BootEnv(key string) (string, bool) {
+	bootEnvMu.RLock()
+	defer bootEnvMu.RUnlock()
+	v, ok := bootEnv[key]
+	return v, ok
+}
+
+// RestoreBootEnv re-exports the given variables from the boot snapshot when
+// they are currently unset — i.e. the environment file did not define them
+// and the reload cycle cleared them. Returns the names actually restored.
+func RestoreBootEnv(keys []string) []string {
+	var restored []string
+	for _, key := range keys {
+		if isEnvSet(key) {
+			continue // the file, or a managed policy, owns it now
+		}
+		if value, ok := BootEnv(key); ok && value != "" {
+			_ = os.Setenv(key, value)
+			restored = append(restored, key)
+		}
+	}
+	sort.Strings(restored)
+	return restored
+}
+
+// ResetBootEnvForTest clears the snapshot so a test can take its own.
+func ResetBootEnvForTest() {
+	bootEnvOnce = sync.Once{}
+	bootEnvMu.Lock()
+	bootEnv = nil
+	bootEnvMu.Unlock()
+}
+
+// ReapplyProjectDotenv re-exports the variables that project overlays had
+// contributed and that are currently unset. A reload clears reloadable
+// variables and re-reads only the process-wide environment file, which
+// would otherwise drop the project's contribution for good — the overlay
+// itself runs once per process. Fill-only, like the original overlay.
+func ReapplyProjectDotenv() []string {
+	dotenvMu.RLock()
+	pending := make(map[string]string, len(dotenvOverlayApplied))
+	for key, value := range dotenvOverlayApplied {
+		pending[key] = value
+	}
+	dotenvMu.RUnlock()
+
+	var restored []string
+	for key, value := range pending {
+		if isEnvSet(key) {
+			continue
+		}
+		_ = os.Setenv(key, value)
+		restored = append(restored, key)
+	}
+	sort.Strings(restored)
+	return restored
 }

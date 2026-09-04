@@ -80,6 +80,7 @@ func (cli *ChatCLI) ApplyProjectEnv(dir string) (manager.LLMManager, config.Proj
 			return
 		}
 		cli.manager = rebuilt
+		notifyManagerRebuilt(rebuilt)
 		mgr = rebuilt
 		cli.adoptProviderAfterOverlay(rep)
 	})
@@ -109,6 +110,48 @@ func (cli *ChatCLI) adoptProviderAfterOverlay(rep config.ProjectDotenvReport) {
 		zap.String("provider", cli.Provider),
 		zap.String("model", cli.Model),
 		zap.String("source", strings.Join(rep.Applied, ",")))
+}
+
+// managerHooks are notified whenever the LLM manager is rebuilt (/reload,
+// /config reload, the project overlay). Long-lived servers hold their own
+// reference to the manager — the MCP/ACP backend does — and without this
+// they would keep serving the provider set the configuration had BEFORE the
+// reload. Delivered as a push instead of exposing the field: the readers
+// live on other goroutines, and each one stores the value behind its own
+// lock.
+var (
+	managerHooksMu sync.Mutex
+	managerHooks   []func(manager.LLMManager)
+)
+
+// OnManagerRebuild registers a hook fired after every manager rebuild.
+func (cli *ChatCLI) OnManagerRebuild(fn func(manager.LLMManager)) {
+	if fn == nil {
+		return
+	}
+	managerHooksMu.Lock()
+	defer managerHooksMu.Unlock()
+	managerHooks = append(managerHooks, fn)
+}
+
+// notifyManagerRebuilt fires the hooks with the new manager.
+func notifyManagerRebuilt(m manager.LLMManager) {
+	if m == nil {
+		return
+	}
+	managerHooksMu.Lock()
+	hooks := append([]func(manager.LLMManager){}, managerHooks...)
+	managerHooksMu.Unlock()
+	for _, fn := range hooks {
+		fn(m)
+	}
+}
+
+// ResetManagerHooksForTest clears the registered hooks. Test-only.
+func ResetManagerHooksForTest() {
+	managerHooksMu.Lock()
+	defer managerHooksMu.Unlock()
+	managerHooks = nil
 }
 
 // ResetProjectEnvOnceForTest re-arms the one-shot overlay. Test-only.

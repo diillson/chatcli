@@ -361,3 +361,24 @@ func TestManageSession_Guards(t *testing.T) {
 		t.Error("delete without a store must fail")
 	}
 }
+
+// A rebuilt manager must reach the backend: the ACP/MCP server holds its own
+// reference, and a `/config reload` from the client that only swapped
+// ChatCLI's would leave every later prompt on the pre-reload provider set.
+func TestRPCBackend_SetManagerSwapsTheLiveManager(t *testing.T) {
+	first := &manager.LLMManagerImpl{}
+	second := &manager.LLMManagerImpl{}
+	b := &rpcBackend{mgr: first}
+
+	if b.manager() != manager.LLMManager(first) {
+		t.Fatal("backend must start on the manager it was built with")
+	}
+	b.setManager(second)
+	if b.manager() != manager.LLMManager(second) {
+		t.Fatal("setManager must swap the live manager")
+	}
+	b.setManager(nil)
+	if b.manager() != manager.LLMManager(second) {
+		t.Fatal("a nil rebuild must never blank the manager")
+	}
+}

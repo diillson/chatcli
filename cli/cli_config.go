@@ -40,7 +40,16 @@ func (cli *ChatCLI) reconfigureLogger() {
 // removido do .env sobrevive ao /reload até o processo reiniciar. Toda env
 // nova de provider precisa entrar nesta lista. AWS_REGION/AWS_PROFILE ficam
 // de fora de propósito: são ambientais do SDK e podem vir do shell, não do
-// .env — unsetá-las derrubaria a cadeia de credenciais no reload.
+// .env — unsetá-las derrubaria a cadeia de credenciais no reload
+// (TestReloadableEnvVarsCoverCriticalProviderVars trava isso). Use
+// BEDROCK_PROFILE/BEDROCK_REGION quando quiser um valor que o /reload
+// releia do arquivo.
+//
+// O que entra aqui é limpo mesmo quando NÃO veio do .env — o bloco env de
+// uma IDE/cliente MCP é a única fonte em superfícies não interativas. Por
+// isso reloadConfiguration chama config.RestoreBootEnv depois do Overload:
+// o arquivo continua mandando no que ele declara, e o que o shell/cliente
+// entregou no boot volta em vez de sumir.
 var reloadableEnvVars = []string{
 	"LOG_LEVEL", "ENV", "LLM_PROVIDER", "LOG_FILE", "LOG_MAX_SIZE", "HISTORY_MAX_SIZE",
 	"OPENAI_API_KEY", "OPENAI_MODEL", "OPENAI_ASSISTANT_MODEL",
@@ -112,6 +121,20 @@ func (cli *ChatCLI) reloadConfiguration(ctx context.Context) {
 	if rep := config.ApplyManaged(); rep.Err != nil {
 		cli.logger.Warn("managed config unreadable; ignored", zap.String("path", rep.Path), zap.Error(rep.Err))
 	}
+	// Anything the file does NOT define falls back to what the shell — or an
+	// editor/MCP client's env block — provided at boot, instead of staying
+	// cleared. The file still wins for every variable it declares, so
+	// editing it remains the way to change a value; what this prevents is a
+	// single /reload silently dropping the provider, model or AWS profile
+	// pinned by a client that never writes an environment file.
+	if restored := config.RestoreBootEnv(reloadableEnvVars); len(restored) > 0 {
+		cli.logger.Info("reload: restored process-provided variables", zap.Strings("keys", restored))
+	}
+	// Same for the project overlay: it runs once per process, so without
+	// this the project's contribution would be gone after the first reload.
+	if reapplied := config.ReapplyProjectDotenv(); len(reapplied) > 0 {
+		cli.logger.Info("reload: re-applied project .env variables", zap.Strings("keys", reapplied))
+	}
 
 	// Slash-command catalog: force a re-scan so /reload picks up command
 	// files created or edited since boot (the stat fingerprint would catch
@@ -149,6 +172,9 @@ func (cli *ChatCLI) reloadConfiguration(ctx context.Context) {
 	}
 
 	cli.manager = manager
+	// Servers that cached the manager (MCP/ACP backend) must follow the
+	// rebuild, or a reload from the client changes nothing for them.
+	notifyManagerRebuilt(manager)
 
 	if prevProvider != "" && prevModel != "" {
 		if client, err := cli.manager.GetClient(prevProvider, prevModel); err == nil {

@@ -99,6 +99,8 @@ func runRPC(kind string, mgr manager.LLMManager, logger *zap.Logger) error {
 	}
 	if chatCLI != nil {
 		backend.store = chatCLI
+		// Follow every manager rebuild (project overlay, `/config reload`).
+		chatCLI.OnManagerRebuild(backend.setManager)
 		// Same bounded lifecycle the REPL applies on start: expire
 		// machine-created sessions (autosaves, mcp- mirrors) past their TTL.
 		// Background — boot never waits on disk.
@@ -285,6 +287,18 @@ func (b *rpcBackend) manager() manager.LLMManager {
 	return b.mgr
 }
 
+// setManager adopts a rebuilt manager (project overlay, or a `/config
+// reload` issued from the client): without it the server would keep serving
+// the provider set the configuration had before the reload.
+func (b *rpcBackend) setManager(m manager.LLMManager) {
+	if m == nil {
+		return
+	}
+	b.mgrMu.Lock()
+	b.mgr = m
+	b.mgrMu.Unlock()
+}
+
 // AdoptWorkspace implements rpcserve.ACPWorkspaceBackend: the editor told us
 // which project it opened, so layer that project's .env over the process
 // configuration (fill-only, once per process).
@@ -297,13 +311,9 @@ func (b *rpcBackend) AdoptWorkspace(dir string) {
 	if b.cli == nil {
 		return
 	}
-	rebuilt, _ := b.cli.ApplyProjectEnv(dir)
-	if rebuilt == nil {
-		return
-	}
-	b.mgrMu.Lock()
-	b.mgr = rebuilt
-	b.mgrMu.Unlock()
+	// The rebuilt manager arrives through the OnManagerRebuild hook, so the
+	// swap happens under the backend's own lock.
+	b.cli.ApplyProjectEnv(dir)
 }
 
 // HasLLM reports whether any LLM provider is configured. The MCP server
