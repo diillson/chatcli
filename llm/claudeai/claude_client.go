@@ -49,7 +49,18 @@ type ClaudeClient struct {
 	// processing, so the OAuth-sensitive request path stays untouched.
 	// See usage_tracker.go for the accessors.
 	usage client.UsageState
+
+	// thinking holds the reasoning blocks of THIS instance's most recent
+	// response so the caller can replay them in the next assistant turn,
+	// which is what the provider requires once extended thinking is on.
+	thinking client.ThinkingState
 }
+
+// LastThinking implements client.ThinkingAwareClient.
+func (c *ClaudeClient) LastThinking() []models.ThinkingBlock { return c.thinking.LastThinking() }
+
+// LastThinkingModel implements client.ThinkingAwareClient.
+func (c *ClaudeClient) LastThinkingModel() string { return c.thinking.LastThinkingModel() }
 
 const (
 	oauthUserAgent         = auth.ClaudeCodeUserAgent
@@ -377,6 +388,11 @@ func (c *ClaudeClient) processResponse(resp *http.Response) (string, error) {
 		c.logger.Error(i18n.T("llm.error.decode_response_for", "ClaudeAI"), zap.Error(err))
 		return "", fmt.Errorf("%s: %w", i18n.T("llm.error.decode_response"), err)
 	}
+
+	// Reasoning blocks ride out through the instance: this path returns a
+	// string, so the caller reads them back with LastThinking and attaches
+	// them to the assistant message it stores.
+	c.thinking.StoreThinking(c.model, client.ParseAnthropicThinkingBody(bodyBytes))
 
 	var responseText string
 	for _, content := range result.Content {

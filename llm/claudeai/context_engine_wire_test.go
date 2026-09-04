@@ -50,9 +50,27 @@ func TestProviderContextEngine_AddsContextManagementAndBeta(t *testing.T) {
 	if !ok {
 		t.Fatalf("context_management missing: %v", body)
 	}
+	// Two edits ride together: stale tool results and stale reasoning.
+	// Both are cleared by the same pass over the prompt, so the engine
+	// asks for them in one block.
 	edits, _ := cm["edits"].([]interface{})
-	if len(edits) != 1 || edits[0].(map[string]interface{})["type"] != "clear_tool_uses_20250919" {
+	types := make([]string, 0, len(edits))
+	for _, e := range edits {
+		m, ok := e.(map[string]interface{})
+		if !ok {
+			t.Fatalf("edit is not an object: %v", e)
+		}
+		typ, _ := m["type"].(string)
+		types = append(types, typ)
+	}
+	want := []string{"clear_tool_uses_20250919", "clear_thinking_20251015"}
+	if len(types) != len(want) {
 		t.Fatalf("edits = %v", edits)
+	}
+	for i, w := range want {
+		if types[i] != w {
+			t.Fatalf("edit %d = %q, want %q (order matters: %v)", i, types[i], w, edits)
+		}
 	}
 	beta := headers.Get("anthropic-beta")
 	if !strings.Contains(beta, llmclient.ContextManagementBeta) || !strings.Contains(beta, llmclient.ExtendedCacheTTLBeta) {

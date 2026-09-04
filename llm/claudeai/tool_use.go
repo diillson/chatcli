@@ -26,6 +26,7 @@ import (
 
 // Ensure ClaudeClient implements ToolAwareClient.
 var _ client.ToolAwareClient = (*ClaudeClient)(nil)
+var _ client.ThinkingAwareClient = (*ClaudeClient)(nil)
 
 // SupportsNativeTools returns true for API key auth, false for OAuth.
 // The OAuth endpoint (console.anthropic.com) uses a different message format
@@ -168,6 +169,12 @@ func (c *ClaudeClient) SendPromptWithTools(ctx context.Context, prompt string, h
 	)
 
 	response, err := parseClaudeToolResponse(respBody, c.logger)
+	if err == nil && response != nil {
+		// Mirror the reasoning blocks onto the instance too: callers that
+		// hold the response replay from it, callers on the plain path read
+		// them back through LastThinking.
+		c.thinking.StoreThinking(c.model, response.Thinking)
+	}
 	if err == nil && response != nil && response.Usage != nil {
 		// Per-instance mirror of what parseClaudeToolResponse recorded in the
 		// legacy global — parallel clients must not cross-attribute tokens.
@@ -253,8 +260,15 @@ func buildClaudeToolMessages(prompt string, history []models.Message) []interfac
 
 		case "assistant":
 			if len(msg.ToolCalls) > 0 {
-				// Assistant with tool_use content blocks
+				// Assistant with tool_use content blocks. Reasoning blocks
+				// come first when the turn has any: with extended thinking
+				// on, the provider expects the thinking that produced the
+				// tool call to travel back inside the same turn, ahead of
+				// the text and the tool_use blocks.
 				var content []interface{}
+				for _, blk := range client.AnthropicThinkingBlocks(msg.Thinking).Blocks {
+					content = append(content, blk)
+				}
 				if msg.Content != "" {
 					content = append(content, map[string]interface{}{
 						"type": "text",
@@ -374,6 +388,10 @@ func parseClaudeToolResponse(body string, logger *zap.Logger) (*models.LLMRespon
 
 		blockType, _ := b["type"].(string)
 		switch blockType {
+		case "thinking", "redacted_thinking":
+			// Collected below in one pass so the blocks keep their arrival
+			// order; the provider requires them replayed unchanged.
+			continue
 		case "text":
 			if text, ok := b["text"].(string); ok {
 				textParts = append(textParts, text)
@@ -394,6 +412,7 @@ func parseClaudeToolResponse(body string, logger *zap.Logger) (*models.LLMRespon
 	}
 
 	response.Content = strings.Join(textParts, "\n")
+	response.Thinking = client.ParseAnthropicThinkingBody([]byte(body))
 
 	// Server-side context edits applied by the provider context engine:
 	// parsed into the response so the caller can mirror them locally

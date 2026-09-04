@@ -2689,15 +2689,24 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 			}
 		}
 
-		// Persistir a resposta no histórico "real"
+		// Persistir a resposta no histórico "real". The reasoning blocks
+		// ride along on the assistant turn: with extended thinking on, the
+		// provider expects them back inside the turn that carries the tool
+		// call, and dropping them makes every step re-reason from zero.
+		thinkingBlocks := turnThinkingBlocks(llmResp, turnClient)
 		if len(nativeToolCalls) > 0 {
 			a.cli.history = append(a.cli.history, models.Message{
 				Role:      "assistant",
 				Content:   aiResponse,
 				ToolCalls: nativeToolCalls,
+				Thinking:  thinkingBlocks,
 			})
 		} else {
-			a.cli.history = append(a.cli.history, models.Message{Role: "assistant", Content: aiResponse})
+			a.cli.history = append(a.cli.history, models.Message{
+				Role:     "assistant",
+				Content:  aiResponse,
+				Thinking: thinkingBlocks,
+			})
 		}
 
 		// Mid-loop skill activation: the model's own <reasoning> text and the

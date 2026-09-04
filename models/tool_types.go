@@ -68,6 +68,23 @@ type LLMResponse struct {
 	// from the request server-side (Anthropic context editing); nil when
 	// nothing was edited.
 	ContextEdits *ContextEdits `json:"context_edits,omitempty"`
+	// Thinking carries the provider-native reasoning blocks of this
+	// response, in the order they arrived. They must be replayed verbatim
+	// inside the assistant turn on the next request; empty when the
+	// response carried none.
+	Thinking []ThinkingBlock `json:"thinking,omitempty"`
+}
+
+// ThinkingBlock is one provider-native reasoning block. It is opaque: the
+// text of a "thinking" block travels with a signature the provider
+// verifies, and a "redacted_thinking" block carries an encrypted payload
+// with no readable text. Neither may be edited, summarized or re-ordered —
+// they are replayed exactly as received or dropped entirely.
+type ThinkingBlock struct {
+	Type      string `json:"type"`                // "thinking" or "redacted_thinking"
+	Thinking  string `json:"thinking,omitempty"`  // reasoning text ("thinking" only)
+	Signature string `json:"signature,omitempty"` // provider signature ("thinking" only)
+	Data      string `json:"data,omitempty"`      // encrypted payload ("redacted_thinking" only)
 }
 
 // ContextEdits sums the server-side edits a provider applied to one
