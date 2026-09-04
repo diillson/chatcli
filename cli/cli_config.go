@@ -38,9 +38,20 @@ func (cli *ChatCLI) reconfigureLogger() {
 // reloadableEnvVars são as variáveis limpas do ambiente do processo antes do
 // godotenv.Overload em reloadConfiguration — sem constar aqui, um valor
 // removido do .env sobrevive ao /reload até o processo reiniciar. Toda env
-// nova de provider precisa entrar nesta lista. AWS_REGION/AWS_PROFILE ficam
-// de fora de propósito: são ambientais do SDK e podem vir do shell, não do
-// .env — unsetá-las derrubaria a cadeia de credenciais no reload.
+// nova de provider precisa entrar nesta lista.
+//
+// AWS_PROFILE/AWS_REGION ficaram fora daqui por muito tempo com uma razão
+// legítima: são ambientais do SDK, costumam vir do shell e não do .env, e
+// unsetá-las derrubava a cadeia de credenciais no /reload. O que mudou é que
+// limpar deixou de significar perder — reloadConfiguration chama
+// config.RestoreBootEnv depois do Overload (devolve o que o shell ou o bloco
+// env da IDE/cliente MCP entregou no boot e que o arquivo não redefine) e
+// config.ReapplyProjectDotenv (devolve o que o .env do projeto contribuiu).
+// Com as duas redes no lugar, remover a variável do arquivo passa a valer
+// sem reiniciar, que é a razão de existir desta lista, sem que um valor de
+// fora do arquivo seja perdido. O contrato de comportamento está travado em
+// TestReload_KeepsClientProvidedVariables (pacote config) e no caso AWS de
+// TestReloadableEnvVarsCoverCriticalProviderVars.
 var reloadableEnvVars = []string{
 	"LOG_LEVEL", "ENV", "LLM_PROVIDER", "LOG_FILE", "LOG_MAX_SIZE", "HISTORY_MAX_SIZE",
 	"OPENAI_API_KEY", "OPENAI_MODEL", "OPENAI_ASSISTANT_MODEL",
@@ -58,6 +69,7 @@ var reloadableEnvVars = []string{
 	"COPILOT_MODEL", "COPILOT_MAX_TOKENS", "GITHUB_COPILOT_TOKEN",
 	"GITHUB_TOKEN", "GH_TOKEN", "GITHUB_MODELS_TOKEN", "GITHUB_MODELS_MODEL", "GITHUB_MODELS_API_URL",
 	"BEDROCK_PROVIDER", "BEDROCK_MODEL", "BEDROCK_MAX_TOKENS", "BEDROCK_REGION", "BEDROCK_PROFILE",
+	"AWS_PROFILE", "AWS_REGION", "AWS_DEFAULT_REGION",
 	"BEDROCK_BASE_URL", "BEDROCK_CONTROL_BASE_URL", "BEDROCK_MANTLE_BASE_URL",
 	"BEDROCK_ANTHROPIC_ENDPOINT", "BEDROCK_TEMPERATURE", "BEDROCK_TOP_P",
 	"OPENROUTER_API_KEY", "OPENROUTER_MODEL", "OPENROUTER_MAX_TOKENS", "OPENROUTER_API_URL",
@@ -112,6 +124,20 @@ func (cli *ChatCLI) reloadConfiguration(ctx context.Context) {
 	if rep := config.ApplyManaged(); rep.Err != nil {
 		cli.logger.Warn("managed config unreadable; ignored", zap.String("path", rep.Path), zap.Error(rep.Err))
 	}
+	// Anything the file does NOT define falls back to what the shell — or an
+	// editor/MCP client's env block — provided at boot, instead of staying
+	// cleared. The file still wins for every variable it declares, so
+	// editing it remains the way to change a value; what this prevents is a
+	// single /reload silently dropping the provider, model or AWS profile
+	// pinned by a client that never writes an environment file.
+	if restored := config.RestoreBootEnv(reloadableEnvVars); len(restored) > 0 {
+		cli.logger.Info("reload: restored process-provided variables", zap.Strings("keys", restored))
+	}
+	// Same for the project overlay: it runs once per process, so without
+	// this the project's contribution would be gone after the first reload.
+	if reapplied := config.ReapplyProjectDotenv(); len(reapplied) > 0 {
+		cli.logger.Info("reload: re-applied project .env variables", zap.Strings("keys", reapplied))
+	}
 
 	// Slash-command catalog: force a re-scan so /reload picks up command
 	// files created or edited since boot (the stat fingerprint would catch
@@ -149,6 +175,9 @@ func (cli *ChatCLI) reloadConfiguration(ctx context.Context) {
 	}
 
 	cli.manager = manager
+	// Servers that cached the manager (MCP/ACP backend) must follow the
+	// rebuild, or a reload from the client changes nothing for them.
+	notifyManagerRebuilt(manager)
 
 	if prevProvider != "" && prevModel != "" {
 		if client, err := cli.manager.GetClient(prevProvider, prevModel); err == nil {

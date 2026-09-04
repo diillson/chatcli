@@ -59,6 +59,11 @@ ZETA-SKILL-BODY
 	}
 
 	mgr := persona.NewManager(zap.NewNop())
+	// Skill activations are recorded asynchronously under HOME, which here
+	// is a t.TempDir: without draining them the write races the directory
+	// removal and fails the test with "directory not empty". Registered
+	// after the TempDir cleanups so it runs before them (LIFO).
+	t.Cleanup(mgr.WaitUsageFlush)
 	mgr.SetProjectDir(tmp)
 	if _, err := mgr.RefreshSkills(); err != nil {
 		t.Fatalf("RefreshSkills: %v", err)
