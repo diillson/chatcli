@@ -31,8 +31,8 @@ func (cli *ChatCLI) unextractedSegment() []models.Message {
 	}
 	seg := make([]models.Message, 0, len(cli.history)-start)
 	for _, m := range cli.history[start:] {
-		if m.Role == "system" {
-			continue
+		if m.Role == "system" || m.IsTurnContext() {
+			continue // prompts and ChatCLI's own recall/date blocks are not conversation
 		}
 		seg = append(seg, m)
 	}

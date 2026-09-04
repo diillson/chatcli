@@ -4137,7 +4137,10 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 			// And proactive recall against the follow-up's own words — the
 			// system prompt's recall blocks froze at Run() time.
 			if rb := a.followUpRecallBlocks(ctx, userInput); rb != "" {
-				a.cli.history = append(a.cli.history, models.Message{Role: "user", Content: rb})
+				// Tagged like every other injected block: excluded from
+				// extraction, autosave indexing and session search, so the
+				// recall never feeds itself back into memory.
+				a.cli.history = append(a.cli.history, models.TurnContextMessage(turnContextHeader+rb))
 			}
 			continue
 		}

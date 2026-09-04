@@ -574,7 +574,7 @@ func (sm *SessionManager) searchCorpus() (*sessionCorpus, error) {
 				// words, so they both pollute BM25 ranking and let framing
 				// terms qualify every session. Recall searches conversation
 				// only.
-				if msg.Role == "system" {
+				if msg.Role == "system" || msg.IsTurnContext() {
 					continue
 				}
 				norm := normalizeForSearch(msg.Content)

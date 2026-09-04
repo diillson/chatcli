@@ -15,6 +15,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/diillson/chatcli/cli/workspace/threatscan"
 	"github.com/diillson/chatcli/llm/embedding"
 	"github.com/diillson/chatcli/models"
 	"github.com/diillson/chatcli/utils"
@@ -971,6 +972,16 @@ func (m *Manager) BuildRetrievedContextMessages(ctx context.Context, sessionID, 
 		}
 		if block == "" {
 			continue
+		}
+		// A corpus cloned from the web is untrusted text: the same threat
+		// scan the workspace instruction files get, before it reaches the
+		// model as retrieved data.
+		if threatscan.Enabled() {
+			if sanitized, blocked := threatscan.Sanitize(block, threatscan.ScopeContext); blocked > 0 {
+				m.logger.Warn("retrieved passages carried instruction-like content; sanitized",
+					zap.String("context", fc.Name), zap.Int("blocked", blocked))
+				block = sanitized
+			}
 		}
 		used += len(block)
 		messages = append(messages, models.Message{Role: "system", Content: block})

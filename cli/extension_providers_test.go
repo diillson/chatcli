@@ -83,7 +83,7 @@ func TestExternalMemoryRecall_AugmentsAndDegrades(t *testing.T) {
 	// memory store (no embedded facts).
 	t.Setenv("CHATCLI_MEMORY_AUTORECALL", "true")
 	block := cli.memoryAutoRecallBlockCtx(context.Background(), []string{"freeze"}, "when does the freeze end")
-	if !strings.Contains(block, "deploy freeze") || !strings.HasPrefix(block, autoRecallHeader) {
+	if !strings.Contains(block, "deploy freeze") || !strings.HasPrefix(block, externalRecallHeader) {
 		t.Fatalf("block = %q", block)
 	}
 	// Failure degrades to nothing.
