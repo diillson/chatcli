@@ -2446,9 +2446,16 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 			turnUsage = llmclient.GetUsageOrEstimate(turnClient, inputChars, len(aiResponse))
 			effProvider, effModel := a.effectiveRoute()
 			a.cli.costTracker.RecordRealUsage(effProvider, effModel, turnUsage)
+			// The provider context engine cleared tool results server-side:
+			// mirror that locally and do not calibrate on this turn (the
+			// chars sent no longer match the tokens counted).
+			edited := llmResp != nil && llmResp.ContextEdits != nil && llmResp.ContextEdits.ClearedToolUses > 0
+			if edited {
+				a.cli.mirrorContextEdits(llmResp.ContextEdits)
+			}
 			// Learn the real chars-per-token ratio for this provider/model
 			// from what was actually sent and what the API counted.
-			if turnUsage != nil && turnUsage.IsReal {
+			if turnUsage != nil && turnUsage.IsReal && !edited {
 				a.cli.calibrator().Observe(effProvider, effModel, promptCharsOf(turnHistory), contextTokens(effProvider, effModel, turnUsage))
 			}
 			a.cli.maybeAnnounceBudget()

@@ -208,6 +208,9 @@ func (cli *ChatCLI) showContextStatus(ctx context.Context) {
 	if r.ExactHistoryTokens > 0 {
 		fmt.Printf("    %s %s tok\n", kitPad(i18n.T("context.status.exact_history")), formatTokenCount(int64(r.ExactHistoryTokens)))
 	}
+	if edits, toolUses, tokens := cli.costTracker.ContextEditStats(); edits > 0 {
+		fmt.Printf("    %s\n", colorize(i18n.T("context.status.provider_edits", edits, toolUses, formatTokenCount(tokens)), ColorGray))
+	}
 	if r.Window > 0 {
 		fmt.Printf("    %s ≈%s tok (%s)\n", kitPad(i18n.T("context.status.total_projected")),
 			formatTokenCount(int64(r.TotalTokens)), colorize(fmt.Sprintf("%.0f%%", r.ProjectedPct), pctColor(r.ProjectedPct)))

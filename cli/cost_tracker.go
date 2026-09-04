@@ -127,7 +127,11 @@ type SessionCostData struct {
 // with per-model granularity, real API usage data support, cache token pricing,
 // write-through session persistence, and configurable budget enforcement.
 type CostTracker struct {
-	mu sync.RWMutex
+	// Provider context engine bookkeeping (server-side clears).
+	contextEditsApplied  int
+	contextEditsToolUses int
+	contextEditsTokens   int64
+	mu                   sync.RWMutex
 
 	// storeDir overrides the snapshot directory (per-tenant store sets);
 	// empty means the process default (costStoreDir).
@@ -281,6 +285,30 @@ func modelKey(provider, model string) string {
 
 // RecordRealUsage records actual token usage from an API response.
 // This is the preferred path — provides accurate cost tracking.
+// RecordContextEdits books what the provider context engine cleared
+// server-side (tool results and the input tokens they held).
+func (ct *CostTracker) RecordContextEdits(clearedToolUses, clearedInputTokens int) {
+	if ct == nil {
+		return
+	}
+	ct.mu.Lock()
+	ct.contextEditsApplied++
+	ct.contextEditsToolUses += clearedToolUses
+	ct.contextEditsTokens += int64(clearedInputTokens)
+	ct.mu.Unlock()
+}
+
+// ContextEditStats returns how many provider context edits were applied
+// this session, the tool results cleared and the input tokens freed.
+func (ct *CostTracker) ContextEditStats() (edits, toolUses int, tokens int64) {
+	if ct == nil {
+		return 0, 0, 0
+	}
+	ct.mu.RLock()
+	defer ct.mu.RUnlock()
+	return ct.contextEditsApplied, ct.contextEditsToolUses, ct.contextEditsTokens
+}
+
 func (ct *CostTracker) RecordRealUsage(provider, model string, usage *models.UsageInfo) {
 	if usage == nil {
 		return
