@@ -500,6 +500,13 @@ func (c *BedrockClient) sendPromptAnthropicModel(ctx context.Context, wireModel,
 	}
 
 	applyAnthropicThinkingForEffort(reqBody, wireModel, ctx)
+	// Provider context engine: the Anthropic models served here take the
+	// same context_management block as the first-party endpoint, and this
+	// path builds the native Anthropic body, so it travels unchanged.
+	// Audit III's PR 13 wired the response side and left this surface out.
+	if cm := client.AnthropicContextManagement(); cm != nil {
+		reqBody["context_management"] = cm
+	}
 
 	// Rolling conversation breakpoint. Bedrock accepts "ttl":"1h" in the
 	// cache_control object for Claude 4.5+ (docs.aws.amazon.com/bedrock/

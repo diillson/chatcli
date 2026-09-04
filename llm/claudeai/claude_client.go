@@ -750,6 +750,9 @@ func applyExtendedCacheTTLBeta(req *http.Request) {
 	if client.ProviderContextEngine() {
 		addAnthropicBeta(req, client.ContextManagementBeta)
 	}
+	if client.ProviderCompactionEngine() {
+		addAnthropicBeta(req, client.CompactionBeta)
+	}
 }
 
 // addAnthropicBeta appends one beta flag to the anthropic-beta header
@@ -790,6 +793,9 @@ func applyOAuthHeaders(req *http.Request, token string) {
 	}
 	if client.ProviderContextEngine() {
 		betas = betas + "," + client.ContextManagementBeta
+		if client.ProviderCompactionEngine() {
+			betas = betas + "," + client.CompactionBeta
+		}
 	}
 	req.Header.Set("anthropic-beta", betas)
 	req.Header.Set("anthropic-version", "2023-06-01")

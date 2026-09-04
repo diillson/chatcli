@@ -34,9 +34,39 @@ const ContextEngineEnv = "CHATCLI_CONTEXT_ENGINE"
 // ContextManagementBeta is the Anthropic beta that enables context editing.
 const ContextManagementBeta = "context-management-2025-06-27"
 
-// ProviderContextEngine reports whether CHATCLI_CONTEXT_ENGINE=provider.
+// CompactionBeta is the Anthropic beta that enables server-side
+// compaction, where the API summarizes the older conversation itself
+// instead of the client spending a turn on a summarizer.
+const CompactionBeta = "compact-2026-01-12"
+
+// contextEngine returns the selected engine, lowercased and trimmed.
+func contextEngine() string {
+	return strings.ToLower(strings.TrimSpace(os.Getenv(ContextEngineEnv)))
+}
+
+// ProviderContextEngine reports whether the provider's own context
+// management is in play. Both provider values ask for it: the compaction
+// engine is the editing engine plus a summarizing edit, never a
+// replacement, so a prompt that outgrows the window is still trimmed of
+// stale tool results on the way there.
 func ProviderContextEngine() bool {
-	return strings.EqualFold(strings.TrimSpace(os.Getenv(ContextEngineEnv)), "provider")
+	switch contextEngine() {
+	case "provider", "provider-compact":
+		return true
+	}
+	return false
+}
+
+// ProviderCompactionEngine reports whether the provider should also
+// summarize the older conversation server-side
+// (CHATCLI_CONTEXT_ENGINE=provider-compact).
+//
+// Opt-in and never the default: ChatCLI's own compaction is recoverable —
+// what it cuts is archived and can be recalled — and a server-side summary
+// is not. The value exists for sessions that would rather not spend a turn
+// on a local summarizer.
+func ProviderCompactionEngine() bool {
+	return contextEngine() == "provider-compact"
 }
 
 // ContextThreshold is a typed amount in an Anthropic context edit
@@ -83,6 +113,16 @@ func AnthropicContextManagement() *ContextManagement {
 		Trigger: &ContextThreshold{Type: "input_tokens", Value: 100000},
 		Keep:    &ContextThreshold{Type: "thinking_turns", Value: 3},
 	})
+	// Server-side compaction summarizes what the two clearing edits could
+	// not free. It runs last on purpose: clearing stale tool results and
+	// old reasoning is lossless, summarizing is not, so the cheap edits
+	// get their chance first.
+	if ProviderCompactionEngine() {
+		edits = append(edits, ContextEdit{
+			Type:    "compact_20260112",
+			Trigger: &ContextThreshold{Type: "input_tokens", Value: 150000},
+		})
+	}
 	return &ContextManagement{Edits: edits}
 }
 
