@@ -111,10 +111,41 @@ func auxAllowedPathsSnapshot() []string {
 	return out
 }
 
-// systemBinPaths are allowed for read/execute operations.
+// systemBinPaths are allowed for READ and EXECUTE only. A run needs to
+// read an interpreter or run a tool that lives outside the workspace;
+// nothing legitimate needs to WRITE there, and treating the two the same
+// let a write escape the workspace boundary entirely — planting an
+// executable on the user's PATH is the one escape that outlives the run.
 var systemBinPaths = []string{
 	"/usr/bin/", "/usr/local/bin/", "/bin/", "/usr/sbin/",
 	"/opt/homebrew/bin/",
+}
+
+// resolvedSensitivePaths is sensitivePaths with every entry put through
+// the same symlink resolution the candidate goes through.
+//
+// The list is compared against a path already resolved by EvalSymlinks,
+// and on macOS /etc resolves to /private/etc — so a literal "/etc/" entry
+// matched nothing and the whole denylist was inert on that platform.
+// Resolved once at init because the mapping is a property of the system,
+// not of the path being checked.
+var resolvedSensitivePaths = resolveDenyList(sensitivePaths)
+
+func resolveDenyList(paths []string) []string {
+	out := make([]string, 0, len(paths)*2)
+	for _, p := range paths {
+		out = append(out, p)
+		trimmed := strings.TrimSuffix(p, "/")
+		resolved, err := filepath.EvalSymlinks(trimmed)
+		if err != nil || resolved == trimmed {
+			continue
+		}
+		if strings.HasSuffix(p, "/") {
+			resolved += "/"
+		}
+		out = append(out, resolved)
+	}
+	return out
 }
 
 // NewEngine creates an Engine that writes to the given writers.
@@ -129,8 +160,53 @@ func NewEngine(out, errOut io.Writer, workspaceRoot string) *Engine {
 	return &Engine{Out: out, Err: errOut, WorkspaceRoot: root}
 }
 
-// validatePath checks that a file path is within the workspace boundary and not sensitive.
+// resolveThroughExistingAncestor resolves the symlinks of a path that may
+// not exist yet.
+//
+// EvalSymlinks fails on a missing path, and resolving only the immediate
+// parent is not enough: writing a new file into a new subdirectory leaves
+// both missing, so the path stayed unresolved while the boundary it is
+// compared against was resolved — and on any system where the workspace
+// sits under a symlink (macOS puts temporary and user directories under
+// one) a legitimate write read as an escape. So it walks up to the
+// nearest ancestor that does exist, resolves that, and rejoins the rest.
+func resolveThroughExistingAncestor(abs string) string {
+	if resolved, err := filepath.EvalSymlinks(abs); err == nil {
+		return resolved
+	}
+	dir, rest := filepath.Dir(abs), filepath.Base(abs)
+	for {
+		if resolved, err := filepath.EvalSymlinks(dir); err == nil {
+			return filepath.Join(resolved, rest)
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			// Reached the root without finding anything that exists:
+			// the cleaned absolute path is the best answer available.
+			return abs
+		}
+		rest = filepath.Join(filepath.Base(dir), rest)
+		dir = parent
+	}
+}
+
+// validatePath checks that a path is within the workspace boundary and not
+// sensitive, for reading or executing. System binary directories pass:
+// a run legitimately reads an interpreter or runs a tool from outside the
+// workspace.
 func (e *Engine) validatePath(target string) error {
+	return e.validatePathForAccess(target, false)
+}
+
+// validateWritePath is validatePath for a path about to be written. It
+// refuses the system binary directories: the workspace boundary is the
+// promise this tool makes, and a write outside it is the one effect that
+// outlives the run.
+func (e *Engine) validateWritePath(target string) error {
+	return e.validatePathForAccess(target, true)
+}
+
+func (e *Engine) validatePathForAccess(target string, write bool) error {
 	if target == "" {
 		return nil
 	}
@@ -140,19 +216,10 @@ func (e *Engine) validatePath(target string) error {
 		return fmt.Errorf("cannot resolve path %q: %w", target, err)
 	}
 
-	// Resolve symlinks (follow the real path)
-	resolved := abs
-	if evalPath, err := filepath.EvalSymlinks(abs); err == nil {
-		resolved = evalPath
-	} else {
-		parent := filepath.Dir(abs)
-		if evalParent, err2 := filepath.EvalSymlinks(parent); err2 == nil {
-			resolved = filepath.Join(evalParent, filepath.Base(abs))
-		}
-	}
+	resolved := resolveThroughExistingAncestor(abs)
 
 	// Block sensitive system paths
-	for _, sp := range sensitivePaths {
+	for _, sp := range resolvedSensitivePaths {
 		if strings.HasPrefix(resolved, sp) {
 			return fmt.Errorf("access to sensitive path %q is blocked", target)
 		}
@@ -173,10 +240,12 @@ func (e *Engine) validatePath(target string) error {
 		}
 
 		isSystemBin := false
-		for _, bp := range systemBinPaths {
-			if strings.HasPrefix(resolved, bp) {
-				isSystemBin = true
-				break
+		if !write {
+			for _, bp := range systemBinPaths {
+				if strings.HasPrefix(resolved, bp) {
+					isSystemBin = true
+					break
+				}
 			}
 		}
 

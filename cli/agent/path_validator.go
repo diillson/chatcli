@@ -12,6 +12,13 @@ import (
 )
 
 // PathValidator validates file paths against workspace boundaries.
+//
+// Not wired into any execution path today: command validation runs through
+// CommandValidator and the coder engine's own boundary check, and reads
+// go through SensitiveReadPaths. It is kept because it is part of the
+// package's exported surface, and it is kept correct — a security helper
+// that is wrong is worse than one that is unused, and the next caller
+// should not inherit the macOS denylist bug this comment replaced.
 type PathValidator struct {
 	workspaceBoundary string
 	logger            *zap.Logger
@@ -23,6 +30,29 @@ var sensitivePaths = []string{
 	"/etc/ssh/", "/etc/ssl/",
 	"/proc/", "/sys/", "/dev/",
 	"/boot/", "/sbin/",
+}
+
+// resolvedSensitivePaths carries each entry above in both spellings: the
+// literal one and the one it resolves to. The candidate path is compared
+// after EvalSymlinks, and on macOS /etc resolves to /private/etc — so the
+// literal entries matched nothing and the denylist was inert there.
+var resolvedSensitivePaths = resolveDenyList(sensitivePaths)
+
+func resolveDenyList(paths []string) []string {
+	out := make([]string, 0, len(paths)*2)
+	for _, p := range paths {
+		out = append(out, p)
+		trimmed := strings.TrimSuffix(p, "/")
+		resolved, err := filepath.EvalSymlinks(trimmed)
+		if err != nil || resolved == trimmed {
+			continue
+		}
+		if strings.HasSuffix(p, "/") {
+			resolved += "/"
+		}
+		out = append(out, resolved)
+	}
+	return out
 }
 
 // Allowed system binary paths (read/execute only).
@@ -73,7 +103,7 @@ func (pv *PathValidator) DetectPathTraversal(command string) (bool, string) {
 		}
 
 		// Check sensitive paths
-		for _, sensitive := range sensitivePaths {
+		for _, sensitive := range resolvedSensitivePaths {
 			if strings.HasPrefix(resolved, sensitive) {
 				return true, fmt.Sprintf("command accesses sensitive path: %s", sensitive)
 			}
