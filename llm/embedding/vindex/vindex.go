@@ -212,6 +212,15 @@ func (x *Index) store(ids []string, vecs [][]float32) error {
 	return nil
 }
 
+// ProviderName names the embedding provider behind the index ("" when
+// disabled); the query cache is keyed by it.
+func (x *Index) ProviderName() string {
+	if x == nil || x.provider == nil {
+		return ""
+	}
+	return x.provider.Name()
+}
+
 // EmbedQuery embeds a single query string for use with Search.
 func (x *Index) EmbedQuery(ctx context.Context, query string) ([]float32, error) {
 	if !x.Enabled() {

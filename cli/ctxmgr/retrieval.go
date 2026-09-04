@@ -56,6 +56,9 @@ const (
 
 // RetrievalEngine builds and queries per-context passage vectors.
 type RetrievalEngine struct {
+	// queries caches query embeddings per provider for the turn's corpora
+	// (queryVector). A pointer so the engine value stays comparable.
+	queries  *queryVecCache
 	provider embedding.Provider
 	baseDir  string
 	segOpts  SegmentOptions
@@ -250,18 +253,27 @@ func (e *RetrievalEngine) RetrieveHybridScored(ctx context.Context, fc *FileCont
 		// Cheap — one query embedding, zero new passage embeddings.
 		return e.semanticOnlyScored(ctx, entry, query, k), nil
 	}
-	lexScores := normalizeHits(lexHits)
-	vecScores := e.rerankCandidates(ctx, entry, lexHits, query)
-
-	fused := make(map[int]float64, len(lexScores)+len(vecScores))
-	if len(vecScores) == 0 {
-		fused = lexScores
-	} else {
-		for i, s := range lexScores {
-			fused[i] += hybridLexWeight * s
+	// Hybrid is a UNION, not a BM25-gated rerank: the vector index's own
+	// top-k (over every passage already embedded) joins the BM25 pool, so
+	// a passage that says it in other words still surfaces. Reciprocal
+	// rank fusion replaces per-query min-max: ranks are comparable across
+	// corpora, where a single-hit corpus used to score 1.0 by construction.
+	lexRank := make(map[int]int, len(lexHits))
+	for r, h := range lexHits {
+		lexRank[h.idx] = r + 1
+	}
+	vecRank := e.vectorRanks(ctx, entry, lexHits, query, pool)
+	fused := make(map[int]float64, len(lexRank)+len(vecRank))
+	if len(vecRank) == 0 {
+		for i, s := range normalizeHits(lexHits) {
+			fused[i] = s
 		}
-		for i, s := range vecScores {
-			fused[i] += hybridVecWeight * s
+	} else {
+		for i, r := range lexRank {
+			fused[i] += hybridLexWeight * rrfScore(r)
+		}
+		for i, r := range vecRank {
+			fused[i] += hybridVecWeight * rrfScore(r)
 		}
 	}
 
@@ -330,20 +342,27 @@ func (e *RetrievalEngine) applyReranker(ctx context.Context, entry *lexCacheEntr
 	return append(out, order[head:]...)
 }
 
-// rerankCandidates embeds ONLY the BM25 candidates still missing from the
-// vector cache (≤ pool per query, one small provider batch), then returns
-// min-max-normalized cosine scores by segment index. Nil when embeddings are
-// unavailable or fail — the hybrid then runs lexical-only.
-func (e *RetrievalEngine) rerankCandidates(ctx context.Context, entry *lexCacheEntry, candidates []lexHit, query string) map[int]float64 {
+// rrfK is the reciprocal-rank-fusion constant (the usual 60).
+const rrfK = 60
+
+// rrfScore is the RRF contribution of a 1-based rank.
+func rrfScore(rank int) float64 { return 1 / float64(rrfK+rank) }
+
+// vectorRanks embeds the BM25 candidates still missing from the cache
+// (bounded, one small batch), then ranks the union of the index's own
+// top-pool cosine hits and the candidates by cosine score. Nil when
+// embeddings are unavailable or fail — the hybrid then runs lexical-only.
+func (e *RetrievalEngine) vectorRanks(ctx context.Context, entry *lexCacheEntry, candidates []lexHit, query string, pool int) map[int]int {
 	if !e.Enabled() || entry.vec == nil {
 		return nil
 	}
-	idxByID := make(map[string]int, len(candidates))
+	idxByID := make(map[string]int, len(entry.segs))
+	for i, s := range entry.segs {
+		idxByID[s.ID] = i
+	}
 	ids := make([]string, 0, len(candidates))
 	for _, h := range candidates {
-		s := entry.segs[h.idx]
-		idxByID[s.ID] = h.idx
-		ids = append(ids, s.ID)
+		ids = append(ids, entry.segs[h.idx].ID)
 	}
 	if missing := entry.vec.MissingFor(ids); len(missing) > 0 {
 		sub := make(map[string]string, len(missing))
@@ -355,29 +374,88 @@ func (e *RetrievalEngine) rerankCandidates(ctx context.Context, entry *lexCacheE
 			return nil
 		}
 	}
-	qv, err := entry.vec.EmbedQuery(ctx, query)
+	qv, err := e.queryVector(ctx, entry, query)
 	if err != nil {
 		e.logger.Warn("knowledge: query embedding failed; falling back to lexical retrieval", zap.Error(err))
 		return nil
 	}
-	hits := entry.vec.ScoreAgainst(qv, ids, segmentScoreFloor)
-	if len(hits) == 0 {
+	// Union: the index's top-pool over everything embedded so far plus the
+	// BM25 candidates scored against the same query vector.
+	seen := make(map[string]float64, pool+len(ids))
+	for _, h := range entry.vec.Search(qv, pool, segmentScoreFloor) {
+		seen[h.ID] = h.Score
+	}
+	for _, h := range entry.vec.ScoreAgainst(qv, ids, segmentScoreFloor) {
+		if _, ok := seen[h.ID]; !ok {
+			seen[h.ID] = h.Score
+		}
+	}
+	if len(seen) == 0 {
 		return nil
 	}
-	minS, maxS := hits[len(hits)-1].Score, hits[0].Score
-	out := make(map[int]float64, len(hits))
-	for _, h := range hits {
-		i, ok := idxByID[h.ID]
-		if !ok {
-			continue
-		}
-		if maxS > minS {
-			out[i] = (h.Score - minS) / (maxS - minS)
-		} else {
-			out[i] = 1
+	type scored struct {
+		idx   int
+		score float64
+	}
+	all := make([]scored, 0, len(seen))
+	for id, s := range seen {
+		if i, ok := idxByID[id]; ok {
+			all = append(all, scored{i, s})
 		}
 	}
+	sort.Slice(all, func(a, b int) bool {
+		if all[a].score != all[b].score {
+			return all[a].score > all[b].score
+		}
+		return all[a].idx < all[b].idx
+	})
+	out := make(map[int]int, len(all))
+	for r, s := range all {
+		out[s.idx] = r + 1
+	}
 	return out
+}
+
+// queryVecCacheMax bounds the per-engine query-vector cache; a turn asks
+// the same query against every attached corpus, and the cache turns those
+// N embedding calls into one.
+const queryVecCacheMax = 64
+
+// queryVecCache is the bounded query-embedding cache behind queryVector.
+type queryVecCache struct {
+	mu   sync.Mutex
+	vecs map[string][]float32
+}
+
+var queryCacheInit sync.Mutex
+
+// queryVector embeds query once per provider and reuses it across the
+// corpora of the same turn.
+func (e *RetrievalEngine) queryVector(ctx context.Context, entry *lexCacheEntry, query string) ([]float32, error) {
+	queryCacheInit.Lock()
+	if e.queries == nil {
+		e.queries = &queryVecCache{vecs: make(map[string][]float32, queryVecCacheMax)}
+	}
+	c := e.queries
+	queryCacheInit.Unlock()
+	key := entry.vec.ProviderName() + "\x00" + strings.TrimSpace(query)
+	c.mu.Lock()
+	if v, ok := c.vecs[key]; ok {
+		c.mu.Unlock()
+		return v, nil
+	}
+	c.mu.Unlock()
+	v, err := entry.vec.EmbedQuery(ctx, query)
+	if err != nil {
+		return nil, err
+	}
+	c.mu.Lock()
+	if len(c.vecs) >= queryVecCacheMax {
+		c.vecs = make(map[string][]float32, queryVecCacheMax)
+	}
+	c.vecs[key] = v
+	c.mu.Unlock()
+	return v, nil
 }
 
 // semanticOnly answers queries with zero lexical overlap using the vectors
@@ -386,7 +464,7 @@ func (e *RetrievalEngine) semanticOnlyScored(ctx context.Context, entry *lexCach
 	if !e.Enabled() || entry.vec == nil || entry.vec.Count() == 0 {
 		return nil
 	}
-	qv, err := entry.vec.EmbedQuery(ctx, query)
+	qv, err := e.queryVector(ctx, entry, query)
 	if err != nil {
 		e.logger.Warn("knowledge: query embedding failed; no results for non-lexical query", zap.Error(err))
 		return nil

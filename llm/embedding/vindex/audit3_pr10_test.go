@@ -84,3 +84,13 @@ func TestLoad_AdoptsTheProviderDimensionWhenDiskContradictsIt(t *testing.T) {
 		t.Fatal("old ids are missing again, the new one is stored")
 	}
 }
+
+func TestProviderName_NilSafe(t *testing.T) {
+	var none *Index
+	if none.ProviderName() != "" || (&Index{}).ProviderName() != "" {
+		t.Fatal("nil index or nil provider → empty name")
+	}
+	if idx := New(filepath.Join(t.TempDir(), "v.json"), &failAfterProvider{ok: 1, dim: 3, name: "fake:named"}); idx.ProviderName() != "fake:named" {
+		t.Fatalf("name = %q", idx.ProviderName())
+	}
+}
