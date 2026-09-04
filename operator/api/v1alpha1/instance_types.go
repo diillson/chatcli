@@ -176,6 +176,14 @@ type ServerSpec struct {
 	TLS *TLSSpec `json:"tls,omitempty"`
 
 	// Token references a Secret containing the auth token.
+	// Maps to CHATCLI_SERVER_TOKEN env var.
+	//
+	// REQUIRED unless security.jwtSecretRef is set or the server binds
+	// loopback: a listener on a reachable address with no credential
+	// admits every caller as an administrator, so the server refuses to
+	// start in that shape and the operator will not provision the
+	// Deployment — it raises the AuthenticationConfigured condition on the
+	// Instance instead.
 	// +optional
 	Token *SecretKeyRefSpec `json:"token,omitempty"`
 
@@ -187,7 +195,11 @@ type ServerSpec struct {
 // ServerSecuritySpec defines security settings for the gRPC server.
 type ServerSecuritySpec struct {
 	// JWTSecretRef references a Secret key containing the JWT signing secret.
-	// Maps to CHATCLI_JWT_SECRET env var.
+	// Maps to CHATCLI_JWT_SECRET env var. Tokens signed with it must carry
+	// an exp claim; one without an expiry is rejected.
+	//
+	// One of this or spec.server.token is required unless the server binds
+	// loopback.
 	// +optional
 	JWTSecretRef *SecretKeyRefSpec `json:"jwtSecretRef,omitempty"`
 
@@ -217,8 +229,13 @@ type ServerSecuritySpec struct {
 	MaxConcurrentStreams *int32 `json:"maxConcurrentStreams,omitempty"`
 
 	// BindAddress is the address to bind the server to.
-	// Maps to CHATCLI_BIND_ADDRESS env var. Default: "127.0.0.1".
-	// Set to "0.0.0.0" to expose to all interfaces.
+	// Maps to CHATCLI_BIND_ADDRESS env var.
+	//
+	// Unset inside a cluster means every interface ("0.0.0.0"), which is
+	// what makes Service routing and health checks work — it is NOT
+	// loopback. Set it to "127.0.0.1" for an instance that should only be
+	// reachable inside its own pod; any other value requires a credential
+	// (see Token and JWTSecretRef).
 	// +optional
 	BindAddress string `json:"bindAddress,omitempty"`
 

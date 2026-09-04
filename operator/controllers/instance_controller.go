@@ -188,6 +188,35 @@ func (r *InstanceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 		return ctrl.Result{}, err
 	}
 
+	// The server refuses to start unauthenticated on a reachable address,
+	// so a spec in that shape would produce a crash loop with the reason
+	// buried in container logs. Say it on the Instance instead, and do not
+	// provision the Deployment.
+	if instanceAuthUnconfigured(&instance) {
+		meta.SetStatusCondition(&instance.Status.Conditions, metav1.Condition{
+			Type:               AuthConditionType,
+			Status:             metav1.ConditionFalse,
+			Reason:             "CredentialMissing",
+			Message:            authUnconfiguredMessage,
+			ObservedGeneration: instance.Generation,
+		})
+		instance.Status.Ready = false
+		if err := r.Status().Update(ctx, &instance); err != nil {
+			log.Error(err, "failed to record the missing-credential condition")
+		}
+		log.Info("instance not provisioned: " + authUnconfiguredMessage)
+		reconciliationsTotal.WithLabelValues("success").Inc()
+		reconcileDuration.Observe(time.Since(start).Seconds())
+		return ctrl.Result{}, nil
+	}
+	meta.SetStatusCondition(&instance.Status.Conditions, metav1.Condition{
+		Type:               AuthConditionType,
+		Status:             metav1.ConditionTrue,
+		Reason:             "CredentialConfigured",
+		Message:            "server has a credential, or binds loopback only",
+		ObservedGeneration: instance.Generation,
+	})
+
 	if err := r.reconcileDeployment(ctx, &instance); err != nil {
 		log.Error(err, "failed to reconcile Deployment")
 		reconciliationsTotal.WithLabelValues("error").Inc()
