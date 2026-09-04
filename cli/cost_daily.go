@@ -76,14 +76,25 @@ func (ct *CostTracker) accrueDailyLocked() {
 	if ct.dailySaveTimer != nil {
 		ct.dailySaveTimer.Stop()
 	}
-	ct.dailySaveTimer = time.AfterFunc(dailySpendSaveDelay, ct.saveDailySpend)
+	// The path is resolved now, not when the timer fires: a late timer
+	// must write to the store it was scheduled for, never to whatever HOME
+	// points at 1.5s later (another tenant, another test's directory).
+	path := ct.dailySpendPath()
+	ct.dailySaveTimer = time.AfterFunc(dailySpendSaveDelay, func() { ct.saveDailySpendTo(path) })
 }
 
 // saveDailySpend persists today's spend (best-effort, atomic).
 func (ct *CostTracker) saveDailySpend() {
 	ct.mu.RLock()
-	f := dailySpendFileData{Date: ct.dailyDate, SpentUSD: ct.dailySpentUSD, Updated: time.Now().Format(time.RFC3339)}
 	path := ct.dailySpendPath()
+	ct.mu.RUnlock()
+	ct.saveDailySpendTo(path)
+}
+
+// saveDailySpendTo writes today's spend to path.
+func (ct *CostTracker) saveDailySpendTo(path string) {
+	ct.mu.RLock()
+	f := dailySpendFileData{Date: ct.dailyDate, SpentUSD: ct.dailySpentUSD, Updated: time.Now().Format(time.RFC3339)}
 	ct.mu.RUnlock()
 	data, err := json.MarshalIndent(f, "", "  ")
 	if err != nil {
