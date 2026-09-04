@@ -118,3 +118,40 @@ func TestAgentSystemMessage_NoVolatileBlocks(t *testing.T) {
 		t.Fatal("turn context message shape")
 	}
 }
+
+func TestTurnContext_AgentHelpersAndPendingStash(t *testing.T) {
+	if composeTurnContext("", "") != "" || composeTurnContext("chan", "") != "chan" || composeTurnContext("", "dyn") != "dyn" {
+		t.Fatal("composeTurnContext edge cases")
+	}
+	if got := composeTurnContext("chan", "dyn"); got != "chan\n\ndyn" {
+		t.Fatalf("channels precede the dynamic block: %q", got)
+	}
+	cli := &ChatCLI{}
+	a := &AgentMode{cli: cli}
+	a.appendTurnContext("   ")
+	if len(cli.history) != 0 {
+		t.Fatal("empty turn context appends nothing")
+	}
+	a.appendTurnContext("Current date: 2026-09-03")
+	if len(cli.history) != 1 || !cli.history[0].IsTurnContext() || !strings.HasPrefix(cli.history[0].Content, turnContextHeader) {
+		t.Fatalf("turn context message shape: %+v", cli.history)
+	}
+	cli.setPendingTurnContext("ctx")
+	if cli.takePendingTurnContext() != "ctx" || cli.takePendingTurnContext() != "" {
+		t.Fatal("pending turn context is taken once")
+	}
+	var nilCLI *ChatCLI
+	nilCLI.setPendingTurnContext("x")
+	if nilCLI.takePendingTurnContext() != "" {
+		t.Fatal("nil-safe")
+	}
+	if turnContextText(nil) != "" || turnContextText([]models.ContentBlock{{Text: "  "}}) != "" {
+		t.Fatal("no volatile blocks → no message")
+	}
+	if key := llmclient.PromptCacheKey(nil); key != "" {
+		t.Fatal("no system message → no key")
+	}
+	if r := (*ChatCLI)(nil).frozenPrefixRatio("openai", "gpt-5.6-terra"); r != defaultCharsPerToken {
+		t.Fatal("nil CLI falls back to the default ratio")
+	}
+}
