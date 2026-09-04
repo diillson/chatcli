@@ -399,19 +399,12 @@ memory:
   # Uses the persistence PVC by default.
   # Memory files are stored under /home/chatcli/.chatcli/memory/
 
-# Shell safety configuration
-safety:
-  enabled: false
-  # Inline safety config (creates ConfigMap automatically)
-  config: {}
-  #   denyPatterns:
-  #     - pattern: "rm -rf /"
-  #       severity: critical
-  #   allowPatterns:
-  #     - pattern: "go test"
-  #   workspaceBoundary: "/workspace"
-  # Or reference an existing ConfigMap with safety_config.json
-  existingConfigMap: ""
+# Shell safety is configured through the agent's own variables, set under
+# `env` or `secrets` above. Nothing reads a CHATCLI_SAFETY_ENABLED switch:
+#   CHATCLI_AGENT_SECURITY_MODE   strict (default) | permissive
+#   CHATCLI_AGENT_ALLOWLIST       commands that run without confirmation
+#   CHATCLI_AGENT_DENYLIST        commands that are always refused
+#   CHATCLI_AGENT_ALLOW_SUDO      false by default
 
 # Skill Registry configuration (multi-registry support)
 skillRegistry:

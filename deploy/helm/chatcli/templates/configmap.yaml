@@ -51,9 +51,6 @@ data:
   CHATCLI_BOOTSTRAP_ENABLED: "true"
   CHATCLI_BOOTSTRAP_DIR: "/home/chatcli/.chatcli/bootstrap"
   {{- end }}
-  {{- if .Values.safety.enabled }}
-  CHATCLI_SAFETY_ENABLED: "true"
-  {{- end }}
   {{- if .Values.skillRegistry.enabled }}
   {{- if .Values.skillRegistry.registryUrls }}
   CHATCLI_REGISTRY_URLS: {{ .Values.skillRegistry.registryUrls | quote }}

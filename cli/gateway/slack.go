@@ -77,14 +77,18 @@ func (s *SlackAdapter) eventsHandler(ctx context.Context, inbound chan<- Inbound
 		}
 		body, _ := io.ReadAll(io.LimitReader(r.Body, 1<<20))
 
-		// SecOps: verify the request actually came from Slack.
-		if s.signingSecret != "" {
-			ts := r.Header.Get("X-Slack-Request-Timestamp")
-			sig := r.Header.Get("X-Slack-Signature")
-			if !verifySlackSignature(s.signingSecret, ts, body, sig) {
-				rw.WriteHeader(http.StatusUnauthorized)
-				return
+		// SecOps: verify the request actually came from Slack. Fail closed
+		// — an adapter with no signing secret cannot tell a real delivery
+		// from a forged one, and what it reaches is an agent that approves
+		// its own tool calls, so it accepts nothing rather than everything.
+		ts := r.Header.Get("X-Slack-Request-Timestamp")
+		sig := r.Header.Get("X-Slack-Signature")
+		if !verifySlackSignature(s.signingSecret, ts, body, sig) {
+			if s.logger != nil {
+				s.logger.Warn("slack: rejected an event with no valid signature")
 			}
+			rw.WriteHeader(http.StatusUnauthorized)
+			return
 		}
 
 		challenge, msg, hasMsg, err := parseSlackEvent(body)
@@ -226,7 +230,7 @@ func (s *SlackAdapter) sendPhoto(ctx context.Context, msg OutboundMessage) error
 // verifySlackSignature checks the X-Slack-Signature HMAC and rejects stale
 // timestamps (replay protection, 5-minute window).
 func verifySlackSignature(secret, timestamp string, body []byte, signature string) bool {
-	if timestamp == "" || signature == "" {
+	if secret == "" || timestamp == "" || signature == "" {
 		return false
 	}
 	ts, err := strconv.ParseInt(timestamp, 10, 64)

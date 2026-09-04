@@ -29,17 +29,35 @@ func recvWithin(t *testing.T, ch <-chan InboundMessage, d time.Duration) Inbound
 	}
 }
 
+// postSlackSigned sends a body with the signature Slack would attach.
+func postSlackSigned(t *testing.T, url, secret, body string) *http.Response {
+	t.Helper()
+	ts := strconv.FormatInt(time.Now().Unix(), 10)
+	mac := hmac.New(sha256.New, []byte(secret))
+	mac.Write([]byte("v0:" + ts + ":" + body))
+	req, err := http.NewRequest(http.MethodPost, url, strings.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Slack-Request-Timestamp", ts)
+	req.Header.Set("X-Slack-Signature", "v0="+hex.EncodeToString(mac.Sum(nil)))
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return resp
+}
+
 func TestSlackEventsHandler(t *testing.T) {
+	const secret = "slack-signing-secret"
 	ch := make(chan InboundMessage, 1)
-	a := NewSlackAdapter("tok", "", ":0", "/slack/events", zap.NewNop()) // empty secret skips verify
+	a := NewSlackAdapter("tok", secret, ":0", "/slack/events", zap.NewNop())
 	srv := httptest.NewServer(a.eventsHandler(context.Background(), ch))
 	defer srv.Close()
 
 	// url_verification handshake echoes the challenge.
-	resp, err := http.Post(srv.URL, "application/json", strings.NewReader(`{"type":"url_verification","challenge":"abc123"}`))
-	if err != nil {
-		t.Fatal(err)
-	}
+	resp := postSlackSigned(t, srv.URL, secret, `{"type":"url_verification","challenge":"abc123"}`)
 	body, _ := io.ReadAll(resp.Body)
 	resp.Body.Close()
 	if !strings.Contains(string(body), "abc123") {
@@ -47,14 +65,23 @@ func TestSlackEventsHandler(t *testing.T) {
 	}
 
 	// A message event reaches inbound.
-	postResp, err := http.Post(srv.URL, "application/json", strings.NewReader(
-		`{"type":"event_callback","event":{"type":"message","channel":"C1","user":"U1","text":"hi slack"}}`))
-	if err != nil {
-		t.Fatal(err)
-	}
+	postResp := postSlackSigned(t, srv.URL, secret,
+		`{"type":"event_callback","event":{"type":"message","channel":"C1","user":"U1","text":"hi slack"}}`)
 	_ = postResp.Body.Close()
 	if m := recvWithin(t, ch, time.Second); m.Text != "hi slack" || m.ChatID != "C1" {
 		t.Errorf("inbound wrong: %+v", m)
+	}
+
+	// An unsigned delivery is refused: it is indistinguishable from a
+	// forged one, and what it reaches approves its own tool calls.
+	unsigned, err := http.Post(srv.URL, "application/json", strings.NewReader(
+		`{"type":"event_callback","event":{"type":"message","channel":"C1","user":"U1","text":"forged"}}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = unsigned.Body.Close()
+	if unsigned.StatusCode != http.StatusUnauthorized {
+		t.Errorf("unsigned event should be 401, got %d", unsigned.StatusCode)
 	}
 
 	// GET is rejected.
@@ -101,7 +128,7 @@ func TestSlackSend(t *testing.T) {
 
 func TestWhatsAppHandler(t *testing.T) {
 	ch := make(chan InboundMessage, 1)
-	a := NewWhatsAppAdapter("tok", "phone1", "verifytok", ":0", "/wa", zap.NewNop())
+	a := NewWhatsAppAdapter("tok", "phone1", "verifytok", ":0", "/wa", zap.NewNop()).WithAppSecret("appsecret")
 	srv := httptest.NewServer(a.webhookHandler(context.Background(), ch))
 	defer srv.Close()
 
@@ -118,12 +145,30 @@ func TestWhatsAppHandler(t *testing.T) {
 		t.Errorf("wrong verify token should be 403, got %d", r2.StatusCode)
 	}
 	_ = r2.Body.Close()
-	// Message event.
-	postResp, _ := http.Post(srv.URL, "application/json", strings.NewReader(
-		`{"entry":[{"changes":[{"value":{"messages":[{"from":"55119","type":"text","text":{"body":"ola"}}]}}]}]}`))
+	// Message event, signed the way Meta signs it.
+	const payload = `{"entry":[{"changes":[{"value":{"messages":[{"from":"55119","type":"text","text":{"body":"ola"}}]}}]}]}`
+	mac := hmac.New(sha256.New, []byte("appsecret"))
+	mac.Write([]byte(payload))
+	req, _ := http.NewRequest(http.MethodPost, srv.URL, strings.NewReader(payload))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Hub-Signature-256", "sha256="+hex.EncodeToString(mac.Sum(nil)))
+	postResp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
 	_ = postResp.Body.Close()
 	if m := recvWithin(t, ch, time.Second); m.Text != "ola" || m.ChatID != "55119" {
 		t.Errorf("inbound wrong: %+v", m)
+	}
+
+	// Unsigned delivery is refused rather than delivered to the agent.
+	unsigned, err := http.Post(srv.URL, "application/json", strings.NewReader(payload))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = unsigned.Body.Close()
+	if unsigned.StatusCode != http.StatusUnauthorized {
+		t.Errorf("unsigned delivery should be 401, got %d", unsigned.StatusCode)
 	}
 }
 

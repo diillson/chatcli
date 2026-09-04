@@ -8,7 +8,10 @@ package gateway
 import (
 	"bytes"
 	"context"
+	"crypto/hmac"
+	"crypto/sha256"
 	"crypto/subtle"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -32,11 +35,17 @@ type WhatsAppAdapter struct {
 	accessToken string
 	phoneID     string
 	verifyToken string
-	addr        string
-	path        string
-	graphBase   string // overridable for tests; defaults to https://graph.facebook.com/v21.0
-	http        *http.Client
-	logger      *zap.Logger
+	// appSecret signs every inbound POST. Meta computes an HMAC-SHA256 of
+	// the raw body with it and sends the result in X-Hub-Signature-256;
+	// without it there is nothing separating a real delivery from anyone
+	// who found the URL, and the message goes straight to an agent that
+	// approves its own tool calls.
+	appSecret string
+	addr      string
+	path      string
+	graphBase string // overridable for tests; defaults to https://graph.facebook.com/v21.0
+	http      *http.Client
+	logger    *zap.Logger
 }
 
 // NewWhatsAppAdapter builds a WhatsApp Cloud API adapter.
@@ -58,6 +67,15 @@ func NewWhatsAppAdapter(accessToken, phoneID, verifyToken, addr, path string, lo
 
 // Name implements Adapter.
 func (a *WhatsAppAdapter) Name() string { return whatsappPlatform }
+
+// WithAppSecret sets the Meta app secret used to verify the signature on
+// every inbound delivery, and returns the adapter so the builder can chain
+// it. Without it the adapter refuses every POST: an unsigned delivery is
+// indistinguishable from a forged one.
+func (a *WhatsAppAdapter) WithAppSecret(secret string) *WhatsAppAdapter {
+	a.appSecret = secret
+	return a
+}
 
 // SetLogger implements LoggerAware: inject the daemon logger and trace the
 // HTTP client's calls to the WhatsApp Cloud API.
@@ -90,6 +108,17 @@ func (a *WhatsAppAdapter) webhookHandler(ctx context.Context, inbound chan<- Inb
 			rw.WriteHeader(http.StatusForbidden)
 		case http.MethodPost:
 			body, _ := io.ReadAll(io.LimitReader(r.Body, 1<<20))
+			// Fail closed. An unsigned delivery is indistinguishable from
+			// a forged one, and what it reaches is an agent that approves
+			// its own tool calls — so an adapter without an app secret
+			// accepts nothing rather than accepting everything.
+			if !verifyMetaSignature(a.appSecret, body, r.Header.Get("X-Hub-Signature-256")) {
+				if a.logger != nil {
+					a.logger.Warn("whatsapp: rejected an inbound delivery with no valid signature")
+				}
+				rw.WriteHeader(http.StatusUnauthorized)
+				return
+			}
 			rw.WriteHeader(http.StatusOK) // ack fast; Meta retries on non-200
 			for _, msg := range parseWhatsAppInbound(body) {
 				a.hydrateAudio(ctx, &msg)
@@ -430,6 +459,27 @@ func init() {
 			addr,
 			os.Getenv("CHATCLI_WHATSAPP_PATH"),
 			zap.NewNop(),
-		), nil
+		).WithAppSecret(os.Getenv("CHATCLI_WHATSAPP_APP_SECRET")), nil
 	})
+}
+
+// verifyMetaSignature checks the X-Hub-Signature-256 header Meta sends on
+// every webhook delivery: an HMAC-SHA256 of the raw body, keyed with the
+// app secret, rendered as "sha256=<hex>".
+//
+// Returns false when the secret is unset, which is what makes the handler
+// fail closed: a deployment that never configured one was accepting
+// anything that reached the URL.
+func verifyMetaSignature(secret string, body []byte, header string) bool {
+	if secret == "" || header == "" {
+		return false
+	}
+	got, ok := strings.CutPrefix(header, "sha256=")
+	if !ok {
+		return false
+	}
+	mac := hmac.New(sha256.New, []byte(secret))
+	mac.Write(body)
+	want := hex.EncodeToString(mac.Sum(nil))
+	return subtle.ConstantTimeCompare([]byte(want), []byte(got)) == 1
 }
