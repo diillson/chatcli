@@ -104,6 +104,11 @@ func runRPC(kind string, mgr manager.LLMManager, logger *zap.Logger) error {
 	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	if chatCLI != nil {
+		// MCP/ACP servers exit with their client: persist spend and release
+		// paid caches like every other surface.
+		defer chatCLI.FinalizeSpend(context.WithoutCancel(ctx))
+	}
 	defer stop()
 
 	ver := version.GetCurrentVersion().Version

@@ -49,6 +49,9 @@ func (cli *ChatCLI) HandleOneShotOrFatal(ctx context.Context, opts *Options) boo
 		return false
 	}
 	cli.SetAuditSurface("oneshot")
+	// -p exits right after its turn: persist spend and release paid caches
+	// like the REPL's cleanup does.
+	defer cli.finalizeSpend(context.WithoutCancel(ctx))
 
 	// Aplica overrides de provider/model
 	if err := cli.ApplyOverrides(ctx, cli.manager, opts.Provider, opts.Model); err != nil {

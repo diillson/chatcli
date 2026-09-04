@@ -312,6 +312,7 @@ func (cli *ChatCLI) runGateway(ctx context.Context, broker hub.Store) error {
 	runner.SetVoicePrefs(gateway.SharedVoicePrefs())
 	cli.maybeEnableVoiceReplies(runner)
 	cli.maybeEnableImageReplies(runner, imgOutbox)
+	defer cli.finalizeSpend(context.WithoutCancel(ctx))
 	return runner.Run(ctx)
 }
 

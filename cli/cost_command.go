@@ -6,11 +6,14 @@
 package cli
 
 import (
+	"bytes"
+	"encoding/csv"
 	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -124,17 +127,52 @@ func (cli *ChatCLI) handleCostSessions() {
 
 // handleCostExport writes the current session snapshot as JSON — to the
 // given path, or to the cost store with an -export suffix when omitted.
+// costSnapshotCSV renders the per-model rows of a snapshot as CSV (one
+// row per provider/model plus a total row) for spreadsheets and roll-ups.
+func costSnapshotCSV(snap SessionCostData) []byte {
+	var buf bytes.Buffer
+	w := csv.NewWriter(&buf)
+	_ = w.Write([]string{"session_id", "provider", "model", "requests", "prompt_tokens", "completion_tokens", "cache_read_tokens", "cache_write_tokens", "reasoning_tokens", "cost_usd"})
+	keys := make([]string, 0, len(snap.ModelUsage))
+	for k := range snap.ModelUsage {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	for _, k := range keys {
+		rec := snap.ModelUsage[k]
+		if rec == nil {
+			continue
+		}
+		_ = w.Write([]string{snap.SessionID, rec.Provider, rec.Model, strconv.Itoa(rec.Requests),
+			strconv.FormatInt(rec.PromptTokens, 10), strconv.FormatInt(rec.CompletionTokens, 10),
+			strconv.FormatInt(rec.CacheReadTokens, 10), strconv.FormatInt(rec.CacheCreationTokens, 10),
+			strconv.FormatInt(rec.ReasoningTokens, 10), strconv.FormatFloat(rec.TotalCostUSD, 'f', 6, 64)})
+	}
+	_ = w.Write([]string{snap.SessionID, "total", "", "", "", "", "", "", "", strconv.FormatFloat(snap.TotalCostUSD, 'f', 6, 64)})
+	w.Flush()
+	return buf.Bytes()
+}
+
 func (cli *ChatCLI) handleCostExport(path string) {
 	snap := cli.costTracker.Snapshot()
-	b, err := json.MarshalIndent(snap, "", "  ")
+	if path != "" {
+		if expanded, expErr := utils.ExpandPath(path); expErr == nil {
+			path = expanded
+		}
+	}
+	var b []byte
+	var err error
+	if strings.HasSuffix(strings.ToLower(path), ".csv") {
+		b = costSnapshotCSV(snap)
+	} else {
+		b, err = json.MarshalIndent(snap, "", "  ")
+	}
 	if err != nil {
 		fmt.Println(colorize("  "+i18n.T("cost.cmd.export_failed", err), ColorYellow))
 		return
 	}
 	if path == "" {
 		path = filepath.Join(costStoreDir(), snap.SessionID+"-export.json")
-	} else if expanded, expErr := utils.ExpandPath(path); expErr == nil {
-		path = expanded
 	}
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		fmt.Println(colorize("  "+i18n.T("cost.cmd.export_failed", err), ColorYellow))

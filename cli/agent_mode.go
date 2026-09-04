@@ -1623,6 +1623,13 @@ func (a *AgentMode) followUpRecallBlocks(ctx context.Context, userMsg string) st
 	return strings.Join(parts, "\n\n")
 }
 
+// nextLocalMidnight is when a daily budget resets: the park-on-hard-stop
+// resume time.
+func nextLocalMidnight() time.Time {
+	now := time.Now()
+	return time.Date(now.Year(), now.Month(), now.Day()+1, 0, 0, 0, 0, now.Location())
+}
+
 // RunCoderOnce executa o modo coder de forma não-interativa (one-shot),
 // mas mantendo o loop ReAct do AgentMode (com tool_calls/plugins).
 func (cli *ChatCLI) RunCoderOnce(ctx context.Context, input string) error {
@@ -2085,6 +2092,12 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 		// the session budget is exhausted and CHATCLI_BUDGET_HARD_STOP is on.
 		if err := a.cli.budgetBlockedErr(); err != nil {
 			fmt.Println(colorize("  "+err.Error(), ColorRed))
+			// Park instead of dying: the run resumes when the day rolls
+			// over (daily budget) or when /parked resume is issued after
+			// the budget was raised — the work done so far is not lost.
+			if perr := a.handleAgentPark(ctx, park.Request{Mode: park.ModeUntil, Until: nextLocalMidnight()}, "", ""); perr != nil {
+				return perr
+			}
 			return err
 		}
 

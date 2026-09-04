@@ -12,7 +12,9 @@ package cli
 
 import (
 	"context"
+	"os"
 	"strconv"
+	"strings"
 
 	"github.com/diillson/chatcli/cli/telemetry"
 	"go.uber.org/zap"
@@ -41,6 +43,19 @@ func (cli *ChatCLI) initTelemetry(ctx context.Context, surface string) {
 	}
 }
 
+// telemetrySessionAttrOptIn reports whether OTEL_RESOURCE_ATTRIBUTES carries
+// chatcli.session=attr — the operator's explicit acceptance of one series
+// per session on the session cost metric.
+func telemetrySessionAttrOptIn() bool {
+	for _, kv := range strings.Split(os.Getenv("OTEL_RESOURCE_ATTRIBUTES"), ",") {
+		k, v, ok := strings.Cut(strings.TrimSpace(kv), "=")
+		if ok && strings.TrimSpace(k) == "chatcli.session" && strings.EqualFold(strings.TrimSpace(v), "attr") {
+			return true
+		}
+	}
+	return false
+}
+
 // telemetryMetrics renders the cost tracker as cumulative OTLP sums.
 func (cli *ChatCLI) telemetryMetrics() []telemetry.Metric {
 	ct := cli.costTracker
@@ -54,7 +69,8 @@ func (cli *ChatCLI) telemetryMetrics() []telemetry.Metric {
 		if rec == nil {
 			continue
 		}
-		base := map[string]string{"provider": rec.Provider, "model": rec.Model}
+		// OpenTelemetry GenAI semantic-convention attribute names.
+		base := map[string]string{"gen_ai.provider.name": rec.Provider, "gen_ai.request.model": rec.Model}
 		for kind, n := range map[string]int64{
 			"input": rec.PromptTokens, "output": rec.CompletionTokens,
 			"cache_read": rec.CacheReadTokens, "cache_write": rec.CacheCreationTokens, "reasoning": rec.ReasoningTokens,
@@ -88,7 +104,23 @@ func (cli *ChatCLI) telemetryMetrics() []telemetry.Metric {
 	if snap.CacheResources > 0 {
 		out = append(out, telemetry.Metric{Name: "chatcli.cache.storage_cost", Unit: "USD", Points: []telemetry.Point{{Value: snap.CacheStorageCostUSD}}})
 	}
-	out = append(out, telemetry.Metric{Name: "chatcli.session.cost", Unit: "USD", Points: []telemetry.Point{{Value: snap.TotalCostUSD, Attrs: map[string]string{"session": snap.SessionID}}}})
+	// The session id is unbounded cardinality: attached only when the
+	// operator opted in through OTEL_RESOURCE_ATTRIBUTES (chatcli.session=attr).
+	sessionAttrs := map[string]string(nil)
+	if telemetrySessionAttrOptIn() {
+		sessionAttrs = map[string]string{"chatcli.session.id": snap.SessionID}
+	}
+	out = append(out, telemetry.Metric{Name: "chatcli.session.cost", Unit: "USD", Points: []telemetry.Point{{Value: snap.TotalCostUSD, Attrs: sessionAttrs}}})
+	if calls, tokens, cost := ct.EmbeddingStats(); calls > 0 {
+		out = append(out, telemetry.Metric{Name: "chatcli.embedding.tokens", Unit: "{token}", Points: []telemetry.Point{{Value: float64(tokens)}}})
+		out = append(out, telemetry.Metric{Name: "chatcli.embedding.cost", Unit: "USD", Points: []telemetry.Point{{Value: cost}}})
+	}
+	if spent, limit := ct.DailySpend(); limit > 0 || spent > 0 {
+		out = append(out, telemetry.Metric{Name: "chatcli.budget.daily_spent", Unit: "USD", Points: []telemetry.Point{{Value: spent}}})
+		if limit > 0 {
+			out = append(out, telemetry.Metric{Name: "chatcli.budget.daily_limit", Unit: "USD", Points: []telemetry.Point{{Value: limit}}})
+		}
+	}
 	return out
 }
 
