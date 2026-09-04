@@ -128,8 +128,20 @@ var sensitiveTextPatterns = []struct {
 	{regexp.MustCompile(`github_pat_[a-zA-Z0-9_]{20,}`), "[REDACTED_GH_PAT]"},
 	// Google AI
 	{regexp.MustCompile(`AIza[0-9A-Za-z\-_]{30,}`), "[REDACTED_GOOGLE_API_KEY]"},
-	// AWS keys
+	// AWS keys (access key id; secret access key by assignment)
 	{regexp.MustCompile(`AKIA[0-9A-Z]{16}`), "[REDACTED_AWS_KEY]"},
+	{regexp.MustCompile(`(?i)(aws_secret_access_key\s*[=:]\s*"?)[A-Za-z0-9/+=]{40}`), "${1}[REDACTED_AWS_SECRET]"},
+	// Slack tokens (bot, user, app, refresh, config) and webhooks
+	{regexp.MustCompile(`xox[baprs]-[A-Za-z0-9-]{10,}`), "[REDACTED_SLACK_TOKEN]"},
+	{regexp.MustCompile(`https://hooks\.slack\.com/services/[A-Za-z0-9/]+`), "https://hooks.slack.com/services/[REDACTED]"},
+	// PEM private keys (RSA, EC, OpenSSH, PKCS#8, encrypted)
+	{regexp.MustCompile(`(?s)-----BEGIN [A-Z ]*PRIVATE KEY-----.*?-----END [A-Z ]*PRIVATE KEY-----`), "-----BEGIN PRIVATE KEY-----[REDACTED]-----END PRIVATE KEY-----"},
+	// Connection strings carrying credentials (postgres, mysql, mongodb, redis, amqp, ...)
+	{regexp.MustCompile(`(?i)\b([a-z][a-z0-9+.-]*://[^/\s:@]+:)[^@\s]+@`), "${1}[REDACTED]@"},
+	// GCP service-account JSON and Azure storage / SAS keys
+	{regexp.MustCompile(`("private_key_id")\s*:\s*"[^"]+"`), `${1}:"[REDACTED]"`},
+	{regexp.MustCompile(`(?i)(AccountKey=)[A-Za-z0-9+/=]{20,}`), "${1}[REDACTED]"},
+	{regexp.MustCompile(`(?i)(SharedAccessSignature=|sig=)[A-Za-z0-9%+/=]{20,}`), "${1}[REDACTED]"},
 	// Bearer tokens e JWTs (parte do meio)
 	{regexp.MustCompile(`(?i)Bearer\s+[A-Za-z0-9\.\-_]+`), "Bearer [REDACTED]"},
 	{regexp.MustCompile(`ey[A-Za-z0-9-_=]+\.ey[A-Za-z0-9-_=]+\.[A-Za-z0-9-_.+/=]+`), "[REDACTED_JWT]"},

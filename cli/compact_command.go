@@ -195,7 +195,7 @@ CONVERSATION TO COMPACT:
 	// legacy lossy behavior.
 	recallNote := ""
 	if cli.compressionLayer != nil {
-		if key, ok := cli.compressionLayer.Archive(renderMessagesForArchive(middleMessages)); ok {
+		if key, ok := cli.compressionLayer.Archive(persistRedact(renderMessagesForArchive(middleMessages))); ok {
 			recallNote = "\n\n[full transcript of the summarized segment recoverable via @recall " +
 				compress.FormatMarker(key) + "]"
 		}

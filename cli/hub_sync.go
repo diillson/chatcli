@@ -325,5 +325,5 @@ func (cli *ChatCLI) mirrorHubTurn(ctx context.Context, userText, assistantText s
 	if cli.hubSync == nil {
 		return
 	}
-	cli.hubSync.mirrorTurn(ctx, userText, assistantText)
+	cli.hubSync.mirrorTurn(ctx, persistRedact(userText), persistRedact(assistantText))
 }

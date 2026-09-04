@@ -303,6 +303,10 @@ func (cli *ChatCLI) runGateway(ctx context.Context, broker hub.Store) error {
 	}
 
 	imgOutbox := newGatewayImageOutbox()
+	// The daemon lives for days: re-run retention periodically (the REPL
+	// runs it once at boot) so tenant parks, sessions, transcripts and the
+	// memory queue actually expire.
+	go cli.runRetentionLoop(ctx, retentionInterval)
 	runner := gateway.NewRunner(adapters, cli.gatewayAgentFunc(sessions, transcriber, imgOutbox), cli.logger, 0)
 	runner.SetThinkingNotice(i18n.T("gateway.thinking"))
 	runner.SetVoicePrefs(gateway.SharedVoicePrefs())

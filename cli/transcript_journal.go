@@ -241,6 +241,11 @@ func (j *transcriptJournal) appendEvents(events []transcriptEvent) error {
 		}
 	}
 	for _, ev := range events {
+		if ev.Message != nil && persistRedactEnabled() {
+			redacted := *ev.Message
+			redacted.Content = persistRedact(ev.Message.Content)
+			ev.Message = &redacted
+		}
 		line, err := json.Marshal(ev)
 		if err != nil {
 			_ = f.Close()

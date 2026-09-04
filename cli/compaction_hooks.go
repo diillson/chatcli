@@ -156,7 +156,7 @@ func archiveDroppedMessages(layer *compress.Layer, before, after []models.Messag
 	if len(dropped) == 0 {
 		return ""
 	}
-	key, ok := layer.Archive(renderMessagesForArchive(dropped))
+	key, ok := layer.Archive(persistRedact(renderMessagesForArchive(dropped)))
 	if !ok {
 		return ""
 	}
