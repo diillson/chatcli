@@ -19,6 +19,7 @@ package cli
 
 import (
 	"bufio"
+	"bytes"
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
@@ -26,6 +27,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -119,7 +121,10 @@ func openTranscriptJournal(dir, id string) (*transcriptJournal, error) {
 	return j, nil
 }
 
-// messageHash identifies a message by role, content and tool id.
+// messageHash identifies a message by role, content, tool-result id,
+// every native tool call (id, name, arguments) and the image count, so two
+// assistant messages that differ only in the call they made — the common
+// shape in a tool loop — never collapse into one journal entry.
 func messageHash(m models.Message) string {
 	h := sha256.New()
 	h.Write([]byte(m.Role))
@@ -129,7 +134,39 @@ func messageHash(m models.Message) string {
 	h.Write([]byte(m.ToolCallID))
 	h.Write([]byte{0})
 	h.Write([]byte(strconv.Itoa(len(m.ToolCalls))))
+	for _, tc := range m.ToolCalls {
+		h.Write([]byte{0})
+		h.Write([]byte(tc.ID))
+		h.Write([]byte{0})
+		h.Write([]byte(tc.Name))
+		h.Write([]byte{0})
+		h.Write([]byte(tc.ArgumentsJSON()))
+	}
+	h.Write([]byte{0})
+	h.Write([]byte(strconv.Itoa(len(m.Images))))
 	return hex.EncodeToString(h.Sum(nil))
+}
+
+// hashHistory hashes every message of a history in order.
+func hashHistory(history []models.Message) []string {
+	out := make([]string, len(history))
+	for i := range history {
+		out[i] = messageHash(history[i])
+	}
+	return out
+}
+
+// prefixMatches reports whether hashes starts with prefix.
+func prefixMatches(hashes, prefix []string) bool {
+	if len(hashes) < len(prefix) {
+		return false
+	}
+	for i := range prefix {
+		if hashes[i] != prefix[i] {
+			return false
+		}
+	}
+	return true
 }
 
 // Sync appends every message that has not been journaled yet. When the
@@ -142,7 +179,13 @@ func (j *transcriptJournal) Sync(history []models.Message) error {
 	j.mu.Lock()
 	defer j.mu.Unlock()
 
-	extends := len(history) >= j.lastCount && j.lastCount > 0 && messageHash(history[j.lastCount-1]) == j.lastHash
+	// The whole prefix is compared, not just the last message: an in-place
+	// mutation (microcompact, read dedup, pairing repair, Level 1 trim)
+	// leaves the tail intact while changing earlier messages, and a journal
+	// that only watched the tail recorded nothing — undo and checkpoints
+	// then resolved against hashes that were never appended.
+	hashes := hashHistory(history)
+	extends := j.lastCount > 0 && prefixMatches(hashes, j.lastHashes)
 	var events []transcriptEvent
 	now := time.Now()
 	if !extends && j.lastCount > 0 {
@@ -153,8 +196,12 @@ func (j *transcriptJournal) Sync(history []models.Message) error {
 		start = j.lastCount
 	}
 	for i := start; i < len(history); i++ {
-		h := messageHash(history[i])
-		if j.seen[h] {
+		h := hashes[i]
+		// A genuinely new tail message is always journaled, even when its
+		// bytes match an earlier one ("ok", "continue"): the transcript is
+		// a record, not a set. Dedup applies only when a rewrite re-emits
+		// messages the journal already holds.
+		if !extends && j.seen[h] {
 			continue
 		}
 		m := history[i]
@@ -167,12 +214,9 @@ func (j *transcriptJournal) Sync(history []models.Message) error {
 		}
 	}
 	j.lastCount = len(history)
-	j.lastHashes = make([]string, len(history))
-	for i := range history {
-		j.lastHashes[i] = messageHash(history[i])
-	}
+	j.lastHashes = hashes
 	if len(history) > 0 {
-		j.lastHash = j.lastHashes[len(history)-1]
+		j.lastHash = hashes[len(history)-1]
 	} else {
 		j.lastHash = ""
 	}
@@ -182,11 +226,20 @@ func (j *transcriptJournal) Sync(history []models.Message) error {
 // appendEvents writes events as JSON lines (sealed when encryption at rest
 // is on) and fsyncs.
 func (j *transcriptJournal) appendEvents(events []transcriptEvent) error {
-	f, err := os.OpenFile(j.path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600) // #nosec G304 -- path built from a validated id under ~/.chatcli/transcripts
+	f, err := os.OpenFile(j.path, os.O_CREATE|os.O_RDWR|os.O_APPEND, 0o600) // #nosec G304 -- path built from a validated id under ~/.chatcli/transcripts
 	if err != nil {
 		return err
 	}
 	w := bufio.NewWriter(f)
+	// A crash mid-append leaves a partial last line; start on a fresh line
+	// so the reader can skip the torn one and every later event stays
+	// readable.
+	if info, serr := f.Stat(); serr == nil && info.Size() > 0 {
+		tail := make([]byte, 1)
+		if _, rerr := f.ReadAt(tail, info.Size()-1); rerr == nil && tail[0] != '\n' {
+			_, _ = w.WriteString("\n")
+		}
+	}
 	for _, ev := range events {
 		line, err := json.Marshal(ev)
 		if err != nil {
@@ -279,30 +332,65 @@ func readTranscriptEvents(path string) ([]transcriptEvent, error) {
 		return nil, err
 	}
 	defer func() { _ = f.Close() }()
+	events, _, err := decodeTranscriptEvents(f)
+	return events, err
+}
+
+// decodeTranscriptEvents reads journal lines with no line-length cap and
+// skips what it cannot use — a torn last line from a crash, a corrupt or
+// foreign line — instead of failing the whole journal (which used to
+// disable undo, checkpoints and export for the session). A sealed line
+// this process cannot open is an error: that is a key problem, not a
+// corrupt journal. Returns the events and how many lines were skipped.
+func decodeTranscriptEvents(r io.Reader) ([]transcriptEvent, int, error) {
+	br := bufio.NewReaderSize(r, 1024*1024)
 	var out []transcriptEvent
-	sc := bufio.NewScanner(f)
-	sc.Buffer(make([]byte, 0, 1024*1024), 64*1024*1024)
-	for sc.Scan() {
-		line := sc.Bytes()
-		if len(line) == 0 {
-			continue
-		}
-		if strings.HasPrefix(string(line), sealedLinePrefix) {
-			raw, err := base64.StdEncoding.DecodeString(string(line[len(sealedLinePrefix):]))
-			if err != nil {
-				return nil, fmt.Errorf("transcript: corrupt sealed line: %w", err)
+	skipped := 0
+	for {
+		line, rerr := br.ReadBytes('\n')
+		torn := rerr != nil && len(line) > 0 // no trailing newline: partial write
+		line = bytes.TrimRight(line, "\r\n")
+		if len(line) > 0 && !torn {
+			ev, ok, oerr := decodeTranscriptLine(line)
+			if oerr != nil {
+				return out, skipped, oerr
 			}
-			if line, err = atrest.Open(raw); err != nil {
-				return nil, err
+			if ok {
+				out = append(out, ev)
+			} else {
+				skipped++
 			}
+		} else if torn {
+			skipped++
 		}
-		var ev transcriptEvent
-		if err := json.Unmarshal(line, &ev); err != nil {
-			return nil, fmt.Errorf("transcript: corrupt line: %w", err)
+		if rerr != nil {
+			if errors.Is(rerr, io.EOF) {
+				return out, skipped, nil
+			}
+			return out, skipped, rerr
 		}
-		out = append(out, ev)
 	}
-	return out, sc.Err()
+}
+
+// decodeTranscriptLine parses one line; ok is false for a line that is not
+// a journal event.
+func decodeTranscriptLine(line []byte) (transcriptEvent, bool, error) {
+	if bytes.HasPrefix(line, []byte(sealedLinePrefix)) {
+		raw, err := base64.StdEncoding.DecodeString(string(line[len(sealedLinePrefix):]))
+		if err != nil {
+			return transcriptEvent{}, false, nil
+		}
+		plain, err := atrest.Open(raw)
+		if err != nil {
+			return transcriptEvent{}, false, err
+		}
+		line = plain
+	}
+	var ev transcriptEvent
+	if err := json.Unmarshal(line, &ev); err != nil || (ev.Kind != "msg" && ev.Kind != "rewrite") {
+		return transcriptEvent{}, false, nil
+	}
+	return ev, true, nil
 }
 
 // pruneTranscripts removes journals whose last write is older than ttl.
