@@ -13,6 +13,8 @@ import (
 	"os"
 	"strconv"
 	"strings"
+
+	"github.com/diillson/chatcli/llm/bedrock"
 )
 
 // NewByName returns a provider by short name. Supported names: "voyage",
@@ -71,8 +73,11 @@ func NewByName(name string) (Provider, error) {
 				dim = n
 			}
 		}
-		region := firstNonEmpty(os.Getenv("BEDROCK_REGION"), os.Getenv("AWS_REGION"))
-		profile := os.Getenv("AWS_PROFILE")
+		// Shared resolution: BEDROCK_PROFILE/BEDROCK_REGION first, then the
+		// AWS_* pair, then the loaded .env — embeddings must land on the same
+		// account as chat.
+		region, _ := bedrock.ResolveRegion()
+		profile, _ := bedrock.ResolveProfile()
 		return NewBedrock(os.Getenv("CHATCLI_EMBED_MODEL"), region, profile, dim, nil)
 	default:
 		return nil, fmt.Errorf("%w: %q", ErrUnknownProvider, name)

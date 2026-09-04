@@ -6,8 +6,6 @@
 package bedrock
 
 import (
-	"os"
-
 	"github.com/diillson/chatcli/config"
 	"github.com/diillson/chatcli/llm/client"
 	"github.com/diillson/chatcli/llm/registry"
@@ -18,21 +16,27 @@ func init() {
 		Name:         "BEDROCK",
 		DisplayName:  "AWS Bedrock (all text models available to your account)",
 		RequiresAuth: false, // Auth comes from AWS credential chain, not a string APIKey
-		EnvKeys:      []string{"BEDROCK_REGION", "AWS_REGION", "AWS_PROFILE"},
+		EnvKeys:      []string{"BEDROCK_REGION", "AWS_REGION", "BEDROCK_PROFILE", "AWS_PROFILE"},
 		Factory: func(cfg registry.ProviderConfig) (client.LLMClient, error) {
 			model := cfg.Model
 			if model == "" {
 				model = config.DefaultBedrockModel
 			}
+			// Same resolution the manager and every other Bedrock surface
+			// use (BEDROCK_* first, then AWS_*, then the loaded .env) — this
+			// factory used to read AWS_PROFILE from the process only, so a
+			// BEDROCK_PROFILE or an .env-only profile selected a different
+			// account here than in chat.
+			envRegion, _ := ResolveRegion()
 			region := firstNonEmpty(
 				cfg.ExtraConfig["region"],
-				os.Getenv("BEDROCK_REGION"),
-				os.Getenv("AWS_REGION"),
+				envRegion,
 				config.DefaultBedrockRegion,
 			)
+			envProfile, _ := ResolveProfile()
 			profile := firstNonEmpty(
 				cfg.ExtraConfig["profile"],
-				os.Getenv("AWS_PROFILE"),
+				envProfile,
 			)
 			return NewBedrockClient(model, region, profile, cfg.Logger, cfg.MaxRetries, cfg.Backoff), nil
 		},

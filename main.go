@@ -61,10 +61,11 @@ func dispatchSubcommand() bool {
 // dotenvBootstrap carries the outcome of the pre-i18n environment load so
 // entrypoints can defer user-facing warnings until translations are up.
 type dotenvBootstrap struct {
-	path      string
-	expandErr error
-	loadErr   error
-	managed   config.ManagedReport
+	path       string
+	expandErr  error
+	loadErr    error
+	managed    config.ManagedReport
+	resolution config.DotenvResolution
 }
 
 // loadDotenvThenI18n resolves and loads the dotenv file and only then
@@ -73,14 +74,13 @@ type dotenvBootstrap struct {
 // init-first order silently ignored a dotenv-only CHATCLI_LANG, masked on
 // Unix by LANG but pinning Windows cmd/PowerShell (no LANG) to English.
 func loadDotenvThenI18n() dotenvBootstrap {
-	b := dotenvBootstrap{path: os.Getenv("CHATCLI_DOTENV")}
-	if b.path == "" {
-		b.path = ".env"
-	} else if expanded, err := utils.ExpandPath(b.path); err == nil {
-		b.path = expanded
-	} else {
-		b.expandErr = err
-	}
+	// config.ResolveDotenv is the single discovery rule shared by every
+	// entrypoint: $CHATCLI_DOTENV, else ./.env, ~/.chatcli/.env, ~/.env.
+	// The home fallbacks are what keep `chatcli acp` / `mcp-server` working
+	// when an editor spawns them without the user's shell environment.
+	res := config.ResolveDotenv()
+	config.SetActiveDotenv(res)
+	b := dotenvBootstrap{path: res.Path, expandErr: res.ExpandErr, resolution: res}
 	b.loadErr = godotenv.Load(b.path)
 	// Organization-managed defaults and locked policies (config/managed.go):
 	// after the user's .env so defaults fill only what is unset, and before
@@ -102,6 +102,25 @@ func reportDotenvBootstrap(b dotenvBootstrap) {
 	if b.managed.Err != nil {
 		fmt.Println(i18n.T("main.warn_managed_config", b.managed.Path, b.managed.Err))
 	}
+}
+
+// logDotenvResolution records which environment file the process actually
+// loaded, plus the candidates considered when none was found. It is the
+// first thing to check when an editor-spawned `acp`/`mcp-server` disagrees
+// with the terminal about available providers or the AWS profile in use.
+func logDotenvResolution(logger *zap.Logger) {
+	res := config.ActiveDotenv()
+	fields := []zap.Field{
+		zap.String("path", res.Path),
+		zap.String("origin", string(res.Origin)),
+		zap.Bool("exists", res.Exists),
+	}
+	if res.Exists {
+		logger.Info("dotenv loaded", fields...)
+		return
+	}
+	logger.Warn("no dotenv file found; only the process environment is in effect",
+		append(fields, zap.Strings("candidates", res.Candidates))...)
 }
 
 // printVersionInfo prints version details (including update check) and is used
@@ -211,6 +230,7 @@ func main() {
 
 	config.InitGlobal(logger)
 	config.Global.Load()
+	logDotenvResolution(logger)
 	utils.ApplyGlobalTLSTrust(logger)
 	utils.LogStartupInfo(logger)
 
@@ -288,6 +308,9 @@ func runSubcommand(subcmd string, args []string) {
 
 	config.InitGlobal(logger)
 	config.Global.Load()
+	// stdout carries the JSON-RPC protocol on `acp`/`mcp-server`: the dotenv
+	// outcome goes to the log, never to the wire.
+	logDotenvResolution(logger)
 	utils.ApplyGlobalTLSTrust(logger)
 
 	defer func() {
@@ -380,6 +403,7 @@ func runDaemonSubcommand(args []string) {
 
 	config.InitGlobal(logger)
 	config.Global.Load()
+	logDotenvResolution(logger)
 	utils.ApplyGlobalTLSTrust(logger)
 
 	ctx, cancel := context.WithCancel(context.Background())

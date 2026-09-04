@@ -61,6 +61,16 @@ type SlashCommandExpander interface {
 	ExpandSlashCommand(ctx context.Context, session, text string) (string, bool)
 }
 
+// ACPWorkspaceBackend is an OPTIONAL capability (type assertion, same
+// contract as ACPCommandBackend): backends that can adopt the client's
+// project directory get session/new's cwd. ChatCLI uses it to layer that
+// project's .env on top of its own configuration — fill-only, so a project
+// can add settings (a per-repository AWS_PROFILE or model) but never take
+// over one the user already set.
+type ACPWorkspaceBackend interface {
+	AdoptWorkspace(dir string)
+}
+
 // HistoryItem is one conversation message replayed to an ACP client on
 // session/load (system messages and empty content are filtered out upstream).
 type HistoryItem struct {
@@ -145,6 +155,17 @@ func (a *ACP) Handle(ctx context.Context, method string, params json.RawMessage)
 		}, nil
 	case "session/new":
 		id := uuid.NewString()
+		// cwd is the client's project directory. Editors spawn the agent
+		// without the user's shell environment, so this is often the only
+		// hint ChatCLI gets about which project it is serving.
+		if wb, ok := a.backend.(ACPWorkspaceBackend); ok && len(params) > 0 {
+			var p struct {
+				Cwd string `json:"cwd"`
+			}
+			if err := json.Unmarshal(params, &p); err == nil && strings.TrimSpace(p.Cwd) != "" {
+				wb.AdoptWorkspace(p.Cwd)
+			}
+		}
 		a.mu.Lock()
 		a.sessions[id] = &acpSession{mode: acpDefaultMode}
 		a.mu.Unlock()

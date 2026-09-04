@@ -207,34 +207,13 @@ func profileHint(profile string) string {
 	return " --profile " + profile
 }
 
-// isAWSCredentialError matches the aws-sdk-go-v2 error chain shapes seen
-// when no usable credential source exists: expired SSO token cache, IMDS
-// disabled/absent, or an empty provider chain. String matching is the
-// pragmatic option — the SDK wraps these in fmt-joined chains without
-// stable sentinel types across providers.
+// isAWSCredentialError reports whether err is an AWS credential-chain
+// failure. The marker list lives in llm/bedrock (IsCredentialError) so chat,
+// listing and embeddings classify the same error identically — two copies
+// drifted apart is how an expired session tripped the breaker on one surface
+// and surfaced raw on another.
 func isAWSCredentialError(err error) bool {
-	if err == nil {
-		return false
-	}
-	msg := strings.ToLower(err.Error())
-	for _, marker := range []string{
-		"failed to refresh cached credentials",
-		"get credentials:",
-		"no ec2 imds role found",
-		"ec2imds",
-		"sso session",
-		"sso token",
-		"token has expired",
-		"expiredtoken",
-		"invalidclienttokenid",
-		"no valid credential sources",
-		"failed to retrieve credentials",
-	} {
-		if strings.Contains(msg, marker) {
-			return true
-		}
-	}
-	return false
+	return bedrock.IsCredentialError(err)
 }
 
 func (b *Bedrock) ensureRuntime(ctx context.Context) error {

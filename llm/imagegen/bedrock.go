@@ -19,7 +19,6 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
-	"os"
 	"strings"
 
 	"github.com/aws/aws-sdk-go-v2/service/bedrockruntime"
@@ -230,19 +229,11 @@ func aspectRatio(w, h int) string {
 // bedrockImageRegion / bedrockImageProfile read the same env the chat Bedrock
 // provider uses.
 func bedrockImageRegion() string {
-	for _, k := range []string{"BEDROCK_REGION", "AWS_REGION", "AWS_DEFAULT_REGION"} {
-		if v := strings.TrimSpace(os.Getenv(k)); v != "" {
-			return v
-		}
-	}
-	return ""
+	region, _ := bedrock.ResolveRegion()
+	return region
 }
 
 func bedrockImageProfile() string {
-	for _, k := range []string{"BEDROCK_PROFILE", "AWS_PROFILE"} {
-		if v := strings.TrimSpace(os.Getenv(k)); v != "" {
-			return v
-		}
-	}
-	return ""
+	profile, _ := bedrock.ResolveProfile()
+	return profile
 }
