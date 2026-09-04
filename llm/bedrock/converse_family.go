@@ -347,7 +347,7 @@ func converseSupportsCachePoint(model string) bool {
 // lifetime on Claude 4.5+ ("ttl":"1h" per the Bedrock prompt-caching
 // guide), empty (wire default, 5 minutes) for Nova and older Claude.
 func converseCacheTTL(model string) bedrockruntimetypes.CacheTTL {
-	if !supportsExtendedCacheTTL(model) || client.AnthropicCacheTTL() != "1h" {
+	if !extendedCacheTTLModel(model) || client.AnthropicCacheTTL() != "1h" {
 		return ""
 	}
 	return bedrockruntimetypes.CacheTTLOneHour

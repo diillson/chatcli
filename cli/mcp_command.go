@@ -68,6 +68,11 @@ func (cli *ChatCLI) handleMCPCommand(ctx context.Context, userInput string) {
 	}
 
 	switch subcommand {
+	case "restart", "start", "stop", "reload", "login", "auth", "logout":
+		// The MCP tool catalog is part of the stable prefix.
+		defer cli.notePrefixChanged("mcp " + subcommand)
+	}
+	switch subcommand {
 	case "", "status":
 		cli.mcpShowStatus(name)
 	case "tools":

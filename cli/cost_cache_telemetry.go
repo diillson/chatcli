@@ -18,8 +18,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/diillson/chatcli/llm/bedrock"
 	llmclient "github.com/diillson/chatcli/llm/client"
 	"github.com/diillson/chatcli/models"
+	"go.uber.org/zap"
 )
 
 const (
@@ -32,7 +34,21 @@ const (
 	// cacheMissStreakAlert is how many consecutive misses trigger the
 	// one-shot "your stable prefix is changing every turn" notice.
 	cacheMissStreakAlert = 3
+	// subsetMinCacheableTokens is the smallest prompt the subset-schema
+	// providers cache at all (OpenAI, Gemini, xAI, Kimi: 1024 tokens); a
+	// shorter prompt served with cached_tokens=0 is not a miss.
+	subsetMinCacheableTokens = 1024
 )
+
+// providerCache is the per-provider slice of the telemetry: "first request"
+// and the hit ratio are per provider because every provider has its own
+// cache, its own schema and its own prefix.
+type providerCache struct {
+	requests    int
+	readTokens  int64
+	writeTokens int64
+	inputTokens int64
+}
 
 // cacheTelemetry is the tracker-side accumulator. All methods are called
 // with the tracker's mutex held.
@@ -50,6 +66,22 @@ type cacheTelemetry struct {
 	rebuildPending bool // set by NoteExpectedCacheRebuild until the next request
 	missStreak     int
 	alertArmed     bool // a streak notice is waiting to be shown
+
+	byProvider map[string]*providerCache
+}
+
+// bucket returns (creating) the per-provider slice.
+func (c *cacheTelemetry) bucket(provider string) *providerCache {
+	if c.byProvider == nil {
+		c.byProvider = make(map[string]*providerCache)
+	}
+	key := strings.ToUpper(strings.TrimSpace(provider))
+	b := c.byProvider[key]
+	if b == nil {
+		b = &providerCache{}
+		c.byProvider[key] = b
+	}
+	return b
 }
 
 // observe folds one real usage report into the telemetry.
@@ -59,22 +91,32 @@ func (c *cacheTelemetry) observe(provider, model string, u *models.UsageInfo, no
 	prompt := int64(u.PromptTokens)
 	additive := cacheTokensAdditive(provider, model)
 
+	b := c.bucket(provider)
+	first := b.requests == 0
 	if read == 0 && write == 0 {
-		// Provider reported no cache activity: nothing to learn about the
-		// cache from this request (and no basis to call it a miss).
-		return
+		// No cache activity reported. On an additive schema (Anthropic,
+		// Bedrock) that means no marker was placed — nothing to learn. On a
+		// subset schema (OpenAI, Gemini, xAI, Kimi) cached_tokens=0 on a
+		// prompt the provider would have cached IS the total miss: the
+		// prefix changed or expired.
+		if additive || first || prompt < subsetMinCacheableTokens {
+			return
+		}
 	}
-	first := c.requests == 0
 	c.requests++
 	c.readTokens += read
 	c.lastActivity = now
 	c.lastProvider = provider
 	c.lastModel = model
+	b.requests++
+	b.readTokens += read
+	b.inputTokens += prompt
 
 	var miss bool
 	if additive {
 		c.writeTokens += write
 		c.inputTokens += prompt
+		b.writeTokens += write
 		// Anthropic/Bedrock: the write is the part of the prefix the cache
 		// did not hold. A large write after the first request means the
 		// prefix changed (or expired).
@@ -154,6 +196,11 @@ func cacheTTLFor(provider, model string) string {
 	m := strings.ToLower(model)
 	if strings.Contains(p, "claudeai") || strings.Contains(m, "claude") || strings.Contains(m, "fable") {
 		if strings.Contains(p, "bedrock") {
+			// The marker Converse/InvokeModel actually sent: 1h only on
+			// the Claude generations that accept the ttl field.
+			if bedrock.SupportsExtendedCacheTTL(model) {
+				return llmclient.AnthropicCacheTTL()
+			}
 			return "5m"
 		}
 		return llmclient.AnthropicCacheTTL()
@@ -202,11 +249,33 @@ func (ct *CostTracker) cacheStatsLocked() CacheStats {
 	if c.requests == 0 {
 		return stats
 	}
+	// The hit ratio is the last-used provider's own: each provider has its
+	// own cache and schema, so blending an additive and a subset provider
+	// into one ratio would describe neither.
 	additive := cacheTokensAdditive(c.lastProvider, c.lastModel)
-	stats.HitPct = cacheHitPct(additive, c.readTokens, c.writeTokens, c.inputTokens)
+	if b := c.byProvider[strings.ToUpper(strings.TrimSpace(c.lastProvider))]; b != nil {
+		stats.HitPct = cacheHitPct(additive, b.readTokens, b.writeTokens, b.inputTokens)
+	} else {
+		stats.HitPct = cacheHitPct(additive, c.readTokens, c.writeTokens, c.inputTokens)
+	}
 	stats.TTL = cacheTTLFor(c.lastProvider, c.lastModel)
 	stats.Warm = time.Since(c.lastActivity) < cacheTTLDuration(stats.TTL)
 	return stats
+}
+
+// notePrefixChanged records that an operation just changed the stable
+// prefix on purpose (/switch, /agent attach|detach, /session load|attach,
+// MCP server start/stop/restart/reload/login/logout, skill pin|unpin), so
+// the next request's cache write reads as an expected rebuild, not as an
+// unstable-prefix miss.
+func (cli *ChatCLI) notePrefixChanged(reason string) {
+	if cli == nil || cli.costTracker == nil {
+		return
+	}
+	cli.costTracker.NoteExpectedCacheRebuild()
+	if cli.logger != nil {
+		cli.logger.Debug("prefix changed; next cache write is an expected rebuild", zap.String("reason", reason))
+	}
 }
 
 // NoteExpectedCacheRebuild tells the telemetry that ChatCLI just rewrote

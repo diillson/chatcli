@@ -19,12 +19,12 @@ func TestSupportsExtendedCacheTTL_Gate(t *testing.T) {
 	yes := []string{"anthropic.claude-sonnet-4-6", "anthropic.claude-opus-4-8", "anthropic.claude-sonnet-5", "anthropic.claude-fable-5-1", "anthropic.claude-haiku-4-5-20251001-v1:0", "us.anthropic.claude-opus-4-5-20251101-v1:0"}
 	no := []string{"anthropic.claude-3-7-sonnet-20250219-v1:0", "anthropic.claude-3-5-sonnet-20241022-v2:0", "amazon.nova-pro-v1:0", "meta.llama4", "openai.gpt-5.6-terra"}
 	for _, m := range yes {
-		if !supportsExtendedCacheTTL(m) {
+		if !extendedCacheTTLModel(m) {
 			t.Fatalf("%s must support the 1h TTL", m)
 		}
 	}
 	for _, m := range no {
-		if supportsExtendedCacheTTL(m) {
+		if extendedCacheTTLModel(m) {
 			t.Fatalf("%s must not get a 1h TTL", m)
 		}
 	}

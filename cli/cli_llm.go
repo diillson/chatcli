@@ -309,6 +309,7 @@ func (cli *ChatCLI) applyProviderSwitch(ctx context.Context, newProvider string)
 	cli.Client = newClient
 	cli.Provider = newProvider
 	cli.Model = newModel
+	cli.notePrefixChanged("switch provider")
 	fmt.Println(i18n.T("status.provider_switched", cli.Client.GetModelName(), cli.Provider))
 	fmt.Println()
 	cli.refreshModelCache(ctx)
@@ -455,6 +456,7 @@ func (cli *ChatCLI) handleSwitchCommand(ctx context.Context, userInput string) {
 		} else {
 			cli.Client = newClient
 			cli.Model = newModel
+			cli.notePrefixChanged("switch model")
 			fmt.Println(i18n.T("cli.switch.change_model_success", cli.Client.GetModelName(), cli.Provider))
 			// Mirror the live choice for a running/future gateway daemon (separate process).
 			cli.writeRuntimeModelState()

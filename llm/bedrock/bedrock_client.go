@@ -473,7 +473,7 @@ func (c *BedrockClient) sendPromptAnthropicModel(ctx context.Context, wireModel,
 	// cache_control object for Claude 4.5+ (docs.aws.amazon.com/bedrock/
 	// latest/userguide/prompt-caching.html), so the configured TTL applies
 	// there; older Claude keeps the 5-minute wire default.
-	client.MarkAnthropicHistoryBreakpoint(client.AnthropicMessages{Maps: messages}, client.AnthropicCacheMarkerWithTTL(supportsExtendedCacheTTL(wireModel)))
+	client.MarkAnthropicHistoryBreakpoint(client.AnthropicMessages{Maps: messages}, client.AnthropicCacheMarkerWithTTL(extendedCacheTTLModel(wireModel)))
 	enforceCacheControlBudget(reqBody, anthropicMaxCacheBreakpoints)
 
 	payload, err := json.Marshal(reqBody)
@@ -577,7 +577,7 @@ func (c *BedrockClient) buildMessagesAndSystem(prompt string, history []models.M
 						// Anthropic requires longer-lived breakpoints to
 						// precede shorter ones, so system and history must
 						// carry one lifetime.
-						block["cache_control"] = client.AnthropicCacheMarkerWithTTL(supportsExtendedCacheTTL(c.model))
+						block["cache_control"] = client.AnthropicCacheMarkerWithTTL(extendedCacheTTLModel(c.model))
 					}
 					systemBlocks = append(systemBlocks, block)
 				}
@@ -607,11 +607,16 @@ func (c *BedrockClient) buildMessagesAndSystem(prompt string, history []models.M
 	return messages, nil
 }
 
-// supportsExtendedCacheTTL reports whether Bedrock honors the 1-hour
+// extendedCacheTTLModel reports whether Bedrock honors the 1-hour
 // cache TTL for the model: every Claude from the 4.5 generation on
 // (Sonnet/Opus 4.5+, Haiku 4.5, the 5.x line, Fable/Mythos). Claude 3.x
 // and non-Anthropic vendors keep the 5-minute default.
-func supportsExtendedCacheTTL(model string) bool {
+// SupportsExtendedCacheTTL reports whether the Bedrock Claude model accepts
+// the 1h cache ttl (Claude 4.5+); telemetry reads it to report the TTL the
+// request actually carried.
+func SupportsExtendedCacheTTL(model string) bool { return extendedCacheTTLModel(model) }
+
+func extendedCacheTTLModel(model string) bool {
 	m := strings.ToLower(model)
 	if !strings.Contains(m, "claude") {
 		return false
