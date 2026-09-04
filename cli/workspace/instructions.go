@@ -22,6 +22,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"unicode/utf8"
 )
 
 const (
@@ -175,7 +176,10 @@ func capInstructionDoc(doc string, limit int) string {
 		return doc
 	}
 	cut := limit
-	if i := strings.LastIndexByte(doc[:limit], '\n'); i > limit/2 {
+	for cut > 0 && !utf8.RuneStart(doc[cut]) {
+		cut-- // never split a multi-byte rune
+	}
+	if i := strings.LastIndexByte(doc[:cut], '\n'); i > limit/2 {
 		cut = i
 	}
 	return doc[:cut] + fmt.Sprintf("\n\n<!-- instruction files truncated at %d KiB -->", limit/1024)

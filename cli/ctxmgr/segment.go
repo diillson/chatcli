@@ -19,6 +19,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/diillson/chatcli/utils"
 )
@@ -102,7 +103,26 @@ func segmentOne(f utils.FileInfo, opts SegmentOptions) []Segment {
 	if strings.TrimSpace(content) == "" {
 		return nil
 	}
+	// Binary and minified content never reaches the embedder: a NUL byte or
+	// invalid UTF-8 is binary; a file that is one or two enormous lines is
+	// a bundle nobody can cite a line of. One such passage used to poison
+	// the whole provider batch (400) and silently stop the warm-up.
+	if reason := unembeddableReason(content); reason != "" {
+		return nil
+	}
 	lines := strings.Split(content, "\n")
+	// Hard cap per passage: an over-long line is cut rune-safe at
+	// maxPassageBytes so a single line can never exceed a provider's
+	// per-input limit.
+	capBytes := opts.MaxChars * passageHardCapFactor
+	if capBytes <= 0 {
+		capBytes = defaultSegmentMaxChars * passageHardCapFactor
+	}
+	for i, l := range lines {
+		if len(l) > capBytes {
+			lines[i] = l[:alignRuneBefore(l, capBytes)] + "…"
+		}
+	}
 
 	var out []Segment
 	start := 0 // 0-based index into lines
@@ -153,6 +173,47 @@ func segmentOne(f utils.FileInfo, opts SegmentOptions) []Segment {
 		start = next
 	}
 	return out
+}
+
+// passageHardCapFactor × MaxChars is the byte ceiling of one passage line.
+const passageHardCapFactor = 4
+
+// minifiedLineBytes is the longest line a human-authored source file has;
+// beyond it, with almost no line breaks, the file is a bundle/minified
+// artifact. minifiedMinBytes keeps small one-liners (a long JSON line, a
+// data URI) on the normal path: they are capped, not dropped.
+const (
+	minifiedLineBytes = 4096
+	minifiedMinBytes  = 32 * 1024
+)
+
+// unembeddableReason classifies content the ingest must skip: "binary"
+// (NUL byte or invalid UTF-8) or "minified" (huge lines, no structure);
+// "" when the content is ordinary text.
+func unembeddableReason(content string) string {
+	if strings.IndexByte(content, 0) >= 0 || !utf8.ValidString(content) {
+		return "binary"
+	}
+	if len(content) < minifiedMinBytes {
+		return ""
+	}
+	longest, lines := 0, 1
+	start := 0
+	for i := 0; i <= len(content); i++ {
+		if i == len(content) || content[i] == '\n' {
+			if l := i - start; l > longest {
+				longest = l
+			}
+			if i < len(content) {
+				lines++
+			}
+			start = i + 1
+		}
+	}
+	if longest >= minifiedLineBytes && len(content)/lines >= minifiedLineBytes/4 {
+		return "minified"
+	}
+	return ""
 }
 
 // segmentID is a stable, collision-resistant key for the vector index. It folds

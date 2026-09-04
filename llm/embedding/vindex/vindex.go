@@ -45,6 +45,9 @@ type Index struct {
 	entries  map[string][]float32
 	path     string
 	logger   *zap.Logger
+	// dimFromDisk marks a dimension taken from the cache file while the
+	// provider had not reported one yet (lazy probe on first embed).
+	dimFromDisk bool
 }
 
 // Option customizes an Index at construction.
@@ -135,14 +138,55 @@ func (x *Index) Upsert(ctx context.Context, items map[string]string) error {
 		ids = append(ids, id)
 		texts = append(texts, text)
 	}
-	vecs, err := x.provider.Embed(ctx, texts)
-	if err != nil {
-		return fmt.Errorf("embed batch: %w", err)
+	// Bounded provider requests: a large map is sent in chunks and every
+	// chunk that came back is written before an error is returned, so a
+	// flaky provider degrades instead of losing progress.
+	stored := 0
+	var firstErr error
+	for start := 0; start < len(ids); start += UpsertBatch {
+		if err := ctx.Err(); err != nil {
+			firstErr = err
+			break
+		}
+		end := start + UpsertBatch
+		if end > len(ids) {
+			end = len(ids)
+		}
+		vecs, err := x.provider.Embed(ctx, texts[start:end])
+		if err != nil {
+			firstErr = fmt.Errorf("embed batch: %w", err)
+			break
+		}
+		if len(vecs) != end-start {
+			firstErr = fmt.Errorf("provider returned %d vectors for %d inputs", len(vecs), end-start)
+			break
+		}
+		if err := x.store(ids[start:end], vecs); err != nil {
+			firstErr = err
+			break
+		}
+		stored += len(vecs)
 	}
-	if len(vecs) != len(ids) {
-		return fmt.Errorf("provider returned %d vectors for %d inputs", len(vecs), len(ids))
+	if stored == 0 && firstErr != nil {
+		return firstErr
 	}
+	if err := x.persist(); err != nil && firstErr == nil {
+		firstErr = err
+	}
+	return firstErr
+}
+
+// UpsertBatch bounds one provider request inside Upsert.
+const UpsertBatch = 64
+
+// store writes one chunk of vectors. The dimension is learned from the
+// first vector; a dimension inherited from the on-disk cache that the
+// provider then contradicts (Ollama reports 0 until its first embed, so
+// the load check could not catch a same-name model swap) discards the
+// stale cache and adopts the provider's dimension.
+func (x *Index) store(ids []string, vecs [][]float32) error {
 	x.mu.Lock()
+	defer x.mu.Unlock()
 	for i, vec := range vecs {
 		if len(vec) == 0 {
 			continue
@@ -151,13 +195,20 @@ func (x *Index) Upsert(ctx context.Context, items map[string]string) error {
 			x.dim = len(vec)
 		}
 		if len(vec) != x.dim {
-			x.mu.Unlock()
-			return fmt.Errorf("provider %s emitted dim=%d but index dim=%d", x.provider.Name(), len(vec), x.dim)
+			if x.dimFromDisk {
+				x.logger.Warn("vindex dimension on disk contradicts the provider — auto-clearing for re-embed",
+					zap.Int("on_disk_dim", x.dim), zap.Int("provider_dim", len(vec)), zap.String("path", x.path))
+				x.entries = make(map[string][]float32)
+				x.dim = len(vec)
+				x.dimFromDisk = false
+			} else {
+				return fmt.Errorf("provider %s emitted dim=%d but index dim=%d", x.provider.Name(), len(vec), x.dim)
+			}
 		}
 		x.entries[ids[i]] = vec
 	}
-	x.mu.Unlock()
-	return x.persist()
+	x.dimFromDisk = false
+	return nil
 }
 
 // EmbedQuery embeds a single query string for use with Search.
@@ -323,6 +374,7 @@ func (x *Index) load() {
 		return
 	}
 	if f.Dimension > 0 {
+		x.dimFromDisk = x.dim == 0
 		x.dim = f.Dimension
 	}
 	if f.Entries != nil {
