@@ -28,7 +28,7 @@ func TestVerbatimToolResult_SurvivesPairingAfterLevel2(t *testing.T) {
 		models.Message{Role: "tool", ToolCallID: "r1", Content: "RECALLED ORIGINAL " + strings.Repeat("x", 300), Meta: &models.MessageMeta{PreserveVerbatim: true}},
 		models.Message{Role: "assistant", Content: strings.Repeat("more answer ", 50)},
 		models.Message{Role: "user", Content: "recent 1"}, models.Message{Role: "user", Content: "recent 2"})
-	out, err := hc.structuredSummarize(context.Background(), h, &countingSummarizer{summary: strings.Repeat("## Summary\n- point ", 8)}, CompactConfig{MinKeepRecent: 2})
+	out, _, err := hc.structuredSummarize(context.Background(), h, &countingSummarizer{summary: strings.Repeat("## Summary\n- point ", 8)}, CompactConfig{MinKeepRecent: 2})
 	if err != nil {
 		t.Fatal(err)
 	}

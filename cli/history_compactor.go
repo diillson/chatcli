@@ -390,8 +390,7 @@ func (hc *HistoryCompactor) Compact(
 			zap.Int("remaining", hc.l2Backoff))
 	} else {
 		hc.emitStatus(CompactStageSummarize, i18n.T("compact.status.summarize"))
-		summarized, err = hc.structuredSummarize(ctx, history, llmClient, cfg)
-		rep.SummaryUsage = summarizerUsage(llmClient, cfg)
+		summarized, rep.SummaryUsage, err = hc.structuredSummarize(ctx, history, llmClient, cfg)
 	}
 	if err != nil {
 		// A cancellation from the user should propagate, not silently fall
@@ -456,13 +455,26 @@ func (hc *HistoryCompactor) Compact(
 // errL2Backoff marks a Level 2 skipped by the back-off (not a failure).
 var errL2Backoff = errors.New("level 2 skipped by back-off")
 
-// summarizerUsage reads what the Level 2 call consumed from the client
-// that served it (the configured summarizer, else the session client).
-func summarizerUsage(llmClient client.LLMClient, cfg CompactConfig) *models.UsageInfo {
-	c := llmClient
-	if cfg.SummarizerClient != nil {
-		c = cfg.SummarizerClient
+// usageOfCall returns the usage a client reported for the call made
+// between snapshot (its LastUsage before the call) and now — nil when the
+// client did not report new usage (the call did not happen, failed, or the
+// client keeps no usage). Comparing pointers, not values: providers store a
+// fresh UsageInfo per request, and the sticky previous one must never be
+// re-booked as this call's spend.
+func usageOfCall(c client.LLMClient, snapshot *models.UsageInfo) *models.UsageInfo {
+	ua, ok := c.(client.UsageAwareClient)
+	if !ok || ua == nil {
+		return nil
 	}
+	now := ua.LastUsage()
+	if now == nil || now == snapshot {
+		return nil
+	}
+	return now
+}
+
+// usageSnapshot reads a client's current LastUsage pointer (nil-safe).
+func usageSnapshot(c client.LLMClient) *models.UsageInfo {
 	if ua, ok := c.(client.UsageAwareClient); ok && ua != nil {
 		return ua.LastUsage()
 	}
@@ -564,7 +576,7 @@ func (hc *HistoryCompactor) structuredSummarize(
 	history []models.Message,
 	llmClient client.LLMClient,
 	cfg CompactConfig,
-) ([]models.Message, error) {
+) ([]models.Message, *models.UsageInfo, error) {
 	// Find boundaries: [system messages | middle (to summarize) | recent (keep verbatim)]
 	systemEnd := 0
 	for i, msg := range history {
@@ -579,12 +591,12 @@ func (hc *HistoryCompactor) structuredSummarize(
 	recentStart = snapToToolBlockBoundary(history, recentStart, systemEnd)
 	if recentStart <= systemEnd {
 		// Not enough messages to split — nothing to summarize
-		return history, nil
+		return history, nil, nil
 	}
 
 	middleMessages, verbatim := splitVerbatim(history[systemEnd:recentStart])
 	if len(middleMessages) < 4 {
-		return history, nil
+		return history, nil, nil
 	}
 
 	// Build input for the summarizer: budgeted against the summarizer's
@@ -612,6 +624,7 @@ func (hc *HistoryCompactor) structuredSummarize(
 	}
 	var response string
 	var err error
+	var usage *models.UsageInfo
 	if cfg.ExternalSummarizer != nil {
 		response, err = cfg.ExternalSummarizer.Compact(summarizeCtx, segment, summarizerInputBudget(cfg), "")
 		if err != nil && hc.logger != nil {
@@ -619,9 +632,11 @@ func (hc *HistoryCompactor) structuredSummarize(
 		}
 	}
 	if strings.TrimSpace(response) == "" {
+		before := usageSnapshot(summarizer)
 		response, err = summarizer.SendPrompt(summarizeCtx, prompt, summaryHistory, 0)
+		usage = usageOfCall(summarizer, before)
 		if err != nil {
-			return nil, fmt.Errorf("structured summarization LLM call failed: %w", err)
+			return nil, usage, fmt.Errorf("structured summarization LLM call failed: %w", err)
 		}
 	}
 	// Quality gate: a refusal, an empty or a truncated answer must never
@@ -631,12 +646,16 @@ func (hc *HistoryCompactor) structuredSummarize(
 		hc.logger.Warn("Level 2 summary rejected by the quality gate; retrying once",
 			zap.Int("chars", len(strings.TrimSpace(response))))
 		hc.emitStatus(CompactStageSummarize, i18n.T("compact.status.summary_retry"))
+		before := usageSnapshot(summarizer)
 		response, err = summarizer.SendPrompt(summarizeCtx, prompt, summaryHistory, 0)
+		if u := usageOfCall(summarizer, before); u != nil {
+			usage = sumUsage(usage, u)
+		}
 		if err != nil {
-			return nil, fmt.Errorf("structured summarization retry failed: %w", err)
+			return nil, usage, fmt.Errorf("structured summarization retry failed: %w", err)
 		}
 		if !summaryPassesGate(response, len(segment)) {
-			return nil, errSummaryRejected
+			return nil, usage, errSummaryRejected
 		}
 	}
 
@@ -665,7 +684,27 @@ func (hc *HistoryCompactor) structuredSummarize(
 	result = append(result, downgradeVerbatimResults(verbatim)...)
 	result = append(result, history[recentStart:]...)
 
-	return result, nil
+	return result, usage, nil
+}
+
+// sumUsage adds two usage records (nil-safe) so a retried summary bills
+// both calls.
+func sumUsage(a, b *models.UsageInfo) *models.UsageInfo {
+	if a == nil {
+		return b
+	}
+	if b == nil {
+		return a
+	}
+	out := *a
+	out.PromptTokens += b.PromptTokens
+	out.CompletionTokens += b.CompletionTokens
+	out.TotalTokens += b.TotalTokens
+	out.CacheReadInputTokens += b.CacheReadInputTokens
+	out.CacheCreationInputTokens += b.CacheCreationInputTokens
+	out.CacheCreation1hInputTokens += b.CacheCreation1hInputTokens
+	out.ReasoningTokens += b.ReasoningTokens
+	return &out
 }
 
 // errSummaryRejected marks a summary that failed the quality gate twice.

@@ -69,7 +69,7 @@ func TestStructuredSummarize_TooSmallReturnsUnchanged(t *testing.T) {
 		{Role: "assistant", Content: "a"},
 		{Role: "user", Content: "u2"},
 	}
-	out, err := hc.structuredSummarize(context.Background(), history, nil, cfg)
+	out, _, err := hc.structuredSummarize(context.Background(), history, nil, cfg)
 	require.NoError(t, err)
 	assert.Equal(t, history, out)
 }
@@ -89,7 +89,7 @@ func TestStructuredSummarize_SnapKeepsToolBlockIntact(t *testing.T) {
 		{Role: "assistant", ToolCalls: []models.ToolCall{{ID: "web_fetch:0", Name: "web_fetch"}}},
 		models.NewToolResultMessage("web_fetch:0", "out", false, ""),
 	}
-	out, err := hc.structuredSummarize(context.Background(), history, nil, cfg)
+	out, _, err := hc.structuredSummarize(context.Background(), history, nil, cfg)
 	require.NoError(t, err)
 	assert.True(t, agent.ValidateToolResultPairing(out))
 }

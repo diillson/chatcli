@@ -267,10 +267,7 @@ func (cli *ChatCLI) renderCostSummary() {
 		fmt.Println(p + "    " + colorize(i18n.T("cost.cmd.embeddings",
 			ct.embeddingCalls, formatTokenCount(ct.embeddingTokens), fmt.Sprintf("$%.4f", ct.embeddingCostUSD)), ColorGray))
 	}
-	if ct.compactions > 0 {
-		fmt.Println(p + "    " + colorize(i18n.T("cost.cmd.compactions",
-			ct.compactions, ct.compactionsLevel3, fmt.Sprintf("$%.4f", ct.compactionCostUSD)), ColorGray))
-	}
+	printBackgroundCostLines(p, ct)
 	// Session prompt-cache telemetry: hit share, misses, rebuilds ChatCLI
 	// itself caused (compaction), and whether the prefix is still warm.
 	if stats := ct.cacheStatsLocked(); stats.Reported() {

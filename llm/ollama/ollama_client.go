@@ -78,6 +78,9 @@ func (c *Client) getMaxTokens() int {
 }
 
 func (c *Client) SendPrompt(ctx context.Context, prompt string, history []models.Message, maxTokens int) (string, error) {
+	// A response without a usage block must not re-book the previous
+	// call's tokens as this call's: reset before the request.
+	c.usageState.StoreUsage(nil)
 	effectiveMaxTokens := maxTokens
 	if effectiveMaxTokens <= 0 {
 		effectiveMaxTokens = c.getMaxTokens() // Fallback se nada for passado

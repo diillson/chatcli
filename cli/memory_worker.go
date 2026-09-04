@@ -45,6 +45,10 @@ type memoryWorker struct {
 	// lookupFallback resolves a fallback provider client; indirected so tests
 	// exercise the chain without a full LLM manager.
 	lookupFallback func(provider string) (client.LLMClient, error)
+	// dedicated is the worker's own client instance (backgroundClient),
+	// keyed by provider:model so a session model switch rebuilds it.
+	dedicated    client.LLMClient
+	dedicatedKey string
 }
 
 const (
@@ -250,13 +254,7 @@ func (mw *memoryWorker) runRollups(ctx context.Context) {
 	}
 	mgr := mw.store.Manager()
 
-	var sendPrompt func(ctx context.Context, prompt string) (string, error)
-	if llmClient := mw.cli.getClient(); llmClient != nil {
-		sendPrompt = func(ctx context.Context, prompt string) (string, error) {
-			history := []models.Message{{Role: "user", Content: prompt}}
-			return llmClient.SendPrompt(ctx, prompt, history, 0)
-		}
-	}
+	sendPrompt := mw.backgroundSendPrompt()
 
 	written, err := mgr.RunRollups(ctx, sendPrompt)
 	if err != nil {
@@ -403,6 +401,25 @@ items (bug fixed, feature built, decision made, incident resolved) — never
 greetings, questions or plans that didn't happen. Skip the section entirely if
 no work was completed.`
 
+// backgroundSendPrompt returns the prompt function rollups and memory
+// compaction use: the worker's dedicated client, gated by the budget and
+// booked under the memory slice. Nil when no client is available.
+func (mw *memoryWorker) backgroundSendPrompt() func(ctx context.Context, prompt string) (string, error) {
+	c, provider, model := mw.backgroundClient()
+	if c == nil {
+		return nil
+	}
+	return func(ctx context.Context, prompt string) (string, error) {
+		if err := mw.cli.budgetBlockedErr(); err != nil {
+			return "", err
+		}
+		before := usageSnapshot(c)
+		out, err := c.SendPrompt(ctx, prompt, []models.Message{{Role: "user", Content: prompt}}, 0)
+		mw.recordUsage(extractionClient{name: provider, llm: c, provider: provider, model: model}, usageOfCall(c, before))
+		return out, err
+	}
+}
+
 // buildExtractionSnippet renders the conversation segment the memory
 // extractor sees. Secrets are redacted BEFORE truncation and before the
 // text reaches the extraction LLM, so a token pasted into the chat can
@@ -491,6 +508,12 @@ func (mw *memoryWorker) extractAndSave(ctx context.Context, messages []models.Me
 		mw.logger.Debug("Memory worker: LLM returned nothing new")
 		return nil
 	}
+	if !looksLikeExtraction(response) {
+		// A refusal, a chat answer or a truncated reply is not "nothing new":
+		// surface it as a failure so the segment is queued and retried once
+		// (pendingMaxAttempts) instead of being silently discarded.
+		return fmt.Errorf("memory extraction reply unparseable (%d chars, no section markers)", len(response))
+	}
 
 	mw.logger.Debug("Memory worker: LLM response received",
 		zap.Int("response_len", len(response)),
@@ -534,17 +557,7 @@ func (mw *memoryWorker) maybeCompact(ctx context.Context) {
 
 	mw.logger.Info("Memory worker: starting compaction")
 
-	llmClient := mw.cli.getClient()
-	var sendPrompt func(ctx context.Context, prompt string) (string, error)
-
-	if llmClient != nil {
-		sendPrompt = func(ctx context.Context, prompt string) (string, error) {
-			history := []models.Message{
-				{Role: "user", Content: prompt},
-			}
-			return llmClient.SendPrompt(ctx, prompt, history, 0)
-		}
-	}
+	sendPrompt := mw.backgroundSendPrompt()
 
 	ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer cancel()
@@ -671,6 +684,18 @@ func parseMemoryResponse(response string) (daily string, longTerm string) {
 	}
 
 	return daily, longTerm
+}
+
+// looksLikeExtraction reports whether a reply carries any of the section
+// markers the parser understands.
+func looksLikeExtraction(s string) bool {
+	u := strings.ToUpper(s)
+	for _, k := range []string{"DAILY", "LONG", "FACT", "TOPIC", "PROJECT", "PROFILE", "EPISODE", "PATTERN", "MEMORY"} {
+		if strings.Contains(u, k) {
+			return true
+		}
+	}
+	return false
 }
 
 func isNothingNew(s string) bool {

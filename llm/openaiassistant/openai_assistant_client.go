@@ -130,6 +130,9 @@ func (c *OpenAIAssistantClient) GetModelName() string {
 
 // SendPrompt envia uma mensagem para o thread atual e retorna a resposta
 func (c *OpenAIAssistantClient) SendPrompt(ctx context.Context, prompt string, history []models.Message, maxTokens int) (string, error) {
+	// A response without a usage block must not re-book the previous
+	// call's tokens as this call's: reset before the request.
+	c.usageState.StoreUsage(nil)
 	start := time.Now()
 	client.LogRequestStart(c.logger, "OPENAI_ASSISTANT", c.model,
 		zap.Int("payload_bytes", len(prompt)),
