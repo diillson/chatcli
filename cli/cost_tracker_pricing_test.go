@@ -167,7 +167,7 @@ func TestGetModelPricing(t *testing.T) {
 		{"kimi-k2.5 retired keeps generic tier", "MOONSHOT", "kimi-k2.5", 0.95, 4.00},
 		{"moonshot-v1 retired keeps generic tier", "MOONSHOT", "moonshot-v1-128k", 0.95, 4.00},
 
-		{"copilot", "COPILOT", "gpt-4o", 2.50, 10.0},
+		{"copilot", "COPILOT", "gpt-4o", 0, 0}, // subscription: known-zero
 		{"ollama zero", "OLLAMA", "llama3", 0.0, 0.0},
 		// Devin CLI: o binário não reporta tokens e o custo é da assinatura
 		// Cognition — sempre zero, qualquer que seja o modelo roteado.
