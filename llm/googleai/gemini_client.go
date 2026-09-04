@@ -151,6 +151,12 @@ func (c *GeminiClient) SendPrompt(ctx context.Context, prompt string, history []
 		"topK":            40,
 		"maxOutputTokens": effectiveMaxTokens,
 	}
+	// Per-turn effort. Gemini takes a named level and rejects a request
+	// that also carries the legacy token budget, so the level is the only
+	// thinking knob this path sends.
+	if lvl := client.GeminiThinkingLevel(client.EffortFromContext(ctx)); lvl != "" {
+		generationConfig["thinkingConfig"] = map[string]interface{}{"thinkingLevel": lvl}
+	}
 
 	reqBody := map[string]interface{}{
 		"contents":         contents,

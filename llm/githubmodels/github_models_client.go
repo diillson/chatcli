@@ -127,6 +127,11 @@ func (c *GitHubModelsClient) SendPrompt(ctx context.Context, prompt string, hist
 		"max_tokens": effectiveMaxTokens,
 	}
 
+	// Per-turn effort: same chat schema as OpenAI, same field.
+	if eff := client.OpenAIReasoningEffort(c.model, client.EffortFromContext(ctx)); eff != "" {
+		payload["reasoning_effort"] = eff
+	}
+
 	jsonValue, err := json.Marshal(payload)
 	if err != nil {
 		return "", fmt.Errorf("%s: %w", i18n.T("llm.error.marshal_payload_for", "GitHub Models"), err)

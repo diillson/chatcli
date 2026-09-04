@@ -100,6 +100,13 @@ func (c *XAIClient) SendPrompt(ctx context.Context, prompt string, history []mod
 		"max_tokens": effectiveMaxTokens,
 	}
 
+	// Per-turn effort. Grok's reasoning models accept only low and high,
+	// so the middle of the scale maps down rather than up: a cheap turn
+	// stays cheap.
+	if eff := client.XAIReasoningEffort(c.model, client.EffortFromContext(ctx)); eff != "" {
+		payload["reasoning_effort"] = eff
+	}
+
 	// Automatic prompt caching routing hint on OpenAI-compatible upstreams
 	// (ignored by those that do not route on it). See client.PromptCacheKey.
 	if key := client.PromptCacheKey(history); key != "" {

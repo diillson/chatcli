@@ -86,12 +86,10 @@ func (c *OpenAIResponsesClient) getMaxTokens() int {
 // honors this field on the o-series reasoning models (o1, o3, o4, GPT-5).
 // Non-reasoning chat models (gpt-4o, gpt-4.1, etc.) reject unknown fields.
 func supportsReasoningEffort(model string) bool {
-	m := strings.ToLower(model)
-	return strings.HasPrefix(m, "o1") ||
-		strings.HasPrefix(m, "o3") ||
-		strings.HasPrefix(m, "o4") ||
-		strings.HasPrefix(m, "gpt-5") ||
-		strings.Contains(m, "-reasoning")
+	// One list for the whole OpenAI-compatible family (see
+	// client.SupportsOpenAIReasoningEffort): this used to be duplicated
+	// per client and drifted.
+	return client.SupportsOpenAIReasoningEffort(model)
 }
 
 func (c *OpenAIResponsesClient) SendPrompt(ctx context.Context, prompt string, history []models.Message, maxTokens int) (string, error) {

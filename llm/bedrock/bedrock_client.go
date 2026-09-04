@@ -666,6 +666,17 @@ func extendedCacheTTLModel(model string) bool {
 }
 
 func supportsExtendedThinking(model string) bool {
+	if catalog.HasCapability(catalog.ProviderBedrock, model, "extended_thinking") {
+		return true
+	}
+	// A registered model without the flag takes no budget: that is what
+	// keeps a newer Claude on Bedrock from being handed the budgeted shape
+	// it answers with a 400.
+	if _, known := catalog.Resolve(catalog.ProviderBedrock, model); known {
+		return false
+	}
+	// Unknown id (cross-region profile, bare ARN): keep the historical
+	// name match so an unlisted model does not silently lose thinking.
 	m := strings.ToLower(model)
 	return strings.Contains(m, "opus-4") ||
 		strings.Contains(m, "sonnet-4") ||
@@ -695,12 +706,22 @@ func applyAnthropicThinkingForEffort(reqBody map[string]interface{}, model strin
 	if effort == client.EffortUnset {
 		return false
 	}
+	// Same lever as the first-party path: this builder feeds the native
+	// Anthropic messages body (InvokeModel and the Mantle endpoint), which
+	// carries output_config unchanged. The Converse and OpenAI families
+	// have their own request shapes and are not touched here.
+	if cfg := client.AnthropicOutputConfig(effort); cfg != nil &&
+		catalog.HasCapability(catalog.ProviderBedrock, model, "output_effort") {
+		reqBody["output_config"] = cfg
+	}
 	if catalog.HasCapability(catalog.ProviderBedrock, model, "adaptive_thinking") {
 		reqBody["thinking"] = map[string]interface{}{"type": "adaptive"}
 		return true
 	}
 	budget := client.ThinkingBudgetForEffort(effort)
 	if budget <= 0 || !supportsExtendedThinking(model) {
+		// The return value reports whether a thinking block was attached;
+		// output_config travels independently of it.
 		return false
 	}
 	required := budget + 1024

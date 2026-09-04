@@ -200,6 +200,18 @@ func (c *ClaudeClient) getMaxTokens() int {
 // that dated variants (e.g. "claude-sonnet-4-5-20251001") and future 4.x
 // releases keep working without a catalog update.
 func supportsExtendedThinking(model string) bool {
+	if catalog.HasCapability(catalog.ProviderClaudeAI, model, "extended_thinking") {
+		return true
+	}
+	// The catalog is authoritative for every model it knows: a registered
+	// entry without the flag takes no budget, which is what stops a newer
+	// model from being handed the budgeted shape it rejects with a 400.
+	if _, known := catalog.Resolve(catalog.ProviderClaudeAI, model); known {
+		return false
+	}
+	// Unknown id (a dated snapshot, a gateway alias): fall back to the
+	// historical name match so an unlisted model keeps the thinking it
+	// has today rather than silently losing it.
 	m := strings.ToLower(model)
 	return strings.Contains(m, "opus-4") ||
 		strings.Contains(m, "sonnet-4") ||
@@ -229,6 +241,13 @@ func applyThinkingForEffort(reqBody map[string]interface{}, model string, ctx co
 	effort := client.EffortFromContext(ctx)
 	if effort == client.EffortUnset {
 		return false
+	}
+	// The level itself travels in output_config: the thinking block only
+	// says whether the model reasons, so without this every level from low
+	// to max produced the same request and the provider's default applied.
+	if cfg := client.AnthropicOutputConfig(effort); cfg != nil &&
+		catalog.HasCapability(catalog.ProviderClaudeAI, model, "output_effort") {
+		reqBody["output_config"] = cfg
 	}
 	if usesAdaptiveThinkingOnly(model) {
 		reqBody["thinking"] = map[string]interface{}{"type": "adaptive"}
