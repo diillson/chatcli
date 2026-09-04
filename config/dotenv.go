@@ -398,7 +398,7 @@ func BootEnv(key string) (string, bool) {
 // they are currently unset — i.e. the environment file did not define them
 // and the reload cycle cleared them. Returns the names actually restored.
 func RestoreBootEnv(keys []string) []string {
-	var restored []string
+	restored := make([]string, 0, len(keys))
 	for _, key := range keys {
 		if isEnvSet(key) {
 			continue // the file, or a managed policy, owns it now
@@ -433,7 +433,7 @@ func ReapplyProjectDotenv() []string {
 	}
 	dotenvMu.RUnlock()
 
-	var restored []string
+	restored := make([]string, 0, len(pending))
 	for key, value := range pending {
 		if isEnvSet(key) {
 			continue
