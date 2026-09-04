@@ -69,15 +69,35 @@ func TestContextBuilder_DynamicContext(t *testing.T) {
 	wsDir := t.TempDir()
 	cb := NewContextBuilder(bl, ms, wsDir)
 
+	// Split by lifetime: the date is the only part that varies within a
+	// session, so it is the only part that rides in the per-turn block.
 	dyn := cb.BuildDynamicContext()
 	if !strings.Contains(dyn, "Current date: ") || strings.Contains(dyn, ":00") {
 		t.Errorf("expected dynamic context with date, got %q", dyn)
 	}
-	if !strings.Contains(dyn, "Current working directory: "+wsDir) {
-		t.Errorf("expected CWD in dynamic context, got %q", dyn)
+	if strings.Contains(dyn, "Current working directory") || strings.Contains(dyn, "IMPORTANT") {
+		t.Errorf("session-invariant text must not repeat per turn, got %q", dyn)
 	}
-	if !strings.Contains(dyn, "IMPORTANT") {
-		t.Errorf("expected disambiguation instruction in dynamic context, got %q", dyn)
+
+	// The invariant half still reaches the model — from the cached prefix.
+	dir := cb.BuildWorkspaceDirective()
+	if !strings.Contains(dir, "Current working directory: "+wsDir) {
+		t.Errorf("expected CWD in the workspace directive, got %q", dir)
+	}
+	if !strings.Contains(dir, "IMPORTANT") {
+		t.Errorf("expected disambiguation instruction in the workspace directive, got %q", dir)
+	}
+	if strings.Contains(dir, "Current date") {
+		t.Errorf("the directive must not carry the date, got %q", dir)
+	}
+}
+
+func TestContextBuilder_WorkspaceDirectiveEmptyWithoutWorkspace(t *testing.T) {
+	bl := NewBootstrapLoader(t.TempDir(), t.TempDir(), testLogger())
+	ms := NewMemoryStore(t.TempDir(), testLogger())
+	cb := NewContextBuilder(bl, ms, "")
+	if got := cb.BuildWorkspaceDirective(); got != "" {
+		t.Errorf("no workspace means no directive, got %q", got)
 	}
 }
 

@@ -2,7 +2,6 @@ package workspace
 
 import (
 	"context"
-	"fmt"
 	"strings"
 	"sync"
 	"time"
@@ -247,24 +246,40 @@ func appendMatchingRules(rules *RulesLoader, hints []string, parts []string) []s
 // BuildDynamicContext returns time-sensitive and session-aware context.
 // Includes current time, working directory, and disambiguation instructions
 // so the model never confuses paths from long-term memory with the current session.
+//
+// The block is split by lifetime, not by topic. What varies within a
+// session (the date) stays here, in the per-turn message; what is fixed
+// for the whole session (the working directory and the rule for resolving
+// relative paths against it) moved to BuildWorkspaceDirective, which the
+// caller places in the cached prefix. Both halves reach the model on every
+// turn as before; only one of them is paid for again each time.
 func (cb *ContextBuilder) BuildDynamicContext() string {
 	now := time.Now()
-	var parts []string
 	// Day resolution on purpose: this block rides in the per-turn context
 	// message, and a wall-clock second would make it differ on every
 	// request for nothing the model needs.
-	parts = append(parts, "Current date: "+now.Format("2006-01-02")+" ("+now.Weekday().String()+", "+now.Format("MST")+")")
+	return "Current date: " + now.Format("2006-01-02") + " (" + now.Weekday().String() + ", " + now.Format("MST") + ")"
+}
 
-	if cb.workspaceDir != "" {
-		parts = append(parts, fmt.Sprintf("Current working directory: %s", cb.workspaceDir))
-		parts = append(parts,
-			"IMPORTANT: When the user refers to \"here\", \"this project\", \"current directory\", "+
-				"or uses relative paths, ALWAYS resolve them against the current working directory above — "+
-				"NOT against paths from long-term memory or previous sessions. "+
-				"Memory may contain paths from other projects; treat those as historical context only.")
+// BuildWorkspaceDirective returns the session-invariant half of the
+// context above: where the session is rooted and how to read a relative
+// path against it. It belongs in the stable prefix — repeating it on every
+// turn cost the window a paragraph per turn and told the model nothing it
+// had not already been told.
+//
+// Empty when there is no workspace, so the caller can append it blind.
+func (cb *ContextBuilder) BuildWorkspaceDirective() string {
+	if cb.workspaceDir == "" {
+		return ""
 	}
-
-	return strings.Join(parts, "\n")
+	// Model-facing text, English on purpose — the same rule the mode
+	// banners follow. Translating a prompt directive changes how the model
+	// resolves paths, so it is not routed through i18n.
+	const directive = "IMPORTANT: When the user refers to \"here\", \"this project\", \"current directory\", " +
+		"or uses relative paths, ALWAYS resolve them against the current working directory above — " +
+		"NOT against paths from long-term memory or previous sessions. " +
+		"Memory may contain paths from other projects; treat those as historical context only."
+	return "Current working directory: " + cb.workspaceDir + "\n" + directive
 }
 
 // InvalidateCache forces rebuild on next call.

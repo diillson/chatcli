@@ -347,6 +347,13 @@ func (hc *HistoryCompactor) Compact(
 	hc.emitStatus(CompactStageStart, i18n.T("compact.status.start",
 		beforeMsgs, FormatPayloadSize(before), FormatPayloadSize(budget)))
 
+	// LEVEL 0: superseded turn context. These are blocks ChatCLI injected
+	// itself — the date, an MCP channel push, a recall — and only the last
+	// one still says anything current. They are dropped rather than
+	// summarized: paying a summarizer to compress ChatCLI's own repeated
+	// preamble buys nothing, and the newest block stays untouched.
+	history = dropSupersededTurnContext(history)
+
 	// LEVEL 1: Near-lossless trimming — pure Go, no network
 	hc.emitStatus(CompactStageTrim, i18n.T("compact.status.trim"))
 	history = hc.trimmer.TrimHistory(history)

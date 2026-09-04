@@ -54,8 +54,15 @@ func (cli *ChatCLI) processLLMRequest(parentCtx context.Context, in string) {
 	cli.compactHistoryIfNeeded(ctx)
 
 	assembly := cli.assembleChatSystemPrompt(ctx, userInput, additionalContext)
-	tempHistory := cli.buildChatTempHistoryWithContext(assembly.parts, assembly.turnContext, userInput, additionalContext, images)
-	cli.setPendingTurnContext(turnContextText(assembly.turnContext))
+	// A block that would repeat the last one still in history is not sent
+	// and not persisted: the model already read it, and adding it again
+	// only spends window. Anything that actually changed travels.
+	turnCtx := assembly.turnContext
+	if turnContextIsRedundant(cli.history, turnContextText(turnCtx)) {
+		turnCtx = nil
+	}
+	tempHistory := cli.buildChatTempHistoryWithContext(assembly.parts, turnCtx, userInput, additionalContext, images)
+	cli.setPendingTurnContext(turnContextText(turnCtx))
 	// What the wire carries this turn — the calibrator's chars side.
 	cli.lastPromptChars = promptCharsOf(tempHistory) + len(userInput+additionalContext)
 	userMessage := models.Message{Role: "user", Content: userInput + additionalContext, Images: images}
