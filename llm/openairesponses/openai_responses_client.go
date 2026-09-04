@@ -126,6 +126,7 @@ func (c *OpenAIResponsesClient) SendPrompt(ctx context.Context, prompt string, h
 			"instructions":      instructions,
 			"input":             conversationInput,
 			"max_output_tokens": effectiveMaxTokens,
+			"store":             false,
 		}
 	} else {
 		input := buildTextFromHistory(history, "")
@@ -143,6 +144,11 @@ func (c *OpenAIResponsesClient) SendPrompt(ctx context.Context, prompt string, h
 			"model":             c.model,
 			"input":             input,
 			"max_output_tokens": effectiveMaxTokens,
+			// Explicit, like the OAuth path: the endpoint retains
+			// responses by default, and ChatCLI never reads them back —
+			// it resends the conversation every turn. Leaving the field
+			// unset paid the retention without taking the benefit.
+			"store": false,
 		}
 	}
 

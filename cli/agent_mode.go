@@ -2517,8 +2517,8 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 			}
 			// Learn the real chars-per-token ratio for this provider/model
 			// from what was actually sent and what the API counted.
-			if turnUsage != nil && turnUsage.IsReal && !edited {
-				a.cli.calibrator().Observe(effProvider, effModel, promptCharsOf(turnHistory), contextTokens(effProvider, effModel, turnUsage))
+			if !edited {
+				a.observeCalibration(effProvider, effModel, turnHistory, turnUsage)
 			}
 			a.cli.maybeAnnounceBudget()
 			a.cli.maybeAnnounceCacheMisses()
@@ -4750,6 +4750,30 @@ func extractDelegateArgs(argsJSON string) (map[string]interface{}, string) {
 		return inner, string(outer.Args)
 	}
 	return nil, string(outer.Args)
+}
+
+// observeCalibration feeds one turn into the chars-per-token calibrator.
+// Only a real usage report teaches anything: an estimate would train the
+// ratio on the ratio it was derived from.
+func (a *AgentMode) observeCalibration(provider, model string, turnHistory []models.Message, usage *models.UsageInfo) {
+	if usage == nil || !usage.IsReal || a.cli == nil {
+		return
+	}
+	a.cli.calibrator().Observe(provider, model,
+		a.calibrationChars(turnHistory), contextTokens(provider, model, usage))
+}
+
+// calibrationChars is the chars side of one calibration sample: what the
+// request actually put on the wire.
+//
+// The tokens side comes from the provider's own count, which includes the
+// tool definitions the request shipped. Measuring the history alone made
+// the learned ratio read low on exactly the surface that carries a tool
+// catalog, and a low chars-per-token ratio makes the compaction budget
+// treat the same text as more tokens than it costs — compacting earlier
+// than it needs to.
+func (a *AgentMode) calibrationChars(turnHistory []models.Message) int {
+	return promptCharsOf(turnHistory) + a.toolDefsChars
 }
 
 // estimateToolDefsChars measures the native tool definitions this run ships
