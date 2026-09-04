@@ -1,0 +1,6 @@
+{
+  "cost.budget.daily_warning": "⚠ Daily budget: $%.4f of $%.2f spent today (%.0f%%).",
+  "cost.budget.daily_exceeded": "⛔ Daily budget exceeded: $%.4f of $%.2f (%.0f%%).",
+  "cost.budget.daily_exceeded_hard": "⛔ Daily budget exceeded: $%.4f of $%.2f (%.0f%%) — new LLM turns are blocked until tomorrow or /cost budget raises the limit.",
+  "audit.locked_unavailable": "The managed configuration locks the audit trail path and it cannot be written; refusing to start unaudited: %v"
+}

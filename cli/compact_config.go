@@ -162,17 +162,28 @@ func (cli *ChatCLI) compactSummarizerClient() client.LLMClient {
 	if handle == "" || cli.manager == nil {
 		return nil
 	}
-	cli.compactSummarizerOnce.Do(func() {
-		resolution := cli.resolveSkillClient(handle)
-		if resolution.Client == nil || (!resolution.Changed && resolution.UserMessage != "") {
-			if cli.logger != nil {
-				cli.logger.Warn("compact summarizer model not usable, keeping the session client",
-					zap.String("handle", handle), zap.String("reason", resolution.UserMessage))
-			}
-			return
+	// Cached by the env value: CHATCLI_COMPACT_MODEL is reloadable, so a
+	// change (or a transient resolution failure) must not stay pinned for
+	// the process the way a sync.Once did.
+	cli.compactSummarizerMu.Lock()
+	defer cli.compactSummarizerMu.Unlock()
+	if cli.compactSummarizerHandle == handle {
+		return cli.compactSummarizer
+	}
+	resolution := cli.resolveSkillClient(handle)
+	if resolution.Client == nil || (!resolution.Changed && resolution.UserMessage != "") {
+		if cli.logger != nil {
+			cli.logger.Warn("compact summarizer model not usable, keeping the session client",
+				zap.String("handle", handle), zap.String("reason", resolution.UserMessage))
 		}
-		cli.compactSummarizer = resolution.Client
-		cli.compactSummarizerProvider, cli.compactSummarizerModel = resolution.Provider, resolution.Model
-	})
+		// Not cached: the next call retries (a transient failure must not
+		// pin the session client for the rest of the process).
+		cli.compactSummarizer, cli.compactSummarizerHandle = nil, ""
+		cli.compactSummarizerProvider, cli.compactSummarizerModel = "", ""
+		return nil
+	}
+	cli.compactSummarizer = resolution.Client
+	cli.compactSummarizerHandle = handle
+	cli.compactSummarizerProvider, cli.compactSummarizerModel = resolution.Provider, resolution.Model
 	return cli.compactSummarizer
 }
