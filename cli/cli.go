@@ -2191,9 +2191,12 @@ func (cli *ChatCLI) cleanup(ctx context.Context) {
 		}
 	}
 
-	// Stop background memory worker
+	// The unextracted tail of this session is queued for the next one
+	// (the last turns of every REPL session used to be lost), then the
+	// worker is stopped with a bounded wait for an in-flight pass.
 	if cli.memWorker != nil {
-		cli.memWorker.stop()
+		cli.queueMemoryBeforeCompaction()
+		cli.memWorker.stopAndWait(memoryStopWait)
 	}
 
 	// Drain and shut down the durable reflexion queue. Pending jobs
