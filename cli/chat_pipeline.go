@@ -1013,10 +1013,15 @@ func (cli *ChatCLI) telemetryParts(usage *models.UsageInfo, costUSD float64, inc
 		// Prefer the projection for the NEXT request (current history plus
 		// the prefix that will front it): that is what decides whether the
 		// next turn compacts, and it may legitimately exceed 100%.
-		if proj, ok := cli.projectedContextPct(window); ok {
-			pct = proj
+		reserve := 0.0
+		if used, res, ok := cli.projectedContextParts(window); ok {
+			pct, reserve = used, res
 		}
-		parts = append(parts, i18n.T("chat.envelope.context_pct", roundPct(pct)))
+		if roundPct(reserve) > 0 {
+			parts = append(parts, i18n.T("chat.envelope.context_pct_reserve", roundPct(pct), roundPct(reserve)))
+		} else {
+			parts = append(parts, i18n.T("chat.envelope.context_pct", roundPct(pct)))
+		}
 	}
 	// Prompt-cache share of this turn's input, on every provider that
 	// reports cache tokens (Anthropic/Bedrock additive counts, OpenAI/
@@ -1060,10 +1065,25 @@ func (cli *ChatCLI) projectedContextPct(window int) (float64, bool) {
 	}
 	// One estimate for the footer, the compactor and /context status; the
 	// answer reserve is capped against the window the caller measures.
+	used, reserve, ok := cli.projectedContextParts(window)
+	return used + reserve, ok
+}
+
+// projectedContextParts splits the projection into what already occupies
+// the window (prefix, history, tool definitions) and the answer reserve
+// (max_tokens as sent, capped at a quarter of the window). The footer
+// shows them apart: a lone "ctx 16%" on an empty conversation read as a
+// capped window when it was only the reserve.
+func (cli *ChatCLI) projectedContextParts(window int) (used, reserve float64, ok bool) {
 	e := cli.contextEstimate()
 	e.Window = window
 	e.ReserveTokens = answerReserveTokens(cli.getMaxTokensForCurrentLLM(), window)
-	return e.Pct()
+	total, ok := e.Pct()
+	if !ok {
+		return 0, 0, false
+	}
+	reserve = float64(e.ReserveTokens) / float64(window) * 100
+	return total - reserve, reserve, true
 }
 
 // roundPct rounds a percentage to an int, floored at 0 and deliberately
