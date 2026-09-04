@@ -18,9 +18,9 @@ import (
 // and the MCP/ACP servers call it on their own exit so no surface leaves
 // spend unsaved or a paid cache lingering.
 // FinalizeSpend is finalizeSpend for the command layer (rpcserve exits).
-func (cli *ChatCLI) FinalizeSpend(ctx context.Context) { cli.finalizeSpend(ctx) }
+func (cli *ChatCLI) FinalizeSpend(ctx context.Context) { cli.settleSpendOnExit(ctx) }
 
-func (cli *ChatCLI) finalizeSpend(ctx context.Context) {
+func (cli *ChatCLI) settleSpendOnExit(ctx context.Context) {
 	if cli == nil {
 		return
 	}

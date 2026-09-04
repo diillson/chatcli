@@ -68,13 +68,13 @@ func TestCostExport_CSV(t *testing.T) {
 }
 
 func TestFinalizeSpend_NilSafeAndPersists(t *testing.T) {
-	(*ChatCLI)(nil).finalizeSpend(context.Background())
-	(&ChatCLI{}).finalizeSpend(context.Background())
+	(*ChatCLI)(nil).settleSpendOnExit(context.Background())
+	(&ChatCLI{}).settleSpendOnExit(context.Background())
 	t.Setenv("HOME", t.TempDir())
 	ct := NewCostTracker()
 	ct.RecordUsage("OPENAI", "gpt-5.6", 10, 1)
 	c := &ChatCLI{logger: zap.NewNop(), costTracker: ct}
-	c.finalizeSpend(context.Background())
+	c.settleSpendOnExit(context.Background())
 	if _, err := LoadCostSnapshot(ct.Snapshot().SessionID); err != nil {
 		t.Fatalf("snapshot must be persisted on exit: %v", err)
 	}
