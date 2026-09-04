@@ -473,5 +473,44 @@ func SameProject(a, b string) bool {
 		return true
 	}
 	sep := string(filepath.Separator)
-	return strings.HasPrefix(a, b+sep) || strings.HasPrefix(b, a+sep)
+	if strings.HasPrefix(a, b+sep) || strings.HasPrefix(b, a+sep) {
+		return true
+	}
+	// Git worktrees of one repository are one project: their .git is a
+	// file pointing into the main checkout's .git/worktrees/<name>.
+	ca, cb := gitCommonDir(a), gitCommonDir(b)
+	return ca != "" && ca == cb
+}
+
+// gitCommonDir resolves the repository's common .git directory for a
+// worktree or a main checkout ("" when dir is not inside a git repo).
+func gitCommonDir(dir string) string {
+	for d := dir; ; d = filepath.Dir(d) {
+		dotGit := filepath.Join(d, ".git")
+		info, err := os.Stat(dotGit)
+		if err == nil {
+			if info.IsDir() {
+				return dotGit
+			}
+			data, rerr := os.ReadFile(dotGit) // #nosec G304 -- the .git file of a directory the user works in
+			if rerr != nil {
+				return ""
+			}
+			line := strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(string(data)), "gitdir:"))
+			if line == "" {
+				return ""
+			}
+			if !filepath.IsAbs(line) {
+				line = filepath.Join(d, line)
+			}
+			// <common>/.git/worktrees/<name> → <common>/.git
+			if i := strings.Index(filepath.ToSlash(line), "/worktrees/"); i >= 0 {
+				return filepath.Clean(filepath.FromSlash(filepath.ToSlash(line)[:i]))
+			}
+			return filepath.Clean(line)
+		}
+		if parent := filepath.Dir(d); parent == d {
+			return ""
+		}
+	}
 }

@@ -528,7 +528,7 @@ func buildExtractionSnippet(messages []models.Message) strings.Builder {
 		content := redactSecretsForLLM(msg.Content)
 		// Truncate very long messages to keep the extraction prompt small
 		if len(content) > 1500 {
-			content = content[:1200] + "\n... [truncated] ...\n" + content[len(content)-200:]
+			content = truncateRunesafe(content, 1200) + "\n... [truncated] ...\n" + tailRunesafe(content, 200)
 		}
 		sb.WriteString(fmt.Sprintf("[%s]: %s\n\n", msg.Role, content))
 	}
@@ -725,62 +725,6 @@ func (mw *memoryWorker) clearStatus() {
 // Deprecated: These are kept only for existing tests in memory_worker_test.go.
 // Production code uses memory.Manager.ProcessExtraction() with the enhanced parser.
 
-// parseMemoryResponse splits the LLM response into daily notes and long-term facts.
-//
-//nolint:unused // used by memory_worker_test; golangci run.tests=false hides the call site.
-func parseMemoryResponse(response string) (daily string, longTerm string) {
-	upper := strings.ToUpper(response)
-
-	dailyIdx := findSectionIndex(upper, "DAILY")
-	longTermIdx := findSectionIndex(upper, "LONGTERM")
-	if longTermIdx < 0 {
-		longTermIdx = findSectionIndex(upper, "LONG-TERM")
-	}
-	if longTermIdx < 0 {
-		longTermIdx = findSectionIndex(upper, "LONG_TERM")
-	}
-
-	extractAfter := func(idx int) string {
-		nlIdx := strings.Index(response[idx:], "\n")
-		if nlIdx < 0 {
-			return ""
-		}
-		return strings.TrimSpace(response[idx+nlIdx+1:])
-	}
-
-	switch {
-	case dailyIdx >= 0 && longTermIdx >= 0:
-		if dailyIdx < longTermIdx {
-			nlIdx := strings.Index(response[dailyIdx:], "\n")
-			if nlIdx >= 0 {
-				daily = strings.TrimSpace(response[dailyIdx+nlIdx+1 : longTermIdx])
-			}
-			longTerm = extractAfter(longTermIdx)
-		} else {
-			nlIdx := strings.Index(response[longTermIdx:], "\n")
-			if nlIdx >= 0 {
-				longTerm = strings.TrimSpace(response[longTermIdx+nlIdx+1 : dailyIdx])
-			}
-			daily = extractAfter(dailyIdx)
-		}
-	case dailyIdx >= 0:
-		daily = extractAfter(dailyIdx)
-	case longTermIdx >= 0:
-		longTerm = extractAfter(longTermIdx)
-	default:
-		daily = response
-	}
-
-	if isNothingNew(daily) {
-		daily = ""
-	}
-	if isNothingNew(longTerm) {
-		longTerm = ""
-	}
-
-	return daily, longTerm
-}
-
 // looksLikeExtraction reports whether a reply carries any of the section
 // markers the parser understands.
 func looksLikeExtraction(s string) bool {
@@ -802,22 +746,4 @@ func isNothingNew(s string) bool {
 		return true
 	}
 	return false
-}
-
-//nolint:unused // used by memory_worker_test via parseMemoryResponse.
-func findSectionIndex(upperResponse string, keyword string) int {
-	patterns := []string{
-		"## " + keyword,
-		"##" + keyword,
-		"# " + keyword,
-		"**" + keyword + "**",
-	}
-	best := -1
-	for _, p := range patterns {
-		idx := strings.Index(upperResponse, p)
-		if idx >= 0 && (best < 0 || idx < best) {
-			best = idx
-		}
-	}
-	return best
 }

@@ -640,6 +640,12 @@ func (m *MCP) callTool(ctx context.Context, params json.RawMessage) (interface{}
 		return m.result(m.backend.ProvidersJSON())
 	case "manage_session":
 		if sb, ok := m.backend.(SessionBackend); ok {
+			// The MCP/ACP surfaces have no principal: under hub isolation
+			// (CHATCLI_HUB_ISOLATE=true, multi-user gateway) they must not
+			// load, attach or delete the base user's sessions.
+			if hubIsolationOn() && (a.Action == "load" || a.Action == "attach" || a.Action == "delete") {
+				return nil, errf(CodeInvalidParams, "manage_session %s is refused under CHATCLI_HUB_ISOLATE=true: this surface has no principal (single-user surfaces only)", a.Action)
+			}
 			if a.Action == "" {
 				return nil, errf(CodeInvalidParams, "action is required (save, load, attach, detach, status, list, delete, clear, active, policy_mode%s)", m.sessionSearchActions())
 			}
@@ -901,4 +907,14 @@ func (m *MCP) result(text string, err error) (interface{}, *RPCError) {
 	return map[string]interface{}{
 		"content": []map[string]interface{}{{"type": "text", "text": text}},
 	}, nil
+}
+
+// hubIsolationOn reports whether the gateway hub runs in per-principal
+// isolation (CHATCLI_HUB_ISOLATE=true).
+func hubIsolationOn() bool {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv("CHATCLI_HUB_ISOLATE"))) {
+	case "1", "true", "yes", "on":
+		return true
+	}
+	return false
 }

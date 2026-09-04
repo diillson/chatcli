@@ -182,6 +182,18 @@ func (a *sessionPluginAdapter) GetMessage(_ context.Context, name string, index 
 
 // truncateRunesafe cuts s at cap bytes, snapping back to a rune boundary so
 // the output stays valid UTF-8, and appends an ellipsis when it cut.
+// tailRunesafe returns the last capBytes of s without splitting a rune.
+func tailRunesafe(s string, capBytes int) string {
+	if len(s) <= capBytes {
+		return s
+	}
+	i := len(s) - capBytes
+	for i < len(s) && !utf8.RuneStart(s[i]) {
+		i++
+	}
+	return s[i:]
+}
+
 func truncateRunesafe(s string, capBytes int) string {
 	if len(s) <= capBytes {
 		return s

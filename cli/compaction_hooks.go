@@ -119,6 +119,7 @@ func (cli *ChatCLI) compactionEvent(typ hooks.EventType, trigger string) hooks.H
 // loop: cost record from the compactor's report, cache-rebuild note for
 // the cache telemetry, PostCompact hooks.
 func (cli *ChatCLI) noteCompactionApplied(ctx context.Context, trigger string) {
+	cli.refreshBootstrapCard()
 	if cli == nil {
 		return
 	}

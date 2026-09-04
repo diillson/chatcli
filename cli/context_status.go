@@ -220,6 +220,9 @@ func (cli *ChatCLI) showContextStatus(ctx context.Context) {
 	if r.ReserveTokens > 0 {
 		fmt.Printf("    %s %s tok\n", kitPad(i18n.T("context.status.total_reserve")), formatTokenCount(int64(r.ReserveTokens)))
 	}
+	if skips := cli.compressionLayer.ArchiveSkips(); skips > 0 {
+		fmt.Printf("    %s\n", colorize(i18n.T("context.status.ccr_skips", skips), ColorYellow))
+	}
 	if edits, toolUses, tokens := cli.costTracker.ContextEditStats(); edits > 0 {
 		fmt.Printf("    %s\n", colorize(i18n.T("context.status.provider_edits", edits, toolUses, formatTokenCount(tokens)), ColorGray))
 	}

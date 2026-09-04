@@ -118,7 +118,7 @@ func autoRecallEpisodeLine(e *memory.Episode) string {
 		text += " → " + strings.TrimSpace(e.Outcome)
 	}
 	if len(text) > autoRecallEpisodeLineMax {
-		text = text[:autoRecallEpisodeLineMax] + "…"
+		text = truncateRunesafe(text, autoRecallEpisodeLineMax) + "…"
 	}
 	return "- [episode " + e.Date.Format("2006-01-02") + "] " + text
 }
@@ -127,7 +127,10 @@ func (cli *ChatCLI) memoryAutoRecallBlockCtx(ctx context.Context, hints []string
 	if !memoryAutoRecallEnabled() || len(hints) == 0 {
 		return ""
 	}
-	block := cli.builtinAutoRecallBlock(ctx, hints, query)
+	block := ""
+	if !memoryProviderExclusive(os.Getenv(MemoryProviderEnv)) {
+		block = cli.builtinAutoRecallBlock(ctx, hints, query)
+	}
 	// External memory provider (CHATCLI_MEMORY_PROVIDER=mcp:<server>): its
 	// answer rides after the embedded block, bounded, never blocking.
 	if ext := cli.externalMemoryRecall(ctx, query, hints); ext != "" {

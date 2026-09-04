@@ -34,12 +34,13 @@ func isRecallTool(toolName string) bool {
 //
 // The zero Layer is not usable; build one with NewLayer or NewLayerFromEnv.
 type Layer struct {
-	router    atomic.Pointer[ContentRouter] // swapped whole on SetProfile
-	store     Store
-	mode      atomic.Int32 // holds a Mode; mutable at runtime via SetMode (/config compression)
-	profile   atomic.Int32 // holds a Profile; mutable at runtime via SetProfile
-	threshold atomic.Int64 // bytes; mutable at runtime via SetThreshold
-	metrics   *Metrics
+	archiveSkips atomic.Int64                  // archives refused by the store (per-entry cap)
+	router       atomic.Pointer[ContentRouter] // swapped whole on SetProfile
+	store        Store
+	mode         atomic.Int32 // holds a Mode; mutable at runtime via SetMode (/config compression)
+	profile      atomic.Int32 // holds a Profile; mutable at runtime via SetProfile
+	threshold    atomic.Int64 // bytes; mutable at runtime via SetThreshold
+	metrics      *Metrics
 
 	// storeFallbackErr records why the persistent CCR store could not be
 	// opened when the layer had to fall back to a bounded in-memory store.
@@ -294,9 +295,22 @@ func (l *Layer) Archive(content string) (string, bool) {
 	}
 	key, err := l.store.Put(content)
 	if err != nil {
+		// The largest cuts are exactly the ones that lose "recoverable via
+		// @recall" here; count it so the callers can say so instead of
+		// skipping silently (ArchiveSkips).
+		l.archiveSkips.Add(1)
 		return "", false
 	}
 	return key, true
+}
+
+// ArchiveSkips reports how many archives the store refused this session
+// (over the per-entry cap); surfaced by /cost and /context status.
+func (l *Layer) ArchiveSkips() int64 {
+	if l == nil {
+		return 0
+	}
+	return l.archiveSkips.Load()
 }
 
 // Recall returns the original content stored under a CCR key, or ok=false when

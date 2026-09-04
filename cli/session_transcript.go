@@ -23,16 +23,26 @@ import (
 	"github.com/diillson/chatcli/cli/ctxmgr"
 	"github.com/diillson/chatcli/i18n"
 	"github.com/diillson/chatcli/models"
+	"github.com/diillson/chatcli/pkg/atrest"
 )
 
 // transcriptSearchHits is how many hits /session transcript search prints.
 const transcriptSearchHits = 8
+
+// transcriptViewCap bounds how many journaled messages the transcript
+// commands load per call.
+const transcriptViewCap = 20_000
 
 // fullTranscript returns the journal's messages (source "journal") or the
 // live history (source "history") when the journal is unavailable.
 func (cli *ChatCLI) fullTranscript() ([]models.Message, string) {
 	if cli != nil && cli.transcript != nil && !cli.transcript.disabled && cli.transcript.path != "" {
 		if msgs, err := readTranscript(cli.transcript.path); err == nil && len(msgs) > 0 {
+			// Bounded view: a journal of a long-running session is read in
+			// full on every search/show/stats; keep the tail.
+			if len(msgs) > transcriptViewCap {
+				msgs = msgs[len(msgs)-transcriptViewCap:]
+			}
 			return msgs, "journal"
 		}
 	}
@@ -79,6 +89,10 @@ func (cli *ChatCLI) handleSessionExport(format, path string) {
 	} else {
 		_, err = f.WriteString(renderTranscriptMarkdown(msgs, cli.currentSessionName, cli.transcriptID()))
 		count = len(msgs)
+	}
+	if err == nil && atrest.Enabled() {
+		// The journal is sealed; the export is not.
+		fmt.Println(colorize("  "+i18n.T("session.export.plaintext_notice"), ColorYellow))
 	}
 	if cerr := f.Close(); err == nil {
 		err = cerr

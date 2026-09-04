@@ -84,9 +84,12 @@ func enforceCacheControlBudget(reqBody map[string]interface{}, maxMarkers int) {
 	var holders []map[string]interface{}
 
 	// Order matters: system is the outermost prefix, then tools, then
-	// messages. We collect in that order so the "earliest" markers we
-	// drop are correctly the system-block ones — those have the smallest
-	// covered prefix and are the cheapest to lose.
+	// messages. A marker caches everything BEFORE it, so a later marker
+	// already covers what an earlier one covers; an earlier marker only
+	// adds a partial-hit fallback for requests that diverge between the
+	// two. Collecting in request order makes the markers we drop first the
+	// earliest ones — the fallbacks — while the latest (largest) prefix
+	// stays cached.
 	if v, ok := reqBody["system"]; ok {
 		collectMarkerHolders(v, &holders)
 	}

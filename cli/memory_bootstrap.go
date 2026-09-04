@@ -83,6 +83,22 @@ const bootstrapCardChatDirective = "Never claim you have no memory of past sessi
 // computing the session-start snapshot on first use. Both are "" when every
 // memory surface is empty (a fresh install has nothing to navigate) or when
 // memory injection is off entirely.
+// bootstrapTitleMaxBytes caps a session title on the card.
+const bootstrapTitleMaxBytes = 80
+
+// refreshBootstrapCard lets the card be rebuilt at the next boundary
+// (compaction) when it was empty at session start — the first facts of a
+// fresh install used to stay invisible for the whole session.
+func (cli *ChatCLI) refreshBootstrapCard() {
+	if cli == nil || cli.bootstrapCard == nil {
+		return
+	}
+	st := cli.bootstrapCard
+	if st.chat == "" && st.agent == "" {
+		cli.bootstrapCard = &bootstrapCardState{}
+	}
+}
+
 func (cli *ChatCLI) memoryBootstrapCards() (chatCard, agentCard string) {
 	st := cli.bootstrapCardState()
 	st.once.Do(func() {
@@ -159,7 +175,7 @@ func (cli *ChatCLI) bootstrapSnapshotLines() []string {
 			if name, saved, title := cli.sessionManager.LatestSessionInfo(); name != "" {
 				line += fmt.Sprintf(" — latest: %q (%s", name, formatSessionAge(saved))
 				if title != "" {
-					line += fmt.Sprintf(", %q", title)
+					line += fmt.Sprintf(", %q", truncateRunesafe(title, bootstrapTitleMaxBytes))
 				}
 				line += ")"
 			}

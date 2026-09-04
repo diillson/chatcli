@@ -154,7 +154,7 @@ var envDefaults = map[string]envDefault{
 	"CHATCLI_MANAGED_CONFIG":               {Value: "(/etc/chatcli/managed.env · %ProgramData%\\chatcli\\managed.env)", Source: "config/managed.go (org defaults; !KEY=value locks)"},
 	"CHATCLI_PROMPT_CACHE_EXPLICIT":        {Value: "false", Source: "llm/client/cache_resources.go (Gemini cachedContents; bills storage per token-hour)"},
 	"CHATCLI_CONTEXT_ENGINE":               {Value: "builtin", Source: "extension_providers.go (builtin | mcp:<server> with a context_compact tool)"},
-	"CHATCLI_MEMORY_PROVIDER":              {Value: "builtin", Source: "extension_providers.go (builtin | mcp:<server> with memory_recall/memory_store tools)"},
+	"CHATCLI_MEMORY_PROVIDER":              {Value: "builtin", Source: "extension_providers.go (builtin | mcp:<server> alongside the embedded memory | mcp-only:<server> external only)"},
 	"CHATCLI_COMPACT_MODEL":                {Value: "(session client)", Source: "compact_config.go (PROVIDER:model for Level 2 summaries)"},
 	"CHATCLI_MICROCOMPACT_TRUNCATE_TURNS":  {Value: "2", Source: "agent.DefaultMicrocompactConfig"},
 	"CHATCLI_MICROCOMPACT_SUMMARIZE_TURNS": {Value: "4", Source: "agent.DefaultMicrocompactConfig"},
