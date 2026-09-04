@@ -173,7 +173,7 @@ func (c *ClaudeClient) SendPromptWithTools(ctx context.Context, prompt string, h
 		// Mirror the reasoning blocks onto the instance too: callers that
 		// hold the response replay from it, callers on the plain path read
 		// them back through LastThinking.
-		c.thinking.StoreThinking(c.model, response.Thinking)
+		c.storeThinking(response.Thinking)
 	}
 	if err == nil && response != nil && response.Usage != nil {
 		// Per-instance mirror of what parseClaudeToolResponse recorded in the

@@ -53,14 +53,37 @@ type ClaudeClient struct {
 	// thinking holds the reasoning blocks of THIS instance's most recent
 	// response so the caller can replay them in the next assistant turn,
 	// which is what the provider requires once extended thinking is on.
-	thinking client.ThinkingState
+	// Behind a pointer on purpose: client.ThinkingState carries a slice,
+	// so embedding it by value would turn ClaudeClient from a comparable
+	// type into an incomparable one — breaking for anyone comparing
+	// client values.
+	thinking *client.ThinkingState
 }
 
 // LastThinking implements client.ThinkingAwareClient.
-func (c *ClaudeClient) LastThinking() []models.ThinkingBlock { return c.thinking.LastThinking() }
+func (c *ClaudeClient) LastThinking() []models.ThinkingBlock {
+	if c.thinking == nil {
+		return nil
+	}
+	return c.thinking.LastThinking()
+}
 
 // LastThinkingModel implements client.ThinkingAwareClient.
-func (c *ClaudeClient) LastThinkingModel() string { return c.thinking.LastThinkingModel() }
+func (c *ClaudeClient) LastThinkingModel() string {
+	if c.thinking == nil {
+		return ""
+	}
+	return c.thinking.LastThinkingModel()
+}
+
+// storeThinking records the reasoning blocks of the response just parsed,
+// tagged with the model that produced them.
+func (c *ClaudeClient) storeThinking(blocks []models.ThinkingBlock) {
+	if c.thinking == nil {
+		return
+	}
+	c.thinking.StoreThinking(c.model, blocks)
+}
 
 const (
 	oauthUserAgent         = auth.ClaudeCodeUserAgent
@@ -152,6 +175,7 @@ func NewClaudeClient(provider auth.TokenProvider, model string, logger *zap.Logg
 		maxAttempts: maxAttempts,
 		backoff:     backoff,
 		apiURL:      apiURL,
+		thinking:    &client.ThinkingState{},
 	}
 }
 
@@ -392,7 +416,7 @@ func (c *ClaudeClient) processResponse(resp *http.Response) (string, error) {
 	// Reasoning blocks ride out through the instance: this path returns a
 	// string, so the caller reads them back with LastThinking and attaches
 	// them to the assistant message it stores.
-	c.thinking.StoreThinking(c.model, client.ParseAnthropicThinkingBody(bodyBytes))
+	c.storeThinking(client.ParseAnthropicThinkingBody(bodyBytes))
 
 	var responseText string
 	for _, content := range result.Content {
