@@ -253,7 +253,7 @@ func (cb *ContextBuilder) BuildDynamicContext() string {
 	// Day resolution on purpose: this block rides in the per-turn context
 	// message, and a wall-clock second would make it differ on every
 	// request for nothing the model needs.
-	parts = append(parts, fmt.Sprintf("Current date: %s (%s, %s)", now.Format("2006-01-02"), now.Weekday(), now.Format("MST")))
+	parts = append(parts, "Current date: "+now.Format("2006-01-02")+" ("+now.Weekday().String()+", "+now.Format("MST")+")")
 
 	if cb.workspaceDir != "" {
 		parts = append(parts, fmt.Sprintf("Current working directory: %s", cb.workspaceDir))
