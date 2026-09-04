@@ -299,7 +299,7 @@ func (sm *SessionManager) SaveSessionV2(name string, sd *SessionData) error {
 	// before the write so every producer of this store — REPL save, exit
 	// autosave, MCP session mirrors, write-through — is covered by the one
 	// call. A no-op when no key is configured.
-	data, err = atrest.Seal(data)
+	data, err = atrest.SealAt(filePath, data)
 	if err != nil {
 		sm.logger.Error("Erro ao criptografar a sessão", zap.String("session", name), zap.Error(err))
 		return fmt.Errorf("%s: %w", i18n.T("session.encrypt_failed"), err)
@@ -374,7 +374,7 @@ func (sm *SessionManager) LoadSessionV2(name string) (*SessionData, error) {
 	// was configured) pass through and are sealed on their next save; an
 	// encrypted file with no key present is a clear error, never a silently
 	// empty or "corrupt" session.
-	data, err = atrest.Open(data)
+	data, err = atrest.OpenAt(filePath, data)
 	if err != nil {
 		sm.logger.Error("Erro ao decriptar a sessão", zap.String("session", name), zap.Error(err))
 		return nil, fmt.Errorf("%s: %w", i18n.T("session.decrypt_failed", name), err)

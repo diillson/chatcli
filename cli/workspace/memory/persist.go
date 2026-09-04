@@ -35,7 +35,7 @@ import (
 // and an atomic rename (utils.AtomicWriteFile), so readers, crashes and power
 // loss only ever observe the old or the new content — never a torn write.
 func atomicWriteFile(path string, data []byte, perm os.FileMode) error {
-	sealed, err := atrest.Seal(data)
+	sealed, err := atrest.SealAt(path, data)
 	if err != nil {
 		return err
 	}
@@ -53,7 +53,7 @@ func readStoreFile(path string) ([]byte, error) {
 		return nil, err
 	}
 	if atrest.IsEncrypted(data) {
-		plain, oerr := atrest.Open(data)
+		plain, oerr := atrest.OpenAt(path, data)
 		if oerr != nil {
 			return nil, &SealedStoreError{Path: path, Err: oerr}
 		}

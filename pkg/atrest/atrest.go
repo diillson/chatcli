@@ -31,14 +31,29 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
+	"sync"
 
+	"github.com/diillson/chatcli/utils"
+	"golang.org/x/crypto/argon2"
 	"golang.org/x/crypto/hkdf"
 )
 
 const (
-	// Magic is the header every encrypted payload starts with.
+	// Magic is the header every version-1 encrypted payload starts with
+	// (no additional authenticated data).
 	Magic = "CHATCLI_ENC_v1\n"
+	// MagicV2 heads payloads bound to their store location: the AEAD's
+	// additional data is the store's relative path and tenant, so a file
+	// copied from one tenant's directory into another's (or renamed) no
+	// longer opens as if it belonged there. Version-1 payloads stay
+	// readable and are rewritten as v2 on their next save or reseal.
+	MagicV2 = "CHATCLI_ENC_v2\n"
+	// ShortSecretBytes is the length under which a secret is treated as a
+	// passphrase and stretched with Argon2id before key derivation; a
+	// random secret of at least this many bytes goes straight to HKDF.
+	ShortSecretBytes = 32
 	// EnvKey is the environment variable that opts a process into
 	// encryption at rest and supplies the master secret.
 	EnvKey = "CHATCLI_ENCRYPTION_KEY"
@@ -125,7 +140,7 @@ func (e *Encryptor) gcm() (cipher.AEAD, error) {
 
 // IsEncrypted reports whether data carries the encrypted-payload header.
 func IsEncrypted(data []byte) bool {
-	return len(data) >= len(Magic) && string(data[:len(Magic)]) == Magic
+	return (len(data) >= len(Magic) && string(data[:len(Magic)]) == Magic) || isV2(data)
 }
 
 // Enabled reports whether the process opted into encryption at rest.
@@ -133,16 +148,178 @@ func Enabled() bool {
 	return os.Getenv(EnvKey) != ""
 }
 
-// fromEnv builds the session-class Encryptor from CHATCLI_ENCRYPTION_KEY.
-// Re-derived per call: the derivation costs microseconds and reading the
-// environment each time keeps behavior consistent with a runtime reload.
+// fromEnv builds the version-1 Encryptor from CHATCLI_ENCRYPTION_KEY
+// (SHA-256 of the secret into HKDF). Re-derived per call: the derivation
+// costs microseconds and reading the environment each time keeps
+// behavior consistent with a runtime reload.
 func fromEnv() (*Encryptor, error) {
 	secret := os.Getenv(EnvKey)
 	if secret == "" {
 		return nil, ErrKeyMissing
 	}
+	return legacyEncryptor(secret)
+}
+
+// legacyEncryptor is the v1 derivation for a secret.
+func legacyEncryptor(secret string) (*Encryptor, error) {
 	master := sha256.Sum256([]byte(secret))
 	return NewFromMaster(master[:], SessionInfo)
+}
+
+// v2Encryptor derives the version-2 key: a random secret of at least
+// ShortSecretBytes goes to HKDF as before; a shorter one is a passphrase
+// and is stretched with Argon2id (64 MiB, 3 passes) first, cached per
+// secret because the stretch costs real time.
+func v2Encryptor(secret string) (*Encryptor, error) {
+	if len(secret) >= ShortSecretBytes {
+		master := sha256.Sum256([]byte(secret))
+		return NewFromMaster(master[:], SessionInfo)
+	}
+	stretchMu.Lock()
+	master, ok := stretched[secret]
+	stretchMu.Unlock()
+	if !ok {
+		master = argon2.IDKey([]byte(secret), []byte(argonSalt), 3, 64*1024, 4, 32)
+		stretchMu.Lock()
+		stretched[secret] = master
+		stretchMu.Unlock()
+	}
+	return NewFromMaster(master, SessionInfo)
+}
+
+// argonSalt is the fixed application salt for passphrase stretching (the
+// secret is per installation; the salt separates this use from any other
+// Argon2 use of the same passphrase).
+const argonSalt = "chatcli-atrest-v2-passphrase"
+
+var (
+	stretchMu sync.Mutex
+	stretched = map[string][]byte{}
+)
+
+// aadFor derives the additional authenticated data that binds a payload
+// to its store: the tenant slug and the last path components under the
+// state root. "" (no path) binds nothing — the v2 format without a
+// location, still stretched and authenticated.
+func aadFor(path string) []byte {
+	if path == "" {
+		return nil
+	}
+	clean := filepath.ToSlash(filepath.Clean(path))
+	tenant := ""
+	rel := clean
+	if i := strings.Index(clean, "/tenants/"); i >= 0 {
+		rest := clean[i+len("/tenants/"):]
+		if j := strings.IndexByte(rest, '/'); j > 0 {
+			tenant, rel = rest[:j], rest[j+1:]
+		}
+	} else if i := strings.Index(clean, "/.chatcli/"); i >= 0 {
+		rel = clean[i+len("/.chatcli/"):]
+	} else {
+		// Custom roots: bind to the store's own directory and name.
+		rel = filepath.ToSlash(filepath.Join(filepath.Base(filepath.Dir(clean)), filepath.Base(clean)))
+	}
+	return []byte("v2\x00" + rel + "\x00" + tenant)
+}
+
+// SealAt encrypts plaintext bound to the store at path (version 2). A
+// no-op when encryption at rest is off.
+func SealAt(path string, plaintext []byte) ([]byte, error) {
+	if !Enabled() {
+		return plaintext, nil
+	}
+	enc, err := v2Encryptor(os.Getenv(EnvKey))
+	if err != nil {
+		return nil, err
+	}
+	return enc.encryptV2(plaintext, aadFor(path))
+}
+
+// OpenAt decrypts a payload sealed for the store at path: version 2 with
+// the current or a retired key, version 1 through Open. Plaintext passes
+// through.
+func OpenAt(path string, data []byte) ([]byte, error) {
+	if !isV2(data) {
+		return Open(data)
+	}
+	secret := os.Getenv(EnvKey)
+	if secret == "" {
+		return nil, ErrKeyMissing
+	}
+	// Bound to this path first; a payload sealed without a location (Seal,
+	// or a store that has not been resealed at its path yet) carries no
+	// binding and opens with the empty AAD.
+	aads := [][]byte{aadFor(path)}
+	if path != "" {
+		aads = append(aads, nil)
+	}
+	enc, err := v2Encryptor(secret)
+	if err != nil {
+		return nil, err
+	}
+	var firstErr error
+	for _, aad := range aads {
+		plain, derr := enc.decryptV2(data, aad)
+		if derr == nil {
+			return plain, nil
+		}
+		if firstErr == nil {
+			firstErr = derr
+		}
+	}
+	for _, old := range previousSecrets() {
+		oe, derr := v2Encryptor(old)
+		if derr != nil {
+			continue
+		}
+		for _, aad := range aads {
+			if plain, perr := oe.decryptV2(data, aad); perr == nil {
+				return plain, nil
+			}
+		}
+	}
+	return nil, firstErr
+}
+
+func isV2(data []byte) bool {
+	return len(data) >= len(MagicV2) && string(data[:len(MagicV2)]) == MagicV2
+}
+
+// encryptV2 returns MagicV2 + nonce + ciphertext authenticated with aad.
+func (e *Encryptor) encryptV2(plaintext, aad []byte) ([]byte, error) {
+	gcm, err := e.gcm()
+	if err != nil {
+		return nil, err
+	}
+	nonce := make([]byte, gcm.NonceSize())
+	if _, err := io.ReadFull(rand.Reader, nonce); err != nil {
+		return nil, fmt.Errorf("atrest: nonce generation failed: %w", err)
+	}
+	out := make([]byte, 0, len(MagicV2)+len(nonce)+len(plaintext)+gcm.Overhead())
+	out = append(out, MagicV2...)
+	out = append(out, nonce...)
+	return gcm.Seal(out, nonce, plaintext, aad), nil
+}
+
+// decryptV2 validates the v2 header and opens the payload with aad.
+func (e *Encryptor) decryptV2(data, aad []byte) ([]byte, error) {
+	if !isV2(data) {
+		return nil, errors.New("atrest: not a version-2 payload")
+	}
+	gcm, err := e.gcm()
+	if err != nil {
+		return nil, err
+	}
+	body := data[len(MagicV2):]
+	if len(body) < gcm.NonceSize() {
+		return nil, errors.New("atrest: payload too short for nonce")
+	}
+	nonce, ciphertext := body[:gcm.NonceSize()], body[gcm.NonceSize():]
+	plain, err := gcm.Open(nil, nonce, ciphertext, aad)
+	if err != nil {
+		return nil, fmt.Errorf("atrest: decryption failed (tampered, wrong key, or moved between stores): %w", err)
+	}
+	return plain, nil
 }
 
 // Seal encrypts plaintext when encryption at rest is enabled and returns it
@@ -151,11 +328,11 @@ func Seal(plaintext []byte) ([]byte, error) {
 	if !Enabled() {
 		return plaintext, nil
 	}
-	enc, err := fromEnv()
+	enc, err := v2Encryptor(os.Getenv(EnvKey))
 	if err != nil {
 		return nil, err
 	}
-	return enc.Encrypt(plaintext)
+	return enc.encryptV2(plaintext, nil)
 }
 
 // Open decrypts an encrypted payload and passes plaintext through untouched.
@@ -166,6 +343,9 @@ func Seal(plaintext []byte) ([]byte, error) {
 func Open(data []byte) ([]byte, error) {
 	if !IsEncrypted(data) {
 		return data, nil
+	}
+	if isV2(data) {
+		return OpenAt("", data)
 	}
 	enc, err := fromEnv()
 	if err != nil {
@@ -206,14 +386,20 @@ func previousSecrets() []string {
 // SealedWithCurrentKey reports whether data opens with the current key
 // alone (false for plaintext and for payloads only a retired key opens).
 func SealedWithCurrentKey(data []byte) bool {
-	if !IsEncrypted(data) {
+	return sealedWithCurrentKeyAt("", data)
+}
+
+// sealedWithCurrentKeyAt is SealedWithCurrentKey for a payload bound to
+// path; a version-1 payload is never "current" (it lacks the binding).
+func sealedWithCurrentKeyAt(path string, data []byte) bool {
+	if !isV2(data) {
 		return false
 	}
-	enc, err := fromEnv()
+	enc, err := v2Encryptor(os.Getenv(EnvKey))
 	if err != nil {
 		return false
 	}
-	_, err = enc.Decrypt(data)
+	_, err = enc.decryptV2(data, aadFor(path))
 	return err == nil
 }
 
@@ -240,14 +426,14 @@ func ResealFile(path string) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	if len(data) == 0 || SealedWithCurrentKey(data) {
+	if len(data) == 0 || sealedWithCurrentKeyAt(path, data) {
 		return false, nil
 	}
-	plain, err := Open(data)
+	plain, err := OpenAt(path, data)
 	if err != nil {
 		return false, err
 	}
-	sealed, err := Seal(plain)
+	sealed, err := SealAt(path, plain)
 	if err != nil {
 		return false, err
 	}
@@ -255,12 +441,9 @@ func ResealFile(path string) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	tmp := path + ".reseal.tmp"
-	if err := os.WriteFile(tmp, sealed, info.Mode().Perm()); err != nil { // #nosec G304 G703 -- same operator-owned store path as the read above
-		return false, err
-	}
-	if err := os.Rename(tmp, path); err != nil { // #nosec G703 -- same operator-owned store path
-		_ = os.Remove(tmp)
+	// fsync'd temp + rename: a power loss between the write and the rename
+	// must never leave an empty store behind the old name.
+	if err := utils.AtomicWriteFile(path, sealed, info.Mode().Perm()); err != nil {
 		return false, err
 	}
 	return true, nil
@@ -284,14 +467,14 @@ func ResealLines(path, linePrefix string) (int, error) {
 			continue
 		}
 		raw, err := base64.StdEncoding.DecodeString(line[len(linePrefix):])
-		if err != nil || SealedWithCurrentKey(raw) {
+		if err != nil || sealedWithCurrentKeyAt(path, raw) {
 			continue
 		}
-		plain, err := Open(raw)
+		plain, err := OpenAt(path, raw)
 		if err != nil {
 			return changed, fmt.Errorf("line %d: %w", i+1, err)
 		}
-		sealed, err := Seal(plain)
+		sealed, err := SealAt(path, plain)
 		if err != nil {
 			return changed, err
 		}
@@ -305,12 +488,7 @@ func ResealLines(path, linePrefix string) (int, error) {
 	if err != nil {
 		return 0, err
 	}
-	tmp := path + ".reseal.tmp"
-	if err := os.WriteFile(tmp, []byte(strings.Join(lines, "\n")), info.Mode().Perm()); err != nil { // #nosec G304 G703 -- same operator-owned store path as the read above
-		return 0, err
-	}
-	if err := os.Rename(tmp, path); err != nil { // #nosec G703 -- same operator-owned store path
-		_ = os.Remove(tmp)
+	if err := utils.AtomicWriteFile(path, []byte(strings.Join(lines, "\n")), info.Mode().Perm()); err != nil {
 		return 0, err
 	}
 	return changed, nil

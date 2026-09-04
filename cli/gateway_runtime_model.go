@@ -56,7 +56,7 @@ func (cli *ChatCLI) writeRuntimeModelState() {
 		return
 	}
 	path := runtimeModelStatePath()
-	if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		cli.logger.Warn("gateway: could not create runtime-model state dir", zap.Error(err))
 		return
 	}
