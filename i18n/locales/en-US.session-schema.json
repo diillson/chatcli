@@ -1,0 +1,3 @@
+{
+  "session.schema_newer": "session %q was written by a newer ChatCLI (schema v%d; this build reads up to v%d) — update ChatCLI to open it"
+}

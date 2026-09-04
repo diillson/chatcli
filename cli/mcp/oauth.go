@@ -257,7 +257,7 @@ func saveOAuthMeta(meta *oauthServerMeta) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(path, data, 0o600)
+	return utils.AtomicWriteFile(path, data, 0o600)
 }
 
 // hasStoredMCPOAuth reports whether we already hold OAuth metadata AND a

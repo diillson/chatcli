@@ -14,6 +14,7 @@ package usage
 
 import (
 	"encoding/json"
+	"github.com/diillson/chatcli/utils"
 	"os"
 	"path/filepath"
 	"sort"
@@ -125,5 +126,5 @@ func (s *Store) saveLocked(data map[string]Entry) {
 	if err != nil {
 		return
 	}
-	_ = os.WriteFile(s.path, raw, 0o600)
+	_ = utils.AtomicWriteFile(s.path, raw, 0o600)
 }

@@ -339,7 +339,7 @@ func (pm *PolicyManager) save() error {
 	}
 
 	// M1: Use restrictive permissions so only the owner can read security rules
-	return os.WriteFile(pm.configPath, data, 0o600)
+	return utils.AtomicWriteFile(pm.configPath, data, 0o600)
 }
 
 func (pm *PolicyManager) defaultRules() {

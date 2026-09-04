@@ -27,6 +27,7 @@ package cli
 
 import (
 	"encoding/json"
+	"github.com/diillson/chatcli/utils"
 	"os"
 	"path/filepath"
 
@@ -64,7 +65,7 @@ func (cli *ChatCLI) writeRuntimeModelState() {
 		cli.logger.Warn("gateway: could not marshal runtime-model state", zap.Error(err))
 		return
 	}
-	if err := os.WriteFile(path, data, 0o600); err != nil {
+	if err := utils.AtomicWriteFile(path, data, 0o600); err != nil {
 		cli.logger.Warn("gateway: could not write runtime-model state", zap.Error(err))
 	}
 }
