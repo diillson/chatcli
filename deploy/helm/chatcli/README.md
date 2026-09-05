@@ -161,8 +161,28 @@ fallback:
 |-----------|-------------|---------|
 | `server.port` | gRPC server port | `50051` |
 | `server.metricsPort` | Prometheus metrics port (0 = disabled) | `9090` |
-| `server.token` | Authentication token (empty = no auth) | `""` |
+| `server.token` | Authentication token. **Required in-cluster** — see below | `""` |
 | `server.grpcReflection` | Enable gRPC reflection (disable in production) | `false` |
+
+### The server needs a credential in-cluster
+
+Inside Kubernetes the server binds every interface, because that is what
+makes Service routing and health checks work. A listener reachable from
+the network with no credential admits every caller as an administrator, so
+the server **refuses to start** in that shape and says which setting is
+missing.
+
+Set one of:
+
+| Option | Value | When |
+|---|---|---|
+| Shared token | `server.token` | one credential for every caller |
+| Per-user JWTs | `security.jwtSecret` or `security.jwtSecretRef` | callers carry their own identity and role; tokens must carry an `exp` claim |
+| No credential | `security.bindAddress: "127.0.0.1"` | the server is only reached from inside its own pod |
+
+`security.jwtSecretRef` is preferred over `security.jwtSecret` in
+production: the plain value lands in the Deployment's env, the reference
+keeps it in a Secret.
 
 ### TLS
 

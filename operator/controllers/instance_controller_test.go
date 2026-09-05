@@ -40,6 +40,12 @@ func newInstance(name, ns string) *platformv1alpha1.Instance {
 		Spec: platformv1alpha1.InstanceSpec{
 			Provider: "CLAUDEAI",
 			Model:    "claude-sonnet-4-5",
+			// A server reachable from the network needs a credential or
+			// the operator will not provision it (auth_precheck.go), so
+			// the fixture carries the shape a real Instance has.
+			Server: platformv1alpha1.ServerSpec{
+				Token: &platformv1alpha1.SecretKeyRefSpec{Name: "chatcli-server-token", Key: "token"},
+			},
 		},
 	}
 }

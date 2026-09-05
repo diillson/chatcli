@@ -170,6 +170,8 @@ spec:
     token:
       name: chatcli-server-token    # Secret containing the auth token
       key: token                    # Key within the Secret (default: "token")
+      # Required unless security.jwtSecretRef is set or the server binds
+      # loopback — see "Server authentication is required" below.
     security:
       rateLimitRps: 20
       rateLimitBurst: 50
@@ -259,6 +261,39 @@ spec:
   server:
     port: 50051
 ```
+
+### Server authentication is required
+
+An Instance provisions a gRPC server. Inside a cluster that server binds
+every interface unless `spec.server.security.bindAddress` says otherwise,
+and a listener reachable from the network with no credential admits every
+caller as an administrator.
+
+So the server refuses to start in that shape, and the operator refuses to
+provision the Deployment rather than leaving a pod to crash-loop with the
+reason in its logs. Instead it raises a condition on the Instance:
+
+```bash
+kubectl get instance my-instance -o jsonpath='{.status.conditions[?(@.type=="AuthenticationConfigured")]}'
+```
+
+```
+{"type":"AuthenticationConfigured","status":"False","reason":"CredentialMissing",
+ "message":"server would listen on a reachable address with no credential ..."}
+```
+
+Three ways to satisfy it:
+
+| Option | Field | When |
+|---|---|---|
+| Shared token | `spec.server.token` | one credential for every caller |
+| Per-user JWTs | `spec.server.security.jwtSecretRef` | callers carry their own identity and role; tokens must carry an `exp` claim |
+| No credential | `spec.server.security.bindAddress: "127.0.0.1"` | the server is only reached from inside its own pod |
+
+A credential supplied directly through `spec.extraEnv` as
+`CHATCLI_SERVER_TOKEN` or `CHATCLI_JWT_SECRET` counts too.
+
+<!-- provider auth follows -->
 
 Two authentication modes — pick one:
 

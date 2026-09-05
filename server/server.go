@@ -242,6 +242,15 @@ func (s *Server) Start() error {
 			bindAddr = "127.0.0.1"
 		}
 	}
+	// Fail closed on a reachable address. Binding every interface with no
+	// credential configured admits any caller on the network as an
+	// administrator — inside a cluster that is every pod. Loopback keeps
+	// working without a credential, because that is the local CLI's own
+	// transport and the boundary is the machine.
+	if err := requireAuthOnReachableBind(bindAddr, s.config.Token); err != nil {
+		return err
+	}
+
 	addr := fmt.Sprintf("%s:%d", bindAddr, s.config.Port)
 	lis, err := net.Listen("tcp", addr)
 	if err != nil {

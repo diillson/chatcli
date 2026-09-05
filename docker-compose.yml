@@ -13,7 +13,20 @@ services:
     environment:
       # Server config
       CHATCLI_SERVER_PORT: "50051"
-      CHATCLI_SERVER_TOKEN: "${CHATCLI_SERVER_TOKEN:-}"  # Set for auth, leave empty for no auth
+
+      # The published port above only reaches the server if it listens on
+      # the container's interface. Without this the server binds loopback
+      # INSIDE the container: the health check still passes (it runs in
+      # there) while nothing outside can connect.
+      CHATCLI_BIND_ADDRESS: "${CHATCLI_BIND_ADDRESS:-0.0.0.0}"
+
+      # REQUIRED with the bind above: a server reachable from outside the
+      # container with no credential admits every caller as an
+      # administrator, so it refuses to start and says so. Compose cannot
+      # express "required unless loopback", so the check lives in the
+      # server. To run without a token, keep it inside the container:
+      #   CHATCLI_BIND_ADDRESS=127.0.0.1  (then use `docker exec`)
+      CHATCLI_SERVER_TOKEN: "${CHATCLI_SERVER_TOKEN:-}"
 
       # LLM Provider (configure at least one)
       LLM_PROVIDER: "${LLM_PROVIDER:-}"

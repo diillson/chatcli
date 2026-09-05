@@ -24,7 +24,16 @@ maintainers:
     email: diillson@hotmail.com
 annotations:
   artifacthub.io/license: Apache-2.0
-  artifacthub.io/containsSecurityUpdates: 'false'
+  artifacthub.io/containsSecurityUpdates: 'true'
+  artifacthub.io/changes: |
+    - kind: security
+      description: The server refuses to start unauthenticated on a reachable address; set server.token or security.jwtSecretRef, or bind loopback
+    - kind: security
+      description: JWTs without an exp claim are rejected, and the auth-failure rate limit counts per client instead of per connection
+    - kind: changed
+      description: An Instance without a credential is no longer provisioned; the operator raises the AuthenticationConfigured condition instead
+    - kind: removed
+      description: The safety values block, whose only effect was a variable no code reads
   artifacthub.io/prerelease: 'false'
   artifacthub.io/operator: 'false'
   artifacthub.io/crds: |

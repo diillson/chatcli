@@ -241,6 +241,26 @@ This chart installs 17 Custom Resource Definitions for the AIOps platform:
 | `EscalationPolicy` | `ep` | L1 -> L2 -> L3 escalation chains for incidents |
 | `IncidentSLA` | `sla` | SLA targets for incident response and resolution by severity |
 | `Instance` | `inst` | ChatCLI instance configuration |
+
+> **An Instance needs a credential.** The server an Instance provisions
+> binds every interface inside a cluster, and a reachable listener with no
+> credential admits every caller as an administrator — so it refuses to
+> start, and the operator refuses to provision the Deployment rather than
+> leaving a pod to crash-loop. It raises a condition instead:
+>
+> ```bash
+> kubectl get instance my-instance \
+>   -o jsonpath='{.status.conditions[?(@.type=="AuthenticationConfigured")].message}'
+> ```
+>
+> Satisfy it with `spec.server.token`, with
+> `spec.server.security.jwtSecretRef` (tokens must carry an `exp` claim),
+> or by binding loopback with
+> `spec.server.security.bindAddress: "127.0.0.1"` when the server is only
+> reached from inside its own pod. A credential passed through
+> `spec.extraEnv` as `CHATCLI_SERVER_TOKEN` or `CHATCLI_JWT_SECRET` counts
+> too. Note that leaving `bindAddress` unset means *every interface*, not
+> loopback.
 | `Issue` | `iss` | Correlated operational problem detected in the cluster |
 | `NotificationPolicy` | `np` | Multi-channel notification rules (Slack, PagerDuty, Email, etc.) |
 | `PostMortem` | `pm` | Auto-generated post-incident lifecycle report |
