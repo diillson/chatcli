@@ -1031,6 +1031,11 @@ func (a *AgentMode) Run(ctx context.Context, query string, additionalContext str
 	// CHATCLI_PROMPT_CACHE_TTL=auto: the agent/coder loop prefers the hour
 	// (long sessions that pause between tool rounds); chat and one-shot
 	// keep the 5-minute default, restored when this run ends.
+	//
+	// This states a preference; it no longer changes a conversation that
+	// already resolved one. The ttl is part of the cache_control marker,
+	// so flipping it mid-conversation rewrote the prefix and threw away
+	// the cache on every crossing between chat and the loop.
 	llmclient.SetPromptCacheTTLHint("1h")
 	defer llmclient.SetPromptCacheTTLHint("5m")
 	defer func() {

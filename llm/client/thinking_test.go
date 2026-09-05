@@ -72,7 +72,7 @@ func TestThinkingStateStoreAndClear(t *testing.T) {
 // content, so the provider engine must be able to retire the old ones.
 func TestAnthropicContextManagementClearsThinking(t *testing.T) {
 	t.Setenv(ContextEngineEnv, "provider")
-	cm := AnthropicContextManagement()
+	cm := AnthropicContextManagementFor(200000)
 	if cm == nil {
 		t.Fatal("provider engine selected but no context_management block")
 	}
@@ -95,7 +95,7 @@ func TestAnthropicContextManagementClearsThinking(t *testing.T) {
 
 func TestAnthropicContextManagementOffByDefault(t *testing.T) {
 	t.Setenv(ContextEngineEnv, "")
-	if cm := AnthropicContextManagement(); cm != nil {
+	if cm := AnthropicContextManagementFor(200000); cm != nil {
 		t.Errorf("builtin engine must send no context_management, got %+v", cm)
 	}
 }
@@ -112,7 +112,7 @@ func TestProviderCompactionEngineAddsCompactLast(t *testing.T) {
 	if !ProviderCompactionEngine() {
 		t.Fatal("provider-compact must select server-side compaction")
 	}
-	cm := AnthropicContextManagement()
+	cm := AnthropicContextManagementFor(200000)
 	if cm == nil || len(cm.Edits) != 3 {
 		t.Fatalf("want three edits, got %+v", cm)
 	}
@@ -126,7 +126,7 @@ func TestProviderEngineWithoutCompaction(t *testing.T) {
 	if ProviderCompactionEngine() {
 		t.Error("plain provider must not ask the server to summarize")
 	}
-	cm := AnthropicContextManagement()
+	cm := AnthropicContextManagementFor(200000)
 	if cm == nil {
 		t.Fatal("plain provider still edits context")
 	}
