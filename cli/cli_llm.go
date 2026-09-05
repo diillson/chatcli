@@ -58,7 +58,7 @@ func (cli *ChatCLI) processLLMRequest(parentCtx context.Context, in string) {
 	// and not persisted: the model already read it, and adding it again
 	// only spends window. Anything that actually changed travels.
 	turnCtx := assembly.turnContext
-	if turnContextIsRedundant(cli.history, turnContextText(turnCtx)) {
+	if turnContextIsRedundant(cli.Provider, cli.Model, cli.history, turnContextText(turnCtx)) {
 		turnCtx = nil
 	}
 	tempHistory := cli.buildChatTempHistoryWithContext(assembly.parts, turnCtx, userInput, additionalContext, images)

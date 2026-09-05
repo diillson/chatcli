@@ -980,7 +980,10 @@ func (a *AgentMode) effectiveRoute() (provider, model string) {
 	if provider == "" {
 		provider = os.Getenv("LLM_PROVIDER")
 	}
-	if provider == "" {
+	if provider == "" && config.Global != nil {
+		// Nil before config boot, and on any surface that builds an
+		// AgentMode without one. Reading through it used to panic, which
+		// only stayed invisible while every caller ran after boot.
 		provider = config.Global.GetString("LLM_PROVIDER")
 	}
 	return provider, a.cli.Model
@@ -1366,8 +1369,14 @@ func (a *AgentMode) appendTurnContext(text string) {
 	full := turnContextHeader + text
 	// A block that would repeat the last one still in history is not
 	// appended: the model already read it, and a run of thirty turns used
-	// to carry thirty copies of the same date line into the window.
-	if turnContextIsRedundant(a.cli.history, full) {
+	// to carry thirty copies of the same date line into the window. On a
+	// turn-scoped provider "still in history" stops implying "still read",
+	// so the route decides — see turnContextIsRedundant.
+	var provider, model string
+	if a.cli != nil {
+		provider, model = a.effectiveRoute()
+	}
+	if turnContextIsRedundant(provider, model, a.cli.history, full) {
 		return
 	}
 	a.cli.history = append(a.cli.history, models.TurnContextMessage(full))

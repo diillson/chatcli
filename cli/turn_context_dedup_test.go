@@ -17,18 +17,18 @@ func TestTurnContextIsRedundantOnlyOnAnExactRepeat(t *testing.T) {
 		tc("Current date: 2026-09-04"),
 		{Role: "assistant", Content: "hello"},
 	}
-	if !turnContextIsRedundant(history, "Current date: 2026-09-04") {
+	if !turnContextIsRedundant("OPENAI", "gpt-5.6", history, "Current date: 2026-09-04") {
 		t.Error("an exact repeat must not be injected again")
 	}
 	// The day rolling over, a new working directory or a channel push all
 	// change the text, and the block must travel again.
-	if turnContextIsRedundant(history, "Current date: 2026-09-05") {
+	if turnContextIsRedundant("OPENAI", "gpt-5.6", history, "Current date: 2026-09-05") {
 		t.Error("a changed block must travel")
 	}
-	if !turnContextIsRedundant(history, "   ") {
+	if !turnContextIsRedundant("OPENAI", "gpt-5.6", history, "   ") {
 		t.Error("an empty block is nothing to say")
 	}
-	if turnContextIsRedundant(nil, "Current date: 2026-09-04") {
+	if turnContextIsRedundant("OPENAI", "gpt-5.6", nil, "Current date: 2026-09-04") {
 		t.Error("the first block of a session must always travel")
 	}
 }

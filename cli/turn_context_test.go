@@ -155,3 +155,43 @@ func TestTurnContext_AgentHelpersAndPendingStash(t *testing.T) {
 		t.Fatal("nil CLI falls back to the default ratio")
 	}
 }
+
+// TestTurnContextIsRedundant_TracksWhatTheModelStillReads is the guard on
+// the regression turn-scoped system messages introduced. Skipping a repeat
+// was safe while the earlier block still rendered as a user message. On a
+// turn-scoped provider it does not: it stays in the array — it has to —
+// but stops rendering the moment a user message follows it, which every
+// later turn provides. The model read its context once and never again.
+func TestTurnContextIsRedundant_TracksWhatTheModelStillReads(t *testing.T) {
+	const block = "[TURN CONTEXT] today is 2026-09-04; cwd /repo"
+	history := []models.Message{
+		{Role: "user", Content: "first question"},
+		models.TurnContextMessage(block),
+		{Role: "assistant", Content: "first answer"},
+	}
+
+	// A provider that renders the earlier block keeps skipping the repeat:
+	// thirty turns must not carry thirty copies of the same date line.
+	if !turnContextIsRedundant("CLAUDEAI", "claude-sonnet-5", history, block) {
+		t.Fatal("a still-rendered block makes an identical one redundant")
+	}
+	if !turnContextIsRedundant("OPENAI", "gpt-5.6", history, block) {
+		t.Fatal("every provider without the capability keeps the old rule")
+	}
+
+	// A turn-scoped provider does not. Nothing already sent is visible, so
+	// nothing can be redundant — and a cleared block costs no tokens.
+	for _, model := range []string{"claude-opus-5", "claude-fable-5-1", "claude-opus-4-8"} {
+		if turnContextIsRedundant("CLAUDEAI", model, history, block) {
+			t.Fatalf("%s clears the earlier block, so the repeat is the only copy the model can read", model)
+		}
+	}
+	if turnContextIsRedundant("BEDROCK", "anthropic.claude-opus-5", history, block) {
+		t.Fatal("the Bedrock mirror clears it too")
+	}
+
+	// Empty stays empty on every provider: there is nothing to say.
+	if !turnContextIsRedundant("CLAUDEAI", "claude-opus-5", history, "   ") {
+		t.Fatal("an empty block is redundant everywhere")
+	}
+}
