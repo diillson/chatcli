@@ -27,6 +27,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"hash"
 	"io"
 	"os"
 	"path/filepath"
@@ -127,9 +128,15 @@ func openTranscriptJournal(dir, id string) (*transcriptJournal, error) {
 }
 
 // messageHash identifies a message by role, content, tool-result id,
-// every native tool call (id, name, arguments) and the image count, so two
-// assistant messages that differ only in the call they made — the common
-// shape in a tool loop — never collapse into one journal entry.
+// every native tool call (id, name, arguments), the image count and the
+// reasoning blocks it carries, so two assistant messages that differ only
+// in the call they made — or only in the reasoning that produced it, the
+// shape a retried tool loop emits — never collapse into one journal entry.
+//
+// The reasoning bytes are appended only when the message actually carries
+// blocks. A message without them hashes exactly as it did before reasoning
+// was persisted, so journals written by earlier builds still match their
+// live history and are extended rather than re-walked as a rewrite.
 func messageHash(m models.Message) string {
 	h := sha256.New()
 	h.Write([]byte(m.Role))
@@ -149,7 +156,32 @@ func messageHash(m models.Message) string {
 	}
 	h.Write([]byte{0})
 	h.Write([]byte(strconv.Itoa(len(m.Images))))
+	writeThinkingIdentity(h, m.Thinking)
 	return hex.EncodeToString(h.Sum(nil))
+}
+
+// writeThinkingIdentity folds the reasoning blocks into an open hash, in
+// order: a block's position is part of its identity because the provider
+// contract replays the sequence verbatim. Every field is covered — the
+// signature and the encrypted payload are what a provider validates, and
+// the text is the only discriminator for providers that sign neither.
+// Writes nothing for a message that carries no blocks (see messageHash).
+func writeThinkingIdentity(h hash.Hash, blocks []models.ThinkingBlock) {
+	if len(blocks) == 0 {
+		return
+	}
+	h.Write([]byte{0})
+	h.Write([]byte(strconv.Itoa(len(blocks))))
+	for _, b := range blocks {
+		h.Write([]byte{0})
+		h.Write([]byte(b.Type))
+		h.Write([]byte{0})
+		h.Write([]byte(b.Signature))
+		h.Write([]byte{0})
+		h.Write([]byte(b.Data))
+		h.Write([]byte{0})
+		h.Write([]byte(b.Thinking))
+	}
 }
 
 // hashHistory hashes every message of a history in order.
@@ -330,8 +362,18 @@ func readWorkerTranscript(path string) ([]transcriptEvent, error) {
 
 // transcriptIndex maps message hash → message over the journaled
 // messages (first occurrence wins; the journal dedups on append anyway).
+//
+// A rewrite event stores the hashes of the history it replaced, and
+// /rewind resolves those against this index — so a hash recorded by an
+// earlier build has to keep resolving. Reasoning-free messages hash
+// unchanged (see messageHash), which covers every journal older than
+// persisted reasoning. Journals written in between hold reasoning under
+// the pre-change digest, so each such message is also indexed under the
+// hash it would have had without its blocks. Aliases go in a second pass:
+// a real reasoning-free twin always outranks one.
 func transcriptIndex(events []transcriptEvent) map[string]models.Message {
 	idx := make(map[string]models.Message, len(events))
+	var withReasoning []*models.Message
 	for _, ev := range events {
 		if ev.Kind != "msg" || ev.Message == nil || ev.Worker != "" {
 			continue
@@ -339,6 +381,16 @@ func transcriptIndex(events []transcriptEvent) map[string]models.Message {
 		h := messageHash(*ev.Message)
 		if _, ok := idx[h]; !ok {
 			idx[h] = *ev.Message
+		}
+		if len(ev.Message.Thinking) > 0 {
+			withReasoning = append(withReasoning, ev.Message)
+		}
+	}
+	for _, m := range withReasoning {
+		bare := *m
+		bare.Thinking = nil
+		if h := messageHash(bare); idx[h].Role == "" {
+			idx[h] = *m
 		}
 	}
 	return idx
