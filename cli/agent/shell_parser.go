@@ -46,9 +46,21 @@ type ShellSegment struct {
 // the dangerous-pattern matcher still runs against the full line as a
 // belt-and-suspenders measure.
 func ParseShellSegments(line string) []ShellSegment {
+	segments, _ := ParseShellSegmentsChecked(line)
+	return segments
+}
+
+// ParseShellSegmentsChecked is ParseShellSegments plus whether the line
+// actually parsed.
+//
+// The distinction matters to a caller that decides policy per segment: the
+// fallback returns the whole line as one segment, which is indistinguishable
+// from a genuine single command, and a gate that cannot tell them apart is a
+// gate that can be talked out of decomposing a line at all.
+func ParseShellSegmentsChecked(line string) (segments []ShellSegment, parsed bool) {
 	trimmed := strings.TrimSpace(line)
 	if trimmed == "" {
-		return nil
+		return nil, true
 	}
 	parser := syntax.NewParser(syntax.Variant(syntax.LangBash))
 	file, err := parser.Parse(strings.NewReader(trimmed), "")
@@ -56,7 +68,7 @@ func ParseShellSegments(line string) []ShellSegment {
 		// Couldn't parse — return whole line as one segment so callers can
 		// still run their regex matchers. Returning nil would silently bypass
 		// the dangerous-pattern check.
-		return []ShellSegment{singleSegment(trimmed, false, 0)}
+		return []ShellSegment{singleSegment(trimmed, false, 0)}, false
 	}
 
 	var out []ShellSegment
@@ -67,7 +79,7 @@ func ParseShellSegments(line string) []ShellSegment {
 	if len(out) == 0 {
 		out = append(out, singleSegment(trimmed, false, 0))
 	}
-	return out
+	return out, true
 }
 
 // walkStmt recursively flattens a statement into its constituent simple

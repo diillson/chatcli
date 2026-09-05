@@ -154,6 +154,8 @@ func (e *Engine) handleTest(ctx context.Context, args []string) error {
 	registerDirAliases(fs, dir)
 	cmd := fs.String("cmd", "", "")
 	timeout := fs.Int("timeout", 1800, "")
+	allowUnsafe := fs.Bool("allow-unsafe", false, "")
+	allowSudo := fs.Bool("allow-sudo", false, "")
 	if err := parseFlags(fs, args); err != nil {
 		return err
 	}
@@ -170,12 +172,36 @@ func (e *Engine) handleTest(ctx context.Context, args []string) error {
 		}
 	}
 
+	// `test` takes an arbitrary --cmd, exactly like `exec`, and ran it
+	// through none of the guards `exec` applies: not the dangerous-pattern
+	// check, not the sandbox. A subcommand named after running tests is not
+	// a smaller privilege than one named after running commands, and the
+	// same escape hatches exist here so a test suite that legitimately needs
+	// them is not newly refused.
+	if !*allowUnsafe {
+		if unsafe, reason := IsUnsafeCommand(finalCmd, *allowSudo); unsafe {
+			return fmt.Errorf("comando bloqueado: %s", reason)
+		}
+	}
+
 	execCtx, cancel := context.WithTimeout(ctx, time.Duration(*timeout)*time.Second)
 	defer cancel()
 
 	e.printf("🧪 Rodando testes: %s\n", finalCmd)
-	out, err := runCommandWithContext(execCtx, *dir, finalCmd)
+	out, err := e.runSandboxedCommand(execCtx, *dir, finalCmd)
 	return e.printCommandOutput(out, err)
+}
+
+// runSandboxedCommand runs a shell line under whatever confinement
+// CHATCLI_CODER_SANDBOX selects, collecting combined output.
+func (e *Engine) runSandboxedCommand(ctx context.Context, dir, cmdLine string) (string, error) {
+	name, cmdArgs := e.sandboxedCommand(cmdLine, dir)
+	cmd := exec.CommandContext(ctx, name, cmdArgs...) //#nosec G204 -- agent/CLI tool execution; command validated by IsUnsafeCommand + policy_manager upstream, optionally OS-sandboxed
+	if dir != "" {
+		cmd.Dir = dir
+	}
+	out, err := cmd.CombinedOutput()
+	return string(out), err
 }
 
 // IsUnsafeCommand checks if a shell command matches known dangerous patterns.
@@ -263,15 +289,5 @@ func runCommandCtx(ctx context.Context, dir, cmd string, args ...string) (string
 		command.Dir = dir
 	}
 	out, err := command.CombinedOutput()
-	return string(out), err
-}
-
-func runCommandWithContext(ctx context.Context, dir, cmdLine string) (string, error) {
-	shell, shellFlag := resolveShell()
-	cmd := exec.CommandContext(ctx, shell, shellFlag, cmdLine) //#nosec G204 -- agent/CLI tool execution; commands validated by command_validator + policy_manager upstream
-	if dir != "" {
-		cmd.Dir = dir
-	}
-	out, err := cmd.CombinedOutput()
 	return string(out), err
 }
