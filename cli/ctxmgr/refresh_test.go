@@ -247,3 +247,104 @@ func TestContextFingerprint_TracksSeal(t *testing.T) {
 		t.Fatal("a context that gained the seals must not reuse the unsealed cache entry")
 	}
 }
+
+// TestRefreshContext_WatcherRefreshesContentOnly covers the cost nobody
+// asked for. Adopting a seal re-cuts the corpus and makes it re-earn its
+// vectors — the right price for a command the user typed, the wrong one
+// for a file save. The watcher refreshes on its own schedule.
+func TestRefreshContext_WatcherRefreshesContentOnly(t *testing.T) {
+	m, src := newRefreshManager(t)
+	ctx := context.Background()
+	fc, err := m.CreateContext(ctx, "docs", "", []string{src}, ModeFull, nil, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for k := range currentIndexSeals() {
+		delete(fc.Metadata, k)
+	}
+
+	// The watcher's path: content only.
+	fresh, rep, err := m.rescanContext(ctx, "docs", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rep.Resealed {
+		t.Fatal("a file save must not migrate a corpus onto a new seal")
+	}
+	if Situated(fresh) {
+		t.Fatal("the watcher must leave the corpus on the shape whose vectors are already paid for")
+	}
+
+	// The command the user typed does migrate it.
+	fresh, rep, err = m.RefreshContext(ctx, "docs")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !rep.Resealed || !Situated(fresh) {
+		t.Fatalf("/context refresh is what moves a corpus onto the current seals: %s", rep)
+	}
+}
+
+// TestRefreshContext_SealOnlyCountsOnceStored covers the half-written
+// migration. The seal decides how a corpus is cut and what its passages
+// are indexed by, so a context whose memory claims one shape while the
+// stored copy has another invalidates the retrieval cache, re-embeds, and
+// then re-embeds again in the next process that reads the old seal.
+//
+// The write is made to fail by putting a directory where the context file
+// belongs — a rename onto it fails on Windows, Linux and macOS alike,
+// unlike a permission bit.
+func TestRefreshContext_SealOnlyCountsOnceStored(t *testing.T) {
+	base := t.TempDir()
+	m, err := NewManagerWithBasePath(base, zap.NewNop())
+	if err != nil {
+		t.Fatal(err)
+	}
+	src := t.TempDir()
+	if err := os.WriteFile(filepath.Join(src, "a.md"), []byte("# alpha\nbody\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	fc, err := m.CreateContext(ctx, "docs", "", []string{src}, ModeFull, nil, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for k := range currentIndexSeals() {
+		delete(fc.Metadata, k)
+	}
+	before := indexSeal(fc)
+
+	stored := filepath.Join(base, fc.ID+".json")
+	if err := os.Remove(stored); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(stored, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err = m.RefreshContext(ctx, "docs"); err == nil {
+		t.Fatal("the refresh must report the failed write")
+	}
+	if Situated(fc) {
+		t.Fatal("a seal that never reached disk must not be left in memory")
+	}
+	// The seal is the claim that must not survive the failed write. The
+	// rest of the refresh legitimately did happen in memory — the files
+	// were re-scanned — so the fingerprint moving is correct; the corpus
+	// staying on the cut and the indexed text its stored vectors were
+	// paid for is what matters.
+	if after := indexSeal(fc); after != before {
+		t.Fatalf("the seal must stay where the stored corpus is: %q then %q", before, after)
+	}
+
+	// The write recovers and the migration lands for real.
+	if err := os.Remove(stored); err != nil {
+		t.Fatal(err)
+	}
+	fresh, rep, err := m.RefreshContext(ctx, "docs")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !rep.Resealed || !Situated(fresh) {
+		t.Fatalf("the retry must land the seal: %s", rep)
+	}
+}

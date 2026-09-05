@@ -96,6 +96,32 @@ func applyIndexSeals(fc *FileContext) bool {
 	return changed
 }
 
+// indexSealsDiffer reports whether a context is on a seal other than the
+// current one, without touching it — the question a refresh asks before
+// deciding it has work to do.
+func indexSealsDiffer(fc *FileContext) bool {
+	if fc == nil {
+		return true
+	}
+	for k, v := range currentIndexSeals() {
+		if fc.Metadata[k] != v {
+			return true
+		}
+	}
+	return false
+}
+
+// clearIndexSeals undoes applyIndexSeals, so a reseal that could not be
+// persisted leaves nothing behind claiming it was.
+func clearIndexSeals(fc *FileContext) {
+	if fc == nil || fc.Metadata == nil {
+		return
+	}
+	for k := range currentIndexSeals() {
+		delete(fc.Metadata, k)
+	}
+}
+
 // indexSeal renders a context's seals as a stable string for the
 // retrieval fingerprint. Sorted, so map order never invalidates a cache.
 func indexSeal(fc *FileContext) string {

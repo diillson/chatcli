@@ -242,7 +242,9 @@ func (w *ContextWatcher) refresh(name string) {
 	if closed {
 		return
 	}
-	_, rep, err := w.m.RefreshContext(w.ctx, name)
+	// Content only. Adopting a seal re-embeds the corpus, and a file save
+	// is not the user asking for that — /context refresh is.
+	_, rep, err := w.m.rescanContext(w.ctx, name, false)
 	if w.notify != nil && (err != nil || rep.Dirty()) {
 		w.notify(name, rep, err)
 	}

@@ -83,3 +83,16 @@ func TestRemainingTaskBudgetTokensFor_PricesTheServingPair(t *testing.T) {
 		t.Fatalf("an unsampled pair must fall back to the session average, got %d ok=%v", fresh, ok)
 	}
 }
+
+// TestAgentMode_TaskBudgetCeilingIsPerRun covers the state that outlived
+// the run it belonged to. AgentMode is one instance for the whole
+// session, so the ceiling fixed on the first run was still there on the
+// second: a fresh task announced a total it had already spent most of,
+// and the model wound down something that had barely started.
+func TestAgentMode_TaskBudgetCeilingIsPerRun(t *testing.T) {
+	a := &AgentMode{taskBudgetTotal: 400000}
+	a.resetPerRunState()
+	if a.taskBudgetTotal != 0 {
+		t.Fatalf("a new run must announce its own ceiling, inherited %d", a.taskBudgetTotal)
+	}
+}
