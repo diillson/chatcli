@@ -240,6 +240,12 @@ func buildClaudeToolMessages(prompt string, history []models.Message, turnScoped
 			continue
 		}
 		role := strings.ToLower(strings.TrimSpace(msg.Role))
+		// Only an assistant turn may be preceded by a system message, and a
+		// tool loop is mostly user-role messages: that is how tool results
+		// travel. A block written before one is rejected outright.
+		for _, ts := range turnScoped.FlushBefore(role) {
+			messages = append(messages, turnScopedBlock(ts))
+		}
 
 		switch role {
 		case "system":
@@ -320,10 +326,6 @@ func buildClaudeToolMessages(prompt string, history []models.Message, turnScoped
 				"content": visionwire.AnthropicContent(msg.Content, msg.Images),
 			})
 		}
-		// One position later than the history holds it: see the emitter.
-		for _, ts := range turnScoped.Flush() {
-			messages = append(messages, turnScopedBlock(ts))
-		}
 	}
 
 	// Add prompt as user message if needed
@@ -336,8 +338,8 @@ func buildClaudeToolMessages(prompt string, history []models.Message, turnScoped
 		}
 	}
 
-	// A block claimed on the last history entry: the prompt above is the
-	// user message it belongs to.
+	// The end of the array: the other position the provider accepts, and
+	// where the block renders for the turn being sent.
 	for _, ts := range turnScoped.Flush() {
 		messages = append(messages, turnScopedBlock(ts))
 	}

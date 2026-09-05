@@ -618,7 +618,9 @@ func (c *BedrockClient) buildMessagesAndSystem(prompt string, history []models.M
 		if turnScoped.Claim(msg) {
 			continue
 		}
-		switch strings.ToLower(strings.TrimSpace(msg.Role)) {
+		role := strings.ToLower(strings.TrimSpace(msg.Role))
+		messages = appendTurnScopedBefore(messages, turnScoped, role)
+		switch role {
 		case "assistant":
 			messages = append(messages, map[string]interface{}{
 				"role":    "assistant",
@@ -646,8 +648,6 @@ func (c *BedrockClient) buildMessagesAndSystem(prompt string, history []models.M
 		default:
 			messages = append(messages, map[string]interface{}{"role": "user", "content": visionwire.AnthropicContent(msg.Content, msg.Images)})
 		}
-		// One position later than the history holds it: see the emitter.
-		messages = appendTurnScoped(messages, turnScoped)
 	}
 
 	if len(history) == 0 || history[len(history)-1].Role != "user" || history[len(history)-1].Content != prompt {
@@ -655,8 +655,8 @@ func (c *BedrockClient) buildMessagesAndSystem(prompt string, history []models.M
 			messages = append(messages, map[string]interface{}{"role": "user", "content": prompt})
 		}
 	}
-	// A block claimed on the last history entry: the prompt above is the
-	// user message it belongs to.
+	// The end of the array: the other position the provider accepts, and
+	// where the block renders for the turn being sent.
 	messages = appendTurnScoped(messages, turnScoped)
 	c.turnScoped = turnScoped
 
@@ -1151,6 +1151,17 @@ func (c *BedrockClient) storeThinkingFromBody(body []byte) {
 
 // appendTurnScoped writes whatever the emitter buffered into the message
 // array, in the one shape both Bedrock transports send.
+func appendTurnScopedBefore(messages []map[string]interface{}, e *client.TurnContextEmitter, role string) []map[string]interface{} {
+	for _, m := range e.FlushBefore(role) {
+		messages = append(messages, map[string]interface{}{
+			"role":     m.Role,
+			"clear_at": m.ClearAt,
+			"content":  m.Content,
+		})
+	}
+	return messages
+}
+
 func appendTurnScoped(messages []map[string]interface{}, e *client.TurnContextEmitter) []map[string]interface{} {
 	for _, m := range e.Flush() {
 		messages = append(messages, map[string]interface{}{

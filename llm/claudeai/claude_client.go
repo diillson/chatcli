@@ -576,7 +576,9 @@ func (c *ClaudeClient) buildMessagesAndSystem(prompt string, history []models.Me
 		if turnScoped.Claim(msg) {
 			continue
 		}
-		switch strings.ToLower(strings.TrimSpace(msg.Role)) {
+		role := strings.ToLower(strings.TrimSpace(msg.Role))
+		messages = appendTurnScopedBefore(messages, turnScoped, role)
+		switch role {
 		case "assistant":
 			messages = append(messages, map[string]interface{}{"role": "assistant", "content": visionwire.AnthropicContent(msg.Content, msg.Images)})
 		case "system":
@@ -598,8 +600,6 @@ func (c *ClaudeClient) buildMessagesAndSystem(prompt string, history []models.Me
 		default:
 			messages = append(messages, map[string]interface{}{"role": "user", "content": visionwire.AnthropicContent(msg.Content, msg.Images)})
 		}
-		// One position later than the history holds it: see the emitter.
-		messages = appendTurnScoped(messages, turnScoped)
 	}
 
 	if len(history) == 0 || history[len(history)-1].Role != "user" || history[len(history)-1].Content != prompt {
@@ -607,8 +607,8 @@ func (c *ClaudeClient) buildMessagesAndSystem(prompt string, history []models.Me
 			messages = append(messages, map[string]interface{}{"role": "user", "content": prompt})
 		}
 	}
-	// A block claimed on the last history entry has nothing after it yet;
-	// the prompt above is the user message it belongs to.
+	// The end of the array: the other position the provider accepts, and
+	// where the block renders for the turn being sent.
 	messages = appendTurnScoped(messages, turnScoped)
 	c.turnScoped = turnScoped
 
@@ -641,7 +641,9 @@ func (c *ClaudeClient) buildOAuthMessagesAndSystem(prompt string, history []mode
 		if turnScoped.Claim(msg) {
 			continue
 		}
-		switch strings.ToLower(strings.TrimSpace(msg.Role)) {
+		role := strings.ToLower(strings.TrimSpace(msg.Role))
+		messages = appendTurnScopedBefore(messages, turnScoped, role)
+		switch role {
 		case "assistant":
 			messages = append(messages, map[string]interface{}{
 				"role":    "assistant",
@@ -669,8 +671,6 @@ func (c *ClaudeClient) buildOAuthMessagesAndSystem(prompt string, history []mode
 				"content": visionwire.AnthropicOAuthContent(msg.Content, msg.Images),
 			})
 		}
-		// One position later than the history holds it: see the emitter.
-		messages = appendTurnScoped(messages, turnScoped)
 	}
 
 	if len(history) == 0 || history[len(history)-1].Role != "user" || history[len(history)-1].Content != prompt {
@@ -681,8 +681,8 @@ func (c *ClaudeClient) buildOAuthMessagesAndSystem(prompt string, history []mode
 			})
 		}
 	}
-	// A block claimed on the last history entry: the prompt above is the
-	// user message it belongs to.
+	// The end of the array: the other position the provider accepts, and
+	// where the block renders for the turn being sent.
 	messages = appendTurnScoped(messages, turnScoped)
 	c.turnScoped = turnScoped
 
@@ -1058,6 +1058,15 @@ func applyTaskBudget(reqBody map[string]interface{}, model string, ctx context.C
 // turn-scoped system message is written in exactly one place.
 func appendTurnScoped(messages []map[string]interface{}, e *client.TurnContextEmitter) []map[string]interface{} {
 	for _, m := range e.Flush() {
+		messages = append(messages, turnScopedBlock(m))
+	}
+	return messages
+}
+
+// appendTurnScopedBefore writes whatever must precede a message with this
+// role. Only an assistant turn may be preceded by a system message.
+func appendTurnScopedBefore(messages []map[string]interface{}, e *client.TurnContextEmitter, role string) []map[string]interface{} {
+	for _, m := range e.FlushBefore(role) {
 		messages = append(messages, turnScopedBlock(m))
 	}
 	return messages

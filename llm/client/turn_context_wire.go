@@ -27,15 +27,31 @@
  * Every provider whose catalog entry does not claim it keeps the
  * user-role block byte for byte, so this can only add.
  *
- * Placement is the whole trick. A turn-scoped message renders only while
- * no user message follows it, so emitting the block where the history
- * holds it — ahead of the user's turn — would clear it on the very
- * request that introduced it. It is emitted one position later, directly
- * after the message it accompanies. That position is stable for the life
- * of the conversation: the same history always serializes to the same
- * bytes, which is what re-sending a cleared message verbatim requires. A
- * block that lands at a different index on a later request is an edit to
- * an earlier message, and misses the cache from there on.
+ * Placement answers to two rules at once, and the provider enforces one
+ * of them:
+ *
+ *   messages.N: role 'system' must precede an 'assistant' message or end
+ *   the array
+ *
+ * So a block may sit immediately before an assistant turn, or last. It may
+ * never sit before a user turn — and a tool loop is full of user-role
+ * messages, because that is how tool results travel.
+ *
+ * The second rule is what makes the block useful: it renders only while no
+ * user message follows it. Emitting it where the history holds it, ahead
+ * of the user's turn, would clear it on the very request that introduced
+ * it.
+ *
+ * Both are satisfied by holding the block until the next assistant turn is
+ * about to be written, and by flushing whatever is left at the end of the
+ * array. A block before an assistant turn is legal and, since a later user
+ * message always follows, correctly cleared. A block at the end is legal
+ * and renders, which is the copy the current turn reads.
+ *
+ * Position stays a function of the history alone, which is what re-sending
+ * a cleared message verbatim requires: a block that lands at a different
+ * index on a later request is an edit to an earlier message, and misses
+ * the cache from there on.
  */
 package client
 
@@ -115,17 +131,58 @@ func (e *TurnContextEmitter) Claim(msg models.Message) bool {
 	return true
 }
 
-// Flush returns what was claimed and clears it. Callers call it right
-// after appending an ordinary message, which is what places the block one
-// position later than the history holds it.
+// FlushBefore returns what must be written immediately ahead of a message
+// with this role, and clears it. Only an assistant turn may be preceded by
+// a system message; before anything else the block waits, which is what
+// keeps a tool loop legal — tool results travel as user-role messages, and
+// a block written before one is rejected outright.
+func (e *TurnContextEmitter) FlushBefore(role string) []TurnScopedSystem {
+	if e == nil || len(e.pending) == 0 {
+		return nil
+	}
+	if !strings.EqualFold(strings.TrimSpace(role), "assistant") {
+		return nil
+	}
+	return e.take()
+}
+
+// Flush returns whatever is still pending, for the end of the array — the
+// one other position the provider accepts, and the one where the block
+// renders for the turn being sent.
 func (e *TurnContextEmitter) Flush() []TurnScopedSystem {
 	if e == nil || len(e.pending) == 0 {
 		return nil
 	}
-	out := e.pending
+	return e.take()
+}
+
+// take returns the pending blocks as a single message.
+//
+// Coalesced because the provider's rule leaves at most one legal slot in
+// the shapes that pile blocks up: a system message must precede an
+// assistant turn or end the array, and the first of two adjacent system
+// messages does neither. Blocks pile up when several turns pass with no
+// assistant between them — which is what a failed request leaves behind,
+// and what a run of tool results looks like.
+//
+// Joining is deterministic given the history, so the position and the
+// bytes are still a function of the conversation alone.
+func (e *TurnContextEmitter) take() []TurnScopedSystem {
+	pending := e.pending
 	e.pending = nil
 	e.emitted = true
-	return out
+	if len(pending) == 1 {
+		return pending
+	}
+	parts := make([]string, 0, len(pending))
+	for _, p := range pending {
+		parts = append(parts, p.Content)
+	}
+	return []TurnScopedSystem{{
+		Role:    "system",
+		ClearAt: ClearAtNextUserMessage,
+		Content: strings.Join(parts, "\n\n"),
+	}}
 }
 
 // Used reports whether any turn-scoped message was actually emitted, so
