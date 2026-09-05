@@ -6,10 +6,14 @@
 package controllers
 
 import (
+	"context"
 	"net"
 	"strings"
 
 	platformv1alpha1 "github.com/diillson/chatcli/operator/api/v1alpha1"
+	"k8s.io/apimachinery/pkg/api/meta"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"sigs.k8s.io/controller-runtime/pkg/log"
 )
 
 // Refusing to provision an unauthenticated instance on a reachable bind.
@@ -96,4 +100,39 @@ func isLoopbackAddress(addr string) bool {
 	}
 	ip := net.ParseIP(host)
 	return ip != nil && ip.IsLoopback()
+}
+
+// recordAuthCondition writes the AuthenticationConfigured condition for
+// this Instance and reports whether provisioning must stop.
+//
+// Stopping is not an error: there is nothing to retry until the spec
+// changes, and a requeue would only rewrite the same condition. The
+// condition is the output — it is what the user reads.
+func (r *InstanceReconciler) recordAuthCondition(ctx context.Context, instance *platformv1alpha1.Instance) bool {
+	log := log.FromContext(ctx)
+	blocked := instanceAuthUnconfigured(instance)
+
+	cond := metav1.Condition{
+		Type:               AuthConditionType,
+		Status:             metav1.ConditionTrue,
+		Reason:             "CredentialConfigured",
+		Message:            "server has a credential, or binds loopback only",
+		ObservedGeneration: instance.Generation,
+	}
+	if blocked {
+		cond.Status = metav1.ConditionFalse
+		cond.Reason = "CredentialMissing"
+		cond.Message = authUnconfiguredMessage
+		instance.Status.Ready = false
+	}
+	meta.SetStatusCondition(&instance.Status.Conditions, cond)
+
+	if !blocked {
+		return false
+	}
+	if err := r.Status().Update(ctx, instance); err != nil {
+		log.Error(err, "failed to record the missing-credential condition")
+	}
+	log.Info("instance not provisioned: " + authUnconfiguredMessage)
+	return true
 }

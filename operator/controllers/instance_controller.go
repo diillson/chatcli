@@ -147,29 +147,10 @@ func (r *InstanceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 		}
 	}
 
-	if err := r.reconcileConfigMap(ctx, &instance); err != nil {
-		log.Error(err, "failed to reconcile ConfigMap")
+	if err := r.reconcileConfigMaps(ctx, &instance); err != nil {
 		reconciliationsTotal.WithLabelValues("error").Inc()
 		reconcileDuration.Observe(time.Since(start).Seconds())
 		return ctrl.Result{}, err
-	}
-
-	if instance.Spec.MCP != nil && instance.Spec.MCP.Enabled {
-		if err := r.reconcileMCPConfigMap(ctx, &instance); err != nil {
-			log.Error(err, "failed to reconcile MCP ConfigMap")
-			reconciliationsTotal.WithLabelValues("error").Inc()
-			reconcileDuration.Observe(time.Since(start).Seconds())
-			return ctrl.Result{}, err
-		}
-	}
-
-	if instance.Spec.Watcher != nil && instance.Spec.Watcher.Enabled && len(instance.Spec.Watcher.Targets) > 0 {
-		if err := r.reconcileWatchConfigMap(ctx, &instance); err != nil {
-			log.Error(err, "failed to reconcile watch config ConfigMap")
-			reconciliationsTotal.WithLabelValues("error").Inc()
-			reconcileDuration.Observe(time.Since(start).Seconds())
-			return ctrl.Result{}, err
-		}
 	}
 
 	if instance.Spec.Persistence != nil && instance.Spec.Persistence.Enabled {
@@ -192,30 +173,11 @@ func (r *InstanceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 	// so a spec in that shape would produce a crash loop with the reason
 	// buried in container logs. Say it on the Instance instead, and do not
 	// provision the Deployment.
-	if instanceAuthUnconfigured(&instance) {
-		meta.SetStatusCondition(&instance.Status.Conditions, metav1.Condition{
-			Type:               AuthConditionType,
-			Status:             metav1.ConditionFalse,
-			Reason:             "CredentialMissing",
-			Message:            authUnconfiguredMessage,
-			ObservedGeneration: instance.Generation,
-		})
-		instance.Status.Ready = false
-		if err := r.Status().Update(ctx, &instance); err != nil {
-			log.Error(err, "failed to record the missing-credential condition")
-		}
-		log.Info("instance not provisioned: " + authUnconfiguredMessage)
+	if r.recordAuthCondition(ctx, &instance) {
 		reconciliationsTotal.WithLabelValues("success").Inc()
 		reconcileDuration.Observe(time.Since(start).Seconds())
 		return ctrl.Result{}, nil
 	}
-	meta.SetStatusCondition(&instance.Status.Conditions, metav1.Condition{
-		Type:               AuthConditionType,
-		Status:             metav1.ConditionTrue,
-		Reason:             "CredentialConfigured",
-		Message:            "server has a credential, or binds loopback only",
-		ObservedGeneration: instance.Generation,
-	})
 
 	if err := r.reconcileDeployment(ctx, &instance); err != nil {
 		log.Error(err, "failed to reconcile Deployment")
@@ -362,4 +324,31 @@ func (r *InstanceReconciler) secretToInstance(ctx context.Context, obj client.Ob
 		}
 	}
 	return requests
+}
+
+// reconcileConfigMaps reconciles every ConfigMap an Instance owns: its own
+// configuration, the MCP server list when MCP is enabled, and the watch
+// targets when the watcher has any. Grouped because the three share a
+// lifecycle and a failure mode, and reading them as one step keeps the
+// reconcile loop legible.
+func (r *InstanceReconciler) reconcileConfigMaps(ctx context.Context, instance *platformv1alpha1.Instance) error {
+	log := log.FromContext(ctx)
+
+	if err := r.reconcileConfigMap(ctx, instance); err != nil {
+		log.Error(err, "failed to reconcile ConfigMap")
+		return err
+	}
+	if instance.Spec.MCP != nil && instance.Spec.MCP.Enabled {
+		if err := r.reconcileMCPConfigMap(ctx, instance); err != nil {
+			log.Error(err, "failed to reconcile MCP ConfigMap")
+			return err
+		}
+	}
+	if instance.Spec.Watcher != nil && instance.Spec.Watcher.Enabled && len(instance.Spec.Watcher.Targets) > 0 {
+		if err := r.reconcileWatchConfigMap(ctx, instance); err != nil {
+			log.Error(err, "failed to reconcile watch config ConfigMap")
+			return err
+		}
+	}
+	return nil
 }
