@@ -1,5 +1,39 @@
 # Changelog
 
+## [1.197.0](https://github.com/diillson/chatcli/compare/v1.196.1...v1.197.0) (2026-09-05)
+
+
+### Features
+
+* **agent:** a run under a spending ceiling tells the model how much room is left ([#1514](https://github.com/diillson/chatcli/issues/1514)) ([51f6b22](https://github.com/diillson/chatcli/commit/51f6b22fcd2001048582b151a8169d074c324548))
+* **knowledge:** a passage carries where it came from into the index ([#1513](https://github.com/diillson/chatcli/issues/1513)) ([c38b07e](https://github.com/diillson/chatcli/commit/c38b07e80c2ef6e39d187ef9ab60e22712958fc3))
+* **llm:** per-turn context as a turn-scoped system message ([#1519](https://github.com/diillson/chatcli/issues/1519)) ([e93768e](https://github.com/diillson/chatcli/commit/e93768e0bb7f1be2e9ef225d568d8b27455fa504))
+* **llm:** the OAuth path carries per-turn context like the others ([#1522](https://github.com/diillson/chatcli/issues/1522)) ([326dd35](https://github.com/diillson/chatcli/commit/326dd35bed0414daa5cbbbf76fcdf399f298ad0b))
+* **llm:** xAI and MiniMax count their own tokens ([#1515](https://github.com/diillson/chatcli/issues/1515)) ([c20786f](https://github.com/diillson/chatcli/commit/c20786f03bc7b67ee9af4a91ef951c317e16066e))
+
+
+### Bug Fixes
+
+* **agent:** tool schemas stop travelling once they crowd out the conversation ([#1505](https://github.com/diillson/chatcli/issues/1505)) ([674397e](https://github.com/diillson/chatcli/commit/674397effe5a39cad9d83e9f4d4a7c8f676cf025))
+* **cache:** an advisable compaction waits while the prefix cache is warm ([#1506](https://github.com/diillson/chatcli/issues/1506)) ([ebac1eb](https://github.com/diillson/chatcli/commit/ebac1eb490dd51e9d9afcbcfe7409bbd1c4ddea1))
+* **cli:** per-run state that is per run, and a seal that counts once stored ([#1521](https://github.com/diillson/chatcli/issues/1521)) ([28b1ebe](https://github.com/diillson/chatcli/commit/28b1ebe78cab7cf88d84b3e4dacb6c6511e70131))
+* **cli:** per-turn context follows what the model still reads ([#1520](https://github.com/diillson/chatcli/issues/1520)) ([8be6b7d](https://github.com/diillson/chatcli/commit/8be6b7d69273ef772315d01706efb590caee4189))
+* **cli:** reasoning blocks are part of a journaled message identity ([#1516](https://github.com/diillson/chatcli/issues/1516)) ([ab8cf28](https://github.com/diillson/chatcli/commit/ab8cf2890cd4bae11b30413fe85dd74b7be324ce))
+* **coder:** a write may not leave the workspace, and the denylist works on macOS ([#1510](https://github.com/diillson/chatcli/issues/1510)) ([d4b822d](https://github.com/diillson/chatcli/commit/d4b822d50476a0fee0bfedc3ba3e2bd3a89baf07))
+* **config:** every variable the code reads is visible in /config, enforced by a test ([#1509](https://github.com/diillson/chatcli/issues/1509)) ([4edce44](https://github.com/diillson/chatcli/commit/4edce44a69412eb3ee81478ad658b014fb2cdd76))
+* **context:** the per-turn block stops repeating itself into the window ([#1504](https://github.com/diillson/chatcli/issues/1504)) ([1cf4cdf](https://github.com/diillson/chatcli/commit/1cf4cdf33732cb5113d36601e5a24aa479ebcd73))
+* **context:** the provider engine reaches Bedrock and can summarize server-side ([#1507](https://github.com/diillson/chatcli/issues/1507)) ([3d9c2c0](https://github.com/diillson/chatcli/commit/3d9c2c0487a0302c6613ce1eca57d305ca23fd75))
+* **cost:** the calibration sample measures what the request actually sent ([#1508](https://github.com/diillson/chatcli/issues/1508)) ([287b44d](https://github.com/diillson/chatcli/commit/287b44de560223d227569f1269d9d52af933d063))
+* **ctxmgr:** refresh adopts the current segmenter and situating seals ([#1517](https://github.com/diillson/chatcli/issues/1517)) ([cba6a56](https://github.com/diillson/chatcli/commit/cba6a564f337702767319aaca3ea222c709fb6e3))
+* **gateway:** an inbound message with no valid signature is refused ([#1511](https://github.com/diillson/chatcli/issues/1511)) ([c4f516a](https://github.com/diillson/chatcli/commit/c4f516a9b03560d9a87dcb91f879be3acc748f41))
+* **llm:** a turn-scoped system message goes where the provider accepts it ([#1523](https://github.com/diillson/chatcli/issues/1523)) ([ed0afec](https://github.com/diillson/chatcli/commit/ed0afec66a0faec78cad38acc049c4fa1df8847d))
+* **llm:** cache decisions hold for the conversation, thresholds follow the window ([#1526](https://github.com/diillson/chatcli/issues/1526)) ([0366ccf](https://github.com/diillson/chatcli/commit/0366ccf3b588ba1f5127c42a2a73b3eb32e6e318))
+* **llm:** reasoning blocks travel back with the turn that produced them ([#1501](https://github.com/diillson/chatcli/issues/1501)) ([19d2aef](https://github.com/diillson/chatcli/commit/19d2aeffe5b3f5706cf596af318800afcaaee815))
+* **llm:** the cache breakpoint survives a trailing system message ([#1524](https://github.com/diillson/chatcli/issues/1524)) ([0c66e4d](https://github.com/diillson/chatcli/commit/0c66e4d9152c142081a428642429afa956147727))
+* **llm:** the effort a turn asks for reaches the request on every provider ([#1503](https://github.com/diillson/chatcli/issues/1503)) ([46cdfd7](https://github.com/diillson/chatcli/commit/46cdfd71a9a09df6f4ae9273961455c3b9343d44))
+* **llm:** the task budget travels, on both providers that read it ([#1525](https://github.com/diillson/chatcli/issues/1525)) ([1239580](https://github.com/diillson/chatcli/commit/1239580a09639f19f738f394c862649b484b9906))
+* **server:** refuse to serve an unauthenticated API on a reachable address ([#1512](https://github.com/diillson/chatcli/issues/1512)) ([c1af13a](https://github.com/diillson/chatcli/commit/c1af13a9c181d3ad9cf71bd7649cd747b179bccc))
+
 ## [1.196.1](https://github.com/diillson/chatcli/compare/v1.196.0...v1.196.1) (2026-09-04)
 
 
