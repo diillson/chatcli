@@ -263,3 +263,177 @@ func TestMemoryFlush_QueuesUnextractedSegment(t *testing.T) {
 }
 
 func zapNop() *zap.Logger { return zap.NewNop() }
+
+// thinkingBlocks builds one signed reasoning block for the tests below.
+func thinkingBlocks(sig string) []models.ThinkingBlock {
+	return []models.ThinkingBlock{{Type: "thinking", Thinking: "let me check " + sig, Signature: sig}}
+}
+
+// TestMessageHash_ReasoningIsPartOfIdentity pins both halves of the
+// contract: reasoning discriminates, and its absence changes nothing.
+func TestMessageHash_ReasoningIsPartOfIdentity(t *testing.T) {
+	base := models.Message{Role: "assistant", Content: "reading the file"}
+	base.ToolCalls = []models.ToolCall{{ID: "call_1", Name: "read_file"}}
+
+	a, b := base, base
+	a.Thinking = thinkingBlocks("sig-A")
+	b.Thinking = thinkingBlocks("sig-B")
+	if messageHash(a) == messageHash(b) {
+		t.Fatal("turns identical in content and calls but differing in reasoning must not share a hash")
+	}
+	if messageHash(a) == messageHash(base) {
+		t.Fatal("a reasoning block must change the hash of the turn carrying it")
+	}
+
+	// Order is identity: the provider replays the sequence verbatim.
+	two := base
+	two.Thinking = []models.ThinkingBlock{a.Thinking[0], b.Thinking[0]}
+	swapped := base
+	swapped.Thinking = []models.ThinkingBlock{b.Thinking[0], a.Thinking[0]}
+	if messageHash(two) == messageHash(swapped) {
+		t.Fatal("reasoning order must be part of the hash")
+	}
+
+	// Migration guard: a message without reasoning hashes exactly as it did
+	// before reasoning was persisted, so journals from earlier builds still
+	// match their history. The constant is the pre-change digest.
+	const preReasoningDigest = "1d83ebbe8302299c84843bdf174f521a3fa221d0cb5df16e507751f469be131b"
+	if got := messageHash(models.Message{Role: "assistant", Content: "a1"}); got != preReasoningDigest {
+		t.Fatalf("hash of a reasoning-free message changed: %s (journals written by earlier builds no longer match)", got)
+	}
+}
+
+// TestTranscriptJournal_RewriteKeepsTwinTurnsWithDistinctReasoning covers
+// the path where the collision actually cost a message: after a compaction
+// the journal re-walks the history and skips what it has already seen, so
+// a turn whose twin-in-text came earlier used to be dropped from the record.
+func TestTranscriptJournal_RewriteKeepsTwinTurnsWithDistinctReasoning(t *testing.T) {
+	t.Setenv(atrest.EnvKey, "")
+	dir := t.TempDir()
+	j, err := openTranscriptJournal(dir, "tr-twins")
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	// A retried tool loop: the same answer and the same call, twice, with
+	// the reasoning that led there differing.
+	twin := func(sig string) models.Message {
+		return models.Message{
+			Role:      "assistant",
+			Content:   "running it",
+			ToolCalls: []models.ToolCall{{ID: "call_1", Name: "run_command"}},
+			Thinking:  thinkingBlocks(sig),
+		}
+	}
+	history := []models.Message{
+		{Role: "system", Content: "sys"},
+		{Role: "user", Content: "build it"},
+		twin("sig-A"),
+		{Role: "tool", Content: "exit 1", ToolCallID: "call_1"},
+		twin("sig-B"),
+		{Role: "tool", Content: "exit 0", ToolCallID: "call_1"},
+	}
+	if err := j.Sync(history); err != nil {
+		t.Fatalf("sync: %v", err)
+	}
+
+	// Compaction rewrites the window: the tail survives, the head collapses.
+	compacted := []models.Message{
+		history[0],
+		{Role: "user", Content: "[STRUCTURED SUMMARY]", Meta: &models.MessageMeta{IsSummary: true}},
+		history[4],
+		history[5],
+	}
+	if err := j.Sync(compacted); err != nil {
+		t.Fatalf("sync after rewrite: %v", err)
+	}
+
+	msgs, err := readTranscript(j.path)
+	if err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	var sigs []string
+	for _, m := range msgs {
+		for _, b := range m.Thinking {
+			sigs = append(sigs, b.Signature)
+		}
+	}
+	if len(sigs) != 2 || sigs[0] != "sig-A" || sigs[1] != "sig-B" {
+		t.Fatalf("both turns must survive the rewrite with their own reasoning, got %v", sigs)
+	}
+}
+
+// TestTranscriptJournal_ExtendsJournalWrittenBeforeReasoning proves the
+// migration on a real file: a journal recorded by an earlier build is
+// extended, not re-walked as a rewrite, and nothing is duplicated.
+func TestTranscriptJournal_ExtendsJournalWrittenBeforeReasoning(t *testing.T) {
+	t.Setenv(atrest.EnvKey, "")
+	dir := t.TempDir()
+	// Two events exactly as an earlier build wrote them: no thinking field.
+	legacy := `{"ts":"2026-09-01T10:00:00Z","kind":"msg","message":{"role":"user","content":"u1"}}
+{"ts":"2026-09-01T10:00:01Z","kind":"msg","message":{"role":"assistant","content":"a1"}}
+`
+	path := filepath.Join(dir, "tr-legacy.jsonl")
+	if err := os.WriteFile(path, []byte(legacy), 0o600); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	j, err := openTranscriptJournal(dir, "tr-legacy")
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	history := []models.Message{
+		{Role: "user", Content: "u1"},
+		{Role: "assistant", Content: "a1"},
+		{Role: "user", Content: "u2"},
+	}
+	if err := j.Sync(history); err != nil {
+		t.Fatalf("sync: %v", err)
+	}
+	msgs, _ := readTranscript(path)
+	if len(msgs) != 3 || msgs[2].Content != "u2" {
+		t.Fatalf("legacy journal = %d msgs, want the two legacy plus u2", len(msgs))
+	}
+}
+
+// TestTranscriptIndex_ResolvesHashesRecordedByEarlierBuilds guards the
+// consumer that actually persists hashes: a rewrite event stores the
+// history it replaced by hash, and /rewind resolves those against the
+// index. Both pre-change shapes must still resolve — a reasoning-free
+// message (every journal older than persisted reasoning) and a
+// reasoning-carrying one recorded while the hash still ignored its blocks.
+func TestTranscriptIndex_ResolvesHashesRecordedByEarlierBuilds(t *testing.T) {
+	plain := models.Message{Role: "user", Content: "u1"}
+	reasoned := models.Message{
+		Role:      "assistant",
+		Content:   "running it",
+		ToolCalls: []models.ToolCall{{ID: "call_1", Name: "run_command"}},
+		Thinking:  thinkingBlocks("sig-A"),
+	}
+	// The digests an earlier build would have written into the rewrite
+	// event: reasoning played no part in either.
+	bare := reasoned
+	bare.Thinking = nil
+	recorded := []string{messageHash(plain), messageHash(bare)}
+
+	idx := transcriptIndex([]transcriptEvent{
+		{Kind: "msg", Message: &plain},
+		{Kind: "msg", Message: &reasoned},
+	})
+	restored, ok := resolveHashes(idx, recorded)
+	if !ok {
+		t.Fatal("a restore point recorded before reasoning entered the hash must still resolve")
+	}
+	if len(restored) != 2 || len(restored[1].Thinking) != 1 || restored[1].Thinking[0].Signature != "sig-A" {
+		t.Fatalf("the resolved message must carry its reasoning, got %+v", restored)
+	}
+
+	// An alias never outranks a real reasoning-free message with the same
+	// bytes: the exact match wins.
+	twin := bare
+	idx = transcriptIndex([]transcriptEvent{
+		{Kind: "msg", Message: &reasoned},
+		{Kind: "msg", Message: &twin},
+	})
+	if got := idx[messageHash(bare)]; len(got.Thinking) != 0 {
+		t.Fatal("an exact reasoning-free match must win over the alias of a reasoning-carrying twin")
+	}
+}
