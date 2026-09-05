@@ -32,6 +32,12 @@ type Segment struct {
 	StartLine int // 1-based, inclusive
 	EndLine   int // 1-based, inclusive
 	Content   string
+	// Context situates the passage in its document — the file and the
+	// nearest structure enclosing it. It is prefixed to the text the
+	// passage is indexed by (see IndexText) and never to what the model
+	// reads, so citations and rendered passages are unchanged. Empty on
+	// corpora indexed before situating shipped.
+	Context string
 }
 
 // SegmentOptions tunes how files are split into passages.
@@ -44,6 +50,10 @@ type SegmentOptions struct {
 	// file type reads by. Only contexts created with the v2 segmenter
 	// (see segmentOptionsFor) opt in, so existing corpora keep their ids.
 	Boundaries bool
+	// Situate prefixes each passage's indexed text with the file and the
+	// structure enclosing it (see situate.go). Only contexts tagged for it
+	// opt in, so existing corpora keep the vectors they already paid for.
+	Situate bool
 }
 
 // segmenterV2 tags contexts created after boundary-aware segmentation
@@ -56,6 +66,7 @@ const (
 // segmentOptionsFor derives the segmenter options for one context from the
 // engine defaults and the context's own tag.
 func segmentOptionsFor(fc *FileContext, base SegmentOptions) SegmentOptions {
+	base.Situate = Situated(fc)
 	if fc != nil && fc.Metadata != nil && fc.Metadata[segmenterMetaKey] == segmenterV2 {
 		base.Boundaries = true
 		if base.OverlapLines < 3 {
@@ -171,6 +182,11 @@ func segmentOne(f utils.FileInfo, opts SegmentOptions) []Segment {
 			next = end
 		}
 		start = next
+	}
+	if opts.Situate {
+		// Derived after the cut so each passage knows its own first line:
+		// the header names the file and the structure enclosing it.
+		situate(out, lines)
 	}
 	return out
 }

@@ -49,7 +49,10 @@ func newLexicalIndex(segs []Segment) *lexicalIndex {
 	}
 	var total int
 	for i, s := range segs {
-		terms := tokenizeLexicalMode(s.Content, idx.mode)
+		// The situating header is indexed with the passage: a query that
+		// names the file or the function it is about must be able to match
+		// on it, which is the whole point of deriving it.
+		terms := tokenizeLexicalMode(s.IndexText(), idx.mode)
 		idx.docLen[i] = len(terms)
 		total += len(terms)
 		for _, t := range terms {

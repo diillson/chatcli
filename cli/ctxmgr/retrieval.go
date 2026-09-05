@@ -154,7 +154,7 @@ func (e *RetrievalEngine) Retrieve(ctx context.Context, fc *FileContext, query s
 	// embedded. Only a run that embedded nothing at all is an error.
 	byContent := make(map[string]string, len(segs))
 	for _, s := range segs {
-		byContent[s.ID] = s.Content
+		byContent[s.ID] = s.IndexText()
 	}
 	if embedded, err := e.embedMissing(ctx, entry, allIDs, byContent); err != nil && embedded == 0 && len(idx.MissingFor(allIDs)) == len(allIDs) {
 		return nil, fmt.Errorf("embed segments: %w", err)
@@ -367,7 +367,7 @@ func (e *RetrievalEngine) vectorRanks(ctx context.Context, entry *lexCacheEntry,
 	if missing := entry.vec.MissingFor(ids); len(missing) > 0 {
 		sub := make(map[string]string, len(missing))
 		for _, id := range missing {
-			sub[id] = entry.segs[idxByID[id]].Content
+			sub[id] = entry.segs[idxByID[id]].IndexText()
 		}
 		if err := entry.vec.Upsert(ctx, sub); err != nil {
 			e.logger.Warn("knowledge: embedding unavailable; falling back to lexical retrieval", zap.Error(err))
@@ -544,7 +544,7 @@ func (e *RetrievalEngine) Warm(ctx context.Context, fc *FileContext) (int, error
 	byID := make(map[string]string, len(entry.segs))
 	for _, s := range entry.segs {
 		ids = append(ids, s.ID)
-		byID[s.ID] = s.Content
+		byID[s.ID] = s.IndexText()
 	}
 	return e.embedMissing(ctx, entry, ids, byID)
 }
