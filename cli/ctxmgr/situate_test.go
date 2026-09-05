@@ -60,10 +60,14 @@ func TestSituatingIsOptIn(t *testing.T) {
 	}
 }
 
-// Passage ids are content hashes and must not move: an opted-in corpus
-// re-embeds because its indexed text changed, but the ids it prunes and
-// upserts by stay the same.
-func TestSituatingDoesNotChangePassageIDs(t *testing.T) {
+// Passage ids key the vector cache, so they name what was embedded — not
+// only what was cut. This test used to assert the opposite, on the belief
+// that an opted-in corpus "re-embeds because its indexed text changed";
+// it does not. Re-embedding is driven by the ids the index reports
+// missing, so an unchanged id means an unchanged vector, and the situating
+// header never reached a single one. The cut is still identical either
+// way: only the id and the indexed text move.
+func TestSituatingMovesPassageIDsSoVectorsAreReEarned(t *testing.T) {
 	body := "package x\n\nfunc F() {\n" + strings.Repeat("\t// line\n", 40) + "}\n"
 	files := []utils.FileInfo{goFile("x/f.go", body)}
 	off := SegmentFiles(files, SegmentOptions{MaxChars: 400})
@@ -72,11 +76,24 @@ func TestSituatingDoesNotChangePassageIDs(t *testing.T) {
 		t.Fatalf("segment count changed: %d vs %d", len(off), len(on))
 	}
 	for i := range off {
-		if off[i].ID != on[i].ID {
-			t.Errorf("passage %d id changed with situating: %s vs %s", i, off[i].ID, on[i].ID)
-		}
 		if off[i].Content != on[i].Content {
-			t.Errorf("passage %d content changed with situating", i)
+			t.Errorf("passage %d content changed with situating: the cut must be identical", i)
+		}
+		if on[i].Context == "" {
+			t.Errorf("passage %d opted in but carries no header", i)
+			continue
+		}
+		if off[i].ID == on[i].ID {
+			t.Errorf("passage %d kept its id though its indexed text changed: the vector would never be re-earned", i)
+		}
+	}
+
+	// Situating twice is not a second migration: the id is a function of
+	// the cut and the header, so a corpus already situated stays put.
+	again := SegmentFiles(files, SegmentOptions{MaxChars: 400, Situate: true})
+	for i := range on {
+		if on[i].ID != again[i].ID {
+			t.Errorf("passage %d id is not stable across re-segmentation", i)
 		}
 	}
 }

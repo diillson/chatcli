@@ -18,6 +18,7 @@ package ctxmgr
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"sort"
 	"strings"
 	"unicode/utf8"
 
@@ -62,6 +63,61 @@ const (
 	segmenterMetaKey = "segmenter"
 	segmenterV2      = "v2"
 )
+
+// currentIndexSeals are the seals every context created — or refreshed —
+// from here on carries. They are tags rather than global switches so a
+// corpus is only ever re-cut and re-embedded when the context is built or
+// refreshed, never on the next query — a live corpus keeps serving the
+// vectors it already paid for until a refresh moves it.
+func currentIndexSeals() map[string]string {
+	return map[string]string{
+		segmenterMetaKey: segmenterV2,
+		situatedMetaKey:  situatedV1,
+	}
+}
+
+// applyIndexSeals writes the current seals onto a context and reports
+// whether any of them changed — the signal that its passages have to be
+// re-cut and its vectors re-earned even when no file moved.
+func applyIndexSeals(fc *FileContext) bool {
+	if fc == nil {
+		return false
+	}
+	changed := false
+	for k, v := range currentIndexSeals() {
+		if fc.Metadata == nil {
+			fc.Metadata = map[string]string{}
+		}
+		if fc.Metadata[k] != v {
+			fc.Metadata[k] = v
+			changed = true
+		}
+	}
+	return changed
+}
+
+// indexSeal renders a context's seals as a stable string for the
+// retrieval fingerprint. Sorted, so map order never invalidates a cache.
+func indexSeal(fc *FileContext) string {
+	if fc == nil || fc.Metadata == nil {
+		return ""
+	}
+	keys := make([]string, 0, 2)
+	for k := range currentIndexSeals() {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	var b strings.Builder
+	for i, k := range keys {
+		if i > 0 {
+			b.WriteByte(',')
+		}
+		b.WriteString(k)
+		b.WriteByte('=')
+		b.WriteString(fc.Metadata[k])
+	}
+	return b.String()
+}
 
 // segmentOptionsFor derives the segmenter options for one context from the
 // engine defaults and the context's own tag.
@@ -187,6 +243,16 @@ func segmentOne(f utils.FileInfo, opts SegmentOptions) []Segment {
 		// Derived after the cut so each passage knows its own first line:
 		// the header names the file and the structure enclosing it.
 		situate(out, lines)
+		// The id keys the vector cache, so it has to name what was
+		// embedded, not only what was cut. Boundary-aware segmentation
+		// moves the cut and changes the id on its own; situating leaves
+		// the cut alone and changes only the indexed text, so without
+		// this a corpus that gained a header kept every id it had, the
+		// index reported nothing missing, and the header never reached
+		// a single vector.
+		for i := range out {
+			out[i].ID = situatedSegmentID(out[i].ID, out[i].Context)
+		}
 	}
 	return out
 }
@@ -243,6 +309,21 @@ func segmentID(path string, startLine int, body string) string {
 	_, _ = h.Write([]byte(itoa(startLine)))
 	_, _ = h.Write([]byte{0})
 	_, _ = h.Write([]byte(body))
+	sum := h.Sum(nil)
+	return hex.EncodeToString(sum[:12])
+}
+
+// situatedSegmentID derives the id of a passage indexed with a situating
+// header from the id of its raw cut. Passages without a header keep the
+// bare id, so turning situating on is the only thing that moves them.
+func situatedSegmentID(base, context string) string {
+	if context == "" {
+		return base
+	}
+	h := sha256.New()
+	_, _ = h.Write([]byte(base))
+	_, _ = h.Write([]byte{0})
+	_, _ = h.Write([]byte(context))
 	sum := h.Sum(nil)
 	return hex.EncodeToString(sum[:12])
 }

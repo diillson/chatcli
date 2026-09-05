@@ -90,6 +90,11 @@ func (h *ContextHandler) handleRefresh(ctx context.Context, args []string) error
 		return nil
 	}
 	fmt.Println(colorize("  "+i18n.T("context.refresh.done", name, rep.Changed, rep.Added, rep.Removed), ColorGreen))
+	if rep.Resealed {
+		// A refresh that moved zero files still did work, and the work
+		// costs embeddings: say so instead of printing three zeros.
+		fmt.Println(colorize("  "+i18n.T("context.refresh.resealed", name), ColorCyan))
+	}
 	return nil
 }
 

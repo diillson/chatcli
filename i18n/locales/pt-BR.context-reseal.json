@@ -1,0 +1,3 @@
+{
+  "context.refresh.resealed": "o contexto %q passa a indexar com o segmentador e os cabeçalhos de situação atuais; suas passagens foram recortadas de novo e serão re-embedadas na próxima consulta"
+}

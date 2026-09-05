@@ -181,3 +181,69 @@ func TestWatchDirsFor_SkipsNoiseDirs(t *testing.T) {
 		t.Fatalf("dirs = %v", dirs)
 	}
 }
+
+// TestRefreshContext_AdoptsCurrentSeals covers the promise creation makes
+// on a context's behalf: the seals are tagged rather than global so old
+// corpora keep the vectors they paid for, and a refresh is the documented
+// way off that shape. Refresh never wrote them, so a context created
+// before either seal stayed on the old cut and the bare indexed text no
+// matter how often it was refreshed.
+func TestRefreshContext_AdoptsCurrentSeals(t *testing.T) {
+	m, src := newRefreshManager(t)
+	ctx := context.Background()
+	fc, err := m.CreateContext(ctx, "docs", "", []string{src}, ModeFull, nil, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Age it back to a context built before the seals existed.
+	for k := range currentIndexSeals() {
+		delete(fc.Metadata, k)
+	}
+	if Situated(fc) {
+		t.Fatal("precondition: the context must start unsealed")
+	}
+	before := contextFingerprint(fc)
+
+	// Not one file has moved.
+	fresh, rep, err := m.RefreshContext(ctx, "docs")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rep.Changed+rep.Added+rep.Removed != 0 {
+		t.Fatalf("no file moved, yet the diff reports %s", rep)
+	}
+	if !rep.Resealed || !rep.Dirty() {
+		t.Fatalf("adopting a seal is work: report = %s", rep)
+	}
+	if !Situated(fresh) {
+		t.Fatal("refresh must move the context onto the current situating version")
+	}
+	if fresh.Metadata[segmenterMetaKey] != segmenterV2 {
+		t.Fatalf("refresh must move the context onto the current segmenter, got %q", fresh.Metadata[segmenterMetaKey])
+	}
+	if after := contextFingerprint(fresh); after == before {
+		t.Fatal("the retrieval cache must be invalidated by a reseal: the corpus is cut differently and indexed by different text")
+	}
+
+	// Idempotent: a context already on the current seals is not re-cut on
+	// every refresh, or the watcher would re-embed the corpus forever.
+	_, rep2, err := m.RefreshContext(ctx, "docs")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rep2.Resealed || rep2.Dirty() {
+		t.Fatalf("a sealed context must refresh clean, got %s", rep2)
+	}
+}
+
+// TestContextFingerprint_TracksSeal pins the invalidation directly: the
+// seal is what decides the cut and the indexed text, so two otherwise
+// identical contexts that differ only in it must not share a cache entry.
+func TestContextFingerprint_TracksSeal(t *testing.T) {
+	fc := &FileContext{Name: "docs", FileCount: 2, TotalSize: 100, UpdatedAt: time.Unix(0, 0)}
+	bare := contextFingerprint(fc)
+	applyIndexSeals(fc)
+	if sealed := contextFingerprint(fc); sealed == bare {
+		t.Fatal("a context that gained the seals must not reuse the unsealed cache entry")
+	}
+}
