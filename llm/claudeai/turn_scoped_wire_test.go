@@ -153,3 +153,63 @@ func TestBuildClaudeToolMessages_StablePositionAcrossRequests(t *testing.T) {
 		}
 	}
 }
+
+// renderedTurnContextBlocks counts the turn-context blocks the model
+// actually reads in one request: a turn-scoped system message renders
+// only while no user message follows it.
+func renderedTurnContextBlocks(messages []map[string]interface{}) int {
+	rendered := 0
+	for i, m := range messages {
+		if roleAt(m) != "system" {
+			continue
+		}
+		visible := true
+		for _, later := range messages[i+1:] {
+			if roleAt(later) == "user" {
+				visible = false
+				break
+			}
+		}
+		if visible {
+			rendered++
+		}
+	}
+	return rendered
+}
+
+// TestTurnScoped_SecondTurnStillCarriesContext is the end-to-end guard on
+// the regression turn-scoping introduced. The per-turn block is skipped
+// when it repeats the last one still in history, and on a turn-scoped
+// model "still in history" stopped implying "still read": the earlier
+// block stays in the array and renders for nobody. A day-resolution date
+// line is byte-identical all day, so the model read its context on turn 1
+// and never again.
+func TestTurnScoped_SecondTurnStillCarriesContext(t *testing.T) {
+	const block = "[TURN CONTEXT] today is 2026-09-04; cwd /repo"
+	c := &ClaudeClient{model: "claude-opus-5", logger: zap.NewNop()}
+
+	// Turn 1: the block is injected and read.
+	turn1 := []models.Message{
+		{Role: "system", Content: "you are a CLI"},
+		models.TurnContextMessage(block),
+		{Role: "user", Content: "first question"},
+	}
+	messages, _ := c.buildMessagesAndSystem("first question", turn1)
+	if got := renderedTurnContextBlocks(messages); got != 1 {
+		t.Fatalf("turn 1 rendered %d blocks, want 1", got)
+	}
+
+	// Turn 2: the text has not changed. The block must still be injected,
+	// because nothing the model can read carries it any more.
+	if !client.SupportsTurnScopedSystem(catalog.ProviderClaudeAI, c.model) {
+		t.Fatal("precondition: the model under test must be turn-scoped")
+	}
+	turn2 := append(append([]models.Message{}, turn1...),
+		models.Message{Role: "assistant", Content: "first answer"},
+		models.TurnContextMessage(block),
+		models.Message{Role: "user", Content: "second question"})
+	messages, _ = c.buildMessagesAndSystem("second question", turn2)
+	if got := renderedTurnContextBlocks(messages); got != 1 {
+		t.Fatalf("turn 2 rendered %d blocks, want exactly 1 — 0 means the model lost its context, 2 means the earlier one never cleared", got)
+	}
+}

@@ -29,6 +29,7 @@ package cli
 import (
 	"strings"
 
+	"github.com/diillson/chatcli/llm/client"
 	"github.com/diillson/chatcli/models"
 )
 
@@ -49,9 +50,23 @@ func lastTurnContextText(history []models.Message) string {
 // Comparison is on the whole text, so any real change — the day rolling
 // over, a new working directory, an MCP channel push, a recall block —
 // makes the block travel again. Only a byte-for-byte repeat is skipped.
-func turnContextIsRedundant(history []models.Message, text string) bool {
+//
+// The question is whether the model still READS the earlier block, not
+// whether the array still holds it. On a provider that takes turn-scoped
+// system messages the two stopped being the same thing: an earlier block
+// stays in the array — it has to, or the prompt cache and the
+// thinking-block conversation check both break — but it renders only
+// while no user message follows it, and every later turn puts one there.
+// Nothing already sent is visible, so nothing can be redundant, and
+// skipping meant the model read its context once and never again. That is
+// what the capability is for: a cleared block costs no tokens, so sending
+// one every turn is the shape the feature describes.
+func turnContextIsRedundant(provider, model string, history []models.Message, text string) bool {
 	if strings.TrimSpace(text) == "" {
 		return true
+	}
+	if client.SupportsTurnScopedSystem(provider, model) {
+		return false
 	}
 	return text == lastTurnContextText(history)
 }
