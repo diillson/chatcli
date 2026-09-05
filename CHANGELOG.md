@@ -1,5 +1,20 @@
 # Changelog
 
+## [1.198.0](https://github.com/diillson/chatcli/compare/v1.197.0...v1.198.0) (2026-09-05)
+
+
+### Features
+
+* **auth:** the keychain setting starts doing something, on every platform including Windows ([#1532](https://github.com/diillson/chatcli/issues/1532)) ([34a80df](https://github.com/diillson/chatcli/commit/34a80dfcf3adf8738ab7b6c9e3d16ef6261c5b51))
+* **deploy:** the chart can configure what the security page says it can, and the CORS setting reaches the server ([#1533](https://github.com/diillson/chatcli/issues/1533)) ([e4d38c0](https://github.com/diillson/chatcli/commit/e4d38c0521562fc8bf1eb969c3432af1f690061e))
+* **plugins:** the signing toolchain and quarantine the docs described ([#1529](https://github.com/diillson/chatcli/issues/1529)) ([5abe224](https://github.com/diillson/chatcli/commit/5abe22498996365dd9d92fbe4da371f4d8b84bf6))
+* **server:** RS256, mutual TLS, real roles, and an audit trail that names the caller ([#1528](https://github.com/diillson/chatcli/issues/1528)) ([abf6bf6](https://github.com/diillson/chatcli/commit/abf6bf6800bd089c4f5e6a4ba0da0f8cdf670ba2))
+
+
+### Bug Fixes
+
+* **agent:** the allowlist covers the whole line, and coder test stops being the way around it ([#1531](https://github.com/diillson/chatcli/issues/1531)) ([491efbc](https://github.com/diillson/chatcli/commit/491efbc6d0d0f9907e653b9659ff86cd6d4b5efc))
+
 ## [1.197.0](https://github.com/diillson/chatcli/compare/v1.196.1...v1.197.0) (2026-09-05)
 
 
