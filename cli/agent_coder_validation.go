@@ -11,17 +11,27 @@ import (
 	"strings"
 )
 
-// isCoderExecDangerous checks if a @coder exec command contains a dangerous
-// shell command. It extracts the actual shell command from the parsed args
-// and validates it against the agent's CommandValidator.IsDangerous().
+// coderShellSubcommands are the @coder subcommands that run an arbitrary
+// shell line given to them.
+//
+// `test` belongs here as much as `exec` does: it takes the same --cmd and
+// runs it through the same shell. Guarding only the subcommand named after
+// running commands left the one named after running tests as an unguarded
+// path to the same place.
+var coderShellSubcommands = map[string]bool{"exec": true, "test": true}
+
+// isCoderExecDangerous checks if a @coder subcommand that runs a shell line
+// carries a dangerous command. It extracts the actual shell command from the
+// parsed args and validates it against the agent's
+// CommandValidator.IsDangerous().
 // This is the critical security guard that prevents destructive commands
-// from executing through @coder exec even when the policy says "allow".
+// from executing through @coder even when the policy says "allow".
 func (a *AgentMode) isCoderExecDangerous(toolArgs []string) (bool, string) {
 	if len(toolArgs) == 0 {
 		return false, ""
 	}
 	sub := strings.ToLower(strings.TrimSpace(toolArgs[0]))
-	if sub != "exec" {
+	if !coderShellSubcommands[sub] {
 		return false, ""
 	}
 	// Extract the --cmd value from parsed args

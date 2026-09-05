@@ -41,6 +41,7 @@ func DefaultAllowedCommands() map[string]string {
 		"ln": "file", "chmod": "file", "chown": "file", "basename": "file",
 		"dirname": "file", "realpath": "file", "readlink": "file",
 		"md5sum": "file", "sha256sum": "file", "sha1sum": "file",
+		"cmp": "file",
 
 		// Text processing
 		"grep": "text", "rg": "text", "sed": "text", "awk": "text",
@@ -50,6 +51,8 @@ func DefaultAllowedCommands() map[string]string {
 		"fold": "text", "expand": "text", "unexpand": "text",
 		"comm": "text", "join": "text", "nl": "text", "rev": "text",
 		"strings": "text", "od": "text", "xxd": "text", "hexdump": "text",
+		"ag": "text", "look": "text", "base64": "text", "xmllint": "text",
+		"csvtool": "text", "openssl": "text",
 
 		// Development tools
 		"go": "dev", "git": "dev", "make": "dev", "npm": "dev",
@@ -65,6 +68,7 @@ func DefaultAllowedCommands() map[string]string {
 		"gofmt": "dev", "golint": "dev", "gopls": "dev",
 		"eslint": "dev", "prettier": "dev", "black": "dev",
 		"pytest": "dev", "jest": "dev", "mocha": "dev",
+		"npx": "dev", "poetry": "dev", "zig": "dev", "kotlinc": "dev",
 
 		// Container / Infrastructure
 		"docker": "container", "podman": "container",
@@ -75,6 +79,7 @@ func DefaultAllowedCommands() map[string]string {
 		"kustomize": "container", "oc": "container",
 		"eksctl": "container", "gcloud": "container",
 		"aws": "container", "az": "container",
+		"istioctl": "container", "argocd": "container", "flux": "container",
 
 		// Network (read-only oriented)
 		"curl": "network", "wget": "network",
@@ -92,6 +97,7 @@ func DefaultAllowedCommands() map[string]string {
 		"id": "sysinfo", "groups": "sysinfo", "lsof": "sysinfo",
 		"ulimit": "sysinfo", "locale": "sysinfo", "getconf": "sysinfo",
 		"arch": "sysinfo", "nproc": "sysinfo", "lscpu": "sysinfo",
+		"cal":   "sysinfo",
 		"lsblk": "sysinfo", "mount": "sysinfo", "lsusb": "sysinfo",
 
 		// Editors / Viewers
@@ -107,6 +113,15 @@ func DefaultAllowedCommands() map[string]string {
 		"export": "shell", "set": "shell", "unset": "shell",
 		"alias": "shell", "type": "shell", "command": "shell",
 		"source": "shell", "eval": "shell", "exec": "shell",
+		"clear": "shell", "reset": "shell", "tput": "shell", "stty": "shell",
+
+		// Navigation and no-op builtins. They carry no capability of their
+		// own, and they are how real command lines are written: refusing
+		// them once every segment is checked would break "cd sub && build"
+		// without withholding anything.
+		"cd": "shell", "pwd": "shell", "pushd": "shell", "popd": "shell",
+		"dirs": "shell", "wait": "shell", "read": "shell", "shift": "shell",
+		"jobs": "shell", ":": "shell", "[": "shell",
 		"sh": "shell", "bash": "shell", "zsh": "shell",
 	}
 	return commands
@@ -124,9 +139,13 @@ func NewCommandAllowlist() *CommandAllowlist {
 		mode:            mode,
 	}
 
-	// Add custom commands from CHATCLI_AGENT_ALLOWLIST env var (comma-separated)
+	// Add custom commands from CHATCLI_AGENT_ALLOWLIST. Both separators are
+	// accepted: the sibling denylist variable is semicolon-separated, the
+	// documentation said semicolon here too, and a value that silently
+	// registers one command named "a;b;c" is a configuration that looks
+	// applied and is not.
 	if extra := os.Getenv("CHATCLI_AGENT_ALLOWLIST"); extra != "" {
-		for _, cmd := range strings.Split(extra, ",") {
+		for _, cmd := range strings.FieldsFunc(extra, func(r rune) bool { return r == ',' || r == ';' }) {
 			cmd = strings.TrimSpace(cmd)
 			if cmd != "" {
 				al.allowedCommands[cmd] = "custom"
@@ -137,8 +156,16 @@ func NewCommandAllowlist() *CommandAllowlist {
 	return al
 }
 
-// IsAllowed checks if a command is in the allowlist.
+// IsAllowed checks whether every command on the line is in the allowlist.
 // Returns (allowed, category, reason).
+//
+// Every command, not the first one: a line is a sequence of invocations, and
+// checking only the leading word means any allowed command is a passphrase
+// for the rest of the line. Prefixing with a benign command was enough to
+// carry an arbitrary one past the gate, which is the opposite of what an
+// allowlist is for.
+//
+// The category returned is the leading command's, which is what callers log.
 func (al *CommandAllowlist) IsAllowed(fullCommand string) (bool, string, string) {
 	al.mu.RLock()
 	defer al.mu.RUnlock()
@@ -148,11 +175,34 @@ func (al *CommandAllowlist) IsAllowed(fullCommand string) (bool, string, string)
 		return false, "", "empty command"
 	}
 
-	if category, ok := al.allowedCommands[baseCmd]; ok {
+	category, ok := al.allowedCommands[baseCmd]
+	if !ok {
+		return false, "", "command '" + baseCmd + "' is not in the security allowlist"
+	}
+
+	// Decompose with a real shell parser and hold every segment to the same
+	// rule. On a line the parser could not read, the legacy single-command
+	// check above stands on its own: a line bash cannot parse is one the
+	// executor's shell is unlikely to run either, and failing closed here
+	// would refuse every command on a host whose shell is not bash.
+	segments, parsed := ParseShellSegmentsChecked(fullCommand)
+	if !parsed {
 		return true, category, ""
 	}
 
-	return false, "", "command '" + baseCmd + "' is not in the security allowlist"
+	for _, seg := range segments {
+		segCmd := extractBaseCommand(seg.Full)
+		if segCmd == "" {
+			// A segment that carries no invocation — a bare assignment, say.
+			// Nothing to authorize.
+			continue
+		}
+		if _, ok := al.allowedCommands[segCmd]; !ok {
+			return false, "", "command '" + segCmd + "' is not in the security allowlist"
+		}
+	}
+
+	return true, category, ""
 }
 
 // GetMode returns the current security mode.

@@ -8,6 +8,7 @@ package agent
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 
 	"github.com/diillson/chatcli/pkg/fspath"
@@ -29,10 +30,15 @@ func NewSensitiveReadPaths() *SensitiveReadPaths {
 		allowKubeconfig: strings.EqualFold(os.Getenv("CHATCLI_AGENT_ALLOW_KUBECONFIG"), "true"),
 	}
 
-	// Parse extra allowed read paths (separated by os.PathListSeparator:
-	// ':' on Unix, ';' on Windows — ':' would split drive letters apart)
+	// Parse extra allowed read paths. The native separator always works
+	// (':' on Unix, ';' on Windows), and ';' is additionally accepted on
+	// Unix because every sibling agent variable uses it and the
+	// documentation said so here too — a value that silently becomes one
+	// path named "/a;/b" is a setting that looks applied and is not.
+	// ':' is never a separator on Windows: it would split drive letters
+	// apart.
 	if extra := os.Getenv("CHATCLI_AGENT_EXTRA_READ_PATHS"); extra != "" {
-		for _, p := range filepath.SplitList(extra) {
+		for _, p := range splitReadPaths(extra) {
 			p = strings.TrimSpace(p)
 			if p != "" {
 				s.extraReadPaths = append(s.extraReadPaths, p)
@@ -212,4 +218,15 @@ func (s *SensitiveReadPaths) isSensitivePath(path string) (bool, string) {
 	}
 
 	return false, ""
+}
+
+// splitReadPaths splits a path list on the separators that are unambiguous
+// for the host: the native one everywhere, plus ';' on Unix.
+func splitReadPaths(value string) []string {
+	if runtime.GOOS == "windows" {
+		return filepath.SplitList(value)
+	}
+	return strings.FieldsFunc(value, func(r rune) bool {
+		return r == os.PathListSeparator || r == ';'
+	})
 }
