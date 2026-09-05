@@ -34,6 +34,32 @@ const ContextEngineEnv = "CHATCLI_CONTEXT_ENGINE"
 // ContextManagementBeta is the Anthropic beta that enables context editing.
 const ContextManagementBeta = "context-management-2025-06-27"
 
+// TaskBudgetBeta is the Anthropic beta that enables the task budget: a
+// token ceiling the model reads while generating, so it paces itself
+// instead of being cut off mid-task.
+const TaskBudgetBeta = "task-budgets-2026-03-13"
+
+// TaskBudget is the output_config.task_budget block.
+type TaskBudget struct {
+	Type string `json:"type"`
+	// Total is the ceiling for the whole task.
+	Total int `json:"total"`
+	// Remaining is how much of it is left. Sent because ChatCLI rewrites
+	// history when it compacts, and a server that cannot see the earlier
+	// turns cannot derive the spend itself.
+	Remaining int `json:"remaining"`
+}
+
+// AnthropicTaskBudget builds the task-budget block for a run with the
+// given number of tokens left to spend. Nil when there is nothing to say,
+// so callers can assign it without a check.
+func AnthropicTaskBudget(remainingTokens int) *TaskBudget {
+	if remainingTokens <= 0 {
+		return nil
+	}
+	return &TaskBudget{Type: "tokens", Total: remainingTokens, Remaining: remainingTokens}
+}
+
 // CompactionBeta is the Anthropic beta that enables server-side
 // compaction, where the API summarizes the older conversation itself
 // instead of the client spending a turn on a summarizer.

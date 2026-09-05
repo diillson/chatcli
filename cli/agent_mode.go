@@ -931,6 +931,15 @@ func (a *AgentMode) clientAndCtxForTurn(ctx context.Context) (llmclient.LLMClien
 	} else if a.skillEffortHint != llmclient.EffortUnset {
 		ctx = llmclient.WithEffortHint(ctx, a.skillEffortHint)
 	}
+	// A run under a spending ceiling tells the model how much room is
+	// left, so a long task winds down instead of being cut off mid-step
+	// when the hard stop fires. Nothing is attached when there is no
+	// ceiling, or too little left to state.
+	if a.cli != nil && a.cli.costTracker != nil {
+		if tokens, ok := a.cli.costTracker.RemainingTaskBudgetTokens(); ok {
+			ctx = llmclient.WithTaskBudget(ctx, llmclient.AnthropicTaskBudget(tokens))
+		}
+	}
 	return turnClient, ctx
 }
 

@@ -249,6 +249,7 @@ func applyThinkingForEffort(reqBody map[string]interface{}, model string, ctx co
 		catalog.HasCapability(catalog.ProviderClaudeAI, model, "output_effort") {
 		reqBody["output_config"] = cfg
 	}
+	applyTaskBudget(reqBody, model, ctx)
 	if usesAdaptiveThinkingOnly(model) {
 		reqBody["thinking"] = map[string]interface{}{"type": "adaptive"}
 		return true
@@ -726,6 +727,7 @@ func (c *ClaudeClient) sendOAuthTitleRequest(ctx context.Context, userText strin
 // Anthropic Messages API for the active credential mode. The token argument
 // is the raw access token (no "oauth:"/"token:"/"apikey:" prefix).
 func (c *ClaudeClient) applyAuthHeaders(req *http.Request, token string) {
+	defer applyTaskBudgetBeta(req)
 	switch c.provider.Mode() {
 	case auth.AuthModeOAuth:
 		applyOAuthHeaders(req, token)
@@ -752,6 +754,16 @@ func applyExtendedCacheTTLBeta(req *http.Request) {
 	}
 	if client.ProviderCompactionEngine() {
 		addAnthropicBeta(req, client.CompactionBeta)
+	}
+}
+
+// applyTaskBudgetBeta adds the task-budget beta when this turn carries a
+// budget. Read from the request's own context rather than from the body,
+// so it holds on every auth mode without threading the payload through
+// the header helpers.
+func applyTaskBudgetBeta(req *http.Request) {
+	if client.TaskBudgetFromContext(req.Context()) != nil {
+		addAnthropicBeta(req, client.TaskBudgetBeta)
 	}
 }
 
@@ -980,4 +992,26 @@ func streamErrorToAPIError(errType, message string) error {
 		message = errType
 	}
 	return &utils.APIError{StatusCode: status, Message: utils.SanitizeSensitiveText(errType + ": " + message)}
+}
+
+// applyTaskBudget attaches the task budget to output_config when the run
+// has a spending ceiling to pace against and the model reads one.
+//
+// output_config may already carry the effort level, so the block is merged
+// rather than assigned: the two are independent settings that share a
+// field. The budget travels as a typed value, which is why the map is
+// built as interface-valued here.
+func applyTaskBudget(reqBody map[string]interface{}, model string, ctx context.Context) bool {
+	budget := client.TaskBudgetFromContext(ctx)
+	if budget == nil || !catalog.HasCapability(catalog.ProviderClaudeAI, model, "task_budget") {
+		return false
+	}
+	cfg, _ := reqBody["output_config"].(map[string]string)
+	merged := make(map[string]interface{}, len(cfg)+1)
+	for k, v := range cfg {
+		merged[k] = v
+	}
+	merged["task_budget"] = budget
+	reqBody["output_config"] = merged
+	return true
 }

@@ -389,7 +389,7 @@ var registry = []ModelMeta{
 		Capabilities: []string{
 			"vision",
 			"json_mode", "tools",
-			"adaptive_thinking", "output_effort", "mid_conversation_system",
+			"adaptive_thinking", "output_effort", "task_budget", "mid_conversation_system",
 		},
 	},
 	{
@@ -417,7 +417,7 @@ var registry = []ModelMeta{
 		Capabilities: []string{
 			"vision",
 			"json_mode", "tools",
-			"adaptive_thinking", "output_effort", "mid_conversation_system",
+			"adaptive_thinking", "output_effort", "task_budget", "mid_conversation_system",
 		},
 	},
 	{
@@ -440,7 +440,7 @@ var registry = []ModelMeta{
 		MaxOutputTokens: 128000,
 		PreferredAPI:    APIAnthropicMessages,
 		APIVersion:      config.ClaudeAIAPIVersionDefault,
-		Capabilities:    []string{"vision", "json_mode", "tools", "adaptive_thinking", "output_effort"},
+		Capabilities:    []string{"vision", "json_mode", "tools", "adaptive_thinking", "output_effort", "task_budget"},
 	},
 	{
 		// Sonnet 5 (claude-sonnet-5, Jun 2026): the Sonnet-tier successor —
@@ -462,14 +462,14 @@ var registry = []ModelMeta{
 		MaxOutputTokens: 128000,
 		PreferredAPI:    APIAnthropicMessages,
 		APIVersion:      config.ClaudeAIAPIVersionDefault,
-		Capabilities:    []string{"vision", "json_mode", "tools", "adaptive_thinking", "output_effort"},
+		Capabilities:    []string{"vision", "json_mode", "tools", "adaptive_thinking", "output_effort", "task_budget"},
 	},
 	{
 		// Opus 4.8 (claude-opus-4-8, May 28 2026): 1M context by default on
 		// the Claude API, 128K max output. Same API constraints as 4.7
 		// (no temperature/top_p/top_k; adaptive thinking only — extended
 		// thinking budgets return 400). New capabilities at launch:
-		//   - "adaptive_thinking", "output_effort": only supported thinking mode
+		//   - "adaptive_thinking", "output_effort", "task_budget": only supported thinking mode
 		//   - "fast_mode": research-preview "speed":"fast" for ~2.5x output
 		//     tokens per second at premium pricing
 		//   - "mid_conversation_system": role:"system" messages accepted
@@ -490,7 +490,7 @@ var registry = []ModelMeta{
 		Capabilities: []string{
 			"vision",
 			"json_mode", "tools",
-			"adaptive_thinking", "output_effort", "fast_mode",
+			"adaptive_thinking", "output_effort", "task_budget", "fast_mode",
 			"mid_conversation_system", "low_cache_minimum",
 		},
 	},
@@ -508,7 +508,7 @@ var registry = []ModelMeta{
 		MaxOutputTokens: 128000,
 		PreferredAPI:    APIAnthropicMessages,
 		APIVersion:      config.ClaudeAIAPIVersionDefault,
-		Capabilities:    []string{"vision", "json_mode", "tools", "adaptive_thinking", "output_effort"},
+		Capabilities:    []string{"vision", "json_mode", "tools", "adaptive_thinking", "output_effort", "task_budget"},
 	},
 	// There is no Sonnet 4.7: Anthropic went from Sonnet 4.6 straight to
 	// Sonnet 5. The forward-projected placeholder that used to sit here
@@ -1330,7 +1330,7 @@ var registry = []ModelMeta{
 		ContextWindow:   1000000,
 		MaxOutputTokens: 128000,
 		PreferredAPI:    APIAnthropicMessages,
-		Capabilities:    []string{"tools", "vision", "json_mode", "adaptive_thinking", "output_effort", "bedrock_mantle_only"},
+		Capabilities:    []string{"tools", "vision", "json_mode", "adaptive_thinking", "output_effort", "task_budget", "bedrock_mantle_only"},
 	},
 	// Fable 5 (Jun 9 2026). Dateless ID per Anthropic's Bedrock docs —
 	// Fable 5, Opus 4.8 and Opus 4.7 have NO ARN-versioned model IDs on
@@ -1350,7 +1350,7 @@ var registry = []ModelMeta{
 		ContextWindow:   1000000,
 		MaxOutputTokens: 128000,
 		PreferredAPI:    APIAnthropicMessages,
-		Capabilities:    []string{"tools", "vision", "json_mode", "adaptive_thinking", "output_effort", "bedrock_mantle_only"},
+		Capabilities:    []string{"tools", "vision", "json_mode", "adaptive_thinking", "output_effort", "task_budget", "bedrock_mantle_only"},
 	},
 	// Opus 5 (Jul 2026). Like Sonnet 5 and Fable 5, served through the
 	// Claude-in-Amazon-Bedrock Messages endpoint (the models overview lists
@@ -1365,7 +1365,7 @@ var registry = []ModelMeta{
 		ContextWindow:   1000000,
 		MaxOutputTokens: 128000,
 		PreferredAPI:    APIAnthropicMessages,
-		Capabilities:    []string{"tools", "vision", "json_mode", "adaptive_thinking", "output_effort", "bedrock_mantle_only"},
+		Capabilities:    []string{"tools", "vision", "json_mode", "adaptive_thinking", "output_effort", "task_budget", "bedrock_mantle_only"},
 	},
 	// Sonnet 5 (Jun 2026). Served EXCLUSIVELY by the Claude-in-Amazon-
 	// Bedrock Messages endpoint (bedrock-mantle.{region}.api.aws) — it has
@@ -1380,7 +1380,7 @@ var registry = []ModelMeta{
 		ContextWindow:   1000000,
 		MaxOutputTokens: 128000,
 		PreferredAPI:    APIAnthropicMessages,
-		Capabilities:    []string{"tools", "vision", "json_mode", "adaptive_thinking", "output_effort", "bedrock_mantle_only"},
+		Capabilities:    []string{"tools", "vision", "json_mode", "adaptive_thinking", "output_effort", "task_budget", "bedrock_mantle_only"},
 	},
 	// Claude 4.8 (May 28 2026). Opus 4.8 = 1M / 128K per Anthropic.
 	// Canonical id is the global. inference profile: the bare dateless id
@@ -1403,7 +1403,7 @@ var registry = []ModelMeta{
 		PreferredAPI:    APIAnthropicMessages,
 		Capabilities: []string{
 			"tools", "vision", "json_mode",
-			"adaptive_thinking", "output_effort", "low_cache_minimum",
+			"adaptive_thinking", "output_effort", "task_budget", "low_cache_minimum",
 		},
 	},
 
@@ -1423,7 +1423,7 @@ var registry = []ModelMeta{
 		ContextWindow:   1000000,
 		MaxOutputTokens: 128000,
 		PreferredAPI:    APIAnthropicMessages,
-		Capabilities:    []string{"tools", "vision", "json_mode", "adaptive_thinking", "output_effort"},
+		Capabilities:    []string{"tools", "vision", "json_mode", "adaptive_thinking", "output_effort", "task_budget"},
 	},
 
 	// Claude 4.6 (abr 2026). Bedrock specs follow the AWS model cards:

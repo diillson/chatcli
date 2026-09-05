@@ -134,3 +134,28 @@ func AnthropicOutputConfig(e SkillEffort) map[string]string {
 	}
 	return map[string]string{"effort": level}
 }
+
+// The task budget travels the same way the effort hint does: attached to
+// the turn's context by the caller that knows the run's ceiling, read by
+// whichever provider adapter serves the turn. Providers that do not
+// understand it ignore the value, so nothing has to know who is on the
+// other end.
+
+type taskBudgetCtxKey struct{}
+
+// WithTaskBudget attaches a task budget to ctx for one turn.
+func WithTaskBudget(ctx context.Context, budget *TaskBudget) context.Context {
+	if budget == nil {
+		return ctx
+	}
+	return context.WithValue(ctx, taskBudgetCtxKey{}, budget)
+}
+
+// TaskBudgetFromContext returns the turn's task budget, or nil.
+func TaskBudgetFromContext(ctx context.Context) *TaskBudget {
+	if ctx == nil {
+		return nil
+	}
+	b, _ := ctx.Value(taskBudgetCtxKey{}).(*TaskBudget)
+	return b
+}
