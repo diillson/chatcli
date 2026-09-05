@@ -281,3 +281,102 @@ func TestOAuthBuildMessages_UnsupportedModelIsUnchanged(t *testing.T) {
 		t.Fatal("a request carrying no turn-scoped message must carry no extra beta")
 	}
 }
+
+// assertSystemPlacementLegal encodes the rule the provider stated in the
+// 400 that this test exists because of:
+//
+//	messages.N: role 'system' must precede an 'assistant' message or end
+//	the array
+//
+// The original placement — directly after the user turn the block belongs
+// to — satisfied it only when an assistant turn happened to come next. A
+// tool loop is mostly user-role messages, because that is how tool results
+// travel, and two user turns in a row is what a failed request leaves
+// behind. Both produced [user, system, user] and were rejected outright.
+func assertSystemPlacementLegal(t *testing.T, label string, messages []interface{}) {
+	t.Helper()
+	for i, m := range messages {
+		if roleAt(m) != "system" {
+			continue
+		}
+		if i == len(messages)-1 {
+			continue // ends the array
+		}
+		if next := roleAt(messages[i+1]); next != "assistant" {
+			t.Errorf("%s: messages.%d is role 'system' followed by %q — must precede an assistant message or end the array", label, i, next)
+		}
+	}
+}
+
+func asAny(messages []map[string]interface{}) []interface{} {
+	out := make([]interface{}, 0, len(messages))
+	for _, m := range messages {
+		out = append(out, m)
+	}
+	return out
+}
+
+// TestTurnScoped_PlacementIsLegalOnEveryHistoryShape runs every Anthropic
+// builder over the shapes that broke in production and over the tool loop
+// that would have broken next.
+func TestTurnScoped_PlacementIsLegalOnEveryHistoryShape(t *testing.T) {
+	tc := func(n string) models.Message { return models.TurnContextMessage("[TURN CONTEXT] " + n) }
+
+	shapes := map[string][]models.Message{
+		"chat, one turn": {
+			{Role: "system", Content: "sys"},
+			tc("t1"), {Role: "user", Content: "q1"},
+		},
+		"chat, several turns": {
+			{Role: "system", Content: "sys"},
+			tc("t1"), {Role: "user", Content: "q1"}, {Role: "assistant", Content: "a1"},
+			tc("t2"), {Role: "user", Content: "q2"}, {Role: "assistant", Content: "a2"},
+			tc("t3"), {Role: "user", Content: "q3"},
+		},
+		// What the production session actually held: a turn whose request
+		// failed leaves a user message with no assistant answer, and the
+		// next turn appends another block and another user message.
+		"two user turns in a row after a failed request": {
+			{Role: "system", Content: "sys"},
+			tc("t1"), {Role: "user", Content: "q1"}, {Role: "assistant", Content: "a1"},
+			tc("t2"), {Role: "user", Content: "q2"},
+			tc("t3"), {Role: "user", Content: "q3"},
+		},
+		// Tool results travel as user-role messages, so a block held for
+		// the next assistant turn has to survive several of them.
+		"tool loop": {
+			{Role: "system", Content: "sys"},
+			tc("t1"), {Role: "user", Content: "build it"},
+			{Role: "assistant", Content: "running", ToolCalls: []models.ToolCall{{ID: "c1", Name: "run"}}},
+			{Role: "tool", Content: "exit 1", ToolCallID: "c1"},
+			tc("t2"),
+			{Role: "tool", Content: "exit 0", ToolCallID: "c1"},
+			{Role: "assistant", Content: "done"},
+			tc("t3"), {Role: "user", Content: "thanks"},
+		},
+		"block is the last entry": {
+			{Role: "system", Content: "sys"},
+			{Role: "user", Content: "q1"}, {Role: "assistant", Content: "a1"}, tc("t1"),
+		},
+	}
+
+	for name, history := range shapes {
+		t.Run(name, func(t *testing.T) {
+			last := ""
+			if n := len(history); n > 0 {
+				last = history[n-1].Content
+			}
+			c := &ClaudeClient{model: "claude-opus-5", logger: zap.NewNop()}
+
+			msgs, _ := c.buildMessagesAndSystem(last, history)
+			assertSystemPlacementLegal(t, "api-key builder", asAny(msgs))
+
+			oauth, _ := c.buildOAuthMessagesAndSystem(last, history)
+			assertSystemPlacementLegal(t, "oauth builder", asAny(oauth))
+
+			tool := buildClaudeToolMessages(last, history,
+				client.NewTurnContextEmitter(catalog.ProviderClaudeAI, "claude-opus-5"))
+			assertSystemPlacementLegal(t, "tool loop", tool)
+		})
+	}
+}
