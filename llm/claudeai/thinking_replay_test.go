@@ -45,7 +45,7 @@ func TestBuildClaudeToolMessagesReplaysThinkingFirst(t *testing.T) {
 		},
 		{Role: "tool", ToolCallID: "tu_1", Content: "package main"},
 	}
-	raw, err := json.Marshal(buildClaudeToolMessages("", history))
+	raw, err := json.Marshal(buildClaudeToolMessages("", history, nil))
 	if err != nil {
 		t.Fatalf("marshal: %v", err)
 	}

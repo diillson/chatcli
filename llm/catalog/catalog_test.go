@@ -343,12 +343,13 @@ func TestClaudeOpus48Specs(t *testing.T) {
 	legacy, ok := Resolve(ProviderBedrock, "global.anthropic.claude-opus-4-8-20260528-v1:0")
 	assert.True(t, ok, "legacy dated Bedrock id must still resolve as alias")
 	assert.Equal(t, "global.anthropic.claude-opus-4-8", legacy.ID)
-	// fast_mode is a first-party research preview and
-	// mid_conversation_system is not served by Bedrock — neither may be
-	// advertised on the Bedrock mirror or the client would emit
-	// parameters AWS rejects.
+	// fast_mode is a first-party research preview and may not be
+	// advertised on the Bedrock mirror, or the client would emit a
+	// parameter AWS rejects. mid_conversation_system is the opposite case:
+	// the platform-availability matrix lists Amazon Bedrock alongside the
+	// Claude API and Google Cloud, so the mirror must advertise it.
 	assert.False(t, HasCapability(ProviderBedrock, "claude-opus-4-8", "fast_mode"))
-	assert.False(t, HasCapability(ProviderBedrock, "claude-opus-4-8", "mid_conversation_system"))
+	assert.True(t, HasCapability(ProviderBedrock, "claude-opus-4-8", "mid_conversation_system"))
 }
 
 // TestClaudeOpus5Specs pins the published Opus 5 specs (models overview,
@@ -372,9 +373,9 @@ func TestClaudeOpus5Specs(t *testing.T) {
 	assert.False(t,
 		HasCapability(ProviderClaudeAI, "claude-opus-5", "fast_mode"),
 		"claude-opus-5 must not advertise fast_mode (not documented for Opus 5)")
-	assert.False(t,
+	assert.True(t,
 		HasCapability(ProviderClaudeAI, "claude-opus-5", "mid_conversation_system"),
-		"mid_conversation_system is documented for Opus 4.8 only")
+		"Opus 5 is on the supported list for mid-conversation system messages")
 	// Regression guards: the opus-4.x lookups must keep resolving to their
 	// own entries after the opus-5 entry lands, and vice-versa.
 	m48, ok := Resolve(ProviderClaudeAI, "claude-opus-4-8")
@@ -440,8 +441,9 @@ func TestBedrockFable5Entry(t *testing.T) {
 		"Bedrock Fable 5 must advertise adaptive_thinking")
 	assert.False(t,
 		HasCapability(ProviderBedrock, "anthropic.claude-fable-5", "fast_mode"))
-	assert.False(t,
-		HasCapability(ProviderBedrock, "anthropic.claude-fable-5", "mid_conversation_system"))
+	assert.True(t,
+		HasCapability(ProviderBedrock, "anthropic.claude-fable-5", "mid_conversation_system"),
+		"served on Bedrock per the platform-availability matrix")
 }
 
 // TestBedrockOpus5Entry pins Opus 5 on Bedrock. Like Sonnet 5 and Fable 5
@@ -469,8 +471,9 @@ func TestBedrockOpus5Entry(t *testing.T) {
 		"Opus 5 must be flagged mantle-only so the client picks the Messages endpoint")
 	assert.False(t,
 		HasCapability(ProviderBedrock, "anthropic.claude-opus-5", "fast_mode"))
-	assert.False(t,
-		HasCapability(ProviderBedrock, "anthropic.claude-opus-5", "mid_conversation_system"))
+	assert.True(t,
+		HasCapability(ProviderBedrock, "anthropic.claude-opus-5", "mid_conversation_system"),
+		"served on Bedrock per the platform-availability matrix")
 	// Regression guard: the Bedrock opus-4.x entries keep resolving to
 	// their own IDs.
 	m48, ok := Resolve(ProviderBedrock, "anthropic.claude-opus-4-8")

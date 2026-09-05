@@ -36,7 +36,7 @@ func TestBuildClaudeToolMessages_EmitsNativeIsError(t *testing.T) {
 			ErrorCode:  "ENOENT",
 		},
 	}
-	msgs := buildClaudeToolMessages("", history)
+	msgs := buildClaudeToolMessages("", history, nil)
 	require.NotEmpty(t, msgs)
 
 	// Find the user message containing the tool_result block.
@@ -88,7 +88,7 @@ func TestBuildClaudeToolMessages_NoErrorPassesThrough(t *testing.T) {
 			Content:    "found 3 matches",
 		},
 	}
-	msgs := buildClaudeToolMessages("", history)
+	msgs := buildClaudeToolMessages("", history, nil)
 	require.NotEmpty(t, msgs)
 
 	var toolResultBlock map[string]interface{}
@@ -126,7 +126,7 @@ func TestBuildClaudeToolMessages_ErrorWithoutCodeStillSetsFlag(t *testing.T) {
 			IsError:    true,
 		},
 	}
-	msgs := buildClaudeToolMessages("", history)
+	msgs := buildClaudeToolMessages("", history, nil)
 	require.NotEmpty(t, msgs)
 
 	envelope := msgs[0].(map[string]interface{})

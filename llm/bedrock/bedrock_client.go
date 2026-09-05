@@ -170,17 +170,21 @@ func normalizeBedrockModelID(model string) string {
 
 // filterBedrockCapabilities strips capability flags that exist on the
 // first-party Claude API but are not served by Bedrock, per Anthropic's
-// platform-availability matrix: fast_mode (research preview, first-party
-// only) and mid_conversation_system (unsupported on Bedrock). Advertising
-// either on a Bedrock entry would make the request builders emit
-// parameters AWS rejects.
+// platform-availability matrix: fast_mode is a research preview and stays
+// first-party only. Advertising it on a Bedrock entry would make the
+// request builders emit a parameter AWS rejects.
+//
+// mid_conversation_system used to be stripped here as unsupported. It is
+// served on Bedrock — the platform matrix lists the Claude API, Amazon
+// Bedrock and Google Cloud for it, and for the clear_at beta on the same
+// models — so stripping it denied Bedrock a capability it has.
 func filterBedrockCapabilities(caps []string) []string {
 	if caps == nil {
 		return nil
 	}
 	out := make([]string, 0, len(caps))
 	for _, c := range caps {
-		if c == "fast_mode" || c == "mid_conversation_system" {
+		if c == "fast_mode" {
 			continue
 		}
 		out = append(out, c)
@@ -202,6 +206,13 @@ func filterBedrockCapabilities(caps []string) []string {
 //   - Shared credentials file (~/.aws/credentials) — selected by AWS_PROFILE
 //   - EC2/ECS/EKS IAM roles
 type BedrockClient struct {
+	// turnScoped records the emitter of the request currently being built,
+	// so the clear_at opt-in rides only on a request that carries a
+	// turn-scoped system message. Held as a pointer: the emitter is per
+	// request, and this is the handoff between the builder and the
+	// transport that has to declare the beta.
+	turnScoped *client.TurnContextEmitter
+
 	model       string
 	region      string
 	profile     string
@@ -498,6 +509,7 @@ func (c *BedrockClient) sendPromptAnthropicModel(ctx context.Context, wireModel,
 	if systemObj != nil {
 		reqBody["system"] = systemObj
 	}
+	c.applyTurnScopedSystemBeta(reqBody)
 
 	applyAnthropicThinkingForEffort(reqBody, wireModel, ctx)
 	// Provider context engine: the Anthropic models served here take the
@@ -601,7 +613,11 @@ func (c *BedrockClient) buildMessagesAndSystem(prompt string, history []models.M
 	var systemBlocks []map[string]interface{}
 	var plainSystemParts []string
 
+	turnScoped := client.NewTurnContextEmitter(catalog.ProviderBedrock, c.model)
 	for _, msg := range history {
+		if turnScoped.Claim(msg) {
+			continue
+		}
 		switch strings.ToLower(strings.TrimSpace(msg.Role)) {
 		case "assistant":
 			messages = append(messages, map[string]interface{}{
@@ -630,6 +646,8 @@ func (c *BedrockClient) buildMessagesAndSystem(prompt string, history []models.M
 		default:
 			messages = append(messages, map[string]interface{}{"role": "user", "content": visionwire.AnthropicContent(msg.Content, msg.Images)})
 		}
+		// One position later than the history holds it: see the emitter.
+		messages = appendTurnScoped(messages, turnScoped)
 	}
 
 	if len(history) == 0 || history[len(history)-1].Role != "user" || history[len(history)-1].Content != prompt {
@@ -637,6 +655,10 @@ func (c *BedrockClient) buildMessagesAndSystem(prompt string, history []models.M
 			messages = append(messages, map[string]interface{}{"role": "user", "content": prompt})
 		}
 	}
+	// A block claimed on the last history entry: the prompt above is the
+	// user message it belongs to.
+	messages = appendTurnScoped(messages, turnScoped)
+	c.turnScoped = turnScoped
 
 	if len(systemBlocks) > 0 {
 		for _, part := range plainSystemParts {
@@ -1125,4 +1147,38 @@ func (c *BedrockClient) storeThinkingFromBody(body []byte) {
 		return
 	}
 	c.thinking.StoreThinking(c.model, client.ParseAnthropicThinkingBody(body))
+}
+
+// appendTurnScoped writes whatever the emitter buffered into the message
+// array, in the one shape both Bedrock transports send.
+func appendTurnScoped(messages []map[string]interface{}, e *client.TurnContextEmitter) []map[string]interface{} {
+	for _, m := range e.Flush() {
+		messages = append(messages, map[string]interface{}{
+			"role":     m.Role,
+			"clear_at": m.ClearAt,
+			"content":  m.Content,
+		})
+	}
+	return messages
+}
+
+// applyTurnScopedSystemBeta opts one request into the clear_at beta, but
+// only when a turn-scoped system message actually travels on it.
+//
+// Bedrock takes beta flags in the request body rather than in a header on
+// the InvokeModel path, so this is the InvokeModel form; the Messages
+// transport sends the header instead. Without the flag the field is
+// rejected as unknown, so a request that carries no such message must not
+// carry the flag either.
+func (c *BedrockClient) applyTurnScopedSystemBeta(reqBody map[string]interface{}) {
+	if c == nil || !c.turnScoped.Used() {
+		return
+	}
+	existing, _ := reqBody["anthropic_beta"].([]string)
+	for _, b := range existing {
+		if b == client.TurnScopedSystemBeta {
+			return
+		}
+	}
+	reqBody["anthropic_beta"] = append(existing, client.TurnScopedSystemBeta)
 }

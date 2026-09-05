@@ -17,6 +17,7 @@ import (
 
 	"github.com/diillson/chatcli/auth"
 	"github.com/diillson/chatcli/i18n"
+	"github.com/diillson/chatcli/llm/catalog"
 	"github.com/diillson/chatcli/llm/client"
 	"github.com/diillson/chatcli/llm/internal/visionwire"
 	"github.com/diillson/chatcli/models"
@@ -56,7 +57,9 @@ func (c *ClaudeClient) SendPromptWithTools(ctx context.Context, prompt string, h
 	systemBlocks := coalesceCacheControl(buildSystemBlocks(history), anthropicMaxCacheBreakpoints-1)
 
 	// Build messages (excluding system messages)
-	messages := buildClaudeToolMessages(prompt, history)
+	turnScoped := client.NewTurnContextEmitter(catalog.ProviderClaudeAI, c.model)
+	messages := buildClaudeToolMessages(prompt, history, turnScoped)
+	c.turnScoped = turnScoped
 
 	// Build tool definitions for Anthropic format.
 	// Mark the LAST tool with cache_control: ephemeral so the whole tool
@@ -221,10 +224,21 @@ func buildSystemBlocks(history []models.Message) []map[string]interface{} {
 }
 
 // buildClaudeToolMessages constructs messages for Claude's tool use format.
-func buildClaudeToolMessages(prompt string, history []models.Message) []interface{} {
-	var messages []interface{}
+//
+// turnScoped defers ChatCLI's per-turn context blocks by one position so
+// they render on the turn they belong to and clear afterwards; it claims
+// nothing on a model without the capability, and the loop is then exactly
+// what it was.
+func buildClaudeToolMessages(prompt string, history []models.Message, turnScoped *client.TurnContextEmitter) []interface{} {
+	// One wire message per history entry, plus the prompt: system entries
+	// leave a hole and turn-scoped blocks fill one, so this is the shape,
+	// not a guarantee.
+	messages := make([]interface{}, 0, len(history)+1)
 
 	for _, msg := range history {
+		if turnScoped.Claim(msg) {
+			continue
+		}
 		role := strings.ToLower(strings.TrimSpace(msg.Role))
 
 		switch role {
@@ -306,6 +320,10 @@ func buildClaudeToolMessages(prompt string, history []models.Message) []interfac
 				"content": visionwire.AnthropicContent(msg.Content, msg.Images),
 			})
 		}
+		// One position later than the history holds it: see the emitter.
+		for _, ts := range turnScoped.Flush() {
+			messages = append(messages, turnScopedBlock(ts))
+		}
 	}
 
 	// Add prompt as user message if needed
@@ -316,6 +334,12 @@ func buildClaudeToolMessages(prompt string, history []models.Message) []interfac
 				"content": prompt,
 			})
 		}
+	}
+
+	// A block claimed on the last history entry: the prompt above is the
+	// user message it belongs to.
+	for _, ts := range turnScoped.Flush() {
+		messages = append(messages, turnScopedBlock(ts))
 	}
 
 	return messages
@@ -444,4 +468,13 @@ func parseClaudeToolResponse(body string, logger *zap.Logger) (*models.LLMRespon
 	}
 
 	return response, nil
+}
+
+// turnScopedBlock is the wire shape of one turn-scoped system message.
+func turnScopedBlock(ts client.TurnScopedSystem) map[string]interface{} {
+	return map[string]interface{}{
+		"role":     ts.Role,
+		"clear_at": ts.ClearAt,
+		"content":  ts.Content,
+	}
 }
