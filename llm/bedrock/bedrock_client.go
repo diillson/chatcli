@@ -212,6 +212,10 @@ type BedrockClient struct {
 	// request, and this is the handoff between the builder and the
 	// transport that has to declare the beta.
 	turnScoped *client.TurnContextEmitter
+	// taskBudgetSent records whether the request being built carries a
+	// task budget, so the Messages transport declares that beta and only
+	// that beta. The InvokeModel path reads it from the body instead.
+	taskBudgetSent bool
 
 	model       string
 	region      string
@@ -512,6 +516,7 @@ func (c *BedrockClient) sendPromptAnthropicModel(ctx context.Context, wireModel,
 	c.applyTurnScopedSystemBeta(reqBody)
 
 	applyAnthropicThinkingForEffort(reqBody, wireModel, ctx)
+	applyBedrockTaskBudgetBeta(reqBody, applyBedrockTaskBudget(reqBody, wireModel, ctx))
 	// Provider context engine: the Anthropic models served here take the
 	// same context_management block as the first-party endpoint, and this
 	// path builds the native Anthropic body, so it travels unchanged.
@@ -711,6 +716,50 @@ func supportsExtendedThinking(model string) bool {
 		strings.Contains(m, "sonnet-4") ||
 		strings.Contains(m, "3-7-sonnet") ||
 		strings.Contains(m, "claude-3-7")
+}
+
+// applyBedrockTaskBudget attaches the task budget to output_config on the
+// native Anthropic body both Bedrock transports send.
+//
+// The catalog advertises task_budget on the Bedrock mirrors of every model
+// that reads it, and this package never sent the field — the capability
+// was announced and unimplemented, so a run under a spending ceiling got
+// paced on the first-party API and not here.
+//
+// Called after the effort routing and outside it: a spending ceiling is
+// not a reasoning setting, and the effort path returns early when no
+// effort was chosen. Calling it before would have the effort assignment
+// overwrite the merged map.
+func applyBedrockTaskBudget(reqBody map[string]interface{}, model string, ctx context.Context) bool {
+	budget := client.TaskBudgetFromContext(ctx)
+	if budget == nil || !catalog.HasCapability(catalog.ProviderBedrock, model, "task_budget") {
+		return false
+	}
+	cfg, _ := reqBody["output_config"].(map[string]string)
+	merged := make(map[string]interface{}, len(cfg)+1)
+	for k, v := range cfg {
+		merged[k] = v
+	}
+	merged["task_budget"] = budget
+	reqBody["output_config"] = merged
+	return true
+}
+
+// applyBedrockTaskBudgetBeta opts an InvokeModel request into the
+// task-budget beta, and only when the request carries one. Bedrock takes
+// beta flags in the body on this path; the Messages transport sends the
+// header.
+func applyBedrockTaskBudgetBeta(reqBody map[string]interface{}, sent bool) {
+	if !sent {
+		return
+	}
+	existing, _ := reqBody["anthropic_beta"].([]string)
+	for _, b := range existing {
+		if b == client.TaskBudgetBeta {
+			return
+		}
+	}
+	reqBody["anthropic_beta"] = append(existing, client.TaskBudgetBeta)
 }
 
 // applyAnthropicThinkingForEffort routes the per-turn skill effort hint

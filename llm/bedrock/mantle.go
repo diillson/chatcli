@@ -202,6 +202,7 @@ func (c *BedrockClient) sendPromptAnthropicMantle(ctx context.Context, prompt st
 	}
 
 	applyAnthropicThinkingForEffort(reqBody, c.model, ctx)
+	c.taskBudgetSent = applyBedrockTaskBudget(reqBody, c.model, ctx)
 	// Rolling conversation breakpoint; the configured TTL applies on Claude
 	// 4.5+ (Bedrock accepts "ttl":"1h" in cache_control).
 	client.MarkAnthropicHistoryBreakpoint(client.AnthropicMessages{Maps: messages}, client.AnthropicCacheMarkerWithTTL(extendedCacheTTLModel(c.model)))
@@ -255,8 +256,15 @@ func (c *BedrockClient) doMantleRequest(ctx context.Context, endpoint string, pa
 	req.Header.Set("anthropic-version", mantleAnthropicVersion)
 	// The Messages transport is HTTP, so the beta opt-in takes the header
 	// form here rather than the body field InvokeModel uses.
+	var betas []string
 	if c.turnScoped.Used() {
-		req.Header.Set("anthropic-beta", client.TurnScopedSystemBeta)
+		betas = append(betas, client.TurnScopedSystemBeta)
+	}
+	if c.taskBudgetSent {
+		betas = append(betas, client.TaskBudgetBeta)
+	}
+	if len(betas) > 0 {
+		req.Header.Set("anthropic-beta", strings.Join(betas, ","))
 	}
 
 	if bearer := strings.TrimSpace(os.Getenv("AWS_BEARER_TOKEN_BEDROCK")); bearer != "" {

@@ -255,7 +255,6 @@ func applyThinkingForEffort(reqBody map[string]interface{}, model string, ctx co
 		catalog.HasCapability(catalog.ProviderClaudeAI, model, "output_effort") {
 		reqBody["output_config"] = cfg
 	}
-	applyTaskBudget(reqBody, model, ctx)
 	if usesAdaptiveThinkingOnly(model) {
 		reqBody["thinking"] = map[string]interface{}{"type": "adaptive"}
 		return true
@@ -327,7 +326,12 @@ func (c *ClaudeClient) SendPrompt(ctx context.Context, prompt string, history []
 	// Skill effort hint → thinking. Opus 4.7+ only accepts adaptive
 	// thinking; older 4.x and Sonnet 3.7 accept budgeted extended
 	// thinking. applyThinkingForEffort routes by catalog capability.
-	if applyThinkingForEffort(reqBody, c.model, ctx) {
+	thinkingAttached := applyThinkingForEffort(reqBody, c.model, ctx)
+	// After the effort routing, and outside it: a spending ceiling is not
+	// a reasoning setting, and lived inside one long enough to never be
+	// sent (see applyTaskBudget).
+	applyTaskBudget(reqBody, c.model, ctx)
+	if thinkingAttached {
 		c.logger.Debug("claudeai: thinking enabled from skill effort hint",
 			zap.Any("thinking", reqBody["thinking"]),
 			zap.String("model", c.model))
@@ -1038,6 +1042,13 @@ func streamErrorToAPIError(errType, message string) error {
 // rather than assigned: the two are independent settings that share a
 // field. The budget travels as a typed value, which is why the map is
 // built as interface-valued here.
+//
+// Call it AFTER the effort routing, never inside it. Sharing a field is
+// the only thing these two have in common: effort routing returns early
+// when no effort was chosen, and the routing that would choose one is off
+// by default — so a budget called from in there never traveled at all.
+// Calling it before instead would have the effort assignment overwrite
+// the merged map.
 func applyTaskBudget(reqBody map[string]interface{}, model string, ctx context.Context) bool {
 	budget := client.TaskBudgetFromContext(ctx)
 	if budget == nil || !catalog.HasCapability(catalog.ProviderClaudeAI, model, "task_budget") {
