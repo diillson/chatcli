@@ -90,10 +90,14 @@ func TestNormalizeBedrockModelID(t *testing.T) {
 	}
 }
 
-// filterBedrockCapabilities strips first-party-only capability flags when a
-// Claude model is mirrored onto Bedrock: fast_mode (research preview,
-// first-party API only) and mid_conversation_system (not served by Bedrock
-// per Anthropic's platform-availability matrix).
+// filterBedrockCapabilities strips the one first-party-only capability
+// flag when a Claude model is mirrored onto Bedrock: fast_mode, a research
+// preview served on the Claude API alone.
+//
+// mid_conversation_system must survive the filter. It was stripped here as
+// unsupported, and the platform-availability matrix lists Amazon Bedrock
+// alongside the Claude API and Google Cloud both for it and for the
+// clear_at beta — so the filter was denying Bedrock a capability it has.
 func TestFilterBedrockCapabilities(t *testing.T) {
 	in := []string{
 		"vision", "json_mode", "tools",
@@ -102,7 +106,7 @@ func TestFilterBedrockCapabilities(t *testing.T) {
 	}
 	got := filterBedrockCapabilities(in)
 	assert.ElementsMatch(t,
-		[]string{"vision", "json_mode", "tools", "adaptive_thinking", "low_cache_minimum"},
+		[]string{"vision", "json_mode", "tools", "adaptive_thinking", "low_cache_minimum", "mid_conversation_system"},
 		got)
 	assert.Nil(t, filterBedrockCapabilities(nil))
 }
@@ -146,7 +150,10 @@ func TestRegisterBedrockModelEnrichment(t *testing.T) {
 	assert.Equal(t, 77000, meta.MaxOutputTokens)
 	assert.Contains(t, meta.Capabilities, "adaptive_thinking")
 	assert.NotContains(t, meta.Capabilities, "fast_mode", "first-party-only capability must be filtered")
-	assert.NotContains(t, meta.Capabilities, "mid_conversation_system")
+	// mid_conversation_system is served on Bedrock and must survive the
+	// mirror: the platform-availability matrix lists Amazon Bedrock for it
+	// and for the clear_at beta, on the same models as the Claude API.
+	assert.Contains(t, meta.Capabilities, "mid_conversation_system")
 
 	// Known ids short-circuit: re-registering must not clobber the static
 	// entry's specs.

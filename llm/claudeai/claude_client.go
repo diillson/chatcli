@@ -44,6 +44,12 @@ type ClaudeClient struct {
 	backoff     time.Duration
 	apiURL      string
 
+	// turnScoped records the emitter of the request currently being built,
+	// so the clear_at beta header is added only when a turn-scoped system
+	// message actually travels. Held as a pointer: the emitter is per
+	// request, and this is the handoff between the builder and the header.
+	turnScoped *client.TurnContextEmitter
+
 	// usage holds THIS instance's most recent API usage. Read-side only:
 	// populated from response bodies/SSE events after the original
 	// processing, so the OAuth-sensitive request path stays untouched.
@@ -564,8 +570,12 @@ func (c *ClaudeClient) buildMessagesAndSystem(prompt string, history []models.Me
 	var messages []map[string]interface{}
 	var systemBlocks []map[string]interface{}
 	var plainSystemParts []string
+	turnScoped := client.NewTurnContextEmitter(catalog.ProviderClaudeAI, c.model)
 
 	for _, msg := range history {
+		if turnScoped.Claim(msg) {
+			continue
+		}
 		switch strings.ToLower(strings.TrimSpace(msg.Role)) {
 		case "assistant":
 			messages = append(messages, map[string]interface{}{"role": "assistant", "content": visionwire.AnthropicContent(msg.Content, msg.Images)})
@@ -588,6 +598,8 @@ func (c *ClaudeClient) buildMessagesAndSystem(prompt string, history []models.Me
 		default:
 			messages = append(messages, map[string]interface{}{"role": "user", "content": visionwire.AnthropicContent(msg.Content, msg.Images)})
 		}
+		// One position later than the history holds it: see the emitter.
+		messages = appendTurnScoped(messages, turnScoped)
 	}
 
 	if len(history) == 0 || history[len(history)-1].Role != "user" || history[len(history)-1].Content != prompt {
@@ -595,6 +607,10 @@ func (c *ClaudeClient) buildMessagesAndSystem(prompt string, history []models.Me
 			messages = append(messages, map[string]interface{}{"role": "user", "content": prompt})
 		}
 	}
+	// A block claimed on the last history entry has nothing after it yet;
+	// the prompt above is the user message it belongs to.
+	messages = appendTurnScoped(messages, turnScoped)
+	c.turnScoped = turnScoped
 
 	// Prefer structured blocks (with cache_control) over plain string
 	if len(systemBlocks) > 0 {
@@ -728,6 +744,7 @@ func (c *ClaudeClient) sendOAuthTitleRequest(ctx context.Context, userText strin
 // is the raw access token (no "oauth:"/"token:"/"apikey:" prefix).
 func (c *ClaudeClient) applyAuthHeaders(req *http.Request, token string) {
 	defer applyTaskBudgetBeta(req)
+	defer c.applyTurnScopedSystemBeta(req)
 	switch c.provider.Mode() {
 	case auth.AuthModeOAuth:
 		applyOAuthHeaders(req, token)
@@ -764,6 +781,16 @@ func applyExtendedCacheTTLBeta(req *http.Request) {
 func applyTaskBudgetBeta(req *http.Request) {
 	if client.TaskBudgetFromContext(req.Context()) != nil {
 		addAnthropicBeta(req, client.TaskBudgetBeta)
+	}
+}
+
+// applyTurnScopedSystemBeta adds the clear_at beta when the request being
+// built actually carries a turn-scoped system message. Without the flag
+// the field is rejected as unknown; with it on every request, turns that
+// carry nothing would be opted into a beta for no reason.
+func (c *ClaudeClient) applyTurnScopedSystemBeta(req *http.Request) {
+	if c != nil && c.turnScoped.Used() {
+		addAnthropicBeta(req, client.TurnScopedSystemBeta)
 	}
 }
 
@@ -1014,4 +1041,14 @@ func applyTaskBudget(reqBody map[string]interface{}, model string, ctx context.C
 	merged["task_budget"] = budget
 	reqBody["output_config"] = merged
 	return true
+}
+
+// appendTurnScoped writes whatever the emitter buffered into the message
+// array. Kept next to the builders that call it so the wire shape of a
+// turn-scoped system message is written in exactly one place.
+func appendTurnScoped(messages []map[string]interface{}, e *client.TurnContextEmitter) []map[string]interface{} {
+	for _, m := range e.Flush() {
+		messages = append(messages, turnScopedBlock(m))
+	}
+	return messages
 }

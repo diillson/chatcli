@@ -440,7 +440,7 @@ var registry = []ModelMeta{
 		MaxOutputTokens: 128000,
 		PreferredAPI:    APIAnthropicMessages,
 		APIVersion:      config.ClaudeAIAPIVersionDefault,
-		Capabilities:    []string{"vision", "json_mode", "tools", "adaptive_thinking", "output_effort", "task_budget"},
+		Capabilities:    []string{"vision", "json_mode", "tools", "adaptive_thinking", "output_effort", "task_budget", "mid_conversation_system"},
 	},
 	{
 		// Sonnet 5 (claude-sonnet-5, Jun 2026): the Sonnet-tier successor —
@@ -1306,12 +1306,15 @@ var registry = []ModelMeta{
 	// este catálogo com o que a conta AWS realmente tem acesso.
 
 	// NOTE (capabilities on Bedrock mirrors): fast_mode is a first-party
-	// research preview and mid_conversation_system is not served by Bedrock
-	// (Anthropic platform-availability matrix) — neither flag may appear on
-	// ProviderBedrock entries or the client would emit parameters AWS
-	// rejects. Per-block prompt caching (cache_control) IS supported for
-	// Claude on Bedrock; only the top-level automatic cache parameter is
-	// first-party-only, and this client never emits it.
+	// research preview and may not appear on ProviderBedrock entries, or
+	// the client would emit a parameter AWS rejects.
+	// mid_conversation_system is a different case: it was excluded here as
+	// unsupported, and the platform-availability matrix lists the Claude
+	// API, Amazon Bedrock and Google Cloud for it — and the same three for
+	// the clear_at beta on the same models. It belongs on the mirrors of
+	// the models that have it. Per-block prompt caching (cache_control) IS
+	// supported for Claude on Bedrock; only the top-level automatic cache
+	// parameter is first-party-only, and this client never emits it.
 
 	// Fable 5.1 (Sep 1 2026, AWS what's-new 2026/09 + Bedrock model card
 	// anthropic-claude-fable-5-1). Same shape as Fable 5: dateless id,
@@ -1330,7 +1333,7 @@ var registry = []ModelMeta{
 		ContextWindow:   1000000,
 		MaxOutputTokens: 128000,
 		PreferredAPI:    APIAnthropicMessages,
-		Capabilities:    []string{"tools", "vision", "json_mode", "adaptive_thinking", "output_effort", "task_budget", "bedrock_mantle_only"},
+		Capabilities:    []string{"tools", "vision", "json_mode", "adaptive_thinking", "output_effort", "task_budget", "bedrock_mantle_only", "mid_conversation_system"},
 	},
 	// Fable 5 (Jun 9 2026). Dateless ID per Anthropic's Bedrock docs —
 	// Fable 5, Opus 4.8 and Opus 4.7 have NO ARN-versioned model IDs on
@@ -1350,7 +1353,7 @@ var registry = []ModelMeta{
 		ContextWindow:   1000000,
 		MaxOutputTokens: 128000,
 		PreferredAPI:    APIAnthropicMessages,
-		Capabilities:    []string{"tools", "vision", "json_mode", "adaptive_thinking", "output_effort", "task_budget", "bedrock_mantle_only"},
+		Capabilities:    []string{"tools", "vision", "json_mode", "adaptive_thinking", "output_effort", "task_budget", "bedrock_mantle_only", "mid_conversation_system"},
 	},
 	// Opus 5 (Jul 2026). Like Sonnet 5 and Fable 5, served through the
 	// Claude-in-Amazon-Bedrock Messages endpoint (the models overview lists
@@ -1365,7 +1368,7 @@ var registry = []ModelMeta{
 		ContextWindow:   1000000,
 		MaxOutputTokens: 128000,
 		PreferredAPI:    APIAnthropicMessages,
-		Capabilities:    []string{"tools", "vision", "json_mode", "adaptive_thinking", "output_effort", "task_budget", "bedrock_mantle_only"},
+		Capabilities:    []string{"tools", "vision", "json_mode", "adaptive_thinking", "output_effort", "task_budget", "bedrock_mantle_only", "mid_conversation_system"},
 	},
 	// Sonnet 5 (Jun 2026). Served EXCLUSIVELY by the Claude-in-Amazon-
 	// Bedrock Messages endpoint (bedrock-mantle.{region}.api.aws) — it has
@@ -1404,6 +1407,7 @@ var registry = []ModelMeta{
 		Capabilities: []string{
 			"tools", "vision", "json_mode",
 			"adaptive_thinking", "output_effort", "task_budget", "low_cache_minimum",
+			"mid_conversation_system",
 		},
 	},
 

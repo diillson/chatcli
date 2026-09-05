@@ -253,6 +253,11 @@ func (c *BedrockClient) doMantleRequest(ctx context.Context, endpoint string, pa
 	}
 	req.Header.Set("content-type", "application/json")
 	req.Header.Set("anthropic-version", mantleAnthropicVersion)
+	// The Messages transport is HTTP, so the beta opt-in takes the header
+	// form here rather than the body field InvokeModel uses.
+	if c.turnScoped.Used() {
+		req.Header.Set("anthropic-beta", client.TurnScopedSystemBeta)
+	}
 
 	if bearer := strings.TrimSpace(os.Getenv("AWS_BEARER_TOKEN_BEDROCK")); bearer != "" {
 		// Short-term bearer tokens (aws-bedrock-token-generator) travel in
