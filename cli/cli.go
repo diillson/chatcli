@@ -171,6 +171,12 @@ var CommandFlags = map[string]map[string][]prompt.Suggest{
 
 // ChatCLI representa a interface de linha de comando do chat
 type ChatCLI struct {
+	// lastWireShape is the request shape of the previous turn — the effort,
+	// the tool set and whether a task budget rode along. Compared each turn
+	// so a rewrite we chose is declared to the cache telemetry instead of
+	// reading as an unstable prefix (see cache_prefix_notice.go).
+	lastWireShape        wireShape
+	wireShapeSet         bool
 	Client               client.LLMClient
 	manager              manager.LLMManager
 	logger               *zap.Logger

@@ -71,6 +71,28 @@ func (ct *CostTracker) costPerCompletionToken() (float64, bool) {
 	return ct.totalCostUSD / float64(ct.totalCompletionTokens), true
 }
 
+// costPerCompletionTokenOf is the same rate for one provider:model pair.
+//
+// The session-wide average is only a rate while the session stays on one
+// model. A session that switched — an @model route, a fallback chain, a
+// dedicated summarizer — blends prices that differ by more than an order
+// of magnitude, and the ceiling the model reads is then denominated in a
+// model that does not exist. Reports false until this pair has generated
+// enough on its own, so the caller can fall back to the session average
+// rather than extrapolate from a handful of tokens.
+func (ct *CostTracker) costPerCompletionTokenOf(provider, model string) (float64, bool) {
+	if provider == "" || model == "" {
+		return 0, false
+	}
+	ct.mu.RLock()
+	defer ct.mu.RUnlock()
+	rec, ok := ct.modelUsage[modelKey(provider, model)]
+	if !ok || rec.CompletionTokens < taskBudgetMinSampleTokens || rec.TotalCostUSD <= 0 {
+		return 0, false
+	}
+	return rec.TotalCostUSD / float64(rec.CompletionTokens), true
+}
+
 // taskBudgetMinSampleTokens is how much the session must have generated
 // before its own cost ratio is worth extrapolating from. A handful of
 // tokens on a cache-cold first turn is not a rate.
@@ -81,6 +103,15 @@ const taskBudgetMinSampleTokens = 2000
 // express, no measured rate to convert with, or so little room left that
 // the provider's floor would reject it.
 func (ct *CostTracker) RemainingTaskBudgetTokens() (int, bool) {
+	return ct.RemainingTaskBudgetTokensFor("", "")
+}
+
+// RemainingTaskBudgetTokensFor is RemainingTaskBudgetTokens denominated in
+// the tokens of the pair that actually serves the turn, falling back to the
+// session average while that pair has no rate of its own. Callers that know
+// their route should use this: the ceiling only means something in the
+// currency the next turn will be billed in.
+func (ct *CostTracker) RemainingTaskBudgetTokensFor(provider, model string) (int, bool) {
 	if ct == nil {
 		return 0, false
 	}
@@ -88,9 +119,11 @@ func (ct *CostTracker) RemainingTaskBudgetTokens() (int, bool) {
 	if !ok {
 		return 0, false
 	}
-	perToken, ok := ct.costPerCompletionToken()
+	perToken, ok := ct.costPerCompletionTokenOf(provider, model)
 	if !ok {
-		return 0, false
+		if perToken, ok = ct.costPerCompletionToken(); !ok {
+			return 0, false
+		}
 	}
 	tokens := int(remainingUSD / perToken)
 	if tokens < taskBudgetMinTokens {

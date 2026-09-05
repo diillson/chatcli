@@ -50,14 +50,33 @@ type TaskBudget struct {
 	Remaining int `json:"remaining"`
 }
 
-// AnthropicTaskBudget builds the task-budget block for a run with the
-// given number of tokens left to spend. Nil when there is nothing to say,
-// so callers can assign it without a check.
+// AnthropicTaskBudget builds the task-budget block for the first turn of a
+// run, where the ceiling and what is left of it are the same number. Nil
+// when there is nothing to say, so callers can assign it without a check.
+//
+// Later turns must use AnthropicTaskBudgetFor: a run that recomputes both
+// numbers every turn shows the model a ceiling that shrinks with the
+// spend, which is not what the field means.
 func AnthropicTaskBudget(remainingTokens int) *TaskBudget {
-	if remainingTokens <= 0 {
+	return AnthropicTaskBudgetFor(remainingTokens, remainingTokens)
+}
+
+// AnthropicTaskBudgetFor builds the block from a ceiling fixed when the run
+// started and what is left of it now.
+//
+// Remaining is clamped to total. The remaining spend is derived from a
+// budget that can grow underneath a run — a daily limit rolls over at
+// midnight — and a run whose ceiling grew mid-task would tell the model it
+// has more room than it started with, which is the opposite of what a
+// budget is for. The ceiling a run announced is the ceiling it keeps.
+func AnthropicTaskBudgetFor(total, remaining int) *TaskBudget {
+	if total <= 0 || remaining <= 0 {
 		return nil
 	}
-	return &TaskBudget{Type: "tokens", Total: remainingTokens, Remaining: remainingTokens}
+	if remaining > total {
+		remaining = total
+	}
+	return &TaskBudget{Type: "tokens", Total: total, Remaining: remaining}
 }
 
 // CompactionBeta is the Anthropic beta that enables server-side

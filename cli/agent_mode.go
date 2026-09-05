@@ -64,7 +64,14 @@ type AgentMode struct {
 	activatedTools map[string]bool
 	// deferrableTools is the set the index advertises, kept so a
 	// find_tools call can be answered without rebuilding it.
-	deferrableTools     []models.ToolDefinition
+	deferrableTools []models.ToolDefinition
+	// deferrableCount is the manager tool count the set was captured at,
+	// so a server that finishes connecting mid-run is noticed.
+	deferrableCount int
+	// taskBudgetTotal is the ceiling this run announced on the first turn
+	// it had one. It stays put for the rest of the run: only the remainder
+	// moves (see AnthropicTaskBudgetFor).
+	taskBudgetTotal     int
 	cli                 *ChatCLI
 	logger              *zap.Logger
 	executor            *agent.CommandExecutor
@@ -936,8 +943,16 @@ func (a *AgentMode) clientAndCtxForTurn(ctx context.Context) (llmclient.LLMClien
 	// when the hard stop fires. Nothing is attached when there is no
 	// ceiling, or too little left to state.
 	if a.cli != nil && a.cli.costTracker != nil {
-		if tokens, ok := a.cli.costTracker.RemainingTaskBudgetTokens(); ok {
-			ctx = llmclient.WithTaskBudget(ctx, llmclient.AnthropicTaskBudget(tokens))
+		provider, model := a.effectiveRoute()
+		if tokens, ok := a.cli.costTracker.RemainingTaskBudgetTokensFor(provider, model); ok {
+			// The ceiling is fixed the first turn the run has one; only
+			// what is left of it moves. Recomputing both every turn showed
+			// the model a ceiling that shrank with its own spend — and one
+			// that grew when a daily limit rolled over mid-run.
+			if a.taskBudgetTotal <= 0 {
+				a.taskBudgetTotal = tokens
+			}
+			ctx = llmclient.WithTaskBudget(ctx, llmclient.AnthropicTaskBudgetFor(a.taskBudgetTotal, tokens))
 		}
 	}
 	return turnClient, ctx
@@ -2470,9 +2485,14 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 			// stop traveling and are advertised through the index built
 			// once for this run; the model pulls what it needs and keeps
 			// it for the rest of the run.
+			a.adoptToolsConnectedMidRun()
 			plan := workers.PlanToolDefs(core, a.deferrableTools, a.activatedTools, a.toolDeferThreshold())
 			nativeToolDefs = plan.Defs
 		}
+		// The effort, the tool set and the task budget all live outside the
+		// history and all decide whether the prefix can be reused. Declare a
+		// change so the coming cache write reads as the rebuild it is.
+		a.cli.noteWireShape(llmclient.EffortFromContext(turnCtx), nativeToolDefs, llmclient.TaskBudgetFromContext(turnCtx) != nil)
 
 		// Chamada à LLM (native tools or text)
 		var aiResponse string

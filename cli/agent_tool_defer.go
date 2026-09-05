@@ -86,6 +86,7 @@ func (a *AgentMode) handleFindTools(call models.ToolCall) (string, bool) {
 func (a *AgentMode) prepareDeferredTools() string {
 	a.activatedTools = map[string]bool{}
 	a.deferrableTools = nil
+	a.deferrableCount = 0
 	if a.cli == nil || a.cli.mcpManager == nil || a.cli.mcpManager.ToolCount() == 0 {
 		return ""
 	}
@@ -101,8 +102,100 @@ func (a *AgentMode) prepareDeferredTools() string {
 		return ""
 	}
 	a.deferrableTools = deferrable
+	a.deferrableCount = a.cli.mcpManager.ToolCount()
 	a.logger.Info("deferring tool definitions behind a searchable index",
 		zap.Int("deferred", plan.Deferred),
 		zap.Int("loaded", len(plan.Defs)))
 	return plan.Index
+}
+
+// adoptToolsConnectedMidRun folds tools that appeared after the run
+// started into the deferred set.
+//
+// MCP servers connect on their own schedule and a session starts them
+// deliberately mid-run. The deferrable set was captured once, while the
+// cached prompt was assembled, so a server that finished connecting after
+// that was invisible twice over: its schemas did not travel, and it was
+// not in the set find_tools searches — the model could neither call it nor
+// discover that it existed.
+//
+// The new definitions are activated so they travel this turn, which is the
+// only way the model learns of them: the index that would have advertised
+// them is baked into the prefix and is not worth rewriting for this. That
+// is bounded — past the run's defer threshold the newcomers stay in the
+// searchable set only, still reachable through find_tools, which is what
+// deferral is for. Either way the tools array changed, and the caller
+// declares that to the cache telemetry.
+func (a *AgentMode) adoptToolsConnectedMidRun() {
+	if a.cli == nil || a.cli.mcpManager == nil || a.deferrableCount == 0 {
+		return
+	}
+	count := a.cli.mcpManager.ToolCount()
+	if count == a.deferrableCount {
+		return
+	}
+	a.deferrableCount = count
+	if a.activatedTools == nil {
+		a.activatedTools = map[string]bool{}
+	}
+	current := a.cli.mcpManager.GetTools()
+	arrived, activated := foldArrivedTools(current, a.deferrableTools, a.activatedTools, a.toolDeferThreshold())
+	a.deferrableTools = current
+	a.logger.Info("deferred tool set changed mid-run",
+		zap.Int("arrived", arrived),
+		zap.Int("activated", activated),
+		zap.Int("tools", count))
+}
+
+// foldArrivedTools decides what to do with definitions that appeared since
+// the deferred set was captured, mutating activated in place. It returns
+// how many arrived and how many were activated.
+//
+// Newcomers are activated so their schemas travel, which is the only way
+// the model learns they exist: the index that would advertise them is
+// baked into the cached prefix and is not worth rewriting for this. The
+// activation stops at the run's defer threshold, so a large server
+// connecting mid-run cannot undo the deferral that made room in the first
+// place — past it the newcomers stay searchable through find_tools, which
+// is what deferral is for. A set that only shrank activates nothing and is
+// still refreshed, so find_tools stops offering schemas nothing can serve.
+func foldArrivedTools(current, known []models.ToolDefinition, activated map[string]bool, threshold int) (arrived, activatedNow int) {
+	seen := make(map[string]bool, len(known))
+	for _, d := range known {
+		seen[d.Function.Name] = true
+	}
+	weight := activatedToolsChars(known, activated)
+	for _, d := range current {
+		if seen[d.Function.Name] {
+			continue
+		}
+		arrived++
+		if w := toolDefChars(d); weight+w <= threshold {
+			activated[d.Function.Name] = true
+			weight += w
+			activatedNow++
+		}
+	}
+	return arrived, activatedNow
+}
+
+// toolDefChars is one definition's serialized weight.
+func toolDefChars(d models.ToolDefinition) int {
+	b, err := json.Marshal(d)
+	if err != nil {
+		return 0
+	}
+	return len(b)
+}
+
+// activatedToolsChars is what the already-activated definitions weigh, so
+// adopting newcomers stays inside the same budget the run deferred under.
+func activatedToolsChars(defs []models.ToolDefinition, activated map[string]bool) int {
+	total := 0
+	for _, d := range defs {
+		if activated[d.Function.Name] {
+			total += toolDefChars(d)
+		}
+	}
+	return total
 }
