@@ -101,6 +101,9 @@ func (c *ClaudeClient) SendPromptWithTools(ctx context.Context, prompt string, h
 	// Skill effort hint → thinking (tool-use path). Opus 4.7+ uses adaptive,
 	// older models use budgeted extended thinking — see applyThinkingForEffort.
 	applyThinkingForEffort(reqBody, c.model, ctx)
+	// A spending ceiling is not a reasoning setting: it travels whether or
+	// not an effort was chosen. See applyTaskBudget.
+	applyTaskBudget(reqBody, c.model, ctx)
 
 	// Opus 4.8 fast mode opt-in via ANTHROPIC_SPEED=fast.
 	applyFastModeIfRequested(reqBody, c.model)
