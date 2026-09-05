@@ -1,0 +1,5 @@
+{
+  "cfg.kv.keychain_in_effect": "backend em vigor",
+  "cfg.value.keychain_native": "keychain do sistema",
+  "cfg.value.keychain_file": "arquivo (~/.chatcli/.auth-key)"
+}

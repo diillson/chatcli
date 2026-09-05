@@ -302,6 +302,7 @@ var envDefaults = map[string]envDefault{
 	"CHATCLI_ALLOW_INSECURE":         {Value: "false", IsBool: true, Source: "TLS posture"},
 	"CHATCLI_ENV_REDACT_MODE":        {Value: "permissive", Source: "content_redactor.go (off|permissive|strict)"},
 	"CHATCLI_PLUGIN_QUARANTINE":      {Value: "off", Source: "plugins.quarantineWindowFromEnv (duration, on, or off)"},
+	"CHATCLI_KEYCHAIN_BACKEND":       {Value: "auto", Source: "auth.NewKeychainStore (auto|keychain|file)"},
 
 	// ─── Server mode ─────────────────────────────────────────────
 	"CHATCLI_GRPC_REFLECTION":   {Value: "false", IsBool: true, Source: "server.go"},

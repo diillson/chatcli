@@ -29,29 +29,36 @@ func getKeyPath() string {
 	return filepath.Join(home, ".chatcli", keyFileName)
 }
 
+// loadOrCreateKey returns the key that encrypts stored credentials,
+// creating one on first use.
+//
+// Where it lives is CHATCLI_KEYCHAIN_BACKEND's decision — see
+// resolveEncryptionKey. Until this was wired, that variable was read and
+// then ignored: the keychain store existed and nothing ever called it, so
+// the key was always a file no matter what the setting said.
 func loadOrCreateKey() ([]byte, error) {
-	keyPath := getKeyPath()
+	return resolveEncryptionKey(NewKeychainStore(), getKeyPath())
+}
 
-	data, err := os.ReadFile(keyPath) //#nosec G304 -- path supplied by user/agent through validated tool surface (boundary check upstream)
-	if err == nil && len(data) == 32 {
-		return data, nil
-	}
-
+// newRandomKey generates a fresh 256-bit key.
+func newRandomKey() ([]byte, error) {
 	key := make([]byte, 32)
 	if _, err := rand.Read(key); err != nil {
 		return nil, fmt.Errorf("%s: %w", i18n.T("auth.crypto.keygen_failed"), err)
 	}
+	return key, nil
+}
 
+// writeKeyFile persists the key with owner-only permissions.
+func writeKeyFile(keyPath string, key []byte) error {
 	dir := filepath.Dir(keyPath)
 	if err := os.MkdirAll(dir, 0o700); err != nil {
-		return nil, fmt.Errorf("%s: %w", i18n.T("auth.crypto.keydir_failed"), err)
+		return fmt.Errorf("%s: %w", i18n.T("auth.crypto.keydir_failed"), err)
 	}
-
 	if err := os.WriteFile(keyPath, key, 0o600); err != nil {
-		return nil, fmt.Errorf("%s: %w", i18n.T("auth.crypto.keysave_failed"), err)
+		return fmt.Errorf("%s: %w", i18n.T("auth.crypto.keysave_failed"), err)
 	}
-
-	return key, nil
+	return nil
 }
 
 func encryptData(plaintext []byte) ([]byte, error) {
