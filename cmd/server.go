@@ -31,13 +31,14 @@ import (
 
 // ServerOptions holds the flags for the 'server' subcommand.
 type ServerOptions struct {
-	Port        int
-	Token       string
-	CertFile    string
-	KeyFile     string
-	Provider    string
-	Model       string
-	MetricsPort int
+	Port         int
+	Token        string
+	CertFile     string
+	KeyFile      string
+	ClientCAFile string
+	Provider     string
+	Model        string
+	MetricsPort  int
 
 	// Fallback chain (optional)
 	FallbackProviders    string
@@ -67,6 +68,7 @@ func RunServer(args []string, llmMgr manager.LLMManager, logger *zap.Logger) err
 	fs.StringVar(&opts.Token, "token", os.Getenv("CHATCLI_SERVER_TOKEN"), "Authentication token (empty = no auth)")
 	fs.StringVar(&opts.CertFile, "tls-cert", os.Getenv("CHATCLI_SERVER_TLS_CERT"), "TLS certificate file path")
 	fs.StringVar(&opts.KeyFile, "tls-key", os.Getenv("CHATCLI_SERVER_TLS_KEY"), "TLS key file path")
+	fs.StringVar(&opts.ClientCAFile, "tls-client-ca", os.Getenv("CHATCLI_SERVER_TLS_CLIENT_CA"), "CA bundle that client certificates are verified against (enables mTLS)")
 	fs.StringVar(&opts.Provider, "provider", os.Getenv("LLM_PROVIDER"), "Default LLM provider")
 	fs.StringVar(&opts.Model, "model", "", "Default LLM model")
 	fs.IntVar(&opts.MetricsPort, "metrics-port", getEnvInt("CHATCLI_METRICS_PORT", 9090), "Prometheus metrics HTTP port (0 = disabled)")
@@ -115,13 +117,14 @@ func RunServer(args []string, llmMgr manager.LLMManager, logger *zap.Logger) err
 	}
 
 	cfg := server.Config{
-		Port:        opts.Port,
-		Token:       opts.Token,
-		TLSCertFile: opts.CertFile,
-		TLSKeyFile:  opts.KeyFile,
-		Provider:    opts.Provider,
-		Model:       opts.Model,
-		MetricsPort: opts.MetricsPort,
+		Port:            opts.Port,
+		Token:           opts.Token,
+		TLSCertFile:     opts.CertFile,
+		TLSKeyFile:      opts.KeyFile,
+		TLSClientCAFile: opts.ClientCAFile,
+		Provider:        opts.Provider,
+		Model:           opts.Model,
+		MetricsPort:     opts.MetricsPort,
 	}
 
 	srv := server.New(cfg, llmMgr, sessionMgr, logger)
@@ -438,6 +441,8 @@ Flags:
   --token <string>    Authentication token (env: CHATCLI_SERVER_TOKEN)
   --tls-cert <path>   TLS certificate file (env: CHATCLI_SERVER_TLS_CERT)
   --tls-key <path>    TLS key file (env: CHATCLI_SERVER_TLS_KEY)
+  --tls-client-ca <path>  CA bundle for client certificate verification, enables mTLS
+                          (env: CHATCLI_SERVER_TLS_CLIENT_CA)
   --provider <name>   Default LLM provider (env: LLM_PROVIDER)
   --model <name>      Default LLM model
   --metrics-port <n>  Prometheus metrics HTTP port (default: 9090, 0=disabled, env: CHATCLI_METRICS_PORT)

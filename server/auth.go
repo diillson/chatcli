@@ -7,6 +7,7 @@ package server
 
 import (
 	"context"
+	"crypto/rsa"
 	"crypto/subtle"
 	"net"
 	"os"
@@ -30,7 +31,13 @@ type TokenAuthInterceptor struct {
 	logger *zap.Logger
 
 	// JWT configuration (optional, loaded from env)
-	jwtSecret []byte // from CHATCLI_JWT_SECRET
+	jwtSecret []byte // from CHATCLI_JWT_SECRET (HS256)
+
+	// RS256 configuration. jwtAlg names the single algorithm this server
+	// accepts; a token declaring anything else is refused before its
+	// signature is computed.
+	jwtPublicKeys []*rsa.PublicKey // from CHATCLI_JWT_PUBLIC_KEY, or a PEM CHATCLI_JWT_SECRET
+	jwtAlg        string
 
 	// Auth failure rate limiting: max 5 failures/min per IP
 	failureMu       sync.Mutex
@@ -47,11 +54,7 @@ func NewTokenAuthInterceptor(token string, logger *zap.Logger) *TokenAuthInterce
 		failureLimiters: make(map[string]*rate.Limiter),
 	}
 
-	// Load JWT secret from environment if available
-	if secret := os.Getenv("CHATCLI_JWT_SECRET"); secret != "" {
-		ai.jwtSecret = []byte(secret)
-		logger.Info("JWT authentication enabled (HS256)")
-	}
+	ai.configureJWT(logger)
 
 	// Start background cleanup to prevent memory leak from auth failure limiters
 	ai.startFailureLimiterCleanup()
@@ -65,8 +68,10 @@ func (a *TokenAuthInterceptor) Unary() grpc.UnaryServerInterceptor {
 	return func(ctx context.Context, req interface{}, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (interface{}, error) {
 		newCtx, err := a.authorize(ctx, info.FullMethod)
 		if err != nil {
+			authOutcomeFrom(ctx).recordDenied()
 			return nil, err
 		}
+		authOutcomeFrom(ctx).recordUser(UserFromContext(newCtx))
 		return handler(newCtx, req)
 	}
 }
@@ -76,8 +81,10 @@ func (a *TokenAuthInterceptor) Stream() grpc.StreamServerInterceptor {
 	return func(srv interface{}, ss grpc.ServerStream, info *grpc.StreamServerInfo, handler grpc.StreamHandler) error {
 		newCtx, err := a.authorize(ss.Context(), info.FullMethod)
 		if err != nil {
+			authOutcomeFrom(ss.Context()).recordDenied()
 			return err
 		}
+		authOutcomeFrom(ss.Context()).recordUser(UserFromContext(newCtx))
 		// Wrap the stream with the new context containing UserInfo
 		wrapped := &wrappedServerStream{ServerStream: ss, ctx: newCtx}
 		return handler(srv, wrapped)
@@ -97,7 +104,7 @@ func (w *wrappedServerStream) Context() context.Context {
 // authorize validates credentials and returns a context with UserInfo on success.
 func (a *TokenAuthInterceptor) authorize(ctx context.Context, method string) (context.Context, error) {
 	// Skip auth if no token and no JWT configured
-	if a.token == "" && a.jwtSecret == nil {
+	if a.token == "" && !a.jwtConfigured() {
 		// No auth configured — inject default admin user for backward compat
 		return ContextWithUser(ctx, &UserInfo{Subject: "system", Role: RoleAdmin}), nil
 	}
@@ -136,7 +143,7 @@ func (a *TokenAuthInterceptor) authorize(ctx context.Context, method string) (co
 	token = strings.TrimPrefix(token, "Bearer ")
 
 	// Try JWT validation first if configured
-	if a.jwtSecret != nil {
+	if a.jwtConfigured() {
 		if user, err := a.validateJWT(token); err == nil {
 			return ContextWithUser(ctx, user), nil
 		}
@@ -169,20 +176,41 @@ func (a *TokenAuthInterceptor) validateJWT(tokenStr string) (*UserInfo, error) {
 		return nil, status.Errorf(codes.Unauthenticated, "invalid token format")
 	}
 
+	// The token's declared algorithm must be the one this server is
+	// configured for. Reading it to *select* the verification path is the
+	// algorithm-confusion forgery: a server trusting an RSA public key
+	// would then also accept an HS256 token signed with that public key as
+	// the shared secret.
+	alg, err := jwtHeaderAlg(parts[0])
+	if err != nil {
+		return nil, status.Errorf(codes.Unauthenticated, "authentication failed")
+	}
+	if !strings.EqualFold(alg, a.jwtAlg) {
+		a.logger.Warn("JWT rejected: algorithm mismatch",
+			zap.String("token_alg", alg), zap.String("configured_alg", a.jwtAlg))
+		return nil, status.Errorf(codes.Unauthenticated, "authentication failed")
+	}
+
 	// Base64url → standard base64 replacer
 	b64URLReplacer := strings.NewReplacer("-", "+", "_", "/")
 
-	// Verify HMAC-SHA256 signature
-	expectedSig := computeHS256(parts[0]+"."+parts[1], a.jwtSecret)
 	sigB64 := padBase64(b64URLReplacer.Replace(parts[2]))
-
 	actualSig, err := base64Decode(sigB64)
 	if err != nil {
 		return nil, status.Errorf(codes.Unauthenticated, "authentication failed")
 	}
 
-	if subtle.ConstantTimeCompare(expectedSig, actualSig) != 1 {
-		return nil, status.Errorf(codes.Unauthenticated, "authentication failed")
+	signingInput := parts[0] + "." + parts[1]
+	switch a.jwtAlg {
+	case jwtAlgRS256:
+		if !verifyRS256(signingInput, actualSig, a.jwtPublicKeys) {
+			return nil, status.Errorf(codes.Unauthenticated, "authentication failed")
+		}
+	default:
+		expectedSig := computeHS256(signingInput, a.jwtSecret)
+		if subtle.ConstantTimeCompare(expectedSig, actualSig) != 1 {
+			return nil, status.Errorf(codes.Unauthenticated, "authentication failed")
+		}
 	}
 
 	// Decode payload
@@ -234,9 +262,19 @@ func (a *TokenAuthInterceptor) validateJWT(tokenStr string) (*UserInfo, error) {
 		}
 	}
 
+	roleClaim := getStringClaim(claims, "role")
+	role, recognized := ParseRoleStrict(roleClaim)
+	if !recognized {
+		// Least privilege, and loudly: a role nobody recognizes is far
+		// more often a typo in the issuer's config than an attack, and
+		// silently granting write access would hide it.
+		a.logger.Warn("JWT carries an unrecognized role; granting read-only access",
+			zap.String("role_claim", roleClaim),
+			zap.String("granted", string(role)))
+	}
 	user := &UserInfo{
 		Subject: getStringClaim(claims, "sub"),
-		Role:    ParseRole(getStringClaim(claims, "role")),
+		Role:    role,
 		Email:   getStringClaim(claims, "email"),
 	}
 	if tid := getStringClaim(claims, "tenant_id"); tid != "" {

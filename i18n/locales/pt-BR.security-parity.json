@@ -1,0 +1,6 @@
+{
+  "cfg.value.jwt_disabled": "não configurado",
+  "server.mtls.enabled": "TLS mútuo habilitado: os clientes precisam apresentar um certificado assinado pela CA configurada",
+  "server.mtls.load_failed": "falha ao carregar o bundle de CA de clientes; recusando iniciar, porque subir sem ele aceitaria clientes anônimos num servidor configurado para TLS mútuo",
+  "server.mtls.requires_tls": "há uma CA de clientes configurada mas o TLS do servidor não está; o TLS mútuo precisa de --tls-cert e --tls-key para ter um handshake que carregue o certificado do cliente"
+}

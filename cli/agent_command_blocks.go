@@ -427,6 +427,9 @@ func (a *AgentMode) cmdSaveOutput(renderer *agent.UIRenderer, outputs []*Command
 	dir := filepath.Join(os.TempDir(), "chatcli-agent-logs")
 	_ = os.MkdirAll(dir, 0o700)
 	fpath := filepath.Join(dir, fmt.Sprintf("cmd-%d-%d.log", n, time.Now().Unix()))
+	// #nosec G703 -- every component is generated: os.TempDir, a constant
+	// directory, and a filename built from a bounds-checked index and a
+	// timestamp. No caller-supplied string reaches this path.
 	if writeErr := os.WriteFile(fpath, []byte(outputs[n-1].Output), 0o600); writeErr != nil {
 		fmt.Println(i18n.T("agent.status.error_saving"), writeErr)
 	} else {

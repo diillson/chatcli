@@ -306,6 +306,17 @@ var envDefaults = map[string]envDefault{
 	"CHATCLI_GRPC_REFLECTION":   {Value: "false", IsBool: true, Source: "server.go"},
 	"CHATCLI_FALLBACK_ENABLED":  {Value: "false", IsBool: true, Source: "server fallback"},
 	"CHATCLI_OPERATOR_DEV_MODE": {Value: "false", IsBool: true, Source: "operator"},
+
+	// ─── Server mode: limits ─────────────────────────────────────
+	// The numbers an operator sizes a deployment against. They live here
+	// so `/config server` answers with what the runtime actually uses,
+	// rather than leaving the reader to trust a table somewhere else.
+	"CHATCLI_BIND_ADDRESS":           {Value: "127.0.0.1 (0.0.0.0 under Kubernetes)", Source: "server.go Start"},
+	"CHATCLI_RATE_LIMIT_RPS":         {Value: "10", Source: "server.DefaultRateLimiterConfig"},
+	"CHATCLI_RATE_LIMIT_BURST":       {Value: "20", Source: "server.DefaultRateLimiterConfig"},
+	"CHATCLI_MAX_RECV_MSG_SIZE":      {Value: "52428800", Source: "server.New (50MB)"},
+	"CHATCLI_MAX_SEND_MSG_SIZE":      {Value: "52428800", Source: "server.New (50MB)"},
+	"CHATCLI_MAX_CONCURRENT_STREAMS": {Value: "100", Source: "server.New"},
 }
 
 // lookupEnvDefault returns the registered default for `name`, or

@@ -40,6 +40,7 @@ type Config struct {
 	Token            string // auth token (empty = no auth)
 	TLSCertFile      string
 	TLSKeyFile       string
+	TLSClientCAFile  string // CA bundle for client certificate verification (mTLS)
 	Provider         string
 	Model            string
 	EnableReflection bool // enable gRPC reflection (default: false, check CHATCLI_GRPC_REFLECTION env)
@@ -111,7 +112,9 @@ func New(cfg Config, llmMgr manager.LLMManager, sessionStore SessionStore, logge
 		auditLogger.UnaryInterceptor(),
 	}, unaryChain...)
 	streamChain = append([]grpc.StreamServerInterceptor{
+		ValidationStreamInterceptor(),
 		rateLimiter.StreamInterceptor(),
+		auditLogger.StreamInterceptor(),
 	}, streamChain...)
 
 	// --- Security: Message Size Limits (H2) ---
@@ -156,8 +159,31 @@ func New(cfg Config, llmMgr manager.LLMManager, sessionStore SessionStore, logge
 			Certificates: []tls.Certificate{cert},
 			MinVersion:   tls.VersionTLS13, // Security: Upgrade to TLS 1.3 (M7)
 		}
+		// Mutual TLS: when a client CA bundle is configured, the server
+		// requires and verifies a client certificate. Failing to load the
+		// bundle is fatal — see applyClientCAs.
+		if err := applyClientCAs(tlsConfig, cfg.TLSClientCAFile); err != nil {
+			fmt.Fprintf(os.Stderr, "FATAL: mTLS client CA load failed: %v\n", err)
+			logger.Fatal(i18n.T("server.mtls.load_failed"),
+				zap.Error(err),
+				zap.String("client_ca", cfg.TLSClientCAFile),
+			)
+		}
 		opts = append(opts, grpc.Creds(credentials.NewTLS(tlsConfig)))
 		logger.Info(i18n.T("server.tls.enabled"), zap.String("cert", cfg.TLSCertFile))
+		if cfg.TLSClientCAFile != "" {
+			logger.Info(i18n.T("server.mtls.enabled"),
+				zap.String("client_ca", cfg.TLSClientCAFile),
+				zap.Int("ca_certificates", clientCACertCount(cfg.TLSClientCAFile)),
+			)
+		}
+	} else if cfg.TLSClientCAFile != "" {
+		// A client CA without a server certificate cannot produce mTLS:
+		// there is no TLS handshake to carry the client certificate.
+		fmt.Fprintln(os.Stderr, "FATAL: --tls-client-ca requires --tls-cert and --tls-key")
+		logger.Fatal(i18n.T("server.mtls.requires_tls"),
+			zap.String("client_ca", cfg.TLSClientCAFile),
+		)
 	}
 
 	grpcServer := grpc.NewServer(opts...)
