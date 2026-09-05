@@ -11,22 +11,53 @@ import (
 	"time"
 )
 
-func TestPromptCacheTTL_AutoFollowsSurfaceHint(t *testing.T) {
+// TestPromptCacheTTL_AutoSettlesOncePerConversation pins what "auto"
+// means now. It used to follow the surface hint on every call, which read
+// as flexibility and behaved as a leak: the ttl is part of the
+// cache_control marker, so its value is prefix bytes, and a session that
+// crossed between chat and the agent loop re-marked the same messages and
+// threw away the prefix it had just paid for. Whichever surface asks
+// first decides for the conversation.
+func TestPromptCacheTTL_AutoSettlesOncePerConversation(t *testing.T) {
 	t.Setenv(PromptCacheTTLEnv, "auto")
+	t.Cleanup(func() { SetPromptCacheTTLHint("5m"); ResetPromptCacheTTL() })
+
+	// A conversation that starts in chat holds the 5-minute default, and
+	// entering the agent loop later does not rewrite its prefix.
+	ResetPromptCacheTTL()
 	SetPromptCacheTTLHint("5m")
 	if got := AnthropicCacheTTL(); got != "5m" {
-		t.Fatalf("auto without an agent hint must be 5m, got %s", got)
+		t.Fatalf("a chat-first conversation settles on 5m, got %s", got)
 	}
 	SetPromptCacheTTLHint("1h")
-	t.Cleanup(func() { SetPromptCacheTTLHint("5m") })
+	if got := AnthropicCacheTTL(); got != "5m" {
+		t.Fatalf("entering the agent loop must not re-mark a settled conversation, got %s", got)
+	}
+
+	// A conversation that starts in the agent loop holds the hour, and
+	// dropping back to chat does not take it away either.
+	ResetPromptCacheTTL()
+	SetPromptCacheTTLHint("1h")
 	if got := AnthropicCacheTTL(); got != "1h" {
-		t.Fatalf("auto with the agent hint must be 1h, got %s", got)
+		t.Fatalf("an agent-first conversation settles on 1h, got %s", got)
 	}
 	if PromptCacheTTLDuration() != time.Hour {
-		t.Fatal("duration must follow the resolved TTL")
+		t.Fatal("duration must follow the settled TTL")
 	}
-	// An explicit value ignores the hint.
+	SetPromptCacheTTLHint("5m")
+	if got := AnthropicCacheTTL(); got != "1h" {
+		t.Fatalf("leaving the agent loop must not re-mark a settled conversation, got %s", got)
+	}
+
+	// A new conversation resolves again: the prefix is gone anyway.
+	ResetPromptCacheTTL()
+	if got := AnthropicCacheTTL(); got != "5m" {
+		t.Fatalf("a restarted conversation resolves fresh, got %s", got)
+	}
+
+	// An explicit value ignores the hint and never settles anything.
 	t.Setenv(PromptCacheTTLEnv, "5m")
+	SetPromptCacheTTLHint("1h")
 	if got := AnthropicCacheTTL(); got != "5m" {
 		t.Fatalf("explicit 5m must win over the hint, got %s", got)
 	}

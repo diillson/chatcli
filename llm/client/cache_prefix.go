@@ -134,19 +134,68 @@ type ContextManagement struct {
 	Edits []ContextEdit `json:"edits"`
 }
 
-// AnthropicContextManagement returns the context_management request block
-// for the provider context engine: clear the oldest tool results once the
-// prompt passes 100K input tokens, keeping the five most recent tool uses
-// and freeing at least 20K tokens per edit. Nil when the engine is off.
+// contextEditWindowFraction is where the clearing edits start firing, as a
+// share of the model's own context window, and contextEditReleaseFraction
+// is how much one edit frees.
+//
+// Fractions rather than constants because the catalog spans 128K to 1M: a
+// fixed 100K trigger fires at four fifths of a small window and at a tenth
+// of a large one, so the same number meant opposite things. Half the
+// window leaves room to work before anything is cleared and still leaves
+// the cheap lossless edits their chance ahead of any summarizing.
+const (
+	contextEditWindowFraction  = 0.5
+	contextEditReleaseFraction = 0.1
+	// Floors for a model whose window the catalog does not know: the
+	// values this shipped with, so an unknown model behaves as before.
+	defaultContextEditTrigger = 100000
+	defaultContextEditRelease = 20000
+)
+
+// contextEditThresholds derives the trigger and release for one model.
+func contextEditThresholds(window int) (trigger, release int) {
+	if window <= 0 {
+		return defaultContextEditTrigger, defaultContextEditRelease
+	}
+	trigger = int(float64(window) * contextEditWindowFraction)
+	release = int(float64(window) * contextEditReleaseFraction)
+	if trigger < defaultContextEditTrigger/2 {
+		// A small window still needs room to work: never clear before the
+		// prompt is worth clearing.
+		trigger = defaultContextEditTrigger / 2
+	}
+	if release < 1 {
+		release = 1
+	}
+	return trigger, release
+}
+
+// AnthropicContextManagement returns the block with the fixed thresholds
+// this shipped with. Callers that know the model should use
+// AnthropicContextManagementFor: the same trigger means opposite things
+// on a 128K window and a 1M one.
 func AnthropicContextManagement() *ContextManagement {
+	return AnthropicContextManagementFor(0)
+}
+
+// AnthropicContextManagementFor returns the context_management request
+// block for the provider context engine: clear the oldest tool results
+// once the prompt passes half the model's context window, keeping the
+// five most recent tool uses and freeing a tenth of the window per edit.
+// Nil when the engine is off.
+//
+// window is the model's context window, from the catalog; zero falls back
+// to the fixed thresholds this shipped with.
+func AnthropicContextManagementFor(window int) *ContextManagement {
 	if !ProviderContextEngine() {
 		return nil
 	}
+	trigger, release := contextEditThresholds(window)
 	edits := []ContextEdit{{
 		Type:         "clear_tool_uses_20250919",
-		Trigger:      &ContextThreshold{Type: "input_tokens", Value: 100000},
+		Trigger:      &ContextThreshold{Type: "input_tokens", Value: trigger},
 		Keep:         &ContextThreshold{Type: "tool_uses", Value: 5},
-		ClearAtLeast: &ContextThreshold{Type: "input_tokens", Value: 20000},
+		ClearAtLeast: &ContextThreshold{Type: "input_tokens", Value: release},
 	}}
 	// Once reasoning blocks are replayed they occupy the window like any
 	// other content, so the engine needs a way to retire the old ones. The
@@ -155,7 +204,7 @@ func AnthropicContextManagement() *ContextManagement {
 	// reasoning the model is still building on.
 	edits = append(edits, ContextEdit{
 		Type:    "clear_thinking_20251015",
-		Trigger: &ContextThreshold{Type: "input_tokens", Value: 100000},
+		Trigger: &ContextThreshold{Type: "input_tokens", Value: trigger},
 		Keep:    &ContextThreshold{Type: "thinking_turns", Value: 3},
 	})
 	// Server-side compaction summarizes what the two clearing edits could
@@ -164,8 +213,11 @@ func AnthropicContextManagement() *ContextManagement {
 	// get their chance first.
 	if ProviderCompactionEngine() {
 		edits = append(edits, ContextEdit{
-			Type:    "compact_20260112",
-			Trigger: &ContextThreshold{Type: "input_tokens", Value: 150000},
+			Type: "compact_20260112",
+			// Behind the lossless edits by the same margin the fixed
+			// values used: summarizing is the last resort, so it waits
+			// until clearing has had its chance.
+			Trigger: &ContextThreshold{Type: "input_tokens", Value: trigger + trigger/2},
 		})
 	}
 	return &ContextManagement{Edits: edits}
@@ -190,6 +242,18 @@ var promptCacheTTLHint atomic.Value // string
 // SetPromptCacheTTLHint records the surface preference honored by
 // CHATCLI_PROMPT_CACHE_TTL=auto ("5m" or "1h"; anything else resets to
 // the 5-minute default).
+// promptCacheTTLHeld is the value "auto" settled on for this conversation.
+// Empty until the first request resolves it.
+var promptCacheTTLHeld atomic.Value
+
+// ResetPromptCacheTTL releases the held decision so the next request
+// resolves "auto" again. Called where a conversation restarts and the
+// prefix is being rebuilt anyway, so nothing is thrown away that was not
+// already gone.
+func ResetPromptCacheTTL() {
+	promptCacheTTLHeld.Store("")
+}
+
 func SetPromptCacheTTLHint(ttl string) {
 	if ttl != "1h" {
 		ttl = "5m"
@@ -198,18 +262,32 @@ func SetPromptCacheTTLHint(ttl string) {
 }
 
 // AnthropicCacheTTL returns the configured cache lifetime, normalized to
-// "5m" or "1h". "auto" defers to the surface hint (SetPromptCacheTTLHint);
-// anything else resolves to the 5-minute default so a typo can never
-// disable caching or send an invalid ttl.
+// "5m" or "1h". "auto" resolves once per conversation from the surface
+// hint (SetPromptCacheTTLHint) and then holds; anything else resolves to
+// the 5-minute default so a typo can never disable caching or send an
+// invalid ttl.
+//
+// Holding is the point. The ttl is part of the cache_control marker, so
+// its value IS prefix bytes: a session that alternates chat and the agent
+// loop used to mark the same messages first with the hour and then
+// without it, and every crossing threw away the prefix it had just paid
+// for. Whichever surface asks first decides for the conversation, and
+// ResetPromptCacheTTL releases it when the conversation genuinely
+// restarts.
 func AnthropicCacheTTL() string {
 	switch strings.ToLower(strings.TrimSpace(os.Getenv(PromptCacheTTLEnv))) {
 	case "1h", "60m", "hour":
 		return "1h"
 	case "auto":
-		if v, _ := promptCacheTTLHint.Load().(string); v == "1h" {
-			return "1h"
+		if held, _ := promptCacheTTLHeld.Load().(string); held != "" {
+			return held
 		}
-		return "5m"
+		resolved := "5m"
+		if v, _ := promptCacheTTLHint.Load().(string); v == "1h" {
+			resolved = "1h"
+		}
+		promptCacheTTLHeld.Store(resolved)
+		return resolved
 	default:
 		return "5m"
 	}

@@ -94,7 +94,7 @@ func (c *ClaudeClient) SendPromptWithTools(ctx context.Context, prompt string, h
 	}
 	// Provider context engine: let Anthropic clear stale tool results
 	// server-side (context editing beta) on top of the local compaction.
-	if cm := client.AnthropicContextManagement(); cm != nil && len(toolDefs) > 0 {
+	if cm := client.AnthropicContextManagementFor(catalog.GetContextWindow(catalog.ProviderClaudeAI, c.model)); cm != nil && len(toolDefs) > 0 {
 		reqBody["context_management"] = cm
 	}
 

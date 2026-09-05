@@ -521,7 +521,7 @@ func (c *BedrockClient) sendPromptAnthropicModel(ctx context.Context, wireModel,
 	// same context_management block as the first-party endpoint, and this
 	// path builds the native Anthropic body, so it travels unchanged.
 	// Audit III's PR 13 wired the response side and left this surface out.
-	if cm := client.AnthropicContextManagement(); cm != nil {
+	if cm := client.AnthropicContextManagementFor(catalog.GetContextWindow(catalog.ProviderBedrock, wireModel)); cm != nil {
 		reqBody["context_management"] = cm
 	}
 

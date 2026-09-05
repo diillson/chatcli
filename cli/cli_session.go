@@ -11,6 +11,7 @@ import (
 
 	"github.com/diillson/chatcli/client/remote"
 	"github.com/diillson/chatcli/i18n"
+	llmclient "github.com/diillson/chatcli/llm/client"
 	"github.com/diillson/chatcli/models"
 	"github.com/diillson/chatcli/ui/kit"
 )
@@ -223,6 +224,9 @@ func (cli *ChatCLI) clearAllHistories() {
 	cli.history = make([]models.Message, 0)
 	cli.checkpoints = nil
 	cli.preCompaction = nil
+	// The prefix is gone either way, so the ttl "auto" settled on for the
+	// old conversation is released here rather than held into the new one.
+	llmclient.ResetPromptCacheTTL()
 }
 
 // clearConversation is /clear: the conversation restarts empty while the
@@ -242,6 +246,7 @@ func (cli *ChatCLI) clearConversation(ctx context.Context) {
 	cli.saveCheckpoint()
 	cli.history = make([]models.Message, 0)
 	cli.syncTranscript()
+	llmclient.ResetPromptCacheTTL()
 	if cli.costTracker != nil {
 		cli.costTracker.NoteExpectedCacheRebuild()
 	}
