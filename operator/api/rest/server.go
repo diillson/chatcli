@@ -86,7 +86,8 @@ type APIServer struct {
 	apiKeysMu     sync.RWMutex
 	apiKeys       map[string]string // key -> role
 	limiter       *rateLimiter
-	corsOrigin    string
+	corsMu        sync.RWMutex
+	corsPolicy    CORSPolicy
 	watcherBridge WatcherDedupInvalidator // optional, for dedup invalidation on manual resolve
 }
 
@@ -101,8 +102,8 @@ func NewAPIServer(c client.Client, addr string) *APIServer {
 		listenAddr:   addr,
 		apiKeyHeader: authHeaderName,
 		apiKeys:      make(map[string]string),
-		limiter:      newRateLimiter(30), // Security (M3): 30 requests/minute (reduced from 100)
-		corsOrigin:   "",                 // Security (H6): deny-all CORS by default
+		limiter:      newRateLimiter(30),  // Security (M3): 30 requests/minute (reduced from 100)
+		corsPolicy:   CORSPolicyFromEnv(), // Security (H6): deny-all CORS unless an origin is configured
 	}
 }
 
@@ -119,9 +120,29 @@ func (s *APIServer) SetWatcherBridge(wb WatcherDedupInvalidator) {
 	s.watcherBridge = wb
 }
 
-// SetCORSOrigin configures the allowed CORS origin.
+// SetCORSOrigin configures a single allowed CORS origin.
 func (s *APIServer) SetCORSOrigin(origin string) {
-	s.corsOrigin = origin
+	s.SetCORSPolicy(CORSPolicy{
+		AllowedOrigins: splitList(origin),
+		AllowedMethods: defaultCORSMethods,
+	})
+}
+
+// SetCORSPolicy replaces the cross-origin policy.
+func (s *APIServer) SetCORSPolicy(policy CORSPolicy) {
+	if len(policy.AllowedMethods) == 0 {
+		policy.AllowedMethods = defaultCORSMethods
+	}
+	s.corsMu.Lock()
+	defer s.corsMu.Unlock()
+	s.corsPolicy = policy
+}
+
+// CORSAllowedOrigins reports the configured origins, for the startup log.
+func (s *APIServer) CORSAllowedOrigins() []string {
+	s.corsMu.RLock()
+	defer s.corsMu.RUnlock()
+	return append([]string(nil), s.corsPolicy.AllowedOrigins...)
 }
 
 // Start implements manager.Runnable and starts the HTTP server.

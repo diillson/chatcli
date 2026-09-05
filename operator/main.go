@@ -255,6 +255,15 @@ func main() {
 		aiopsPort = "8090"
 	}
 	apiServer := rest.NewAPIServer(mgr.GetClient(), ":"+aiopsPort)
+	// The CORS policy comes from the environment the chart already sets.
+	// Logged because it was previously read by nobody: an operator who
+	// configured an origin and saw the dashboard blocked had no way to tell
+	// whether the setting had arrived.
+	if origins := apiServer.CORSAllowedOrigins(); len(origins) > 0 {
+		setupLog.Info("CORS enabled", "allowedOrigins", origins)
+	} else {
+		setupLog.Info("CORS disabled (no allowed origin configured); browser cross-origin requests are blocked")
+	}
 
 	// Load API keys from ConfigMap chatcli-operator-config (field: api-keys)
 	// and start a watcher to hot-reload on changes (no restart needed)

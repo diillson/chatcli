@@ -109,6 +109,29 @@ spec:
                   name: {{ .Values.security.jwtSecretRef.name }}
                   key: {{ .Values.security.jwtSecretRef.key }}
           {{- end }}
+          {{- if .Values.security.jwtIssuer }}
+            - name: CHATCLI_JWT_ISSUER
+              value: {{ .Values.security.jwtIssuer | quote }}
+          {{- end }}
+          {{- if .Values.security.jwtAudience }}
+            - name: CHATCLI_JWT_AUDIENCE
+              value: {{ .Values.security.jwtAudience | quote }}
+          {{- end }}
+          {{- if .Values.security.jwtPublicKey }}
+            - name: CHATCLI_JWT_PUBLIC_KEY
+              value: {{ .Values.security.jwtPublicKey | quote }}
+          {{- end }}
+          {{- if .Values.security.jwtPublicKeyRef }}
+            - name: CHATCLI_JWT_PUBLIC_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.security.jwtPublicKeyRef.name }}
+                  key: {{ .Values.security.jwtPublicKeyRef.key }}
+          {{- end }}
+          {{- if .Values.security.tlsClientCA }}
+            - name: CHATCLI_SERVER_TLS_CLIENT_CA
+              value: {{ .Values.security.tlsClientCA | quote }}
+          {{- end }}
           {{- if .Values.security.rateLimitRps }}
             - name: CHATCLI_RATE_LIMIT_RPS
               value: {{ .Values.security.rateLimitRps | quote }}
