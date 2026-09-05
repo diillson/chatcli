@@ -38,7 +38,9 @@ type RateLimiterConfig struct {
 // Override via CHATCLI_RATE_LIMIT_RPS and CHATCLI_RATE_LIMIT_BURST env vars.
 func DefaultRateLimiterConfig() RateLimiterConfig {
 	rps := 10.0
-	burst := 30
+	// Burst 20 over a sustained 10 rps: two seconds of headroom for a
+	// client that batches, and no more.
+	burst := 20
 
 	if v := os.Getenv("CHATCLI_RATE_LIMIT_RPS"); v != "" {
 		if f, err := strconv.ParseFloat(v, 64); err == nil && f > 0 {

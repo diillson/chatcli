@@ -8,6 +8,7 @@ package server
 import (
 	"context"
 	"fmt"
+	"strings"
 )
 
 // UserRole defines the access level for authenticated users.
@@ -17,6 +18,18 @@ const (
 	RoleAdmin    UserRole = "admin"
 	RoleUser     UserRole = "user"
 	RoleReadonly UserRole = "readonly"
+)
+
+// Documented claim names for the same three access levels. A deployment
+// issuing tokens with role "viewer" or "operator" gets exactly the level
+// those names promise, and code comparing against RoleReadonly / RoleUser
+// keeps working unchanged, because these are aliases rather than a fourth
+// and fifth level.
+const (
+	// RoleViewer is read-only access: the "viewer" claim.
+	RoleViewer = RoleReadonly
+	// RoleOperator is day-to-day operational access: the "operator" claim.
+	RoleOperator = RoleUser
 )
 
 // UserInfo holds the identity and role information extracted from authentication.
@@ -79,16 +92,38 @@ func RequireRole(ctx context.Context, required UserRole) (*UserInfo, error) {
 	return u, nil
 }
 
-// ParseRole converts a string to UserRole, defaulting to RoleUser for unknown values.
+// ParseRole converts a role claim to a UserRole.
+//
+// An absent claim keeps the historical default of RoleUser: tokens that
+// never carried a role were minted against a server that granted them
+// that level, and silently demoting them would lock out working
+// deployments on upgrade.
+//
+// A role that is present but not recognized resolves to RoleReadonly, not
+// RoleUser. That is the direction a name typo has to fail: a token asking
+// for "vewer", or for a role this server has never heard of, must not end
+// up with write access because the switch fell through to the default.
 func ParseRole(s string) UserRole {
-	switch s {
+	role, _ := ParseRoleStrict(s)
+	return role
+}
+
+// ParseRoleStrict resolves a role claim and reports whether it was
+// recognized, so the caller can tell an unknown role from a deliberate
+// read-only one and say so in the log.
+func ParseRoleStrict(s string) (role UserRole, recognized bool) {
+	switch strings.ToLower(strings.TrimSpace(s)) {
 	case "admin":
-		return RoleAdmin
-	case "readonly":
-		return RoleReadonly
-	case "user":
-		return RoleUser
+		return RoleAdmin, true
+	case "operator", "user":
+		return RoleUser, true
+	case "viewer", "readonly":
+		return RoleReadonly, true
+	case "":
+		// No role claim at all: the pre-RBAC default, kept for tokens
+		// minted before roles existed.
+		return RoleUser, true
 	default:
-		return RoleUser
+		return RoleReadonly, false
 	}
 }

@@ -30,6 +30,38 @@ const (
 	maxTokensMax        = 200000
 	temperatureMin      = 0.0
 	temperatureMax      = 2.0
+
+	// Kubernetes naming limits (RFC 1123).
+	maxNamespaceLen    = 63
+	maxResourceNameLen = 253
+	maxKindLen         = 64
+	maxSignalTypeLen   = 128
+	maxSeverityLen     = 32
+
+	// AIOps agentic loop bounds.
+	riskScoreMin               = 0
+	riskScoreMax               = 100
+	maxAgenticSteps            = 100
+	maxAgenticHistoryEntries   = 500
+	maxInsightAnalysisBytes    = 256 * 1024 // 256KB
+	maxInsightRecommendations  = 100
+	maxInsightSuggestedActions = 100
+
+	// Interactive session (bidirectional stream) bounds.
+	maxSessionMetadataEntries    = 64
+	maxSessionMetadataKeyLen     = 128
+	maxSessionMetadataValueBytes = 8 * 1024 // 8KB
+
+	// Conversation hub bounds.
+	maxPrincipalLen          = 256
+	maxConvIDLen             = 128
+	maxChannelLen            = 64
+	maxPlatformLen           = 64
+	maxChannelUserIDLen      = 256
+	maxEventRoleLen          = 32
+	maxClientMsgIDLen        = 128
+	maxEventContentBytes     = 512 * 1024 // 500KB
+	maxConversationReadLimit = 10000
 )
 
 var sessionNameRegex = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_\-.]{0,254}$`)
@@ -44,26 +76,46 @@ func ValidationInterceptor() grpc.UnaryServerInterceptor {
 	}
 }
 
+// ValidationStreamInterceptor returns a gRPC stream interceptor that validates
+// every message a streaming RPC receives.
+//
+// A stream interceptor never sees the messages itself — the handler pulls
+// them off the stream — so validating here means wrapping the stream and
+// checking each one as it is received. That covers all three shapes: the
+// single request of a server-streaming RPC (StreamPrompt, DownloadPlugin,
+// SubscribeConversation) and every message of the bidirectional one
+// (InteractiveSession), which is the only path where a client can keep
+// sending for as long as the connection stays open.
+func ValidationStreamInterceptor() grpc.StreamServerInterceptor {
+	return func(srv interface{}, ss grpc.ServerStream, info *grpc.StreamServerInfo, handler grpc.StreamHandler) error {
+		return handler(srv, &validatingServerStream{ServerStream: ss, method: info.FullMethod})
+	}
+}
+
+// validatingServerStream validates each received message against the RPC's
+// registered validator before the handler ever sees it.
+type validatingServerStream struct {
+	grpc.ServerStream
+	method string
+}
+
+func (v *validatingServerStream) RecvMsg(m interface{}) error {
+	if err := v.ServerStream.RecvMsg(m); err != nil {
+		return err
+	}
+	if err := validateRequest(v.method, m); err != nil {
+		return status.Errorf(codes.InvalidArgument, "validation: %s", err.Error())
+	}
+	return nil
+}
+
 func validateRequest(method string, req interface{}) error {
 	// Extract the short method name from the full gRPC method path
 	parts := strings.Split(method, "/")
 	shortMethod := parts[len(parts)-1]
 
-	switch shortMethod {
-	case "SendPrompt":
-		return validateSendPrompt(req)
-	case "StreamPrompt":
-		return validateStreamPrompt(req)
-	case "SaveSession":
-		return validateSaveSession(req)
-	case "LoadSession", "DeleteSession":
-		return validateSessionName(req)
-	case "ExecuteRemotePlugin":
-		return validateExecutePlugin(req)
-	case "DownloadPlugin":
-		return validateDownloadPlugin(req)
-	case "AnalyzeIssue":
-		return validateAnalyzeIssue(req)
+	if validate, ok := requestValidators[shortMethod]; ok {
+		return validate(req)
 	}
 	return nil
 }

@@ -1,0 +1,6 @@
+{
+  "cfg.value.jwt_disabled": "not configured",
+  "server.mtls.enabled": "mutual TLS enabled: clients must present a certificate signed by the configured CA",
+  "server.mtls.load_failed": "failed to load the client CA bundle; refusing to start, because coming up without it would accept anonymous clients on a server configured for mutual TLS",
+  "server.mtls.requires_tls": "a client CA is configured but server TLS is not; mutual TLS needs --tls-cert and --tls-key to have a handshake to carry the client certificate"
+}
