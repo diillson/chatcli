@@ -19,6 +19,17 @@
  * prompt cache and, on models that check it, the thinking-block
  * conversation are matched against.
  *
+ * A note on the shape itself, because it diverges from the reference
+ * implementation on purpose. Claude Code — Anthropic's own CLI, same
+ * models, first-party access — does not use role:"system" inside messages
+ * anywhere; when it needs to say something mid-conversation it builds
+ * synthetic user messages with a caveat tag asking the model not to answer
+ * them. That is the form ChatCLI used before this. We take the channel the
+ * API opened for exactly this instead, which is a real capability the
+ * workaround does not have. It is also a beta that has broken twice, so it
+ * is switchable: TurnScopedSystemEnv turns it off and the user-role block
+ * comes back, with no other behavior changed.
+ *
  * The decision lives here rather than in one provider's client because
  * nothing about it is provider-specific except the answer. It is read from
  * the model catalog, so every surface that serves a capable model — the
@@ -56,6 +67,7 @@
 package client
 
 import (
+	"os"
 	"strings"
 
 	"github.com/diillson/chatcli/llm/catalog"
@@ -87,10 +99,30 @@ type TurnScopedSystem struct {
 	Content string
 }
 
+// TurnScopedSystemEnv turns the turn-scoped system message off, so the
+// per-turn block travels as the user-role message it always was.
+//
+// Every other wire feature here has a switch — the context engine, the
+// cache TTL. This one shipped without one, and when it broke the only way
+// out was to change model. That is the gap this closes; it is not a
+// second name for an existing setting.
+const TurnScopedSystemEnv = "CHATCLI_TURN_SCOPED_SYSTEM"
+
+// turnScopedSystemDisabled reports whether the user asked for the old
+// form. Only an explicit off disables it, so a typo cannot silently turn
+// a capability off.
+func turnScopedSystemDisabled() bool {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv(TurnScopedSystemEnv))) {
+	case "off", "false", "0", "no":
+		return true
+	}
+	return false
+}
+
 // SupportsTurnScopedSystem reports whether this provider and model take a
 // turn-scoped system message. Everything else keeps the user-role block.
 func SupportsTurnScopedSystem(provider, model string) bool {
-	if strings.TrimSpace(model) == "" {
+	if strings.TrimSpace(model) == "" || turnScopedSystemDisabled() {
 		return false
 	}
 	return catalog.HasCapability(provider, model, MidConversationSystemCapability)
