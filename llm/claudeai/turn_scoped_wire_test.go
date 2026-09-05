@@ -6,6 +6,9 @@
 package claudeai
 
 import (
+	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/diillson/chatcli/llm/catalog"
@@ -211,5 +214,70 @@ func TestTurnScoped_SecondTurnStillCarriesContext(t *testing.T) {
 	messages, _ = c.buildMessagesAndSystem("second question", turn2)
 	if got := renderedTurnContextBlocks(messages); got != 1 {
 		t.Fatalf("turn 2 rendered %d blocks, want exactly 1 — 0 means the model lost its context, 2 means the earlier one never cleared", got)
+	}
+}
+
+// TestOAuthBuildMessages_CarriesTheBlockToo closes the surface Audit VI
+// found missing. The Anthropic client has three message builders, not
+// two: the API-key path, the tool loop, and this one for OAuth sessions.
+// Only the first two were wired, so an OAuth session kept sending the
+// block as a user message while the other two sent a system message —
+// the same conversation serialized two ways depending on how the user
+// had authenticated.
+func TestOAuthBuildMessages_CarriesTheBlockToo(t *testing.T) {
+	c := &ClaudeClient{model: "claude-opus-5", logger: zap.NewNop()}
+	messages, _ := c.buildOAuthMessagesAndSystem("second question", turnScopedHistory())
+
+	var roles []string
+	for _, m := range messages {
+		roles = append(roles, roleAt(m))
+	}
+	want := []string{"user", "assistant", "user", "system"}
+	if len(roles) != len(want) {
+		t.Fatalf("roles = %v, want %v", roles, want)
+	}
+	for i := range want {
+		if roles[i] != want[i] {
+			t.Fatalf("roles = %v, want %v — the OAuth builder must place the block like the other two", roles, want)
+		}
+	}
+	if clearAtOf(messages[len(messages)-1]) != client.ClearAtNextUserMessage {
+		t.Fatal("the OAuth path must scope the block to the turn too")
+	}
+
+	// The OAuth header helper sets anthropic-beta wholesale, so the
+	// clear_at opt-in has to be appended after it rather than replaced by
+	// it. Without the flag the field is rejected as an unknown field.
+	req := httptest.NewRequest(http.MethodPost, "https://api.anthropic.com/v1/messages", nil)
+	applyOAuthHeaders(req, "tok")
+	c.applyTurnScopedSystemBeta(req)
+	betas := req.Header.Get("anthropic-beta")
+	if !strings.Contains(betas, client.TurnScopedSystemBeta) {
+		t.Fatalf("anthropic-beta = %q, want the clear_at beta appended", betas)
+	}
+	if !strings.Contains(betas, oauthAnthropicBeta) {
+		t.Fatalf("anthropic-beta = %q, the OAuth betas must survive", betas)
+	}
+}
+
+// TestOAuthBuildMessages_UnsupportedModelIsUnchanged keeps the OAuth path
+// under the same no-regression rule as the others.
+func TestOAuthBuildMessages_UnsupportedModelIsUnchanged(t *testing.T) {
+	c := &ClaudeClient{model: "claude-sonnet-5", logger: zap.NewNop()}
+	messages, _ := c.buildOAuthMessagesAndSystem("second question", turnScopedHistory())
+	for _, m := range messages {
+		if clearAtOf(m) != "" {
+			t.Fatal("a model without the capability must never receive clear_at")
+		}
+	}
+	if c.turnScoped.Used() {
+		t.Fatal("nothing was emitted, so no beta may be declared")
+	}
+	req := httptest.NewRequest(http.MethodPost, "https://api.anthropic.com/v1/messages", nil)
+	applyOAuthHeaders(req, "tok")
+	before := req.Header.Get("anthropic-beta")
+	c.applyTurnScopedSystemBeta(req)
+	if req.Header.Get("anthropic-beta") != before {
+		t.Fatal("a request carrying no turn-scoped message must carry no extra beta")
 	}
 }

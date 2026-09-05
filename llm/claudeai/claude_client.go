@@ -635,8 +635,12 @@ func (c *ClaudeClient) buildOAuthMessagesAndSystem(prompt string, history []mode
 	var messages []map[string]interface{}
 	var systemParts []string
 	var structuredParts []map[string]interface{}
+	turnScoped := client.NewTurnContextEmitter(catalog.ProviderClaudeAI, c.model)
 
 	for _, msg := range history {
+		if turnScoped.Claim(msg) {
+			continue
+		}
 		switch strings.ToLower(strings.TrimSpace(msg.Role)) {
 		case "assistant":
 			messages = append(messages, map[string]interface{}{
@@ -665,6 +669,8 @@ func (c *ClaudeClient) buildOAuthMessagesAndSystem(prompt string, history []mode
 				"content": visionwire.AnthropicOAuthContent(msg.Content, msg.Images),
 			})
 		}
+		// One position later than the history holds it: see the emitter.
+		messages = appendTurnScoped(messages, turnScoped)
 	}
 
 	if len(history) == 0 || history[len(history)-1].Role != "user" || history[len(history)-1].Content != prompt {
@@ -675,6 +681,10 @@ func (c *ClaudeClient) buildOAuthMessagesAndSystem(prompt string, history []mode
 			})
 		}
 	}
+	// A block claimed on the last history entry: the prompt above is the
+	// user message it belongs to.
+	messages = appendTurnScoped(messages, turnScoped)
+	c.turnScoped = turnScoped
 
 	systemObjs := []interface{}{
 		oauthTextBlock(oauthBaseSystemPrompt),
