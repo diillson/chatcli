@@ -1184,6 +1184,7 @@ func (cli *ChatCLI) showConfigIntegrations(ctx context.Context) {
 			kv(p, "· "+pl.Name(), fmt.Sprintf("v%s — %s", pl.Version(), shorten(pl.Description(), 50)))
 		}
 		kv(p, "CHATCLI_ALLOW_UNSIGNED_PLUGINS", envBool("CHATCLI_ALLOW_UNSIGNED_PLUGINS"))
+		kv(p, "CHATCLI_PLUGIN_QUARANTINE", envOr("CHATCLI_PLUGIN_QUARANTINE"))
 	}
 
 	fmt.Println(p)
@@ -1457,6 +1458,7 @@ func (cli *ChatCLI) showConfigSecurity() {
 	fmt.Println(p)
 	subheader(p, "cfg.sub.sec.plugins")
 	kv(p, "CHATCLI_ALLOW_UNSIGNED_PLUGINS", envBool("CHATCLI_ALLOW_UNSIGNED_PLUGINS"))
+	kv(p, "CHATCLI_PLUGIN_QUARANTINE", envOr("CHATCLI_PLUGIN_QUARANTINE"))
 
 	sectionEnd(ColorRed)
 }

@@ -86,6 +86,7 @@ var reloadableEnvVars = []string{
 	// Security, sessions, memory, hub, telemetry: a value removed from
 	// .env must not survive /reload.
 	"CHATCLI_ENCRYPTION_KEY", "CHATCLI_AUDIT_LOG_PATH", "CHATCLI_ENV_REDACT_MODE", "CHATCLI_MANAGED_CONFIG",
+	"CHATCLI_ALLOW_UNSIGNED_PLUGINS", "CHATCLI_PLUGIN_QUARANTINE",
 	"CHATCLI_PROJECT_ENV",
 	"CHATCLI_SESSION_TRANSCRIPT", "CHATCLI_SESSION_TTL", "CHATCLI_GATEWAY_MAX_TENANTS", "CHATCLI_HUB_TTL_HOURS",
 	"CHATCLI_MEMORY_MODE", "CHATCLI_MEMORY_ENABLED", "CHATCLI_MEMORY_AUTORECALL", "CHATCLI_SESSION_AUTORECALL",
@@ -398,6 +399,7 @@ func (cli *ChatCLI) showHelp() {
 	printCommand("/plugin install <url>", i18n.T("help.command.plugin_install"))
 	printCommand("/plugin show <nome>", i18n.T("help.command.plugin_show"))
 	printCommand("/plugin inspect <nome>", i18n.T("help.command.plugin_inspect"))
+	printCommand("/plugin quarantine [release <nome>]", i18n.T("help.command.plugin_quarantine"))
 
 	fmt.Printf("\n  %s\n", colorize(i18n.T("help.section.persona"), ColorLime))
 	printCommand("/agent list", i18n.T("help.command.persona_list"))
