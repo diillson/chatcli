@@ -958,6 +958,16 @@ func (a *AgentMode) clientAndCtxForTurn(ctx context.Context) (llmclient.LLMClien
 	return turnClient, ctx
 }
 
+// resetPerRunState clears the state that belongs to one Run. AgentMode is
+// a single instance for the session, so anything a run leaves behind is
+// read by the next one as if it were its own.
+func (a *AgentMode) resetPerRunState() {
+	if a == nil {
+		return
+	}
+	a.taskBudgetTotal = 0
+}
+
 // effectiveRoute reports the provider and model that actually serve the
 // current turn: the AI's @model route override first, then the skill
 // frontmatter hint, then the session's own pair (with the same env/config
@@ -1002,6 +1012,14 @@ func (a *AgentMode) Run(ctx context.Context, query string, additionalContext str
 		return fmt.Errorf("agent: another Run is already in flight on this AgentMode instance")
 	}
 	defer a.runInflight.Store(false)
+
+	// Per-run state, reset here because AgentMode is one instance for the
+	// whole session: the second run of a session inherits whatever the
+	// first left behind. The task budget's ceiling is fixed on the first
+	// turn that has one, so without this the "run" ceiling was the
+	// session's — every later run announced a total it had already spent
+	// most of, and the model wound down a task that had barely started.
+	a.resetPerRunState()
 
 	// Register the orchestrator itself in the process-wide run registry.
 	// Workers, subagents and MoA members spawned from this loop inherit the

@@ -174,6 +174,20 @@ func expandSourcePaths(paths []string) []string {
 // when something changed. Contexts created before source paths were
 // recorded cannot refresh: re-run /context update <name> <paths> once.
 func (m *Manager) RefreshContext(ctx context.Context, name string) (*FileContext, RefreshReport, error) {
+	return m.rescanContext(ctx, name, true)
+}
+
+// rescanContext re-scans a context's sources, with the reseal made an
+// explicit choice of the caller rather than a side effect.
+//
+// Adopting a seal re-cuts the corpus and makes it re-earn its vectors.
+// That is the right price for a command the user typed, and the wrong one
+// for a file save: the watcher refreshes on its own schedule, and a
+// corpus that silently re-embedded because someone touched a file would
+// spend on a migration nobody asked for, at a moment nobody chose. The
+// watcher refreshes content only; /context refresh is what moves a
+// corpus onto the current seals.
+func (m *Manager) rescanContext(ctx context.Context, name string, reseal bool) (*FileContext, RefreshReport, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -222,8 +236,12 @@ func (m *Manager) RefreshContext(ctx context.Context, name string) (*FileContext
 	// and until now it never wrote them — a context created before either
 	// seal stayed on the old cut and the bare indexed text no matter how
 	// often it was refreshed.
-	resealed := applyIndexSeals(fc)
-	rep.Resealed = resealed
+	// Checked, not written: the seal only becomes true once the context it
+	// belongs to is on disk. Writing it here and failing to save below
+	// would leave memory claiming a shape the stored corpus does not have
+	// — the retrieval cache would invalidate and re-embed, and the next
+	// process would read the old seal off disk and re-embed again.
+	rep.Resealed = reseal && indexSealsDiffer(fc)
 	if !rep.Dirty() && len(fc.FileStamps) > 0 {
 		// Nothing moved: keep UpdatedAt so retrieval caches and the
 		// vector index stay valid as they are.
@@ -261,7 +279,18 @@ func (m *Manager) RefreshContext(ctx context.Context, name string) (*FileContext
 		fc.ChunkStrategy = string(ChunkSmart)
 	}
 	fc.UpdatedAt = time.Now()
+	sealedNow := false
+	if rep.Resealed {
+		sealedNow = applyIndexSeals(fc)
+	}
 	if err := m.Storage.SaveContext(fc); err != nil {
+		if sealedNow {
+			// The corpus on disk never gained the seal, so neither does
+			// the one in memory: both stay on the shape whose vectors are
+			// already paid for, and the next refresh tries again.
+			clearIndexSeals(fc)
+			rep.Resealed = false
+		}
 		return fc, rep, fmt.Errorf("erro ao salvar contexto: %w", err)
 	}
 	m.logger.Info("context refreshed", zap.String("context", name), zap.String("report", rep.String()))
