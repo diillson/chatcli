@@ -154,6 +154,7 @@ var envDefaults = map[string]envDefault{
 	"CHATCLI_MANAGED_CONFIG":               {Value: "(/etc/chatcli/managed.env · %ProgramData%\\chatcli\\managed.env)", Source: "config/managed.go (org defaults; !KEY=value locks)"},
 	"CHATCLI_PROMPT_CACHE_EXPLICIT":        {Value: "false", Source: "llm/client/cache_resources.go (Gemini cachedContents; bills storage per token-hour)"},
 	"CHATCLI_WHATSAPP_APP_SECRET":          {Value: "", Source: "cli/gateway/whatsapp.go (Meta app secret; inbound deliveries are refused without it)"},
+	"CHATCLI_TURN_SCOPED_SYSTEM":           {Value: "on", Source: "llm/client/turn_context_wire.go (on | off — off sends the per-turn block as a user message, the form used before the mid-conversation system message)"},
 	"CHATCLI_CONTEXT_ENGINE":               {Value: "builtin", Source: "extension_providers.go (builtin | provider — the model's server-side context editing | provider-compact — editing plus server-side summarization | mcp:<server> with a context_compact tool)"},
 	"CHATCLI_MEMORY_PROVIDER":              {Value: "builtin", Source: "extension_providers.go (builtin | mcp:<server> alongside the embedded memory | mcp-only:<server> external only)"},
 	"CHATCLI_COMPACT_MODEL":                {Value: "(session client)", Source: "compact_config.go (PROVIDER:model for Level 2 summaries)"},
