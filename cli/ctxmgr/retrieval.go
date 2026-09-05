@@ -592,7 +592,10 @@ func (e *RetrievalEngine) embedMissing(ctx context.Context, entry *lexCacheEntry
 // contextFingerprint identifies one revision of a context's content; caches
 // keyed by it invalidate exactly when the context is updated.
 func contextFingerprint(fc *FileContext) string {
-	return fmt.Sprintf("%s|%d|%d|%s", fc.UpdatedAt.UTC().Format("20060102T150405.000"), fc.FileCount, fc.TotalSize, KnowledgeNormalizeMode())
+	// The seals belong here: they decide how the corpus is cut and what
+	// text each passage is indexed by, so a context that gains one has to
+	// be re-derived even though not one of its files moved.
+	return fmt.Sprintf("%s|%d|%d|%s|%s", fc.UpdatedAt.UTC().Format("20060102T150405.000"), fc.FileCount, fc.TotalSize, KnowledgeNormalizeMode(), indexSeal(fc))
 }
 
 // normalizeHits min-max-normalizes BM25 scores to [0,1] by segment index.

@@ -44,14 +44,23 @@ type RefreshReport struct {
 	Added     int
 	Removed   int
 	Unchanged int
+	// Resealed marks a refresh that moved the context onto the current
+	// segmenter and situating versions. It makes the refresh dirty on its
+	// own: not one file has to have moved for the passages to be cut
+	// differently and indexed by different text.
+	Resealed bool
 }
 
 // Dirty reports whether anything changed.
-func (r RefreshReport) Dirty() bool { return r.Changed+r.Added+r.Removed > 0 }
+func (r RefreshReport) Dirty() bool { return r.Changed+r.Added+r.Removed > 0 || r.Resealed }
 
 // String renders the report compactly (for notices and logs).
 func (r RefreshReport) String() string {
-	return fmt.Sprintf("changed=%d added=%d removed=%d unchanged=%d", r.Changed, r.Added, r.Removed, r.Unchanged)
+	base := fmt.Sprintf("changed=%d added=%d removed=%d unchanged=%d", r.Changed, r.Added, r.Removed, r.Unchanged)
+	if r.Resealed {
+		base += " resealed=true"
+	}
+	return base
 }
 
 // contentHash is the stamp hash of a file body.
@@ -206,6 +215,15 @@ func (m *Manager) RefreshContext(ctx context.Context, name string) (*FileContext
 	}
 	freshStamps := stampFiles(files)
 	rep := diffStamps(fc.FileStamps, files, freshStamps)
+	// A refresh is also how a context adopts the seals it was created
+	// before. Creation tags every new context with the current segmenter
+	// and situating versions and leaves older corpora on the shape they
+	// already paid vectors for; the way off that shape is this command,
+	// and until now it never wrote them — a context created before either
+	// seal stayed on the old cut and the bare indexed text no matter how
+	// often it was refreshed.
+	resealed := applyIndexSeals(fc)
+	rep.Resealed = resealed
 	if !rep.Dirty() && len(fc.FileStamps) > 0 {
 		// Nothing moved: keep UpdatedAt so retrieval caches and the
 		// vector index stay valid as they are.

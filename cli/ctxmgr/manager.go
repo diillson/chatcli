@@ -179,10 +179,7 @@ func (m *Manager) CreateContext(ctx context.Context, name, description string, p
 	// indexed with a situating header. Both are tagged rather than global
 	// so corpora indexed before them keep the ids and vectors they already
 	// paid for; a /context refresh re-indexes into the new shape.
-	knowledgeMeta := map[string]string{
-		segmenterMetaKey: segmenterV2,
-		situatedMetaKey:  situatedV1,
-	}
+	knowledgeMeta := currentIndexSeals()
 	var files []utils.FileInfo
 	var scanPaths []string
 	if mode == ModeKnowledge {
