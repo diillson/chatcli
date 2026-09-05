@@ -1077,11 +1077,21 @@ func (cli *ChatCLI) getPluginSuggestions(d prompt.Document) []prompt.Suggest {
 			{Text: "show", Description: i18n.T("complete.plugin.sub_show")},
 			{Text: "inspect", Description: i18n.T("complete.plugin.sub_inspect")},
 			{Text: "uninstall", Description: i18n.T("complete.plugin.sub_uninstall")},
+			{Text: "quarantine", Description: i18n.T("complete.plugin.sub_quarantine")},
 		}
 		return prompt.FilterHasPrefix(suggestions, d.GetWordBeforeCursor(), true)
 	}
 
 	subcommand := args[1]
+	if subcommand == "quarantine" {
+		if len(args) == 2 || (len(args) == 3 && !strings.HasSuffix(line, " ")) {
+			return prompt.FilterHasPrefix([]prompt.Suggest{
+				{Text: "list", Description: i18n.T("complete.plugin.quarantine_list")},
+				{Text: "release", Description: i18n.T("complete.plugin.quarantine_release")},
+			}, d.GetWordBeforeCursor(), true)
+		}
+		return []prompt.Suggest{}
+	}
 	// Sugerir nomes de plugins para subcomandos que precisam de um nome
 	if subcommand == "show" || subcommand == "inspect" || subcommand == "uninstall" {
 		if len(args) == 2 || (len(args) == 3 && !strings.HasSuffix(line, " ")) {

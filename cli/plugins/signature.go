@@ -66,23 +66,70 @@ func NewPluginVerifier() *PluginVerifier {
 	return v
 }
 
+// VerificationStatus is what inspecting a plugin's signature concluded.
+//
+// The three outcomes call for different handling and must not collapse into
+// one error value: a verified plugin loads, an unsigned one is subject to
+// whatever policy covers unsigned plugins, and one whose signature does not
+// check out is refused outright.
+type VerificationStatus int
+
+const (
+	// StatusVerified means a signature was present and matched a trusted key.
+	StatusVerified VerificationStatus = iota
+	// StatusUnsigned means no signature file sits beside the binary.
+	StatusUnsigned
+	// StatusUntrusted means a signature was present and did not verify: a
+	// malformed file, or a mismatch against keys this machine does trust.
+	StatusUntrusted
+	// StatusUnverifiable means a signature was present and this machine has
+	// no trusted key to check it against. It is distinct from
+	// StatusUntrusted because nothing here contradicts anything: signatures
+	// simply are not in use on this machine, which makes such a plugin no
+	// more suspect than an unsigned one.
+	StatusUnverifiable
+)
+
+// Inspect reports what the signature says, without consulting policy.
+//
+// VerifyPlugin folds "unsigned, and unsigned is allowed" into a nil error,
+// which is the right answer to "may this load?" and the wrong one for a
+// caller that needs to treat unsigned plugins differently — quarantine, or
+// a status display. Inspect answers the factual question and leaves the
+// policy to the caller.
+func (v *PluginVerifier) Inspect(pluginPath string) (VerificationStatus, error) {
+	sigPath := filepath.Clean(pluginPath + SignatureSuffix)
+
+	sigData, err := os.ReadFile(sigPath) // #nosec G304 -- path derived from plugin dir, validated by manager
+	if err != nil {
+		if os.IsNotExist(err) {
+			return StatusUnsigned, ErrNoSignature
+		}
+		return StatusUntrusted, fmt.Errorf("failed to read signature file: %w", err)
+	}
+	if err := v.verifySignature(pluginPath, sigData); err != nil {
+		if errors.Is(err, ErrNoTrustedKeys) {
+			return StatusUnverifiable, err
+		}
+		return StatusUntrusted, err
+	}
+	return StatusVerified, nil
+}
+
 // VerifyPlugin checks the Ed25519 signature of a plugin binary.
 // The .sig file must be adjacent to the plugin (e.g., myplugin.sig for myplugin).
 // .sig format: first line is base64-encoded Ed25519 signature of the plugin's SHA256 hash.
 func (v *PluginVerifier) VerifyPlugin(pluginPath string) error {
-	sigPath := filepath.Clean(pluginPath + ".sig")
-
-	// Read signature file
-	sigData, err := os.ReadFile(sigPath) // #nosec G304 -- path derived from plugin dir, validated by manager
-	if err != nil {
-		if os.IsNotExist(err) {
-			if v.allowUnsigned {
-				return nil // development mode
-			}
-			return ErrNoSignature
-		}
-		return fmt.Errorf("failed to read signature file: %w", err)
+	status, err := v.Inspect(pluginPath)
+	if v.allowUnsigned && (status == StatusUnsigned || status == StatusUnverifiable) {
+		return nil // development mode
 	}
+	return err
+}
+
+// verifySignature checks signature bytes against the plugin binary and the
+// trusted keys.
+func (v *PluginVerifier) verifySignature(pluginPath string, sigData []byte) error {
 
 	// Parse signature (first line is base64-encoded signature)
 	lines := strings.SplitN(strings.TrimSpace(string(sigData)), "\n", 2)
@@ -109,9 +156,6 @@ func (v *PluginVerifier) VerifyPlugin(pluginPath string) error {
 
 	// Verify against trusted keys
 	if len(v.trustedKeys) == 0 {
-		if v.allowUnsigned {
-			return nil
-		}
 		return ErrNoTrustedKeys
 	}
 

@@ -1,7 +1,6 @@
 package plugins
 
 import (
-	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -25,6 +24,7 @@ type Manager struct {
 	mu         sync.RWMutex
 	watcher    *fsnotify.Watcher
 	closeOnce  sync.Once
+	quarantine *Quarantine
 }
 
 func NewManager(logger *zap.Logger) (*Manager, error) {
@@ -51,6 +51,7 @@ func NewManager(logger *zap.Logger) (*Manager, error) {
 		pluginsDir: pluginsDir,
 		logger:     logger,
 		watcher:    watcher,
+		quarantine: NewQuarantine(pluginsDir),
 	}
 	m.Reload()
 	go m.watchForChanges()
@@ -136,21 +137,57 @@ func (m *Manager) Reload() {
 		m.logger.Warn("SECURITY: unsigned plugins are allowed (CHATCLI_ALLOW_UNSIGNED_PLUGINS=true) — disable in production")
 	}
 
+	// The quarantine window is read fresh, so /reload picks up a change to
+	// CHATCLI_PLUGIN_QUARANTINE the same way every other reloadable setting
+	// is picked up.
+	m.quarantine = NewQuarantine(m.pluginsDir)
+	if raw, bad := ConfiguredButUnparseable(); bad {
+		m.logger.Warn("CHATCLI_PLUGIN_QUARANTINE is not a duration; quarantine stays off",
+			zap.String("value", raw))
+	}
+
+	present := make(map[string]struct{}, len(entries))
+
 	for _, entry := range entries {
 		if strings.HasSuffix(entry.Name(), ".sig") || strings.HasPrefix(entry.Name(), ".") {
 			continue // skip signature files and hidden files
 		}
 		pluginPath := filepath.Join(m.pluginsDir, entry.Name())
+		present[entry.Name()] = struct{}{}
 
-		// Verify plugin signature
-		if err := verifier.VerifyPlugin(pluginPath); err != nil {
-			if errors.Is(err, ErrNoSignature) && verifier.AllowsUnsigned() {
-				m.logger.Warn("Loading unsigned plugin (dev mode)", zap.String("plugin", entry.Name()))
-			} else {
-				m.logger.Warn("Plugin signature verification failed, skipping",
+		// Inspect the signature, then apply policy. The two are separate
+		// because "unsigned" and "signature does not verify" are different
+		// facts that call for different handling.
+		switch status, err := verifier.Inspect(pluginPath); status {
+		case StatusVerified:
+			// Signed by a key this machine trusts: load it.
+
+		case StatusUnsigned, StatusUnverifiable:
+			// Unverifiable joins unsigned here on purpose: with no trusted
+			// key on this machine, a signature is not evidence of anything,
+			// so it neither helps nor should it start refusing a plugin that
+			// loaded before.
+			if !verifier.AllowsUnsigned() {
+				m.logger.Warn("Plugin signature cannot be trusted and unsigned plugins are not allowed, skipping",
 					zap.String("plugin", entry.Name()), zap.Error(err))
 				continue
 			}
+			// Unsigned, and unsigned is tolerated. Quarantine — when
+			// configured — is the remaining gate: a binary that just
+			// appeared waits before it can run with this process's
+			// permissions.
+			if admitted, remaining := m.quarantine.Admit(pluginPath); !admitted {
+				m.logger.Warn("Plugin held in quarantine",
+					zap.String("plugin", entry.Name()),
+					zap.Duration("remaining", remaining.Round(time.Second)))
+				continue
+			}
+			m.logger.Warn("Loading unsigned plugin (dev mode)", zap.String("plugin", entry.Name()))
+
+		default:
+			m.logger.Warn("Plugin signature verification failed, skipping",
+				zap.String("plugin", entry.Name()), zap.Error(err))
+			continue
 		}
 
 		plugin, err := NewPluginFromPath(pluginPath)
@@ -168,7 +205,25 @@ func (m *Manager) Reload() {
 		}
 	}
 
+	// A plugin that is gone must not leave a record that would admit a
+	// future binary of the same name without its own waiting period.
+	if m.quarantine.Enabled() {
+		for _, e := range m.quarantine.List() {
+			if _, still := present[e.Name]; !still {
+				m.quarantine.Forget(e.Name)
+			}
+		}
+	}
+
 	m.logger.Info("Plugins recarregados.", zap.Int("count", len(m.plugins)))
+}
+
+// Quarantine exposes the gate so the /plugin surface can list what is
+// waiting and release a reviewed binary.
+func (m *Manager) Quarantine() *Quarantine {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.quarantine
 }
 
 func (m *Manager) GetPlugin(name string) (Plugin, bool) {

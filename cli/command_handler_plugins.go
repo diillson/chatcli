@@ -14,6 +14,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"time"
 
 	"github.com/diillson/chatcli/auth"
 	"github.com/diillson/chatcli/config"
@@ -206,6 +207,9 @@ func (ch *CommandHandler) handlePluginCommand(userInput string) {
 		fmt.Println(i18n.T("plugin.reloading"))
 		pluginManager.Reload()
 		fmt.Println(i18n.T("plugin.reload_success"))
+
+	case "quarantine":
+		ch.pluginQuarantine(args)
 
 	default:
 		fmt.Println(i18n.T("plugin.error.unknown_subcommand", subcommand))
@@ -439,4 +443,56 @@ func parseGitURL(rawURL string) (cloneURL, branch, subDir string) {
 
 	// Plain URL — return as-is.
 	return rawURL, "", ""
+}
+
+// pluginQuarantine implements /plugin quarantine [list|release <name>].
+//
+// The gate lives in the plugin manager, so the REPL asks it rather than
+// re-reading state: what /plugin quarantine shows is what the loader used.
+func (ch *CommandHandler) pluginQuarantine(args []string) {
+	q := ch.cli.pluginManager.Quarantine()
+	if !q.Enabled() {
+		fmt.Println(i18n.T("plugincli.quarantine.disabled"))
+		return
+	}
+
+	sub := "list"
+	if len(args) > 2 {
+		sub = args[2]
+	}
+
+	switch sub {
+	case "list":
+		entries := q.List()
+		if len(entries) == 0 {
+			fmt.Println(i18n.T("plugincli.quarantine.empty", q.Window().String()))
+			return
+		}
+		fmt.Println(i18n.T("plugincli.quarantine.header", q.Window().String()))
+		for _, e := range entries {
+			switch {
+			case e.Released:
+				fmt.Println(i18n.T("plugincli.quarantine.row_released", e.Name))
+			case e.Remaining > 0:
+				fmt.Println(i18n.T("plugincli.quarantine.row_waiting", e.Name, e.Remaining.Round(time.Second).String()))
+			default:
+				fmt.Println(i18n.T("plugincli.quarantine.row_admitted", e.Name))
+			}
+		}
+
+	case "release":
+		if len(args) < 4 {
+			fmt.Println(i18n.T("plugincli.quarantine.release_name_required"))
+			return
+		}
+		if err := q.Release(args[3]); err != nil {
+			fmt.Println(i18n.T("plugincli.verify.failed", err))
+			return
+		}
+		fmt.Println(i18n.T("plugincli.quarantine.released", args[3]))
+		ch.cli.pluginManager.Reload()
+
+	default:
+		fmt.Println(i18n.T("plugincli.quarantine.unknown_verb", sub))
+	}
 }

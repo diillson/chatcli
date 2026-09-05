@@ -54,6 +54,16 @@ func dispatchSubcommand() bool {
 			os.Exit(1)
 		}
 		return true
+	case "plugin":
+		// Plugin supply chain (keygen/sign/verify/trust/quarantine) — key
+		// management an operator or a CI job runs, so it boots no further
+		// than `chatcli mcp` does.
+		i18n.Init()
+		if err := cmd.RunPluginCLI(os.Args[2:]); err != nil {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			os.Exit(1)
+		}
+		return true
 	}
 	return false
 }
