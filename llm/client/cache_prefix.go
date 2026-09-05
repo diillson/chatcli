@@ -248,15 +248,44 @@ type AnthropicMessages struct {
 	List []interface{}
 }
 
-// last returns the final message of whichever list is populated.
-func (m AnthropicMessages) last() map[string]interface{} {
-	if n := len(m.Maps); n > 0 {
-		return m.Maps[n-1]
+// at returns message i of whichever list is populated.
+func (m AnthropicMessages) at(i int) map[string]interface{} {
+	if len(m.Maps) > 0 {
+		return m.Maps[i]
 	}
-	if n := len(m.List); n > 0 {
-		if last, ok := m.List[n-1].(map[string]interface{}); ok {
-			return last
+	if msg, ok := m.List[i].(map[string]interface{}); ok {
+		return msg
+	}
+	return nil
+}
+
+// count is how many messages the request carries.
+func (m AnthropicMessages) count() int {
+	if n := len(m.Maps); n > 0 {
+		return n
+	}
+	return len(m.List)
+}
+
+// lastMarkable returns the final message that can carry the rolling cache
+// breakpoint, walking past trailing turn-scoped system messages.
+//
+// A system message inside messages is a new shape: it did not exist when
+// the breakpoint was written, and it rejects cache_control outright. It
+// also sits last whenever the current turn carries per-turn context — so
+// a marker placed on "the final message" stopped being placed at all, and
+// the whole conversation quietly stopped being a cacheable prefix on every
+// model that takes the form.
+func (m AnthropicMessages) lastMarkable() map[string]interface{} {
+	for i := m.count() - 1; i >= 0; i-- {
+		msg := m.at(i)
+		if msg == nil {
+			return nil
 		}
+		if role, _ := msg["role"].(string); strings.EqualFold(role, "system") {
+			continue
+		}
+		return msg
 	}
 	return nil
 }
@@ -268,12 +297,14 @@ func (m AnthropicMessages) last() map[string]interface{} {
 // element type, and adapter content types that marshal to one of those.
 // Empty content is left alone — the API rejects empty text blocks — and so
 // is a request whose last message is an assistant turn (a prefill), which
-// must stay unmarked.
+// must stay unmarked. Trailing turn-scoped system messages are walked past
+// rather than marked: they reject cache_control, and the breakpoint
+// belongs on the turn behind them.
 func MarkAnthropicHistoryBreakpoint(messages AnthropicMessages, marker CacheMarker) {
 	if marker == nil {
 		return
 	}
-	last := messages.last()
+	last := messages.lastMarkable()
 	if last == nil {
 		return
 	}

@@ -380,3 +380,72 @@ func TestTurnScoped_PlacementIsLegalOnEveryHistoryShape(t *testing.T) {
 		})
 	}
 }
+
+// countCacheBreakpoints counts the cache_control markers a request carries
+// on its message array.
+func countCacheBreakpoints(messages []map[string]interface{}) int {
+	n := 0
+	for _, m := range messages {
+		blocks, ok := m["content"].([]map[string]interface{})
+		if !ok {
+			continue
+		}
+		for _, b := range blocks {
+			if _, marked := b["cache_control"]; marked {
+				n++
+			}
+		}
+	}
+	return n
+}
+
+// TestTurnScoped_HistoryStaysCacheable covers what fixing the 400 cost.
+// The rolling breakpoint marks the last message so the whole conversation
+// becomes a cacheable prefix, and it gives up when that message is not a
+// user turn — a guard written for assistant prefills, before a system
+// message could appear inside the array at all.
+//
+// Putting the block at the end of the array made that guard fire on every
+// turn: no breakpoint, no cached prefix, and nothing said so. The block
+// itself can never carry the marker — cache_control is rejected on a
+// turn-scoped message — so the breakpoint belongs on the turn behind it.
+func TestTurnScoped_HistoryStaysCacheable(t *testing.T) {
+	history := []models.Message{
+		{Role: "system", Content: "sys"},
+		{Role: "user", Content: "q1"},
+		{Role: "assistant", Content: "a1"},
+		models.TurnContextMessage("[TURN CONTEXT] today is 2026-09-05"),
+		{Role: "user", Content: "q2"},
+	}
+
+	for _, model := range []string{"claude-opus-5", "claude-fable-5-1", "claude-sonnet-5"} {
+		t.Run(model, func(t *testing.T) {
+			c := &ClaudeClient{model: model, logger: zap.NewNop()}
+			messages, _ := c.buildMessagesAndSystem("q2", history)
+			client.MarkAnthropicHistoryBreakpoint(client.AnthropicMessages{Maps: messages}, client.AnthropicCacheMarker())
+
+			if got := countCacheBreakpoints(messages); got != 1 {
+				t.Fatalf("%s: %d cache breakpoints, want 1 — the conversation must stay a cacheable prefix", model, got)
+			}
+			// The marker must never land on the block itself.
+			for _, m := range messages {
+				if roleAt(m) != "system" {
+					continue
+				}
+				if _, ok := m["cache_control"]; ok {
+					t.Fatal("cache_control is rejected on a turn-scoped system message")
+				}
+			}
+		})
+	}
+
+	// An assistant prefill still stays unmarked: the guard this walks past
+	// exists for that case and must survive.
+	c := &ClaudeClient{model: "claude-opus-5", logger: zap.NewNop()}
+	prefill := append(append([]models.Message{}, history...), models.Message{Role: "assistant", Content: "partial"})
+	messages, _ := c.buildMessagesAndSystem("", prefill)
+	client.MarkAnthropicHistoryBreakpoint(client.AnthropicMessages{Maps: messages}, client.AnthropicCacheMarker())
+	if got := countCacheBreakpoints(messages); got != 0 {
+		t.Fatalf("an assistant prefill must stay unmarked, got %d breakpoints", got)
+	}
+}
