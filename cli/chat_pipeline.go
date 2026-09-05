@@ -746,13 +746,22 @@ func (cli *ChatCLI) noticeSkillResolution(resolution SkillClientResolution) {
 // the user has issued a `/thinking` override the override wins; an explicit
 // EffortUnset override means "thinking off" and detaches the hint entirely.
 func (cli *ChatCLI) applyChatEffortHint(ctx context.Context, skillEffort client.SkillEffort) context.Context {
-	if eff, overridden := cli.applyThinkingOverride(skillEffort); overridden {
-		if eff != client.EffortUnset {
-			return client.WithEffortHint(ctx, eff)
-		}
+	effective, overridden := cli.applyThinkingOverride(skillEffort)
+	if !overridden {
+		effective = skillEffort
+	}
+	// Chat carries no tools by design and no task budget, so effort is the
+	// whole of this surface's request shape — and the router moves it turn
+	// to turn on its own. Declare the change so the rebuild it causes is
+	// not counted against prefix stability.
+	cli.noteWireShape(effective, nil, false)
+	// An active override resolving to Unset means thinking is explicitly
+	// off: send no hint at all. Unset without an override is just "nothing
+	// chosen" and travels as before.
+	if overridden && effective == client.EffortUnset {
 		return ctx
 	}
-	return client.WithEffortHint(ctx, skillEffort)
+	return client.WithEffortHint(ctx, effective)
 }
 
 // executeLLMTurn delegates to the streaming path when the active client
