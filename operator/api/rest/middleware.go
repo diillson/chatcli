@@ -163,25 +163,15 @@ func (s *APIServer) rateLimitMiddleware(next http.Handler) http.Handler {
 // Security (H6): Default to deny-all CORS. Require explicit origin configuration.
 func (s *APIServer) corsMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		origin := s.corsOrigin
-		// Security: deny-all by default — CORS only if explicitly configured
-		if origin == "" {
-			// No CORS headers set — browser cross-origin requests will be blocked
-			next.ServeHTTP(w, r)
-			return
+		// Deny-all until an origin is configured: with no policy, no CORS
+		// headers are written and a browser blocks the cross-origin call.
+		s.corsMu.RLock()
+		policy := s.corsPolicy
+		s.corsMu.RUnlock()
+
+		if policy.apply(w, r, s.apiKeyHeader) {
+			return // preflight answered
 		}
-
-		w.Header().Set("Access-Control-Allow-Origin", origin)
-		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
-		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, "+s.apiKeyHeader+", Authorization")
-		w.Header().Set("Access-Control-Allow-Credentials", "false")
-		w.Header().Set("Access-Control-Max-Age", "3600") // 1 hour, not 24h
-
-		if r.Method == http.MethodOptions {
-			w.WriteHeader(http.StatusNoContent)
-			return
-		}
-
 		next.ServeHTTP(w, r)
 	})
 }

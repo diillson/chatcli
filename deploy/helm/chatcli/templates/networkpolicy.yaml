@@ -16,8 +16,15 @@ spec:
   - ports:
     - port: {{ .Values.server.port }}
       protocol: TCP
-    {{- if .Values.metrics.enabled }}
-    - port: {{ .Values.metrics.port | default 9090 }}
+    {{- /*
+      The metrics port comes from server.metricsPort, the same value the
+      deployment passes to --metrics-port. This block previously read a
+      .Values.metrics map that the chart does not define, so enabling the
+      policy at all failed to render with a nil pointer — the protection
+      could not be turned on.
+    */}}
+    {{- if .Values.server.metricsPort }}
+    - port: {{ .Values.server.metricsPort }}
       protocol: TCP
     {{- end }}
     {{- with .Values.networkPolicy.ingressFrom }}
@@ -25,5 +32,28 @@ spec:
       {{- toYaml . | nindent 4 }}
     {{- end }}
   egress:
+  {{- if eq (.Values.networkPolicy.egress | default "allowAll") "restricted" }}
+  {{- /*
+    Restricted egress. DNS comes first and is not optional: a pod that
+    cannot resolve names fails in ways that look nothing like a network
+    policy problem, and every other rule here is written against names.
+  */}}
+  - ports:
+    - port: 53
+      protocol: UDP
+    - port: 53
+      protocol: TCP
+  - ports:
+    # HTTPS: LLM providers, and any other outbound API the server calls.
+    - port: 443
+      protocol: TCP
+    # The Kubernetes API, for the watcher and the AIOps surface.
+    - port: {{ .Values.networkPolicy.kubernetesApiPort | default 6443 }}
+      protocol: TCP
+    {{- with .Values.networkPolicy.egressExtraPorts }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+  {{- else }}
   - {}  # Allow all egress (LLM API calls, DNS, etc.)
+  {{- end }}
 {{- end }}

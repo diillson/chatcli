@@ -131,7 +131,13 @@ security:
   # Custom log scrub patterns (comma-separated regexes)
   logScrubPatterns: ""
   # CORS allowed origin (empty = deny all)
-  corsOrigin: ""
+  # CORS for the operator REST API (dashboard). Deny-all until an origin is
+  # named: with none, a browser blocks every cross-origin call.
+  corsOrigin: ""                # a single origin (kept for compatibility)
+  corsAllowedOrigins: []        # several origins, or ["*"] for any
+  #   - "https://dashboard.example.com"
+  corsAllowedMethods: []        # defaults to GET, POST, PUT, DELETE, OPTIONS
+  corsAllowCredentials: false   # cookies / Authorization on cross-origin calls
   # Audit log file path
   auditLogPath: ""
 

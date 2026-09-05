@@ -13,7 +13,9 @@
     "image": {
       "type": "object",
       "description": "Container image configuration.",
-      "required": ["repository"],
+      "required": [
+        "repository"
+      ],
       "additionalProperties": false,
       "properties": {
         "repository": {
@@ -27,7 +29,11 @@
         },
         "pullPolicy": {
           "type": "string",
-          "enum": ["Always", "IfNotPresent", "Never"],
+          "enum": [
+            "Always",
+            "IfNotPresent",
+            "Never"
+          ],
           "description": "Kubernetes image pull policy.",
           "default": "IfNotPresent"
         }
@@ -38,7 +44,9 @@
       "description": "List of Docker registry pull secrets.",
       "items": {
         "type": "object",
-        "required": ["name"],
+        "required": [
+          "name"
+        ],
         "additionalProperties": false,
         "properties": {
           "name": {
@@ -162,9 +170,26 @@
           "description": "Container image for the kubectl-apply Job that ships with the hook.",
           "additionalProperties": false,
           "properties": {
-            "repository": {"type": "string", "description": "Image repository. Defaults to the official Kubernetes-project distroless kubectl image at registry.k8s.io.", "default": "registry.k8s.io/kubectl"},
-            "tag": {"type": "string", "description": "Image tag. Must be a fully-qualified patch tag (e.g. v1.31.10) — major-minor stubs like v1.31 are NOT resolvable on registry.k8s.io.", "default": "v1.31.10"},
-            "pullPolicy": {"type": "string", "enum": ["Always", "IfNotPresent", "Never"], "description": "Image pull policy.", "default": "IfNotPresent"}
+            "repository": {
+              "type": "string",
+              "description": "Image repository. Defaults to the official Kubernetes-project distroless kubectl image at registry.k8s.io.",
+              "default": "registry.k8s.io/kubectl"
+            },
+            "tag": {
+              "type": "string",
+              "description": "Image tag. Must be a fully-qualified patch tag (e.g. v1.31.10) \u2014 major-minor stubs like v1.31 are NOT resolvable on registry.k8s.io.",
+              "default": "v1.31.10"
+            },
+            "pullPolicy": {
+              "type": "string",
+              "enum": [
+                "Always",
+                "IfNotPresent",
+                "Never"
+              ],
+              "description": "Image pull policy.",
+              "default": "IfNotPresent"
+            }
           }
         },
         "resources": {
@@ -175,12 +200,16 @@
         "tolerations": {
           "type": "array",
           "description": "Tolerations for the hook Job pod.",
-          "items": {"type": "object"}
+          "items": {
+            "type": "object"
+          }
         },
         "nodeSelector": {
           "type": "object",
           "description": "NodeSelector for the hook Job pod.",
-          "additionalProperties": {"type": "string"}
+          "additionalProperties": {
+            "type": "string"
+          }
         }
       }
     },
@@ -191,7 +220,11 @@
       "properties": {
         "type": {
           "type": "string",
-          "enum": ["ClusterIP", "NodePort", "LoadBalancer"],
+          "enum": [
+            "ClusterIP",
+            "NodePort",
+            "LoadBalancer"
+          ],
           "description": "Kubernetes Service type.",
           "default": "ClusterIP"
         }
@@ -324,14 +357,21 @@
           },
           "operator": {
             "type": "string",
-            "enum": ["Exists", "Equal"]
+            "enum": [
+              "Exists",
+              "Equal"
+            ]
           },
           "value": {
             "type": "string"
           },
           "effect": {
             "type": "string",
-            "enum": ["NoSchedule", "PreferNoSchedule", "NoExecute"]
+            "enum": [
+              "NoSchedule",
+              "PreferNoSchedule",
+              "NoExecute"
+            ]
           },
           "tolerationSeconds": {
             "type": "integer"
@@ -388,17 +428,27 @@
           "type": "object",
           "description": "TLS configuration for the REST API.",
           "properties": {
-            "certFile": { "type": "string" },
-            "keyFile": { "type": "string" }
+            "certFile": {
+              "type": "string"
+            },
+            "keyFile": {
+              "type": "string"
+            }
           }
         },
         "grpcTLS": {
           "type": "object",
           "description": "TLS for gRPC communication with ChatCLI server.",
           "properties": {
-            "certFile": { "type": "string" },
-            "keyFile": { "type": "string" },
-            "caFile": { "type": "string" }
+            "certFile": {
+              "type": "string"
+            },
+            "keyFile": {
+              "type": "string"
+            },
+            "caFile": {
+              "type": "string"
+            }
           }
         },
         "allowedResourceTypes": {
@@ -416,6 +466,24 @@
         "auditLogPath": {
           "type": "string",
           "description": "File path for structured audit logs."
+        },
+        "corsAllowedOrigins": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Origins allowed to call the operator REST API from a browser."
+        },
+        "corsAllowedMethods": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "HTTP methods allowed cross-origin; defaults to GET, POST, PUT, DELETE, OPTIONS."
+        },
+        "corsAllowCredentials": {
+          "type": "boolean",
+          "description": "Allow cookies and Authorization on cross-origin requests."
         }
       }
     },
@@ -424,11 +492,19 @@
       "description": "Extra environment variables for the operator pod.",
       "items": {
         "type": "object",
-        "required": ["name"],
+        "required": [
+          "name"
+        ],
         "properties": {
-          "name": { "type": "string" },
-          "value": { "type": "string" },
-          "valueFrom": { "type": "object" }
+          "name": {
+            "type": "string"
+          },
+          "value": {
+            "type": "string"
+          },
+          "valueFrom": {
+            "type": "object"
+          }
         }
       }
     }

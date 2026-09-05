@@ -272,6 +272,23 @@ networkPolicy:
   enabled: false
   # ingressFrom: []
 
+  # Egress policy. "allowAll" (the default) keeps the previous behaviour:
+  # the policy restricts ingress and leaves outbound traffic alone.
+  # "restricted" narrows egress to what the server actually needs — DNS,
+  # HTTPS for LLM providers, and the Kubernetes API — which is what a
+  # NetworkPolicy is usually installed for.
+  #
+  # Start with allowAll, confirm ingress behaves, then tighten. A pod that
+  # cannot resolve DNS fails in ways that look nothing like a network
+  # policy problem.
+  egress: allowAll        # allowAll | restricted
+  # Extra ports to allow on egress when egress=restricted, for a private
+  # model endpoint or an internal service the server calls.
+  # egressExtraPorts:
+  #   - port: 8080
+  #     protocol: TCP
+  kubernetesApiPort: 6443
+
 nodeSelector: {}
 tolerations: []
 affinity: {}
@@ -300,9 +317,28 @@ security:
   #   name: chatcli-jwt
   #   key: secret
 
+  # Expected JWT claims. Leaving either empty skips that check, which means
+  # a token minted for another audience by the same issuer is accepted —
+  # set both wherever more than one service shares a signing key.
+  jwtIssuer: ""         # expected "iss" claim
+  jwtAudience: ""       # expected "aud" claim
+
+  # RS256: an RSA public key (PEM) or the path to one inside the container.
+  # Setting this selects RS256; leave it empty for an HS256 shared secret.
+  jwtPublicKey: ""
+  # Reference a Secret key holding the RSA public key (recommended)
+  jwtPublicKeyRef: {}
+  #   name: chatcli-jwt
+  #   key: public.pem
+
+  # Mutual TLS: path to the CA bundle client certificates are verified
+  # against. Requires tls.cert and tls.key — there is no handshake to carry
+  # a client certificate without them. Mount the bundle via extraVolumes.
+  tlsClientCA: ""
+
   # Per-client rate limiting
   rateLimitRps: ""      # requests/second (default: 10)
-  rateLimitBurst: ""    # burst size (default: 30)
+  rateLimitBurst: ""    # burst size (default: 20)
 
   # gRPC message size limits
   maxRecvMsgSize: ""    # bytes (default: 52428800 = 50MB)

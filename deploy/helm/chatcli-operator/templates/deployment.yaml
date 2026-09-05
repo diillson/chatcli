@@ -91,6 +91,18 @@ spec:
             - name: CHATCLI_CORS_ORIGIN
               value: {{ .Values.security.corsOrigin | quote }}
           {{- end }}
+          {{- with .Values.security.corsAllowedOrigins }}
+            - name: CHATCLI_CORS_ALLOWED_ORIGINS
+              value: {{ join "," . | quote }}
+          {{- end }}
+          {{- with .Values.security.corsAllowedMethods }}
+            - name: CHATCLI_CORS_ALLOWED_METHODS
+              value: {{ join "," . | quote }}
+          {{- end }}
+          {{- if .Values.security.corsAllowCredentials }}
+            - name: CHATCLI_CORS_ALLOW_CREDENTIALS
+              value: "true"
+          {{- end }}
           {{- if .Values.security.auditLogPath }}
             - name: CHATCLI_AUDIT_LOG_PATH
               value: {{ .Values.security.auditLogPath | quote }}
