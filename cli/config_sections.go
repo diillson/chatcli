@@ -1356,6 +1356,7 @@ func (cli *ChatCLI) showConfigAuth() {
 
 	kv(p, "CHATCLI_AUTH_DIR", envOr("CHATCLI_AUTH_DIR"))
 	kv(p, "CHATCLI_KEYCHAIN_BACKEND", envOr("CHATCLI_KEYCHAIN_BACKEND"))
+	kv(p, i18n.T("cfg.kv.keychain_in_effect"), keychainBackendInEffect())
 	kv(p, "CHATCLI_ENCRYPTION_KEY", presence(os.Getenv("CHATCLI_ENCRYPTION_KEY")))
 	kv(p, "CHATCLI_COPILOT_CLIENT_ID", presence(os.Getenv("CHATCLI_COPILOT_CLIENT_ID")))
 	kv(p, "CHATCLI_OPENAI_CLIENT_ID", presence(os.Getenv("CHATCLI_OPENAI_CLIENT_ID")))

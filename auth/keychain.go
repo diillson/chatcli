@@ -24,9 +24,21 @@ const (
 
 const keychainServiceName = "chatcli"
 
+// keychainOps is the platform's credential store, behind an interface so
+// the backend-selection logic can be exercised without a real keychain —
+// which is otherwise untestable on any single machine, and is exactly the
+// logic that decides where a user's encryption key ends up.
+type keychainOps interface {
+	Available() bool
+	Get(account string) ([]byte, error)
+	Set(account string, data []byte) error
+	Delete(account string) error
+}
+
 // KeychainStore provides cross-platform secure credential storage.
 type KeychainStore struct {
 	backend KeychainBackend
+	ops     keychainOps
 }
 
 // NewKeychainStore creates a keychain store configured from CHATCLI_KEYCHAIN_BACKEND env.
@@ -44,13 +56,26 @@ func NewKeychainStore() *KeychainStore {
 		}
 	}
 
-	return &KeychainStore{backend: backend}
+	return &KeychainStore{backend: backend, ops: osKeychain{}}
 }
+
+// osKeychain is the real platform store: a thin adapter over the existing
+// per-platform helpers, so the interface adds a seam without rewriting the
+// code that talks to macOS, Linux or Windows.
+type osKeychain struct{ store KeychainStore }
+
+func (osKeychain) Available() bool { return nativeKeychainAvailable() }
+
+func (o osKeychain) Get(account string) ([]byte, error) { return o.store.nativeGet(account) }
+
+func (o osKeychain) Set(account string, data []byte) error { return o.store.nativeSet(account, data) }
+
+func (o osKeychain) Delete(account string) error { return o.store.nativeDelete(account) }
 
 // Get retrieves a value from the keychain.
 func (ks *KeychainStore) Get(account string) ([]byte, error) {
 	if ks.useNative() {
-		val, err := ks.nativeGet(account)
+		val, err := ks.ops.Get(account)
 		if err == nil {
 			return val, nil
 		}
@@ -66,7 +91,7 @@ func (ks *KeychainStore) Get(account string) ([]byte, error) {
 // Set stores a value in the keychain.
 func (ks *KeychainStore) Set(account string, data []byte) error {
 	if ks.useNative() {
-		return ks.nativeSet(account, data)
+		return ks.ops.Set(account, data)
 	}
 	return fmt.Errorf("keychain: file backend — use auth/crypto.go directly")
 }
@@ -74,7 +99,7 @@ func (ks *KeychainStore) Set(account string, data []byte) error {
 // Delete removes a value from the keychain.
 func (ks *KeychainStore) Delete(account string) error {
 	if ks.useNative() {
-		return ks.nativeDelete(account)
+		return ks.ops.Delete(account)
 	}
 	return fmt.Errorf("keychain: file backend — use auth/crypto.go directly")
 }
@@ -85,9 +110,15 @@ func (ks *KeychainStore) IsNativeAvailable() bool {
 }
 
 func (ks *KeychainStore) useNative() bool {
-	if ks.backend == KeychainFile {
+	if ks.backend == KeychainFile || ks.ops == nil {
 		return false
 	}
+	return ks.ops.Available()
+}
+
+// nativeKeychainAvailable reports whether this machine has a usable
+// credential store.
+func nativeKeychainAvailable() bool {
 	switch runtime.GOOS {
 	case "darwin":
 		_, err := exec.LookPath("security")
@@ -95,6 +126,12 @@ func (ks *KeychainStore) useNative() bool {
 	case "linux":
 		_, err := exec.LookPath("secret-tool")
 		return err == nil
+	case "windows":
+		// The Credential Manager, reached through the advapi32 API. A
+		// machine where that DLL cannot be loaded falls through to the file
+		// backend rather than failing — the same shape as a Linux box with
+		// no secret-tool installed.
+		return nativeAvailable()
 	default:
 		return false
 	}
@@ -108,6 +145,8 @@ func (ks *KeychainStore) nativeGet(account string) ([]byte, error) {
 		return ks.macGet(account)
 	case "linux":
 		return ks.linuxGet(account)
+	case "windows":
+		return platformGet(account)
 	default:
 		return nil, fmt.Errorf("native keychain not supported on %s", runtime.GOOS)
 	}
@@ -119,6 +158,8 @@ func (ks *KeychainStore) nativeSet(account string, data []byte) error {
 		return ks.macSet(account, data)
 	case "linux":
 		return ks.linuxSet(account, data)
+	case "windows":
+		return platformSet(account, data)
 	default:
 		return fmt.Errorf("native keychain not supported on %s", runtime.GOOS)
 	}
@@ -130,6 +171,8 @@ func (ks *KeychainStore) nativeDelete(account string) error {
 		return ks.macDelete(account)
 	case "linux":
 		return ks.linuxDelete(account)
+	case "windows":
+		return platformDelete(account)
 	default:
 		return fmt.Errorf("native keychain not supported on %s", runtime.GOOS)
 	}
