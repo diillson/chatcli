@@ -24,7 +24,7 @@ import "strings"
 
 // SupportsOpenAIReasoningEffort reports whether a model on the
 // OpenAI-compatible chat schema accepts reasoning_effort. Shared by the
-// direct OpenAI client, the Responses client, Copilot, GitHub Models and
+// direct OpenAI client, the Responses client, Copilot and
 // the Bedrock OpenAI family, which all speak the same dialect and used to
 // carry their own copy of this list (or none at all).
 func SupportsOpenAIReasoningEffort(model string) bool {

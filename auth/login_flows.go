@@ -525,8 +525,7 @@ func FormatAuthStatus(logger *zap.Logger) string {
 	return i18n.T("auth.login.status_display",
 		fmtProvider(ProviderAnthropic),
 		fmtProvider(ProviderOpenAICodex),
-		fmtProvider(ProviderGitHubCopilot),
-		fmtProvider(ProviderGitHubModels))
+		fmtProvider(ProviderGitHubCopilot))
 }
 
 func Logout(provider ProviderID, logger *zap.Logger) error {

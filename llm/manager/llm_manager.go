@@ -26,7 +26,6 @@ import (
 	"github.com/diillson/chatcli/llm/client"
 	"github.com/diillson/chatcli/llm/copilot"
 	"github.com/diillson/chatcli/llm/devincli"
-	githubmodels "github.com/diillson/chatcli/llm/githubmodels"
 	"github.com/diillson/chatcli/llm/googleai"
 	"github.com/diillson/chatcli/llm/minimax"
 	"github.com/diillson/chatcli/llm/moonshot"
@@ -169,7 +168,6 @@ func NewLLMManager(logger *zap.Logger) (LLMManager, error) {
 	manager.configurarMoonshotClient(maxRetries, initialBackoff)
 	manager.configurarOllamaClient(maxRetries, initialBackoff)
 	manager.configurarCopilotClient(maxRetries, initialBackoff)
-	manager.configurarGitHubModelsClient(maxRetries, initialBackoff)
 	manager.configurarOpenRouterClient(maxRetries, initialBackoff)
 	manager.configurarBedrockClient(maxRetries, initialBackoff)
 	manager.configurarDevinCLIClient(maxRetries, initialBackoff)
@@ -549,11 +547,6 @@ func (m *LLMManagerImpl) configurarOllamaClient(maxRetries int, initialBackoff t
 }
 
 // configurarCopilotClient configura o cliente GitHub Copilot.
-//
-// closure targets different provider packages; shared boilerplate is
-// kept readable at the call site rather than abstracted.
-//
-//nolint:dupl // near-duplicate of configurarGitHubModelsClient but the
 func (m *LLMManagerImpl) configurarCopilotClient(maxRetries int, initialBackoff time.Duration) {
 	if _, err := m.tokenProviderFor(auth.ProviderGitHubCopilot); err != nil {
 		m.logger.Info(i18n.T("llm.warn.provider_not_configured", "GitHub Copilot", "COPILOT"), zap.Error(err))
@@ -569,27 +562,6 @@ func (m *LLMManagerImpl) configurarCopilotClient(maxRetries int, initialBackoff 
 			model = config.DefaultCopilotModel
 		}
 		return copilot.NewClient(tp, model, m.logger, maxRetries, initialBackoff), nil
-	}
-}
-
-// configurarGitHubModelsClient configura o cliente GitHub Models marketplace.
-//
-//nolint:dupl // near-duplicate of configurarCopilotClient; see note there.
-func (m *LLMManagerImpl) configurarGitHubModelsClient(maxRetries int, initialBackoff time.Duration) {
-	if _, err := m.tokenProviderFor(auth.ProviderGitHubModels); err != nil {
-		m.logger.Info(i18n.T("llm.warn.provider_not_configured", "GitHub Models", "GITHUB_MODELS"), zap.Error(err))
-		return
-	}
-	m.logger.Info(i18n.T("llm.info.configuring_provider", "GitHub Models"))
-	m.clients["GITHUB_MODELS"] = func(model string) (client.LLMClient, error) {
-		tp, err := m.tokenProviderFor(auth.ProviderGitHubModels)
-		if err != nil {
-			return nil, fmt.Errorf("%s: %w", i18n.T("llm.manager.failed_resolve_auth", "GitHub Models"), err)
-		}
-		if model == "" {
-			model = config.DefaultGitHubModelsModel
-		}
-		return githubmodels.NewGitHubModelsClient(tp, model, m.logger, maxRetries, initialBackoff), nil
 	}
 }
 
@@ -788,7 +760,6 @@ func (m *LLMManagerImpl) RefreshProviders() {
 	m.configurarOpenAIClient(maxRetries, initialBackoff)
 	m.configurarClaudeAIClient(maxRetries, initialBackoff)
 	m.configurarCopilotClient(maxRetries, initialBackoff)
-	m.configurarGitHubModelsClient(maxRetries, initialBackoff)
 	m.configurarZAIClient(maxRetries, initialBackoff)
 	m.configurarMiniMaxClient(maxRetries, initialBackoff)
 	m.configurarMoonshotClient(maxRetries, initialBackoff)

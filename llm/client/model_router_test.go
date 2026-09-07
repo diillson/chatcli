@@ -37,7 +37,7 @@ func TestKnownProvidersCoversManagerRegistry(t *testing.T) {
 	required := []string{
 		"OPENAI", "OPENAI_ASSISTANT", "CLAUDEAI", "BEDROCK", "GOOGLEAI",
 		"XAI", "ZAI", "MOONSHOT", "MINIMAX", "STACKSPOT", "OLLAMA",
-		"COPILOT", "GITHUB_MODELS", "OPENROUTER", "DEVIN",
+		"COPILOT", "OPENROUTER", "DEVIN",
 	}
 	for _, p := range required {
 		if !ContainsProvider(KnownProviders, p) {

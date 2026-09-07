@@ -64,7 +64,7 @@ func (s *UsageState) LastStopReason() string {
 }
 
 // ParseOpenAIUsage extracts usage info from an OpenAI-compatible Chat
-// Completions response map. Works for OpenAI, XAI, Copilot, GitHub Models,
+// Completions response map. Works for OpenAI, XAI, Copilot,
 // OpenRouter, ZAI, MiniMax — anything that mirrors the
 // `prompt_tokens` / `completion_tokens` / `total_tokens` schema.
 //

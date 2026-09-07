@@ -6,7 +6,7 @@
  * Local tokenizer for the GPT family.
  *
  * OpenAI publishes no counting endpoint, so every surface that serves GPT
- * models — OpenAI Chat Completions and Responses, GitHub Models, Copilot,
+ * models — OpenAI Chat Completions and Responses, Copilot,
  * OpenRouter openai/* and the Bedrock OpenAI family — counts locally with
  * the model's own BPE encoding (o200k_base for GPT-4o/4.1/4.5/5.x and the
  * o-series, cl100k_base for GPT-4/3.5). The vocabulary is fetched once

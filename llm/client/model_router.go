@@ -184,7 +184,7 @@ func ResolveModelRouting(in ResolveModelRoutingInput) ModelRoutingResolution {
 	// 0. Explicit "PROVIDER:model" qualified hint — deterministic routing
 	// with no guessing. This is how the @model tool (and skill frontmatter)
 	// disambiguates models that exist on several providers (claude-* on
-	// CLAUDEAI/BEDROCK/OPENROUTER, deepseek on OLLAMA/GITHUB_MODELS, …).
+	// CLAUDEAI/BEDROCK/OPENROUTER, deepseek on OLLAMA/OPENROUTER, …).
 	// The prefix is only honored when it names a known or configured
 	// provider, so Ollama tags like "qwen2.5:14b" fall through untouched.
 	if qProvider, qModel, ok := SplitQualifiedHint(hint, in.Router.GetAvailableProviders()); ok {
@@ -302,7 +302,7 @@ func FamilyProviderOf(model string) string {
 var KnownProviders = []string{
 	"OPENAI", "OPENAI_ASSISTANT", "CLAUDEAI", "BEDROCK", "GOOGLEAI", "XAI",
 	"ZAI", "MOONSHOT", "MINIMAX", "STACKSPOT", "OLLAMA", "COPILOT",
-	"GITHUB_MODELS", "OPENROUTER", "DEVIN",
+	"OPENROUTER", "DEVIN",
 }
 
 // SplitQualifiedHint recognizes the explicit "PROVIDER:model" hint form and

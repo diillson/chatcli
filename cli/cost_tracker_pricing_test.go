@@ -45,6 +45,12 @@ func TestGetModelPricing(t *testing.T) {
 		{"claude haiku legacy", "CLAUDEAI", "claude-3-haiku", 0.25, 1.25},
 
 		// OpenAI — specific before generic.
+		// gpt-6-astra: $10/$50 no tier curto (>272K de input dobra para
+		// $20/$75, surcharge que o tracker não modela).
+		{"gpt-6-astra", "OPENAI", "gpt-6-astra", 10.0, 50.0},
+		{"gpt-6-astra bedrock id", "BEDROCK", "global.openai.gpt-6-astra", 10.0, 50.0},
+		{"gpt-6-astra openrouter slug", "OPENROUTER", "openai/gpt-6-astra", 10.0, 50.0},
+		{"gpt-6-astra devin effort slug", "OPENAI", "gpt-6-astra-medium", 10.0, 50.0},
 		// gpt-5.6 tiers (list prices after the Jul 30 2026 cuts: terra
 		// −20%, luna −80%): the specific terra/luna tags must win before
 		// the bare gpt-5.6 case, which covers the family alias that the

@@ -186,7 +186,6 @@ func TestEnvFallbackProvider_AllProviders(t *testing.T) {
 		{ProviderAnthropic, "ANTHROPIC_API_KEY", "ant-key", AuthModeAPIKey, "ant-key", "env:ANTHROPIC_API_KEY"},
 		{ProviderOpenAI, "OPENAI_API_KEY", "oai-key", AuthModeAPIKey, "oai-key", "env:OPENAI_API_KEY"},
 		{ProviderGitHubCopilot, "GITHUB_COPILOT_TOKEN", "gho", AuthModeToken, "gho", "env:GITHUB_COPILOT_TOKEN"},
-		{ProviderGitHubModels, "GITHUB_TOKEN", "ghp", AuthModeToken, "ghp", "env:GITHUB_TOKEN"},
 	}
 	for _, c := range cases {
 		t.Run(c.envVar, func(t *testing.T) {
@@ -215,11 +214,10 @@ func TestEnvFallbackProvider_NoMatchReturnsNil(t *testing.T) {
 		"ANTHROPIC_OAUTH_TOKEN", "ANTHROPIC_API_KEY",
 		"OPENAI_API_KEY",
 		"GITHUB_COPILOT_TOKEN",
-		"GITHUB_TOKEN", "GH_TOKEN", "GITHUB_MODELS_TOKEN",
 	} {
 		t.Setenv(k, "")
 	}
-	for _, p := range []ProviderID{ProviderAnthropic, ProviderOpenAI, ProviderGitHubCopilot, ProviderGitHubModels} {
+	for _, p := range []ProviderID{ProviderAnthropic, ProviderOpenAI, ProviderGitHubCopilot} {
 		if tp := envFallbackProvider(p); tp != nil {
 			t.Errorf("envFallbackProvider(%s) = non-nil with all envs cleared", p)
 		}
@@ -271,7 +269,6 @@ func TestFormatAuthStatus_AllNotConnected(t *testing.T) {
 		"ANTHROPIC_OAUTH_TOKEN", "ANTHROPIC_API_KEY",
 		"OPENAI_API_KEY",
 		"GITHUB_COPILOT_TOKEN",
-		"GITHUB_TOKEN", "GH_TOKEN", "GITHUB_MODELS_TOKEN",
 	} {
 		t.Setenv(k, "")
 	}

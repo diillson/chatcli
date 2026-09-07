@@ -1038,6 +1038,16 @@ func claudePricing(model string) (float64, float64, bool) {
 // ("gpt-4o").
 func openAIPricing(model string) (float64, float64, bool) {
 	switch {
+	// gpt-6-astra (GA 03/Set/2026): $10/$50 no tier curto de contexto
+	// (developers.openai.com/api/docs/pricing). Acima de 272K tokens de
+	// input a OpenAI cobra $20/$75 sobre a request inteira — o mesmo
+	// surcharge de long-context que a família 5.6 tem e que o
+	// cost_tracker não modela (um único tier por modelo), então uma
+	// sessão que estoure 272K é subestimada aqui. O caso cobre também o
+	// id do Bedrock (openai.gpt-6-astra) e o slug do OpenRouter
+	// (openai/gpt-6-astra), que repassam a mesma tarifa.
+	case strings.Contains(model, "gpt-6-astra"):
+		return 10.0, 50.0, true
 	// gpt-5.6 (Jul 2026): preços de lista da API por tier
 	// (developers.openai.com/api/docs/pricing, Set/2026): terra e luna
 	// desde o corte de 30/Jul; Sol caiu para $4/$20 em 21/Ago ("pelo
@@ -1471,6 +1481,19 @@ func getCachePricing(provider, model string) (cacheWriteCost, cacheReadCost floa
 		// resources add storage per token-hour, priced separately from
 		// lifecycle events (cost_cache_resources.go).
 		return 0, inputCost * 0.10
+	case strings.Contains(model, "gpt-6"), strings.Contains(model, "gpt-5.6"):
+		// gpt-6-astra e a família 5.6 deixaram o caching automático das
+		// gerações anteriores: a tabela de preços publica coluna própria
+		// de cache writes a 1,25x o input e cached input a 10% dele —
+		// astra $12,50/$1,00 sobre $10; sol $5,00/$0,40 sobre $4; terra
+		// $2,50/$0,20; luna $0,25/$0,02 (developers.openai.com/api/docs
+		// /pricing, confirmado nas mesmas razões no mirror do OpenRouter).
+		// Sem este caso os dois caíam no genérico abaixo, que cobrava a
+		// leitura de cache a 50% do input — 5x acima da tarifa real.
+		// A escrita fica inerte enquanto a usage da OpenAI não reporta
+		// tokens de cache creation (só Anthropic/Bedrock/Devin o fazem);
+		// está aqui para o dia em que reportar.
+		return inputCost * 1.25, inputCost * 0.10
 	case strings.Contains(model, "gpt"), strings.Contains(model, "o1"),
 		strings.Contains(model, "o3"), strings.Contains(model, "o4"):
 		// OpenAI automatic prompt caching: hits at 50% of input, no write

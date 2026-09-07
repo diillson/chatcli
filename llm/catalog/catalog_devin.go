@@ -45,7 +45,12 @@ func init() {
 		{"claude-sonnet-4.5", 200000, 64000},
 		{"claude-haiku-4.5", 200000, 64000},
 		{"claude-sonnet-4", 200000, 64000},
-		// OpenAI family (specs mirror the OPENAI entries).
+		// OpenAI family (specs mirror the OPENAI entries). Devin exposes
+		// Astra as five effort-suffixed slugs (gpt-6-astra-low ..
+		// -max, with -medium flagged recommended); the bare id below
+		// covers all of them through Resolve()'s prefix pass, the same
+		// way the gpt-5.6-* entries cover their own -medium/-high forms.
+		{"gpt-6-astra", 1050000, 128000},
 		{"gpt-5.6-sol", 1050000, 128000},
 		{"gpt-5.6-terra", 1050000, 128000},
 		{"gpt-5.6-luna", 1050000, 128000},

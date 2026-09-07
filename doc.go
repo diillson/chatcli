@@ -1,7 +1,7 @@
 // ChatCLI is a multi-provider AI platform for terminal, server, and Kubernetes.
 //
 // It connects 11 LLM providers (OpenAI, Anthropic Claude, Google Gemini, xAI Grok,
-// ZAI, MiniMax, GitHub Copilot, GitHub Models, StackSpot AI, Ollama, and OpenAI
+// ZAI, MiniMax, GitHub Copilot, StackSpot AI, Ollama, and OpenAI
 // Assistants) to a unified interface with autonomous agents, native tool calling,
 // automatic provider failover, and a full AIOps pipeline.
 //

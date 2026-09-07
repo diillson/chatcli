@@ -42,7 +42,7 @@ tls:
 # LLM Provider configuration
 llm:
   # Default provider: OPENAI, OPENAI_ASSISTANT, CLAUDEAI, BEDROCK, GOOGLEAI, XAI, ZAI,
-  # MINIMAX, STACKSPOT, OLLAMA, COPILOT, GITHUB_MODELS, OPENROUTER
+  # MINIMAX, STACKSPOT, OLLAMA, COPILOT, OPENROUTER
   # For BEDROCK: use IRSA via serviceAccount.annotations, or static AWS keys in secrets.*
   provider: ""
   model: ""

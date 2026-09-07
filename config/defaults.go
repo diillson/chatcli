@@ -80,10 +80,6 @@ const (
 	// 10min cobre respostas longas sem segurar um turno travado para sempre.
 	DevinCLIDefaultTimeout = 10 * time.Minute
 
-	// Valores padrão para GitHub Models (marketplace)
-	DefaultGitHubModelsModel = "gpt-4o"
-	GitHubModelsAPIURL       = "https://models.inference.ai.azure.com/chat/completions"
-
 	// Valores padrão para OpenRouter
 	DefaultOpenRouterModel = "openai/gpt-5.2"
 	OpenRouterAPIURL       = "https://openrouter.ai/api/v1/chat/completions"
