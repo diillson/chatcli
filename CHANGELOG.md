@@ -1,5 +1,21 @@
 # Changelog
 
+## [1.199.0](https://github.com/diillson/chatcli/compare/v1.198.0...v1.199.0) (2026-09-07)
+
+
+### ⚠ BREAKING CHANGES
+
+* **catalog:** o valor GITHUB_MODELS sai do enum de provider do CRD Instance e do schema do chart Helm. ChatCLIInstance que ainda aponte para ele passa a ser rejeitado na admissao e precisa migrar de provider antes do upgrade. As env vars GITHUB_MODELS_MODEL, GITHUB_MODELS_TOKEN, GITHUB_MODELS_MAX_TOKENS e GITHUB_MODELS_API_URL deixam de ter efeito, e /auth login github-models deixa de existir.
+
+### Features
+
+* **catalog:** add GPT-6 Astra and drop retired GitHub Models ([#1547](https://github.com/diillson/chatcli/issues/1547)) ([db6da6f](https://github.com/diillson/chatcli/commit/db6da6fc1d11b5c86011b0b191a67b66fc628131))
+
+
+### Documentation
+
+* **readme:** document the GitHub Models removal and pin the next version ([#1549](https://github.com/diillson/chatcli/issues/1549)) ([20df89f](https://github.com/diillson/chatcli/commit/20df89f7e496806c3e5e4e4cf1f673f0ae5d7493))
+
 ## [1.198.0](https://github.com/diillson/chatcli/compare/v1.197.0...v1.198.0) (2026-09-05)
 
 
