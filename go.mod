@@ -7,7 +7,7 @@ require (
 	github.com/aws/aws-sdk-go-v2 v1.45.1
 	github.com/aws/aws-sdk-go-v2/config v1.33.1
 	github.com/aws/aws-sdk-go-v2/feature/ec2/imds v1.19.1
-	github.com/aws/aws-sdk-go-v2/service/bedrock v1.69.1
+	github.com/aws/aws-sdk-go-v2/service/bedrock v1.70.0
 	github.com/aws/aws-sdk-go-v2/service/bedrockruntime v1.59.1
 	github.com/aws/smithy-go v1.28.1
 	github.com/c-bata/go-prompt v0.2.6
