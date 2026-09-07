@@ -645,16 +645,16 @@ func (cli *ChatCLI) getClient() client.LLMClient {
 // than a long if/else chain lets a new provider plug in with a single line
 // and keeps the lookup function inside the project's cyclomatic budget.
 var providerMaxTokensEnv = map[string]string{
-	"OPENAI":        "OPENAI_MAX_TOKENS",
-	"CLAUDEAI":      "ANTHROPIC_MAX_TOKENS",
-	"GOOGLEAI":      "GOOGLEAI_MAX_TOKENS",
-	"XAI":           "XAI_MAX_TOKENS",
-	"ZAI":           "ZAI_MAX_TOKENS",
-	"MINIMAX":       "MINIMAX_MAX_TOKENS",
-	"MOONSHOT":      "MOONSHOT_MAX_TOKENS",
-	"OLLAMA":        "OLLAMA_MAX_TOKENS",
-	"STACKSPOT":     "STACKSPOT_MAX_TOKENS",
-	"COPILOT":       "COPILOT_MAX_TOKENS",
+	"OPENAI":    "OPENAI_MAX_TOKENS",
+	"CLAUDEAI":  "ANTHROPIC_MAX_TOKENS",
+	"GOOGLEAI":  "GOOGLEAI_MAX_TOKENS",
+	"XAI":       "XAI_MAX_TOKENS",
+	"ZAI":       "ZAI_MAX_TOKENS",
+	"MINIMAX":   "MINIMAX_MAX_TOKENS",
+	"MOONSHOT":  "MOONSHOT_MAX_TOKENS",
+	"OLLAMA":    "OLLAMA_MAX_TOKENS",
+	"STACKSPOT": "STACKSPOT_MAX_TOKENS",
+	"COPILOT":   "COPILOT_MAX_TOKENS",
 	// BEDROCK_MAX_TOKENS is the primary env the Bedrock client reads (it
 	// also accepts ANTHROPIC_MAX_TOKENS as a secondary, handled client-side).
 	"BEDROCK":    "BEDROCK_MAX_TOKENS",
