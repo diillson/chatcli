@@ -137,6 +137,16 @@ OPENAI_API_KEY=sk-xxx
 | Ollama | — | `OLLAMA_MODEL` | `OLLAMA_ENABLED=true`, `OLLAMA_BASE_URL` |
 | OpenAI (Responses API) | `OPENAI_API_KEY` | `OPENAI_MODEL` | `OPENAI_RESPONSES_API_URL` |
 
+> **Removed provider — GitHub Models.** GitHub retired GitHub Models on
+> July 30 2026 (playground, model catalog, inference API and BYOK, for
+> every customer), so the `GITHUB_MODELS` provider was dropped. The env
+> vars `GITHUB_MODELS_MODEL`, `GITHUB_MODELS_TOKEN`,
+> `GITHUB_MODELS_MAX_TOKENS` and `GITHUB_MODELS_API_URL` no longer have
+> any effect, and `GITHUB_MODELS` is no longer accepted as a provider
+> value (including in the operator's `Instance` CRD). **GitHub Copilot is
+> a different product and is unaffected** — if you were on GitHub Models
+> for OpenAI models, `COPILOT` or `OPENAI` are the direct replacements.
+
 #### Environment file (.env) discovery
 
 ChatCLI looks for its environment file in this order, and the **first file that exists wins**:
