@@ -339,8 +339,7 @@ spec:
                         name:
                           description: Name is the provider name (OPENAI, OPENAI_ASSISTANT,
                             CLAUDEAI, BEDROCK, GOOGLEAI, XAI, ZAI, MINIMAX, MOONSHOT,
-                            STACKSPOT, OLLAMA, COPILOT, GITHUB_MODELS, OPENROUTER,
-                            DEVIN).
+                            STACKSPOT, OLLAMA, COPILOT, OPENROUTER, DEVIN).
                           enum:
                           - OPENAI
                           - OPENAI_ASSISTANT
@@ -354,7 +353,6 @@ spec:
                           - STACKSPOT
                           - OLLAMA
                           - COPILOT
-                          - GITHUB_MODELS
                           - OPENROUTER
                           - DEVIN
                           type: string
@@ -488,7 +486,7 @@ spec:
                 type: object
               provider:
                 description: |-
-                  Provider is the LLM provider (OPENAI, OPENAI_ASSISTANT, CLAUDEAI, BEDROCK, GOOGLEAI, XAI, ZAI, MINIMAX, MOONSHOT, STACKSPOT, OLLAMA, COPILOT, GITHUB_MODELS, OPENROUTER, DEVIN).
+                  Provider is the LLM provider (OPENAI, OPENAI_ASSISTANT, CLAUDEAI, BEDROCK, GOOGLEAI, XAI, ZAI, MINIMAX, MOONSHOT, STACKSPOT, OLLAMA, COPILOT, OPENROUTER, DEVIN).
                   BEDROCK uses the AWS credentials chain (IAM role via IRSA, static keys in the Secret, or instance profile).
                 type: string
               replicas:

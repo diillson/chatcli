@@ -48,8 +48,8 @@ func TestTouchPoint_Render(t *testing.T) {
 	if got := tp.Render("MOONSHOT"); got != "MOONSHOT moonshot" {
 		t.Errorf("Render(MOONSHOT) = %q", got)
 	}
-	if got := tp.Render("GITHUB_MODELS"); got != "GITHUB_MODELS github_models" {
-		t.Errorf("Render(GITHUB_MODELS) = %q", got)
+	if got := tp.Render("OPENAI_ASSISTANT"); got != "OPENAI_ASSISTANT openai_assistant" {
+		t.Errorf("Render(OPENAI_ASSISTANT) = %q", got)
 	}
 }
 

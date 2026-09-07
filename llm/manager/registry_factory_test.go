@@ -27,7 +27,7 @@ func TestRegistryFactories(t *testing.T) {
 	}
 
 	cases := []string{
-		"CLAUDEAI", "COPILOT", "GITHUB_MODELS", "GOOGLEAI",
+		"CLAUDEAI", "COPILOT", "GOOGLEAI",
 		"MINIMAX", "MOONSHOT", "OPENAI", "OPENAI_RESPONSES",
 		"OPENROUTER", "XAI", "ZAI",
 	}

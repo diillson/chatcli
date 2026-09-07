@@ -613,6 +613,72 @@ func TestGPT55LimitsAndCapabilities(t *testing.T) {
 // de output na API de plataforma. O ponto crítico pinado aqui é que os IDs
 // exatos resolvem para as SUAS entradas — antes desta família entrar no
 // catálogo, "gpt-5.6-*" caía por prefixo na entrada gpt-5 (400K de contexto).
+// TestGPT6AstraEntries pins GPT-6 Astra (GA Sep 3 2026) across every
+// provider that serves it. Astra ships as a single model — no mini/pro/tier
+// fan-out — so the interesting contracts are that the bare id resolves on
+// each provider, that the "gpt-6" family shorthand lands on it, and that
+// heading the OpenAI block does not let its aliases swallow the 5.x line
+// underneath it.
+func TestGPT6AstraEntries(t *testing.T) {
+	for _, tc := range []struct {
+		provider string
+		id       string
+		api      PreferredAPI
+	}{
+		{ProviderOpenAI, "gpt-6-astra", APIResponses},
+		{ProviderCopilot, "gpt-6-astra", APIChatCompletions},
+		{ProviderOpenRouter, "openai/gpt-6-astra", APIChatCompletions},
+		{ProviderBedrock, "global.openai.gpt-6-astra", APIChatCompletions},
+		{ProviderDevin, "gpt-6-astra", APIChatCompletions},
+	} {
+		meta, ok := Resolve(tc.provider, tc.id)
+		assert.True(t, ok, "expected %s/%s to resolve", tc.provider, tc.id)
+		assert.Equal(t, tc.id, meta.ID, "%s/%s must resolve to its own entry", tc.provider, tc.id)
+		assert.Equal(t, 1050000, meta.ContextWindow, "%s/%s context window", tc.provider, tc.id)
+		assert.Equal(t, 128000, meta.MaxOutputTokens, "%s/%s max output", tc.provider, tc.id)
+		assert.Equal(t, tc.api, meta.PreferredAPI, "%s/%s preferred API", tc.provider, tc.id)
+		assert.Contains(t, meta.Capabilities, "tools", "%s/%s should advertise tools", tc.provider, tc.id)
+		assert.Equal(t, 128000, GetMaxTokens(tc.provider, tc.id, 0), "%s/%s max tokens lookup", tc.provider, tc.id)
+	}
+
+	// Family shorthand resolves to Astra on the first-party provider.
+	meta, ok := Resolve(ProviderOpenAI, "gpt-6")
+	assert.True(t, ok)
+	assert.Equal(t, "gpt-6-astra", meta.ID)
+
+	// Astra heads the OpenAI block; its aliases must not shadow the 5.x
+	// entries listed after it.
+	for id, want := range map[string]string{
+		"gpt-5.6":       "gpt-5.6-sol",
+		"gpt-5.6-luna":  "gpt-5.6-luna",
+		"gpt-5.5":       "gpt-5.5",
+		"gpt-5.4-mini":  "gpt-5.4-mini",
+		"gpt-5.3-codex": "gpt-5.3-codex",
+	} {
+		meta, ok := Resolve(ProviderOpenAI, id)
+		assert.True(t, ok, "expected %s to still resolve", id)
+		assert.Equal(t, want, meta.ID, "%s must not be shadowed by the gpt-6 entry", id)
+	}
+
+	// Devin exposes Astra with reasoning-effort suffixes; the bare entry
+	// covers them through Resolve's prefix pass.
+	for _, slug := range []string{"gpt-6-astra-low", "gpt-6-astra-medium", "gpt-6-astra-max"} {
+		meta, ok := Resolve(ProviderDevin, slug)
+		assert.True(t, ok, "expected Devin slug %s to resolve", slug)
+		assert.Equal(t, "gpt-6-astra", meta.ID, "Devin slug %s should map to the Astra entry", slug)
+	}
+
+	// The Bedrock row is Converse-only: the "openai." vendor prefix would
+	// otherwise route it down the gpt-oss InvokeModel path.
+	assert.True(t, HasCapability(ProviderBedrock, "global.openai.gpt-6-astra", "bedrock_converse_only"),
+		"Bedrock Astra must carry bedrock_converse_only")
+	for _, alias := range []string{"bedrock-gpt-6-astra", "openai.gpt-6-astra", "us.openai.gpt-6-astra"} {
+		meta, ok := Resolve(ProviderBedrock, alias)
+		assert.True(t, ok, "expected Bedrock alias %s to resolve", alias)
+		assert.Equal(t, "global.openai.gpt-6-astra", meta.ID, "alias %s should map to the global profile", alias)
+	}
+}
+
 func TestGPT56FamilyEntries(t *testing.T) {
 	for _, id := range []string{"gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"} {
 		meta, ok := Resolve(ProviderOpenAI, id)

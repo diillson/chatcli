@@ -25,7 +25,6 @@ const (
 	ProviderMoonshot        = "MOONSHOT"
 	ProviderOllama          = "OLLAMA"
 	ProviderCopilot         = "COPILOT"
-	ProviderGitHubModels    = "GITHUB_MODELS"
 	ProviderOpenRouter      = "OPENROUTER"
 	ProviderBedrock         = "BEDROCK"
 	ProviderDevin           = "DEVIN"
@@ -72,8 +71,42 @@ type ModelMeta struct {
 // catalog_test.go pin this contract for the Claude Opus 4.x line and
 // the same applies to GPT-5.x — gpt-5.6-* must be listed before gpt-5.5
 // before gpt-5.4 before gpt-5.3-codex before gpt-5 (whose alias list
-// includes "gpt-5.1" and other prefix-y strings).
+// includes "gpt-5.1" and other prefix-y strings). GPT-6 heads the OpenAI
+// block for the same reason.
 var registry = []ModelMeta{
+	// ── OpenAI GPT-6 ─────────────────────────────────────────────────
+	// gpt-6-astra (GA Sep 3 2026): single model, no mini/pro/tier
+	// fan-out. Platform API specs (developers.openai.com/api/docs/models
+	// /gpt-6-astra): 1,050,000 context — 922,000 of it addressable as
+	// input — with 128,000 max output and an Apr 30 2026 knowledge
+	// cutoff. Serves Responses and Chat Completions; reasoning_effort
+	// takes five levels (low/medium/high/xhigh/max), two more than the
+	// 5.x line.
+	//
+	// The "gpt-6" alias is a family shorthand pointing at Astra, the way
+	// "gpt-5.6" points at Sol. It is a loose (Contains) alias, so a
+	// future gpt-6-mini would resolve here until it gets its own entry
+	// listed ABOVE this one — same rule as the rest of the block.
+	//
+	// OAuth/Codex: the slug needs the originator + User-Agent pair that
+	// config.OpenAICodex* already sends, and nothing more. codex-cli
+	// only learned Astra in 0.153.1 while our pinned User-Agent still
+	// says 0.144.0, but that version is NOT a gate here: it feeds
+	// minimal_client_version on the /codex/models listing, which this
+	// project never calls — /codex/responses only checks that the pair
+	// is present and well-formed (see config/defaults.go). Bumping the
+	// pin would be churn against an empirically verified constant.
+	{
+		ID:              "gpt-6-astra",
+		Aliases:         []string{"gpt-6-astra", "gpt-6"},
+		DisplayName:     "GPT-6 Astra",
+		Provider:        ProviderOpenAI,
+		ContextWindow:   1050000,
+		MaxOutputTokens: 128000,
+		PreferredAPI:    APIResponses,
+		Capabilities:    []string{"vision", "tools", "json_mode"},
+	},
+
 	// ── OpenAI GPT-5 family ──────────────────────────────────────────
 	// gpt-5.6 (GA Jul 9 2026): three named tiers — Sol (flagship), Terra
 	// (balanced) and Luna (fast/affordable). Platform API specs: all three
@@ -666,6 +699,25 @@ var registry = []ModelMeta{
 	// below follow GitHub's lifecycle, not Google's, and stay.
 	// GitHub Copilot Models (accessible via Copilot subscription)
 	{
+		// GA in Copilot Sep 4 2026 (github.blog/changelog) for Pro+, Max,
+		// Business and Enterprise; rollout is gradual per IDE and an
+		// Enterprise/Business admin can disable it by model policy, so a
+		// resolve here is not a promise the seat can actually select it.
+		// Copilot serves the vendor slug unchanged, as it does for the
+		// gpt-4o entries below. The docs advertise a 1M-token window;
+		// the platform-API figure is kept for the same reason the
+		// OPENAI entry keeps it — client-side sizing wants the ceiling,
+		// and CHATCLI_CONTEXT_WINDOW overrides a tighter deployment.
+		ID:              "gpt-6-astra",
+		Aliases:         []string{"copilot-gpt-6-astra", "copilot-gpt-6"},
+		DisplayName:     "GPT-6 Astra (Copilot)",
+		Provider:        ProviderCopilot,
+		ContextWindow:   1050000,
+		MaxOutputTokens: 128000,
+		PreferredAPI:    APIChatCompletions,
+		Capabilities:    []string{"vision", "tools", "json_mode"},
+	},
+	{
 		ID:              "gpt-4o",
 		Aliases:         []string{"copilot-gpt-4o"},
 		DisplayName:     "GPT-4o (Copilot)",
@@ -705,93 +757,12 @@ var registry = []ModelMeta{
 		PreferredAPI:    APIChatCompletions,
 		Capabilities:    []string{"vision", "tools"},
 	},
-	// GitHub Models marketplace (models.inference.ai.azure.com)
-	// These are the known models available via GitHub PAT.
-	// The actual availability depends on the user's GitHub plan.
-	{
-		ID:              "gpt-4o",
-		Aliases:         []string{"gh-gpt-4o"},
-		DisplayName:     "GPT-4o (GitHub Models)",
-		Provider:        ProviderGitHubModels,
-		ContextWindow:   128000,
-		MaxOutputTokens: 16384,
-		PreferredAPI:    APIChatCompletions,
-		Capabilities:    []string{"vision", "tools", "json_mode"},
-	},
-	{
-		ID:              "gpt-4o-mini",
-		Aliases:         []string{"gh-gpt-4o-mini"},
-		DisplayName:     "GPT-4o mini (GitHub Models)",
-		Provider:        ProviderGitHubModels,
-		ContextWindow:   128000,
-		MaxOutputTokens: 16384,
-		PreferredAPI:    APIChatCompletions,
-		Capabilities:    []string{"vision", "tools", "json_mode"},
-	},
-	{
-		ID:              "Meta-Llama-3.1-405B-Instruct",
-		Aliases:         []string{"llama-3.1-405b", "meta-llama-405b"},
-		DisplayName:     "Llama 3.1 405B (GitHub Models)",
-		Provider:        ProviderGitHubModels,
-		ContextWindow:   128000,
-		MaxOutputTokens: 4096,
-		PreferredAPI:    APIChatCompletions,
-	},
-	{
-		ID:              "Meta-Llama-3.1-8B-Instruct",
-		Aliases:         []string{"llama-3.1-8b", "meta-llama-8b"},
-		DisplayName:     "Llama 3.1 8B (GitHub Models)",
-		Provider:        ProviderGitHubModels,
-		ContextWindow:   128000,
-		MaxOutputTokens: 4096,
-		PreferredAPI:    APIChatCompletions,
-	},
-	// Models below require GitHub Copilot Pro or expanded access
-	{
-		ID:              "DeepSeek-R1",
-		Aliases:         []string{"deepseek-r1", "deepseek"},
-		DisplayName:     "DeepSeek R1 (GitHub Models)",
-		Provider:        ProviderGitHubModels,
-		ContextWindow:   64000,
-		MaxOutputTokens: 8192,
-		PreferredAPI:    APIChatCompletions,
-	},
-	{
-		ID:              "Mistral-large-2411",
-		Aliases:         []string{"mistral-large", "mistral"},
-		DisplayName:     "Mistral Large (GitHub Models)",
-		Provider:        ProviderGitHubModels,
-		ContextWindow:   128000,
-		MaxOutputTokens: 4096,
-		PreferredAPI:    APIChatCompletions,
-	},
-	{
-		ID:              "Phi-4",
-		Aliases:         []string{"phi-4", "phi4"},
-		DisplayName:     "Phi-4 (GitHub Models)",
-		Provider:        ProviderGitHubModels,
-		ContextWindow:   16384,
-		MaxOutputTokens: 4096,
-		PreferredAPI:    APIChatCompletions,
-	},
-	{
-		ID:              "AI21-Jamba-1.5-Large",
-		Aliases:         []string{"jamba-1.5-large", "jamba"},
-		DisplayName:     "Jamba 1.5 Large (GitHub Models)",
-		Provider:        ProviderGitHubModels,
-		ContextWindow:   256000,
-		MaxOutputTokens: 4096,
-		PreferredAPI:    APIChatCompletions,
-	},
-	{
-		ID:              "Cohere-command-r-plus-08-2024",
-		Aliases:         []string{"cohere-command-r-plus", "cohere"},
-		DisplayName:     "Cohere Command R+ (GitHub Models)",
-		Provider:        ProviderGitHubModels,
-		ContextWindow:   128000,
-		MaxOutputTokens: 4096,
-		PreferredAPI:    APIChatCompletions,
-	},
+	// GitHub Models (models.inference.ai.azure.com) was fully retired on
+	// Jul 30 2026 — playground, catalog, inference API and BYOK all went
+	// away for every customer, and the endpoint now answers
+	// "github_models_retirement_brownout". Its nine entries and the whole
+	// GITHUB_MODELS provider were removed rather than left resolving to a
+	// dead host. GitHub Copilot (above) is a different product and stays.
 
 	// xAI (Grok) Models. Specs from xAI's published model docs and the
 	// OpenRouter mirror (which xAI also publishes against). Aliases were
@@ -1155,6 +1126,21 @@ var registry = []ModelMeta{
 	// OpenRouter Models (multi-provider gateway)
 	// Models use provider/model-name format. Only popular defaults are listed;
 	// the full catalog is fetched dynamically via ListModels.
+	{
+		// openrouter.ai/openai/gpt-6-astra — served by OpenAI and Azure
+		// (US) upstreams, 1.05M context with 128K completions. Listed for
+		// the same reason as the Anthropic 5-family below: until the
+		// dynamic ListModels catalog loads, an uncataloged slug sizes at
+		// the 50K default and compacts constantly.
+		ID:              "openai/gpt-6-astra",
+		Aliases:         []string{"openrouter-gpt-6-astra", "openrouter-gpt-6"},
+		DisplayName:     "GPT-6 Astra (OpenRouter)",
+		Provider:        ProviderOpenRouter,
+		ContextWindow:   1050000,
+		MaxOutputTokens: 128000,
+		PreferredAPI:    APIChatCompletions,
+		Capabilities:    []string{"vision", "tools", "json_mode"},
+	},
 	{
 		ID:              "openai/gpt-4o",
 		Aliases:         []string{"openrouter-gpt-4o"},
@@ -1598,6 +1584,34 @@ var registry = []ModelMeta{
 		Capabilities:    []string{"tools", "json_mode"},
 	},
 
+	// ── AWS Bedrock — OpenAI GPT-6 (frontier, Sep 2026) ──────────────
+	// ⚠️ Added AHEAD of AWS documentation: at the time of writing the
+	// "models at a glance" index still stops at the 5.6 line, so there is
+	// no Bedrock model card for Astra to cite. The ID comes from OpenAI's
+	// own shipping client — codex-rs/model-provider-info pins
+	// AMAZON_BEDROCK_GPT_6_ASTRA_MODEL_ID = "openai.gpt-6-astra" and the
+	// Codex Bedrock catalog lists it beside the three 5.6 tiers — and the
+	// launch coverage put Bedrock in the rollout. Same shape as its
+	// siblings below: inference-profile IDs and bedrock_converse_only, so
+	// resolveFamily does not send the "openai." prefix down the gpt-oss
+	// InvokeModel path. NOT verified against a live AWS account; if the
+	// card lands with a different profile set, fix the aliases here.
+	//
+	// Note Codex sizes these at a 272,000-token window on Bedrock rather
+	// than the platform API's 1.05M. That is its own client-side choice
+	// (it matches OpenAI's short-context pricing tier, not an AWS limit),
+	// so this entry keeps the family convention the 5.6 rows established.
+	{
+		ID:              "global.openai.gpt-6-astra",
+		Aliases:         []string{"bedrock-gpt-6-astra", "openai.gpt-6-astra", "us.openai.gpt-6-astra"},
+		DisplayName:     "GPT-6 Astra (Bedrock, global)",
+		Provider:        ProviderBedrock,
+		ContextWindow:   1050000,
+		MaxOutputTokens: 128000,
+		PreferredAPI:    APIChatCompletions,
+		Capabilities:    []string{"tools", "vision", "json_mode", "bedrock_converse_only"},
+	},
+
 	// ── AWS Bedrock — OpenAI GPT-5.6 (frontier, Jul 13 2026) ──────────
 	// Sol/Terra/Luna on Bedrock (model cards openai-gpt-5-6-*) speak
 	// Converse, Responses and Chat Completions but NOT InvokeModel, and
@@ -1858,8 +1872,6 @@ func GetMaxTokens(provider, model string, override int) int {
 		return 8192
 	case ProviderCopilot:
 		return 16384
-	case ProviderGitHubModels:
-		return 4096
 	case ProviderOpenRouter:
 		return 16384
 	case ProviderDevin:
@@ -1970,8 +1982,6 @@ func GetContextWindow(provider, model string) int {
 	case ProviderOllama:
 		return 8192
 	case ProviderCopilot:
-		return 128000
-	case ProviderGitHubModels:
 		return 128000
 	case ProviderOpenRouter:
 		return 128000

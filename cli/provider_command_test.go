@@ -22,7 +22,7 @@ func TestProviderDefaultModel(t *testing.T) {
 	c := &ChatCLI{}
 	known := []string{
 		"OPENAI", "CLAUDEAI", "OPENAI_ASSISTANT", "GOOGLEAI", "XAI", "ZAI",
-		"MINIMAX", "MOONSHOT", "OLLAMA", "COPILOT", "GITHUB_MODELS",
+		"MINIMAX", "MOONSHOT", "OLLAMA", "COPILOT",
 	}
 	for _, p := range known {
 		if got := c.providerDefaultModel(p); got == "" {

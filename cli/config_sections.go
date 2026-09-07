@@ -636,10 +636,6 @@ func (cli *ChatCLI) showConfigProviders() {
 	kv(p, "GITHUB_COPILOT_TOKEN", presence(os.Getenv("GITHUB_COPILOT_TOKEN")))
 
 	fmt.Println(p)
-	subheader(p, "cfg.sub.prov.github_models")
-	kv(p, "GITHUB_MODELS_MODEL", envOr("GITHUB_MODELS_MODEL"))
-	kv(p, "GITHUB_MODELS_MAX_TOKENS", envOr("GITHUB_MODELS_MAX_TOKENS"))
-	kv(p, "GITHUB_MODELS_TOKEN", presence(os.Getenv("GITHUB_MODELS_TOKEN")))
 	kv(p, "GITHUB_TOKEN", presence(os.Getenv("GITHUB_TOKEN")))
 	kv(p, "GH_TOKEN", presence(os.Getenv("GH_TOKEN")))
 
@@ -1369,7 +1365,6 @@ func (cli *ChatCLI) showConfigAuth() {
 		"anthropic",
 		"openai-codex",
 		"github-copilot",
-		"github-models",
 	}
 
 	anyLoggedIn := false

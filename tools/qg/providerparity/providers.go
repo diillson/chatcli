@@ -75,8 +75,8 @@ func isUpper(c byte) bool { return c >= 'A' && c <= 'Z' }
 // across releases (it appears in the exemption table); Description is for
 // humans; Path is repo-relative; Pattern uses `{Upper}` and `{lower}`
 // placeholders. We deliberately do not support a Pascal placeholder
-// because Go's acronym-aware casing ("ClaudeAI", "GitHubModels") cannot
-// be derived mechanically from "CLAUDEAI" or "GITHUB_MODELS".
+// because Go's acronym-aware casing ("ClaudeAI", "OpenAIAssistant") cannot
+// be derived mechanically from "CLAUDEAI" or "OPENAI_ASSISTANT".
 type TouchPoint struct {
 	ID          string
 	Description string
@@ -270,9 +270,6 @@ func DefaultTouchPoints() []TouchPoint {
 //	STACKSPOT — uses CLIENT_ID/CLIENT_KEY; no public pricing; not
 //	            exposed via cfg.sub.prov.stackspot's subsection.
 //	OLLAMA — local, no API key, no public pricing.
-//	GITHUB_MODELS — uses GitHub auth, model-prefix pricing; CLI factory
-//	                stored at `m.clients["GITHUB_MODELS"]` already, but
-//	                distinct from operator CRD coverage.
 //	MINIMAX — uses provider-keyed pricing via "minimax" substring, so
 //	          the cost_tracker.cli check by `{lower}` already matches.
 func DefaultExemptions() Exemptions {
@@ -300,12 +297,6 @@ func DefaultExemptions() Exemptions {
 			"env.redactor",    // local, no API key
 			"operator.cost",   // local, no cost
 			"manager.refresh", // Ollama spec via base_url not API key
-		},
-		"GITHUB_MODELS": {
-			"env.redactor",    // uses GITHUB_MODELS_TOKEN (OAuth-issued), not _API_KEY
-			"manager.refresh", // not in CreateClientWithKey; OAuth-only flow
-			"cost.cli",        // priced via "copilot" substring fallback
-			"operator.cost",   // same
 		},
 		"MINIMAX": {
 			"manager.refresh", // MiniMax priced via "minimax" substring

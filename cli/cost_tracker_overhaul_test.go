@@ -48,6 +48,17 @@ func TestGetCachePricingFamilies(t *testing.T) {
 		{"CLAUDEAI", "claude-fable-5-1", 10.0 * 1.25, 10.0 * 0.025},
 		{"BEDROCK", "anthropic.claude-fable-5-1", 10.0 * 1.25, 10.0 * 0.025},
 		{"CLAUDEAI", "claude-fable-5", 10.0 * 1.25, 10.0 * 0.10}, // Fable 5 keeps the 10% rule
+		// GPT-6 Astra and the 5.6 tiers publish a cache-writes column
+		// (1.25x input) and cached input at 10% — unlike gpt-4o and the
+		// older generations below, which keep automatic caching's 50%
+		// read and free writes.
+		{"OPENAI", "gpt-6-astra", 10.0 * 1.25, 10.0 * 0.10},
+		{"BEDROCK", "global.openai.gpt-6-astra", 10.0 * 1.25, 10.0 * 0.10},
+		{"OPENROUTER", "openai/gpt-6-astra", 10.0 * 1.25, 10.0 * 0.10},
+		{"OPENAI", "gpt-5.6-sol", 4.0 * 1.25, 4.0 * 0.10},
+		{"OPENAI", "gpt-5.6-terra", 2.0 * 1.25, 2.0 * 0.10},
+		{"OPENAI", "gpt-5.6-luna", 0.20 * 1.25, 0.20 * 0.10},
+		{"OPENAI", "gpt-5.5", 0, 5.0 * 0.50},
 		{"OPENAI", "gpt-4o", 0, 2.50 * 0.50},
 		{"GOOGLEAI", "gemini-2.5-pro", 0, 1.25 * 0.10}, // cached reads 10% of input (Sep/2026 pricing)
 		{"DEEPSEEK", "deepseek-chat", 0, 0.27 * 0.25},

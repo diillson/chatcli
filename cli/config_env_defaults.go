@@ -95,7 +95,6 @@ var envDefaults = map[string]envDefault{
 	"BEDROCK_REGION":             {Value: config.DefaultBedrockRegion, Source: "config.DefaultBedrockRegion"},
 	"COPILOT_MODEL":              {Value: config.DefaultCopilotModel, Source: "config.DefaultCopilotModel"},
 	"COPILOT_API_BASE_URL":       {Value: config.CopilotAPIURL, Source: "config.CopilotAPIURL"},
-	"GITHUB_MODELS_MODEL":        {Value: config.DefaultGitHubModelsModel, Source: "config.DefaultGitHubModelsModel"},
 	"ZAI_MODEL":                  {Value: config.DefaultZAIModel, Source: "config.DefaultZAIModel"},
 	"ZAI_API_URL":                {Value: config.ZAIAPIURL, Source: "config.ZAIAPIURL"},
 	"ZAI_USE_CODING_PLAN":        {Value: "false", Source: "hardcoded (true → config.ZAICodingAPIURL, GLM Coding Plan)"},

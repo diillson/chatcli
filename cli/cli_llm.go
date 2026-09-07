@@ -304,8 +304,6 @@ func (cli *ChatCLI) providerDefaultModel(provider string) string {
 		return utils.GetEnvOrDefault("OLLAMA_MODEL", config.DefaultOllamaModel)
 	case "COPILOT":
 		return utils.GetEnvOrDefault("COPILOT_MODEL", config.DefaultCopilotModel)
-	case "GITHUB_MODELS":
-		return utils.GetEnvOrDefault("GITHUB_MODELS_MODEL", config.DefaultGitHubModelsModel)
 	}
 	return ""
 }
@@ -657,7 +655,6 @@ var providerMaxTokensEnv = map[string]string{
 	"OLLAMA":        "OLLAMA_MAX_TOKENS",
 	"STACKSPOT":     "STACKSPOT_MAX_TOKENS",
 	"COPILOT":       "COPILOT_MAX_TOKENS",
-	"GITHUB_MODELS": "GITHUB_MODELS_MAX_TOKENS",
 	// BEDROCK_MAX_TOKENS is the primary env the Bedrock client reads (it
 	// also accepts ANTHROPIC_MAX_TOKENS as a secondary, handled client-side).
 	"BEDROCK":    "BEDROCK_MAX_TOKENS",

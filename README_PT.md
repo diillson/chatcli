@@ -57,7 +57,7 @@
 
 | | |
 |---|---|
-| **Multi-provider com fallback** | 14 provedores de LLM (OpenAI · OpenAI Responses · Anthropic · Bedrock · Google · xAI · ZAI · MiniMax · Moonshot (Kimi) · Copilot · GitHub Models · StackSpot · OpenRouter · Ollama), com classificação inteligente de erros, backoff exponencial e cooldown por provider. |
+| **Multi-provider com fallback** | 14 provedores de LLM (OpenAI · OpenAI Responses · Anthropic · Bedrock · Google · xAI · ZAI · MiniMax · Moonshot (Kimi) · Copilot · StackSpot · OpenRouter · Ollama · Devin CLI), com classificação inteligente de erros, backoff exponencial e cooldown por provider. |
 | **Agentes autônomos** | 14 workers builtin coordenados por motor ReAct (Reason + Act): 12 specialists de orquestração executam em paralelo + 2 de qualidade (refiner, verifier), com pipeline de qualidade em 7 padrões. |
 | **Quality pipeline** | Self-Refine, Chain-of-Verification (CoVe), Reflexion, RAG + HyDE, Plan-and-Solve (ReWOO), backbone de reasoning cross-provider — todos compostos por state machine thread-safe com circuit breakers e hot reload. |
 | **Scheduler (Chronos)** | Agendamento durável com cron + wait-until + DAG + daemon mode. `/schedule`, `/wait`, `/jobs` + tool `@scheduler` para agents. WAL CRC32, snapshots, rate limiter, circuit breakers, audit JSONL, 13 métricas Prometheus. Jobs sobrevivem a crash e a fechar o CLI. |
@@ -114,7 +114,7 @@ go build -ldflags "-X github.com/diillson/chatcli/version.Version=${VERSION}" -o
 
 ```bash
 LLM_PROVIDER=OPENAI    # OPENAI, CLAUDEAI, BEDROCK, GOOGLEAI, XAI, ZAI, MINIMAX, MOONSHOT,
-                       # COPILOT, GITHUB_MODELS, OLLAMA, STACKSPOT, OPENROUTER
+                       # COPILOT, OLLAMA, STACKSPOT, OPENROUTER
 OPENAI_API_KEY=sk-xxx
 ```
 
@@ -132,7 +132,6 @@ OPENAI_API_KEY=sk-xxx
 | MiniMax | `MINIMAX_API_KEY` | `MINIMAX_MODEL` | `MINIMAX_MAX_TOKENS` |
 | Moonshot (Kimi) | `MOONSHOT_API_KEY` | `MOONSHOT_MODEL` | `MOONSHOT_MAX_TOKENS`, `MOONSHOT_THINKING` |
 | GitHub Copilot | `GITHUB_COPILOT_TOKEN` | `COPILOT_MODEL` | ou `/auth login github-copilot` |
-| GitHub Models | `GITHUB_TOKEN` | `GITHUB_MODELS_MODEL` | `GH_TOKEN`, `GITHUB_MODELS_TOKEN` |
 | StackSpot | `CLIENT_ID`, `CLIENT_KEY` | — | `STACKSPOT_REALM`, `STACKSPOT_AGENT_ID` |
 | OpenRouter | `OPENROUTER_API_KEY` | — | `OPENROUTER_MAX_TOKENS`, `OPENROUTER_FALLBACK_MODELS`, `OPENROUTER_API_URL` |
 | Ollama | — | `OLLAMA_MODEL` | `OLLAMA_ENABLED=true`, `OLLAMA_BASE_URL` |
@@ -309,7 +308,6 @@ helm install chatcli oci://ghcr.io/diillson/charts/chatcli \
 | **MiniMax** | MiniMax-M2.7 | Nativo | Sim | — |
 | **Moonshot (Kimi)** | kimi-k2.6 | Nativo | Sim | `MOONSHOT_THINKING=enabled\|disabled\|auto` |
 | **GitHub Copilot** | gpt-4o | Nativo | Sim | — |
-| **GitHub Models** | gpt-4o | Nativo | Sim | — |
 | **StackSpot AI** | StackSpotAI | — | — | — |
 | **OpenRouter** | openai/gpt-5.2 | Nativo | Sim | Passthrough |
 | **Ollama** | (local) | XML fallback | — | Tags `<thinking>` normalizadas |
@@ -625,7 +623,7 @@ chatcli/
     openai/  openai_responses/  openai_assistant/
     claudeai/  bedrock/
     googleai/  xai/  zai/  minimax/
-    copilot/  github_models/  stackspotai/  openrouter/  ollama/
+    copilot/  stackspotai/  openrouter/  ollama/
     fallback/  catalog/  registry/  token/  toolshim/  embedding/
   metrics/                  Prometheus registry + /metrics + /healthz
   server/                   gRPC + TLS + JWT + MCP + Plugin discovery

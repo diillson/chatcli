@@ -131,7 +131,6 @@
             "STACKSPOT",
             "OLLAMA",
             "COPILOT",
-            "GITHUB_MODELS",
             "OPENROUTER"
           ],
           "description": "LLM provider to use."
@@ -303,10 +302,6 @@
         "githubCopilotToken": {
           "type": "string",
           "description": "GitHub Copilot authentication token."
-        },
-        "githubModelsToken": {
-          "type": "string",
-          "description": "GitHub Models authentication token."
         },
         "openrouterApiKey": {
           "type": "string",

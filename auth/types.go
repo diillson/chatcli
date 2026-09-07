@@ -24,7 +24,6 @@ const (
 	ProviderOpenAI        ProviderID = "openai"
 	ProviderOpenAICodex   ProviderID = "openai-codex"
 	ProviderGitHubCopilot ProviderID = "github-copilot"
-	ProviderGitHubModels  ProviderID = "github-models"
 	// ProviderMCP is the base provider id for OAuth credentials minted for
 	// remote MCP servers. Per-server profiles use the id "mcp:<server>" so
 	// each server keeps an independent credential; the token/authorization

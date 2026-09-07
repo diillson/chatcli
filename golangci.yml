@@ -75,7 +75,7 @@ issues:
     - linters:
         - revive
       text: "error-naming:"
-    # Package directories like openai_assistant and github_models use
+    # Package directories like openai_assistant and stackspotai use
     # snake_case because they mirror the provider's public name. The
     # linter recommends CamelCase but renaming would cascade through
     # every import.

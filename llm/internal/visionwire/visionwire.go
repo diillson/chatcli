@@ -85,7 +85,7 @@ func DataURL(ic models.ImageContent) string {
 // Completions message. With no valid images it is the plain text string
 // (byte-identical to the legacy path). With images it is the multimodal parts
 // array: a text part (when text is non-empty) followed by one image_url part
-// per image. Shared by openai, xai, zai, openrouter, copilot, githubmodels,
+// per image. Shared by openai, xai, zai, openrouter, copilot,
 // moonshot, minimax, ollama.
 func OpenAIContent(text string, imgs []models.ImageContent) Content {
 	valid := validImages(imgs)

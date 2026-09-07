@@ -98,12 +98,6 @@ func envFallbackProvider(provider ProviderID) TokenProvider {
 		if v := strings.TrimSpace(os.Getenv("GITHUB_COPILOT_TOKEN")); v != "" {
 			return &staticTokenProvider{token: v, mode: AuthModeToken, provider: provider, source: "env:GITHUB_COPILOT_TOKEN"}
 		}
-	case ProviderGitHubModels:
-		for _, envKey := range []string{"GITHUB_TOKEN", "GH_TOKEN", "GITHUB_MODELS_TOKEN"} {
-			if v := strings.TrimSpace(os.Getenv(envKey)); v != "" {
-				return &staticTokenProvider{token: v, mode: AuthModeToken, provider: provider, source: "env:" + envKey}
-			}
-		}
 	}
 	return nil
 }
