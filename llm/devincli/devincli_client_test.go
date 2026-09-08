@@ -387,3 +387,166 @@ echo ok
 	assert.True(t, utf8.Valid(prompt), "prompt file must always be valid UTF-8 for the Rust CLI")
 	assert.Contains(t, string(prompt), "binário cru", "surrounding valid text must survive sanitization")
 }
+
+// TestSendPrompt_WaivesWorkspaceTrustByDefault is the regression this flag
+// exists for: from the 3000.6 CLI line onward, --print refuses to run in a
+// directory it has not been told to trust, and every ChatCLI turn runs in a
+// throwaway temp dir that can never be trusted. Without the waiver the whole
+// provider stops answering.
+func TestSendPrompt_WaivesWorkspaceTrustByDefault(t *testing.T) {
+	record := filepath.Join(t.TempDir(), "argv")
+	// Impersonates a current CLI: refuses --print outside a trusted dir
+	// unless the check is explicitly waived.
+	bin := fakeDevin(t, `
+echo "$@" > `+record+`
+case " $* " in
+  *" --respect-workspace-trust false "*) ;;
+  *) echo "Error: workspace is not trusted; run devin in a trusted directory" >&2; exit 1;;
+esac
+printf '<<<CHATCLI_REPLY_BEGIN>>>\nok\n<<<CHATCLI_REPLY_END>>>\n'
+`)
+	c := NewClient(bin, "claude-sonnet-4.6", zap.NewNop(), 1, 0)
+	got, err := c.SendPrompt(context.Background(), "hi", nil, 0)
+	require.NoError(t, err)
+	assert.Equal(t, "ok", got)
+
+	argv, err := os.ReadFile(record)
+	require.NoError(t, err)
+	assert.Contains(t, string(argv), "--respect-workspace-trust false")
+}
+
+// TestWorkspaceTrustArgs_HonorsTheOperator covers the two ways an operator
+// overrides the waiver. Setting the env to true restores the CLI's own
+// default; pinning the flag through DEVIN_CLI_EXTRA_ARGS must suppress ours
+// entirely, because passing the same flag twice is a parse error.
+func TestWorkspaceTrustArgs_HonorsTheOperator(t *testing.T) {
+	t.Cleanup(func() { workspaceTrustUnsupported.Store(false) })
+
+	t.Run("default waives the check", func(t *testing.T) {
+		assert.Equal(t, []string{"--respect-workspace-trust", "false"}, workspaceTrustArgs())
+	})
+
+	t.Run("env true restores the CLI default", func(t *testing.T) {
+		t.Setenv("DEVIN_CLI_RESPECT_WORKSPACE_TRUST", "true")
+		assert.Equal(t, []string{"--respect-workspace-trust", "true"}, workspaceTrustArgs())
+	})
+
+	t.Run("env false is explicit but identical", func(t *testing.T) {
+		t.Setenv("DEVIN_CLI_RESPECT_WORKSPACE_TRUST", "false")
+		assert.Equal(t, []string{"--respect-workspace-trust", "false"}, workspaceTrustArgs())
+	})
+
+	t.Run("extra args pinning the flag wins outright", func(t *testing.T) {
+		t.Setenv("DEVIN_CLI_EXTRA_ARGS", "--respect-workspace-trust true")
+		assert.Nil(t, workspaceTrustArgs(), "ours must not be added a second time")
+	})
+
+	t.Run("a build that rejected it never sees it again", func(t *testing.T) {
+		workspaceTrustUnsupported.Store(true)
+		assert.Nil(t, workspaceTrustArgs())
+	})
+}
+
+// TestSendPrompt_ArgvNeverRepeatsWorkspaceTrust guards the concrete parse
+// error the dedupe prevents: clap rejects the flag given twice, so an
+// operator who pinned it in DEVIN_CLI_EXTRA_ARGS would otherwise break every
+// turn by following the docs.
+func TestSendPrompt_ArgvNeverRepeatsWorkspaceTrust(t *testing.T) {
+	record := filepath.Join(t.TempDir(), "argv")
+	t.Setenv("DEVIN_CLI_EXTRA_ARGS", "--respect-workspace-trust false")
+	bin := fakeDevin(t, `echo "$@" > `+record+`; echo ok`)
+	c := NewClient(bin, "", zap.NewNop(), 1, 0)
+	_, err := c.SendPrompt(context.Background(), "hi", nil, 0)
+	require.NoError(t, err)
+
+	argv, err := os.ReadFile(record)
+	require.NoError(t, err)
+	assert.Equal(t, 1, strings.Count(string(argv), "--respect-workspace-trust"),
+		"the flag must appear exactly once")
+}
+
+// TestSendPrompt_OldCLIRejectingWorkspaceTrustIsRetriedWithoutIt keeps the
+// provider working on a binary that predates the flag. Dropping it there is
+// always safe: a build that cannot parse it also does not gate --print on
+// workspace trust.
+func TestSendPrompt_OldCLIRejectingWorkspaceTrustIsRetriedWithoutIt(t *testing.T) {
+	t.Cleanup(func() { workspaceTrustUnsupported.Store(false) })
+	record := filepath.Join(t.TempDir(), "argv")
+	bin := fakeDevin(t, `
+echo "$@" >> `+record+`
+case " $* " in
+  *" --respect-workspace-trust "*) echo "error: unexpected argument '--respect-workspace-trust' found" >&2; exit 2;;
+esac
+printf '<<<CHATCLI_REPLY_BEGIN>>>\nok\n<<<CHATCLI_REPLY_END>>>\n'
+`)
+	c := NewClient(bin, "", zap.NewNop(), 1, 0)
+	got, err := c.SendPrompt(context.Background(), "hi", nil, 0)
+	require.NoError(t, err)
+	assert.Equal(t, "ok", got)
+	assert.True(t, workspaceTrustUnsupported.Load(), "the rejection must latch for the process")
+
+	lines := argvLines(t, record)
+	require.Len(t, lines, 2, "one rejected attempt, one retry without the flag")
+	assert.Contains(t, lines[0], "--respect-workspace-trust")
+	assert.NotContains(t, lines[1], "--respect-workspace-trust")
+
+	// Later turns skip it up front instead of paying for the rejection again.
+	_, err = c.SendPrompt(context.Background(), "again", nil, 0)
+	require.NoError(t, err)
+	lines = argvLines(t, record)
+	require.Len(t, lines, 3)
+	assert.NotContains(t, lines[2], "--respect-workspace-trust")
+}
+
+// TestSendPrompt_BuildPredatingBothFlagsStillAnswers covers the oldest binary
+// we still support. The CLI's parser names only ONE unexpected argument per
+// run, so recovering needs a retry per flag — a single fallback would leave
+// the turn failing on the second one.
+func TestSendPrompt_BuildPredatingBothFlagsStillAnswers(t *testing.T) {
+	t.Cleanup(func() {
+		exportUnsupported.Store(false)
+		workspaceTrustUnsupported.Store(false)
+	})
+	record := filepath.Join(t.TempDir(), "argv")
+	bin := fakeDevin(t, `
+echo "$@" >> `+record+`
+case " $* " in
+  *" --export "*) echo "error: unexpected argument '--export' found" >&2; exit 2;;
+esac
+case " $* " in
+  *" --respect-workspace-trust "*) echo "error: unexpected argument '--respect-workspace-trust' found" >&2; exit 2;;
+esac
+printf '<<<CHATCLI_REPLY_BEGIN>>>\nok\n<<<CHATCLI_REPLY_END>>>\n'
+`)
+	c := NewClient(bin, "", zap.NewNop(), 1, 0)
+	got, err := c.SendPrompt(context.Background(), "hi", nil, 0)
+	require.NoError(t, err)
+	assert.Equal(t, "ok", got)
+
+	lines := argvLines(t, record)
+	require.Len(t, lines, 3, "one attempt per rejected flag, then the clean run")
+	assert.NotContains(t, lines[2], "--export")
+	assert.NotContains(t, lines[2], "--respect-workspace-trust")
+}
+
+// TestFlagRejected_IsNarrow keeps the retry from firing on real failures. A
+// trust check that RAN and said no names the flag in its hint, and retrying
+// that would loop instead of surfacing the error.
+func TestFlagRejected_IsNarrow(t *testing.T) {
+	const flag = "--respect-workspace-trust"
+	assert.True(t, flagRejected("error: unexpected argument '--respect-workspace-trust' found", flag))
+	assert.True(t, flagRejected("Found argument '--respect-workspace-trust' which wasn't expected", flag))
+	assert.False(t, flagRejected("Error: workspace is not trusted; pass --respect-workspace-trust false", flag),
+		"a check that ran and refused is not a missing flag")
+	assert.False(t, flagRejected("Error: Not logged in. Run `devin auth login`", flag))
+	assert.False(t, flagRejected("error: unexpected argument '--export' found", flag),
+		"a rejection naming another flag must not latch this one")
+}
+
+// argvLines reads the recorded invocations of the fake binary, one per line.
+func argvLines(t *testing.T, record string) []string {
+	t.Helper()
+	argv, err := os.ReadFile(record)
+	require.NoError(t, err)
+	return strings.Split(strings.TrimSpace(string(argv)), "\n")
+}

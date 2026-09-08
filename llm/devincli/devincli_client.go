@@ -34,6 +34,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -192,6 +193,49 @@ func probeKnownDirs(name string, dirs []string) (string, bool) {
 // working at the cost of estimated (chars/4) usage.
 var exportUnsupported atomic.Bool
 
+// workspaceTrustUnsupported is the same latch for --respect-workspace-trust,
+// which only exists on builds from the 3000.6 line onward. Dropping it on an
+// older binary is always safe: a build that does not know the flag is also a
+// build that does not gate --print on workspace trust.
+var workspaceTrustUnsupported atomic.Bool
+
+// respectWorkspaceTrustFlag is the flag the Devin CLI added to let
+// non-interactive runs past its workspace-trust prompt.
+const respectWorkspaceTrustFlag = "--respect-workspace-trust"
+
+// workspaceTrustArgs returns the --respect-workspace-trust pair to append to
+// the invocation, or nil to omit the flag.
+//
+// The default is "false", and that is a statement about ChatCLI's own setup
+// rather than a relaxation of anyone's security posture: every invocation
+// runs inside a private os.MkdirTemp directory created moments earlier,
+// holding nothing but the prompt file we just wrote. There is no project
+// there to trust or distrust. The CLI cannot know that, and its --print mode
+// has no way to raise the trust prompt, so from 3000.6 onward it simply
+// fails in that directory unless the check is waived.
+//
+// DEVIN_CLI_RESPECT_WORKSPACE_TRUST=true restores the CLI's own default for
+// a deployment that would rather see the failure than waive the check. The
+// flag is omitted entirely when the operator already pins it through
+// DEVIN_CLI_EXTRA_ARGS — passing it twice is a parse error, and an explicit
+// operator choice outranks ours.
+func workspaceTrustArgs() []string {
+	if workspaceTrustUnsupported.Load() {
+		return nil
+	}
+	if strings.Contains(os.Getenv("DEVIN_CLI_EXTRA_ARGS"), respectWorkspaceTrustFlag) {
+		return nil
+	}
+	respect := config.DevinCLIDefaultRespectWorkspaceTrust
+	switch strings.ToLower(strings.TrimSpace(os.Getenv("DEVIN_CLI_RESPECT_WORKSPACE_TRUST"))) {
+	case "true", "1", "yes", "on":
+		respect = true
+	case "false", "0", "no", "off":
+		respect = false
+	}
+	return []string{respectWorkspaceTrustFlag, strconv.FormatBool(respect)}
+}
+
 // usageExportEnabled reports whether turns request the per-turn ATIF
 // export that carries real token usage. DEVIN_CLI_USAGE_EXPORT=false
 // opts out (a locked-down deployment may forbid trajectory files).
@@ -203,13 +247,15 @@ func usageExportEnabled() bool {
 	return !exportUnsupported.Load()
 }
 
-// exportFlagRejected recognizes the CLI refusing the --export flag (an
-// older build) so the turn can be retried without it. The match is
-// deliberately narrow: only an argument-parsing error that names the
-// flag counts, never a turn that failed for another reason.
-func exportFlagRejected(detail string) bool {
+// flagRejected recognizes the CLI's argument parser refusing a flag this
+// build does not know, so the turn can be retried without it. The match is
+// deliberately narrow: only a parsing error that names the flag counts,
+// never a turn that failed for another reason — a write error mentioning
+// --export, or a trust check that ran and said no, must NOT look like a
+// missing flag or the retry would loop on a real failure.
+func flagRejected(detail, flag string) bool {
 	d := strings.ToLower(detail)
-	if !strings.Contains(d, "--export") {
+	if !strings.Contains(d, strings.ToLower(flag)) {
 		return false
 	}
 	return strings.Contains(d, "unexpected argument") ||
@@ -217,6 +263,31 @@ func exportFlagRejected(detail string) bool {
 		strings.Contains(d, "unknown argument") ||
 		strings.Contains(d, "found argument") ||
 		strings.Contains(d, "wasn't expected")
+}
+
+// exportFlagRejected reports the --export case of flagRejected.
+func exportFlagRejected(detail string) bool { return flagRejected(detail, "--export") }
+
+// latchUnsupportedFlag inspects a failed run for the CLI refusing one of the
+// optional flags ChatCLI adds, records it process-wide and reports whether
+// anything was newly latched — i.e. whether retrying can plausibly help.
+// The parser names ONE unexpected argument per run, so a build old enough to
+// reject both needs one retry per flag; the caller bounds the attempts.
+func latchUnsupportedFlag(detail string, logger *zap.Logger, bin string) bool {
+	switch {
+	case !exportUnsupported.Load() && exportFlagRejected(detail):
+		exportUnsupported.Store(true)
+		logger.Warn("devincli: this devin build rejects --export; real token usage unavailable, retrying without it",
+			zap.String("bin", bin))
+		return true
+	case !workspaceTrustUnsupported.Load() && flagRejected(detail, respectWorkspaceTrustFlag):
+		workspaceTrustUnsupported.Store(true)
+		logger.Warn("devincli: this devin build predates --respect-workspace-trust; retrying without it",
+			zap.String("bin", bin))
+		return true
+	default:
+		return false
+	}
 }
 
 // Client implements client.LLMClient over the local Devin CLI subprocess.
@@ -324,15 +395,17 @@ func (c *Client) runOnce(ctx context.Context, flattened string, timeout time.Dur
 		return "", fmt.Errorf("%s: %w", i18n.T("llm.devincli.prepare_prompt"), err)
 	}
 
-	withExport := usageExportEnabled()
-	reply, err := c.execTurn(ctx, workDir, promptFile, timeout, withExport)
-	if err != nil && withExport && exportFlagRejected(err.Error()) {
-		// Older CLI: no --export. Latch it and run the turn again plainly;
-		// usage degrades to the chars/4 estimate for this process.
-		exportUnsupported.Store(true)
-		c.logger.Warn("devincli: this devin build rejects --export; real token usage unavailable, retrying without it",
-			zap.String("bin", c.binPath))
-		return c.execTurn(ctx, workDir, promptFile, timeout, false)
+	reply, err := c.execTurn(ctx, workDir, promptFile, timeout, usageExportEnabled())
+	// Older builds reject flags newer ones need: --export first, then
+	// --respect-workspace-trust. Each rejection latches for the process, so
+	// the retry drops that flag and every later turn skips it up front. Two
+	// attempts cover a build that predates both — the parser only ever names
+	// one unexpected argument per run.
+	for attempt := 0; err != nil && attempt < 2; attempt++ {
+		if !latchUnsupportedFlag(err.Error(), c.logger, c.binPath) {
+			break
+		}
+		reply, err = c.execTurn(ctx, workDir, promptFile, timeout, usageExportEnabled())
 	}
 	return reply, err
 }
@@ -442,6 +515,12 @@ func (c *Client) buildArgs(promptFile, exportPath string) []string {
 
 	permMode := utils.GetEnvOrDefault("DEVIN_CLI_PERMISSION_MODE", config.DevinCLIDefaultPermissionMode)
 	args = append(args, "--permission-mode", permMode)
+
+	// The turn runs in a throwaway temp directory, which the CLI has never
+	// seen and therefore does not trust; --print has no way to ask. Without
+	// this the whole provider stops working on a current CLI. See
+	// workspaceTrustArgs for why waiving the check here is not a relaxation.
+	args = append(args, workspaceTrustArgs()...)
 
 	if agentConfig := strings.TrimSpace(os.Getenv("DEVIN_CLI_AGENT_CONFIG")); agentConfig != "" {
 		args = append(args, "--agent-config", agentConfig)

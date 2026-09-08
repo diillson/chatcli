@@ -128,8 +128,15 @@ func TestListModels_ProjectsFamiliesThenVariants(t *testing.T) {
 
 	argv, err := os.ReadFile(record)
 	require.NoError(t, err)
-	assert.Equal(t, "models list --format json", strings.TrimSpace(string(argv)),
-		"listing must not carry the turn flags (-p, --model, --permission-mode)")
+	args := strings.TrimSpace(string(argv))
+	assert.True(t, strings.HasPrefix(args, "models list --format json"), args)
+	for _, turnOnly := range []string{"-p", "--model", "--permission-mode", "--export"} {
+		assert.NotContainsf(t, " "+args+" ", " "+turnOnly+" ",
+			"listing must not carry the turn flag %s", turnOnly)
+	}
+	// The listing runs in the same throwaway temp directory a turn does, so
+	// it needs the same waiver or a current CLI refuses to run there.
+	assert.Contains(t, args, "--respect-workspace-trust false")
 }
 
 func TestListModels_RegistersDiscoveredSpecsInCatalog(t *testing.T) {

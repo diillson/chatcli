@@ -603,6 +603,7 @@ func (cli *ChatCLI) showConfigProviders() {
 	kv(p, "DEVIN_CLI_SANDBOX", envOr("DEVIN_CLI_SANDBOX"))
 	kv(p, "DEVIN_CLI_EXTRA_ARGS", envOr("DEVIN_CLI_EXTRA_ARGS"))
 	kv(p, "DEVIN_CLI_USAGE_EXPORT", envOr("DEVIN_CLI_USAGE_EXPORT"))
+	kv(p, "DEVIN_CLI_RESPECT_WORKSPACE_TRUST", envOr("DEVIN_CLI_RESPECT_WORKSPACE_TRUST"))
 
 	fmt.Println(p)
 	subheader(p, "cfg.sub.prov.bedrock")
