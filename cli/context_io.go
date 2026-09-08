@@ -12,6 +12,8 @@ import (
 
 	"github.com/diillson/chatcli/cli/ctxmgr"
 	"github.com/diillson/chatcli/i18n"
+	"github.com/diillson/chatcli/ui/kit"
+	"github.com/diillson/chatcli/ui/theme"
 )
 
 // handleAttach anexa um contexto à sessão atual
@@ -278,7 +280,7 @@ func printTokenCostFeedback(ctx *ctxmgr.FileContext) {
 	if estimatedTokens > 20000 {
 		fmt.Printf("  %s %s\n",
 			colorize("⚠", ColorYellow),
-			i18n.T("context.io.large_context_tip"))
+			kit.Colorize(i18n.T("context.io.large_context_tip"), theme.RoleText))
 	}
 }
 

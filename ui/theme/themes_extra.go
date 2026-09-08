@@ -43,10 +43,13 @@ func NordTheme() Theme {
 		Name:    "nord",
 		Variant: VariantDark,
 		Palette: Palette{
-			Primary:    Color{Hex: "#81A1C1", ANSI256: 110, ANSI16: 4},
-			Secondary:  Color{Hex: "#B48EAD", ANSI256: 139, ANSI16: 5},
-			Accent:     Color{Hex: "#88C0D0", ANSI256: 116, ANSI16: 6},
-			Muted:      Color{Hex: "#4C566A", ANSI256: 240, ANSI16: 8},
+			Primary:   Color{Hex: "#81A1C1", ANSI256: 110, ANSI16: 4},
+			Secondary: Color{Hex: "#B48EAD", ANSI256: 139, ANSI16: 5},
+			Accent:    Color{Hex: "#88C0D0", ANSI256: 116, ANSI16: 6},
+			// nord3 lifted toward nord4: the canonical #4C566A is Nord's COMMENT
+			// color and lands at 1.7:1 on nord0 — fine for a token inside code,
+			// unreadable for the whole metadata lines ChatCLI paints with Muted.
+			Muted:      Color{Hex: "#7B88A1", ANSI256: 103, ANSI16: 8},
 			Success:    Color{Hex: "#A3BE8C", ANSI256: 108, ANSI16: 2},
 			Warning:    Color{Hex: "#EBCB8B", ANSI256: 222, ANSI16: 3},
 			Danger:     Color{Hex: "#BF616A", ANSI256: 131, ANSI16: 1},
@@ -65,10 +68,12 @@ func TokyoNightTheme() Theme {
 		Name:    "tokyo-night",
 		Variant: VariantDark,
 		Palette: Palette{
-			Primary:    Color{Hex: "#7AA2F7", ANSI256: 111, ANSI16: 4},
-			Secondary:  Color{Hex: "#BB9AF7", ANSI256: 141, ANSI16: 5},
-			Accent:     Color{Hex: "#7DCFFF", ANSI256: 117, ANSI16: 6},
-			Muted:      Color{Hex: "#565F89", ANSI256: 60, ANSI16: 8},
+			Primary:   Color{Hex: "#7AA2F7", ANSI256: 111, ANSI16: 4},
+			Secondary: Color{Hex: "#BB9AF7", ANSI256: 141, ANSI16: 5},
+			Accent:    Color{Hex: "#7DCFFF", ANSI256: 117, ANSI16: 6},
+			// comment lifted toward fg_dark — see the nord note: 2.8:1 is a
+			// syntax-token contrast, not a body-text one.
+			Muted:      Color{Hex: "#6E77A3", ANSI256: 103, ANSI16: 8},
 			Success:    Color{Hex: "#9ECE6A", ANSI256: 149, ANSI16: 2},
 			Warning:    Color{Hex: "#E0AF68", ANSI256: 179, ANSI16: 3},
 			Danger:     Color{Hex: "#F7768E", ANSI256: 204, ANSI16: 1},
@@ -87,10 +92,12 @@ func SolarizedDarkTheme() Theme {
 		Name:    "solarized-dark",
 		Variant: VariantDark,
 		Palette: Palette{
-			Primary:    Color{Hex: "#268BD2", ANSI256: 32, ANSI16: 4},
-			Secondary:  Color{Hex: "#D33682", ANSI256: 168, ANSI16: 5},
-			Accent:     Color{Hex: "#6C71C4", ANSI256: 61, ANSI16: 13},
-			Muted:      Color{Hex: "#586E75", ANSI256: 240, ANSI16: 8},
+			Primary:   Color{Hex: "#268BD2", ANSI256: 32, ANSI16: 4},
+			Secondary: Color{Hex: "#D33682", ANSI256: 168, ANSI16: 5},
+			Accent:    Color{Hex: "#6C71C4", ANSI256: 61, ANSI16: 13},
+			// base00, not base01: Solarized reserves base01 for comments, and on
+			// base03 it lands at 2.8:1. base00 is the palette's own body tone.
+			Muted:      Color{Hex: "#657B83", ANSI256: 66, ANSI16: 8},
 			Success:    Color{Hex: "#859900", ANSI256: 100, ANSI16: 2},
 			Warning:    Color{Hex: "#B58900", ANSI256: 136, ANSI16: 3},
 			Danger:     Color{Hex: "#DC322F", ANSI256: 160, ANSI16: 1},
@@ -109,17 +116,24 @@ func SolarizedLightTheme() Theme {
 		Name:    "solarized-light",
 		Variant: VariantLight,
 		Palette: Palette{
-			Primary:    Color{Hex: "#268BD2", ANSI256: 32, ANSI16: 4},
-			Secondary:  Color{Hex: "#D33682", ANSI256: 168, ANSI16: 5},
-			Accent:     Color{Hex: "#6C71C4", ANSI256: 61, ANSI16: 5},
-			Muted:      Color{Hex: "#93A1A1", ANSI256: 247, ANSI16: 7},
+			Primary:   Color{Hex: "#268BD2", ANSI256: 32, ANSI16: 4},
+			Secondary: Color{Hex: "#D33682", ANSI256: 168, ANSI16: 5},
+			Accent:    Color{Hex: "#6C71C4", ANSI256: 61, ANSI16: 5},
+			// Solarized's own light-mode text ladder: base00 for de-emphasized
+			// content, base01 for body, base02 for emphasis. base1 (#93A1A1)
+			// stays where Solarized actually puts it on a light ground — rules
+			// and borders — because as TEXT it lands near 1.9:1 on base3 and
+			// secondary lines were unreadable. Same reason the 16-color index
+			// moves off 7 (light gray on a light terminal): 8 is the classic
+			// dark gray and is the only legible neutral here.
+			Muted:      Color{Hex: "#657B83", ANSI256: 66, ANSI16: 8},
 			Success:    Color{Hex: "#859900", ANSI256: 100, ANSI16: 2},
 			Warning:    Color{Hex: "#CB4B16", ANSI256: 166, ANSI16: 3},
 			Danger:     Color{Hex: "#DC322F", ANSI256: 160, ANSI16: 1},
 			Info:       Color{Hex: "#2AA198", ANSI256: 37, ANSI16: 6},
 			Border:     Color{Hex: "#93A1A1", ANSI256: 247, ANSI16: 7},
-			Text:       Color{Hex: "#657B83", ANSI256: 241, ANSI16: 0},
-			TextStrong: Color{Hex: "#586E75", ANSI256: 240, ANSI16: 0},
+			Text:       Color{Hex: "#586E75", ANSI256: 240, ANSI16: 0},
+			TextStrong: Color{Hex: "#073642", ANSI256: 23, ANSI16: 0},
 			Background: Color{Hex: "#FDF6E3", ANSI256: 230, ANSI16: 15},
 		},
 	}
@@ -197,10 +211,11 @@ func OneDarkTheme() Theme {
 		Name:    "one-dark",
 		Variant: VariantDark,
 		Palette: Palette{
-			Primary:    Color{Hex: "#61AFEF", ANSI256: 75, ANSI16: 4},
-			Secondary:  Color{Hex: "#C678DD", ANSI256: 176, ANSI16: 5},
-			Accent:     Color{Hex: "#56B6C2", ANSI256: 73, ANSI16: 6},
-			Muted:      Color{Hex: "#5C6370", ANSI256: 241, ANSI16: 8},
+			Primary:   Color{Hex: "#61AFEF", ANSI256: 75, ANSI16: 4},
+			Secondary: Color{Hex: "#C678DD", ANSI256: 176, ANSI16: 5},
+			Accent:    Color{Hex: "#56B6C2", ANSI256: 73, ANSI16: 6},
+			// comment gray lifted toward the foreground — see the nord note.
+			Muted:      Color{Hex: "#7F8796", ANSI256: 102, ANSI16: 8},
 			Success:    Color{Hex: "#98C379", ANSI256: 114, ANSI16: 2},
 			Warning:    Color{Hex: "#E5C07B", ANSI256: 180, ANSI16: 3},
 			Danger:     Color{Hex: "#E06C75", ANSI256: 168, ANSI16: 1},

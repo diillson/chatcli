@@ -9,6 +9,8 @@ import (
 	"github.com/diillson/chatcli/cli/compress"
 	"github.com/diillson/chatcli/i18n"
 	"github.com/diillson/chatcli/models"
+	"github.com/diillson/chatcli/ui/kit"
+	"github.com/diillson/chatcli/ui/theme"
 	"go.uber.org/zap"
 )
 
@@ -137,7 +139,7 @@ CONVERSATION TO COMPACT:
 
 	fmt.Printf("  %s %s %s\n",
 		colorize("📦", ""),
-		i18n.T("compact.compacting_with_instruction"),
+		kit.Colorize(i18n.T("compact.compacting_with_instruction"), theme.RoleText),
 		colorize(instruction, ColorCyan),
 	)
 
@@ -228,7 +230,7 @@ CONVERSATION TO COMPACT:
 
 	fmt.Printf("  %s %s (%s: %s)\n",
 		colorize("✓", ColorGreen),
-		i18n.T("compact.success", before, after),
+		kit.Colorize(i18n.T("compact.success", before, after), theme.RoleText),
 		i18n.T("compact.preserved"),
 		colorize(instruction, ColorCyan),
 	)

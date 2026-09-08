@@ -11,6 +11,8 @@ import (
 
 	"github.com/diillson/chatcli/i18n"
 	"github.com/diillson/chatcli/models"
+	"github.com/diillson/chatcli/ui/kit"
+	"github.com/diillson/chatcli/ui/theme"
 )
 
 // conversationCheckpoint stores a snapshot of the conversation at a given point.
@@ -80,11 +82,14 @@ func (cli *ChatCLI) showRewindMenu() bool {
 		msgInfo := fmt.Sprintf("%d msgs", cp.MsgCount)
 		idx := len(cli.checkpoints) - i
 
+		// The label is the only content column, so it carries the theme's
+		// body-text color instead of being printed bare: unstyled text keeps
+		// the terminal's own foreground and so never follows a theme switch.
 		fmt.Printf("  %s  %s  %s  %s\n",
 			colorize(fmt.Sprintf("[%d]", idx), ColorCyan),
 			colorize(timeStr, ColorGray),
 			colorize(msgInfo, ColorYellow),
-			cp.Label,
+			kit.Colorize(cp.Label, theme.RoleText),
 		)
 	}
 
@@ -128,7 +133,7 @@ func (cli *ChatCLI) showRewindMenu() bool {
 
 	fmt.Printf("  %s %s\n",
 		colorize("↩", ColorGreen),
-		i18n.T("rewind.success", idx, cp.Timestamp.Format("15:04:05"), cp.MsgCount),
+		kit.Colorize(i18n.T("rewind.success", idx, cp.Timestamp.Format("15:04:05"), cp.MsgCount), theme.RoleText),
 	)
 
 	return true

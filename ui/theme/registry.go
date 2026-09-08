@@ -249,13 +249,18 @@ func LightTheme() Theme {
 			Secondary: Color{Hex: "#2563EB", ANSI256: 26, ANSI16: 4},
 			Accent:    Color{Hex: "#0891B2", ANSI256: 31, ANSI16: 6},
 			Muted:     Color{Hex: "#6B7280", ANSI256: 244, ANSI16: 8},
-			Success:   Color{Hex: "#16A34A", ANSI256: 34, ANSI16: 2},
-			Warning:   Color{Hex: "#B45309", ANSI256: 130, ANSI16: 3},
-			Danger:    Color{Hex: "#DC2626", ANSI256: 160, ANSI16: 1},
-			// ANSI16 10 (bright green), distinct from Success' 2 so the two
-			// roles stay distinguishable on 16-color terminals — matching the
-			// dark theme's Info/Success separation.
-			Info:       Color{Hex: "#4D7C0F", ANSI256: 64, ANSI16: 10},
+			// green-700, not green-600: the lighter tone sat at 2.99:1 on the
+			// light ground, i.e. right under the legibility floor this theme
+			// exists to hold.
+			Success: Color{Hex: "#15803D", ANSI256: 28, ANSI16: 2},
+			Warning: Color{Hex: "#B45309", ANSI256: 130, ANSI16: 3},
+			Danger:  Color{Hex: "#DC2626", ANSI256: 160, ANSI16: 1},
+			// ANSI16 4 (blue), NOT the dark theme's 10 (bright green): on a
+			// 16-color LIGHT terminal the bright range is painted for a dark
+			// ground and bright green on white is effectively invisible. Blue
+			// keeps Info distinct from Success' 2 (the separation the dark
+			// theme gets from 10) while staying legible on the light ground.
+			Info:       Color{Hex: "#4D7C0F", ANSI256: 64, ANSI16: 4},
 			Border:     Color{Hex: "#9CA3AF", ANSI256: 247, ANSI16: 7},
 			Text:       Color{Hex: "#1F2937", ANSI256: 236, ANSI16: 0},
 			TextStrong: Color{Hex: "#111827", ANSI256: 232, ANSI16: 0},
