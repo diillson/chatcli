@@ -2,7 +2,16 @@
 # generate-artifacthub-changelog.sh
 #
 # Parses the latest version section from CHANGELOG.md and injects it as
-# the `artifacthub.io/changes` annotation into one or more Chart.yaml files.
+# the `artifacthub.io/changes` annotation into one or more Chart.yaml files,
+# and keeps `artifacthub.io/containsSecurityUpdates` in step with it.
+#
+# That second part is why the flag exists here at all: it used to be a literal
+# 'true' in Chart.yaml, set during a release that really did carry security
+# fixes and never turned off again. Every release after it advertised security
+# updates it did not contain, which is worse than saying nothing — an operator
+# who prioritises security upgrades cannot tell the real one from the noise.
+# The flag is now derived from the same changelog block as the changes list:
+# true when that block has a security entry, false when it does not.
 #
 # Usage:
 #   ./scripts/generate-artifacthub-changelog.sh deploy/helm/chatcli/Chart.yaml [deploy/helm/chatcli-operator/Chart.yaml ...]
@@ -93,8 +102,15 @@ if [[ -z "$annotation" ]]; then
   exit 0
 fi
 
-# Build the full annotation value (pipe literal block scalar)
-annotation_value="|\n${annotation}"
+# The security flag follows the entries we just built: a release is a security
+# release when its changelog block carries a security entry, and is not one
+# otherwise. Deriving it here is what stops the flag latching 'true' forever.
+if grep -qE '^[[:space:]]*- kind: security[[:space:]]*$' <<< "$annotation"; then
+  security_updates="true"
+else
+  security_updates="false"
+fi
+security_line="  artifacthub.io/containsSecurityUpdates: '${security_updates}'"
 
 # Inject into each Chart.yaml
 for chart_file in "$@"; do
@@ -152,5 +168,23 @@ for chart_file in "$@"; do
   } > "$chart_file"
 
   rm -f "$tmpfile"
-  echo "OK: Updated $chart_file with artifacthub.io/changes annotation"
+
+  # Rewrite the security flag in place, or add it right under `annotations:`
+  # when the chart has never carried one. awk rather than `sed -i` because
+  # the in-place flag is not portable between GNU and BSD sed.
+  tmpfile=$(mktemp)
+  if grep -q 'artifacthub\.io/containsSecurityUpdates:' "$chart_file"; then
+    awk -v line="$security_line" '
+      /^[[:space:]]*artifacthub\.io\/containsSecurityUpdates:/ { print line; next }
+      { print }
+    ' "$chart_file" > "$tmpfile"
+  else
+    awk -v line="$security_line" '
+      { print }
+      /^annotations:[[:space:]]*$/ { print line }
+    ' "$chart_file" > "$tmpfile"
+  fi
+  mv "$tmpfile" "$chart_file"
+
+  echo "OK: Updated $chart_file (changes annotation; containsSecurityUpdates=${security_updates})"
 done
