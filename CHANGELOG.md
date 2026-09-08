@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.199.1](https://github.com/diillson/chatcli/compare/v1.199.0...v1.199.1) (2026-09-08)
+
+
+### Bug Fixes
+
+* **ui:** the prompt and every palette follow the theme instead of forcing white ([#1550](https://github.com/diillson/chatcli/issues/1550)) ([529151c](https://github.com/diillson/chatcli/commit/529151c89be102729b2de5758dc1de304b4e0952))
+
 ## [1.199.0](https://github.com/diillson/chatcli/compare/v1.198.0...v1.199.0) (2026-09-07)
 
 
