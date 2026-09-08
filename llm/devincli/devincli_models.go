@@ -124,13 +124,8 @@ func (c *Client) ListModels(ctx context.Context) ([]client.ModelInfo, error) {
 	}
 	defer func() { _ = os.RemoveAll(workDir) }()
 
+	// No flag latching here, deliberately — see execModelsList.
 	out, detail, runErr := c.execModelsList(ctx, workDir)
-	// Same latch-and-retry as a turn: a build predating
-	// --respect-workspace-trust refuses to parse it, and the model list must
-	// keep working on an older binary. See workspaceTrustArgs.
-	if runErr != nil && latchUnsupportedFlag(detail, c.logger, c.binPath) {
-		out, detail, runErr = c.execModelsList(ctx, workDir)
-	}
 	if ctx.Err() == context.DeadlineExceeded {
 		return nil, fmt.Errorf("%s: %w", i18n.T("llm.devincli.list_timeout", devinListModelsTimeout.String()), ctx.Err())
 	}
@@ -199,13 +194,25 @@ func synthesizeFamilies(variants []devinVariant) []devinFamily {
 }
 
 // execModelsList runs one `devin models list` invocation in workDir and
-// returns its stdout plus a sanitized failure detail. Args are rebuilt on
-// every call so a retry picks up whatever the flag latch just learned.
+// returns its stdout plus a sanitized failure detail.
+//
+// The listing carries NO workspace-trust flag, and that is load-bearing
+// rather than an oversight. `--respect-workspace-trust` is documented as a
+// global flag, but the `models` subcommand's parser rejects it outright:
+//
+//	error: unexpected argument '--respect-workspace-trust' found
+//
+// which is indistinguishable from an old binary that never knew the flag. A
+// listing that passed it would therefore latch it as unsupported for the
+// whole process and strip it from every later TURN — turning a provider
+// switch, which lists models first, into "Refusing to run in an untrusted
+// workspace" on the very next message. The listing does not need the waiver
+// anyway: it performs no trust check, which is why it worked before the
+// waiver existed and still does.
 func (c *Client) execModelsList(ctx context.Context, workDir string) ([]byte, string, error) {
-	args := append([]string{"models", "list", "--format", "json"}, workspaceTrustArgs()...)
+	args := []string{"models", "list", "--format", "json"}
 	// #nosec G204 G702 -- binPath resolves from operator configuration
-	// (PATH lookup or DEVIN_CLI_PATH) and argv is a fixed subcommand plus
-	// the boolean workspace-trust flag, never model or network input.
+	// (PATH lookup or DEVIN_CLI_PATH) and argv is a fixed subcommand.
 	cmd := exec.CommandContext(ctx, c.binPath, args...)
 	cmd.WaitDelay = 2 * time.Second
 	cmd.Dir = workDir

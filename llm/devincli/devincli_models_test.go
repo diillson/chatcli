@@ -134,9 +134,10 @@ func TestListModels_ProjectsFamiliesThenVariants(t *testing.T) {
 		assert.NotContainsf(t, " "+args+" ", " "+turnOnly+" ",
 			"listing must not carry the turn flag %s", turnOnly)
 	}
-	// The listing runs in the same throwaway temp directory a turn does, so
-	// it needs the same waiver or a current CLI refuses to run there.
-	assert.Contains(t, args, "--respect-workspace-trust false")
+	// The listing must NOT carry the workspace-trust flag: the models
+	// subcommand's parser rejects it, and that rejection is indistinguishable
+	// from an old binary, which would latch the flag off for every later turn.
+	assert.NotContains(t, args, "--respect-workspace-trust")
 }
 
 func TestListModels_RegistersDiscoveredSpecsInCatalog(t *testing.T) {
@@ -373,4 +374,37 @@ func TestRestoreSnapshot_CorruptFileIsAnError(t *testing.T) {
 	path := isolateSnapshot(t)
 	require.NoError(t, os.WriteFile(path, []byte("{not json"), 0o600))
 	require.Error(t, restoreSnapshot())
+}
+
+// TestListModels_NeverDisablesTheWorkspaceTrustFlagForTurns reproduces the
+// field report: boot on another provider, `/provider` to DEVIN — which lists
+// models first — then send a message, and the turn dies with "Refusing to run
+// in an untrusted workspace".
+//
+// The cause was the listing carrying the waiver. `devin models list` rejects
+// it with "unexpected argument", the same wording an old binary uses for a
+// flag it never had, so the process latched the flag as unsupported and
+// stripped it from every turn that followed. Whatever the listing does, it
+// must never decide what a TURN is allowed to send.
+func TestListModels_NeverDisablesTheWorkspaceTrustFlagForTurns(t *testing.T) {
+	isolateSnapshot(t)
+	t.Cleanup(func() { workspaceTrustUnsupported.Store(false) })
+	workspaceTrustUnsupported.Store(false)
+
+	// Impersonates the real CLI: the models subcommand refuses the flag the
+	// print mode requires.
+	bin := fakeDevin(t, `
+case " $* " in
+  *" --respect-workspace-trust "*)
+    echo "error: unexpected argument '--respect-workspace-trust' found" >&2; exit 2;;
+esac
+echo '{"models":[]}'
+`)
+	c := NewClient(bin, "", zap.NewNop(), 1, 0)
+	_, _ = c.ListModels(context.Background())
+
+	assert.False(t, workspaceTrustUnsupported.Load(),
+		"listing models must not latch the flag off for the whole process")
+	assert.Equal(t, []string{"--respect-workspace-trust", "false"}, workspaceTrustArgs(),
+		"the next turn must still send the waiver")
 }
