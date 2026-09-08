@@ -24,16 +24,16 @@ maintainers:
     email: diillson@hotmail.com
 annotations:
   artifacthub.io/license: Apache-2.0
-  artifacthub.io/containsSecurityUpdates: 'true'
+  # Both this flag and artifacthub.io/changes below are rewritten from
+  # CHANGELOG.md at publish time by scripts/generate-artifacthub-changelog.sh,
+  # which sets the flag only when the release actually carries a security
+  # entry. It used to be hardcoded 'true', so every release after the 1.198.0
+  # auth work advertised security fixes it did not contain. The values
+  # committed here describe the chart as it stands in the repository.
+  artifacthub.io/containsSecurityUpdates: 'false'
   artifacthub.io/changes: |
-    - kind: security
-      description: The server refuses to start unauthenticated on a reachable address; set server.token or security.jwtSecretRef, or bind loopback
-    - kind: security
-      description: JWTs without an exp claim are rejected, and the auth-failure rate limit counts per client instead of per connection
-    - kind: changed
-      description: An Instance without a credential is no longer provisioned; the operator raises the AuthenticationConfigured condition instead
     - kind: removed
-      description: The safety values block, whose only effect was a variable no code reads
+      description: The GITHUB_MODELS provider value, retired upstream, is gone from the Instance CRD enum and the chart values schema
   artifacthub.io/prerelease: 'false'
   artifacthub.io/operator: 'false'
   artifacthub.io/crds: |

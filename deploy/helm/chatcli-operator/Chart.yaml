@@ -25,14 +25,16 @@ maintainers:
     email: diillson@hotmail.com
 annotations:
   artifacthub.io/license: Apache-2.0
-  artifacthub.io/containsSecurityUpdates: 'true'
+  # Both this flag and artifacthub.io/changes below are rewritten from
+  # CHANGELOG.md at publish time by scripts/generate-artifacthub-changelog.sh,
+  # which sets the flag only when the release actually carries a security
+  # entry. It used to be hardcoded 'true', so every release after the 1.198.0
+  # auth work advertised security fixes it did not contain. The values
+  # committed here describe the chart as it stands in the repository.
+  artifacthub.io/containsSecurityUpdates: 'false'
   artifacthub.io/changes: |
-    - kind: changed
-      description: An Instance whose server would listen on a reachable address with no credential is no longer provisioned; the operator raises the AuthenticationConfigured condition on it instead
-    - kind: security
-      description: The server refuses to start unauthenticated on a reachable address, so spec.server.token or spec.server.security.jwtSecretRef is required unless bindAddress is loopback
-    - kind: fixed
-      description: The bindAddress field documented a 127.0.0.1 default it never had; unset means every interface inside a cluster
+    - kind: removed
+      description: The GITHUB_MODELS provider value, retired upstream, is gone from the Instance CRD enum
   artifacthub.io/prerelease: 'false'
   artifacthub.io/operator: 'true'
   artifacthub.io/operatorCapabilities: Seamless Upgrades
