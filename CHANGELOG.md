@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.199.2](https://github.com/diillson/chatcli/compare/v1.199.1...v1.199.2) (2026-09-08)
+
+
+### Bug Fixes
+
+* **devin:** waive workspace trust so turns keep working on the current CLI ([#1552](https://github.com/diillson/chatcli/issues/1552)) ([872be52](https://github.com/diillson/chatcli/commit/872be52cfe3f86462170c752422234c273672d1d))
+* **helm:** stop advertising security updates on releases that carry none ([#1554](https://github.com/diillson/chatcli/issues/1554)) ([a3a1dfb](https://github.com/diillson/chatcli/commit/a3a1dfb26238121623dcd9cd339312a03e40c765))
+
 ## [1.199.1](https://github.com/diillson/chatcli/compare/v1.199.0...v1.199.1) (2026-09-08)
 
 

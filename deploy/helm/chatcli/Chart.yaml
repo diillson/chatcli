@@ -2,8 +2,8 @@ apiVersion: v2
 name: chatcli
 description: ChatCLI - CLI for LLM interaction with gRPC server mode
 type: application
-version: 1.199.1
-appVersion: 1.199.1
+version: 1.199.2
+appVersion: 1.199.2
 home: https://chatcli.edilsonfreitas.com
 sources:
   - https://github.com/diillson/chatcli
@@ -24,12 +24,6 @@ maintainers:
     email: diillson@hotmail.com
 annotations:
   artifacthub.io/license: Apache-2.0
-  # Both this flag and artifacthub.io/changes below are rewritten from
-  # CHANGELOG.md at publish time by scripts/generate-artifacthub-changelog.sh,
-  # which sets the flag only when the release actually carries a security
-  # entry. It used to be hardcoded 'true', so every release after the 1.198.0
-  # auth work advertised security fixes it did not contain. The values
-  # committed here describe the chart as it stands in the repository.
   artifacthub.io/containsSecurityUpdates: 'false'
   artifacthub.io/changes: |
     - kind: removed
