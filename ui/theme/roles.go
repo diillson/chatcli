@@ -48,6 +48,20 @@ const (
 	// without this one warnings rendered in the Info hue while the legacy
 	// yellow path went through Palette.Warning — two colors for one meaning.
 	RoleWarning
+	// RoleText: plain body text the UI paints itself — the counterpart of the
+	// Text color glamour already uses for markdown prose. Surfaces that print
+	// raw content (menu labels, listing descriptions) MUST use this instead of
+	// leaving the text unstyled: unstyled text inherits the terminal's own
+	// foreground, so it never follows a theme switch.
+	RoleText
+	// RoleTextStrong: the highest-contrast foreground of the palette — the
+	// text the user is actively typing, bold labels, selected rows.
+	RoleTextStrong
+	// RoleBackground: the palette's surface color. Only meaningful where a
+	// BACKGROUND is being painted (code blocks, the completion dropdown, the
+	// foreground placed ON a saturated accent fill); never use it as body
+	// foreground, it is the terminal ground by construction.
+	RoleBackground
 )
 
 // ColorFor resolves a role to its palette color under the active theme.
@@ -78,6 +92,12 @@ func (t Theme) ColorFor(r Role) Color {
 		return p.Muted
 	case RoleWarning:
 		return p.Warning
+	case RoleText:
+		return p.Text
+	case RoleTextStrong:
+		return p.TextStrong
+	case RoleBackground:
+		return p.Background
 	default: // RoleBorder
 		return p.Border
 	}

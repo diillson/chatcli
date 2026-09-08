@@ -744,8 +744,9 @@ func (a *AgentMode) readLineFromGoPrompt() string {
 		"  > ",
 		noopCompleter,
 		prompt.OptionParser(pasteParser),
-		prompt.OptionPrefixTextColor(prompt.Green),
-		prompt.OptionInputTextColor(prompt.White),
+		// Same theme-derived colors as the chat REPL (see prompt_theme.go):
+		// the coder prompt must not force white text onto a light terminal.
+		themePromptTextColors(),
 	)
 }
 
@@ -780,9 +781,9 @@ func isMultilineTrigger(s string) bool {
 // text, trimmed.
 func (a *AgentMode) runMultilineSession(trigger string, reader *bufio.Reader) (string, error) {
 	a.multilineBuf.ProcessLine(trigger)
-	fmt.Printf("\n  \033[90m📝 %s\033[0m\n", i18n.T("multiline.hint", a.multilineBuf.Delimiter()))
+	fmt.Printf("\n  %s\n", colorize("📝 "+i18n.T("multiline.hint", a.multilineBuf.Delimiter()), ColorGray))
 	for {
-		fmt.Printf("  \033[90m... [%d] \033[0m", a.multilineBuf.LineCount()+1)
+		fmt.Printf("  %s ", colorize(fmt.Sprintf("... [%d]", a.multilineBuf.LineCount()+1), ColorGray))
 		nextLine, _ := reader.ReadString('\n')
 		nextLine = strings.TrimRight(nextLine, "\r\n")
 		complete, fullText := a.multilineBuf.ProcessLine(nextLine)

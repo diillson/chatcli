@@ -14,6 +14,8 @@ import (
 
 	"github.com/diillson/chatcli/cli/ctxmgr"
 	"github.com/diillson/chatcli/i18n"
+	"github.com/diillson/chatcli/ui/kit"
+	"github.com/diillson/chatcli/ui/theme"
 	"github.com/diillson/chatcli/utils"
 )
 
@@ -149,18 +151,18 @@ func (h *ContextHandler) handleShowAttached(sessionID string) error {
 		colorize(formatTokenCount(totalTokens), ColorYellow))
 	fmt.Printf("  %s %s\n",
 		colorize("💡", ""),
-		i18n.T("context.display.cache_info"))
+		kit.Colorize(i18n.T("context.display.cache_info"), theme.RoleText))
 	fmt.Printf("     %s %s\n",
 		colorize("•", ColorGray),
-		i18n.T("context.display.cache_anthropic"))
+		kit.Colorize(i18n.T("context.display.cache_anthropic"), theme.RoleText))
 	fmt.Printf("     %s %s\n",
 		colorize("•", ColorGray),
-		i18n.T("context.display.cache_openai"))
+		kit.Colorize(i18n.T("context.display.cache_openai"), theme.RoleText))
 
 	if totalTokens > 10000 {
 		fmt.Printf("\n  %s %s\n",
 			colorize("⚠", ColorYellow),
-			i18n.T("context.display.large_context_warning", contexts[0].Name))
+			kit.Colorize(i18n.T("context.display.large_context_warning", contexts[0].Name), theme.RoleText))
 	}
 
 	fmt.Println()
@@ -296,7 +298,7 @@ func (h *ContextHandler) printChunkedStructure(ctx *ctxmgr.FileContext, detailed
 	for i, chunk := range ctx.Chunks {
 		fmt.Printf("\n  %s %s\n",
 			colorize("📦", ColorYellow),
-			i18n.T("context.display.chunks.chunk_label", chunk.Index, chunk.TotalChunks))
+			kit.Colorize(i18n.T("context.display.chunks.chunk_label", chunk.Index, chunk.TotalChunks), theme.RoleText))
 
 		if chunk.Description != "" {
 			fmt.Printf("    %s %s\n", colorize(i18n.T("context.display.label.description"), ColorGray), chunk.Description)
@@ -414,22 +416,22 @@ func (h *ContextHandler) printAttachmentInfo(ctx *ctxmgr.FileContext) {
 	} else {
 		fmt.Printf("  %s %s\n",
 			colorize("●", ColorGray),
-			i18n.T("context.display.attachment.not_attached"))
+			kit.Colorize(i18n.T("context.display.attachment.not_attached"), theme.RoleText))
 		fmt.Println()
 	}
 
 	fmt.Printf("  %s %s\n",
 		colorize("●", ColorCyan),
-		i18n.T("context.display.attachment.attach_instruction"))
+		kit.Colorize(i18n.T("context.display.attachment.attach_instruction"), theme.RoleText))
 	fmt.Printf("    %s\n\n",
 		colorize(fmt.Sprintf("/context attach %s", ctx.Name), ColorYellow))
 
 	if ctx.IsChunked {
 		fmt.Printf("  %s %s\n",
 			colorize("💡", ColorCyan),
-			i18n.T("context.display.attachment.chunked_info"))
+			kit.Colorize(i18n.T("context.display.attachment.chunked_info"), theme.RoleText))
 		fmt.Printf("    %s %s\n", colorize("•", ColorGray),
-			i18n.T("context.display.attachment.attach_all"))
+			kit.Colorize(i18n.T("context.display.attachment.attach_all"), theme.RoleText))
 		fmt.Printf("    %s %s %s\n",
 			colorize("•", ColorGray),
 			i18n.T("context.display.attachment.attach_specific"),

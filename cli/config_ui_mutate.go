@@ -28,6 +28,7 @@ import (
 
 	"github.com/diillson/chatcli/config"
 	"github.com/diillson/chatcli/i18n"
+	"github.com/diillson/chatcli/ui/kit"
 	"github.com/diillson/chatcli/ui/theme"
 )
 
@@ -58,7 +59,9 @@ func (cli *ChatCLI) printConfigUIUsage() {
 	fmt.Println("  /config ui")
 	fmt.Println("  /config ui theme                       # " + i18n.T("cfg.ui.usage_theme_show"))
 	for _, name := range theme.Names() {
-		fmt.Printf("  /config ui theme %-21s # %s\n", name, i18n.T("cfg.ui.usage_theme_set", name))
+		fmt.Printf("  /config ui theme %s # %s\n",
+			kit.PadRight(name, 21),
+			kit.Colorize(i18n.T("cfg.ui.usage_theme_set", name), theme.RoleText))
 	}
 	fmt.Println()
 	fmt.Println(colorize("  "+i18n.T("cfg.ui.usage_note_scope"), ColorGray))
@@ -88,10 +91,25 @@ func (cli *ChatCLI) configUITheme(args []string) {
 
 	if previous == target {
 		fmt.Println(colorize("  ✔ "+i18n.T("cfg.ui.theme_set_noop", target), ColorGray))
-	} else {
-		fmt.Println(colorize("  ✔ "+i18n.T("cfg.ui.theme_set_ok", previous, target), ColorGreen))
+		return
 	}
+	fmt.Println(colorize("  ✔ "+i18n.T("cfg.ui.theme_set_ok", previous, target), ColorGreen))
 	fmt.Println(colorize("    "+i18n.T("cfg.ui.theme_persist_hint", target), ColorGray))
+
+	// Every fmt.Print surface re-reads the theme on its next render, but
+	// go-prompt froze its colors on the renderer when the prompt was built:
+	// without a rebuild the line the user types would keep the OLD theme's
+	// ink until the next mode switch — white on white when switching to a
+	// light theme, which is the whole point of switching. Raising the flag
+	// makes the REPL's exit checker end this prompt as soon as the command
+	// returns; the loop then rebuilds it from the new palette. Only the REPL
+	// has a prompt to rebuild: headless callers (scheduler, gateway,
+	// ACP/MCP, the agent and coder loops) leave the flag alone, and the
+	// coder prompt picks the palette up on its next line anyway because it
+	// is constructed per input.
+	if cli.promptRunning {
+		cli.themeReloadPending = true
+	}
 }
 
 // printConfigUIStatus shows the active theme, the detected color profile and
@@ -123,9 +141,9 @@ func (cli *ChatCLI) printConfigUIStatus() {
 		}
 		fmt.Printf("  %s%s%s  %s\n",
 			marker,
-			colorize(fmt.Sprintf("%-8s", name), ColorYellow),
+			colorize(kit.PadRight(name, 16), ColorYellow),
 			colorize(" ·", ColorGray),
-			i18n.T("cfg.ui.theme_desc_"+name),
+			kit.Colorize(i18n.T("cfg.ui.theme_desc_"+name), theme.RoleText),
 		)
 	}
 	fmt.Println()

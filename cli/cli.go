@@ -246,6 +246,8 @@ type ChatCLI struct {
 	executionProfile    ExecutionProfile
 	pendingAction       string // stores intended action before panic (for Windows go-prompt tearDown workaround)
 	replActive          bool   // true only inside the interactive Start() loop (gates the palette trigger)
+	promptRunning       bool   // true only while go-prompt owns the terminal (gates the theme-driven prompt rebuild)
+	themeReloadPending  bool   // a theme switch landed mid-prompt; go-prompt must be rebuilt to repaint the input line
 	paletteRequested    bool   // a handler asked to open the command palette; the executor runs it in place
 	paletteTarget       string // command to scope the palette to ("" opens the categorized root)
 	suppressPaletteOnce bool   // skip the palette trigger for the next handled command (the palette's own selection)
@@ -1373,8 +1375,14 @@ func (cli *ChatCLI) Start(ctx context.Context) {
 
 	shouldContinue := true
 	for shouldContinue {
+		// Set when the prompt exited to adopt a new theme: the loop rebuilds
+		// it with the new palette and must NOT run the post-prompt dispatch —
+		// there is no mode to enter, and restoreTerminal would wipe the
+		// visible transcript for what is only a repaint.
+		themeReload := false
 		func() {
 			defer func() {
+				cli.promptRunning = false
 				if r := recover(); r != nil {
 					// On Windows, go-prompt tearDown may panic with "close of closed channel"
 					// which replaces our original panic value. Use pendingAction as fallback.
@@ -1415,14 +1423,21 @@ func (cli *ChatCLI) Start(ctx context.Context) {
 				prompt.OptionParser(pasteParser),
 				prompt.OptionTitle("ChatCLI - LLM no seu Terminal"),
 				prompt.OptionLivePrefix(cli.changeLivePrefix),
-				prompt.OptionPrefixTextColor(prompt.Green),
-				prompt.OptionInputTextColor(prompt.White),
-				prompt.OptionSuggestionBGColor(prompt.DarkGray),
-				prompt.OptionDescriptionBGColor(prompt.Black),
-				prompt.OptionSuggestionTextColor(prompt.White),
-				prompt.OptionDescriptionTextColor(prompt.Yellow),
-				prompt.OptionSelectedSuggestionBGColor(prompt.Blue),
-				prompt.OptionSelectedDescriptionBGColor(prompt.DarkGray),
+				// Input line + completion dropdown, painted from the ACTIVE
+				// theme (see prompt_theme.go). These used to be literals, so
+				// the text you type stayed white under every theme — white on
+				// white on any light terminal.
+				themePromptColors(),
+				// go-prompt copies those colors onto its renderer here and
+				// never re-reads them, so a theme switched from inside the
+				// executor would leave the line being typed in the OLD ink.
+				// Leaving the Run loop right after such a command lets the
+				// iteration below rebuild the prompt from the new palette;
+				// go-prompt has already restored cooked mode at this point,
+				// so the exit is clean.
+				prompt.OptionSetExitCheckerOnInput(func(string, bool) bool {
+					return cli.themeReloadPending
+				}),
 				prompt.OptionHistory(cli.commandHistory),
 				prompt.OptionMaxSuggestion(10),
 				prompt.OptionAddKeyBind(prompt.KeyBind{
@@ -1560,11 +1575,18 @@ func (cli *ChatCLI) Start(ctx context.Context) {
 				),
 			)
 
+			cli.promptRunning = true
 			p.Run()
+			cli.promptRunning = false
+			if cli.themeReloadPending {
+				cli.themeReloadPending = false
+				themeReload = true // loop again: rebuild the prompt, keep the REPL
+				return
+			}
 			shouldContinue = false
 		}()
 
-		if shouldContinue {
+		if shouldContinue && !themeReload {
 			cli.restoreTerminal()
 
 			lastCmd := ""
