@@ -550,3 +550,47 @@ func argvLines(t *testing.T, record string) []string {
 	require.NoError(t, err)
 	return strings.Split(strings.TrimSpace(string(argv)), "\n")
 }
+
+// TestProviderSwitchThenTurn_KeepsTheWorkspaceTrustWaiver walks the exact
+// sequence from the field: start elsewhere, switch to DEVIN — which lists the
+// account's models first — then send a message. The listing used to poison a
+// process-wide latch and strip the waiver from the turn that followed, so the
+// first thing the user typed after switching died with "Refusing to run in an
+// untrusted workspace" on a CLI that was perfectly capable of the flag.
+func TestProviderSwitchThenTurn_KeepsTheWorkspaceTrustWaiver(t *testing.T) {
+	t.Cleanup(func() { workspaceTrustUnsupported.Store(false) })
+	workspaceTrustUnsupported.Store(false)
+	record := filepath.Join(t.TempDir(), "argv")
+
+	// The real 3000.6 CLI: `models list` rejects the flag outright, while
+	// --print refuses to run without it.
+	bin := fakeDevin(t, `
+echo "$@" >> `+record+`
+case "$1" in
+  models)
+    case " $* " in
+      *" --respect-workspace-trust "*)
+        echo "error: unexpected argument '--respect-workspace-trust' found" >&2; exit 2;;
+    esac
+    echo '{"models":[]}'; exit 0;;
+esac
+case " $* " in
+  *" --respect-workspace-trust false "*) ;;
+  *) echo "Error: Refusing to run in an untrusted workspace: /tmp/x" >&2; exit 1;;
+esac
+printf '<<<CHATCLI_REPLY_BEGIN>>>\nOK\n<<<CHATCLI_REPLY_END>>>\n'
+`)
+	c := NewClient(bin, "kimi-k3", zap.NewNop(), 1, 0)
+
+	// The provider switch lists models…
+	_, _ = c.ListModels(context.Background())
+	// …and the very next message must still reach the model.
+	got, err := c.SendPrompt(context.Background(), "oi", nil, 0)
+	require.NoError(t, err, "the turn right after a provider switch must still carry the waiver")
+	assert.Equal(t, "OK", got)
+
+	lines := argvLines(t, record)
+	require.GreaterOrEqual(t, len(lines), 2)
+	assert.NotContains(t, lines[0], "--respect-workspace-trust", "the listing must not send it")
+	assert.Contains(t, lines[len(lines)-1], "--respect-workspace-trust false", "the turn must send it")
+}
