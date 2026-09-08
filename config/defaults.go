@@ -76,6 +76,13 @@ const (
 	DefaultDevinModel             = "claude-sonnet-4.6"
 	DevinCLIDefaultBinary         = "devin"
 	DevinCLIDefaultPermissionMode = "auto"
+	// Turns run in a throwaway temp directory that the CLI has never seen and
+	// therefore does not trust, and --print has no way to raise the trust
+	// prompt — so from the 3000.6 line onward it just fails there unless the
+	// check is waived. Waiving it is honest here: the directory holds nothing
+	// but the prompt file ChatCLI wrote moments earlier. Set
+	// DEVIN_CLI_RESPECT_WORKSPACE_TRUST=true to restore the CLI's own default.
+	DevinCLIDefaultRespectWorkspaceTrust = false
 	// Turnos do CLI embutem o overhead do harness do Devin além da geração;
 	// 10min cobre respostas longas sem segurar um turno travado para sempre.
 	DevinCLIDefaultTimeout = 10 * time.Minute

@@ -124,35 +124,24 @@ func (c *Client) ListModels(ctx context.Context) ([]client.ModelInfo, error) {
 	}
 	defer func() { _ = os.RemoveAll(workDir) }()
 
-	args := []string{"models", "list", "--format", "json"}
-	// #nosec G204 G702 -- binPath resolves from operator configuration
-	// (PATH lookup or DEVIN_CLI_PATH) and argv is a fixed subcommand.
-	cmd := exec.CommandContext(ctx, c.binPath, args...)
-	cmd.WaitDelay = 2 * time.Second
-	cmd.Dir = workDir
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-
-	c.logger.Debug("devincli: list models", zap.String("bin", c.binPath), zap.Strings("args", args))
-
-	runErr := cmd.Run()
+	out, detail, runErr := c.execModelsList(ctx, workDir)
+	// Same latch-and-retry as a turn: a build predating
+	// --respect-workspace-trust refuses to parse it, and the model list must
+	// keep working on an older binary. See workspaceTrustArgs.
+	if runErr != nil && latchUnsupportedFlag(detail, c.logger, c.binPath) {
+		out, detail, runErr = c.execModelsList(ctx, workDir)
+	}
 	if ctx.Err() == context.DeadlineExceeded {
 		return nil, fmt.Errorf("%s: %w", i18n.T("llm.devincli.list_timeout", devinListModelsTimeout.String()), ctx.Err())
 	}
 	if runErr != nil {
-		detail := strings.TrimSpace(stderr.String())
-		if detail == "" {
-			detail = strings.TrimSpace(stdout.String())
-		}
-		detail = utils.SanitizeSensitiveText(stripANSI(detail))
 		if isAuthError(detail) {
 			return nil, fmt.Errorf("%s", i18n.T("llm.devincli.auth_required"))
 		}
 		return nil, fmt.Errorf("%s: %w: %s", i18n.T("llm.devincli.list_failed"), runErr, tail(detail, 500))
 	}
 
-	families, err := parseDevinModels(stdout.Bytes())
+	families, err := parseDevinModels(out)
 	if err != nil {
 		return nil, fmt.Errorf("%s: %w", i18n.T("llm.devincli.list_decode"), err)
 	}
@@ -207,6 +196,34 @@ func synthesizeFamilies(variants []devinVariant) []devinFamily {
 		out = append(out, devinFamily{Slug: v.UID, Label: v.Label, Variants: []devinVariant{v}})
 	}
 	return out
+}
+
+// execModelsList runs one `devin models list` invocation in workDir and
+// returns its stdout plus a sanitized failure detail. Args are rebuilt on
+// every call so a retry picks up whatever the flag latch just learned.
+func (c *Client) execModelsList(ctx context.Context, workDir string) ([]byte, string, error) {
+	args := append([]string{"models", "list", "--format", "json"}, workspaceTrustArgs()...)
+	// #nosec G204 G702 -- binPath resolves from operator configuration
+	// (PATH lookup or DEVIN_CLI_PATH) and argv is a fixed subcommand plus
+	// the boolean workspace-trust flag, never model or network input.
+	cmd := exec.CommandContext(ctx, c.binPath, args...)
+	cmd.WaitDelay = 2 * time.Second
+	cmd.Dir = workDir
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+
+	c.logger.Debug("devincli: list models", zap.String("bin", c.binPath), zap.Strings("args", args))
+
+	runErr := cmd.Run()
+	if runErr == nil {
+		return stdout.Bytes(), "", nil
+	}
+	detail := strings.TrimSpace(stderr.String())
+	if detail == "" {
+		detail = strings.TrimSpace(stdout.String())
+	}
+	return stdout.Bytes(), utils.SanitizeSensitiveText(stripANSI(detail)), runErr
 }
 
 // projectDevinModels flattens the families into the listing order the UI
