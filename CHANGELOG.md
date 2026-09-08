@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.199.3](https://github.com/diillson/chatcli/compare/v1.199.2...v1.199.3) (2026-09-08)
+
+
+### Bug Fixes
+
+* **devin:** the model listing no longer strips the workspace-trust waiver from turns ([#1555](https://github.com/diillson/chatcli/issues/1555)) ([7d610e5](https://github.com/diillson/chatcli/commit/7d610e5080e82727e156ad16a200c1605cc1599c))
+
 ## [1.199.2](https://github.com/diillson/chatcli/compare/v1.199.1...v1.199.2) (2026-09-08)
 
 
