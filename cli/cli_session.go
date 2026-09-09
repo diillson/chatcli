@@ -225,7 +225,7 @@ func (cli *ChatCLI) handleLoadSession(ctx context.Context, name string) {
 // that no longer exists, and keeping either would make the next prompt
 // point at content the model cannot see.
 func (cli *ChatCLI) resetChatPrefixMemo() {
-	cli.chatWorkspaceStable = nil
+	cli.workspaceStableMemo = nil
 	cli.skillBodiesInjected = nil
 	cli.chatPullSkillsAvailable = nil
 }

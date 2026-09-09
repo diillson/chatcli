@@ -266,22 +266,30 @@ func (cli *ChatCLI) modeAndLanguagePart() models.ContentBlock {
 // workspaceStablePart is the half of the workspace context that does not
 // change with the question: bootstrap files, the memory index, and the
 // knowledge-graph card. It carries a cache hint and is memoized for the
-// conversation — see ChatCLI.chatWorkspaceStable for why the freeze is what
+// conversation — see ChatCLI.workspaceStableMemo for why the freeze is what
 // makes caching it worthwhile.
 func (cli *ChatCLI) workspaceStablePart(ctx context.Context) (models.ContentBlock, bool) {
-	if cli.contextBuilder == nil {
-		return models.ContentBlock{}, false
-	}
-	if cli.chatWorkspaceStable != nil {
-		if *cli.chatWorkspaceStable == "" {
-			return models.ContentBlock{}, false
-		}
-		return cachedTextBlock(*cli.chatWorkspaceStable), true
-	}
 	mode := cli.chatEffectiveMemoryMode()
 	recallHint := ""
 	if mode == memModeIndex {
 		recallHint = chatMemoryRecallHint
+	}
+	stable := cli.workspaceStableText(ctx, mode, recallHint)
+	if stable == "" {
+		return models.ContentBlock{}, false
+	}
+	return cachedTextBlock(stable), true
+}
+
+// workspaceStableText is the shared turn-independent workspace text, memoized
+// for the conversation. Chat and agent/coder both place it in their cached
+// region; only the surrounding prompt differs.
+func (cli *ChatCLI) workspaceStableText(ctx context.Context, mode, recallHint string) string {
+	if cli.contextBuilder == nil {
+		return ""
+	}
+	if cli.workspaceStableMemo != nil {
+		return *cli.workspaceStableMemo
 	}
 	stable, _ := cli.contextBuilder.SplitWorkspaceContextMode(ctx, "", nil, nil, mode, recallHint)
 	// The graph card is a deterministic map of content, not a retrieval:
@@ -289,11 +297,8 @@ func (cli *ChatCLI) workspaceStablePart(ctx context.Context) (models.ContentBloc
 	if mode != memModeOff {
 		stable = joinPromptBlocks(stable, cli.graphIndexBlock())
 	}
-	cli.chatWorkspaceStable = &stable
-	if stable == "" {
-		return models.ContentBlock{}, false
-	}
-	return cachedTextBlock(stable), true
+	cli.workspaceStableMemo = &stable
+	return stable
 }
 
 // workspaceTurnPart is the remainder that genuinely varies with the turn:
@@ -623,6 +628,19 @@ func (cli *ChatCLI) skillBodyStillInHistory(skill *persona.Skill) bool {
 // Long enough not to collide across skills, short enough to survive a
 // trailing trim.
 const skillVisibilityProbeChars = 160
+
+// agentSkillCuration is the policy for the agent/coder skills block. Unlike
+// chat it always arms: the deferred form cites the skill's source path, and
+// both loops have file tools to read it with, so nothing depends on an
+// optional exception being enabled.
+func (cli *ChatCLI) agentSkillCuration() skillCuration {
+	return skillCuration{
+		Budget:       skillInjectBudget(),
+		Injected:     cli.skillBodiesInjected,
+		StillVisible: cli.skillBodyStillInHistory,
+		Recovery:     "re-read it from the source path above",
+	}
+}
 
 // rememberInjectedSkillBodies records the bodies this turn actually inlined.
 func (cli *ChatCLI) rememberInjectedSkillBodies(inlined map[string]string) {

@@ -341,15 +341,19 @@ type ChatCLI struct {
 	// first copy sat in the history the model still reads. Cleared with the
 	// history, since a cleared conversation no longer carries those copies.
 	skillBodiesInjected map[string]string
-	// chatWorkspaceStable memoizes the turn-independent half of the
-	// workspace context (bootstrap files + memory index) for the life of a
-	// conversation. It is cached prefix bytes now, and the memory index
-	// carries live counters that tick as the memory worker writes: without
-	// the freeze the prefix would be invalidated by its own bookkeeping on
-	// almost every turn, paying a full rewrite to report a changed number.
-	// Fresh facts still reach the model through the volatile auto-recall
-	// block, which is where per-turn memory belongs.
-	chatWorkspaceStable *string
+	// workspaceStableMemo memoizes the turn-independent half of the
+	// workspace context (bootstrap files + memory index + graph card) for
+	// the life of a conversation. It is cached prefix bytes now, and the
+	// memory index carries live counters that tick as the memory worker
+	// writes: without the freeze the prefix would be invalidated by its own
+	// bookkeeping on almost every turn, paying a full rewrite to report a
+	// changed number. Fresh facts still reach the model through the
+	// volatile auto-recall block, which is where per-turn memory belongs.
+	//
+	// Shared by chat and agent/coder on purpose: the block is the same text
+	// on both surfaces, and one memo means a session that alternates modes
+	// does not rebuild it differently on each crossing.
+	workspaceStableMemo *string
 	// chatPullSkillsAvailable memoizes whether any skill is installed, so
 	// the per-turn prompt assembly does not walk the skill directories
 	// several times to answer a question whose answer does not change.
