@@ -296,7 +296,9 @@ func (u *UsageInfo) Merge(other *UsageInfo) {
 	if other == nil {
 		return
 	}
-	u.InputTokensTotal += other.InputTotal()
+	// InputTotal on both sides: a legacy operand carries no normalized
+	// field, and += would silently drop its own input.
+	u.InputTokensTotal = u.InputTotal() + other.InputTotal()
 	u.PromptTokens += other.PromptTokens
 	u.CompletionTokens += other.CompletionTokens
 	u.TotalTokens += other.TotalTokens

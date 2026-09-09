@@ -97,3 +97,15 @@ func TestEstimateFromCharsCarriesInputTotal(t *testing.T) {
 		t.Fatalf("InputTotal = %d, want 1000", u.InputTotal())
 	}
 }
+
+// TestMergeLegacyLeftOperandKeepsItsInput: a += on the normalized field
+// would drop the left side's own input when only the right side carries one.
+func TestMergeLegacyLeftOperandKeepsItsInput(t *testing.T) {
+	a := &UsageInfo{PromptTokens: 50, CompletionTokens: 1} // legacy
+	b := &UsageInfo{PromptTokens: 100, CompletionTokens: 2}
+	b.Normalize(CacheSubset)
+	a.Merge(b)
+	if got := a.InputTotal(); got != 150 {
+		t.Fatalf("merged InputTotal = %d, want 150", got)
+	}
+}

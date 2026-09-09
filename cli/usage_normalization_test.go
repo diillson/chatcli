@@ -238,3 +238,45 @@ func TestCalibratorExactPairWins(t *testing.T) {
 		t.Fatalf("own samples lost to the sibling: %v", ratio)
 	}
 }
+
+// TestCacheAccountingFollowsThePayload: MiniMax serves the same model over
+// an OpenAI-shaped and an Anthropic-shaped endpoint. The model name cannot
+// tell them apart; the payload can, and the cache hit ratio depends on it.
+func TestCacheAccountingFollowsThePayload(t *testing.T) {
+	anthropicSurface := &models.UsageInfo{PromptTokens: 400, CompletionTokens: 20,
+		CacheCreationInputTokens: 1000, CacheReadInputTokens: 9000, IsReal: true}
+	anthropicSurface.Normalize(models.CacheAdditive)
+
+	openaiSurface := &models.UsageInfo{PromptTokens: 10400, CompletionTokens: 20,
+		CacheReadInputTokens: 9000, IsReal: true}
+	openaiSurface.Normalize(models.CacheSubset)
+
+	if !usageCacheAccounting("MINIMAX", "MiniMax-M2.7", anthropicSurface) {
+		t.Fatal("Anthropic-shaped payload read as subset")
+	}
+	if usageCacheAccounting("MINIMAX", "MiniMax-M2.7", openaiSurface) {
+		t.Fatal("OpenAI-shaped payload read as additive")
+	}
+
+	// Both describe the same 10.4K input with 9K served from cache: the hit
+	// ratio must match, whichever endpoint answered.
+	a, okA := TurnCacheHitPct("MINIMAX", "MiniMax-M2.7", anthropicSurface)
+	b, okB := TurnCacheHitPct("MINIMAX", "MiniMax-M2.7", openaiSurface)
+	if !okA || !okB {
+		t.Fatal("cache telemetry unreported")
+	}
+	if clampPct(a) != clampPct(b) {
+		t.Fatalf("same cache state read differently: %.1f%% vs %.1f%%", a, b)
+	}
+}
+
+// TestCacheAccountingFallsBackWithoutCacheActivity: with no cache tokens the
+// payload cannot say which schema it is, and nothing was cached anyway — the
+// provider/model heuristic stays in charge.
+func TestCacheAccountingFallsBackWithoutCacheActivity(t *testing.T) {
+	u := &models.UsageInfo{PromptTokens: 500, CompletionTokens: 10, IsReal: true}
+	u.Normalize(models.CacheSubset)
+	if !usageCacheAccounting("CLAUDEAI", "claude-sonnet-4-6", u) {
+		t.Fatal("heuristic not consulted when the payload is silent")
+	}
+}

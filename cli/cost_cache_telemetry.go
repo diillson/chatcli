@@ -62,6 +62,10 @@ type cacheTelemetry struct {
 	lastActivity time.Time
 	lastProvider string
 	lastModel    string
+	// lastAdditive is how the LAST report counted its cache tokens, taken
+	// from the payload itself (usageCacheAccounting) instead of re-guessing
+	// from the provider/model names when the ratio is rendered.
+	lastAdditive bool
 
 	rebuildPending bool // set by NoteExpectedCacheRebuild until the next request
 	missStreak     int
@@ -84,12 +88,32 @@ func (c *cacheTelemetry) bucket(provider string) *providerCache {
 	return b
 }
 
+// usageCacheAccounting reports whether THIS report counted cache tokens
+// alongside the prompt count. The adapter that parsed the payload already
+// decided that (models.UsageInfo.Normalize), and its answer is readable
+// whenever the report carries cache activity: an additive schema lands a
+// normalized input strictly above PromptTokens, a subset schema lands on
+// it. With no cache activity the two are indistinguishable and nothing
+// was cached anyway, so the provider/model heuristic decides — as it also
+// does for usage restored from a session written before normalization.
+//
+// This is what keeps a provider whose surface disagrees with its model
+// name honest: MiniMax serves the same model over an OpenAI-shaped and an
+// Anthropic-shaped endpoint, and only the payload says which one answered.
+func usageCacheAccounting(provider, model string, u *models.UsageInfo) bool {
+	if u != nil && u.InputTokensTotal > 0 &&
+		u.CacheReadInputTokens+u.CacheCreationInputTokens > 0 {
+		return u.InputTokensTotal > u.PromptTokens
+	}
+	return cacheTokensAdditive(provider, model)
+}
+
 // observe folds one real usage report into the telemetry.
 func (c *cacheTelemetry) observe(provider, model string, u *models.UsageInfo, now time.Time) {
 	read := int64(u.CacheReadInputTokens)
 	write := int64(u.CacheCreationInputTokens)
 	prompt := int64(u.PromptTokens)
-	additive := cacheTokensAdditive(provider, model)
+	additive := usageCacheAccounting(provider, model, u)
 
 	b := c.bucket(provider)
 	first := b.requests == 0
@@ -108,6 +132,7 @@ func (c *cacheTelemetry) observe(provider, model string, u *models.UsageInfo, no
 	c.lastActivity = now
 	c.lastProvider = provider
 	c.lastModel = model
+	c.lastAdditive = additive
 	b.requests++
 	b.readTokens += read
 	b.inputTokens += prompt
@@ -184,7 +209,7 @@ func TurnCacheHitPct(provider, model string, u *models.UsageInfo) (float64, bool
 	if u == nil || (u.CacheReadInputTokens == 0 && u.CacheCreationInputTokens == 0) {
 		return 0, false
 	}
-	return cacheHitPct(cacheTokensAdditive(provider, model),
+	return cacheHitPct(usageCacheAccounting(provider, model, u),
 		int64(u.CacheReadInputTokens), int64(u.CacheCreationInputTokens), int64(u.PromptTokens)), true
 }
 
@@ -252,7 +277,7 @@ func (ct *CostTracker) cacheStatsLocked() CacheStats {
 	// The hit ratio is the last-used provider's own: each provider has its
 	// own cache and schema, so blending an additive and a subset provider
 	// into one ratio would describe neither.
-	additive := cacheTokensAdditive(c.lastProvider, c.lastModel)
+	additive := c.lastAdditive
 	if b := c.byProvider[strings.ToUpper(strings.TrimSpace(c.lastProvider))]; b != nil {
 		stats.HitPct = cacheHitPct(additive, b.readTokens, b.writeTokens, b.inputTokens)
 	} else {
