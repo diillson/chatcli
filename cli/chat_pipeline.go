@@ -991,7 +991,7 @@ func (cli *ChatCLI) renderAssistantResponse(
 // the footer adds no new bookkeeping. It returns "" (no footer drawn) when
 // usage is unreported, keeping the box clean for providers that omit counts.
 func (cli *ChatCLI) chatEnvelopeFooter(servedProvider, servedModel string, usage *models.UsageInfo) string {
-	if usage == nil || (usage.PromptTokens == 0 && usage.CompletionTokens == 0) {
+	if usage == nil || (usage.InputTotal() == 0 && usage.CompletionTokens == 0) {
 		return ""
 	}
 
@@ -1007,7 +1007,7 @@ func (cli *ChatCLI) chatEnvelopeFooter(servedProvider, servedModel string, usage
 	}
 	turnCost := estimateTurnCostUSD(servedProvider, servedModel, usage)
 
-	parts := cli.telemetryParts(usage, turnCost, false)
+	parts := cli.telemetryParts(servedProvider, servedModel, usage, turnCost, false)
 	if len(parts) == 0 {
 		return ""
 	}
@@ -1021,21 +1021,35 @@ func (cli *ChatCLI) chatEnvelopeFooter(servedProvider, servedModel string, usage
 // When includeTokens is set, a leading "in↑ out↓" token summary is prepended
 // (the agent line has no header to carry it, unlike the chat envelope). Returns
 // nil when usage is unreported so callers can omit the telemetry cleanly.
-func (cli *ChatCLI) telemetryParts(usage *models.UsageInfo, costUSD float64, includeTokens bool) []string {
-	if usage == nil || (usage.PromptTokens == 0 && usage.CompletionTokens == 0) {
+//
+// provider/model are the pair that actually SERVED the turn (a skill hint or
+// route override may have swapped both). Window sizing, cache semantics and
+// the cost beside them must all read the same pair, or one turn is described
+// by two different models.
+func (cli *ChatCLI) telemetryParts(provider, model string, usage *models.UsageInfo, costUSD float64, includeTokens bool) []string {
+	if usage == nil || (usage.InputTotal() == 0 && usage.CompletionTokens == 0) {
 		return nil
+	}
+	if provider == "" {
+		provider = cli.Provider
+	}
+	if model == "" {
+		model = cli.Model
 	}
 	parts := make([]string, 0, 4)
 	if includeTokens {
-		parts = append(parts, i18n.T("chat.envelope.tokens", usage.PromptTokens, usage.CompletionTokens))
+		// The whole input, cache included — see UsageInfo.InputTotal. The
+		// raw PromptTokens rendered a 22K-token turn as "3↑" on every
+		// additive schema.
+		parts = append(parts, i18n.T("chat.envelope.tokens", usage.InputTotal(), usage.CompletionTokens))
 	}
 	if costUSD > 0 {
 		parts = append(parts, formatTurnCost(costUSD))
 	}
-	if window := catalog.GetContextWindow(cli.Provider, cli.Model); window > 0 {
+	if window := catalog.GetContextWindow(provider, model); window > 0 {
 		// Cached input counts: see contextTokens — PromptTokens alone is
 		// only the uncached delta on Anthropic/Bedrock schemas.
-		pct := float64(contextTokens(cli.Provider, cli.Model, usage)) / float64(window) * 100
+		pct := float64(contextTokens(provider, model, usage)) / float64(window) * 100
 		// Prefer the projection for the NEXT request (current history plus
 		// the prefix that will front it): that is what decides whether the
 		// next turn compacts, and it may legitimately exceed 100%.
@@ -1052,7 +1066,7 @@ func (cli *ChatCLI) telemetryParts(usage *models.UsageInfo, costUSD float64, inc
 	// Prompt-cache share of this turn's input, on every provider that
 	// reports cache tokens (Anthropic/Bedrock additive counts, OpenAI/
 	// Gemini/Grok/Kimi subset counts). Omitted when nothing was reported.
-	if hit, ok := TurnCacheHitPct(cli.Provider, cli.Model, usage); ok {
+	if hit, ok := TurnCacheHitPct(provider, model, usage); ok {
 		parts = append(parts, i18n.T("chat.envelope.cache_pct", clampPct(hit)))
 	}
 	// Compression savings SINCE THE LAST RENDER — per-turn, matching the cost
@@ -1169,8 +1183,11 @@ func formatLatency(d time.Duration) string {
 // formatTokenSummary renders usage as "312↑ 1.8k↓". Returns the i18n
 // placeholder when usage is unreported (provider didn't return counts).
 func formatTokenSummary(u *models.UsageInfo) string {
-	if u == nil || (u.PromptTokens == 0 && u.CompletionTokens == 0) {
+	if u == nil || (u.InputTotal() == 0 && u.CompletionTokens == 0) {
 		return i18n.T("chat.envelope.no_tokens")
 	}
-	return i18n.T("chat.envelope.tokens", u.PromptTokens, u.CompletionTokens)
+	// InputTotal, not PromptTokens: on the Anthropic/Bedrock schemas the
+	// latter is only the uncached delta, so a turn that shipped a 22K
+	// prefix (and paid to write it into the cache) rendered as "3↑".
+	return i18n.T("chat.envelope.tokens", u.InputTotal(), u.CompletionTokens)
 }

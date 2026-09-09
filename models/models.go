@@ -264,6 +264,22 @@ type UsageInfo struct {
 	// output, so the cost tracker adds them for Gemini.
 	ReasoningTokens int `json:"reasoning_tokens,omitempty"`
 
+	// InputTokensTotal is the SCHEMA-NORMALIZED input of this call: every
+	// token the model held, cache included, regardless of how the provider
+	// splits the counts. Providers disagree about what PromptTokens means —
+	// the Anthropic Messages schema (direct, Bedrock, MiniMax's Anthropic
+	// surface) excludes cache reads and writes from input_tokens, while the
+	// OpenAI schema (and Gemini, Ollama, StackSpot, OpenRouter) reports the
+	// cached share INSIDE prompt_tokens. Rendering PromptTokens as "the
+	// input" therefore showed 3 tokens on Bedrock and 22.858 on Devin for
+	// the same ~22K prefix.
+	//
+	// Every provider adapter fills this via Normalize, where the schema is
+	// a fact rather than a guess about the model name. Zero means "not
+	// normalized" (a usage record persisted before this field existed);
+	// readers fall back to the provider/model heuristic.
+	InputTokensTotal int `json:"input_tokens_total,omitempty"`
+
 	// CostUSD is the actual billed cost reported by the provider for this
 	// call, when the API surfaces one (OpenRouter's usage.cost). Zero means
 	// "not reported" — cost is then derived from the local pricing tables.
@@ -280,6 +296,9 @@ func (u *UsageInfo) Merge(other *UsageInfo) {
 	if other == nil {
 		return
 	}
+	// InputTotal on both sides: a legacy operand carries no normalized
+	// field, and += would silently drop its own input.
+	u.InputTokensTotal = u.InputTotal() + other.InputTotal()
 	u.PromptTokens += other.PromptTokens
 	u.CompletionTokens += other.CompletionTokens
 	u.TotalTokens += other.TotalTokens
@@ -302,6 +321,71 @@ func EstimateFromChars(inputChars, outputChars int) *UsageInfo {
 		PromptTokens:     prompt,
 		CompletionTokens: completion,
 		TotalTokens:      prompt + completion,
+		InputTokensTotal: prompt,
 		IsReal:           false,
 	}
+}
+
+// CacheAccounting says how a provider's usage payload counts prompt-cache
+// tokens relative to its prompt count. It belongs to the REPORTING SCHEMA,
+// not to the model: the same Claude model reports additive counts on the
+// Anthropic Messages API and subset counts through an OpenAI-compatible
+// gateway, so only the adapter that read the payload can classify it.
+type CacheAccounting int
+
+const (
+	// CacheSubset: the cached share is already counted INSIDE PromptTokens.
+	// OpenAI (prompt_tokens_details.cached_tokens), Gemini
+	// (cachedContentTokenCount), OpenRouter, and every provider that
+	// reports no cache at all (Ollama, StackSpot) — for those the prompt
+	// count already IS the whole input.
+	CacheSubset CacheAccounting = iota
+
+	// CacheAdditive: cache reads and writes are counted ALONGSIDE
+	// PromptTokens, which then holds only the uncached delta. The Anthropic
+	// Messages schema and Bedrock's Converse TokenUsage both document
+	// "total input = input_tokens + cache_read + cache_write".
+	CacheAdditive
+)
+
+// Normalize fills InputTokensTotal from the counts the provider reported,
+// given how that provider's schema accounts for cache tokens. Call it in
+// the adapter, right where the payload was parsed — that is the only place
+// the schema is known as a fact instead of guessed from a model name.
+//
+// TotalTokens is raised to match when the normalized input makes it bigger,
+// and never lowered: providers that fold extra counts into their own total
+// (Gemini adds thoughtsTokenCount) keep it.
+func (u *UsageInfo) Normalize(acct CacheAccounting) {
+	if u == nil {
+		return
+	}
+	total := u.PromptTokens
+	cached := u.CacheReadInputTokens + u.CacheCreationInputTokens
+	if acct == CacheAdditive {
+		total += cached
+	} else if cached > total {
+		// A subset schema cannot report more cached tokens than the prompt
+		// count they are a subset of. Believe the larger number rather than
+		// render an input smaller than its own cache.
+		total = cached
+	}
+	u.InputTokensTotal = total
+	if t := total + u.CompletionTokens; t > u.TotalTokens {
+		u.TotalTokens = t
+	}
+}
+
+// InputTotal is the whole input of this call — what belongs on screen as
+// "tokens in" and what the context-window math must measure. Falls back to
+// PromptTokens for usage that predates normalization (a session record
+// written by an older build), which is exactly the old behavior.
+func (u *UsageInfo) InputTotal() int {
+	if u == nil {
+		return 0
+	}
+	if u.InputTokensTotal > 0 {
+		return u.InputTokensTotal
+	}
+	return u.PromptTokens
 }

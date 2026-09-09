@@ -509,6 +509,9 @@ func (c *OpenRouterClient) processResponse(resp *http.Response) (string, error) 
 		if result.Usage.CompletionTokensDetails != nil {
 			info.ReasoningTokens = result.Usage.CompletionTokensDetails.ReasoningTokens
 		}
+		// OpenAI-compatible envelope regardless of which vendor's model
+		// served the request: cached_tokens is a subset of prompt_tokens.
+		info.Normalize(models.CacheSubset)
 		c.usageState.StoreUsage(info)
 		c.logger.Debug("OpenRouter usage",
 			zap.Int("prompt_tokens", result.Usage.PromptTokens),

@@ -27,9 +27,13 @@ func TestStreamUsageAccumulator(t *testing.T) {
 		t.Fatalf("no real usage committed: %+v", u)
 	}
 	if u.PromptTokens != 150 || u.CompletionTokens != 37 ||
-		u.CacheCreationInputTokens != 20 || u.CacheReadInputTokens != 90 ||
-		u.TotalTokens != 187 {
+		u.CacheCreationInputTokens != 20 || u.CacheReadInputTokens != 90 {
 		t.Fatalf("wrong accumulated usage: %+v", u)
+	}
+	// Anthropic counts cache reads and writes BESIDE input_tokens, so the
+	// input this turn held is 150+20+90 and the total grows with it.
+	if u.InputTokensTotal != 260 || u.TotalTokens != 297 {
+		t.Fatalf("stream usage not normalized: %+v", u)
 	}
 	if c.LastStopReason() != "end_turn" {
 		t.Fatalf("stop reason = %q", c.LastStopReason())

@@ -78,13 +78,18 @@ func TestParseOpenAIResponsesUsage(t *testing.T) {
 	// Responses API uses input_tokens / output_tokens — NOT prompt_/completion_.
 	// Reasoning models populate output_tokens_details.reasoning_tokens (already
 	// counted inside output_tokens).
+	//
+	// cached_tokens is a SUBSET of input_tokens on this schema, so the fixture
+	// keeps them consistent (1024 of the 1075 input tokens came from cache).
+	// The earlier numbers had more cached tokens than input, which the API
+	// cannot emit and which now trips the normalizer's defensive branch.
 	const body = `{
 		"usage": {
-			"input_tokens": 75,
+			"input_tokens": 1075,
 			"input_tokens_details": {"cached_tokens": 1024},
 			"output_tokens": 1186,
 			"output_tokens_details": {"reasoning_tokens": 1024},
-			"total_tokens": 1261
+			"total_tokens": 2261
 		}
 	}`
 
@@ -92,9 +97,10 @@ func TestParseOpenAIResponsesUsage(t *testing.T) {
 	assert.NoError(t, err)
 	assert.NotNil(t, got, "Responses API usage block must parse")
 	assert.True(t, got.IsReal)
-	assert.Equal(t, 75, got.PromptTokens, "input_tokens → PromptTokens")
+	assert.Equal(t, 1075, got.PromptTokens, "input_tokens → PromptTokens")
 	assert.Equal(t, 1186, got.CompletionTokens, "output_tokens → CompletionTokens")
-	assert.Equal(t, 1261, got.TotalTokens)
+	assert.Equal(t, 2261, got.TotalTokens)
+	assert.Equal(t, 1075, got.InputTokensTotal, "cached_tokens is inside input_tokens here")
 	assert.Equal(t, 1024, got.CacheReadInputTokens, "input_tokens_details.cached_tokens → CacheReadInputTokens")
 	assert.Equal(t, 1024, got.ReasoningTokens, "output_tokens_details.reasoning_tokens → ReasoningTokens")
 }
@@ -170,5 +176,9 @@ func TestParseAnthropicUsage_StaysUntouched(t *testing.T) {
 	assert.Equal(t, 50, got.CompletionTokens)
 	assert.Equal(t, 20, got.CacheCreationInputTokens)
 	assert.Equal(t, 80, got.CacheReadInputTokens)
-	assert.Equal(t, 150, got.TotalTokens, "Anthropic parser sums input+output (API doesn't include total)")
+	// The Anthropic API sends no total, so the parser builds one — over the
+	// SCHEMA-NORMALIZED input (input + cache read + cache write), not over
+	// input_tokens alone, which on this schema is only the uncached delta.
+	assert.Equal(t, 200, got.InputTokensTotal, "cache reads/writes are input on the Anthropic schema")
+	assert.Equal(t, 250, got.TotalTokens, "normalized input + output")
 }

@@ -58,9 +58,14 @@ func TestCaptureConverseUsage(t *testing.T) {
 	c.captureConverseUsage(out)
 
 	u := c.LastUsage()
-	if u == nil || u.PromptTokens != 200 || u.CompletionTokens != 50 || u.TotalTokens != 250 ||
+	if u == nil || u.PromptTokens != 200 || u.CompletionTokens != 50 ||
 		u.CacheReadInputTokens != 80 || !u.IsReal {
 		t.Fatalf("wrong converse usage: %+v", u)
+	}
+	// Converse's own totalTokens (250) leaves the cache out. The normalized
+	// total is the input the model actually held plus the output.
+	if u.InputTokensTotal != 280 || u.TotalTokens != 330 {
+		t.Fatalf("usage not normalized: %+v", u)
 	}
 }
 

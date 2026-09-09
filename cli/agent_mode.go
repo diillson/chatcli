@@ -2562,6 +2562,11 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 		// served this turn (see clientAndCtxForTurn). turnUsage is hoisted
 		// so the per-turn telemetry line (showTurnStats) can reuse it.
 		var turnUsage *models.UsageInfo
+		// The pair that actually served the turn, hoisted alongside
+		// turnUsage: the telemetry line must price and size the window
+		// against the SAME pair the tracker recorded under, or a skill
+		// route override makes the two disagree about one turn.
+		var turnProvider, turnModel string
 		if a.cli.costTracker != nil && err == nil {
 			inputChars := 0
 			for _, m := range turnHistory {
@@ -2569,6 +2574,7 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 			}
 			turnUsage = llmclient.GetUsageOrEstimate(turnClient, inputChars, len(aiResponse))
 			effProvider, effModel := a.effectiveRoute()
+			turnProvider, turnModel = effProvider, effModel
 			a.cli.costTracker.RecordRealUsage(effProvider, effModel, turnUsage)
 			// The provider context engine cleared tool results server-side:
 			// mirror that locally and do not calibrate on this turn (the
@@ -2609,7 +2615,8 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 			// user stays aware of spend/context inside agent & coder too.
 			var telem string
 			if turnUsage != nil && a.cli.costTracker != nil {
-				telem = strings.Join(a.cli.telemetryParts(turnUsage, a.cli.costTracker.TotalCost(), true), " · ")
+				telem = strings.Join(a.cli.telemetryParts(turnProvider, turnModel,
+					turnUsage, a.cli.costTracker.TotalCost(), true), " · ")
 			}
 			fmt.Println(metrics.FormatTurnInfo(turn+1, maxTurns, turnDuration, &metrics.TurnStats{
 				TurnAgents:       turnAgents,

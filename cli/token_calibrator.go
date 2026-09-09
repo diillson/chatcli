@@ -88,8 +88,90 @@ func (c *tokenCalibrator) Observe(provider, model string, chars, tokens int) {
 	c.scheduleSave()
 }
 
+// modelFamilyKey reduces a provider-specific model id to the model itself,
+// so ratios learned on one surface can seed another. Tokenization belongs
+// to the MODEL, not to who serves it: Claude Sonnet 4.6 splits text the
+// same way whether Anthropic, Bedrock or a CLI wrapper delivers it, and
+// gpt-6-astra does too. Without this, every provider started at the blind
+// 4.0 default even when a sibling entry had already measured the same
+// model — which is how one conversation showed "ctx 2%" on one provider
+// and "ctx 11%" on another.
+//
+// Strips the Bedrock inference-profile shape (region prefix, vendor
+// prefix, date stamp, -v1:0 revision); anything else passes through.
+func modelFamilyKey(model string) string {
+	m := strings.ToLower(strings.TrimSpace(model))
+	if m == "" {
+		return ""
+	}
+	for _, p := range []string{"global.", "us.", "eu.", "apac.", "au.", "ca.", "sa."} {
+		if strings.HasPrefix(m, p) {
+			m = m[len(p):]
+			break
+		}
+	}
+	for _, p := range []string{"anthropic.", "amazon.", "meta.", "mistral.", "ai21.",
+		"cohere.", "deepseek.", "openai.", "qwen.", "writer.", "stability.",
+		"twelvelabs.", "luma.", "moonshotai.", "xai.", "zai."} {
+		if strings.HasPrefix(m, p) {
+			m = m[len(p):]
+			break
+		}
+	}
+	// "-v1:0" / ":0" revision suffix.
+	if i := strings.LastIndex(m, ":"); i > 0 && isAllDigits(m[i+1:]) {
+		m = m[:i]
+	}
+	if i := strings.LastIndex(m, "-v"); i > 0 && isAllDigits(m[i+2:]) {
+		m = m[:i]
+	}
+	// "-20260115" date stamp.
+	if i := strings.LastIndex(m, "-"); i > 0 && len(m[i+1:]) == 8 && isAllDigits(m[i+1:]) {
+		m = m[:i]
+	}
+	return m
+}
+
+func isAllDigits(s string) bool {
+	if s == "" {
+		return false
+	}
+	for _, r := range s {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	return true
+}
+
+// familyRatioLocked finds a ratio learned for the same model under another
+// provider, preferring the best-sampled one. Caller holds the read lock.
+func (c *tokenCalibrator) familyRatioLocked(model string) (float64, int) {
+	family := modelFamilyKey(model)
+	if family == "" {
+		return 0, 0
+	}
+	bestRatio, bestSamples := 0.0, 0
+	for key, ratio := range c.ratios {
+		if ratio <= 0 {
+			continue
+		}
+		i := strings.Index(key, ":")
+		if i < 0 || modelFamilyKey(key[i+1:]) != family {
+			continue
+		}
+		if n := c.samples[key]; n > bestSamples {
+			bestRatio, bestSamples = ratio, n
+		}
+	}
+	return bestRatio, bestSamples
+}
+
 // CharsPerToken returns the learned ratio and how many samples produced it;
-// (defaultCharsPerToken, 0) before any sample.
+// (defaultCharsPerToken, 0) before any sample. With no sample for this exact
+// provider:model pair, a ratio measured for the SAME MODEL under another
+// provider is used (see modelFamilyKey) — a measured sibling beats the
+// blind default. The reported sample count is that sibling's.
 func (c *tokenCalibrator) CharsPerToken(provider, model string) (float64, int) {
 	if c == nil {
 		return defaultCharsPerToken, 0
@@ -99,6 +181,9 @@ func (c *tokenCalibrator) CharsPerToken(provider, model string) (float64, int) {
 	key := calibrationKey(provider, model)
 	if r, ok := c.ratios[key]; ok && r > 0 {
 		return r, c.samples[key]
+	}
+	if r, n := c.familyRatioLocked(model); r > 0 {
+		return r, n
 	}
 	return defaultCharsPerToken, 0
 }

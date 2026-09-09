@@ -87,6 +87,11 @@ func parseTrajectoryUsage(raw []byte) (turnUsage, error) {
 
 	var out turnUsage
 	usage := &models.UsageInfo{IsReal: true}
+	// inputTotal is accumulated PER STEP, because one trajectory can mix
+	// both metric shapes (and, across steps, backends): summing first and
+	// classifying once would apply one schema to counters written under
+	// another.
+	inputTotal := 0
 	for _, step := range doc.Steps {
 		if step.Metadata.IsUserInput || strings.EqualFold(step.Source, "user") {
 			continue
@@ -105,12 +110,23 @@ func parseTrajectoryUsage(raw []byte) (turnUsage, error) {
 			if step.Metrics != nil {
 				usage.CostUSD += step.Metrics.CostUSD
 			}
+			stepModel := step.Metadata.GenerationModel
+			if stepModel == "" {
+				stepModel = doc.Agent.ModelName
+			}
+			inputTotal += int(m.InputTokens)
+			if devinCacheAccounting(true, stepModel) == models.CacheAdditive {
+				inputTotal += int(m.CacheCreationTokens) + int(m.CacheReadTokens)
+			}
 		case step.Metrics != nil:
 			m := step.Metrics
 			usage.PromptTokens += int(m.PromptTokens)
 			usage.CompletionTokens += int(m.CompletionTokens)
 			usage.CacheReadInputTokens += int(m.CachedTokens)
 			usage.CostUSD += m.CostUSD
+			// ATIF standard block: cached_tokens is a subset of
+			// prompt_tokens, whatever model produced the step.
+			inputTotal += int(m.PromptTokens)
 		}
 	}
 	if usage.PromptTokens == 0 && usage.CompletionTokens == 0 && doc.FinalMetrics != nil {
@@ -118,6 +134,8 @@ func parseTrajectoryUsage(raw []byte) (turnUsage, error) {
 		usage.CompletionTokens = int(doc.FinalMetrics.TotalCompletionTokens)
 		usage.CacheReadInputTokens = int(doc.FinalMetrics.TotalCachedTokens)
 		usage.CostUSD = doc.FinalMetrics.TotalCostUSD
+		// final_metrics is the ATIF standard block's shape: subset.
+		inputTotal = usage.PromptTokens
 	}
 	if out.Model == "" {
 		out.Model = doc.Agent.ModelName
@@ -125,7 +143,36 @@ func parseTrajectoryUsage(raw []byte) (turnUsage, error) {
 	if usage.PromptTokens == 0 && usage.CompletionTokens == 0 {
 		return out, nil
 	}
-	usage.TotalTokens = usage.PromptTokens + usage.CompletionTokens
+	if inputTotal < usage.PromptTokens {
+		inputTotal = usage.PromptTokens
+	}
+	usage.InputTokensTotal = inputTotal
+	usage.TotalTokens = inputTotal + usage.CompletionTokens
 	out.Usage = usage
 	return out, nil
+}
+
+// devinCacheAccounting classifies ONE step's token counts.
+//
+// The Devin CLI fronts several backends and copies each one's counters into
+// the same ATIF fields, so the field names alone do not settle the
+// semantics — the model that generated does. An Anthropic backend reports
+// cache reads and writes BESIDE input_tokens (they must be added to get the
+// real input); the OpenAI/Kimi backends report the cached share INSIDE it
+// (adding would double-count it). The trajectory names that model
+// (step.metadata.generation_model, else agent.model_name), which is the
+// right thing to classify on: the ChatCLI-facing alias may be an opaque
+// account-level name that says nothing about the backend.
+//
+// The ATIF standard block is OpenAI-shaped by definition (prompt_tokens /
+// cached_tokens), so it is always subset regardless of the model.
+func devinCacheAccounting(nativeMetrics bool, model string) models.CacheAccounting {
+	if !nativeMetrics {
+		return models.CacheSubset
+	}
+	m := strings.ToLower(model)
+	if strings.Contains(m, "claude") || strings.Contains(m, "fable") || strings.Contains(m, "anthropic") {
+		return models.CacheAdditive
+	}
+	return models.CacheSubset
 }

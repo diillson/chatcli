@@ -37,15 +37,15 @@ func TestChatEnvelopeFooter_ShowsCostAndContext(t *testing.T) {
 
 func TestTelemetryParts_NilWhenNoUsage(t *testing.T) {
 	cli := &ChatCLI{Provider: "OPENAI", Model: "gpt-4o"}
-	assert.Nil(t, cli.telemetryParts(nil, 1.0, true), "no usage → no parts")
-	assert.Nil(t, cli.telemetryParts(&models.UsageInfo{}, 1.0, true), "zero usage → no parts")
+	assert.Nil(t, cli.telemetryParts("", "", nil, 1.0, true), "no usage → no parts")
+	assert.Nil(t, cli.telemetryParts("", "", &models.UsageInfo{}, 1.0, true), "zero usage → no parts")
 }
 
 func TestTelemetryParts_IncludeTokensPrependsSummary(t *testing.T) {
 	cli := &ChatCLI{Provider: "OPENAI", Model: "gpt-4o"}
 	usage := &models.UsageInfo{PromptTokens: 1000, CompletionTokens: 500}
 
-	withTokens := cli.telemetryParts(usage, 0.5, true)
+	withTokens := cli.telemetryParts("", "", usage, 0.5, true)
 	if assert.NotEmpty(t, withTokens) {
 		// The leading part is the token in/out summary ("1000↑ 500↓").
 		assert.Contains(t, withTokens[0], "↑", "first part is the token summary")
@@ -53,7 +53,7 @@ func TestTelemetryParts_IncludeTokensPrependsSummary(t *testing.T) {
 	}
 
 	// Without tokens (chat footer path), the summary is absent.
-	noTokens := cli.telemetryParts(usage, 0.5, false)
+	noTokens := cli.telemetryParts("", "", usage, 0.5, false)
 	if assert.NotEmpty(t, noTokens) {
 		assert.NotContains(t, noTokens[0], "↑", "footer path omits the token summary")
 	}
@@ -61,7 +61,7 @@ func TestTelemetryParts_IncludeTokensPrependsSummary(t *testing.T) {
 
 func TestTelemetryParts_ShowsCostAndContext(t *testing.T) {
 	cli := &ChatCLI{Provider: "OPENAI", Model: "gpt-4o"}
-	parts := cli.telemetryParts(&models.UsageInfo{PromptTokens: 1000, CompletionTokens: 500}, 0.5, true)
+	parts := cli.telemetryParts("", "", &models.UsageInfo{PromptTokens: 1000, CompletionTokens: 500}, 0.5, true)
 
 	joined := strings.Join(parts, " · ")
 	assert.Contains(t, joined, "$", "shows the cost figure passed in")
@@ -70,7 +70,7 @@ func TestTelemetryParts_ShowsCostAndContext(t *testing.T) {
 
 func TestTelemetryParts_OmitsCostWhenZero(t *testing.T) {
 	cli := &ChatCLI{Provider: "OPENAI", Model: "gpt-4o"}
-	parts := cli.telemetryParts(&models.UsageInfo{PromptTokens: 1000, CompletionTokens: 500}, 0, true)
+	parts := cli.telemetryParts("", "", &models.UsageInfo{PromptTokens: 1000, CompletionTokens: 500}, 0, true)
 	assert.NotContains(t, strings.Join(parts, " · "), "$", "zero cost → no cost part")
 }
 
@@ -93,11 +93,11 @@ func TestTelemetryParts_CompressionSavingsAreTurnDeltas(t *testing.T) {
 	if _, res := layer.CompressToolOutput("@search", b.String()); res.SavedBytes() == 0 {
 		t.Fatal("fixture produced no savings")
 	}
-	first := strings.Join(cli.telemetryParts(usage, 0, false), " · ")
+	first := strings.Join(cli.telemetryParts("", "", usage, 0, false), " · ")
 	assert.Contains(t, first, i18n.T("chat.envelope.compression_saved", ""), "first render shows fresh savings")
 
 	// Second render with no new compression: no savings part repeated.
-	second := strings.Join(cli.telemetryParts(usage, 0, false), " · ")
+	second := strings.Join(cli.telemetryParts("", "", usage, 0, false), " · ")
 	assert.NotContains(t, second, i18n.T("chat.envelope.compression_saved", ""),
 		"already-reported savings must not repeat on the next turn")
 }
@@ -123,14 +123,14 @@ func TestClampPct_Bounds(t *testing.T) {
 func TestTelemetryParts_ContextPctCountsCachedInput(t *testing.T) {
 	bedrock := &ChatCLI{Provider: "BEDROCK", Model: "global.anthropic.claude-sonnet-5"}
 	usage := &models.UsageInfo{PromptTokens: 20000, CompletionTokens: 800, CacheReadInputTokens: 570000, CacheCreationInputTokens: 10000, IsReal: true}
-	joined := strings.Join(bedrock.telemetryParts(usage, 0, false), " · ")
+	joined := strings.Join(bedrock.telemetryParts("", "", usage, 0, false), " · ")
 	assert.Contains(t, joined, "ctx 60%", "additive schema: prompt + cache read + cache write over the 1M window")
 
 	// Subset schema: OpenAI's prompt_tokens already includes cached_tokens,
 	// so adding them again would double count.
 	openai := &ChatCLI{Provider: "OPENAI", Model: "gpt-4o"}
 	sub := &models.UsageInfo{PromptTokens: 64000, CompletionTokens: 100, CacheReadInputTokens: 60000, IsReal: true}
-	joined = strings.Join(openai.telemetryParts(sub, 0, false), " · ")
+	joined = strings.Join(openai.telemetryParts("", "", sub, 0, false), " · ")
 	assert.Contains(t, joined, "ctx 50%", "subset schema: prompt tokens alone over the 128K window")
 }
 

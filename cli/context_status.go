@@ -21,6 +21,7 @@ import (
 	"github.com/diillson/chatcli/cli/compress"
 	"github.com/diillson/chatcli/i18n"
 	"github.com/diillson/chatcli/llm/catalog"
+	"github.com/diillson/chatcli/llm/client"
 	"github.com/diillson/chatcli/models"
 )
 
@@ -67,6 +68,14 @@ type contextStatusReport struct {
 	PrefixBudgetTokens int
 	PrefixPct          float64
 	Degraded           []string
+
+	// MeasuredInputTokens is what the PROVIDER counted for the last call,
+	// schema-normalized (cache reads and writes included). Everything above
+	// it is a local chars x ratio projection; this is the only figure that
+	// came from the model's own tokenizer, so showing both is what lets a
+	// user see the estimate drifting instead of discovering it when
+	// compaction fires early. Zero when the client reported nothing yet.
+	MeasuredInputTokens int
 }
 
 // summarizeHistory computes the role breakdown of the live history. Weight
@@ -154,6 +163,10 @@ func (cli *ChatCLI) buildContextStatusReport(ctx context.Context) contextStatusR
 	if cli.costTracker != nil {
 		r.Cache = cli.costTracker.CacheStats()
 	}
+	// What the provider actually counted for the last call on this client.
+	if uac, ok := client.AsUsageAware(cli.Client); ok {
+		r.MeasuredInputTokens = contextTokens(cli.Provider, cli.Model, uac.LastUsage())
+	}
 	return r
 }
 
@@ -225,6 +238,10 @@ func (cli *ChatCLI) showContextStatus(ctx context.Context) {
 	}
 	if edits, toolUses, tokens := cli.costTracker.ContextEditStats(); edits > 0 {
 		fmt.Printf("    %s\n", colorize(i18n.T("context.status.provider_edits", edits, toolUses, formatTokenCount(tokens)), ColorGray))
+	}
+	if r.MeasuredInputTokens > 0 {
+		fmt.Printf("    %s %s tok\n", kitPad(i18n.T("context.status.measured_input")),
+			formatTokenCount(int64(r.MeasuredInputTokens)))
 	}
 	if r.Window > 0 {
 		fmt.Printf("    %s ≈%s tok (%s)\n", kitPad(i18n.T("context.status.total_projected")),

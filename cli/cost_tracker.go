@@ -56,6 +56,14 @@ type ModelUsageRecord struct {
 	CompletionTokens int64 `json:"completion_tokens"`
 	TotalTokens      int64 `json:"total_tokens"`
 
+	// InputTokens is the schema-normalized input (cache included) summed
+	// over the record's requests — the figure that is comparable between
+	// providers. PromptTokens stays exactly as the provider reported it
+	// because the cost math depends on that raw split. Zero on records
+	// persisted before normalization existed; readers fall back to
+	// PromptTokens.
+	InputTokens int64 `json:"input_tokens,omitempty"`
+
 	// Prompt-cache tokens. Anthropic reports them ALONGSIDE input_tokens
 	// (additive); OpenAI/Gemini report cache reads as a SUBSET of the
 	// prompt count — recomputeCost handles both semantics.
@@ -147,6 +155,7 @@ type CostTracker struct {
 
 	// Aggregates (computed from modelUsage)
 	totalPromptTokens     int64
+	totalInputTokens      int64
 	totalCompletionTokens int64
 	totalCacheCreation    int64
 	totalCacheRead        int64
@@ -328,10 +337,19 @@ func (ct *CostTracker) RecordRealUsage(provider, model string, usage *models.Usa
 
 	rec.PromptTokens += int64(usage.PromptTokens)
 	rec.CompletionTokens += int64(usage.CompletionTokens)
-	totalTokens := usage.TotalTokens
-	if totalTokens == 0 {
-		// Providers that omit total_tokens must not zero the record's total.
-		totalTokens = usage.PromptTokens + usage.CompletionTokens
+	// InputTokens is the comparable figure across providers: PromptTokens
+	// means "uncached delta" on additive schemas and "whole input" on
+	// subset ones, so summing it alone made the /cost totals of a Bedrock
+	// session and an OpenAI session incomparable. Cost still prices
+	// PromptTokens and the cache pools separately — this is the display and
+	// reporting number, not a billing input.
+	inputTokens := contextTokens(provider, model, usage)
+	rec.InputTokens += int64(inputTokens)
+	totalTokens := inputTokens + usage.CompletionTokens
+	if reported := usage.TotalTokens; reported > totalTokens {
+		// Never shrink a provider-reported total that folds in counts of
+		// its own (Gemini adds thoughtsTokenCount).
+		totalTokens = reported
 	}
 	rec.TotalTokens += int64(totalTokens)
 	rec.CacheCreationTokens += int64(usage.CacheCreationInputTokens)
@@ -380,6 +398,7 @@ func (ct *CostTracker) RecordUsage(provider, model string, promptTokens, complet
 		PromptTokens:     promptTokens,
 		CompletionTokens: completionTokens,
 		TotalTokens:      promptTokens + completionTokens,
+		InputTokensTotal: promptTokens,
 		IsReal:           false,
 	})
 }
@@ -494,7 +513,7 @@ func (ct *CostTracker) TotalCost() float64 {
 func (ct *CostTracker) TotalTokens() int64 {
 	ct.mu.RLock()
 	defer ct.mu.RUnlock()
-	return ct.totalPromptTokens + ct.totalCompletionTokens
+	return ct.totalInputTokens + ct.totalCompletionTokens
 }
 
 // Snapshot returns a copy of the current session cost data — the same shape
@@ -519,7 +538,7 @@ func (ct *CostTracker) snapshotLocked() SessionCostData {
 		ModelUsage:    usage,
 		TotalCostUSD:  ct.totalCostUSD,
 		TotalRequests: ct.totalRequests,
-		TotalTokens:   ct.totalPromptTokens + ct.totalCompletionTokens,
+		TotalTokens:   ct.totalInputTokens + ct.totalCompletionTokens,
 
 		CacheResources:         ct.cacheResources,
 		CacheStorageTokenHours: ct.cacheStorageTokenHours,
@@ -802,6 +821,7 @@ func recomputeRecordCost(rec *ModelUsageRecord) {
 
 func (ct *CostTracker) recomputeAggregates() {
 	ct.totalPromptTokens = 0
+	ct.totalInputTokens = 0
 	ct.totalCompletionTokens = 0
 	ct.totalCacheCreation = 0
 	ct.totalCacheRead = 0
@@ -811,6 +831,7 @@ func (ct *CostTracker) recomputeAggregates() {
 
 	for _, rec := range ct.modelUsage {
 		ct.totalPromptTokens += rec.PromptTokens
+		ct.totalInputTokens += recordInputTokens(rec)
 		ct.totalCompletionTokens += rec.CompletionTokens
 		ct.totalCacheCreation += rec.CacheCreationTokens
 		ct.totalCacheRead += rec.CacheReadTokens
@@ -1372,8 +1393,10 @@ func tieredCallCostUSD(provider, model string, usage *models.UsageInfo) float64 
 	if usage == nil || usage.CostUSD > 0 {
 		return 0
 	}
-	context := usage.PromptTokens + usage.CacheReadInputTokens + usage.CacheCreationInputTokens
-	in, out := longContextMultipliers(provider, model, context)
+	// Schema-normalized: adding the cached counts unconditionally
+	// double-counted them on subset schemas (Gemini, Grok), which could tip
+	// a request over the long-context threshold it never crossed.
+	in, out := longContextMultipliers(provider, model, contextTokens(provider, model, usage))
 	if in == 1 && out == 1 {
 		return 0
 	}
@@ -1434,11 +1457,34 @@ func contextTokens(provider, model string, usage *models.UsageInfo) int {
 	if usage == nil {
 		return 0
 	}
+	// The provider adapter classified its own payload — believe it over any
+	// guess made from the provider/model strings. This is what makes a
+	// Claude model behave correctly whether it was served by Anthropic
+	// (additive), by an OpenAI-compatible gateway (subset) or by a CLI that
+	// proxies several backends.
+	if usage.InputTokensTotal > 0 {
+		return usage.InputTokensTotal
+	}
+	// Not normalized: usage restored from a session recorded by an older
+	// build, or an estimate. Fall back to the name-based heuristic.
 	n := usage.PromptTokens
 	if cacheTokensAdditive(provider, model) {
 		n += usage.CacheReadInputTokens + usage.CacheCreationInputTokens
 	}
 	return n
+}
+
+// recordInputTokens is the schema-normalized input of a record, with the
+// fallback that keeps sessions persisted before normalization readable:
+// their InputTokens is zero, and PromptTokens is what those builds recorded.
+func recordInputTokens(rec *ModelUsageRecord) int64 {
+	if rec == nil {
+		return 0
+	}
+	if rec.InputTokens > 0 {
+		return rec.InputTokens
+	}
+	return rec.PromptTokens
 }
 
 // getCachePricing returns cache write and cache read cost per 1M tokens.

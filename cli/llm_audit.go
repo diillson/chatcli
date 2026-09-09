@@ -207,7 +207,9 @@ func (w *llmAuditWriter) record(ev client.RequestAuditEvent) {
 	}
 	if ev.Phase == "recv" && ev.Status == "success" && w.usage != nil {
 		if u := w.usage(); u != nil {
-			entry.InputTokens = u.PromptTokens
+			// The whole input, cache included: an audit trail that logged
+			// only the uncached delta understated every cached turn.
+			entry.InputTokens = u.InputTotal()
 			entry.OutputTokens = u.CompletionTokens
 			entry.CacheReadTokens = u.CacheReadInputTokens
 			entry.CacheWriteTokens = u.CacheCreationInputTokens
