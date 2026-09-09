@@ -146,7 +146,7 @@ func (cli *ChatCLI) assembleChatSystemPrompt(
 	// (bootstrap files, memory index, knowledge-graph card). Identical on
 	// every turn of a session, so it belongs in the cached prefix; it used
 	// to ride in the per-turn block and was re-sent whole on every request.
-	if part, ok := cli.workspaceStablePart(); ok {
+	if part, ok := cli.workspaceStablePart(ctx); ok {
 		out.add("workspace_stable", part)
 		budget.spend(len(part.Text))
 	}
@@ -268,7 +268,7 @@ func (cli *ChatCLI) modeAndLanguagePart() models.ContentBlock {
 // knowledge-graph card. It carries a cache hint and is memoized for the
 // conversation — see ChatCLI.chatWorkspaceStable for why the freeze is what
 // makes caching it worthwhile.
-func (cli *ChatCLI) workspaceStablePart() (models.ContentBlock, bool) {
+func (cli *ChatCLI) workspaceStablePart(ctx context.Context) (models.ContentBlock, bool) {
 	if cli.contextBuilder == nil {
 		return models.ContentBlock{}, false
 	}
@@ -283,8 +283,7 @@ func (cli *ChatCLI) workspaceStablePart() (models.ContentBlock, bool) {
 	if mode == memModeIndex {
 		recallHint = chatMemoryRecallHint
 	}
-	stable, _ := cli.contextBuilder.SplitWorkspaceContextMode(
-		context.Background(), "", nil, nil, mode, recallHint)
+	stable, _ := cli.contextBuilder.SplitWorkspaceContextMode(ctx, "", nil, nil, mode, recallHint)
 	// The graph card is a deterministic map of content, not a retrieval:
 	// stable for the session and pull-oriented, so it belongs here.
 	if mode != memModeOff {

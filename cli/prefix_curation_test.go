@@ -236,14 +236,14 @@ func TestStableWorkspaceBlockIsCachedAndConstant(t *testing.T) {
 	t.Setenv("CHATCLI_MEMORY_MODE", memModeIndex)
 	cli := newCuratedCLI(t)
 
-	first, ok := cli.workspaceStablePart()
+	first, ok := cli.workspaceStablePart(testCtx())
 	if !ok || strings.TrimSpace(first.Text) == "" {
 		t.Fatal("no stable workspace block produced")
 	}
 	if first.CacheControl == nil {
 		t.Fatal("stable block carries no cache hint — it would be re-sent every turn")
 	}
-	second, _ := cli.workspaceStablePart()
+	second, _ := cli.workspaceStablePart(testCtx())
 	if first.Text != second.Text {
 		t.Fatal("stable block changed between turns; it would invalidate the prefix it lives in")
 	}
@@ -254,7 +254,7 @@ func TestStableWorkspaceBlockIsCachedAndConstant(t *testing.T) {
 func TestStableWorkspaceBlockIsDroppedWithTheHistory(t *testing.T) {
 	t.Setenv("CHATCLI_MEMORY_MODE", memModeIndex)
 	cli := newCuratedCLI(t)
-	if _, ok := cli.workspaceStablePart(); !ok {
+	if _, ok := cli.workspaceStablePart(testCtx()); !ok {
 		t.Fatal("no stable block to begin with")
 	}
 	if cli.chatWorkspaceStable == nil {
