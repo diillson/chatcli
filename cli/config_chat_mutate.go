@@ -46,6 +46,8 @@ func (cli *ChatCLI) routeConfigChat(args []string) {
 		cli.configChatGraphView(args[1:])
 	case "memory", "mem":
 		cli.configChatMemory(args[1:])
+	case "pull", "context-pull", "context_pull":
+		cli.configChatContextPull(args[1:])
 	case "on", "enable", "status", "off", "disable", "toggle":
 		// Allow the shorthand `/config chat on|off|toggle|status` too.
 		cli.configChatAsk(args)
@@ -94,6 +96,31 @@ func (cli *ChatCLI) configChatKnowledge(args []string) {
 	default:
 		fmt.Println(colorize("  ❌ "+i18n.T("cfg.chat.kb_invalid", args[0]), ColorRed))
 		fmt.Println(colorize("  "+i18n.T("cfg.chat.kb_valid"), ColorGray))
+	}
+}
+
+// configChatContextPull handles `/config chat pull [on|off|toggle|status]`.
+// Turning it OFF is not just losing a tool: the prefix curation that depends
+// on it (summarized MCP catalog, de-duplicated skill bodies) reverts to
+// inlining everything, because a summary the model cannot expand would cost
+// capability instead of tokens.
+func (cli *ChatCLI) configChatContextPull(args []string) {
+	if len(args) == 0 {
+		cli.showConfigChat()
+		return
+	}
+	switch strings.ToLower(strings.TrimSpace(args[0])) {
+	case "on", "enable", "true", "1", "yes":
+		cli.setChatToggle(chatContextPullEnvVar, "context_pull", chatContextPullEnabled(), true)
+	case "off", "disable", "false", "0", "no":
+		cli.setChatToggle(chatContextPullEnvVar, "context_pull", chatContextPullEnabled(), false)
+	case "toggle":
+		cli.setChatToggle(chatContextPullEnvVar, "context_pull", chatContextPullEnabled(), !chatContextPullEnabled())
+	case "status", "show":
+		cli.showConfigChat()
+	default:
+		fmt.Println(colorize("  ❌ "+i18n.T("cfg.chat.pull_invalid", args[0]), ColorRed))
+		fmt.Println(colorize("  "+i18n.T("cfg.chat.pull_valid"), ColorGray))
 	}
 }
 
@@ -187,6 +214,8 @@ func (cli *ChatCLI) showConfigChat() {
 	kv(p, i18n.T("cfg.chat.gv_effective"), chatStateLabel(chatGraphViewEnabled()))
 	kv(p, chatMemoryEnvVar, envBool(chatMemoryEnvVar))
 	kv(p, i18n.T("cfg.chat.mem_effective"), chatStateLabel(chatMemoryEnabled()))
+	kv(p, chatContextPullEnvVar, envBool(chatContextPullEnvVar))
+	kv(p, i18n.T("cfg.chat.pull_effective"), chatStateLabel(cli.chatContextPullActive()))
 
 	// Both native (API key) and XML (OAuth) providers work; report which path
 	// the active provider will take so the user knows what to expect.
@@ -213,6 +242,18 @@ func yesNo(b bool) string {
 	return i18n.T("cfg.val.no")
 }
 
+// isChatToggleSubcommand reports whether the /config chat subcommand takes
+// an on|off|toggle|status value. A list, not a chain of comparisons: every
+// new exception added one more `||` to a line already past the margin.
+func isChatToggleSubcommand(sub string) bool {
+	switch strings.ToLower(strings.TrimSpace(sub)) {
+	case "ask", "knowledge", "kb", "graphview", "graph", "gv",
+		"memory", "mem", "pull", "context-pull", "context_pull":
+		return true
+	}
+	return false
+}
+
 // getConfigChatSuggestions autocompletes `/config chat …`. The "chat" token is
 // args[1]; we offer the ask/on/off/toggle/status subcommands and the on/off/
 // toggle/status values after `ask`.
@@ -228,6 +269,7 @@ func (cli *ChatCLI) getConfigChatSuggestions(d prompt.Document) []prompt.Suggest
 			{Text: "knowledge", Description: i18n.T("complete.config.chat_knowledge")},
 			{Text: "graphview", Description: i18n.T("complete.config.chat_graphview")},
 			{Text: "memory", Description: i18n.T("complete.config.chat_memory")},
+			{Text: "pull", Description: i18n.T("complete.config.chat_pull")},
 			{Text: "on", Description: i18n.T("complete.config.chat_on")},
 			{Text: "off", Description: i18n.T("complete.config.chat_off")},
 			{Text: "toggle", Description: i18n.T("complete.config.chat_toggle")},
@@ -237,7 +279,7 @@ func (cli *ChatCLI) getConfigChatSuggestions(d prompt.Document) []prompt.Suggest
 	}
 
 	// /config chat ask|knowledge <TAB>
-	if len(args) >= 3 && (strings.ToLower(args[2]) == "ask" || strings.ToLower(args[2]) == "knowledge" || strings.ToLower(args[2]) == "graphview" || strings.ToLower(args[2]) == "memory") {
+	if len(args) >= 3 && isChatToggleSubcommand(args[2]) {
 		if len(args) == 3 || (len(args) == 4 && !strings.HasSuffix(line, " ")) {
 			vals := []prompt.Suggest{
 				{Text: "on", Description: i18n.T("complete.config.chat_on")},
@@ -264,6 +306,8 @@ func (cli *ChatCLI) printConfigChatUsage() {
 	fmt.Println("  /config chat graphview off    # " + i18n.T("cfg.chat.usage_gv_off"))
 	fmt.Println("  /config chat memory on        # " + i18n.T("cfg.chat.usage_mem_on"))
 	fmt.Println("  /config chat memory off       # " + i18n.T("cfg.chat.usage_mem_off"))
+	fmt.Println("  /config chat pull on          # " + i18n.T("cfg.chat.usage_pull_on"))
+	fmt.Println("  /config chat pull off         # " + i18n.T("cfg.chat.usage_pull_off"))
 	fmt.Println()
 	fmt.Println(colorize("  "+i18n.T("cfg.chat.usage_note"), ColorGray))
 }

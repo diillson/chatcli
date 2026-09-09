@@ -63,24 +63,49 @@ func (cli *ChatCLI) maybeChatAskTurn(
 	resolution SkillClientResolution,
 	stopSpinner func(),
 ) (string, bool, error) {
-	askOn := chatAskEnabled()
-	kbOn := cli.chatKnowledgeActive()
-	gvOn := chatGraphViewEnabled()
-	memOn := cli.chatMemoryActive()
-	if !askOn && !kbOn && !gvOn && !memOn {
+	on := cli.chatExceptionsForTurn()
+	if !on.any() {
 		return "", false, nil
 	}
 	// Native tool-use providers: buffered decision turn offering only the
 	// sanctioned exception tools.
 	if tac, ok := client.AsToolAware(activeClient); ok && tac.SupportsNativeTools() {
 		out, err := cli.executeChatAskNative(ctx, tac, activeClient, userInput, additionalContext,
-			tempHistory, effectiveMaxTokens, resolution, stopSpinner, askOn, kbOn, gvOn, memOn)
+			tempHistory, effectiveMaxTokens, resolution, stopSpinner, on)
 		return out, true, err
 	}
 	// Providers without native tools (e.g. Claude in OAuth mode): XML transport.
 	out, err := cli.executeChatAskXML(ctx, activeClient, userInput, additionalContext,
-		tempHistory, effectiveMaxTokens, stopSpinner, askOn, kbOn, gvOn, memOn)
+		tempHistory, effectiveMaxTokens, stopSpinner, on)
 	return out, true, err
+}
+
+// chatExceptions is the set of sanctioned chat-mode tools enabled for one
+// turn. A struct rather than a parade of booleans: each new exception used
+// to widen four signatures, and a caller passing them out of order was a
+// silent behavior change no compiler would catch.
+type chatExceptions struct {
+	ask  bool // ask_user — interactive question overlay
+	kb   bool // knowledge — read attached corpora
+	gv   bool // graphview — render the knowledge graph
+	mem  bool // memory — read/write long-term memory
+	pull bool // context_pull — recover material curated out of the prompt
+}
+
+func (e chatExceptions) any() bool {
+	return e.ask || e.kb || e.gv || e.mem || e.pull
+}
+
+// chatExceptionsForTurn resolves which exceptions apply right now. Each one
+// is read live so /config toggles take effect on the next turn.
+func (cli *ChatCLI) chatExceptionsForTurn() chatExceptions {
+	return chatExceptions{
+		ask:  chatAskEnabled(),
+		kb:   cli.chatKnowledgeActive(),
+		gv:   chatGraphViewEnabled(),
+		mem:  cli.chatMemoryActive(),
+		pull: cli.chatContextPullActive(),
+	}
 }
 
 // finishSpinner stops the thinking animation and the prefix spinner and resets
@@ -106,9 +131,9 @@ func (cli *ChatCLI) executeChatAskNative(
 	effectiveMaxTokens int,
 	resolution SkillClientResolution,
 	stopSpinner func(),
-	askOn, kbOn, gvOn, memOn bool,
+	on chatExceptions,
 ) (string, error) {
-	tools := buildChatExceptionTools(askOn, kbOn, gvOn, memOn)
+	tools := buildChatExceptionTools(on)
 	prompt := userInput + additionalContext
 	// The chat temp history copies agent-mode messages verbatim, ToolCalls
 	// included. An agent run that ended on a non-standard exit (cancel,
@@ -139,7 +164,7 @@ func (cli *ChatCLI) executeChatAskNative(
 		var calls chatExceptionCalls
 		if resp != nil {
 			for _, tc := range resp.ToolCalls {
-				calls.collect(tc.Name, tc.ArgumentsJSON(), askOn, kbOn, gvOn, memOn)
+				calls.collect(tc.Name, tc.ArgumentsJSON(), on)
 			}
 		}
 
@@ -167,6 +192,15 @@ func (cli *ChatCLI) executeChatAskNative(
 			continue
 		}
 
+		// Context recovery: hand back the material curated out of the prompt
+		// and decide again. This is what makes the curation lossless — a
+		// deferred skill body or the full MCP catalog is one round away.
+		if calls.pull != "" && round < chatContextPullMaxRounds {
+			result := cli.runChatContextPull(calls.pull)
+			history, prompt = appendContextPullRound(history, prompt, calls.pull, result)
+			continue
+		}
+
 		// No ask: the buffered content is the answer.
 		if calls.ask == "" {
 			cli.finishSpinner(stopSpinner)
@@ -186,19 +220,22 @@ func (cli *ChatCLI) executeChatAskNative(
 
 // buildChatExceptionTools assembles the native tool definitions for the
 // enabled chat exceptions, in a stable order.
-func buildChatExceptionTools(askOn, kbOn, gvOn, memOn bool) []models.ToolDefinition {
+func buildChatExceptionTools(on chatExceptions) []models.ToolDefinition {
 	var tools []models.ToolDefinition
-	if askOn {
+	if on.ask {
 		tools = append(tools, workers.AskUserToolDefinition())
 	}
-	if kbOn {
+	if on.kb {
 		tools = append(tools, knowledgeToolDefinition())
 	}
-	if gvOn {
+	if on.gv {
 		tools = append(tools, graphViewToolDefinition())
 	}
-	if memOn {
+	if on.mem {
 		tools = append(tools, memoryToolDefinition())
+	}
+	if on.pull {
+		tools = append(tools, contextPullToolDefinition())
 	}
 	return tools
 }
@@ -206,19 +243,21 @@ func buildChatExceptionTools(askOn, kbOn, gvOn, memOn bool) []models.ToolDefinit
 // chatExceptionCalls carries the FIRST call captured per exception tool in one
 // decision round; collect ignores disabled tools and later duplicates.
 type chatExceptionCalls struct {
-	ask, kb, gv, mem string
+	ask, kb, gv, mem, pull string
 }
 
-func (c *chatExceptionCalls) collect(name, args string, askOn, kbOn, gvOn, memOn bool) {
+func (c *chatExceptionCalls) collect(name, args string, on chatExceptions) {
 	switch {
-	case askOn && isAskToolName(name) && c.ask == "":
+	case on.ask && isAskToolName(name) && c.ask == "":
 		c.ask = args
-	case kbOn && isKnowledgeToolName(name) && c.kb == "":
+	case on.kb && isKnowledgeToolName(name) && c.kb == "":
 		c.kb = args
-	case gvOn && isGraphViewToolName(name) && c.gv == "":
+	case on.gv && isGraphViewToolName(name) && c.gv == "":
 		c.gv = args
-	case memOn && isMemoryToolName(name) && c.mem == "":
+	case on.mem && isMemoryToolName(name) && c.mem == "":
 		c.mem = args
+	case on.pull && isContextPullToolName(name) && c.pull == "":
+		c.pull = args
 	}
 }
 
@@ -232,20 +271,23 @@ func (cli *ChatCLI) executeChatAskXML(
 	tempHistory []models.Message,
 	effectiveMaxTokens int,
 	stopSpinner func(),
-	askOn, kbOn, gvOn, memOn bool,
+	on chatExceptions,
 ) (string, error) {
 	instruction := ""
-	if askOn {
+	if on.ask {
 		instruction += chatAskXMLInstruction()
 	}
-	if kbOn {
+	if on.kb {
 		instruction += chatKnowledgeXMLInstruction()
 	}
-	if gvOn {
+	if on.gv {
 		instruction += chatGraphViewXMLInstruction()
 	}
-	if memOn {
+	if on.mem {
 		instruction += chatMemoryXMLInstruction()
+	}
+	if on.pull {
+		instruction += chatContextPullXMLInstruction()
 	}
 	prompt := userInput + additionalContext + instruction
 	history := tempHistory
@@ -264,7 +306,7 @@ func (cli *ChatCLI) executeChatAskXML(
 		parsed, _ := agent.ParseToolCalls(resp)
 		var calls chatExceptionCalls
 		for _, tc := range parsed {
-			calls.collect(tc.Name, tc.Args, askOn, kbOn, gvOn, memOn)
+			calls.collect(tc.Name, tc.Args, on)
 		}
 
 		// Knowledge pull: execute, fold into the conversation, decide again.
@@ -291,6 +333,15 @@ func (cli *ChatCLI) executeChatAskXML(
 			result := cli.runChatGraphView(ctx, calls.gv)
 			history, prompt = appendGraphViewRound(history, prompt, calls.gv, result)
 			gvDone = true
+			continue
+		}
+
+		// Context recovery: same contract as the native path, with the call
+		// format re-pinned for the next round.
+		if calls.pull != "" && round < chatContextPullMaxRounds {
+			result := cli.runChatContextPull(calls.pull)
+			history, prompt = appendContextPullRound(history, prompt, calls.pull, result)
+			prompt += chatContextPullXMLInstruction()
 			continue
 		}
 

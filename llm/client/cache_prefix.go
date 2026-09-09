@@ -234,9 +234,9 @@ const PromptCacheTTLEnv = "CHATCLI_PROMPT_CACHE_TTL"
 const ExtendedCacheTTLBeta = "extended-cache-ttl-2025-04-11"
 
 // promptCacheTTLHint is the lifetime the running surface asks for when the
-// env says "auto": the coder/agent loop sets "1h" for its turns (long
-// sessions that pause between tool rounds) and restores "5m" after; chat
-// and one-shot never touch it. Read only when the env is "auto".
+// env says "auto" or is unset: the session promotes it to "1h" after it has
+// watched its own prefix expire during a pause the hour would have covered.
+// Read only when the env leaves the choice open.
 var promptCacheTTLHint atomic.Value // string
 
 // SetPromptCacheTTLHint records the surface preference honored by
@@ -278,7 +278,12 @@ func AnthropicCacheTTL() string {
 	switch strings.ToLower(strings.TrimSpace(os.Getenv(PromptCacheTTLEnv))) {
 	case "1h", "60m", "hour":
 		return "1h"
-	case "auto":
+	case "auto", "":
+		// Unset behaves like "auto": the surface decides, and a surface
+		// that never asks keeps the 5-minute default. This is what lets the
+		// running session promote the lifetime once it has OBSERVED the
+		// prefix expiring during a pause, instead of betting on the hour up
+		// front and charging 2x the write to a conversation that never idles.
 		if held, _ := promptCacheTTLHeld.Load().(string); held != "" {
 			return held
 		}

@@ -15,6 +15,7 @@ package cli
 
 import (
 	"fmt"
+	"os"
 	"strings"
 	"time"
 
@@ -31,6 +32,11 @@ const (
 	// (the new tail of every turn) are normal, not misses.
 	cacheMissMinTokens = 2000
 	cacheMissMinShare  = 0.05
+
+	// shortCacheLifetime is the default prompt-cache window every provider
+	// in the catalog offers. A rebuild after a longer pause is what the
+	// hour-long lifetime exists to prevent.
+	shortCacheLifetime = 5 * time.Minute
 	// cacheMissStreakAlert is how many consecutive misses trigger the
 	// one-shot "your stable prefix is changing every turn" notice.
 	cacheMissStreakAlert = 3
@@ -66,6 +72,12 @@ type cacheTelemetry struct {
 	// from the payload itself (usageCacheAccounting) instead of re-guessing
 	// from the provider/model names when the ratio is rendered.
 	lastAdditive bool
+	// idleExpiries counts prefix rebuilds this session caused by the cache
+	// expiring during a pause that an hour-long entry would have survived.
+	// It is the evidence for promoting the lifetime: guessing up front
+	// costs 2x the write on a conversation that never idles, while this
+	// only ever fires after the conversation has proven it pauses.
+	idleExpiries int
 
 	rebuildPending bool // set by NoteExpectedCacheRebuild until the next request
 	missStreak     int
@@ -127,6 +139,10 @@ func (c *cacheTelemetry) observe(provider, model string, u *models.UsageInfo, no
 			return
 		}
 	}
+	idleGap := time.Duration(0)
+	if !c.lastActivity.IsZero() {
+		idleGap = now.Sub(c.lastActivity)
+	}
 	c.requests++
 	c.readTokens += read
 	c.lastActivity = now
@@ -136,6 +152,12 @@ func (c *cacheTelemetry) observe(provider, model string, u *models.UsageInfo, no
 	b.requests++
 	b.readTokens += read
 	b.inputTokens += prompt
+
+	// A miss that a longer-lived cache would have prevented: the gap since
+	// the previous call outlived the 5-minute window but would have fit
+	// inside the hour. Measured BEFORE lastActivity is overwritten above —
+	// see idleGap, captured at entry.
+	expiredWhileIdle := !first && idleGap > shortCacheLifetime && idleGap < time.Hour
 
 	var miss bool
 	if additive {
@@ -158,11 +180,17 @@ func (c *cacheTelemetry) observe(provider, model string, u *models.UsageInfo, no
 		c.rebuilds++
 		c.rebuildPending = false
 		c.missStreak = 0
+		if expiredWhileIdle {
+			c.idleExpiries++
+		}
 	case miss:
 		c.misses++
 		c.missStreak++
 		if c.missStreak == cacheMissStreakAlert {
 			c.alertArmed = true
+		}
+		if expiredWhileIdle {
+			c.idleExpiries++
 		}
 	default:
 		c.missStreak = 0
@@ -211,6 +239,51 @@ func TurnCacheHitPct(provider, model string, u *models.UsageInfo) (float64, bool
 	}
 	return cacheHitPct(usageCacheAccounting(provider, model, u),
 		int64(u.CacheReadInputTokens), int64(u.CacheCreationInputTokens), int64(u.PromptTokens)), true
+}
+
+// supportsExtendedCacheTTL reports whether this provider/model can carry the
+// hour-long prompt-cache entry at all. Only the Anthropic family offers it,
+// and on Bedrock only the generations that accept the ttl field.
+func supportsExtendedCacheTTL(provider, model string) bool {
+	p := strings.ToLower(provider)
+	m := strings.ToLower(model)
+	if !strings.Contains(p, "claudeai") && !strings.Contains(m, "claude") && !strings.Contains(m, "fable") {
+		return false
+	}
+	if strings.Contains(p, "bedrock") {
+		return bedrock.SupportsExtendedCacheTTL(model)
+	}
+	return true
+}
+
+// promoteCacheTTLIfIdling asks for the hour-long prompt cache once this
+// conversation has PROVEN it pauses: a rebuild happened because the prefix
+// expired during a gap the hour would have covered.
+//
+// Deciding up front is a bet either way — the hour costs 2x the write
+// instead of 1.25x, so it is pure loss for a rapid-fire session and a large
+// win for one with pauses. Waiting for the evidence makes the first rebuild
+// the price of the information, and every later one is avoided. One-way and
+// once: a promotion is never undone, and a session that never idles never
+// pays for the hour.
+//
+// A user who pinned CHATCLI_PROMPT_CACHE_TTL decided already; this never
+// overrides them.
+func (ct *CostTracker) promoteCacheTTLIfIdling(provider, model string) {
+	if ct.cacheTTLPromoted || ct.cache.idleExpiries == 0 {
+		return
+	}
+	if os.Getenv(llmclient.PromptCacheTTLEnv) != "" {
+		return
+	}
+	if !supportsExtendedCacheTTL(provider, model) {
+		return
+	}
+	ct.cacheTTLPromoted = true
+	llmclient.SetPromptCacheTTLHint("1h")
+	// The prefix is being rebuilt anyway — that is what was just observed —
+	// so releasing the held decision throws nothing away.
+	llmclient.ResetPromptCacheTTL()
 }
 
 // cacheTTLFor names the cache lifetime in effect for a provider/model:
