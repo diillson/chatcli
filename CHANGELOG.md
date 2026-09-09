@@ -1,5 +1,18 @@
 # Changelog
 
+## [1.200.0](https://github.com/diillson/chatcli/compare/v1.199.3...v1.200.0) (2026-09-09)
+
+
+### Features
+
+* **agent:** split the workspace block by lifetime and de-duplicate skills across runs ([#1561](https://github.com/diillson/chatcli/issues/1561)) ([1da7d1f](https://github.com/diillson/chatcli/commit/1da7d1fe7498176eefe07252e100a270d5a648d0))
+* **chat:** curate the prefix behind a recovery tool, and cache what is stable ([#1560](https://github.com/diillson/chatcli/issues/1560)) ([f252ea5](https://github.com/diillson/chatcli/commit/f252ea509f99457f73133459f2542aa61e816409))
+
+
+### Bug Fixes
+
+* **usage:** normalize input token accounting across every provider schema ([#1558](https://github.com/diillson/chatcli/issues/1558)) ([cbec01c](https://github.com/diillson/chatcli/commit/cbec01c0302e0fb9e6390ea405fcf64bd7fb97dd))
+
 ## [1.199.3](https://github.com/diillson/chatcli/compare/v1.199.2...v1.199.3) (2026-09-08)
 
 
