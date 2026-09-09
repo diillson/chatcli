@@ -35,9 +35,11 @@ func TestModeAndLanguagePart_HasCacheHintAndLanguageDirective(t *testing.T) {
 
 func TestWorkspaceContextPart_NilBuilderReturnsFalse(t *testing.T) {
 	cli := &ChatCLI{}
-	_, ok := cli.workspaceContextPart(testCtx(), "anything", nil)
-	if ok {
-		t.Error("nil contextBuilder must return ok=false")
+	if _, ok := cli.workspaceStablePart(testCtx()); ok {
+		t.Error("nil contextBuilder must return ok=false for the stable half")
+	}
+	if _, ok := cli.workspaceTurnPart(testCtx(), "anything", nil); ok {
+		t.Error("nil contextBuilder must return ok=false for the turn half")
 	}
 }
 

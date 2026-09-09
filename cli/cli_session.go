@@ -219,11 +219,23 @@ func (cli *ChatCLI) handleLoadSession(ctx context.Context, name string) {
 	}
 }
 
+// resetChatPrefixMemo drops everything the chat prefix remembers about the
+// conversation that just ended: the frozen workspace half and the record of
+// which skill bodies the history already carries. Both describe a history
+// that no longer exists, and keeping either would make the next prompt
+// point at content the model cannot see.
+func (cli *ChatCLI) resetChatPrefixMemo() {
+	cli.chatWorkspaceStable = nil
+	cli.skillBodiesInjected = nil
+	cli.chatPullSkillsAvailable = nil
+}
+
 // clearAllHistories resets the unified history.
 func (cli *ChatCLI) clearAllHistories() {
 	cli.history = make([]models.Message, 0)
 	cli.checkpoints = nil
 	cli.preCompaction = nil
+	cli.resetChatPrefixMemo()
 	// The prefix is gone either way, so the ttl "auto" settled on for the
 	// old conversation is released here rather than held into the new one.
 	llmclient.ResetPromptCacheTTL()
@@ -246,6 +258,7 @@ func (cli *ChatCLI) clearConversation(ctx context.Context) {
 	cli.saveCheckpoint()
 	cli.history = make([]models.Message, 0)
 	cli.syncTranscript()
+	cli.resetChatPrefixMemo()
 	llmclient.ResetPromptCacheTTL()
 	if cli.costTracker != nil {
 		cli.costTracker.NoteExpectedCacheRebuild()

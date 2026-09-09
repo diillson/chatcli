@@ -1,0 +1,9 @@
+{
+  "cfg.chat.pull_effective": "recuperação de contexto no chat (efetivo)",
+  "cfg.chat.pull_invalid": "valor inválido: %s",
+  "cfg.chat.pull_valid": "valores válidos: on, off, toggle, status",
+  "cfg.chat.usage_pull_off": "desliga a recuperação — o prefixo volta a embutir tudo",
+  "cfg.chat.usage_pull_on": "permite ao chat recuperar contexto curado (corpo de skills, catálogo MCP)",
+  "complete.config.chat_pull": "recuperar contexto curado para fora do prompt",
+  "context.status.section.workspace_stable": "Workspace (estável: bootstrap + índice de memória)"
+}

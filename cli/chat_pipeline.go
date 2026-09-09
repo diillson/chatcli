@@ -142,6 +142,14 @@ func (cli *ChatCLI) assembleChatSystemPrompt(
 	mode := cli.modeAndLanguagePart()
 	out.add("mode", mode) // Part 0
 	budget.spend(len(mode.Text))
+	// Part 0b — the turn-independent half of the workspace context
+	// (bootstrap files, memory index, knowledge-graph card). Identical on
+	// every turn of a session, so it belongs in the cached prefix; it used
+	// to ride in the per-turn block and was re-sent whole on every request.
+	if part, ok := cli.workspaceStablePart(ctx); ok {
+		out.add("workspace_stable", part)
+		budget.spend(len(part.Text))
+	}
 	// Attachments are measured raw first so the skill budget knows what is
 	// left; they fold only when even bodiless skills would not fit.
 	attachedRaw := cli.attachedContextParts()
@@ -182,7 +190,7 @@ func (cli *ChatCLI) assembleChatSystemPrompt(
 	// history PLUS the current input. History alone left the first turn of a
 	// fresh session hintless — exactly when proactive recall matters most.
 	hints := cli.turnHints(userInput)
-	if part, ok := cli.workspaceContextPart(ctx, userInput, hints); ok { // Part 4
+	if part, ok := cli.workspaceTurnPart(ctx, userInput, hints); ok { // Part 4
 		out.addTurn("workspace_memory", part)
 	}
 	// Part 4b: semantic /context retrieval (--rag). Query-driven, so it lives
@@ -194,8 +202,9 @@ func (cli *ChatCLI) assembleChatSystemPrompt(
 			out.addTurn("skill_manual", models.ContentBlock{Type: "text", Text: block})
 		}
 	}
-	if block, ok := autoSkillBlockLimited(autoActivated, skillBudget); ok { // Part 6
+	if block, inlined := autoSkillBlockCurated(autoActivated, cli.chatSkillCuration(skillBudget)); block.Text != "" { // Part 6
 		out.addTurn("skills_auto", block)
+		cli.rememberInjectedSkillBodies(inlined)
 	}
 	if part, ok := cli.mcpChannelPart(); ok { // Part 7
 		out.addTurn("mcp_channels", part)
@@ -254,38 +263,78 @@ func (cli *ChatCLI) modeAndLanguagePart() models.ContentBlock {
 	}
 }
 
-// workspaceContextPart builds the bootstrap-files-plus-smart-memory block.
-// Returns (zero, false) when there is no workspace context to inject (e.g. on
-// a fresh repo with no SOUL.md / MEMORY.md).
-//
-// VOLATILE: memory retrieval is hint-driven (recentHistoryHints changes every
-// turn), so this block's text varies turn to turn. It therefore carries NO
-// cache hint and lives in the volatile suffix — caching it would force a
-// cache-creation write each turn while never earning a read, and (worse) would
-// poison any cached block placed after it. The wall-clock timestamp that used
-// to be appended here now lives in its own trailing block (dynamicContextPart)
-// so it can't bust the prefix cache.
-func (cli *ChatCLI) workspaceContextPart(ctx context.Context, userInput string, hints []string) (models.ContentBlock, bool) {
+// workspaceStablePart is the half of the workspace context that does not
+// change with the question: bootstrap files, the memory index, and the
+// knowledge-graph card. It carries a cache hint and is memoized for the
+// conversation — see ChatCLI.chatWorkspaceStable for why the freeze is what
+// makes caching it worthwhile.
+func (cli *ChatCLI) workspaceStablePart(ctx context.Context) (models.ContentBlock, bool) {
 	if cli.contextBuilder == nil {
 		return models.ContentBlock{}, false
 	}
-	wsCtx := cli.retrieveWorkspaceContext(ctx, userInput, hints)
-	// Knowledge-graph map-of-content card, mirroring agent/coder placement:
-	// tiny, deterministic, and pull-oriented (the memory tool exception can
-	// expand any hub on demand). Skipped only when memory is off entirely.
-	if cli.chatEffectiveMemoryMode() != memModeOff {
-		if gb := cli.graphIndexBlock(); gb != "" {
-			if strings.TrimSpace(wsCtx) == "" {
-				wsCtx = gb
-			} else {
-				wsCtx = strings.TrimRight(wsCtx, "\n") + "\n\n" + gb
-			}
+	if cli.chatWorkspaceStable != nil {
+		if *cli.chatWorkspaceStable == "" {
+			return models.ContentBlock{}, false
 		}
+		return cachedTextBlock(*cli.chatWorkspaceStable), true
 	}
-	if wsCtx == "" {
+	mode := cli.chatEffectiveMemoryMode()
+	recallHint := ""
+	if mode == memModeIndex {
+		recallHint = chatMemoryRecallHint
+	}
+	stable, _ := cli.contextBuilder.SplitWorkspaceContextMode(ctx, "", nil, nil, mode, recallHint)
+	// The graph card is a deterministic map of content, not a retrieval:
+	// stable for the session and pull-oriented, so it belongs here.
+	if mode != memModeOff {
+		stable = joinPromptBlocks(stable, cli.graphIndexBlock())
+	}
+	cli.chatWorkspaceStable = &stable
+	if stable == "" {
 		return models.ContentBlock{}, false
 	}
-	return models.ContentBlock{Type: "text", Text: wsCtx}, true
+	return cachedTextBlock(stable), true
+}
+
+// workspaceTurnPart is the remainder that genuinely varies with the turn:
+// the rules matched from this turn's hints, and in full memory mode the
+// query-driven retrieval. No cache hint — it changes per turn by design.
+func (cli *ChatCLI) workspaceTurnPart(ctx context.Context, userInput string, hints []string) (models.ContentBlock, bool) {
+	if cli.contextBuilder == nil {
+		return models.ContentBlock{}, false
+	}
+	mode := cli.chatEffectiveMemoryMode()
+	recallHint := ""
+	if mode == memModeIndex {
+		recallHint = chatMemoryRecallHint
+	}
+	aug := cli.hydeAugmenterFor(quality.LoadFromEnv())
+	_, turn := cli.contextBuilder.SplitWorkspaceContextMode(ctx, userInput, hints, aug, mode, recallHint)
+	if turn == "" {
+		return models.ContentBlock{}, false
+	}
+	return models.ContentBlock{Type: "text", Text: turn}, true
+}
+
+// cachedTextBlock is a text block that carries the prefix cache hint.
+func cachedTextBlock(text string) models.ContentBlock {
+	return models.ContentBlock{
+		Type:         "text",
+		Text:         text,
+		CacheControl: &models.CacheControl{Type: "ephemeral"},
+	}
+}
+
+// joinPromptBlocks concatenates non-empty prompt blocks with one blank line,
+// so an absent block never leaves stray separators in the prompt.
+func joinPromptBlocks(blocks ...string) string {
+	parts := make([]string, 0, len(blocks))
+	for _, b := range blocks {
+		if s := strings.TrimSpace(b); s != "" {
+			parts = append(parts, s)
+		}
+	}
+	return strings.Join(parts, "\n\n")
 }
 
 // dynamicContextPart emits the time-sensitive context (current wall-clock time
@@ -509,14 +558,83 @@ func autoSkillBlock(autoActivated []*persona.Skill) (models.ContentBlock, bool) 
 
 // autoSkillBlockLimited is autoSkillBlock under an explicit body budget.
 func autoSkillBlockLimited(autoActivated []*persona.Skill, budget int) (models.ContentBlock, bool) {
+	block, _ := autoSkillBlockCurated(autoActivated, skillCuration{Budget: budget})
+	if block.Text == "" {
+		return models.ContentBlock{}, false
+	}
+	return block, true
+}
+
+// autoSkillBlockCurated is autoSkillBlockLimited under a curation policy. It
+// returns the bodies it inlined so the session can remember them.
+func autoSkillBlockCurated(autoActivated []*persona.Skill, cur skillCuration) (models.ContentBlock, map[string]string) {
 	if len(autoActivated) == 0 {
-		return models.ContentBlock{}, false
+		return models.ContentBlock{}, nil
 	}
-	block := buildSkillInjectionBlockLimited(autoActivated, budget)
+	block, inlined := buildSkillInjectionBlockCurated(autoActivated, cur)
 	if block == "" {
-		return models.ContentBlock{}, false
+		return models.ContentBlock{}, nil
 	}
-	return models.ContentBlock{Type: "text", Text: block}, true
+	return models.ContentBlock{Type: "text", Text: block}, inlined
+}
+
+// chatSkillCuration is the policy for a chat turn's auto-activated skills.
+//
+// De-duplication is armed ONLY when the recovery path is available: without
+// context_pull a "you already have it" note would point at a copy the model
+// may no longer be able to see after compaction, and a prompt that withholds
+// binding guidance is worse than a prompt that repeats it.
+func (cli *ChatCLI) chatSkillCuration(budget int) skillCuration {
+	cur := skillCuration{Budget: budget}
+	if !cli.chatContextPullActive() {
+		return cur
+	}
+	cur.Recovery = "call context_pull with kind=skill and this skill's name to read its full instructions"
+	cur.Injected = cli.skillBodiesInjected
+	cur.StillVisible = cli.skillBodyStillInHistory
+	return cur
+}
+
+// skillBodyStillInHistory reports whether the body inlined on an earlier
+// turn is still part of the conversation the model receives. Checked against
+// the live history rather than tracked through every place that can drop it
+// (compaction, /clear, /rewind, session load, checkpoint restore): a missed
+// site there would silently withhold binding guidance, and this check cannot
+// miss one. The probe is the head of the body, which is unique enough in
+// practice and costs a substring scan only for skills that already fired.
+func (cli *ChatCLI) skillBodyStillInHistory(skill *persona.Skill) bool {
+	body := strings.TrimSpace(skill.Content)
+	if body == "" {
+		return false
+	}
+	probe := body
+	if len(probe) > skillVisibilityProbeChars {
+		probe = probe[:skillVisibilityProbeChars]
+	}
+	for _, msg := range cli.history {
+		if strings.Contains(msg.Content, probe) {
+			return true
+		}
+	}
+	return false
+}
+
+// skillVisibilityProbeChars is how much of a body identifies it in history.
+// Long enough not to collide across skills, short enough to survive a
+// trailing trim.
+const skillVisibilityProbeChars = 160
+
+// rememberInjectedSkillBodies records the bodies this turn actually inlined.
+func (cli *ChatCLI) rememberInjectedSkillBodies(inlined map[string]string) {
+	if len(inlined) == 0 {
+		return
+	}
+	if cli.skillBodiesInjected == nil {
+		cli.skillBodiesInjected = make(map[string]string, len(inlined))
+	}
+	for name, fingerprint := range inlined {
+		cli.skillBodiesInjected[name] = fingerprint
+	}
 }
 
 // pickSkillHints resolves model/effort hints across pinned + auto-activated
@@ -579,10 +697,20 @@ func (cli *ChatCLI) mcpChannelPart() (models.ContentBlock, bool) {
 	return models.ContentBlock{Type: "text", Text: channelCtx}, true
 }
 
-// mcpToolsPart emits a small catalog (name + description only) of the MCP
-// tools the client has access to, plus a hint that they are callable only
-// in agent/coder mode. The full tool schema is deferred to the agent loop
-// to avoid burning tokens in chat mode.
+// mcpToolsPart emits the catalog of MCP tools the client has access to,
+// plus a hint that they are callable only in agent/coder mode.
+//
+// Chat cannot call these tools, so their descriptions are read at most once
+// per conversation — usually never — while being paid for in every cached
+// prefix. A catalog of a few dozen tools from a single server is easily the
+// largest block in a chat prefix.
+//
+// So chat gets the NAMES, which is what the model needs to know what exists
+// and to answer "what can you reach", and the descriptions become one
+// context_pull away. The trade is only taken when that recovery path is
+// actually available: with the exception disabled the full catalog is
+// inlined exactly as before, because a summary the model cannot expand is
+// a capability loss, not a saving.
 func (cli *ChatCLI) mcpToolsPart() (models.ContentBlock, bool) {
 	if cli.mcpManager == nil {
 		return models.ContentBlock{}, false
@@ -598,8 +726,16 @@ func (cli *ChatCLI) mcpToolsPart() (models.ContentBlock, bool) {
 	b.WriteString("# Available MCP Tools\n\n")
 	b.WriteString("The following external tools are available via MCP servers. ")
 	b.WriteString("In agent/coder mode they can be invoked directly.\n\n")
-	for _, t := range mcpTools {
-		fmt.Fprintf(&b, "- **%s**: %s\n", t.Function.Name, t.Function.Description)
+	if cli.chatContextPullActive() {
+		fmt.Fprintf(&b, "%d tools, listed by name. Call context_pull with kind=mcp_tools "+
+			"to read what any of them does before describing it to the user.\n\n", len(mcpTools))
+		for _, t := range mcpTools {
+			fmt.Fprintf(&b, "- %s\n", t.Function.Name)
+		}
+	} else {
+		for _, t := range mcpTools {
+			fmt.Fprintf(&b, "- **%s**: %s\n", t.Function.Name, t.Function.Description)
+		}
 	}
 	// Stable across a session (the catalog changes only on connect/disconnect),
 	// so it sits in the cached prefix and carries a cache hint.

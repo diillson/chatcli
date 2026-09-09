@@ -154,6 +154,10 @@ type CostTracker struct {
 	modelUsage map[string]*ModelUsageRecord
 
 	// Aggregates (computed from modelUsage)
+	// cacheTTLPromoted records that this session already asked for the
+	// hour-long prompt cache, so the promotion happens once and is never
+	// undone. See promoteCacheTTLIfIdling.
+	cacheTTLPromoted      bool
 	totalPromptTokens     int64
 	totalInputTokens      int64
 	totalCompletionTokens int64
@@ -358,6 +362,7 @@ func (ct *CostTracker) RecordRealUsage(provider, model string, usage *models.Usa
 	rec.ReasoningTokens += int64(usage.ReasoningTokens)
 	if usage.IsReal {
 		ct.cache.observe(provider, model, usage, time.Now())
+		ct.promoteCacheTTLIfIdling(provider, model)
 	}
 	if usage.CostUSD > 0 {
 		// This call's tokens are covered by the provider-billed amount —

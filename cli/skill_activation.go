@@ -11,6 +11,8 @@
 package cli
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"os"
 	"regexp"
@@ -123,16 +125,24 @@ func buildSkillInjectionBlock(skills []*persona.Skill) string {
 // explicit body budget (the prompt budget may hand it less than the
 // per-block default).
 func buildSkillInjectionBlockLimited(skills []*persona.Skill, budget int) string {
+	block, _ := buildSkillInjectionBlockCurated(skills, skillCuration{Budget: budget})
+	return block
+}
+
+// buildSkillInjectionBlockCurated is buildSkillInjectionBlockLimited under a
+// curation policy, returning the bodies it inlined so the caller can avoid
+// paying for them again on the next turn.
+func buildSkillInjectionBlockCurated(skills []*persona.Skill, cur skillCuration) (string, map[string]string) {
 	if len(skills) == 0 {
-		return ""
+		return "", nil
 	}
 	var b strings.Builder
 	b.WriteString("# Auto-loaded Skills\n\n")
 	b.WriteString("The following skills were automatically activated based on ")
 	b.WriteString("your input (matched via `triggers:` keywords or `paths:` globs ")
 	b.WriteString("in the skill frontmatter). Follow their guidance when relevant.\n\n")
-	renderSkillEntriesLimited(&b, skills, budget, false)
-	return b.String()
+	inlined := renderSkillEntriesCurated(&b, skills, cur)
+	return b.String(), inlined
 }
 
 // renderSkillEntries writes the shared per-skill markdown section (name,
@@ -155,6 +165,48 @@ func renderSkillEntries(b *strings.Builder, skills []*persona.Skill) {
 // later activations still announce themselves (header + description +
 // source) without paying for another full body.
 func renderSkillEntriesLimited(b *strings.Builder, skills []*persona.Skill, budget int, deferAll bool) {
+	renderSkillEntriesCurated(b, skills, skillCuration{Budget: budget, DeferAll: deferAll})
+}
+
+// skillCuration describes how much of each body to inline and how a body
+// left out tells the reader to get it back.
+type skillCuration struct {
+	// Budget is the total characters of BODIES this block may inline.
+	Budget int
+	// DeferAll forces every body into its deferred form.
+	DeferAll bool
+	// Injected maps a skill name to the fingerprint of the body already
+	// inlined EARLIER IN THIS CONVERSATION. A skill that activates on ten
+	// turns used to ship its whole body ten times; the copy from the first
+	// turn is still in the history the model reads, so the repeats say so
+	// instead of paying again. Nil disables the de-duplication.
+	Injected map[string]string
+	// StillVisible reports whether that earlier copy is genuinely still in
+	// the history the model will receive. Compaction, /clear, /rewind and a
+	// session load can all take it away, and pointing at guidance that is
+	// no longer on screen is exactly the regression this curation must not
+	// cause. Nil means "trust Injected".
+	StillVisible func(skill *persona.Skill) bool
+	// Recovery names the call that brings a deferred body back (chat's
+	// context_pull). Empty when the surface has file tools of its own and
+	// the source path is instruction enough.
+	Recovery string
+}
+
+// skillBodyFingerprint identifies the exact body text that was inlined, so
+// an edited skill re-inlines instead of pointing at a copy that no longer
+// matches what is on disk.
+func skillBodyFingerprint(skill *persona.Skill) string {
+	sum := sha256.Sum256([]byte(strings.TrimSpace(skill.Content)))
+	return hex.EncodeToString(sum[:8])
+}
+
+// renderSkillEntriesCurated is renderSkillEntriesLimited with de-duplication
+// and a recovery affordance. It returns the fingerprints of the bodies it
+// actually inlined, for the caller to remember.
+func renderSkillEntriesCurated(b *strings.Builder, skills []*persona.Skill, cur skillCuration) map[string]string {
+	var inlined map[string]string
+	budget, deferAll := cur.Budget, cur.DeferAll
 	spent := 0
 	for _, skill := range skills {
 		fmt.Fprintf(b, "## Skill: %s", skill.Name)
@@ -176,14 +228,47 @@ func renderSkillEntriesLimited(b *strings.Builder, skills []*persona.Skill, budg
 		if body == "" {
 			continue
 		}
+		fingerprint := skillBodyFingerprint(skill)
+		if prev, ok := cur.Injected[skill.Name]; ok && prev == fingerprint &&
+			(cur.StillVisible == nil || cur.StillVisible(skill)) {
+			b.WriteString(renderSkillBodyRepeat(cur.Recovery))
+			continue
+		}
 		if deferAll || (budget > 0 && spent+len(body) > budget) {
-			b.WriteString(renderSkillBodyPointer(skill))
+			b.WriteString(renderSkillBodyPointerWithRecovery(skill, cur.Recovery))
 			continue
 		}
 		b.WriteString(body)
 		b.WriteString("\n\n")
 		spent += len(body)
+		if inlined == nil {
+			inlined = map[string]string{}
+		}
+		inlined[skill.Name] = fingerprint
 	}
+	return inlined
+}
+
+// renderSkillBodyRepeat replaces a body this conversation already carries.
+// It must never read as "this skill has no instructions": the guidance is
+// binding, it is simply already on screen further up.
+func renderSkillBodyRepeat(recovery string) string {
+	note := "_Body already provided earlier in this conversation — follow that copy; " +
+		"it has not changed._"
+	if recovery != "" {
+		note = strings.TrimSuffix(note, "_") + " If it is no longer visible above, " + recovery + "_"
+	}
+	return note + "\n\n"
+}
+
+// renderSkillBodyPointerWithRecovery is renderSkillBodyPointer plus the call
+// that recovers the body on a surface with no file tools.
+func renderSkillBodyPointerWithRecovery(skill *persona.Skill, recovery string) string {
+	if recovery == "" {
+		return renderSkillBodyPointer(skill)
+	}
+	return fmt.Sprintf("_Body not inlined (skill injection budget). "+
+		"Before applying this skill, %s_\n\n", recovery)
 }
 
 // renderSkillBodyPointer emits the deferred-body note for a skill whose

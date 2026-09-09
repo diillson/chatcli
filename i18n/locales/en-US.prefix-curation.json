@@ -1,0 +1,9 @@
+{
+  "cfg.chat.pull_effective": "context recovery in chat (effective)",
+  "cfg.chat.pull_invalid": "invalid value: %s",
+  "cfg.chat.pull_valid": "valid values: on, off, toggle, status",
+  "cfg.chat.usage_pull_off": "disable recovery — the prefix then inlines everything again",
+  "cfg.chat.usage_pull_on": "let chat recover curated-out context (skill bodies, MCP catalog)",
+  "complete.config.chat_pull": "recover context curated out of the prompt",
+  "context.status.section.workspace_stable": "Workspace (stable: bootstrap + memory index)"
+}

@@ -222,6 +222,53 @@ func (cb *ContextBuilder) BuildWorkspaceContextMode(
 	return strings.Join(parts, "\n\n---\n\n")
 }
 
+// SplitWorkspaceContextMode is BuildWorkspaceContextMode separated by
+// LIFETIME instead of by topic.
+//
+// stable is the share that does not depend on the turn — bootstrap files
+// and, in index mode, the memory index. It is byte-identical across the
+// turns of a session, so the caller can put it in the cached prefix and pay
+// for it once instead of on every request; measured on a real session, the
+// index and graph blocks were the single most repeated content in the
+// window.
+//
+// turn is the remainder that genuinely varies with the question: the
+// path-specific rules matched from this turn's hints, and in full mode the
+// query-driven retrieval, which must never enter a cached prefix — a block
+// that changes per turn invalidates everything cached before it.
+//
+// Together they carry exactly what BuildWorkspaceContextMode returns; the
+// split changes where each half is placed, never whether the model sees it.
+func (cb *ContextBuilder) SplitWorkspaceContextMode(
+	ctx context.Context, query string, hints []string,
+	augmenter *memory.HyDEAugmenter, mode string, recallHint string,
+) (stable, turn string) {
+	if mode == "" || mode == "full" {
+		// Full mode injects retrieved memory chosen from the query, so the
+		// whole block is turn-dependent. Only the bootstrap files underneath
+		// it are stable, and they are already inside that text — splitting
+		// them out would mean re-deriving the retrieval, so full mode keeps
+		// its single volatile block.
+		return "", cb.BuildWorkspaceContextMode(ctx, query, hints, augmenter, mode, recallHint)
+	}
+
+	var stableParts []string
+	if bc := cb.bootstrap.LoadBootstrapContent(); bc != "" {
+		stableParts = append(stableParts, bc)
+	}
+	if cb.memory != nil {
+		if idx := cb.memory.GetMemoryIndex(0); idx != "" {
+			block := idx
+			if strings.TrimSpace(recallHint) != "" {
+				block += "\n\n" + recallHint
+			}
+			stableParts = append(stableParts, block)
+		}
+	}
+	turnParts := appendMatchingRules(cb.rules, hints, nil)
+	return strings.Join(stableParts, "\n\n---\n\n"), strings.Join(turnParts, "\n\n---\n\n")
+}
+
 // appendMatchingRules appends path-specific rules for any file-like hints,
 // mirroring the rule-loading logic shared by the prefix builders.
 func appendMatchingRules(rules *RulesLoader, hints []string, parts []string) []string {
