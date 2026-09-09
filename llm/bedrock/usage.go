@@ -88,6 +88,10 @@ func (c *BedrockClient) captureConverseUsage(out *bedrockruntime.ConverseOutput)
 			info.CacheCreation1hInputTokens += deref(d.InputTokens)
 		}
 	}
+	// Converse documents "total input tokens = inputTokens +
+	// cacheReadInputTokens + cacheWriteInputTokens" for every vendor served
+	// through it, so inputTokens alone is the uncached delta.
+	info.Normalize(models.CacheAdditive)
 	c.usage.StoreUsage(info)
 	if out.StopReason != "" {
 		c.usage.StoreStopReason(string(out.StopReason))

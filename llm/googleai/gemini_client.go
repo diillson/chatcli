@@ -398,14 +398,18 @@ func (c *GeminiClient) parseResponse(bodyBytes []byte) (string, error) {
 
 	// Store usage info
 	if result.UsageMetadata.TotalTokenCount > 0 || result.UsageMetadata.PromptTokenCount > 0 {
-		c.usageState.StoreUsage(&models.UsageInfo{
+		usage := &models.UsageInfo{
 			PromptTokens:         result.UsageMetadata.PromptTokenCount,
 			CompletionTokens:     result.UsageMetadata.CandidatesTokenCount,
 			TotalTokens:          result.UsageMetadata.TotalTokenCount,
 			CacheReadInputTokens: result.UsageMetadata.CachedContentTokenCount,
 			ReasoningTokens:      result.UsageMetadata.ThoughtsTokenCount,
 			IsReal:               true,
-		})
+		}
+		// cachedContentTokenCount is the cached SHARE of promptTokenCount,
+		// not an extra charge beside it.
+		usage.Normalize(models.CacheSubset)
+		c.usageState.StoreUsage(usage)
 	}
 
 	// Store stop reason

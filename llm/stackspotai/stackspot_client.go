@@ -152,12 +152,16 @@ func (c *StackSpotClient) sendChatRequest(ctx context.Context, prompt, accessTok
 	// Store usage info (StackSpot custom format)
 	promptTokens := response.Tokens.User + response.Tokens.Enrichment
 	if promptTokens > 0 || response.Tokens.Output > 0 {
-		c.usageState.StoreUsage(&models.UsageInfo{
+		usage := &models.UsageInfo{
 			PromptTokens:     promptTokens,
 			CompletionTokens: response.Tokens.Output,
 			TotalTokens:      promptTokens + response.Tokens.Output,
 			IsReal:           true,
-		})
+		}
+		// StackSpot reports user+enrichment as the whole input; no cache
+		// split exists on this API.
+		usage.Normalize(models.CacheSubset)
+		c.usageState.StoreUsage(usage)
 	}
 	if response.StopReason != "" {
 		c.usageState.StoreStopReason(response.StopReason)

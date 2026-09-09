@@ -108,6 +108,8 @@ func ParseOpenAIUsage(result map[string]interface{}) *models.UsageInfo {
 	if info.TotalTokens == 0 && (info.PromptTokens > 0 || info.CompletionTokens > 0) {
 		info.TotalTokens = info.PromptTokens + info.CompletionTokens
 	}
+	// OpenAI counts cached_tokens INSIDE prompt_tokens.
+	info.Normalize(models.CacheSubset)
 
 	return info
 }
@@ -174,6 +176,9 @@ func ParseOpenAIResponsesUsage(data []byte) (*models.UsageInfo, error) {
 	if info.TotalTokens == 0 && (info.PromptTokens > 0 || info.CompletionTokens > 0) {
 		info.TotalTokens = info.PromptTokens + info.CompletionTokens
 	}
+	// Responses API: input_tokens_details.cached_tokens is a subset of
+	// input_tokens, exactly as on Chat Completions.
+	info.Normalize(models.CacheSubset)
 	return info, nil
 }
 
@@ -208,6 +213,9 @@ func ParseAnthropicUsage(result map[string]interface{}) *models.UsageInfo {
 	}
 
 	info.TotalTokens = info.PromptTokens + info.CompletionTokens
+	// Anthropic reports cache reads and writes ALONGSIDE input_tokens, so
+	// the normalized input is the sum — and TotalTokens grows with it.
+	info.Normalize(models.CacheAdditive)
 	return info
 }
 

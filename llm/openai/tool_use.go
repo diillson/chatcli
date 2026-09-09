@@ -272,27 +272,14 @@ func parseToolResponse(body string, logger *zap.Logger) (*models.LLMResponse, er
 		}
 	}
 
-	// Extract usage. OpenAI reports the auto-caching hit through
-	// prompt_tokens_details.cached_tokens — surface it via
-	// UsageInfo.CacheReadInputTokens so the cost tracker and any
-	// user-facing metrics reflect the savings consistently with
-	// Anthropic's explicit cache_read_input_tokens.
-	if usage, ok := result["usage"].(map[string]interface{}); ok {
-		response.Usage = &models.UsageInfo{IsReal: true}
-		if pt, ok := usage["prompt_tokens"].(float64); ok {
-			response.Usage.PromptTokens = int(pt)
-		}
-		if ct, ok := usage["completion_tokens"].(float64); ok {
-			response.Usage.CompletionTokens = int(ct)
-		}
-		if tt, ok := usage["total_tokens"].(float64); ok {
-			response.Usage.TotalTokens = int(tt)
-		}
-		if details, ok := usage["prompt_tokens_details"].(map[string]interface{}); ok {
-			if cached, ok := details["cached_tokens"].(float64); ok {
-				response.Usage.CacheReadInputTokens = int(cached)
-			}
-		}
+	// Extract usage through the shared OpenAI parser: it surfaces the
+	// auto-caching hit (prompt_tokens_details.cached_tokens) as
+	// CacheReadInputTokens, the reasoning tokens the hand-rolled block
+	// dropped, and the schema-normalized input every display and budget
+	// site reads. Cached tokens are a SUBSET of prompt_tokens here, which
+	// is what the parser records.
+	if usage := client.ParseOpenAIUsage(result); usage != nil {
+		response.Usage = usage
 	}
 
 	return response, nil

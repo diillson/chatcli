@@ -161,6 +161,8 @@ func (a *streamUsageAccumulator) commit(c *ClaudeClient) {
 	info := a.info
 	info.TotalTokens = info.PromptTokens + info.CompletionTokens
 	info.IsReal = true
+	// message_start reports cache reads/writes beside input_tokens.
+	info.Normalize(models.CacheAdditive)
 	c.storeUsage(&info)
 	if a.stopReason != "" {
 		c.usage.StoreStopReason(a.stopReason)

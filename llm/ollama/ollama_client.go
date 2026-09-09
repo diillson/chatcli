@@ -193,12 +193,16 @@ func (c *Client) SendPrompt(ctx context.Context, prompt string, history []models
 
 		// Extract usage from Ollama's custom format
 		if result.EvalCount > 0 || result.PromptEvalCount > 0 {
-			c.usageState.StoreUsage(&models.UsageInfo{
+			usage := &models.UsageInfo{
 				PromptTokens:     result.PromptEvalCount,
 				CompletionTokens: result.EvalCount,
 				TotalTokens:      result.PromptEvalCount + result.EvalCount,
 				IsReal:           true,
-			})
+			}
+			// Ollama reports no cache split: prompt_eval_count already is
+			// the whole input.
+			usage.Normalize(models.CacheSubset)
+			c.usageState.StoreUsage(usage)
 		}
 		if result.DoneReason != "" {
 			c.usageState.StoreStopReason(result.DoneReason)

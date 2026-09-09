@@ -704,6 +704,7 @@ func sumUsage(a, b *models.UsageInfo) *models.UsageInfo {
 		return a
 	}
 	out := *a
+	out.InputTokensTotal = a.InputTotal() + b.InputTotal()
 	out.PromptTokens += b.PromptTokens
 	out.CompletionTokens += b.CompletionTokens
 	out.TotalTokens += b.TotalTokens

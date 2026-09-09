@@ -44,7 +44,11 @@ func TestParseTrajectoryUsage_SumsAgentSteps(t *testing.T) {
 	assert.True(t, got.Usage.IsReal)
 	assert.Equal(t, 13500, got.Usage.PromptTokens, "user steps never count")
 	assert.Equal(t, 500, got.Usage.CompletionTokens)
-	assert.Equal(t, 14000, got.Usage.TotalTokens)
+	// Normalized: the Anthropic-backed step's cache write and read ARE
+	// input (12000+500+11000), the ATIF-standard step's cached_tokens are
+	// already inside its 1500 — 25000 input, 500 output.
+	assert.Equal(t, 25000, got.Usage.InputTokensTotal)
+	assert.Equal(t, 25500, got.Usage.TotalTokens)
 	assert.Equal(t, 500, got.Usage.CacheCreationInputTokens)
 	assert.Equal(t, 12000, got.Usage.CacheReadInputTokens, "ATIF cached_tokens folds into cache reads")
 	assert.InDelta(t, 0.0125, got.Usage.CostUSD, 1e-9)
