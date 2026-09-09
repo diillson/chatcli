@@ -1115,11 +1115,13 @@ func (a *AgentMode) Run(ctx context.Context, query string, additionalContext str
 
 	// Block 3 — workspace / retrieval context. Built only when we actually
 	// have a context builder; empty string means "skip this block".
+	// The workspace context comes back split by lifetime: the half that does
+	// not depend on the query (bootstrap files, memory index, graph card)
+	// earns a cache breakpoint, the query-driven half trails uncached.
 	// dynamicText (wall-clock time + cwd disambiguation) is captured
-	// SEPARATELY from workspaceText: the timestamp changes every turn, so
-	// bundling it into the cacheable workspace block would bust the prefix
-	// cache. It is emitted as its own uncached trailing block instead.
-	workspaceText, dynamicText := a.buildWorkspaceBlocks(ctx, query)
+	// SEPARATELY from both: the timestamp changes every turn, so bundling it
+	// into a cacheable block would bust the prefix cache.
+	workspaceStable, workspaceTurn, dynamicText := a.buildWorkspaceBlocks(ctx, query)
 
 	// Block 2 — tool descriptions (plugins) + session workspace hint.
 	// Merged into one cacheable block since they're always emitted as a pair.
@@ -1265,7 +1267,8 @@ func (a *AgentMode) Run(ctx context.Context, query string, additionalContext str
 	// before the query (turn_context.go), so the system prompt stays
 	// byte-stable and the prefix cache keeps hitting across runs.
 	turnContextText := composeTurnContext(channelsText, dynamicText)
-	sysMsg := buildAgentSystemMessage(coreText, toolsText, workspaceText, skillsText, orchestratorText, "", "")
+	sysMsg := buildAgentSystemMessage(coreText, toolsText, workspaceStable, workspaceTurn,
+		skillsText, orchestratorText, "", "")
 	breakdownMode := "agent"
 	if isCoder {
 		breakdownMode = "coder"
@@ -1274,7 +1277,8 @@ func (a *AgentMode) Run(ctx context.Context, query string, additionalContext str
 		{Name: "core", Chars: len(strings.TrimSpace(coreText)), Cached: true},
 		{Name: "tools", Chars: len(strings.TrimSpace(toolsText)), Cached: true},
 		{Name: "orchestrator", Chars: len(strings.TrimSpace(orchestratorText)), Cached: true},
-		{Name: "workspace_memory", Chars: len(strings.TrimSpace(workspaceText))},
+		{Name: "workspace_stable", Chars: len(strings.TrimSpace(workspaceStable)), Cached: true},
+		{Name: "workspace_memory", Chars: len(strings.TrimSpace(workspaceTurn))},
 		{Name: "skills", Chars: len(strings.TrimSpace(skillsText))},
 		{Name: "turn_context", Chars: len(strings.TrimSpace(turnContextText))},
 	})
@@ -1511,9 +1515,9 @@ func (a *AgentMode) composeCoreText(isCoder, hasActivePersona bool) string {
 // buildWorkspaceBlocks builds Block 3 of the agent system prompt: the
 // workspace/retrieval context plus the separately-cached dynamic (wall-clock)
 // context. Returns empty strings when no context builder is configured.
-func (a *AgentMode) buildWorkspaceBlocks(ctx context.Context, query string) (string, string) {
+func (a *AgentMode) buildWorkspaceBlocks(ctx context.Context, query string) (stable, turn, dynamic string) {
 	if a.cli.contextBuilder == nil {
-		return "", ""
+		return "", "", ""
 	}
 	var hints []string
 	hintWindow := 3
@@ -1546,20 +1550,14 @@ func (a *AgentMode) buildWorkspaceBlocks(ctx context.Context, query string) (str
 	if mode == memModeIndex {
 		recallHint = memoryRecallHint
 	}
-	workspaceText := a.cli.contextBuilder.BuildWorkspaceContextMode(ctx, query, hints, aug, mode, recallHint)
-
-	// Append the knowledge-graph map-of-content card next to the memory index.
-	// It is tiny and deterministic (so prompt-cache friendly), and agent/coder
-	// can pull a subject's neighborhood on demand via @graph.
-	if mode != memModeOff {
-		if gb := a.cli.graphIndexBlock(); gb != "" {
-			if strings.TrimSpace(workspaceText) == "" {
-				workspaceText = gb
-			} else {
-				workspaceText = strings.TrimRight(workspaceText, "\n") + "\n\n" + gb
-			}
-		}
-	}
+	// Split by lifetime, same as chat: the bootstrap files, the memory index
+	// and the graph card do not depend on the query, so they earn a cache
+	// breakpoint and are read warm for the rest of the run instead of being
+	// re-sent at full price on every turn of it. The knowledge-graph card
+	// rides with them — tiny, deterministic, and pull-oriented (@graph
+	// expands any subject on demand).
+	workspaceStable := a.cli.workspaceStableText(ctx, mode, recallHint)
+	_, workspaceTurn := a.cli.contextBuilder.SplitWorkspaceContextMode(ctx, query, hints, aug, mode, recallHint)
 
 	dynamicText := a.cli.contextBuilder.BuildDynamicContext()
 	// Proactive recall (index mode only): the top hint-matching facts ride in
@@ -1593,7 +1591,7 @@ func (a *AgentMode) buildWorkspaceBlocks(ctx context.Context, query string) (str
 			dynamicText = sr + "\n\n" + dynamicText
 		}
 	}
-	return workspaceText, dynamicText
+	return workspaceStable, workspaceTurn, dynamicText
 }
 
 // applyManualSkillAndCommandHints consumes the pending manual-skill
@@ -4753,7 +4751,7 @@ func (a *AgentMode) buildAgentSkillBlocks(query, additionalContext string) strin
 	autoActivated := mgr.FindAutoActivatedSkills(query, filePaths)
 	autoActivated = dedupAutoAgainstPinned(autoActivated, pinned)
 
-	skillsText := concatSkillBlocks(pinned, autoActivated)
+	skillsText := a.concatSkillBlocksCurated(pinned, autoActivated)
 
 	merged := append([]*persona.Skill(nil), pinned...)
 	merged = append(merged, autoActivated...)
@@ -4795,6 +4793,40 @@ func concatSkillBlocks(pinned, autoActivated []*persona.Skill) string {
 				out += "\n\n"
 			}
 			out += block
+		}
+	}
+	return out
+}
+
+// concatSkillBlocksCurated is concatSkillBlocks with cross-run
+// de-duplication.
+//
+// The mid-loop re-scan already guarantees a skill fires at most once per Run
+// (rescanNewSkills' dedup set) and ages its blocks afterwards. What it cannot
+// see is the run BEFORE it: a session with several /coder runs rebuilt this
+// block from scratch each time and re-shipped bodies the conversation was
+// already carrying. The check is the same one chat uses — the live history,
+// so compaction, /clear, /rewind and a session load all restore the full
+// body — and here the deferred form points at the skill's source path, which
+// agent and coder can simply read.
+func (a *AgentMode) concatSkillBlocksCurated(pinned, autoActivated []*persona.Skill) string {
+	cur := a.cli.agentSkillCuration()
+	var out string
+	if len(pinned) > 0 {
+		block, inlined := buildPinnedSkillInjectionBlockCurated(pinned, cur)
+		if block != "" {
+			out = block
+			a.cli.rememberInjectedSkillBodies(inlined)
+		}
+	}
+	if len(autoActivated) > 0 {
+		block, inlined := buildSkillInjectionBlockCurated(autoActivated, cur)
+		if block != "" {
+			if out != "" {
+				out += "\n\n"
+			}
+			out += block
+			a.cli.rememberInjectedSkillBodies(inlined)
 		}
 	}
 	return out

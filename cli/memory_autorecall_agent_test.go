@@ -39,12 +39,15 @@ func TestBuildWorkspaceBlocks_InjectsAutoRecallInIndexMode(t *testing.T) {
 	t.Setenv("CHATCLI_MEMORY_MODE", "index")
 	cli, a := newAgentAutoRecallCLI(t)
 
-	workspaceText, dynamicText := a.buildWorkspaceBlocks(context.Background(), "embed windows")
+	workspaceStable, workspaceTurn, dynamicText := a.buildWorkspaceBlocks(context.Background(), "embed windows")
 	if !strings.Contains(dynamicText, "[MEMORY AUTO-RECALL]") || !strings.Contains(dynamicText, "forward slashes") {
 		t.Errorf("index mode must inject auto-recall into the UNCACHED dynamic block, got: %s", dynamicText)
 	}
-	if strings.Contains(workspaceText, "[MEMORY AUTO-RECALL]") {
-		t.Errorf("auto-recall must NEVER land in the cacheable workspace block: %s", workspaceText)
+	if strings.Contains(workspaceStable, "[MEMORY AUTO-RECALL]") {
+		t.Errorf("auto-recall must NEVER land in the cacheable workspace block: %s", workspaceStable)
+	}
+	if strings.Contains(workspaceTurn, "[MEMORY AUTO-RECALL]") {
+		t.Errorf("auto-recall belongs to the dynamic block, not the workspace one: %s", workspaceTurn)
 	}
 	if !strings.Contains(dynamicText, "Current date:") {
 		t.Errorf("the date context must survive alongside auto-recall: %s", dynamicText)
@@ -56,7 +59,7 @@ func TestBuildWorkspaceBlocks_NoAutoRecallInFullMode(t *testing.T) {
 	t.Setenv("CHATCLI_MEMORY_MODE", "full")
 	_, a := newAgentAutoRecallCLI(t)
 
-	_, dynamicText := a.buildWorkspaceBlocks(context.Background(), "embed windows")
+	_, _, dynamicText := a.buildWorkspaceBlocks(context.Background(), "embed windows")
 	if strings.Contains(dynamicText, "[MEMORY AUTO-RECALL]") {
 		t.Errorf("full mode already pushes retrieval; auto-recall must not double-inject: %s", dynamicText)
 	}

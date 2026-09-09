@@ -52,14 +52,18 @@ import (
 //
 // Cache budget: Anthropic allows up to 4 cache_control breakpoints; the three
 // stable blocks fit with one to spare, and any empty block simply collapses.
-func buildAgentSystemMessage(core, tools, workspace, skills, orchestrator, channels, dynamic string) models.Message {
+func buildAgentSystemMessage(core, tools, workspaceStable, workspaceTurn, skills, orchestrator, channels, dynamic string) models.Message {
+	// workspaceStable goes LAST in the cached region on purpose: appending
+	// leaves core/tools/orchestrator byte-identical, so the prefix they
+	// already earned keeps hitting instead of shifting by a block.
 	stable := []string{
 		strings.TrimSpace(core),
 		strings.TrimSpace(tools),
 		strings.TrimSpace(orchestrator),
+		strings.TrimSpace(workspaceStable),
 	}
 	volatile := []string{
-		strings.TrimSpace(workspace),
+		strings.TrimSpace(workspaceTurn),
 		strings.TrimSpace(skills),
 		strings.TrimSpace(channels),
 		strings.TrimSpace(dynamic),

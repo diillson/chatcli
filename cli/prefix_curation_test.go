@@ -257,12 +257,12 @@ func TestStableWorkspaceBlockIsDroppedWithTheHistory(t *testing.T) {
 	if _, ok := cli.workspaceStablePart(testCtx()); !ok {
 		t.Fatal("no stable block to begin with")
 	}
-	if cli.chatWorkspaceStable == nil {
+	if cli.workspaceStableMemo == nil {
 		t.Fatal("stable block was not memoized")
 	}
 	cli.skillBodiesInjected = map[string]string{"x": "y"}
 	cli.resetChatPrefixMemo()
-	if cli.chatWorkspaceStable != nil || cli.skillBodiesInjected != nil {
+	if cli.workspaceStableMemo != nil || cli.skillBodiesInjected != nil {
 		t.Fatal("prefix memo survived the conversation it describes")
 	}
 }
@@ -296,5 +296,48 @@ func TestCachedPrefixStaysContiguous(t *testing.T) {
 	}
 	if !sawStableWorkspace {
 		t.Fatal("the stable workspace half never reached the cached prefix")
+	}
+}
+
+// TestAgentSkillCurationAlwaysArms: unlike chat, agent and coder have file
+// tools, so the deferred form is reachable without any optional exception.
+func TestAgentSkillCurationAlwaysArms(t *testing.T) {
+	t.Setenv(chatContextPullEnvVar, "false")
+	cli := &ChatCLI{}
+	cur := cli.agentSkillCuration()
+	if cur.StillVisible == nil || cur.Recovery == "" {
+		t.Fatalf("agent curation must arm regardless of the chat exception: %+v", cur)
+	}
+	if !strings.Contains(cur.Recovery, "source path") {
+		t.Errorf("agent recovery must point at the file it can read: %q", cur.Recovery)
+	}
+}
+
+// TestAgentSkillDedupIsCrossRun: the mid-loop re-scan already dedups within a
+// run; the gap this closes is the run BEFORE it, whose bodies are still in
+// the session history.
+func TestAgentSkillDedupIsCrossRun(t *testing.T) {
+	skill := curationSkill("patch-flow", curationBody)
+	cli := &ChatCLI{
+		skillBodiesInjected: map[string]string{"patch-flow": skillBodyFingerprint(skill)},
+		history: []models.Message{
+			{Role: "user", Content: "## Skill: patch-flow\n\n" + curationBody},
+		},
+	}
+	a := &AgentMode{cli: cli}
+
+	out := a.concatSkillBlocksCurated(nil, []*persona.Skill{skill})
+	if strings.Contains(out, "Step 1") {
+		t.Error("a body already in the session history was shipped again in a new run")
+	}
+	if !strings.Contains(out, "patch-flow") {
+		t.Error("the activation itself must still be announced")
+	}
+
+	// Same run, but the earlier copy is gone: the body comes back in full.
+	cli.history = nil
+	out = a.concatSkillBlocksCurated(nil, []*persona.Skill{skill})
+	if !strings.Contains(out, "Step 1") {
+		t.Fatal("body withheld with no copy left in history")
 	}
 }

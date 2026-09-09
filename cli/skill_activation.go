@@ -298,16 +298,23 @@ func buildPinnedSkillInjectionBlock(skills []*persona.Skill) string {
 // buildPinnedSkillInjectionBlockLimited is buildPinnedSkillInjectionBlock
 // under an explicit body budget.
 func buildPinnedSkillInjectionBlockLimited(skills []*persona.Skill, budget int) string {
+	block, _ := buildPinnedSkillInjectionBlockCurated(skills, skillCuration{Budget: budget})
+	return block
+}
+
+// buildPinnedSkillInjectionBlockCurated is the pinned block under a curation
+// policy, returning the bodies it inlined.
+func buildPinnedSkillInjectionBlockCurated(skills []*persona.Skill, cur skillCuration) (string, map[string]string) {
 	if len(skills) == 0 {
-		return ""
+		return "", nil
 	}
 	var b strings.Builder
 	b.WriteString("# Pinned Skills\n\n")
 	b.WriteString("The user pinned the following skills for this session via ")
 	b.WriteString("`/skill pin <name>`. They apply to every turn regardless of ")
 	b.WriteString("input triggers or file paths — treat them as standing instructions.\n\n")
-	renderSkillEntriesLimited(&b, skills, budget, false)
-	return b.String()
+	inlined := renderSkillEntriesCurated(&b, skills, cur)
+	return b.String(), inlined
 }
 
 // dedupAutoAgainstPinned filters an auto-activated skill slice to exclude any

@@ -107,7 +107,7 @@ func TestPrefixBudget_RatioFrozenPerSession(t *testing.T) {
 }
 
 func TestAgentSystemMessage_NoVolatileBlocks(t *testing.T) {
-	msg := buildAgentSystemMessage("core", "tools", "workspace", "skills", "orch", "", "")
+	msg := buildAgentSystemMessage("core", "tools", "", "workspace", "skills", "orch", "", "")
 	for _, p := range msg.SystemParts {
 		if strings.Contains(p.Text, "Current date") {
 			t.Fatal("agent system message must not carry the date")
