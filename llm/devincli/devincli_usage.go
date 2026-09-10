@@ -50,6 +50,16 @@ type atifMetrics struct {
 	CompletionTokens float64 `json:"completion_tokens"`
 	CachedTokens     float64 `json:"cached_tokens"`
 	CostUSD          float64 `json:"cost_usd"`
+	// Extra carries what the standard block has no field for. Enterprise
+	// builds of the CLI report ONLY this block, and for an Anthropic
+	// backend they put the cache write there (a turn observed in the
+	// field: prompt_tokens 14274 = cached_tokens 9098 + extra
+	// cache_creation_input_tokens 5173 + 3 uncached). Without reading it
+	// the write is priced as plain input instead of at the write rate.
+	Extra struct {
+		CacheCreationInputTokens float64 `json:"cache_creation_input_tokens"`
+		CacheReadInputTokens     float64 `json:"cache_read_input_tokens"`
+	} `json:"extra"`
 }
 
 type devinMetric struct {
@@ -122,10 +132,19 @@ func parseTrajectoryUsage(raw []byte) (turnUsage, error) {
 			m := step.Metrics
 			usage.PromptTokens += int(m.PromptTokens)
 			usage.CompletionTokens += int(m.CompletionTokens)
-			usage.CacheReadInputTokens += int(m.CachedTokens)
+			// cached_tokens is the read; a build that also spells it out
+			// under extra reports the same number twice, so take the larger
+			// rather than the sum.
+			read := m.CachedTokens
+			if m.Extra.CacheReadInputTokens > read {
+				read = m.Extra.CacheReadInputTokens
+			}
+			usage.CacheReadInputTokens += int(read)
+			usage.CacheCreationInputTokens += int(m.Extra.CacheCreationInputTokens)
 			usage.CostUSD += m.CostUSD
-			// ATIF standard block: cached_tokens is a subset of
-			// prompt_tokens, whatever model produced the step.
+			// ATIF standard block: cached_tokens (and the extra cache
+			// write) are a subset of prompt_tokens, whatever model produced
+			// the step.
 			inputTotal += int(m.PromptTokens)
 		}
 	}

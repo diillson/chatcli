@@ -1,0 +1,5 @@
+{
+  "cost.cmd.pricing_unmetered_models": "No per-token rate known for: %s — priced at $0. Set %s to attribute a cost.",
+  "cfg.val.model_pricing_active": "%d override(s) active",
+  "cfg.val.model_pricing_malformed": "— ignored (malformed): %s"
+}

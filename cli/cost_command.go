@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/diillson/chatcli/i18n"
+	"github.com/diillson/chatcli/llm/pricing"
 	"github.com/diillson/chatcli/ui/kit"
 	"github.com/diillson/chatcli/utils"
 )
@@ -359,6 +360,12 @@ func (cli *ChatCLI) renderCostSummary() {
 	if unpriced := unpricedModelsLocked(ct); len(unpriced) > 0 {
 		fmt.Println(p + colorize("  "+i18n.T("cost.cmd.pricing_unknown_models", strings.Join(unpriced, ", ")), ColorYellow))
 	}
+	// Models priced at a known zero because nothing told ChatCLI their
+	// rate: a silent $0.0000 reads as "free" when it means "unknown", so
+	// say so and name the knob that fixes it.
+	if unmetered := unmeteredModelsLocked(ct); len(unmetered) > 0 {
+		fmt.Println(p + colorize("  "+i18n.T("cost.cmd.pricing_unmetered_models", strings.Join(unmetered, ", "), pricing.OverrideEnv), ColorGray))
+	}
 
 	printDailyBudgetLine(p, ct)
 
@@ -438,6 +445,28 @@ func recordSourceTag(rec *ModelUsageRecord) string {
 		return colorize(i18n.T("cost.cmd.tag_api"), ColorGreen)
 	}
 	return colorize(i18n.T("cost.cmd.tag_estimate"), ColorYellow)
+}
+
+// unmeteredModelsLocked lists models that carry tokens, matched a pricing
+// source, and still price at zero with no provider-billed amount — a
+// subscription, a self-hosted backend, or a wrapper whose account never
+// reported a rate. Local Ollama is excluded: it is free, not unknown.
+// Caller holds ct.mu.
+func unmeteredModelsLocked(ct *CostTracker) []string {
+	var out []string
+	for _, rec := range ct.modelUsage {
+		if !rec.PricingKnown || rec.TotalTokens == 0 || rec.ProviderCostUSD > 0 {
+			continue
+		}
+		if strings.Contains(strings.ToLower(rec.Provider), "ollama") {
+			continue
+		}
+		if in, outRate := getModelPricing(rec.Provider, rec.Model); in == 0 && outRate == 0 {
+			out = append(out, rec.Provider+"/"+rec.Model)
+		}
+	}
+	sort.Strings(out)
+	return out
 }
 
 // unpricedModelsLocked lists models that carry tokens but matched no pricing
