@@ -11,12 +11,20 @@ import (
 	"path/filepath"
 
 	"github.com/diillson/chatcli/i18n"
+	"github.com/diillson/chatcli/pkg/testenv"
 	"go.uber.org/zap"
 )
 
 // TestMain ensures i18n is initialized before any test runs so T() returns
 // real translations instead of the raw key strings.
 func TestMain(m *testing.M) {
+	// Hermetic home and file keychain first: constructors reached by these
+	// tests (cost tracker, checkpoints, skills, memory, the logger) resolve
+	// ~/.chatcli on first use, and the credential key otherwise comes from
+	// the OS keychain — which on macOS prompts once per rebuilt test binary.
+	_, cleanupHome := testenv.Isolate()
+	defer cleanupHome()
+
 	// Force English for stable, locale-independent test assertions.
 	_ = os.Setenv("CHATCLI_LANG", "en")
 
@@ -37,6 +45,7 @@ func TestMain(m *testing.M) {
 	if boardDirErr == nil {
 		_ = os.RemoveAll(boardDir)
 	}
+	cleanupHome()
 	os.Exit(code)
 }
 

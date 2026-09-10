@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"runtime"
 	"strings"
+	"testing"
 )
 
 // KeychainBackend specifies which keychain to use.
@@ -56,15 +57,32 @@ func NewKeychainStore() *KeychainStore {
 		}
 	}
 
-	return &KeychainStore{backend: backend, ops: osKeychain{}}
+	return &KeychainStore{backend: backend, ops: osKeychain{forced: backend == KeychainNative}}
 }
 
 // osKeychain is the real platform store: a thin adapter over the existing
 // per-platform helpers, so the interface adds a seam without rewriting the
 // code that talks to macOS, Linux or Windows.
-type osKeychain struct{ store KeychainStore }
+//
+// forced records that the operator pinned CHATCLI_KEYCHAIN_BACKEND=keychain.
+// It is the one way a test binary reaches the real credential store: by
+// default Available answers false inside tests, because a test process that
+// resolves the encryption key with no file key at hand would otherwise
+// write a fresh key over the developer's own (macSet deletes and re-adds
+// the item), and on macOS every rebuilt test binary first triggers the
+// keychain's permission prompt. Fakes wired through keychainOps are not
+// affected — they are how the native paths are exercised in tests.
+type osKeychain struct {
+	store  KeychainStore
+	forced bool
+}
 
-func (osKeychain) Available() bool { return nativeKeychainAvailable() }
+func (o osKeychain) Available() bool {
+	if testing.Testing() && !o.forced {
+		return false
+	}
+	return nativeKeychainAvailable()
+}
 
 func (o osKeychain) Get(account string) ([]byte, error) { return o.store.nativeGet(account) }
 

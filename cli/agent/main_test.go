@@ -15,13 +15,14 @@
 package agent
 
 import (
-	"os"
 	"testing"
 
+	"github.com/diillson/chatcli/pkg/testenv"
 	"github.com/diillson/chatcli/ui/theme"
 )
 
 func TestMain(m *testing.M) {
-	theme.SetProfile(theme.ProfileANSI)
-	os.Exit(m.Run())
+	// Checkpoint tests init git stores under the home directory; keep them
+	// out of the developer's real ~/.chatcli.
+	testenv.Main(m, func() { theme.SetProfile(theme.ProfileANSI) })
 }
