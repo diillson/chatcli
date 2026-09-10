@@ -1,5 +1,19 @@
 # Changelog
 
+## [1.201.0](https://github.com/diillson/chatcli/compare/v1.200.0...v1.201.0) (2026-09-10)
+
+
+### Features
+
+* **config:** register the compression knobs in the defaults registry and name them in /config ([#1564](https://github.com/diillson/chatcli/issues/1564)) ([f1c86ce](https://github.com/diillson/chatcli/commit/f1c86ce547cf41caca588f732d043ef8439d3a1a))
+* **storage:** inventory and on-demand curation of every local store ([#1566](https://github.com/diillson/chatcli/issues/1566)) ([3113381](https://github.com/diillson/chatcli/commit/3113381f6b8e9195c36912a711815b339d96c8ff))
+
+
+### Bug Fixes
+
+* **cost:** price Devin turns without a listed rate and bill enterprise cache reads once ([#1562](https://github.com/diillson/chatcli/issues/1562)) ([6813a2c](https://github.com/diillson/chatcli/commit/6813a2cfb2569b36cfd7ee83114a9a53802c2c0e))
+* **storage:** complete only what the command still accepts ([#1567](https://github.com/diillson/chatcli/issues/1567)) ([03f2fe8](https://github.com/diillson/chatcli/commit/03f2fe8127d93e22b6f9130cafaaf910c02362db))
+
 ## [1.200.0](https://github.com/diillson/chatcli/compare/v1.199.3...v1.200.0) (2026-09-09)
 
 
