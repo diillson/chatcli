@@ -42,6 +42,9 @@ func dispatchSubcommand() bool {
 	case "daemon":
 		runDaemonSubcommand(os.Args[2:])
 		return true
+	case "storage":
+		runStorageSubcommand(os.Args[2:])
+		return true
 	case "update":
 		runUpdateSubcommand(os.Args[2:])
 		return true
@@ -394,6 +397,30 @@ func runUpdateSubcommand(args []string) {
 // runDaemonSubcommand handles the "daemon" subcommand. Standalone
 // because the scheduler daemon does not need an LLMManager (it doesn't
 // run agent tasks until a CLI attaches and delegates a bridge).
+// runStorageSubcommand runs `chatcli storage` without booting a provider:
+// the store inventory and curation need the environment (state root,
+// TTLs) and the logger, nothing else.
+func runStorageSubcommand(args []string) {
+	_ = loadDotenvThenI18n()
+	theme.InitFromEnv()
+
+	logger, err := utils.InitializeLogger()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to initialize logger: %v\n", err)
+		os.Exit(1)
+	}
+	defer func() { _ = logger.Sync() }()
+
+	config.InitGlobal(logger)
+	config.Global.Load()
+	logDotenvResolution(logger)
+
+	if err := cmd.RunStorage(context.Background(), args, logger); err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
+	}
+}
+
 func runDaemonSubcommand(args []string) {
 	_ = loadDotenvThenI18n()
 	theme.InitFromEnv()

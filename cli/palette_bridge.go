@@ -25,7 +25,8 @@ var paletteModeSwitch = map[string]bool{
 // as typed instead of opening the per-command palette. Their subcommands
 // still complete inline and appear in the palette when scoped explicitly.
 var paletteDirectRun = map[string]bool{
-	"/cost": true,
+	"/cost":    true,
+	"/storage": true,
 }
 
 // paletteSuggest returns the next-token suggestions for a command line by

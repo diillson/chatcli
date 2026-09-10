@@ -35,6 +35,7 @@ type retentionReport struct {
 	AuditFiles  int // rotated audit trail files past the retention window
 	Parks       int
 	Costs       int
+	Checkpoints int // shadow git stores whose workspace is gone or untouched past the window
 }
 
 // runRetentionPass expires park snapshots and cost snapshots older than the
@@ -73,15 +74,39 @@ func (cli *ChatCLI) runRetentionPass() retentionReport {
 			rep.Pending += pruneFilesOlderThan(filepath.Join(root, "memory", "pending"), cutoff, ".json")
 		}
 	}
+	// Coder checkpoints: a shadow git store per workspace. One whose
+	// workspace no longer exists — a temp dir a test or a one-shot tool
+	// discarded — can never be restored; one untouched for the window is
+	// a rollback nobody will ask for. Same rules as /storage prune.
+	if root := cli.storageRoot(); root != "" {
+		for _, c := range checkpointCandidates(filepath.Join(root, "checkpoints"), cutoff) {
+			if removeCandidate(c) {
+				rep.Checkpoints++
+			}
+		}
+	}
 	// Rotated audit trails (the live file is never touched) follow the
 	// same window; the operator keeps them elsewhere for longer retention.
 	if path := os.Getenv(AuditLogPathEnv); path != "" && filepath.IsAbs(filepath.Clean(path)) {
 		rep.AuditFiles = auditchain.PruneRotated(filepath.Clean(path), cutoff)
 	}
-	if cli != nil && cli.logger != nil && (rep.Parks > 0 || rep.Costs > 0 || rep.AuditFiles > 0 || rep.Sessions > 0 || rep.Pending > 0) {
-		cli.logger.Info("retention pass", zap.Int("parks_removed", rep.Parks), zap.Int("cost_snapshots_removed", rep.Costs), zap.Int("audit_files_removed", rep.AuditFiles), zap.Int("sessions_removed", rep.Sessions), zap.Int("pending_removed", rep.Pending))
+	if cli != nil && cli.logger != nil && (rep.Parks > 0 || rep.Costs > 0 || rep.AuditFiles > 0 || rep.Sessions > 0 || rep.Pending > 0 || rep.Checkpoints > 0) {
+		cli.logger.Info("retention pass", zap.Int("parks_removed", rep.Parks), zap.Int("cost_snapshots_removed", rep.Costs), zap.Int("audit_files_removed", rep.AuditFiles), zap.Int("sessions_removed", rep.Sessions), zap.Int("pending_removed", rep.Pending), zap.Int("checkpoints_removed", rep.Checkpoints))
 	}
 	return rep
+}
+
+// storageRoot is the state root the stores live under: the tenant-aware
+// root of a live session, else ~/.chatcli.
+func (cli *ChatCLI) storageRoot() string {
+	if cli != nil && cli.stateRoot != "" {
+		return cli.stateRoot
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return ""
+	}
+	return filepath.Join(home, ".chatcli")
 }
 
 // pruneFilesOlderThan removes the regular files of dir (with the given
@@ -182,6 +207,7 @@ func (cli *ChatCLI) showConfigRetention() {
 	kv(p, i18n.T("cfg.kv.retention.transcripts"), ttlVal)
 	kv(p, i18n.T("cfg.kv.retention.parks"), ttlVal)
 	kv(p, i18n.T("cfg.kv.retention.costs"), ttlVal)
+	kv(p, i18n.T("cfg.kv.retention.checkpoints"), ttlVal+"  "+i18n.T("cfg.kv.retention.checkpoints_note"))
 
 	fmt.Println(p)
 	subheader(p, "cfg.sub.retention.archives")
@@ -208,8 +234,13 @@ func (cli *ChatCLI) showConfigRetention() {
 
 	fmt.Println(p)
 	fmt.Println(colorize("  "+i18n.T("cfg.retention.note"), ColorGray))
+	fmt.Println(colorize("  "+i18n.T("cfg.retention.storage_hint"), ColorGray))
 	fmt.Println()
 }
+
+// SessionTTL is sessionTTLDuration for callers outside the package (the
+// `chatcli storage` subcommand prices its dry run with the same window).
+func SessionTTL() time.Duration { return sessionTTLDuration() }
 
 // sessionTTLDuration is the machine-session policy as a duration:
 // CHATCLI_SESSION_TTL in days (90 by default), 0 disables expiry.

@@ -235,6 +235,10 @@ func (ch *CommandHandler) buildRoutes() {
 			c.handleCostCommand(strings.TrimSpace(strings.TrimPrefix(in, "/cost")))
 			return false
 		}},
+		{"/storage", true, func(ctx context.Context, in string) bool {
+			c.handleStorageCommand(ctx, strings.TrimSpace(strings.TrimPrefix(in, "/storage")))
+			return false
+		}},
 		{"/switch", false, func(ctx context.Context, in string) bool { c.handleSwitchCommand(ctx, in); return false }},
 		{"/provider", false, func(ctx context.Context, in string) bool { c.handleProviderCommand(ctx, in); return false }},
 		// Must precede "/model" (raw-prefix) so it isn't shadowed by it.

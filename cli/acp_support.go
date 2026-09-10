@@ -53,7 +53,7 @@ var acpCommandAllow = map[string]bool{
 	"/export": true, "/context": true, "/memory": true,
 	"/thinking": true, "/refine": true, "/verify": true, "/reflect": true, "/moa": true,
 	"/mcp": true, "/websearch": true, "/skill": true, "/plugin": true, "/policy": true,
-	"/cost": true, "/metrics": true, "/ratelimit": true,
+	"/cost": true, "/storage": true, "/metrics": true, "/ratelimit": true,
 	"/version": true, "/help": true, "/agents": true, "/board": true, "/mail": true,
 	"/taskgraph": true,
 }

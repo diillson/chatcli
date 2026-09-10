@@ -301,6 +301,7 @@ func (cli *ChatCLI) showHelp() {
 	printCommand("/memory export | import | recall | why", i18n.T("help.command.memory_tools"))
 	printCommand("/autocompact", i18n.T("help.command.autocompact"))
 	printCommand("/cost [reset | last | sessions | export]", i18n.T("help.command.cost"))
+	printCommand("/storage [prune [store] [--apply]]", i18n.T("help.command.storage"))
 	printCommand("/config managed | retention", i18n.T("help.command.config_ops"))
 	printCommand("/config security reseal | verify-audit", i18n.T("help.command.config_security_ops"))
 	printCommand("/version | /v", i18n.T("help.command.version"))
