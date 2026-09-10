@@ -339,7 +339,8 @@ func (ct *CostTracker) RecordRealUsage(provider, model string, usage *models.Usa
 	key := modelKey(provider, model)
 	rec := ct.getOrCreateRecord(key, provider, model)
 
-	rec.PromptTokens += int64(usage.PromptTokens)
+	promptForRecord := promptTokensForRecord(provider, model, usage)
+	rec.PromptTokens += int64(promptForRecord)
 	rec.CompletionTokens += int64(usage.CompletionTokens)
 	// InputTokens is the comparable figure across providers: PromptTokens
 	// means "uncached delta" on additive schemas and "whole input" on
@@ -368,7 +369,7 @@ func (ct *CostTracker) RecordRealUsage(provider, model string, usage *models.Usa
 		// This call's tokens are covered by the provider-billed amount —
 		// remember them so recomputeCost prices only the uncovered rest.
 		rec.ProviderCostUSD += usage.CostUSD
-		rec.BilledPromptTokens += int64(usage.PromptTokens)
+		rec.BilledPromptTokens += int64(promptForRecord)
 		rec.BilledCompletionTokens += int64(usage.CompletionTokens)
 		rec.BilledCacheReadTokens += int64(usage.CacheReadInputTokens)
 		rec.BilledCacheCreationTokens += int64(usage.CacheCreationInputTokens)
@@ -938,7 +939,7 @@ func estimateTurnCostUSD(provider, model string, usage *models.UsageInfo) float6
 		ReasoningTokens:       int64(usage.ReasoningTokens),
 		Provider:              provider,
 		Model:                 model,
-		PromptTokens:          int64(usage.PromptTokens),
+		PromptTokens:          int64(promptTokensForRecord(provider, model, usage)),
 		CompletionTokens:      int64(usage.CompletionTokens),
 		CacheReadTokens:       int64(usage.CacheReadInputTokens),
 		CacheCreationTokens:   int64(usage.CacheCreationInputTokens),
@@ -972,20 +973,36 @@ func getModelPricing(provider, model string) (inputCost, outputCost float64) {
 
 // lookupModelPricing is getModelPricing plus a known flag: known=false means
 // the model matched NO table entry — cost zero because the price is unknown,
-// not because the backend is unmetered. Ollama/StackSpot/Devin return
-// known=true with zero prices (deliberately free from ChatCLI's viewpoint).
+// not because the backend is unmetered. Ollama/StackSpot/Copilot return
+// known=true with zero prices (deliberately free from ChatCLI's viewpoint),
+// and so does a Devin family no listing ever priced.
 func lookupModelPricing(provider, model string) (inputCost, outputCost float64, known bool) {
 	model = strings.ToLower(model)
 	provider = strings.ToLower(provider)
+
+	// The operator's word outranks every source below: CHATCLI_MODEL_PRICING
+	// pins a rate for any provider+model (or a provider-wide "*"), which is
+	// how a metered wrapper that never tells ChatCLI its price — an
+	// enterprise Devin CLI, a paid Ollama host, a subscription — still gets
+	// a real cost line instead of a known zero.
+	if in, out, ok := overriddenPricing(provider, model); ok {
+		return in, out, true
+	}
 
 	// DEVIN antes das heurísticas de modelo: o wrapper roteia modelos com
 	// nomes reconhecíveis (claude-*, gpt-*) mas a tarifa é a da conta
 	// Cognition, não a da API direta — sem o curto-circuito,
 	// claudePricing/openAIPricing cobrariam errado. A tarifa por modelo
 	// vem da própria listagem do CLI (cost_summary) via llm/pricing; sem
-	// listagem (CLI antigo, sem login) continua zero-conhecido, como antes.
+	// ela (listagem sem cost_summary nos builds enterprise, CLI antigo,
+	// sem login) vale a tabela estática espelhada da listagem de uma
+	// conta; só uma família que nunca foi listada com preço fica em
+	// zero-conhecido.
 	if strings.Contains(provider, "devin") {
 		if in, out, ok := devinListedPricing(model); ok {
+			return in, out, true
+		}
+		if in, out, ok := devinStaticPricing(model); ok {
 			return in, out, true
 		}
 		return 0, 0, true
@@ -1279,6 +1296,22 @@ func deepseekPricing(model string) (float64, float64, bool) {
 	return 0, 0, false
 }
 
+// overriddenPricing resolves a CHATCLI_MODEL_PRICING entry for
+// provider+model: the exact id first, then the catalog id an alias or
+// variant resolves to (so "DEVIN:claude-opus-5=5/25" also prices
+// claude-opus-5-xhigh), then the provider's wildcard.
+func overriddenPricing(provider, model string) (float64, float64, bool) {
+	if r, ok := pricing.LookupOverride(provider, model); ok {
+		return r.InputPerMTok, r.OutputPerMTok, true
+	}
+	if meta, ok := catalog.Resolve(provider, model); ok && !strings.EqualFold(meta.ID, model) {
+		if r, ok := pricing.LookupOverride(provider, meta.ID); ok {
+			return r.InputPerMTok, r.OutputPerMTok, true
+		}
+	}
+	return 0, 0, false
+}
+
 // devinListedPricing returns the per-account rate the Devin CLI reported
 // for model (exact id first, then the catalog family a variant or alias
 // resolves to, so "opus" or an unlisted reasoning suffix still price at
@@ -1409,7 +1442,7 @@ func tieredCallCostUSD(provider, model string, usage *models.UsageInfo) float64 
 		ReasoningTokens:       int64(usage.ReasoningTokens),
 		Provider:              provider,
 		Model:                 model,
-		PromptTokens:          int64(usage.PromptTokens),
+		PromptTokens:          int64(promptTokensForRecord(provider, model, usage)),
 		CompletionTokens:      int64(usage.CompletionTokens),
 		CacheReadTokens:       int64(usage.CacheReadInputTokens),
 		CacheCreationTokens:   int64(usage.CacheCreationInputTokens),
@@ -1447,6 +1480,50 @@ func cacheTokensAdditive(provider, model string) bool {
 		return !strings.Contains(m, "gpt") && !strings.Contains(m, "openai")
 	}
 	return strings.Contains(m, "claude")
+}
+
+// promptTokensForRecord converts one call's prompt count into the
+// convention recomputeRecordCost prices the record's PromptTokens under:
+// "uncached delta" where cacheTokensAdditive says additive, "whole input"
+// where it says subset. The convention is decided by provider and model
+// NAME; the payload's schema is a fact the adapter recorded in
+// InputTokensTotal, and the two disagree exactly when a model is served
+// through a schema that is not its vendor's. The case seen in the field:
+// an enterprise Devin CLI reports a Claude turn in the OpenAI-shaped ATIF
+// block (prompt_tokens 14274 INCLUDING cached_tokens 9098 and a 5173-token
+// cache write), the name rule says additive, and without this the 14271
+// cached tokens were billed at the input rate on top of their cache rate.
+//
+// Only PromptTokens is converted; the cache pools stay as reported and are
+// priced once, at their own rates, either way. No InputTokensTotal (an
+// estimate, or a session recorded by an older build) means no schema fact
+// and the count is used as-is.
+func promptTokensForRecord(provider, model string, usage *models.UsageInfo) int {
+	if usage == nil {
+		return 0
+	}
+	cached := usage.CacheReadInputTokens + usage.CacheCreationInputTokens
+	if usage.InputTokensTotal <= 0 || cached == 0 {
+		return usage.PromptTokens
+	}
+	payloadAdditive := usage.InputTokensTotal >= usage.PromptTokens+cached
+	nameAdditive := cacheTokensAdditive(provider, model)
+	switch {
+	case nameAdditive && !payloadAdditive:
+		// Subset payload under an additive convention: the prompt count is
+		// the whole input, keep only the part outside the cache.
+		if delta := usage.PromptTokens - cached; delta > 0 {
+			return delta
+		}
+		return 0
+	case !nameAdditive && payloadAdditive:
+		// Additive payload under a subset convention: the whole input is
+		// prompt + reads (recomputeRecordCost carves the reads back out at
+		// the cache-read rate); writes stay outside so the write rate
+		// prices them exactly once.
+		return usage.PromptTokens + usage.CacheReadInputTokens
+	}
+	return usage.PromptTokens
 }
 
 // contextTokens is the input the model actually held for the turn — what

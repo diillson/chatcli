@@ -188,6 +188,7 @@ var envDefaults = map[string]envDefault{
 
 	// ─── Cost / budget ───────────────────────────────────────────
 	"CHATCLI_SESSION_BUDGET_USD":          {Value: "(no budget)", Source: "cost_tracker.go"},
+	"CHATCLI_MODEL_PRICING":               {Value: "(none)", Source: "llm/pricing/override.go (PROVIDER:model=input/output in USD per MTok, ';'-separated, model '*' = whole provider; outranks account listings and static tables — the knob for a metered wrapper that never reports its rate, e.g. an enterprise Devin CLI without cost_summary)"},
 	"CHATCLI_DAILY_BUDGET_USD":            {Value: "(no budget)", Source: "cli/cost_daily.go (spend across every session of the calendar day under the store dir — per tenant on the gateway; shares CHATCLI_BUDGET_WARNING_PCT and CHATCLI_BUDGET_HARD_STOP)"},
 	"OTEL_EXPORTER_OTLP_ENDPOINT":         {Value: "(off)", Source: "cli/telemetry/otlp.go (OpenTelemetry standard; base URL, metrics go to <base>/v1/metrics over OTLP/HTTP JSON)"},
 	"OTEL_EXPORTER_OTLP_METRICS_ENDPOINT": {Value: "(derived)", Source: "cli/telemetry/otlp.go (OpenTelemetry standard; full metrics URL, wins over the base endpoint)"},

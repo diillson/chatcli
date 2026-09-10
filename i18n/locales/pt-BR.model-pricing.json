@@ -1,0 +1,5 @@
+{
+  "cost.cmd.pricing_unmetered_models": "Sem tarifa por token conhecida para: %s — precificado a $0. Defina %s para atribuir um custo.",
+  "cfg.val.model_pricing_active": "%d override(s) ativo(s)",
+  "cfg.val.model_pricing_malformed": "— ignorados (malformados): %s"
+}

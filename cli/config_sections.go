@@ -46,6 +46,7 @@ import (
 	"github.com/diillson/chatcli/llm/bedrock"
 	"github.com/diillson/chatcli/llm/catalog"
 	"github.com/diillson/chatcli/llm/imagegen"
+	"github.com/diillson/chatcli/llm/pricing"
 	"github.com/diillson/chatcli/llm/transcription"
 	"github.com/diillson/chatcli/llm/tts"
 	"github.com/diillson/chatcli/ui/kit"
@@ -289,6 +290,22 @@ func kv(prefix, key, value string) {
 // The default registry is consulted only when the env is unset — an
 // explicitly-set empty string still goes through the not_set branch
 // (matching pre-registry behavior).
+// modelPricingOverrideStatus renders CHATCLI_MODEL_PRICING for /config:
+// the raw value plus how many entries took effect, and which ones did not
+// parse — a typo in a price is otherwise invisible until /cost looks off.
+func modelPricingOverrideStatus() string {
+	raw := strings.TrimSpace(os.Getenv(pricing.OverrideEnv))
+	if raw == "" {
+		return envOr(pricing.OverrideEnv)
+	}
+	active, malformed := pricing.OverrideStatus()
+	status := i18n.T("cfg.val.model_pricing_active", active)
+	if len(malformed) > 0 {
+		status += " " + i18n.T("cfg.val.model_pricing_malformed", strings.Join(malformed, "; "))
+	}
+	return raw + " (" + status + ")"
+}
+
 func envOr(name string) string {
 	if v := strings.TrimSpace(os.Getenv(name)); v != "" {
 		if e, managed := config.ManagedEntryFor(name); managed && e.Value == v {
@@ -988,6 +1005,7 @@ func (cli *ChatCLI) showConfigSession() {
 		kv(p, i18n.T("cfg.kv.cost_tracker"), i18n.T("cfg.val.not_initialized"))
 	}
 	kv(p, "CHATCLI_SESSION_BUDGET_USD", envOr("CHATCLI_SESSION_BUDGET_USD"))
+	kv(p, pricing.OverrideEnv, modelPricingOverrideStatus())
 	kv(p, "CHATCLI_BUDGET_WARNING_PCT", envOr("CHATCLI_BUDGET_WARNING_PCT"))
 	kv(p, "CHATCLI_BUDGET_HARD_STOP", envBool("CHATCLI_BUDGET_HARD_STOP"))
 	kv(p, "CHATCLI_SESSION_TTL", envOr("CHATCLI_SESSION_TTL"))

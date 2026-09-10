@@ -175,10 +175,11 @@ func TestGetModelPricing(t *testing.T) {
 
 		{"copilot", "COPILOT", "gpt-4o", 0, 0}, // subscription: known-zero
 		{"ollama zero", "OLLAMA", "llama3", 0.0, 0.0},
-		// Devin CLI: o binário não reporta tokens e o custo é da assinatura
-		// Cognition — sempre zero, qualquer que seja o modelo roteado.
-		{"devin zero", "DEVIN", "claude-sonnet-4.6", 0.0, 0.0},
-		{"devin zero swe", "DEVIN", "swe-1.7-lightning", 0.0, 0.0},
+		// Devin CLI: a tarifa é a da conta Cognition (tabela estática
+		// espelhada da listagem), nunca a da API direta do vendor.
+		{"devin static claude", "DEVIN", "claude-sonnet-4.6", 3.0, 15.0},
+		{"devin static swe", "DEVIN", "swe-1.7-lightning", 2.5, 12.5},
+		{"devin never listed stays zero", "DEVIN", "claude-fable-5.1", 0.0, 0.0},
 		{"stackspot zero", "STACKSPOT", "stackspotai", 0.0, 0.0},
 
 		// Unknown provider+model defaults to zero.
@@ -238,25 +239,31 @@ func TestLookupModelPricing_ZAICodingPlan(t *testing.T) {
 func TestLookupModelPricing_DevinListedRates(t *testing.T) {
 	t.Cleanup(func() { pricing.ResetProvider(catalog.ProviderDevin) })
 
-	in, out, known := lookupModelPricing("DEVIN", "claude-opus-5")
-	assert.True(t, known)
-	assert.Zero(t, in)
-	assert.Zero(t, out)
+	t.Setenv(pricing.OverrideEnv, "")
 
-	pricing.Register(catalog.ProviderDevin, "claude-opus-5", pricing.Rate{InputPerMTok: 5, OutputPerMTok: 25})
-	in, out, known = lookupModelPricing("DEVIN", "claude-opus-5")
+	// Nothing listed yet: the static Cognition table answers.
+	in, out, known := lookupModelPricing("DEVIN", "claude-opus-5")
 	assert.True(t, known)
 	assert.Equal(t, 5.0, in)
 	assert.Equal(t, 25.0, out)
 
+	// The account's own listing outranks the static table.
+	pricing.Register(catalog.ProviderDevin, "claude-opus-5", pricing.Rate{InputPerMTok: 6, OutputPerMTok: 30})
+	in, out, known = lookupModelPricing("DEVIN", "claude-opus-5")
+	assert.True(t, known)
+	assert.Equal(t, 6.0, in)
+	assert.Equal(t, 30.0, out)
+
 	// Unlisted reasoning suffix resolves to the family through the catalog.
 	in, _, _ = lookupModelPricing("DEVIN", "claude-opus-5-xhigh")
-	assert.Equal(t, 5.0, in)
+	assert.Equal(t, 6.0, in)
 
-	// A routed claude-* id never falls through to the direct-API table.
-	in, _, known = lookupModelPricing("DEVIN", "claude-sonnet-4.6")
+	// A routed claude-* id never falls through to the direct-API table:
+	// Cognition's rate for sonnet 4.6 happens to match Anthropic's, so
+	// prove it on sol, where they differ ($1.2 here, $4 direct).
+	in, _, known = lookupModelPricing("DEVIN", "gpt-5.6-sol")
 	assert.True(t, known)
-	assert.Zero(t, in)
+	assert.Equal(t, 1.2, in)
 
 	// The routing tier follows the listed rate instead of "unmetered".
 	tier, _, _ := modelRoutingTier("DEVIN", "claude-opus-5")

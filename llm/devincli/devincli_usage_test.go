@@ -196,3 +196,38 @@ func TestExportFlagRejected_IsNarrow(t *testing.T) {
 	assert.False(t, exportFlagRejected("Error: Not logged in. Run `devin auth login`"))
 	assert.False(t, exportFlagRejected("failed to write --export file: permission denied"))
 }
+
+// An enterprise Devin CLI reports ONLY the ATIF standard block and puts an
+// Anthropic backend's cache write under metrics.extra. These are the
+// numbers of a real turn (claude-sonnet-4.6, "reply with OK only"):
+// prompt_tokens is the WHOLE input, cached_tokens and the extra write are
+// subsets of it, and the write must land in the cache-creation pool or it
+// is priced as plain input.
+func TestParseTrajectoryUsage_StandardBlockExtraCacheWrite(t *testing.T) {
+	const enterprise = `{"agent":{"model_name":"claude-sonnet-4.6"},"steps":[
+	  {"source":"user","metadata":{"is_user_input":true}},
+	  {"source":"agent","metrics":{"prompt_tokens":14274,"completion_tokens":4,"cached_tokens":9098,
+	    "extra":{"cache_creation_input_tokens":5173}}}],
+	  "final_metrics":{"total_prompt_tokens":14274,"total_completion_tokens":4,"total_cached_tokens":9098,"total_steps":2}}`
+	got, err := parseTrajectoryUsage([]byte(enterprise))
+	require.NoError(t, err)
+	require.NotNil(t, got.Usage)
+	assert.Equal(t, 14274, got.Usage.PromptTokens)
+	assert.Equal(t, 4, got.Usage.CompletionTokens)
+	assert.Equal(t, 9098, got.Usage.CacheReadInputTokens)
+	assert.Equal(t, 5173, got.Usage.CacheCreationInputTokens, "extra.cache_creation_input_tokens is the cache write")
+	assert.Equal(t, 14274, got.Usage.InputTokensTotal, "standard block: cache counts are a subset of prompt_tokens")
+	assert.Equal(t, 14278, got.Usage.TotalTokens)
+	assert.Zero(t, got.Usage.CostUSD, "no cost_usd anywhere in the document")
+}
+
+// A build that spells the read out under extra as well reports the same
+// number twice; it must not be summed.
+func TestParseTrajectoryUsage_ExtraReadIsNotDoubleCounted(t *testing.T) {
+	const doc = `{"steps":[{"source":"agent","metrics":{"prompt_tokens":100,"completion_tokens":1,"cached_tokens":60,
+	  "extra":{"cache_read_input_tokens":60}}}]}`
+	got, err := parseTrajectoryUsage([]byte(doc))
+	require.NoError(t, err)
+	require.NotNil(t, got.Usage)
+	assert.Equal(t, 60, got.Usage.CacheReadInputTokens)
+}
