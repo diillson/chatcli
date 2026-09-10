@@ -94,6 +94,7 @@ var rootCommands = []RootCommand{
 	{"/version", CatCore, "complete.root.version", ""},
 	{"/update", CatCore, "complete.root.update", ""},
 	{"/cost", CatCore, "complete.root.cost", ""},
+	{"/storage", CatCore, "complete.root.storage", ""},
 	{"/metrics", CatCore, "complete.root.metrics", ""},
 	{"/ratelimit", CatCore, "complete.root.ratelimit", ""},
 	{"/rewind", CatCore, "complete.root.rewind", ""},
