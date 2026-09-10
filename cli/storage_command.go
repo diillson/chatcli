@@ -200,30 +200,58 @@ func maxInt(a, b int) int {
 }
 
 // getStorageSuggestions completes the /storage subcommands, store names
-// and flags.
+// and flags — only what the command still accepts at the cursor: one
+// store at most, each flag once, and after prune only the stores that
+// have a pruning rule (the protected ones are inventory-only).
 func (cli *ChatCLI) getStorageSuggestions(d prompt.Document) []prompt.Suggest {
 	line := d.TextBeforeCursor()
 	args := strings.Fields(line)
 	word := d.GetWordBeforeCursor()
-	stores := func() []prompt.Suggest {
+	typing := !strings.HasSuffix(line, " ") // the last field is still being typed
+	stores := func(prunableOnly bool) []prompt.Suggest {
 		out := make([]prompt.Suggest, 0, len(StorageStoreNames()))
 		for _, n := range StorageStoreNames() {
-			out = append(out, prompt.Suggest{Text: n, Description: i18n.T("storage.policy." + storePolicyName(n))})
+			policy := storePolicyName(n)
+			if prunableOnly && policy == PolicyReadOnly {
+				continue
+			}
+			out = append(out, prompt.Suggest{Text: n, Description: i18n.T("storage.policy." + policy)})
 		}
 		return out
 	}
 	switch {
-	case len(args) == 1 || (len(args) == 2 && !strings.HasSuffix(line, " ")):
+	case len(args) == 1 || (len(args) == 2 && typing):
 		return prompt.FilterHasPrefix(append([]prompt.Suggest{
 			{Text: "prune", Description: i18n.T("complete.storage.prune")},
-		}, stores()...), word, true)
-	case args[1] == "prune":
-		return prompt.FilterHasPrefix(append(stores(),
+		}, stores(false)...), word, true)
+	case args[1] != "prune":
+		return nil // a bare store name takes nothing after it
+	}
+	// After prune: what is already on the line is not offered again.
+	settled := args[2:]
+	if typing && len(settled) > 0 {
+		settled = settled[:len(settled)-1]
+	}
+	hasStore, hasMode := false, false
+	for _, a := range settled {
+		switch strings.ToLower(a) {
+		case "--apply", "apply", "--yes", "-y", "--dry-run", "dry-run", "--dry", "-n":
+			hasMode = true
+		default:
+			hasStore = true
+		}
+	}
+	var out []prompt.Suggest
+	if !hasStore {
+		out = append(out, stores(true)...)
+	}
+	if !hasMode {
+		out = append(out,
 			prompt.Suggest{Text: "--apply", Description: i18n.T("complete.storage.apply")},
 			prompt.Suggest{Text: "--dry-run", Description: i18n.T("complete.storage.dry_run")},
-		), word, true)
+		)
 	}
-	return nil
+	return prompt.FilterHasPrefix(out, word, true)
 }
 
 // storePolicyName is the policy a store is governed by, for completions.
