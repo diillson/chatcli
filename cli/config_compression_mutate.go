@@ -203,14 +203,16 @@ func (cli *ChatCLI) showConfigCompression() {
 	if cli.compressionLayer != nil {
 		mode = cli.compressionLayer.Mode().String()
 	}
-	kv(p, i18n.T("cfg.compression.mode"), mode)
+	// Env names as keys, like every other section: the row is how a user
+	// discovers which variable pins the value they are looking at.
+	kv(p, "CHATCLI_COMPRESSION", mode)
 	profile := compress.ProfileDefault.String()
 	threshold := fmt.Sprintf("%d", compress.DefaultThreshold)
 	if cli.compressionLayer != nil {
 		profile = cli.compressionLayer.Profile().String()
 		threshold = fmt.Sprintf("%d", cli.compressionLayer.Threshold())
 	}
-	kv(p, i18n.T("cfg.compression.profile"), profile)
+	kv(p, "CHATCLI_COMPRESSION_PROFILE", profile)
 	kv(p, "CHATCLI_COMPRESSION_THRESHOLD", threshold)
 	kv(p, "CHATCLI_COMPRESSION_CCR_DIR", envOrDefault("CHATCLI_COMPRESSION_CCR_DIR", "~/.chatcli/ccr"))
 	kv(p, "CHATCLI_COMPRESSION_CCR_MAX_MB", envOrDefault("CHATCLI_COMPRESSION_CCR_MAX_MB", "256"))
