@@ -106,3 +106,22 @@ func TestKeychainStore_GetFallbackPathsAreDistinct(t *testing.T) {
 		t.Error("a missing account returned no error under the keychain backend")
 	}
 }
+
+// A test binary must never reach the developer's real credential store
+// unless the backend is pinned to the keychain on purpose: the default
+// store reports no native keychain here, while the forced one answers
+// whatever the machine has.
+func TestNewKeychainStore_NeverUsesTheNativeStoreFromATestBinary(t *testing.T) {
+	t.Setenv("CHATCLI_KEYCHAIN_BACKEND", "")
+	if NewKeychainStore().IsNativeAvailable() {
+		t.Fatal("the default store reached the real keychain from a test binary")
+	}
+	t.Setenv("CHATCLI_KEYCHAIN_BACKEND", "auto")
+	if NewKeychainStore().IsNativeAvailable() {
+		t.Fatal("auto reached the real keychain from a test binary")
+	}
+	t.Setenv("CHATCLI_KEYCHAIN_BACKEND", "keychain")
+	if got, want := NewKeychainStore().IsNativeAvailable(), nativeKeychainAvailable(); got != want {
+		t.Fatalf("forced backend: IsNativeAvailable = %v, machine has native = %v", got, want)
+	}
+}

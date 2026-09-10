@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/diillson/chatcli/auth"
+	"github.com/diillson/chatcli/pkg/testenv"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -35,10 +36,19 @@ func TestMain(m *testing.M) {
 		panic("failed to build chatcli binary: " + err.Error() + "\nOutput:\n" + string(output))
 	}
 
+	// Isolate only after the build: go build needs the real module and
+	// build caches under the developer's home. From here on the binary the
+	// tests spawn inherits a throwaway HOME, so its logger, cost snapshots,
+	// memory store, scheduler audit and update check never touch the real
+	// ~/.chatcli — one run of this package used to leave a dozen files there.
+	_, cleanupHome := testenv.Isolate()
+
 	// Executar os testes
 	exitCode := m.Run()
 
-	defer os.Remove(chatcliBinary)
+	// A deferred call never runs past os.Exit; remove the binary here.
+	cleanupHome()
+	_ = os.Remove(chatcliBinary)
 	os.Exit(exitCode)
 }
 
