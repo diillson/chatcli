@@ -72,6 +72,7 @@ Para garantir um processo tranquilo, siga estes passos para configurar seu ambie
     ```bash
     go test ./...
     ```
+    A suíte é hermética: nada é gravado no seu `~/.chatcli` real e o keychain do sistema nunca é consultado. Um pacote cujos testes alcançam o store da home (cost tracker, checkpoints, memória, sessões, logs) ou a chave de credenciais declara um `TestMain` que chama `testenv.Main(m)` (`pkg/testenv`): ele aponta o HOME para um diretório descartável e fixa `CHATCLI_KEYCHAIN_BACKEND=file`. Como rede extra, o adaptador nativo do keychain recusa responder de dentro de um binário de teste, salvo com `CHATCLI_KEYCHAIN_BACKEND=keychain` explícito. Se um teste novo passar a escrever fora do `t.TempDir()`, a correção é o `TestMain`, nunca um caminho real. Para conferir: `touch marker; go test ./...; find ~/.chatcli -newer marker -type f` deve não listar nada.
 4.  **Faça o Commit das Suas Alterações**: Use uma mensagem de commit clara e descritiva.
     ```bash
     git commit -m "feat: Adiciona suporte para o comando @docker"
