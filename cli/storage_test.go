@@ -255,4 +255,16 @@ func TestStorageSuggestions_OfferSubcommandsStoresAndFlags(t *testing.T) {
 	afterPrune := suggestTexts(c.getStorageSuggestions(docAt("/storage prune ")))
 	assert.Contains(t, afterPrune, "--apply")
 	assert.Contains(t, afterPrune, StoreCheckpoints)
+	assert.NotContains(t, afterPrune, StoreSkills, "prune offers only stores that have a rule")
+
+	// One store at most, each flag once, and the two modes exclude each other.
+	afterStore := suggestTexts(c.getStorageSuggestions(docAt("/storage prune costs ")))
+	assert.Equal(t, []string{"--apply", "--dry-run"}, afterStore)
+	afterFlag := suggestTexts(c.getStorageSuggestions(docAt("/storage prune --apply ")))
+	assert.NotContains(t, afterFlag, "--apply")
+	assert.NotContains(t, afterFlag, "--dry-run")
+	assert.Contains(t, afterFlag, StoreCosts)
+	assert.Empty(t, c.getStorageSuggestions(docAt("/storage prune costs --apply ")))
+	assert.Equal(t, []string{StoreCosts}, suggestTexts(c.getStorageSuggestions(docAt("/storage prune co"))), "a half-typed store still completes")
+	assert.Empty(t, c.getStorageSuggestions(docAt("/storage costs ")), "a bare store takes nothing after it")
 }
