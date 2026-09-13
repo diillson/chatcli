@@ -164,6 +164,7 @@ var envDefaults = map[string]envDefault{
 	"CHATCLI_MICROCOMPACT_HEAD_CHARS":      {Value: "2000", Source: "agent.DefaultMicrocompactConfig"},
 	"CHATCLI_MICROCOMPACT_TAIL_CHARS":      {Value: "500", Source: "agent.DefaultMicrocompactConfig"},
 	"CHATCLI_MICROCOMPACT_MIN_CONTENT":     {Value: "3000", Source: "agent.DefaultMicrocompactConfig"},
+	"CHATCLI_HISTORY_REWRITE_PRESSURE":     {Value: "0.75", Source: "cli/rewrite_pressure.go (share of the compaction budget before microcompact, read dedup and skill aging rewrite a warm cached prefix; 0 = every turn as before)"},
 	"CHATCLI_TOOL_RESULT_BUDGET_CHARS":     {Value: "200000", Source: "agent.DefaultTurnBudgetChars"},
 	"CHATCLI_TOOL_RESULT_MAX_CHARS":        {Value: "20000", Source: "agent.DefaultPerResultMaxChars"},
 

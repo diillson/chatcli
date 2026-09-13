@@ -7,12 +7,25 @@
  * Large results are persisted to disk and replaced with compact references,
  * preventing context window saturation.
  *
+ * The enforcement runs on the OUTGOING copy of the history, on every
+ * request, so the same oversized result is truncated again and again. That
+ * is only harmless if the preview comes out byte-identical each time: the
+ * result sits ahead of the provider's rolling cache breakpoint, and a
+ * preview that differs from the previous request's rewrites the prefix
+ * from that message onward — the whole conversation after it is billed as
+ * a cache write instead of a read, on every turn, until the result ages
+ * out. The overflow file is therefore named by the result's own content
+ * (tool-call id plus a content hash), written once and reused, never by a
+ * counter.
+ *
  * Inspired by openclaude's tool result budget enforcement and
  * MAX_TOOL_RESULTS_PER_MESSAGE_CHARS threshold.
  */
 package agent
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -20,7 +33,6 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"sync/atomic"
 
 	"github.com/diillson/chatcli/models"
 	"go.uber.org/zap"
@@ -57,8 +69,6 @@ func init() {
 		}
 	}
 }
-
-var budgetFileCounter uint64
 
 // budgetResultDirOverride is set by the session workspace so overflow files
 // land inside the session scratch area (which is on the read allowlist for
@@ -238,6 +248,13 @@ func EnforceToolResultBudgetWith(history []models.Message, turnBudget, perResult
 
 // truncateWithDiskPersist saves the full content to a temp file and returns
 // a truncated preview with a reference to the file.
+//
+// The preview is a pure function of the content and the tool-call id: the
+// file name carries a hash of the content instead of a counter, and a file
+// that already holds this content is reused rather than rewritten. Every
+// request that re-derives the preview for the same result produces the
+// same bytes, which is what keeps the message a cache read instead of a
+// prefix rewrite (see the file header).
 func truncateWithDiskPersist(content, toolCallID string, maxSize int, logger *zap.Logger) string {
 	if len(content) <= maxSize {
 		return content
@@ -252,12 +269,9 @@ func truncateWithDiskPersist(content, toolCallID string, maxSize int, logger *za
 		return content[:maxSize] + "\n... [output truncated — dir creation failed]"
 	}
 
-	n := atomic.AddUint64(&budgetFileCounter, 1)
-	sanitizedID := strings.ReplaceAll(toolCallID, "/", "_")
-	filename := fmt.Sprintf("budget_%s_%d.txt", sanitizedID, n)
-	fullPath := filepath.Join(dir, filename)
+	fullPath := filepath.Join(dir, overflowFileName(toolCallID, content))
 
-	if err := os.WriteFile(fullPath, []byte(content), 0o600); err != nil {
+	if err := writeOverflowOnce(fullPath, content); err != nil {
 		if logger != nil {
 			logger.Warn("Failed to persist tool result to disk, truncating without reference",
 				zap.Error(err))
@@ -299,6 +313,37 @@ func truncateWithDiskPersist(content, toolCallID string, maxSize int, logger *za
 	}
 
 	return preview.String()
+}
+
+// overflowFileName names the overflow file for one tool result. The name is
+// derived from the tool-call id and a digest of the content, so the same
+// result always maps to the same file — across requests of one session,
+// and across a tool-call id a provider reuses for different results (Kimi
+// K3 does) without the two ever colliding.
+func overflowFileName(toolCallID, content string) string {
+	id := strings.Map(func(r rune) rune {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9', r == '-', r == '_':
+			return r
+		}
+		return '_'
+	}, strings.TrimSpace(toolCallID))
+	if id == "" {
+		id = "result"
+	}
+	sum := sha256.Sum256([]byte(content))
+	return fmt.Sprintf("budget_%s_%s.txt", id, hex.EncodeToString(sum[:])[:16])
+}
+
+// writeOverflowOnce writes content to path unless a file of the same size
+// is already there: the name already commits to the content, so an
+// existing file of the right size is this content, written by an earlier
+// request. Rewriting it would only cost the bytes.
+func writeOverflowOnce(path, content string) error {
+	if st, err := os.Stat(path); err == nil && st.Mode().IsRegular() && st.Size() == int64(len(content)) {
+		return nil
+	}
+	return os.WriteFile(path, []byte(content), 0o600)
 }
 
 func budgetResultDir() string {

@@ -2325,51 +2325,6 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 		// this turn's rewrites can stub them — durability against a hard
 		// kill mid-run.
 		a.cli.syncTranscript()
-		mcCfg := agent.DefaultMicrocompactConfig()
-		// Route dropped bytes through CCR so every microcompacted tool
-		// result stays recoverable via @recall instead of being lost.
-		mcCfg.CCR = a.cli.compressionLayer
-		if h, report := agent.ApplyMicrocompact(a.cli.history, turn, mcCfg, a.logger); report != nil && (report.Truncated > 0 || report.Summarized > 0) {
-			a.cli.history = h
-			a.cli.costTracker.NoteExpectedCacheRebuild()
-			fmt.Printf("\r\033[K  %s %s\n",
-				renderer.Colorize("🗜", agent.ColorGray),
-				renderer.Colorize(
-					i18n.T("agent.microcompact.applied",
-						report.Truncated, report.Summarized, FormatPayloadSize(int(report.CharsSaved))),
-					agent.ColorGray))
-		}
-
-		// Skill aging (same turn boundary as microcompact, so both passes
-		// share a single prefix-cache invalidation event): mid-loop skill
-		// blocks the model has already absorbed collapse to CCR-recoverable
-		// stubs, and the collapsed skills leave the dedup set so they can
-		// re-trigger after the cooldown.
-		saCfg := agent.DefaultSkillAgingConfig()
-		saCfg.CCR = a.cli.compressionLayer
-		// Repeated reads of the same file: keep the newest, stub the rest
-		// (recoverable via @recall). Same turn boundary as microcompact so
-		// the two rewrites share one prefix-cache invalidation.
-		if h, report := agent.DedupRepeatedReads(a.cli.history, mcCfg.CCR, a.logger); report != nil && report.Superseded > 0 {
-			a.cli.history = h
-			a.cli.costTracker.NoteExpectedCacheRebuild()
-			fmt.Printf("\r\033[K  %s %s\n",
-				renderer.Colorize("│", agent.ColorGray),
-				renderer.Colorize(i18n.T("agent.dedup_reads.applied", report.Superseded, FormatPayloadSize(int(report.CharsSaved))), agent.ColorGray))
-		}
-		if h, report := agent.ApplySkillAging(a.cli.history, saCfg, a.logger); report != nil && report.Collapsed > 0 {
-			a.cli.history = h
-			a.cli.costTracker.NoteExpectedCacheRebuild()
-			a.releaseCollapsedSkills(report.CollapsedSkills, turn)
-			fmt.Printf("\r\033[K  %s %s\n",
-				renderer.Colorize("🗜", agent.ColorGray),
-				renderer.Colorize(
-					i18n.T("agent.skills.aged",
-						report.Collapsed, FormatPayloadSize(int(report.CharsSaved))),
-					agent.ColorGray))
-		}
-
-		// Compact history if over budget (before building turn history)
 		cfg := a.cli.compactConfig(a.cli.Provider, a.cli.Model)
 		a.cli.toolDefsChars = a.toolDefsChars
 		cfg.ReservedChars = a.cli.contextEstimate().ReservedChars()
@@ -2379,6 +2334,63 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 			cfg.BudgetRatio = 0.60
 		}
 		cfg.MinKeepRecent = 8 // ~4 tool call cycles
+
+		// The three in-place rewrites below (microcompact, read dedup,
+		// skill aging) each invalidate the provider's cached prefix from
+		// the edited message onward. Against a warm cache they wait until
+		// the history is actually pressing on the compaction budget; with
+		// no warm prefix to lose they run as before (rewrite_pressure.go).
+		if !a.cli.historyRewriteAllowed(a.cli.history, cfg) {
+			a.logger.Debug("history rewrites deferred: prefix cache is warm and the window is not under pressure",
+				zap.Int("turn", turn+1),
+				zap.Int("history_chars", totalChars(a.cli.history)))
+		} else {
+			mcCfg := agent.DefaultMicrocompactConfig()
+			// Route dropped bytes through CCR so every microcompacted tool
+			// result stays recoverable via @recall instead of being lost.
+			mcCfg.CCR = a.cli.compressionLayer
+			if h, report := agent.ApplyMicrocompact(a.cli.history, turn, mcCfg, a.logger); report != nil && (report.Truncated > 0 || report.Summarized > 0) {
+				a.cli.history = h
+				a.cli.costTracker.NoteExpectedCacheRebuild()
+				fmt.Printf("\r\033[K  %s %s\n",
+					renderer.Colorize("🗜", agent.ColorGray),
+					renderer.Colorize(
+						i18n.T("agent.microcompact.applied",
+							report.Truncated, report.Summarized, FormatPayloadSize(int(report.CharsSaved))),
+						agent.ColorGray))
+			}
+
+			// Skill aging (same turn boundary as microcompact, so both passes
+			// share a single prefix-cache invalidation event): mid-loop skill
+			// blocks the model has already absorbed collapse to CCR-recoverable
+			// stubs, and the collapsed skills leave the dedup set so they can
+			// re-trigger after the cooldown.
+			saCfg := agent.DefaultSkillAgingConfig()
+			saCfg.CCR = a.cli.compressionLayer
+			// Repeated reads of the same file: keep the newest, stub the rest
+			// (recoverable via @recall). Same turn boundary as microcompact so
+			// the two rewrites share one prefix-cache invalidation.
+			if h, report := agent.DedupRepeatedReads(a.cli.history, mcCfg.CCR, a.logger); report != nil && report.Superseded > 0 {
+				a.cli.history = h
+				a.cli.costTracker.NoteExpectedCacheRebuild()
+				fmt.Printf("\r\033[K  %s %s\n",
+					renderer.Colorize("│", agent.ColorGray),
+					renderer.Colorize(i18n.T("agent.dedup_reads.applied", report.Superseded, FormatPayloadSize(int(report.CharsSaved))), agent.ColorGray))
+			}
+			if h, report := agent.ApplySkillAging(a.cli.history, saCfg, a.logger); report != nil && report.Collapsed > 0 {
+				a.cli.history = h
+				a.cli.costTracker.NoteExpectedCacheRebuild()
+				a.releaseCollapsedSkills(report.CollapsedSkills, turn)
+				fmt.Printf("\r\033[K  %s %s\n",
+					renderer.Colorize("🗜", agent.ColorGray),
+					renderer.Colorize(
+						i18n.T("agent.skills.aged",
+							report.Collapsed, FormatPayloadSize(int(report.CharsSaved))),
+						agent.ColorGray))
+			}
+		}
+
+		// Compact history if over budget (before building turn history)
 
 		// Pre-flight: measure the current history and react BEFORE the
 		// request goes out. Two paths:
