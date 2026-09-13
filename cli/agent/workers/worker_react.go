@@ -208,8 +208,12 @@ func RunWorkerReAct(
 		// Progressively compact old tool results (turn boundary only, so a
 		// tool_use/tool_result pair is never split). CCR-backed when the
 		// session layer is registered — otherwise same legacy behavior the
-		// orchestrator had before CCR.
-		history, _ = agent.ApplyMicrocompact(history, turn, mcCfg, logger)
+		// orchestrator had before CCR. Skipped while the window says the
+		// provider's prefix cache is warm and the history is not under
+		// pressure: the rewrite would cost more than the tokens it saves.
+		if workerRewriteAllowed(window, history) {
+			history, _ = agent.ApplyMicrocompact(history, turn, mcCfg, logger)
+		}
 		history = applyWorkerWindow(ctx, window, history, logger)
 
 		// --- Call LLM (native or text mode) ---

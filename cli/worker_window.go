@@ -29,6 +29,16 @@ func (w *workerWindow) NeedsCompaction(history []models.Message) bool {
 	return w.cli.historyCompactor.NeedsCompaction(history, w.cli.compactConfig(w.cli.Provider, w.cli.Model))
 }
 
+// RewriteAllowed applies the session's rewrite-pressure gate to a worker
+// history (workers.RewriteGate): a worker's microcompact invalidates its
+// own cached prefix exactly like the orchestrator's does.
+func (w *workerWindow) RewriteAllowed(history []models.Message) bool {
+	if w == nil || w.cli == nil {
+		return true
+	}
+	return w.cli.historyRewriteAllowed(history, w.cli.compactConfig(w.cli.Provider, w.cli.Model))
+}
+
 // Compact runs the session compactor (Level 1 trim, Level 2 summary with
 // the configured summarizer, CCR archive through the tenant's layer).
 func (w *workerWindow) Compact(ctx context.Context, history []models.Message) ([]models.Message, error) {

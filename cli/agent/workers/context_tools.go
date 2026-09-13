@@ -113,6 +113,24 @@ type WindowManager interface {
 	NoteTurn(worker string, turn []models.Message)
 }
 
+// RewriteGate is the optional side of a WindowManager that decides whether
+// a worker turn may rewrite old messages in place (microcompact). A window
+// that does not implement it leaves the historical every-turn behavior;
+// one that does trades the rewrite against the provider's warm prefix
+// cache the same way the orchestrator loop does.
+type RewriteGate interface {
+	RewriteAllowed(history []models.Message) bool
+}
+
+// workerRewriteAllowed consults the window's RewriteGate when it has one.
+func workerRewriteAllowed(window WindowManager, history []models.Message) bool {
+	gate, ok := window.(RewriteGate)
+	if !ok || gate == nil {
+		return true
+	}
+	return gate.RewriteAllowed(history)
+}
+
 // RegisterWorkerWindow installs the orchestrator's window manager for
 // every worker loop of this process (nil clears it).
 func RegisterWorkerWindow(wm WindowManager) {
