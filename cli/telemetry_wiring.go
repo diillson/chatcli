@@ -98,6 +98,7 @@ func (cli *ChatCLI) telemetryMetrics() []telemetry.Metric {
 		out = append(out, telemetry.Metric{Name: "chatcli.cache.requests", Unit: "{request}", Points: []telemetry.Point{
 			{Value: float64(stats.Requests), Attrs: map[string]string{"outcome": "total"}},
 			{Value: float64(stats.Misses), Attrs: map[string]string{"outcome": "miss"}},
+			{Value: float64(stats.Expired), Attrs: map[string]string{"outcome": "expired"}},
 			{Value: float64(stats.Rebuilds), Attrs: map[string]string{"outcome": "expected_rebuild"}},
 		}})
 	}

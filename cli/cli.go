@@ -1049,6 +1049,7 @@ func NewChatCLI(ctx context.Context, manager manager.LLMManager, logger *zap.Log
 
 	// Initialize cost tracker
 	cli.costTracker = NewCostTracker()
+	cli.costTracker.SetLogger(cli.logger)
 
 	cli.bootstrapMCP(ctx, logger)
 

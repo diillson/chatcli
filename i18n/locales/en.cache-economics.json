@@ -1,0 +1,13 @@
+{
+  "cost.cmd.processed": "Processed:",
+  "cost.cmd.processed_note": "(input + cache reads + cache writes + output)",
+  "cost.cmd.econ_label": "Cache economics:",
+  "cost.cmd.econ_gross": "Read discount:",
+  "cost.cmd.econ_gross_note": "(%s reads billed below the input price)",
+  "cost.cmd.econ_premium": "Write premium:",
+  "cost.cmd.econ_premium_note": "(%s writes billed above the input price)",
+  "cost.cmd.econ_net": "Net savings:",
+  "cost.cmd.econ_without": "Without cache:",
+  "cost.cmd.econ_without_note": "actual %s · %s saved",
+  "cost.cmd.cache_health": "Prompt cache: %d requests · %s of input from cache · %d unstable misses · %d expired · %d expected rebuilds"
+}

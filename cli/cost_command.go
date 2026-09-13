@@ -277,6 +277,14 @@ func (cli *ChatCLI) renderCostSummary() {
 	tokenRow(i18n.T("cost.cmd.input"), formatTokenCount64(ct.totalPromptTokens), ColorGreen+promptBar+ColorReset)
 	tokenRow(i18n.T("cost.cmd.output"), formatTokenCount64(ct.totalCompletionTokens), ColorPurple+completionBar+ColorReset)
 	tokenRow(i18n.T("cost.cmd.total"), formatTokenCount64(totalTokens), "")
+	// Input above is the uncached share on additive schemas, so Total
+	// understates what the model actually read. Processed is the whole of
+	// it — every token the provider tokenized, cached or not — shown when
+	// the two differ, i.e. whenever a cache took part.
+	if processed := ct.totalInputTokens + ct.totalCompletionTokens; processed > totalTokens {
+		tokenRow(i18n.T("cost.cmd.processed"), formatTokenCount64(processed),
+			colorize(i18n.T("cost.cmd.processed_note"), ColorGray))
+	}
 	if ct.totalReasoning > 0 {
 		// Informational: reasoning tokens are already inside Output.
 		tokenRow(i18n.T("cost.cmd.reasoning"), formatTokenCount64(ct.totalReasoning),
@@ -290,12 +298,9 @@ func (cli *ChatCLI) renderCostSummary() {
 		fmt.Println(p + colorize("  "+i18n.T("cost.cmd.cache_tokens_label"), ColorCyan))
 		fmt.Println(p + "    " + kit.PadRight(i18n.T("cost.cmd.cache_created"), cacheW+2) +
 			ColorBold + formatTokenCount64(ct.totalCacheCreation) + ColorReset)
-		savings := ""
-		if saved := cacheSavingsUSDLocked(ct); saved > 0.00005 {
-			savings = "  " + colorize(i18n.T("cost.cmd.cache_saved_usd", fmt.Sprintf("$%.4f", saved)), ColorGray)
-		}
 		fmt.Println(p + "    " + kit.PadRight(i18n.T("cost.cmd.cache_read"), cacheW+2) +
-			ColorBold + formatTokenCount64(ct.totalCacheRead) + ColorReset + savings)
+			ColorBold + formatTokenCount64(ct.totalCacheRead) + ColorReset)
+		printCacheEconomics(p, ct)
 	}
 	// Explicit cache resources: storage bought for the granted lifetimes.
 	if ct.cacheResources > 0 {
@@ -315,8 +320,8 @@ func (cli *ChatCLI) renderCostSummary() {
 		if stats.Warm {
 			state = i18n.T("cost.cmd.cache_warm", stats.TTL, formatIdle(time.Since(stats.LastActivity)))
 		}
-		fmt.Println(p + colorize("  "+i18n.T("cost.cmd.cache_stats",
-			stats.Requests, fmt.Sprintf("%.0f%%", stats.HitPct), stats.Misses, stats.Rebuilds), ColorCyan) +
+		fmt.Println(p + colorize("  "+i18n.T("cost.cmd.cache_health",
+			stats.Requests, fmt.Sprintf("%.0f%%", stats.HitPct), stats.Misses, stats.Expired, stats.Rebuilds), ColorCyan) +
 			" " + colorize(state, ColorGray))
 	}
 	fmt.Println(p)
@@ -482,24 +487,98 @@ func unpricedModelsLocked(ct *CostTracker) []string {
 	return out
 }
 
-// cacheSavingsUSDLocked estimates how much the session saved because cache
-// reads were billed at the discounted rate instead of the full input price.
+// cacheEconomics is the session's cache balance in dollars: what the
+// read discount saved, what the write premium cost on top of the input
+// price, the difference, and what the same tokens would have cost with
+// no cache at all.
+//
+// Reads alone overstate the saving. A cache write is billed ABOVE the
+// input price on the additive schemas (1.25x, or 2x with the hour-long
+// TTL on Anthropic), so a session that rewrote its prefix a few times can
+// have given back a third of what the reads saved. Subset schemas
+// (OpenAI, Gemini, xAI, Kimi) charge nothing extra for the write, and
+// their premium is simply zero.
+type cacheEconomics struct {
+	ReadTokens   int64
+	WriteTokens  int64
+	Gross        float64 // reads billed below the input price
+	Premium      float64 // writes billed above the input price
+	Net          float64 // Gross - Premium
+	Actual       float64 // the session's total cost
+	WithoutCache float64 // Actual + Net
+	SavedPct     float64 // Net as a share of WithoutCache, 0-100
+}
+
+// cacheEconomicsLocked computes the balance from the per-model records.
 // Caller holds ct.mu.
-func cacheSavingsUSDLocked(ct *CostTracker) float64 {
-	saved := 0.0
+func cacheEconomicsLocked(ct *CostTracker) cacheEconomics {
+	e := cacheEconomics{Actual: ct.totalCostUSD}
 	for _, rec := range ct.modelUsage {
-		if rec.CacheReadTokens == 0 {
+		if rec.CacheReadTokens == 0 && rec.CacheCreationTokens == 0 {
 			continue
 		}
 		inputCost, _, known := lookupModelPricing(rec.Provider, rec.Model)
 		if !known || inputCost <= 0 {
 			continue
 		}
-		_, readCost := getCachePricing(rec.Provider, rec.Model)
-		if readCost <= 0 || readCost >= inputCost {
-			continue
+		writeCost, readCost := getCachePricing(rec.Provider, rec.Model)
+		e.ReadTokens += rec.CacheReadTokens
+		e.WriteTokens += rec.CacheCreationTokens
+		if readCost > 0 && readCost < inputCost {
+			e.Gross += float64(rec.CacheReadTokens) / 1_000_000 * (inputCost - readCost)
 		}
-		saved += float64(rec.CacheReadTokens) / 1_000_000 * (inputCost - readCost)
+		creation1h := rec.CacheCreation1hTokens
+		if creation1h > rec.CacheCreationTokens {
+			creation1h = rec.CacheCreationTokens
+		}
+		creation5m := rec.CacheCreationTokens - creation1h
+		if writeCost > inputCost {
+			e.Premium += float64(creation5m) / 1_000_000 * (writeCost - inputCost)
+		}
+		if write1h := cacheWrite1hCost(rec.Provider, rec.Model, writeCost); write1h > inputCost {
+			e.Premium += float64(creation1h) / 1_000_000 * (write1h - inputCost)
+		}
 	}
-	return saved
+	e.Net = e.Gross - e.Premium
+	e.WithoutCache = e.Actual + e.Net
+	if e.WithoutCache > 0 {
+		e.SavedPct = e.Net / e.WithoutCache * 100
+	}
+	return e
+}
+
+// printCacheEconomics renders the balance under the cache token rows.
+// Nothing is printed when no priced model reported cache tokens. Caller
+// holds ct.mu.
+func printCacheEconomics(p string, ct *CostTracker) {
+	e := cacheEconomicsLocked(ct)
+	if e.ReadTokens == 0 && e.WriteTokens == 0 {
+		return
+	}
+	usd := func(v float64) string { return fmt.Sprintf("$%.4f", v) }
+	labels := []string{i18n.T("cost.cmd.econ_gross"), i18n.T("cost.cmd.econ_net"), i18n.T("cost.cmd.econ_without")}
+	if e.Premium > 0 {
+		labels = append(labels, i18n.T("cost.cmd.econ_premium"))
+	}
+	w := 0
+	for _, l := range labels {
+		if lw := kit.VisibleLen(l); lw > w {
+			w = lw
+		}
+	}
+	line := func(label, value, note string) {
+		out := "    " + kit.PadRight(label, w+2) + ColorBold + kit.PadRight(value, 9) + ColorReset
+		if note != "" {
+			out += "  " + colorize(note, ColorGray)
+		}
+		fmt.Println(p + out)
+	}
+	fmt.Println(p + colorize("  "+i18n.T("cost.cmd.econ_label"), ColorCyan))
+	line(i18n.T("cost.cmd.econ_gross"), usd(e.Gross), i18n.T("cost.cmd.econ_gross_note", formatTokenCount64(e.ReadTokens)))
+	if e.Premium > 0 {
+		line(i18n.T("cost.cmd.econ_premium"), "-"+usd(e.Premium), i18n.T("cost.cmd.econ_premium_note", formatTokenCount64(e.WriteTokens)))
+	}
+	line(i18n.T("cost.cmd.econ_net"), usd(e.Net), "")
+	line(i18n.T("cost.cmd.econ_without"), usd(e.WithoutCache),
+		i18n.T("cost.cmd.econ_without_note", usd(e.Actual), fmt.Sprintf("%.0f%%", e.SavedPct)))
 }
