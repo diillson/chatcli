@@ -26,12 +26,23 @@ import (
 )
 
 const (
-	// cacheMissMinTokens and cacheMissMinShare define a miss the way an
-	// operator would read it: a request re-processed (wrote back) a
-	// meaningful chunk of what it could have read from cache. Tiny writes
-	// (the new tail of every turn) are normal, not misses.
+	// cacheMissMinTokens is the smallest write (additive schemas) or prompt
+	// (subset schemas) worth calling a miss: below it nothing meaningful
+	// was re-processed, whatever the ratios say.
 	cacheMissMinTokens = 2000
-	cacheMissMinShare  = 0.05
+	// cacheReadTolerance is how much of what the previous request read or
+	// wrote this request must read back before the prefix counts as
+	// intact. Everything the previous request read plus what it wrote is
+	// readable now, so a request that reads noticeably less than that lost
+	// its prefix. The margin absorbs block-granular caching and a trimmed
+	// last message; it is not a share of this request's size, so a big
+	// but normal tail (a large tool result, a pasted file) is never a miss.
+	cacheReadTolerance = 0.9
+	// subsetReadTolerance is the same margin for subset schemas, where
+	// cached_tokens must approach the previous request's whole prompt.
+	// Looser because those providers cache in 128-token blocks and report
+	// a floor of the true prefix.
+	subsetReadTolerance = 0.8
 
 	// shortCacheLifetime is the default prompt-cache window every provider
 	// in the catalog offers. A rebuild after a longer pause is what the
@@ -54,13 +65,21 @@ type providerCache struct {
 	readTokens  int64
 	writeTokens int64
 	inputTokens int64
+	// What the previous request of this provider established: on an
+	// additive schema lastRead+lastWrite is the prefix the cache now holds,
+	// on a subset schema lastPrompt is. The next request is judged against
+	// it — see observe.
+	lastRead   int64
+	lastWrite  int64
+	lastPrompt int64
 }
 
 // cacheTelemetry is the tracker-side accumulator. All methods are called
 // with the tracker's mutex held.
 type cacheTelemetry struct {
 	requests     int   // requests that reported any cache field
-	misses       int   // re-processed content the cache already held
+	misses       int   // lost the prefix while it should have been warm
+	expired      int   // lost the prefix after a pause the cache did not survive
 	rebuilds     int   // misses explained by a history rewrite we made
 	readTokens   int64 // served from cache
 	writeTokens  int64 // written to cache (additive schemas only)
@@ -120,12 +139,50 @@ func usageCacheAccounting(provider, model string, u *models.UsageInfo) bool {
 	return cacheTokensAdditive(provider, model)
 }
 
+// cacheObservation is what one usage report told the telemetry, returned
+// so the tracker can log it per request: the raw buckets, the gap since
+// the previous request, what the previous request had established, and
+// how the request was classified.
+type cacheObservation struct {
+	Provider string
+	Model    string
+	Additive bool
+	Prompt   int64
+	Read     int64
+	Write    int64
+	Expected int64 // prefix the previous request left readable
+	IdleGap  time.Duration
+	Observed bool // false when the report carried nothing to learn from
+	Miss     bool // lost the prefix while it should have been warm
+	Expired  bool // lost it after a pause the cache did not survive
+	Rebuild  bool // lost it because ChatCLI rewrote the prefix on purpose
+}
+
 // observe folds one real usage report into the telemetry.
-func (c *cacheTelemetry) observe(provider, model string, u *models.UsageInfo, now time.Time) {
-	read := int64(u.CacheReadInputTokens)
-	write := int64(u.CacheCreationInputTokens)
-	prompt := int64(u.PromptTokens)
-	additive := usageCacheAccounting(provider, model, u)
+//
+// A request is judged against what the previous request of the same
+// provider established, not against its own size. On an additive schema
+// everything the previous request read plus what it wrote is readable
+// now, so this request should read back at least that (within
+// cacheReadTolerance); reading noticeably less means the prefix was lost.
+// On a subset schema the previous request's whole prompt is the prefix
+// the cache holds, and cached_tokens should approach it. A large write
+// or a large prompt on its own is never a miss: that is what a big tool
+// result or a pasted file looks like on a perfectly stable prefix.
+//
+// A lost prefix is one of three things: a rebuild ChatCLI declared
+// (NoteExpectedCacheRebuild), an expiry after a pause the cache did not
+// survive, or an unstable prefix — the only one worth alerting on.
+func (c *cacheTelemetry) observe(provider, model string, u *models.UsageInfo, now time.Time) cacheObservation {
+	obs := cacheObservation{
+		Provider: provider,
+		Model:    model,
+		Read:     int64(u.CacheReadInputTokens),
+		Write:    int64(u.CacheCreationInputTokens),
+		Prompt:   int64(u.PromptTokens),
+		Additive: usageCacheAccounting(provider, model, u),
+	}
+	read, write, prompt, additive := obs.Read, obs.Write, obs.Prompt, obs.Additive
 
 	b := c.bucket(provider)
 	first := b.requests == 0
@@ -136,12 +193,17 @@ func (c *cacheTelemetry) observe(provider, model string, u *models.UsageInfo, no
 		// prompt the provider would have cached IS the total miss: the
 		// prefix changed or expired.
 		if additive || first || prompt < subsetMinCacheableTokens {
-			return
+			return obs
 		}
 	}
-	idleGap := time.Duration(0)
+	obs.Observed = true
 	if !c.lastActivity.IsZero() {
-		idleGap = now.Sub(c.lastActivity)
+		obs.IdleGap = now.Sub(c.lastActivity)
+	}
+	if additive {
+		obs.Expected = b.lastRead + b.lastWrite
+	} else {
+		obs.Expected = b.lastPrompt
 	}
 	c.requests++
 	c.readTokens += read
@@ -152,57 +214,61 @@ func (c *cacheTelemetry) observe(provider, model string, u *models.UsageInfo, no
 	b.requests++
 	b.readTokens += read
 	b.inputTokens += prompt
+	b.lastRead, b.lastWrite, b.lastPrompt = read, write, prompt
 
 	// A miss that a longer-lived cache would have prevented: the gap since
 	// the previous call outlived the 5-minute window but would have fit
 	// inside the hour. Measured BEFORE lastActivity is overwritten above —
-	// see idleGap, captured at entry.
-	expiredWhileIdle := !first && idleGap > shortCacheLifetime && idleGap < time.Hour
+	// see obs.IdleGap, captured at entry.
+	expiredWhileIdle := !first && obs.IdleGap > shortCacheLifetime && obs.IdleGap < time.Hour
 
-	var miss bool
+	var lost bool
 	if additive {
 		c.writeTokens += write
 		c.inputTokens += prompt
 		b.writeTokens += write
-		// Anthropic/Bedrock: the write is the part of the prefix the cache
-		// did not hold. A large write after the first request means the
-		// prefix changed (or expired).
-		miss = !first && write >= cacheMissMinTokens && float64(write) > cacheMissMinShare*float64(read+write)
+		lost = !first && write >= cacheMissMinTokens && obs.Expected > 0 &&
+			float64(read) < cacheReadTolerance*float64(obs.Expected)
 	} else {
 		c.inputTokens += prompt
-		// OpenAI/Gemini/Grok/Kimi: cached tokens are a subset of the prompt.
-		// A sizeable prompt served with (almost) nothing from cache after
-		// earlier hits is a miss.
-		miss = !first && prompt >= cacheMissMinTokens && float64(read) < cacheMissMinShare*float64(prompt)
+		lost = !first && prompt >= cacheMissMinTokens && obs.Expected >= subsetMinCacheableTokens &&
+			float64(read) < subsetReadTolerance*float64(obs.Expected)
 	}
 	switch {
-	case miss && c.rebuildPending:
+	case lost && c.rebuildPending:
+		obs.Rebuild = true
 		c.rebuilds++
 		c.rebuildPending = false
 		c.missStreak = 0
 		if expiredWhileIdle {
 			c.idleExpiries++
 		}
-	case miss:
+	case lost && expiredWhileIdle:
+		obs.Expired = true
+		c.expired++
+		c.idleExpiries++
+		// An expiry says nothing about the prefix's stability.
+		c.missStreak = 0
+	case lost:
+		obs.Miss = true
 		c.misses++
 		c.missStreak++
 		if c.missStreak == cacheMissStreakAlert {
 			c.alertArmed = true
 		}
-		if expiredWhileIdle {
-			c.idleExpiries++
-		}
 	default:
 		c.missStreak = 0
 		c.rebuildPending = false
 	}
+	return obs
 }
 
 // CacheStats is the read model /cost and the envelope footer render.
 type CacheStats struct {
 	Requests     int
-	Misses       int
-	Rebuilds     int
+	Misses       int     // prefix lost while it should have been warm
+	Expired      int     // prefix lost after a pause the cache did not survive
+	Rebuilds     int     // prefix rewritten by ChatCLI on purpose
 	HitPct       float64 // share of input served from cache, 0-100
 	LastActivity time.Time
 	TTL          string // "5m" or "1h"
@@ -341,6 +407,7 @@ func (ct *CostTracker) cacheStatsLocked() CacheStats {
 	stats := CacheStats{
 		Requests:     c.requests,
 		Misses:       c.misses,
+		Expired:      c.expired,
 		Rebuilds:     c.rebuilds,
 		LastActivity: c.lastActivity,
 	}
@@ -402,4 +469,47 @@ func (ct *CostTracker) TakeCacheMissAlert() bool {
 	}
 	ct.cache.alertArmed = false
 	return true
+}
+
+// SetLogger installs the logger that receives one line per observed
+// request. The tracker is created before the session logger exists, so
+// the wiring happens where the two meet.
+func (ct *CostTracker) SetLogger(logger *zap.Logger) {
+	if ct == nil {
+		return
+	}
+	ct.mu.Lock()
+	ct.logger = logger
+	ct.mu.Unlock()
+}
+
+// logCacheObservation writes the per-request cache line: what the provider
+// reported, what the previous request had left readable, the idle gap and
+// the outcome. This is the record the aggregate counters are built from;
+// the counters say THAT the prefix broke, the line says WHEN and by how
+// much. Debug on purpose — one line per request is noise at Info.
+func (ct *CostTracker) logCacheObservation(obs cacheObservation) {
+	if ct == nil || ct.logger == nil || !obs.Observed {
+		return
+	}
+	outcome := "hit"
+	switch {
+	case obs.Rebuild:
+		outcome = "expected_rebuild"
+	case obs.Expired:
+		outcome = "expired"
+	case obs.Miss:
+		outcome = "miss"
+	}
+	ct.logger.Debug("prompt cache observed",
+		zap.String("provider", obs.Provider),
+		zap.String("model", obs.Model),
+		zap.Bool("additive", obs.Additive),
+		zap.Int64("prompt", obs.Prompt),
+		zap.Int64("cache_read", obs.Read),
+		zap.Int64("cache_write", obs.Write),
+		zap.Int64("expected_read", obs.Expected),
+		zap.String("ttl", cacheTTLFor(obs.Provider, obs.Model)),
+		zap.Duration("idle_gap", obs.IdleGap),
+		zap.String("outcome", outcome))
 }

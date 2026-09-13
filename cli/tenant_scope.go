@@ -266,6 +266,7 @@ func (cli *ChatCLI) buildTenantStores(ctx context.Context, principal string) (*t
 	}
 	ts.compressionLayer = layer
 	ts.costTracker = NewCostTrackerAt(filepath.Join(root, "costs"))
+	ts.costTracker.SetLogger(cli.logger)
 	if transcriptEnabled() {
 		dir := filepath.Join(root, transcriptDirName)
 		if err := os.MkdirAll(dir, 0o700); err == nil {

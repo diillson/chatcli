@@ -23,6 +23,7 @@ import (
 	"github.com/diillson/chatcli/llm/pricing"
 	"github.com/diillson/chatcli/llm/zai"
 	"github.com/diillson/chatcli/models"
+	"go.uber.org/zap"
 )
 
 // BudgetLevel indicates how close the session is to its spending limit.
@@ -140,6 +141,9 @@ type CostTracker struct {
 	contextEditsToolUses int
 	contextEditsTokens   int64
 	mu                   sync.RWMutex
+	// logger receives the per-request prompt-cache observation (SetLogger);
+	// nil logs nothing.
+	logger *zap.Logger
 
 	// storeDir overrides the snapshot directory (per-tenant store sets);
 	// empty means the process default (costStoreDir).
@@ -362,7 +366,7 @@ func (ct *CostTracker) RecordRealUsage(provider, model string, usage *models.Usa
 	rec.CacheCreation1hTokens += int64(usage.CacheCreation1hInputTokens)
 	rec.ReasoningTokens += int64(usage.ReasoningTokens)
 	if usage.IsReal {
-		ct.cache.observe(provider, model, usage, time.Now())
+		ct.logCacheObservation(ct.cache.observe(provider, model, usage, time.Now()))
 		ct.promoteCacheTTLIfIdling(provider, model)
 	}
 	if usage.CostUSD > 0 {

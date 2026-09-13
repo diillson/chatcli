@@ -1,0 +1,13 @@
+{
+  "cost.cmd.processed": "Processados:",
+  "cost.cmd.processed_note": "(input + leituras de cache + escritas de cache + output)",
+  "cost.cmd.econ_label": "Economia do cache:",
+  "cost.cmd.econ_gross": "Desconto de leitura:",
+  "cost.cmd.econ_gross_note": "(%s leituras cobradas abaixo do preço de input)",
+  "cost.cmd.econ_premium": "Prêmio de escrita:",
+  "cost.cmd.econ_premium_note": "(%s escritas cobradas acima do preço de input)",
+  "cost.cmd.econ_net": "Economia líquida:",
+  "cost.cmd.econ_without": "Sem cache:",
+  "cost.cmd.econ_without_note": "real %s · %s economizado",
+  "cost.cmd.cache_health": "Cache de prompt: %d requisições · %s do input vindo do cache · %d misses instáveis · %d expirados · %d rebuilds esperados"
+}
