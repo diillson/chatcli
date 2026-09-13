@@ -409,7 +409,7 @@ func (cli *ChatCLI) turnHints(userInput string) []string {
 	}
 	texts := make([]string, 0, window+1)
 	for _, msg := range cli.history[len(cli.history)-window:] {
-		if msg.IsTurnContext() {
+		if msg.IsInjectedContext() {
 			continue // injected context is not a hint about what the user wants
 		}
 		texts = append(texts, msg.Content)
@@ -904,11 +904,13 @@ func (cli *ChatCLI) applyChatEffortHint(ctx context.Context, skillEffort client.
 	if !overridden {
 		effective = skillEffort
 	}
-	// Chat carries no tools by design and no task budget, so effort is the
-	// whole of this surface's request shape — and the router moves it turn
-	// to turn on its own. Declare the change so the rebuild it causes is
-	// not counted against prefix stability.
-	cli.noteWireShape(effective, nil, false)
+	// Chat carries no task budget, so effort plus the sanctioned exception
+	// tools are the whole of this surface's request shape. Both move on
+	// their own: the router changes effort turn to turn, and the tool set
+	// follows /config toggles, a knowledge attach or an MCP server
+	// connecting (context_pull). Declare the change so the rebuild it
+	// causes is not counted against prefix stability.
+	cli.noteWireShape(effective, buildChatExceptionTools(cli.chatExceptionsForTurn()), false)
 	// An active override resolving to Unset means thinking is explicitly
 	// off: send no hint at all. Unset without an override is just "nothing
 	// chosen" and travels as before.

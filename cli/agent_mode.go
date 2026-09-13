@@ -1267,8 +1267,13 @@ func (a *AgentMode) Run(ctx context.Context, query string, additionalContext str
 	// before the query (turn_context.go), so the system prompt stays
 	// byte-stable and the prefix cache keeps hitting across runs.
 	turnContextText := composeTurnContext(channelsText, dynamicText)
-	sysMsg := buildAgentSystemMessage(coreText, toolsText, workspaceStable, workspaceTurn,
-		skillsText, orchestratorText, "", "")
+	// The query-driven workspace context and the skills block are not
+	// system blocks either: they change with every run, and a system
+	// message that differs between runs rewrote the whole cached
+	// conversation on each new query. They ride as flagged history
+	// messages appended once per run (agent_run_context.go).
+	sysMsg := buildAgentSystemMessage(coreText, toolsText, workspaceStable, "",
+		"", orchestratorText, "", "")
 	breakdownMode := "agent"
 	if isCoder {
 		breakdownMode = "coder"
@@ -1299,6 +1304,8 @@ func (a *AgentMode) Run(ctx context.Context, query string, additionalContext str
 	a.installAgentSystemMessage(sysMsg, currentModeName)
 	a.toolDefsChars = a.estimateToolDefsChars()
 	a.cli.toolDefsChars = a.toolDefsChars
+	a.appendRunContext(workspaceTurn)
+	a.appendRunSkills(skillsText)
 
 	currentQuery := query
 	if additionalContext != "" {
