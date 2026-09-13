@@ -144,6 +144,11 @@ type CostTracker struct {
 	// logger receives the per-request prompt-cache observation (SetLogger);
 	// nil logs nothing.
 	logger *zap.Logger
+	// onRealUsage runs after every provider-reported usage is booked, with
+	// the tracker unlocked (SetRealUsageHook). The cache keep-alive
+	// scheduler hangs off it: a request is the moment the cache entry's
+	// timer restarts.
+	onRealUsage func(provider, model string)
 
 	// storeDir overrides the snapshot directory (per-tenant store sets);
 	// empty means the process default (costStoreDir).
@@ -395,10 +400,14 @@ func (ct *CostTracker) RecordRealUsage(provider, model string, usage *models.Usa
 	if shouldSave {
 		ct.lastSave = time.Now()
 	}
+	hook := ct.onRealUsage
 	ct.mu.Unlock()
 
 	if shouldSave {
 		_ = ct.SaveSession()
+	}
+	if hook != nil && usage.IsReal {
+		hook(provider, model)
 	}
 }
 

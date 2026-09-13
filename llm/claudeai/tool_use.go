@@ -173,6 +173,7 @@ func (c *ClaudeClient) SendPromptWithTools(ctx context.Context, prompt string, h
 		zap.String("path", "tool_use"),
 		zap.Int("response_bytes", len(respBody)),
 	)
+	c.rememberRequest(jsonValue)
 
 	response, err := parseClaudeToolResponse(respBody, c.logger)
 	if err == nil && response != nil {
