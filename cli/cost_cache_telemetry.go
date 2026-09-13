@@ -339,6 +339,12 @@ func (ct *CostTracker) promoteCacheTTLIfIdling(provider, model string) {
 	if ct.cacheTTLPromoted || ct.cache.idleExpiries == 0 {
 		return
 	}
+	// A route kept warm by keep-alive reads is cheaper on the short
+	// lifetime; the expiry that would promote it is one the scheduler
+	// let happen on purpose.
+	if llmclient.PromptCacheKeepAlivePreferred() {
+		return
+	}
 	if os.Getenv(llmclient.PromptCacheTTLEnv) != "" {
 		return
 	}
@@ -512,4 +518,15 @@ func (ct *CostTracker) logCacheObservation(obs cacheObservation) {
 		zap.String("ttl", cacheTTLFor(obs.Provider, obs.Model)),
 		zap.Duration("idle_gap", obs.IdleGap),
 		zap.String("outcome", outcome))
+}
+
+// SetRealUsageHook installs the function called after every
+// provider-reported usage is booked, outside the tracker's lock.
+func (ct *CostTracker) SetRealUsageHook(fn func(provider, model string)) {
+	if ct == nil {
+		return
+	}
+	ct.mu.Lock()
+	ct.onRealUsage = fn
+	ct.mu.Unlock()
 }

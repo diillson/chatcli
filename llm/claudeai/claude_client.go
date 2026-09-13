@@ -19,6 +19,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/andybalholm/brotli"
@@ -49,6 +50,13 @@ type ClaudeClient struct {
 	// message actually travels. Held as a pointer: the emitter is per
 	// request, and this is the handoff between the builder and the header.
 	turnScoped *client.TurnContextEmitter
+
+	// lastRequest is the body of the last request sent on the key/token
+	// paths, kept for KeepPromptCacheWarm (keepalive.go).
+	// A string, not a byte slice: the struct stays comparable, which the
+	// exported API promises.
+	lastRequestMu sync.Mutex
+	lastRequest   string
 
 	// usage holds THIS instance's most recent API usage. Read-side only:
 	// populated from response bodies/SSE events after the original
@@ -408,6 +416,7 @@ func (c *ClaudeClient) SendPrompt(ctx context.Context, prompt string, history []
 		zap.String("auth", authMode),
 		zap.Int("response_chars", len(responseText)),
 	)
+	c.rememberRequest(jsonValue)
 
 	if isOAuth {
 		if err := c.sendOAuthTitleRequest(ctx, fmt.Sprintf(oauthTitleUserWrapTmpl, prompt)); err != nil {

@@ -237,8 +237,10 @@ func (cli *ChatCLI) clearAllHistories() {
 	cli.preCompaction = nil
 	cli.resetChatPrefixMemo()
 	// The prefix is gone either way, so the ttl "auto" settled on for the
-	// old conversation is released here rather than held into the new one.
+	// old conversation is released here rather than held into the new one,
+	// and nothing is left to keep warm.
 	llmclient.ResetPromptCacheTTL()
+	cli.cancelPromptCacheKeepAlive()
 }
 
 // clearConversation is /clear: the conversation restarts empty while the
@@ -260,6 +262,7 @@ func (cli *ChatCLI) clearConversation(ctx context.Context) {
 	cli.syncTranscript()
 	cli.resetChatPrefixMemo()
 	llmclient.ResetPromptCacheTTL()
+	cli.cancelPromptCacheKeepAlive()
 	if cli.costTracker != nil {
 		cli.costTracker.NoteExpectedCacheRebuild()
 	}

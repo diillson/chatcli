@@ -152,6 +152,7 @@ var envDefaults = map[string]envDefault{
 	// ─── Resilience: compaction ──────────────────────────────────
 	"CHATCLI_CONTEXT_WINDOW":               {Value: "(auto from catalog)", Source: "catalog.GetContextWindow"},
 	"CHATCLI_PROMPT_CACHE_TTL":             {Value: "5m", Source: "llm/client/cache_prefix.go (5m|1h|auto; auto = 1h in agent/coder turns)"},
+	"CHATCLI_PROMPT_CACHE_KEEPALIVE":       {Value: "auto", Source: "cli/cache_keepalive.go (auto = refresh the 5m entry with max_tokens 0 while idle on models whose cache reads cost at most 5% of input, e.g. Fable 5.1; on = every client that can; off)"},
 	"CHATCLI_MANAGED_CONFIG":               {Value: "(/etc/chatcli/managed.env · %ProgramData%\\chatcli\\managed.env)", Source: "config/managed.go (org defaults; !KEY=value locks)"},
 	"CHATCLI_PROMPT_CACHE_EXPLICIT":        {Value: "false", Source: "llm/client/cache_resources.go (Gemini cachedContents; bills storage per token-hour)"},
 	"CHATCLI_WHATSAPP_APP_SECRET":          {Value: "", Source: "cli/gateway/whatsapp.go (Meta app secret; inbound deliveries are refused without it)"},

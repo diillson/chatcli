@@ -203,6 +203,8 @@ type ChatCLI struct {
 	// the struct so cleanup can cancel an in-flight graph run.
 	taskGraphAdapter *taskGraphAdapter
 	unattended       bool // when true, the agent runs without any interactive confirmation (gateway daemon)
+	// cacheKeepAlive schedules the prompt-cache refreshes (cache_keepalive.go).
+	cacheKeepAlive promptCacheKeepAlive
 	// policyAutoMode is the session-scoped /policy mode: when true, coder
 	// policy "ask" verdicts auto-approve (deny rules, the command validator
 	// and safety-immune operations still gate). Atomic because command
@@ -1050,6 +1052,7 @@ func NewChatCLI(ctx context.Context, manager manager.LLMManager, logger *zap.Log
 	// Initialize cost tracker
 	cli.costTracker = NewCostTracker()
 	cli.costTracker.SetLogger(cli.logger)
+	cli.costTracker.SetRealUsageHook(cli.noteRealUsageForKeepAlive)
 
 	cli.bootstrapMCP(ctx, logger)
 

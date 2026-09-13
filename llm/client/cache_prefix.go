@@ -261,6 +261,48 @@ func SetPromptCacheTTLHint(ttl string) {
 	promptCacheTTLHint.Store(ttl)
 }
 
+// HeldPromptCacheTTL returns the lifetime "auto" settled on for the
+// current conversation, or "" while it is still open. It exists so a
+// process that serves several conversations (the gateway, one store set
+// per tenant) can carry each conversation's decision across a swap:
+// the held value is part of every cache_control marker, so one tenant's
+// choice leaking into another's request rewrites that tenant's prefix.
+func HeldPromptCacheTTL() string {
+	held, _ := promptCacheTTLHeld.Load().(string)
+	return held
+}
+
+// RestorePromptCacheTTL installs a conversation's held decision ("5m",
+// "1h", or "" for still open) when that conversation is swapped back in.
+// Anything else resets to open, so a corrupt value can never pin an
+// invalid ttl.
+func RestorePromptCacheTTL(held string) {
+	switch held {
+	case "5m", "1h":
+		promptCacheTTLHeld.Store(held)
+	default:
+		promptCacheTTLHeld.Store("")
+	}
+}
+
+// promptCacheKeepAlivePreferred is set by the running surface when the
+// active model is cheaper to keep warm with periodic cache reads than
+// with the hour-long entry (see cli's keep-alive). While set, "auto"
+// resolves to the 5-minute default whatever the surface hint says, and
+// the idle-expiry promotion stands down.
+var promptCacheKeepAlivePreferred atomic.Bool
+
+// SetPromptCacheKeepAlivePreferred records whether the active model is
+// kept warm by keep-alive reads instead of the hour-long ttl.
+func SetPromptCacheKeepAlivePreferred(on bool) {
+	promptCacheKeepAlivePreferred.Store(on)
+}
+
+// PromptCacheKeepAlivePreferred reports the keep-alive preference.
+func PromptCacheKeepAlivePreferred() bool {
+	return promptCacheKeepAlivePreferred.Load()
+}
+
 // AnthropicCacheTTL returns the configured cache lifetime, normalized to
 // "5m" or "1h". "auto" resolves once per conversation from the surface
 // hint (SetPromptCacheTTLHint) and then holds; anything else resolves to
@@ -288,7 +330,7 @@ func AnthropicCacheTTL() string {
 			return held
 		}
 		resolved := "5m"
-		if v, _ := promptCacheTTLHint.Load().(string); v == "1h" {
+		if v, _ := promptCacheTTLHint.Load().(string); v == "1h" && !promptCacheKeepAlivePreferred.Load() {
 			resolved = "1h"
 		}
 		promptCacheTTLHeld.Store(resolved)

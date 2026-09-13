@@ -33,6 +33,7 @@ import (
 	"github.com/diillson/chatcli/cli/agent/workers"
 	"github.com/diillson/chatcli/cli/compress"
 	"github.com/diillson/chatcli/cli/workspace"
+	llmclient "github.com/diillson/chatcli/llm/client"
 	"github.com/diillson/chatcli/models"
 	"go.uber.org/zap"
 )
@@ -58,6 +59,12 @@ type tenantStores struct {
 	costTracker      *CostTracker
 	transcript       *transcriptJournal
 	contextBuilder   *workspace.ContextBuilder
+	// promptCacheTTL is the cache lifetime "auto" settled on for this
+	// tenant's conversation ("" while open). The value is part of every
+	// cache_control marker the adapters send, so it travels with the
+	// conversation instead of living in the process: one tenant's /coder
+	// run must not rewrite every other tenant's cached prefix.
+	promptCacheTTL string
 
 	history            []models.Message
 	checkpoints        []conversationCheckpoint
@@ -155,6 +162,7 @@ func (cli *ChatCLI) captureStores(into *tenantStores) {
 	into.preCompaction = cli.preCompaction
 	into.pendingInboundImages = cli.pendingInboundImages
 	into.lastAgentReply = cli.lastAgentReply
+	into.promptCacheTTL = llmclient.HeldPromptCacheTTL()
 	cli.recallTraceMu.Lock()
 	into.lastRecallTrace = cli.lastRecallTrace
 	cli.recallTraceMu.Unlock()
@@ -189,6 +197,7 @@ func (cli *ChatCLI) applyStores(ts *tenantStores) {
 	cli.preCompaction = ts.preCompaction
 	cli.pendingInboundImages = ts.pendingInboundImages
 	cli.lastAgentReply = ts.lastAgentReply
+	llmclient.RestorePromptCacheTTL(ts.promptCacheTTL)
 	cli.recallTraceMu.Lock()
 	cli.lastRecallTrace = ts.lastRecallTrace
 	cli.recallTraceMu.Unlock()
@@ -267,6 +276,7 @@ func (cli *ChatCLI) buildTenantStores(ctx context.Context, principal string) (*t
 	ts.compressionLayer = layer
 	ts.costTracker = NewCostTrackerAt(filepath.Join(root, "costs"))
 	ts.costTracker.SetLogger(cli.logger)
+	ts.costTracker.SetRealUsageHook(cli.noteRealUsageForKeepAlive)
 	if transcriptEnabled() {
 		dir := filepath.Join(root, transcriptDirName)
 		if err := os.MkdirAll(dir, 0o700); err == nil {
