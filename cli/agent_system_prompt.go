@@ -35,11 +35,15 @@ import (
 //	workspace    — bootstrap files + MEMORY retrieval (hint-driven)
 //	skills       — pinned + auto-activated + manual skills (query-driven)
 //
-// The per-TURN context (date, proactive recall, MCP channel pushes) is not
-// a system block at all any more: it rides as a flagged user-role message
-// before the query (turn_context.go), so the system message is byte-stable
-// across runs. channels/dynamic stay as parameters for compatibility and
-// are empty in production.
+// In production every volatile block is empty. The per-TURN context (date,
+// proactive recall, MCP channel pushes) rides as a flagged user-role
+// message before the query (turn_context.go), and the per-RUN context
+// (query-driven workspace retrieval, skills) as flagged history messages
+// appended once per run (agent_run_context.go). A volatile block inside
+// the system array sits ahead of every message, so even without a cache
+// hint a change to it rewrote the whole cached conversation on each new
+// query. The parameters stay for compatibility; the split below still
+// applies to any caller that passes them.
 //
 // Two representations are produced and kept in sync:
 //

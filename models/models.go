@@ -51,6 +51,16 @@ type MessageMeta struct {
 	// SkillCollapsed is true once ApplySkillAging reduced this skill block
 	// to a stub, so the pass never collapses the same block twice.
 	SkillCollapsed bool `json:"skill_collapsed,omitempty"`
+
+	// RunContext marks a user-role message ChatCLI injected at the start of
+	// an agent/coder run with the query-driven workspace context (memory
+	// retrieval, hint-matched rules). It used to trail the system message
+	// and change with every run, which rewrote the whole cached prefix on
+	// each new /coder query. As a plain history message it is appended once
+	// per run and read for the whole run, tool loop included — unlike a
+	// TurnContext block, which a turn-scoped provider clears at the next
+	// user message. Structural so consumers can tell it from user text.
+	RunContext bool `json:"run_context,omitempty"`
 }
 
 // SkillNameList splits the comma-separated SkillNames marker into the
@@ -210,6 +220,25 @@ const SessionSchemaVersion = 2
 // context rather than user text (see MessageMeta.TurnContext).
 func (m Message) IsTurnContext() bool {
 	return m.Meta != nil && m.Meta.TurnContext
+}
+
+// IsRunContext reports whether the message is ChatCLI-injected run
+// context rather than user text (see MessageMeta.RunContext).
+func (m Message) IsRunContext() bool {
+	return m.Meta != nil && m.Meta.RunContext
+}
+
+// IsInjectedContext reports whether ChatCLI itself wrote the message —
+// turn or run context — so consumers that learn from, search, or recall
+// what the user said can skip it in one check.
+func (m Message) IsInjectedContext() bool {
+	return m.IsTurnContext() || m.IsRunContext()
+}
+
+// RunContextMessage builds the flagged user-role message that carries a
+// run's workspace context.
+func RunContextMessage(text string) Message {
+	return Message{Role: "user", Content: text, Meta: &MessageMeta{RunContext: true}}
 }
 
 // TurnContextMessage builds the flagged user-role message that carries

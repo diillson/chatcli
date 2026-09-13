@@ -169,6 +169,9 @@ func renderTranscriptMarkdown(msgs []models.Message, session, transcriptID strin
 		if m.IsTurnContext() {
 			label = role + " · turn context (injected by ChatCLI)"
 		}
+		if m.IsRunContext() {
+			label = role + " · run context (injected by ChatCLI)"
+		}
 		fmt.Fprintf(&b, "### #%d %s\n\n", i+1, label)
 		if c := strings.TrimSpace(m.Content); c != "" {
 			b.WriteString(c + "\n\n")
