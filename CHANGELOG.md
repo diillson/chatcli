@@ -1,5 +1,19 @@
 # Changelog
 
+## [1.202.0](https://github.com/diillson/chatcli/compare/v1.201.0...v1.202.0) (2026-09-13)
+
+
+### Features
+
+* **agent:** keep the coder system prompt byte-stable across runs ([#1571](https://github.com/diillson/chatcli/issues/1571)) ([825cec0](https://github.com/diillson/chatcli/commit/825cec0b24c06071b532aef16fce1236217f6014))
+* **cache:** scope the cache lifetime per tenant and keep Fable entries warm ([#1573](https://github.com/diillson/chatcli/issues/1573)) ([c51ccd6](https://github.com/diillson/chatcli/commit/c51ccd6155c9bfe0adf48b7c3f7117a24670e0ef))
+* **cost:** honest cache accounting in /cost and a per-request cache log ([#1572](https://github.com/diillson/chatcli/issues/1572)) ([cdda3c2](https://github.com/diillson/chatcli/commit/cdda3c21c3334e438e601cab4867c699db60a0d2))
+
+
+### Bug Fixes
+
+* **agent:** stop rewriting the cached prefix on every turn of the coder loop ([#1569](https://github.com/diillson/chatcli/issues/1569)) ([68ef9f7](https://github.com/diillson/chatcli/commit/68ef9f7803c11ed2f9d2e5fcd85bf2f0e75a13e4))
+
 ## [1.201.0](https://github.com/diillson/chatcli/compare/v1.200.0...v1.201.0) (2026-09-10)
 
 
