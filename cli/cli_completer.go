@@ -1208,6 +1208,7 @@ func skillSubcommandSuggestions() []prompt.Suggest {
 		{Text: "pin", Description: i18n.T("complete.skill.sub_pin")},
 		{Text: "unpin", Description: i18n.T("complete.skill.sub_unpin")},
 		{Text: "pinned", Description: i18n.T("complete.skill.sub_pinned")},
+		{Text: "stats", Description: i18n.T("complete.skill.sub_stats")},
 		{Text: "help", Description: i18n.T("complete.skill.sub_help")},
 	}
 }

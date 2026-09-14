@@ -1,0 +1,11 @@
+{
+  "skill.help.stats": "Eficácia de cada skill: runs em que participou, turnos, tool calls e custo por run contra a baseline de todos os runs",
+  "complete.skill.sub_stats": "Eficácia das skills contra a baseline",
+  "skill.stats.header": "Eficácia das skills (por run, contra a baseline de todos os runs)",
+  "skill.stats.empty": "Nenhum run usou uma skill ainda. As estatísticas acumulam conforme runs de agent e coder ativam skills.",
+  "skill.stats.baseline": "baseline · %d runs · %s turnos · %s tool calls · %s · %s de erros",
+  "skill.stats.row": "%s (%s) · %d runs · %s turnos (%s) · %s tool calls · %s (%s) · %s de erros",
+  "skill.stats.origin_installed": "instalada",
+  "skill.stats.origin_learned": "aprendida",
+  "skill.stats.legend": "Os percentuais entre parênteses são a média da skill contra a baseline: negativo significa que os runs que a usaram foram mais curtos ou mais baratos. Uma skill aprendida que fica positiva é candidata a poda."
+}

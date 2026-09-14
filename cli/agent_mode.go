@@ -215,6 +215,9 @@ type AgentMode struct {
 	// aging collapsed its injection block (releaseCollapsedSkills). Used as
 	// a re-injection cooldown by rescanSkillsMidLoop. Reset per Run().
 	skillCollapseTurn map[string]int
+	// runStartCost is the session's total cost when the run began, so the
+	// run's own spend can be credited to the skills it used (skill_stats.go).
+	runStartCost float64
 
 	// skillCharsInjected accumulates the characters of skill guidance this
 	// Run() has injected (startup blocks + mid-loop injections). Once it
@@ -1021,6 +1024,9 @@ func (a *AgentMode) Run(ctx context.Context, query string, additionalContext str
 	// session's — every later run announced a total it had already spent
 	// most of, and the model wound down a task that had barely started.
 	a.resetPerRunState()
+	if a.cli.costTracker != nil {
+		a.runStartCost = a.cli.costTracker.TotalCost()
+	}
 
 	// Register the orchestrator itself in the process-wide run registry.
 	// Workers, subagents and MoA members spawned from this loop inherit the
@@ -1357,6 +1363,9 @@ func (a *AgentMode) Run(ctx context.Context, query string, additionalContext str
 	if err == nil {
 		a.cli.persistBoundSession()
 	}
+	// What the run cost, credited to the skills that took part in it.
+	snap := orchRun.Snapshot()
+	a.recordSkillRunOutcome(snap.Turn, snap.ToolCalls, err)
 	// Close the orchestrator's registry entry with the real outcome; the
 	// deferred End(nil) then no-ops (End is idempotent, first call wins).
 	orchRun.End(err)
