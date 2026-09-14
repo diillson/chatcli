@@ -29,9 +29,9 @@ jobs:
         # enforcement was fully paid down (misspell in PR #1055, the five
         # heavy linters in #1056, the remainder here), so the whole module
         # is enforced: debt can no longer accumulate outside PR diffs.
-        uses: golangci/golangci-lint-action@v6
+        uses: golangci/golangci-lint-action@v9
         with:
-          version: v1.64.8
+          version: v2.13.2
           install-mode: goinstall
           args: --timeout=8m
 
