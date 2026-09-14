@@ -1,5 +1,15 @@
 # Changelog
 
+## [1.203.0](https://github.com/diillson/chatcli/compare/v1.202.0...v1.203.0) (2026-09-14)
+
+
+### Features
+
+* **cache:** refresh the cache entry through long tool calls on every adapter that can ([#1574](https://github.com/diillson/chatcli/issues/1574)) ([9beff76](https://github.com/diillson/chatcli/commit/9beff76980d5c6ae66b7dc777efe117433f0dadf))
+* **cost:** persist the prompt-cache telemetry with the session and expose the write/read ratio ([#1575](https://github.com/diillson/chatcli/issues/1575)) ([c5ae4eb](https://github.com/diillson/chatcli/commit/c5ae4eb53f3e8bd16acc4a0e115de307633d6b6e))
+* **prompts:** size the reasoning block to the task in every mode prompt ([#1577](https://github.com/diillson/chatcli/issues/1577)) ([4136b44](https://github.com/diillson/chatcli/commit/4136b44d0eb4f52c4c0ae8ee1c9a07f8d7f3f79c))
+* **skills:** measure each skill against the baseline of every run ([#1578](https://github.com/diillson/chatcli/issues/1578)) ([4342140](https://github.com/diillson/chatcli/commit/43421406eaa3d470d8397319cacde57b9cdcb0d4))
+
 ## [1.202.0](https://github.com/diillson/chatcli/compare/v1.201.0...v1.202.0) (2026-09-13)
 
 
