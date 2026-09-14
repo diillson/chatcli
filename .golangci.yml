@@ -12,7 +12,7 @@
 
 run:
   timeout: 5m
-  go: "1.26"
+  go: "1.27"
   # The project still has files that predate gosec / new lint rules.
   # Diff-only enforcement (via workflow flag) prevents the gate from
   # blocking PRs over pre-existing violations.

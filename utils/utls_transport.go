@@ -11,47 +11,48 @@ import (
 	"fmt"
 	"net"
 	"net/http"
-	"sync"
 	"time"
 
 	utls "github.com/refraction-networking/utls"
-	"golang.org/x/net/http2"
 )
 
-// chromeTLSTransport is an http.RoundTripper that uses uTLS to mimic
-// Chrome's TLS fingerprint with proper HTTP/2 support.
-//
-// Go's http.Transport ignores HTTP/2 when DialTLSContext is set (it only
-// enables h2 with the standard crypto/tls package). Since Chrome's TLS
-// ClientHello includes "h2" in ALPN, servers like chatgpt.com (Cloudflare)
-// negotiate HTTP/2 — but http.Transport tries to speak HTTP/1.1, causing
-// "malformed HTTP response" errors (HTTP/2 SETTINGS frames misread as HTTP/1).
-//
-// This transport checks the ALPN result after the uTLS handshake and routes
-// to http2.Transport when "h2" is negotiated.
-type chromeTLSTransport struct {
-	mu      sync.Mutex
-	h2Conns map[string]*http2.ClientConn
-}
+// chromeTLSDialTimeout bounds the TCP connect of the Chrome-fingerprint
+// dialer; the TLS handshake itself is bounded by the request context.
+const chromeTLSDialTimeout = 10 * time.Second
+
+// chromeTLSIdleConnTimeout mirrors http.DefaultTransport so idle
+// fingerprinted connections are recycled instead of lingering forever.
+const chromeTLSIdleConnTimeout = 90 * time.Second
 
 // NewChromeTLSTransport creates an http.RoundTripper that uses a Chrome-like
 // TLS fingerprint via uTLS with automatic HTTP/1.1 / HTTP/2 support based on
 // ALPN negotiation.
+//
+// The transport is a standard http.Transport whose TLS dial is delegated to
+// uTLS. http.Transport probes the dialed connection for a ConnectionState
+// method returning crypto/tls's ConnectionState; uTLS exposes its own type,
+// so the connection is wrapped in chromeTLSConn to translate it. With that
+// translation in place the standard library sees the negotiated ALPN
+// protocol, routes "h2" connections to its bundled HTTP/2 client and keeps
+// HTTP/1.1 for everything else, with regular connection pooling for both.
 func NewChromeTLSTransport() http.RoundTripper {
-	return &chromeTLSTransport{
-		h2Conns: make(map[string]*http2.ClientConn),
+	return &http.Transport{
+		DialTLSContext:    dialChromeTLS,
+		ForceAttemptHTTP2: true,
+		IdleConnTimeout:   chromeTLSIdleConnTimeout,
 	}
 }
 
-// dialUTLS performs a raw TCP dial followed by a uTLS handshake that mimics
-// Chrome's TLS fingerprint.
-func (*chromeTLSTransport) dialUTLS(ctx context.Context, addr string) (*utls.UConn, error) {
+// dialChromeTLS performs a raw TCP dial followed by a uTLS handshake that
+// mimics Chrome's TLS fingerprint, returning the connection adapted for
+// http.Transport.
+func dialChromeTLS(ctx context.Context, network, addr string) (net.Conn, error) {
 	host, _, err := net.SplitHostPort(addr)
 	if err != nil {
 		host = addr
 	}
 
-	rawConn, err := (&net.Dialer{Timeout: 10 * time.Second}).DialContext(ctx, "tcp", addr)
+	rawConn, err := (&net.Dialer{Timeout: chromeTLSDialTimeout}).DialContext(ctx, network, addr)
 	if err != nil {
 		return nil, fmt.Errorf("dial %s: %w", addr, err)
 	}
@@ -73,62 +74,34 @@ func (*chromeTLSTransport) dialUTLS(ctx context.Context, addr string) (*utls.UCo
 		return nil, fmt.Errorf("utls handshake with %s: %w", addr, err)
 	}
 
-	return uConn, nil
+	return &chromeTLSConn{UConn: uConn}, nil
 }
 
-func (c *chromeTLSTransport) RoundTrip(req *http.Request) (*http.Response, error) {
-	addr := req.URL.Host
-	if req.URL.Port() == "" {
-		addr += ":443"
+// chromeTLSConn adapts a uTLS connection to the shape http.Transport and
+// its bundled HTTP/2 client probe on a DialTLSContext result: a
+// ConnectionState method returning crypto/tls's ConnectionState. Without
+// it the transport cannot see that the server agreed on "h2" and would
+// speak HTTP/1.1 into an HTTP/2 connection ("malformed HTTP response").
+type chromeTLSConn struct {
+	*utls.UConn
+}
+
+// ConnectionState translates the uTLS handshake state into the standard
+// library's type. Every field that exists on both sides is carried over so
+// http.Response.TLS is populated as it would be for a crypto/tls dial.
+func (c *chromeTLSConn) ConnectionState() tls.ConnectionState {
+	s := c.UConn.ConnectionState()
+	return tls.ConnectionState{
+		Version:                     s.Version,
+		HandshakeComplete:           s.HandshakeComplete,
+		DidResume:                   s.DidResume,
+		CipherSuite:                 s.CipherSuite,
+		NegotiatedProtocol:          s.NegotiatedProtocol,
+		NegotiatedProtocolIsMutual:  s.NegotiatedProtocolIsMutual,
+		ServerName:                  s.ServerName,
+		PeerCertificates:            s.PeerCertificates,
+		VerifiedChains:              s.VerifiedChains,
+		SignedCertificateTimestamps: s.SignedCertificateTimestamps,
+		OCSPResponse:                s.OCSPResponse,
 	}
-
-	// Fast path: reuse a cached HTTP/2 client connection.
-	c.mu.Lock()
-	cc := c.h2Conns[addr]
-	c.mu.Unlock()
-
-	if cc != nil {
-		if cc.CanTakeNewRequest() {
-			resp, err := cc.RoundTrip(req)
-			if err == nil {
-				return resp, nil
-			}
-		}
-		// Connection is stale or broken — evict it.
-		c.mu.Lock()
-		if c.h2Conns[addr] == cc {
-			delete(c.h2Conns, addr)
-		}
-		c.mu.Unlock()
-	}
-
-	// Dial a new uTLS connection and check negotiated ALPN protocol.
-	uConn, err := c.dialUTLS(req.Context(), addr)
-	if err != nil {
-		return nil, err
-	}
-
-	alpn := uConn.ConnectionState().NegotiatedProtocol
-
-	if alpn == "h2" {
-		// Server negotiated HTTP/2 — use http2.Transport.
-		newCC, err := (&http2.Transport{}).NewClientConn(uConn)
-		if err != nil {
-			_ = uConn.Close()
-			return nil, fmt.Errorf("h2 client conn to %s: %w", addr, err)
-		}
-		c.mu.Lock()
-		c.h2Conns[addr] = newCC
-		c.mu.Unlock()
-		return newCC.RoundTrip(req)
-	}
-
-	// HTTP/1.1 fallback: wrap the pre-dialed connection in a one-shot
-	// http.Transport so it gets used for this single request.
-	h1 := &http.Transport{
-		DialTLSContext: func(_ context.Context, _, _ string) (net.Conn, error) {
-			return uConn, nil
-		},
-	}
-	return h1.RoundTrip(req)
 }
