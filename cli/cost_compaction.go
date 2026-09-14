@@ -45,7 +45,7 @@ func (ct *CostTracker) RecordMemoryUsage(provider, model string, usage *models.U
 		return
 	}
 	cost := estimateTurnCostUSD(provider, model, usage)
-	ct.RecordRealUsage(provider, model, usage)
+	ct.RecordRealUsageIn(LaneBackground, provider, model, usage)
 	ct.mu.Lock()
 	ct.memoryCalls++
 	ct.memoryCostUSD += cost

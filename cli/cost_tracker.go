@@ -338,8 +338,40 @@ func (ct *CostTracker) ContextEditStats() (edits, toolUses int, tokens int64) {
 }
 
 func (ct *CostTracker) RecordRealUsage(provider, model string, usage *models.UsageInfo) {
+	ct.RecordRealUsageIn(LaneMain, provider, model, usage)
+}
+
+// UsageLane names the conversation a usage report belongs to. The cost
+// is booked the same way whatever the lane; what differs is the prefix
+// cache telemetry, which judges a request against the previous one of
+// the same provider and therefore must only ever see one conversation.
+// The memory worker's extraction prompt and a squad worker's own loop
+// share the provider with the main conversation but not its prefix: fed
+// into the same bucket they read as lost prefixes, inflate the write/read
+// ratio, and disarm the keep-alive.
+type UsageLane string
+
+const (
+	// LaneMain is the user's conversation: chat, agent and coder turns.
+	LaneMain UsageLane = "main"
+	// LaneBackground is ChatCLI's own housekeeping: memory extraction,
+	// rollups, memory compaction, the compaction summarizer.
+	LaneBackground UsageLane = "background"
+	// LaneWorker is a squad, taskgraph or delegate worker's own loop.
+	LaneWorker UsageLane = "worker"
+)
+
+// RecordRealUsageIn books one usage report under a lane. Every lane
+// counts toward the session's tokens and dollars; only the main lane
+// feeds the prefix-cache telemetry, the ttl promotion and the keep-alive
+// schedule, because those describe the user's conversation and nothing
+// else shares its prefix.
+func (ct *CostTracker) RecordRealUsageIn(lane UsageLane, provider, model string, usage *models.UsageInfo) {
 	if usage == nil {
 		return
+	}
+	if lane == "" {
+		lane = LaneMain
 	}
 	// Long-context tiers are per call (the record only knows totals): a
 	// call past the provider's threshold is booked at its tier price as a
@@ -376,9 +408,11 @@ func (ct *CostTracker) RecordRealUsage(provider, model string, usage *models.Usa
 	rec.CacheReadTokens += int64(usage.CacheReadInputTokens)
 	rec.CacheCreation1hTokens += int64(usage.CacheCreation1hInputTokens)
 	rec.ReasoningTokens += int64(usage.ReasoningTokens)
-	if usage.IsReal {
+	if usage.IsReal && lane == LaneMain {
 		ct.logCacheObservation(ct.cache.observe(provider, model, usage, time.Now()))
 		ct.promoteCacheTTLIfIdling(provider, model)
+	} else if usage.IsReal {
+		ct.logLaneUsage(lane, provider, model, usage)
 	}
 	if usage.CostUSD > 0 {
 		// This call's tokens are covered by the provider-billed amount —
@@ -412,7 +446,7 @@ func (ct *CostTracker) RecordRealUsage(provider, model string, usage *models.Usa
 	if shouldSave {
 		_ = ct.SaveSession()
 	}
-	if hook != nil && usage.IsReal {
+	if hook != nil && usage.IsReal && lane == LaneMain {
 		hook(provider, model)
 	}
 }

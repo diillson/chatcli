@@ -555,3 +555,21 @@ func (ct *CostTracker) SetRealUsageHook(fn func(provider, model string)) {
 	ct.onRealUsage = fn
 	ct.mu.Unlock()
 }
+
+// logLaneUsage is the per-request line for a lane the prefix telemetry
+// does not judge: the raw buckets, so the memory worker's or a worker's
+// own cache behavior stays visible in the log without being read as the
+// main conversation losing its prefix.
+func (ct *CostTracker) logLaneUsage(lane UsageLane, provider, model string, u *models.UsageInfo) {
+	if ct == nil || ct.logger == nil || u == nil {
+		return
+	}
+	ct.logger.Debug("usage booked outside the main conversation",
+		zap.String("lane", string(lane)),
+		zap.String("provider", provider),
+		zap.String("model", model),
+		zap.Int("prompt", u.PromptTokens),
+		zap.Int("cache_read", u.CacheReadInputTokens),
+		zap.Int("cache_write", u.CacheCreationInputTokens),
+		zap.Int("output", u.CompletionTokens))
+}
