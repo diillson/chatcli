@@ -150,16 +150,16 @@ jobs:
         # module — in the change that flipped this), so enforcement covers
         # the whole tree: pre-existing debt can no longer accumulate
         # silently outside PR diffs.
-        uses: golangci/golangci-lint-action@v6
+        uses: golangci/golangci-lint-action@v9
         with:
-          version: v1.64.8
+          version: v2.13.2
           install-mode: goinstall
           args: --timeout=8m
 
       - name: golangci-lint (operator, full module)
-        uses: golangci/golangci-lint-action@v6
+        uses: golangci/golangci-lint-action@v9
         with:
-          version: v1.64.8
+          version: v2.13.2
           install-mode: goinstall
           working-directory: operator
           args: --timeout=8m

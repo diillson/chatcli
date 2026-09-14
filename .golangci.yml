@@ -1,4 +1,4 @@
-# golangci-lint config for chatcli.
+# golangci-lint config for chatcli (golangci-lint v2 format).
 #
 # Strategy: enable the linters whose findings have caught real bugs in
 # the past (errcheck/govet/staticcheck/revive) plus a few quality-of-life
@@ -10,27 +10,24 @@
 # modules. New debt fails the gate immediately instead of accumulating
 # outside PR diffs.
 
+version: "2"
+
 run:
-  timeout: 5m
   go: "1.27"
-  # The project still has files that predate gosec / new lint rules.
-  # Diff-only enforcement (via workflow flag) prevents the gate from
-  # blocking PRs over pre-existing violations.
 
 linters:
   # Disable defaults explicitly so the enabled set is auditable.
-  disable-all: true
+  default: none
   enable:
     # Defaults — proven worth across the codebase.
     - errcheck
     - govet
     - ineffassign
+    # staticcheck in v2 also carries the former gosimple (S1*) checks
+    # plus the style (ST*) and quickfix (QF*) families; see settings.
     - staticcheck
-    - gosimple
     - unused
     # Doc-comments on exported identifiers (revive's `exported` rule).
-    # Most legacy code does not have them; --new-from-rev keeps the
-    # gate from blocking pre-existing functions.
     - revive
     # Catches misspellings in identifiers, strings and comments. Cheap
     # and surprisingly effective on AI-generated code.
@@ -53,111 +50,115 @@ linters:
     # Cyclomatic complexity at the linter level (Floor 8 is finer-grained
     # diff-only; keep this here as a defense-in-depth signal).
     - gocyclo
-
-linters-settings:
-  revive:
-    severity: warning
+  settings:
+    staticcheck:
+      # golangci-lint's default set: every SA/S1/ST/QF check except the
+      # six doc-comment and naming style rules (ST1000, ST1003, ST1016,
+      # ST1020, ST1021, ST1022) that golangci disables out of the box.
+      # Quickfix (QF*) and the remaining style (ST*) checks are new
+      # relative to the v1 gate and were paid down in PR #1597.
+      checks:
+        - all
+        - -ST1000
+        - -ST1003
+        - -ST1016
+        - -ST1020
+        - -ST1021
+        - -ST1022
+    errorlint:
+      errorf: true
+      asserts: true
+      comparison: true
+    gocyclo:
+      min-complexity: 30
+    misspell:
+      locale: US
+      ignore-rules:
+        - alternar
+        - argumentos
+        - autor
+        - calcular
+        - cancelled
+        - cancelling
+        - clientes
+        - comando
+        - comandos
+        - contextos
+        - correspondente
+        - devolvendo
+        - duplicatas
+        - eles
+        - essencial
+        - exclusivos
+        - exponencial
+        - instal
+        - operacional
+        - presentes
+        - prestes
+        - problemas
+        - processos
+        - profissional
+        - progresso
+        - resolvemos
+        - sucess
+        - tradicional
+        - validade
+        - variantes
+    prealloc:
+      simple: true
+      range-loops: true
+      for-loops: false
+    revive:
+      severity: warning
+      rules:
+        - name: exported
+          arguments:
+            - checkPrivateReceivers
+            - disableStutteringCheck
+        - name: package-comments
+        - name: var-naming
+        - name: indent-error-flow
+        - name: redefines-builtin-id
+        - name: empty-block
+        - name: superfluous-else
+        - name: confusing-naming
+        - name: error-naming
+        - name: error-return
+        - name: error-strings
+        - name: receiver-naming
+        - name: unreachable-code
+        - name: blank-imports
+  exclusions:
+    generated: lax
+    presets:
+      - comments
+      - common-false-positives
+      - legacy
+      - std-error-handling
     rules:
-      - name: exported
-        # Require doc comments on exported funcs/types. Disabled
-        # initialisms check (Go's acronym-aware Pascal is enough).
-        arguments:
-          - "checkPrivateReceivers"
-          - "disableStutteringCheck"
-      - name: package-comments
-      - name: var-naming
-      - name: indent-error-flow
-      - name: redefines-builtin-id
-      - name: empty-block
-      - name: superfluous-else
-      - name: confusing-naming
-      - name: error-naming
-      - name: error-return
-      - name: error-strings
-      - name: receiver-naming
-      - name: unreachable-code
-      - name: blank-imports
-
-  gocyclo:
-    # Match the Floor 8 budget. Anything above this is a refactor target
-    # the linter surfaces inline (Floor 8 still blocks the gate).
-    min-complexity: 30
-
-  errorlint:
-    errorf: true
-    asserts: true
-    comparison: true
-
-  prealloc:
-    simple: true
-    range-loops: true
-    for-loops: false
-
-  misspell:
-    locale: US
-    # ChatCLI is a bilingual (pt-BR/en) codebase: comments, log messages and
-    # i18n bodies are routinely Portuguese. The US dictionary reads many
-    # legitimate Portuguese words as English typos ("comando" -> "commando",
-    # "contextos" -> "contexts", ...). ignore-words whitelists those so the
-    # linter only flags genuine English mistakes — without it, every future
-    # edit to a Portuguese line gets a false positive.
-    #
-    # A few entries are deliberate ENGLISH vocabulary, not Portuguese:
-    #   - cancelled / cancelling: the scheduler's serialized job state
-    #     (StatusCancelled, the "job.cancelled" event) — renaming would break
-    #     persisted state and the event contract.
-    #   - instal: a fragment of the Portuguese regex alternative `instal[ae]r?`
-    #     in cli/agent_routing.go; "fixing" it would corrupt the pattern.
-    ignore-words:
-      - alternar
-      - argumentos
-      - autor
-      - calcular
-      - cancelled
-      - cancelling
-      - clientes
-      - comando
-      - comandos
-      - contextos
-      - correspondente
-      - devolvendo
-      - duplicatas
-      - eles
-      - essencial
-      - exclusivos
-      - exponencial
-      - instal
-      - operacional
-      - presentes
-      - prestes
-      - problemas
-      - processos
-      - profissional
-      - progresso
-      - resolvemos
-      - sucess
-      - tradicional
-      - validade
-      - variantes
-
+      - linters:
+          - gocyclo
+          - prealloc
+          - revive
+        path: _test\.go
+      - linters:
+          - revive
+        path: tools/qg/cmd/.*main\.go
+        text: package-comments
+    paths:
+      - vendor
+      - tools/docgen
+      - proto
+      - third_party$
+      - builtin$
+      - examples$
 issues:
-  # Don't enforce on generated files.
-  exclude-dirs:
-    - vendor
-    - tools/docgen
-    - proto
-  exclude-rules:
-    # Test code: relax the docstring rule and let table-driven tests
-    # use anonymous structs freely.
-    - path: _test\.go
-      linters:
-        - revive
-        - prealloc
-        - gocyclo
-    # Generated coverage helpers do not need docstrings.
-    - path: tools/qg/cmd/.*main\.go
-      linters:
-        - revive
-      text: "package-comments"
   max-issues-per-linter: 0
   max-same-issues: 0
+formatters:
+  exclusions:
+    generated: lax
+    paths:
+      - third_party$
+      - builtin$
+      - examples$
