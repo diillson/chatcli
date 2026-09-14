@@ -7,5 +7,8 @@
   "skill.stats.row": "%s (%s) · %d runs · %s turnos (%s) · %s tool calls · %s (%s) · %s de erros",
   "skill.stats.origin_installed": "instalada",
   "skill.stats.origin_learned": "aprendida",
-  "skill.stats.legend": "Os percentuais entre parênteses são a média da skill contra a baseline: negativo significa que os runs que a usaram foram mais curtos ou mais baratos. Uma skill aprendida que fica positiva é candidata a poda."
+  "skill.stats.legend": "Os percentuais entre parênteses são a média da skill contra a baseline: negativo significa que os runs que a usaram foram mais curtos ou mais baratos. Uma skill aprendida que fica positiva é candidata a poda.",
+  "skill.stats.used": "tools usadas em %d de %d runs",
+  "skill.stats.unmeasured": "uso de tools não declarado",
+  "selfevolve.notice.redirected": "incorporada a uma skill existente: %s"
 }

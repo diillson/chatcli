@@ -11,6 +11,8 @@
  */
 package cli
 
+import "strings"
+
 // noteRunTurn records the loop turn the run is on.
 func (a *AgentMode) noteRunTurn(turn, maxTurns int) {
 	if a == nil {
@@ -18,6 +20,27 @@ func (a *AgentMode) noteRunTurn(turn, maxTurns int) {
 	}
 	a.runTurns = turn
 	a.orchRun.SetTurn(turn, maxTurns)
+}
+
+// noteRunToolName records a tool the run executed, by plugin name.
+func (a *AgentMode) noteRunToolName(name string) {
+	if a == nil {
+		return
+	}
+	name = normalizeToolName(name)
+	if name == "" {
+		return
+	}
+	if a.runToolNames == nil {
+		a.runToolNames = map[string]bool{}
+	}
+	a.runToolNames[name] = true
+}
+
+// normalizeToolName lowercases a tool name and drops the @ prefix, so a
+// skill's allowed-tools list and the executed name compare alike.
+func normalizeToolName(name string) string {
+	return strings.TrimPrefix(strings.ToLower(strings.TrimSpace(name)), "@")
 }
 
 // noteRunToolCalls adds tool calls the run just executed.

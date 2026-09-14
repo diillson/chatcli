@@ -7,5 +7,8 @@
   "skill.stats.row": "%s (%s) · %d runs · %s turns (%s) · %s tool calls · %s (%s) · %s errors",
   "skill.stats.origin_installed": "installed",
   "skill.stats.origin_learned": "learned",
-  "skill.stats.legend": "Percentages in parentheses are the skill's average against the baseline: negative means the runs that used it were shorter or cheaper. A learned skill that stays positive is a candidate for pruning."
+  "skill.stats.legend": "Percentages in parentheses are the skill's average against the baseline: negative means the runs that used it were shorter or cheaper. A learned skill that stays positive is a candidate for pruning.",
+  "skill.stats.used": "tools used in %d of %d runs",
+  "skill.stats.unmeasured": "tool use not declared",
+  "selfevolve.notice.redirected": "folded into an existing skill: %s"
 }

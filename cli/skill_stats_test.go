@@ -18,9 +18,9 @@ func TestSkillStatsLedgerRecordsAndRoundTrips(t *testing.T) {
 	path := filepath.Join(t.TempDir(), skillStatsFile)
 	l := loadSkillStatsAt(path)
 	now := time.Date(2026, 9, 13, 12, 0, 0, 0, time.UTC)
-	l.recordRun([]string{"alpha", " ", "beta"}, 4, 6, 0.20, true, now)
-	l.recordRun(nil, 2, 1, 0.05, true, now.Add(time.Minute))
-	l.recordRun([]string{"alpha"}, 8, 10, -1, false, now.Add(2*time.Minute)) // a negative cost clamps to zero
+	l.recordRun([]string{"alpha", " ", "beta"}, 4, 6, 0.20, true, now, nil)
+	l.recordRun(nil, 2, 1, 0.05, true, now.Add(time.Minute), nil)
+	l.recordRun([]string{"alpha"}, 8, 10, -1, false, now.Add(2*time.Minute), nil) // a negative cost clamps to zero
 
 	if l.Baseline.Runs != 3 || l.Baseline.RunsOK != 2 || l.Baseline.Turns != 14 {
 		t.Fatalf("baseline = %+v", l.Baseline)
@@ -53,7 +53,7 @@ func TestSkillStatsLedgerRecordsAndRoundTrips(t *testing.T) {
 		t.Fatal("a ledger without a path saves nothing and never errors")
 	}
 	var none *skillStatsLedger
-	none.recordRun([]string{"x"}, 1, 1, 1, true, now)
+	none.recordRun([]string{"x"}, 1, 1, 1, true, now, nil)
 	if none.save() != nil {
 		t.Fatal("nil ledger")
 	}
@@ -64,9 +64,9 @@ func TestSkillStatsLedgerRecordsAndRoundTrips(t *testing.T) {
 func TestRenderSkillStats(t *testing.T) {
 	l := loadSkillStatsAt("")
 	now := time.Now()
-	l.recordRun([]string{"flamengo-match-info"}, 2, 1, 0.08, true, now)
-	l.recordRun([]string{"go-refactor"}, 12, 20, 1.20, false, now)
-	l.recordRun(nil, 6, 8, 0.50, true, now)
+	l.recordRun([]string{"flamengo-match-info"}, 2, 1, 0.08, true, now, nil)
+	l.recordRun([]string{"go-refactor"}, 12, 20, 1.20, false, now, nil)
+	l.recordRun(nil, 6, 8, 0.50, true, now, nil)
 	learned := map[string]string{"flamengo-match-info": "hash"}
 
 	lines := renderSkillStats(l, learned, "")
