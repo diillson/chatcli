@@ -215,6 +215,9 @@ type AgentMode struct {
 	// aging collapsed its injection block (releaseCollapsedSkills). Used as
 	// a re-injection cooldown by rescanSkillsMidLoop. Reset per Run().
 	skillCollapseTurn map[string]int
+	// runStartCost is the session's total cost when the run began, so the
+	// run's own spend can be credited to the skills it used (skill_stats.go).
+	runStartCost float64
 
 	// skillCharsInjected accumulates the characters of skill guidance this
 	// Run() has injected (startup blocks + mid-loop injections). Once it
@@ -967,6 +970,12 @@ func (a *AgentMode) resetPerRunState() {
 		return
 	}
 	a.taskBudgetTotal = 0
+	// The session's spend when this run begins, so the run's own cost can
+	// be credited to the skills it uses (skill_stats.go).
+	a.runStartCost = 0
+	if a.cli != nil && a.cli.costTracker != nil {
+		a.runStartCost = a.cli.costTracker.TotalCost()
+	}
 }
 
 // effectiveRoute reports the provider and model that actually serve the
@@ -1357,6 +1366,9 @@ func (a *AgentMode) Run(ctx context.Context, query string, additionalContext str
 	if err == nil {
 		a.cli.persistBoundSession()
 	}
+	// What the run cost, credited to the skills that took part in it.
+	snap := orchRun.Snapshot()
+	a.recordSkillRunOutcome(snap.Turn, snap.ToolCalls, err)
 	// Close the orchestrator's registry entry with the real outcome; the
 	// deferred End(nil) then no-ops (End is idempotent, first call wins).
 	orchRun.End(err)

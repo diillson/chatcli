@@ -162,6 +162,13 @@ func (sh *SkillHandler) HandleCommand(ctx context.Context, userInput string) {
 	case "pinned":
 		sh.ShowPinned()
 
+	case "stats":
+		filter := ""
+		if len(args) > 2 {
+			filter = args[2]
+		}
+		sh.ShowStats(filter)
+
 	case "help":
 		sh.ShowHelp()
 
@@ -1169,6 +1176,7 @@ func (sh *SkillHandler) ShowHelp() {
 		{"/skill pin <name>", i18n.T("skill.help.pin")},
 		{"/skill unpin <name>", i18n.T("skill.help.unpin")},
 		{"/skill pinned", i18n.T("skill.help.pinned")},
+		{"/skill stats [name]", i18n.T("skill.help.stats")},
 		{"/skill help", i18n.T("skill.help.show_help")},
 	}
 

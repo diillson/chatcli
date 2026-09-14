@@ -1,0 +1,11 @@
+{
+  "skill.help.stats": "Effectiveness of each skill: runs it took part in, turns, tool calls and cost per run against the baseline of every run",
+  "complete.skill.sub_stats": "Skill effectiveness against the baseline",
+  "skill.stats.header": "Skill effectiveness (per run, against the baseline of every run)",
+  "skill.stats.empty": "No run has used a skill yet. Stats accumulate as agent and coder runs activate skills.",
+  "skill.stats.baseline": "baseline · %d runs · %s turns · %s tool calls · %s · %s errors",
+  "skill.stats.row": "%s (%s) · %d runs · %s turns (%s) · %s tool calls · %s (%s) · %s errors",
+  "skill.stats.origin_installed": "installed",
+  "skill.stats.origin_learned": "learned",
+  "skill.stats.legend": "Percentages in parentheses are the skill's average against the baseline: negative means the runs that used it were shorter or cheaper. A learned skill that stays positive is a candidate for pruning."
+}
