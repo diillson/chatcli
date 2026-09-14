@@ -1,5 +1,20 @@
 # Changelog
 
+## [1.204.0](https://github.com/diillson/chatcli/compare/v1.203.0...v1.204.0) (2026-09-14)
+
+
+### Features
+
+* **cost:** attribute every lost prefix to the request region that changed ([#1582](https://github.com/diillson/chatcli/issues/1582)) ([ca5d12c](https://github.com/diillson/chatcli/commit/ca5d12ce6da5c5f411456f8da30fca17c1dd0b99))
+* **memory:** cache-shaped extraction request and the memory balance in /cost ([#1580](https://github.com/diillson/chatcli/issues/1580)) ([df2fa77](https://github.com/diillson/chatcli/commit/df2fa776a2b18104ca36c5fea367889e9ad98362))
+* **prompts:** bind specific claims to tool evidence in every mode prompt ([#1583](https://github.com/diillson/chatcli/issues/1583)) ([0c91438](https://github.com/diillson/chatcli/commit/0c91438e149748ddde0462fc76102789ed0556b7))
+* **skills:** generalize learned skills at authoring time and measure tool use per run ([#1584](https://github.com/diillson/chatcli/issues/1584)) ([e430ae3](https://github.com/diillson/chatcli/commit/e430ae3805e01b556789d651c5b9b798c7c3c4ee))
+
+
+### Bug Fixes
+
+* **cost:** keep background and worker traffic out of the prefix telemetry and count the orchestrator's own progress ([#1579](https://github.com/diillson/chatcli/issues/1579)) ([9a08e97](https://github.com/diillson/chatcli/commit/9a08e97aadd274623b5d2c686da1e8bf1a81b2ce))
+
 ## [1.203.0](https://github.com/diillson/chatcli/compare/v1.202.0...v1.203.0) (2026-09-14)
 
 
