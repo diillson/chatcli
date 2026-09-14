@@ -970,6 +970,12 @@ func (a *AgentMode) resetPerRunState() {
 		return
 	}
 	a.taskBudgetTotal = 0
+	// The session's spend when this run begins, so the run's own cost can
+	// be credited to the skills it uses (skill_stats.go).
+	a.runStartCost = 0
+	if a.cli != nil && a.cli.costTracker != nil {
+		a.runStartCost = a.cli.costTracker.TotalCost()
+	}
 }
 
 // effectiveRoute reports the provider and model that actually serve the
@@ -1024,9 +1030,6 @@ func (a *AgentMode) Run(ctx context.Context, query string, additionalContext str
 	// session's — every later run announced a total it had already spent
 	// most of, and the model wound down a task that had barely started.
 	a.resetPerRunState()
-	if a.cli.costTracker != nil {
-		a.runStartCost = a.cli.costTracker.TotalCost()
-	}
 
 	// Register the orchestrator itself in the process-wide run registry.
 	// Workers, subagents and MoA members spawned from this loop inherit the

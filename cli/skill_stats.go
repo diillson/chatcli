@@ -257,7 +257,7 @@ func renderSkillStats(l *skillStatsLedger, learned map[string]string, filter str
 		}
 		rows = kept
 	}
-	var out []string
+	out := make([]string, 0, len(rows)+1)
 	if len(rows) == 0 {
 		return append(out, i18n.T("skill.stats.empty"))
 	}
