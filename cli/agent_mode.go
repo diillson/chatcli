@@ -1029,16 +1029,17 @@ func (a *AgentMode) Run(ctx context.Context, query string, additionalContext str
 	orchCtx, orchRun := a.beginOrchestratorRun(ctx, query, systemPromptOverride)
 	ctx = orchCtx
 
-	// CHATCLI_PROMPT_CACHE_TTL=auto: the agent/coder loop prefers the hour
-	// (long sessions that pause between tool rounds); chat and one-shot
-	// keep the 5-minute default, restored when this run ends.
-	//
-	// This states a preference; it no longer changes a conversation that
-	// already resolved one. The ttl is part of the cache_control marker,
-	// so flipping it mid-conversation rewrote the prefix and threw away
-	// the cache on every crossing between chat and the loop.
-	llmclient.SetPromptCacheTTLHint("1h")
-	defer llmclient.SetPromptCacheTTLHint("5m")
+	// CHATCLI_PROMPT_CACHE_TTL=auto used to resolve to the hour here, up
+	// front, on the bet that a coder run pauses between tool rounds. A
+	// two-request run paid the doubled write for nothing. The loop now
+	// keeps the evidence-based lifetime every surface uses: the 5-minute
+	// entry until the session has watched its own prefix expire during a
+	// pause the hour would have covered (promoteCacheTTLIfIdling), and a
+	// keep-alive refresh while a tool call runs past the lifetime
+	// (cache_keepalive.go), which is what made the up-front bet
+	// unnecessary. An explicit CHATCLI_PROMPT_CACHE_TTL=1h still wins.
+	a.cli.setKeepAliveRun(true)
+	defer a.cli.setKeepAliveRun(false)
 	defer func() {
 		orchRun.End(nil)
 	}()

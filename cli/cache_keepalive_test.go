@@ -68,11 +68,13 @@ func TestKeepAliveAppliesByReadPrice(t *testing.T) {
 	}
 }
 
-// Every booked request restarts the schedule for a qualifying route and
-// pins the short lifetime; a route that stops qualifying cancels it.
+// Every booked request restarts the schedule on the short lifetime. A
+// cheap-read route also pins the 5-minute entry; on any other route the
+// timer still runs, because inside a run it is the signal that a tool
+// call is outliving the entry.
 func TestKeepAliveArmsFromBookedUsageAndPinsShortTTL(t *testing.T) {
 	cli := keepAliveCLI(t)
-	llmclient.SetPromptCacheTTLHint("1h") // what a coder run asks for
+	llmclient.SetPromptCacheTTLHint("1h") // what a surface may still ask for
 	cli.costTracker.RecordRealUsage("CLAUDEAI", "claude-fable-5-1", realUsage(100, 0, 30000))
 	ka := &cli.cacheKeepAlive
 	ka.mu.Lock()
@@ -86,10 +88,52 @@ func TestKeepAliveArmsFromBookedUsageAndPinsShortTTL(t *testing.T) {
 	}
 	cli.costTracker.RecordRealUsage("CLAUDEAI", "claude-sonnet-5", realUsage(100, 0, 30000))
 	ka.mu.Lock()
-	stillArmed := ka.timer != nil
+	stillArmed := ka.timer != nil && ka.model == "claude-sonnet-5"
 	ka.mu.Unlock()
-	if stillArmed || llmclient.PromptCacheKeepAlivePreferred() {
-		t.Fatal("a route that does not qualify cancels the schedule")
+	if !stillArmed || llmclient.PromptCacheKeepAlivePreferred() {
+		t.Fatal("a Sonnet request keeps the timer for the long-operation case but drops the idle preference")
+	}
+	// On the hour-long entry there is nothing to refresh.
+	t.Setenv(llmclient.PromptCacheTTLEnv, "1h")
+	cli.costTracker.RecordRealUsage("CLAUDEAI", "claude-sonnet-5", realUsage(100, 0, 30000))
+	ka.mu.Lock()
+	hourArmed := ka.timer != nil
+	ka.mu.Unlock()
+	if hourArmed {
+		t.Fatal("an hour-long entry must not be refreshed")
+	}
+}
+
+// Inside a run every capable route refreshes: the timer firing there
+// means a tool call is outliving the entry. Outside a run only a
+// cheap-read route does.
+func TestKeepAliveRefreshesLongToolCallsOnEveryRoute(t *testing.T) {
+	cli := keepAliveCLI(t)
+	wc := &warmClient{}
+	cli.Client = wc
+	fire := func() bool {
+		cli.armPromptCacheKeepAlive("OPENAI", "gpt-5.6", 0)
+		cli.cacheKeepAlive.mu.Lock()
+		gen := cli.cacheKeepAlive.gen
+		cli.cacheKeepAlive.mu.Unlock()
+		return cli.firePromptCacheKeepAlive(gen)
+	}
+	if fire() || wc.calls != 0 {
+		t.Fatal("idle on a route with ordinary read prices: no refresh")
+	}
+	cli.setKeepAliveRun(true)
+	if !fire() || wc.calls != 1 {
+		t.Fatal("inside a run the entry is outliving a tool call: refresh on any route")
+	}
+	cli.setKeepAliveRun(false)
+	t.Setenv(PromptCacheKeepAliveEnv, "on")
+	if !fire() || wc.calls != 2 {
+		t.Fatal("on forces the idle refresh on every capable route")
+	}
+	t.Setenv(PromptCacheKeepAliveEnv, "off")
+	cli.setKeepAliveRun(true)
+	if cli.keepAliveArmed() {
+		t.Fatal("off never arms")
 	}
 }
 

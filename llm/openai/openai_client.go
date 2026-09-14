@@ -38,6 +38,9 @@ type OpenAIClient struct {
 	maxAttempts int
 	backoff     time.Duration
 	usageState  client.UsageState
+	// lastRequest remembers the body of the last request for
+	// KeepPromptCacheWarm (keepalive.go).
+	lastRequest client.LastRequestKeeper
 }
 
 // LastUsage returns the token usage from the most recent API call.
@@ -173,6 +176,7 @@ func (c *OpenAIClient) SendPrompt(ctx context.Context, prompt string, history []
 	client.LogRequestFinish(c.logger, "OPENAI", c.model, "success", time.Since(start),
 		zap.Int("response_chars", len(response)),
 	)
+	c.lastRequest.Remember(jsonValue)
 	return response, nil
 }
 

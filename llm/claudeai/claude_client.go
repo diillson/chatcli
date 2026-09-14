@@ -19,7 +19,6 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/andybalholm/brotli"
@@ -53,10 +52,9 @@ type ClaudeClient struct {
 
 	// lastRequest is the body of the last request sent on the key/token
 	// paths, kept for KeepPromptCacheWarm (keepalive.go).
-	// A string, not a byte slice: the struct stays comparable, which the
-	// exported API promises.
-	lastRequestMu sync.Mutex
-	lastRequest   string
+	// lastRequest remembers the body of the last key/token request for
+	// KeepPromptCacheWarm (keepalive.go).
+	lastRequest client.LastRequestKeeper
 
 	// usage holds THIS instance's most recent API usage. Read-side only:
 	// populated from response bodies/SSE events after the original
