@@ -272,6 +272,23 @@ func HeldPromptCacheTTL() string {
 	return held
 }
 
+// PromptCacheTTLIfResolved reports the lifetime in effect WITHOUT
+// resolving it: the explicit env value when one is set, the held "auto"
+// decision when the conversation already made one, and "" while "auto"
+// is still open. Readers that only describe state (a snapshot, a log
+// line) use this; AnthropicCacheTTL is for the request that needs a
+// value now, because reading it settles the conversation's decision.
+func PromptCacheTTLIfResolved() string {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv(PromptCacheTTLEnv))) {
+	case "1h", "60m", "hour":
+		return "1h"
+	case "auto", "":
+		return HeldPromptCacheTTL()
+	default:
+		return "5m"
+	}
+}
+
 // RestorePromptCacheTTL installs a conversation's held decision ("5m",
 // "1h", or "" for still open) when that conversation is swapped back in.
 // Anything else resets to open, so a corrupt value can never pin an

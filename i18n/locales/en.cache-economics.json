@@ -9,5 +9,7 @@
   "cost.cmd.econ_net": "Net savings:",
   "cost.cmd.econ_without": "Without cache:",
   "cost.cmd.econ_without_note": "actual %s · %s saved",
-  "cost.cmd.cache_health": "Prompt cache: %d requests · %s of input from cache · %d unstable misses · %d expired · %d expected rebuilds"
+  "cost.cmd.cache_health": "Prompt cache: %d requests · %s of input from cache · %d unstable misses · %d expired · %d expected rebuilds",
+  "cost.cmd.cache_ratio": "write/read ratio %s (cache writes over cache reads; a prefix that only grows stays well under 1)",
+  "cost.cmd.sessions_cache_row": "cache: %s hit · write/read %s · %d unstable misses · %d expired · %d expected rebuilds · TTL %s"
 }

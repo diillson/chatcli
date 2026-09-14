@@ -121,6 +121,9 @@ func (cli *ChatCLI) handleCostSessions() {
 				formatTokenCount64(snap.TotalTokens),
 				fmt.Sprintf("$%.4f", snap.TotalCostUSD)),
 			ColorGray))
+		if line := sessionCacheRow(snap.Cache); line != "" {
+			fmt.Println(p + "    " + colorize(line, ColorGray))
+		}
 	}
 	fmt.Println(uiBoxEnd(ColorCyan))
 	fmt.Println()
@@ -323,6 +326,9 @@ func (cli *ChatCLI) renderCostSummary() {
 		fmt.Println(p + colorize("  "+i18n.T("cost.cmd.cache_health",
 			stats.Requests, fmt.Sprintf("%.0f%%", stats.HitPct), stats.Misses, stats.Expired, stats.Rebuilds), ColorCyan) +
 			" " + colorize(state, ColorGray))
+		if stats.WriteReadRatio > 0 {
+			fmt.Println(p + colorize("  "+i18n.T("cost.cmd.cache_ratio", fmt.Sprintf("%.2f", stats.WriteReadRatio)), ColorGray))
+		}
 	}
 	fmt.Println(p)
 
@@ -485,6 +491,19 @@ func unpricedModelsLocked(ct *CostTracker) []string {
 	}
 	sort.Strings(out)
 	return out
+}
+
+// sessionCacheRow renders a persisted session's cache record for the
+// listing: hit share, write/read ratio and how the prefix was lost, so
+// sessions can be compared on prefix stability at a glance. Empty when
+// the session carried no cache record.
+func sessionCacheRow(c *CacheTelemetrySnapshot) string {
+	if c == nil || c.Requests == 0 {
+		return ""
+	}
+	return i18n.T("cost.cmd.sessions_cache_row",
+		fmt.Sprintf("%.0f%%", c.HitPct), fmt.Sprintf("%.2f", c.WriteReadRatio),
+		c.Misses, c.Expired, c.Rebuilds, c.TTL)
 }
 
 // cacheEconomics is the session's cache balance in dollars: what the

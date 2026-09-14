@@ -9,5 +9,7 @@
   "cost.cmd.econ_net": "Economia líquida:",
   "cost.cmd.econ_without": "Sem cache:",
   "cost.cmd.econ_without_note": "real %s · %s economizado",
-  "cost.cmd.cache_health": "Cache de prompt: %d requisições · %s do input vindo do cache · %d misses instáveis · %d expirados · %d rebuilds esperados"
+  "cost.cmd.cache_health": "Cache de prompt: %d requisições · %s do input vindo do cache · %d misses instáveis · %d expirados · %d rebuilds esperados",
+  "cost.cmd.cache_ratio": "razão write/read %s (escritas sobre leituras de cache; um prefixo que só cresce fica bem abaixo de 1)",
+  "cost.cmd.sessions_cache_row": "cache: %s de acerto · write/read %s · %d misses instáveis · %d expirados · %d rebuilds esperados · TTL %s"
 }
