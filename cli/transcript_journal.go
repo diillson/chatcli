@@ -83,7 +83,7 @@ type transcriptJournal struct {
 // transcriptEnabled honors CHATCLI_SESSION_TRANSCRIPT (default on).
 func transcriptEnabled() bool {
 	v := strings.ToLower(strings.TrimSpace(os.Getenv(TranscriptEnv)))
-	return !(v == "false" || v == "0" || v == "off" || v == "no")
+	return v != "false" && v != "0" && v != "off" && v != "no"
 }
 
 // newTranscriptID mints a sortable, collision-safe journal id.

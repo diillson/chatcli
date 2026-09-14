@@ -206,8 +206,9 @@ func WrapStreamLine(line string, width int) []string {
 // continuações — usada em output cru de tool (YAML/JSON/tabelas), onde
 // colapsar whitespace como o word-wrap de prosa destruiria o layout.
 func WrapPreserve(text string, limit int) []string {
-	var out []string
-	for _, line := range strings.Split(text, "\n") {
+	lines := strings.Split(text, "\n")
+	out := make([]string, 0, len(lines))
+	for _, line := range lines {
 		out = append(out, WrapStreamLine(line, limit)...)
 	}
 	return out

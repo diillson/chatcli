@@ -838,21 +838,21 @@ func (r *LogAnalysisResult) writeStackTraces(sb *strings.Builder) {
 	sb.WriteString("### Stack Traces Found\n")
 	for i, t := range r.StackTraces {
 		if i >= 5 {
-			sb.WriteString(fmt.Sprintf("... and %d more stack traces\n", len(r.StackTraces)-5))
+			fmt.Fprintf(sb, "... and %d more stack traces\n", len(r.StackTraces)-5)
 			break
 		}
-		sb.WriteString(fmt.Sprintf("\n**[%s] %s: %s** (pod=%s, container=%s, occurrences=%d)\n",
-			t.Language, t.ExceptionType, t.Message, t.PodName, t.ContainerName, t.OccurrenceCount))
+		fmt.Fprintf(sb, "\n**[%s] %s: %s** (pod=%s, container=%s, occurrences=%d)\n",
+			t.Language, t.ExceptionType, t.Message, t.PodName, t.ContainerName, t.OccurrenceCount)
 		// Show top 10 frames
 		maxFrames := 10
 		if len(t.Frames) < maxFrames {
 			maxFrames = len(t.Frames)
 		}
 		for _, f := range t.Frames[:maxFrames] {
-			sb.WriteString(fmt.Sprintf("  %s\n", f))
+			fmt.Fprintf(sb, "  %s\n", f)
 		}
 		if len(t.Frames) > 10 {
-			sb.WriteString(fmt.Sprintf("  ... %d more frames\n", len(t.Frames)-10))
+			fmt.Fprintf(sb, "  ... %d more frames\n", len(t.Frames)-10)
 		}
 	}
 	sb.WriteString("\n")
@@ -868,8 +868,8 @@ func (r *LogAnalysisResult) writeErrorPatterns(sb *strings.Builder) {
 		if i >= 10 {
 			break
 		}
-		sb.WriteString(fmt.Sprintf("- [%s/%s] %s (count=%d)\n",
-			p.Severity, p.Category, p.SampleLines[0], p.Count))
+		fmt.Fprintf(sb, "- [%s/%s] %s (count=%d)\n",
+			p.Severity, p.Category, p.SampleLines[0], p.Count)
 	}
 	sb.WriteString("\n")
 }
@@ -884,12 +884,12 @@ func (r *LogAnalysisResult) writeStructuredErrors(sb *strings.Builder) {
 		if i >= 10 {
 			break
 		}
-		sb.WriteString(fmt.Sprintf("- [%s] %s", e.Level, e.Message))
+		fmt.Fprintf(sb, "- [%s] %s", e.Level, e.Message)
 		if e.Error != "" {
-			sb.WriteString(fmt.Sprintf(" error=%s", truncateLine(e.Error, 150)))
+			fmt.Fprintf(sb, " error=%s", truncateLine(e.Error, 150))
 		}
 		if e.Logger != "" {
-			sb.WriteString(fmt.Sprintf(" logger=%s", e.Logger))
+			fmt.Fprintf(sb, " logger=%s", e.Logger)
 		}
 		sb.WriteString("\n")
 	}
@@ -906,13 +906,13 @@ func (r *LogAnalysisResult) writeCriticalLines(sb *strings.Builder) {
 		if i >= 5 {
 			break
 		}
-		sb.WriteString(fmt.Sprintf("Pod=%s Container=%s:\n", cl.PodName, cl.ContainerName))
+		fmt.Fprintf(sb, "Pod=%s Container=%s:\n", cl.PodName, cl.ContainerName)
 		for _, b := range cl.LinesBefore {
-			sb.WriteString(fmt.Sprintf("    %s\n", b))
+			fmt.Fprintf(sb, "    %s\n", b)
 		}
-		sb.WriteString(fmt.Sprintf(" >> %s\n", cl.Line))
+		fmt.Fprintf(sb, " >> %s\n", cl.Line)
 		for _, a := range cl.LinesAfter {
-			sb.WriteString(fmt.Sprintf("    %s\n", a))
+			fmt.Fprintf(sb, "    %s\n", a)
 		}
 		sb.WriteString("\n")
 	}
@@ -926,10 +926,10 @@ func (r *LogAnalysisResult) writeInitContainerFindings(sb *strings.Builder) {
 	sb.WriteString("### Init Container Findings\n")
 	for _, s := range r.InitContainerLogs {
 		if s.ErrorCount > 0 || len(s.KeyFindings) > 0 {
-			sb.WriteString(fmt.Sprintf("- %s/%s: errors=%d warnings=%d\n",
-				s.PodName, s.ContainerName, s.ErrorCount, s.WarnCount))
+			fmt.Fprintf(sb, "- %s/%s: errors=%d warnings=%d\n",
+				s.PodName, s.ContainerName, s.ErrorCount, s.WarnCount)
 			for _, f := range s.KeyFindings {
-				sb.WriteString(fmt.Sprintf("  - %s\n", f))
+				fmt.Fprintf(sb, "  - %s\n", f)
 			}
 		}
 	}
@@ -943,10 +943,10 @@ func (r *LogAnalysisResult) writeSidecarFindings(sb *strings.Builder) {
 	}
 	for _, s := range r.SidecarLogs {
 		if s.ErrorCount > 0 {
-			sb.WriteString(fmt.Sprintf("### Sidecar %s/%s: errors=%d\n",
-				s.PodName, s.ContainerName, s.ErrorCount))
+			fmt.Fprintf(sb, "### Sidecar %s/%s: errors=%d\n",
+				s.PodName, s.ContainerName, s.ErrorCount)
 			for _, f := range s.KeyFindings {
-				sb.WriteString(fmt.Sprintf("- %s\n", f))
+				fmt.Fprintf(sb, "- %s\n", f)
 			}
 		}
 	}
@@ -1006,9 +1006,10 @@ func buildLogAnalysisSummary(result *LogAnalysisResult) string {
 	criticalCount := 0
 	highCount := 0
 	for _, p := range result.ErrorPatterns {
-		if p.Severity == "critical" {
+		switch p.Severity {
+		case "critical":
 			criticalCount += p.Count
-		} else if p.Severity == "high" {
+		case "high":
 			highCount += p.Count
 		}
 	}

@@ -107,7 +107,7 @@ func expandUserPath(path string) string {
 		return path
 	}
 	// Only "~" alone or "~/" (or "~\" on Windows) — never "~username".
-	if path != "~" && !strings.HasPrefix(path, "~/") && !(len(path) > 1 && path[1] == filepath.Separator) {
+	if path != "~" && !strings.HasPrefix(path, "~/") && (len(path) <= 1 || path[1] != filepath.Separator) {
 		return path
 	}
 	home, err := os.UserHomeDir()

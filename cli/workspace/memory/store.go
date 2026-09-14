@@ -1239,14 +1239,14 @@ func (m *Manager) FormatStats() string {
 	stats := m.Stats()
 	var sb strings.Builder
 
-	sb.WriteString(fmt.Sprintf("Facts: %d\n", stats["facts_count"]))
-	sb.WriteString(fmt.Sprintf("Topics: %d\n", stats["topics_count"]))
-	sb.WriteString(fmt.Sprintf("Projects: %d\n", stats["projects_count"]))
+	fmt.Fprintf(&sb, "Facts: %d\n", stats["facts_count"])
+	fmt.Fprintf(&sb, "Topics: %d\n", stats["topics_count"])
+	fmt.Fprintf(&sb, "Projects: %d\n", stats["projects_count"])
 
 	usageStats, _ := stats["usage_stats"].(UsageStats)
 	if usageStats.SessionCount > 0 {
-		sb.WriteString(fmt.Sprintf("Sessions: %d\n", usageStats.SessionCount))
-		sb.WriteString(fmt.Sprintf("Total messages: %d\n", usageStats.TotalMessages))
+		fmt.Fprintf(&sb, "Sessions: %d\n", usageStats.SessionCount)
+		fmt.Fprintf(&sb, "Total messages: %d\n", usageStats.TotalMessages)
 	}
 
 	return sb.String()

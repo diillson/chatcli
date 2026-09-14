@@ -457,7 +457,7 @@ func (cli *ChatCLI) showMemoryStats() {
 	// Peak hours
 	peakHours := mgr.Patterns.GetPeakHours(3)
 	if len(peakHours) > 0 {
-		var hourStrs []string
+		hourStrs := make([]string, 0, len(peakHours))
 		for _, h := range peakHours {
 			hourStrs = append(hourStrs, fmt.Sprintf("%02d:00", h))
 		}
@@ -472,7 +472,7 @@ func (cli *ChatCLI) showMemoryStats() {
 
 	// Top features
 	if len(stats.FeatureUsage) > 0 {
-		var features []string
+		features := make([]string, 0, len(stats.FeatureUsage))
 		for f, c := range stats.FeatureUsage {
 			features = append(features, fmt.Sprintf("%s(%d)", f, c))
 		}

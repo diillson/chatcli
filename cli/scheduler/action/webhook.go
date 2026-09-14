@@ -44,7 +44,7 @@ func (Webhook) ValidateSpec(payload map[string]any) error {
 	if url == "" {
 		return fmt.Errorf("webhook: payload.url is required")
 	}
-	if !(strings.HasPrefix(url, "http://") || strings.HasPrefix(url, "https://")) {
+	if !strings.HasPrefix(url, "http://") && !strings.HasPrefix(url, "https://") {
 		return fmt.Errorf("webhook: url must be http:// or https://")
 	}
 	return nil

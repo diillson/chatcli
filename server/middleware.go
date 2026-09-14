@@ -77,8 +77,8 @@ func isDebugMode() bool {
 
 // sanitizePanicValue removes potentially sensitive data from panic values before logging.
 func sanitizePanicValue(r interface{}) string {
-	s := strings.TrimSpace(strings.Replace(strings.Replace(
-		strings.Replace(fmt.Sprint(r), "\n", " ", -1), "\r", "", -1), "\t", " ", -1))
+	s := strings.TrimSpace(strings.ReplaceAll(strings.ReplaceAll(
+		strings.ReplaceAll(fmt.Sprint(r), "\n", " "), "\r", ""), "\t", " "))
 	// Truncate to prevent log flooding
 	if len(s) > 500 {
 		s = s[:500] + "...[truncated]"

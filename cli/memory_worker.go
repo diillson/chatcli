@@ -530,7 +530,7 @@ func buildExtractionSnippet(messages []models.Message) strings.Builder {
 		if len(content) > 1500 {
 			content = truncateRunesafe(content, 1200) + "\n... [truncated] ...\n" + tailRunesafe(content, 200)
 		}
-		sb.WriteString(fmt.Sprintf("[%s]: %s\n\n", msg.Role, content))
+		fmt.Fprintf(&sb, "[%s]: %s\n\n", msg.Role, content)
 	}
 	return sb
 }

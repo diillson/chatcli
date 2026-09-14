@@ -114,8 +114,8 @@ func (c *Compactor) RunWithLLM(ctx context.Context, sendPrompt func(ctx context.
 	// Build fact list for LLM
 	var sb strings.Builder
 	for i, f := range facts {
-		sb.WriteString(fmt.Sprintf("%d. [%s] %s (score: %.2f, accessed: %d times)\n",
-			i+1, f.Category, f.Content, f.Score, f.AccessCount))
+		fmt.Fprintf(&sb, "%d. [%s] %s (score: %.2f, accessed: %d times)\n",
+			i+1, f.Category, f.Content, f.Score, f.AccessCount)
 	}
 
 	prompt := compactionPrompt + "\n\n---\n\nCURRENT FACTS (" +

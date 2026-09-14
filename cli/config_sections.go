@@ -839,7 +839,7 @@ func collectPerAgentOverrides() []perAgentEntry {
 		if !strings.HasPrefix(k, "CHATCLI_AGENT_") {
 			continue
 		}
-		if !(strings.HasSuffix(k, "_MODEL") || strings.HasSuffix(k, "_EFFORT")) {
+		if !strings.HasSuffix(k, "_MODEL") && !strings.HasSuffix(k, "_EFFORT") {
 			continue
 		}
 		// Exclude the well-known, non-per-agent suffixes captured elsewhere.

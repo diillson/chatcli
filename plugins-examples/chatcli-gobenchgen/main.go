@@ -84,16 +84,16 @@ func main() {
 
 	// Gera o código-fonte do benchmark em um buffer de bytes.
 	var out bytes.Buffer
-	out.WriteString(fmt.Sprintf("package %s\n\n", node.Name.Name))
+	fmt.Fprintf(&out, "package %s\n\n", node.Name.Name)
 	out.WriteString("import \"testing\"\n\n")
-	out.WriteString(fmt.Sprintf("func Benchmark%s(b *testing.B) {\n", funcName))
+	fmt.Fprintf(&out, "func Benchmark%s(b *testing.B) {\n", funcName)
 	out.WriteString("    // Este benchmark foi gerado automaticamente pelo plugin @go-bench-gen do ChatCLI.\n")
 	out.WriteString("    b.ReportAllocs()\n") // Adiciona medição de alocações de memória.
 	out.WriteString("    b.ResetTimer()\n")   // Zera o timer antes do loop para medições mais precisas.
 	out.WriteString("    for i := 0; i < b.N; i++ {\n")
 	// Simplificação: assume que a função não tem argumentos ou retornos.
 	// Uma versão profissional lidaria com a inicialização de parâmetros aqui.
-	out.WriteString(fmt.Sprintf("        %s()\n", funcName))
+	fmt.Fprintf(&out, "        %s()\n", funcName)
 	out.WriteString("    }\n")
 	out.WriteString("}\n")
 

@@ -339,7 +339,7 @@ func subagentSystemPrompt(preface string, readOnly bool, tools []string) string 
 	if readOnly {
 		sb.WriteString("5. This subagent is READ-ONLY. Any write/exec attempt will be blocked.\n")
 	}
-	sb.WriteString(fmt.Sprintf("\nAllowed tools: %s\n", strings.Join(tools, ", ")))
+	fmt.Fprintf(&sb, "\nAllowed tools: %s\n", strings.Join(tools, ", "))
 
 	// Same truncated/compressed-output navigation guidance every worker gets.
 	sb.WriteString("\n")
@@ -349,7 +349,7 @@ func subagentSystemPrompt(preface string, readOnly bool, tools []string) string 
 	// Knowledge: point the subagent at the session scratch dir in case it
 	// needs to stage intermediate files.
 	if tmp := os.Getenv("CHATCLI_AGENT_TMPDIR"); tmp != "" {
-		sb.WriteString(fmt.Sprintf("\nScratch dir (read/write allowed): %s  (exposed as $CHATCLI_AGENT_TMPDIR to exec)\n", tmp))
+		fmt.Fprintf(&sb, "\nScratch dir (read/write allowed): %s  (exposed as $CHATCLI_AGENT_TMPDIR to exec)\n", tmp)
 	}
 
 	return sb.String()

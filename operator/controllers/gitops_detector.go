@@ -576,18 +576,18 @@ func (ctx *GitOpsContext) FormatForAI() string {
 	if ctx.HelmRelease != nil {
 		r := ctx.HelmRelease
 		sb.WriteString("### Helm Release\n")
-		sb.WriteString(fmt.Sprintf("- Release: %s (namespace: %s)\n", r.Name, r.Namespace))
-		sb.WriteString(fmt.Sprintf("- Chart: %s version=%s appVersion=%s\n", r.Chart, r.Version, r.AppVersion))
-		sb.WriteString(fmt.Sprintf("- Status: %s (revision %d)\n", r.Status, r.Revision))
+		fmt.Fprintf(&sb, "- Release: %s (namespace: %s)\n", r.Name, r.Namespace)
+		fmt.Fprintf(&sb, "- Chart: %s version=%s appVersion=%s\n", r.Chart, r.Version, r.AppVersion)
+		fmt.Fprintf(&sb, "- Status: %s (revision %d)\n", r.Status, r.Revision)
 		if !r.UpdatedAt.IsZero() {
-			sb.WriteString(fmt.Sprintf("- Last deployed: %s\n", r.UpdatedAt.Format(time.RFC3339)))
+			fmt.Fprintf(&sb, "- Last deployed: %s\n", r.UpdatedAt.Format(time.RFC3339))
 		}
 		if r.PreviousRevision > 0 {
-			sb.WriteString(fmt.Sprintf("- Previous revision: %d (status=%s) — available for rollback\n",
-				r.PreviousRevision, r.PreviousStatus))
+			fmt.Fprintf(&sb, "- Previous revision: %d (status=%s) — available for rollback\n",
+				r.PreviousRevision, r.PreviousStatus)
 		}
 		if r.Status == "failed" || r.Status == "pending-upgrade" {
-			sb.WriteString(fmt.Sprintf("**ALERT: Helm release is in '%s' state — this is likely the cause of the issue.**\n", r.Status))
+			fmt.Fprintf(&sb, "**ALERT: Helm release is in '%s' state — this is likely the cause of the issue.**\n", r.Status)
 		}
 		sb.WriteString("\n")
 	}
@@ -595,11 +595,11 @@ func (ctx *GitOpsContext) FormatForAI() string {
 	if ctx.ArgoCDApp != nil {
 		a := ctx.ArgoCDApp
 		sb.WriteString("### ArgoCD Application\n")
-		sb.WriteString(fmt.Sprintf("- Application: %s (project: %s)\n", a.Name, a.Project))
-		sb.WriteString(fmt.Sprintf("- Repository: %s path=%s revision=%s\n", a.RepoURL, a.Path, a.TargetRevision))
-		sb.WriteString(fmt.Sprintf("- Sync: %s | Health: %s | Policy: %s\n", a.SyncStatus, a.HealthStatus, a.SyncPolicy))
+		fmt.Fprintf(&sb, "- Application: %s (project: %s)\n", a.Name, a.Project)
+		fmt.Fprintf(&sb, "- Repository: %s path=%s revision=%s\n", a.RepoURL, a.Path, a.TargetRevision)
+		fmt.Fprintf(&sb, "- Sync: %s | Health: %s | Policy: %s\n", a.SyncStatus, a.HealthStatus, a.SyncPolicy)
 		if !a.LastSyncedAt.IsZero() {
-			sb.WriteString(fmt.Sprintf("- Last sync: %s result=%s\n", a.LastSyncedAt.Format(time.RFC3339), a.LastSyncResult))
+			fmt.Fprintf(&sb, "- Last sync: %s result=%s\n", a.LastSyncedAt.Format(time.RFC3339), a.LastSyncResult)
 		}
 		if a.HealthStatus == "Degraded" {
 			sb.WriteString("**ALERT: ArgoCD app health is Degraded.**\n")
@@ -608,7 +608,7 @@ func (ctx *GitOpsContext) FormatForAI() string {
 			sb.WriteString("**ALERT: ArgoCD app is OutOfSync — cluster state differs from git.**\n")
 		}
 		for _, c := range a.Conditions {
-			sb.WriteString(fmt.Sprintf("- Condition: %s\n", c))
+			fmt.Fprintf(&sb, "- Condition: %s\n", c)
 		}
 		sb.WriteString("\n")
 	}
@@ -616,16 +616,16 @@ func (ctx *GitOpsContext) FormatForAI() string {
 	if ctx.FluxResource != nil {
 		f := ctx.FluxResource
 		sb.WriteString("### Flux Kustomization\n")
-		sb.WriteString(fmt.Sprintf("- Kustomization: %s (namespace: %s)\n", f.Name, f.Namespace))
-		sb.WriteString(fmt.Sprintf("- Source: %s path=%s\n", f.SourceRef, f.Path))
-		sb.WriteString(fmt.Sprintf("- Ready: %t suspended=%t\n", f.Ready, f.Suspended))
+		fmt.Fprintf(&sb, "- Kustomization: %s (namespace: %s)\n", f.Name, f.Namespace)
+		fmt.Fprintf(&sb, "- Source: %s path=%s\n", f.SourceRef, f.Path)
+		fmt.Fprintf(&sb, "- Ready: %t suspended=%t\n", f.Ready, f.Suspended)
 		if !f.LastApplied.IsZero() {
-			sb.WriteString(fmt.Sprintf("- Last applied: %s\n", f.LastApplied.Format(time.RFC3339)))
+			fmt.Fprintf(&sb, "- Last applied: %s\n", f.LastApplied.Format(time.RFC3339))
 		}
 		if !f.Ready {
 			sb.WriteString("**ALERT: Flux kustomization is not ready.**\n")
 			for _, c := range f.Conditions {
-				sb.WriteString(fmt.Sprintf("- %s\n", c))
+				fmt.Fprintf(&sb, "- %s\n", c)
 			}
 		}
 		sb.WriteString("\n")

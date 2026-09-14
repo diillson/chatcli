@@ -59,11 +59,11 @@ func isCoreTool(name string) bool { return coreToolNames[name] }
 // an on-demand description is byte-identical to an inline one.
 func renderToolBlock(plugin plugins.Plugin, compact bool) string {
 	var b strings.Builder
-	b.WriteString(fmt.Sprintf("- Ferramenta: %s\n", plugin.Name()))
-	b.WriteString(fmt.Sprintf("  Descrição: %s\n", plugin.Description()))
+	fmt.Fprintf(&b, "- Ferramenta: %s\n", plugin.Name())
+	fmt.Fprintf(&b, "  Descrição: %s\n", plugin.Description())
 
 	if plugin.Schema() == "" {
-		b.WriteString(fmt.Sprintf("  Uso: %s\n", plugin.Usage()))
+		fmt.Fprintf(&b, "  Uso: %s\n", plugin.Usage())
 		return b.String()
 	}
 
@@ -83,17 +83,17 @@ func renderToolBlock(plugin plugins.Plugin, compact bool) string {
 		} `json:"subcommands"`
 	}
 	if err := json.Unmarshal([]byte(plugin.Schema()), &schema); err != nil {
-		b.WriteString(fmt.Sprintf("  Uso: %s\n", plugin.Usage()))
+		fmt.Fprintf(&b, "  Uso: %s\n", plugin.Usage())
 		return b.String()
 	}
 
 	if schema.ArgsFormat != "" {
-		b.WriteString(fmt.Sprintf("  Formato args: %s\n", schema.ArgsFormat))
+		fmt.Fprintf(&b, "  Formato args: %s\n", schema.ArgsFormat)
 	}
 	if compact {
 		b.WriteString("  Subcomandos:\n")
 		for _, sub := range schema.Subcommands {
-			b.WriteString(fmt.Sprintf("    - %s: %s\n", sub.Name, sub.Description))
+			fmt.Fprintf(&b, "    - %s: %s\n", sub.Name, sub.Description)
 			var requiredFlags []string
 			for _, flag := range sub.Flags {
 				if flag.Required {
@@ -104,7 +104,7 @@ func renderToolBlock(plugin plugins.Plugin, compact bool) string {
 				b.WriteString("      Obrigatórios: " + strings.Join(requiredFlags, ", ") + "\n")
 			}
 			if len(sub.Examples) > 0 {
-				b.WriteString(fmt.Sprintf("      Ex: %s\n", sub.Examples[0]))
+				fmt.Fprintf(&b, "      Ex: %s\n", sub.Examples[0])
 			}
 		}
 		return b.String()
@@ -112,7 +112,7 @@ func renderToolBlock(plugin plugins.Plugin, compact bool) string {
 
 	b.WriteString("  Subcomandos Disponíveis:\n")
 	for _, sub := range schema.Subcommands {
-		b.WriteString(fmt.Sprintf("    - %s: %s\n", sub.Name, sub.Description))
+		fmt.Fprintf(&b, "    - %s: %s\n", sub.Name, sub.Description)
 		if len(sub.Flags) > 0 {
 			b.WriteString("      Flags:\n")
 			for _, flag := range sub.Flags {
@@ -134,7 +134,7 @@ func renderToolBlock(plugin plugins.Plugin, compact bool) string {
 			}
 			b.WriteString("      Exemplos:\n")
 			for i := 0; i < limit; i++ {
-				b.WriteString(fmt.Sprintf("        - %s\n", sub.Examples[i]))
+				fmt.Fprintf(&b, "        - %s\n", sub.Examples[i])
 			}
 		}
 	}
@@ -173,9 +173,9 @@ func firstSentence(s string) string {
 // Shared shape with @tools describe so the model learns one format.
 func renderMCPToolBlock(tool mcp.MCPTool) string {
 	var b strings.Builder
-	b.WriteString(fmt.Sprintf("- Ferramenta: mcp_%s (MCP, servidor: %s)\n", tool.Name, tool.ServerName))
-	b.WriteString(fmt.Sprintf("  Descrição: %s\n", tool.Description))
-	b.WriteString(fmt.Sprintf("  Invocação: <tool_call name=\"mcp_%s\" args='{...}' /> (args = JSON validado pelo schema abaixo)\n", tool.Name))
+	fmt.Fprintf(&b, "- Ferramenta: mcp_%s (MCP, servidor: %s)\n", tool.Name, tool.ServerName)
+	fmt.Fprintf(&b, "  Descrição: %s\n", tool.Description)
+	fmt.Fprintf(&b, "  Invocação: <tool_call name=\"mcp_%s\" args='{...}' /> (args = JSON validado pelo schema abaixo)\n", tool.Name)
 	if len(tool.Parameters) == 0 {
 		b.WriteString("  Parâmetros: nenhum — invoque com args='{}'\n")
 		return b.String()

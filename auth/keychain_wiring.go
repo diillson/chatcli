@@ -90,11 +90,11 @@ func storeKeyInKeychain(ks *KeychainStore, key []byte) bool {
 func resolveEncryptionKey(ks *KeychainStore, keyPath string) ([]byte, error) {
 	fileKey, hasFile := readKeyFile(keyPath)
 
-	switch {
-	case ks.backend == KeychainFile:
+	switch ks.backend {
+	case KeychainFile:
 		// Explicit file backend: never touch the keychain.
 
-	case ks.backend == KeychainNative:
+	case KeychainNative:
 		if key, ok := keyFromKeychain(ks); ok {
 			return key, nil
 		}

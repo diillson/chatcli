@@ -1372,7 +1372,7 @@ func (r *RemediationReconciler) executeRetryJob(ctx context.Context, resource pl
 		isFailed = true // No active, no succeeded = effectively failed
 	}
 	if !isFailed {
-		return fmt.Errorf("Job %s is not in failed state", resource.Name)
+		return fmt.Errorf("job %s is not in failed state", resource.Name)
 	}
 
 	// Capture the spec for recreation
@@ -1429,7 +1429,7 @@ func (r *RemediationReconciler) executeDeleteFailedJob(ctx context.Context, reso
 		}
 	}
 	if !isFailed {
-		return fmt.Errorf("Job %s is not in failed state, refusing to delete", resource.Name)
+		return fmt.Errorf("job %s is not in failed state, refusing to delete", resource.Name)
 	}
 
 	propagation := metav1.DeletePropagationBackground

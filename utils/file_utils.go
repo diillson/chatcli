@@ -299,34 +299,34 @@ func FormatDirectoryContent(files []FileInfo, maxTotalSize int64) string {
 
 	// Cabeçalho com informações gerais
 	if totalSize >= maxTotalSize {
-		builder.WriteString(fmt.Sprintf("⚠️ CONTEÚDO TRUNCADO: Limite de tamanho atingido (%.2f MB). Mostrando %d arquivos parcialmente.\n\n",
-			float64(maxTotalSize)/1024/1024, len(files)))
+		fmt.Fprintf(&builder, "⚠️ CONTEÚDO TRUNCADO: Limite de tamanho atingido (%.2f MB). Mostrando %d arquivos parcialmente.\n\n",
+			float64(maxTotalSize)/1024/1024, len(files))
 	} else {
-		builder.WriteString(fmt.Sprintf("📁 CONTEÚDO DO DIRETÓRIO: %d arquivos (%.2f KB total)\n\n",
-			len(files), float64(totalSize)/1024))
+		fmt.Fprintf(&builder, "📁 CONTEÚDO DO DIRETÓRIO: %d arquivos (%.2f KB total)\n\n",
+			len(files), float64(totalSize)/1024)
 	}
 
 	// Índice dos arquivos para referência rápida
 	builder.WriteString("📑 ÍNDICE DE ARQUIVOS:\n")
 	for i, file := range files {
 		relPath := file.Path
-		builder.WriteString(fmt.Sprintf("%d. %s (%s, %.2f KB)\n",
-			i+1, relPath, file.Type, float64(len(file.Content))/1024))
+		fmt.Fprintf(&builder, "%d. %s (%s, %.2f KB)\n",
+			i+1, relPath, file.Type, float64(len(file.Content))/1024)
 	}
 	builder.WriteString("\n")
 
 	// Conteúdo de cada arquivo
 	for i, file := range files {
 		// Separador claro entre arquivos
-		builder.WriteString(fmt.Sprintf("📄 ARQUIVO %d/%d: %s (%s)\n",
-			i+1, len(files), file.Path, file.Type))
+		fmt.Fprintf(&builder, "📄 ARQUIVO %d/%d: %s (%s)\n",
+			i+1, len(files), file.Path, file.Type)
 
 		// Formatar o conteúdo baseado no tipo do arquivo
 		if isCodeFile(file.Type) {
-			builder.WriteString(fmt.Sprintf("```%s\n%s\n```\n\n",
-				getLanguageIdentifier(file.Type), file.Content))
+			fmt.Fprintf(&builder, "```%s\n%s\n```\n\n",
+				getLanguageIdentifier(file.Type), file.Content)
 		} else {
-			builder.WriteString(fmt.Sprintf("%s\n\n", file.Content))
+			fmt.Fprintf(&builder, "%s\n\n", file.Content)
 		}
 	}
 

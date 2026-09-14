@@ -144,24 +144,24 @@ func PromptSecurityCheckWithContext(ctx context.Context, toolName, args string, 
 
 	// --- Agent context (parallel mode) ---
 	if secCtx != nil && secCtx.AgentName != "" {
-		b.WriteString(fmt.Sprintf("%s🤖 Agent%s  %s%s%s%s\n",
-			gray, reset, gray+"·  "+reset, cyan+bold, secCtx.AgentName, reset))
+		fmt.Fprintf(&b, "%s🤖 Agent%s  %s%s%s%s\n",
+			gray, reset, gray+"·  "+reset, cyan+bold, secCtx.AgentName, reset)
 		if secCtx.TaskDesc != "" {
 			taskDisplay := secCtx.TaskDesc
 			if len(taskDisplay) > 120 {
 				taskDisplay = taskDisplay[:120] + "..."
 			}
-			b.WriteString(fmt.Sprintf("%s📋 %s%s  %s%s%s%s\n",
-				gray, i18n.T("coder.security.task"), reset, gray+"·  "+reset, white, taskDisplay, reset))
+			fmt.Fprintf(&b, "%s📋 %s%s  %s%s%s%s\n",
+				gray, i18n.T("coder.security.task"), reset, gray+"·  "+reset, white, taskDisplay, reset)
 		}
 		b.WriteString("\n")
 	}
 
 	// --- Action + details ---
-	b.WriteString(fmt.Sprintf("%s⚡ %s%s  %s%s%s%s\n",
-		gray, i18n.T("coder.security.action"), reset, gray+"·  "+reset, yellow+bold, actionLabel, reset))
+	fmt.Fprintf(&b, "%s⚡ %s%s  %s%s%s%s\n",
+		gray, i18n.T("coder.security.action"), reset, gray+"·  "+reset, yellow+bold, actionLabel, reset)
 	for _, d := range details {
-		b.WriteString(fmt.Sprintf("              %s%s%s\n", cyan, d, reset))
+		fmt.Fprintf(&b, "              %s%s%s\n", cyan, d, reset)
 	}
 
 	// --- Policy rule info ---
@@ -171,20 +171,20 @@ func PromptSecurityCheckWithContext(ctx context.Context, toolName, args string, 
 	} else {
 		ruleVal = i18n.T("coder.security.no_rule_for", pattern)
 	}
-	b.WriteString(fmt.Sprintf("%s📜 %s%s  %s%s%s%s\n",
-		gray, i18n.T("coder.security.rule"), reset, gray+"·  "+reset, gray, ruleVal, reset))
+	fmt.Fprintf(&b, "%s📜 %s%s  %s%s%s%s\n",
+		gray, i18n.T("coder.security.rule"), reset, gray+"·  "+reset, gray, ruleVal, reset)
 
 	b.WriteString("\n")
 
 	// --- Choices ---
 	b.WriteString(bold + i18n.T("coder.security.choose") + ":" + reset + "\n")
-	b.WriteString(fmt.Sprintf("  [%s] %s\n", green+"y"+reset, i18n.T("coder.security.yes_once")))
+	fmt.Fprintf(&b, "  [%s] %s\n", green+"y"+reset, i18n.T("coder.security.yes_once"))
 	if !isExecCmd {
-		b.WriteString(fmt.Sprintf("  [%s] %s\n", green+"a"+reset, i18n.T("coder.security.allow_always", pattern)))
+		fmt.Fprintf(&b, "  [%s] %s\n", green+"a"+reset, i18n.T("coder.security.allow_always", pattern))
 	}
-	b.WriteString(fmt.Sprintf("  [%s] %s\n", red+"n"+reset, i18n.T("coder.security.no_skip")))
+	fmt.Fprintf(&b, "  [%s] %s\n", red+"n"+reset, i18n.T("coder.security.no_skip"))
 	if !isExecCmd {
-		b.WriteString(fmt.Sprintf("  [%s] %s", red+"d"+reset, i18n.T("coder.security.deny_always", pattern)))
+		fmt.Fprintf(&b, "  [%s] %s", red+"d"+reset, i18n.T("coder.security.deny_always", pattern))
 	}
 	// No final "\n" intentionally: trailing newline would force lipgloss
 	// to render an empty padding row before the bottom border.

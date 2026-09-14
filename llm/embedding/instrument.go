@@ -61,7 +61,7 @@ func (i *Instrumented) Embed(ctx context.Context, texts []string) ([][]float32, 
 		for _, t := range texts {
 			chars += len(t)
 		}
-		fn(i.Provider.Name(), len(texts), chars, err)
+		fn(i.Name(), len(texts), chars, err)
 	}
 	return out, err
 }

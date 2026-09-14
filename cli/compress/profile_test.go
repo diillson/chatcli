@@ -66,7 +66,7 @@ func TestProfilesOrderSavings(t *testing.T) {
 		}
 		sizes[p] = res.CompressedSize
 	}
-	if !(sizes[ProfileAggressive] < sizes[ProfileDefault] && sizes[ProfileDefault] < sizes[ProfileConservative]) {
+	if sizes[ProfileAggressive] >= sizes[ProfileDefault] || sizes[ProfileDefault] >= sizes[ProfileConservative] {
 		t.Fatalf("profile ordering violated: aggressive=%d default=%d conservative=%d",
 			sizes[ProfileAggressive], sizes[ProfileDefault], sizes[ProfileConservative])
 	}

@@ -471,9 +471,9 @@ func buildSchedulerSystemPrompt(preface string, tools []string) string {
 	sb.WriteString("3. Emit tool calls one per response (or several in parallel if independent), then wait for the tool result before continuing. The worker injects the result and re-prompts you.\n")
 	sb.WriteString("4. After all tools have run, produce a short, structured final summary describing what you did and the outcome — that summary becomes the job's history entry shown via /jobs logs.\n")
 	sb.WriteString("5. If a tool fails, surface the error in your summary instead of looping silently. Never fabricate tool output: only describe results that came back from real tool calls.\n")
-	sb.WriteString(fmt.Sprintf("\nAvailable @coder subcommands: %s\n", strings.Join(tools, ", ")))
+	fmt.Fprintf(&sb, "\nAvailable @coder subcommands: %s\n", strings.Join(tools, ", "))
 	if tmp := os.Getenv("CHATCLI_AGENT_TMPDIR"); tmp != "" {
-		sb.WriteString(fmt.Sprintf("\nScratch dir (read/write allowed): %s  (exposed as $CHATCLI_AGENT_TMPDIR to exec)\n", tmp))
+		fmt.Fprintf(&sb, "\nScratch dir (read/write allowed): %s  (exposed as $CHATCLI_AGENT_TMPDIR to exec)\n", tmp)
 	}
 	return sb.String()
 }

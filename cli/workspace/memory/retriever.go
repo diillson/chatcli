@@ -228,7 +228,7 @@ func (r *RelevanceRetriever) assemble(rankedFacts []*Fact) string {
 	// 5. Recent daily notes (last 3 days, if budget allows)
 	recentNotes := r.daily.GetRecentDailyNotes(3)
 	if len(recentNotes) > 0 && remaining > 200 {
-		var notesParts []string
+		notesParts := make([]string, 0, len(recentNotes))
 		for _, note := range recentNotes {
 			dateStr := note.Date.Format("2006-01-02")
 			noteContent := note.Content

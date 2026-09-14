@@ -85,7 +85,7 @@ func TestThinkingBudgetOrderedByLevel(t *testing.T) {
 	high := ThinkingBudgetForEffort(EffortHigh)
 	xhigh := ThinkingBudgetForEffort(EffortXHigh)
 	max := ThinkingBudgetForEffort(EffortMax)
-	if !(low < high && high < xhigh && xhigh < max) {
+	if low >= high || high >= xhigh || xhigh >= max {
 		t.Errorf("budgets must increase with the level: %d %d %d %d", low, high, xhigh, max)
 	}
 	if ThinkingBudgetForEffort(EffortLow) != 0 || ThinkingBudgetForEffort(EffortUnset) != 0 {

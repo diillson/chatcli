@@ -157,7 +157,7 @@ func (r *NotificationReconciler) Reconcile(ctx context.Context, req ctrl.Request
 	issue.SetAnnotations(annotations)
 	if err := r.Update(ctx, &issue); err != nil {
 		if errors.IsConflict(err) {
-			return ctrl.Result{Requeue: true}, nil
+			return ctrl.Result{RequeueAfter: immediateRequeueDelay}, nil
 		}
 		return ctrl.Result{}, fmt.Errorf("updating issue annotation: %w", err)
 	}

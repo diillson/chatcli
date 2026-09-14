@@ -606,7 +606,7 @@ func appendFactsToArchive(facts []*Fact, archivePath string) error {
 	if len(facts) == 0 {
 		return nil
 	}
-	var archive []*Fact
+	archive := make([]*Fact, 0, len(facts))
 	if data, err := os.ReadFile(archivePath); err == nil { //#nosec G304 -- path supplied by user/agent through validated tool surface (boundary check upstream)
 		_ = json.Unmarshal(data, &archive)
 	}
@@ -668,7 +668,7 @@ func (fi *FactIndex) GenerateMarkdown(maxSize int) string {
 
 	for _, cat := range catOrder {
 		catFacts := categories[cat]
-		sb.WriteString(fmt.Sprintf("## %s\n\n", cases.Title(language.English).String(cat)))
+		fmt.Fprintf(&sb, "## %s\n\n", cases.Title(language.English).String(cat))
 		for _, f := range catFacts {
 			line := fmt.Sprintf("- %s\n", f.Content)
 			if sb.Len()+len(line) > maxSize {

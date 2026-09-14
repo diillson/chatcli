@@ -113,11 +113,11 @@ func fillIncidentMetrics(report *ComplianceReport, issues *platformv1alpha1.Issu
 		totalAttempts += int64(iss.Status.RemediationAttempts)
 
 		if iss.Status.DetectedAt != nil {
-			totalDetectDur += iss.Status.DetectedAt.Time.Sub(iss.CreationTimestamp.Time)
+			totalDetectDur += iss.Status.DetectedAt.Sub(iss.CreationTimestamp.Time)
 			detectCount++
 		}
 		if iss.Status.DetectedAt != nil && iss.Status.ResolvedAt != nil {
-			totalResolveDur += iss.Status.ResolvedAt.Time.Sub(iss.Status.DetectedAt.Time)
+			totalResolveDur += iss.Status.ResolvedAt.Sub(iss.Status.DetectedAt.Time)
 			resolveCount++
 		}
 	}
@@ -161,9 +161,10 @@ func (cr *ComplianceReporter) fillRemediationMetrics(ctx context.Context, report
 		for _, a := range plan.Spec.Actions {
 			as := report.RemediationMetrics.ByActionType[string(a.Type)]
 			as.Count++
-			if plan.Status.State == platformv1alpha1.RemediationStateCompleted {
+			switch plan.Status.State {
+			case platformv1alpha1.RemediationStateCompleted:
 				as.Success++
-			} else if plan.Status.State == platformv1alpha1.RemediationStateFailed {
+			case platformv1alpha1.RemediationStateFailed:
 				as.Failed++
 			}
 			report.RemediationMetrics.ByActionType[string(a.Type)] = as
@@ -197,7 +198,7 @@ func (cr *ComplianceReporter) fillApprovalMetrics(ctx context.Context, report *C
 				report.ApprovalMetrics.ManualApproved++
 			}
 			if ar.Status.ApprovedAt != nil {
-				totalDecisionDur += ar.Status.ApprovedAt.Time.Sub(ar.CreationTimestamp.Time)
+				totalDecisionDur += ar.Status.ApprovedAt.Sub(ar.CreationTimestamp.Time)
 				decisionCount++
 			}
 		case platformv1alpha1.ApprovalStateRejected:
@@ -233,11 +234,11 @@ func fillSLAMetrics(report *ComplianceReport, issues *platformv1alpha1.IssueList
 		}
 		// Check if response SLA was violated (DetectedAt too late)
 		if iss.Status.DetectedAt != nil {
-			detectTime := iss.Status.DetectedAt.Time.Sub(iss.CreationTimestamp.Time)
+			detectTime := iss.Status.DetectedAt.Sub(iss.CreationTimestamp.Time)
 			report.SLAMetrics.AverageResponseTime += detectTime
 		}
 		if iss.Status.ResolvedAt != nil {
-			resolveTime := iss.Status.ResolvedAt.Time.Sub(iss.CreationTimestamp.Time)
+			resolveTime := iss.Status.ResolvedAt.Sub(iss.CreationTimestamp.Time)
 			report.SLAMetrics.AverageResolutionTime += resolveTime
 		}
 	}

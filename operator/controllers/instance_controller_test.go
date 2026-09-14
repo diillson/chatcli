@@ -741,12 +741,12 @@ func TestBuildPodSpec_WatchConfigVolume(t *testing.T) {
 	for _, v := range podSpec.Volumes {
 		if v.Name == "watch-config" {
 			foundVolume = true
-			if v.VolumeSource.ConfigMap == nil {
+			if v.ConfigMap == nil {
 				t.Fatal("watch-config volume should have ConfigMap source")
 			}
 			expectedCMName := "my-watcher-watch-config"
-			if v.VolumeSource.ConfigMap.Name != expectedCMName {
-				t.Errorf("expected ConfigMap name %q, got %q", expectedCMName, v.VolumeSource.ConfigMap.Name)
+			if v.ConfigMap.Name != expectedCMName {
+				t.Errorf("expected ConfigMap name %q, got %q", expectedCMName, v.ConfigMap.Name)
 			}
 		}
 	}
@@ -1102,7 +1102,7 @@ func TestReconcile_WithMultiTargetWatcher(t *testing.T) {
 	for _, v := range volumes {
 		if v.Name == "watch-config" {
 			foundVolume = true
-			if v.VolumeSource.ConfigMap == nil || v.VolumeSource.ConfigMap.Name != "multi-watch-watch-config" {
+			if v.ConfigMap == nil || v.ConfigMap.Name != "multi-watch-watch-config" {
 				t.Errorf("expected watch-config volume to reference ConfigMap 'multi-watch-watch-config'")
 			}
 		}

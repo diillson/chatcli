@@ -295,9 +295,8 @@ func truncateWithDiskPersist(content, toolCallID string, maxSize int, logger *za
 	}
 	preview.WriteString(head)
 
-	preview.WriteString(fmt.Sprintf(
-		"\n\n... [%d chars omitted — full output saved to %s]\n\n",
-		len(content)-PreviewHeadChars-PreviewTailChars, fullPath))
+	fmt.Fprintf(&preview, "\n\n... [%d chars omitted — full output saved to %s]\n\n",
+		len(content)-PreviewHeadChars-PreviewTailChars, fullPath)
 
 	tailStart := len(content) - PreviewTailChars
 	if tailStart < 0 {

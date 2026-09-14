@@ -127,11 +127,12 @@ func reportDotenvBootstrap(b dotenvBootstrap) {
 // with the terminal about available providers or the AWS profile in use.
 func logDotenvResolution(logger *zap.Logger) {
 	res := config.ActiveDotenv()
-	fields := []zap.Field{
+	fields := make([]zap.Field, 0, 4)
+	fields = append(fields,
 		zap.String("path", res.Path),
 		zap.String("origin", string(res.Origin)),
 		zap.Bool("exists", res.Exists),
-	}
+	)
 	if res.Exists {
 		logger.Info("dotenv loaded", fields...)
 		return

@@ -125,7 +125,7 @@ func (r *IssueReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 		if err := r.Update(ctx, &issue); err != nil {
 			return ctrl.Result{}, err
 		}
-		return ctrl.Result{Requeue: true}, nil
+		return ctrl.Result{RequeueAfter: immediateRequeueDelay}, nil
 	}
 
 	// 4. State machine
@@ -182,7 +182,7 @@ func (r *IssueReconciler) handleDetected(ctx context.Context, issue *platformv1a
 	var runbookContext string
 	var candidateNames []string
 	if len(candidateRunbooks) > 0 {
-		var sections []string
+		sections := make([]string, 0, len(candidateRunbooks))
 		for _, rb := range candidateRunbooks {
 			candidateNames = append(candidateNames, rb.Name)
 			var stepsDesc []string
@@ -873,14 +873,14 @@ func (r *IssueReconciler) collectFailureEvidence(ctx context.Context, issue *pla
 			continue
 		}
 
-		sb.WriteString(fmt.Sprintf("Attempt %d (state=%s):\n", p.Spec.Attempt, p.Status.State))
-		sb.WriteString(fmt.Sprintf("  Strategy: %s\n", p.Spec.Strategy))
-		sb.WriteString(fmt.Sprintf("  Result: %s\n", p.Status.Result))
+		fmt.Fprintf(&sb, "Attempt %d (state=%s):\n", p.Spec.Attempt, p.Status.State)
+		fmt.Fprintf(&sb, "  Strategy: %s\n", p.Spec.Strategy)
+		fmt.Fprintf(&sb, "  Result: %s\n", p.Status.Result)
 		for _, a := range p.Spec.Actions {
-			sb.WriteString(fmt.Sprintf("  Action: %s params=%v\n", a.Type, a.Params))
+			fmt.Fprintf(&sb, "  Action: %s params=%v\n", a.Type, a.Params)
 		}
 		for _, ev := range p.Status.Evidence {
-			sb.WriteString(fmt.Sprintf("  Evidence: [%s] %s\n", ev.Type, ev.Data))
+			fmt.Fprintf(&sb, "  Evidence: [%s] %s\n", ev.Type, ev.Data)
 		}
 		sb.WriteString("\n")
 	}

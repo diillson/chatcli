@@ -204,8 +204,8 @@ func (r *ChaosReconciler) reconcilePending(ctx context.Context, exp *platformv1a
 		return ctrl.Result{}, fmt.Errorf("updating status to Running: %w", err)
 	}
 
-	// Requeue immediately to execute the experiment.
-	return ctrl.Result{Requeue: true}, nil
+	// Requeue right away to execute the experiment.
+	return ctrl.Result{RequeueAfter: immediateRequeueDelay}, nil
 }
 
 // reconcileRunning executes the chaos experiment and manages its lifecycle.
@@ -259,7 +259,7 @@ func (r *ChaosReconciler) reconcileRunning(ctx context.Context, exp *platformv1a
 	// Requeue to check duration/abort conditions.
 	remaining := duration - time.Since(exp.Status.StartedAt.Time)
 	if remaining <= 0 {
-		return ctrl.Result{Requeue: true}, nil
+		return ctrl.Result{RequeueAfter: immediateRequeueDelay}, nil
 	}
 	requeueAfter := remaining
 	if requeueAfter > 10*time.Second {

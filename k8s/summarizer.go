@@ -52,8 +52,8 @@ func (s *Summarizer) GenerateContext() string {
 	if kind == "" {
 		kind = "Deployment"
 	}
-	b.WriteString(fmt.Sprintf("[K8s Context: %s/%s in namespace/%s]\n", strings.ToLower(kind), r.Name, r.Namespace))
-	b.WriteString(fmt.Sprintf("Collected at: %s\n\n", snap.Timestamp.Format(time.RFC3339)))
+	fmt.Fprintf(&b, "[K8s Context: %s/%s in namespace/%s]\n", strings.ToLower(kind), r.Name, r.Namespace)
+	fmt.Fprintf(&b, "Collected at: %s\n\n", snap.Timestamp.Format(time.RFC3339))
 
 	writeResourceStatus(&b, kind, r)
 	s.writePodStatus(&b, snap)
@@ -69,47 +69,47 @@ func (s *Summarizer) GenerateContext() string {
 
 // writeResourceStatus renders the kind-aware resource status section.
 func writeResourceStatus(b *strings.Builder, kind string, r ResourceStatus) {
-	b.WriteString(fmt.Sprintf("## %s Status\n", kind))
+	fmt.Fprintf(b, "## %s Status\n", kind)
 	switch kind {
 	case "Job":
-		b.WriteString(fmt.Sprintf("  Active: %d, Succeeded: %d, Failed: %d\n", r.Active, r.Succeeded, r.Failed))
+		fmt.Fprintf(b, "  Active: %d, Succeeded: %d, Failed: %d\n", r.Active, r.Succeeded, r.Failed)
 		if r.Suspended {
 			b.WriteString("  State: SUSPENDED\n")
 		}
 	case "CronJob":
-		b.WriteString(fmt.Sprintf("  Schedule: %s, Active Jobs: %d\n", r.Schedule, r.Active))
+		fmt.Fprintf(b, "  Schedule: %s, Active Jobs: %d\n", r.Schedule, r.Active)
 		if r.Suspended {
 			b.WriteString("  State: SUSPENDED\n")
 		}
 		if r.LastScheduleTime != nil {
-			b.WriteString(fmt.Sprintf("  Last scheduled: %s\n", r.LastScheduleTime.Format(time.RFC3339)))
+			fmt.Fprintf(b, "  Last scheduled: %s\n", r.LastScheduleTime.Format(time.RFC3339))
 		}
 	case "DaemonSet":
-		b.WriteString(fmt.Sprintf("  Nodes: %d/%d ready, %d updated, %d available, %d unavailable\n",
-			r.ReadyReplicas, r.Replicas, r.UpdatedReplicas, r.AvailableReplicas, r.UnavailableCount))
+		fmt.Fprintf(b, "  Nodes: %d/%d ready, %d updated, %d available, %d unavailable\n",
+			r.ReadyReplicas, r.Replicas, r.UpdatedReplicas, r.AvailableReplicas, r.UnavailableCount)
 		if r.Strategy != "" {
-			b.WriteString(fmt.Sprintf("  Update Strategy: %s\n", r.Strategy))
+			fmt.Fprintf(b, "  Update Strategy: %s\n", r.Strategy)
 		}
 	default: // Deployment, StatefulSet
-		b.WriteString(fmt.Sprintf("  Replicas: %d/%d ready, %d updated, %d available\n",
-			r.ReadyReplicas, r.Replicas, r.UpdatedReplicas, r.AvailableReplicas))
+		fmt.Fprintf(b, "  Replicas: %d/%d ready, %d updated, %d available\n",
+			r.ReadyReplicas, r.Replicas, r.UpdatedReplicas, r.AvailableReplicas)
 		if r.Strategy != "" {
-			b.WriteString(fmt.Sprintf("  Strategy: %s\n", r.Strategy))
+			fmt.Fprintf(b, "  Strategy: %s\n", r.Strategy)
 		}
 	}
 	if len(r.Conditions) > 0 {
 		b.WriteString("  Conditions:\n")
 		for _, c := range r.Conditions {
-			b.WriteString(fmt.Sprintf("    - %s\n", c))
+			fmt.Fprintf(b, "    - %s\n", c)
 		}
 	}
 }
 
 // writePodStatus renders the pod status section.
 func (s *Summarizer) writePodStatus(b *strings.Builder, snap ResourceSnapshot) {
-	b.WriteString(fmt.Sprintf("\n## Pods (%d total)\n", len(snap.Pods)))
+	fmt.Fprintf(b, "\n## Pods (%d total)\n", len(snap.Pods))
 	totalRestarts, restartsInWindow := s.store.GetRestartTrend()
-	b.WriteString(fmt.Sprintf("  Total restarts: %d (delta in window: %d)\n", totalRestarts, restartsInWindow))
+	fmt.Fprintf(b, "  Total restarts: %d (delta in window: %d)\n", totalRestarts, restartsInWindow)
 
 	for _, pod := range snap.Pods {
 		readyStr := "Ready"
@@ -123,13 +123,13 @@ func (s *Summarizer) writePodStatus(b *strings.Builder, snap ResourceSnapshot) {
 		b.WriteString(line + "\n")
 
 		if pod.LastTerminated != nil {
-			b.WriteString(fmt.Sprintf("    Last terminated: %s (exit code %d) at %s\n",
+			fmt.Fprintf(b, "    Last terminated: %s (exit code %d) at %s\n",
 				pod.LastTerminated.Reason, pod.LastTerminated.ExitCode,
-				pod.LastTerminated.EndedAt.Format(time.RFC3339)))
+				pod.LastTerminated.EndedAt.Format(time.RFC3339))
 		}
 
 		for _, cond := range pod.Conditions {
-			b.WriteString(fmt.Sprintf("    Condition: %s\n", cond))
+			fmt.Fprintf(b, "    Condition: %s\n", cond)
 		}
 	}
 }
@@ -140,11 +140,11 @@ func writeHPAStatus(b *strings.Builder, snap ResourceSnapshot) {
 		return
 	}
 	h := snap.HPA
-	b.WriteString(fmt.Sprintf("\n## HPA (%s)\n", h.Name))
-	b.WriteString(fmt.Sprintf("  Replicas: %d current, %d desired (min=%d, max=%d)\n",
-		h.CurrentReplicas, h.DesiredReplicas, h.MinReplicas, h.MaxReplicas))
+	fmt.Fprintf(b, "\n## HPA (%s)\n", h.Name)
+	fmt.Fprintf(b, "  Replicas: %d current, %d desired (min=%d, max=%d)\n",
+		h.CurrentReplicas, h.DesiredReplicas, h.MinReplicas, h.MaxReplicas)
 	for _, m := range h.CurrentMetrics {
-		b.WriteString(fmt.Sprintf("  Metric: %s\n", m))
+		fmt.Fprintf(b, "  Metric: %s\n", m)
 	}
 }
 
@@ -153,7 +153,7 @@ func writeNodeHealth(b *strings.Builder, snap ResourceSnapshot) {
 	if len(snap.Nodes) == 0 {
 		return
 	}
-	b.WriteString(fmt.Sprintf("\n## Nodes (%d)\n", len(snap.Nodes)))
+	fmt.Fprintf(b, "\n## Nodes (%d)\n", len(snap.Nodes))
 	for _, node := range snap.Nodes {
 		status := "Ready"
 		if !node.Ready {
@@ -181,7 +181,7 @@ func writeNodeHealth(b *strings.Builder, snap ResourceSnapshot) {
 		line += fmt.Sprintf(" pods=%d/%d k8s=%s", node.PodCount, node.PodCapacity, node.KubeletVersion)
 		b.WriteString(line + "\n")
 		for _, cond := range node.Conditions {
-			b.WriteString(fmt.Sprintf("    %s\n", cond))
+			fmt.Fprintf(b, "    %s\n", cond)
 		}
 	}
 }
@@ -191,7 +191,7 @@ func writeRecentEvents(b *strings.Builder, snap ResourceSnapshot) {
 	if len(snap.Events) == 0 {
 		return
 	}
-	b.WriteString(fmt.Sprintf("\n## Recent Events (%d)\n", len(snap.Events)))
+	fmt.Fprintf(b, "\n## Recent Events (%d)\n", len(snap.Events))
 	// Show last 10 events
 	start := 0
 	if len(snap.Events) > 10 {
@@ -199,8 +199,8 @@ func writeRecentEvents(b *strings.Builder, snap ResourceSnapshot) {
 	}
 	for _, ev := range snap.Events[start:] {
 		age := time.Since(ev.Timestamp).Truncate(time.Second)
-		b.WriteString(fmt.Sprintf("  [%s] %s %s: %s (%s ago)\n",
-			ev.Type, ev.Object, ev.Reason, ev.Message, age))
+		fmt.Fprintf(b, "  [%s] %s %s: %s (%s ago)\n",
+			ev.Type, ev.Object, ev.Reason, ev.Message, age)
 	}
 }
 
@@ -208,10 +208,10 @@ func writeRecentEvents(b *strings.Builder, snap ResourceSnapshot) {
 func (s *Summarizer) writeAlerts(b *strings.Builder) {
 	alerts := s.store.GetAlerts()
 	if len(alerts) > 0 {
-		b.WriteString(fmt.Sprintf("\n## Active Alerts (%d)\n", len(alerts)))
+		fmt.Fprintf(b, "\n## Active Alerts (%d)\n", len(alerts))
 		for _, a := range alerts {
-			b.WriteString(fmt.Sprintf("  [%s] %s: %s (%s)\n",
-				a.Severity, a.Type, a.Message, a.Object))
+			fmt.Fprintf(b, "  [%s] %s: %s (%s)\n",
+				a.Severity, a.Type, a.Message, a.Object)
 		}
 	} else {
 		b.WriteString("\n## Alerts: None active\n")
@@ -223,14 +223,14 @@ func writeAppMetrics(b *strings.Builder, snap ResourceSnapshot) {
 	if snap.AppMetrics == nil || len(snap.AppMetrics.Metrics) == 0 {
 		return
 	}
-	b.WriteString(fmt.Sprintf("\n## Application Metrics (%d)\n", len(snap.AppMetrics.Metrics)))
+	fmt.Fprintf(b, "\n## Application Metrics (%d)\n", len(snap.AppMetrics.Metrics))
 	names := make([]string, 0, len(snap.AppMetrics.Metrics))
 	for k := range snap.AppMetrics.Metrics {
 		names = append(names, k)
 	}
 	sort.Strings(names)
 	for _, name := range names {
-		b.WriteString(fmt.Sprintf("  %s: %.4g\n", name, snap.AppMetrics.Metrics[name]))
+		fmt.Fprintf(b, "  %s: %.4g\n", name, snap.AppMetrics.Metrics[name])
 	}
 }
 
@@ -238,10 +238,10 @@ func writeAppMetrics(b *strings.Builder, snap ResourceSnapshot) {
 func (s *Summarizer) writeErrorLogs(b *strings.Builder) {
 	errorLogs := s.store.GetErrorLogs(10)
 	if len(errorLogs) > 0 {
-		b.WriteString(fmt.Sprintf("\n## Recent Error Logs (%d)\n", len(errorLogs)))
+		fmt.Fprintf(b, "\n## Recent Error Logs (%d)\n", len(errorLogs))
 		for _, log := range errorLogs {
-			b.WriteString(fmt.Sprintf("  [%s] %s/%s: %s\n",
-				log.Timestamp.Format("15:04:05"), log.PodName, log.Container, log.Line))
+			fmt.Fprintf(b, "  [%s] %s/%s: %s\n",
+				log.Timestamp.Format("15:04:05"), log.PodName, log.Container, log.Line)
 		}
 	} else {
 		b.WriteString("\n## Error Logs: None\n")
@@ -342,7 +342,7 @@ func (ms *MultiSummarizer) GenerateContext() string {
 	})
 
 	var b strings.Builder
-	b.WriteString(fmt.Sprintf("[K8s Multi-Watcher: %d targets monitored]\n\n", len(scores)))
+	fmt.Fprintf(&b, "[K8s Multi-Watcher: %d targets monitored]\n\n", len(scores))
 
 	remaining := ms.maxChars - b.Len()
 

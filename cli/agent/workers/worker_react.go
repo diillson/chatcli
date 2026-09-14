@@ -1061,7 +1061,7 @@ func buildReflectionPrompt(turnBlocked, totalValidated, consecutiveFailures int,
 	if turnBlocked == totalValidated {
 		reflection.WriteString(reflectionAllBlockedPrompt)
 	} else if consecutiveFailures >= 3 {
-		reflection.WriteString(fmt.Sprintf(reflectionEscalatePrompt, consecutiveFailures))
+		fmt.Fprintf(&reflection, reflectionEscalatePrompt, consecutiveFailures)
 	} else {
 		reflection.WriteString(reflectionStandardPrompt)
 	}
@@ -1073,7 +1073,7 @@ func buildReflectionPrompt(turnBlocked, totalValidated, consecutiveFailures int,
 		}
 	}
 	if len(blacklisted) > 0 {
-		reflection.WriteString(fmt.Sprintf("\n\nBLACKLISTED COMMANDS (do NOT use): %s", strings.Join(blacklisted, ", ")))
+		fmt.Fprintf(&reflection, "\n\nBLACKLISTED COMMANDS (do NOT use): %s", strings.Join(blacklisted, ", "))
 	}
 
 	return reflection.String()
@@ -1132,7 +1132,7 @@ func parseCoderToolCall(tc agent.ToolCall) (string, []string, error) {
 		if err := json.Unmarshal(jsonArgs.Args, &argsMap); err == nil {
 			// Normaliza aliases comuns que LLMs confundem
 			argsMap = normalizeArgAliases(jsonArgs.Cmd, argsMap)
-			var cliArgs []string
+			cliArgs := make([]string, 0, 2*len(argsMap))
 			for k, v := range argsMap {
 				cliArgs = append(cliArgs, fmt.Sprintf("--%s", k), fmt.Sprintf("%v", v))
 			}

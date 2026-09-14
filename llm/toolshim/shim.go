@@ -74,8 +74,8 @@ func (s *Shim) BuildToolPrompt(tools []models.ToolDefinition) string {
 	sb.WriteString("You may call multiple tools in one response by outputting multiple JSON objects.\n\n")
 
 	for _, tool := range tools {
-		sb.WriteString(fmt.Sprintf("### %s\n", tool.Function.Name))
-		sb.WriteString(fmt.Sprintf("%s\n\n", tool.Function.Description))
+		fmt.Fprintf(&sb, "### %s\n", tool.Function.Name)
+		fmt.Fprintf(&sb, "%s\n\n", tool.Function.Description)
 
 		// Write parameter schema
 		if props, ok := tool.Function.Parameters["properties"].(map[string]interface{}); ok {
@@ -92,7 +92,7 @@ func (s *Shim) BuildToolPrompt(tools []models.ToolDefinition) string {
 				if contains(required, name) {
 					req = " (required)"
 				}
-				sb.WriteString(fmt.Sprintf("- `%s` (%s%s): %s\n", name, typ, req, desc))
+				fmt.Fprintf(&sb, "- `%s` (%s%s): %s\n", name, typ, req, desc)
 			}
 			sb.WriteString("\n")
 		}

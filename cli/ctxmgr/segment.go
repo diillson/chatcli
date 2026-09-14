@@ -184,7 +184,7 @@ func (o SegmentOptions) sanitized() SegmentOptions {
 // which lets the vector index skip re-embedding work that hasn't changed.
 func SegmentFiles(files []utils.FileInfo, opts SegmentOptions) []Segment {
 	opts = opts.sanitized()
-	var segments []Segment
+	segments := make([]Segment, 0, len(files))
 	for _, f := range files {
 		segments = append(segments, segmentOne(f, opts)...)
 	}

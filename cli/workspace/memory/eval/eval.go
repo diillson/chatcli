@@ -174,10 +174,8 @@ func (c Comparison) String() string {
 	b.WriteString("baseline : " + c.Baseline.String() + "\n")
 	b.WriteString("candidate: " + c.Candidate.String() + "\n")
 	d := c.Improvement()
-	b.WriteString(fmt.Sprintf(
-		"delta    : recall@k=%+.4f  precision@k=%+.4f  MRR=%+.4f  nDCG@k=%+.4f",
-		d.RecallAtK, d.PrecisionAtK, d.MRR, d.NDCGAtK,
-	))
+	fmt.Fprintf(&b, "delta    : recall@k=%+.4f  precision@k=%+.4f  MRR=%+.4f  nDCG@k=%+.4f",
+		d.RecallAtK, d.PrecisionAtK, d.MRR, d.NDCGAtK)
 	return b.String()
 }
 

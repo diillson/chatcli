@@ -160,7 +160,7 @@ func (a *modelRoutingAdapter) List(ctx context.Context, providerFilter string) (
 	}
 	for i, name := range names {
 		entry := listed[i]
-		b.WriteString(fmt.Sprintf("\n%s (%d, %s)\n", name, len(entry.models), entry.source))
+		fmt.Fprintf(&b, "\n%s (%d, %s)\n", name, len(entry.models), entry.source)
 		shown := 0
 		for _, m := range entry.models {
 			if perProviderCap > 0 && shown >= perProviderCap {

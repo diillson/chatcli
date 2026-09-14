@@ -408,7 +408,8 @@ func (r *UIRenderer) PrintMenu() {
 		const keyWidth = 6
 		head := kit.Style(theme.RoleHeader).Bold(true).Render(title)
 		sep := kit.Style(theme.RoleMuted).Render(strings.Repeat("─", lipgloss.Width(head)))
-		rows := []string{head, sep}
+		rows := make([]string, 0, 2+len(entries))
+		rows = append(rows, head, sep)
 		for _, e := range entries {
 			key := r.Colorize(fmt.Sprintf("%-*s", keyWidth, e.key), ColorYellow)
 			rows = append(rows, key+" "+e.desc)

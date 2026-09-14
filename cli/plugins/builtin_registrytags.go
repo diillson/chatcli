@@ -340,8 +340,8 @@ func detectRegistryTarget(image, override string) (registry, repo string) {
 	if len(parts) == 2 && looksLikeRegistryHost(parts[0]) {
 		host := parts[0]
 		repo = parts[1]
-		switch {
-		case host == "docker.io" || host == "registry.hub.docker.com" || host == "index.docker.io":
+		switch host {
+		case "docker.io", "registry.hub.docker.com", "index.docker.io":
 			return "https://hub.docker.com", repo
 		default:
 			return ensureScheme(host), repo

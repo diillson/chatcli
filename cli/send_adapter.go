@@ -119,9 +119,9 @@ func (a *sendPluginAdapter) List(ctx context.Context) (string, error) {
 	for _, name := range sortedKeys(adapters) {
 		home := strings.TrimSpace(os.Getenv(homeChannelEnv(name)))
 		if home == "" {
-			b.WriteString(fmt.Sprintf("  • %s — %s\n", name, i18n.T("send.tool.list.no_home", homeChannelEnv(name))))
+			fmt.Fprintf(&b, "  • %s — %s\n", name, i18n.T("send.tool.list.no_home", homeChannelEnv(name)))
 		} else {
-			b.WriteString(fmt.Sprintf("  • %s — %s (%s)\n", name, i18n.T("send.tool.list.home"), home))
+			fmt.Fprintf(&b, "  • %s — %s (%s)\n", name, i18n.T("send.tool.list.home"), home)
 		}
 	}
 	return strings.TrimRight(b.String(), "\n"), nil

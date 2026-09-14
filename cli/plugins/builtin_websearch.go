@@ -219,12 +219,12 @@ func runSearchChain(ctx context.Context, query string, maxResults int, onOutput 
 // one-line-per-hit preview through onOutput.
 func formatSearchResults(query string, provider SearchProvider, results []searchResult, onOutput func(string)) string {
 	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf("Search results for: %q (via %s)\n\n", query, provider))
+	fmt.Fprintf(&sb, "Search results for: %q (via %s)\n\n", query, provider)
 	for i, r := range results {
-		sb.WriteString(fmt.Sprintf("%d. %s\n", i+1, r.Title))
-		sb.WriteString(fmt.Sprintf("   URL: %s\n", r.URL))
+		fmt.Fprintf(&sb, "%d. %s\n", i+1, r.Title)
+		fmt.Fprintf(&sb, "   URL: %s\n", r.URL)
 		if r.Snippet != "" {
-			sb.WriteString(fmt.Sprintf("   %s\n", r.Snippet))
+			fmt.Fprintf(&sb, "   %s\n", r.Snippet)
 		}
 		sb.WriteString("\n")
 

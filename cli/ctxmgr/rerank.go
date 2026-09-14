@@ -124,7 +124,7 @@ func removeIndex(xs []int, v int) []int {
 func rerankTokenSet(s string) map[string]struct{} {
 	set := map[string]struct{}{}
 	for _, tok := range strings.FieldsFunc(strings.ToLower(s), func(r rune) bool {
-		return !(r >= 'a' && r <= 'z' || r >= '0' && r <= '9' || r == '_' || r > 127)
+		return (r < 'a' || r > 'z') && (r < '0' || r > '9') && r != '_' && r <= 127
 	}) {
 		if len(tok) >= 3 {
 			set[tok] = struct{}{}

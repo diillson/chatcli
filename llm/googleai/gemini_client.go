@@ -520,7 +520,7 @@ func (c *GeminiClient) ListModels(ctx context.Context) ([]client.ModelInfo, erro
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("Google AI /models returned %d: %s", resp.StatusCode, c.sanitizeErrorResponse(string(bodyBytes)))
+		return nil, fmt.Errorf("listing Google AI models: HTTP %d: %s", resp.StatusCode, c.sanitizeErrorResponse(string(bodyBytes)))
 	}
 
 	var result struct {

@@ -409,7 +409,7 @@ func executeRecall(v validatedTC) execResult {
 		// Tolerate bare keys without the <<ccr:>> wrapper: pick tokens that
 		// look like CCR keys (16 lowercase hex chars).
 		for _, tok := range strings.FieldsFunc(raw.String(), func(r rune) bool {
-			return !((r >= '0' && r <= '9') || (r >= 'a' && r <= 'f'))
+			return (r < '0' || r > '9') && (r < 'a' || r > 'f')
 		}) {
 			if len(tok) == 16 {
 				keys = append(keys, tok)

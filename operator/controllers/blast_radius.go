@@ -647,7 +647,7 @@ func (bp *BlastRadiusPredictor) buildPredictionSummary(prediction *BlastRadiusPr
 		parts = append(parts, fmt.Sprintf("Warnings: %d", len(prediction.Warnings)))
 	}
 	if len(prediction.AffectedServices) > 0 {
-		var names []string
+		names := make([]string, 0, len(prediction.AffectedServices))
 		for _, s := range prediction.AffectedServices {
 			names = append(names, s.Name)
 		}
@@ -665,12 +665,12 @@ func (p *BlastRadiusPrediction) FormatForAI() string {
 
 	var sb strings.Builder
 	sb.WriteString("## Blast Radius / Impact Prediction\n\n")
-	sb.WriteString(fmt.Sprintf("**Overall Risk: %s | Safe to Execute: %t**\n\n", p.RiskLevel, p.Safe))
+	fmt.Fprintf(&sb, "**Overall Risk: %s | Safe to Execute: %t**\n\n", p.RiskLevel, p.Safe)
 
 	if len(p.Blockers) > 0 {
 		sb.WriteString("### BLOCKERS (action should NOT proceed)\n")
 		for _, b := range p.Blockers {
-			sb.WriteString(fmt.Sprintf("- %s\n", b))
+			fmt.Fprintf(&sb, "- %s\n", b)
 		}
 		sb.WriteString("\n")
 	}
@@ -678,14 +678,14 @@ func (p *BlastRadiusPrediction) FormatForAI() string {
 	if len(p.Warnings) > 0 {
 		sb.WriteString("### Warnings\n")
 		for _, w := range p.Warnings {
-			sb.WriteString(fmt.Sprintf("- %s\n", w))
+			fmt.Fprintf(&sb, "- %s\n", w)
 		}
 		sb.WriteString("\n")
 	}
 
 	if p.PDBCheck != nil {
 		sb.WriteString("### PodDisruptionBudget\n")
-		sb.WriteString(fmt.Sprintf("- %s\n", p.PDBCheck.Detail))
+		fmt.Fprintf(&sb, "- %s\n", p.PDBCheck.Detail)
 		if p.PDBCheck.WouldViolate {
 			sb.WriteString("**PDB would be violated!**\n")
 		}
@@ -694,15 +694,15 @@ func (p *BlastRadiusPrediction) FormatForAI() string {
 
 	if p.QuotaCheck != nil {
 		sb.WriteString("### ResourceQuota\n")
-		sb.WriteString(fmt.Sprintf("- %s\n", p.QuotaCheck.Detail))
+		fmt.Fprintf(&sb, "- %s\n", p.QuotaCheck.Detail)
 		sb.WriteString("\n")
 	}
 
 	if len(p.AffectedServices) > 0 {
 		sb.WriteString("### Affected Services\n")
 		for _, s := range p.AffectedServices {
-			sb.WriteString(fmt.Sprintf("- %s/%s: %s (%s)\n",
-				s.Namespace, s.Name, s.PredictedHealth, s.Reason))
+			fmt.Fprintf(&sb, "- %s/%s: %s (%s)\n",
+				s.Namespace, s.Name, s.PredictedHealth, s.Reason)
 		}
 		sb.WriteString("\n")
 	}

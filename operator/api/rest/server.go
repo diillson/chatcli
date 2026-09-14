@@ -2301,7 +2301,7 @@ func unstructuredToAuditEvent(obj map[string]interface{}) AuditEventItem {
 
 		// details is a map — flatten first entry as detail for display
 		if details, ok := spec["details"].(map[string]interface{}); ok {
-			var parts []string
+			parts := make([]string, 0, len(details))
 			for k, v := range details {
 				parts = append(parts, k+"="+fmt.Sprintf("%v", v))
 			}

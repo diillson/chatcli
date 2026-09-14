@@ -426,9 +426,9 @@ func (s *MetricsSnapshot) FormatForAI() string {
 			if t.Direction == "drop" || t.Direction == "sustained_low" {
 				icon = "▼"
 			}
-			sb.WriteString(fmt.Sprintf("- **%s** [%s] %s %s: %.4f → %.4f → %.4f (%.1f%% change)\n",
+			fmt.Fprintf(&sb, "- **%s** [%s] %s %s: %.4f → %.4f → %.4f (%.1f%% change)\n",
 				t.MetricName, t.Significance, icon, t.Direction,
-				t.BeforeValue, t.DuringValue, t.AfterValue, t.ChangePercent))
+				t.BeforeValue, t.DuringValue, t.AfterValue, t.ChangePercent)
 		}
 		sb.WriteString("\n")
 	}
@@ -441,8 +441,8 @@ func (s *MetricsSnapshot) FormatForAI() string {
 			return
 		}
 		latest := series.DataPoints[len(series.DataPoints)-1]
-		sb.WriteString(fmt.Sprintf("- %s: %.4f %s (at %s)\n",
-			label, latest.Value, series.Unit, latest.Timestamp.Format(time.RFC3339)))
+		fmt.Fprintf(&sb, "- %s: %.4f %s (at %s)\n",
+			label, latest.Value, series.Unit, latest.Timestamp.Format(time.RFC3339))
 	}
 
 	formatSeries("CPU Usage", s.CPUUsage)
@@ -464,8 +464,8 @@ func (s *MetricsSnapshot) FormatForAI() string {
 	if len(s.Correlations) > 0 {
 		sb.WriteString("### Metric-Event Correlations\n")
 		for _, c := range s.Correlations {
-			sb.WriteString(fmt.Sprintf("- %s: %s (%s, delta=%s)\n",
-				c.MetricName, c.Detail, c.EventType, c.TimeDelta.Round(time.Second)))
+			fmt.Fprintf(&sb, "- %s: %s (%s, delta=%s)\n",
+				c.MetricName, c.Detail, c.EventType, c.TimeDelta.Round(time.Second))
 		}
 		sb.WriteString("\n")
 	}

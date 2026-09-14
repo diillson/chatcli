@@ -230,9 +230,14 @@ func (r *EnvRedactor) isSensitive(key, value string) bool {
 
 func isHexString(s string) bool {
 	for _, c := range s {
-		if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F')) {
+		if !isHexDigit(c) {
 			return false
 		}
 	}
 	return true
+}
+
+// isHexDigit reports whether c is an ASCII hexadecimal digit of either case.
+func isHexDigit(c rune) bool {
+	return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F')
 }

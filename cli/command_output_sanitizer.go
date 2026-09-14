@@ -65,14 +65,14 @@ func SanitizeCommandOutput(cmd, output string) string {
 
 	var b strings.Builder
 	if injectionDetected {
-		b.WriteString(fmt.Sprintf("[WARNING: Output may contain prompt injection attempts. Detected patterns: %s]\n", strings.Join(patterns, ", ")))
+		fmt.Fprintf(&b, "[WARNING: Output may contain prompt injection attempts. Detected patterns: %s]\n", strings.Join(patterns, ", "))
 	}
 
 	// Wrap with explicit delimiters to separate data from instructions
-	b.WriteString(fmt.Sprintf("<COMMAND_OUTPUT cmd=%q>\n", cmd))
+	fmt.Fprintf(&b, "<COMMAND_OUTPUT cmd=%q>\n", cmd)
 	b.WriteString(output)
 	if truncated {
-		b.WriteString(fmt.Sprintf("\n[TRUNCATED: output exceeded %d bytes]", maxSize))
+		fmt.Fprintf(&b, "\n[TRUNCATED: output exceeded %d bytes]", maxSize)
 	}
 	b.WriteString("\n</COMMAND_OUTPUT>")
 

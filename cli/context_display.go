@@ -265,7 +265,7 @@ func (h *ContextHandler) printFileTypeStatistics(ctx *ctxmgr.FileContext) {
 			count int
 			size  int64
 		}
-		var stats []typeStats
+		stats := make([]typeStats, 0, len(fileTypes))
 		for t, c := range fileTypes {
 			stats = append(stats, typeStats{t, c, typeSizes[t]})
 		}

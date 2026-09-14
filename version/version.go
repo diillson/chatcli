@@ -320,28 +320,28 @@ func FormatVersionInfo(info VersionInfo, latest string, hasUpdate bool, checkErr
 
 	// --- Versão Atual ---
 	result.WriteString("\n  " + ansiColor("Versão Atual", ansiLime) + "\n")
-	result.WriteString(fmt.Sprintf("    %s    %s\n", ansiColor("Versão:", ansiCyan), ansiColor(displayValue(info.Version), ansiGray)))
-	result.WriteString(fmt.Sprintf("    %s    %s\n", ansiColor("Commit Hash:", ansiCyan), ansiColor(displayValue(info.CommitHash), ansiGray)))
-	result.WriteString(fmt.Sprintf("    %s    %s\n", ansiColor("Data de Build:", ansiCyan), ansiColor(displayValue(info.BuildDate), ansiGray)))
+	fmt.Fprintf(&result, "    %s    %s\n", ansiColor("Versão:", ansiCyan), ansiColor(displayValue(info.Version), ansiGray))
+	fmt.Fprintf(&result, "    %s    %s\n", ansiColor("Commit Hash:", ansiCyan), ansiColor(displayValue(info.CommitHash), ansiGray))
+	fmt.Fprintf(&result, "    %s    %s\n", ansiColor("Data de Build:", ansiCyan), ansiColor(displayValue(info.BuildDate), ansiGray))
 
 	// --- Atualizações ---
 	result.WriteString("\n  " + ansiColor("Status de Atualizações", ansiLime) + "\n")
 	if checkErr != nil {
-		result.WriteString(fmt.Sprintf("    %s    %s\n", ansiColor("Erro na Verificação:", ansiCyan), ansiColor(fmt.Sprintf("Não foi possível verificar: %v", checkErr), ansiYellow)))
+		fmt.Fprintf(&result, "    %s    %s\n", ansiColor("Erro na Verificação:", ansiCyan), ansiColor(fmt.Sprintf("Não foi possível verificar: %v", checkErr), ansiYellow))
 	} else {
-		result.WriteString(fmt.Sprintf("    %s    %s\n", ansiColor("Versão Mais Recente:", ansiCyan), ansiColor(latest, ansiGray)))
+		fmt.Fprintf(&result, "    %s    %s\n", ansiColor("Versão Mais Recente:", ansiCyan), ansiColor(latest, ansiGray))
 		if hasUpdate {
-			result.WriteString(fmt.Sprintf("    %s    %s\n", ansiColor("Atualização:", ansiCyan), ansiColor("Disponível! Atualize para a versão mais recente.", ansiGreen)))
+			fmt.Fprintf(&result, "    %s    %s\n", ansiColor("Atualização:", ansiCyan), ansiColor("Disponível! Atualize para a versão mais recente.", ansiGreen))
 		} else {
-			result.WriteString(fmt.Sprintf("    %s    %s\n", ansiColor("Atualização:", ansiCyan), ansiColor("Você está na versão mais recente.", ansiGreen)))
+			fmt.Fprintf(&result, "    %s    %s\n", ansiColor("Atualização:", ansiCyan), ansiColor("Você está na versão mais recente.", ansiGreen))
 		}
 	}
 
 	// --- Dica de Atualização ---
 	result.WriteString("\n  " + ansiColor("Como Atualizar", ansiLime) + "\n")
-	result.WriteString(fmt.Sprintf("    %s    %s\n", ansiColor("Homebrew:", ansiCyan), ansiColor("brew upgrade chatcli", ansiGray)))
-	result.WriteString(fmt.Sprintf("    %s    %s\n", ansiColor("Go Install:", ansiCyan), ansiColor("go install github.com/diillson/chatcli@latest", ansiGray)))
-	result.WriteString(fmt.Sprintf("    %s    %s\n", ansiColor("Dica:", ansiCyan), ansiColor("Instale via Homebrew: brew tap diillson/chatcli && brew install chatcli", ansiGray)))
+	fmt.Fprintf(&result, "    %s    %s\n", ansiColor("Homebrew:", ansiCyan), ansiColor("brew upgrade chatcli", ansiGray))
+	fmt.Fprintf(&result, "    %s    %s\n", ansiColor("Go Install:", ansiCyan), ansiColor("go install github.com/diillson/chatcli@latest", ansiGray))
+	fmt.Fprintf(&result, "    %s    %s\n", ansiColor("Dica:", ansiCyan), ansiColor("Instale via Homebrew: brew tap diillson/chatcli && brew install chatcli", ansiGray))
 
 	result.WriteString("\n") // Espaço final
 	return result.String()

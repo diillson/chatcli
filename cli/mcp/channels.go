@@ -423,10 +423,10 @@ func (cm *ChannelManager) FormatForPrompt(maxMessages int) string {
 	var sb strings.Builder
 	sb.WriteString("## MCP Channel Messages (Recent)\n\n")
 	for _, msg := range recent {
-		sb.WriteString(fmt.Sprintf("[%s/%s %s] %s\n",
+		fmt.Fprintf(&sb, "[%s/%s %s] %s\n",
 			msg.ServerName, msg.Channel,
 			msg.Timestamp.Format("15:04:05"),
-			msg.Content))
+			msg.Content)
 	}
 	return sb.String()
 }

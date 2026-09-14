@@ -417,7 +417,7 @@ func (cli *ChatCLI) processDirectorySummary(ctx context.Context, path string, to
 
 	// Se for um diretório, escanear a estrutura
 	var builder strings.Builder
-	builder.WriteString(fmt.Sprintf("📁 ESTRUTURA DO DIRETÓRIO: %s\n\n", path))
+	fmt.Fprintf(&builder, "📁 ESTRUTURA DO DIRETÓRIO: %s\n\n", path)
 
 	// Mapeamentos para estatísticas
 	fileTypes := make(map[string]int)
@@ -483,8 +483,8 @@ func (cli *ChatCLI) processDirectorySummary(ctx context.Context, path string, to
 					fileTypes[fileType]++
 
 					// Adicionar informações do arquivo, incluindo a extensão
-					builder.WriteString(fmt.Sprintf("%s (%s, %.1f KB, %s)\n",
-						entry.Name(), fileExt, float64(fInfo.Size())/1024, fileType))
+					fmt.Fprintf(&builder, "%s (%s, %.1f KB, %s)\n",
+						entry.Name(), fileExt, float64(fInfo.Size())/1024, fileType)
 				} else {
 					builder.WriteString(entry.Name() + "\n")
 				}
@@ -500,13 +500,13 @@ func (cli *ChatCLI) processDirectorySummary(ctx context.Context, path string, to
 
 	// Adicionar estatísticas
 	builder.WriteString("\n📊 ESTATÍSTICAS:\n")
-	builder.WriteString(fmt.Sprintf("Total de Diretórios: %d\n", totalDirs))
-	builder.WriteString(fmt.Sprintf("Total de Arquivos: %d\n", totalFiles))
-	builder.WriteString(fmt.Sprintf("Tamanho Total: %.2f MB\n", float64(totalSize)/1024/1024))
+	fmt.Fprintf(&builder, "Total de Diretórios: %d\n", totalDirs)
+	fmt.Fprintf(&builder, "Total de Arquivos: %d\n", totalFiles)
+	fmt.Fprintf(&builder, "Tamanho Total: %.2f MB\n", float64(totalSize)/1024/1024)
 
 	builder.WriteString("\n🔍 TIPOS DE ARQUIVO:\n")
 	for fileType, count := range fileTypes {
-		builder.WriteString(fmt.Sprintf("%s: %d arquivos\n", fileType, count))
+		fmt.Fprintf(&builder, "%s: %d arquivos\n", fileType, count)
 	}
 
 	return builder.String(), nil
@@ -844,7 +844,7 @@ func (cli *ChatCLI) processDirectorySmart(ctx context.Context, path string, quer
 	var currentTokens int
 	var builder strings.Builder
 
-	builder.WriteString(fmt.Sprintf("📁 ARQUIVOS MAIS RELEVANTES PARA: \"%s\"\n\n", query))
+	fmt.Fprintf(&builder, "📁 ARQUIVOS MAIS RELEVANTES PARA: \"%s\"\n\n", query)
 
 	for _, scored := range scoredFiles {
 		fileTokens := tokenEstimator(scored.File.Content)
@@ -854,21 +854,21 @@ func (cli *ChatCLI) processDirectorySmart(ctx context.Context, path string, quer
 			if len(selectedFiles) == 0 && fileTokens < maxTokens*3/4 {
 				selectedFiles = append(selectedFiles, scored.File)
 				currentTokens += fileTokens
-				builder.WriteString(fmt.Sprintf("📄 %s (Pontuação de relevância: %.2f)\n",
-					scored.File.Path, scored.Score))
+				fmt.Fprintf(&builder, "📄 %s (Pontuação de relevância: %.2f)\n",
+					scored.File.Path, scored.Score)
 			} else {
 				break
 			}
 		} else {
 			selectedFiles = append(selectedFiles, scored.File)
 			currentTokens += fileTokens
-			builder.WriteString(fmt.Sprintf("📄 %s (Pontuação de relevância: %.2f)\n",
-				scored.File.Path, scored.Score))
+			fmt.Fprintf(&builder, "📄 %s (Pontuação de relevância: %.2f)\n",
+				scored.File.Path, scored.Score)
 		}
 	}
 
-	builder.WriteString(fmt.Sprintf("\n🔍 Foram selecionados %d/%d arquivos mais relevantes para sua consulta.\n\n",
-		len(selectedFiles), len(files)))
+	fmt.Fprintf(&builder, "\n🔍 Foram selecionados %d/%d arquivos mais relevantes para sua consulta.\n\n",
+		len(selectedFiles), len(files))
 
 	// Se não houver arquivos relevantes, retornar resumo
 	if len(selectedFiles) == 0 {

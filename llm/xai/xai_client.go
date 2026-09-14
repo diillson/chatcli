@@ -85,7 +85,7 @@ func (c *XAIClient) SendPrompt(ctx context.Context, prompt string, history []mod
 		effectiveMaxTokens = c.getMaxTokens() // Fallback para a lógica antiga se nada for passado
 	}
 
-	messages := []map[string]interface{}{}
+	messages := make([]map[string]interface{}, 0, len(history))
 	for _, msg := range history {
 		role := strings.ToLower(strings.TrimSpace(msg.Role))
 		if role != "system" && role != "user" && role != "assistant" {

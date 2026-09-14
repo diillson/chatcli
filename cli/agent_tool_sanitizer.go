@@ -338,9 +338,10 @@ func fixUnbalancedQuotesWithTrailingBackslash(input string) (string, bool) {
 			continue
 		}
 
-		if ch == '"' {
+		switch ch {
+		case '"':
 			doubleQuotes++
-		} else if ch == '\'' {
+		case '\'':
 			singleQuotes++
 		}
 	}
