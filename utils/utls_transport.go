@@ -97,7 +97,6 @@ func (c *chromeTLSConn) ConnectionState() tls.ConnectionState {
 		DidResume:                   s.DidResume,
 		CipherSuite:                 s.CipherSuite,
 		NegotiatedProtocol:          s.NegotiatedProtocol,
-		NegotiatedProtocolIsMutual:  s.NegotiatedProtocolIsMutual,
 		ServerName:                  s.ServerName,
 		PeerCertificates:            s.PeerCertificates,
 		VerifiedChains:              s.VerifiedChains,

@@ -36,7 +36,15 @@ func newChromeTLSTestServer(t *testing.T, enableHTTP2 bool) *httptest.Server {
 	return srv
 }
 
-func getProto(t *testing.T, client *http.Client, url string) (*http.Response, string, bool) {
+// probe is what one round trip through the Chrome TLS transport observed.
+type probe struct {
+	proto  string
+	body   string
+	reused bool
+	tls    *tls.ConnectionState
+}
+
+func getProto(t *testing.T, client *http.Client, url string) probe {
 	t.Helper()
 	var reused bool
 	trace := &httptrace.ClientTrace{
@@ -50,37 +58,37 @@ func getProto(t *testing.T, client *http.Client, url string) (*http.Response, st
 	if err != nil {
 		t.Fatalf("GET %s: %v", url, err)
 	}
+	defer func() { _ = resp.Body.Close() }()
 	body, err := io.ReadAll(resp.Body)
-	_ = resp.Body.Close()
 	if err != nil {
 		t.Fatalf("read body: %v", err)
 	}
-	return resp, string(body), reused
+	return probe{proto: resp.Proto, body: string(body), reused: reused, tls: resp.TLS}
 }
 
 func TestChromeTLSTransport_NegotiatesHTTP2AndReusesConnection(t *testing.T) {
 	srv := newChromeTLSTestServer(t, true)
 	client := &http.Client{Transport: NewChromeTLSTransport()}
 
-	resp, body, reused := getProto(t, client, srv.URL)
-	if resp.ProtoMajor != 2 || body != "HTTP/2.0" {
-		t.Fatalf("expected HTTP/2 over the Chrome-fingerprint dial, got proto=%s body=%q", resp.Proto, body)
+	first := getProto(t, client, srv.URL)
+	if first.proto != "HTTP/2.0" || first.body != "HTTP/2.0" {
+		t.Fatalf("expected HTTP/2 over the Chrome-fingerprint dial, got proto=%s body=%q", first.proto, first.body)
 	}
-	if reused {
+	if first.reused {
 		t.Fatalf("first request must open a fresh connection")
 	}
-	if resp.TLS == nil || resp.TLS.NegotiatedProtocol != "h2" || !resp.TLS.HandshakeComplete {
-		t.Fatalf("expected translated TLS state with ALPN h2, got %+v", resp.TLS)
+	if first.tls == nil || first.tls.NegotiatedProtocol != "h2" || !first.tls.HandshakeComplete {
+		t.Fatalf("expected translated TLS state with ALPN h2, got %+v", first.tls)
 	}
-	if len(resp.TLS.PeerCertificates) == 0 || !resp.TLS.PeerCertificates[0].Equal(srv.Certificate()) {
+	if len(first.tls.PeerCertificates) == 0 || !first.tls.PeerCertificates[0].Equal(srv.Certificate()) {
 		t.Fatalf("expected the server certificate in the translated TLS state")
 	}
 
-	resp2, body2, reused2 := getProto(t, client, srv.URL)
-	if resp2.ProtoMajor != 2 || body2 != "HTTP/2.0" {
-		t.Fatalf("second request expected HTTP/2, got proto=%s body=%q", resp2.Proto, body2)
+	second := getProto(t, client, srv.URL)
+	if second.proto != "HTTP/2.0" || second.body != "HTTP/2.0" {
+		t.Fatalf("second request expected HTTP/2, got proto=%s body=%q", second.proto, second.body)
 	}
-	if !reused2 {
+	if !second.reused {
 		t.Fatalf("second request must reuse the pooled HTTP/2 connection")
 	}
 }
@@ -89,16 +97,15 @@ func TestChromeTLSTransport_FallsBackToHTTP1WhenServerLacksH2(t *testing.T) {
 	srv := newChromeTLSTestServer(t, false)
 	client := &http.Client{Transport: NewChromeTLSTransport()}
 
-	resp, body, _ := getProto(t, client, srv.URL)
-	if resp.ProtoMajor != 1 || body != "HTTP/1.1" {
-		t.Fatalf("expected HTTP/1.1 fallback, got proto=%s body=%q", resp.Proto, body)
+	first := getProto(t, client, srv.URL)
+	if first.proto != "HTTP/1.1" || first.body != "HTTP/1.1" {
+		t.Fatalf("expected HTTP/1.1 fallback, got proto=%s body=%q", first.proto, first.body)
 	}
-	if resp.TLS == nil || resp.TLS.NegotiatedProtocol == "h2" {
-		t.Fatalf("expected translated TLS state without h2, got %+v", resp.TLS)
+	if first.tls == nil || first.tls.NegotiatedProtocol == "h2" {
+		t.Fatalf("expected translated TLS state without h2, got %+v", first.tls)
 	}
 
-	_, _, reused := getProto(t, client, srv.URL)
-	if !reused {
+	if second := getProto(t, client, srv.URL); !second.reused {
 		t.Fatalf("HTTP/1.1 keep-alive connection must be pooled and reused")
 	}
 }
@@ -116,8 +123,10 @@ func TestChromeTLSTransport_RejectsUntrustedCertificate(t *testing.T) {
 
 	client := &http.Client{Transport: NewChromeTLSTransport()}
 	resp, err := client.Get(srv.URL)
+	if resp != nil {
+		defer func() { _ = resp.Body.Close() }()
+	}
 	if err == nil {
-		_ = resp.Body.Close()
 		t.Fatalf("expected the uTLS handshake to reject the self-signed test certificate")
 	}
 }
