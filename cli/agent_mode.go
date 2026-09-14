@@ -2527,6 +2527,7 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 		var llmResp *models.LLMResponse
 
 		if canUseNativeTools && len(nativeToolDefs) > 0 {
+			a.cli.notePrefixShape(turnHistory, nativeToolDefs)
 			llmResp, err = toolAwareClient.SendPromptWithTools(turnCtx, "", turnHistory, nativeToolDefs, currentMaxTokens)
 			if a.cli.refreshClientOnAuthError(err) {
 				// The refresh rebuilt the session client; re-resolve the
@@ -2544,6 +2545,7 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 				nativeToolCalls = llmResp.ToolCalls
 			}
 		} else {
+			a.cli.notePrefixShape(turnHistory, nil)
 			aiResponse, err = turnClient.SendPrompt(turnCtx, "", turnHistory, currentMaxTokens)
 			if a.cli.refreshClientOnAuthError(err) {
 				turnClient, turnCtx = a.clientAndCtxForTurn(ctx)

@@ -141,6 +141,7 @@ func (cli *ChatCLI) executeChatAskNative(
 	// pipeline repairs — repair the outgoing copy here or strict
 	// OpenAI-compat providers reject the request with a 400.
 	history, _ := agent.EnsureToolResultPairing(tempHistory, cli.logger)
+	cli.notePrefixShape(history, tools)
 	gvDone := false
 
 	for round := 0; ; round++ {
@@ -291,6 +292,7 @@ func (cli *ChatCLI) executeChatAskXML(
 	}
 	prompt := userInput + additionalContext + instruction
 	history := tempHistory
+	cli.notePrefixShape(history, nil)
 	gvDone := false
 
 	for round := 0; ; round++ {
