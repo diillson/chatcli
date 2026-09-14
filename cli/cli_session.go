@@ -241,6 +241,7 @@ func (cli *ChatCLI) clearAllHistories() {
 	// and nothing is left to keep warm.
 	llmclient.ResetPromptCacheTTL()
 	cli.cancelPromptCacheKeepAlive()
+	cli.resetPrefixShape()
 }
 
 // clearConversation is /clear: the conversation restarts empty while the
@@ -263,6 +264,7 @@ func (cli *ChatCLI) clearConversation(ctx context.Context) {
 	cli.resetChatPrefixMemo()
 	llmclient.ResetPromptCacheTTL()
 	cli.cancelPromptCacheKeepAlive()
+	cli.resetPrefixShape()
 	if cli.costTracker != nil {
 		cli.costTracker.NoteExpectedCacheRebuild()
 	}

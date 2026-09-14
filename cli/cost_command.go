@@ -492,11 +492,17 @@ func printCacheHealth(p string, ct *CostTracker) {
 	if stats.Warm {
 		state = i18n.T("cost.cmd.cache_warm", stats.TTL, formatIdle(time.Since(stats.LastActivity)))
 	}
+	if !stats.TTLPromotedAt.IsZero() {
+		state += " " + i18n.T("cost.cmd.cache_ttl_promoted", formatIdle(stats.TTLPromotedAt.Sub(ct.sessionStart).Truncate(time.Second)))
+	}
 	fmt.Println(p + colorize("  "+i18n.T("cost.cmd.cache_health",
 		stats.Requests, fmt.Sprintf("%.0f%%", stats.HitPct), stats.Misses, stats.Expired, stats.Rebuilds), ColorCyan) +
 		" " + colorize(state, ColorGray))
 	if stats.WriteReadRatio > 0 {
 		fmt.Println(p + colorize("  "+i18n.T("cost.cmd.cache_ratio", fmt.Sprintf("%.2f", stats.WriteReadRatio)), ColorGray))
+	}
+	for _, line := range lostPrefixLines(ct.cache.lostPrefixesLocked()) {
+		fmt.Println(p + colorize("  "+line, ColorGray))
 	}
 }
 

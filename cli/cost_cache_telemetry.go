@@ -102,6 +102,15 @@ type cacheTelemetry struct {
 	missStreak     int
 	alertArmed     bool // a streak notice is waiting to be shown
 
+	// pendingCause is what changed in the request about to be observed
+	// (prefix_shape.go); consumed by observe. causes counts lost prefixes
+	// by cause and events keeps the most recent ones for /cost.
+	pendingCause prefixChange
+	causes       map[string]int
+	events       []lostPrefixEvent
+	// ttlPromotedAt is when the lifetime was promoted on evidence.
+	ttlPromotedAt time.Time
+
 	byProvider map[string]*providerCache
 }
 
@@ -139,6 +148,46 @@ func usageCacheAccounting(provider, model string, u *models.UsageInfo) bool {
 	return cacheTokensAdditive(provider, model)
 }
 
+// lostPrefixEvent is one lost prefix with its outcome and cause.
+type lostPrefixEvent struct {
+	Request int
+	Outcome string // miss | expired | rebuild
+	Cause   prefixChange
+}
+
+// NotePrefixChange records what the next main-lane request changed ahead
+// of its tail, so a lost prefix on it can be attributed. A pending ttl
+// promotion is a more specific cause than "nothing changed" and is kept.
+func (ct *CostTracker) NotePrefixChange(change prefixChange) {
+	if ct == nil {
+		return
+	}
+	ct.mu.Lock()
+	if !change.none() || ct.cache.pendingCause.Kind != prefixCauseTTL {
+		ct.cache.pendingCause = change
+	}
+	ct.mu.Unlock()
+}
+
+// attributeLoss books a lost prefix against the request's pending cause.
+// A loss with no observed change is a server-side or lifetime event and
+// is recorded as such, never blamed on the prompt.
+func (c *cacheTelemetry) attributeLoss(outcome string) prefixChange {
+	cause := c.pendingCause
+	if cause.none() {
+		cause = prefixChange{Kind: prefixCauseUnobserved, Detail: outcome}
+	}
+	if c.causes == nil {
+		c.causes = map[string]int{}
+	}
+	c.causes[cause.key()]++
+	c.events = append(c.events, lostPrefixEvent{Request: c.requests, Outcome: outcome, Cause: cause})
+	if len(c.events) > prefixCauseMaxEvents {
+		c.events = c.events[len(c.events)-prefixCauseMaxEvents:]
+	}
+	return cause
+}
+
 // cacheObservation is what one usage report told the telemetry, returned
 // so the tracker can log it per request: the raw buckets, the gap since
 // the previous request, what the previous request had established, and
@@ -156,6 +205,7 @@ type cacheObservation struct {
 	Miss     bool // lost the prefix while it should have been warm
 	Expired  bool // lost it after a pause the cache did not survive
 	Rebuild  bool // lost it because ChatCLI rewrote the prefix on purpose
+	Cause    prefixChange
 }
 
 // observe folds one real usage report into the telemetry.
@@ -243,12 +293,14 @@ func (c *cacheTelemetry) observe(provider, model string, u *models.UsageInfo, no
 		if expiredWhileIdle {
 			c.idleExpiries++
 		}
+		obs.Cause = c.attributeLoss("rebuild")
 	case lost && expiredWhileIdle:
 		obs.Expired = true
 		c.expired++
 		c.idleExpiries++
 		// An expiry says nothing about the prefix's stability.
 		c.missStreak = 0
+		obs.Cause = c.attributeLoss("expired")
 	case lost:
 		obs.Miss = true
 		c.misses++
@@ -256,10 +308,13 @@ func (c *cacheTelemetry) observe(provider, model string, u *models.UsageInfo, no
 		if c.missStreak == cacheMissStreakAlert {
 			c.alertArmed = true
 		}
+		obs.Cause = c.attributeLoss("miss")
 	default:
 		c.missStreak = 0
 		c.rebuildPending = false
 	}
+	// The change belonged to this request, whatever it did to the cache.
+	c.pendingCause = prefixChange{}
 	return obs
 }
 
@@ -276,6 +331,40 @@ type CacheStats struct {
 	LastActivity   time.Time
 	TTL            string // "5m" or "1h"
 	Warm           bool   // last activity within the TTL
+	// TTLPromotedAt is when "auto" moved to the hour on evidence (zero
+	// when it never did). The attribution table lives in LostPrefixReport
+	// (LostPrefixes), so this struct stays comparable.
+	TTLPromotedAt time.Time
+}
+
+// LostPrefixReport is the attribution of every lost prefix: counts by
+// cause and the most recent events.
+type LostPrefixReport struct {
+	Causes map[string]int
+	Events []lostPrefixEvent
+}
+
+// LostPrefixes returns the attribution of the session's lost prefixes.
+func (ct *CostTracker) LostPrefixes() LostPrefixReport {
+	if ct == nil {
+		return LostPrefixReport{}
+	}
+	ct.mu.RLock()
+	defer ct.mu.RUnlock()
+	return ct.cache.lostPrefixesLocked()
+}
+
+// lostPrefixesLocked copies the attribution; caller holds the lock.
+func (c *cacheTelemetry) lostPrefixesLocked() LostPrefixReport {
+	r := LostPrefixReport{}
+	if len(c.causes) > 0 {
+		r.Causes = make(map[string]int, len(c.causes))
+		for k, v := range c.causes {
+			r.Causes[k] = v
+		}
+	}
+	r.Events = append([]lostPrefixEvent(nil), c.events...)
+	return r
 }
 
 // Reported is true when at least one request carried cache fields.
@@ -355,10 +444,16 @@ func (ct *CostTracker) promoteCacheTTLIfIdling(provider, model string) {
 		return
 	}
 	ct.cacheTTLPromoted = true
+	ct.cache.ttlPromotedAt = time.Now()
 	llmclient.SetPromptCacheTTLHint("1h")
 	// The prefix is being rebuilt anyway — that is what was just observed —
-	// so releasing the held decision throws nothing away.
+	// so releasing the held decision throws nothing away. The NEXT request
+	// carries the hour in every marker, which is a different prefix from
+	// the one the expired request just wrote: one more rewrite, expected
+	// and attributed to the promotion, not read as an unstable prefix.
 	llmclient.ResetPromptCacheTTL()
+	ct.cache.rebuildPending = true
+	ct.cache.pendingCause = prefixChange{Kind: prefixCauseTTL}
 }
 
 // cacheTTLFor names the cache lifetime in effect for a provider/model:
@@ -456,6 +551,7 @@ func (ct *CostTracker) cacheStatsLocked() CacheStats {
 	}
 	stats.TTL = cacheTTLFor(c.lastProvider, c.lastModel)
 	stats.Warm = time.Since(c.lastActivity) < cacheTTLDuration(stats.TTL)
+	stats.TTLPromotedAt = c.ttlPromotedAt
 	return stats
 }
 
@@ -533,6 +629,7 @@ func (ct *CostTracker) logCacheObservation(obs cacheObservation) {
 		outcome = "miss"
 	}
 	ct.logger.Debug("prompt cache observed",
+		zap.String("cause", obs.Cause.key()),
 		zap.String("provider", obs.Provider),
 		zap.String("model", obs.Model),
 		zap.Bool("additive", obs.Additive),

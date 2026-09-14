@@ -205,6 +205,10 @@ type ChatCLI struct {
 	unattended       bool // when true, the agent runs without any interactive confirmation (gateway daemon)
 	// cacheKeepAlive schedules the prompt-cache refreshes (cache_keepalive.go).
 	cacheKeepAlive promptCacheKeepAlive
+	// lastPrefixShape is the previous main-lane request's fingerprint, for
+	// cache miss attribution (prefix_shape.go).
+	prefixShapeMu   sync.Mutex
+	lastPrefixShape prefixShape
 	// policyAutoMode is the session-scoped /policy mode: when true, coder
 	// policy "ask" verdicts auto-approve (deny rules, the command validator
 	// and safety-immune operations still gate). Atomic because command
