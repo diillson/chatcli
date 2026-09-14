@@ -4,7 +4,7 @@ go 1.26.6
 
 require (
 	github.com/andybalholm/brotli v1.2.3
-	github.com/aws/aws-sdk-go-v2 v1.45.1
+	github.com/aws/aws-sdk-go-v2 v1.47.0
 	github.com/aws/aws-sdk-go-v2/config v1.33.2
 	github.com/aws/aws-sdk-go-v2/feature/ec2/imds v1.19.1
 	github.com/aws/aws-sdk-go-v2/service/bedrock v1.70.0
