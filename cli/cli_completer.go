@@ -1410,10 +1410,10 @@ func (cli *ChatCLI) suggestPreferArgs(d prompt.Document) []prompt.Suggest {
 	if len(args) < 4 && !(len(args) == 4 && !endsWithSpace) {
 		return nil
 	}
-	suggestions := []prompt.Suggest{
-		{Text: "--reset", Description: i18n.T("complete.skill.flag_reset")},
-	}
-	suggestions = append(suggestions, cli.getRegistryNameSuggestions(d)...)
+	registry := cli.getRegistryNameSuggestions(d)
+	suggestions := make([]prompt.Suggest, 0, len(registry)+2)
+	suggestions = append(suggestions, prompt.Suggest{Text: "--reset", Description: i18n.T("complete.skill.flag_reset")})
+	suggestions = append(suggestions, registry...)
 	suggestions = append(suggestions, prompt.Suggest{Text: "local", Description: i18n.T("complete.skill.prefer_local")})
 	return prompt.FilterHasPrefix(suggestions, d.GetWordBeforeCursor(), true)
 }

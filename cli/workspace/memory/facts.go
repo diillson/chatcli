@@ -606,7 +606,7 @@ func appendFactsToArchive(facts []*Fact, archivePath string) error {
 	if len(facts) == 0 {
 		return nil
 	}
-	var archive []*Fact
+	archive := make([]*Fact, 0, len(facts))
 	if data, err := os.ReadFile(archivePath); err == nil { //#nosec G304 -- path supplied by user/agent through validated tool surface (boundary check upstream)
 		_ = json.Unmarshal(data, &archive)
 	}

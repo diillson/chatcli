@@ -325,7 +325,7 @@ func (ca *CascadeAnalyzer) buildCascadeSummary(result *CascadeResult) string {
 	var parts []string
 
 	if len(result.Chain) >= 2 {
-		var chain []string
+		chain := make([]string, 0, len(result.Chain))
 		for _, n := range result.Chain {
 			chain = append(chain, fmt.Sprintf("%s(%s)", n.ServiceName, n.Role))
 		}

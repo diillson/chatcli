@@ -529,7 +529,7 @@ func (m *LLMManagerImpl) configurarOllamaClient(maxRetries int, initialBackoff t
 			}
 		}
 		if !found {
-			var availableModels []string
+			availableModels := make([]string, 0, len(tags.Models))
 			for _, m := range tags.Models {
 				availableModels = append(availableModels, m.Name)
 			}

@@ -297,7 +297,8 @@ func shadowGitDir(root string) (string, error) {
 // the caller is responsible for cleaning what it left behind (see
 // cleanupAbortedSnapshot).
 func shadowGit(ctx context.Context, gitDir, workTree string, args ...string) (string, error) {
-	base := []string{"--git-dir=" + gitDir, "--work-tree=" + workTree}
+	base := make([]string, 0, 2+len(args))
+	base = append(base, "--git-dir="+gitDir, "--work-tree="+workTree)
 	cmd := exec.CommandContext(ctx, "git", append(base, args...)...) // #nosec G204 -- fixed git binary; args are engine-built, never model-provided verbatim
 	// A killed git can leave children holding the output pipes (the reason
 	// the deadline exists at all is processes that outstay their welcome);

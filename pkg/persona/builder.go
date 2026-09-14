@@ -39,7 +39,7 @@ func (b *Builder) BuildMultiAgentPrompt(agents []*Agent) (*ComposedPrompt, error
 	promptParts := make([]string, 0, 8+len(agents)*4)
 
 	// 1. Collective Role Definition
-	agentNames := []string{}
+	agentNames := make([]string, 0, len(agents))
 	for _, a := range agents {
 		agentNames = append(agentNames, strings.ToUpper(a.Name))
 		result.ActiveAgents = append(result.ActiveAgents, a.Name)
@@ -85,7 +85,7 @@ func (b *Builder) BuildMultiAgentPrompt(agents []*Agent) (*ComposedPrompt, error
 		promptParts = append(promptParts, "#########################################################")
 
 		// Sort for deterministic order
-		var sortedSkills []string
+		sortedSkills := make([]string, 0, len(uniqueSkills))
 		for k := range uniqueSkills {
 			sortedSkills = append(sortedSkills, k)
 		}
@@ -154,7 +154,7 @@ func (b *Builder) appendSkillResources(parts *[]string, skill *Skill) {
 			*parts = append(*parts, "\n[KNOWLEDGE BASE (Markdown Documents)]:")
 
 			// Sort for deterministic prompt
-			var keys []string
+			keys := make([]string, 0, len(skill.Subskills))
 			for k := range skill.Subskills {
 				keys = append(keys, k)
 			}
@@ -172,7 +172,7 @@ func (b *Builder) appendSkillResources(parts *[]string, skill *Skill) {
 			*parts = append(*parts, "Use the command provided below to run these specialized scripts when needed.")
 
 			// Sort keys
-			var keys []string
+			keys := make([]string, 0, len(skill.Scripts))
 			for k := range skill.Scripts {
 				keys = append(keys, k)
 			}

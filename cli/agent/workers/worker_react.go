@@ -1132,7 +1132,7 @@ func parseCoderToolCall(tc agent.ToolCall) (string, []string, error) {
 		if err := json.Unmarshal(jsonArgs.Args, &argsMap); err == nil {
 			// Normaliza aliases comuns que LLMs confundem
 			argsMap = normalizeArgAliases(jsonArgs.Cmd, argsMap)
-			var cliArgs []string
+			cliArgs := make([]string, 0, 2*len(argsMap))
 			for k, v := range argsMap {
 				cliArgs = append(cliArgs, fmt.Sprintf("--%s", k), fmt.Sprintf("%v", v))
 			}

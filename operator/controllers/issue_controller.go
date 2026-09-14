@@ -125,7 +125,7 @@ func (r *IssueReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 		if err := r.Update(ctx, &issue); err != nil {
 			return ctrl.Result{}, err
 		}
-		return ctrl.Result{Requeue: true}, nil
+		return ctrl.Result{RequeueAfter: immediateRequeueDelay}, nil
 	}
 
 	// 4. State machine
@@ -182,7 +182,7 @@ func (r *IssueReconciler) handleDetected(ctx context.Context, issue *platformv1a
 	var runbookContext string
 	var candidateNames []string
 	if len(candidateRunbooks) > 0 {
-		var sections []string
+		sections := make([]string, 0, len(candidateRunbooks))
 		for _, rb := range candidateRunbooks {
 			candidateNames = append(candidateNames, rb.Name)
 			var stepsDesc []string

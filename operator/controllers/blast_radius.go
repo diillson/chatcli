@@ -647,7 +647,7 @@ func (bp *BlastRadiusPredictor) buildPredictionSummary(prediction *BlastRadiusPr
 		parts = append(parts, fmt.Sprintf("Warnings: %d", len(prediction.Warnings)))
 	}
 	if len(prediction.AffectedServices) > 0 {
-		var names []string
+		names := make([]string, 0, len(prediction.AffectedServices))
 		for _, s := range prediction.AffectedServices {
 			names = append(names, s.Name)
 		}
