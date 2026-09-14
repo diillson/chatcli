@@ -52,6 +52,64 @@ func (ct *CostTracker) RecordMemoryUsage(provider, model string, usage *models.U
 	ct.mu.Unlock()
 }
 
+// RecordMemoryOutcome counts what one extraction persisted.
+func (ct *CostTracker) RecordMemoryOutcome(facts, episodes int) {
+	if ct == nil {
+		return
+	}
+	ct.mu.Lock()
+	ct.memoryFactsWritten += facts
+	ct.memoryEpisodesWritten += episodes
+	ct.mu.Unlock()
+}
+
+// RecordMemoryRecall counts one proactive recall that put facts in front
+// of the model: the read side of the memory's return on investment.
+func (ct *CostTracker) RecordMemoryRecall(facts int) {
+	if ct == nil || facts <= 0 {
+		return
+	}
+	ct.mu.Lock()
+	ct.memoryRecalls++
+	ct.memoryFactsRecalled += facts
+	ct.mu.Unlock()
+}
+
+// MemoryROI is the memory worker's balance for /cost: what it cost,
+// what it wrote, and how much of the store the conversation read back.
+type MemoryROI struct {
+	Calls           int
+	CostUSD         float64
+	FactsWritten    int
+	EpisodesWritten int
+	Recalls         int
+	FactsRecalled   int
+}
+
+// CostPerFact is the extraction spend per persisted fact or episode; 0
+// when nothing was written.
+func (r MemoryROI) CostPerFact() float64 {
+	n := r.FactsWritten + r.EpisodesWritten
+	if n == 0 {
+		return 0
+	}
+	return r.CostUSD / float64(n)
+}
+
+// MemoryROIStats returns the session's memory balance.
+func (ct *CostTracker) MemoryROIStats() MemoryROI {
+	if ct == nil {
+		return MemoryROI{}
+	}
+	ct.mu.RLock()
+	defer ct.mu.RUnlock()
+	return MemoryROI{
+		Calls: ct.memoryCalls, CostUSD: ct.memoryCostUSD,
+		FactsWritten: ct.memoryFactsWritten, EpisodesWritten: ct.memoryEpisodesWritten,
+		Recalls: ct.memoryRecalls, FactsRecalled: ct.memoryFactsRecalled,
+	}
+}
+
 // MemoryStats returns the session's background memory-worker counters.
 func (ct *CostTracker) MemoryStats() (calls int, costUSD float64) {
 	if ct == nil {
@@ -68,6 +126,11 @@ func (ct *CostTracker) MemoryStats() (calls int, costUSD float64) {
 func printBackgroundCostLines(p string, ct *CostTracker) {
 	if ct.memoryCalls > 0 {
 		fmt.Println(p + "    " + colorize(i18n.T("cost.cmd.memory_worker", ct.memoryCalls, fmt.Sprintf("$%.4f", ct.memoryCostUSD)), ColorGray))
+		fmt.Println(p + "    " + colorize(memoryROILine(MemoryROI{
+			Calls: ct.memoryCalls, CostUSD: ct.memoryCostUSD,
+			FactsWritten: ct.memoryFactsWritten, EpisodesWritten: ct.memoryEpisodesWritten,
+			Recalls: ct.memoryRecalls, FactsRecalled: ct.memoryFactsRecalled,
+		}), ColorGray))
 	}
 	if ct.compactions > 0 {
 		fmt.Println(p + "    " + colorize(i18n.T("cost.cmd.compactions",
@@ -83,4 +146,16 @@ func (ct *CostTracker) CompactionStats() (total, level3 int, costUSD float64) {
 	ct.mu.RLock()
 	defer ct.mu.RUnlock()
 	return ct.compactions, ct.compactionsLevel3, ct.compactionCostUSD
+}
+
+// memoryROILine renders the memory balance under the worker's cost line:
+// what the calls wrote, what it cost per item, and what the conversation
+// read back through proactive recall. A worker that writes nothing the
+// session ever reads is the case this line exists to expose.
+func memoryROILine(r MemoryROI) string {
+	perFact := "—"
+	if v := r.CostPerFact(); v > 0 {
+		perFact = fmt.Sprintf("$%.4f", v)
+	}
+	return i18n.T("cost.cmd.memory_roi", r.FactsWritten, r.EpisodesWritten, perFact, r.Recalls, r.FactsRecalled)
 }

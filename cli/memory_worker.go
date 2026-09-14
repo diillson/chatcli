@@ -563,33 +563,7 @@ func (mw *memoryWorker) extractAndSave(ctx context.Context, messages []models.Me
 	// Build conversation snippet for extraction
 	sb := buildExtractionSnippet(messages)
 
-	// Build enhanced prompt with existing context
-	var fullPrompt strings.Builder
-	fullPrompt.WriteString(instructions)
-	fullPrompt.WriteString("\n\n---\n\n")
-
-	// Include current workspace so the extraction LLM can distinguish session context
-	if wsDir := mgr.WorkspaceDir(); wsDir != "" {
-		fullPrompt.WriteString(fmt.Sprintf("CURRENT SESSION WORKSPACE: %s\n", wsDir))
-		fullPrompt.WriteString("(All paths and facts from this conversation belong to this workspace.)\n\n---\n\n")
-	}
-
-	existingContext := mgr.FormatExistingContext()
-	if existingContext != "" {
-		fullPrompt.WriteString(existingContext)
-		fullPrompt.WriteString("\n\n---\n\n")
-	}
-
-	fullPrompt.WriteString("CONVERSATION SEGMENT TO ANALYZE:\n\n")
-	fullPrompt.WriteString(sb.String())
-
-	prompt := fullPrompt.String()
-
-	// Pass prompt as both the prompt param and the last user message in history.
-	history := []models.Message{
-		{Role: "system", Content: instructions},
-		{Role: "user", Content: prompt},
-	}
+	prompt, history := buildExtractionRequest(instructions, mgr.WorkspaceDir(), mgr.FormatExistingContext(), sb.String())
 
 	// Walk the provider chain (active client first, then fallbacks) so one
 	// provider's outage does not cost the conversation its memory.
@@ -621,6 +595,9 @@ func (mw *memoryWorker) extractAndSave(ctx context.Context, messages []models.Me
 	summary := mw.store.ProcessExtractionResult(response)
 	if !summary.IsEmpty() {
 		mw.cli.pushMemoryNotice(formatMemoryNotice(summary))
+	}
+	if mw.cli.costTracker != nil {
+		mw.cli.costTracker.RecordMemoryOutcome(summary.FactsAdded, summary.EpisodesAdded)
 	}
 
 	// Same response, second harvest: author new skills, or evolve existing ones

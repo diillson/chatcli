@@ -50,6 +50,15 @@ func (cli *ChatCLI) noteRecalledFacts(facts []*memory.Fact) {
 	if cli == nil {
 		return
 	}
+	if cli.costTracker != nil {
+		shown := 0
+		for _, f := range facts {
+			if f != nil {
+				shown++
+			}
+		}
+		cli.costTracker.RecordMemoryRecall(shown)
+	}
 	set := make([]recalledFact, 0, len(facts))
 	for _, f := range facts {
 		if f == nil || f.ID == "" {
