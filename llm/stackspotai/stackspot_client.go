@@ -203,7 +203,7 @@ func formatConversationHistory(history []models.Message) string {
 		if msg.Role == "assistant" {
 			role = "Assistente"
 		}
-		conversationBuilder.WriteString(fmt.Sprintf("%s: %s\n", role, msg.Content))
+		fmt.Fprintf(&conversationBuilder, "%s: %s\n", role, msg.Content)
 	}
 	return conversationBuilder.String()
 }

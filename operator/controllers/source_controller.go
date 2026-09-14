@@ -576,7 +576,7 @@ func findCommitsNearTime(commits []platformv1alpha1.GitCommitInfo, incidentTime 
 	start := incidentTime.Add(-window)
 	var near []platformv1alpha1.GitCommitInfo
 	for _, c := range commits {
-		if c.Timestamp.Time.After(start) && c.Timestamp.Time.Before(incidentTime.Add(5*time.Minute)) {
+		if c.Timestamp.After(start) && c.Timestamp.Time.Before(incidentTime.Add(5*time.Minute)) {
 			near = append(near, c)
 		}
 	}
@@ -793,7 +793,7 @@ func readLinesAround(rootDir, filePath string, targetLine, contextLines int) (st
 			if lineNum == targetLine {
 				marker = ">>"
 			}
-			sb.WriteString(fmt.Sprintf("%s %4d | %s\n", marker, lineNum, scanner.Text()))
+			fmt.Fprintf(&sb, "%s %4d | %s\n", marker, lineNum, scanner.Text())
 		}
 		if lineNum > endLine {
 			break
@@ -887,13 +887,13 @@ func (ctx *SourceCodeContext) FormatForAI() string {
 	if ctx.SuspectedCommit != nil {
 		c := ctx.SuspectedCommit
 		sb.WriteString("### Suspected Commit\n")
-		sb.WriteString(fmt.Sprintf("**%s** by %s at %s\n",
-			c.SHA[:8], c.Author, c.Timestamp.Format("2006-01-02 15:04:05")))
-		sb.WriteString(fmt.Sprintf("Message: %s\n", c.Message))
+		fmt.Fprintf(&sb, "**%s** by %s at %s\n",
+			c.SHA[:8], c.Author, c.Timestamp.Format("2006-01-02 15:04:05"))
+		fmt.Fprintf(&sb, "Message: %s\n", c.Message)
 		if len(c.FilesChanged) > 0 {
 			sb.WriteString("Files changed:\n")
 			for _, f := range c.FilesChanged {
-				sb.WriteString(fmt.Sprintf("  - %s\n", f))
+				fmt.Fprintf(&sb, "  - %s\n", f)
 			}
 		}
 		sb.WriteString("\n")
@@ -903,8 +903,8 @@ func (ctx *SourceCodeContext) FormatForAI() string {
 	if len(ctx.RecentChanges) > 0 {
 		sb.WriteString("### Recent Commits (30min before incident)\n")
 		for _, c := range ctx.RecentChanges {
-			sb.WriteString(fmt.Sprintf("- %s %s: %s (%d files)\n",
-				c.SHA[:8], c.Author, c.Message, len(c.FilesChanged)))
+			fmt.Fprintf(&sb, "- %s %s: %s (%d files)\n",
+				c.SHA[:8], c.Author, c.Message, len(c.FilesChanged))
 		}
 		sb.WriteString("\n")
 	}
@@ -913,7 +913,7 @@ func (ctx *SourceCodeContext) FormatForAI() string {
 	if len(ctx.RelevantCode) > 0 {
 		sb.WriteString("### Code from Stack Trace References\n")
 		for _, s := range ctx.RelevantCode {
-			sb.WriteString(fmt.Sprintf("**%s** (%s, lines %d-%d)\n", s.FilePath, s.Reason, s.StartLine, s.EndLine))
+			fmt.Fprintf(&sb, "**%s** (%s, lines %d-%d)\n", s.FilePath, s.Reason, s.StartLine, s.EndLine)
 			sb.WriteString("```" + s.Language + "\n")
 			sb.WriteString(s.Content)
 			sb.WriteString("```\n\n")
@@ -924,7 +924,7 @@ func (ctx *SourceCodeContext) FormatForAI() string {
 	if len(ctx.ConfigContext) > 0 {
 		sb.WriteString("### Deployment Configuration\n")
 		for _, cf := range ctx.ConfigContext {
-			sb.WriteString(fmt.Sprintf("**%s**\n```\n%s\n```\n\n", cf.FilePath, cf.Content))
+			fmt.Fprintf(&sb, "**%s**\n```\n%s\n```\n\n", cf.FilePath, cf.Content)
 		}
 	}
 

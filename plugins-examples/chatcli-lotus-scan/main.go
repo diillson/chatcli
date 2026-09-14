@@ -67,13 +67,13 @@ func main() {
 			if title == "" {
 				title = info.Name() // Fallback para o nome do diretório
 			}
-			builder.WriteString(fmt.Sprintf("%s- %s/ (Seção)\n", indent, title))
+			fmt.Fprintf(&builder, "%s- %s/ (Seção)\n", indent, title)
 		} else if strings.HasSuffix(info.Name(), ".md") && info.Name() != "_index.md" {
 			title := getTitleFromFrontMatter(path)
 			if title == "" {
 				title = info.Name()
 			}
-			builder.WriteString(fmt.Sprintf("%s  - %s (Página)\n", indent, title))
+			fmt.Fprintf(&builder, "%s  - %s (Página)\n", indent, title)
 		}
 		return nil
 	})

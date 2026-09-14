@@ -1257,17 +1257,17 @@ func (m *Manager) formatContextContent(ctx *FileContext, opts FormatOptions) str
 
 	// Cabeçalho do contexto
 	if opts.IncludeMetadata {
-		builder.WriteString(fmt.Sprintf("📦 CONTEXT: %s\n", ctx.Name))
+		fmt.Fprintf(&builder, "📦 CONTEXT: %s\n", ctx.Name)
 		if ctx.Description != "" {
-			builder.WriteString(fmt.Sprintf("Description: %s\n", ctx.Description))
+			fmt.Fprintf(&builder, "Description: %s\n", ctx.Description)
 		}
 		if opts.IncludeTimestamp {
-			builder.WriteString(fmt.Sprintf("Created: %s\n", ctx.CreatedAt.Format(time.RFC3339)))
+			fmt.Fprintf(&builder, "Created: %s\n", ctx.CreatedAt.Format(time.RFC3339))
 		}
-		builder.WriteString(fmt.Sprintf("Mode: %s | Files: %d | Size: %.2f MB\n",
-			ctx.Mode, ctx.FileCount, float64(ctx.TotalSize)/1024/1024))
+		fmt.Fprintf(&builder, "Mode: %s | Files: %d | Size: %.2f MB\n",
+			ctx.Mode, ctx.FileCount, float64(ctx.TotalSize)/1024/1024)
 		if len(ctx.Tags) > 0 {
-			builder.WriteString(fmt.Sprintf("Tags: %s\n", strings.Join(ctx.Tags, ", ")))
+			fmt.Fprintf(&builder, "Tags: %s\n", strings.Join(ctx.Tags, ", "))
 		}
 		builder.WriteString("\n")
 	}
@@ -1350,15 +1350,15 @@ func (m *Manager) AttachContextWithOptions(sessionID, contextID string, opts Att
 func (m *Manager) formatChunk(chunk FileChunk, opts FormatOptions) string {
 	var b strings.Builder
 
-	b.WriteString(fmt.Sprintf("\n📦 CHUNK %d/%d: %s\n",
-		chunk.Index, chunk.TotalChunks, chunk.Description))
+	fmt.Fprintf(&b, "\n📦 CHUNK %d/%d: %s\n",
+		chunk.Index, chunk.TotalChunks, chunk.Description)
 	b.WriteString(strings.Repeat("=", 80) + "\n\n")
 
 	for _, file := range chunk.Files {
-		b.WriteString(fmt.Sprintf("📄 ARQUIVO: %s\n", file.Path))
+		fmt.Fprintf(&b, "📄 ARQUIVO: %s\n", file.Path)
 		if opts.IncludeMetadata {
-			b.WriteString(fmt.Sprintf("Tipo: %s | Tamanho: %.2f KB\n",
-				file.Type, float64(file.Size)/1024))
+			fmt.Fprintf(&b, "Tipo: %s | Tamanho: %.2f KB\n",
+				file.Type, float64(file.Size)/1024)
 		}
 		b.WriteString("```\n")
 		b.WriteString(file.Content)

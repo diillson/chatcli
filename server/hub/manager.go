@@ -113,7 +113,7 @@ func (m *Manager) Subscribe(ctx context.Context, convID string, sinceSeq int64) 
 		defer close(out)
 		defer m.unsubscribe(convID, id)
 
-		backlog, err := m.Store.Read(ctx, convID, sinceSeq, 0)
+		backlog, err := m.Read(ctx, convID, sinceSeq, 0)
 		if err != nil {
 			m.logger.Warn("hub: subscribe backlog read failed", zap.String("conv_id", convID), zap.Error(err))
 			return

@@ -68,12 +68,12 @@ func fakeServer(t *testing.T, serverIn io.Reader, serverOut io.Writer, diagURI s
 		if err := json.Unmarshal(body, &m); err != nil {
 			return
 		}
-		switch {
-		case m.Method == "initialize":
+		switch m.Method {
+		case "initialize":
 			_ = writeMessage(serverOut, map[string]interface{}{"jsonrpc": "2.0", "id": m.ID, "result": map[string]interface{}{"capabilities": map[string]interface{}{}}})
-		case m.Method == "shutdown":
+		case "shutdown":
 			_ = writeMessage(serverOut, map[string]interface{}{"jsonrpc": "2.0", "id": m.ID, "result": nil})
-		case m.Method == "textDocument/didOpen":
+		case "textDocument/didOpen":
 			_ = writeMessage(serverOut, map[string]interface{}{
 				"jsonrpc": "2.0",
 				"method":  "textDocument/publishDiagnostics",

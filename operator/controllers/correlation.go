@@ -250,7 +250,7 @@ func (ce *CorrelationEngine) FindRecentlyResolvedIssue(ctx context.Context, reso
 			issue.Spec.Resource.Namespace == resource.Namespace &&
 			issue.Status.State == platformv1alpha1.IssueStateResolved &&
 			issue.Status.ResolvedAt != nil &&
-			issue.Status.ResolvedAt.Time.After(cutoff) {
+			issue.Status.ResolvedAt.After(cutoff) {
 			return issue, nil
 		}
 	}

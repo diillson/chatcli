@@ -375,12 +375,12 @@ func (r *CascadeResult) FormatForAI() string {
 			if i < len(r.Chain)-1 {
 				arrow = " →"
 			}
-			sb.WriteString(fmt.Sprintf("%d. **%s/%s** [%s] severity=%s signal=%s detected=%s%s\n",
+			fmt.Fprintf(&sb, "%d. **%s/%s** [%s] severity=%s signal=%s detected=%s%s\n",
 				i+1, n.Namespace, n.ServiceName, n.Role, n.Severity, n.SignalType,
-				n.DetectedAt.Format("15:04:05"), arrow))
+				n.DetectedAt.Format("15:04:05"), arrow)
 		}
 		if r.RootCauseService != "" {
-			sb.WriteString(fmt.Sprintf("\n**Suspected root cause service: %s**\n", r.RootCauseService))
+			fmt.Fprintf(&sb, "\n**Suspected root cause service: %s**\n", r.RootCauseService)
 		}
 		sb.WriteString("\n")
 	}
@@ -394,8 +394,8 @@ func (r *CascadeResult) FormatForAI() string {
 					sb.WriteString("### Unhealthy Service Dependencies\n")
 					unhealthy = true
 				}
-				sb.WriteString(fmt.Sprintf("- %s → %s:%d (endpoints=%d, UNHEALTHY)\n",
-					svc, d.ServiceName, d.Port, d.Endpoints))
+				fmt.Fprintf(&sb, "- %s → %s:%d (endpoints=%d, UNHEALTHY)\n",
+					svc, d.ServiceName, d.Port, d.Endpoints)
 			}
 		}
 	}
@@ -407,9 +407,9 @@ func (r *CascadeResult) FormatForAI() string {
 	if len(r.CrossNamespaceIssues) > 0 {
 		sb.WriteString("### Cross-Namespace Active Issues (within 20min window)\n")
 		for _, ci := range r.CrossNamespaceIssues {
-			sb.WriteString(fmt.Sprintf("- %s/%s [%s] %s signal=%s state=%s detected=%s\n",
+			fmt.Fprintf(&sb, "- %s/%s [%s] %s signal=%s state=%s detected=%s\n",
 				ci.Namespace, ci.Name, ci.Severity, ci.Resource, ci.SignalType,
-				ci.State, ci.DetectedAt.Format("15:04:05")))
+				ci.State, ci.DetectedAt.Format("15:04:05"))
 		}
 		sb.WriteString("\n")
 	}

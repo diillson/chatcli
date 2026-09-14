@@ -89,7 +89,7 @@ func searchArticles(term string) {
 	var builder strings.Builder
 	builder.WriteString("Resultados da busca na Wikipedia (títulos exatos para usar com --read):\n")
 	for i, title := range titles {
-		builder.WriteString(fmt.Sprintf("%d. \"%s\"\n", i+1, title.(string)))
+		fmt.Fprintf(&builder, "%d. \"%s\"\n", i+1, title.(string))
 	}
 
 	fmt.Print(builder.String())

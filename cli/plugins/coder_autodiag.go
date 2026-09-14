@@ -156,7 +156,7 @@ func appendAutoDiagnostics(subcmd string, args []string, output string) string {
 	started := time.Now()
 	for i, file := range targets {
 		if time.Since(started) > autoDiagPassBudget {
-			b.WriteString(fmt.Sprintf("- %d file(s) not checked (diagnostics time budget) — run @lsp diagnostics on them if needed.\n", len(targets)-i))
+			fmt.Fprintf(&b, "- %d file(s) not checked (diagnostics time budget) — run @lsp diagnostics on them if needed.\n", len(targets)-i)
 			break
 		}
 		text, hasIssues, err := qd.QuickDiagnostics(file)
@@ -164,7 +164,7 @@ func appendAutoDiagnostics(subcmd string, args []string, output string) string {
 			continue
 		}
 		if b.Len()+len(text) > maxAutoDiagBytes {
-			b.WriteString(fmt.Sprintf("- %s: findings omitted (diagnostics budget) — run @lsp diagnostics on it.\n", file))
+			fmt.Fprintf(&b, "- %s: findings omitted (diagnostics budget) — run @lsp diagnostics on it.\n", file)
 			continue
 		}
 		b.WriteString(text)

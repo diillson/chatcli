@@ -668,7 +668,7 @@ func (fi *FactIndex) GenerateMarkdown(maxSize int) string {
 
 	for _, cat := range catOrder {
 		catFacts := categories[cat]
-		sb.WriteString(fmt.Sprintf("## %s\n\n", cases.Title(language.English).String(cat)))
+		fmt.Fprintf(&sb, "## %s\n\n", cases.Title(language.English).String(cat))
 		for _, f := range catFacts {
 			line := fmt.Sprintf("- %s\n", f.Content)
 			if sb.Len()+len(line) > maxSize {

@@ -116,8 +116,8 @@ func (a *memoryPluginAdapter) Recall(query string) (string, error) {
 	}
 
 	var out string
-	switch {
-	case q == "":
+	switch q {
+	case "":
 		out = a.cli.memoryStore.GetMemoryContext()
 	default:
 		hints := memory.ExtractKeywords([]string{q})

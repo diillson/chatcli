@@ -122,7 +122,7 @@ func (h *ContextHandler) inspectContext(ctx *ctxmgr.FileContext) {
 		fmt.Printf("\n%s\n", colorize(i18n.T("context.inspect.chunk_analysis_header"), ColorCyan+ColorBold))
 
 		var totalChunkSize int64
-		var minSize, maxSize int64 = ctx.Chunks[0].TotalSize, ctx.Chunks[0].TotalSize
+		var minSize, maxSize = ctx.Chunks[0].TotalSize, ctx.Chunks[0].TotalSize
 
 		for _, chunk := range ctx.Chunks {
 			totalChunkSize += chunk.TotalSize

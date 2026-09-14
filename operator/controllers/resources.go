@@ -771,38 +771,38 @@ func buildWatchConfigYAML(watcher *platformv1alpha1.WatcherSpec) string {
 	var b strings.Builder
 
 	if watcher.Interval != "" {
-		b.WriteString(fmt.Sprintf("interval: %q\n", watcher.Interval))
+		fmt.Fprintf(&b, "interval: %q\n", watcher.Interval)
 	}
 	if watcher.Window != "" {
-		b.WriteString(fmt.Sprintf("window: %q\n", watcher.Window))
+		fmt.Fprintf(&b, "window: %q\n", watcher.Window)
 	}
 	if watcher.MaxLogLines > 0 {
-		b.WriteString(fmt.Sprintf("maxLogLines: %d\n", watcher.MaxLogLines))
+		fmt.Fprintf(&b, "maxLogLines: %d\n", watcher.MaxLogLines)
 	}
 	if watcher.MaxContextChars > 0 {
-		b.WriteString(fmt.Sprintf("maxContextChars: %d\n", watcher.MaxContextChars))
+		fmt.Fprintf(&b, "maxContextChars: %d\n", watcher.MaxContextChars)
 	}
 
 	b.WriteString("targets:\n")
 	for i := range watcher.Targets {
 		t := &watcher.Targets[i]
-		b.WriteString(fmt.Sprintf("  - deployment: %q\n", t.ResourceName()))
-		b.WriteString(fmt.Sprintf("    kind: %q\n", t.ResourceKind()))
+		fmt.Fprintf(&b, "  - deployment: %q\n", t.ResourceName())
+		fmt.Fprintf(&b, "    kind: %q\n", t.ResourceKind())
 		ns := t.Namespace
 		if ns == "" {
 			ns = "default"
 		}
-		b.WriteString(fmt.Sprintf("    namespace: %q\n", ns))
+		fmt.Fprintf(&b, "    namespace: %q\n", ns)
 		if t.MetricsPort > 0 {
-			b.WriteString(fmt.Sprintf("    metricsPort: %d\n", t.MetricsPort))
+			fmt.Fprintf(&b, "    metricsPort: %d\n", t.MetricsPort)
 		}
 		if t.MetricsPath != "" {
-			b.WriteString(fmt.Sprintf("    metricsPath: %q\n", t.MetricsPath))
+			fmt.Fprintf(&b, "    metricsPath: %q\n", t.MetricsPath)
 		}
 		if len(t.MetricsFilter) > 0 {
 			b.WriteString("    metricsFilter:\n")
 			for _, f := range t.MetricsFilter {
-				b.WriteString(fmt.Sprintf("      - %q\n", f))
+				fmt.Fprintf(&b, "      - %q\n", f)
 			}
 		}
 	}

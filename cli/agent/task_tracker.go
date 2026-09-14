@@ -414,9 +414,10 @@ func (t *TaskTracker) FormatProgress() string {
 	completed := 0
 	failed := 0
 	for _, task := range t.plan.Tasks {
-		if task.Status == TaskCompleted {
+		switch task.Status {
+		case TaskCompleted:
 			completed++
-		} else if task.Status == TaskFailed {
+		case TaskFailed:
 			failed++
 		}
 	}

@@ -215,9 +215,9 @@ func injectSourceField(content string, source string, hash string) string {
 		// No frontmatter — prepend minimal frontmatter with source
 		var sb strings.Builder
 		sb.WriteString("---\n")
-		sb.WriteString(fmt.Sprintf("source: %q\n", source))
+		fmt.Fprintf(&sb, "source: %q\n", source)
 		if hash != "" {
-			sb.WriteString(fmt.Sprintf("snapshot_hash: %q\n", hash))
+			fmt.Fprintf(&sb, "snapshot_hash: %q\n", hash)
 		}
 		sb.WriteString("---\n")
 		sb.WriteString(content)
@@ -492,18 +492,18 @@ func (inst *Installer) GetInstallDir() string {
 func buildSkillMD(meta *SkillMeta, content []byte) string {
 	var sb strings.Builder
 	sb.WriteString("---\n")
-	sb.WriteString(fmt.Sprintf("name: %q\n", meta.Name))
+	fmt.Fprintf(&sb, "name: %q\n", meta.Name)
 	if meta.Description != "" {
-		sb.WriteString(fmt.Sprintf("description: %q\n", meta.Description))
+		fmt.Fprintf(&sb, "description: %q\n", meta.Description)
 	}
 	if meta.Version != "" {
-		sb.WriteString(fmt.Sprintf("version: %q\n", meta.Version))
+		fmt.Fprintf(&sb, "version: %q\n", meta.Version)
 	}
 	if meta.Author != "" {
-		sb.WriteString(fmt.Sprintf("author: %q\n", meta.Author))
+		fmt.Fprintf(&sb, "author: %q\n", meta.Author)
 	}
 	if meta.RegistryName != "" {
-		sb.WriteString(fmt.Sprintf("source: %q\n", meta.RegistryName))
+		fmt.Fprintf(&sb, "source: %q\n", meta.RegistryName)
 	}
 	sb.WriteString("---\n\n")
 	sb.Write(content)

@@ -89,8 +89,8 @@ type attachFlags struct {
 func parseAttachFlags(args []string) (attachFlags, error) {
 	f := attachFlags{priority: 100}
 	for i := 1; i < len(args); i++ {
-		switch arg := args[i]; {
-		case arg == "--weight" || arg == "-w":
+		switch arg := args[i]; arg {
+		case "--weight", "-w":
 			if i+1 >= len(args) {
 				return f, fmt.Errorf("%s", i18n.T("context.attach.error.invalid_weight"))
 			}
@@ -100,7 +100,7 @@ func parseAttachFlags(args []string) (attachFlags, error) {
 				return f, fmt.Errorf("%s", i18n.T("context.attach.error.invalid_weight"))
 			}
 			f.weight = w
-		case arg == "--priority" || arg == "-p":
+		case "--priority", "-p":
 			if i+1 >= len(args) {
 				return f, fmt.Errorf("%s", i18n.T("context.attach.error.invalid_priority"))
 			}
@@ -111,7 +111,7 @@ func parseAttachFlags(args []string) (attachFlags, error) {
 			}
 			f.priority = p
 
-		case arg == "--chunk" || arg == "-c":
+		case "--chunk", "-c":
 			if i+1 >= len(args) {
 				return f, fmt.Errorf("%s", i18n.T("context.io.error.chunk_requires_number"))
 			}
@@ -122,7 +122,7 @@ func parseAttachFlags(args []string) (attachFlags, error) {
 			}
 			f.selectedChunks = append(f.selectedChunks, chunkNum)
 
-		case arg == "--chunks" || arg == "-C":
+		case "--chunks", "-C":
 			if i+1 >= len(args) {
 				return f, fmt.Errorf("%s", i18n.T("context.io.error.chunks_requires_numbers"))
 			}
@@ -133,7 +133,7 @@ func parseAttachFlags(args []string) (attachFlags, error) {
 			}
 			f.selectedChunks = append(f.selectedChunks, nums...)
 
-		case arg == "--rag" || arg == "--retrieve" || arg == "-r":
+		case "--rag", "--retrieve", "-r":
 			// Semantic retrieval: inject only the top-K relevant passages per
 			// turn. An optional trailing number overrides the default K.
 			f.retrievalTopK = ctxmgr.DefaultRetrievalTopK
@@ -146,7 +146,7 @@ func parseAttachFlags(args []string) (attachFlags, error) {
 				}
 			}
 
-		case arg == "--full" || arg == "-f":
+		case "--full", "-f":
 			// Whole-content injection, explicitly: opts out of the automatic
 			// RAG upgrade for large contexts (attachAutoRag).
 			f.full = true

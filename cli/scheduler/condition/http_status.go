@@ -50,7 +50,7 @@ func (*HTTPStatus) ValidateSpec(spec map[string]any) error {
 	if strings.TrimSpace(url) == "" {
 		return fmt.Errorf("http_status: spec.url is required")
 	}
-	if !(strings.HasPrefix(url, "http://") || strings.HasPrefix(url, "https://")) {
+	if !strings.HasPrefix(url, "http://") && !strings.HasPrefix(url, "https://") {
 		return fmt.Errorf("http_status: spec.url must be http:// or https://")
 	}
 	if re := asString(spec, "expected_regex"); re != "" {

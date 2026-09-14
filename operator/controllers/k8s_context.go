@@ -56,14 +56,14 @@ func (b *KubernetesContextBuilder) BuildContext(ctx context.Context, resource pl
 	case "CronJob":
 		b.buildCronJobContext(ctx, resource, &sb)
 	default:
-		sb.WriteString(fmt.Sprintf("## Resource Status\nResource kind %q — collecting generic pod/event context.\n\n", resource.Kind))
+		fmt.Fprintf(&sb, "## Resource Status\nResource kind %q — collecting generic pod/event context.\n\n", resource.Kind)
 	}
 
 	// Common sections for all resource kinds
 	// Pod Details
 	podCtx, err := b.buildPodDetails(ctx, resource)
 	if err != nil {
-		sb.WriteString(fmt.Sprintf("## Pod Details\nError fetching pods: %v\n\n", err))
+		fmt.Fprintf(&sb, "## Pod Details\nError fetching pods: %v\n\n", err)
 	} else {
 		sb.WriteString(podCtx)
 	}
@@ -72,7 +72,7 @@ func (b *KubernetesContextBuilder) BuildContext(ctx context.Context, resource pl
 	if b.clientset != nil {
 		logCtx, err := b.buildPodLogs(ctx, resource)
 		if err != nil {
-			sb.WriteString(fmt.Sprintf("## Pod Logs\nError fetching logs: %v\n\n", err))
+			fmt.Fprintf(&sb, "## Pod Logs\nError fetching logs: %v\n\n", err)
 		} else if logCtx != "" {
 			sb.WriteString(logCtx)
 		}
@@ -81,7 +81,7 @@ func (b *KubernetesContextBuilder) BuildContext(ctx context.Context, resource pl
 	// Recent Events
 	eventCtx, err := b.buildRecentEvents(ctx, resource)
 	if err != nil {
-		sb.WriteString(fmt.Sprintf("## Recent Events\nError fetching events: %v\n\n", err))
+		fmt.Fprintf(&sb, "## Recent Events\nError fetching events: %v\n\n", err)
 	} else {
 		sb.WriteString(eventCtx)
 	}
@@ -90,7 +90,7 @@ func (b *KubernetesContextBuilder) BuildContext(ctx context.Context, resource pl
 	if resource.Kind == "Deployment" {
 		revCtx, err := b.buildRevisionHistory(ctx, resource)
 		if err != nil {
-			sb.WriteString(fmt.Sprintf("## Revision History\nError fetching replicasets: %v\n\n", err))
+			fmt.Fprintf(&sb, "## Revision History\nError fetching replicasets: %v\n\n", err)
 		} else {
 			sb.WriteString(revCtx)
 		}
@@ -113,7 +113,7 @@ func (b *KubernetesContextBuilder) BuildContext(ctx context.Context, resource pl
 func (b *KubernetesContextBuilder) buildDeploymentContext(ctx context.Context, resource platformv1alpha1.ResourceRef, sb *strings.Builder) {
 	deployCtx, err := b.buildDeploymentStatus(ctx, resource)
 	if err != nil {
-		sb.WriteString(fmt.Sprintf("## Deployment Status\nError fetching deployment: %v\n\n", err))
+		fmt.Fprintf(sb, "## Deployment Status\nError fetching deployment: %v\n\n", err)
 	} else {
 		sb.WriteString(deployCtx)
 	}
@@ -123,7 +123,7 @@ func (b *KubernetesContextBuilder) buildDeploymentContext(ctx context.Context, r
 func (b *KubernetesContextBuilder) buildStatefulSetContext(ctx context.Context, resource platformv1alpha1.ResourceRef, sb *strings.Builder) {
 	var sts appsv1.StatefulSet
 	if err := b.client.Get(ctx, types.NamespacedName{Name: resource.Name, Namespace: resource.Namespace}, &sts); err != nil {
-		sb.WriteString(fmt.Sprintf("## StatefulSet Status\nError fetching StatefulSet: %v\n\n", err))
+		fmt.Fprintf(sb, "## StatefulSet Status\nError fetching StatefulSet: %v\n\n", err)
 		return
 	}
 
@@ -133,27 +133,27 @@ func (b *KubernetesContextBuilder) buildStatefulSetContext(ctx context.Context, 
 	}
 
 	sb.WriteString("## StatefulSet Status\n")
-	sb.WriteString(fmt.Sprintf("Name: %s/%s\n", sts.Namespace, sts.Name))
-	sb.WriteString(fmt.Sprintf("Replicas: desired=%d ready=%d current=%d updated=%d\n",
-		desired, sts.Status.ReadyReplicas, sts.Status.CurrentReplicas, sts.Status.UpdatedReplicas))
-	sb.WriteString(fmt.Sprintf("Update Strategy: %s\n", sts.Spec.UpdateStrategy.Type))
+	fmt.Fprintf(sb, "Name: %s/%s\n", sts.Namespace, sts.Name)
+	fmt.Fprintf(sb, "Replicas: desired=%d ready=%d current=%d updated=%d\n",
+		desired, sts.Status.ReadyReplicas, sts.Status.CurrentReplicas, sts.Status.UpdatedReplicas)
+	fmt.Fprintf(sb, "Update Strategy: %s\n", sts.Spec.UpdateStrategy.Type)
 
 	if sts.Spec.UpdateStrategy.RollingUpdate != nil && sts.Spec.UpdateStrategy.RollingUpdate.Partition != nil {
-		sb.WriteString(fmt.Sprintf("Partition: %d\n", *sts.Spec.UpdateStrategy.RollingUpdate.Partition))
+		fmt.Fprintf(sb, "Partition: %d\n", *sts.Spec.UpdateStrategy.RollingUpdate.Partition)
 	}
-	sb.WriteString(fmt.Sprintf("Service: %s\n", sts.Spec.ServiceName))
-	sb.WriteString(fmt.Sprintf("PodManagementPolicy: %s\n", sts.Spec.PodManagementPolicy))
+	fmt.Fprintf(sb, "Service: %s\n", sts.Spec.ServiceName)
+	fmt.Fprintf(sb, "PodManagementPolicy: %s\n", sts.Spec.PodManagementPolicy)
 
 	// Container info
 	for _, c := range sts.Spec.Template.Spec.Containers {
-		sb.WriteString(fmt.Sprintf("Container: %s image=%s", c.Name, c.Image))
+		fmt.Fprintf(sb, "Container: %s image=%s", c.Name, c.Image)
 		if c.Resources.Requests != nil {
-			sb.WriteString(fmt.Sprintf(" requests=[cpu=%s mem=%s]",
-				c.Resources.Requests.Cpu().String(), c.Resources.Requests.Memory().String()))
+			fmt.Fprintf(sb, " requests=[cpu=%s mem=%s]",
+				c.Resources.Requests.Cpu().String(), c.Resources.Requests.Memory().String())
 		}
 		if c.Resources.Limits != nil {
-			sb.WriteString(fmt.Sprintf(" limits=[cpu=%s mem=%s]",
-				c.Resources.Limits.Cpu().String(), c.Resources.Limits.Memory().String()))
+			fmt.Fprintf(sb, " limits=[cpu=%s mem=%s]",
+				c.Resources.Limits.Cpu().String(), c.Resources.Limits.Memory().String())
 		}
 		sb.WriteString("\n")
 	}
@@ -161,13 +161,13 @@ func (b *KubernetesContextBuilder) buildStatefulSetContext(ctx context.Context, 
 	// VolumeClaimTemplates
 	for _, vct := range sts.Spec.VolumeClaimTemplates {
 		storage := vct.Spec.Resources.Requests.Storage()
-		sb.WriteString(fmt.Sprintf("VolumeClaimTemplate: %s storage=%s\n", vct.Name, storage.String()))
+		fmt.Fprintf(sb, "VolumeClaimTemplate: %s storage=%s\n", vct.Name, storage.String())
 	}
 
 	// Conditions
 	for _, cond := range sts.Status.Conditions {
-		sb.WriteString(fmt.Sprintf("Condition: %s=%s reason=%s message=%q\n",
-			cond.Type, cond.Status, cond.Reason, cond.Message))
+		fmt.Fprintf(sb, "Condition: %s=%s reason=%s message=%q\n",
+			cond.Type, cond.Status, cond.Reason, cond.Message)
 	}
 	sb.WriteString("\n")
 }
@@ -176,37 +176,37 @@ func (b *KubernetesContextBuilder) buildStatefulSetContext(ctx context.Context, 
 func (b *KubernetesContextBuilder) buildDaemonSetContext(ctx context.Context, resource platformv1alpha1.ResourceRef, sb *strings.Builder) {
 	var ds appsv1.DaemonSet
 	if err := b.client.Get(ctx, types.NamespacedName{Name: resource.Name, Namespace: resource.Namespace}, &ds); err != nil {
-		sb.WriteString(fmt.Sprintf("## DaemonSet Status\nError fetching DaemonSet: %v\n\n", err))
+		fmt.Fprintf(sb, "## DaemonSet Status\nError fetching DaemonSet: %v\n\n", err)
 		return
 	}
 
 	sb.WriteString("## DaemonSet Status\n")
-	sb.WriteString(fmt.Sprintf("Name: %s/%s\n", ds.Namespace, ds.Name))
-	sb.WriteString(fmt.Sprintf("Desired: %d Current: %d Ready: %d Available: %d Unavailable: %d\n",
+	fmt.Fprintf(sb, "Name: %s/%s\n", ds.Namespace, ds.Name)
+	fmt.Fprintf(sb, "Desired: %d Current: %d Ready: %d Available: %d Unavailable: %d\n",
 		ds.Status.DesiredNumberScheduled, ds.Status.CurrentNumberScheduled,
-		ds.Status.NumberReady, ds.Status.NumberAvailable, ds.Status.NumberUnavailable))
-	sb.WriteString(fmt.Sprintf("Updated: %d MisScheduled: %d\n",
-		ds.Status.UpdatedNumberScheduled, ds.Status.NumberMisscheduled))
-	sb.WriteString(fmt.Sprintf("Update Strategy: %s\n", ds.Spec.UpdateStrategy.Type))
+		ds.Status.NumberReady, ds.Status.NumberAvailable, ds.Status.NumberUnavailable)
+	fmt.Fprintf(sb, "Updated: %d MisScheduled: %d\n",
+		ds.Status.UpdatedNumberScheduled, ds.Status.NumberMisscheduled)
+	fmt.Fprintf(sb, "Update Strategy: %s\n", ds.Spec.UpdateStrategy.Type)
 
 	// Node selector
 	if ds.Spec.Template.Spec.NodeSelector != nil {
-		sb.WriteString(fmt.Sprintf("NodeSelector: %v\n", ds.Spec.Template.Spec.NodeSelector))
+		fmt.Fprintf(sb, "NodeSelector: %v\n", ds.Spec.Template.Spec.NodeSelector)
 	}
 
 	// Tolerations
 	for _, t := range ds.Spec.Template.Spec.Tolerations {
-		sb.WriteString(fmt.Sprintf("Toleration: %s=%s effect=%s\n", t.Key, t.Value, t.Effect))
+		fmt.Fprintf(sb, "Toleration: %s=%s effect=%s\n", t.Key, t.Value, t.Effect)
 	}
 
 	// Containers
 	for _, c := range ds.Spec.Template.Spec.Containers {
-		sb.WriteString(fmt.Sprintf("Container: %s image=%s\n", c.Name, c.Image))
+		fmt.Fprintf(sb, "Container: %s image=%s\n", c.Name, c.Image)
 	}
 
 	// Conditions
 	for _, cond := range ds.Status.Conditions {
-		sb.WriteString(fmt.Sprintf("Condition: %s=%s reason=%s\n", cond.Type, cond.Status, cond.Reason))
+		fmt.Fprintf(sb, "Condition: %s=%s reason=%s\n", cond.Type, cond.Status, cond.Reason)
 	}
 	sb.WriteString("\n")
 }
@@ -215,44 +215,44 @@ func (b *KubernetesContextBuilder) buildDaemonSetContext(ctx context.Context, re
 func (b *KubernetesContextBuilder) buildJobContext(ctx context.Context, resource platformv1alpha1.ResourceRef, sb *strings.Builder) {
 	var job batchv1.Job
 	if err := b.client.Get(ctx, types.NamespacedName{Name: resource.Name, Namespace: resource.Namespace}, &job); err != nil {
-		sb.WriteString(fmt.Sprintf("## Job Status\nError fetching Job: %v\n\n", err))
+		fmt.Fprintf(sb, "## Job Status\nError fetching Job: %v\n\n", err)
 		return
 	}
 
 	sb.WriteString("## Job Status\n")
-	sb.WriteString(fmt.Sprintf("Name: %s/%s\n", job.Namespace, job.Name))
-	sb.WriteString(fmt.Sprintf("Active: %d Succeeded: %d Failed: %d\n",
-		job.Status.Active, job.Status.Succeeded, job.Status.Failed))
+	fmt.Fprintf(sb, "Name: %s/%s\n", job.Namespace, job.Name)
+	fmt.Fprintf(sb, "Active: %d Succeeded: %d Failed: %d\n",
+		job.Status.Active, job.Status.Succeeded, job.Status.Failed)
 
 	if job.Spec.Completions != nil {
-		sb.WriteString(fmt.Sprintf("Completions: %d\n", *job.Spec.Completions))
+		fmt.Fprintf(sb, "Completions: %d\n", *job.Spec.Completions)
 	}
 	if job.Spec.Parallelism != nil {
-		sb.WriteString(fmt.Sprintf("Parallelism: %d\n", *job.Spec.Parallelism))
+		fmt.Fprintf(sb, "Parallelism: %d\n", *job.Spec.Parallelism)
 	}
 	if job.Spec.BackoffLimit != nil {
-		sb.WriteString(fmt.Sprintf("BackoffLimit: %d\n", *job.Spec.BackoffLimit))
+		fmt.Fprintf(sb, "BackoffLimit: %d\n", *job.Spec.BackoffLimit)
 	}
 	if job.Spec.ActiveDeadlineSeconds != nil {
-		sb.WriteString(fmt.Sprintf("ActiveDeadlineSeconds: %d\n", *job.Spec.ActiveDeadlineSeconds))
+		fmt.Fprintf(sb, "ActiveDeadlineSeconds: %d\n", *job.Spec.ActiveDeadlineSeconds)
 	}
 
 	if job.Status.StartTime != nil {
-		sb.WriteString(fmt.Sprintf("StartTime: %s\n", job.Status.StartTime.Format("2006-01-02 15:04:05")))
+		fmt.Fprintf(sb, "StartTime: %s\n", job.Status.StartTime.Format("2006-01-02 15:04:05"))
 	}
 	if job.Status.CompletionTime != nil {
-		sb.WriteString(fmt.Sprintf("CompletionTime: %s\n", job.Status.CompletionTime.Format("2006-01-02 15:04:05")))
+		fmt.Fprintf(sb, "CompletionTime: %s\n", job.Status.CompletionTime.Format("2006-01-02 15:04:05"))
 	}
 
 	// Conditions
 	for _, cond := range job.Status.Conditions {
-		sb.WriteString(fmt.Sprintf("Condition: %s=%s reason=%s message=%q\n",
-			cond.Type, cond.Status, cond.Reason, cond.Message))
+		fmt.Fprintf(sb, "Condition: %s=%s reason=%s message=%q\n",
+			cond.Type, cond.Status, cond.Reason, cond.Message)
 	}
 
 	// Containers
 	for _, c := range job.Spec.Template.Spec.Containers {
-		sb.WriteString(fmt.Sprintf("Container: %s image=%s\n", c.Name, c.Image))
+		fmt.Fprintf(sb, "Container: %s image=%s\n", c.Name, c.Image)
 	}
 	sb.WriteString("\n")
 }
@@ -261,32 +261,32 @@ func (b *KubernetesContextBuilder) buildJobContext(ctx context.Context, resource
 func (b *KubernetesContextBuilder) buildCronJobContext(ctx context.Context, resource platformv1alpha1.ResourceRef, sb *strings.Builder) {
 	var cj batchv1.CronJob
 	if err := b.client.Get(ctx, types.NamespacedName{Name: resource.Name, Namespace: resource.Namespace}, &cj); err != nil {
-		sb.WriteString(fmt.Sprintf("## CronJob Status\nError fetching CronJob: %v\n\n", err))
+		fmt.Fprintf(sb, "## CronJob Status\nError fetching CronJob: %v\n\n", err)
 		return
 	}
 
 	sb.WriteString("## CronJob Status\n")
-	sb.WriteString(fmt.Sprintf("Name: %s/%s\n", cj.Namespace, cj.Name))
-	sb.WriteString(fmt.Sprintf("Schedule: %s\n", cj.Spec.Schedule))
-	sb.WriteString(fmt.Sprintf("Suspend: %t\n", cj.Spec.Suspend != nil && *cj.Spec.Suspend))
+	fmt.Fprintf(sb, "Name: %s/%s\n", cj.Namespace, cj.Name)
+	fmt.Fprintf(sb, "Schedule: %s\n", cj.Spec.Schedule)
+	fmt.Fprintf(sb, "Suspend: %t\n", cj.Spec.Suspend != nil && *cj.Spec.Suspend)
 
 	if cj.Status.LastScheduleTime != nil {
-		sb.WriteString(fmt.Sprintf("LastScheduleTime: %s\n", cj.Status.LastScheduleTime.Format("2006-01-02 15:04:05")))
+		fmt.Fprintf(sb, "LastScheduleTime: %s\n", cj.Status.LastScheduleTime.Format("2006-01-02 15:04:05"))
 	}
 	if cj.Status.LastSuccessfulTime != nil {
-		sb.WriteString(fmt.Sprintf("LastSuccessfulTime: %s\n", cj.Status.LastSuccessfulTime.Format("2006-01-02 15:04:05")))
+		fmt.Fprintf(sb, "LastSuccessfulTime: %s\n", cj.Status.LastSuccessfulTime.Format("2006-01-02 15:04:05"))
 	}
 
-	sb.WriteString(fmt.Sprintf("Active Jobs: %d\n", len(cj.Status.Active)))
+	fmt.Fprintf(sb, "Active Jobs: %d\n", len(cj.Status.Active))
 	for _, aj := range cj.Status.Active {
-		sb.WriteString(fmt.Sprintf("  - %s/%s\n", aj.Namespace, aj.Name))
+		fmt.Fprintf(sb, "  - %s/%s\n", aj.Namespace, aj.Name)
 	}
 
 	if cj.Spec.ConcurrencyPolicy != "" {
-		sb.WriteString(fmt.Sprintf("ConcurrencyPolicy: %s\n", cj.Spec.ConcurrencyPolicy))
+		fmt.Fprintf(sb, "ConcurrencyPolicy: %s\n", cj.Spec.ConcurrencyPolicy)
 	}
 	if cj.Spec.FailedJobsHistoryLimit != nil {
-		sb.WriteString(fmt.Sprintf("FailedJobsHistoryLimit: %d\n", *cj.Spec.FailedJobsHistoryLimit))
+		fmt.Fprintf(sb, "FailedJobsHistoryLimit: %d\n", *cj.Spec.FailedJobsHistoryLimit)
 	}
 	sb.WriteString("\n")
 }
@@ -308,24 +308,24 @@ func (b *KubernetesContextBuilder) buildHPAContext(ctx context.Context, resource
 		}
 
 		sb.WriteString("## HPA (Horizontal Pod Autoscaler)\n")
-		sb.WriteString(fmt.Sprintf("Name: %s\n", hpa.Name))
-		sb.WriteString(fmt.Sprintf("MinReplicas: %d MaxReplicas: %d\n",
-			*hpa.Spec.MinReplicas, hpa.Spec.MaxReplicas))
-		sb.WriteString(fmt.Sprintf("CurrentReplicas: %d DesiredReplicas: %d\n",
-			hpa.Status.CurrentReplicas, hpa.Status.DesiredReplicas))
+		fmt.Fprintf(&sb, "Name: %s\n", hpa.Name)
+		fmt.Fprintf(&sb, "MinReplicas: %d MaxReplicas: %d\n",
+			*hpa.Spec.MinReplicas, hpa.Spec.MaxReplicas)
+		fmt.Fprintf(&sb, "CurrentReplicas: %d DesiredReplicas: %d\n",
+			hpa.Status.CurrentReplicas, hpa.Status.DesiredReplicas)
 
 		// Metrics
 		for _, metric := range hpa.Spec.Metrics {
 			switch metric.Type {
 			case autoscalingv2.ResourceMetricSourceType:
 				if metric.Resource != nil {
-					sb.WriteString(fmt.Sprintf("Metric: %s target=%v\n",
-						metric.Resource.Name, metric.Resource.Target.AverageUtilization))
+					fmt.Fprintf(&sb, "Metric: %s target=%v\n",
+						metric.Resource.Name, metric.Resource.Target.AverageUtilization)
 				}
 			case autoscalingv2.PodsMetricSourceType:
 				if metric.Pods != nil {
-					sb.WriteString(fmt.Sprintf("Metric: pods/%s target=%s\n",
-						metric.Pods.Metric.Name, metric.Pods.Target.AverageValue))
+					fmt.Fprintf(&sb, "Metric: pods/%s target=%s\n",
+						metric.Pods.Metric.Name, metric.Pods.Target.AverageValue)
 				}
 			}
 		}
@@ -335,16 +335,16 @@ func (b *KubernetesContextBuilder) buildHPAContext(ctx context.Context, resource
 			switch cm.Type {
 			case autoscalingv2.ResourceMetricSourceType:
 				if cm.Resource != nil && cm.Resource.Current.AverageUtilization != nil {
-					sb.WriteString(fmt.Sprintf("Current %s: %d%%\n",
-						cm.Resource.Name, *cm.Resource.Current.AverageUtilization))
+					fmt.Fprintf(&sb, "Current %s: %d%%\n",
+						cm.Resource.Name, *cm.Resource.Current.AverageUtilization)
 				}
 			}
 		}
 
 		// Conditions
 		for _, cond := range hpa.Status.Conditions {
-			sb.WriteString(fmt.Sprintf("Condition: %s=%s reason=%s message=%q\n",
-				cond.Type, cond.Status, cond.Reason, cond.Message))
+			fmt.Fprintf(&sb, "Condition: %s=%s reason=%s message=%q\n",
+				cond.Type, cond.Status, cond.Reason, cond.Message)
 		}
 
 		// Detect HPA maxed out
@@ -372,38 +372,38 @@ func (b *KubernetesContextBuilder) buildDeploymentStatus(ctx context.Context, re
 
 	var sb strings.Builder
 	sb.WriteString("## Deployment Status\n")
-	sb.WriteString(fmt.Sprintf("Name: %s/%s\n", deploy.Namespace, deploy.Name))
-	sb.WriteString(fmt.Sprintf("Replicas: desired=%d ready=%d updated=%d available=%d unavailable=%d\n",
+	fmt.Fprintf(&sb, "Name: %s/%s\n", deploy.Namespace, deploy.Name)
+	fmt.Fprintf(&sb, "Replicas: desired=%d ready=%d updated=%d available=%d unavailable=%d\n",
 		desired, deploy.Status.ReadyReplicas, deploy.Status.UpdatedReplicas,
-		deploy.Status.AvailableReplicas, deploy.Status.UnavailableReplicas))
-	sb.WriteString(fmt.Sprintf("Generation: %d (observed: %d)\n", deploy.Generation, deploy.Status.ObservedGeneration))
+		deploy.Status.AvailableReplicas, deploy.Status.UnavailableReplicas)
+	fmt.Fprintf(&sb, "Generation: %d (observed: %d)\n", deploy.Generation, deploy.Status.ObservedGeneration)
 
 	// Containers info
 	for _, c := range deploy.Spec.Template.Spec.Containers {
-		sb.WriteString(fmt.Sprintf("Container: %s image=%s", c.Name, c.Image))
+		fmt.Fprintf(&sb, "Container: %s image=%s", c.Name, c.Image)
 		if len(c.Command) > 0 {
-			sb.WriteString(fmt.Sprintf(" command=%v", c.Command))
+			fmt.Fprintf(&sb, " command=%v", c.Command)
 		}
 		if len(c.Args) > 0 {
-			sb.WriteString(fmt.Sprintf(" args=%v", c.Args))
+			fmt.Fprintf(&sb, " args=%v", c.Args)
 		}
 		if c.Resources.Requests != nil {
-			sb.WriteString(fmt.Sprintf(" requests=[cpu=%s mem=%s]",
+			fmt.Fprintf(&sb, " requests=[cpu=%s mem=%s]",
 				c.Resources.Requests.Cpu().String(),
-				c.Resources.Requests.Memory().String()))
+				c.Resources.Requests.Memory().String())
 		}
 		if c.Resources.Limits != nil {
-			sb.WriteString(fmt.Sprintf(" limits=[cpu=%s mem=%s]",
+			fmt.Fprintf(&sb, " limits=[cpu=%s mem=%s]",
 				c.Resources.Limits.Cpu().String(),
-				c.Resources.Limits.Memory().String()))
+				c.Resources.Limits.Memory().String())
 		}
 		sb.WriteString("\n")
 	}
 
 	// Conditions
 	for _, cond := range deploy.Status.Conditions {
-		sb.WriteString(fmt.Sprintf("Condition: %s=%s reason=%s message=%q\n",
-			cond.Type, cond.Status, cond.Reason, cond.Message))
+		fmt.Fprintf(&sb, "Condition: %s=%s reason=%s message=%q\n",
+			cond.Type, cond.Status, cond.Reason, cond.Message)
 	}
 	sb.WriteString("\n")
 
@@ -443,25 +443,25 @@ func (b *KubernetesContextBuilder) buildPodDetails(ctx context.Context, resource
 	}
 
 	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf("## Pod Details (showing %d pods)\n", len(matchingPods)))
+	fmt.Fprintf(&sb, "## Pod Details (showing %d pods)\n", len(matchingPods))
 
 	for _, pod := range matchingPods {
-		sb.WriteString(fmt.Sprintf("Pod: %s phase=%s\n", pod.Name, pod.Status.Phase))
+		fmt.Fprintf(&sb, "Pod: %s phase=%s\n", pod.Name, pod.Status.Phase)
 		for _, cs := range pod.Status.ContainerStatuses {
-			sb.WriteString(fmt.Sprintf("  Container: %s ready=%t restarts=%d\n",
-				cs.Name, cs.Ready, cs.RestartCount))
+			fmt.Fprintf(&sb, "  Container: %s ready=%t restarts=%d\n",
+				cs.Name, cs.Ready, cs.RestartCount)
 			if cs.State.Waiting != nil {
-				sb.WriteString(fmt.Sprintf("    State: Waiting reason=%s message=%q\n",
-					cs.State.Waiting.Reason, cs.State.Waiting.Message))
+				fmt.Fprintf(&sb, "    State: Waiting reason=%s message=%q\n",
+					cs.State.Waiting.Reason, cs.State.Waiting.Message)
 			}
 			if cs.State.Terminated != nil {
-				sb.WriteString(fmt.Sprintf("    State: Terminated reason=%s exitCode=%d\n",
-					cs.State.Terminated.Reason, cs.State.Terminated.ExitCode))
+				fmt.Fprintf(&sb, "    State: Terminated reason=%s exitCode=%d\n",
+					cs.State.Terminated.Reason, cs.State.Terminated.ExitCode)
 			}
 			if cs.LastTerminationState.Terminated != nil {
 				t := cs.LastTerminationState.Terminated
-				sb.WriteString(fmt.Sprintf("    LastTermination: reason=%s exitCode=%d\n",
-					t.Reason, t.ExitCode))
+				fmt.Fprintf(&sb, "    LastTermination: reason=%s exitCode=%d\n",
+					t.Reason, t.ExitCode)
 			}
 		}
 	}
@@ -510,14 +510,14 @@ func (b *KubernetesContextBuilder) buildPodLogs(ctx context.Context, resource pl
 			// Fetch current container logs
 			logs := b.fetchContainerLogs(ctx, pod.Name, cs.Name, resource.Namespace, tailLines, false)
 			if logs != "" {
-				sb.WriteString(fmt.Sprintf("### %s/%s (restarts=%d)\n%s\n", pod.Name, cs.Name, cs.RestartCount, logs))
+				fmt.Fprintf(&sb, "### %s/%s (restarts=%d)\n%s\n", pod.Name, cs.Name, cs.RestartCount, logs)
 			}
 
 			// Fetch previous container logs if there were restarts
 			if cs.RestartCount > 0 {
 				prevLogs := b.fetchContainerLogs(ctx, pod.Name, cs.Name, resource.Namespace, tailLines, true)
 				if prevLogs != "" {
-					sb.WriteString(fmt.Sprintf("### %s/%s (previous terminated instance)\n%s\n", pod.Name, cs.Name, prevLogs))
+					fmt.Fprintf(&sb, "### %s/%s (previous terminated instance)\n%s\n", pod.Name, cs.Name, prevLogs)
 				}
 			}
 		}
@@ -587,10 +587,10 @@ func (b *KubernetesContextBuilder) buildRecentEvents(ctx context.Context, resour
 	}
 
 	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf("## Recent Events (last %d)\n", len(relevant)))
+	fmt.Fprintf(&sb, "## Recent Events (last %d)\n", len(relevant))
 	for _, ev := range relevant {
-		sb.WriteString(fmt.Sprintf("%s %s: %s (count=%d object=%s)\n",
-			ev.Type, ev.Reason, ev.Message, ev.Count, ev.InvolvedObject.Name))
+		fmt.Fprintf(&sb, "%s %s: %s (count=%d object=%s)\n",
+			ev.Type, ev.Reason, ev.Message, ev.Count, ev.InvolvedObject.Name)
 	}
 	sb.WriteString("\n")
 
@@ -638,19 +638,19 @@ func (b *KubernetesContextBuilder) buildRevisionHistory(ctx context.Context, res
 	}
 
 	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf("## Revision History (last %d revisions)\n", len(owned)))
+	fmt.Fprintf(&sb, "## Revision History (last %d revisions)\n", len(owned))
 
 	for i, info := range owned {
 		replicas := int32(0)
 		if info.rs.Spec.Replicas != nil {
 			replicas = *info.rs.Spec.Replicas
 		}
-		sb.WriteString(fmt.Sprintf("Revision %d: replicas=%d/%d",
-			info.revision, info.rs.Status.ReadyReplicas, replicas))
+		fmt.Fprintf(&sb, "Revision %d: replicas=%d/%d",
+			info.revision, info.rs.Status.ReadyReplicas, replicas)
 
 		// Show container images
 		for _, c := range info.rs.Spec.Template.Spec.Containers {
-			sb.WriteString(fmt.Sprintf(" [%s=%s]", c.Name, c.Image))
+			fmt.Fprintf(&sb, " [%s=%s]", c.Name, c.Image)
 		}
 		sb.WriteString("\n")
 
@@ -661,7 +661,7 @@ func (b *KubernetesContextBuilder) buildRevisionHistory(ctx context.Context, res
 				owned[i+1].rs.Spec.Template.Spec.Containers,
 			)
 			for _, d := range diffs {
-				sb.WriteString(fmt.Sprintf("  Changed: %s\n", d))
+				fmt.Fprintf(&sb, "  Changed: %s\n", d)
 			}
 		}
 	}

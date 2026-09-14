@@ -157,7 +157,7 @@ func TestEngineHappyPathRespectsDepsAndReview(t *testing.T) {
 		}
 		return -1
 	}
-	if !(idx("tg:T1:e1") < idx("tg:T1:r1") && idx("tg:T1:r1") < idx("tg:T2:e1")) {
+	if idx("tg:T1:e1") >= idx("tg:T1:r1") || idx("tg:T1:r1") >= idx("tg:T2:e1") {
 		t.Fatalf("dependency/review ordering violated: %v", order)
 	}
 	if len(gate.ran) != 1 || gate.ran[0] != "go test ./..." {

@@ -162,7 +162,7 @@ func (e *RCAEnricher) findConfigChanges(ctx context.Context, resource platformv1
 	window := detectedAt.Add(-30 * time.Minute)
 	for _, ev := range events.Items {
 		evTime := ev.LastTimestamp.Time
-		if ev.EventTime.Time.After(evTime) {
+		if ev.EventTime.After(evTime) {
 			evTime = ev.EventTime.Time
 		}
 		if evTime.Before(window) {
@@ -275,7 +275,7 @@ func (rca *RCAContext) FormatForAI() string {
 	if len(rca.PossibleCauses) > 0 {
 		sb.WriteString("### Possible Causes (ranked)\n")
 		for i, c := range rca.PossibleCauses {
-			sb.WriteString(fmt.Sprintf("%d. %s\n", i+1, c))
+			fmt.Fprintf(&sb, "%d. %s\n", i+1, c)
 		}
 		sb.WriteString("\n")
 	}
@@ -283,9 +283,9 @@ func (rca *RCAContext) FormatForAI() string {
 	if len(rca.RecentDeployments) > 0 {
 		sb.WriteString("### Recent Deployment Changes\n")
 		for _, dc := range rca.RecentDeployments {
-			sb.WriteString(fmt.Sprintf("- Revision %d at %s: %s → %s (by %s)\n",
+			fmt.Fprintf(&sb, "- Revision %d at %s: %s → %s (by %s)\n",
 				dc.Revision, dc.Timestamp.Format("15:04:05"),
-				dc.ImageBefore, dc.ImageAfter, dc.ChangedBy))
+				dc.ImageBefore, dc.ImageAfter, dc.ChangedBy)
 		}
 		sb.WriteString("\n")
 	}
@@ -293,7 +293,7 @@ func (rca *RCAContext) FormatForAI() string {
 	if len(rca.RecentConfigChanges) > 0 {
 		sb.WriteString("### Recent Config Changes\n")
 		for _, cc := range rca.RecentConfigChanges {
-			sb.WriteString(fmt.Sprintf("- ConfigMap %s at %s\n", cc.ConfigMapName, cc.Timestamp.Format("15:04:05")))
+			fmt.Fprintf(&sb, "- ConfigMap %s at %s\n", cc.ConfigMapName, cc.Timestamp.Format("15:04:05"))
 		}
 		sb.WriteString("\n")
 	}
@@ -305,7 +305,7 @@ func (rca *RCAContext) FormatForAI() string {
 			if !d.Healthy {
 				status = "UNHEALTHY"
 			}
-			sb.WriteString(fmt.Sprintf("- %s/%s: %s (endpoints=%d)\n", d.Namespace, d.ServiceName, status, d.Endpoints))
+			fmt.Fprintf(&sb, "- %s/%s: %s (endpoints=%d)\n", d.Namespace, d.ServiceName, status, d.Endpoints)
 		}
 		sb.WriteString("\n")
 	}
@@ -313,8 +313,8 @@ func (rca *RCAContext) FormatForAI() string {
 	if len(rca.RelatedIssues) > 0 {
 		sb.WriteString("### Related Active Issues\n")
 		for _, ri := range rca.RelatedIssues {
-			sb.WriteString(fmt.Sprintf("- %s [%s] %s/%s state=%s\n",
-				ri.Name, ri.Severity, ri.Resource.Kind, ri.Resource.Name, ri.State))
+			fmt.Fprintf(&sb, "- %s [%s] %s/%s state=%s\n",
+				ri.Name, ri.Severity, ri.Resource.Kind, ri.Resource.Name, ri.State)
 		}
 		sb.WriteString("\n")
 	}

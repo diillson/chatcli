@@ -95,7 +95,7 @@ func TestSlashToolPlugin_ImplementsPluginContract(t *testing.T) {
 			return "summary", nil
 		},
 	}
-	var p plugins.Plugin = NewSlashToolPlugin(entry)
+	var p = NewSlashToolPlugin(entry)
 	require.NotNil(t, p)
 	assert.Equal(t, "@cmd:help", p.Name())
 	assert.Equal(t, "help text", p.Description())

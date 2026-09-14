@@ -1407,7 +1407,7 @@ func (cli *ChatCLI) suggestPreferArgs(d prompt.Document) []prompt.Suggest {
 	endsWithSpace := strings.HasSuffix(line, " ")
 
 	// Only suggest sources once we are past the skill-name token.
-	if len(args) < 4 && !(len(args) == 4 && !endsWithSpace) {
+	if len(args) < 4 && (len(args) != 4 || endsWithSpace) {
 		return nil
 	}
 	registry := cli.getRegistryNameSuggestions(d)

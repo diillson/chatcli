@@ -136,7 +136,7 @@ func New(cfg Config, bridge CLIBridge, deps SchedulerDeps, logger *zap.Logger) (
 		return nil, fmt.Errorf("scheduler: open wal: %w", err)
 	}
 
-	var audit auditWriter = NopAuditWriter()
+	var audit = NopAuditWriter()
 	if cfg.AuditEnabled {
 		audit = NewAuditFileWriter(cfg.DataDir, cfg.AuditMaxSizeMB, cfg.AuditMaxBackups, cfg.AuditMaxAgeDays, logger, metrics)
 	}

@@ -425,13 +425,13 @@ func (e *EmailSender) Send(ctx context.Context, msg *NotificationMessage) error 
 	}
 
 	var fieldsHTML strings.Builder
-	fieldsHTML.WriteString(fmt.Sprintf(`<tr><td style="padding:4px 8px;font-weight:bold">Severity</td><td style="padding:4px 8px">%s</td></tr>`, msg.Severity))
-	fieldsHTML.WriteString(fmt.Sprintf(`<tr><td style="padding:4px 8px;font-weight:bold">Resource</td><td style="padding:4px 8px">%s</td></tr>`, msg.Resource))
-	fieldsHTML.WriteString(fmt.Sprintf(`<tr><td style="padding:4px 8px;font-weight:bold">Namespace</td><td style="padding:4px 8px">%s</td></tr>`, msg.Namespace))
-	fieldsHTML.WriteString(fmt.Sprintf(`<tr><td style="padding:4px 8px;font-weight:bold">State</td><td style="padding:4px 8px">%s</td></tr>`, msg.State))
-	fieldsHTML.WriteString(fmt.Sprintf(`<tr><td style="padding:4px 8px;font-weight:bold">Issue</td><td style="padding:4px 8px">%s</td></tr>`, msg.IssueName))
+	fmt.Fprintf(&fieldsHTML, `<tr><td style="padding:4px 8px;font-weight:bold">Severity</td><td style="padding:4px 8px">%s</td></tr>`, msg.Severity)
+	fmt.Fprintf(&fieldsHTML, `<tr><td style="padding:4px 8px;font-weight:bold">Resource</td><td style="padding:4px 8px">%s</td></tr>`, msg.Resource)
+	fmt.Fprintf(&fieldsHTML, `<tr><td style="padding:4px 8px;font-weight:bold">Namespace</td><td style="padding:4px 8px">%s</td></tr>`, msg.Namespace)
+	fmt.Fprintf(&fieldsHTML, `<tr><td style="padding:4px 8px;font-weight:bold">State</td><td style="padding:4px 8px">%s</td></tr>`, msg.State)
+	fmt.Fprintf(&fieldsHTML, `<tr><td style="padding:4px 8px;font-weight:bold">Issue</td><td style="padding:4px 8px">%s</td></tr>`, msg.IssueName)
 	for k, v := range msg.Fields {
-		fieldsHTML.WriteString(fmt.Sprintf(`<tr><td style="padding:4px 8px;font-weight:bold">%s</td><td style="padding:4px 8px">%s</td></tr>`, k, v))
+		fmt.Fprintf(&fieldsHTML, `<tr><td style="padding:4px 8px;font-weight:bold">%s</td><td style="padding:4px 8px">%s</td></tr>`, k, v)
 	}
 
 	htmlBody := fmt.Sprintf(`<!DOCTYPE html>

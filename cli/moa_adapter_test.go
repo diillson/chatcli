@@ -46,7 +46,7 @@ func (m *moaFakeManager) GetClient(provider, _ string) (client.LLMClient, error)
 	return &moaFakeClient{answer: ans}, nil
 }
 
-func (m *moaFakeManager) GetAvailableProviders() []string { return m.minimalManager.providers }
+func (m *moaFakeManager) GetAvailableProviders() []string { return m.providers }
 
 func newMoaCLI(mgr *moaFakeManager, provider, model string) *ChatCLI {
 	return &ChatCLI{Provider: provider, Model: model, manager: mgr, logger: zap.NewNop()}

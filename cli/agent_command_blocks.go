@@ -721,7 +721,7 @@ func (a *AgentMode) executeCommandsWithOutput(ctx context.Context, block agent.C
 	fmt.Println("\n" + renderer.Colorize(topBorder, agent.ColorGray))
 	fmt.Println(renderer.Colorize(titleContent, agent.ColorLime+agent.ColorBold))
 
-	allOutput.WriteString(fmt.Sprintf("\nExecutando: %s (tipo: %s)\n", block.Description, langNorm))
+	fmt.Fprintf(&allOutput, "\nExecutando: %s (tipo: %s)\n", block.Description, langNorm)
 
 	shell := os.Getenv("SHELL")
 	if shell == "" {
@@ -802,7 +802,7 @@ func (a *AgentMode) runScriptBlock(ctx context.Context, block agent.CommandBlock
 
 	meta := fmt.Sprintf("  [exit=%d, duração=%s]\n", result.ExitCode, result.Duration)
 	fmt.Print(meta)
-	allOutput.WriteString(fmt.Sprintf("[meta] exit=%d duration=%s\n", result.ExitCode, result.Duration))
+	fmt.Fprintf(allOutput, "[meta] exit=%d duration=%s\n", result.ExitCode, result.Duration)
 }
 
 // runSingleCommand executes one command from a non-script block, handling
@@ -879,7 +879,7 @@ func (a *AgentMode) runSingleCommand(ctx context.Context, block agent.CommandBlo
 
 		meta := fmt.Sprintf("  [exit=%d, duração=%s]\n", result.ExitCode, result.Duration)
 		fmt.Print(meta)
-		allOutput.WriteString(fmt.Sprintf("[meta] exit=%d duration=%s\n", result.ExitCode, result.Duration))
+		fmt.Fprintf(allOutput, "[meta] exit=%d duration=%s\n", result.ExitCode, result.Duration)
 		return
 	}
 
@@ -899,7 +899,7 @@ func (a *AgentMode) runSingleCommand(ctx context.Context, block agent.CommandBlo
 
 	meta := fmt.Sprintf("  [exit=%d, duração=%s]\n", result.ExitCode, result.Duration)
 	fmt.Print(meta)
-	allOutput.WriteString(fmt.Sprintf("[meta] exit=%d duration=%s\n", result.ExitCode, result.Duration))
+	fmt.Fprintf(allOutput, "[meta] exit=%d duration=%s\n", result.ExitCode, result.Duration)
 }
 
 // runChangeDir handles a `cd` command inside a command block, resolving ~ and

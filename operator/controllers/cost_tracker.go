@@ -90,31 +90,31 @@ func (ct *CostTracker) getTokenPricing(ctx context.Context, namespace, provider 
 	}
 
 	// Defaults
-	switch {
-	case provider == "CLAUDEAI" || provider == "claudeai":
+	switch provider {
+	case "CLAUDEAI", "claudeai":
 		return tokenPricing{InputPerMillion: 3.0, OutputPerMillion: 15.0}
-	case provider == "OPENAI" || provider == "openai":
+	case "OPENAI", "openai":
 		return tokenPricing{InputPerMillion: 10.0, OutputPerMillion: 30.0}
-	case provider == "GOOGLEAI" || provider == "googleai":
+	case "GOOGLEAI", "googleai":
 		return tokenPricing{InputPerMillion: 1.25, OutputPerMillion: 5.0}
-	case provider == "XAI" || provider == "xai":
+	case "XAI", "xai":
 		return tokenPricing{InputPerMillion: 3.0, OutputPerMillion: 15.0}
-	case provider == "ZAI" || provider == "zai":
+	case "ZAI", "zai":
 		return tokenPricing{InputPerMillion: 1.0, OutputPerMillion: 4.0}
-	case provider == "MINIMAX" || provider == "minimax":
+	case "MINIMAX", "minimax":
 		return tokenPricing{InputPerMillion: 0.3, OutputPerMillion: 1.2}
-	case provider == "MOONSHOT" || provider == "moonshot":
+	case "MOONSHOT", "moonshot":
 		// kimi-k2.6 public list as of 2026-05: $0.95/M input (cache miss),
 		// $4.00/M output. Cache-hit is $0.16/M but operator cost tracking
 		// uses a single tier — pick the miss price to stay conservative.
 		return tokenPricing{InputPerMillion: 0.95, OutputPerMillion: 4.0}
-	case provider == "COPILOT" || provider == "copilot":
+	case "COPILOT", "copilot":
 		return tokenPricing{InputPerMillion: 10.0, OutputPerMillion: 30.0}
-	case provider == "DEVIN" || provider == "devin":
+	case "DEVIN", "devin":
 		// Devin CLI wrapper: the binary reports no token usage and cost is
 		// carried by the Cognition subscription — zero, like local providers.
 		return tokenPricing{InputPerMillion: 0, OutputPerMillion: 0}
-	case provider == "OPENROUTER" || provider == "openrouter":
+	case "OPENROUTER", "openrouter":
 		// OpenRouter pricing varies by routed model; use conservative average.
 		// Override via ConfigMap chatcli-cost-config for accurate per-model pricing.
 		return tokenPricing{InputPerMillion: 2.0, OutputPerMillion: 8.0}

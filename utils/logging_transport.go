@@ -256,11 +256,11 @@ func headersToString(headers http.Header) string {
 			strings.Contains(lowerKey, "secret") ||
 			strings.Contains(lowerKey, "token") ||
 			strings.Contains(lowerKey, "password") {
-			buf.WriteString(fmt.Sprintf("%s: [REDACTED]; ", key))
+			fmt.Fprintf(&buf, "%s: [REDACTED]; ", key)
 			continue
 		}
 		for _, value := range values {
-			buf.WriteString(fmt.Sprintf("%s: %s; ", key, value))
+			fmt.Fprintf(&buf, "%s: %s; ", key, value)
 		}
 	}
 	return buf.String()

@@ -88,7 +88,7 @@ func stripANSITest(s string) string {
 	var b strings.Builder
 	for i := 0; i < len(s); i++ {
 		if s[i] == 0x1b { // ESC — skip until the terminating letter of the CSI
-			for i < len(s) && !((s[i] >= 'a' && s[i] <= 'z') || (s[i] >= 'A' && s[i] <= 'Z')) {
+			for i < len(s) && (s[i] < 'a' || s[i] > 'z') && (s[i] < 'A' || s[i] > 'Z') {
 				i++
 			}
 			continue

@@ -60,9 +60,9 @@ func main() {
 	// Monta o front matter
 	var frontMatter strings.Builder
 	frontMatter.WriteString("+++\n")
-	frontMatter.WriteString(fmt.Sprintf("title = \"%s\"\n", *title))
+	fmt.Fprintf(&frontMatter, "title = \"%s\"\n", *title)
 	if *weight > 0 {
-		frontMatter.WriteString(fmt.Sprintf("weight = %d\n", *weight))
+		fmt.Fprintf(&frontMatter, "weight = %d\n", *weight)
 	}
 	frontMatter.WriteString("+++\n\n")
 

@@ -72,7 +72,7 @@ func run(args []string, stdout, stderr io.Writer) error {
 func formatMarkdown(providers []providerparity.Provider, violations []providerparity.Violation) string {
 	var b strings.Builder
 	b.WriteString("## Provider parity\n\n")
-	b.WriteString(fmt.Sprintf("Checked %d providers against the touch-point matrix.\n\n", len(providers)))
+	fmt.Fprintf(&b, "Checked %d providers against the touch-point matrix.\n\n", len(providers))
 
 	if len(violations) == 0 {
 		b.WriteString("- ✅ Every provider is wired through every touch point.\n")

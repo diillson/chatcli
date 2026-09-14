@@ -38,7 +38,7 @@ func (conceptProvider) Embed(_ context.Context, texts []string) ([][]float32, er
 	for i, t := range texts {
 		v := make([]float32, conceptDim)
 		for _, w := range strings.FieldsFunc(strings.ToLower(t), func(r rune) bool {
-			return !(r >= 'a' && r <= 'z')
+			return r < 'a' || r > 'z'
 		}) {
 			if idx, ok := conceptWords[w]; ok {
 				v[idx]++

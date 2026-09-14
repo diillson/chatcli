@@ -4063,10 +4063,10 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 				}
 
 				// Acumula o resultado para a LLM
-				batchOutputBuilder.WriteString(fmt.Sprintf("--- Resultado da Ação %d (%s) ---\n", i+1, toolName))
+				fmt.Fprintf(&batchOutputBuilder, "--- Resultado da Ação %d (%s) ---\n", i+1, toolName)
 
 				if execErr != nil || batchHasError {
-					batchOutputBuilder.WriteString(fmt.Sprintf("ERRO: %v\nSaída parcial: %s\n", execErr, toolOutput))
+					fmt.Fprintf(&batchOutputBuilder, "ERRO: %v\nSaída parcial: %s\n", execErr, toolOutput)
 					batchOutputBuilder.WriteString("\n[EXECUÇÃO EM LOTE INTERROMPIDA PREMATURAMENTE DEVIDO A ERRO NA AÇÃO ANTERIOR]\n")
 
 					// Garante flag de erro se veio de execErr
@@ -4585,8 +4585,8 @@ func buildMCPToolsSection(tools []models.ToolDefinition, isCoderMode bool) strin
 	}
 	b.WriteString("\n")
 	for _, t := range tools {
-		b.WriteString(fmt.Sprintf("  - %s: %s\n",
-			t.Function.Name, clampIndexDescription(t.Function.Description)))
+		fmt.Fprintf(&b, "  - %s: %s\n",
+			t.Function.Name, clampIndexDescription(t.Function.Description))
 	}
 	return b.String()
 }

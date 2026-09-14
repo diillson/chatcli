@@ -920,7 +920,7 @@ func (c *ClaudeClient) ListModels(ctx context.Context) ([]client.ModelInfo, erro
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("Anthropic /models returned %d: %s", resp.StatusCode, utils.SanitizeSensitiveText(string(bodyBytes)))
+		return nil, fmt.Errorf("listing Anthropic models: HTTP %d: %s", resp.StatusCode, utils.SanitizeSensitiveText(string(bodyBytes)))
 	}
 
 	var result struct {

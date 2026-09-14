@@ -45,8 +45,8 @@ func (cli *ChatCLI) handleGraphCommand(ctx context.Context, input string) {
 
 	var include map[string]bool
 	var title string
-	switch {
-	case arg == "" || arg == "full" || arg == "all":
+	switch arg {
+	case "", "full", "all":
 		include = selectFullGraphNodes(g)
 		title = "knowledge graph"
 	default:

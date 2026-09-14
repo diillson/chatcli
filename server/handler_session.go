@@ -307,16 +307,16 @@ func (h *Handler) executeRemoteCommand(rawCommand string) string {
 	// Normalize: remove leading '/' if present
 	cmd = strings.TrimPrefix(cmd, "/")
 
-	switch {
-	case cmd == "status":
+	switch cmd {
+	case "status":
 		return h.cmdStatus()
-	case cmd == "watcher status":
+	case "watcher status":
 		return h.cmdWatcherStatus()
-	case cmd == "plugins list":
+	case "plugins list":
 		return h.cmdPluginsList()
-	case cmd == "agents list":
+	case "agents list":
 		return h.cmdAgentsList()
-	case cmd == "skills list":
+	case "skills list":
 		return h.cmdSkillsList()
 	default:
 		return i18n.T("server.session.cmd_unknown", rawCommand)
@@ -400,12 +400,12 @@ func (h *Handler) cmdPluginsList() string {
 	var b strings.Builder
 	b.WriteString(i18n.T("server.session.cmd_plugins_header", len(plugins)))
 	for _, p := range plugins {
-		b.WriteString(fmt.Sprintf("  - %s", p.Name()))
+		fmt.Fprintf(&b, "  - %s", p.Name())
 		if v := p.Version(); v != "" {
-			b.WriteString(fmt.Sprintf(" (v%s)", v))
+			fmt.Fprintf(&b, " (v%s)", v)
 		}
 		if d := p.Description(); d != "" {
-			b.WriteString(fmt.Sprintf(" — %s", d))
+			fmt.Fprintf(&b, " — %s", d)
 		}
 		b.WriteString("\n")
 	}
@@ -429,9 +429,9 @@ func (h *Handler) cmdAgentsList() string {
 	var b strings.Builder
 	b.WriteString(i18n.T("server.session.cmd_agents_header", len(agents)))
 	for _, a := range agents {
-		b.WriteString(fmt.Sprintf("  - %s", a.Name))
+		fmt.Fprintf(&b, "  - %s", a.Name)
 		if a.Description != "" {
-			b.WriteString(fmt.Sprintf(" — %s", a.Description))
+			fmt.Fprintf(&b, " — %s", a.Description)
 		}
 		b.WriteString("\n")
 	}
@@ -455,9 +455,9 @@ func (h *Handler) cmdSkillsList() string {
 	var b strings.Builder
 	b.WriteString(i18n.T("server.session.cmd_skills_header", len(skills)))
 	for _, s := range skills {
-		b.WriteString(fmt.Sprintf("  - %s", s.Name))
+		fmt.Fprintf(&b, "  - %s", s.Name)
 		if s.Description != "" {
-			b.WriteString(fmt.Sprintf(" — %s", s.Description))
+			fmt.Fprintf(&b, " — %s", s.Description)
 		}
 		b.WriteString("\n")
 	}

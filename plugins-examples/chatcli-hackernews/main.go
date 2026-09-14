@@ -93,8 +93,8 @@ func main() {
 		}
 
 		// 3. Formatar a saída para ser legível pela IA e por humanos
-		output.WriteString(fmt.Sprintf("[%d] Título: %s\n", i+1, item.Title))
-		output.WriteString(fmt.Sprintf("    Pontos: %d | Autor: %s | Comentários: %d\n", item.Score, item.By, item.Descendants))
+		fmt.Fprintf(&output, "[%d] Título: %s\n", i+1, item.Title)
+		fmt.Fprintf(&output, "    Pontos: %d | Autor: %s | Comentários: %d\n", item.Score, item.By, item.Descendants)
 	}
 
 	fmt.Print(output.String())

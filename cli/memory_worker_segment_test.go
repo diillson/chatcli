@@ -47,10 +47,8 @@ func TestNudgeSegment_QueuesAndExtractsOwnedTurn(t *testing.T) {
 	// on shared runners — 3s flaked there while the loop exits in
 	// milliseconds on a healthy run.
 	deadline := time.Now().Add(15 * time.Second)
-	for {
-		if extractor.calls.Load() > 0 {
-			break // extraction consumed the queued segment
-		}
+	for extractor.calls.Load() <= 0 {
+
 		if time.Now().After(deadline) {
 			if len(mw.pendingFiles()) > 0 {
 				t.Fatal("segment stayed queued but extraction never ran")

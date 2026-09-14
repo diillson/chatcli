@@ -225,7 +225,7 @@ func extractBaseCommand(fullCommand string) string {
 			// Check if prefix looks like a var name (no spaces, alphanumeric+underscore)
 			isVar := true
 			for _, c := range prefix {
-				if !((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '_') {
+				if !isShellIdentRune(c) {
 					isVar = false
 					break
 				}
@@ -297,4 +297,9 @@ func extractBaseCommand(fullCommand string) string {
 	// Strip path prefix and Windows executable extension
 	// (e.g., /usr/bin/git -> git, C:\Git\git.exe -> git)
 	return baseName(fields[0])
+}
+
+// isShellIdentRune reports whether c may appear in a shell variable name.
+func isShellIdentRune(c rune) bool {
+	return (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '_'
 }

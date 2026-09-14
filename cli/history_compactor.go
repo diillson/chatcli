@@ -808,7 +808,7 @@ func renderSegmentForSummary(layer *compress.Layer, msgs []models.Message, budge
 			}
 			content += "\n[tool_calls: " + strings.Join(names, ", ") + "]"
 		}
-		sb.WriteString(fmt.Sprintf("[%s]: %s\n\n", msg.Role, content))
+		fmt.Fprintf(&sb, "[%s]: %s\n\n", msg.Role, content)
 	}
 	return sb.String()
 }

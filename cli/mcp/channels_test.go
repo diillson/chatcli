@@ -147,7 +147,7 @@ func TestChannelManager_FormatForPromptRendersOrChrono(t *testing.T) {
 	if !strings.Contains(out, "## MCP Channel Messages") {
 		t.Errorf("expected header, got %q", out)
 	}
-	if i, j := strings.Index(out, "first"), strings.Index(out, "second"); !(i >= 0 && i < j) {
+	if i, j := strings.Index(out, "first"), strings.Index(out, "second"); i < 0 || i >= j {
 		t.Errorf("messages not in chronological order: %q", out)
 	}
 }
