@@ -45,6 +45,35 @@ type skillRunStats struct {
 	ToolCalls int       `json:"tool_calls"`
 	CostUSD   float64   `json:"cost_usd"`
 	LastUsed  time.Time `json:"last_used,omitempty"`
+	// Measured counts the runs where the skill declared tools, so its use
+	// could be observed; Used counts those runs where one of them ran.
+	// A skill without declared tools is activated, never "used" or
+	// "unused": that would be a guess.
+	Measured int `json:"measured,omitempty"`
+	Used     int `json:"used,omitempty"`
+}
+
+// skillUse is what a run observed about one skill's tools.
+type skillUse struct {
+	Measurable bool
+	Used       bool
+}
+
+// skillUseFor decides whether a skill's declared tools were executed in a
+// run. No declared tools means nothing to measure.
+func skillUseFor(declared []string, executed map[string]bool) skillUse {
+	use := skillUse{}
+	for _, d := range declared {
+		d = normalizeToolName(d)
+		if d == "" {
+			continue
+		}
+		use.Measurable = true
+		if executed[d] {
+			use.Used = true
+		}
+	}
+	return use
 }
 
 // add folds one run in.
@@ -162,8 +191,9 @@ func (l *skillStatsLedger) save() error {
 }
 
 // recordRun folds one finished run into the baseline and into every
-// skill that took part in it.
-func (l *skillStatsLedger) recordRun(skills []string, turns, toolCalls int, cost float64, ok bool, at time.Time) {
+// skill that took part in it. use, when given, says per skill whether
+// its declared tools ran.
+func (l *skillStatsLedger) recordRun(skills []string, turns, toolCalls int, cost float64, ok bool, at time.Time, use map[string]skillUse) {
 	if l == nil {
 		return
 	}
@@ -184,6 +214,12 @@ func (l *skillStatsLedger) recordRun(skills []string, turns, toolCalls int, cost
 			l.Skills[name] = s
 		}
 		s.add(turns, toolCalls, cost, ok, at)
+		if u := use[name]; u.Measurable {
+			s.Measured++
+			if u.Used {
+				s.Used++
+			}
+		}
 	}
 }
 
@@ -199,10 +235,31 @@ func (a *AgentMode) recordSkillRunOutcome(turns, toolCalls int, runErr error) {
 		cost = a.cli.costTracker.TotalCost() - a.runStartCost
 	}
 	ledger := loadSkillStats()
-	ledger.recordRun(a.InjectedSkillNames(), turns, toolCalls, cost, runErr == nil, time.Now())
+	ledger.recordRun(a.InjectedSkillNames(), turns, toolCalls, cost, runErr == nil, time.Now(), a.skillUsesThisRun())
 	if err := ledger.save(); err != nil && a.logger != nil {
 		a.logger.Debug("skill stats not recorded", zap.Error(err))
 	}
+}
+
+// skillUsesThisRun observes, for every skill injected into the run,
+// whether one of its declared tools was executed.
+func (a *AgentMode) skillUsesThisRun() map[string]skillUse {
+	if a == nil || a.cli == nil || a.cli.personaHandler == nil {
+		return nil
+	}
+	mgr := a.cli.personaHandler.GetManager()
+	if mgr == nil {
+		return nil
+	}
+	out := map[string]skillUse{}
+	for _, name := range a.InjectedSkillNames() {
+		s, err := mgr.GetSkillByName(name)
+		if err != nil || s == nil {
+			continue
+		}
+		out[name] = skillUseFor([]string(s.Tools), a.runToolNames)
+	}
+	return out
 }
 
 // skillStatsRow is one rendered line of /skill stats.
@@ -271,11 +328,17 @@ func renderSkillStats(l *skillStatsLedger, learned map[string]string, filter str
 		if r.Learned {
 			origin = i18n.T("skill.stats.origin_learned")
 		}
-		out = append(out, i18n.T("skill.stats.row", r.Name, origin, s.Runs,
+		row := i18n.T("skill.stats.row", r.Name, origin, s.Runs,
 			fmt.Sprintf("%.1f", s.avgTurns()), fmt.Sprintf("%+.0f%%", deltaPct(s.avgTurns(), b.avgTurns())),
 			fmt.Sprintf("%.1f", s.avgToolCalls()),
 			fmt.Sprintf("$%.4f", s.avgCost()), fmt.Sprintf("%+.0f%%", deltaPct(s.avgCost(), b.avgCost())),
-			fmt.Sprintf("%.0f%%", s.errorPct())))
+			fmt.Sprintf("%.0f%%", s.errorPct()))
+		if s.Measured > 0 {
+			row += " · " + i18n.T("skill.stats.used", s.Used, s.Measured)
+		} else {
+			row += " · " + i18n.T("skill.stats.unmeasured")
+		}
+		out = append(out, row)
 	}
 	return out
 }

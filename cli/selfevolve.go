@@ -131,7 +131,13 @@ improvement:
 [[/skill]]
 
 Rules: name is a-z/0-9/dash only. PREFER (B) evolve whenever the index already
-has a related skill; only create a NEW skill when nothing covers the topic.`
+has a related skill; only create a NEW skill when nothing covers the topic.
+
+GENERALIZE. A skill is a reusable competence, never the entity of the example
+that taught it: team-match-info, not flamengo-match-info; deploy-service-to-k8s,
+not deploy-billing-api. Name and describe the competence; put the entity in the
+body as an input ("the team", "<service>") and in the triggers as the generic
+words a future request would use.`
 
 // skillCandidate is one parsed SKILL_CANDIDATES block. It is either a NEW-skill
 // candidate (Body set) or an EVOLVE candidate (Improvement set); the engine
@@ -173,11 +179,14 @@ type selfEvolveSummary struct {
 	Evolved       []string // engine-owned skills updated in place
 	EvolvedBackup []string // user-owned skills evolved after a reversible backup
 	Suggested     []string // detected but not written (suggest mode / backup failed)
+	// Redirected lists NEW candidates folded into an existing skill they
+	// overlapped instead of being authored beside it ("candidate → skill").
+	Redirected []string
 }
 
 func (s selfEvolveSummary) isEmpty() bool {
 	return len(s.Authored) == 0 && len(s.Evolved) == 0 &&
-		len(s.EvolvedBackup) == 0 && len(s.Suggested) == 0
+		len(s.EvolvedBackup) == 0 && len(s.Suggested) == 0 && len(s.Redirected) == 0
 }
 
 // applySkillCandidates parses the extraction response for skill candidates and,
@@ -223,6 +232,17 @@ func (cli *ChatCLI) applySkillCandidates(ctx context.Context, response string, m
 				dirty = true
 			}
 			continue
+		}
+		// A NEW candidate that overlaps an installed skill is that skill's
+		// evolution, not a sibling: one team-match-info, not one per team.
+		if redirected, ok := redirectToExisting(cli.existingSkillMetas(), c); ok {
+			if target, found := plugins.ReadSkillContent(redirected.Name); found {
+				if cli.evolveExistingSkill(ctx, redirected, target, man, merge, &sum) {
+					dirty = true
+					sum.Redirected = append(sum.Redirected, c.Name+" → "+redirected.Name)
+				}
+				continue
+			}
 		}
 		if cli.authorNewSkill(c, man, &sum) {
 			dirty = true
@@ -438,6 +458,9 @@ func formatSelfEvolveNotice(s selfEvolveSummary) string {
 	}
 	if len(s.EvolvedBackup) > 0 {
 		parts = append(parts, i18n.T("selfevolve.notice.evolved_backup", strings.Join(s.EvolvedBackup, ", ")))
+	}
+	if len(s.Redirected) > 0 {
+		parts = append(parts, i18n.T("selfevolve.notice.redirected", strings.Join(s.Redirected, ", ")))
 	}
 	if len(s.Suggested) > 0 {
 		parts = append(parts, i18n.T("selfevolve.notice.suggested", strings.Join(s.Suggested, ", ")))

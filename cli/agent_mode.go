@@ -225,6 +225,10 @@ type AgentMode struct {
 	orchRun      *runs.Run
 	runTurns     int
 	runToolCalls int
+	// runToolNames is every tool the run executed, for skill utilization
+	// (skill_stats.go): a skill that declares tools was used when one of
+	// them ran after its injection.
+	runToolNames map[string]bool
 
 	// skillCharsInjected accumulates the characters of skill guidance this
 	// Run() has injected (startup blocks + mid-loop injections). Once it
@@ -978,6 +982,7 @@ func (a *AgentMode) resetPerRunState() {
 	}
 	a.taskBudgetTotal = 0
 	a.runTurns, a.runToolCalls = 0, 0
+	a.runToolNames = nil
 	// The session's spend when this run begins, so the run's own cost can
 	// be credited to the skills it uses (skill_stats.go).
 	a.runStartCost = 0
@@ -4076,6 +4081,7 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 				a.toolCallsExecd++
 				turnToolCalls++
 				a.noteRunToolCalls(1)
+				a.noteRunToolName(toolName)
 			}
 
 			// Log per-batch structured outcome at DEBUG so operators can
