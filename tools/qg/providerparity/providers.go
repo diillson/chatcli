@@ -253,7 +253,7 @@ func DefaultTouchPoints() []TouchPoint {
 			ID:          "operator.cost",
 			Description: "operator cost tracker prices the provider",
 			Path:        "operator/controllers/cost_tracker.go",
-			Pattern:     `provider == "{Upper}"`,
+			Pattern:     `case "{Upper}"`,
 		},
 	}
 }
