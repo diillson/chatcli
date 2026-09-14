@@ -127,6 +127,10 @@ type SessionCostData struct {
 	EmbeddingCostUSD       float64 `json:"embedding_cost_usd,omitempty"`
 	MemoryCalls            int     `json:"memory_calls,omitempty"`
 	MemoryCostUSD          float64 `json:"memory_cost_usd,omitempty"`
+	MemoryFactsWritten     int     `json:"memory_facts_written,omitempty"`
+	MemoryEpisodesWritten  int     `json:"memory_episodes_written,omitempty"`
+	MemoryRecalls          int     `json:"memory_recalls,omitempty"`
+	MemoryFactsRecalled    int     `json:"memory_facts_recalled,omitempty"`
 	Compactions            int     `json:"compactions,omitempty"`
 	CompactionsLevel3      int     `json:"compactions_level3,omitempty"`
 	CompactionCostUSD      float64 `json:"compaction_cost_usd,omitempty"`
@@ -209,11 +213,17 @@ type CostTracker struct {
 	compactions            int
 	memoryCalls            int
 	memoryCostUSD          float64
-	embeddingCalls         int
-	embeddingTokens        int64
-	embeddingCostUSD       float64
-	compactionsLevel3      int
-	compactionCostUSD      float64
+	// What the memory worker produced and what the conversation read back:
+	// the two sides of the memory ROI (cost_compaction.go).
+	memoryFactsWritten    int
+	memoryEpisodesWritten int
+	memoryRecalls         int
+	memoryFactsRecalled   int
+	embeddingCalls        int
+	embeddingTokens       int64
+	embeddingCostUSD      float64
+	compactionsLevel3     int
+	compactionCostUSD     float64
 
 	// Persistence write-through throttle.
 	lastSave time.Time
@@ -574,6 +584,10 @@ func (ct *CostTracker) snapshotLocked() SessionCostData {
 		EmbeddingCostUSD:       ct.embeddingCostUSD,
 		MemoryCalls:            ct.memoryCalls,
 		MemoryCostUSD:          ct.memoryCostUSD,
+		MemoryFactsWritten:     ct.memoryFactsWritten,
+		MemoryEpisodesWritten:  ct.memoryEpisodesWritten,
+		MemoryRecalls:          ct.memoryRecalls,
+		MemoryFactsRecalled:    ct.memoryFactsRecalled,
 		Compactions:            ct.compactions,
 		CompactionsLevel3:      ct.compactionsLevel3,
 		CompactionCostUSD:      ct.compactionCostUSD,
@@ -667,6 +681,10 @@ func (ct *CostTracker) RestoreSession(sessionID string) error {
 	ct.embeddingCostUSD = data.EmbeddingCostUSD
 	ct.memoryCalls = data.MemoryCalls
 	ct.memoryCostUSD = data.MemoryCostUSD
+	ct.memoryFactsWritten = data.MemoryFactsWritten
+	ct.memoryEpisodesWritten = data.MemoryEpisodesWritten
+	ct.memoryRecalls = data.MemoryRecalls
+	ct.memoryFactsRecalled = data.MemoryFactsRecalled
 	ct.compactions = data.Compactions
 	ct.compactionsLevel3 = data.CompactionsLevel3
 	ct.compactionCostUSD = data.CompactionCostUSD
