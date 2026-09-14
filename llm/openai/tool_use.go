@@ -121,6 +121,7 @@ func (c *OpenAIClient) SendPromptWithTools(ctx context.Context, prompt string, h
 		zap.String("path", "tool_use"),
 		zap.Int("response_chars", len(resp)),
 	)
+	c.lastRequest.Remember(jsonValue)
 	response, err := parseToolResponse(resp, c.logger)
 	if err == nil && response != nil && response.Usage != nil {
 		// Mirror the tool-path usage into the client state so LastUsage()

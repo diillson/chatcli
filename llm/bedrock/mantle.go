@@ -242,6 +242,7 @@ func (c *BedrockClient) sendPromptAnthropicMantle(ctx context.Context, prompt st
 		zap.String("family", "anthropic-mantle"),
 		zap.Int("response_chars", len(responseText)),
 	)
+	c.lastMantleRequest.Remember(payload)
 	return responseText, nil
 }
 

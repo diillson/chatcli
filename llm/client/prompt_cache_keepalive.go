@@ -18,7 +18,10 @@ package client
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
+	"sync"
 
 	"github.com/diillson/chatcli/models"
 )
@@ -50,4 +53,71 @@ func (c *InstrumentedClient) KeepPromptCacheWarm(ctx context.Context) (*models.U
 		return nil, ErrPromptCacheKeepAliveUnsupported
 	}
 	return ka.KeepPromptCacheWarm(ctx)
+}
+
+// LastRequestKeeper remembers the body of an adapter's last request so a
+// keep-alive can re-send the same prefix. Adapters embed one. The body is
+// held as a string on purpose: the exported client structs promise to
+// stay comparable, and a byte slice would break that.
+type LastRequestKeeper struct {
+	mu   sync.Mutex
+	body string
+}
+
+// Remember stores the body of a request that reached the provider.
+func (k *LastRequestKeeper) Remember(body []byte) {
+	if k == nil {
+		return
+	}
+	k.mu.Lock()
+	k.body = string(body)
+	k.mu.Unlock()
+}
+
+// Take returns the remembered body, ok=false when nothing was sent yet.
+func (k *LastRequestKeeper) Take() ([]byte, bool) {
+	if k == nil {
+		return nil, false
+	}
+	k.mu.Lock()
+	body := k.body
+	k.mu.Unlock()
+	if body == "" {
+		return nil, false
+	}
+	return []byte(body), true
+}
+
+// KeepAliveRequestBody derives the no-output request from a remembered
+// body, for every JSON wire ChatCLI speaks: the output cap is lowered to
+// minOutput under whichever name the wire uses (max_tokens on the
+// Anthropic and Chat Completions shapes, max_completion_tokens on the
+// newer OpenAI models), streaming is removed because a no-output request
+// does not stream, and the task budget is removed because its beta
+// header is bound to the turn's context. Everything else travels as it
+// was: thinking, effort and the messages are part of the cache key, and a
+// refresh that changed them would write a new entry instead of
+// refreshing this one.
+func KeepAliveRequestBody(last []byte, minOutput int) ([]byte, error) {
+	var req map[string]interface{}
+	if err := json.Unmarshal(last, &req); err != nil {
+		return nil, fmt.Errorf("keep-alive body: %w", err)
+	}
+	if minOutput < 0 {
+		minOutput = 0
+	}
+	for _, key := range []string{"max_tokens", "max_completion_tokens"} {
+		if _, ok := req[key]; ok {
+			req[key] = minOutput
+		}
+	}
+	delete(req, "stream")
+	delete(req, "stream_options")
+	if cfg, ok := req["output_config"].(map[string]interface{}); ok {
+		delete(cfg, "task_budget")
+		if len(cfg) == 0 {
+			delete(req, "output_config")
+		}
+	}
+	return json.Marshal(req)
 }

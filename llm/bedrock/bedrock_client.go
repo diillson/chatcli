@@ -206,6 +206,9 @@ func filterBedrockCapabilities(caps []string) []string {
 //   - Shared credentials file (~/.aws/credentials) — selected by AWS_PROFILE
 //   - EC2/ECS/EKS IAM roles
 type BedrockClient struct {
+	// lastMantleRequest remembers the body of the last Messages request
+	// sent to the Mantle endpoint for KeepPromptCacheWarm (keepalive.go).
+	lastMantleRequest client.LastRequestKeeper
 	// turnScoped records the emitter of the request currently being built,
 	// so the clear_at opt-in rides only on a request that carries a
 	// turn-scoped system message. Held as a pointer: the emitter is per

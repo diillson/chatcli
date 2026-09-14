@@ -8,7 +8,6 @@ package claudeai
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -28,33 +27,24 @@ func (c *ClaudeClient) rememberRequest(body []byte) {
 	if c == nil || c.provider.Mode() == auth.AuthModeOAuth {
 		return
 	}
-	c.lastRequestMu.Lock()
-	c.lastRequest = string(body)
-	c.lastRequestMu.Unlock()
+	c.lastRequest.Remember(body)
 }
 
 // KeepPromptCacheWarm re-sends the last request with max_tokens: 0. The
 // API runs the prefill, refreshes the cache entry at the breakpoints the
 // request carries, and returns no content — only usage, which is what
-// comes back so the caller can book the cache read.
-//
-// The body travels as it was, thinking and effort included: those are
-// part of the cache key on every current model, so a refresh that
-// dropped them would write a new entry instead of refreshing this one.
-// Only the task budget is removed — its beta header is bound to the
-// turn's context, which this request does not carry — and streaming,
-// which a no-output request does not accept.
+// comes back so the caller can book the cache read. The body is derived
+// by client.KeepAliveRequestBody: thinking and effort kept, task budget
+// and streaming removed.
 func (c *ClaudeClient) KeepPromptCacheWarm(ctx context.Context) (*models.UsageInfo, error) {
 	if c == nil || c.provider.Mode() == auth.AuthModeOAuth {
 		return nil, client.ErrPromptCacheKeepAliveUnsupported
 	}
-	c.lastRequestMu.Lock()
-	last := c.lastRequest
-	c.lastRequestMu.Unlock()
-	if last == "" {
+	last, ok := c.lastRequest.Take()
+	if !ok {
 		return nil, client.ErrPromptCacheKeepAliveUnsupported
 	}
-	body, err := keepAliveBody([]byte(last))
+	body, err := client.KeepAliveRequestBody(last, 0)
 	if err != nil {
 		return nil, err
 	}
@@ -93,21 +83,4 @@ func (c *ClaudeClient) KeepPromptCacheWarm(ctx context.Context) (*models.UsageIn
 		zap.Int("cache_write", usage.CacheCreationInputTokens),
 		zap.String("model", c.model))
 	return usage, nil
-}
-
-// keepAliveBody derives the no-output request from a remembered body.
-func keepAliveBody(last []byte) ([]byte, error) {
-	var req map[string]interface{}
-	if err := json.Unmarshal(last, &req); err != nil {
-		return nil, fmt.Errorf("claudeai: keep-alive body: %w", err)
-	}
-	req["max_tokens"] = 0
-	delete(req, "stream")
-	if cfg, ok := req["output_config"].(map[string]interface{}); ok {
-		delete(cfg, "task_budget")
-		if len(cfg) == 0 {
-			delete(req, "output_config")
-		}
-	}
-	return json.Marshal(req)
 }
