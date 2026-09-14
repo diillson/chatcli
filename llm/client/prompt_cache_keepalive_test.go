@@ -52,3 +52,29 @@ func TestInstrumentedClientForwardsKeepAlive(t *testing.T) {
 		t.Fatalf("nil wrapper: got %v", err)
 	}
 }
+
+// Describing the lifetime must not decide it: an open "auto" reads as
+// empty and stays open, an explicit env or a held decision reads as is.
+func TestPromptCacheTTLIfResolvedDoesNotSettleAuto(t *testing.T) {
+	t.Setenv(PromptCacheTTLEnv, "")
+	t.Cleanup(func() { ResetPromptCacheTTL(); SetPromptCacheTTLHint("5m") })
+	ResetPromptCacheTTL()
+	SetPromptCacheTTLHint("1h")
+	if got := PromptCacheTTLIfResolved(); got != "" {
+		t.Fatalf("open auto must read as empty, got %q", got)
+	}
+	if HeldPromptCacheTTL() != "" {
+		t.Fatal("reading must not settle the decision")
+	}
+	if got := AnthropicCacheTTL(); got != "1h" || PromptCacheTTLIfResolved() != "1h" {
+		t.Fatalf("once settled both agree, got %q", got)
+	}
+	t.Setenv(PromptCacheTTLEnv, "5m")
+	if PromptCacheTTLIfResolved() != "5m" {
+		t.Fatal("an explicit env reads as is")
+	}
+	t.Setenv(PromptCacheTTLEnv, "hour")
+	if PromptCacheTTLIfResolved() != "1h" {
+		t.Fatal("hour normalizes to 1h")
+	}
+}

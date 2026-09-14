@@ -265,14 +265,17 @@ func (c *cacheTelemetry) observe(provider, model string, u *models.UsageInfo, no
 
 // CacheStats is the read model /cost and the envelope footer render.
 type CacheStats struct {
-	Requests     int
-	Misses       int     // prefix lost while it should have been warm
-	Expired      int     // prefix lost after a pause the cache did not survive
-	Rebuilds     int     // prefix rewritten by ChatCLI on purpose
-	HitPct       float64 // share of input served from cache, 0-100
-	LastActivity time.Time
-	TTL          string // "5m" or "1h"
-	Warm         bool   // last activity within the TTL
+	Requests int
+	Misses   int     // prefix lost while it should have been warm
+	Expired  int     // prefix lost after a pause the cache did not survive
+	Rebuilds int     // prefix rewritten by ChatCLI on purpose
+	HitPct   float64 // share of input served from cache, 0-100
+	// WriteReadRatio is cache writes over cache reads for the last-used
+	// provider: the share of cached traffic paid at the write price.
+	WriteReadRatio float64
+	LastActivity   time.Time
+	TTL            string // "5m" or "1h"
+	Warm           bool   // last activity within the TTL
 }
 
 // Reported is true when at least one request carried cache fields.
@@ -382,6 +385,26 @@ func cacheTTLFor(provider, model string) string {
 	return "5m"
 }
 
+// cacheTTLIfResolvedFor is cacheTTLFor for readers that must not settle
+// the "auto" decision as a side effect (the persisted snapshot is written
+// from inside the request that books usage, before the keep-alive hook
+// has had its say). "" while the lifetime is still open.
+func cacheTTLIfResolvedFor(provider, model string) string {
+	p := strings.ToLower(provider)
+	m := strings.ToLower(model)
+	anthropic := strings.Contains(p, "claudeai") || strings.Contains(m, "claude") || strings.Contains(m, "fable")
+	if anthropic {
+		if strings.Contains(p, "bedrock") && !bedrock.SupportsExtendedCacheTTL(model) {
+			return "5m"
+		}
+		return llmclient.PromptCacheTTLIfResolved()
+	}
+	if (strings.Contains(p, "googleai") || strings.Contains(m, "gemini")) && llmclient.ExplicitCacheEnabled() {
+		return llmclient.PromptCacheTTLIfResolved()
+	}
+	return "5m"
+}
+
 func cacheTTLDuration(ttl string) time.Duration {
 	if ttl == "1h" {
 		return time.Hour
@@ -426,8 +449,10 @@ func (ct *CostTracker) cacheStatsLocked() CacheStats {
 	additive := c.lastAdditive
 	if b := c.byProvider[strings.ToUpper(strings.TrimSpace(c.lastProvider))]; b != nil {
 		stats.HitPct = cacheHitPct(additive, b.readTokens, b.writeTokens, b.inputTokens)
+		stats.WriteReadRatio = writeReadRatio(b.writeTokens, b.readTokens)
 	} else {
 		stats.HitPct = cacheHitPct(additive, c.readTokens, c.writeTokens, c.inputTokens)
+		stats.WriteReadRatio = writeReadRatio(c.writeTokens, c.readTokens)
 	}
 	stats.TTL = cacheTTLFor(c.lastProvider, c.lastModel)
 	stats.Warm = time.Since(c.lastActivity) < cacheTTLDuration(stats.TTL)

@@ -33,6 +33,7 @@ func keepAliveCLI(t *testing.T) *ChatCLI {
 	t.Cleanup(func() {
 		llmclient.ResetPromptCacheTTL()
 		llmclient.SetPromptCacheKeepAlivePreferred(false)
+		llmclient.SetPromptCacheTTLHint("5m")
 	})
 	cli := &ChatCLI{logger: zap.NewNop(), costTracker: NewCostTrackerAt(t.TempDir())}
 	cli.costTracker.SetRealUsageHook(cli.noteRealUsageForKeepAlive)

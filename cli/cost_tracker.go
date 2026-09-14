@@ -130,6 +130,12 @@ type SessionCostData struct {
 	Compactions            int     `json:"compactions,omitempty"`
 	CompactionsLevel3      int     `json:"compactions_level3,omitempty"`
 	CompactionCostUSD      float64 `json:"compaction_cost_usd,omitempty"`
+
+	// Cache is the prompt-cache telemetry of the session (misses, expiries,
+	// rebuilds, hit share, write/read ratio), persisted so a later /cost
+	// sessions can compare sessions instead of losing the counters with
+	// the process. Nil on snapshots written before it existed.
+	Cache *CacheTelemetrySnapshot `json:"cache,omitempty"`
 }
 
 // CostTracker tracks token usage and estimated cost for the current session,
@@ -558,6 +564,7 @@ func (ct *CostTracker) snapshotLocked() SessionCostData {
 		TotalCostUSD:  ct.totalCostUSD,
 		TotalRequests: ct.totalRequests,
 		TotalTokens:   ct.totalInputTokens + ct.totalCompletionTokens,
+		Cache:         ct.cache.snapshot(ct.cacheTTLPromoted),
 
 		CacheResources:         ct.cacheResources,
 		CacheStorageTokenHours: ct.cacheStorageTokenHours,
@@ -663,6 +670,10 @@ func (ct *CostTracker) RestoreSession(sessionID string) error {
 	ct.compactions = data.Compactions
 	ct.compactionsLevel3 = data.CompactionsLevel3
 	ct.compactionCostUSD = data.CompactionCostUSD
+	ct.cache.restore(data.Cache)
+	if data.Cache != nil {
+		ct.cacheTTLPromoted = data.Cache.TTLPromoted
+	}
 	ct.recomputeAggregates()
 	return nil
 }

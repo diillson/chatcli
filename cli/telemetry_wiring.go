@@ -101,6 +101,11 @@ func (cli *ChatCLI) telemetryMetrics() []telemetry.Metric {
 			{Value: float64(stats.Expired), Attrs: map[string]string{"outcome": "expired"}},
 			{Value: float64(stats.Rebuilds), Attrs: map[string]string{"outcome": "expected_rebuild"}},
 		}})
+		// The two figures a dashboard compares sessions on: how much of the
+		// input the cache served, and how much of the cached traffic was
+		// paid at the write price.
+		out = append(out, telemetry.Metric{Name: "chatcli.cache.hit_pct", Unit: "%", Points: []telemetry.Point{{Value: stats.HitPct}}})
+		out = append(out, telemetry.Metric{Name: "chatcli.cache.write_read_ratio", Unit: "1", Points: []telemetry.Point{{Value: stats.WriteReadRatio}}})
 	}
 	if snap.CacheResources > 0 {
 		out = append(out, telemetry.Metric{Name: "chatcli.cache.storage_cost", Unit: "USD", Points: []telemetry.Point{{Value: snap.CacheStorageCostUSD}}})
