@@ -218,6 +218,13 @@ type AgentMode struct {
 	// runStartCost is the session's total cost when the run began, so the
 	// run's own spend can be credited to the skills it used (skill_stats.go).
 	runStartCost float64
+	// orchRun is the registry entry of the run in flight; runTurns and
+	// runToolCalls are what the loop has done in it so far. The registry
+	// used to hear only from workers, so the orchestrator's own entry, and
+	// everything read from it, sat at zero (agent_run_progress.go).
+	orchRun      *runs.Run
+	runTurns     int
+	runToolCalls int
 
 	// skillCharsInjected accumulates the characters of skill guidance this
 	// Run() has injected (startup blocks + mid-loop injections). Once it
@@ -970,6 +977,7 @@ func (a *AgentMode) resetPerRunState() {
 		return
 	}
 	a.taskBudgetTotal = 0
+	a.runTurns, a.runToolCalls = 0, 0
 	// The session's spend when this run begins, so the run's own cost can
 	// be credited to the skills it uses (skill_stats.go).
 	a.runStartCost = 0
@@ -1037,6 +1045,8 @@ func (a *AgentMode) Run(ctx context.Context, query string, additionalContext str
 	// tree view possible. A park suspension counts as a clean end.
 	orchCtx, orchRun := a.beginOrchestratorRun(ctx, query, systemPromptOverride)
 	ctx = orchCtx
+	a.orchRun = orchRun
+	defer func() { a.orchRun = nil }()
 
 	// CHATCLI_PROMPT_CACHE_TTL=auto used to resolve to the hour here, up
 	// front, on the bet that a coder run pauses between tool rounds. A
@@ -1367,8 +1377,7 @@ func (a *AgentMode) Run(ctx context.Context, query string, additionalContext str
 		a.cli.persistBoundSession()
 	}
 	// What the run cost, credited to the skills that took part in it.
-	snap := orchRun.Snapshot()
-	a.recordSkillRunOutcome(snap.Turn, snap.ToolCalls, err)
+	a.recordSkillRunOutcome(a.runTurns, a.runToolCalls, err)
 	// Close the orchestrator's registry entry with the real outcome; the
 	// deferred End(nil) then no-ops (End is idempotent, first call wins).
 	orchRun.End(err)
@@ -2427,6 +2436,7 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 		// Reset per-turn counters
 		turnAgents := 0
 		turnToolCalls := 0
+		a.noteRunTurn(turn+1, maxTurns)
 
 		// Resolve per-turn client + effort hint from any active "@model use"
 		// route override or skill hints. Model swap is transparent; effort
@@ -3261,6 +3271,7 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 				}
 				a.toolCallsExecd += totalAgentToolCalls
 				turnToolCalls += totalAgentToolCalls
+				a.noteRunToolCalls(totalAgentToolCalls)
 
 				if !isCompactUI {
 					// Resumo compacto do dispatch
@@ -4064,6 +4075,7 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 				successCount++
 				a.toolCallsExecd++
 				turnToolCalls++
+				a.noteRunToolCalls(1)
 			}
 
 			// Log per-batch structured outcome at DEBUG so operators can
@@ -4451,7 +4463,9 @@ func (a *AgentMode) initMultiAgent(ctx context.Context) bool {
 	if a.cli.costTracker != nil {
 		tracker := a.cli.costTracker
 		a.agentDispatcher.SetUsageRecorder(func(provider, model string, usage *models.UsageInfo) {
-			tracker.RecordRealUsage(provider, model, usage)
+			// A worker's loop has its own prefix: booked in full, kept out
+			// of the main conversation's cache telemetry.
+			tracker.RecordRealUsageIn(LaneWorker, provider, model, usage)
 		})
 		a.agentDispatcher.SetBudgetGate(a.cli.budgetBlockedErr)
 	}
