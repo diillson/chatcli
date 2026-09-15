@@ -2199,6 +2199,18 @@ func (cli *ChatCLI) stopMCPConfigWatcher() {
 	}
 }
 
+// shutdownToolProcesses stops every helper process a tool may have started
+// — language servers (@lsp), background processes (@proc) and the browser
+// (@browser). Shared by the interactive teardown and the one-shot exit
+// paths: a Chrome left behind by `chatcli -p` outlives the process
+// otherwise.
+func (cli *ChatCLI) shutdownToolProcesses(ctx context.Context) {
+	ctx = context.WithoutCancel(ctx)
+	cli.shutdownLSPPool()
+	cli.shutdownProcSupervisor()
+	browser.Shutdown(ctx)
+}
+
 func (cli *ChatCLI) cleanup(ctx context.Context) {
 	// Teardown should not be aborted if the caller's context was already
 	// cancelled (e.g. Ctrl+C); detach cancellation but inherit values.
@@ -2303,13 +2315,7 @@ func (cli *ChatCLI) cleanup(ctx context.Context) {
 	if cli.pluginManager != nil {
 		cli.pluginManager.Close()
 	}
-	// Shut down any language servers the @lsp tool started.
-	cli.shutdownLSPPool()
-	// Stop any background processes the @proc tool started.
-	cli.shutdownProcSupervisor()
-	// Close the browser session the @browser tool may have launched — a
-	// headless Chrome must never outlive ChatCLI.
-	browser.Shutdown(ctx)
+	cli.shutdownToolProcesses(ctx)
 	// Cancel an in-flight task graph run so its workers stop with the
 	// session, and stop the dashboard server if one was opened.
 	if cli.taskGraphAdapter != nil {

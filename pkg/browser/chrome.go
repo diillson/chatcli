@@ -100,6 +100,30 @@ func headlessEnabled() bool {
 	return true
 }
 
+// chromeArgs builds the launch command line. Besides the DevTools port and
+// the profile, it turns off the "AutomationControlled" blink feature: with
+// it on, navigator.webdriver is true and Google's sign-in refuses the
+// browser as "not secure" — which defeats the whole point of handing the
+// window to the user so they can log in.
+func chromeArgs(headless bool, userDataDir string) []string {
+	args := []string{
+		"--remote-debugging-port=0",
+		"--user-data-dir=" + userDataDir,
+		"--no-first-run",
+		"--no-default-browser-check",
+		"--disable-background-networking",
+		"--disable-sync",
+		"--disable-features=Translate",
+		"--disable-blink-features=AutomationControlled",
+		"--mute-audio",
+		"about:blank",
+	}
+	if headless {
+		args = append([]string{"--headless=new"}, args...)
+	}
+	return args
+}
+
 // launchChrome starts the browser and returns the running command plus the
 // DevTools websocket URL it announced. userDataDir is the profile to run
 // on; empty creates a throwaway one (reported back so the caller owns it).
@@ -125,22 +149,7 @@ func launchChrome(ctx context.Context, headless bool, userDataDir string) (cmd *
 		}
 	}
 
-	args := []string{
-		"--remote-debugging-port=0",
-		"--user-data-dir=" + userDataDir,
-		"--no-first-run",
-		"--no-default-browser-check",
-		"--disable-background-networking",
-		"--disable-sync",
-		"--disable-features=Translate",
-		"--mute-audio",
-		"about:blank",
-	}
-	if headless {
-		args = append([]string{"--headless=new"}, args...)
-	}
-
-	cmd = exec.Command(bin, args...) // #nosec G204 -- binary from curated candidates or operator-set CHATCLI_BROWSER_BIN
+	cmd = exec.Command(bin, chromeArgs(headless, userDataDir)...) // #nosec G204 -- binary from curated candidates or operator-set CHATCLI_BROWSER_BIN
 	stderr, err := cmd.StderrPipe()
 	if err != nil {
 		cleanup()

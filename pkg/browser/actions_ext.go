@@ -119,14 +119,14 @@ func (s *Session) Press(ctx context.Context, chord string) error {
 	if def.text != "" {
 		down["text"] = def.text
 	}
-	if _, err := s.conn.call(ctx, s.sessionID, "Input.dispatchKeyEvent", down); err != nil {
+	if _, err := s.call(ctx, "Input.dispatchKeyEvent", down); err != nil {
 		return err
 	}
 	up := map[string]interface{}{
 		"type": "keyUp", "key": def.key, "code": def.code,
 		"windowsVirtualKeyCode": def.vk, "nativeVirtualKeyCode": def.vk, "modifiers": modifiers,
 	}
-	_, err := s.conn.call(ctx, s.sessionID, "Input.dispatchKeyEvent", up)
+	_, err := s.call(ctx, "Input.dispatchKeyEvent", up)
 	return err
 }
 
@@ -161,7 +161,7 @@ func (s *Session) Hover(ctx context.Context, target string) error {
 	if err != nil {
 		return err
 	}
-	_, err = s.conn.call(ctx, s.sessionID, "Input.dispatchMouseEvent", map[string]interface{}{
+	_, err = s.call(ctx, "Input.dispatchMouseEvent", map[string]interface{}{
 		"type": "mouseMoved", "x": x, "y": y,
 	})
 	return err
@@ -221,7 +221,7 @@ func (s *Session) Upload(ctx context.Context, target string, paths []string) err
 	if err != nil {
 		return err
 	}
-	_, err = s.conn.call(ctx, s.sessionID, "DOM.setFileInputFiles", map[string]interface{}{
+	_, err = s.call(ctx, "DOM.setFileInputFiles", map[string]interface{}{
 		"files": abs, "nodeId": nodeID,
 	})
 	return err
@@ -229,7 +229,7 @@ func (s *Session) Upload(ctx context.Context, target string, paths []string) err
 
 // nodeIDFor resolves a ref/selector to a DOM node id.
 func (s *Session) nodeIDFor(ctx context.Context, target string) (int, error) {
-	res, err := s.conn.call(ctx, s.sessionID, "DOM.getDocument", map[string]interface{}{"depth": 0})
+	res, err := s.call(ctx, "DOM.getDocument", map[string]interface{}{"depth": 0})
 	if err != nil {
 		return 0, err
 	}
@@ -241,7 +241,7 @@ func (s *Session) nodeIDFor(ctx context.Context, target string) (int, error) {
 	if err := json.Unmarshal(res, &doc); err != nil {
 		return 0, err
 	}
-	res, err = s.conn.call(ctx, s.sessionID, "DOM.querySelector", map[string]interface{}{
+	res, err = s.call(ctx, "DOM.querySelector", map[string]interface{}{
 		"nodeId": doc.Root.NodeID, "selector": resolveSelector(target),
 	})
 	if err != nil {
@@ -288,7 +288,7 @@ func (s *Session) HTML(ctx context.Context, target string, maxBytes int) (string
 // PDF renders the page to a PDF file. Chrome only implements printToPDF
 // headless; a visible session gets a clear hint.
 func (s *Session) PDF(ctx context.Context, path string) error {
-	res, err := s.conn.call(ctx, s.sessionID, "Page.printToPDF", map[string]interface{}{
+	res, err := s.call(ctx, "Page.printToPDF", map[string]interface{}{
 		"printBackground": true, "preferCSSPageSize": true,
 	})
 	if err != nil {
@@ -323,20 +323,20 @@ func (s *Session) Resize(ctx context.Context, width, height int, mobile bool) er
 	if mobile {
 		scale = 2
 	}
-	_, err := s.conn.call(ctx, s.sessionID, "Emulation.setDeviceMetricsOverride", map[string]interface{}{
+	_, err := s.call(ctx, "Emulation.setDeviceMetricsOverride", map[string]interface{}{
 		"width": width, "height": height, "deviceScaleFactor": scale, "mobile": mobile,
 	})
 	if err != nil {
 		return err
 	}
-	_, err = s.conn.call(ctx, s.sessionID, "Emulation.setTouchEmulationEnabled", map[string]interface{}{"enabled": mobile})
+	_, err = s.call(ctx, "Emulation.setTouchEmulationEnabled", map[string]interface{}{"enabled": mobile})
 	return err
 }
 
 // ScreenshotFull captures the whole scrollable page (not just the viewport)
 // as PNG into path.
 func (s *Session) ScreenshotFull(ctx context.Context, path string) error {
-	res, err := s.conn.call(ctx, s.sessionID, "Page.getLayoutMetrics", nil)
+	res, err := s.call(ctx, "Page.getLayoutMetrics", nil)
 	if err != nil {
 		return err
 	}
@@ -432,6 +432,7 @@ func (s *Session) SwitchTab(ctx context.Context, which string) (TabInfo, error) 
 	}
 	s.mu.Lock()
 	s.targetID, s.sessionID = pick.ID, attached.SessionID
+	s.targetGone = false
 	s.loadCh = make(chan struct{})
 	s.mu.Unlock()
 	_, _ = s.conn.call(ctx, "", "Target.activateTarget", map[string]interface{}{"targetId": pick.ID})

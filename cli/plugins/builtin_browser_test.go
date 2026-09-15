@@ -40,6 +40,8 @@ type fakeBrowserBackend struct {
 	tabs    []browser.TabInfo
 	cookies []browser.CookieInfo
 	evalOut string
+	// identityErr, when set, is returned by Identity (and cleared).
+	identityErr error
 }
 
 func (f *fakeBrowserBackend) Navigate(_ context.Context, url string) (string, string, error) {
@@ -65,6 +67,11 @@ func (f *fakeBrowserBackend) Eval(_ context.Context, js string) (string, error) 
 	return "42", nil
 }
 func (f *fakeBrowserBackend) Identity(context.Context) (string, string, error) {
+	if f.identityErr != nil {
+		err := f.identityErr
+		f.identityErr = nil
+		return "", "", err
+	}
 	if len(f.urls) == 0 {
 		return "Example", "http://x", nil
 	}
@@ -741,5 +748,44 @@ func TestBrowserExecute_HideWithoutSessionNeverLaunches(t *testing.T) {
 	}
 	if len(*modes) != 0 {
 		t.Fatalf("hide without a session must not acquire a browser, got %v", *modes)
+	}
+}
+
+func TestBrowserExecute_WaitReportsClosedPageAsResult(t *testing.T) {
+	fake := withFakeBrowser(t)
+	p := NewBuiltinBrowserPlugin()
+	fake.identityErr = browser.ErrPageClosed
+	out, err := p.Execute(context.Background(), []string{`{"cmd":"wait","args":{"url":"/dashboard","timeout":5}}`})
+	if err != nil || out != browserMsgPageClosed {
+		t.Fatalf("closed page during wait must be a result the model can act on: out=%q err=%v", out, err)
+	}
+	// Any other backend error is still an error.
+	fake.identityErr = errors.New("boom")
+	if _, err := p.Execute(context.Background(), []string{"wait", "--url", "/x", "--timeout", "5"}); err == nil || !strings.Contains(err.Error(), "boom") {
+		t.Fatalf("generic error must propagate, got %v", err)
+	}
+}
+
+func TestBrowserNormalizeURL(t *testing.T) {
+	cases := map[string]string{
+		"example.com":           "https://example.com",
+		"http://x":              "http://x",
+		"about:blank":           "about:blank",
+		"data:text/html,<b>x":   "data:text/html,<b>x",
+		"file:///tmp/form.html": "file:///tmp/form.html",
+		" localhost:3000 ":      "https://localhost:3000",
+	}
+	for in, want := range cases {
+		if got := browserNormalizeURL(in); got != want {
+			t.Fatalf("browserNormalizeURL(%q) = %q, want %q", in, got, want)
+		}
+	}
+	fake := withFakeBrowser(t)
+	p := NewBuiltinBrowserPlugin()
+	if _, err := p.Execute(context.Background(), []string{"open", "about:blank"}); err != nil {
+		t.Fatal(err)
+	}
+	if fake.lastTarget != "about:blank" {
+		t.Fatalf("about:blank must reach the backend untouched, got %q", fake.lastTarget)
 	}
 }

@@ -25,6 +25,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -84,11 +85,12 @@ type Session struct {
 	targetID    string
 	sessionID   string
 
-	mu       sync.Mutex
-	console  []ConsoleEntry
-	network  []NetworkEntry
-	requests map[string]NetworkEntry // requestId -> method/url awaiting response
-	loadCh   chan struct{}           // closed on Page.loadEventFired; replaced per navigation
+	mu         sync.Mutex
+	targetGone bool // the page target was closed (user closed the tab/window)
+	console    []ConsoleEntry
+	network    []NetworkEntry
+	requests   map[string]NetworkEntry // requestId -> method/url awaiting response
+	loadCh     chan struct{}           // closed on Page.loadEventFired; replaced per navigation
 }
 
 // NewSession launches a browser, attaches to a fresh page target and enables
@@ -131,9 +133,20 @@ func launchSession(ctx context.Context, headless bool, userDataDir string) (*Ses
 	return s, nil
 }
 
+// ErrPageClosed reports that the page the session drove is gone — the user
+// closed the tab or the window. The session itself stays usable: the next
+// command attaches a fresh blank tab.
+var ErrPageClosed = errors.New("the browser page was closed (tab or window closed by the user); a fresh blank tab is attached on the next command — open or show a URL again")
+
+// cdpSessionNotFound is the DevTools error code for a command sent to a
+// session that no longer exists.
+const cdpSessionNotFound = -32001
+
 // attachFreshTarget creates an about:blank page target, attaches to it and
-// enables Page/Runtime/Network events.
+// enables Page/Runtime/Network events. Target discovery is switched on so
+// the session hears when its page is destroyed.
 func (s *Session) attachFreshTarget(ctx context.Context) error {
+	_, _ = s.conn.call(ctx, "", "Target.setDiscoverTargets", map[string]interface{}{"discover": true})
 	res, err := s.conn.call(ctx, "", "Target.createTarget", map[string]interface{}{"url": "about:blank"})
 	if err != nil {
 		return err
@@ -144,10 +157,9 @@ func (s *Session) attachFreshTarget(ctx context.Context) error {
 	if err := json.Unmarshal(res, &created); err != nil {
 		return err
 	}
-	s.targetID = created.TargetID
 
 	res, err = s.conn.call(ctx, "", "Target.attachToTarget", map[string]interface{}{
-		"targetId": s.targetID, "flatten": true,
+		"targetId": created.TargetID, "flatten": true,
 	})
 	if err != nil {
 		return err
@@ -158,14 +170,56 @@ func (s *Session) attachFreshTarget(ctx context.Context) error {
 	if err := json.Unmarshal(res, &attached); err != nil {
 		return err
 	}
-	s.sessionID = attached.SessionID
+	s.mu.Lock()
+	s.targetID, s.sessionID = created.TargetID, attached.SessionID
+	s.targetGone = false
+	s.loadCh = make(chan struct{})
+	s.mu.Unlock()
 
 	for _, method := range []string{"Page.enable", "Runtime.enable", "Network.enable"} {
-		if _, err := s.conn.call(ctx, s.sessionID, method, nil); err != nil {
+		if _, err := s.conn.call(ctx, attached.SessionID, method, nil); err != nil {
 			return fmt.Errorf("%s: %w", method, err)
 		}
 	}
 	return nil
+}
+
+// call sends a command to the page session. A page the user closed is
+// detected two ways — the detach event marks it, and the browser answers
+// "session not found" — and surfaces as ErrPageClosed; the NEXT call after
+// that attaches a fresh blank tab first, so the tool keeps working.
+func (s *Session) call(ctx context.Context, method string, params interface{}) (json.RawMessage, error) {
+	s.mu.Lock()
+	gone, sid := s.targetGone, s.sessionID
+	s.mu.Unlock()
+	if gone {
+		if err := s.attachFreshTarget(ctx); err != nil {
+			return nil, fmt.Errorf("reattach after the page was closed: %w", err)
+		}
+		s.mu.Lock()
+		sid = s.sessionID
+		s.mu.Unlock()
+	}
+	res, err := s.conn.call(ctx, sid, method, params)
+	var cerr *cdpError
+	if err != nil && errors.As(err, &cerr) && cerr.Code == cdpSessionNotFound {
+		s.mu.Lock()
+		s.targetGone = true
+		s.mu.Unlock()
+		return nil, ErrPageClosed
+	}
+	return res, err
+}
+
+// PageClosed reports whether the page the session drove has been closed
+// and no command has reattached a fresh one yet.
+func (s *Session) PageClosed() bool {
+	if s == nil {
+		return false
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.targetGone
 }
 
 // handleEvent routes CDP events into the capture rings and load waiters.
@@ -177,6 +231,18 @@ func (s *Session) handleEvent(method string, params json.RawMessage, sessionID s
 		return
 	}
 	switch method {
+	case "Target.detachedFromTarget", "Target.targetDestroyed":
+		var ev struct {
+			SessionID string `json:"sessionId"`
+			TargetID  string `json:"targetId"`
+		}
+		_ = json.Unmarshal(params, &ev)
+		s.mu.Lock()
+		if (ev.SessionID != "" && ev.SessionID == s.sessionID) || (ev.TargetID != "" && ev.TargetID == s.targetID) {
+			s.targetGone = true
+		}
+		s.mu.Unlock()
+
 	case "Page.javascriptDialogOpening":
 		// An alert/confirm/prompt blocks the page (and every Runtime.evaluate
 		// with it). Accept it right away and leave a trace in the console
@@ -305,7 +371,7 @@ func (s *Session) Navigate(ctx context.Context, url string) (title, finalURL str
 	loadCh := s.loadCh
 	s.mu.Unlock()
 
-	if _, err := s.conn.call(ctx, s.sessionID, "Page.navigate", map[string]interface{}{"url": url}); err != nil {
+	if _, err := s.call(ctx, "Page.navigate", map[string]interface{}{"url": url}); err != nil {
 		return "", "", err
 	}
 	timer := time.NewTimer(navigateWait)
@@ -523,7 +589,7 @@ func (s *Session) Eval(ctx context.Context, expression string) (string, error) {
 // evalRaw is Runtime.evaluate with returnByValue: results come back as JSON
 // text (strings verbatim, objects marshaled).
 func (s *Session) evalRaw(ctx context.Context, expression string) (string, error) {
-	res, err := s.conn.call(ctx, s.sessionID, "Runtime.evaluate", map[string]interface{}{
+	res, err := s.call(ctx, "Runtime.evaluate", map[string]interface{}{
 		"expression":    expression,
 		"returnByValue": true,
 		"awaitPromise":  true,
@@ -574,7 +640,7 @@ func (s *Session) Screenshot(ctx context.Context, path string) error {
 // captureScreenshot runs Page.captureScreenshot with params and writes the
 // PNG to path.
 func (s *Session) captureScreenshot(ctx context.Context, path string, params map[string]interface{}) error {
-	res, err := s.conn.call(ctx, s.sessionID, "Page.captureScreenshot", params)
+	res, err := s.call(ctx, "Page.captureScreenshot", params)
 	if err != nil {
 		return err
 	}
@@ -840,11 +906,23 @@ func DefaultStatus(ctx context.Context) (running bool, title, url string) {
 	if !s.Alive() {
 		return false, "", ""
 	}
+	if s.PageClosed() {
+		// Never reattach from a status probe; the next real command does.
+		return true, "", ""
+	}
 	title, url, err := s.Identity(ctx)
 	if err != nil {
 		return true, "", ""
 	}
 	return true, title, url
+}
+
+// DefaultPageClosed reports whether the process-wide session's page was
+// closed by the user and not yet replaced. Never launches a browser.
+func DefaultPageClosed() bool {
+	defaultMu.Lock()
+	defer defaultMu.Unlock()
+	return defaultSession.Alive() && defaultSession.PageClosed()
 }
 
 // Shutdown closes the process-wide session if one is running. Wired into the

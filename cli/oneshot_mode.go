@@ -83,6 +83,15 @@ func (cli *ChatCLI) HandleOneShotOrFatal(ctx context.Context, opts *Options) boo
 
 	ctxOne, cancelOne := context.WithTimeout(ctx, opts.Timeout)
 	defer cancelOne()
+	// Tool helper processes (browser, LSP, @proc) must not outlive a
+	// one-shot run: the interactive teardown never runs here, and Fatal
+	// exits without unwinding, so the failure paths tear down explicitly.
+	defer cli.shutdownToolProcesses(ctx)
+	fatal := func(userMsg, logMsg string, err error) {
+		fmt.Fprintln(os.Stderr, userMsg+"\n\n"+i18n.T("oneshot.details_label")+":\n```\n"+err.Error()+"\n```")
+		cli.shutdownToolProcesses(ctx)
+		cli.logger.Fatal(logMsg, zap.Error(err))
+	}
 
 	// Slash-command expansion: `chatcli -p "/review-pr 12"` resolves the
 	// template before mode routing, so a command behaves identically in
@@ -93,8 +102,7 @@ func (cli *ChatCLI) HandleOneShotOrFatal(ctx context.Context, opts *Options) boo
 	if coderRoute {
 		// mode:coder command: same engine and error contract as -p "/coder …".
 		if err := cli.runCoderQuery(ctxOne, input, false); err != nil {
-			fmt.Fprintln(os.Stderr, i18n.T("oneshot.error.coder_failed")+"\n\n"+i18n.T("oneshot.details_label")+":\n```\n"+err.Error()+"\n```")
-			cli.logger.Fatal("Erro no modo coder one-shot", zap.Error(err))
+			fatal(i18n.T("oneshot.error.coder_failed"), "Erro no modo coder one-shot", err)
 		}
 		cli.queueOneShotMemory()
 		return true
@@ -102,19 +110,16 @@ func (cli *ChatCLI) HandleOneShotOrFatal(ctx context.Context, opts *Options) boo
 
 	if strings.HasPrefix(input, "/agent ") || strings.HasPrefix(input, "/run ") {
 		if err := cli.RunAgentOnce(ctxOne, input, opts.AgentAutoExec); err != nil {
-			fmt.Fprintln(os.Stderr, i18n.T("oneshot.error.agent_failed")+"\n\n"+i18n.T("oneshot.details_label")+":\n```\n"+err.Error()+"\n```")
-			cli.logger.Fatal("Erro no modo agente one-shot", zap.Error(err))
+			fatal(i18n.T("oneshot.error.agent_failed"), "Erro no modo agente one-shot", err)
 		}
 	} else if strings.HasPrefix(input, "/coder ") {
 		// coder one-shot (mesma experiência do modo /coder interativo)
 		if err := cli.RunCoderOnce(ctxOne, input); err != nil {
-			fmt.Fprintln(os.Stderr, i18n.T("oneshot.error.coder_failed")+"\n\n"+i18n.T("oneshot.details_label")+":\n```\n"+err.Error()+"\n```")
-			cli.logger.Fatal("Erro no modo coder one-shot", zap.Error(err))
+			fatal(i18n.T("oneshot.error.coder_failed"), "Erro no modo coder one-shot", err)
 		}
 	} else {
 		if err := cli.RunOnce(ctxOne, input, opts.NoAnim, opts.Raw); err != nil {
-			fmt.Fprintln(os.Stderr, i18n.T("oneshot.error.run_failed")+"\n\n"+i18n.T("oneshot.details_label")+":\n```\n"+err.Error()+"\n```")
-			cli.logger.Fatal("Erro no modo one-shot", zap.Error(err))
+			fatal(i18n.T("oneshot.error.run_failed"), "Erro no modo one-shot", err)
 		}
 	}
 
