@@ -87,10 +87,13 @@ type Session struct {
 
 	mu         sync.Mutex
 	targetGone bool // the page target was closed (user closed the tab/window)
-	console    []ConsoleEntry
-	network    []NetworkEntry
-	requests   map[string]NetworkEntry // requestId -> method/url awaiting response
-	loadCh     chan struct{}           // closed on Page.loadEventFired; replaced per navigation
+	// goneReported is set once a command has surfaced ErrPageClosed for
+	// the current closure; only then does the next command reattach.
+	goneReported bool
+	console      []ConsoleEntry
+	network      []NetworkEntry
+	requests     map[string]NetworkEntry // requestId -> method/url awaiting response
+	loadCh       chan struct{}           // closed on Page.loadEventFired; replaced per navigation
 }
 
 // NewSession launches a browser, attaches to a fresh page target and enables
@@ -138,6 +141,11 @@ func launchSession(ctx context.Context, headless bool, userDataDir string) (*Ses
 // command attaches a fresh blank tab.
 var ErrPageClosed = errors.New("the browser page was closed (tab or window closed by the user); a fresh blank tab is attached on the next command — open or show a URL again")
 
+// ErrBrowserClosed reports that the browser process itself is gone — the
+// user quit it. The next open/show launches a new one; a throwaway
+// profile's logins are lost with it.
+var ErrBrowserClosed = errors.New("the browser was closed (quit by the user); the next open or show launches a new one — logins in a throwaway profile are lost, set CHATCLI_BROWSER_PROFILE to keep them")
+
 // cdpSessionNotFound is the DevTools error code for a command sent to a
 // session that no longer exists.
 const cdpSessionNotFound = -32001
@@ -172,7 +180,7 @@ func (s *Session) attachFreshTarget(ctx context.Context) error {
 	}
 	s.mu.Lock()
 	s.targetID, s.sessionID = created.TargetID, attached.SessionID
-	s.targetGone = false
+	s.targetGone, s.goneReported = false, false
 	s.loadCh = make(chan struct{})
 	s.mu.Unlock()
 
@@ -186,14 +194,25 @@ func (s *Session) attachFreshTarget(ctx context.Context) error {
 
 // call sends a command to the page session. A page the user closed is
 // detected two ways — the detach event marks it, and the browser answers
-// "session not found" — and surfaces as ErrPageClosed; the NEXT call after
-// that attaches a fresh blank tab first, so the tool keeps working.
+// "session not found". Either way the FIRST command to notice returns
+// ErrPageClosed, so a polling wait reports the closure instead of quietly
+// carrying on against a blank tab; the command after that attaches a
+// fresh blank tab first, so the tool keeps working.
 func (s *Session) call(ctx context.Context, method string, params interface{}) (json.RawMessage, error) {
 	s.mu.Lock()
-	gone, sid := s.targetGone, s.sessionID
+	gone, reported, sid := s.targetGone, s.goneReported, s.sessionID
+	if gone && !reported {
+		s.goneReported = true
+	}
 	s.mu.Unlock()
+	if gone && !reported {
+		return nil, ErrPageClosed
+	}
 	if gone {
 		if err := s.attachFreshTarget(ctx); err != nil {
+			if !s.Alive() {
+				return nil, ErrBrowserClosed
+			}
 			return nil, fmt.Errorf("reattach after the page was closed: %w", err)
 		}
 		s.mu.Lock()
@@ -204,9 +223,12 @@ func (s *Session) call(ctx context.Context, method string, params interface{}) (
 	var cerr *cdpError
 	if err != nil && errors.As(err, &cerr) && cerr.Code == cdpSessionNotFound {
 		s.mu.Lock()
-		s.targetGone = true
+		s.targetGone, s.goneReported = true, true
 		s.mu.Unlock()
 		return nil, ErrPageClosed
+	}
+	if err != nil && !s.Alive() {
+		return nil, ErrBrowserClosed
 	}
 	return res, err
 }

@@ -102,7 +102,7 @@ Subcommands:
   open {url} [--visible]           navigate to url (launches the browser on first use), returns a page snapshot; --visible puts the window on the user's screen
   show [url]                       make the browser window VISIBLE on the user's screen (relaunches a headless session on the same profile — logins are kept); optionally navigates to url
   hide                             back to headless (window disappears, session and cookies are kept)
-  wait [--url substr] [--text substr] [--selector css|ref] [--timeout secs]   block until the page URL/text contains substr and/or an element exists (default 120s, max 600s) — pair with show for a user login
+  wait [--url substr] [--text substr] [--selector css|ref] [--changed] [--timeout secs]   block until the page URL/text contains substr, an element exists and/or the URL leaves the current one (default 120s, max 600s) — pair with show for a user login; --changed when you cannot predict the landing page
   snapshot [--max N]               current page as text: title, url, numbered interactive elements, visible text
   click {target}                   click an element — target is a [n] ref from the last snapshot or a CSS selector
   type {target} {text} [--submit]  type into an input; --submit presses Enter / submits its form
@@ -147,7 +147,7 @@ func (*BuiltinBrowserPlugin) Schema() string {
 			{"name": "open", "description": "navigate to a URL and return a page snapshot; visible:true puts the window on the user's screen", "examples": []string{`{"cmd":"open","args":{"url":"http://localhost:3000"}}`, `{"cmd":"open","args":{"url":"https://app.example.com/login","visible":true}}`}},
 			{"name": "show", "description": "make the browser window visible to the user (session and logins kept); optional url to navigate", "examples": []string{`{"cmd":"show"}`, `{"cmd":"show","args":{"url":"https://app.example.com/login"}}`}},
 			{"name": "hide", "description": "return to headless (session and logins kept)", "examples": []string{`{"cmd":"hide"}`}},
-			{"name": "wait", "description": "block until the page URL and/or text contains the given substring, up to timeout seconds (default 120, max 600)", "examples": []string{`{"cmd":"wait","args":{"url":"/dashboard","timeout":300}}`, `{"cmd":"wait","args":{"text":"Welcome back"}}`}},
+			{"name": "wait", "description": "block until the page URL/text contains the given substring, an element exists and/or the URL changes (changed:true — for logins whose landing page is unknown), up to timeout seconds (default 120, max 600); a timeout is a result with the current page", "examples": []string{`{"cmd":"wait","args":{"url":"/dashboard","timeout":300}}`, `{"cmd":"wait","args":{"text":"Welcome back"}}`, `{"cmd":"wait","args":{"changed":true,"timeout":300}}`}},
 			{"name": "snapshot", "description": "current page as text with numbered interactive elements", "examples": []string{`{"cmd":"snapshot"}`}},
 			{"name": "click", "description": "click an element by snapshot ref or CSS selector", "examples": []string{`{"cmd":"click","args":{"target":"3"}}`, `{"cmd":"click","args":{"target":"#submit"}}`}},
 			{"name": "type", "description": "type into an input; submit optionally presses Enter", "examples": []string{`{"cmd":"type","args":{"target":"2","text":"golang","submit":true}}`}},
@@ -195,6 +195,8 @@ type browserInvocation struct {
 	timeout int
 	// selector is the `wait` element condition.
 	selector string
+	// changed is the `wait` condition "URL left the one it had at start".
+	changed bool
 	// Second-tier verbs.
 	key    string   // press
 	files  []string // upload
@@ -244,8 +246,10 @@ const (
 	browserMsgHideAttached  = "This session drives the user's own browser (CHATCLI_BROWSER_CDP_URL); its window stays as it is."
 	browserMsgWaitDoneFmt   = "Condition met after %s: %s (%s)"
 	browserMsgWaitTimeout   = "Timed out after %s waiting for %s; page is still: %s (%s). The user may still be busy — ask them, or wait again."
+	browserMsgWaitMovedFmt  = " The page did move during the wait, from %s — the user may already be done (check the snapshot) even though the exact condition did not match."
 	browserMsgPageClosed    = "The browser page was closed before the condition was met — the user closed the tab or window (a site may also have refused to proceed; ask them what they saw). The session is still running: the next open/show attaches a fresh tab."
 	browserMsgPageClosedTag = " [page closed by the user — next open/show attaches a fresh tab]"
+	browserMsgBrowserClosed = "The browser was closed before the condition was met — the user quit it. The next open/show launches a new browser; logins made in a throwaway profile are gone (CHATCLI_BROWSER_PROFILE keeps them)."
 )
 
 // Execute dispatches a @browser invocation.
@@ -364,23 +368,40 @@ func browserWaitBound(seconds int) time.Duration {
 // page state to decide whether to ask the user or wait again.
 func browserCmdWait(ctx context.Context, b BrowserBackend, inv browserInvocation) (string, error) {
 	urlSub, textSub, selector := strings.TrimSpace(inv.url), strings.TrimSpace(inv.text), strings.TrimSpace(inv.selector)
-	if urlSub == "" && textSub == "" && selector == "" {
-		return "", errors.New(`@browser wait: give a condition — {"cmd":"wait","args":{"url":"/dashboard"}}, {"text":"Welcome"} and/or {"selector":"#app-ready"}; to wait for the user without a page condition, ask them with @ask instead`)
+	if urlSub == "" && textSub == "" && selector == "" && !inv.changed {
+		return "", errors.New(`@browser wait: give a condition — {"cmd":"wait","args":{"url":"/dashboard"}}, {"text":"Welcome"}, {"selector":"#app-ready"} and/or {"changed":true} (URL leaves the current one — for logins whose landing page you cannot predict); to wait for the user without a page condition, ask them with @ask instead`)
 	}
 	bound := browserWaitBound(inv.timeout)
 	start := time.Now()
 	deadline := start.Add(bound)
-	var title, url string
+	var title, url, startURL string
+	first := true
 	for {
 		var err error
 		title, url, err = browserPageState(ctx, b, textSub != "")
 		if errors.Is(err, browser.ErrPageClosed) {
 			return browserMsgPageClosed, nil
 		}
+		if errors.Is(err, browser.ErrBrowserClosed) {
+			return browserMsgBrowserClosed, nil
+		}
 		if err != nil {
 			return "", fmt.Errorf("@browser wait: %w", err)
 		}
+		if first {
+			startURL, first = url, false
+			if inv.changed {
+				// The starting page is by definition not the destination.
+				if !browserWaitSleep(ctx) {
+					return "", fmt.Errorf("@browser wait: %w", ctx.Err())
+				}
+				continue
+			}
+		}
 		ok := browserWaitSatisfied(url, title, urlSub, textSub)
+		if ok && inv.changed && url == startURL {
+			ok = false
+		}
 		if ok && selector != "" {
 			ok, err = browserSelectorPresent(ctx, b, selector)
 			if err != nil {
@@ -393,13 +414,25 @@ func browserCmdWait(ctx context.Context, b BrowserBackend, inv browserInvocation
 		if time.Now().After(deadline) {
 			break
 		}
-		select {
-		case <-ctx.Done():
+		if !browserWaitSleep(ctx) {
 			return "", fmt.Errorf("@browser wait: %w", ctx.Err())
-		case <-time.After(browserWaitPoll):
 		}
 	}
-	return fmt.Sprintf(browserMsgWaitTimeout, bound, browserWaitCondition(urlSub, textSub, selector), browserWaitTitle(title), url), nil
+	msg := fmt.Sprintf(browserMsgWaitTimeout, bound, browserWaitCondition(urlSub, textSub, selector, inv.changed), browserWaitTitle(title), url)
+	if startURL != "" && url != startURL {
+		msg += fmt.Sprintf(browserMsgWaitMovedFmt, startURL)
+	}
+	return msg, nil
+}
+
+// browserWaitSleep pauses one poll interval; false when ctx ended first.
+func browserWaitSleep(ctx context.Context) bool {
+	select {
+	case <-ctx.Done():
+		return false
+	case <-time.After(browserWaitPoll):
+		return true
+	}
 }
 
 // browserSelectorPresent reports whether a visible element matches selector
@@ -474,8 +507,11 @@ func browserWaitTitle(state string) string {
 }
 
 // browserWaitCondition renders the condition for the timeout message.
-func browserWaitCondition(urlSub, textSub, selector string) string {
+func browserWaitCondition(urlSub, textSub, selector string, changed bool) string {
 	var parts []string
+	if changed {
+		parts = append(parts, "url to change")
+	}
 	if urlSub != "" {
 		parts = append(parts, fmt.Sprintf("url containing %q", urlSub))
 	}
@@ -681,6 +717,7 @@ func (inv *browserInvocation) applyFlatFlags(flags map[string]string, bools map[
 		inv.timeout = atoiDefault(v, 0)
 	}
 	inv.selector = firstFlag(flags, "selector", "element", "for")
+	inv.changed = bools["changed"] || bools["navigated"] || boolFlag(flags, "changed") || boolFlag(flags, "navigated")
 	inv.key = firstFlag(flags, "key", "keys", "chord")
 	if v := firstFlag(flags, "width", "w"); v != "" {
 		inv.width = atoiDefault(v, 0)
@@ -787,6 +824,8 @@ func (inv *browserInvocation) posWait(positionals []string) {
 	for _, pos := range positionals {
 		if n, err := strconv.Atoi(pos); err == nil && inv.timeout == 0 {
 			inv.timeout = n
+		} else if strings.EqualFold(pos, "changed") || strings.EqualFold(pos, "navigated") {
+			inv.changed = true
 		} else if inv.url == "" && inv.text == "" && inv.selector == "" {
 			inv.url = pos
 		}
@@ -937,6 +976,7 @@ func parseBrowserEnvelope(payload string, inv browserInvocation) (browserInvocat
 	inv.max = getInt("max", 0)
 	inv.timeout = getInt("timeout", getInt("seconds", 0))
 	inv.selector = getStr("selector", "element", "for")
+	inv.changed = getBool("changed") || getBool("navigated")
 	inv.key = getStr("key", "keys", "chord")
 	inv.width = getInt("width", getInt("w", 0))
 	inv.height = getInt("height", getInt("h", 0))

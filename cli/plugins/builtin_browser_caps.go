@@ -78,7 +78,7 @@ func (p *BuiltinBrowserPlugin) DescribeCall(args []string) string {
 	case "hide":
 		return i18n.T("plugins.browser.describe_hide")
 	case "wait":
-		return i18n.T("plugins.browser.describe_wait", describeTrim(browserWaitCondition(inv.url, inv.text, inv.selector)))
+		return i18n.T("plugins.browser.describe_wait", describeTrim(browserWaitCondition(inv.url, inv.text, inv.selector, inv.changed)))
 	case "press":
 		return i18n.T("plugins.browser.describe_press", describeTrim(inv.key))
 	case "hover":

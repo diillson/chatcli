@@ -759,6 +759,11 @@ func TestBrowserExecute_WaitReportsClosedPageAsResult(t *testing.T) {
 	if err != nil || out != browserMsgPageClosed {
 		t.Fatalf("closed page during wait must be a result the model can act on: out=%q err=%v", out, err)
 	}
+	fake.identityErr = browser.ErrBrowserClosed
+	out, err = p.Execute(context.Background(), []string{"wait", "--url", "/dashboard", "--timeout", "5"})
+	if err != nil || out != browserMsgBrowserClosed {
+		t.Fatalf("quit browser during wait must be a result: out=%q err=%v", out, err)
+	}
 	// Any other backend error is still an error.
 	fake.identityErr = errors.New("boom")
 	if _, err := p.Execute(context.Background(), []string{"wait", "--url", "/x", "--timeout", "5"}); err == nil || !strings.Contains(err.Error(), "boom") {
@@ -787,5 +792,37 @@ func TestBrowserNormalizeURL(t *testing.T) {
 	}
 	if fake.lastTarget != "about:blank" {
 		t.Fatalf("about:blank must reach the backend untouched, got %q", fake.lastTarget)
+	}
+}
+
+func TestBrowserExecute_WaitChangedAndTimeoutMentionsMove(t *testing.T) {
+	fake := withFakeBrowser(t)
+	p := NewBuiltinBrowserPlugin()
+
+	// --changed: the URL at the first poll is the baseline; the second
+	// poll differs, so the condition is met.
+	fake.urls = []string{"https://app/login", "https://app/login", "https://app/"}
+	out, err := p.Execute(context.Background(), []string{`{"cmd":"wait","args":{"changed":true,"timeout":5}}`})
+	if err != nil || !strings.Contains(out, "Condition met") || !strings.Contains(out, "https://app/") {
+		t.Fatalf("wait changed: out=%q err=%v", out, err)
+	}
+	for _, args := range [][]string{{"wait", "--changed", "--timeout", "5"}, {"wait", "changed", "5"}} {
+		inv, err := parseBrowserInvocation(args)
+		if err != nil || !inv.changed || inv.timeout != 5 {
+			t.Fatalf("%v: changed=%t timeout=%d err=%v", args, inv.changed, inv.timeout, err)
+		}
+	}
+
+	// Timeout with the page having moved: the message says where it came from.
+	fake.urls = []string{"https://app/login", "https://app/"}
+	out, err = p.Execute(context.Background(), []string{`{"cmd":"wait","args":{"url":"/settings","timeout":1}}`})
+	if err != nil || !strings.Contains(out, "Timed out") || !strings.Contains(out, "did move") || !strings.Contains(out, "https://app/login") {
+		t.Fatalf("timeout after move: out=%q err=%v", out, err)
+	}
+	// Timeout without movement stays terse.
+	fake.urls = []string{"https://app/login"}
+	out, err = p.Execute(context.Background(), []string{`{"cmd":"wait","args":{"url":"/settings","timeout":1}}`})
+	if err != nil || strings.Contains(out, "did move") {
+		t.Fatalf("timeout without move: out=%q err=%v", out, err)
 	}
 }

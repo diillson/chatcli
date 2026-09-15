@@ -122,6 +122,22 @@ func TestHandleEvent_DetachMarksPageClosed(t *testing.T) {
 	if !s.PageClosed() {
 		t.Fatal("detachedFromTarget for our session must mark the page closed")
 	}
+	// The first command after the event REPORTS the closure — a polling
+	// wait must see it rather than silently continue on a blank tab.
+	gone.Store(true)
+	if _, _, err := s.Identity(ctx); !errors.Is(err, ErrPageClosed) {
+		t.Fatalf("first call after detach must return ErrPageClosed, got %v", err)
+	}
+	if created.Load() != 1 {
+		t.Fatalf("reporting must not reattach yet, created=%d", created.Load())
+	}
+	// The command after that reattaches and works.
+	if _, _, err := s.Identity(ctx); err != nil {
+		t.Fatalf("second call after detach must reattach: %v", err)
+	}
+	if created.Load() != 2 || s.PageClosed() {
+		t.Fatalf("expected a fresh target, created=%d closed=%t", created.Load(), s.PageClosed())
+	}
 	// An event for another session/target is ignored.
 	s.mu.Lock()
 	s.targetGone = false
@@ -131,16 +147,18 @@ func TestHandleEvent_DetachMarksPageClosed(t *testing.T) {
 	if s.PageClosed() {
 		t.Fatal("events for other targets must not mark the page closed")
 	}
-	// Marked closed by event: the next command reattaches before talking
-	// to the page, and never sees -32001.
-	s.mu.Lock()
-	s.targetGone = true
-	s.mu.Unlock()
+}
+
+func TestCall_BrowserGoneBecomesErrBrowserClosed(t *testing.T) {
+	s, _, gone, _ := closedPageSession(t)
+	ctx := context.Background()
 	gone.Store(true)
-	if _, _, err := s.Identity(ctx); err != nil {
-		t.Fatalf("reattach on first call after detach: %v", err)
+	if _, _, err := s.Identity(ctx); !errors.Is(err, ErrPageClosed) {
+		t.Fatalf("want ErrPageClosed first, got %v", err)
 	}
-	if created.Load() != 2 {
-		t.Fatalf("expected a fresh target, created=%d", created.Load())
+	// The browser goes away entirely before the reattach.
+	s.conn.close()
+	if _, _, err := s.Identity(ctx); !errors.Is(err, ErrBrowserClosed) {
+		t.Fatalf("reattach against a dead browser must be ErrBrowserClosed, got %v", err)
 	}
 }
