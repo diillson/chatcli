@@ -15,10 +15,20 @@ import (
 
 // browserReadOnlyCmds are the invocations without page side effects beyond
 // navigation itself. `open` is classified like @webfetch (a fetch); `click`,
-// `type` and `eval` can trigger real actions on remote sites and therefore
-// go through the security gate.
+// `type`, `press`, `hover`, `select`, `upload`, `eval` and `cookies --clear`
+// can trigger real actions on remote sites (or log the user out) and
+// therefore go through the security gate.
 var browserReadOnlyCmds = map[string]bool{
 	"open":       true,
+	"show":       true,
+	"hide":       true,
+	"wait":       true,
+	"html":       true,
+	"pdf":        true,
+	"resize":     true,
+	"tabs":       true,
+	"tab":        true,
+	"cookies":    true, // listing only; --clear is checked below
 	"snapshot":   true,
 	"screenshot": true,
 	"console":    true,
@@ -34,6 +44,9 @@ var browserReadOnlyCmds = map[string]bool{
 func (p *BuiltinBrowserPlugin) IsReadOnly(args []string) bool {
 	inv, err := parseBrowserInvocation(args)
 	if err != nil {
+		return false
+	}
+	if inv.cmd == "cookies" && inv.clear {
 		return false
 	}
 	return browserReadOnlyCmds[inv.cmd]
@@ -53,7 +66,42 @@ func (p *BuiltinBrowserPlugin) DescribeCall(args []string) string {
 	}
 	switch inv.cmd {
 	case "open":
+		if inv.visibleSet && inv.visible {
+			return i18n.T("plugins.browser.describe_show", describeTrim(inv.url))
+		}
 		return i18n.T("plugins.browser.describe_open", describeTrim(inv.url))
+	case "show":
+		if inv.url == "" {
+			return i18n.T("plugins.browser.describe_show_bare")
+		}
+		return i18n.T("plugins.browser.describe_show", describeTrim(inv.url))
+	case "hide":
+		return i18n.T("plugins.browser.describe_hide")
+	case "wait":
+		return i18n.T("plugins.browser.describe_wait", describeTrim(browserWaitCondition(inv.url, inv.text, inv.selector)))
+	case "press":
+		return i18n.T("plugins.browser.describe_press", describeTrim(inv.key))
+	case "hover":
+		return i18n.T("plugins.browser.describe_hover", describeTrim(inv.target))
+	case "select":
+		return i18n.T("plugins.browser.describe_select", describeTrim(inv.target))
+	case "upload":
+		return i18n.T("plugins.browser.describe_upload", describeTrim(inv.target))
+	case "html":
+		return i18n.T("plugins.browser.describe_html")
+	case "pdf":
+		return i18n.T("plugins.browser.describe_pdf")
+	case "resize":
+		return i18n.T("plugins.browser.describe_resize")
+	case "tabs":
+		return i18n.T("plugins.browser.describe_tabs")
+	case "tab":
+		return i18n.T("plugins.browser.describe_tab", describeTrim(inv.target))
+	case "cookies":
+		if inv.clear {
+			return i18n.T("plugins.browser.describe_cookies_clear")
+		}
+		return i18n.T("plugins.browser.describe_cookies")
 	case "snapshot":
 		return i18n.T("plugins.browser.describe_snapshot")
 	case "click":

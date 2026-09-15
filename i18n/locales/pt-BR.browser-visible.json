@@ -1,0 +1,17 @@
+{
+  "plugins.browser.describe_show": "Navegador: mostrando a janela para você %s",
+  "plugins.browser.describe_hide": "Navegador: escondendo a janela (headless)",
+  "plugins.browser.describe_wait": "Navegador: aguardando a página (%s)",
+  "plugins.browser.describe_press": "Navegador: pressionando %s",
+  "plugins.browser.describe_hover": "Navegador: passando o mouse sobre %s",
+  "plugins.browser.describe_select": "Navegador: selecionando uma opção em %s",
+  "plugins.browser.describe_upload": "Navegador: anexando arquivo(s) em %s",
+  "plugins.browser.describe_html": "Navegador: lendo o HTML da página",
+  "plugins.browser.describe_pdf": "Navegador: salvando a página como PDF",
+  "plugins.browser.describe_resize": "Navegador: redimensionando a viewport",
+  "plugins.browser.describe_tabs": "Navegador: listando abas",
+  "plugins.browser.describe_tab": "Navegador: mudando para a aba %s",
+  "plugins.browser.describe_cookies": "Navegador: listando cookies",
+  "plugins.browser.describe_cookies_clear": "Navegador: limpando todos os cookies",
+  "plugins.browser.describe_show_bare": "Navegador: mostrando a janela para você"
+}

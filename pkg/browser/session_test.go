@@ -172,3 +172,48 @@ func refOf(t *testing.T, snapshot, label string) string {
 	t.Fatalf("no snapshot line with %q", label)
 	return ""
 }
+
+// TestRelaunchKeepsProfileAndPage exercises the visibility flip machinery
+// against a real browser without opening a window: relaunching headless →
+// headless still proves the profile directory is reused (not deleted) and
+// the page is restored.
+func TestRelaunchKeepsProfileAndPage(t *testing.T) {
+	first := newE2ESession(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+
+	dataURL := "data:text/html," + url.PathEscape(e2ePage)
+	if _, _, err := first.Navigate(ctx, dataURL); err != nil {
+		t.Fatalf("navigate: %v", err)
+	}
+	dir := first.ProfileDir()
+	if dir == "" || !first.ephemeral {
+		t.Fatalf("e2e session must own a throwaway profile, got %q", dir)
+	}
+
+	second, err := relaunch(ctx, first, true)
+	if err != nil {
+		t.Fatalf("relaunch: %v", err)
+	}
+	t.Cleanup(func() { second.Close(context.Background()) })
+	if second.ProfileDir() != dir {
+		t.Fatalf("relaunch must reuse the profile dir: %q vs %q", second.ProfileDir(), dir)
+	}
+	if _, err := os.Stat(dir); err != nil {
+		t.Fatalf("profile dir must survive the flip: %v", err)
+	}
+	if !second.ephemeral {
+		t.Fatal("throwaway ownership must transfer to the new session")
+	}
+	title, _, err := second.Identity(ctx)
+	if err != nil || title != "ChatCLI E2E" {
+		t.Fatalf("page must be restored after relaunch: title=%q err=%v", title, err)
+	}
+	if first.Alive() {
+		t.Fatal("previous session must be closed")
+	}
+	second.Close(ctx)
+	if _, err := os.Stat(dir); !os.IsNotExist(err) {
+		t.Fatalf("throwaway profile must be removed on final close, stat err=%v", err)
+	}
+}
