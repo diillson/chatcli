@@ -12,7 +12,10 @@
  * browser announces at startup, so the only requirement is a local Chrome,
  * Chromium, Brave or Edge binary — no driver, no downloaded runtime, no new
  * dependency. CHATCLI_BROWSER_BIN overrides discovery; headless is the
- * default and CHATCLI_BROWSER_HEADLESS=false opens a visible window.
+ * default and CHATCLI_BROWSER_HEADLESS=false opens a visible window for the
+ * whole process. Visibility is also switchable per call (see Mode in
+ * session.go): the tool can surface the window on demand so the user logs
+ * in or interacts, then hide it again — the profile survives the flip.
  */
 package browser
 
@@ -97,17 +100,29 @@ func headlessEnabled() bool {
 	return true
 }
 
-// launchChrome starts the browser with a throwaway profile and returns the
-// running command plus the DevTools websocket URL it announced. The caller
-// owns both the process and the userDataDir.
-func launchChrome(ctx context.Context) (cmd *exec.Cmd, wsURL, userDataDir string, err error) {
+// launchChrome starts the browser and returns the running command plus the
+// DevTools websocket URL it announced. userDataDir is the profile to run
+// on; empty creates a throwaway one (reported back so the caller owns it).
+// headless picks --headless=new; the caller decides from the env default
+// or an explicit per-call Mode.
+func launchChrome(ctx context.Context, headless bool, userDataDir string) (cmd *exec.Cmd, wsURL string, dataDir string, err error) {
 	bin, err := locateChrome()
 	if err != nil {
 		return nil, "", "", err
 	}
-	userDataDir, err = os.MkdirTemp("", "chatcli-browser-*")
-	if err != nil {
+	ephemeral := userDataDir == ""
+	if ephemeral {
+		userDataDir, err = os.MkdirTemp("", "chatcli-browser-*")
+		if err != nil {
+			return nil, "", "", fmt.Errorf("create browser profile dir: %w", err)
+		}
+	} else if err := os.MkdirAll(userDataDir, 0o700); err != nil {
 		return nil, "", "", fmt.Errorf("create browser profile dir: %w", err)
+	}
+	cleanup := func() {
+		if ephemeral {
+			_ = os.RemoveAll(userDataDir)
+		}
 	}
 
 	args := []string{
@@ -121,18 +136,18 @@ func launchChrome(ctx context.Context) (cmd *exec.Cmd, wsURL, userDataDir string
 		"--mute-audio",
 		"about:blank",
 	}
-	if headlessEnabled() {
+	if headless {
 		args = append([]string{"--headless=new"}, args...)
 	}
 
 	cmd = exec.Command(bin, args...) // #nosec G204 -- binary from curated candidates or operator-set CHATCLI_BROWSER_BIN
 	stderr, err := cmd.StderrPipe()
 	if err != nil {
-		_ = os.RemoveAll(userDataDir)
+		cleanup()
 		return nil, "", "", err
 	}
 	if err := cmd.Start(); err != nil {
-		_ = os.RemoveAll(userDataDir)
+		cleanup()
 		return nil, "", "", fmt.Errorf("start browser: %w", err)
 	}
 
@@ -140,7 +155,10 @@ func launchChrome(ctx context.Context) (cmd *exec.Cmd, wsURL, userDataDir string
 	if err != nil {
 		_ = cmd.Process.Kill()
 		_, _ = cmd.Process.Wait()
-		_ = os.RemoveAll(userDataDir)
+		cleanup()
+		if !ephemeral {
+			err = fmt.Errorf("%w (profile %s — if another browser is already running on it, close that window first)", err, userDataDir)
+		}
 		return nil, "", "", err
 	}
 	// Keep draining stderr so the browser never blocks on a full pipe.

@@ -1,0 +1,17 @@
+{
+  "plugins.browser.describe_show": "Browser: showing the window to you %s",
+  "plugins.browser.describe_hide": "Browser: hiding the window (headless)",
+  "plugins.browser.describe_wait": "Browser: waiting for the page (%s)",
+  "plugins.browser.describe_press": "Browser: pressing %s",
+  "plugins.browser.describe_hover": "Browser: hovering %s",
+  "plugins.browser.describe_select": "Browser: selecting an option in %s",
+  "plugins.browser.describe_upload": "Browser: attaching file(s) to %s",
+  "plugins.browser.describe_html": "Browser: reading page HTML",
+  "plugins.browser.describe_pdf": "Browser: saving the page as PDF",
+  "plugins.browser.describe_resize": "Browser: resizing the viewport",
+  "plugins.browser.describe_tabs": "Browser: listing tabs",
+  "plugins.browser.describe_tab": "Browser: switching to tab %s",
+  "plugins.browser.describe_cookies": "Browser: listing cookies",
+  "plugins.browser.describe_cookies_clear": "Browser: clearing all cookies",
+  "plugins.browser.describe_show_bare": "Browser: showing the window to you"
+}

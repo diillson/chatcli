@@ -58,11 +58,29 @@ type NetworkEntry struct {
 	Type   string // Document|XHR|Fetch|Script|…
 }
 
+// Mode is the visibility a caller asks for when acquiring the session.
+type Mode int
+
+const (
+	// ModeDefault keeps a running session as it is; a fresh launch follows
+	// CHATCLI_BROWSER_HEADLESS.
+	ModeDefault Mode = iota
+	// ModeVisible wants a real window on the user's screen — relaunching a
+	// headless session on the same profile if needed.
+	ModeVisible
+	// ModeHeadless wants no window — relaunching a visible session on the
+	// same profile if needed.
+	ModeHeadless
+)
+
 // Session drives one page in one launched browser.
 type Session struct {
 	cmd         *exec.Cmd
 	conn        *cdpConn
 	userDataDir string
+	ephemeral   bool // profile dir is ours to delete on close
+	headless    bool
+	attached    bool // the user's own browser (CDPURLEnv): never killed or relaunched
 	targetID    string
 	sessionID   string
 
@@ -76,13 +94,26 @@ type Session struct {
 // NewSession launches a browser, attaches to a fresh page target and enables
 // the domains the actions need.
 func NewSession(ctx context.Context) (*Session, error) {
-	cmd, wsURL, dataDir, err := launchChrome(ctx)
+	if ep := attachURL(); ep != "" {
+		return attachSession(ctx, ep)
+	}
+	return launchSession(ctx, headlessEnabled(), persistentProfileDir())
+}
+
+// launchSession launches a browser with the given visibility on userDataDir
+// ("" = throwaway profile owned by the session) and attaches to a fresh
+// page target.
+func launchSession(ctx context.Context, headless bool, userDataDir string) (*Session, error) {
+	ephemeral := userDataDir == ""
+	cmd, wsURL, dataDir, err := launchChrome(ctx, headless, userDataDir)
 	if err != nil {
 		return nil, err
 	}
 	s := &Session{
 		cmd:         cmd,
 		userDataDir: dataDir,
+		ephemeral:   ephemeral,
+		headless:    headless,
 		requests:    make(map[string]NetworkEntry),
 		loadCh:      make(chan struct{}),
 	}
@@ -139,10 +170,32 @@ func (s *Session) attachFreshTarget(ctx context.Context) error {
 
 // handleEvent routes CDP events into the capture rings and load waiters.
 func (s *Session) handleEvent(method string, params json.RawMessage, sessionID string) {
-	if sessionID != "" && sessionID != s.sessionID {
+	s.mu.Lock()
+	current := s.sessionID
+	s.mu.Unlock()
+	if sessionID != "" && sessionID != current {
 		return
 	}
 	switch method {
+	case "Page.javascriptDialogOpening":
+		// An alert/confirm/prompt blocks the page (and every Runtime.evaluate
+		// with it). Accept it right away and leave a trace in the console
+		// ring so the model knows the page raised one.
+		var ev struct {
+			Type          string `json:"type"`
+			Message       string `json:"message"`
+			DefaultPrompt string `json:"defaultPrompt"`
+		}
+		_ = json.Unmarshal(params, &ev)
+		s.appendConsole(ConsoleEntry{Kind: "dialog", Text: fmt.Sprintf("%s: %s (auto-accepted)", ev.Type, ev.Message)})
+		go func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			_, _ = s.conn.call(ctx, current, "Page.handleJavaScriptDialog", map[string]interface{}{
+				"accept": true, "promptText": ev.DefaultPrompt,
+			})
+		}()
+
 	case "Page.loadEventFired":
 		s.mu.Lock()
 		select {
@@ -515,7 +568,13 @@ func (s *Session) evalRaw(ctx context.Context, expression string) (string, error
 
 // Screenshot captures the viewport as PNG into path (directories created).
 func (s *Session) Screenshot(ctx context.Context, path string) error {
-	res, err := s.conn.call(ctx, s.sessionID, "Page.captureScreenshot", map[string]interface{}{"format": "png"})
+	return s.captureScreenshot(ctx, path, map[string]interface{}{"format": "png"})
+}
+
+// captureScreenshot runs Page.captureScreenshot with params and writes the
+// PNG to path.
+func (s *Session) captureScreenshot(ctx context.Context, path string, params map[string]interface{}) error {
+	res, err := s.conn.call(ctx, s.sessionID, "Page.captureScreenshot", params)
 	if err != nil {
 		return err
 	}
@@ -559,17 +618,75 @@ func (s *Session) NetworkTail(n int) []NetworkEntry {
 	return out
 }
 
-// Close tears down the connection, the browser process and its throwaway
-// profile. Idempotent; ctx bounds the polite Browser.close attempt (the
-// process is killed regardless).
+// Visible reports whether the session runs with a window on screen.
+func (s *Session) Visible() bool { return s != nil && !s.headless }
+
+// Attached reports whether the session drives the user's own browser
+// (CDPURLEnv) rather than one ChatCLI launched.
+func (s *Session) Attached() bool { return s != nil && s.attached }
+
+// ProfileDir is the user-data directory the session runs on.
+func (s *Session) ProfileDir() string {
+	if s == nil {
+		return ""
+	}
+	return s.userDataDir
+}
+
+// Close tears down the connection, the browser process and (when the
+// profile is a throwaway) its directory. Idempotent; ctx bounds the polite
+// Browser.close attempt, which is given a moment to flush cookies and
+// storage to disk before the process is killed — a persistent or reused
+// profile must not lose the login the user just performed.
 func (s *Session) Close(ctx context.Context) {
+	if s.attached {
+		s.detach(ctx)
+		return
+	}
 	if s.conn != nil {
 		closeCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
-		_, _ = s.conn.call(closeCtx, "", "Browser.close", nil)
+		_, closeErr := s.conn.call(closeCtx, "", "Browser.close", nil)
 		cancel()
 		s.conn.close()
+		if closeErr == nil {
+			s.awaitExit(gracefulExitWait)
+		}
 	}
 	s.killBrowser()
+}
+
+// detach closes only the tab the session opened in the user's browser and
+// drops the connection; the browser itself is theirs and stays up.
+func (s *Session) detach(ctx context.Context) {
+	if s.conn == nil {
+		return
+	}
+	if s.targetID != "" {
+		closeCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+		_, _ = s.conn.call(closeCtx, "", "Target.closeTarget", map[string]interface{}{"targetId": s.targetID})
+		cancel()
+	}
+	s.conn.close()
+}
+
+// gracefulExitWait bounds how long Close lets the browser exit on its own
+// after Browser.close before killing it.
+const gracefulExitWait = 5 * time.Second
+
+// awaitExit waits up to d for the browser process to exit by itself.
+func (s *Session) awaitExit(d time.Duration) {
+	if s.cmd == nil || s.cmd.Process == nil {
+		return
+	}
+	done := make(chan struct{})
+	go func() {
+		_, _ = s.cmd.Process.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(d):
+	}
 }
 
 func (s *Session) killBrowser() {
@@ -577,7 +694,7 @@ func (s *Session) killBrowser() {
 		_ = s.cmd.Process.Kill()
 		_, _ = s.cmd.Process.Wait()
 	}
-	if s.userDataDir != "" {
+	if s.userDataDir != "" && s.ephemeral {
 		_ = os.RemoveAll(s.userDataDir)
 	}
 }
@@ -605,20 +722,113 @@ var (
 // Acquire returns the process-wide session, launching the browser on first
 // use or after a crash/close.
 func Acquire(ctx context.Context) (*Session, error) {
+	return AcquireMode(ctx, ModeDefault)
+}
+
+// AcquireMode returns the process-wide session in the requested visibility.
+// A running session whose visibility differs is relaunched on the SAME
+// profile directory and brought back to the page it was on, so cookies and
+// logins survive the flip: the agent can surface the window for the user to
+// sign in, then keep driving the authenticated session headless.
+func AcquireMode(ctx context.Context, mode Mode) (*Session, error) {
 	defaultMu.Lock()
 	defer defaultMu.Unlock()
 	if defaultSession.Alive() {
-		return defaultSession, nil
+		if mode == ModeDefault || defaultSession.attached || defaultSession.headless == (mode == ModeHeadless) {
+			return defaultSession, nil
+		}
+		s, err := relaunch(ctx, defaultSession, mode == ModeHeadless)
+		if err != nil {
+			return nil, err
+		}
+		defaultSession = s
+		return s, nil
 	}
 	if defaultSession != nil {
 		defaultSession.Close(ctx)
 	}
-	s, err := NewSession(ctx)
+	var s *Session
+	var err error
+	if ep := attachURL(); ep != "" {
+		s, err = attachSession(ctx, ep)
+	} else {
+		headless := headlessEnabled()
+		switch mode {
+		case ModeVisible:
+			headless = false
+		case ModeHeadless:
+			headless = true
+		}
+		s, err = launchSession(ctx, headless, persistentProfileDir())
+	}
 	if err != nil {
 		return nil, err
 	}
 	defaultSession = s
 	return s, nil
+}
+
+// relaunch closes prev and starts a new session with the given visibility on
+// prev's profile directory, then restores the page prev was showing. On
+// launch failure the profile is kept (a throwaway one is adopted by nobody,
+// so it is removed) and the error returned; prev is closed either way.
+func relaunch(ctx context.Context, prev *Session, headless bool) (*Session, error) {
+	_, prevURL, _ := prev.Identity(ctx)
+	dir, ephemeral := prev.userDataDir, prev.ephemeral
+	prev.ephemeral = false // the new session inherits the directory
+	prev.Close(ctx)
+
+	s, err := launchSession(ctx, headless, dir)
+	if err != nil {
+		if ephemeral {
+			_ = os.RemoveAll(dir)
+		}
+		return nil, fmt.Errorf("relaunch browser: %w", err)
+	}
+	s.ephemeral = ephemeral
+	if prevURL != "" && prevURL != "about:blank" {
+		if _, _, err := s.Navigate(ctx, prevURL); err != nil {
+			// The session is usable even if the old page will not load again.
+			s.appendConsole(ConsoleEntry{Kind: "warn", Text: "chatcli: could not restore " + prevURL + " after relaunch: " + err.Error()})
+		}
+	}
+	return s, nil
+}
+
+// DefaultAlive reports whether a process-wide session is running. Never
+// launches a browser.
+func DefaultAlive() bool {
+	defaultMu.Lock()
+	defer defaultMu.Unlock()
+	return defaultSession.Alive()
+}
+
+// DefaultVisible reports whether the process-wide session is alive and
+// showing a window. Never launches a browser.
+func DefaultVisible() bool {
+	defaultMu.Lock()
+	defer defaultMu.Unlock()
+	return defaultSession.Alive() && defaultSession.Visible()
+}
+
+// DefaultAttached reports whether the process-wide session drives the
+// user's own browser. Never launches a browser.
+func DefaultAttached() bool {
+	defaultMu.Lock()
+	defer defaultMu.Unlock()
+	return defaultSession.Alive() && defaultSession.Attached()
+}
+
+// DefaultProfile reports the profile directory the process-wide session
+// runs on and whether it persists across ChatCLI runs ("" when no session
+// or when attached to the user's browser).
+func DefaultProfile() (dir string, persistent bool) {
+	defaultMu.Lock()
+	defer defaultMu.Unlock()
+	if !defaultSession.Alive() || defaultSession.attached {
+		return "", false
+	}
+	return defaultSession.userDataDir, !defaultSession.ephemeral
 }
 
 // DefaultStatus reports whether the process-wide session is alive and, when
