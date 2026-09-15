@@ -1,5 +1,18 @@
 # Changelog
 
+## [1.205.0](https://github.com/diillson/chatcli/compare/v1.204.0...v1.205.0) (2026-09-15)
+
+
+### Features
+
+* **browser:** visible hand-off for user logins, attach to the user's own Chrome and second-tier verbs ([#1598](https://github.com/diillson/chatcli/issues/1598)) ([988b859](https://github.com/diillson/chatcli/commit/988b8597f71b20ab98b5aa82c3dfa8f85fdd34ce))
+
+
+### Bug Fixes
+
+* **browser:** report a closed page before reattaching, and a quit browser as its own result ([#1601](https://github.com/diillson/chatcli/issues/1601)) ([1500b8d](https://github.com/diillson/chatcli/commit/1500b8d9a4fdaf051b91eb1fa30d976f71127741))
+* **browser:** survive a closed tab, pass Google's automation check and tear the browser down after one-shot runs ([#1600](https://github.com/diillson/chatcli/issues/1600)) ([92e5d08](https://github.com/diillson/chatcli/commit/92e5d084d255f869040a74fbd7cc529d8209f278))
+
 ## [1.204.0](https://github.com/diillson/chatcli/compare/v1.203.0...v1.204.0) (2026-09-14)
 
 
