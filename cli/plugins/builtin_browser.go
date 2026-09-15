@@ -244,6 +244,8 @@ const (
 	browserMsgHideAttached  = "This session drives the user's own browser (CHATCLI_BROWSER_CDP_URL); its window stays as it is."
 	browserMsgWaitDoneFmt   = "Condition met after %s: %s (%s)"
 	browserMsgWaitTimeout   = "Timed out after %s waiting for %s; page is still: %s (%s). The user may still be busy — ask them, or wait again."
+	browserMsgPageClosed    = "The browser page was closed before the condition was met — the user closed the tab or window (a site may also have refused to proceed; ask them what they saw). The session is still running: the next open/show attaches a fresh tab."
+	browserMsgPageClosedTag = " [page closed by the user — next open/show attaches a fresh tab]"
 )
 
 // Execute dispatches a @browser invocation.
@@ -372,6 +374,9 @@ func browserCmdWait(ctx context.Context, b BrowserBackend, inv browserInvocation
 	for {
 		var err error
 		title, url, err = browserPageState(ctx, b, textSub != "")
+		if errors.Is(err, browser.ErrPageClosed) {
+			return browserMsgPageClosed, nil
+		}
 		if err != nil {
 			return "", fmt.Errorf("@browser wait: %w", err)
 		}
@@ -488,13 +493,26 @@ func browserCmdOpen(ctx context.Context, b BrowserBackend, inv browserInvocation
 	if inv.url == "" {
 		return "", errors.New(`@browser open: missing url. Example: {"cmd":"open","args":{"url":"http://localhost:3000"}}`)
 	}
-	if !strings.Contains(inv.url, "://") {
-		inv.url = "https://" + inv.url
-	}
+	inv.url = browserNormalizeURL(inv.url)
 	if _, _, err := b.Navigate(ctx, inv.url); err != nil {
 		return "", fmt.Errorf("@browser open: %w", err)
 	}
 	return b.Snapshot(ctx, inv.max)
+}
+
+// browserNormalizeURL defaults a bare host to https:// while leaving
+// scheme-carrying URLs (about:blank, data:, file:, javascript:) alone.
+func browserNormalizeURL(raw string) string {
+	u := strings.TrimSpace(raw)
+	if strings.Contains(u, "://") {
+		return u
+	}
+	for _, scheme := range []string{"about:", "data:", "file:", "javascript:", "blob:", "chrome:"} {
+		if strings.HasPrefix(strings.ToLower(u), scheme) {
+			return u
+		}
+	}
+	return "https://" + u
 }
 
 // browserCmdClick clicks and returns the resulting page (the click may have
@@ -615,6 +633,9 @@ var browserStatus = func(ctx context.Context) (string, error) {
 		tag = browserMsgAttachedTag
 	} else if dir, persistent := browser.DefaultProfile(); persistent {
 		tag += fmt.Sprintf(browserMsgProfileFmt, dir)
+	}
+	if browser.DefaultPageClosed() {
+		tag += browserMsgPageClosedTag
 	}
 	if title == "" && url == "" {
 		return browserMsgNoIdentity + tag, nil
