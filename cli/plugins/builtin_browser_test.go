@@ -759,6 +759,11 @@ func TestBrowserExecute_WaitReportsClosedPageAsResult(t *testing.T) {
 	if err != nil || out != browserMsgPageClosed {
 		t.Fatalf("closed page during wait must be a result the model can act on: out=%q err=%v", out, err)
 	}
+	fake.identityErr = browser.ErrBrowserClosed
+	out, err = p.Execute(context.Background(), []string{"wait", "--url", "/dashboard", "--timeout", "5"})
+	if err != nil || out != browserMsgBrowserClosed {
+		t.Fatalf("quit browser during wait must be a result: out=%q err=%v", out, err)
+	}
 	// Any other backend error is still an error.
 	fake.identityErr = errors.New("boom")
 	if _, err := p.Execute(context.Background(), []string{"wait", "--url", "/x", "--timeout", "5"}); err == nil || !strings.Contains(err.Error(), "boom") {

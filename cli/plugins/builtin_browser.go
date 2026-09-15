@@ -246,6 +246,7 @@ const (
 	browserMsgWaitTimeout   = "Timed out after %s waiting for %s; page is still: %s (%s). The user may still be busy — ask them, or wait again."
 	browserMsgPageClosed    = "The browser page was closed before the condition was met — the user closed the tab or window (a site may also have refused to proceed; ask them what they saw). The session is still running: the next open/show attaches a fresh tab."
 	browserMsgPageClosedTag = " [page closed by the user — next open/show attaches a fresh tab]"
+	browserMsgBrowserClosed = "The browser was closed before the condition was met — the user quit it. The next open/show launches a new browser; logins made in a throwaway profile are gone (CHATCLI_BROWSER_PROFILE keeps them)."
 )
 
 // Execute dispatches a @browser invocation.
@@ -376,6 +377,9 @@ func browserCmdWait(ctx context.Context, b BrowserBackend, inv browserInvocation
 		title, url, err = browserPageState(ctx, b, textSub != "")
 		if errors.Is(err, browser.ErrPageClosed) {
 			return browserMsgPageClosed, nil
+		}
+		if errors.Is(err, browser.ErrBrowserClosed) {
+			return browserMsgBrowserClosed, nil
 		}
 		if err != nil {
 			return "", fmt.Errorf("@browser wait: %w", err)
