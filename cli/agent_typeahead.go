@@ -17,6 +17,7 @@
 package cli
 
 import (
+	"fmt"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -24,6 +25,121 @@ import (
 	"github.com/diillson/chatcli/cli/metrics"
 	"github.com/diillson/chatcli/i18n"
 )
+
+// salvagedTypeaheadCap bounds the rescue buffer, same order of magnitude as
+// the stdin channel itself: a stuck consumer must not grow it without limit.
+const salvagedTypeaheadCap = 20
+
+// drainLinesNonBlocking empties a line channel without waiting.
+func drainLinesNonBlocking(ch <-chan string) []string {
+	if ch == nil {
+		return nil
+	}
+	var out []string
+	for {
+		select {
+		case line, ok := <-ch:
+			if !ok {
+				return out
+			}
+			out = append(out, line)
+		default:
+			return out
+		}
+	}
+}
+
+// isPromptAnswerShaped reports whether a line is one of the short answers
+// the security prompt accepts. A line like that, sitting in the channel when
+// a prompt renders, is the accidental pre-answer the input guard exists to
+// discard — never an instruction for the model.
+func isPromptAnswerShaped(line string) bool {
+	switch strings.ToLower(strings.TrimSpace(line)) {
+	case "", "y", "yes", "s", "sim", "n", "no", "nao", "não", "a", "always", "d", "deny":
+		return true
+	}
+	return false
+}
+
+// salvageTypeahead keeps submitted lines that a teardown or an input-guard
+// drain would otherwise drop, so the next type-ahead drain still delivers
+// them to the model. Safe from any goroutine (worker security prompts reach
+// it through salvageGuardDrained).
+func (a *AgentMode) salvageTypeahead(lines []string) {
+	a.salvageMu.Lock()
+	defer a.salvageMu.Unlock()
+	for _, line := range lines {
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		if len(a.salvagedLines) >= salvagedTypeaheadCap {
+			return
+		}
+		a.salvagedLines = append(a.salvagedLines, line)
+	}
+}
+
+// salvageGuardDrained is the security-prompt sink: what the input guard
+// drained is kept as follow-up instructions, minus the lines shaped like a
+// prompt answer (the accidental pre-answers the guard is there to discard).
+func (a *AgentMode) salvageGuardDrained(lines []string) {
+	kept := make([]string, 0, len(lines))
+	for _, line := range lines {
+		if !isPromptAnswerShaped(line) {
+			kept = append(kept, line)
+		}
+	}
+	a.salvageTypeahead(kept)
+}
+
+// takeSalvagedTypeahead hands over (and clears) the rescued lines.
+func (a *AgentMode) takeSalvagedTypeahead() []string {
+	a.salvageMu.Lock()
+	defer a.salvageMu.Unlock()
+	out := a.salvagedLines
+	a.salvagedLines = nil
+	return out
+}
+
+// salvagedTypeaheadCount feeds the spinner's queue indicator.
+func (a *AgentMode) salvagedTypeaheadCount() int {
+	a.salvageMu.Lock()
+	defer a.salvageMu.Unlock()
+	return len(a.salvagedLines)
+}
+
+// reportUnconsumedTypeahead runs when the outermost loop scope ends (max
+// turns, error, cancel) with instructions still waiting: there is no next
+// turn to deliver them to, so they are shown back to the user instead of
+// disappearing — and never leak into a later, unrelated run.
+func (a *AgentMode) reportUnconsumedTypeahead() {
+	var lines []string
+	for _, line := range a.takeSalvagedTypeahead() {
+		if strings.TrimSpace(line) != "" {
+			lines = append(lines, line)
+		}
+	}
+	if len(lines) == 0 || (a.cli != nil && a.cli.unattended) {
+		return
+	}
+	fmt.Printf("\n  %s\n", colorize("📭 "+i18n.T("agent.queue.unconsumed", len(lines)), ColorYellow))
+	for _, line := range lines {
+		fmt.Printf("    %s\n", colorize("❯ "+sanitizeTypeaheadPreview(line), ColorGray))
+	}
+}
+
+// typeaheadInstructionHeader labels a follow-up the user typed WHILE the
+// agent was working. It lands in history right after a batch of tool
+// results; unlabeled, flat-text transports (and long tool outputs on any
+// provider) make it read like more tool output and the model carries on
+// with its previous plan. English on purpose — models follow it better.
+const typeaheadInstructionHeader = "[NEW USER INSTRUCTION — the user typed this while you were working. " +
+	"It takes priority over your current plan: acknowledge it and adapt your next actions accordingly.]"
+
+// labelTypeaheadInstruction wraps a mid-run follow-up for the model.
+func labelTypeaheadInstruction(msg string) string {
+	return typeaheadInstructionHeader + "\n" + msg
+}
 
 // setTypeaheadPreview publishes the current partial input line (what has
 // been typed since the last Enter). Called from the reader goroutine.
@@ -141,6 +257,7 @@ func (a *AgentMode) buildTurnSpinnerFrame(d time.Duration, modelName string, had
 	if a.stdinLines != nil {
 		queued += len(a.stdinLines)
 	}
+	queued += a.salvagedTypeaheadCount()
 	if queued > 0 {
 		msg = "Processando... " + i18n.T("agent.queue.indicator", queued)
 	}

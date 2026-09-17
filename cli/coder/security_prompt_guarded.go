@@ -8,6 +8,7 @@ package coder
 
 import (
 	"context"
+	"sync"
 
 	"go.uber.org/zap"
 )
@@ -34,6 +35,38 @@ func SetSecurityPromptLogger(logger *zap.Logger) {
 	promptInputGuard = NewInputGuard(logger)
 }
 
+var (
+	promptSalvageMu sync.RWMutex
+	promptSalvage   func(lines []string)
+)
+
+// SetSecurityPromptSalvage installs the sink that receives the lines the
+// input guard drains before a security prompt renders. Those lines never
+// answer the prompt, but they are what the user typed for the agent loop
+// while the model was working, so the loop re-queues them as follow-up
+// instructions instead of losing them. Pass nil to detach (drained lines
+// are then dropped, the legacy behavior).
+func SetSecurityPromptSalvage(fn func(lines []string)) {
+	promptSalvageMu.Lock()
+	promptSalvage = fn
+	promptSalvageMu.Unlock()
+}
+
+// guardPrompt runs the pre-prompt defense and forwards whatever the channel
+// drain caught to the salvage sink.
+func guardPrompt(guard *InputGuard, inputCh <-chan string) {
+	drained := guard.GuardCollect(inputCh)
+	if len(drained) == 0 {
+		return
+	}
+	promptSalvageMu.RLock()
+	sink := promptSalvage
+	promptSalvageMu.RUnlock()
+	if sink != nil {
+		sink(drained)
+	}
+}
+
 // activeInputGuard returns the package-level guard, lazily instantiated
 // with the most recently configured logger (or a no-op when nothing was
 // wired). Used by the Guarded* wrappers below.
@@ -52,7 +85,7 @@ func activeInputGuard() *InputGuard {
 // would be consumed by the very next <-inputCh as the y/n answer.
 func PromptSecurityCheckGuarded(ctx context.Context, toolName, args string, inputCh <-chan string) SecurityDecision {
 	guard := activeInputGuard()
-	guard.Guard(inputCh)
+	guardPrompt(guard, inputCh)
 	decision := PromptSecurityCheck(ctx, toolName, args, inputCh)
 	// The wrapped prompt already consumed the user's deliberate answer
 	// from the channel. The debounce here is for any *trailing* input
@@ -68,7 +101,7 @@ func PromptSecurityCheckGuarded(ctx context.Context, toolName, args string, inpu
 // before the prompt renders, debounce after the answer is read.
 func PromptSecurityCheckWithContextGuarded(ctx context.Context, toolName, args string, secCtx *SecurityContext, inputCh <-chan string) SecurityDecision {
 	guard := activeInputGuard()
-	guard.Guard(inputCh)
+	guardPrompt(guard, inputCh)
 	decision := PromptSecurityCheckWithContext(ctx, toolName, args, secCtx, inputCh)
 	guard.IntentDebounce(ctx, inputCh)
 	return decision

@@ -167,6 +167,19 @@ type AgentMode struct {
 	// mode (Unix); empty on Windows and non-TTY runs.
 	typeaheadMu   sync.Mutex
 	typeaheadLine string
+	// Submitted lines rescued from a path that would otherwise drop them
+	// (reader teardown with lines still queued, the input guard's drain
+	// before a security prompt). Consumed by the next type-ahead drain.
+	// See agent_typeahead.go.
+	salvageMu     sync.Mutex
+	salvagedLines []string
+	// stdinCarry is the half-typed line (no Enter yet) a teardown
+	// interrupted; the next reader spawn — or the line-editing prompt —
+	// picks it up so a suspend never eats keystrokes. Guarded by stdinMu.
+	stdinCarry string
+	// promptInitialText pre-fills the next line-editing prompt with what
+	// the user had already typed (no Enter yet) when the turn ended.
+	promptInitialText string
 	// stdinCbreakRestore undoes the cbreak TTY state applied when the
 	// reader spawned. Guarded by stdinMu.
 	stdinCbreakRestore func()
@@ -321,6 +334,9 @@ func (a *AgentMode) startStdinReader(ctx context.Context) {
 		// both race for the same fd (byte interleaving).
 		return
 	}
+	// Outermost scope: lines the security prompts' input guard drains are
+	// follow-up instructions for THIS loop, not garbage.
+	coder.SetSecurityPromptSalvage(a.salvageGuardDrained)
 	a.spawnStdinReaderLocked(ctx)
 }
 
@@ -343,6 +359,9 @@ func (a *AgentMode) spawnStdinReaderLocked(ctx context.Context) {
 	// still be draining — it must keep talking to ITS channels, not the
 	// successor's.
 	linesCh, doneCh, canceler := a.stdinLines, a.stdinDone, a.stdinCancel
+	carry := a.stdinCarry
+	a.stdinCarry = ""
+	a.setTypeaheadPreview(carry)
 
 	go func() {
 		defer a.stdinWg.Done()
@@ -352,6 +371,7 @@ func (a *AgentMode) spawnStdinReaderLocked(ctx context.Context) {
 		canceler.bind()
 		defer canceler.unbind()
 		var lineBuf strings.Builder
+		lineBuf.WriteString(carry)
 		buf := make([]byte, 512)
 		for {
 			select {
@@ -436,6 +456,9 @@ func (a *AgentMode) stopStdinReader() {
 		return
 	}
 	a.teardownStdinReaderLocked()
+	a.stdinCarry = ""
+	coder.SetSecurityPromptSalvage(nil)
+	a.reportUnconsumedTypeahead()
 }
 
 // teardownStdinReaderLocked stops the goroutine and clears the lifecycle
@@ -457,6 +480,11 @@ func (a *AgentMode) teardownStdinReaderLocked() {
 			a.abortBlockedStdinRead(done)
 		}
 
+		// Lines submitted but not yet drained at a turn boundary survive
+		// the teardown: a suspend (final-answer prompt, @ask overlay) used
+		// to nil the channel with the user's follow-up still inside it.
+		a.salvageTypeahead(drainLinesNonBlocking(a.stdinLines))
+		a.stdinCarry = a.typeaheadPreviewSnapshot()
 		a.stdinLines = nil
 		a.stdinDone = nil
 	}
@@ -465,6 +493,16 @@ func (a *AgentMode) teardownStdinReaderLocked() {
 		a.stdinCbreakRestore = nil
 	}
 	a.setTypeaheadPreview("")
+}
+
+// takeStdinCarry hands over (and clears) the half-typed line a teardown
+// interrupted.
+func (a *AgentMode) takeStdinCarry() string {
+	a.stdinMu.Lock()
+	defer a.stdinMu.Unlock()
+	carry := a.stdinCarry
+	a.stdinCarry = ""
+	return carry
 }
 
 // suspendStdinReader fully releases the stdin fd regardless of the refcount
@@ -754,10 +792,15 @@ func (a *AgentMode) readLineFromGoPrompt() string {
 		},
 	)
 	noopCompleter := func(prompt.Document) []prompt.Suggest { return nil }
+	initial := a.promptInitialText
+	a.promptInitialText = ""
 	return prompt.Input(
 		"  > ",
 		noopCompleter,
 		prompt.OptionParser(pasteParser),
+		// What the user was typing when the turn ended carries over into
+		// the editable line instead of vanishing with the spinner.
+		prompt.OptionInitialBufferText(initial),
 		// Same theme-derived colors as the chat REPL (see prompt_theme.go):
 		// the coder prompt must not force white text onto a light terminal.
 		themePromptTextColors(),
@@ -815,28 +858,29 @@ func (a *AgentMode) runMultilineSession(trigger string, reader *bufio.Reader) (s
 // to chat. Folding them keeps every typed instruction in the turn it was
 // meant for.
 func (a *AgentMode) drainStdinToQueue() string {
-	var lines []string
-	for {
-		select {
-		case line := <-a.stdinLines:
-			if line == "" {
-				continue // skip empty lines (bare Enter presses)
-			}
-			// Swallow scheduler-injected "/resume <token>" lines whose
-			// token is already queued for auto-resume (the bridge may
-			// have injected while this loop was starting, before the
-			// isExecuting guard flipped). The queued resume still fires
-			// via drainPendingResumes once this loop exits — the line
-			// itself must not reach the LLM as a user instruction.
-			if token, ok := parsePendingResumeLine(line); ok && a.cli.hasPendingResume(token) {
-				fmt.Println(colorize(" ⏸ "+i18n.T("park.resume.queued_while_busy", token), ColorCyan))
-				continue
-			}
-			lines = append(lines, line)
-		default:
-			return strings.Join(lines, "\n")
-		}
+	// Rescued lines were typed BEFORE anything still in the channel.
+	pending := a.takeSalvagedTypeahead()
+	if a.stdinLines != nil {
+		pending = append(pending, drainLinesNonBlocking(a.stdinLines)...)
 	}
+	var lines []string
+	for _, line := range pending {
+		if line == "" {
+			continue // skip empty lines (bare Enter presses)
+		}
+		// Swallow scheduler-injected "/resume <token>" lines whose
+		// token is already queued for auto-resume (the bridge may
+		// have injected while this loop was starting, before the
+		// isExecuting guard flipped). The queued resume still fires
+		// via drainPendingResumes once this loop exits — the line
+		// itself must not reach the LLM as a user instruction.
+		if token, ok := parsePendingResumeLine(line); ok && a.cli.hasPendingResume(token) {
+			fmt.Println(colorize(" ⏸ "+i18n.T("park.resume.queued_while_busy", token), ColorCyan))
+			continue
+		}
+		lines = append(lines, line)
+	}
+	return strings.Join(lines, "\n")
 }
 
 // CommandBlock and the other aliases below re-export the agent
@@ -2289,7 +2333,7 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 			userMsg = a.expandFollowUpCommand(ctx, userMsg)
 			a.cli.history = append(a.cli.history, models.Message{
 				Role:    "user",
-				Content: userMsg,
+				Content: labelTypeaheadInstruction(userMsg),
 			})
 			// A type-ahead follow-up is a fresh trigger surface: activate its
 			// skills NOW so they shape the very next turn, not one turn late.
@@ -4249,6 +4293,18 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 			// this — possibly nested — loop scope stays balanced.
 			a.suspendStdinReader()
 
+			// The user already answered: instructions submitted while this
+			// final turn was streaming were rescued by the teardown. Hand
+			// them to the next turn's type-ahead drain instead of blocking
+			// on a prompt for input that was given (and used to be dropped).
+			if a.salvagedTypeaheadCount() > 0 {
+				a.resumeStdinReader(ctx)
+				continue
+			}
+
+			// The half-typed line moves into the editable prompt (and must
+			// not ALSO seed the reader that resumes afterwards).
+			a.promptInitialText = sanitizeTypeaheadPreview(a.takeStdinCarry())
 			userInput, err := a.readLineWithEditing()
 
 			// Restart the stdin reader for subsequent agent turns

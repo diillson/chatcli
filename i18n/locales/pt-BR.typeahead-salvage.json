@@ -1,0 +1,3 @@
+{
+  "agent.queue.unconsumed": "%d instrução(ões) na fila não foram entregues — a execução terminou antes do próximo turno. Reenvie se ainda precisar:"
+}
