@@ -1,0 +1,3 @@
+{
+  "agent.queue.unconsumed": "%d queued instruction(s) were not delivered — the run ended before the next turn. Send them again if still needed:"
+}

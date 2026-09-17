@@ -152,6 +152,19 @@ func (g *InputGuard) Guard(ch <-chan string) bool {
 	return anyDiscarded
 }
 
+// GuardCollect runs the same pre-prompt sequence as Guard but hands the
+// drained channel lines back instead of dropping them. A complete line the
+// user submitted while the model was working is an instruction for the agent
+// loop, not an accidental answer: it must not reach the prompt (that is what
+// the drain is for), yet throwing it away silently loses the user's
+// follow-up. The caller decides what is worth keeping.
+func (g *InputGuard) GuardCollect(ch <-chan string) []string {
+	if err := g.FlushTTYInput(); err != nil {
+		g.logger.Debug("input guard: FlushTTYInput failed (non-fatal)", zap.Error(err))
+	}
+	return g.DrainStdinChannel(ch)
+}
+
 // preview returns a short, escape-stripped excerpt of an input line for
 // safe logging. We never want to dump full user input to the log.
 func preview(s string) string {
