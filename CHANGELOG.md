@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.205.1](https://github.com/diillson/chatcli/compare/v1.205.0...v1.205.1) (2026-09-17)
+
+
+### Bug Fixes
+
+* **coder:** deliver instructions typed mid-run instead of dropping them ([#1602](https://github.com/diillson/chatcli/issues/1602)) ([37bf54c](https://github.com/diillson/chatcli/commit/37bf54c340fab7bc14bae88be37c89aa8e0a1dc1))
+
 ## [1.205.0](https://github.com/diillson/chatcli/compare/v1.204.0...v1.205.0) (2026-09-15)
 
 
