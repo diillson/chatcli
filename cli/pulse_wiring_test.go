@@ -23,21 +23,27 @@ import (
 	"go.uber.org/zap"
 )
 
-func collectPulse(t *testing.T, bus *pulse.Bus, n int) []pulse.Event {
+// subscribePulse subscribes NOW and returns a collector. Subscribing must
+// happen before anything is emitted: the bus delivers to whoever is attached
+// at the moment an event is pumped, so a late subscriber misses it.
+func subscribePulse(t *testing.T, bus *pulse.Bus) func(n int) []pulse.Event {
 	t.Helper()
 	ch, cancel := bus.Subscribe(64)
 	t.Cleanup(cancel)
-	out := make([]pulse.Event, 0, n)
-	deadline := time.After(3 * time.Second)
-	for len(out) < n {
-		select {
-		case ev := <-ch:
-			out = append(out, ev)
-		case <-deadline:
-			t.Fatalf("got %d of %d pulse events: %+v", len(out), n, out)
+	return func(n int) []pulse.Event {
+		t.Helper()
+		out := make([]pulse.Event, 0, n)
+		deadline := time.After(3 * time.Second)
+		for len(out) < n {
+			select {
+			case ev := <-ch:
+				out = append(out, ev)
+			case <-deadline:
+				t.Fatalf("got %d of %d pulse events: %+v", len(out), n, out)
+			}
 		}
+		return out
 	}
-	return out
 }
 
 func TestPulseRunEventMapsLifecycleAndParent(t *testing.T) {
@@ -89,6 +95,7 @@ func TestPulseLLMTapPairsRequestsPerModel(t *testing.T) {
 	bus.SetEnabled(true)
 	tap := newPulseLLMTap(bus)
 	now := time.Now()
+	collect := subscribePulse(t, bus)
 
 	go func() {
 		tap.observe(client.RequestAuditEvent{Time: now, Phase: "send", Provider: "openai", Model: "gpt-x", Fields: map[string]string{"payload_bytes": "512", "prompt": "must-not-pass"}})
@@ -99,7 +106,7 @@ func TestPulseLLMTapPairsRequestsPerModel(t *testing.T) {
 		tap.observe(client.RequestAuditEvent{Time: now, Phase: "send", Provider: "xai", Model: "grok"})
 		tap.observe(client.RequestAuditEvent{Time: now, Phase: "recv", Provider: "xai", Model: "grok", Status: "canceled"})
 	}()
-	got := collectPulse(t, bus, 6)
+	got := collect(6)
 
 	assert.Equal(t, "llm-1", got[0].ID)
 	assert.Equal(t, pulse.PhaseStart, got[0].Phase)
