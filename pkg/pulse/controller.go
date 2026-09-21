@@ -18,12 +18,16 @@ const DefaultPollInterval = 2 * time.Second
 
 // Options configures a Controller.
 type Options struct {
-	Bus     *Bus   // defaults to Default()
-	Root    string // defaults to DefaultRoot()
-	Meta    Meta   // Instance is filled from the bus
-	Forced  bool   // record regardless of the lease (CHATCLI_DASH=1)
-	Poll    time.Duration
-	OnError func(error) // optional; spool failures are reported, never fatal
+	Bus    *Bus   // defaults to Default()
+	Root   string // defaults to DefaultRoot()
+	Meta   Meta   // Instance is filled from the bus
+	Forced bool   // record regardless of the lease
+	// ForcedFn, when set, is asked on every check whether to record
+	// regardless of the lease. It lets a setting that can change while the
+	// process runs (an env reloaded from .env) take effect without a restart.
+	ForcedFn func() bool
+	Poll     time.Duration
+	OnError  func(error) // optional; spool failures are reported, never fatal
 }
 
 // Controller owns the recording lifecycle of one process: it turns the bus
@@ -177,7 +181,7 @@ func (c *Controller) run(ctx context.Context) {
 	defer stop()
 
 	reconcile := func() {
-		want := c.opts.Forced || LeaseActive(c.opts.Root, time.Now())
+		want := c.opts.Forced || (c.opts.ForcedFn != nil && c.opts.ForcedFn()) || LeaseActive(c.opts.Root, time.Now())
 		switch {
 		case want && spool == nil:
 			meta := c.opts.Meta

@@ -51,6 +51,7 @@ import (
 	"github.com/diillson/chatcli/llm/tokenizer"
 	"github.com/diillson/chatcli/pkg/browser"
 	"github.com/diillson/chatcli/pkg/persona"
+	"github.com/diillson/chatcli/pkg/pulse"
 	"github.com/diillson/chatcli/ui/kit"
 	"github.com/diillson/chatcli/ui/theme"
 	"github.com/fsnotify/fsnotify"
@@ -392,6 +393,11 @@ type ChatCLI struct {
 	lastRecallTrace *memoryRecallTrace
 	// otlp is the OpenTelemetry metrics exporter (nil unless OTEL_* is set).
 	otlp *telemetry.Exporter
+	// pulse records live telemetry for the dashboard; nil when no spool
+	// root can be resolved.
+	pulse *pulse.Controller
+	// dash is the live dashboard server this session started, if any.
+	dash dashState
 	// pendingTurnContext is the chat turn's injected context text between
 	// assembly and commit (turn_context.go).
 	pendingTurnContext string
@@ -949,6 +955,7 @@ func NewChatCLI(ctx context.Context, manager manager.LLMManager, logger *zap.Log
 	cli.initTranscriptJournal("")
 	cli.initLLMAudit("repl")
 	cli.initTelemetry(ctx, "repl")
+	cli.initPulse(ctx, "repl")
 	cli.initCacheResourceCosting()
 	// GPT models count tokens locally: warm the vocabulary in the
 	// background so the first exact count is ready by the first turn.
@@ -2227,6 +2234,7 @@ func (cli *ChatCLI) cleanup(ctx context.Context) {
 	cli.calibrator().flushCalibration()
 	cli.costTracker.FlushDailySpend()
 	cli.shutdownTelemetry(ctx)
+	cli.shutdownPulse()
 
 	// Stop context watchers before the stores go away.
 	if cli.contextHandler != nil {
@@ -2324,6 +2332,7 @@ func (cli *ChatCLI) cleanup(ctx context.Context) {
 		}
 		cli.taskGraphAdapter.shutdownDash(ctx)
 	}
+	cli.shutdownDash(ctx)
 
 	// Tear down the session scratch workspace. Respects
 	// CHATCLI_AGENT_KEEP_TMPDIR=true for debugging (files are left behind).

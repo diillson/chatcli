@@ -26,6 +26,7 @@ import (
 
 	"github.com/diillson/chatcli/cli/compress"
 	"github.com/diillson/chatcli/cli/taskgraph"
+	"github.com/diillson/chatcli/pkg/pulse"
 	"github.com/diillson/chatcli/server/hub"
 	"go.uber.org/zap"
 )
@@ -39,6 +40,7 @@ const (
 	StoreParked      = "parked"
 	StorePending     = "memory-pending"
 	StoreTaskGraph   = "taskgraph"
+	StorePulse       = "pulse"
 	StoreCCR         = "ccr"
 	StoreHub         = "hub"
 	StoreMemory      = "memory"
@@ -128,7 +130,7 @@ type candidate struct {
 func StorageStoreNames() []string {
 	return []string{
 		StoreCosts, StoreCheckpoints, StoreSessions, StoreTranscripts, StoreParked,
-		StorePending, StoreTaskGraph, StoreCCR, StoreHub,
+		StorePending, StoreTaskGraph, StorePulse, StoreCCR, StoreHub,
 		StoreMemory, StoreSkills, StorePlugins, StoreContexts, StoreAgents, StoreCommands,
 		StoreReflexion, StoreScheduler, StoreTokenizers, StoreMCP, StoreCache, StoreLogs,
 	}
@@ -236,7 +238,7 @@ func inventoryStore(opts StorageOptions, name string) StorageStore {
 		st.Policy = PolicyMachine
 	case StoreTranscripts, StoreParked, StorePending:
 		st.Policy = PolicyTTL
-	case StoreTaskGraph:
+	case StoreTaskGraph, StorePulse:
 		st.Policy = PolicyRuns
 	case StoreCCR:
 		st.Policy, st.OnApplyOnly = PolicyCap, true
@@ -325,6 +327,8 @@ func storeCandidates(opts StorageOptions, name string) []candidate {
 		return fileCandidates(dir, cutoff, ".json", nil)
 	case StoreTaskGraph:
 		return taskGraphCandidates(dir, opts.Now.Add(-taskgraph.DefaultRetention), opts.SkipTaskGraphRun)
+	case StorePulse:
+		return pulseCandidates(dir, opts.Now)
 	}
 	return nil
 }
@@ -558,6 +562,20 @@ func taskGraphCandidates(dir string, cutoff time.Time, skipRunID string) []candi
 		}
 		_, size := dirUsage(run, "")
 		out = append(out, candidate{path: run, bytes: size, isDir: true, reason: ReasonTTL})
+	}
+	return out
+}
+
+// pulseCandidates selects the live telemetry spools of processes that are
+// dead and past the retention window. A process that is still recording —
+// this one included — is never a candidate.
+func pulseCandidates(dir string, now time.Time) []candidate {
+	stale := pulse.PrunableInstances(dir, pulse.DefaultRetention, pulse.Default().Instance(), now)
+	out := make([]candidate, 0, len(stale))
+	for _, m := range stale {
+		spool := filepath.Join(dir, m.Instance)
+		_, size := dirUsage(spool, "")
+		out = append(out, candidate{path: spool, bytes: size, isDir: true, reason: ReasonTTL})
 	}
 	return out
 }
