@@ -67,7 +67,7 @@ func (c *StackSpotClient) SendPrompt(ctx context.Context, prompt string, history
 	fullPrompt := fmt.Sprintf("%sUsuário: %s", conversationHistory, prompt)
 
 	start := time.Now()
-	client.LogRequestStart(c.logger, "STACKSPOT", c.GetModelName(),
+	client.LogRequestStart(c.logger, "STACKSPOT", c.GetModelName(), client.CallerField(ctx),
 		zap.Int("payload_bytes", len(fullPrompt)),
 		zap.Int("history_len", len(history)),
 		zap.Int("max_tokens", maxTokens),
@@ -80,12 +80,12 @@ func (c *StackSpotClient) SendPrompt(ctx context.Context, prompt string, history
 	})
 
 	if err != nil {
-		client.LogRequestFinish(c.logger, "STACKSPOT", c.GetModelName(), "error", time.Since(start))
+		client.LogRequestFinish(c.logger, "STACKSPOT", c.GetModelName(), "error", time.Since(start), client.CallerField(ctx))
 		c.logger.Error(i18n.T("llm.stackspot.get_response_error"), zap.Error(err))
 		return "", err
 	}
 
-	client.LogRequestFinish(c.logger, "STACKSPOT", c.GetModelName(), "success", time.Since(start),
+	client.LogRequestFinish(c.logger, "STACKSPOT", c.GetModelName(), "success", time.Since(start), client.CallerField(ctx),
 		zap.Int("response_chars", len(llmResponse)),
 	)
 	return llmResponse, nil

@@ -69,6 +69,10 @@ func (cli *ChatCLI) initPulse(ctx context.Context, surface string) {
 	runs.Default().OnEventKeyed(pulseObserverKey, func(info runs.Info) { bus.Emit(pulseRunEvent(info)) })
 	llmTap := newPulseLLMTap(bus)
 	client.RegisterRequestAuditorKeyed(pulseObserverKey, llmTap.observe)
+	// Names the agent run behind each LLM request, so a request hangs from
+	// the agent that made it instead of from the session. It also lands in
+	// the request log and the audit trail, where it was just as missing.
+	client.SetCallerResolver(func(ctx context.Context) string { return runs.FromContext(ctx).ID() })
 
 	wd, _ := os.Getwd()
 	logger := cli.logger
@@ -213,20 +217,26 @@ func pulseRunEvent(info runs.Info) pulse.Event {
 }
 
 // pulseLLMTap turns the send/recv audit pair into one node per request. The
-// audit event carries no request id, so an open request is matched to its
-// response by provider and model, oldest first; with parallel workers on the
-// same model a response may close a sibling's node, which is harmless — the
-// duration shown is the one the response itself reports.
+// audit event carries no request id; it carries the provider, the model and,
+// since the adapters pass client.CallerField, the agent run that asked. A
+// response is matched to the oldest open request with the same three.
 type pulseLLMTap struct {
 	bus *pulse.Bus
 
 	mu   sync.Mutex
 	seq  uint64
-	open map[string][]string
+	open map[string][]pulseOpenRequest
+}
+
+// pulseOpenRequest is a request waiting for its response. The parent is kept
+// because only the send carries the caller, and the end event must hang from
+// the same node as the start.
+type pulseOpenRequest struct {
+	id, parent string
 }
 
 func newPulseLLMTap(bus *pulse.Bus) *pulseLLMTap {
-	return &pulseLLMTap{bus: bus, open: make(map[string][]string)}
+	return &pulseLLMTap{bus: bus, open: make(map[string][]pulseOpenRequest)}
 }
 
 // pulseLLMAttrs are the audit fields worth showing on a request node. All of
@@ -240,21 +250,29 @@ func (t *pulseLLMTap) observe(ev client.RequestAuditEvent) {
 	if !t.bus.Enabled() {
 		return
 	}
-	key := ev.Provider + ":" + ev.Model
+	caller := ev.Fields[client.CallerFieldKey]
 	out := pulse.Event{
 		Kind:   pulse.KindLLM,
 		Parent: pulseSessionNodeID,
-		Name:   key,
+		Name:   ev.Provider + ":" + ev.Model,
 		TS:     ev.Time,
 	}
+	if caller != "" {
+		out.Parent = caller
+	}
+	// Send and receive both name their caller, so a response is matched to
+	// the request of the same agent on the same model: with parallel workers
+	// one agent's response never closes a sibling's node. Requests with no
+	// caller (chat, background) still pair oldest first per model.
+	key := out.Name + "|" + caller
 
 	t.mu.Lock()
 	if ev.Phase == "send" {
 		t.seq++
 		out.ID = "llm-" + strconv.FormatUint(t.seq, 10)
-		t.open[key] = append(t.open[key], out.ID)
+		t.open[key] = append(t.open[key], pulseOpenRequest{id: out.ID, parent: out.Parent})
 	} else if ids := t.open[key]; len(ids) > 0 {
-		out.ID = ids[0]
+		out.ID, out.Parent = ids[0].id, ids[0].parent
 		if len(ids) == 1 {
 			delete(t.open, key)
 		} else {

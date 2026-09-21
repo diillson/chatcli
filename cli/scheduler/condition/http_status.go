@@ -26,6 +26,7 @@ import (
 	"time"
 
 	"github.com/diillson/chatcli/cli/scheduler"
+	"github.com/diillson/chatcli/utils"
 )
 
 // HTTPStatus implements scheduler.ConditionEvaluator.
@@ -139,7 +140,7 @@ func (h *HTTPStatus) client(timeout time.Duration, insecure bool) *http.Client {
 		IdleConnTimeout:       30 * time.Second,
 	}
 	c := &http.Client{
-		Transport: tr,
+		Transport: utils.MeterTransport(tr), // shows the probed host on the live dashboard
 		Timeout:   timeout,
 	}
 	h.clients[key] = c

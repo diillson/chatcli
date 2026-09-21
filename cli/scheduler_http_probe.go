@@ -15,6 +15,8 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/diillson/chatcli/utils"
 )
 
 // httpProbeBodyCap bounds the response body returned to the agent so a
@@ -52,12 +54,14 @@ func (c *httpProbeClient) Do(ctx context.Context, method, url string, headers ma
 
 	hc := &http.Client{
 		Timeout: c.Timeout,
-		Transport: &http.Transport{
+		// Metered so the hosts a scheduled probe reaches show on the live
+		// dashboard; the transport underneath is unchanged.
+		Transport: utils.MeterTransport(&http.Transport{
 			TLSClientConfig:       &tls.Config{MinVersion: tls.VersionTLS12},
 			ResponseHeaderTimeout: c.Timeout,
 			DisableKeepAlives:     true,
 			MaxIdleConns:          1,
-		},
+		}),
 		CheckRedirect: func(_ *http.Request, via []*http.Request) error {
 			if len(via) >= httpProbeMaxRedirects {
 				return fmt.Errorf("http probe: too many redirects (>%d)", httpProbeMaxRedirects)

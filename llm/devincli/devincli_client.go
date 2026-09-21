@@ -343,7 +343,7 @@ func (c *Client) SendPrompt(ctx context.Context, prompt string, history []models
 	// re-count the previous turn's usage.
 	c.StoreUsage(nil)
 	start := time.Now()
-	client.LogRequestStart(c.logger, "DEVIN", c.model, zap.Int("history_len", len(history)), zap.Int("prompt_chars", len(prompt)))
+	client.LogRequestStart(c.logger, "DEVIN", c.model, client.CallerField(ctx), zap.Int("history_len", len(history)), zap.Int("prompt_chars", len(prompt)))
 	c.logger.Info("llm: send",
 		zap.String("provider", "DEVIN"),
 		zap.String("model", c.model),
@@ -356,7 +356,7 @@ func (c *Client) SendPrompt(ctx context.Context, prompt string, history []models
 		return c.runOnce(ctx, flattened, timeout)
 	})
 	if err != nil {
-		client.LogRequestFinish(c.logger, "DEVIN", c.model, "error", time.Since(start))
+		client.LogRequestFinish(c.logger, "DEVIN", c.model, "error", time.Since(start), client.CallerField(ctx))
 		c.logger.Error(i18n.T("llm.devincli.exec_failed"), zap.Error(err))
 		return "", err
 	}
@@ -368,7 +368,7 @@ func (c *Client) SendPrompt(ctx context.Context, prompt string, history []models
 		zap.Duration("duration", time.Since(start)),
 		zap.Int("response_chars", len(response)),
 	)
-	client.LogRequestFinish(c.logger, "DEVIN", c.model, "success", time.Since(start), zap.Int("response_chars", len(response)))
+	client.LogRequestFinish(c.logger, "DEVIN", c.model, "success", time.Since(start), client.CallerField(ctx), zap.Int("response_chars", len(response)))
 	return response, nil
 }
 

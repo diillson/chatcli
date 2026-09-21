@@ -153,7 +153,7 @@ func (c *OpenAIClient) SendPrompt(ctx context.Context, prompt string, history []
 	}
 
 	start := time.Now()
-	client.LogRequestStart(c.logger, "OPENAI", c.model,
+	client.LogRequestStart(c.logger, "OPENAI", c.model, client.CallerField(ctx),
 		zap.Int("payload_bytes", len(jsonValue)),
 		zap.Int("history_len", len(history)),
 		zap.Int("max_tokens", effectiveMaxTokens),
@@ -170,10 +170,10 @@ func (c *OpenAIClient) SendPrompt(ctx context.Context, prompt string, history []
 		return c.processResponse(resp)
 	})
 	if err != nil {
-		client.LogRequestFinish(c.logger, "OPENAI", c.model, "error", time.Since(start))
+		client.LogRequestFinish(c.logger, "OPENAI", c.model, "error", time.Since(start), client.CallerField(ctx))
 		return response, err
 	}
-	client.LogRequestFinish(c.logger, "OPENAI", c.model, "success", time.Since(start),
+	client.LogRequestFinish(c.logger, "OPENAI", c.model, "success", time.Since(start), client.CallerField(ctx),
 		zap.Int("response_chars", len(response)),
 	)
 	c.lastRequest.Remember(jsonValue)
@@ -392,7 +392,7 @@ func (c *OpenAIClient) SendPromptStream(ctx context.Context, prompt string, hist
 	}
 
 	start := time.Now()
-	client.LogRequestStart(c.logger, "OPENAI", c.model,
+	client.LogRequestStart(c.logger, "OPENAI", c.model, client.CallerField(ctx),
 		zap.Int("payload_bytes", len(jsonValue)),
 		zap.Int("history_len", len(history)),
 		zap.Int("max_tokens", effectiveMaxTokens),
@@ -401,7 +401,7 @@ func (c *OpenAIClient) SendPromptStream(ctx context.Context, prompt string, hist
 
 	resp, err := c.openStream(ctx, jsonValue)
 	if err != nil {
-		client.LogRequestFinish(c.logger, "OPENAI", c.model, "error", time.Since(start),
+		client.LogRequestFinish(c.logger, "OPENAI", c.model, "error", time.Since(start), client.CallerField(ctx),
 			zap.String("kind", "stream"),
 		)
 		return nil, err
@@ -410,14 +410,14 @@ func (c *OpenAIClient) SendPromptStream(ctx context.Context, prompt string, hist
 	if resp.StatusCode != http.StatusOK {
 		raw, _ := io.ReadAll(resp.Body)
 		_ = resp.Body.Close()
-		client.LogRequestFinish(c.logger, "OPENAI", c.model, "error", time.Since(start),
+		client.LogRequestFinish(c.logger, "OPENAI", c.model, "error", time.Since(start), client.CallerField(ctx),
 			zap.String("kind", "stream"),
 			zap.Int("status_code", resp.StatusCode),
 		)
 		return nil, &utils.APIError{StatusCode: resp.StatusCode, Message: utils.SanitizeSensitiveText(string(raw))}
 	}
 
-	client.LogRequestFinish(c.logger, "OPENAI", c.model, "success", time.Since(start),
+	client.LogRequestFinish(c.logger, "OPENAI", c.model, "success", time.Since(start), client.CallerField(ctx),
 		zap.String("kind", "stream_started"),
 	)
 

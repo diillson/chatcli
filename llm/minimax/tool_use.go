@@ -85,7 +85,7 @@ func (c *MiniMaxClient) SendPromptWithTools(ctx context.Context, prompt string, 
 	}
 
 	start := time.Now()
-	client.LogRequestStart(c.logger, "MINIMAX", c.model,
+	client.LogRequestStart(c.logger, "MINIMAX", c.model, client.CallerField(ctx),
 		zap.String("path", "tool_use"),
 		zap.Int("payload_bytes", len(jsonValue)),
 		zap.Int("history_len", len(history)),
@@ -112,13 +112,13 @@ func (c *MiniMaxClient) SendPromptWithTools(ctx context.Context, prompt string, 
 		return string(bodyBytes), nil
 	})
 	if err != nil {
-		client.LogRequestFinish(c.logger, "MINIMAX", c.model, "error", time.Since(start),
+		client.LogRequestFinish(c.logger, "MINIMAX", c.model, "error", time.Since(start), client.CallerField(ctx),
 			zap.String("path", "tool_use"),
 		)
 		return nil, err
 	}
 
-	client.LogRequestFinish(c.logger, "MINIMAX", c.model, "success", time.Since(start),
+	client.LogRequestFinish(c.logger, "MINIMAX", c.model, "success", time.Since(start), client.CallerField(ctx),
 		zap.String("path", "tool_use"),
 		zap.Int("response_chars", len(resp)),
 	)

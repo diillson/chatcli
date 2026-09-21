@@ -73,7 +73,7 @@ func (c *BedrockClient) sendPromptConverse(ctx context.Context, prompt string, h
 	}
 
 	start := time.Now()
-	client.LogRequestStart(c.logger, "BEDROCK", c.model,
+	client.LogRequestStart(c.logger, "BEDROCK", c.model, client.CallerField(ctx),
 		zap.String("family", string(familyConverse)),
 		zap.String("region", c.region),
 		zap.String("endpoint", RuntimeEndpointURL(c.region)),
@@ -93,7 +93,7 @@ func (c *BedrockClient) sendPromptConverse(ctx context.Context, prompt string, h
 		return text, perr
 	})
 	if err != nil {
-		client.LogRequestFinish(c.logger, "BEDROCK", c.model, "error", time.Since(start),
+		client.LogRequestFinish(c.logger, "BEDROCK", c.model, "error", time.Since(start), client.CallerField(ctx),
 			zap.String("family", string(familyConverse)),
 		)
 		c.logger.Error(i18n.T("llm.error.get_response_after_retries", "Bedrock"), zap.Error(err))
@@ -102,7 +102,7 @@ func (c *BedrockClient) sendPromptConverse(ctx context.Context, prompt string, h
 		// agent-mode payload recovery can still learn an adaptive cap.
 		return "", client.WithRequestSize(err, estimateConversePayloadBytes(prompt, history))
 	}
-	client.LogRequestFinish(c.logger, "BEDROCK", c.model, "success", time.Since(start),
+	client.LogRequestFinish(c.logger, "BEDROCK", c.model, "success", time.Since(start), client.CallerField(ctx),
 		zap.String("family", string(familyConverse)),
 		zap.Int("response_chars", len(responseText)),
 	)

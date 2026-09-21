@@ -185,7 +185,7 @@ func (c *GeminiClient) SendPrompt(ctx context.Context, prompt string, history []
 	c.logger.Debug("Payload preparado", zap.Int("payload_size", len(jsonValue)), zap.String("model", c.model))
 
 	start := time.Now()
-	client.LogRequestStart(c.logger, "GOOGLEAI", c.model,
+	client.LogRequestStart(c.logger, "GOOGLEAI", c.model, client.CallerField(ctx),
 		zap.Int("payload_bytes", len(jsonValue)),
 		zap.Int("history_len", len(history)),
 		zap.Int("max_tokens", effectiveMaxTokens),
@@ -217,12 +217,12 @@ func (c *GeminiClient) SendPrompt(ctx context.Context, prompt string, history []
 	}
 
 	if err != nil {
-		client.LogRequestFinish(c.logger, "GOOGLEAI", c.model, "error", time.Since(start))
+		client.LogRequestFinish(c.logger, "GOOGLEAI", c.model, "error", time.Since(start), client.CallerField(ctx))
 		c.logger.Error(i18n.T("llm.error.get_response_after_retries", "Google AI"), zap.Error(err))
 		return "", err
 	}
 
-	client.LogRequestFinish(c.logger, "GOOGLEAI", c.model, "success", time.Since(start),
+	client.LogRequestFinish(c.logger, "GOOGLEAI", c.model, "success", time.Since(start), client.CallerField(ctx),
 		zap.Int("response_chars", len(response)),
 	)
 	c.logger.Info(i18n.T("llm.info.response_received", "Google AI"),

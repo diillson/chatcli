@@ -134,7 +134,7 @@ func (c *OpenAIAssistantClient) SendPrompt(ctx context.Context, prompt string, h
 	// call's tokens as this call's: reset before the request.
 	c.usageState.StoreUsage(nil)
 	start := time.Now()
-	client.LogRequestStart(c.logger, "OPENAI_ASSISTANT", c.model,
+	client.LogRequestStart(c.logger, "OPENAI_ASSISTANT", c.model, client.CallerField(ctx),
 		zap.Int("payload_bytes", len(prompt)),
 		zap.Int("history_len", len(history)),
 		zap.Int("max_tokens", maxTokens),
@@ -147,7 +147,7 @@ func (c *OpenAIAssistantClient) SendPrompt(ctx context.Context, prompt string, h
 		threadID, err := c.createThread(ctx)
 		if err != nil {
 			c.mu.Unlock()
-			client.LogRequestFinish(c.logger, "OPENAI_ASSISTANT", c.model, "error", time.Since(start))
+			client.LogRequestFinish(c.logger, "OPENAI_ASSISTANT", c.model, "error", time.Since(start), client.CallerField(ctx))
 			return "", fmt.Errorf("%s: %w", i18n.T("llm.assistant.create_thread_error"), err)
 		}
 		c.currentThreadID = threadID
@@ -163,7 +163,7 @@ func (c *OpenAIAssistantClient) SendPrompt(ctx context.Context, prompt string, h
 		c.logger.Error(i18n.T("llm.assistant.add_message_error"),
 			zap.String("threadID", threadID),
 			zap.Error(err))
-		client.LogRequestFinish(c.logger, "OPENAI_ASSISTANT", c.model, "error", time.Since(start))
+		client.LogRequestFinish(c.logger, "OPENAI_ASSISTANT", c.model, "error", time.Since(start), client.CallerField(ctx))
 		return "", fmt.Errorf("%s: %w", i18n.T("llm.assistant.add_message_error"), err)
 	}
 
@@ -173,7 +173,7 @@ func (c *OpenAIAssistantClient) SendPrompt(ctx context.Context, prompt string, h
 		c.logger.Error(i18n.T("llm.assistant.run_error"),
 			zap.String("threadID", threadID),
 			zap.Error(err))
-		client.LogRequestFinish(c.logger, "OPENAI_ASSISTANT", c.model, "error", time.Since(start))
+		client.LogRequestFinish(c.logger, "OPENAI_ASSISTANT", c.model, "error", time.Since(start), client.CallerField(ctx))
 		return "", fmt.Errorf("%s: %w", i18n.T("llm.assistant.run_error"), err)
 	}
 
@@ -198,7 +198,7 @@ func (c *OpenAIAssistantClient) SendPrompt(ctx context.Context, prompt string, h
 			partialResponse, getErr := c.getLatestResponse(ctx, threadID)
 			if getErr == nil && partialResponse != "" {
 				c.logger.Info(i18n.T("llm.assistant.partial_response"))
-				client.LogRequestFinish(c.logger, "OPENAI_ASSISTANT", c.model, "success", time.Since(start),
+				client.LogRequestFinish(c.logger, "OPENAI_ASSISTANT", c.model, "success", time.Since(start), client.CallerField(ctx),
 					zap.Int("response_chars", len(partialResponse)),
 					zap.String("kind", "partial"),
 				)
@@ -206,7 +206,7 @@ func (c *OpenAIAssistantClient) SendPrompt(ctx context.Context, prompt string, h
 			}
 		}
 
-		client.LogRequestFinish(c.logger, "OPENAI_ASSISTANT", c.model, "error", time.Since(start))
+		client.LogRequestFinish(c.logger, "OPENAI_ASSISTANT", c.model, "error", time.Since(start), client.CallerField(ctx))
 		return "", fmt.Errorf("%s: %w", i18n.T("llm.assistant.wait_response_error"), err)
 	}
 
@@ -215,7 +215,7 @@ func (c *OpenAIAssistantClient) SendPrompt(ctx context.Context, prompt string, h
 			zap.String("threadID", threadID),
 			zap.String("runID", runID),
 			zap.String("status", runStatus))
-		client.LogRequestFinish(c.logger, "OPENAI_ASSISTANT", c.model, "error", time.Since(start))
+		client.LogRequestFinish(c.logger, "OPENAI_ASSISTANT", c.model, "error", time.Since(start), client.CallerField(ctx))
 		return "", fmt.Errorf("%s", i18n.T("llm.assistant.run_failed", runStatus))
 	}
 
@@ -225,11 +225,11 @@ func (c *OpenAIAssistantClient) SendPrompt(ctx context.Context, prompt string, h
 		c.logger.Error(i18n.T("llm.assistant.get_response_error"),
 			zap.String("threadID", threadID),
 			zap.Error(err))
-		client.LogRequestFinish(c.logger, "OPENAI_ASSISTANT", c.model, "error", time.Since(start))
+		client.LogRequestFinish(c.logger, "OPENAI_ASSISTANT", c.model, "error", time.Since(start), client.CallerField(ctx))
 		return "", fmt.Errorf("%s: %w", i18n.T("llm.assistant.get_response_error"), err)
 	}
 
-	client.LogRequestFinish(c.logger, "OPENAI_ASSISTANT", c.model, "success", time.Since(start),
+	client.LogRequestFinish(c.logger, "OPENAI_ASSISTANT", c.model, "success", time.Since(start), client.CallerField(ctx),
 		zap.Int("response_chars", len(response)),
 	)
 	return response, nil
