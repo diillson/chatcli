@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.207.1](https://github.com/diillson/chatcli/compare/v1.207.0...v1.207.1) (2026-09-21)
+
+
+### Bug Fixes
+
+* **pulsedash:** move a whole kind at once and never let cards overlap ([#1632](https://github.com/diillson/chatcli/issues/1632)) ([63d93ce](https://github.com/diillson/chatcli/commit/63d93cefc6100c13228b0791cd06f4f67a8f4229))
+
 ## [1.207.0](https://github.com/diillson/chatcli/compare/v1.206.0...v1.207.0) (2026-09-21)
 
 
