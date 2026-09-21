@@ -39,6 +39,10 @@ const pulseObserverKey = "pulse"
 // from.
 const pulseSessionNodeID = "session"
 
+// pulseMCPSnapshotKey orders the MCP servers after the session and the runs
+// when current state is replayed.
+const pulseMCPSnapshotKey = "20-mcp"
+
 // pulseForced reports whether CHATCLI_DASH asks this process to record from
 // boot, without waiting for a dashboard lease. It is how surfaces with no
 // prompt (ACP, the MCP server, the gateway daemon) opt in.
@@ -102,6 +106,7 @@ func (cli *ChatCLI) shutdownPulse() {
 	bus := pulse.Default()
 	bus.RegisterSnapshotter("00-session", nil)
 	bus.RegisterSnapshotter("10-runs", nil)
+	bus.RegisterSnapshotter(pulseMCPSnapshotKey, nil)
 	cli.pulse.Close()
 	cli.pulse = nil
 }

@@ -46,6 +46,7 @@ import (
 	llmclient "github.com/diillson/chatcli/llm/client"
 	"github.com/diillson/chatcli/models"
 	"github.com/diillson/chatcli/pkg/persona"
+	"github.com/diillson/chatcli/pkg/pulse"
 	"github.com/diillson/chatcli/utils"
 	"go.uber.org/zap"
 	"golang.org/x/term"
@@ -275,6 +276,9 @@ type AgentMode struct {
 	// call ids for the sink channel.
 	events       agentevents.Sink
 	eventToolSeq int
+	// pulseTools holds the live telemetry spans of tool calls in flight,
+	// by event call ID. Loop goroutine only.
+	pulseTools map[string]*pulse.Span
 }
 
 // splitStdinChunk consumes raw bytes from a stdin Read() call and returns
@@ -1109,6 +1113,7 @@ func (a *AgentMode) Run(ctx context.Context, query string, additionalContext str
 	a.cli.setKeepAliveRun(true)
 	defer a.cli.setKeepAliveRun(false)
 	defer func() {
+		a.pulseCloseOpenTools()
 		orchRun.End(nil)
 	}()
 

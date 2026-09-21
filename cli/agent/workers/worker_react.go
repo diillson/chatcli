@@ -17,6 +17,7 @@ import (
 	"github.com/diillson/chatcli/llm/client"
 	"github.com/diillson/chatcli/models"
 	"github.com/diillson/chatcli/pkg/coder/engine"
+	"github.com/diillson/chatcli/pkg/pulse"
 	"go.uber.org/zap"
 )
 
@@ -610,6 +611,47 @@ func callWorkerLLM(ctx context.Context, useNativeTools bool, toolAware client.To
 // security policy, special-cases delegate (recursive subagent), and otherwise
 // dispatches to the coder engine, applying file locking and result truncation.
 func executeToolCall(ctx context.Context, v validatedTC, lockMgr *FileLockManager, policyChecker PolicyChecker) execResult {
+	// Guarded so that, with the dashboard off, a tool call pays one atomic
+	// load and not the run lookup.
+	var span *pulse.Span
+	if pulse.Enabled() {
+		span = pulse.Begin(pulse.KindTool, pulseToolName(v.rtc), runs.FromContext(ctx).ID()).With("subcmd", v.rtc.Subcmd)
+	}
+	res := runToolCall(ctx, v, lockMgr, policyChecker)
+	span.End(pulseToolStatus(ctx, v, res))
+	return res
+}
+
+// pulseToolName is the hub a worker tool call lights up on the live
+// dashboard: the granted plugin, or @coder for the engine subcommands — the
+// same names the orchestrator loop reports, so both meet on one node.
+func pulseToolName(rtc resolvedToolCall) string {
+	if rtc.pluginName != "" {
+		return rtc.pluginName
+	}
+	return "@coder"
+}
+
+// pulseToolStatus classifies the outcome without looking at any content.
+func pulseToolStatus(ctx context.Context, v validatedTC, res execResult) string {
+	switch {
+	case v.blocked || (res.failed && res.record.Error != nil && res.record.Error.Error() == policyBlockedReason):
+		return pulse.StatusBlocked
+	case ctx.Err() != nil:
+		return pulse.StatusCancelled
+	case res.failed:
+		return pulse.StatusError
+	default:
+		return pulse.StatusOK
+	}
+}
+
+// policyBlockedReason is the error a tool call refused by the security
+// policy is recorded with.
+const policyBlockedReason = "blocked by security policy"
+
+// runToolCall is the body of executeToolCall, which wraps it with telemetry.
+func runToolCall(ctx context.Context, v validatedTC, lockMgr *FileLockManager, policyChecker PolicyChecker) execResult {
 	if v.blocked {
 		return execResult{index: v.index, output: v.msg + "\n", failed: true, toolID: v.rtc.ID}
 	}
@@ -626,7 +668,7 @@ func executeToolCall(ctx context.Context, v validatedTC, lockMgr *FileLockManage
 			record := ToolCallRecord{
 				Name:  v.rtc.Subcmd,
 				Args:  v.rtc.RawArgs,
-				Error: fmt.Errorf("blocked by security policy"),
+				Error: errors.New(policyBlockedReason),
 			}
 			return execResult{index: v.index, record: record, output: blockedMsg + "\n", failed: true, toolID: v.rtc.ID}
 		}

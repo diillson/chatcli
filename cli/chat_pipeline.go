@@ -526,6 +526,7 @@ func (cli *ChatCLI) resolveSkillsForTurn(
 	filePaths = extractFilePaths(userInput + " " + additionalContext)
 	autoActivated = mgr.FindAutoActivatedSkills(userInput, filePaths)
 	autoActivated = dedupAutoAgainstPinned(autoActivated, pinned)
+	pulseSkillsActivated("", pulseSkillSourceChat, skillNames(autoActivated)...)
 	return pinned, autoActivated, filePaths
 }
 

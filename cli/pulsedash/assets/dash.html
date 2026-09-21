@@ -286,7 +286,9 @@ function subline(n) {
     else if (a.action) parts.push(a.action);
     return parts.join(" · ") || (a.run_kind || "");
   }
-  const parts = [n.calls + "×"];
+  const parts = [];
+  if (n.attrs.state) parts.push(n.attrs.state);   // MCP lifecycle, skill aging: state over counters
+  if (n.calls || !n.attrs.state) parts.push(n.calls + "×");
   if (n.active) parts.push(n.active + " " + S("active", "active"));
   if (n.timed) parts.push("~" + ms(n.totalMs / n.timed));
   if (n.errors) parts.push(n.errors + " " + S("errors", "err"));

@@ -180,6 +180,7 @@ func (a *AgentMode) rescanSkillsMidLoop(text string, turn int) (string, []string
 	for _, s := range fresh {
 		names = append(names, s.Name)
 	}
+	pulseSkillsActivated(a.orchRun.ID(), pulseSkillSourceMidLoop, names...)
 	block := buildMidLoopSkillBlockBudgeted(fresh, a.skillCharsInjected)
 	a.skillCharsInjected += len(block)
 	a.logger.Info("agent mode: mid-loop skill activation",
@@ -221,6 +222,7 @@ func (a *AgentMode) releaseCollapsedSkills(names []string, turn int) {
 	if a.skillCollapseTurn == nil {
 		a.skillCollapseTurn = make(map[string]int)
 	}
+	pulseSkillsCollapsed(a.orchRun.ID(), names)
 	for _, name := range names {
 		delete(a.injectedSkillNames, name)
 		a.skillCollapseTurn[name] = turn
@@ -252,6 +254,9 @@ func (a *AgentMode) noteInjectedSkills(skills ...*persona.Skill) {
 	}
 	for _, s := range skills {
 		if s != nil {
+			if !a.injectedSkillNames[s.Name] {
+				pulseSkillsActivated(a.orchRun.ID(), pulseSkillSourceStartup, s.Name)
+			}
 			a.injectedSkillNames[s.Name] = true
 		}
 	}
