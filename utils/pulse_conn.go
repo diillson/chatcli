@@ -24,6 +24,33 @@ import (
 	"github.com/diillson/chatcli/pkg/pulse"
 )
 
+// MeterTransport wraps a transport so its requests show on the live
+// dashboard. It is for the clients built outside NewHTTPClient* (web tools,
+// embedding providers), which the logging transport never sees. A nil base
+// means http.DefaultTransport. The body of every response is metered as it
+// is read, so a large download reports its real size without being buffered.
+func MeterTransport(base http.RoundTripper) http.RoundTripper {
+	if base == nil {
+		base = http.DefaultTransport
+	}
+	return &meterTransport{base: base}
+}
+
+type meterTransport struct {
+	base http.RoundTripper
+}
+
+func (m *meterTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	conn := beginConnSpan(req)
+	resp, err := m.base.RoundTrip(req)
+	if err != nil || resp == nil {
+		conn.fail(err)
+		return resp, err
+	}
+	resp.Body = conn.stream(resp.StatusCode, resp.Body)
+	return resp, nil
+}
+
 // connSpan measures one outbound request. A nil connSpan does nothing, which
 // is what beginConnSpan returns while the dashboard is off.
 type connSpan struct {

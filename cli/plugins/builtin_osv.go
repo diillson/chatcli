@@ -34,7 +34,7 @@ var osvBaseURL = "https://api.osv.dev"
 // osvHTTPClient is the HTTP client used for OSV queries. Overridable in tests.
 // It shares the proxy-aware transport so OSV lookups authenticate against a
 // corporate proxy just like @webfetch/@websearch (see builtin_web_httpclient.go).
-var osvHTTPClient = &http.Client{Timeout: 30 * time.Second, Transport: &proxyAuthTransport{base: newWebTransport()}}
+var osvHTTPClient = &http.Client{Timeout: 30 * time.Second, Transport: newWebRoundTripper()}
 
 // BuiltinOsvPlugin is the @osv tool.
 type BuiltinOsvPlugin struct{}

@@ -167,3 +167,54 @@ func TestConnTelemetryIsFreeWhileOff(t *testing.T) {
 		t.Fatal("status mapping")
 	}
 }
+
+// Clients built outside NewHTTPClient* opt in through MeterTransport. The
+// body is metered while the caller reads it, never buffered, and the node
+// closes with the real size.
+func TestMeterTransportReportsAndNeverBuffers(t *testing.T) {
+	collect := watchConns(t)
+	payload := strings.Repeat("x", 4096)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = io.WriteString(w, payload)
+	}))
+	defer srv.Close()
+
+	c := &http.Client{Transport: MeterTransport(nil), Timeout: 5 * time.Second}
+	resp, err := c.Get(srv.URL + "/SECRET-PATH?key=SECRET-QUERY") // #nosec G107 -- local test server
+	if err != nil {
+		t.Fatal(err)
+	}
+	if evs := collect(1); evs[0].Phase != pulse.PhaseStart {
+		t.Fatalf("only the start may exist before the body is read: %+v", evs)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	_ = resp.Body.Close()
+	if string(body) != payload {
+		t.Fatal("the caller must receive the body untouched")
+	}
+	end := collect(2)[1]
+	if end.Status != pulse.StatusOK || end.Attrs["resp_bytes"] != "4096" || end.Attrs["status"] != "200" {
+		t.Fatalf("end = %+v", end)
+	}
+	wire, _ := json.Marshal(collect(2))
+	if strings.Contains(string(wire), "SECRET") {
+		t.Fatalf("path or query leaked: %s", wire)
+	}
+}
+
+func TestMeterTransportPassesFailuresThrough(t *testing.T) {
+	collect := watchConns(t)
+	srv := httptest.NewServer(http.NotFoundHandler())
+	url := srv.URL
+	srv.Close()
+	resp, err := (&http.Client{Transport: MeterTransport(http.DefaultTransport), Timeout: 2 * time.Second}).Get(url) // #nosec G107 -- local test server
+	if resp != nil {
+		_ = resp.Body.Close()
+	}
+	if err == nil {
+		t.Fatal("expected a dial error")
+	}
+	if end := collect(2)[1]; end.Status != pulse.StatusError {
+		t.Fatalf("end = %+v", end)
+	}
+}
