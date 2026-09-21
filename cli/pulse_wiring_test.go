@@ -110,7 +110,7 @@ func TestPulseLLMTapPairsRequestsPerModel(t *testing.T) {
 
 	assert.Equal(t, "llm-1", got[0].ID)
 	assert.Equal(t, pulse.PhaseStart, got[0].Phase)
-	assert.Equal(t, "openai:gpt-x", got[0].Name)
+	assert.Equal(t, "OPENAI:gpt-x", got[0].Name, "the provider is upper-cased so request taps and usage reports meet on one node")
 	assert.Equal(t, "512", got[0].Attrs["payload_bytes"])
 	assert.NotContains(t, got[0].Attrs, "prompt", "only the allow-listed numeric fields pass")
 

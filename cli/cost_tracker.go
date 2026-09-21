@@ -23,6 +23,7 @@ import (
 	"github.com/diillson/chatcli/llm/pricing"
 	"github.com/diillson/chatcli/llm/zai"
 	"github.com/diillson/chatcli/models"
+	"github.com/diillson/chatcli/pkg/pulse"
 	"go.uber.org/zap"
 )
 
@@ -451,8 +452,12 @@ func (ct *CostTracker) RecordRealUsageIn(lane UsageLane, provider, model string,
 		ct.lastSave = time.Now()
 	}
 	hook := ct.onRealUsage
+	usageEvents := ct.pulseUsageEventsLocked(lane, rec, inputTokens, usage)
 	ct.mu.Unlock()
 
+	for _, ev := range usageEvents {
+		pulse.Emit(ev)
+	}
 	if shouldSave {
 		_ = ct.SaveSession()
 	}

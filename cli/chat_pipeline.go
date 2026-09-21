@@ -1214,6 +1214,7 @@ func (cli *ChatCLI) telemetryParts(provider, model string, usage *models.UsageIn
 		if used, res, ok := cli.projectedContextParts(window); ok {
 			pct, reserve = used, res
 		}
+		pulseContextWindow(roundPct(pct), window)
 		if roundPct(reserve) > 0 {
 			parts = append(parts, i18n.T("chat.envelope.context_pct_reserve", roundPct(pct), roundPct(reserve)))
 		} else {
