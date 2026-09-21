@@ -1,5 +1,27 @@
 # Changelog
 
+## [1.206.0](https://github.com/diillson/chatcli/compare/v1.205.1...v1.206.0) (2026-09-21)
+
+
+### Features
+
+* **dash:** add the dash command and wire the run and LLM request taps ([#1620](https://github.com/diillson/chatcli/issues/1620)) ([ddef6f8](https://github.com/diillson/chatcli/commit/ddef6f87fb37f6c9fec0aa3578529c3fb48b72ea))
+* **pulse:** add the live telemetry bus and its disk spool ([#1617](https://github.com/diillson/chatcli/issues/1617)) ([78e89d6](https://github.com/diillson/chatcli/commit/78e89d623db388df59d3aa0f9020a2783a54ea13))
+* **pulsedash:** add the live telemetry dashboard server and page ([#1619](https://github.com/diillson/chatcli/issues/1619)) ([38e469a](https://github.com/diillson/chatcli/commit/38e469ac1bd177cb577a21128abb1894bf1fdcfd))
+* **pulse:** hang each LLM request from the agent that made it ([#1626](https://github.com/diillson/chatcli/issues/1626)) ([4dd924c](https://github.com/diillson/chatcli/commit/4dd924c97bc630093e197b1ae61b517f43469541))
+* **pulse:** meter the tokenizer, self-update, release check and OTLP clients ([#1628](https://github.com/diillson/chatcli/issues/1628)) ([8aa1532](https://github.com/diillson/chatcli/commit/8aa15325bc91b3431d19a56bd079d21875bae812))
+* **pulse:** report background work on the live dashboard ([#1624](https://github.com/diillson/chatcli/issues/1624)) ([fc98b60](https://github.com/diillson/chatcli/commit/fc98b6001f85556e9553a830e8e8b6f865a992b9))
+* **pulse:** report outbound connections on the live dashboard ([#1622](https://github.com/diillson/chatcli/issues/1622)) ([d26d3ff](https://github.com/diillson/chatcli/commit/d26d3ff305e0b01893f3b2583320ac6a9cac364c))
+* **pulse:** report the MCP and ACP server surfaces and the scheduler daemon ([#1625](https://github.com/diillson/chatcli/issues/1625)) ([86b12b0](https://github.com/diillson/chatcli/commit/86b12b0963a0b6f3fb57866df850fe3680fa75c4))
+* **pulse:** report the seven harness patterns and what each one concluded ([#1623](https://github.com/diillson/chatcli/issues/1623)) ([3657c34](https://github.com/diillson/chatcli/commit/3657c34375e9f6b9caf3d2934bd322581bb043dd))
+* **pulse:** report tools, MCP servers, skills and chat turns on the live dashboard ([#1621](https://github.com/diillson/chatcli/issues/1621)) ([d2c2a0f](https://github.com/diillson/chatcli/commit/d2c2a0f102750f4d7a639028244bcc0ce217ed0e))
+* **runs:** allow keyed observers on the run registry and the request auditor ([#1618](https://github.com/diillson/chatcli/issues/1618)) ([f8ba536](https://github.com/diillson/chatcli/commit/f8ba5362d94e9aef1c84aae668b677074f059c56))
+
+
+### Bug Fixes
+
+* **utils:** stream event-stream responses through the logging transport ([#1614](https://github.com/diillson/chatcli/issues/1614)) ([b965d60](https://github.com/diillson/chatcli/commit/b965d6077971779871edb20e997c476f8e0ccd22))
+
 ## [1.205.1](https://github.com/diillson/chatcli/compare/v1.205.0...v1.205.1) (2026-09-17)
 
 
