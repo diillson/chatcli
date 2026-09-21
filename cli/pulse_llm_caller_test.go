@@ -57,7 +57,7 @@ func TestLLMRequestsHangFromTheAgentThatMadeThem(t *testing.T) {
 		assert.Equalf(t, want.parent, pair[0].Parent, "%s start parent", id)
 		assert.Equalf(t, want.parent, pair[1].Parent, "%s end hangs from the same node as its start", id)
 		assert.Equalf(t, want.status, pair[1].Status, "%s outcome", id)
-		assert.Equal(t, "claudeai:fable", pair[0].Name, "the hub is still the model, not the caller")
+		assert.Equal(t, "CLAUDEAI:fable", pair[0].Name, "the hub is still the model, not the caller")
 	}
 	assert.Empty(t, tap.open)
 }

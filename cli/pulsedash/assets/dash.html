@@ -277,7 +277,7 @@ function rr(x, y, w, h, r) { ctx.beginPath(); ctx.moveTo(x+r,y); ctx.arcTo(x+w,y
 function clip(text, max) { if (ctx.measureText(text).width <= max) return text; let t = text; while (t.length > 1 && ctx.measureText(t + "…").width > max) t = t.slice(0, -1); return t + "…"; }
 function ms(v) { return v >= 1000 ? (v / 1000).toFixed(v >= 10000 ? 0 : 1) + "s" : Math.round(v) + "ms"; }
 function subline(n) {
-  if (n.kind === "session") { const a = n.attrs; return [a.provider, a.model].filter(Boolean).join(" · "); }
+  if (n.kind === "session") { const a = n.attrs; return [a.model || a.provider, a.cost, a.ctx && ("ctx " + a.ctx)].filter(Boolean).join(" · "); }
   if (n.kind === "agent") {
     const a = n.attrs, parts = [];
     if (a.turn) parts.push(S("turn", "turn") + " " + a.turn + "/" + a.max_turns);
@@ -292,6 +292,7 @@ function subline(n) {
   if (n.active) parts.push(n.active + " " + S("active", "active"));
   if (n.timed) parts.push("~" + ms(n.totalMs / n.timed));
   if (n.errors) parts.push(n.errors + " " + S("errors", "err"));
+  if (n.attrs.cost) parts.push(n.attrs.cost);   // what this model has cost so far, from the cost tracker
   return parts.join(" · ");
 }
 function bez(a, b) { const x1 = a.x + NODE_W, y1 = a.y + NODE_H/2, x2 = b.x, y2 = b.y + NODE_H/2, c = Math.max(40, (x2 - x1)/2); return {x1,y1,x2,y2,c1x:x1+c,c2x:x2-c}; }

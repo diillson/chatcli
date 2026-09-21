@@ -254,7 +254,7 @@ func (t *pulseLLMTap) observe(ev client.RequestAuditEvent) {
 	out := pulse.Event{
 		Kind:   pulse.KindLLM,
 		Parent: pulseSessionNodeID,
-		Name:   ev.Provider + ":" + ev.Model,
+		Name:   pulseModelNode(ev.Provider, ev.Model),
 		TS:     ev.Time,
 	}
 	if caller != "" {
