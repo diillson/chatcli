@@ -232,7 +232,7 @@ func shadeHex(hex string, amount float64) string {
 // dashStringKeys are the page strings; each maps to the catalog key
 // "dash.ui.<key>".
 var dashStringKeys = []string{
-	"title", "feed", "nodes", "active", "rate", "fit", "pause", "resume", "empty", "ended", "turn", "tools", "errors",
+	"title", "feed", "nodes", "active", "rate", "fit", "reset", "reset_hint", "pause", "resume", "empty", "ended", "turn", "tools", "errors",
 	"forbidden", "offline", "p.kind", "p.status", "p.calls", "p.errors", "p.avg", "p.took", "p.recent",
 	"kind.session", "kind.agent", "kind.turn", "kind.llm", "kind.tool", "kind.skill", "kind.mcp", "kind.pattern",
 	"kind.background", "kind.conn", "kind.rpc",
