@@ -117,6 +117,10 @@ func TestInitLLMAudit_LockedManagedPathFailsClosed(t *testing.T) {
 	if err := os.WriteFile(managed, []byte("!CHATCLI_AUDIT_LOG_PATH="+unwritable+"\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
+	// The managed policy is process-global. Registered before Setenv so it
+	// runs after the env is restored: the reload then finds no policy file
+	// and clears the lock instead of leaking it into later tests.
+	t.Cleanup(func() { config.ApplyManaged() })
 	t.Setenv("CHATCLI_MANAGED_CONFIG", managed)
 	config.ApplyManaged()
 	t.Setenv(AuditLogPathEnv, unwritable)
@@ -155,6 +159,10 @@ func TestInitLLMAudit_LockedUnwritableAbsolutePathFailsClosed(t *testing.T) {
 	if err := os.WriteFile(managed, []byte("!CHATCLI_AUDIT_LOG_PATH="+target+"\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
+	// The managed policy is process-global. Registered before Setenv so it
+	// runs after the env is restored: the reload then finds no policy file
+	// and clears the lock instead of leaking it into later tests.
+	t.Cleanup(func() { config.ApplyManaged() })
 	t.Setenv("CHATCLI_MANAGED_CONFIG", managed)
 	config.ApplyManaged()
 	t.Setenv(AuditLogPathEnv, target)
