@@ -268,9 +268,10 @@ func (e *Engine) Run(ctx context.Context) (string, error) {
 var heartbeatInterval = 5 * time.Second
 
 // startHeartbeat polls the run registry for this run's live children and
-// streams a transient progress line while any are active. Polling (instead
-// of Registry.OnEvent) is deliberate: the registry has a single observer
-// slot and the hub bridge owns it.
+// streams a transient progress line while any are active. Sampling on a
+// ticker is deliberate: the line is a pace-limited summary, and an observer
+// (Registry.OnEventKeyed) would fire on every turn and every tool of every
+// worker, which would need the same ticker back to throttle it.
 func (e *Engine) startHeartbeat(ctx context.Context, parentRunID string) func() {
 	if e.cfg.OnEvent == nil || parentRunID == "" {
 		return func() {}

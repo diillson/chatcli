@@ -27,6 +27,7 @@ import (
 	"time"
 
 	"github.com/diillson/chatcli/cli/scheduler"
+	"github.com/diillson/chatcli/utils"
 )
 
 // Webhook implements scheduler.ActionExecutor.
@@ -107,10 +108,11 @@ func (Webhook) Execute(ctx context.Context, action scheduler.Action, env *schedu
 
 	client := &http.Client{
 		Timeout: timeout,
-		Transport: &http.Transport{
+		// Metered so the webhook target shows on the live dashboard.
+		Transport: utils.MeterTransport(&http.Transport{
 			TLSClientConfig:       &tls.Config{InsecureSkipVerify: insecure}, //#nosec G402 -- opt-in
 			ResponseHeaderTimeout: timeout,
-		},
+		}),
 	}
 	resp, err := client.Do(req)
 	if err != nil {

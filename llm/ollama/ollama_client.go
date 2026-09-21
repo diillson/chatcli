@@ -139,7 +139,7 @@ func (c *Client) SendPrompt(ctx context.Context, prompt string, history []models
 	}
 
 	start := time.Now()
-	client.LogRequestStart(c.logger, "OLLAMA", c.model,
+	client.LogRequestStart(c.logger, "OLLAMA", c.model, client.CallerField(ctx),
 		zap.Int("payload_bytes", len(body)),
 		zap.Int("history_len", len(history)),
 		zap.Int("max_tokens", effectiveMaxTokens),
@@ -212,12 +212,12 @@ func (c *Client) SendPrompt(ctx context.Context, prompt string, history []models
 	})
 
 	if err != nil {
-		client.LogRequestFinish(c.logger, "OLLAMA", c.model, "error", time.Since(start))
+		client.LogRequestFinish(c.logger, "OLLAMA", c.model, "error", time.Since(start), client.CallerField(ctx))
 		c.logger.Error(i18n.T("llm.ollama.get_response_error"), zap.Error(err))
 		return "", err
 	}
 
-	client.LogRequestFinish(c.logger, "OLLAMA", c.model, "success", time.Since(start),
+	client.LogRequestFinish(c.logger, "OLLAMA", c.model, "success", time.Since(start), client.CallerField(ctx),
 		zap.Int("response_chars", len(response)),
 	)
 

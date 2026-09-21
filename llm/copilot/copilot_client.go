@@ -158,7 +158,7 @@ func (c *Client) SendPrompt(ctx context.Context, prompt string, history []models
 	}
 
 	start := time.Now()
-	client.LogRequestStart(c.logger, "COPILOT", c.model,
+	client.LogRequestStart(c.logger, "COPILOT", c.model, client.CallerField(ctx),
 		zap.Int("payload_bytes", len(jsonValue)),
 		zap.Int("history_len", len(history)),
 		zap.Int("max_tokens", effectiveMaxTokens),
@@ -175,10 +175,10 @@ func (c *Client) SendPrompt(ctx context.Context, prompt string, history []models
 		return c.processResponse(resp)
 	})
 	if err != nil {
-		client.LogRequestFinish(c.logger, "COPILOT", c.model, "error", time.Since(start))
+		client.LogRequestFinish(c.logger, "COPILOT", c.model, "error", time.Since(start), client.CallerField(ctx))
 		return response, err
 	}
-	client.LogRequestFinish(c.logger, "COPILOT", c.model, "success", time.Since(start),
+	client.LogRequestFinish(c.logger, "COPILOT", c.model, "success", time.Since(start), client.CallerField(ctx),
 		zap.Int("response_chars", len(response)),
 	)
 	return response, nil

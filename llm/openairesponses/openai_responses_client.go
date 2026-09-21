@@ -182,7 +182,7 @@ func (c *OpenAIResponsesClient) SendPrompt(ctx context.Context, prompt string, h
 	}
 
 	start := time.Now()
-	client.LogRequestStart(c.logger, "OPENAI", c.model,
+	client.LogRequestStart(c.logger, "OPENAI", c.model, client.CallerField(ctx),
 		zap.String("path", "responses"),
 		zap.Int("payload_bytes", len(jsonValue)),
 		zap.Int("history_len", len(history)),
@@ -205,14 +205,14 @@ func (c *OpenAIResponsesClient) SendPrompt(ctx context.Context, prompt string, h
 	})
 
 	if err != nil {
-		client.LogRequestFinish(c.logger, "OPENAI", c.model, "error", time.Since(start),
+		client.LogRequestFinish(c.logger, "OPENAI", c.model, "error", time.Since(start), client.CallerField(ctx),
 			zap.String("path", "responses"),
 		)
 		c.logger.Error(i18n.T("llm.responses.get_response_error"), zap.Error(err))
 		return "", err
 	}
 
-	client.LogRequestFinish(c.logger, "OPENAI", c.model, "success", time.Since(start),
+	client.LogRequestFinish(c.logger, "OPENAI", c.model, "success", time.Since(start), client.CallerField(ctx),
 		zap.String("path", "responses"),
 		zap.Int("response_chars", len(response)),
 	)

@@ -541,7 +541,7 @@ func (c *BedrockClient) sendPromptAnthropicModel(ctx context.Context, wireModel,
 	}
 
 	start := time.Now()
-	client.LogRequestStart(c.logger, "BEDROCK", wireModel,
+	client.LogRequestStart(c.logger, "BEDROCK", wireModel, client.CallerField(ctx),
 		zap.String("family", string(familyAnthropic)),
 		zap.String("region", c.region),
 		zap.String("endpoint", RuntimeEndpointURL(c.region)),
@@ -570,7 +570,7 @@ func (c *BedrockClient) sendPromptAnthropicModel(ctx context.Context, wireModel,
 	})
 
 	if err != nil {
-		client.LogRequestFinish(c.logger, "BEDROCK", wireModel, "error", time.Since(start),
+		client.LogRequestFinish(c.logger, "BEDROCK", wireModel, "error", time.Since(start), client.CallerField(ctx),
 			zap.String("family", string(familyAnthropic)),
 		)
 		c.logger.Error(i18n.T("llm.error.get_response_after_retries", "Bedrock"), zap.Error(err))
@@ -578,7 +578,7 @@ func (c *BedrockClient) sendPromptAnthropicModel(ctx context.Context, wireModel,
 		// learn the proxy/WAF cap from the exact size that was rejected.
 		return "", client.WithRequestSize(err, len(payload))
 	}
-	client.LogRequestFinish(c.logger, "BEDROCK", wireModel, "success", time.Since(start),
+	client.LogRequestFinish(c.logger, "BEDROCK", wireModel, "success", time.Since(start), client.CallerField(ctx),
 		zap.String("family", string(familyAnthropic)),
 		zap.Int("response_chars", len(responseText)),
 	)

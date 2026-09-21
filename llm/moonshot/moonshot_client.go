@@ -159,7 +159,7 @@ func (c *MoonshotClient) SendPrompt(ctx context.Context, prompt string, history 
 	}
 
 	start := time.Now()
-	client.LogRequestStart(c.logger, "MOONSHOT", c.model,
+	client.LogRequestStart(c.logger, "MOONSHOT", c.model, client.CallerField(ctx),
 		zap.Int("payload_bytes", len(jsonValue)),
 		zap.Int("history_len", len(history)),
 		zap.Int("max_tokens", effectiveMaxTokens),
@@ -178,12 +178,12 @@ func (c *MoonshotClient) SendPrompt(ctx context.Context, prompt string, history 
 	})
 
 	if err != nil {
-		client.LogRequestFinish(c.logger, "MOONSHOT", c.model, "error", time.Since(start))
+		client.LogRequestFinish(c.logger, "MOONSHOT", c.model, "error", time.Since(start), client.CallerField(ctx))
 		c.logger.Error(i18n.T("llm.error.get_response_after_retries", "MOONSHOT"), zap.Error(err))
 		return "", err
 	}
 
-	client.LogRequestFinish(c.logger, "MOONSHOT", c.model, "success", time.Since(start),
+	client.LogRequestFinish(c.logger, "MOONSHOT", c.model, "success", time.Since(start), client.CallerField(ctx),
 		zap.Int("response_chars", len(response)),
 	)
 	return response, nil

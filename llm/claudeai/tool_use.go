@@ -121,7 +121,7 @@ func (c *ClaudeClient) SendPromptWithTools(ctx context.Context, prompt string, h
 	}
 
 	start := time.Now()
-	client.LogRequestStart(c.logger, "CLAUDEAI", c.model,
+	client.LogRequestStart(c.logger, "CLAUDEAI", c.model, client.CallerField(ctx),
 		zap.String("path", "tool_use"),
 		zap.Int("payload_bytes", len(jsonValue)),
 		zap.Int("history_len", len(history)),
@@ -164,12 +164,12 @@ func (c *ClaudeClient) SendPromptWithTools(ctx context.Context, prompt string, h
 		return string(bodyBytes), nil
 	})
 	if err != nil {
-		client.LogRequestFinish(c.logger, "CLAUDEAI", c.model, "error", time.Since(start),
+		client.LogRequestFinish(c.logger, "CLAUDEAI", c.model, "error", time.Since(start), client.CallerField(ctx),
 			zap.String("path", "tool_use"),
 		)
 		return nil, err
 	}
-	client.LogRequestFinish(c.logger, "CLAUDEAI", c.model, "success", time.Since(start),
+	client.LogRequestFinish(c.logger, "CLAUDEAI", c.model, "success", time.Since(start), client.CallerField(ctx),
 		zap.String("path", "tool_use"),
 		zap.Int("response_bytes", len(respBody)),
 	)
