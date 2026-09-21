@@ -47,7 +47,7 @@ var assets embed.FS
 const (
 	readHeaderTimeout = 10 * time.Second
 	bootPlaceholder   = "__PULSE_BOOT__"
-	tokenHeader       = "X-Pulse-Token"
+	tokenHeader       = "X-Pulse-Token" // #nosec G101 -- the NAME of the request header, not a credential; the token itself is random per server
 	maxEventsPerPoll  = 2000
 )
 
