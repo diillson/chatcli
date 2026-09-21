@@ -94,5 +94,6 @@ func attachSession(ctx context.Context, endpoint string) (*Session, error) {
 		s.conn.close()
 		return nil, err
 	}
+	s.pulseBegin()
 	return s, nil
 }

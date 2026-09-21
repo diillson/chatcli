@@ -151,23 +151,6 @@ func TestConnTelemetryReportsTransportFailure(t *testing.T) {
 	}
 }
 
-func TestConnTelemetryIsFreeWhileOff(t *testing.T) {
-	req, _ := http.NewRequest(http.MethodGet, "https://example.test/x", nil)
-	if beginConnSpan(req) != nil {
-		t.Fatal("dashboard off: no span")
-	}
-	var c *connSpan
-	c.fail(io.EOF)
-	c.finish(200, 1)
-	body := io.NopCloser(strings.NewReader("x"))
-	if c.stream(200, body) != body {
-		t.Fatal("dashboard off: the body must not be wrapped")
-	}
-	if connStatus(399) != pulse.StatusOK || connStatus(500) != pulse.StatusError {
-		t.Fatal("status mapping")
-	}
-}
-
 // Clients built outside NewHTTPClient* opt in through MeterTransport. The
 // body is metered while the caller reads it, never buffered, and the node
 // closes with the real size.

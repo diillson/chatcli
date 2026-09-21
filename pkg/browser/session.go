@@ -102,16 +102,6 @@ type Session struct {
 // NewSession launches a browser, attaches to a fresh page target and enables
 // the domains the actions need.
 func NewSession(ctx context.Context) (*Session, error) {
-	s, err := openSession(ctx)
-	if err == nil {
-		s.pulseBegin()
-	}
-	return s, err
-}
-
-// openSession attaches to the user's browser when one is configured and
-// launches one otherwise.
-func openSession(ctx context.Context) (*Session, error) {
 	if ep := attachURL(); ep != "" {
 		return attachSession(ctx, ep)
 	}
@@ -120,7 +110,11 @@ func openSession(ctx context.Context) (*Session, error) {
 
 // pulseBegin opens the live-dashboard span of the browser: a Chrome process
 // (or an attachment to the user's own) that stays up across turns. Only how
-// it runs is reported, never a URL or anything on a page.
+// it runs is reported, never a URL or anything on a page. It is called by the
+// two constructors, launchSession and attachSession, so every way a session
+// comes to exist is covered: the first open, a relaunch when the window is
+// shown or hidden, and a mode switch. Each of those closes the previous
+// session first, which ends its span.
 func (s *Session) pulseBegin() {
 	mode := "visible"
 	switch {
@@ -160,6 +154,7 @@ func launchSession(ctx context.Context, headless bool, userDataDir string) (*Ses
 		s.Close(ctx)
 		return nil, err
 	}
+	s.pulseBegin()
 	return s, nil
 }
 

@@ -29,6 +29,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/diillson/chatcli/pkg/pulse"
 )
 
 // Standard OpenTelemetry environment variables honored by the exporter.
@@ -111,7 +113,7 @@ func NewFromEnv(source Source, extraResource map[string]string) *Exporter {
 		headers:  parseHeaders(os.Getenv(EnvHeaders)),
 		resource: map[string]string{"service.name": defaultServiceName},
 		interval: defaultInterval,
-		client:   &http.Client{Timeout: pushTimeout},
+		client:   &http.Client{Timeout: pushTimeout, Transport: pulse.MeterTransport(nil)}, // pushes to the collector show on the live dashboard
 		source:   source,
 		start:    time.Now(),
 	}

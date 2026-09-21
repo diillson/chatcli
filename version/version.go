@@ -16,6 +16,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/diillson/chatcli/pkg/pulse"
 )
 
 var (
@@ -47,7 +49,8 @@ func versionCheckDisabled() bool {
 // apontam CHATCLI_LATEST_VERSION_URL para um servidor de teste).
 var FetchLatestReleaseImpl = func(ctx context.Context) (ReleaseInfo, error) {
 	client := &http.Client{
-		Timeout: 10 * time.Second,
+		Timeout:   10 * time.Second,
+		Transport: pulse.MeterTransport(nil), // the release check shows on the live dashboard
 	}
 
 	url := os.Getenv("CHATCLI_LATEST_VERSION_URL")

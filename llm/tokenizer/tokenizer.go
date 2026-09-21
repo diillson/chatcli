@@ -35,6 +35,7 @@ import (
 	"time"
 
 	"github.com/diillson/chatcli/models"
+	"github.com/diillson/chatcli/pkg/pulse"
 	"github.com/diillson/chatcli/utils"
 	tiktoken "github.com/pkoukk/tiktoken-go"
 )
@@ -200,7 +201,7 @@ func stateDir() string {
 
 func setup() {
 	setupOnce.Do(func() {
-		loader = &cacheLoader{dir: stateDir(), client: &http.Client{Timeout: fetchTimeout}}
+		loader = &cacheLoader{dir: stateDir(), client: &http.Client{Timeout: fetchTimeout, Transport: pulse.MeterTransport(nil)}} // the vocabulary download shows on the live dashboard
 		tiktoken.SetBpeLoader(loader)
 	})
 }
