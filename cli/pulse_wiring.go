@@ -91,6 +91,39 @@ func (cli *ChatCLI) initPulse(ctx context.Context, surface string) {
 	})
 }
 
+// StartPulseRecorder starts live telemetry recording for an entry point that
+// never builds a ChatCLI — the standalone scheduler daemon. It gets the same
+// lease-driven lifecycle and the same CHATCLI_DASH switch as every other
+// surface, and a session node of its own so its jobs have a root to hang
+// from. The returned func stops recording and flushes the spool.
+func StartPulseRecorder(ctx context.Context, surface string, logger *zap.Logger) func() {
+	bus := pulse.Default()
+	bus.RegisterSnapshotter("00-session", func() []pulse.Event {
+		return []pulse.Event{{
+			Kind:   pulse.KindSession,
+			Phase:  pulse.PhaseStart,
+			ID:     pulseSessionNodeID,
+			Name:   surface,
+			Status: pulse.StatusRunning,
+		}}
+	})
+	wd, _ := os.Getwd()
+	ctl := pulse.Start(context.WithoutCancel(ctx), pulse.Options{
+		Bus:      bus,
+		ForcedFn: pulseForced,
+		Meta:     pulse.Meta{PID: os.Getpid(), Surface: surface, Version: version.Version, WorkDir: filepath.Base(wd)},
+		OnError: func(err error) {
+			if logger != nil {
+				logger.Debug("pulse: spool error", zap.Error(err))
+			}
+		},
+	})
+	return func() {
+		bus.RegisterSnapshotter("00-session", nil)
+		ctl.Close()
+	}
+}
+
 // pulseSurface renames the process role once the entry point knows it.
 func (cli *ChatCLI) pulseSurface(surface string) {
 	if cli == nil {

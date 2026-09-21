@@ -20,6 +20,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/diillson/chatcli/cli"
 	"github.com/diillson/chatcli/cli/scheduler"
 	"github.com/diillson/chatcli/cli/scheduler/builtins"
 	"go.uber.org/zap"
@@ -77,6 +78,12 @@ func daemonStart(ctx context.Context, args []string, logger *zap.Logger) error {
 		return fmt.Errorf("daemon: build scheduler: %w", err)
 	}
 	builtins.RegisterAll(s)
+
+	// The daemon builds no ChatCLI, so it starts its own telemetry recorder:
+	// without it the scheduler's events would have nowhere to go and the
+	// daemon would be invisible on the live dashboard.
+	stopPulse := cli.StartPulseRecorder(ctx, "daemon", logger)
+	defer stopPulse()
 
 	d := scheduler.NewDaemon(s, resolvedSocket, logger)
 	logger.Info("chatcli daemon starting", zap.String("socket", resolvedSocket))
