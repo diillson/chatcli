@@ -198,6 +198,14 @@ Shows:
 - per-pattern config (refine, verify, reflexion, plan-first, hyde, reasoning)
 - vector index state (provider name + entry count, when wired)
 
+`/config quality` shows how the patterns are **configured**. To watch them **run**, open the live dashboard:
+
+```bash
+/dash                      # or `chatcli dash` from another terminal
+```
+
+Each of the seven is a node that reports what it concluded, not just that it fired: Self-Refine `rewrote draft` / `kept draft` / `rolled back`; CoVe `verified clean` / `found discrepancy` / `corrected draft`; Reflexion the trigger and `lesson queued`, then from its background worker `lesson saved` / `no lesson` / `retrying` / `dead letter`; Plan-and-Solve `routed to @taskgraph` or `executed N steps`; HyDE `augmented retrieval` or `fell back to plain hints`; the reasoning backbone the effort tier it attached; ReAct every loop with its turns. A pattern that is disabled, or whose guards reject the result, stays dark. The labels are fixed strings chosen by the code, never model output.
+
 ## Cost & latency notes
 
 | Pattern | Extra LLM calls per turn | Notes |
