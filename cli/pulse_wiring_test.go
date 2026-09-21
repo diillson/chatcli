@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/diillson/chatcli/cli/agent/runs"
+	"github.com/diillson/chatcli/i18n"
 	"github.com/diillson/chatcli/llm/client"
 	"github.com/diillson/chatcli/pkg/pulse"
 	"github.com/stretchr/testify/assert"
@@ -236,7 +237,12 @@ func TestShowConfigPulse(t *testing.T) {
 	assert.Contains(t, configSectionNames, "dash")
 }
 
-func TestStoragePulseSpoolRetention(t *testing.T) {
+// /storage prune is the user asking for the store to be cleaned: the spool of
+// a process that is no longer running has nothing left to record and goes
+// now, not a day later. (The day of grace belongs to the automatic sweep at
+// boot, which nobody asked for.) What must never go: a process that is still
+// recording, this process, and the lease.
+func TestStoragePrunePulseRemovesEveryDeadSpool(t *testing.T) {
 	now := time.Now()
 	root := t.TempDir()
 	dir := filepath.Join(root, StorePulse)
@@ -247,21 +253,38 @@ func TestStoragePulseSpoolRetention(t *testing.T) {
 		require.NoError(t, os.WriteFile(filepath.Join(dir, name, "events-00000000000000000001.ndjson"), []byte(strings.Repeat("x", 100)), 0o600))
 	}
 	writeMeta("old-dead", true, 48*time.Hour)
-	writeMeta("recent-dead", true, time.Hour)
-	writeMeta("live", false, 0)
+	writeMeta("just-ended", true, time.Second)                // closed cleanly a second ago
+	writeMeta("crashed", false, time.Minute)                  // never marked ended, heartbeat stale
+	writeMeta("live", false, 0)                               // still recording
+	writeMeta(pulse.Default().Instance(), true, 48*time.Hour) // this very process
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "lease.json"), []byte(`{}`), 0o600))
+
+	// A directory with no readable meta.json: a crash between mkdir and the
+	// first write. Old ones are debris; a fresh one may be a process booting.
+	oldStray, freshStray := filepath.Join(dir, "stray-old"), filepath.Join(dir, "stray-fresh")
+	require.NoError(t, os.MkdirAll(oldStray, 0o750))
+	require.NoError(t, os.MkdirAll(freshStray, 0o750))
+	require.NoError(t, os.Chtimes(oldStray, now.Add(-3*time.Hour), now.Add(-3*time.Hour)))
 
 	res, err := RunStorage(context.Background(), StorageOptions{Root: root, Now: now})
 	require.NoError(t, err)
 	st := storeByName(res, StorePulse)
-	assert.Equal(t, PolicyRuns, st.Policy)
+	assert.Equal(t, PolicyDeadProcess, st.Policy, "its own policy, not the task graph's")
 	assert.False(t, st.Protected)
-	assert.Equal(t, 1, st.Prunable, "only the dead process past retention")
+	assert.Equal(t, 4, st.Prunable, "the inventory shows exactly what prune would remove")
+	assert.Equal(t, map[string]int{ReasonDead: 3, ReasonStray: 1}, st.Reasons)
 	assert.True(t, IsStorageStore(StorePulse))
+	assert.NotEqual(t, "storage.policy."+PolicyDeadProcess, i18n.T("storage.policy."+PolicyDeadProcess), "policy label translated")
+	assert.NotEqual(t, "storage.reason."+ReasonDead, i18n.T("storage.reason."+ReasonDead), "reason label translated")
 
 	applied, err := RunStorage(context.Background(), StorageOptions{Root: root, Now: now, Apply: true, Only: StorePulse})
 	require.NoError(t, err)
 	assert.True(t, applied.Applied)
-	assert.NoDirExists(t, filepath.Join(dir, "old-dead"))
-	assert.DirExists(t, filepath.Join(dir, "recent-dead"))
-	assert.DirExists(t, filepath.Join(dir, "live"))
+	for _, gone := range []string{"old-dead", "just-ended", "crashed", "stray-old"} {
+		assert.NoDirExists(t, filepath.Join(dir, gone), gone)
+	}
+	for _, kept := range []string{"live", pulse.Default().Instance(), "stray-fresh"} {
+		assert.DirExists(t, filepath.Join(dir, kept), kept)
+	}
+	assert.FileExists(t, filepath.Join(dir, "lease.json"), "the lease is how dashboards turn recording on: never pruned")
 }
