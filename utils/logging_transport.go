@@ -127,6 +127,7 @@ type LoggingTransport struct {
 // RoundTrip implementa a interface http.RoundTripper
 func (t *LoggingTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	safeURL := t.sanitizeURL(req.URL.String())
+	conn := beginConnSpan(req) // nil while the live dashboard is off
 
 	// Log da requisição com URL sanitizada
 	t.Logger.Info("Enviando Requisição",
@@ -141,6 +142,7 @@ func (t *LoggingTransport) RoundTrip(req *http.Request) (*http.Response, error) 
 		reqBodyBytes, err = io.ReadAll(req.Body)
 		if err != nil {
 			t.Logger.Error("Erro ao ler o corpo da requisição", zap.Error(err))
+			conn.fail(err)
 			return nil, err
 		}
 		req.Body = io.NopCloser(bytes.NewBuffer(reqBodyBytes)) // Resetar o Body
@@ -160,6 +162,7 @@ func (t *LoggingTransport) RoundTrip(req *http.Request) (*http.Response, error) 
 			zap.Error(err),
 			zap.Duration("Duração", duration),
 		)
+		conn.fail(err)
 		return resp, err
 	}
 
@@ -177,6 +180,7 @@ func (t *LoggingTransport) RoundTrip(req *http.Request) (*http.Response, error) 
 	// com o corpo todo em memória. O corpo segue intocado para o chamador.
 	if isEventStream(resp.Header.Get("Content-Type")) {
 		t.Logger.Debug("Corpo da Resposta em streaming: não capturado")
+		resp.Body = conn.stream(resp.StatusCode, resp.Body)
 		return resp, nil
 	}
 
@@ -187,6 +191,7 @@ func (t *LoggingTransport) RoundTrip(req *http.Request) (*http.Response, error) 
 		if err != nil {
 			t.Logger.Error("Erro ao ler o corpo da resposta", zap.Error(err))
 			_ = resp.Body.Close()
+			conn.fail(err)
 			return resp, err
 		}
 		resp.Body = io.NopCloser(bytes.NewBuffer(respBodyBytes)) // Resetar o Body
@@ -195,6 +200,7 @@ func (t *LoggingTransport) RoundTrip(req *http.Request) (*http.Response, error) 
 		t.Logger.Debug("Corpo da Resposta", zap.ByteString("Body", sanitizedBody))
 	}
 
+	conn.finish(resp.StatusCode, int64(len(respBodyBytes)))
 	return resp, nil
 }
 

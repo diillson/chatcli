@@ -43,7 +43,7 @@ import (
 // Overridable in tests. It shares the proxy-aware transport so lookups work
 // behind a corporate proxy and honor the global TLS trust overrides, like the
 // @webfetch/@websearch/@osv builtins (see builtin_web_httpclient.go).
-var wikipediaHTTPClient = &http.Client{Timeout: 15 * time.Second, Transport: &proxyAuthTransport{base: newWebTransport()}}
+var wikipediaHTTPClient = &http.Client{Timeout: 15 * time.Second, Transport: newWebRoundTripper()}
 
 // wikipediaBaseURL builds the MediaWiki action API endpoint for a language
 // edition. Split out so tests can point it at a local server.

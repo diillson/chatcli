@@ -25,6 +25,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/diillson/chatcli/utils"
 )
 
 const (
@@ -55,7 +57,7 @@ func NewOllama(host, model string, dim int) (*Ollama, error) {
 	if strings.TrimSpace(model) == "" {
 		model = ollamaDefaultModel
 	}
-	return &Ollama{host: host, model: model, dim: dim, client: &http.Client{Timeout: 120 * time.Second}}, nil
+	return &Ollama{host: host, model: model, dim: dim, client: &http.Client{Timeout: 120 * time.Second, Transport: utils.MeterTransport(nil)}}, nil
 }
 
 // Name implements Provider.

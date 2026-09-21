@@ -18,9 +18,11 @@ package gateway
 
 import (
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
+	"github.com/diillson/chatcli/pkg/pulse"
 	"go.uber.org/zap"
 )
 
@@ -62,9 +64,11 @@ func newLoggingClient(c *http.Client, logger *zap.Logger, platform string) *http
 }
 
 func (lt *loggingTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	span := beginPlatformSpan(req, lt.platform)
 	start := time.Now()
 	resp, err := lt.base.RoundTrip(req)
 	dur := time.Since(start)
+	endPlatformSpan(span, resp, err)
 
 	fields := []zap.Field{
 		zap.String("platform", lt.platform),
@@ -107,4 +111,32 @@ func sanitizeAPIPath(p string) string {
 // requests are steady-state noise rather than discrete events.
 func isPollPath(p string) bool {
 	return strings.Contains(p, "getUpdates")
+}
+
+// beginPlatformSpan opens the live-dashboard span of a platform API request.
+// Long-poll receive loops fire continuously while idle and would bury every
+// other node, so they are left out, as they are left out of the Info log.
+// Only the hostname leaves the process: platform paths embed bot tokens.
+func beginPlatformSpan(req *http.Request, platform string) *pulse.Span {
+	if !pulse.Enabled() || req == nil || req.URL == nil || isPollPath(req.URL.Path) {
+		return nil
+	}
+	host := req.URL.Hostname()
+	if host == "" {
+		return nil
+	}
+	return pulse.Begin(pulse.KindConn, host, "").With("method", req.Method).With("platform", platform)
+}
+
+// endPlatformSpan closes the span with the outcome of the request.
+func endPlatformSpan(span *pulse.Span, resp *http.Response, err error) {
+	switch {
+	case span == nil:
+	case err != nil || resp == nil:
+		span.EndErr(err)
+	case resp.StatusCode >= http.StatusBadRequest:
+		span.With("status", strconv.Itoa(resp.StatusCode)).End(pulse.StatusError)
+	default:
+		span.With("status", strconv.Itoa(resp.StatusCode)).End(pulse.StatusOK)
+	}
 }

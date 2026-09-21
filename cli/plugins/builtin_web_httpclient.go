@@ -61,7 +61,7 @@ var (
 func webHTTPClient() *http.Client {
 	webClientOnce.Do(func() {
 		webClient = &http.Client{
-			Transport: &proxyAuthTransport{base: newWebTransport()},
+			Transport: newWebRoundTripper(),
 			// Re-validate every redirect hop so a 302 to an internal URL can't
 			// launder past the initial SSRF check.
 			CheckRedirect: validateRedirect,
@@ -118,6 +118,14 @@ func webGetWithUA(ctx context.Context, url, userAgent string, extraHeaders map[s
 		req.Header.Set(k, v)
 	}
 	return webHTTPClient().Do(req) //#nosec G704 -- request URL validated upstream (see above)
+}
+
+// newWebRoundTripper is the transport every web tool client uses: proxy
+// authentication over the proxy-aware transport, metered so the hosts the
+// tools reach show on the live dashboard. These clients are built outside
+// utils.NewHTTPClient*, so nothing else would see them.
+func newWebRoundTripper() http.RoundTripper {
+	return utils.MeterTransport(&proxyAuthTransport{base: newWebTransport()})
 }
 
 // newWebTransport builds the proxy-aware transport. The connection settings

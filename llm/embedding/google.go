@@ -24,6 +24,8 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/diillson/chatcli/utils"
 )
 
 const (
@@ -65,7 +67,7 @@ func NewGoogle(apiKey, model string, dim int) (*Google, error) {
 		endpoint: googleEndpointBase,
 		dim:      dim,
 		batchMax: googleBatchMax,
-		client:   &http.Client{Timeout: 30 * time.Second},
+		client:   &http.Client{Timeout: 30 * time.Second, Transport: utils.MeterTransport(nil)},
 	}, nil
 }
 

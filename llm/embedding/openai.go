@@ -17,6 +17,8 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/diillson/chatcli/utils"
 )
 
 const (
@@ -66,7 +68,7 @@ func NewOpenAI(apiKey, model string, dim int) (*OpenAI, error) {
 		model:    model,
 		endpoint: openaiEndpoint,
 		dim:      dim,
-		client:   &http.Client{Timeout: 30 * time.Second},
+		client:   &http.Client{Timeout: 30 * time.Second, Transport: utils.MeterTransport(nil)},
 	}, nil
 }
 

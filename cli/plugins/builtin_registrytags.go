@@ -54,7 +54,7 @@ import (
 // Overridable in tests. It shares the proxy-aware transport so lookups
 // authenticate against a corporate proxy and honor the global TLS trust
 // overrides, just like @webfetch/@websearch/@osv (see builtin_web_httpclient.go).
-var registryTagsHTTPClient = &http.Client{Timeout: 30 * time.Second, Transport: &proxyAuthTransport{base: newWebTransport()}}
+var registryTagsHTTPClient = &http.Client{Timeout: 30 * time.Second, Transport: newWebRoundTripper()}
 
 // registryTagsMaxTags caps how many tags a single call returns. A busy
 // repository (e.g. library/ubuntu) has thousands of tags; returning all of
