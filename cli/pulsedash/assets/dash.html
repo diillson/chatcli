@@ -101,7 +101,7 @@ const KINDS = ["session","agent","turn","llm","tool","skill","mcp","pattern","ba
 // Resource kinds share three columns instead of one each: a graph ten columns
 // wide only fits the screen at a zoom nobody can read.
 const GROUPS = [["llm","conn"], ["tool","mcp","skill"], ["pattern","background","turn","rpc"]];
-const NODE_W = 188, NODE_H = 54, GAP_X = 62, GAP_Y = 14, GROUP_GAP = 26, BAND_PAD = 34, MIN_FIT = .72, DONE_TTL = 45000, FEED_MAX = 250;
+const NODE_W = 188, NODE_H = 54, GAP_X = 62, GAP_Y = 14, GROUP_GAP = 34, HEAD_H = 20, BAND_PAD = 50, MIN_FIT = .72, DONE_TTL = 45000, FEED_MAX = 250;
 
 $("title").textContent = S("title", "ChatCLI · Live");
 $("lNodes").textContent = S("nodes", "nodes");
@@ -110,7 +110,7 @@ $("lRate").textContent = S("rate", "events/s");
 $("lFeed").textContent = S("feed", "Live events");
 $("bFit").textContent = S("fit", "Fit");
 $("bReset").textContent = S("reset", "Reset layout");
-$("bReset").title = S("reset_hint", "Drag any node to place it. Double-click a node, or use this, to hand it back to the automatic layout.");
+$("bReset").title = S("reset_hint", "Drag a card to place it, or drag a kind header (or Shift-drag a card) to move the whole kind. Double-click hands it back to the automatic layout; this does it for everything.");
 $("empty").textContent = S("empty", "Waiting for a chatcli process to report…\nRun something in any chatcli session on this machine.");
 
 const state = {
@@ -119,6 +119,8 @@ const state = {
   edges: new Map(),       // "from>to" -> {from,to,fire,active}
   particles: [],
   hidden: new Set(),      // hidden kinds
+  groupOff: new Map(),    // "inst|kind" -> {dx,dy,seq}: a whole kind dragged as one
+  moveSeq: 0,             // orders what the user moved: the latest holds its ground
   cam: {x:30, y:30, k:1}, autoFit: true, paused: false,
   recent: [],             // timestamps for the rate
 };
@@ -210,6 +212,17 @@ function visible(n) {
   const inst = state.instances.get(n.inst);
   return inst && inst.shown && !state.hidden.has(n.kind);
 }
+// Layout, in three passes.
+//  1. Flow: a band per process, a column per group, kinds stacked in a column.
+//     A node placed by hand (pin) and a kind moved as a whole (groupOff) leave
+//     the flow, so the column closes up behind them.
+//  2. Moved kinds are stacked at their offset from the column they belong to.
+//     Because it is an offset and not a position, cards that show up later
+//     join the group where the user put it.
+//  3. Collision: no card the layout places may land on another card. Anything
+//     in the way of a fixed card (pinned or moved) is pushed down its column.
+const groupKey = n => n.inst + "|" + n.kind;
+const isFixed = n => !!n.pin || state.groupOff.has(groupKey(n));
 function layout() {
   const depth = new Map();
   const parentOf = new Map();
@@ -220,17 +233,17 @@ function layout() {
     const d = pn && pn.kind === "agent" ? depthOf(p) + 1 : 0;
     depth.set(k, d); return d;
   };
-  let bandY = 0, maxX = 0;
-  const bands = [];
+  const groupOf = kind => { const g = GROUPS.findIndex(ks => ks.includes(kind)); return g < 0 ? GROUPS.length - 1 : g; };
+  let bandY = 0;
+  const plans = [];
   for (const [tok, inst] of state.instances) {
     if (!inst.shown) continue;
+    const mine = [...state.nodes.values()].filter(n => n.inst === tok && visible(n));
+    if (!mine.length) continue;
     const cols = new Map();
     const put = (col, n) => { if (!cols.has(col)) cols.set(col, []); cols.get(col).push(n); };
     let maxDepth = -1;
-    const mine = [...state.nodes.values()].filter(n => n.inst === tok && visible(n));
-    if (!mine.length) continue;
     for (const n of mine) if (n.kind === "agent") maxDepth = Math.max(maxDepth, depthOf(n.key));
-    const groupOf = kind => { const g = GROUPS.findIndex(ks => ks.includes(kind)); return g < 0 ? GROUPS.length - 1 : g; };
     for (const n of mine) {
       if (n.kind === "session") put("0", n);
       else if (n.kind === "agent") put("a" + depthOf(n.key), n);
@@ -239,32 +252,75 @@ function layout() {
     const order = ["0"];
     for (let d = 0; d <= maxDepth; d++) order.push("a" + d);
     GROUPS.forEach((_, g) => { if (cols.has("g" + g)) order.push("g" + g); });
+    const top = bandY + BAND_PAD;
     let tall = NODE_H, x = 0;
     for (const c of order) {
       const list = cols.get(c); if (!list) continue;
       // Stable order: kind first, then name. Sorting by activity would make
       // nodes trade places every second and the eye could never settle.
       list.sort((a, b) => (KINDS.indexOf(a.kind) - KINDS.indexOf(b.kind)) || a.name.localeCompare(b.name));
-      let y = bandY + BAND_PAD, prev = null;
+      let y = top, prev = null;
+      const moved = new Map();                      // kind -> next y of the moved stack in this column
       for (const n of list) {
-        // A node the user placed stays where it was put and leaves no gap:
-        // the rest of its column closes up around it.
+        n.colX = x; n.bandTop = top;
         if (n.pin) { n.tx = n.pin.x; n.ty = n.pin.y; continue; }
+        const off = state.groupOff.get(groupKey(n));
+        if (off) {
+          const my = moved.has(n.kind) ? moved.get(n.kind) : top + off.dy;
+          n.tx = x + off.dx; n.ty = my; moved.set(n.kind, my + NODE_H + GAP_Y);
+          continue;
+        }
         if (prev !== null && prev !== n.kind) y += GROUP_GAP - GAP_Y;
         n.tx = x; n.ty = y; y += NODE_H + GAP_Y; prev = n.kind;
       }
-      tall = Math.max(tall, y - GAP_Y - bandY - BAND_PAD);
+      tall = Math.max(tall, y - GAP_Y - top);
       x += NODE_W + GAP_X;
     }
     const h = BAND_PAD + tall + 18;
-    // The band hugs its nodes, so it stretches to follow one dragged away.
-    let x0 = -16, y0 = bandY, x1 = x - GAP_X + 16, y1 = bandY + h;
-    for (const n of mine) {
+    plans.push({tok, inst, mine, baseY: bandY, baseW: x - GAP_X, h});
+    bandY += h + 22;
+  }
+
+  // Pass 3: collision. One rule for everything: what was moved last holds
+  // its ground, and whatever is in its way yields by sliding down its own
+  // stack. Cards the layout placed yield to everything the user moved. A
+  // pinned card that yields keeps its pin, so it goes back when the way clears.
+  const rank = n => n.pin ? n.pin.seq : (state.groupOff.get(groupKey(n)) || {seq: 0}).seq;
+  const hits = (a, bx, by) => a.tx < bx + NODE_W + 8 && bx < a.tx + NODE_W + 8 && a.ty - HEAD_H < by + NODE_H + GAP_Y && by - HEAD_H < a.ty + NODE_H + GAP_Y;
+  for (const plan of plans) {
+    const queue = [...plan.mine].sort((a, b) => (rank(b) - rank(a)) || (a.tx - b.tx) || (a.ty - b.ty));
+    const placed = [], bottom = new Map();          // stack -> first free y
+    for (const n of queue) {
+      const stack = (n.pin ? n.key : state.groupOff.has(groupKey(n)) ? groupKey(n) : "flow") + "|" + n.tx;
+      let y = Math.max(n.ty, bottom.has(stack) ? bottom.get(stack) : -Infinity);
+      for (let guard = 0; guard < 96; guard++) {
+        const block = placed.find(f => hits(f, n.tx, y));
+        if (!block) break;
+        y = block.ty + NODE_H + GAP_Y + HEAD_H;
+      }
+      n.ty = y; placed.push(n); bottom.set(stack, y + NODE_H + GAP_Y);
+    }
+  }
+
+  // Kind headers: one per kind per column, above its first card. They name
+  // the cluster and are the handle that drags it as a whole.
+  const headers = [];
+  const bands = [];
+  for (const plan of plans) {
+    const firsts = new Map();
+    for (const n of plan.mine) {
+      if (n.kind === "session" || n.pin) continue;
+      const k = n.kind + "|" + n.colX, cur = firsts.get(k);
+      if (!cur || n.ty < cur.ty) firsts.set(k, n);
+    }
+    for (const n of firsts.values()) headers.push({key: groupKey(n), inst: n.inst, kind: n.kind, x: n.tx, y: n.ty - HEAD_H, moved: state.groupOff.has(groupKey(n))});
+    // The band hugs its cards, so it stretches to follow what was dragged away.
+    let x0 = -16, y0 = plan.baseY, x1 = plan.baseW + 16, y1 = plan.baseY + plan.h;
+    for (const n of plan.mine) {
       x0 = Math.min(x0, n.tx - 16); y0 = Math.min(y0, n.ty - BAND_PAD);
       x1 = Math.max(x1, n.tx + NODE_W + 16); y1 = Math.max(y1, n.ty + NODE_H + 18);
     }
-    bands.push({tok, x:x0, y:y0, w:x1 - x0, h:y1 - y0, inst});
-    bandY += h + 22;
+    bands.push({tok: plan.tok, x:x0, y:y0, w:x1 - x0, h:y1 - y0, inst: plan.inst});
   }
   for (const n of state.nodes.values()) if (n.x === null) { n.x = n.tx - 40; n.y = n.ty; }
   let wx0 = 0, wy0 = 0, wx1 = 0, wy1 = 0;
@@ -272,12 +328,12 @@ function layout() {
     if (i === 0) { wx0 = b.x; wy0 = b.y; wx1 = b.x + b.w; wy1 = b.y + b.h; return; }
     wx0 = Math.min(wx0, b.x); wy0 = Math.min(wy0, b.y); wx1 = Math.max(wx1, b.x + b.w); wy1 = Math.max(wy1, b.y + b.h);
   });
-  return {bands, x:wx0, y:wy0, w:wx1 - wx0, h:wy1 - wy0};
+  return {bands, headers, x:wx0, y:wy0, w:wx1 - wx0, h:wy1 - wy0};
 }
 
 // ─── drawing ──────────────────────────────────────────────────────────────
 const cv = $("cv"), ctx = cv.getContext("2d");
-let dpr = 1, view = {w:0, h:0}, world = {bands:[], x:0, y:0, w:0, h:0}, last = performance.now();
+let dpr = 1, view = {w:0, h:0}, world = {bands:[], headers:[], x:0, y:0, w:0, h:0}, last = performance.now();
 function resize() {
   const r = cv.getBoundingClientRect(); dpr = window.devicePixelRatio || 1;
   cv.width = Math.max(1, r.width * dpr); cv.height = Math.max(1, r.height * dpr); view = {w:r.width, h:r.height};
@@ -333,9 +389,15 @@ function draw(now) {
     const m = b.inst.meta;
     ctx.fillText(((m.surface || "chatcli") + " · pid " + m.pid + (m.workdir ? " · " + m.workdir : "") + (b.inst.alive ? "" : " · " + S("ended", "ended"))).toUpperCase(), b.x + 12, b.y + 11);
   }
+  for (const hd of world.headers) {                    // kind headers: label + drag handle
+    const col = cssVar("--k-" + hd.kind) || C.accent, hot = drag && drag.group === hd.key;
+    ctx.globalAlpha = hot ? 1 : .8; ctx.fillStyle = col; ctx.font = "700 11px ui-sans-serif,system-ui"; ctx.textBaseline = "top";
+    ctx.fillText("⠿ " + S("kind." + hd.kind, hd.kind).toUpperCase() + (hd.moved ? "  ·" : ""), hd.x + 2, hd.y + 2);
+    ctx.globalAlpha = 1;
+  }
   for (const n of state.nodes.values()) {              // ease toward layout targets
     if (n.x === null) continue;
-    if (drag && drag.node === n) { n.x = n.tx; n.y = n.ty; }            // under the pointer: no easing lag
+    if (drag && (drag.node === n || drag.group === groupKey(n)) && !(drag.group && n.pin)) { n.x = n.tx; n.y = n.ty; }   // under the pointer: no easing lag
     else { n.x += (n.tx - n.x) * Math.min(1, dt * 9); n.y += (n.ty - n.y) * Math.min(1, dt * 9); }
     n.flash = Math.max(0, n.flash - dt * 1.6);
   }
@@ -445,22 +507,46 @@ function hit(w) {
   for (const n of state.nodes.values()) if (visible(n) && n.x !== null && w.x >= n.x && w.x <= n.x + NODE_W && w.y >= n.y && w.y <= n.y + NODE_H) found = n;
   return found;
 }
+function hitHeader(w) {
+  for (const hd of world.headers) if (w.x >= hd.x && w.x <= hd.x + NODE_W && w.y >= hd.y && w.y <= hd.y + HEAD_H) return hd;
+  return null;
+}
+// startGroupDrag begins moving a whole kind. The offset is seeded from where
+// the cluster is right now, so grabbing it never makes it jump.
+function startGroupDrag(key, p, e) {
+  if (!state.groupOff.has(key)) {
+    let first = null;
+    for (const n of state.nodes.values()) if (groupKey(n) === key && !n.pin && visible(n) && (!first || n.ty < first.ty)) first = n;
+    if (!first) return null;
+    state.groupOff.set(key, {dx: first.tx - first.colX, dy: first.ty - first.bandTop, seq: 0});
+  }
+  const off = state.groupOff.get(key);   // its priority only changes once it actually moves: a bare click must not make it jump
+  return {group:key, node:null, px:p.x, py:p.y, dx0:off.dx, dy0:off.dy, sx:e.clientX, sy:e.clientY};
+}
 // Pointer events cover mouse, touch and pen with one code path. Pressing on a
-// node drags that node; pressing on the background pans the view.
+// kind header (or Shift-pressing one of its cards) drags the whole kind;
+// pressing on a card drags that card; pressing on the background pans.
 cv.addEventListener("pointerdown", e => {
-  const p = pointerWorld(e), n = hit(p);
+  const p = pointerWorld(e), hd = hitHeader(p), n = hd ? null : hit(p);
   moved = false; cv.setPointerCapture(e.pointerId); cv.classList.add("drag");
-  drag = n ? {node:n, ox:p.x - n.x, oy:p.y - n.y, sx:e.clientX, sy:e.clientY}
-           : {node:null, cx:state.cam.x, cy:state.cam.y, sx:e.clientX, sy:e.clientY};
+  if (hd) drag = startGroupDrag(hd.key, p, e);
+  else if (n && e.shiftKey && n.kind !== "session") { delete n.pin; drag = startGroupDrag(groupKey(n), p, e); }
+  else if (n) drag = {node:n, ox:p.x - n.x, oy:p.y - n.y, sx:e.clientX, sy:e.clientY, seq: ++state.moveSeq};
+  if (!drag) drag = {node:null, cx:state.cam.x, cy:state.cam.y, sx:e.clientX, sy:e.clientY};
 });
 cv.addEventListener("pointermove", e => {
-  if (!drag) { cv.classList.toggle("over", !!hit(pointerWorld(e))); return; }
+  if (!drag) { const p = pointerWorld(e); cv.classList.toggle("over", !!(hitHeader(p) || hit(p))); return; }
   const dx = e.clientX - drag.sx, dy = e.clientY - drag.sy;
   if (!moved && Math.abs(dx) + Math.abs(dy) <= 3) return;   // a press that barely moves is still a click
   moved = true; state.autoFit = false; $("pop").style.display = "none";
-  if (drag.node) {
+  if (drag.group) {
+    const p = pointerWorld(e);
+    const off = state.groupOff.get(drag.group);
+    if (!drag.ranked) { off.seq = ++state.moveSeq; drag.ranked = true; }
+    off.dx = drag.dx0 + p.x - drag.px; off.dy = drag.dy0 + p.y - drag.py;
+  } else if (drag.node) {
     const p = pointerWorld(e), n = drag.node;
-    n.pin = {x: p.x - drag.ox, y: p.y - drag.oy}; n.tx = n.x = n.pin.x; n.ty = n.y = n.pin.y;
+    n.pin = {x: p.x - drag.ox, y: p.y - drag.oy, seq: drag.seq}; n.tx = n.x = n.pin.x; n.ty = n.y = n.pin.y;
   } else {
     state.cam.x = drag.cx + dx / state.cam.k; state.cam.y = drag.cy + dy / state.cam.k;
   }
@@ -474,9 +560,13 @@ function endDrag(e) {
 }
 cv.addEventListener("pointerup", endDrag);
 cv.addEventListener("pointercancel", () => { drag = null; cv.classList.remove("drag"); });
-// Double-click hands a placed node back to the automatic layout.
-cv.addEventListener("dblclick", e => { const n = hit(pointerWorld(e)); if (n && n.pin) { delete n.pin; $("pop").style.display = "none"; } });
-$("bReset").onclick = () => { for (const n of state.nodes.values()) delete n.pin; state.autoFit = true; };
+// Double-click hands a placed card, or a moved kind, back to the automatic layout.
+cv.addEventListener("dblclick", e => {
+  const p = pointerWorld(e), hd = hitHeader(p);
+  if (hd) { state.groupOff.delete(hd.key); return; }
+  const n = hit(p); if (n && n.pin) { delete n.pin; $("pop").style.display = "none"; }
+});
+$("bReset").onclick = () => { for (const n of state.nodes.values()) delete n.pin; state.groupOff.clear(); state.autoFit = true; };
 cv.addEventListener("wheel", e => {
   e.preventDefault(); state.autoFit = false;
   const r = cv.getBoundingClientRect(), sx = e.clientX - r.left, sy = e.clientY - r.top, before = toWorld(sx, sy);
