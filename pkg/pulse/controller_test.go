@@ -7,6 +7,7 @@ package pulse
 
 import (
 	"context"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -133,6 +134,22 @@ func TestControllerReportsSpoolFailureWithoutDying(t *testing.T) {
 	if c.Recording() || bus.Enabled() {
 		t.Fatal("must stay off when the spool cannot open")
 	}
+}
+
+// A setting that changes while the process runs (an env reloaded from .env)
+// must start and stop recording without a restart.
+func TestControllerForcedFnIsReevaluated(t *testing.T) {
+	var on atomic.Bool
+	c := Start(context.Background(), Options{Bus: New("proc-fn"), Root: t.TempDir(), ForcedFn: on.Load, Poll: 10 * time.Millisecond})
+	defer c.Close()
+	time.Sleep(40 * time.Millisecond)
+	if c.Recording() {
+		t.Fatal("recording while the setting is off")
+	}
+	on.Store(true)
+	waitFor(t, "recording after the setting turned on", c.Recording)
+	on.Store(false)
+	waitFor(t, "recording to stop after the setting turned off", func() bool { return !c.Recording() })
 }
 
 func TestControllerSetSurfaceReachesMeta(t *testing.T) {

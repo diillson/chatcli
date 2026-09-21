@@ -62,7 +62,7 @@ import (
 var configSectionNames = []string{
 	"providers", "agent", "security", "chat", "compression", "output", "commands", "ui", "resilience",
 	"proxy", "managed", "policy", "retention", "session", "integrations", "auth", "image", "diagram",
-	"graphview", "taskgraph", "quality", "update", "memory", "selfevolve", "scheduler", "server", "hub",
+	"graphview", "taskgraph", "dash", "quality", "update", "memory", "selfevolve", "scheduler", "server", "hub",
 }
 
 func (cli *ChatCLI) routeConfigCommand(ctx context.Context, args []string) {
@@ -128,6 +128,8 @@ func (cli *ChatCLI) routeConfigCommand(ctx context.Context, args []string) {
 		cli.showConfigGraphView()
 	case "taskgraph", "tg":
 		cli.showConfigTaskGraph()
+	case "dash", "pulse":
+		cli.showConfigPulse()
 	case "quality":
 		cli.showConfigQuality()
 	case "update", "updates":

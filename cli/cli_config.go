@@ -57,7 +57,7 @@ var reloadableEnvVars = []string{
 	"OPENAI_API_KEY", "OPENAI_MODEL", "OPENAI_ASSISTANT_MODEL",
 	"OPENAI_USE_RESPONSES", "OPENAI_MAX_TOKENS", "OPENAI_API_URL", "OPENAI_RESPONSES_API_URL",
 	"ANTHROPIC_API_KEY", "ANTHROPIC_MODEL", "ANTHROPIC_MAX_TOKENS", "ANTHROPIC_API_VERSION", "ANTHROPIC_BASE_URL",
-	"CHATCLI_PROMPT_CACHE_TTL", "CHATCLI_PROMPT_CACHE_EXPLICIT", "CHATCLI_MODEL_PRICING",
+	"CHATCLI_PROMPT_CACHE_TTL", "CHATCLI_PROMPT_CACHE_EXPLICIT", "CHATCLI_MODEL_PRICING", "CHATCLI_DASH",
 	"CHATCLI_COMPACT_MODEL", "CHATCLI_KNOWLEDGE_RERANK", "CHATCLI_KNOWLEDGE_NORMALIZE", "CHATCLI_ENCRYPTION_KEY_PREVIOUS", "CHATCLI_MEMORY_PROVIDER", "CHATCLI_CONTEXT_ENGINE",
 	"GOOGLEAI_API_KEY", "GOOGLEAI_MODEL", "GOOGLEAI_MAX_TOKENS",
 	"XAI_API_KEY", "XAI_MODEL", "XAI_MAX_TOKENS",
@@ -411,6 +411,7 @@ func (cli *ChatCLI) showHelp() {
 	printCommand("/agent off", i18n.T("help.command.persona_off"))
 	printCommand("/agents {list|show <id>|cancel <id>}", i18n.T("help.command.agents"))
 	printCommand("/board {list|show|create|move|…}", i18n.T("help.command.board"))
+	printCommand("/dash [open|url|status|off]", i18n.T("help.command.dash"))
 	printCommand("/mail {list|send <agent> <texto>|pending}", i18n.T("help.command.mail"))
 
 	fmt.Printf("\n  %s\n", colorize(i18n.T("help.section.scheduler"), ColorLime))

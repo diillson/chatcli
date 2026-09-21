@@ -174,6 +174,7 @@ func (cli *ChatCLI) SetAuditSurface(surface string) {
 		return
 	}
 	cli.telemetrySurface(surface)
+	cli.pulseSurface(surface)
 	if cli.llmAudit == nil {
 		return
 	}

@@ -45,6 +45,9 @@ func dispatchSubcommand() bool {
 	case "storage":
 		runStorageSubcommand(os.Args[2:])
 		return true
+	case "dash":
+		runDashSubcommand()
+		return true
 	case "update":
 		runUpdateSubcommand(os.Args[2:])
 		return true
@@ -418,6 +421,21 @@ func runStorageSubcommand(args []string) {
 
 	if err := cmd.RunStorage(context.Background(), args, logger); err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
+	}
+}
+
+// runDashSubcommand runs `chatcli dash`: the live telemetry dashboard served
+// from a terminal of its own. It boots no provider — it only reads the spool
+// the other chatcli processes write, and needs the locale and the theme to
+// dress the page.
+func runDashSubcommand() {
+	_ = loadDotenvThenI18n()
+	theme.InitFromEnv()
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	if err := cli.RunDashForeground(ctx); err != nil {
+		fmt.Fprintln(os.Stderr, i18n.T("dash.cli.failed", err))
 		os.Exit(1)
 	}
 }
