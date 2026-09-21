@@ -59,5 +59,7 @@
   "dash.ui.kind.conn": "conexão",
   "dash.ui.kind.rpc": "rpc",
   "dash.ui.reset": "Reorganizar",
-  "dash.ui.reset_hint": "Arraste um card para posicioná-lo, ou arraste o cabeçalho de um tipo (ou Shift+arraste um card) para mover o conjunto inteiro. Duplo clique devolve ao layout automático; este botão faz isso com tudo."
+  "dash.ui.reset_hint": "Arraste um card para posicioná-lo, ou arraste o cabeçalho de um tipo (ou Shift+arraste um card) para mover o conjunto inteiro. Duplo clique devolve ao layout automático; este botão faz isso com tudo.",
+  "storage.policy.dead-process": "removido quando o processo dono já não existe",
+  "storage.reason.dead": "processo encerrado"
 }

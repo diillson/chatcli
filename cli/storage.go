@@ -63,6 +63,7 @@ const (
 	ReasonOrphan = "orphan" // the workspace it belonged to no longer exists
 	ReasonBurst  = "burst"  // created in a burst no person produces
 	ReasonStray  = "stray"  // a temp file a crash left behind
+	ReasonDead   = "dead"   // the process that owned it is no longer running
 )
 
 // Policy kinds, keyed for i18n (storage.policy.<kind>).
@@ -75,6 +76,9 @@ const (
 	PolicyIdle     = "idle"      // idle conversations by hub TTL
 	PolicyMachine  = "machine"   // machine sessions only, named ones never
 	PolicyReadOnly = "protected" // never pruned: user content or live state
+	// PolicyDeadProcess: state owned by a process, removed once that process
+	// is gone (the live telemetry spools).
+	PolicyDeadProcess = "dead-process"
 )
 
 // StorageStore is one store's line in the inventory.
@@ -238,8 +242,10 @@ func inventoryStore(opts StorageOptions, name string) StorageStore {
 		st.Policy = PolicyMachine
 	case StoreTranscripts, StoreParked, StorePending:
 		st.Policy = PolicyTTL
-	case StoreTaskGraph, StorePulse:
+	case StoreTaskGraph:
 		st.Policy = PolicyRuns
+	case StorePulse:
+		st.Policy = PolicyDeadProcess
 	case StoreCCR:
 		st.Policy, st.OnApplyOnly = PolicyCap, true
 	case StoreHub:
@@ -566,16 +572,46 @@ func taskGraphCandidates(dir string, cutoff time.Time, skipRunID string) []candi
 	return out
 }
 
-// pulseCandidates selects the live telemetry spools of processes that are
-// dead and past the retention window. A process that is still recording —
-// this one included — is never a candidate.
+// pulseStrayGrace is how old a spool directory with no readable meta.json
+// must be before it counts as debris. A younger one may belong to a process
+// that is still writing its first meta.
+const pulseStrayGrace = time.Hour
+
+// pulseCandidates selects the live telemetry spools nothing will write to
+// again: every process that is no longer running, and the directories a
+// crash left without a meta.json. RunStorage only runs on demand — the user
+// asked for the store to be cleaned — so a dead spool goes now; the day of
+// grace belongs to the automatic sweep at boot (pulse.DefaultRetention). A
+// process that is still recording, this one included, and the lease file are
+// never candidates.
 func pulseCandidates(dir string, now time.Time) []candidate {
-	stale := pulse.PrunableInstances(dir, pulse.DefaultRetention, pulse.Default().Instance(), now)
-	out := make([]candidate, 0, len(stale))
-	for _, m := range stale {
+	self := pulse.Default().Instance()
+	dead := pulse.PrunableInstances(dir, 0, self, now)
+	out := make([]candidate, 0, len(dead))
+	known := make(map[string]bool, len(dead))
+	for _, m := range pulse.ListInstances(dir) {
+		known[m.Instance] = true
+	}
+	for _, m := range dead {
 		spool := filepath.Join(dir, m.Instance)
 		_, size := dirUsage(spool, "")
-		out = append(out, candidate{path: spool, bytes: size, isDir: true, reason: ReasonTTL})
+		out = append(out, candidate{path: spool, bytes: size, isDir: true, reason: ReasonDead})
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return out
+	}
+	for _, e := range entries {
+		if !e.IsDir() || known[e.Name()] || e.Name() == self {
+			continue
+		}
+		info, err := e.Info()
+		if err != nil || now.Sub(info.ModTime()) < pulseStrayGrace {
+			continue
+		}
+		stray := filepath.Join(dir, e.Name())
+		_, size := dirUsage(stray, "")
+		out = append(out, candidate{path: stray, bytes: size, isDir: true, reason: ReasonStray})
 	}
 	return out
 }
