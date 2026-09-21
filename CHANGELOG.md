@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.207.2](https://github.com/diillson/chatcli/compare/v1.207.1...v1.207.2) (2026-09-21)
+
+
+### Bug Fixes
+
+* **storage:** prune pulse removes the spool of every process that is gone ([#1634](https://github.com/diillson/chatcli/issues/1634)) ([0fcfdd7](https://github.com/diillson/chatcli/commit/0fcfdd7cdaf36a0cae530d8567dc7d905195b7d6))
+
 ## [1.207.1](https://github.com/diillson/chatcli/compare/v1.207.0...v1.207.1) (2026-09-21)
 
 
