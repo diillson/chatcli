@@ -14,7 +14,9 @@
 package client
 
 import (
+	"sort"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"go.uber.org/zap"
@@ -35,25 +37,63 @@ type RequestAuditEvent struct {
 // RequestAuditor consumes audit events.
 type RequestAuditor func(RequestAuditEvent)
 
+// Sinks are keyed so independent consumers (the hash-chained audit log, the
+// live telemetry bus) compose instead of clobbering each other. auditOrder
+// is the key-sorted delivery list, rebuilt on registration so the per-request
+// path only takes a read lock and copies nothing.
 var (
 	auditMu      sync.RWMutex
-	auditSink    RequestAuditor
-	auditEnabled bool
+	auditSinks   map[string]RequestAuditor
+	auditOrder   []RequestAuditor
+	auditEnabled atomic.Bool // read lock-free on every request
 )
+
+// defaultAuditorKey is the slot RegisterRequestAuditor writes to. It is kept
+// for API stability: that function delegates to RegisterRequestAuditorKeyed
+// under this fixed key, so its single owner keeps working unchanged next to
+// keyed consumers.
+const defaultAuditorKey = "default"
 
 // RegisterRequestAuditor installs the sink (nil clears it).
 func RegisterRequestAuditor(fn RequestAuditor) {
+	RegisterRequestAuditorKeyed(defaultAuditorKey, fn)
+}
+
+// RegisterRequestAuditorKeyed installs (fn != nil) or removes (fn == nil)
+// the sink stored under key, leaving every other sink in place. Sinks run
+// synchronously on the request goroutine and must be fast and non-blocking.
+func RegisterRequestAuditorKeyed(key string, fn RequestAuditor) {
+	if key == "" {
+		return
+	}
 	auditMu.Lock()
-	auditSink = fn
-	auditEnabled = fn != nil
-	auditMu.Unlock()
+	defer auditMu.Unlock()
+	if fn == nil {
+		delete(auditSinks, key)
+	} else {
+		if auditSinks == nil {
+			auditSinks = make(map[string]RequestAuditor)
+		}
+		auditSinks[key] = fn
+	}
+	keys := make([]string, 0, len(auditSinks))
+	for k := range auditSinks {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	order := make([]RequestAuditor, 0, len(keys))
+	for _, k := range keys {
+		order = append(order, auditSinks[k])
+	}
+	auditOrder = order
+	auditEnabled.Store(len(order) > 0)
 }
 
 func emitAudit(ev RequestAuditEvent) {
 	auditMu.RLock()
-	fn := auditSink
+	sinks := auditOrder
 	auditMu.RUnlock()
-	if fn != nil {
+	for _, fn := range sinks {
 		fn(ev)
 	}
 }

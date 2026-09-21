@@ -213,8 +213,10 @@ type Registry struct {
 	seq      atomic.Uint64
 	instance string // random token making run IDs unique across processes
 
-	hookMu  sync.Mutex
-	onEvent func(Info)
+	// observers are keyed so independent consumers (the hub bridge, the
+	// live telemetry bus) compose instead of clobbering each other.
+	hookMu    sync.Mutex
+	observers map[string]func(Info)
 }
 
 // NewRegistry builds an empty registry with the given history capacity
@@ -256,23 +258,58 @@ func (g *Registry) Instance() string {
 // locks with an immutable snapshot; it must be fast and non-blocking
 // (a persistence bridge is expected to coalesce, not to do I/O inline).
 func (g *Registry) OnEvent(fn func(Info)) {
-	if g == nil {
+	g.OnEventKeyed(defaultObserverKey, fn)
+}
+
+// defaultObserverKey is the slot OnEvent writes to. It is kept for API
+// stability: OnEvent delegates to OnEventKeyed under this fixed key, so its
+// single owner keeps working unchanged next to keyed consumers.
+const defaultObserverKey = "default"
+
+// OnEventKeyed registers (fn != nil) or removes (fn == nil) an observer
+// under key, leaving every other observer in place. The contract is the one
+// OnEvent documents: fn runs synchronously on the goroutine that changed the
+// run, outside registry and run locks, with an immutable snapshot, and must
+// be fast and non-blocking.
+func (g *Registry) OnEventKeyed(key string, fn func(Info)) {
+	if g == nil || key == "" {
 		return
 	}
 	g.hookMu.Lock()
-	g.onEvent = fn
-	g.hookMu.Unlock()
+	defer g.hookMu.Unlock()
+	if fn == nil {
+		delete(g.observers, key)
+		return
+	}
+	if g.observers == nil {
+		g.observers = make(map[string]func(Info))
+	}
+	g.observers[key] = fn
 }
 
-// notify delivers a snapshot to the registered observer, if any.
+// notify delivers a snapshot to every registered observer, in key order so
+// delivery is deterministic. Observers run outside hookMu: one of them may
+// register or detach from inside its callback without deadlocking.
 func (g *Registry) notify(snapshot Info) {
 	if g == nil {
 		return
 	}
 	g.hookMu.Lock()
-	fn := g.onEvent
+	if len(g.observers) == 0 {
+		g.hookMu.Unlock()
+		return
+	}
+	keys := make([]string, 0, len(g.observers))
+	for k := range g.observers {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	fns := make([]func(Info), 0, len(keys))
+	for _, k := range keys {
+		fns = append(fns, g.observers[k])
+	}
 	g.hookMu.Unlock()
-	if fn != nil {
+	for _, fn := range fns {
 		fn(snapshot)
 	}
 }

@@ -25,7 +25,7 @@ import (
 // traceable without flipping the global logger to DEBUG.
 func LogRequestStart(logger *zap.Logger, provider, model string, fields ...zap.Field) {
 	if logger == nil {
-		if auditEnabled {
+		if auditEnabled.Load() {
 			emitAudit(RequestAuditEvent{Time: time.Now(), Phase: "send", Provider: provider, Model: model, Fields: fieldsToStrings(fields)})
 		}
 		return
@@ -34,7 +34,7 @@ func LogRequestStart(logger *zap.Logger, provider, model string, fields ...zap.F
 	base = append(base, zap.String("provider", provider), zap.String("model", model))
 	base = append(base, fields...)
 	logger.Info("llm: send", base...)
-	if auditEnabled {
+	if auditEnabled.Load() {
 		emitAudit(RequestAuditEvent{Time: time.Now(), Phase: "send", Provider: provider, Model: model, Fields: fieldsToStrings(fields)})
 	}
 }
@@ -47,7 +47,7 @@ func LogRequestStart(logger *zap.Logger, provider, model string, fields ...zap.F
 // and tail latencies without parsing free-form error text.
 func LogRequestFinish(logger *zap.Logger, provider, model, status string, duration time.Duration, fields ...zap.Field) {
 	if logger == nil {
-		if auditEnabled {
+		if auditEnabled.Load() {
 			emitAudit(RequestAuditEvent{Time: time.Now(), Phase: "recv", Provider: provider, Model: model,
 				Status: status, Duration: duration, Fields: fieldsToStrings(fields)})
 		}
@@ -62,7 +62,7 @@ func LogRequestFinish(logger *zap.Logger, provider, model, status string, durati
 	)
 	base = append(base, fields...)
 	logger.Info("llm: recv", base...)
-	if auditEnabled {
+	if auditEnabled.Load() {
 		emitAudit(RequestAuditEvent{Time: time.Now(), Phase: "recv", Provider: provider, Model: model,
 			Status: status, Duration: duration, Fields: fieldsToStrings(fields)})
 	}
