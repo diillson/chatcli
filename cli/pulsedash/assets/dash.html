@@ -343,7 +343,7 @@ function draw(now) {
     ctx.globalAlpha = alive ? (n.doneAt ? .62 : 1) : .4;
     if (hot || n.flash > 0) { ctx.shadowColor = col; ctx.shadowBlur = 8 + 16 * Math.max(n.flash, hot ? .35 + .3 * Math.abs(Math.sin(now / 420)) : 0); }
     ctx.fillStyle = C.panel; rr(n.x, n.y, NODE_W, NODE_H, 9); ctx.fill(); ctx.shadowBlur = 0;
-    ctx.strokeStyle = n.errors && !hot ? C.err : (hot ? col : C.border); ctx.lineWidth = hot ? 1.6 : 1; ctx.stroke();
+    ctx.strokeStyle = (n.errors || n.status === "error") && !hot ? C.err : (hot ? col : C.border); // a node whose current state is an error (an MCP server that failed) is red too, not only one with failed calls ctx.lineWidth = hot ? 1.6 : 1; ctx.stroke();
     ctx.fillStyle = col; rr(n.x, n.y, 5, NODE_H, 3); ctx.fill();
     ctx.textBaseline = "alphabetic"; ctx.fillStyle = C.strong; ctx.font = "600 12px ui-sans-serif,system-ui";
     ctx.fillText(clip(n.name, NODE_W - 28), n.x + 14, n.y + 21);

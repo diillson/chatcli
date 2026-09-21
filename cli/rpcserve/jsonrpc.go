@@ -178,7 +178,9 @@ func (s *Server) dispatch(ctx context.Context, line []byte) {
 		_ = s.write(Response{JSONRPC: "2.0", ID: req.ID, Error: errf(CodeInvalidRequest, "missing method")})
 		return
 	}
+	span := pulseInbound(req.Method)
 	result, rpcErr := s.handler(ctx, req.Method, req.Params)
+	pulseEndRPC(span, rpcErr)
 	if req.IsNotification() {
 		return // notifications get no response
 	}
@@ -221,6 +223,14 @@ func (s *Server) routeClientResponse(line []byte, id json.RawMessage) {
 // Request sends a server-initiated request to the client and blocks until the
 // client responds or ctx is done. Used by ACP's session/request_permission.
 func (s *Server) Request(ctx context.Context, method string, params interface{}) (json.RawMessage, error) {
+	span := pulseOutbound(method)
+	out, err := s.requestClient(ctx, method, params)
+	span.EndErr(err)
+	return out, err
+}
+
+// requestClient is the body of Request, which wraps it with telemetry.
+func (s *Server) requestClient(ctx context.Context, method string, params interface{}) (json.RawMessage, error) {
 	raw, err := json.Marshal(params)
 	if err != nil {
 		return nil, err
