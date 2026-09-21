@@ -17,6 +17,8 @@ import (
 	"runtime"
 	"strings"
 	"time"
+
+	"github.com/diillson/chatcli/pkg/pulse"
 )
 
 // downloadBaseURL é a raiz dos assets de release; var (não const) para os
@@ -70,7 +72,9 @@ func SelfReplace(ctx context.Context, execPath, tag string) error {
 		tag = "v" + tag
 	}
 
-	client := &http.Client{Timeout: downloadTimeout}
+	// Metered so the release download shows on the live dashboard, with its
+	// real size: the body is counted as it is read, never buffered.
+	client := &http.Client{Timeout: downloadTimeout, Transport: pulse.MeterTransport(nil)}
 
 	expected, err := fetchExpectedChecksum(ctx, client, tag, asset)
 	if err != nil {
