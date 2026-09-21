@@ -2100,6 +2100,10 @@ func (cli *ChatCLI) bootstrapMCP(ctx context.Context, logger *zap.Logger) {
 	// inheriting context values.
 	mcpCtx, mcpCancelFn := context.WithCancel(context.WithoutCancel(ctx))
 	cli.mcpManager = mcpMgr
+	// Registered here, with the manager in hand, rather than in initPulse:
+	// the snapshot runs on the telemetry goroutine and must not read a field
+	// this goroutine is still assigning.
+	pulse.Default().RegisterSnapshotter(pulseMCPSnapshotKey, mcpMgr.PulseSnapshot)
 	cli.mcpCancel = mcpCancelFn
 	cli.mcpConfigPath = mcpConfigPath
 	cli.mcpCtx = mcpCtx

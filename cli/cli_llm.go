@@ -18,6 +18,7 @@ import (
 	"github.com/diillson/chatcli/llm/catalog"
 	"github.com/diillson/chatcli/llm/client"
 	"github.com/diillson/chatcli/models"
+	"github.com/diillson/chatcli/pkg/pulse"
 	"github.com/diillson/chatcli/ui/kit"
 	"github.com/diillson/chatcli/ui/theme"
 	"github.com/diillson/chatcli/utils"
@@ -30,6 +31,12 @@ import (
 // model/effort resolution, LLM execution, response handling) live in
 // chat_pipeline.go so each step can be read and tested in isolation.
 func (cli *ChatCLI) processLLMRequest(parentCtx context.Context, in string) {
+	// One node per chat turn on the live dashboard. The deferred End is the
+	// safety net for an early exit; the real outcome is reported below and
+	// only the first End counts.
+	turn := pulse.Begin(pulse.KindTurn, pulseTurnChat, "")
+	defer turn.End(pulse.StatusCancelled)
+
 	stopSpinner := cli.startProcessingLifecycle()
 	defer cli.endProcessingLifecycle(parentCtx, stopSpinner)
 
@@ -93,6 +100,7 @@ func (cli *ChatCLI) processLLMRequest(parentCtx context.Context, in string) {
 			tempHistory, effectiveMaxTokens, resolution, stopSpinner,
 		)
 	}
+	turn.EndErr(llmErr)
 	cli.handleChatTurnResult(
 		ctx, llmErr, userMessage, aiResponse, resolution.Client, resolution,
 		userInput, additionalContext, time.Since(turnStart),

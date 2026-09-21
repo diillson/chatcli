@@ -26,7 +26,9 @@ import (
 	"strings"
 	"sync/atomic"
 
+	"github.com/diillson/chatcli/cli/agent/runs"
 	"github.com/diillson/chatcli/cli/plugins"
+	"github.com/diillson/chatcli/pkg/pulse"
 )
 
 var ansiSeq = regexp.MustCompile(`\x1b\[[0-9;]*[a-zA-Z]`)
@@ -197,6 +199,18 @@ func (cli *ChatCLI) RunCoderCaptured(ctx context.Context, task string) (string, 
 
 // execBuiltin runs a plugin, capturing any streamed output into the result.
 func execBuiltin(ctx context.Context, p plugins.Plugin, argv []string) (string, error) {
+	var span *pulse.Span
+	if pulse.Enabled() {
+		span = pulse.Begin(pulse.KindTool, p.Name(), runs.FromContext(ctx).ID())
+	}
+	out, err := runBuiltin(ctx, p, argv)
+	span.EndErr(err)
+	return out, err
+}
+
+// runBuiltin is execBuiltin without the telemetry span, for callers that
+// already report the call themselves (a squad worker's tool dispatch).
+func runBuiltin(ctx context.Context, p plugins.Plugin, argv []string) (string, error) {
 	var sb strings.Builder
 	out, err := p.ExecuteWithStream(ctx, argv, func(s string) { sb.WriteString(s) })
 	if out == "" {

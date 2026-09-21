@@ -75,7 +75,9 @@ func (cli *ChatCLI) runWorkerPluginTool(ctx context.Context, tool, argsJSON stri
 		mu.Lock()
 		defer mu.Unlock()
 	}
-	return execBuiltin(ctx, plugin, argv)
+	// The worker's tool dispatch already reports this call on the live
+	// telemetry bus; the uninstrumented runner avoids counting it twice.
+	return runBuiltin(ctx, plugin, argv)
 }
 
 // workerPluginToolDefs translates grant names into native tool definitions:

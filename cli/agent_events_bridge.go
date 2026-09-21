@@ -165,6 +165,7 @@ func (a *AgentMode) emitToolStart(toolName, title, rawInput string, argv []strin
 		RawInput:  rawInput,
 		Locations: locs,
 	}
+	a.pulseToolBegin(tc)
 	if a.events != nil {
 		a.events.ToolStart(tc)
 	}
@@ -174,6 +175,7 @@ func (a *AgentMode) emitToolStart(toolName, title, rawInput string, argv []strin
 // emitToolEnd delivers the terminal state of a tool call started via
 // emitToolStart. Output must be the LLM-facing (already truncated) text.
 func (a *AgentMode) emitToolEnd(tc agentevents.ToolCall, output string, execErr error, errorCode string, duration time.Duration) {
+	a.pulseToolEnd(tc.ID, execErr)
 	if a.events == nil {
 		return
 	}
@@ -198,6 +200,7 @@ func (a *AgentMode) emitToolEnd(tc agentevents.ToolCall, output string, execErr 
 // (security policy, validation) as a failed tool_call the client never saw
 // start — sinks emit the full tool_call shape for unseen ids.
 func (a *AgentMode) emitBlockedTool(toolName, rawInput, msg string) {
+	a.pulseToolBlocked(toolName)
 	if a.events == nil {
 		return
 	}

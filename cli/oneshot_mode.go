@@ -18,6 +18,7 @@ import (
 	"github.com/diillson/chatcli/i18n"
 	"github.com/diillson/chatcli/llm/client"
 	"github.com/diillson/chatcli/models"
+	"github.com/diillson/chatcli/pkg/pulse"
 	"go.uber.org/zap"
 )
 
@@ -267,6 +268,8 @@ func (cli *ChatCLI) RunOnce(ctx context.Context, input string, disableAnimation 
 	}
 
 	effectiveMaxTokens := cli.getMaxTokensForCurrentLLM()
+	turn := pulse.Begin(pulse.KindTurn, pulseTurnOneShot, "")
+	defer turn.End(pulse.StatusCancelled)
 	aiResponse, err := activeClient.SendPrompt(ctx, userInput+additionalContext, cli.history, effectiveMaxTokens)
 	// Auto-retry on OAuth token expiration (401)
 	if cli.refreshClientOnAuthError(err) {
@@ -281,6 +284,7 @@ func (cli *ChatCLI) RunOnce(ctx context.Context, input string, disableAnimation 
 	if !disableAnimation {
 		cli.animation.StopThinkingAnimation()
 	}
+	turn.EndErr(err)
 
 	if err != nil {
 		return err

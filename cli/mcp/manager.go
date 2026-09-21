@@ -12,8 +12,10 @@ import (
 	"sync"
 	"time"
 
+	"github.com/diillson/chatcli/cli/agent/runs"
 	"github.com/diillson/chatcli/i18n"
 	"github.com/diillson/chatcli/models"
+	"github.com/diillson/chatcli/pkg/pulse"
 	"go.uber.org/zap"
 )
 
@@ -430,6 +432,7 @@ func (m *Manager) removeServer(ctx context.Context, name string) {
 	if process != nil {
 		_ = process.Kill()
 	}
+	m.pulseState(conn, pulseStateStopped)
 	m.logger.Info("MCP server stopped (reload)", zap.String("server", name))
 }
 
@@ -523,6 +526,7 @@ func (m *Manager) StopOne(ctx context.Context, name string) error {
 	if process != nil {
 		_ = process.Kill()
 	}
+	m.pulseState(conn, pulseStateStopped)
 	m.logger.Info("MCP server stopped", zap.String("server", name))
 	return nil
 }
@@ -971,6 +975,7 @@ func (m *Manager) markDisconnected(name string, reason error) {
 	if dropped > 0 {
 		m.notifyCatalogChanged()
 	}
+	m.pulseState(conn, pulseStateDisconnected)
 	m.logger.Warn("MCP server disconnected",
 		zap.String("server", name),
 		zap.Error(reason))
@@ -978,6 +983,18 @@ func (m *Manager) markDisconnected(name string, reason error) {
 
 // startServer starts a single MCP server via the configured transport.
 func (m *Manager) startServer(ctx context.Context, conn *ServerConnection) error {
+	m.pulseState(conn, pulseStateStarting)
+	err := m.startServerTransport(ctx, conn)
+	if err != nil {
+		m.pulseState(conn, pulseStateFailed)
+		return err
+	}
+	m.pulseState(conn, pulseStateConnected)
+	return nil
+}
+
+// startServerTransport dispatches on the configured transport.
+func (m *Manager) startServerTransport(ctx context.Context, conn *ServerConnection) error {
 	switch conn.Config.Transport {
 	case TransportStdio:
 		return m.startStdioServer(ctx, conn)
@@ -1236,6 +1253,24 @@ func (m *Manager) discoverTools(conn *ServerConnection) error {
 
 // callTool sends a tools/call request to the MCP server via its transport.
 func (m *Manager) callTool(ctx context.Context, conn *ServerConnection, toolName string, args map[string]interface{}) (*MCPToolResult, error) {
+	var span *pulse.Span
+	if pulse.Enabled() {
+		span = pulse.Begin(pulse.KindMCP, conn.Config.Name, runs.FromContext(ctx).ID()).With("tool", toolName)
+	}
+	res, err := m.callToolTransport(conn, toolName, args)
+	switch {
+	case err != nil:
+		span.EndErr(err)
+	case res.IsError:
+		span.End(pulse.StatusError)
+	default:
+		span.End(pulse.StatusOK)
+	}
+	return res, err
+}
+
+// callToolTransport is the body of callTool, which wraps it with telemetry.
+func (m *Manager) callToolTransport(conn *ServerConnection, toolName string, args map[string]interface{}) (*MCPToolResult, error) {
 	if conn.transport == nil {
 		return nil, fmt.Errorf("MCP server %q has no active transport", conn.Config.Name)
 	}
