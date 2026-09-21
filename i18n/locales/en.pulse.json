@@ -57,5 +57,7 @@
   "dash.ui.kind.pattern": "pattern",
   "dash.ui.kind.background": "background",
   "dash.ui.kind.conn": "connection",
-  "dash.ui.kind.rpc": "rpc"
+  "dash.ui.kind.rpc": "rpc",
+  "dash.ui.reset": "Reset layout",
+  "dash.ui.reset_hint": "Drag any node to place it. Double-click a node, or use this, to hand it back to the automatic layout."
 }

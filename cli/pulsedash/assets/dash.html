@@ -34,7 +34,8 @@
     padding:3px 10px; cursor:pointer; font:inherit; }
   button.ctl:hover { border-color:var(--accent); }
   #stage { position:relative; overflow:hidden; }
-  canvas { position:absolute; inset:0; width:100%; height:100%; display:block; cursor:grab; }
+  canvas { position:absolute; inset:0; width:100%; height:100%; display:block; cursor:grab; touch-action:none; }
+  canvas.over { cursor:move; }
   canvas.drag { cursor:grabbing; }
   #empty { position:absolute; inset:0; display:flex; align-items:center; justify-content:center; text-align:center;
     color:var(--muted); padding:40px; pointer-events:none; white-space:pre-line; }
@@ -69,6 +70,7 @@
     <span class="stat"><b id="sActive">0</b> <span id="lActive">active</span></span>
     <span class="stat"><b id="sRate">0</b> <span id="lRate">events/s</span></span>
     <button class="ctl" id="bPause"></button>
+    <button class="ctl" id="bReset"></button>
     <button class="ctl" id="bFit"></button>
   </header>
   <div id="stage">
@@ -107,6 +109,8 @@ $("lActive").textContent = S("active", "active");
 $("lRate").textContent = S("rate", "events/s");
 $("lFeed").textContent = S("feed", "Live events");
 $("bFit").textContent = S("fit", "Fit");
+$("bReset").textContent = S("reset", "Reset layout");
+$("bReset").title = S("reset_hint", "Drag any node to place it. Double-click a node, or use this, to hand it back to the automatic layout.");
 $("empty").textContent = S("empty", "Waiting for a chatcli process to report…\nRun something in any chatcli session on this machine.");
 
 const state = {
@@ -243,6 +247,9 @@ function layout() {
       list.sort((a, b) => (KINDS.indexOf(a.kind) - KINDS.indexOf(b.kind)) || a.name.localeCompare(b.name));
       let y = bandY + BAND_PAD, prev = null;
       for (const n of list) {
+        // A node the user placed stays where it was put and leaves no gap:
+        // the rest of its column closes up around it.
+        if (n.pin) { n.tx = n.pin.x; n.ty = n.pin.y; continue; }
         if (prev !== null && prev !== n.kind) y += GROUP_GAP - GAP_Y;
         n.tx = x; n.ty = y; y += NODE_H + GAP_Y; prev = n.kind;
       }
@@ -250,17 +257,27 @@ function layout() {
       x += NODE_W + GAP_X;
     }
     const h = BAND_PAD + tall + 18;
-    bands.push({tok, y:bandY, h, w:x - GAP_X, inst});
-    maxX = Math.max(maxX, x - GAP_X);
+    // The band hugs its nodes, so it stretches to follow one dragged away.
+    let x0 = -16, y0 = bandY, x1 = x - GAP_X + 16, y1 = bandY + h;
+    for (const n of mine) {
+      x0 = Math.min(x0, n.tx - 16); y0 = Math.min(y0, n.ty - BAND_PAD);
+      x1 = Math.max(x1, n.tx + NODE_W + 16); y1 = Math.max(y1, n.ty + NODE_H + 18);
+    }
+    bands.push({tok, x:x0, y:y0, w:x1 - x0, h:y1 - y0, inst});
     bandY += h + 22;
   }
   for (const n of state.nodes.values()) if (n.x === null) { n.x = n.tx - 40; n.y = n.ty; }
-  return {bands, w:maxX, h:bandY};
+  let wx0 = 0, wy0 = 0, wx1 = 0, wy1 = 0;
+  bands.forEach((b, i) => {
+    if (i === 0) { wx0 = b.x; wy0 = b.y; wx1 = b.x + b.w; wy1 = b.y + b.h; return; }
+    wx0 = Math.min(wx0, b.x); wy0 = Math.min(wy0, b.y); wx1 = Math.max(wx1, b.x + b.w); wy1 = Math.max(wy1, b.y + b.h);
+  });
+  return {bands, x:wx0, y:wy0, w:wx1 - wx0, h:wy1 - wy0};
 }
 
 // ─── drawing ──────────────────────────────────────────────────────────────
 const cv = $("cv"), ctx = cv.getContext("2d");
-let dpr = 1, view = {w:0, h:0}, world = {bands:[], w:0, h:0}, last = performance.now();
+let dpr = 1, view = {w:0, h:0}, world = {bands:[], x:0, y:0, w:0, h:0}, last = performance.now();
 function resize() {
   const r = cv.getBoundingClientRect(); dpr = window.devicePixelRatio || 1;
   cv.width = Math.max(1, r.width * dpr); cv.height = Math.max(1, r.height * dpr); view = {w:r.width, h:r.height};
@@ -271,13 +288,15 @@ function fit() {
   // point the graph keeps its scale, anchors top-left and the user pans.
   const k = Math.max(MIN_FIT, Math.min(1.15, (view.w - 60) / world.w, (view.h - 60) / world.h));
   state.cam.k = k;
-  state.cam.x = Math.max(28 / k, (view.w / k - world.w) / 2); state.cam.y = Math.max(20 / k, (view.h / k - world.h) / 2);
+  // The world no longer starts at the origin: a node dragged up or left
+  // moves its top-left corner.
+  state.cam.x = Math.max(28 / k, (view.w / k - world.w) / 2) - world.x; state.cam.y = Math.max(20 / k, (view.h / k - world.h) / 2) - world.y;
 }
 function rr(x, y, w, h, r) { ctx.beginPath(); ctx.moveTo(x+r,y); ctx.arcTo(x+w,y,x+w,y+h,r); ctx.arcTo(x+w,y+h,x,y+h,r); ctx.arcTo(x,y+h,x,y,r); ctx.arcTo(x,y,x+w,y,r); ctx.closePath(); }
 function clip(text, max) { if (ctx.measureText(text).width <= max) return text; let t = text; while (t.length > 1 && ctx.measureText(t + "…").width > max) t = t.slice(0, -1); return t + "…"; }
 function ms(v) { return v >= 1000 ? (v / 1000).toFixed(v >= 10000 ? 0 : 1) + "s" : Math.round(v) + "ms"; }
 function subline(n) {
-  if (n.kind === "session") { const a = n.attrs; return [a.model || a.provider, a.cost, a.ctx && ("ctx " + a.ctx)].filter(Boolean).join(" · "); }
+  if (n.kind === "session") { const a = n.attrs; return [a.cost, a.ctx && ("ctx " + a.ctx), a.model || a.provider].filter(Boolean).join(" · "); }   // numbers first: a long model name must not clip them
   if (n.kind === "agent") {
     const a = n.attrs, parts = [];
     if (a.turn) parts.push(S("turn", "turn") + " " + a.turn + "/" + a.max_turns);
@@ -308,15 +327,16 @@ function draw(now) {
   const C = {border:cssVar("--border"), panel:cssVar("--panel"), text:cssVar("--text"), strong:cssVar("--strong"), muted:cssVar("--muted"), err:cssVar("--err"), ok:cssVar("--ok"), accent:cssVar("--accent")};
 
   for (const b of world.bands) {                       // process bands
-    ctx.globalAlpha = b.inst.alive ? .5 : .22; ctx.fillStyle = C.panel; rr(-16, b.y, b.w + 32, b.h, 12); ctx.fill();
+    ctx.globalAlpha = b.inst.alive ? .5 : .22; ctx.fillStyle = C.panel; rr(b.x, b.y, b.w, b.h, 12); ctx.fill();
     ctx.globalAlpha = 1; ctx.strokeStyle = C.border; ctx.lineWidth = 1; ctx.stroke();
     ctx.fillStyle = C.muted; ctx.font = "600 10px ui-sans-serif,system-ui"; ctx.textBaseline = "top";
     const m = b.inst.meta;
-    ctx.fillText(((m.surface || "chatcli") + " · pid " + m.pid + (m.workdir ? " · " + m.workdir : "") + (b.inst.alive ? "" : " · " + S("ended", "ended"))).toUpperCase(), -4, b.y + 11);
+    ctx.fillText(((m.surface || "chatcli") + " · pid " + m.pid + (m.workdir ? " · " + m.workdir : "") + (b.inst.alive ? "" : " · " + S("ended", "ended"))).toUpperCase(), b.x + 12, b.y + 11);
   }
   for (const n of state.nodes.values()) {              // ease toward layout targets
     if (n.x === null) continue;
-    n.x += (n.tx - n.x) * Math.min(1, dt * 9); n.y += (n.ty - n.y) * Math.min(1, dt * 9);
+    if (drag && drag.node === n) { n.x = n.tx; n.y = n.ty; }            // under the pointer: no easing lag
+    else { n.x += (n.tx - n.x) * Math.min(1, dt * 9); n.y += (n.ty - n.y) * Math.min(1, dt * 9); }
     n.flash = Math.max(0, n.flash - dt * 1.6);
   }
   for (const e of state.edges.values()) {              // edges
@@ -350,6 +370,7 @@ function draw(now) {
     ctx.fillText(clip(n.name, NODE_W - 28), n.x + 14, n.y + 21);
     ctx.fillStyle = C.muted; ctx.font = "11px ui-sans-serif,system-ui";
     ctx.fillText(clip(subline(n), NODE_W - 28), n.x + 14, n.y + 39);
+    if (n.pin) { ctx.strokeStyle = C.muted; ctx.lineWidth = 1.2; ctx.beginPath(); ctx.arc(n.x + NODE_W - 11, n.y + NODE_H - 11, 3, 0, Math.PI*2); ctx.stroke(); }   // placed by hand
     if (n.single && n.doneAt) { ctx.fillStyle = n.status === "ok" ? C.ok : n.status === "error" ? C.err : C.muted; ctx.beginPath(); ctx.arc(n.x + NODE_W - 12, n.y + 14, 3.5, 0, Math.PI*2); ctx.fill(); }
     ctx.globalAlpha = 1;
   }
@@ -417,14 +438,45 @@ function showPop(n, sx, sy) {
 // ─── interaction ──────────────────────────────────────────────────────────
 let drag = null, moved = false;
 const toWorld = (sx, sy) => ({x: sx / state.cam.k - state.cam.x, y: sy / state.cam.k - state.cam.y});
-cv.addEventListener("mousedown", e => { drag = {x:e.clientX, y:e.clientY, cx:state.cam.x, cy:state.cam.y}; moved = false; cv.classList.add("drag"); });
-window.addEventListener("mousemove", e => { if (!drag) return; const dx = e.clientX - drag.x, dy = e.clientY - drag.y; if (Math.abs(dx) + Math.abs(dy) > 3) { moved = true; state.autoFit = false; } state.cam.x = drag.cx + dx / state.cam.k; state.cam.y = drag.cy + dy / state.cam.k; });
-window.addEventListener("mouseup", e => {
-  if (!drag) return; drag = null; cv.classList.remove("drag"); if (moved) return;
-  const r = cv.getBoundingClientRect(), w = toWorld(e.clientX - r.left, e.clientY - r.top);
-  for (const n of state.nodes.values()) if (visible(n) && w.x >= n.x && w.x <= n.x + NODE_W && w.y >= n.y && w.y <= n.y + NODE_H) { showPop(n, e.clientX - r.left, e.clientY - r.top); return; }
-  $("pop").style.display = "none";
+const pointerWorld = e => { const r = cv.getBoundingClientRect(); return {sx: e.clientX - r.left, sy: e.clientY - r.top, ...toWorld(e.clientX - r.left, e.clientY - r.top)}; };
+// The last node drawn is the one on top, so it wins the hit test.
+function hit(w) {
+  let found = null;
+  for (const n of state.nodes.values()) if (visible(n) && n.x !== null && w.x >= n.x && w.x <= n.x + NODE_W && w.y >= n.y && w.y <= n.y + NODE_H) found = n;
+  return found;
+}
+// Pointer events cover mouse, touch and pen with one code path. Pressing on a
+// node drags that node; pressing on the background pans the view.
+cv.addEventListener("pointerdown", e => {
+  const p = pointerWorld(e), n = hit(p);
+  moved = false; cv.setPointerCapture(e.pointerId); cv.classList.add("drag");
+  drag = n ? {node:n, ox:p.x - n.x, oy:p.y - n.y, sx:e.clientX, sy:e.clientY}
+           : {node:null, cx:state.cam.x, cy:state.cam.y, sx:e.clientX, sy:e.clientY};
 });
+cv.addEventListener("pointermove", e => {
+  if (!drag) { cv.classList.toggle("over", !!hit(pointerWorld(e))); return; }
+  const dx = e.clientX - drag.sx, dy = e.clientY - drag.sy;
+  if (!moved && Math.abs(dx) + Math.abs(dy) <= 3) return;   // a press that barely moves is still a click
+  moved = true; state.autoFit = false; $("pop").style.display = "none";
+  if (drag.node) {
+    const p = pointerWorld(e), n = drag.node;
+    n.pin = {x: p.x - drag.ox, y: p.y - drag.oy}; n.tx = n.x = n.pin.x; n.ty = n.y = n.pin.y;
+  } else {
+    state.cam.x = drag.cx + dx / state.cam.k; state.cam.y = drag.cy + dy / state.cam.k;
+  }
+});
+function endDrag(e) {
+  if (!drag) return;
+  const clicked = !moved ? drag.node : null, wasClick = !moved;
+  drag = null; cv.classList.remove("drag");
+  if (!wasClick) return;
+  if (clicked) { const p = pointerWorld(e); showPop(clicked, p.sx, p.sy); } else $("pop").style.display = "none";
+}
+cv.addEventListener("pointerup", endDrag);
+cv.addEventListener("pointercancel", () => { drag = null; cv.classList.remove("drag"); });
+// Double-click hands a placed node back to the automatic layout.
+cv.addEventListener("dblclick", e => { const n = hit(pointerWorld(e)); if (n && n.pin) { delete n.pin; $("pop").style.display = "none"; } });
+$("bReset").onclick = () => { for (const n of state.nodes.values()) delete n.pin; state.autoFit = true; };
 cv.addEventListener("wheel", e => {
   e.preventDefault(); state.autoFit = false;
   const r = cv.getBoundingClientRect(), sx = e.clientX - r.left, sy = e.clientY - r.top, before = toWorld(sx, sy);

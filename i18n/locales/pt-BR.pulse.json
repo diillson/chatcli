@@ -57,5 +57,7 @@
   "dash.ui.kind.pattern": "padrão",
   "dash.ui.kind.background": "background",
   "dash.ui.kind.conn": "conexão",
-  "dash.ui.kind.rpc": "rpc"
+  "dash.ui.kind.rpc": "rpc",
+  "dash.ui.reset": "Reorganizar",
+  "dash.ui.reset_hint": "Arraste qualquer nó para posicioná-lo. Dê duplo clique num nó, ou use este botão, para devolvê-lo ao layout automático."
 }
