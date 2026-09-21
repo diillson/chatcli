@@ -29,6 +29,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/diillson/chatcli/pkg/pulse"
 	"go.uber.org/zap"
 )
 
@@ -170,10 +171,13 @@ func (s *Supervisor) Start(command, dir string) (Info, error) {
 		mp.info.State = StateExited
 		mp.info.Ended = time.Now()
 		mp.info.ExitCode = exitCodeOf(err)
+		exited := mp.info
 		s.mu.Unlock()
+		pulseProc(exited, pulse.PhaseEnd)
 		close(mp.done)
 	}()
 
+	pulseProc(mp.info, pulse.PhaseStart)
 	s.logger.Info("proc: started", zap.String("id", id), zap.Int("pid", mp.info.PID), zap.String("cmd", command))
 	return mp.info, nil
 }
@@ -251,13 +255,16 @@ func (s *Supervisor) StartPTY(command, dir string) (Info, error) {
 		mp.info.State = StateExited
 		mp.info.Ended = time.Now()
 		mp.info.ExitCode = exitCodeOf(err)
+		exited := mp.info
 		s.mu.Unlock()
+		pulseProc(exited, pulse.PhaseEnd)
 		mp.ptmxMu.Lock()
 		_ = ptmx.Close()
 		mp.ptmxMu.Unlock()
 		close(mp.done)
 	}()
 
+	pulseProc(mp.info, pulse.PhaseStart)
 	s.logger.Info("proc: started (pty)", zap.String("id", id), zap.Int("pid", mp.info.PID), zap.String("cmd", command))
 	return mp.info, nil
 }

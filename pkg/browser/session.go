@@ -33,6 +33,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/diillson/chatcli/pkg/pulse"
 )
 
 const (
@@ -76,6 +78,7 @@ const (
 
 // Session drives one page in one launched browser.
 type Session struct {
+	pulse       *pulse.Span // live-dashboard span, open while the browser is up
 	cmd         *exec.Cmd
 	conn        *cdpConn
 	userDataDir string
@@ -99,10 +102,34 @@ type Session struct {
 // NewSession launches a browser, attaches to a fresh page target and enables
 // the domains the actions need.
 func NewSession(ctx context.Context) (*Session, error) {
+	s, err := openSession(ctx)
+	if err == nil {
+		s.pulseBegin()
+	}
+	return s, err
+}
+
+// openSession attaches to the user's browser when one is configured and
+// launches one otherwise.
+func openSession(ctx context.Context) (*Session, error) {
 	if ep := attachURL(); ep != "" {
 		return attachSession(ctx, ep)
 	}
 	return launchSession(ctx, headlessEnabled(), persistentProfileDir())
+}
+
+// pulseBegin opens the live-dashboard span of the browser: a Chrome process
+// (or an attachment to the user's own) that stays up across turns. Only how
+// it runs is reported, never a URL or anything on a page.
+func (s *Session) pulseBegin() {
+	mode := "visible"
+	switch {
+	case s.attached:
+		mode = "attached"
+	case s.headless:
+		mode = "headless"
+	}
+	s.pulse = pulse.Begin(pulse.KindBackground, "@browser", "").With("mode", mode)
 }
 
 // launchSession launches a browser with the given visibility on userDataDir
@@ -727,6 +754,7 @@ func (s *Session) ProfileDir() string {
 // storage to disk before the process is killed — a persistent or reused
 // profile must not lose the login the user just performed.
 func (s *Session) Close(ctx context.Context) {
+	s.pulse.With("state", "closed").End(pulse.StatusOK)
 	if s.attached {
 		s.detach(ctx)
 		return

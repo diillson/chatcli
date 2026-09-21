@@ -12,9 +12,11 @@ import (
 	"fmt"
 	"io"
 	"os/exec"
+	"path/filepath"
 	"sync"
 	"time"
 
+	"github.com/diillson/chatcli/pkg/pulse"
 	"go.uber.org/zap"
 )
 
@@ -53,6 +55,11 @@ func (d Diagnostic) SeverityLabel() string {
 
 // Client is a minimal LSP client over a single server connection.
 type Client struct {
+	// pulse is the live-dashboard span of this language server: open from
+	// spawn until its stdout closes. Servers are pooled and outlive turns, so
+	// they are background work a user cannot otherwise see.
+	pulse *pulse.Span
+
 	w       io.Writer
 	r       *bufio.Reader
 	cmd     *exec.Cmd
@@ -112,12 +119,16 @@ func Spawn(ctx context.Context, spec ServerSpec, logger *zap.Logger) (*Client, e
 		received: map[string]bool{},
 		done:     make(chan struct{}),
 	}
+	// Only the program name of the server: the override env may carry flags.
+	c.pulse = pulse.Begin(pulse.KindBackground, "lsp", "").
+		With("server", filepath.Base(spec.Command[0])).With("language", spec.LanguageID)
 	go c.readLoop()
 	return c, nil
 }
 
 func (c *Client) readLoop() {
 	defer close(c.done)
+	defer c.pulse.With("state", "server exited").End(pulse.StatusOK)
 	for {
 		body, err := readMessage(c.r)
 		if err != nil {

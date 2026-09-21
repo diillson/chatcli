@@ -783,6 +783,8 @@ func (s *Scheduler) emit(evt Event) {
 	if s.bridge != nil {
 		s.bridge.PublishEvent(evt)
 	}
+	// Live dashboard.
+	pulseEmit(evt)
 }
 
 func (s *Scheduler) onBreakerChange(kind string) func(string, BreakerState, BreakerState) {
