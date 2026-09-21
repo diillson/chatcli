@@ -13,10 +13,12 @@ import (
 	"time"
 
 	"github.com/diillson/chatcli/cli/agent/runs"
+	"github.com/diillson/chatcli/models"
 	"github.com/diillson/chatcli/pkg/persona"
 	"github.com/diillson/chatcli/pkg/pulse"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/zap"
 )
 
 // pulseWatch turns the process-wide bus on for the test and returns a
@@ -166,4 +168,24 @@ func TestTapsAreSilentWhileOff(t *testing.T) {
 	_, _ = execBuiltin(context.Background(), fakePlugin{name: "@p"}, nil)
 	assert.Nil(t, a.pulseTools, "off: not even the span table is allocated")
 	assert.Equal(t, before, pulse.Default().Stats().Published)
+}
+
+// Pattern #2: by default a complex task is routed to the task graph rather
+// than planned in-loop. That decision is invisible in the terminal scrollback
+// a minute later; on the dashboard it is a fact on the plan-and-solve node.
+func TestPlanFirstRoutingIsReportedAsAPattern(t *testing.T) {
+	collect := pulseWatch(t, pulse.KindPattern)
+	_, run := runs.NewRegistry(4).Begin(context.Background(), runs.Info{Kind: runs.KindOrchestrator})
+	a := &AgentMode{orchRun: run, logger: zap.NewNop(), cli: &ChatCLI{history: []models.Message{{Role: "user", Content: "SECRET-QUERY"}}}}
+
+	captureStdout(t, func() { a.steerToTaskGraph("SECRET-QUERY refactor the billing module") })
+
+	ev := collect(1)[0]
+	assert.Equal(t, pulse.PatternPlanAndSolve, ev.Name)
+	assert.Equal(t, pulse.PhasePoint, ev.Phase)
+	assert.Equal(t, "routed to @taskgraph", ev.Attrs["state"])
+	assert.Equal(t, run.ID(), ev.Parent)
+	wire, _ := json.Marshal(ev)
+	assert.NotContains(t, string(wire), "SECRET-QUERY")
+	assert.Contains(t, a.cli.history[0].Content, taskGraphSteerDirective, "the steer itself still happens")
 }

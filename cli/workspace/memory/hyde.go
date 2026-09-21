@@ -18,8 +18,11 @@ package memory
 
 import (
 	"context"
+	"strconv"
 	"strings"
 
+	"github.com/diillson/chatcli/cli/agent/runs"
+	"github.com/diillson/chatcli/pkg/pulse"
 	"go.uber.org/zap"
 )
 
@@ -89,14 +92,20 @@ func (h *HyDEAugmenter) Augment(ctx context.Context, query string, originalHints
 	// The hypothesis prompt is the user-facing question framed as the
 	// caller-supplied system prompt.
 	prompt := h.cfg.Prompt + "\n\nQuestion: " + q + "\n\nHypothetical answer:"
+	var span *pulse.Span
+	if pulse.Enabled() {
+		span = pulse.BeginPattern(pulse.PatternRAGHyDE, runs.FromContext(ctx).ID())
+	}
 	hyp, err := h.llm(ctx, prompt)
 	if err != nil {
 		h.logger.Warn("HyDE hypothesis call failed; falling back to plain hints",
 			zap.Error(err))
+		span.Outcome(pulse.StatusOf(err), "fell back to plain hints")
 		return originalHints
 	}
 	hyp = strings.TrimSpace(hyp)
 	if hyp == "" {
+		span.Outcome(pulse.StatusOK, "empty hypothesis")
 		return originalHints
 	}
 
@@ -105,6 +114,7 @@ func (h *HyDEAugmenter) Augment(ctx context.Context, query string, originalHints
 		hypKeywords = hypKeywords[:h.cfg.NumKeywords]
 	}
 
+	span.With("keywords", strconv.Itoa(len(hypKeywords))).Outcome(pulse.StatusOK, "augmented retrieval")
 	return mergeUniqueLowercase(originalHints, hypKeywords)
 }
 

@@ -30,10 +30,12 @@ import (
 	"fmt"
 	"math/rand"
 	"path/filepath"
+	"strconv"
 	"sync"
 	"time"
 
 	"github.com/diillson/chatcli/cli/agent/quality"
+	"github.com/diillson/chatcli/pkg/pulse"
 	"go.uber.org/zap"
 )
 
@@ -419,8 +421,12 @@ func (r *Runner) processJob(ctx context.Context, job LessonJob, workerID int) {
 		return
 	}
 
+	// The background half of Reflexion on the live dashboard: the hook only
+	// queues; this is where a lesson is distilled, skipped, retried or lost.
+	span := pulse.BeginPattern(pulse.PatternReflexion, "").With("attempt", strconv.Itoa(job.Attempts))
 	res := safeProcess(jobCtx, processor, job, r.logger)
 	elapsed := time.Since(started)
+	endLessonSpan(span, res.Outcome)
 
 	if r.metrics != nil {
 		r.metrics.AttemptsTotal.WithLabelValues(res.Outcome.String()).Inc()
@@ -512,4 +518,18 @@ func safeProcess(ctx context.Context, p Processor, job LessonJob, logger *zap.Lo
 		}
 	}()
 	return p(ctx, job)
+}
+
+// endLessonSpan closes the dashboard span of a processed lesson job.
+func endLessonSpan(span *pulse.Span, outcome ProcessOutcome) {
+	switch outcome {
+	case OutcomeSuccess:
+		span.Outcome(pulse.StatusOK, pulse.OutcomeLessonSaved)
+	case OutcomeSkipped:
+		span.Outcome(pulse.StatusOK, pulse.OutcomeNoLesson)
+	case OutcomeTransient:
+		span.Outcome(pulse.StatusError, pulse.OutcomeRetrying)
+	default:
+		span.Outcome(pulse.StatusError, pulse.OutcomeDeadLetter)
+	}
 }

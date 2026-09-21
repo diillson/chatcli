@@ -1414,7 +1414,9 @@ func (a *AgentMode) Run(ctx context.Context, query string, additionalContext str
 	}
 
 	// --- 2. O LOOP DE RACIOCÍNIO-AÇÃO (ReAct) ---
+	reactSpan := pulse.BeginPattern(pulse.PatternReAct, orchRun.ID())
 	err := a.processAIResponseAndAct(ctx, maxTurns)
+	a.pulseReactEnd(reactSpan, err)
 	endRun, err := a.settleParkSentinel(ctx, err)
 	if endRun {
 		return err

@@ -14,6 +14,7 @@ import (
 	"fmt"
 
 	"github.com/diillson/chatcli/cli/agent/workers"
+	"github.com/diillson/chatcli/pkg/pulse"
 	"go.uber.org/zap"
 )
 
@@ -64,11 +65,13 @@ func (h *VerifyHook) PostRun(ctx context.Context, hc *HookContext, result *worke
 		Task:  body,
 		ID:    "verify",
 	}
+	span := beginPattern(ctx, pulse.PatternCoVe)
 	res := h.dispatch(ctx, call)
 	if res.Error != nil {
 		h.logger.Warn("verifier dispatch failed; keeping draft",
 			zap.String("source_agent", string(hc.Agent.Type())),
 			zap.Error(res.Error))
+		span.Outcome(pulse.StatusError, outcomeFailed)
 		return nil
 	}
 
@@ -80,11 +83,17 @@ func (h *VerifyHook) PostRun(ctx context.Context, hc *HookContext, result *worke
 	if parsed.HasDiscrepancy() {
 		result.SetMetadata("verified_with_discrepancy", "true")
 		result.SetMetadata("verifier_discrepancies", parsed.Discrepancies)
+		// A discrepancy is the pattern doing its job, not a failure of it;
+		// it is tinted as a warning-worthy outcome through its label.
+		outcome := outcomeDiscrepancy
 		if cfg.RewriteOnDiscrepancy && parsed.Final != "" {
 			result.Output = parsed.Final
+			outcome = outcomeCorrected
 		}
+		span.Outcome(pulse.StatusOK, outcome)
 	} else {
 		result.SetMetadata("verified_clean", "true")
+		span.Outcome(pulse.StatusOK, outcomeClean)
 	}
 	return nil
 }

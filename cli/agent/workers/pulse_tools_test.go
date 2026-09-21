@@ -15,6 +15,7 @@ import (
 
 	"github.com/diillson/chatcli/cli/agent/runs"
 	"github.com/diillson/chatcli/pkg/pulse"
+	"go.uber.org/zap"
 )
 
 func TestPulseToolNameAndStatus(t *testing.T) {
@@ -92,5 +93,44 @@ func TestExecuteToolCallIsSilentWhileOff(t *testing.T) {
 	executeToolCall(context.Background(), validatedTC{blocked: true, msg: "x"}, nil, nil)
 	if got := pulse.Default().Stats().Published; got != before {
 		t.Fatalf("published %d events with the dashboard off", got-before)
+	}
+}
+
+// Pattern #1: every worker ReAct loop is one span on the react node, under
+// the worker's run, closing with how many turns it took.
+func TestWorkerReActLoopIsReportedAsAPattern(t *testing.T) {
+	bus := pulse.Default()
+	ch, cancelSub := bus.Subscribe(128)
+	bus.SetEnabled(true)
+	t.Cleanup(func() { bus.SetEnabled(false); cancelSub() })
+
+	ctx, run := runs.NewRegistry(4).Begin(context.Background(), runs.Info{Kind: runs.KindWorker, Agent: "search"})
+	defer run.End(nil)
+	client := &mockLLMClient{responses: []string{"SECRET-ANSWER final."}}
+	if _, err := RunWorkerReAct(ctx, WorkerReActConfig{MaxTurns: 5, SystemPrompt: "test", ReadOnly: true}, "SECRET-TASK", client, nil, NewSkillSet(), nil, zap.NewNop()); err != nil {
+		t.Fatal(err)
+	}
+
+	var react []pulse.Event
+	deadline := time.After(3 * time.Second)
+	for len(react) < 2 {
+		select {
+		case ev := <-ch:
+			if ev.Kind == pulse.KindPattern && ev.Name == pulse.PatternReAct {
+				react = append(react, ev)
+			}
+		case <-deadline:
+			t.Fatalf("got %d react events", len(react))
+		}
+	}
+	if react[0].Phase != pulse.PhaseStart || react[0].Parent != run.ID() {
+		t.Fatalf("start = %+v", react[0])
+	}
+	if react[1].Phase != pulse.PhaseEnd || react[1].Status != pulse.StatusOK || !strings.HasSuffix(react[1].Attrs["state"], " turns") {
+		t.Fatalf("end = %+v", react[1])
+	}
+	wire, _ := json.Marshal(react)
+	if strings.Contains(string(wire), "SECRET") {
+		t.Fatalf("task or answer leaked: %s", wire)
 	}
 }

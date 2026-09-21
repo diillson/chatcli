@@ -20,12 +20,14 @@ package cli
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/diillson/chatcli/cli/agent/quality"
 	"github.com/diillson/chatcli/cli/agent/workers"
 	"github.com/diillson/chatcli/i18n"
 	"github.com/diillson/chatcli/models"
+	"github.com/diillson/chatcli/pkg/pulse"
 	"go.uber.org/zap"
 )
 
@@ -44,6 +46,10 @@ const taskGraphSteerDirective = "\n\n[ORCHESTRATION HINT] This looks like a subs
 func (a *AgentMode) steerToTaskGraph(userQuery string) {
 	a.logger.Info("Plan-First routed to @taskgraph",
 		zap.Int("complexity", quality.ComplexityScore(userQuery)))
+	if pulse.Enabled() {
+		pulse.Point(pulse.KindPattern, pulse.PatternPlanAndSolve, a.orchRun.ID(), pulse.StatusOK,
+			map[string]string{"state": "routed to @taskgraph"})
+	}
 	fmt.Println(colorize("  "+i18n.T("plan_first.routed_taskgraph"), ColorCyan))
 	n := len(a.cli.history)
 	if n == 0 {
@@ -133,6 +139,12 @@ func (a *AgentMode) runPlanFirstIfApplicable(ctx context.Context, userQuery stri
 	// Step 1: ask the planner for a structured JSON plan via the
 	// dispatcher so model routing, effort hints, policy and reasoning
 	// auto-enable all fire correctly.
+	// On the live dashboard: what the planner run concluded. Every exit
+	// below names its outcome; the deferred close reports the last one set.
+	planSpan := pulse.BeginPattern(pulse.PatternPlanAndSolve, a.orchRun.ID())
+	planStatus, planOutcome := pulse.StatusError, "planner failed"
+	defer func() { planSpan.Outcome(planStatus, planOutcome) }()
+
 	plannerCall := workers.AgentCall{
 		Agent: workers.AgentTypePlanner,
 		Task:  workers.PlannerStructuredOutputDirective + "\n" + userQuery,
@@ -157,6 +169,7 @@ func (a *AgentMode) runPlanFirstIfApplicable(ctx context.Context, userQuery stri
 	if dryRun {
 		a.renderPlanPreview(planResults[0].Output)
 		a.cli.planDryRunHandled = true
+		planStatus, planOutcome = pulse.StatusOK, "dry run preview"
 		return
 	}
 
@@ -169,6 +182,7 @@ func (a *AgentMode) runPlanFirstIfApplicable(ctx context.Context, userQuery stri
 	// prompt and make it impossible to answer.
 	fmt.Println(colorize("  "+i18n.T("plan_first.spinner_executing"), ColorCyan))
 	runner := quality.NewPlanRunner(a.agentDispatcher, a.logger)
+	planOutcome = "plan not parseable"
 	runRes, parseErr := runner.RunFromPlannerOutput(ctx, planResults[0].Output)
 	if parseErr != nil {
 		a.logger.Warn("Plan-First aborted: plan parse failed",
@@ -185,8 +199,10 @@ func (a *AgentMode) runPlanFirstIfApplicable(ctx context.Context, userQuery stri
 	//   - assistant: shows the model what was already attempted
 	//   - system:    feeds the deterministic per-step results
 	header := i18n.T("plan_first.executed", runRes.StepsExecuted)
+	planStatus, planOutcome = pulse.StatusOK, "executed "+strconv.Itoa(runRes.StepsExecuted)+" steps"
 	if runRes.HadErrors {
 		header += " " + i18n.T("plan_first.with_errors")
+		planStatus, planOutcome = pulse.StatusError, planOutcome+" with errors"
 	}
 	fmt.Println(colorize("  "+header, ColorCyan))
 

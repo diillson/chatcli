@@ -28,6 +28,7 @@ import (
 	"context"
 
 	"github.com/diillson/chatcli/cli/agent/workers"
+	"github.com/diillson/chatcli/pkg/pulse"
 	"go.uber.org/zap"
 )
 
@@ -122,7 +123,10 @@ func (h *ReflexionHook) PostRun(ctx context.Context, hc *HookContext, result *wo
 			h.logger.Warn("reflexion: enqueue failed; lesson may be lost",
 				zap.String("trigger", trigger),
 				zap.Error(err))
+			reflexionTriggered(ctx, trigger, pulse.StatusError, outcomeQueueFailed)
+			return nil
 		}
+		reflexionTriggered(ctx, trigger, pulse.StatusOK, outcomeQueued)
 		return nil
 	}
 
@@ -132,11 +136,14 @@ func (h *ReflexionHook) PostRun(ctx context.Context, hc *HookContext, result *wo
 	// Background — never block the turn. Derive a detached context from
 	// the turn's ctx (inherits values, strips cancellation) so the
 	// per-worker timeout doesn't kill the lesson call mid-flight.
+	reflexionTriggered(ctx, trigger, pulse.StatusOK, outcomeQueued)
 	go h.runReflexion(context.WithoutCancel(ctx), req) //#nosec G118 -- detached on purpose; lesson gen outlives the turn
 	return nil
 }
 
 func (h *ReflexionHook) runReflexion(ctx context.Context, req LessonRequest) {
+	span := pulse.BeginPattern(pulse.PatternReflexion, "").With("trigger", req.Trigger)
+	defer span.Outcome(pulse.StatusError, outcomeFailed) // only the first close counts
 	lesson, err := GenerateLesson(ctx, h.llm, req)
 	if err != nil {
 		h.logger.Warn("reflexion: lesson generation failed",
@@ -147,6 +154,7 @@ func (h *ReflexionHook) runReflexion(ctx context.Context, req LessonRequest) {
 	if lesson == nil {
 		// Model declared "no actionable lesson" — that's a valid
 		// outcome, no error, no persistence.
+		span.Outcome(pulse.StatusOK, pulse.OutcomeNoLesson)
 		return
 	}
 	if err := h.persist(ctx, *lesson); err != nil {
@@ -155,6 +163,7 @@ func (h *ReflexionHook) runReflexion(ctx context.Context, req LessonRequest) {
 			zap.Error(err))
 		return
 	}
+	span.Outcome(pulse.StatusOK, pulse.OutcomeLessonSaved)
 	h.logger.Info("reflexion: lesson persisted",
 		zap.String("trigger", req.Trigger),
 		zap.String("situation", lesson.Situation),
