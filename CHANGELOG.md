@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.207.0](https://github.com/diillson/chatcli/compare/v1.206.0...v1.207.0) (2026-09-21)
+
+
+### Features
+
+* **pulsedash:** let nodes be dragged into place on the live dashboard ([#1631](https://github.com/diillson/chatcli/issues/1631)) ([0ad96ad](https://github.com/diillson/chatcli/commit/0ad96ad729cd7c1e280e9e2bfc0efff0a79a6f8e))
+
+
+### Bug Fixes
+
+* **pulse:** show token usage, cost and context window on the live dashboard ([#1629](https://github.com/diillson/chatcli/issues/1629)) ([e4b3d56](https://github.com/diillson/chatcli/commit/e4b3d56dd0f0cde62a60ae57f40507d13feac41f))
+
 ## [1.206.0](https://github.com/diillson/chatcli/compare/v1.205.1...v1.206.0) (2026-09-21)
 
 
