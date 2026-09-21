@@ -12,6 +12,9 @@
 package cli
 
 import (
+	"errors"
+	"strconv"
+
 	"github.com/diillson/chatcli/cli/agentevents"
 	"github.com/diillson/chatcli/pkg/pulse"
 )
@@ -58,4 +61,16 @@ func (a *AgentMode) pulseCloseOpenTools() {
 		span.End(pulse.StatusCancelled)
 		delete(a.pulseTools, id)
 	}
+}
+
+// pulseReactEnd closes the span of the orchestrator's ReAct loop (pattern
+// #1) with how far it got. A park is the loop choosing to sleep until a
+// wake, not a failure.
+func (a *AgentMode) pulseReactEnd(span *pulse.Span, err error) {
+	turns := strconv.Itoa(a.runTurns) + " turns"
+	if errors.Is(err, errAgentParkedRequested) {
+		span.Outcome(pulse.StatusOK, "parked after "+turns)
+		return
+	}
+	span.Outcome(pulse.StatusOf(err), turns)
 }

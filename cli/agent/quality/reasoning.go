@@ -49,7 +49,9 @@ func applyAutoReasoning(ctx context.Context, cfg ReasoningConfig, agent workers.
 	if mode != "on" && !inAutoAgents(string(agent.Type()), cfg.AutoAgents) {
 		return ctx
 	}
-	return client.WithEffortHint(ctx, EffortForBudget(cfg.Budget))
+	effort := EffortForBudget(cfg.Budget)
+	reasoningApplied(ctx, string(agent.Type()), string(effort))
+	return client.WithEffortHint(ctx, effort)
 }
 
 // EffortForBudget translates a thinking budget (in tokens) into the

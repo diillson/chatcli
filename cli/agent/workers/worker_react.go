@@ -96,6 +96,7 @@ func RunWorkerReAct(
 	// (dispatcher, subagent, MoA, scheduler bridge). Nil-safe — a loop run
 	// without a registered handle simply reports nothing.
 	liveRun := runs.FromContext(ctx)
+	defer pulseReactLoop(ctx, liveRun)()
 
 	maxTurns := resolveWorkerMaxTurns(config)
 
@@ -620,6 +621,18 @@ func executeToolCall(ctx context.Context, v validatedTC, lockMgr *FileLockManage
 	res := runToolCall(ctx, v, lockMgr, policyChecker)
 	span.End(pulseToolStatus(ctx, v, res))
 	return res
+}
+
+// pulseReactLoop opens the span of a worker ReAct loop (harness pattern #1)
+// and returns the func that closes it with how many turns the loop took.
+func pulseReactLoop(ctx context.Context, liveRun *runs.Run) func() {
+	if !pulse.Enabled() {
+		return func() {}
+	}
+	span := pulse.BeginPattern(pulse.PatternReAct, liveRun.ID())
+	return func() {
+		span.Outcome(pulse.StatusOf(ctx.Err()), strconv.Itoa(liveRun.Snapshot().Turn)+" turns")
+	}
 }
 
 // pulseToolName is the hub a worker tool call lights up on the live

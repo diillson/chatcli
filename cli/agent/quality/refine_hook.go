@@ -23,6 +23,7 @@ import (
 
 	"github.com/diillson/chatcli/cli/agent/quality/convergence"
 	"github.com/diillson/chatcli/cli/agent/workers"
+	"github.com/diillson/chatcli/pkg/pulse"
 	"go.uber.org/zap"
 )
 
@@ -105,7 +106,10 @@ func (h *RefineHook) PostRun(ctx context.Context, hc *HookContext, result *worke
 	bestDraft := draft
 	bestSimToOrig := 1.0 // original is trivially 100% similar to itself
 
+	span := beginPattern(ctx, pulse.PatternSelfRefine)
+	passes, passFailed := 0, false
 	for pass := 0; pass < maxPasses; pass++ {
+		passes = pass + 1
 		body := workers.RefineDirective + "\n" +
 			"Task:\n" + originalTask + "\n\n" +
 			"Draft:\n" + currentDraft
@@ -120,6 +124,7 @@ func (h *RefineHook) PostRun(ctx context.Context, hc *HookContext, result *worke
 				zap.String("source_agent", string(hc.Agent.Type())),
 				zap.Int("pass", pass),
 				zap.Error(res.Error))
+			passFailed = true
 			break
 		}
 		next := res.Output
@@ -169,6 +174,7 @@ func (h *RefineHook) PostRun(ctx context.Context, hc *HookContext, result *worke
 	if final != draft {
 		result.Output = final
 	}
+	endRefine(span, passes, passFailed, result.MetadataFlag("refine_rolled_back"), final != draft)
 	return nil
 }
 
