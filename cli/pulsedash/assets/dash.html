@@ -1,0 +1,477 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ChatCLI · Live</title>
+<style>
+  :root {
+    --bg:#11131a; --panel:#181b25; --border:#2a2f40; --text:#c9d1e4; --strong:#ffffff; --muted:#7f889e;
+    --accent:#7c9cff; --ok:#4ade80; --err:#f87171; --warn:#fbbf24;
+    --k-session:#7c9cff; --k-agent:#c084fc; --k-llm:#38bdf8; --k-tool:#4ade80; --k-skill:#fbbf24;
+    --k-mcp:#fb923c; --k-pattern:#f472b6; --k-background:#94a3b8; --k-conn:#2dd4bf; --k-rpc:#a3e635; --k-turn:#818cf8;
+  }
+  * { box-sizing:border-box; }
+  html,body { height:100%; margin:0; background:var(--bg); color:var(--text);
+    font:13px/1.45 ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif; }
+  #app { display:grid; grid-template-rows:auto 1fr; grid-template-columns:1fr 340px; height:100%; }
+  header { grid-column:1 / 3; display:flex; align-items:center; gap:14px; padding:9px 14px;
+    background:var(--panel); border-bottom:1px solid var(--border); flex-wrap:wrap; }
+  h1 { font-size:14px; margin:0; color:var(--strong); letter-spacing:.02em; display:flex; align-items:center; gap:8px; }
+  #beat { width:9px; height:9px; border-radius:50%; background:var(--muted); transition:background .2s, box-shadow .2s; }
+  #beat.on { background:var(--ok); box-shadow:0 0 10px var(--ok); }
+  .chips { display:flex; gap:6px; flex-wrap:wrap; }
+  .chip { border:1px solid var(--border); border-radius:999px; padding:2px 10px; cursor:pointer; user-select:none;
+    background:transparent; color:var(--text); font:inherit; display:inline-flex; align-items:center; gap:6px; }
+  .chip:hover { border-color:var(--accent); }
+  .chip.off { opacity:.38; }
+  .chip .dot { width:8px; height:8px; border-radius:50%; background:var(--muted); }
+  .chip.live .dot { background:var(--ok); }
+  .chip.self { border-color:var(--accent); }
+  .spacer { flex:1; }
+  .stat { color:var(--muted); } .stat b { color:var(--strong); font-weight:600; }
+  button.ctl { background:transparent; color:var(--text); border:1px solid var(--border); border-radius:6px;
+    padding:3px 10px; cursor:pointer; font:inherit; }
+  button.ctl:hover { border-color:var(--accent); }
+  #stage { position:relative; overflow:hidden; }
+  canvas { position:absolute; inset:0; width:100%; height:100%; display:block; cursor:grab; }
+  canvas.drag { cursor:grabbing; }
+  #empty { position:absolute; inset:0; display:flex; align-items:center; justify-content:center; text-align:center;
+    color:var(--muted); padding:40px; pointer-events:none; white-space:pre-line; }
+  aside { border-left:1px solid var(--border); background:var(--panel); display:flex; flex-direction:column; min-height:0; }
+  aside h2 { font-size:11px; text-transform:uppercase; letter-spacing:.08em; color:var(--muted); margin:0; padding:10px 12px 6px; }
+  #feed { overflow:auto; flex:1; padding:0 6px 10px; }
+  .row { display:grid; grid-template-columns:10px 1fr auto; gap:8px; align-items:baseline; padding:3px 6px; border-radius:5px; }
+  .row:hover { background:rgba(127,136,158,.12); }
+  .row .k { width:8px; height:8px; border-radius:50%; align-self:center; }
+  .row .n { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .row .n small { color:var(--muted); }
+  .row .d { color:var(--muted); font-variant-numeric:tabular-nums; }
+  .row.err .n { color:var(--err); }
+  #pop { position:absolute; min-width:240px; max-width:340px; background:var(--panel); border:1px solid var(--border);
+    border-radius:8px; padding:10px 12px; box-shadow:0 10px 30px rgba(0,0,0,.45); display:none; z-index:5; }
+  #pop h3 { margin:0 0 6px; font-size:13px; color:var(--strong); word-break:break-all; }
+  #pop table { border-collapse:collapse; width:100%; }
+  #pop td { padding:1px 0; vertical-align:top; } #pop td:first-child { color:var(--muted); padding-right:10px; white-space:nowrap; }
+  #pop td:last-child { word-break:break-all; }
+  #legend { position:absolute; left:12px; bottom:10px; display:flex; gap:6px; flex-wrap:wrap; max-width:70%; }
+  #err { color:var(--err); }
+</style>
+</head>
+<body>
+<div id="app">
+  <header>
+    <h1><span id="beat"></span><span id="title">ChatCLI · Live</span></h1>
+    <div class="chips" id="instances"></div>
+    <div class="spacer"></div>
+    <span class="stat" id="err"></span>
+    <span class="stat"><b id="sNodes">0</b> <span id="lNodes">nodes</span></span>
+    <span class="stat"><b id="sActive">0</b> <span id="lActive">active</span></span>
+    <span class="stat"><b id="sRate">0</b> <span id="lRate">events/s</span></span>
+    <button class="ctl" id="bPause"></button>
+    <button class="ctl" id="bFit"></button>
+  </header>
+  <div id="stage">
+    <canvas id="cv"></canvas>
+    <div id="empty"></div>
+    <div id="legend"></div>
+    <div id="pop"></div>
+  </div>
+  <aside>
+    <h2 id="lFeed">Live events</h2>
+    <div id="feed"></div>
+  </aside>
+</div>
+<script>
+"use strict";
+const BOOT = __PULSE_BOOT__;
+const $ = id => document.getElementById(id);
+const S = (k, fb) => (BOOT.strings && BOOT.strings[k]) || fb;
+document.documentElement.lang = BOOT.lang || "en";
+for (const [k, v] of Object.entries(BOOT.theme || {})) document.documentElement.style.setProperty(k, v);
+const cssVar = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+
+// The token arrives in the URL once, moves to memory and leaves the address bar.
+const TOKEN = new URLSearchParams(location.search).get("t") || "";
+history.replaceState(null, "", location.pathname);
+
+const KINDS = ["session","agent","turn","llm","tool","skill","mcp","pattern","background","conn","rpc"];
+// Resource kinds share three columns instead of one each: a graph ten columns
+// wide only fits the screen at a zoom nobody can read.
+const GROUPS = [["llm","conn"], ["tool","mcp","skill"], ["pattern","background","turn","rpc"]];
+const NODE_W = 188, NODE_H = 54, GAP_X = 62, GAP_Y = 14, GROUP_GAP = 26, BAND_PAD = 34, MIN_FIT = .72, DONE_TTL = 45000, FEED_MAX = 250;
+
+$("title").textContent = S("title", "ChatCLI · Live");
+$("lNodes").textContent = S("nodes", "nodes");
+$("lActive").textContent = S("active", "active");
+$("lRate").textContent = S("rate", "events/s");
+$("lFeed").textContent = S("feed", "Live events");
+$("bFit").textContent = S("fit", "Fit");
+$("empty").textContent = S("empty", "Waiting for a chatcli process to report…\nRun something in any chatcli session on this machine.");
+
+const state = {
+  instances: new Map(),   // token -> {meta, alive, cursor, shown}
+  nodes: new Map(),       // key -> node
+  edges: new Map(),       // "from>to" -> {from,to,fire,active}
+  particles: [],
+  hidden: new Set(),      // hidden kinds
+  cam: {x:30, y:30, k:1}, autoFit: true, paused: false,
+  recent: [],             // timestamps for the rate
+};
+
+// ─── reducer: events -> graph ─────────────────────────────────────────────
+function nodeKey(ev) {
+  if (ev.kind === "session") return ev.instance + "|session";
+  if (ev.kind === "agent") return ev.instance + "|a|" + ev.id;
+  return ev.instance + "|h|" + ev.kind + "|" + (ev.name || ev.id);
+}
+function parentKey(ev) {
+  if (ev.kind === "session") return null;
+  if (ev.parent && ev.parent !== "session") {
+    const k = ev.instance + "|a|" + ev.parent;
+    if (state.nodes.has(k)) return k;
+  }
+  return ev.instance + "|session";
+}
+function ensureSession(inst) {
+  const key = inst + "|session";
+  if (!state.nodes.has(key)) {
+    const info = state.instances.get(inst);
+    state.nodes.set(key, mkNode(key, inst, "session", (info && info.meta.surface) || "chatcli", true));
+  }
+  return key;
+}
+function mkNode(key, inst, kind, name, single) {
+  return { key, inst, kind, name, single, status:"", active:0, calls:0, errors:0, totalMs:0, timed:0,
+           attrs:{}, recent:[], flash:0, doneAt:0, x:null, y:null, tx:0, ty:0 };
+}
+function apply(ev) {
+  const live = !(ev.attrs && ev.attrs.snapshot === "true");
+  ensureSession(ev.instance);
+  const key = nodeKey(ev);
+  let n = state.nodes.get(key);
+  if (!n) { n = mkNode(key, ev.instance, ev.kind, ev.name || ev.id, ev.kind === "session" || ev.kind === "agent"); state.nodes.set(key, n); }
+  if (ev.name && n.single) n.name = ev.name;
+  const sameAction = ev.phase === "update" && n.attrs.action === ((ev.attrs || {}).action);
+  Object.assign(n.attrs, ev.attrs || {});
+  delete n.attrs.snapshot;
+
+  if (n.single) {
+    n.status = ev.status || n.status;
+    if (ev.phase === "end") { n.doneAt = Date.now(); n.active = 0; if (ev.dur_ms) n.totalMs = ev.dur_ms; }
+    else { n.active = 1; n.doneAt = 0; }
+    if (ev.status === "error") n.errors = 1;
+  } else {
+    if (ev.phase === "start") { n.active++; n.calls++; }
+    else if (ev.phase === "point") { n.calls++; }
+    else if (ev.phase === "end") {
+      n.active = Math.max(0, n.active - 1);
+      if (ev.dur_ms) { n.totalMs += ev.dur_ms; n.timed++; }
+      if (ev.status === "error") n.errors++;
+      n.recent.unshift({ts:ev.ts, status:ev.status, dur:ev.dur_ms||0});
+      if (n.recent.length > 6) n.recent.pop();
+    }
+    n.status = n.active > 0 ? "running" : (ev.status || n.status);
+  }
+  if (live) n.flash = 1;
+
+  const pk = parentKey(ev);
+  if (pk) {
+    const ek = pk + ">" + key;
+    let e = state.edges.get(ek);
+    if (!e) { e = {from:pk, to:key, fire:0}; state.edges.set(ek, e); }
+    if (live) { e.fire = 1; state.particles.push({edge:ek, t:0, err: ev.status === "error"}); }
+  }
+  if (live) { if (!sameAction) pushFeed(ev); state.recent.push(Date.now()); }
+}
+function prune(now) {
+  for (const [k, n] of state.nodes) {
+    if (n.kind !== "agent" || !n.doneAt || now - n.doneAt < DONE_TTL) continue;
+    let busy = false;
+    for (const e of state.edges.values()) if (e.from === k) { const c = state.nodes.get(e.to); if (c && c.active > 0) { busy = true; break; } }
+    if (busy) continue;
+    state.nodes.delete(k);
+    for (const ek of [...state.edges.keys()]) { const e = state.edges.get(ek); if (e.from === k || e.to === k) state.edges.delete(ek); }
+  }
+  for (const [k, n] of state.nodes) {            // hubs left with no edge lose their place too
+    if (n.kind === "session" || n.kind === "agent") continue;
+    let linked = false;
+    for (const e of state.edges.values()) if (e.to === k) { linked = true; break; }
+    if (!linked) state.nodes.delete(k);
+  }
+}
+
+// ─── layout: a band per process, a column per kind, agents by depth ───────
+function visible(n) {
+  const inst = state.instances.get(n.inst);
+  return inst && inst.shown && !state.hidden.has(n.kind);
+}
+function layout() {
+  const depth = new Map();
+  const parentOf = new Map();
+  for (const e of state.edges.values()) { const c = state.nodes.get(e.to); if (c && c.kind === "agent") parentOf.set(e.to, e.from); }
+  const depthOf = k => {
+    if (depth.has(k)) return depth.get(k);
+    const p = parentOf.get(k); const pn = p && state.nodes.get(p);
+    const d = pn && pn.kind === "agent" ? depthOf(p) + 1 : 0;
+    depth.set(k, d); return d;
+  };
+  let bandY = 0, maxX = 0;
+  const bands = [];
+  for (const [tok, inst] of state.instances) {
+    if (!inst.shown) continue;
+    const cols = new Map();
+    const put = (col, n) => { if (!cols.has(col)) cols.set(col, []); cols.get(col).push(n); };
+    let maxDepth = -1;
+    const mine = [...state.nodes.values()].filter(n => n.inst === tok && visible(n));
+    if (!mine.length) continue;
+    for (const n of mine) if (n.kind === "agent") maxDepth = Math.max(maxDepth, depthOf(n.key));
+    const groupOf = kind => { const g = GROUPS.findIndex(ks => ks.includes(kind)); return g < 0 ? GROUPS.length - 1 : g; };
+    for (const n of mine) {
+      if (n.kind === "session") put("0", n);
+      else if (n.kind === "agent") put("a" + depthOf(n.key), n);
+      else put("g" + groupOf(n.kind), n);
+    }
+    const order = ["0"];
+    for (let d = 0; d <= maxDepth; d++) order.push("a" + d);
+    GROUPS.forEach((_, g) => { if (cols.has("g" + g)) order.push("g" + g); });
+    let tall = NODE_H, x = 0;
+    for (const c of order) {
+      const list = cols.get(c); if (!list) continue;
+      // Stable order: kind first, then name. Sorting by activity would make
+      // nodes trade places every second and the eye could never settle.
+      list.sort((a, b) => (KINDS.indexOf(a.kind) - KINDS.indexOf(b.kind)) || a.name.localeCompare(b.name));
+      let y = bandY + BAND_PAD, prev = null;
+      for (const n of list) {
+        if (prev !== null && prev !== n.kind) y += GROUP_GAP - GAP_Y;
+        n.tx = x; n.ty = y; y += NODE_H + GAP_Y; prev = n.kind;
+      }
+      tall = Math.max(tall, y - GAP_Y - bandY - BAND_PAD);
+      x += NODE_W + GAP_X;
+    }
+    const h = BAND_PAD + tall + 18;
+    bands.push({tok, y:bandY, h, w:x - GAP_X, inst});
+    maxX = Math.max(maxX, x - GAP_X);
+    bandY += h + 22;
+  }
+  for (const n of state.nodes.values()) if (n.x === null) { n.x = n.tx - 40; n.y = n.ty; }
+  return {bands, w:maxX, h:bandY};
+}
+
+// ─── drawing ──────────────────────────────────────────────────────────────
+const cv = $("cv"), ctx = cv.getContext("2d");
+let dpr = 1, view = {w:0, h:0}, world = {bands:[], w:0, h:0}, last = performance.now();
+function resize() {
+  const r = cv.getBoundingClientRect(); dpr = window.devicePixelRatio || 1;
+  cv.width = Math.max(1, r.width * dpr); cv.height = Math.max(1, r.height * dpr); view = {w:r.width, h:r.height};
+}
+function fit() {
+  if (!world.w || !world.h) return;
+  // Never shrink below a readable size to make everything fit: past that
+  // point the graph keeps its scale, anchors top-left and the user pans.
+  const k = Math.max(MIN_FIT, Math.min(1.15, (view.w - 60) / world.w, (view.h - 60) / world.h));
+  state.cam.k = k;
+  state.cam.x = Math.max(28 / k, (view.w / k - world.w) / 2); state.cam.y = Math.max(20 / k, (view.h / k - world.h) / 2);
+}
+function rr(x, y, w, h, r) { ctx.beginPath(); ctx.moveTo(x+r,y); ctx.arcTo(x+w,y,x+w,y+h,r); ctx.arcTo(x+w,y+h,x,y+h,r); ctx.arcTo(x,y+h,x,y,r); ctx.arcTo(x,y,x+w,y,r); ctx.closePath(); }
+function clip(text, max) { if (ctx.measureText(text).width <= max) return text; let t = text; while (t.length > 1 && ctx.measureText(t + "…").width > max) t = t.slice(0, -1); return t + "…"; }
+function ms(v) { return v >= 1000 ? (v / 1000).toFixed(v >= 10000 ? 0 : 1) + "s" : Math.round(v) + "ms"; }
+function subline(n) {
+  if (n.kind === "session") { const a = n.attrs; return [a.provider, a.model].filter(Boolean).join(" · "); }
+  if (n.kind === "agent") {
+    const a = n.attrs, parts = [];
+    if (a.turn) parts.push(S("turn", "turn") + " " + a.turn + "/" + a.max_turns);
+    if (a.tool_calls) parts.push(a.tool_calls + " " + S("tools", "tools"));
+    if (n.doneAt && n.totalMs) parts.push(ms(n.totalMs));
+    else if (a.action) parts.push(a.action);
+    return parts.join(" · ") || (a.run_kind || "");
+  }
+  const parts = [n.calls + "×"];
+  if (n.active) parts.push(n.active + " " + S("active", "active"));
+  if (n.timed) parts.push("~" + ms(n.totalMs / n.timed));
+  if (n.errors) parts.push(n.errors + " " + S("errors", "err"));
+  return parts.join(" · ");
+}
+function bez(a, b) { const x1 = a.x + NODE_W, y1 = a.y + NODE_H/2, x2 = b.x, y2 = b.y + NODE_H/2, c = Math.max(40, (x2 - x1)/2); return {x1,y1,x2,y2,c1x:x1+c,c2x:x2-c}; }
+function bezPoint(p, t) { const u = 1-t; return { x:u*u*u*p.x1+3*u*u*t*p.c1x+3*u*t*t*p.c2x+t*t*t*p.x2, y:u*u*u*p.y1+3*u*u*t*p.y1+3*u*t*t*p.y2+t*t*t*p.y2 }; }
+
+function draw(now) {
+  const dt = Math.min(.1, (now - last) / 1000); last = now;
+  world = layout();
+  if (state.autoFit) fit();
+  const k = state.cam.k;
+  ctx.setTransform(1,0,0,1,0,0); ctx.clearRect(0,0,cv.width,cv.height);
+  ctx.setTransform(dpr*k,0,0,dpr*k,dpr*state.cam.x*k,dpr*state.cam.y*k);
+  const C = {border:cssVar("--border"), panel:cssVar("--panel"), text:cssVar("--text"), strong:cssVar("--strong"), muted:cssVar("--muted"), err:cssVar("--err"), ok:cssVar("--ok"), accent:cssVar("--accent")};
+
+  for (const b of world.bands) {                       // process bands
+    ctx.globalAlpha = b.inst.alive ? .5 : .22; ctx.fillStyle = C.panel; rr(-16, b.y, b.w + 32, b.h, 12); ctx.fill();
+    ctx.globalAlpha = 1; ctx.strokeStyle = C.border; ctx.lineWidth = 1; ctx.stroke();
+    ctx.fillStyle = C.muted; ctx.font = "600 10px ui-sans-serif,system-ui"; ctx.textBaseline = "top";
+    const m = b.inst.meta;
+    ctx.fillText(((m.surface || "chatcli") + " · pid " + m.pid + (m.workdir ? " · " + m.workdir : "") + (b.inst.alive ? "" : " · " + S("ended", "ended"))).toUpperCase(), -4, b.y + 11);
+  }
+  for (const n of state.nodes.values()) {              // ease toward layout targets
+    if (n.x === null) continue;
+    n.x += (n.tx - n.x) * Math.min(1, dt * 9); n.y += (n.ty - n.y) * Math.min(1, dt * 9);
+    n.flash = Math.max(0, n.flash - dt * 1.6);
+  }
+  for (const e of state.edges.values()) {              // edges
+    const a = state.nodes.get(e.from), b = state.nodes.get(e.to);
+    if (!a || !b || !visible(a) || !visible(b)) continue;
+    e.fire = Math.max(0, e.fire - dt * 1.4);
+    const p = bez(a, b), col = cssVar("--k-" + b.kind) || C.accent, hot = b.active > 0;
+    ctx.beginPath(); ctx.moveTo(p.x1, p.y1); ctx.bezierCurveTo(p.c1x, p.y1, p.c2x, p.y2, p.x2, p.y2);
+    ctx.strokeStyle = hot || e.fire > 0 ? col : C.border; ctx.globalAlpha = hot ? .9 : .35 + e.fire * .55; ctx.lineWidth = hot ? 1.8 : 1.1 + e.fire;
+    if (hot) { ctx.setLineDash([7, 6]); ctx.lineDashOffset = -now / 1000 * 30; }
+    ctx.stroke(); ctx.setLineDash([]); ctx.globalAlpha = 1;
+  }
+  state.particles = state.particles.filter(pt => {      // a pulse travels each time something fires
+    pt.t += dt * 1.7; const e = state.edges.get(pt.edge); if (!e || pt.t >= 1) return false;
+    const a = state.nodes.get(e.from), b = state.nodes.get(e.to); if (!a || !b || !visible(a) || !visible(b)) return false;
+    const q = bezPoint(bez(a, b), pt.t), col = pt.err ? C.err : (cssVar("--k-" + b.kind) || C.accent);
+    ctx.beginPath(); ctx.arc(q.x, q.y, 3.4, 0, Math.PI*2); ctx.fillStyle = col; ctx.shadowColor = col; ctx.shadowBlur = 12; ctx.fill(); ctx.shadowBlur = 0;
+    return true;
+  });
+  let active = 0, shown = 0;
+  for (const n of state.nodes.values()) {              // nodes
+    if (!visible(n) || n.x === null) continue;
+    shown++; if (n.active > 0) active++;
+    const col = cssVar("--k-" + n.kind) || C.accent, alive = (state.instances.get(n.inst) || {}).alive, hot = n.active > 0;
+    ctx.globalAlpha = alive ? (n.doneAt ? .62 : 1) : .4;
+    if (hot || n.flash > 0) { ctx.shadowColor = col; ctx.shadowBlur = 8 + 16 * Math.max(n.flash, hot ? .35 + .3 * Math.abs(Math.sin(now / 420)) : 0); }
+    ctx.fillStyle = C.panel; rr(n.x, n.y, NODE_W, NODE_H, 9); ctx.fill(); ctx.shadowBlur = 0;
+    ctx.strokeStyle = n.errors && !hot ? C.err : (hot ? col : C.border); ctx.lineWidth = hot ? 1.6 : 1; ctx.stroke();
+    ctx.fillStyle = col; rr(n.x, n.y, 5, NODE_H, 3); ctx.fill();
+    ctx.textBaseline = "alphabetic"; ctx.fillStyle = C.strong; ctx.font = "600 12px ui-sans-serif,system-ui";
+    ctx.fillText(clip(n.name, NODE_W - 28), n.x + 14, n.y + 21);
+    ctx.fillStyle = C.muted; ctx.font = "11px ui-sans-serif,system-ui";
+    ctx.fillText(clip(subline(n), NODE_W - 28), n.x + 14, n.y + 39);
+    if (n.single && n.doneAt) { ctx.fillStyle = n.status === "ok" ? C.ok : n.status === "error" ? C.err : C.muted; ctx.beginPath(); ctx.arc(n.x + NODE_W - 12, n.y + 14, 3.5, 0, Math.PI*2); ctx.fill(); }
+    ctx.globalAlpha = 1;
+  }
+  $("sNodes").textContent = shown; $("sActive").textContent = active;
+  $("empty").style.display = shown ? "none" : "flex";
+  requestAnimationFrame(draw);
+}
+
+// ─── side feed, chips, legend, popover ────────────────────────────────────
+// Progress updates of one node arrive in bursts (every turn, every tool) and
+// would bury everything else: consecutive ones collapse into a single row
+// that counts them.
+let lastFeed = null;
+function pushFeed(ev) {
+  const sig = ev.phase === "update" ? nodeKey(ev) : null;
+  if (sig && lastFeed && lastFeed.sig === sig) {
+    lastFeed.count++; lastFeed.small.textContent = ev.phase + " ×" + lastFeed.count + (ev.attrs && ev.attrs.action ? " · " + ev.attrs.action : "");
+    return;
+  }
+  const row = document.createElement("div"); row.className = "row" + (ev.status === "error" ? " err" : "");
+  const dot = document.createElement("span"); dot.className = "k"; dot.style.background = cssVar("--k-" + ev.kind) || cssVar("--accent");
+  const name = document.createElement("span"); name.className = "n"; name.textContent = (ev.name || ev.id) + " ";
+  const small = document.createElement("small"); small.textContent = ev.phase + (ev.status && ev.phase !== "start" ? " · " + ev.status : ""); name.appendChild(small);
+  const dur = document.createElement("span"); dur.className = "d"; dur.textContent = ev.dur_ms ? ms(ev.dur_ms) : "";
+  row.append(dot, name, dur);
+  lastFeed = sig ? {sig, small, count:1} : null;
+  const feed = $("feed"); feed.prepend(row); while (feed.childElementCount > FEED_MAX) feed.lastElementChild.remove();
+}
+function renderChips() {
+  const box = $("instances"); box.textContent = "";
+  for (const [tok, inst] of state.instances) {
+    const b = document.createElement("button");
+    b.className = "chip" + (inst.alive ? " live" : "") + (inst.shown ? "" : " off") + (tok === BOOT.self ? " self" : "");
+    const dot = document.createElement("span"); dot.className = "dot";
+    b.append(dot, document.createTextNode((inst.meta.surface || "chatcli") + " · " + inst.meta.pid));
+    b.title = tok; b.onclick = () => { inst.shown = !inst.shown; renderChips(); };
+    box.appendChild(b);
+  }
+}
+function renderLegend() {
+  const box = $("legend"); box.textContent = "";
+  for (const k of KINDS) {
+    const b = document.createElement("button"); b.className = "chip" + (state.hidden.has(k) ? " off" : "");
+    const dot = document.createElement("span"); dot.className = "dot"; dot.style.background = cssVar("--k-" + k);
+    b.append(dot, document.createTextNode(S("kind." + k, k)));
+    b.onclick = () => { state.hidden.has(k) ? state.hidden.delete(k) : state.hidden.add(k); renderLegend(); };
+    box.appendChild(b);
+  }
+}
+function showPop(n, sx, sy) {
+  const pop = $("pop"); pop.textContent = "";
+  const h = document.createElement("h3"); h.textContent = n.name; pop.appendChild(h);
+  const table = document.createElement("table");
+  const add = (k, v) => { if (v === undefined || v === "" || v === null) return; const tr = document.createElement("tr"), a = document.createElement("td"), b = document.createElement("td"); a.textContent = k; b.textContent = String(v); tr.append(a, b); table.appendChild(tr); };
+  add(S("p.kind", "kind"), S("kind." + n.kind, n.kind)); add(S("p.status", "status"), n.status);
+  if (!n.single) { add(S("p.calls", "calls"), n.calls); add(S("active", "active"), n.active); add(S("p.errors", "errors"), n.errors); if (n.timed) add(S("p.avg", "average"), ms(n.totalMs / n.timed)); }
+  else if (n.totalMs) add(S("p.took", "took"), ms(n.totalMs));
+  for (const [k, v] of Object.entries(n.attrs)) add(k, v);
+  n.recent.forEach((r, i) => add(i === 0 ? S("p.recent", "recent") : "", (r.status || "") + (r.dur ? " · " + ms(r.dur) : "")));
+  pop.appendChild(table);
+  pop.style.display = "block";
+  pop.style.left = Math.min(sx + 14, view.w - pop.offsetWidth - 10) + "px"; pop.style.top = Math.min(sy + 14, view.h - pop.offsetHeight - 10) + "px";
+}
+
+// ─── interaction ──────────────────────────────────────────────────────────
+let drag = null, moved = false;
+const toWorld = (sx, sy) => ({x: sx / state.cam.k - state.cam.x, y: sy / state.cam.k - state.cam.y});
+cv.addEventListener("mousedown", e => { drag = {x:e.clientX, y:e.clientY, cx:state.cam.x, cy:state.cam.y}; moved = false; cv.classList.add("drag"); });
+window.addEventListener("mousemove", e => { if (!drag) return; const dx = e.clientX - drag.x, dy = e.clientY - drag.y; if (Math.abs(dx) + Math.abs(dy) > 3) { moved = true; state.autoFit = false; } state.cam.x = drag.cx + dx / state.cam.k; state.cam.y = drag.cy + dy / state.cam.k; });
+window.addEventListener("mouseup", e => {
+  if (!drag) return; drag = null; cv.classList.remove("drag"); if (moved) return;
+  const r = cv.getBoundingClientRect(), w = toWorld(e.clientX - r.left, e.clientY - r.top);
+  for (const n of state.nodes.values()) if (visible(n) && w.x >= n.x && w.x <= n.x + NODE_W && w.y >= n.y && w.y <= n.y + NODE_H) { showPop(n, e.clientX - r.left, e.clientY - r.top); return; }
+  $("pop").style.display = "none";
+});
+cv.addEventListener("wheel", e => {
+  e.preventDefault(); state.autoFit = false;
+  const r = cv.getBoundingClientRect(), sx = e.clientX - r.left, sy = e.clientY - r.top, before = toWorld(sx, sy);
+  state.cam.k = Math.min(2.5, Math.max(.2, state.cam.k * (e.deltaY < 0 ? 1.1 : 1/1.1)));
+  state.cam.x = sx / state.cam.k - before.x; state.cam.y = sy / state.cam.k - before.y;
+}, {passive:false});
+$("bFit").onclick = () => { state.autoFit = true; };
+function paintPause() { $("bPause").textContent = state.paused ? S("resume", "Resume") : S("pause", "Pause"); }
+$("bPause").onclick = () => { state.paused = !state.paused; paintPause(); };
+window.addEventListener("keydown", e => { if (e.key === "0") state.autoFit = true; if (e.key === " ") { e.preventDefault(); $("bPause").click(); } if (e.key === "Escape") $("pop").style.display = "none"; });
+window.addEventListener("resize", resize);
+
+// ─── polling ──────────────────────────────────────────────────────────────
+async function api(path) {
+  const res = await fetch(path, {headers: {"X-Pulse-Token": TOKEN}, cache: "no-store"});
+  if (!res.ok) throw new Error(String(res.status));
+  return res.json();
+}
+async function tick() {
+  try {
+    const list = await api("/api/instances");
+    const seen = new Set();
+    for (const row of list.instances) {
+      seen.add(row.instance);
+      let inst = state.instances.get(row.instance);
+      if (!inst) { inst = {meta:row, alive:row.alive, cursor:0, shown:row.alive}; state.instances.set(row.instance, inst); }
+      inst.meta = row; inst.alive = row.alive;
+      const s = state.nodes.get(row.instance + "|session"); if (s && row.surface) s.name = row.surface;
+    }
+    for (const tok of [...state.instances.keys()]) if (!seen.has(tok)) state.instances.delete(tok);
+    renderChips();
+    if (!state.paused) {
+      for (const [tok, inst] of state.instances) {
+        if (!inst.shown) continue;
+        const out = await api("/api/events?instance=" + encodeURIComponent(tok) + "&since=" + inst.cursor);
+        out.events.forEach(apply); inst.cursor = out.next;
+      }
+    }
+    const now = Date.now(); prune(now);
+    state.recent = state.recent.filter(t => now - t < 5000);
+    $("sRate").textContent = (state.recent.length / 5).toFixed(1);
+    $("beat").classList.toggle("on", state.recent.length > 0);
+    $("err").textContent = "";
+  } catch (err) {
+    $("err").textContent = err.message === "403" ? S("forbidden", "session expired — reopen from chatcli") : S("offline", "dashboard server unreachable");
+    $("beat").classList.remove("on");
+  }
+  setTimeout(tick, 1000);
+}
+resize(); renderLegend(); paintPause(); requestAnimationFrame(draw); tick();
+</script>
+</body>
+</html>
