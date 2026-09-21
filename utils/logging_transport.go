@@ -172,6 +172,14 @@ func (t *LoggingTransport) RoundTrip(req *http.Request) (*http.Response, error) 
 		zap.String("Cabeçalhos", headersToString(resp.Header)),
 	)
 
+	// Resposta em streaming (SSE): ler o corpo inteiro aqui seguraria o
+	// stream até o servidor fechá-lo — o chamador receberia tudo de uma vez,
+	// com o corpo todo em memória. O corpo segue intocado para o chamador.
+	if isEventStream(resp.Header.Get("Content-Type")) {
+		t.Logger.Debug("Corpo da Resposta em streaming: não capturado")
+		return resp, nil
+	}
+
 	var respBodyBytes []byte
 	if resp.Body != nil {
 		var err error
@@ -188,6 +196,13 @@ func (t *LoggingTransport) RoundTrip(req *http.Request) (*http.Response, error) 
 	}
 
 	return resp, nil
+}
+
+// isEventStream reporta se o Content-Type é text/event-stream, ignorando
+// parâmetros (charset) e caixa.
+func isEventStream(contentType string) bool {
+	mediaType, _, _ := strings.Cut(contentType, ";")
+	return strings.EqualFold(strings.TrimSpace(mediaType), "text/event-stream")
 }
 
 // método para sanitizar URLs do logging transport
