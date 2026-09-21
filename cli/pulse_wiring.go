@@ -43,6 +43,9 @@ const pulseSessionNodeID = "session"
 // when current state is replayed.
 const pulseMCPSnapshotKey = "20-mcp"
 
+// pulseProcSnapshotKey replays the supervised background processes.
+const pulseProcSnapshotKey = "30-proc"
+
 // pulseForced reports whether CHATCLI_DASH asks this process to record from
 // boot, without waiting for a dashboard lease. It is how surfaces with no
 // prompt (ACP, the MCP server, the gateway daemon) opt in.
@@ -107,6 +110,7 @@ func (cli *ChatCLI) shutdownPulse() {
 	bus.RegisterSnapshotter("00-session", nil)
 	bus.RegisterSnapshotter("10-runs", nil)
 	bus.RegisterSnapshotter(pulseMCPSnapshotKey, nil)
+	bus.RegisterSnapshotter(pulseProcSnapshotKey, nil)
 	cli.pulse.Close()
 	cli.pulse = nil
 }

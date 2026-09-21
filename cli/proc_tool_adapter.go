@@ -18,6 +18,7 @@ import (
 	"github.com/diillson/chatcli/cli/agent"
 	"github.com/diillson/chatcli/cli/agent/proc"
 	"github.com/diillson/chatcli/cli/plugins"
+	"github.com/diillson/chatcli/pkg/pulse"
 	"github.com/diillson/chatcli/utils"
 )
 
@@ -30,7 +31,11 @@ type procToolAdapter struct {
 func (a *procToolAdapter) supervisor() *proc.Supervisor {
 	a.cli.procSupOnce.Do(func() {
 		validator := agent.NewCommandValidator(a.cli.logger)
-		a.cli.procSup = proc.NewSupervisor(validator.ValidateCommand, a.cli.logger)
+		sup := proc.NewSupervisor(validator.ValidateCommand, a.cli.logger)
+		a.cli.procSup = sup
+		// Registered with the supervisor in hand: the snapshot runs on the
+		// telemetry goroutine and must not read a field still being set.
+		pulse.Default().RegisterSnapshotter(pulseProcSnapshotKey, sup.PulseSnapshot)
 	})
 	return a.cli.procSup
 }

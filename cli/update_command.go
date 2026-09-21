@@ -21,6 +21,7 @@ import (
 
 	"github.com/diillson/chatcli/config"
 	"github.com/diillson/chatcli/i18n"
+	"github.com/diillson/chatcli/pkg/pulse"
 	"github.com/diillson/chatcli/ui/kit"
 	"github.com/diillson/chatcli/ui/theme"
 	"github.com/diillson/chatcli/update"
@@ -263,9 +264,15 @@ func (cli *ChatCLI) backgroundUpdateFlow(ctx context.Context) {
 		return
 	}
 	if mode == update.ModeAuto && info.Method.AutoApplicable() {
-		if cli.stageAutoUpdate(ctx, info, rep) {
+		// Staging downloads and verifies a release in the background: on the
+		// live dashboard it is a span on the auto-update node.
+		span := pulse.Begin(pulse.KindBackground, "auto-update", "")
+		staged := cli.stageAutoUpdate(ctx, info, rep)
+		if staged {
+			span.With("state", "staged for next boot").End(pulse.StatusOK)
 			return // staged (aqui ou por outro processo) — o próximo boot anuncia
 		}
+		span.With("state", "staging failed").End(pulse.StatusError)
 	}
 	cli.queueUpdateNotice(rep.Latest)
 }

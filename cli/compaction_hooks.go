@@ -19,6 +19,7 @@ import (
 	"github.com/diillson/chatcli/cli/compress"
 	"github.com/diillson/chatcli/cli/hooks"
 	"github.com/diillson/chatcli/models"
+	"github.com/diillson/chatcli/pkg/pulse"
 )
 
 // Compaction triggers reported to hooks (CHATCLI_HOOK_TRIGGER).
@@ -35,6 +36,7 @@ func (cli *ChatCLI) beforeCompaction(ctx context.Context, trigger string) {
 	if cli == nil {
 		return
 	}
+	cli.pulseCompactionBegin(trigger)
 	cli.rememberPreCompaction()
 	if cli.hookManager == nil {
 		return
@@ -55,6 +57,7 @@ func (cli *ChatCLI) firePostCompact(ctx context.Context, trigger string) {
 }
 
 func (cli *ChatCLI) firePostCompactOutcome(ctx context.Context, trigger, outcome string) {
+	cli.pulseCompactionEnd(outcome)
 	if cli == nil || cli.hookManager == nil {
 		return
 	}
@@ -162,4 +165,32 @@ func archiveDroppedMessages(layer *compress.Layer, before, after []models.Messag
 		return ""
 	}
 	return "[full transcript of the messages dropped by context recovery recoverable via @recall " + compress.FormatMarker(key) + "]"
+}
+
+// pulseCompactionNode is the live-dashboard node of history compaction. A
+// compaction summarizes the conversation with an LLM call of its own and
+// holds the turn for as long as that takes, which from the terminal reads as
+// a hang; on the dashboard it is a span that says what is going on.
+const pulseCompactionNode = "compaction"
+
+// pulseCompactionBegin opens the span. beforeCompaction and the post-compact
+// outcome bracket every compaction on every surface.
+func (cli *ChatCLI) pulseCompactionBegin(trigger string) {
+	if !pulse.Enabled() {
+		return
+	}
+	span := pulse.Begin(pulse.KindBackground, pulseCompactionNode, "").With("trigger", trigger)
+	if prev := cli.pulseCompaction.Swap(span); prev != nil {
+		prev.End(pulse.StatusCancelled) // a compaction that never reported its outcome
+	}
+}
+
+// pulseCompactionEnd closes the span with the outcome reported to the hooks.
+func (cli *ChatCLI) pulseCompactionEnd(outcome string) {
+	if cli == nil {
+		return
+	}
+	if span := cli.pulseCompaction.Swap(nil); span != nil {
+		span.With("state", outcome).End(pulse.StatusOK)
+	}
 }

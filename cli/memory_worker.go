@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"github.com/diillson/chatcli/cli/workspace"
 	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -14,6 +15,7 @@ import (
 	"github.com/diillson/chatcli/i18n"
 	"github.com/diillson/chatcli/llm/client"
 	"github.com/diillson/chatcli/models"
+	"github.com/diillson/chatcli/pkg/pulse"
 	"go.uber.org/zap"
 )
 
@@ -357,6 +359,7 @@ func (mw *memoryWorker) runRollups(ctx context.Context) {
 		return
 	}
 	if written > 0 {
+		pulseMemoryWorkerPoint("wrote " + strconv.Itoa(written) + " rollup digests")
 		mw.logger.Info("Memory worker: rollup digests written", zap.Int("count", written))
 		if mw.cli.contextBuilder != nil {
 			mw.cli.contextBuilder.InvalidateCache()
@@ -536,6 +539,17 @@ func buildExtractionSnippet(messages []models.Message) strings.Builder {
 }
 
 func (mw *memoryWorker) extractAndSave(ctx context.Context, messages []models.Message) error {
+	// The extraction makes its own LLM call in the background, off the turn:
+	// on the live dashboard it is a span on the memory worker node.
+	span := pulse.Begin(pulse.KindBackground, pulseMemoryWorkerNode, "").With("messages", strconv.Itoa(len(messages)))
+	err := mw.extractAndSaveMessages(ctx, messages)
+	span.With("state", "extracted facts").EndErr(err)
+	return err
+}
+
+// extractAndSaveMessages is the body of extractAndSave, which wraps it with
+// telemetry.
+func (mw *memoryWorker) extractAndSaveMessages(ctx context.Context, messages []models.Message) error {
 	if mw.store == nil {
 		return fmt.Errorf("memory store not available")
 	}
@@ -634,7 +648,10 @@ func (mw *memoryWorker) maybeCompact(ctx context.Context) {
 	ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer cancel()
 
-	if err := mgr.RunCompaction(ctx, sendPrompt); err != nil {
+	span := pulse.Begin(pulse.KindBackground, pulseMemoryWorkerNode, "")
+	err := mgr.RunCompaction(ctx, sendPrompt)
+	span.With("state", "compacted memory").EndErr(err)
+	if err != nil {
 		mw.logger.Warn("Memory worker: compaction failed", zap.Error(err))
 	} else {
 		mw.logger.Info("Memory worker: compaction complete")
@@ -723,4 +740,16 @@ func isNothingNew(s string) bool {
 		return true
 	}
 	return false
+}
+
+// pulseMemoryWorkerNode is the live-dashboard node of the background memory
+// worker (fact extraction, rollups, compaction).
+const pulseMemoryWorkerNode = "memory-worker"
+
+// pulseMemoryWorkerPoint reports something the worker did that has no
+// duration worth timing.
+func pulseMemoryWorkerPoint(state string) {
+	if pulse.Enabled() {
+		pulse.Point(pulse.KindBackground, pulseMemoryWorkerNode, "", pulse.StatusOK, map[string]string{"state": state})
+	}
 }

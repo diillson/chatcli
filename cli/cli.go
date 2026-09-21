@@ -398,6 +398,8 @@ type ChatCLI struct {
 	pulse *pulse.Controller
 	// dash is the live dashboard server this session started, if any.
 	dash dashState
+	// pulseCompaction is the telemetry span of the compaction in flight.
+	pulseCompaction atomic.Pointer[pulse.Span]
 	// pendingTurnContext is the chat turn's injected context text between
 	// assembly and commit (turn_context.go).
 	pendingTurnContext string
