@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.208.2](https://github.com/diillson/chatcli/compare/v1.208.1...v1.208.2) (2026-09-22)
+
+
+### Bug Fixes
+
+* **claudeai:** a refused turn is named and resent instead of ending the coder session ([#1643](https://github.com/diillson/chatcli/issues/1643)) ([131e308](https://github.com/diillson/chatcli/commit/131e308d73370d5586ae71eb242e120cf882364a))
+
 ## [1.208.1](https://github.com/diillson/chatcli/compare/v1.208.0...v1.208.1) (2026-09-22)
 
 
