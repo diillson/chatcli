@@ -439,7 +439,8 @@ func (c *ClaudeClient) processResponse(resp *http.Response) (string, error) {
 	}
 
 	var result struct {
-		Content []struct {
+		StopReason string `json:"stop_reason"`
+		Content    []struct {
 			Type string `json:"type"`
 			Text string `json:"text"`
 		} `json:"content"`
@@ -456,20 +457,22 @@ func (c *ClaudeClient) processResponse(resp *http.Response) (string, error) {
 	c.storeThinking(client.ParseAnthropicThinkingBody(bodyBytes))
 
 	var responseText string
+	blocks := map[string]int{}
 	for _, content := range result.Content {
+		blocks[content.Type]++
 		if content.Type == "text" {
 			responseText += content.Text
 		}
 	}
 
-	if responseText == "" {
-		c.logger.Error(i18n.T("llm.error.no_text_content", "ClaudeAI"))
-		return "", fmt.Errorf("%s", i18n.T("llm.error.no_response", "ClaudeAI"))
-	}
-
 	// Read-side usage capture: separate parse of the already-read bytes so
 	// /cost gets real counts on the buffered path too (see usage_tracker.go).
+	// Before the empty check: the input was billed either way.
 	c.recordUsageFromBody(bodyBytes)
+
+	if responseText == "" {
+		return "", c.emptyResponse(result.StopReason, blocks, "buffered")
+	}
 
 	return responseText, nil
 }
@@ -503,6 +506,7 @@ func (c *ClaudeClient) processStreamResponse(resp *http.Response, captureUsage b
 	// the real token counts (see usage_tracker.go). Fed alongside the text
 	// decode below; committed once the stream ends.
 	var usageAcc streamUsageAccumulator
+	blocks := map[string]int{} // content block types the stream opened, for the empty-reply diagnosis
 	reader := bufio.NewReader(decodedBody)
 	for {
 		line, err := reader.ReadString('\n')
@@ -533,6 +537,9 @@ func (c *ClaudeClient) processStreamResponse(resp *http.Response, captureUsage b
 				Type string `json:"type"`
 				Text string `json:"text"`
 			} `json:"delta"`
+			ContentBlock *struct {
+				Type string `json:"type"`
+			} `json:"content_block"`
 			Error *struct {
 				Type    string `json:"type"`
 				Message string `json:"message"`
@@ -551,6 +558,9 @@ func (c *ClaudeClient) processStreamResponse(resp *http.Response, captureUsage b
 			// the user sees the provider's message, not "no text".
 			return "", streamErrorToAPIError(evt.Error.Type, evt.Error.Message)
 		}
+		if evt.Type == "content_block_start" && evt.ContentBlock != nil {
+			blocks[evt.ContentBlock.Type]++
+		}
 		if evt.Type == "content_block_delta" && evt.Delta != nil && evt.Delta.Type == "text_delta" {
 			out.WriteString(evt.Delta.Text)
 		}
@@ -563,16 +573,27 @@ func (c *ClaudeClient) processStreamResponse(resp *http.Response, captureUsage b
 	}
 
 	responseText := out.String()
-	if responseText == "" {
-		c.logger.Error(i18n.T("llm.error.no_text_content_stream", "ClaudeAI"))
-		return "", fmt.Errorf("%s", i18n.T("llm.error.no_response", "ClaudeAI"))
-	}
-
 	if captureUsage {
+		// The input was billed whether or not any text came back.
 		usageAcc.commit(c)
+	}
+	if responseText == "" {
+		// No text is not one thing: a classifier refusal, a reply that
+		// spent every token on reasoning, a tool-use-only turn. The stop
+		// reason and the blocks name it, for the log and for the caller.
+		return "", c.emptyResponse(usageAcc.stopReason, blocks, "stream")
 	}
 
 	return responseText, nil
+}
+
+// emptyResponse builds the typed error for a reply with no text and logs
+// what the provider did send. The caller decides whether it is recoverable.
+func (c *ClaudeClient) emptyResponse(stopReason string, blocks map[string]int, path string) error {
+	err := &client.EmptyResponseError{Provider: "ClaudeAI", Model: c.model, StopReason: stopReason, Blocks: blocks}
+	c.logger.Error(i18n.T("llm.error.no_text_content", "ClaudeAI"),
+		zap.String("path", path), zap.String("stop_reason", stopReason), zap.Any("blocks", blocks))
+	return err
 }
 
 func (c *ClaudeClient) buildMessagesAndSystem(prompt string, history []models.Message) ([]map[string]interface{}, interface{}) {

@@ -1,0 +1,6 @@
+{
+  "llm.error.refusal": "%s declined to answer this turn (stop_reason %s: the provider's safety classifier stopped the reply). Retrying the same request gives the same result; rephrase the step or move to the next one",
+  "llm.error.empty_reasoning_only": "%s returned reasoning but no text (the reply spent its tokens thinking)",
+  "llm.error.empty_with_stop_reason": "%s returned no text (stop_reason %s; blocks: %s)",
+  "agent.refusal.retrying": "⚠ The provider's safety classifier stopped that reply. Telling the model and resending the turn (%d/%d)."
+}

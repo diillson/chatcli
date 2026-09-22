@@ -190,6 +190,13 @@ func (c *ClaudeClient) SendPromptWithTools(ctx context.Context, prompt string, h
 			c.usage.StoreStopReason(response.StopReason)
 		}
 	}
+	if err == nil && response != nil && response.Content == "" && len(response.ToolCalls) == 0 &&
+		(response.StopReason == client.StopReasonRefusal || response.StopReason == client.StopReasonContentFilter) {
+		// A classifier stopped the reply: no text, no tool call. Reported as
+		// the typed empty reply so the loop can nudge and resend instead of
+		// taking an empty turn as the model's answer.
+		return nil, c.emptyResponse(response.StopReason, map[string]int{"thinking": len(response.Thinking)}, "tool_use")
+	}
 	return response, err
 }
 

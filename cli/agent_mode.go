@@ -229,6 +229,9 @@ type AgentMode struct {
 	// aging collapsed its injection block (releaseCollapsedSkills). Used as
 	// a re-injection cooldown by rescanSkillsMidLoop. Reset per Run().
 	skillCollapseTurn map[string]int
+	// refusalRetries counts the turns this run resent after the provider's
+	// safety classifier stopped a reply (agent_refusal.go).
+	refusalRetries int
 	// runStartCost is the session's total cost when the run began, so the
 	// run's own spend can be credited to the skills it used (skill_stats.go).
 	runStartCost float64
@@ -1036,6 +1039,7 @@ func (a *AgentMode) resetPerRunState() {
 	a.taskBudgetTotal = 0
 	a.runTurns, a.runToolCalls = 0, 0
 	a.runToolNames = nil
+	a.refusalRetries = 0
 	// The session's spend when this run begins, so the run's own cost can
 	// be credited to the skills it uses (skill_stats.go).
 	a.runStartCost = 0
@@ -2585,11 +2589,12 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 		if canUseNativeTools && len(nativeToolDefs) > 0 {
 			a.cli.notePrefixShape(turnHistory, nativeToolDefs)
 			llmResp, err = toolAwareClient.SendPromptWithTools(turnCtx, "", turnHistory, nativeToolDefs, currentMaxTokens)
-			if a.cli.refreshClientOnAuthError(err) {
+			if a.resendTurnAfter(err, &turnHistory) {
 				// The refresh rebuilt the session client; re-resolve the
 				// turn client so the retry runs on a fresh handle for the
 				// provider that actually served this turn (route override
-				// included) instead of the stale pre-refresh wrapper.
+				// included) instead of the stale pre-refresh wrapper. After
+				// a refusal the same call goes out with the nudge appended.
 				turnClient, turnCtx = a.clientAndCtxForTurn(ctx)
 				if tac, ok := llmclient.AsToolAware(turnClient); ok && tac.SupportsNativeTools() {
 					toolAwareClient = tac
@@ -2603,7 +2608,7 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 		} else {
 			a.cli.notePrefixShape(turnHistory, nil)
 			aiResponse, err = turnClient.SendPrompt(turnCtx, "", turnHistory, currentMaxTokens)
-			if a.cli.refreshClientOnAuthError(err) {
+			if a.resendTurnAfter(err, &turnHistory) {
 				turnClient, turnCtx = a.clientAndCtxForTurn(ctx)
 				aiResponse, err = turnClient.SendPrompt(turnCtx, "", turnHistory, currentMaxTokens)
 			}
