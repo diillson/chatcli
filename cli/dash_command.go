@@ -204,25 +204,30 @@ func dashOptions(root, holder string) pulsedash.Options {
 	}
 }
 
-// dashThemeVars maps the terminal theme onto the page chrome. The palette's
-// Background is its surface color (what code blocks sit on), so it becomes
-// the panel and the page ground is derived from it. Node-kind colors are NOT
-// themed: a fixed categorical set keeps eleven kinds distinguishable, which
-// the role colors of an arbitrary theme do not guarantee.
+// dashThemeVars dresses the page chrome from the terminal theme, but only
+// when that theme is light: the page ships its own look, a dark terminal
+// (the palette the ChatCLI deck uses), and a dark terminal theme keeps it.
+// A light terminal needs a light page, so its palette maps onto the chrome;
+// the Background is the surface color (what code blocks sit on), so it
+// becomes the panel and the ground is derived from it. Node-kind colors are
+// never themed: a fixed categorical set keeps eleven kinds apart, which the
+// role colors of an arbitrary theme do not guarantee.
 func dashThemeVars(t theme.Theme) map[string]string {
-	p := t.Palette
-	ground := shadeHex(p.Background.Hex, -0.30)
-	if t.Variant == theme.VariantLight {
-		ground = shadeHex(p.Background.Hex, 0.45)
+	if t.Variant != theme.VariantLight {
+		return nil
 	}
+	p := t.Palette
 	return map[string]string{
-		"--bg":     ground,
+		"--bg":     shadeHex(p.Background.Hex, 0.45),
 		"--panel":  p.Background.Hex,
+		"--panel2": shadeHex(p.Background.Hex, -0.06),
 		"--border": p.Border.Hex,
 		"--text":   p.Text.Hex,
 		"--strong": p.TextStrong.Hex,
 		"--muted":  p.Muted.Hex,
+		"--faint":  shadeHex(p.Muted.Hex, 0.35),
 		"--accent": p.Primary.Hex,
+		"--brand":  p.Primary.Hex,
 		"--ok":     p.Success.Hex,
 		"--err":    p.Danger.Hex,
 		"--warn":   p.Warning.Hex,
@@ -255,6 +260,7 @@ var dashStringKeys = []string{
 	"title", "feed", "nodes", "active", "rate", "fit", "reset", "reset_hint", "pause", "resume", "empty", "ended", "turn", "tools", "errors",
 	"forbidden", "offline", "routed", "p.kind", "p.status", "p.calls", "p.errors", "p.avg", "p.took", "p.recent", "p.routes",
 	"export", "export_hint", "errors_only", "alerts", "search", "keys", "cache", "req", "mark", "all_kinds",
+	"tile.cost", "tile.requests", "tile.active", "tile.ctx", "tile.errors", "recent_min", "brand_sub", "processes",
 	"kind.session", "kind.agent", "kind.turn", "kind.llm", "kind.tool", "kind.skill", "kind.mcp", "kind.pattern",
 	"kind.background", "kind.conn", "kind.rpc",
 }

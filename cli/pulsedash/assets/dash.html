@@ -5,92 +5,138 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>ChatCLI · Live</title>
 <style>
+  /* Tokens: one deliberate look, a dark terminal, the same the ChatCLI deck
+     uses. A light terminal theme is the only thing that overrides them. */
   :root {
-    --bg:#11131a; --panel:#181b25; --border:#2a2f40; --text:#c9d1e4; --strong:#ffffff; --muted:#7f889e;
-    --accent:#7c9cff; --ok:#4ade80; --err:#f87171; --warn:#fbbf24;
-    --k-session:#7c9cff; --k-agent:#c084fc; --k-llm:#38bdf8; --k-tool:#4ade80; --k-skill:#fbbf24;
-    --k-mcp:#fb923c; --k-pattern:#f472b6; --k-background:#94a3b8; --k-conn:#2dd4bf; --k-rpc:#a3e635; --k-turn:#818cf8;
+    --bg:#0B0E14; --panel:#10141C; --panel2:#151B26; --border:#1E2634; --text:#DCE3EB; --strong:#FFFFFF; --muted:#7D8798; --faint:#556070;
+    --amber:#FFB454; --cyan:#4FC3E8; --violet:#C79BFF; --green:#7FD962; --red:#E06C75;
+    --accent:var(--cyan); --brand:var(--amber); --ok:var(--green); --err:var(--red); --warn:var(--amber);
+    --k-session:#FFB454; --k-agent:#C79BFF; --k-llm:#4FC3E8; --k-tool:#7FD962; --k-skill:#F2D66B;
+    --k-mcp:#FF8C69; --k-pattern:#F27DB5; --k-background:#8FA1B8; --k-conn:#4FD1C5; --k-rpc:#B8E05A; --k-turn:#8B9CFF;
+    --mono:ui-monospace,"SF Mono",SFMono-Regular,Menlo,"Cascadia Code",Consolas,monospace;
+    --sans:-apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif;
   }
   * { box-sizing:border-box; }
-  html,body { height:100%; margin:0; background:var(--bg); color:var(--text);
-    font:13px/1.45 ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif; }
-  #app { display:grid; grid-template-rows:auto 1fr; grid-template-columns:1fr 340px; height:100%; }
-  header { grid-column:1 / 3; display:flex; align-items:center; gap:14px; padding:9px 14px;
-    background:var(--panel); border-bottom:1px solid var(--border); flex-wrap:wrap; }
-  h1 { font-size:14px; margin:0; color:var(--strong); letter-spacing:.02em; display:flex; align-items:center; gap:8px; }
-  #beat { width:9px; height:9px; border-radius:50%; background:var(--muted); transition:background .2s, box-shadow .2s; }
+  html,body { height:100%; margin:0; background:var(--bg); color:var(--text); font:12.5px/1.45 var(--mono); }
+  ::selection { background:#ffb45433; }
+  #app { display:grid; grid-template-rows:auto auto 1fr auto; grid-template-columns:minmax(0,1fr) 360px; height:100%; }
+  header { grid-row:1; grid-column:1 / 3; } #tiles { grid-row:2; grid-column:1 / 2; } #stage { grid-row:3; grid-column:1 / 2; }
+  aside { grid-row:2 / 4; grid-column:2 / 3; } footer { grid-row:4; grid-column:1 / 3; }
+  /* progress line: the deck's bar, here driven by activity */
+  #bar { position:fixed; top:0; left:0; height:2px; width:0; z-index:10; background:linear-gradient(90deg, var(--amber), var(--cyan)); transition:width .6s ease; }
+  /* titlebar: a macOS terminal window's */
+  header { display:grid; grid-template-columns:auto 1fr auto; align-items:center; gap:14px; padding:8px 14px;
+    background:var(--panel); border-bottom:1px solid var(--border); }
+  .lights { display:flex; gap:7px; }
+  .lights i { width:12px; height:12px; border-radius:50%; display:block; border:1px solid rgba(0,0,0,.25); }
+  .lights i:nth-child(1) { background:#FF5F57; } .lights i:nth-child(2) { background:#FEBC2E; } .lights i:nth-child(3) { background:#28C840; }
+  h1 { font-size:12px; font-weight:600; margin:0; color:var(--muted); letter-spacing:.02em; display:flex; align-items:center; justify-content:center; gap:10px; min-width:0; }
+  h1 #title { color:var(--text); }
+  h1 .sub { color:var(--muted); font-weight:400; }
+  #beat { width:8px; height:8px; border-radius:50%; background:var(--faint); transition:background .2s, box-shadow .2s; }
   #beat.on { background:var(--ok); box-shadow:0 0 10px var(--ok); }
+  .tools { display:flex; align-items:center; gap:8px; flex-wrap:wrap; justify-content:flex-end; }
   .chips { display:flex; gap:6px; flex-wrap:wrap; }
-  .chip { border:1px solid var(--border); border-radius:999px; padding:2px 10px; cursor:pointer; user-select:none;
-    background:transparent; color:var(--text); font:inherit; display:inline-flex; align-items:center; gap:6px; }
-  .chip:hover { border-color:var(--accent); }
+  .chip { border:1px solid var(--border); border-radius:4px; padding:2px 9px; cursor:pointer; user-select:none;
+    background:transparent; color:var(--text); font:inherit; font-size:11px; display:inline-flex; align-items:center; gap:6px; }
+  .chip:hover { border-color:var(--muted); }
   .chip.off { opacity:.38; }
-  .chip .dot { width:8px; height:8px; border-radius:50%; background:var(--muted); }
-  .chip.live .dot { background:var(--ok); }
-  .chip.self { border-color:var(--accent); }
-  .spacer { flex:1; }
-  .stat { color:var(--muted); } .stat b { color:var(--strong); font-weight:600; }
-  .stat.alert { cursor:pointer; border:1px solid transparent; border-radius:999px; padding:1px 8px; }
-  .stat.alert.hot { color:var(--err); border-color:var(--err); } .stat.alert.hot b { color:var(--err); }
-  .stat.alert.on { background:rgba(248,113,113,.15); }
-  #spark { width:96px; height:22px; vertical-align:middle; opacity:.9; }
-  #search { background:transparent; color:var(--text); border:1px solid var(--border); border-radius:6px; padding:3px 8px; font:inherit; width:150px; }
-  #search:focus { outline:none; border-color:var(--accent); }
-  select.ctl { appearance:none; -webkit-appearance:none; padding-right:18px; }
-  aside .bar { display:flex; align-items:center; gap:6px; padding:8px 10px 4px; }
-  aside .bar h2 { padding:0; flex:1; }
-  aside .bar button.ctl, aside .bar select.ctl { padding:2px 8px; font-size:11px; }
-  aside .bar button.ctl.on { border-color:var(--err); color:var(--err); }
-  #feed.only-err .row:not(.err) { display:none; }
-  .row.mark .n { color:var(--strong); }
-  .row.mark .k { border-radius:2px; transform:rotate(45deg); }
-  .row.route .n { color:var(--strong); }
-  button.ctl { background:transparent; color:var(--text); border:1px solid var(--border); border-radius:6px;
-    padding:3px 10px; cursor:pointer; font:inherit; }
-  button.ctl:hover { border-color:var(--accent); }
-  #stage { position:relative; overflow:hidden; }
+  .chip .dot { width:7px; height:7px; border-radius:50%; background:var(--faint); }
+  .chip.live .dot { background:var(--ok); box-shadow:0 0 6px var(--ok); }
+  .chip.self { border-color:var(--brand); }
+  button.ctl, select.ctl { background:transparent; color:var(--muted); border:1px solid var(--border); border-radius:4px;
+    padding:3px 9px; cursor:pointer; font:inherit; font-size:11px; }
+  button.ctl:hover, select.ctl:hover { color:var(--text); border-color:var(--muted); }
+  button.ctl:focus-visible, select.ctl:focus-visible, #search:focus-visible { outline:2px solid var(--cyan); outline-offset:2px; }
+  select.ctl { appearance:none; -webkit-appearance:none; padding-right:16px; }
+  #search { background:var(--panel2); color:var(--text); border:1px solid var(--border); border-radius:4px; padding:3px 9px; font:inherit; font-size:11px; width:170px; }
+  #search::placeholder { color:var(--faint); }
+  #search:focus { outline:none; border-color:var(--cyan); }
+  /* stat tiles: the deck's big mono numbers */
+  #tiles { display:grid; grid-template-columns:repeat(6, 1fr); gap:8px; padding:10px 14px 4px; background:var(--bg); }
+  .tile { background:var(--panel); border:1px solid var(--border); border-radius:6px; padding:9px 12px 8px; min-width:0; position:relative; }
+  .tile .n { font-size:20px; font-weight:700; letter-spacing:-.02em; font-variant-numeric:tabular-nums; line-height:1.15; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .tile .d { font-size:10px; color:var(--muted); margin-top:3px; letter-spacing:.06em; text-transform:uppercase; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .tile.a .n { color:var(--amber); } .tile.c .n { color:var(--cyan); } .tile.g .n { color:var(--green); } .tile.v .n { color:var(--violet); }
+  .tile.e .n { color:var(--muted); } .tile.e.hot .n { color:var(--red); }
+  .tile.e { cursor:pointer; } .tile.e.on { border-color:var(--red); }
+  #spark { position:absolute; right:10px; top:8px; width:96px; height:30px; opacity:.9; }
+  @media (max-width:1100px) { #tiles { grid-template-columns:repeat(3, 1fr); } }
+  /* stage */
+  #stage { position:relative; overflow:hidden; background:var(--bg);
+    background-image:radial-gradient(circle at 1px 1px, #1a2130 1px, transparent 0); background-size:26px 26px; }
   canvas { position:absolute; inset:0; width:100%; height:100%; display:block; cursor:grab; touch-action:none; }
   canvas.over { cursor:move; }
   canvas.drag { cursor:grabbing; }
   #empty { position:absolute; inset:0; display:flex; align-items:center; justify-content:center; text-align:center;
-    color:var(--muted); padding:40px; pointer-events:none; white-space:pre-line; }
+    color:var(--muted); padding:40px; pointer-events:none; white-space:pre-line; font-size:13px; line-height:1.7; }
+  #empty .ps1 { color:var(--green); } #empty .cur::after { content:"▋"; color:var(--amber); animation:blink 1.05s steps(1) infinite; }
+  @keyframes blink { 50% { opacity:0; } }
+  @media (prefers-reduced-motion:reduce) { #empty .cur::after { animation:none; } #bar { transition:none; } }
+  /* feed: a tail of the log */
   aside { border-left:1px solid var(--border); background:var(--panel); display:flex; flex-direction:column; min-height:0; }
-  aside h2 { font-size:11px; text-transform:uppercase; letter-spacing:.08em; color:var(--muted); margin:0; padding:10px 12px 6px; }
-  #feed { overflow:auto; flex:1; padding:0 6px 10px; }
-  .row { display:grid; grid-template-columns:10px 1fr auto; gap:8px; align-items:baseline; padding:3px 6px; border-radius:5px; }
-  .row:hover { background:rgba(127,136,158,.12); }
-  .row .k { width:8px; height:8px; border-radius:50%; align-self:center; }
+  aside .bar { display:flex; align-items:center; gap:6px; padding:9px 10px 6px; border-bottom:1px solid var(--border); }
+  aside .bar h2 { flex:1; min-width:0; }
+  aside h2 { font-size:11px; letter-spacing:.06em; color:var(--muted); margin:0; font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  aside h2::before { content:"$ "; color:var(--brand); }
+  aside .bar button.ctl, aside .bar select.ctl { padding:2px 7px; font-size:10.5px; }
+  aside .bar button.ctl.on { border-color:var(--err); color:var(--err); }
+  #feed { overflow:auto; flex:1; padding:4px 6px 10px; font-size:11.5px; }
+  #feed.only-err .row:not(.err) { display:none; }
+  .row { display:grid; grid-template-columns:52px 8px 1fr auto; gap:7px; align-items:baseline; padding:2px 6px; border-radius:4px; }
+  .row:hover { background:var(--panel2); }
+  .row .t { color:var(--faint); font-variant-numeric:tabular-nums; font-size:10.5px; }
+  .row .k { width:7px; height:7px; border-radius:50%; align-self:center; }
   .row .n { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-  .row .n small { color:var(--muted); }
-  .row .d { color:var(--muted); font-variant-numeric:tabular-nums; }
+  .row .n small { color:var(--muted); font-size:10.5px; }
+  .row .d { color:var(--muted); font-variant-numeric:tabular-nums; font-size:10.5px; }
   .row.err .n { color:var(--err); }
-  #pop { position:absolute; min-width:240px; max-width:340px; background:var(--panel); border:1px solid var(--border);
-    border-radius:8px; padding:10px 12px; box-shadow:0 10px 30px rgba(0,0,0,.45); display:none; z-index:5; }
-  #pop h3 { margin:0 0 6px; font-size:13px; color:var(--strong); word-break:break-all; }
-  #pop table { border-collapse:collapse; width:100%; }
-  #pop td { padding:1px 0; vertical-align:top; } #pop td:first-child { color:var(--muted); padding-right:10px; white-space:nowrap; }
+  .row.mark .n { color:var(--amber); }
+  .row.mark .k { border-radius:1px; transform:rotate(45deg); }
+  .row.route .n { color:var(--strong); }
+  /* popover: a small window */
+  #pop { position:absolute; min-width:250px; max-width:360px; background:var(--panel); border:1px solid var(--border);
+    border-radius:6px; padding:0; box-shadow:0 14px 40px rgba(0,0,0,.55); display:none; z-index:5; overflow:hidden; }
+  #pop .ttl { display:flex; align-items:center; gap:8px; padding:7px 10px; background:var(--panel2); border-bottom:1px solid var(--border); }
+  #pop .ttl .lights i { width:9px; height:9px; }
+  #pop h3 { margin:0; font-size:12px; color:var(--strong); word-break:break-all; font-weight:600; }
+  #pop table { border-collapse:collapse; width:100%; margin:8px 10px 10px; width:calc(100% - 20px); font-size:11.5px; }
+  #pop td { padding:1px 0; vertical-align:top; } #pop td:first-child { color:var(--muted); padding-right:12px; white-space:nowrap; }
   #pop td:last-child { word-break:break-all; }
-  #legend { position:absolute; left:12px; bottom:10px; display:flex; gap:6px; flex-wrap:wrap; max-width:70%; }
+  #legend { position:absolute; left:12px; bottom:10px; display:flex; gap:5px; flex-wrap:wrap; max-width:70%; }
+  #legend .chip { font-size:10px; letter-spacing:.06em; text-transform:uppercase; padding:2px 8px; background:color-mix(in srgb, var(--panel) 80%, transparent); }
+  /* statusbar: the deck's */
+  footer { display:flex; align-items:center; gap:18px; padding:6px 14px; font-size:10.5px; letter-spacing:.04em; color:var(--muted);
+    background:color-mix(in srgb, var(--panel) 88%, transparent); border-top:1px solid var(--border); }
+  footer .brand { color:var(--brand); font-weight:600; }
+  footer .spacer { flex:1; }
+  footer b { color:var(--text); font-weight:600; font-variant-numeric:tabular-nums; }
   #err { color:var(--err); }
 </style>
 </head>
 <body>
+<div id="bar"></div>
 <div id="app">
   <header>
-    <h1><span id="beat"></span><span id="title">ChatCLI · Live</span></h1>
-    <div class="chips" id="instances"></div>
-    <div class="spacer"></div>
-    <span class="stat" id="err"></span>
-    <input id="search" type="search" autocomplete="off" spellcheck="false">
-    <span class="stat alert" id="sAlert" role="button" tabindex="0"><b id="sErrN">0</b> <span id="lErr">err</span></span>
-    <span class="stat"><b id="sNodes">0</b> <span id="lNodes">nodes</span></span>
-    <span class="stat"><b id="sActive">0</b> <span id="lActive">active</span></span>
-    <span class="stat"><canvas id="spark" width="192" height="44"></canvas> <b id="sRate">0</b> <span id="lRate">events/s</span></span>
-    <button class="ctl" id="bPause"></button>
-    <button class="ctl" id="bReset"></button>
-    <button class="ctl" id="bFit"></button>
-    <button class="ctl" id="bExport"></button>
+    <div class="lights"><i></i><i></i><i></i></div>
+    <h1><span id="beat"></span><span id="title">chatcli — live</span><span class="sub" id="subtitle"></span></h1>
+    <div class="tools">
+      <div class="chips" id="instances"></div>
+      <input id="search" type="search" autocomplete="off" spellcheck="false">
+      <button class="ctl" id="bPause"></button>
+      <button class="ctl" id="bReset"></button>
+      <button class="ctl" id="bFit"></button>
+      <button class="ctl" id="bExport"></button>
+    </div>
   </header>
+  <div id="tiles">
+    <div class="tile a"><div class="n" id="tCost">—</div><div class="d" id="lCost">cost</div></div>
+    <div class="tile c"><div class="n" id="tReq">0</div><div class="d" id="lReq">requests</div></div>
+    <div class="tile g"><div class="n"><span id="sActive">0</span> <span style="font-size:12px;color:var(--muted)">/ <span id="sNodes">0</span></span></div><div class="d" id="lActive">active</div></div>
+    <div class="tile v"><div class="n" id="tCtx">—</div><div class="d" id="lCtx">context</div></div>
+    <div class="tile e" id="sAlert" role="button" tabindex="0"><div class="n"><span id="tErr">0</span> <span style="font-size:12px;color:var(--muted)"><span id="sErrN">0</span> <span id="lErrMin">last min</span></span></div><div class="d" id="lErr">errors</div></div>
+    <div class="tile"><canvas id="spark" width="192" height="60"></canvas><div class="n" id="sRate">0</div><div class="d" id="lRate">events/s</div></div>
+  </div>
   <div id="stage">
     <canvas id="cv"></canvas>
     <div id="empty"></div>
@@ -99,12 +145,19 @@
   </div>
   <aside>
     <div class="bar">
-      <h2 id="lFeed">Live events</h2>
+      <h2 id="lFeed">tail -f events</h2>
       <select class="ctl" id="feedKind"></select>
       <button class="ctl" id="bErrOnly"></button>
     </div>
     <div id="feed"></div>
   </aside>
+  <footer>
+    <span class="brand">chatcli</span><span id="lBrand">· live dashboard</span>
+    <span><b id="fProcs">0</b> <span id="lProcs">processes</span></span>
+    <span class="spacer"></span>
+    <span id="err"></span>
+    <span id="fKeys"></span>
+  </footer>
 </div>
 <script>
 "use strict";
@@ -123,24 +176,32 @@ const KINDS = ["session","agent","turn","llm","tool","skill","mcp","pattern","ba
 // Resource kinds share three columns instead of one each: a graph ten columns
 // wide only fits the screen at a zoom nobody can read.
 const GROUPS = [["llm","conn"], ["tool","mcp","skill"], ["pattern","background","turn","rpc"]];
-const NODE_W = 188, NODE_H = 54, GAP_X = 62, GAP_Y = 14, GROUP_GAP = 34, HEAD_H = 20, BAND_PAD = 50, MIN_FIT = .72, DONE_TTL = 45000, FEED_MAX = 250;
+const NODE_W = 188, NODE_H = 54, GAP_X = 62, GAP_Y = 14, GROUP_GAP = 34, HEAD_H = 20, BAND_PAD = 56, MIN_FIT = .72, DONE_TTL = 45000, FEED_MAX = 250;
 
-$("title").textContent = S("title", "ChatCLI · Live");
-$("lNodes").textContent = S("nodes", "nodes");
-$("lActive").textContent = S("active", "active");
+$("title").textContent = S("title", "chatcli — live");
+$("lActive").textContent = S("tile.active", "active / nodes");
 $("lRate").textContent = S("rate", "events/s");
-$("lFeed").textContent = S("feed", "Live events");
+$("lCost").textContent = S("tile.cost", "session cost");
+$("lReq").textContent = S("tile.requests", "requests");
+$("lCtx").textContent = S("tile.ctx", "context window");
+$("lErr").textContent = S("tile.errors", "errors");
+$("lErrMin").textContent = S("recent_min", "last min");
+$("lFeed").textContent = S("feed", "tail -f events");
+$("lBrand").textContent = "· " + S("brand_sub", "live dashboard");
+$("lProcs").textContent = S("processes", "processes");
+$("fKeys").textContent = S("keys", "/ search · e errors · space pause · 0 fit");
 $("bFit").textContent = S("fit", "Fit");
 $("bReset").textContent = S("reset", "Reset layout");
 $("bExport").textContent = S("export", "Export");
 $("bExport").title = S("export_hint", "Download the events of the shown processes as NDJSON");
 $("bErrOnly").textContent = S("errors_only", "Errors only");
-$("lErr").textContent = S("errors", "err");
 $("sAlert").title = S("alerts", "Errors in the last minute; click to show only errors in the feed");
 $("search").placeholder = S("search", "Search nodes… ( / )");
 $("search").title = S("keys", "Keys: / search · e errors only · space pause · 0 fit · Esc clear");
 $("bReset").title = S("reset_hint", "Drag a card to place it, or drag a kind header (or Shift-drag a card) to move the whole kind. Double-click hands it back to the automatic layout; this does it for everything.");
-$("empty").textContent = S("empty", "Waiting for a chatcli process to report…\nRun something in any chatcli session on this machine.");
+{ const e = $("empty"), ps = document.createElement("span"), cmd = document.createElement("span");
+  ps.className = "ps1"; ps.textContent = "chatcli ~ % "; cmd.className = "cur"; cmd.textContent = "tail -f ~/.chatcli/pulse";
+  e.append(ps, cmd, document.createTextNode("\n" + S("empty", "Waiting for a chatcli process to report…\nRun something in any chatcli session on this machine."))); }
 
 const state = {
   instances: new Map(),   // token -> {meta, alive, cursor, shown}
@@ -409,6 +470,7 @@ function fit() {
 }
 function rr(x, y, w, h, r) { ctx.beginPath(); ctx.moveTo(x+r,y); ctx.arcTo(x+w,y,x+w,y+h,r); ctx.arcTo(x+w,y+h,x,y+h,r); ctx.arcTo(x,y+h,x,y,r); ctx.arcTo(x,y,x+w,y,r); ctx.closePath(); }
 function clip(text, max) { if (ctx.measureText(text).width <= max) return text; let t = text; while (t.length > 1 && ctx.measureText(t + "…").width > max) t = t.slice(0, -1); return t + "…"; }
+function clock(ts) { const d = ts ? new Date(ts) : new Date(); return isNaN(d) ? "" : d.toTimeString().slice(0, 8); }
 function ms(v) { return v >= 1000 ? (v / 1000).toFixed(v >= 10000 ? 0 : 1) + "s" : Math.round(v) + "ms"; }
 function subline(n) {
   if (n.kind === "session") { const a = n.attrs; return [a.cost, a.ctx && ("ctx " + a.ctx), a.model || a.provider].filter(Boolean).join(" · "); }   // numbers first: a long model name must not clip them
@@ -450,6 +512,27 @@ function bandFigures(tok) {
   if (errs) parts.push(errs + " " + S("errors", "err"));
   return parts.join(" · ");
 }
+// The tiles sum what the shown processes report: cost and requests from
+// their session cards, the fullest context window, errors from every hub.
+function renderTiles() {
+  let cost = 0, hasCost = false, req = 0, ctx = -1, errs = 0, procs = 0;
+  for (const [tok, inst] of state.instances) {
+    if (!inst.shown) continue;
+    if (inst.alive) procs++;
+    const s = state.nodes.get(tok + "|session"), a = s ? s.attrs : {};
+    if (a.cost) { const v = parseFloat(String(a.cost).replace(/[^0-9.]/g, "")); if (!isNaN(v)) { cost += v; hasCost = true; } }
+    if (a.requests) req += parseInt(a.requests, 10) || 0;
+    if (a.ctx) ctx = Math.max(ctx, parseInt(a.ctx, 10) || 0);
+  }
+  for (const n of state.nodes.values()) if (n.kind !== "session" && visible(n)) errs += n.errors;
+  $("tCost").textContent = hasCost ? "$" + (cost < 0.01 && cost > 0 ? cost.toFixed(4) : cost.toFixed(2)) : "—";
+  $("tReq").textContent = req;
+  $("tCtx").textContent = ctx >= 0 ? ctx + "%" : "—";
+  $("tErr").textContent = errs;
+  $("sAlert").classList.toggle("hot", errs > 0 || state.errs.length > 0);
+  $("fProcs").textContent = procs;
+  $("subtitle").textContent = procs ? "· " + procs + " " + S("processes", "processes") : "";
+}
 const matches = n => !state.query || n.name.toLowerCase().includes(state.query) || (n.kind === "agent" && (n.attrs.action || "").toLowerCase().includes(state.query));
 function bez(a, b) { const x1 = a.x + NODE_W, y1 = a.y + NODE_H/2, x2 = b.x, y2 = b.y + NODE_H/2, c = Math.max(40, (x2 - x1)/2); return {x1,y1,x2,y2,c1x:x1+c,c2x:x2-c}; }
 function bezPoint(p, t) { const u = 1-t; return { x:u*u*u*p.x1+3*u*u*t*p.c1x+3*u*t*t*p.c2x+t*t*t*p.x2, y:u*u*u*p.y1+3*u*u*t*p.y1+3*u*t*t*p.y2+t*t*t*p.y2 }; }
@@ -461,21 +544,29 @@ function draw(now) {
   const k = state.cam.k;
   ctx.setTransform(1,0,0,1,0,0); ctx.clearRect(0,0,cv.width,cv.height);
   ctx.setTransform(dpr*k,0,0,dpr*k,dpr*state.cam.x*k,dpr*state.cam.y*k);
-  const C = {border:cssVar("--border"), panel:cssVar("--panel"), text:cssVar("--text"), strong:cssVar("--strong"), muted:cssVar("--muted"), err:cssVar("--err"), ok:cssVar("--ok"), accent:cssVar("--accent")};
+  const C = {border:cssVar("--border"), panel:cssVar("--panel"), panel2:cssVar("--panel2"), text:cssVar("--text"), strong:cssVar("--strong"), muted:cssVar("--muted"), faint:cssVar("--faint"), err:cssVar("--err"), ok:cssVar("--ok"), accent:cssVar("--accent"), brand:cssVar("--brand")};
+  const MONO = cssVar("--mono") || "ui-monospace,Menlo,monospace";
 
-  for (const b of world.bands) {                       // process bands
-    ctx.globalAlpha = b.inst.alive ? .5 : .22; ctx.fillStyle = C.panel; rr(b.x, b.y, b.w, b.h, 12); ctx.fill();
-    ctx.globalAlpha = 1; ctx.strokeStyle = C.border; ctx.lineWidth = 1; ctx.stroke();
-    ctx.fillStyle = C.muted; ctx.font = "600 10px ui-sans-serif,system-ui"; ctx.textBaseline = "top";
-    const m = b.inst.meta;
-    ctx.fillText(((m.surface || "chatcli") + " · pid " + m.pid + (m.workdir ? " · " + m.workdir : "") + (b.inst.alive ? "" : " · " + S("ended", "ended"))).toUpperCase(), b.x + 12, b.y + 11);
+  for (const b of world.bands) {                       // process bands: one terminal window each
+    ctx.globalAlpha = b.inst.alive ? .92 : .5;
+    ctx.fillStyle = C.panel; rr(b.x, b.y, b.w, b.h, 8); ctx.fill();
+    ctx.strokeStyle = C.border; ctx.lineWidth = 1; ctx.stroke();
+    ctx.save(); rr(b.x, b.y, b.w, b.h, 8); ctx.clip();                      // titlebar strip
+    ctx.fillStyle = C.panel2; ctx.fillRect(b.x, b.y, b.w, 28);
+    ctx.fillStyle = C.border; ctx.fillRect(b.x, b.y + 28, b.w, 1);
+    ctx.restore();
+    [["#FF5F57", 0], ["#FEBC2E", 1], ["#28C840", 2]].forEach(([c, i]) => { ctx.beginPath(); ctx.arc(b.x + 16 + i * 15, b.y + 14, 5, 0, Math.PI * 2); ctx.fillStyle = c; ctx.globalAlpha = b.inst.alive ? 1 : .45; ctx.fill(); });
+    ctx.globalAlpha = 1; ctx.textBaseline = "middle"; ctx.font = "600 10.5px " + MONO;
+    const m = b.inst.meta, title = (m.surface || "chatcli") + " · pid " + m.pid + (m.workdir ? " · ~/" + m.workdir : "") + (b.inst.alive ? "" : " · " + S("ended", "ended"));
+    ctx.fillStyle = b.inst.alive ? C.text : C.muted; ctx.fillText(title, b.x + 60, b.y + 14);
     const fig = bandFigures(b.tok);
-    if (fig) { ctx.textAlign = "right"; ctx.fillStyle = C.text; ctx.fillText(fig, b.x + b.w - 12, b.y + 11); ctx.textAlign = "left"; }
+    if (fig) { ctx.textAlign = "right"; ctx.fillStyle = C.brand; ctx.fillText(fig, b.x + b.w - 12, b.y + 14); ctx.textAlign = "left"; }
+    ctx.textBaseline = "top";
   }
   for (const hd of world.headers) {                    // kind headers: label + drag handle
     const col = cssVar("--k-" + hd.kind) || C.accent, hot = drag && drag.group === hd.key;
-    ctx.globalAlpha = hot ? 1 : .8; ctx.fillStyle = col; ctx.font = "700 11px ui-sans-serif,system-ui"; ctx.textBaseline = "top";
-    ctx.fillText("⠿ " + S("kind." + hd.kind, hd.kind).toUpperCase() + (hd.moved ? "  ·" : ""), hd.x + 2, hd.y + 2);
+    ctx.globalAlpha = hot ? 1 : .85; ctx.fillStyle = col; ctx.font = "700 10px " + MONO; ctx.textBaseline = "top";
+    ctx.fillText("⠿ " + S("kind." + hd.kind, hd.kind).toUpperCase().split("").join("\u200a") + (hd.moved ? "  ·" : ""), hd.x + 2, hd.y + 3);
     ctx.globalAlpha = 1;
   }
   for (const n of state.nodes.values()) {              // ease toward layout targets
@@ -498,7 +589,7 @@ function draw(now) {
     pt.t += dt * 1.7; const e = state.edges.get(pt.edge); if (!e || pt.t >= 1) return false;
     const a = state.nodes.get(e.from), b = state.nodes.get(e.to); if (!a || !b || !visible(a) || !visible(b)) return false;
     const q = bezPoint(bez(a, b), pt.t), col = pt.err ? C.err : (cssVar("--k-" + b.kind) || C.accent);
-    ctx.beginPath(); ctx.arc(q.x, q.y, 3.4, 0, Math.PI*2); ctx.fillStyle = col; ctx.shadowColor = col; ctx.shadowBlur = 12; ctx.fill(); ctx.shadowBlur = 0;
+    ctx.beginPath(); ctx.arc(q.x, q.y, 3, 0, Math.PI*2); ctx.fillStyle = col; ctx.shadowColor = col; ctx.shadowBlur = 14; ctx.fill(); ctx.shadowBlur = 0;
     return true;
   });
   let active = 0, shown = 0;
@@ -509,18 +600,20 @@ function draw(now) {
     ctx.globalAlpha = !found ? .18 : alive ? (n.doneAt ? .62 : 1) : .4;
     if (found && state.query) { ctx.shadowColor = C.accent; ctx.shadowBlur = 18; }
     if (hot || n.flash > 0) { ctx.shadowColor = col; ctx.shadowBlur = 8 + 16 * Math.max(n.flash, hot ? .35 + .3 * Math.abs(Math.sin(now / 420)) : 0); }
-    ctx.fillStyle = C.panel; rr(n.x, n.y, NODE_W, NODE_H, 9); ctx.fill(); ctx.shadowBlur = 0;
-    ctx.strokeStyle = (n.errors || n.status === "error") && !hot ? C.err : (hot ? col : C.border); // a node whose current state is an error (an MCP server that failed) is red too, not only one with failed calls ctx.lineWidth = hot ? 1.6 : 1; ctx.stroke();
-    ctx.fillStyle = col; rr(n.x, n.y, 5, NODE_H, 3); ctx.fill();
-    ctx.textBaseline = "alphabetic"; ctx.fillStyle = C.strong; ctx.font = "600 12px ui-sans-serif,system-ui";
+    ctx.fillStyle = hot ? C.panel2 : C.panel; rr(n.x, n.y, NODE_W, NODE_H, 6); ctx.fill(); ctx.shadowBlur = 0;
+    ctx.strokeStyle = (n.errors || n.status === "error") && !hot ? C.err : (hot ? col : C.border); // a node whose current state is an error (an MCP server that failed) is red too, not only one with failed calls
+    ctx.lineWidth = hot ? 1.4 : 1; ctx.stroke();
+    ctx.fillStyle = col; rr(n.x, n.y, 4, NODE_H, 2); ctx.fill();
+    ctx.textBaseline = "alphabetic"; ctx.fillStyle = C.strong; ctx.font = "600 11.5px " + MONO;
     ctx.fillText(clip(n.name, NODE_W - 28), n.x + 14, n.y + 21);
-    ctx.fillStyle = C.muted; ctx.font = "11px ui-sans-serif,system-ui";
+    ctx.fillStyle = C.muted; ctx.font = "10.5px " + MONO;
     ctx.fillText(clip(subline(n), NODE_W - 28), n.x + 14, n.y + 39);
     if (n.pin) { ctx.strokeStyle = C.muted; ctx.lineWidth = 1.2; ctx.beginPath(); ctx.arc(n.x + NODE_W - 11, n.y + NODE_H - 11, 3, 0, Math.PI*2); ctx.stroke(); }   // placed by hand
     if (n.single && n.doneAt) { ctx.fillStyle = n.status === "ok" ? C.ok : n.status === "error" ? C.err : C.muted; ctx.beginPath(); ctx.arc(n.x + NODE_W - 12, n.y + 14, 3.5, 0, Math.PI*2); ctx.fill(); }
     ctx.globalAlpha = 1;
   }
   $("sNodes").textContent = shown; $("sActive").textContent = active;
+  $("beat").classList.toggle("on", active > 0 || state.recent.length > 0);
   $("empty").style.display = shown ? "none" : "flex";
   requestAnimationFrame(draw);
 }
@@ -536,7 +629,7 @@ function pushFeed(ev) {
     lastFeed.count++; lastFeed.small.textContent = ev.phase + " ×" + lastFeed.count + (ev.attrs && ev.attrs.action ? " · " + ev.attrs.action : "");
     return;
   }
-  const row = feedRow(ev.kind, ev.status === "error" ? "err" : "");
+  const row = feedRow(ev.kind, ev.status === "error" ? "err" : "", ev.ts);
   const name = document.createElement("span"); name.className = "n"; name.textContent = (ev.name || ev.id) + " ";
   const small = document.createElement("small"); small.textContent = ev.phase + (ev.status && ev.phase !== "start" ? " · " + ev.status : ""); name.appendChild(small);
   const dur = document.createElement("span"); dur.className = "d"; dur.textContent = ev.dur_ms ? ms(ev.dur_ms) : "";
@@ -546,16 +639,17 @@ function pushFeed(ev) {
 }
 // Every row carries its kind, so the feed filters are a class on the list
 // and a CSS rule, never a rebuild.
-function feedRow(kind, cls) {
+function feedRow(kind, cls, ts) {
   const row = document.createElement("div"); row.className = "row" + (cls ? " " + cls : ""); row.dataset.kind = kind;
+  const t = document.createElement("span"); t.className = "t"; t.textContent = clock(ts);
   const dot = document.createElement("span"); dot.className = "k"; dot.style.background = cssVar("--k-" + kind) || cssVar("--accent");
-  row.appendChild(dot);
+  row.append(t, dot);
   row.style.display = state.feedKind && state.feedKind !== kind ? "none" : "";
   return row;
 }
 function addFeedRow(row) { const feed = $("feed"); feed.prepend(row); while (feed.childElementCount > FEED_MAX) feed.lastElementChild.remove(); }
 function pushMarkRow(ev) {
-  const row = feedRow("session", "mark");
+  const row = feedRow("session", "mark", ev.ts);
   const name = document.createElement("span"); name.className = "n"; name.textContent = "◆ " + ev.attrs.note + " ";
   const small = document.createElement("small"); small.textContent = S("mark", "mark"); name.appendChild(small);
   row.append(name, document.createElement("span"));
@@ -578,7 +672,7 @@ function renderFeedKinds() {
 // collapsing of the session's update rows, so the switch never disappears
 // into a "update ×12".
 function pushRouteRow(n, ev) {
-  const row = feedRow("llm", "route");
+  const row = feedRow("llm", "route", ev.ts);
   const name = document.createElement("span"); name.className = "n"; name.textContent = S("routed", "model →") + " " + routeOf(ev.attrs) + " ";
   const small = document.createElement("small"); small.textContent = [n.attrs.route, n.attrs.via].filter(Boolean).join(" · "); name.appendChild(small);
   row.append(name, document.createElement("span"));
@@ -607,7 +701,10 @@ function renderLegend() {
 }
 function showPop(n, sx, sy) {
   const pop = $("pop"); pop.textContent = "";
-  const h = document.createElement("h3"); h.textContent = n.name; pop.appendChild(h);
+  const ttl = document.createElement("div"); ttl.className = "ttl";
+  const lights = document.createElement("div"); lights.className = "lights"; for (let i = 0; i < 3; i++) lights.appendChild(document.createElement("i"));
+  const h = document.createElement("h3"); h.textContent = n.name; h.style.color = cssVar("--k-" + n.kind) || cssVar("--strong");
+  ttl.append(lights, h); pop.appendChild(ttl);
   const table = document.createElement("table");
   const add = (k, v) => { if (v === undefined || v === "" || v === null) return; const tr = document.createElement("tr"), a = document.createElement("td"), b = document.createElement("td"); a.textContent = k; b.textContent = String(v); tr.append(a, b); table.appendChild(tr); };
   add(S("p.kind", "kind"), S("kind." + n.kind, n.kind)); add(S("p.status", "status"), n.status);
@@ -736,7 +833,7 @@ $("bExport").onclick = async () => {
 // The sparkline is the last minute of events per second.
 function drawSpark() {
   const c = $("spark"), g = c.getContext("2d"), w = c.width, h = c.height, n = state.hist.length, max = Math.max(1, ...state.hist);
-  g.clearRect(0, 0, w, h); g.fillStyle = cssVar("--accent"); g.globalAlpha = .85;
+  g.clearRect(0, 0, w, h); g.fillStyle = cssVar("--cyan"); g.globalAlpha = .75;
   const bw = w / n;
   for (let i = 0; i < n; i++) { const v = state.hist[(state.histSec + 1 + i) % n]; if (!v) continue; const bh = Math.max(2, v / max * (h - 4)); g.fillRect(i * bw, h - bh, Math.max(1, bw - 1), bh); }
   g.globalAlpha = 1;
@@ -775,14 +872,15 @@ async function tick() {
     state.hist[sec % state.hist.length] += state.recent.filter(t => now - t < 1000).length;
     state.recent = state.recent.filter(t => now - t < 5000);
     state.errs = state.errs.filter(t => now - t < 60000);
-    $("sErrN").textContent = state.errs.length; $("sAlert").classList.toggle("hot", state.errs.length > 0);
-    drawSpark();
-    $("sRate").textContent = (state.recent.length / 5).toFixed(1);
-    $("beat").classList.toggle("on", state.recent.length > 0);
+    $("sErrN").textContent = state.errs.length;
+    drawSpark(); renderTiles();
+    const rate = state.recent.length / 5;
+    $("sRate").textContent = rate.toFixed(1);
+    $("bar").style.width = Math.min(100, rate * 12) + "%";   // the deck's progress line, here a measure of activity
     $("err").textContent = "";
   } catch (err) {
     $("err").textContent = err.message === "403" ? S("forbidden", "session expired — reopen from chatcli") : S("offline", "dashboard server unreachable");
-    $("beat").classList.remove("on");
+    $("beat").classList.remove("on"); $("bar").style.width = "0";
   }
   setTimeout(tick, 1000);
 }

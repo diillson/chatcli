@@ -25,8 +25,8 @@
   "dash.cli.serving": "chatcli live dashboard: %s",
   "dash.cli.hint": "Every chatcli process on this machine records while the page is open. Press Ctrl+C to stop.",
   "dash.cli.failed": "could not start the dashboard: %v",
-  "dash.ui.title": "ChatCLI · Live",
-  "dash.ui.feed": "Live events",
+  "dash.ui.title": "chatcli — live",
+  "dash.ui.feed": "tail -f events",
   "dash.ui.nodes": "nodes",
   "dash.ui.active": "active",
   "dash.ui.rate": "events/s",
@@ -73,5 +73,13 @@
   "dash.ui.cache": "cache",
   "dash.ui.req": "req",
   "dash.ui.mark": "mark",
-  "dash.ui.all_kinds": "All kinds"
+  "dash.ui.all_kinds": "All kinds",
+  "dash.ui.tile.cost": "session cost",
+  "dash.ui.tile.requests": "requests",
+  "dash.ui.tile.active": "active / nodes",
+  "dash.ui.tile.ctx": "context window",
+  "dash.ui.tile.errors": "errors",
+  "dash.ui.recent_min": "last min",
+  "dash.ui.brand_sub": "live dashboard",
+  "dash.ui.processes": "processes"
 }
