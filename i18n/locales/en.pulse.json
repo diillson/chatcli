@@ -59,7 +59,7 @@
   "dash.ui.kind.conn": "connection",
   "dash.ui.kind.rpc": "rpc",
   "dash.ui.reset": "Reset layout",
-  "dash.ui.reset_hint": "Drag a card to place it, or drag a kind header (or Shift-drag a card) to move the whole kind. Double-click hands it back to the automatic layout; this does it for everything.",
+  "dash.ui.reset_hint": "Drag a window by its titlebar to move the whole process; drag a card to place it, or a kind header (or Shift-drag a card) to move the whole kind. Double-click any of them to hand it back to the automatic layout; this does it for everything.",
   "storage.policy.dead-process": "removed once its process is gone",
   "storage.reason.dead": "process gone",
   "dash.ui.routed": "model →",
