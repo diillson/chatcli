@@ -62,7 +62,11 @@ func TestDashOpenServesReusesAndStartsRecording(t *testing.T) {
 	page, _ := io.ReadAll(resp.Body)
 	_ = resp.Body.Close()
 	assert.Contains(t, string(page), `"self":"`+pulse.Default().Instance()+`"`)
-	assert.Contains(t, string(page), `"--panel":"`+theme.Active().Palette.Background.Hex+`"`, "the active theme dresses the page")
+	if theme.Active().Variant == theme.VariantLight {
+		assert.Contains(t, string(page), `"--panel":"`+theme.Active().Palette.Background.Hex+`"`, "a light theme dresses the page")
+	} else {
+		assert.NotContains(t, string(page), `"--panel":"`, "a dark theme keeps the page's own terminal look")
+	}
 
 	status := captureStdout(t, func() { c.handleDashCommand(context.Background(), "/dash status") })
 	assert.Contains(t, status, url)
@@ -127,12 +131,12 @@ func TestRunDashForegroundServesUntilCancelled(t *testing.T) {
 
 func TestDashThemeVarsFollowVariant(t *testing.T) {
 	dark := dashThemeVars(theme.Theme{Variant: theme.VariantDark, Palette: theme.Palette{Background: theme.Color{Hex: "#202020"}, Text: theme.Color{Hex: "#eeeeee"}}})
-	assert.Equal(t, "#202020", dark["--panel"])
-	assert.Equal(t, "#161616", dark["--bg"], "dark: the ground sits below the panel")
-	assert.Equal(t, "#eeeeee", dark["--text"])
+	assert.Nil(t, dark, "dark: the page keeps its own terminal look, the deck's palette")
 
-	light := dashThemeVars(theme.Theme{Variant: theme.VariantLight, Palette: theme.Palette{Background: theme.Color{Hex: "#e0e0e0"}}})
+	light := dashThemeVars(theme.Theme{Variant: theme.VariantLight, Palette: theme.Palette{Background: theme.Color{Hex: "#e0e0e0"}, Muted: theme.Color{Hex: "#808080"}}})
+	assert.Equal(t, "#e0e0e0", light["--panel"])
 	assert.Equal(t, "#eeeeee", light["--bg"], "light: the ground sits above the panel")
+	assert.Equal(t, "#d3d3d3", light["--panel2"], "light: the second surface sits just below the panel")
 
 	for _, name := range theme.Names() {
 		require.NoError(t, theme.SetActive(name))

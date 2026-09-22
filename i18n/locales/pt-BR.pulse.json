@@ -25,8 +25,8 @@
   "dash.cli.serving": "dash ao vivo do chatcli: %s",
   "dash.cli.hint": "Todo processo chatcli desta máquina grava enquanto a página estiver aberta. Ctrl+C para encerrar.",
   "dash.cli.failed": "não foi possível subir a dash: %v",
-  "dash.ui.title": "ChatCLI · Ao vivo",
-  "dash.ui.feed": "Eventos ao vivo",
+  "dash.ui.title": "chatcli — ao vivo",
+  "dash.ui.feed": "tail -f eventos",
   "dash.ui.nodes": "nós",
   "dash.ui.active": "ativos",
   "dash.ui.rate": "eventos/s",
@@ -73,5 +73,13 @@
   "dash.ui.cache": "cache",
   "dash.ui.req": "req",
   "dash.ui.mark": "marcação",
-  "dash.ui.all_kinds": "Todos os kinds"
+  "dash.ui.all_kinds": "Todos os kinds",
+  "dash.ui.tile.cost": "custo da sessão",
+  "dash.ui.tile.requests": "requisições",
+  "dash.ui.tile.active": "ativos / nós",
+  "dash.ui.tile.ctx": "janela de contexto",
+  "dash.ui.tile.errors": "erros",
+  "dash.ui.recent_min": "último min",
+  "dash.ui.brand_sub": "dash ao vivo",
+  "dash.ui.processes": "processos"
 }
