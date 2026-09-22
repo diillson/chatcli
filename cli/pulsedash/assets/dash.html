@@ -210,6 +210,9 @@ const state = {
   particles: [],
   hidden: new Set(),      // hidden kinds
   groupOff: new Map(),    // "inst|kind" -> {dx,dy,seq}: a whole kind dragged as one
+  bandPos: new Map(),     // inst -> {x,y}: a window the user placed by its titlebar (world top-left)
+  bandOrigin: new Map(),  // inst -> {x,y}: where the window's local space sits in the world this frame
+  bandZ: [],              // instances in stacking order; the last one drawn is on top
   moveSeq: 0,             // orders what the user moved: the latest holds its ground
   cam: {x:30, y:30, k:1}, autoFit: true, paused: false,
   recent: [],             // timestamps for the rate
@@ -332,17 +335,27 @@ function visible(n) {
   const inst = state.instances.get(n.inst);
   return inst && inst.shown && !state.hidden.has(n.kind);
 }
-// Layout, in three passes.
-//  1. Flow: a band per process, a column per group, kinds stacked in a column.
-//     A node placed by hand (pin) and a kind moved as a whole (groupOff) leave
-//     the flow, so the column closes up behind them.
+// Layout, in four passes. Every process is a window with a space of its
+// own: cards, pins and moved kinds live in window-local coordinates, so a
+// window can be moved as one piece and what happens inside one never
+// reaches another.
+//  1. Flow: a column per group, kinds stacked in a column. A card placed by
+//     hand (pin) and a kind moved as a whole (groupOff) leave the flow, so
+//     the column closes up behind them.
 //  2. Moved kinds are stacked at their offset from the column they belong to.
 //     Because it is an offset and not a position, cards that show up later
 //     join the group where the user put it.
 //  3. Collision: no card the layout places may land on another card. Anything
 //     in the way of a fixed card (pinned or moved) is pushed down its column.
+//  4. Placement: windows stack top to bottom by their REAL size, cards dragged
+//     away included, so a window that grew pushes the next one down instead
+//     of covering it. A window the user placed by its titlebar stays where it
+//     was put and the stack flows around it. The window touched last is on top.
 const groupKey = n => n.inst + "|" + n.kind;
 const isFixed = n => !!n.pin || state.groupOff.has(groupKey(n));
+const zOf = tok => { const i = state.bandZ.indexOf(tok); return i < 0 ? -1 : i; };
+// raise puts a window on top of the others.
+function raise(tok) { const i = state.bandZ.indexOf(tok); if (i >= 0) state.bandZ.splice(i, 1); state.bandZ.push(tok); }
 function layout() {
   const depth = new Map();
   const parentOf = new Map();
@@ -354,7 +367,6 @@ function layout() {
     depth.set(k, d); return d;
   };
   const groupOf = kind => { const g = GROUPS.findIndex(ks => ks.includes(kind)); return g < 0 ? GROUPS.length - 1 : g; };
-  let bandY = 0;
   const plans = [];
   for (const [tok, inst] of state.instances) {
     if (!inst.shown) continue;
@@ -372,7 +384,7 @@ function layout() {
     const order = ["0"];
     for (let d = 0; d <= maxDepth; d++) order.push("a" + d);
     GROUPS.forEach((_, g) => { if (cols.has("g" + g)) order.push("g" + g); });
-    const top = bandY + BAND_PAD;
+    const top = BAND_PAD;                            // window-local
     let tall = NODE_H, x = 0;
     for (const c of order) {
       const list = cols.get(c); if (!list) continue;
@@ -383,22 +395,20 @@ function layout() {
       const moved = new Map();                      // kind -> next y of the moved stack in this column
       for (const n of list) {
         n.colX = x; n.bandTop = top;
-        if (n.pin) { n.tx = n.pin.x; n.ty = n.pin.y; continue; }
+        if (n.pin) { n.lx = n.pin.x; n.ly = n.pin.y; continue; }
         const off = state.groupOff.get(groupKey(n));
         if (off) {
           const my = moved.has(n.kind) ? moved.get(n.kind) : top + off.dy;
-          n.tx = x + off.dx; n.ty = my; moved.set(n.kind, my + NODE_H + GAP_Y);
+          n.lx = x + off.dx; n.ly = my; moved.set(n.kind, my + NODE_H + GAP_Y);
           continue;
         }
         if (prev !== null && prev !== n.kind) y += GROUP_GAP - GAP_Y;
-        n.tx = x; n.ty = y; y += NODE_H + GAP_Y; prev = n.kind;
+        n.lx = x; n.ly = y; y += NODE_H + GAP_Y; prev = n.kind;
       }
       tall = Math.max(tall, y - GAP_Y - top);
       x += NODE_W + GAP_X;
     }
-    const h = BAND_PAD + tall + 18;
-    plans.push({tok, inst, mine, baseY: bandY, baseW: x - GAP_X, h});
-    bandY += h + 22;
+    plans.push({tok, inst, mine, baseW: x - GAP_X, baseH: BAND_PAD + tall + 18});
   }
 
   // Pass 3: collision. One rule for everything: what was moved last holds
@@ -406,42 +416,60 @@ function layout() {
   // stack. Cards the layout placed yield to everything the user moved. A
   // pinned card that yields keeps its pin, so it goes back when the way clears.
   const rank = n => n.pin ? n.pin.seq : (state.groupOff.get(groupKey(n)) || {seq: 0}).seq;
-  const hits = (a, bx, by) => a.tx < bx + NODE_W + 8 && bx < a.tx + NODE_W + 8 && a.ty - HEAD_H < by + NODE_H + GAP_Y && by - HEAD_H < a.ty + NODE_H + GAP_Y;
+  const hits = (a, bx, by) => a.lx < bx + NODE_W + 8 && bx < a.lx + NODE_W + 8 && a.ly - HEAD_H < by + NODE_H + GAP_Y && by - HEAD_H < a.ly + NODE_H + GAP_Y;
   for (const plan of plans) {
-    const queue = [...plan.mine].sort((a, b) => (rank(b) - rank(a)) || (a.tx - b.tx) || (a.ty - b.ty));
+    const queue = [...plan.mine].sort((a, b) => (rank(b) - rank(a)) || (a.lx - b.lx) || (a.ly - b.ly));
     const placed = [], bottom = new Map();          // stack -> first free y
     for (const n of queue) {
-      const stack = (n.pin ? n.key : state.groupOff.has(groupKey(n)) ? groupKey(n) : "flow") + "|" + n.tx;
-      let y = Math.max(n.ty, bottom.has(stack) ? bottom.get(stack) : -Infinity);
+      const stack = (n.pin ? n.key : state.groupOff.has(groupKey(n)) ? groupKey(n) : "flow") + "|" + n.lx;
+      let y = Math.max(n.ly, bottom.has(stack) ? bottom.get(stack) : -Infinity);
       for (let guard = 0; guard < 96; guard++) {
-        const block = placed.find(f => hits(f, n.tx, y));
+        const block = placed.find(f => hits(f, n.lx, y));
         if (!block) break;
-        y = block.ty + NODE_H + GAP_Y + HEAD_H;
+        y = block.ly + NODE_H + GAP_Y + HEAD_H;
       }
-      n.ty = y; placed.push(n); bottom.set(stack, y + NODE_H + GAP_Y);
+      n.ly = y; placed.push(n); bottom.set(stack, y + NODE_H + GAP_Y);
     }
+    // The window hugs its cards, so it stretches to follow what was dragged away.
+    let x0 = -16, y0 = 0, x1 = plan.baseW + 16, y1 = plan.baseH;
+    for (const n of plan.mine) {
+      x0 = Math.min(x0, n.lx - 16); y0 = Math.min(y0, n.ly - BAND_PAD);
+      x1 = Math.max(x1, n.lx + NODE_W + 16); y1 = Math.max(y1, n.ly + NODE_H + 18);
+    }
+    plan.box = {x0, y0, w: x1 - x0, h: y1 - y0};
   }
 
-  // Kind headers: one per kind per column, above its first card. They name
-  // the cluster and are the handle that drags it as a whole.
-  const headers = [];
-  const bands = [];
+  // Pass 4: placement. Windows the user placed are fixed; the rest stack
+  // under each other by their real size, and step over any placed window
+  // in their way.
+  const bands = [], headers = [];
+  const fixed = plans.filter(p => state.bandPos.has(p.tok)).map(p => ({...state.bandPos.get(p.tok), w: p.box.w, h: p.box.h}));
+  const overlaps = (x, y, w, h, f) => x < f.x + f.w + 22 && f.x < x + w + 22 && y < f.y + f.h + 22 && f.y < y + h + 22;
+  let flowY = 0;
   for (const plan of plans) {
+    const pos = state.bandPos.get(plan.tok);
+    let bx, by;
+    if (pos) { bx = pos.x; by = pos.y; }
+    else {
+      bx = 0; by = flowY;
+      for (let guard = 0; guard < 32; guard++) { const f = fixed.find(f => overlaps(bx, by, plan.box.w, plan.box.h, f)); if (!f) break; by = f.y + f.h + 22; }
+      flowY = by + plan.box.h + 22;
+    }
+    const origin = {x: bx - plan.box.x0, y: by - plan.box.y0};
+    state.bandOrigin.set(plan.tok, origin);
+    for (const n of plan.mine) { n.tx = origin.x + n.lx; n.ty = origin.y + n.ly; }
+    // Kind headers: one per kind per column, above its first card. They name
+    // the cluster and are the handle that drags it as a whole.
     const firsts = new Map();
     for (const n of plan.mine) {
       if (n.kind === "session" || n.pin) continue;
       const k = n.kind + "|" + n.colX, cur = firsts.get(k);
-      if (!cur || n.ty < cur.ty) firsts.set(k, n);
+      if (!cur || n.ly < cur.ly) firsts.set(k, n);
     }
     for (const n of firsts.values()) headers.push({key: groupKey(n), inst: n.inst, kind: n.kind, x: n.tx, y: n.ty - HEAD_H, moved: state.groupOff.has(groupKey(n))});
-    // The band hugs its cards, so it stretches to follow what was dragged away.
-    let x0 = -16, y0 = plan.baseY, x1 = plan.baseW + 16, y1 = plan.baseY + plan.h;
-    for (const n of plan.mine) {
-      x0 = Math.min(x0, n.tx - 16); y0 = Math.min(y0, n.ty - BAND_PAD);
-      x1 = Math.max(x1, n.tx + NODE_W + 16); y1 = Math.max(y1, n.ty + NODE_H + 18);
-    }
-    bands.push({tok: plan.tok, x:x0, y:y0, w:x1 - x0, h:y1 - y0, inst: plan.inst});
+    bands.push({tok: plan.tok, x: bx, y: by, w: plan.box.w, h: plan.box.h, inst: plan.inst, placed: !!pos});
   }
+  bands.sort((a, b) => zOf(a.tok) - zOf(b.tok));      // drawn in this order: the last one is on top
   for (const n of state.nodes.values()) if (n.x === null) { n.x = n.tx - 40; n.y = n.ty; }
   let wx0 = 0, wy0 = 0, wx1 = 0, wy1 = 0;
   bands.forEach((b, i) => {
@@ -544,13 +572,23 @@ function draw(now) {
   const k = state.cam.k;
   ctx.setTransform(1,0,0,1,0,0); ctx.clearRect(0,0,cv.width,cv.height);
   ctx.setTransform(dpr*k,0,0,dpr*k,dpr*state.cam.x*k,dpr*state.cam.y*k);
-  const C = {border:cssVar("--border"), panel:cssVar("--panel"), panel2:cssVar("--panel2"), text:cssVar("--text"), strong:cssVar("--strong"), muted:cssVar("--muted"), faint:cssVar("--faint"), err:cssVar("--err"), ok:cssVar("--ok"), accent:cssVar("--accent"), brand:cssVar("--brand")};
+  const C = {bg:cssVar("--bg"), border:cssVar("--border"), panel:cssVar("--panel"), panel2:cssVar("--panel2"), text:cssVar("--text"), strong:cssVar("--strong"), muted:cssVar("--muted"), faint:cssVar("--faint"), err:cssVar("--err"), ok:cssVar("--ok"), accent:cssVar("--accent"), brand:cssVar("--brand")};
   const MONO = cssVar("--mono") || "ui-monospace,Menlo,monospace";
 
-  for (const b of world.bands) {                       // process bands: one terminal window each
+  for (const n of state.nodes.values()) {              // ease toward layout targets
+    if (n.x === null) continue;
+    if (drag && (drag.node === n || drag.group === groupKey(n) || drag.band === n.inst) && !(drag.group && n.pin)) { n.x = n.tx; n.y = n.ty; }   // under the pointer: no easing lag
+    else { n.x += (n.tx - n.x) * Math.min(1, dt * 9); n.y += (n.ty - n.y) * Math.min(1, dt * 9); }
+    n.flash = Math.max(0, n.flash - dt * 1.6);
+  }
+  for (const e of state.edges.values()) e.fire = Math.max(0, e.fire - dt * 1.4);
+  let active = 0, shown = 0;
+  for (const b of world.bands) {                       // one terminal window per process, bottom to top
     ctx.globalAlpha = b.inst.alive ? .92 : .5;
+    if (b.placed || state.bandZ.length > 1) { ctx.shadowColor = "rgba(0,0,0,.6)"; ctx.shadowBlur = 24; ctx.shadowOffsetY = 6; }
+    ctx.fillStyle = C.bg; rr(b.x, b.y, b.w, b.h, 8); ctx.fill(); ctx.shadowBlur = 0; ctx.shadowOffsetY = 0;
     ctx.fillStyle = C.panel; rr(b.x, b.y, b.w, b.h, 8); ctx.fill();
-    ctx.strokeStyle = C.border; ctx.lineWidth = 1; ctx.stroke();
+    ctx.strokeStyle = drag && drag.band === b.tok ? C.brand : C.border; ctx.lineWidth = 1; ctx.stroke();
     ctx.save(); rr(b.x, b.y, b.w, b.h, 8); ctx.clip();                      // titlebar strip
     ctx.fillStyle = C.panel2; ctx.fillRect(b.x, b.y, b.w, 28);
     ctx.fillStyle = C.border; ctx.fillRect(b.x, b.y + 28, b.w, 1);
@@ -562,23 +600,17 @@ function draw(now) {
     const fig = bandFigures(b.tok);
     if (fig) { ctx.textAlign = "right"; ctx.fillStyle = C.brand; ctx.fillText(fig, b.x + b.w - 12, b.y + 14); ctx.textAlign = "left"; }
     ctx.textBaseline = "top";
-  }
+    const inst = b.tok;
   for (const hd of world.headers) {                    // kind headers: label + drag handle
+    if (hd.inst !== inst) continue;
     const col = cssVar("--k-" + hd.kind) || C.accent, hot = drag && drag.group === hd.key;
     ctx.globalAlpha = hot ? 1 : .85; ctx.fillStyle = col; ctx.font = "700 10px " + MONO; ctx.textBaseline = "top";
     ctx.fillText("⠿ " + S("kind." + hd.kind, hd.kind).toUpperCase().split("").join("\u200a") + (hd.moved ? "  ·" : ""), hd.x + 2, hd.y + 3);
     ctx.globalAlpha = 1;
   }
-  for (const n of state.nodes.values()) {              // ease toward layout targets
-    if (n.x === null) continue;
-    if (drag && (drag.node === n || drag.group === groupKey(n)) && !(drag.group && n.pin)) { n.x = n.tx; n.y = n.ty; }   // under the pointer: no easing lag
-    else { n.x += (n.tx - n.x) * Math.min(1, dt * 9); n.y += (n.ty - n.y) * Math.min(1, dt * 9); }
-    n.flash = Math.max(0, n.flash - dt * 1.6);
-  }
   for (const e of state.edges.values()) {              // edges
     const a = state.nodes.get(e.from), b = state.nodes.get(e.to);
-    if (!a || !b || !visible(a) || !visible(b)) continue;
-    e.fire = Math.max(0, e.fire - dt * 1.4);
+    if (!a || !b || a.inst !== inst || !visible(a) || !visible(b)) continue;
     const p = bez(a, b), col = cssVar("--k-" + b.kind) || C.accent, hot = b.active > 0;
     ctx.beginPath(); ctx.moveTo(p.x1, p.y1); ctx.bezierCurveTo(p.c1x, p.y1, p.c2x, p.y2, p.x2, p.y2);
     ctx.strokeStyle = hot || e.fire > 0 ? col : C.border; ctx.globalAlpha = hot ? .9 : .35 + e.fire * .55; ctx.lineWidth = hot ? 1.8 : 1.1 + e.fire;
@@ -586,15 +618,16 @@ function draw(now) {
     ctx.stroke(); ctx.setLineDash([]); ctx.globalAlpha = 1;
   }
   state.particles = state.particles.filter(pt => {      // a pulse travels each time something fires
-    pt.t += dt * 1.7; const e = state.edges.get(pt.edge); if (!e || pt.t >= 1) return false;
+    const e = state.edges.get(pt.edge); if (!e || pt.t >= 1) return false;
     const a = state.nodes.get(e.from), b = state.nodes.get(e.to); if (!a || !b || !visible(a) || !visible(b)) return false;
+    if (a.inst !== inst) return true;                  // another window draws it
+    pt.t += dt * 1.7;
     const q = bezPoint(bez(a, b), pt.t), col = pt.err ? C.err : (cssVar("--k-" + b.kind) || C.accent);
     ctx.beginPath(); ctx.arc(q.x, q.y, 3, 0, Math.PI*2); ctx.fillStyle = col; ctx.shadowColor = col; ctx.shadowBlur = 14; ctx.fill(); ctx.shadowBlur = 0;
     return true;
   });
-  let active = 0, shown = 0;
   for (const n of state.nodes.values()) {              // nodes
-    if (!visible(n) || n.x === null) continue;
+    if (n.inst !== inst || !visible(n) || n.x === null) continue;
     shown++; if (n.active > 0) active++;
     const col = cssVar("--k-" + n.kind) || C.accent, alive = (state.instances.get(n.inst) || {}).alive, hot = n.active > 0, found = matches(n);
     ctx.globalAlpha = !found ? .18 : alive ? (n.doneAt ? .62 : 1) : .4;
@@ -611,6 +644,7 @@ function draw(now) {
     if (n.pin) { ctx.strokeStyle = C.muted; ctx.lineWidth = 1.2; ctx.beginPath(); ctx.arc(n.x + NODE_W - 11, n.y + NODE_H - 11, 3, 0, Math.PI*2); ctx.stroke(); }   // placed by hand
     if (n.single && n.doneAt) { ctx.fillStyle = n.status === "ok" ? C.ok : n.status === "error" ? C.err : C.muted; ctx.beginPath(); ctx.arc(n.x + NODE_W - 12, n.y + 14, 3.5, 0, Math.PI*2); ctx.fill(); }
     ctx.globalAlpha = 1;
+  }
   }
   $("sNodes").textContent = shown; $("sActive").textContent = active;
   $("beat").classList.toggle("on", active > 0 || state.recent.length > 0);
@@ -723,16 +757,27 @@ function showPop(n, sx, sy) {
 let drag = null, moved = false;
 const toWorld = (sx, sy) => ({x: sx / state.cam.k - state.cam.x, y: sy / state.cam.k - state.cam.y});
 const pointerWorld = e => { const r = cv.getBoundingClientRect(); return {sx: e.clientX - r.left, sy: e.clientY - r.top, ...toWorld(e.clientX - r.left, e.clientY - r.top)}; };
-// The last node drawn is the one on top, so it wins the hit test.
+// Windows may overlap: the topmost one under the pointer owns the hit, and
+// only its cards and headers can be picked. Within a window the last card
+// drawn is the one on top.
+const TITLE_H = 28;
+function bandAt(w) {
+  for (let i = world.bands.length - 1; i >= 0; i--) { const b = world.bands[i]; if (w.x >= b.x && w.x <= b.x + b.w && w.y >= b.y && w.y <= b.y + b.h) return b; }
+  return null;
+}
 function hit(w) {
+  const b = bandAt(w); if (!b) return null;
   let found = null;
-  for (const n of state.nodes.values()) if (visible(n) && n.x !== null && w.x >= n.x && w.x <= n.x + NODE_W && w.y >= n.y && w.y <= n.y + NODE_H) found = n;
+  for (const n of state.nodes.values()) if (n.inst === b.tok && visible(n) && n.x !== null && w.x >= n.x && w.x <= n.x + NODE_W && w.y >= n.y && w.y <= n.y + NODE_H) found = n;
   return found;
 }
 function hitHeader(w) {
-  for (const hd of world.headers) if (w.x >= hd.x && w.x <= hd.x + NODE_W && w.y >= hd.y && w.y <= hd.y + HEAD_H) return hd;
+  const b = bandAt(w); if (!b) return null;
+  for (const hd of world.headers) if (hd.inst === b.tok && w.x >= hd.x && w.x <= hd.x + NODE_W && w.y >= hd.y && w.y <= hd.y + HEAD_H) return hd;
   return null;
 }
+// hitTitle is the titlebar strip of the topmost window under the pointer.
+function hitTitle(w) { const b = bandAt(w); return b && w.y <= b.y + TITLE_H ? b : null; }
 // startGroupDrag begins moving a whole kind. The offset is seeded from where
 // the cluster is right now, so grabbing it never makes it jump.
 function startGroupDrag(key, p, e) {
@@ -740,35 +785,43 @@ function startGroupDrag(key, p, e) {
     let first = null;
     for (const n of state.nodes.values()) if (groupKey(n) === key && !n.pin && visible(n) && (!first || n.ty < first.ty)) first = n;
     if (!first) return null;
-    state.groupOff.set(key, {dx: first.tx - first.colX, dy: first.ty - first.bandTop, seq: 0});
+    state.groupOff.set(key, {dx: first.lx - first.colX, dy: first.ly - first.bandTop, seq: 0});
   }
   const off = state.groupOff.get(key);   // its priority only changes once it actually moves: a bare click must not make it jump
+  raise(key.split("|")[0]);
   return {group:key, node:null, px:p.x, py:p.y, dx0:off.dx, dy0:off.dy, sx:e.clientX, sy:e.clientY};
 }
 // Pointer events cover mouse, touch and pen with one code path. Pressing on a
-// kind header (or Shift-pressing one of its cards) drags the whole kind;
-// pressing on a card drags that card; pressing on the background pans.
+// window's titlebar drags the whole window; pressing on a kind header (or
+// Shift-pressing one of its cards) drags the whole kind; pressing on a card
+// drags that card; pressing on the background pans. Whatever is touched
+// brings its window to the top.
 cv.addEventListener("pointerdown", e => {
-  const p = pointerWorld(e), hd = hitHeader(p), n = hd ? null : hit(p);
+  const p = pointerWorld(e), hd = hitHeader(p), n = hd ? null : hit(p), tb = hd || n ? null : hitTitle(p);
   moved = false; cv.setPointerCapture(e.pointerId); cv.classList.add("drag");
-  if (hd) drag = startGroupDrag(hd.key, p, e);
+  if (tb) { raise(tb.tok); drag = {band: tb.tok, ox: p.x - tb.x, oy: p.y - tb.y, sx: e.clientX, sy: e.clientY}; }
+  else if (hd) drag = startGroupDrag(hd.key, p, e);
   else if (n && e.shiftKey && n.kind !== "session") { delete n.pin; drag = startGroupDrag(groupKey(n), p, e); }
-  else if (n) drag = {node:n, ox:p.x - n.x, oy:p.y - n.y, sx:e.clientX, sy:e.clientY, seq: ++state.moveSeq};
+  else if (n) { raise(n.inst); drag = {node:n, ox:p.x - n.x, oy:p.y - n.y, sx:e.clientX, sy:e.clientY, seq: ++state.moveSeq}; }
   if (!drag) drag = {node:null, cx:state.cam.x, cy:state.cam.y, sx:e.clientX, sy:e.clientY};
 });
 cv.addEventListener("pointermove", e => {
-  if (!drag) { const p = pointerWorld(e); cv.classList.toggle("over", !!(hitHeader(p) || hit(p))); return; }
+  if (!drag) { const p = pointerWorld(e); cv.classList.toggle("over", !!(hitHeader(p) || hit(p) || hitTitle(p))); return; }
   const dx = e.clientX - drag.sx, dy = e.clientY - drag.sy;
   if (!moved && Math.abs(dx) + Math.abs(dy) <= 3) return;   // a press that barely moves is still a click
   moved = true; state.autoFit = false; $("pop").style.display = "none";
-  if (drag.group) {
+  if (drag.band) {
+    const p = pointerWorld(e);
+    state.bandPos.set(drag.band, {x: p.x - drag.ox, y: p.y - drag.oy});
+  } else if (drag.group) {
     const p = pointerWorld(e);
     const off = state.groupOff.get(drag.group);
     if (!drag.ranked) { off.seq = ++state.moveSeq; drag.ranked = true; }
     off.dx = drag.dx0 + p.x - drag.px; off.dy = drag.dy0 + p.y - drag.py;
   } else if (drag.node) {
-    const p = pointerWorld(e), n = drag.node;
-    n.pin = {x: p.x - drag.ox, y: p.y - drag.oy, seq: drag.seq}; n.tx = n.x = n.pin.x; n.ty = n.y = n.pin.y;
+    // Pins live in the window's own space, so the card follows its window.
+    const p = pointerWorld(e), n = drag.node, o = state.bandOrigin.get(n.inst) || {x:0, y:0};
+    n.pin = {x: p.x - drag.ox - o.x, y: p.y - drag.oy - o.y, seq: drag.seq}; n.lx = n.pin.x; n.ly = n.pin.y; n.tx = n.x = o.x + n.pin.x; n.ty = n.y = o.y + n.pin.y;
   } else {
     state.cam.x = drag.cx + dx / state.cam.k; state.cam.y = drag.cy + dy / state.cam.k;
   }
@@ -782,13 +835,15 @@ function endDrag(e) {
 }
 cv.addEventListener("pointerup", endDrag);
 cv.addEventListener("pointercancel", () => { drag = null; cv.classList.remove("drag"); });
-// Double-click hands a placed card, or a moved kind, back to the automatic layout.
+// Double-click hands a placed card, a moved kind or a placed window back to
+// the automatic layout.
 cv.addEventListener("dblclick", e => {
   const p = pointerWorld(e), hd = hitHeader(p);
   if (hd) { state.groupOff.delete(hd.key); return; }
-  const n = hit(p); if (n && n.pin) { delete n.pin; $("pop").style.display = "none"; }
+  const n = hit(p); if (n && n.pin) { delete n.pin; $("pop").style.display = "none"; return; }
+  const tb = n ? null : hitTitle(p); if (tb) state.bandPos.delete(tb.tok);
 });
-$("bReset").onclick = () => { for (const n of state.nodes.values()) delete n.pin; state.groupOff.clear(); state.autoFit = true; };
+$("bReset").onclick = () => { for (const n of state.nodes.values()) delete n.pin; state.groupOff.clear(); state.bandPos.clear(); state.bandZ.length = 0; state.autoFit = true; };
 cv.addEventListener("wheel", e => {
   e.preventDefault(); state.autoFit = false;
   const r = cv.getBoundingClientRect(), sx = e.clientX - r.left, sy = e.clientY - r.top, before = toWorld(sx, sy);
