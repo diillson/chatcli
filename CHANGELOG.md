@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.208.1](https://github.com/diillson/chatcli/compare/v1.208.0...v1.208.1) (2026-09-22)
+
+
+### Bug Fixes
+
+* **pulsedash:** process windows move on their own and never cover each other ([#1641](https://github.com/diillson/chatcli/issues/1641)) ([ada539b](https://github.com/diillson/chatcli/commit/ada539bb81cc32cc9f3e62607b8268e9404acf6a))
+
 ## [1.208.0](https://github.com/diillson/chatcli/compare/v1.207.2...v1.208.0) (2026-09-22)
 
 
