@@ -21,7 +21,7 @@
   "dash.not_running": "The dashboard is not running. Start it with /dash.",
   "dash.stopped": "Dashboard stopped. Processes stop recording as the lease runs out.",
   "dash.status.bus": "this process: %s · %d events published · %d dropped",
-  "dash.status.instance": "%s %s · pid %d · %s",
+  "dash.status.instance": "%s %s · pid %s · %s",
   "dash.cli.serving": "chatcli live dashboard: %s",
   "dash.cli.hint": "Every chatcli process on this machine records while the page is open. Press Ctrl+C to stop.",
   "dash.cli.failed": "could not start the dashboard: %v",

@@ -14,6 +14,7 @@ package cli
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"strconv"
@@ -60,13 +61,16 @@ func (cli *ChatCLI) handleDashCommand(ctx context.Context, userInput string) {
 	}
 }
 
-// dashOpen starts the dashboard (once per session) and prints its address.
-// The browser only opens from an interactive terminal: never from a daemon,
-// a pipe or a surface whose stdout is a protocol stream.
-func (cli *ChatCLI) dashOpen(launch bool) {
+// errDashUnavailable: no recorder, so no spool to serve (no home directory).
+var errDashUnavailable = errors.New("dash: unavailable")
+
+// dashEnsureServer starts the dashboard once per session, takes the
+// recording lease and returns the server. It is shared by /dash and the
+// @dash tool, and prints nothing: the tool runs on surfaces whose stdout is
+// a protocol stream.
+func (cli *ChatCLI) dashEnsureServer() (*pulsedash.Server, error) {
 	if cli.pulse == nil {
-		fmt.Println(colorize("  "+i18n.T("dash.unavailable"), ColorYellow))
-		return
+		return nil, errDashUnavailable
 	}
 	cli.dash.mu.Lock()
 	srv := cli.dash.srv
@@ -74,8 +78,7 @@ func (cli *ChatCLI) dashOpen(launch bool) {
 		started, err := pulsedash.Start(dashOptions(cli.pulse.Root(), "chatcli-"+strconv.Itoa(os.Getpid())))
 		if err != nil {
 			cli.dash.mu.Unlock()
-			fmt.Println(colorize("  "+i18n.T("dash.start_failed", err), ColorYellow))
-			return
+			return nil, err
 		}
 		srv, cli.dash.srv = started, started
 	}
@@ -83,6 +86,22 @@ func (cli *ChatCLI) dashOpen(launch bool) {
 
 	// The lease was just taken: record now, not at the next poll.
 	cli.pulse.Wake()
+	return srv, nil
+}
+
+// dashOpen starts the dashboard (once per session) and prints its address.
+// The browser only opens from an interactive terminal: never from a daemon,
+// a pipe or a surface whose stdout is a protocol stream.
+func (cli *ChatCLI) dashOpen(launch bool) {
+	srv, err := cli.dashEnsureServer()
+	if errors.Is(err, errDashUnavailable) {
+		fmt.Println(colorize("  "+i18n.T("dash.unavailable"), ColorYellow))
+		return
+	}
+	if err != nil {
+		fmt.Println(colorize("  "+i18n.T("dash.start_failed", err), ColorYellow))
+		return
+	}
 	fmt.Println(colorize("  "+i18n.T("dash.serving", srv.URL()), ColorCyan))
 	fmt.Println(colorize("  "+i18n.T("dash.serving_hint"), ColorGray))
 	if launch && term.IsTerminal(int(os.Stdout.Fd())) {
@@ -144,7 +163,8 @@ func (cli *ChatCLI) dashStatus() {
 		if m.Instance == pulse.Default().Instance() {
 			mark = "*"
 		}
-		fmt.Println("  " + i18n.T("dash.status.instance", mark, m.Surface, m.PID, m.Instance))
+		// The i18n printer groups digits ("pid 4,242"); a PID is a name.
+		fmt.Println("  " + i18n.T("dash.status.instance", mark, m.Surface, strconv.Itoa(m.PID), m.Instance))
 	}
 }
 

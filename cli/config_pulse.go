@@ -24,6 +24,7 @@ func (cli *ChatCLI) showConfigPulse() {
 	sectionHeader("📡", "cfg.section.dash.title", ColorCyan)
 	p := uiPrefix(ColorCyan)
 	kv(p, pulseDashEnv, envOr(pulseDashEnv))
+	kv(p, dashToolEnv, envBool(dashToolEnv))
 
 	state := i18n.T("cfg.dash.state_idle")
 	if cli.pulse.Recording() {

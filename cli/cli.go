@@ -686,14 +686,8 @@ func NewChatCLI(ctx context.Context, manager manager.LLMManager, logger *zap.Log
 		// @moa — Mixture-of-Agents: fan a prompt out to several models and
 		// synthesize one best answer. Wired below to the LLM manager.
 		pluginMgr.RegisterBuiltinPlugin(plugins.NewBuiltinMoaPlugin())
-		// @model — model/provider routing by the AI itself: list providers
-		// and models (tier/price/context/capabilities), switch the rest of
-		// the task to a fitter model, or delegate a self-contained subtask
-		// to a cheaper one. Adapter wired below over the LLM manager.
-		// CHATCLI_AGENT_MODEL_TOOL=false disables it (cost governance).
-		if isModelToolEnabled() {
-			pluginMgr.RegisterBuiltinPlugin(plugins.NewBuiltinModelPlugin())
-		}
+		// @model and @dash have kill switches; see registerGatedBuiltins.
+		registerGatedBuiltins(pluginMgr)
 		// @osv — keyless dependency vulnerability scanning via OSV.dev.
 		// Self-contained (HTTP + filesystem), no adapter wiring needed.
 		pluginMgr.RegisterBuiltinPlugin(plugins.NewBuiltinOsvPlugin())
@@ -1042,6 +1036,9 @@ func NewChatCLI(ctx context.Context, manager manager.LLMManager, logger *zap.Log
 	// Wire the @model tool to the live session (manager + catalog + cost
 	// tables + agent-loop route override).
 	plugins.SetModelRoutingAdapter(&modelRoutingAdapter{cli: cli})
+
+	// Wire the @dash tool to the live recorder and dashboard server.
+	plugins.SetDashAdapter(&dashToolAdapter{cli: cli})
 
 	// Wire the @session tool to the saved-session store so the agent can
 	// search past conversations.
@@ -2364,5 +2361,28 @@ func (cli *ChatCLI) cleanup(ctx context.Context) {
 			!strings.Contains(msg, "inappropriate ioctl") {
 			fmt.Fprintf(os.Stderr, "Falha ao sincronizar logger: %v\n", err)
 		}
+	}
+}
+
+// registerGatedBuiltins registers the builtins that an environment switch
+// can turn off. Kept out of NewChatCLI, whose branch count is at the
+// complexity ceiling.
+//
+//   - @model — model/provider routing by the AI itself: list providers and
+//     models (tier/price/context/capabilities), switch the rest of the task
+//     to a fitter model, or delegate a self-contained subtask to a cheaper
+//     one. Adapter wired in NewChatCLI over the LLM manager.
+//     CHATCLI_AGENT_MODEL_TOOL=false disables it (cost governance).
+//   - @dash — the live telemetry dashboard as a tool: start it and hand the
+//     address over, stop it, read the reduced graph or the newest events of
+//     this or every chatcli process, mark a phase on the timeline. Adapter
+//     wired in NewChatCLI over the recorder and the server.
+//     CHATCLI_AGENT_DASH_TOOL=false disables it.
+func registerGatedBuiltins(pluginMgr *plugins.Manager) {
+	if isModelToolEnabled() {
+		pluginMgr.RegisterBuiltinPlugin(plugins.NewBuiltinModelPlugin())
+	}
+	if isDashToolEnabled() {
+		pluginMgr.RegisterBuiltinPlugin(plugins.NewBuiltinDashPlugin())
 	}
 }

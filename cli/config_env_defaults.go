@@ -131,6 +131,7 @@ var envDefaults = map[string]envDefault{
 	"CHATCLI_AGENT_EARLY_EXIT_TURNS": {Value: "3", Source: "agent_earlyexit.defaultStagnationThreshold"},
 	"CHATCLI_AGENT_SMART_ROUTE":      {Value: "hint", Source: "agent_routing.smartRouting"},
 	"CHATCLI_AGENT_MODEL_TOOL":       {Value: "true", IsBool: true, Source: "model_tool_adapter.isModelToolEnabled"},
+	"CHATCLI_AGENT_DASH_TOOL":        {Value: "true", IsBool: true, Source: "dash_tool_adapter.isDashToolEnabled"},
 	"CHATCLI_SKILL_INJECT_BUDGET":    {Value: "24000", Source: "skill_activation.skillInjectBudget — 0 = unlimited; run cap = 2x this"},
 	"CHATCLI_SKILL_AGE_TURNS":        {Value: "6", Source: "agent.DefaultSkillAgingConfig — turns before a mid-loop skill block collapses to a stub (also the re-inject cooldown)"},
 
