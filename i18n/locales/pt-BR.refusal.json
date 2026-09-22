@@ -1,0 +1,6 @@
+{
+  "llm.error.refusal": "%s se recusou a responder este turno (stop_reason %s: o classificador de segurança do provider interrompeu a resposta). Repetir a mesma requisição dá o mesmo resultado; reformule o passo ou siga para o próximo",
+  "llm.error.empty_reasoning_only": "%s devolveu raciocínio mas nenhum texto (a resposta gastou os tokens pensando)",
+  "llm.error.empty_with_stop_reason": "%s não devolveu texto (stop_reason %s; blocos: %s)",
+  "agent.refusal.retrying": "⚠ O classificador de segurança do provider interrompeu aquela resposta. Avisando o modelo e reenviando o turno (%d/%d)."
+}
