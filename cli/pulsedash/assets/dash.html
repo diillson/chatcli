@@ -30,6 +30,21 @@
   .chip.self { border-color:var(--accent); }
   .spacer { flex:1; }
   .stat { color:var(--muted); } .stat b { color:var(--strong); font-weight:600; }
+  .stat.alert { cursor:pointer; border:1px solid transparent; border-radius:999px; padding:1px 8px; }
+  .stat.alert.hot { color:var(--err); border-color:var(--err); } .stat.alert.hot b { color:var(--err); }
+  .stat.alert.on { background:rgba(248,113,113,.15); }
+  #spark { width:96px; height:22px; vertical-align:middle; opacity:.9; }
+  #search { background:transparent; color:var(--text); border:1px solid var(--border); border-radius:6px; padding:3px 8px; font:inherit; width:150px; }
+  #search:focus { outline:none; border-color:var(--accent); }
+  select.ctl { appearance:none; -webkit-appearance:none; padding-right:18px; }
+  aside .bar { display:flex; align-items:center; gap:6px; padding:8px 10px 4px; }
+  aside .bar h2 { padding:0; flex:1; }
+  aside .bar button.ctl, aside .bar select.ctl { padding:2px 8px; font-size:11px; }
+  aside .bar button.ctl.on { border-color:var(--err); color:var(--err); }
+  #feed.only-err .row:not(.err) { display:none; }
+  .row.mark .n { color:var(--strong); }
+  .row.mark .k { border-radius:2px; transform:rotate(45deg); }
+  .row.route .n { color:var(--strong); }
   button.ctl { background:transparent; color:var(--text); border:1px solid var(--border); border-radius:6px;
     padding:3px 10px; cursor:pointer; font:inherit; }
   button.ctl:hover { border-color:var(--accent); }
@@ -66,12 +81,15 @@
     <div class="chips" id="instances"></div>
     <div class="spacer"></div>
     <span class="stat" id="err"></span>
+    <input id="search" type="search" autocomplete="off" spellcheck="false">
+    <span class="stat alert" id="sAlert" role="button" tabindex="0"><b id="sErrN">0</b> <span id="lErr">err</span></span>
     <span class="stat"><b id="sNodes">0</b> <span id="lNodes">nodes</span></span>
     <span class="stat"><b id="sActive">0</b> <span id="lActive">active</span></span>
-    <span class="stat"><b id="sRate">0</b> <span id="lRate">events/s</span></span>
+    <span class="stat"><canvas id="spark" width="192" height="44"></canvas> <b id="sRate">0</b> <span id="lRate">events/s</span></span>
     <button class="ctl" id="bPause"></button>
     <button class="ctl" id="bReset"></button>
     <button class="ctl" id="bFit"></button>
+    <button class="ctl" id="bExport"></button>
   </header>
   <div id="stage">
     <canvas id="cv"></canvas>
@@ -80,7 +98,11 @@
     <div id="pop"></div>
   </div>
   <aside>
-    <h2 id="lFeed">Live events</h2>
+    <div class="bar">
+      <h2 id="lFeed">Live events</h2>
+      <select class="ctl" id="feedKind"></select>
+      <button class="ctl" id="bErrOnly"></button>
+    </div>
     <div id="feed"></div>
   </aside>
 </div>
@@ -110,6 +132,13 @@ $("lRate").textContent = S("rate", "events/s");
 $("lFeed").textContent = S("feed", "Live events");
 $("bFit").textContent = S("fit", "Fit");
 $("bReset").textContent = S("reset", "Reset layout");
+$("bExport").textContent = S("export", "Export");
+$("bExport").title = S("export_hint", "Download the events of the shown processes as NDJSON");
+$("bErrOnly").textContent = S("errors_only", "Errors only");
+$("lErr").textContent = S("errors", "err");
+$("sAlert").title = S("alerts", "Errors in the last minute; click to show only errors in the feed");
+$("search").placeholder = S("search", "Search nodes… ( / )");
+$("search").title = S("keys", "Keys: / search · e errors only · space pause · 0 fit · Esc clear");
 $("bReset").title = S("reset_hint", "Drag a card to place it, or drag a kind header (or Shift-drag a card) to move the whole kind. Double-click hands it back to the automatic layout; this does it for everything.");
 $("empty").textContent = S("empty", "Waiting for a chatcli process to report…\nRun something in any chatcli session on this machine.");
 
@@ -123,7 +152,24 @@ const state = {
   moveSeq: 0,             // orders what the user moved: the latest holds its ground
   cam: {x:30, y:30, k:1}, autoFit: true, paused: false,
   recent: [],             // timestamps for the rate
+  errs: [],               // timestamps of errors, for the alert badge
+  hist: new Array(60).fill(0), histSec: 0,   // events per second, last minute
+  query: "",              // node search
+  feedKind: "", onlyErr: false,              // feed filters
 };
+// Per-viewer conveniences survive a reload; nothing here is state that matters.
+const PREFS = "chatcli.dash.prefs";
+function loadPrefs() {
+  try {
+    const p = JSON.parse(localStorage.getItem(PREFS) || "{}");
+    if (Array.isArray(p.hidden)) p.hidden.forEach(k => state.hidden.add(k));
+    if (typeof p.feedKind === "string") state.feedKind = p.feedKind;
+    if (p.onlyErr) state.onlyErr = true;
+  } catch (_) { /* private mode or blocked storage: defaults */ }
+}
+function savePrefs() {
+  try { localStorage.setItem(PREFS, JSON.stringify({hidden: [...state.hidden], feedKind: state.feedKind, onlyErr: state.onlyErr})); } catch (_) { /* ignore */ }
+}
 
 // ─── reducer: events -> graph ─────────────────────────────────────────────
 function nodeKey(ev) {
@@ -168,6 +214,10 @@ function apply(ev) {
   delete n.attrs.snapshot;
   const rerouted = n.kind === "session" && after && before && after !== before;
   if (rerouted) { n.routes.unshift({model: after, route: n.attrs.route || "", via: n.attrs.via || ""}); if (n.routes.length > 6) n.routes.pop(); }
+  // A mark is a label the agent left on the timeline (@dash mark): a feed
+  // row, never a change of the session's state.
+  const mark = n.kind === "session" && ev.phase === "point" && ev.attrs && ev.attrs.note;
+  if (mark) { if (live) { pushMarkRow(ev); state.recent.push(Date.now()); } return; }
 
   if (n.single) {
     n.status = ev.status || n.status;
@@ -187,6 +237,7 @@ function apply(ev) {
     n.status = n.active > 0 ? "running" : (ev.status || n.status);
   }
   if (live) n.flash = 1;
+  if (live && ev.status === "error") state.errs.push(Date.now());
 
   const pk = parentKey(ev);
   if (pk) {
@@ -376,8 +427,30 @@ function subline(n) {
   if (n.timed) parts.push("~" + ms(n.totalMs / n.timed));
   if (n.errors) parts.push(n.errors + " " + S("errors", "err"));
   if (n.attrs.cost) parts.push(n.attrs.cost);   // what this model has cost so far, from the cost tracker
+  const hit = cacheHit(n); if (hit !== null) parts.push(S("cache", "cache") + " " + hit + "%");
   return parts.join(" · ");
 }
+// Prompt-cache share of the last request's input, from the usage report the
+// cost tracker put on the hub (input and cache read tokens of the last call).
+function cacheHit(n) {
+  if (n.kind !== "llm") return null;
+  const read = +n.attrs.last_cache_read || 0, input = +n.attrs.last_input_tokens || 0;
+  if (!read && !input) return null;
+  return Math.round(100 * read / (read + input));
+}
+// One line of figures per process, from its session card and its hubs:
+// what it cost, how many requests, how full the window is, how many errors.
+function bandFigures(tok) {
+  const s = state.nodes.get(tok + "|session"), a = s ? s.attrs : {}, parts = [];
+  if (a.cost) parts.push(a.cost);
+  if (a.requests) parts.push(a.requests + " " + S("req", "req"));
+  if (a.ctx) parts.push("ctx " + a.ctx);
+  let errs = 0;
+  for (const n of state.nodes.values()) if (n.inst === tok && n.kind !== "session") errs += n.errors;
+  if (errs) parts.push(errs + " " + S("errors", "err"));
+  return parts.join(" · ");
+}
+const matches = n => !state.query || n.name.toLowerCase().includes(state.query) || (n.kind === "agent" && (n.attrs.action || "").toLowerCase().includes(state.query));
 function bez(a, b) { const x1 = a.x + NODE_W, y1 = a.y + NODE_H/2, x2 = b.x, y2 = b.y + NODE_H/2, c = Math.max(40, (x2 - x1)/2); return {x1,y1,x2,y2,c1x:x1+c,c2x:x2-c}; }
 function bezPoint(p, t) { const u = 1-t; return { x:u*u*u*p.x1+3*u*u*t*p.c1x+3*u*t*t*p.c2x+t*t*t*p.x2, y:u*u*u*p.y1+3*u*u*t*p.y1+3*u*t*t*p.y2+t*t*t*p.y2 }; }
 
@@ -396,6 +469,8 @@ function draw(now) {
     ctx.fillStyle = C.muted; ctx.font = "600 10px ui-sans-serif,system-ui"; ctx.textBaseline = "top";
     const m = b.inst.meta;
     ctx.fillText(((m.surface || "chatcli") + " · pid " + m.pid + (m.workdir ? " · " + m.workdir : "") + (b.inst.alive ? "" : " · " + S("ended", "ended"))).toUpperCase(), b.x + 12, b.y + 11);
+    const fig = bandFigures(b.tok);
+    if (fig) { ctx.textAlign = "right"; ctx.fillStyle = C.text; ctx.fillText(fig, b.x + b.w - 12, b.y + 11); ctx.textAlign = "left"; }
   }
   for (const hd of world.headers) {                    // kind headers: label + drag handle
     const col = cssVar("--k-" + hd.kind) || C.accent, hot = drag && drag.group === hd.key;
@@ -430,8 +505,9 @@ function draw(now) {
   for (const n of state.nodes.values()) {              // nodes
     if (!visible(n) || n.x === null) continue;
     shown++; if (n.active > 0) active++;
-    const col = cssVar("--k-" + n.kind) || C.accent, alive = (state.instances.get(n.inst) || {}).alive, hot = n.active > 0;
-    ctx.globalAlpha = alive ? (n.doneAt ? .62 : 1) : .4;
+    const col = cssVar("--k-" + n.kind) || C.accent, alive = (state.instances.get(n.inst) || {}).alive, hot = n.active > 0, found = matches(n);
+    ctx.globalAlpha = !found ? .18 : alive ? (n.doneAt ? .62 : 1) : .4;
+    if (found && state.query) { ctx.shadowColor = C.accent; ctx.shadowBlur = 18; }
     if (hot || n.flash > 0) { ctx.shadowColor = col; ctx.shadowBlur = 8 + 16 * Math.max(n.flash, hot ? .35 + .3 * Math.abs(Math.sin(now / 420)) : 0); }
     ctx.fillStyle = C.panel; rr(n.x, n.y, NODE_W, NODE_H, 9); ctx.fill(); ctx.shadowBlur = 0;
     ctx.strokeStyle = (n.errors || n.status === "error") && !hot ? C.err : (hot ? col : C.border); // a node whose current state is an error (an MCP server that failed) is red too, not only one with failed calls ctx.lineWidth = hot ? 1.6 : 1; ctx.stroke();
@@ -460,27 +536,53 @@ function pushFeed(ev) {
     lastFeed.count++; lastFeed.small.textContent = ev.phase + " ×" + lastFeed.count + (ev.attrs && ev.attrs.action ? " · " + ev.attrs.action : "");
     return;
   }
-  const row = document.createElement("div"); row.className = "row" + (ev.status === "error" ? " err" : "");
-  const dot = document.createElement("span"); dot.className = "k"; dot.style.background = cssVar("--k-" + ev.kind) || cssVar("--accent");
+  const row = feedRow(ev.kind, ev.status === "error" ? "err" : "");
   const name = document.createElement("span"); name.className = "n"; name.textContent = (ev.name || ev.id) + " ";
   const small = document.createElement("small"); small.textContent = ev.phase + (ev.status && ev.phase !== "start" ? " · " + ev.status : ""); name.appendChild(small);
   const dur = document.createElement("span"); dur.className = "d"; dur.textContent = ev.dur_ms ? ms(ev.dur_ms) : "";
-  row.append(dot, name, dur);
+  row.append(name, dur);
   lastFeed = sig ? {sig, small, count:1} : null;
-  const feed = $("feed"); feed.prepend(row); while (feed.childElementCount > FEED_MAX) feed.lastElementChild.remove();
+  addFeedRow(row);
+}
+// Every row carries its kind, so the feed filters are a class on the list
+// and a CSS rule, never a rebuild.
+function feedRow(kind, cls) {
+  const row = document.createElement("div"); row.className = "row" + (cls ? " " + cls : ""); row.dataset.kind = kind;
+  const dot = document.createElement("span"); dot.className = "k"; dot.style.background = cssVar("--k-" + kind) || cssVar("--accent");
+  row.appendChild(dot);
+  row.style.display = state.feedKind && state.feedKind !== kind ? "none" : "";
+  return row;
+}
+function addFeedRow(row) { const feed = $("feed"); feed.prepend(row); while (feed.childElementCount > FEED_MAX) feed.lastElementChild.remove(); }
+function pushMarkRow(ev) {
+  const row = feedRow("session", "mark");
+  const name = document.createElement("span"); name.className = "n"; name.textContent = "◆ " + ev.attrs.note + " ";
+  const small = document.createElement("small"); small.textContent = S("mark", "mark"); name.appendChild(small);
+  row.append(name, document.createElement("span"));
+  lastFeed = null; addFeedRow(row);
+}
+function applyFeedFilter() {
+  $("feed").classList.toggle("only-err", state.onlyErr);
+  $("bErrOnly").classList.toggle("on", state.onlyErr);
+  $("sAlert").classList.toggle("on", state.onlyErr);
+  for (const row of $("feed").children) row.style.display = state.feedKind && state.feedKind !== row.dataset.kind ? "none" : "";
+  savePrefs();
+}
+function renderFeedKinds() {
+  const sel = $("feedKind"); sel.textContent = "";
+  const all = document.createElement("option"); all.value = ""; all.textContent = S("all_kinds", "All kinds"); sel.appendChild(all);
+  for (const k of KINDS) { const o = document.createElement("option"); o.value = k; o.textContent = S("kind." + k, k); sel.appendChild(o); }
+  sel.value = state.feedKind;
 }
 // A model change gets its own row, named by the new pair; it also ends the
 // collapsing of the session's update rows, so the switch never disappears
 // into a "update ×12".
 function pushRouteRow(n, ev) {
-  const row = document.createElement("div"); row.className = "row";
-  const dot = document.createElement("span"); dot.className = "k"; dot.style.background = cssVar("--k-llm") || cssVar("--accent");
+  const row = feedRow("llm", "route");
   const name = document.createElement("span"); name.className = "n"; name.textContent = S("routed", "model →") + " " + routeOf(ev.attrs) + " ";
   const small = document.createElement("small"); small.textContent = [n.attrs.route, n.attrs.via].filter(Boolean).join(" · "); name.appendChild(small);
-  const dur = document.createElement("span"); dur.className = "d";
-  row.append(dot, name, dur);
-  lastFeed = null;
-  const feed = $("feed"); feed.prepend(row); while (feed.childElementCount > FEED_MAX) feed.lastElementChild.remove();
+  row.append(name, document.createElement("span"));
+  lastFeed = null; addFeedRow(row);
 }
 function renderChips() {
   const box = $("instances"); box.textContent = "";
@@ -499,7 +601,7 @@ function renderLegend() {
     const b = document.createElement("button"); b.className = "chip" + (state.hidden.has(k) ? " off" : "");
     const dot = document.createElement("span"); dot.className = "dot"; dot.style.background = cssVar("--k-" + k);
     b.append(dot, document.createTextNode(S("kind." + k, k)));
-    b.onclick = () => { state.hidden.has(k) ? state.hidden.delete(k) : state.hidden.add(k); renderLegend(); };
+    b.onclick = () => { state.hidden.has(k) ? state.hidden.delete(k) : state.hidden.add(k); renderLegend(); savePrefs(); };
     box.appendChild(b);
   }
 }
@@ -511,6 +613,7 @@ function showPop(n, sx, sy) {
   add(S("p.kind", "kind"), S("kind." + n.kind, n.kind)); add(S("p.status", "status"), n.status);
   if (!n.single) { add(S("p.calls", "calls"), n.calls); add(S("active", "active"), n.active); add(S("p.errors", "errors"), n.errors); if (n.timed) add(S("p.avg", "average"), ms(n.totalMs / n.timed)); }
   else if (n.totalMs) add(S("p.took", "took"), ms(n.totalMs));
+  const hit = cacheHit(n); if (hit !== null) add(S("cache", "cache"), hit + "%");
   for (const [k, v] of Object.entries(n.attrs)) add(k, v);
   n.recent.forEach((r, i) => add(i === 0 ? S("p.recent", "recent") : "", (r.status || "") + (r.dur ? " · " + ms(r.dur) : "")));
   n.routes.forEach((r, i) => add(i === 0 ? S("p.routes", "model changes") : "", [r.model, r.route, r.via].filter(Boolean).join(" · ")));
@@ -598,7 +701,46 @@ cv.addEventListener("wheel", e => {
 $("bFit").onclick = () => { state.autoFit = true; };
 function paintPause() { $("bPause").textContent = state.paused ? S("resume", "Resume") : S("pause", "Pause"); }
 $("bPause").onclick = () => { state.paused = !state.paused; paintPause(); };
-window.addEventListener("keydown", e => { if (e.key === "0") state.autoFit = true; if (e.key === " ") { e.preventDefault(); $("bPause").click(); } if (e.key === "Escape") $("pop").style.display = "none"; });
+window.addEventListener("keydown", e => {
+  const typing = e.target === $("search") || e.target.tagName === "SELECT";
+  if (e.key === "Escape") { $("pop").style.display = "none"; if (typing) { $("search").value = ""; state.query = ""; $("search").blur(); } return; }
+  if (typing) return;
+  if (e.key === "0") state.autoFit = true;
+  if (e.key === " ") { e.preventDefault(); $("bPause").click(); }
+  if (e.key === "/") { e.preventDefault(); $("search").focus(); $("search").select(); }
+  if (e.key === "e") $("bErrOnly").click();
+});
+$("search").addEventListener("input", () => { state.query = $("search").value.trim().toLowerCase(); });
+$("bErrOnly").onclick = () => { state.onlyErr = !state.onlyErr; applyFeedFilter(); };
+$("sAlert").onclick = () => $("bErrOnly").click();
+$("sAlert").onkeydown = e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); $("bErrOnly").click(); } };
+$("feedKind").onchange = () => { state.feedKind = $("feedKind").value; applyFeedFilter(); };
+// Export: the events of every shown process, replayed from the spool with
+// the same cursor API the page polls, as NDJSON — what a bug report needs.
+$("bExport").onclick = async () => {
+  const lines = [];
+  for (const [tok, inst] of state.instances) {
+    if (!inst.shown) continue;
+    let cursor = 0;
+    for (let guard = 0; guard < 200; guard++) {
+      const out = await api("/api/events?instance=" + encodeURIComponent(tok) + "&since=" + cursor);
+      out.events.forEach(ev => lines.push(JSON.stringify(ev)));
+      if (!out.events.length || out.next === cursor) break;
+      cursor = out.next;
+    }
+  }
+  const blob = new Blob([lines.join("\n") + "\n"], {type: "application/x-ndjson"});
+  const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = "chatcli-pulse-" + new Date().toISOString().replace(/[:.]/g, "-") + ".ndjson";
+  document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+};
+// The sparkline is the last minute of events per second.
+function drawSpark() {
+  const c = $("spark"), g = c.getContext("2d"), w = c.width, h = c.height, n = state.hist.length, max = Math.max(1, ...state.hist);
+  g.clearRect(0, 0, w, h); g.fillStyle = cssVar("--accent"); g.globalAlpha = .85;
+  const bw = w / n;
+  for (let i = 0; i < n; i++) { const v = state.hist[(state.histSec + 1 + i) % n]; if (!v) continue; const bh = Math.max(2, v / max * (h - 4)); g.fillRect(i * bw, h - bh, Math.max(1, bw - 1), bh); }
+  g.globalAlpha = 1;
+}
 window.addEventListener("resize", resize);
 
 // ─── polling ──────────────────────────────────────────────────────────────
@@ -628,7 +770,13 @@ async function tick() {
       }
     }
     const now = Date.now(); prune(now);
+    const sec = Math.floor(now / 1000);
+    if (sec !== state.histSec) { state.hist[sec % state.hist.length] = 0; state.histSec = sec; }
+    state.hist[sec % state.hist.length] += state.recent.filter(t => now - t < 1000).length;
     state.recent = state.recent.filter(t => now - t < 5000);
+    state.errs = state.errs.filter(t => now - t < 60000);
+    $("sErrN").textContent = state.errs.length; $("sAlert").classList.toggle("hot", state.errs.length > 0);
+    drawSpark();
     $("sRate").textContent = (state.recent.length / 5).toFixed(1);
     $("beat").classList.toggle("on", state.recent.length > 0);
     $("err").textContent = "";
@@ -638,7 +786,7 @@ async function tick() {
   }
   setTimeout(tick, 1000);
 }
-resize(); renderLegend(); paintPause(); requestAnimationFrame(draw); tick();
+loadPrefs(); resize(); renderLegend(); renderFeedKinds(); applyFeedFilter(); paintPause(); requestAnimationFrame(draw); tick();
 </script>
 </body>
 </html>

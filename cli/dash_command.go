@@ -234,6 +234,7 @@ func shadeHex(hex string, amount float64) string {
 var dashStringKeys = []string{
 	"title", "feed", "nodes", "active", "rate", "fit", "reset", "reset_hint", "pause", "resume", "empty", "ended", "turn", "tools", "errors",
 	"forbidden", "offline", "routed", "p.kind", "p.status", "p.calls", "p.errors", "p.avg", "p.took", "p.recent", "p.routes",
+	"export", "export_hint", "errors_only", "alerts", "search", "keys", "cache", "req", "mark", "all_kinds",
 	"kind.session", "kind.agent", "kind.turn", "kind.llm", "kind.tool", "kind.skill", "kind.mcp", "kind.pattern",
 	"kind.background", "kind.conn", "kind.rpc",
 }

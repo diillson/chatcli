@@ -63,5 +63,15 @@
   "storage.policy.dead-process": "removido quando o processo dono já não existe",
   "storage.reason.dead": "processo encerrado",
   "dash.ui.routed": "modelo →",
-  "dash.ui.p.routes": "trocas de modelo"
+  "dash.ui.p.routes": "trocas de modelo",
+  "dash.ui.export": "Exportar",
+  "dash.ui.export_hint": "Baixar os eventos dos processos exibidos como NDJSON",
+  "dash.ui.errors_only": "Só erros",
+  "dash.ui.alerts": "Erros no último minuto; clique para mostrar só erros no feed",
+  "dash.ui.search": "Buscar nós… ( / )",
+  "dash.ui.keys": "Teclas: / buscar · e só erros · espaço pausar · 0 enquadrar · Esc limpar",
+  "dash.ui.cache": "cache",
+  "dash.ui.req": "req",
+  "dash.ui.mark": "marcação",
+  "dash.ui.all_kinds": "Todos os kinds"
 }
