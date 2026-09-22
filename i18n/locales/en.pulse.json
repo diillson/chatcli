@@ -63,5 +63,15 @@
   "storage.policy.dead-process": "removed once its process is gone",
   "storage.reason.dead": "process gone",
   "dash.ui.routed": "model →",
-  "dash.ui.p.routes": "model changes"
+  "dash.ui.p.routes": "model changes",
+  "dash.ui.export": "Export",
+  "dash.ui.export_hint": "Download the events of the shown processes as NDJSON",
+  "dash.ui.errors_only": "Errors only",
+  "dash.ui.alerts": "Errors in the last minute; click to show only errors in the feed",
+  "dash.ui.search": "Search nodes… ( / )",
+  "dash.ui.keys": "Keys: / search · e errors only · space pause · 0 fit · Esc clear",
+  "dash.ui.cache": "cache",
+  "dash.ui.req": "req",
+  "dash.ui.mark": "mark",
+  "dash.ui.all_kinds": "All kinds"
 }
