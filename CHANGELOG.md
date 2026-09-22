@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.209.0](https://github.com/diillson/chatcli/compare/v1.208.2...v1.209.0) (2026-09-22)
+
+
+### Features
+
+* **agent:** a refused turn falls back to a sibling model, and skill evolution shows on the dashboard ([#1645](https://github.com/diillson/chatcli/issues/1645)) ([aaa743f](https://github.com/diillson/chatcli/commit/aaa743fc1729f493ee32a4b617e8b7a4ba994fcf))
+
 ## [1.208.2](https://github.com/diillson/chatcli/compare/v1.208.1...v1.208.2) (2026-09-22)
 
 
