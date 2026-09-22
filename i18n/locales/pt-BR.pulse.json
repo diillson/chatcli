@@ -21,7 +21,7 @@
   "dash.not_running": "A dash não está rodando. Suba com /dash.",
   "dash.stopped": "Dash encerrada. Os processos param de gravar conforme o lease expira.",
   "dash.status.bus": "este processo: %s · %d eventos publicados · %d descartados",
-  "dash.status.instance": "%s %s · pid %d · %s",
+  "dash.status.instance": "%s %s · pid %s · %s",
   "dash.cli.serving": "dash ao vivo do chatcli: %s",
   "dash.cli.hint": "Todo processo chatcli desta máquina grava enquanto a página estiver aberta. Ctrl+C para encerrar.",
   "dash.cli.failed": "não foi possível subir a dash: %v",

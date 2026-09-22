@@ -694,6 +694,14 @@ func NewChatCLI(ctx context.Context, manager manager.LLMManager, logger *zap.Log
 		if isModelToolEnabled() {
 			pluginMgr.RegisterBuiltinPlugin(plugins.NewBuiltinModelPlugin())
 		}
+		// @dash — the live telemetry dashboard as a tool: start it and hand
+		// the address over, stop it, read the reduced graph or the newest
+		// events of this or every chatcli process, mark a phase on the
+		// timeline. Adapter wired below over the recorder and the server.
+		// CHATCLI_AGENT_DASH_TOOL=false disables it.
+		if isDashToolEnabled() {
+			pluginMgr.RegisterBuiltinPlugin(plugins.NewBuiltinDashPlugin())
+		}
 		// @osv — keyless dependency vulnerability scanning via OSV.dev.
 		// Self-contained (HTTP + filesystem), no adapter wiring needed.
 		pluginMgr.RegisterBuiltinPlugin(plugins.NewBuiltinOsvPlugin())
@@ -1042,6 +1050,9 @@ func NewChatCLI(ctx context.Context, manager manager.LLMManager, logger *zap.Log
 	// Wire the @model tool to the live session (manager + catalog + cost
 	// tables + agent-loop route override).
 	plugins.SetModelRoutingAdapter(&modelRoutingAdapter{cli: cli})
+
+	// Wire the @dash tool to the live recorder and dashboard server.
+	plugins.SetDashAdapter(&dashToolAdapter{cli: cli})
 
 	// Wire the @session tool to the saved-session store so the agent can
 	// search past conversations.
