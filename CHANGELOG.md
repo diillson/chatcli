@@ -1,5 +1,19 @@
 # Changelog
 
+## [1.208.0](https://github.com/diillson/chatcli/compare/v1.207.2...v1.208.0) (2026-09-22)
+
+
+### Features
+
+* **plugins:** [@dash](https://github.com/dash) tool lets the agent manage and read the live dashboard ([#1638](https://github.com/diillson/chatcli/issues/1638)) ([fed93e9](https://github.com/diillson/chatcli/commit/fed93e9abb14832cdd1cf21f4c25c9df5ccfe808))
+* **pulsedash:** essentials on the live dashboard page ([#1639](https://github.com/diillson/chatcli/issues/1639)) ([0f64bf2](https://github.com/diillson/chatcli/commit/0f64bf21a8fcb85fd190c5ab0b8f3b0b93fc116a))
+* **pulsedash:** the dashboard in the deck's terminal look ([#1640](https://github.com/diillson/chatcli/issues/1640)) ([57e6eb1](https://github.com/diillson/chatcli/commit/57e6eb11c5b73e723f89c92d7df39da65d732d09))
+
+
+### Bug Fixes
+
+* **pulsedash:** session card follows the model that serves the next request ([#1636](https://github.com/diillson/chatcli/issues/1636)) ([1937867](https://github.com/diillson/chatcli/commit/1937867e55e05d842bc9f45b6a482c2012180fad))
+
 ## [1.207.2](https://github.com/diillson/chatcli/compare/v1.207.1...v1.207.2) (2026-09-21)
 
 
