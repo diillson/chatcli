@@ -973,9 +973,9 @@ func (a *AgentMode) getInput(promptStr string) string {
 // the qualified "PROVIDER:model" form, so its resolution is deterministic.
 func (a *AgentMode) clientAndCtxForTurn(ctx context.Context) (llmclient.LLMClient, context.Context) {
 	turnClient := a.cli.Client
-	hint := a.cli.agentRouteOverrideHandle()
+	hint, source := a.cli.agentRouteOverrideHandle(), pulseRouteOverride
 	if hint == "" {
-		hint = a.skillModelHint
+		hint, source = a.skillModelHint, pulseRouteSkill
 	}
 	if hint != "" {
 		resolution := a.cli.resolveSkillClient(hint)
@@ -990,6 +990,11 @@ func (a *AgentMode) clientAndCtxForTurn(ctx context.Context) (llmclient.LLMClien
 				zap.String("to_provider", resolution.Provider),
 				zap.String("to_model", resolution.Model))
 		}
+		// The dashboard's session card names the pair this turn resolved,
+		// not the one the session booted with.
+		a.cli.pulseNoteResolvedRoute(resolution, source, "agent turn")
+	} else {
+		a.cli.pulseNoteRoute(a.cli.Provider, a.cli.Model, pulseRouteSession, "agent turn")
 	}
 	// Honor /thinking session override before falling back to the skill
 	// effort hint. EffortUnset inside an active override means "thinking
@@ -1259,7 +1264,7 @@ func (a *AgentMode) Run(ctx context.Context, query string, additionalContext str
 	// routing decision must never silently outlive the task it was made for.
 	a.skillModelHint = ""
 	a.skillEffortHint = llmclient.EffortUnset
-	a.cli.clearAgentRouteOverride()
+	a.cli.clearAgentRouteOverride("run start")
 	a.injectedSkillNames = make(map[string]bool)
 	a.skillCollapseTurn = make(map[string]int)
 	a.skillCharsInjected = 0

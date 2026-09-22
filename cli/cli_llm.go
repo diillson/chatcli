@@ -78,6 +78,7 @@ func (cli *ChatCLI) processLLMRequest(parentCtx context.Context, in string) {
 	cli.ensureModelCacheWarm(ctx)
 	resolution := cli.resolveSkillClient(assembly.modelHint)
 	cli.noticeSkillResolution(resolution)
+	cli.pulseNoteResolvedRoute(resolution, pulseRouteSkill, "chat turn")
 	ctx = cli.applyChatEffortHint(ctx, routeEffortForPrompt(userInput, assembly.effort))
 
 	turnStart := time.Now()
@@ -333,6 +334,7 @@ func (cli *ChatCLI) applyProviderSwitch(ctx context.Context, newProvider string)
 	cli.Provider = newProvider
 	cli.Model = newModel
 	cli.notePrefixChanged("switch provider")
+	cli.pulseRouteChanged("/provider")
 	fmt.Println(i18n.T("status.provider_switched", cli.Client.GetModelName(), cli.Provider))
 	fmt.Println()
 	cli.refreshModelCache(ctx)
@@ -480,6 +482,7 @@ func (cli *ChatCLI) handleSwitchCommand(ctx context.Context, userInput string) {
 			cli.Client = newClient
 			cli.Model = newModel
 			cli.notePrefixChanged("switch model")
+			cli.pulseRouteChanged("/switch")
 			fmt.Println(i18n.T("cli.switch.change_model_success", cli.Client.GetModelName(), cli.Provider))
 			// Mirror the live choice for a running/future gateway daemon (separate process).
 			cli.writeRuntimeModelState()

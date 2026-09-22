@@ -54,11 +54,13 @@ func isModelToolEnabled() bool {
 
 // setAgentRouteOverride records the AI-chosen "PROVIDER:model" handle. It is
 // honored per turn by AgentMode.clientAndCtxForTurn and never mutates the
-// session's own Client/Provider/Model.
-func (cli *ChatCLI) setAgentRouteOverride(handle string) {
+// session's own Client/Provider/Model. via names who changed it, for the
+// live dashboard.
+func (cli *ChatCLI) setAgentRouteOverride(handle, via string) {
 	cli.agentRouteOverrideMu.Lock()
 	cli.agentRouteOverride = handle
 	cli.agentRouteOverrideMu.Unlock()
+	cli.pulseRouteChanged(via)
 }
 
 // agentRouteOverrideHandle returns the active override ("" = none).
@@ -69,8 +71,8 @@ func (cli *ChatCLI) agentRouteOverrideHandle() string {
 }
 
 // clearAgentRouteOverride removes the override (task end, reset, new Run).
-func (cli *ChatCLI) clearAgentRouteOverride() {
-	cli.setAgentRouteOverride("")
+func (cli *ChatCLI) clearAgentRouteOverride(via string) {
+	cli.setAgentRouteOverride("", via)
 }
 
 // --- adapter -----------------------------------------------------------------
@@ -241,12 +243,12 @@ func (a *modelRoutingAdapter) Use(ctx context.Context, handle string) (string, e
 		}
 		// The handle is the session's own model — an override would be a
 		// no-op, so clear any previous one instead.
-		cli.clearAgentRouteOverride()
+		cli.clearAgentRouteOverride("@model use")
 		return i18n.T("model.tool.already_active", resolution.Provider+":"+resolution.Model), nil
 	}
 
 	qualified := resolution.Provider + ":" + resolution.Model
-	cli.setAgentRouteOverride(qualified)
+	cli.setAgentRouteOverride(qualified, "@model use")
 
 	msg := i18n.T("model.tool.switched", qualified)
 	if resolution.CrossProvider {
@@ -268,7 +270,7 @@ func (a *modelRoutingAdapter) Reset() (string, error) {
 	if cli.agentRouteOverrideHandle() == "" {
 		return i18n.T("model.tool.reset.none", cli.Provider+":"+cli.Model), nil
 	}
-	cli.clearAgentRouteOverride()
+	cli.clearAgentRouteOverride("@model reset")
 	return i18n.T("model.tool.reset.done", cli.Provider+":"+cli.Model), nil
 }
 

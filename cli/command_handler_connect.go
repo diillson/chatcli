@@ -164,6 +164,7 @@ func (ch *CommandHandler) handleConnectCommand(ctx context.Context, userInput st
 	ch.cli.isRemote = true
 	ch.cli.remoteAddress = address
 	ch.cli.refreshModelCache(ctx)
+	ch.cli.pulseRouteChanged("/connect")
 
 	connInfo := fmt.Sprintf("version: %s, provider: %s, model: %s", ver, ch.cli.Provider, ch.cli.Model)
 	if useLocalAuth {
@@ -238,6 +239,7 @@ func (ch *CommandHandler) handleDisconnectCommand(ctx context.Context) {
 	ch.cli.Client = ch.cli.localClient
 	ch.cli.Provider = ch.cli.localProvider
 	ch.cli.Model = ch.cli.localModel
+	ch.cli.pulseRouteChanged("/disconnect")
 	ch.cli.remoteConn = nil
 	ch.cli.isRemote = false
 	ch.cli.remoteAddress = ""
@@ -326,4 +328,5 @@ func (ch *CommandHandler) autoSwitchProvider(ctx context.Context, provider, mode
 	ch.cli.Model = model
 	fmt.Println(i18n.T("status.provider_switched", ch.cli.Client.GetModelName(), ch.cli.Provider))
 	ch.cli.refreshModelCache(ctx)
+	ch.cli.pulseRouteChanged("oauth login")
 }

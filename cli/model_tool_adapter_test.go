@@ -158,7 +158,7 @@ func TestModelToolUseResetStatus(t *testing.T) {
 	})
 
 	t.Run("reset clears and reports", func(t *testing.T) {
-		cliObj.setAgentRouteOverride("GOOGLEAI:gemini-2.5-flash")
+		cliObj.setAgentRouteOverride("GOOGLEAI:gemini-2.5-flash", "test")
 		if _, err := adapter.Reset(); err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -252,14 +252,14 @@ func TestClientAndCtxForTurnPrefersRouteOverride(t *testing.T) {
 	}
 
 	// @model override outranks the skill hint.
-	cliObj.setAgentRouteOverride("GOOGLEAI:gemini-2.5-flash")
+	cliObj.setAgentRouteOverride("GOOGLEAI:gemini-2.5-flash", "test")
 	turnClient, _ = a.clientAndCtxForTurn(ctx)
 	if turnClient.GetModelName() != "gemini-2.5-flash" {
 		t.Fatalf("route override must win over skill hint, got %s", turnClient.GetModelName())
 	}
 
 	// Reset returns to the skill hint.
-	cliObj.clearAgentRouteOverride()
+	cliObj.clearAgentRouteOverride("test")
 	turnClient, _ = a.clientAndCtxForTurn(ctx)
 	if turnClient.GetModelName() != "claude-haiku-4-5-20251001" {
 		t.Fatalf("after reset expected skill hint client, got %s", turnClient.GetModelName())

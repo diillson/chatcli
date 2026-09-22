@@ -153,15 +153,15 @@ func (cli *ChatCLI) shutdownPulse() {
 }
 
 // pulseSessionSnapshot describes the process itself: the root of its graph.
+// The pair it carries is the one that serves the next request — the @model
+// override when the AI set one — and it seeds the route state, so the turn
+// that follows only speaks up if the pair changes.
 func (cli *ChatCLI) pulseSessionSnapshot() []pulse.Event {
-	ev := pulse.Event{
-		Kind:   pulse.KindSession,
-		Phase:  pulse.PhaseStart,
-		ID:     pulseSessionNodeID,
-		Name:   "chatcli",
-		Status: pulse.StatusRunning,
-	}
-	return []pulse.Event{ev.With("provider", cli.Provider).With("model", cli.Model)}
+	provider, model, source := cli.effectivePulseRoute()
+	cli.pulseRoute.set(provider, model, source)
+	ev := pulseRouteEvent(pulse.PhaseStart, provider, model, source, "")
+	ev.Name = "chatcli"
+	return []pulse.Event{ev}
 }
 
 // pulseRunsSnapshot replays the runs that are live right now, so a dashboard

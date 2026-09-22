@@ -61,5 +61,7 @@
   "dash.ui.reset": "Reset layout",
   "dash.ui.reset_hint": "Drag a card to place it, or drag a kind header (or Shift-drag a card) to move the whole kind. Double-click hands it back to the automatic layout; this does it for everything.",
   "storage.policy.dead-process": "removed once its process is gone",
-  "storage.reason.dead": "process gone"
+  "storage.reason.dead": "process gone",
+  "dash.ui.routed": "model →",
+  "dash.ui.p.routes": "model changes"
 }
