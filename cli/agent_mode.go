@@ -229,9 +229,15 @@ type AgentMode struct {
 	// aging collapsed its injection block (releaseCollapsedSkills). Used as
 	// a re-injection cooldown by rescanSkillsMidLoop. Reset per Run().
 	skillCollapseTurn map[string]int
-	// refusalRetries counts the turns this run resent after the provider's
-	// safety classifier stopped a reply (agent_refusal.go).
-	refusalRetries int
+	// Refusal recovery (agent_refusal.go): how many turns this run resent
+	// after the provider's safety classifier stopped a reply, the fallback
+	// route serving the resend, what the user had before it, whether the
+	// coming resolve is the fallback turn, and whether the route stays.
+	refusalRetries      int
+	refusalFallback     string
+	refusalPrevOverride string
+	refusalArmed        bool
+	refusalSticky       bool
 	// runStartCost is the session's total cost when the run began, so the
 	// run's own spend can be credited to the skills it used (skill_stats.go).
 	runStartCost float64
@@ -975,6 +981,9 @@ func (a *AgentMode) getInput(promptStr string) string {
 // static preference captured at Run() start). The override handle is always
 // the qualified "PROVIDER:model" form, so its resolution is deterministic.
 func (a *AgentMode) clientAndCtxForTurn(ctx context.Context) (llmclient.LLMClient, context.Context) {
+	// A refusal fallback lasts one turn: this resolve either serves it or
+	// hands the route back.
+	a.settleRefusalFallback()
 	turnClient := a.cli.Client
 	hint, source := a.cli.agentRouteOverrideHandle(), pulseRouteOverride
 	if hint == "" {
@@ -1039,7 +1048,7 @@ func (a *AgentMode) resetPerRunState() {
 	a.taskBudgetTotal = 0
 	a.runTurns, a.runToolCalls = 0, 0
 	a.runToolNames = nil
-	a.refusalRetries = 0
+	a.resetRefusalState()
 	// The session's spend when this run begins, so the run's own cost can
 	// be credited to the skills it uses (skill_stats.go).
 	a.runStartCost = 0

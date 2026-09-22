@@ -31,11 +31,13 @@ import (
 	"context"
 	"os"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/diillson/chatcli/cli/plugins"
 	"github.com/diillson/chatcli/config"
 	"github.com/diillson/chatcli/i18n"
+	"github.com/diillson/chatcli/pkg/pulse"
 )
 
 // selfEvolveMode is the autonomy level for skill authoring.
@@ -182,6 +184,47 @@ type selfEvolveSummary struct {
 	// Redirected lists NEW candidates folded into an existing skill they
 	// overlapped instead of being authored beside it ("candidate → skill").
 	Redirected []string
+	// Failed counts candidates whose merge, backup or write failed.
+	Failed int
+}
+
+// pulseSkillEvolutionNode is the dashboard node of the skill evolution pass.
+const pulseSkillEvolutionNode = "skill-evolution"
+
+// outcome is the one-line state the dashboard shows for a pass.
+func (s selfEvolveSummary) outcome() string {
+	var parts []string
+	add := func(n int, label string) {
+		if n > 0 {
+			parts = append(parts, strconv.Itoa(n)+" "+label)
+		}
+	}
+	add(len(s.Authored), "authored")
+	add(len(s.Evolved)+len(s.EvolvedBackup), "evolved")
+	add(len(s.Redirected), "redirected")
+	add(len(s.Suggested), "suggested")
+	add(s.Failed, "failed")
+	if len(parts) == 0 {
+		return "no change"
+	}
+	return strings.Join(parts, " · ")
+}
+
+// pulseSkills marks each skill the pass touched on the dashboard: a point
+// on the skill's own node with what happened to it.
+func (s selfEvolveSummary) pulseSkills(mode selfEvolveMode) {
+	if !pulse.Enabled() {
+		return
+	}
+	mark := func(names []string, state string) {
+		for _, name := range names {
+			pulse.Point(pulse.KindSkill, name, "", pulse.StatusOK, map[string]string{"state": state, "mode": mode.String()})
+		}
+	}
+	mark(s.Authored, "created")
+	mark(s.Evolved, "evolved")
+	mark(s.EvolvedBackup, "evolved (backup kept)")
+	mark(s.Suggested, "suggested")
 }
 
 func (s selfEvolveSummary) isEmpty() bool {
@@ -205,6 +248,11 @@ func (cli *ChatCLI) applySkillCandidates(ctx context.Context, response string, m
 	if len(candidates) == 0 {
 		return sum
 	}
+	// On the live dashboard the pass is a background span with its
+	// outcome, and every skill it wrote a point on that skill's node.
+	span := pulse.Begin(pulse.KindBackground, pulseSkillEvolutionNode, "").
+		With("mode", mode.String()).With("candidates", strconv.Itoa(len(candidates)))
+	defer func() { span.Outcome(pulse.StatusOK, sum.outcome()); sum.pulseSkills(mode) }()
 
 	man := loadSelfEvolveManifest()
 	seen := make(map[string]bool, len(candidates))
@@ -269,6 +317,7 @@ func (cli *ChatCLI) authorNewSkill(c skillCandidate, man *selfEvolveManifest, su
 	}
 	if _, err := plugins.SaveSkill(c.toInput(), false); err != nil {
 		cli.logger.Debug("selfevolve: author failed: " + err.Error())
+		sum.Failed++
 		return false
 	}
 	man.record(c.Name)
@@ -289,6 +338,7 @@ func (cli *ChatCLI) evolveExistingSkill(ctx context.Context, c skillCandidate, e
 	merged, err := merge(ctx, c.Name, currentBody, change)
 	if err != nil {
 		cli.logger.Debug("selfevolve: merge failed, not evolving: " + err.Error())
+		sum.Failed++
 		return false
 	}
 	merged = strings.TrimSpace(merged)
@@ -317,6 +367,7 @@ func (cli *ChatCLI) evolveExistingSkill(ctx context.Context, c skillCandidate, e
 		if _, err := plugins.BackupSkill(c.Name); err != nil {
 			cli.logger.Debug("selfevolve: backup failed, not evolving: " + err.Error())
 			sum.Suggested = append(sum.Suggested, c.Name)
+			sum.Failed++
 			return false
 		}
 	}
@@ -324,6 +375,7 @@ func (cli *ChatCLI) evolveExistingSkill(ctx context.Context, c skillCandidate, e
 	in := plugins.AutoSkillInput{Name: c.Name, Description: desc, Content: merged, Triggers: triggers}
 	if _, err := plugins.SaveSkill(in, true); err != nil {
 		cli.logger.Debug("selfevolve: evolve failed: " + err.Error())
+		sum.Failed++
 		return false
 	}
 	man.record(c.Name)
