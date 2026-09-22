@@ -471,6 +471,9 @@ type ChatCLI struct {
 	agentRouteOverride   string
 	agentRouteOverrideMu sync.RWMutex
 
+	// Last provider/model pair reported to the live dashboard (pulse_route.go).
+	pulseRoute pulseRouteState
+
 	// Multiline input buffer (--- delimiter toggle)
 	multilineBuf MultilineBuffer
 

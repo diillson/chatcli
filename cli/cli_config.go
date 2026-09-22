@@ -187,6 +187,7 @@ func (cli *ChatCLI) reloadConfiguration(ctx context.Context) {
 			cli.Provider = prevProvider
 			cli.Model = prevModel
 			cli.refreshModelCache(ctx)
+			cli.pulseRouteChanged("/reload")
 			fmt.Println(i18n.T("status.reload_success_preserved"))
 			return
 		}
@@ -196,6 +197,7 @@ func (cli *ChatCLI) reloadConfiguration(ctx context.Context) {
 	cli.configureProviderAndModel()
 	if client, err := cli.manager.GetClient(cli.Provider, cli.Model); err == nil {
 		cli.Client = client
+		cli.pulseRouteChanged("/reload")
 		fmt.Println(i18n.T("status.reload_success"))
 	} else {
 		cli.logger.Error("Erro ao obter o cliente LLM", zap.Error(err))
@@ -477,6 +479,7 @@ func (cli *ChatCLI) ApplyOverrides(ctx context.Context, mgr manager.LLMManager, 
 	cli.Provider = prov
 	cli.Model = mod
 	cli.refreshModelCache(ctx)
+	cli.pulseRouteChanged("rpc override")
 	return nil
 }
 

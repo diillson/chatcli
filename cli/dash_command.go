@@ -233,7 +233,7 @@ func shadeHex(hex string, amount float64) string {
 // "dash.ui.<key>".
 var dashStringKeys = []string{
 	"title", "feed", "nodes", "active", "rate", "fit", "reset", "reset_hint", "pause", "resume", "empty", "ended", "turn", "tools", "errors",
-	"forbidden", "offline", "p.kind", "p.status", "p.calls", "p.errors", "p.avg", "p.took", "p.recent",
+	"forbidden", "offline", "routed", "p.kind", "p.status", "p.calls", "p.errors", "p.avg", "p.took", "p.recent", "p.routes",
 	"kind.session", "kind.agent", "kind.turn", "kind.llm", "kind.tool", "kind.skill", "kind.mcp", "kind.pattern",
 	"kind.background", "kind.conn", "kind.rpc",
 }

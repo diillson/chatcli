@@ -74,6 +74,9 @@ func RunTool(ctx context.Context, args []string, mgr manager.LLMManager, logger 
 	chatCLI.SetAuditSurface("tool")
 	// One-shot, non-interactive: nothing may block reading stdin.
 	chatCLI.SetUnattended(true)
+	// Exit like -p does: spend saved, paid caches released, telemetry
+	// flushed. Without it the process left with its last events unwritten.
+	defer chatCLI.FinalizeSpend(context.WithoutCancel(ctx))
 	return runToolWith(ctx, chatCLI, args, os.Stdout)
 }
 

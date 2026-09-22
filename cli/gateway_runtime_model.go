@@ -116,4 +116,5 @@ func (cli *ChatCLI) refreshGatewayModel() {
 	cli.Client = client
 	cli.Provider = s.Provider
 	cli.Model = s.Model
+	cli.pulseRouteChanged("gateway")
 }

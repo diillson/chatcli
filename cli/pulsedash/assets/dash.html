@@ -149,7 +149,7 @@ function ensureSession(inst) {
 }
 function mkNode(key, inst, kind, name, single) {
   return { key, inst, kind, name, single, status:"", active:0, calls:0, errors:0, totalMs:0, timed:0,
-           attrs:{}, recent:[], flash:0, doneAt:0, x:null, y:null, tx:0, ty:0 };
+           attrs:{}, recent:[], routes:[], flash:0, doneAt:0, x:null, y:null, tx:0, ty:0 };
 }
 function apply(ev) {
   const live = !(ev.attrs && ev.attrs.snapshot === "true");
@@ -159,8 +159,15 @@ function apply(ev) {
   if (!n) { n = mkNode(key, ev.instance, ev.kind, ev.name || ev.id, ev.kind === "session" || ev.kind === "agent"); state.nodes.set(key, n); }
   if (ev.name && n.single) n.name = ev.name;
   const sameAction = ev.phase === "update" && n.attrs.action === ((ev.attrs || {}).action);
+  // The session card names the pair that serves the next request. A change
+  // of pair (@model use, a skill hint, /switch) is worth a line of its own in
+  // the feed and a place in the card's history: it is the moment every
+  // request hub after it lights up under another model.
+  const before = routeOf(n.attrs), after = routeOf(ev.attrs || {});
   Object.assign(n.attrs, ev.attrs || {});
   delete n.attrs.snapshot;
+  const rerouted = n.kind === "session" && after && before && after !== before;
+  if (rerouted) { n.routes.unshift({model: after, route: n.attrs.route || "", via: n.attrs.via || ""}); if (n.routes.length > 6) n.routes.pop(); }
 
   if (n.single) {
     n.status = ev.status || n.status;
@@ -188,8 +195,9 @@ function apply(ev) {
     if (!e) { e = {from:pk, to:key, fire:0}; state.edges.set(ek, e); }
     if (live) { e.fire = 1; state.particles.push({edge:ek, t:0, err: ev.status === "error"}); }
   }
-  if (live) { if (!sameAction) pushFeed(ev); state.recent.push(Date.now()); }
+  if (live) { if (rerouted) pushRouteRow(n, ev); else if (!sameAction) pushFeed(ev); state.recent.push(Date.now()); }
 }
+const routeOf = a => a && a.model ? (a.provider ? a.provider + ":" : "") + a.model : "";
 function prune(now) {
   for (const [k, n] of state.nodes) {
     if (n.kind !== "agent" || !n.doneAt || now - n.doneAt < DONE_TTL) continue;
@@ -461,6 +469,19 @@ function pushFeed(ev) {
   lastFeed = sig ? {sig, small, count:1} : null;
   const feed = $("feed"); feed.prepend(row); while (feed.childElementCount > FEED_MAX) feed.lastElementChild.remove();
 }
+// A model change gets its own row, named by the new pair; it also ends the
+// collapsing of the session's update rows, so the switch never disappears
+// into a "update ×12".
+function pushRouteRow(n, ev) {
+  const row = document.createElement("div"); row.className = "row";
+  const dot = document.createElement("span"); dot.className = "k"; dot.style.background = cssVar("--k-llm") || cssVar("--accent");
+  const name = document.createElement("span"); name.className = "n"; name.textContent = S("routed", "model →") + " " + routeOf(ev.attrs) + " ";
+  const small = document.createElement("small"); small.textContent = [n.attrs.route, n.attrs.via].filter(Boolean).join(" · "); name.appendChild(small);
+  const dur = document.createElement("span"); dur.className = "d";
+  row.append(dot, name, dur);
+  lastFeed = null;
+  const feed = $("feed"); feed.prepend(row); while (feed.childElementCount > FEED_MAX) feed.lastElementChild.remove();
+}
 function renderChips() {
   const box = $("instances"); box.textContent = "";
   for (const [tok, inst] of state.instances) {
@@ -492,6 +513,7 @@ function showPop(n, sx, sy) {
   else if (n.totalMs) add(S("p.took", "took"), ms(n.totalMs));
   for (const [k, v] of Object.entries(n.attrs)) add(k, v);
   n.recent.forEach((r, i) => add(i === 0 ? S("p.recent", "recent") : "", (r.status || "") + (r.dur ? " · " + ms(r.dur) : "")));
+  n.routes.forEach((r, i) => add(i === 0 ? S("p.routes", "model changes") : "", [r.model, r.route, r.via].filter(Boolean).join(" · ")));
   pop.appendChild(table);
   pop.style.display = "block";
   pop.style.left = Math.min(sx + 14, view.w - pop.offsetWidth - 10) + "px"; pop.style.top = Math.min(sy + 14, view.h - pop.offsetHeight - 10) + "px";

@@ -33,4 +33,8 @@ func (cli *ChatCLI) settleSpendOnExit(ctx context.Context) {
 	if n := client.ReleaseCacheResources(ctx); n > 0 && cli.logger != nil {
 		cli.logger.Info("released provider cache resources on exit", zap.Int("count", n))
 	}
+	// The live telemetry spool is flushed by the same exit: a one-shot or
+	// a tool run that returned right after its last event used to lose the
+	// tail of its recording, the switch it had just made included.
+	cli.shutdownPulse()
 }
