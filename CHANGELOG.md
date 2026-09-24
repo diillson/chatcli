@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.210.2](https://github.com/diillson/chatcli/compare/v1.210.1...v1.210.2) (2026-09-24)
+
+
+### Bug Fixes
+
+* **coder:** the required block is a plan, not the model's reasoning; both spellings are read ([#1651](https://github.com/diillson/chatcli/issues/1651)) ([2641087](https://github.com/diillson/chatcli/commit/2641087a617172676345fec44f64f654eb90cb36))
+
 ## [1.210.1](https://github.com/diillson/chatcli/compare/v1.210.0...v1.210.1) (2026-09-24)
 
 
