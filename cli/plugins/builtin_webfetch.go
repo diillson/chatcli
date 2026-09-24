@@ -311,7 +311,11 @@ func parseFetchArgs(args []string) (fetchArgs, error) {
 		}
 	}
 
-	// Positional flags.
+	// Positional flags. A bare invocation has no URL to fetch: the
+	// validation below reports it instead of indexing an empty argv.
+	if len(args) == 0 {
+		return out, nil
+	}
 	subcmd := args[0]
 	start := 0
 	if subcmd == "fetch" {

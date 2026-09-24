@@ -228,6 +228,9 @@ func (p *BuiltinParkPlugin) ExecuteWithStream(ctx context.Context, args []string
 // scheduler plugin: JSON envelope, flat JSON, and argv form.
 func parseParkInvocation(args []string) (string, string, error) {
 	payload := strings.TrimSpace(strings.Join(args, " "))
+	if payload == "" {
+		return "", "", fmt.Errorf(`missing cmd: expected the JSON envelope or a subcommand. Example: {"cmd":"delay","args":{"duration":"5m"}}`)
+	}
 
 	if strings.HasPrefix(payload, "{") {
 		var raw map[string]json.RawMessage

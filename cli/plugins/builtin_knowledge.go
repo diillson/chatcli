@@ -209,6 +209,9 @@ func (p *BuiltinKnowledgePlugin) ExecuteWithStream(_ context.Context, args []str
 // flat JSON, and the flattened argv form. Returns the canonical (cmd, innerJSON).
 func parseKnowledgeInvocation(args []string) (string, string, error) {
 	payload := strings.TrimSpace(strings.Join(args, " "))
+	if payload == "" {
+		return "", "", fmt.Errorf("missing cmd: expected the JSON envelope {cmd, args} or a subcommand")
+	}
 
 	if strings.HasPrefix(payload, "{") {
 		var raw map[string]json.RawMessage

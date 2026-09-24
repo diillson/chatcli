@@ -103,9 +103,23 @@ func IsReadOnly(p Plugin, args []string) bool {
 		return false
 	}
 	if r, ok := p.(ReadOnlyAware); ok {
-		return r.IsReadOnly(args)
+		return guarded(func() bool { return r.IsReadOnly(args) }, false)
 	}
 	return false
+}
+
+// guarded runs a capability probe and answers fallback if the probe panics.
+// The probes parse whatever args the model produced — an empty argv, a
+// half-formed envelope — and a probe is consulted before the security gate,
+// so a parser slip there must degrade to the fail-closed answer, never end
+// the session. The plugin's Execute still reports the real parse error.
+func guarded[T any](probe func() T, fallback T) (out T) {
+	defer func() {
+		if r := recover(); r != nil {
+			out = fallback
+		}
+	}()
+	return probe()
 }
 
 // IsConcurrencySafe returns whether the plugin can run in parallel with
@@ -115,7 +129,7 @@ func IsConcurrencySafe(p Plugin, args []string) bool {
 		return false
 	}
 	if c, ok := p.(ConcurrencySafeAware); ok {
-		return c.IsConcurrencySafe(args)
+		return guarded(func() bool { return c.IsConcurrencySafe(args) }, false)
 	}
 	return false
 }
@@ -128,7 +142,7 @@ func DescribeCall(p Plugin, args []string) string {
 		return ""
 	}
 	if d, ok := p.(DescriberWithInput); ok {
-		if s := d.DescribeCall(args); s != "" {
+		if s := guarded(func() string { return d.DescribeCall(args) }, ""); s != "" {
 			return s
 		}
 	}

@@ -271,6 +271,9 @@ func procInvocationCmd(args []string) string {
 // ("logs p1" / "start 'npm run dev'").
 func parseProcInvocation(args []string) (string, string, error) {
 	payload := strings.TrimSpace(strings.Join(args, " "))
+	if payload == "" {
+		return "", "", fmt.Errorf(`missing cmd (valid: start|status|logs|stop|remove|list). Expected {"cmd":"start","args":{"command":"..."}}`)
+	}
 
 	if strings.HasPrefix(payload, "{") {
 		var raw map[string]json.RawMessage

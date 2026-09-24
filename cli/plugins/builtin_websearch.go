@@ -123,7 +123,11 @@ func parseWebSearchArgs(args []string) (string, int) {
 		}
 	}
 
-	// Positional fallback.
+	// Positional fallback. A bare invocation has no query: the caller
+	// reports the empty query instead of indexing an empty argv.
+	if len(args) == 0 {
+		return "", maxResults
+	}
 	subcmd := args[0]
 	if subcmd == "search" && len(args) > 1 {
 		var queryParts []string
