@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.210.1](https://github.com/diillson/chatcli/compare/v1.210.0...v1.210.1) (2026-09-24)
+
+
+### Bug Fixes
+
+* **agent:** a describe's subject no longer becomes a tool call, and an empty argv never panics a plugin ([#1649](https://github.com/diillson/chatcli/issues/1649)) ([3359789](https://github.com/diillson/chatcli/commit/33597894b4c850024c5c0dac3dccbcedadc0b87d))
+
 ## [1.210.0](https://github.com/diillson/chatcli/compare/v1.209.0...v1.210.0) (2026-09-24)
 
 
