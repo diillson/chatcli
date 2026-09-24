@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.210.3](https://github.com/diillson/chatcli/compare/v1.210.2...v1.210.3) (2026-09-24)
+
+
+### Bug Fixes
+
+* **coder:** sessions recorded before the plan rename are brought to the new spelling on load and on every run ([#1653](https://github.com/diillson/chatcli/issues/1653)) ([2b3e4b3](https://github.com/diillson/chatcli/commit/2b3e4b3b6cee49abe15b8abff6b95e989179fe72))
+
 ## [1.210.2](https://github.com/diillson/chatcli/compare/v1.210.1...v1.210.2) (2026-09-24)
 
 
