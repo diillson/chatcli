@@ -86,7 +86,7 @@ func exchangeAnthropicToken(ctx context.Context, tokenURL string, payload map[st
 		return nil, err
 	}
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("User-Agent", ClaudeCodeUserAgent)
+	req.Header.Set("User-Agent", ClaudeCodeUA())
 	req.Header.Set("Accept", "application/json")
 
 	return doTokenExchange(hc, req)
@@ -148,7 +148,7 @@ func fetchAnthropicEmailFrom(ctx context.Context, profileURL, accessToken string
 	}
 	req.Header.Set("Authorization", "Bearer "+accessToken)
 	req.Header.Set("Accept", "application/json")
-	req.Header.Set("User-Agent", ClaudeCodeUserAgent)
+	req.Header.Set("User-Agent", ClaudeCodeUA())
 
 	resp, err := hc.Do(req) //#nosec G704 -- public Anthropic profile endpoint
 	if err != nil {

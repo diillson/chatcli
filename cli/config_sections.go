@@ -1386,6 +1386,10 @@ func (cli *ChatCLI) showConfigAuth() {
 	fmt.Println(p)
 	subheader(p, "cfg.sub.auth.oauth")
 	kv(p, "CHATCLI_ANTHROPIC_LEGACY_OAUTH", envBool("CHATCLI_ANTHROPIC_LEGACY_OAUTH"))
+	// The Claude Code release the OAuth surface presents: the compiled
+	// floor unless the env or a claude_code_version_too_old error moved
+	// it — the effective value is what the next request sends.
+	kv(p, "CHATCLI_CLAUDE_CODE_VERSION", auth.EffectiveClaudeCodeVersion())
 
 	providers := []auth.ProviderID{
 		"anthropic",

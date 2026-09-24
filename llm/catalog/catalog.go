@@ -106,6 +106,36 @@ var registry = []ModelMeta{
 		PreferredAPI:    APIResponses,
 		Capabilities:    []string{"vision", "tools", "json_mode"},
 	},
+	// gpt-6-sol / gpt-6-luna (GA Sep 22 2026, developers.openai.com/api/
+	// docs/models/gpt-6-sol and /gpt-6-luna): the two lower tiers of the
+	// GPT-6 family (no Terra this generation). Same 1,050,000 / 128K
+	// profile as Astra, reasoning_effort none|low|medium(default)|high|
+	// xhigh|max, Responses API with the built-in tools; Chat Completions
+	// does function calling only at reasoning_effort=none. List prices
+	// $2/$10 (Sol, cached $0.20) and $0.10/$0.50 (Luna, cached $0.01);
+	// above 272K input the whole request bills 2x — the same surcharge
+	// the 5.6 line has and cost_tracker does not model. The bare "gpt-6"
+	// alias stays on Astra (flagship).
+	{
+		ID:              "gpt-6-sol",
+		Aliases:         []string{"gpt-6-sol"},
+		DisplayName:     "GPT-6 Sol",
+		Provider:        ProviderOpenAI,
+		ContextWindow:   1050000,
+		MaxOutputTokens: 128000,
+		PreferredAPI:    APIResponses,
+		Capabilities:    []string{"vision", "tools", "json_mode"},
+	},
+	{
+		ID:              "gpt-6-luna",
+		Aliases:         []string{"gpt-6-luna"},
+		DisplayName:     "GPT-6 Luna",
+		Provider:        ProviderOpenAI,
+		ContextWindow:   1050000,
+		MaxOutputTokens: 128000,
+		PreferredAPI:    APIResponses,
+		Capabilities:    []string{"vision", "tools", "json_mode"},
+	},
 
 	// ── OpenAI GPT-5 family ──────────────────────────────────────────
 	// gpt-5.6 (GA Jul 9 2026): three named tiers — Sol (flagship), Terra
@@ -454,6 +484,43 @@ var registry = []ModelMeta{
 		},
 	},
 	{
+		// Opus 5.5 (claude-opus-5-5, Sep 22 2026): successor to Opus 5 in the
+		// Opus line at a LOWER price — $4/$20 per MTok, cache reads at
+		// $0.20 (5% of input, not the usual 10%; see cli/cost_tracker.go
+		// claudePricing + getCachePricing, both need the explicit case
+		// because the "opus-5" substring also matches this id). 1M
+		// context, 128K max output, same tokenizer as Opus 5. Thinking
+		// CANNOT be disabled (thinking:{type:"disabled"} and budget_tokens
+		// return 400 at every effort level — adaptive only, as on Fable);
+		// server-side effort default is "medium", one level below Opus 5.
+		// Forced tool_choice ("any"/"tool") returns 400 — this client only
+		// sends auto. Thinking blocks are bound to the model (a fallback
+		// model runs without them). fast_mode is served (research
+		// preview, $8/$40 — 2x standard) and mid_conversation_system too.
+		// Runs cyber AND bio classifiers plus reasoning_extraction: a
+		// refusal comes back as HTTP 200 with stop_reason "refusal" and
+		// stop_details.category — surfaced by client.EmptyResponseError.
+		// Requires Claude Code >= 2.1.280 on the OAuth surface
+		// (auth.ClaudeCodeVersion) — older fingerprints get
+		// claude_code_version_too_old. Listed BEFORE Opus 5 because
+		// "opus-5" is a prefix of "opus-5-5"; the exact-alias pass keeps
+		// "opus-5" on Opus 5.
+		ID:              "claude-opus-5-5",
+		Aliases:         []string{"claude-opus-5-5", "opus-5-5", "claude-opus-5.5", "opus-5.5", "claude-5.5-opus"},
+		DisplayName:     "Claude Opus 5.5 (1M context)",
+		Provider:        ProviderClaudeAI,
+		ContextWindow:   1000000,
+		MaxOutputTokens: 128000,
+		PreferredAPI:    APIAnthropicMessages,
+		APIVersion:      config.ClaudeAIAPIVersionDefault,
+		Capabilities: []string{
+			"vision",
+			"json_mode", "tools",
+			"adaptive_thinking", "output_effort", "task_budget", "fast_mode",
+			"mid_conversation_system",
+		},
+	},
+	{
 		// Opus 5 (claude-opus-5, Jul 2026): the Opus-tier successor to 4.8,
 		// positioned for complex agentic coding and enterprise work (Fable 5
 		// remains the tier above). 1M context, 128K max output, $5/$25 per
@@ -583,13 +650,29 @@ var registry = []ModelMeta{
 	// over the per-model cap.
 	//
 	// Gemini 3.x generation (re-verified per-model on ai.google.dev, Sep 2
-	// 2026 — nothing newer than 3.7 Flash has shipped): 3.7-flash (GA Aug
+	// 2026; 3.8-flash added Sep 24 2026): 3.7-flash (GA Aug
 	// 13 2026), 3.6-flash (Jul 21 2026), 3.5-flash, 3.5-flash-lite and
 	// 3.1-flash-lite stable; 3.1-pro-preview and 3-flash-preview in
 	// preview. "gemini-3.1-pro" without -preview is NOT a real model code
 	// (kept only as an alias). The whole generation shares the uniform
 	// 1,048,576 / 65,536 profile. Newest first so generic alias prefixes
 	// don't shadow the more specific ids.
+	{
+		// gemini-3.8-flash (GA Sep 2 2026, ai.google.dev/gemini-api/docs/
+		// changelog; model card deepmind.google/models/model-cards/
+		// gemini-3-8-flash): successor to 3.7 Flash for coding/agentic
+		// work, same 1,048,576 / 65,536 profile, tunable thinking. Same
+		// $0.75/$3.75 introductory rate as 3.7/3.6 (cached $0.075), which
+		// Google holds until Dec 31 2026.
+		ID:              "gemini-3.8-flash",
+		Aliases:         []string{"gemini-3.8-flash", "gemini-3.8-flash-latest"},
+		DisplayName:     "Gemini 3.8 Flash",
+		Provider:        ProviderGoogleAI,
+		ContextWindow:   1048576,
+		MaxOutputTokens: 65536,
+		PreferredAPI:    "gemini_api",
+		Capabilities:    []string{"vision", "tools", "json_mode", "code_execution"},
+	},
 	{
 		ID:              "gemini-3.7-flash",
 		Aliases:         []string{"gemini-3.7-flash", "gemini-3.7-flash-latest"},
@@ -717,6 +800,44 @@ var registry = []ModelMeta{
 		PreferredAPI:    APIChatCompletions,
 		Capabilities:    []string{"vision", "tools", "json_mode"},
 	},
+	// GA in Copilot Sep 22 2026 (github.blog/changelog): GPT-6 Sol and
+	// Luna (Pro+, Max, Business, Enterprise) and Claude Opus 5.5 (same
+	// plans, gradual rollout, model policy can disable it). Copilot
+	// serves the vendor slugs unchanged; for Anthropic it spells the
+	// version with a dot (claude-sonnet-4 above, claude-opus-4.5 before
+	// it), so the dotted id is canonical here and the dashed one an
+	// alias. Same sizing caveat as Astra: the platform-API ceiling is
+	// kept, CHATCLI_CONTEXT_WINDOW narrows it.
+	{
+		ID:              "gpt-6-sol",
+		Aliases:         []string{"copilot-gpt-6-sol"},
+		DisplayName:     "GPT-6 Sol (Copilot)",
+		Provider:        ProviderCopilot,
+		ContextWindow:   1050000,
+		MaxOutputTokens: 128000,
+		PreferredAPI:    APIChatCompletions,
+		Capabilities:    []string{"vision", "tools", "json_mode"},
+	},
+	{
+		ID:              "gpt-6-luna",
+		Aliases:         []string{"copilot-gpt-6-luna"},
+		DisplayName:     "GPT-6 Luna (Copilot)",
+		Provider:        ProviderCopilot,
+		ContextWindow:   1050000,
+		MaxOutputTokens: 128000,
+		PreferredAPI:    APIChatCompletions,
+		Capabilities:    []string{"vision", "tools", "json_mode"},
+	},
+	{
+		ID:              "claude-opus-5.5",
+		Aliases:         []string{"copilot-claude-opus-5.5", "copilot-claude-opus-5-5", "claude-opus-5-5"},
+		DisplayName:     "Claude Opus 5.5 (Copilot)",
+		Provider:        ProviderCopilot,
+		ContextWindow:   1000000,
+		MaxOutputTokens: 128000,
+		PreferredAPI:    APIChatCompletions,
+		Capabilities:    []string{"vision", "tools", "json_mode", "adaptive_thinking"},
+	},
 	{
 		ID:              "gpt-4o",
 		Aliases:         []string{"copilot-gpt-4o"},
@@ -778,6 +899,22 @@ var registry = []ModelMeta{
 	// 4.20 variants so it cannot shadow them. The announced "fast"
 	// variant of 4.6 has no published model id yet — do not add it until
 	// docs.x.ai lists one.
+	{
+		// grok-4.7 (Sep 21 2026, docs.x.ai/developers/grok-4-7): new
+		// flagship, 500K context, reasoning effort low|medium|high|xhigh,
+		// same $2/$6 tier as 4.6/4.5 with cached input at $0.50 (25%);
+		// above 200K of prompt the request bills 2x ($4/$12), a surcharge
+		// cost_tracker does not model. The "grok-4.7-fast" variant is
+		// Cursor/Grok-Build only — not on the public API, not listed.
+		ID:              "grok-4.7",
+		Aliases:         []string{"grok-4.7", "grok-4.7-latest"},
+		DisplayName:     "Grok-4.7",
+		Provider:        ProviderXAI,
+		ContextWindow:   500000,
+		MaxOutputTokens: 16384,
+		PreferredAPI:    APIChatCompletions,
+		Capabilities:    []string{"vision", "tools", "json_mode"},
+	},
 	{
 		ID:              "grok-4.6",
 		Aliases:         []string{"grok-4.6", "grok-4.6-latest"},
@@ -861,6 +998,22 @@ var registry = []ModelMeta{
 	// docs (docs.z.ai/guides/llm/glm-*). Ordering rule: newest IDs first
 	// so generic alias prefixes ("glm-5") don't shadow the more specific
 	// "glm-5.1" / "glm-5-turbo" tags.
+	{
+		// GLM-5.3-FlashX (Sep 18 2026, docs.z.ai/guides/overview/pricing):
+		// the high-speed serving tier of GLM-5.3-Flash — same weights, same
+		// 1M / 128K profile and multimodal input, ~2.5x the price
+		// ($0.37/$1.25, cached $0.075). MUST sit ahead of glm-5.3-flash:
+		// "glm-5.3-flash" is a prefix of this id and the shorter entry
+		// would otherwise swallow it in the contains pass.
+		ID:              "glm-5.3-flashx",
+		Aliases:         []string{"glm-5.3-flashx", "glm-5-3-flashx"},
+		DisplayName:     "GLM-5.3 FlashX",
+		Provider:        ProviderZAI,
+		ContextWindow:   1000000,
+		MaxOutputTokens: 128000,
+		PreferredAPI:    APIChatCompletions,
+		Capabilities:    []string{"tools", "json_mode", "vision"},
+	},
 	{
 		// GLM-5.3-Flash (Aug 26 2026): 1M-token context, 128K max output
 		// (docs.z.ai/guides/llm/glm-5.3-flash). Natively multimodal
@@ -1008,6 +1161,23 @@ var registry = []ModelMeta{
 
 	// MiniMax Models
 	{
+		// MiniMax-M3 (Jun 1 2026, platform.minimax.io release notes): the
+		// current M-series flagship — agentic reasoning, tool use, coding,
+		// multimodal chat input and long context (1,048,576 tokens; the
+		// output cap follows the M2.7 convention below, MiniMax publishes
+		// none). Pay-as-you-go $0.30/$1.20 per MTok up to 512K of context
+		// (2x above), cache reads $0.06. Was missing from the catalog
+		// since launch — an M3 session sized at the M2.x window.
+		ID:              "MiniMax-M3",
+		Aliases:         []string{"minimax-m3", "m3"},
+		DisplayName:     "MiniMax M3",
+		Provider:        ProviderMiniMax,
+		ContextWindow:   1048576,
+		MaxOutputTokens: 131072,
+		PreferredAPI:    APIChatCompletions,
+		Capabilities:    []string{"tools", "vision"},
+	},
+	{
 		ID:              "MiniMax-M2.7",
 		Aliases:         []string{"minimax-m2.7", "m2.7"},
 		DisplayName:     "MiniMax M2.7",
@@ -1141,6 +1311,29 @@ var registry = []ModelMeta{
 		PreferredAPI:    APIChatCompletions,
 		Capabilities:    []string{"vision", "tools", "json_mode"},
 	},
+	// openai/gpt-6-sol and openai/gpt-6-luna (listed Sep 22 2026,
+	// openrouter.ai/api/v1/models: 1,050,000 ctx, 128K out, $2/$10 and
+	// $0.10/$0.50 — the vendor list price passed through).
+	{
+		ID:              "openai/gpt-6-sol",
+		Aliases:         []string{"openrouter-gpt-6-sol"},
+		DisplayName:     "GPT-6 Sol (OpenRouter)",
+		Provider:        ProviderOpenRouter,
+		ContextWindow:   1050000,
+		MaxOutputTokens: 128000,
+		PreferredAPI:    APIChatCompletions,
+		Capabilities:    []string{"vision", "tools", "json_mode"},
+	},
+	{
+		ID:              "openai/gpt-6-luna",
+		Aliases:         []string{"openrouter-gpt-6-luna"},
+		DisplayName:     "GPT-6 Luna (OpenRouter)",
+		Provider:        ProviderOpenRouter,
+		ContextWindow:   1050000,
+		MaxOutputTokens: 128000,
+		PreferredAPI:    APIChatCompletions,
+		Capabilities:    []string{"vision", "tools", "json_mode"},
+	},
 	{
 		ID:              "openai/gpt-4o",
 		Aliases:         []string{"openrouter-gpt-4o"},
@@ -1165,6 +1358,19 @@ var registry = []ModelMeta{
 	// here so context-window sizing is right even before the dynamic
 	// ListModels catalog loads — an uncataloged model falls back to the
 	// 50K default and compacts constantly.
+	{
+		// OpenRouter spells the 5.5 slug with a dot (anthropic/claude-opus-5.5,
+		// listed Sep 22 2026: 1M ctx, 128K out, $4/$20, cache read $0.20).
+		// Listed before the Opus 5 slug, which is its prefix.
+		ID:              "anthropic/claude-opus-5.5",
+		Aliases:         []string{"openrouter-claude-opus-5.5", "openrouter-claude-opus-5-5", "anthropic/claude-opus-5-5"},
+		DisplayName:     "Claude Opus 5.5 (OpenRouter)",
+		Provider:        ProviderOpenRouter,
+		ContextWindow:   1000000,
+		MaxOutputTokens: 128000,
+		PreferredAPI:    APIChatCompletions,
+		Capabilities:    []string{"vision", "tools", "json_mode"},
+	},
 	{
 		ID:              "anthropic/claude-opus-5",
 		Aliases:         []string{"openrouter-claude-opus-5"},
@@ -1335,6 +1541,21 @@ var registry = []ModelMeta{
 		ID:              "anthropic.claude-fable-5",
 		Aliases:         []string{"bedrock-fable-5", "global.anthropic.claude-fable-5", "us.anthropic.claude-fable-5", "claude-fable-5", "fable-5"},
 		DisplayName:     "Claude Fable 5 (Bedrock, 1M ctx)",
+		Provider:        ProviderBedrock,
+		ContextWindow:   1000000,
+		MaxOutputTokens: 128000,
+		PreferredAPI:    APIAnthropicMessages,
+		Capabilities:    []string{"tools", "vision", "json_mode", "adaptive_thinking", "output_effort", "task_budget", "bedrock_mantle_only", "mid_conversation_system"},
+	},
+	// Opus 5.5 (GA on Bedrock Sep 22 2026, model card
+	// model-card-anthropic-claude-opus-5-5): dateless id with the us./eu./
+	// au./global. inference profiles, served through the Messages
+	// endpoint like Opus 5 (bedrock_mantle_only; the InvokeModel fallback
+	// still covers it). Listed before Opus 5, whose id is its prefix.
+	{
+		ID:              "anthropic.claude-opus-5-5",
+		Aliases:         []string{"bedrock-opus-5-5", "bedrock-opus-5.5", "global.anthropic.claude-opus-5-5", "us.anthropic.claude-opus-5-5", "eu.anthropic.claude-opus-5-5", "au.anthropic.claude-opus-5-5", "claude-opus-5-5", "opus-5-5", "claude-opus-5.5", "opus-5.5"},
+		DisplayName:     "Claude Opus 5.5 (Bedrock, 1M ctx)",
 		Provider:        ProviderBedrock,
 		ContextWindow:   1000000,
 		MaxOutputTokens: 128000,
@@ -1605,6 +1826,32 @@ var registry = []ModelMeta{
 		ID:              "global.openai.gpt-6-astra",
 		Aliases:         []string{"bedrock-gpt-6-astra", "openai.gpt-6-astra", "us.openai.gpt-6-astra"},
 		DisplayName:     "GPT-6 Astra (Bedrock, global)",
+		Provider:        ProviderBedrock,
+		ContextWindow:   1050000,
+		MaxOutputTokens: 128000,
+		PreferredAPI:    APIChatCompletions,
+		Capabilities:    []string{"tools", "vision", "json_mode", "bedrock_converse_only"},
+	},
+	// GPT-6 Sol and Luna on Bedrock (GA Sep 22 2026, aws.amazon.com/
+	// about-aws/whats-new/2026/09/openai-gpt-6-sol-luna-on-amazon-bedrock).
+	// Ids from the Codex source (codex-rs model-provider-info:
+	// AMAZON_BEDROCK_GPT_6_SOL_MODEL_ID = "openai.gpt-6-sol", ..._LUNA_...
+	// = "openai.gpt-6-luna") behind the same global. profile as Astra;
+	// Converse-only like the rest of the OpenAI block.
+	{
+		ID:              "global.openai.gpt-6-sol",
+		Aliases:         []string{"bedrock-gpt-6-sol", "openai.gpt-6-sol", "us.openai.gpt-6-sol"},
+		DisplayName:     "GPT-6 Sol (Bedrock, global)",
+		Provider:        ProviderBedrock,
+		ContextWindow:   1050000,
+		MaxOutputTokens: 128000,
+		PreferredAPI:    APIChatCompletions,
+		Capabilities:    []string{"tools", "vision", "json_mode", "bedrock_converse_only"},
+	},
+	{
+		ID:              "global.openai.gpt-6-luna",
+		Aliases:         []string{"bedrock-gpt-6-luna", "openai.gpt-6-luna", "us.openai.gpt-6-luna"},
+		DisplayName:     "GPT-6 Luna (Bedrock, global)",
 		Provider:        ProviderBedrock,
 		ContextWindow:   1050000,
 		MaxOutputTokens: 128000,

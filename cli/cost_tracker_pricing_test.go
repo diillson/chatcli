@@ -38,6 +38,12 @@ func TestGetModelPricing(t *testing.T) {
 		{"claude opus 5", "CLAUDEAI", "claude-opus-5", 5.0, 25.0},
 		{"claude opus 5 bedrock id", "BEDROCK", "anthropic.claude-opus-5", 5.0, 25.0},
 		{"claude opus 5 openrouter slug", "OPENROUTER", "anthropic/claude-opus-5", 5.0, 25.0},
+		// Opus 5.5 (Sep 22 2026) is $4/$20 — cheaper than Opus 5. The trap
+		// is the "opus-5" substring right above it, which would bill 5/25.
+		{"claude opus 5.5", "CLAUDEAI", "claude-opus-5-5", 4.0, 20.0},
+		{"claude opus 5.5 bedrock id", "BEDROCK", "global.anthropic.claude-opus-5-5", 4.0, 20.0},
+		{"claude opus 5.5 openrouter slug", "OPENROUTER", "anthropic/claude-opus-5.5", 4.0, 20.0},
+		{"claude opus 5.5 devin slug", "DEVIN", "claude-opus-5.5-high", 4.0, 20.0},
 		{"claude opus legacy", "CLAUDEAI", "claude-3-opus", 15.0, 75.0},
 		{"claude opus 4.1 legacy", "CLAUDEAI", "claude-opus-4-1", 15.0, 75.0},
 		{"claude sonnet", "CLAUDEAI", "claude-sonnet-4-6", 3.0, 15.0},
@@ -51,6 +57,14 @@ func TestGetModelPricing(t *testing.T) {
 		{"gpt-6-astra bedrock id", "BEDROCK", "global.openai.gpt-6-astra", 10.0, 50.0},
 		{"gpt-6-astra openrouter slug", "OPENROUTER", "openai/gpt-6-astra", 10.0, 50.0},
 		{"gpt-6-astra devin effort slug", "OPENAI", "gpt-6-astra-medium", 10.0, 50.0},
+		// gpt-6-sol / gpt-6-luna (Sep 22 2026): $2/$10 and $0.10/$0.50 in
+		// every spelling; neither may fall into the 5.6 tiers below.
+		{"gpt-6-sol", "OPENAI", "gpt-6-sol", 2.0, 10.0},
+		{"gpt-6-sol bedrock id", "BEDROCK", "global.openai.gpt-6-sol", 2.0, 10.0},
+		{"gpt-6-sol openrouter slug", "OPENROUTER", "openai/gpt-6-sol", 2.0, 10.0},
+		{"gpt-6-luna", "OPENAI", "gpt-6-luna", 0.10, 0.50},
+		{"gpt-6-luna bedrock id", "BEDROCK", "global.openai.gpt-6-luna", 0.10, 0.50},
+		{"gpt-6-luna openrouter slug", "OPENROUTER", "openai/gpt-6-luna", 0.10, 0.50},
 		// gpt-5.6 tiers (list prices after the Jul 30 2026 cuts: terra
 		// −20%, luna −80%): the specific terra/luna tags must win before
 		// the bare gpt-5.6 case, which covers the family alias that the
@@ -95,6 +109,7 @@ func TestGetModelPricing(t *testing.T) {
 		// generic "gemini-3" (Pro) case is a substring of every 3.x id,
 		// so the specific tags must win first; same for the flash-lite
 		// vs flash pairs.
+		{"gemini 3.8 flash", "GOOGLEAI", "gemini-3.8-flash", 0.75, 3.75},
 		{"gemini 3.7 flash", "GOOGLEAI", "gemini-3.7-flash", 0.75, 3.75},
 		{"gemini 3.6 flash", "GOOGLEAI", "gemini-3.6-flash", 0.75, 3.75},
 		{"gemini 3.5 flash-lite before flash", "GOOGLEAI", "gemini-3.5-flash-lite", 0.30, 2.50},
@@ -111,6 +126,7 @@ func TestGetModelPricing(t *testing.T) {
 		{"gemini 1.5 flash", "GOOGLEAI", "gemini-1.5-flash", 0.075, 0.30},
 
 		// xAI Grok — 2026 generation (docs.x.ai pricing, base <200K tier).
+		{"grok-4.7", "XAI", "grok-4.7", 2.0, 6.0},
 		{"grok-4.6", "XAI", "grok-4.6", 2.0, 6.0},
 		{"grok-4.5", "XAI", "grok-4.5", 2.0, 6.0},
 		{"grok-4.3", "XAI", "grok-4.3", 1.25, 2.50},
@@ -134,12 +150,14 @@ func TestGetModelPricing(t *testing.T) {
 		{"deepseek bare", "OPENROUTER", "deepseek-chat", 0.27, 1.10},
 
 		// Provider-keyed fallbacks
+		{"minimax m3 before the family rate", "MINIMAX", "MiniMax-M3", 0.30, 1.20},
 		{"minimax via model", "OTHER", "minimax-m2.7", 0.20, 1.10},
 		{"minimax via provider", "MINIMAX", "anything", 0.20, 1.10},
 		// Z.AI GLM-5 family — public list prices (docs.z.ai, Jun 2026):
 		// GLM-5.2 $1.40/$4.40, GLM-5 $1.00/$3.20 per MTok. The specific
 		// "glm-5.2" tag must win before the bare "glm-5" prefix; unknown
 		// GLM/ZAI ids keep the conservative flat fallback.
+		{"glm-5.3-flashx before glm-5.3-flash", "ZAI", "glm-5.3-flashx", 0.37, 1.25},
 		{"glm-5.3-flash before glm-5.3", "ZAI", "glm-5.3-flash", 0.15, 0.50},
 		{"glm-5.3 same tier as 5.2", "ZAI", "glm-5.3", 1.40, 4.40},
 		{"glm-5.2", "ZAI", "glm-5.2", 1.40, 4.40},

@@ -38,7 +38,11 @@ type devinRate struct {
 // row as the dotted slug (claude-opus-4.8). Longest key wins, so
 // gpt-5.4-mini never resolves as gpt-5.4.
 var devinStaticRates = map[string]devinRate{
-	// Anthropic family.
+	// Anthropic family. Opus 5.5 (Sep 22 2026) gets its own row so the
+	// longest-key match stops billing it as Opus 5: the vendor list price
+	// ($4/$20, fast $8/$40) until Cognition's listing carries it — the
+	// listing wins over this table whenever the account has the model.
+	"claude-opus-5.5":   {4, 20, 8, 40},
 	"claude-opus-5":     {5, 25, 10, 50},
 	"claude-sonnet-5":   {2, 10, 0, 0},
 	"claude-opus-4.8":   {5, 25, 10, 50},

@@ -84,7 +84,8 @@ func (a *AgentMode) nudgeAfterRefusal(err error, turnHistory *[]models.Message) 
 		return false
 	}
 	a.refusalRetries++
-	fallback := a.refusalFallbackHandle()
+	refusal := llmclient.AsEmptyResponse(err)
+	fallback := a.refusalFallbackHandle(refusal)
 	if fallback == "" && a.refusalRetries > agentRefusalMaxRetries {
 		if a.logger != nil {
 			a.logger.Warn("agent turn: refused again and no fallback model, giving up", zap.Int("retries", agentRefusalMaxRetries), zap.Error(err))
@@ -103,12 +104,31 @@ func (a *AgentMode) nudgeAfterRefusal(err error, turnHistory *[]models.Message) 
 	}
 	if a.logger != nil {
 		a.logger.Warn("agent turn: provider refused the reply, resending",
-			zap.Int("attempt", a.refusalRetries), zap.String("fallback", fallback), zap.Bool("sticky", a.refusalSticky), zap.Error(err))
+			zap.Int("attempt", a.refusalRetries), zap.String("fallback", fallback), zap.Bool("sticky", a.refusalSticky),
+			zap.String("refusal_category", refusal.Category()), zap.String("recommended_model", refusal.RecommendedModel()), zap.Error(err))
 	}
 	if !a.cli.unattended {
+		if reason := refusalReasonLine(refusal); reason != "" {
+			fmt.Println(colorize("  "+reason, ColorYellow))
+		}
 		fmt.Println(colorize("  "+notice, ColorYellow))
 	}
 	return true
+}
+
+// refusalReasonLine names what the classifier flagged, when the provider
+// said: the policy category and, if given, its explanation. Empty when the
+// refusal came without details, so the notice alone is printed then.
+func refusalReasonLine(refusal *llmclient.EmptyResponseError) string {
+	category := refusal.Category()
+	if category == "" {
+		return ""
+	}
+	explanation := refusal.Details.Explanation
+	if explanation == "" {
+		explanation = i18n.T("agent.refusal.no_explanation")
+	}
+	return i18n.T("agent.refusal.reason", category, explanation)
 }
 
 // armRefusalFallback routes the coming resend to the fallback model. Past
@@ -157,8 +177,11 @@ func (a *AgentMode) resetRefusalState() {
 
 // refusalFallbackHandle is the "PROVIDER:model" a refused turn is resent
 // on, or "" when there is none: the setting is off, or "auto" finds no
-// sibling of the refusing model in the provider's catalog.
-func (a *AgentMode) refusalFallbackHandle() string {
+// sibling of the refusing model in the provider's catalog. In "auto" the
+// model the provider itself recommended for this refusal wins over the
+// family table: Anthropic picks it by the policy category, so it is the
+// one that will actually answer.
+func (a *AgentMode) refusalFallbackHandle(refusal *llmclient.EmptyResponseError) string {
 	setting := strings.TrimSpace(utils.GetEnvOrDefault(refusalFallbackEnv, "auto"))
 	switch strings.ToLower(setting) {
 	case "", "off", "false", "0", "none":
@@ -168,9 +191,26 @@ func (a *AgentMode) refusalFallbackHandle() string {
 			return a.refusalFallback
 		}
 		provider, model := a.effectiveRoute()
+		if recommended := refusalRecommendedFor(provider, model, refusal); recommended != "" {
+			return recommended
+		}
 		return refusalSiblingFor(provider, model)
 	}
 	return setting
+}
+
+// refusalRecommendedFor is the provider's own recommendation for the
+// refused turn as a route handle, when the refusal carried one that the
+// provider's catalog knows and that is not the model that just refused.
+func refusalRecommendedFor(provider, model string, refusal *llmclient.EmptyResponseError) string {
+	recommended := strings.TrimSpace(refusal.RecommendedModel())
+	if recommended == "" || strings.EqualFold(recommended, model) {
+		return ""
+	}
+	if _, known := catalog.Resolve(provider, recommended); !known {
+		return ""
+	}
+	return strings.ToUpper(provider) + ":" + recommended
 }
 
 // refusalSiblingFor picks the sibling model of the same provider for the

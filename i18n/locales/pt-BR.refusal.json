@@ -4,5 +4,8 @@
   "llm.error.empty_with_stop_reason": "%s não devolveu texto (stop_reason %s; blocos: %s)",
   "agent.refusal.retrying": "⚠ O classificador de segurança do provider interrompeu aquela resposta. Avisando o modelo e reenviando o turno (%d/%d).",
   "agent.refusal.fallback": "⚠ O classificador de segurança do provider interrompeu aquela resposta. Avisando o modelo e reenviando este turno em %s (fallback de recusa %d/%d); o próximo turno volta ao seu modelo.",
-  "agent.refusal.fallback_sticky": "⚠ Recusado de novo. O resto desta execução fica em %s; @model reset ou uma nova execução volta ao seu modelo."
+  "agent.refusal.fallback_sticky": "⚠ Recusado de novo. O resto desta execução fica em %s; @model reset ou uma nova execução volta ao seu modelo.",
+  "llm.error.refusal_category": "%s se recusou a responder este turno (stop_reason %s, categoria do classificador de segurança \"%s\"%s). Repetir a mesma requisição dá o mesmo resultado; reformule o passo ou siga para o próximo",
+  "agent.refusal.reason": "⚠ Categoria do classificador: %s — %s",
+  "agent.refusal.no_explanation": "o provider não deu explicação"
 }

@@ -98,6 +98,40 @@ func TestSendPromptWithTools_RefusalWithNothingInItIsTheTypedError(t *testing.T)
 	// The client-level guard turns that into the typed error (see
 	// SendPromptWithTools); the parse itself stays neutral.
 	c := newEmptyReplyClient()
-	typed := c.emptyResponse(response.StopReason, map[string]int{"thinking": len(response.Thinking)}, "tool_use")
+	typed := c.emptyResponse(response.StopReason, client.ParseAnthropicStopDetails([]byte(body)), map[string]int{"thinking": len(response.Thinking)}, "tool_use")
 	assert.True(t, client.IsRefusal(typed))
+	assert.Empty(t, client.AsEmptyResponse(typed).Category(), "no stop_details in the body, no category")
+}
+
+// A refusal names what the classifier flagged: the stream carries
+// stop_details in message_delta, the buffered body at the top level, and
+// the tool path re-reads the body it already holds. The category and the
+// recommended model reach the typed error so the loop can print the
+// reason and route to the model Anthropic suggests.
+func TestRefusalCarriesStopDetails(t *testing.T) {
+	stream := "event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"usage\":{\"input_tokens\":10}}}\n\n" +
+		"event: message_delta\ndata: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"refusal\",\"stop_details\":{\"type\":\"refusal\",\"category\":\"cyber\",\"explanation\":\"offensive tooling\",\"recommended_model\":\"claude-opus-4-8\"}},\"usage\":{\"output_tokens\":0}}\n\n" +
+		"event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n"
+	resp := &http.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": []string{"text/event-stream"}}, Body: sseBody(stream)}
+	_, err := newEmptyReplyClient().processStreamResponse(resp, true)
+	empty := client.AsEmptyResponse(err)
+	require.NotNil(t, empty)
+	assert.Equal(t, "cyber", empty.Category())
+	assert.Equal(t, "claude-opus-4-8", empty.RecommendedModel())
+	assert.Contains(t, err.Error(), "cyber")
+	assert.Contains(t, err.Error(), "offensive tooling")
+
+	buffered := `{"id":"msg_3","type":"message","role":"assistant","model":"claude-fable-5-1","content":[],"stop_reason":"refusal","stop_details":{"type":"refusal","category":"bio","explanation":null,"recommended_model":null},"usage":{"input_tokens":5,"output_tokens":0}}`
+	_, err = newEmptyReplyClient().processResponse(&http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(buffered))})
+	empty = client.AsEmptyResponse(err)
+	require.NotNil(t, empty)
+	assert.Equal(t, "bio", empty.Category())
+	assert.Empty(t, empty.RecommendedModel(), "null recommendation is none")
+	assert.Contains(t, err.Error(), "bio")
+
+	details := client.ParseAnthropicStopDetails([]byte(buffered))
+	require.NotNil(t, details)
+	assert.Equal(t, "bio", details.Category)
+	assert.Nil(t, client.ParseAnthropicStopDetails([]byte(`{"stop_reason":"refusal","stop_details":null}`)), "null details are none")
+	assert.Nil(t, client.ParseAnthropicStopDetails([]byte(`not json`)))
 }

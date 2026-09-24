@@ -105,7 +105,7 @@ func (c *ClaudeClient) SendPromptWithTools(ctx context.Context, prompt string, h
 	// not an effort was chosen. See applyTaskBudget.
 	applyTaskBudget(reqBody, c.model, ctx)
 
-	// Opus 4.8 fast mode opt-in via ANTHROPIC_SPEED=fast.
+	// Fast mode opt-in via ANTHROPIC_SPEED=fast (Opus 5.5 / Opus 4.8).
 	applyFastModeIfRequested(reqBody, c.model)
 
 	// Rolling conversation breakpoint on the last user/tool_result message —
@@ -131,37 +131,39 @@ func (c *ClaudeClient) SendPromptWithTools(ctx context.Context, prompt string, h
 	)
 
 	respBody, err := utils.Retry(ctx, c.logger, c.maxAttempts, c.backoff, func(ctx context.Context) (string, error) {
-		resp, err := auth.DoWithRefresh(ctx, c.provider, func(token string) (*http.Response, error) {
-			req, err := c.buildToolRequest(ctx, jsonValue, token)
+		return c.sendWithVersionHeal(func() (string, error) {
+			resp, err := auth.DoWithRefresh(ctx, c.provider, func(token string) (*http.Response, error) {
+				req, err := c.buildToolRequest(ctx, jsonValue, token)
+				if err != nil {
+					return nil, err
+				}
+				return c.client.Do(req)
+			})
 			if err != nil {
-				return nil, err
+				return "", err
 			}
-			return c.client.Do(req)
+			defer resp.Body.Close()
+
+			// Decode compressed response (gzip, deflate, br) — OAuth endpoints
+			// send compressed responses when Accept-Encoding is set.
+			reader, decErr := decodeResponseBody(resp)
+			if decErr != nil {
+				return "", fmt.Errorf("%s: %w", i18n.T("llm.tool.error.decoding_response_body"), decErr)
+			}
+			if reader != resp.Body {
+				defer reader.Close()
+			}
+
+			bodyBytes, err := io.ReadAll(reader)
+			if err != nil {
+				return "", fmt.Errorf("%s: %w", i18n.T("llm.tool.error.reading_response"), err)
+			}
+
+			if resp.StatusCode != 200 {
+				return "", &utils.APIError{StatusCode: resp.StatusCode, Message: utils.SanitizeSensitiveText(string(bodyBytes))}
+			}
+			return string(bodyBytes), nil
 		})
-		if err != nil {
-			return "", err
-		}
-		defer resp.Body.Close()
-
-		// Decode compressed response (gzip, deflate, br) — OAuth endpoints
-		// send compressed responses when Accept-Encoding is set.
-		reader, decErr := decodeResponseBody(resp)
-		if decErr != nil {
-			return "", fmt.Errorf("%s: %w", i18n.T("llm.tool.error.decoding_response_body"), decErr)
-		}
-		if reader != resp.Body {
-			defer reader.Close()
-		}
-
-		bodyBytes, err := io.ReadAll(reader)
-		if err != nil {
-			return "", fmt.Errorf("%s: %w", i18n.T("llm.tool.error.reading_response"), err)
-		}
-
-		if resp.StatusCode != 200 {
-			return "", &utils.APIError{StatusCode: resp.StatusCode, Message: utils.SanitizeSensitiveText(string(bodyBytes))}
-		}
-		return string(bodyBytes), nil
 	})
 	if err != nil {
 		client.LogRequestFinish(c.logger, "CLAUDEAI", c.model, "error", time.Since(start), client.CallerField(ctx),
@@ -195,7 +197,8 @@ func (c *ClaudeClient) SendPromptWithTools(ctx context.Context, prompt string, h
 		// A classifier stopped the reply: no text, no tool call. Reported as
 		// the typed empty reply so the loop can nudge and resend instead of
 		// taking an empty turn as the model's answer.
-		return nil, c.emptyResponse(response.StopReason, map[string]int{"thinking": len(response.Thinking)}, "tool_use")
+		return nil, c.emptyResponse(response.StopReason, client.ParseAnthropicStopDetails([]byte(respBody)),
+			map[string]int{"thinking": len(response.Thinking)}, "tool_use")
 	}
 	return response, err
 }

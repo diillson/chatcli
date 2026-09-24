@@ -12,6 +12,7 @@ import (
 	"compress/gzip"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -98,7 +99,6 @@ func (c *ClaudeClient) storeThinking(blocks []models.ThinkingBlock) {
 }
 
 const (
-	oauthUserAgent         = auth.ClaudeCodeUserAgent
 	oauthAnthropicBeta     = "oauth-2025-04-20,interleaved-thinking-2025-05-14,claude-code-20250219,fine-grained-tool-streaming-2025-05-14"
 	oauthSonnet1MBeta      = "context-1m-2025-08-07"
 	oauthBaseSystemPrompt  = "You are Claude Code, Anthropic's official CLI for Claude."
@@ -280,7 +280,7 @@ func applyThinkingForEffort(reqBody map[string]interface{}, model string, ctx co
 }
 
 // applyFastModeIfRequested attaches `speed: "fast"` for models that
-// advertise the fast_mode capability (currently Opus 4.8 only — research
+// advertise the fast_mode capability (Opus 5.5 and Opus 4.8 — research
 // preview). Opt-in via ANTHROPIC_SPEED=fast; otherwise the request goes
 // through standard mode at standard pricing. Silently ignored for models
 // that don't advertise the capability.
@@ -343,7 +343,7 @@ func (c *ClaudeClient) SendPrompt(ctx context.Context, prompt string, history []
 			zap.String("model", c.model))
 	}
 
-	// Opus 4.8 fast mode opt-in (research preview, premium pricing).
+	// Fast mode opt-in (Opus 5.5 / Opus 4.8; research preview, premium pricing).
 	if applyFastModeIfRequested(reqBody, c.model) {
 		c.logger.Debug("claudeai: fast mode enabled (ANTHROPIC_SPEED=fast)",
 			zap.String("model", c.model))
@@ -379,28 +379,30 @@ func (c *ClaudeClient) SendPrompt(ctx context.Context, prompt string, history []
 	}
 
 	responseText, err := utils.Retry(ctx, c.logger, c.maxAttempts, c.backoff, func(ctx context.Context) (string, error) {
-		reqURL := c.apiURL
-		if isOAuth {
-			reqURL = withBetaQuery(reqURL)
-		}
-		reqCtx := context.WithValue(ctx, oauthModelKey{}, c.model)
-		resp, err := auth.DoWithRefresh(reqCtx, c.provider, func(token string) (*http.Response, error) {
-			req, err := http.NewRequestWithContext(reqCtx, http.MethodPost, reqURL, bytes.NewReader(jsonValue))
-			if err != nil {
-				return nil, fmt.Errorf("%s: %w", i18n.T("llm.error.create_request"), err)
+		return c.sendWithVersionHeal(func() (string, error) {
+			reqURL := c.apiURL
+			if isOAuth {
+				reqURL = withBetaQuery(reqURL)
 			}
-			req.Header.Add("Content-Type", oauthContentType)
-			c.applyAuthHeaders(req, token)
-			return c.client.Do(req)
+			reqCtx := context.WithValue(ctx, oauthModelKey{}, c.model)
+			resp, err := auth.DoWithRefresh(reqCtx, c.provider, func(token string) (*http.Response, error) {
+				req, err := http.NewRequestWithContext(reqCtx, http.MethodPost, reqURL, bytes.NewReader(jsonValue))
+				if err != nil {
+					return nil, fmt.Errorf("%s: %w", i18n.T("llm.error.create_request"), err)
+				}
+				req.Header.Add("Content-Type", oauthContentType)
+				c.applyAuthHeaders(req, token)
+				return c.client.Do(req)
+			})
+			if err != nil {
+				return "", err
+			}
+			defer func() { _ = resp.Body.Close() }()
+			if isOAuth {
+				return c.processStreamResponse(resp, true)
+			}
+			return c.processResponse(resp)
 		})
-		if err != nil {
-			return "", err
-		}
-		defer func() { _ = resp.Body.Close() }()
-		if isOAuth {
-			return c.processStreamResponse(resp, true)
-		}
-		return c.processResponse(resp)
 	})
 
 	if err != nil {
@@ -439,8 +441,9 @@ func (c *ClaudeClient) processResponse(resp *http.Response) (string, error) {
 	}
 
 	var result struct {
-		StopReason string `json:"stop_reason"`
-		Content    []struct {
+		StopReason  string              `json:"stop_reason"`
+		StopDetails *client.StopDetails `json:"stop_details"`
+		Content     []struct {
 			Type string `json:"type"`
 			Text string `json:"text"`
 		} `json:"content"`
@@ -471,7 +474,7 @@ func (c *ClaudeClient) processResponse(resp *http.Response) (string, error) {
 	c.recordUsageFromBody(bodyBytes)
 
 	if responseText == "" {
-		return "", c.emptyResponse(result.StopReason, blocks, "buffered")
+		return "", c.emptyResponse(result.StopReason, result.StopDetails, blocks, "buffered")
 	}
 
 	return responseText, nil
@@ -581,19 +584,62 @@ func (c *ClaudeClient) processStreamResponse(resp *http.Response, captureUsage b
 		// No text is not one thing: a classifier refusal, a reply that
 		// spent every token on reasoning, a tool-use-only turn. The stop
 		// reason and the blocks name it, for the log and for the caller.
-		return "", c.emptyResponse(usageAcc.stopReason, blocks, "stream")
+		return "", c.emptyResponse(usageAcc.stopReason, usageAcc.stopDetails, blocks, "stream")
 	}
 
 	return responseText, nil
 }
 
 // emptyResponse builds the typed error for a reply with no text and logs
-// what the provider did send. The caller decides whether it is recoverable.
-func (c *ClaudeClient) emptyResponse(stopReason string, blocks map[string]int, path string) error {
-	err := &client.EmptyResponseError{Provider: "ClaudeAI", Model: c.model, StopReason: stopReason, Blocks: blocks}
-	c.logger.Error(i18n.T("llm.error.no_text_content", "ClaudeAI"),
-		zap.String("path", path), zap.String("stop_reason", stopReason), zap.Any("blocks", blocks))
+// what the provider did send — the stop reason, the blocks, and for a
+// refusal the classifier's category, explanation and recommended model,
+// so the log answers "refused for what?" rather than just "refused". The
+// caller decides whether it is recoverable.
+func (c *ClaudeClient) emptyResponse(stopReason string, details *client.StopDetails, blocks map[string]int, path string) error {
+	err := &client.EmptyResponseError{Provider: "ClaudeAI", Model: c.model, StopReason: stopReason, Blocks: blocks, Details: details}
+	fields := []zap.Field{zap.String("path", path), zap.String("stop_reason", stopReason), zap.Any("blocks", blocks)}
+	if details != nil {
+		fields = append(fields,
+			zap.String("refusal_category", details.Category),
+			zap.String("refusal_explanation", details.Explanation),
+			zap.String("recommended_model", details.RecommendedModel))
+	}
+	c.logger.Error(i18n.T("llm.error.no_text_content", "ClaudeAI"), fields...)
 	return err
+}
+
+// sendWithVersionHeal runs one request and, when the API rejects it because
+// the Claude Code release the OAuth surface presents is too old for the
+// model (claude_code_version_too_old, a 400 that names the release it
+// wants), adopts that release for the process and sends the request once
+// more. Any other error, and a second rejection, come back as they are.
+func (c *ClaudeClient) sendWithVersionHeal(send func() (string, error)) (string, error) {
+	out, err := send()
+	if err == nil || !c.healClaudeCodeVersion(err) {
+		return out, err
+	}
+	return send()
+}
+
+// healClaudeCodeVersion reads the release a claude_code_version_too_old
+// error asks for and adopts it. It reports whether the fingerprint changed,
+// which is the only case a resend can succeed.
+func (c *ClaudeClient) healClaudeCodeVersion(err error) bool {
+	var apiErr *utils.APIError
+	if !errors.As(err, &apiErr) || apiErr.StatusCode != http.StatusBadRequest {
+		return false
+	}
+	required := auth.RequiredClaudeCodeVersion(apiErr.Message)
+	if required == "" {
+		return false
+	}
+	previous := auth.EffectiveClaudeCodeVersion()
+	if !auth.AdoptClaudeCodeVersion(required) {
+		return false
+	}
+	c.logger.Warn("claudeai: the API requires a newer Claude Code release for this model; presenting it and resending",
+		zap.String("model", c.model), zap.String("was", previous), zap.String("now", required))
+	return true
 }
 
 func (c *ClaudeClient) buildMessagesAndSystem(prompt string, history []models.Message) ([]map[string]interface{}, interface{}) {
@@ -862,7 +908,7 @@ func applyOAuthHeaders(req *http.Request, token string) {
 	req.Header.Set("Accept", oauthAcceptHeader)
 	req.Header.Set("Accept-Encoding", oauthAcceptEncoding)
 	req.Header.Set("Connection", oauthConnectionHeader)
-	req.Header.Set("User-Agent", oauthUserAgent)
+	req.Header.Set("User-Agent", auth.ClaudeCodeUA())
 	betas := oauthAnthropicBeta
 	if os.Getenv("ANTHROPIC_1MTOKENS_SONNET") == "true" {
 		if m, ok := req.Context().Value(oauthModelKey{}).(string); ok && isClaudeSonnet(m) {

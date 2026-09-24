@@ -462,11 +462,14 @@ func (p *oauthTokenProvider) Close() {
 }
 
 // ClaudeCodeVersion is the Claude Code release the OAuth surface presents
-// itself as. The Messages API gates the newest models on this version
-// ("Claude Code X does not support this model; version Y or newer is
-// required"), so it must track a current Claude Code release; every OAuth
-// request (login, refresh, messages, models) sends the same fingerprint.
-const ClaudeCodeVersion = "2.1.259"
+// itself as, at minimum. The Messages API gates the newest models on this
+// version ("Claude Code X does not support this model; version Y or newer
+// is required"), so it must track a current Claude Code release; every
+// OAuth request (login, refresh, messages, models) sends the same
+// fingerprint. 2.1.280 is the floor for claude-opus-5-5 (Sep 22 2026).
+// The process can present a newer release than this floor — see
+// EffectiveClaudeCodeVersion (env override, or learned from the error).
+const ClaudeCodeVersion = "2.1.281"
 
 // ClaudeCodeUserAgent is the User-Agent of the OAuth surface.
 const ClaudeCodeUserAgent = "claude-cli/" + ClaudeCodeVersion + " (external, cli)"
