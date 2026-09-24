@@ -1393,6 +1393,12 @@ func (a *AgentMode) Run(ctx context.Context, query string, additionalContext str
 	if isCoder {
 		currentModeName = ModeCoder
 	}
+	// History that reached this run from anywhere else than a session load
+	// (a resumed park, a hub conversation, a remote client) gets the same
+	// plan-tag normalization the session restore applies.
+	if n := normalizeLegacyPlanTags(a.cli.history); n > 0 && a.logger != nil {
+		a.logger.Info("agent run: legacy plan tags normalized", zap.Int("messages", n))
+	}
 	a.installAgentSystemMessage(sysMsg, currentModeName)
 	a.toolDefsChars = a.estimateToolDefsChars()
 	a.cli.toolDefsChars = a.toolDefsChars
