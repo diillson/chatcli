@@ -35,6 +35,8 @@ func init() {
 		// model table; 5.1 MUST precede 5 (dotted prefix rule above).
 		{"claude-fable-5.1", 1000000, 128000},
 		{"claude-fable-5", 1000000, 128000},
+		// Opus 5.5 (Sep 22 2026) precedes Opus 5: dotted prefix rule.
+		{"claude-opus-5.5", 1000000, 128000},
 		{"claude-opus-5", 1000000, 128000},
 		{"claude-sonnet-5", 1000000, 128000},
 		{"claude-opus-4.8", 1000000, 128000},
@@ -51,6 +53,8 @@ func init() {
 		// covers all of them through Resolve()'s prefix pass, the same
 		// way the gpt-5.6-* entries cover their own -medium/-high forms.
 		{"gpt-6-astra", 1050000, 128000},
+		{"gpt-6-sol", 1050000, 128000},
+		{"gpt-6-luna", 1050000, 128000},
 		{"gpt-5.6-sol", 1050000, 128000},
 		{"gpt-5.6-terra", 1050000, 128000},
 		{"gpt-5.6-luna", 1050000, 128000},

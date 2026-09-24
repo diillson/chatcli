@@ -36,6 +36,23 @@ func TestEmptyResponseErrorNamesTheCause(t *testing.T) {
 	bare := &EmptyResponseError{}
 	assert.Equal(t, "none", bare.blockSummary())
 	assert.NotEmpty(t, bare.Error(), "no provider, no stop reason: still a message")
+
+	// With stop_details the message names the category (and the
+	// explanation when there is one); without them it stays as before.
+	categorized := &EmptyResponseError{Provider: "ClaudeAI", StopReason: StopReasonRefusal,
+		Details: &StopDetails{Category: "reasoning_extraction", Explanation: "asked for the chain of thought", RecommendedModel: "claude-opus-4-8"}}
+	assert.Equal(t, "reasoning_extraction", categorized.Category())
+	assert.Equal(t, "claude-opus-4-8", categorized.RecommendedModel())
+	assert.Contains(t, categorized.Error(), "reasoning_extraction")
+	assert.Contains(t, categorized.Error(), "asked for the chain of thought")
+	terse := &EmptyResponseError{Provider: "ClaudeAI", StopReason: StopReasonRefusal, Details: &StopDetails{Category: "cyber"}}
+	assert.Contains(t, terse.Error(), "cyber")
+	assert.NotContains(t, terse.Error(), ": )", "no explanation, no dangling separator")
+	assert.Empty(t, refused.Category())
+	assert.Empty(t, refused.RecommendedModel())
+	var none *EmptyResponseError
+	assert.Empty(t, none.Category(), "nil-safe")
+	assert.Empty(t, none.RecommendedModel(), "nil-safe")
 }
 
 func TestAsEmptyResponseUnwraps(t *testing.T) {

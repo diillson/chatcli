@@ -92,9 +92,10 @@ func (c *ClaudeClient) recordUsageFromBody(body []byte) {
 // (and an initial output count), message_delta carries the final output
 // count and stop reason.
 type streamUsageAccumulator struct {
-	info       models.UsageInfo
-	stopReason string
-	seen       bool
+	info        models.UsageInfo
+	stopReason  string
+	stopDetails *client.StopDetails // what message_delta said about a refusal, if anything
+	seen        bool
 }
 
 // anthropicStreamEvent mirrors the usage-bearing subset of Anthropic SSE
@@ -107,7 +108,8 @@ type anthropicStreamEvent struct {
 	} `json:"message"`
 	Usage *anthropicStreamUsage `json:"usage"`
 	Delta *struct {
-		StopReason string `json:"stop_reason"`
+		StopReason  string              `json:"stop_reason"`
+		StopDetails *client.StopDetails `json:"stop_details"`
 	} `json:"delta"`
 }
 
@@ -149,6 +151,9 @@ func (a *streamUsageAccumulator) observe(data []byte) {
 		}
 		if evt.Delta != nil && evt.Delta.StopReason != "" {
 			a.stopReason = evt.Delta.StopReason
+		}
+		if evt.Delta != nil && evt.Delta.StopDetails != nil {
+			a.stopDetails = evt.Delta.StopDetails
 		}
 	}
 }

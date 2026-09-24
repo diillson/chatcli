@@ -917,3 +917,140 @@ func TestBedrockFamily5ProfileAliases(t *testing.T) {
 		assert.Contains(t, meta.Capabilities, "bedrock_mantle_only", "profile id %s keeps Mantle routing", id)
 	}
 }
+
+// TestClaudeOpus55Entries pins the Sep 22 2026 Opus 5.5 launch across the
+// providers that serve it: 1M/128K, adaptive thinking that cannot be
+// disabled, fast mode, and the dotted/dashed spellings. The ordering trap
+// is "opus-5" being a prefix of "opus-5-5": the 5.5 entry sits first and
+// the exact-alias pass keeps "opus-5" on Opus 5.
+func TestClaudeOpus55Entries(t *testing.T) {
+	for _, id := range []string{"claude-opus-5-5", "opus-5-5", "claude-opus-5.5", "opus-5.5"} {
+		meta, ok := Resolve(ProviderClaudeAI, id)
+		assert.True(t, ok, "expected %s to resolve on ProviderClaudeAI", id)
+		assert.Equal(t, "claude-opus-5-5", meta.ID, "alias %s must resolve to claude-opus-5-5", id)
+		assert.Equal(t, 1000000, meta.ContextWindow)
+		assert.Equal(t, 128000, meta.MaxOutputTokens)
+		assert.Equal(t, APIAnthropicMessages, meta.PreferredAPI)
+	}
+	for _, capability := range []string{"tools", "json_mode", "vision", "adaptive_thinking", "output_effort", "task_budget", "fast_mode", "mid_conversation_system"} {
+		assert.True(t, HasCapability(ProviderClaudeAI, "claude-opus-5-5", capability), "claude-opus-5-5 should advertise %q", capability)
+	}
+	assert.False(t, HasCapability(ProviderClaudeAI, "claude-opus-5-5", "extended_thinking"), "budgeted thinking returns 400 on Opus 5.5")
+
+	// Opus 5 keeps its own entry and its shorthand.
+	for _, id := range []string{"claude-opus-5", "opus-5"} {
+		meta, ok := Resolve(ProviderClaudeAI, id)
+		assert.True(t, ok)
+		assert.Equal(t, "claude-opus-5", meta.ID, "%s must stay on Opus 5", id)
+	}
+
+	for _, tc := range []struct{ provider, id, want string }{
+		{ProviderBedrock, "anthropic.claude-opus-5-5", "anthropic.claude-opus-5-5"},
+		{ProviderBedrock, "global.anthropic.claude-opus-5-5", "anthropic.claude-opus-5-5"},
+		{ProviderBedrock, "eu.anthropic.claude-opus-5-5", "anthropic.claude-opus-5-5"},
+		{ProviderBedrock, "bedrock-opus-5.5", "anthropic.claude-opus-5-5"},
+		{ProviderBedrock, "anthropic.claude-opus-5", "anthropic.claude-opus-5"},
+		{ProviderOpenRouter, "anthropic/claude-opus-5.5", "anthropic/claude-opus-5.5"},
+		{ProviderOpenRouter, "anthropic/claude-opus-5-5", "anthropic/claude-opus-5.5"},
+		{ProviderOpenRouter, "anthropic/claude-opus-5", "anthropic/claude-opus-5"},
+		{ProviderCopilot, "claude-opus-5.5", "claude-opus-5.5"},
+		{ProviderCopilot, "claude-opus-5-5", "claude-opus-5.5"},
+		{ProviderDevin, "claude-opus-5.5", "claude-opus-5.5"},
+		{ProviderDevin, "claude-opus-5.5-high", "claude-opus-5.5"},
+		{ProviderDevin, "claude-opus-5-medium", "claude-opus-5"},
+	} {
+		meta, ok := Resolve(tc.provider, tc.id)
+		assert.True(t, ok, "expected %s/%s to resolve", tc.provider, tc.id)
+		assert.Equal(t, tc.want, meta.ID, "%s/%s", tc.provider, tc.id)
+		assert.Equal(t, 1000000, meta.ContextWindow, "%s/%s context", tc.provider, tc.id)
+		assert.Equal(t, 128000, GetMaxTokens(tc.provider, tc.id, 0), "%s/%s max tokens", tc.provider, tc.id)
+	}
+	assert.True(t, HasCapability(ProviderBedrock, "anthropic.claude-opus-5-5", "bedrock_mantle_only"), "Opus 5.5 rides the Messages endpoint on Bedrock like Opus 5")
+}
+
+// TestGPT6SolLunaEntries pins the Sep 22 2026 GPT-6 Sol/Luna launch: the
+// Astra profile (1.05M/128K, Responses API first-party) on every surface
+// that serves them, with the bare "gpt-6" shorthand staying on Astra.
+func TestGPT6SolLunaEntries(t *testing.T) {
+	for _, tc := range []struct {
+		provider, id string
+		api          PreferredAPI
+	}{
+		{ProviderOpenAI, "gpt-6-sol", APIResponses},
+		{ProviderOpenAI, "gpt-6-luna", APIResponses},
+		{ProviderCopilot, "gpt-6-sol", APIChatCompletions},
+		{ProviderCopilot, "gpt-6-luna", APIChatCompletions},
+		{ProviderOpenRouter, "openai/gpt-6-sol", APIChatCompletions},
+		{ProviderOpenRouter, "openai/gpt-6-luna", APIChatCompletions},
+		{ProviderBedrock, "global.openai.gpt-6-sol", APIChatCompletions},
+		{ProviderBedrock, "global.openai.gpt-6-luna", APIChatCompletions},
+		{ProviderDevin, "gpt-6-sol", APIChatCompletions},
+		{ProviderDevin, "gpt-6-luna", APIChatCompletions},
+	} {
+		meta, ok := Resolve(tc.provider, tc.id)
+		assert.True(t, ok, "expected %s/%s to resolve", tc.provider, tc.id)
+		assert.Equal(t, tc.id, meta.ID, "%s/%s must resolve to its own entry", tc.provider, tc.id)
+		assert.Equal(t, 1050000, meta.ContextWindow, "%s/%s context", tc.provider, tc.id)
+		assert.Equal(t, 128000, meta.MaxOutputTokens, "%s/%s max output", tc.provider, tc.id)
+		assert.Equal(t, tc.api, meta.PreferredAPI, "%s/%s api", tc.provider, tc.id)
+	}
+	meta, ok := Resolve(ProviderOpenAI, "gpt-6")
+	assert.True(t, ok)
+	assert.Equal(t, "gpt-6-astra", meta.ID, "the family shorthand stays on the flagship")
+	// The 5.6 tiers with the same names are untouched.
+	for _, id := range []string{"gpt-5.6-sol", "gpt-5.6-luna"} {
+		meta, ok := Resolve(ProviderOpenAI, id)
+		assert.True(t, ok)
+		assert.Equal(t, id, meta.ID)
+	}
+	for _, id := range []string{"openai.gpt-6-sol", "us.openai.gpt-6-luna", "bedrock-gpt-6-luna"} {
+		meta, ok := Resolve(ProviderBedrock, id)
+		assert.True(t, ok, "Bedrock alias %s", id)
+		assert.Contains(t, meta.Capabilities, "bedrock_converse_only", "Bedrock GPT-6 rows are Converse-only")
+	}
+	for _, slug := range []string{"gpt-6-sol-low", "gpt-6-luna-max"} {
+		meta, ok := Resolve(ProviderDevin, slug)
+		assert.True(t, ok, "Devin effort slug %s", slug)
+		assert.True(t, meta.ID == "gpt-6-sol" || meta.ID == "gpt-6-luna", "Devin slug %s → %s", slug, meta.ID)
+	}
+}
+
+// TestSep2026Refresh pins the other Sep 2026 launches: Gemini 3.8 Flash,
+// Grok 4.7, GLM-5.3-FlashX (ahead of Flash, its prefix) and MiniMax M3
+// (missing since June).
+func TestSep2026Refresh(t *testing.T) {
+	g, ok := Resolve(ProviderGoogleAI, "gemini-3.8-flash")
+	assert.True(t, ok)
+	assert.Equal(t, "gemini-3.8-flash", g.ID)
+	assert.Equal(t, 1048576, g.ContextWindow)
+	assert.Equal(t, 65536, g.MaxOutputTokens)
+	g37, _ := Resolve(ProviderGoogleAI, "gemini-3.7-flash")
+	assert.Equal(t, "gemini-3.7-flash", g37.ID, "3.7 keeps its own entry")
+
+	x, ok := Resolve(ProviderXAI, "grok-4.7")
+	assert.True(t, ok)
+	assert.Equal(t, "grok-4.7", x.ID)
+	assert.Equal(t, 500000, x.ContextWindow)
+	x46, _ := Resolve(ProviderXAI, "grok-4.6")
+	assert.Equal(t, "grok-4.6", x46.ID)
+
+	for _, id := range []string{"glm-5.3-flashx", "glm-5-3-flashx"} {
+		z, ok := Resolve(ProviderZAI, id)
+		assert.True(t, ok, id)
+		assert.Equal(t, "glm-5.3-flashx", z.ID, "%s must not be swallowed by glm-5.3-flash", id)
+		assert.Equal(t, 1000000, z.ContextWindow)
+		assert.Equal(t, 128000, z.MaxOutputTokens)
+		assert.Contains(t, z.Capabilities, "vision")
+	}
+	zf, _ := Resolve(ProviderZAI, "glm-5.3-flash")
+	assert.Equal(t, "glm-5.3-flash", zf.ID, "Flash keeps its own entry")
+
+	for _, id := range []string{"MiniMax-M3", "minimax-m3", "m3"} {
+		m, ok := Resolve(ProviderMiniMax, id)
+		assert.True(t, ok, id)
+		assert.Equal(t, "MiniMax-M3", m.ID)
+		assert.Equal(t, 1048576, m.ContextWindow)
+	}
+	m27, _ := Resolve(ProviderMiniMax, "MiniMax-M2.7")
+	assert.Equal(t, "MiniMax-M2.7", m27.ID)
+}

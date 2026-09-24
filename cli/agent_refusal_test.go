@@ -169,3 +169,52 @@ func TestRefusalNoticePrintsOnATerminal(t *testing.T) {
 	assert.Contains(t, out, "claude-opus-5")
 	assert.Contains(t, out, "1/2")
 }
+
+// The provider's own recommendation wins over the family table when the
+// catalog knows it on that provider; otherwise the table decides.
+func TestRefusalRecommendedModelWins(t *testing.T) {
+	t.Setenv(refusalFallbackEnv, "auto")
+	cliObj, _ := newRoutingTestCLI()
+	cliObj.Model = "claude-opus-5-5"
+	a := &AgentMode{cli: cliObj, logger: zap.NewNop()}
+
+	recommended := &llmclient.EmptyResponseError{Provider: "ClaudeAI", Model: "claude-opus-5-5", StopReason: llmclient.StopReasonRefusal,
+		Details: &llmclient.StopDetails{Category: "cyber", RecommendedModel: "claude-opus-4-8"}}
+	assert.Equal(t, "CLAUDEAI:claude-opus-4-8", a.refusalFallbackHandle(recommended))
+	assert.Equal(t, "CLAUDEAI:claude-opus-4-8", refusalRecommendedFor("CLAUDEAI", "claude-opus-5-5", recommended))
+
+	unknown := &llmclient.EmptyResponseError{StopReason: llmclient.StopReasonRefusal, Details: &llmclient.StopDetails{RecommendedModel: "claude-nope-9"}}
+	assert.Equal(t, "CLAUDEAI:claude-sonnet-5", a.refusalFallbackHandle(unknown), "an unknown recommendation falls back to the family table")
+	same := &llmclient.EmptyResponseError{StopReason: llmclient.StopReasonRefusal, Details: &llmclient.StopDetails{RecommendedModel: "claude-opus-5-5"}}
+	assert.Equal(t, "CLAUDEAI:claude-sonnet-5", a.refusalFallbackHandle(same), "recommending the refusing model itself is no recommendation")
+	assert.Equal(t, "CLAUDEAI:claude-sonnet-5", a.refusalFallbackHandle(nil), "no details, family table")
+	assert.Empty(t, refusalRecommendedFor("GOOGLEAI", "gemini-3.8-flash", recommended), "a provider without the model gets none")
+
+	t.Setenv(refusalFallbackEnv, "off")
+	assert.Empty(t, a.refusalFallbackHandle(recommended), "off is off, recommendation or not")
+}
+
+// The reason line names the category the classifier applied, with the
+// explanation when the provider gave one.
+func TestRefusalReasonLine(t *testing.T) {
+	assert.Empty(t, refusalReasonLine(nil))
+	assert.Empty(t, refusalReasonLine(&llmclient.EmptyResponseError{StopReason: llmclient.StopReasonRefusal}))
+	line := refusalReasonLine(&llmclient.EmptyResponseError{StopReason: llmclient.StopReasonRefusal,
+		Details: &llmclient.StopDetails{Category: "reasoning_extraction", Explanation: "the prompt asks for the chain of thought"}})
+	assert.Contains(t, line, "reasoning_extraction")
+	assert.Contains(t, line, "chain of thought")
+	terse := refusalReasonLine(&llmclient.EmptyResponseError{StopReason: llmclient.StopReasonRefusal, Details: &llmclient.StopDetails{Category: "bio"}})
+	assert.Contains(t, terse, "bio")
+
+	t.Setenv(refusalFallbackEnv, "auto")
+	cliObj, _ := newRoutingTestCLI()
+	cliObj.Model = "claude-fable-5-1"
+	a := &AgentMode{cli: cliObj, logger: zap.NewNop()}
+	turn := []models.Message{}
+	err := fmt.Errorf("turn: %w", &llmclient.EmptyResponseError{Provider: "ClaudeAI", Model: "claude-fable-5-1", StopReason: llmclient.StopReasonRefusal,
+		Details: &llmclient.StopDetails{Category: "cyber", Explanation: "exploit development"}})
+	out := captureStdout(t, func() { require.True(t, a.resendTurnAfter(err, &turn)) })
+	assert.Contains(t, out, "cyber")
+	assert.Contains(t, out, "exploit development")
+	assert.Contains(t, out, "claude-opus-5")
+}

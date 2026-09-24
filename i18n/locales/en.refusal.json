@@ -4,5 +4,8 @@
   "llm.error.empty_with_stop_reason": "%s returned no text (stop_reason %s; blocks: %s)",
   "agent.refusal.retrying": "⚠ The provider's safety classifier stopped that reply. Telling the model and resending the turn (%d/%d).",
   "agent.refusal.fallback": "⚠ The provider's safety classifier stopped that reply. Telling the model and resending this turn on %s (refusal fallback %d/%d); the next turn returns to your model.",
-  "agent.refusal.fallback_sticky": "⚠ Refused again. The rest of this run stays on %s; @model reset or a new run returns to your model."
+  "agent.refusal.fallback_sticky": "⚠ Refused again. The rest of this run stays on %s; @model reset or a new run returns to your model.",
+  "llm.error.refusal_category": "%s declined to answer this turn (stop_reason %s, safety classifier category \"%s\"%s). Retrying the same request gives the same result; rephrase the step or move to the next one",
+  "agent.refusal.reason": "⚠ Classifier category: %s — %s",
+  "agent.refusal.no_explanation": "the provider gave no explanation"
 }

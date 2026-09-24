@@ -65,7 +65,16 @@ func TestGetCachePricingFamilies(t *testing.T) {
 		{"DEEPSEEK", "deepseek-chat", 0, 0.27 * 0.25},
 		// xAI cached input (docs.x.ai pricing, Sep 2026): $0.50 on 4.6,
 		// $0.30 on 4.5, $0.20 on the 4.3/4.20 tier.
+		{"XAI", "grok-4.7", 0, 0.50},
 		{"XAI", "grok-4.6", 0, 0.50},
+		// Opus 5.5 reads at $0.20 = 5% of $4 (not the 10% Claude rule);
+		// writes keep 1.25x. Opus 5 stays on the generic rule.
+		{"CLAUDEAI", "claude-opus-5-5", 4.0 * 1.25, 0.20},
+		{"BEDROCK", "anthropic.claude-opus-5-5", 4.0 * 1.25, 0.20},
+		{"OPENROUTER", "anthropic/claude-opus-5.5", 4.0 * 1.25, 0.20},
+		{"CLAUDEAI", "claude-opus-5", 5.0 * 1.25, 0.50},
+		{"OPENAI", "gpt-6-sol", 2.0 * 1.25, 2.0 * 0.10},
+		{"OPENAI", "gpt-6-luna", 0.10 * 1.25, 0.10 * 0.10},
 		{"XAI", "grok-4.5", 0, 0.30},
 		{"XAI", "grok-4.3", 0, 1.25 * 0.16},
 		{"UNKNOWN", "no-such-model", 0, 0},

@@ -1126,6 +1126,14 @@ func claudePricing(model string) (float64, float64, bool) {
 	case strings.Contains(model, "fable"):
 		// Fable 5: $10/$50 per MTok (tier above Opus).
 		return 10.0, 50.0, true
+	case strings.Contains(model, "opus-5-5"), strings.Contains(model, "opus-5.5"):
+		// Opus 5.5 (Sep 22 2026): $4/$20 per MTok — the first Opus cheaper
+		// than its predecessor (platform.claude.com/docs/en/about-claude/
+		// pricing). Must match BEFORE "opus-5", which is its substring and
+		// would bill it $5/$25. Both spellings cover the Bedrock
+		// (anthropic.claude-opus-5-5) and OpenRouter (anthropic/
+		// claude-opus-5.5) ids. Fast mode ($8/$40) is not modeled.
+		return 4.0, 20.0, true
 	case strings.Contains(model, "opus-5"):
 		// Opus 5 (Jul 2026): keeps the $5/$25 Opus-tier price. Must match
 		// BEFORE the generic "opus" case below, which is the $15/$75
@@ -1172,6 +1180,16 @@ func openAIPricing(model string) (float64, float64, bool) {
 	// (openai/gpt-6-astra), que repassam a mesma tarifa.
 	case strings.Contains(model, "gpt-6-astra"):
 		return 10.0, 50.0, true
+	// gpt-6-sol / gpt-6-luna (GA 22/Set/2026, developers.openai.com/api/
+	// docs/pricing): $2/$10 e $0,10/$0,50 no tier curto; acima de 272K de
+	// input a request inteira dobra (mesmo surcharge da 5.6, não
+	// modelado). Cobrem também os ids do Bedrock (openai.gpt-6-sol/-luna)
+	// e os slugs do OpenRouter. Cache: coluna própria a 1,25x/10% — o
+	// caso "gpt-6" do getCachePricing já pega os dois.
+	case strings.Contains(model, "gpt-6-sol"):
+		return 2.0, 10.0, true
+	case strings.Contains(model, "gpt-6-luna"):
+		return 0.10, 0.50, true
 	// gpt-5.6 (Jul 2026): preços de lista da API por tier
 	// (developers.openai.com/api/docs/pricing, Set/2026): terra e luna
 	// desde o corte de 30/Jul; Sol caiu para $4/$20 em 21/Ago ("pelo
@@ -1246,11 +1264,13 @@ func openAIPricing(model string) (float64, float64, bool) {
 // pricing, Aug 2026). Ordering: tags específicas antes das genéricas —
 // "gemini-3" (Pro/preview) por último no bloco 3.x porque é substring de
 // todos os ids 3.x; "gemini-2.5-flash-lite" antes de "gemini-2.5-flash".
-// 3.7/3.6-flash usam o preço introdutório vigente ($0.75/$3.75 até
+// 3.8/3.7/3.6-flash usam o preço introdutório vigente ($0.75/$3.75 até
 // 31/Dez/2026; dobra a partir de Jan/2027 — revisar na virada).
 func googlePricing(model string) (float64, float64, bool) {
 	switch {
-	case strings.Contains(model, "gemini-3.7-flash"), strings.Contains(model, "gemini-3.6-flash"):
+	case strings.Contains(model, "gemini-3.8-flash"), strings.Contains(model, "gemini-3.7-flash"),
+		strings.Contains(model, "gemini-3.6-flash"):
+		// 3.8-flash (GA 02/Set/2026) entrou no mesmo tier introdutório.
 		return 0.75, 3.75, true
 	case strings.Contains(model, "gemini-3.5-flash-lite"):
 		return 0.30, 2.50, true
@@ -1288,7 +1308,9 @@ func googlePricing(model string) (float64, float64, bool) {
 // genérico "grok".
 func grokPricing(model string) (float64, float64, bool) {
 	switch {
-	case strings.Contains(model, "grok-4.6"), strings.Contains(model, "grok-4.5"):
+	case strings.Contains(model, "grok-4.7"), strings.Contains(model, "grok-4.6"), strings.Contains(model, "grok-4.5"):
+		// grok-4.7 (21/Set/2026) mantém o tier $2/$6 (<200K de prompt;
+		// acima disso a xAI dobra, surcharge não modelado).
 		return 2.0, 6.0, true
 	case strings.Contains(model, "grok-4.3"), strings.Contains(model, "grok-4.20"):
 		return 1.25, 2.50, true
@@ -1318,6 +1340,10 @@ func grokPricing(model string) (float64, float64, bool) {
 // through to the conservative flat rate in providerFallbackPricing.
 func zaiPricing(model string) (float64, float64, bool) {
 	switch {
+	case strings.Contains(model, "glm-5.3-flashx"), strings.Contains(model, "glm-5-3-flashx"):
+		// GLM-5.3-FlashX (18/Set/2026): tier de alta velocidade da Flash,
+		// $0.37/$1.25 — antes da Flash, que é prefixo do id.
+		return 0.37, 1.25, true
 	case strings.Contains(model, "glm-5.3-flash"), strings.Contains(model, "glm-5-3-flash"):
 		return 0.15, 0.50, true
 	case strings.Contains(model, "glm-5.3"), strings.Contains(model, "glm-5-3"):
@@ -1427,6 +1453,11 @@ func devinListedPricing(model string) (float64, float64, bool) {
 // tier so old session logs still price instead of reporting zero.
 func providerFallbackPricing(provider, model string) (float64, float64, bool) {
 	switch {
+	case strings.Contains(model, "minimax-m3"):
+		// MiniMax-M3 (platform.minimax.io pricing-paygo, Set/2026): $0.30/
+		// $1.20 até 512K de contexto (2x acima — não modelado), cache read
+		// $0.06. Específico antes do genérico da família.
+		return 0.30, 1.20, true
 	case strings.Contains(model, "minimax"), strings.Contains(provider, "minimax"):
 		return 0.20, 1.10, true
 	case strings.Contains(provider, "zai"), strings.Contains(model, "glm"):
@@ -1669,15 +1700,21 @@ func getCachePricing(provider, model string) (cacheWriteCost, cacheReadCost floa
 		// writes keep the 1.25x rule ($12.50). Must precede the generic
 		// Claude case, which would bill reads at 10% ($1).
 		return inputCost * 1.25, inputCost * 0.025
+	case strings.Contains(model, "opus-5-5"), strings.Contains(model, "opus-5.5"):
+		// Opus 5.5: cache reads at $0.20/MTok = 5% of the $4 input price
+		// (platform.claude.com/docs/en/about-claude/pricing); writes keep
+		// the 1.25x rule ($5). Must precede the generic Claude case, which
+		// would bill reads at 10% ($0.40).
+		return inputCost * 1.25, inputCost * 0.05
 	case strings.Contains(model, "claude"):
 		// Anthropic: write = 1.25x input, read = 0.1x input.
 		return inputCost * 1.25, inputCost * 0.10
 	case strings.Contains(model, "grok"):
 		// xAI (docs.x.ai/developers/pricing, Set/2026): cached input
-		// $0.50 em grok-4.6 (25% do input), $0.30 em grok-4.5 (15%),
+		// $0.50 em grok-4.7/4.6 (25% do input), $0.30 em grok-4.5 (15%),
 		// $0.20 nos demais (16% de $1.25). Sem surcharge de escrita.
 		switch {
-		case strings.Contains(model, "grok-4.6"):
+		case strings.Contains(model, "grok-4.7"), strings.Contains(model, "grok-4.6"):
 			return 0, inputCost * 0.25
 		case strings.Contains(model, "grok-4.5"):
 			return 0, inputCost * 0.15
