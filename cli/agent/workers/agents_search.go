@@ -67,7 +67,7 @@ Use <tool_call name="@coder" args='{"cmd":"COMMAND","args":{...}}' /> syntax.
 5. If a search returns too many results, narrow with --glob or --dir.
 
 ## RESPONSE FORMAT
-1. Start with <reasoning> (what you need to find and your search strategy)
+1. Start with <plan> (what you need to find and your search strategy)
 2. Emit <tool_call> tags for search operations
 3. After getting results, provide a structured summary with locations`
 }

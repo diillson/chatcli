@@ -2185,7 +2185,7 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 
 		var anchor string
 		if a.isCoderMode {
-			anchor = "REMINDER (/CODER MODE): You MUST respond with a short <reasoning> (2-6 lines) then emit one or more <tool_call name=\"@coder\" args=\"...\" />. " +
+			anchor = "REMINDER (/CODER MODE): You MUST respond with a short <plan> (the actions you will take, 2-6 lines) then emit one or more <tool_call name=\"@coder\" args=\"...\" />. " +
 				"CRITICAL: Emit ALL independent tool_calls in a SINGLE response. Do NOT split independent reads/searches/writes into separate turns. " +
 				"If you need to read 3 files, emit 3 tool_calls NOW, not one per turn. Use <agent_call> for 3+ independent tasks when available. " +
 				"Do NOT use code blocks (```). For write/patch: base64 encoding and single-line args are MANDATORY."
@@ -2200,11 +2200,9 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 		return h
 	}
 
-	// Helper para verificar tags de raciocínio
-	hasReasoningTag := func(s string) bool {
-		ls := strings.ToLower(s)
-		return strings.Contains(ls, "<reasoning>") && strings.Contains(ls, "</reasoning>")
-	}
+	// The plan block the coder requires before any action: <plan>, or
+	// the <reasoning> spelling older prompts and skills still produce.
+	hasReasoningTag := hasPlanTag
 
 	// Helper local: renderizar um card com markdown usando o renderer do cli (glamour).
 	renderMDCard := func(icon, title, md, color string) {
@@ -2890,7 +2888,7 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 			})
 		}
 
-		// Mid-loop skill activation: the model's own <reasoning> text and the
+		// Mid-loop skill activation: the model's own <plan> text and the
 		// file paths inside its tool_call args are trigger surfaces too. A
 		// skill whose keyword only surfaces in the agent's plan ("I'll write a
 		// Helm chart for this") — or whose path glob matches a file the agent
@@ -3006,11 +3004,11 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 		// ==============
 		// RENDERIZAÇÃO DE PENSAMENTO (Timeline)
 		// ==============
-		reasoning, _ := extractXMLTagContent(thoughtText, "reasoning")
+		reasoning := extractPlanBlock(thoughtText)
 		explanation, _ := extractXMLTagContent(thoughtText, "explanation")
 
 		remaining := thoughtText
-		remaining = stripXMLTagBlock(remaining, "reasoning")
+		remaining = stripPlanBlocks(remaining)
 		remaining = stripXMLTagBlock(remaining, "explanation")
 		remaining = stripXMLTagBlock(remaining, "final_summary")
 		remaining = stripXMLTagBlock(remaining, "plan")
@@ -3037,7 +3035,7 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 			case isMinimal:
 				renderer.RenderTimelineEvent("🧭", "PLANO", compactText(reasoning, 3, 260), agent.ColorCyan)
 			default:
-				renderMDCard("🧠", i18n.T("agent.ui.reasoning_title"), reasoning, agent.ColorCyan)
+				renderMDCard("🧭", i18n.T("agent.ui.reasoning_title"), reasoning, agent.ColorCyan)
 			}
 			// Integração de Task Tracking (somente no modo /coder)
 			if a.isCoderMode {
@@ -3120,12 +3118,12 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 		// =========================
 		if a.isCoderMode {
 			if len(toolCalls) > 0 {
-				// Require <reasoning> before acting
+				// Require the <plan> block before acting
 				if !hasReasoningTag(thoughtText) {
 					a.cli.history = append(a.cli.history, models.Message{
 						Role: "user",
-						Content: "FORMAT ERROR: In /coder mode, you MUST write a <reasoning> block (2-6 lines with task list) BEFORE any <tool_call>. " +
-							"Rewrite your response starting with <reasoning>...</reasoning> then your <tool_call> tags.",
+						Content: "FORMAT ERROR: In /coder mode, you MUST write a <plan> block (the actions you will take, 2-6 lines with a task list) BEFORE any <tool_call>. " +
+							"Rewrite your response starting with <plan>...</plan> then your <tool_call> tags.",
 					})
 					continue
 				}
@@ -3168,7 +3166,7 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 					a.cli.history = append(a.cli.history, models.Message{
 						Role: "user",
 						Content: "FORMAT ERROR: Code blocks and shell commands are NOT allowed in /coder mode. " +
-							"You MUST use <reasoning> followed by <tool_call> tags. " +
+							"You MUST use <plan> followed by <tool_call> tags. " +
 							"For shell commands: <tool_call name=\"@coder\" args='{\"cmd\":\"exec\",\"args\":{\"cmd\":\"your command\"}}' />",
 					})
 					continue
@@ -4216,7 +4214,7 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 				if a.taskTracker != nil && a.taskTracker.NeedsReplanning() {
 					a.cli.history = append(a.cli.history, models.Message{
 						Role:    "user",
-						Content: "ATENÇÃO: Múltiplas falhas detectadas. Crie um NOVO <reasoning> com uma lista replanejada de tarefas, considerando os erros anteriores.",
+						Content: "ATENÇÃO: Múltiplas falhas detectadas. Crie um NOVO <plan> com uma lista replanejada de tarefas, considerando os erros anteriores.",
 					})
 				}
 			} else if batchHasError && !strings.Contains(batchOutputBuilder.String(), "Resultado da Ação") {
@@ -4234,7 +4232,7 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 				// back to the user.
 				feedbackForAI := i18n.T("agent.feedback.tool_output", toolCallNamesLabel(toolCalls), batchOutputBuilder.String())
 				if a.taskTracker != nil && a.taskTracker.NeedsReplanning() {
-					feedbackForAI += "\n\nATENÇÃO: Múltiplas falhas detectadas. Crie um NOVO <reasoning> com uma lista replanejada de tarefas, considerando os erros anteriores."
+					feedbackForAI += "\n\nATENÇÃO: Múltiplas falhas detectadas. Crie um NOVO <plan> com uma lista replanejada de tarefas, considerando os erros anteriores."
 				}
 				a.cli.history = append(a.cli.history, buildBatchFeedbackMessage(feedbackForAI, toolCalls))
 			}
@@ -4272,7 +4270,7 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 				a.cli.history = append(a.cli.history, models.Message{
 					Role: "user",
 					Content: "No modo /coder, não use blocos ```execute``` nem comandos shell. " +
-						"Use <reasoning> e então emita <tool_call name=\"@coder\" ... />.",
+						"Use <plan> e então emita <tool_call name=\"@coder\" ... />.",
 				})
 				continue
 			}

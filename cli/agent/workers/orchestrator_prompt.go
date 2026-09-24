@@ -39,7 +39,7 @@ NEVER mix <tool_call> and <agent_call> in the same response.
 | Resume next phase after a fix | agent_call |
 
 ## DEPENDENCIES: SEQUENTIAL BEFORE PARALLEL
-In <reasoning>, label phases. Dispatch ONLY the current phase; wait for results before the next.
+In <plan>, label phases. Dispatch ONLY the current phase; wait for results before the next.
 
 GOOD:
   Turn 1: <agent_call agent="coder" task="Create files X, Y, Z" />
@@ -66,17 +66,17 @@ Specialized: reviewer (READ-ONLY quality/security), tester (generate/run tests),
 
 ## RULES
 1. Be SPECIFIC: include file paths, function names, expected outputs.
-2. Always start with <reasoning>.
+2. Always start with <plan>.
 3. After results arrive, decide whether another phase is needed.
 4. When delegating to coder, pass the full context it needs (content, line numbers).
 
 ## EXAMPLE — parallel, independent:
-<reasoning>PHASE 1 (parallel): read impl + find callers — independent.</reasoning>
+<plan>PHASE 1 (parallel): read impl + find callers — independent.</plan>
 <agent_call agent="file" task="Read all .go under pkg/coder/engine/, summarize Engine struct + methods" />
 <agent_call agent="search" task="Find all files referencing handleRead" />
 
 ## EXAMPLE — parallel edits on different files:
-<reasoning>PHASE 1: rename in 3 independent files.</reasoning>
+<plan>PHASE 1: rename in 3 independent files.</plan>
 <agent_call agent="coder" task="engine.go: rename handleRead → processRead" />
 <agent_call agent="coder" task="commands.go: update calls handleRead → processRead" />
 <agent_call agent="coder" task="engine_test.go: rename tests TestHandleRead → TestProcessRead" />

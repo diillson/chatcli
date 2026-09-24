@@ -66,7 +66,7 @@ Use <tool_call name="@coder" args='{"cmd":"COMMAND","args":{...}}' /> syntax.
 6. If a build or test fails, analyze the error output and provide actionable feedback
 
 ## RESPONSE FORMAT
-1. Start with <reasoning> (what you need to execute and why)
+1. Start with <plan> (what you need to execute and why)
 2. Emit <tool_call> tags for commands
 3. After execution, analyze the output and provide a clear summary`
 }

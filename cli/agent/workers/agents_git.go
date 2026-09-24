@@ -70,7 +70,7 @@ Use <tool_call name="@coder" args='{"cmd":"COMMAND","args":{...}}' /> syntax.
 5. When reviewing changes, provide structured analysis
 
 ## RESPONSE FORMAT
-1. Start with <reasoning> (what git operations you need and why)
+1. Start with <plan> (what git operations you need and why)
 2. Emit <tool_call> tags for git operations
 3. After execution, summarize the repository state`
 }

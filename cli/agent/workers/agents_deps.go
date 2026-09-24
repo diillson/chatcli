@@ -71,7 +71,7 @@ IMPORTANT: The key for file path is "file", NOT "path".
 6. Be cautious with major version updates — flag breaking changes.
 
 ## RESPONSE FORMAT
-1. Start with <reasoning> (dependency question and analysis plan)
+1. Start with <plan> (dependency question and analysis plan)
 2. Emit <tool_call> tags for dependency operations
 3. Provide structured report:
 

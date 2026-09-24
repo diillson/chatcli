@@ -339,7 +339,7 @@ func buildCustomSystemPrompt(
 
 	// Response format
 	b.WriteString("## RULES\n")
-	b.WriteString("1. Start with <reasoning> (what you plan to do and why)\n")
+	b.WriteString("1. Start with <plan> (what you plan to do and why)\n")
 	b.WriteString("2. Emit <tool_call> tags for operations\n")
 	b.WriteString("3. After getting results, provide a clear structured summary\n")
 	b.WriteString("4. Be thorough — use all relevant tools, not just one\n")

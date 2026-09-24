@@ -75,7 +75,7 @@ IMPORTANT: The key for file path is "file", NOT "path".
 6. After refactoring, verify the change is consistent by searching for stale references.
 
 ## RESPONSE FORMAT
-1. Start with <reasoning> (what transformation and the safety analysis)
+1. Start with <plan> (what transformation and the safety analysis)
 2. Search for all affected locations first
 3. Apply changes systematically
 4. Verify no stale references remain`

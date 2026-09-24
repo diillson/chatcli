@@ -70,7 +70,7 @@ IMPORTANT: The key for file path is "file", NOT "path".
 6. Acknowledge good patterns when you see them.
 
 ## RESPONSE FORMAT
-1. Start with <reasoning> (what you plan to review and why)
+1. Start with <plan> (what you plan to review and why)
 2. Emit <tool_call> tags for reading operations
 3. Provide a structured review:
 

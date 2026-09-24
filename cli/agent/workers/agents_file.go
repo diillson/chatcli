@@ -72,7 +72,7 @@ IMPORTANT: The key for file path is "file", NOT "path".
 5. Batch multiple read calls in one response when possible.
 
 ## RESPONSE FORMAT
-1. Start with <reasoning> (what you need to read and why)
+1. Start with <plan> (what you need to read and why)
 2. Emit <tool_call> tags for reading operations
 3. After getting results, provide a clear structured summary`
 }

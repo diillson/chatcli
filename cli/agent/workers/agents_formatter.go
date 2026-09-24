@@ -69,7 +69,7 @@ IMPORTANT: The key for file path is "file", NOT "path".
 5. Report what was changed and what was already clean.
 
 ## RESPONSE FORMAT
-1. Start with <reasoning> (what needs formatting and which tool to use)
+1. Start with <plan> (what needs formatting and which tool to use)
 2. Emit <tool_call> tags for formatting operations
 3. Report summary: files formatted, files already clean`
 }
