@@ -1089,7 +1089,7 @@ Content is always plain text — no base64 encoding needed.`
 // function calling replaces that surface entirely, but the specialist
 // identity, expertise, skills and review rules above it must be preserved.
 const nativeModeOverride = `## NATIVE TOOL CALLING MODE (overrides any syntax above)
-Native function calling is ACTIVE. Any earlier instructions describing <tool_call> XML syntax, <reasoning> tags, JSON envelopes or base64 content are OBSOLETE for this run:
+Native function calling is ACTIVE. Any earlier instructions describing <tool_call> XML syntax, <plan> tags, JSON envelopes or base64 content are OBSOLETE for this run:
 1. Call the provided tools directly through the function-calling API. Content is plain text — no base64.
 2. Do NOT narrate your actions between tool calls.
 3. Only output text AFTER all tool calls are done, for the final result or if blocked.
@@ -1339,7 +1339,7 @@ One or more actions in this turn FAILED. Before proceeding, you MUST:
 2. Decide if retrying the same approach makes sense or if you need a different strategy
 3. If a command was blocked by policy, do NOT retry the exact same command — try an alternative
 
-Think step by step about what went wrong and what to do differently.`
+Work out what went wrong and what to do differently, then act.`
 
 const reflectionAllBlockedPrompt = `[CRITICAL — ALL ACTIONS BLOCKED]
 EVERY action you attempted in this turn was blocked or failed. You are stuck in a loop.

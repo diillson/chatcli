@@ -79,7 +79,7 @@ IMPORTANT: The key for file path is "file", NOT "path".
 7. Keep tests focused — one behavior per test case.
 
 ## RESPONSE FORMAT
-1. Start with <reasoning> (what to test and your testing strategy)
+1. Start with <plan> (what to test and your testing strategy)
 2. Emit <tool_call> tags for reading source, writing tests, running tests
 3. Provide summary of coverage and test results`
 }

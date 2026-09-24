@@ -619,8 +619,8 @@ func (r *UIRenderer) RenderThinking(thought string) {
 	if strings.TrimSpace(thought) == "" {
 		return
 	}
-	// Usa cor cinza/ciano para pensamento
-	r.RenderTimelineEvent("🧠", i18n.T("agent.ui.reasoning_title"), thought, ColorCyan)
+	// The plan block, in cyan.
+	r.RenderTimelineEvent("🧭", i18n.T("agent.ui.reasoning_title"), thought, ColorCyan)
 }
 
 // RenderToolCall exibe a chamada da ferramenta de forma limpa (escondendo Base64 e sujeira HTML)

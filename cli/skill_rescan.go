@@ -5,7 +5,7 @@
  *
  * Skills auto-activate once at Run() start against the user's query. That
  * misses everything the ReAct loop produces afterwards: the model's own
- * <reasoning> text, the file paths its tool calls start touching, and the
+ * <plan> text, the file paths its tool calls start touching, and the
  * follow-up instructions the user types mid-session (type-ahead queue or the
  * interactive continuation prompt). This file closes that gap: every turn the
  * loop re-scans that mid-run text against the skill catalog and injects any

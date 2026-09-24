@@ -49,7 +49,7 @@ func (t *MessageTrimmer) compressOrEmpty(s string) string {
 
 // Regex patterns for extracting/stripping content.
 var (
-	reasoningBlockRe   = regexp.MustCompile(`(?s)<reasoning>.*?</reasoning>`)
+	reasoningBlockRe   = regexp.MustCompile(`(?s)<plan>.*?</plan>|<reasoning>.*?</reasoning>`)
 	explanationBlockRe = regexp.MustCompile(`(?s)<explanation>.*?</explanation>`)
 	// (?:_call)? also compacts the <tool ...> alias emitted by CLI-backed
 	// models (Devin/Codex/Claude Code); groups stay 1=name, 2=args.
@@ -124,7 +124,8 @@ func (t *MessageTrimmer) trimMessage(msg models.Message, history []models.Messag
 func (t *MessageTrimmer) trimAssistantMessage(content string) string {
 	original := content
 
-	// Strip <reasoning> blocks — intermediate reasoning doesn't need to be re-sent
+	// Strip <plan> blocks (and the older <reasoning> spelling) — the
+	// intermediate plan doesn't need to be re-sent
 	content = reasoningBlockRe.ReplaceAllString(content, "")
 
 	// Strip <explanation> blocks
