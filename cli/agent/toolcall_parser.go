@@ -56,9 +56,10 @@ func ParseToolCalls(text string) ([]ToolCall, error) {
 	// would cause the same tool call to appear twice in the batch.
 	jsonCalls := parseJSONToolCalls(scannable)
 	for _, jc := range jsonCalls {
-		if !isDuplicateToolCall(calls, jc) {
-			calls = append(calls, jc)
+		if embeddedInParsedCall(calls, jc) || isDuplicateToolCall(calls, jc) {
+			continue
 		}
+		calls = append(calls, jc)
 	}
 
 	// Recovery pass: no call found outside a fence — re-scan executable
@@ -117,6 +118,25 @@ func recoverToolCallArgs(toolName, args string) string {
 	}
 
 	return args
+}
+
+// embeddedInParsedCall reports whether the candidate's JSON object was lifted
+// from inside a call that is already in the batch — typically out of an XML
+// tag's args attribute. The tag owns everything in that attribute, whatever
+// the inner object names: a describe of @proc carries {"name":"@proc"} in
+// its args, and that object is the description's subject, not a second call.
+// isDuplicateToolCall only catches the same-name case; this one is
+// name-blind on purpose.
+func embeddedInParsedCall(existing []ToolCall, candidate ToolCall) bool {
+	if candidate.Raw == "" {
+		return false
+	}
+	for _, ec := range existing {
+		if ec.Raw != "" && ec.Raw != candidate.Raw && strings.Contains(ec.Raw, candidate.Raw) {
+			return true
+		}
+	}
+	return false
 }
 
 // isDuplicateToolCall checks whether candidate is a duplicate of any existing
@@ -766,9 +786,10 @@ func parseFencedToolCalls(fences []fencedBlock) []ToolCall {
 		// Same dedup rule as the top-level flow: the JSON scanner re-finds
 		// the object embedded in an XML args attribute.
 		for _, jc := range parseJSONToolCalls(f.content) {
-			if !isDuplicateToolCall(calls, jc) {
-				calls = append(calls, jc)
+			if embeddedInParsedCall(calls, jc) || isDuplicateToolCall(calls, jc) {
+				continue
 			}
+			calls = append(calls, jc)
 		}
 	}
 	return calls
@@ -918,8 +939,19 @@ func jsonObjToToolCall(obj map[string]interface{}) (ToolCall, bool) {
 		argsStr = extractArgs(v)
 	}
 
-	// If we have a name with @, return directly
+	// If we have a name with @, return directly. The bare "name" key is
+	// the one shape data shares with a call — {"name":"@proc"} is what
+	// @tools describe takes, and what a tool listing prints — so that
+	// spelling needs its args key beside it to count as a call; the
+	// explicit tool_call/tool keys carry the intent on their own.
 	if name != "" && strings.HasPrefix(name, "@") {
+		_, hasArgs := obj["args"]
+		_, hasArguments := obj["arguments"]
+		_, hasToolCall := obj["tool_call"]
+		_, hasTool := obj["tool"]
+		if !hasArgs && !hasArguments && !hasToolCall && !hasTool {
+			return ToolCall{}, false
+		}
 		return ToolCall{Name: name, Args: argsStr}, true
 	}
 

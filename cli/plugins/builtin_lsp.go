@@ -246,6 +246,9 @@ func canonicalLSPCmd(cmd string) string {
 // ("diagnostics <file>" / "definition <file> <line> <column>").
 func parseLSPInvocation(args []string) (string, string, error) {
 	payload := strings.TrimSpace(strings.Join(args, " "))
+	if payload == "" {
+		return "", "", fmt.Errorf("missing cmd (valid: diagnostics|definition|references|symbols|hover)")
+	}
 
 	if strings.HasPrefix(payload, "{") {
 		var raw map[string]json.RawMessage

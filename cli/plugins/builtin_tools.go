@@ -142,6 +142,9 @@ func (p *BuiltinToolsPlugin) ExecuteWithStream(_ context.Context, args []string,
 // ("describe @diagram" / "list").
 func parseToolsInvocation(args []string) (string, string, error) {
 	payload := strings.TrimSpace(strings.Join(args, " "))
+	if payload == "" {
+		return "", "", fmt.Errorf(`missing cmd (valid: describe|list). Expected {"cmd":"describe","args":{"name":"@x"}}`)
+	}
 
 	if strings.HasPrefix(payload, "{") {
 		var raw map[string]json.RawMessage
