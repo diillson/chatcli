@@ -39,12 +39,12 @@ func TestEmptyResponseErrorNamesTheCause(t *testing.T) {
 
 	// With stop_details the message names the category (and the
 	// explanation when there is one); without them it stays as before.
-	categorised := &EmptyResponseError{Provider: "ClaudeAI", StopReason: StopReasonRefusal,
+	categorized := &EmptyResponseError{Provider: "ClaudeAI", StopReason: StopReasonRefusal,
 		Details: &StopDetails{Category: "reasoning_extraction", Explanation: "asked for the chain of thought", RecommendedModel: "claude-opus-4-8"}}
-	assert.Equal(t, "reasoning_extraction", categorised.Category())
-	assert.Equal(t, "claude-opus-4-8", categorised.RecommendedModel())
-	assert.Contains(t, categorised.Error(), "reasoning_extraction")
-	assert.Contains(t, categorised.Error(), "asked for the chain of thought")
+	assert.Equal(t, "reasoning_extraction", categorized.Category())
+	assert.Equal(t, "claude-opus-4-8", categorized.RecommendedModel())
+	assert.Contains(t, categorized.Error(), "reasoning_extraction")
+	assert.Contains(t, categorized.Error(), "asked for the chain of thought")
 	terse := &EmptyResponseError{Provider: "ClaudeAI", StopReason: StopReasonRefusal, Details: &StopDetails{Category: "cyber"}}
 	assert.Contains(t, terse.Error(), "cyber")
 	assert.NotContains(t, terse.Error(), ": )", "no explanation, no dangling separator")
