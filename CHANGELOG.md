@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.210.0](https://github.com/diillson/chatcli/compare/v1.209.0...v1.210.0) (2026-09-24)
+
+
+### Features
+
+* **catalog:** Opus 5.5 and the September model launches, self-healing Claude Code fingerprint, refusals name their category ([#1647](https://github.com/diillson/chatcli/issues/1647)) ([7fb88b2](https://github.com/diillson/chatcli/commit/7fb88b2fcd1c12323cbd6e052a25a6a7a4dd78f7))
+
 ## [1.209.0](https://github.com/diillson/chatcli/compare/v1.208.2...v1.209.0) (2026-09-22)
 
 
