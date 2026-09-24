@@ -14,6 +14,7 @@ import (
 	llmclient "github.com/diillson/chatcli/llm/client"
 	"github.com/diillson/chatcli/models"
 	"github.com/diillson/chatcli/ui/kit"
+	"go.uber.org/zap"
 )
 
 func (cli *ChatCLI) RunAgentOnce(ctx context.Context, input string, autoExecute bool) error {
@@ -330,6 +331,13 @@ func (cli *ChatCLI) restoreSessionData(sd *SessionData) {
 				cli.history = append(cli.history, msg)
 			}
 		}
+	}
+
+	// Sessions recorded before the plan rename carry <reasoning> blocks and
+	// the old format nudges in their turns; bring them to the current
+	// spelling so they never reach the API as a demand for reasoning.
+	if n := normalizeLegacyPlanTags(cli.history); n > 0 && cli.logger != nil {
+		cli.logger.Info("session restore: legacy plan tags normalized", zap.Int("messages", n))
 	}
 
 	cli.checkpoints = cli.restoreCheckpoints(sd.Checkpoints)

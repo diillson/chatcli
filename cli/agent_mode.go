@@ -1517,6 +1517,12 @@ func (a *AgentMode) appendTurnContext(text string) {
 // freshly-built sysMsg for the current mode — replacing a surviving same-mode
 // system message in place, or prepending when none exists.
 func (a *AgentMode) installAgentSystemMessage(sysMsg models.Message, currentModeName string) {
+	// History that reached this run from anywhere else than a session load
+	// (a resumed park, a hub conversation, a remote client) gets the same
+	// plan-tag normalization the session restore applies.
+	if n := normalizeLegacyPlanTags(a.cli.history); n > 0 && a.logger != nil {
+		a.logger.Info("agent run: legacy plan tags normalized", zap.Int("messages", n))
+	}
 	a.cli.history = purgeStaleModeSystems(a.cli.history, currentModeName)
 
 	if len(a.cli.history) == 0 {

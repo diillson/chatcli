@@ -16,6 +16,8 @@ package cli
 import (
 	"regexp"
 	"strings"
+
+	"github.com/diillson/chatcli/models"
 )
 
 // planTagNames are the spellings of the plan block, newest first.
@@ -50,4 +52,33 @@ func extractPlanBlock(text string) string {
 // stripPlanBlocks removes every plan block, in either spelling.
 func stripPlanBlocks(text string) string {
 	return planBlockRe.ReplaceAllString(text, "")
+}
+
+// legacyPlanTagRe matches the old spelling of the plan tag, open or close,
+// in any case.
+var legacyPlanTagRe = regexp.MustCompile(`(?i)<(/?)reasoning>`)
+
+// normalizeLegacyPlanTags rewrites the old <reasoning> spelling to <plan>
+// in the user and assistant turns of a history that was recorded before
+// the rename — a loaded session, a resumed park, a hub conversation. The
+// system slot is rebuilt from the current prompts every run, so it needs
+// nothing; but the model's own earlier plan blocks and the format nudges
+// ChatCLI stored as user turns ("you MUST write a <reasoning> block") would
+// otherwise travel back to the API as they were written, and that is the
+// demand the newest Claude models decline as reasoning_extraction. Tool
+// results are left alone: quoted documentation is not an instruction. It
+// edits in place and reports how many messages changed.
+func normalizeLegacyPlanTags(history []models.Message) int {
+	changed := 0
+	for i := range history {
+		if history[i].Role != "user" && history[i].Role != "assistant" {
+			continue
+		}
+		if !strings.Contains(strings.ToLower(history[i].Content), "reasoning>") {
+			continue
+		}
+		history[i].Content = legacyPlanTagRe.ReplaceAllString(history[i].Content, "<${1}plan>")
+		changed++
+	}
+	return changed
 }

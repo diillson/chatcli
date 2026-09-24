@@ -13,6 +13,7 @@ import (
 	"testing"
 
 	"github.com/diillson/chatcli/i18n"
+	"github.com/diillson/chatcli/models"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
@@ -73,4 +74,33 @@ func TestHistoryTrimmerStripsBothPlanSpellings(t *testing.T) {
 	assert.NotContains(t, got, "<plan>")
 	assert.NotContains(t, got, "<reasoning>")
 	assert.Contains(t, got, "@coder read", "the tool call survives, compacted")
+}
+
+// A session recorded before the rename carries the old spelling in the
+// model's plan blocks and in the format nudges ChatCLI stored as user
+// turns; restoring it (and every coder run) brings both to <plan>, and
+// leaves system and tool turns alone.
+func TestLegacyPlanTagsNormalizedOnRestore(t *testing.T) {
+	history := []models.Message{
+		{Role: "system", Content: "[ACTIVE MODE: /coder]\nStart with <reasoning>"},
+		{Role: "user", Content: "fix the tests"},
+		{Role: "assistant", Content: "<REASONING>\n1. read\n2. patch\n</REASONING>\n<tool_call name=\"@coder\" args='{\"cmd\":\"read\"}' />"},
+		{Role: "user", Content: "FORMAT ERROR: In /coder mode, you MUST write a <reasoning> block (2-6 lines with task list) BEFORE any <tool_call>. Rewrite your response starting with <reasoning>...</reasoning> then your <tool_call> tags."},
+		{Role: "tool", Content: "docs say: wrap it in <reasoning>"},
+		{Role: "assistant", Content: "<plan>already new</plan>"},
+	}
+	assert.Equal(t, 2, normalizeLegacyPlanTags(history))
+	assert.Contains(t, history[0].Content, "<reasoning>", "the system slot is rebuilt each run, not rewritten")
+	assert.Equal(t, "<plan>\n1. read\n2. patch\n</plan>\n<tool_call name=\"@coder\" args='{\"cmd\":\"read\"}' />", history[2].Content)
+	assert.NotContains(t, history[3].Content, "reasoning")
+	assert.Contains(t, history[3].Content, "<plan>...</plan>")
+	assert.Contains(t, history[4].Content, "<reasoning>", "tool output is quoted material, left alone")
+	assert.Equal(t, 0, normalizeLegacyPlanTags(history), "idempotent")
+
+	cli := &ChatCLI{logger: zap.NewNop()}
+	cli.restoreSessionData(&models.SessionData{ChatHistory: []models.Message{
+		{Role: "assistant", Content: "<reasoning>old</reasoning>"},
+	}})
+	require.Len(t, cli.history, 1)
+	assert.Equal(t, "<plan>old</plan>", cli.history[0].Content)
 }
