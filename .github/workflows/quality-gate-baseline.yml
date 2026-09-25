@@ -33,6 +33,15 @@ jobs:
           go-version-file: go.mod
           cache: true
 
+      - name: Install envtest binaries (operator integration suite)
+        # The operator's integration tests need a real API server. The
+        # binaries come from setup-envtest, pinned to the Kubernetes minor the
+        # operator's client-go targets; KUBEBUILDER_ASSETS makes the suite run
+        # instead of skip.
+        run: |
+          go install sigs.k8s.io/controller-runtime/tools/setup-envtest@release-0.25
+          echo "KUBEBUILDER_ASSETS=$(setup-envtest use 1.37.0 -p path)" >> "$GITHUB_ENV"
+
       - name: Run tests with coverage (root + operator merged)
         # -coverpkg=./... is intentional: the baseline must match the PR
         # ratchet methodology in quality-gate.yml. Without it the two

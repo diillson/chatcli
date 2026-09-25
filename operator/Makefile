@@ -1,6 +1,6 @@
 IMG ?= ghcr.io/diillson/chatcli-operator:latest
 
-.PHONY: all build run dash-preview test manifests docker-build docker-push install uninstall deploy undeploy fmt vet
+.PHONY: all build run dash-preview test test-integration envtest manifests docker-build docker-push install uninstall deploy undeploy fmt vet
 
 all: build
 
@@ -22,6 +22,22 @@ dash-preview:
 
 test:
 	go test ./... -coverprofile cover.out
+
+# Integration tests run the controllers against a real API server
+# (envtest: kube-apiserver + etcd) with the CRDs from config/crd/bases.
+# The binaries are fetched once into ./bin by setup-envtest; the tests
+# skip when KUBEBUILDER_ASSETS is unset so plain `go test ./...` stays green.
+ENVTEST_K8S_VERSION ?= 1.37.0
+LOCALBIN ?= $(shell pwd)/bin
+SETUP_ENVTEST ?= go run sigs.k8s.io/controller-runtime/tools/setup-envtest@release-0.25
+
+envtest:
+	@mkdir -p $(LOCALBIN)
+	@$(SETUP_ENVTEST) use $(ENVTEST_K8S_VERSION) --bin-dir $(LOCALBIN) -p path
+
+test-integration:
+	KUBEBUILDER_ASSETS="$$($(SETUP_ENVTEST) use $(ENVTEST_K8S_VERSION) --bin-dir $(LOCALBIN) -p path)" \
+		go test ./integration/... -count=1 -v -timeout 15m
 
 ## Code quality
 

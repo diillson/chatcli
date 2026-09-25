@@ -56,6 +56,13 @@ func NewServerClient(logger *zap.Logger) *ServerClient {
 	return &ServerClient{logger: logger}
 }
 
+// NewServerClientWithConn wraps an already-dialed connection. The
+// integration suite uses it to point the controllers at an in-memory
+// server; production code dials through Connect.
+func NewServerClientWithConn(conn *grpc.ClientConn, logger *zap.Logger) *ServerClient {
+	return &ServerClient{conn: conn, client: pb.NewChatCLIServiceClient(conn), logger: logger}
+}
+
 // Connect establishes a gRPC connection to the server at the given address.
 func (sc *ServerClient) Connect(address string, opts ConnectionOpts) error {
 	sc.mu.Lock()

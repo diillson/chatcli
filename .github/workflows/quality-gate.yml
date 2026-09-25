@@ -193,6 +193,15 @@ jobs:
           sudo wget -qO /usr/local/bin/yq https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
           sudo chmod +x /usr/local/bin/yq
 
+      - name: Install envtest binaries (operator integration suite)
+        # The operator's integration tests need a real API server. The
+        # binaries come from setup-envtest, pinned to the Kubernetes minor the
+        # operator's client-go targets; KUBEBUILDER_ASSETS makes the suite run
+        # instead of skip.
+        run: |
+          go install sigs.k8s.io/controller-runtime/tools/setup-envtest@release-0.25
+          echo "KUBEBUILDER_ASSETS=$(setup-envtest use 1.37.0 -p path)" >> "$GITHUB_ENV"
+
       - name: go test root + operator (merged profile)
         # -coverpkg=./... is REQUIRED for patch-coverage correctness: it
         # forces the profile to include every package in the module, even
