@@ -26,6 +26,7 @@ package cli
 
 import (
 	"context"
+	"strings"
 
 	"github.com/diillson/chatcli/llm/client"
 	"github.com/diillson/chatcli/models"
@@ -38,6 +39,24 @@ import (
 type RPCChatOpts struct {
 	Provider string
 	Model    string
+	// Attachments carries per-turn inputs a remote surface collected (images
+	// a browser attached). A pointer keeps the options comparable.
+	Attachments *TurnAttachments
+	// Stream, when set, receives the reply as the provider produces it and
+	// the turn uses the provider's streaming path when it has one. The
+	// full reply is still returned. An interface keeps the options
+	// comparable.
+	Stream ChunkSink
+}
+
+// TurnAttachments are the binary inputs of one turn.
+type TurnAttachments struct {
+	Images []models.ImageContent
+}
+
+// ChunkSink receives streamed reply text.
+type ChunkSink interface {
+	Chunk(text string)
 }
 
 // RPCChatTurn is the result of a headless chat turn: the assistant reply and
@@ -103,6 +122,9 @@ func (cli *ChatCLI) runChatTurnSerialized(
 	// gating, cross-channel hub pull, token-aware compaction (this replaces
 	// the old hard 30-message cap).
 	input, additionalContext, images := cli.processSpecialCommands(ctx, userInput)
+	if o.Attachments != nil {
+		images = append(images, o.Attachments.Images...)
+	}
 	images, visionDesc := cli.gateImagesForModel(ctx, images)
 	additionalContext += visionDesc
 	cli.syncHubContext(ctx)
@@ -126,21 +148,24 @@ func (cli *ChatCLI) runChatTurnSerialized(
 		return RPCChatTurn{}, err
 	}
 
-	reply, err := activeClient.SendPrompt(ctx, input+additionalContext, tempHistory, maxTokens)
+	send := func() (string, *models.UsageInfo, error) {
+		return cli.rpcSend(ctx, activeClient, input+additionalContext, tempHistory, maxTokens, o.Stream)
+	}
+	reply, usage, err := send()
 	if cli.refreshClientOnAuthError(err) {
 		// The refresh rebuilt cli.Client; the routed client above still
 		// holds the expired credential, so resolve the route again.
 		if activeClient, resProvider, resModel, err = cli.resolveRPCChatClient(assembly.modelHint, o); err != nil {
 			return RPCChatTurn{}, err
 		}
-		reply, err = activeClient.SendPrompt(ctx, input+additionalContext, tempHistory, maxTokens)
+		reply, usage, err = send()
 	}
 	// Overflow recovery (bounded): the unattended surfaces used to fail
 	// the turn outright where the REPL agent loop recovered.
 	rec := cli.newOverflowRecovery("rpc", nil)
 	for err != nil && cli.recoverOverflow(ctx, rec, err) {
 		tempHistory = cli.buildChatTempHistoryWithContext(assembly.parts, assembly.turnContext, input, additionalContext, images)
-		reply, err = activeClient.SendPrompt(ctx, input+additionalContext, tempHistory, maxTokens)
+		reply, usage, err = send()
 	}
 	if err != nil {
 		return RPCChatTurn{}, err
@@ -160,7 +185,9 @@ func (cli *ChatCLI) runChatTurnSerialized(
 	cli.mirrorHubTurn(ctx, userMessage.Content, reply)
 
 	if cli.costTracker != nil {
-		usage := client.GetUsageOrEstimate(activeClient, len(input+additionalContext), len(reply))
+		if usage == nil {
+			usage = client.GetUsageOrEstimate(activeClient, len(input+additionalContext), len(reply))
+		}
 		cli.costTracker.RecordRealUsage(resProvider, resModel, usage)
 	}
 	// Memory extraction + skill self-evolution ride the same worker the REPL
@@ -202,4 +229,50 @@ func (cli *ChatCLI) resolveRPCChatClient(
 			zap.String("model", resolution.Model))
 	}
 	return resolution.Client, resolution.Provider, resolution.Model, nil
+}
+
+// rpcSend performs one model call for an RPC chat turn. With a sink and a
+// provider that streams, the reply is forwarded chunk by chunk and the
+// usage the stream reports comes back with it; otherwise the buffered call
+// is made and usage is left for the caller to estimate.
+func (cli *ChatCLI) rpcSend(ctx context.Context, active client.LLMClient, prompt string, history []models.Message, maxTokens int, sink ChunkSink) (string, *models.UsageInfo, error) {
+	if sink == nil {
+		reply, err := active.SendPrompt(ctx, prompt, history, maxTokens)
+		return reply, nil, err
+	}
+	sc, ok := client.AsStreamingClient(active)
+	if !ok {
+		reply, err := active.SendPrompt(ctx, prompt, history, maxTokens)
+		if err == nil && reply != "" {
+			sink.Chunk(reply)
+		}
+		return reply, nil, err
+	}
+	chunks, err := sc.SendPromptStream(ctx, prompt, history, maxTokens)
+	if err != nil {
+		return "", nil, err
+	}
+	var (
+		text  strings.Builder
+		usage *models.UsageInfo
+	)
+	for chunk := range chunks {
+		if chunk.Error != nil {
+			return text.String(), usage, chunk.Error
+		}
+		if chunk.Text != "" {
+			text.WriteString(chunk.Text)
+			sink.Chunk(chunk.Text)
+		}
+		if chunk.Usage != nil {
+			usage = chunk.Usage
+		}
+		if chunk.Done {
+			break
+		}
+	}
+	if err := ctx.Err(); err != nil && text.Len() == 0 {
+		return "", usage, err
+	}
+	return text.String(), usage, nil
 }

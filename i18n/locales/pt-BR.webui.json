@@ -1,0 +1,21 @@
+{
+  "web.loopback_only": "a interface web só escuta em endereços de loopback; %s não é um",
+  "web.page_missing": "A aplicação web não está embutida neste binário.",
+  "web.bad_request": "requisição inválida: %v",
+  "web.unknown_endpoint": "endpoint desconhecido: %s",
+  "web.empty_turn": "o texto do turno está vazio",
+  "web.busy": "um turno já está em execução; aguarde ou cancele antes de enviar outro",
+  "web.bad_image": "imagem inválida ou não suportada: %s",
+  "web.no_such_run": "nenhum turno em execução com esse id",
+  "web.no_such_dialog": "nenhum pedido de permissão pendente com esse id",
+  "web.bad_decision": "decisão inválida: %s",
+  "web.voice_off": "síntese de voz não configurada neste processo",
+  "web.stt_off": "transcrição de áudio não configurada neste processo",
+  "web.images_off": "geração de imagens não configurada neste processo",
+  "web.empty_audio": "o corpo da requisição não contém áudio",
+  "web.cli.serving": "Interface web em %s",
+  "web.cli.serving_hint": "O endereço carrega o token desta execução; feche o processo para invalidá-lo.",
+  "web.cli.failed": "Falha ao iniciar a interface web: %v",
+  "web.cli.bound": "Sessão vinculada: %s",
+  "web.cli.stopped": "Interface web encerrada."
+}
