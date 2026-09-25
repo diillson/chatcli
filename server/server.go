@@ -62,17 +62,35 @@ type Server struct {
 // New creates a new ChatCLI gRPC server.
 func New(cfg Config, llmMgr manager.LLMManager, sessionStore SessionStore, logger *zap.Logger) *Server {
 	authInterceptor := NewTokenAuthInterceptor(cfg.Token, logger)
+	if cfg.TLSClientCAFile != "" {
+		// The listener verifies client certificates; name the caller after
+		// its certificate so RBAC, the audit trail and the rate limiter see
+		// a principal instead of an anonymous admin.
+		authInterceptor.EnableMTLSIdentity(mtlsRoleFromEnv())
+	}
 
-	// Build interceptor chains — metrics first (outermost), then recovery, logging, auth
+	// --- Security: Rate Limiting (H3) ---
+	// Runs AFTER auth so an authenticated caller is limited by its subject
+	// (JWT sub, certificate name) rather than by the address it shares with
+	// every other tenant behind the same NAT or ingress; anonymous callers
+	// fall back to the address. Unauthenticated floods are bounded by the
+	// auth failure limiter (per address) that runs inside authorize.
+	rateLimiterCfg := DefaultRateLimiterConfig()
+	rateLimiter := NewPerClientRateLimiter(rateLimiterCfg, logger)
+
+	// Build interceptor chains — metrics first (outermost), then recovery,
+	// logging, auth, rate limit
 	unaryChain := []grpc.UnaryServerInterceptor{
 		recoveryUnaryInterceptor(logger),
 		loggingUnaryInterceptor(logger),
 		authInterceptor.Unary(),
+		rateLimiter.UnaryInterceptor(),
 	}
 	streamChain := []grpc.StreamServerInterceptor{
 		recoveryStreamInterceptor(logger),
 		loggingStreamInterceptor(logger),
 		authInterceptor.Stream(),
+		rateLimiter.StreamInterceptor(),
 	}
 
 	// Metrics setup (gRPC interceptors + LLM/session/server metrics)
@@ -98,22 +116,17 @@ func New(cfg Config, llmMgr manager.LLMManager, sessionStore SessionStore, logge
 		metricsServer = metrics.NewServer(cfg.MetricsPort, logger)
 	}
 
-	// --- Security: Rate Limiting (H3) ---
-	rateLimiterCfg := DefaultRateLimiterConfig()
-	rateLimiter := NewPerClientRateLimiter(rateLimiterCfg, logger)
-
 	// --- Security: Audit Logging (L1) ---
 	auditLogger := NewAuditLogger(logger)
 
-	// Prepend security interceptors: validation → rate limit → audit (before auth chain)
+	// Prepend security interceptors: validation → audit (before the auth chain;
+	// the audit entry learns the identity from the auth outcome it wraps)
 	unaryChain = append([]grpc.UnaryServerInterceptor{
 		ValidationInterceptor(),
-		rateLimiter.UnaryInterceptor(),
 		auditLogger.UnaryInterceptor(),
 	}, unaryChain...)
 	streamChain = append([]grpc.StreamServerInterceptor{
 		ValidationStreamInterceptor(),
-		rateLimiter.StreamInterceptor(),
 		auditLogger.StreamInterceptor(),
 	}, streamChain...)
 
@@ -273,7 +286,7 @@ func (s *Server) Start() error {
 	// administrator — inside a cluster that is every pod. Loopback keeps
 	// working without a credential, because that is the local CLI's own
 	// transport and the boundary is the machine.
-	if err := requireAuthOnReachableBind(bindAddr, s.config.Token); err != nil {
+	if err := requireAuthOnReachableBind(bindAddr, bindCredentialsFromEnv(s.config.Token, s.config.TLSClientCAFile)); err != nil {
 		return err
 	}
 

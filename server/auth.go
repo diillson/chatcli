@@ -42,6 +42,12 @@ type TokenAuthInterceptor struct {
 	// Auth failure rate limiting: max 5 failures/min per IP
 	failureMu       sync.Mutex
 	failureLimiters map[string]*rate.Limiter
+
+	// mTLS identity: when the listener verifies client certificates, a
+	// caller without a bearer token is the principal its certificate
+	// names, with mtlsRole. See EnableMTLSIdentity.
+	mtlsIdentity bool
+	mtlsRole     UserRole
 }
 
 // NewTokenAuthInterceptor creates a new auth interceptor.
@@ -103,8 +109,8 @@ func (w *wrappedServerStream) Context() context.Context {
 
 // authorize validates credentials and returns a context with UserInfo on success.
 func (a *TokenAuthInterceptor) authorize(ctx context.Context, method string) (context.Context, error) {
-	// Skip auth if no token and no JWT configured
-	if a.token == "" && !a.jwtConfigured() {
+	// Skip auth if no token, no JWT and no certificate identity configured
+	if a.token == "" && !a.jwtConfigured() && !a.mtlsIdentity {
 		// No auth configured — inject default admin user for backward compat
 		return ContextWithUser(ctx, &UserInfo{Subject: "system", Role: RoleAdmin}), nil
 	}
@@ -112,6 +118,14 @@ func (a *TokenAuthInterceptor) authorize(ctx context.Context, method string) (co
 	// Always allow health checks without auth
 	if strings.HasSuffix(method, "/Health") {
 		return ctx, nil
+	}
+
+	// A verified client certificate identifies the caller on its own. A
+	// bearer token, when present, still wins below: it carries a role the
+	// issuer chose, which is more specific than the certificate's default.
+	certUser := a.certIdentity(ctx)
+	if certUser != nil && !hasBearer(ctx) {
+		return ContextWithUser(ctx, certUser), nil
 	}
 
 	// Check auth failure rate limiting
@@ -351,4 +365,14 @@ func extractPeerAddress(ctx context.Context) string {
 		return host
 	}
 	return addr
+}
+
+// hasBearer reports whether the incoming metadata carries an authorization
+// header at all (valid or not).
+func hasBearer(ctx context.Context) bool {
+	md, ok := metadata.FromIncomingContext(ctx)
+	if !ok {
+		return false
+	}
+	return len(md.Get("authorization")) > 0
 }

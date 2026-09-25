@@ -132,6 +132,10 @@ spec:
             - name: CHATCLI_SERVER_TLS_CLIENT_CA
               value: {{ .Values.security.tlsClientCA | quote }}
           {{- end }}
+          {{- if .Values.security.mtlsRole }}
+            - name: CHATCLI_MTLS_ROLE
+              value: {{ .Values.security.mtlsRole | quote }}
+          {{- end }}
           {{- if .Values.security.rateLimitRps }}
             - name: CHATCLI_RATE_LIMIT_RPS
               value: {{ .Values.security.rateLimitRps | quote }}

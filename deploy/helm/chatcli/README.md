@@ -344,6 +344,9 @@ Fine-grained security controls for production deployments. These parameters conf
 |-----------|-------------|---------|
 | `security.jwtSecret` | JWT signing secret for server authentication | `""` |
 | `security.jwtSecretRef` | Reference to Secret key for JWT secret (recommended) | `{}` |
+| `security.jwtPublicKey` | RSA public key (PEM or path) for RS256 JWTs; takes precedence over `jwtSecret` | `""` |
+| `security.tlsClientCA` | CA bundle path client certificates are verified against (mutual TLS); requires `tls.cert`/`tls.key` | `""` |
+| `security.mtlsRole` | Role for callers identified by client certificate alone (`viewer`, `user`, `admin`) | `""` (user) |
 | `security.rateLimitRps` | Per-client rate limit in requests/second | `""` (default: 10) |
 | `security.rateLimitBurst` | Rate limit burst size | `""` (default: 30) |
 | `security.maxRecvMsgSize` | Max gRPC receive message size in bytes | `""` (default: 50MB) |

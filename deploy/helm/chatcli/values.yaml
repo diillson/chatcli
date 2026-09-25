@@ -335,6 +335,9 @@ security:
   # against. Requires tls.cert and tls.key — there is no handshake to carry
   # a client certificate without them. Mount the bundle via extraVolumes.
   tlsClientCA: ""
+  # Role granted to callers identified by their client certificate alone
+  # (no bearer token): viewer, user/operator or admin. Default: user.
+  mtlsRole: ""
 
   # Per-client rate limiting
   rateLimitRps: ""      # requests/second (default: 10)
