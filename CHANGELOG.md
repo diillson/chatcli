@@ -1,5 +1,34 @@
 # Changelog
 
+## [1.211.0](https://github.com/diillson/chatcli/compare/v1.210.3...v1.211.0) (2026-09-25)
+
+
+### Features
+
+* **chat:** let the assistant propose switching to coder mode, confirmed by the user ([#1660](https://github.com/diillson/chatcli/issues/1660)) ([ec60bf1](https://github.com/diillson/chatcli/commit/ec60bf12860227a00fb731ea7d9bc2b33473d247))
+* **operator:** authenticate to JWT-secured Instances and type the RS256, issuer, audience and operator credential fields ([#1659](https://github.com/diillson/chatcli/issues/1659)) ([d94ef43](https://github.com/diillson/chatcli/commit/d94ef43ef77e4c6485eb694441623feacd373400))
+* **operator:** book the tokens the server reports and price replies on the wire ([#1666](https://github.com/diillson/chatcli/issues/1666)) ([42a0eaa](https://github.com/diillson/chatcli/commit/42a0eaab51017dab29883808fbd9fb4067288e64))
+* **operator:** integration suite runs the controllers against a real API server ([#1672](https://github.com/diillson/chatcli/issues/1672)) ([4e756d9](https://github.com/diillson/chatcli/commit/4e756d9f926099f41e82478ca98fcbcb8160ec60))
+* **operator:** make dash-preview target serves the web dashboard without a cluster ([#1670](https://github.com/diillson/chatcli/issues/1670)) ([42e87e0](https://github.com/diillson/chatcli/commit/42e87e0932aa0d3c3f44156694256c23dd74d734))
+* **operator:** probe the running server for version and health, and type mutual TLS on the Instance ([#1661](https://github.com/diillson/chatcli/issues/1661)) ([112a0f4](https://github.com/diillson/chatcli/commit/112a0f491fd132aaf17b1fc95eb5a775ca59e5e1))
+* **operator:** restyle the web dashboard to the live dashboard's language ([#1664](https://github.com/diillson/chatcli/issues/1664)) ([6abfb93](https://github.com/diillson/chatcli/commit/6abfb93082e5c92dafdd79380350fd2d8a1306f0))
+* **operator:** theme and language switchers on the web dashboard ([#1669](https://github.com/diillson/chatcli/issues/1669)) ([074df23](https://github.com/diillson/chatcli/commit/074df23ddf5605aa368bb70a784426a9cfb8e986))
+* **operator:** type the server features, pod scheduling and service account annotations on the Instance ([#1665](https://github.com/diillson/chatcli/issues/1665)) ([5a940b5](https://github.com/diillson/chatcli/commit/5a940b5446a65fa741fe1a9d0f45b3457459b15a))
+* **operator:** wire the decision engine, cluster tier, convergence detector, federation checks and audit events ([#1675](https://github.com/diillson/chatcli/issues/1675)) ([761e469](https://github.com/diillson/chatcli/commit/761e469298e666855b63e152541e8696cc712b40))
+* **server:** accept RS256 and mTLS as startup credentials, name certificate callers and rate limit by subject ([#1658](https://github.com/diillson/chatcli/issues/1658)) ([acc38eb](https://github.com/diillson/chatcli/commit/acc38eb09b0e4275c0d5c56d3535e21f1713482c))
+* **server:** route every prompt RPC through streaming, fallback chain, catalog max tokens and usage attribution ([#1656](https://github.com/diillson/chatcli/issues/1656)) ([fdf3bb2](https://github.com/diillson/chatcli/commit/fdf3bb2231ca30abe7e8d2ea8a7b8878a6fdcc0d))
+* **server:** serve the full ChatCLI turn engine over gRPC with ChatTurn, RunCoder, RunAgent and tool RPCs ([#1663](https://github.com/diillson/chatcli/issues/1663)) ([4af42db](https://github.com/diillson/chatcli/commit/4af42dbf12f28af26cedffc0ac6031bf11007915))
+* **server:** stream watcher alerts to the operator instead of polling ([#1671](https://github.com/diillson/chatcli/issues/1671)) ([ac79780](https://github.com/diillson/chatcli/commit/ac797809c0cef6e50d3dcb3a0898c8ca4d64f365))
+* **web:** /web command opens the browser app on the terminal session, config section and composer routing ([#1678](https://github.com/diillson/chatcli/issues/1678)) ([958233d](https://github.com/diillson/chatcli/commit/958233d28bb3e5a425625034ad86c3b1ed33526c))
+* **web:** bundled web application page ([#1677](https://github.com/diillson/chatcli/issues/1677)) ([41044ee](https://github.com/diillson/chatcli/commit/41044eed812e1d79c941156f0fa1364534fbcaf3))
+* **web:** local web UI backend on the shared engine with streamed turns and browser permissions ([#1676](https://github.com/diillson/chatcli/issues/1676)) ([914a539](https://github.com/diillson/chatcli/commit/914a539ccaad8f78749cb156603944ff2f74d766))
+
+
+### Bug Fixes
+
+* **deploy:** repair stale server and operator artifacts and scope the docs version bump ([#1655](https://github.com/diillson/chatcli/issues/1655)) ([3bdb1b4](https://github.com/diillson/chatcli/commit/3bdb1b447af7c0c253c60c007cefdc3eb497d8f2))
+* **server:** make the alert stream overflow test deterministic ([#1674](https://github.com/diillson/chatcli/issues/1674)) ([a70ed37](https://github.com/diillson/chatcli/commit/a70ed375157741fd76408fc9a05fab71ca567eed))
+
 ## [1.210.3](https://github.com/diillson/chatcli/compare/v1.210.2...v1.210.3) (2026-09-24)
 
 
