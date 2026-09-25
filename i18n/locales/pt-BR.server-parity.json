@@ -1,0 +1,8 @@
+{
+  "server.route.auth_refreshed": "Credenciais do servidor renovadas após erro de autenticação; repetindo a requisição",
+  "server.route.auth_reroute_failed": "Não foi possível reconstruir o cliente LLM após renovar as credenciais",
+  "server.route.refusal_no_sibling": "Resposta interrompida pelo classificador de segurança e sem modelo irmão disponível para repetir",
+  "server.route.refusal_reroute_failed": "Não foi possível criar o cliente do modelo irmão para repetir após a recusa",
+  "server.route.refusal_retry": "Resposta interrompida pelo classificador de segurança; repetindo uma vez no modelo irmão",
+  "llm.fallback.stream_closed_empty": "O provedor %s fechou o stream sem enviar nada"
+}

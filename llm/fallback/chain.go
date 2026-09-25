@@ -247,6 +247,111 @@ func (c *Chain) SendPromptWithTools(ctx context.Context, prompt string, history 
 	return nil, errors.New(i18n.T("llm.fallback.no_tool_providers"))
 }
 
+// SupportsStreaming reports whether at least one entry of the chain can
+// stream. The chain itself always accepts SendPromptStream: entries that
+// cannot stream answer as a single chunk.
+func (c *Chain) SupportsStreaming() bool {
+	for _, entry := range c.entries {
+		if client.IsStreamingCapable(entry.Client) {
+			return true
+		}
+	}
+	return false
+}
+
+// SendPromptStream streams through the chain. Failover is possible only
+// while nothing has been delivered: an entry that fails before its first
+// text chunk is skipped like a failed SendPrompt, while an error after text
+// already flowed is forwarded as-is (the caller has shown partial output
+// and a second provider would start over). Entries without streaming
+// support answer through SendPrompt as one chunk, so a chain mixing both
+// kinds still streams from the ones that can.
+func (c *Chain) SendPromptStream(ctx context.Context, prompt string, history []models.Message, maxTokens int) (<-chan client.StreamChunk, error) {
+	var lastErr error
+	for _, entry := range c.entries {
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
+		if !c.isAvailable(entry.Provider) {
+			c.logger.Debug(i18n.T("llm.fallback.skipping_cooldown"),
+				zap.String("provider", entry.Provider))
+			continue
+		}
+		out, err := c.streamEntry(ctx, entry, prompt, history, maxTokens)
+		if err == nil {
+			return out, nil
+		}
+		errClass := ClassifyError(err)
+		c.logger.Warn(i18n.T("llm.fallback.request_failed"),
+			zap.String("provider", entry.Provider),
+			zap.Int("attempt", 1),
+			zap.String("error_class", errClass.String()),
+			zap.Error(err),
+		)
+		c.markFailure(entry.Provider, err, errClass)
+		lastErr = err
+	}
+	if lastErr != nil {
+		return nil, fmt.Errorf("%s: %w", i18n.T("llm.fallback.all_failed"), lastErr)
+	}
+	return nil, errors.New(i18n.T("llm.fallback.no_providers"))
+}
+
+// streamEntry opens a stream on one entry and waits for its first event so
+// a provider that rejects the request up front (auth, model not found,
+// overload before any token) still fails over. Non-streaming entries are
+// served through SendPrompt as a single Done chunk.
+func (c *Chain) streamEntry(ctx context.Context, entry FallbackEntry, prompt string, history []models.Message, maxTokens int) (<-chan client.StreamChunk, error) {
+	sc, ok := client.AsStreamingClient(entry.Client)
+	if !ok {
+		text, err := entry.Client.SendPrompt(ctx, prompt, history, maxTokens)
+		if err != nil {
+			return nil, err
+		}
+		c.markSuccess(entry.Provider)
+		c.setLastServed(entry)
+		out := make(chan client.StreamChunk, 1)
+		out <- client.StreamChunk{Text: text, Done: true, Usage: c.LastUsage(), StopReason: c.LastStopReason()}
+		close(out)
+		return out, nil
+	}
+	in, err := sc.SendPromptStream(ctx, prompt, history, maxTokens)
+	if err != nil {
+		return nil, err
+	}
+	first, open := <-in
+	if !open {
+		return nil, errors.New(i18n.T("llm.fallback.stream_closed_empty", entry.Provider))
+	}
+	if first.Error != nil {
+		return nil, first.Error
+	}
+	// The entry answered: from here on it owns the stream.
+	c.markSuccess(entry.Provider)
+	c.setLastServed(entry)
+	out := make(chan client.StreamChunk)
+	go func() {
+		defer close(out)
+		forward := func(ch client.StreamChunk) bool {
+			select {
+			case out <- ch:
+				return true
+			case <-ctx.Done():
+				return false
+			}
+		}
+		if !forward(first) {
+			return
+		}
+		for ch := range in {
+			if !forward(ch) {
+				return
+			}
+		}
+	}()
+	return out, nil
+}
+
 // GetHealth returns health status for all providers.
 func (c *Chain) GetHealth() []ProviderHealth {
 	c.mu.RLock()

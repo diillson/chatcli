@@ -102,6 +102,19 @@ service ChatCLIService {
 
 // --- SendPrompt ---
 
+// TokenUsage is the usage the provider reported for one reply, as the
+// server saw it. When estimated is true the provider returned no usage and
+// the counts derive from character length; remote clients price the reply
+// locally with their own pricing table.
+message TokenUsage {
+  int32 prompt_tokens = 1;
+  int32 completion_tokens = 2;
+  int32 cache_read_tokens = 3;
+  int32 cache_write_tokens = 4;
+  int32 reasoning_tokens = 5;
+  bool estimated = 6;
+}
+
 message SendPromptRequest {
   string prompt = 1;
   repeated ChatMessage history = 2;
@@ -114,8 +127,10 @@ message SendPromptRequest {
 
 message SendPromptResponse {
   string response = 1;
-  string model = 2;
-  string provider = 3;
+  string model = 2;       // model that actually answered (fallback chain aware)
+  string provider = 3;    // provider that actually answered
+  TokenUsage usage = 4;
+  string stop_reason = 5; // end_turn, max_tokens, refusal, ... as the provider reported
 }
 
 // --- StreamPrompt ---
@@ -135,6 +150,8 @@ message StreamPromptResponse {
   bool done = 2;          // true when stream is complete
   string model = 3;
   string provider = 4;
+  TokenUsage usage = 5;   // only on the final (done) message
+  string stop_reason = 6; // only on the final (done) message
 }
 
 // --- InteractiveSession ---
@@ -300,6 +317,7 @@ message AnalyzeIssueResponse {
   string model = 4;
   string provider = 5;
   repeated SuggestedAction suggested_actions = 6;
+  TokenUsage usage = 7;
 }
 
 message SuggestedAction {
@@ -359,6 +377,9 @@ message AgenticStepResponse {
   // GAP-01 fix.
   bool diverges_from_insight = 9;
   string divergence_reason = 10;               // LLM-provided justification when intentionally diverging
+  TokenUsage usage = 11;
+  string model = 12;                           // model that answered this step
+  string provider = 13;                        // provider that answered this step
 }
 
 // =============================================================================

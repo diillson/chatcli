@@ -651,27 +651,6 @@ func (cli *ChatCLI) getClient() client.LLMClient {
 	return c
 }
 
-// providerMaxTokensEnv maps each known provider (canonical, upper-cased name)
-// to its operator-facing override env var. Keeping this as a table rather
-// than a long if/else chain lets a new provider plug in with a single line
-// and keeps the lookup function inside the project's cyclomatic budget.
-var providerMaxTokensEnv = map[string]string{
-	"OPENAI":    "OPENAI_MAX_TOKENS",
-	"CLAUDEAI":  "ANTHROPIC_MAX_TOKENS",
-	"GOOGLEAI":  "GOOGLEAI_MAX_TOKENS",
-	"XAI":       "XAI_MAX_TOKENS",
-	"ZAI":       "ZAI_MAX_TOKENS",
-	"MINIMAX":   "MINIMAX_MAX_TOKENS",
-	"MOONSHOT":  "MOONSHOT_MAX_TOKENS",
-	"OLLAMA":    "OLLAMA_MAX_TOKENS",
-	"STACKSPOT": "STACKSPOT_MAX_TOKENS",
-	"COPILOT":   "COPILOT_MAX_TOKENS",
-	// BEDROCK_MAX_TOKENS is the primary env the Bedrock client reads (it
-	// also accepts ANTHROPIC_MAX_TOKENS as a secondary, handled client-side).
-	"BEDROCK":    "BEDROCK_MAX_TOKENS",
-	"OPENROUTER": "OPENROUTER_MAX_TOKENS",
-}
-
 // getMaxTokensForCurrentLLM picks the per-turn `max_tokens` for the active
 // LLM by walking the precedence chain:
 //
@@ -701,25 +680,11 @@ func (cli *ChatCLI) effectiveMaxTokensDisplay() string {
 	return fmt.Sprintf("%d", effective)
 }
 
-// providerMaxTokensOverride reads the configured env var for the provider
-// and returns its positive-integer value, or 0 when the env is unset,
-// empty, non-numeric, or non-positive. Unknown providers (or providers
-// without a registered env var) silently yield 0 so the caller falls back
-// to the catalog default.
+// providerMaxTokensOverride reads the provider's *_MAX_TOKENS env var
+// through the catalog table every surface shares (CLI, gRPC server, RPC
+// backends), so an operator override means the same thing everywhere.
 func providerMaxTokensOverride(provider string) int {
-	envName, ok := providerMaxTokensEnv[strings.ToUpper(provider)]
-	if !ok {
-		return 0
-	}
-	raw := os.Getenv(envName)
-	if raw == "" {
-		return 0
-	}
-	n, err := strconv.Atoi(raw)
-	if err != nil || n <= 0 {
-		return 0
-	}
-	return n
+	return catalog.MaxTokensEnvOverride(provider)
 }
 
 // estimateBytesFromTokens estima a quantidade de bytes baseada em tokens

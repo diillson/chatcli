@@ -972,6 +972,11 @@ func (cli *ChatCLI) executeStreamingTurn(
 ) (string, error) {
 	chunks, err := sc.SendPromptStream(ctx, userInput+additionalContext, tempHistory, effectiveMaxTokens)
 	if err != nil && cli.refreshClientOnAuthError(err) {
+		// The refresh rebuilt cli.Client; sc still holds the expired
+		// credential unless the turn was routed to another model.
+		if fresh, ok := client.AsStreamingClient(cli.clientAfterRefresh(activeClient, resolution.Changed)); ok {
+			sc = fresh
+		}
 		chunks, err = sc.SendPromptStream(ctx, userInput+additionalContext, tempHistory, effectiveMaxTokens)
 	}
 
@@ -1019,6 +1024,7 @@ func (cli *ChatCLI) executeBufferedTurn(
 ) (string, error) {
 	aiResponse, err := activeClient.SendPrompt(ctx, userInput+additionalContext, tempHistory, effectiveMaxTokens)
 	if cli.refreshClientOnAuthError(err) {
+		activeClient = cli.clientAfterRefresh(activeClient, false)
 		aiResponse, err = activeClient.SendPrompt(ctx, userInput+additionalContext, tempHistory, effectiveMaxTokens)
 	}
 	cli.animation.StopThinkingAnimation()
@@ -1348,4 +1354,21 @@ func formatTokenSummary(u *models.UsageInfo) string {
 	// latter is only the uncached delta, so a turn that shipped a 22K
 	// prefix (and paid to write it into the cache) rendered as "3↑".
 	return i18n.T("chat.envelope.tokens", u.InputTotal(), u.CompletionTokens)
+}
+
+// clientAfterRefresh returns the client a retry should use once
+// refreshClientOnAuthError rebuilt cli.Client: the rebuilt default client
+// when the turn ran on it, or the routed client unchanged when a skill or
+// override routed the turn elsewhere (that route was not refreshed and is
+// not the one that expired).
+func (cli *ChatCLI) clientAfterRefresh(routed client.LLMClient, routedElsewhere bool) client.LLMClient {
+	if routedElsewhere {
+		return routed
+	}
+	cli.mu.Lock()
+	defer cli.mu.Unlock()
+	if cli.Client != nil {
+		return cli.Client
+	}
+	return routed
 }

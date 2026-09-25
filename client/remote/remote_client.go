@@ -9,11 +9,15 @@ import (
 	"context"
 	"crypto/tls"
 	"crypto/x509"
+	"errors"
 	"fmt"
+	"io"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
+	llmclient "github.com/diillson/chatcli/llm/client"
 	"github.com/diillson/chatcli/models"
 	pb "github.com/diillson/chatcli/proto/chatcli/v1"
 	"go.uber.org/zap"
@@ -36,6 +40,13 @@ type Client struct {
 	model          string            // effective model name (for display)
 	provider       string            // effective provider name (for display)
 	logger         *zap.Logger
+
+	// Last reply attribution, as the server reported it: usage and stop
+	// reason feed the local cost tracker and agent loop through the
+	// UsageAwareClient / StopReasonAwareClient interfaces.
+	lastMu         sync.Mutex
+	lastUsage      *models.UsageInfo
+	lastStopReason string
 }
 
 // Config holds remote client configuration.
@@ -183,17 +194,9 @@ func (c *Client) GetModelName() string {
 func (c *Client) SendPrompt(ctx context.Context, prompt string, history []models.Message, maxTokens int) (string, error) {
 	ctx = c.withAuth(ctx)
 
-	protoHistory := make([]*pb.ChatMessage, 0, len(history))
-	for _, msg := range history {
-		protoHistory = append(protoHistory, &pb.ChatMessage{
-			Role:    msg.Role,
-			Content: msg.Content,
-		})
-	}
-
 	resp, err := c.grpcClient.SendPrompt(ctx, &pb.SendPromptRequest{
 		Prompt:         prompt,
-		History:        protoHistory,
+		History:        historyToProto(history),
 		MaxTokens:      int32(maxTokens), //#nosec G115 -- value bounded by domain (counts/versions/fd)
 		Provider:       c.overProvider,
 		Model:          c.overModel,
@@ -204,16 +207,119 @@ func (c *Client) SendPrompt(ctx context.Context, prompt string, history []models
 		return "", fmt.Errorf("remote SendPrompt failed: %w", err)
 	}
 
-	// Update model/provider from server response when not explicitly set by the client.
-	// This allows the display to show the actual model being used on the server.
-	if resp.Model != "" && c.overModel == "" {
-		c.model = resp.Model
-	}
-	if resp.Provider != "" && c.overProvider == "" {
-		c.provider = resp.Provider
-	}
-
+	c.noteReply(resp.Model, resp.Provider, resp.Usage, resp.StopReason)
 	return resp.Response, nil
+}
+
+// noteReply records who answered and what it cost. Model and provider
+// follow the server's attribution (the fallback chain may have answered
+// with another provider) unless the client pinned them explicitly.
+func (c *Client) noteReply(model, provider string, usage *pb.TokenUsage, stopReason string) {
+	c.lastMu.Lock()
+	defer c.lastMu.Unlock()
+	if model != "" && c.overModel == "" {
+		c.model = model
+	}
+	if provider != "" && c.overProvider == "" {
+		c.provider = provider
+	}
+	c.lastUsage = usageFromProto(usage)
+	c.lastStopReason = stopReason
+}
+
+// usageFromProto converts the wire usage into the model the cost tracker
+// prices. A nil usage means the server reported none (older servers).
+func usageFromProto(u *pb.TokenUsage) *models.UsageInfo {
+	if u == nil {
+		return nil
+	}
+	return &models.UsageInfo{
+		PromptTokens:             int(u.PromptTokens),
+		CompletionTokens:         int(u.CompletionTokens),
+		TotalTokens:              int(u.PromptTokens + u.CompletionTokens),
+		CacheReadInputTokens:     int(u.CacheReadTokens),
+		CacheCreationInputTokens: int(u.CacheWriteTokens),
+		ReasoningTokens:          int(u.ReasoningTokens),
+		IsReal:                   !u.Estimated,
+	}
+}
+
+// LastUsage implements client.UsageAwareClient with the usage the server
+// reported for the most recent reply, so `/cost` over `chatcli connect`
+// prices real tokens instead of a character estimate.
+func (c *Client) LastUsage() *models.UsageInfo {
+	c.lastMu.Lock()
+	defer c.lastMu.Unlock()
+	return c.lastUsage
+}
+
+// LastStopReason implements client.StopReasonAwareClient.
+func (c *Client) LastStopReason() string {
+	c.lastMu.Lock()
+	defer c.lastMu.Unlock()
+	return c.lastStopReason
+}
+
+// SupportsStreaming implements client.StreamingClient: the server streams
+// text as the provider produces it.
+func (c *Client) SupportsStreaming() bool { return true }
+
+// SendPromptStream implements client.StreamingClient over the StreamPrompt
+// RPC. Chunks are forwarded as they arrive; the final message carries the
+// usage and stop reason, which are also recorded for LastUsage.
+func (c *Client) SendPromptStream(ctx context.Context, prompt string, history []models.Message, maxTokens int) (<-chan llmclient.StreamChunk, error) {
+	ctx = c.withAuth(ctx)
+	stream, err := c.grpcClient.StreamPrompt(ctx, &pb.StreamPromptRequest{
+		Prompt:         prompt,
+		History:        historyToProto(history),
+		MaxTokens:      int32(maxTokens), //#nosec G115 -- value bounded by domain (counts/versions/fd)
+		Provider:       c.overProvider,
+		Model:          c.overModel,
+		ClientApiKey:   c.clientAPIKey,
+		ProviderConfig: c.providerConfig,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("remote StreamPrompt failed: %w", err)
+	}
+	out := make(chan llmclient.StreamChunk)
+	go func() {
+		defer close(out)
+		for {
+			msg, err := stream.Recv()
+			if err != nil {
+				if errors.Is(err, io.EOF) {
+					// Older servers close without a done message.
+					out <- llmclient.StreamChunk{Done: true}
+					return
+				}
+				out <- llmclient.StreamChunk{Error: fmt.Errorf("remote StreamPrompt failed: %w", err)}
+				return
+			}
+			if msg.Done {
+				c.noteReply(msg.Model, msg.Provider, msg.Usage, msg.StopReason)
+				out <- llmclient.StreamChunk{Text: msg.Chunk, Done: true, Usage: usageFromProto(msg.Usage), StopReason: msg.StopReason}
+				return
+			}
+			select {
+			case out <- llmclient.StreamChunk{Text: msg.Chunk}:
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
+	return out, nil
+}
+
+// historyToProto converts the local history for the wire.
+func historyToProto(history []models.Message) []*pb.ChatMessage {
+	protoHistory := make([]*pb.ChatMessage, 0, len(history))
+	for _, msg := range history {
+		protoHistory = append(protoHistory, &pb.ChatMessage{
+			Role:    msg.Role,
+			Content: msg.Content,
+		})
+	}
+	return protoHistory
 }
 
 // GetProvider returns the remote server's provider.

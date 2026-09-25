@@ -53,7 +53,7 @@ func (h *Handler) AnalyzeIssue(ctx context.Context, req *pb.AnalyzeIssueRequest)
 		return nil, status.Errorf(codes.InvalidArgument, "%s", i18n.T("server.analysis.issue_name_required"))
 	}
 
-	llmClient, err := h.getClient(req.Provider, req.Model, "", nil)
+	route, err := h.resolveRoute(req.Provider, req.Model, "", nil)
 	if err != nil {
 		h.logger.Error(i18n.T("server.analysis.llm_client_failed"), zap.Error(err))
 		return nil, status.Errorf(codes.Internal, "%s", i18n.T("server.analysis.get_client_error", err))
@@ -67,11 +67,12 @@ func (h *Handler) AnalyzeIssue(ctx context.Context, req *pb.AnalyzeIssueRequest)
 	// and would duplicate/conflict with the operator's context. Skills are a
 	// different matter: server-side skill guidance (runbooks, conventions)
 	// must reach operator analysis prompts too, so only applySkills runs.
-	response, err := llmClient.SendPrompt(ctx, h.applySkills(prompt), nil, 0)
+	res, err := h.complete(ctx, route, h.applySkills(prompt), nil, h.effectiveMaxTokens(0, route))
 	if err != nil {
 		h.logger.Error(i18n.T("server.analysis.llm_failed"), zap.Error(err), zap.String("issue", req.IssueName))
 		return nil, status.Errorf(codes.Internal, "%s", i18n.T("server.analysis.llm_error", err))
 	}
+	response := res.text
 
 	analysis := parseAnalysisResponse(response)
 
@@ -89,11 +90,6 @@ func (h *Handler) AnalyzeIssue(ctx context.Context, req *pb.AnalyzeIssueRequest)
 			zap.String("first_action", firstActionType(analysis.Actions)))
 	}
 
-	provider := req.Provider
-	if provider == "" {
-		provider = h.defaultProvider
-	}
-
 	// Map parsed actions to proto SuggestedAction
 	suggestedActions := make([]*pb.SuggestedAction, 0, len(analysis.Actions))
 	for _, a := range analysis.Actions {
@@ -109,9 +105,10 @@ func (h *Handler) AnalyzeIssue(ctx context.Context, req *pb.AnalyzeIssueRequest)
 		Analysis:         analysis.Analysis,
 		Confidence:       analysis.Confidence,
 		Recommendations:  analysis.Recommendations,
-		Model:            llmClient.GetModelName(),
-		Provider:         provider,
+		Model:            res.model,
+		Provider:         res.provider,
 		SuggestedActions: suggestedActions,
+		Usage:            usageToProto(res.usage),
 	}, nil
 }
 
@@ -544,7 +541,7 @@ func (h *Handler) AgenticStep(ctx context.Context, req *pb.AgenticStepRequest) (
 		return nil, status.Errorf(codes.InvalidArgument, "%s", i18n.T("server.agentic.issue_name_required"))
 	}
 
-	llmClient, err := h.getClient(req.Provider, req.Model, "", nil)
+	route, err := h.resolveRoute(req.Provider, req.Model, "", nil)
 	if err != nil {
 		h.logger.Error(i18n.T("server.agentic.llm_client_failed"), zap.Error(err))
 		return nil, status.Errorf(codes.Internal, "%s", i18n.T("server.agentic.get_client_error", err))
@@ -553,13 +550,16 @@ func (h *Handler) AgenticStep(ctx context.Context, req *pb.AgenticStepRequest) (
 	prompt := buildAgenticStepPrompt(req)
 	// Same contract as AnalyzeIssue: no enrichPrompt (operator owns the k8s
 	// context), but server-side skills still activate on the step prompt.
-	response, err := llmClient.SendPrompt(ctx, h.applySkills(prompt), nil, 0)
+	res, err := h.complete(ctx, route, h.applySkills(prompt), nil, h.effectiveMaxTokens(0, route))
 	if err != nil {
 		h.logger.Error(i18n.T("server.agentic.llm_failed"), zap.Error(err), zap.String("issue", req.IssueName), zap.Int32("step", req.CurrentStep))
 		return nil, status.Errorf(codes.Internal, "%s", i18n.T("server.agentic.llm_error", err))
 	}
 
-	parsed := parseAgenticStepResponse(response)
+	parsed := parseAgenticStepResponse(res.text)
+	parsed.Usage = usageToProto(res.usage)
+	parsed.Model = res.model
+	parsed.Provider = res.provider
 
 	// GAP-01 fix: detect when the agentic loop's next_action contradicts the
 	// AIInsight's primary suggested action. The LLM is asked to populate

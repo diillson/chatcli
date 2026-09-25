@@ -77,7 +77,11 @@ type LLMManager interface {
 
 // LLMManagerImpl gerencia diferentes clientes LLM e o TokenManager
 type LLMManagerImpl struct {
-	clients          map[string]func(string) (client.LLMClient, error)
+	clients map[string]func(string) (client.LLMClient, error)
+	// clientsMu guards clients: RefreshProviders rewrites factories at
+	// runtime (OAuth refresh, env reload, the gRPC server's 401 recovery)
+	// while concurrent requests resolve them through GetClient.
+	clientsMu        sync.RWMutex
 	logger           *zap.Logger
 	tokenManager     token.Manager
 	mu               sync.RWMutex
@@ -614,19 +618,30 @@ func (m *LLMManagerImpl) configurarDevinCLIClient(maxRetries int, initialBackoff
 	}
 }
 
+// clientFactory returns the registered factory for provider under the
+// read lock; the factory itself runs outside the lock (it may do I/O).
+func (m *LLMManagerImpl) clientFactory(provider string) (func(string) (client.LLMClient, error), bool) {
+	m.clientsMu.RLock()
+	defer m.clientsMu.RUnlock()
+	factoryFunc, ok := m.clients[provider]
+	return factoryFunc, ok
+}
+
 // GetAvailableProviders retorna uma lista de provedores disponíveis configurados
 func (m *LLMManagerImpl) GetAvailableProviders() []string {
+	m.clientsMu.RLock()
 	providers := make([]string, 0, len(m.clients))
 	for provider := range m.clients {
 		providers = append(providers, provider)
 	}
+	m.clientsMu.RUnlock()
 	sort.Strings(providers)
 	return providers
 }
 
 // GetClient retorna um cliente LLM com base no provedor e no modelo especificados.
 func (m *LLMManagerImpl) GetClient(provider string, model string) (client.LLMClient, error) {
-	factoryFunc, ok := m.clients[provider]
+	factoryFunc, ok := m.clientFactory(provider)
 	if !ok {
 		m.logger.Warn(i18n.T("llm.manager.client_attempt_failed"),
 			zap.String("provider", provider))
@@ -649,7 +664,7 @@ func (m *LLMManagerImpl) GetClient(provider string, model string) (client.LLMCli
 // client implements client.ModelLister, it fetches models dynamically from the API.
 // Otherwise, it falls back to the static catalog.
 func (m *LLMManagerImpl) ListModelsForProvider(ctx context.Context, provider string) ([]client.ModelInfo, error) {
-	factoryFunc, ok := m.clients[provider]
+	factoryFunc, ok := m.clientFactory(provider)
 	if !ok {
 		return nil, fmt.Errorf("%s", i18n.T("llm.manager.provider_unsupported", provider))
 	}
@@ -753,6 +768,12 @@ func (m *LLMManagerImpl) RefreshProviders() {
 
 	m.closeTokenProviders()
 	auth.InvalidateCache()
+
+	// The configurar* calls below rewrite factories in m.clients; hold the
+	// write lock for the whole rebuild so a concurrent GetClient sees either
+	// the old or the new factory, never a map being written.
+	m.clientsMu.Lock()
+	defer m.clientsMu.Unlock()
 
 	// Re-configure OAuth providers. configurar* only registers the factory
 	// if the TokenProvider resolves, so an existing working factory is
