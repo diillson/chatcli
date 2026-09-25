@@ -28,7 +28,7 @@ import (
 )
 
 const (
-	tokenHeader       = "X-Web-Token"
+	tokenHeader       = "X-Web-Token" // #nosec G101 -- the header name that carries the token, not a credential
 	readHeaderTimeout = 10 * time.Second
 	// maxJSONBody bounds ordinary requests; maxMediaBody bounds audio and
 	// image uploads.
