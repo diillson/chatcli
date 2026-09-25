@@ -10,6 +10,7 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/subtle"
+	"embed"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -43,11 +44,27 @@ const (
 	bootPlaceholder          = "__CHATCLI_WEB_BOOT__"
 )
 
+// assets holds the application page. A single file, no build step, no
+// external resources: the strict CSP forbids them and the UI must work
+// offline next to the terminal.
+//
+//go:embed assets/app.html
+var assets embed.FS
+
+// Page returns the bundled application HTML.
+func Page() []byte {
+	raw, err := assets.ReadFile("assets/app.html")
+	if err != nil {
+		return nil
+	}
+	return raw
+}
+
 // Options configure a web server.
 type Options struct {
 	Backend Backend
 	// Page is the application HTML; the boot placeholder in it is replaced
-	// with the boot JSON. Nil serves a placeholder page.
+	// with the boot JSON. Nil serves the bundled page.
 	Page []byte
 	// Addr is the listen address; empty binds 127.0.0.1 on a free port.
 	Addr string
@@ -101,6 +118,12 @@ func Start(opts Options) (*Server, error) {
 	}
 	if opts.PermissionTimeout <= 0 {
 		opts.PermissionTimeout = defaultPermissionTimeout
+	}
+	if len(opts.Page) == 0 {
+		opts.Page = Page()
+	}
+	if opts.Strings == nil {
+		opts.Strings = UIStrings()
 	}
 	addr := opts.Addr
 	if addr == "" {

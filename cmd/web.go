@@ -29,11 +29,12 @@ import (
 	"github.com/diillson/chatcli/version"
 )
 
-// webPage is the application page; set by the package that embeds it so
-// this file has no build-time dependency on the assets.
+// webPage, when set through SetWebPage, replaces the bundled application
+// page; nil serves the page embedded in the webui package.
 var webPage []byte
 
-// SetWebPage installs the application HTML the web server serves.
+// SetWebPage installs a custom application page (a build that wants to
+// ship its own front end). The bundled page is used when none is set.
 func SetWebPage(page []byte) { webPage = page }
 
 // webBrowserLauncher opens the URL; tests replace it.
