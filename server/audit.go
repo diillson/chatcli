@@ -245,6 +245,7 @@ func isSecuritySensitive(method string) bool {
 		"ExecuteRemotePlugin", "DownloadPlugin",
 		"SendPrompt", "StreamPrompt", "InteractiveSession",
 		"AnalyzeIssue",
+		"ChatTurn", "RunCoder", "RunAgent", "RunPipelineTool",
 	}
 	for _, s := range sensitive {
 		if strings.HasSuffix(method, "/"+s) {

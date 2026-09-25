@@ -50,6 +50,11 @@ const (
 	ChatCLIService_SubscribeConversation_FullMethodName     = "/chatcli.v1.ChatCLIService/SubscribeConversation"
 	ChatCLIService_SetBinding_FullMethodName                = "/chatcli.v1.ChatCLIService/SetBinding"
 	ChatCLIService_ListBindings_FullMethodName              = "/chatcli.v1.ChatCLIService/ListBindings"
+	ChatCLIService_ChatTurn_FullMethodName                  = "/chatcli.v1.ChatCLIService/ChatTurn"
+	ChatCLIService_RunCoder_FullMethodName                  = "/chatcli.v1.ChatCLIService/RunCoder"
+	ChatCLIService_RunAgent_FullMethodName                  = "/chatcli.v1.ChatCLIService/RunAgent"
+	ChatCLIService_ListPipelineTools_FullMethodName         = "/chatcli.v1.ChatCLIService/ListPipelineTools"
+	ChatCLIService_RunPipelineTool_FullMethodName           = "/chatcli.v1.ChatCLIService/RunPipelineTool"
 )
 
 // ChatCLIServiceClient is the client API for ChatCLIService service.
@@ -116,6 +121,16 @@ type ChatCLIServiceClient interface {
 	SetBinding(ctx context.Context, in *SetBindingRequest, opts ...grpc.CallOption) (*SetBindingResponse, error)
 	// ListBindings returns channel→principal bindings (optionally filtered).
 	ListBindings(ctx context.Context, in *ListBindingsRequest, opts ...grpc.CallOption) (*ListBindingsResponse, error)
+	// --- Pipeline: the full ChatCLI turn engine hosted by the server (opt-in,
+	// CHATCLI_SERVER_PIPELINE=true). Unlike SendPrompt, a ChatTurn runs the same
+	// enrichment an interactive turn gets (memory, contexts, skills, knowledge,
+	// compaction) and RunCoder/RunAgent drive the real agent loops with the
+	// server's tools. Sessions are namespaced by the caller's principal. ---
+	ChatTurn(ctx context.Context, in *ChatTurnRequest, opts ...grpc.CallOption) (*ChatTurnResponse, error)
+	RunCoder(ctx context.Context, in *PipelineTaskRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[PipelineTaskEvent], error)
+	RunAgent(ctx context.Context, in *PipelineTaskRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[PipelineTaskEvent], error)
+	ListPipelineTools(ctx context.Context, in *ListPipelineToolsRequest, opts ...grpc.CallOption) (*ListPipelineToolsResponse, error)
+	RunPipelineTool(ctx context.Context, in *RunPipelineToolRequest, opts ...grpc.CallOption) (*RunPipelineToolResponse, error)
 }
 
 type chatCLIServiceClient struct {
@@ -426,6 +441,74 @@ func (c *chatCLIServiceClient) ListBindings(ctx context.Context, in *ListBinding
 	return out, nil
 }
 
+func (c *chatCLIServiceClient) ChatTurn(ctx context.Context, in *ChatTurnRequest, opts ...grpc.CallOption) (*ChatTurnResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ChatTurnResponse)
+	err := c.cc.Invoke(ctx, ChatCLIService_ChatTurn_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *chatCLIServiceClient) RunCoder(ctx context.Context, in *PipelineTaskRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[PipelineTaskEvent], error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	stream, err := c.cc.NewStream(ctx, &ChatCLIService_ServiceDesc.Streams[4], ChatCLIService_RunCoder_FullMethodName, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	x := &grpc.GenericClientStream[PipelineTaskRequest, PipelineTaskEvent]{ClientStream: stream}
+	if err := x.ClientStream.SendMsg(in); err != nil {
+		return nil, err
+	}
+	if err := x.ClientStream.CloseSend(); err != nil {
+		return nil, err
+	}
+	return x, nil
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type ChatCLIService_RunCoderClient = grpc.ServerStreamingClient[PipelineTaskEvent]
+
+func (c *chatCLIServiceClient) RunAgent(ctx context.Context, in *PipelineTaskRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[PipelineTaskEvent], error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	stream, err := c.cc.NewStream(ctx, &ChatCLIService_ServiceDesc.Streams[5], ChatCLIService_RunAgent_FullMethodName, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	x := &grpc.GenericClientStream[PipelineTaskRequest, PipelineTaskEvent]{ClientStream: stream}
+	if err := x.ClientStream.SendMsg(in); err != nil {
+		return nil, err
+	}
+	if err := x.ClientStream.CloseSend(); err != nil {
+		return nil, err
+	}
+	return x, nil
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type ChatCLIService_RunAgentClient = grpc.ServerStreamingClient[PipelineTaskEvent]
+
+func (c *chatCLIServiceClient) ListPipelineTools(ctx context.Context, in *ListPipelineToolsRequest, opts ...grpc.CallOption) (*ListPipelineToolsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ListPipelineToolsResponse)
+	err := c.cc.Invoke(ctx, ChatCLIService_ListPipelineTools_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *chatCLIServiceClient) RunPipelineTool(ctx context.Context, in *RunPipelineToolRequest, opts ...grpc.CallOption) (*RunPipelineToolResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(RunPipelineToolResponse)
+	err := c.cc.Invoke(ctx, ChatCLIService_RunPipelineTool_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // ChatCLIServiceServer is the server API for ChatCLIService service.
 // All implementations must embed UnimplementedChatCLIServiceServer
 // for forward compatibility.
@@ -490,6 +573,16 @@ type ChatCLIServiceServer interface {
 	SetBinding(context.Context, *SetBindingRequest) (*SetBindingResponse, error)
 	// ListBindings returns channel→principal bindings (optionally filtered).
 	ListBindings(context.Context, *ListBindingsRequest) (*ListBindingsResponse, error)
+	// --- Pipeline: the full ChatCLI turn engine hosted by the server (opt-in,
+	// CHATCLI_SERVER_PIPELINE=true). Unlike SendPrompt, a ChatTurn runs the same
+	// enrichment an interactive turn gets (memory, contexts, skills, knowledge,
+	// compaction) and RunCoder/RunAgent drive the real agent loops with the
+	// server's tools. Sessions are namespaced by the caller's principal. ---
+	ChatTurn(context.Context, *ChatTurnRequest) (*ChatTurnResponse, error)
+	RunCoder(*PipelineTaskRequest, grpc.ServerStreamingServer[PipelineTaskEvent]) error
+	RunAgent(*PipelineTaskRequest, grpc.ServerStreamingServer[PipelineTaskEvent]) error
+	ListPipelineTools(context.Context, *ListPipelineToolsRequest) (*ListPipelineToolsResponse, error)
+	RunPipelineTool(context.Context, *RunPipelineToolRequest) (*RunPipelineToolResponse, error)
 	mustEmbedUnimplementedChatCLIServiceServer()
 }
 
@@ -580,6 +673,21 @@ func (UnimplementedChatCLIServiceServer) SetBinding(context.Context, *SetBinding
 }
 func (UnimplementedChatCLIServiceServer) ListBindings(context.Context, *ListBindingsRequest) (*ListBindingsResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ListBindings not implemented")
+}
+func (UnimplementedChatCLIServiceServer) ChatTurn(context.Context, *ChatTurnRequest) (*ChatTurnResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ChatTurn not implemented")
+}
+func (UnimplementedChatCLIServiceServer) RunCoder(*PipelineTaskRequest, grpc.ServerStreamingServer[PipelineTaskEvent]) error {
+	return status.Errorf(codes.Unimplemented, "method RunCoder not implemented")
+}
+func (UnimplementedChatCLIServiceServer) RunAgent(*PipelineTaskRequest, grpc.ServerStreamingServer[PipelineTaskEvent]) error {
+	return status.Errorf(codes.Unimplemented, "method RunAgent not implemented")
+}
+func (UnimplementedChatCLIServiceServer) ListPipelineTools(context.Context, *ListPipelineToolsRequest) (*ListPipelineToolsResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ListPipelineTools not implemented")
+}
+func (UnimplementedChatCLIServiceServer) RunPipelineTool(context.Context, *RunPipelineToolRequest) (*RunPipelineToolResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method RunPipelineTool not implemented")
 }
 func (UnimplementedChatCLIServiceServer) mustEmbedUnimplementedChatCLIServiceServer() {}
 func (UnimplementedChatCLIServiceServer) testEmbeddedByValue()                        {}
@@ -1056,6 +1164,82 @@ func _ChatCLIService_ListBindings_Handler(srv interface{}, ctx context.Context, 
 	return interceptor(ctx, in, info, handler)
 }
 
+func _ChatCLIService_ChatTurn_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ChatTurnRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ChatCLIServiceServer).ChatTurn(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ChatCLIService_ChatTurn_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ChatCLIServiceServer).ChatTurn(ctx, req.(*ChatTurnRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _ChatCLIService_RunCoder_Handler(srv interface{}, stream grpc.ServerStream) error {
+	m := new(PipelineTaskRequest)
+	if err := stream.RecvMsg(m); err != nil {
+		return err
+	}
+	return srv.(ChatCLIServiceServer).RunCoder(m, &grpc.GenericServerStream[PipelineTaskRequest, PipelineTaskEvent]{ServerStream: stream})
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type ChatCLIService_RunCoderServer = grpc.ServerStreamingServer[PipelineTaskEvent]
+
+func _ChatCLIService_RunAgent_Handler(srv interface{}, stream grpc.ServerStream) error {
+	m := new(PipelineTaskRequest)
+	if err := stream.RecvMsg(m); err != nil {
+		return err
+	}
+	return srv.(ChatCLIServiceServer).RunAgent(m, &grpc.GenericServerStream[PipelineTaskRequest, PipelineTaskEvent]{ServerStream: stream})
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type ChatCLIService_RunAgentServer = grpc.ServerStreamingServer[PipelineTaskEvent]
+
+func _ChatCLIService_ListPipelineTools_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListPipelineToolsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ChatCLIServiceServer).ListPipelineTools(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ChatCLIService_ListPipelineTools_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ChatCLIServiceServer).ListPipelineTools(ctx, req.(*ListPipelineToolsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _ChatCLIService_RunPipelineTool_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(RunPipelineToolRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ChatCLIServiceServer).RunPipelineTool(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ChatCLIService_RunPipelineTool_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ChatCLIServiceServer).RunPipelineTool(ctx, req.(*RunPipelineToolRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // ChatCLIService_ServiceDesc is the grpc.ServiceDesc for ChatCLIService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -1155,6 +1339,18 @@ var ChatCLIService_ServiceDesc = grpc.ServiceDesc{
 			MethodName: "ListBindings",
 			Handler:    _ChatCLIService_ListBindings_Handler,
 		},
+		{
+			MethodName: "ChatTurn",
+			Handler:    _ChatCLIService_ChatTurn_Handler,
+		},
+		{
+			MethodName: "ListPipelineTools",
+			Handler:    _ChatCLIService_ListPipelineTools_Handler,
+		},
+		{
+			MethodName: "RunPipelineTool",
+			Handler:    _ChatCLIService_RunPipelineTool_Handler,
+		},
 	},
 	Streams: []grpc.StreamDesc{
 		{
@@ -1176,6 +1372,16 @@ var ChatCLIService_ServiceDesc = grpc.ServiceDesc{
 		{
 			StreamName:    "SubscribeConversation",
 			Handler:       _ChatCLIService_SubscribeConversation_Handler,
+			ServerStreams: true,
+		},
+		{
+			StreamName:    "RunCoder",
+			Handler:       _ChatCLIService_RunCoder_Handler,
+			ServerStreams: true,
+		},
+		{
+			StreamName:    "RunAgent",
+			Handler:       _ChatCLIService_RunAgent_Handler,
 			ServerStreams: true,
 		},
 	},

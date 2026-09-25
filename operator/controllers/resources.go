@@ -221,6 +221,11 @@ func (r *InstanceReconciler) buildPodSpec(instance *platformv1alpha1.Instance) c
 		})
 	}
 
+	// Pipeline RPCs (server-hosted turn engine)
+	if instance.Spec.Pipeline != nil && instance.Spec.Pipeline.Enabled {
+		container.Env = append(container.Env, corev1.EnvVar{Name: "CHATCLI_SERVER_PIPELINE", Value: "true"})
+	}
+
 	// RS256 verification key, issuer and audience from spec.server.security
 	if sec := instance.Spec.Server.Security; sec != nil {
 		if sec.JWTPublicKeyRef != nil {

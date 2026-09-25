@@ -63,3 +63,18 @@ func TestBuildPodSpec_RendersRS256IssuerAndAudience(t *testing.T) {
 		}
 	}
 }
+
+func TestBuildPodSpec_RendersPipelineToggle(t *testing.T) {
+	r := &InstanceReconciler{Scheme: newScheme()}
+	on := newInstance("pipe", "default")
+	on.Spec.Pipeline = &platformv1alpha1.PipelineSpec{Enabled: true}
+	env := envByName(r.buildPodSpec(on).Containers[0].Env)
+	if env["CHATCLI_SERVER_PIPELINE"].Value != "true" {
+		t.Errorf("pipeline env not rendered: %+v", env["CHATCLI_SERVER_PIPELINE"])
+	}
+	off := newInstance("plain", "default")
+	off.Spec.Pipeline = &platformv1alpha1.PipelineSpec{Enabled: false}
+	if _, ok := envByName(r.buildPodSpec(off).Containers[0].Env)["CHATCLI_SERVER_PIPELINE"]; ok {
+		t.Error("disabled pipeline must not render the variable")
+	}
+}

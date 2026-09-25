@@ -56,6 +56,12 @@ var requestValidators = map[string]func(interface{}) error{
 	"SubscribeConversation":     validateSubscribeConversation,
 	"SetBinding":                validateSetBinding,
 	"ListBindings":              validateListBindings,
+	// Pipeline
+	"ChatTurn":          validateChatTurn,
+	"RunCoder":          validatePipelineTask,
+	"RunAgent":          validatePipelineTask,
+	"ListPipelineTools": validateNoFields,
+	"RunPipelineTool":   validateRunPipelineTool,
 }
 
 // validateNoFields is the explicit "this request carries nothing worth

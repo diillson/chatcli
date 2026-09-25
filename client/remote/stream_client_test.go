@@ -55,7 +55,7 @@ func (s *fakePromptServer) StreamPrompt(req *pb.StreamPromptRequest, stream pb.C
 		Usage: &pb.TokenUsage{PromptTokens: 4, CompletionTokens: 2, Estimated: true}, StopReason: "max_tokens"})
 }
 
-func newPromptTestClient(t *testing.T, fake *fakePromptServer) *Client {
+func newPromptTestClient(t *testing.T, fake pb.ChatCLIServiceServer) *Client {
 	t.Helper()
 	lis := bufconn.Listen(1 << 20)
 	srv := grpc.NewServer()

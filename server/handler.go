@@ -73,6 +73,10 @@ type Handler struct {
 
 	// Request-path routing state (credential refresh throttle).
 	handlerRouteState
+
+	// Pipeline backend (optional, nil when the server hosts no ChatCLI).
+	// Set via SetPipelineBackend.
+	pipeline PipelineBackend
 }
 
 // SessionStore abstracts session persistence for testability.
@@ -382,6 +386,8 @@ func (h *Handler) GetServerInfo(ctx context.Context, req *pb.GetServerInfoReques
 	if h.watcherDeployment != "" {
 		resp.WatcherTarget = h.watcherNamespace + "/" + h.watcherDeployment
 	}
+
+	resp.PipelineEnabled = h.pipeline != nil
 
 	// Resource counts
 	if h.pluginManager != nil {

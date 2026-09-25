@@ -190,6 +190,8 @@ spec:
       #   key: token
       # mtlsRole: user              # role for callers identified by client certificate alone
       # operatorClientCertSecretName: chatcli-operator-cert   # tls.crt/tls.key the operator presents
+  # pipeline:                        # host the full ChatCLI turn engine behind the
+  #   enabled: true                  # ChatTurn/RunCoder/RunAgent/tool RPCs (serialized turns)
   watcher:
     enabled: true
     interval: "30s"
