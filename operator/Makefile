@@ -1,6 +1,6 @@
 IMG ?= ghcr.io/diillson/chatcli-operator:latest
 
-.PHONY: all build run test manifests docker-build docker-push install uninstall deploy undeploy fmt vet
+.PHONY: all build run dash-preview test manifests docker-build docker-push install uninstall deploy undeploy fmt vet
 
 all: build
 
@@ -11,6 +11,12 @@ build: fmt vet
 
 run: fmt vet
 	go run main.go
+
+# Serve the web dashboard on localhost over a fake client seeded with
+# synthetic incidents: no cluster needed. Open the printed URL and log in
+# with the API key "preview". Override the address with DASHPREVIEW_ADDR.
+dash-preview:
+	go run ./hack/dashpreview
 
 ## Test
 
