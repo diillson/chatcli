@@ -196,25 +196,70 @@ func (wb *WatcherBridge) buildConnectionOpts(ctx context.Context, inst *platform
 		}
 	}
 
-	// Token authentication
+	// Credential the operator presents, by precedence:
+	//   1. spec.server.token — the shared token, exactly as before;
+	//   2. spec.server.security.operatorTokenRef — a credential issued for
+	//      the operator (a JWT from an external issuer, needed when the
+	//      server verifies RS256, or a dedicated shared token);
+	//   3. spec.server.security.jwtSecretRef — the server's HS256 secret,
+	//      from which the operator mints its own short-lived tokens.
+	// An Instance secured by JWT alone used to leave every operator call
+	// unauthenticated.
 	if inst.Spec.Server.Token != nil && inst.Spec.Server.Token.Name != "" {
-		var tokenSecret corev1.Secret
-		key := types.NamespacedName{Name: inst.Spec.Server.Token.Name, Namespace: inst.Namespace}
-		if err := wb.client.Get(ctx, key, &tokenSecret); err != nil {
-			return opts, fmt.Errorf("reading token secret %q: %w", inst.Spec.Server.Token.Name, err)
+		token, err := wb.readSecretKey(ctx, inst.Namespace, inst.Spec.Server.Token, "token")
+		if err != nil {
+			return opts, err
 		}
-		tokenKey := inst.Spec.Server.Token.Key
-		if tokenKey == "" {
-			tokenKey = "token"
-		}
-		tokenValue, ok := tokenSecret.Data[tokenKey]
-		if !ok {
-			return opts, fmt.Errorf("key %q not found in secret %q", tokenKey, inst.Spec.Server.Token.Name)
-		}
-		opts.Token = string(tokenValue)
+		opts.Token = token
+		return opts, nil
 	}
-
+	sec := inst.Spec.Server.Security
+	if sec == nil {
+		return opts, nil
+	}
+	if sec.OperatorTokenRef != nil && sec.OperatorTokenRef.Name != "" {
+		token, err := wb.readSecretKey(ctx, inst.Namespace, sec.OperatorTokenRef, "token")
+		if err != nil {
+			return opts, err
+		}
+		opts.TokenSource = staticTokenSource(token)
+		return opts, nil
+	}
+	if sec.JWTSecretRef != nil && sec.JWTSecretRef.Name != "" {
+		secret, err := wb.readSecretKey(ctx, inst.Namespace, sec.JWTSecretRef, "secret")
+		if err != nil {
+			return opts, err
+		}
+		minter, err := newJWTMinter([]byte(secret), sec.JWTIssuer, sec.JWTAudience)
+		if err != nil {
+			return opts, fmt.Errorf("instance %s: %w", inst.Name, err)
+		}
+		opts.TokenSource = minter.Token
+		return opts, nil
+	}
+	if sec.JWTPublicKeyRef != nil && sec.JWTPublicKeyRef.Name != "" {
+		return opts, fmt.Errorf("instance %s verifies RS256 tokens (jwtPublicKeyRef) and the operator has no credential to present: set spec.server.security.operatorTokenRef", inst.Name)
+	}
 	return opts, nil
+}
+
+// readSecretKey returns the value of ref.Key (or defaultKey when the ref
+// names none) in the referenced Secret.
+func (wb *WatcherBridge) readSecretKey(ctx context.Context, namespace string, ref *platformv1alpha1.SecretKeyRefSpec, defaultKey string) (string, error) {
+	var secret corev1.Secret
+	key := types.NamespacedName{Name: ref.Name, Namespace: namespace}
+	if err := wb.client.Get(ctx, key, &secret); err != nil {
+		return "", fmt.Errorf("reading secret %q: %w", ref.Name, err)
+	}
+	k := ref.Key
+	if k == "" {
+		k = defaultKey
+	}
+	value, ok := secret.Data[k]
+	if !ok {
+		return "", fmt.Errorf("key %q not found in secret %q", k, ref.Name)
+	}
+	return string(value), nil
 }
 
 func (wb *WatcherBridge) createAnomaly(ctx context.Context, alert *pb.WatcherAlert) error {

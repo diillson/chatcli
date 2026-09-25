@@ -826,6 +826,33 @@ spec:
                         description: EnableReflection enables gRPC reflection (requires
                           also CHATCLI_GRPC_REFLECTION=true).
                         type: boolean
+                      jwtAudience:
+                        description: |-
+                          JWTAudience, when set, is the aud claim the server requires. Maps to
+                          CHATCLI_JWT_AUDIENCE; the operator stamps it on the tokens it mints.
+                        type: string
+                      jwtIssuer:
+                        description: |-
+                          JWTIssuer, when set, is the iss claim the server requires. Maps to
+                          CHATCLI_JWT_ISSUER; the operator stamps it on the tokens it mints.
+                        type: string
+                      jwtPublicKeyRef:
+                        description: |-
+                          JWTPublicKeyRef references a Secret key containing the RSA public key
+                          (PEM) the server verifies RS256 tokens with. Maps to
+                          CHATCLI_JWT_PUBLIC_KEY. With only this configured the operator cannot
+                          sign its own tokens: set operatorTokenRef so it can authenticate.
+                        properties:
+                          key:
+                            description: Key is the key within the Secret.
+                            type: string
+                          name:
+                            description: Name is the Secret name.
+                            type: string
+                        required:
+                        - key
+                        - name
+                        type: object
                       jwtSecretRef:
                         description: |-
                           JWTSecretRef references a Secret key containing the JWT signing secret.
@@ -863,6 +890,23 @@ spec:
                           Maps to CHATCLI_MAX_SEND_MSG_SIZE env var. Default: 52428800 (50MB).
                         format: int32
                         type: integer
+                      operatorTokenRef:
+                        description: |-
+                          OperatorTokenRef references a Secret key holding the credential the
+                          operator presents to this server: a JWT issued out of band, or the
+                          shared token. Without it the operator uses spec.server.token, or
+                          mints its own HS256 tokens from jwtSecretRef.
+                        properties:
+                          key:
+                            description: Key is the key within the Secret.
+                            type: string
+                          name:
+                            description: Name is the Secret name.
+                            type: string
+                        required:
+                        - key
+                        - name
+                        type: object
                       rateLimitBurst:
                         description: |-
                           RateLimitBurst is the maximum burst size for rate limiting.

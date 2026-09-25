@@ -176,9 +176,17 @@ spec:
       rateLimitRps: 20
       rateLimitBurst: 50
       bindAddress: "0.0.0.0"
-      jwtSecretRef:
+      jwtSecretRef:                 # HS256: the operator mints its own tokens from it
         name: chatcli-jwt
         key: secret
+      # jwtPublicKeyRef:            # RS256 instead: PEM public key the server verifies with
+      #   name: chatcli-jwt
+      #   key: public.pem
+      # jwtIssuer: "my-idp"         # required iss / aud claims, when your issuer sets them
+      # jwtAudience: "chatcli"
+      # operatorTokenRef:           # credential the operator presents (needed with RS256)
+      #   name: chatcli-operator-jwt
+      #   key: token
   watcher:
     enabled: true
     interval: "30s"
@@ -287,11 +295,36 @@ Three ways to satisfy it:
 | Option | Field | When |
 |---|---|---|
 | Shared token | `spec.server.token` | one credential for every caller |
-| Per-user JWTs | `spec.server.security.jwtSecretRef` | callers carry their own identity and role; tokens must carry an `exp` claim |
+| Per-user JWTs (HS256) | `spec.server.security.jwtSecretRef` | callers carry their own identity and role; tokens must carry an `exp` claim |
+| Per-user JWTs (RS256) | `spec.server.security.jwtPublicKeyRef` | tokens are issued by an external identity provider; `jwtIssuer` / `jwtAudience` pin the claims the server requires |
 | No credential | `spec.server.security.bindAddress: "127.0.0.1"` | the server is only reached from inside its own pod |
 
 A credential supplied directly through `spec.extraEnv` as
-`CHATCLI_SERVER_TOKEN` or `CHATCLI_JWT_SECRET` counts too.
+`CHATCLI_SERVER_TOKEN`, `CHATCLI_JWT_SECRET`, `CHATCLI_JWT_PUBLIC_KEY` or
+`CHATCLI_SERVER_TLS_CLIENT_CA` counts too.
+
+#### How the operator authenticates
+
+The AIOps pipeline (alerts, analysis, remediation steps) calls the same
+server, so the operator needs a credential of its own. It picks one in this
+order and reports the choice on the Instance:
+
+| Precedence | Field | What the operator sends |
+|---|---|---|
+| 1 | `spec.server.token` | the shared token, as before |
+| 2 | `spec.server.security.operatorTokenRef` | the referenced value verbatim: a JWT issued for `chatcli-operator` by your identity provider (RS256 servers), or a dedicated shared token |
+| 3 | `spec.server.security.jwtSecretRef` | short-lived HS256 tokens it mints itself (`sub: chatcli-operator`, `role: operator`, one hour, renewed at 45 minutes), stamped with `jwtIssuer` / `jwtAudience` when set |
+
+```bash
+kubectl get instance my-instance -o jsonpath='{.status.conditions[?(@.type=="OperatorCredentialConfigured")]}'
+```
+
+`OperatorCredentialConfigured=False` means the server is secured in a way
+the operator cannot satisfy (an RS256 public key with no
+`operatorTokenRef`, or a credential passed only through `extraEnv`): the
+Instance still provisions, but `AnalyzeIssue` and `AgenticStep` will be
+refused until one of the fields above is set. The minted token carries the
+`operator` role, which the AIOps RPCs need and nothing more.
 
 <!-- provider auth follows -->
 

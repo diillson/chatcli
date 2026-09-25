@@ -203,6 +203,30 @@ type ServerSecuritySpec struct {
 	// +optional
 	JWTSecretRef *SecretKeyRefSpec `json:"jwtSecretRef,omitempty"`
 
+	// JWTPublicKeyRef references a Secret key containing the RSA public key
+	// (PEM) the server verifies RS256 tokens with. Maps to
+	// CHATCLI_JWT_PUBLIC_KEY. With only this configured the operator cannot
+	// sign its own tokens: set operatorTokenRef so it can authenticate.
+	// +optional
+	JWTPublicKeyRef *SecretKeyRefSpec `json:"jwtPublicKeyRef,omitempty"`
+
+	// JWTIssuer, when set, is the iss claim the server requires. Maps to
+	// CHATCLI_JWT_ISSUER; the operator stamps it on the tokens it mints.
+	// +optional
+	JWTIssuer string `json:"jwtIssuer,omitempty"`
+
+	// JWTAudience, when set, is the aud claim the server requires. Maps to
+	// CHATCLI_JWT_AUDIENCE; the operator stamps it on the tokens it mints.
+	// +optional
+	JWTAudience string `json:"jwtAudience,omitempty"`
+
+	// OperatorTokenRef references a Secret key holding the credential the
+	// operator presents to this server: a JWT issued out of band, or the
+	// shared token. Without it the operator uses spec.server.token, or
+	// mints its own HS256 tokens from jwtSecretRef.
+	// +optional
+	OperatorTokenRef *SecretKeyRefSpec `json:"operatorTokenRef,omitempty"`
+
 	// RateLimitRPS is the per-client rate limit in requests per second.
 	// Maps to CHATCLI_RATE_LIMIT_RPS env var. Default: 10.
 	// +optional

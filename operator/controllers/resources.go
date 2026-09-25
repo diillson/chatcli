@@ -221,6 +221,28 @@ func (r *InstanceReconciler) buildPodSpec(instance *platformv1alpha1.Instance) c
 		})
 	}
 
+	// RS256 verification key, issuer and audience from spec.server.security
+	if sec := instance.Spec.Server.Security; sec != nil {
+		if sec.JWTPublicKeyRef != nil {
+			container.Env = append(container.Env, corev1.EnvVar{
+				Name: "CHATCLI_JWT_PUBLIC_KEY",
+				ValueFrom: &corev1.EnvVarSource{
+					SecretKeyRef: &corev1.SecretKeySelector{
+						LocalObjectReference: corev1.LocalObjectReference{Name: sec.JWTPublicKeyRef.Name},
+						Key:                  sec.JWTPublicKeyRef.Key,
+						Optional:             boolPtr(true),
+					},
+				},
+			})
+		}
+		if sec.JWTIssuer != "" {
+			container.Env = append(container.Env, corev1.EnvVar{Name: "CHATCLI_JWT_ISSUER", Value: sec.JWTIssuer})
+		}
+		if sec.JWTAudience != "" {
+			container.Env = append(container.Env, corev1.EnvVar{Name: "CHATCLI_JWT_AUDIENCE", Value: sec.JWTAudience})
+		}
+	}
+
 	// Server token from spec.server.token
 	if instance.Spec.Server.Token != nil {
 		container.Env = append(container.Env, corev1.EnvVar{
