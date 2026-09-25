@@ -18,6 +18,9 @@ RUN go mod download
 WORKDIR /workspace
 COPY proto/ proto/
 COPY pkg/ pkg/
+COPY config/ config/
+COPY llm/ llm/
+COPY models/ models/
 COPY operator/main.go operator/main.go
 COPY operator/api/ operator/api/
 COPY operator/controllers/ operator/controllers/

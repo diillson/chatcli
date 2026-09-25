@@ -4,11 +4,21 @@
  * License: Apache-2.0
  */
 
-// Package pricing is a leaf registry of per-model token rates discovered at
-// runtime — the per-account prices a provider reports in its own model
-// listing (the Devin CLI's cost_summary today). The cost tracker's static
-// tables stay the source for providers with published list prices; this
-// registry covers the ones whose rate is only knowable from the account.
+// Package pricing is ChatCLI's USD pricing engine, a leaf every surface
+// prices token usage with — the CLI's cost tracker and /cost, the gRPC
+// server and the Kubernetes operator — so they can never disagree about
+// the price of the same call.
+//
+// It holds three things. The static tables of published list prices per
+// provider and model family, with each provider's cache discount and
+// long-context tier (tables.go, devin.go). The rates discovered at
+// runtime: the per-account prices a provider reports in its own model
+// listing (the Devin CLI's cost_summary; Register/Lookup) and the
+// operator's CHATCLI_MODEL_PRICING override (override.go), which outranks
+// everything. And the cost formula itself (engine.go): RatesFor resolves
+// every knob for a provider+model, RecordCost prices a cumulative token
+// ledger, and CostOf prices one provider-reported usage payload in a
+// single call.
 package pricing
 
 import (

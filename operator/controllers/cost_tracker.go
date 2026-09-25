@@ -12,6 +12,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
+	"github.com/diillson/chatcli/llm/pricing"
 	platformv1alpha1 "github.com/diillson/chatcli/operator/api/v1alpha1"
 )
 
@@ -75,21 +76,32 @@ func NewCostTracker(c client.Client) *CostTracker {
 	return &CostTracker{client: c}
 }
 
-func (ct *CostTracker) getTokenPricing(ctx context.Context, namespace, provider string) tokenPricing {
+// getTokenPricing resolves the per-million token rates of provider+model.
+// Precedence: an explicit entry in the chatcli-cost-config ConfigMap (the
+// cluster operator's word), then the shared pricing engine in llm/pricing
+// (the same per-model tables, overrides and subscription rules the CLI's
+// /cost uses, so a ledger here and a session there agree on the price of
+// the same call), then the legacy per-provider defaults below for a model
+// the engine does not know.
+func (ct *CostTracker) getTokenPricing(ctx context.Context, namespace, provider, model string) tokenPricing {
 	// Try to load from config
 	cm := &corev1.ConfigMap{}
 	if err := ct.client.Get(ctx, types.NamespacedName{Name: costConfigCM, Namespace: namespace}, cm); err == nil {
 		if cm.Data != nil {
-			var pricing map[string]tokenPricing
-			if json.Unmarshal([]byte(cm.Data["pricing"]), &pricing) == nil {
-				if p, ok := pricing[provider]; ok {
+			var configured map[string]tokenPricing
+			if json.Unmarshal([]byte(cm.Data["pricing"]), &configured) == nil {
+				if p, ok := configured[provider]; ok {
 					return p
 				}
 			}
 		}
 	}
 
-	// Defaults
+	if rates := pricing.RatesFor(provider, model); rates.Known {
+		return tokenPricing{InputPerMillion: rates.InputPerMTok, OutputPerMillion: rates.OutputPerMTok}
+	}
+
+	// Defaults for a model the engine does not price.
 	switch provider {
 	case "CLAUDEAI", "claudeai":
 		return tokenPricing{InputPerMillion: 3.0, OutputPerMillion: 15.0}
@@ -135,9 +147,9 @@ func (ct *CostTracker) RecordLLMCost(ctx context.Context, issueRef platformv1alp
 	cost.LLMCosts.Provider = provider
 	cost.LLMCosts.Model = model
 
-	pricing := ct.getTokenPricing(ctx, namespace, provider)
-	cost.LLMCosts.EstimatedCostUSD = float64(cost.LLMCosts.TotalInputTokens)/1_000_000*pricing.InputPerMillion +
-		float64(cost.LLMCosts.TotalOutputTokens)/1_000_000*pricing.OutputPerMillion
+	rates := ct.getTokenPricing(ctx, namespace, provider, model)
+	cost.LLMCosts.EstimatedCostUSD = float64(cost.LLMCosts.TotalInputTokens)/1_000_000*rates.InputPerMillion +
+		float64(cost.LLMCosts.TotalOutputTokens)/1_000_000*rates.OutputPerMillion
 	cost.TotalCostUSD = cost.LLMCosts.EstimatedCostUSD + cost.DowntimeCost.EstimatedRevenueLoss
 
 	return ct.saveCost(ctx, namespace, cost)
@@ -155,9 +167,9 @@ func (ct *CostTracker) RecordAgenticStep(ctx context.Context, issueRef platformv
 	cost.LLMCosts.Provider = provider
 	cost.LLMCosts.Model = model
 
-	pricing := ct.getTokenPricing(ctx, namespace, provider)
-	cost.LLMCosts.EstimatedCostUSD = float64(cost.LLMCosts.TotalInputTokens)/1_000_000*pricing.InputPerMillion +
-		float64(cost.LLMCosts.TotalOutputTokens)/1_000_000*pricing.OutputPerMillion
+	rates := ct.getTokenPricing(ctx, namespace, provider, model)
+	cost.LLMCosts.EstimatedCostUSD = float64(cost.LLMCosts.TotalInputTokens)/1_000_000*rates.InputPerMillion +
+		float64(cost.LLMCosts.TotalOutputTokens)/1_000_000*rates.OutputPerMillion
 	cost.TotalCostUSD = cost.LLMCosts.EstimatedCostUSD + cost.DowntimeCost.EstimatedRevenueLoss
 
 	return ct.saveCost(ctx, namespace, cost)

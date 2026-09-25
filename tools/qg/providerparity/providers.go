@@ -215,8 +215,8 @@ func DefaultTouchPoints() []TouchPoint {
 		},
 		{
 			ID:          "cost.cli",
-			Description: "cli/cost_tracker.go recognizes the provider in providerFallbackPricing",
-			Path:        "cli/cost_tracker.go",
+			Description: "llm/pricing/tables.go recognizes the provider in providerFallbackPricing",
+			Path:        "llm/pricing/tables.go",
 			Pattern:     `"{lower}"`,
 		},
 		{
