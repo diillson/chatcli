@@ -124,6 +124,11 @@ message TokenUsage {
   int32 cache_write_tokens = 4;
   int32 reasoning_tokens = 5;
   bool estimated = 6;
+  // What the server's pricing engine says this reply cost, in USD, from
+  // the same per-model tables the CLI's /cost uses. cost_known is false
+  // when the model has no published price (cost_usd is then 0).
+  double cost_usd = 7;
+  bool cost_known = 8;
 }
 
 message SendPromptRequest {

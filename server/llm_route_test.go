@@ -168,13 +168,13 @@ func TestComplete_AttributesUsageAndStopReason(t *testing.T) {
 	assert.True(t, res.usage.IsReal)
 	assert.Equal(t, "end_turn", res.stopReason)
 
-	pu := usageToProto(res.usage)
+	pu := usageToProto(res.provider, res.model, res.usage)
 	assert.Equal(t, int32(7), pu.PromptTokens)
 	assert.False(t, pu.Estimated)
 	back := protoToUsage(pu)
 	assert.Equal(t, 9, back.TotalTokens)
 	assert.True(t, back.IsReal)
-	assert.Nil(t, usageToProto(nil))
+	assert.Nil(t, usageToProto("OPENAI", "gpt-6-astra", nil))
 	assert.Nil(t, protoToUsage(nil))
 }
 
@@ -384,4 +384,16 @@ func TestIsAuthError(t *testing.T) {
 	assert.False(t, isAuthError(&utils.APIError{StatusCode: 500}))
 	assert.False(t, isAuthError(errors.New("nope")))
 	assert.False(t, isAuthError(nil))
+}
+
+func TestUsageToProto_PricesWithTheSharedEngine(t *testing.T) {
+	u := &models.UsageInfo{PromptTokens: 1_000_000, CompletionTokens: 1_000_000, IsReal: true}
+	priced := usageToProto("OPENAI", "gpt-6-astra", u)
+	require.NotNil(t, priced)
+	assert.True(t, priced.CostKnown, "a catalog model has a price")
+	assert.Greater(t, priced.CostUsd, 0.0)
+	unknown := usageToProto("OPENAI", "no-such-model-ever", u)
+	assert.False(t, unknown.CostKnown, "an unpriced model reports no cost rather than a guess")
+	assert.Equal(t, 0.0, unknown.CostUsd)
+	assert.Equal(t, int32(1_000_000), unknown.PromptTokens, "tokens are reported either way")
 }

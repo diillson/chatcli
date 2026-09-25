@@ -40,6 +40,7 @@ import (
 	"github.com/diillson/chatcli/i18n"
 	"github.com/diillson/chatcli/llm/catalog"
 	"github.com/diillson/chatcli/llm/client"
+	"github.com/diillson/chatcli/llm/pricing"
 	"github.com/diillson/chatcli/models"
 	pb "github.com/diillson/chatcli/proto/chatcli/v1"
 	"github.com/diillson/chatcli/utils"
@@ -335,11 +336,14 @@ func isAuthError(err error) bool {
 	return false
 }
 
-// usageToProto converts the provider usage into the wire message.
-func usageToProto(u *models.UsageInfo) *pb.TokenUsage {
+// usageToProto converts the provider usage into the wire message and
+// prices it with the shared engine, so a client without a pricing table
+// (the operator, a thin client) sees the same USD the CLI's /cost shows.
+func usageToProto(provider, model string, u *models.UsageInfo) *pb.TokenUsage {
 	if u == nil {
 		return nil
 	}
+	cost := pricing.CostOf(provider, model, u)
 	return &pb.TokenUsage{
 		PromptTokens:     int32(u.PromptTokens),             //#nosec G115 -- token counts are bounded by provider context windows
 		CompletionTokens: int32(u.CompletionTokens),         //#nosec G115 -- see above
@@ -347,6 +351,8 @@ func usageToProto(u *models.UsageInfo) *pb.TokenUsage {
 		CacheWriteTokens: int32(u.CacheCreationInputTokens), //#nosec G115 -- see above
 		ReasoningTokens:  int32(u.ReasoningTokens),          //#nosec G115 -- see above
 		Estimated:        !u.IsReal,
+		CostUsd:          cost.TotalUSD,
+		CostKnown:        cost.Known,
 	}
 }
 

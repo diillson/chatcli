@@ -115,13 +115,14 @@ func (r *AIInsightReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 		return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
 	}
 
-	// Record LLM cost for this analysis call
+	// Record LLM cost for this analysis call: the tokens the provider
+	// reported, attributed to the provider and model that answered (the
+	// server's fallback chain may have routed elsewhere). A response
+	// without usage (older server) falls back to a character estimate.
 	if r.CostTracker != nil {
-		// Estimate tokens from context length (~4 chars per token) and response length
-		inputTokens := int64(len(combinedContext) / 4)
-		outputTokens := int64(len(resp.Analysis) / 4)
-		_ = r.CostTracker.RecordLLMCost(ctx, insight.Spec.IssueRef, issue.Namespace,
-			insight.Spec.Provider, insight.Spec.Model, inputTokens, outputTokens)
+		inputTokens, outputTokens := usageTokens(resp.GetUsage(), int64(len(combinedContext)/4), int64(len(resp.Analysis)/4))
+		provider, model := servedProviderModel(resp.GetProvider(), resp.GetModel(), insight.Spec.Provider, insight.Spec.Model)
+		_ = r.CostTracker.RecordLLMCost(ctx, insight.Spec.IssueRef, issue.Namespace, provider, model, inputTokens, outputTokens)
 	}
 
 	// Update AIInsight status with the analysis
