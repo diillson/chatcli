@@ -61,3 +61,18 @@ func TestRunWeb_RejectsUnknownFlags(t *testing.T) {
 		t.Fatal("an unknown flag must fail before anything boots")
 	}
 }
+
+// A restored transcript carries what people said, never the context
+// ChatCLI injected for a turn or a run.
+func TestRestoreSession_SkipsInjectedContext(t *testing.T) {
+	b := &rpcBackend{sessions: map[string][]models.Message{"web": {
+		models.TurnContextMessage("[TURN CONTEXT] recalled facts"),
+		{Role: "user", Content: "hello"},
+		models.RunContextMessage("[RUN CONTEXT] workspace"),
+		{Role: "assistant", Content: "hi"},
+	}}}
+	items, err := b.RestoreSession(context.Background(), "web")
+	if err != nil || len(items) != 2 || items[0].Content != "hello" || items[1].Content != "hi" {
+		t.Fatalf("items = %+v err=%v", items, err)
+	}
+}

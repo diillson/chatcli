@@ -417,7 +417,10 @@ func (b *rpcBackend) RestoreSession(_ context.Context, session string) ([]rpcser
 		if m.Role != "user" && m.Role != "assistant" {
 			continue
 		}
-		if len(m.ToolCalls) > 0 || strings.TrimSpace(m.Content) == "" {
+		// Context ChatCLI injected for a turn or a run is not something the
+		// user said; a client replaying the transcript must not show it as
+		// a user message.
+		if len(m.ToolCalls) > 0 || m.IsInjectedContext() || strings.TrimSpace(m.Content) == "" {
 			continue
 		}
 		items = append(items, rpcserve.HistoryItem{Role: m.Role, Content: m.Content})

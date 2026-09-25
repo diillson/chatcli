@@ -398,6 +398,7 @@ type ChatCLI struct {
 	pulse *pulse.Controller
 	// dash is the live dashboard server this session started, if any.
 	dash dashState
+	web  webState
 	// pulseCompaction is the telemetry span of the compaction in flight.
 	pulseCompaction atomic.Pointer[pulse.Span]
 	// pendingTurnContext is the chat turn's injected context text between
@@ -2355,6 +2356,7 @@ func (cli *ChatCLI) cleanup(ctx context.Context) {
 		cli.taskGraphAdapter.shutdownDash(ctx)
 	}
 	cli.shutdownDash(ctx)
+	cli.shutdownWeb(ctx)
 
 	// Tear down the session scratch workspace. Respects
 	// CHATCLI_AGENT_KEEP_TMPDIR=true for debugging (files are left behind).
