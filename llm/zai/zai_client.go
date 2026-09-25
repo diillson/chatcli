@@ -23,6 +23,7 @@ import (
 	"github.com/diillson/chatcli/llm/catalog"
 	"github.com/diillson/chatcli/llm/client"
 	"github.com/diillson/chatcli/llm/internal/visionwire"
+	"github.com/diillson/chatcli/llm/zai/codingplan"
 	"github.com/diillson/chatcli/models"
 	"github.com/diillson/chatcli/utils"
 	"go.uber.org/zap"
@@ -49,16 +50,11 @@ type ZAIClient struct {
 // assinatura GLM Coding Plan) > o fallback informado (endpoint oficial
 // pay-as-you-go). A mesma key do platform vale nos dois endpoints; é o
 // caminho /coding/ que decide se a request debita do plano ou dos créditos.
+//
+// A regra vive no pacote-folha llm/zai/codingplan para que o motor de
+// preços (llm/pricing) a consulte sem importar este cliente inteiro.
 func ResolveAPIURL(fallback string) string {
-	if v := strings.TrimSpace(os.Getenv("ZAI_API_URL")); v != "" {
-		return v
-	}
-	if v := strings.TrimSpace(os.Getenv("ZAI_USE_CODING_PLAN")); v != "" {
-		if b, err := strconv.ParseBool(v); err == nil && b {
-			return config.ZAICodingAPIURL
-		}
-	}
-	return fallback
+	return codingplan.ResolveAPIURL(fallback)
 }
 
 // CodingPlanActive reporta se as requests estão indo para um endpoint do GLM
@@ -67,7 +63,7 @@ func ResolveAPIURL(fallback string) string {
 // assinatura não são faturados por token; o cost tracker usa isto para
 // zerar a tarifa (mesmo curto-circuito do Devin/Ollama).
 func CodingPlanActive() bool {
-	return strings.Contains(ResolveAPIURL(config.ZAIAPIURL), "/api/coding/")
+	return codingplan.Active()
 }
 
 // LastUsage returns the token usage from the most recent API call.
