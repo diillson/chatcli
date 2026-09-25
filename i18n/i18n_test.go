@@ -114,3 +114,21 @@ func TestT_UnknownKeyReturnsKey(t *testing.T) {
 		t.Errorf("unknown key must echo the key, got %q", got)
 	}
 }
+
+func TestLookupIn_PerLanguage(t *testing.T) {
+	Init()
+	en, ok := LookupIn("en", "web.ui.composer.send")
+	if !ok || en == "" {
+		t.Fatalf("en lookup failed: %q %v", en, ok)
+	}
+	pt, ok := LookupIn("pt-BR", "web.ui.composer.send")
+	if !ok || pt == "" || pt == en {
+		t.Fatalf("pt-BR lookup failed or equals en: %q %v", pt, ok)
+	}
+	if v, ok := LookupIn("not a tag", "web.ui.composer.send"); !ok || v == "" {
+		t.Fatalf("invalid tag should fall back to default: %q %v", v, ok)
+	}
+	if _, ok := LookupIn("en", "web.ui.__missing__"); ok {
+		t.Fatal("missing key must report false")
+	}
+}

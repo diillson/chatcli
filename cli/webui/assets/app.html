@@ -88,6 +88,8 @@
   .msg.assistant .who { background:var(--panel2); color:var(--brand); border:1px solid var(--border); }
   .msg.system .who { background:transparent; color:var(--faint); }
   .msg .body { flex:1; min-width:0; }
+  .msg .col { flex:1; min-width:0; display:flex; flex-direction:column; }
+  .msg .col .body { flex:none; }
   .msg.user .body { background:var(--user); border-radius:8px; padding:8px 12px; white-space:pre-wrap; }
   .msg .body img.att { max-width:220px; max-height:180px; border-radius:6px; border:1px solid var(--border); display:block; margin-top:6px; }
   .md p { margin:0 0 .7em; } .md p:last-child { margin-bottom:0; }
@@ -104,6 +106,11 @@
   .md th { background:var(--panel2); }
   .md hr { border:0; border-top:1px solid var(--border); margin:.8em 0; }
   .caret::after { content:"▍"; color:var(--brand); animation:blink 1s steps(2) infinite; }
+  .working { display:flex; align-items:center; gap:8px; color:var(--muted); font-size:12px; padding:4px 0; }
+  .working .dots { display:inline-flex; gap:3px; }
+  .working .dots i { width:6px; height:6px; border-radius:50%; background:var(--warn); animation:pulse 1.2s ease-in-out infinite; }
+  .working .dots i:nth-child(2) { animation-delay:.2s; } .working .dots i:nth-child(3) { animation-delay:.4s; }
+  @keyframes pulse { 0%,80%,100% { opacity:.25; transform:scale(.8); } 40% { opacity:1; transform:scale(1); } }
   @keyframes blink { 50% { opacity:0; } }
   details.block { border:1px solid var(--border); border-radius:6px; margin:6px 0; background:var(--panel); }
   details.block summary { cursor:pointer; padding:6px 10px; color:var(--muted); font-size:11.5px; list-style:none; display:flex; align-items:center; gap:8px; }
@@ -264,7 +271,7 @@ const $ = s => document.querySelector(s);
 const $$ = s => Array.from(document.querySelectorAll(s));
 
 // ---------- i18n: English defaults, overridden by the strings the server ships ----------
-const S = Object.assign({
+const DEFAULTS = {
   'mode.chat':'Chat','mode.coder':'Coder','mode.agent':'Agent','btn.panel':'Panel',
   'side.sessions':'Sessions','side.new':'+ New','side.search':'Search sessions…','side.attach':'Attach','side.fork':'Fork','side.delete':'Delete',
   'empty.title':'What are we working on?','empty.body':'The same engine as the terminal: chat, coder and agent with your tools, skills, memory and sessions. Everything you say here continues in the terminal, MCP, ACP and your channels.',
@@ -274,6 +281,7 @@ const S = Object.assign({
   'pane.status':'Status','pane.tools':'Tools','pane.skills':'Skills','pane.mcp':'MCP','pane.memory':'Memory','pane.commands':'Commands','pane.filter':'Filter…',
   'status.version':'Version','status.provider':'Provider','status.model':'Model','status.policy':'Policy','status.maxTokens':'Max tokens','status.session':'Session','status.cost':'Session cost','status.requests':'Requests','status.tokens':'Tokens','status.daily':'Today','status.budgetBlocked':'Budget hard stop active','status.none':'none',
   'perm.title':'Permission requested','perm.deny_always':'Deny always','perm.deny_once':'Deny','perm.allow_always':'Allow always','perm.allow_once':'Allow once',
+  'work.thinking':'Thinking…','work.tool':'Running {name}…','work.waiting':'Waiting for the model…',
   'tool.run':'Run','tool.running':'running…','tool.done':'done','tool.error':'error','tool.readonly':'read-only',
   'skill.view':'View','skill.use':'Use',
   'mcp.connected':'connected','mcp.disconnected':'disconnected','mcp.tools':'{n} tool(s)','mcp.auth':'login required','mcp.none':'No MCP servers configured.',
@@ -282,12 +290,31 @@ const S = Object.assign({
   'stt.recording':'Recording… click to stop','stt.failed':'Transcription failed','tts.speak':'Speak','image.prompt':'Describe the image to generate','image.failed':'Image generation failed',
   'session.bound':'Bound to {name}','session.new':'New session started','session.deleted':'Session deleted','session.confirmDelete':'Delete saved session {name}?','session.forkName':'Name for the fork','session.live':'live',
   'theme':'theme','lang':'language','offline':'Server unreachable','busy':'A turn is already running',
-}, BOOT.strings || {});
-const t = (k, vars) => (S[k] || k).replace(/\{(\w+)\}/g, (_, v) => vars && v in vars ? vars[v] : '');
+};
+// The server ships every switchable language; the page starts in the
+// process language unless the visitor picked another one before.
+const CATALOGS = BOOT.catalogs || {};
+let S = {};
+function setLang(lang, persist) {
+  if (!CATALOGS[lang] && lang !== 'en') lang = 'en';
+  BOOT.lang = lang;
+  S = Object.assign({}, DEFAULTS, CATALOGS[lang] || (lang === BOOT.lang ? BOOT.strings : {}) || {});
+  document.documentElement.lang = lang;
+  $('#btnLang').textContent = lang.toUpperCase().slice(0, 2);
+  $('#btnLang').title = t('lang');
+  applyStrings();
+  if (persist) { try { localStorage.setItem('chatcli_web_lang', lang); } catch {} }
+}
+function nextLang() {
+  const langs = Object.keys(CATALOGS).length ? Object.keys(CATALOGS) : ['en'];
+  return langs[(langs.indexOf(BOOT.lang) + 1) % langs.length];
+}
+const t = (k, vars) => (S[k] || DEFAULTS[k] || k).replace(/\{(\w+)\}/g, (_, v) => vars && v in vars ? vars[v] : '');
 function applyStrings() {
   $$('[data-i18n]').forEach(el => { el.textContent = t(el.dataset.i18n); });
   $$('[data-i18n-placeholder]').forEach(el => { el.placeholder = t(el.dataset.i18nPlaceholder); });
-  document.documentElement.lang = BOOT.lang || 'en';
+  // Panels built from data re-render in the new language.
+  if (typeof renderRoute === 'function' && state.providers) { renderRoute(); renderStatus(); renderTools(); renderSkills(); renderMCP(); renderMemory(); renderCommands(); renderSessions(); }
 }
 
 // ---------- theme ----------
@@ -390,7 +417,9 @@ function addMessage(role, text, images) {
   hideEmpty();
   const el = document.createElement('div'); el.className = 'msg ' + role;
   const who = role === 'user' ? 'you' : role === 'assistant' ? 'ai' : '·';
-  el.innerHTML = '<div class="who">' + who + '</div><div class="body"></div>';
+  // The assistant column stacks the thinking block and the activity line
+  // above the prose, full width, instead of beside it.
+  el.innerHTML = '<div class="who">' + who + '</div>' + (role === 'assistant' ? '<div class="col"><div class="body"></div></div>' : '<div class="body"></div>');
   const body = el.querySelector('.body');
   if (role === 'assistant') { body.classList.add('md'); body.innerHTML = md(text || ''); }
   else body.textContent = text || '';
@@ -408,20 +437,34 @@ transcript.addEventListener('click', e => {
 // streamed assistant message: chunks accumulate as text, rendered as markdown on the fly
 function beginAssistant() {
   const el = addMessage('assistant', '');
-  const body = el.querySelector('.body'); body.classList.add('caret');
-  state.streaming = { el, body, text: '', blocks: body };
+  const body = el.querySelector('.body');
+  // The bubble opens right under the user's message with a live activity
+  // line, so the reader never has to look away to know the turn is alive.
+  const work = document.createElement('div'); work.className = 'working';
+  work.innerHTML = '<span class="dots"><i></i><i></i><i></i></span><span class="wtext"></span>';
+  body.before(work);
+  state.streaming = { el, body, text: '', blocks: body, work };
+  setWorking(t('work.waiting'));
   return state.streaming;
+}
+function setWorking(text) {
+  const s = state.streaming; if (!s || !s.work) return;
+  s.work.querySelector('.wtext').textContent = text;
+  s.work.style.display = text ? '' : 'none';
 }
 function appendChunk(text) {
   const s = state.streaming || beginAssistant();
   s.text += text;
   s.body.innerHTML = md(s.text);
   s.body.classList.add('caret');
+  setWorking('');
   scrollDown();
 }
 function endAssistant(finalText) {
   const s = state.streaming; if (!s) { if (finalText) addMessage('assistant', finalText); return; }
   if (finalText && finalText.trim() && s.text.trim() === '') s.text = finalText;
+  if (s.work) s.work.remove();
+  if (s.text.trim() === '' && !s.thought && !s.el.querySelector('details')) { s.el.remove(); state.streaming = null; return; }
   s.body.innerHTML = md(s.text);
   s.body.classList.remove('caret');
   if (BOOT.features.voice && s.text.trim()) {
@@ -436,19 +479,20 @@ function addThought(text) {
   if (!d) {
     d = document.createElement('details'); d.className = 'block thought';
     d.innerHTML = '<summary>' + esc(t('thought')) + '</summary><div class="inner"></div>';
-    s.el.querySelector('.body').before(d); s.thought = d;
-    // thoughts precede the prose: place the details before the markdown body
-    s.el.insertBefore(d, s.el.querySelector('.body'));
+    // Thoughts precede the prose, above the markdown body in the column.
+    s.body.before(d); s.thought = d;
   }
   d.querySelector('.inner').textContent += text;
+  if (!s.text) setWorking(t('work.thinking'));
 }
 function addToolStart(tool) {
   hideEmpty();
   const d = document.createElement('details'); d.className = 'tool run'; d.dataset.id = tool.id;
   d.innerHTML = '<summary><span>' + esc(tool.name) + '</span><span class="hint">' + esc(tool.title || '') + '</span><span class="st">' + esc(t('tool.running')) + '</span></summary>' +
     '<div class="inner">' + (tool.input ? '<pre>' + esc(tool.input) + '</pre>' : '') + '<pre class="out" style="display:none"></pre></div>';
-  const anchor = state.streaming ? state.streaming.el : null;
-  transcript.insertBefore(d, anchor || $('#plan'));
+  const s = state.streaming || beginAssistant();
+  transcript.insertBefore(d, s.el);
+  if (!s.text) setWorking(t('work.tool', { name: tool.name }));
   scrollDown();
 }
 function addToolEnd(tool) {
@@ -457,6 +501,7 @@ function addToolEnd(tool) {
   d.classList.remove('run'); if (tool.is_error) d.classList.add('err');
   d.querySelector('.st').textContent = (tool.is_error ? t('tool.error') : t('tool.done')) + (tool.duration_ms ? ' · ' + (tool.duration_ms / 1000).toFixed(1) + 's' : '');
   if (tool.output) { const o = d.querySelector('.out'); o.textContent = tool.output; o.style.display = ''; }
+  if (state.streaming && !state.streaming.text && !transcript.querySelector('details.tool.run')) setWorking(t('work.thinking'));
 }
 function setPlan(entries) {
   const p = $('#plan');
@@ -497,13 +542,13 @@ async function sendTurn(text) {
   const previews = images.map(i => 'data:' + i.media_type + ';base64,' + i.data);
   addMessage('user', text, previews);
   $('#input').value = ''; autosize(); state.images = []; renderAtts();
-  setBusy(true); setPlan(null);
+  setBusy(true); setPlan(null); beginAssistant();
   let resp;
   try {
     resp = await fetch('/api/turn', { method: 'POST', headers: { 'X-Web-Token': TOKEN, 'Content-Type': 'application/json' },
       body: JSON.stringify({ session: state.session, mode: state.mode, text, provider: state.provider, model: state.model, images }) });
-  } catch (e) { setBusy(false); toast(t('offline'), 'err'); return; }
-  if (!resp.ok) { setBusy(false); let msg = resp.statusText; try { msg = (await resp.json()).error || msg; } catch {} toast(msg, 'err'); return; }
+  } catch (e) { endAssistant(''); setBusy(false); toast(t('offline'), 'err'); return; }
+  if (!resp.ok) { endAssistant(''); setBusy(false); let msg = resp.statusText; try { msg = (await resp.json()).error || msg; } catch {} toast(msg, 'err'); return; }
   const reader = resp.body.getReader(); const dec = new TextDecoder(); let buf = '';
   try {
     for (;;) {
@@ -523,6 +568,7 @@ async function sendTurn(text) {
 function handleEvent(ev) {
   switch (ev.type) {
     case 'run': state.run = ev.run; break;
+    case 'mode': setMode(ev.mode); if (ev.text) addMessage('system', ev.text); break;
     case 'chunk': appendChunk(ev.text); break;
     case 'message': appendChunk(ev.text); break;
     case 'thought': addThought(ev.text); break;
@@ -564,7 +610,7 @@ function palette() {
   if (!hits.length) { pal.classList.remove('on'); return; }
   pal.innerHTML = hits.map((x, i) => '<div class="row' + (i === 0 ? ' on' : '') + '" data-v="' + esc(x.name) + '"><span class="name">' + esc(x.name) + '</span><span class="meta">' + esc(x.desc || '') + '</span></div>').join('');
   pal.classList.add('on');
-  $$('#palette .row').forEach(r => r.addEventListener('click', () => { input.value = r.dataset.v + ' '; pal.classList.remove('on'); input.focus(); autosize(); }));
+  $$('#palette .row').forEach(r => r.addEventListener('click', () => { input.value = m[1] + r.dataset.v.replace(/^[/@]/, '') + ' '; pal.classList.remove('on'); input.focus(); autosize(); }));
 }
 $('#btnAttach').addEventListener('click', () => $('#fileInput').click());
 $('#fileInput').addEventListener('change', async e => {
@@ -627,8 +673,14 @@ if (BOOT.features.images) {
 }
 
 // ---------- mode, route, theme, language, drawer ----------
-$$('#modeSeg button').forEach(b => b.addEventListener('click', () => { state.mode = b.dataset.mode; $$('#modeSeg button').forEach(x => x.classList.toggle('on', x === b)); try { localStorage.setItem('chatcli_web_mode', state.mode); } catch {} }));
-try { const m = localStorage.getItem('chatcli_web_mode'); if (m) $$('#modeSeg button').find(b => b.dataset.mode === m)?.click(); } catch {}
+function setMode(mode) {
+  const b = $$('#modeSeg button').find(x => x.dataset.mode === mode); if (!b) return;
+  state.mode = mode; $$('#modeSeg button').forEach(x => x.classList.toggle('on', x === b));
+  try { localStorage.setItem('chatcli_web_mode', state.mode); } catch {}
+  if (state.providers) renderRoute();
+}
+$$('#modeSeg button').forEach(b => b.addEventListener('click', () => setMode(b.dataset.mode)));
+try { const m = localStorage.getItem('chatcli_web_mode'); if (m) setMode(m); } catch {}
 function renderRoute() {
   const ps = $('#provider'), ms = $('#model');
   ps.innerHTML = state.providers.map(p => '<option value="' + esc(p.name) + '"' + (p.name === state.provider ? ' selected' : '') + '>' + esc(p.name) + '</option>').join('');
@@ -646,7 +698,7 @@ $('#provider').addEventListener('change', async e => {
 });
 $('#model').addEventListener('change', async e => { state.model = e.target.value; renderRoute(); await api('defaults', { json: { provider: state.provider, model: state.model } }).catch(err => toast(err.message, 'err')); });
 $('#btnTheme').addEventListener('click', () => applyTheme(document.documentElement.dataset.theme === 'light' ? 'dark' : 'light'));
-$('#btnLang').addEventListener('click', () => { BOOT.lang = BOOT.lang === 'pt-BR' ? 'en' : 'pt-BR'; toast(t('lang') + ': ' + BOOT.lang); });
+$('#btnLang').addEventListener('click', () => setLang(nextLang(), true));
 $('#btnDrawer').addEventListener('click', () => $('#app').classList.toggle('drawer'));
 $('#btnSide').addEventListener('click', () => { const a = $('#app'); a.classList.toggle('nosidebar'); a.classList.toggle('showside', !a.classList.contains('nosidebar') && window.innerWidth <= 900); });
 $$('#drawerTabs button').forEach(b => b.addEventListener('click', () => {
@@ -675,7 +727,7 @@ function renderTools() {
   const q = ($('#toolSearch').value || '').toLowerCase();
   $('#toolsList').innerHTML = state.tools.filter(x => !q || (x.Name + ' ' + (x.Description || '')).toLowerCase().includes(q)).map(x =>
     '<div class="item"><h4>' + esc(x.Name) + (x.ReadOnly ? ' <span class="chip ok">' + esc(t('tool.readonly')) + '</span>' : '') + '<span class="grow" style="flex:1"></span><button class="ghost" data-use="' + esc(x.Name) + '">' + esc(t('tool.run')) + '</button></h4><p>' + esc(x.Description || '') + '</p>' + (x.Usage ? '<p class="hint">' + esc(x.Usage) + '</p>' : '') + '</div>').join('');
-  $$('#toolsList [data-use]').forEach(b => b.addEventListener('click', () => { input.value = b.dataset.use + ' '; autosize(); input.focus(); }));
+  $$('#toolsList [data-use]').forEach(b => b.addEventListener('click', () => { input.value = '@' + b.dataset.use.replace(/^@/, '') + ' '; autosize(); input.focus(); }));
 }
 $('#toolSearch').addEventListener('input', renderTools);
 function renderSkills() {
@@ -694,7 +746,7 @@ function renderMemory() {
 }
 function renderCommands() {
   $('#commandsList').innerHTML = state.commands.length ? state.commands.map(c => '<div class="item"><h4>' + esc(c.Name) + '<span style="flex:1"></span><button class="ghost" data-cmd="' + esc(c.Name) + '">' + esc(t('skill.use')) + '</button></h4><p>' + esc(c.Description || '') + '</p></div>').join('') : '<p class="hint">' + esc(t('commands.none')) + '</p>';
-  $$('#commandsList [data-cmd]').forEach(b => b.addEventListener('click', () => { input.value = b.dataset.cmd + ' '; autosize(); input.focus(); }));
+  $$('#commandsList [data-cmd]').forEach(b => b.addEventListener('click', () => { input.value = '/' + b.dataset.cmd.replace(/^\//, '') + ' '; autosize(); input.focus(); }));
 }
 
 // ---------- sessions: the shared saved sessions, continuity with the terminal ----------
@@ -742,9 +794,10 @@ async function refreshStatus() { try { state.status = await api('status'); rende
 
 // ---------- boot ----------
 async function boot() {
-  applyStrings();
+  let savedLang = null;
+  try { savedLang = localStorage.getItem('chatcli_web_lang'); } catch {}
+  setLang(savedLang || BOOT.lang || 'en', false);
   $('#webVersion').textContent = 'chatcli ' + (BOOT.version || '');
-  $('#btnLang').textContent = (BOOT.lang || 'en').toUpperCase().slice(0, 2);
   try {
     const j = await api('boot?session=' + encodeURIComponent(state.session));
     state.status = j.status || {}; state.tools = j.tools || []; state.skills = j.skills || []; state.commands = j.commands || []; state.resources = j.resources || []; state.sessions = j.sessions || [];

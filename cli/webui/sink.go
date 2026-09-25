@@ -29,6 +29,7 @@ type event struct {
 	Reply     string      `json:"reply,omitempty"`
 	Error     string      `json:"error,omitempty"`
 	Cancelled bool        `json:"cancelled,omitempty"`
+	Mode      string      `json:"mode,omitempty"`
 }
 
 type toolEvent struct {

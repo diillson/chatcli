@@ -198,3 +198,24 @@ func rawLookup(key string) (string, bool) {
 	}
 	return "", false
 }
+
+// LookupIn resolves key in the catalog of the given language tag (for
+// example "pt-BR" or "en"), falling back to the default language. It lets
+// a surface ship several languages at once, the way the web UI does, while
+// T keeps serving the process language.
+func LookupIn(tag, key string) (string, bool) {
+	parsed, err := language.Parse(tag)
+	if err == nil {
+		if m, ok := rawByTag[parsed]; ok {
+			if v, ok := m[key]; ok {
+				return strings.ReplaceAll(v, "%%", "%"), true
+			}
+		}
+	}
+	if m, ok := rawByTag[defaultLang]; ok {
+		if v, ok := m[key]; ok {
+			return strings.ReplaceAll(v, "%%", "%"), true
+		}
+	}
+	return "", false
+}

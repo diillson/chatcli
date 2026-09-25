@@ -223,13 +223,14 @@ func (s *Server) guard(next http.HandlerFunc) http.HandlerFunc {
 
 // boot is what the page receives at load.
 type boot struct {
-	Lang      string            `json:"lang"`
-	Strings   map[string]string `json:"strings"`
-	ThemeName string            `json:"theme"`
-	ThemeVars map[string]string `json:"theme_vars,omitempty"`
-	Version   string            `json:"version"`
-	Token     string            `json:"token"`
-	Features  features          `json:"features"`
+	Lang      string                       `json:"lang"`
+	Strings   map[string]string            `json:"strings"`
+	Catalogs  map[string]map[string]string `json:"catalogs"`
+	ThemeName string                       `json:"theme"`
+	ThemeVars map[string]string            `json:"theme_vars,omitempty"`
+	Version   string                       `json:"version"`
+	Token     string                       `json:"token"`
+	Features  features                     `json:"features"`
 }
 
 type features struct {
@@ -254,7 +255,7 @@ func (s *Server) bootData() boot {
 	if lang == "" {
 		lang = "en"
 	}
-	return boot{Lang: lang, Strings: s.opts.Strings, ThemeName: s.opts.ThemeName, ThemeVars: s.opts.ThemeVars, Version: s.opts.Version, Token: s.token, Features: s.features()}
+	return boot{Lang: lang, Strings: s.opts.Strings, Catalogs: UICatalogs(), ThemeName: s.opts.ThemeName, ThemeVars: s.opts.ThemeVars, Version: s.opts.Version, Token: s.token, Features: s.features()}
 }
 
 func (s *Server) renderPage() []byte {

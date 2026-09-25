@@ -48,6 +48,7 @@ func RunWeb(args []string, mgr manager.LLMManager, logger *zap.Logger) error {
 	addr := fs.String("addr", "", "listen address (default 127.0.0.1 on a free port; loopback only)")
 	session := fs.String("session", "", "saved session to bind the browser to (continues the terminal conversation)")
 	noBrowser := fs.Bool("no-browser", false, "print the address instead of opening the browser")
+	urlFile := fs.String("url-file", "", "write the address to this file once serving (for a parent process that opens it)")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -83,6 +84,11 @@ func RunWeb(args []string, mgr manager.LLMManager, logger *zap.Logger) error {
 	}
 	fmt.Println(i18n.T("web.cli.serving", srv.URL()))
 	fmt.Println(i18n.T("web.cli.serving_hint"))
+	if *urlFile != "" {
+		if err := os.WriteFile(*urlFile, []byte(srv.URL()+"\n"), 0o600); err != nil {
+			logger.Warn("web: writing the url file", zap.Error(err))
+		}
+	}
 	if !*noBrowser && term.IsTerminal(int(os.Stdout.Fd())) {
 		_ = webBrowserLauncher(srv.URL())
 	}

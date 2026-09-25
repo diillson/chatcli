@@ -291,6 +291,7 @@ func (ch *CommandHandler) buildRoutes() {
 		{"/board", true, func(_ context.Context, in string) bool { c.handleBoardCommand(in); return false }},
 		{"/taskgraph", true, func(_ context.Context, in string) bool { c.handleTaskGraphCommand(in); return false }},
 		{"/dash", true, func(ctx context.Context, in string) bool { c.handleDashCommand(ctx, in); return false }},
+		{"/web", true, func(ctx context.Context, in string) bool { c.handleWebCommand(ctx, in); return false }},
 		{"/mail", true, func(_ context.Context, in string) bool { c.handleMailCommand(in); return false }},
 		{"/resume", false, func(ctx context.Context, in string) bool { c.handleResumeCommand(ctx, in); return false }},
 		{"/cancel-park", false, func(_ context.Context, in string) bool { c.handleCancelParkCommand(in); return false }},

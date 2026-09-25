@@ -62,7 +62,7 @@ import (
 var configSectionNames = []string{
 	"providers", "agent", "security", "chat", "compression", "output", "commands", "ui", "resilience",
 	"proxy", "managed", "policy", "retention", "session", "integrations", "auth", "image", "diagram",
-	"graphview", "taskgraph", "dash", "quality", "update", "memory", "selfevolve", "scheduler", "server", "hub",
+	"graphview", "taskgraph", "dash", "web", "quality", "update", "memory", "selfevolve", "scheduler", "server", "hub",
 }
 
 func (cli *ChatCLI) routeConfigCommand(ctx context.Context, args []string) {
@@ -176,6 +176,7 @@ func (cli *ChatCLI) routeHierarchicalConfig(section string, rest []string) bool 
 		"compression": {cli.showConfigCompression, cli.routeConfigCompression},
 		"compress":    {cli.showConfigCompression, cli.routeConfigCompression},
 		"output":      {cli.showConfigOutput, cli.routeConfigOutput},
+		"web":         {cli.showConfigWeb, cli.routeConfigWeb},
 		"verbosity":   {cli.showConfigOutput, cli.routeConfigOutput},
 		"commands":    {cli.showConfigCommands, cli.routeConfigCommands},
 	}

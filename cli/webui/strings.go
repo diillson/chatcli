@@ -20,7 +20,7 @@ var uiKeys = []string{
 	"pane.status", "pane.tools", "pane.skills", "pane.mcp", "pane.memory", "pane.commands", "pane.filter",
 	"status.version", "status.provider", "status.model", "status.policy", "status.maxTokens", "status.session", "status.cost", "status.requests", "status.tokens", "status.daily", "status.budgetBlocked", "status.none",
 	"perm.title", "perm.deny_always", "perm.deny_once", "perm.allow_always", "perm.allow_once",
-	"tool.run", "tool.running", "tool.done", "tool.error", "tool.readonly",
+	"work.thinking", "work.tool", "work.waiting", "tool.run", "tool.running", "tool.done", "tool.error", "tool.readonly",
 	"skill.view", "skill.use",
 	"mcp.connected", "mcp.disconnected", "mcp.tools", "mcp.auth", "mcp.none",
 	"memory.none", "commands.none",
@@ -30,11 +30,37 @@ var uiKeys = []string{
 	"theme", "lang", "offline", "busy",
 }
 
+// UILanguages are the languages the page can switch between at runtime.
+var UILanguages = []string{"en", "pt-BR"}
+
 // UIStrings returns the page strings in the process language.
 func UIStrings() map[string]string {
 	out := make(map[string]string, len(uiKeys))
 	for _, k := range uiKeys {
 		out[k] = i18n.T("web.ui." + k)
+	}
+	return out
+}
+
+// UIStringsFor returns the page strings in one language; keys the catalog
+// lacks fall back to the process language.
+func UIStringsFor(lang string) map[string]string {
+	out := make(map[string]string, len(uiKeys))
+	for _, k := range uiKeys {
+		if v, ok := i18n.LookupIn(lang, "web.ui."+k); ok {
+			out[k] = v
+		} else {
+			out[k] = i18n.T("web.ui." + k)
+		}
+	}
+	return out
+}
+
+// UICatalogs returns every switchable language's strings, keyed by tag.
+func UICatalogs() map[string]map[string]string {
+	out := make(map[string]map[string]string, len(UILanguages))
+	for _, lang := range UILanguages {
+		out[lang] = UIStringsFor(lang)
 	}
 	return out
 }
