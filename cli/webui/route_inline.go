@@ -17,7 +17,7 @@ import (
 )
 
 // slashModes maps the mode-switch tokens to the page's session modes, the
-// same table the ACP surface honours.
+// same table the ACP surface honors.
 var slashModes = map[string]string{
 	"/chat":  "chat",
 	"/agent": "agent",
