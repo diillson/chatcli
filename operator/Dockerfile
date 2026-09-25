@@ -24,6 +24,7 @@ COPY models/ models/
 COPY operator/main.go operator/main.go
 COPY operator/api/ operator/api/
 COPY operator/controllers/ operator/controllers/
+COPY operator/internal/ operator/internal/
 COPY operator/channels/ operator/channels/
 COPY operator/web/ operator/web/
 

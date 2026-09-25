@@ -23,6 +23,7 @@ import (
 	"github.com/diillson/chatcli/operator/api/rest"
 	platformv1alpha1 "github.com/diillson/chatcli/operator/api/v1alpha1"
 	"github.com/diillson/chatcli/operator/controllers"
+	"github.com/diillson/chatcli/operator/internal/setup"
 )
 
 var (
@@ -90,170 +91,19 @@ func main() {
 	serverClient := controllers.NewServerClient(zapLogger)
 	defer serverClient.Close()
 
-	// WatcherBridge — polls server alerts and creates Anomaly CRs
-	watcherBridge := controllers.NewWatcherBridge(mgr.GetClient(), mgr.GetScheme(), serverClient, zapLogger)
-	alertTransport, err := controllers.ParseAlertTransport(os.Getenv("CHATCLI_OPERATOR_ALERT_TRANSPORT"))
+	// Every reconciler and the WatcherBridge are wired by internal/setup so
+	// the integration suite runs exactly what a deployed operator runs.
+	setupOpts, err := setup.OptionsFromEnv(kubeClientset, serverClient, zapLogger)
 	if err != nil {
-		setupLog.Error(err, "invalid CHATCLI_OPERATOR_ALERT_TRANSPORT")
+		setupLog.Error(err, "invalid operator configuration")
 		os.Exit(1)
 	}
-	watcherBridge.SetAlertTransport(alertTransport)
-	if err := mgr.Add(watcherBridge); err != nil {
-		setupLog.Error(err, "unable to add WatcherBridge")
+	if _, err := setup.Controllers(mgr, setupOpts); err != nil {
+		setupLog.Error(err, "unable to set up controllers")
 		os.Exit(1)
 	}
-
-	if err = (&controllers.InstanceReconciler{
-		Client: mgr.GetClient(),
-		Scheme: mgr.GetScheme(),
-		Prober: controllers.NewGRPCProber(mgr.GetClient(), zapLogger),
-	}).SetupWithManager(mgr); err != nil {
-		setupLog.Error(err, "unable to create controller", "controller", "Instance")
-		os.Exit(1)
-	}
-
-	auditRecorder := controllers.NewAuditRecorder(mgr.GetClient(), mgr.GetScheme())
-
-	if err = (&controllers.IssueReconciler{
-		Client:           mgr.GetClient(),
-		Scheme:           mgr.GetScheme(),
-		DedupInvalidator: watcherBridge,
-		AuditRecorder:    auditRecorder,
-	}).SetupWithManager(mgr); err != nil {
-		setupLog.Error(err, "unable to create controller", "controller", "Issue")
-		os.Exit(1)
-	}
-
-	// Shared components for AIOps pipeline
-	patternStore := controllers.NewPatternStore(mgr.GetClient())
-	costTracker := controllers.NewCostTracker(mgr.GetClient())
-	noiseReducer := controllers.NewNoiseReducer(mgr.GetClient())
-
-	// Shared components for enriched AI analysis
-	contextBuilder := controllers.NewKubernetesContextBuilder(mgr.GetClient(), kubeClientset)
-	logAnalyzer := controllers.NewLogAnalyzer(mgr.GetClient(), kubeClientset)
-	gitOpsDetector := controllers.NewGitOpsDetector(mgr.GetClient())
-	sourceCodeAnalyzer := controllers.NewSourceCodeAnalyzer(mgr.GetClient())
-	cascadeAnalyzer := controllers.NewCascadeAnalyzer(mgr.GetClient())
-	blastRadiusPredictor := controllers.NewBlastRadiusPredictor(mgr.GetClient())
-
-	if err = (&controllers.RemediationReconciler{
-		Client:         mgr.GetClient(),
-		Scheme:         mgr.GetScheme(),
-		ServerClient:   serverClient,
-		ContextBuilder: contextBuilder,
-		AuditRecorder:  auditRecorder,
-		PatternStore:   patternStore,
-		CostTracker:    costTracker,
-	}).SetupWithManager(mgr); err != nil {
-		setupLog.Error(err, "unable to create controller", "controller", "Remediation")
-		os.Exit(1)
-	}
-
-	if err = (&controllers.AnomalyReconciler{
-		Client:       mgr.GetClient(),
-		Scheme:       mgr.GetScheme(),
-		NoiseReducer: noiseReducer,
-	}).SetupWithManager(mgr); err != nil {
-		setupLog.Error(err, "unable to create controller", "controller", "Anomaly")
-		os.Exit(1)
-	}
-
-	// MetricsCollector — optional, requires PROMETHEUS_URL env var
-	var metricsCollector *controllers.MetricsCollector
-	if promURL := os.Getenv("PROMETHEUS_URL"); promURL != "" {
-		metricsCollector = controllers.NewMetricsCollector(promURL)
-		setupLog.Info("Prometheus metrics collector enabled", "url", promURL)
-	}
-
-	// AIInsightReconciler — calls server AnalyzeIssue RPC with enriched context
-	if err = (&controllers.AIInsightReconciler{
-		Client:               mgr.GetClient(),
-		Scheme:               mgr.GetScheme(),
-		ServerClient:         serverClient,
-		ContextBuilder:       contextBuilder,
-		LogAnalyzer:          logAnalyzer,
-		MetricsCollector:     metricsCollector,
-		GitOpsDetector:       gitOpsDetector,
-		SourceCodeAnalyzer:   sourceCodeAnalyzer,
-		CascadeAnalyzer:      cascadeAnalyzer,
-		BlastRadiusPredictor: blastRadiusPredictor,
-		CostTracker:          costTracker,
-	}).SetupWithManager(mgr); err != nil {
-		setupLog.Error(err, "unable to create controller", "controller", "AIInsight")
-		os.Exit(1)
-	}
-
-	if err = (&controllers.PostMortemReconciler{
-		Client: mgr.GetClient(),
-		Scheme: mgr.GetScheme(),
-	}).SetupWithManager(mgr); err != nil {
-		setupLog.Error(err, "unable to create controller", "controller", "PostMortem")
-		os.Exit(1)
-	}
-
-	// NotificationReconciler — sends notifications on issue state changes and handles escalation
-	if err = (&controllers.NotificationReconciler{
-		Client: mgr.GetClient(),
-		Scheme: mgr.GetScheme(),
-	}).SetupWithManager(mgr); err != nil {
-		setupLog.Error(err, "unable to create controller", "controller", "Notification")
-		os.Exit(1)
-	}
-
-	// SLOReconciler — tracks SLO compliance with burn rate alerting
-	if err = (&controllers.SLOReconciler{
-		Client: mgr.GetClient(),
-		Scheme: mgr.GetScheme(),
-	}).SetupWithManager(mgr); err != nil {
-		setupLog.Error(err, "unable to create controller", "controller", "SLO")
-		os.Exit(1)
-	}
-
-	// SLAReconciler — monitors SLA compliance for incident response/resolution
-	if err = (&controllers.SLAReconciler{
-		Client: mgr.GetClient(),
-		Scheme: mgr.GetScheme(),
-	}).SetupWithManager(mgr); err != nil {
-		setupLog.Error(err, "unable to create controller", "controller", "SLA")
-		os.Exit(1)
-	}
-
-	// ApprovalReconciler — manages approval workflows for remediation actions
-	if err = (&controllers.ApprovalReconciler{
-		Client:               mgr.GetClient(),
-		Scheme:               mgr.GetScheme(),
-		BlastRadiusPredictor: blastRadiusPredictor,
-	}).SetupWithManager(mgr); err != nil {
-		setupLog.Error(err, "unable to create controller", "controller", "Approval")
-		os.Exit(1)
-	}
-
-	// FederationReconciler — manages multi-cluster registration and cross-cluster correlation
-	if err = (&controllers.FederationReconciler{
-		Client: mgr.GetClient(),
-		Scheme: mgr.GetScheme(),
-	}).SetupWithManager(mgr); err != nil {
-		setupLog.Error(err, "unable to create controller", "controller", "Federation")
-		os.Exit(1)
-	}
-
-	// SourceRepositoryReconciler — syncs git repositories for code-aware diagnostics
-	if err = (&controllers.SourceRepositoryReconciler{
-		Client: mgr.GetClient(),
-		Scheme: mgr.GetScheme(),
-	}).SetupWithManager(mgr); err != nil {
-		setupLog.Error(err, "unable to create controller", "controller", "SourceRepository")
-		os.Exit(1)
-	}
-
-	// ChaosReconciler — manages chaos engineering experiments
-	if err = (&controllers.ChaosReconciler{
-		Client: mgr.GetClient(),
-		Scheme: mgr.GetScheme(),
-	}).SetupWithManager(mgr); err != nil {
-		setupLog.Error(err, "unable to create controller", "controller", "Chaos")
-		os.Exit(1)
+	if setupOpts.PrometheusURL != "" {
+		setupLog.Info("Prometheus metrics collector enabled", "url", setupOpts.PrometheusURL)
 	}
 
 	// REST API Gateway — provides HTTP API access to AIOps resources
