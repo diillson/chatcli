@@ -5,6 +5,7 @@ metadata:
   namespace: {{ .Release.Namespace }}
   labels:
     {{- include "chatcli-operator.labels" . | nindent 4 }}
+    app.kubernetes.io/component: controller
 spec:
   replicas: {{ .Values.replicaCount }}
   selector:
@@ -86,6 +87,10 @@ spec:
           {{- if .Values.security.logScrubPatterns }}
             - name: CHATCLI_LOG_SCRUB_PATTERNS
               value: {{ .Values.security.logScrubPatterns | quote }}
+          {{- end }}
+          {{- if .Values.security.allowedDiagnosticCommands }}
+            - name: CHATCLI_ALLOWED_DIAGNOSTIC_COMMANDS
+              value: {{ .Values.security.allowedDiagnosticCommands | quote }}
           {{- end }}
           {{- if .Values.security.corsOrigin }}
             - name: CHATCLI_CORS_ORIGIN

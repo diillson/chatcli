@@ -1,28 +1,109 @@
+# Minimal Kubernetes manifest for the ChatCLI gRPC server.
+#
+# This is the smallest deployable shape and exists for kubectl-only
+# environments. The supported path for production is the Helm chart at
+# deploy/helm/chatcli (TLS, JWT, rate limits, PVC, network policy, HPA,
+# ServiceMonitor and CRD upgrades are all handled there):
+#
+#   helm install chatcli oci://ghcr.io/diillson/charts/chatcli \
+#     --set llm.provider=OPENAI --set secrets.openaiApiKey=sk-...
+#
+# Before applying:
+#   kubectl create secret generic chatcli-server \
+#     --from-literal=CHATCLI_SERVER_TOKEN="$(openssl rand -hex 32)" \
+#     --from-literal=OPENAI_API_KEY=sk-...
+apiVersion: v1
+kind: Service
+metadata:
+  name: chatcli
+  labels:
+    app.kubernetes.io/name: chatcli
+spec:
+  selector:
+    app.kubernetes.io/name: chatcli
+  ports:
+    - name: grpc
+      port: 50051
+      targetPort: grpc
+    - name: metrics
+      port: 9090
+      targetPort: metrics
+---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: chatcli
   labels:
-    app: chatcli
+    app.kubernetes.io/name: chatcli
 spec:
   replicas: 1
   selector:
     matchLabels:
-      app: chatcli
+      app.kubernetes.io/name: chatcli
   template:
     metadata:
       labels:
-        app: chatcli
+        app.kubernetes.io/name: chatcli
     spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        fsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
       containers:
         - name: chatcli
-          image: chatcli:latest
+          # Pin to a release tag in production; "latest" is for evaluation only.
+          image: ghcr.io/diillson/chatcli:latest
+          args: ["server"]
           ports:
-            - containerPort: 8080
+            - name: grpc
+              containerPort: 50051
+            - name: metrics
+              containerPort: 9090
+          env:
+            - name: HOME
+              value: /home/chatcli
+            - name: LLM_PROVIDER
+              value: OPENAI
+            # The server refuses a reachable bind without a credential, so
+            # CHATCLI_SERVER_TOKEN (or CHATCLI_JWT_SECRET) must come from
+            # the Secret below.
+            - name: CHATCLI_BIND_ADDRESS
+              value: "0.0.0.0"
+          envFrom:
+            - secretRef:
+                name: chatcli-server
+          livenessProbe:
+            grpc:
+              port: 50051
+            initialDelaySeconds: 10
+            periodSeconds: 30
+          readinessProbe:
+            grpc:
+              port: 50051
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: home
+              mountPath: /home/chatcli
+            - name: tmp
+              mountPath: /tmp
           resources:
             requests:
               cpu: "100m"
-              memory: "128Mi"
-            limits:
-              cpu: "500m"
               memory: "256Mi"
+            limits:
+              cpu: "1"
+              memory: "1Gi"
+      volumes:
+        - name: home
+          emptyDir: {}
+        - name: tmp
+          emptyDir: {}

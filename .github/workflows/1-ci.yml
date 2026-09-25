@@ -58,3 +58,73 @@ jobs:
           name: coverage-report
           path: coverage.txt
           retention-days: 7 # O artefato só precisa existir por 7 dias
+
+  # JOB 2: the Helm charts ship with every release, so they get the same
+  # PR-time gate as the Go code: strict lint, a render of the shapes users
+  # actually deploy, and schema validation of the rendered manifests.
+  helm-charts:
+    name: Helm charts (lint, template, kubeconform)
+    runs-on: ubuntu-latest
+    if: github.actor != 'release-please[bot]' && github.actor != 'github-actions[bot]'
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Set up Helm
+        uses: azure/setup-helm@v5
+        with:
+          version: v3.22.0
+
+      - name: Install kubeconform
+        run: |
+          set -euo pipefail
+          KC_VERSION=v0.8.0
+          curl -fsSL "https://github.com/yannh/kubeconform/releases/download/${KC_VERSION}/kubeconform-linux-amd64.tar.gz" \
+            | tar -xz -C /usr/local/bin kubeconform
+          kubeconform -v
+
+      - name: helm lint --strict
+        run: |
+          set -euo pipefail
+          helm lint --strict deploy/helm/chatcli
+          helm lint --strict deploy/helm/chatcli-operator
+
+      - name: Render and validate manifests
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/rendered
+          # Server chart: default, and the "everything on" shape (fallback, MCP,
+          # watcher targets, persistence, network policy, ingress, HPA, PDB, TLS/JWT).
+          helm template chatcli deploy/helm/chatcli \
+            --set server.token=ci-token > /tmp/rendered/server-default.yaml
+          helm template chatcli deploy/helm/chatcli \
+            --set server.token=ci-token \
+            --set llm.provider=CLAUDEAI --set secrets.anthropicApiKey=k \
+            --set fallback.enabled=true \
+            --set 'fallback.providers[0].name=OPENAI' --set 'fallback.providers[0].model=gpt-6-astra' \
+            --set 'fallback.providers[1].name=MOONSHOT' --set secrets.moonshotApiKey=k \
+            --set mcp.enabled=true --set 'mcp.servers[0].name=fs' --set 'mcp.servers[0].command=npx' \
+            --set copilot.model=gpt-6-astra \
+            --set persistence.enabled=true --set networkPolicy.enabled=true \
+            --set ingress.enabled=true \
+            --set autoscaling.enabled=true --set podDisruptionBudget.enabled=true \
+            --set serviceMonitor.enabled=true --set security.jwtSecret=ci-secret \
+            --set memory.enabled=true > /tmp/rendered/server-full.yaml
+          # Operator chart: default and with TLS + CORS + diagnostics allowlist.
+          helm template chatcli-operator deploy/helm/chatcli-operator \
+            > /tmp/rendered/operator-default.yaml
+          helm template chatcli-operator deploy/helm/chatcli-operator \
+            --set serviceMonitor.enabled=true \
+            --set security.corsAllowedOrigins[0]=https://dash.example.com \
+            --set security.allowedDiagnosticCommands="kubectl top" \
+            > /tmp/rendered/operator-full.yaml
+          # CRDs and CRs (Instance etc.) have no upstream JSON schema; the
+          # rendered core objects (Deployment, Service, RBAC, ...) are checked
+          # strictly. -strict rejects unknown fields, which is what catches a
+          # typo in a template.
+          kubeconform -strict -summary -ignore-missing-schemas \
+            -kubernetes-version 1.31.0 \
+            -schema-location default \
+            -schema-location 'https://raw.githubusercontent.com/datreeio/CRDs-catalog/main/{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json' \
+            /tmp/rendered/*.yaml
+

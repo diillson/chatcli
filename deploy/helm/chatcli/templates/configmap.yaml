@@ -22,6 +22,15 @@ data:
   OLLAMA_MODEL: {{ .Values.ollama.model | quote }}
   {{- end }}
   {{- end }}
+  {{- if .Values.copilot.model }}
+  COPILOT_MODEL: {{ .Values.copilot.model | quote }}
+  {{- end }}
+  {{- if .Values.copilot.maxTokens }}
+  COPILOT_MAX_TOKENS: {{ .Values.copilot.maxTokens | quote }}
+  {{- end }}
+  {{- if .Values.copilot.apiBaseUrl }}
+  COPILOT_API_BASE_URL: {{ .Values.copilot.apiBaseUrl | quote }}
+  {{- end }}
   {{- if .Values.fallback.enabled }}
   CHATCLI_FALLBACK_ENABLED: "true"
   {{- $providers := list }}

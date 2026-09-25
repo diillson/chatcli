@@ -43,9 +43,8 @@ metadata:
 spec:
   replicas: 1
   provider: BEDROCK
-  # Default model already uses a global inference profile required for modern Claude.
-  # For older models (3, 3.5) the base id works; for 3.7+/4.x/4.5/4.6 you MUST use
-  # a prefix like "global.", "us.", "eu.", or "apac.".
+  # Claude on Bedrock is addressed through an inference profile id: prefix the
+  # base id with "global.", "us.", "eu." or "apac.". Claude 3.x models are retired.
   model: global.anthropic.claude-sonnet-4-6
   image:
     repository: ghcr.io/diillson/chatcli

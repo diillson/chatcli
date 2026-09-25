@@ -130,6 +130,9 @@ security:
   allowedResourceTypes: ""
   # Custom log scrub patterns (comma-separated regexes)
   logScrubPatterns: ""
+  # Extra read-only diagnostic commands the remediation engine may run
+  # (comma-separated; appended to the built-in allowlist)
+  allowedDiagnosticCommands: ""
   # CORS allowed origin (empty = deny all)
   # CORS for the operator REST API (dashboard). Deny-all until an origin is
   # named: with none, a browser blocks every cross-origin call.

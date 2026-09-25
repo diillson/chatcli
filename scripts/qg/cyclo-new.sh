@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # scripts/qg/cyclo-new.sh — cyclomatic complexity gate for files in the diff.
 #
-# Project-wide gocyclo is grandfathered at 70 in golangci.yml. We hold NEW
-# code to a much lower bar (default 30). This runs gocyclo only against
+# Project-wide gocyclo is enforced at 30 by .golangci.yml. This gate holds
+# files touched by the PR to the same bar (default 30) even when the rest of
+# the module is temporarily exempt. This runs gocyclo only against
 # files changed in the PR (added or modified, .go non-test, non-generated)
 # and ignores files explicitly listed under cyclo_new.exempt in
 # .github/quality-gate.yml.

@@ -24,6 +24,10 @@
           "type": "yaml",
           "path": "deploy/helm/chatcli-operator/Chart.yaml",
           "jsonpath": "$.version"
+        },
+        {
+          "type": "generic",
+          "path": "operator/config/manager/manager.yaml"
         }
       ]
     }

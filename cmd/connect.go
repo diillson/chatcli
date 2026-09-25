@@ -84,7 +84,7 @@ func RunConnect(ctx context.Context, args []string, llmMgr manager.LLMManager, l
 	fs.StringVar(&opts.CertFile, "ca-cert", "", "CA certificate file for TLS")
 	fs.StringVar(&opts.ClientAPIKey, "llm-key", os.Getenv("CHATCLI_CLIENT_API_KEY"), "Your own LLM API key/OAuth token (forwarded to server)")
 	fs.BoolVar(&opts.UseLocalAuth, "use-local-auth", false, "Use OAuth/API key from local auth store (~/.chatcli/auth-profiles.json)")
-	fs.StringVar(&opts.Provider, "provider", "", "Override server's default LLM provider (e.g., OPENAI, CLAUDEAI, GOOGLEAI, XAI, ZAI, MINIMAX, STACKSPOT, OLLAMA, COPILOT)")
+	fs.StringVar(&opts.Provider, "provider", "", "Override server's default LLM provider (OPENAI, OPENAI_ASSISTANT, CLAUDEAI, BEDROCK, GOOGLEAI, XAI, ZAI, MINIMAX, MOONSHOT, STACKSPOT, OLLAMA, COPILOT, OPENROUTER, DEVIN)")
 	fs.StringVar(&opts.Model, "model", "", "Override server's default LLM model (e.g., gpt-5.6-sol, gemini-2.5-flash)")
 	fs.StringVar(&opts.ClientID, "client-id", "", "StackSpot: Client ID for authentication")
 	fs.StringVar(&opts.ClientKey, "client-key", "", "StackSpot: Client Key for authentication")
