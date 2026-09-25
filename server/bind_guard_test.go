@@ -10,7 +10,7 @@ import (
 func TestLoopbackMayRunWithoutAuth(t *testing.T) {
 	t.Setenv("CHATCLI_JWT_SECRET", "")
 	for _, addr := range []string{"127.0.0.1", "::1", "localhost", "127.0.0.1:8080", "[::1]:8080"} {
-		if err := requireAuthOnReachableBind(addr, ""); err != nil {
+		if err := requireAuthOnReachableBind(addr, bindCredentials{}); err != nil {
 			t.Errorf("%s must be allowed without a credential: %v", addr, err)
 		}
 	}
@@ -19,7 +19,7 @@ func TestLoopbackMayRunWithoutAuth(t *testing.T) {
 func TestReachableBindRequiresACredential(t *testing.T) {
 	t.Setenv("CHATCLI_JWT_SECRET", "")
 	for _, addr := range []string{"0.0.0.0", "::", "10.0.0.5", "", "chatcli.internal"} {
-		err := requireAuthOnReachableBind(addr, "")
+		err := requireAuthOnReachableBind(addr, bindCredentials{})
 		if err == nil {
 			t.Errorf("%q must refuse to serve unauthenticated", addr)
 			continue
@@ -34,13 +34,29 @@ func TestReachableBindRequiresACredential(t *testing.T) {
 }
 
 func TestReachableBindAcceptsEitherCredential(t *testing.T) {
-	t.Setenv("CHATCLI_JWT_SECRET", "")
-	if err := requireAuthOnReachableBind("0.0.0.0", "shared-token"); err != nil {
-		t.Errorf("a shared token must be enough: %v", err)
+	cases := map[string]bindCredentials{
+		"shared token":             {token: "shared-token"},
+		"HS256 secret":             {jwtSecret: "a-jwt-secret"},
+		"RS256 public key":         {jwtPublicKey: "/etc/chatcli/jwt.pub"},
+		"RS256 material in secret": {jwtSecret: "-----BEGIN PUBLIC KEY-----\nMIIB\n-----END PUBLIC KEY-----"},
+		"client CA (mTLS)":         {clientCAFile: "/etc/chatcli/clients-ca.pem"},
 	}
-	t.Setenv("CHATCLI_JWT_SECRET", "a-jwt-secret")
-	if err := requireAuthOnReachableBind("0.0.0.0", ""); err != nil {
-		t.Errorf("a JWT secret must be enough: %v", err)
+	for name, creds := range cases {
+		if err := requireAuthOnReachableBind("0.0.0.0", creds); err != nil {
+			t.Errorf("%s must be enough: %v", name, err)
+		}
+	}
+	if err := requireAuthOnReachableBind("0.0.0.0", bindCredentials{token: "  ", clientCAFile: " "}); err == nil {
+		t.Error("blank values are not credentials")
+	}
+}
+
+func TestBindCredentialsFromEnvReadsTheJWTMaterial(t *testing.T) {
+	t.Setenv("CHATCLI_JWT_SECRET", "hs")
+	t.Setenv("CHATCLI_JWT_PUBLIC_KEY", "/k.pub")
+	c := bindCredentialsFromEnv("tok", "/ca.pem")
+	if c.token != "tok" || c.jwtSecret != "hs" || c.jwtPublicKey != "/k.pub" || c.clientCAFile != "/ca.pem" {
+		t.Errorf("unexpected credentials: %+v", c)
 	}
 }
 

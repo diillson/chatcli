@@ -325,6 +325,7 @@ var envDefaults = map[string]envDefault{
 	// rather than leaving the reader to trust a table somewhere else.
 	"CHATCLI_BIND_ADDRESS":           {Value: "127.0.0.1 (0.0.0.0 under Kubernetes)", Source: "server.go Start"},
 	"CHATCLI_RATE_LIMIT_RPS":         {Value: "10", Source: "server.DefaultRateLimiterConfig"},
+	"CHATCLI_MTLS_ROLE":              {Value: "user", Source: "server.mtlsRoleFromEnv"},
 	"CHATCLI_RATE_LIMIT_BURST":       {Value: "20", Source: "server.DefaultRateLimiterConfig"},
 	"CHATCLI_MAX_RECV_MSG_SIZE":      {Value: "52428800", Source: "server.New (50MB)"},
 	"CHATCLI_MAX_SEND_MSG_SIZE":      {Value: "52428800", Source: "server.New (50MB)"},

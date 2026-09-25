@@ -10,6 +10,8 @@ import (
 	"net"
 	"os"
 	"strings"
+
+	"github.com/diillson/chatcli/pkg/jwtkey"
 )
 
 // Refusing to serve an unauthenticated API on a reachable address.
@@ -25,21 +27,53 @@ import (
 // open, anything else needs a credential, and the server says which one is
 // missing instead of starting and hoping.
 
+// bindCredentials is every credential the guard recognizes. It mirrors what
+// the auth interceptor and the TLS listener actually enforce: a shared
+// token, JWT material of either algorithm, or a client CA (mTLS), so a
+// deployment secured by RS256 or by client certificates alone is not refused
+// at startup.
+type bindCredentials struct {
+	token        string
+	jwtSecret    string
+	jwtPublicKey string
+	clientCAFile string
+}
+
+// configured reports whether any credential is set.
+func (c bindCredentials) configured() bool {
+	if strings.TrimSpace(c.token) != "" || strings.TrimSpace(c.clientCAFile) != "" {
+		return true
+	}
+	return jwtkey.Algorithm(c.jwtPublicKey, c.jwtSecret) != jwtkey.AlgNone
+}
+
 // requireAuthOnReachableBind returns an error when the server would listen
-// on an address other than loopback with neither a shared token nor a JWT
-// secret configured.
-func requireAuthOnReachableBind(bindAddr, token string) error {
+// on an address other than loopback with no credential configured: no
+// shared token, no JWT secret or public key, and no client CA.
+func requireAuthOnReachableBind(bindAddr string, creds bindCredentials) error {
 	if isLoopbackBind(bindAddr) {
 		return nil
 	}
-	if strings.TrimSpace(token) != "" || strings.TrimSpace(os.Getenv("CHATCLI_JWT_SECRET")) != "" {
+	if creds.configured() {
 		return nil
 	}
 	return fmt.Errorf(
 		"refusing to serve an unauthenticated API on %s: every caller that can reach it would be admitted as an administrator. "+
-			"Set CHATCLI_SERVER_TOKEN (or --token) for a shared token, or CHATCLI_JWT_SECRET for per-user JWTs. "+
+			"Set CHATCLI_SERVER_TOKEN (or --token) for a shared token, CHATCLI_JWT_SECRET for HS256 JWTs, "+
+			"CHATCLI_JWT_PUBLIC_KEY for RS256 JWTs, or CHATCLI_SERVER_TLS_CLIENT_CA (--tls-client-ca) for mTLS. "+
 			"To run without authentication, bind loopback instead (CHATCLI_BIND_ADDRESS=127.0.0.1)",
 		bindAddr)
+}
+
+// bindCredentialsFromEnv reads the JWT material from the environment next
+// to the token and client CA the server was configured with.
+func bindCredentialsFromEnv(token, clientCAFile string) bindCredentials {
+	return bindCredentials{
+		token:        token,
+		jwtSecret:    os.Getenv("CHATCLI_JWT_SECRET"),
+		jwtPublicKey: os.Getenv("CHATCLI_JWT_PUBLIC_KEY"),
+		clientCAFile: clientCAFile,
+	}
 }
 
 // isLoopbackBind reports whether an address reaches only this machine.
