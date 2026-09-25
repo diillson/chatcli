@@ -113,6 +113,11 @@ securityContext:
     drop:
       - ALL
 
+# How the operator receives watcher alerts from the ChatCLI server.
+# "stream" keeps a StreamAlerts stream open and falls back to polling only
+# while the server has no such RPC; "poll" queries GetAlerts every 30s.
+alertTransport: stream
+
 # Security hardening configuration for the operator
 security:
   # Dev mode disables authentication on the REST API (NEVER use in production)

@@ -1,0 +1,3 @@
+{
+  "server.alerts.stream_resync": "alert stream interrupted: the consumer fell behind; reopen with include_current to resync"
+}

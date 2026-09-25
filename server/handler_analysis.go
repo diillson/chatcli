@@ -27,21 +27,10 @@ func (h *Handler) GetAlerts(ctx context.Context, req *pb.GetAlertsRequest) (*pb.
 	alerts := h.watcherAlertsFunc()
 	result := make([]*pb.WatcherAlert, 0, len(alerts))
 	for _, a := range alerts {
-		if req.Namespace != "" && a.Namespace != req.Namespace {
+		if !alertMatches(req.Namespace, req.Deployment, a) {
 			continue
 		}
-		if req.Deployment != "" && a.Deployment != req.Deployment {
-			continue
-		}
-		result = append(result, &pb.WatcherAlert{
-			Type:          a.Type,
-			Severity:      a.Severity,
-			Message:       a.Message,
-			Object:        a.Object,
-			Namespace:     a.Namespace,
-			Deployment:    a.Deployment,
-			TimestampUnix: a.Timestamp.Unix(),
-		})
+		result = append(result, alertToProto(a))
 	}
 
 	return &pb.GetAlertsResponse{Alerts: result}, nil

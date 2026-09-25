@@ -1,0 +1,3 @@
+{
+  "server.alerts.stream_resync": "stream de alertas interrompido: o consumidor ficou para trás; reabra com include_current para ressincronizar"
+}

@@ -92,6 +92,12 @@ func main() {
 
 	// WatcherBridge — polls server alerts and creates Anomaly CRs
 	watcherBridge := controllers.NewWatcherBridge(mgr.GetClient(), mgr.GetScheme(), serverClient, zapLogger)
+	alertTransport, err := controllers.ParseAlertTransport(os.Getenv("CHATCLI_OPERATOR_ALERT_TRANSPORT"))
+	if err != nil {
+		setupLog.Error(err, "invalid CHATCLI_OPERATOR_ALERT_TRANSPORT")
+		os.Exit(1)
+	}
+	watcherBridge.SetAlertTransport(alertTransport)
 	if err := mgr.Add(watcherBridge); err != nil {
 		setupLog.Error(err, "unable to add WatcherBridge")
 		os.Exit(1)

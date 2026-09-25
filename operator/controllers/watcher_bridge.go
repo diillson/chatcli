@@ -18,13 +18,36 @@ import (
 
 	pb "github.com/diillson/chatcli/proto/chatcli/v1"
 	"go.uber.org/zap"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
 	platformv1alpha1 "github.com/diillson/chatcli/operator/api/v1alpha1"
 )
 
 const (
-	// PollInterval is how often the bridge polls the server for alerts.
+	// PollInterval is how often the bridge polls the server for alerts when
+	// it is on the polling transport, and how long it waits between
+	// discovery attempts while no Instance is ready.
 	PollInterval = 30 * time.Second
+
+	// streamHeartbeatTimeout is how long the bridge tolerates silence on the
+	// alert stream before it treats the connection as dead and reopens it.
+	// The server heartbeats every 15 seconds, so this allows three misses.
+	streamHeartbeatTimeout = 60 * time.Second
+
+	// streamRetryAfter is how long the bridge stays on polling after a server
+	// answered StreamAlerts with UNIMPLEMENTED, before it probes the stream
+	// again. Server upgrades roll without an operator restart.
+	streamRetryAfter = 10 * time.Minute
+
+	// streamBackoffMax caps the exponential backoff between stream reopens.
+	streamBackoffMax = 30 * time.Second
+
+	// streamFailuresBeforeRediscover is how many silent stream attempts in a
+	// row the bridge tolerates on one connection before it rediscovers the
+	// Instance. gRPC re-resolves the Service address on its own, so a pod
+	// restart heals without this; a replaced Instance does not.
+	streamFailuresBeforeRediscover = 3
 
 	// DefaultDedupTTL is the default dedup TTL when no Instance AIOps config is set.
 	// Lowered from 60 to 30 minutes (GAP-02 fix, 2026-05-23): UID-aware hashing
@@ -40,13 +63,55 @@ const (
 	missingUIDSentinel = "uid:missing"
 )
 
-// WatcherBridge polls the ChatCLI server's GetAlerts RPC and creates Anomaly CRs.
+// AlertTransport selects how the bridge receives alerts from the server.
+type AlertTransport string
+
+const (
+	// AlertTransportStream keeps a StreamAlerts stream open and falls back
+	// to polling only while the server has no such RPC. The default.
+	AlertTransportStream AlertTransport = "stream"
+	// AlertTransportPoll queries GetAlerts every PollInterval.
+	AlertTransportPoll AlertTransport = "poll"
+)
+
+// ParseAlertTransport reads the CHATCLI_OPERATOR_ALERT_TRANSPORT value. An
+// empty value means the default, stream; anything else must be one of the
+// two transports.
+func ParseAlertTransport(v string) (AlertTransport, error) {
+	switch strings.ToLower(strings.TrimSpace(v)) {
+	case "", string(AlertTransportStream):
+		return AlertTransportStream, nil
+	case string(AlertTransportPoll):
+		return AlertTransportPoll, nil
+	}
+	return "", fmt.Errorf("unknown alert transport %q: want %q or %q", v, AlertTransportStream, AlertTransportPoll)
+}
+
+// errStreamStalled is returned when the alert stream went silent for longer
+// than streamHeartbeatTimeout.
+var errStreamStalled = fmt.Errorf("alert stream stalled: no heartbeat from the server")
+
+// WatcherBridge receives the ChatCLI server's watcher alerts and creates
+// Anomaly CRs. It keeps a StreamAlerts stream open and polls GetAlerts only
+// as a fallback for a server without that RPC or when configured to.
 // It implements manager.Runnable so it runs as a background goroutine in the controller manager.
 type WatcherBridge struct {
 	client       client.Client
 	scheme       *runtime.Scheme
 	serverClient *ServerClient
 	logger       *zap.Logger
+
+	transport        AlertTransport
+	pollInterval     time.Duration
+	heartbeatTimeout time.Duration
+	// streamUnsupportedUntil is set when the server answered UNIMPLEMENTED;
+	// polling covers the gap until the stream is probed again.
+	streamUnsupportedUntil time.Time
+	// streamFailures counts consecutive stream attempts that delivered
+	// nothing. After streamFailuresBeforeRediscover the connection is
+	// dropped so the next round rediscovers the Instance: the address or
+	// credentials may have changed underneath a long-lived connection.
+	streamFailures int
 
 	mu                sync.Mutex
 	seen              map[string]dedupEntry      // hash → entry (timestamp + resource ref for invalidation)
@@ -66,40 +131,166 @@ type dedupEntry struct {
 // NewWatcherBridge creates a new WatcherBridge.
 func NewWatcherBridge(c client.Client, scheme *runtime.Scheme, sc *ServerClient, logger *zap.Logger) *WatcherBridge {
 	return &WatcherBridge{
-		client:       c,
-		scheme:       scheme,
-		serverClient: sc,
-		logger:       logger.Named("watcher-bridge"),
-		seen:         make(map[string]dedupEntry),
+		client:           c,
+		scheme:           scheme,
+		serverClient:     sc,
+		logger:           logger.Named("watcher-bridge"),
+		transport:        AlertTransportStream,
+		pollInterval:     PollInterval,
+		heartbeatTimeout: streamHeartbeatTimeout,
+		seen:             make(map[string]dedupEntry),
 	}
 }
 
-// Start implements manager.Runnable. It runs a polling loop until the context is canceled.
+// SetAlertTransport selects stream or poll. Call it before Start.
+func (wb *WatcherBridge) SetAlertTransport(t AlertTransport) {
+	wb.transport = t
+}
+
+// Start implements manager.Runnable. It keeps the bridge attached to a ready
+// Instance until the context is canceled: streaming alerts when the server
+// offers StreamAlerts, polling GetAlerts otherwise.
 func (wb *WatcherBridge) Start(ctx context.Context) error {
-	wb.logger.Info("WatcherBridge started", zap.Duration("poll_interval", PollInterval))
+	wb.logger.Info("WatcherBridge started",
+		zap.String("transport", string(wb.transport)),
+		zap.Duration("poll_interval", wb.pollInterval))
 
-	ticker := time.NewTicker(PollInterval)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-ctx.Done():
-			wb.logger.Info("WatcherBridge stopped")
-			return nil
-		case <-ticker.C:
-			wb.poll(ctx)
-		}
+	backoff := time.Second
+	for ctx.Err() == nil {
+		wb.cycle(ctx, &backoff)
 	}
+	wb.logger.Info("WatcherBridge stopped")
+	return nil
 }
 
-func (wb *WatcherBridge) poll(ctx context.Context) {
+// cycle runs one attach-and-consume round: connect when needed, then either
+// hold the stream open until it ends or poll once and wait. backoff grows
+// while stream reopens keep failing and resets once one delivers.
+func (wb *WatcherBridge) cycle(ctx context.Context, backoff *time.Duration) {
 	if !wb.serverClient.IsConnected() {
 		if err := wb.discoverAndConnect(ctx); err != nil {
 			wb.logger.Debug("Server discovery failed", zap.Error(err))
+			sleepCtx(ctx, wb.pollInterval)
 			return
 		}
 	}
 
+	if wb.streamWanted() {
+		received, err := wb.consumeStream(ctx)
+		if ctx.Err() != nil {
+			return
+		}
+		if received > 0 {
+			*backoff = time.Second
+			wb.streamFailures = 0
+		} else {
+			wb.streamFailures++
+		}
+		switch {
+		case status.Code(err) == codes.Unimplemented:
+			// Older server: poll until it is worth probing the stream again.
+			wb.streamUnsupportedUntil = time.Now().Add(streamRetryAfter)
+			wb.logger.Info("Server has no StreamAlerts RPC; polling GetAlerts",
+				zap.Duration("retry_stream_in", streamRetryAfter))
+		case status.Code(err) == codes.Aborted:
+			// The server dropped us for falling behind: reopen at once with
+			// the current snapshot, dedup absorbs the repeats.
+			wb.logger.Warn("Alert stream asked for a resync", zap.Error(err))
+		default:
+			// Transport failure or silence: back off and reopen. gRPC keeps
+			// re-resolving the Service, so only a run of silent attempts
+			// drops the connection for a full rediscovery of the Instance.
+			wb.logger.Warn("Alert stream ended; reopening",
+				zap.Error(err), zap.Duration("backoff", *backoff), zap.Int("silent_attempts", wb.streamFailures))
+			if wb.streamFailures >= streamFailuresBeforeRediscover {
+				wb.streamFailures = 0
+				_ = wb.serverClient.Close()
+			}
+			sleepCtx(ctx, *backoff)
+			*backoff = min(*backoff*2, streamBackoffMax)
+		}
+		return
+	}
+
+	wb.poll(ctx)
+	sleepCtx(ctx, wb.pollInterval)
+}
+
+// streamWanted reports whether this round should open the stream.
+func (wb *WatcherBridge) streamWanted() bool {
+	if wb.transport != AlertTransportStream {
+		return false
+	}
+	return time.Now().After(wb.streamUnsupportedUntil)
+}
+
+// consumeStream holds a StreamAlerts stream open and turns every alert into
+// an Anomaly. It returns how many messages arrived and why the stream ended:
+// the context, a gRPC status, or errStreamStalled after heartbeatTimeout of
+// silence.
+func (wb *WatcherBridge) consumeStream(ctx context.Context) (int, error) {
+	sctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	stream, err := wb.serverClient.StreamAlerts(sctx, true)
+	if err != nil {
+		return 0, err
+	}
+	wb.logger.Info("Alert stream open")
+
+	type msg struct {
+		resp *pb.StreamAlertsResponse
+		err  error
+	}
+	msgs := make(chan msg, 1)
+	go func() {
+		for {
+			resp, err := stream.Recv()
+			select {
+			case msgs <- msg{resp: resp, err: err}:
+			case <-sctx.Done():
+				return
+			}
+			if err != nil {
+				return
+			}
+		}
+	}()
+
+	received := 0
+	timer := time.NewTimer(wb.heartbeatTimeout)
+	defer timer.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return received, ctx.Err()
+		case <-timer.C:
+			return received, errStreamStalled
+		case m := <-msgs:
+			if m.err != nil {
+				return received, m.err
+			}
+			received++
+			if !timer.Stop() {
+				select {
+				case <-timer.C:
+				default:
+				}
+			}
+			timer.Reset(wb.heartbeatTimeout)
+			if m.resp.GetHeartbeat() {
+				wb.pruneDedup()
+				continue
+			}
+			if a := m.resp.GetAlert(); a != nil {
+				wb.handleAlert(ctx, a)
+			}
+		}
+	}
+}
+
+// poll queries GetAlerts once and turns new alerts into Anomalies.
+func (wb *WatcherBridge) poll(ctx context.Context) {
 	resp, err := wb.serverClient.GetAlerts(ctx)
 	if err != nil {
 		wb.logger.Warn("GetAlerts RPC failed", zap.Error(err))
@@ -113,23 +304,39 @@ func (wb *WatcherBridge) poll(ctx context.Context) {
 	wb.logger.Info("Received alerts from server", zap.Int("count", len(resp.Alerts)))
 
 	for _, alert := range resp.Alerts {
-		hash := wb.computeAlertHash(ctx, alert)
-		if wb.isDuplicate(hash) {
-			continue
-		}
-
-		if err := wb.createAnomaly(ctx, alert); err != nil {
-			wb.logger.Error("Failed to create Anomaly CR", zap.Error(err), zap.String("alert_type", alert.Type))
-			continue
-		}
-		ns := alert.Namespace
-		if ns == "" {
-			ns = "default"
-		}
-		wb.markSeen(hash, alert.Deployment, ns)
+		wb.handleAlert(ctx, alert)
 	}
 
 	wb.pruneDedup()
+}
+
+// handleAlert creates the Anomaly for an alert the bridge has not seen in
+// the dedup window. Shared by the stream and the polling paths.
+func (wb *WatcherBridge) handleAlert(ctx context.Context, alert *pb.WatcherAlert) {
+	hash := wb.computeAlertHash(ctx, alert)
+	if wb.isDuplicate(hash) {
+		return
+	}
+
+	if err := wb.createAnomaly(ctx, alert); err != nil {
+		wb.logger.Error("Failed to create Anomaly CR", zap.Error(err), zap.String("alert_type", alert.Type))
+		return
+	}
+	ns := alert.Namespace
+	if ns == "" {
+		ns = "default"
+	}
+	wb.markSeen(hash, alert.Deployment, ns)
+}
+
+// sleepCtx waits for d or until ctx ends, whichever comes first.
+func sleepCtx(ctx context.Context, d time.Duration) {
+	t := time.NewTimer(d)
+	defer t.Stop()
+	select {
+	case <-ctx.Done():
+	case <-t.C:
+	}
 }
 
 // discoverAndConnect finds a ready Instance CR and connects to its server.
