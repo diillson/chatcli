@@ -109,7 +109,7 @@ Clients can use their own API keys (personal mode) or the server's configured pr
 
 | Parameter | Description | Default |
 |-----------|-------------|---------|
-| `llm.provider` | Default provider: `OPENAI`, `CLAUDEAI`, `GOOGLEAI`, `XAI`, `ZAI`, `MINIMAX`, `STACKSPOT`, `OLLAMA`, `COPILOT`, `OPENROUTER` | `""` |
+| `llm.provider` | Default provider: `OPENAI`, `OPENAI_ASSISTANT`, `CLAUDEAI`, `BEDROCK`, `GOOGLEAI`, `XAI`, `ZAI`, `MINIMAX`, `MOONSHOT`, `STACKSPOT`, `OLLAMA`, `COPILOT`, `OPENROUTER` | `""` |
 | `llm.model` | Model override | `""` |
 | `secrets.openaiApiKey` | OpenAI API key | `""` |
 | `secrets.anthropicApiKey` | Anthropic API key | `""` |
@@ -119,6 +119,7 @@ Clients can use their own API keys (personal mode) or the server's configured pr
 | `secrets.minimaxApiKey` | MiniMax API key | `""` |
 | `secrets.githubCopilotToken` | GitHub Copilot token | `""` |
 | `secrets.openrouterApiKey` | OpenRouter API key | `""` |
+| `secrets.moonshotApiKey` | Moonshot (Kimi) API key | `""` |
 | `secrets.stackspotClientId` | StackSpot client ID | `""` |
 | `secrets.stackspotClientKey` | StackSpot client key | `""` |
 | `secrets.stackspotRealm` | StackSpot realm | `""` |
@@ -144,15 +145,15 @@ fallback:
     - name: OPENAI
       model: gpt-4o
     - name: CLAUDEAI
-      model: claude-sonnet-4-20250514
+      model: claude-sonnet-4-6
     - name: GOOGLEAI
-      model: gemini-2.0-flash
+      model: gemini-2.5-flash
     - name: ZAI
       model: glm-4.7
     - name: MINIMAX
       model: MiniMax-M2.7
     - name: OPENROUTER
-      model: anthropic/claude-sonnet-4
+      model: anthropic/claude-sonnet-4.6
 ```
 
 ### gRPC Server
@@ -261,7 +262,7 @@ watcher:
 
 | Parameter | Description | Default |
 |-----------|-------------|---------|
-| `copilot.model` | Model (gpt-4o, claude-sonnet-4, gemini-2.0-flash, etc.) | `""` |
+| `copilot.model` | Model (gpt-6-astra, gpt-4o, claude-sonnet-4-6, gemini-2.5-flash, etc.) | `""` |
 | `copilot.maxTokens` | Max response tokens | `""` |
 | `copilot.apiBaseUrl` | API URL override for enterprise | `""` |
 
@@ -393,7 +394,7 @@ security:
 | `serviceMonitor.interval` | Scrape interval | `"30s"` |
 | `serviceMonitor.scrapeTimeout` | Scrape timeout | `""` |
 | `serviceMonitor.labels` | Additional labels | `{}` |
-| `prometheusUrl` | Prometheus URL for AIOps metrics enrichment | `""` |
+| `prometheusUrl` | Deprecated: read by the operator only, set it on the `chatcli-operator` chart | `""` |
 
 ### Plugins
 

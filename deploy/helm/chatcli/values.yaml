@@ -42,7 +42,8 @@ tls:
 # LLM Provider configuration
 llm:
   # Default provider: OPENAI, OPENAI_ASSISTANT, CLAUDEAI, BEDROCK, GOOGLEAI, XAI, ZAI,
-  # MINIMAX, STACKSPOT, OLLAMA, COPILOT, OPENROUTER
+  # MINIMAX, MOONSHOT, STACKSPOT, OLLAMA, COPILOT, OPENROUTER
+  # DEVIN is a local-CLI transport and is not available in the server image.
   # For BEDROCK: use IRSA via serviceAccount.annotations, or static AWS keys in secrets.*
   provider: ""
   model: ""
@@ -58,9 +59,9 @@ fallback:
   #   - name: OPENAI
   #     model: gpt-4o
   #   - name: CLAUDEAI
-  #     model: claude-sonnet-4-20250514
+  #     model: claude-sonnet-4-6
   #   - name: GOOGLEAI
-  #     model: gemini-2.0-flash
+  #     model: gemini-2.5-flash
   maxRetries: 2
   cooldownBase: "30s"
   cooldownMax: "5m"
@@ -110,6 +111,8 @@ secrets:
   githubCopilotToken: ""
   # OpenRouter
   openrouterApiKey: ""
+  # Moonshot (Kimi)
+  moonshotApiKey: ""
   # AWS Bedrock — leave empty and use IRSA (serviceAccount.annotations) for IAM-based auth,
   # or set the static credentials below. Region is required either way (BEDROCK_REGION or AWS_REGION).
   awsAccessKeyId: ""
@@ -125,7 +128,7 @@ secrets:
 # Authenticate via /auth login github-copilot (Device Flow OAuth)
 # or set secrets.githubCopilotToken above
 copilot:
-  model: ""           # e.g., gpt-4o, gpt-4o-mini, claude-sonnet-4, gemini-2.0-flash
+  model: ""           # e.g., gpt-6-astra, gpt-4o, claude-sonnet-4-6, gemini-2.5-flash
   maxTokens: ""       # max tokens for response (default: provider limit)
   apiBaseUrl: ""      # override for enterprise (default: https://api.githubcopilot.com)
 
@@ -300,10 +303,9 @@ serviceMonitor:
   scrapeTimeout: ""
   labels: {}
 
-# AIOps enrichment — Prometheus URL for metrics collection during incident analysis.
-# When set, the operator queries Prometheus for CPU, memory, latency, error rate
-# trends around incident time, providing quantitative context to the AI.
-# Example: "http://prometheus-server.monitoring.svc:9090"
+# Deprecated: PROMETHEUS_URL is read by the AIOps operator, not by the server.
+# Set `prometheusUrl` on the chatcli-operator chart instead. Kept so existing
+# values files keep validating; the server ignores the variable.
 prometheusUrl: ""
 
 # Security hardening configuration
@@ -403,7 +405,7 @@ agents:
   #     ---
   #     name: coder
   #     description: Expert coder agent
-  #     model: gpt-4
+  #     model: gpt-6-astra
   #     skills: [golang, docker]
   #     ---
   #     You are an expert coder...

@@ -207,7 +207,7 @@ Backend compartilhado com TLS 1.3, JWT/RBAC, fallback, métricas Prometheus, MCP
 chatcli server --port 50051 \
   --token meu-token
 chatcli connect \
-  --server host:50051 \
+  --addr host:50051 \
   --token meu-token
 ```
 

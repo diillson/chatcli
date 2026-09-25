@@ -459,6 +459,10 @@
           "type": "string",
           "description": "Comma-separated custom regex patterns for log scrubbing."
         },
+        "allowedDiagnosticCommands": {
+          "type": "string",
+          "description": "Comma-separated extra read-only diagnostic commands allowed for remediation (appended to the built-in allowlist)."
+        },
         "corsOrigin": {
           "type": "string",
           "description": "CORS allowed origin. Empty = deny all (default)."

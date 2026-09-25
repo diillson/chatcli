@@ -1,6 +1,5 @@
 # ChatCLI Server - Docker Compose for development
 # Usage: docker compose up
-version: "3.9"
 
 services:
   chatcli-server:
@@ -28,25 +27,56 @@ services:
       #   CHATCLI_BIND_ADDRESS=127.0.0.1  (then use `docker exec`)
       CHATCLI_SERVER_TOKEN: "${CHATCLI_SERVER_TOKEN:-}"
 
+      # Per-user JWTs instead of (or alongside) the shared token.
+      # HS256 secret, or an RS256 public key (PEM) via CHATCLI_JWT_PUBLIC_KEY.
+      CHATCLI_JWT_SECRET: "${CHATCLI_JWT_SECRET:-}"
+      CHATCLI_JWT_PUBLIC_KEY: "${CHATCLI_JWT_PUBLIC_KEY:-}"
+      CHATCLI_JWT_ISSUER: "${CHATCLI_JWT_ISSUER:-}"
+      CHATCLI_JWT_AUDIENCE: "${CHATCLI_JWT_AUDIENCE:-}"
+
       # LLM Provider (configure at least one)
       LLM_PROVIDER: "${LLM_PROVIDER:-}"
+      LLM_MODEL: "${LLM_MODEL:-}"
       OPENAI_API_KEY: "${OPENAI_API_KEY:-}"
       OPENAI_MODEL: "${OPENAI_MODEL:-}"
       ANTHROPIC_API_KEY: "${ANTHROPIC_API_KEY:-}"
       ANTHROPIC_MODEL: "${ANTHROPIC_MODEL:-}"
       GOOGLEAI_API_KEY: "${GOOGLEAI_API_KEY:-}"
+      GOOGLEAI_MODEL: "${GOOGLEAI_MODEL:-}"
+      XAI_API_KEY: "${XAI_API_KEY:-}"
+      XAI_MODEL: "${XAI_MODEL:-}"
       ZAI_API_KEY: "${ZAI_API_KEY:-}"
       ZAI_MODEL: "${ZAI_MODEL:-}"
       MINIMAX_API_KEY: "${MINIMAX_API_KEY:-}"
       MINIMAX_MODEL: "${MINIMAX_MODEL:-}"
       MINIMAX_API_COMPAT: "${MINIMAX_API_COMPAT:-}"
+      MOONSHOT_API_KEY: "${MOONSHOT_API_KEY:-}"
+      MOONSHOT_MODEL: "${MOONSHOT_MODEL:-}"
+      OPENROUTER_API_KEY: "${OPENROUTER_API_KEY:-}"
+      OPENROUTER_MODEL: "${OPENROUTER_MODEL:-}"
       OLLAMA_ENABLED: "${OLLAMA_ENABLED:-}"
       OLLAMA_BASE_URL: "${OLLAMA_BASE_URL:-}"
       OLLAMA_MODEL: "${OLLAMA_MODEL:-}"
 
+      # AWS Bedrock (static keys; prefer an instance role or SSO on real hosts)
+      AWS_ACCESS_KEY_ID: "${AWS_ACCESS_KEY_ID:-}"
+      AWS_SECRET_ACCESS_KEY: "${AWS_SECRET_ACCESS_KEY:-}"
+      AWS_SESSION_TOKEN: "${AWS_SESSION_TOKEN:-}"
+      BEDROCK_REGION: "${BEDROCK_REGION:-}"
+      BEDROCK_MODEL: "${BEDROCK_MODEL:-}"
+
+      # StackSpot
+      CLIENT_ID: "${CLIENT_ID:-}"
+      CLIENT_KEY: "${CLIENT_KEY:-}"
+      STACKSPOT_REALM: "${STACKSPOT_REALM:-}"
+      STACKSPOT_AGENT_ID: "${STACKSPOT_AGENT_ID:-}"
+
       # GitHub Copilot
       GITHUB_COPILOT_TOKEN: "${GITHUB_COPILOT_TOKEN:-}"
       COPILOT_MODEL: "${COPILOT_MODEL:-}"
+
+      # Corporate CA bundle for every outbound TLS connection (PEM path inside the container)
+      CHATCLI_CA_BUNDLE: "${CHATCLI_CA_BUNDLE:-}"
 
       # Provider fallback chain (comma-separated, e.g. "OPENAI,CLAUDEAI,GOOGLEAI")
       CHATCLI_FALLBACK_ENABLED: "${CHATCLI_FALLBACK_ENABLED:-}"

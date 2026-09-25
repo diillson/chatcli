@@ -758,9 +758,15 @@ jobs:
 
           echo "Atualizando versão: $OLD_VERSION -> $NEW_VERSION"
 
-          # 1) Inline references in MDX (chatcli image tags, server,
-          #    operator, helm rows). Same behavior as before.
-          find . -name "*.mdx" -exec sed -i "s/${OLD_VERSION}/${NEW_VERSION}/g" {} +
+          # 1) Current-release references in MDX (image tags, helm
+          #    --version rows, install URLs, sample output). Scoped to
+          #    code spans, code fences, bold spans and URLs: a version
+          #    quoted in running prose ("As of v1.2.3 …") is history and
+          #    must not follow the release train. The former global sed
+          #    also left the dots unescaped and rewrote unrelated ids.
+          OLD_VERSION="$OLD_VERSION" NEW_VERSION="$NEW_VERSION" \
+            perl _chatcli_src/scripts/docs/bump-version.pl \
+            $(find . -path ./_chatcli_src -prune -o -name "*.mdx" -print)
 
           # 2) docs.json banner ('🚀 ChatCLI X.Y.Z — ...'). The banner
           #    is in JSON (not MDX) and was a silent gap before — it

@@ -219,7 +219,7 @@ metadata:
   name: chatcli-copilot
 spec:
   provider: COPILOT
-  model: gpt-4o          # or gpt-4o-mini, claude-sonnet-4, gemini-2.0-flash
+  model: gpt-6-astra     # or gpt-4o, claude-sonnet-4-6, gemini-2.5-flash
   replicas: 1
   apiKeys:
     name: chatcli-copilot-keys   # Secret with GITHUB_COPILOT_TOKEN
@@ -252,8 +252,8 @@ metadata:
   name: chatcli-bedrock
 spec:
   provider: BEDROCK
-  # Modern Claude on Bedrock requires an inference profile id
-  # (prefix global./us./eu./apac.). For Claude 3/3.5 the base id also works.
+  # Claude on Bedrock requires an inference profile id
+  # (prefix global./us./eu./apac.). Claude 3.x models are retired on Bedrock.
   model: global.anthropic.claude-sonnet-4-6
   replicas: 1
   apiKeys:

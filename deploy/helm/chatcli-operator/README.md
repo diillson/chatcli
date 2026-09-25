@@ -190,6 +190,7 @@ The operator ships with defense-in-depth security controls suitable for producti
 | `security.grpcTLS.caFile` | CA certificate for gRPC server verification | `""` |
 | `security.allowedResourceTypes` | Comma-separated allowed resource types for remediation | `""` |
 | `security.logScrubPatterns` | Custom regex patterns for log scrubbing before LLM | `""` |
+| `security.allowedDiagnosticCommands` | Extra read-only diagnostic commands for remediation (comma-separated) | `""` |
 | `security.corsOrigin` | Allowed CORS origin (empty = deny all) | `""` |
 | `security.auditLogPath` | Audit log file path (JSON lines) | `""` |
 | `extraEnv` | Extra environment variables for operator pod | `[]` |

@@ -128,6 +128,7 @@
             "XAI",
             "ZAI",
             "MINIMAX",
+            "MOONSHOT",
             "STACKSPOT",
             "OLLAMA",
             "COPILOT",
@@ -306,6 +307,10 @@
         "openrouterApiKey": {
           "type": "string",
           "description": "OpenRouter API key for accessing multiple LLM providers through a single endpoint."
+        },
+        "moonshotApiKey": {
+          "type": "string",
+          "description": "Moonshot (Kimi) API key."
         },
         "awsAccessKeyId": {
           "type": "string",
@@ -840,7 +845,7 @@
     },
     "prometheusUrl": {
       "type": "string",
-      "description": "Prometheus server URL for querying metrics."
+      "description": "Deprecated: read by the AIOps operator only. Configure prometheusUrl on the chatcli-operator chart."
     },
     "extraEnv": {
       "type": "array",
