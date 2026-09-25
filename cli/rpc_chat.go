@@ -128,6 +128,11 @@ func (cli *ChatCLI) runChatTurnSerialized(
 
 	reply, err := activeClient.SendPrompt(ctx, input+additionalContext, tempHistory, maxTokens)
 	if cli.refreshClientOnAuthError(err) {
+		// The refresh rebuilt cli.Client; the routed client above still
+		// holds the expired credential, so resolve the route again.
+		if activeClient, resProvider, resModel, err = cli.resolveRPCChatClient(assembly.modelHint, o); err != nil {
+			return RPCChatTurn{}, err
+		}
 		reply, err = activeClient.SendPrompt(ctx, input+additionalContext, tempHistory, maxTokens)
 	}
 	// Overflow recovery (bounded): the unattended surfaces used to fail

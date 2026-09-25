@@ -1,0 +1,8 @@
+{
+  "server.route.auth_refreshed": "Server credentials refreshed after an authentication error; retrying the request",
+  "server.route.auth_reroute_failed": "Could not rebuild the LLM client after the credential refresh",
+  "server.route.refusal_no_sibling": "Reply stopped by the safety classifier and no sibling model is available for a retry",
+  "server.route.refusal_reroute_failed": "Could not build the sibling model client for the refusal retry",
+  "server.route.refusal_retry": "Reply stopped by the safety classifier; retrying once on the sibling model",
+  "llm.fallback.stream_closed_empty": "Provider %s closed the stream without sending anything"
+}

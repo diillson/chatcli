@@ -119,6 +119,73 @@ func (c *InstrumentedClient) SendPromptWithTools(ctx context.Context, prompt str
 	return response, nil
 }
 
+// SendPromptStream streams through the inner client when it can stream and
+// records the call once the final chunk (or an error) lands. Before this
+// the wrapper hid the inner client's StreamingClient interface, so a
+// metrics-enabled server fell back to buffered replies.
+func (c *InstrumentedClient) SendPromptStream(ctx context.Context, prompt string, history []models.Message, maxTokens int) (<-chan StreamChunk, error) {
+	sc, ok := AsStreamingClient(c.inner)
+	if !ok {
+		return nil, fmt.Errorf("inner client %T does not support streaming", c.inner)
+	}
+	model := c.inner.GetModelName()
+	start := time.Now()
+	in, err := sc.SendPromptStream(ctx, prompt, history, maxTokens)
+	if err != nil {
+		c.recorder.RecordRequest(c.provider, model, "error", time.Since(start))
+		c.recorder.RecordError(c.provider, model, classifyError(err))
+		return nil, err
+	}
+	out := make(chan StreamChunk)
+	go func() {
+		defer close(out)
+		failed := false
+		for chunk := range in {
+			if chunk.Error != nil && !failed {
+				failed = true
+				c.recorder.RecordRequest(c.provider, model, "error", time.Since(start))
+				c.recorder.RecordError(c.provider, model, classifyError(chunk.Error))
+			}
+			if chunk.Done && !failed {
+				c.recorder.RecordRequest(c.provider, model, "success", time.Since(start))
+				c.recordUsage(model)
+			}
+			select {
+			case out <- chunk:
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
+	return out, nil
+}
+
+// SupportsStreaming reports whether the inner client streams.
+func (c *InstrumentedClient) SupportsStreaming() bool {
+	return IsStreamingCapable(c.inner)
+}
+
+// LastUsage forwards the inner client's usage so callers above the wrapper
+// (server responses, cost tracking) keep seeing real token counts.
+func (c *InstrumentedClient) LastUsage() *models.UsageInfo {
+	if ua, ok := c.inner.(UsageAwareClient); ok {
+		return ua.LastUsage()
+	}
+	return nil
+}
+
+// LastStopReason forwards the inner client's stop reason.
+func (c *InstrumentedClient) LastStopReason() string {
+	if sr, ok := c.inner.(StopReasonAwareClient); ok {
+		return sr.LastStopReason()
+	}
+	return ""
+}
+
+// Unwrap exposes the inner client for capability checks that need the
+// concrete provider client (never for bypassing instrumentation).
+func (c *InstrumentedClient) Unwrap() LLMClient { return c.inner }
+
 // SupportsNativeTools returns true if the inner client supports native tool calling.
 func (c *InstrumentedClient) SupportsNativeTools() bool {
 	tac, ok := c.inner.(ToolAwareClient)

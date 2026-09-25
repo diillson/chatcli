@@ -21,21 +21,23 @@
 //
 // # Features
 //
-//   - Every LLM provider registered by the shared manager (same catalog,
-//     credentials and OAuth profiles as the CLI)
-//   - Unary and streaming prompt RPCs, plus an interactive bidirectional
-//     session
+//   - Every LLM provider registered by the shared manager (same catalog and
+//     credentials as the CLI); callers may forward their own credential
+//   - Unary and real streaming prompt RPCs; responses name the provider and
+//     model that answered and carry the reported token usage
+//   - Provider fallback chain on the request path, with health monitoring
+//   - max_tokens from the request, the provider env override or the catalog
+//   - Expired server credentials refreshed once (throttled) and retried;
+//     classifier refusals resent once on the sibling model
+//   - Interactive bidirectional sessions
 //   - Persistent named sessions (list, load, save, delete)
 //   - Remote plugin execution and download with role-based access control
-//   - Agent and skill discovery for connected clients, with skill
-//     auto-activation on prompts
-//   - AIOps RPCs (alerts, issue analysis, agentic remediation steps) for the
-//     Kubernetes operator
+//   - Agent and skill discovery, with skill auto-activation on prompts
+//   - AIOps RPCs (alerts, issue analysis, agentic remediation steps)
 //   - Cross-channel conversation hub (event log, subscriptions, bindings)
 //   - Prometheus metrics (gRPC, LLM, session counters)
 //   - Kubernetes watcher context injection
 //
-// The provider fallback chain and the MCP manager wired by the server
-// subcommand are reported by the status command; request routing through
-// them is being unified with the CLI turn pipeline.
+// The MCP manager wired by the server subcommand is reported by the status
+// command; its tools are not yet offered on the request path.
 package server

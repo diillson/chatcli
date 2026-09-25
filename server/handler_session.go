@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"strconv"
 	"strings"
 	"sync"
 
@@ -22,83 +23,77 @@ import (
 	"google.golang.org/grpc/status"
 )
 
-// SendPrompt handles a single prompt request.
+// SendPrompt handles a single prompt request. Routing, max_tokens, credential
+// refresh and refusal retry follow llm_route.go; the response names the
+// provider and model that answered and carries the reported usage.
 func (h *Handler) SendPrompt(ctx context.Context, req *pb.SendPromptRequest) (*pb.SendPromptResponse, error) {
 	if req.Prompt == "" {
 		return nil, status.Errorf(codes.InvalidArgument, "%s", i18n.T("server.session.prompt_empty"))
 	}
 
-	llmClient, err := h.getClient(req.Provider, req.Model, req.ClientApiKey, req.ProviderConfig)
+	route, err := h.resolveRoute(req.Provider, req.Model, req.ClientApiKey, req.ProviderConfig)
 	if err != nil {
 		h.logger.Error(i18n.T("server.session.llm_client_failed"), zap.Error(err))
 		return nil, status.Errorf(codes.Internal, "%s", i18n.T("server.session.get_client_error", err))
 	}
 
 	history := protoToHistory(req.History)
-	maxTokens := int(req.MaxTokens)
+	maxTokens := h.effectiveMaxTokens(req.MaxTokens, route)
 
-	enrichedPrompt := h.enrichPrompt(req.Prompt)
-	response, err := llmClient.SendPrompt(ctx, enrichedPrompt, history, maxTokens)
+	res, err := h.complete(ctx, route, h.enrichPrompt(req.Prompt), history, maxTokens)
 	if err != nil {
 		h.logger.Error(i18n.T("server.session.send_prompt_failed"), zap.Error(err))
 		return nil, status.Errorf(codes.Internal, "%s", i18n.T("server.session.llm_error", err))
 	}
 
-	provider := req.Provider
-	if provider == "" {
-		provider = h.defaultProvider
-	}
-
 	return &pb.SendPromptResponse{
-		Response: response,
-		Model:    llmClient.GetModelName(),
-		Provider: provider,
+		Response:   res.text,
+		Model:      res.model,
+		Provider:   res.provider,
+		Usage:      usageToProto(res.usage),
+		StopReason: res.stopReason,
 	}, nil
 }
 
-// StreamPrompt handles a streaming prompt request.
+// StreamPrompt handles a streaming prompt request. Text is forwarded as the
+// provider produces it; the final message carries usage and stop reason.
+// Routes that cannot stream deliver the reply as one chunk.
 func (h *Handler) StreamPrompt(req *pb.StreamPromptRequest, stream pb.ChatCLIService_StreamPromptServer) error {
 	if req.Prompt == "" {
 		return status.Errorf(codes.InvalidArgument, "%s", i18n.T("server.session.prompt_empty"))
 	}
 
-	llmClient, err := h.getClient(req.Provider, req.Model, req.ClientApiKey, req.ProviderConfig)
+	route, err := h.resolveRoute(req.Provider, req.Model, req.ClientApiKey, req.ProviderConfig)
 	if err != nil {
 		h.logger.Error(i18n.T("server.session.stream_client_failed"), zap.Error(err))
 		return status.Errorf(codes.Internal, "%s", i18n.T("server.session.get_client_error", err))
 	}
 
 	history := protoToHistory(req.History)
-	maxTokens := int(req.MaxTokens)
+	maxTokens := h.effectiveMaxTokens(req.MaxTokens, route)
 
-	enrichedPrompt := h.enrichPrompt(req.Prompt)
-	response, err := llmClient.SendPrompt(stream.Context(), enrichedPrompt, history, maxTokens)
+	// Attribution is only final once the reply completed (the fallback
+	// chain decides who answers at call time), so in-flight chunks carry
+	// the route's expectation and the done message carries the truth.
+	res, err := h.stream(stream.Context(), route, h.enrichPrompt(req.Prompt), history, maxTokens, func(chunk string) error {
+		return stream.Send(&pb.StreamPromptResponse{
+			Chunk:    chunk,
+			Model:    route.model,
+			Provider: route.provider,
+		})
+	})
 	if err != nil {
 		h.logger.Error(i18n.T("server.session.stream_failed"), zap.Error(err))
 		return status.Errorf(codes.Internal, "%s", i18n.T("server.session.llm_error", err))
 	}
 
-	provider := req.Provider
-	if provider == "" {
-		provider = h.defaultProvider
-	}
-
-	modelName := llmClient.GetModelName()
-
-	chunks := chunkResponse(response, streamChunkSize)
-	for i, chunk := range chunks {
-		isLast := i == len(chunks)-1
-		if err := stream.Send(&pb.StreamPromptResponse{
-			Chunk:    chunk,
-			Done:     isLast,
-			Model:    modelName,
-			Provider: provider,
-		}); err != nil {
-			return err
-		}
-	}
-
-	return nil
+	return stream.Send(&pb.StreamPromptResponse{
+		Done:       true,
+		Model:      res.model,
+		Provider:   res.provider,
+		Usage:      usageToProto(res.usage),
+		StopReason: res.stopReason,
+	})
 }
 
 // InteractiveSession handles bidirectional streaming for interactive mode.
@@ -130,7 +125,7 @@ func (h *Handler) InteractiveSession(stream pb.ChatCLIService_InteractiveSession
 			mu.Lock()
 			history = append(history, models.Message{Role: "user", Content: msg.Content})
 
-			llmClient, err := h.getClient(msg.Metadata["provider"], msg.Metadata["model"], msg.Metadata["client_api_key"], nil)
+			route, err := h.resolveRoute(msg.Metadata["provider"], msg.Metadata["model"], msg.Metadata["client_api_key"], nil)
 			if err != nil {
 				mu.Unlock()
 				sendErr := stream.Send(&pb.SessionMessage{
@@ -143,9 +138,9 @@ func (h *Handler) InteractiveSession(stream pb.ChatCLIService_InteractiveSession
 				continue
 			}
 
-			maxTokens := 0 // use default
-			enrichedContent := h.enrichPrompt(msg.Content)
-			response, err := llmClient.SendPrompt(stream.Context(), enrichedContent, history, maxTokens)
+			maxTokens := h.effectiveMaxTokens(0, route)
+			res, err := h.complete(stream.Context(), route, h.enrichPrompt(msg.Content), history, maxTokens)
+			response := res.text
 			if err != nil {
 				mu.Unlock()
 				sendErr := stream.Send(&pb.SessionMessage{
@@ -162,12 +157,9 @@ func (h *Handler) InteractiveSession(stream pb.ChatCLIService_InteractiveSession
 			mu.Unlock()
 
 			if err := stream.Send(&pb.SessionMessage{
-				Type:    pb.SessionMessage_ASSISTANT_RESPONSE,
-				Content: response,
-				Metadata: map[string]string{
-					"model":    llmClient.GetModelName(),
-					"provider": h.defaultProvider,
-				},
+				Type:     pb.SessionMessage_ASSISTANT_RESPONSE,
+				Content:  response,
+				Metadata: sessionReplyMetadata(res),
 			}); err != nil {
 				return err
 			}
@@ -463,4 +455,29 @@ func (h *Handler) cmdSkillsList() string {
 	}
 
 	return b.String()
+}
+
+// sessionReplyMetadata is the attribution an interactive reply carries:
+// the provider and model that answered (not the server default), plus the
+// reported usage so the client can price the turn.
+func sessionReplyMetadata(res turnResult) map[string]string {
+	md := map[string]string{
+		"model":    res.model,
+		"provider": res.provider,
+	}
+	if res.stopReason != "" {
+		md["stop_reason"] = res.stopReason
+	}
+	if res.usage != nil {
+		md["prompt_tokens"] = strconv.Itoa(res.usage.PromptTokens)
+		md["completion_tokens"] = strconv.Itoa(res.usage.CompletionTokens)
+		if res.usage.CacheReadInputTokens > 0 {
+			md["cache_read_tokens"] = strconv.Itoa(res.usage.CacheReadInputTokens)
+		}
+		if res.usage.CacheCreationInputTokens > 0 {
+			md["cache_write_tokens"] = strconv.Itoa(res.usage.CacheCreationInputTokens)
+		}
+		md["usage_estimated"] = strconv.FormatBool(!res.usage.IsReal)
+	}
+	return md
 }

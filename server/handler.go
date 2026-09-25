@@ -26,12 +26,6 @@ import (
 	"go.uber.org/zap"
 )
 
-const (
-	// streamChunkSize is the approximate number of characters per streaming chunk.
-	// Splitting at sentence/paragraph boundaries gives clients a natural progressive display.
-	streamChunkSize = 200
-)
-
 // Handler implements the ChatCLIService gRPC server.
 type Handler struct {
 	pb.UnimplementedChatCLIServiceServer
@@ -76,6 +70,9 @@ type Handler struct {
 	// Conversation hub broker for cross-channel continuity (optional, nil when
 	// the hub is disabled). Set via SetHub.
 	hub hub.Broker
+
+	// Request-path routing state (credential refresh throttle).
+	handlerRouteState
 }
 
 // SessionStore abstracts session persistence for testability.

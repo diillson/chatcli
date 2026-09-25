@@ -174,7 +174,7 @@ func TestHandler_SendPrompt_Success(t *testing.T) {
 	logger := zap.NewNop()
 
 	llmClient := &mockLLMClient{}
-	llmClient.On("SendPrompt", mock.Anything, "Hello", []models.Message{}, 0).Return("Hi there!", nil)
+	llmClient.On("SendPrompt", mock.Anything, "Hello", []models.Message{}, mock.AnythingOfType("int")).Return("Hi there!", nil)
 	llmClient.On("GetModelName").Return("gpt-4")
 
 	mgr := &mockLLMManager{}
@@ -194,7 +194,7 @@ func TestHandler_SendPrompt_WithClientAPIKey(t *testing.T) {
 	logger := zap.NewNop()
 
 	llmClient := &mockLLMClient{}
-	llmClient.On("SendPrompt", mock.Anything, "Hello", []models.Message{}, 0).Return("Using your key!", nil)
+	llmClient.On("SendPrompt", mock.Anything, "Hello", []models.Message{}, mock.AnythingOfType("int")).Return("Using your key!", nil)
 	llmClient.On("GetModelName").Return("gpt-4o")
 
 	mgr := &mockLLMManager{}
@@ -348,7 +348,7 @@ func TestHandler_SendPrompt_WithWatcherContext(t *testing.T) {
 	// The enriched prompt should contain the K8s context + user question
 	llmClient.On("SendPrompt", mock.Anything, mock.MatchedBy(func(prompt string) bool {
 		return strings.Contains(prompt, "[K8s] 3 pods ready") && strings.Contains(prompt, "User Question: Is it healthy?")
-	}), []models.Message{}, 0).Return("Yes, all pods are running.", nil)
+	}), []models.Message{}, mock.AnythingOfType("int")).Return("Yes, all pods are running.", nil)
 	llmClient.On("GetModelName").Return("gpt-4")
 
 	mgr := &mockLLMManager{}

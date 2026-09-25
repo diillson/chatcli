@@ -52,19 +52,6 @@ const refusalNudge = "[system] Your previous reply was stopped by the provider's
 	"Continue the task from the current step. State the next action plainly, avoid echoing file contents or secrets verbatim, " +
 	"and if a step cannot be done, say so in one line and move to the next one."
 
-// refusalSiblings is the "auto" fallback by model family, most capable
-// sibling first. Looked up on the provider that refused, through the
-// catalog, so a provider that lacks the sibling gets none.
-var refusalSiblings = []struct {
-	family   string
-	siblings []string
-}{
-	{"fable", []string{"claude-opus-5", "claude-sonnet-5"}},
-	{"mythos", []string{"claude-opus-5", "claude-sonnet-5"}},
-	{"opus", []string{"claude-sonnet-5"}},
-	{"sonnet", []string{"claude-haiku-4-5-20251001"}},
-}
-
 // resendTurnAfter reports whether the turn that failed with err should be
 // sent again: after an expired credential was refreshed, or after a
 // refusal, with a nudge appended to both the outgoing turn and the run's
@@ -214,22 +201,8 @@ func refusalRecommendedFor(provider, model string, refusal *llmclient.EmptyRespo
 }
 
 // refusalSiblingFor picks the sibling model of the same provider for the
-// family of model, the first one the catalog knows.
+// family of model, the first one the catalog knows (catalog.RefusalSibling,
+// shared with the gRPC server's refusal retry).
 func refusalSiblingFor(provider, model string) string {
-	lower := strings.ToLower(model)
-	for _, f := range refusalSiblings {
-		if !strings.Contains(lower, f.family) {
-			continue
-		}
-		for _, sibling := range f.siblings {
-			if strings.Contains(lower, sibling) {
-				continue // already on it
-			}
-			if _, known := catalog.Resolve(provider, sibling); known {
-				return strings.ToUpper(provider) + ":" + sibling
-			}
-		}
-		return ""
-	}
-	return ""
+	return catalog.RefusalSibling(provider, model)
 }
