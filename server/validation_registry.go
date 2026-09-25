@@ -36,6 +36,7 @@ var requestValidators = map[string]func(interface{}) error{
 
 	// AIOps
 	"GetAlerts":    validateGetAlerts,
+	"StreamAlerts": validateStreamAlerts,
 	"AnalyzeIssue": validateAnalyzeIssue,
 	"AgenticStep":  validateAgenticStep,
 

@@ -208,6 +208,16 @@ func RunServer(args []string, llmMgr manager.LLMManager, logger *zap.Logger) err
 		stores := mw.GetStores()
 		multiSum := k8s.NewMultiSummarizer(stores, multiCfg.MaxContextChars)
 
+		// Every store reports new alerts to one broadcaster so StreamAlerts
+		// pushes them the moment the watcher raises them.
+		alertStream := server.NewAlertBroadcaster()
+		for key, store := range stores {
+			ns, deploy := splitStoreKey(key)
+			store.SetAlertHook(func(a k8s.Alert) {
+				alertStream.Publish(alertInfoFrom(a, ns, deploy))
+			})
+		}
+
 		srv.SetWatcher(server.WatcherConfig{
 			ContextFunc: multiSum.GenerateContext,
 			StatusFunc:  multiSum.GenerateStatusSummary,
@@ -226,34 +236,16 @@ func RunServer(args []string, llmMgr manager.LLMManager, logger *zap.Logger) err
 			AlertsFunc: func() []server.AlertInfo {
 				var all []server.AlertInfo
 				for key, store := range stores {
-					// Key format is "Kind/namespace/name" (e.g., "Deployment/production/api-gateway")
-					parts := strings.SplitN(key, "/", 3)
-					ns, deploy := "", ""
-					if len(parts) == 3 {
-						// kind = parts[0] (not used here, carried via alert.Object)
-						ns = parts[1]
-						deploy = parts[2]
-					} else if len(parts) == 2 {
-						// Backward compat: "namespace/name"
-						ns = parts[0]
-						deploy = parts[1]
-					}
+					ns, deploy := splitStoreKey(key)
 					for _, a := range store.GetAlerts() {
-						all = append(all, server.AlertInfo{
-							Type:       string(a.Type),
-							Severity:   string(a.Severity),
-							Message:    a.Message,
-							Object:     a.Object,
-							Namespace:  ns,
-							Deployment: deploy,
-							Timestamp:  a.Timestamp,
-						})
+						all = append(all, alertInfoFrom(a, ns, deploy))
 					}
 				}
 				return all
 			},
-			Deployment: fmt.Sprintf("%d targets", mw.TargetCount()),
-			Namespace:  "multi",
+			AlertStream: alertStream,
+			Deployment:  fmt.Sprintf("%d targets", mw.TargetCount()),
+			Namespace:   "multi",
 		})
 
 		ctx, cancel := context.WithCancel(context.Background())
@@ -487,4 +479,32 @@ Examples:
 
   # Server with multi-target K8s watcher (config file)
   chatcli server --watch-config targets.yaml`)
+}
+
+// splitStoreKey parses a watcher store key. The format is
+// "Kind/namespace/name" (for example "Deployment/production/api-gateway");
+// the older "namespace/name" form is still accepted. The kind is not
+// returned: alerts carry it in their Object field.
+func splitStoreKey(key string) (namespace, deployment string) {
+	parts := strings.SplitN(key, "/", 3)
+	switch len(parts) {
+	case 3:
+		return parts[1], parts[2]
+	case 2:
+		return parts[0], parts[1]
+	}
+	return "", ""
+}
+
+// alertInfoFrom converts a watcher alert into the server's wire-neutral form.
+func alertInfoFrom(a k8s.Alert, namespace, deployment string) server.AlertInfo {
+	return server.AlertInfo{
+		Type:       string(a.Type),
+		Severity:   string(a.Severity),
+		Message:    a.Message,
+		Object:     a.Object,
+		Namespace:  namespace,
+		Deployment: deployment,
+		Timestamp:  a.Timestamp,
+	}
 }

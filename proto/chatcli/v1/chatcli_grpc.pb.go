@@ -34,6 +34,7 @@ const (
 	ChatCLIService_GetWatcherStatus_FullMethodName          = "/chatcli.v1.ChatCLIService/GetWatcherStatus"
 	ChatCLIService_Health_FullMethodName                    = "/chatcli.v1.ChatCLIService/Health"
 	ChatCLIService_GetAlerts_FullMethodName                 = "/chatcli.v1.ChatCLIService/GetAlerts"
+	ChatCLIService_StreamAlerts_FullMethodName              = "/chatcli.v1.ChatCLIService/StreamAlerts"
 	ChatCLIService_AnalyzeIssue_FullMethodName              = "/chatcli.v1.ChatCLIService/AnalyzeIssue"
 	ChatCLIService_AgenticStep_FullMethodName               = "/chatcli.v1.ChatCLIService/AgenticStep"
 	ChatCLIService_ListRemotePlugins_FullMethodName         = "/chatcli.v1.ChatCLIService/ListRemotePlugins"
@@ -85,6 +86,12 @@ type ChatCLIServiceClient interface {
 	Health(ctx context.Context, in *HealthRequest, opts ...grpc.CallOption) (*HealthResponse, error)
 	// GetAlerts returns current watcher alerts (anomalies detected by the K8s watcher).
 	GetAlerts(ctx context.Context, in *GetAlertsRequest, opts ...grpc.CallOption) (*GetAlertsResponse, error)
+	// StreamAlerts pushes watcher alerts as the watcher raises them, instead of
+	// the client polling GetAlerts. With include_current the stream opens with
+	// the alerts active right now, then only new ones follow. Heartbeats let
+	// the client tell a quiet watcher from a dead connection. A server that
+	// fell behind ends the stream with ABORTED: reopen it with include_current.
+	StreamAlerts(ctx context.Context, in *StreamAlertsRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[StreamAlertsResponse], error)
 	// AnalyzeIssue uses the LLM to analyze an AIOps issue and return recommendations.
 	AnalyzeIssue(ctx context.Context, in *AnalyzeIssueRequest, opts ...grpc.CallOption) (*AnalyzeIssueResponse, error)
 	// AgenticStep runs one turn of the AI-driven remediation agent loop.
@@ -263,6 +270,25 @@ func (c *chatCLIServiceClient) GetAlerts(ctx context.Context, in *GetAlertsReque
 	return out, nil
 }
 
+func (c *chatCLIServiceClient) StreamAlerts(ctx context.Context, in *StreamAlertsRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[StreamAlertsResponse], error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	stream, err := c.cc.NewStream(ctx, &ChatCLIService_ServiceDesc.Streams[2], ChatCLIService_StreamAlerts_FullMethodName, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	x := &grpc.GenericClientStream[StreamAlertsRequest, StreamAlertsResponse]{ClientStream: stream}
+	if err := x.ClientStream.SendMsg(in); err != nil {
+		return nil, err
+	}
+	if err := x.ClientStream.CloseSend(); err != nil {
+		return nil, err
+	}
+	return x, nil
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type ChatCLIService_StreamAlertsClient = grpc.ServerStreamingClient[StreamAlertsResponse]
+
 func (c *chatCLIServiceClient) AnalyzeIssue(ctx context.Context, in *AnalyzeIssueRequest, opts ...grpc.CallOption) (*AnalyzeIssueResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(AnalyzeIssueResponse)
@@ -345,7 +371,7 @@ func (c *chatCLIServiceClient) ExecuteRemotePlugin(ctx context.Context, in *Exec
 
 func (c *chatCLIServiceClient) DownloadPlugin(ctx context.Context, in *DownloadPluginRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[DownloadPluginResponse], error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	stream, err := c.cc.NewStream(ctx, &ChatCLIService_ServiceDesc.Streams[2], ChatCLIService_DownloadPlugin_FullMethodName, cOpts...)
+	stream, err := c.cc.NewStream(ctx, &ChatCLIService_ServiceDesc.Streams[3], ChatCLIService_DownloadPlugin_FullMethodName, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -404,7 +430,7 @@ func (c *chatCLIServiceClient) ReadConversation(ctx context.Context, in *ReadCon
 
 func (c *chatCLIServiceClient) SubscribeConversation(ctx context.Context, in *SubscribeConversationRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[ConversationEvent], error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	stream, err := c.cc.NewStream(ctx, &ChatCLIService_ServiceDesc.Streams[3], ChatCLIService_SubscribeConversation_FullMethodName, cOpts...)
+	stream, err := c.cc.NewStream(ctx, &ChatCLIService_ServiceDesc.Streams[4], ChatCLIService_SubscribeConversation_FullMethodName, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -453,7 +479,7 @@ func (c *chatCLIServiceClient) ChatTurn(ctx context.Context, in *ChatTurnRequest
 
 func (c *chatCLIServiceClient) RunCoder(ctx context.Context, in *PipelineTaskRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[PipelineTaskEvent], error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	stream, err := c.cc.NewStream(ctx, &ChatCLIService_ServiceDesc.Streams[4], ChatCLIService_RunCoder_FullMethodName, cOpts...)
+	stream, err := c.cc.NewStream(ctx, &ChatCLIService_ServiceDesc.Streams[5], ChatCLIService_RunCoder_FullMethodName, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -472,7 +498,7 @@ type ChatCLIService_RunCoderClient = grpc.ServerStreamingClient[PipelineTaskEven
 
 func (c *chatCLIServiceClient) RunAgent(ctx context.Context, in *PipelineTaskRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[PipelineTaskEvent], error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	stream, err := c.cc.NewStream(ctx, &ChatCLIService_ServiceDesc.Streams[5], ChatCLIService_RunAgent_FullMethodName, cOpts...)
+	stream, err := c.cc.NewStream(ctx, &ChatCLIService_ServiceDesc.Streams[6], ChatCLIService_RunAgent_FullMethodName, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -537,6 +563,12 @@ type ChatCLIServiceServer interface {
 	Health(context.Context, *HealthRequest) (*HealthResponse, error)
 	// GetAlerts returns current watcher alerts (anomalies detected by the K8s watcher).
 	GetAlerts(context.Context, *GetAlertsRequest) (*GetAlertsResponse, error)
+	// StreamAlerts pushes watcher alerts as the watcher raises them, instead of
+	// the client polling GetAlerts. With include_current the stream opens with
+	// the alerts active right now, then only new ones follow. Heartbeats let
+	// the client tell a quiet watcher from a dead connection. A server that
+	// fell behind ends the stream with ABORTED: reopen it with include_current.
+	StreamAlerts(*StreamAlertsRequest, grpc.ServerStreamingServer[StreamAlertsResponse]) error
 	// AnalyzeIssue uses the LLM to analyze an AIOps issue and return recommendations.
 	AnalyzeIssue(context.Context, *AnalyzeIssueRequest) (*AnalyzeIssueResponse, error)
 	// AgenticStep runs one turn of the AI-driven remediation agent loop.
@@ -625,6 +657,9 @@ func (UnimplementedChatCLIServiceServer) Health(context.Context, *HealthRequest)
 }
 func (UnimplementedChatCLIServiceServer) GetAlerts(context.Context, *GetAlertsRequest) (*GetAlertsResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method GetAlerts not implemented")
+}
+func (UnimplementedChatCLIServiceServer) StreamAlerts(*StreamAlertsRequest, grpc.ServerStreamingServer[StreamAlertsResponse]) error {
+	return status.Errorf(codes.Unimplemented, "method StreamAlerts not implemented")
 }
 func (UnimplementedChatCLIServiceServer) AnalyzeIssue(context.Context, *AnalyzeIssueRequest) (*AnalyzeIssueResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method AnalyzeIssue not implemented")
@@ -889,6 +924,17 @@ func _ChatCLIService_GetAlerts_Handler(srv interface{}, ctx context.Context, dec
 	}
 	return interceptor(ctx, in, info, handler)
 }
+
+func _ChatCLIService_StreamAlerts_Handler(srv interface{}, stream grpc.ServerStream) error {
+	m := new(StreamAlertsRequest)
+	if err := stream.RecvMsg(m); err != nil {
+		return err
+	}
+	return srv.(ChatCLIServiceServer).StreamAlerts(m, &grpc.GenericServerStream[StreamAlertsRequest, StreamAlertsResponse]{ServerStream: stream})
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type ChatCLIService_StreamAlertsServer = grpc.ServerStreamingServer[StreamAlertsResponse]
 
 func _ChatCLIService_AnalyzeIssue_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(AnalyzeIssueRequest)
@@ -1363,6 +1409,11 @@ var ChatCLIService_ServiceDesc = grpc.ServiceDesc{
 			Handler:       _ChatCLIService_InteractiveSession_Handler,
 			ServerStreams: true,
 			ClientStreams: true,
+		},
+		{
+			StreamName:    "StreamAlerts",
+			Handler:       _ChatCLIService_StreamAlerts_Handler,
+			ServerStreams: true,
 		},
 		{
 			StreamName:    "DownloadPlugin",

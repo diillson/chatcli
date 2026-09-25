@@ -56,6 +56,17 @@ func validateGetAlerts(req interface{}) error {
 	return validateResourceName("deployment", r.Deployment)
 }
 
+func validateStreamAlerts(req interface{}) error {
+	r, ok := req.(*pb.StreamAlertsRequest)
+	if !ok {
+		return nil
+	}
+	if err := validateNamespace("namespace", r.Namespace); err != nil {
+		return err
+	}
+	return validateResourceName("deployment", r.Deployment)
+}
+
 // validateAgenticStep bounds the remediation agent's turn. This is the
 // widest request the server accepts — a full conversation history plus a
 // fresh cluster snapshot — so every repeated and free-text field is

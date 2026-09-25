@@ -19,6 +19,19 @@ type ObservabilityStore struct {
 	maxLogs      int
 	window       time.Duration // only keep data within this window
 	mu           sync.RWMutex
+	// alertHook, when set, sees every alert the store accepts as new. It
+	// runs outside the lock so a slow consumer never stalls the watcher.
+	alertHook func(Alert)
+}
+
+// SetAlertHook registers a callback for every alert the store accepts as new.
+// Duplicates the store drops never reach the hook, so a subscriber receives
+// each alert once per window. The hook runs on the watcher goroutine and must
+// not block.
+func (s *ObservabilityStore) SetAlertHook(hook func(Alert)) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.alertHook = hook
 }
 
 // NewObservabilityStore creates a new store with the given capacity.
@@ -58,13 +71,21 @@ func (s *ObservabilityStore) AddLogs(entries []LogEntry) {
 // AddAlert adds an alert to the store. Duplicates (same Type+Object) are skipped
 // to prevent alert accumulation from repeated poll cycles detecting the same condition.
 func (s *ObservabilityStore) AddAlert(alert Alert) {
+	if hook := s.appendAlert(alert); hook != nil {
+		hook(alert)
+	}
+}
+
+// appendAlert stores the alert under the lock and returns the hook to notify
+// when the alert was new, nil when it was a duplicate.
+func (s *ObservabilityStore) appendAlert(alert Alert) func(Alert) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	// Dedup: skip if same Type+Object already exists in window
 	for _, existing := range s.alerts {
 		if existing.Type == alert.Type && existing.Object == alert.Object {
-			return
+			return nil
 		}
 	}
 
@@ -78,6 +99,7 @@ func (s *ObservabilityStore) AddAlert(alert Alert) {
 		}
 	}
 	s.alerts = filtered
+	return s.alertHook
 }
 
 // LatestSnapshot returns the most recent snapshot, if any.

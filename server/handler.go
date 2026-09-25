@@ -43,6 +43,7 @@ type Handler struct {
 	watcherStatusFunc  func() string // compact status summary
 	watcherStatsFunc   func() (alertCount, snapshotCount, podCount int)
 	watcherAlertsFunc  func() []AlertInfo // raw alerts for AIOps operator
+	alertBroadcaster   *AlertBroadcaster  // live alerts for StreamAlerts, nil without a watcher
 	watcherDeployment  string
 	watcherNamespace   string
 
@@ -123,6 +124,7 @@ type WatcherConfig struct {
 	StatusFunc  func() string                                    // compact status summary
 	StatsFunc   func() (alertCount, snapshotCount, podCount int) // numeric stats
 	AlertsFunc  func() []AlertInfo                               // raw alerts for AIOps operator
+	AlertStream *AlertBroadcaster                                // live alerts for StreamAlerts (optional)
 	Deployment  string
 	Namespace   string
 }
@@ -139,6 +141,7 @@ func (h *Handler) SetWatcher(cfg WatcherConfig) {
 	h.watcherStatusFunc = cfg.StatusFunc
 	h.watcherStatsFunc = cfg.StatsFunc
 	h.watcherAlertsFunc = cfg.AlertsFunc
+	h.alertBroadcaster = cfg.AlertStream
 	h.watcherDeployment = cfg.Deployment
 	h.watcherNamespace = cfg.Namespace
 }

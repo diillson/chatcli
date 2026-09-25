@@ -43,6 +43,13 @@ service ChatCLIService {
   // GetAlerts returns current watcher alerts (anomalies detected by the K8s watcher).
   rpc GetAlerts(GetAlertsRequest) returns (GetAlertsResponse);
 
+  // StreamAlerts pushes watcher alerts as the watcher raises them, instead of
+  // the client polling GetAlerts. With include_current the stream opens with
+  // the alerts active right now, then only new ones follow. Heartbeats let
+  // the client tell a quiet watcher from a dead connection. A server that
+  // fell behind ends the stream with ABORTED: reopen it with include_current.
+  rpc StreamAlerts(StreamAlertsRequest) returns (stream StreamAlertsResponse);
+
   // AnalyzeIssue uses the LLM to analyze an AIOps issue and return recommendations.
   rpc AnalyzeIssue(AnalyzeIssueRequest) returns (AnalyzeIssueResponse);
 
@@ -308,6 +315,17 @@ message GetAlertsRequest {
 
 message GetAlertsResponse {
   repeated WatcherAlert alerts = 1;
+}
+
+message StreamAlertsRequest {
+  string namespace = 1;       // optional: filter by namespace
+  string deployment = 2;      // optional: filter by deployment
+  bool include_current = 3;   // open with the alerts active right now
+}
+
+message StreamAlertsResponse {
+  WatcherAlert alert = 1;     // unset on a heartbeat
+  bool heartbeat = 2;         // liveness tick, no alert attached
 }
 
 // --- AI Issue Analysis (AIOps) ---

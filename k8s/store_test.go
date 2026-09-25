@@ -250,3 +250,27 @@ func TestStats(t *testing.T) {
 	assert.Equal(t, 1, stats.LogCount)
 	assert.Equal(t, 1, stats.AlertCount)
 }
+
+// The alert hook fires once per alert the store accepts as new, never for
+// the duplicates it drops, and runs outside the store lock so the hook may
+// read the store back.
+func TestAddAlert_HookSeesOnlyNewAlerts(t *testing.T) {
+	store := NewObservabilityStore(10, 10, time.Hour)
+	var seen []Alert
+	store.SetAlertHook(func(a Alert) {
+		seen = append(seen, a)
+		_ = store.GetAlerts() // must not deadlock
+	})
+	first := Alert{Timestamp: time.Now(), Type: AlertHighRestarts, Object: "pod-a", Message: "restarts"}
+	store.AddAlert(first)
+	store.AddAlert(first) // duplicate: same type and object
+	store.AddAlert(Alert{Timestamp: time.Now(), Type: AlertPodOOMKilled, Object: "pod-a"})
+
+	assert.Len(t, seen, 2)
+	assert.Equal(t, AlertHighRestarts, seen[0].Type)
+	assert.Equal(t, AlertPodOOMKilled, seen[1].Type)
+
+	store.SetAlertHook(nil)
+	store.AddAlert(Alert{Timestamp: time.Now(), Type: AlertPodNotReady, Object: "pod-b"})
+	assert.Len(t, seen, 2, "a cleared hook must not fire")
+}

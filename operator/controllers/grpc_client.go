@@ -188,6 +188,20 @@ func (sc *ServerClient) GetAlerts(ctx context.Context) (*pb.GetAlertsResponse, e
 	return sc.client.GetAlerts(sc.withAuth(ctx), &pb.GetAlertsRequest{})
 }
 
+// StreamAlerts opens the StreamAlerts RPC. The stream lives as long as ctx;
+// cancel it to close the stream. With includeCurrent the server opens with
+// the alerts active right now before pushing new ones.
+func (sc *ServerClient) StreamAlerts(ctx context.Context, includeCurrent bool) (pb.ChatCLIService_StreamAlertsClient, error) {
+	sc.mu.RLock()
+	defer sc.mu.RUnlock()
+
+	if sc.client == nil {
+		return nil, fmt.Errorf("not connected to server")
+	}
+
+	return sc.client.StreamAlerts(sc.withAuth(ctx), &pb.StreamAlertsRequest{IncludeCurrent: includeCurrent})
+}
+
 // AnalyzeIssue calls the AnalyzeIssue RPC.
 func (sc *ServerClient) AnalyzeIssue(ctx context.Context, req *pb.AnalyzeIssueRequest) (*pb.AnalyzeIssueResponse, error) {
 	sc.mu.RLock()

@@ -55,6 +55,10 @@ spec:
             - name: CHATCLI_AIOPS_PORT
               value: {{ .Values.api.port | quote }}
           {{- end }}
+          {{- if .Values.alertTransport }}
+            - name: CHATCLI_OPERATOR_ALERT_TRANSPORT
+              value: {{ .Values.alertTransport | quote }}
+          {{- end }}
           {{- /* Security configuration */ -}}
           {{- if .Values.security.devMode }}
             - name: CHATCLI_OPERATOR_DEV_MODE

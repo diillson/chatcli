@@ -177,7 +177,7 @@
             },
             "tag": {
               "type": "string",
-              "description": "Image tag. Must be a fully-qualified patch tag (e.g. v1.31.10) \u2014 major-minor stubs like v1.31 are NOT resolvable on registry.k8s.io.",
+              "description": "Image tag. Must be a fully-qualified patch tag (e.g. v1.31.10) — major-minor stubs like v1.31 are NOT resolvable on registry.k8s.io.",
               "default": "v1.31.10"
             },
             "pullPolicy": {
@@ -414,6 +414,14 @@
           "default": {}
         }
       }
+    },
+    "alertTransport": {
+      "type": "string",
+      "enum": [
+        "stream",
+        "poll"
+      ],
+      "description": "How the operator receives watcher alerts: stream keeps a StreamAlerts stream open and polls only while the server lacks the RPC; poll queries GetAlerts every 30s."
     },
     "security": {
       "type": "object",
