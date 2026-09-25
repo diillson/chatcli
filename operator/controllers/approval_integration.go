@@ -199,16 +199,6 @@ func CreateApprovalRequest(
 	return nil
 }
 
-// IsApprovalPending checks if a remediation plan has a pending approval.
-func IsApprovalPending(plan *platformv1alpha1.RemediationPlan) bool {
-	annotations := plan.GetAnnotations()
-	if annotations == nil {
-		return false
-	}
-	_, exists := annotations[annotationApprovalPending]
-	return exists
-}
-
 // CalculateBlastRadius assesses the potential impact of remediation actions
 // on a given resource by querying related pods and services.
 func CalculateBlastRadius(

@@ -130,21 +130,6 @@ func (ps *PatternStore) FindMatchingPattern(ctx context.Context, issue *platform
 	return pattern, pattern.ConfidenceBoost, nil
 }
 
-func (ps *PatternStore) GetPatterns(ctx context.Context, namespace string) ([]IncidentPattern, error) {
-	cm, err := ps.getOrCreateCM(ctx, namespace)
-	if err != nil {
-		return nil, err
-	}
-	var patterns []IncidentPattern
-	for _, v := range cm.Data {
-		var p IncidentPattern
-		if json.Unmarshal([]byte(v), &p) == nil {
-			patterns = append(patterns, p)
-		}
-	}
-	return patterns, nil
-}
-
 func (ps *PatternStore) getOrCreateCM(ctx context.Context, ns string) (*corev1.ConfigMap, error) {
 	cm := &corev1.ConfigMap{}
 	err := ps.client.Get(ctx, types.NamespacedName{Name: patternStoreConfigMap, Namespace: ns}, cm)

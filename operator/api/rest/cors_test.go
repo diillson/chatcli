@@ -117,15 +117,3 @@ func TestCORS_ReadsTheEnvironmentTheChartSets(t *testing.T) {
 		t.Error("credentials flag did not reach the policy")
 	}
 }
-
-func TestCORS_SetCORSOriginStillWorks(t *testing.T) {
-	s := &APIServer{apiKeyHeader: "X-API-Key"}
-	s.SetCORSOrigin("https://a.example.com")
-	if got := s.CORSAllowedOrigins(); len(got) != 1 || got[0] != "https://a.example.com" {
-		t.Fatalf("SetCORSOrigin = %+v", got)
-	}
-	s.SetCORSOrigin("")
-	if got := s.CORSAllowedOrigins(); len(got) != 0 {
-		t.Fatalf("clearing the origin left %+v", got)
-	}
-}

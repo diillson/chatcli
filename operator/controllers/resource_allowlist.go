@@ -134,8 +134,3 @@ func (al *ResourceAllowlist) CheckResourceAccess(kind string) error {
 
 	return fmt.Errorf("resource type %q is not in the allowed list; add it to 'allowed_resource_types' in operator config or create an ApprovalRequest", kind)
 }
-
-// GetManagedNamespaceLabel returns the label key used to identify managed namespaces.
-func (al *ResourceAllowlist) GetManagedNamespaceLabel() string {
-	return al.managedNSLabel
-}

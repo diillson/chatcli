@@ -120,14 +120,6 @@ func (s *APIServer) SetWatcherBridge(wb WatcherDedupInvalidator) {
 	s.watcherBridge = wb
 }
 
-// SetCORSOrigin configures a single allowed CORS origin.
-func (s *APIServer) SetCORSOrigin(origin string) {
-	s.SetCORSPolicy(CORSPolicy{
-		AllowedOrigins: splitList(origin),
-		AllowedMethods: defaultCORSMethods,
-	})
-}
-
 // SetCORSPolicy replaces the cross-origin policy.
 func (s *APIServer) SetCORSPolicy(policy CORSPolicy) {
 	if len(policy.AllowedMethods) == 0 {
@@ -1461,6 +1453,8 @@ func (s *APIServer) routeAnalytics(w http.ResponseWriter, r *http.Request, rest 
 		s.handleAnalyticsCompliance(w, r, tr)
 	case "capacity":
 		s.handleAnalyticsCapacity(w, r, tr)
+	case "cost":
+		s.handleAnalyticsCost(w, r, tr)
 	default:
 		writeError(w, http.StatusNotFound, "unknown analytics endpoint: "+rest[0])
 	}
@@ -1579,6 +1573,28 @@ func (s *APIServer) handleAnalyticsCompliance(w http.ResponseWriter, r *http.Req
 		APIVersion: "v1",
 		Kind:       "ComplianceReport",
 		Spec:       report,
+	})
+}
+
+// handleAnalyticsCost serves the LLM cost ledger the controllers write per
+// incident: total spend, incident count and cost per incident for the
+// namespace and window. Without a namespace it aggregates every namespace.
+func (s *APIServer) handleAnalyticsCost(w http.ResponseWriter, r *http.Request, tr timeRangeParams) {
+	tracker := controllers.NewCostTracker(s.client)
+	ns := r.URL.Query().Get("namespace")
+	window := 30 * 24 * time.Hour
+	if tr.From != nil && tr.To != nil {
+		window = tr.To.Sub(*tr.From)
+	}
+	summary, err := tracker.GetCostSummary(r.Context(), ns, window)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to read the cost ledger: "+err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, APIResponse{
+		APIVersion: "v1",
+		Kind:       "CostSummary",
+		Spec:       summary,
 	})
 }
 

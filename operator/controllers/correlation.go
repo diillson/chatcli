@@ -6,7 +6,6 @@ import (
 	"sort"
 	"time"
 
-	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	platformv1alpha1 "github.com/diillson/chatcli/operator/api/v1alpha1"
@@ -200,15 +199,6 @@ func (ce *CorrelationEngine) MarkAnomalyCorrelated(ctx context.Context, anomaly 
 	anomaly.Status.Correlated = true
 	anomaly.Status.IssueRef = &platformv1alpha1.IssueRef{Name: issueName}
 	return ce.client.Status().Update(ctx, anomaly)
-}
-
-// GetIssue fetches an Issue by name.
-func (ce *CorrelationEngine) GetIssue(ctx context.Context, name, namespace string) (*platformv1alpha1.Issue, error) {
-	var issue platformv1alpha1.Issue
-	if err := ce.client.Get(ctx, types.NamespacedName{Name: name, Namespace: namespace}, &issue); err != nil {
-		return nil, err
-	}
-	return &issue, nil
 }
 
 func signalWeight(signalType platformv1alpha1.AnomalySignalType) float64 {

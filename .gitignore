@@ -39,6 +39,8 @@ testclio
 
 # build output
 /bin/
+# envtest binaries fetched by `make -C operator envtest`
+operator/bin/
 *.bak
 
 # Agent worktrees created by Claude Code (never part of the repo)
