@@ -366,6 +366,10 @@ type RPCRunOpts struct {
 	// of operating on the process-global history.
 	History    []models.Message
 	HistoryOut *[]models.Message
+	// Attachments are the binary inputs of the task (images a remote
+	// surface attached); the loop offers them to the model on its first
+	// turn, the way the gateway hands over inbound images.
+	Attachments *TurnAttachments
 }
 
 // RunAgentRPC runs the FULL agent (ReAct) loop with per-call options — the
@@ -434,6 +438,11 @@ func (cli *ChatCLI) runLoopRPC(ctx context.Context, o RPCRunOpts, fn func(contex
 			prevSession := cli.currentSessionName
 			cli.currentSessionName = o.Session
 			defer func() { cli.currentSessionName = prevSession }()
+		}
+		if o.Attachments != nil && len(o.Attachments.Images) > 0 {
+			prevImages := cli.pendingInboundImages
+			cli.pendingInboundImages = append([]models.ImageContent(nil), o.Attachments.Images...)
+			defer func() { cli.pendingInboundImages = prevImages }()
 		}
 		// Per-session conversation swap (mirrors runChatTurnSerialized):
 		// the loop starts from the caller's history and the updated

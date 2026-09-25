@@ -1,0 +1,21 @@
+{
+  "web.loopback_only": "the web UI only listens on loopback addresses; %s is not one",
+  "web.page_missing": "The web application is not bundled in this binary.",
+  "web.bad_request": "invalid request: %v",
+  "web.unknown_endpoint": "unknown endpoint: %s",
+  "web.empty_turn": "the turn text is empty",
+  "web.busy": "a turn is already running; wait or cancel it before sending another",
+  "web.bad_image": "invalid or unsupported image: %s",
+  "web.no_such_run": "no running turn with that id",
+  "web.no_such_dialog": "no pending permission request with that id",
+  "web.bad_decision": "invalid decision: %s",
+  "web.voice_off": "voice synthesis is not configured in this process",
+  "web.stt_off": "audio transcription is not configured in this process",
+  "web.images_off": "image generation is not configured in this process",
+  "web.empty_audio": "the request body carries no audio",
+  "web.cli.serving": "Web UI at %s",
+  "web.cli.serving_hint": "The address carries this run's token; stop the process to invalidate it.",
+  "web.cli.failed": "Failed to start the web UI: %v",
+  "web.cli.bound": "Bound session: %s",
+  "web.cli.stopped": "Web UI stopped."
+}
