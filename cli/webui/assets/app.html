@@ -565,6 +565,7 @@ async function sendTurn(text) {
 function handleEvent(ev) {
   switch (ev.type) {
     case 'run': state.run = ev.run; break;
+    case 'mode': setMode(ev.mode); if (ev.text) addMessage('system', ev.text); break;
     case 'chunk': appendChunk(ev.text); break;
     case 'message': appendChunk(ev.text); break;
     case 'thought': addThought(ev.text); break;
@@ -606,7 +607,7 @@ function palette() {
   if (!hits.length) { pal.classList.remove('on'); return; }
   pal.innerHTML = hits.map((x, i) => '<div class="row' + (i === 0 ? ' on' : '') + '" data-v="' + esc(x.name) + '"><span class="name">' + esc(x.name) + '</span><span class="meta">' + esc(x.desc || '') + '</span></div>').join('');
   pal.classList.add('on');
-  $$('#palette .row').forEach(r => r.addEventListener('click', () => { input.value = r.dataset.v + ' '; pal.classList.remove('on'); input.focus(); autosize(); }));
+  $$('#palette .row').forEach(r => r.addEventListener('click', () => { input.value = m[1] + r.dataset.v.replace(/^[/@]/, '') + ' '; pal.classList.remove('on'); input.focus(); autosize(); }));
 }
 $('#btnAttach').addEventListener('click', () => $('#fileInput').click());
 $('#fileInput').addEventListener('change', async e => {
@@ -669,8 +670,14 @@ if (BOOT.features.images) {
 }
 
 // ---------- mode, route, theme, language, drawer ----------
-$$('#modeSeg button').forEach(b => b.addEventListener('click', () => { state.mode = b.dataset.mode; $$('#modeSeg button').forEach(x => x.classList.toggle('on', x === b)); try { localStorage.setItem('chatcli_web_mode', state.mode); } catch {} }));
-try { const m = localStorage.getItem('chatcli_web_mode'); if (m) $$('#modeSeg button').find(b => b.dataset.mode === m)?.click(); } catch {}
+function setMode(mode) {
+  const b = $$('#modeSeg button').find(x => x.dataset.mode === mode); if (!b) return;
+  state.mode = mode; $$('#modeSeg button').forEach(x => x.classList.toggle('on', x === b));
+  try { localStorage.setItem('chatcli_web_mode', state.mode); } catch {}
+  if (state.providers) renderRoute();
+}
+$$('#modeSeg button').forEach(b => b.addEventListener('click', () => setMode(b.dataset.mode)));
+try { const m = localStorage.getItem('chatcli_web_mode'); if (m) setMode(m); } catch {}
 function renderRoute() {
   const ps = $('#provider'), ms = $('#model');
   ps.innerHTML = state.providers.map(p => '<option value="' + esc(p.name) + '"' + (p.name === state.provider ? ' selected' : '') + '>' + esc(p.name) + '</option>').join('');
@@ -717,7 +724,7 @@ function renderTools() {
   const q = ($('#toolSearch').value || '').toLowerCase();
   $('#toolsList').innerHTML = state.tools.filter(x => !q || (x.Name + ' ' + (x.Description || '')).toLowerCase().includes(q)).map(x =>
     '<div class="item"><h4>' + esc(x.Name) + (x.ReadOnly ? ' <span class="chip ok">' + esc(t('tool.readonly')) + '</span>' : '') + '<span class="grow" style="flex:1"></span><button class="ghost" data-use="' + esc(x.Name) + '">' + esc(t('tool.run')) + '</button></h4><p>' + esc(x.Description || '') + '</p>' + (x.Usage ? '<p class="hint">' + esc(x.Usage) + '</p>' : '') + '</div>').join('');
-  $$('#toolsList [data-use]').forEach(b => b.addEventListener('click', () => { input.value = b.dataset.use + ' '; autosize(); input.focus(); }));
+  $$('#toolsList [data-use]').forEach(b => b.addEventListener('click', () => { input.value = '@' + b.dataset.use.replace(/^@/, '') + ' '; autosize(); input.focus(); }));
 }
 $('#toolSearch').addEventListener('input', renderTools);
 function renderSkills() {
@@ -736,7 +743,7 @@ function renderMemory() {
 }
 function renderCommands() {
   $('#commandsList').innerHTML = state.commands.length ? state.commands.map(c => '<div class="item"><h4>' + esc(c.Name) + '<span style="flex:1"></span><button class="ghost" data-cmd="' + esc(c.Name) + '">' + esc(t('skill.use')) + '</button></h4><p>' + esc(c.Description || '') + '</p></div>').join('') : '<p class="hint">' + esc(t('commands.none')) + '</p>';
-  $$('#commandsList [data-cmd]').forEach(b => b.addEventListener('click', () => { input.value = b.dataset.cmd + ' '; autosize(); input.focus(); }));
+  $$('#commandsList [data-cmd]').forEach(b => b.addEventListener('click', () => { input.value = '/' + b.dataset.cmd.replace(/^\//, '') + ' '; autosize(); input.focus(); }));
 }
 
 // ---------- sessions: the shared saved sessions, continuity with the terminal ----------

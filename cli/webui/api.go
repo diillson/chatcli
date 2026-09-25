@@ -289,6 +289,9 @@ func (s *Server) execute(ctx context.Context, rn *run, session, mode, text strin
 		err   error
 	)
 	b := s.opts.Backend
+	if s.routeInline(ctx, rn, session, &mode, &text) {
+		return
+	}
 	switch strings.ToLower(strings.TrimSpace(mode)) {
 	case "coder":
 		reply, err = b.RunCoder(ctx, session, text, o, rn.sink)
