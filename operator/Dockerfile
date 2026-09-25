@@ -17,6 +17,7 @@ RUN go mod download
 # Copy source needed by the operator
 WORKDIR /workspace
 COPY proto/ proto/
+COPY pkg/ pkg/
 COPY operator/main.go operator/main.go
 COPY operator/api/ operator/api/
 COPY operator/controllers/ operator/controllers/

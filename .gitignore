@@ -40,3 +40,6 @@ testclio
 # build output
 /bin/
 *.bak
+
+# Agent worktrees created by Claude Code (never part of the repo)
+.claude/worktrees/
