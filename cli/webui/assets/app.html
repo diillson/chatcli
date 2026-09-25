@@ -104,6 +104,11 @@
   .md th { background:var(--panel2); }
   .md hr { border:0; border-top:1px solid var(--border); margin:.8em 0; }
   .caret::after { content:"▍"; color:var(--brand); animation:blink 1s steps(2) infinite; }
+  .working { display:flex; align-items:center; gap:8px; color:var(--muted); font-size:12px; padding:4px 0; }
+  .working .dots { display:inline-flex; gap:3px; }
+  .working .dots i { width:6px; height:6px; border-radius:50%; background:var(--warn); animation:pulse 1.2s ease-in-out infinite; }
+  .working .dots i:nth-child(2) { animation-delay:.2s; } .working .dots i:nth-child(3) { animation-delay:.4s; }
+  @keyframes pulse { 0%,80%,100% { opacity:.25; transform:scale(.8); } 40% { opacity:1; transform:scale(1); } }
   @keyframes blink { 50% { opacity:0; } }
   details.block { border:1px solid var(--border); border-radius:6px; margin:6px 0; background:var(--panel); }
   details.block summary { cursor:pointer; padding:6px 10px; color:var(--muted); font-size:11.5px; list-style:none; display:flex; align-items:center; gap:8px; }
@@ -264,7 +269,7 @@ const $ = s => document.querySelector(s);
 const $$ = s => Array.from(document.querySelectorAll(s));
 
 // ---------- i18n: English defaults, overridden by the strings the server ships ----------
-const S = Object.assign({
+const DEFAULTS = {
   'mode.chat':'Chat','mode.coder':'Coder','mode.agent':'Agent','btn.panel':'Panel',
   'side.sessions':'Sessions','side.new':'+ New','side.search':'Search sessions…','side.attach':'Attach','side.fork':'Fork','side.delete':'Delete',
   'empty.title':'What are we working on?','empty.body':'The same engine as the terminal: chat, coder and agent with your tools, skills, memory and sessions. Everything you say here continues in the terminal, MCP, ACP and your channels.',
@@ -274,6 +279,7 @@ const S = Object.assign({
   'pane.status':'Status','pane.tools':'Tools','pane.skills':'Skills','pane.mcp':'MCP','pane.memory':'Memory','pane.commands':'Commands','pane.filter':'Filter…',
   'status.version':'Version','status.provider':'Provider','status.model':'Model','status.policy':'Policy','status.maxTokens':'Max tokens','status.session':'Session','status.cost':'Session cost','status.requests':'Requests','status.tokens':'Tokens','status.daily':'Today','status.budgetBlocked':'Budget hard stop active','status.none':'none',
   'perm.title':'Permission requested','perm.deny_always':'Deny always','perm.deny_once':'Deny','perm.allow_always':'Allow always','perm.allow_once':'Allow once',
+  'work.thinking':'Thinking…','work.tool':'Running {name}…','work.waiting':'Waiting for the model…',
   'tool.run':'Run','tool.running':'running…','tool.done':'done','tool.error':'error','tool.readonly':'read-only',
   'skill.view':'View','skill.use':'Use',
   'mcp.connected':'connected','mcp.disconnected':'disconnected','mcp.tools':'{n} tool(s)','mcp.auth':'login required','mcp.none':'No MCP servers configured.',
@@ -282,12 +288,31 @@ const S = Object.assign({
   'stt.recording':'Recording… click to stop','stt.failed':'Transcription failed','tts.speak':'Speak','image.prompt':'Describe the image to generate','image.failed':'Image generation failed',
   'session.bound':'Bound to {name}','session.new':'New session started','session.deleted':'Session deleted','session.confirmDelete':'Delete saved session {name}?','session.forkName':'Name for the fork','session.live':'live',
   'theme':'theme','lang':'language','offline':'Server unreachable','busy':'A turn is already running',
-}, BOOT.strings || {});
-const t = (k, vars) => (S[k] || k).replace(/\{(\w+)\}/g, (_, v) => vars && v in vars ? vars[v] : '');
+};
+// The server ships every switchable language; the page starts in the
+// process language unless the visitor picked another one before.
+const CATALOGS = BOOT.catalogs || {};
+let S = {};
+function setLang(lang, persist) {
+  if (!CATALOGS[lang] && lang !== 'en') lang = 'en';
+  BOOT.lang = lang;
+  S = Object.assign({}, DEFAULTS, CATALOGS[lang] || (lang === BOOT.lang ? BOOT.strings : {}) || {});
+  document.documentElement.lang = lang;
+  $('#btnLang').textContent = lang.toUpperCase().slice(0, 2);
+  $('#btnLang').title = t('lang');
+  applyStrings();
+  if (persist) { try { localStorage.setItem('chatcli_web_lang', lang); } catch {} }
+}
+function nextLang() {
+  const langs = Object.keys(CATALOGS).length ? Object.keys(CATALOGS) : ['en'];
+  return langs[(langs.indexOf(BOOT.lang) + 1) % langs.length];
+}
+const t = (k, vars) => (S[k] || DEFAULTS[k] || k).replace(/\{(\w+)\}/g, (_, v) => vars && v in vars ? vars[v] : '');
 function applyStrings() {
   $$('[data-i18n]').forEach(el => { el.textContent = t(el.dataset.i18n); });
   $$('[data-i18n-placeholder]').forEach(el => { el.placeholder = t(el.dataset.i18nPlaceholder); });
-  document.documentElement.lang = BOOT.lang || 'en';
+  // Panels built from data re-render in the new language.
+  if (typeof renderRoute === 'function' && state.providers) { renderRoute(); renderStatus(); renderTools(); renderSkills(); renderMCP(); renderMemory(); renderCommands(); renderSessions(); }
 }
 
 // ---------- theme ----------
@@ -408,20 +433,34 @@ transcript.addEventListener('click', e => {
 // streamed assistant message: chunks accumulate as text, rendered as markdown on the fly
 function beginAssistant() {
   const el = addMessage('assistant', '');
-  const body = el.querySelector('.body'); body.classList.add('caret');
-  state.streaming = { el, body, text: '', blocks: body };
+  const body = el.querySelector('.body');
+  // The bubble opens right under the user's message with a live activity
+  // line, so the reader never has to look away to know the turn is alive.
+  const work = document.createElement('div'); work.className = 'working';
+  work.innerHTML = '<span class="dots"><i></i><i></i><i></i></span><span class="wtext"></span>';
+  el.insertBefore(work, body);
+  state.streaming = { el, body, text: '', blocks: body, work };
+  setWorking(t('work.waiting'));
   return state.streaming;
+}
+function setWorking(text) {
+  const s = state.streaming; if (!s || !s.work) return;
+  s.work.querySelector('.wtext').textContent = text;
+  s.work.style.display = text ? '' : 'none';
 }
 function appendChunk(text) {
   const s = state.streaming || beginAssistant();
   s.text += text;
   s.body.innerHTML = md(s.text);
   s.body.classList.add('caret');
+  setWorking('');
   scrollDown();
 }
 function endAssistant(finalText) {
   const s = state.streaming; if (!s) { if (finalText) addMessage('assistant', finalText); return; }
   if (finalText && finalText.trim() && s.text.trim() === '') s.text = finalText;
+  if (s.work) s.work.remove();
+  if (s.text.trim() === '' && !s.thought && !s.el.querySelector('details')) { s.el.remove(); state.streaming = null; return; }
   s.body.innerHTML = md(s.text);
   s.body.classList.remove('caret');
   if (BOOT.features.voice && s.text.trim()) {
@@ -441,14 +480,16 @@ function addThought(text) {
     s.el.insertBefore(d, s.el.querySelector('.body'));
   }
   d.querySelector('.inner').textContent += text;
+  if (!s.text) setWorking(t('work.thinking'));
 }
 function addToolStart(tool) {
   hideEmpty();
   const d = document.createElement('details'); d.className = 'tool run'; d.dataset.id = tool.id;
   d.innerHTML = '<summary><span>' + esc(tool.name) + '</span><span class="hint">' + esc(tool.title || '') + '</span><span class="st">' + esc(t('tool.running')) + '</span></summary>' +
     '<div class="inner">' + (tool.input ? '<pre>' + esc(tool.input) + '</pre>' : '') + '<pre class="out" style="display:none"></pre></div>';
-  const anchor = state.streaming ? state.streaming.el : null;
-  transcript.insertBefore(d, anchor || $('#plan'));
+  const s = state.streaming || beginAssistant();
+  transcript.insertBefore(d, s.el);
+  if (!s.text) setWorking(t('work.tool', { name: tool.name }));
   scrollDown();
 }
 function addToolEnd(tool) {
@@ -457,6 +498,7 @@ function addToolEnd(tool) {
   d.classList.remove('run'); if (tool.is_error) d.classList.add('err');
   d.querySelector('.st').textContent = (tool.is_error ? t('tool.error') : t('tool.done')) + (tool.duration_ms ? ' · ' + (tool.duration_ms / 1000).toFixed(1) + 's' : '');
   if (tool.output) { const o = d.querySelector('.out'); o.textContent = tool.output; o.style.display = ''; }
+  if (state.streaming && !state.streaming.text && !transcript.querySelector('details.tool.run')) setWorking(t('work.thinking'));
 }
 function setPlan(entries) {
   const p = $('#plan');
@@ -497,13 +539,13 @@ async function sendTurn(text) {
   const previews = images.map(i => 'data:' + i.media_type + ';base64,' + i.data);
   addMessage('user', text, previews);
   $('#input').value = ''; autosize(); state.images = []; renderAtts();
-  setBusy(true); setPlan(null);
+  setBusy(true); setPlan(null); beginAssistant();
   let resp;
   try {
     resp = await fetch('/api/turn', { method: 'POST', headers: { 'X-Web-Token': TOKEN, 'Content-Type': 'application/json' },
       body: JSON.stringify({ session: state.session, mode: state.mode, text, provider: state.provider, model: state.model, images }) });
-  } catch (e) { setBusy(false); toast(t('offline'), 'err'); return; }
-  if (!resp.ok) { setBusy(false); let msg = resp.statusText; try { msg = (await resp.json()).error || msg; } catch {} toast(msg, 'err'); return; }
+  } catch (e) { endAssistant(''); setBusy(false); toast(t('offline'), 'err'); return; }
+  if (!resp.ok) { endAssistant(''); setBusy(false); let msg = resp.statusText; try { msg = (await resp.json()).error || msg; } catch {} toast(msg, 'err'); return; }
   const reader = resp.body.getReader(); const dec = new TextDecoder(); let buf = '';
   try {
     for (;;) {
@@ -646,7 +688,7 @@ $('#provider').addEventListener('change', async e => {
 });
 $('#model').addEventListener('change', async e => { state.model = e.target.value; renderRoute(); await api('defaults', { json: { provider: state.provider, model: state.model } }).catch(err => toast(err.message, 'err')); });
 $('#btnTheme').addEventListener('click', () => applyTheme(document.documentElement.dataset.theme === 'light' ? 'dark' : 'light'));
-$('#btnLang').addEventListener('click', () => { BOOT.lang = BOOT.lang === 'pt-BR' ? 'en' : 'pt-BR'; toast(t('lang') + ': ' + BOOT.lang); });
+$('#btnLang').addEventListener('click', () => setLang(nextLang(), true));
 $('#btnDrawer').addEventListener('click', () => $('#app').classList.toggle('drawer'));
 $('#btnSide').addEventListener('click', () => { const a = $('#app'); a.classList.toggle('nosidebar'); a.classList.toggle('showside', !a.classList.contains('nosidebar') && window.innerWidth <= 900); });
 $$('#drawerTabs button').forEach(b => b.addEventListener('click', () => {
@@ -742,9 +784,10 @@ async function refreshStatus() { try { state.status = await api('status'); rende
 
 // ---------- boot ----------
 async function boot() {
-  applyStrings();
+  let savedLang = null;
+  try { savedLang = localStorage.getItem('chatcli_web_lang'); } catch {}
+  setLang(savedLang || BOOT.lang || 'en', false);
   $('#webVersion').textContent = 'chatcli ' + (BOOT.version || '');
-  $('#btnLang').textContent = (BOOT.lang || 'en').toUpperCase().slice(0, 2);
   try {
     const j = await api('boot?session=' + encodeURIComponent(state.session));
     state.status = j.status || {}; state.tools = j.tools || []; state.skills = j.skills || []; state.commands = j.commands || []; state.resources = j.resources || []; state.sessions = j.sessions || [];

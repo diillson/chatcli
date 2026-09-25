@@ -31,7 +31,7 @@ func TestPage_IsBundledSelfContainedAndTranslated(t *testing.T) {
 	// Every key the page's default table declares is a known UI key, and
 	// every key the server ships exists in the page's defaults.
 	defaults := map[string]bool{}
-	block := page[strings.Index(page, "const S = Object.assign({"):strings.Index(page, "}, BOOT.strings || {});")]
+	block := page[strings.Index(page, "const DEFAULTS = {"):strings.Index(page, "};\n// The server ships every switchable language")]
 	for _, m := range regexp.MustCompile(`'([a-zA-Z0-9_.]+)':`).FindAllStringSubmatch(block, -1) {
 		defaults[m[1]] = true
 	}
