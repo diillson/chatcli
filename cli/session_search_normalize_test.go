@@ -7,7 +7,9 @@
 package cli
 
 import (
+	"encoding/json"
 	"os"
+	"strings"
 	"testing"
 	"time"
 	"unicode/utf8"
@@ -224,5 +226,83 @@ func TestLatestSessionInfo(t *testing.T) {
 	name, saved, title := sm.LatestSessionInfo()
 	if name != "newest" || saved.IsZero() || title != "assunto da newest" {
 		t.Errorf("LatestSessionInfo = %q/%v/%q", name, saved, title)
+	}
+}
+
+// TestDeriveSessionTitleSkipsInjectedContext: the per-turn context ChatCLI
+// injects as a user-role message is not what the user said, so it never
+// becomes the session title — neither on save nor for a title an older
+// build already stored (web list, /session list, boot notice, recall all
+// read from these paths).
+func TestDeriveSessionTitleSkipsInjectedContext(t *testing.T) {
+	sm := newTestSessionManager(t)
+	if err := sm.SaveSessionV2("ctx", &SessionData{
+		Version: 2,
+		ChatHistory: []models.Message{
+			{Role: "system", Content: "system prompt"},
+			models.TurnContextMessage(turnContextHeader + "[SESSION RECALL]\nsaved conversations…"),
+			models.RunContextMessage(runContextHeader + "workspace: /tmp/x"),
+			{Role: "user", Content: "tu é bom mesmo ?"},
+			{Role: "assistant", Content: "Sim."},
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	sd, err := sm.LoadSessionV2("ctx")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sd.Title != "tu é bom mesmo ?" {
+		t.Errorf("title must skip injected context, got %q", sd.Title)
+	}
+
+	// A meta-less copy (older files) is recognized by its header.
+	if got := deriveSessionTitle(&SessionData{ChatHistory: []models.Message{
+		{Role: "user", Content: turnContextHeader + "stuff"},
+		{Role: "user", Content: "pergunta real"},
+	}}); got != "pergunta real" {
+		t.Errorf("header-only detection failed, got %q", got)
+	}
+
+	// A stale title stored by an older build heals on load, in the title
+	// map and in the boot-notice lookup, and is rewritten on the next save.
+	stale := &SessionData{
+		Version: 2,
+		Title:   "[TURN CONTEXT — injected by ChatCLI for this turn, not writt…",
+		ChatHistory: []models.Message{
+			models.TurnContextMessage(turnContextHeader + "recall card"),
+			{Role: "user", Content: "corrigir o build"},
+		},
+	}
+	raw, _ := json.Marshal(stale)
+	if err := os.WriteFile(sm.getSessionPath("stale"), raw, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	sd, err = sm.LoadSessionV2("stale")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sd.Title != "corrigir o build" {
+		t.Errorf("stale title must heal on load, got %q", sd.Title)
+	}
+	if titles := sm.SessionTitles(); titles["stale"] != "corrigir o build" {
+		t.Errorf("SessionTitles must heal stale titles, got %q", titles["stale"])
+	}
+	if name, _, title := sm.LatestSessionInfo(); name == "stale" && title != "corrigir o build" {
+		t.Errorf("LatestSessionInfo must heal stale titles, got %q", title)
+	}
+	if err := sm.SaveSessionV2("stale", sd); err != nil {
+		t.Fatal(err)
+	}
+	onDisk, _ := os.ReadFile(sm.getSessionPath("stale"))
+	if !strings.Contains(string(onDisk), `"title": "corrigir o build"`) {
+		t.Errorf("re-save must persist the healed title, got %s", onDisk)
+	}
+
+	// A session whose only user turns are injected context has no title.
+	if got := deriveSessionTitle(&SessionData{ChatHistory: []models.Message{
+		models.TurnContextMessage(turnContextHeader + "x"),
+	}}); got != "" {
+		t.Errorf("injected-only history must yield no title, got %q", got)
 	}
 }
