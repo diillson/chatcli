@@ -103,7 +103,7 @@ func TestServerClientWithAuth_PrefersTheTokenSource(t *testing.T) {
 		t.Errorf("source must win, got %v", got)
 	}
 
-	sc.source = func(context.Context) (string, error) { return "", context.DeadlineExceeded }
+	sc.source = failingSource{}
 	if _, ok := metadata.FromOutgoingContext(sc.withAuth(context.Background())); ok {
 		t.Error("a failing source sends no credential rather than a stale one")
 	}
@@ -137,7 +137,7 @@ func TestBuildConnectionOpts_MintsHS256FromJWTSecretRef(t *testing.T) {
 	if opts.Token != "" || opts.TokenSource == nil {
 		t.Fatalf("a JWT secret yields a token source, got token=%q source=%v", opts.Token, opts.TokenSource != nil)
 	}
-	tok, err := opts.TokenSource(context.Background())
+	tok, err := opts.TokenSource.Token(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -189,7 +189,7 @@ func TestBuildConnectionOpts_OperatorTokenRefAndPrecedence(t *testing.T) {
 	if opts.TokenSource == nil {
 		t.Fatal("operatorTokenRef yields a source")
 	}
-	if tok, _ := opts.TokenSource(context.Background()); tok != "issued-jwt" {
+	if tok, _ := opts.TokenSource.Token(context.Background()); tok != "issued-jwt" {
 		t.Errorf("operatorTokenRef wins over jwtSecretRef, got %q", tok)
 	}
 
@@ -254,3 +254,8 @@ func TestOperatorCredentialCondition(t *testing.T) {
 		t.Error("a client CA secures the server")
 	}
 }
+
+// failingSource is a TokenSource that never yields a credential.
+type failingSource struct{}
+
+func (failingSource) Token(context.Context) (string, error) { return "", context.DeadlineExceeded }

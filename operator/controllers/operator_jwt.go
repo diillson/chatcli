@@ -28,8 +28,11 @@ const (
 	operatorJWTRefreshAt = 0.75
 )
 
-// TokenSource yields the bearer credential for one outgoing call.
-type TokenSource func(ctx context.Context) (string, error)
+// TokenSource yields the bearer credential for one outgoing call. An
+// interface rather than a func type so ConnectionOpts stays comparable.
+type TokenSource interface {
+	Token(ctx context.Context) (string, error)
+}
 
 // jwtMinter issues short-lived HS256 tokens for the operator from the
 // server's own signing secret (spec.server.security.jwtSecretRef) and
@@ -85,7 +88,11 @@ func (m *jwtMinter) Token(_ context.Context) (string, error) {
 	return tok, nil
 }
 
+// staticToken presents one credential for the connection lifetime.
+type staticToken string
+
+// Token implements TokenSource.
+func (s staticToken) Token(context.Context) (string, error) { return string(s), nil }
+
 // staticTokenSource presents one credential for the connection lifetime.
-func staticTokenSource(token string) TokenSource {
-	return func(context.Context) (string, error) { return token, nil }
-}
+func staticTokenSource(token string) TokenSource { return staticToken(token) }

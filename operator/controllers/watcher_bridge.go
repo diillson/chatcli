@@ -234,7 +234,7 @@ func (wb *WatcherBridge) buildConnectionOpts(ctx context.Context, inst *platform
 		if err != nil {
 			return opts, fmt.Errorf("instance %s: %w", inst.Name, err)
 		}
-		opts.TokenSource = minter.Token
+		opts.TokenSource = minter
 		return opts, nil
 	}
 	if sec.JWTPublicKeyRef != nil && sec.JWTPublicKeyRef.Name != "" {

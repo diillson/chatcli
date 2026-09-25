@@ -153,7 +153,7 @@ func (sc *ServerClient) Connect(address string, opts ConnectionOpts) error {
 func (sc *ServerClient) withAuth(ctx context.Context) context.Context {
 	token := sc.token
 	if sc.source != nil {
-		minted, err := sc.source(ctx)
+		minted, err := sc.source.Token(ctx)
 		if err != nil {
 			sc.logger.Error("operator credential unavailable; call goes out unauthenticated", zap.Error(err))
 			return ctx
