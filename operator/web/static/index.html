@@ -2199,8 +2199,8 @@ function escapeHtml(str) {
 function timeAgo(dateStr) {
   if (!dateStr) return '-';
   const now = Date.now();
-  const t = new Date(dateStr).getTime();
-  const diff = Math.max(0, now - t);
+  const ts = new Date(dateStr).getTime();
+  const diff = Math.max(0, now - ts);
   const secs = Math.floor(diff / 1000);
   if (secs < 60) return t('time.ago.s', { n: secs });
   const mins = Math.floor(secs / 60);
@@ -2249,11 +2249,11 @@ function showEmpty(el, msg) {
 
 function toast(msg, type = 'info') {
   const c = $('#toastContainer');
-  const t = document.createElement('div');
-  t.className = `toast toast-${type}`;
-  t.textContent = msg;
-  c.appendChild(t);
-  setTimeout(() => { t.style.opacity = '0'; t.style.transition = 'opacity 0.3s'; setTimeout(() => t.remove(), 300); }, 4000);
+  const el = document.createElement('div');
+  el.className = `toast toast-${type}`;
+  el.textContent = msg;
+  c.appendChild(el);
+  setTimeout(() => { el.style.opacity = '0'; el.style.transition = 'opacity 0.3s'; setTimeout(() => el.remove(), 300); }, 4000);
 }
 
 // ===== TAB NAVIGATION =====

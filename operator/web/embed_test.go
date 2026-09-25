@@ -373,3 +373,15 @@ func TestDashboardThemeSwitcher(t *testing.T) {
 		}
 	}
 }
+
+// TestDashboardScriptNeverShadowsTranslate guards the i18n helper: a local
+// named t inside any function hides the global t() and every translated
+// string rendered after it throws "t is not a function". It happened once
+// (timeAgo) and took every table with a relative time down.
+func TestDashboardScriptNeverShadowsTranslate(t *testing.T) {
+	shape := parseDashboard(t, dashboardSource(t))
+	re := regexp.MustCompile(`(?m)\b(?:const|let|var)\s+t\s*=|function\s*\([^)]*\bt\b[^)]*\)|\(\s*t\s*\)\s*=>|catch\s*\(\s*t\s*\)`)
+	if m := re.FindAllString(shape.script, -1); len(m) > 0 {
+		t.Fatalf("the inline script shadows the translation helper t(): %v", m)
+	}
+}
