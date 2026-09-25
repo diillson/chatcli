@@ -30,7 +30,7 @@ build:
   go_vet: true
   gofmt: true
   golangci_lint:
-    version: v1.64.8
+    version: v2.13.2
     timeout: 5m
 
 # Floor 2 — Total coverage ratchet vs. main. Baseline is stored as a commit
