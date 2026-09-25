@@ -201,7 +201,7 @@ git diff | chatcli -p "Resuma"
 
 ### Servidor gRPC
 
-Backend compartilhado com TLS 1.3, JWT/RBAC, fallback, métricas Prometheus, MCP e discovery de plugins.
+Backend compartilhado com TLS 1.3, JWT (HS256/RS256) e identidade por mTLS, RBAC, fallback chain em toda requisição, streaming real com usage e custo no wire, métricas Prometheus e discovery de plugins. `CHATCLI_SERVER_PIPELINE=true` também serve o engine completo de turno do ChatCLI (`ChatTurn`, `RunCoder`, `RunAgent`, tools) para clientes finos e o operator.
 
 ```bash
 chatcli server --port 50051 \
@@ -557,7 +557,7 @@ Credenciais armazenadas com **AES-256-GCM** em `~/.chatcli/auth-profiles.json`.
 | **Sessões** | `/session {save,load,list,delete,new,fork,search}` · `/export` · `/newsession` · `/rewind` |
 | **Contexto** | `/context {create,attach,list,remove}` · `@git` · `@file` · `@env` · `@history` · `@command` |
 | **Config** | `/config [section]` · `/status` · `/settings` · `/switch <provider\|model>` |
-| **Modo agente** | `/agent [task]` · `/run` · `/coder` · `/plan [query]` · `/moa <prompt>` |
+| **Modo agente** | `/agent [task]` · `/run` · `/coder` · `/plan [query]` · `/moa <prompt>` — no chat, o assistente propõe mudar para `/coder` numa tarefa que exige o workspace e você confirma com Enter (`CHATCLI_CHAT_CODER_HANDOFF`) |
 | **Quality pipeline** | `/thinking [on\|off\|auto]` · `/refine [draft]` · `/verify [answer]` · `/reflect [list\|failed\|retry\|purge\|drain\|<texto>]` |
 | **Memória & grafo** | `/memory {longterm,list,profile,facts,remember,forget,profile set,compact}` · `@memory` (remember/recall/forget/profile/neighbors/map) — perfil com ciclo de vida: campos de lista fazem upsert (reafirmar um item supera o antigo, não duplica) e sufixos `_replace`/`_done`/`_remove` reescrevem (ex.: `goals_done=` remove o objetivo concluído; registre junto `milestone=` e `certifications=`); novos campos `interests`, `directives` (regras duras vs preferências; escopo por projeto com `"[scope:<projeto>] regra"` — injetada só quando o workspace correspondente está ativo), `milestone` (linha do tempo datada), `stance` (posição técnica com o porquê, `"posição :: razão"`) e `env_<chave>` (ambiente estruturado); proveniência+frescor por campo (user vs extraction, reafirmação atualiza `confirmed_at`, campos velhos são sinalizados como possivelmente desatualizados) e camada de privacidade (chaves financeiras/saúde/família auto-marcadas `[sensitive]`: personalizam respostas mas nunca entram em código/exemplos/artefatos; `sensitive_mark`/`sensitive_unmark`); daily notes consolidam em digests semanais e mensais (seção Trajectory no contexto); atualização de perfil funciona também no chat (exceção sancionada, `/config chat memory`, `CHATCLI_CHAT_MEMORY`) · `/graph [assunto]` · `/compact [ratio]` |
 | **Extensibilidade** | `/mcp {init,list,invoke,config}` · `/plugin {list,load,unload}` · `/skill <name>` · `/hooks {list,enable,disable,test}` |
