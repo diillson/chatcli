@@ -3,11 +3,36 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>ChatCLI AIOps Dashboard</title>
+<title data-i18n="app.title">ChatCLI AIOps Dashboard</title>
+<script>
+/* Theme and language bootstrap. Runs before the stylesheet so a saved or
+   ?theme=/?lang= choice never flashes the system default first. Query
+   params win once and are persisted; a blocked localStorage falls back to
+   the OS theme and the browser language. */
+(function () {
+  var root = document.documentElement;
+  var params = null;
+  try { params = new URLSearchParams(location.search); } catch (e) { params = null; }
+  var load = function (k) { try { return localStorage.getItem(k); } catch (e) { return null; } };
+  var store = function (k, v) { try { localStorage.setItem(k, v); } catch (e) { /* private mode */ } };
+  var theme = params && params.get('theme');
+  if (theme === 'system' || theme === 'dark' || theme === 'light') store('chatcli_dash_theme', theme);
+  else theme = load('chatcli_dash_theme');
+  if (theme === 'dark' || theme === 'light') root.setAttribute('data-theme', theme);
+  else root.removeAttribute('data-theme');
+  var lang = params && params.get('lang');
+  lang = lang ? (/^pt/i.test(lang) ? 'pt-BR' : (/^en/i.test(lang) ? 'en' : null)) : null;
+  if (lang) store('chatcli_dash_lang', lang);
+  else lang = load('chatcli_dash_lang');
+  if (lang !== 'en' && lang !== 'pt-BR') lang = /^pt/i.test(navigator.language || '') ? 'pt-BR' : 'en';
+  root.lang = lang;
+})();
+</script>
 <style>
 /* Tokens: the same dark terminal the ChatCLI live dashboard draws. A light
-   OS theme is the only thing that overrides them, and it does so below with
-   a set that keeps every text token at 4.5:1 or better on the panels. */
+   OS theme overrides them below with a set that keeps every text token at
+   4.5:1 or better on the panels; the header's theme switcher pins either
+   set through data-theme on <html>, so "system" is simply its absence. */
 :root {
   --bg:#0B0E14; --panel:#10141C; --panel2:#151B26; --border:#1E2634; --text:#DCE3EB; --strong:#FFFFFF; --muted:#7D8798; --faint:#556070;
   --amber:#FFB454; --cyan:#4FC3E8; --violet:#C79BFF; --green:#7FD962; --red:#E06C75; --orange:#FF8C69;
@@ -26,7 +51,7 @@
   color-scheme:dark;
 }
 @media (prefers-color-scheme:light) {
-  :root {
+  :root:not([data-theme="dark"]) {
     --bg:#F3F5F8; --panel:#FFFFFF; --panel2:#EDF1F6; --border:#D3DAE4; --text:#1F2733; --strong:#000000; --muted:#5A6575; --faint:#7A8595;
     --amber:#9C5700; --cyan:#0A6E8C; --violet:#7332C7; --green:#2A7430; --red:#BE3140; --orange:#B84A1C;
     --shadow:0 14px 40px rgba(20,30,45,.18);
@@ -35,6 +60,17 @@
     color-scheme:light;
   }
 }
+/* Explicit choice from the header switcher (persisted in localStorage as
+   chatcli_dash_theme). Same light set as above; dark is the base set. */
+:root[data-theme="light"] {
+  --bg:#F3F5F8; --panel:#FFFFFF; --panel2:#EDF1F6; --border:#D3DAE4; --text:#1F2733; --strong:#000000; --muted:#5A6575; --faint:#7A8595;
+  --amber:#9C5700; --cyan:#0A6E8C; --violet:#7332C7; --green:#2A7430; --red:#BE3140; --orange:#B84A1C;
+  --shadow:0 14px 40px rgba(20,30,45,.18);
+  --scrim:rgba(235,239,244,.85);
+  --on-accent:#FFFFFF;
+  color-scheme:light;
+  }
+:root[data-theme="dark"] { color-scheme:dark; }
 *, *::before, *::after { box-sizing:border-box; margin:0; padding:0; }
 html { font-size:12.5px; }
 body {
@@ -251,6 +287,13 @@ tr.expandable { cursor:pointer; }
 .expand-content h4:first-child { margin-top:0; }
 .expand-content p { margin-bottom:4px; }
 .expand-content ul { margin-left:1.2rem; margin-bottom:6px; }
+/* Runbook steps: the label already carries the step number, and the global
+   reset zeroes the list padding, so the browser marker would draw outside
+   the box over the border. Each step is a card instead. */
+.expand-content ol.step-list { list-style:none; margin:0 0 6px; padding:0; }
+.expand-content ol.step-list li { padding:6px 10px; margin-bottom:6px; border:1px solid var(--border); border-left:2px solid var(--brand); border-radius:4px; background:color-mix(in srgb, var(--panel) 80%, transparent); }
+.expand-content ol.step-list li:last-child { margin-bottom:0; }
+.expand-content ol.step-list p { margin:2px 0 4px; }
 .expand-content pre { font:inherit; }
 
 /* ===== BADGES: color plus a label, never color alone ===== */
@@ -335,6 +378,8 @@ tr.expandable { cursor:pointer; }
 
 /* ===== TIMELINE: a tail of the log ===== */
 .timeline { position:relative; padding-left:18px; }
+.timeline-toolbar { display:flex; justify-content:flex-end; margin-bottom:8px; }
+.timeline-toolbar .btn { font-size:11px; }
 .timeline::before { content:''; position:absolute; left:5px; top:0; bottom:0; width:2px; background:var(--border); }
 .timeline-item { position:relative; padding-bottom:10px; font-size:12px; }
 .timeline-item::before {
@@ -406,6 +451,8 @@ tr.expandable { cursor:pointer; }
 .filter-select:focus, .filter-input:focus { border-color:var(--accent); }
 .header .filter-select { padding:2px 7px; font-size:11px; color:var(--muted); background:transparent; }
 .header .filter-select:hover { color:var(--text); border-color:var(--muted); }
+.switchers { display:flex; align-items:center; gap:6px; }
+.panel-filters { padding:8px 12px 0; margin-bottom:0; }
 
 /* ===== INPUT ===== */
 .input-group { display:flex; flex-direction:column; gap:4px; margin-bottom:8px; }
@@ -592,29 +639,29 @@ tr.expandable { cursor:pointer; }
   </h1>
   <div class="tools">
     <div class="time-range-picker" id="timeRangePicker">
-      <button class="btn" onclick="toggleTimeDropdown()" title="Time range filter" aria-haspopup="true">
-        <span id="timeRangeLabel">All time</span> ▾
+      <button class="btn" onclick="toggleTimeDropdown()" title="Time range filter" data-i18n-title="time.filterTitle" aria-haspopup="true">
+        <span id="timeRangeLabel" data-i18n="time.all">All time</span> ▾
       </button>
       <div class="time-dropdown" id="timeDropdown" style="display:none">
         <div class="time-presets">
-          <button onclick="setTimeRange('1h')">Last 1h</button>
-          <button onclick="setTimeRange('6h')">Last 6h</button>
-          <button onclick="setTimeRange('24h')">Last 24h</button>
-          <button onclick="setTimeRange('7d')">Last 7d</button>
-          <button onclick="setTimeRange('30d')">Last 30d</button>
-          <button onclick="setTimeRange('all')">All time</button>
+          <button onclick="setTimeRange('1h')" data-i18n="time.last1h">Last 1h</button>
+          <button onclick="setTimeRange('6h')" data-i18n="time.last6h">Last 6h</button>
+          <button onclick="setTimeRange('24h')" data-i18n="time.last24h">Last 24h</button>
+          <button onclick="setTimeRange('7d')" data-i18n="time.last7d">Last 7d</button>
+          <button onclick="setTimeRange('30d')" data-i18n="time.last30d">Last 30d</button>
+          <button onclick="setTimeRange('all')" data-i18n="time.all">All time</button>
         </div>
         <div class="time-custom">
-          <label>From <input type="datetime-local" id="timeFrom"></label>
-          <label>To <input type="datetime-local" id="timeTo"></label>
-          <button onclick="applyCustomRange()">Apply</button>
+          <label><span data-i18n="time.from">From</span> <input type="datetime-local" id="timeFrom"></label>
+          <label><span data-i18n="time.to">To</span> <input type="datetime-local" id="timeTo"></label>
+          <button onclick="applyCustomRange()" data-i18n="time.apply">Apply</button>
         </div>
       </div>
     </div>
     <div class="refresh-indicator">
-      <label for="refreshSelect" class="sr-label">refresh</label>
-      <select id="refreshSelect" class="filter-select" onchange="changeRefreshInterval()" title="Auto-refresh interval">
-        <option value="0">Off</option>
+      <label for="refreshSelect" class="sr-label" data-i18n="refresh.label">Auto-refresh interval</label>
+      <select id="refreshSelect" class="filter-select" onchange="changeRefreshInterval()" title="Auto-refresh interval" data-i18n-title="refresh.label">
+        <option value="0" data-i18n="refresh.off">Off</option>
         <option value="10">10s</option>
         <option value="30" selected>30s</option>
         <option value="60">1m</option>
@@ -622,24 +669,37 @@ tr.expandable { cursor:pointer; }
         <option value="300">5m</option>
       </select>
       <span id="refreshTimer" class="refresh-timer">30s</span>
-      <button class="btn btn-icon" onclick="manualRefresh()" title="Refresh now" aria-label="Refresh now">&#8635;</button>
+      <button class="btn btn-icon" onclick="manualRefresh()" title="Refresh now" aria-label="Refresh now" data-i18n-title="refresh.now" data-i18n-aria="refresh.now">&#8635;</button>
     </div>
-    <button class="btn btn-icon" id="logoutBtn" style="display:none" onclick="logoutApiKey()" title="Change API key" aria-label="Change API key">&#128274;</button>
+    <div class="switchers">
+      <label for="themeSelect" class="sr-label" data-i18n="theme.label">Theme</label>
+      <select id="themeSelect" class="filter-select" onchange="changeTheme()" title="Theme" aria-label="Theme" data-i18n-title="theme.label" data-i18n-aria="theme.label">
+        <option value="system" data-i18n="theme.system">System</option>
+        <option value="dark" data-i18n="theme.dark">Dark</option>
+        <option value="light" data-i18n="theme.light">Light</option>
+      </select>
+      <label for="langSelect" class="sr-label" data-i18n="lang.label">Language</label>
+      <select id="langSelect" class="filter-select" onchange="changeLanguage()" title="Language" aria-label="Language" data-i18n-title="lang.label" data-i18n-aria="lang.label">
+        <option value="en" lang="en">English</option>
+        <option value="pt-BR" lang="pt-BR">Português (BR)</option>
+      </select>
+    </div>
+    <button class="btn btn-icon" id="logoutBtn" style="display:none" onclick="logoutApiKey()" title="Change API key" aria-label="Change API key" data-i18n-title="auth.changeKey" data-i18n-aria="auth.changeKey">&#128274;</button>
   </div>
 </header>
 
 <!-- TAB BAR: the dashboard's segmented control -->
-<nav class="tab-bar" id="tabBar" role="tablist" aria-label="Dashboard sections">
-  <button class="tab-btn active" role="tab" aria-selected="true" aria-controls="page-overview" data-tab="overview">Overview</button>
-  <button class="tab-btn" role="tab" aria-selected="false" aria-controls="page-incidents" data-tab="incidents">Incidents</button>
-  <button class="tab-btn" role="tab" aria-selected="false" aria-controls="page-slos" data-tab="slos">SLOs</button>
-  <button class="tab-btn" role="tab" aria-selected="false" aria-controls="page-approvals" data-tab="approvals">Approvals <span class="badge" id="approvalBadge" style="display:none">0</span></button>
-  <button class="tab-btn" role="tab" aria-selected="false" aria-controls="page-aiinsights" data-tab="aiinsights">AI Insights</button>
-  <button class="tab-btn" role="tab" aria-selected="false" aria-controls="page-remediations" data-tab="remediations">Remediations</button>
-  <button class="tab-btn" role="tab" aria-selected="false" aria-controls="page-runbooks" data-tab="runbooks">Runbooks</button>
-  <button class="tab-btn" role="tab" aria-selected="false" aria-controls="page-postmortems" data-tab="postmortems">PostMortems</button>
-  <button class="tab-btn" role="tab" aria-selected="false" aria-controls="page-clusters" data-tab="clusters">Clusters</button>
-  <button class="tab-btn" role="tab" aria-selected="false" aria-controls="page-audit" data-tab="audit">Audit</button>
+<nav class="tab-bar" id="tabBar" role="tablist" aria-label="Dashboard sections" data-i18n-aria="nav.label">
+  <button class="tab-btn active" role="tab" aria-selected="true" aria-controls="page-overview" data-tab="overview" data-i18n="tab.overview">Overview</button>
+  <button class="tab-btn" role="tab" aria-selected="false" aria-controls="page-incidents" data-tab="incidents" data-i18n="tab.incidents">Incidents</button>
+  <button class="tab-btn" role="tab" aria-selected="false" aria-controls="page-slos" data-tab="slos" data-i18n="tab.slos">SLOs</button>
+  <button class="tab-btn" role="tab" aria-selected="false" aria-controls="page-approvals" data-tab="approvals"><span data-i18n="tab.approvals">Approvals</span> <span class="badge" id="approvalBadge" style="display:none">0</span></button>
+  <button class="tab-btn" role="tab" aria-selected="false" aria-controls="page-aiinsights" data-tab="aiinsights" data-i18n="tab.aiinsights">AI Insights</button>
+  <button class="tab-btn" role="tab" aria-selected="false" aria-controls="page-remediations" data-tab="remediations" data-i18n="tab.remediations">Remediations</button>
+  <button class="tab-btn" role="tab" aria-selected="false" aria-controls="page-runbooks" data-tab="runbooks" data-i18n="tab.runbooks">Runbooks</button>
+  <button class="tab-btn" role="tab" aria-selected="false" aria-controls="page-postmortems" data-tab="postmortems" data-i18n="tab.postmortems">PostMortems</button>
+  <button class="tab-btn" role="tab" aria-selected="false" aria-controls="page-clusters" data-tab="clusters" data-i18n="tab.clusters">Clusters</button>
+  <button class="tab-btn" role="tab" aria-selected="false" aria-controls="page-audit" data-tab="audit" data-i18n="tab.audit">Audit</button>
 </nav>
 
 <!-- MAIN CONTENT -->
@@ -651,31 +711,68 @@ tr.expandable { cursor:pointer; }
     <div id="capacityWarnings"></div>
     <div class="drag-grid" id="overviewPanels">
       <div class="panel" draggable="true" data-panel-id="severityPie">
-        <div class="panel-header"><span class="drag-grip">⠿</span><span class="panel-title">Issues by Severity</span></div>
+        <div class="panel-header"><span class="drag-grip">⠿</span><span class="panel-title" data-i18n="panel.severityPie">Issues by Severity</span></div>
         <div class="panel-body" id="severityPie"></div>
       </div>
       <div class="panel" draggable="true" data-panel-id="platformResources">
-        <div class="panel-header"><span class="drag-grip">⠿</span><span class="panel-title">Platform Resources</span></div>
+        <div class="panel-header"><span class="drag-grip">⠿</span><span class="panel-title" data-i18n="panel.platformResources">Platform Resources</span></div>
         <div class="panel-body" id="platformResources"></div>
       </div>
       <div class="panel" draggable="true" data-panel-id="remediationTimeline">
-        <div class="panel-header"><span class="drag-grip">⠿</span><span class="panel-title">Remediation Activity</span></div>
+        <div class="panel-header"><span class="drag-grip">⠿</span><span class="panel-title" data-i18n="panel.remediationTimeline">Remediation Activity</span></div>
         <div class="panel-body" id="remediationTimeline"></div>
       </div>
       <div class="panel" draggable="true" data-panel-id="remediationStrategyChart">
-        <div class="panel-header"><span class="drag-grip">⠿</span><span class="panel-title">Remediation by Strategy</span></div>
+        <div class="panel-header"><span class="drag-grip">⠿</span><span class="panel-title" data-i18n="panel.remediationStrategy">Remediation by Strategy</span></div>
         <div class="panel-body" id="remediationStrategyChart"></div>
       </div>
       <div class="panel" draggable="true" data-panel-id="complianceCard">
-        <div class="panel-header"><span class="drag-grip">⠿</span><span class="panel-title">Compliance & SLA</span></div>
+        <div class="panel-header"><span class="drag-grip">⠿</span><span class="panel-title" data-i18n="panel.compliance">Compliance & SLA</span></div>
         <div class="panel-body" id="complianceCard"></div>
       </div>
       <div class="panel" draggable="true" data-panel-id="mttdMttrTrend">
-        <div class="panel-header"><span class="drag-grip">⠿</span><span class="panel-title">MTTD & MTTR Trend</span></div>
+        <div class="panel-header"><span class="drag-grip">⠿</span><span class="panel-title" data-i18n="panel.mttdMttr">MTTD & MTTR Trend</span></div>
         <div class="panel-body" id="mttdMttrTrend"></div>
       </div>
       <div class="panel panel-full" draggable="true" data-panel-id="recentIncidentsTable">
-        <div class="panel-header"><span class="drag-grip">⠿</span><span class="panel-title">Recent Incidents</span></div>
+        <div class="panel-header"><span class="drag-grip">⠿</span><span class="panel-title" data-i18n="panel.recentIncidents">Recent Incidents</span></div>
+        <!-- Client-side filters over the incidents this panel already loaded;
+             persisted as chatcli_dash_recentFilters. Defaults show everything,
+             so an untouched panel renders exactly what it always did. -->
+        <div class="filters panel-filters" id="recentFilters">
+          <select class="filter-select" id="recentSeverityFilter" aria-label="Severity" data-i18n-aria="filter.severity">
+            <option value="" data-i18n="filter.allSeverities">All Severities</option>
+            <option value="critical" data-i18n="severity.critical">Critical</option>
+            <option value="high" data-i18n="severity.high">High</option>
+            <option value="medium" data-i18n="severity.medium">Medium</option>
+            <option value="low" data-i18n="severity.low">Low</option>
+          </select>
+          <select class="filter-select" id="recentStateFilter" aria-label="State" data-i18n-aria="filter.state">
+            <option value="" data-i18n="filter.allStates">All States</option>
+            <option value="Detected" data-i18n="state.Detected">Detected</option>
+            <option value="Analyzing" data-i18n="state.Analyzing">Analyzing</option>
+            <option value="Remediating" data-i18n="state.Remediating">Remediating</option>
+            <option value="Contained" data-i18n="state.ContainedNeedsHuman">Contained (needs human action)</option>
+            <option value="Resolved" data-i18n="state.Resolved">Resolved</option>
+            <option value="Escalated" data-i18n="state.Escalated">Escalated</option>
+            <option value="Failed" data-i18n="state.Failed">Failed</option>
+          </select>
+          <select class="filter-select" id="recentKindFilter" aria-label="Resource kind" data-i18n-aria="filter.kind">
+            <option value="" data-i18n="filter.allKinds">All Kinds</option>
+            <option value="Deployment">Deployment</option>
+            <option value="StatefulSet">StatefulSet</option>
+            <option value="DaemonSet">DaemonSet</option>
+            <option value="Job">Job</option>
+            <option value="CronJob">CronJob</option>
+          </select>
+          <select class="filter-select" id="recentChaosFilter" title="Filter chaos engineering incidents" aria-label="Filter chaos engineering incidents" data-i18n-title="filter.chaosTitle" data-i18n-aria="filter.chaosTitle">
+            <option value="" data-i18n="filter.allSources">All sources</option>
+            <option value="exclude" data-i18n="filter.hideChaos">Hide chaos drills</option>
+            <option value="only" data-i18n="filter.onlyChaos">Only chaos drills</option>
+          </select>
+          <input class="filter-input" id="recentNamespaceFilter" placeholder="Namespace..." aria-label="Namespace" data-i18n-placeholder="filter.namespace" data-i18n-aria="col.namespace" style="width:150px">
+          <button class="btn" type="button" id="recentFiltersReset" data-i18n="filter.reset">Reset</button>
+        </div>
         <div class="panel-body table-wrap" id="recentIncidentsTable"></div>
       </div>
     </div>
@@ -684,25 +781,25 @@ tr.expandable { cursor:pointer; }
   <!-- INCIDENTS PAGE -->
   <div class="page" id="page-incidents" role="tabpanel">
     <div class="filters">
-      <select class="filter-select" id="incSeverityFilter">
-        <option value="">All Severities</option>
-        <option value="critical">Critical</option>
-        <option value="high">High</option>
-        <option value="medium">Medium</option>
-        <option value="low">Low</option>
+      <select class="filter-select" id="incSeverityFilter" aria-label="Severity" data-i18n-aria="filter.severity">
+        <option value="" data-i18n="filter.allSeverities">All Severities</option>
+        <option value="critical" data-i18n="severity.critical">Critical</option>
+        <option value="high" data-i18n="severity.high">High</option>
+        <option value="medium" data-i18n="severity.medium">Medium</option>
+        <option value="low" data-i18n="severity.low">Low</option>
       </select>
-      <select class="filter-select" id="incStateFilter">
-        <option value="">All States</option>
-        <option value="Detected">Detected</option>
-        <option value="Analyzing">Analyzing</option>
-        <option value="Remediating">Remediating</option>
-        <option value="Contained">Contained (needs human action)</option>
-        <option value="Resolved">Resolved</option>
-        <option value="Escalated">Escalated</option>
-        <option value="Failed">Failed</option>
+      <select class="filter-select" id="incStateFilter" aria-label="State" data-i18n-aria="filter.state">
+        <option value="" data-i18n="filter.allStates">All States</option>
+        <option value="Detected" data-i18n="state.Detected">Detected</option>
+        <option value="Analyzing" data-i18n="state.Analyzing">Analyzing</option>
+        <option value="Remediating" data-i18n="state.Remediating">Remediating</option>
+        <option value="Contained" data-i18n="state.ContainedNeedsHuman">Contained (needs human action)</option>
+        <option value="Resolved" data-i18n="state.Resolved">Resolved</option>
+        <option value="Escalated" data-i18n="state.Escalated">Escalated</option>
+        <option value="Failed" data-i18n="state.Failed">Failed</option>
       </select>
-      <select class="filter-select" id="incKindFilter">
-        <option value="">All Kinds</option>
+      <select class="filter-select" id="incKindFilter" aria-label="Resource kind" data-i18n-aria="filter.kind">
+        <option value="" data-i18n="filter.allKinds">All Kinds</option>
         <option value="Deployment">Deployment</option>
         <option value="StatefulSet">StatefulSet</option>
         <option value="DaemonSet">DaemonSet</option>
@@ -710,17 +807,17 @@ tr.expandable { cursor:pointer; }
         <option value="CronJob">CronJob</option>
       </select>
       <!-- GAP-04 fix: filter to hide/show chaos-induced incidents -->
-      <select class="filter-select" id="incChaosFilter" title="Filter chaos engineering incidents">
-        <option value="exclude">Hide chaos drills</option>
-        <option value="">All sources</option>
-        <option value="only">Only chaos drills</option>
+      <select class="filter-select" id="incChaosFilter" title="Filter chaos engineering incidents" aria-label="Filter chaos engineering incidents" data-i18n-title="filter.chaosTitle" data-i18n-aria="filter.chaosTitle">
+        <option value="exclude" data-i18n="filter.hideChaos">Hide chaos drills</option>
+        <option value="" data-i18n="filter.allSources">All sources</option>
+        <option value="only" data-i18n="filter.onlyChaos">Only chaos drills</option>
       </select>
-      <input class="filter-input" id="incNamespaceFilter" placeholder="Namespace..." style="width:150px">
-      <button class="btn btn-primary" onclick="loadIncidents()">Apply</button>
+      <input class="filter-input" id="incNamespaceFilter" placeholder="Namespace..." aria-label="Namespace" data-i18n-placeholder="filter.namespace" data-i18n-aria="col.namespace" style="width:150px">
+      <button class="btn btn-primary" onclick="loadIncidents()" data-i18n="filter.apply">Apply</button>
     </div>
     <div class="panel">
       <div class="panel-header">
-        <span class="panel-title">Incidents</span>
+        <span class="panel-title" data-i18n="section.incidents">Incidents</span>
         <span class="refresh-indicator" style="font-size:0.75rem; color: var(--text-muted);" id="incidentCount"></span>
       </div>
       <div class="panel-body table-wrap" id="incidentsTableBody"></div>
@@ -731,7 +828,7 @@ tr.expandable { cursor:pointer; }
   <div class="page" id="page-slos" role="tabpanel">
     <div class="grid-3" id="sloCards"></div>
     <div class="panel">
-      <div class="panel-header"><span class="panel-title">Active SLO Alerts</span></div>
+      <div class="panel-header"><span class="panel-title" data-i18n="section.sloAlerts">Active SLO Alerts</span></div>
       <div class="panel-body" id="sloAlerts"></div>
     </div>
   </div>
@@ -739,13 +836,13 @@ tr.expandable { cursor:pointer; }
   <!-- APPROVALS PAGE -->
   <div class="page" id="page-approvals" role="tabpanel">
     <div class="filters">
-      <select class="filter-select" id="approvalStateFilter">
-        <option value="">All</option>
-        <option value="Pending" selected>Pending</option>
-        <option value="Approved">Approved</option>
-        <option value="Rejected">Rejected</option>
+      <select class="filter-select" id="approvalStateFilter" aria-label="State" data-i18n-aria="filter.state">
+        <option value="" data-i18n="filter.all">All</option>
+        <option value="Pending" selected data-i18n="state.Pending">Pending</option>
+        <option value="Approved" data-i18n="state.Approved">Approved</option>
+        <option value="Rejected" data-i18n="state.Rejected">Rejected</option>
       </select>
-      <button class="btn btn-primary" onclick="loadApprovals()">Apply</button>
+      <button class="btn btn-primary" onclick="loadApprovals()" data-i18n="filter.apply">Apply</button>
     </div>
     <div id="approvalsList"></div>
   </div>
@@ -753,12 +850,12 @@ tr.expandable { cursor:pointer; }
   <!-- AI INSIGHTS PAGE -->
   <div class="page" id="page-aiinsights" role="tabpanel">
     <div class="filters">
-      <input class="filter-input" id="insightIssueFilter" placeholder="Filter by incident..." style="width:200px">
-      <button class="btn btn-primary" onclick="loadAIInsights()">Apply</button>
+      <input class="filter-input" id="insightIssueFilter" placeholder="Filter by incident..." aria-label="Incident" data-i18n-placeholder="filter.byIncident" data-i18n-aria="col.incident" style="width:200px">
+      <button class="btn btn-primary" onclick="loadAIInsights()" data-i18n="filter.apply">Apply</button>
     </div>
     <div class="panel">
       <div class="panel-header">
-        <span class="panel-title">AI Insights</span>
+        <span class="panel-title" data-i18n="section.aiInsights">AI Insights</span>
         <span style="font-size:0.75rem; color: var(--text-muted);" id="insightCount"></span>
       </div>
       <div class="panel-body table-wrap" id="insightsTableBody"></div>
@@ -768,21 +865,21 @@ tr.expandable { cursor:pointer; }
   <!-- REMEDIATIONS PAGE -->
   <div class="page" id="page-remediations" role="tabpanel">
     <div class="filters">
-      <select class="filter-select" id="remediationStateFilter">
-        <option value="">All States</option>
-        <option value="Pending">Pending</option>
-        <option value="Executing">Executing</option>
-        <option value="Verifying">Verifying</option>
-        <option value="Completed">Completed</option>
-        <option value="Failed">Failed</option>
-        <option value="RolledBack">RolledBack</option>
+      <select class="filter-select" id="remediationStateFilter" aria-label="State" data-i18n-aria="filter.state">
+        <option value="" data-i18n="filter.allStates">All States</option>
+        <option value="Pending" data-i18n="state.Pending">Pending</option>
+        <option value="Executing" data-i18n="state.Executing">Executing</option>
+        <option value="Verifying" data-i18n="state.Verifying">Verifying</option>
+        <option value="Completed" data-i18n="state.Completed">Completed</option>
+        <option value="Failed" data-i18n="state.Failed">Failed</option>
+        <option value="RolledBack" data-i18n="state.RolledBack">RolledBack</option>
       </select>
-      <input class="filter-input" id="remediationIssueFilter" placeholder="Filter by incident..." style="width:200px">
-      <button class="btn btn-primary" onclick="loadRemediations()">Apply</button>
+      <input class="filter-input" id="remediationIssueFilter" placeholder="Filter by incident..." aria-label="Incident" data-i18n-placeholder="filter.byIncident" data-i18n-aria="col.incident" style="width:200px">
+      <button class="btn btn-primary" onclick="loadRemediations()" data-i18n="filter.apply">Apply</button>
     </div>
     <div class="panel">
       <div class="panel-header">
-        <span class="panel-title">Remediation Plans</span>
+        <span class="panel-title" data-i18n="section.remediationPlans">Remediation Plans</span>
         <span style="font-size:0.75rem; color: var(--text-muted);" id="remediationCount"></span>
       </div>
       <div class="panel-body table-wrap" id="remediationsTableBody"></div>
@@ -793,7 +890,7 @@ tr.expandable { cursor:pointer; }
   <div class="page" id="page-runbooks" role="tabpanel">
     <div class="panel">
       <div class="panel-header">
-        <span class="panel-title">Runbooks</span>
+        <span class="panel-title" data-i18n="section.runbooks">Runbooks</span>
         <span style="font-size:0.75rem; color: var(--text-muted);" id="runbookCount"></span>
       </div>
       <div class="panel-body table-wrap" id="runbooksTableBody"></div>
@@ -803,7 +900,7 @@ tr.expandable { cursor:pointer; }
   <!-- POSTMORTEMS PAGE -->
   <div class="page" id="page-postmortems" role="tabpanel">
     <div class="panel">
-      <div class="panel-header"><span class="panel-title">Post-Mortems</span></div>
+      <div class="panel-header"><span class="panel-title" data-i18n="section.postmortems">Post-Mortems</span></div>
       <div class="panel-body table-wrap" id="postmortemsTableBody"></div>
     </div>
   </div>
@@ -818,56 +915,56 @@ tr.expandable { cursor:pointer; }
   <!-- AUDIT PAGE -->
   <div class="page" id="page-audit" role="tabpanel">
     <div class="filters">
-      <input class="filter-input" id="auditSearch" placeholder="Search events..." style="width:220px">
-      <select class="filter-select" id="auditTypeFilter">
-        <option value="">All Types</option>
-        <optgroup label="Issues">
-          <option value="issue_created">Issue Created</option>
-          <option value="issue_resolved">Issue Resolved</option>
-          <option value="issue_escalated">Issue Escalated</option>
+      <input class="filter-input" id="auditSearch" placeholder="Search events..." aria-label="Search events..." data-i18n-placeholder="filter.searchEvents" data-i18n-aria="filter.searchEvents" style="width:220px">
+      <select class="filter-select" id="auditTypeFilter" aria-label="Event Type" data-i18n-aria="col.eventType">
+        <option value="" data-i18n="filter.allTypes">All Types</option>
+        <optgroup label="Issues" data-i18n-label="audit.group.issues">
+          <option value="issue_created" data-i18n="audit.type.issue_created">Issue Created</option>
+          <option value="issue_resolved" data-i18n="audit.type.issue_resolved">Issue Resolved</option>
+          <option value="issue_escalated" data-i18n="audit.type.issue_escalated">Issue Escalated</option>
         </optgroup>
-        <optgroup label="Remediation">
-          <option value="remediation_started">Remediation Started</option>
-          <option value="remediation_completed">Remediation Completed</option>
-          <option value="remediation_failed">Remediation Failed</option>
+        <optgroup label="Remediation" data-i18n-label="audit.group.remediation">
+          <option value="remediation_started" data-i18n="audit.type.remediation_started">Remediation Started</option>
+          <option value="remediation_completed" data-i18n="audit.type.remediation_completed">Remediation Completed</option>
+          <option value="remediation_failed" data-i18n="audit.type.remediation_failed">Remediation Failed</option>
         </optgroup>
-        <optgroup label="Approvals">
-          <option value="approval_requested">Approval Requested</option>
-          <option value="approval_granted">Approval Granted</option>
-          <option value="approval_rejected">Approval Rejected</option>
-          <option value="approval_expired">Approval Expired</option>
+        <optgroup label="Approvals" data-i18n-label="audit.group.approvals">
+          <option value="approval_requested" data-i18n="audit.type.approval_requested">Approval Requested</option>
+          <option value="approval_granted" data-i18n="audit.type.approval_granted">Approval Granted</option>
+          <option value="approval_rejected" data-i18n="audit.type.approval_rejected">Approval Rejected</option>
+          <option value="approval_expired" data-i18n="audit.type.approval_expired">Approval Expired</option>
         </optgroup>
-        <optgroup label="Operations">
-          <option value="escalation_triggered">Escalation Triggered</option>
-          <option value="notification_sent">Notification Sent</option>
-          <option value="postmortem_created">PostMortem Created</option>
-          <option value="runbook_generated">Runbook Generated</option>
+        <optgroup label="Operations" data-i18n-label="audit.group.operations">
+          <option value="escalation_triggered" data-i18n="audit.type.escalation_triggered">Escalation Triggered</option>
+          <option value="notification_sent" data-i18n="audit.type.notification_sent">Notification Sent</option>
+          <option value="postmortem_created" data-i18n="audit.type.postmortem_created">PostMortem Created</option>
+          <option value="runbook_generated" data-i18n="audit.type.runbook_generated">Runbook Generated</option>
         </optgroup>
-        <optgroup label="SLO/SLA">
-          <option value="slo_violation">SLO Violation</option>
-          <option value="sla_breach">SLA Breach</option>
+        <optgroup label="SLO/SLA" data-i18n-label="audit.group.slo">
+          <option value="slo_violation" data-i18n="audit.type.slo_violation">SLO Violation</option>
+          <option value="sla_breach" data-i18n="audit.type.sla_breach">SLA Breach</option>
         </optgroup>
-        <optgroup label="Clusters">
-          <option value="cluster_connected">Cluster Connected</option>
-          <option value="cluster_disconnected">Cluster Disconnected</option>
+        <optgroup label="Clusters" data-i18n-label="audit.group.clusters">
+          <option value="cluster_connected" data-i18n="audit.type.cluster_connected">Cluster Connected</option>
+          <option value="cluster_disconnected" data-i18n="audit.type.cluster_disconnected">Cluster Disconnected</option>
         </optgroup>
-        <optgroup label="System">
-          <option value="pattern_learned">Pattern Learned</option>
-          <option value="config_changed">Config Changed</option>
+        <optgroup label="System" data-i18n-label="audit.group.system">
+          <option value="pattern_learned" data-i18n="audit.type.pattern_learned">Pattern Learned</option>
+          <option value="config_changed" data-i18n="audit.type.config_changed">Config Changed</option>
         </optgroup>
       </select>
-      <select class="filter-select" id="auditSevFilter">
-        <option value="">All Severities</option>
-        <option value="info">Info</option>
-        <option value="warning">Warning</option>
-        <option value="critical">Critical</option>
+      <select class="filter-select" id="auditSevFilter" aria-label="Severity" data-i18n-aria="filter.severity">
+        <option value="" data-i18n="filter.allSeverities">All Severities</option>
+        <option value="info" data-i18n="severity.info">Info</option>
+        <option value="warning" data-i18n="severity.warning">Warning</option>
+        <option value="critical" data-i18n="severity.critical">Critical</option>
       </select>
-      <button class="btn btn-primary" onclick="loadAudit()">Apply</button>
-      <button class="btn" onclick="exportAudit()">Export JSON</button>
+      <button class="btn btn-primary" onclick="loadAudit()" data-i18n="filter.apply">Apply</button>
+      <button class="btn" onclick="exportAudit()" data-i18n="audit.export">Export JSON</button>
     </div>
     <div class="panel">
       <div class="panel-header">
-        <span class="panel-title">Audit Log</span>
+        <span class="panel-title" data-i18n="section.auditLog">Audit Log</span>
         <span style="font-size:0.75rem; color: var(--text-muted);" id="auditCount"></span>
       </div>
       <div class="panel-body table-wrap" id="auditTableBody"></div>
@@ -877,13 +974,803 @@ tr.expandable { cursor:pointer; }
 </main>
 
 <footer class="footer">
-  <span class="brand">chatcli</span><span>· aiops dashboard</span>
+  <span class="brand">chatcli</span><span data-i18n="footer.sub">· aiops dashboard</span>
   <span class="spacer"></span>
   <span>api <b>/api/v1</b></span>
 </footer>
 
 <!-- TOAST CONTAINER -->
 <div class="toast-container" id="toastContainer"></div>
+
+<!-- I18N CATALOG: flat keys, {var} placeholders, one object per language.
+     Plain JSON so the Go test in web/embed_test.go can parse it and check
+     that both languages carry the same keys and every key the page uses. -->
+<script type="application/json" id="i18n-catalog">
+{
+ "en": {
+  "app.title": "ChatCLI AIOps Dashboard",
+  "health.healthy": "Healthy",
+  "health.degraded": "Degraded",
+  "health.disconnected": "Disconnected",
+  "time.filterTitle": "Time range filter",
+  "time.all": "All time",
+  "time.last1h": "Last 1h",
+  "time.last6h": "Last 6h",
+  "time.last24h": "Last 24h",
+  "time.last7d": "Last 7d",
+  "time.last30d": "Last 30d",
+  "time.from": "From",
+  "time.to": "To",
+  "time.apply": "Apply",
+  "refresh.label": "Auto-refresh interval",
+  "refresh.off": "Off",
+  "refresh.editing": "paused while editing",
+  "refresh.now": "Refresh now",
+  "auth.changeKey": "Change API key",
+  "theme.label": "Theme",
+  "theme.system": "System",
+  "theme.dark": "Dark",
+  "theme.light": "Light",
+  "lang.label": "Language",
+  "nav.label": "Dashboard sections",
+  "footer.sub": "· aiops dashboard",
+  "tab.overview": "Overview",
+  "tab.incidents": "Incidents",
+  "tab.slos": "SLOs",
+  "tab.approvals": "Approvals",
+  "tab.aiinsights": "AI Insights",
+  "tab.remediations": "Remediations",
+  "tab.runbooks": "Runbooks",
+  "tab.postmortems": "PostMortems",
+  "tab.clusters": "Clusters",
+  "tab.audit": "Audit",
+  "panel.severityPie": "Issues by Severity",
+  "panel.platformResources": "Platform Resources",
+  "panel.remediationTimeline": "Remediation Activity",
+  "panel.remediationStrategy": "Remediation by Strategy",
+  "panel.compliance": "Compliance & SLA",
+  "panel.mttdMttr": "MTTD & MTTR Trend",
+  "panel.recentIncidents": "Recent Incidents",
+  "filter.severity": "Severity",
+  "filter.state": "State",
+  "filter.kind": "Resource kind",
+  "filter.allSeverities": "All Severities",
+  "filter.allStates": "All States",
+  "filter.allKinds": "All Kinds",
+  "filter.chaosTitle": "Filter chaos engineering incidents",
+  "filter.hideChaos": "Hide chaos drills",
+  "filter.allSources": "All sources",
+  "filter.onlyChaos": "Only chaos drills",
+  "filter.namespace": "Namespace...",
+  "filter.apply": "Apply",
+  "filter.reset": "Reset",
+  "filter.all": "All",
+  "filter.allTypes": "All Types",
+  "filter.byIncident": "Filter by incident...",
+  "filter.searchEvents": "Search events...",
+  "severity.critical": "Critical",
+  "severity.high": "High",
+  "severity.medium": "Medium",
+  "severity.low": "Low",
+  "severity.info": "Info",
+  "severity.warning": "Warning",
+  "severity.unknown": "unknown",
+  "state.Detected": "Detected",
+  "state.Analyzing": "Analyzing",
+  "state.Remediating": "Remediating",
+  "state.Contained": "Contained",
+  "state.ContainedNeedsHuman": "Contained (needs human action)",
+  "state.Resolved": "Resolved",
+  "state.Escalated": "Escalated",
+  "state.Failed": "Failed",
+  "state.Pending": "Pending",
+  "state.WaitingApproval": "WaitingApproval",
+  "state.Executing": "Executing",
+  "state.Verifying": "Verifying",
+  "state.Completed": "Completed",
+  "state.RolledBack": "RolledBack",
+  "state.Approved": "Approved",
+  "state.Rejected": "Rejected",
+  "state.Expired": "Expired",
+  "state.Open": "Open",
+  "state.InReview": "InReview",
+  "state.Closed": "Closed",
+  "state.Healthy": "Healthy",
+  "state.Firing": "Firing",
+  "state.Breached": "Breached",
+  "state.AtRisk": "AtRisk",
+  "state.Offline": "Offline",
+  "state.Unknown": "Unknown",
+  "urgency.urgent": "urgent",
+  "urgency.plan": "plan",
+  "section.incidents": "Incidents",
+  "section.sloAlerts": "Active SLO Alerts",
+  "section.aiInsights": "AI Insights",
+  "section.remediationPlans": "Remediation Plans",
+  "section.runbooks": "Runbooks",
+  "section.postmortems": "Post-Mortems",
+  "section.auditLog": "Audit Log",
+  "audit.group.issues": "Issues",
+  "audit.group.remediation": "Remediation",
+  "audit.group.approvals": "Approvals",
+  "audit.group.operations": "Operations",
+  "audit.group.slo": "SLO/SLA",
+  "audit.group.clusters": "Clusters",
+  "audit.group.system": "System",
+  "audit.type.issue_created": "Issue Created",
+  "audit.type.issue_resolved": "Issue Resolved",
+  "audit.type.issue_escalated": "Issue Escalated",
+  "audit.type.remediation_started": "Remediation Started",
+  "audit.type.remediation_completed": "Remediation Completed",
+  "audit.type.remediation_failed": "Remediation Failed",
+  "audit.type.approval_requested": "Approval Requested",
+  "audit.type.approval_granted": "Approval Granted",
+  "audit.type.approval_rejected": "Approval Rejected",
+  "audit.type.approval_expired": "Approval Expired",
+  "audit.type.escalation_triggered": "Escalation Triggered",
+  "audit.type.notification_sent": "Notification Sent",
+  "audit.type.postmortem_created": "PostMortem Created",
+  "audit.type.runbook_generated": "Runbook Generated",
+  "audit.type.slo_violation": "SLO Violation",
+  "audit.type.sla_breach": "SLA Breach",
+  "audit.type.cluster_connected": "Cluster Connected",
+  "audit.type.cluster_disconnected": "Cluster Disconnected",
+  "audit.type.pattern_learned": "Pattern Learned",
+  "audit.type.config_changed": "Config Changed",
+  "audit.export": "Export JSON",
+  "audit.count": "{n} event(s)",
+  "audit.countOf": "{n} event(s) of {total}",
+  "audit.empty": "No audit events found",
+  "login.signIn": "sign in",
+  "login.title": "API Key Required",
+  "login.hint": "Enter your API key to access the dashboard.",
+  "login.apiKey": "API key",
+  "login.connect": "Connect",
+  "login.verifying": "Verifying...",
+  "login.invalid": "Invalid API key. Please try again.",
+  "error.authRequired": "Authentication required",
+  "common.loading": "Loading...",
+  "common.retry": "Retry",
+  "common.noData": "No data available",
+  "common.total": "Total",
+  "common.unknown": "Unknown",
+  "common.na": "N/A",
+  "common.inProgress": "In progress...",
+  "table.sortHint": "Click to sort",
+  "time.ago.s": "{n}s ago",
+  "time.ago.m": "{n}m ago",
+  "time.ago.h": "{n}h ago",
+  "time.ago.d": "{n}d ago",
+  "col.name": "Name",
+  "col.severity": "Severity",
+  "col.state": "State",
+  "col.resource": "Resource",
+  "col.namespace": "Namespace",
+  "col.age": "Age",
+  "col.risk": "Risk",
+  "col.actions": "Actions",
+  "col.signal": "Signal",
+  "col.resourceKind": "Resource Kind",
+  "col.steps": "Steps",
+  "col.maxAttempts": "Max Attempts",
+  "col.created": "Created",
+  "col.duration": "Duration",
+  "col.issue": "Issue",
+  "col.incident": "Incident",
+  "col.provider": "Provider",
+  "col.model": "Model",
+  "col.confidence": "Confidence",
+  "col.recommendations": "Recommendations",
+  "col.generated": "Generated",
+  "col.attempt": "Attempt",
+  "col.mode": "Mode",
+  "col.started": "Started",
+  "col.service": "Service",
+  "col.current": "Current",
+  "col.target": "Target",
+  "col.budget": "Budget",
+  "col.timestamp": "Timestamp",
+  "col.eventType": "Event Type",
+  "col.actor": "Actor",
+  "col.correlation": "Correlation",
+  "col.detail": "Detail",
+  "kpi.activeIssues": "Active Issues",
+  "kpi.contained": "Contained (needs human)",
+  "kpi.resolved": "Resolved",
+  "kpi.remediations": "Remediations",
+  "kpi.successRate": "Success Rate",
+  "kpi.postmortemsOpen": "PostMortems (open)",
+  "kpi.pendingAction": "({n} pending action)",
+  "kpi.pendingApprovals": "Pending Approvals",
+  "kpi.chaosDrills": "Chaos drills (excluded from MTTD/MTTR)",
+  "kpi.resolved24h": "Resolved (24h)",
+  "kpi.mttr": "MTTR",
+  "kpi.sloBudget": "SLO Budget",
+  "kpi.activeClusters": "Active Clusters",
+  "pie.empty": "No incidents to display",
+  "error.severity": "Failed to load severity data",
+  "resources.issuesTotal": "Issues (total)",
+  "resources.remediations": "Remediations",
+  "resources.postmortems": "PostMortems",
+  "resources.runbooks": "Runbooks",
+  "resources.slos": "SLOs",
+  "resources.pendingApprovals": "Pending Approvals",
+  "resources.avgRisk": "Avg Risk Score",
+  "error.platformResources": "Failed to load platform resources",
+  "mttd.empty": "No MTTD/MTTR data available",
+  "mttd.detect": "MTTD (Detect)",
+  "mttd.resolve": "MTTR (Resolve)",
+  "mttd.samples": "{n} samples",
+  "mttd.barTitle": "{date}: {value} ({n} samples)",
+  "mttd.trend": "MTTR trend (last 10 days)",
+  "error.mttd": "Failed to load MTTD/MTTR",
+  "recent.empty": "No recent incidents",
+  "recent.emptyFilter": "No incidents match the filters",
+  "error.recentIncidents": "Failed to load recent incidents",
+  "timeline.empty": "No remediation activity",
+  "timeline.sortNewest": "Newest first",
+  "timeline.sortOldest": "Oldest first",
+  "timeline.sortHint": "Click to flip the time order",
+  "timeline.attempts": "{n} attempt(s)",
+  "error.remediationActivity": "Failed to load remediation activity",
+  "incidents.count": "{n} incident(s)",
+  "incidents.emptyFilter": "No incidents match the filters",
+  "error.incidents": "Failed to load incidents: {msg}",
+  "badge.chaos": "CHAOS",
+  "badge.chaosTitle": "Chaos drill — correlated with {experiment}",
+  "badge.chaosDefault": "a ChaosExperiment",
+  "badge.needsHuman": "NEEDS HUMAN",
+  "badge.needsHumanTitle": "Workload silenced via containment — human action required to restore service",
+  "action.ack": "Ack",
+  "action.snooze": "Snooze",
+  "action.resolve": "Resolve",
+  "detail.description": "Description",
+  "detail.noDescription": "No description available",
+  "detail.resource": "Resource",
+  "detail.in": "in",
+  "detail.details": "Details",
+  "detail.signalType": "Signal Type",
+  "detail.source": "Source",
+  "detail.riskScore": "Risk Score",
+  "detail.remediationAttempts": "Remediation Attempts",
+  "detail.resolution": "Resolution",
+  "detail.detected": "Detected",
+  "detail.resolved": "Resolved",
+  "detail.duration": "Duration",
+  "ai.analysis": "AI Analysis",
+  "ai.confidence": "{pct}% confidence",
+  "ai.recommendations": "Recommendations",
+  "toast.acked": "Incident {name} acknowledged",
+  "toast.ackFailed": "Failed to acknowledge: {msg}",
+  "prompt.snooze": "Snooze duration (e.g. 1h, 30m, 2h):",
+  "toast.snoozed": "Incident {name} snoozed for {duration}",
+  "toast.snoozeFailed": "Failed to snooze: {msg}",
+  "prompt.resolution": "Resolution note (optional):",
+  "prompt.resolutionDefault": "Manually resolved — root cause addressed",
+  "toast.resolved": "Incident {name} resolved",
+  "toast.resolveFailed": "Failed to resolve: {msg}",
+  "slo.empty": "No SLOs configured",
+  "slo.noAlerts": "No alerts",
+  "slo.sli": "SLI: {sli}",
+  "slo.window": "Window: {window}",
+  "slo.target": "Target: {target}%",
+  "slo.budgetRemaining": "Error Budget Remaining",
+  "slo.noActiveAlerts": "No active SLO alerts",
+  "error.slos": "Failed to load SLOs: {msg}",
+  "approvals.empty": "No approval requests found",
+  "approval.requestedBy": "Requested by: {who}",
+  "approval.action": "Action",
+  "approval.resource": "Resource",
+  "approval.reason": "Reason",
+  "approval.blastRadius": "Blast Radius",
+  "approval.decisionReason": "Decision Reason",
+  "approval.reasonPlaceholder": "Enter reason...",
+  "approval.approve": "Approve",
+  "approval.reject": "Reject",
+  "approval.approvedBy": "Approved by: {who}",
+  "approval.rejectedBy": "Rejected by: {who}",
+  "approval.reasonLabel": "Reason: {reason}",
+  "toast.approved": "Approval {name} approved",
+  "toast.approveFailed": "Failed to approve: {msg}",
+  "toast.rejected": "Approval {name} rejected",
+  "toast.rejectFailed": "Failed to reject: {msg}",
+  "error.approvals": "Failed to load approvals: {msg}",
+  "runbooks.count": "{n} runbook(s)",
+  "runbooks.empty": "No runbooks available. Runbooks are auto-generated when the AI successfully remediates an incident.",
+  "runbook.step": "Step {n}: {name}",
+  "runbook.noDescription": "No description",
+  "runbook.trigger": "Trigger",
+  "runbook.signal": "Signal",
+  "runbook.severity": "Severity",
+  "runbook.kind": "Kind",
+  "runbook.steps": "Steps ({n})",
+  "error.runbooks": "Failed to load runbooks: {msg}",
+  "pm.empty": "No post-mortems available",
+  "pm.review": "Review",
+  "pm.close": "Close",
+  "pm.ackHuman": "Ack Human Action",
+  "pm.ackHumanTitle": "Acknowledge that the required action has been performed (clears requiresHumanAction and unblocks Close)",
+  "pm.humanDefault": "Workload contained — human action required",
+  "pm.summary": "Summary",
+  "pm.noSummary": "No summary available",
+  "pm.rootCause": "Root Cause",
+  "pm.notDetermined": "Not determined",
+  "pm.impact": "Impact",
+  "pm.timeline": "Timeline",
+  "pm.actionsExecuted": "Actions Executed",
+  "pm.lessons": "Lessons Learned",
+  "pm.prevention": "Prevention Actions",
+  "pm.feedback": "Developer Feedback",
+  "pm.providedBy": "Provided by",
+  "pm.at": "At",
+  "pm.accuracy": "Remediation Accuracy",
+  "pm.rootCauseOverride": "Root Cause Override",
+  "pm.comments": "Comments",
+  "pm.yourName": "Your Name",
+  "pm.namePlaceholder": "e.g., jane.doe",
+  "pm.rootCausePlaceholder": "Leave empty to keep AI root cause",
+  "pm.commentsPlaceholder": "Additional comments...",
+  "pm.submitFeedback": "Submit Feedback",
+  "toast.pmReviewed": "Post-mortem {name} marked for review",
+  "toast.reviewFailed": "Failed to review: {msg}",
+  "toast.pmClosed": "Post-mortem {name} closed",
+  "toast.closeFailed": "Failed to close: {msg}",
+  "prompt.ackHuman": "Optional note describing the action you took (rollback target, config change, etc.):",
+  "toast.humanAcked": "Human action acknowledged for {name} — PostMortem is now closeable",
+  "toast.nameRequired": "Please provide your name",
+  "toast.ratingRequired": "Please rate the remediation accuracy (1-5 stars)",
+  "toast.feedbackSent": "Feedback submitted for {name}",
+  "toast.feedbackFailed": "Failed to submit feedback: {msg}",
+  "error.postmortems": "Failed to load post-mortems: {msg}",
+  "insights.count": "{n} insight(s)",
+  "insights.empty": "No AI insights available",
+  "insights.actions": "{n} action(s)",
+  "insights.pending": "Analysis pending...",
+  "insights.suggestedActions": "Suggested Actions",
+  "insights.logAnalysis": "Log Analysis",
+  "insights.cascade": "Cascade Analysis",
+  "insights.gitops": "GitOps Context",
+  "insights.blastRadius": "Blast Radius Prediction",
+  "error.insights": "Failed to load AI insights: {msg}",
+  "remediations.count": "{n} plan(s)",
+  "remediations.empty": "No remediation plans available",
+  "rem.agentic": "Agentic",
+  "rem.runbook": "Runbook",
+  "rem.steps": "{n} steps",
+  "rem.strategy": "Strategy",
+  "rem.plannedActions": "Planned Actions",
+  "rem.result": "Result",
+  "rem.agenticSteps": "Agentic steps: {n}",
+  "rem.started": "Started: {when}",
+  "rem.completed": "Completed: {when}",
+  "error.remediations": "Failed to load remediations: {msg}",
+  "compliance.sla": "SLA Compliance",
+  "compliance.responseViolations": "Response violations: {n}",
+  "compliance.resolutionViolations": "Resolution violations: {n}",
+  "compliance.approvals": "Approvals (auto/manual): {auto}/{manual}",
+  "compliance.unavailable": "Compliance data unavailable",
+  "capacity.title": "Capacity Warnings ({n})",
+  "strategy.empty": "No remediation data",
+  "strategy.unavailable": "Stats unavailable",
+  "federation.title": "Federation",
+  "federation.connected": "Connected",
+  "federation.disconnected": "Disconnected",
+  "federation.activeIssues": "Active Issues",
+  "federation.correlations": "Cross-Cluster Correlations ({n})",
+  "federation.cascade": "CASCADE",
+  "federation.elevated": "ELEVATED",
+  "clusters.total": "Total Clusters",
+  "clusters.healthy": "Healthy",
+  "clusters.degraded": "Degraded",
+  "clusters.offline": "Offline",
+  "clusters.empty": "No clusters registered",
+  "cluster.region": "Region",
+  "cluster.environment": "Environment",
+  "cluster.tier": "Tier",
+  "cluster.nodes": "Nodes",
+  "cluster.namespaces": "Namespaces",
+  "cluster.version": "Version",
+  "cluster.activeIssues": "Active Issues",
+  "cluster.activeRemediations": "Active Remediations",
+  "cluster.lastHealthCheck": "Last Health Check",
+  "error.clusters": "Failed to load clusters: {msg}",
+  "toast.exported": "Audit events exported",
+  "toast.exportFailed": "Failed to export: {msg}",
+  "error.audit": "Failed to load audit events: {msg}"
+ },
+ "pt-BR": {
+  "app.title": "ChatCLI AIOps Dashboard",
+  "health.healthy": "Saudável",
+  "health.degraded": "Degradado",
+  "health.disconnected": "Desconectado",
+  "time.filterTitle": "Filtro de período",
+  "time.all": "Todo o período",
+  "time.last1h": "Última 1h",
+  "time.last6h": "Últimas 6h",
+  "time.last24h": "Últimas 24h",
+  "time.last7d": "Últimos 7 dias",
+  "time.last30d": "Últimos 30 dias",
+  "time.from": "De",
+  "time.to": "Até",
+  "time.apply": "Aplicar",
+  "refresh.label": "Intervalo de atualização automática",
+  "refresh.off": "Desligado",
+  "refresh.editing": "pausado durante a edição",
+  "refresh.now": "Atualizar agora",
+  "auth.changeKey": "Trocar a chave de API",
+  "theme.label": "Tema",
+  "theme.system": "Sistema",
+  "theme.dark": "Escuro",
+  "theme.light": "Claro",
+  "lang.label": "Idioma",
+  "nav.label": "Seções do dashboard",
+  "footer.sub": "· dashboard aiops",
+  "tab.overview": "Visão geral",
+  "tab.incidents": "Incidentes",
+  "tab.slos": "SLOs",
+  "tab.approvals": "Aprovações",
+  "tab.aiinsights": "Insights de IA",
+  "tab.remediations": "Remediações",
+  "tab.runbooks": "Runbooks",
+  "tab.postmortems": "PostMortems",
+  "tab.clusters": "Clusters",
+  "tab.audit": "Auditoria",
+  "panel.severityPie": "Issues por severidade",
+  "panel.platformResources": "Recursos da plataforma",
+  "panel.remediationTimeline": "Atividade de remediação",
+  "panel.remediationStrategy": "Remediação por estratégia",
+  "panel.compliance": "Conformidade e SLA",
+  "panel.mttdMttr": "Tendência de MTTD e MTTR",
+  "panel.recentIncidents": "Incidentes recentes",
+  "filter.severity": "Severidade",
+  "filter.state": "Estado",
+  "filter.kind": "Tipo de recurso",
+  "filter.allSeverities": "Todas as severidades",
+  "filter.allStates": "Todos os estados",
+  "filter.allKinds": "Todos os tipos",
+  "filter.chaosTitle": "Filtrar incidentes de chaos engineering",
+  "filter.hideChaos": "Ocultar simulações de chaos",
+  "filter.allSources": "Todas as origens",
+  "filter.onlyChaos": "Só simulações de chaos",
+  "filter.namespace": "Namespace...",
+  "filter.apply": "Aplicar",
+  "filter.reset": "Limpar",
+  "filter.all": "Todas",
+  "filter.allTypes": "Todos os tipos",
+  "filter.byIncident": "Filtrar por incidente...",
+  "filter.searchEvents": "Buscar eventos...",
+  "severity.critical": "Crítica",
+  "severity.high": "Alta",
+  "severity.medium": "Média",
+  "severity.low": "Baixa",
+  "severity.info": "Info",
+  "severity.warning": "Aviso",
+  "severity.unknown": "desconhecida",
+  "state.Detected": "Detectado",
+  "state.Analyzing": "Analisando",
+  "state.Remediating": "Remediando",
+  "state.Contained": "Contido",
+  "state.ContainedNeedsHuman": "Contido (requer ação humana)",
+  "state.Resolved": "Resolvido",
+  "state.Escalated": "Escalado",
+  "state.Failed": "Falhou",
+  "state.Pending": "Pendente",
+  "state.WaitingApproval": "Aguardando aprovação",
+  "state.Executing": "Executando",
+  "state.Verifying": "Verificando",
+  "state.Completed": "Concluído",
+  "state.RolledBack": "Revertido",
+  "state.Approved": "Aprovado",
+  "state.Rejected": "Rejeitado",
+  "state.Expired": "Expirado",
+  "state.Open": "Aberto",
+  "state.InReview": "Em revisão",
+  "state.Closed": "Fechado",
+  "state.Healthy": "Saudável",
+  "state.Firing": "Em alerta",
+  "state.Breached": "Violado",
+  "state.AtRisk": "Em risco",
+  "state.Offline": "Offline",
+  "state.Unknown": "Desconhecido",
+  "urgency.urgent": "urgente",
+  "urgency.plan": "planejar",
+  "section.incidents": "Incidentes",
+  "section.sloAlerts": "Alertas de SLO ativos",
+  "section.aiInsights": "Insights de IA",
+  "section.remediationPlans": "Planos de remediação",
+  "section.runbooks": "Runbooks",
+  "section.postmortems": "Post-Mortems",
+  "section.auditLog": "Log de auditoria",
+  "audit.group.issues": "Issues",
+  "audit.group.remediation": "Remediação",
+  "audit.group.approvals": "Aprovações",
+  "audit.group.operations": "Operações",
+  "audit.group.slo": "SLO/SLA",
+  "audit.group.clusters": "Clusters",
+  "audit.group.system": "Sistema",
+  "audit.type.issue_created": "Issue criada",
+  "audit.type.issue_resolved": "Issue resolvida",
+  "audit.type.issue_escalated": "Issue escalada",
+  "audit.type.remediation_started": "Remediação iniciada",
+  "audit.type.remediation_completed": "Remediação concluída",
+  "audit.type.remediation_failed": "Remediação falhou",
+  "audit.type.approval_requested": "Aprovação solicitada",
+  "audit.type.approval_granted": "Aprovação concedida",
+  "audit.type.approval_rejected": "Aprovação rejeitada",
+  "audit.type.approval_expired": "Aprovação expirada",
+  "audit.type.escalation_triggered": "Escalonamento acionado",
+  "audit.type.notification_sent": "Notificação enviada",
+  "audit.type.postmortem_created": "PostMortem criado",
+  "audit.type.runbook_generated": "Runbook gerado",
+  "audit.type.slo_violation": "Violação de SLO",
+  "audit.type.sla_breach": "Quebra de SLA",
+  "audit.type.cluster_connected": "Cluster conectado",
+  "audit.type.cluster_disconnected": "Cluster desconectado",
+  "audit.type.pattern_learned": "Padrão aprendido",
+  "audit.type.config_changed": "Configuração alterada",
+  "audit.export": "Exportar JSON",
+  "audit.count": "{n} evento(s)",
+  "audit.countOf": "{n} evento(s) de {total}",
+  "audit.empty": "Nenhum evento de auditoria encontrado",
+  "login.signIn": "entrar",
+  "login.title": "Chave de API necessária",
+  "login.hint": "Informe sua chave de API para acessar o dashboard.",
+  "login.apiKey": "Chave de API",
+  "login.connect": "Conectar",
+  "login.verifying": "Verificando...",
+  "login.invalid": "Chave de API inválida. Tente novamente.",
+  "error.authRequired": "Autenticação necessária",
+  "common.loading": "Carregando...",
+  "common.retry": "Tentar novamente",
+  "common.noData": "Sem dados disponíveis",
+  "common.total": "Total",
+  "common.unknown": "Desconhecido",
+  "common.na": "N/D",
+  "common.inProgress": "Em andamento...",
+  "table.sortHint": "Clique para ordenar",
+  "time.ago.s": "há {n}s",
+  "time.ago.m": "há {n}min",
+  "time.ago.h": "há {n}h",
+  "time.ago.d": "há {n}d",
+  "col.name": "Nome",
+  "col.severity": "Severidade",
+  "col.state": "Estado",
+  "col.resource": "Recurso",
+  "col.namespace": "Namespace",
+  "col.age": "Idade",
+  "col.risk": "Risco",
+  "col.actions": "Ações",
+  "col.signal": "Sinal",
+  "col.resourceKind": "Tipo de recurso",
+  "col.steps": "Passos",
+  "col.maxAttempts": "Tentativas máx.",
+  "col.created": "Criado",
+  "col.duration": "Duração",
+  "col.issue": "Issue",
+  "col.incident": "Incidente",
+  "col.provider": "Provedor",
+  "col.model": "Modelo",
+  "col.confidence": "Confiança",
+  "col.recommendations": "Recomendações",
+  "col.generated": "Gerado",
+  "col.attempt": "Tentativa",
+  "col.mode": "Modo",
+  "col.started": "Início",
+  "col.service": "Serviço",
+  "col.current": "Atual",
+  "col.target": "Meta",
+  "col.budget": "Budget",
+  "col.timestamp": "Data/hora",
+  "col.eventType": "Tipo de evento",
+  "col.actor": "Ator",
+  "col.correlation": "Correlação",
+  "col.detail": "Detalhe",
+  "kpi.activeIssues": "Issues ativas",
+  "kpi.contained": "Contidas (requer humano)",
+  "kpi.resolved": "Resolvidas",
+  "kpi.remediations": "Remediações",
+  "kpi.successRate": "Taxa de sucesso",
+  "kpi.postmortemsOpen": "PostMortems (abertos)",
+  "kpi.pendingAction": "({n} com ação pendente)",
+  "kpi.pendingApprovals": "Aprovações pendentes",
+  "kpi.chaosDrills": "Simulações de chaos (fora do MTTD/MTTR)",
+  "kpi.resolved24h": "Resolvidas (24h)",
+  "kpi.mttr": "MTTR",
+  "kpi.sloBudget": "Budget de SLO",
+  "kpi.activeClusters": "Clusters ativos",
+  "pie.empty": "Nenhum incidente para exibir",
+  "error.severity": "Falha ao carregar os dados de severidade",
+  "resources.issuesTotal": "Issues (total)",
+  "resources.remediations": "Remediações",
+  "resources.postmortems": "PostMortems",
+  "resources.runbooks": "Runbooks",
+  "resources.slos": "SLOs",
+  "resources.pendingApprovals": "Aprovações pendentes",
+  "resources.avgRisk": "Risco médio",
+  "error.platformResources": "Falha ao carregar os recursos da plataforma",
+  "mttd.empty": "Sem dados de MTTD/MTTR",
+  "mttd.detect": "MTTD (detecção)",
+  "mttd.resolve": "MTTR (resolução)",
+  "mttd.samples": "{n} amostras",
+  "mttd.barTitle": "{date}: {value} ({n} amostras)",
+  "mttd.trend": "Tendência do MTTR (últimos 10 dias)",
+  "error.mttd": "Falha ao carregar MTTD/MTTR",
+  "recent.empty": "Nenhum incidente recente",
+  "recent.emptyFilter": "Nenhum incidente corresponde aos filtros",
+  "error.recentIncidents": "Falha ao carregar os incidentes recentes",
+  "timeline.empty": "Sem atividade de remediação",
+  "timeline.sortNewest": "Mais recentes primeiro",
+  "timeline.sortOldest": "Mais antigos primeiro",
+  "timeline.sortHint": "Clique para inverter a ordem por tempo",
+  "timeline.attempts": "{n} tentativa(s)",
+  "error.remediationActivity": "Falha ao carregar a atividade de remediação",
+  "incidents.count": "{n} incidente(s)",
+  "incidents.emptyFilter": "Nenhum incidente corresponde aos filtros",
+  "error.incidents": "Falha ao carregar incidentes: {msg}",
+  "badge.chaos": "CHAOS",
+  "badge.chaosTitle": "Simulação de chaos — correlacionada com {experiment}",
+  "badge.chaosDefault": "um ChaosExperiment",
+  "badge.needsHuman": "REQUER HUMANO",
+  "badge.needsHumanTitle": "Workload silenciado por contenção — é preciso uma ação humana para restaurar o serviço",
+  "action.ack": "Reconhecer",
+  "action.snooze": "Adiar",
+  "action.resolve": "Resolver",
+  "detail.description": "Descrição",
+  "detail.noDescription": "Sem descrição disponível",
+  "detail.resource": "Recurso",
+  "detail.in": "em",
+  "detail.details": "Detalhes",
+  "detail.signalType": "Tipo de sinal",
+  "detail.source": "Origem",
+  "detail.riskScore": "Pontuação de risco",
+  "detail.remediationAttempts": "Tentativas de remediação",
+  "detail.resolution": "Resolução",
+  "detail.detected": "Detectado",
+  "detail.resolved": "Resolvido",
+  "detail.duration": "Duração",
+  "ai.analysis": "Análise da IA",
+  "ai.confidence": "{pct}% de confiança",
+  "ai.recommendations": "Recomendações",
+  "toast.acked": "Incidente {name} reconhecido",
+  "toast.ackFailed": "Falha ao reconhecer: {msg}",
+  "prompt.snooze": "Duração do adiamento (ex.: 1h, 30m, 2h):",
+  "toast.snoozed": "Incidente {name} adiado por {duration}",
+  "toast.snoozeFailed": "Falha ao adiar: {msg}",
+  "prompt.resolution": "Nota de resolução (opcional):",
+  "prompt.resolutionDefault": "Resolvido manualmente — causa raiz tratada",
+  "toast.resolved": "Incidente {name} resolvido",
+  "toast.resolveFailed": "Falha ao resolver: {msg}",
+  "slo.empty": "Nenhum SLO configurado",
+  "slo.noAlerts": "Sem alertas",
+  "slo.sli": "SLI: {sli}",
+  "slo.window": "Janela: {window}",
+  "slo.target": "Meta: {target}%",
+  "slo.budgetRemaining": "Error budget restante",
+  "slo.noActiveAlerts": "Nenhum alerta de SLO ativo",
+  "error.slos": "Falha ao carregar SLOs: {msg}",
+  "approvals.empty": "Nenhuma solicitação de aprovação encontrada",
+  "approval.requestedBy": "Solicitado por: {who}",
+  "approval.action": "Ação",
+  "approval.resource": "Recurso",
+  "approval.reason": "Motivo",
+  "approval.blastRadius": "Raio de impacto",
+  "approval.decisionReason": "Motivo da decisão",
+  "approval.reasonPlaceholder": "Informe o motivo...",
+  "approval.approve": "Aprovar",
+  "approval.reject": "Rejeitar",
+  "approval.approvedBy": "Aprovado por: {who}",
+  "approval.rejectedBy": "Rejeitado por: {who}",
+  "approval.reasonLabel": "Motivo: {reason}",
+  "toast.approved": "Solicitação {name} aprovada",
+  "toast.approveFailed": "Falha ao aprovar: {msg}",
+  "toast.rejected": "Solicitação {name} rejeitada",
+  "toast.rejectFailed": "Falha ao rejeitar: {msg}",
+  "error.approvals": "Falha ao carregar aprovações: {msg}",
+  "runbooks.count": "{n} runbook(s)",
+  "runbooks.empty": "Nenhum runbook disponível. Runbooks são gerados automaticamente quando a IA remedia um incidente com sucesso.",
+  "runbook.step": "Passo {n}: {name}",
+  "runbook.noDescription": "Sem descrição",
+  "runbook.trigger": "Gatilho",
+  "runbook.signal": "Sinal",
+  "runbook.severity": "Severidade",
+  "runbook.kind": "Tipo",
+  "runbook.steps": "Passos ({n})",
+  "error.runbooks": "Falha ao carregar runbooks: {msg}",
+  "pm.empty": "Nenhum post-mortem disponível",
+  "pm.review": "Revisar",
+  "pm.close": "Fechar",
+  "pm.ackHuman": "Confirmar ação humana",
+  "pm.ackHumanTitle": "Confirma que a ação necessária foi executada (limpa requiresHumanAction e libera o fechamento)",
+  "pm.humanDefault": "Workload contido — ação humana necessária",
+  "pm.summary": "Resumo",
+  "pm.noSummary": "Sem resumo disponível",
+  "pm.rootCause": "Causa raiz",
+  "pm.notDetermined": "Não determinada",
+  "pm.impact": "Impacto",
+  "pm.timeline": "Linha do tempo",
+  "pm.actionsExecuted": "Ações executadas",
+  "pm.lessons": "Lições aprendidas",
+  "pm.prevention": "Ações de prevenção",
+  "pm.feedback": "Feedback do desenvolvedor",
+  "pm.providedBy": "Enviado por",
+  "pm.at": "Em",
+  "pm.accuracy": "Precisão da remediação",
+  "pm.rootCauseOverride": "Causa raiz corrigida",
+  "pm.comments": "Comentários",
+  "pm.yourName": "Seu nome",
+  "pm.namePlaceholder": "ex.: maria.silva",
+  "pm.rootCausePlaceholder": "Deixe em branco para manter a causa raiz da IA",
+  "pm.commentsPlaceholder": "Comentários adicionais...",
+  "pm.submitFeedback": "Enviar feedback",
+  "toast.pmReviewed": "Post-mortem {name} marcado para revisão",
+  "toast.reviewFailed": "Falha ao revisar: {msg}",
+  "toast.pmClosed": "Post-mortem {name} fechado",
+  "toast.closeFailed": "Falha ao fechar: {msg}",
+  "prompt.ackHuman": "Nota opcional descrevendo a ação executada (alvo do rollback, mudança de configuração etc.):",
+  "toast.humanAcked": "Ação humana confirmada para {name} — o PostMortem já pode ser fechado",
+  "toast.nameRequired": "Informe seu nome",
+  "toast.ratingRequired": "Avalie a precisão da remediação (1 a 5 estrelas)",
+  "toast.feedbackSent": "Feedback enviado para {name}",
+  "toast.feedbackFailed": "Falha ao enviar o feedback: {msg}",
+  "error.postmortems": "Falha ao carregar post-mortems: {msg}",
+  "insights.count": "{n} insight(s)",
+  "insights.empty": "Nenhum insight de IA disponível",
+  "insights.actions": "{n} ação(ões)",
+  "insights.pending": "Análise pendente...",
+  "insights.suggestedActions": "Ações sugeridas",
+  "insights.logAnalysis": "Análise de logs",
+  "insights.cascade": "Análise de cascata",
+  "insights.gitops": "Contexto GitOps",
+  "insights.blastRadius": "Previsão de raio de impacto",
+  "error.insights": "Falha ao carregar insights de IA: {msg}",
+  "remediations.count": "{n} plano(s)",
+  "remediations.empty": "Nenhum plano de remediação disponível",
+  "rem.agentic": "Agêntico",
+  "rem.runbook": "Runbook",
+  "rem.steps": "{n} passos",
+  "rem.strategy": "Estratégia",
+  "rem.plannedActions": "Ações planejadas",
+  "rem.result": "Resultado",
+  "rem.agenticSteps": "Passos agênticos: {n}",
+  "rem.started": "Início: {when}",
+  "rem.completed": "Conclusão: {when}",
+  "error.remediations": "Falha ao carregar remediações: {msg}",
+  "compliance.sla": "Conformidade com o SLA",
+  "compliance.responseViolations": "Violações de resposta: {n}",
+  "compliance.resolutionViolations": "Violações de resolução: {n}",
+  "compliance.approvals": "Aprovações (auto/manual): {auto}/{manual}",
+  "compliance.unavailable": "Dados de conformidade indisponíveis",
+  "capacity.title": "Avisos de capacidade ({n})",
+  "strategy.empty": "Sem dados de remediação",
+  "strategy.unavailable": "Estatísticas indisponíveis",
+  "federation.title": "Federação",
+  "federation.connected": "Conectados",
+  "federation.disconnected": "Desconectados",
+  "federation.activeIssues": "Issues ativas",
+  "federation.correlations": "Correlações entre clusters ({n})",
+  "federation.cascade": "CASCATA",
+  "federation.elevated": "ELEVADO",
+  "clusters.total": "Total de clusters",
+  "clusters.healthy": "Saudáveis",
+  "clusters.degraded": "Degradados",
+  "clusters.offline": "Offline",
+  "clusters.empty": "Nenhum cluster registrado",
+  "cluster.region": "Região",
+  "cluster.environment": "Ambiente",
+  "cluster.tier": "Tier",
+  "cluster.nodes": "Nós",
+  "cluster.namespaces": "Namespaces",
+  "cluster.version": "Versão",
+  "cluster.activeIssues": "Issues ativas",
+  "cluster.activeRemediations": "Remediações ativas",
+  "cluster.lastHealthCheck": "Última verificação",
+  "error.clusters": "Falha ao carregar clusters: {msg}",
+  "toast.exported": "Eventos de auditoria exportados",
+  "toast.exportFailed": "Falha ao exportar: {msg}",
+  "error.audit": "Falha ao carregar eventos de auditoria: {msg}"
+ }
+}
+</script>
 
 <script>
 // ============================================================
@@ -897,6 +1784,105 @@ let refreshInterval = null;
 let refreshCountdown = 30;
 let refreshSeconds = 30; // 0 = off
 let expandedRows = new Set();
+
+// ===== I18N + THEME =====
+// The catalog is the JSON block above; the head bootstrap already resolved
+// the language onto <html lang> and the theme onto <html data-theme>.
+const I18N = JSON.parse(document.getElementById('i18n-catalog').textContent);
+const LANGS = Object.keys(I18N);
+const THEMES = ['system', 'dark', 'light'];
+let lang = LANGS.includes(document.documentElement.lang) ? document.documentElement.lang : 'en';
+
+// Enum values the API sends (severity "critical", state "Contained", ...)
+// keep their raw value in classes and data-* attributes; only the label is
+// looked up, case-insensitively, under the matching catalog prefix.
+const enumKeys = {};
+Object.keys(I18N.en).forEach(key => {
+  const dot = key.indexOf('.');
+  if (dot < 0) return;
+  const prefix = key.slice(0, dot);
+  (enumKeys[prefix] = enumKeys[prefix] || {})[key.slice(dot + 1).toLowerCase()] = key;
+});
+
+function t(key, vars) {
+  const table = I18N[lang] || {};
+  let s = table[key] ?? I18N.en[key] ?? key;
+  if (vars) s = s.replace(/\{(\w+)\}/g, (m, name) => (name in vars ? String(vars[name]) : m));
+  return s;
+}
+
+function enumLabel(prefix, raw, fallbackKey) {
+  if (raw === undefined || raw === null || raw === '') return fallbackKey ? t(fallbackKey) : '';
+  const key = (enumKeys[prefix] || {})[String(raw).toLowerCase()];
+  return key ? t(key) : String(raw);
+}
+
+function applyTranslations(root = document) {
+  document.documentElement.lang = lang;
+  root.querySelectorAll('[data-i18n]').forEach(el => { el.textContent = t(el.dataset.i18n); });
+  root.querySelectorAll('[data-i18n-title]').forEach(el => { el.title = t(el.dataset.i18nTitle); });
+  root.querySelectorAll('[data-i18n-placeholder]').forEach(el => { el.placeholder = t(el.dataset.i18nPlaceholder); });
+  root.querySelectorAll('[data-i18n-aria]').forEach(el => { el.setAttribute('aria-label', t(el.dataset.i18nAria)); });
+  root.querySelectorAll('[data-i18n-label]').forEach(el => { el.label = t(el.dataset.i18nLabel); });
+}
+
+function setLanguage(next, rerender) {
+  if (!LANGS.includes(next)) next = 'en';
+  lang = next;
+  try { localStorage.setItem('chatcli_dash_lang', next); } catch { /* private mode */ }
+  const sel = document.getElementById('langSelect');
+  if (sel) sel.value = next;
+  applyTranslations();
+  renderTimeRangeLabel();
+  if (rerender) loadCurrentTab();
+}
+
+function changeLanguage() { setLanguage($('#langSelect').value, true); }
+
+function applyTheme(theme) {
+  const root = document.documentElement;
+  if (theme === 'dark' || theme === 'light') root.setAttribute('data-theme', theme);
+  else root.removeAttribute('data-theme');
+}
+
+function setTheme(next) {
+  if (!THEMES.includes(next)) next = 'system';
+  try { localStorage.setItem('chatcli_dash_theme', next); } catch { /* private mode */ }
+  applyTheme(next);
+  const sel = document.getElementById('themeSelect');
+  if (sel) sel.value = next;
+}
+
+function changeTheme() { setTheme($('#themeSelect').value); }
+
+function storedTheme() {
+  let v = null;
+  try { v = localStorage.getItem('chatcli_dash_theme'); } catch { v = null; }
+  return THEMES.includes(v) ? v : 'system';
+}
+
+// Dates and numbers follow the active language, not the OS locale.
+const fmtCache = {};
+function formatter(kind, opts) {
+  const key = lang + '|' + kind + '|' + JSON.stringify(opts);
+  if (!fmtCache[key]) fmtCache[key] = kind === 'num' ? new Intl.NumberFormat(lang, opts) : new Intl.DateTimeFormat(lang, opts);
+  return fmtCache[key];
+}
+function fmtDateTime(value) {
+  const d = value instanceof Date ? value : new Date(value);
+  if (isNaN(d)) return '-';
+  return formatter('dt', { year: 'numeric', month: 'numeric', day: 'numeric', hour: 'numeric', minute: '2-digit', second: '2-digit' }).format(d);
+}
+function fmtDate(value) {
+  const d = value instanceof Date ? value : new Date(value);
+  if (isNaN(d)) return '-';
+  return formatter('d', { year: 'numeric', month: 'numeric', day: 'numeric' }).format(d);
+}
+function fmtNum(value, digits = 0) {
+  const n = Number(value);
+  if (value === null || value === undefined || isNaN(n)) return '-';
+  return formatter('num', { minimumFractionDigits: digits, maximumFractionDigits: digits }).format(n);
+}
 
 // Sort state per tab: { tabName: { colIdx, asc } }
 const sortState = {};
@@ -989,7 +1975,7 @@ async function apiFetch(path, opts = {}) {
       localStorage.removeItem('chatcli_api_key');
       updateLogoutBtn();
       promptApiKey();
-      throw new Error('Authentication required');
+      throw new Error(t('error.authRequired'));
     }
     if (!res.ok) {
       const err = await res.json().catch(() => ({ message: res.statusText }));
@@ -1014,32 +2000,33 @@ function promptApiKey() {
   overlay.className = 'login-overlay';
   overlay.innerHTML = `
     <div class="login-card" role="dialog" aria-labelledby="apiKeyTitle" aria-modal="true">
-      <div class="login-ttl"><div class="lights" aria-hidden="true"><i></i><i></i><i></i></div><h3><b>chatcli — aiops</b> · sign in</h3></div>
+      <div class="login-ttl"><div class="lights" aria-hidden="true"><i></i><i></i><i></i></div><h3><b>chatcli — aiops</b> · <span data-i18n="login.signIn">sign in</span></h3></div>
       <div class="login-body">
-        <h2 id="apiKeyTitle">API Key Required</h2>
-        <p>Enter your API key to access the dashboard.</p>
-        <input id="apiKeyInput" class="login-input" type="password" placeholder="ck_live_..." autocomplete="current-password" aria-label="API key" />
-        <div><button id="apiKeySubmit" class="btn btn-primary login-btn">Connect</button></div>
-        <p id="apiKeyError" class="login-err" role="alert">Invalid API key. Please try again.</p>
+        <h2 id="apiKeyTitle" data-i18n="login.title">API Key Required</h2>
+        <p data-i18n="login.hint">Enter your API key to access the dashboard.</p>
+        <input id="apiKeyInput" class="login-input" type="password" placeholder="ck_live_..." autocomplete="current-password" aria-label="API key" data-i18n-aria="login.apiKey" />
+        <div><button id="apiKeySubmit" class="btn btn-primary login-btn" data-i18n="login.connect">Connect</button></div>
+        <p id="apiKeyError" class="login-err" role="alert" data-i18n="login.invalid">Invalid API key. Please try again.</p>
       </div>
     </div>`;
   document.body.appendChild(overlay);
+  applyTranslations(overlay);
   const input = document.getElementById('apiKeyInput');
   const btn = document.getElementById('apiKeySubmit');
   const errMsg = document.getElementById('apiKeyError');
   async function submit() {
     const key = input.value.trim();
     if (!key) return;
-    btn.disabled = true; btn.textContent = 'Verifying...';
+    btn.disabled = true; btn.textContent = t('login.verifying');
     try {
       const res = await fetch(API + '/incidents?pageSize=1', { headers: { 'X-API-Key': key } });
-      if (res.status === 401) { errMsg.style.display = 'block'; btn.disabled = false; btn.textContent = 'Connect'; return; }
+      if (res.status === 401) { errMsg.style.display = 'block'; btn.disabled = false; btn.textContent = t('login.connect'); return; }
       apiKey = key;
       localStorage.setItem('chatcli_api_key', key);
       overlay.remove();
       updateLogoutBtn();
       switchTab(currentTab);
-    } catch { errMsg.style.display = 'block'; btn.disabled = false; btn.textContent = 'Connect'; }
+    } catch { errMsg.style.display = 'block'; btn.disabled = false; btn.textContent = t('login.connect'); }
   }
   btn.addEventListener('click', submit);
   input.addEventListener('keydown', e => { if (e.key === 'Enter') submit(); });
@@ -1080,7 +2067,7 @@ function sortTableByCol(tableEl, colIdx, asc) {
     const an = parseFloat(av), bn = parseFloat(bv);
     if (!isNaN(an) && !isNaN(bn)) return asc ? an - bn : bn - an;
     const timeToSecs = s => {
-      const m = s.match(/^(\d+)(s|m|h|d) ago$/);
+      const m = s.match(/^(?:há )?(\d+)(s|m|h|d)(?: ago)?$/);
       if (!m) return NaN;
       const v = parseInt(m[1]);
       switch(m[2]) { case 's': return v; case 'm': return v*60; case 'h': return v*3600; case 'd': return v*86400; }
@@ -1100,15 +2087,19 @@ function sortTableByCol(tableEl, colIdx, asc) {
   if (headers[colIdx]) headers[colIdx].textContent += asc ? ' ▲' : ' ▼';
 }
 
-function makeSortable(tableEl, defaultSortCol) {
+function makeSortable(tableEl, defaultSortCol, stateKey) {
   if (!tableEl) return;
   const headers = tableEl.querySelectorAll('thead th');
+  // Tables normally share the sort memory of their tab. A panel that lives
+  // next to other tables in the same tab passes its own key instead.
+  const key = stateKey || currentTab;
 
-  // Find timestamp column as default sort if not specified
+  // Find timestamp column as default sort if not specified. Templates mark
+  // it with data-time so the pick does not depend on the header's language.
   if (defaultSortCol === undefined) {
     headers.forEach((th, i) => {
       const txt = th.textContent.toLowerCase();
-      if (txt.includes('created') || txt.includes('age') || txt.includes('timestamp') || txt.includes('time')) {
+      if (th.dataset.time !== undefined || txt.includes('created') || txt.includes('age') || txt.includes('timestamp') || txt.includes('time')) {
         defaultSortCol = i;
       }
     });
@@ -1118,27 +2109,42 @@ function makeSortable(tableEl, defaultSortCol) {
     if (!th.textContent.trim()) return;
     th.style.cursor = 'pointer';
     th.style.userSelect = 'none';
-    th.title = 'Click to sort';
+    th.title = t('table.sortHint');
     th.addEventListener('click', () => {
-      const saved = sortState[currentTab];
+      const saved = sortState[key];
       const asc = (saved && saved.colIdx === colIdx) ? !saved.asc : (colIdx === defaultSortCol ? false : true);
-      sortState[currentTab] = { colIdx, asc };
+      sortState[key] = { colIdx, asc };
       sortTableByCol(tableEl, colIdx, asc);
     });
   });
 
   // Restore saved sort or apply default (timestamp DESC = newest first)
-  const saved = sortState[currentTab];
+  const saved = sortState[key];
   if (saved !== undefined) {
     sortTableByCol(tableEl, saved.colIdx, saved.asc);
   } else if (defaultSortCol !== undefined) {
-    sortState[currentTab] = { colIdx: defaultSortCol, asc: false };
+    sortState[key] = { colIdx: defaultSortCol, asc: false };
     sortTableByCol(tableEl, defaultSortCol, false);
   }
 }
 
 // ── Time Range Picker ──────────────────────────────────────────────────
-let globalTimeRange = { from: null, to: null, label: 'All time' };
+let globalTimeRange = { from: null, to: null, label: 'All time', labelKey: 'time.all' };
+
+// The label is a catalog key for presets and a formatted date pair for a
+// custom range; both re-render when the language changes.
+function renderTimeRangeLabel() {
+  const el = $('#timeRangeLabel');
+  if (!el) return;
+  if (globalTimeRange.labelKey) {
+    el.dataset.i18n = globalTimeRange.labelKey;
+    globalTimeRange.label = t(globalTimeRange.labelKey);
+  } else {
+    delete el.dataset.i18n;
+    globalTimeRange.label = `${fmtDate(globalTimeRange.from)} – ${fmtDate(globalTimeRange.to)}`;
+  }
+  el.textContent = globalTimeRange.label;
+}
 
 function toggleTimeDropdown() {
   const dd = $('#timeDropdown');
@@ -1156,19 +2162,19 @@ document.addEventListener('click', (e) => {
 function setTimeRange(preset) {
   const now = new Date();
   let from = null;
-  let label = 'All time';
+  let labelKey = 'time.all';
 
   switch (preset) {
-    case '1h':  from = new Date(now - 3600000); label = 'Last 1h'; break;
-    case '6h':  from = new Date(now - 21600000); label = 'Last 6h'; break;
-    case '24h': from = new Date(now - 86400000); label = 'Last 24h'; break;
-    case '7d':  from = new Date(now - 604800000); label = 'Last 7d'; break;
-    case '30d': from = new Date(now - 2592000000); label = 'Last 30d'; break;
-    case 'all': from = null; label = 'All time'; break;
+    case '1h':  from = new Date(now - 3600000); labelKey = 'time.last1h'; break;
+    case '6h':  from = new Date(now - 21600000); labelKey = 'time.last6h'; break;
+    case '24h': from = new Date(now - 86400000); labelKey = 'time.last24h'; break;
+    case '7d':  from = new Date(now - 604800000); labelKey = 'time.last7d'; break;
+    case '30d': from = new Date(now - 2592000000); labelKey = 'time.last30d'; break;
+    case 'all': from = null; labelKey = 'time.all'; break;
   }
 
-  globalTimeRange = { from, to: preset === 'all' ? null : now, label };
-  $('#timeRangeLabel').textContent = label;
+  globalTimeRange = { from, to: preset === 'all' ? null : now, label: t(labelKey), labelKey };
+  renderTimeRangeLabel();
   $('#timeDropdown').style.display = 'none';
   refreshCurrentTab();
 }
@@ -1180,10 +2186,9 @@ function applyCustomRange() {
 
   const from = new Date(fromInput);
   const to = toInput ? new Date(toInput) : new Date();
-  const label = `${from.toLocaleDateString()} – ${to.toLocaleDateString()}`;
 
-  globalTimeRange = { from, to, label };
-  $('#timeRangeLabel').textContent = label;
+  globalTimeRange = { from, to, label: '', labelKey: null };
+  renderTimeRangeLabel();
   $('#timeDropdown').style.display = 'none';
   refreshCurrentTab();
 }
@@ -1199,9 +2204,18 @@ function getTimeRangeQuery() {
   return q;
 }
 
+// A refresh reloads the tab in place. It must not go through the tab button:
+// switchTab() forgets which rows are expanded, so an open post-mortem would
+// collapse every time the time range changed.
 function refreshCurrentTab() {
-  const activeTab = document.querySelector('.tab-bar .tab-btn.active');
-  if (activeTab) activeTab.click();
+  loadCurrentTab();
+}
+
+// Rows are keyed by namespace/name so an expanded row survives a reorder;
+// the index is only a fallback for objects without a name.
+function rowKey(item, idx) {
+  if (!item || !item.name) return String(idx);
+  return ((item.namespace || '') + '/' + item.name).replace(/[^A-Za-z0-9_.\/-]/g, '_');
 }
 
 function escapeHtml(str) {
@@ -1214,21 +2228,21 @@ function escapeHtml(str) {
 function timeAgo(dateStr) {
   if (!dateStr) return '-';
   const now = Date.now();
-  const t = new Date(dateStr).getTime();
-  const diff = Math.max(0, now - t);
+  const ts = new Date(dateStr).getTime();
+  const diff = Math.max(0, now - ts);
   const secs = Math.floor(diff / 1000);
-  if (secs < 60) return secs + 's ago';
+  if (secs < 60) return t('time.ago.s', { n: secs });
   const mins = Math.floor(secs / 60);
-  if (mins < 60) return mins + 'm ago';
+  if (mins < 60) return t('time.ago.m', { n: mins });
   const hrs = Math.floor(mins / 60);
-  if (hrs < 24) return hrs + 'h ago';
+  if (hrs < 24) return t('time.ago.h', { n: hrs });
   const days = Math.floor(hrs / 24);
-  return days + 'd ago';
+  return t('time.ago.d', { n: days });
 }
 
 function severityBadge(sev) {
   const s = (sev || '').toLowerCase().replace(/[^a-z0-9-]/g, '');
-  return `<span class="badge-sev badge-${s}">${escapeHtml(sev || 'unknown')}</span>`;
+  return `<span class="badge-sev badge-${s}" data-severity="${escapeHtml(sev || 'unknown')}">${escapeHtml(enumLabel('severity', sev, 'severity.unknown'))}</span>`;
 }
 
 function resourceKindBadge(kind) {
@@ -1242,33 +2256,33 @@ function resourceKindBadge(kind) {
   };
   const icon = icons[kind] || '📋';
   const color = colors[kind] || 'var(--accent)';
-  return `<span class="resource-kind-badge" style="background:${color}" title="${escapeHtml(kind || 'Unknown')}">${icon} ${escapeHtml(kind || '?')}</span>`;
+  return `<span class="resource-kind-badge" style="background:${color}" title="${escapeHtml(kind || t('common.unknown'))}">${icon} ${escapeHtml(kind || '?')}</span>`;
 }
 
 function stateBadge(state) {
   const s = (state || '').toLowerCase().replace(/[^a-z0-9]/g, '');
-  return `<span class="badge-state state-${s}">${escapeHtml(state || 'Unknown')}</span>`;
+  return `<span class="badge-state state-${s}" data-state="${escapeHtml(state || 'Unknown')}">${escapeHtml(enumLabel('state', state, 'state.Unknown'))}</span>`;
 }
 
 function showLoading(el) {
-  el.innerHTML = '<div class="loading-overlay"><div class="spinner"></div><span>Loading...</span></div>';
+  el.innerHTML = `<div class="loading-overlay"><div class="spinner"></div><span>${t('common.loading')}</span></div>`;
 }
 
 function showError(el, msg, retryFn) {
-  el.innerHTML = `<div class="error-state"><p>${escapeHtml(msg)}</p>${retryFn ? '<button class="btn btn-primary" onclick="' + retryFn + '">Retry</button>' : ''}</div>`;
+  el.innerHTML = `<div class="error-state"><p>${escapeHtml(msg)}</p>${retryFn ? '<button class="btn btn-primary" onclick="' + retryFn + '">' + t('common.retry') + '</button>' : ''}</div>`;
 }
 
 function showEmpty(el, msg) {
-  el.innerHTML = `<div class="empty-state">${escapeHtml(msg || 'No data available')}</div>`;
+  el.innerHTML = `<div class="empty-state">${escapeHtml(msg || t('common.noData'))}</div>`;
 }
 
 function toast(msg, type = 'info') {
   const c = $('#toastContainer');
-  const t = document.createElement('div');
-  t.className = `toast toast-${type}`;
-  t.textContent = msg;
-  c.appendChild(t);
-  setTimeout(() => { t.style.opacity = '0'; t.style.transition = 'opacity 0.3s'; setTimeout(() => t.remove(), 300); }, 4000);
+  const el = document.createElement('div');
+  el.className = `toast toast-${type}`;
+  el.textContent = msg;
+  c.appendChild(el);
+  setTimeout(() => { el.style.opacity = '0'; el.style.transition = 'opacity 0.3s'; setTimeout(() => el.remove(), 300); }, 4000);
 }
 
 // ===== TAB NAVIGATION =====
@@ -1290,20 +2304,78 @@ $('#tabBar').addEventListener('click', (e) => {
   if (btn) switchTab(btn.dataset.tab);
 });
 
+// ===== DRAFT GUARD =====
+// Every tab re-renders through innerHTML, so a form the operator is filling
+// in (post-mortem feedback, approval reason) would be wiped by the
+// auto-refresh or by any other reload. Drafts are remembered per field id
+// from the input event, re-applied whenever the page markup changes, and
+// the auto-refresh holds while a field is focused or a draft is pending.
+// Filter bars are excluded: their values are state, not drafts.
+const drafts = new Map();
+const DRAFT_FIELDS = 'textarea, input[type="text"], input[type="number"]';
+
+function rememberDraft(id, value) {
+  if (!id) return;
+  const v = value === undefined || value === null ? '' : String(value);
+  if (v === '' || v === '0') drafts.delete(id); else drafts.set(id, v);
+}
+
+function forgetDrafts(prefix) {
+  Array.from(drafts.keys()).forEach(k => { if (!prefix || k.startsWith(prefix)) drafts.delete(k); });
+}
+
+function isEditing() {
+  if (drafts.size > 0) return true;
+  const a = document.activeElement;
+  return !!(a && a.closest('main') && !a.closest('.filters') && a.matches(DRAFT_FIELDS));
+}
+
+function restoreDrafts() {
+  drafts.forEach((value, id) => {
+    const el = document.getElementById(id);
+    if (!el || el.value === value) return;
+    el.value = value;
+    if (id.startsWith('fb-accuracy-')) {
+      const star = document.querySelector(`.star-rating[data-pm="${CSS.escape(id.slice('fb-accuracy-'.length))}"] .star`);
+      if (star) resetStars(star);
+    }
+  });
+}
+
+function initDraftGuard() {
+  const main = document.querySelector('main');
+  if (!main) return;
+  main.addEventListener('input', e => {
+    const f = e.target;
+    if (!f.id || f.closest('.filters') || !f.matches(DRAFT_FIELDS)) return;
+    rememberDraft(f.id, f.value);
+  });
+  new MutationObserver(() => restoreDrafts()).observe(main, { childList: true, subtree: true });
+}
+
 // ===== AUTO-REFRESH =====
 
 function startRefresh() {
   clearInterval(refreshInterval);
+  const timer = $('#refreshTimer');
   if (refreshSeconds <= 0) {
-    $('#refreshTimer').textContent = 'Off';
+    timer.dataset.i18n = 'refresh.off';
+    timer.textContent = t('refresh.off');
     $('#refreshDot').style.background = 'var(--text-dim)';
     return;
   }
+  delete timer.dataset.i18n;
   refreshCountdown = refreshSeconds;
   $('#refreshDot').style.background = 'var(--success)';
   refreshInterval = setInterval(() => {
+    if (isEditing()) {
+      // Hold the countdown at its start while a form is being filled in.
+      refreshCountdown = refreshSeconds;
+      timer.textContent = t('refresh.editing');
+      return;
+    }
     refreshCountdown--;
-    $('#refreshTimer').textContent = `${refreshCountdown}s`;
+    timer.textContent = `${refreshCountdown}s`;
     if (refreshCountdown <= 0) {
       refreshCountdown = refreshSeconds;
       loadCurrentTab();
@@ -1341,23 +2413,30 @@ function loadCurrentTab() {
 
 // ===== HEALTH CHECK =====
 
+// The badge remembers its catalog key so a language switch re-labels the
+// state it is actually in.
+function setHealthBadge(badge, key) {
+  badge.dataset.i18n = key;
+  badge.textContent = t(key);
+}
+
 async function checkHealth() {
   try {
     const res = await fetch('/healthz');
     const data = await res.json();
     const badge = $('#healthBadge');
     if (data.status === 'ok') {
-      badge.textContent = 'Healthy';
+      setHealthBadge(badge, 'health.healthy');
       badge.className = 'health-badge health-ok';
       $('#refreshDot').style.background = 'var(--sev-low)';
     } else {
-      badge.textContent = 'Degraded';
+      setHealthBadge(badge, 'health.degraded');
       badge.className = 'health-badge health-err';
       $('#refreshDot').style.background = 'var(--sev-critical)';
     }
   } catch {
     const badge = $('#healthBadge');
-    badge.textContent = 'Disconnected';
+    setHealthBadge(badge, 'health.disconnected');
     badge.className = 'health-badge health-err';
     $('#refreshDot').style.background = 'var(--sev-critical)';
   }
@@ -1388,14 +2467,14 @@ async function loadOverviewStats() {
     // badge and to set it apart visually from the red "Active" card — same
     // family (open work) but different urgency profile.
     const cards = [
-      { label: 'Active Issues', value: s.openIssues ?? 0, color: 'var(--sev-critical)' },
-      { label: 'Contained (needs human)', value: s.containedIssues ?? 0, color: 'var(--violet)', emphasis: (s.containedIssues ?? 0) > 0 },
-      { label: 'Resolved', value: s.resolvedIssues ?? 0, color: 'var(--sev-low)' },
-      { label: 'Remediations', value: `${s.resolvedByRemediation ?? 0}/${s.remediatedIssues ?? 0}`, color: 'var(--success)' },
-      { label: 'Success Rate', value: (successRate * 100).toFixed(1) + '%', color: 'var(--sev-low)' },
-      { label: 'PostMortems (open)', value: `${s.totalPostMortems ?? 0}${(s.postMortemsRequiringHumanAction ?? 0) > 0 ? ` (${s.postMortemsRequiringHumanAction} pending action)` : ''}`, color: 'var(--sev-medium)' },
-      { label: 'Pending Approvals', value: s.pendingApprovals ?? 0, color: 'var(--warning)' },
-      { label: 'Chaos drills (excluded from MTTD/MTTR)', value: s.chaosInducedIssues ?? 0, color: 'var(--success)' },
+      { label: t('kpi.activeIssues'), value: s.openIssues ?? 0, color: 'var(--sev-critical)' },
+      { label: t('kpi.contained'), value: s.containedIssues ?? 0, color: 'var(--violet)', emphasis: (s.containedIssues ?? 0) > 0 },
+      { label: t('kpi.resolved'), value: s.resolvedIssues ?? 0, color: 'var(--sev-low)' },
+      { label: t('kpi.remediations'), value: `${s.resolvedByRemediation ?? 0}/${s.remediatedIssues ?? 0}`, color: 'var(--success)' },
+      { label: t('kpi.successRate'), value: fmtNum(successRate * 100, 1) + '%', color: 'var(--sev-low)' },
+      { label: t('kpi.postmortemsOpen'), value: `${s.totalPostMortems ?? 0}${(s.postMortemsRequiringHumanAction ?? 0) > 0 ? ' ' + t('kpi.pendingAction', { n: s.postMortemsRequiringHumanAction }) : ''}`, color: 'var(--sev-medium)' },
+      { label: t('kpi.pendingApprovals'), value: s.pendingApprovals ?? 0, color: 'var(--warning)' },
+      { label: t('kpi.chaosDrills'), value: s.chaosInducedIssues ?? 0, color: 'var(--success)' },
     ];
     el.innerHTML = cards.map(c => `
       <div class="stat-card${c.emphasis ? ' stat-card-alert' : ''}">
@@ -1410,12 +2489,12 @@ async function loadOverviewStats() {
 
 function buildFallbackStats() {
   const cards = [
-    { label: 'Active Issues', value: '-' },
-    { label: 'Resolved (24h)', value: '-' },
-    { label: 'MTTR', value: '-' },
-    { label: 'Success Rate', value: '-' },
-    { label: 'SLO Budget', value: '-' },
-    { label: 'Active Clusters', value: '-' },
+    { label: t('kpi.activeIssues'), value: '-' },
+    { label: t('kpi.resolved24h'), value: '-' },
+    { label: t('kpi.mttr'), value: '-' },
+    { label: t('kpi.successRate'), value: '-' },
+    { label: t('kpi.sloBudget'), value: '-' },
+    { label: t('kpi.activeClusters'), value: '-' },
   ];
   return cards.map(c => `
     <div class="stat-card">
@@ -1431,7 +2510,7 @@ function formatDuration(val) {
   if (typeof val === 'number') {
     if (val < 60) return Math.round(val) + 's';
     if (val < 3600) return Math.round(val / 60) + 'm';
-    return (val / 3600).toFixed(1) + 'h';
+    return fmtNum(val / 3600, 1) + 'h';
   }
   return String(val);
 }
@@ -1448,7 +2527,7 @@ async function loadSeverityPie() {
     });
     const total = Object.values(counts).reduce((a, b) => a + b, 0);
     if (total === 0) {
-      showEmpty(el, 'No incidents to display');
+      showEmpty(el, t('pie.empty'));
       return;
     }
     const colors = { critical: 'var(--sev-critical)', high: 'var(--sev-high)', medium: 'var(--sev-medium)', low: 'var(--sev-low)' };
@@ -1463,20 +2542,20 @@ async function loadSeverityPie() {
     el.innerHTML = `
       <div class="pie-container">
         <div class="pie" style="background: conic-gradient(${gradParts.join(', ')})">
-          <div class="pie-center"><span class="num">${total}</span><span class="lbl">Total</span></div>
+          <div class="pie-center"><span class="num">${total}</span><span class="lbl">${t('common.total')}</span></div>
         </div>
         <div class="pie-legend">
           ${Object.entries(counts).map(([s, c]) => `
             <div class="legend-item">
               <div class="legend-dot" style="background:${colors[s]}"></div>
-              <span>${s.charAt(0).toUpperCase() + s.slice(1)}: ${c}</span>
+              <span>${escapeHtml(enumLabel('severity', s))}: ${c}</span>
             </div>
           `).join('')}
         </div>
       </div>
     `;
   } catch (e) {
-    showError(el, 'Failed to load severity data', 'loadSeverityPie()');
+    showError(el, t('error.severity'), 'loadSeverityPie()');
   }
 }
 
@@ -1501,16 +2580,16 @@ async function loadPlatformResources() {
       </div>`;
 
     el.innerHTML = `<div style="display:flex; flex-direction:column; gap:0.5rem;">
-      ${res('📋', 'Issues (total)', s.totalIssues ?? 0, 'var(--text)')}
-      ${res('🔧', 'Remediations', s.totalRemediations ?? 0, 'var(--success)')}
-      ${res('📝', 'PostMortems', s.totalPostMortems ?? 0, 'var(--sev-medium)')}
-      ${res('📚', 'Runbooks', s.totalRunbooks ?? 0, 'var(--accent)')}
-      ${res('🎯', 'SLOs', s.totalSLOs ?? 0, s.slosAtRisk > 0 ? 'var(--sev-high)' : 'var(--sev-low)')}
-      ${res('⏳', 'Pending Approvals', s.pendingApprovals ?? 0, s.pendingApprovals > 0 ? 'var(--sev-medium)' : 'var(--text-muted)')}
-      ${res('📊', 'Avg Risk Score', (s.avgRiskScore ?? 0).toFixed(0), s.avgRiskScore > 60 ? 'var(--sev-critical)' : s.avgRiskScore > 30 ? 'var(--sev-medium)' : 'var(--sev-low)')}
+      ${res('📋', t('resources.issuesTotal'), s.totalIssues ?? 0, 'var(--text)')}
+      ${res('🔧', t('resources.remediations'), s.totalRemediations ?? 0, 'var(--success)')}
+      ${res('📝', t('resources.postmortems'), s.totalPostMortems ?? 0, 'var(--sev-medium)')}
+      ${res('📚', t('resources.runbooks'), s.totalRunbooks ?? 0, 'var(--accent)')}
+      ${res('🎯', t('resources.slos'), s.totalSLOs ?? 0, s.slosAtRisk > 0 ? 'var(--sev-high)' : 'var(--sev-low)')}
+      ${res('⏳', t('resources.pendingApprovals'), s.pendingApprovals ?? 0, s.pendingApprovals > 0 ? 'var(--sev-medium)' : 'var(--text-muted)')}
+      ${res('📊', t('resources.avgRisk'), fmtNum(s.avgRiskScore ?? 0, 0), s.avgRiskScore > 60 ? 'var(--sev-critical)' : s.avgRiskScore > 30 ? 'var(--sev-medium)' : 'var(--sev-low)')}
     </div>`;
   } catch (e) {
-    showError(el, 'Failed to load platform resources', 'loadPlatformResources()');
+    showError(el, t('error.platformResources'), 'loadPlatformResources()');
   }
 }
 
@@ -1526,15 +2605,15 @@ async function loadMttdMttrTrend() {
     const mttr = (mttrData.items || mttrData.spec || []);
 
     if ((!mttd.length && !mttr.length)) {
-      showEmpty(el, 'No MTTD/MTTR data available');
+      showEmpty(el, t('mttd.empty'));
       return;
     }
 
     const formatDuration = (secs) => {
       if (secs === 0) return '< 1s';
       if (secs < 60) return Math.round(secs) + 's';
-      if (secs < 3600) return (secs / 60).toFixed(1) + 'm';
-      return (secs / 3600).toFixed(1) + 'h';
+      if (secs < 3600) return fmtNum(secs / 60, 1) + 'm';
+      return fmtNum(secs / 3600, 1) + 'h';
     };
 
     // Show latest values as stats + recent trend as mini bars
@@ -1547,7 +2626,7 @@ async function loadMttdMttrTrend() {
 
     const maxMttr = Math.max(...mttr.map(m => m.value), 1);
     const trendBars = mttr.slice(-10).map(m =>
-      `<div style="flex:1; display:flex; flex-direction:column; align-items:center; gap:2px;" title="${m.date}: ${formatDuration(m.value)} (${m.count} samples)">
+      `<div style="flex:1; display:flex; flex-direction:column; align-items:center; gap:2px;" title="${escapeHtml(t('mttd.barTitle', { date: m.date, value: formatDuration(m.value), n: m.count }))}">
         <div style="width:100%; background:var(--accent); border-radius:2px; height:${Math.max(4, (m.value / maxMttr) * 40)}px;"></div>
         <span style="font-size:0.5rem; color:var(--text-muted)">${m.date?.slice(5) || ''}</span>
       </div>`
@@ -1557,20 +2636,130 @@ async function loadMttdMttrTrend() {
       <div style="display:flex; gap:2rem; margin-bottom:1rem;">
         <div style="text-align:center; flex:1;">
           <div style="font-size:1.4rem; font-weight:700; color:var(--success)">${latestMttd !== null ? formatDuration(latestMttd) : '-'}</div>
-          <div style="font-size:0.7rem; color:var(--text-muted)">MTTD (Detect)</div>
-          <div style="font-size:0.6rem; color:var(--text-dim)">${mttdSamples} samples</div>
+          <div style="font-size:0.7rem; color:var(--text-muted)">${t('mttd.detect')}</div>
+          <div style="font-size:0.6rem; color:var(--text-dim)">${t('mttd.samples', { n: mttdSamples })}</div>
         </div>
         <div style="text-align:center; flex:1;">
           <div style="font-size:1.4rem; font-weight:700; color:var(--accent)">${latestMttr !== null ? formatDuration(latestMttr) : '-'}</div>
-          <div style="font-size:0.7rem; color:var(--text-muted)">MTTR (Resolve)</div>
-          <div style="font-size:0.6rem; color:var(--text-dim)">${mttrSamples} samples</div>
+          <div style="font-size:0.7rem; color:var(--text-muted)">${t('mttd.resolve')}</div>
+          <div style="font-size:0.6rem; color:var(--text-dim)">${t('mttd.samples', { n: mttrSamples })}</div>
         </div>
       </div>
       ${trendBars ? `<div style="display:flex; gap:2px; align-items:flex-end; height:50px;">${trendBars}</div>
-      <div style="font-size:0.6rem; color:var(--text-muted); text-align:center; margin-top:4px;">MTTR trend (last 10 days)</div>` : ''}
+      <div style="font-size:0.6rem; color:var(--text-muted); text-align:center; margin-top:4px;">${t('mttd.trend')}</div>` : ''}
     `;
   } catch (e) {
-    showError(el, 'Failed to load MTTD/MTTR', 'loadMttdMttrTrend()');
+    showError(el, t('error.mttd'), 'loadMttdMttrTrend()');
+  }
+}
+
+// The Recent Incidents panel filters client-side over the page it already
+// fetched: same controls as the Incidents tab, ids prefixed "recent", the
+// selection persisted as chatcli_dash_recentFilters and re-applied on every
+// render, including the auto-refresh ones.
+const RECENT_FILTERS_KEY = 'chatcli_dash_recentFilters';
+const recentFilterIds = {
+  severity: 'recentSeverityFilter',
+  state: 'recentStateFilter',
+  kind: 'recentKindFilter',
+  chaos: 'recentChaosFilter',
+  namespace: 'recentNamespaceFilter',
+};
+let recentIncidentItems = [];
+
+function readRecentFilters() {
+  const f = {};
+  for (const [name, id] of Object.entries(recentFilterIds)) {
+    const el = document.getElementById(id);
+    f[name] = el ? el.value : '';
+  }
+  return f;
+}
+
+function saveRecentFilters() {
+  try { localStorage.setItem(RECENT_FILTERS_KEY, JSON.stringify(readRecentFilters())); } catch { /* private mode */ }
+}
+
+function restoreRecentFilters() {
+  let saved = null;
+  try { saved = JSON.parse(localStorage.getItem(RECENT_FILTERS_KEY) || 'null'); } catch { saved = null; }
+  if (!saved || typeof saved !== 'object') return;
+  for (const [name, id] of Object.entries(recentFilterIds)) {
+    const el = document.getElementById(id);
+    if (!el || typeof saved[name] !== 'string') continue;
+    el.value = saved[name];
+    // A select ignores a value it has no option for; fall back to "all".
+    if (el.tagName === 'SELECT' && el.value !== saved[name]) el.value = '';
+  }
+}
+
+function filterRecentIncidents(items, f) {
+  const ns = (f.namespace || '').trim().toLowerCase();
+  return items.filter(i => {
+    if (f.severity && (i.severity || '').toLowerCase() !== f.severity) return false;
+    if (f.state && i.state !== f.state) return false;
+    if (f.kind && (i.resource || {}).kind !== f.kind) return false;
+    if (f.chaos === 'exclude' && i.chaosInduced) return false;
+    if (f.chaos === 'only' && !i.chaosInduced) return false;
+    if (ns && !(i.namespace || '').toLowerCase().includes(ns)) return false;
+    return true;
+  });
+}
+
+// Severity sorts by rank, not by label, so "critical" lands above "high" in
+// every language.
+const SEVERITY_RANK = { critical: 4, high: 3, medium: 2, low: 1 };
+const RECENT_SORT_KEY = 'overview:recentIncidents';
+const RECENT_AGE_COL = 5;
+
+function renderRecentIncidents() {
+  const el = $('#recentIncidentsTable');
+  if (!el) return;
+  if (recentIncidentItems.length === 0) { showEmpty(el, t('recent.empty')); return; }
+  const items = filterRecentIncidents(recentIncidentItems, readRecentFilters());
+  if (items.length === 0) { showEmpty(el, t('recent.emptyFilter')); return; }
+  el.innerHTML = `
+    <table>
+      <thead><tr>
+        <th>${t('col.name')}</th><th>${t('col.severity')}</th><th>${t('col.state')}</th><th>${t('col.resource')}</th><th>${t('col.namespace')}</th><th data-time>${t('col.age')}</th>
+      </tr></thead>
+      <tbody>
+        ${items.map(i => {
+          const res = i.resource || {};
+          return `<tr>
+          <td data-sort-value="${escapeHtml(i.name || '')}">${escapeHtml(i.name)}</td>
+          <td data-sort-value="${SEVERITY_RANK[i.severity] || 0}">${severityBadge(i.severity)}</td>
+          <td data-sort-value="${escapeHtml(i.state || '')}">${stateBadge(i.state)}</td>
+          <td data-sort-value="${escapeHtml((res.kind || '') + '/' + (res.name || ''))}">${resourceKindBadge(res.kind)} ${escapeHtml(res.name)}</td>
+          <td data-sort-value="${escapeHtml(i.namespace || '')}">${escapeHtml(i.namespace)}</td>
+          <td data-sort-value="${new Date(i.creationTimestamp || 0).getTime()}">${timeAgo(i.creationTimestamp)}</td>
+        </tr>`; }).join('')}
+      </tbody>
+    </table>
+  `;
+  // Clicking a header sorts the panel; the choice survives refreshes and
+  // filter changes because the sort memory is keyed per panel.
+  makeSortable(el.querySelector('table'), RECENT_AGE_COL, RECENT_SORT_KEY);
+}
+
+function initRecentFilters() {
+  const bar = document.getElementById('recentFilters');
+  if (!bar) return;
+  restoreRecentFilters();
+  const rerender = () => { saveRecentFilters(); renderRecentIncidents(); };
+  bar.addEventListener('change', e => { if (e.target.closest('select, input')) rerender(); });
+  bar.addEventListener('input', e => { if (e.target.id === recentFilterIds.namespace) rerender(); });
+  document.getElementById('recentFiltersReset').addEventListener('click', () => {
+    Object.values(recentFilterIds).forEach(id => { const el = document.getElementById(id); if (el) el.value = ''; });
+    rerender();
+  });
+  // The panel stays draggable from its header; while the pointer is over the
+  // controls the drag is off so selecting text in the input does not lift
+  // the whole panel.
+  const panel = bar.closest('.panel[draggable]');
+  if (panel) {
+    bar.addEventListener('pointerenter', () => panel.setAttribute('draggable', 'false'));
+    bar.addEventListener('pointerleave', () => panel.setAttribute('draggable', 'true'));
   }
 }
 
@@ -1578,54 +2767,63 @@ async function loadRecentIncidents() {
   const el = $('#recentIncidentsTable');
   try {
     const data = await apiFetch('/incidents?pageSize=20' + getTimeRangeQuery());
-    const items = data.items || [];
-    if (items.length === 0) { showEmpty(el, 'No recent incidents'); return; }
-    el.innerHTML = `
-      <table>
-        <thead><tr>
-          <th>Name</th><th>Severity</th><th>State</th><th>Resource</th><th>Namespace</th><th>Age</th>
-        </tr></thead>
-        <tbody>
-          ${items.map(i => `<tr>
-            <td>${escapeHtml(i.name)}</td>
-            <td>${severityBadge(i.severity)}</td>
-            <td>${stateBadge(i.state)}</td>
-            <td>${resourceKindBadge((i.resource || {}).kind)} ${escapeHtml((i.resource || {}).name)}</td>
-            <td>${escapeHtml(i.namespace)}</td>
-            <td data-sort-value="${new Date(i.creationTimestamp || 0).getTime()}">${timeAgo(i.creationTimestamp)}</td>
-          </tr>`).join('')}
-        </tbody>
-      </table>
-    `;
+    recentIncidentItems = data.items || [];
+    renderRecentIncidents();
   } catch (e) {
-    showError(el, 'Failed to load recent incidents', 'loadRecentIncidents()');
+    showError(el, t('error.recentIncidents'), 'loadRecentIncidents()');
   }
+}
+
+// The remediation activity panel keeps the fetched items so flipping the
+// time order re-renders without another round trip. The order is persisted
+// as chatcli_dash_remediationSort; the default is newest first.
+const REMEDIATION_SORT_KEY = 'chatcli_dash_remediationSort';
+let remediationItems = [];
+let remediationOldestFirst = false;
+try { remediationOldestFirst = localStorage.getItem(REMEDIATION_SORT_KEY) === 'asc'; } catch { /* private mode */ }
+
+function toggleRemediationSort() {
+  remediationOldestFirst = !remediationOldestFirst;
+  try { localStorage.setItem(REMEDIATION_SORT_KEY, remediationOldestFirst ? 'asc' : 'desc'); } catch { /* private mode */ }
+  renderRemediationTimeline();
+}
+
+function renderRemediationTimeline() {
+  const el = $('#remediationTimeline');
+  if (!el) return;
+  if (remediationItems.length === 0) {
+    showEmpty(el, t('timeline.empty'));
+    return;
+  }
+  const stamp = i => new Date(i.creationTimestamp || 0).getTime();
+  const items = remediationItems.slice().sort((a, b) => remediationOldestFirst ? stamp(a) - stamp(b) : stamp(b) - stamp(a));
+  const label = remediationOldestFirst ? t('timeline.sortOldest') : t('timeline.sortNewest');
+  el.innerHTML = `<div class="timeline-toolbar">
+      <button type="button" class="btn btn-icon" id="remediationSortToggle" title="${t('timeline.sortHint')}" onclick="toggleRemediationSort()">${label} ${remediationOldestFirst ? '▲' : '▼'}</button>
+    </div>
+    <div class="timeline">
+      ${items.map(i => `
+        <div class="timeline-item">
+          <div class="timeline-time" title="${escapeHtml(i.creationTimestamp || '')}">${timeAgo(i.creationTimestamp)}</div>
+          <div class="timeline-text">
+            <span class="timeline-type" data-state="${escapeHtml(i.state || '')}">${escapeHtml(enumLabel('state', i.state))}</span>
+            ${resourceKindBadge((i.resource || {}).kind)}
+            ${escapeHtml((i.resource || {}).name || i.name)} - ${t('timeline.attempts', { n: i.remediationAttempts })}
+            ${i.signalType ? `<span style="color:var(--text-muted);font-size:0.75rem"> (${escapeHtml(i.signalType)})</span>` : ''}
+          </div>
+        </div>
+      `).join('')}
+    </div>`;
 }
 
 async function loadRemediationTimeline() {
   const el = $('#remediationTimeline');
   try {
     const data = await apiFetch('/incidents?pageSize=10' + getTimeRangeQuery());
-    const items = (data.items || []).filter(i => i.remediationAttempts > 0).slice(0, 10);
-    if (items.length === 0) {
-      showEmpty(el, 'No remediation activity');
-      return;
-    }
-    el.innerHTML = `<div class="timeline">
-      ${items.map(i => `
-        <div class="timeline-item">
-          <div class="timeline-time">${timeAgo(i.creationTimestamp)}</div>
-          <div class="timeline-text">
-            <span class="timeline-type">${escapeHtml(i.state)}</span>
-            ${resourceKindBadge((i.resource || {}).kind)}
-            ${escapeHtml((i.resource || {}).name || i.name)} - ${i.remediationAttempts} attempt(s)
-            ${i.signalType ? `<span style="color:var(--text-muted);font-size:0.75rem"> (${escapeHtml(i.signalType)})</span>` : ''}
-          </div>
-        </div>
-      `).join('')}
-    </div>`;
+    remediationItems = (data.items || []).filter(i => i.remediationAttempts > 0).slice(0, 10);
+    renderRemediationTimeline();
   } catch (e) {
-    showError(el, 'Failed to load remediation activity', 'loadRemediationTimeline()');
+    showError(el, t('error.remediationActivity'), 'loadRemediationTimeline()');
   }
 }
 
@@ -1659,26 +2857,26 @@ async function loadIncidents() {
       items = items.filter(i => i.chaosInduced);
     }
     const total = items.length;
-    $('#incidentCount').textContent = `${total} incident(s)`;
-    if (items.length === 0) { showEmpty(el, 'No incidents match the filters'); return; }
+    $('#incidentCount').textContent = t('incidents.count', { n: total });
+    if (items.length === 0) { showEmpty(el, t('incidents.emptyFilter')); return; }
     el.innerHTML = `<table>
       <thead><tr>
-        <th></th><th>Name</th><th>Severity</th><th>State</th><th>Resource</th><th>Namespace</th><th>Risk</th><th>Age</th><th>Actions</th>
+        <th></th><th>${t('col.name')}</th><th>${t('col.severity')}</th><th>${t('col.state')}</th><th>${t('col.resource')}</th><th>${t('col.namespace')}</th><th>${t('col.risk')}</th><th data-time>${t('col.age')}</th><th>${t('col.actions')}</th>
       </tr></thead>
       <tbody id="incidentsTbody"></tbody>
     </table>`;
     const tbody = $('#incidentsTbody');
     items.forEach((item, idx) => {
-      const id = 'inc-' + idx;
+      const id = 'inc-' + rowKey(item, idx);
       const isExpanded = expandedRows.has(id);
       const mainRow = document.createElement('tr');
       mainRow.className = 'expandable';
       mainRow.dataset.rowId = id;
       const chaosBadge = item.chaosInduced
-        ? `<span class="badge-chaos" title="Chaos drill — correlated with ${escapeHtml(item.chaosExperiment || 'a ChaosExperiment')}">CHAOS</span>`
+        ? `<span class="badge-chaos" title="${escapeHtml(t('badge.chaosTitle', { experiment: item.chaosExperiment || t('badge.chaosDefault') }))}">${t('badge.chaos')}</span>`
         : '';
       const humanBadge = item.requiresHumanAction
-        ? `<span class="badge-needs-human" title="Workload silenced via containment — human action required to restore service">NEEDS HUMAN</span>`
+        ? `<span class="badge-needs-human" title="${escapeHtml(t('badge.needsHumanTitle'))}">${t('badge.needsHuman')}</span>`
         : '';
       mainRow.innerHTML = `
         <td style="width:20px; cursor:pointer; color:var(--text-muted)">${isExpanded ? '&#9660;' : '&#9654;'}</td>
@@ -1687,12 +2885,12 @@ async function loadIncidents() {
         <td>${stateBadge(item.state)}</td>
         <td>${resourceKindBadge((item.resource||{}).kind)} ${escapeHtml((item.resource||{}).name)}</td>
         <td>${escapeHtml(item.namespace)}</td>
-        <td data-sort-value="${item.riskScore || 0}">${item.riskScore != null ? item.riskScore.toFixed(1) : '-'}</td>
+        <td data-sort-value="${item.riskScore || 0}">${item.riskScore != null ? fmtNum(item.riskScore, 1) : '-'}</td>
         <td data-sort-value="${new Date(item.creationTimestamp || 0).getTime()}">${timeAgo(item.creationTimestamp)}</td>
         <td class="btn-group">
-          ${item.state !== 'Resolved' && item.state !== 'Contained' ? `<button class="btn btn-success" onclick="event.stopPropagation(); ackIncident('${escapeHtml(item.name)}', '${escapeHtml(item.namespace)}')">Ack</button>` : ''}
-          ${item.state !== 'Resolved' && item.state !== 'Contained' ? `<button class="btn" onclick="event.stopPropagation(); snoozeIncident('${escapeHtml(item.name)}', '${escapeHtml(item.namespace)}')">Snooze</button>` : ''}
-          ${(item.state === 'Escalated' || item.state === 'Contained') ? `<button class="btn" style="background:var(--sev-low);color:#000;font-weight:700" onclick="event.stopPropagation(); resolveIncident('${escapeHtml(item.name)}', '${escapeHtml(item.namespace)}')">Resolve</button>` : ''}
+          ${item.state !== 'Resolved' && item.state !== 'Contained' ? `<button class="btn btn-success" onclick="event.stopPropagation(); ackIncident('${escapeHtml(item.name)}', '${escapeHtml(item.namespace)}')">${t('action.ack')}</button>` : ''}
+          ${item.state !== 'Resolved' && item.state !== 'Contained' ? `<button class="btn" onclick="event.stopPropagation(); snoozeIncident('${escapeHtml(item.name)}', '${escapeHtml(item.namespace)}')">${t('action.snooze')}</button>` : ''}
+          ${(item.state === 'Escalated' || item.state === 'Contained') ? `<button class="btn" style="background:var(--sev-low);color:#000;font-weight:700" onclick="event.stopPropagation(); resolveIncident('${escapeHtml(item.name)}', '${escapeHtml(item.namespace)}')">${t('action.resolve')}</button>` : ''}
         </td>
       `;
       mainRow.addEventListener('click', () => toggleIncidentExpand(id, item, mainRow));
@@ -1704,7 +2902,7 @@ async function loadIncidents() {
     });
     makeSortable(el.querySelector('table'));
   } catch (e) {
-    showError(el, 'Failed to load incidents: ' + e.message, 'loadIncidents()');
+    showError(el, t('error.incidents', { msg: e.message }), 'loadIncidents()');
   }
 }
 
@@ -1729,18 +2927,18 @@ function buildIncidentExpandRow(item) {
   const res = item.resource || {};
   tr.innerHTML = `<td colspan="9">
     <div class="expand-content">
-      <h4>Description</h4>
-      <p>${escapeHtml(item.description || 'No description available')}</p>
-      <h4>Resource</h4>
-      <p>${resourceKindBadge(res.kind)} <strong>${escapeHtml(res.name || '-')}</strong> in <em>${escapeHtml(res.namespace || item.namespace || '-')}</em></p>
-      <h4>Details</h4>
-      <p>Signal Type: <span class="action-type-badge">${escapeHtml(item.signalType || '-')}</span> | Source: ${escapeHtml(item.source || '-')} | Risk Score: <strong>${item.riskScore != null ? item.riskScore.toFixed(1) : '-'}</strong></p>
-      <p>Remediation Attempts: ${item.remediationAttempts || 0} / ${item.maxRemediationAttempts || '-'}</p>
-      ${item.resolution ? `<h4>Resolution</h4><p>${escapeHtml(item.resolution)}</p>` : ''}
+      <h4>${t('detail.description')}</h4>
+      <p>${escapeHtml(item.description || t('detail.noDescription'))}</p>
+      <h4>${t('detail.resource')}</h4>
+      <p>${resourceKindBadge(res.kind)} <strong>${escapeHtml(res.name || '-')}</strong> ${t('detail.in')} <em>${escapeHtml(res.namespace || item.namespace || '-')}</em></p>
+      <h4>${t('detail.details')}</h4>
+      <p>${t('detail.signalType')}: <span class="action-type-badge">${escapeHtml(item.signalType || '-')}</span> | ${t('detail.source')}: ${escapeHtml(item.source || '-')} | ${t('detail.riskScore')}: <strong>${item.riskScore != null ? fmtNum(item.riskScore, 1) : '-'}</strong></p>
+      <p>${t('detail.remediationAttempts')}: ${item.remediationAttempts || 0} / ${item.maxRemediationAttempts || '-'}</p>
+      ${item.resolution ? `<h4>${t('detail.resolution')}</h4><p>${escapeHtml(item.resolution)}</p>` : ''}
       <div style="display:flex;gap:2rem;margin-top:0.5rem;font-size:0.8rem;color:var(--text-muted)">
-        ${item.detectedAt ? `<span>Detected: ${new Date(item.detectedAt).toLocaleString()}</span>` : ''}
-        ${item.resolvedAt ? `<span>Resolved: ${new Date(item.resolvedAt).toLocaleString()}</span>` : ''}
-        ${item.detectedAt && item.resolvedAt ? `<span>Duration: ${formatDuration(new Date(item.resolvedAt) - new Date(item.detectedAt))}</span>` : ''}
+        ${item.detectedAt ? `<span>${t('detail.detected')}: ${fmtDateTime(item.detectedAt)}</span>` : ''}
+        ${item.resolvedAt ? `<span>${t('detail.resolved')}: ${fmtDateTime(item.resolvedAt)}</span>` : ''}
+        ${item.detectedAt && item.resolvedAt ? `<span>${t('detail.duration')}: ${formatDuration(new Date(item.resolvedAt) - new Date(item.detectedAt))}</span>` : ''}
       </div>
       <div id="ai-preview-${escapeHtml(item.name)}" style="margin-top:0.5rem;"></div>
     </div>
@@ -1775,12 +2973,12 @@ async function loadAIInsightPreview(incidentName) {
     const confColor = ai.confidence >= 0.85 ? 'var(--sev-low)' : ai.confidence >= 0.7 ? 'var(--sev-medium)' : 'var(--sev-high)';
     const recs = (ai.recommendations || []).slice(0, 3);
     el.innerHTML = `
-      <h4 style="display:flex;align-items:center;gap:0.5rem;">AI Analysis
-        <span style="background:${confColor}; color:#fff; padding:0.1rem 0.4rem; border-radius:4px; font-size:0.7rem;">${confPct}% confidence</span>
+      <h4 style="display:flex;align-items:center;gap:0.5rem;">${t('ai.analysis')}
+        <span style="background:${confColor}; color:#fff; padding:0.1rem 0.4rem; border-radius:4px; font-size:0.7rem;">${t('ai.confidence', { pct: confPct })}</span>
         <span style="font-size:0.7rem; color:var(--text-dim)">${escapeHtml(ai.provider || '')} / ${escapeHtml(ai.model || '')}</span>
       </h4>
       <p style="font-size:0.8rem; max-height:100px; overflow-y:auto; white-space:pre-wrap;">${escapeHtml((ai.analysis || '').substring(0, 500))}${(ai.analysis || '').length > 500 ? '...' : ''}</p>
-      ${recs.length > 0 ? `<div style="font-size:0.8rem;"><strong>Recommendations:</strong><ul style="margin:0.2rem 0 0 1rem;">${recs.map(r => `<li>${escapeHtml(r)}</li>`).join('')}</ul></div>` : ''}
+      ${recs.length > 0 ? `<div style="font-size:0.8rem;"><strong>${t('ai.recommendations')}:</strong><ul style="margin:0.2rem 0 0 1rem;">${recs.map(r => `<li>${escapeHtml(r)}</li>`).join('')}</ul></div>` : ''}
     `;
   } catch (e) { /* silent */ }
 }
@@ -1788,34 +2986,34 @@ async function loadAIInsightPreview(incidentName) {
 async function ackIncident(name, ns) {
   try {
     await apiPost(`/incidents/${name}/acknowledge?namespace=${encodeURIComponent(ns)}`, {});
-    toast(`Incident ${name} acknowledged`, 'success');
+    toast(t('toast.acked', { name }), 'success');
     loadIncidents();
   } catch (e) {
-    toast(`Failed to acknowledge: ${e.message}`, 'error');
+    toast(t('toast.ackFailed', { msg: e.message }), 'error');
   }
 }
 
 async function snoozeIncident(name, ns) {
-  const duration = prompt('Snooze duration (e.g. 1h, 30m, 2h):', '1h');
+  const duration = prompt(t('prompt.snooze'), '1h');
   if (!duration) return;
   try {
     await apiPost(`/incidents/${name}/snooze?namespace=${encodeURIComponent(ns)}`, { duration });
-    toast(`Incident ${name} snoozed for ${duration}`, 'success');
+    toast(t('toast.snoozed', { name, duration }), 'success');
     loadIncidents();
   } catch (e) {
-    toast(`Failed to snooze: ${e.message}`, 'error');
+    toast(t('toast.snoozeFailed', { msg: e.message }), 'error');
   }
 }
 
 async function resolveIncident(name, ns) {
-  const resolution = prompt('Resolution note (optional):', 'Manually resolved — root cause addressed');
+  const resolution = prompt(t('prompt.resolution'), t('prompt.resolutionDefault'));
   if (resolution === null) return; // cancelled
   try {
     await apiPost(`/incidents/${name}/resolve?namespace=${encodeURIComponent(ns)}`, { resolution });
-    toast(`Incident ${name} resolved`, 'success');
+    toast(t('toast.resolved', { name }), 'success');
     loadIncidents();
   } catch (e) {
-    toast(`Failed to resolve: ${e.message}`, 'error');
+    toast(t('toast.resolveFailed', { msg: e.message }), 'error');
   }
 }
 
@@ -1828,7 +3026,7 @@ async function loadSLOs() {
   try {
     const data = await apiFetch('/slos?pageSize=100' + getTimeRangeQuery());
     const items = (data.items || []).sort((a, b) => (a.name || '').localeCompare(b.name || ''));
-    if (items.length === 0) { showEmpty(cardsEl, 'No SLOs configured'); showEmpty(alertsEl, 'No alerts'); return; }
+    if (items.length === 0) { showEmpty(cardsEl, t('slo.empty')); showEmpty(alertsEl, t('slo.noAlerts')); return; }
     cardsEl.innerHTML = items.map(slo => {
       const budgetPct = slo.errorBudgetRemaining || 100;
       const budgetClass = budgetPct > 50 ? 'gauge-ok' : budgetPct > 20 ? 'gauge-warn' : 'gauge-danger';
@@ -1843,18 +3041,18 @@ async function loadSLOs() {
           </div>
           <div class="panel-body">
             <div style="display:flex; justify-content:space-between; margin-bottom:0.5rem;">
-              <span style="font-size:0.8rem; color:var(--text-muted)">SLI: ${escapeHtml(slo.sli || '-')}</span>
-              <span style="font-size:0.8rem; color:var(--text-muted)">Window: ${escapeHtml(slo.window || '30d')}</span>
+              <span style="font-size:0.8rem; color:var(--text-muted)">${escapeHtml(t('slo.sli', { sli: slo.sli || '-' }))}</span>
+              <span style="font-size:0.8rem; color:var(--text-muted)">${escapeHtml(t('slo.window', { window: slo.window || '30d' }))}</span>
             </div>
             <div style="display:flex; justify-content:space-between; align-items:baseline; margin-bottom:0.3rem;">
               <span style="font-size:1.5rem; font-weight:700; color:${meeting ? 'var(--sev-low)' : 'var(--sev-critical)'}">
-                ${currentPct.toFixed(2)}%
+                ${fmtNum(currentPct, 2)}%
               </span>
-              <span style="font-size:0.8rem; color:var(--text-muted)">Target: ${target.toFixed(2)}%</span>
+              <span style="font-size:0.8rem; color:var(--text-muted)">${t('slo.target', { target: fmtNum(target, 2) })}</span>
             </div>
-            <div style="font-size:0.75rem; color:var(--text-muted); margin-bottom:0.3rem;">Error Budget Remaining</div>
+            <div style="font-size:0.75rem; color:var(--text-muted); margin-bottom:0.3rem;">${t('slo.budgetRemaining')}</div>
             <div class="gauge-bar"><div class="gauge-fill ${budgetClass}" style="width:${Math.max(0, Math.min(100, budgetPct))}%"></div></div>
-            <div style="font-size:0.75rem; color:var(--text-muted); text-align:right">${budgetPct.toFixed(1)}%</div>
+            <div style="font-size:0.75rem; color:var(--text-muted); text-align:right">${fmtNum(budgetPct, 1)}%</div>
             <div class="burn-rates">
               ${buildBurnChip('1h', slo)}
               ${buildBurnChip('6h', slo)}
@@ -1869,23 +3067,23 @@ async function loadSLOs() {
     // Show alerts for SLOs that are breaching
     const alertItems = items.filter(s => (s.state || '').toLowerCase() === 'firing' || (s.currentValue || 0) < (s.target || 99.9));
     if (alertItems.length === 0) {
-      alertsEl.innerHTML = '<div class="empty-state">No active SLO alerts</div>';
+      alertsEl.innerHTML = `<div class="empty-state">${t('slo.noActiveAlerts')}</div>`;
     } else {
       alertsEl.innerHTML = `<table>
-        <thead><tr><th>Service</th><th>Current</th><th>Target</th><th>Budget</th><th>State</th></tr></thead>
+        <thead><tr><th>${t('col.service')}</th><th>${t('col.current')}</th><th>${t('col.target')}</th><th>${t('col.budget')}</th><th>${t('col.state')}</th></tr></thead>
         <tbody>
           ${alertItems.map(s => `<tr>
             <td>${escapeHtml(s.service || s.name)}</td>
-            <td style="color:var(--sev-critical)">${(s.currentValue || 0).toFixed(2)}%</td>
-            <td>${(s.target || 99.9).toFixed(2)}%</td>
-            <td>${(s.errorBudgetRemaining || 0).toFixed(1)}%</td>
+            <td style="color:var(--sev-critical)">${fmtNum(s.currentValue || 0, 2)}%</td>
+            <td>${fmtNum(s.target || 99.9, 2)}%</td>
+            <td>${fmtNum(s.errorBudgetRemaining || 0, 1)}%</td>
             <td>${stateBadge(s.state || (s.currentValue >= s.target ? 'Healthy' : 'Firing'))}</td>
           </tr>`).join('')}
         </tbody>
       </table>`;
     }
   } catch (e) {
-    showError(cardsEl, 'Failed to load SLOs: ' + e.message, 'loadSLOs()');
+    showError(cardsEl, t('error.slos', { msg: e.message }), 'loadSLOs()');
     showEmpty(alertsEl, '');
   }
 }
@@ -1902,7 +3100,7 @@ function buildBurnChip(window, slo) {
     default: rate = 0;
   }
   const cls = rate > 14 ? 'burn-danger' : rate > 1 ? 'burn-warn' : 'burn-ok';
-  return `<span class="burn-chip ${cls}">${window}: ${rate.toFixed(1)}x</span>`;
+  return `<span class="burn-chip ${cls}">${window}: ${fmtNum(rate, 1)}x</span>`;
 }
 
 // ===== APPROVALS PAGE =====
@@ -1927,65 +3125,67 @@ async function loadApprovals() {
       badge.style.display = 'none';
     }
 
-    if (items.length === 0) { showEmpty(el, 'No approval requests found'); return; }
+    if (items.length === 0) { showEmpty(el, t('approvals.empty')); return; }
     el.innerHTML = items.map((item, idx) => `
       <div class="approval-card">
         <div class="approval-header">
           <div>
             <div class="approval-name">${escapeHtml(item.name)}</div>
-            <div class="approval-meta">${escapeHtml(item.namespace)} | Requested by: ${escapeHtml(item.requestedBy || '-')}</div>
+            <div class="approval-meta">${escapeHtml(item.namespace)} | ${escapeHtml(t('approval.requestedBy', { who: item.requestedBy || '-' }))}</div>
           </div>
           ${stateBadge(item.state)}
         </div>
         <div style="font-size:0.85rem; margin-bottom:0.5rem;">
-          <strong>Action:</strong> ${escapeHtml(item.action || '-')}<br>
-          <strong>Resource:</strong> ${escapeHtml(item.resource || '-')}<br>
-          <strong>Reason:</strong> ${escapeHtml(item.reason || '-')}
-          ${(item.annotations && item.annotations['platform.chatcli.io/blast-risk-level']) ? `<br><strong>Blast Radius:</strong> <span style="color:${item.annotations['platform.chatcli.io/blast-risk-level'] === 'critical' ? 'var(--sev-critical)' : item.annotations['platform.chatcli.io/blast-risk-level'] === 'high' ? 'var(--sev-high)' : 'var(--sev-medium)'}; font-weight:600">${escapeHtml(item.annotations['platform.chatcli.io/blast-risk-level']).toUpperCase()}</span>` : ''}
+          <strong>${t('approval.action')}:</strong> ${escapeHtml(item.action || '-')}<br>
+          <strong>${t('approval.resource')}:</strong> ${escapeHtml(item.resource || '-')}<br>
+          <strong>${t('approval.reason')}:</strong> ${escapeHtml(item.reason || '-')}
+          ${(item.annotations && item.annotations['platform.chatcli.io/blast-risk-level']) ? `<br><strong>${t('approval.blastRadius')}:</strong> <span style="color:${item.annotations['platform.chatcli.io/blast-risk-level'] === 'critical' ? 'var(--sev-critical)' : item.annotations['platform.chatcli.io/blast-risk-level'] === 'high' ? 'var(--sev-high)' : 'var(--sev-medium)'}; font-weight:600">${escapeHtml(item.annotations['platform.chatcli.io/blast-risk-level']).toUpperCase()}</span>` : ''}
         </div>
         ${item.state === 'Pending' ? `
           <div class="input-group">
-            <label>Decision Reason</label>
-            <input type="text" id="approval-reason-${idx}" placeholder="Enter reason...">
+            <label for="approval-reason-${escapeHtml(item.name)}">${t('approval.decisionReason')}</label>
+            <input type="text" id="approval-reason-${escapeHtml(item.name)}" placeholder="${escapeHtml(t('approval.reasonPlaceholder'))}">
           </div>
           <div class="approval-actions">
-            <button class="btn btn-success" onclick="approveRequest('${escapeHtml(item.name)}', '${escapeHtml(item.namespace)}', ${idx})">Approve</button>
-            <button class="btn btn-danger" onclick="rejectRequest('${escapeHtml(item.name)}', '${escapeHtml(item.namespace)}', ${idx})">Reject</button>
+            <button class="btn btn-success" onclick="approveRequest('${escapeHtml(item.name)}', '${escapeHtml(item.namespace)}')">${t('approval.approve')}</button>
+            <button class="btn btn-danger" onclick="rejectRequest('${escapeHtml(item.name)}', '${escapeHtml(item.namespace)}')">${t('approval.reject')}</button>
           </div>
         ` : `
           <div style="font-size:0.8rem; color:var(--text-muted); margin-top:0.5rem;">
-            ${item.approvedBy ? 'Approved by: ' + escapeHtml(item.approvedBy) : ''}
-            ${item.rejectedBy ? 'Rejected by: ' + escapeHtml(item.rejectedBy) : ''}
-            ${item.decisionReason ? ' | Reason: ' + escapeHtml(item.decisionReason) : ''}
-            ${item.decidedAt ? ' | ' + new Date(item.decidedAt).toLocaleString() : ''}
+            ${item.approvedBy ? escapeHtml(t('approval.approvedBy', { who: item.approvedBy })) : ''}
+            ${item.rejectedBy ? escapeHtml(t('approval.rejectedBy', { who: item.rejectedBy })) : ''}
+            ${item.decisionReason ? ' | ' + escapeHtml(t('approval.reasonLabel', { reason: item.decisionReason })) : ''}
+            ${item.decidedAt ? ' | ' + fmtDateTime(item.decidedAt) : ''}
           </div>
         `}
       </div>
     `).join('');
   } catch (e) {
-    showError(el, 'Failed to load approvals: ' + e.message, 'loadApprovals()');
+    showError(el, t('error.approvals', { msg: e.message }), 'loadApprovals()');
   }
 }
 
-async function approveRequest(name, ns, idx) {
-  const reason = document.getElementById('approval-reason-' + idx)?.value || '';
+async function approveRequest(name, ns) {
+  const reason = document.getElementById('approval-reason-' + name)?.value || '';
   try {
     await apiPost(`/approvals/${name}/approve?namespace=${encodeURIComponent(ns)}`, { approver: 'web-ui', reason });
-    toast(`Approval ${name} approved`, 'success');
+    forgetDrafts('approval-reason-' + name);
+    toast(t('toast.approved', { name }), 'success');
     loadApprovals();
   } catch (e) {
-    toast(`Failed to approve: ${e.message}`, 'error');
+    toast(t('toast.approveFailed', { msg: e.message }), 'error');
   }
 }
 
-async function rejectRequest(name, ns, idx) {
-  const reason = document.getElementById('approval-reason-' + idx)?.value || '';
+async function rejectRequest(name, ns) {
+  const reason = document.getElementById('approval-reason-' + name)?.value || '';
   try {
     await apiPost(`/approvals/${name}/reject?namespace=${encodeURIComponent(ns)}`, { approver: 'web-ui', reason });
-    toast(`Approval ${name} rejected`, 'info');
+    forgetDrafts('approval-reason-' + name);
+    toast(t('toast.rejected', { name }), 'info');
     loadApprovals();
   } catch (e) {
-    toast(`Failed to reject: ${e.message}`, 'error');
+    toast(t('toast.rejectFailed', { msg: e.message }), 'error');
   }
 }
 
@@ -1997,17 +3197,17 @@ async function loadRunbooks() {
   try {
     const data = await apiFetch('/runbooks?pageSize=100');
     const items = data.items || [];
-    $('#runbookCount').textContent = `${items.length} runbook(s)`;
-    if (items.length === 0) { showEmpty(el, 'No runbooks available. Runbooks are auto-generated when the AI successfully remediates an incident.'); return; }
+    $('#runbookCount').textContent = t('runbooks.count', { n: items.length });
+    if (items.length === 0) { showEmpty(el, t('runbooks.empty')); return; }
     el.innerHTML = `<table>
       <thead><tr>
-        <th></th><th>Name</th><th>Signal</th><th>Severity</th><th>Resource Kind</th><th>Steps</th><th>Max Attempts</th><th>Created</th>
+        <th></th><th>${t('col.name')}</th><th>${t('col.signal')}</th><th>${t('col.severity')}</th><th>${t('col.resourceKind')}</th><th>${t('col.steps')}</th><th>${t('col.maxAttempts')}</th><th data-time>${t('col.created')}</th>
       </tr></thead>
       <tbody id="runbooksTbody"></tbody>
     </table>`;
     const tbody = $('#runbooksTbody');
     items.forEach((item, idx) => {
-      const id = 'rb-' + idx;
+      const id = 'rb-' + rowKey(item, idx);
       const isExpanded = expandedRows.has(id);
       const trigger = item.trigger || {};
       const stepsCount = (item.steps || []).length;
@@ -2019,7 +3219,7 @@ async function loadRunbooks() {
         <td>${escapeHtml(item.name)}</td>
         <td><span class="action-type-badge">${escapeHtml(trigger.signalType || '-')}</span></td>
         <td>${severityBadge(trigger.severity || 'low')}</td>
-        <td>${resourceKindBadge(trigger.resourceKind || 'Unknown')}</td>
+        <td>${resourceKindBadge(trigger.resourceKind || t('common.unknown'))}</td>
         <td>${stepsCount}</td>
         <td>${item.maxAttempts || 3}</td>
         <td data-sort-value="${new Date(item.creationTimestamp || 0).getTime()}">${timeAgo(item.creationTimestamp)}</td>
@@ -2030,7 +3230,7 @@ async function loadRunbooks() {
     });
     makeSortable(el.querySelector('table'));
   } catch (e) {
-    showError(el, 'Failed to load runbooks: ' + e.message, 'loadRunbooks()');
+    showError(el, t('error.runbooks', { msg: e.message }), 'loadRunbooks()');
   }
 }
 
@@ -2052,21 +3252,21 @@ function buildRunbookExpandRow(item) {
   tr.className = 'expand-row';
   const steps = (item.steps || []).map((s, i) =>
     `<li>
-      <strong>Step ${i + 1}: ${escapeHtml(s.name)}</strong>
+      <strong>${escapeHtml(t('runbook.step', { n: i + 1, name: s.name || '' }))}</strong>
       <span class="action-type-badge" style="margin-left:0.5rem">${escapeHtml(s.action)}</span>
-      <p style="margin:0.25rem 0 0.5rem; color:var(--text-muted)">${escapeHtml(s.description || '')}</p>
+      ${s.description ? `<p style="color:var(--text-muted)">${escapeHtml(s.description)}</p>` : ''}
       ${s.params ? `<code style="font-size:0.75rem; color:var(--text-dim)">${escapeHtml(JSON.stringify(s.params))}</code>` : ''}
     </li>`
   ).join('');
   tr.innerHTML = `<td colspan="8">
     <div class="expand-content">
-      <h4>Description</h4>
-      <p style="white-space:pre-wrap; max-height:200px; overflow-y:auto;">${escapeHtml(item.description || 'No description')}</p>
-      <h4>Trigger</h4>
-      <p>Signal: <span class="action-type-badge">${escapeHtml((item.trigger || {}).signalType || '-')}</span>
-         Severity: ${severityBadge((item.trigger || {}).severity || '-')}
-         Kind: ${resourceKindBadge((item.trigger || {}).resourceKind || '-')}</p>
-      ${steps ? `<h4>Steps (${(item.steps || []).length})</h4><ol>${steps}</ol>` : ''}
+      <h4>${t('detail.description')}</h4>
+      <p style="white-space:pre-wrap; max-height:200px; overflow-y:auto;">${escapeHtml(item.description || t('runbook.noDescription'))}</p>
+      <h4>${t('runbook.trigger')}</h4>
+      <p>${t('runbook.signal')}: <span class="action-type-badge">${escapeHtml((item.trigger || {}).signalType || '-')}</span>
+         ${t('runbook.severity')}: ${severityBadge((item.trigger || {}).severity || '-')}
+         ${t('runbook.kind')}: ${resourceKindBadge((item.trigger || {}).resourceKind || '-')}</p>
+      ${steps ? `<h4>${t('runbook.steps', { n: (item.steps || []).length })}</h4><ol class="step-list">${steps}</ol>` : ''}
     </div>
   </td>`;
   return tr;
@@ -2080,25 +3280,25 @@ async function loadPostMortems() {
   try {
     const data = await apiFetch('/postmortems?pageSize=100');
     const items = data.items || [];
-    if (items.length === 0) { showEmpty(el, 'No post-mortems available'); return; }
+    if (items.length === 0) { showEmpty(el, t('pm.empty')); return; }
     el.innerHTML = `<table>
       <thead><tr>
-        <th></th><th>Name</th><th>Severity</th><th>State</th><th>Resource</th><th>Duration</th><th>Issue</th><th>Created</th><th>Actions</th>
+        <th></th><th>${t('col.name')}</th><th>${t('col.severity')}</th><th>${t('col.state')}</th><th>${t('col.resource')}</th><th>${t('col.duration')}</th><th>${t('col.issue')}</th><th data-time>${t('col.created')}</th><th>${t('col.actions')}</th>
       </tr></thead>
       <tbody id="pmTbody"></tbody>
     </table>`;
     const tbody = $('#pmTbody');
     items.forEach((item, idx) => {
-      const id = 'pm-' + idx;
+      const id = 'pm-' + rowKey(item, idx);
       const isExpanded = expandedRows.has(id);
       const mainRow = document.createElement('tr');
       mainRow.className = 'expandable';
       mainRow.dataset.rowId = id;
       const pmChaosBadge = item.chaosInduced
-        ? `<span class="badge-chaos" title="Chaos drill — correlated with ${escapeHtml(item.chaosExperiment || 'a ChaosExperiment')}">CHAOS</span>`
+        ? `<span class="badge-chaos" title="${escapeHtml(t('badge.chaosTitle', { experiment: item.chaosExperiment || t('badge.chaosDefault') }))}">${t('badge.chaos')}</span>`
         : '';
       const pmHumanBadge = item.requiresHumanAction
-        ? `<span class="badge-needs-human" title="${escapeHtml(item.requiredAction || 'Workload contained — human action required')}">NEEDS HUMAN</span>`
+        ? `<span class="badge-needs-human" title="${escapeHtml(item.requiredAction || t('pm.humanDefault'))}">${t('badge.needsHuman')}</span>`
         : '';
       mainRow.innerHTML = `
         <td style="width:20px; cursor:pointer; color:var(--text-muted)">${isExpanded ? '&#9660;' : '&#9654;'}</td>
@@ -2110,9 +3310,9 @@ async function loadPostMortems() {
         <td>${escapeHtml(item.issueRef || '-')}</td>
         <td data-sort-value="${new Date(item.creationTimestamp || 0).getTime()}">${timeAgo(item.creationTimestamp)}</td>
         <td class="btn-group">
-          ${item.state !== 'Closed' && !item.requiresHumanAction ? `<button class="btn" onclick="event.stopPropagation(); reviewPM('${escapeHtml(item.name)}', '${escapeHtml(item.namespace)}')">Review</button>` : ''}
-          ${item.state !== 'Closed' && !item.requiresHumanAction ? `<button class="btn btn-success" onclick="event.stopPropagation(); closePM('${escapeHtml(item.name)}', '${escapeHtml(item.namespace)}')">Close</button>` : ''}
-          ${item.requiresHumanAction ? `<button class="btn" style="background:var(--violet);color:var(--on-accent);font-weight:700" onclick="event.stopPropagation(); ackHumanAction('${escapeHtml(item.name)}', '${escapeHtml(item.namespace)}')" title="Acknowledge that the required action has been performed (clears requiresHumanAction and unblocks Close)">Ack Human Action</button>` : ''}
+          ${item.state !== 'Closed' && !item.requiresHumanAction ? `<button class="btn" onclick="event.stopPropagation(); reviewPM('${escapeHtml(item.name)}', '${escapeHtml(item.namespace)}')">${t('pm.review')}</button>` : ''}
+          ${item.state !== 'Closed' && !item.requiresHumanAction ? `<button class="btn btn-success" onclick="event.stopPropagation(); closePM('${escapeHtml(item.name)}', '${escapeHtml(item.namespace)}')">${t('pm.close')}</button>` : ''}
+          ${item.requiresHumanAction ? `<button class="btn" style="background:var(--violet);color:var(--on-accent);font-weight:700" onclick="event.stopPropagation(); ackHumanAction('${escapeHtml(item.name)}', '${escapeHtml(item.namespace)}')" title="${escapeHtml(t('pm.ackHumanTitle'))}">${t('pm.ackHuman')}</button>` : ''}
         </td>
       `;
       mainRow.addEventListener('click', () => togglePMExpand(id, item, mainRow));
@@ -2123,7 +3323,7 @@ async function loadPostMortems() {
     });
     makeSortable(el.querySelector('table'));
   } catch (e) {
-    showError(el, 'Failed to load post-mortems: ' + e.message, 'loadPostMortems()');
+    showError(el, t('error.postmortems', { msg: e.message }), 'loadPostMortems()');
   }
 }
 
@@ -2144,61 +3344,61 @@ function buildPMExpandRow(item) {
   const tr = document.createElement('tr');
   tr.className = 'expand-row';
   tr.dataset.parent = 'pm-' + (item._idx || '');
-  const timeline = (item.timeline || []).map(t =>
-    `<li><strong>${escapeHtml(t.type)}</strong> (${new Date(t.timestamp).toLocaleString()}): ${escapeHtml(t.detail)}</li>`
+  const timeline = (item.timeline || []).map(ev =>
+    `<li><strong>${escapeHtml(ev.type)}</strong> (${fmtDateTime(ev.timestamp)}): ${escapeHtml(ev.detail)}</li>`
   ).join('');
   const actionsExecuted = (item.actionsExecuted || []).map(a =>
-    `<li><span class="action-type-badge">${escapeHtml(a.action || '-')}</span> ${a.result === 'success' ? '✅' : '❌'} ${escapeHtml(a.detail || '')} <small style="color:var(--text-muted)">${a.timestamp ? new Date(a.timestamp).toLocaleString() : ''}</small></li>`
+    `<li><span class="action-type-badge">${escapeHtml(a.action || '-')}</span> ${a.result === 'success' ? '✅' : '❌'} ${escapeHtml(a.detail || '')} <small style="color:var(--text-muted)">${a.timestamp ? fmtDateTime(a.timestamp) : ''}</small></li>`
   ).join('');
   const lessons = (item.lessonsLearned || []).map(l => `<li>${escapeHtml(l)}</li>`).join('');
   const preventions = (item.preventionActions || []).map(a => `<li>${escapeHtml(a)}</li>`).join('');
   tr.innerHTML = `<td colspan="9">
     <div class="expand-content">
-      <h4>Summary</h4>
-      <p style="white-space:pre-wrap; max-height:200px; overflow-y:auto;">${escapeHtml(item.summary || 'No summary available')}</p>
-      <h4>Root Cause</h4>
-      <p style="white-space:pre-wrap; max-height:200px; overflow-y:auto;">${escapeHtml(item.rootCause || 'Not determined')}</p>
-      <h4>Impact</h4>
+      <h4>${t('pm.summary')}</h4>
+      <p style="white-space:pre-wrap; max-height:200px; overflow-y:auto;">${escapeHtml(item.summary || t('pm.noSummary'))}</p>
+      <h4>${t('pm.rootCause')}</h4>
+      <p style="white-space:pre-wrap; max-height:200px; overflow-y:auto;">${escapeHtml(item.rootCause || t('pm.notDetermined'))}</p>
+      <h4>${t('pm.impact')}</h4>
       <p style="white-space:pre-wrap; max-height:200px; overflow-y:auto;">${escapeHtml(item.impact || '-')}</p>
-      ${timeline ? `<h4>Timeline</h4><ul>${timeline}</ul>` : ''}
-      ${actionsExecuted ? `<h4>Actions Executed</h4><ul>${actionsExecuted}</ul>` : ''}
-      ${lessons ? `<h4>Lessons Learned</h4><ul>${lessons}</ul>` : ''}
-      ${preventions ? `<h4>Prevention Actions</h4><ul>${preventions}</ul>` : ''}
-      <h4>Developer Feedback</h4>
+      ${timeline ? `<h4>${t('pm.timeline')}</h4><ul>${timeline}</ul>` : ''}
+      ${actionsExecuted ? `<h4>${t('pm.actionsExecuted')}</h4><ul>${actionsExecuted}</ul>` : ''}
+      ${lessons ? `<h4>${t('pm.lessons')}</h4><ul>${lessons}</ul>` : ''}
+      ${preventions ? `<h4>${t('pm.prevention')}</h4><ul>${preventions}</ul>` : ''}
+      <h4>${t('pm.feedback')}</h4>
       ${item.feedback ? `
         <div style="background:var(--card-bg); border:1px solid var(--border); border-radius:8px; padding:1rem; margin-bottom:1rem;">
           <div style="display:flex; gap:1.5rem; flex-wrap:wrap; margin-bottom:0.5rem;">
-            <span><strong>Provided by:</strong> ${escapeHtml(item.feedback.providedBy || '-')}</span>
-            <span><strong>At:</strong> ${item.feedback.providedAt ? new Date(item.feedback.providedAt).toLocaleString() : '-'}</span>
-            <span><strong>Remediation Accuracy:</strong> ${'★'.repeat(item.feedback.remediationAccuracy || 0)}${'☆'.repeat(5 - (item.feedback.remediationAccuracy || 0))}</span>
+            <span><strong>${t('pm.providedBy')}:</strong> ${escapeHtml(item.feedback.providedBy || '-')}</span>
+            <span><strong>${t('pm.at')}:</strong> ${item.feedback.providedAt ? fmtDateTime(item.feedback.providedAt) : '-'}</span>
+            <span><strong>${t('pm.accuracy')}:</strong> ${'★'.repeat(item.feedback.remediationAccuracy || 0)}${'☆'.repeat(5 - (item.feedback.remediationAccuracy || 0))}</span>
           </div>
-          ${item.feedback.overrideRootCause ? `<p><strong>Root Cause Override:</strong> ${escapeHtml(item.feedback.overrideRootCause)}</p>` : ''}
-          ${item.feedback.comments ? `<p><strong>Comments:</strong> ${escapeHtml(item.feedback.comments)}</p>` : ''}
+          ${item.feedback.overrideRootCause ? `<p><strong>${t('pm.rootCauseOverride')}:</strong> ${escapeHtml(item.feedback.overrideRootCause)}</p>` : ''}
+          ${item.feedback.comments ? `<p><strong>${t('pm.comments')}:</strong> ${escapeHtml(item.feedback.comments)}</p>` : ''}
         </div>
       ` : `
         <div id="feedback-form-${escapeHtml(item.name)}" style="background:var(--card-bg); border:1px solid var(--border); border-radius:8px; padding:1rem;">
           <div style="display:flex; flex-direction:column; gap:0.75rem;">
             <div style="display:flex; gap:1rem; align-items:center; flex-wrap:wrap;">
-              <label style="min-width:140px;">Remediation Accuracy:</label>
+              <label style="min-width:140px;">${t('pm.accuracy')}:</label>
               <span class="star-rating" data-pm="${escapeHtml(item.name)}">
                 ${[1,2,3,4,5].map(n => `<span class="star" data-value="${n}" style="cursor:pointer; font-size:1.3rem; color:var(--text-muted)" onmouseover="previewStars(this)" onmouseout="resetStars(this)" onclick="selectStar(this)">☆</span>`).join('')}
               </span>
               <input type="hidden" id="fb-accuracy-${escapeHtml(item.name)}" value="0">
             </div>
             <div style="display:flex; gap:1rem; align-items:center; flex-wrap:wrap;">
-              <label style="min-width:140px;">Your Name:</label>
-              <input type="text" id="fb-author-${escapeHtml(item.name)}" placeholder="e.g., john.doe" style="background:var(--bg); color:var(--text); border:1px solid var(--border); border-radius:4px; padding:0.4rem 0.6rem; flex:1; min-width:150px;">
+              <label style="min-width:140px;" for="fb-author-${escapeHtml(item.name)}">${t('pm.yourName')}:</label>
+              <input type="text" id="fb-author-${escapeHtml(item.name)}" placeholder="${escapeHtml(t('pm.namePlaceholder'))}" style="background:var(--bg); color:var(--text); border:1px solid var(--border); border-radius:4px; padding:0.4rem 0.6rem; flex:1; min-width:150px;">
             </div>
             <div style="display:flex; gap:1rem; align-items:start; flex-wrap:wrap;">
-              <label style="min-width:140px;">Root Cause Override:</label>
-              <input type="text" id="fb-rootcause-${escapeHtml(item.name)}" placeholder="Leave empty to keep AI root cause" style="background:var(--bg); color:var(--text); border:1px solid var(--border); border-radius:4px; padding:0.4rem 0.6rem; flex:1; min-width:150px;">
+              <label style="min-width:140px;" for="fb-rootcause-${escapeHtml(item.name)}">${t('pm.rootCauseOverride')}:</label>
+              <input type="text" id="fb-rootcause-${escapeHtml(item.name)}" placeholder="${escapeHtml(t('pm.rootCausePlaceholder'))}" style="background:var(--bg); color:var(--text); border:1px solid var(--border); border-radius:4px; padding:0.4rem 0.6rem; flex:1; min-width:150px;">
             </div>
             <div style="display:flex; gap:1rem; align-items:start; flex-wrap:wrap;">
-              <label style="min-width:140px;">Comments:</label>
-              <textarea id="fb-comments-${escapeHtml(item.name)}" rows="2" placeholder="Additional comments..." style="background:var(--bg); color:var(--text); border:1px solid var(--border); border-radius:4px; padding:0.4rem 0.6rem; flex:1; min-width:150px; resize:vertical;"></textarea>
+              <label style="min-width:140px;" for="fb-comments-${escapeHtml(item.name)}">${t('pm.comments')}:</label>
+              <textarea id="fb-comments-${escapeHtml(item.name)}" rows="2" placeholder="${escapeHtml(t('pm.commentsPlaceholder'))}" style="background:var(--bg); color:var(--text); border:1px solid var(--border); border-radius:4px; padding:0.4rem 0.6rem; flex:1; min-width:150px; resize:vertical;"></textarea>
             </div>
             <div style="text-align:right;">
-              <button class="btn btn-success" onclick="event.stopPropagation(); submitFeedback('${escapeHtml(item.name)}', '${escapeHtml(item.namespace)}')">Submit Feedback</button>
+              <button class="btn btn-success" onclick="event.stopPropagation(); submitFeedback('${escapeHtml(item.name)}', '${escapeHtml(item.namespace)}')">${t('pm.submitFeedback')}</button>
             </div>
           </div>
         </div>
@@ -2211,20 +3411,20 @@ function buildPMExpandRow(item) {
 async function reviewPM(name, ns) {
   try {
     await apiPost(`/postmortems/${name}/review?namespace=${encodeURIComponent(ns)}`, { reviewer: 'web-ui' });
-    toast(`Post-mortem ${name} marked for review`, 'success');
+    toast(t('toast.pmReviewed', { name }), 'success');
     loadPostMortems();
   } catch (e) {
-    toast(`Failed to review: ${e.message}`, 'error');
+    toast(t('toast.reviewFailed', { msg: e.message }), 'error');
   }
 }
 
 async function closePM(name, ns) {
   try {
     await apiPost(`/postmortems/${name}/close?namespace=${encodeURIComponent(ns)}`, { reviewer: 'web-ui', notes: 'Closed via Web UI' });
-    toast(`Post-mortem ${name} closed`, 'success');
+    toast(t('toast.pmClosed', { name }), 'success');
     loadPostMortems();
   } catch (e) {
-    toast(`Failed to close: ${e.message}`, 'error');
+    toast(t('toast.closeFailed', { msg: e.message }), 'error');
   }
 }
 
@@ -2233,15 +3433,15 @@ async function closePM(name, ns) {
 // etc.). Sets the operator-side annotation that lifts the close-block on the
 // PostMortem.
 async function ackHumanAction(name, ns) {
-  const note = prompt('Optional note describing the action you took (rollback target, config change, etc.):', '');
+  const note = prompt(t('prompt.ackHuman'), '');
   if (note === null) return; // user cancelled
   try {
     await apiPost(`/postmortems/${name}/ack-human-action?namespace=${encodeURIComponent(ns)}`,
       { acknowledgedBy: 'web-ui', note: note });
-    toast(`Human action acknowledged for ${name} — PostMortem is now closeable`, 'success');
+    toast(t('toast.humanAcked', { name }), 'success');
     loadPostMortems();
   } catch (e) {
-    toast(`Failed to acknowledge: ${e.message}`, 'error');
+    toast(t('toast.ackFailed', { msg: e.message }), 'error');
   }
 }
 
@@ -2259,6 +3459,7 @@ function selectStar(el) {
   const val = parseInt(el.dataset.value);
   const pm = el.parentElement.dataset.pm;
   document.getElementById('fb-accuracy-' + pm).value = val;
+  rememberDraft('fb-accuracy-' + pm, val);
   previewStars(el);
 }
 
@@ -2268,8 +3469,8 @@ async function submitFeedback(name, ns) {
   const rootCause = (document.getElementById('fb-rootcause-' + name).value || '').trim();
   const comments = (document.getElementById('fb-comments-' + name).value || '').trim();
 
-  if (!author) { toast('Please provide your name', 'error'); return; }
-  if (accuracy < 1 || accuracy > 5) { toast('Please rate the remediation accuracy (1-5 stars)', 'error'); return; }
+  if (!author) { toast(t('toast.nameRequired'), 'error'); return; }
+  if (accuracy < 1 || accuracy > 5) { toast(t('toast.ratingRequired'), 'error'); return; }
 
   try {
     await apiPost(`/postmortems/${name}/feedback?namespace=${encodeURIComponent(ns)}`, {
@@ -2278,10 +3479,11 @@ async function submitFeedback(name, ns) {
       comments: comments,
       providedBy: author
     });
-    toast(`Feedback submitted for ${name}`, 'success');
+    ['fb-accuracy-', 'fb-author-', 'fb-rootcause-', 'fb-comments-'].forEach(pfx => forgetDrafts(pfx + name));
+    toast(t('toast.feedbackSent', { name }), 'success');
     loadPostMortems();
   } catch (e) {
-    toast(`Failed to submit feedback: ${e.message}`, 'error');
+    toast(t('toast.feedbackFailed', { msg: e.message }), 'error');
   }
 }
 
@@ -2295,17 +3497,17 @@ async function loadAIInsights() {
     const qs = issueFilter ? `?pageSize=100&issue=${encodeURIComponent(issueFilter)}` : '?pageSize=100';
     const data = await apiFetch('/aiinsights' + qs);
     const items = data.items || [];
-    $('#insightCount').textContent = `${items.length} insight(s)`;
-    if (items.length === 0) { showEmpty(el, 'No AI insights available'); return; }
+    $('#insightCount').textContent = t('insights.count', { n: items.length });
+    if (items.length === 0) { showEmpty(el, t('insights.empty')); return; }
     el.innerHTML = `<table>
       <thead><tr>
-        <th></th><th>Incident</th><th>Provider</th><th>Model</th><th>Confidence</th><th>Recommendations</th><th>Actions</th><th>Generated</th>
+        <th></th><th>${t('col.incident')}</th><th>${t('col.provider')}</th><th>${t('col.model')}</th><th>${t('col.confidence')}</th><th>${t('col.recommendations')}</th><th>${t('col.actions')}</th><th>${t('col.generated')}</th>
       </tr></thead>
       <tbody id="insightsTbody"></tbody>
     </table>`;
     const tbody = $('#insightsTbody');
     items.forEach((item, idx) => {
-      const id = 'ai-' + idx;
+      const id = 'ai-' + rowKey(item, idx);
       const isExpanded = expandedRows.has(id);
       const confidence = item.confidence || 0;
       const confColor = confidence >= 0.85 ? 'var(--sev-low)' : confidence >= 0.7 ? 'var(--sev-medium)' : 'var(--sev-high)';
@@ -2319,9 +3521,9 @@ async function loadAIInsights() {
         <td>${escapeHtml(item.issueRef || '-')}</td>
         <td>${escapeHtml(item.provider || '-')}</td>
         <td><small>${escapeHtml(item.model || '-')}</small></td>
-        <td><span style="color:${confColor}; font-weight:600">${(confidence * 100).toFixed(0)}%</span></td>
+        <td><span style="color:${confColor}; font-weight:600">${fmtNum(confidence * 100, 0)}%</span></td>
         <td>${recCount}</td>
-        <td>${actCount > 0 ? `<span class="action-type-badge">${actCount} action(s)</span>` : '-'}</td>
+        <td>${actCount > 0 ? `<span class="action-type-badge">${t('insights.actions', { n: actCount })}</span>` : '-'}</td>
         <td data-sort-value="${new Date(item.generatedAt || item.creationTimestamp || 0).getTime()}">${timeAgo(item.generatedAt || item.creationTimestamp)}</td>
       `;
       mainRow.addEventListener('click', () => toggleInsightExpand(id, item, mainRow));
@@ -2330,7 +3532,7 @@ async function loadAIInsights() {
     });
     makeSortable(el.querySelector('table'));
   } catch (e) {
-    showError(el, 'Failed to load AI insights: ' + e.message, 'loadAIInsights()');
+    showError(el, t('error.insights', { msg: e.message }), 'loadAIInsights()');
   }
 }
 
@@ -2356,14 +3558,14 @@ function buildInsightExpandRow(item) {
   ).join('');
   tr.innerHTML = `<td colspan="8">
     <div class="expand-content">
-      <h4>AI Analysis</h4>
-      <p style="white-space:pre-wrap; max-height:300px; overflow-y:auto;">${escapeHtml(item.analysis || 'Analysis pending...')}</p>
-      ${recs ? `<h4>Recommendations</h4><ul>${recs}</ul>` : ''}
-      ${actions ? `<h4>Suggested Actions</h4><ul>${actions}</ul>` : ''}
-      ${item.logAnalysis ? `<h4>Log Analysis</h4><p style="white-space:pre-wrap; max-height:200px; overflow-y:auto; font-size:0.8rem; color:var(--text-muted)">${escapeHtml(item.logAnalysis)}</p>` : ''}
-      ${item.cascadeAnalysis ? `<h4>Cascade Analysis</h4><p style="white-space:pre-wrap; font-size:0.85rem;">${escapeHtml(item.cascadeAnalysis)}</p>` : ''}
-      ${item.gitOpsContext ? `<h4>GitOps Context</h4><p style="font-size:0.85rem;">${escapeHtml(item.gitOpsContext)}</p>` : ''}
-      ${item.blastRadiusPrediction ? `<h4>Blast Radius Prediction</h4><p style="font-size:0.85rem;">${escapeHtml(item.blastRadiusPrediction)}</p>` : ''}
+      <h4>${t('ai.analysis')}</h4>
+      <p style="white-space:pre-wrap; max-height:300px; overflow-y:auto;">${escapeHtml(item.analysis || t('insights.pending'))}</p>
+      ${recs ? `<h4>${t('ai.recommendations')}</h4><ul>${recs}</ul>` : ''}
+      ${actions ? `<h4>${t('insights.suggestedActions')}</h4><ul>${actions}</ul>` : ''}
+      ${item.logAnalysis ? `<h4>${t('insights.logAnalysis')}</h4><p style="white-space:pre-wrap; max-height:200px; overflow-y:auto; font-size:0.8rem; color:var(--text-muted)">${escapeHtml(item.logAnalysis)}</p>` : ''}
+      ${item.cascadeAnalysis ? `<h4>${t('insights.cascade')}</h4><p style="white-space:pre-wrap; font-size:0.85rem;">${escapeHtml(item.cascadeAnalysis)}</p>` : ''}
+      ${item.gitOpsContext ? `<h4>${t('insights.gitops')}</h4><p style="font-size:0.85rem;">${escapeHtml(item.gitOpsContext)}</p>` : ''}
+      ${item.blastRadiusPrediction ? `<h4>${t('insights.blastRadius')}</h4><p style="font-size:0.85rem;">${escapeHtml(item.blastRadiusPrediction)}</p>` : ''}
     </div>
   </td>`;
   return tr;
@@ -2382,24 +3584,24 @@ async function loadRemediations() {
     if (issueFilter) qs += `&issue=${encodeURIComponent(issueFilter)}`;
     const data = await apiFetch('/remediations' + qs);
     const items = data.items || [];
-    $('#remediationCount').textContent = `${items.length} plan(s)`;
-    if (items.length === 0) { showEmpty(el, 'No remediation plans available'); return; }
+    $('#remediationCount').textContent = t('remediations.count', { n: items.length });
+    if (items.length === 0) { showEmpty(el, t('remediations.empty')); return; }
     el.innerHTML = `<table>
       <thead><tr>
-        <th></th><th>Name</th><th>Incident</th><th>Attempt</th><th>State</th><th>Mode</th><th>Actions</th><th>Started</th><th>Duration</th>
+        <th></th><th>${t('col.name')}</th><th>${t('col.incident')}</th><th>${t('col.attempt')}</th><th>${t('col.state')}</th><th>${t('col.mode')}</th><th>${t('col.actions')}</th><th>${t('col.started')}</th><th>${t('col.duration')}</th>
       </tr></thead>
       <tbody id="remTbody"></tbody>
     </table>`;
     const tbody = $('#remTbody');
     items.forEach((item, idx) => {
-      const id = 'rem-' + idx;
+      const id = 'rem-' + rowKey(item, idx);
       const isExpanded = expandedRows.has(id);
-      const mode = item.agenticMode ? '<span style="color:var(--highlight); font-weight:600">Agentic</span>' : 'Runbook';
+      const mode = item.agenticMode ? `<span style="color:var(--highlight); font-weight:600">${t('rem.agentic')}</span>` : t('rem.runbook');
       const actCount = (item.actions || []).length;
-      const stepsInfo = item.agenticMode ? `${item.agenticStepCount || 0} steps` : `${actCount} action(s)`;
+      const stepsInfo = item.agenticMode ? t('rem.steps', { n: item.agenticStepCount || 0 }) : t('insights.actions', { n: actCount });
       const duration = item.startedAt && item.completedAt
         ? formatDuration(new Date(item.completedAt) - new Date(item.startedAt))
-        : item.startedAt ? 'In progress...' : '-';
+        : item.startedAt ? t('common.inProgress') : '-';
       const mainRow = document.createElement('tr');
       mainRow.className = 'expandable';
       mainRow.dataset.rowId = id;
@@ -2420,7 +3622,7 @@ async function loadRemediations() {
     });
     makeSortable(el.querySelector('table'));
   } catch (e) {
-    showError(el, 'Failed to load remediations: ' + e.message, 'loadRemediations()');
+    showError(el, t('error.remediations', { msg: e.message }), 'loadRemediations()');
   }
 }
 
@@ -2445,14 +3647,14 @@ function buildRemExpandRow(item) {
   ).join('');
   tr.innerHTML = `<td colspan="9">
     <div class="expand-content">
-      <h4>Strategy</h4>
-      <p>${escapeHtml(item.strategy || 'N/A')}</p>
-      ${actions ? `<h4>Planned Actions</h4><ul>${actions}</ul>` : ''}
-      ${item.result ? `<h4>Result</h4><p>${escapeHtml(item.result)}</p>` : ''}
+      <h4>${t('rem.strategy')}</h4>
+      <p>${escapeHtml(item.strategy || t('common.na'))}</p>
+      ${actions ? `<h4>${t('rem.plannedActions')}</h4><ul>${actions}</ul>` : ''}
+      ${item.result ? `<h4>${t('rem.result')}</h4><p>${escapeHtml(item.result)}</p>` : ''}
       <p style="margin-top:0.5rem; font-size:0.8rem; color:var(--text-muted)">
-        ${item.agenticMode ? `Agentic steps: ${item.agenticStepCount || 0}` : ''}
-        ${item.startedAt ? ` | Started: ${new Date(item.startedAt).toLocaleString()}` : ''}
-        ${item.completedAt ? ` | Completed: ${new Date(item.completedAt).toLocaleString()}` : ''}
+        ${item.agenticMode ? t('rem.agenticSteps', { n: item.agenticStepCount || 0 }) : ''}
+        ${item.startedAt ? ` | ${t('rem.started', { when: fmtDateTime(item.startedAt) })}` : ''}
+        ${item.completedAt ? ` | ${t('rem.completed', { when: fmtDateTime(item.completedAt) })}` : ''}
       </p>
     </div>
   </td>`;
@@ -2476,19 +3678,19 @@ async function loadComplianceCard() {
     el.innerHTML = `
       <div style="display:grid; grid-template-columns:1fr 1fr; gap:1rem;">
         <div>
-          <div style="font-size:2rem; font-weight:700; color:${compColor}">${compPct.toFixed(1)}%</div>
-          <div style="color:var(--text-muted); font-size:0.8rem">SLA Compliance</div>
+          <div style="font-size:2rem; font-weight:700; color:${compColor}">${fmtNum(compPct, 1)}%</div>
+          <div style="color:var(--text-muted); font-size:0.8rem">${t('compliance.sla')}</div>
         </div>
         <div style="font-size:0.85rem; color:var(--text-muted)">
           <div>MTTD: ${inc.MTTD ? formatDuration(inc.MTTD / 1e6) : '-'}</div>
           <div>MTTR: ${inc.MTTR ? formatDuration(inc.MTTR / 1e6) : '-'}</div>
-          <div>Response violations: ${sla.ResponseSLAViolations || 0}</div>
-          <div>Resolution violations: ${sla.ResolutionSLAViolations || 0}</div>
-          <div>Approvals (auto/manual): ${approval.AutoApproved || 0}/${approval.ManualApproved || 0}</div>
+          <div>${t('compliance.responseViolations', { n: sla.ResponseSLAViolations || 0 })}</div>
+          <div>${t('compliance.resolutionViolations', { n: sla.ResolutionSLAViolations || 0 })}</div>
+          <div>${t('compliance.approvals', { auto: approval.AutoApproved || 0, manual: approval.ManualApproved || 0 })}</div>
         </div>
       </div>`;
   } catch (e) {
-    el.innerHTML = '<p style="color:var(--text-muted); font-size:0.8rem">Compliance data unavailable</p>';
+    el.innerHTML = `<p style="color:var(--text-muted); font-size:0.8rem">${t('compliance.unavailable')}</p>`;
   }
 }
 
@@ -2504,14 +3706,14 @@ async function loadCapacityWarnings() {
     if (warnings.length === 0) { el.innerHTML = ''; return; }
     el.innerHTML = `
       <div class="panel" style="border-left:3px solid var(--warning); margin-bottom:1rem;">
-        <div class="panel-header"><span class="panel-title" style="color:var(--warning)">Capacity Warnings (${warnings.length})</span></div>
+        <div class="panel-header"><span class="panel-title" style="color:var(--warning)">${t('capacity.title', { n: warnings.length })}</span></div>
         <div class="panel-body">
           ${warnings.map(w => {
             const res = w.Resource || {};
             const urgColor = w.Urgency === 'urgent' ? 'var(--sev-critical)' : 'var(--sev-medium)';
             return `<div style="padding:0.3rem 0; border-bottom:1px solid var(--border);">
-              <span style="color:${urgColor}; font-weight:600; text-transform:uppercase; font-size:0.7rem">${escapeHtml(w.Urgency || 'unknown')}</span>
-              ${resourceKindBadge(res.Kind || 'Unknown')} ${escapeHtml(res.Name || '-')}
+              <span style="color:${urgColor}; font-weight:600; text-transform:uppercase; font-size:0.7rem" data-urgency="${escapeHtml(w.Urgency || 'unknown')}">${escapeHtml(enumLabel('urgency', w.Urgency, 'common.unknown'))}</span>
+              ${resourceKindBadge(res.Kind || t('common.unknown'))} ${escapeHtml(res.Name || '-')}
               <span style="color:var(--text-muted); font-size:0.8rem">— ${escapeHtml(w.Recommendation || '')}</span>
             </div>`;
           }).join('')}
@@ -2529,13 +3731,13 @@ async function loadRemediationStrategyChart() {
   try {
     const data = await apiFetch('/analytics/remediation-stats?' + getTimeRangeQuery());
     const items = data.items || [];
-    if (items.length === 0) { el.innerHTML = '<p style="color:var(--text-muted)">No remediation data</p>'; return; }
+    if (items.length === 0) { el.innerHTML = `<p style="color:var(--text-muted)">${t('strategy.empty')}</p>`; return; }
     const sorted = items.sort((a, b) => (b.total || 0) - (a.total || 0)).slice(0, 8);
     el.innerHTML = sorted.map(s => {
       const rate = s.successRate != null ? (s.successRate * 100).toFixed(0) : 0;
       const barColor = rate >= 80 ? 'var(--sev-low)' : rate >= 50 ? 'var(--sev-medium)' : 'var(--sev-critical)';
       return `<div style="display:flex; align-items:center; gap:0.5rem; margin-bottom:0.4rem;">
-        <span style="min-width:130px; font-size:0.75rem; color:var(--text-muted)">${escapeHtml(s.action || 'Unknown')}</span>
+        <span style="min-width:130px; font-size:0.75rem; color:var(--text-muted)">${escapeHtml(s.action || t('common.unknown'))}</span>
         <div style="flex:1; background:var(--panel2); border-radius:4px; height:16px; overflow:hidden;">
           <div style="width:${rate}%; background:${barColor}; height:100%; border-radius:4px; transition:width 0.3s;"></div>
         </div>
@@ -2544,7 +3746,7 @@ async function loadRemediationStrategyChart() {
       </div>`;
     }).join('');
   } catch (e) {
-    el.innerHTML = '<p style="color:var(--text-muted); font-size:0.8rem">Stats unavailable</p>';
+    el.innerHTML = `<p style="color:var(--text-muted); font-size:0.8rem">${t('strategy.unavailable')}</p>`;
   }
 }
 
@@ -2561,23 +3763,23 @@ async function loadFederationPanel() {
     const correlations = corrData ? (corrData.items || []) : [];
     if (!status && correlations.length === 0) { el.innerHTML = ''; return; }
 
-    let html = '<div class="panel" style="margin-bottom:1rem;"><div class="panel-header"><span class="panel-title">Federation</span></div><div class="panel-body">';
+    let html = `<div class="panel" style="margin-bottom:1rem;"><div class="panel-header"><span class="panel-title">${t('federation.title')}</span></div><div class="panel-body">`;
     if (status) {
       html += `<div class="stats-grid" style="margin-bottom:0.5rem;">
-        <div class="stat-card"><div class="stat-label">Connected</div><div class="stat-value" style="color:var(--sev-low)">${status.connectedClusters || 0}</div></div>
-        <div class="stat-card"><div class="stat-label">Disconnected</div><div class="stat-value" style="color:var(--sev-critical)">${status.disconnectedClusters || 0}</div></div>
-        <div class="stat-card"><div class="stat-label">Active Issues</div><div class="stat-value" style="color:var(--warning)">${status.totalActiveIssues || 0}</div></div>
+        <div class="stat-card"><div class="stat-label">${t('federation.connected')}</div><div class="stat-value" style="color:var(--sev-low)">${status.connectedClusters || 0}</div></div>
+        <div class="stat-card"><div class="stat-label">${t('federation.disconnected')}</div><div class="stat-value" style="color:var(--sev-critical)">${status.disconnectedClusters || 0}</div></div>
+        <div class="stat-card"><div class="stat-label">${t('federation.activeIssues')}</div><div class="stat-value" style="color:var(--warning)">${status.totalActiveIssues || 0}</div></div>
       </div>`;
     }
     if (correlations.length > 0) {
-      html += `<h4 style="margin:0.5rem 0 0.3rem; font-size:0.85rem;">Cross-Cluster Correlations (${correlations.length})</h4>`;
+      html += `<h4 style="margin:0.5rem 0 0.3rem; font-size:0.85rem;">${t('federation.correlations', { n: correlations.length })}</h4>`;
       html += correlations.map(c => `
         <div style="padding:0.3rem 0; border-bottom:1px solid var(--border); font-size:0.8rem;">
           ${severityBadge(c.severity || 'low')}
           <strong>${escapeHtml(c.issue || '-')}</strong>
           <span style="color:var(--text-muted)">— ${escapeHtml(c.signalType || '-')}</span>
-          ${c.cascade ? '<span style="color:var(--sev-critical); font-size:0.7rem; margin-left:0.3rem">CASCADE</span>' : ''}
-          ${c.elevated ? '<span style="color:var(--sev-high); font-size:0.7rem; margin-left:0.3rem">ELEVATED</span>' : ''}
+          ${c.cascade ? `<span style="color:var(--sev-critical); font-size:0.7rem; margin-left:0.3rem">${t('federation.cascade')}</span>` : ''}
+          ${c.elevated ? `<span style="color:var(--sev-high); font-size:0.7rem; margin-left:0.3rem">${t('federation.elevated')}</span>` : ''}
           ${c.correlatedClusters ? `<span style="color:var(--text-dim); font-size:0.7rem; margin-left:0.3rem">${escapeHtml(c.correlatedClusters)}</span>` : ''}
         </div>`).join('');
     }
@@ -2600,24 +3802,24 @@ async function loadClusters() {
     const status = data.spec || {};
     summaryEl.innerHTML = `
       <div class="stat-card">
-        <div class="stat-label">Total Clusters</div>
+        <div class="stat-label">${t('clusters.total')}</div>
         <div class="stat-value">${status.totalClusters || 0}</div>
       </div>
       <div class="stat-card">
-        <div class="stat-label">Healthy</div>
+        <div class="stat-label">${t('clusters.healthy')}</div>
         <div class="stat-value" style="color:var(--sev-low)">${status.healthyClusters || 0}</div>
       </div>
       <div class="stat-card">
-        <div class="stat-label">Degraded</div>
+        <div class="stat-label">${t('clusters.degraded')}</div>
         <div class="stat-value" style="color:var(--sev-medium)">${status.degradedClusters || 0}</div>
       </div>
       <div class="stat-card">
-        <div class="stat-label">Offline</div>
+        <div class="stat-label">${t('clusters.offline')}</div>
         <div class="stat-value" style="color:var(--sev-critical)">${status.offlineClusters || 0}</div>
       </div>
     `;
     const clusters = status.clusters || [];
-    if (clusters.length === 0) { showEmpty(cardsEl, 'No clusters registered'); return; }
+    if (clusters.length === 0) { showEmpty(cardsEl, t('clusters.empty')); return; }
     cardsEl.innerHTML = clusters.map(c => {
       const connState = c.connected ? 'Healthy' : 'Offline';
       return `
@@ -2626,21 +3828,21 @@ async function loadClusters() {
             <span class="cluster-name">${escapeHtml(c.displayName || c.name)}</span>
             ${stateBadge(connState)}
           </div>
-          <div class="cluster-detail"><b>Region:</b> ${escapeHtml(c.region || '-')}</div>
-          <div class="cluster-detail"><b>Environment:</b> ${escapeHtml(c.environment || '-')}</div>
-          <div class="cluster-detail"><b>Tier:</b> ${escapeHtml(c.tier || '-')}</div>
-          <div class="cluster-detail"><b>Nodes:</b> ${c.nodeCount || '-'}</div>
-          <div class="cluster-detail"><b>Namespaces:</b> ${c.namespaceCount || '-'}</div>
-          <div class="cluster-detail"><b>Version:</b> ${escapeHtml(c.version || '-')}</div>
-          <div class="cluster-detail"><b>Active Issues:</b> ${c.activeIssues || 0}</div>
-          <div class="cluster-detail"><b>Active Remediations:</b> ${c.activeRemediations || 0}</div>
-          ${c.lastHealthCheck ? `<div class="cluster-detail"><b>Last Health Check:</b> ${timeAgo(c.lastHealthCheck)}</div>` : ''}
+          <div class="cluster-detail"><b>${t('cluster.region')}:</b> ${escapeHtml(c.region || '-')}</div>
+          <div class="cluster-detail"><b>${t('cluster.environment')}:</b> ${escapeHtml(c.environment || '-')}</div>
+          <div class="cluster-detail"><b>${t('cluster.tier')}:</b> ${escapeHtml(c.tier || '-')}</div>
+          <div class="cluster-detail"><b>${t('cluster.nodes')}:</b> ${c.nodeCount || '-'}</div>
+          <div class="cluster-detail"><b>${t('cluster.namespaces')}:</b> ${c.namespaceCount || '-'}</div>
+          <div class="cluster-detail"><b>${t('cluster.version')}:</b> ${escapeHtml(c.version || '-')}</div>
+          <div class="cluster-detail"><b>${t('cluster.activeIssues')}:</b> ${c.activeIssues || 0}</div>
+          <div class="cluster-detail"><b>${t('cluster.activeRemediations')}:</b> ${c.activeRemediations || 0}</div>
+          ${c.lastHealthCheck ? `<div class="cluster-detail"><b>${t('cluster.lastHealthCheck')}:</b> ${timeAgo(c.lastHealthCheck)}</div>` : ''}
         </div>
       `;
     }).join('');
   } catch (e) {
     summaryEl.innerHTML = '';
-    showError(cardsEl, 'Failed to load clusters: ' + e.message, 'loadClusters()');
+    showError(cardsEl, t('error.clusters', { msg: e.message }), 'loadClusters()');
   }
 }
 
@@ -2681,15 +3883,15 @@ async function loadAudit() {
       );
     }
 
-    $('#auditCount').textContent = `${items.length} event(s)` + (items.length !== total ? ` of ${total}` : '');
-    if (items.length === 0) { showEmpty(el, 'No audit events found'); return; }
+    $('#auditCount').textContent = items.length !== total ? t('audit.countOf', { n: items.length, total }) : t('audit.count', { n: items.length });
+    if (items.length === 0) { showEmpty(el, t('audit.empty')); return; }
     el.innerHTML = `<table>
       <thead><tr>
-        <th>Timestamp</th><th>Event Type</th><th>Severity</th><th>Actor</th><th>Resource</th><th>Correlation</th><th>Detail</th>
+        <th data-time>${t('col.timestamp')}</th><th>${t('col.eventType')}</th><th>${t('col.severity')}</th><th>${t('col.actor')}</th><th>${t('col.resource')}</th><th>${t('col.correlation')}</th><th>${t('col.detail')}</th>
       </tr></thead>
       <tbody>
         ${items.map(i => `<tr>
-          <td style="white-space:nowrap" data-sort-value="${new Date(i.timestamp || i.creationTimestamp || 0).getTime()}">${i.timestamp ? new Date(i.timestamp).toLocaleString() : timeAgo(i.creationTimestamp)}</td>
+          <td style="white-space:nowrap" data-sort-value="${new Date(i.timestamp || i.creationTimestamp || 0).getTime()}">${i.timestamp ? fmtDateTime(i.timestamp) : timeAgo(i.creationTimestamp)}</td>
           <td>${escapeHtml(i.eventType || '-')}</td>
           <td>${i.severity ? severityBadge(i.severity) : '-'}</td>
           <td>${escapeHtml(i.actorName || '-')}${i.actorType ? ' <small>(' + escapeHtml(i.actorType) + ')</small>' : ''}</td>
@@ -2701,7 +3903,7 @@ async function loadAudit() {
     </table>`;
     makeSortable(el.querySelector('table'));
   } catch (e) {
-    showError(el, 'Failed to load audit events: ' + e.message, 'loadAudit()');
+    showError(el, t('error.audit', { msg: e.message }), 'loadAudit()');
   }
 }
 
@@ -2725,9 +3927,9 @@ async function exportAudit() {
     a.click();
     a.remove();
     URL.revokeObjectURL(url);
-    toast('Audit events exported', 'success');
+    toast(t('toast.exported'), 'success');
   } catch (e) {
-    toast('Failed to export: ' + e.message, 'error');
+    toast(t('toast.exportFailed', { msg: e.message }), 'error');
   }
 }
 
@@ -2749,9 +3951,18 @@ async function updateApprovalBadge() {
 
 // ===== INIT =====
 
+// Preferences first: the head bootstrap chose theme and language before
+// paint; here the switchers reflect that choice and the static markup gets
+// its labels, before any panel renders.
+$('#themeSelect').value = storedTheme();
+$('#langSelect').value = lang;
+applyTranslations();
+
 document.addEventListener('DOMContentLoaded', () => {
   updateLogoutBtn();
   initDragPanels('overviewPanels');
+  initRecentFilters();
+  initDraftGuard();
   loadOverview();
   checkHealth();
   updateApprovalBadge();
