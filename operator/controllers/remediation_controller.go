@@ -655,6 +655,7 @@ func (r *RemediationReconciler) handleAgenticExecuting(ctx context.Context, plan
 	}
 
 	resp, requeue := r.callAgenticStepRPC(ctx, plan, issue, maxSteps, currentStep, log)
+	r.recordAgenticStepCost(ctx, issue, resp)
 	if resp == nil {
 		return requeue, nil
 	}
@@ -1677,4 +1678,20 @@ func (r *RemediationReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&platformv1alpha1.RemediationPlan{}).
 		Complete(r)
+}
+
+// recordAgenticStepCost books one agentic step on the incident ledger from
+// the tokens the server reported. Steps used to go unrecorded: the
+// reconciler had a tracker and never called it.
+func (r *RemediationReconciler) recordAgenticStepCost(ctx context.Context, issue *platformv1alpha1.Issue, resp *pb.AgenticStepResponse) {
+	if r.CostTracker == nil || resp == nil || issue == nil {
+		return
+	}
+	inputTokens, outputTokens := usageTokens(resp.GetUsage(), 0, int64(len(resp.GetReasoning())/4))
+	provider, model := servedProviderModel(resp.GetProvider(), resp.GetModel(), "", "")
+	if provider == "" && model == "" {
+		provider, model = resolveInstanceProvider(ctx, r.Client)
+	}
+	_ = r.CostTracker.RecordAgenticStep(ctx, platformv1alpha1.IssueRef{Name: issue.Name},
+		issue.Namespace, provider, model, inputTokens, outputTokens)
 }

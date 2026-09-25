@@ -50,7 +50,7 @@ func (h *Handler) SendPrompt(ctx context.Context, req *pb.SendPromptRequest) (*p
 		Response:   res.text,
 		Model:      res.model,
 		Provider:   res.provider,
-		Usage:      usageToProto(res.usage),
+		Usage:      usageToProto(res.provider, res.model, res.usage),
 		StopReason: res.stopReason,
 	}, nil
 }
@@ -91,7 +91,7 @@ func (h *Handler) StreamPrompt(req *pb.StreamPromptRequest, stream pb.ChatCLISer
 		Done:       true,
 		Model:      res.model,
 		Provider:   res.provider,
-		Usage:      usageToProto(res.usage),
+		Usage:      usageToProto(res.provider, res.model, res.usage),
 		StopReason: res.stopReason,
 	})
 }

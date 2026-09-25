@@ -108,7 +108,7 @@ func (h *Handler) AnalyzeIssue(ctx context.Context, req *pb.AnalyzeIssueRequest)
 		Model:            res.model,
 		Provider:         res.provider,
 		SuggestedActions: suggestedActions,
-		Usage:            usageToProto(res.usage),
+		Usage:            usageToProto(res.provider, res.model, res.usage),
 	}, nil
 }
 
@@ -557,7 +557,7 @@ func (h *Handler) AgenticStep(ctx context.Context, req *pb.AgenticStepRequest) (
 	}
 
 	parsed := parseAgenticStepResponse(res.text)
-	parsed.Usage = usageToProto(res.usage)
+	parsed.Usage = usageToProto(res.provider, res.model, res.usage)
 	parsed.Model = res.model
 	parsed.Provider = res.provider
 
