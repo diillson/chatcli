@@ -371,6 +371,8 @@ tr.expandable { cursor:pointer; }
 
 /* ===== TIMELINE: a tail of the log ===== */
 .timeline { position:relative; padding-left:18px; }
+.timeline-toolbar { display:flex; justify-content:flex-end; margin-bottom:8px; }
+.timeline-toolbar .btn { font-size:11px; }
 .timeline::before { content:''; position:absolute; left:5px; top:0; bottom:0; width:2px; background:var(--border); }
 .timeline-item { position:relative; padding-bottom:10px; font-size:12px; }
 .timeline-item::before {
@@ -995,6 +997,7 @@ tr.expandable { cursor:pointer; }
   "time.apply": "Apply",
   "refresh.label": "Auto-refresh interval",
   "refresh.off": "Off",
+  "refresh.editing": "paused while editing",
   "refresh.now": "Refresh now",
   "auth.changeKey": "Change API key",
   "theme.label": "Theme",
@@ -1198,6 +1201,9 @@ tr.expandable { cursor:pointer; }
   "recent.emptyFilter": "No incidents match the filters",
   "error.recentIncidents": "Failed to load recent incidents",
   "timeline.empty": "No remediation activity",
+  "timeline.sortNewest": "Newest first",
+  "timeline.sortOldest": "Oldest first",
+  "timeline.sortHint": "Click to flip the time order",
   "timeline.attempts": "{n} attempt(s)",
   "error.remediationActivity": "Failed to load remediation activity",
   "incidents.count": "{n} incident(s)",
@@ -1382,6 +1388,7 @@ tr.expandable { cursor:pointer; }
   "time.apply": "Aplicar",
   "refresh.label": "Intervalo de atualização automática",
   "refresh.off": "Desligado",
+  "refresh.editing": "pausado durante a edição",
   "refresh.now": "Atualizar agora",
   "auth.changeKey": "Trocar a chave de API",
   "theme.label": "Tema",
@@ -1585,6 +1592,9 @@ tr.expandable { cursor:pointer; }
   "recent.emptyFilter": "Nenhum incidente corresponde aos filtros",
   "error.recentIncidents": "Falha ao carregar os incidentes recentes",
   "timeline.empty": "Sem atividade de remediação",
+  "timeline.sortNewest": "Mais recentes primeiro",
+  "timeline.sortOldest": "Mais antigos primeiro",
+  "timeline.sortHint": "Clique para inverter a ordem por tempo",
   "timeline.attempts": "{n} tentativa(s)",
   "error.remediationActivity": "Falha ao carregar a atividade de remediação",
   "incidents.count": "{n} incidente(s)",
@@ -2070,9 +2080,12 @@ function sortTableByCol(tableEl, colIdx, asc) {
   if (headers[colIdx]) headers[colIdx].textContent += asc ? ' ▲' : ' ▼';
 }
 
-function makeSortable(tableEl, defaultSortCol) {
+function makeSortable(tableEl, defaultSortCol, stateKey) {
   if (!tableEl) return;
   const headers = tableEl.querySelectorAll('thead th');
+  // Tables normally share the sort memory of their tab. A panel that lives
+  // next to other tables in the same tab passes its own key instead.
+  const key = stateKey || currentTab;
 
   // Find timestamp column as default sort if not specified. Templates mark
   // it with data-time so the pick does not depend on the header's language.
@@ -2091,19 +2104,19 @@ function makeSortable(tableEl, defaultSortCol) {
     th.style.userSelect = 'none';
     th.title = t('table.sortHint');
     th.addEventListener('click', () => {
-      const saved = sortState[currentTab];
+      const saved = sortState[key];
       const asc = (saved && saved.colIdx === colIdx) ? !saved.asc : (colIdx === defaultSortCol ? false : true);
-      sortState[currentTab] = { colIdx, asc };
+      sortState[key] = { colIdx, asc };
       sortTableByCol(tableEl, colIdx, asc);
     });
   });
 
   // Restore saved sort or apply default (timestamp DESC = newest first)
-  const saved = sortState[currentTab];
+  const saved = sortState[key];
   if (saved !== undefined) {
     sortTableByCol(tableEl, saved.colIdx, saved.asc);
   } else if (defaultSortCol !== undefined) {
-    sortState[currentTab] = { colIdx: defaultSortCol, asc: false };
+    sortState[key] = { colIdx: defaultSortCol, asc: false };
     sortTableByCol(tableEl, defaultSortCol, false);
   }
 }
@@ -2184,9 +2197,18 @@ function getTimeRangeQuery() {
   return q;
 }
 
+// A refresh reloads the tab in place. It must not go through the tab button:
+// switchTab() forgets which rows are expanded, so an open post-mortem would
+// collapse every time the time range changed.
 function refreshCurrentTab() {
-  const activeTab = document.querySelector('.tab-bar .tab-btn.active');
-  if (activeTab) activeTab.click();
+  loadCurrentTab();
+}
+
+// Rows are keyed by namespace/name so an expanded row survives a reorder;
+// the index is only a fallback for objects without a name.
+function rowKey(item, idx) {
+  if (!item || !item.name) return String(idx);
+  return ((item.namespace || '') + '/' + item.name).replace(/[^A-Za-z0-9_.\/-]/g, '_');
 }
 
 function escapeHtml(str) {
@@ -2275,6 +2297,55 @@ $('#tabBar').addEventListener('click', (e) => {
   if (btn) switchTab(btn.dataset.tab);
 });
 
+// ===== DRAFT GUARD =====
+// Every tab re-renders through innerHTML, so a form the operator is filling
+// in (post-mortem feedback, approval reason) would be wiped by the
+// auto-refresh or by any other reload. Drafts are remembered per field id
+// from the input event, re-applied whenever the page markup changes, and
+// the auto-refresh holds while a field is focused or a draft is pending.
+// Filter bars are excluded: their values are state, not drafts.
+const drafts = new Map();
+const DRAFT_FIELDS = 'textarea, input[type="text"], input[type="number"]';
+
+function rememberDraft(id, value) {
+  if (!id) return;
+  const v = value === undefined || value === null ? '' : String(value);
+  if (v === '' || v === '0') drafts.delete(id); else drafts.set(id, v);
+}
+
+function forgetDrafts(prefix) {
+  Array.from(drafts.keys()).forEach(k => { if (!prefix || k.startsWith(prefix)) drafts.delete(k); });
+}
+
+function isEditing() {
+  if (drafts.size > 0) return true;
+  const a = document.activeElement;
+  return !!(a && a.closest('main') && !a.closest('.filters') && a.matches(DRAFT_FIELDS));
+}
+
+function restoreDrafts() {
+  drafts.forEach((value, id) => {
+    const el = document.getElementById(id);
+    if (!el || el.value === value) return;
+    el.value = value;
+    if (id.startsWith('fb-accuracy-')) {
+      const star = document.querySelector(`.star-rating[data-pm="${CSS.escape(id.slice('fb-accuracy-'.length))}"] .star`);
+      if (star) resetStars(star);
+    }
+  });
+}
+
+function initDraftGuard() {
+  const main = document.querySelector('main');
+  if (!main) return;
+  main.addEventListener('input', e => {
+    const f = e.target;
+    if (!f.id || f.closest('.filters') || !f.matches(DRAFT_FIELDS)) return;
+    rememberDraft(f.id, f.value);
+  });
+  new MutationObserver(() => restoreDrafts()).observe(main, { childList: true, subtree: true });
+}
+
 // ===== AUTO-REFRESH =====
 
 function startRefresh() {
@@ -2290,6 +2361,12 @@ function startRefresh() {
   refreshCountdown = refreshSeconds;
   $('#refreshDot').style.background = 'var(--success)';
   refreshInterval = setInterval(() => {
+    if (isEditing()) {
+      // Hold the countdown at its start while a form is being filled in.
+      refreshCountdown = refreshSeconds;
+      timer.textContent = t('refresh.editing');
+      return;
+    }
     refreshCountdown--;
     timer.textContent = `${refreshCountdown}s`;
     if (refreshCountdown <= 0) {
@@ -2622,6 +2699,12 @@ function filterRecentIncidents(items, f) {
   });
 }
 
+// Severity sorts by rank, not by label, so "critical" lands above "high" in
+// every language.
+const SEVERITY_RANK = { critical: 4, high: 3, medium: 2, low: 1 };
+const RECENT_SORT_KEY = 'overview:recentIncidents';
+const RECENT_AGE_COL = 5;
+
 function renderRecentIncidents() {
   const el = $('#recentIncidentsTable');
   if (!el) return;
@@ -2634,17 +2717,22 @@ function renderRecentIncidents() {
         <th>${t('col.name')}</th><th>${t('col.severity')}</th><th>${t('col.state')}</th><th>${t('col.resource')}</th><th>${t('col.namespace')}</th><th data-time>${t('col.age')}</th>
       </tr></thead>
       <tbody>
-        ${items.map(i => `<tr>
-          <td>${escapeHtml(i.name)}</td>
-          <td>${severityBadge(i.severity)}</td>
-          <td>${stateBadge(i.state)}</td>
-          <td>${resourceKindBadge((i.resource || {}).kind)} ${escapeHtml((i.resource || {}).name)}</td>
-          <td>${escapeHtml(i.namespace)}</td>
+        ${items.map(i => {
+          const res = i.resource || {};
+          return `<tr>
+          <td data-sort-value="${escapeHtml(i.name || '')}">${escapeHtml(i.name)}</td>
+          <td data-sort-value="${SEVERITY_RANK[i.severity] || 0}">${severityBadge(i.severity)}</td>
+          <td data-sort-value="${escapeHtml(i.state || '')}">${stateBadge(i.state)}</td>
+          <td data-sort-value="${escapeHtml((res.kind || '') + '/' + (res.name || ''))}">${resourceKindBadge(res.kind)} ${escapeHtml(res.name)}</td>
+          <td data-sort-value="${escapeHtml(i.namespace || '')}">${escapeHtml(i.namespace)}</td>
           <td data-sort-value="${new Date(i.creationTimestamp || 0).getTime()}">${timeAgo(i.creationTimestamp)}</td>
-        </tr>`).join('')}
+        </tr>`; }).join('')}
       </tbody>
     </table>
   `;
+  // Clicking a header sorts the panel; the choice survives refreshes and
+  // filter changes because the sort memory is keyed per panel.
+  makeSortable(el.querySelector('table'), RECENT_AGE_COL, RECENT_SORT_KEY);
 }
 
 function initRecentFilters() {
@@ -2679,19 +2767,37 @@ async function loadRecentIncidents() {
   }
 }
 
-async function loadRemediationTimeline() {
+// The remediation activity panel keeps the fetched items so flipping the
+// time order re-renders without another round trip. The order is persisted
+// as chatcli_dash_remediationSort; the default is newest first.
+const REMEDIATION_SORT_KEY = 'chatcli_dash_remediationSort';
+let remediationItems = [];
+let remediationOldestFirst = false;
+try { remediationOldestFirst = localStorage.getItem(REMEDIATION_SORT_KEY) === 'asc'; } catch { /* private mode */ }
+
+function toggleRemediationSort() {
+  remediationOldestFirst = !remediationOldestFirst;
+  try { localStorage.setItem(REMEDIATION_SORT_KEY, remediationOldestFirst ? 'asc' : 'desc'); } catch { /* private mode */ }
+  renderRemediationTimeline();
+}
+
+function renderRemediationTimeline() {
   const el = $('#remediationTimeline');
-  try {
-    const data = await apiFetch('/incidents?pageSize=10' + getTimeRangeQuery());
-    const items = (data.items || []).filter(i => i.remediationAttempts > 0).slice(0, 10);
-    if (items.length === 0) {
-      showEmpty(el, t('timeline.empty'));
-      return;
-    }
-    el.innerHTML = `<div class="timeline">
+  if (!el) return;
+  if (remediationItems.length === 0) {
+    showEmpty(el, t('timeline.empty'));
+    return;
+  }
+  const stamp = i => new Date(i.creationTimestamp || 0).getTime();
+  const items = remediationItems.slice().sort((a, b) => remediationOldestFirst ? stamp(a) - stamp(b) : stamp(b) - stamp(a));
+  const label = remediationOldestFirst ? t('timeline.sortOldest') : t('timeline.sortNewest');
+  el.innerHTML = `<div class="timeline-toolbar">
+      <button type="button" class="btn btn-icon" id="remediationSortToggle" title="${t('timeline.sortHint')}" onclick="toggleRemediationSort()">${label} ${remediationOldestFirst ? '▲' : '▼'}</button>
+    </div>
+    <div class="timeline">
       ${items.map(i => `
         <div class="timeline-item">
-          <div class="timeline-time">${timeAgo(i.creationTimestamp)}</div>
+          <div class="timeline-time" title="${escapeHtml(i.creationTimestamp || '')}">${timeAgo(i.creationTimestamp)}</div>
           <div class="timeline-text">
             <span class="timeline-type" data-state="${escapeHtml(i.state || '')}">${escapeHtml(enumLabel('state', i.state))}</span>
             ${resourceKindBadge((i.resource || {}).kind)}
@@ -2701,6 +2807,14 @@ async function loadRemediationTimeline() {
         </div>
       `).join('')}
     </div>`;
+}
+
+async function loadRemediationTimeline() {
+  const el = $('#remediationTimeline');
+  try {
+    const data = await apiFetch('/incidents?pageSize=10' + getTimeRangeQuery());
+    remediationItems = (data.items || []).filter(i => i.remediationAttempts > 0).slice(0, 10);
+    renderRemediationTimeline();
   } catch (e) {
     showError(el, t('error.remediationActivity'), 'loadRemediationTimeline()');
   }
@@ -2746,7 +2860,7 @@ async function loadIncidents() {
     </table>`;
     const tbody = $('#incidentsTbody');
     items.forEach((item, idx) => {
-      const id = 'inc-' + idx;
+      const id = 'inc-' + rowKey(item, idx);
       const isExpanded = expandedRows.has(id);
       const mainRow = document.createElement('tr');
       mainRow.className = 'expandable';
@@ -3022,12 +3136,12 @@ async function loadApprovals() {
         </div>
         ${item.state === 'Pending' ? `
           <div class="input-group">
-            <label for="approval-reason-${idx}">${t('approval.decisionReason')}</label>
-            <input type="text" id="approval-reason-${idx}" placeholder="${escapeHtml(t('approval.reasonPlaceholder'))}">
+            <label for="approval-reason-${escapeHtml(item.name)}">${t('approval.decisionReason')}</label>
+            <input type="text" id="approval-reason-${escapeHtml(item.name)}" placeholder="${escapeHtml(t('approval.reasonPlaceholder'))}">
           </div>
           <div class="approval-actions">
-            <button class="btn btn-success" onclick="approveRequest('${escapeHtml(item.name)}', '${escapeHtml(item.namespace)}', ${idx})">${t('approval.approve')}</button>
-            <button class="btn btn-danger" onclick="rejectRequest('${escapeHtml(item.name)}', '${escapeHtml(item.namespace)}', ${idx})">${t('approval.reject')}</button>
+            <button class="btn btn-success" onclick="approveRequest('${escapeHtml(item.name)}', '${escapeHtml(item.namespace)}')">${t('approval.approve')}</button>
+            <button class="btn btn-danger" onclick="rejectRequest('${escapeHtml(item.name)}', '${escapeHtml(item.namespace)}')">${t('approval.reject')}</button>
           </div>
         ` : `
           <div style="font-size:0.8rem; color:var(--text-muted); margin-top:0.5rem;">
@@ -3044,10 +3158,11 @@ async function loadApprovals() {
   }
 }
 
-async function approveRequest(name, ns, idx) {
-  const reason = document.getElementById('approval-reason-' + idx)?.value || '';
+async function approveRequest(name, ns) {
+  const reason = document.getElementById('approval-reason-' + name)?.value || '';
   try {
     await apiPost(`/approvals/${name}/approve?namespace=${encodeURIComponent(ns)}`, { approver: 'web-ui', reason });
+    forgetDrafts('approval-reason-' + name);
     toast(t('toast.approved', { name }), 'success');
     loadApprovals();
   } catch (e) {
@@ -3055,10 +3170,11 @@ async function approveRequest(name, ns, idx) {
   }
 }
 
-async function rejectRequest(name, ns, idx) {
-  const reason = document.getElementById('approval-reason-' + idx)?.value || '';
+async function rejectRequest(name, ns) {
+  const reason = document.getElementById('approval-reason-' + name)?.value || '';
   try {
     await apiPost(`/approvals/${name}/reject?namespace=${encodeURIComponent(ns)}`, { approver: 'web-ui', reason });
+    forgetDrafts('approval-reason-' + name);
     toast(t('toast.rejected', { name }), 'info');
     loadApprovals();
   } catch (e) {
@@ -3084,7 +3200,7 @@ async function loadRunbooks() {
     </table>`;
     const tbody = $('#runbooksTbody');
     items.forEach((item, idx) => {
-      const id = 'rb-' + idx;
+      const id = 'rb-' + rowKey(item, idx);
       const isExpanded = expandedRows.has(id);
       const trigger = item.trigger || {};
       const stepsCount = (item.steps || []).length;
@@ -3166,7 +3282,7 @@ async function loadPostMortems() {
     </table>`;
     const tbody = $('#pmTbody');
     items.forEach((item, idx) => {
-      const id = 'pm-' + idx;
+      const id = 'pm-' + rowKey(item, idx);
       const isExpanded = expandedRows.has(id);
       const mainRow = document.createElement('tr');
       mainRow.className = 'expandable';
@@ -3336,6 +3452,7 @@ function selectStar(el) {
   const val = parseInt(el.dataset.value);
   const pm = el.parentElement.dataset.pm;
   document.getElementById('fb-accuracy-' + pm).value = val;
+  rememberDraft('fb-accuracy-' + pm, val);
   previewStars(el);
 }
 
@@ -3355,6 +3472,7 @@ async function submitFeedback(name, ns) {
       comments: comments,
       providedBy: author
     });
+    ['fb-accuracy-', 'fb-author-', 'fb-rootcause-', 'fb-comments-'].forEach(pfx => forgetDrafts(pfx + name));
     toast(t('toast.feedbackSent', { name }), 'success');
     loadPostMortems();
   } catch (e) {
@@ -3382,7 +3500,7 @@ async function loadAIInsights() {
     </table>`;
     const tbody = $('#insightsTbody');
     items.forEach((item, idx) => {
-      const id = 'ai-' + idx;
+      const id = 'ai-' + rowKey(item, idx);
       const isExpanded = expandedRows.has(id);
       const confidence = item.confidence || 0;
       const confColor = confidence >= 0.85 ? 'var(--sev-low)' : confidence >= 0.7 ? 'var(--sev-medium)' : 'var(--sev-high)';
@@ -3469,7 +3587,7 @@ async function loadRemediations() {
     </table>`;
     const tbody = $('#remTbody');
     items.forEach((item, idx) => {
-      const id = 'rem-' + idx;
+      const id = 'rem-' + rowKey(item, idx);
       const isExpanded = expandedRows.has(id);
       const mode = item.agenticMode ? `<span style="color:var(--highlight); font-weight:600">${t('rem.agentic')}</span>` : t('rem.runbook');
       const actCount = (item.actions || []).length;
@@ -3837,6 +3955,7 @@ document.addEventListener('DOMContentLoaded', () => {
   updateLogoutBtn();
   initDragPanels('overviewPanels');
   initRecentFilters();
+  initDraftGuard();
   loadOverview();
   checkHealth();
   updateApprovalBadge();

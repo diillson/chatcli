@@ -385,3 +385,62 @@ func TestDashboardScriptNeverShadowsTranslate(t *testing.T) {
 		t.Fatalf("the inline script shadows the translation helper t(): %v", m)
 	}
 }
+
+// The overview "Recent Incidents" panel sorts by any column and the
+// remediation activity panel flips its time order. Both live next to other
+// tables in the same tab, so the sort memory has to be keyed per panel.
+func TestDashboardOverviewPanelsSort(t *testing.T) {
+	shape := parseDashboard(t, dashboardSource(t))
+	for _, want := range []string{
+		"function makeSortable(tableEl, defaultSortCol, stateKey)",
+		"const key = stateKey || currentTab;",
+		"makeSortable(el.querySelector('table'), RECENT_AGE_COL, RECENT_SORT_KEY)",
+		`data-sort-value="${SEVERITY_RANK[i.severity] || 0}"`,
+		`data-sort-value="${escapeHtml(i.state || '')}"`,
+		`data-sort-value="${escapeHtml(i.namespace || '')}"`,
+		"function toggleRemediationSort()",
+		"function renderRemediationTimeline()",
+		"t('timeline.sortNewest')",
+		"t('timeline.sortOldest')",
+	} {
+		if !strings.Contains(shape.script, want) {
+			t.Errorf("dashboard script lost the sorting wiring %q", want)
+		}
+	}
+}
+
+// A form the operator is filling in must survive the auto-refresh and any
+// other reload: drafts are remembered per field, restored after a
+// re-render, and the countdown holds while editing. Rows are keyed by
+// object name so an expanded post-mortem stays open when the list reorders.
+func TestDashboardKeepsDraftsAcrossRefresh(t *testing.T) {
+	shape := parseDashboard(t, dashboardSource(t))
+	for _, want := range []string{
+		"function initDraftGuard()",
+		"function restoreDrafts()",
+		"function isEditing()",
+		"new MutationObserver(() => restoreDrafts())",
+		"if (isEditing()) {",
+		"t('refresh.editing')",
+		"rememberDraft('fb-accuracy-' + pm, val)",
+		"forgetDrafts('approval-reason-' + name)",
+		"function rowKey(item, idx)",
+		"initDraftGuard();",
+	} {
+		if !strings.Contains(shape.script, want) {
+			t.Errorf("dashboard script lost the draft guard wiring %q", want)
+		}
+	}
+	if strings.Contains(shape.script, "const id = 'pm-' + idx;") {
+		t.Errorf("post-mortem rows are still keyed by list position; an expanded row would jump on reorder")
+	}
+	if strings.Contains(shape.script, "approval-reason-${idx}") {
+		t.Errorf("approval reason field is still keyed by list position")
+	}
+	// refreshCurrentTab must not click the tab: switchTab() clears the
+	// expanded rows and would collapse an open post-mortem on every refresh.
+	re := regexp.MustCompile(`function refreshCurrentTab\(\) \{\s*loadCurrentTab\(\);\s*\}`)
+	if !re.MatchString(shape.script) {
+		t.Errorf("refreshCurrentTab must reload in place through loadCurrentTab()")
+	}
+}
