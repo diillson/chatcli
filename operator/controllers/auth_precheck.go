@@ -60,6 +60,9 @@ func instanceHasCredential(instance *platformv1alpha1.Instance) bool {
 	if sec := instance.Spec.Server.Security; sec != nil && (sec.JWTSecretRef != nil || sec.JWTPublicKeyRef != nil) {
 		return true
 	}
+	if tls := instance.Spec.Server.TLS; tls != nil && tls.Enabled && tls.ClientCASecretName != "" {
+		return true // mutual TLS: the handshake is the credential
+	}
 	for _, env := range instance.Spec.ExtraEnv {
 		switch env.Name {
 		// Every credential the server's own bind guard accepts.
@@ -96,6 +99,9 @@ func operatorCredentialFor(instance *platformv1alpha1.Instance) (source string, 
 	if sec != nil && sec.JWTSecretRef != nil && sec.JWTSecretRef.Name != "" {
 		return "spec.server.security.jwtSecretRef (minted HS256 tokens)", true
 	}
+	if sec != nil && sec.OperatorClientCertSecretName != "" {
+		return "spec.server.security.operatorClientCertSecretName (client certificate)", true
+	}
 	if !instanceHasCredential(instance) {
 		// Nothing configured: the server is either loopback-only or blocked
 		// by AuthenticationConfigured; either way no credential is needed.
@@ -105,8 +111,8 @@ func operatorCredentialFor(instance *platformv1alpha1.Instance) (source string, 
 }
 
 // operatorCredentialMissingMessage explains the fix.
-const operatorCredentialMissingMessage = "the server requires a credential the operator cannot present (RS256 public key, or a credential set only through extraEnv): " +
-	"set spec.server.security.operatorTokenRef, or spec.server.token, or spec.server.security.jwtSecretRef with an HS256 secret"
+const operatorCredentialMissingMessage = "the server requires a credential the operator cannot present (RS256 public key, client CA, or a credential set only through extraEnv): " +
+	"set spec.server.security.operatorTokenRef, spec.server.security.operatorClientCertSecretName, spec.server.token, or spec.server.security.jwtSecretRef with an HS256 secret"
 
 // recordOperatorCredentialCondition writes OperatorCredentialConfigured.
 // Informational: provisioning continues, the pipeline just says up front
@@ -140,7 +146,7 @@ func instanceAuthUnconfigured(instance *platformv1alpha1.Instance) bool {
 // authUnconfiguredMessage is what the condition and the event say. It
 // names both ways to fix it and the one way to opt out.
 const authUnconfiguredMessage = "server would listen on a reachable address with no credential, and refuses to start in that shape: " +
-	"set spec.server.token, spec.server.security.jwtSecretRef or spec.server.security.jwtPublicKeyRef, or bind loopback with spec.server.security.bindAddress=127.0.0.1"
+	"set spec.server.token, spec.server.security.jwtSecretRef, spec.server.security.jwtPublicKeyRef or spec.server.tls.clientCASecretName, or bind loopback with spec.server.security.bindAddress=127.0.0.1"
 
 // isLoopbackAddress mirrors the server's own check.
 func isLoopbackAddress(addr string) bool {

@@ -241,6 +241,9 @@ func (r *InstanceReconciler) buildPodSpec(instance *platformv1alpha1.Instance) c
 		if sec.JWTAudience != "" {
 			container.Env = append(container.Env, corev1.EnvVar{Name: "CHATCLI_JWT_AUDIENCE", Value: sec.JWTAudience})
 		}
+		if sec.MTLSRole != "" {
+			container.Env = append(container.Env, corev1.EnvVar{Name: "CHATCLI_MTLS_ROLE", Value: sec.MTLSRole})
+		}
 	}
 
 	// Server token from spec.server.token
@@ -347,6 +350,23 @@ func (r *InstanceReconciler) buildInstanceVolumes(instance *platformv1alpha1.Ins
 			VolumeSource: corev1.VolumeSource{
 				Secret: &corev1.SecretVolumeSource{
 					SecretName: instance.Spec.Server.TLS.SecretName,
+				},
+			},
+		})
+	}
+
+	// Client CA for mutual TLS
+	if tls := instance.Spec.Server.TLS; tls != nil && tls.Enabled && tls.ClientCASecretName != "" {
+		volumeMounts = append(volumeMounts, corev1.VolumeMount{
+			Name:      "client-ca",
+			MountPath: "/etc/chatcli/client-ca",
+			ReadOnly:  true,
+		})
+		volumes = append(volumes, corev1.Volume{
+			Name: "client-ca",
+			VolumeSource: corev1.VolumeSource{
+				Secret: &corev1.SecretVolumeSource{
+					SecretName: tls.ClientCASecretName,
 				},
 			},
 		})
@@ -509,6 +529,9 @@ func (r *InstanceReconciler) buildContainerArgs(instance *platformv1alpha1.Insta
 	if instance.Spec.Server.TLS != nil && instance.Spec.Server.TLS.Enabled {
 		args = append(args, "--tls-cert", "/etc/chatcli/tls/tls.crt")
 		args = append(args, "--tls-key", "/etc/chatcli/tls/tls.key")
+		if instance.Spec.Server.TLS.ClientCASecretName != "" {
+			args = append(args, "--tls-client-ca", "/etc/chatcli/client-ca/ca.crt")
+		}
 	}
 
 	// MCP args

@@ -100,6 +100,7 @@ func main() {
 	if err = (&controllers.InstanceReconciler{
 		Client: mgr.GetClient(),
 		Scheme: mgr.GetScheme(),
+		Prober: controllers.NewGRPCProber(mgr.GetClient(), zapLogger),
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "Instance")
 		os.Exit(1)
