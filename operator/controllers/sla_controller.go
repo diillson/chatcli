@@ -43,7 +43,8 @@ func init() {
 
 type SLAReconciler struct {
 	client.Client
-	Scheme *runtime.Scheme
+	Scheme        *runtime.Scheme
+	AuditRecorder *AuditRecorder // optional: records SLA breaches
 }
 
 func (r *SLAReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
@@ -222,6 +223,11 @@ func (r *SLAReconciler) recordViolation(ctx context.Context, sla *platformv1alph
 	sla.Status.ActiveViolations++
 	sla.Status.LastViolationAt = &now
 	slaViolationsTotal.WithLabelValues(string(sla.Spec.Severity), vType).Inc()
+	if r.AuditRecorder != nil {
+		if err := r.AuditRecorder.RecordSLABreach(ctx, issue, vType, record.Elapsed, record.Threshold); err != nil {
+			log.FromContext(ctx).Error(err, "Failed to record SLA breach audit event", "issue", issue.Name)
+		}
+	}
 	r.updateCompliance(sla)
 	meta.SetStatusCondition(&sla.Status.Conditions, metav1.Condition{
 		Type: "SLAViolation", Status: metav1.ConditionTrue,

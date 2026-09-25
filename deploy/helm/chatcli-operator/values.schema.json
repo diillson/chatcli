@@ -423,6 +423,19 @@
       ],
       "description": "How the operator receives watcher alerts: stream keeps a StreamAlerts stream open and polls only while the server lacks the RPC; poll queries GetAlerts every 30s."
     },
+    "decisionEngine": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "description": "Gate every RemediationPlan on adjusted AI confidence, severity and a per-namespace circuit breaker; plans that do not pass wait for a human."
+        }
+      }
+    },
+    "clusterName": {
+      "type": "string",
+      "description": "This cluster's ClusterRegistration name; its tier decides which severities wait for a human."
+    },
     "security": {
       "type": "object",
       "description": "Security hardening configuration for the operator.",

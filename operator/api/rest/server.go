@@ -242,6 +242,8 @@ func (s *APIServer) routeAPI(w http.ResponseWriter, r *http.Request) {
 		s.routeAnalytics(w, r, rest)
 	case "clusters":
 		s.routeClusters(w, r, rest)
+	case "policies":
+		s.routePolicies(w, r, rest)
 	case "audit":
 		s.routeAudit(w, r, rest)
 	case "aiinsights":

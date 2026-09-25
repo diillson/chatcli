@@ -91,22 +91,26 @@ func (r *ApprovalReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 func (r *ApprovalReconciler) reconcilePending(ctx context.Context, ar *platformv1alpha1.ApprovalRequest) (ctrl.Result, error) {
 	logger := log.FromContext(ctx)
 
-	// Find matching policy
-	var policy platformv1alpha1.ApprovalPolicy
-	if err := r.Get(ctx, types.NamespacedName{
-		Name:      ar.Spec.PolicyRef,
-		Namespace: ar.Namespace,
-	}, &policy); err != nil {
-		logger.Error(err, "Failed to find ApprovalPolicy", "policy", ar.Spec.PolicyRef)
-		return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
-	}
-
-	// Find matching rule
+	// Find matching policy and rule. A request the operator raised on its
+	// own (decision engine, cluster tier) has no ApprovalPolicy object; it
+	// follows the built-in rule instead.
 	var rule *platformv1alpha1.ApprovalRule
-	for i := range policy.Spec.Rules {
-		if policy.Spec.Rules[i].Name == ar.Spec.RuleName {
-			rule = &policy.Spec.Rules[i]
-			break
+	if IsSyntheticApprovalPolicy(ar.Spec.PolicyRef) {
+		rule = DecisionEngineRule()
+	} else {
+		var policy platformv1alpha1.ApprovalPolicy
+		if err := r.Get(ctx, types.NamespacedName{
+			Name:      ar.Spec.PolicyRef,
+			Namespace: ar.Namespace,
+		}, &policy); err != nil {
+			logger.Error(err, "Failed to find ApprovalPolicy", "policy", ar.Spec.PolicyRef)
+			return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
+		}
+		for i := range policy.Spec.Rules {
+			if policy.Spec.Rules[i].Name == ar.Spec.RuleName {
+				rule = &policy.Spec.Rules[i]
+				break
+			}
 		}
 	}
 	if rule == nil {
@@ -508,6 +512,9 @@ func (r *ApprovalReconciler) reconcileExpired(ctx context.Context, ar *platformv
 }
 
 func (r *ApprovalReconciler) updatePolicyCounters(ctx context.Context, ar *platformv1alpha1.ApprovalRequest, result string) error {
+	if IsSyntheticApprovalPolicy(ar.Spec.PolicyRef) {
+		return nil // no ApprovalPolicy object carries these counters
+	}
 	var policy platformv1alpha1.ApprovalPolicy
 	if err := r.Get(ctx, types.NamespacedName{
 		Name:      ar.Spec.PolicyRef,

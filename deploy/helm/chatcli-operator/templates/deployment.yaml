@@ -59,6 +59,14 @@ spec:
             - name: CHATCLI_OPERATOR_ALERT_TRANSPORT
               value: {{ .Values.alertTransport | quote }}
           {{- end }}
+          {{- if .Values.decisionEngine.enabled }}
+            - name: CHATCLI_OPERATOR_DECISION_ENGINE
+              value: "true"
+          {{- end }}
+          {{- if .Values.clusterName }}
+            - name: CHATCLI_OPERATOR_CLUSTER_NAME
+              value: {{ .Values.clusterName | quote }}
+          {{- end }}
           {{- /* Security configuration */ -}}
           {{- if .Values.security.devMode }}
             - name: CHATCLI_OPERATOR_DEV_MODE

@@ -85,6 +85,10 @@ type IssueReconciler struct {
 	Scheme           *runtime.Scheme
 	DedupInvalidator DedupInvalidator // optional: watcher bridge for dedup invalidation
 	AuditRecorder    *AuditRecorder   // optional: records audit trail events
+	// Federation, when set, correlates a new Issue across registered
+	// clusters and flags staging-to-production cascades. It must be the
+	// same instance the manager runs: it holds the remote client cache.
+	Federation *FederationReconciler
 }
 
 // +kubebuilder:rbac:groups=platform.chatcli.io,resources=issues,verbs=get;list;watch;create;update;patch;delete
@@ -258,7 +262,26 @@ func (r *IssueReconciler) handleDetected(ctx context.Context, issue *platformv1a
 		return ctrl.Result{}, err
 	}
 
+	r.correlateAcrossClusters(ctx, issue)
+
 	return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
+}
+
+// correlateAcrossClusters runs the federation checks on a freshly detected
+// Issue. Cascade detection goes first because it updates this object;
+// correlation works on copies it reads back. Both are best effort: a
+// failure never blocks the Issue.
+func (r *IssueReconciler) correlateAcrossClusters(ctx context.Context, issue *platformv1alpha1.Issue) {
+	if r.Federation == nil {
+		return
+	}
+	log := log.FromContext(ctx)
+	if _, err := r.Federation.DetectCascade(ctx, issue); err != nil {
+		log.Error(err, "Cascade detection failed", "issue", issue.Name)
+	}
+	if err := r.Federation.CorrelateAcrossClusters(ctx, issue); err != nil {
+		log.Error(err, "Cross-cluster correlation failed", "issue", issue.Name)
+	}
 }
 
 // handleAnalyzing processes an issue in the Analyzing state.

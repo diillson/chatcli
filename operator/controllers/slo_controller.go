@@ -64,7 +64,8 @@ func init() {
 // SLOReconciler reconciles ServiceLevelObjective objects.
 type SLOReconciler struct {
 	client.Client
-	Scheme *runtime.Scheme
+	Scheme        *runtime.Scheme
+	AuditRecorder *AuditRecorder // optional: records burn-rate violations
 }
 
 // +kubebuilder:rbac:groups=platform.chatcli.io,resources=servicelevelobjectives,verbs=get;list;watch;create;update;patch;delete
@@ -400,6 +401,11 @@ func (r *SLOReconciler) checkBurnRateAlerts(ctx context.Context, slo *platformv1
 				newActiveAlerts = append(newActiveAlerts, alert)
 
 				sloViolationsTotal.WithLabelValues(slo.Spec.ServiceName, slo.Name, string(brw.Severity)).Inc()
+				if r.AuditRecorder != nil {
+					if err := r.AuditRecorder.RecordSLOViolation(ctx, slo.Name, slo.Namespace, windowLabel, shortBurnRate); err != nil {
+						logger.Error(err, "Failed to record SLO violation audit event", "slo", slo.Name)
+					}
+				}
 
 				if err := r.createSLOViolationIssue(ctx, slo, windowLabel, shortBurnRate, brw.Severity); err != nil {
 					logger.Error(err, "Failed to create SLO violation issue", "slo", slo.Name)

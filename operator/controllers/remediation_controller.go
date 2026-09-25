@@ -44,10 +44,38 @@ var (
 	})
 )
 
+// Decision engine and agentic-loop observability. The circuit breaker
+// gauge is per namespace: that is the scope the breaker counts failures in.
+var (
+	decisionEvaluationsTotal = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Namespace: "chatcli",
+		Subsystem: "operator",
+		Name:      "decision_engine_evaluations_total",
+		Help:      "Decision engine evaluations by the mode they granted.",
+	}, []string{"mode"})
+
+	decisionCircuitBreakerState = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+		Namespace: "chatcli",
+		Subsystem: "operator",
+		Name:      "decision_engine_circuit_breaker_state",
+		Help:      "Circuit breaker state per namespace: 0 closed, 1 open.",
+	}, []string{"namespace"})
+
+	convergenceStopsTotal = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Namespace: "chatcli",
+		Subsystem: "operator",
+		Name:      "agentic_convergence_stops_total",
+		Help:      "Agentic loops stopped by the convergence detector, by reason.",
+	}, []string{"reason"})
+)
+
 func init() {
 	ctrlmetrics.Registry.MustRegister(
 		remediationsTotal,
 		remediationDuration,
+		decisionEvaluationsTotal,
+		decisionCircuitBreakerState,
+		convergenceStopsTotal,
 	)
 }
 
@@ -62,8 +90,17 @@ type RemediationReconciler struct {
 	ServerClient   AgenticStepCaller
 	ContextBuilder *KubernetesContextBuilder
 	AuditRecorder  *AuditRecorder
-	PatternStore   *PatternStore // Records resolution/failure patterns for Decision Engine learning
-	CostTracker    *CostTracker  // Tracks LLM and downtime costs per incident
+	// DecisionEngine, when set, evaluates every plan before it executes and
+	// parks it for a human when confidence, severity or the circuit breaker
+	// say so. Nil leaves ApprovalPolicies as the only gate.
+	DecisionEngine *DecisionEngine
+	// ClusterTier, when set, is the local cluster's registration name; the
+	// tier of that ClusterRegistration decides whether plans wait for a
+	// human. Needs Federation to look the registration up.
+	ClusterTier  string
+	Federation   *FederationReconciler
+	PatternStore *PatternStore // Records resolution/failure patterns for Decision Engine learning
+	CostTracker  *CostTracker  // Tracks LLM and downtime costs per incident
 }
 
 // +kubebuilder:rbac:groups=platform.chatcli.io,resources=remediationplans,verbs=get;list;watch;create;update;patch;delete
@@ -118,6 +155,7 @@ func (r *RemediationReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 			r.recordPatternResolution(ctx, &plan)
 		case platformv1alpha1.RemediationStateFailed, platformv1alpha1.RemediationStateRolledBack:
 			r.recordPatternFailure(ctx, &plan)
+			r.auditRemediationFailed(ctx, &plan)
 		}
 	}
 
@@ -142,6 +180,7 @@ func (r *RemediationReconciler) handleWaitingApproval(ctx context.Context, plan 
 	case platformv1alpha1.ApprovalStateApproved:
 		approvedBy, _ := lastDecision(ar.Status.Decisions)
 		log.Info("Approval granted, proceeding with execution", "plan", plan.Name, "approvedBy", approvedBy)
+		r.auditApprovalDecision(ctx, &ar, "approved")
 		now := metav1.Now()
 		plan.Status.State = platformv1alpha1.RemediationStateExecuting
 		plan.Status.StartedAt = &now
@@ -151,12 +190,14 @@ func (r *RemediationReconciler) handleWaitingApproval(ctx context.Context, plan 
 	case platformv1alpha1.ApprovalStateRejected:
 		rejectedBy, reason := lastDecision(ar.Status.Decisions)
 		log.Info("Approval rejected", "plan", plan.Name, "rejectedBy", rejectedBy)
+		r.auditApprovalDecision(ctx, &ar, "rejected")
 		plan.Status.State = platformv1alpha1.RemediationStateFailed
 		plan.Status.Result = fmt.Sprintf("Approval rejected by %s: %s", rejectedBy, reason)
 		return ctrl.Result{}, r.Status().Update(ctx, plan)
 
 	case platformv1alpha1.ApprovalStateExpired:
 		log.Info("Approval expired", "plan", plan.Name)
+		r.auditApprovalDecision(ctx, &ar, "expired")
 		plan.Status.State = platformv1alpha1.RemediationStateFailed
 		plan.Status.Result = "Approval request expired without decision"
 		return ctrl.Result{}, r.Status().Update(ctx, plan)
@@ -184,16 +225,31 @@ func (r *RemediationReconciler) handlePending(ctx context.Context, plan *platfor
 		} else if required && rule.Mode != platformv1alpha1.ApprovalModeAuto {
 			log.Info("Approval required by policy", "plan", plan.Name, "policy", policy.Name, "rule", rule.Name, "mode", rule.Mode)
 			if err := CreateApprovalRequest(ctx, r.Client, r.Scheme, plan, &issue, &insight, policy, rule); err != nil {
-				log.Error(err, "Failed to create approval request, proceeding without approval")
-			} else {
-				plan.Status.State = platformv1alpha1.RemediationStateWaitingApproval
-				plan.Status.Result = fmt.Sprintf("Waiting for %s approval (policy: %s, rule: %s)", rule.Mode, policy.Name, rule.Name)
-				if err := r.Status().Update(ctx, plan); err != nil {
-					return ctrl.Result{}, err
-				}
-				log.Info("Approval request created, plan set to WaitingApproval", "plan", plan.Name)
-				return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
+				// Fail closed: a gate that could not be raised is not a gate
+				// that was passed. A conflict here is common on a live API
+				// server, when a reconcile runs on a cached copy of a plan
+				// that was just parked; the retry reads the parked state.
+				log.Error(err, "Failed to create approval request; retrying, the plan stays pending", "plan", plan.Name)
+				return ctrl.Result{RequeueAfter: conflictRetryDelay}, nil
 			}
+			r.auditApprovalRequested(ctx, plan)
+			plan.Status.State = platformv1alpha1.RemediationStateWaitingApproval
+			plan.Status.Result = fmt.Sprintf("Waiting for %s approval (policy: %s, rule: %s)", rule.Mode, policy.Name, rule.Name)
+			if err := r.Status().Update(ctx, plan); err != nil {
+				return ctrl.Result{}, err
+			}
+			log.Info("Approval request created, plan set to WaitingApproval", "plan", plan.Name)
+			return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
+		}
+
+		// No policy parked the plan: the cluster tier and the decision
+		// engine get their say, each able to park it under a synthetic
+		// policy the approval controller knows how to expire.
+		if parked, res, err := r.gateByClusterTier(ctx, plan, &issue, &insight); parked || err != nil {
+			return res, err
+		}
+		if parked, res, err := r.gateByDecisionEngine(ctx, plan, &issue, &insight); parked || err != nil {
+			return res, err
 		}
 	}
 
@@ -684,7 +740,33 @@ func (r *RemediationReconciler) applyAgenticSafetyGuards(ctx context.Context, pl
 	if plan.Status.AgenticStartedAt != nil && time.Since(plan.Status.AgenticStartedAt.Time) > agenticTimeout {
 		return r.failAgenticPlan(ctx, plan, "Agentic loop timed out (10 minutes)")
 	}
+	// A loop that converged on the same observation, oscillates between two
+	// actions, keeps failing or is about to hit the timeout stops here
+	// instead of burning the remaining steps.
+	if plan.Status.AgenticStartedAt != nil {
+		detector := &ConvergenceDetector{}
+		if stop, why := detector.ShouldStop(plan.Spec.AgenticHistory, time.Since(plan.Status.AgenticStartedAt.Time)); stop {
+			convergenceStopsTotal.WithLabelValues(convergenceStopReason(why)).Inc()
+			progress := detector.EstimateProgress(plan.Spec.AgenticHistory)
+			return r.failAgenticPlan(ctx, plan, fmt.Sprintf("Agentic loop stopped: %s (estimated progress %.0f%%)", why, progress*100))
+		}
+	}
 	return ctrl.Result{}, false, nil
+}
+
+// convergenceStopReason folds the detector's free-text reason into a
+// bounded metric label.
+func convergenceStopReason(why string) string {
+	switch {
+	case strings.HasPrefix(why, "Converged"):
+		return "converged"
+	case strings.HasPrefix(why, "Oscillating"):
+		return "oscillating"
+	case strings.HasPrefix(why, "Approaching timeout"):
+		return "timeout"
+	default:
+		return "failures"
+	}
 }
 
 // failAgenticPlan transitions the plan to Failed with the given result message
@@ -1694,4 +1776,135 @@ func (r *RemediationReconciler) recordAgenticStepCost(ctx context.Context, issue
 	}
 	_ = r.CostTracker.RecordAgenticStep(ctx, platformv1alpha1.IssueRef{Name: issue.Name},
 		issue.Namespace, provider, model, inputTokens, outputTokens)
+}
+
+// gateByDecisionEngine asks the decision engine whether the plan may run.
+// It annotates the plan with the verdict either way and parks it under
+// the decision-engine policy when a human has to approve. parked reports
+// that the caller must return res; a nil engine is a no-op.
+func (r *RemediationReconciler) gateByDecisionEngine(ctx context.Context, plan *platformv1alpha1.RemediationPlan, issue *platformv1alpha1.Issue, insight *platformv1alpha1.AIInsight) (bool, ctrl.Result, error) {
+	if r.DecisionEngine == nil {
+		return false, ctrl.Result{}, nil
+	}
+	log := log.FromContext(ctx)
+	decision, err := r.DecisionEngine.ShouldAutoRemediate(ctx, r.Client, issue, insight, plan.Spec.Actions)
+	if err != nil {
+		log.Error(err, "Decision engine failed; proceeding on policies alone", "plan", plan.Name)
+		return false, ctrl.Result{}, nil
+	}
+	decisionEvaluationsTotal.WithLabelValues(decision.Mode).Inc()
+	breaker := 0.0
+	if decision.Mode == DecisionModeBlocked {
+		breaker = 1
+	}
+	decisionCircuitBreakerState.WithLabelValues(plan.Namespace).Set(breaker)
+	log.Info("Decision engine verdict", "plan", plan.Name, "mode", decision.Mode,
+		"confidence", fmt.Sprintf("%.2f", decision.AdjustedConfidence), "risk", decision.RiskAssessment, "reason", decision.Reason)
+
+	if !decision.RequiresApproval {
+		r.annotatePlan(ctx, plan, decision.annotate)
+		return false, ctrl.Result{}, nil
+	}
+	return r.parkUnderSyntheticPolicy(ctx, plan, issue, insight, DecisionEnginePolicyName, decision)
+}
+
+// gateByClusterTier parks the plan when the local cluster's tier says a
+// human decides for this severity. Needs both the local registration name
+// and the federation reconciler that holds the registrations.
+func (r *RemediationReconciler) gateByClusterTier(ctx context.Context, plan *platformv1alpha1.RemediationPlan, issue *platformv1alpha1.Issue, insight *platformv1alpha1.AIInsight) (bool, ctrl.Result, error) {
+	if r.ClusterTier == "" || r.Federation == nil {
+		return false, ctrl.Result{}, nil
+	}
+	log := log.FromContext(ctx)
+	mode, err := r.Federation.GetClusterApprovalMode(ctx, r.ClusterTier)
+	if err != nil {
+		log.Error(err, "Cluster tier unknown; proceeding on policies alone", "cluster", r.ClusterTier)
+		return false, ctrl.Result{}, nil
+	}
+	if !ClusterTierRequiresApproval(mode, issue.Spec.Severity) {
+		return false, ctrl.Result{}, nil
+	}
+	decision := &DecisionResult{
+		RequiresApproval:   true,
+		Mode:               DecisionModeApproval,
+		RiskAssessment:     string(issue.Spec.Severity),
+		AdjustedConfidence: float64(insight.Status.Confidence),
+		Reason:             fmt.Sprintf("Cluster %s tier policy %q requires approval for %s severity", r.ClusterTier, mode, issue.Spec.Severity),
+	}
+	return r.parkUnderSyntheticPolicy(ctx, plan, issue, insight, ClusterTierPolicyName, decision)
+}
+
+// parkUnderSyntheticPolicy raises the ApprovalRequest for a verdict that
+// has no ApprovalPolicy behind it and moves the plan to WaitingApproval.
+func (r *RemediationReconciler) parkUnderSyntheticPolicy(ctx context.Context, plan *platformv1alpha1.RemediationPlan, issue *platformv1alpha1.Issue, insight *platformv1alpha1.AIInsight, policyName string, decision *DecisionResult) (bool, ctrl.Result, error) {
+	log := log.FromContext(ctx)
+	// The verdict is persisted first: CreateApprovalRequest patches the
+	// plan relative to its current state, so annotations set only in memory
+	// would not reach the API server.
+	r.annotatePlan(ctx, plan, decision.annotate)
+	if err := CreateApprovalRequest(ctx, r.Client, r.Scheme, plan, issue, insight, SyntheticApprovalPolicy(policyName), DecisionEngineRule()); err != nil {
+		// Unlike a policy gate, a verdict that says "wait" is not skipped
+		// on error: the plan stays Pending and the next reconcile retries.
+		log.Error(err, "Failed to create approval request for the verdict; retrying", "plan", plan.Name, "policy", policyName)
+		return true, ctrl.Result{RequeueAfter: conflictRetryDelay}, nil
+	}
+	r.auditApprovalRequested(ctx, plan)
+	plan.Status.State = platformv1alpha1.RemediationStateWaitingApproval
+	plan.Status.Result = decision.Reason
+	if err := r.Status().Update(ctx, plan); err != nil {
+		return true, ctrl.Result{}, err
+	}
+	log.Info("Plan parked for approval by verdict", "plan", plan.Name, "policy", policyName, "mode", decision.Mode)
+	return true, ctrl.Result{RequeueAfter: 10 * time.Second}, nil
+}
+
+// annotatePlan persists annotations through a merge patch, which leaves the
+// in-memory status alone for the status write that follows.
+func (r *RemediationReconciler) annotatePlan(ctx context.Context, plan *platformv1alpha1.RemediationPlan, set func(*platformv1alpha1.RemediationPlan)) {
+	base := plan.DeepCopy()
+	set(plan)
+	if err := r.Patch(ctx, plan, client.MergeFrom(base)); err != nil {
+		log.FromContext(ctx).Error(err, "Failed to annotate plan with the decision", "plan", plan.Name)
+	}
+}
+
+// auditApprovalRequested records the request the plan is now waiting on.
+func (r *RemediationReconciler) auditApprovalRequested(ctx context.Context, plan *platformv1alpha1.RemediationPlan) {
+	if r.AuditRecorder == nil {
+		return
+	}
+	var ar platformv1alpha1.ApprovalRequest
+	if err := r.Get(ctx, types.NamespacedName{Name: "approval-" + plan.Name, Namespace: plan.Namespace}, &ar); err != nil {
+		return
+	}
+	if err := r.AuditRecorder.RecordApprovalRequested(ctx, &ar); err != nil {
+		log.FromContext(ctx).Error(err, "Failed to record approval-requested audit event", "plan", plan.Name)
+	}
+}
+
+// auditApprovalDecision records the decision once, when the plan leaves
+// WaitingApproval; the approval controller re-reconciles terminal requests
+// and would record duplicates.
+func (r *RemediationReconciler) auditApprovalDecision(ctx context.Context, ar *platformv1alpha1.ApprovalRequest, decision string) {
+	if r.AuditRecorder == nil {
+		return
+	}
+	if err := r.AuditRecorder.RecordApprovalDecision(ctx, ar, decision); err != nil {
+		log.FromContext(ctx).Error(err, "Failed to record approval decision audit event", "approval", ar.Name)
+	}
+}
+
+// auditRemediationFailed records a failed or rolled-back plan against its
+// Issue. Fires on the state transition, so once per failure.
+func (r *RemediationReconciler) auditRemediationFailed(ctx context.Context, plan *platformv1alpha1.RemediationPlan) {
+	if r.AuditRecorder == nil {
+		return
+	}
+	var issue platformv1alpha1.Issue
+	if err := r.Get(ctx, types.NamespacedName{Name: plan.Spec.IssueRef.Name, Namespace: plan.Namespace}, &issue); err != nil {
+		return
+	}
+	if err := r.AuditRecorder.RecordRemediationFailed(ctx, plan, &issue); err != nil {
+		log.FromContext(ctx).Error(err, "Failed to record remediation-failed audit event", "plan", plan.Name)
+	}
 }

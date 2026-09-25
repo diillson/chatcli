@@ -14,6 +14,7 @@ package setup
 import (
 	"fmt"
 	"os"
+	"strings"
 
 	"go.uber.org/zap"
 	"k8s.io/client-go/kubernetes"
@@ -34,6 +35,12 @@ type Options struct {
 	AlertTransport controllers.AlertTransport
 	// PrometheusURL enables the metrics collector when set.
 	PrometheusURL string
+	// DecisionEngine turns on the confidence and circuit-breaker gate that
+	// parks plans for a human; off, ApprovalPolicies are the only gate.
+	DecisionEngine bool
+	// ClusterName is the local cluster's ClusterRegistration name. When set,
+	// the registration's tier decides which severities wait for a human.
+	ClusterName string
 }
 
 // Components are the long-lived pieces main may need after wiring.
@@ -53,6 +60,8 @@ func OptionsFromEnv(clientset kubernetes.Interface, sc *controllers.ServerClient
 		Logger:         logger,
 		AlertTransport: transport,
 		PrometheusURL:  os.Getenv("PROMETHEUS_URL"),
+		DecisionEngine: strings.EqualFold(os.Getenv("CHATCLI_OPERATOR_DECISION_ENGINE"), "true"),
+		ClusterName:    strings.TrimSpace(os.Getenv("CHATCLI_OPERATOR_CLUSTER_NAME")),
 	}, nil
 }
 
@@ -71,6 +80,14 @@ func Controllers(mgr ctrl.Manager, o Options) (*Components, error) {
 	}
 
 	auditRecorder := controllers.NewAuditRecorder(c, s)
+
+	// One federation reconciler serves both its own controller and the
+	// Issue and Remediation reconcilers: it owns the remote client cache.
+	federation := &controllers.FederationReconciler{Client: c, Scheme: s}
+	var engine *controllers.DecisionEngine
+	if o.DecisionEngine {
+		engine = &controllers.DecisionEngine{}
+	}
 
 	// Shared components for the AIOps pipeline.
 	patternStore := controllers.NewPatternStore(c)
@@ -100,11 +117,12 @@ func Controllers(mgr ctrl.Manager, o Options) (*Components, error) {
 			Client: c, Scheme: s, Prober: controllers.NewGRPCProber(c, o.Logger),
 		}).SetupWithManager},
 		{"Issue", (&controllers.IssueReconciler{
-			Client: c, Scheme: s, DedupInvalidator: watcherBridge, AuditRecorder: auditRecorder,
+			Client: c, Scheme: s, DedupInvalidator: watcherBridge, AuditRecorder: auditRecorder, Federation: federation,
 		}).SetupWithManager},
 		{"Remediation", (&controllers.RemediationReconciler{
 			Client: c, Scheme: s, ServerClient: o.ServerClient, ContextBuilder: contextBuilder,
 			AuditRecorder: auditRecorder, PatternStore: patternStore, CostTracker: costTracker,
+			DecisionEngine: engine, ClusterTier: o.ClusterName, Federation: federation,
 		}).SetupWithManager},
 		{"Anomaly", (&controllers.AnomalyReconciler{
 			Client: c, Scheme: s, NoiseReducer: noiseReducer,
@@ -116,13 +134,13 @@ func Controllers(mgr ctrl.Manager, o Options) (*Components, error) {
 			BlastRadiusPredictor: blastRadiusPredictor, CostTracker: costTracker,
 		}).SetupWithManager},
 		{"PostMortem", (&controllers.PostMortemReconciler{Client: c, Scheme: s}).SetupWithManager},
-		{"Notification", (&controllers.NotificationReconciler{Client: c, Scheme: s}).SetupWithManager},
-		{"SLO", (&controllers.SLOReconciler{Client: c, Scheme: s}).SetupWithManager},
-		{"SLA", (&controllers.SLAReconciler{Client: c, Scheme: s}).SetupWithManager},
+		{"Notification", (&controllers.NotificationReconciler{Client: c, Scheme: s, AuditRecorder: auditRecorder}).SetupWithManager},
+		{"SLO", (&controllers.SLOReconciler{Client: c, Scheme: s, AuditRecorder: auditRecorder}).SetupWithManager},
+		{"SLA", (&controllers.SLAReconciler{Client: c, Scheme: s, AuditRecorder: auditRecorder}).SetupWithManager},
 		{"Approval", (&controllers.ApprovalReconciler{
 			Client: c, Scheme: s, BlastRadiusPredictor: blastRadiusPredictor,
 		}).SetupWithManager},
-		{"Federation", (&controllers.FederationReconciler{Client: c, Scheme: s}).SetupWithManager},
+		{"Federation", federation.SetupWithManager},
 		{"SourceRepository", (&controllers.SourceRepositoryReconciler{Client: c, Scheme: s}).SetupWithManager},
 		{"Chaos", (&controllers.ChaosReconciler{Client: c, Scheme: s}).SetupWithManager},
 	}

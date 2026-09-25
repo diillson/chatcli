@@ -167,11 +167,15 @@ func run(m *testing.M) int {
 	}
 	serverClient := controllers.NewServerClientWithConn(conn, zap.NewNop())
 
+	// The decision engine is on so its gate is exercised on a live API
+	// server; the other scenarios pass it (medium severity, confidence
+	// 0.92 is auto-notify) and the SLA scenario never reaches a plan.
 	if _, err := setup.Controllers(mgr, setup.Options{
 		Clientset:      clientset,
 		ServerClient:   serverClient,
 		Logger:         zap.NewNop(),
 		AlertTransport: controllers.AlertTransportStream,
+		DecisionEngine: true,
 	}); err != nil {
 		fmt.Println("integration: controllers:", err)
 		return 1
