@@ -29,6 +29,10 @@ type ConnectionOpts struct {
 
 	// Token is the Bearer token for authentication.
 	Token string
+
+	// TokenSource, when set, yields the bearer credential per call (minted
+	// JWTs that renew themselves). It takes precedence over Token.
+	TokenSource TokenSource
 }
 
 // ServerClient wraps the gRPC connection to the ChatCLI server.
@@ -37,6 +41,7 @@ type ServerClient struct {
 	conn   *grpc.ClientConn
 	client pb.ChatCLIServiceClient
 	token  string
+	source TokenSource
 	logger *zap.Logger
 }
 
@@ -130,20 +135,35 @@ func (sc *ServerClient) Connect(address string, opts ConnectionOpts) error {
 	sc.conn = conn
 	sc.client = pb.NewChatCLIServiceClient(conn)
 	sc.token = opts.Token
+	sc.source = opts.TokenSource
 
 	sc.logger.Info("Connected to ChatCLI server",
 		zap.String("address", address),
 		zap.Bool("tls", opts.TLSEnabled),
-		zap.Bool("auth", opts.Token != ""))
+		zap.Bool("auth", opts.Token != "" || opts.TokenSource != nil),
+		zap.Bool("minted_jwt", opts.TokenSource != nil))
 	return nil
 }
 
-// withAuth injects the Bearer token into the gRPC context metadata.
+// withAuth injects the Bearer credential into the gRPC context metadata:
+// the per-call source when configured (a minted JWT that renews itself),
+// else the static token. A source that fails leaves the call
+// unauthenticated so the server's refusal, not a silent retry loop, is what
+// surfaces; the failure is logged with its cause.
 func (sc *ServerClient) withAuth(ctx context.Context) context.Context {
-	if sc.token == "" {
+	token := sc.token
+	if sc.source != nil {
+		minted, err := sc.source.Token(ctx)
+		if err != nil {
+			sc.logger.Error("operator credential unavailable; call goes out unauthenticated", zap.Error(err))
+			return ctx
+		}
+		token = minted
+	}
+	if token == "" {
 		return ctx
 	}
-	md := metadata.Pairs("authorization", "Bearer "+sc.token)
+	md := metadata.Pairs("authorization", "Bearer "+token)
 	return metadata.NewOutgoingContext(ctx, md)
 }
 

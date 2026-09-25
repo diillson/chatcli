@@ -57,18 +57,75 @@ func instanceHasCredential(instance *platformv1alpha1.Instance) bool {
 	if instance.Spec.Server.Token != nil {
 		return true
 	}
-	if sec := instance.Spec.Server.Security; sec != nil && sec.JWTSecretRef != nil {
+	if sec := instance.Spec.Server.Security; sec != nil && (sec.JWTSecretRef != nil || sec.JWTPublicKeyRef != nil) {
 		return true
 	}
 	for _, env := range instance.Spec.ExtraEnv {
 		switch env.Name {
-		case "CHATCLI_SERVER_TOKEN", "CHATCLI_JWT_SECRET":
+		// Every credential the server's own bind guard accepts.
+		case "CHATCLI_SERVER_TOKEN", "CHATCLI_JWT_SECRET", "CHATCLI_JWT_PUBLIC_KEY", "CHATCLI_SERVER_TLS_CLIENT_CA":
 			if env.Value != "" || env.ValueFrom != nil {
 				return true
 			}
 		}
 	}
 	return false
+}
+
+// OperatorCredentialConditionType reports whether the operator itself can
+// authenticate to this Instance. A server may be perfectly secured
+// (AuthenticationConfigured=True) and still unreachable for the AIOps
+// pipeline: an RS256-only server, or a credential passed through extraEnv
+// that the operator never reads.
+const OperatorCredentialConditionType = "OperatorCredentialConfigured"
+
+// operatorCredentialFor reports how the operator will authenticate to the
+// Instance and, when it cannot, why. The HS256/RS256 distinction of a
+// jwtSecretRef is settled at connect time (the Secret is read then).
+func operatorCredentialFor(instance *platformv1alpha1.Instance) (source string, ok bool) {
+	if instance == nil {
+		return "", false
+	}
+	if instance.Spec.Server.Token != nil && instance.Spec.Server.Token.Name != "" {
+		return "spec.server.token", true
+	}
+	sec := instance.Spec.Server.Security
+	if sec != nil && sec.OperatorTokenRef != nil && sec.OperatorTokenRef.Name != "" {
+		return "spec.server.security.operatorTokenRef", true
+	}
+	if sec != nil && sec.JWTSecretRef != nil && sec.JWTSecretRef.Name != "" {
+		return "spec.server.security.jwtSecretRef (minted HS256 tokens)", true
+	}
+	if !instanceHasCredential(instance) {
+		// Nothing configured: the server is either loopback-only or blocked
+		// by AuthenticationConfigured; either way no credential is needed.
+		return "none required", true
+	}
+	return "", false
+}
+
+// operatorCredentialMissingMessage explains the fix.
+const operatorCredentialMissingMessage = "the server requires a credential the operator cannot present (RS256 public key, or a credential set only through extraEnv): " +
+	"set spec.server.security.operatorTokenRef, or spec.server.token, or spec.server.security.jwtSecretRef with an HS256 secret"
+
+// recordOperatorCredentialCondition writes OperatorCredentialConfigured.
+// Informational: provisioning continues, the pipeline just says up front
+// why AnalyzeIssue and AgenticStep will be refused.
+func recordOperatorCredentialCondition(instance *platformv1alpha1.Instance) {
+	source, ok := operatorCredentialFor(instance)
+	cond := metav1.Condition{
+		Type:               OperatorCredentialConditionType,
+		Status:             metav1.ConditionTrue,
+		Reason:             "CredentialAvailable",
+		Message:            "operator authenticates with " + source,
+		ObservedGeneration: instance.Generation,
+	}
+	if !ok {
+		cond.Status = metav1.ConditionFalse
+		cond.Reason = "CredentialMissing"
+		cond.Message = operatorCredentialMissingMessage
+	}
+	meta.SetStatusCondition(&instance.Status.Conditions, cond)
 }
 
 // instanceAuthUnconfigured reports whether this Instance would provision a
@@ -83,7 +140,7 @@ func instanceAuthUnconfigured(instance *platformv1alpha1.Instance) bool {
 // authUnconfiguredMessage is what the condition and the event say. It
 // names both ways to fix it and the one way to opt out.
 const authUnconfiguredMessage = "server would listen on a reachable address with no credential, and refuses to start in that shape: " +
-	"set spec.server.token, or spec.server.security.jwtSecretRef, or bind loopback with spec.server.security.bindAddress=127.0.0.1"
+	"set spec.server.token, spec.server.security.jwtSecretRef or spec.server.security.jwtPublicKeyRef, or bind loopback with spec.server.security.bindAddress=127.0.0.1"
 
 // isLoopbackAddress mirrors the server's own check.
 func isLoopbackAddress(addr string) bool {
@@ -126,6 +183,7 @@ func (r *InstanceReconciler) recordAuthCondition(ctx context.Context, instance *
 		instance.Status.Ready = false
 	}
 	meta.SetStatusCondition(&instance.Status.Conditions, cond)
+	recordOperatorCredentialCondition(instance)
 
 	if !blocked {
 		return false
