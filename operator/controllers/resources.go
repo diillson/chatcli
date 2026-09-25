@@ -57,6 +57,11 @@ func (r *InstanceReconciler) reconcileDeployment(ctx context.Context, instance *
 		// Compute hashes of config inputs so that changes trigger a rolling
 		// update (the pod reads envFrom and config files only at startup).
 		podAnnotations := map[string]string{}
+		if sched := instance.Spec.Scheduling; sched != nil {
+			for k, v := range sched.PodAnnotations {
+				podAnnotations[k] = v
+			}
+		}
 		if instance.Spec.Watcher != nil && instance.Spec.Watcher.Enabled && len(instance.Spec.Watcher.Targets) > 0 {
 			yaml := buildWatchConfigYAML(instance.Spec.Watcher)
 			hash := fmt.Sprintf("%x", sha256.Sum256([]byte(yaml)))
@@ -226,6 +231,8 @@ func (r *InstanceReconciler) buildPodSpec(instance *platformv1alpha1.Instance) c
 		container.Env = append(container.Env, corev1.EnvVar{Name: "CHATCLI_SERVER_PIPELINE", Value: "true"})
 	}
 
+	container.Env = append(container.Env, featureEnv(instance.Spec.Features)...)
+
 	// RS256 verification key, issuer and audience from spec.server.security
 	if sec := instance.Spec.Server.Security; sec != nil {
 		if sec.JWTPublicKeyRef != nil {
@@ -273,6 +280,13 @@ func (r *InstanceReconciler) buildPodSpec(instance *platformv1alpha1.Instance) c
 		InitContainers:     initContainers,
 		Containers:         []corev1.Container{container},
 		Volumes:            volumes,
+	}
+	if sched := instance.Spec.Scheduling; sched != nil {
+		podSpec.NodeSelector = sched.NodeSelector
+		podSpec.Tolerations = sched.Tolerations
+		podSpec.Affinity = sched.Affinity
+		podSpec.ImagePullSecrets = sched.ImagePullSecrets
+		podSpec.PriorityClassName = sched.PriorityClassName
 	}
 
 	if instance.Spec.SecurityContext != nil {
@@ -355,6 +369,23 @@ func (r *InstanceReconciler) buildInstanceVolumes(instance *platformv1alpha1.Ins
 			VolumeSource: corev1.VolumeSource{
 				Secret: &corev1.SecretVolumeSource{
 					SecretName: instance.Spec.Server.TLS.SecretName,
+				},
+			},
+		})
+	}
+
+	// Corporate CA bundle for every outbound TLS connection
+	if f := instance.Spec.Features; f != nil && f.CABundleSecretName != "" {
+		volumeMounts = append(volumeMounts, corev1.VolumeMount{
+			Name:      "ca-bundle",
+			MountPath: "/etc/chatcli/ca",
+			ReadOnly:  true,
+		})
+		volumes = append(volumes, corev1.Volume{
+			Name: "ca-bundle",
+			VolumeSource: corev1.VolumeSource{
+				Secret: &corev1.SecretVolumeSource{
+					SecretName: f.CABundleSecretName,
 				},
 			},
 		})
@@ -874,9 +905,85 @@ func (r *InstanceReconciler) reconcileServiceAccount(ctx context.Context, instan
 			return err
 		}
 		sa.Labels = labels(instance)
+		// Merge the declared annotations over whatever is there: keys other
+		// tools added (IRSA controllers, mesh injectors) survive.
+		if instance.Spec.ServiceAccount != nil && len(instance.Spec.ServiceAccount.Annotations) > 0 {
+			if sa.Annotations == nil {
+				sa.Annotations = map[string]string{}
+			}
+			for k, v := range instance.Spec.ServiceAccount.Annotations {
+				sa.Annotations[k] = v
+			}
+		}
 		return nil
 	})
 	return err
+}
+
+// featureEnv renders spec.features as the server's own variables. Only
+// what is set is rendered, so the server defaults keep applying otherwise.
+func featureEnv(f *platformv1alpha1.FeaturesSpec) []corev1.EnvVar {
+	if f == nil {
+		return nil
+	}
+	var env []corev1.EnvVar
+	add := func(name, value string) { env = append(env, corev1.EnvVar{Name: name, Value: value}) }
+	if f.Memory != nil {
+		add("CHATCLI_MEMORY_ENABLED", strconv.FormatBool(f.Memory.Enabled))
+		if f.Memory.Mode != "" {
+			add("CHATCLI_MEMORY_MODE", f.Memory.Mode)
+		}
+	}
+	if f.Knowledge != nil {
+		add("CHATCLI_CHAT_KNOWLEDGE", strconv.FormatBool(*f.Knowledge))
+	}
+	if f.Budget != nil {
+		if f.Budget.SessionUSD != "" {
+			add("CHATCLI_SESSION_BUDGET_USD", f.Budget.SessionUSD)
+		}
+		if f.Budget.DailyUSD != "" {
+			add("CHATCLI_DAILY_BUDGET_USD", f.Budget.DailyUSD)
+		}
+		if f.Budget.HardStop {
+			add("CHATCLI_BUDGET_HARD_STOP", "true")
+		}
+	}
+	if f.Hub != nil {
+		add("CHATCLI_HUB_ENABLED", strconv.FormatBool(*f.Hub))
+	}
+	if f.CABundleSecretName != "" {
+		add("CHATCLI_CA_BUNDLE", "/etc/chatcli/ca/ca.crt")
+	}
+	if f.AllowHTTPProviders {
+		add("CHATCLI_ALLOW_HTTP_PROVIDERS", "true")
+	}
+	if f.EncryptionKeyRef != nil {
+		env = append(env, corev1.EnvVar{
+			Name: "CHATCLI_ENCRYPTION_KEY",
+			ValueFrom: &corev1.EnvVarSource{
+				SecretKeyRef: &corev1.SecretKeySelector{
+					LocalObjectReference: corev1.LocalObjectReference{Name: f.EncryptionKeyRef.Name},
+					Key:                  f.EncryptionKeyRef.Key,
+					Optional:             boolPtr(true),
+				},
+			},
+		})
+	}
+	if lr := f.LogRotation; lr != nil {
+		if lr.MaxSizeMB > 0 {
+			add("CHATCLI_LOG_MAX_SIZE_MB", strconv.Itoa(int(lr.MaxSizeMB)))
+		}
+		if lr.MaxBackups > 0 {
+			add("CHATCLI_LOG_MAX_BACKUPS", strconv.Itoa(int(lr.MaxBackups)))
+		}
+		if lr.MaxAgeDays > 0 {
+			add("CHATCLI_LOG_MAX_AGE_DAYS", strconv.Itoa(int(lr.MaxAgeDays)))
+		}
+		if lr.Compress {
+			add("CHATCLI_LOG_COMPRESS", "true")
+		}
+	}
+	return env
 }
 
 // watcherPolicyRules returns the RBAC rules needed by the K8s watcher.

@@ -192,6 +192,22 @@ spec:
       # operatorClientCertSecretName: chatcli-operator-cert   # tls.crt/tls.key the operator presents
   # pipeline:                        # host the full ChatCLI turn engine behind the
   #   enabled: true                  # ChatTurn/RunCoder/RunAgent/tool RPCs (serialized turns)
+  # features:                        # server capabilities, typed (no extraEnv needed)
+  #   memory: { enabled: true, mode: index }
+  #   knowledge: true
+  #   budget: { sessionUSD: "5", dailyUSD: "50", hardStop: true }
+  #   hub: true
+  #   caBundleSecretName: corp-ca    # ca.crt trusted by every outbound TLS connection
+  #   encryptionKeyRef: { name: chatcli-at-rest, key: key }
+  #   logRotation: { maxSizeMB: 200, maxBackups: 3, maxAgeDays: 7, compress: true }
+  # scheduling:                      # pod placement
+  #   nodeSelector: { pool: ai }
+  #   tolerations: [{ key: gpu, operator: Exists }]
+  #   imagePullSecrets: [{ name: ghcr }]
+  #   priorityClassName: high
+  #   podAnnotations: { sidecar.istio.io/inject: "false" }
+  # serviceAccount:                  # IRSA / Workload Identity, kept across reconciles
+  #   annotations: { eks.amazonaws.com/role-arn: arn:aws:iam::123456789012:role/chatcli }
   watcher:
     enabled: true
     interval: "30s"
@@ -356,11 +372,13 @@ last known `status.serverVersion` is kept across a failed probe.
 
 Two authentication modes — pick one:
 
-**IRSA (recommended on EKS)** — annotate the ServiceAccount with the IAM role ARN. The operator's `reconcileServiceAccount` only updates labels, so external annotations survive reconciliation:
+**IRSA (recommended on EKS)** — declare the IAM role on the Instance and the operator keeps it on the managed ServiceAccount (annotations added out of band survive too):
 
-```bash
-kubectl annotate serviceaccount chatcli-bedrock -n <ns> \
-  eks.amazonaws.com/role-arn=arn:aws:iam::123456789012:role/chatcli-bedrock
+```yaml
+spec:
+  serviceAccount:
+    annotations:
+      eks.amazonaws.com/role-arn: arn:aws:iam::123456789012:role/chatcli-bedrock
 ```
 
 The Secret then only needs the region:
