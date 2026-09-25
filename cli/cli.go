@@ -500,6 +500,10 @@ type ChatCLI struct {
 	// terminal in cooked mode, and the staged hints must land immediately
 	// before the AgentMode.Run that consumes them).
 	pendingCoderCommandInput string
+	// pendingCoderHandoff holds the task the assistant proposed for coder
+	// mode in its last chat reply; the next REPL input answers it
+	// (coder_handoff.go).
+	pendingCoderHandoff string
 
 	// Session-level reasoning override set by /thinking. When override.set
 	// is true the value of override.effort wins over skill hints and
@@ -1260,6 +1264,18 @@ func (cli *ChatCLI) executor(in string) {
 	if in != "" {
 		cli.commandHistory = append(cli.commandHistory, in)
 		cli.newCommandsInSession = append(cli.newCommandsInSession, in)
+	}
+
+	// A coder handoff the assistant proposed on its last reply is answered
+	// by this input: Enter or yes rewrites it into the /coder invocation
+	// (dispatched below exactly like a typed one), no stays in chat, any
+	// other text is a normal turn.
+	if rewritten, handled := cli.consumeCoderHandoffAnswer(in); handled {
+		if rewritten == "" {
+			return
+		}
+		in = rewritten
+		cli.commandHistory = append(cli.commandHistory, in)
 	}
 
 	if strings.HasPrefix(in, "/run") {

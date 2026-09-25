@@ -145,6 +145,12 @@ func (cli *ChatCLI) runChatTurnSerialized(
 	if err != nil {
 		return RPCChatTurn{}, err
 	}
+	// Headless: nobody can confirm a coder handoff here, so a stray tag is
+	// dropped from the reply instead of reaching the client.
+	if task, cleaned := extractCoderHandoff(reply); task != "" {
+		cli.logger.Debug("rpc chat: dropping coder handoff proposal", zap.String("task", task))
+		reply = cleaned
+	}
 
 	userMessage := models.Message{Role: "user", Content: input + additionalContext, Images: images}
 	if turnCtx != "" {

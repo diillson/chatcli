@@ -244,6 +244,12 @@ func (cli *ChatCLI) modeAndLanguagePart() models.ContentBlock {
 	// Output-token reduction: the verbosity directive is a static string per
 	// level, so appending it keeps this Part 0 block cacheable.
 	text := ChatModeSystemHint + "\n" + i18n.T("ai.response_language") + verbosityDirectiveBlock()
+	// Attended REPL only: the model proposes the switch to coder mode and
+	// the user confirms at the prompt (coder_handoff.go). Static text, so
+	// the block stays cacheable.
+	if cli.coderHandoffActive() {
+		text += "\n" + coderHandoffInstruction
+	}
 	// Where the session is rooted and how to read a relative path against
 	// it is fixed for the whole session, so it belongs in the cached
 	// prefix. It used to ride in the per-turn context message, which paid
@@ -1057,6 +1063,19 @@ func (cli *ChatCLI) handleChatTurnResult(
 		}
 		fmt.Println(i18n.T("error.generic", err.Error()))
 		return
+	}
+
+	// A coder handoff proposal rides as a tag at the end of the reply: it
+	// is stripped before the reply is stored and rendered, and shown as a
+	// proposal under the envelope once the turn is finalized.
+	if task, cleaned := extractCoderHandoff(aiResponse); task != "" {
+		aiResponse = cleaned
+		if aiResponse == "" {
+			aiResponse = i18n.T("handoff.only_tag")
+		}
+		if cli.coderHandoffActive() {
+			defer cli.noteCoderHandoff(task)
+		}
 	}
 
 	// The turn context message is persisted too: the next request must
