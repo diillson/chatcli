@@ -402,10 +402,20 @@ func TestDashboardOverviewPanelsSort(t *testing.T) {
 		"function renderRemediationTimeline()",
 		"t('timeline.sortNewest')",
 		"t('timeline.sortOldest')",
+		`<ol class="step-list">`,
 	} {
 		if !strings.Contains(shape.script, want) {
 			t.Errorf("dashboard script lost the sorting wiring %q", want)
 		}
+	}
+}
+
+// The runbook step list draws its own cards: the global reset zeroes the list
+// padding, so a browser marker would render outside the box over the border.
+func TestDashboardRunbookStepsHaveNoBrowserMarker(t *testing.T) {
+	shape := parseDashboard(t, dashboardSource(t))
+	if !strings.Contains(shape.style, ".expand-content ol.step-list { list-style:none;") {
+		t.Fatalf("runbook step list must hide the browser marker and lay out its own cards")
 	}
 }
 

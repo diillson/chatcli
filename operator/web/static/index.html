@@ -287,6 +287,13 @@ tr.expandable { cursor:pointer; }
 .expand-content h4:first-child { margin-top:0; }
 .expand-content p { margin-bottom:4px; }
 .expand-content ul { margin-left:1.2rem; margin-bottom:6px; }
+/* Runbook steps: the label already carries the step number, and the global
+   reset zeroes the list padding, so the browser marker would draw outside
+   the box over the border. Each step is a card instead. */
+.expand-content ol.step-list { list-style:none; margin:0 0 6px; padding:0; }
+.expand-content ol.step-list li { padding:6px 10px; margin-bottom:6px; border:1px solid var(--border); border-left:2px solid var(--brand); border-radius:4px; background:color-mix(in srgb, var(--panel) 80%, transparent); }
+.expand-content ol.step-list li:last-child { margin-bottom:0; }
+.expand-content ol.step-list p { margin:2px 0 4px; }
 .expand-content pre { font:inherit; }
 
 /* ===== BADGES: color plus a label, never color alone ===== */
@@ -3247,7 +3254,7 @@ function buildRunbookExpandRow(item) {
     `<li>
       <strong>${escapeHtml(t('runbook.step', { n: i + 1, name: s.name || '' }))}</strong>
       <span class="action-type-badge" style="margin-left:0.5rem">${escapeHtml(s.action)}</span>
-      <p style="margin:0.25rem 0 0.5rem; color:var(--text-muted)">${escapeHtml(s.description || '')}</p>
+      ${s.description ? `<p style="color:var(--text-muted)">${escapeHtml(s.description)}</p>` : ''}
       ${s.params ? `<code style="font-size:0.75rem; color:var(--text-dim)">${escapeHtml(JSON.stringify(s.params))}</code>` : ''}
     </li>`
   ).join('');
@@ -3259,7 +3266,7 @@ function buildRunbookExpandRow(item) {
       <p>${t('runbook.signal')}: <span class="action-type-badge">${escapeHtml((item.trigger || {}).signalType || '-')}</span>
          ${t('runbook.severity')}: ${severityBadge((item.trigger || {}).severity || '-')}
          ${t('runbook.kind')}: ${resourceKindBadge((item.trigger || {}).resourceKind || '-')}</p>
-      ${steps ? `<h4>${t('runbook.steps', { n: (item.steps || []).length })}</h4><ol>${steps}</ol>` : ''}
+      ${steps ? `<h4>${t('runbook.steps', { n: (item.steps || []).length })}</h4><ol class="step-list">${steps}</ol>` : ''}
     </div>
   </td>`;
   return tr;
