@@ -5,6 +5,7 @@ metadata:
   namespace: {{ .Release.Namespace }}
   labels:
     {{- include "chatcli-operator.labels" . | nindent 4 }}
+    app.kubernetes.io/component: controller
 spec:
   type: {{ .Values.service.type }}
   selector:

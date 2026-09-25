@@ -5,6 +5,7 @@ metadata:
   name: {{ include "chatcli-operator.fullname" . }}
   labels:
     {{- include "chatcli-operator.labels" . | nindent 4 }}
+    app.kubernetes.io/component: controller
 rules:
   # ──────────────────────────────────────────────────
   # Platform CRDs (all 17)
@@ -170,6 +171,7 @@ metadata:
   name: {{ include "chatcli-operator.fullname" . }}
   labels:
     {{- include "chatcli-operator.labels" . | nindent 4 }}
+    app.kubernetes.io/component: controller
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole
