@@ -1,0 +1,7 @@
+{
+  "handoff.proposal_title": "The assistant proposes switching to coder mode for this task:",
+  "handoff.proposal_hint": "Press Enter (or y) to enter coder mode, n to stay in chat; anything else continues the chat.",
+  "handoff.accepted": "Entering coder mode with the proposed task…",
+  "handoff.declined": "Staying in chat mode.",
+  "handoff.only_tag": "(The assistant proposed handing this task to coder mode.)"
+}
