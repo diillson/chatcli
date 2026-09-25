@@ -284,8 +284,10 @@ func (sm *SessionManager) SaveSessionV2(name string, sd *SessionData) error {
 	}
 	// Derive a topic title once at save time so machine names
 	// (autosave-20260720-1504) stay recognizable in list/search/recall.
-	// An explicitly set title always wins.
-	if strings.TrimSpace(sd.Title) == "" {
+	// An explicitly set title always wins. A title an older build derived
+	// from injected context is not one the user set: it is replaced so the
+	// file heals on its next autosave.
+	if strings.TrimSpace(sd.Title) == "" || isInjectedContextTitle(sd.Title) {
 		sd.Title = deriveSessionTitle(sd)
 	}
 	filePath := sm.getSessionPath(name)
@@ -388,6 +390,12 @@ func (sm *SessionManager) LoadSessionV2(name string) (*SessionData, error) {
 		if sd.Version > models.SessionSchemaVersion {
 			return nil, fmt.Errorf("%w: %s", ErrSessionSchemaNewer, i18n.T("session.schema_newer", name, sd.Version, models.SessionSchemaVersion))
 		}
+		// Titles derived by older builds could be the per-turn context
+		// ChatCLI injects as a user message. Every reader (catalog, boot
+		// notice, recall, web list) goes through here, so heal once.
+		if isInjectedContextTitle(sd.Title) {
+			sd.Title = deriveSessionTitle(&sd)
+		}
 		sm.logger.Info("Sessão v2 carregada com sucesso", zap.String("session", name))
 		return &sd, nil
 	}
@@ -410,13 +418,50 @@ func (sm *SessionManager) LoadSessionV2(name string) (*SessionData, error) {
 // short enough for one list line.
 const sessionTitleMaxRunes = 60
 
-// deriveSessionTitle picks the first non-empty user message as the session's
-// topic label, whitespace-collapsed and rune-capped. Returns "" for sessions
-// with no user turn.
+// injectedContextHeaders are the leading lines of the user-role messages
+// ChatCLI writes itself (turn and run context). Messages saved before the
+// structural meta flag existed carry only the header, so title derivation
+// recognizes both.
+var injectedContextHeaders = []string{
+	strings.TrimSpace(turnContextHeader),
+	strings.TrimSpace(runContextHeader),
+}
+
+// isInjectedContextText reports whether content starts with one of the
+// ChatCLI-injected context headers.
+func isInjectedContextText(content string) bool {
+	c := strings.TrimSpace(content)
+	for _, h := range injectedContextHeaders {
+		if strings.HasPrefix(c, h) {
+			return true
+		}
+	}
+	return false
+}
+
+// isInjectedContextTitle reports whether a stored title was derived from an
+// injected context message by an older build. Derived titles are rune-capped
+// with an ellipsis, so the full header may be cut: match on the opening tag
+// ("[TURN CONTEXT", "[RUN CONTEXT"), which no user-written title starts with.
+func isInjectedContextTitle(title string) bool {
+	t := strings.TrimSpace(title)
+	for _, h := range injectedContextHeaders {
+		tag, _, _ := strings.Cut(h, " —") // "[TURN CONTEXT"
+		if strings.HasPrefix(t, tag) {
+			return true
+		}
+	}
+	return false
+}
+
+// deriveSessionTitle picks the first non-empty message the user actually
+// wrote as the session's topic label, whitespace-collapsed and rune-capped.
+// Context ChatCLI injects under the user role (turn/run context) is skipped.
+// Returns "" for sessions with no user turn.
 func deriveSessionTitle(sd *SessionData) string {
 	for _, hist := range [][]models.Message{sd.ChatHistory, sd.AgentHistory, sd.CoderHistory} {
 		for _, m := range hist {
-			if m.Role != "user" {
+			if m.Role != "user" || m.IsInjectedContext() || isInjectedContextText(m.Content) {
 				continue
 			}
 			t := strings.Join(strings.Fields(m.Content), " ")
