@@ -19,20 +19,39 @@ import (
 	"google.golang.org/grpc/status"
 )
 
-// fakeAlertStream captures what StreamAlerts sends.
+// fakeAlertStream captures what StreamAlerts sends. With gate set, the
+// first Send parks until the gate closes, which pins the handler mid-send
+// so a test can fill its subscriber buffer without the handler draining it.
 type fakeAlertStream struct {
 	grpc.ServerStream
-	ctx  context.Context
-	mu   sync.Mutex
-	sent []*pb.StreamAlertsResponse
+	ctx     context.Context
+	mu      sync.Mutex
+	sent    []*pb.StreamAlertsResponse
+	gate    chan struct{}
+	parked  bool
+	gateHit bool
 }
 
 func (f *fakeAlertStream) Context() context.Context { return f.ctx }
 func (f *fakeAlertStream) Send(r *pb.StreamAlertsResponse) error {
 	f.mu.Lock()
-	defer f.mu.Unlock()
+	gate := f.gate
+	if gate != nil && !f.gateHit {
+		f.gateHit = true
+		f.parked = true
+		f.mu.Unlock()
+		<-gate
+		f.mu.Lock()
+		f.parked = false
+	}
 	f.sent = append(f.sent, r)
+	f.mu.Unlock()
 	return nil
+}
+func (f *fakeAlertStream) isParked() bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.parked
 }
 func (f *fakeAlertStream) snapshot() []*pb.StreamAlertsResponse {
 	f.mu.Lock()
@@ -168,22 +187,24 @@ func TestStreamAlerts_AbortsWhenDroppedForFallingBehind(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	// A stream whose context is alive but that never gets scheduled to
-	// drain: publish past the buffer from the same goroutine before the
-	// handler's loop can run, then let it observe the closed channel.
-	stream := &fakeAlertStream{ctx: ctx}
+	// Park the handler inside its first Send so it cannot drain the
+	// subscriber buffer, fill the buffer past capacity, then release it:
+	// the handler drains what was buffered and meets the closed channel.
+	gate := make(chan struct{})
+	stream := &fakeAlertStream{ctx: ctx, gate: gate}
 	done := make(chan error, 1)
 	go func() { done <- h.StreamAlerts(&pb.StreamAlertsRequest{}, stream) }()
 	waitFor(t, func() bool { return b.Subscribers() == 1 })
 
-	b.mu.Lock()
-	for _, ch := range b.subs {
-		for len(ch) < cap(ch) {
-			ch <- AlertInfo{Type: "T", Object: "o"}
-		}
+	b.Publish(AlertInfo{Type: "T", Object: "first"})
+	waitFor(t, func() bool { return stream.isParked() })
+	for i := 0; i <= alertSubscriberBuffer; i++ {
+		b.Publish(AlertInfo{Type: "T", Object: "o"})
 	}
-	b.mu.Unlock()
-	b.Publish(AlertInfo{Type: "T", Object: "overflow"})
+	if b.Subscribers() != 0 {
+		t.Fatalf("the parked subscriber should have been dropped, subscribers = %d", b.Subscribers())
+	}
+	close(gate)
 
 	select {
 	case err := <-done:
