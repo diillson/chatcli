@@ -208,7 +208,9 @@ func mustCreate(t *testing.T, obj client.Object) {
 	}
 }
 
-func key(ns, name string) types.NamespacedName { return types.NamespacedName{Namespace: ns, Name: name} }
+func key(ns, name string) types.NamespacedName {
+	return types.NamespacedName{Namespace: ns, Name: name}
+}
 
 // eventually polls cond until it holds or the deadline passes. Controllers
 // requeue on their own timers, so a generous deadline is deliberate.
