@@ -76,6 +76,24 @@ type InstanceSpec struct {
 	// +optional
 	Plugins *PluginProvisionSpec `json:"plugins,omitempty"`
 
+	// Scheduling places the pod: node selector, tolerations, affinity,
+	// image pull secrets, priority class and extra pod annotations.
+	// +optional
+	Scheduling *SchedulingSpec `json:"scheduling,omitempty"`
+
+	// ServiceAccount customizes the ServiceAccount the operator manages
+	// for this Instance, for example IRSA / Workload Identity annotations.
+	// Annotations added out of band survive reconciliation.
+	// +optional
+	ServiceAccount *ServiceAccountSpec `json:"serviceAccount,omitempty"`
+
+	// Features toggles the server's own capabilities that used to be
+	// reachable only through extraEnv: memory, knowledge, budgets, the
+	// conversation hub, a corporate CA bundle, encryption at rest, log
+	// rotation and the HTTP-provider guard.
+	// +optional
+	Features *FeaturesSpec `json:"features,omitempty"`
+
 	// Pipeline hosts the full ChatCLI turn engine in the server behind the
 	// ChatTurn, RunCoder, RunAgent and tool RPCs (CHATCLI_SERVER_PIPELINE).
 	// Off by default: the engine's workers run inside the pod and its turns
@@ -298,6 +316,116 @@ type ServerSecuritySpec struct {
 	// EnableReflection enables gRPC reflection (requires also CHATCLI_GRPC_REFLECTION=true).
 	// +optional
 	EnableReflection bool `json:"enableReflection,omitempty"`
+}
+
+// SchedulingSpec places the Instance pod.
+type SchedulingSpec struct {
+	// NodeSelector constrains the pod to nodes with these labels.
+	// +optional
+	NodeSelector map[string]string `json:"nodeSelector,omitempty"`
+	// Tolerations lets the pod schedule onto tainted nodes.
+	// +optional
+	Tolerations []corev1.Toleration `json:"tolerations,omitempty"`
+	// Affinity is the pod's scheduling affinity.
+	// +optional
+	Affinity *corev1.Affinity `json:"affinity,omitempty"`
+	// ImagePullSecrets authenticate the image pull.
+	// +optional
+	ImagePullSecrets []corev1.LocalObjectReference `json:"imagePullSecrets,omitempty"`
+	// PriorityClassName sets the pod priority class.
+	// +optional
+	PriorityClassName string `json:"priorityClassName,omitempty"`
+	// PodAnnotations are added to the pod template (service mesh, IAM,
+	// observability hints). The operator's own rollout hashes win on a key clash.
+	// +optional
+	PodAnnotations map[string]string `json:"podAnnotations,omitempty"`
+}
+
+// ServiceAccountSpec customizes the managed ServiceAccount.
+type ServiceAccountSpec struct {
+	// Annotations are set on the ServiceAccount, for example
+	// eks.amazonaws.com/role-arn for IRSA or
+	// iam.gke.io/gcp-service-account for Workload Identity. Keys added by
+	// other tools are kept.
+	// +optional
+	Annotations map[string]string `json:"annotations,omitempty"`
+}
+
+// FeaturesSpec toggles server capabilities.
+type FeaturesSpec struct {
+	// Memory controls long-term memory (CHATCLI_MEMORY_ENABLED,
+	// CHATCLI_MEMORY_MODE).
+	// +optional
+	Memory *MemoryFeatureSpec `json:"memory,omitempty"`
+	// Knowledge enables the knowledge base for chat turns
+	// (CHATCLI_CHAT_KNOWLEDGE). Nil keeps the server default.
+	// +optional
+	Knowledge *bool `json:"knowledge,omitempty"`
+	// Budget bounds spend (CHATCLI_SESSION_BUDGET_USD,
+	// CHATCLI_DAILY_BUDGET_USD, CHATCLI_BUDGET_HARD_STOP).
+	// +optional
+	Budget *BudgetSpec `json:"budget,omitempty"`
+	// Hub enables the cross-channel conversation hub (CHATCLI_HUB_ENABLED).
+	// Nil keeps the server default.
+	// +optional
+	Hub *bool `json:"hub,omitempty"`
+	// CABundleSecretName names a Secret whose ca.crt is the corporate CA
+	// bundle every outbound TLS connection trusts (mounted at
+	// /etc/chatcli/ca, CHATCLI_CA_BUNDLE).
+	// +optional
+	CABundleSecretName string `json:"caBundleSecretName,omitempty"`
+	// AllowHTTPProviders lets caller-supplied provider endpoints use plain
+	// HTTP (CHATCLI_ALLOW_HTTP_PROVIDERS). Off keeps the TLS-only posture.
+	// +optional
+	AllowHTTPProviders bool `json:"allowHTTPProviders,omitempty"`
+	// EncryptionKeyRef references the Secret key holding the at-rest
+	// encryption key for the server's stores (CHATCLI_ENCRYPTION_KEY).
+	// +optional
+	EncryptionKeyRef *SecretKeyRefSpec `json:"encryptionKeyRef,omitempty"`
+	// LogRotation configures the server log file rotation.
+	// +optional
+	LogRotation *LogRotationSpec `json:"logRotation,omitempty"`
+}
+
+// MemoryFeatureSpec controls long-term memory.
+type MemoryFeatureSpec struct {
+	// Enabled turns memory on or off (CHATCLI_MEMORY_ENABLED).
+	Enabled bool `json:"enabled,omitempty"`
+	// Mode selects how memory reaches the prompt (CHATCLI_MEMORY_MODE):
+	// index, pull, or off.
+	// +kubebuilder:validation:Enum=index;pull;off
+	// +optional
+	Mode string `json:"mode,omitempty"`
+}
+
+// BudgetSpec bounds spend.
+type BudgetSpec struct {
+	// SessionUSD is the per-session budget (CHATCLI_SESSION_BUDGET_USD).
+	// +optional
+	SessionUSD string `json:"sessionUSD,omitempty"`
+	// DailyUSD is the calendar-day budget (CHATCLI_DAILY_BUDGET_USD).
+	// +optional
+	DailyUSD string `json:"dailyUSD,omitempty"`
+	// HardStop refuses turns once a budget is exceeded
+	// (CHATCLI_BUDGET_HARD_STOP).
+	// +optional
+	HardStop bool `json:"hardStop,omitempty"`
+}
+
+// LogRotationSpec configures log file rotation.
+type LogRotationSpec struct {
+	// MaxSizeMB rotates the log file past this size (CHATCLI_LOG_MAX_SIZE_MB).
+	// +optional
+	MaxSizeMB int32 `json:"maxSizeMB,omitempty"`
+	// MaxBackups keeps at most this many rotated files (CHATCLI_LOG_MAX_BACKUPS).
+	// +optional
+	MaxBackups int32 `json:"maxBackups,omitempty"`
+	// MaxAgeDays removes rotated files older than this (CHATCLI_LOG_MAX_AGE_DAYS).
+	// +optional
+	MaxAgeDays int32 `json:"maxAgeDays,omitempty"`
+	// Compress gzips rotated files (CHATCLI_LOG_COMPRESS).
+	// +optional
+	Compress bool `json:"compress,omitempty"`
 }
 
 // PipelineSpec toggles the server-hosted turn engine.
