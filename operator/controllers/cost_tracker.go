@@ -26,9 +26,12 @@ type CostTracker struct {
 type IncidentCost struct {
 	IssueName         string           `json:"issueName"`
 	LLMCosts          LLMCostBreakdown `json:"llmCosts"`
-	DowntimeCost      DowntimeCostInfo `json:"downtimeCost"`
 	EngineerTimeSaved float64          `json:"engineerTimeSavedMinutes"`
 	TotalCostUSD      float64          `json:"totalCostUSD"`
+	// RecordedAt is when the ledger entry was last booked; summaries use it
+	// to honor their window. Entries written before it existed have no
+	// value and are always included.
+	RecordedAt time.Time `json:"recordedAt,omitempty"`
 }
 
 type LLMCostBreakdown struct {
@@ -41,30 +44,12 @@ type LLMCostBreakdown struct {
 	Model             string  `json:"model"`
 }
 
-type DowntimeCostInfo struct {
-	DurationSeconds      float64 `json:"durationSeconds"`
-	EstimatedRevenueLoss float64 `json:"estimatedRevenueLoss"`
-}
-
 type CostSummary struct {
-	PeriodStart       time.Time `json:"periodStart"`
-	PeriodEnd         time.Time `json:"periodEnd"`
-	TotalLLMCost      float64   `json:"totalLLMCost"`
-	TotalDowntimeCost float64   `json:"totalDowntimeCost"`
-	IncidentCount     int       `json:"incidentCount"`
-	CostPerIncident   float64   `json:"costPerIncident"`
-}
-
-type ROIReport struct {
-	PeriodStart             time.Time `json:"periodStart"`
-	PeriodEnd               time.Time `json:"periodEnd"`
-	AutoRemediatedIncidents int       `json:"autoRemediatedIncidents"`
-	ManualIncidents         int       `json:"manualIncidents"`
-	EngineerHoursSaved      float64   `json:"engineerHoursSaved"`
-	LLMCostTotal            float64   `json:"llmCostTotal"`
-	DowntimePreventedMins   float64   `json:"downtimePreventedMinutes"`
-	EstimatedSavingsUSD     float64   `json:"estimatedSavingsUSD"`
-	ROIPercentage           float64   `json:"roiPercentage"`
+	PeriodStart     time.Time `json:"periodStart"`
+	PeriodEnd       time.Time `json:"periodEnd"`
+	TotalLLMCost    float64   `json:"totalLLMCost"`
+	IncidentCount   int       `json:"incidentCount"`
+	CostPerIncident float64   `json:"costPerIncident"`
 }
 
 type tokenPricing struct {
@@ -150,7 +135,8 @@ func (ct *CostTracker) RecordLLMCost(ctx context.Context, issueRef platformv1alp
 	rates := ct.getTokenPricing(ctx, namespace, provider, model)
 	cost.LLMCosts.EstimatedCostUSD = float64(cost.LLMCosts.TotalInputTokens)/1_000_000*rates.InputPerMillion +
 		float64(cost.LLMCosts.TotalOutputTokens)/1_000_000*rates.OutputPerMillion
-	cost.TotalCostUSD = cost.LLMCosts.EstimatedCostUSD + cost.DowntimeCost.EstimatedRevenueLoss
+	cost.TotalCostUSD = cost.LLMCosts.EstimatedCostUSD
+	cost.RecordedAt = time.Now()
 
 	return ct.saveCost(ctx, namespace, cost)
 }
@@ -170,20 +156,8 @@ func (ct *CostTracker) RecordAgenticStep(ctx context.Context, issueRef platformv
 	rates := ct.getTokenPricing(ctx, namespace, provider, model)
 	cost.LLMCosts.EstimatedCostUSD = float64(cost.LLMCosts.TotalInputTokens)/1_000_000*rates.InputPerMillion +
 		float64(cost.LLMCosts.TotalOutputTokens)/1_000_000*rates.OutputPerMillion
-	cost.TotalCostUSD = cost.LLMCosts.EstimatedCostUSD + cost.DowntimeCost.EstimatedRevenueLoss
-
-	return ct.saveCost(ctx, namespace, cost)
-}
-
-func (ct *CostTracker) RecordDowntimeCost(ctx context.Context, issueRef platformv1alpha1.IssueRef, namespace string, duration time.Duration, revenuePerMinute float64) error {
-	cost, err := ct.loadCost(ctx, issueRef.Name, namespace)
-	if err != nil {
-		cost = &IncidentCost{IssueName: issueRef.Name}
-	}
-
-	cost.DowntimeCost.DurationSeconds = duration.Seconds()
-	cost.DowntimeCost.EstimatedRevenueLoss = duration.Minutes() * revenuePerMinute
-	cost.TotalCostUSD = cost.LLMCosts.EstimatedCostUSD + cost.DowntimeCost.EstimatedRevenueLoss
+	cost.TotalCostUSD = cost.LLMCosts.EstimatedCostUSD
+	cost.RecordedAt = time.Now()
 
 	return ct.saveCost(ctx, namespace, cost)
 }
@@ -202,73 +176,17 @@ func (ct *CostTracker) GetCostSummary(ctx context.Context, namespace string, win
 	}
 
 	for _, cost := range costs {
+		if !cost.RecordedAt.IsZero() && cost.RecordedAt.Before(summary.PeriodStart) {
+			continue
+		}
 		summary.TotalLLMCost += cost.LLMCosts.EstimatedCostUSD
-		summary.TotalDowntimeCost += cost.DowntimeCost.EstimatedRevenueLoss
 		summary.IncidentCount++
 	}
 
 	if summary.IncidentCount > 0 {
-		summary.CostPerIncident = (summary.TotalLLMCost + summary.TotalDowntimeCost) / float64(summary.IncidentCount)
+		summary.CostPerIncident = summary.TotalLLMCost / float64(summary.IncidentCount)
 	}
 	return summary, nil
-}
-
-func (ct *CostTracker) CalculateROI(ctx context.Context, namespace string, window time.Duration) (*ROIReport, error) {
-	now := time.Now()
-	start := now.Add(-window)
-	report := &ROIReport{PeriodStart: start, PeriodEnd: now}
-
-	// Count auto-remediated vs manual
-	var plans platformv1alpha1.RemediationPlanList
-	opts := []client.ListOption{client.InNamespace(namespace)}
-	if err := ct.client.List(ctx, &plans, opts...); err != nil {
-		return report, err
-	}
-
-	for _, plan := range plans.Items {
-		if plan.CreationTimestamp.Time.Before(start) {
-			continue
-		}
-		if plan.Status.State == platformv1alpha1.RemediationStateCompleted {
-			report.AutoRemediatedIncidents++
-			// Estimate downtime prevented (avg 15min per auto-remediated incident)
-			report.DowntimePreventedMins += 15
-		}
-	}
-
-	// Count manual incidents (escalated/failed)
-	var issues platformv1alpha1.IssueList
-	if err := ct.client.List(ctx, &issues, opts...); err != nil {
-		return report, err
-	}
-	for _, iss := range issues.Items {
-		if iss.CreationTimestamp.Time.Before(start) {
-			continue
-		}
-		if iss.Status.State == platformv1alpha1.IssueStateEscalated || iss.Status.State == platformv1alpha1.IssueStateFailed {
-			report.ManualIncidents++
-		}
-	}
-
-	// Load costs
-	costs, _ := ct.loadAllCosts(ctx, namespace)
-	for _, cost := range costs {
-		report.LLMCostTotal += cost.LLMCosts.EstimatedCostUSD
-	}
-
-	// Engineer time saved: 2h average per auto-remediated incident
-	report.EngineerHoursSaved = float64(report.AutoRemediatedIncidents) * 2.0
-
-	// Savings: engineer hours * $75/hour + downtime prevented * $10/min (configurable)
-	hourlyRate := 75.0
-	revenuePerMin := 10.0
-	report.EstimatedSavingsUSD = report.EngineerHoursSaved*hourlyRate + report.DowntimePreventedMins*revenuePerMin
-
-	if report.LLMCostTotal > 0 {
-		report.ROIPercentage = (report.EstimatedSavingsUSD - report.LLMCostTotal) / report.LLMCostTotal * 100
-	}
-
-	return report, nil
 }
 
 func (ct *CostTracker) loadCost(ctx context.Context, issueName, namespace string) (*IncidentCost, error) {
@@ -287,16 +205,35 @@ func (ct *CostTracker) loadCost(ctx context.Context, issueName, namespace string
 	return &cost, nil
 }
 
+// loadAllCosts reads every ledger entry of a namespace, or of every
+// namespace when namespace is empty: each namespace keeps its own ledger
+// ConfigMap, found by the managed-by label the tracker sets on creation.
 func (ct *CostTracker) loadAllCosts(ctx context.Context, namespace string) ([]IncidentCost, error) {
-	cm := &corev1.ConfigMap{}
-	if err := ct.client.Get(ctx, types.NamespacedName{Name: costLedgerCM, Namespace: namespace}, cm); err != nil {
-		return nil, err
+	var ledgers []corev1.ConfigMap
+	if namespace != "" {
+		cm := &corev1.ConfigMap{}
+		if err := ct.client.Get(ctx, types.NamespacedName{Name: costLedgerCM, Namespace: namespace}, cm); err != nil {
+			return nil, err
+		}
+		ledgers = append(ledgers, *cm)
+	} else {
+		var list corev1.ConfigMapList
+		if err := ct.client.List(ctx, &list, client.MatchingLabels{"app.kubernetes.io/managed-by": "chatcli-operator"}); err != nil {
+			return nil, err
+		}
+		for _, cm := range list.Items {
+			if cm.Name == costLedgerCM {
+				ledgers = append(ledgers, cm)
+			}
+		}
 	}
 	var costs []IncidentCost
-	for _, v := range cm.Data {
-		var cost IncidentCost
-		if json.Unmarshal([]byte(v), &cost) == nil {
-			costs = append(costs, cost)
+	for _, cm := range ledgers {
+		for _, v := range cm.Data {
+			var cost IncidentCost
+			if json.Unmarshal([]byte(v), &cost) == nil {
+				costs = append(costs, cost)
+			}
 		}
 	}
 	return costs, nil

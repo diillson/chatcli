@@ -61,16 +61,6 @@ type FederationReconciler struct {
 	remoteClients sync.Map // name -> client.Client
 }
 
-// GlobalStatus aggregates status across all federated clusters.
-type GlobalStatus struct {
-	TotalClusters      int
-	ConnectedClusters  int
-	TotalActiveIssues  int
-	IssuesBySeverity   map[string]int
-	ActiveRemediations int
-	UnhealthyClusters  []string
-}
-
 // +kubebuilder:rbac:groups=platform.chatcli.io,resources=clusterregistrations,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=platform.chatcli.io,resources=clusterregistrations/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=platform.chatcli.io,resources=issues,verbs=get;list;watch;update;patch
@@ -437,62 +427,6 @@ func (r *FederationReconciler) DetectCascade(ctx context.Context, issue *platfor
 	}
 
 	return false, nil
-}
-
-// GetGlobalStatus aggregates status from all registered clusters.
-func (r *FederationReconciler) GetGlobalStatus(ctx context.Context) (*GlobalStatus, error) {
-	var clusterList platformv1alpha1.ClusterRegistrationList
-	if err := r.List(ctx, &clusterList); err != nil {
-		return nil, fmt.Errorf("listing cluster registrations: %w", err)
-	}
-
-	status := &GlobalStatus{
-		IssuesBySeverity: make(map[string]int),
-	}
-
-	for _, cr := range clusterList.Items {
-		status.TotalClusters++
-
-		if cr.Status.Connected {
-			status.ConnectedClusters++
-		} else {
-			status.UnhealthyClusters = append(status.UnhealthyClusters, cr.Name)
-		}
-
-		status.TotalActiveIssues += int(cr.Status.ActiveIssues)
-		status.ActiveRemediations += int(cr.Status.ActiveRemediations)
-
-		// Count issues by severity from connected clusters
-		if cr.Status.Connected {
-			cached, ok := r.remoteClients.Load(cr.Name)
-			if !ok {
-				continue
-			}
-			remoteClient := cached.(client.Client)
-
-			var issues platformv1alpha1.IssueList
-			if err := remoteClient.List(ctx, &issues); err != nil {
-				continue
-			}
-			for _, issue := range issues.Items {
-				if !isTerminalIssueState(issue.Status.State) {
-					status.IssuesBySeverity[string(issue.Spec.Severity)]++
-				}
-			}
-		}
-	}
-
-	// Also include local cluster issues
-	var localIssues platformv1alpha1.IssueList
-	if err := r.List(ctx, &localIssues); err == nil {
-		for _, issue := range localIssues.Items {
-			if !isTerminalIssueState(issue.Status.State) {
-				status.IssuesBySeverity[string(issue.Spec.Severity)]++
-			}
-		}
-	}
-
-	return status, nil
 }
 
 // GetClusterApprovalMode determines the remediation approval mode based on cluster tier and issue severity.

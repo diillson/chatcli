@@ -26,10 +26,6 @@ spec:
         - namespaceSelector:
             matchLabels:
               kubernetes.io/metadata.name: monitoring
-    # Allow webhook traffic (port 9443)
-    - ports:
-        - protocol: TCP
-          port: 9443
   egress:
     # Allow DNS resolution
     - ports:

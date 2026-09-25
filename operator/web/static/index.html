@@ -2567,7 +2567,7 @@ async function loadPlatformResources() {
     const s = summary.spec || {};
 
     // Fetch additional resource counts not in summary
-    let anomalyCount = 0, approvalPolicyCount = 0, escalationPolicyCount = 0, notifPolicyCount = 0, slaCount = 0;
+    let anomalyCount = 0;
     try { const d = await apiFetch('/incidents?pageSize=1'); anomalyCount = d.metadata?.totalCount ?? 0; } catch {}
 
     const res = (icon, label, count, color) =>

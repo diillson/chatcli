@@ -105,17 +105,3 @@ func (ls *LogScrubber) ScrubText(text string) string {
 	}
 	return result
 }
-
-// AddPatterns adds custom scrub patterns at runtime.
-func (ls *LogScrubber) AddPatterns(patterns []ScrubPattern) {
-	ls.mu.Lock()
-	defer ls.mu.Unlock()
-	ls.patterns = append(ls.patterns, patterns...)
-}
-
-// PatternCount returns the number of active scrub patterns.
-func (ls *LogScrubber) PatternCount() int {
-	ls.mu.RLock()
-	defer ls.mu.RUnlock()
-	return len(ls.patterns)
-}

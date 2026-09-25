@@ -745,12 +745,6 @@ func (wb *WatcherBridge) GetSeenCount() int {
 	return len(wb.seen)
 }
 
-// SetServerAddress is a convenience method to directly set the server address.
-// Used primarily in testing or local development.
-func (wb *WatcherBridge) SetServerAddress(address string) error {
-	return wb.serverClient.Connect(address, ConnectionOpts{})
-}
-
 // NeedLeaderElection implements manager.LeaderElectionRunnable.
 func (wb *WatcherBridge) NeedLeaderElection() bool {
 	return true
@@ -775,13 +769,4 @@ func (wb *WatcherBridge) ResolveServerAddress(ctx context.Context) (string, erro
 	}
 
 	return "", fmt.Errorf("no ready Instance found")
-}
-
-// GetAnomalyByName returns an Anomaly CR by name from the given namespace.
-func (wb *WatcherBridge) GetAnomalyByName(ctx context.Context, name, namespace string) (*platformv1alpha1.Anomaly, error) {
-	var anomaly platformv1alpha1.Anomaly
-	if err := wb.client.Get(ctx, types.NamespacedName{Name: name, Namespace: namespace}, &anomaly); err != nil {
-		return nil, err
-	}
-	return &anomaly, nil
 }
