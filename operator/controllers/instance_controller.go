@@ -71,6 +71,9 @@ func init() {
 type InstanceReconciler struct {
 	client.Client
 	Scheme *runtime.Scheme
+	// Prober reaches the running server for its version and health; nil
+	// disables the probe (tests, or an operator that never dials).
+	Prober Prober
 }
 
 // +kubebuilder:rbac:groups=platform.chatcli.io,resources=instances,verbs=get;list;watch;create;update;patch;delete
@@ -255,8 +258,56 @@ func (r *InstanceReconciler) updateStatus(ctx context.Context, instance *platfor
 	}
 	meta.SetStatusCondition(&instance.Status.Conditions, availableCond)
 
+	r.probeServer(ctx, instance)
+
 	instance.Status.ObservedGeneration = instance.Generation
 	return r.Status().Update(ctx, instance)
+}
+
+// ServerReachableConditionType reports whether the operator reached the
+// running server with its own transport and credential, and what version
+// answered. Ready (pods up) and reachable (the operator can drive it) are
+// different facts; this is the second one.
+const ServerReachableConditionType = "ServerReachable"
+
+// probeServer asks the running server for its version and health and
+// records the outcome. Nothing to probe while the Deployment is not ready.
+func (r *InstanceReconciler) probeServer(ctx context.Context, instance *platformv1alpha1.Instance) {
+	if r.Prober == nil {
+		return
+	}
+	cond := metav1.Condition{
+		Type:               ServerReachableConditionType,
+		ObservedGeneration: instance.Generation,
+	}
+	if !instance.Status.Ready {
+		cond.Status = metav1.ConditionUnknown
+		cond.Reason = "DeploymentNotReady"
+		cond.Message = "not probed: no ready replica"
+		meta.SetStatusCondition(&instance.Status.Conditions, cond)
+		return
+	}
+	now := metav1.Now()
+	instance.Status.ServerProbeTime = &now
+	res, err := r.Prober.ProbeInstance(ctx, instance)
+	switch {
+	case err != nil:
+		cond.Status = metav1.ConditionFalse
+		cond.Reason = "ProbeFailed"
+		cond.Message = err.Error()
+	case !res.Healthy:
+		cond.Status = metav1.ConditionFalse
+		cond.Reason = "NotServing"
+		cond.Message = "server answered Health with NOT_SERVING"
+	default:
+		cond.Status = metav1.ConditionTrue
+		cond.Reason = "Serving"
+		cond.Message = fmt.Sprintf("server %s serving (%s/%s)", res.Version, res.Provider, res.Model)
+	}
+	if res.Version != "" {
+		instance.Status.ServerVersion = res.Version
+	}
+	meta.SetStatusCondition(&instance.Status.Conditions, cond)
 }
 
 func (r *InstanceReconciler) cleanupResources(ctx context.Context, instance *platformv1alpha1.Instance) error {

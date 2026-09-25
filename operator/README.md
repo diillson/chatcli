@@ -167,6 +167,7 @@ spec:
     tls:
       enabled: true
       secretName: chatcli-tls       # Secret with tls.crt, tls.key, ca.crt (optional)
+      # clientCASecretName: chatcli-clients-ca   # mutual TLS: ca.crt client certs are verified against
     token:
       name: chatcli-server-token    # Secret containing the auth token
       key: token                    # Key within the Secret (default: "token")
@@ -187,6 +188,8 @@ spec:
       # operatorTokenRef:           # credential the operator presents (needed with RS256)
       #   name: chatcli-operator-jwt
       #   key: token
+      # mtlsRole: user              # role for callers identified by client certificate alone
+      # operatorClientCertSecretName: chatcli-operator-cert   # tls.crt/tls.key the operator presents
   watcher:
     enabled: true
     interval: "30s"
@@ -297,6 +300,7 @@ Three ways to satisfy it:
 | Shared token | `spec.server.token` | one credential for every caller |
 | Per-user JWTs (HS256) | `spec.server.security.jwtSecretRef` | callers carry their own identity and role; tokens must carry an `exp` claim |
 | Per-user JWTs (RS256) | `spec.server.security.jwtPublicKeyRef` | tokens are issued by an external identity provider; `jwtIssuer` / `jwtAudience` pin the claims the server requires |
+| Mutual TLS | `spec.server.tls.clientCASecretName` | every connection must present a certificate signed by that CA; the server names the caller after it with the role in `spec.server.security.mtlsRole` (default `user`) |
 | No credential | `spec.server.security.bindAddress: "127.0.0.1"` | the server is only reached from inside its own pod |
 
 A credential supplied directly through `spec.extraEnv` as
@@ -314,17 +318,37 @@ order and reports the choice on the Instance:
 | 1 | `spec.server.token` | the shared token, as before |
 | 2 | `spec.server.security.operatorTokenRef` | the referenced value verbatim: a JWT issued for `chatcli-operator` by your identity provider (RS256 servers), or a dedicated shared token |
 | 3 | `spec.server.security.jwtSecretRef` | short-lived HS256 tokens it mints itself (`sub: chatcli-operator`, `role: operator`, one hour, renewed at 45 minutes), stamped with `jwtIssuer` / `jwtAudience` when set |
+| 4 | `spec.server.security.operatorClientCertSecretName` | its client certificate (`tls.crt` / `tls.key`), presented on every connection; with `clientCASecretName` on the server and no bearer credential the certificate is the whole identity |
 
 ```bash
 kubectl get instance my-instance -o jsonpath='{.status.conditions[?(@.type=="OperatorCredentialConfigured")]}'
 ```
 
 `OperatorCredentialConfigured=False` means the server is secured in a way
-the operator cannot satisfy (an RS256 public key with no
-`operatorTokenRef`, or a credential passed only through `extraEnv`): the
+the operator cannot satisfy (an RS256 public key or a client CA with no
+operator credential, or a credential passed only through `extraEnv`): the
 Instance still provisions, but `AnalyzeIssue` and `AgenticStep` will be
 refused until one of the fields above is set. The minted token carries the
 `operator` role, which the AIOps RPCs need and nothing more.
+
+#### What is really running
+
+Once the Deployment is ready the operator probes the server with its own
+transport and credential (`Health`, then `GetServerInfo`) and records the
+outcome, so `kubectl get instance` shows the version that answered and
+whether the AIOps pipeline can drive it:
+
+```bash
+kubectl get instance my-instance
+# NAME          READY   REPLICAS   PROVIDER   VERSION   AGE
+# my-instance   true    1          CLAUDEAI   1.211.0   3d
+kubectl get instance my-instance -o jsonpath='{.status.conditions[?(@.type=="ServerReachable")]}'
+```
+
+`ServerReachable=False` with reason `ProbeFailed` and a message mentioning
+the credential check means the pods are up but the operator's credential
+was refused; `NotServing` means the server answered but is draining. The
+last known `status.serverVersion` is kept across a failed probe.
 
 <!-- provider auth follows -->
 

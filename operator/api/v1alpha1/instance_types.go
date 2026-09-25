@@ -227,6 +227,21 @@ type ServerSecuritySpec struct {
 	// +optional
 	OperatorTokenRef *SecretKeyRefSpec `json:"operatorTokenRef,omitempty"`
 
+	// MTLSRole is the role granted to callers identified by their client
+	// certificate alone (no bearer token). Maps to CHATCLI_MTLS_ROLE.
+	// Default on the server: user.
+	// +kubebuilder:validation:Enum=viewer;readonly;user;operator;admin
+	// +optional
+	MTLSRole string `json:"mtlsRole,omitempty"`
+
+	// OperatorClientCertSecretName names a TLS Secret (tls.crt, tls.key)
+	// the operator presents as its client certificate when dialing this
+	// Instance. With tls.clientCASecretName on the server side this is the
+	// operator's credential: no bearer token is needed and the server names
+	// the caller after the certificate with mtlsRole.
+	// +optional
+	OperatorClientCertSecretName string `json:"operatorClientCertSecretName,omitempty"`
+
 	// RateLimitRPS is the per-client rate limit in requests per second.
 	// Maps to CHATCLI_RATE_LIMIT_RPS env var. Default: 10.
 	// +optional
@@ -289,6 +304,15 @@ type TLSSpec struct {
 	// certificates, otherwise the connection fails with
 	// "certificate signed by unknown authority".
 	SecretName string `json:"secretName,omitempty"`
+
+	// ClientCASecretName names a Secret whose ca.crt is the CA bundle client
+	// certificates are verified against (mutual TLS). Mounted at
+	// /etc/chatcli/client-ca and passed as --tls-client-ca; the server then
+	// requires a client certificate on every connection and names the
+	// caller after it (see security.mtlsRole). Counts as a credential for
+	// the reachable-bind check. Requires Enabled and SecretName.
+	// +optional
+	ClientCASecretName string `json:"clientCASecretName,omitempty"`
 }
 
 // SecretKeyRefSpec references a specific key in a Secret.
@@ -571,6 +595,16 @@ type InstanceStatus struct {
 
 	// ObservedGeneration tracks which generation was last reconciled.
 	ObservedGeneration int64 `json:"observedGeneration,omitempty"`
+
+	// ServerVersion is the version the running server reported on the last
+	// probe (GetServerInfo), empty until the operator reached it.
+	// +optional
+	ServerVersion string `json:"serverVersion,omitempty"`
+
+	// ServerProbeTime is when the operator last probed the server; the
+	// ServerReachable condition carries the outcome.
+	// +optional
+	ServerProbeTime *metav1.Time `json:"serverProbeTime,omitempty"`
 }
 
 // +kubebuilder:object:root=true
@@ -579,6 +613,7 @@ type InstanceStatus struct {
 // +kubebuilder:printcolumn:name="Ready",type="boolean",JSONPath=".status.ready"
 // +kubebuilder:printcolumn:name="Replicas",type="integer",JSONPath=".status.replicas"
 // +kubebuilder:printcolumn:name="Provider",type="string",JSONPath=".spec.provider"
+// +kubebuilder:printcolumn:name="Version",type="string",JSONPath=".status.serverVersion"
 // +kubebuilder:printcolumn:name="Age",type="date",JSONPath=".metadata.creationTimestamp"
 
 // Instance is the Schema for the instances API.

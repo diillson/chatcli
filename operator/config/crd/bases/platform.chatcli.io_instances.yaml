@@ -26,6 +26,9 @@ spec:
     - jsonPath: .spec.provider
       name: Provider
       type: string
+    - jsonPath: .status.serverVersion
+      name: Version
+      type: string
     - jsonPath: .metadata.creationTimestamp
       name: Age
       type: date
@@ -890,6 +893,26 @@ spec:
                           Maps to CHATCLI_MAX_SEND_MSG_SIZE env var. Default: 52428800 (50MB).
                         format: int32
                         type: integer
+                      mtlsRole:
+                        description: |-
+                          MTLSRole is the role granted to callers identified by their client
+                          certificate alone (no bearer token). Maps to CHATCLI_MTLS_ROLE.
+                          Default on the server: user.
+                        enum:
+                        - viewer
+                        - readonly
+                        - user
+                        - operator
+                        - admin
+                        type: string
+                      operatorClientCertSecretName:
+                        description: |-
+                          OperatorClientCertSecretName names a TLS Secret (tls.crt, tls.key)
+                          the operator presents as its client certificate when dialing this
+                          Instance. With tls.clientCASecretName on the server side this is the
+                          operator's credential: no bearer token is needed and the server names
+                          the caller after the certificate with mtlsRole.
+                        type: string
                       operatorTokenRef:
                         description: |-
                           OperatorTokenRef references a Secret key holding the credential the
@@ -923,6 +946,15 @@ spec:
                   tls:
                     description: TLS configures TLS for the gRPC server.
                     properties:
+                      clientCASecretName:
+                        description: |-
+                          ClientCASecretName names a Secret whose ca.crt is the CA bundle client
+                          certificates are verified against (mutual TLS). Mounted at
+                          /etc/chatcli/client-ca and passed as --tls-client-ca; the server then
+                          requires a client certificate on every connection and names the
+                          caller after it (see security.mtlsRole). Counts as a credential for
+                          the reachable-bind check. Requires Enabled and SecretName.
+                        type: string
                       enabled:
                         description: Enabled enables TLS.
                         type: boolean
@@ -1125,6 +1157,17 @@ spec:
                 description: Replicas is the total number of desired replicas.
                 format: int32
                 type: integer
+              serverProbeTime:
+                description: |-
+                  ServerProbeTime is when the operator last probed the server; the
+                  ServerReachable condition carries the outcome.
+                format: date-time
+                type: string
+              serverVersion:
+                description: |-
+                  ServerVersion is the version the running server reported on the last
+                  probe (GetServerInfo), empty until the operator reached it.
+                type: string
             required:
             - ready
             - readyReplicas

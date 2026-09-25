@@ -33,6 +33,12 @@ type ConnectionOpts struct {
 	// TokenSource, when set, yields the bearer credential per call (minted
 	// JWTs that renew themselves). It takes precedence over Token.
 	TokenSource TokenSource
+
+	// ClientCertificate is the client certificate the operator presents
+	// (mutual TLS), parsed from the Instance's Secret. It takes precedence
+	// over CHATCLI_GRPC_TLS_CERT/KEY, which stay as the operator-wide
+	// fallback. A pointer so the struct stays comparable.
+	ClientCertificate *tls.Certificate
 }
 
 // ServerClient wraps the gRPC connection to the ChatCLI server.
@@ -95,8 +101,11 @@ func (sc *ServerClient) Connect(address string, opts ConnectionOpts) error {
 		tlsCfg.RootCAs = certPool
 	}
 
-	// mTLS: load client certificate if configured
-	if certPath := os.Getenv("CHATCLI_GRPC_TLS_CERT"); certPath != "" {
+	// mTLS: per-Instance client certificate from the CR, else the
+	// operator-wide one from the environment.
+	if opts.ClientCertificate != nil {
+		tlsCfg.Certificates = []tls.Certificate{*opts.ClientCertificate}
+	} else if certPath := os.Getenv("CHATCLI_GRPC_TLS_CERT"); certPath != "" {
 		keyPath := os.Getenv("CHATCLI_GRPC_TLS_KEY")
 		if keyPath == "" {
 			return fmt.Errorf("CHATCLI_GRPC_TLS_CERT set but CHATCLI_GRPC_TLS_KEY is missing")
@@ -189,6 +198,26 @@ func (sc *ServerClient) AnalyzeIssue(ctx context.Context, req *pb.AnalyzeIssueRe
 	}
 
 	return sc.client.AnalyzeIssue(sc.withAuth(ctx), req)
+}
+
+// Health calls the Health RPC (unauthenticated on the server).
+func (sc *ServerClient) Health(ctx context.Context) (*pb.HealthResponse, error) {
+	sc.mu.RLock()
+	defer sc.mu.RUnlock()
+	if sc.client == nil {
+		return nil, fmt.Errorf("not connected to server")
+	}
+	return sc.client.Health(sc.withAuth(ctx), &pb.HealthRequest{})
+}
+
+// GetServerInfo calls the GetServerInfo RPC.
+func (sc *ServerClient) GetServerInfo(ctx context.Context) (*pb.GetServerInfoResponse, error) {
+	sc.mu.RLock()
+	defer sc.mu.RUnlock()
+	if sc.client == nil {
+		return nil, fmt.Errorf("not connected to server")
+	}
+	return sc.client.GetServerInfo(sc.withAuth(ctx), &pb.GetServerInfoRequest{})
 }
 
 // AgenticStepCaller abstracts the AgenticStep RPC for testing.
