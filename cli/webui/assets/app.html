@@ -88,6 +88,8 @@
   .msg.assistant .who { background:var(--panel2); color:var(--brand); border:1px solid var(--border); }
   .msg.system .who { background:transparent; color:var(--faint); }
   .msg .body { flex:1; min-width:0; }
+  .msg .col { flex:1; min-width:0; display:flex; flex-direction:column; }
+  .msg .col .body { flex:none; }
   .msg.user .body { background:var(--user); border-radius:8px; padding:8px 12px; white-space:pre-wrap; }
   .msg .body img.att { max-width:220px; max-height:180px; border-radius:6px; border:1px solid var(--border); display:block; margin-top:6px; }
   .md p { margin:0 0 .7em; } .md p:last-child { margin-bottom:0; }
@@ -415,7 +417,9 @@ function addMessage(role, text, images) {
   hideEmpty();
   const el = document.createElement('div'); el.className = 'msg ' + role;
   const who = role === 'user' ? 'you' : role === 'assistant' ? 'ai' : '·';
-  el.innerHTML = '<div class="who">' + who + '</div><div class="body"></div>';
+  // The assistant column stacks the thinking block and the activity line
+  // above the prose, full width, instead of beside it.
+  el.innerHTML = '<div class="who">' + who + '</div>' + (role === 'assistant' ? '<div class="col"><div class="body"></div></div>' : '<div class="body"></div>');
   const body = el.querySelector('.body');
   if (role === 'assistant') { body.classList.add('md'); body.innerHTML = md(text || ''); }
   else body.textContent = text || '';
@@ -438,7 +442,7 @@ function beginAssistant() {
   // line, so the reader never has to look away to know the turn is alive.
   const work = document.createElement('div'); work.className = 'working';
   work.innerHTML = '<span class="dots"><i></i><i></i><i></i></span><span class="wtext"></span>';
-  el.insertBefore(work, body);
+  body.before(work);
   state.streaming = { el, body, text: '', blocks: body, work };
   setWorking(t('work.waiting'));
   return state.streaming;
@@ -475,9 +479,8 @@ function addThought(text) {
   if (!d) {
     d = document.createElement('details'); d.className = 'block thought';
     d.innerHTML = '<summary>' + esc(t('thought')) + '</summary><div class="inner"></div>';
-    s.el.querySelector('.body').before(d); s.thought = d;
-    // thoughts precede the prose: place the details before the markdown body
-    s.el.insertBefore(d, s.el.querySelector('.body'));
+    // Thoughts precede the prose, above the markdown body in the column.
+    s.body.before(d); s.thought = d;
   }
   d.querySelector('.inner').textContent += text;
   if (!s.text) setWorking(t('work.thinking'));
