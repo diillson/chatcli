@@ -69,9 +69,10 @@ func init() {
 // based on matching NotificationPolicy rules.
 type NotificationReconciler struct {
 	client.Client
-	Scheme     *runtime.Scheme
-	throttle   sync.Map // key: "issue/channel" -> last sent time (time.Time)
-	hourCounts sync.Map // key: "issue/hour" -> count (*int64)
+	Scheme        *runtime.Scheme
+	AuditRecorder *AuditRecorder // optional: records every delivery attempt
+	throttle      sync.Map       // key: "issue/channel" -> last sent time (time.Time)
+	hourCounts    sync.Map       // key: "issue/hour" -> count (*int64)
 }
 
 // +kubebuilder:rbac:groups=platform.chatcli.io,resources=issues,verbs=get;list;watch;update;patch
@@ -212,6 +213,7 @@ func (r *NotificationReconciler) processPolicy(ctx context.Context, policy *plat
 				logger.Error(err, "failed to resolve channel config", "channel", channelName)
 				notificationsFailedTotal.WithLabelValues(string(ch.Type), "config_resolve").Inc()
 				r.recordDelivery(ctx, policy, channelName, false, err.Error())
+				r.auditDelivery(ctx, channelName, issue, false, err.Error())
 				continue
 			}
 
@@ -221,6 +223,7 @@ func (r *NotificationReconciler) processPolicy(ctx context.Context, policy *plat
 				logger.Error(err, "failed to create channel sender", "channel", channelName)
 				notificationsFailedTotal.WithLabelValues(string(ch.Type), "sender_create").Inc()
 				r.recordDelivery(ctx, policy, channelName, false, err.Error())
+				r.auditDelivery(ctx, channelName, issue, false, err.Error())
 				continue
 			}
 
@@ -231,12 +234,14 @@ func (r *NotificationReconciler) processPolicy(ctx context.Context, policy *plat
 				notificationsSentTotal.WithLabelValues(string(ch.Type), string(issue.Spec.Severity), "failure").Inc()
 				notificationsFailedTotal.WithLabelValues(string(ch.Type), "send").Inc()
 				r.recordDelivery(ctx, policy, channelName, false, err.Error())
+				r.auditDelivery(ctx, channelName, issue, false, err.Error())
 				continue
 			}
 
 			logger.Info("notification sent", "channel", channelName, "type", ch.Type)
 			notificationsSentTotal.WithLabelValues(string(ch.Type), string(issue.Spec.Severity), "success").Inc()
 			r.recordDelivery(ctx, policy, channelName, true, "")
+			r.auditDelivery(ctx, channelName, issue, true, "")
 			r.updateThrottle(throttleKey)
 		}
 	}
@@ -818,9 +823,11 @@ func (r *NotificationReconciler) sendEscalationNotification(ctx context.Context,
 						logger.Error(err, "failed to send escalation notification", "channel", ch.Name)
 						notificationsSentTotal.WithLabelValues(string(ch.Type), severity, "failure").Inc()
 						notificationsFailedTotal.WithLabelValues(string(ch.Type), "send").Inc()
+						r.auditDelivery(ctx, ch.Name, issue, false, err.Error())
 					} else {
 						logger.Info("escalation notification sent", "channel", ch.Name, "level", level.Name)
 						notificationsSentTotal.WithLabelValues(string(ch.Type), severity, "success").Inc()
+						r.auditDelivery(ctx, ch.Name, issue, true, "")
 					}
 				}
 			}
@@ -878,4 +885,15 @@ func (r *NotificationReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		Named("notification").
 		For(&platformv1alpha1.Issue{}).
 		Complete(r)
+}
+
+// auditDelivery records a delivery attempt as an AuditEvent, success or
+// failure, so the audit trail shows who was told about an Issue.
+func (r *NotificationReconciler) auditDelivery(ctx context.Context, channelName string, issue *platformv1alpha1.Issue, success bool, errMsg string) {
+	if r.AuditRecorder == nil || issue == nil {
+		return
+	}
+	if err := r.AuditRecorder.RecordNotificationSent(ctx, channelName, issue, success, errMsg); err != nil {
+		log.FromContext(ctx).Error(err, "Failed to record notification audit event", "channel", channelName)
+	}
 }

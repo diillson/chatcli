@@ -699,6 +699,7 @@ tr.expandable { cursor:pointer; }
   <button class="tab-btn" role="tab" aria-selected="false" aria-controls="page-runbooks" data-tab="runbooks" data-i18n="tab.runbooks">Runbooks</button>
   <button class="tab-btn" role="tab" aria-selected="false" aria-controls="page-postmortems" data-tab="postmortems" data-i18n="tab.postmortems">PostMortems</button>
   <button class="tab-btn" role="tab" aria-selected="false" aria-controls="page-clusters" data-tab="clusters" data-i18n="tab.clusters">Clusters</button>
+  <button class="tab-btn" role="tab" aria-selected="false" aria-controls="page-policies" data-tab="policies" data-i18n="tab.policies">Policies</button>
   <button class="tab-btn" role="tab" aria-selected="false" aria-controls="page-audit" data-tab="audit" data-i18n="tab.audit">Audit</button>
 </nav>
 
@@ -912,6 +913,20 @@ tr.expandable { cursor:pointer; }
     <div class="grid-3" id="clusterCards"></div>
   </div>
 
+  <!-- POLICIES PAGE: the four policy kinds the controllers read; managed through kubectl or GitOps, read-only here -->
+  <div class="page" id="page-policies" role="tabpanel">
+    <div class="filters">
+      <input class="filter-input" id="polNamespaceFilter" placeholder="Namespace" aria-label="Namespace" data-i18n-placeholder="filter.namespace" data-i18n-aria="filter.namespace">
+      <span class="filter-hint" data-i18n="policies.hint">Read-only: policies are managed with kubectl or GitOps.</span>
+    </div>
+    <div class="grid-2" id="policiesGrid">
+      <div class="panel"><div class="panel-header"><span class="panel-title" data-i18n="policies.approval">Approval Policies</span></div><div class="panel-body" id="policiesApproval"></div></div>
+      <div class="panel"><div class="panel-header"><span class="panel-title" data-i18n="policies.notification">Notification Policies</span></div><div class="panel-body" id="policiesNotification"></div></div>
+      <div class="panel"><div class="panel-header"><span class="panel-title" data-i18n="policies.escalation">Escalation Policies</span></div><div class="panel-body" id="policiesEscalation"></div></div>
+      <div class="panel"><div class="panel-header"><span class="panel-title" data-i18n="policies.sla">Incident SLAs</span></div><div class="panel-body" id="policiesSla"></div></div>
+    </div>
+  </div>
+
   <!-- AUDIT PAGE -->
   <div class="page" id="page-audit" role="tabpanel">
     <div class="filters">
@@ -1023,7 +1038,28 @@ tr.expandable { cursor:pointer; }
   "tab.runbooks": "Runbooks",
   "tab.postmortems": "PostMortems",
   "tab.clusters": "Clusters",
+  "tab.policies": "Policies",
   "tab.audit": "Audit",
+  "policies.hint": "Read-only: policies are managed with kubectl or GitOps.",
+  "policies.approval": "Approval Policies",
+  "policies.notification": "Notification Policies",
+  "policies.escalation": "Escalation Policies",
+  "policies.sla": "Incident SLAs",
+  "policies.empty": "None in this scope",
+  "policies.rules": "{n} rule(s)",
+  "policies.channels": "{n} channel(s)",
+  "policies.levels": "{n} level(s)",
+  "policies.enabled": "enabled",
+  "policies.disabled": "disabled",
+  "policies.default": "default",
+  "col.mode": "Mode",
+  "col.response": "Response",
+  "col.resolution": "Resolution",
+  "col.violations": "Violations",
+  "col.compliance": "Compliance",
+  "col.approved": "Approved",
+  "col.rejected": "Rejected",
+  "error.policies": "Failed to load policies",
   "panel.severityPie": "Issues by Severity",
   "panel.platformResources": "Platform Resources",
   "panel.remediationTimeline": "Remediation Activity",
@@ -1414,7 +1450,28 @@ tr.expandable { cursor:pointer; }
   "tab.runbooks": "Runbooks",
   "tab.postmortems": "PostMortems",
   "tab.clusters": "Clusters",
+  "tab.policies": "Políticas",
   "tab.audit": "Auditoria",
+  "policies.hint": "Somente leitura: as políticas são gerenciadas com kubectl ou GitOps.",
+  "policies.approval": "Políticas de aprovação",
+  "policies.notification": "Políticas de notificação",
+  "policies.escalation": "Políticas de escalonamento",
+  "policies.sla": "SLAs de incidente",
+  "policies.empty": "Nenhuma neste escopo",
+  "policies.rules": "{n} regra(s)",
+  "policies.channels": "{n} canal(is)",
+  "policies.levels": "{n} nível(is)",
+  "policies.enabled": "ativa",
+  "policies.disabled": "desativada",
+  "policies.default": "padrão",
+  "col.mode": "Modo",
+  "col.response": "Resposta",
+  "col.resolution": "Resolução",
+  "col.violations": "Violações",
+  "col.compliance": "Conformidade",
+  "col.approved": "Aprovadas",
+  "col.rejected": "Rejeitadas",
+  "error.policies": "Falha ao carregar as políticas",
   "panel.severityPie": "Issues por severidade",
   "panel.platformResources": "Recursos da plataforma",
   "panel.remediationTimeline": "Atividade de remediação",
@@ -2406,9 +2463,48 @@ function loadCurrentTab() {
     case 'runbooks': loadRunbooks(); break;
     case 'postmortems': loadPostMortems(); break;
     case 'clusters': loadClusters(); break;
+    case 'policies': loadPolicies(); break;
     case 'audit': loadAudit(); break;
   }
   checkHealth();
+}
+
+// ===== POLICIES PAGE =====
+
+// Each policy kind has its own shape, so each panel renders the columns
+// that matter for that kind; the API serves the raw spec and status.
+const policyPanels = [
+  { kind: 'approval', el: 'policiesApproval', cols: () => [t('col.name'), t('col.namespace'), t('col.state'), t('policies.rules'), t('col.approved'), t('col.rejected')],
+    row: p => [escapeHtml(p.name), escapeHtml(p.namespace), enabledBadge(p.spec?.enabled), t('policies.rules', { n: (p.spec?.rules || []).length }), (p.status?.totalApproved ?? 0), (p.status?.totalRejected ?? 0)] },
+  { kind: 'notification', el: 'policiesNotification', cols: () => [t('col.name'), t('col.namespace'), t('policies.channels'), t('policies.rules'), t('col.created')],
+    row: p => [escapeHtml(p.name), escapeHtml(p.namespace), t('policies.channels', { n: (p.spec?.channels || []).length }), t('policies.rules', { n: (p.spec?.rules || []).length }), timeAgo(p.creationTimestamp)] },
+  { kind: 'escalation', el: 'policiesEscalation', cols: () => [t('col.name'), t('col.namespace'), t('col.state'), t('policies.levels'), t('col.severity')],
+    row: p => [escapeHtml(p.name), escapeHtml(p.namespace), enabledBadge(p.spec?.enabled) + (p.spec?.defaultPolicy ? ` <span class="badge">${t('policies.default')}</span>` : ''), t('policies.levels', { n: (p.spec?.levels || []).length }), (p.spec?.severities || []).map(sv => severityBadge(sv)).join(' ') || '-'] },
+  { kind: 'sla', el: 'policiesSla', cols: () => [t('col.name'), t('col.namespace'), t('col.severity'), t('col.response'), t('col.resolution'), t('col.violations'), t('col.compliance')],
+    row: p => [escapeHtml(p.name), escapeHtml(p.namespace), severityBadge(p.spec?.severity), escapeHtml(p.spec?.responseTime || '-'), escapeHtml(p.spec?.resolutionTime || '-'), (p.status?.totalViolations ?? 0), p.status?.compliancePercentage != null ? `${Number(p.status.compliancePercentage).toFixed(1)}%` : '-'] },
+];
+
+function enabledBadge(enabled) {
+  return enabled ? `<span class="badge badge-ok">${t('policies.enabled')}</span>` : `<span class="badge">${t('policies.disabled')}</span>`;
+}
+
+async function loadPolicies() {
+  const ns = ($('#polNamespaceFilter')?.value || '').trim();
+  await Promise.all(policyPanels.map(async panel => {
+    const el = document.getElementById(panel.el);
+    if (!el) return;
+    showLoading(el);
+    try {
+      const data = await apiFetch(`/policies/${panel.kind}?pageSize=100` + (ns ? '&namespace=' + encodeURIComponent(ns) : ''));
+      const items = data.items || [];
+      if (items.length === 0) { showEmpty(el, t('policies.empty')); return; }
+      el.innerHTML = `<table><thead><tr>${panel.cols().map(c => `<th>${c}</th>`).join('')}</tr></thead>
+        <tbody>${items.map(p => `<tr>${panel.row(p).map(v => `<td>${v}</td>`).join('')}</tr>`).join('')}</tbody></table>`;
+      makeSortable(el.querySelector('table'), 0, 'policies:' + panel.kind);
+    } catch (e) {
+      showError(el, t('error.policies'), 'loadPolicies()');
+    }
+  }));
 }
 
 // ===== HEALTH CHECK =====

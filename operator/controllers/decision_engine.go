@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"time"
 
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	platformv1alpha1 "github.com/diillson/chatcli/operator/api/v1alpha1"
@@ -13,6 +14,59 @@ import (
 // DecisionEngine implements confidence-based auto-remediation decisions.
 type DecisionEngine struct{}
 
+// Synthetic approval policies. A plan the engine parks has no
+// ApprovalPolicy behind it, so its ApprovalRequest points at one of these
+// names and the approval controller applies DecisionEngineRule instead of
+// looking the policy up.
+const (
+	// DecisionEnginePolicyName marks a request raised by the confidence and
+	// circuit-breaker evaluation.
+	DecisionEnginePolicyName = "decision-engine"
+	// ClusterTierPolicyName marks a request raised by the tier of the local
+	// cluster's ClusterRegistration.
+	ClusterTierPolicyName = "cluster-tier"
+
+	// Annotations the engine leaves on the plan so operators and the
+	// dashboard can see why it ran or waited.
+	annotationDecisionMode       = "platform.chatcli.io/decision-mode"
+	annotationDecisionConfidence = "platform.chatcli.io/confidence"
+	annotationDecisionRisk       = "platform.chatcli.io/risk"
+	annotationDecisionReason     = "platform.chatcli.io/decision-reason"
+
+	// Decision modes, in the order of autonomy they grant.
+	DecisionModeAuto       = "auto"        // executes, nobody is told
+	DecisionModeAutoNotify = "auto-notify" // executes, operators are notified
+	DecisionModeApproval   = "approval"    // waits for a human
+	DecisionModeManual     = "manual"      // waits for a human, low confidence or critical
+	DecisionModeBlocked    = "blocked"     // circuit breaker open
+
+	circuitBreakerWindow    = time.Hour
+	circuitBreakerThreshold = 3
+)
+
+// IsSyntheticApprovalPolicy reports whether a policy name is one the
+// operator raises on its own rather than an ApprovalPolicy object.
+func IsSyntheticApprovalPolicy(name string) bool {
+	return name == DecisionEnginePolicyName || name == ClusterTierPolicyName
+}
+
+// SyntheticApprovalPolicy returns the stand-in policy object for a
+// synthetic name: only the name is meaningful.
+func SyntheticApprovalPolicy(name string) *platformv1alpha1.ApprovalPolicy {
+	return &platformv1alpha1.ApprovalPolicy{ObjectMeta: metav1.ObjectMeta{Name: name}}
+}
+
+// DecisionEngineRule is the rule every synthetic request follows: one
+// human approves within 30 minutes, or the plan fails as expired.
+func DecisionEngineRule() *platformv1alpha1.ApprovalRule {
+	return &platformv1alpha1.ApprovalRule{
+		Name:              "decision-engine",
+		Mode:              platformv1alpha1.ApprovalModeManual,
+		TimeoutMinutes:    30,
+		RequiredApprovers: 1,
+	}
+}
+
 // DecisionResult contains the auto-remediation decision.
 type DecisionResult struct {
 	Allowed            bool
@@ -20,6 +74,22 @@ type DecisionResult struct {
 	AdjustedConfidence float64
 	RequiresApproval   bool
 	RiskAssessment     string
+	// Mode is the autonomy the engine granted: auto, auto-notify,
+	// approval, manual or blocked.
+	Mode string
+}
+
+// annotate writes the decision onto the plan's annotations in memory.
+func (dr *DecisionResult) annotate(plan *platformv1alpha1.RemediationPlan) {
+	ann := plan.GetAnnotations()
+	if ann == nil {
+		ann = map[string]string{}
+	}
+	ann[annotationDecisionMode] = dr.Mode
+	ann[annotationDecisionConfidence] = fmt.Sprintf("%.2f", dr.AdjustedConfidence)
+	ann[annotationDecisionRisk] = dr.RiskAssessment
+	ann[annotationDecisionReason] = dr.Reason
+	plan.SetAnnotations(ann)
 }
 
 // ShouldAutoRemediate evaluates whether the proposed remediation should be auto-executed.
@@ -36,6 +106,7 @@ func (de *DecisionEngine) ShouldAutoRemediate(ctx context.Context, c client.Clie
 		result.RequiresApproval = true
 		result.Reason = fmt.Sprintf("Circuit breaker open: %s", reason)
 		result.RiskAssessment = "critical"
+		result.Mode = DecisionModeBlocked
 		return result, nil
 	}
 
@@ -103,16 +174,20 @@ func (de *DecisionEngine) ShouldAutoRemediate(ctx context.Context, c client.Clie
 		result.Allowed = true
 		result.Reason = fmt.Sprintf("Auto-approved: high confidence (%.2f) + low severity", confidence)
 		result.RiskAssessment = "low"
+		result.Mode = DecisionModeAuto
 	case confidence >= 0.85 && sev == platformv1alpha1.IssueSeverityMedium:
 		result.Allowed = true
 		result.Reason = fmt.Sprintf("Auto-approved with notification: confidence %.2f + medium severity", confidence)
 		result.RiskAssessment = "medium"
+		result.Mode = DecisionModeAutoNotify
 	case confidence >= 0.80 && sev == platformv1alpha1.IssueSeverityHigh:
 		result.RequiresApproval = true
 		result.Reason = fmt.Sprintf("Approval required: confidence %.2f + high severity", confidence)
 		result.RiskAssessment = "high"
+		result.Mode = DecisionModeApproval
 	default:
 		result.RequiresApproval = true
+		result.Mode = DecisionModeManual
 		if sev == platformv1alpha1.IssueSeverityCritical {
 			result.Reason = fmt.Sprintf("Manual approval required: critical severity (confidence %.2f)", confidence)
 			result.RiskAssessment = "critical"
@@ -182,18 +257,49 @@ func (de *DecisionEngine) IsCircuitBreakerOpen(ctx context.Context, c client.Cli
 	if err := c.List(ctx, &plans, client.InNamespace(namespace)); err != nil {
 		return false, "", err
 	}
-	cutoff := time.Now().Add(-1 * time.Hour)
+	cutoff := time.Now().Add(-circuitBreakerWindow)
 	failedCount := 0
 	for _, plan := range plans.Items {
-		if plan.Status.CompletedAt == nil || plan.Status.CompletedAt.Time.Before(cutoff) {
+		if plan.Status.State != platformv1alpha1.RemediationStateFailed && plan.Status.State != platformv1alpha1.RemediationStateRolledBack {
 			continue
 		}
-		if plan.Status.State == platformv1alpha1.RemediationStateFailed || plan.Status.State == platformv1alpha1.RemediationStateRolledBack {
-			failedCount++
+		if failedAt(&plan).Before(cutoff) {
+			continue
 		}
+		failedCount++
 	}
-	if failedCount >= 3 {
+	if failedCount >= circuitBreakerThreshold {
 		return true, fmt.Sprintf("%d remediations failed in last hour", failedCount), nil
 	}
 	return false, "", nil
+}
+
+// failedAt is when a failed plan failed. Not every failure path stamps
+// CompletedAt, so the start time and then the creation time stand in;
+// without this a failure that skipped the stamp would never trip the
+// breaker.
+func failedAt(plan *platformv1alpha1.RemediationPlan) time.Time {
+	switch {
+	case plan.Status.CompletedAt != nil:
+		return plan.Status.CompletedAt.Time
+	case plan.Status.StartedAt != nil:
+		return plan.Status.StartedAt.Time
+	default:
+		return plan.CreationTimestamp.Time
+	}
+}
+
+// ClusterTierRequiresApproval maps a ClusterRegistration tier to whether a
+// plan of the given severity must wait for a human: critical clusters
+// always, standard clusters for critical and high severities, non-critical
+// clusters never. An unknown tier is treated as critical.
+func ClusterTierRequiresApproval(mode string, severity platformv1alpha1.IssueSeverity) bool {
+	switch mode {
+	case "auto":
+		return false
+	case "auto-medium-low":
+		return severity == platformv1alpha1.IssueSeverityCritical || severity == platformv1alpha1.IssueSeverityHigh
+	default:
+		return true
+	}
 }

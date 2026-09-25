@@ -170,7 +170,7 @@ func TestDashboardScriptFindsEveryID(t *testing.T) {
 
 func TestDashboardTabBarKeepsItsSections(t *testing.T) {
 	shape := parseDashboard(t, dashboardSource(t))
-	want := []string{"overview", "incidents", "slos", "approvals", "aiinsights", "remediations", "runbooks", "postmortems", "clusters", "audit"}
+	want := []string{"overview", "incidents", "slos", "approvals", "aiinsights", "remediations", "runbooks", "postmortems", "clusters", "policies", "audit"}
 	if strings.Join(shape.tabs, ",") != strings.Join(want, ",") {
 		t.Fatalf("tab bar = %v, want %v", shape.tabs, want)
 	}
@@ -452,5 +452,19 @@ func TestDashboardKeepsDraftsAcrossRefresh(t *testing.T) {
 	re := regexp.MustCompile(`function refreshCurrentTab\(\) \{\s*loadCurrentTab\(\);\s*\}`)
 	if !re.MatchString(shape.script) {
 		t.Errorf("refreshCurrentTab must reload in place through loadCurrentTab()")
+	}
+}
+
+// The Policies tab reads the four policy kinds through the read-only
+// policies API and never offers a write.
+func TestDashboardPoliciesTabIsReadOnly(t *testing.T) {
+	shape := parseDashboard(t, dashboardSource(t))
+	for _, want := range []string{"async function loadPolicies()", "`/policies/${panel.kind}?pageSize=100`", "case 'policies': loadPolicies(); break;", "t('policies.empty')"} {
+		if !strings.Contains(shape.script, want) {
+			t.Errorf("dashboard script lost the policies wiring %q", want)
+		}
+	}
+	if strings.Contains(shape.script, "apiPost(`/policies") || strings.Contains(shape.script, "apiDelete(`/policies") {
+		t.Fatal("the policies tab must not write policies")
 	}
 }

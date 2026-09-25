@@ -118,6 +118,20 @@ securityContext:
 # while the server has no such RPC; "poll" queries GetAlerts every 30s.
 alertTransport: stream
 
+# Decision engine: before a RemediationPlan executes, adjust the AI
+# confidence by history, pattern matches, time of day, concurrent issues
+# and severity, and park the plan for a human unless confidence and severity
+# allow it. A namespace with 3 failed remediations in an hour trips a
+# circuit breaker that parks everything. Off by default: ApprovalPolicies
+# are then the only gate.
+decisionEngine:
+  enabled: false
+
+# Name of this cluster's ClusterRegistration. When set, the registration's
+# tier decides which severities wait for a human: critical clusters always,
+# standard clusters for critical and high, non-critical clusters never.
+clusterName: ""
+
 # Security hardening configuration for the operator
 security:
   # Dev mode disables authentication on the REST API (NEVER use in production)

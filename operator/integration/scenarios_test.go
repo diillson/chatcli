@@ -340,3 +340,75 @@ func TestSLAResolutionViolationIsRecorded(t *testing.T) {
 		t.Errorf("TotalIssuesTracked = %d", sla.Status.TotalIssuesTracked)
 	}
 }
+
+// With the decision engine on, a critical issue's plan waits for a human
+// under the synthetic decision-engine policy even though no ApprovalPolicy
+// exists in the namespace; the verdict is annotated on the plan, the
+// request is audited, and approving it runs the plan. The Issue is written
+// directly so its severity is critical from the first reconcile.
+func TestDecisionEngineParksCriticalPlan(t *testing.T) {
+	ns := namespace(t, "it-decision")
+	ctx := context.Background()
+	rb := scaleRunbook("error-rate", ns)
+	rb.Spec.Trigger.Severity = platformv1alpha1.IssueSeverityCritical
+	mustCreate(t, rb)
+	mustCreate(t, deployment("billing", ns, 2))
+	issue := &platformv1alpha1.Issue{
+		ObjectMeta: metav1.ObjectMeta{Name: "billing-error-storm", Namespace: ns},
+		Spec: platformv1alpha1.IssueSpec{
+			Severity: platformv1alpha1.IssueSeverityCritical, Source: platformv1alpha1.IssueSourcePrometheus, SignalType: "error_rate",
+			Resource: platformv1alpha1.ResourceRef{Kind: "Deployment", Name: "billing", Namespace: ns}, Description: "5xx ratio at 95%", RiskScore: 95,
+		},
+	}
+	mustCreate(t, issue)
+
+	var plan platformv1alpha1.RemediationPlan
+	eventually(t, wait, "the plan parked by the decision engine", func() bool {
+		return k8sClient.Get(ctx, key(ns, issue.Name+"-plan-1"), &plan) == nil && plan.Status.State == platformv1alpha1.RemediationStateWaitingApproval
+	})
+	if plan.Annotations["platform.chatcli.io/decision-mode"] != "manual" {
+		t.Fatalf("plan annotations = %v, want decision-mode manual", plan.Annotations)
+	}
+	var ar platformv1alpha1.ApprovalRequest
+	eventually(t, wait, "the synthetic ApprovalRequest", func() bool {
+		return k8sClient.Get(ctx, key(ns, "approval-"+plan.Name), &ar) == nil && ar.Status.State == platformv1alpha1.ApprovalStatePending
+	})
+	if ar.Spec.PolicyRef != "decision-engine" || ar.Spec.TimeoutMinutes != 30 {
+		t.Fatalf("ApprovalRequest = %+v", ar.Spec)
+	}
+	var events platformv1alpha1.AuditEventList
+	eventually(t, wait, "the approval_requested audit event", func() bool {
+		if err := k8sClient.List(ctx, &events, client.InNamespace(ns)); err != nil {
+			return false
+		}
+		for _, e := range events.Items {
+			if e.Spec.EventType == "approval_requested" {
+				return true
+			}
+		}
+		return false
+	})
+
+	now := metav1.Now()
+	ar.Status.State = platformv1alpha1.ApprovalStateApproved
+	ar.Status.ApprovedAt = &now
+	ar.Status.Decisions = append(ar.Status.Decisions, platformv1alpha1.ApprovalDecision{Approver: "sre-lead", Decision: "approved", Reason: "integration", Timestamp: now})
+	if err := k8sClient.Status().Update(ctx, &ar); err != nil {
+		t.Fatal(err)
+	}
+	var deploy appsv1.Deployment
+	eventually(t, wait, "the approved plan to scale the Deployment", func() bool {
+		return k8sClient.Get(ctx, key(ns, "billing"), &deploy) == nil && *deploy.Spec.Replicas == 4
+	})
+	eventually(t, wait, "the approval decision audit event", func() bool {
+		if err := k8sClient.List(ctx, &events, client.InNamespace(ns)); err != nil {
+			return false
+		}
+		for _, e := range events.Items {
+			if e.Spec.EventType == "approval_approved" {
+				return true
+			}
+		}
+		return false
+	})
+}

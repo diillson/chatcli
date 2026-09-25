@@ -7,9 +7,11 @@ import (
 
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	k8slabels "k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -175,24 +177,36 @@ func CreateApprovalRequest(
 		return fmt.Errorf("setting owner reference: %w", err)
 	}
 
+	// A request that already exists (a previous attempt failed after the
+	// Create) is reused: proceeding without approval would skip the gate.
 	if err := c.Create(ctx, ar); err != nil {
-		return fmt.Errorf("creating approval request: %w", err)
+		if !errors.IsAlreadyExists(err) {
+			return fmt.Errorf("creating approval request: %w", err)
+		}
+		if err := c.Get(ctx, types.NamespacedName{Name: ar.Name, Namespace: ar.Namespace}, ar); err != nil {
+			return fmt.Errorf("reading existing approval request: %w", err)
+		}
 	}
 
 	// Set initial status
-	ar.Status.State = platformv1alpha1.ApprovalStatePending
-	if err := c.Status().Update(ctx, ar); err != nil {
-		return fmt.Errorf("updating approval request status: %w", err)
+	if ar.Status.State == "" {
+		ar.Status.State = platformv1alpha1.ApprovalStatePending
+		if err := c.Status().Update(ctx, ar); err != nil {
+			return fmt.Errorf("updating approval request status: %w", err)
+		}
 	}
 
-	// Add approval-pending annotation to the plan
+	// Add approval-pending annotation to the plan. A merge patch touches
+	// only the annotation, so a plan whose cached copy is behind the API
+	// server is still annotated instead of failing on the resource version.
+	base := plan.DeepCopy()
 	annotations := plan.GetAnnotations()
 	if annotations == nil {
 		annotations = make(map[string]string)
 	}
 	annotations[annotationApprovalPending] = ar.Name
 	plan.SetAnnotations(annotations)
-	if err := c.Update(ctx, plan); err != nil {
+	if err := c.Patch(ctx, plan, client.MergeFrom(base)); err != nil {
 		return fmt.Errorf("annotating remediation plan: %w", err)
 	}
 
