@@ -76,6 +76,13 @@ type InstanceSpec struct {
 	// +optional
 	Plugins *PluginProvisionSpec `json:"plugins,omitempty"`
 
+	// Pipeline hosts the full ChatCLI turn engine in the server behind the
+	// ChatTurn, RunCoder, RunAgent and tool RPCs (CHATCLI_SERVER_PIPELINE).
+	// Off by default: the engine's workers run inside the pod and its turns
+	// are serialized.
+	// +optional
+	Pipeline *PipelineSpec `json:"pipeline,omitempty"`
+
 	// MCP configures MCP (Model Context Protocol) servers for the instance.
 	// MCP servers expose external tools (filesystem, search, databases, etc.)
 	// that the AI can invoke during conversations.
@@ -291,6 +298,12 @@ type ServerSecuritySpec struct {
 	// EnableReflection enables gRPC reflection (requires also CHATCLI_GRPC_REFLECTION=true).
 	// +optional
 	EnableReflection bool `json:"enableReflection,omitempty"`
+}
+
+// PipelineSpec toggles the server-hosted turn engine.
+type PipelineSpec struct {
+	// Enabled serves the pipeline RPCs.
+	Enabled bool `json:"enabled,omitempty"`
 }
 
 // TLSSpec configures TLS.

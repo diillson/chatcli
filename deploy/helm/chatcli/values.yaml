@@ -441,6 +441,13 @@ bootstrap:
   # Or reference an existing ConfigMap containing bootstrap .md files
   existingConfigMap: ""
 
+# Pipeline RPCs: host the full ChatCLI turn engine in the server
+# (ChatTurn, RunCoder, RunAgent, tool RPCs). Off by default: the engine's
+# workers run inside the pod and its turns are serialized. Cannot be
+# combined with the co-located gateway (CHATCLI_GATEWAY_IN_SERVER).
+pipeline:
+  enabled: false
+
 # Memory persistence (long-term MEMORY.md + daily notes)
 memory:
   enabled: false

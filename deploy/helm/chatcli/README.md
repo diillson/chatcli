@@ -322,6 +322,7 @@ agents:
 | `persistence.accessModes` | PVC access modes | `["ReadWriteOnce"]` |
 | `persistence.size` | PVC size | `1Gi` |
 | `memory.enabled` | Enable long-term memory persistence (daily notes, facts, patterns) | `false` |
+| `pipeline.enabled` | Host the full ChatCLI turn engine behind the `ChatTurn`, `RunCoder`, `RunAgent` and tool RPCs (`CHATCLI_SERVER_PIPELINE`); exclusive with the co-located gateway | `false` |
 
 ### Networking & Security
 

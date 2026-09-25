@@ -1,0 +1,14 @@
+{
+  "server.pipeline.disabled": "the pipeline RPCs are not enabled on this server (start it with CHATCLI_SERVER_PIPELINE=true)",
+  "server.pipeline.exec_requires_admin": "coder, agent and tool runs execute on the server and require the admin role",
+  "server.pipeline.text_required": "text is required",
+  "server.pipeline.task_required": "task is required",
+  "server.pipeline.tool_required": "tool name is required",
+  "server.pipeline.turn_error": "pipeline turn failed: %v",
+  "server.pipeline.chat_failed": "pipeline chat turn failed",
+  "server.pipeline.run_failed": "pipeline run failed",
+  "server.pipeline.tool_failed": "pipeline tool call failed",
+  "cmd.server.pipeline_enabled": "Pipeline RPCs enabled: ChatTurn, RunCoder, RunAgent and tools run on the server's ChatCLI engine",
+  "cmd.server.pipeline_init_failed": "Pipeline RPCs disabled: the ChatCLI engine failed to initialize",
+  "cmd.server.pipeline_gateway_conflict": "Pipeline RPCs disabled: CHATCLI_SERVER_PIPELINE and CHATCLI_GATEWAY_IN_SERVER cannot share one process; run the gateway separately"
+}

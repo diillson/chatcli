@@ -98,6 +98,17 @@ service ChatCLIService {
 
   // ListBindings returns channel→principal bindings (optionally filtered).
   rpc ListBindings(ListBindingsRequest) returns (ListBindingsResponse);
+
+  // --- Pipeline: the full ChatCLI turn engine hosted by the server (opt-in,
+  // CHATCLI_SERVER_PIPELINE=true). Unlike SendPrompt, a ChatTurn runs the same
+  // enrichment an interactive turn gets (memory, contexts, skills, knowledge,
+  // compaction) and RunCoder/RunAgent drive the real agent loops with the
+  // server's tools. Sessions are namespaced by the caller's principal. ---
+  rpc ChatTurn(ChatTurnRequest) returns (ChatTurnResponse);
+  rpc RunCoder(PipelineTaskRequest) returns (stream PipelineTaskEvent);
+  rpc RunAgent(PipelineTaskRequest) returns (stream PipelineTaskEvent);
+  rpc ListPipelineTools(ListPipelineToolsRequest) returns (ListPipelineToolsResponse);
+  rpc RunPipelineTool(RunPipelineToolRequest) returns (RunPipelineToolResponse);
 }
 
 // --- SendPrompt ---
@@ -243,6 +254,7 @@ message GetServerInfoResponse {
   int32 plugin_count = 7;      // number of plugins available on server
   int32 agent_count = 8;       // number of agents available on server
   int32 skill_count = 9;       // number of skills available on server
+  bool pipeline_enabled = 10;  // ChatTurn/RunCoder/RunAgent/RunPipelineTool are served
 }
 
 // --- Watcher Status ---
@@ -573,4 +585,51 @@ message HubBinding {
 }
 message ListBindingsResponse {
   repeated HubBinding bindings = 1;
+}
+
+// --- Pipeline messages ---
+
+message ChatTurnRequest {
+  string session = 1;   // caller-chosen conversation id; namespaced by principal on the server
+  string text = 2;
+  string provider = 3;  // optional per-turn routing override
+  string model = 4;
+  bool plain = 5;       // bare LLM passthrough: no memory/contexts/skills, no compaction
+}
+message ChatTurnResponse {
+  string reply = 1;
+  string session = 2;   // the namespaced session id the server used
+}
+
+message PipelineTaskRequest {
+  string session = 1;
+  string task = 2;
+  string provider = 3;
+  string model = 4;
+  map<string, string> quality = 5;  // CHATCLI_QUALITY_* overrides for this run only
+}
+message PipelineTaskEvent {
+  oneof event {
+    string line = 1;    // a rendered transcript line as the loop works
+    string final = 2;   // the final answer; last event of the stream
+  }
+}
+
+message ListPipelineToolsRequest {}
+message PipelineTool {
+  string name = 1;
+  string description = 2;
+  string usage = 3;
+  string schema = 4;    // JSON schema of the arguments, when the tool declares one
+  bool read_only = 5;
+}
+message ListPipelineToolsResponse {
+  repeated PipelineTool tools = 1;
+}
+message RunPipelineToolRequest {
+  string name = 1;
+  string args = 2;      // raw argument string exactly as the REPL would take it
+}
+message RunPipelineToolResponse {
+  string output = 1;
 }

@@ -278,6 +278,12 @@ func RunServer(args []string, llmMgr manager.LLMManager, logger *zap.Logger) err
 		defer stopGW()
 	}
 
+	// Full turn engine over gRPC (opt-in): ChatTurn, RunCoder, RunAgent
+	// and tool RPCs on a ChatCLI hosted in this process.
+	if stopPipeline := initPipelineBackend(llmMgr, srv, logger); stopPipeline != nil {
+		defer stopPipeline()
+	}
+
 	return srv.Start()
 }
 

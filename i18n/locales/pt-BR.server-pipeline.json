@@ -1,0 +1,14 @@
+{
+  "server.pipeline.disabled": "os RPCs de pipeline não estão habilitados neste servidor (inicie com CHATCLI_SERVER_PIPELINE=true)",
+  "server.pipeline.exec_requires_admin": "execuções de coder, agent e tools rodam no servidor e exigem o papel admin",
+  "server.pipeline.text_required": "text é obrigatório",
+  "server.pipeline.task_required": "task é obrigatório",
+  "server.pipeline.tool_required": "o nome da tool é obrigatório",
+  "server.pipeline.turn_error": "turno do pipeline falhou: %v",
+  "server.pipeline.chat_failed": "turno de chat do pipeline falhou",
+  "server.pipeline.run_failed": "execução do pipeline falhou",
+  "server.pipeline.tool_failed": "chamada de tool do pipeline falhou",
+  "cmd.server.pipeline_enabled": "RPCs de pipeline habilitados: ChatTurn, RunCoder, RunAgent e tools rodam no engine ChatCLI do servidor",
+  "cmd.server.pipeline_init_failed": "RPCs de pipeline desabilitados: o engine ChatCLI falhou ao inicializar",
+  "cmd.server.pipeline_gateway_conflict": "RPCs de pipeline desabilitados: CHATCLI_SERVER_PIPELINE e CHATCLI_GATEWAY_IN_SERVER não podem dividir um processo; rode o gateway separado"
+}

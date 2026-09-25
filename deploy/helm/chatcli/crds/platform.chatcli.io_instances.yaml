@@ -475,6 +475,17 @@ spec:
                     description: StorageClassName is the storage class to use.
                     type: string
                 type: object
+              pipeline:
+                description: |-
+                  Pipeline hosts the full ChatCLI turn engine in the server behind the
+                  ChatTurn, RunCoder, RunAgent and tool RPCs (CHATCLI_SERVER_PIPELINE).
+                  Off by default: the engine's workers run inside the pod and its turns
+                  are serialized.
+                properties:
+                  enabled:
+                    description: Enabled serves the pipeline RPCs.
+                    type: boolean
+                type: object
               plugins:
                 description: Plugins configures plugin provisioning for the instance.
                 properties:

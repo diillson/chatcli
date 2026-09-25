@@ -946,6 +946,17 @@
         }
       }
     },
+    "pipeline": {
+      "type": "object",
+      "description": "Pipeline RPCs: host the full ChatCLI turn engine in the server (ChatTurn, RunCoder, RunAgent, tools).",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "description": "Enable the pipeline RPCs (CHATCLI_SERVER_PIPELINE). Exclusive with the co-located gateway."
+        }
+      }
+    },
     "memory": {
       "type": "object",
       "description": "Memory feature configuration.",
