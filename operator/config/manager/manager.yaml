@@ -52,7 +52,7 @@ spec:
       containers:
         - name: manager
           # Security (C6): Pin image to specific version. Production should use SHA256 digest.
-          image: ghcr.io/diillson/chatcli-operator:1.210.3 # x-release-please-version
+          image: ghcr.io/diillson/chatcli-operator:1.211.0 # x-release-please-version
           imagePullPolicy: IfNotPresent
           args:
             - --leader-elect
