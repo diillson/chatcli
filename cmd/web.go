@@ -40,6 +40,39 @@ func SetWebPage(page []byte) { webPage = page }
 // webBrowserLauncher opens the URL; tests replace it.
 var webBrowserLauncher = cli.LaunchBrowser
 
+// webLiveSession is the live session id the page speaks for (the webui
+// server's default when a request names none).
+const webLiveSession = "web"
+
+// webSessionPrefix names the saved session a standalone `chatcli web` binds
+// when none is given: the same prefix /web uses for a terminal it binds, so
+// both kinds show up together in the catalog.
+const webSessionPrefix = "web-"
+
+// bindWebSession binds the browser's live session to a saved one. An
+// explicit name is honored, or the start fails. Without one, a fresh
+// web-<timestamp> session is bound so every turn is written through under
+// its own name: the rolling mcp-web mirror alone would be overwritten by the
+// next standalone run, losing the previous conversation. The file appears on
+// the first completed turn, so an idle start leaves nothing behind. A
+// backend without a store (no engine configured) stays unbound.
+func bindWebSession(ctx context.Context, backend *rpcBackend, explicit string) (string, error) {
+	if name := strings.TrimSpace(explicit); name != "" {
+		if _, err := backend.ManageSession(ctx, "attach", webLiveSession, name); err != nil {
+			return "", err
+		}
+		return name, nil
+	}
+	if backend == nil || backend.store == nil {
+		return "", nil
+	}
+	name := webSessionPrefix + time.Now().Format("20060102-150405")
+	if _, err := backend.ManageSession(ctx, "attach", webLiveSession, name); err != nil {
+		return "", err
+	}
+	return name, nil
+}
+
 // RunWeb serves the local web UI: `chatcli web [--addr host:port]
 // [--session name] [--no-browser]`. The engine is the same shared backend
 // MCP and ACP use, so a session bound here continues in the terminal.
@@ -59,10 +92,11 @@ func RunWeb(args []string, mgr manager.LLMManager, logger *zap.Logger) error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	if name := strings.TrimSpace(*session); name != "" {
-		if _, err := backend.ManageSession(ctx, "attach", "web", name); err != nil {
-			return fmt.Errorf("%s", i18n.T("web.cli.failed", err))
-		}
+	name, err := bindWebSession(ctx, backend, *session)
+	if err != nil {
+		return fmt.Errorf("%s", i18n.T("web.cli.failed", err))
+	}
+	if name != "" {
 		fmt.Println(i18n.T("web.cli.bound", name))
 	}
 

@@ -8,6 +8,7 @@ package cmd
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/diillson/chatcli/cli/webui"
@@ -74,5 +75,39 @@ func TestRestoreSession_SkipsInjectedContext(t *testing.T) {
 	items, err := b.RestoreSession(context.Background(), "web")
 	if err != nil || len(items) != 2 || items[0].Content != "hello" || items[1].Content != "hi" {
 		t.Fatalf("items = %+v err=%v", items, err)
+	}
+}
+
+// A standalone `chatcli web` without --session binds a fresh web-<stamp>
+// session (lazily: the file appears on the first turn), an explicit name is
+// honored, and a backend without a store stays unbound instead of failing.
+func TestBindWebSession(t *testing.T) {
+	store := newFakeStore()
+	b := sessionBackend(store)
+
+	name, err := bindWebSession(context.Background(), b, "")
+	if err != nil || !strings.HasPrefix(name, webSessionPrefix) {
+		t.Fatalf("default binding: name=%q err=%v", name, err)
+	}
+	if got := b.boundName(webLiveSession); got != name {
+		t.Fatalf("live session must be bound to %q, got %q", name, got)
+	}
+	if _, ok := store.saved[name]; ok {
+		t.Fatalf("binding must not create %q before the first turn", name)
+	}
+
+	name, err = bindWebSession(context.Background(), b, " shared ")
+	if err != nil || name != "shared" {
+		t.Fatalf("explicit binding: name=%q err=%v", name, err)
+	}
+	if got := b.boundName(webLiveSession); got != "shared" {
+		t.Fatalf("explicit name must rebind, got %q", got)
+	}
+
+	if name, err := bindWebSession(context.Background(), &rpcBackend{sessions: map[string][]models.Message{}}, ""); err != nil || name != "" {
+		t.Fatalf("no store must stay unbound without error: name=%q err=%v", name, err)
+	}
+	if _, err := bindWebSession(context.Background(), &rpcBackend{sessions: map[string][]models.Message{}}, "x"); err == nil {
+		t.Fatal("an explicit name without a store must fail")
 	}
 }

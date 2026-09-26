@@ -118,3 +118,52 @@ func TestSessionAutosaveKeep_DefaultAndOverride(t *testing.T) {
 		t.Errorf("malformed override must fall back, got %d", got)
 	}
 }
+
+// TestAutosaveOnExit_BoundSessionIsNotDuplicated: a terminal bound to a
+// named session already persists every turn; exit flushes that session
+// once more and writes no autosave- copy. Without write-through, and when
+// the bound file vanished, the autosave still keeps the conversation.
+func TestAutosaveOnExit_BoundSessionIsNotDuplicated(t *testing.T) {
+	cli := newAutosaveCLI(t, 4)
+	if err := cli.sessionManager.SaveSessionV2("minha", cli.buildSessionData()); err != nil {
+		t.Fatal(err)
+	}
+	cli.currentSessionName = "minha"
+	cli.markBoundSessionSynced("minha")
+	cli.history = append(cli.history, models.Message{Role: "user", Content: "último turno"})
+
+	cli.autosaveSessionOnExit()
+	if autos := autosaveNames(t, cli); len(autos) != 0 {
+		t.Fatalf("bound session must not be duplicated as autosave, got %v", autos)
+	}
+	sd, err := cli.sessionManager.LoadSessionV2("minha")
+	if err != nil || len(sd.ChatHistory) != 5 {
+		t.Fatalf("exit must flush the last turn into the bound session: %v / %d", err, len(sd.ChatHistory))
+	}
+
+	// Write-through off: the binding is inert, so the autosave applies.
+	t.Setenv("CHATCLI_SESSION_WRITETHROUGH", "off")
+	cli = newAutosaveCLI(t, 4)
+	cli.currentSessionName = "minha"
+	cli.autosaveSessionOnExit()
+	if autos := autosaveNames(t, cli); len(autos) != 1 {
+		t.Fatalf("without write-through the autosave must still happen, got %v", autos)
+	}
+	t.Setenv("CHATCLI_SESSION_WRITETHROUGH", "")
+
+	// Bound file deleted by another surface: the flush detaches and the
+	// autosave keeps the conversation.
+	cli = newAutosaveCLI(t, 4)
+	if err := cli.sessionManager.SaveSessionV2("sumiu", cli.buildSessionData()); err != nil {
+		t.Fatal(err)
+	}
+	cli.currentSessionName = "sumiu"
+	cli.markBoundSessionSynced("sumiu")
+	if err := cli.sessionManager.DeleteSession("sumiu"); err != nil {
+		t.Fatal(err)
+	}
+	cli.autosaveSessionOnExit()
+	if autos := autosaveNames(t, cli); len(autos) != 1 {
+		t.Fatalf("a vanished bound session must fall back to autosave, got %v", autos)
+	}
+}

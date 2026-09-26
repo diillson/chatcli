@@ -79,6 +79,19 @@ func (cli *ChatCLI) autosaveSessionOnExit() {
 	if cli.sessionManager == nil {
 		return
 	}
+	// A terminal bound to a named session (loaded, saved, or created by
+	// /web) already persists every turn through write-through. A second
+	// copy under autosave- would only duplicate it in the catalog: flush the
+	// bound session once more so the last turn is on disk, and stop there.
+	// The flush detaches when another surface deleted the file meanwhile;
+	// the autosave below then still keeps the conversation.
+	if name := cli.boundSessionName(); name != "" && sessionWritethroughEnabled() {
+		cli.persistBoundSession()
+		if cli.boundSessionName() == name {
+			fmt.Println(colorize("  "+i18n.T("session.autosave.bound", name), ColorGray))
+			return
+		}
+	}
 	nonSystem := 0
 	for _, m := range cli.history {
 		if m.Role != "system" {
