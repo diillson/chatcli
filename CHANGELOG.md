@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.211.2](https://github.com/diillson/chatcli/compare/v1.211.1...v1.211.2) (2026-09-26)
+
+
+### Bug Fixes
+
+* **rpc:** headless chat turns reach the live dashboard and are recorded under the model that served them ([#1684](https://github.com/diillson/chatcli/issues/1684)) ([af2d7c6](https://github.com/diillson/chatcli/commit/af2d7c67f07444342a01a577b97a55e06ccd328f))
+* **web:** a bound or cleared live session never refills from the mcp autosave mirror; New binds a fresh web session ([#1682](https://github.com/diillson/chatcli/issues/1682)) ([a3c1c4c](https://github.com/diillson/chatcli/commit/a3c1c4cc5a1204db9cf6f5b5c25912343ed0d7b4))
+
 ## [1.211.1](https://github.com/diillson/chatcli/compare/v1.211.0...v1.211.1) (2026-09-26)
 
 
