@@ -11,6 +11,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/diillson/chatcli/cli"
 	"github.com/diillson/chatcli/cli/webui"
 	"github.com/diillson/chatcli/models"
 )
@@ -109,5 +110,44 @@ func TestBindWebSession(t *testing.T) {
 	}
 	if _, err := bindWebSession(context.Background(), &rpcBackend{sessions: map[string][]models.Message{}}, "x"); err == nil {
 		t.Fatal("an explicit name without a store must fail")
+	}
+}
+
+// The backend's default route is the pair the engine booted on when the
+// environment names no model (LLM_MODEL is optional): the page then shows
+// the pair that serves, and a turn that names no model is recorded under
+// it. An explicit env route wins, and a model named for another provider
+// is not carried over.
+func TestAdoptEngineRoute(t *testing.T) {
+	engine := &cli.ChatCLI{Provider: "CLAUDEAI", Model: "claude-sonnet-4-6"}
+
+	b := &rpcBackend{}
+	b.adoptEngineRoute(engine)
+	if p, m := b.Defaults(); p != "CLAUDEAI" || m != "claude-sonnet-4-6" {
+		t.Fatalf("empty env must adopt the engine pair, got %s/%s", p, m)
+	}
+
+	b = &rpcBackend{provider: "claudeai"}
+	b.adoptEngineRoute(engine)
+	if _, m := b.Defaults(); m != "claude-sonnet-4-6" {
+		t.Fatalf("same provider in another case must still adopt the model, got %q", m)
+	}
+
+	b = &rpcBackend{provider: "OPENAI"}
+	b.adoptEngineRoute(engine)
+	if _, m := b.Defaults(); m != "" {
+		t.Fatalf("another provider must not inherit the engine's model, got %q", m)
+	}
+
+	b = &rpcBackend{provider: "CLAUDEAI", model: "claude-opus-5-5"}
+	b.adoptEngineRoute(engine)
+	if _, m := b.Defaults(); m != "claude-opus-5-5" {
+		t.Fatalf("an explicit env model must win, got %q", m)
+	}
+
+	b = &rpcBackend{}
+	b.adoptEngineRoute(nil)
+	if p, m := b.Defaults(); p != "" || m != "" {
+		t.Fatalf("no engine must leave the route empty, got %s/%s", p, m)
 	}
 }

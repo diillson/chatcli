@@ -1208,6 +1208,26 @@ func (cli *ChatCLI) chatEnvelopeFooter(servedProvider, servedModel string, usage
 // route override may have swapped both). Window sizing, cache semantics and
 // the cost beside them must all read the same pair, or one turn is described
 // by two different models.
+// contextWindowUsage reports how full the served model's context window is
+// after a turn, as the footer prints it and the dashboard shows it: the
+// projection for the NEXT request (current history plus the prefix that
+// will front it) when one is available — that is what decides whether the
+// next turn compacts, and it may legitimately exceed 100% — otherwise the
+// share this turn's usage took. Cached input counts (see contextTokens):
+// PromptTokens alone is only the uncached delta on Anthropic/Bedrock
+// schemas. window is 0 for a model whose context window is unknown.
+func (cli *ChatCLI) contextWindowUsage(provider, model string, usage *models.UsageInfo) (pct, reserve float64, window int) {
+	window = catalog.GetContextWindow(provider, model)
+	if window <= 0 {
+		return 0, 0, 0
+	}
+	pct = float64(contextTokens(provider, model, usage)) / float64(window) * 100
+	if used, res, ok := cli.projectedContextParts(window); ok {
+		pct, reserve = used, res
+	}
+	return pct, reserve, window
+}
+
 func (cli *ChatCLI) telemetryParts(provider, model string, usage *models.UsageInfo, costUSD float64, includeTokens bool) []string {
 	if usage == nil || (usage.InputTotal() == 0 && usage.CompletionTokens == 0) {
 		return nil
@@ -1228,17 +1248,7 @@ func (cli *ChatCLI) telemetryParts(provider, model string, usage *models.UsageIn
 	if costUSD > 0 {
 		parts = append(parts, formatTurnCost(costUSD))
 	}
-	if window := catalog.GetContextWindow(provider, model); window > 0 {
-		// Cached input counts: see contextTokens — PromptTokens alone is
-		// only the uncached delta on Anthropic/Bedrock schemas.
-		pct := float64(contextTokens(provider, model, usage)) / float64(window) * 100
-		// Prefer the projection for the NEXT request (current history plus
-		// the prefix that will front it): that is what decides whether the
-		// next turn compacts, and it may legitimately exceed 100%.
-		reserve := 0.0
-		if used, res, ok := cli.projectedContextParts(window); ok {
-			pct, reserve = used, res
-		}
+	if pct, reserve, window := cli.contextWindowUsage(provider, model, usage); window > 0 {
 		pulseContextWindow(roundPct(pct), window)
 		if roundPct(reserve) > 0 {
 			parts = append(parts, i18n.T("chat.envelope.context_pct_reserve", roundPct(pct), roundPct(reserve)))

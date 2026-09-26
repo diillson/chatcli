@@ -135,6 +135,7 @@ func newRPCBackend(kind string, mgr manager.LLMManager, logger *zap.Logger) (*rp
 	}
 	if chatCLI != nil {
 		backend.store = chatCLI
+		backend.adoptEngineRoute(chatCLI)
 		chatCLI.OnManagerRebuild(backend.setManager)
 		go chatCLI.CleanExpiredMachineSessionsRPC()
 		cleanups = append(cleanups, func() { chatCLI.FinalizeSpend(context.Background()) })
