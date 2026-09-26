@@ -86,7 +86,7 @@ func TestBindWebSession(t *testing.T) {
 	b := sessionBackend(store)
 
 	name, err := bindWebSession(context.Background(), b, "")
-	if err != nil || !strings.HasPrefix(name, webSessionPrefix) {
+	if err != nil || !strings.HasPrefix(name, webui.SessionPrefix) {
 		t.Fatalf("default binding: name=%q err=%v", name, err)
 	}
 	if got := b.boundName(webLiveSession); got != name {

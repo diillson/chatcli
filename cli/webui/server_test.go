@@ -34,11 +34,12 @@ type fakeBackend struct {
 	model    string
 	seen     []TurnOptions
 	sessions map[string][]rpcserve.HistoryItem
+	bound    map[string]string
 	decision agentevents.PermissionDecision
 }
 
 func newFakeBackend() *fakeBackend {
-	return &fakeBackend{provider: "FAKE", model: "fake-1", sessions: map[string][]rpcserve.HistoryItem{}}
+	return &fakeBackend{provider: "FAKE", model: "fake-1", sessions: map[string][]rpcserve.HistoryItem{}, bound: map[string]string{}}
 }
 
 func (f *fakeBackend) HasLLM() bool                   { return true }
@@ -58,13 +59,26 @@ func (f *fakeBackend) RunCommand(_ context.Context, _, line string) (string, err
 	return "ran " + line, nil
 }
 func (f *fakeBackend) ManageSession(_ context.Context, action, session, name string) (string, error) {
-	if action == "attach" {
-		f.mu.Lock()
-		f.sessions[session] = []rpcserve.HistoryItem{{Role: "user", Content: "from " + name}}
-		f.mu.Unlock()
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	switch action {
+	case "attach":
+		f.bound[session] = name
+		if !strings.HasPrefix(name, SessionPrefix) {
+			f.sessions[session] = []rpcserve.HistoryItem{{Role: "user", Content: "from " + name}}
+		}
 		return "attached", nil
+	case "clear":
+		delete(f.sessions, session)
+		delete(f.bound, session)
+		return "cleared", nil
 	}
 	return "", errors.New("unsupported")
+}
+func (f *fakeBackend) BoundSession(session string) string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.bound[session]
 }
 func (f *fakeBackend) RestoreSession(_ context.Context, session string) ([]rpcserve.HistoryItem, error) {
 	f.mu.Lock()
@@ -216,8 +230,24 @@ func TestServer_BootAndCatalogs(t *testing.T) {
 	if code, body := call(t, srv, http.MethodPost, "/api/command", map[string]string{"line": "/memory"}, true); code != http.StatusOK || !strings.Contains(string(body), "ran /memory") {
 		t.Fatalf("command = %d %s", code, body)
 	}
-	if code, body := call(t, srv, http.MethodPost, "/api/session", map[string]string{"action": "attach", "name": "s1"}, true); code != http.StatusOK || !strings.Contains(string(body), "from s1") {
-		t.Fatalf("session attach must return the bound history: %d %s", code, body)
+	if code, body := call(t, srv, http.MethodPost, "/api/session", map[string]string{"action": "attach", "name": "s1"}, true); code != http.StatusOK || !strings.Contains(string(body), "from s1") || !strings.Contains(string(body), `"bound":"s1"`) {
+		t.Fatalf("session attach must return the bound history and name: %d %s", code, body)
+	}
+	// Boot names the bound session so the page shows what it shares with
+	// the terminal from the first paint.
+	if code, body := call(t, srv, http.MethodGet, "/api/boot", nil, true); code != http.StatusOK || !strings.Contains(string(body), `"bound":"s1"`) {
+		t.Fatalf("boot must name the bound session: %d %s", code, body)
+	}
+	// "+ New" clears the live session and binds a fresh web-owned one, so
+	// the new conversation is written through instead of living only in
+	// the autosave mirror.
+	code, body = call(t, srv, http.MethodPost, "/api/session", map[string]string{"action": "clear"}, true)
+	var cleared struct {
+		Bound   string                 `json:"bound"`
+		History []rpcserve.HistoryItem `json:"history"`
+	}
+	if code != http.StatusOK || json.Unmarshal(body, &cleared) != nil || !strings.HasPrefix(cleared.Bound, SessionPrefix) || len(cleared.History) != 0 {
+		t.Fatalf("clear must bind a fresh %s session with an empty history: %d %s", SessionPrefix, code, body)
 	}
 }
 

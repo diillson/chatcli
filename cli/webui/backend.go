@@ -14,6 +14,7 @@ package webui
 
 import (
 	"context"
+	"time"
 
 	"github.com/diillson/chatcli/cli"
 	"github.com/diillson/chatcli/cli/agentevents"
@@ -84,4 +85,23 @@ type Backend interface {
 	ReadResource(ctx context.Context, uri string) (rpcserve.ResourceContent, error)
 
 	Status() Status
+}
+
+// SessionBinder is the optional continuity seam: a backend that binds live
+// sessions to saved ones reports the bound name, so the page can show which
+// saved session the browser shares with the terminal.
+type SessionBinder interface {
+	BoundSession(session string) string
+}
+
+// SessionPrefix names the saved sessions the web surface creates on its own:
+// the one a standalone `chatcli web` binds, the one /web binds a terminal
+// to, and the one "+ New" in the page starts. One prefix, so they show up
+// together in the catalog.
+const SessionPrefix = "web-"
+
+// FreshSessionName names a new web-owned saved session after the moment it
+// was started.
+func FreshSessionName() string {
+	return SessionPrefix + time.Now().Format("20060102-150405")
 }

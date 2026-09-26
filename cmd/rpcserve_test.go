@@ -299,8 +299,10 @@ func TestManageSession_ActiveAndClear(t *testing.T) {
 	if out, err = b.ManageSession(ctx, "clear", "a", ""); err != nil || !strings.Contains(out, "cleared") {
 		t.Fatalf("clear wrong: %q, %v", out, err)
 	}
-	if _, still := b.sessions["a"]; still {
-		t.Error("clear must drop the live session")
+	// The session stays live and empty: RestoreSession must never read a
+	// cleared session as a restart and refill it from the autosave mirror.
+	if hist, still := b.sessions["a"]; !still || len(hist) != 0 {
+		t.Errorf("clear must leave the live session empty, got present=%v len=%d", still, len(hist))
 	}
 	if out, _ = b.ManageSession(ctx, "clear", "ghost", ""); !strings.Contains(out, "no live history") {
 		t.Errorf("clearing an unknown session must say so: %q", out)

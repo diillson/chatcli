@@ -200,6 +200,72 @@ func TestRestoreSession_LiveThenMirror(t *testing.T) {
 	}
 }
 
+// A session bound to a saved session, or one this process has seen and
+// cleared, is never refilled from the mcp- autosave mirror: an empty bound
+// history is a fresh conversation (a terminal that has not typed yet), and
+// a cleared one was cleared on purpose. Only an unknown id restores from
+// the mirror (the restart path).
+func TestRestoreSession_BoundOrClearedNeverResurrectsMirror(t *testing.T) {
+	store := newFakeStore()
+	b := sessionBackend(store)
+	ctx := context.Background()
+	store.saved["mcp-web"] = []models.Message{
+		{Role: "user", Content: "old talk"},
+		{Role: "assistant", Content: "old reply"},
+	}
+
+	// /web on an empty terminal: the saved file exists with no messages.
+	store.saved["web-20260925-213519"] = nil
+	if _, err := b.ManageSession(ctx, "attach", "web", "web-20260925-213519"); err != nil {
+		t.Fatalf("attach: %v", err)
+	}
+	items, err := b.RestoreSession(ctx, "web")
+	if err != nil {
+		t.Fatalf("restore bound: %v", err)
+	}
+	if len(items) != 0 {
+		t.Fatalf("a bound, empty session must stay empty, got %+v", items)
+	}
+	b.mu.Lock()
+	live := len(b.sessions["web"])
+	b.mu.Unlock()
+	if live != 0 {
+		t.Fatalf("the live session must not be hydrated from the mirror, got %d messages", live)
+	}
+
+	// The same holds for a lazily attached name (no file yet).
+	if _, err := b.ManageSession(ctx, "attach", "web2", "web-later"); err != nil {
+		t.Fatalf("lazy attach: %v", err)
+	}
+	store.saved["mcp-web2"] = store.saved["mcp-web"]
+	if items, err := b.RestoreSession(ctx, "web2"); err != nil || len(items) != 0 {
+		t.Fatalf("lazily bound session must stay empty: %+v err=%v", items, err)
+	}
+
+	// "+ New" / clear: live and fresh, not a restart.
+	b.mu.Lock()
+	b.sessions["web"] = sessionMsgs(2)
+	b.mu.Unlock()
+	if _, err := b.ManageSession(ctx, "clear", "web", ""); err != nil {
+		t.Fatalf("clear: %v", err)
+	}
+	if items, err := b.RestoreSession(ctx, "web"); err != nil || len(items) != 0 {
+		t.Fatalf("a cleared session must stay empty: %+v err=%v", items, err)
+	}
+	if _, err := b.runSessionCommand(ctx, "web", []string{"new"}); err != nil {
+		t.Fatalf("new: %v", err)
+	}
+	if items, err := b.RestoreSession(ctx, "web"); err != nil || len(items) != 0 {
+		t.Fatalf("after /session new the session must stay empty: %+v err=%v", items, err)
+	}
+
+	// Only an id this process never saw restores from its mirror.
+	store.saved["mcp-restarted"] = store.saved["mcp-web"]
+	if items, err := b.RestoreSession(ctx, "restarted"); err != nil || len(items) != 2 {
+		t.Fatalf("unknown id must restore from the mirror: %+v err=%v", items, err)
+	}
+}
+
 // Walks the remaining /session subcommand surface end to end: usage, save
 // (validation, empty, success+bind), status, fork (memory and bound source),
 // new, list, search validation and the unknown fallback.

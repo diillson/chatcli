@@ -22,6 +22,7 @@ import (
 // do. Everything else webui.Backend needs already exists for those surfaces.
 
 var _ webui.Backend = (*rpcBackend)(nil)
+var _ webui.SessionBinder = (*rpcBackend)(nil)
 
 // Defaults are the provider and model a turn uses when it names none.
 func (b *rpcBackend) Defaults() (string, string) {
@@ -119,6 +120,10 @@ func (b *rpcBackend) RunCoder(ctx context.Context, session, task string, o webui
 		return b.cli.RunCoderRPC(ctx, task, ro)
 	}, rpcserve.RunOpts{Provider: provider, Model: model, Events: events})
 }
+
+// BoundSession implements webui.SessionBinder: the saved session the live
+// session is bound to, "" when loose.
+func (b *rpcBackend) BoundSession(session string) string { return b.boundName(session) }
 
 // Commands lists the slash commands the browser may run.
 func (b *rpcBackend) Commands() []rpcserve.CommandInfo { return b.ACPCommands() }

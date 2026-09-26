@@ -44,11 +44,6 @@ var webBrowserLauncher = cli.LaunchBrowser
 // server's default when a request names none).
 const webLiveSession = "web"
 
-// webSessionPrefix names the saved session a standalone `chatcli web` binds
-// when none is given: the same prefix /web uses for a terminal it binds, so
-// both kinds show up together in the catalog.
-const webSessionPrefix = "web-"
-
 // bindWebSession binds the browser's live session to a saved one. An
 // explicit name is honored, or the start fails. Without one, a fresh
 // web-<timestamp> session is bound so every turn is written through under
@@ -66,7 +61,7 @@ func bindWebSession(ctx context.Context, backend *rpcBackend, explicit string) (
 	if backend == nil || backend.store == nil {
 		return "", nil
 	}
-	name := webSessionPrefix + time.Now().Format("20060102-150405")
+	name := webui.FreshSessionName()
 	if _, err := backend.ManageSession(ctx, "attach", webLiveSession, name); err != nil {
 		return "", err
 	}
