@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.211.1](https://github.com/diillson/chatcli/compare/v1.211.0...v1.211.1) (2026-09-26)
+
+
+### Bug Fixes
+
+* **session:** derive titles from what the user wrote, never from injected context ([#1679](https://github.com/diillson/chatcli/issues/1679)) ([e587620](https://github.com/diillson/chatcli/commit/e5876200e89a393c1753cfb5068e8fc4865e9614))
+* **web:** standalone web binds a fresh session and bound terminals skip the exit autosave ([#1681](https://github.com/diillson/chatcli/issues/1681)) ([a0be867](https://github.com/diillson/chatcli/commit/a0be8674571685272d3b6719c9a312a393aa24fd))
+
 ## [1.211.0](https://github.com/diillson/chatcli/compare/v1.210.3...v1.211.0) (2026-09-25)
 
 
