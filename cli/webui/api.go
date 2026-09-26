@@ -137,8 +137,18 @@ func (s *Server) handleBoot(w http.ResponseWriter, r *http.Request) {
 		"commands":  b.Commands(),
 		"resources": b.Resources(),
 		"sessions":  b.SessionCatalog(),
+		"bound":     s.boundOf(r.URL.Query().Get("session")),
 		"history":   s.historyItems(r.Context(), r.URL.Query().Get("session")),
 	})
+}
+
+// boundOf names the saved session the live session is bound to, or "" when
+// the backend does not bind or the session is loose.
+func (s *Server) boundOf(session string) string {
+	if binder, ok := s.opts.Backend.(SessionBinder); ok {
+		return binder.BoundSession(s.sessionOf(session))
+	}
+	return ""
 }
 
 func (s *Server) handleProviders(w http.ResponseWriter) {
@@ -419,12 +429,23 @@ func (s *Server) handleSessionAction(w http.ResponseWriter, r *http.Request) {
 	if !readJSON(w, r, &req) {
 		return
 	}
-	out, err := s.opts.Backend.ManageSession(r.Context(), strings.TrimSpace(req.Action), s.sessionOf(req.Session), strings.TrimSpace(req.Name))
+	action, session := strings.TrimSpace(req.Action), s.sessionOf(req.Session)
+	out, err := s.opts.Backend.ManageSession(r.Context(), action, session, strings.TrimSpace(req.Name))
 	if err != nil {
 		writeErr(w, http.StatusBadRequest, "session", err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]interface{}{"result": out, "sessions": s.opts.Backend.SessionCatalog(), "history": s.historyItems(r.Context(), req.Session)})
+	// "+ New" starts a conversation of its own: bind it to a fresh web-owned
+	// saved session right away (the file appears on the first turn), so it
+	// is written through and listed like every other one instead of living
+	// only in the rolling autosave mirror. Best effort — a backend that does
+	// not bind keeps the cleared live session.
+	if action == "clear" {
+		if _, err := s.opts.Backend.ManageSession(r.Context(), "attach", session, FreshSessionName()); err != nil && s.opts.Logger != nil {
+			s.opts.Logger.Warn("web: binding the new session", zap.Error(err))
+		}
+	}
+	writeJSON(w, http.StatusOK, map[string]interface{}{"result": out, "sessions": s.opts.Backend.SessionCatalog(), "bound": s.boundOf(req.Session), "history": s.historyItems(r.Context(), req.Session)})
 }
 
 func (s *Server) handleTool(w http.ResponseWriter, r *http.Request, name string) {

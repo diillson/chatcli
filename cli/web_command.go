@@ -122,6 +122,8 @@ func (cli *ChatCLI) webBindSession() string {
 	if cli.sessionManager == nil {
 		return ""
 	}
+	// Same shape as webui.FreshSessionName (webui imports this package,
+	// so the name is spelled here as well).
 	name := "web-" + time.Now().Format("20060102-150405")
 	if err := cli.sessionManager.SaveSessionV2(name, cli.buildSessionData()); err != nil {
 		cli.logger.Warn("web: binding the terminal session failed", zap.Error(err))

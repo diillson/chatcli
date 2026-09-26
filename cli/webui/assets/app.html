@@ -786,7 +786,7 @@ async function sessionAction(act, name) {
 }
 $('#btnNew').addEventListener('click', async () => {
   if (state.run) { toast(t('busy'), 'warn'); return; }
-  try { await api('session', { json: { action: 'clear', session: state.session } }); state.bound = ''; loadHistory([]); renderSessions(); renderStatus(); toast(t('session.new'), 'ok'); }
+  try { const j = await api('session', { json: { action: 'clear', session: state.session } }); state.bound = j.bound || ''; loadHistory([]); renderSessions(); renderStatus(); toast(state.bound ? t('session.bound', { name: state.bound }) : t('session.new'), 'ok'); }
   catch (e) { toast(e.message, 'err'); }
 });
 async function refreshSessions() { try { const j = await api('sessions'); state.sessions = j.sessions || []; renderSessions(); } catch {} }
@@ -802,6 +802,7 @@ async function boot() {
     const j = await api('boot?session=' + encodeURIComponent(state.session));
     state.status = j.status || {}; state.tools = j.tools || []; state.skills = j.skills || []; state.commands = j.commands || []; state.resources = j.resources || []; state.sessions = j.sessions || [];
     const p = j.providers || {}; state.providers = p.providers || []; state.provider = p.active_provider || state.status.provider || ''; state.model = p.active_model || state.status.model || '';
+    state.bound = j.bound || '';
     renderRoute(); renderStatus(); renderTools(); renderSkills(); renderMCP(); renderMemory(); renderCommands(); renderSessions();
     loadHistory(j.history);
     $('#beat').classList.add('on');

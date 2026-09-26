@@ -339,7 +339,10 @@ func (b *rpcBackend) sessionCmdDelete(name string) (string, error) {
 func (b *rpcBackend) sessionCmdNew(ctx context.Context, session string) (string, error) {
 	b.mu.Lock()
 	hist := b.sessions[session]
-	delete(b.sessions, session)
+	// The key stays, empty: the session is live and fresh, so a later
+	// RestoreSession must not treat it as a restart and refill it from the
+	// autosave mirror.
+	b.sessions[session] = nil
 	b.mu.Unlock()
 	// Same last-chance autosave contract as ManageSession's clear.
 	b.autosaveSession(session, hist)
@@ -390,12 +393,22 @@ func (b *rpcBackend) rotateHub(ctx context.Context) {
 // in-process session (server not restarted), then the rolling autosave
 // mirror ("mcp-<id>") the turn path maintains — which is what survives a
 // server restart.
+//
+// The mirror is only for a session id this process has never seen. A session
+// bound to a saved session already has its truth in that file: an empty
+// bound history is a fresh conversation (a terminal that has not typed yet,
+// a standalone web start), not a restart, and hydrating it from the mirror
+// would splice a previous, unrelated conversation into it. Likewise a
+// session that was live and then cleared stays empty — the clear was asked
+// for.
 func (b *rpcBackend) RestoreSession(_ context.Context, session string) ([]rpcserve.HistoryItem, error) {
 	b.mu.Lock()
-	hist := append([]models.Message(nil), b.sessions[session]...)
+	live, seen := b.sessions[session]
+	hist := append([]models.Message(nil), live...)
+	bound := b.bindings[session] != ""
 	b.mu.Unlock()
 
-	if len(hist) == 0 {
+	if len(hist) == 0 && !seen && !bound {
 		if b.store == nil {
 			return nil, errCLIUnavailable
 		}

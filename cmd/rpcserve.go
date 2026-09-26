@@ -614,7 +614,10 @@ func (b *rpcBackend) ManageSession(_ context.Context, action, session, name stri
 	case "clear":
 		b.mu.Lock()
 		hist, existed := b.sessions[session]
-		delete(b.sessions, session)
+		// Keep the key, empty: a cleared session is live and fresh, and
+		// RestoreSession must not mistake it for a restart and refill it
+		// from the autosave mirror.
+		b.sessions[session] = nil
 		b.mu.Unlock()
 		b.unbindSession(session)
 		if !existed {
