@@ -50,7 +50,7 @@ const webLiveSession = "web"
 const webSessionPrefix = "web-"
 
 // bindWebSession binds the browser's live session to a saved one. An
-// explicit name is honoured, or the start fails. Without one, a fresh
+// explicit name is honored, or the start fails. Without one, a fresh
 // web-<timestamp> session is bound so every turn is written through under
 // its own name: the rolling mcp-web mirror alone would be overwritten by the
 // next standalone run, losing the previous conversation. The file appears on

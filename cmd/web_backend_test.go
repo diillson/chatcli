@@ -80,7 +80,7 @@ func TestRestoreSession_SkipsInjectedContext(t *testing.T) {
 
 // A standalone `chatcli web` without --session binds a fresh web-<stamp>
 // session (lazily: the file appears on the first turn), an explicit name is
-// honoured, and a backend without a store stays unbound instead of failing.
+// honored, and a backend without a store stays unbound instead of failing.
 func TestBindWebSession(t *testing.T) {
 	store := newFakeStore()
 	b := sessionBackend(store)
