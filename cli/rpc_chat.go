@@ -30,6 +30,7 @@ import (
 
 	"github.com/diillson/chatcli/llm/client"
 	"github.com/diillson/chatcli/models"
+	"github.com/diillson/chatcli/pkg/pulse"
 	"go.uber.org/zap"
 )
 
@@ -94,10 +95,15 @@ func (cli *ChatCLI) RunChatTurnRPC(
 func (cli *ChatCLI) runChatTurnSerialized(
 	ctx context.Context, sessionID, userInput string,
 	history []models.Message, o RPCChatOpts,
-) (RPCChatTurn, error) {
+) (turn RPCChatTurn, err error) {
 	if sessionID == "" {
 		sessionID = rpcDefaultSessionID
 	}
+	// One node per chat turn on the live dashboard, as the REPL turn has:
+	// a turn served over MCP, ACP, the gateway or the web UI is a turn of
+	// this process too. The outcome is the turn's error, if any.
+	span := pulse.Begin(pulse.KindTurn, pulseTurnChat, "")
+	defer func() { span.EndErr(err) }()
 
 	// Swap in the session state; ALWAYS restore, error included — the REPL
 	// invariants (and any later run) depend on it.
@@ -189,6 +195,12 @@ func (cli *ChatCLI) runChatTurnSerialized(
 			usage = client.GetUsageOrEstimate(activeClient, len(input+additionalContext), len(reply))
 		}
 		cli.costTracker.RecordRealUsage(resProvider, resModel, usage)
+		// The same context-window projection the REPL footer reports, on
+		// the session node of this process; the history is still the
+		// session's here, before the deferred restore.
+		if pct, _, window := cli.contextWindowUsage(resProvider, resModel, usage); window > 0 {
+			pulseContextWindow(roundPct(pct), window)
+		}
 	}
 	// Memory extraction + skill self-evolution ride the same worker the REPL
 	// uses. The turn is handed over as an owned segment (WAL queue) because
@@ -216,11 +228,30 @@ func (cli *ChatCLI) resolveRPCChatClient(
 		if provider == "" {
 			provider = cli.Provider
 		}
-		c, err := cli.manager.GetClient(provider, o.Model)
+		// A call that names the provider only is served by the session's
+		// model on the session's provider, else by that provider's default
+		// model, and the turn is recorded under that id. An empty name here
+		// used to file the usage under "provider:" — unpriced, so the turn
+		// cost nothing on /cost — and to open a second, nameless model node
+		// on the dashboard. A provider with no known default keeps the
+		// client's own name as a last resort.
+		model := o.Model
+		if model == "" {
+			if provider == cli.Provider {
+				model = cli.Model
+			} else {
+				model = cli.providerDefaultModel(provider)
+			}
+		}
+		c, err := cli.manager.GetClient(provider, model)
 		if err != nil {
 			return nil, "", "", err
 		}
-		return c, provider, o.Model, nil
+		if model == "" {
+			model = c.GetModelName()
+		}
+		cli.pulseNoteRoute(provider, model, pulseRouteSession, "rpc chat turn")
+		return c, provider, model, nil
 	}
 	resolution := cli.resolveSkillClient(modelHint)
 	if resolution.Changed {
@@ -228,6 +259,7 @@ func (cli *ChatCLI) resolveRPCChatClient(
 			zap.String("provider", resolution.Provider),
 			zap.String("model", resolution.Model))
 	}
+	cli.pulseNoteResolvedRoute(resolution, pulseRouteSkill, "rpc chat turn")
 	return resolution.Client, resolution.Provider, resolution.Model, nil
 }
 

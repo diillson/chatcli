@@ -99,6 +99,7 @@ func runRPC(kind string, mgr manager.LLMManager, logger *zap.Logger) error {
 	}
 	if chatCLI != nil {
 		backend.store = chatCLI
+		backend.adoptEngineRoute(chatCLI)
 		// Follow every manager rebuild (project overlay, `/config reload`).
 		chatCLI.OnManagerRebuild(backend.setManager)
 		// Same bounded lifecycle the REPL applies on start: expire
@@ -227,6 +228,24 @@ type rpcBackend struct {
 	// by bindSession. Both guarded by mu.
 	bindings map[string]string
 	bindSync map[string]time.Time
+}
+
+// adoptEngineRoute makes the pair the engine booted on the backend's default
+// route when the environment names none: LLM_MODEL is optional, the engine
+// resolves the model itself. With it the page shows the pair that actually
+// serves, and a turn that names no model is recorded under the model that
+// served it instead of under an empty name. A model named for another
+// provider is not carried over.
+func (b *rpcBackend) adoptEngineRoute(chatCLI *cli.ChatCLI) {
+	if chatCLI == nil {
+		return
+	}
+	if b.provider == "" {
+		b.provider = chatCLI.Provider
+	}
+	if b.model == "" && strings.EqualFold(b.provider, chatCLI.Provider) {
+		b.model = chatCLI.Model
+	}
 }
 
 // rpcMaxHistory is the legacy hard message cap, applied only on the plain
