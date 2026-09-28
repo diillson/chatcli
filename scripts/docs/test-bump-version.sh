@@ -20,6 +20,9 @@ helm install chatcli oci://ghcr.io/diillson/charts/chatcli --version 1.2.3
 docker pull ghcr.io/diillson/chatcli:1.2.3
 ```
 Version 11.2.30 is a different token and must stay.
+| `a` | A chart that rendered no strategy (up to 1.2.3), or a `strategy` that surges |
+Set `x` to keep the layout of charts up to 1.2.3; the default is `y`.
+**new** in this release, while **1.2.3** was current and prose after 1.2.3 stays **bold**.
 MDX
 
 OLD_VERSION=1.2.3 NEW_VERSION=1.2.4 perl "$DIR/bump-version.pl" "$TMP/page.mdx" >/dev/null
@@ -39,4 +42,9 @@ expect 'claude-opus-4-1-20250805-v1:0'
 expect 'config_backup_20260301_100000.json'
 expect 'Version 11.2.30 is a different token'
 reject '1.2.3`'
+# Prose between two code spans (or two bold spans) is not code: a closing
+# backtick followed by an opening one must not pair up into a fake span.
+expect 'rendered no strategy (up to 1.2.3), or'
+expect 'layout of charts up to 1.2.3; the default'
+expect 'while **1.2.4** was current and prose after 1.2.3 stays'
 echo "bump-version self-test: ok"

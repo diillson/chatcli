@@ -44,6 +44,11 @@ jobs:
             exit 1
           fi
 
+      # The release pipeline rewrites the current version in the docs site
+      # with this script; a pairing bug there silently rewrote history.
+      - name: Docs version bump self-test
+        run: bash scripts/docs/test-bump-version.sh
+
       - name: Go vet
         run: go vet ./...
 
