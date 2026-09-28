@@ -3,13 +3,16 @@ package controllers
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
@@ -59,14 +62,9 @@ func (r *SLAReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.R
 		return ctrl.Result{}, err
 	}
 
-	responseThreshold, err := time.ParseDuration(sla.Spec.ResponseTime)
+	responseThreshold, resolutionThreshold, err := r.slaThresholds(ctx, sla)
 	if err != nil {
-		lg.Error(err, "Invalid responseTime", "sla", sla.Name)
-		return ctrl.Result{}, nil
-	}
-	resolutionThreshold, err := time.ParseDuration(sla.Spec.ResolutionTime)
-	if err != nil {
-		lg.Error(err, "Invalid resolutionTime", "sla", sla.Name)
+		lg.Error(err, "IncidentSLA has an invalid duration; it is not enforced", "sla", sla.Name)
 		return ctrl.Result{}, nil
 	}
 
@@ -115,6 +113,7 @@ func (r *SLAReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.R
 			issue.Annotations["platform.chatcli.io/sla-resolution-checked"] = "true"
 			_ = r.Update(ctx, &issue)
 		}
+		r.closeViolations(ctx, sla, &issue)
 		return ctrl.Result{}, nil
 
 	case platformv1alpha1.IssueStateEscalated, platformv1alpha1.IssueStateFailed:
@@ -245,7 +244,115 @@ func (r *SLAReconciler) recordViolation(ctx context.Context, sla *platformv1alph
 	} else {
 		issue.Annotations["platform.chatcli.io/sla-violated"] = vType
 	}
+	// Remember which SLA counted the violation: severity can change later
+	// (federation elevates it) and the close must decrement the same SLA.
+	issue.Annotations[annotationSLAName] = sla.Namespace + "/" + sla.Name
 	_ = r.Update(ctx, issue)
+}
+
+const (
+	// annotationSLAName is the namespace/name of the IncidentSLA that counted
+	// the Issue's violations.
+	annotationSLAName = "platform.chatcli.io/sla-name"
+	// annotationSLAViolationsClosed marks violations already removed from
+	// the SLA's activeViolations.
+	annotationSLAViolationsClosed = "platform.chatcli.io/sla-violations-closed"
+)
+
+// closeViolations removes a resolved Issue's violations from the SLA's
+// activeViolations, once. The SLA that counted them is the one recorded at
+// violation time, falling back to the matched SLA.
+func (r *SLAReconciler) closeViolations(ctx context.Context, matched *platformv1alpha1.IncidentSLA, issue *platformv1alpha1.Issue) {
+	violated := alreadyViolatedStr(*issue)
+	if violated == "" || issue.Annotations[annotationSLAViolationsClosed] == "true" {
+		return
+	}
+	lg := log.FromContext(ctx)
+	sla := matched
+	if ref := issue.Annotations[annotationSLAName]; ref != "" && ref != matched.Namespace+"/"+matched.Name {
+		ns, name, _ := strings.Cut(ref, "/")
+		var owner platformv1alpha1.IncidentSLA
+		if err := r.Get(ctx, types.NamespacedName{Namespace: ns, Name: name}, &owner); err == nil {
+			sla = &owner
+		} else if !apierrors.IsNotFound(err) {
+			lg.Error(err, "Failed to read the IncidentSLA that counted the violation", "sla", ref)
+			return
+		} else {
+			sla = nil // the SLA is gone: nothing left to decrement
+		}
+	}
+	if sla != nil {
+		sla.Status.ActiveViolations -= clampInt32(len(strings.Split(violated, ",")))
+		if sla.Status.ActiveViolations < 0 {
+			sla.Status.ActiveViolations = 0
+		}
+		if sla.Status.ActiveViolations == 0 {
+			meta.SetStatusCondition(&sla.Status.Conditions, metav1.Condition{
+				Type: "SLAViolation", Status: metav1.ConditionFalse, Reason: "NoActiveViolation",
+				Message:            "Every Issue that violated this SLA is resolved",
+				LastTransitionTime: metav1.Now(),
+			})
+		}
+		if err := r.Status().Update(ctx, sla); err != nil {
+			lg.Error(err, "Failed to decrement active SLA violations", "sla", sla.Name)
+			return
+		}
+	}
+	issue.Annotations[annotationSLAViolationsClosed] = "true"
+	if err := r.Update(ctx, issue); err != nil {
+		lg.Error(err, "Failed to mark SLA violations closed", "issue", issue.Name)
+	}
+}
+
+// slaThresholds parses the SLA durations. An invalid one is reported on the
+// SLA as Ready=False so it is not silently ignored.
+func (r *SLAReconciler) slaThresholds(ctx context.Context, sla *platformv1alpha1.IncidentSLA) (response, resolution time.Duration, err error) {
+	response, err = ParseSLADuration(sla.Spec.ResponseTime)
+	if err == nil {
+		resolution, err = ParseSLADuration(sla.Spec.ResolutionTime)
+	}
+	cond := metav1.Condition{Type: "Ready", Status: metav1.ConditionTrue, Reason: "Valid",
+		Message: "responseTime and resolutionTime are valid", LastTransitionTime: metav1.Now()}
+	if err != nil {
+		cond.Status, cond.Reason, cond.Message = metav1.ConditionFalse, "InvalidDuration", err.Error()
+	}
+	if meta.SetStatusCondition(&sla.Status.Conditions, cond) {
+		if updateErr := r.Status().Update(ctx, sla); updateErr != nil {
+			log.FromContext(ctx).Error(updateErr, "Failed to report IncidentSLA validity", "sla", sla.Name)
+		}
+	}
+	return response, resolution, err
+}
+
+// ParseSLADuration parses an SLA duration: a Go duration ("15m", "4h",
+// "1h30m") optionally preceded by whole days ("1d", "2d12h").
+func ParseSLADuration(s string) (time.Duration, error) {
+	raw := strings.TrimSpace(s)
+	if raw == "" {
+		return 0, fmt.Errorf("empty duration")
+	}
+	var days time.Duration
+	if i := strings.IndexByte(raw, 'd'); i >= 0 {
+		n, err := strconv.Atoi(raw[:i])
+		if err != nil || n < 0 {
+			return 0, fmt.Errorf("invalid duration %q: days must be a whole number", s)
+		}
+		days = time.Duration(n) * 24 * time.Hour
+		raw = raw[i+1:]
+	}
+	var rest time.Duration
+	if raw != "" {
+		d, err := time.ParseDuration(raw)
+		if err != nil {
+			return 0, fmt.Errorf("invalid duration %q: %w", s, err)
+		}
+		rest = d
+	}
+	total := days + rest
+	if total <= 0 {
+		return 0, fmt.Errorf("invalid duration %q: must be positive", s)
+	}
+	return total, nil
 }
 
 func (r *SLAReconciler) updateCompliance(sla *platformv1alpha1.IncidentSLA) {
