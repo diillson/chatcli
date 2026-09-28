@@ -2,7 +2,9 @@ package v1alpha1
 
 import metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
-// ChaosExperimentType defines the kind of chaos to inject.
+// ChaosExperimentType defines the kind of chaos to inject. network_delay and
+// network_loss are accepted for compatibility but not supported: the
+// experiment fails at once with a status that says so, and nothing is injected.
 // +kubebuilder:validation:Enum=pod_kill;pod_failure;cpu_stress;memory_stress;network_delay;network_loss;disk_stress
 type ChaosExperimentType string
 
@@ -67,7 +69,9 @@ type PostExperimentSpec struct {
 	// +optional
 	RecoveryTimeout string `json:"recoveryTimeout,omitempty"`
 
-	// RunRemediationTest re-injects the fault after a successful remediation to validate it works.
+	// RunRemediationTest reports whether a remediation ran during the experiment (the
+	// result says "remediation validation passed" or "no remediation was applied"). It does
+	// not re-inject the fault.
 	// +optional
 	RunRemediationTest bool `json:"runRemediationTest,omitempty"`
 }
@@ -88,13 +92,12 @@ type ChaosExperimentSpec struct {
 	// For pod_failure: count, gracePeriodSeconds.
 	// For cpu_stress: cores, loadPercent.
 	// For memory_stress: bytes (e.g., "256Mi"), workers.
-	// For network_delay: latencyMs, jitterMs, interface.
-	// For network_loss: percent, correlation.
 	// For disk_stress: size (e.g., "1Gi"), workers.
 	// +optional
 	Parameters map[string]string `json:"parameters,omitempty"`
 
-	// Schedule is an optional cron expression for recurring experiments (e.g., "0 3 * * 1").
+	// Schedule is reserved: recurring experiments are not implemented, and an experiment
+	// that sets it fails at once with a status message saying so.
 	// +optional
 	Schedule string `json:"schedule,omitempty"`
 

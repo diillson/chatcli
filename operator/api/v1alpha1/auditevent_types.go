@@ -34,11 +34,10 @@ type AuditResource struct {
 // AuditEventSpec defines the immutable audit event record.
 type AuditEventSpec struct {
 	// EventType classifies the event.
-	// Supported: issue_created, issue_resolved, issue_escalated, remediation_started,
-	// remediation_completed, remediation_failed, approval_requested, approval_granted,
-	// approval_rejected, approval_expired, notification_sent, slo_violation, sla_breach,
-	// pattern_learned, config_changed, cluster_connected, cluster_disconnected,
-	// escalation_triggered, postmortem_created, runbook_generated.
+	// Emitted by the operator: issue_created, issue_resolved, issue_escalated,
+	// issue_contained, remediation_started, remediation_completed, remediation_failed,
+	// approval_requested, approval_approved, approval_rejected, approval_expired,
+	// notification_sent, slo_violation, sla_breach.
 	EventType string `json:"eventType"`
 
 	// Actor who performed the action.

@@ -11,6 +11,8 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus"
 	appsv1 "k8s.io/api/apps/v1"
+	batchv1 "k8s.io/api/batch/v1"
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -657,7 +659,14 @@ func (r *IssueReconciler) findAllMatchingRunbooks(ctx context.Context, issue *pl
 		return nil
 	}
 
-	all := append(runbooks.Items, allRunbooks.Items...)
+	// Same-namespace runbooks first, then the others once: the cluster-wide
+	// list holds the same-namespace ones too, which were listed twice.
+	all := runbooks.Items
+	for _, rb := range allRunbooks.Items {
+		if rb.Namespace != issue.Namespace {
+			all = append(all, rb)
+		}
+	}
 
 	signalType := issue.Spec.SignalType
 	if signalType == "" && issue.Labels != nil {
@@ -1283,10 +1292,62 @@ func (r *IssueReconciler) isResourceHealthy(ctx context.Context, resource platfo
 		}
 		return sts.Status.ReadyReplicas >= desired, nil
 
+	case "DaemonSet":
+		var ds appsv1.DaemonSet
+		if err := r.Get(ctx, types.NamespacedName{Name: resource.Name, Namespace: resource.Namespace}, &ds); err != nil {
+			return false, err
+		}
+		return daemonSetHealthy(&ds), nil
+
+	case "Job":
+		var job batchv1.Job
+		if err := r.Get(ctx, types.NamespacedName{Name: resource.Name, Namespace: resource.Namespace}, &job); err != nil {
+			return false, err
+		}
+		// A Job has recovered only when it completed; running is not enough.
+		return jobConditionTrue(&job, batchv1.JobComplete), nil
+
+	case "Node":
+		var node corev1.Node
+		if err := r.Get(ctx, types.NamespacedName{Name: resource.Name}, &node); err != nil {
+			return false, err
+		}
+		return nodeReady(&node), nil
+
 	default:
 		// For other kinds, assume not healthy to avoid false auto-resolve
 		return false, nil
 	}
+}
+
+// daemonSetHealthy: the rollout is observed and every scheduled pod is
+// updated, ready and available.
+func daemonSetHealthy(ds *appsv1.DaemonSet) bool {
+	st := ds.Status
+	return st.ObservedGeneration >= ds.Generation &&
+		st.NumberReady >= st.DesiredNumberScheduled &&
+		st.UpdatedNumberScheduled >= st.DesiredNumberScheduled &&
+		st.NumberUnavailable == 0
+}
+
+// jobConditionTrue reports whether the Job carries the condition as True.
+func jobConditionTrue(job *batchv1.Job, condType batchv1.JobConditionType) bool {
+	for _, cond := range job.Status.Conditions {
+		if cond.Type == condType && cond.Status == corev1.ConditionTrue {
+			return true
+		}
+	}
+	return false
+}
+
+// nodeReady reports whether the Node's Ready condition is True.
+func nodeReady(node *corev1.Node) bool {
+	for _, cond := range node.Status.Conditions {
+		if cond.Type == corev1.NodeReady {
+			return cond.Status == corev1.ConditionTrue
+		}
+	}
+	return false
 }
 
 // invalidateDedup removes dedup entries for the issue's resource, allowing new anomalies to be detected.
@@ -1299,16 +1360,16 @@ func (r *IssueReconciler) invalidateDedup(issue *platformv1alpha1.Issue) {
 	}
 }
 
-// getMaxRemediationAttempts reads the max attempts from the first Instance's AIOps config.
+// getMaxRemediationAttempts reads the max attempts from the AIOps settings
+// of the Instance the WatcherBridge uses (see aiopsInstance).
 func (r *IssueReconciler) getMaxRemediationAttempts(ctx context.Context) int32 {
-	var instances platformv1alpha1.InstanceList
-	if err := r.List(ctx, &instances); err == nil && len(instances.Items) > 0 {
-		return instances.Items[0].Spec.AIOps.GetMaxRemediationAttempts()
+	if inst := aiopsInstance(ctx, r.Client, nil); inst != nil {
+		return inst.Spec.AIOps.GetMaxRemediationAttempts()
 	}
 	return 5 // default
 }
 
-// getAgenticMaxSteps reads the agentic max steps from the first Instance's AIOps config.
+// getAgenticMaxSteps reads the agentic max steps from the AIOps settings.
 func (r *IssueReconciler) getAgenticMaxSteps(ctx context.Context) int32 {
 	cfg := r.getAIOpsConfig(ctx)
 	if cfg != nil {
@@ -1317,13 +1378,10 @@ func (r *IssueReconciler) getAgenticMaxSteps(ctx context.Context) int32 {
 	return 10 // default
 }
 
-// getAIOpsConfig reads the AIOps config from the first Instance.
+// getAIOpsConfig reads the AIOps settings of the Instance the WatcherBridge
+// uses (see aiopsInstance), not an arbitrary first Instance.
 func (r *IssueReconciler) getAIOpsConfig(ctx context.Context) *platformv1alpha1.AIOpsSpec {
-	var instances platformv1alpha1.InstanceList
-	if err := r.List(ctx, &instances); err == nil && len(instances.Items) > 0 {
-		return instances.Items[0].Spec.AIOps
-	}
-	return nil
+	return aiopsSpecFor(ctx, r.Client, nil)
 }
 
 // createAgenticRemediationPlan creates a RemediationPlan in agentic mode (AI-driven step-by-step).
@@ -1478,11 +1536,15 @@ func agenticHistoryToTimelineEvent(step platformv1alpha1.AgenticStep) platformv1
 // planActionToTimelineEvent renders a runbook-style action into the timeline,
 // consulting plan.Status.ActionCheckpoints to determine success/failure.
 func planActionToTimelineEvent(action platformv1alpha1.RemediationAction, idx int, plan *platformv1alpha1.RemediationPlan, now metav1.Time) platformv1alpha1.TimelineEvent {
-	_, detail := planActionOutcome(action, idx, plan)
+	result, detail := planActionOutcome(action, idx, plan)
 	ts := planActionTimestamp(plan, now)
+	evType := "action_executed"
+	if result == "failed" {
+		evType = "action_failed"
+	}
 	return platformv1alpha1.TimelineEvent{
 		Timestamp: ts,
-		Type:      "action_executed",
+		Type:      evType,
 		Detail:    fmt.Sprintf("%s: %s", action.Type, detail),
 	}
 }
