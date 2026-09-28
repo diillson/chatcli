@@ -140,7 +140,7 @@ func (e *embeddedSynth) info() EmbeddedInfo {
 }
 
 func dirExistsTTS(p string) bool {
-	fi, err := os.Stat(p)
+	fi, err := os.Stat(filepath.Clean(p)) // #nosec G703 -- existence check only, under the operator-configured cache dir (validated absolute)
 	return err == nil && fi.IsDir()
 }
 
