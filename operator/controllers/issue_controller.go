@@ -74,6 +74,45 @@ func init() {
 	)
 }
 
+// Manual resolution annotations. The REST API marks an Issue resolved by
+// hand with manualResolutionAnnotation; the watcher dedup for its resource
+// must then be dropped so the next alert is seen. That dedup lives in the
+// running WatcherBridge, on the leader, while the REST API serves on every
+// replica. The replica that served the request invalidates directly when
+// the bridge runs there and sets ManualResolutionDedupAnnotation; otherwise
+// the leader's IssueReconciler does it and sets the annotation, once.
+const (
+	manualResolutionAnnotation = "aiops.chatcli.io/manual-resolution"
+	// ManualResolutionDedupAnnotation records that the watcher dedup was
+	// invalidated for a manually resolved Issue.
+	ManualResolutionDedupAnnotation = "aiops.chatcli.io/manual-resolution-dedup-invalidated"
+
+	// maxDedupTTL is the longest dedup TTL an Instance accepts
+	// (spec.aiops.dedupTTLMinutes maximum, 1440).
+	maxDedupTTL = 24 * time.Hour
+)
+
+// invalidateManualResolution drops the watcher dedup for a manually
+// resolved Issue whose invalidation has not happened yet, and records it.
+func (r *IssueReconciler) invalidateManualResolution(ctx context.Context, issue *platformv1alpha1.Issue) error {
+	if r.DedupInvalidator == nil || issue.Status.State != platformv1alpha1.IssueStateResolved {
+		return nil
+	}
+	if issue.Annotations[manualResolutionAnnotation] != "true" || issue.Annotations[ManualResolutionDedupAnnotation] == "true" {
+		return nil
+	}
+	// Past the longest dedup TTL an Instance can configure there is no
+	// entry left to drop; skipping keeps an upgrade from patching every
+	// historical Issue.
+	if at := issue.Status.ResolvedAt; at != nil && time.Since(at.Time) > maxDedupTTL {
+		return nil
+	}
+	r.invalidateDedup(issue)
+	patch := client.MergeFrom(issue.DeepCopy())
+	issue.Annotations[ManualResolutionDedupAnnotation] = "true"
+	return client.IgnoreNotFound(r.Patch(ctx, issue, patch))
+}
+
 // DedupInvalidator allows invalidating dedup entries when issues reach terminal states.
 type DedupInvalidator interface {
 	InvalidateDedupForResource(deployment, namespace string)
@@ -147,7 +186,7 @@ func (r *IssueReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 	case platformv1alpha1.IssueStateResolved, platformv1alpha1.IssueStateFailed:
 		// Terminal states
 		log.Info("Issue in terminal state", "name", issue.Name, "state", issue.Status.State)
-		return ctrl.Result{}, nil
+		return ctrl.Result{}, r.invalidateManualResolution(ctx, &issue)
 	default:
 		log.Info("Unknown issue state", "state", issue.Status.State)
 		return ctrl.Result{}, nil

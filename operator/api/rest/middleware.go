@@ -2,9 +2,15 @@ package rest
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"fmt"
 	"log"
+	"math"
+	"net"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -117,19 +123,43 @@ func (tb *tokenBucket) allow() bool {
 	return true
 }
 
+// Rate limits of the REST API, in requests per minute.
+const (
+	// unauthenticatedRequestsPerMinute bounds, per client host, requests
+	// that carry no valid API key: the surface a client guessing keys
+	// works on.
+	unauthenticatedRequestsPerMinute = 30
+	// authenticatedRequestsPerMinute bounds requests per API key. The
+	// dashboard issues about a dozen requests per refresh and viewer (up
+	// to 66 a minute at its fastest refresh), so the ceiling leaves room
+	// for several viewers sharing one key.
+	authenticatedRequestsPerMinute = 600
+)
+
+// Idle bucket eviction. A bucket idle long enough to have refilled is
+// indistinguishable from a new one, so dropping it loses nothing.
+const (
+	bucketPruneInterval = 5 * time.Minute
+	bucketIdleTTL       = 10 * time.Minute
+)
+
 // rateLimiter holds per-key token buckets.
 type rateLimiter struct {
 	buckets sync.Map // map[string]*tokenBucket
 	maxRPM  float64  // requests per minute
+
+	pruneMu   sync.Mutex
+	lastPrune time.Time
 }
 
 // newRateLimiter creates a rate limiter with the given max requests per minute.
 func newRateLimiter(maxRPM float64) *rateLimiter {
-	return &rateLimiter{maxRPM: maxRPM}
+	return &rateLimiter{maxRPM: maxRPM, lastPrune: time.Now()}
 }
 
 // getBucket returns (or creates) the token bucket for the given key.
 func (rl *rateLimiter) getBucket(key string) *tokenBucket {
+	rl.pruneIdle(time.Now())
 	if v, ok := rl.buckets.Load(key); ok {
 		return v.(*tokenBucket)
 	}
@@ -138,23 +168,89 @@ func (rl *rateLimiter) getBucket(key string) *tokenBucket {
 	return actual.(*tokenBucket)
 }
 
-// rateLimitMiddleware enforces rate limiting per API key.
+// pruneIdle drops buckets unused for bucketIdleTTL, at most once per
+// bucketPruneInterval, so the map follows the set of active clients
+// instead of growing with every client ever seen.
+func (rl *rateLimiter) pruneIdle(now time.Time) {
+	rl.pruneMu.Lock()
+	if now.Sub(rl.lastPrune) < bucketPruneInterval {
+		rl.pruneMu.Unlock()
+		return
+	}
+	rl.lastPrune = now
+	rl.pruneMu.Unlock()
+
+	rl.buckets.Range(func(k, v any) bool {
+		tb := v.(*tokenBucket)
+		tb.mu.Lock()
+		idle := now.Sub(tb.lastRefill)
+		tb.mu.Unlock()
+		if idle >= bucketIdleTTL {
+			rl.buckets.Delete(k)
+		}
+		return true
+	})
+}
+
+// exceededMessage is the 429 body, derived from the configured limit.
+func (rl *rateLimiter) exceededMessage() string {
+	return fmt.Sprintf("rate limit exceeded: %d requests per minute", int(rl.maxRPM))
+}
+
+// retryAfterSeconds is how long until the bucket holds a token again.
+func (rl *rateLimiter) retryAfterSeconds() int {
+	if rl.maxRPM <= 0 {
+		return 60
+	}
+	return max(1, int(math.Ceil(60/rl.maxRPM)))
+}
+
+// clientHost is the host part of the peer address. Keying by the full
+// address (host and ephemeral port) gives every new TCP connection a fresh
+// bucket, which is no limit at all. Forwarding headers are not honored:
+// with no trusted-proxy configuration, anything in them is client input.
+func clientHost(r *http.Request) string {
+	if host, _, err := net.SplitHostPort(r.RemoteAddr); err == nil {
+		return host
+	}
+	return r.RemoteAddr
+}
+
+// rateLimitMiddleware runs before authentication, so it must not trust the
+// key it has not verified yet. A request with a valid API key is limited
+// per key (a digest of it, never the key itself); anything else is
+// limited per client host, which is what bounds key guessing.
 func (s *APIServer) rateLimitMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		key, _ := r.Context().Value(contextKeyAPIKey).(string)
-		if key == "" {
-			key = r.RemoteAddr
-		}
-
-		bucket := s.limiter.getBucket(key)
+		limiter, key := s.rateLimitBucketFor(r)
+		bucket := limiter.getBucket(key)
 		if !bucket.allow() {
-			w.Header().Set("Retry-After", "60")
-			writeError(w, http.StatusTooManyRequests, "rate limit exceeded: 100 requests per minute")
+			w.Header().Set("Retry-After", strconv.Itoa(limiter.retryAfterSeconds()))
+			writeError(w, http.StatusTooManyRequests, limiter.exceededMessage())
 			return
 		}
 
 		next.ServeHTTP(w, r)
 	})
+}
+
+// rateLimitBucketFor picks the limiter and bucket key for a request.
+func (s *APIServer) rateLimitBucketFor(r *http.Request) (*rateLimiter, string) {
+	s.apiKeysMu.RLock()
+	keysLen := len(s.apiKeys)
+	_, valid := s.apiKeys[r.Header.Get(s.apiKeyHeader)]
+	s.apiKeysMu.RUnlock()
+
+	switch {
+	case valid && keysLen > 0:
+		sum := sha256.Sum256([]byte(r.Header.Get(s.apiKeyHeader)))
+		return s.keyLimiter, "key:" + hex.EncodeToString(sum[:])
+	case keysLen == 0 && os.Getenv("CHATCLI_OPERATOR_DEV_MODE") == "true":
+		// Dev mode admits every caller as admin; limit it like a key.
+		return s.keyLimiter, "dev:" + clientHost(r)
+	default:
+		return s.limiter, "host:" + clientHost(r)
+	}
 }
 
 // --- CORS Middleware ---

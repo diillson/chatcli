@@ -330,8 +330,11 @@ spec:
                   providers:
                     description: |-
                       Providers is an ordered list of fallback providers to try.
-                      First entry is highest priority. The primary provider (spec.provider)
-                      is always tried first, then these in order.
+                      First entry is highest priority. When spec.provider is not in the
+                      list, the operator puts it first (with spec.model), so the primary
+                      provider is tried first and then these in order; when the list
+                      already names it, the list order is used as given. The server builds
+                      the chain only when at least two of its providers have credentials.
                     items:
                       description: FallbackProviderEntry defines a single provider
                         in the fallback chain.
@@ -1904,8 +1907,12 @@ spec:
                 properties:
                   metricsPort:
                     default: 9090
-                    description: MetricsPort is the Prometheus metrics HTTP port (0
-                      = disabled).
+                    description: |-
+                      MetricsPort is the HTTP port of the server's Prometheus metrics
+                      (/metrics) and health (/healthz) endpoints. The operator always
+                      enables it: the pod's startup, readiness and liveness probes use
+                      /healthz on this port, so 0 (or unset) means the default 9090, not
+                      disabled.
                     format: int32
                     type: integer
                   port:
@@ -1938,8 +1945,9 @@ spec:
                           Maps to CHATCLI_DEBUG env var.
                         type: boolean
                       enableReflection:
-                        description: EnableReflection enables gRPC reflection (requires
-                          also CHATCLI_GRPC_REFLECTION=true).
+                        description: |-
+                          EnableReflection enables gRPC server reflection.
+                          Maps to CHATCLI_GRPC_REFLECTION=true.
                         type: boolean
                       jwtAudience:
                         description: |-
@@ -2045,7 +2053,7 @@ spec:
                       rateLimitBurst:
                         description: |-
                           RateLimitBurst is the maximum burst size for rate limiting.
-                          Maps to CHATCLI_RATE_LIMIT_BURST env var. Default: 30.
+                          Maps to CHATCLI_RATE_LIMIT_BURST env var. Default: 20.
                         format: int32
                         type: integer
                       rateLimitRps:
@@ -2073,6 +2081,9 @@ spec:
                       secretName:
                         description: |-
                           SecretName is the name of the Secret containing tls.crt and tls.key.
+                          Required when Enabled is true: without it the server has no
+                          certificate to load, so the operator does not provision the
+                          Deployment and reports TLSConfigured=False (SecretNameMissing).
                           If the Secret also contains a ca.crt key, the operator will use it as
                           the trust root when dialing the gRPC server — required for self-signed
                           certificates, otherwise the connection fails with
@@ -2287,8 +2298,10 @@ spec:
                 type: integer
               serverProbeTime:
                 description: |-
-                  ServerProbeTime is when the operator last probed the server; the
-                  ServerReachable condition carries the outcome.
+                  ServerProbeTime is when the operator last recorded a probe of the
+                  server; the ServerReachable condition carries the outcome. A ready
+                  Instance is probed every five minutes; the time moves whenever the
+                  outcome or version changes, and otherwise at most once per interval.
                 format: date-time
                 type: string
               serverVersion:

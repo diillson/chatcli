@@ -85,7 +85,8 @@ type APIServer struct {
 	apiKeyHeader  string
 	apiKeysMu     sync.RWMutex
 	apiKeys       map[string]string // key -> role
-	limiter       *rateLimiter
+	limiter       *rateLimiter      // requests without a valid key, per client host
+	keyLimiter    *rateLimiter      // requests with a valid key, per key
 	corsMu        sync.RWMutex
 	corsPolicy    CORSPolicy
 	watcherBridge WatcherDedupInvalidator // optional, for dedup invalidation on manual resolve
@@ -102,7 +103,8 @@ func NewAPIServer(c client.Client, addr string) *APIServer {
 		listenAddr:   addr,
 		apiKeyHeader: authHeaderName,
 		apiKeys:      make(map[string]string),
-		limiter:      newRateLimiter(30),  // Security (M3): 30 requests/minute (reduced from 100)
+		limiter:      newRateLimiter(unauthenticatedRequestsPerMinute), // Security (M3)
+		keyLimiter:   newRateLimiter(authenticatedRequestsPerMinute),
 		corsPolicy:   CORSPolicyFromEnv(), // Security (H6): deny-all CORS unless an origin is configured
 	}
 }
@@ -118,6 +120,35 @@ func (s *APIServer) SetAPIKeys(keys map[string]string) {
 // SetWatcherBridge sets the watcher bridge for dedup invalidation on manual resolve.
 func (s *APIServer) SetWatcherBridge(wb WatcherDedupInvalidator) {
 	s.watcherBridge = wb
+}
+
+// NeedLeaderElection implements manager.LeaderElectionRunnable. The REST
+// API and dashboard serve on every replica: the Service routes to every
+// ready operator pod, and a replica that is not the leader would otherwise
+// pass readiness without listening. Every write goes through the API
+// server with optimistic concurrency, so any replica may serve it.
+func (s *APIServer) NeedLeaderElection() bool {
+	return false
+}
+
+// activeInvalidator is implemented by a bridge that can tell whether it is
+// the running one (the leader's).
+type activeInvalidator interface {
+	IsActive() bool
+}
+
+// localDedupInvalidator returns the bridge when its dedup state lives in
+// this process, i.e. it runs here. On a replica that is not the leader the
+// bridge is idle and the leader's IssueReconciler performs the
+// invalidation instead (see controllers.ManualResolutionDedupAnnotation).
+func (s *APIServer) localDedupInvalidator() WatcherDedupInvalidator {
+	if s.watcherBridge == nil {
+		return nil
+	}
+	if a, ok := s.watcherBridge.(activeInvalidator); ok && !a.IsActive() {
+		return nil
+	}
+	return s.watcherBridge
 }
 
 // SetCORSPolicy replaces the cross-origin policy.
@@ -488,14 +519,19 @@ func (s *APIServer) handleResolveIncident(w http.ResponseWriter, r *http.Request
 	issue.Annotations["aiops.chatcli.io/resolved-by"] = roleFromContext(ctx)
 	issue.Annotations["aiops.chatcli.io/resolved-at"] = now.Format(time.RFC3339)
 	issue.Annotations["aiops.chatcli.io/manual-resolution"] = "true"
+	// Invalidate dedup for the resource so new anomalies can be detected.
+	// When the running bridge is in this process it is done here and the
+	// Issue says so; otherwise the leader does it on its next reconcile.
+	local := s.localDedupInvalidator()
+	if local != nil {
+		issue.Annotations[controllers.ManualResolutionDedupAnnotation] = "true"
+	}
 	if err := s.client.Update(ctx, issue); err != nil {
 		log.Printf("[REST] warning: failed to update annotations on resolved issue %s: %v", issue.Name, err)
 	}
-
-	// Invalidate dedup for the resource so new anomalies can be detected
-	if s.watcherBridge != nil {
+	if local != nil {
 		res := issue.Spec.Resource
-		s.watcherBridge.InvalidateDedupForResource(res.Name, res.Namespace)
+		local.InvalidateDedupForResource(res.Name, res.Namespace)
 	}
 
 	item := issueToIncidentItem(*issue)

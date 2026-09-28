@@ -101,6 +101,17 @@ func (r *InstanceReconciler) reconcileDeployment(ctx context.Context, instance *
 			}
 		}
 
+		// Hash the credential Secrets the server reads at startup (token,
+		// JWT material, client CA, CA bundle, encryption key, extraEnv
+		// secret refs) so rotating any of them rolls the pods.
+		credHash, err := hashSecretUses(ctx, r.Client, instance.Namespace, podCredentialSecretUses(instance))
+		if err != nil {
+			return err
+		}
+		if credHash != "" {
+			podAnnotations[credentialsHashAnnotation] = credHash
+		}
+
 		deploy.Spec = appsv1.DeploymentSpec{
 			Replicas: &replicas,
 			Selector: &metav1.LabelSelector{
@@ -171,14 +182,11 @@ func (r *InstanceReconciler) buildPodSpec(instance *platformv1alpha1.Instance) c
 				Protocol:      corev1.ProtocolTCP,
 			},
 		},
-		Resources: instance.Spec.Resources,
-		SecurityContext: &corev1.SecurityContext{
-			AllowPrivilegeEscalation: boolPtr(false),
-			ReadOnlyRootFilesystem:   boolPtr(true),
-			Capabilities: &corev1.Capabilities{
-				Drop: []corev1.Capability{"ALL"},
-			},
-		},
+		Resources:       instance.Spec.Resources,
+		SecurityContext: restrictedContainerSecurityContext(),
+		StartupProbe:    serverStartupProbe(),
+		ReadinessProbe:  serverReadinessProbe(),
+		LivenessProbe:   serverLivenessProbe(),
 	}
 
 	// HOME must be set explicitly: the container runs as UID 1000 which may not
@@ -525,6 +533,11 @@ func (r *InstanceReconciler) buildInstanceVolumes(instance *platformv1alpha1.Ins
 				Name:    "plugin-loader",
 				Image:   instance.Spec.Plugins.Image,
 				Command: []string{"sh", "-c", "cp -a /plugins/* /target-plugins/ 2>/dev/null || true"},
+				// Same restricted context as the server container: the copy
+				// only writes to the emptyDir, and a pod whose init container
+				// lacks it is rejected under the restricted Pod Security
+				// Standard.
+				SecurityContext: restrictedContainerSecurityContext(),
 				VolumeMounts: []corev1.VolumeMount{
 					{
 						Name:      "plugins",
@@ -754,15 +767,9 @@ func (r *InstanceReconciler) reconcileConfigMap(ctx context.Context, instance *p
 		// Fallback chain configuration
 		if instance.Spec.Fallback != nil && instance.Spec.Fallback.Enabled && len(instance.Spec.Fallback.Providers) > 0 {
 			cm.Data["CHATCLI_FALLBACK_ENABLED"] = "true"
-
-			providerNames := make([]string, 0, len(instance.Spec.Fallback.Providers))
-			for _, p := range instance.Spec.Fallback.Providers {
-				providerNames = append(providerNames, p.Name)
-				if p.Model != "" {
-					cm.Data["CHATCLI_FALLBACK_MODEL_"+p.Name] = p.Model
-				}
+			for k, v := range fallbackChainEnv(instance) {
+				cm.Data[k] = v
 			}
-			cm.Data["CHATCLI_FALLBACK_PROVIDERS"] = strings.Join(providerNames, ",")
 
 			if instance.Spec.Fallback.MaxRetries > 0 {
 				cm.Data["CHATCLI_FALLBACK_MAX_RETRIES"] = strconv.Itoa(int(instance.Spec.Fallback.MaxRetries))
