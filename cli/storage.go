@@ -55,6 +55,9 @@ const (
 	StoreMCP         = "mcp"
 	StoreCache       = "cache"
 	StoreLogs        = "logs"
+	// StoreAttachments holds the saved copies of images attached to web
+	// turns (saveTurnAttachments).
+	StoreAttachments = "attachments"
 )
 
 // Removal reasons, keyed for i18n (storage.reason.<reason>).
@@ -137,6 +140,7 @@ func StorageStoreNames() []string {
 		StorePending, StoreTaskGraph, StorePulse, StoreCCR, StoreHub,
 		StoreMemory, StoreSkills, StorePlugins, StoreContexts, StoreAgents, StoreCommands,
 		StoreReflexion, StoreScheduler, StoreTokenizers, StoreMCP, StoreCache, StoreLogs,
+		StoreAttachments,
 	}
 }
 
@@ -240,7 +244,7 @@ func inventoryStore(opts StorageOptions, name string) StorageStore {
 		st.Policy = PolicyOrphan
 	case StoreSessions:
 		st.Policy = PolicyMachine
-	case StoreTranscripts, StoreParked, StorePending:
+	case StoreTranscripts, StoreParked, StorePending, StoreAttachments:
 		st.Policy = PolicyTTL
 	case StoreTaskGraph:
 		st.Policy = PolicyRuns
@@ -331,6 +335,8 @@ func storeCandidates(opts StorageOptions, name string) []candidate {
 		return fileCandidates(dir, cutoff, "", nil)
 	case StorePending:
 		return fileCandidates(dir, cutoff, ".json", nil)
+	case StoreAttachments:
+		return fileCandidates(dir, cutoff, "", nil)
 	case StoreTaskGraph:
 		return taskGraphCandidates(dir, opts.Now.Add(-taskgraph.DefaultRetention), opts.SkipTaskGraphRun)
 	case StorePulse:

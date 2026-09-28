@@ -440,9 +440,10 @@ func (cli *ChatCLI) runLoopRPC(ctx context.Context, o RPCRunOpts, fn func(contex
 			defer func() { cli.currentSessionName = prevSession }()
 		}
 		if o.Attachments != nil && len(o.Attachments.Images) > 0 {
-			prevImages := cli.pendingInboundImages
+			prevImages, prevNote := cli.pendingInboundImages, cli.pendingInboundNote
 			cli.pendingInboundImages = append([]models.ImageContent(nil), o.Attachments.Images...)
-			defer func() { cli.pendingInboundImages = prevImages }()
+			cli.pendingInboundNote = cli.saveTurnAttachments(o.Attachments.Images)
+			defer func() { cli.pendingInboundImages, cli.pendingInboundNote = prevImages, prevNote }()
 		}
 		// Per-session conversation swap (mirrors runChatTurnSerialized):
 		// the loop starts from the caller's history and the updated

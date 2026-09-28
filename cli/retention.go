@@ -36,6 +36,7 @@ type retentionReport struct {
 	Parks       int
 	Costs       int
 	Checkpoints int // shadow git stores whose workspace is gone or untouched past the window
+	Attachments int // saved turn attachments past the window
 }
 
 // runRetentionPass expires park snapshots and cost snapshots older than the
@@ -84,14 +85,17 @@ func (cli *ChatCLI) runRetentionPass() retentionReport {
 				rep.Checkpoints++
 			}
 		}
+		// Saved turn attachments are copies (the conversation keeps the
+		// image itself); past the window nobody will open them again.
+		rep.Attachments = pruneFilesOlderThan(filepath.Join(root, attachmentsDirName), cutoff, "")
 	}
 	// Rotated audit trails (the live file is never touched) follow the
 	// same window; the operator keeps them elsewhere for longer retention.
 	if path := os.Getenv(AuditLogPathEnv); path != "" && filepath.IsAbs(filepath.Clean(path)) {
 		rep.AuditFiles = auditchain.PruneRotated(filepath.Clean(path), cutoff)
 	}
-	if cli != nil && cli.logger != nil && (rep.Parks > 0 || rep.Costs > 0 || rep.AuditFiles > 0 || rep.Sessions > 0 || rep.Pending > 0 || rep.Checkpoints > 0) {
-		cli.logger.Info("retention pass", zap.Int("parks_removed", rep.Parks), zap.Int("cost_snapshots_removed", rep.Costs), zap.Int("audit_files_removed", rep.AuditFiles), zap.Int("sessions_removed", rep.Sessions), zap.Int("pending_removed", rep.Pending), zap.Int("checkpoints_removed", rep.Checkpoints))
+	if cli != nil && cli.logger != nil && (rep.Parks > 0 || rep.Costs > 0 || rep.AuditFiles > 0 || rep.Sessions > 0 || rep.Pending > 0 || rep.Checkpoints > 0 || rep.Attachments > 0) {
+		cli.logger.Info("retention pass", zap.Int("parks_removed", rep.Parks), zap.Int("cost_snapshots_removed", rep.Costs), zap.Int("audit_files_removed", rep.AuditFiles), zap.Int("sessions_removed", rep.Sessions), zap.Int("pending_removed", rep.Pending), zap.Int("checkpoints_removed", rep.Checkpoints), zap.Int("attachments_removed", rep.Attachments))
 	}
 	return rep
 }
@@ -208,6 +212,7 @@ func (cli *ChatCLI) showConfigRetention() {
 	kv(p, i18n.T("cfg.kv.retention.parks"), ttlVal)
 	kv(p, i18n.T("cfg.kv.retention.costs"), ttlVal)
 	kv(p, i18n.T("cfg.kv.retention.checkpoints"), ttlVal+"  "+i18n.T("cfg.kv.retention.checkpoints_note"))
+	kv(p, i18n.T("cfg.kv.retention.attachments"), ttlVal)
 
 	fmt.Println(p)
 	subheader(p, "cfg.sub.retention.archives")

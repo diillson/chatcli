@@ -464,7 +464,7 @@ func deriveSessionTitle(sd *SessionData) string {
 			if m.Role != "user" || m.IsInjectedContext() || isInjectedContextText(m.Content) {
 				continue
 			}
-			t := strings.Join(strings.Fields(m.Content), " ")
+			t := strings.Join(strings.Fields(withoutAttachmentNote(m.Content)), " ")
 			if t == "" {
 				continue
 			}

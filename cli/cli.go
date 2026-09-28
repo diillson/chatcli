@@ -197,6 +197,7 @@ type ChatCLI struct {
 	// run when they arrive from outside the interactive @file flow (e.g. the
 	// messaging gateway). runCoderQuery merges and clears them. Transient.
 	pendingInboundImages []models.ImageContent
+	pendingInboundNote   string      // where the saved copies of pendingInboundImages are (saveTurnAttachments)
 	failedChunks         []FileChunk // Chunks que falharam no processamento
 	lastFailedChunk      *FileChunk  // Referência ao último chunk que falhou
 	agentMode            *AgentMode  // Modo de agente

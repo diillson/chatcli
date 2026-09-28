@@ -345,24 +345,33 @@ func (a *TokenAuthInterceptor) startFailureLimiterCleanup() {
 	}()
 }
 
-// checkFailureRate returns true if the client hasn't exceeded the auth failure limit.
-func (a *TokenAuthInterceptor) checkFailureRate(peerAddr string) bool {
-	a.failureMu.Lock()
-	defer a.failureMu.Unlock()
-
+// failureLimiterFor returns the failure limiter of a client, creating it on
+// first use: 5 failures per minute (1 every 12 seconds, burst 5). Callers
+// hold failureMu.
+func (a *TokenAuthInterceptor) failureLimiterFor(peerAddr string) *rate.Limiter {
 	l, exists := a.failureLimiters[peerAddr]
 	if !exists {
-		// 5 failures per minute (1 every 12 seconds, burst 5)
 		l = rate.NewLimiter(rate.Every(12*time.Second), 5)
 		a.failureLimiters[peerAddr] = l
 	}
-	return l.Allow()
+	return l
 }
 
-// recordFailure consumes a token from the failure rate limiter.
+// checkFailureRate returns true if the client hasn't exceeded the auth
+// failure limit. It only looks: a successful call must never spend the
+// failure budget, or a client making more than five authenticated calls a
+// minute would be refused with valid credentials.
+func (a *TokenAuthInterceptor) checkFailureRate(peerAddr string) bool {
+	a.failureMu.Lock()
+	defer a.failureMu.Unlock()
+	return a.failureLimiterFor(peerAddr).Tokens() >= 1
+}
+
+// recordFailure spends one token of the client's failure budget.
 func (a *TokenAuthInterceptor) recordFailure(peerAddr string) {
-	// The failure is already recorded by the Allow() call in checkFailureRate
-	// This is a no-op placeholder for additional failure tracking (metrics, alerting)
+	a.failureMu.Lock()
+	defer a.failureMu.Unlock()
+	a.failureLimiterFor(peerAddr).Allow()
 }
 
 // extractPeerAddress identifies the caller for rate limiting.
