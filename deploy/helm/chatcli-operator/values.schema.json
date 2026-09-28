@@ -434,7 +434,7 @@
     },
     "clusterName": {
       "type": "string",
-      "description": "This cluster's ClusterRegistration name; its tier decides which severities wait for a human."
+      "description": "This cluster's ClusterRegistration name; its tier decides which severities wait for a human. A name no registration carries sends every plan to manual approval."
     },
     "security": {
       "type": "object",

@@ -37,12 +37,15 @@ type ResourceAllowlist struct {
 }
 
 // DefaultAllowedResourceTypes returns the resource types safe for automated remediation.
+// The operator RBAC (chart templates/rbac.yaml and config/rbac/role.yaml) grants
+// get/create/update on each of them; keep the two in step. ReplicaSet is not
+// listed: its Deployment owns it and would revert a direct write, and the
+// operator holds read-only access to ReplicaSets.
 func DefaultAllowedResourceTypes() map[string]bool {
 	return map[string]bool{
 		"Deployment":              true,
 		"StatefulSet":             true,
 		"DaemonSet":               true,
-		"ReplicaSet":              true,
 		"Service":                 true,
 		"ConfigMap":               true,
 		"HorizontalPodAutoscaler": true,

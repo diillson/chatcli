@@ -2,6 +2,7 @@ package controllers
 
 import (
 	"context"
+	stderrors "errors"
 	"fmt"
 	"strings"
 	"sync"
@@ -551,6 +552,10 @@ func (r *FederationReconciler) DetectCascade(ctx context.Context, issue *platfor
 }
 
 // GetClusterApprovalMode determines the remediation approval mode based on cluster tier and issue severity.
+// errClusterNotRegistered reports a cluster name no ClusterRegistration
+// carries, as opposed to a failure to read the registrations.
+var errClusterNotRegistered = stderrors.New("no ClusterRegistration carries this name")
+
 func (r *FederationReconciler) GetClusterApprovalMode(ctx context.Context, clusterName string) (string, error) {
 	var clusterList platformv1alpha1.ClusterRegistrationList
 	if err := r.List(ctx, &clusterList); err != nil {
@@ -567,7 +572,7 @@ func (r *FederationReconciler) GetClusterApprovalMode(ctx context.Context, clust
 	}
 
 	if targetCluster == nil {
-		return "manual", fmt.Errorf("cluster %q not found", clusterName)
+		return "manual", fmt.Errorf("cluster %q not found: %w", clusterName, errClusterNotRegistered)
 	}
 
 	tier := strings.ToLower(targetCluster.Spec.Tier)

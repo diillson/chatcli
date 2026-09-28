@@ -417,22 +417,22 @@ func TestReconcile_WithWatcher(t *testing.T) {
 		t.Fatalf("reconcile failed: %v", err)
 	}
 
-	// Verify Role
+	// The legacy target lives in "production", outside the Instance's
+	// namespace: a namespaced Role in "default" cannot grant it, so the
+	// Instance is bound to the shared chatcli-watcher ClusterRole.
+	var crb rbacv1.ClusterRoleBinding
+	if err := c.Get(ctx, types.NamespacedName{Name: "default-test-watcher-watcher"}, &crb); err != nil {
+		t.Fatalf("expected ClusterRoleBinding to be created: %v", err)
+	}
+	if crb.RoleRef.Kind != "ClusterRole" || crb.RoleRef.Name != SharedWatcherClusterRole {
+		t.Errorf("expected RoleRef to the shared %s ClusterRole, got %+v", SharedWatcherClusterRole, crb.RoleRef)
+	}
+	if len(crb.Subjects) != 1 || crb.Subjects[0].Name != "test-watcher" || crb.Subjects[0].Namespace != "default" {
+		t.Errorf("unexpected subjects: %+v", crb.Subjects)
+	}
 	var role rbacv1.Role
-	if err := c.Get(ctx, types.NamespacedName{Name: "test-watcher-watcher", Namespace: "default"}, &role); err != nil {
-		t.Fatalf("expected Role to be created: %v", err)
-	}
-	if len(role.Rules) == 0 {
-		t.Error("expected Role rules to be populated")
-	}
-
-	// Verify RoleBinding
-	var rb rbacv1.RoleBinding
-	if err := c.Get(ctx, types.NamespacedName{Name: "test-watcher-watcher", Namespace: "default"}, &rb); err != nil {
-		t.Fatalf("expected RoleBinding to be created: %v", err)
-	}
-	if rb.RoleRef.Name != "test-watcher-watcher" {
-		t.Errorf("expected RoleRef to reference 'test-watcher-watcher', got %q", rb.RoleRef.Name)
+	if err := c.Get(ctx, types.NamespacedName{Name: "test-watcher-watcher", Namespace: "default"}, &role); err == nil {
+		t.Error("a namespaced Role cannot grant a cross-namespace legacy target")
 	}
 
 	// Verify ConfigMap has watcher env vars
@@ -964,7 +964,9 @@ func TestNeedsClusterRBAC(t *testing.T) {
 			want: false,
 		},
 		{
-			name: "no targets",
+			// Legacy single target in another namespace: a namespaced Role
+			// in the Instance namespace cannot grant it.
+			name: "legacy target in another namespace",
 			instance: func() *platformv1alpha1.Instance {
 				inst := newInstance("test", "default")
 				inst.Spec.Watcher = &platformv1alpha1.WatcherSpec{
@@ -972,6 +974,38 @@ func TestNeedsClusterRBAC(t *testing.T) {
 					Deployment: "legacy-app",
 					Namespace:  "prod",
 				}
+				return inst
+			}(),
+			want: true,
+		},
+		{
+			name: "legacy target in the instance namespace",
+			instance: func() *platformv1alpha1.Instance {
+				inst := newInstance("test", "prod")
+				inst.Spec.Watcher = &platformv1alpha1.WatcherSpec{
+					Enabled:    true,
+					Deployment: "legacy-app",
+					Namespace:  "prod",
+				}
+				return inst
+			}(),
+			want: false,
+		},
+		{
+			// The server falls back to "default" without --watch-namespace.
+			name: "legacy target without namespace from another namespace",
+			instance: func() *platformv1alpha1.Instance {
+				inst := newInstance("test", "chatcli")
+				inst.Spec.Watcher = &platformv1alpha1.WatcherSpec{Enabled: true, Deployment: "legacy-app"}
+				return inst
+			}(),
+			want: true,
+		},
+		{
+			name: "watcher without any target",
+			instance: func() *platformv1alpha1.Instance {
+				inst := newInstance("test", "chatcli")
+				inst.Spec.Watcher = &platformv1alpha1.WatcherSpec{Enabled: true}
 				return inst
 			}(),
 			want: false,

@@ -38,6 +38,9 @@ spec:
       interval: 30s
       path: /metrics
 ---
+# ServiceMonitor for the server metrics endpoint (chatcli_*). Instance
+# Services (operator) and the server Helm chart both label the Service
+# app.kubernetes.io/name: chatcli and name the port "metrics".
 apiVersion: monitoring.coreos.com/v1
 kind: ServiceMonitor
 metadata:
@@ -48,7 +51,7 @@ metadata:
 spec:
   selector:
     matchLabels:
-      app.kubernetes.io/name: chatcli-server
+      app.kubernetes.io/name: chatcli
   namespaceSelector:
     any: true
   endpoints:

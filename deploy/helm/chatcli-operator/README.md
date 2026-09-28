@@ -225,7 +225,7 @@ The chart also sets `CHATCLI_OPERATOR_APP_VERSION` to the chart `appVersion`: In
 |-----------|-------------|---------|
 | `alertTransport` | How alerts arrive from the server: `stream` (StreamAlerts, falls back to polling while the server lacks the RPC) or `poll` (GetAlerts every 30s) | `stream` |
 | `decisionEngine.enabled` | Adjust AI confidence by history, patterns, time of day, concurrent issues and severity before a plan runs; 3 failed remediations in a namespace within an hour trip a circuit breaker | `false` |
-| `clusterName` | Name of this cluster's `ClusterRegistration`; its tier decides which severities wait for a human | `""` |
+| `clusterName` | Name of this cluster's `ClusterRegistration`; its tier decides which severities wait for a human. A name no registration carries sends every plan to manual approval | `""` |
 | `prometheusUrl` | Prometheus URL queried for CPU/memory/latency/error-rate trends during analysis | `""` |
 
 ### API & ports
@@ -289,7 +289,7 @@ The default pod and container security contexts satisfy the `restricted` Pod Sec
 | `security.grpcTLS.caFile` | Operator-wide CA (absolute path), used when an Instance's TLS Secret has no `ca.crt` | `""` |
 | `security.allowedResourceTypes` | Extra comma-separated resource kinds remediation may touch, added to the 17 defaults | `""` |
 | `security.logScrubPatterns` | Extra comma-separated regex patterns scrubbed from logs before analysis | `""` |
-| `security.allowedDiagnosticCommands` | Extra read-only diagnostic commands the remediation engine may run (comma-separated, appended to the ~90 built-ins). Read by the operator, not by Instances | `""` |
+| `security.allowedDiagnosticCommands` | Extra read-only diagnostic commands the remediation engine may run (comma-separated, appended to the 100 built-ins). Read by the operator, not by Instances | `""` |
 | `security.corsOrigin` | A single allowed CORS origin (kept for compatibility) | `""` |
 | `security.corsAllowedOrigins` | Allowed CORS origins, or `["*"]` | `[]` |
 | `security.corsAllowedMethods` | Allowed CORS methods (empty = GET, POST, PUT, DELETE, OPTIONS) | `[]` |
@@ -590,8 +590,10 @@ spec:
 helm upgrade chatcli-operator oci://ghcr.io/diillson/charts/chatcli-operator \
   --version <version> \
   --namespace chatcli-system \
-  --reuse-values
+  --reset-then-reuse-values
 ```
+
+`--reset-then-reuse-values` (Helm 3.14+) starts from the new chart's defaults and re-applies your previous overrides. Plain `--reuse-values` skips the defaults of keys added by newer chart versions (for example `apiKeys`, `networkPolicy`, `extraVolumes`) and can fail the render; with an older Helm, pass your values file (`-f my-values.yaml`) instead.
 
 The CRD hook refreshes the CRDs first; Instances without `spec.image.tag` then roll to the matching server release.
 

@@ -112,8 +112,19 @@ func (r *InstanceReconciler) reconcileDeployment(ctx context.Context, instance *
 			podAnnotations[credentialsHashAnnotation] = credHash
 		}
 
+		// Hash the ConfigMaps mounted as files (MCP servers, agents,
+		// skills): the server reads them only at startup.
+		cmHash, err := hashMountedConfigMaps(ctx, r.Client, instance.Namespace, mountedConfigMapNames(instance))
+		if err != nil {
+			return err
+		}
+		if cmHash != "" {
+			podAnnotations[mountedConfigMapsHashAnnotation] = cmHash
+		}
+
 		deploy.Spec = appsv1.DeploymentSpec{
 			Replicas: &replicas,
+			Strategy: deploymentStrategy(instance),
 			Selector: &metav1.LabelSelector{
 				MatchLabels: labels(instance),
 			},
@@ -128,6 +139,18 @@ func (r *InstanceReconciler) reconcileDeployment(ctx context.Context, instance *
 		return nil
 	})
 	return err
+}
+
+// deploymentStrategy picks how pods are replaced. The sessions PVC is
+// ReadWriteOnce: a surge pod scheduled on another node would wait forever
+// on Multi-Attach while the old pod holds the volume, so persistence uses
+// Recreate. Without persistence the API server default (RollingUpdate) is
+// kept.
+func deploymentStrategy(instance *platformv1alpha1.Instance) appsv1.DeploymentStrategy {
+	if instance.Spec.Persistence != nil && instance.Spec.Persistence.Enabled {
+		return appsv1.DeploymentStrategy{Type: appsv1.RecreateDeploymentStrategyType}
+	}
+	return appsv1.DeploymentStrategy{}
 }
 
 func (r *InstanceReconciler) buildPodSpec(instance *platformv1alpha1.Instance) corev1.PodSpec {
@@ -300,10 +323,16 @@ func (r *InstanceReconciler) buildPodSpec(instance *platformv1alpha1.Instance) c
 	if instance.Spec.SecurityContext != nil {
 		podSpec.SecurityContext = instance.Spec.SecurityContext
 	} else {
-		// Default security context
+		// Default security context. FSGroup matches RunAsUser so the
+		// sessions/plugins volumes are writable whatever ownership the
+		// storage provisioner gives a fresh volume; OnRootMismatch skips
+		// the recursive chown once the root already has the group.
+		fsChange := corev1.FSGroupChangeOnRootMismatch
 		podSpec.SecurityContext = &corev1.PodSecurityContext{
-			RunAsNonRoot: boolPtr(true),
-			RunAsUser:    int64Ptr(1000),
+			RunAsNonRoot:        boolPtr(true),
+			RunAsUser:           int64Ptr(1000),
+			FSGroup:             int64Ptr(1000),
+			FSGroupChangePolicy: &fsChange,
 			SeccompProfile: &corev1.SeccompProfile{
 				Type: corev1.SeccompProfileTypeRuntimeDefault,
 			},
@@ -765,15 +794,17 @@ func (r *InstanceReconciler) reconcileConfigMap(ctx context.Context, instance *p
 			cm.Data["CHATCLI_SERVER_PORT"] = strconv.Itoa(int(instance.Spec.Server.Port))
 		}
 		// Fallback chain configuration
+		// A non-empty CHATCLI_FALLBACK_PROVIDERS is what turns the chain on
+		// in the server; there is no separate enable switch to write.
 		if instance.Spec.Fallback != nil && instance.Spec.Fallback.Enabled && len(instance.Spec.Fallback.Providers) > 0 {
-			cm.Data["CHATCLI_FALLBACK_ENABLED"] = "true"
 			for k, v := range fallbackChainEnv(instance) {
 				cm.Data[k] = v
 			}
 
-			if instance.Spec.Fallback.MaxRetries > 0 {
-				cm.Data["CHATCLI_FALLBACK_MAX_RETRIES"] = strconv.Itoa(int(instance.Spec.Fallback.MaxRetries))
-			}
+			// Always written: the CRD defaults an omitted maxRetries to 2, so
+			// 0 here is an explicit "no retry, fail over at once" and must
+			// not fall back to the server's own default.
+			cm.Data["CHATCLI_FALLBACK_MAX_RETRIES"] = strconv.Itoa(int(instance.Spec.Fallback.MaxRetries))
 			if instance.Spec.Fallback.CooldownBase != "" {
 				cm.Data["CHATCLI_FALLBACK_COOLDOWN_BASE"] = instance.Spec.Fallback.CooldownBase
 			}
@@ -1007,6 +1038,12 @@ func watcherPolicyRules() []rbacv1.PolicyRule {
 			Verbs:     []string{"get", "list", "watch"},
 		},
 		{
+			// Job and CronJob watch targets.
+			APIGroups: []string{"batch"},
+			Resources: []string{"jobs", "cronjobs"},
+			Verbs:     []string{"get", "list", "watch"},
+		},
+		{
 			APIGroups: []string{"autoscaling"},
 			Resources: []string{"horizontalpodautoscalers"},
 			Verbs:     []string{"get", "list", "watch"},
@@ -1029,10 +1066,25 @@ func watcherPolicyRules() []rbacv1.PolicyRule {
 	}
 }
 
-// needsClusterRBAC returns true if multi-target watches span multiple namespaces.
+// needsClusterRBAC returns true when the watcher reads outside the
+// Instance's namespace: multi-target watches spanning namespaces, or the
+// legacy single target (watcher.deployment + watcher.namespace) pointing at
+// another namespace. A namespaced Role cannot grant either.
 func needsClusterRBAC(instance *platformv1alpha1.Instance) bool {
-	if instance.Spec.Watcher == nil || len(instance.Spec.Watcher.Targets) == 0 {
+	w := instance.Spec.Watcher
+	if w == nil {
 		return false
+	}
+	if len(w.Targets) == 0 {
+		if w.Deployment == "" {
+			return false
+		}
+		// The server watches "default" when --watch-namespace is absent.
+		ns := w.Namespace
+		if ns == "" {
+			ns = "default"
+		}
+		return ns != instance.Namespace
 	}
 	namespaces := make(map[string]struct{})
 	for _, t := range instance.Spec.Watcher.Targets {
