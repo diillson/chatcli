@@ -10,6 +10,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/util/retry"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/diillson/chatcli/llm/pricing"
@@ -121,62 +122,77 @@ func (ct *CostTracker) getTokenPricing(ctx context.Context, namespace, provider,
 }
 
 func (ct *CostTracker) RecordLLMCost(ctx context.Context, issueRef platformv1alpha1.IssueRef, namespace, provider, model string, inputTokens, outputTokens int64) error {
-	cost, err := ct.loadCost(ctx, issueRef.Name, namespace)
-	if err != nil {
-		cost = &IncidentCost{IssueName: issueRef.Name}
-	}
-
-	cost.LLMCosts.TotalInputTokens += inputTokens
-	cost.LLMCosts.TotalOutputTokens += outputTokens
-	cost.LLMCosts.AnalysisCalls++
-	cost.LLMCosts.Provider = provider
-	cost.LLMCosts.Model = model
-
-	rates := ct.getTokenPricing(ctx, namespace, provider, model)
-	cost.LLMCosts.EstimatedCostUSD = float64(cost.LLMCosts.TotalInputTokens)/1_000_000*rates.InputPerMillion +
-		float64(cost.LLMCosts.TotalOutputTokens)/1_000_000*rates.OutputPerMillion
-	cost.TotalCostUSD = cost.LLMCosts.EstimatedCostUSD
-	cost.RecordedAt = time.Now()
-
-	return ct.saveCost(ctx, namespace, cost)
+	return ct.book(ctx, issueRef.Name, namespace, provider, model, inputTokens, outputTokens, func(c *IncidentCost) {
+		c.LLMCosts.AnalysisCalls++
+	})
 }
 
 func (ct *CostTracker) RecordAgenticStep(ctx context.Context, issueRef platformv1alpha1.IssueRef, namespace, provider, model string, inputTokens, outputTokens int64) error {
-	cost, err := ct.loadCost(ctx, issueRef.Name, namespace)
-	if err != nil {
-		cost = &IncidentCost{IssueName: issueRef.Name}
-	}
+	return ct.book(ctx, issueRef.Name, namespace, provider, model, inputTokens, outputTokens, func(c *IncidentCost) {
+		c.LLMCosts.AgenticSteps++
+	})
+}
 
-	cost.LLMCosts.TotalInputTokens += inputTokens
-	cost.LLMCosts.TotalOutputTokens += outputTokens
-	cost.LLMCosts.AgenticSteps++
-	cost.LLMCosts.Provider = provider
-	cost.LLMCosts.Model = model
-
+// book adds one LLM call to the incident's ledger entry. The call is priced
+// at its own provider and model rate when it is booked and added to the
+// running total, so a later call on another model never reprices earlier
+// ones (Provider and Model name the last call). The read-modify-write is
+// retried on conflict: an analysis and an agentic step booked at the same
+// time in one namespace no longer overwrite each other.
+func (ct *CostTracker) book(ctx context.Context, issueName, namespace, provider, model string, inputTokens, outputTokens int64, count func(*IncidentCost)) error {
 	rates := ct.getTokenPricing(ctx, namespace, provider, model)
-	cost.LLMCosts.EstimatedCostUSD = float64(cost.LLMCosts.TotalInputTokens)/1_000_000*rates.InputPerMillion +
-		float64(cost.LLMCosts.TotalOutputTokens)/1_000_000*rates.OutputPerMillion
-	cost.TotalCostUSD = cost.LLMCosts.EstimatedCostUSD
-	cost.RecordedAt = time.Now()
+	callCost := float64(inputTokens)/1_000_000*rates.InputPerMillion +
+		float64(outputTokens)/1_000_000*rates.OutputPerMillion
 
-	return ct.saveCost(ctx, namespace, cost)
+	retriable := func(err error) bool { return errors.IsConflict(err) || errors.IsAlreadyExists(err) }
+	return retry.OnError(retry.DefaultRetry, retriable, func() error {
+		cm, err := ct.getLedger(ctx, namespace)
+		if err != nil {
+			return err
+		}
+		cost, err := ledgerEntry(cm, issueName)
+		if err != nil {
+			return err
+		}
+		cost.LLMCosts.TotalInputTokens += inputTokens
+		cost.LLMCosts.TotalOutputTokens += outputTokens
+		count(cost)
+		cost.LLMCosts.Provider = provider
+		cost.LLMCosts.Model = model
+		cost.LLMCosts.EstimatedCostUSD += callCost
+		cost.TotalCostUSD = cost.LLMCosts.EstimatedCostUSD
+		cost.RecordedAt = time.Now()
+		return ct.writeLedger(ctx, namespace, cm, cost)
+	})
 }
 
 func (ct *CostTracker) GetIncidentCost(ctx context.Context, issueName, namespace string) (*IncidentCost, error) {
 	return ct.loadCost(ctx, issueName, namespace)
 }
 
+// GetCostSummary covers the window that ends now.
 func (ct *CostTracker) GetCostSummary(ctx context.Context, namespace string, window time.Duration) (*CostSummary, error) {
 	now := time.Now()
-	summary := &CostSummary{PeriodStart: now.Add(-window), PeriodEnd: now}
+	return ct.GetCostSummaryForPeriod(ctx, namespace, now.Add(-window), now)
+}
+
+// GetCostSummaryForPeriod sums the ledger entries last booked in
+// [start, end]; entries written before RecordedAt existed always count. A
+// namespace without a ledger yet is an empty summary; any other read
+// failure is returned instead of an all-zero summary.
+func (ct *CostTracker) GetCostSummaryForPeriod(ctx context.Context, namespace string, start, end time.Time) (*CostSummary, error) {
+	summary := &CostSummary{PeriodStart: start, PeriodEnd: end}
 
 	costs, err := ct.loadAllCosts(ctx, namespace)
 	if err != nil {
-		return summary, nil
+		if errors.IsNotFound(err) {
+			return summary, nil
+		}
+		return nil, err
 	}
 
 	for _, cost := range costs {
-		if !cost.RecordedAt.IsZero() && cost.RecordedAt.Before(summary.PeriodStart) {
+		if !cost.RecordedAt.IsZero() && (cost.RecordedAt.Before(start) || cost.RecordedAt.After(end)) {
 			continue
 		}
 		summary.TotalLLMCost += cost.LLMCosts.EstimatedCostUSD
@@ -202,6 +218,33 @@ func (ct *CostTracker) loadCost(ctx context.Context, issueName, namespace string
 	if err := json.Unmarshal([]byte(data), &cost); err != nil {
 		return nil, err
 	}
+	return &cost, nil
+}
+
+// getLedger reads the namespace ledger; nil without error when it does not
+// exist yet.
+func (ct *CostTracker) getLedger(ctx context.Context, namespace string) (*corev1.ConfigMap, error) {
+	cm := &corev1.ConfigMap{}
+	if err := ct.client.Get(ctx, types.NamespacedName{Name: costLedgerCM, Namespace: namespace}, cm); err != nil {
+		if errors.IsNotFound(err) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("reading cost ledger: %w", err)
+	}
+	return cm, nil
+}
+
+// ledgerEntry decodes the incident's entry, or starts one. A corrupt entry
+// is an error: overwriting it would silently drop what it recorded.
+func ledgerEntry(cm *corev1.ConfigMap, issueName string) (*IncidentCost, error) {
+	if cm == nil || cm.Data[issueName] == "" {
+		return &IncidentCost{IssueName: issueName}, nil
+	}
+	var cost IncidentCost
+	if err := json.Unmarshal([]byte(cm.Data[issueName]), &cost); err != nil {
+		return nil, fmt.Errorf("decoding cost ledger entry %s: %w", issueName, err)
+	}
+	cost.IssueName = issueName
 	return &cost, nil
 }
 
@@ -239,27 +282,25 @@ func (ct *CostTracker) loadAllCosts(ctx context.Context, namespace string) ([]In
 	return costs, nil
 }
 
-func (ct *CostTracker) saveCost(ctx context.Context, namespace string, cost *IncidentCost) error {
-	cm := &corev1.ConfigMap{}
-	err := ct.client.Get(ctx, types.NamespacedName{Name: costLedgerCM, Namespace: namespace}, cm)
+// writeLedger stores the entry, creating the ledger when getLedger found
+// none. The Update carries the resourceVersion that was read, so a
+// concurrent booking surfaces as a conflict and is retried.
+func (ct *CostTracker) writeLedger(ctx context.Context, namespace string, cm *corev1.ConfigMap, cost *IncidentCost) error {
+	data, err := json.Marshal(cost)
 	if err != nil {
-		if !errors.IsNotFound(err) {
-			return err
-		}
+		return err
+	}
+	if cm == nil {
 		cm = &corev1.ConfigMap{
 			ObjectMeta: metav1.ObjectMeta{Name: costLedgerCM, Namespace: namespace,
 				Labels: map[string]string{"app.kubernetes.io/managed-by": "chatcli-operator"}},
-			Data: make(map[string]string),
+			Data: map[string]string{cost.IssueName: string(data)},
 		}
-		data, _ := json.Marshal(cost)
-		cm.Data[cost.IssueName] = string(data)
 		return ct.client.Create(ctx, cm)
 	}
-
 	if cm.Data == nil {
 		cm.Data = make(map[string]string)
 	}
-	data, _ := json.Marshal(cost)
 	cm.Data[cost.IssueName] = string(data)
 	return ct.client.Update(ctx, cm)
 }

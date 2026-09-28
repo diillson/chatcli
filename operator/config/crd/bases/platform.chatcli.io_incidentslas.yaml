@@ -105,20 +105,29 @@ spec:
                   hours.
                 type: boolean
               escalationPolicyRef:
-                description: EscalationPolicyRef references an EscalationPolicy to
-                  trigger on SLA breach.
+                description: |-
+                  EscalationPolicyRef is reserved and not read yet: an SLA breach is recorded on this
+                  IncidentSLA, in the audit trail and in chatcli_operator_sla_violations_total, and
+                  escalation follows the EscalationPolicy matched by the Issue severity.
                 type: string
               notificationPolicyRef:
-                description: NotificationPolicyRef references a NotificationPolicy
-                  for SLA breach notifications.
+                description: |-
+                  NotificationPolicyRef is reserved and not read yet: breaches are not notified on
+                  their own; the Issue's state changes are notified by the matching NotificationPolicies.
                 type: string
               resolutionTime:
-                description: ResolutionTime is the maximum allowed time from detection
-                  to resolution (e.g., "1h", "4h", "24h").
+                description: |-
+                  ResolutionTime is the maximum allowed time from detection to resolution (e.g., "1h", "4h", "24h").
+                  Whole days may lead the value ("1d", "2d12h").
+                minLength: 2
+                pattern: ^([0-9]+d)?([0-9]+(\.[0-9]+)?(ns|us|ms|s|m|h))*$
                 type: string
               responseTime:
-                description: ResponseTime is the maximum allowed time from detection
-                  to first analysis (e.g., "5m", "15m", "1h").
+                description: |-
+                  ResponseTime is the maximum allowed time from detection to first analysis (e.g., "5m", "15m", "1h").
+                  Whole days may lead the value ("1d", "1d12h").
+                minLength: 2
+                pattern: ^([0-9]+d)?([0-9]+(\.[0-9]+)?(ns|us|ms|s|m|h))*$
                 type: string
               severity:
                 description: Severity this SLA applies to.
@@ -137,8 +146,8 @@ spec:
             description: IncidentSLAStatus defines the observed state of IncidentSLA.
             properties:
               activeViolations:
-                description: ActiveViolations is the number of currently open SLA
-                  violations.
+                description: ActiveViolations is the number of SLA violations whose
+                  Issue is not resolved yet.
                 format: int32
                 type: integer
               averageResolutionTime:

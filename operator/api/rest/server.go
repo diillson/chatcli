@@ -1546,11 +1546,8 @@ func (s *APIServer) handleAnalyticsRemediationStats(w http.ResponseWriter, r *ht
 func (s *APIServer) handleAnalyticsCompliance(w http.ResponseWriter, r *http.Request, tr timeRangeParams) {
 	reporter := controllers.NewComplianceReporter(s.client)
 	ns := r.URL.Query().Get("namespace")
-	window := 7 * 24 * time.Hour // default 7 days
-	if tr.From != nil && tr.To != nil {
-		window = tr.To.Sub(*tr.From)
-	}
-	report, err := reporter.GenerateReport(r.Context(), ns, window)
+	start, end := analyticsPeriod(tr, 7*24*time.Hour) // default: the last 7 days
+	report, err := reporter.GenerateReportForPeriod(r.Context(), ns, start, end)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to generate compliance report: "+err.Error())
 		return
@@ -1568,11 +1565,8 @@ func (s *APIServer) handleAnalyticsCompliance(w http.ResponseWriter, r *http.Req
 func (s *APIServer) handleAnalyticsCost(w http.ResponseWriter, r *http.Request, tr timeRangeParams) {
 	tracker := controllers.NewCostTracker(s.client)
 	ns := r.URL.Query().Get("namespace")
-	window := 30 * 24 * time.Hour
-	if tr.From != nil && tr.To != nil {
-		window = tr.To.Sub(*tr.From)
-	}
-	summary, err := tracker.GetCostSummary(r.Context(), ns, window)
+	start, end := analyticsPeriod(tr, 30*24*time.Hour) // default: the last 30 days
+	summary, err := tracker.GetCostSummaryForPeriod(r.Context(), ns, start, end)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to read the cost ledger: "+err.Error())
 		return
@@ -2486,6 +2480,22 @@ func parseTimeRange(r *http.Request) timeRangeParams {
 		}
 	}
 	return tr
+}
+
+// analyticsPeriod turns the from/to query into an absolute period. With
+// both given it is exactly [from, to]; with only from it runs to now; with
+// only to it is the default window ending at to; with neither it is the
+// default window ending now.
+func analyticsPeriod(tr timeRangeParams, defaultWindow time.Duration) (start, end time.Time) {
+	end = time.Now()
+	if tr.To != nil {
+		end = *tr.To
+	}
+	start = end.Add(-defaultWindow)
+	if tr.From != nil {
+		start = *tr.From
+	}
+	return start, end
 }
 
 // paginateSlice returns start and end indices for a slice of the given total length.

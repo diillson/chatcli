@@ -79,7 +79,7 @@ func TestFillIncidentMetrics(t *testing.T) {
 
 func TestFillSLAMetricsNoIncidentsIsFullCompliance(t *testing.T) {
 	report := &ComplianceReport{}
-	fillSLAMetrics(report, &platformv1alpha1.IssueList{}, time.Now().Add(-time.Hour), 0, 0)
+	fillSLAMetrics(report, &platformv1alpha1.IssueList{}, time.Now().Add(-time.Hour), 0, 0, false)
 	if report.SLAMetrics.CompliancePercentage != 100 {
 		t.Fatalf("CompliancePercentage = %v, want 100 for zero incidents", report.SLAMetrics.CompliancePercentage)
 	}
@@ -94,7 +94,7 @@ func TestFillSLAMetricsCountsEscalationsAsViolations(t *testing.T) {
 	}}
 	report := &ComplianceReport{}
 	detectCount, resolveCount := fillIncidentMetrics(report, issues, start)
-	fillSLAMetrics(report, issues, start, detectCount, resolveCount)
+	fillSLAMetrics(report, issues, start, detectCount, resolveCount, false)
 
 	if report.SLAMetrics.ResolutionSLAViolations != 1 {
 		t.Fatalf("ResolutionSLAViolations = %d, want 1 (the escalated issue)", report.SLAMetrics.ResolutionSLAViolations)
