@@ -191,7 +191,11 @@ type ServerSpec struct {
 	// +kubebuilder:default=50051
 	Port int32 `json:"port,omitempty"`
 
-	// MetricsPort is the Prometheus metrics HTTP port (0 = disabled).
+	// MetricsPort is the HTTP port of the server's Prometheus metrics
+	// (/metrics) and health (/healthz) endpoints. The operator always
+	// enables it: the pod's startup, readiness and liveness probes use
+	// /healthz on this port, so 0 (or unset) means the default 9090, not
+	// disabled.
 	// +kubebuilder:default=9090
 	// +optional
 	MetricsPort int32 `json:"metricsPort,omitempty"`
@@ -273,7 +277,7 @@ type ServerSecuritySpec struct {
 	RateLimitRPS *int32 `json:"rateLimitRps,omitempty"`
 
 	// RateLimitBurst is the maximum burst size for rate limiting.
-	// Maps to CHATCLI_RATE_LIMIT_BURST env var. Default: 30.
+	// Maps to CHATCLI_RATE_LIMIT_BURST env var. Default: 20.
 	// +optional
 	RateLimitBurst *int32 `json:"rateLimitBurst,omitempty"`
 
@@ -313,7 +317,8 @@ type ServerSecuritySpec struct {
 	// +optional
 	Debug bool `json:"debug,omitempty"`
 
-	// EnableReflection enables gRPC reflection (requires also CHATCLI_GRPC_REFLECTION=true).
+	// EnableReflection enables gRPC server reflection.
+	// Maps to CHATCLI_GRPC_REFLECTION=true.
 	// +optional
 	EnableReflection bool `json:"enableReflection,omitempty"`
 }
@@ -440,6 +445,9 @@ type TLSSpec struct {
 	Enabled bool `json:"enabled,omitempty"`
 
 	// SecretName is the name of the Secret containing tls.crt and tls.key.
+	// Required when Enabled is true: without it the server has no
+	// certificate to load, so the operator does not provision the
+	// Deployment and reports TLSConfigured=False (SecretNameMissing).
 	// If the Secret also contains a ca.crt key, the operator will use it as
 	// the trust root when dialing the gRPC server — required for self-signed
 	// certificates, otherwise the connection fails with
@@ -586,8 +594,11 @@ type FallbackSpec struct {
 	Enabled bool `json:"enabled"`
 
 	// Providers is an ordered list of fallback providers to try.
-	// First entry is highest priority. The primary provider (spec.provider)
-	// is always tried first, then these in order.
+	// First entry is highest priority. When spec.provider is not in the
+	// list, the operator puts it first (with spec.model), so the primary
+	// provider is tried first and then these in order; when the list
+	// already names it, the list order is used as given. The server builds
+	// the chain only when at least two of its providers have credentials.
 	Providers []FallbackProviderEntry `json:"providers"`
 
 	// MaxRetries is the number of retries per provider before moving to next.
@@ -742,8 +753,10 @@ type InstanceStatus struct {
 	// +optional
 	ServerVersion string `json:"serverVersion,omitempty"`
 
-	// ServerProbeTime is when the operator last probed the server; the
-	// ServerReachable condition carries the outcome.
+	// ServerProbeTime is when the operator last recorded a probe of the
+	// server; the ServerReachable condition carries the outcome. A ready
+	// Instance is probed every five minutes; the time moves whenever the
+	// outcome or version changes, and otherwise at most once per interval.
 	// +optional
 	ServerProbeTime *metav1.Time `json:"serverProbeTime,omitempty"`
 }

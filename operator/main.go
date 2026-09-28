@@ -98,7 +98,8 @@ func main() {
 		setupLog.Error(err, "invalid operator configuration")
 		os.Exit(1)
 	}
-	if _, err := setup.Controllers(mgr, setupOpts); err != nil {
+	components, err := setup.Controllers(mgr, setupOpts)
+	if err != nil {
 		setupLog.Error(err, "unable to set up controllers")
 		os.Exit(1)
 	}
@@ -112,6 +113,9 @@ func main() {
 		aiopsPort = "8090"
 	}
 	apiServer := rest.NewAPIServer(mgr.GetClient(), ":"+aiopsPort)
+	// A manual resolve from the dashboard drops the watcher dedup for the
+	// resource, so the next alert on it is not swallowed.
+	apiServer.SetWatcherBridge(components.WatcherBridge)
 	// The CORS policy comes from the environment the chart already sets.
 	// Logged because it was previously read by nobody: an operator who
 	// configured an origin and saw the dashboard blocked had no way to tell

@@ -3,9 +3,11 @@ package controllers
 import (
 	"context"
 	"crypto/sha256"
+	stderrors "errors"
 	"fmt"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"k8s.io/apimachinery/pkg/api/errors"
@@ -91,6 +93,11 @@ func ParseAlertTransport(v string) (AlertTransport, error) {
 // than streamHeartbeatTimeout.
 var errStreamStalled = fmt.Errorf("alert stream stalled: no heartbeat from the server")
 
+// errCredentialsChanged ends the alert stream when the connected Instance's
+// address, transport or credential material changed underneath the
+// long-lived connection.
+var errCredentialsChanged = stderrors.New("operator credentials for the connected Instance changed")
+
 // WatcherBridge receives the ChatCLI server's watcher alerts and creates
 // Anomaly CRs. It keeps a StreamAlerts stream open and polls GetAlerts only
 // as a fallback for a server without that RPC or when configured to.
@@ -116,6 +123,16 @@ type WatcherBridge struct {
 	mu                sync.Mutex
 	seen              map[string]dedupEntry      // hash → entry (timestamp + resource ref for invalidation)
 	connectedInstance *platformv1alpha1.Instance // Instance we're connected to (for OwnerRef)
+	// connectedFingerprint identifies the address, transport and credential
+	// material the connection was built from (operatorCredentialFingerprint).
+	// The shared ServerClient keeps its token, minter and client certificate
+	// for the life of the connection, so a rotated Secret leaves every RPC
+	// (alerts, AIInsight, remediation) on the old credential until the
+	// bridge notices and reconnects.
+	connectedFingerprint string
+
+	// active is true while Start runs, i.e. on the elected leader.
+	active atomic.Bool
 }
 
 // dedupEntry tracks the resource the hash referred to so InvalidateDedupForResource
@@ -151,6 +168,8 @@ func (wb *WatcherBridge) SetAlertTransport(t AlertTransport) {
 // Instance until the context is canceled: streaming alerts when the server
 // offers StreamAlerts, polling GetAlerts otherwise.
 func (wb *WatcherBridge) Start(ctx context.Context) error {
+	wb.active.Store(true)
+	defer wb.active.Store(false)
 	wb.logger.Info("WatcherBridge started",
 		zap.String("transport", string(wb.transport)),
 		zap.Duration("poll_interval", wb.pollInterval))
@@ -167,6 +186,10 @@ func (wb *WatcherBridge) Start(ctx context.Context) error {
 // hold the stream open until it ends or poll once and wait. backoff grows
 // while stream reopens keep failing and resets once one delivers.
 func (wb *WatcherBridge) cycle(ctx context.Context, backoff *time.Duration) {
+	if wb.serverClient.IsConnected() && wb.credentialsStale(ctx) {
+		wb.logger.Info("Operator credentials for the connected Instance changed; reconnecting")
+		wb.dropConnection()
+	}
 	if !wb.serverClient.IsConnected() {
 		if err := wb.discoverAndConnect(ctx); err != nil {
 			wb.logger.Debug("Server discovery failed", zap.Error(err))
@@ -187,6 +210,12 @@ func (wb *WatcherBridge) cycle(ctx context.Context, backoff *time.Duration) {
 			wb.streamFailures++
 		}
 		switch {
+		case stderrors.Is(err, errCredentialsChanged):
+			// Rebuild the connection with the new material right away.
+			wb.logger.Info("Operator credentials for the connected Instance changed; reconnecting")
+			wb.dropConnection()
+			*backoff = time.Second
+			wb.streamFailures = 0
 		case status.Code(err) == codes.Unimplemented:
 			// Older server: poll until it is worth probing the stream again.
 			wb.streamUnsupportedUntil = time.Now().Add(streamRetryAfter)
@@ -280,6 +309,9 @@ func (wb *WatcherBridge) consumeStream(ctx context.Context) (int, error) {
 			timer.Reset(wb.heartbeatTimeout)
 			if m.resp.GetHeartbeat() {
 				wb.pruneDedup()
+				if wb.credentialsStale(ctx) {
+					return received, errCredentialsChanged
+				}
 				continue
 			}
 			if a := m.resp.GetAlert(); a != nil {
@@ -364,6 +396,13 @@ func (wb *WatcherBridge) discoverAndConnect(ctx context.Context) error {
 				zap.Error(err))
 			continue
 		}
+		// Best effort: without a fingerprint the connection is simply not
+		// checked for rotation, and the silent-stream rediscovery still
+		// applies.
+		fingerprint, fpErr := operatorCredentialFingerprint(ctx, wb.client, &inst)
+		if fpErr != nil {
+			wb.logger.Debug("Could not fingerprint the operator credential", zap.String("instance", inst.Name), zap.Error(fpErr))
+		}
 
 		if err := wb.serverClient.Connect(address, opts); err != nil {
 			wb.logger.Warn("Failed to connect to Instance",
@@ -375,6 +414,7 @@ func (wb *WatcherBridge) discoverAndConnect(ctx context.Context) error {
 		wb.logger.Info("Connected to Instance", zap.String("instance", inst.Name), zap.String("address", address))
 		instCopy := inst
 		wb.connectedInstance = &instCopy
+		wb.connectedFingerprint = fingerprint
 		return nil
 	}
 
@@ -748,6 +788,42 @@ func (wb *WatcherBridge) GetSeenCount() int {
 // NeedLeaderElection implements manager.LeaderElectionRunnable.
 func (wb *WatcherBridge) NeedLeaderElection() bool {
 	return true
+}
+
+// IsActive reports whether this bridge is running, which with leader
+// election means this replica is the leader. The dedup state lives in the
+// running bridge only; a replica that is not active has nothing to
+// invalidate.
+func (wb *WatcherBridge) IsActive() bool {
+	return wb.active.Load()
+}
+
+// credentialsStale reports whether the connected Instance's credential
+// material no longer matches what the connection was built from. Read
+// failures are not staleness: the connection is kept rather than dropped
+// on a transient error.
+func (wb *WatcherBridge) credentialsStale(ctx context.Context) bool {
+	if wb.connectedInstance == nil || wb.connectedFingerprint == "" {
+		return false
+	}
+	var inst platformv1alpha1.Instance
+	key := types.NamespacedName{Name: wb.connectedInstance.Name, Namespace: wb.connectedInstance.Namespace}
+	if err := wb.client.Get(ctx, key, &inst); err != nil {
+		// A deleted Instance is as stale as it gets.
+		return errors.IsNotFound(err)
+	}
+	fp, err := operatorCredentialFingerprint(ctx, wb.client, &inst)
+	if err != nil {
+		return false
+	}
+	return fp != wb.connectedFingerprint
+}
+
+// dropConnection closes the shared connection so the next cycle
+// rediscovers the Instance and dials it with fresh material.
+func (wb *WatcherBridge) dropConnection() {
+	_ = wb.serverClient.Close()
+	wb.connectedFingerprint = ""
 }
 
 // ResolveServerAddress looks up Instance CRs and returns the gRPC address of the first ready instance.

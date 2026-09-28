@@ -366,7 +366,10 @@ kubectl get instance my-instance -o jsonpath='{.status.conditions[?(@.type=="Ser
 `ServerReachable=False` with reason `ProbeFailed` and a message mentioning
 the credential check means the pods are up but the operator's credential
 was refused; `NotServing` means the server answered but is draining. The
-last known `status.serverVersion` is kept across a failed probe.
+last known `status.serverVersion` is kept across a failed probe. A ready
+Instance is probed again every five minutes, so the version and the
+condition follow a server upgrade or a credential rotation without any
+edit to the Instance.
 
 <!-- provider auth follows -->
 

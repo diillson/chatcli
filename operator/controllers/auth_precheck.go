@@ -165,13 +165,15 @@ func isLoopbackAddress(addr string) bool {
 	return ip != nil && ip.IsLoopback()
 }
 
-// recordAuthCondition writes the AuthenticationConfigured condition for
-// this Instance and reports whether provisioning must stop.
+// applyAuthCondition sets the AuthenticationConfigured (and the
+// informational OperatorCredentialConfigured) condition on the in-memory
+// Instance and reports whether provisioning must stop. The caller writes
+// the status.
 //
 // Stopping is not an error: there is nothing to retry until the spec
 // changes, and a requeue would only rewrite the same condition. The
 // condition is the output — it is what the user reads.
-func (r *InstanceReconciler) recordAuthCondition(ctx context.Context, instance *platformv1alpha1.Instance) bool {
+func applyAuthCondition(ctx context.Context, instance *platformv1alpha1.Instance) bool {
 	log := log.FromContext(ctx)
 	blocked := instanceAuthUnconfigured(instance)
 
@@ -191,12 +193,8 @@ func (r *InstanceReconciler) recordAuthCondition(ctx context.Context, instance *
 	meta.SetStatusCondition(&instance.Status.Conditions, cond)
 	recordOperatorCredentialCondition(instance)
 
-	if !blocked {
-		return false
+	if blocked {
+		log.Info("instance not provisioned: " + authUnconfiguredMessage)
 	}
-	if err := r.Status().Update(ctx, instance); err != nil {
-		log.Error(err, "failed to record the missing-credential condition")
-	}
-	log.Info("instance not provisioned: " + authUnconfiguredMessage)
-	return true
+	return blocked
 }

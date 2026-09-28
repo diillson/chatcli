@@ -9,6 +9,7 @@ import (
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
+	"k8s.io/apimachinery/pkg/api/equality"
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -102,6 +103,10 @@ func (r *InstanceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 		reconcileDuration.Observe(time.Since(start).Seconds())
 		return ctrl.Result{}, err
 	}
+	// The status as stored: the reconcile writes it back only when what it
+	// observed differs, so a reconcile that learns nothing new writes
+	// nothing (and a status write never feeds another reconcile).
+	observed := instance.Status.DeepCopy()
 
 	// 2. Handle deletion with finalizer
 	if instance.DeletionTimestamp != nil {
@@ -173,10 +178,16 @@ func (r *InstanceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 	}
 
 	// The server refuses to start unauthenticated on a reachable address,
-	// so a spec in that shape would produce a crash loop with the reason
-	// buried in container logs. Say it on the Instance instead, and do not
-	// provision the Deployment.
-	if r.recordAuthCondition(ctx, &instance) {
+	// and exits when TLS is on with no certificate to load, so a spec in
+	// either shape would produce a crash loop with the reason buried in
+	// container logs. Say it on the Instance instead, and do not provision
+	// the Deployment.
+	tlsBlocked := applyTLSCondition(ctx, &instance)
+	authBlocked := applyAuthCondition(ctx, &instance)
+	if tlsBlocked || authBlocked {
+		if err := r.writeStatusIfChanged(ctx, &instance, observed); err != nil {
+			log.Error(err, "failed to record the provisioning precheck conditions")
+		}
 		reconciliationsTotal.WithLabelValues("success").Inc()
 		reconcileDuration.Observe(time.Since(start).Seconds())
 		return ctrl.Result{}, nil
@@ -190,7 +201,7 @@ func (r *InstanceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 	}
 
 	// 5. Update status
-	if err := r.updateStatus(ctx, &instance); err != nil {
+	if err := r.updateStatusFrom(ctx, &instance, observed); err != nil {
 		log.Error(err, "failed to update status")
 		reconciliationsTotal.WithLabelValues("error").Inc()
 		reconcileDuration.Observe(time.Since(start).Seconds())
@@ -214,10 +225,43 @@ func (r *InstanceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 		}
 	}
 
-	return ctrl.Result{}, nil
+	return ctrl.Result{RequeueAfter: r.probeRequeueAfter(&instance)}, nil
 }
 
+// serverProbeInterval is how often a ready Instance is re-probed when
+// nothing else triggers a reconcile, so ServerReachable and serverVersion
+// follow a server that was upgraded, restarted or lost its credential.
+const serverProbeInterval = 5 * time.Minute
+
+// probeRequeueAfter schedules the next probe: only when there is a prober
+// and a ready Deployment to probe. While not ready, the Deployment's own
+// status changes trigger the reconcile that probes it.
+func (r *InstanceReconciler) probeRequeueAfter(instance *platformv1alpha1.Instance) time.Duration {
+	if r.Prober == nil || !instance.Status.Ready {
+		return 0
+	}
+	return serverProbeInterval
+}
+
+// writeStatusIfChanged writes the status subresource when it differs from
+// what was read at the start of the reconcile. An unchanged status is not
+// written: the write would be a no-op for the API server anyway, and
+// skipping it keeps the reconcile from generating its own watch events.
+func (r *InstanceReconciler) writeStatusIfChanged(ctx context.Context, instance *platformv1alpha1.Instance, observed *platformv1alpha1.InstanceStatus) error {
+	if observed != nil && equality.Semantic.DeepEqual(*observed, instance.Status) {
+		return nil
+	}
+	return r.Status().Update(ctx, instance)
+}
+
+// updateStatus refreshes the status against what the Instance carries now.
 func (r *InstanceReconciler) updateStatus(ctx context.Context, instance *platformv1alpha1.Instance) error {
+	return r.updateStatusFrom(ctx, instance, instance.Status.DeepCopy())
+}
+
+// updateStatusFrom refreshes the status from the Deployment and the server
+// probe, and writes it when it differs from observed.
+func (r *InstanceReconciler) updateStatusFrom(ctx context.Context, instance *platformv1alpha1.Instance, observed *platformv1alpha1.InstanceStatus) error {
 	var deploy appsv1.Deployment
 	nn := types.NamespacedName{Name: instance.Name, Namespace: instance.Namespace}
 	if err := r.Get(ctx, nn, &deploy); err != nil {
@@ -261,7 +305,7 @@ func (r *InstanceReconciler) updateStatus(ctx context.Context, instance *platfor
 	r.probeServer(ctx, instance)
 
 	instance.Status.ObservedGeneration = instance.Generation
-	return r.Status().Update(ctx, instance)
+	return r.writeStatusIfChanged(ctx, instance, observed)
 }
 
 // ServerReachableConditionType reports whether the operator reached the
@@ -287,8 +331,12 @@ func (r *InstanceReconciler) probeServer(ctx context.Context, instance *platform
 		meta.SetStatusCondition(&instance.Status.Conditions, cond)
 		return
 	}
+	var prev *metav1.Condition
+	if c := meta.FindStatusCondition(instance.Status.Conditions, ServerReachableConditionType); c != nil {
+		prev = c.DeepCopy()
+	}
+	prevVersion := instance.Status.ServerVersion
 	now := metav1.Now()
-	instance.Status.ServerProbeTime = &now
 	res, err := r.Prober.ProbeInstance(ctx, instance)
 	switch {
 	case err != nil:
@@ -308,6 +356,26 @@ func (r *InstanceReconciler) probeServer(ctx context.Context, instance *platform
 		instance.Status.ServerVersion = res.Version
 	}
 	meta.SetStatusCondition(&instance.Status.Conditions, cond)
+	if probeOutcomeChanged(prev, &cond) || instance.Status.ServerVersion != prevVersion ||
+		probeStampStale(instance.Status.ServerProbeTime, now.Time) {
+		instance.Status.ServerProbeTime = &now
+	}
+}
+
+// probeOutcomeChanged reports whether the probe learned something the
+// stored condition does not say.
+func probeOutcomeChanged(prev, cur *metav1.Condition) bool {
+	return prev == nil || prev.Status != cur.Status || prev.Reason != cur.Reason ||
+		prev.Message != cur.Message || prev.ObservedGeneration != cur.ObservedGeneration
+}
+
+// probeStampStale reports whether serverProbeTime is due a refresh while
+// the outcome is unchanged. Refreshing it on every reconcile would change
+// the status on every pass, and each status write is itself a watch event
+// that reconciles again: an endless loop of probes and writes. Refreshed
+// once per probe interval, it still says the value was confirmed recently.
+func probeStampStale(stamp *metav1.Time, now time.Time) bool {
+	return stamp == nil || now.Sub(stamp.Time) >= serverProbeInterval
 }
 
 func (r *InstanceReconciler) cleanupResources(ctx context.Context, instance *platformv1alpha1.Instance) error {
@@ -348,7 +416,11 @@ func (r *InstanceReconciler) SetupWithManager(mgr ctrl.Manager) error {
 }
 
 // secretToInstance maps a Secret event to the Instance(s) that reference it
-// via spec.apiKeys.name or spec.server.tls.secretName.
+// anywhere in their spec (see referencedSecretNames): the API keys, the TLS
+// pair and client CA, the server token and JWT material, the operator's own
+// credential and client certificate, the CA bundle, the encryption key and
+// extraEnv secret refs. A reference the watch misses is a rotation that
+// neither rolls the pods nor refreshes the operator's view.
 func (r *InstanceReconciler) secretToInstance(ctx context.Context, obj client.Object) []reconcile.Request {
 	var instances platformv1alpha1.InstanceList
 	if err := r.List(ctx, &instances, client.InNamespace(obj.GetNamespace())); err != nil {
@@ -357,15 +429,9 @@ func (r *InstanceReconciler) secretToInstance(ctx context.Context, obj client.Ob
 
 	secretName := obj.GetName()
 	var requests []reconcile.Request
-	for _, inst := range instances.Items {
-		match := false
-		if inst.Spec.APIKeys != nil && inst.Spec.APIKeys.Name == secretName {
-			match = true
-		}
-		if inst.Spec.Server.TLS != nil && inst.Spec.Server.TLS.SecretName == secretName {
-			match = true
-		}
-		if match {
+	for i := range instances.Items {
+		inst := &instances.Items[i]
+		if _, match := referencedSecretNames(inst)[secretName]; match {
 			requests = append(requests, reconcile.Request{
 				NamespacedName: types.NamespacedName{
 					Name:      inst.Name,
