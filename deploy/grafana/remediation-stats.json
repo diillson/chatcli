@@ -93,7 +93,7 @@
       "type": "stat",
       "targets": [
         {
-          "expr": "sum(increase(chatcli_operator_approvals_total{result=\"auto_approved\"}[24h])) or vector(0)",
+          "expr": "sum(increase(chatcli_operator_approvals_total{mode=\"auto\",result=\"approved\"}[24h])) or vector(0)",
           "legendFormat": "Auto"
         }
       ]
@@ -214,12 +214,13 @@
       },
       "gridPos": { "h": 8, "w": 6, "x": 0, "y": 40 },
       "options": { "colorMode": "background", "graphMode": "area", "reduceOptions": { "calcs": ["lastNotNull"] } },
-      "title": "Pending Approvals",
+      "title": "Expired Approvals (24h)",
+      "description": "Approval requests that expired without a decision. The operator exports decisions, not a pending gauge: the dashboard Approvals tab lists what is pending.",
       "type": "stat",
       "targets": [
         {
-          "expr": "sum(chatcli_operator_approvals_pending) or vector(0)",
-          "legendFormat": "Pending"
+          "expr": "sum(increase(chatcli_operator_approvals_total{result=\"expired\"}[24h])) or vector(0)",
+          "legendFormat": "Expired"
         }
       ]
     },
@@ -295,7 +296,7 @@
       "type": "gauge",
       "targets": [
         {
-          "expr": "sum(increase(chatcli_operator_approvals_total{result=\"auto_approved\"}[24h])) / sum(increase(chatcli_operator_approvals_total[24h]))",
+          "expr": "sum(increase(chatcli_operator_approvals_total{mode=\"auto\",result=\"approved\"}[24h])) / sum(increase(chatcli_operator_approvals_total[24h]))",
           "legendFormat": "Auto-Approve Rate"
         }
       ]

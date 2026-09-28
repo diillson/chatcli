@@ -27,7 +27,9 @@ type EscalationLevel struct {
 	// Name is a human-readable identifier (e.g., "L1-OnCall", "L2-SeniorSRE", "L3-Management").
 	Name string `json:"name"`
 
-	// TimeoutMinutes is the time to wait before escalating to the next level.
+	// TimeoutMinutes is the time to wait before escalating to the next level. An
+	// acknowledged Issue does not escalate further; a snoozed one holds its level and
+	// the level's clock restarts when the snooze ends.
 	// +kubebuilder:default=15
 	TimeoutMinutes int32 `json:"timeoutMinutes"`
 
@@ -38,8 +40,9 @@ type EscalationLevel struct {
 	// +optional
 	NotifyChannels []string `json:"notifyChannels,omitempty"`
 
-	// RepeatIntervalMinutes re-notifies at this interval until acknowledged or escalated.
-	// 0 = no repeat.
+	// RepeatIntervalMinutes re-sends this level's notification at this interval until the
+	// Issue is acknowledged, advances to the next level or resolves. The last level keeps
+	// repeating after its timeout. A snoozed Issue does not repeat. 0 = no repeat.
 	// +kubebuilder:default=0
 	// +optional
 	RepeatIntervalMinutes int32 `json:"repeatIntervalMinutes,omitempty"`
@@ -100,7 +103,6 @@ type EscalationPolicyStatus struct {
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
 // +kubebuilder:resource:shortName=ep
-// +kubebuilder:printcolumn:name="Levels",type="integer",JSONPath=".spec.levels"
 // +kubebuilder:printcolumn:name="Default",type="boolean",JSONPath=".spec.defaultPolicy"
 // +kubebuilder:printcolumn:name="Enabled",type="boolean",JSONPath=".spec.enabled"
 // +kubebuilder:printcolumn:name="Age",type="date",JSONPath=".metadata.creationTimestamp"

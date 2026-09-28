@@ -3132,7 +3132,7 @@ async function loadSLOs() {
     const items = (data.items || []).sort((a, b) => (a.name || '').localeCompare(b.name || ''));
     if (items.length === 0) { showEmpty(cardsEl, t('slo.empty')); showEmpty(alertsEl, t('slo.noAlerts')); return; }
     cardsEl.innerHTML = items.map(slo => {
-      const budgetPct = slo.errorBudgetRemaining || 100;
+      const budgetPct = slo.errorBudgetRemaining ?? 100;
       const budgetClass = budgetPct > 50 ? 'gauge-ok' : budgetPct > 20 ? 'gauge-warn' : 'gauge-danger';
       const currentPct = slo.currentValue || 0;
       const target = slo.target || 99.9;
@@ -3193,16 +3193,8 @@ async function loadSLOs() {
 }
 
 function buildBurnChip(window, slo) {
-  // Compute a simulated burn rate from the available budget data
-  const budgetUsedPct = slo.errorBudgetTotal > 0 ? (slo.errorBudgetUsed / slo.errorBudgetTotal) : 0;
-  let rate;
-  switch(window) {
-    case '1h': rate = budgetUsedPct * 720; break;
-    case '6h': rate = budgetUsedPct * 120; break;
-    case '24h': rate = budgetUsedPct * 30; break;
-    case '72h': rate = budgetUsedPct * 10; break;
-    default: rate = 0;
-  }
+  // Burn rates computed by the SLO controller (1.0 = consuming exactly the budget)
+  const rate = Number(slo['burnRate' + window]) || 0;
   const cls = rate > 14 ? 'burn-danger' : rate > 1 ? 'burn-warn' : 'burn-ok';
   return `<span class="burn-chip ${cls}">${window}: ${fmtNum(rate, 1)}x</span>`;
 }
