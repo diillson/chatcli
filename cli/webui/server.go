@@ -109,6 +109,8 @@ type Server struct {
 	mu     sync.Mutex
 	active *run
 	closed bool
+	// plans holds the last plan each session's runs showed, for /plan.
+	plans map[string][]planEntry
 }
 
 type run struct {

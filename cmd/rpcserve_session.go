@@ -113,7 +113,17 @@ func (b *rpcBackend) refreshBound(session string) {
 // session, then re-stamps the sync watermark so our own write is not
 // mistaken for another surface's. Best effort, like autosaveSession.
 func (b *rpcBackend) writeThrough(session string, hist []models.Message) {
-	if b.store == nil || len(hist) == 0 {
+	if len(hist) == 0 {
+		return
+	}
+	b.persistBound(session, hist)
+}
+
+// persistBound writes hist to the bound saved session, as it is — empty
+// included, for an edit that removed every turn — and re-stamps the sync
+// watermark. No-op for an unbound session.
+func (b *rpcBackend) persistBound(session string, hist []models.Message) {
+	if b.store == nil {
 		return
 	}
 	b.mu.Lock()

@@ -158,9 +158,10 @@ func redSquarePNG(t *testing.T) string {
 }
 
 type e2eWeb struct {
-	srv   *webui.Server
-	model *e2eModel
-	home  string
+	srv    *webui.Server
+	model  *e2eModel
+	home   string
+	engine *cli.ChatCLI
 }
 
 // startE2EWeb serves the real web UI over the real RPC backend and a real
@@ -180,13 +181,13 @@ func startE2EWeb(t *testing.T) *e2eWeb {
 		t.Fatalf("engine: %v", err)
 	}
 	engine.SetUnattended(true)
-	backend := &rpcBackend{mgr: &e2eManager{model: model}, cli: engine, provider: "OPENAI", model: "gpt-4o", sessions: map[string][]models.Message{}}
+	backend := &rpcBackend{mgr: &e2eManager{model: model}, cli: engine, store: engine, provider: "OPENAI", model: "gpt-4o", sessions: map[string][]models.Message{}}
 	srv, err := webui.Start(webui.Options{Backend: backend, Version: "t"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = srv.Shutdown(context.Background()) })
-	return &e2eWeb{srv: srv, model: model, home: home}
+	return &e2eWeb{srv: srv, model: model, home: home, engine: engine}
 }
 
 // turn posts one turn and returns the final event.

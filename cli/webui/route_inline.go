@@ -94,14 +94,25 @@ func (s *Server) routeSlash(ctx context.Context, rn *run, session, line string, 
 		*mode, *text = id, rest
 		return false
 	}
+	// A slash-command template is a prompt: it runs as a turn in the
+	// page's mode, the way ACP runs it.
+	if s.expandTemplate(ctx, session, line, text) {
+		return false
+	}
+	if handled, matched := s.routeWebCommand(ctx, rn, session, line, mode, text); matched {
+		return handled
+	}
 	if s.commandAdvertised(token) {
-		out, err := s.opts.Backend.RunCommand(ctx, session, line)
+		out, err := s.runCommand(ctx, session, line)
 		if err != nil {
 			rn.sink.push(event{Type: "error", Error: i18n.T("web.command_failed", err.Error())})
 			return true
 		}
 		rn.sink.push(event{Type: "done", Reply: out})
 		return true
+	}
+	if handled, matched := s.routeSkill(rn, token, rest, text); matched {
+		return handled
 	}
 	if _, known := palette.RootSummary(token); known {
 		rn.sink.push(event{Type: "done", Reply: i18n.T("web.command_unsupported", token)})

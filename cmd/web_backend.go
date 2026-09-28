@@ -92,6 +92,7 @@ func (b *rpcBackend) Chat(ctx context.Context, session, text string, o webui.Tur
 	b.mu.Unlock()
 	b.autosaveSession(session, newHist)
 	b.writeThrough(session, newHist)
+	b.recordTurn(session, hist, newHist, webui.TurnRecord{Mode: "chat", Text: text, Options: o})
 	return turn.Reply, nil
 }
 
@@ -102,10 +103,14 @@ func (b *rpcBackend) RunAgent(ctx context.Context, session, task string, o webui
 	}
 	provider, model := b.routeOf(o)
 	att := attachmentsOf(o)
-	return b.runLoopSession(session, func(ro cli.RPCRunOpts) (string, error) {
+	b.refreshBound(session)
+	before := b.liveHistory(session)
+	reply, err := b.runLoopSession(session, func(ro cli.RPCRunOpts) (string, error) {
 		ro.Attachments = att
 		return b.cli.RunAgentRPC(ctx, task, ro)
 	}, rpcserve.RunOpts{Provider: provider, Model: model, Events: events})
+	b.recordTurn(session, before, b.liveHistory(session), webui.TurnRecord{Mode: "agent", Text: task, Options: o})
+	return reply, err
 }
 
 // RunCoder drives the coder loop with structured events on the sink.
@@ -115,18 +120,33 @@ func (b *rpcBackend) RunCoder(ctx context.Context, session, task string, o webui
 	}
 	provider, model := b.routeOf(o)
 	att := attachmentsOf(o)
-	return b.runLoopSession(session, func(ro cli.RPCRunOpts) (string, error) {
+	b.refreshBound(session)
+	before := b.liveHistory(session)
+	reply, err := b.runLoopSession(session, func(ro cli.RPCRunOpts) (string, error) {
 		ro.Attachments = att
 		return b.cli.RunCoderRPC(ctx, task, ro)
 	}, rpcserve.RunOpts{Provider: provider, Model: model, Events: events})
+	b.recordTurn(session, before, b.liveHistory(session), webui.TurnRecord{Mode: "coder", Text: task, Options: o})
+	return reply, err
 }
 
 // BoundSession implements webui.SessionBinder: the saved session the live
 // session is bound to, "" when loose.
 func (b *rpcBackend) BoundSession(session string) string { return b.boundName(session) }
 
-// Commands lists the slash commands the browser may run.
-func (b *rpcBackend) Commands() []rpcserve.CommandInfo { return b.ACPCommands() }
+// Commands lists the slash commands the browser may run: the ACP surface
+// plus the page's own (see cli/web_support.go for why they stay apart).
+func (b *rpcBackend) Commands() []rpcserve.CommandInfo {
+	if b.cli == nil {
+		return nil
+	}
+	infos := b.cli.ListWebCommands()
+	out := make([]rpcserve.CommandInfo, 0, len(infos))
+	for _, c := range infos {
+		out = append(out, rpcserve.CommandInfo{Name: c.Name, Description: c.Description, InputHint: c.InputHint})
+	}
+	return out
+}
 
 // SessionCatalog lists the saved sessions, newest first.
 func (b *rpcBackend) SessionCatalog() []cli.SessionSummaryRPC {
