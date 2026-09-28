@@ -25,6 +25,8 @@ import (
 	"github.com/diillson/chatcli/cli/agentevents"
 	"github.com/diillson/chatcli/i18n"
 	"github.com/diillson/chatcli/llm/imagegen"
+	"github.com/diillson/chatcli/llm/transcription"
+	"github.com/diillson/chatcli/llm/tts"
 	"github.com/diillson/chatcli/models"
 )
 
@@ -499,8 +501,9 @@ func (s *Server) handleResource(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleTTS(w http.ResponseWriter, r *http.Request) {
-	if !s.features().Voice {
-		writeErr(w, http.StatusNotImplemented, "voice_off", i18n.T("web.voice_off"))
+	p := s.voice.ttsProvider()
+	if p == nil {
+		s.voiceUnavailable(w, dirTTS, "voice_off", "web.voice_off")
 		return
 	}
 	var req struct {
@@ -511,18 +514,41 @@ func (s *Server) handleTTS(w http.ResponseWriter, r *http.Request) {
 	if !readJSON(w, r, &req) {
 		return
 	}
-	audio, err := s.opts.Voice.Synthesize(r.Context(), req.Text, req.Voice, req.Format)
-	if err != nil {
-		writeErr(w, http.StatusBadGateway, "tts", err.Error())
+	// Replies are markdown: flatten them the way the gateway voice replies
+	// do, so no engine reads code, asterisks and pipes out loud.
+	spoken := tts.StripForSpeech(req.Text)
+	if spoken == "" {
+		writeErr(w, http.StatusUnprocessableEntity, "tts_empty", i18n.T("web.tts_empty"))
 		return
+	}
+	audio, err := p.Synthesize(r.Context(), spoken, req.Voice, req.Format)
+	if err != nil {
+		writeErr(w, http.StatusBadGateway, "tts", i18n.T("web.tts_failed", p.Name(), err))
+		return
+	}
+	if wav, ok := aiffToWAV(audio.Data); ok {
+		audio.Data, audio.Mime = wav, "audio/wav"
 	}
 	w.Header().Set("Content-Type", audio.Mime)
 	_, _ = w.Write(audio.Data)
 }
 
+// voiceUnavailable answers a voice call no engine can serve: 409 when the
+// embedded install is on offer (the page asks the user, then retries), 501
+// when this process has no engine for that direction at all.
+func (s *Server) voiceUnavailable(w http.ResponseWriter, dir, code, key string) {
+	sttOffer, ttsOffer := s.voice.offers()
+	if (dir == dirSTT && sttOffer) || (dir == dirTTS && ttsOffer) {
+		writeErr(w, http.StatusConflict, "voice_install", i18n.T("web.voice_install_required"))
+		return
+	}
+	writeErr(w, http.StatusNotImplemented, code, i18n.T(key))
+}
+
 func (s *Server) handleSTT(w http.ResponseWriter, r *http.Request) {
-	if !s.features().STT {
-		writeErr(w, http.StatusNotImplemented, "stt_off", i18n.T("web.stt_off"))
+	p := s.voice.sttProvider()
+	if p == nil {
+		s.voiceUnavailable(w, dirSTT, "stt_off", "web.stt_off")
 		return
 	}
 	r.Body = http.MaxBytesReader(w, r.Body, maxMediaBody)
@@ -531,12 +557,31 @@ func (s *Server) handleSTT(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "stt", i18n.T("web.empty_audio"))
 		return
 	}
-	text, err := s.opts.STT.Transcribe(r.Context(), audio, r.Header.Get("Content-Type"), r.URL.Query().Get("filename"), r.URL.Query().Get("lang"))
-	if err != nil {
-		writeErr(w, http.StatusBadGateway, "stt", err.Error())
+	// The bytes name the container; the request's label may not (Safari
+	// records mp4), and cloud engines pick the decoder from the extension.
+	mime := r.Header.Get("Content-Type")
+	filename := r.URL.Query().Get("filename")
+	kind := audioKind(audio)
+	if kind != "" {
+		filename = "voice." + kind
+	}
+	lang := sttLanguage(r.URL.Query().Get("lang"))
+	if lang == "" {
+		lang = sttLanguage(s.opts.STTLanguage)
+	}
+	text, err := p.Transcribe(r.Context(), audio, mime, filename, lang)
+	if errors.Is(err, transcription.ErrNeedsFFmpeg) {
+		if kind == "" {
+			kind = mime
+		}
+		writeErr(w, http.StatusUnsupportedMediaType, "stt_format", i18n.T("web.stt_format", p.Name(), kind, transcription.FFmpegInstallHint()))
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]string{"text": text})
+	if err != nil {
+		writeErr(w, http.StatusBadGateway, "stt", i18n.T("web.stt_failed", p.Name(), err))
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"text": strings.TrimSpace(text), "engine": p.Name()})
 }
 
 func (s *Server) handleImage(w http.ResponseWriter, r *http.Request) {

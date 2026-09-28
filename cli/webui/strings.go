@@ -26,6 +26,11 @@ var uiKeys = []string{
 	"memory.none", "commands.none",
 	"thought", "cancelled", "error", "copied", "copy",
 	"stt.recording", "stt.failed", "tts.speak", "image.prompt", "image.failed",
+	"stt.transcribing", "stt.empty", "stt.denied", "stt.unsupported", "stt.cancelled", "stt.hint", "tts.failed",
+	"voice.talk", "voice.talkOn", "voice.talkOff", "voice.listening", "voice.none", "voice.notInstalled",
+	"voice.install.title", "voice.install.body", "voice.install.download", "voice.install.fallback", "voice.install.later",
+	"voice.install.cancel", "voice.install.progress", "voice.install.extract", "voice.install.done", "voice.install.failed",
+	"voice.install.offer", "status.voiceIn", "status.voiceOut",
 	"session.bound", "session.new", "session.deleted", "session.confirmDelete", "session.forkName", "session.live",
 	"theme", "lang", "offline", "busy",
 }

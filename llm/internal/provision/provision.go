@@ -68,6 +68,25 @@ func SherpaAsset(goos, goarch string) (string, bool) {
 	return "", false
 }
 
+// SherpaAssetBytes is the approximate size of the engine tarball SherpaAsset
+// names, for surfaces that tell the user how much a first use downloads.
+// The figures track SherpaVersion; 0 means no prebuilt engine.
+func SherpaAssetBytes(goos, goarch string) int64 {
+	switch goos + "/" + goarch {
+	case "linux/amd64":
+		return 26_825_365
+	case "linux/arm64":
+		return 26_674_802
+	case "darwin/amd64":
+		return 28_956_076
+	case "darwin/arm64":
+		return 25_914_829
+	case "windows/amd64":
+		return 23_368_301
+	}
+	return 0
+}
+
 // DownloadArchive fetches url to dest atomically, rejecting bodies smaller
 // than minBytes (error pages served with status 200).
 func DownloadArchive(ctx context.Context, url, dest string, minBytes int64) error {
@@ -90,7 +109,7 @@ func DownloadArchive(ctx context.Context, url, dest string, minBytes int64) erro
 	if err != nil {
 		return err
 	}
-	n, copyErr := io.Copy(out, resp.Body)
+	n, copyErr := io.Copy(out, progressBody(ctx, resp.Body, url, resp.ContentLength))
 	closeErr := out.Close()
 	if copyErr != nil {
 		_ = os.Remove(tmp)
@@ -241,6 +260,7 @@ func ProvisionArchive(ctx context.Context, url, targetDir string, minBytes int64
 	if err := os.RemoveAll(tmpDir); err != nil {
 		return err
 	}
+	report(ctx, Progress{Phase: PhaseExtract, File: archiveName(url), Done: -1, Total: -1})
 	if err := ExtractTarBz2(tmpTar, tmpDir); err != nil {
 		return err
 	}
