@@ -72,8 +72,9 @@ B. DASHBOARD / REST API KEYS
 1. REVIEW THE EXECDIAGNOSTIC ALLOWLIST
    The agentic remediation loop can only execute diagnostic commands that exactly
    match an entry in the ExecDiagnostic allowlist. The default list ships with
-   ~90 read-only commands targeting health/metrics/pprof endpoints on the
-   standard ports (8080, 9090, 9091, 15000, 15020, 15021, 6060).
+   100 read-only commands targeting health/metrics/pprof endpoints on the
+   standard ports (8080, 9090, 9091, 15000, 15020, 15021, 6060); the startup
+   log below prints the exact count of the running version.
 
    Workloads using non-standard ports (e.g. localhost:5678/health) will have
    their diagnostics REJECTED, which wastes remediation attempts and can leave
@@ -81,10 +82,13 @@ B. DASHBOARD / REST API KEYS
    report for the regression this guards against.
 
    The allowlist is read by the OPERATOR process (not by Instances). Extend it
-   with this chart's security.allowedDiagnosticCommands value (comma-separated):
+   with this chart's security.allowedDiagnosticCommands value (comma-separated).
+   Keep your overrides in a values file and pass it on every upgrade, or use
+   --reset-then-reuse-values (Helm 3.14+). Plain --reuse-values skips the
+   defaults of keys added by newer chart versions and can fail the render:
 
        helm upgrade {{ .Release.Name }} oci://ghcr.io/diillson/charts/chatcli-operator \
-         --version {{ .Chart.Version }} -n {{ .Release.Namespace }} --reuse-values \
+         --version {{ .Chart.Version }} -n {{ .Release.Namespace }} --reset-then-reuse-values \
          --set security.allowedDiagnosticCommands="curl -s localhost:5678/health\,curl -s localhost:7000/healthz"
 
    Inspect the EFFECTIVE allowlist after the operator starts:
@@ -118,8 +122,10 @@ B. DASHBOARD / REST API KEYS
 4. (Optional) PAUSE NOTIFICATIONS DURING CHAOS DRILLS
    Issues that correlate with an active ChaosExperiment are labeled
    `platform.chatcli.io/source=chaos-experiment` and skipped from escalation
-   automatically. If you want them filtered out of regular alert channels too,
-   add an exclusion rule on the source label in your NotificationPolicy.
+   automatically. NotificationPolicy rules still match them: rules filter by
+   severity, state, signal type, namespace and resource kind, not by label.
+   To keep drills out of regular channels, run them in namespaces your rules
+   do not list, or disable the policy for the duration of the drill.
 
 Operator guide: https://chatcli.edilsonfreitas.com/features/k8s-operator
 Production setup: https://chatcli.edilsonfreitas.com/cookbook/aiops-production-setup

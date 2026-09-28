@@ -143,7 +143,7 @@ var envDefaults = map[string]envDefault{
 	"CHATCLI_AGENT_CMD_TIMEOUT":         {Value: "10m", Source: "agent.NewContextManager"},
 	"CHATCLI_AGENT_SOURCE_SHELL_CONFIG": {Value: "false", IsBool: true, Source: "command_executor.go"},
 	"CHATCLI_AGENT_KEEP_TMPDIR":         {Value: "false", IsBool: true, Source: "session_workspace.go"},
-	"CHATCLI_MAX_COMMAND_OUTPUT":        {Value: "102400", Source: "defaultMaxCommandOutput (100KB)"},
+	"CHATCLI_MAX_COMMAND_OUTPUT":        {Value: "102400", Source: "cli/command_output_sanitizer.go (cap on agent command output handed back to the model; the terminal keeps it whole)"},
 
 	// ─── Resilience: payload / recovery ──────────────────────────
 	"CHATCLI_MAX_PAYLOAD":             {Value: "(no cap)", Source: "history_compactor.DefaultCompactConfig"},
@@ -320,7 +320,7 @@ var envDefaults = map[string]envDefault{
 
 	// ─── Server mode ─────────────────────────────────────────────
 	"CHATCLI_GRPC_REFLECTION":   {Value: "false", IsBool: true, Source: "server.go"},
-	"CHATCLI_FALLBACK_ENABLED":  {Value: "false", IsBool: true, Source: "server fallback"},
+	"CHATCLI_FALLBACK_ENABLED":  {Value: "false", IsBool: true, Source: "not read by the server (CHATCLI_FALLBACK_PROVIDERS is the switch)"},
 	"CHATCLI_OPERATOR_DEV_MODE": {Value: "false", IsBool: true, Source: "operator"},
 
 	// ─── Server mode: limits ─────────────────────────────────────

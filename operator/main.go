@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"flag"
-	"fmt"
 	"os"
 	"strings"
 	"time"
@@ -57,8 +56,8 @@ func main() {
 	// GAP-05 fix (chaos test report 2026-05-23): log the effective ExecDiagnostic
 	// allowlist at startup so operators can audit what their pipeline is allowed
 	// to run without having to inspect every Instance CR. Custom additions from
-	// CHATCLI_ALLOWED_DIAGNOSTIC_COMMANDS are listed in full; the ~90 built-in
-	// defaults are summarized by count.
+	// CHATCLI_ALLOWED_DIAGNOSTIC_COMMANDS are listed in full; the built-in
+	// defaults (100 entries) are summarized by count.
 	allowlistSummary := controllers.GetDiagnosticAllowlistSummary()
 	setupLog.Info("Effective ExecDiagnostic allowlist loaded",
 		"total", allowlistSummary.TotalCount,
@@ -127,10 +126,11 @@ func main() {
 		setupLog.Info("CORS disabled (no allowed origin configured); browser cross-origin requests are blocked")
 	}
 
-	// Load API keys from ConfigMap chatcli-operator-config (field: api-keys)
-	// and start a watcher to hot-reload on changes (no restart needed)
-	loadAPIKeysFromConfigMap(kubeClientset, apiServer)
-	go watchAPIKeysConfigMap(kubeClientset, apiServer)
+	// Load API keys from the Secret chatcli-operator-secrets, or else the
+	// ConfigMap chatcli-operator-config (field: api-keys), and keep polling
+	// both to hot-reload changes (no restart needed).
+	keyState := loadAPIKeysFromConfigMap(kubeClientset, apiServer)
+	go watchAPIKeysConfigMap(kubeClientset, apiServer, keyState)
 
 	if err := mgr.Add(apiServer); err != nil {
 		setupLog.Error(err, "unable to add REST API server")
@@ -139,8 +139,10 @@ func main() {
 
 	// Platform role ClusterRoles (chatcli-role-viewer / -operator / -admin / -superadmin)
 	// and the shared chatcli-watcher ClusterRole are pre-provisioned by the Helm chart /
-	// kustomize overlay. The operator only creates RoleBindings/ClusterRoleBindings that
-	// reference them — it never creates or modifies ClusterRoles at runtime (Security H5).
+	// kustomize overlay. The operator only binds chatcli-watcher (one ClusterRoleBinding
+	// per Instance whose watcher reads outside its namespace); the platform roles are for
+	// cluster administrators to bind. It never creates or modifies ClusterRoles at
+	// runtime (Security H5).
 
 	if err := mgr.AddHealthzCheck("healthz", healthz.Ping); err != nil {
 		setupLog.Error(err, "unable to set up health check")
@@ -190,134 +192,152 @@ type apiKeyEntry struct {
 type keySource int
 
 const (
-	keySourceMissing    keySource = iota // the object does not exist
-	keySourceFound                       // the object exists (it may hold no keys)
+	keySourceMissing    keySource = iota // no object, or an object without an api-keys entry: the next source is consulted
+	keySourceFound                       // a parsable api-keys entry (it may yield no usable key)
 	keySourceUnreadable                  // the read failed: the keys in force are kept
+	keySourceInvalid                     // the api-keys entry is not valid YAML: the keys in force are kept
 )
+
+// keyRead is what one key source said on one read.
+type keyRead struct {
+	keys    map[string]rest.APIKey
+	version string
+	src     keySource
+	err     error
+}
 
 func devModeEnabled() bool {
 	return strings.EqualFold(os.Getenv("CHATCLI_OPERATOR_DEV_MODE"), "true")
 }
 
-// loadAPIKeysFromConfigMap reads API keys at startup.
-// Security (M5): Prefers Secret "chatcli-operator-secrets" over ConfigMap for API keys.
-// Security (C4): without keys the REST API rejects every call unless dev mode is on.
-func loadAPIKeysFromConfigMap(clientset kubernetes.Interface, apiServer *rest.APIServer) {
-	namespace := resolveNamespace()
-
-	if keys, _, src, _ := tryLoadKeysFromSecret(clientset, namespace, apiKeysSecretName); src == keySourceFound && len(keys) > 0 {
-		apiServer.SetAPIKeyEntries(keys)
-		setupLog.Info("REST API authentication enabled (from Secret)", "keys", len(keys))
-		return
-	}
-
-	keys, _, src, err := tryLoadKeysFromConfigMap(clientset, namespace, apiKeysConfigMapName)
-	if src == keySourceFound && len(keys) > 0 {
-		apiServer.SetAPIKeyEntries(keys)
-		setupLog.Info("REST API authentication enabled", "keys", len(keys))
-		return
-	}
-	where := fmt.Sprintf("%s/%s", namespace, apiKeysSecretName)
-	if devModeEnabled() {
-		setupLog.Info("WARNING: no API keys found, REST API running in DEV MODE (no auth)", "secret", where)
-		return
-	}
-	setupLog.Error(err, "SECURITY: no API keys found and CHATCLI_OPERATOR_DEV_MODE is not set — REST API will reject all requests with 401",
-		"secret", where, "configmap", fmt.Sprintf("%s/%s", namespace, apiKeysConfigMapName))
+// loadAPIKeysFromConfigMap reads the API keys at startup with the same
+// rules the hot reload applies, and returns the reload state to keep
+// polling with.
+// Security (M5): the Secret "chatcli-operator-secrets" wins over the
+// ConfigMap "chatcli-operator-config".
+// Security (C4): without keys the REST API rejects every call unless dev
+// mode is on.
+func loadAPIKeysFromConfigMap(clientset kubernetes.Interface, apiServer *rest.APIServer) *apiKeyWatchState {
+	st := &apiKeyWatchState{}
+	st.poll(clientset, resolveNamespace(), apiServer)
+	return st
 }
 
 // watchAPIKeysConfigMap polls the Secret and the ConfigMap and hot-reloads
-// the API keys. Priority: Secret "chatcli-operator-secrets" > ConfigMap
-// "chatcli-operator-config".
-func watchAPIKeysConfigMap(clientset kubernetes.Interface, apiServer *rest.APIServer) {
+// the API keys, continuing from the state the startup load left.
+func watchAPIKeysConfigMap(clientset kubernetes.Interface, apiServer *rest.APIServer, st *apiKeyWatchState) {
 	namespace := resolveNamespace()
-	var state apiKeyWatchState
 	ticker := time.NewTicker(apiKeysPollInterval)
 	defer ticker.Stop()
 	for range ticker.C {
-		state.poll(clientset, namespace, apiServer)
+		st.poll(clientset, namespace, apiServer)
 	}
 }
 
-// apiKeyWatchState remembers which version of each source is in force.
+// apiKeyWatchState remembers which key set is in force and which broken
+// version was already reported.
 type apiKeyWatchState struct {
-	secretVersion    string
-	configMapVersion string
+	inForce       string // "<source>/<resourceVersion>", or keysNone
+	reportedError string // "<source>/<resourceVersion>" of the last invalid entry logged
 }
 
-// poll applies one round of the hot reload. Keys stop working as soon as
-// their source says so: a Secret or ConfigMap without keys, or both
-// objects deleted, leaves the API without keys (401 on every call unless
-// dev mode). A source that cannot be read keeps the keys in force, so an
-// API server hiccup does not lock everyone out.
+// keysNone tags the state where no source provides keys.
+const keysNone = "none"
+
+// poll applies one round of the key rules:
+//   - the Secret wins when it holds an api-keys entry; a Secret without
+//     one (or with a blank one) defers to the ConfigMap;
+//   - when neither object provides keys (both deleted, or neither holds an
+//     api-keys entry) every key is revoked, including keys loaded before;
+//   - an api-keys entry that is not valid YAML keeps the last good set in
+//     force and is logged: a typo must not lock every user out, and a
+//     revocation is done by removing the entry, not by breaking it;
+//   - a source that cannot be read keeps the keys in force, so an API
+//     server hiccup does not lock everyone out either.
 func (st *apiKeyWatchState) poll(clientset kubernetes.Interface, namespace string, apiServer *rest.APIServer) {
-	keys, version, src, err := tryLoadKeysFromSecret(clientset, namespace, apiKeysSecretName)
-	switch src {
-	case keySourceFound:
-		st.configMapVersion = ""
-		if version != st.secretVersion {
-			st.secretVersion = version
-			applyReloadedKeys(apiServer, keys, "Secret")
-		}
-		return // Secret takes priority — skip ConfigMap
-	case keySourceUnreadable:
-		setupLog.Error(err, "Failed to read the API keys Secret; keeping the keys in force", "secret", apiKeysSecretName)
-		return
+	sources := []struct {
+		name string
+		read func() keyRead
+	}{
+		{"Secret", func() keyRead { return tryLoadKeysFromSecret(clientset, namespace, apiKeysSecretName) }},
+		{"ConfigMap", func() keyRead { return tryLoadKeysFromConfigMap(clientset, namespace, apiKeysConfigMapName) }},
 	}
-	st.secretVersion = ""
-
-	keys, version, src, err = tryLoadKeysFromConfigMap(clientset, namespace, apiKeysConfigMapName)
-	switch src {
-	case keySourceFound:
-		if version != st.configMapVersion {
-			st.configMapVersion = version
-			applyReloadedKeys(apiServer, keys, "ConfigMap")
-		}
-		return
-	case keySourceUnreadable:
-		setupLog.Error(err, "Failed to read the API keys ConfigMap; keeping the keys in force", "configmap", apiKeysConfigMapName)
-		return
-	}
-	st.configMapVersion = ""
-
-	// Neither the Secret nor the ConfigMap exists: every key is revoked,
-	// including keys loaded at startup before the first poll.
-	if apiServer.APIKeyCount() > 0 {
-		apiServer.SetAPIKeyEntries(map[string]rest.APIKey{})
-		if devModeEnabled() {
-			setupLog.Info("API keys removed (Secret and ConfigMap gone), REST API reverted to dev mode (no auth)")
-		} else {
-			setupLog.Info("API keys removed (Secret and ConfigMap gone): every REST API call is now rejected with 401")
+	for _, source := range sources {
+		r := source.read()
+		switch r.src {
+		case keySourceFound:
+			st.apply(apiServer, source.name+"/"+r.version, source.name, r.keys)
+			return
+		case keySourceUnreadable:
+			setupLog.Error(r.err, "Failed to read the API keys "+source.name+"; keeping the keys in force",
+				"namespace", namespace, "keys", apiServer.APIKeyCount())
+			return
+		case keySourceInvalid:
+			tag := source.name + "/" + r.version
+			if st.reportedError != tag {
+				st.reportedError = tag
+				setupLog.Error(r.err, "The api-keys entry of the "+source.name+" is not valid YAML; keeping the last valid key set in force",
+					"namespace", namespace, "resourceVersion", r.version, "keys", apiServer.APIKeyCount())
+			}
+			return
 		}
 	}
+	st.apply(apiServer, keysNone, "", map[string]rest.APIKey{})
 }
 
-// applyReloadedKeys puts a reloaded key set in force.
-func applyReloadedKeys(apiServer *rest.APIServer, keys map[string]rest.APIKey, source string) {
-	apiServer.SetAPIKeyEntries(keys)
-	if len(keys) > 0 {
-		setupLog.Info("API keys hot-reloaded from "+source, "keys", len(keys))
+// apply puts a key set in force unless it is already the one in force.
+func (st *apiKeyWatchState) apply(apiServer *rest.APIServer, tag, source string, keys map[string]rest.APIKey) {
+	if tag == st.inForce {
 		return
 	}
-	setupLog.Info("API keys hot-reloaded from " + source + ": no valid key, every REST API call is rejected with 401 unless dev mode is on")
+	first := st.inForce == ""
+	st.inForce = tag
+	apiServer.SetAPIKeyEntries(keys)
+	for _, k := range keys {
+		setupLog.Info("loaded API key", "role", k.Role, "name", k.Name)
+	}
+	switch {
+	case len(keys) > 0 && first:
+		setupLog.Info("REST API authentication enabled (from "+source+")", "keys", len(keys))
+	case len(keys) > 0:
+		setupLog.Info("API keys hot-reloaded from "+source, "keys", len(keys))
+	case devModeEnabled():
+		setupLog.Info("WARNING: no API key configured, REST API running in DEV MODE (no auth)",
+			"secret", apiKeysSecretName, "configmap", apiKeysConfigMapName)
+	default:
+		setupLog.Info("SECURITY: no valid API key configured and CHATCLI_OPERATOR_DEV_MODE is not set — every REST API call is rejected with 401",
+			"secret", apiKeysSecretName, "configmap", apiKeysConfigMapName)
+	}
 }
 
 // tryLoadKeysFromSecret loads API keys from a Kubernetes Secret.
-func tryLoadKeysFromSecret(clientset kubernetes.Interface, namespace, name string) (map[string]rest.APIKey, string, keySource, error) {
+func tryLoadKeysFromSecret(clientset kubernetes.Interface, namespace, name string) keyRead {
 	secret, err := clientset.CoreV1().Secrets(namespace).Get(context.Background(), name, metav1.GetOptions{})
 	if err != nil {
-		return nil, "", readFailure(err), err
+		return keyRead{src: readFailure(err), err: err}
 	}
-	return parseAPIKeys(secret.Data[apiKeysField], secret.ResourceVersion), secret.ResourceVersion, keySourceFound, nil
+	return readKeyEntry(secret.Data[apiKeysField], secret.ResourceVersion)
 }
 
 // tryLoadKeysFromConfigMap loads API keys from a Kubernetes ConfigMap.
-func tryLoadKeysFromConfigMap(clientset kubernetes.Interface, namespace, name string) (map[string]rest.APIKey, string, keySource, error) {
+func tryLoadKeysFromConfigMap(clientset kubernetes.Interface, namespace, name string) keyRead {
 	cm, err := clientset.CoreV1().ConfigMaps(namespace).Get(context.Background(), name, metav1.GetOptions{})
 	if err != nil {
-		return nil, "", readFailure(err), err
+		return keyRead{src: readFailure(err), err: err}
 	}
-	return parseAPIKeys([]byte(cm.Data[apiKeysField]), cm.ResourceVersion), cm.ResourceVersion, keySourceFound, nil
+	return readKeyEntry([]byte(cm.Data[apiKeysField]), cm.ResourceVersion)
+}
+
+// readKeyEntry classifies the api-keys entry of an existing object.
+func readKeyEntry(data []byte, resourceVersion string) keyRead {
+	if strings.TrimSpace(string(data)) == "" {
+		return keyRead{src: keySourceMissing, version: resourceVersion}
+	}
+	keys, err := parseAPIKeys(data)
+	if err != nil {
+		return keyRead{src: keySourceInvalid, version: resourceVersion, err: err}
+	}
+	return keyRead{keys: keys, src: keySourceFound, version: resourceVersion}
 }
 
 func readFailure(err error) keySource {
@@ -327,17 +347,14 @@ func readFailure(err error) keySource {
 	return keySourceUnreadable
 }
 
-// parseAPIKeys parses YAML api-keys data. Invalid YAML yields no keys:
-// a broken key list must not keep revoked keys working.
-func parseAPIKeys(data []byte, resourceVersion string) map[string]rest.APIKey {
+// parseAPIKeys parses YAML api-keys data. Entries without a key or a role
+// are skipped; invalid YAML is an error so the caller keeps the last good
+// set.
+func parseAPIKeys(data []byte) (map[string]rest.APIKey, error) {
 	keys := make(map[string]rest.APIKey)
-	if strings.TrimSpace(string(data)) == "" {
-		return keys
-	}
 	var entries []apiKeyEntry
 	if err := yaml.Unmarshal(data, &entries); err != nil {
-		setupLog.Error(err, "failed to parse api-keys", "resourceVersion", resourceVersion)
-		return keys
+		return nil, err
 	}
 	for _, e := range entries {
 		if e.Key == "" || e.Role == "" {
@@ -348,7 +365,6 @@ func parseAPIKeys(data []byte, resourceVersion string) map[string]rest.APIKey {
 			name = strings.TrimSpace(e.Description)
 		}
 		keys[e.Key] = rest.APIKey{Role: e.Role, Name: name}
-		setupLog.Info("loaded API key", "role", e.Role, "name", name)
 	}
-	return keys
+	return keys, nil
 }

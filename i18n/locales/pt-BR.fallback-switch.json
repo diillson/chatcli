@@ -1,0 +1,3 @@
+{
+  "cfg.val.fallback_enabled_not_read": "%s (não é lido: o servidor monta a cadeia de fallback a partir de CHATCLI_FALLBACK_PROVIDERS quando ela lista dois ou mais providers)"
+}

@@ -16,7 +16,6 @@ import (
 	"net/http"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"testing"
 	"time"
 
@@ -48,14 +47,21 @@ func (f *fakeSTT) Transcribe(_ context.Context, audio []byte, mime, filename, la
 }
 
 // fakeEmbeddedSTT is an installable engine whose download waits for the
-// test (or for the context to end).
+// test (or for the context to end). When started is set, the engine
+// announces itself there as its download begins, so a test releases the
+// engine that is really installing (the server also builds engines only to
+// describe the cache).
 type fakeEmbeddedSTT struct {
 	fakeSTT
 	release chan struct{}
 	err     error
+	started chan *fakeEmbeddedSTT
 }
 
 func (f *fakeEmbeddedSTT) EnsureReady(ctx context.Context) error {
+	if f.started != nil {
+		f.started <- f
+	}
 	select {
 	case <-f.release:
 		return f.err
@@ -136,18 +142,40 @@ func voiceStatusOf(t *testing.T, srv *Server) voiceStatus {
 	return st
 }
 
+// waitInstall waits for the latest install attempt to settle, then checks
+// the state it settled in. The timer only bounds a hang; it never decides
+// the outcome.
 func waitInstall(t *testing.T, srv *Server, want string) voiceStatus {
 	t.Helper()
-	deadline := time.Now().Add(5 * time.Second)
-	for {
-		st := voiceStatusOf(t, srv)
-		if st.Install.State == want {
-			return st
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("install state = %+v, want %s", st.Install, want)
-		}
-		time.Sleep(20 * time.Millisecond)
+	waitClosed(t, srv.voice.installEnded(), "install to settle")
+	st := voiceStatusOf(t, srv)
+	if st.Install.State != want {
+		t.Fatalf("install state = %+v, want %s", st.Install, want)
+	}
+	return st
+}
+
+func waitClosed(t *testing.T, ch <-chan struct{}, what string) {
+	t.Helper()
+	if ch == nil {
+		t.Fatalf("waiting for %s: no install was started", what)
+	}
+	select {
+	case <-ch:
+	case <-time.After(30 * time.Second):
+		t.Fatalf("timed out waiting for %s", what)
+	}
+}
+
+// nextStarted returns the next engine whose download began.
+func nextStarted(t *testing.T, started <-chan *fakeEmbeddedSTT) *fakeEmbeddedSTT {
+	t.Helper()
+	select {
+	case e := <-started:
+		return e
+	case <-time.After(30 * time.Second):
+		t.Fatal("timed out waiting for an install attempt to start")
+		return nil
 	}
 }
 
@@ -254,16 +282,12 @@ func TestVoice_OfferAndInstallRequired(t *testing.T) {
 // cancelled attempt reports cancelled, the next one completes and becomes
 // the active engine for the next transcription.
 func TestVoice_InstallCancelRetryAndSwap(t *testing.T) {
-	var built atomic.Int32
-	var last atomic.Pointer[fakeEmbeddedSTT]
+	started := make(chan *fakeEmbeddedSTT, 4)
 	sel := &transcription.Selection{
 		Active: transcription.NewNull(), Source: transcription.SourceNone, PreferEmbedded: true,
 		Embedded: transcription.EmbeddedInfo{Name: "embedded:whisper/base", Supported: true, DownloadBytes: 99},
 		NewEmbedded: func() transcription.Provider {
-			built.Add(1)
-			e := &fakeEmbeddedSTT{fakeSTT: fakeSTT{name: "embedded:whisper/base"}, release: make(chan struct{})}
-			last.Store(e)
-			return e
+			return &fakeEmbeddedSTT{fakeSTT: fakeSTT{name: "embedded:whisper/base"}, release: make(chan struct{}), started: started}
 		},
 	}
 	srv := startVoice(t, Options{STTChoice: sel})
@@ -271,6 +295,7 @@ func TestVoice_InstallCancelRetryAndSwap(t *testing.T) {
 	if code, body := call(t, srv, http.MethodPost, "/api/voice/install", map[string][]string{"targets": {"stt"}}, true); code != http.StatusAccepted || !strings.Contains(string(body), `"running"`) {
 		t.Fatalf("install = %d %s", code, body)
 	}
+	first := nextStarted(t, started)
 	// A second request joins the running install instead of starting another.
 	if code, _ := call(t, srv, http.MethodPost, "/api/voice/install", map[string][]string{"targets": {"stt"}}, true); code != http.StatusAccepted {
 		t.Fatalf("joined install = %d", code)
@@ -285,14 +310,11 @@ func TestVoice_InstallCancelRetryAndSwap(t *testing.T) {
 	if code, _ := call(t, srv, http.MethodPost, "/api/voice/install", map[string][]string{}, true); code != http.StatusAccepted {
 		t.Fatalf("retry = %d", code)
 	}
-	deadline := time.Now().Add(5 * time.Second)
-	for built.Load() < 2 {
-		if time.Now().After(deadline) {
-			t.Fatal("the retry must build a fresh engine")
-		}
-		time.Sleep(10 * time.Millisecond)
+	retry := nextStarted(t, started)
+	if retry == first {
+		t.Fatal("the retry must build a fresh engine")
 	}
-	close(last.Load().release)
+	close(retry.release)
 	st := waitInstall(t, srv, jobDone)
 	if !st.STT.Ready || st.STT.Offer || !st.STT.Embedded.Installed || st.STT.Source != transcription.SourceEmbedded || st.STT.Engine != "embedded:whisper/base" {
 		t.Fatalf("installed status = %+v", st.STT)
@@ -351,12 +373,9 @@ func TestVoice_TTSInstallFailureAndShutdown(t *testing.T) {
 	srv2 := startVoice(t, Options{STTChoice: hang})
 	call(t, srv2, http.MethodPost, "/api/voice/install", map[string][]string{"targets": {"stt"}}, true)
 	_ = srv2.Shutdown(context.Background())
-	deadline := time.Now().Add(5 * time.Second)
-	for srv2.voice.status().Install.State != jobCancelled {
-		if time.Now().After(deadline) {
-			t.Fatalf("shutdown left the install %+v", srv2.voice.status().Install)
-		}
-		time.Sleep(10 * time.Millisecond)
+	waitClosed(t, srv2.voice.installEnded(), "shutdown to cancel the install")
+	if st := srv2.voice.status().Install.State; st != jobCancelled {
+		t.Fatalf("shutdown left the install %+v", srv2.voice.status().Install)
 	}
 }
 

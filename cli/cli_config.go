@@ -254,6 +254,25 @@ func resolveBootModelEnv(name string) string {
 	return ""
 }
 
+// DefaultModelForProvider returns the model a provider runs when nothing
+// else names one: its model variable (process environment first, then the
+// persisted config), its fallback variable, then the built-in default. It
+// is empty for a provider without a model of its own (STACKSPOT) and for an
+// unknown provider. The provider name is case-insensitive.
+func DefaultModelForProvider(provider string) string {
+	src, ok := bootModelSources[strings.ToUpper(strings.TrimSpace(provider))]
+	if !ok {
+		return ""
+	}
+	if m := resolveBootModelEnv(src.envVar); m != "" {
+		return m
+	}
+	if m := resolveBootModelEnv(src.fallbackEnv); m != "" {
+		return m
+	}
+	return src.defaultName
+}
+
 func (cli *ChatCLI) configureProviderAndModel() {
 	// Normalização de case: LLM_PROVIDER=bedrock (minúsculo) furava todas
 	// as comparações exatas e deixava provider E modelo desalinhados.
@@ -261,19 +280,9 @@ func (cli *ChatCLI) configureProviderAndModel() {
 	if cli.Provider == "" {
 		cli.Provider = config.DefaultLLMProvider
 	}
-	src, ok := bootModelSources[cli.Provider]
-	if !ok {
-		return
-	}
-	if m := resolveBootModelEnv(src.envVar); m != "" {
+	if m := DefaultModelForProvider(cli.Provider); m != "" {
 		cli.Model = m
-		return
 	}
-	if m := resolveBootModelEnv(src.fallbackEnv); m != "" {
-		cli.Model = m
-		return
-	}
-	cli.Model = src.defaultName
 }
 
 func (cli *ChatCLI) setExecutionProfile(p ExecutionProfile) {

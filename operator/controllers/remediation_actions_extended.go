@@ -192,7 +192,7 @@ type DiagnosticAllowlistSummary struct {
 
 // GetDiagnosticAllowlistSummary returns the effective allowlist's summary plus
 // the list of custom additions. The full default list is intentionally NOT
-// included — it has ~90 entries and would dwarf the rest of the startup log.
+// included — it has 100 entries and would dwarf the rest of the startup log.
 // Operators can read it directly from defaultDiagnosticAllowlist() or
 // remediation_actions_extended.go if they need the literal contents.
 func GetDiagnosticAllowlistSummary() DiagnosticAllowlistSummary {
@@ -898,9 +898,13 @@ func (r *RemediationReconciler) executeApplyManifest(ctx context.Context, resour
 	existing := &unstructured.Unstructured{}
 	existing.SetGroupVersionKind(obj.GroupVersionKind())
 	err := r.Get(ctx, types.NamespacedName{Name: obj.GetName(), Namespace: obj.GetNamespace()}, existing)
-	if err != nil {
-		// Create new
+	if apierrors.IsNotFound(err) {
 		return r.Create(ctx, obj)
+	}
+	if err != nil {
+		// Forbidden, a missing CRD or a transient failure is not "absent":
+		// creating on top of it would hide the real cause.
+		return fmt.Errorf("reading %s %s/%s: %w", obj.GetKind(), obj.GetNamespace(), obj.GetName(), err)
 	}
 
 	// Update existing

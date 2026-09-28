@@ -207,8 +207,10 @@ type ServerSpec struct {
 	// Token references a Secret containing the auth token.
 	// Maps to CHATCLI_SERVER_TOKEN env var.
 	//
-	// REQUIRED unless security.jwtSecretRef is set or the server binds
-	// loopback: a listener on a reachable address with no credential
+	// REQUIRED unless another credential is configured (security.jwtSecretRef,
+	// security.jwtPublicKeyRef, tls.clientCASecretName with TLS enabled, or
+	// the matching extraEnv variable) or the server binds loopback: a
+	// listener on a reachable address with no credential
 	// admits every caller as an administrator, so the server refuses to
 	// start in that shape and the operator will not provision the
 	// Deployment — it raises the AuthenticationConfigured condition on the
@@ -227,8 +229,8 @@ type ServerSecuritySpec struct {
 	// Maps to CHATCLI_JWT_SECRET env var. Tokens signed with it must carry
 	// an exp claim; one without an expiry is rejected.
 	//
-	// One of this or spec.server.token is required unless the server binds
-	// loopback.
+	// A credential (this, jwtPublicKeyRef, spec.server.token or a client CA)
+	// is required unless the server binds loopback.
 	// +optional
 	JWTSecretRef *SecretKeyRefSpec `json:"jwtSecretRef,omitempty"`
 
@@ -367,7 +369,11 @@ type FeaturesSpec struct {
 	// +optional
 	Knowledge *bool `json:"knowledge,omitempty"`
 	// Budget bounds spend (CHATCLI_SESSION_BUDGET_USD,
-	// CHATCLI_DAILY_BUDGET_USD, CHATCLI_BUDGET_HARD_STOP).
+	// CHATCLI_DAILY_BUDGET_USD, CHATCLI_BUDGET_HARD_STOP). It is enforced
+	// on the pipeline RPCs, which run turns through the ChatCLI engine
+	// (ChatTurn, RunCoder, RunAgent). SendPrompt, StreamPrompt,
+	// InteractiveSession and the AIOps calls (AnalyzeIssue, AgenticStep)
+	// are plain model calls and are not metered against it.
 	// +optional
 	Budget *BudgetSpec `json:"budget,omitempty"`
 	// Hub enables the cross-channel conversation hub (CHATCLI_HUB_ENABLED).

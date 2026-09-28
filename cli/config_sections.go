@@ -1558,8 +1558,13 @@ func (cli *ChatCLI) showConfigServer() {
 
 	fmt.Println(p)
 	subheader(p, "cfg.sub.server.fallback")
-	kv(p, "CHATCLI_FALLBACK_ENABLED", envBool("CHATCLI_FALLBACK_ENABLED"))
 	kv(p, "CHATCLI_FALLBACK_PROVIDERS", envOr("CHATCLI_FALLBACK_PROVIDERS"))
+	// The server never reads CHATCLI_FALLBACK_ENABLED; a non-empty
+	// CHATCLI_FALLBACK_PROVIDERS is the switch. Shown only when set, and
+	// labeled, so nobody trusts it to turn the chain on or off.
+	if v := strings.TrimSpace(os.Getenv("CHATCLI_FALLBACK_ENABLED")); v != "" {
+		kv(p, "CHATCLI_FALLBACK_ENABLED", i18n.T("cfg.val.fallback_enabled_not_read", v))
+	}
 	kv(p, "CHATCLI_FALLBACK_MAX_RETRIES", envOr("CHATCLI_FALLBACK_MAX_RETRIES"))
 	kv(p, "CHATCLI_FALLBACK_COOLDOWN_BASE", envOr("CHATCLI_FALLBACK_COOLDOWN_BASE"))
 	kv(p, "CHATCLI_FALLBACK_COOLDOWN_MAX", envOr("CHATCLI_FALLBACK_COOLDOWN_MAX"))

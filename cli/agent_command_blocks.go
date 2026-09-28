@@ -595,12 +595,7 @@ func (a *AgentMode) cmdAddContextContinue(ctx context.Context, renderer *agent.U
 
 	// Monta o prompt para a IA
 	toolContext := a.getToolContextString()
-	prompt := i18n.T("agent.llm_prompt.continuation_with_context",
-		strings.Join(blocks[cmdNum-1].Commands, "\n"),
-		outputs[cmdNum-1].Output,
-		outputs[cmdNum-1].ErrorMsg,
-		userContext,
-	) + toolContext
+	prompt := continuationPrompt(blocks[cmdNum-1], outputs[cmdNum-1], userContext) + toolContext
 
 	a.cli.history = append(a.cli.history, models.Message{Role: "user", Content: prompt})
 
@@ -610,6 +605,31 @@ func (a *AgentMode) cmdAddContextContinue(ctx context.Context, renderer *agent.U
 	// Ao retornar do loop, o agente pode ter terminado ou apresentado um novo plano.
 	// Em ambos os casos, saímos do loop do plano de ação atual.
 	return true
+}
+
+// continuationPrompt builds the message that hands a block's result back to
+// the model. The output goes through SanitizeCommandOutput on the way: it is
+// capped at CHATCLI_MAX_COMMAND_OUTPUT (default 100 KB), fenced as data and
+// flagged when it carries prompt-injection patterns. The CommandOutput the
+// user views in the terminal is left untouched. userContext, when not
+// empty, selects the variant that carries the user's extra context.
+func continuationPrompt(block CommandBlock, out *CommandOutput, userContext string) string {
+	cmdText := strings.Join(block.Commands, "\n")
+	stdout := commandOutputForModel(cmdText, out.Output)
+	stderr := commandOutputForModel(cmdText, out.ErrorMsg)
+	if userContext != "" {
+		return i18n.T("agent.llm_prompt.continuation_with_context", cmdText, stdout, stderr, userContext)
+	}
+	return i18n.T("agent.llm_prompt.continuation", cmdText, stdout, stderr)
+}
+
+// commandOutputForModel sanitizes one stream of command output for the
+// model; an empty stream stays empty instead of becoming an empty fence.
+func commandOutputForModel(cmd, output string) string {
+	if strings.TrimSpace(output) == "" {
+		return output
+	}
+	return SanitizeCommandOutput(cmd, output)
 }
 
 // cmdContinue feeds a block and its output back to the LLM for continuation.
@@ -630,12 +650,7 @@ func (a *AgentMode) cmdContinue(ctx context.Context, renderer *agent.UIRenderer,
 
 	// Monta o prompt para a IA
 	toolContext := a.getToolContextString()
-	prompt := i18n.T("agent.llm_prompt.continuation",
-		strings.Join(blocks[cmdNum-1].Commands, "\n"),
-		strings.Join(blocks[cmdNum-1].Commands, "\n"),
-		outputs[cmdNum-1].Output,
-		outputs[cmdNum-1].ErrorMsg,
-	) + toolContext
+	prompt := continuationPrompt(blocks[cmdNum-1], outputs[cmdNum-1], "") + toolContext
 
 	a.cli.history = append(a.cli.history, models.Message{Role: "user", Content: prompt})
 

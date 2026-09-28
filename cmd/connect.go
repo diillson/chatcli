@@ -81,7 +81,7 @@ func RunConnect(ctx context.Context, args []string, llmMgr manager.LLMManager, l
 	fs.StringVar(&opts.Address, "addr", os.Getenv("CHATCLI_REMOTE_ADDR"), "Remote server address (host:port)")
 	fs.StringVar(&opts.Token, "token", os.Getenv("CHATCLI_REMOTE_TOKEN"), "Authentication token")
 	fs.BoolVar(&opts.TLS, "tls", false, "Use TLS (the client dials TLS anyway unless CHATCLI_ALLOW_INSECURE=true; pair with --ca-cert for a private CA)")
-	fs.StringVar(&opts.CertFile, "ca-cert", "", "CA certificate file for TLS")
+	fs.StringVar(&opts.CertFile, "ca-cert", "", "CA certificate file for TLS (implies --tls)")
 	fs.StringVar(&opts.ClientAPIKey, "llm-key", os.Getenv("CHATCLI_CLIENT_API_KEY"), "Your own LLM API key/OAuth token (forwarded to server)")
 	fs.BoolVar(&opts.UseLocalAuth, "use-local-auth", false, "Use OAuth/API key from local auth store (~/.chatcli/auth-profiles.json)")
 	fs.StringVar(&opts.Provider, "provider", "", "Override server's default LLM provider (OPENAI, OPENAI_ASSISTANT, CLAUDEAI, BEDROCK, GOOGLEAI, XAI, ZAI, MINIMAX, MOONSHOT, STACKSPOT, OLLAMA, COPILOT, OPENROUTER)")
@@ -274,7 +274,8 @@ Flags:
   --use-local-auth      Use OAuth credentials from local auth store (from /auth login)
   --tls                 Use TLS. The client dials TLS even without it (system trust store)
                         unless CHATCLI_ALLOW_INSECURE=true is set for a plaintext server
-  --ca-cert <path>      CA certificate file for TLS verification (private or self-signed CA)
+  --ca-cert <path>      CA certificate file for TLS verification (private or self-signed CA);
+                        implies --tls
   -p <prompt>           One-shot mode: send prompt and exit
   --raw                 Raw output (no markdown/ANSI formatting)
   --max-tokens <int>    Max tokens for response

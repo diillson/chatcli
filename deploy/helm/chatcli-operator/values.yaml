@@ -129,7 +129,9 @@ decisionEngine:
 
 # Name of this cluster's ClusterRegistration. When set, the registration's
 # tier decides which severities wait for a human: critical clusters always,
-# standard clusters for critical and high, non-critical clusters never.
+# standard clusters for critical and high, non-critical clusters never. A
+# name that no ClusterRegistration carries (by name or displayName) sends
+# every plan to manual approval until the registration exists.
 clusterName: ""
 
 # Security hardening configuration for the operator

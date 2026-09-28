@@ -32,7 +32,10 @@ data:
   COPILOT_API_BASE_URL: {{ .Values.copilot.apiBaseUrl | quote }}
   {{- end }}
   {{- if .Values.fallback.enabled }}
-  CHATCLI_FALLBACK_ENABLED: "true"
+  {{- /*
+    No enable switch is written: the server reads none, and a non-empty
+    CHATCLI_FALLBACK_PROVIDERS is what turns the chain on.
+  */}}
   {{- /*
     The server builds the chain from CHATCLI_FALLBACK_PROVIDERS alone, in
     order, and installs it only when at least two entries resolve; it does

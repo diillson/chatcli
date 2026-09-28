@@ -8,6 +8,7 @@ package controllers
 
 import (
 	"context"
+	stderrors "errors"
 	"strings"
 	"testing"
 	"time"
@@ -17,6 +18,7 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 
 	platformv1alpha1 "github.com/diillson/chatcli/operator/api/v1alpha1"
 )
@@ -295,7 +297,8 @@ func TestAudit_SLABreachAndNotificationAreRecorded(t *testing.T) {
 
 // The cluster tier parks a high-severity plan on a critical-tier cluster
 // under the cluster-tier policy, lets a non-critical cluster run it, and
-// proceeds when the registration cannot be found.
+// parks the plan for manual approval when the configured cluster name has
+// no registration (fail closed; it used to proceed on policies alone).
 func TestRemediation_ClusterTierGate(t *testing.T) {
 	ctx := context.Background()
 	run := func(tier, clusterName string) (platformv1alpha1.RemediationPlan, client.Client) {
@@ -333,8 +336,46 @@ func TestRemediation_ClusterTierGate(t *testing.T) {
 	if p, _ = run("non-critical", "prod-east"); p.Status.State != platformv1alpha1.RemediationStateExecuting {
 		t.Fatalf("non-critical tier: state=%s", p.Status.State)
 	}
-	if p, _ = run("critical", "somewhere-else"); p.Status.State != platformv1alpha1.RemediationStateExecuting {
-		t.Fatalf("unknown registration must not block: state=%s", p.Status.State)
+	p, c = run("critical", "somewhere-else")
+	if p.Status.State != platformv1alpha1.RemediationStateWaitingApproval || !strings.Contains(p.Status.Result, `"somewhere-else"`) || !strings.Contains(p.Status.Result, "not registered") {
+		t.Fatalf("unregistered cluster name must park the plan: state=%s result=%q", p.Status.State, p.Status.Result)
+	}
+	if err := c.Get(ctx, types.NamespacedName{Name: "approval-plan-1", Namespace: "default"}, &ar); err != nil || ar.Spec.PolicyRef != ClusterTierPolicyName {
+		t.Fatalf("unregistered cluster request = %+v (err=%v)", ar.Spec, err)
+	}
+	// No cluster name configured: the gate does not apply.
+	if p, _ = run("critical", ""); p.Status.State != platformv1alpha1.RemediationStateExecuting {
+		t.Fatalf("no cluster name: state=%s", p.Status.State)
+	}
+}
+
+// A failure to read the registrations is not an unknown tier: the plan
+// stays Pending and the reconcile returns the error so it is retried.
+func TestRemediation_ClusterTierReadErrorKeepsPlanPending(t *testing.T) {
+	ctx := context.Background()
+	issue := newIssue("test-issue", "default")
+	issue.Spec.Severity = platformv1alpha1.IssueSeverityHigh
+	plan := newRemediationPlan("plan-1", "default")
+	c := fake.NewClientBuilder().WithScheme(newScheme()).WithStatusSubresource(
+		&platformv1alpha1.RemediationPlan{}, &platformv1alpha1.Issue{}, &platformv1alpha1.ApprovalRequest{},
+	).WithObjects(issue, plan, newDeployment("web", "default", 2)).WithInterceptorFuncs(interceptor.Funcs{
+		List: func(ctx context.Context, cl client.WithWatch, list client.ObjectList, opts ...client.ListOption) error {
+			if _, ok := list.(*platformv1alpha1.ClusterRegistrationList); ok {
+				return stderrors.New("apiserver unavailable")
+			}
+			return cl.List(ctx, list, opts...)
+		},
+	}).Build()
+	r := &RemediationReconciler{Client: c, Scheme: newScheme(), ClusterTier: "prod-east", Federation: &FederationReconciler{Client: c, Scheme: newScheme()}}
+	if _, err := r.Reconcile(ctx, ctrl.Request{NamespacedName: types.NamespacedName{Name: "plan-1", Namespace: "default"}}); err == nil {
+		t.Fatal("a registration read error must be returned for a retry")
+	}
+	var p platformv1alpha1.RemediationPlan
+	if err := c.Get(ctx, types.NamespacedName{Name: "plan-1", Namespace: "default"}, &p); err != nil {
+		t.Fatal(err)
+	}
+	if p.Status.State == platformv1alpha1.RemediationStateExecuting || p.Status.State == platformv1alpha1.RemediationStateCompleted {
+		t.Fatalf("plan ran without its tier: state=%s", p.Status.State)
 	}
 }
 
