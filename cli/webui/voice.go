@@ -76,6 +76,7 @@ type voiceState struct {
 	job    installJob
 	cancel context.CancelFunc
 	closed bool
+	ended  chan struct{} // closed when the latest install attempt settles
 }
 
 // installJob is the progress of the running (or last) install.
@@ -213,9 +214,18 @@ func (v *voiceState) startInstall(parent context.Context, targets []string) bool
 	}
 	ctx, cancel := context.WithCancel(context.WithoutCancel(parent))
 	v.cancel = cancel
+	v.ended = make(chan struct{})
 	v.job = installJob{State: jobRunning, Target: dirs[0], Total: -1}
-	go v.runInstall(ctx, cancel, dirs)
+	go v.runInstall(ctx, cancel, dirs, v.ended)
 	return true
+}
+
+// installEnded is closed once the latest install attempt has settled its
+// final state; nil before the first attempt.
+func (v *voiceState) installEnded() <-chan struct{} {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	return v.ended
 }
 
 func dedupe(in []string) []string {
@@ -230,7 +240,7 @@ func dedupe(in []string) []string {
 	return out
 }
 
-func (v *voiceState) runInstall(ctx context.Context, cancel context.CancelFunc, dirs []string) {
+func (v *voiceState) runInstall(ctx context.Context, cancel context.CancelFunc, dirs []string, ended chan struct{}) {
 	defer cancel()
 	var err error
 	for _, d := range dirs {
@@ -240,6 +250,7 @@ func (v *voiceState) runInstall(ctx context.Context, cancel context.CancelFunc, 
 	}
 	v.mu.Lock()
 	defer v.mu.Unlock()
+	defer close(ended)
 	v.cancel = nil
 	v.refreshEmbeddedLocked()
 	switch {

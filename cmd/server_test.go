@@ -21,6 +21,7 @@ import (
 	"sync/atomic"
 	"testing"
 
+	"github.com/diillson/chatcli/cli"
 	"github.com/diillson/chatcli/cli/mcp"
 	"github.com/diillson/chatcli/llm/client"
 	"github.com/diillson/chatcli/llm/fallback"
@@ -53,10 +54,15 @@ type fakeLLMManager struct {
 	clients map[string]client.LLMClient
 	errors  map[string]error
 	calls   atomic.Int32
+	models  map[string]string // provider -> model asked for (sequential callers only)
 }
 
-func (f *fakeLLMManager) GetClient(provider, _ string) (client.LLMClient, error) {
+func (f *fakeLLMManager) GetClient(provider, model string) (client.LLMClient, error) {
 	f.calls.Add(1)
+	if f.models == nil {
+		f.models = map[string]string{}
+	}
+	f.models[provider] = model
 	if err, ok := f.errors[provider]; ok {
 		return nil, err
 	}
@@ -166,6 +172,56 @@ func TestInitFallbackChain_PerProviderModelOverrideFromEnv(t *testing.T) {
 	// the strings.ToUpper path.
 	if llm.calls.Load() != 2 {
 		t.Errorf("expected 2 GetClient calls; got %d", llm.calls.Load())
+	}
+}
+
+// A fallback provider without CHATCLI_FALLBACK_MODEL_<P> runs its own
+// default model, never the primary provider's model.
+func TestInitFallbackChain_FallbackProviderGetsItsOwnModel(t *testing.T) {
+	t.Setenv("CHATCLI_FALLBACK_MODEL_OPENAI", "")
+	t.Setenv("CHATCLI_FALLBACK_MODEL_CLAUDEAI", "")
+	t.Setenv("CHATCLI_FALLBACK_MODEL_GOOGLEAI", "")
+	t.Setenv("ANTHROPIC_MODEL", "claude-fixture-model")
+	t.Setenv("GOOGLEAI_MODEL", "")
+	opts := &ServerOptions{
+		Provider:          "OPENAI",
+		Model:             "gpt-primary-fixture",
+		FallbackProviders: "OPENAI,CLAUDEAI,googleai",
+	}
+	llm := &fakeLLMManager{clients: map[string]client.LLMClient{
+		"OPENAI":   &fakeLLMClient{},
+		"CLAUDEAI": &fakeLLMClient{},
+		"googleai": &fakeLLMClient{},
+	}}
+	sink := &fakeFallbackSink{}
+	initFallbackChain(opts, llm, sink, zap.NewNop())
+	if sink.chain == nil {
+		t.Fatal("expected chain wired")
+	}
+	want := map[string]string{
+		"OPENAI":   "gpt-primary-fixture",
+		"CLAUDEAI": "claude-fixture-model",
+		"googleai": cli.DefaultModelForProvider("GOOGLEAI"),
+	}
+	for p, m := range want {
+		if llm.models[p] != m {
+			t.Errorf("%s asked for model %q, want %q", p, llm.models[p], m)
+		}
+	}
+	if llm.models["googleai"] == "" || llm.models["googleai"] == opts.Model {
+		t.Errorf("googleai must get its own default, got %q", llm.models["googleai"])
+	}
+}
+
+func TestFallbackModelFor_ExplicitOverrideWins(t *testing.T) {
+	t.Setenv("CHATCLI_FALLBACK_MODEL_CLAUDEAI", "claude-override-fixture")
+	t.Setenv("CHATCLI_FALLBACK_MODEL_OPENAI", "gpt-override-fixture")
+	opts := &ServerOptions{Provider: "OPENAI", Model: "gpt-primary-fixture"}
+	if got := fallbackModelFor("claudeai", opts); got != "claude-override-fixture" {
+		t.Errorf("claudeai = %q", got)
+	}
+	if got := fallbackModelFor("OPENAI", opts); got != "gpt-override-fixture" {
+		t.Errorf("OPENAI = %q", got)
 	}
 }
 

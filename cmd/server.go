@@ -70,7 +70,7 @@ func RunServer(args []string, llmMgr manager.LLMManager, logger *zap.Logger) err
 
 	opts := &ServerOptions{}
 	fs.IntVar(&opts.Port, "port", getEnvInt("CHATCLI_SERVER_PORT", 50051), "gRPC server port")
-	fs.StringVar(&opts.Token, "token", os.Getenv("CHATCLI_SERVER_TOKEN"), "Authentication token (empty = no auth)")
+	fs.StringVar(&opts.Token, "token", os.Getenv("CHATCLI_SERVER_TOKEN"), "Authentication token (empty = no auth, accepted only on a loopback bind address; any other bind requires a credential)")
 	fs.StringVar(&opts.CertFile, "tls-cert", os.Getenv("CHATCLI_SERVER_TLS_CERT"), "TLS certificate file path")
 	fs.StringVar(&opts.KeyFile, "tls-key", os.Getenv("CHATCLI_SERVER_TLS_KEY"), "TLS key file path")
 	fs.StringVar(&opts.ClientCAFile, "tls-client-ca", os.Getenv("CHATCLI_SERVER_TLS_CLIENT_CA"), "CA bundle that client certificates are verified against (enables mTLS)")
@@ -343,6 +343,22 @@ type mcpSink interface {
 	SetMCPManager(mgr *mcp.Manager)
 }
 
+// fallbackModelFor picks the model a provider of the fallback chain runs:
+// CHATCLI_FALLBACK_MODEL_<PROVIDER> when set; the server's model for the
+// primary provider; otherwise that provider's own default (its model
+// variable, then the built-in default). Handing the primary's model to
+// another provider sent, say, a Claude model id to OpenAI, and the
+// fallback failed exactly when it was needed.
+func fallbackModelFor(provider string, opts *ServerOptions) string {
+	if m := strings.TrimSpace(os.Getenv("CHATCLI_FALLBACK_MODEL_" + strings.ToUpper(provider))); m != "" {
+		return m
+	}
+	if strings.EqualFold(strings.TrimSpace(provider), strings.TrimSpace(opts.Provider)) {
+		return opts.Model
+	}
+	return cli.DefaultModelForProvider(provider)
+}
+
 // initFallbackChain wires the optional provider-fallback chain into
 // the sink. Extracted from RunServer so the cyclo budget on the
 // parent function stays in line with the project-wide gate.
@@ -357,10 +373,7 @@ func initFallbackChain(opts *ServerOptions, llmMgr manager.LLMManager, srv fallb
 		if p == "" {
 			continue
 		}
-		model := os.Getenv("CHATCLI_FALLBACK_MODEL_" + strings.ToUpper(p))
-		if model == "" {
-			model = opts.Model
-		}
+		model := fallbackModelFor(p, opts)
 		c, err := llmMgr.GetClient(p, model)
 		if err != nil {
 			logger.Warn(i18n.T("cmd.server.fallback_unavailable"),
@@ -465,7 +478,8 @@ Start the ChatCLI gRPC server for remote access.
 
 Flags:
   --port <int>        Server port (default: 50051, env: CHATCLI_SERVER_PORT)
-  --token <string>    Authentication token (env: CHATCLI_SERVER_TOKEN)
+  --token <string>    Authentication token (env: CHATCLI_SERVER_TOKEN). Without a token,
+                      JWT or client CA the server refuses to start on a non-loopback address
   --tls-cert <path>   TLS certificate file (env: CHATCLI_SERVER_TLS_CERT)
   --tls-key <path>    TLS key file (env: CHATCLI_SERVER_TLS_KEY)
   --tls-client-ca <path>  CA bundle for client certificate verification, enables mTLS

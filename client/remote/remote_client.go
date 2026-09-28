@@ -54,7 +54,7 @@ type Config struct {
 	Address        string            // server address (host:port)
 	Token          string            // auth token for gRPC server authentication
 	TLS            bool              // use TLS
-	CertFile       string            // CA certificate file for TLS (optional)
+	CertFile       string            // CA certificate file for TLS (optional; implies TLS)
 	ClientAPIKey   string            // optional: client's own LLM API key/OAuth token (forwarded to server)
 	Provider       string            // optional: override server's default provider (e.g., "GOOGLEAI")
 	Model          string            // optional: override server's default model (e.g., "gemini-2.5-flash")
@@ -67,7 +67,10 @@ func NewClient(ctx context.Context, cfg Config, logger *zap.Logger) (*Client, er
 
 	// Security (H4): TLS configuration with TLS 1.3 minimum.
 	// Use CHATCLI_TLS_CLIENT_CERT/KEY for mTLS client certificates.
-	if cfg.TLS {
+	// A CA file only means something over TLS, so it turns TLS on: without
+	// this, --ca-cert alone was read by nobody and the private CA silently
+	// played no part in the handshake.
+	if cfg.TLS || cfg.CertFile != "" {
 		tlsCfg := &tls.Config{
 			MinVersion: tls.VersionTLS13,
 		}
