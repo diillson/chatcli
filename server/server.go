@@ -30,6 +30,8 @@ import (
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
+	"google.golang.org/grpc/health"
+	healthpb "google.golang.org/grpc/health/grpc_health_v1"
 	"google.golang.org/grpc/keepalive"
 	"google.golang.org/grpc/reflection"
 )
@@ -57,6 +59,8 @@ type Server struct {
 	rateLimiter   *PerClientRateLimiter // for cleanup on shutdown
 	auditLogger   *AuditLogger          // for cleanup on shutdown
 	hubBroker     hub.Broker            // conversation hub, closed on shutdown (nil when disabled)
+	health        *health.Server        // grpc.health.v1 status, SERVING while the listener serves
+	auth          *TokenAuthInterceptor // for startup checks of the configured credentials
 }
 
 // New creates a new ChatCLI gRPC server.
@@ -225,6 +229,7 @@ func New(cfg Config, llmMgr manager.LLMManager, sessionStore SessionStore, logge
 	}
 
 	pb.RegisterChatCLIServiceServer(grpcServer, handler)
+	healthServer := registerHealthService(grpcServer)
 
 	// Security (M9): gRPC reflection requires BOTH config flag AND env var.
 	// This prevents accidental exposure in production.
@@ -246,6 +251,8 @@ func New(cfg Config, llmMgr manager.LLMManager, sessionStore SessionStore, logge
 		rateLimiter:   rateLimiter,
 		auditLogger:   auditLogger,
 		hubBroker:     hubBroker,
+		health:        healthServer,
+		auth:          authInterceptor,
 	}
 }
 
@@ -289,6 +296,14 @@ func (s *Server) Start() error {
 	if err := requireAuthOnReachableBind(bindAddr, bindCredentialsFromEnv(s.config.Token, s.config.TLSClientCAFile)); err != nil {
 		return err
 	}
+	// JWT material that was configured but did not load is a credential
+	// the operator believes is enforced. Serving without it would be
+	// serving open, on loopback as much as anywhere else.
+	if s.auth != nil {
+		if err := s.auth.jwtConfigError(); err != nil {
+			return fmt.Errorf("refusing to start: %w", err)
+		}
+	}
 
 	addr := fmt.Sprintf("%s:%d", bindAddr, s.config.Port)
 	lis, err := net.Listen("tcp", addr)
@@ -302,6 +317,7 @@ func (s *Server) Start() error {
 	go func() {
 		sig := <-sigChan
 		s.logger.Info(i18n.T("server.shutdown.signal"), zap.String("signal", sig.String()))
+		setHealth(s.health, healthpb.HealthCheckResponse_NOT_SERVING)
 		if s.metricsServer != nil {
 			s.metricsServer.Stop()
 		}
@@ -325,6 +341,7 @@ func (s *Server) Start() error {
 		fmt.Println(i18n.T("server.metrics_enabled", s.config.MetricsPort))
 	}
 
+	setHealth(s.health, healthpb.HealthCheckResponse_SERVING)
 	if err := s.grpcServer.Serve(lis); err != nil {
 		return fmt.Errorf("%s: %w", i18n.T("server.grpc_failed"), err)
 	}
@@ -335,6 +352,7 @@ func (s *Server) Start() error {
 
 // Stop gracefully stops the server and cleans up resources.
 func (s *Server) Stop() {
+	setHealth(s.health, healthpb.HealthCheckResponse_NOT_SERVING)
 	if s.metricsServer != nil {
 		s.metricsServer.Stop()
 	}

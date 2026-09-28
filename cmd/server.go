@@ -40,6 +40,11 @@ type ServerOptions struct {
 	Model        string
 	MetricsPort  int
 
+	// EnableReflection registers gRPC server reflection. It defaults to
+	// CHATCLI_GRPC_REFLECTION=true, the switch the Helm chart and the
+	// Instance CRD set, which otherwise had no flag to pair with.
+	EnableReflection bool
+
 	// Fallback chain (optional)
 	FallbackProviders    string
 	FallbackMaxRetries   int
@@ -72,6 +77,7 @@ func RunServer(args []string, llmMgr manager.LLMManager, logger *zap.Logger) err
 	fs.StringVar(&opts.Provider, "provider", os.Getenv("LLM_PROVIDER"), "Default LLM provider")
 	fs.StringVar(&opts.Model, "model", "", "Default LLM model")
 	fs.IntVar(&opts.MetricsPort, "metrics-port", getEnvInt("CHATCLI_METRICS_PORT", 9090), "Prometheus metrics HTTP port (0 = disabled)")
+	fs.BoolVar(&opts.EnableReflection, "enable-reflection", strings.EqualFold(os.Getenv("CHATCLI_GRPC_REFLECTION"), "true"), "Register gRPC server reflection (also CHATCLI_GRPC_REFLECTION=true; keep off in production)")
 
 	// Fallback chain flags
 	fs.StringVar(&opts.FallbackProviders, "fallback-providers", os.Getenv("CHATCLI_FALLBACK_PROVIDERS"), "Comma-separated fallback providers (e.g. OPENAI,CLAUDEAI,GOOGLEAI,ZAI,MINIMAX)")
@@ -125,6 +131,8 @@ func RunServer(args []string, llmMgr manager.LLMManager, logger *zap.Logger) err
 		Provider:        opts.Provider,
 		Model:           opts.Model,
 		MetricsPort:     opts.MetricsPort,
+
+		EnableReflection: opts.EnableReflection,
 	}
 
 	srv := server.New(cfg, llmMgr, sessionMgr, logger)

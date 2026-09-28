@@ -235,6 +235,18 @@ jobs:
           username: ${{ github.repository_owner }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      # Same release metadata the tag was first published with, so a
+      # refreshed server image keeps reporting its real version. The
+      # operator Dockerfile does not declare these args and ignores them.
+      - name: Build metadata
+        id: buildmeta
+        run: |
+          {
+            echo "version=v${{ matrix.tag }}"
+            echo "commit=$(git rev-parse --short HEAD)"
+            echo "date=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          } >> "$GITHUB_OUTPUT"
+
       - name: Build & push by digest
         id: build
         uses: docker/build-push-action@v7
@@ -242,6 +254,10 @@ jobs:
           context: ${{ matrix.context }}
           file: ${{ matrix.dockerfile }}
           platforms: ${{ matrix.platform }}
+          build-args: |
+            VERSION=${{ steps.buildmeta.outputs.version }}
+            COMMIT_HASH=${{ steps.buildmeta.outputs.commit }}
+            BUILD_DATE=${{ steps.buildmeta.outputs.date }}
           no-cache: true
           provenance: true
           sbom: true

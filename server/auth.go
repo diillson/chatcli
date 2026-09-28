@@ -39,6 +39,12 @@ type TokenAuthInterceptor struct {
 	jwtPublicKeys []*rsa.PublicKey // from CHATCLI_JWT_PUBLIC_KEY, or a PEM CHATCLI_JWT_SECRET
 	jwtAlg        string
 
+	// jwtLoadErr records JWT material that was configured but could not
+	// be loaded. When JWT was the only credential, the server refuses to
+	// start on it and authorize denies every call: the operator asked for
+	// JWT, so running without it would be running open.
+	jwtLoadErr error
+
 	// Auth failure rate limiting: max 5 failures/min per IP
 	failureMu       sync.Mutex
 	failureLimiters map[string]*rate.Limiter
@@ -109,6 +115,16 @@ func (w *wrappedServerStream) Context() context.Context {
 
 // authorize validates credentials and returns a context with UserInfo on success.
 func (a *TokenAuthInterceptor) authorize(ctx context.Context, method string) (context.Context, error) {
+	// Configured JWT material that failed to load, with nothing else to
+	// authenticate against, closes the server instead of dropping it to
+	// the no-auth branch below.
+	if a.jwtOnlyCredentialFailed() {
+		if isHealthMethod(method) {
+			return ctx, nil
+		}
+		return nil, status.Error(codes.Unauthenticated, "JWT verification material failed to load; the server accepts no credentials until it is fixed")
+	}
+
 	// Skip auth if no token, no JWT and no certificate identity configured
 	if a.token == "" && !a.jwtConfigured() && !a.mtlsIdentity {
 		// No auth configured — inject default admin user for backward compat
@@ -116,7 +132,7 @@ func (a *TokenAuthInterceptor) authorize(ctx context.Context, method string) (co
 	}
 
 	// Always allow health checks without auth
-	if strings.HasSuffix(method, "/Health") {
+	if isHealthMethod(method) {
 		return ctx, nil
 	}
 

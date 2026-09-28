@@ -6,6 +6,7 @@
 package server
 
 import (
+	"fmt"
 	"os"
 	"strings"
 
@@ -31,7 +32,8 @@ func (a *TokenAuthInterceptor) configureJWT(logger *zap.Logger) {
 		keys, err := jwtkey.LoadRSAPublicKeys(pub)
 		if err != nil {
 			logger.Error("CHATCLI_JWT_PUBLIC_KEY is set but no RSA public key could be loaded; "+
-				"JWT authentication stays disabled", zap.Error(err))
+				"the server will not start until it is fixed", zap.Error(err))
+			a.jwtLoadErr = fmt.Errorf("CHATCLI_JWT_PUBLIC_KEY is set but no RSA public key could be loaded: %w", err)
 			return
 		}
 		a.jwtPublicKeys = keys
@@ -49,8 +51,10 @@ func (a *TokenAuthInterceptor) configureJWT(logger *zap.Logger) {
 		keys, err := jwtkey.LoadRSAPublicKeys(secret)
 		if err != nil {
 			logger.Error("CHATCLI_JWT_SECRET looks like RSA key material but could not be loaded; "+
-				"JWT authentication stays disabled. Set CHATCLI_JWT_PUBLIC_KEY for RS256, or a "+
+				"the server will not start until it is fixed. Set CHATCLI_JWT_PUBLIC_KEY for RS256, or a "+
 				"plain shared secret for HS256", zap.Error(err))
+			a.jwtLoadErr = fmt.Errorf("CHATCLI_JWT_SECRET looks like RSA key material but could not be loaded "+
+				"(set CHATCLI_JWT_PUBLIC_KEY for RS256, or a plain shared secret for HS256): %w", err)
 			return
 		}
 		a.jwtPublicKeys = keys
@@ -68,4 +72,21 @@ func (a *TokenAuthInterceptor) configureJWT(logger *zap.Logger) {
 // jwtConfigured reports whether any JWT verification material is loaded.
 func (a *TokenAuthInterceptor) jwtConfigured() bool {
 	return len(a.jwtSecret) > 0 || len(a.jwtPublicKeys) > 0
+}
+
+// jwtConfigError returns the load failure of configured JWT material when
+// JWT was the server's only credential, or nil otherwise. With a shared
+// token or client certificates still enforced, a broken key denies JWT
+// callers but leaves the server closed, so it keeps serving as before.
+func (a *TokenAuthInterceptor) jwtConfigError() error {
+	if !a.jwtOnlyCredentialFailed() {
+		return nil
+	}
+	return a.jwtLoadErr
+}
+
+// jwtOnlyCredentialFailed reports whether configured JWT material failed
+// to load and no shared token or certificate identity remains.
+func (a *TokenAuthInterceptor) jwtOnlyCredentialFailed() bool {
+	return a.jwtLoadErr != nil && a.token == "" && !a.mtlsIdentity
 }

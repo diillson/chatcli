@@ -16,7 +16,15 @@ RUN go mod download
 # Copy source and build (TARGETARCH injected by docker buildx for multi-arch)
 COPY . .
 ARG TARGETARCH
-RUN CGO_ENABLED=0 GOOS=linux GOARCH=${TARGETARCH} go build -ldflags="-s -w" -o chatcli .
+# Release metadata stamped into the binary, the same variables the release
+# binaries carry. Without them the server reports version "dev", which is
+# what the operator shows in the Instance status.
+ARG VERSION=dev
+ARG COMMIT_HASH=unknown
+ARG BUILD_DATE=unknown
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=${TARGETARCH} go build \
+    -ldflags="-s -w -X 'github.com/diillson/chatcli/version.Version=${VERSION}' -X 'github.com/diillson/chatcli/version.CommitHash=${COMMIT_HASH}' -X 'github.com/diillson/chatcli/version.BuildDate=${BUILD_DATE}'" \
+    -o chatcli .
 
 # Build grpc_health_probe with patched dependencies:
 #   CVE-2026-34986 (go-jose/v4), GHSA-hrxh-6v49-42gf (grpc),
