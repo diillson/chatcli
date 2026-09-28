@@ -100,7 +100,20 @@ spec:
               secretRef:
                 description: |-
                   SecretRef references a Secret containing auth credentials.
-                  For token: key "token". For basic: keys "username" and "password". For ssh: key "ssh-key".
+                  For token: key "token". For basic: keys "username" and "password". For ssh: key "ssh-key",
+                  plus "known_hosts" (the git server's host keys, e.g. from ssh-keyscan).
+                  Credentials are handed to git per command and never written to the clone's .git/config.
+                type: string
+              sshHostKeyPolicy:
+                description: |-
+                  SSHHostKeyPolicy controls how an ssh clone verifies the git server's host key.
+                  When the Secret holds "known_hosts" the host key must match it, whatever this says.
+                  Without it, "strict" (the default) refuses to connect, and "acceptNew" trusts the
+                  key the host presents on first contact and rejects a different key afterwards
+                  (trust on first use, remembered for the life of the operator pod).
+                enum:
+                - strict
+                - acceptNew
                 type: string
               syncIntervalMinutes:
                 default: 30
