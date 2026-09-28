@@ -16,7 +16,9 @@ fullnameOverride: ""
 # gRPC server configuration
 server:
   port: 50051
-  # Prometheus metrics HTTP port (0 = disabled)
+  # Prometheus metrics HTTP port (0 = disabled). The same listener serves
+  # GET /healthz, which the liveness and startup probes use; with 0 the
+  # probes fall back to a TCP connect on the gRPC port.
   metricsPort: 9090
   # Authentication token for the gRPC server.
   #
@@ -26,17 +28,29 @@ server:
   # as an administrator. Set this, or security.jwtSecret / jwtSecretRef for
   # per-user JWTs. Leaving both empty is only valid when the server is
   # bound to loopback (security.bindAddress: "127.0.0.1").
+  #
+  # Generate one with: openssl rand -hex 32
+  # The value is delivered as CHATCLI_SERVER_TOKEN from a Secret (the chart
+  # Secret, or "<fullname>-server-token" when secrets.existingSecret is set),
+  # never as a command-line argument. Alternatively leave this empty and put
+  # CHATCLI_SERVER_TOKEN in secrets.existingSecret yourself.
   token: ""
-  # Enable gRPC reflection for debugging
+  # Sets CHATCLI_GRPC_REFLECTION. Currently has no effect: the server also
+  # needs an internal switch that `chatcli server` does not expose, so
+  # reflection stays off whatever this is set to.
   grpcReflection: false
 
-# TLS configuration
+# TLS configuration (the server requires TLS 1.3 when enabled)
 tls:
   enabled: false
-  # certFile and keyFile are paths inside the container
+  # certFile and keyFile are paths inside the container. With
+  # existingSecret the Secret is mounted at /etc/chatcli/tls, so use
+  # /etc/chatcli/tls/tls.crt and /etc/chatcli/tls/tls.key.
   certFile: ""
   keyFile: ""
-  # Use existing secret for TLS certificates
+  # Existing Secret with tls.crt / tls.key (e.g. from cert-manager),
+  # mounted read-only at /etc/chatcli/tls. A ca.crt key in it can serve as
+  # the mTLS client CA: security.tlsClientCA: /etc/chatcli/tls/ca.crt
   existingSecret: ""
 
 # LLM Provider configuration
@@ -51,10 +65,16 @@ llm:
 # Provider fallback chain — automatic failover between LLM providers
 # When the primary provider fails (rate limit, timeout, server error),
 # the system automatically tries the next provider in the chain.
+#
+# The chain is llm.provider (with llm.model) followed by the providers
+# listed below; the chart puts llm.provider in front unless you list it
+# yourself, in which case your order is kept. The server only installs the
+# chain when at least two of its providers have working credentials, and
+# uses it for requests that bring no credentials or provider of their own.
 fallback:
   enabled: false
-  # Ordered list of providers to try (first = highest priority)
-  # Each entry needs a corresponding API key in secrets section.
+  # Ordered list of providers to try after llm.provider (first = highest
+  # priority). Each entry needs a corresponding API key in secrets.
   providers: []
   #   - name: OPENAI
   #     model: gpt-4o
@@ -84,8 +104,13 @@ mcp:
   #     # When connected, these built-ins are hidden from the LLM.
   #     # If the server disconnects, built-ins are restored automatically.
   #     overrides: ["@webfetch", "@websearch"]
+  #     # env: extra environment for a stdio server process
+  #     env:
+  #       LOG_LEVEL: info
   servers: []
-  # Or reference an existing ConfigMap with mcp_servers.json
+  # Or reference an existing ConfigMap with a mcp_servers.json key. It is
+  # mounted at /etc/chatcli/mcp and passed as --mcp-config; when set it is
+  # used instead of the ConfigMap rendered from servers.
   existingConfigMap: ""
 
 # Provider API keys (stored in a Secret)
@@ -264,6 +289,7 @@ autoscaling:
   minReplicas: 1
   maxReplicas: 5
   targetCPUUtilizationPercentage: 80
+  # Optional second metric; unset = CPU only.
   # targetMemoryUtilizationPercentage: 80
 
 podDisruptionBudget:
@@ -273,7 +299,16 @@ podDisruptionBudget:
 
 networkPolicy:
   enabled: false
-  # ingressFrom: []
+  # Peers allowed to reach the gRPC and metrics ports (NetworkPolicyPeer
+  # list). Unset or empty = any source. Example: only the operator and
+  # Prometheus namespaces.
+  # ingressFrom:
+  #   - namespaceSelector:
+  #       matchLabels:
+  #         kubernetes.io/metadata.name: chatcli-system
+  #   - namespaceSelector:
+  #       matchLabels:
+  #         kubernetes.io/metadata.name: monitoring
 
   # Egress policy. "allowAll" (the default) keeps the previous behaviour:
   # the policy restricts ingress and leaves outbound traffic alone.
@@ -333,9 +368,13 @@ security:
   #   name: chatcli-jwt
   #   key: public.pem
 
-  # Mutual TLS: path to the CA bundle client certificates are verified
-  # against. Requires tls.cert and tls.key — there is no handshake to carry
-  # a client certificate without them. Mount the bundle via extraVolumes.
+  # Mutual TLS: path inside the container to the CA bundle client
+  # certificates are verified against. Requires tls.enabled with
+  # tls.certFile and tls.keyFile — there is no handshake to carry a client
+  # certificate without them — and then EVERY connection must present a
+  # client certificate. Point it at a ca.crt inside tls.existingSecret
+  # (/etc/chatcli/tls/ca.crt), or mount a separate Secret with
+  # extraVolumes + extraVolumeMounts (see below).
   tlsClientCA: ""
   # Role granted to callers identified by their client certificate alone
   # (no bearer token): viewer, user/operator or admin. Default: user.
@@ -350,11 +389,16 @@ security:
   maxSendMsgSize: ""    # bytes (default: 52428800 = 50MB)
   maxConcurrentStreams: "" # (default: 100)
 
-  # Server bind address (default: 127.0.0.1, set 0.0.0.0 to expose)
+  # Server bind address. Empty = 0.0.0.0 inside Kubernetes (the server
+  # detects KUBERNETES_SERVICE_HOST) and 127.0.0.1 elsewhere. Set
+  # "127.0.0.1" to keep the gRPC listener pod-local (the only shape that
+  # may run without a credential).
   bindAddress: ""
 
-  # Audit logging
-  auditLogPath: ""      # file path for JSON-lines audit log
+  # Audit logging: absolute path for the hash-chained JSON-lines audit log.
+  # Put it on a writable mount (the root filesystem is read-only), e.g.
+  # under /home/chatcli/.chatcli or an extraVolumes entry.
+  auditLogPath: ""
 
   # Debug mode (enables stack traces in error logs)
   debug: false
@@ -371,7 +415,8 @@ security:
   # Allow unsigned plugins (dev only, default: false)
   allowUnsignedPlugins: false
 
-  # Allow insecure (non-TLS) gRPC connections (default: false)
+  # Sets CHATCLI_ALLOW_INSECURE. Only the chatcli *client* reads it (to
+  # dial a plaintext server); it does not change the server listener.
   allowInsecure: false
 
   # Encryption key for sessions at rest (leave empty to use auth key)
@@ -389,6 +434,19 @@ extraEnv: []
 #     secretKeyRef:
 #       name: chatcli-secrets
 #       key: encryption-key
+
+# Extra volumes for the pod and mounts for the server container, e.g. a
+# Secret holding the mTLS client CA for security.tlsClientCA, a corporate
+# CA bundle, or a writable path for security.auditLogPath.
+extraVolumes: []
+# - name: client-ca
+#   secret:
+#     secretName: chatcli-client-ca
+extraVolumeMounts: []
+# - name: client-ca
+#   mountPath: /etc/chatcli/client-ca
+#   readOnly: true
+# ...then: security.tlsClientCA: /etc/chatcli/client-ca/ca.crt
 
 # Persistence for sessions
 persistence:

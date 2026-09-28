@@ -69,3 +69,45 @@ Secret name for provider credentials
 {{- include "chatcli.fullname" . }}
 {{- end }}
 {{- end }}
+
+{{/*
+Secret that carries CHATCLI_SERVER_TOKEN when server.token is set.
+The chart Secret holds it when the chart manages secrets; with
+secrets.existingSecret the chart cannot write into the user's Secret, so
+the token goes into a small dedicated Secret instead. Either way the value
+reaches the pod through a secretKeyRef, never through the container args.
+*/}}
+{{- define "chatcli.tokenSecretName" -}}
+{{- if .Values.secrets.existingSecret }}
+{{- printf "%s-server-token" (include "chatcli.fullname" .) | trunc 63 | trimSuffix "-" }}
+{{- else }}
+{{- include "chatcli.fullname" . }}
+{{- end }}
+{{- end }}
+
+{{/*
+The MCP config is mounted when MCP is enabled and there is something to
+mount: inline servers (rendered into the chart ConfigMap) or an existing
+ConfigMap carrying mcp_servers.json.
+*/}}
+{{- define "chatcli.mcpConfigEnabled" -}}
+{{- if and .Values.mcp.enabled (or .Values.mcp.servers .Values.mcp.existingConfigMap) }}true{{- end }}
+{{- end }}
+
+{{/*
+Process probe for liveness and startup. GET /healthz on the metrics
+listener answers 200 as soon as the process is up and needs neither TLS nor
+a credential, and works for every server image version and with or without
+TLS (a kubelet gRPC probe cannot speak TLS). With metrics disabled it falls
+back to a TCP connect on the gRPC port.
+*/}}
+{{- define "chatcli.processProbe" -}}
+{{- if .Values.server.metricsPort }}
+httpGet:
+  path: /healthz
+  port: metrics
+{{- else }}
+tcpSocket:
+  port: grpc
+{{- end }}
+{{- end }}

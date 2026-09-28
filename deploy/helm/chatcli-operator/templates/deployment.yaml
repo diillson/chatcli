@@ -120,10 +120,12 @@ spec:
             - name: CHATCLI_CORS_ALLOW_CREDENTIALS
               value: "true"
           {{- end }}
-          {{- if .Values.security.auditLogPath }}
-            - name: CHATCLI_AUDIT_LOG_PATH
-              value: {{ .Values.security.auditLogPath | quote }}
-          {{- end }}
+          {{- /*
+            security.auditLogPath is deprecated and ignored: the operator no
+            longer reads CHATCLI_AUDIT_LOG_PATH (its actions are recorded as
+            AuditEvent resources). The key stays in the schema so existing
+            values files keep validating.
+          */}}
           {{- with .Values.extraEnv }}
             {{- toYaml . | nindent 12 }}
           {{- end }}
@@ -153,6 +155,14 @@ spec:
           resources:
             {{- toYaml . | nindent 12 }}
           {{- end }}
+          {{- with .Values.extraVolumeMounts }}
+          volumeMounts:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+      {{- with .Values.extraVolumes }}
+      volumes:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
       {{- with .Values.nodeSelector }}
       nodeSelector:
         {{- toYaml . | nindent 8 }}

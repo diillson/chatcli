@@ -56,6 +56,12 @@ spec:
           imagePullPolicy: IfNotPresent
           args:
             - --leader-elect
+          env:
+            # Default server image tag for Instances that omit
+            # spec.image.tag. Without it they fall back to "latest". Kept in
+            # lockstep with the operator image by release-please.
+            - name: CHATCLI_OPERATOR_APP_VERSION
+              value: "1.211.2" # x-release-please-version
           ports:
             - containerPort: 8080
               name: metrics

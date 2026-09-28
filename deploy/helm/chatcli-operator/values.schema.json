@@ -447,7 +447,7 @@
         },
         "apiTLS": {
           "type": "object",
-          "description": "TLS configuration for the REST API.",
+          "description": "TLS 1.3 for the REST API and dashboard. Paths inside the container; mount the Secret with extraVolumes/extraVolumeMounts.",
           "properties": {
             "certFile": {
               "type": "string"
@@ -459,7 +459,7 @@
         },
         "grpcTLS": {
           "type": "object",
-          "description": "TLS for gRPC communication with ChatCLI server.",
+          "description": "Operator-wide TLS material for dialing ChatCLI servers (absolute paths inside the container). Per-Instance ca.crt / operatorClientCertSecretName take precedence.",
           "properties": {
             "certFile": {
               "type": "string"
@@ -474,7 +474,7 @@
         },
         "allowedResourceTypes": {
           "type": "string",
-          "description": "Comma-separated list of allowed resource types for remediation."
+          "description": "Extra comma-separated resource kinds remediation may touch, added to the built-in defaults."
         },
         "logScrubPatterns": {
           "type": "string",
@@ -482,7 +482,7 @@
         },
         "allowedDiagnosticCommands": {
           "type": "string",
-          "description": "Comma-separated extra read-only diagnostic commands allowed for remediation (appended to the built-in allowlist)."
+          "description": "Comma-separated extra read-only diagnostic commands allowed for remediation (appended to the built-in allowlist). Read by the operator process, not by Instances."
         },
         "corsOrigin": {
           "type": "string",
@@ -490,7 +490,7 @@
         },
         "auditLogPath": {
           "type": "string",
-          "description": "File path for structured audit logs."
+          "description": "DEPRECATED and ignored: the operator no longer reads CHATCLI_AUDIT_LOG_PATH and the chart no longer renders it. Accepted only so existing values files keep validating."
         },
         "corsAllowedOrigins": {
           "type": "array",
@@ -509,6 +509,118 @@
         "corsAllowCredentials": {
           "type": "boolean",
           "description": "Allow cookies and Authorization on cross-origin requests."
+        }
+      }
+    },
+    "apiKeys": {
+      "type": "object",
+      "description": "REST API / dashboard keys. With create=true the chart renders the Secret chatcli-operator-secrets (key api-keys) the operator reads; its name is fixed.",
+      "additionalProperties": false,
+      "properties": {
+        "create": {
+          "type": "boolean",
+          "default": false,
+          "description": "Render the chatcli-operator-secrets Secret from entries."
+        },
+        "entries": {
+          "type": "array",
+          "description": "API keys: key (the X-API-Key value), role (viewer, operator or admin), optional description.",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "key",
+              "role"
+            ],
+            "properties": {
+              "key": {
+                "type": "string",
+                "minLength": 1
+              },
+              "role": {
+                "type": "string",
+                "enum": [
+                  "viewer",
+                  "operator",
+                  "admin"
+                ]
+              },
+              "description": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    },
+    "networkPolicy": {
+      "type": "object",
+      "description": "Optional NetworkPolicy for the operator pod.",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "default": false,
+          "description": "Render the NetworkPolicy."
+        },
+        "apiIngressFrom": {
+          "type": "array",
+          "description": "NetworkPolicyPeer list allowed to reach the REST API/dashboard port. Empty = any source.",
+          "items": {
+            "type": "object"
+          }
+        },
+        "metricsIngressFrom": {
+          "type": "array",
+          "description": "NetworkPolicyPeer list allowed to reach the metrics port. Empty = any source.",
+          "items": {
+            "type": "object"
+          }
+        },
+        "egress": {
+          "type": "string",
+          "enum": [
+            "restricted",
+            "allowAll"
+          ],
+          "default": "restricted",
+          "description": "restricted: DNS, 443, the Kubernetes API port, the Instances' gRPC port, the prometheusUrl port and egressExtraPorts. allowAll: no egress restriction."
+        },
+        "kubernetesApiPort": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 65535,
+          "description": "Kubernetes API server port allowed on egress."
+        },
+        "instanceGrpcPort": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 65535,
+          "description": "gRPC port of the managed Instances (spec.server.port)."
+        },
+        "egressExtraPorts": {
+          "type": "array",
+          "description": "Extra egress ports when egress is restricted (SMTP, git over SSH, webhooks on other ports).",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "port"
+            ],
+            "properties": {
+              "port": {
+                "type": "integer"
+              },
+              "protocol": {
+                "type": "string",
+                "enum": [
+                  "TCP",
+                  "UDP",
+                  "SCTP"
+                ]
+              }
+            }
+          }
         }
       }
     },
@@ -531,6 +643,27 @@
             "type": "object"
           }
         }
+      }
+    },
+    "extraVolumes": {
+      "type": "array",
+      "description": "Extra pod volumes (core/v1 Volume objects), e.g. Secrets behind security.apiTLS / security.grpcTLS paths.",
+      "items": {
+        "type": "object",
+        "required": [
+          "name"
+        ]
+      }
+    },
+    "extraVolumeMounts": {
+      "type": "array",
+      "description": "Extra volume mounts for the manager container (core/v1 VolumeMount objects).",
+      "items": {
+        "type": "object",
+        "required": [
+          "name",
+          "mountPath"
+        ]
       }
     }
   },

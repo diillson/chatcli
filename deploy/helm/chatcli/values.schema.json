@@ -76,15 +76,15 @@
           "type": "integer",
           "minimum": 0,
           "maximum": 65535,
-          "description": "Metrics endpoint port. Set to 0 to disable."
+          "description": "Metrics endpoint port; the same listener serves GET /healthz for the liveness and startup probes. Set to 0 to disable metrics (probes then fall back to a TCP connect on the gRPC port)."
         },
         "token": {
           "type": "string",
-          "description": "Authentication token for the server."
+          "description": "Shared bearer token for the server, delivered as CHATCLI_SERVER_TOKEN from a Secret (never as a container arg). Required in-cluster unless JWT or mTLS is configured."
         },
         "grpcReflection": {
           "type": "boolean",
-          "description": "Enable gRPC reflection for debugging."
+          "description": "Sets CHATCLI_GRPC_REFLECTION. Currently has no effect: `chatcli server` does not expose the internal switch reflection also needs."
         }
       }
     },
@@ -237,13 +237,20 @@
                   "type": "string"
                 },
                 "description": "Built-in plugin names this MCP server replaces (e.g. [\"@webfetch\", \"@websearch\"]). When connected, these built-ins are hidden; on disconnect they are restored automatically."
+              },
+              "env": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "description": "Extra environment variables for a stdio MCP server process."
               }
             }
           }
         },
         "existingConfigMap": {
           "type": "string",
-          "description": "Name of an existing ConfigMap containing MCP server configuration."
+          "description": "Existing ConfigMap with a mcp_servers.json key. Mounted at /etc/chatcli/mcp and passed as --mcp-config; takes precedence over servers."
         }
       }
     },
@@ -520,7 +527,7 @@
             },
             "tag": {
               "type": "string",
-              "description": "Image tag. Must be a fully-qualified patch tag (e.g. v1.31.10) \u2014 major-minor stubs like v1.31 are NOT resolvable on registry.k8s.io.",
+              "description": "Image tag. Must be a fully-qualified patch tag (e.g. v1.31.10) — major-minor stubs like v1.31 are NOT resolvable on registry.k8s.io.",
               "default": "v1.31.10"
             },
             "pullPolicy": {
@@ -724,6 +731,12 @@
           "minimum": 1,
           "maximum": 100,
           "description": "Target CPU utilization percentage for scaling."
+        },
+        "targetMemoryUtilizationPercentage": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100,
+          "description": "Optional target memory utilization percentage; unset = scale on CPU only."
         }
       }
     },
@@ -756,7 +769,7 @@
               "type": "string"
             }
           ],
-          "description": "Maximum number or percentage of pods that can be unavailable."
+          "description": "Maximum number or percentage of pods that can be unavailable. Used only when minAvailable is 0 or unset."
         }
       }
     },
@@ -795,6 +808,13 @@
               }
             },
             "additionalProperties": false
+          }
+        },
+        "ingressFrom": {
+          "type": "array",
+          "description": "NetworkPolicyPeer list allowed to reach the gRPC and metrics ports. Empty = any source.",
+          "items": {
+            "type": "object"
           }
         }
       }
@@ -854,6 +874,27 @@
         "type": "object"
       }
     },
+    "extraVolumes": {
+      "type": "array",
+      "description": "Extra pod volumes (core/v1 Volume objects), e.g. a Secret with the mTLS client CA.",
+      "items": {
+        "type": "object",
+        "required": [
+          "name"
+        ]
+      }
+    },
+    "extraVolumeMounts": {
+      "type": "array",
+      "description": "Extra volume mounts for the server container (core/v1 VolumeMount objects).",
+      "items": {
+        "type": "object",
+        "required": [
+          "name",
+          "mountPath"
+        ]
+      }
+    },
     "persistence": {
       "type": "object",
       "description": "Persistent volume configuration.",
@@ -865,7 +906,7 @@
         },
         "storageClass": {
           "type": "string",
-          "description": "Storage class name. Use '-' for default."
+          "description": "StorageClass name. Empty = cluster default; '-' = storageClassName \"\" (no dynamic provisioning)."
         },
         "accessModes": {
           "type": "array",
@@ -1043,7 +1084,7 @@
             "string",
             "integer"
           ],
-          "description": "Rate limit burst size. Default: 30."
+          "description": "Rate limit burst size. Default: 20."
         },
         "maxRecvMsgSize": {
           "type": [
@@ -1068,11 +1109,11 @@
         },
         "bindAddress": {
           "type": "string",
-          "description": "Server bind address. Default: 127.0.0.1. Set 0.0.0.0 to expose."
+          "description": "Server bind address. Empty = 0.0.0.0 inside Kubernetes, 127.0.0.1 elsewhere. Set 127.0.0.1 to keep the listener pod-local."
         },
         "auditLogPath": {
           "type": "string",
-          "description": "File path for JSON-lines audit log."
+          "description": "Absolute path for the hash-chained JSON-lines audit log; must be on a writable mount."
         },
         "debug": {
           "type": "boolean",
@@ -1109,7 +1150,7 @@
         },
         "allowInsecure": {
           "type": "boolean",
-          "description": "Allow non-TLS gRPC connections. Default: false."
+          "description": "Sets CHATCLI_ALLOW_INSECURE, which only the chatcli client reads; it does not change the server listener."
         },
         "encryptionKey": {
           "type": "string",
@@ -1129,7 +1170,7 @@
         },
         "tlsClientCA": {
           "type": "string",
-          "description": "Path to the CA bundle client certificates are verified against (mutual TLS). Requires tls.cert and tls.key."
+          "description": "Path inside the container to the CA bundle client certificates are verified against (mutual TLS). Requires tls.enabled with tls.certFile and tls.keyFile. Mount it from tls.existingSecret (ca.crt) or extraVolumes."
         },
         "mtlsRole": {
           "type": "string",

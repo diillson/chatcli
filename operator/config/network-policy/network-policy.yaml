@@ -1,3 +1,12 @@
+# Optional NetworkPolicy for the operator pod deployed by `make deploy`.
+# Apply it with `make deploy-network-policy` (remove with
+# `make undeploy-network-policy`). The Helm chart has the same policy
+# behind networkPolicy.enabled.
+#
+# Ports the operator listens on (config/manager/manager.yaml):
+#   8090  REST API + web dashboard (HTTP, or HTTPS with CHATCLI_AIOPS_TLS_*)
+#   8080  Prometheus metrics (plain HTTP)
+#   8081  health probes (/healthz, /readyz)
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -9,40 +18,49 @@ metadata:
 spec:
   podSelector:
     matchLabels:
-      control-plane: controller-manager
+      app.kubernetes.io/name: chatcli-operator
+      app.kubernetes.io/component: controller
   policyTypes:
     - Ingress
     - Egress
   ingress:
-    # Allow REST API access (port 8090)
+    # REST API and dashboard. Narrow with a `from:` block to the namespaces
+    # your users or ingress controller run in.
     - ports:
         - protocol: TCP
           port: 8090
-    # Allow metrics scraping (port 8443)
+    # Metrics scraping from the monitoring namespace.
     - ports:
         - protocol: TCP
-          port: 8443
+          port: 8080
       from:
         - namespaceSelector:
             matchLabels:
               kubernetes.io/metadata.name: monitoring
+    # Health probes (kubelet traffic is exempt on most CNIs, not all).
+    - ports:
+        - protocol: TCP
+          port: 8081
   egress:
-    # Allow DNS resolution
+    # DNS resolution
     - ports:
         - protocol: UDP
           port: 53
         - protocol: TCP
           port: 53
-    # Allow Kubernetes API server (typically port 443 or 6443)
+    # Kubernetes API server (443 on most managed clusters, 6443 otherwise),
+    # plus HTTPS for notification webhooks and git over HTTPS.
     - ports:
         - protocol: TCP
           port: 443
         - protocol: TCP
           port: 6443
-    # Allow gRPC server communication (configurable port)
+    # gRPC to the ChatCLI server of each Instance (spec.server.port).
     - ports:
         - protocol: TCP
           port: 50051
-    # Block cloud metadata endpoints explicitly via CIDR deny
-    # Note: NetworkPolicy doesn't support deny rules natively.
-    # Use a NetworkPolicy engine like Calico or Cilium for explicit deny of 169.254.169.254/32
+    # Add the port of PROMETHEUS_URL (commonly 9090), SMTP (587/465) or
+    # git over SSH (22) here if the operator uses them.
+    #
+    # Cloud metadata endpoints (169.254.169.254) cannot be denied by a plain
+    # NetworkPolicy; use Calico or Cilium policies for an explicit deny.

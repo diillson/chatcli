@@ -6,7 +6,9 @@
 # ServiceMonitor and CRD upgrades are all handled there):
 #
 #   helm install chatcli oci://ghcr.io/diillson/charts/chatcli \
-#     --set llm.provider=OPENAI --set secrets.openaiApiKey=sk-...
+#     --namespace chatcli --create-namespace \
+#     --set llm.provider=OPENAI --set secrets.openaiApiKey=sk-... \
+#     --set server.token="$(openssl rand -hex 32)"
 #
 # Before applying:
 #   kubectl create secret generic chatcli-server \
@@ -56,7 +58,8 @@ spec:
         - name: chatcli
           # Pin to a release tag in production; "latest" is for evaluation only.
           image: ghcr.io/diillson/chatcli:latest
-          args: ["server"]
+          # The image ENTRYPOINT is already `chatcli server`; stated explicitly.
+          command: ["chatcli", "server"]
           ports:
             - name: grpc
               containerPort: 50051
@@ -75,16 +78,30 @@ spec:
           envFrom:
             - secretRef:
                 name: chatcli-server
+          # No kubelet gRPC probe: it cannot speak TLS. HTTP /healthz and TCP
+          # work for every server image version and with or without TLS.
+          # Liveness and startup use GET /healthz on the metrics port;
+          # readiness checks the gRPC listener with a TCP connect.
+          startupProbe:
+            httpGet:
+              path: /healthz
+              port: metrics
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 30
           livenessProbe:
-            grpc:
-              port: 50051
-            initialDelaySeconds: 10
-            periodSeconds: 30
+            httpGet:
+              path: /healthz
+              port: metrics
+            periodSeconds: 20
+            timeoutSeconds: 5
+            failureThreshold: 3
           readinessProbe:
-            grpc:
-              port: 50051
-            initialDelaySeconds: 5
+            tcpSocket:
+              port: grpc
             periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true
