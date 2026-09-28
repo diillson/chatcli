@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"fmt"
+	"strings"
 	"time"
 	"unicode/utf8"
 
@@ -150,26 +151,55 @@ func (ar *AuditRecorder) RecordRemediationFailed(ctx context.Context, plan *plat
 	})
 }
 
+// RecordApprovalRequested is written by the remediation controller, which
+// creates the request when a plan needs a human.
 func (ar *AuditRecorder) RecordApprovalRequested(ctx context.Context, req *platformv1alpha1.ApprovalRequest) error {
 	return ar.Record(ctx, AuditEventParams{
-		EventType: "approval_requested", ActorType: "controller", ActorName: "ApprovalReconciler", ActorController: "approval-controller",
+		EventType: "approval_requested", ActorType: "controller", ActorName: "RemediationReconciler", ActorController: "remediation-controller",
 		ResourceKind: "ApprovalRequest", ResourceName: req.Name, ResourceNamespace: req.Namespace, ResourceUID: string(req.UID),
 		Details:  map[string]string{"issue": req.Spec.IssueRef.Name, "plan": req.Spec.RemediationPlanRef, "rule": req.Spec.RuleName},
 		Severity: "info", CorrelationID: req.Spec.IssueRef.Name,
 	})
 }
 
+// RecordApprovalDecision names who decided: the approvers recorded in
+// status.decisions for a human decision, the approval controller for an
+// auto-approval or an expiry. The remediation controller writes the event
+// when the plan leaves WaitingApproval.
 func (ar *AuditRecorder) RecordApprovalDecision(ctx context.Context, req *platformv1alpha1.ApprovalRequest, decision string) error {
 	sev := "info"
 	if decision == "rejected" || decision == "expired" {
 		sev = "warning"
 	}
+	approvers := approversFor(req, decision)
+	actorType, actorName := "controller", "ApprovalReconciler"
+	if approvers != "" {
+		actorType, actorName = "user", approvers
+	}
 	return ar.Record(ctx, AuditEventParams{
-		EventType: "approval_" + decision, ActorType: "controller", ActorName: "ApprovalReconciler", ActorController: "approval-controller",
+		EventType: "approval_" + decision, ActorType: actorType, ActorName: actorName, ActorController: "remediation-controller",
 		ResourceKind: "ApprovalRequest", ResourceName: req.Name, ResourceNamespace: req.Namespace, ResourceUID: string(req.UID),
-		Details:  map[string]string{"issue": req.Spec.IssueRef.Name, "decision": decision, "auto": fmt.Sprintf("%t", req.Status.AutoApproved)},
+		Details: map[string]string{
+			"issue": req.Spec.IssueRef.Name, "decision": decision,
+			"auto": fmt.Sprintf("%t", req.Status.AutoApproved), "approvers": approvers,
+		},
 		Severity: sev, CorrelationID: req.Spec.IssueRef.Name,
 	})
+}
+
+// approversFor joins the approvers whose recorded decision matches the
+// outcome; empty for an auto-approval or an expiry.
+func approversFor(req *platformv1alpha1.ApprovalRequest, decision string) string {
+	if req.Status.AutoApproved {
+		return ""
+	}
+	var names []string
+	for _, d := range req.Status.Decisions {
+		if d.Decision == decision && d.Approver != "" {
+			names = append(names, d.Approver)
+		}
+	}
+	return strings.Join(names, ",")
 }
 
 func (ar *AuditRecorder) RecordNotificationSent(ctx context.Context, channelName string, issue *platformv1alpha1.Issue, success bool, errMsg string) error {

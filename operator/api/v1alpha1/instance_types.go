@@ -642,11 +642,12 @@ type AIOpsSpec struct {
 
 	// ResolutionCooldownMinutes is how long (in minutes) after an issue is resolved before
 	// new anomalies for the same resource can create a new issue. Prevents stale re-triggers.
+	// 0 turns the cooldown off. Left out, it defaults to 10.
 	// +kubebuilder:default=10
 	// +kubebuilder:validation:Minimum=0
 	// +kubebuilder:validation:Maximum=120
 	// +optional
-	ResolutionCooldownMinutes int32 `json:"resolutionCooldownMinutes,omitempty"`
+	ResolutionCooldownMinutes int32 `json:"resolutionCooldownMinutes"`
 
 	// DedupTTLMinutes is how long (in minutes) the bridge dedup cache retains alert hashes.
 	// After this period, the same alert can create a new Anomaly CR.
@@ -692,12 +693,17 @@ func (a *AIOpsSpec) GetMaxRemediationAttempts() int32 {
 	return 5
 }
 
-// GetResolutionCooldown returns the configured cooldown or the default (10 minutes).
+// GetResolutionCooldown returns the configured cooldown, 0 when it is turned
+// off, or the default (10 minutes) when there are no AIOps settings. The API
+// server defaults a missing field to 10, so a stored 0 is an explicit 0.
 func (a *AIOpsSpec) GetResolutionCooldown() time.Duration {
-	if a != nil && a.ResolutionCooldownMinutes > 0 {
-		return time.Duration(a.ResolutionCooldownMinutes) * time.Minute
+	if a == nil {
+		return 10 * time.Minute
 	}
-	return 10 * time.Minute
+	if a.ResolutionCooldownMinutes <= 0 {
+		return 0
+	}
+	return time.Duration(a.ResolutionCooldownMinutes) * time.Minute
 }
 
 // GetDedupTTL returns the configured dedup TTL or the default (30 minutes).

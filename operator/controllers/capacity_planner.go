@@ -2,7 +2,6 @@ package controllers
 
 import (
 	"context"
-	"math"
 	"time"
 
 	appsv1 "k8s.io/api/apps/v1"
@@ -16,6 +15,13 @@ type CapacityPlanner struct {
 	client client.Client
 }
 
+// CapacityForecast is served as-is by GET /api/v1/analytics/capacity.
+//
+// The operator keeps no usage history: CurrentUsage is what the first
+// container requests (not measured usage), and no trend or exhaustion date
+// can be projected, so Trend.Direction is "insufficient_history" and
+// HistoryAvailable is false. Urgency ("plan" or "none") comes from what is
+// known: requests close to limits and repeated incidents on the resource.
 type CapacityForecast struct {
 	Resource            platformv1alpha1.ResourceRef
 	CurrentUsage        ResourceUsage
@@ -24,6 +30,13 @@ type CapacityForecast struct {
 	Trend               ResourceTrend
 	Forecast            ForecastResult
 	IncidentCorrelation IncidentResourceCorrelation
+	// UsageSource says where CurrentUsage comes from: "requests".
+	UsageSource string
+	// HistoryAvailable is false: no usage samples are collected.
+	HistoryAvailable bool
+	// Urgency is "plan" when requests reach 80% of limits or the resource
+	// is a bottleneck, and "none" otherwise.
+	Urgency string
 }
 
 type ResourceUsage struct {
@@ -56,11 +69,6 @@ type IncidentResourceCorrelation struct {
 	ResourceIsBottleneck     bool
 }
 
-type dataPoint struct {
-	X float64 // timestamp as seconds from epoch
-	Y float64 // value
-}
-
 func NewCapacityPlanner(c client.Client) *CapacityPlanner {
 	return &CapacityPlanner{client: c}
 }
@@ -75,55 +83,34 @@ func (cp *CapacityPlanner) AnalyzeResourceTrends(ctx context.Context, resource p
 	}
 
 	fillUsageFromDeployment(forecast, &deploy)
+	forecast.UsageSource = "requests"
 
-	// Query anomalies for trend analysis
-	var anomalies platformv1alpha1.AnomalyList
-	if err := cp.client.List(ctx, &anomalies, client.InNamespace(resource.Namespace)); err != nil {
-		return forecast, nil
-	}
+	// No usage history is collected, so there is no trend to fit: the
+	// former regression ran over points that all held the current value and
+	// always reported a flat, "stable" trend. Say so instead.
+	forecast.HistoryAvailable = false
+	forecast.Trend.Direction = TrendInsufficientHistory
 
 	cutoff := time.Now().Add(-window)
-	var cpuPoints, memPoints []dataPoint
-	for _, a := range anomalies.Items {
-		if a.CreationTimestamp.Time.Before(cutoff) || a.Spec.Resource.Name != resource.Name {
-			continue
-		}
-		ts := float64(a.CreationTimestamp.Unix())
-		switch a.Spec.SignalType {
-		case platformv1alpha1.SignalCPUHigh:
-			cpuPoints = append(cpuPoints, dataPoint{X: ts, Y: forecast.UsagePercentage.CPU})
-		case platformv1alpha1.SignalMemoryHigh:
-			memPoints = append(memPoints, dataPoint{X: ts, Y: forecast.UsagePercentage.Memory})
-		}
-	}
-
-	// Linear regression for trends
-	if len(cpuPoints) >= 2 {
-		slope, _ := linearRegression(cpuPoints)
-		forecast.Trend.CPUTrendPerDay = slope * 86400 // convert per-second to per-day
-	}
-	if len(memPoints) >= 2 {
-		slope, _ := linearRegression(memPoints)
-		forecast.Trend.MemoryTrendPerDay = slope * 86400
-	}
-
-	// Determine direction
-	if forecast.Trend.CPUTrendPerDay > 1 || forecast.Trend.MemoryTrendPerDay > 1 {
-		forecast.Trend.Direction = "increasing"
-	} else if forecast.Trend.CPUTrendPerDay < -1 || forecast.Trend.MemoryTrendPerDay < -1 {
-		forecast.Trend.Direction = "decreasing"
-	} else {
-		forecast.Trend.Direction = "stable"
-	}
-
-	fillExhaustionForecast(forecast)
-
-	// Recommendation
-	forecast.Forecast.Recommendation = cp.generateRecommendation(forecast)
-
 	cp.fillIncidentCorrelation(ctx, forecast, resource, cutoff)
 
+	forecast.Forecast.Recommendation = cp.generateRecommendation(forecast)
+	forecast.Urgency = capacityUrgency(forecast)
+
 	return forecast, nil
+}
+
+// TrendInsufficientHistory is the trend direction reported while no usage
+// history exists to fit one.
+const TrendInsufficientHistory = "insufficient_history"
+
+// capacityUrgency is "plan" when requests reach 80% of limits or the
+// resource keeps having incidents, "none" otherwise.
+func capacityUrgency(f *CapacityForecast) string {
+	if f.UsagePercentage.CPU >= 80 || f.UsagePercentage.Memory >= 80 || f.IncidentCorrelation.ResourceIsBottleneck {
+		return "plan"
+	}
+	return "none"
 }
 
 // fillUsageFromDeployment extracts limits and request-based current usage from
@@ -215,35 +202,16 @@ func (cp *CapacityPlanner) generateRecommendation(f *CapacityForecast) string {
 		return "CPU exhaustion projected within 30 days. Plan capacity increase."
 	}
 	if f.UsagePercentage.CPU > 80 || f.UsagePercentage.Memory > 80 {
-		return "Resource usage above 80%. Consider increasing limits proactively."
+		return "Requests are above 80% of limits. Consider increasing limits proactively."
+	}
+	if f.IncidentCorrelation.ResourceIsBottleneck {
+		return "Repeated incidents on this resource. Review its capacity."
+	}
+	if f.Trend.Direction == TrendInsufficientHistory {
+		return "No usage history is collected, so no trend or exhaustion date can be projected; requests are within limits."
 	}
 	if f.Trend.Direction == "stable" {
 		return "Resource usage is stable. No action needed."
 	}
 	return "Resource trends are within acceptable ranges."
-}
-
-// linearRegression performs least-squares linear regression on data points.
-func linearRegression(points []dataPoint) (slope, intercept float64) {
-	n := float64(len(points))
-	if n < 2 {
-		return 0, 0
-	}
-
-	var sumX, sumY, sumXY, sumX2 float64
-	for _, p := range points {
-		sumX += p.X
-		sumY += p.Y
-		sumXY += p.X * p.Y
-		sumX2 += p.X * p.X
-	}
-
-	denom := n*sumX2 - sumX*sumX
-	if math.Abs(denom) < 1e-10 {
-		return 0, sumY / n
-	}
-
-	slope = (n*sumXY - sumX*sumY) / denom
-	intercept = (sumY - slope*sumX) / n
-	return slope, intercept
 }

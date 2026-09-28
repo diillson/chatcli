@@ -3839,7 +3839,7 @@ async function loadCapacityWarnings() {
             return `<div style="padding:0.3rem 0; border-bottom:1px solid var(--border);">
               <span style="color:${urgColor}; font-weight:600; text-transform:uppercase; font-size:0.7rem" data-urgency="${escapeHtml(w.Urgency || 'unknown')}">${escapeHtml(enumLabel('urgency', w.Urgency, 'common.unknown'))}</span>
               ${resourceKindBadge(res.Kind || t('common.unknown'))} ${escapeHtml(res.Name || '-')}
-              <span style="color:var(--text-muted); font-size:0.8rem">— ${escapeHtml(w.Recommendation || '')}</span>
+              <span style="color:var(--text-muted); font-size:0.8rem">— ${escapeHtml((w.Forecast && w.Forecast.Recommendation) || w.Recommendation || '')}</span>
             </div>`;
           }).join('')}
         </div>

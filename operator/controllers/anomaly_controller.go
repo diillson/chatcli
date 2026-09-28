@@ -100,8 +100,10 @@ func (r *AnomalyReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 			return ctrl.Result{}, fmt.Errorf("marking anomaly correlated: %w", err)
 		}
 
-		// Update issue risk score based on new anomaly count
-		related, err := r.CorrelationEngine.FindRelatedAnomalies(ctx, resource, CorrelationTimeWindow)
+		// Update issue risk score from every anomaly the Issue now holds,
+		// the one just attached included (it is correlated by now, which
+		// kept it out of the uncorrelated lookup used before).
+		related, err := r.issueAnomalies(ctx, existingIssue, CorrelationTimeWindow)
 		if err != nil {
 			log.Error(err, "Failed to find related anomalies for risk recalculation")
 		} else {
@@ -118,11 +120,14 @@ func (r *AnomalyReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		return ctrl.Result{}, nil
 	}
 
-	// Cooldown: check if same resource was recently resolved (suppress stale re-triggers)
-	resolutionCooldown := r.getResolutionCooldown(ctx)
-	recentlyResolved, err := r.CorrelationEngine.FindRecentlyResolvedIssue(ctx, resource, resolutionCooldown)
-	if err != nil {
-		log.Error(err, "Failed to check recently resolved issues")
+	// Cooldown: check if same resource was recently resolved (suppress stale
+	// re-triggers). resolutionCooldownMinutes 0 turns the check off.
+	var recentlyResolved *platformv1alpha1.Issue
+	if resolutionCooldown := r.getResolutionCooldown(ctx, anomaly.Labels); resolutionCooldown > 0 {
+		recentlyResolved, err = r.CorrelationEngine.FindRecentlyResolvedIssue(ctx, resource, resolutionCooldown)
+		if err != nil {
+			log.Error(err, "Failed to check recently resolved issues")
+		}
 	}
 	if recentlyResolved != nil {
 		log.Info("Suppressing anomaly: same resource recently resolved",
@@ -173,6 +178,12 @@ func (r *AnomalyReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		"platform.chatcli.io/inc-id":   incID,
 		"platform.chatcli.io/resource": resource.Name,
 		"platform.chatcli.io/signal":   string(anomaly.Spec.SignalType),
+	}
+	// Keep the source Instance so the Issue is governed by its settings.
+	for _, key := range []string{labelSourceInstance, labelSourceInstanceNamespace} {
+		if v := anomaly.Labels[key]; v != "" {
+			labels[key] = v
+		}
 	}
 
 	// GAP-04 fix (chaos test report 2026-05-23): when the Anomaly fires for a
@@ -233,13 +244,30 @@ func (r *AnomalyReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	return ctrl.Result{}, nil
 }
 
-// getResolutionCooldown reads the cooldown from the first Instance's AIOps config.
-func (r *AnomalyReconciler) getResolutionCooldown(ctx context.Context) time.Duration {
-	var instances platformv1alpha1.InstanceList
-	if err := r.List(ctx, &instances); err == nil && len(instances.Items) > 0 {
-		return instances.Items[0].Spec.AIOps.GetResolutionCooldown()
+// getResolutionCooldown reads the cooldown from the AIOps settings of the
+// Instance the anomaly came from (see aiopsInstance).
+func (r *AnomalyReconciler) getResolutionCooldown(ctx context.Context, labels map[string]string) time.Duration {
+	if inst := aiopsInstance(ctx, r.Client, labels); inst != nil {
+		return inst.Spec.AIOps.GetResolutionCooldown()
 	}
 	return 10 * time.Minute // default
+}
+
+// issueAnomalies returns the anomalies of the window correlated to issue.
+func (r *AnomalyReconciler) issueAnomalies(ctx context.Context, issue *platformv1alpha1.Issue, window time.Duration) ([]platformv1alpha1.Anomaly, error) {
+	var list platformv1alpha1.AnomalyList
+	if err := r.List(ctx, &list, client.InNamespace(issue.Namespace)); err != nil {
+		return nil, fmt.Errorf("listing anomalies: %w", err)
+	}
+	cutoff := time.Now().Add(-window)
+	out := make([]platformv1alpha1.Anomaly, 0, len(list.Items))
+	for _, a := range list.Items {
+		if a.Status.IssueRef == nil || a.Status.IssueRef.Name != issue.Name || a.CreationTimestamp.Time.Before(cutoff) {
+			continue
+		}
+		out = append(out, a)
+	}
+	return out, nil
 }
 
 // IsChaosInduced reports whether the Issue was created in the context of an
