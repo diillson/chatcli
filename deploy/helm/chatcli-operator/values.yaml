@@ -13,7 +13,9 @@ imagePullSecrets: []
 nameOverride: ""
 fullnameOverride: ""
 
-# Leader election (recommended for HA with replicaCount > 1)
+# Leader election (lease chatcli-operator-lock); keep it on with
+# replicaCount > 1. The reconcilers and the alert bridge run on the leader
+# only; every replica serves the REST API and dashboard.
 leaderElect: true
 
 # AIOps REST API and Web Dashboard
@@ -136,7 +138,9 @@ clusterName: ""
 
 # Security hardening configuration for the operator
 security:
-  # Dev mode disables authentication on the REST API (NEVER use in production)
+  # Dev mode: while no API key is configured, the REST API admits every
+  # call as admin (NEVER use in production). It has no effect once a key
+  # exists.
   devMode: false
   # TLS (1.3) for the REST API and dashboard (port 8090). Paths inside the
   # container: mount the Secret with extraVolumes + extraVolumeMounts.
@@ -153,15 +157,16 @@ security:
     keyFile: ""   # CHATCLI_GRPC_TLS_KEY
     caFile: ""    # CHATCLI_GRPC_TLS_CA
   # Extra resource kinds remediation may touch (comma-separated), added to
-  # the 17 built-in defaults
+  # the 16 built-in defaults. The operator's ClusterRole must allow the kind
+  # too: the chart grants nothing beyond the defaults, so bind an extra
+  # ClusterRole to the operator ServiceAccount for it.
   allowedResourceTypes: ""
   # Custom log scrub patterns (comma-separated regexes)
   logScrubPatterns: ""
   # Extra read-only diagnostic commands the remediation engine may run
-  # (comma-separated; appended to the built-in allowlist). Read by the
+  # (comma-separated; appended to the 100 built-ins). Read by the
   # operator process, so it is set here, not on the Instance.
   allowedDiagnosticCommands: ""
-  # CORS allowed origin (empty = deny all)
   # CORS for the operator REST API (dashboard). Deny-all until an origin is
   # named: with none, a browser blocks every cross-origin call.
   corsOrigin: ""                # a single origin (kept for compatibility)
@@ -184,6 +189,7 @@ security:
 # false to manage the Secret yourself (kubectl, External Secrets, Vault…);
 # note that keys set here are stored in the Helm release.
 # Roles: viewer (read), operator (acknowledge/approve/…), admin (all).
+# An edit that is not valid YAML keeps the last good set in force.
 # name (optional) is the identity recorded on the approval decisions the key
 # takes (falls back to description, then to a fingerprint of the key). A
 # quorum counts each key once, so give each approver their own key.

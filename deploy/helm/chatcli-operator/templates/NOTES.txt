@@ -32,15 +32,19 @@ CRDs out of band.
 ==================================================================================
 
 A. EVERY INSTANCE NEEDS A CREDENTIAL AND TLS
-   - Credential: spec.server.token (Secret ref), security.jwtSecretRef, or
-     tls.clientCASecretName. Without one the operator does not create the
-     Deployment and sets AuthenticationConfigured=False.
+   - Credential: spec.server.token (Secret ref),
+     spec.server.security.jwtSecretRef (or jwtPublicKeyRef plus
+     operatorTokenRef / operatorClientCertSecretName), or mTLS with
+     spec.server.tls.clientCASecretName. Without one the operator does not
+     create the Deployment and sets AuthenticationConfigured=False.
    - TLS: the operator always dials the server over TLS 1.3. Set
      spec.server.tls.enabled: true and spec.server.tls.secretName to a Secret
      with tls.crt, tls.key and (for a private/self-signed CA) ca.crt, valid
      for <instance>.<namespace>.svc.cluster.local. Without TLS the server runs
      but ServerReachable=False and the AIOps pipeline cannot reach it.
-   Check both conditions with:
+   ServerReachable is re-probed every 5 minutes. Rotating a referenced Secret
+   or editing a mounted ConfigMap rolls the Instance pods.
+   Check the conditions with:
 
        kubectl get instance <name> -n <namespace> -o jsonpath='{range .status.conditions[*]}{.type}={.status} {.reason}{"\n"}{end}'
 
@@ -56,11 +60,13 @@ B. DASHBOARD / REST API KEYS
    api-keys) in {{ .Release.Namespace }}, re-read every 30s. Create it, e.g.:
 
        kubectl -n {{ .Release.Namespace }} create secret generic chatcli-operator-secrets \
-         --from-literal=api-keys="$(printf -- '- key: "%s"\n  role: admin\n  description: ops\n' "$(openssl rand -hex 32)")"
+         --from-literal=api-keys="$(printf -- '- key: "%s"\n  role: admin\n  name: ops\n' "$(openssl rand -hex 32)")"
 
    or install with --set apiKeys.create=true and apiKeys.entries (roles:
-   viewer, operator, admin).
+   viewer, operator, admin; give each approver a key and a name).
 {{- end }}
+   /api/ calls are rate limited: 30/min per client host without a valid key,
+   600/min per key (HTTP 429 beyond that). Every replica serves the API.
    Open the dashboard with:
 
        kubectl -n {{ .Release.Namespace }} port-forward svc/{{ include "chatcli-operator.fullname" . }} {{ .Values.api.port }}:{{ .Values.api.port }}
@@ -121,11 +127,14 @@ B. DASHBOARD / REST API KEYS
 
 4. (Optional) PAUSE NOTIFICATIONS DURING CHAOS DRILLS
    Issues that correlate with an active ChaosExperiment are labeled
-   `platform.chatcli.io/source=chaos-experiment` and skipped from escalation
-   automatically. NotificationPolicy rules still match them: rules filter by
-   severity, state, signal type, namespace and resource kind, not by label.
-   To keep drills out of regular channels, run them in namespaces your rules
-   do not list, or disable the policy for the duration of the drill.
+   `platform.chatcli.io/source=chaos-experiment`: they are not escalated and
+   are left out of MTTD/MTTR, but remediation still runs and
+   NotificationPolicy rules still match them (rules filter by severity,
+   state, signal type, namespace and resource kind, not by label). To keep
+   drills out of regular channels, run them in namespaces your rules do not
+   list, or disable the policy for the duration of the drill. Only pod_kill,
+   pod_failure, cpu_stress, memory_stress and disk_stress run; network_delay,
+   network_loss and any spec.schedule fail at once without injecting.
 
 Operator guide: https://chatcli.edilsonfreitas.com/features/k8s-operator
 Production setup: https://chatcli.edilsonfreitas.com/cookbook/aiops-production-setup

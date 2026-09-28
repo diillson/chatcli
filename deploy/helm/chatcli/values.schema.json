@@ -84,7 +84,7 @@
         },
         "grpcReflection": {
           "type": "boolean",
-          "description": "Sets CHATCLI_GRPC_REFLECTION. Currently has no effect: `chatcli server` does not expose the internal switch reflection also needs."
+          "description": "Sets CHATCLI_GRPC_REFLECTION=true, which registers gRPC server reflection so grpcurl and similar tools can list the services. Reflection calls still need the server credential. Keep it off in production."
         }
       }
     },
@@ -95,19 +95,19 @@
       "properties": {
         "enabled": {
           "type": "boolean",
-          "description": "Enable TLS."
+          "description": "Serve gRPC over TLS 1.3. Needs existingSecret or both certFile and keyFile, otherwise the render fails."
         },
         "certFile": {
           "type": "string",
-          "description": "Path to the TLS certificate file inside the container."
+          "description": "Path to the TLS certificate file inside the container. With existingSecret it defaults to /etc/chatcli/tls/tls.crt."
         },
         "keyFile": {
           "type": "string",
-          "description": "Path to the TLS private key file inside the container."
+          "description": "Path to the TLS private key file inside the container. With existingSecret it defaults to /etc/chatcli/tls/tls.key."
         },
         "existingSecret": {
           "type": "string",
-          "description": "Name of an existing Kubernetes secret containing TLS cert and key."
+          "description": "Existing Secret with tls.crt and tls.key (a ca.crt key can serve as the mTLS client CA), mounted read-only at /etc/chatcli/tls."
         }
       }
     },
@@ -149,11 +149,11 @@
       "properties": {
         "enabled": {
           "type": "boolean",
-          "description": "Enable fallback provider chain."
+          "description": "Render the fallback chain (CHATCLI_FALLBACK_PROVIDERS, llm.provider first unless listed)."
         },
         "providers": {
           "type": "array",
-          "description": "Ordered list of fallback providers.",
+          "description": "Ordered providers to try after llm.provider.",
           "items": {
             "type": "object",
             "additionalProperties": false,
@@ -164,7 +164,7 @@
               },
               "model": {
                 "type": "string",
-                "description": "Model to use with this provider."
+                "description": "Model for this provider (CHATCLI_FALLBACK_MODEL_<NAME>). Empty = the provider default model."
               }
             }
           }
@@ -172,7 +172,7 @@
         "maxRetries": {
           "type": "integer",
           "minimum": 0,
-          "description": "Maximum number of retry attempts across providers."
+          "description": "Maximum retries (CHATCLI_FALLBACK_MAX_RETRIES); 0 = no retries."
         },
         "cooldownBase": {
           "type": "string",
@@ -389,16 +389,16 @@
     },
     "watcher": {
       "type": "object",
-      "description": "Deployment watcher configuration for monitoring external workloads.",
+      "description": "Kubernetes workload watcher whose findings are injected into the LLM context.",
       "additionalProperties": false,
       "properties": {
         "enabled": {
           "type": "boolean",
-          "description": "Enable the deployment watcher."
+          "description": "Enable the workload watcher."
         },
         "deployment": {
           "type": "string",
-          "description": "Primary deployment name to watch."
+          "description": "Single-target mode (legacy): Deployment name to watch. Ignored when targets is set."
         },
         "namespace": {
           "type": "string",
@@ -406,7 +406,7 @@
         },
         "targets": {
           "type": "array",
-          "description": "List of additional deployments to watch.",
+          "description": "Multi-target list (takes precedence over deployment/namespace). Targets outside the release namespace switch RBAC to a ClusterRole.",
           "items": {
             "type": "object",
             "additionalProperties": false,
@@ -432,7 +432,7 @@
               },
               "namespace": {
                 "type": "string",
-                "description": "Namespace of the watched resource."
+                "description": "Namespace of the watched resource. Empty = default."
               },
               "metricsPort": {
                 "type": "integer",
@@ -468,7 +468,7 @@
         "maxContextChars": {
           "type": "integer",
           "minimum": 1000,
-          "description": "Maximum number of characters to include in the LLM context."
+          "description": "Maximum number of characters to include in the LLM context (multi-target mode)."
         }
       }
     },
@@ -501,7 +501,7 @@
       "properties": {
         "create": {
           "type": "boolean",
-          "description": "Create RBAC resources."
+          "description": "Create RBAC resources for the watcher. The defaults grant no access to Secrets."
         },
         "clusterWide": {
           "type": "boolean",
@@ -1069,7 +1069,7 @@
       "properties": {
         "jwtSecret": {
           "type": "string",
-          "description": "JWT signing secret for server authentication. For production use jwtSecretRef instead."
+          "description": "HS256 JWT secret (CHATCLI_JWT_SECRET). If JWT is the only credential and its material fails to load, the server refuses to start. For production use jwtSecretRef instead."
         },
         "jwtSecretRef": {
           "type": "object",
@@ -1153,7 +1153,7 @@
             "permissive",
             ""
           ],
-          "description": "Environment variable redaction mode. Default: permissive."
+          "description": "Environment variable redaction mode: off, permissive or strict. Default: permissive."
         },
         "allowUnsignedPlugins": {
           "type": "boolean",
@@ -1181,7 +1181,7 @@
         },
         "tlsClientCA": {
           "type": "string",
-          "description": "Path inside the container to the CA bundle client certificates are verified against (mutual TLS). Requires tls.enabled with tls.certFile and tls.keyFile. Mount it from tls.existingSecret (ca.crt) or extraVolumes."
+          "description": "Path inside the container to the CA bundle client certificates are verified against (mutual TLS). Requires tls.enabled (with existingSecret or both paths). Mount it from tls.existingSecret (ca.crt) or extraVolumes."
         },
         "mtlsRole": {
           "type": "string",
@@ -1193,7 +1193,7 @@
             "operator",
             "admin"
           ],
-          "description": "Role granted to callers identified by their client certificate alone (no bearer token). Default: user."
+          "description": "Role granted to callers identified by their client certificate alone (no bearer token): viewer/readonly, user/operator or admin. Default: user; unknown values mean readonly."
         },
         "jwtPublicKeyRef": {
           "type": "object",

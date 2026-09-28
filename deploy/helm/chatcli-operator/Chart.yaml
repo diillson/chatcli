@@ -37,6 +37,10 @@ annotations:
       description: security.auditLogPath is ignored; the operator no longer reads CHATCLI_AUDIT_LOG_PATH and the chart stopped rendering it
     - kind: fixed
       description: NOTES and README point security.allowedDiagnosticCommands at the operator, and state that Instances need a credential and TLS
+    - kind: fixed
+      description: README, NOTES and values describe the REST API on every replica, its rate limits, API key names and revocation, the fail-closed approval gate, the 16 default remediation kinds, the 5 runnable chaos types and the Instance probes, conditions and rollouts
+    - kind: fixed
+      description: The ServiceLevelObjective and ChaosExperiment examples validate against the current CRDs and no longer set fields the operator rejects or ignores
   artifacthub.io/prerelease: 'false'
   artifacthub.io/operator: 'true'
   artifacthub.io/operatorCapabilities: Seamless Upgrades
@@ -157,8 +161,7 @@ annotations:
         serviceName: api-server
         indicator:
           type: availability
-          metricSource: prometheus
-          prometheusQuery: 'sum(rate(http_requests_total{code!~"5.."}[5m])) / sum(rate(http_requests_total[5m]))'
+          metricSource: issues
         target:
           percentage: 99.9
           window: 30d
@@ -175,8 +178,10 @@ annotations:
           name: api-server
           namespace: production
         duration: 5m
-        schedule: "0 3 * * 1"
         dryRun: true
+        safetyChecks:
+          minHealthyPods: 1
+          abortOnIssueDetected: true
   artifacthub.io/links: |
     - name: Documentation
       url: https://chatcli.edilsonfreitas.com
