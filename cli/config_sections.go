@@ -540,6 +540,7 @@ func (cli *ChatCLI) showConfigGeneral() {
 	kv(p, "CHATCLI_LOG_MAX_BACKUPS", envOr("CHATCLI_LOG_MAX_BACKUPS"))
 	kv(p, "CHATCLI_LOG_MAX_AGE_DAYS", envOr("CHATCLI_LOG_MAX_AGE_DAYS"))
 	kv(p, "CHATCLI_LOG_COMPRESS", envBool("CHATCLI_LOG_COMPRESS"))
+	kv(p, "CHATCLI_LOG_STDERR", envOr("CHATCLI_LOG_STDERR"))
 
 	fmt.Println(p)
 	subheader(p, "cfg.sub.general.history")
