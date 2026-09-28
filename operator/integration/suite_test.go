@@ -19,6 +19,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
@@ -35,6 +36,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
+	"k8s.io/client-go/rest"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/envtest"
@@ -47,6 +49,26 @@ import (
 )
 
 var k8sClient client.Client
+
+// policyListFaults holds the namespaces where listing ApprovalPolicies
+// fails for the controllers.
+var policyListFaults sync.Map
+
+// faultyClient is the controllers' client with injectable read failures.
+type faultyClient struct {
+	client.Client
+}
+
+func (f *faultyClient) List(ctx context.Context, list client.ObjectList, opts ...client.ListOption) error {
+	if _, ok := list.(*platformv1alpha1.ApprovalPolicyList); ok {
+		lo := &client.ListOptions{}
+		lo.ApplyOptions(opts)
+		if _, fail := policyListFaults.Load(lo.Namespace); fail {
+			return fmt.Errorf("injected: approval policies unavailable in %s", lo.Namespace)
+		}
+	}
+	return f.Client.List(ctx, list, opts...)
+}
 
 // fakeServer stands in for the ChatCLI server: it answers the RPCs the
 // controllers call with deterministic content so the pipeline can be
@@ -139,6 +161,15 @@ func run(m *testing.M) int {
 		Scheme:                 scheme,
 		Metrics:                metricsserver.Options{BindAddress: "0"},
 		HealthProbeBindAddress: "0",
+		// The controllers' client can be told to fail chosen reads, so a
+		// scenario can prove a gate fails closed on a live API server.
+		NewClient: func(config *rest.Config, options client.Options) (client.Client, error) {
+			c, err := client.New(config, options)
+			if err != nil {
+				return nil, err
+			}
+			return &faultyClient{Client: c}, nil
+		},
 	})
 	if err != nil {
 		fmt.Println("integration: manager:", err)

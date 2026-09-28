@@ -365,17 +365,35 @@ rules:
       - create
       - update
       - patch
-  # Pods and logs (watcher, remediation restart, pod deletion)
+  # Pod logs (watcher, diagnostics)
   - apiGroups:
       - ""
     resources:
-      - pods
       - pods/log
     verbs:
       - get
       - list
       - watch
+  # Pods: create (chaos stress pods), update (chaos network annotations),
+  # delete (DeletePod, pod_kill / pod_failure, stress pod cleanup)
+  - apiGroups:
+      - ""
+    resources:
+      - pods
+    verbs:
+      - get
+      - list
+      - watch
+      - create
+      - update
       - delete
+  # DrainNode evicts through the Eviction API so PodDisruptionBudgets hold
+  - apiGroups:
+      - ""
+    resources:
+      - pods/eviction
+    verbs:
+      - create
   # ConfigMaps — no delete for remediation safety
   - apiGroups:
       - ""
@@ -448,6 +466,14 @@ rules:
       - get
       - list
       - watch
+      - create
+      - patch
+  # events.k8s.io/v1 Events the controllers emit (e.g. ApprovalGateUnavailable)
+  - apiGroups:
+      - events.k8s.io
+    resources:
+      - events
+    verbs:
       - create
       - patch
   # Namespaces (read for context)

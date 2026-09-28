@@ -524,7 +524,7 @@
         },
         "entries": {
           "type": "array",
-          "description": "API keys: key (the X-API-Key value), role (viewer, operator or admin), optional description.",
+          "description": "API keys: key (the X-API-Key value), role (viewer, operator or admin), optional name and description.",
           "items": {
             "type": "object",
             "additionalProperties": false,
@@ -544,6 +544,10 @@
                   "operator",
                   "admin"
                 ]
+              },
+              "name": {
+                "type": "string",
+                "description": "Identity recorded on the approval decisions taken with this key (falls back to description)."
               },
               "description": {
                 "type": "string"

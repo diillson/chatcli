@@ -123,6 +123,7 @@ func Controllers(mgr ctrl.Manager, o Options) (*Components, error) {
 			Client: c, Scheme: s, ServerClient: o.ServerClient, ContextBuilder: contextBuilder,
 			AuditRecorder: auditRecorder, PatternStore: patternStore, CostTracker: costTracker,
 			DecisionEngine: engine, ClusterTier: o.ClusterName, Federation: federation,
+			EventRecorder: mgr.GetEventRecorder("chatcli-remediation"),
 		}).SetupWithManager},
 		{"Anomaly", (&controllers.AnomalyReconciler{
 			Client: c, Scheme: s, NoiseReducer: noiseReducer,

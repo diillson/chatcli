@@ -16,6 +16,8 @@ import (
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	networkingv1 "k8s.io/api/networking/v1"
+	policyv1 "k8s.io/api/policy/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	apiresource "k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -412,66 +414,157 @@ func (r *RemediationReconciler) executeUncordonNode(ctx context.Context, resourc
 	return nil
 }
 
-// executeDrainNode cordons and evicts pods from a node.
-func (r *RemediationReconciler) executeDrainNode(ctx context.Context, resource platformv1alpha1.ResourceRef, params map[string]string) error {
+// Drain limits. A drain runs inside one reconcile, so its retries are
+// bounded: the "timeout" param (a Go duration, default 2m, at most 10m)
+// caps how long evictions refused by a PodDisruptionBudget are retried.
+const (
+	drainDefaultTimeout     = 2 * time.Minute
+	drainMaxTimeout         = 10 * time.Minute
+	drainGracePeriodSeconds = int64(30)
+)
+
+// drainRetryInterval is the wait between rounds of refused evictions; a
+// variable so tests can shorten it.
+var drainRetryInterval = 5 * time.Second
+
+// drainTimeout parses the optional "timeout" param of DrainNode.
+func drainTimeout(raw string) (time.Duration, error) {
+	if strings.TrimSpace(raw) == "" {
+		return drainDefaultTimeout, nil
+	}
+	d, err := time.ParseDuration(strings.TrimSpace(raw))
+	if err != nil || d <= 0 {
+		return 0, fmt.Errorf("invalid 'timeout' param %q: want a positive duration such as 90s or 5m", raw)
+	}
+	if d > drainMaxTimeout {
+		d = drainMaxTimeout
+	}
+	return d, nil
+}
+
+// drainablePods returns the pods on the node a drain evicts: every pod but
+// DaemonSet pods (their controller recreates them on the node) and mirror
+// pods (static pods the API cannot evict).
+func drainablePods(pods []corev1.Pod, nodeName string) []*corev1.Pod {
+	var out []*corev1.Pod
+	for i := range pods {
+		pod := &pods[i]
+		if pod.Spec.NodeName != nodeName {
+			continue
+		}
+		if _, mirror := pod.Annotations[corev1.MirrorPodAnnotationKey]; mirror {
+			continue
+		}
+		daemon := false
+		for _, ref := range pod.OwnerReferences {
+			if ref.Kind == "DaemonSet" {
+				daemon = true
+				break
+			}
+		}
+		if !daemon {
+			out = append(out, pod)
+		}
+	}
+	return out
+}
+
+// evictionRetryable reports whether a refused eviction may succeed later:
+// a PodDisruptionBudget that allows no disruption now (429), or a transient
+// API server error.
+func evictionRetryable(err error) bool {
+	return apierrors.IsTooManyRequests(err) || apierrors.IsServerTimeout(err) ||
+		apierrors.IsTimeout(err) || apierrors.IsInternalError(err) || apierrors.IsServiceUnavailable(err)
+}
+
+// executeDrainNode cordons a node and evicts its pods through the Eviction
+// API, so PodDisruptionBudgets are honored. An eviction a budget refuses is
+// retried until the timeout; the action fails, naming the pods, when any
+// pod could not be evicted. It does not wait for evicted pods to finish
+// terminating: pods on an unreachable node would never report it.
+func (r *RemediationReconciler) executeDrainNode(ctx context.Context, _ platformv1alpha1.ResourceRef, params map[string]string) error {
 	logger := log.FromContext(ctx)
 
 	nodeName, ok := params["node"]
 	if !ok || nodeName == "" {
 		return fmt.Errorf("missing 'node' param")
 	}
+	timeout, err := drainTimeout(params["timeout"])
+	if err != nil {
+		return err
+	}
 
-	// First cordon
 	var node corev1.Node
 	if err := r.Get(ctx, types.NamespacedName{Name: nodeName}, &node); err != nil {
 		return fmt.Errorf("failed to get node %s: %w", nodeName, err)
 	}
-
-	node.Spec.Unschedulable = true
-	if err := r.Update(ctx, &node); err != nil {
-		return fmt.Errorf("failed to cordon node %s: %w", nodeName, err)
+	if !node.Spec.Unschedulable {
+		node.Spec.Unschedulable = true
+		if err := r.Update(ctx, &node); err != nil {
+			return fmt.Errorf("failed to cordon node %s: %w", nodeName, err)
+		}
 	}
 
-	// Evict pods (except DaemonSet pods and mirror pods)
 	var pods corev1.PodList
 	if err := r.List(ctx, &pods); err != nil {
 		return fmt.Errorf("failed to list pods: %w", err)
 	}
 
+	pending := drainablePods(pods.Items, nodeName)
+	refused := make(map[string]string)
+	deadline := time.Now().Add(timeout)
 	evicted := 0
-	for i := range pods.Items {
-		pod := &pods.Items[i]
-		if pod.Spec.NodeName != nodeName {
-			continue
-		}
-
-		// Skip DaemonSet pods
-		isDaemonSet := false
-		for _, ref := range pod.OwnerReferences {
-			if ref.Kind == "DaemonSet" {
-				isDaemonSet = true
-				break
+	for len(pending) > 0 {
+		var retryLater []*corev1.Pod
+		for _, pod := range pending {
+			podKey := pod.Namespace + "/" + pod.Name
+			err := r.evictPod(ctx, pod)
+			switch {
+			case err == nil || apierrors.IsNotFound(err):
+				evicted++
+				delete(refused, podKey)
+			case evictionRetryable(err):
+				refused[podKey] = err.Error()
+				retryLater = append(retryLater, pod)
+			default:
+				refused[podKey] = err.Error()
 			}
 		}
-		if isDaemonSet {
-			continue
+		pending = retryLater
+		if len(pending) == 0 || time.Now().Add(drainRetryInterval).After(deadline) {
+			break
 		}
+		logger.Info("Evictions refused, retrying", "node", nodeName, "pods", len(pending), "retryIn", drainRetryInterval)
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("drain of node %s interrupted with %d pod(s) not evicted: %w", nodeName, len(pending), ctx.Err())
+		case <-time.After(drainRetryInterval):
+		}
+	}
 
-		// Skip mirror pods
-		if _, ok := pod.Annotations["kubernetes.io/config.mirror"]; ok {
-			continue
+	if len(refused) > 0 {
+		details := make([]string, 0, len(refused))
+		for podKey, reason := range refused {
+			details = append(details, podKey+": "+reason)
 		}
-
-		// Evict the pod
-		if err := r.Delete(ctx, pod, client.GracePeriodSeconds(30)); err != nil {
-			logger.Info("Failed to evict pod", "pod", pod.Name, "error", err)
-			continue
-		}
-		evicted++
+		sort.Strings(details)
+		return fmt.Errorf("node %s not drained: %d pod(s) could not be evicted within %s (%d evicted): %s",
+			nodeName, len(refused), timeout, evicted, strings.Join(details, "; "))
 	}
 
 	logger.Info("Node drained", "node", nodeName, "evicted", evicted)
 	return nil
+}
+
+// evictPod asks the API server to evict a pod (policy/v1 Eviction), which
+// refuses with 429 when a PodDisruptionBudget allows no disruption.
+func (r *RemediationReconciler) evictPod(ctx context.Context, pod *corev1.Pod) error {
+	grace := drainGracePeriodSeconds
+	eviction := &policyv1.Eviction{
+		ObjectMeta:    metav1.ObjectMeta{Name: pod.Name, Namespace: pod.Namespace},
+		DeleteOptions: &metav1.DeleteOptions{GracePeriodSeconds: &grace},
+	}
+	return r.SubResource("eviction").Create(ctx, pod, eviction)
 }
 
 // executeResizePVC resizes a PersistentVolumeClaim.

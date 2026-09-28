@@ -182,11 +182,16 @@ security:
 # false to manage the Secret yourself (kubectl, External Secrets, Vault…);
 # note that keys set here are stored in the Helm release.
 # Roles: viewer (read), operator (acknowledge/approve/…), admin (all).
+# name (optional) is the identity recorded on the approval decisions the key
+# takes (falls back to description, then to a fingerprint of the key). A
+# quorum counts each key once, so give each approver their own key.
+# Deleting the Secret (and the ConfigMap) revokes every key on the next poll.
 apiKeys:
   create: false
   entries: []
   # - key: "<generate with: openssl rand -hex 32>"
   #   role: admin
+  #   name: alice
   #   description: platform team
 
 # Optional NetworkPolicy for the operator pod (off by default).
