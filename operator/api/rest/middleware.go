@@ -28,6 +28,21 @@ const (
 	devModeIdentity = "dev-mode"
 )
 
+// DevModeEnvVar names the switch that admits every REST caller as admin
+// while no API key is configured.
+const DevModeEnvVar = "CHATCLI_OPERATOR_DEV_MODE"
+
+// DevModeEnabled reports whether dev mode is on. It is the one parse of
+// CHATCLI_OPERATOR_DEV_MODE: the auth middleware, the rate limiter and the
+// startup log all ask it, so the log never announces a mode the API does
+// not apply. The value follows strconv.ParseBool, case-insensitively and
+// ignoring surrounding spaces ("true", "True", "1", "t"); anything else,
+// unset included, is off.
+func DevModeEnabled() bool {
+	on, err := strconv.ParseBool(strings.ToLower(strings.TrimSpace(os.Getenv(DevModeEnvVar))))
+	return err == nil && on
+}
+
 // roleFromContext extracts the role from the request context.
 func roleFromContext(ctx context.Context) string {
 	v, _ := ctx.Value(contextKeyRole).(string)
@@ -94,7 +109,7 @@ func (s *APIServer) authMiddleware(next http.Handler) http.Handler {
 
 		// Security (C4): Fail-closed. If no keys configured, reject unless dev mode.
 		if keysLen == 0 {
-			if os.Getenv("CHATCLI_OPERATOR_DEV_MODE") == "true" {
+			if DevModeEnabled() {
 				ctx := context.WithValue(r.Context(), contextKeyRole, "admin")
 				ctx = context.WithValue(ctx, contextKeyAPIKey, "dev-mode")
 				ctx = context.WithValue(ctx, contextKeyIdentity, devModeIdentity)
@@ -304,7 +319,7 @@ func (s *APIServer) rateLimitBucketFor(r *http.Request) (*rateLimiter, string) {
 	case valid && keysLen > 0:
 		sum := sha256.Sum256([]byte(r.Header.Get(s.apiKeyHeader)))
 		return s.keyLimiter, "key:" + hex.EncodeToString(sum[:])
-	case keysLen == 0 && os.Getenv("CHATCLI_OPERATOR_DEV_MODE") == "true":
+	case keysLen == 0 && DevModeEnabled():
 		// Dev mode admits every caller as admin; limit it like a key.
 		return s.keyLimiter, "dev:" + clientHost(r)
 	default:

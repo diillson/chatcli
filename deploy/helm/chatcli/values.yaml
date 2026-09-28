@@ -2,6 +2,21 @@
 
 replicaCount: 1
 
+# Deployment update strategy. Empty (default) = chosen from persistence:
+# with persistence enabled on a volume that is not ReadWriteMany the chart
+# stops the old pod before starting the new one (RollingUpdate with
+# maxSurge 0, maxUnavailable 1), because under the API server default a
+# surge pod scheduled on another node waits forever on Multi-Attach while
+# the old pod, stopped only once the new one is Ready, holds the volume.
+# Without persistence, or with ReadWriteMany, the API server default
+# (RollingUpdate, 25% / 25%) applies. Anything set here is rendered as
+# written and wins; `type: Recreate` gets `rollingUpdate: null`. With Helm 4
+# server-side apply, a release still on a chart that rendered no strategy
+# (up to 1.211.2) cannot switch straight to Recreate: upgrade once on the
+# default first (see the README).
+strategy: {}
+#   type: Recreate
+
 image:
   repository: ghcr.io/diillson/chatcli
   # tag defaults to Chart.appVersion when empty — ensures version consistency.
@@ -363,7 +378,9 @@ security:
   # JWT authentication secret (leave empty to use legacy token auth)
   # For production: use jwtSecretRef to reference a Kubernetes Secret instead.
   jwtSecret: ""
-  # Reference a Secret key for JWT secret (recommended over plain jwtSecret)
+  # Reference a Secret key for JWT secret (recommended over plain jwtSecret).
+  # Set jwtSecret or jwtSecretRef, not both: the render fails when both are
+  # set, since each would define CHATCLI_JWT_SECRET.
   # JWT material fails closed: if a public key (or a PEM-looking secret)
   # cannot be loaded and JWT is the only credential, the server refuses to
   # start; with a token or mTLS also set, every JWT caller is rejected.
@@ -381,7 +398,8 @@ security:
   # RS256: an RSA public key (PEM) or the path to one inside the container.
   # Setting this selects RS256; leave it empty for an HS256 shared secret.
   jwtPublicKey: ""
-  # Reference a Secret key holding the RSA public key (recommended)
+  # Reference a Secret key holding the RSA public key (recommended).
+  # Exclusive with jwtPublicKey, like jwtSecret and jwtSecretRef.
   jwtPublicKeyRef: {}
   #   name: chatcli-jwt
   #   key: public.pem
@@ -443,16 +461,28 @@ security:
   # For production: set via extraEnv with secretKeyRef instead.
   encryptionKey: ""
 
-# Extra environment variables. Logs go to stderr as JSON lines and to a
-# rotated file under /home/chatcli/.chatcli (a 200Mi emptyDir with the
-# read-only root filesystem); CHATCLI_LOG_MAX_SIZE_MB (default 100),
-# CHATCLI_LOG_MAX_BACKUPS (3), CHATCLI_LOG_MAX_AGE_DAYS (28) and
-# CHATCLI_LOG_COMPRESS (true) tune the rotation.
+# Log file rotation. Logs go to stderr as JSON lines and to a rotated file,
+# /home/chatcli/.chatcli/app.log. With the read-only root filesystem that
+# directory is a 200Mi emptyDir, and a volume past its sizeLimit gets the
+# pod evicted, so the chart sets a rotation that fits: at most
+# maxSizeMB x (maxBackups + 1) = 80 MB of log with these defaults (the
+# server's own defaults, 100 MB x 4, do not fit). While the data emptyDir
+# is in use the render fails when that product exceeds 100 MB, leaving the
+# rest of the volume to the other state kept there.
+# Each field sets its CHATCLI_LOG_* variable; null leaves the variable
+# unset (server default). An extraEnv entry of the same name wins.
+logging:
+  maxSizeMB: 20      # CHATCLI_LOG_MAX_SIZE_MB
+  maxBackups: 3      # CHATCLI_LOG_MAX_BACKUPS
+  maxAgeDays: 28     # CHATCLI_LOG_MAX_AGE_DAYS
+  compress: true     # CHATCLI_LOG_COMPRESS
+
+# Extra environment variables. An entry for one of the CHATCLI_LOG_*
+# variables above replaces the chart's value; a CHATCLI_SERVER_TOKEN entry
+# is dropped when server.token is set.
 extraEnv: []
 # - name: LOG_LEVEL
 #   value: "debug"
-# - name: CHATCLI_LOG_MAX_SIZE_MB
-#   value: "20"
 # - name: CHATCLI_AGENT_ALLOWLIST
 #   value: "terraform,ansible,packer"
 # - name: CHATCLI_ENCRYPTION_KEY
@@ -474,7 +504,16 @@ extraVolumeMounts: []
 #   readOnly: true
 # ...then: security.tlsClientCA: /etc/chatcli/client-ca/ca.crt
 
-# Persistence for sessions
+# Persistence for sessions. The PVC root is mounted at
+# /home/chatcli/.chatcli/sessions (and memory, when enabled, in its own
+# directory of the same PVC; see memory.subPath).
+# Without ReadWriteMany the volume attaches to one node at a time: the
+# Deployment then stops the old pod before starting the new one (see
+# `strategy`), and every replica must land on the node holding the volume,
+# so run one replica (or set ReadWriteMany): replicaCount or an HPA above 1 on a
+# ReadWriteOnce volume leaves the pods scheduled elsewhere stuck in
+# ContainerCreating. ReadWriteOncePod admits a single pod, so the render
+# fails with more than one replica.
 persistence:
   enabled: true
   storageClass: ""
@@ -535,8 +574,19 @@ pipeline:
 # Memory persistence (long-term MEMORY.md + daily notes)
 memory:
   enabled: false
-  # Uses the persistence PVC by default.
-  # Memory files are stored under /home/chatcli/.chatcli/memory/
+  # Memory files are stored under /home/chatcli/.chatcli/memory/. With
+  # persistence enabled that is the `subPath` directory of the sessions PVC
+  # (kubelet creates it; the default fsGroup makes it writable), so memory
+  # stores never land among the session files. Without persistence it is a
+  # 200Mi emptyDir.
+  #
+  # Charts up to 1.211.2 mounted memory at the PVC root, next to the
+  # sessions. The sessions stay at the root, so no session moves, and the
+  # chart sets CHATCLI_MEMORY_LEGACY_DIR so the server copies memory's own
+  # files from the root into this directory on its first start: once, never
+  # moving or overwriting anything (README, "Memory on the sessions PVC").
+  # subPath: "" keeps the old shared layout instead.
+  subPath: memory
 
 # Shell safety is configured through the agent's own variables, set under
 # `env` or `secrets` above. Nothing reads a CHATCLI_SAFETY_ENABLED switch:

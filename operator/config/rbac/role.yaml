@@ -414,7 +414,9 @@ rules:
       - get
       - list
       - watch
-  # Pods: create (chaos stress pods), update (chaos network annotations),
+  # Pods: create (chaos stress pods), update (strip the network-chaos
+  # annotations older operator versions wrote, and the request annotations
+  # ExecDiagnostic records on its target pod),
   # delete (DeletePod, pod_kill / pod_failure, stress pod cleanup)
   - apiGroups:
       - ""

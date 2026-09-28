@@ -43,6 +43,7 @@ import (
 	"github.com/diillson/chatcli/cli/scheduler"
 	"github.com/diillson/chatcli/cli/telemetry"
 	"github.com/diillson/chatcli/cli/workspace"
+	"github.com/diillson/chatcli/cli/workspace/memory"
 	"github.com/diillson/chatcli/client/remote"
 	"github.com/diillson/chatcli/i18n"
 	"github.com/diillson/chatcli/llm/client"
@@ -939,6 +940,12 @@ func NewChatCLI(ctx context.Context, manager manager.LLMManager, logger *zap.Log
 	var memStore *workspace.MemoryStore
 	if memoryEnabled {
 		memDir := filepath.Join(homeDir, ".chatcli")
+		// An older layout (the Helm chart up to 1.211.2) kept memory in a
+		// directory shared with the sessions; carry it over once, before
+		// the stores open, so the first start on the new layout keeps it.
+		if legacy := os.Getenv(memory.LegacyDirEnv); legacy != "" {
+			memory.AdoptLegacyDir(legacy, filepath.Join(memDir, "memory"), logger)
+		}
 		memStore = workspace.NewMemoryStore(memDir, logger)
 	} else {
 		logger.Info("Memory disabled via CHATCLI_MEMORY_ENABLED=false")

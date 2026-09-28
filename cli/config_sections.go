@@ -41,6 +41,7 @@ import (
 	"github.com/diillson/chatcli/cli/coder"
 	"github.com/diillson/chatcli/cli/gateway"
 	"github.com/diillson/chatcli/cli/plugins"
+	"github.com/diillson/chatcli/cli/workspace/memory"
 	"github.com/diillson/chatcli/config"
 	"github.com/diillson/chatcli/i18n"
 	"github.com/diillson/chatcli/llm/bedrock"
@@ -1048,6 +1049,7 @@ func (cli *ChatCLI) showConfigSession() {
 	subheader(p, "cfg.sub.session.memory")
 	kv(p, "CHATCLI_MEMORY_ENABLED", envBool("CHATCLI_MEMORY_ENABLED"))
 	kv(p, "CHATCLI_MEMORY_MODE", envOr("CHATCLI_MEMORY_MODE"))
+	kv(p, memory.LegacyDirEnv, envOr(memory.LegacyDirEnv))
 	kv(p, "CHATCLI_BOOTSTRAP_ENABLED", envBool("CHATCLI_BOOTSTRAP_ENABLED"))
 	kv(p, "CHATCLI_BOOTSTRAP_DIR", envOr("CHATCLI_BOOTSTRAP_DIR"))
 	if cli.memoryStore != nil {

@@ -314,6 +314,10 @@ watcher:
 | `plugins.initImage` | Init container image whose `/plugins/*` is copied into the plugins directory | `""` |
 | `plugins.existingPVC` | Existing PVC with pre-installed plugins (instead of an emptyDir) | `""` |
 
+`agents`, `skills` and `bootstrap` mount a ConfigMap only when there is one: inline `definitions` (rendered as `<fullname>-agents`, `-skills`, `-bootstrap`) or an `existingConfigMap`. Enabled with neither, nothing is mounted and the server finds no files in that directory (earlier charts mounted a ConfigMap that did not exist, and the pod stayed in `ContainerCreating`).
+
+The server reads the MCP, agents, skills and bootstrap ConfigMaps only at startup. Each one the chart renders (from `mcp.servers` or `*.definitions`) is hashed into a `checksum/<name>` pod annotation, so a `helm upgrade` that edits it rolls the pods; the watcher config (`watcher.targets`) rides `checksum/config`. A ConfigMap you manage yourself (`*.existingConfigMap`) cannot be hashed by Helm: after editing one, restart the pods with `kubectl -n <namespace> rollout restart deploy/<fullname>`.
+
 ```yaml
 bootstrap:
   enabled: true
@@ -337,12 +341,32 @@ agents:
 |-----------|-------------|---------|
 | `persistence.enabled` | PVC `<fullname>-sessions` for sessions (see the note on rollouts below) | `true` |
 | `persistence.storageClass` | StorageClass (empty = cluster default, `-` = `storageClassName: ""`) | `""` |
-| `persistence.accessModes` | PVC access modes | `["ReadWriteOnce"]` |
+| `persistence.accessModes` | PVC access modes. Without `ReadWriteMany` a rollout stops the old pod before starting the new one (see below); `ReadWriteOncePod` fails the render with more than one replica | `["ReadWriteOnce"]` |
 | `persistence.size` | PVC size | `1Gi` |
-| `memory.enabled` | Long-term memory at `~/.chatcli/memory` (on the sessions PVC when persistence is on) | `false` |
+| `strategy` | Deployment update strategy, rendered as written; empty = chosen from persistence (see below) | `{}` |
+| `memory.enabled` | Long-term memory at `~/.chatcli/memory` (on the sessions PVC when persistence is on, a 200Mi emptyDir otherwise) | `false` |
+| `memory.subPath` | Directory of the sessions PVC that holds memory when persistence is on; memory written at the PVC root by older charts is copied into it once, automatically (see below). `""` = the PVC root, shared with the session files (the layout of charts up to 1.211.2) | `memory` |
 | `pipeline.enabled` | Host the full turn engine behind the `ChatTurn`, `RunCoder`, `RunAgent` and tool RPCs (`CHATCLI_SERVER_PIPELINE`); exec RPCs require an admin caller; exclusive with the co-located gateway | `false` |
 
-The chart's Deployment keeps the default `RollingUpdate` strategy. With one replica and a `ReadWriteOnce` sessions volume, a rollout whose new pod is scheduled on another node cannot attach the volume until the old pod is gone, and the old pod stays until the new one is ready: pin the pod to a node, use a `ReadWriteMany` storage class, or scale to zero around the upgrade.
+**Rollouts.** With `persistence.enabled` and no `ReadWriteMany` access mode, a rollout stops the old pod before starting the new one: the chart renders `RollingUpdate` with `maxSurge: 0` and `maxUnavailable: 1`. Under the API server default (`maxSurge` 25% = one extra pod, `maxUnavailable` 25% = none), a new pod scheduled on another node cannot attach the `ReadWriteOnce` volume while the old pod holds it, and the old pod is only stopped once the new one is ready, so the rollout never finished. Stopping the old pod first means a short gap in service on every rollout. Without persistence, or with `ReadWriteMany`, nothing is rendered and the API server default applies, as before.
+
+This has the effect of the `Recreate` strategy the operator gives an `Instance` with persistence, but it is not `type: Recreate` on purpose: switching a live Deployment to `Recreate` has to remove its defaulted `rollingUpdate` block, which Helm 4's server-side apply cannot do while no field manager owns it, so an upgrade from a chart that rendered no strategy fails with `spec.strategy.rollingUpdate: Forbidden: may not be specified when strategy type is 'Recreate'`. The stop-first `RollingUpdate` applies under Helm 3 and Helm 4 alike.
+
+An explicit `strategy` wins in every case, and `type: Recreate` without `rollingUpdate` is rendered with `rollingUpdate: null`. A fresh install, a Helm 3 release and a release already upgraded once on this chart's default can move to it directly; a release installed by Helm 4 on a chart up to 1.211.2 needs one upgrade on the default first (or `kubectl patch deploy/<fullname> --type=json -p '[{"op":"remove","path":"/spec/strategy/rollingUpdate"},{"op":"replace","path":"/spec/strategy/type","value":"Recreate"}]'`).
+
+A `ReadWriteOnce` volume attaches to one node at a time, so every replica must run on that node: with `replicaCount` or an HPA above 1, pods scheduled elsewhere stay in `ContainerCreating`. Run one replica or use `ReadWriteMany` for several. `ReadWriteOncePod` admits a single pod, and the render fails when `replicaCount` (or `autoscaling.maxReplicas` with the HPA on) is above 1.
+
+**Memory on the sessions PVC.** With `memory.enabled` and persistence, the sessions stay at the PVC root (mounted at `~/.chatcli/sessions`) and memory lives in the `memory.subPath` directory of the same PVC (mounted at `~/.chatcli/memory`). kubelet creates that directory on first mount; the default `podSecurityContext.fsGroup` makes it writable by the server. Charts up to 1.211.2 mounted memory at the PVC root too, so its JSON stores sat among the session files: the session list showed them, and session expiry could delete them.
+
+Upgrading an install that ran with `memory.enabled` and persistence migrates automatically. No session moves, and the first time the server opens memory on the new layout it copies memory's own files from the PVC root into the memory directory: the chart sets `CHATCLI_MEMORY_LEGACY_DIR=/home/chatcli/.chatcli/sessions` (the PVC root as the server sees it) whenever persistence, memory and a `memory.subPath` are all on. The copy:
+
+- takes only memory's files (`MEMORY.md` and its backups, `memory_index.json`, `memory_tombstones.json`, `episodes.json`, `user_profile.json`, `topics.json`, `projects.json`, `usage_stats.json`, `graph.json`, `vector_index.json`, `memory_archive.json`, `compactor_state.json`, their `.corrupt` quarantines, the `YYYYMM/` daily notes, `weekly/`, `monthly/` and `pending/`); the session files stay where they are;
+- never moves, deletes or rewrites anything at the root, and never overwrites a file already in the memory directory; each file lands atomically with mode 0600;
+- runs only while the memory directory holds none of memory's files, and writes `.migrated-from-legacy` there when done, so it happens once;
+- skips an unreadable file with a warning; a file sealed with `CHATCLI_ENCRYPTION_KEY` is resealed for its new path, and while the key is missing or wrong the copy stays pending (`.migrating-from-legacy`) and resumes on the next start;
+- logs what it copied (`memory: adopted the legacy memory directory`).
+
+`memory.subPath: ""` keeps the old shared layout instead (no copy, no `CHATCLI_MEMORY_LEGACY_DIR`). An upgrade with plain `--reuse-values` carries no `memory.subPath` key and keeps the old layout too.
 
 ### Service, ingress, network policy
 
@@ -377,8 +401,8 @@ The chart's Deployment keeps the default `RollingUpdate` strategy. With one repl
 
 | Parameter | Description | Default |
 |-----------|-------------|---------|
-| `security.jwtSecret` | HS256 JWT secret, inline (`CHATCLI_JWT_SECRET`) | `""` |
-| `security.jwtSecretRef` | `{name, key}` of a Secret holding the JWT secret (recommended) | `{}` |
+| `security.jwtSecret` | HS256 JWT secret, inline (`CHATCLI_JWT_SECRET`); exclusive with `jwtSecretRef` (setting both fails the render) | `""` |
+| `security.jwtSecretRef` | `{name, key}` of a Secret holding the JWT secret (recommended); exclusive with `jwtSecret` | `{}` |
 | `security.jwtPublicKey` | RSA public key (PEM or path) -- selects RS256 | `""` |
 | `security.jwtPublicKeyRef` | `{name, key}` of a Secret holding the RSA public key | `{}` |
 | `security.jwtIssuer` | Expected `iss` claim (empty skips the check) | `""` |
@@ -399,7 +423,7 @@ The chart's Deployment keeps the default `RollingUpdate` strategy. With one repl
 | `security.allowUnsignedPlugins` | Allow unsigned plugins (dev only) | `false` |
 | `security.allowInsecure` | Sets `CHATCLI_ALLOW_INSECURE`, which only the chatcli client reads; it does not change the server listener | `false` |
 | `security.encryptionKey` | Session encryption key, inline (prefer `extraEnv` with a `secretKeyRef`) | `""` |
-| `extraEnv` | Extra environment variables | `[]` |
+| `extraEnv` | Extra environment variables; an entry for a `CHATCLI_LOG_*` variable replaces the chart's `logging` value | `[]` |
 | `extraVolumes` | Extra pod volumes | `[]` |
 | `extraVolumeMounts` | Extra mounts for the server container | `[]` |
 
@@ -436,19 +460,27 @@ extraVolumeMounts:
 
 ### Logs
 
-Inside a container the server writes JSON log lines to **stderr** (so `kubectl logs` and log collectors see them) as well as a rotated file, `/home/chatcli/.chatcli/app.log`. With the default read-only root filesystem that directory is an `emptyDir` limited to 200Mi, and the file rotation defaults (100 MB, 3 compressed backups) can come close to it -- lower them with `extraEnv`:
+Inside a container the server writes JSON log lines to **stderr** (so `kubectl logs` and log collectors see them) as well as a rotated file, `/home/chatcli/.chatcli/app.log`. With the default read-only root filesystem that directory is an `emptyDir` limited to 200Mi, and a volume past its limit gets the pod evicted. The server's own rotation defaults (100 MB, 3 backups: up to 400 MB) do not fit, so the chart sets a rotation that does:
+
+| Parameter | Description | Default |
+|-----------|-------------|---------|
+| `logging.maxSizeMB` | `CHATCLI_LOG_MAX_SIZE_MB`: size at which the file rotates | `20` |
+| `logging.maxBackups` | `CHATCLI_LOG_MAX_BACKUPS`: rotated files kept | `3` |
+| `logging.maxAgeDays` | `CHATCLI_LOG_MAX_AGE_DAYS`: days a rotated file is kept | `28` |
+| `logging.compress` | `CHATCLI_LOG_COMPRESS`: gzip rotated files | `true` |
+
+That is at most 80 MB of log. While the data emptyDir is in use, the render fails when `maxSizeMB x (maxBackups + 1)` exceeds 100 MB, leaving the rest of the volume to the other state kept there. A field set to `null` renders no variable (server default, counted as such by the check). An `extraEnv` entry for one of these variables replaces the chart's value, and an `extraEnv` entry for the size or backups skips the check (the explicit escape hatch):
 
 ```yaml
+logging:
+  maxSizeMB: 10
+  maxBackups: 5
 extraEnv:
   - name: LOG_LEVEL              # debug | info | warn | error
     value: info
-  - name: CHATCLI_LOG_MAX_SIZE_MB
-    value: "20"
-  - name: CHATCLI_LOG_MAX_BACKUPS
-    value: "2"
 ```
 
-`CHATCLI_LOG_MAX_AGE_DAYS` (default 28) and `CHATCLI_LOG_COMPRESS` (default `true`) are honored too. `CHATCLI_LOG_STDERR=false` turns the stderr stream off, `true` forces it on outside a container.
+`CHATCLI_LOG_STDERR=false` turns the stderr stream off, `true` forces it on outside a container.
 
 ### Autoscaling and availability
 
@@ -464,7 +496,7 @@ extraEnv:
 | `podDisruptionBudget.minAvailable` | Min available pods | `1` |
 | `podDisruptionBudget.maxUnavailable` | Max unavailable pods; used only when `minAvailable` is `0` or removed (`--set podDisruptionBudget.minAvailable=null`) | unset |
 
-With `persistence.enabled` and the default `ReadWriteOnce` PVC, more than one replica needs a `ReadWriteMany` storage class.
+With `persistence.enabled` and the default `ReadWriteOnce` PVC, more than one replica needs a `ReadWriteMany` storage class (see **Rollouts** under Storage and pipeline; `ReadWriteOncePod` fails the render).
 
 ### Monitoring
 
