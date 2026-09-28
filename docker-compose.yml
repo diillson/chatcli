@@ -10,6 +10,10 @@ services:
     ports:
       - "50051:50051"
     environment:
+      # Stated explicitly so it always matches the chatcli-home volume below
+      # (the image's nonroot user has this home).
+      HOME: /home/nonroot
+
       # Server config
       CHATCLI_SERVER_PORT: "50051"
 
@@ -78,10 +82,14 @@ services:
       # Corporate CA bundle for every outbound TLS connection (PEM path inside the container)
       CHATCLI_CA_BUNDLE: "${CHATCLI_CA_BUNDLE:-}"
 
-      # Provider fallback chain (comma-separated, e.g. "OPENAI,CLAUDEAI,GOOGLEAI")
-      CHATCLI_FALLBACK_ENABLED: "${CHATCLI_FALLBACK_ENABLED:-}"
+      # Provider fallback chain (comma-separated, e.g. "OPENAI,CLAUDEAI,GOOGLEAI").
+      # A non-empty list is what turns the chain on; there is no separate
+      # enable switch. CHATCLI_FALLBACK_MODEL_<PROVIDER> picks the model per
+      # provider (default: the server model).
       CHATCLI_FALLBACK_PROVIDERS: "${CHATCLI_FALLBACK_PROVIDERS:-}"
       CHATCLI_FALLBACK_MAX_RETRIES: "${CHATCLI_FALLBACK_MAX_RETRIES:-2}"
+      CHATCLI_FALLBACK_COOLDOWN_BASE: "${CHATCLI_FALLBACK_COOLDOWN_BASE:-30s}"
+      CHATCLI_FALLBACK_COOLDOWN_MAX: "${CHATCLI_FALLBACK_COOLDOWN_MAX:-5m}"
 
       # MCP (Model Context Protocol)
       CHATCLI_MCP_ENABLED: "${CHATCLI_MCP_ENABLED:-}"
@@ -94,12 +102,15 @@ services:
       # Logging
       LOG_LEVEL: "${LOG_LEVEL:-info}"
     volumes:
-      # Persist sessions across restarts
-      - chatcli-sessions:/home/chatcli/.chatcli/sessions
-      # Mount plugins directory (optional)
-      - chatcli-plugins:/home/chatcli/.chatcli/plugins
-      # Persist memory across restarts
-      - chatcli-memory:/home/chatcli/.chatcli/memory
+      # The image runs as the distroless "nonroot" user (uid 65532) with
+      # HOME=/home/nonroot, and the root filesystem is read-only, so the
+      # whole home is one named volume: ~/.chatcli (sessions, memory,
+      # plugins, logs) lives in it and survives restarts. It is mounted at
+      # the image's own home because Docker seeds a new named volume with the
+      # ownership of the directory it covers; a volume over a path the image
+      # lacks (such as /home/chatcli/...) would be root-owned and unwritable.
+      # Drop plugin binaries into ~/.chatcli/plugins inside this volume.
+      - chatcli-home:/home/nonroot
     restart: unless-stopped
     # The image HEALTHCHECK runs grpc-health-probe against :50051 in
     # plaintext. With TLS enabled on the server, override it with the probe's
@@ -116,6 +127,4 @@ services:
           memory: 1G
 
 volumes:
-  chatcli-sessions:
-  chatcli-plugins:
-  chatcli-memory:
+  chatcli-home:

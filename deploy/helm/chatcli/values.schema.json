@@ -402,7 +402,7 @@
         },
         "namespace": {
           "type": "string",
-          "description": "Namespace of the primary deployment."
+          "description": "Namespace of the primary deployment. Empty means the server default, the namespace named default."
         },
         "targets": {
           "type": "array",
@@ -417,11 +417,22 @@
             "properties": {
               "deployment": {
                 "type": "string",
-                "description": "Deployment name."
+                "description": "Name of the watched resource (a Deployment unless kind says otherwise)."
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "Deployment",
+                  "StatefulSet",
+                  "DaemonSet",
+                  "Job",
+                  "CronJob"
+                ],
+                "description": "Kind of the watched resource. Omitted means Deployment."
               },
               "namespace": {
                 "type": "string",
-                "description": "Deployment namespace."
+                "description": "Namespace of the watched resource."
               },
               "metricsPort": {
                 "type": "integer",

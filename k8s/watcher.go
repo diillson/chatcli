@@ -200,6 +200,17 @@ func (w *ResourceWatcher) collect(ctx context.Context) error {
 	return nil
 }
 
+// raiseAlert stores the alert and counts it in the alerts metric only when
+// the store accepted it as new. The store drops a repeat of the same
+// Type+Object inside the window, and a condition that persists is seen on
+// every poll: counting before the dedup inflated alerts_total by one per
+// cycle for a single standing problem.
+func (w *ResourceWatcher) raiseAlert(target string, alert Alert) {
+	if w.store.recordAlert(alert) && w.metricsRecorder != nil {
+		w.metricsRecorder.IncrementAlert(target, string(alert.Severity), string(alert.Type))
+	}
+}
+
 // detectAnomalies checks the snapshot for common problems and creates alerts.
 func (w *ResourceWatcher) detectAnomalies(snap *ResourceSnapshot) {
 	now := time.Now()
@@ -208,7 +219,7 @@ func (w *ResourceWatcher) detectAnomalies(snap *ResourceSnapshot) {
 	for _, pod := range snap.Pods {
 		// CrashLoopBackOff / High restarts
 		if pod.RestartCount > 5 {
-			w.store.AddAlert(Alert{
+			w.raiseAlert(target, Alert{
 				Timestamp: now,
 				Severity:  SeverityCritical,
 				Type:      AlertHighRestarts,
@@ -216,14 +227,11 @@ func (w *ResourceWatcher) detectAnomalies(snap *ResourceSnapshot) {
 				Object:    pod.Name,
 				Namespace: w.config.Namespace,
 			})
-			if w.metricsRecorder != nil {
-				w.metricsRecorder.IncrementAlert(target, string(SeverityCritical), string(AlertHighRestarts))
-			}
 		}
 
 		// OOMKilled
 		if pod.LastTerminated != nil && pod.LastTerminated.Reason == "OOMKilled" {
-			w.store.AddAlert(Alert{
+			w.raiseAlert(target, Alert{
 				Timestamp: now,
 				Severity:  SeverityCritical,
 				Type:      AlertPodOOMKilled,
@@ -231,14 +239,11 @@ func (w *ResourceWatcher) detectAnomalies(snap *ResourceSnapshot) {
 				Object:    pod.Name,
 				Namespace: w.config.Namespace,
 			})
-			if w.metricsRecorder != nil {
-				w.metricsRecorder.IncrementAlert(target, string(SeverityCritical), string(AlertPodOOMKilled))
-			}
 		}
 
 		// Pod not ready
 		if !pod.Ready && pod.Phase == "Running" {
-			w.store.AddAlert(Alert{
+			w.raiseAlert(target, Alert{
 				Timestamp: now,
 				Severity:  SeverityWarning,
 				Type:      AlertPodNotReady,
@@ -246,9 +251,6 @@ func (w *ResourceWatcher) detectAnomalies(snap *ResourceSnapshot) {
 				Object:    pod.Name,
 				Namespace: w.config.Namespace,
 			})
-			if w.metricsRecorder != nil {
-				w.metricsRecorder.IncrementAlert(target, string(SeverityWarning), string(AlertPodNotReady))
-			}
 		}
 	}
 
@@ -257,7 +259,7 @@ func (w *ResourceWatcher) detectAnomalies(snap *ResourceSnapshot) {
 	switch r.Kind {
 	case "Deployment", "StatefulSet":
 		if r.ReadyReplicas < r.Replicas {
-			w.store.AddAlert(Alert{
+			w.raiseAlert(target, Alert{
 				Timestamp: now,
 				Severity:  SeverityWarning,
 				Type:      AlertDeployFailing,
@@ -265,13 +267,10 @@ func (w *ResourceWatcher) detectAnomalies(snap *ResourceSnapshot) {
 				Object:    fmt.Sprintf("%s/%s", r.Kind, r.Name),
 				Namespace: w.config.Namespace,
 			})
-			if w.metricsRecorder != nil {
-				w.metricsRecorder.IncrementAlert(target, string(SeverityWarning), string(AlertDeployFailing))
-			}
 		}
 	case "DaemonSet":
 		if r.ReadyReplicas < r.Replicas {
-			w.store.AddAlert(Alert{
+			w.raiseAlert(target, Alert{
 				Timestamp: now,
 				Severity:  SeverityWarning,
 				Type:      AlertDeployFailing,
@@ -279,13 +278,10 @@ func (w *ResourceWatcher) detectAnomalies(snap *ResourceSnapshot) {
 				Object:    fmt.Sprintf("DaemonSet/%s", r.Name),
 				Namespace: w.config.Namespace,
 			})
-			if w.metricsRecorder != nil {
-				w.metricsRecorder.IncrementAlert(target, string(SeverityWarning), string(AlertDeployFailing))
-			}
 		}
 	case "Job":
 		if r.Failed > 0 {
-			w.store.AddAlert(Alert{
+			w.raiseAlert(target, Alert{
 				Timestamp: now,
 				Severity:  SeverityCritical,
 				Type:      AlertJobFailed,
@@ -293,14 +289,11 @@ func (w *ResourceWatcher) detectAnomalies(snap *ResourceSnapshot) {
 				Object:    fmt.Sprintf("Job/%s", r.Name),
 				Namespace: w.config.Namespace,
 			})
-			if w.metricsRecorder != nil {
-				w.metricsRecorder.IncrementAlert(target, string(SeverityCritical), string(AlertJobFailed))
-			}
 		}
 	case "CronJob":
 		// Don't alert for intentionally suspended CronJobs.
 		if !r.Suspended && r.LastScheduleTime != nil && time.Since(*r.LastScheduleTime) > 2*time.Hour {
-			w.store.AddAlert(Alert{
+			w.raiseAlert(target, Alert{
 				Timestamp: now,
 				Severity:  SeverityWarning,
 				Type:      AlertCronJobMissed,
@@ -308,15 +301,12 @@ func (w *ResourceWatcher) detectAnomalies(snap *ResourceSnapshot) {
 				Object:    fmt.Sprintf("CronJob/%s", r.Name),
 				Namespace: w.config.Namespace,
 			})
-			if w.metricsRecorder != nil {
-				w.metricsRecorder.IncrementAlert(target, string(SeverityWarning), string(AlertCronJobMissed))
-			}
 		}
 	default:
 		// Backward compat: use legacy Deployment check
 		d := snap.Deployment
 		if d.ReadyReplicas < d.Replicas {
-			w.store.AddAlert(Alert{
+			w.raiseAlert(target, Alert{
 				Timestamp: now,
 				Severity:  SeverityWarning,
 				Type:      AlertDeployFailing,
@@ -324,9 +314,6 @@ func (w *ResourceWatcher) detectAnomalies(snap *ResourceSnapshot) {
 				Object:    d.Name,
 				Namespace: w.config.Namespace,
 			})
-			if w.metricsRecorder != nil {
-				w.metricsRecorder.IncrementAlert(target, string(SeverityWarning), string(AlertDeployFailing))
-			}
 		}
 	}
 
@@ -340,7 +327,7 @@ func (w *ResourceWatcher) detectNodeAnomalies(snap *ResourceSnapshot, now time.T
 		nodeObj := fmt.Sprintf("Node/%s", node.Name)
 
 		if !node.Ready {
-			w.store.AddAlert(Alert{
+			w.raiseAlert(target, Alert{
 				Timestamp: now,
 				Severity:  SeverityCritical,
 				Type:      AlertNodeNotReady,
@@ -348,13 +335,10 @@ func (w *ResourceWatcher) detectNodeAnomalies(snap *ResourceSnapshot, now time.T
 				Object:    nodeObj,
 				Namespace: w.config.Namespace,
 			})
-			if w.metricsRecorder != nil {
-				w.metricsRecorder.IncrementAlert(target, string(SeverityCritical), string(AlertNodeNotReady))
-			}
 		}
 
 		if node.DiskPressure {
-			w.store.AddAlert(Alert{
+			w.raiseAlert(target, Alert{
 				Timestamp: now,
 				Severity:  SeverityCritical,
 				Type:      AlertDiskPressure,
@@ -362,13 +346,10 @@ func (w *ResourceWatcher) detectNodeAnomalies(snap *ResourceSnapshot, now time.T
 				Object:    nodeObj,
 				Namespace: w.config.Namespace,
 			})
-			if w.metricsRecorder != nil {
-				w.metricsRecorder.IncrementAlert(target, string(SeverityCritical), string(AlertDiskPressure))
-			}
 		}
 
 		if node.MemoryPressure {
-			w.store.AddAlert(Alert{
+			w.raiseAlert(target, Alert{
 				Timestamp: now,
 				Severity:  SeverityCritical,
 				Type:      AlertMemoryPressure,
@@ -376,13 +357,10 @@ func (w *ResourceWatcher) detectNodeAnomalies(snap *ResourceSnapshot, now time.T
 				Object:    nodeObj,
 				Namespace: w.config.Namespace,
 			})
-			if w.metricsRecorder != nil {
-				w.metricsRecorder.IncrementAlert(target, string(SeverityCritical), string(AlertMemoryPressure))
-			}
 		}
 
 		if node.PIDPressure {
-			w.store.AddAlert(Alert{
+			w.raiseAlert(target, Alert{
 				Timestamp: now,
 				Severity:  SeverityWarning,
 				Type:      AlertPIDPressure,
@@ -390,13 +368,10 @@ func (w *ResourceWatcher) detectNodeAnomalies(snap *ResourceSnapshot, now time.T
 				Object:    nodeObj,
 				Namespace: w.config.Namespace,
 			})
-			if w.metricsRecorder != nil {
-				w.metricsRecorder.IncrementAlert(target, string(SeverityWarning), string(AlertPIDPressure))
-			}
 		}
 
 		if node.NetworkUnavail {
-			w.store.AddAlert(Alert{
+			w.raiseAlert(target, Alert{
 				Timestamp: now,
 				Severity:  SeverityCritical,
 				Type:      AlertNetworkUnavail,
@@ -404,13 +379,10 @@ func (w *ResourceWatcher) detectNodeAnomalies(snap *ResourceSnapshot, now time.T
 				Object:    nodeObj,
 				Namespace: w.config.Namespace,
 			})
-			if w.metricsRecorder != nil {
-				w.metricsRecorder.IncrementAlert(target, string(SeverityCritical), string(AlertNetworkUnavail))
-			}
 		}
 
 		if node.Unschedulable {
-			w.store.AddAlert(Alert{
+			w.raiseAlert(target, Alert{
 				Timestamp: now,
 				Severity:  SeverityWarning,
 				Type:      AlertNodeUnschedul,
@@ -418,14 +390,11 @@ func (w *ResourceWatcher) detectNodeAnomalies(snap *ResourceSnapshot, now time.T
 				Object:    nodeObj,
 				Namespace: w.config.Namespace,
 			})
-			if w.metricsRecorder != nil {
-				w.metricsRecorder.IncrementAlert(target, string(SeverityWarning), string(AlertNodeUnschedul))
-			}
 		}
 
 		// Pod capacity warning: node running >90% of pod capacity
 		if node.PodCapacity > 0 && float64(node.PodCount)/float64(node.PodCapacity) > 0.9 {
-			w.store.AddAlert(Alert{
+			w.raiseAlert(target, Alert{
 				Timestamp: now,
 				Severity:  SeverityWarning,
 				Type:      AlertPodCapacityHigh,
@@ -433,9 +402,6 @@ func (w *ResourceWatcher) detectNodeAnomalies(snap *ResourceSnapshot, now time.T
 				Object:    nodeObj,
 				Namespace: w.config.Namespace,
 			})
-			if w.metricsRecorder != nil {
-				w.metricsRecorder.IncrementAlert(target, string(SeverityWarning), string(AlertPodCapacityHigh))
-			}
 		}
 	}
 }

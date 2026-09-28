@@ -71,21 +71,31 @@ func (s *ObservabilityStore) AddLogs(entries []LogEntry) {
 // AddAlert adds an alert to the store. Duplicates (same Type+Object) are skipped
 // to prevent alert accumulation from repeated poll cycles detecting the same condition.
 func (s *ObservabilityStore) AddAlert(alert Alert) {
-	if hook := s.appendAlert(alert); hook != nil {
-		hook(alert)
-	}
+	s.recordAlert(alert)
 }
 
-// appendAlert stores the alert under the lock and returns the hook to notify
-// when the alert was new, nil when it was a duplicate.
-func (s *ObservabilityStore) appendAlert(alert Alert) func(Alert) {
+// recordAlert is AddAlert reporting whether the alert was new. Callers that
+// count alerts (the watcher's alerts_total metric) count only these, so a
+// condition seen on every poll cycle is one alert, not one per cycle.
+func (s *ObservabilityStore) recordAlert(alert Alert) bool {
+	hook, added := s.appendAlert(alert)
+	if hook != nil {
+		hook(alert)
+	}
+	return added
+}
+
+// appendAlert stores the alert under the lock. It returns the hook to notify
+// (nil when none is set) and whether the alert was new; a duplicate returns
+// no hook and false.
+func (s *ObservabilityStore) appendAlert(alert Alert) (func(Alert), bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	// Dedup: skip if same Type+Object already exists in window
 	for _, existing := range s.alerts {
 		if existing.Type == alert.Type && existing.Object == alert.Object {
-			return nil
+			return nil, false
 		}
 	}
 
@@ -99,7 +109,7 @@ func (s *ObservabilityStore) appendAlert(alert Alert) func(Alert) {
 		}
 	}
 	s.alerts = filtered
-	return s.alertHook
+	return s.alertHook, true
 }
 
 // LatestSnapshot returns the most recent snapshot, if any.

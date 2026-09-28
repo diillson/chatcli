@@ -35,17 +35,20 @@ server:
   # never as a command-line argument. Alternatively leave this empty and put
   # CHATCLI_SERVER_TOKEN in secrets.existingSecret yourself.
   token: ""
-  # Sets CHATCLI_GRPC_REFLECTION. Currently has no effect: the server also
-  # needs an internal switch that `chatcli server` does not expose, so
-  # reflection stays off whatever this is set to.
+  # Sets CHATCLI_GRPC_REFLECTION=true, which registers gRPC server
+  # reflection (grpcurl, Postman and similar tools can list the services).
+  # Reflection calls still need the server credential like any other RPC.
+  # Keep it off in production.
   grpcReflection: false
 
 # TLS configuration (the server requires TLS 1.3 when enabled)
 tls:
   enabled: false
   # certFile and keyFile are paths inside the container. With
-  # existingSecret the Secret is mounted at /etc/chatcli/tls, so use
-  # /etc/chatcli/tls/tls.crt and /etc/chatcli/tls/tls.key.
+  # existingSecret the Secret is mounted at /etc/chatcli/tls and they
+  # default to /etc/chatcli/tls/tls.crt and /etc/chatcli/tls/tls.key.
+  # enabled: true without existingSecret or both paths fails the render
+  # instead of starting a plaintext listener.
   certFile: ""
   keyFile: ""
   # Existing Secret with tls.crt / tls.key (e.g. from cert-manager),
@@ -167,11 +170,14 @@ ollama:
 watcher:
   enabled: false
 
-  # Single-target mode (legacy) — use "deployment" + "namespace"
+  # Single-target mode (legacy) — use "deployment" + "namespace". Watches a
+  # Deployment; an empty namespace means the namespace named "default".
   deployment: ""
   namespace: ""
 
   # Multi-target mode — use "targets" list (takes precedence over deployment/namespace)
+  # "deployment" is the resource name; "kind" picks the resource type
+  # (Deployment, StatefulSet, DaemonSet, Job or CronJob; omitted = Deployment).
   # targets:
   #   - deployment: api-gateway
   #     namespace: production
@@ -181,7 +187,11 @@ watcher:
   #   - deployment: auth-service
   #     namespace: production
   #     metricsPort: 9090
-  #   - deployment: worker
+  #   - deployment: postgres
+  #     kind: StatefulSet
+  #     namespace: production
+  #   - deployment: nightly-report
+  #     kind: CronJob
   #     namespace: batch
   targets: []
 
@@ -202,7 +212,9 @@ rbac:
   # Set to true to use ClusterRole/ClusterRoleBinding instead of namespace-scoped Role/RoleBinding.
   # Default false (least-privilege: namespace-scoped).
   clusterWide: false
-  # Additional rules beyond the defaults
+  # Additional rules beyond the defaults. The defaults grant no access to
+  # Secrets (the server never reads one through the API); add a rule here
+  # only for a plugin that needs it, scoped with resourceNames.
   additionalRules: []
 
 # CRD lifecycle management.

@@ -5,14 +5,21 @@ metadata:
   name: {{ include "chatcli.fullname" . }}
   labels:
     {{- include "chatcli.labels" . | nindent 4 }}
+  {{- /*
+    The nginx defaults sit under the user's annotations: a key the user sets
+    (backend-protocol GRPCS for a TLS listener, say) replaces the default
+    instead of rendering the same annotation twice.
+  */}}
+  {{- $annotations := dict }}
+  {{- if eq .Values.ingress.className "nginx" }}
+  {{- $_ := set $annotations "nginx.ingress.kubernetes.io/backend-protocol" "GRPC" }}
+  {{- $_ := set $annotations "nginx.ingress.kubernetes.io/ssl-redirect" "true" }}
+  {{- end }}
+  {{- $annotations = merge (deepCopy (.Values.ingress.annotations | default dict)) $annotations }}
+  {{- with $annotations }}
   annotations:
-    {{- if eq .Values.ingress.className "nginx" }}
-    nginx.ingress.kubernetes.io/backend-protocol: "GRPC"
-    nginx.ingress.kubernetes.io/ssl-redirect: "true"
-    {{- end }}
-    {{- with .Values.ingress.annotations }}
     {{- toYaml . | nindent 4 }}
-    {{- end }}
+  {{- end }}
 spec:
   {{- if .Values.ingress.className }}
   ingressClassName: {{ .Values.ingress.className }}

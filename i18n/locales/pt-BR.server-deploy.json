@@ -1,0 +1,8 @@
+{
+  "cmd.server.tls_key_missing": "--tls-cert foi definido (%s) mas --tls-key não: recusando iniciar um listener em texto puro. Defina os dois, ou nenhum para texto puro",
+  "cmd.server.tls_cert_missing": "--tls-key foi definido (%s) mas --tls-cert não: recusando iniciar um listener em texto puro. Defina os dois, ou nenhum para texto puro",
+  "server.metrics_listening": "📊 Métricas Prometheus em :%s/metrics\n",
+  "server.remote.plugin_download_denied": "permissões insuficientes: o papel %q não pode baixar plugins",
+  "remote.agents.header": "Agentes no servidor (%s)",
+  "remote.skills.header": "Skills no servidor (%s)"
+}

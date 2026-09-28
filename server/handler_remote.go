@@ -235,8 +235,16 @@ func (h *Handler) DownloadPlugin(req *pb.DownloadPluginRequest, stream pb.ChatCL
 		return status.Errorf(codes.InvalidArgument, "%s", i18n.T("server.remote.plugin_name_required"))
 	}
 
+	// Same visibility as ListRemotePlugins: a readonly caller lists nothing,
+	// so it downloads nothing, and an internal plugin ("_" prefix) hidden
+	// from non-admins is reported as absent rather than handed over.
+	user := UserFromContext(stream.Context())
+	if user != nil && user.Role == RoleReadonly {
+		return status.Errorf(codes.PermissionDenied, "%s", i18n.T("server.remote.plugin_download_denied", string(user.Role)))
+	}
+
 	plugin, ok := h.pluginManager.GetPlugin(req.PluginName)
-	if !ok {
+	if !ok || (user != nil && user.Role != RoleAdmin && strings.HasPrefix(plugin.Name(), "_")) {
 		return status.Errorf(codes.NotFound, "%s", i18n.T("server.remote.plugin_not_found", req.PluginName))
 	}
 

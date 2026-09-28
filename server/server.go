@@ -338,7 +338,9 @@ func (s *Server) Start() error {
 		fmt.Println(i18n.T("server.auth_enabled"))
 	}
 	if s.config.MetricsPort > 0 {
-		fmt.Println(i18n.T("server.metrics_enabled", s.config.MetricsPort))
+		// The port goes in as text: the i18n printer groups digits, which
+		// turned 9090 into ":9,090".
+		fmt.Println(i18n.T("server.metrics_listening", strconv.Itoa(s.config.MetricsPort)))
 	}
 
 	setHealth(s.health, healthpb.HealthCheckResponse_SERVING)

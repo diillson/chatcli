@@ -80,17 +80,17 @@ func RunConnect(ctx context.Context, args []string, llmMgr manager.LLMManager, l
 	opts := &ConnectOptions{}
 	fs.StringVar(&opts.Address, "addr", os.Getenv("CHATCLI_REMOTE_ADDR"), "Remote server address (host:port)")
 	fs.StringVar(&opts.Token, "token", os.Getenv("CHATCLI_REMOTE_TOKEN"), "Authentication token")
-	fs.BoolVar(&opts.TLS, "tls", false, "Enable TLS")
+	fs.BoolVar(&opts.TLS, "tls", false, "Use TLS (the client dials TLS anyway unless CHATCLI_ALLOW_INSECURE=true; pair with --ca-cert for a private CA)")
 	fs.StringVar(&opts.CertFile, "ca-cert", "", "CA certificate file for TLS")
 	fs.StringVar(&opts.ClientAPIKey, "llm-key", os.Getenv("CHATCLI_CLIENT_API_KEY"), "Your own LLM API key/OAuth token (forwarded to server)")
 	fs.BoolVar(&opts.UseLocalAuth, "use-local-auth", false, "Use OAuth/API key from local auth store (~/.chatcli/auth-profiles.json)")
-	fs.StringVar(&opts.Provider, "provider", "", "Override server's default LLM provider (OPENAI, OPENAI_ASSISTANT, CLAUDEAI, BEDROCK, GOOGLEAI, XAI, ZAI, MINIMAX, MOONSHOT, STACKSPOT, OLLAMA, COPILOT, OPENROUTER, DEVIN)")
+	fs.StringVar(&opts.Provider, "provider", "", "Override server's default LLM provider (OPENAI, OPENAI_ASSISTANT, CLAUDEAI, BEDROCK, GOOGLEAI, XAI, ZAI, MINIMAX, MOONSHOT, STACKSPOT, OLLAMA, COPILOT, OPENROUTER)")
 	fs.StringVar(&opts.Model, "model", "", "Override server's default LLM model (e.g., gpt-5.6-sol, gemini-2.5-flash)")
 	fs.StringVar(&opts.ClientID, "client-id", "", "StackSpot: Client ID for authentication")
 	fs.StringVar(&opts.ClientKey, "client-key", "", "StackSpot: Client Key for authentication")
 	fs.StringVar(&opts.Realm, "realm", "", "StackSpot: Realm/Tenant")
 	fs.StringVar(&opts.AgentID, "agent-id", "", "StackSpot: Agent ID")
-	fs.StringVar(&opts.OllamaURL, "ollama-url", "", "Ollama: Base URL (e.g., http://localhost:11434)")
+	fs.StringVar(&opts.OllamaURL, "ollama-url", "", "Ollama: Base URL as the server reaches it (e.g., https://ollama.internal:11434)")
 	fs.StringVar(&opts.Prompt, "p", "", "One-shot prompt (sends and exits)")
 	fs.BoolVar(&opts.Raw, "raw", false, "Raw output (no formatting)")
 	fs.IntVar(&opts.MaxTokens, "max-tokens", 0, "Max tokens for response")
@@ -199,10 +199,11 @@ func RunConnect(ctx context.Context, args []string, llmMgr manager.LLMManager, l
 	}
 	chatCLI.SetAuditSurface("remote")
 
-	// Override the LLM client with the remote client
-	chatCLI.Client = remoteClient
-	chatCLI.Provider = remoteClient.GetProvider()
-	chatCLI.Model = remoteClient.GetModelName()
+	// Bind the session to the server the same way the in-REPL /connect
+	// does: remote state for /watch status, /session and /disconnect, and
+	// the server's plugins, agents and skills discovered. Setting only the
+	// client left the session believing it was local.
+	chatCLI.AttachRemote(ctx, remoteClient, opts.Address)
 
 	// Join the shared cross-channel conversation: the CLI hydrates the active
 	// thread, live-tails turns from other channels, and mirrors its own turns.
@@ -266,12 +267,14 @@ Arguments:
 Flags:
   --addr <host:port>    Server address (env: CHATCLI_REMOTE_ADDR)
   --token <string>      Server auth token (env: CHATCLI_REMOTE_TOKEN)
-  --provider <string>   Override LLM provider (OPENAI, CLAUDEAI, GOOGLEAI, XAI, ZAI, MINIMAX, STACKSPOT, OLLAMA, COPILOT)
+  --provider <string>   Override LLM provider (OPENAI, OPENAI_ASSISTANT, CLAUDEAI, BEDROCK, GOOGLEAI, XAI,
+                        ZAI, MINIMAX, MOONSHOT, STACKSPOT, OLLAMA, COPILOT, OPENROUTER)
   --model <string>      Override LLM model (e.g., gpt-5.6-sol, gemini-2.5-flash)
   --llm-key <string>    Your own LLM API key/OAuth token (env: CHATCLI_CLIENT_API_KEY)
   --use-local-auth      Use OAuth credentials from local auth store (from /auth login)
-  --tls                 Enable TLS connection
-  --ca-cert <path>      CA certificate file for TLS verification
+  --tls                 Use TLS. The client dials TLS even without it (system trust store)
+                        unless CHATCLI_ALLOW_INSECURE=true is set for a plaintext server
+  --ca-cert <path>      CA certificate file for TLS verification (private or self-signed CA)
   -p <prompt>           One-shot mode: send prompt and exit
   --raw                 Raw output (no markdown/ANSI formatting)
   --max-tokens <int>    Max tokens for response
@@ -283,7 +286,7 @@ Flags:
   --agent-id <string>   StackSpot Agent ID
 
   Ollama flags:
-  --ollama-url <url>    Ollama server base URL (e.g., http://localhost:11434)
+  --ollama-url <url>    Ollama base URL as the server reaches it (e.g., https://ollama.internal:11434)
 
 Credential modes (pick one):
   1. Server credentials (default): Server uses its own API keys from env vars
@@ -292,9 +295,21 @@ Credential modes (pick one):
   4. --client-id + --client-key + --realm + --agent-id: StackSpot credentials
   5. --ollama-url: Connect to an Ollama server (no credentials needed)
 
+Transport:
+  The connection is TLS by default: a server with a public certificate needs no flag,
+  one signed by a private CA needs --ca-cert. A plaintext server (local development,
+  a kubectl port-forward to a server without TLS) needs CHATCLI_ALLOW_INSECURE=true.
+  With --tls, mTLS client certificates come from CHATCLI_TLS_CLIENT_CERT and CHATCLI_TLS_CLIENT_KEY.
+
 Examples:
-  # Use server's default credentials
-  chatcli connect localhost:50051
+  # Use server's default credentials (TLS, public certificate)
+  chatcli connect chatcli.example.com:443 --token "$CHATCLI_REMOTE_TOKEN"
+
+  # Server certificate signed by a private CA
+  chatcli connect myserver:50051 --ca-cert ca.crt --token "$CHATCLI_REMOTE_TOKEN"
+
+  # Plaintext server on this machine (development only)
+  CHATCLI_ALLOW_INSECURE=true chatcli connect localhost:50051
 
   # Use your local Anthropic OAuth token (from /auth login anthropic)
   chatcli connect myserver:50051 --use-local-auth
@@ -311,7 +326,7 @@ Examples:
     --client-id <id> --client-key <key> --realm <realm> --agent-id <agent>
 
   # Ollama (running on the server or accessible URL)
-  chatcli connect myserver:50051 --provider OLLAMA --ollama-url http://gpu-server:11434
+  chatcli connect myserver:50051 --provider OLLAMA --ollama-url https://gpu-server:11434
 
   # GitHub Copilot (uses local OAuth credentials)
   chatcli connect myserver:50051 --use-local-auth --provider COPILOT

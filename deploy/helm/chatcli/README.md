@@ -139,7 +139,7 @@ Set one of:
 | `server.port` | gRPC server port | `50051` |
 | `server.metricsPort` | Prometheus metrics and `/healthz` port (`0` disables metrics; probes then use a TCP check on the gRPC port) | `9090` |
 | `server.token` | Shared bearer token. **Required in-cluster** unless JWT or mTLS is set | `""` |
-| `server.grpcReflection` | Sets `CHATCLI_GRPC_REFLECTION`. Currently has no effect: `chatcli server` does not expose the switch reflection also needs | `false` |
+| `server.grpcReflection` | Sets `CHATCLI_GRPC_REFLECTION=true`, which registers gRPC server reflection (grpcurl and similar tools can list the services); reflection calls still need the server credential. Keep off in production | `false` |
 
 ### Health probes
 
@@ -153,17 +153,17 @@ A kubelet gRPC probe cannot speak TLS, so the chart uses probes that work for ev
 | Parameter | Description | Default |
 |-----------|-------------|---------|
 | `tls.enabled` | Serve gRPC over TLS (1.3) | `false` |
-| `tls.certFile` | Certificate path inside the container (with `existingSecret`: `/etc/chatcli/tls/tls.crt`) | `""` |
-| `tls.keyFile` | Key path inside the container (with `existingSecret`: `/etc/chatcli/tls/tls.key`) | `""` |
+| `tls.certFile` | Certificate path inside the container (with `existingSecret` it defaults to `/etc/chatcli/tls/tls.crt`) | `""` |
+| `tls.keyFile` | Key path inside the container (with `existingSecret` it defaults to `/etc/chatcli/tls/tls.key`) | `""` |
 | `tls.existingSecret` | Existing TLS Secret (e.g. from cert-manager), mounted read-only at `/etc/chatcli/tls` | `""` |
 
 ```yaml
 tls:
   enabled: true
   existingSecret: chatcli-tls
-  certFile: /etc/chatcli/tls/tls.crt
-  keyFile: /etc/chatcli/tls/tls.key
 ```
+
+`tls.enabled: true` with neither `tls.existingSecret` nor both `tls.certFile` and `tls.keyFile` fails the render, instead of starting a listener that would silently serve plaintext.
 
 ### LLM providers
 
@@ -253,14 +253,14 @@ mcp:
 |-----------|-------------|---------|
 | `watcher.enabled` | Enable workload watching | `false` |
 | `watcher.deployment` | Single-target mode: Deployment name (legacy) | `""` |
-| `watcher.namespace` | Single-target mode: namespace | `""` |
-| `watcher.targets` | Multi-target list of `{deployment, namespace, metricsPort, metricsPath, metricsFilter}` (takes precedence) | `[]` |
+| `watcher.namespace` | Single-target mode: namespace (empty = the namespace named `default`) | `""` |
+| `watcher.targets` | Multi-target list of `{deployment, kind, namespace, metricsPort, metricsPath, metricsFilter}` (takes precedence); `deployment` is the resource name and `kind` is `Deployment` (default), `StatefulSet`, `DaemonSet`, `Job` or `CronJob` | `[]` |
 | `watcher.interval` | Collection interval | `"30s"` |
 | `watcher.window` | Analysis time window | `"2h"` |
 | `watcher.maxLogLines` | Max log lines per pod | `100` |
 | `watcher.maxContextChars` | Budget for the LLM context (multi-target) | `32000` |
 
-Targets in other namespaces switch the chart's RBAC to a ClusterRole automatically.
+Targets in other namespaces (including a single-target `watcher.namespace` other than the release namespace) switch the chart's RBAC to a ClusterRole automatically.
 
 ```yaml
 watcher:
@@ -272,6 +272,9 @@ watcher:
       metricsPath: "/metrics"
       metricsFilter: ["http_requests_*", "http_request_duration_*"]
     - deployment: worker
+      namespace: batch
+    - deployment: nightly-report
+      kind: CronJob
       namespace: batch
 ```
 
@@ -342,7 +345,7 @@ agents:
 | `service.type` | Service type | `ClusterIP` |
 | `service.port` | Service port | `50051` |
 | `service.headless` | Headless Service for gRPC client-side load balancing (recommended with `replicaCount > 1`) | `false` |
-| `ingress.enabled` | Create an Ingress (with `className: nginx` the chart adds `backend-protocol: GRPC`) | `false` |
+| `ingress.enabled` | Create an Ingress (with `className: nginx` the chart adds `backend-protocol: GRPC` and `ssl-redirect: "true"`; the same keys in `ingress.annotations` win, e.g. `backend-protocol: GRPCS` for a TLS listener) | `false` |
 | `ingress.className` | Ingress class | `""` |
 | `ingress.annotations` | Ingress annotations | `{}` |
 | `ingress.hosts` | Hosts and paths | `chatcli.local`, `/` |
@@ -360,9 +363,9 @@ agents:
 | `serviceAccount.create` | Create a ServiceAccount | `true` |
 | `serviceAccount.name` | ServiceAccount name override | `""` |
 | `serviceAccount.annotations` | Annotations (IRSA / Workload Identity) | `{}` |
-| `rbac.create` | Create RBAC for the watcher | `true` |
+| `rbac.create` | Create RBAC for the watcher (no access to Secrets: the server never reads one through the API) | `true` |
 | `rbac.clusterWide` | ClusterRole instead of a namespaced Role | `false` |
-| `rbac.additionalRules` | Extra RBAC rules | `[]` |
+| `rbac.additionalRules` | Extra RBAC rules (e.g. Secret access for a plugin that needs it, scoped with `resourceNames`) | `[]` |
 
 ### Security hardening
 
