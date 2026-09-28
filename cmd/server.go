@@ -101,6 +101,15 @@ func RunServer(args []string, llmMgr manager.LLMManager, logger *zap.Logger) err
 		return err
 	}
 
+	// A certificate without its key (or the reverse) used to fall through
+	// to a plaintext listener without a word. Refuse it before anything
+	// starts; stderr as well as the error, because the logger may not flush
+	// before the process exits in a container.
+	if err := validateTLSPair(opts.CertFile, opts.KeyFile); err != nil {
+		fmt.Fprintln(os.Stderr, "FATAL: "+err.Error())
+		return err
+	}
+
 	// Resolve provider if not set
 	if opts.Provider == "" {
 		available := llmMgr.GetAvailableProviders()
@@ -436,6 +445,18 @@ func getEnvInt(key string, defaultVal int) int {
 	return defaultVal
 }
 
+// validateTLSPair reports a half-configured TLS listener: TLS needs both
+// the certificate and the key, and neither means plaintext on purpose.
+func validateTLSPair(certFile, keyFile string) error {
+	switch {
+	case certFile != "" && keyFile == "":
+		return fmt.Errorf("%s", i18n.T("cmd.server.tls_key_missing", certFile))
+	case certFile == "" && keyFile != "":
+		return fmt.Errorf("%s", i18n.T("cmd.server.tls_cert_missing", keyFile))
+	}
+	return nil
+}
+
 // PrintServerUsage prints help for the server subcommand.
 func PrintServerUsage() {
 	fmt.Println(`Usage: chatcli server [flags]
@@ -452,6 +473,8 @@ Flags:
   --provider <name>   Default LLM provider (env: LLM_PROVIDER)
   --model <name>      Default LLM model
   --metrics-port <n>  Prometheus metrics HTTP port (default: 9090, 0=disabled, env: CHATCLI_METRICS_PORT)
+  --enable-reflection Register gRPC server reflection (env: CHATCLI_GRPC_REFLECTION=true);
+                      reflection calls still need the credential. Keep off in production
 
   K8s Watcher (optional, enables K8s context injection for all remote clients):
   --watch-config <path>       Multi-target watch config YAML (env: CHATCLI_WATCH_CONFIG)
@@ -474,7 +497,7 @@ Flags:
 Examples:
   chatcli server
   chatcli server --port 8080 --token mysecret
-  chatcli server --tls-cert cert.pem --tls-key key.pem
+  chatcli server --tls-cert cert.pem --tls-key key.pem   # both or neither
 
   # Server with provider fallback chain
   chatcli server --fallback-providers OPENAI,CLAUDEAI,GOOGLEAI,ZAI,MINIMAX,COPILOT

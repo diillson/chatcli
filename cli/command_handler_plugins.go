@@ -339,6 +339,7 @@ func (ch *CommandHandler) handleAgentPersonaSubcommand(userInput string) bool {
 	switch subcommand {
 	case "list":
 		ch.cli.personaHandler.ListAgents()
+		ch.cli.printRemoteAgents()
 		return true
 	case "load":
 		if len(args) < 3 {
@@ -378,6 +379,7 @@ func (ch *CommandHandler) handleAgentPersonaSubcommand(userInput string) bool {
 		return true
 	case "skills":
 		ch.cli.personaHandler.ListSkills()
+		ch.cli.printRemoteSkills()
 		return true
 	case "help":
 		ch.cli.personaHandler.ShowHelp()

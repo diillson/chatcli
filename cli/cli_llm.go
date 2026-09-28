@@ -552,6 +552,9 @@ func (cli *ChatCLI) refreshModelCache(ctx context.Context) {
 	provider := cli.Provider
 	logger := cli.logger
 	mgr := cli.manager
+	if mgr == nil {
+		return // nothing to list from (a session bound straight to a server)
+	}
 	go func() {
 		// The warmer must outlive the triggering request; detach
 		// cancellation while inheriting context values.

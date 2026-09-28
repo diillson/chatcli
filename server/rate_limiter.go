@@ -7,7 +7,7 @@ package server
 
 import (
 	"context"
-	"fmt"
+	"math"
 	"os"
 	"strconv"
 	"sync"
@@ -100,7 +100,7 @@ func (rl *PerClientRateLimiter) UnaryInterceptor() grpc.UnaryServerInterceptor {
 				zap.String("method", info.FullMethod),
 			)
 			// Set Retry-After header
-			retryAfter := fmt.Sprintf("%.0f", 1.0/rl.config.RequestsPerSecond)
+			retryAfter := strconv.Itoa(retryAfterSeconds(rl.config.RequestsPerSecond))
 			_ = grpc.SetHeader(ctx, metadata.Pairs("retry-after", retryAfter))
 			return nil, status.Errorf(codes.ResourceExhausted, "rate limit exceeded, retry after %s seconds", retryAfter)
 		}
@@ -119,10 +119,30 @@ func (rl *PerClientRateLimiter) StreamInterceptor() grpc.StreamServerInterceptor
 				zap.String("client", clientID),
 				zap.String("method", info.FullMethod),
 			)
-			return status.Errorf(codes.ResourceExhausted, "rate limit exceeded")
+			retryAfter := strconv.Itoa(retryAfterSeconds(rl.config.RequestsPerSecond))
+			_ = ss.SetHeader(metadata.Pairs("retry-after", retryAfter))
+			return status.Errorf(codes.ResourceExhausted, "rate limit exceeded, retry after %s seconds", retryAfter)
 		}
 		return handler(srv, ss)
 	}
+}
+
+// retryAfterSeconds is the wait, in whole seconds, before a rejected caller
+// has a token again: one token refills in 1/rps seconds, rounded up and never
+// below 1. Rounding to nearest turned the default 10 rps into "0", which
+// tells a client to retry at once and hit the limit again.
+func retryAfterSeconds(rps float64) int {
+	if rps <= 0 || math.IsNaN(rps) || math.IsInf(rps, 0) {
+		return 1
+	}
+	secs := math.Ceil(1.0 / rps)
+	if secs < 1 {
+		return 1
+	}
+	if secs > math.MaxInt32 {
+		return math.MaxInt32
+	}
+	return int(secs)
 }
 
 // Stop shuts down the background cleanup goroutine. It is safe to call

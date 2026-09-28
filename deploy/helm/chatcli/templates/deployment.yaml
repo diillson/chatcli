@@ -77,14 +77,31 @@ spec:
             - "--mcp-config=/etc/chatcli/mcp/mcp_servers.json"
             {{- end }}
             {{- if .Values.tls.enabled }}
-            - "--tls-cert={{ .Values.tls.certFile }}"
-            - "--tls-key={{ .Values.tls.keyFile }}"
+            {{- /*
+              An empty --tls-cert/--tls-key would leave the server on
+              plaintext, so one is never rendered: with existingSecret the
+              paths default to the Secret's mount, and without a Secret or
+              both paths the render fails.
+            */}}
+            {{- $tlsCert := .Values.tls.certFile }}
+            {{- $tlsKey := .Values.tls.keyFile }}
+            {{- if .Values.tls.existingSecret }}
+            {{- $tlsCert = $tlsCert | default "/etc/chatcli/tls/tls.crt" }}
+            {{- $tlsKey = $tlsKey | default "/etc/chatcli/tls/tls.key" }}
+            {{- end }}
+            {{- if not (and $tlsCert $tlsKey) }}
+            {{- fail "tls.enabled=true needs tls.existingSecret (mounted at /etc/chatcli/tls) or both tls.certFile and tls.keyFile; without them the server would listen in plaintext" }}
+            {{- end }}
+            - "--tls-cert={{ $tlsCert }}"
+            - "--tls-key={{ $tlsKey }}"
             {{- end }}
             {{- if and .Values.watcher.enabled .Values.watcher.targets }}
             - "--watch-config=/etc/chatcli/watch/watch-config.yaml"
             {{- else if and .Values.watcher.enabled .Values.watcher.deployment }}
             - "--watch-deployment={{ .Values.watcher.deployment }}"
+            {{- if .Values.watcher.namespace }}
             - "--watch-namespace={{ .Values.watcher.namespace }}"
+            {{- end }}
             - "--watch-interval={{ .Values.watcher.interval }}"
             - "--watch-window={{ .Values.watcher.window }}"
             - "--watch-max-log-lines={{ .Values.watcher.maxLogLines }}"

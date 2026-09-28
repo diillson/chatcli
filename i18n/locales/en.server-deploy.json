@@ -1,0 +1,8 @@
+{
+  "cmd.server.tls_key_missing": "--tls-cert is set (%s) but --tls-key is not: refusing to start a plaintext listener. Set both, or neither for plaintext",
+  "cmd.server.tls_cert_missing": "--tls-key is set (%s) but --tls-cert is not: refusing to start a plaintext listener. Set both, or neither for plaintext",
+  "server.metrics_listening": "📊 Prometheus metrics on :%s/metrics\n",
+  "server.remote.plugin_download_denied": "insufficient permissions: role %q cannot download plugins",
+  "remote.agents.header": "Agents on the server (%s)",
+  "remote.skills.header": "Skills on the server (%s)"
+}

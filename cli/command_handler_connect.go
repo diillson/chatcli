@@ -12,8 +12,10 @@ import (
 	"time"
 
 	"github.com/diillson/chatcli/auth"
+	"github.com/diillson/chatcli/cli/plugins"
 	"github.com/diillson/chatcli/client/remote"
 	"github.com/diillson/chatcli/i18n"
+	"github.com/diillson/chatcli/llm/client"
 	"go.uber.org/zap"
 )
 
@@ -151,20 +153,7 @@ func (ch *CommandHandler) handleConnectCommand(ctx context.Context, userInput st
 		return
 	}
 
-	// Save current local state
-	ch.cli.localClient = ch.cli.Client
-	ch.cli.localProvider = ch.cli.Provider
-	ch.cli.localModel = ch.cli.Model
-
-	// Swap to remote
-	ch.cli.Client = remoteClient
-	ch.cli.Provider = remoteClient.GetProvider()
-	ch.cli.Model = remoteClient.GetModelName()
-	ch.cli.remoteConn = remoteClient
-	ch.cli.isRemote = true
-	ch.cli.remoteAddress = address
-	ch.cli.refreshModelCache(ctx)
-	ch.cli.pulseRouteChanged("/connect")
+	ch.cli.bindRemote(ctx, remoteClient, address, "/connect")
 
 	connInfo := fmt.Sprintf("version: %s, provider: %s, model: %s", ver, ch.cli.Provider, ch.cli.Model)
 	if useLocalAuth {
@@ -187,32 +176,122 @@ func (ch *CommandHandler) handleConnectCommand(ctx context.Context, userInput st
 	}
 
 	// Discover and register remote plugins
-	ch.discoverRemoteResources(ctx, remoteClient)
+	ch.cli.discoverRemoteResources(ctx, remoteClient, remotePluginFactory(remoteClient))
 
 	fmt.Println(colorize(i18n.T("connect.hint.disconnect"), ColorCyan))
 }
 
+// remoteBackend is what binding a server connection needs from the client:
+// the LLM surface the session talks to, the connection to close on
+// /disconnect and the discovery RPCs. *remote.Client satisfies it; tests
+// pass a fake.
+type remoteBackend interface {
+	client.LLMClient
+	GetProvider() string
+	Close() error
+	remoteResourceSource
+}
+
+// remoteResourceSource lists what the server offers to a connected CLI.
+type remoteResourceSource interface {
+	ListRemotePlugins(ctx context.Context) ([]remote.RemotePluginInfo, error)
+	ListRemoteAgents(ctx context.Context) ([]remote.RemoteAgentInfo, error)
+	ListRemoteSkills(ctx context.Context) ([]remote.RemoteSkillInfo, error)
+}
+
+// remotePluginFactory builds the proxy that executes a server plugin
+// through rc.
+func remotePluginFactory(rc *remote.Client) func(remote.RemotePluginInfo) plugins.Plugin {
+	return func(info remote.RemotePluginInfo) plugins.Plugin {
+		return remote.NewRemotePluginFromInfo(info, rc)
+	}
+}
+
+// AttachRemote makes rc, an already connected and healthy server client,
+// the session's backend exactly as the in-REPL /connect does: the local
+// client is kept for /disconnect, the session is marked remote (so /watch
+// status, /session and the prompt badge ask the server) and the server's
+// plugins, agents and skills are discovered. `chatcli connect` calls it
+// before Start.
+func (cli *ChatCLI) AttachRemote(ctx context.Context, rc *remote.Client, address string) {
+	cli.bindRemote(ctx, rc, address, "connect")
+	cli.discoverRemoteResources(ctx, rc, remotePluginFactory(rc))
+}
+
+// bindRemote swaps the session onto backend and records the remote state.
+func (cli *ChatCLI) bindRemote(ctx context.Context, backend remoteBackend, address, via string) {
+	// Save current local state
+	cli.localClient = cli.Client
+	cli.localProvider = cli.Provider
+	cli.localModel = cli.Model
+
+	// Swap to remote
+	cli.Client = backend
+	cli.Provider = backend.GetProvider()
+	cli.Model = backend.GetModelName()
+	cli.remoteConn = backend
+	cli.isRemote = true
+	cli.remoteAddress = address
+	cli.refreshModelCache(ctx)
+	cli.pulseRouteChanged(via)
+}
+
 // discoverRemoteResources fetches remote plugins/agents/skills and registers them.
-func (ch *CommandHandler) discoverRemoteResources(ctx context.Context, remoteClient *remote.Client) {
+func (cli *ChatCLI) discoverRemoteResources(ctx context.Context, src remoteResourceSource, newPlugin func(remote.RemotePluginInfo) plugins.Plugin) {
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 
 	// Register remote plugins
-	if remotePlugins, err := remoteClient.ListRemotePlugins(ctx); err == nil && len(remotePlugins) > 0 {
+	if remotePlugins, err := src.ListRemotePlugins(ctx); err == nil && len(remotePlugins) > 0 && cli.pluginManager != nil {
 		for _, p := range remotePlugins {
-			rp := remote.NewRemotePluginFromInfo(p, remoteClient)
-			ch.cli.pluginManager.RegisterRemotePlugin(rp)
+			cli.pluginManager.RegisterRemotePlugin(newPlugin(p))
 		}
-		ch.cli.logger.Info("Remote plugins registered", zap.Int("count", len(remotePlugins)))
+		cli.logger.Info("Remote plugins registered", zap.Int("count", len(remotePlugins)))
 	}
 
 	// Cache remote agents and skills info for listing
-	if agents, err := remoteClient.ListRemoteAgents(ctx); err == nil {
-		ch.cli.remoteAgents = agents
+	if agents, err := src.ListRemoteAgents(ctx); err == nil {
+		cli.remoteAgents = agents
 	}
-	if skills, err := remoteClient.ListRemoteSkills(ctx); err == nil {
-		ch.cli.remoteSkills = skills
+	if skills, err := src.ListRemoteSkills(ctx); err == nil {
+		cli.remoteSkills = skills
 	}
+}
+
+// printRemoteAgents lists the agents the connected server offers, after the
+// local list of /agent list. Silent when not connected or the server has
+// none.
+func (cli *ChatCLI) printRemoteAgents() {
+	if !cli.isRemote || len(cli.remoteAgents) == 0 {
+		return
+	}
+	fmt.Println(colorize("\n "+i18n.T("remote.agents.header", cli.remoteAddress), ColorCyan))
+	fmt.Println(strings.Repeat("─", 50))
+	for _, a := range cli.remoteAgents {
+		desc := a.Description
+		if desc == "" {
+			desc = colorize(i18n.T("agent.persona.no_description"), ColorGray)
+		}
+		fmt.Printf("    %s - %s\n", colorize(a.Name, ColorCyan), desc)
+	}
+	fmt.Println()
+}
+
+// printRemoteSkills is printRemoteAgents for /agent skills.
+func (cli *ChatCLI) printRemoteSkills() {
+	if !cli.isRemote || len(cli.remoteSkills) == 0 {
+		return
+	}
+	fmt.Println(colorize("\n "+i18n.T("remote.skills.header", cli.remoteAddress), ColorCyan))
+	fmt.Println(strings.Repeat("─", 50))
+	for _, s := range cli.remoteSkills {
+		desc := s.Description
+		if desc == "" {
+			desc = colorize(i18n.T("agent.persona.no_description"), ColorGray)
+		}
+		fmt.Printf("    • %s - %s\n", colorize(s.Name, ColorCyan), desc)
+	}
+	fmt.Println()
 }
 
 // handleDisconnectCommand handles the /disconnect command.

@@ -4,8 +4,15 @@
   1. Explicitly set via rbac.clusterWide: true
   2. Targets in multiple different namespaces
   3. Any target in a different namespace than the Helm release namespace
+  4. Single-target mode (watcher.deployment) outside the release namespace;
+     an empty watcher.namespace is the server default, "default"
 */ -}}
 {{- $needsClusterWide := .Values.rbac.clusterWide -}}
+{{- if and (not $needsClusterWide) .Values.watcher.enabled (not .Values.watcher.targets) .Values.watcher.deployment -}}
+  {{- if ne (.Values.watcher.namespace | default "default") .Release.Namespace -}}
+    {{- $needsClusterWide = true -}}
+  {{- end -}}
+{{- end -}}
 {{- if and (not $needsClusterWide) .Values.watcher.enabled .Values.watcher.targets -}}
   {{- $namespaces := dict -}}
   {{- range .Values.watcher.targets -}}
@@ -38,9 +45,12 @@ rules:
   - apiGroups: [ "platform.chatcli.io" ]
     resources: [ "runbooks", "sourcerepositories", "sourcerepositories/status" ]
     verbs: [ "get", "list", "watch", "create", "update", "patch", "delete" ]
-  # Core resources for watcher + remediation
+  # Core resources for watcher + remediation. No Secrets: nothing in the
+  # server reads or writes one through the API (its own credentials arrive
+  # as mounted env and files); grant access through rbac.additionalRules
+  # only for a plugin that really needs it.
   - apiGroups: [""]
-    resources: ["secrets", "configmaps", "persistentvolumeclaims"]
+    resources: ["configmaps", "persistentvolumeclaims"]
     verbs: ["get", "list", "watch", "update", "patch"]
   # Nodes (for cordon/drain remediation)
   - apiGroups: [""]
@@ -116,9 +126,12 @@ rules:
   - apiGroups: [ "platform.chatcli.io" ]
     resources: [ "runbooks", "sourcerepositories", "sourcerepositories/status" ]
     verbs: [ "get", "list", "watch", "create", "update", "patch", "delete" ]
-  # Core resources for watcher + remediation
+  # Core resources for watcher + remediation. No Secrets: nothing in the
+  # server reads or writes one through the API (its own credentials arrive
+  # as mounted env and files); grant access through rbac.additionalRules
+  # only for a plugin that really needs it.
   - apiGroups: [""]
-    resources: ["secrets", "configmaps", "persistentvolumeclaims"]
+    resources: ["configmaps", "persistentvolumeclaims"]
     verbs: ["get", "list", "watch", "update", "patch"]
   # Apps resources (extended verbs for remediation)
   - apiGroups: ["apps"]

@@ -121,6 +121,9 @@ data:
     targets:
     {{- range .Values.watcher.targets }}
       - deployment: {{ .deployment | quote }}
+        {{- if .kind }}
+        kind: {{ .kind | quote }}
+        {{- end }}
         namespace: {{ .namespace | default "default" | quote }}
         {{- if .metricsPort }}
         metricsPort: {{ .metricsPort }}

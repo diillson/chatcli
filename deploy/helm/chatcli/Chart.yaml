@@ -24,7 +24,7 @@ maintainers:
     email: diillson@hotmail.com
 annotations:
   artifacthub.io/license: Apache-2.0
-  artifacthub.io/containsSecurityUpdates: 'false'
+  artifacthub.io/containsSecurityUpdates: 'true'
   artifacthub.io/changes: |
     - kind: fixed
       description: Probes use GET /healthz on the metrics port and a TCP check on the gRPC port, which work for every server image version and with or without TLS; kubelet gRPC probes cannot speak TLS
@@ -42,6 +42,18 @@ annotations:
       description: The plugin-loader init container gets the restricted securityContext
     - kind: added
       description: extraVolumes and extraVolumeMounts, to back security.tlsClientCA and other paths with Secrets
+    - kind: security
+      description: tls.enabled with tls.existingSecret defaults the certificate and key paths to the mounted Secret, and tls.enabled without a Secret or both paths fails the render instead of starting a plaintext listener
+    - kind: security
+      description: The server Role and ClusterRole no longer grant access to Secrets, which the server never reads through the API; rbac.additionalRules can add a scoped rule where a plugin needs one
+    - kind: fixed
+      description: A backend-protocol or ssl-redirect annotation in ingress.annotations replaces the nginx default instead of being rendered twice, so GRPCS backends work
+    - kind: added
+      description: watcher.targets[].kind watches a StatefulSet, DaemonSet, Job or CronJob instead of a Deployment
+    - kind: fixed
+      description: An empty watcher.namespace no longer renders an empty --watch-namespace, and a single-target namespace outside the release namespace switches RBAC to a ClusterRole
+    - kind: fixed
+      description: server.grpcReflection is documented as working, since CHATCLI_GRPC_REFLECTION alone enables reflection
   artifacthub.io/prerelease: 'false'
   artifacthub.io/operator: 'false'
   artifacthub.io/crds: |
