@@ -44,6 +44,12 @@ const (
 //  4. Otherwise describe-fallback — the safe default, since sending image
 //     blocks to a text-only model is a hard API error.
 func (cli *ChatCLI) resolveVisionMode() visionMode {
+	return cli.resolveVisionModeFor(cli.Provider, cli.Model)
+}
+
+// resolveVisionModeFor is resolveVisionMode for a named route: the model a
+// turn is routed to, which is not always the session's.
+func (cli *ChatCLI) resolveVisionModeFor(provider, model string) visionMode {
 	switch strings.ToLower(strings.TrimSpace(os.Getenv("CHATCLI_VISION_INPUT"))) {
 	case "native", "on", "force":
 		return visionNative
@@ -52,12 +58,12 @@ func (cli *ChatCLI) resolveVisionMode() visionMode {
 	case "off", "none", "ignore":
 		return visionOff
 	}
-	if catalog.HasCapability(cli.Provider, cli.Model, "vision") {
+	if catalog.HasCapability(provider, model, "vision") {
 		return visionNative
 	}
-	if modelIDImpliesVision(cli.Model) {
+	if modelIDImpliesVision(model) {
 		cli.logger.Debug("vision: off-catalog model id implies vision, sending native",
-			zap.String("provider", cli.Provider), zap.String("model", cli.Model))
+			zap.String("provider", provider), zap.String("model", model))
 		return visionNative
 	}
 	return visionDescribe

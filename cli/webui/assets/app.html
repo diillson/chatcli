@@ -537,7 +537,7 @@ function setBusy(on) {
 async function sendTurn(text) {
   if (state.run) { toast(t('busy'), 'warn'); return; }
   text = (text || $('#input').value).trim();
-  if (!text) return;
+  if (!text && !state.images.length) return;
   const images = state.images.slice();
   const previews = images.map(i => 'data:' + i.media_type + ';base64,' + i.data);
   addMessage('user', text, previews);

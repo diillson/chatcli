@@ -16,6 +16,7 @@ import (
 	"github.com/diillson/chatcli/config"
 	"github.com/diillson/chatcli/i18n"
 	"github.com/diillson/chatcli/models"
+	"github.com/diillson/chatcli/pkg/atrest"
 	"github.com/diillson/chatcli/utils"
 	"go.uber.org/zap"
 )
@@ -207,27 +208,36 @@ func (cli *ChatCLI) processFileCommand(ctx context.Context, userInput string) (s
 // dropped with a user-facing warning, so a non-vision provider never receives
 // an image it cannot decode.
 func (cli *ChatCLI) gateImagesForModel(ctx context.Context, images []models.ImageContent) ([]models.ImageContent, string) {
+	return cli.gateImagesForRoute(ctx, cli.Provider, cli.Model, images)
+}
+
+// gateImagesForRoute is gateImagesForModel for the model a turn is routed
+// to. A headless turn may name a route other than the session's, and the
+// gate must judge the model that will receive the images: judging the
+// session's model sent images natively to a routed model without vision,
+// and described away the images a routed vision model could have seen.
+func (cli *ChatCLI) gateImagesForRoute(ctx context.Context, provider, model string, images []models.ImageContent) ([]models.ImageContent, string) {
 	if len(images) == 0 {
 		return nil, ""
 	}
 
-	switch cli.resolveVisionMode() {
+	switch cli.resolveVisionModeFor(provider, model) {
 	case visionNative:
 		return cli.compressImagesForVision(images), ""
 	case visionOff:
 		cli.logger.Info("vision: input disabled by CHATCLI_VISION_INPUT=off",
-			zap.String("provider", cli.Provider), zap.String("model", cli.Model))
+			zap.String("provider", provider), zap.String("model", model))
 		return nil, ""
 	default: // visionDescribe
 		if desc, ok := cli.describeImagesFallback(ctx, images); ok {
 			cli.logger.Info("vision: native vision unavailable, using describe-fallback",
-				zap.String("provider", cli.Provider), zap.String("model", cli.Model),
+				zap.String("provider", provider), zap.String("model", model),
 				zap.Int("images", len(images)))
 			return nil, desc
 		}
-		fmt.Println(i18n.T("vision.warn.model_no_vision", cli.Model))
+		fmt.Println(i18n.T("vision.warn.model_no_vision", model))
 		cli.logger.Warn("vision: image attached but model has no vision and no fallback is available",
-			zap.String("provider", cli.Provider), zap.String("model", cli.Model))
+			zap.String("provider", provider), zap.String("model", model))
 		return nil, ""
 	}
 }
@@ -320,6 +330,13 @@ func (cli *ChatCLI) loadImageAttachment(path string) (models.ImageContent, bool)
 	data, err := os.ReadFile(expanded) //#nosec G304 -- user-specified @file path to attach as a vision image
 	if err != nil {
 		return models.ImageContent{}, false
+	}
+	// A saved attachment is sealed when encryption at rest is on
+	// (saveTurnAttachments); anything else passes through untouched.
+	if atrest.IsEncrypted(data) {
+		if data, err = atrest.OpenAt(expanded, data); err != nil {
+			return models.ImageContent{}, false
+		}
 	}
 
 	mime, ok := models.DetectImageMediaType(data)

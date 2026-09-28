@@ -8,6 +8,7 @@ package webui
 
 import (
 	"context"
+	"path/filepath"
 	"strings"
 	"time"
 	"unicode"
@@ -29,6 +30,15 @@ var slashModes = map[string]string{
 // context (file, git, env, shell history). They are never run as tools.
 var chatContextTools = map[string]bool{"file": true, "git": true, "env": true, "history": true}
 
+// viewTool is the tool that shows the model an image. It attaches the image
+// to the conversation a model turn is having, so run on its own it has
+// nothing to attach to; in chat mode the turn itself takes the image.
+const viewTool = "view"
+
+// imageFileExts are the extensions an "@view" argument is taken as a local
+// image by.
+var imageFileExts = map[string]bool{".png": true, ".jpg": true, ".jpeg": true, ".gif": true, ".webp": true}
+
 // splitLeadingToken splits "token rest of line" at the first whitespace.
 func splitLeadingToken(text string) (token, rest string) {
 	text = strings.TrimSpace(text)
@@ -47,13 +57,18 @@ func splitLeadingToken(text string) (token, rest string) {
 // a tool block. It returns true when the line was fully handled; otherwise
 // mode and text may have been rewritten ("/coder fix it" runs "fix it" in
 // coder mode) and the caller continues with the model.
-func (s *Server) routeInline(ctx context.Context, rn *run, session string, mode, text *string) bool {
+//
+// A line that comes with attached images is about them, so it always
+// reaches the model with them: running its leading "@tool" instead used to
+// drop the attachment unseen ("@view check this image" ran @view on the
+// words, failed, and the image never reached the conversation).
+func (s *Server) routeInline(ctx context.Context, rn *run, session string, mode, text *string, hasImages bool) bool {
 	line := strings.TrimSpace(*text)
 	switch {
 	case strings.HasPrefix(line, "/"):
 		return s.routeSlash(ctx, rn, session, line, mode, text)
-	case strings.HasPrefix(line, "@") && normalizeMode(*mode) == "chat":
-		return s.routeTool(ctx, rn, line)
+	case strings.HasPrefix(line, "@") && normalizeMode(*mode) == "chat" && !hasImages:
+		return s.routeTool(ctx, rn, line, text)
 	}
 	return false
 }
@@ -109,10 +124,22 @@ func (s *Server) commandAdvertised(token string) bool {
 	return false
 }
 
-func (s *Server) routeTool(ctx context.Context, rn *run, line string) bool {
+func (s *Server) routeTool(ctx context.Context, rn *run, line string, text *string) bool {
 	token, args := splitLeadingToken(line)
 	name := strings.TrimPrefix(token, "@")
-	if name == "" || chatContextTools[strings.ToLower(name)] || !s.toolKnown(name) {
+	if name == "" || chatContextTools[strings.ToLower(name)] {
+		return false
+	}
+	if strings.EqualFold(name, viewTool) {
+		// "@view shot.png what is wrong?" is the terminal's
+		// "@file shot.png what is wrong?": the chat turn attaches the
+		// image. Anything else is the user's text for the model.
+		if first, _ := splitLeadingToken(args); imageFileExts[strings.ToLower(filepath.Ext(first))] {
+			*text = "@file " + args
+		}
+		return false
+	}
+	if !s.toolKnown(name) {
 		return false
 	}
 	id := rn.id + "-tool"

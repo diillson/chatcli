@@ -1,0 +1,5 @@
+{
+  "web.body_too_large": "a requisição passa dos %d MB que a interface web aceita; anexe menos imagens ou imagens menores",
+  "web.image.default_prompt": "Analise a imagem anexada e descreva o que ela mostra.",
+  "cfg.kv.retention.attachments": "anexos salvos"
+}

@@ -1,0 +1,5 @@
+{
+  "web.body_too_large": "the request is larger than the %d MB the web UI accepts; attach fewer or smaller images",
+  "web.image.default_prompt": "Analyze the attached image and describe what it shows.",
+  "cfg.kv.retention.attachments": "saved attachments"
+}
