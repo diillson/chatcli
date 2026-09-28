@@ -1,0 +1,58 @@
+{{- /*
+NOTES.txt — printed after `helm install` / `helm upgrade`.
+*/ -}}
+{{- $fullname := include "chatcli.fullname" . -}}
+{{- $extraCred := false -}}
+{{- range .Values.extraEnv -}}
+{{- if has .name (list "CHATCLI_SERVER_TOKEN" "CHATCLI_JWT_SECRET" "CHATCLI_JWT_PUBLIC_KEY" "CHATCLI_SERVER_TLS_CLIENT_CA") -}}
+{{- $extraCred = true -}}
+{{- end -}}
+{{- end -}}
+{{- $loopback := has .Values.security.bindAddress (list "127.0.0.1" "localhost" "::1") -}}
+{{- $cred := or .Values.server.token .Values.security.jwtSecret .Values.security.jwtSecretRef .Values.security.jwtPublicKey .Values.security.jwtPublicKeyRef .Values.security.tlsClientCA $extraCred -}}
+ChatCLI server {{ .Chart.AppVersion }} is deployed as {{ $fullname }} in namespace {{ .Release.Namespace }}.
+
+{{- if and (not $cred) (not $loopback) }}
+{{- if .Values.secrets.existingSecret }}
+
+NOTE: no credential is set in the chart values. The server refuses to start
+on a reachable address without one, so secrets.existingSecret
+({{ .Values.secrets.existingSecret }}) must carry CHATCLI_SERVER_TOKEN,
+CHATCLI_JWT_SECRET or CHATCLI_JWT_PUBLIC_KEY. If it does not, the pod exits
+with "refusing to serve an unauthenticated API".
+{{- else }}
+
+WARNING: no credential is configured. Inside Kubernetes the server binds
+every interface and refuses to start unauthenticated, so this pod will exit
+with "refusing to serve an unauthenticated API". Set one of:
+
+    --set server.token="$(openssl rand -hex 32)"
+    --set security.jwtSecretRef.name=<secret> --set security.jwtSecretRef.key=<key>
+{{- end }}
+{{- end }}
+
+Connect from your machine:
+
+    kubectl -n {{ .Release.Namespace }} port-forward svc/{{ $fullname }} {{ .Values.service.port }}:{{ .Values.service.port }}
+{{- if .Values.tls.enabled }}
+    chatcli connect localhost:{{ .Values.service.port }} --tls --ca-cert ca.crt --token "$CHATCLI_REMOTE_TOKEN"
+
+(through a port-forward the certificate must also be valid for localhost)
+{{- else }}
+    CHATCLI_ALLOW_INSECURE=true chatcli connect localhost:{{ .Values.service.port }} --token "$CHATCLI_REMOTE_TOKEN"
+
+The listener is plaintext (tls.enabled=false): the client dials TLS unless
+CHATCLI_ALLOW_INSECURE=true. Enable TLS before exposing it beyond the pod
+network.
+{{- end }}
+{{- if .Values.server.token }}
+
+Read the shared token back with:
+
+    kubectl -n {{ .Release.Namespace }} get secret {{ include "chatcli.tokenSecretName" . }} \
+      -o jsonpath='{.data.CHATCLI_SERVER_TOKEN}' | base64 -d
+{{- end }}
+{{- if .Values.server.metricsPort }}
+
+Metrics and the /healthz probe endpoint: port {{ .Values.server.metricsPort }} (plain HTTP, no auth).
+{{- end }}

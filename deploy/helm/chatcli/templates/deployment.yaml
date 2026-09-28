@@ -30,6 +30,16 @@ spec:
       initContainers:
         - name: plugin-loader
           image: {{ .Values.plugins.initImage }}
+          {{- /*
+            Same container securityContext as the server: without it the
+            pod is rejected in a namespace enforcing the "restricted" Pod
+            Security Standard. The copy only reads /plugins and writes the
+            emptyDir/PVC, so a read-only root filesystem is fine.
+          */}}
+          {{- with .Values.securityContext }}
+          securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
           command: ["sh", "-c", "cp -a /plugins/* /target-plugins/ 2>/dev/null || true"]
           volumeMounts:
             - name: plugins
@@ -46,19 +56,24 @@ spec:
           command: ["chatcli", "server"]
           args:
             - "--port={{ .Values.server.port }}"
-            {{- if .Values.server.metricsPort }}
+            {{- /*
+              Always passed, 0 included: the server's own default is 9090,
+              so omitting the flag for metricsPort=0 left metrics running on
+              a port the chart neither exposes nor declares.
+            */}}
             - "--metrics-port={{ .Values.server.metricsPort }}"
-            {{- end }}
-            {{- if .Values.server.token }}
-            - "--token={{ .Values.server.token }}"
-            {{- end }}
+            {{- /*
+              server.token is NOT passed as --token: an arg is readable in
+              the pod spec and in the process list. It reaches the server as
+              CHATCLI_SERVER_TOKEN from a Secret (see env below).
+            */}}
             {{- if .Values.llm.provider }}
             - "--provider={{ .Values.llm.provider }}"
             {{- end }}
             {{- if .Values.llm.model }}
             - "--model={{ .Values.llm.model }}"
             {{- end }}
-            {{- if and .Values.mcp.enabled .Values.mcp.servers }}
+            {{- if include "chatcli.mcpConfigEnabled" . }}
             - "--mcp-config=/etc/chatcli/mcp/mcp_servers.json"
             {{- end }}
             {{- if .Values.tls.enabled }}
@@ -192,8 +207,32 @@ spec:
             - name: CHATCLI_ENCRYPTION_KEY
               value: {{ .Values.security.encryptionKey | quote }}
           {{- end }}
-          {{- with .Values.extraEnv }}
+          {{- /*
+            server.token, from a Secret. Declared explicitly (not only
+            through envFrom) so it keeps the precedence the old --token arg
+            had: it wins over a CHATCLI_SERVER_TOKEN carried by
+            secrets.existingSecret (env beats envFrom) or by extraEnv (whose
+            entry of that name is dropped, so the container never carries
+            the same variable twice).
+          */}}
+          {{- $extraEnv := .Values.extraEnv }}
+          {{- if .Values.server.token }}
+          {{- $extraEnv = list }}
+          {{- range .Values.extraEnv }}
+          {{- if ne .name "CHATCLI_SERVER_TOKEN" }}
+          {{- $extraEnv = append $extraEnv . }}
+          {{- end }}
+          {{- end }}
+          {{- end }}
+          {{- with $extraEnv }}
             {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- if .Values.server.token }}
+            - name: CHATCLI_SERVER_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "chatcli.tokenSecretName" . }}
+                  key: CHATCLI_SERVER_TOKEN
           {{- end }}
           {{- $mounts := list }}
           {{- if .Values.persistence.enabled }}
@@ -220,7 +259,7 @@ spec:
           {{- if .Values.plugins.enabled }}
           {{- $mounts = append $mounts (dict "name" "plugins" "mountPath" "/home/chatcli/.chatcli/plugins") }}
           {{- end }}
-          {{- if and .Values.mcp.enabled .Values.mcp.servers }}
+          {{- if include "chatcli.mcpConfigEnabled" . }}
           {{- $mounts = append $mounts (dict "name" "mcp-config" "mountPath" "/etc/chatcli/mcp" "readOnly" true) }}
           {{- end }}
           {{- if .Values.bootstrap.enabled }}
@@ -229,31 +268,40 @@ spec:
           {{- if .Values.memory.enabled }}
           {{- $mounts = append $mounts (dict "name" "memory" "mountPath" "/home/chatcli/.chatcli/memory") }}
           {{- end }}
+          {{- range .Values.extraVolumeMounts }}
+          {{- $mounts = append $mounts . }}
+          {{- end }}
           {{- if $mounts }}
           volumeMounts:
             {{- toYaml $mounts | nindent 12 }}
           {{- end }}
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
+          {{- /*
+            The kubelet cannot run a gRPC probe here: the server registers no
+            grpc.health.v1 service and a gRPC probe cannot speak TLS.
+            Liveness and startup ask the process (/healthz on the metrics
+            port, TCP on the gRPC port when metrics are off); readiness asks
+            the gRPC listener, so the Service only routes to a pod once the
+            port it targets is bound.
+          */}}
+          startupProbe:
+            {{- include "chatcli.processProbe" . | trim | nindent 12 }}
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 30
           livenessProbe:
-            grpc:
-              port: {{ .Values.server.port }}
-            initialDelaySeconds: 10
-            periodSeconds: 30
+            {{- include "chatcli.processProbe" . | trim | nindent 12 }}
+            periodSeconds: 20
+            timeoutSeconds: 5
             failureThreshold: 3
           readinessProbe:
-            grpc:
-              port: {{ .Values.server.port }}
-            initialDelaySeconds: 5
+            tcpSocket:
+              port: grpc
             periodSeconds: 10
-            failureThreshold: 2
-          startupProbe:
-            grpc:
-              port: {{ .Values.server.port }}
-            initialDelaySeconds: 5
-            periodSeconds: 5
-            failureThreshold: 12
-      {{- if or .Values.persistence.enabled .Values.tls.existingSecret (and .Values.watcher.enabled .Values.watcher.targets) (and .Values.securityContext .Values.securityContext.readOnlyRootFilesystem) .Values.agents.enabled .Values.skills.enabled .Values.plugins.enabled (and .Values.mcp.enabled .Values.mcp.servers) .Values.bootstrap.enabled .Values.memory.enabled }}
+            timeoutSeconds: 3
+            failureThreshold: 3
+      {{- if or .Values.persistence.enabled .Values.tls.existingSecret (and .Values.watcher.enabled .Values.watcher.targets) (and .Values.securityContext .Values.securityContext.readOnlyRootFilesystem) .Values.agents.enabled .Values.skills.enabled .Values.plugins.enabled (include "chatcli.mcpConfigEnabled" .) .Values.bootstrap.enabled .Values.memory.enabled .Values.extraVolumes }}
       volumes:
         {{- if .Values.persistence.enabled }}
         - name: sessions
@@ -298,7 +346,7 @@ spec:
             sizeLimit: 500Mi
           {{- end }}
         {{- end }}
-        {{- if and .Values.mcp.enabled .Values.mcp.servers }}
+        {{- if include "chatcli.mcpConfigEnabled" . }}
         - name: mcp-config
           configMap:
             name: {{ .Values.mcp.existingConfigMap | default (printf "%s-mcp" (include "chatcli.fullname" .)) }}
@@ -317,6 +365,9 @@ spec:
           emptyDir:
             sizeLimit: 200Mi
           {{- end }}
+        {{- end }}
+        {{- with .Values.extraVolumes }}
+        {{- toYaml . | nindent 8 }}
         {{- end }}
       {{- end }}
       {{- with .Values.nodeSelector }}

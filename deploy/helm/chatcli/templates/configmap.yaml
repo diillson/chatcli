@@ -33,23 +33,44 @@ data:
   {{- end }}
   {{- if .Values.fallback.enabled }}
   CHATCLI_FALLBACK_ENABLED: "true"
+  {{- /*
+    The server builds the chain from CHATCLI_FALLBACK_PROVIDERS alone, in
+    order, and installs it only when at least two entries resolve; it does
+    not put the primary --provider in front on its own. So llm.provider is
+    prepended here unless fallback.providers already lists it (then the
+    listed order is kept as written). Its model is llm.model.
+  */}}
   {{- $providers := list }}
+  {{- $primary := .Values.llm.provider | default "" | upper }}
+  {{- $primaryListed := false }}
+  {{- range .Values.fallback.providers }}
+  {{- if eq (upper .name) $primary }}
+  {{- $primaryListed = true }}
+  {{- end }}
+  {{- end }}
+  {{- if and $primary (not $primaryListed) }}
+  {{- $providers = append $providers $primary }}
+  {{- end }}
   {{- range .Values.fallback.providers }}
   {{- $providers = append $providers .name }}
   {{- end }}
   CHATCLI_FALLBACK_PROVIDERS: {{ join "," $providers | quote }}
+  {{- if and $primary (not $primaryListed) .Values.llm.model }}
+  CHATCLI_FALLBACK_MODEL_{{ $primary }}: {{ .Values.llm.model | quote }}
+  {{- end }}
   {{- range .Values.fallback.providers }}
   {{- if .model }}
-  CHATCLI_FALLBACK_MODEL_{{ .name }}: {{ .model | quote }}
+  CHATCLI_FALLBACK_MODEL_{{ upper .name }}: {{ .model | quote }}
   {{- end }}
   {{- end }}
-  CHATCLI_FALLBACK_MAX_RETRIES: {{ .Values.fallback.maxRetries | default 2 | quote }}
+  {{- /* maxRetries 0 is a valid choice (no retries); only an unset value takes the default. */}}
+  CHATCLI_FALLBACK_MAX_RETRIES: {{ ternary 2 .Values.fallback.maxRetries (kindIs "invalid" .Values.fallback.maxRetries) | quote }}
   CHATCLI_FALLBACK_COOLDOWN_BASE: {{ .Values.fallback.cooldownBase | default "30s" | quote }}
   CHATCLI_FALLBACK_COOLDOWN_MAX: {{ .Values.fallback.cooldownMax | default "5m" | quote }}
   {{- end }}
   {{- if .Values.mcp.enabled }}
   CHATCLI_MCP_ENABLED: "true"
-  {{- if .Values.mcp.servers }}
+  {{- if include "chatcli.mcpConfigEnabled" . }}
   CHATCLI_MCP_CONFIG: "/etc/chatcli/mcp/mcp_servers.json"
   {{- end }}
   {{- end }}

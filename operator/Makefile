@@ -1,6 +1,17 @@
 IMG ?= ghcr.io/diillson/chatcli-operator:latest
 
-.PHONY: all build run dash-preview test test-integration envtest manifests docker-build docker-push install uninstall deploy undeploy fmt vet
+# `make deploy` applies config/manager/manager.yaml with the image pinned
+# there (kept on the release tag by release-please). The image is replaced
+# only when IMG is given explicitly (command line or environment), e.g.
+#   make deploy IMG=registry.example.com/chatcli-operator:dev
+# The :latest default above is only the local tag for docker-build/push.
+ifneq ($(filter command line environment,$(origin IMG)),)
+DEPLOY_IMAGE_SED = sed -E 's|image: ghcr.io/diillson/chatcli-operator:[^[:space:]]+|image: $(IMG)|g'
+else
+DEPLOY_IMAGE_SED = cat
+endif
+
+.PHONY: all build run dash-preview test test-integration envtest manifests docker-build docker-push install uninstall deploy undeploy deploy-network-policy undeploy-network-policy fmt vet
 
 all: build
 
@@ -72,9 +83,16 @@ uninstall:
 
 deploy: install
 	kubectl apply -f config/rbac/role.yaml
-	sed -E 's|image: ghcr.io/diillson/chatcli-operator:[^[:space:]]+|image: ${IMG}|g' config/manager/manager.yaml | kubectl apply -f -
+	$(DEPLOY_IMAGE_SED) config/manager/manager.yaml | kubectl apply -f -
 
 undeploy:
 	kubectl delete -f config/manager/manager.yaml
 	kubectl delete -f config/rbac/role.yaml
 	kubectl delete -f config/crd/bases/
+
+# Optional: restrict the operator pod's traffic to the ports it uses.
+deploy-network-policy:
+	kubectl apply -f config/network-policy/network-policy.yaml
+
+undeploy-network-policy:
+	kubectl delete -f config/network-policy/network-policy.yaml

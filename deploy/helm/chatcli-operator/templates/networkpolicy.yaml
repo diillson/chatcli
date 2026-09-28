@@ -1,0 +1,77 @@
+{{- if .Values.networkPolicy.enabled }}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "chatcli-operator.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "chatcli-operator.labels" . | nindent 4 }}
+    app.kubernetes.io/component: controller
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "chatcli-operator.selectorLabels" . | nindent 6 }}
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    # REST API and web dashboard.
+    - ports:
+        - port: {{ .Values.api.port }}
+          protocol: TCP
+      {{- with .Values.networkPolicy.apiIngressFrom }}
+      from:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+    # Prometheus metrics (plain HTTP).
+    - ports:
+        - port: {{ .Values.metrics.port }}
+          protocol: TCP
+      {{- with .Values.networkPolicy.metricsIngressFrom }}
+      from:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+    # Liveness/readiness probes. Kubelet traffic is exempt on most CNIs,
+    # but not all, so the health port stays open.
+    - ports:
+        - port: {{ .Values.health.port }}
+          protocol: TCP
+  egress:
+  {{- if eq (.Values.networkPolicy.egress | default "restricted") "restricted" }}
+    # DNS first: without it every other rule fails in confusing ways.
+    - ports:
+        - port: 53
+          protocol: UDP
+        - port: 53
+          protocol: TCP
+    - ports:
+        # HTTPS: notification webhooks, git over HTTPS for SourceRepository,
+        # and the API server on managed clusters that publish it on 443.
+        - port: 443
+          protocol: TCP
+        # The Kubernetes API server's own port.
+        - port: {{ .Values.networkPolicy.kubernetesApiPort | default 6443 }}
+          protocol: TCP
+        # gRPC to the ChatCLI server of the Instances the operator manages.
+        - port: {{ .Values.networkPolicy.instanceGrpcPort | default 50051 }}
+          protocol: TCP
+        {{- with .Values.prometheusUrl }}
+        {{- $u := urlParse . }}
+        {{- $hostParts := splitList ":" $u.host }}
+        {{- if gt (len $hostParts) 1 }}
+        # Prometheus (from prometheusUrl).
+        - port: {{ last $hostParts | int }}
+          protocol: TCP
+        {{- else if eq $u.scheme "http" }}
+        # Prometheus (from prometheusUrl).
+        - port: 80
+          protocol: TCP
+        {{- end }}
+        {{- end }}
+        {{- with .Values.networkPolicy.egressExtraPorts }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+  {{- else }}
+    - {}
+  {{- end }}
+{{- end }}

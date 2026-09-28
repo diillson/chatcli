@@ -6,8 +6,8 @@ Thank you for installing {{ .Chart.Name }} {{ .Chart.AppVersion }}.
 
 The ChatCLI AIOps operator is now reconciling Anomaly / Issue / RemediationPlan /
 PostMortem CRs in your cluster.
-
 {{- if .Values.crdUpgrade.enabled }}
+
 A pre-install/pre-upgrade Helm hook already re-applied every CRD shipped with
 this chart (GAP-06 fix). You don't need to run any manual `kubectl apply -f`
 to refresh the CRD schema — that is handled automatically on every
@@ -20,11 +20,50 @@ CRDs out of band.
    the chart version, run this BEFORE upgrading the binary so the API
    server accepts the new fields and enum values:
 
-       kubectl apply -f https://github.com/diillson/chatcli/raw/main/deploy/helm/chatcli-operator/crds/
+       helm pull oci://ghcr.io/diillson/charts/chatcli-operator --version <new-version> --untar
+       kubectl apply --server-side -f chatcli-operator/crds/
 
    Otherwise the new controller logic will be silently rejected at runtime
    (Issue.status.state=Contained, PostMortemSpec.RequiresHumanAction, etc.).
 {{- end }}
+
+==================================================================================
+ Before the first Instance
+==================================================================================
+
+A. EVERY INSTANCE NEEDS A CREDENTIAL AND TLS
+   - Credential: spec.server.token (Secret ref), security.jwtSecretRef, or
+     tls.clientCASecretName. Without one the operator does not create the
+     Deployment and sets AuthenticationConfigured=False.
+   - TLS: the operator always dials the server over TLS 1.3. Set
+     spec.server.tls.enabled: true and spec.server.tls.secretName to a Secret
+     with tls.crt, tls.key and (for a private/self-signed CA) ca.crt, valid
+     for <instance>.<namespace>.svc.cluster.local. Without TLS the server runs
+     but ServerReachable=False and the AIOps pipeline cannot reach it.
+   Check both conditions with:
+
+       kubectl get instance <name> -n <namespace> -o jsonpath='{range .status.conditions[*]}{.type}={.status} {.reason}{"\n"}{end}'
+
+B. DASHBOARD / REST API KEYS
+{{- if .Values.security.devMode }}
+   security.devMode=true: the REST API accepts unauthenticated calls as admin
+   when no keys are configured. Never use this in production.
+{{- else if .Values.apiKeys.create }}
+   The chart created Secret chatcli-operator-secrets with {{ len .Values.apiKeys.entries }} key(s).
+{{- else }}
+   The REST API and dashboard reject every /api/ call (401) until keys exist.
+   The operator reads them from the Secret chatcli-operator-secrets (key
+   api-keys) in {{ .Release.Namespace }}, re-read every 30s. Create it, e.g.:
+
+       kubectl -n {{ .Release.Namespace }} create secret generic chatcli-operator-secrets \
+         --from-literal=api-keys="$(printf -- '- key: "%s"\n  role: admin\n  description: ops\n' "$(openssl rand -hex 32)")"
+
+   or install with --set apiKeys.create=true and apiKeys.entries (roles:
+   viewer, operator, admin).
+{{- end }}
+   Open the dashboard with:
+
+       kubectl -n {{ .Release.Namespace }} port-forward svc/{{ include "chatcli-operator.fullname" . }} {{ .Values.api.port }}:{{ .Values.api.port }}
 
 ==================================================================================
  Post-install checklist (GAP-05 fix, chaos test report 2026-05-23)
@@ -41,12 +80,12 @@ CRDs out of band.
    real issues unremediated. See chaos test Cycle 1 evidence in the 2026-05-23
    report for the regression this guards against.
 
-   Extend the allowlist via the env var CHATCLI_ALLOWED_DIAGNOSTIC_COMMANDS in
-   your Instance CR. Example values block:
+   The allowlist is read by the OPERATOR process (not by Instances). Extend it
+   with this chart's security.allowedDiagnosticCommands value (comma-separated):
 
-       env:
-         - name: CHATCLI_ALLOWED_DIAGNOSTIC_COMMANDS
-           value: "curl -s localhost:5678/health,curl -s localhost:7000/healthz"
+       helm upgrade {{ .Release.Name }} oci://ghcr.io/diillson/charts/chatcli-operator \
+         --version {{ .Chart.Version }} -n {{ .Release.Namespace }} --reuse-values \
+         --set security.allowedDiagnosticCommands="curl -s localhost:5678/health\,curl -s localhost:7000/healthz"
 
    Inspect the EFFECTIVE allowlist after the operator starts:
 
@@ -82,4 +121,5 @@ CRDs out of band.
    automatically. If you want them filtered out of regular alert channels too,
    add an exclusion rule on the source label in your NotificationPolicy.
 
-For full upgrade notes: https://chatcli.ai/docs/aiops/upgrade
+Operator guide: https://chatcli.edilsonfreitas.com/features/k8s-operator
+Production setup: https://chatcli.edilsonfreitas.com/cookbook/aiops-production-setup

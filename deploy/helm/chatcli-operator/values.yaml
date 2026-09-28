@@ -136,21 +136,28 @@ clusterName: ""
 security:
   # Dev mode disables authentication on the REST API (NEVER use in production)
   devMode: false
-  # TLS for the REST API (port 8090)
+  # TLS (1.3) for the REST API and dashboard (port 8090). Paths inside the
+  # container: mount the Secret with extraVolumes + extraVolumeMounts.
   apiTLS:
     certFile: ""  # CHATCLI_AIOPS_TLS_CERT
     keyFile: ""   # CHATCLI_AIOPS_TLS_KEY
-  # gRPC TLS for communication with ChatCLI server
+  # Operator-wide TLS material for dialing ChatCLI servers (the operator
+  # always dials TLS 1.3). Per-Instance settings win: caFile is only used
+  # when the Instance's TLS Secret has no ca.crt, certFile/keyFile only when
+  # the Instance sets no operatorClientCertSecretName. Absolute paths inside
+  # the container: mount them with extraVolumes + extraVolumeMounts.
   grpcTLS:
     certFile: ""  # CHATCLI_GRPC_TLS_CERT
     keyFile: ""   # CHATCLI_GRPC_TLS_KEY
     caFile: ""    # CHATCLI_GRPC_TLS_CA
-  # Allowed resource types for remediation (comma-separated)
+  # Extra resource kinds remediation may touch (comma-separated), added to
+  # the 17 built-in defaults
   allowedResourceTypes: ""
   # Custom log scrub patterns (comma-separated regexes)
   logScrubPatterns: ""
   # Extra read-only diagnostic commands the remediation engine may run
-  # (comma-separated; appended to the built-in allowlist)
+  # (comma-separated; appended to the built-in allowlist). Read by the
+  # operator process, so it is set here, not on the Instance.
   allowedDiagnosticCommands: ""
   # CORS allowed origin (empty = deny all)
   # CORS for the operator REST API (dashboard). Deny-all until an origin is
@@ -160,13 +167,67 @@ security:
   #   - "https://dashboard.example.com"
   corsAllowedMethods: []        # defaults to GET, POST, PUT, DELETE, OPTIONS
   corsAllowCredentials: false   # cookies / Authorization on cross-origin calls
-  # Audit log file path
+  # DEPRECATED, ignored. The operator no longer writes a file audit log (it
+  # records its actions as AuditEvent resources) and nothing reads
+  # CHATCLI_AUDIT_LOG_PATH any more. Kept only so existing values files
+  # keep validating; the chart no longer renders it.
   auditLogPath: ""
+
+# API keys for the REST API and web dashboard (header X-API-Key).
+# The operator reads them from the Secret "chatcli-operator-secrets"
+# (key "api-keys") in its own namespace — the name is fixed — and re-reads
+# it every 30 seconds. Without keys (and without security.devMode) every
+# /api/ call is rejected with 401.
+# With create=true the chart renders that Secret from entries. Leave it
+# false to manage the Secret yourself (kubectl, External Secrets, Vault…);
+# note that keys set here are stored in the Helm release.
+# Roles: viewer (read), operator (acknowledge/approve/…), admin (all).
+apiKeys:
+  create: false
+  entries: []
+  # - key: "<generate with: openssl rand -hex 32>"
+  #   role: admin
+  #   description: platform team
+
+# Optional NetworkPolicy for the operator pod (off by default).
+networkPolicy:
+  enabled: false
+  # Peers (NetworkPolicyPeer list) allowed to reach the REST API/dashboard
+  # and the metrics port. Empty = any source.
+  apiIngressFrom: []
+  metricsIngressFrom: []
+  #   - namespaceSelector:
+  #       matchLabels:
+  #         kubernetes.io/metadata.name: monitoring
+  # "restricted" allows egress only to DNS (53), HTTPS (443), the Kubernetes
+  # API (kubernetesApiPort), the Instances' gRPC port and — when
+  # prometheusUrl names one — the Prometheus port. "allowAll" leaves egress
+  # open. Add egressExtraPorts for SMTP notifications (587/465), git over
+  # SSH (22) or webhooks on other ports.
+  egress: restricted        # restricted | allowAll
+  kubernetesApiPort: 6443
+  instanceGrpcPort: 50051
+  egressExtraPorts: []
+  #   - port: 587
+  #     protocol: TCP
 
 # Extra environment variables for the operator pod
 extraEnv: []
 # - name: CHATCLI_ALLOWED_RESOURCE_TYPES
 #   value: "Deployment,Service,ConfigMap,HPA"
+
+# Extra volumes for the pod and mounts for the manager container, e.g. the
+# Secrets behind security.apiTLS.* and security.grpcTLS.* paths.
+extraVolumes: []
+# - name: api-tls
+#   secret:
+#     secretName: chatcli-operator-api-tls
+extraVolumeMounts: []
+# - name: api-tls
+#   mountPath: /etc/chatcli-operator/api-tls
+#   readOnly: true
+# ...then: security.apiTLS.certFile: /etc/chatcli-operator/api-tls/tls.crt
+#          security.apiTLS.keyFile:  /etc/chatcli-operator/api-tls/tls.key
 
 nodeSelector: {}
 tolerations: []
