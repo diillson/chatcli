@@ -321,7 +321,14 @@ func runSubcommand(subcmd string, args []string) {
 	_ = loadDotenvThenI18n()
 	theme.InitFromEnv()
 
-	logger, err := utils.InitializeLogger()
+	// Long-running services also log to stderr in a container, where
+	// nobody reads the rotated file (see utils.InitializeServiceLogger).
+	initLogger := utils.InitializeLogger
+	switch subcmd {
+	case "server", "serve", "gateway":
+		initLogger = utils.InitializeServiceLogger
+	}
+	logger, err := initLogger()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Failed to initialize logger: %v\n", err)
 		os.Exit(1)

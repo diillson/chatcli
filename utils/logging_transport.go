@@ -39,7 +39,7 @@ func InitializeLogger() (*zap.Logger, error) {
 	}
 
 	// 2. Ler configurações de arquivo e rotação do ambiente
-	logFile := GetEnvOrDefault("LOG_FILE", config.DefaultLogFile)
+	logFile := GetEnvOrDefault("LOG_FILE", GetEnvOrDefault("CHATCLI_LOG_FILE", config.DefaultLogFile))
 	if expanded, err := ExpandPath(logFile); err == nil {
 		logFile = expanded
 	} else {
@@ -58,12 +58,14 @@ func InitializeLogger() (*zap.Logger, error) {
 	}
 
 	// 3. Configurar lumberjack para rotação de logs
+	rot := logRotationFromEnv(maxSizeMB)
+	maxSizeMB = rot.maxSizeMB
 	lumberjackLogger := &lumberjack.Logger{
 		Filename:   logFile,
-		MaxSize:    maxSizeMB, // em MB
-		MaxBackups: 3,
-		MaxAge:     28, // em dias
-		Compress:   true,
+		MaxSize:    rot.maxSizeMB, // em MB
+		MaxBackups: rot.maxBackups,
+		MaxAge:     rot.maxAgeDays, // em dias
+		Compress:   rot.compress,
 	}
 	fileSyncer := zapcore.AddSync(lumberjackLogger)
 
