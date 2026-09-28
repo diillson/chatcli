@@ -243,7 +243,9 @@ func (s *APIServer) computeMTTD(ctx context.Context, tr timeRangeParams) ([]MTTM
 
 	for _, iss := range issues.Items {
 		created := iss.CreationTimestamp.Time
-		if !inTimeRange(created, tr) {
+		// Chaos drills are excluded, as the dashboard states: their
+		// detection time measures the experiment, not production.
+		if !inTimeRange(created, tr) || isChaosIssue(&iss) {
 			continue
 		}
 
@@ -287,7 +289,7 @@ func (s *APIServer) computeMTTR(ctx context.Context, tr timeRangeParams) ([]MTTM
 		}
 
 		created := iss.CreationTimestamp.Time
-		if !inTimeRange(created, tr) {
+		if !inTimeRange(created, tr) || isChaosIssue(&iss) {
 			continue
 		}
 
@@ -651,9 +653,14 @@ func accumulateIssueCounters(summary *AnalyticsSummary, iss *v1alpha1.Issue) {
 	if iss.Spec.Severity == v1alpha1.IssueSeverityCritical {
 		summary.CriticalIssues++
 	}
-	if iss.Labels["platform.chatcli.io/source"] == "chaos-experiment" {
+	if isChaosIssue(iss) {
 		summary.ChaosInducedIssues++
 	}
+}
+
+// isChaosIssue reports whether a chaos experiment induced the Issue.
+func isChaosIssue(iss *v1alpha1.Issue) bool {
+	return iss.Labels["platform.chatcli.io/source"] == "chaos-experiment"
 }
 
 // listUnstructured queries for unstructured resources by plural name.

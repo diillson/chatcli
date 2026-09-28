@@ -1756,26 +1756,18 @@ func (r *RemediationReconciler) verifyResourceHealth(ctx context.Context, resour
 		}
 		return false, nil
 
-	default:
-		// For unknown resource kinds, check if pods are running
-		var podList corev1.PodList
-		if err := r.List(ctx, &podList, client.InNamespace(resource.Namespace)); err != nil {
+	case "Node":
+		// A Node owns no pods the generic check below could find: it is
+		// healthy when its Ready condition is True (a cordon leaves it so).
+		var node corev1.Node
+		if err := r.Get(ctx, types.NamespacedName{Name: resource.Name}, &node); err != nil {
 			return false, err
 		}
-		readyPods := 0
-		totalPods := 0
-		for i := range podList.Items {
-			if isResourcePod(&podList.Items[i], resource) {
-				totalPods++
-				if isPodReady(&podList.Items[i]) {
-					readyPods++
-				}
-			}
-		}
-		if totalPods == 0 {
-			return false, nil
-		}
-		return readyPods > 0, nil
+		return nodeReady(&node), nil
+
+	default:
+		// For unknown resource kinds, check if pods are running
+		return r.anyResourcePodReady(ctx, resource)
 	}
 }
 
@@ -1960,4 +1952,27 @@ func (r *RemediationReconciler) auditRemediationFailed(ctx context.Context, plan
 	if err := r.AuditRecorder.RecordRemediationFailed(ctx, plan, &issue); err != nil {
 		log.FromContext(ctx).Error(err, "Failed to record remediation-failed audit event", "plan", plan.Name)
 	}
+}
+
+// anyResourcePodReady reports whether the resource owns at least one pod
+// and at least one of them is Ready.
+func (r *RemediationReconciler) anyResourcePodReady(ctx context.Context, resource platformv1alpha1.ResourceRef) (bool, error) {
+	var podList corev1.PodList
+	if err := r.List(ctx, &podList, client.InNamespace(resource.Namespace)); err != nil {
+		return false, err
+	}
+	readyPods := 0
+	totalPods := 0
+	for i := range podList.Items {
+		if isResourcePod(&podList.Items[i], resource) {
+			totalPods++
+			if isPodReady(&podList.Items[i]) {
+				readyPods++
+			}
+		}
+	}
+	if totalPods == 0 {
+		return false, nil
+	}
+	return readyPods > 0, nil
 }

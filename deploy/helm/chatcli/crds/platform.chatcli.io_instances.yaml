@@ -117,6 +117,7 @@ spec:
                     description: |-
                       ResolutionCooldownMinutes is how long (in minutes) after an issue is resolved before
                       new anomalies for the same resource can create a new issue. Prevents stale re-triggers.
+                      0 turns the cooldown off. Left out, it defaults to 10.
                     format: int32
                     maximum: 120
                     minimum: 0

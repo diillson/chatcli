@@ -128,6 +128,11 @@ func (r *ChaosReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 func (r *ChaosReconciler) reconcilePending(ctx context.Context, exp *platformv1alpha1.ChaosExperiment) (ctrl.Result, error) {
 	logger := log.FromContext(ctx)
 
+	// Refuse what the operator cannot do instead of pretending to run it.
+	if reason := unsupportedChaosReason(exp); reason != "" {
+		return r.transitionToFailed(ctx, exp, reason)
+	}
+
 	// Check namespace restrictions.
 	if !isNamespaceAllowed(exp.Spec.Target.Namespace, exp.Spec.SafetyChecks.AllowedNamespaces, exp.Spec.SafetyChecks.BlockedNamespaces) {
 		return r.transitionToFailed(ctx, exp, fmt.Sprintf("namespace %q is not allowed by safety checks", exp.Spec.Target.Namespace))
@@ -295,10 +300,6 @@ func (r *ChaosReconciler) executeExperiment(ctx context.Context, exp *platformv1
 		return r.executeCPUStress(ctx, exp)
 	case platformv1alpha1.ChaosTypeMemoryStress:
 		return r.executeMemoryStress(ctx, exp)
-	case platformv1alpha1.ChaosTypeNetworkDelay:
-		return r.executeNetworkDelay(ctx, exp)
-	case platformv1alpha1.ChaosTypeNetworkLoss:
-		return r.executeNetworkLoss(ctx, exp)
 	case platformv1alpha1.ChaosTypeDiskStress:
 		return r.executeDiskStress(ctx, exp)
 	default:
@@ -422,78 +423,6 @@ func (r *ChaosReconciler) executeMemoryStress(ctx context.Context, exp *platform
 	return nil
 }
 
-// executeNetworkDelay annotates target pods to signal network delay simulation.
-func (r *ChaosReconciler) executeNetworkDelay(ctx context.Context, exp *platformv1alpha1.ChaosExperiment) error {
-	logger := log.FromContext(ctx)
-	latencyMs := exp.Spec.Parameters["latencyMs"]
-	if latencyMs == "" {
-		latencyMs = "100"
-	}
-	jitterMs := exp.Spec.Parameters["jitterMs"]
-	if jitterMs == "" {
-		jitterMs = "10"
-	}
-
-	pods, err := r.getTargetPods(ctx, exp.Spec.Target)
-	if err != nil {
-		return fmt.Errorf("listing target pods: %w", err)
-	}
-
-	annotationValue := fmt.Sprintf("%sms jitter=%sms experiment=%s", latencyMs, jitterMs, exp.Name)
-	for i := range pods {
-		pod := &pods[i]
-		if pod.Annotations == nil {
-			pod.Annotations = make(map[string]string)
-		}
-		pod.Annotations[chaosAnnotationDelay] = annotationValue
-		if err := r.Update(ctx, pod); err != nil {
-			logger.Error(err, "failed to annotate pod for network delay", "pod", pod.Name)
-			continue
-		}
-		logger.Info("annotated pod for network delay", "pod", pod.Name, "latency", latencyMs+"ms")
-	}
-
-	exp.Status.PodsAffected = clampInt32(len(pods))
-	chaosPodsAffectedTotal.WithLabelValues(string(platformv1alpha1.ChaosTypeNetworkDelay)).Add(float64(len(pods)))
-	return nil
-}
-
-// executeNetworkLoss annotates target pods to signal network packet loss simulation.
-func (r *ChaosReconciler) executeNetworkLoss(ctx context.Context, exp *platformv1alpha1.ChaosExperiment) error {
-	logger := log.FromContext(ctx)
-	percent := exp.Spec.Parameters["percent"]
-	if percent == "" {
-		percent = "10"
-	}
-	correlation := exp.Spec.Parameters["correlation"]
-	if correlation == "" {
-		correlation = "25"
-	}
-
-	pods, err := r.getTargetPods(ctx, exp.Spec.Target)
-	if err != nil {
-		return fmt.Errorf("listing target pods: %w", err)
-	}
-
-	annotationValue := fmt.Sprintf("%s%% correlation=%s%% experiment=%s", percent, correlation, exp.Name)
-	for i := range pods {
-		pod := &pods[i]
-		if pod.Annotations == nil {
-			pod.Annotations = make(map[string]string)
-		}
-		pod.Annotations[chaosAnnotationLoss] = annotationValue
-		if err := r.Update(ctx, pod); err != nil {
-			logger.Error(err, "failed to annotate pod for network loss", "pod", pod.Name)
-			continue
-		}
-		logger.Info("annotated pod for network loss", "pod", pod.Name, "percent", percent+"%")
-	}
-
-	exp.Status.PodsAffected = clampInt32(len(pods))
-	chaosPodsAffectedTotal.WithLabelValues(string(platformv1alpha1.ChaosTypeNetworkLoss)).Add(float64(len(pods)))
-	return nil
-}
-
 // executeDiskStress creates a stress-ng pod performing disk I/O on the same node as the target.
 func (r *ChaosReconciler) executeDiskStress(ctx context.Context, exp *platformv1alpha1.ChaosExperiment) error {
 	workers := exp.Spec.Parameters["workers"]
@@ -547,14 +476,19 @@ func (r *ChaosReconciler) completeExperiment(ctx context.Context, exp *platformv
 			}
 		}
 
-		recoveryStart := time.Now()
 		healthy, err := r.checkDeploymentHealth(ctx, exp.Spec.Target)
 		if err != nil {
 			logger.Error(err, "failed to check deployment health for recovery verification")
 		}
 
 		if healthy {
-			recoveryDuration := time.Since(recoveryStart)
+			// Recovery is measured from the end of the injection to the
+			// first health check that passes (checks run every 5s), not
+			// across the check itself.
+			recoveryDuration := time.Since(chaosInjectionEnd(exp))
+			if recoveryDuration < 0 {
+				recoveryDuration = 0
+			}
 			exp.Status.RecoveryVerified = true
 			exp.Status.RecoveryTime = recoveryDuration.Round(time.Millisecond).String()
 			chaosRecoveryTimeSeconds.WithLabelValues(string(exp.Spec.ExperimentType)).Observe(recoveryDuration.Seconds())
@@ -610,6 +544,30 @@ func (r *ChaosReconciler) completeExperiment(ctx context.Context, exp *platformv
 	)
 
 	return ctrl.Result{}, r.Status().Update(ctx, exp)
+}
+
+// chaosInjectionEnd is when the fault stopped: start plus duration.
+func chaosInjectionEnd(exp *platformv1alpha1.ChaosExperiment) time.Time {
+	if exp.Status.StartedAt == nil {
+		return time.Now()
+	}
+	duration, _ := time.ParseDuration(exp.Spec.Duration)
+	return exp.Status.StartedAt.Add(duration)
+}
+
+// unsupportedChaosReason explains why an experiment cannot run as written,
+// or returns "" when it can. Network faults need a privileged tc/netem
+// injector the operator does not deploy (they used to only annotate pods,
+// injecting nothing), and recurring schedules are not implemented.
+func unsupportedChaosReason(exp *platformv1alpha1.ChaosExperiment) string {
+	switch exp.Spec.ExperimentType {
+	case platformv1alpha1.ChaosTypeNetworkDelay, platformv1alpha1.ChaosTypeNetworkLoss:
+		return fmt.Sprintf("%s is not supported: injecting network faults needs a privileged tc/netem injector the operator does not deploy; nothing was injected", exp.Spec.ExperimentType)
+	}
+	if strings.TrimSpace(exp.Spec.Schedule) != "" {
+		return "schedule is not supported: recurring experiments are not implemented; remove spec.schedule and create one ChaosExperiment per run"
+	}
+	return ""
 }
 
 // reconcileAborted cleans up resources for an aborted experiment.

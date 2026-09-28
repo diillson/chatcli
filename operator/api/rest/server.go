@@ -10,6 +10,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -848,7 +849,7 @@ func (s *APIServer) handleCreateRunbook(w http.ResponseWriter, r *http.Request) 
 	}
 
 	if err := s.client.Create(ctx, rb); err != nil {
-		writeError(w, http.StatusConflict, "failed to create runbook: "+err.Error())
+		writeError(w, createErrorStatus(err), "failed to create runbook: "+err.Error())
 		return
 	}
 
@@ -1791,10 +1792,49 @@ func (s *APIServer) handleListAuditEvents(w http.ResponseWriter, r *http.Request
 		events = append(events, ae)
 	}
 
+	sortAuditEventsNewestFirst(events)
+
 	total := len(events)
 	start, end := paginateSlice(total, pp)
 
 	writeListResponse(w, "AuditEventList", events[start:end], total, pp)
+}
+
+// sortAuditEventsNewestFirst orders events by their timestamp (falling back
+// to the creation time), newest first, so a page is a stable slice of the
+// trail instead of the store's order.
+func sortAuditEventsNewestFirst(events []AuditEventItem) {
+	at := func(ae AuditEventItem) time.Time {
+		for _, v := range []string{ae.Timestamp, ae.CreationTimestamp} {
+			if t, err := time.Parse(time.RFC3339, v); err == nil {
+				return t
+			}
+		}
+		return time.Time{}
+	}
+	sort.SliceStable(events, func(i, j int) bool {
+		ti, tj := at(events[i]), at(events[j])
+		if !ti.Equal(tj) {
+			return ti.After(tj)
+		}
+		return events[i].Name < events[j].Name
+	})
+}
+
+// createErrorStatus maps a Create failure to its HTTP status: 409 only when
+// the object already exists, 422 for an object the API server rejected,
+// 403 when the operator may not create it, and 500 otherwise.
+func createErrorStatus(err error) int {
+	switch {
+	case apierrors.IsAlreadyExists(err):
+		return http.StatusConflict
+	case apierrors.IsInvalid(err), apierrors.IsBadRequest(err):
+		return http.StatusUnprocessableEntity
+	case apierrors.IsForbidden(err):
+		return http.StatusForbidden
+	default:
+		return http.StatusInternalServerError
+	}
 }
 
 func (s *APIServer) handleExportAuditEvents(w http.ResponseWriter, r *http.Request) {
@@ -2203,6 +2243,8 @@ func unstructuredToApproval(obj map[string]interface{}) ApprovalItem {
 		Namespace:         meta.namespace,
 		CreationTimestamp: meta.creationTimestamp,
 		Labels:            meta.labels,
+		// The dashboard reads the blast-radius badge from here.
+		Annotations: meta.annotations,
 	}
 
 	if spec != nil {
@@ -2331,6 +2373,7 @@ type metaFields struct {
 	namespace         string
 	creationTimestamp string
 	labels            map[string]string
+	annotations       map[string]string
 }
 
 func extractMeta(obj map[string]interface{}) metaFields {
@@ -2344,6 +2387,12 @@ func extractMeta(obj map[string]interface{}) metaFields {
 			m.labels = make(map[string]string, len(lbls))
 			for k, v := range lbls {
 				m.labels[k], _ = v.(string)
+			}
+		}
+		if anns, ok := meta["annotations"].(map[string]interface{}); ok {
+			m.annotations = make(map[string]string, len(anns))
+			for k, v := range anns {
+				m.annotations[k], _ = v.(string)
 			}
 		}
 	}

@@ -99,8 +99,6 @@ spec:
                   For pod_failure: count, gracePeriodSeconds.
                   For cpu_stress: cores, loadPercent.
                   For memory_stress: bytes (e.g., "256Mi"), workers.
-                  For network_delay: latencyMs, jitterMs, interface.
-                  For network_loss: percent, correlation.
                   For disk_stress: size (e.g., "1Gi"), workers.
                 type: object
               postExperiment:
@@ -112,8 +110,10 @@ spec:
                       (e.g., "5m").
                     type: string
                   runRemediationTest:
-                    description: RunRemediationTest re-injects the fault after a successful
-                      remediation to validate it works.
+                    description: |-
+                      RunRemediationTest reports whether a remediation ran during the experiment (the
+                      result says "remediation validation passed" or "no remediation was applied"). It does
+                      not re-inject the fault.
                     type: boolean
                   verifyRecovery:
                     description: VerifyRecovery checks if the target deployment recovers
@@ -157,8 +157,9 @@ spec:
                     type: boolean
                 type: object
               schedule:
-                description: Schedule is an optional cron expression for recurring
-                  experiments (e.g., "0 3 * * 1").
+                description: |-
+                  Schedule is reserved: recurring experiments are not implemented, and an experiment
+                  that sets it fails at once with a status message saying so.
                 type: string
               target:
                 description: Target is the Kubernetes resource to test.
