@@ -108,7 +108,8 @@ func TestRemediationReconcile_NotFound(t *testing.T) {
 
 func TestRemediationReconcile_PendingToExecuting(t *testing.T) {
 	plan := newRemediationPlan("test-plan", "default")
-	r, c := setupFakeRemediationReconciler(plan)
+	// The approval gate reads the parent Issue; no policy gates the plan.
+	r, c := setupFakeRemediationReconciler(plan, newIssue("test-issue", "default"))
 	ctx := context.Background()
 
 	result, err := r.Reconcile(ctx, ctrl.Request{

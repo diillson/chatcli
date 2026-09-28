@@ -111,7 +111,12 @@ type ApprovalPolicySpec struct {
 	// Rules define approval requirements for different action/severity combinations.
 	Rules []ApprovalRule `json:"rules"`
 
-	// DefaultMode is used when no rule matches.
+	// DefaultMode is informational: it is shown by kubectl get ap but the
+	// operator does not apply it, and a plan that matches no rule is not
+	// gated by this policy. The API server stores "manual" in every policy
+	// that omits it, so applying it would gate every unmatched plan of every
+	// existing policy. To gate the remaining plans, end the rules with a
+	// rule whose match is empty.
 	// +kubebuilder:default="manual"
 	// +optional
 	DefaultMode string `json:"defaultMode,omitempty"`

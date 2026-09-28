@@ -56,8 +56,17 @@ rules:
   # Core resources
   # ──────────────────────────────────────────────────
   - apiGroups: [""]
-    resources: ["pods", "pods/log"]
-    verbs: ["get", "list", "watch", "delete"]
+    resources: ["pods/log"]
+    verbs: ["get", "list", "watch"]
+  # Pods: create (chaos stress pods), update (chaos network annotations),
+  # delete (DeletePod, pod_kill / pod_failure, stress pod cleanup).
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list", "watch", "create", "update", "delete"]
+  # DrainNode evicts through the Eviction API so PodDisruptionBudgets hold.
+  - apiGroups: [""]
+    resources: ["pods/eviction"]
+    verbs: ["create"]
   - apiGroups: [""]
     resources: ["services", "serviceaccounts", "persistentvolumeclaims"]
     verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
@@ -70,6 +79,10 @@ rules:
   - apiGroups: [""]
     resources: ["events"]
     verbs: ["get", "list", "watch", "create", "patch"]
+  # events.k8s.io/v1 Events the controllers emit (e.g. ApprovalGateUnavailable).
+  - apiGroups: ["events.k8s.io"]
+    resources: ["events"]
+    verbs: ["create", "patch"]
   - apiGroups: [""]
     resources: ["endpoints", "namespaces"]
     verbs: ["get", "list", "watch"]

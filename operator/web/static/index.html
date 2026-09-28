@@ -1306,9 +1306,13 @@ tr.expandable { cursor:pointer; }
   "approval.approvedBy": "Approved by: {who}",
   "approval.rejectedBy": "Rejected by: {who}",
   "approval.reasonLabel": "Reason: {reason}",
-  "toast.approved": "Approval {name} approved",
+  "approval.approverName": "Your name",
+  "approval.approverPlaceholder": "Recorded on the decision with your API key",
+  "approval.quorumProgress": "{n} of {required} required approvals",
+  "toast.approverRequired": "Enter your name: it is recorded on the decision",
+  "toast.approved": "Approval of {name} recorded",
   "toast.approveFailed": "Failed to approve: {msg}",
-  "toast.rejected": "Approval {name} rejected",
+  "toast.rejected": "Rejection of {name} recorded",
   "toast.rejectFailed": "Failed to reject: {msg}",
   "error.approvals": "Failed to load approvals: {msg}",
   "runbooks.count": "{n} runbook(s)",
@@ -1718,9 +1722,13 @@ tr.expandable { cursor:pointer; }
   "approval.approvedBy": "Aprovado por: {who}",
   "approval.rejectedBy": "Rejeitado por: {who}",
   "approval.reasonLabel": "Motivo: {reason}",
-  "toast.approved": "Solicitação {name} aprovada",
+  "approval.approverName": "Seu nome",
+  "approval.approverPlaceholder": "Registrado na decisão junto com sua API key",
+  "approval.quorumProgress": "{n} de {required} aprovações necessárias",
+  "toast.approverRequired": "Informe seu nome: ele fica registrado na decisão",
+  "toast.approved": "Aprovação de {name} registrada",
   "toast.approveFailed": "Falha ao aprovar: {msg}",
-  "toast.rejected": "Solicitação {name} rejeitada",
+  "toast.rejected": "Rejeição de {name} registrada",
   "toast.rejectFailed": "Falha ao rejeitar: {msg}",
   "error.approvals": "Falha ao carregar aprovações: {msg}",
   "runbooks.count": "{n} runbook(s)",
@@ -3238,6 +3246,11 @@ async function loadApprovals() {
           ${(item.annotations && item.annotations['platform.chatcli.io/blast-risk-level']) ? `<br><strong>${t('approval.blastRadius')}:</strong> <span style="color:${item.annotations['platform.chatcli.io/blast-risk-level'] === 'critical' ? 'var(--sev-critical)' : item.annotations['platform.chatcli.io/blast-risk-level'] === 'high' ? 'var(--sev-high)' : 'var(--sev-medium)'}; font-weight:600">${escapeHtml(item.annotations['platform.chatcli.io/blast-risk-level']).toUpperCase()}</span>` : ''}
         </div>
         ${item.state === 'Pending' ? `
+          ${(item.requiredApprovers || 1) > 1 ? `<div style="font-size:0.8rem; color:var(--text-muted); margin-bottom:0.5rem;">${escapeHtml(t('approval.quorumProgress', { n: approvalCount(item), required: item.requiredApprovers }))}</div>` : ''}
+          <div class="input-group">
+            <label for="approval-approver-${escapeHtml(item.name)}">${t('approval.approverName')}</label>
+            <input type="text" id="approval-approver-${escapeHtml(item.name)}" value="${escapeHtml(savedApprover())}" placeholder="${escapeHtml(t('approval.approverPlaceholder'))}" autocomplete="name">
+          </div>
           <div class="input-group">
             <label for="approval-reason-${escapeHtml(item.name)}">${t('approval.decisionReason')}</label>
             <input type="text" id="approval-reason-${escapeHtml(item.name)}" placeholder="${escapeHtml(t('approval.reasonPlaceholder'))}">
@@ -3261,28 +3274,52 @@ async function loadApprovals() {
   }
 }
 
-async function approveRequest(name, ns) {
+/* The approver name is recorded on the decision next to the API key that
+   authenticated it; it is remembered in this browser for the next one. */
+function savedApprover() {
+  try { return localStorage.getItem('chatcli_approver') || ''; } catch { return ''; }
+}
+
+function approverFor(name) {
+  const el = document.getElementById('approval-approver-' + name);
+  const who = (el?.value || '').trim();
+  if (!who) {
+    toast(t('toast.approverRequired'), 'error');
+    el?.focus();
+    return '';
+  }
+  try { localStorage.setItem('chatcli_approver', who); } catch { /* private mode */ }
+  return who;
+}
+
+function approvalCount(item) {
+  return (item.decisions || []).filter(d => d.decision === 'approved').length;
+}
+
+/* The operator evaluates the decision (quorum, change window) right after
+   it is recorded; the list reloads now and once more when it has. */
+async function decideRequest(name, ns, verb) {
+  const approver = approverFor(name);
+  if (!approver) return;
   const reason = document.getElementById('approval-reason-' + name)?.value || '';
   try {
-    await apiPost(`/approvals/${name}/approve?namespace=${encodeURIComponent(ns)}`, { approver: 'web-ui', reason });
+    await apiPost(`/approvals/${name}/${verb}?namespace=${encodeURIComponent(ns)}`, { approver, reason });
     forgetDrafts('approval-reason-' + name);
-    toast(t('toast.approved', { name }), 'success');
+    forgetDrafts('approval-approver-' + name);
+    toast(t(verb === 'approve' ? 'toast.approved' : 'toast.rejected', { name }), verb === 'approve' ? 'success' : 'info');
     loadApprovals();
+    setTimeout(loadApprovals, 2000);
   } catch (e) {
-    toast(t('toast.approveFailed', { msg: e.message }), 'error');
+    toast(t(verb === 'approve' ? 'toast.approveFailed' : 'toast.rejectFailed', { msg: e.message }), 'error');
   }
 }
 
+async function approveRequest(name, ns) {
+  return decideRequest(name, ns, 'approve');
+}
+
 async function rejectRequest(name, ns) {
-  const reason = document.getElementById('approval-reason-' + name)?.value || '';
-  try {
-    await apiPost(`/approvals/${name}/reject?namespace=${encodeURIComponent(ns)}`, { approver: 'web-ui', reason });
-    forgetDrafts('approval-reason-' + name);
-    toast(t('toast.rejected', { name }), 'info');
-    loadApprovals();
-  } catch (e) {
-    toast(t('toast.rejectFailed', { msg: e.message }), 'error');
-  }
+  return decideRequest(name, ns, 'reject');
 }
 
 // ===== RUNBOOKS PAGE =====

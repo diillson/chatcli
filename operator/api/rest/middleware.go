@@ -20,14 +20,67 @@ import (
 type contextKey string
 
 const (
-	contextKeyRole   contextKey = "role"
-	contextKeyAPIKey contextKey = "apiKey"
+	contextKeyRole     contextKey = "role"
+	contextKeyAPIKey   contextKey = "apiKey"
+	contextKeyIdentity contextKey = "identity"
+
+	// devModeIdentity is the identity of every caller in dev mode (no keys).
+	devModeIdentity = "dev-mode"
 )
 
 // roleFromContext extracts the role from the request context.
 func roleFromContext(ctx context.Context) string {
 	v, _ := ctx.Value(contextKeyRole).(string)
 	return v
+}
+
+// identityFromContext returns the identity of the API key that
+// authenticated the request: the key's name (or description) from the key
+// list, or a fingerprint of the key when it has neither.
+func identityFromContext(ctx context.Context) string {
+	v, _ := ctx.Value(contextKeyIdentity).(string)
+	return v
+}
+
+// APIKey is one configured REST API key.
+type APIKey struct {
+	// Role is viewer, operator or admin.
+	Role string
+	// Name identifies the key's holder on the approval decisions it takes.
+	// Empty falls back to a fingerprint of the key.
+	Name string
+}
+
+// SetAPIKeyEntries configures API keys together with the identity each one
+// records on approval decisions. It replaces every key; an empty map
+// leaves the API without keys, which rejects every call unless dev mode is
+// on. Thread-safe.
+func (s *APIServer) SetAPIKeyEntries(keys map[string]APIKey) {
+	roles := make(map[string]string, len(keys))
+	names := make(map[string]string, len(keys))
+	for k, v := range keys {
+		roles[k] = v.Role
+		if n := strings.TrimSpace(v.Name); n != "" {
+			names[k] = n
+		}
+	}
+	s.apiKeysMu.Lock()
+	defer s.apiKeysMu.Unlock()
+	s.apiKeys = roles
+	s.apiKeyNames = names
+}
+
+// APIKeyCount reports how many API keys are loaded.
+func (s *APIServer) APIKeyCount() int {
+	s.apiKeysMu.RLock()
+	defer s.apiKeysMu.RUnlock()
+	return len(s.apiKeys)
+}
+
+// keyFingerprint identifies a key without revealing it.
+func keyFingerprint(apiKey string) string {
+	sum := sha256.Sum256([]byte(apiKey))
+	return "key-" + hex.EncodeToString(sum[:])[:12]
 }
 
 // --- Authentication Middleware ---
@@ -44,6 +97,7 @@ func (s *APIServer) authMiddleware(next http.Handler) http.Handler {
 			if os.Getenv("CHATCLI_OPERATOR_DEV_MODE") == "true" {
 				ctx := context.WithValue(r.Context(), contextKeyRole, "admin")
 				ctx = context.WithValue(ctx, contextKeyAPIKey, "dev-mode")
+				ctx = context.WithValue(ctx, contextKeyIdentity, devModeIdentity)
 				next.ServeHTTP(w, r.WithContext(ctx))
 				return
 			}
@@ -60,14 +114,19 @@ func (s *APIServer) authMiddleware(next http.Handler) http.Handler {
 		// Find the role for this key.
 		s.apiKeysMu.RLock()
 		role, ok := s.apiKeys[apiKey]
+		identity := s.apiKeyNames[apiKey]
 		s.apiKeysMu.RUnlock()
 		if !ok {
 			writeError(w, http.StatusUnauthorized, "invalid API key")
 			return
 		}
+		if identity == "" {
+			identity = keyFingerprint(apiKey)
+		}
 
 		ctx := context.WithValue(r.Context(), contextKeyRole, role)
 		ctx = context.WithValue(ctx, contextKeyAPIKey, apiKey)
+		ctx = context.WithValue(ctx, contextKeyIdentity, identity)
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
 }

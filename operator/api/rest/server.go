@@ -85,6 +85,7 @@ type APIServer struct {
 	apiKeyHeader  string
 	apiKeysMu     sync.RWMutex
 	apiKeys       map[string]string // key -> role
+	apiKeyNames   map[string]string // key -> identity recorded on decisions
 	limiter       *rateLimiter      // requests without a valid key, per client host
 	keyLimiter    *rateLimiter      // requests with a valid key, per key
 	corsMu        sync.RWMutex
@@ -115,6 +116,7 @@ func (s *APIServer) SetAPIKeys(keys map[string]string) {
 	s.apiKeysMu.Lock()
 	defer s.apiKeysMu.Unlock()
 	s.apiKeys = keys
+	s.apiKeyNames = nil
 }
 
 // SetWatcherBridge sets the watcher bridge for dedup invalidation on manual resolve.
@@ -1033,60 +1035,6 @@ func (s *APIServer) handleGetApproval(w http.ResponseWriter, r *http.Request, na
 		Kind:         "ApprovalRequest",
 		Spec:         ai,
 		Status:       ai,
-		ResourceMeta: unstructuredResourceMeta(obj),
-	})
-}
-
-func (s *APIServer) handleApprovalDecision(w http.ResponseWriter, r *http.Request, name, decision string) {
-	ctx := r.Context()
-	ns := r.URL.Query().Get("namespace")
-
-	var req ApprovalDecisionRequest
-	if err := readJSON(r, &req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid request body: "+err.Error())
-		return
-	}
-
-	if req.Approver == "" {
-		writeError(w, http.StatusBadRequest, "approver is required")
-		return
-	}
-
-	obj, err := s.getUnstructured(ctx, "approvalrequests", name, ns)
-	if err != nil {
-		writeError(w, http.StatusNotFound, "approval not found: "+err.Error())
-		return
-	}
-
-	// Update the status fields.
-	status, _ := obj.Object["status"].(map[string]interface{})
-	if status == nil {
-		status = make(map[string]interface{})
-	}
-	status["state"] = decision
-	status["decidedAt"] = time.Now().Format(time.RFC3339)
-	status["decisionReason"] = req.Reason
-
-	if decision == "Approved" {
-		status["approvedBy"] = req.Approver
-	} else {
-		status["rejectedBy"] = req.Approver
-	}
-	obj.Object["status"] = status
-
-	if err := s.client.Status().Update(ctx, obj); err != nil {
-		// If status subresource update fails, try regular update.
-		if err2 := s.client.Update(ctx, obj); err2 != nil {
-			writeError(w, http.StatusInternalServerError, "failed to update approval: "+err2.Error())
-			return
-		}
-	}
-
-	ai := unstructuredToApproval(obj.Object)
-	writeJSON(w, http.StatusOK, APIResponse{
-		APIVersion:   "v1",
-		Kind:         "ApprovalRequest",
-		Spec:         ai,
 		ResourceMeta: unstructuredResourceMeta(obj),
 	})
 }
@@ -2276,13 +2224,8 @@ func unstructuredToApproval(obj map[string]interface{}) ApprovalItem {
 
 	if status != nil {
 		ai.State, _ = status["state"].(string)
-		ai.ApprovedBy, _ = status["approvedBy"].(string)
-		ai.RejectedBy, _ = status["rejectedBy"].(string)
-		ai.DecisionReason, _ = status["decisionReason"].(string)
-		if da, ok := status["decidedAt"].(string); ok {
-			ai.DecidedAt = &da
-		}
 	}
+	fillApprovalDecisions(&ai, spec, status)
 	if ai.State == "" {
 		ai.State = "Pending"
 	}

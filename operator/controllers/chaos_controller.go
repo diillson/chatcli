@@ -63,6 +63,19 @@ const (
 	chaosAnnotationDelay = "platform.chatcli.io/chaos-network-delay"
 	chaosAnnotationLoss  = "platform.chatcli.io/chaos-network-loss"
 	chaosStressImage     = "alexeiled/stress-ng:latest"
+
+	// ChaosApprovalPolicyName is the policyRef of the ApprovalRequest a
+	// chaos experiment with requireApproval raises. An ApprovalPolicy of
+	// that name, when present, supplies the rule "chaos-experiment-approval"
+	// (quorum, change window); without one the request needs one human
+	// approval within its own timeout.
+	ChaosApprovalPolicyName = "chaos-safety"
+	chaosApprovalRuleName   = "chaos-experiment-approval"
+	chaosApprovalTimeout    = 30
+
+	// Stress pods run as this unprivileged user so they pass the restricted
+	// Pod Security Standard.
+	chaosStressUID = int64(65534)
 )
 
 // ChaosReconciler reconciles ChaosExperiment objects.
@@ -77,7 +90,7 @@ type ChaosReconciler struct {
 // +kubebuilder:rbac:groups=platform.chatcli.io,resources=approvalrequests,verbs=get;list;watch;create
 // +kubebuilder:rbac:groups=apps,resources=deployments,verbs=get;list;watch
 // +kubebuilder:rbac:groups=apps,resources=statefulsets,verbs=get;list;watch
-// +kubebuilder:rbac:groups="",resources=pods,verbs=get;list;watch;create;delete
+// +kubebuilder:rbac:groups="",resources=pods,verbs=get;list;watch;create;update;delete
 
 func (r *ChaosReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	logger := log.FromContext(ctx)
@@ -158,9 +171,12 @@ func (r *ChaosReconciler) reconcilePending(ctx context.Context, exp *platformv1a
 
 	// Check RequireApproval.
 	if exp.Spec.SafetyChecks.RequireApproval {
-		approved, err := r.checkApproval(ctx, exp)
+		approved, denied, err := r.checkApproval(ctx, exp)
 		if err != nil {
 			return ctrl.Result{}, fmt.Errorf("checking approval: %w", err)
+		}
+		if denied != "" {
+			return r.transitionToFailed(ctx, exp, denied)
 		}
 		if !approved {
 			logger.Info("awaiting approval for chaos experiment", "name", exp.Name)
@@ -494,7 +510,7 @@ func (r *ChaosReconciler) executeDiskStress(ctx context.Context, exp *platformv1
 		return fmt.Errorf("getting target node: %w", err)
 	}
 
-	cmd := []string{"stress-ng", "--hdd", workers, "--hdd-bytes", size, "--timeout", exp.Spec.Duration}
+	cmd := []string{"stress-ng", "--hdd", workers, "--hdd-bytes", size, "--temp-path", "/tmp", "--timeout", exp.Spec.Duration}
 	podName := fmt.Sprintf("chaos-disk-%s", exp.Name)
 	if err := r.createStressPod(ctx, podName, exp.Spec.Target.Namespace, nodeName, cmd, exp.Name); err != nil {
 		return fmt.Errorf("creating disk stress pod: %w", err)
@@ -697,13 +713,36 @@ func (r *ChaosReconciler) createStressPod(ctx context.Context, name, namespace, 
 			},
 		},
 		Spec: corev1.PodSpec{
-			RestartPolicy: corev1.RestartPolicyNever,
-			NodeName:      nodeName,
+			RestartPolicy:                corev1.RestartPolicyNever,
+			NodeName:                     nodeName,
+			AutomountServiceAccountToken: boolPtr(false),
+			// Restricted Pod Security Standard: stress-ng burns CPU, memory
+			// and disk I/O as an unprivileged user; none of the stressors
+			// used here needs root or a capability.
+			SecurityContext: &corev1.PodSecurityContext{
+				RunAsNonRoot:   boolPtr(true),
+				RunAsUser:      int64Ptr(chaosStressUID),
+				RunAsGroup:     int64Ptr(chaosStressUID),
+				SeccompProfile: &corev1.SeccompProfile{Type: corev1.SeccompProfileTypeRuntimeDefault},
+			},
+			// The only writable path: the disk stressor writes its files here.
+			Volumes: []corev1.Volume{{
+				Name:         "scratch",
+				VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{}},
+			}},
 			Containers: []corev1.Container{
 				{
 					Name:    "stress",
 					Image:   chaosStressImage,
 					Command: command,
+					SecurityContext: &corev1.SecurityContext{
+						AllowPrivilegeEscalation: boolPtr(false),
+						ReadOnlyRootFilesystem:   boolPtr(true),
+						RunAsNonRoot:             boolPtr(true),
+						Capabilities:             &corev1.Capabilities{Drop: []corev1.Capability{"ALL"}},
+					},
+					VolumeMounts: []corev1.VolumeMount{{Name: "scratch", MountPath: "/tmp"}},
+					WorkingDir:   "/tmp",
 					Resources: corev1.ResourceRequirements{
 						Limits: corev1.ResourceList{
 							corev1.ResourceCPU:    resource.MustParse("500m"),
@@ -972,61 +1011,99 @@ func (r *ChaosReconciler) hasStressPods(ctx context.Context, exp *platformv1alph
 	return len(podList.Items) > 0
 }
 
-// checkApproval checks if an ApprovalRequest exists and is approved for this experiment.
-func (r *ChaosReconciler) checkApproval(ctx context.Context, exp *platformv1alpha1.ChaosExperiment) (bool, error) {
+// checkApproval raises the experiment's ApprovalRequest on first call and
+// reports its outcome: approved, or denied with the reason the experiment
+// fails with (rejected or expired), or neither while it is pending.
+func (r *ChaosReconciler) checkApproval(ctx context.Context, exp *platformv1alpha1.ChaosExperiment) (bool, string, error) {
 	logger := log.FromContext(ctx)
 
-	// Look for an existing ApprovalRequest for this experiment.
 	approvalName := fmt.Sprintf("chaos-%s", exp.Name)
 	var ar platformv1alpha1.ApprovalRequest
 	err := r.Get(ctx, types.NamespacedName{Name: approvalName, Namespace: exp.Namespace}, &ar)
-	if err != nil {
-		if errors.IsNotFound(err) {
-			// Create a new ApprovalRequest.
-			ar = platformv1alpha1.ApprovalRequest{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      approvalName,
-					Namespace: exp.Namespace,
-					Labels: map[string]string{
-						chaosLabelExperiment: exp.Name,
-					},
-				},
-				Spec: platformv1alpha1.ApprovalRequestSpec{
-					IssueRef: platformv1alpha1.IssueRef{
-						Name: fmt.Sprintf("chaos-experiment-%s", exp.Name),
-					},
-					RemediationPlanRef: exp.Name,
-					PolicyRef:          "chaos-safety",
-					RuleName:           "chaos-experiment-approval",
-					Requester:          "chaos-controller",
-					TimeoutMinutes:     30,
-					RequiredApprovers:  1,
-				},
+	if errors.IsNotFound(err) {
+		ar = chaosApprovalRequest(approvalName, exp)
+		if r.Scheme != nil {
+			// Deleted with the experiment.
+			if err := ctrl.SetControllerReference(exp, &ar, r.Scheme); err != nil {
+				return false, "", fmt.Errorf("setting owner reference: %w", err)
 			}
-			if exp.Spec.LinkedIssueRef != nil {
-				ar.Spec.IssueRef = *exp.Spec.LinkedIssueRef
-			}
-			if err := r.Create(ctx, &ar); err != nil {
-				return false, fmt.Errorf("creating approval request: %w", err)
-			}
-			logger.Info("created approval request for chaos experiment", "approval", approvalName)
-			return false, nil
 		}
-		return false, err
+		if err := r.Create(ctx, &ar); err != nil && !errors.IsAlreadyExists(err) {
+			return false, "", fmt.Errorf("creating approval request: %w", err)
+		}
+		logger.Info("created approval request for chaos experiment", "approval", approvalName)
+		return false, "", nil
+	}
+	if err != nil {
+		return false, "", err
 	}
 
 	switch ar.Status.State {
 	case platformv1alpha1.ApprovalStateApproved:
-		return true, nil
+		return true, "", nil
 	case platformv1alpha1.ApprovalStateRejected:
-		// Fail the experiment if approval was rejected.
-		return false, fmt.Errorf("approval rejected for experiment %s", exp.Name)
+		who, reason := rejectionOf(ar.Status.Decisions)
+		return false, fmt.Sprintf("approval rejected by %s: %s", who, reason), nil
 	case platformv1alpha1.ApprovalStateExpired:
-		return false, fmt.Errorf("approval expired for experiment %s", exp.Name)
+		return false, fmt.Sprintf("approval request %s expired without a decision", approvalName), nil
 	default:
-		// Still pending.
-		return false, nil
+		return false, "", nil
 	}
+}
+
+// chaosApprovalRequest builds the request for an experiment. The requested
+// action is Custom (chaos is not a remediation) with the experiment in its
+// params, so approvers see what they approve.
+func chaosApprovalRequest(name string, exp *platformv1alpha1.ChaosExperiment) platformv1alpha1.ApprovalRequest {
+	ar := platformv1alpha1.ApprovalRequest{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      name,
+			Namespace: exp.Namespace,
+			Labels: map[string]string{
+				chaosLabelExperiment: exp.Name,
+			},
+		},
+		Spec: platformv1alpha1.ApprovalRequestSpec{
+			IssueRef: platformv1alpha1.IssueRef{
+				Name: fmt.Sprintf("chaos-experiment-%s", exp.Name),
+			},
+			RemediationPlanRef: exp.Name,
+			PolicyRef:          ChaosApprovalPolicyName,
+			RuleName:           chaosApprovalRuleName,
+			RequestedActions: []platformv1alpha1.RemediationAction{{
+				Type: platformv1alpha1.ActionCustom,
+				Params: map[string]string{
+					"chaosExperiment": exp.Name,
+					"experimentType":  string(exp.Spec.ExperimentType),
+					"target":          fmt.Sprintf("%s/%s/%s", exp.Spec.Target.Kind, exp.Spec.Target.Namespace, exp.Spec.Target.Name),
+					"duration":        exp.Spec.Duration,
+				},
+			}},
+			Requester:         "chaos-controller",
+			TimeoutMinutes:    chaosApprovalTimeout,
+			RequiredApprovers: 1,
+		},
+	}
+	if exp.Spec.LinkedIssueRef != nil {
+		ar.Spec.IssueRef = *exp.Spec.LinkedIssueRef
+	}
+	return ar
+}
+
+// isChaosApprovalRequest reports whether a request was raised by a chaos
+// experiment; it has no RemediationPlan behind it.
+func isChaosApprovalRequest(ar *platformv1alpha1.ApprovalRequest) bool {
+	return ar.Spec.PolicyRef == ChaosApprovalPolicyName && ar.Labels[chaosLabelExperiment] != ""
+}
+
+// rejectionOf returns who rejected a request and why.
+func rejectionOf(decisions []platformv1alpha1.ApprovalDecision) (string, string) {
+	for _, d := range decisions {
+		if d.Decision == ApprovalDecisionRejected {
+			return d.Approver, d.Reason
+		}
+	}
+	return "unknown", ""
 }
 
 // detectNewIssue checks if any new Issues have been created targeting the same resource since the experiment started.

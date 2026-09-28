@@ -18,6 +18,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/tools/events"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
@@ -101,6 +102,9 @@ type RemediationReconciler struct {
 	Federation   *FederationReconciler
 	PatternStore *PatternStore // Records resolution/failure patterns for Decision Engine learning
 	CostTracker  *CostTracker  // Tracks LLM and downtime costs per incident
+	// EventRecorder, when set, emits Kubernetes Events on a plan, such as
+	// an approval gate that could not be evaluated. Nil emits none.
+	EventRecorder events.EventRecorder
 }
 
 // +kubebuilder:rbac:groups=platform.chatcli.io,resources=remediationplans,verbs=get;list;watch;create;update;patch;delete
@@ -109,6 +113,8 @@ type RemediationReconciler struct {
 // +kubebuilder:rbac:groups=apps,resources=replicasets,verbs=get;list;watch
 // +kubebuilder:rbac:groups="",resources=configmaps,verbs=get;list;watch;update;patch
 // +kubebuilder:rbac:groups="",resources=pods,verbs=get;list;watch;delete
+// +kubebuilder:rbac:groups="",resources=pods/eviction,verbs=create
+// +kubebuilder:rbac:groups=events.k8s.io,resources=events,verbs=create;patch
 
 func (r *RemediationReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	log := log.FromContext(ctx)
@@ -208,49 +214,95 @@ func (r *RemediationReconciler) handleWaitingApproval(ctx context.Context, plan 
 	}
 }
 
+// gateByApproval runs every approval gate before a plan executes: the
+// ApprovalPolicies of the namespace, then the cluster tier and the decision
+// engine. It fails closed: when a gate cannot be evaluated (the Issue, the
+// AIInsight or the policies cannot be read) the plan stays Pending and the
+// reconcile returns an error, so it is retried with backoff; it never runs
+// without the gate. A plan whose Issue is gone fails, as it would when
+// executing. parked reports that the caller must return res and err.
+func (r *RemediationReconciler) gateByApproval(ctx context.Context, plan *platformv1alpha1.RemediationPlan) (bool, ctrl.Result, error) {
+	log := log.FromContext(ctx)
+
+	var issue platformv1alpha1.Issue
+	if err := r.Get(ctx, types.NamespacedName{Name: plan.Spec.IssueRef.Name, Namespace: plan.Namespace}, &issue); err != nil {
+		if errors.IsNotFound(err) {
+			log.Info("Parent issue not found; the approval gate cannot be evaluated, failing the plan", "plan", plan.Name, "issue", plan.Spec.IssueRef.Name)
+			r.recordPlanEvent(plan, corev1.EventTypeWarning, "ApprovalGateFailed", "Issue %s not found; the plan fails without running", plan.Spec.IssueRef.Name)
+			plan.Status.State = platformv1alpha1.RemediationStateFailed
+			plan.Status.Result = "Parent issue not found; approval policies cannot be evaluated without it"
+			return true, ctrl.Result{}, r.Status().Update(ctx, plan)
+		}
+		return true, ctrl.Result{}, r.approvalGateUnavailable(ctx, plan, "reading the Issue", err)
+	}
+	var insight platformv1alpha1.AIInsight
+	if err := r.Get(ctx, types.NamespacedName{Name: issue.Name + "-insight", Namespace: plan.Namespace}, &insight); err != nil && !errors.IsNotFound(err) {
+		return true, ctrl.Result{}, r.approvalGateUnavailable(ctx, plan, "reading the AIInsight", err)
+	}
+
+	required, policy, rule, err := CheckApprovalRequired(ctx, r.Client, plan, &issue, &insight)
+	if err != nil {
+		return true, ctrl.Result{}, r.approvalGateUnavailable(ctx, plan, "evaluating ApprovalPolicies", err)
+	}
+	// A manual or quorum rule parks the plan, and so does an auto rule with
+	// autoApproveConditions: the approval controller approves it when they
+	// hold and leaves it to a human otherwise. An auto rule without
+	// conditions lets the plan through.
+	if required && (rule.Mode != platformv1alpha1.ApprovalModeAuto || rule.AutoApproveConditions != nil) {
+		log.Info("Approval required by policy", "plan", plan.Name, "policy", policy.Name, "rule", rule.Name, "mode", rule.Mode)
+		if err := CreateApprovalRequest(ctx, r.Client, r.Scheme, plan, &issue, &insight, policy, rule); err != nil {
+			// Fail closed: a gate that could not be raised is not a gate
+			// that was passed. A conflict here is common on a live API
+			// server, when a reconcile runs on a cached copy of a plan
+			// that was just parked; the retry reads the parked state.
+			log.Error(err, "Failed to create approval request; retrying, the plan stays pending", "plan", plan.Name)
+			return true, ctrl.Result{RequeueAfter: conflictRetryDelay}, nil
+		}
+		r.auditApprovalRequested(ctx, plan)
+		plan.Status.State = platformv1alpha1.RemediationStateWaitingApproval
+		plan.Status.Result = fmt.Sprintf("Waiting for %s approval (policy: %s, rule: %s)", rule.Mode, policy.Name, rule.Name)
+		if err := r.Status().Update(ctx, plan); err != nil {
+			return true, ctrl.Result{}, err
+		}
+		log.Info("Approval request created, plan set to WaitingApproval", "plan", plan.Name)
+		return true, ctrl.Result{RequeueAfter: 10 * time.Second}, nil
+	}
+
+	// No policy parked the plan: the cluster tier and the decision
+	// engine get their say, each able to park it under a synthetic
+	// policy the approval controller knows how to expire.
+	if parked, res, err := r.gateByClusterTier(ctx, plan, &issue, &insight); parked || err != nil {
+		return true, res, err
+	}
+	return r.gateByDecisionEngine(ctx, plan, &issue, &insight)
+}
+
+// approvalGateUnavailable logs and records an event for a gate that could
+// not be evaluated, and returns the error that keeps the plan Pending and
+// makes the controller retry it with backoff.
+func (r *RemediationReconciler) approvalGateUnavailable(ctx context.Context, plan *platformv1alpha1.RemediationPlan, step string, err error) error {
+	log.FromContext(ctx).Error(err, "Approval gate could not be evaluated; the plan stays Pending and is retried with backoff",
+		"plan", plan.Name, "step", step)
+	r.recordPlanEvent(plan, corev1.EventTypeWarning, "ApprovalGateUnavailable",
+		"Approval gate could not be evaluated (%s): %v; the plan stays Pending and is retried", step, err)
+	return fmt.Errorf("approval gate for plan %s/%s (%s): %w", plan.Namespace, plan.Name, step, err)
+}
+
+// recordPlanEvent emits a Kubernetes Event on the plan when a recorder is
+// wired.
+func (r *RemediationReconciler) recordPlanEvent(plan *platformv1alpha1.RemediationPlan, eventType, reason, note string, args ...interface{}) {
+	if r.EventRecorder == nil {
+		return
+	}
+	r.EventRecorder.Eventf(plan, nil, eventType, reason, "ApprovalGate", note, args...)
+}
+
 func (r *RemediationReconciler) handlePending(ctx context.Context, plan *platformv1alpha1.RemediationPlan) (ctrl.Result, error) {
 	log := log.FromContext(ctx)
 	log.Info("Starting remediation", "plan", plan.Name, "attempt", plan.Spec.Attempt)
 
-	// Check if an ApprovalPolicy requires approval for this plan
-	var issue platformv1alpha1.Issue
-	if err := r.Get(ctx, types.NamespacedName{Name: plan.Spec.IssueRef.Name, Namespace: plan.Namespace}, &issue); err == nil {
-		var insight platformv1alpha1.AIInsight
-		insightName := issue.Name + "-insight"
-		_ = r.Get(ctx, types.NamespacedName{Name: insightName, Namespace: plan.Namespace}, &insight)
-
-		required, policy, rule, err := CheckApprovalRequired(ctx, r.Client, plan, &issue, &insight)
-		if err != nil {
-			log.Error(err, "Failed to check approval policy, proceeding without approval")
-		} else if required && rule.Mode != platformv1alpha1.ApprovalModeAuto {
-			log.Info("Approval required by policy", "plan", plan.Name, "policy", policy.Name, "rule", rule.Name, "mode", rule.Mode)
-			if err := CreateApprovalRequest(ctx, r.Client, r.Scheme, plan, &issue, &insight, policy, rule); err != nil {
-				// Fail closed: a gate that could not be raised is not a gate
-				// that was passed. A conflict here is common on a live API
-				// server, when a reconcile runs on a cached copy of a plan
-				// that was just parked; the retry reads the parked state.
-				log.Error(err, "Failed to create approval request; retrying, the plan stays pending", "plan", plan.Name)
-				return ctrl.Result{RequeueAfter: conflictRetryDelay}, nil
-			}
-			r.auditApprovalRequested(ctx, plan)
-			plan.Status.State = platformv1alpha1.RemediationStateWaitingApproval
-			plan.Status.Result = fmt.Sprintf("Waiting for %s approval (policy: %s, rule: %s)", rule.Mode, policy.Name, rule.Name)
-			if err := r.Status().Update(ctx, plan); err != nil {
-				return ctrl.Result{}, err
-			}
-			log.Info("Approval request created, plan set to WaitingApproval", "plan", plan.Name)
-			return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
-		}
-
-		// No policy parked the plan: the cluster tier and the decision
-		// engine get their say, each able to park it under a synthetic
-		// policy the approval controller knows how to expire.
-		if parked, res, err := r.gateByClusterTier(ctx, plan, &issue, &insight); parked || err != nil {
-			return res, err
-		}
-		if parked, res, err := r.gateByDecisionEngine(ctx, plan, &issue, &insight); parked || err != nil {
-			return res, err
-		}
+	if parked, res, err := r.gateByApproval(ctx, plan); parked || err != nil {
+		return res, err
 	}
 
 	// Validate safety constraints (skip for agentic mode — no pre-planned actions)
@@ -1789,8 +1841,9 @@ func (r *RemediationReconciler) gateByDecisionEngine(ctx context.Context, plan *
 	log := log.FromContext(ctx)
 	decision, err := r.DecisionEngine.ShouldAutoRemediate(ctx, r.Client, issue, insight, plan.Spec.Actions)
 	if err != nil {
-		log.Error(err, "Decision engine failed; proceeding on policies alone", "plan", plan.Name)
-		return false, ctrl.Result{}, nil
+		// Fail closed like the policy gate: an engine that cannot decide
+		// has not allowed the plan.
+		return true, ctrl.Result{}, r.approvalGateUnavailable(ctx, plan, "evaluating the decision engine", err)
 	}
 	decisionEvaluationsTotal.WithLabelValues(decision.Mode).Inc()
 	breaker := 0.0

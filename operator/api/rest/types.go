@@ -225,6 +225,18 @@ type ApprovalItem struct {
 	CreationTimestamp string            `json:"creationTimestamp"`
 	Labels            map[string]string `json:"labels,omitempty"`
 	Annotations       map[string]string `json:"annotations,omitempty"`
+	// RequiredApprovers is how many distinct approvers a quorum rule needs.
+	RequiredApprovers int32 `json:"requiredApprovers,omitempty"`
+	// Decisions are the recorded approver decisions (status.decisions).
+	Decisions []ApprovalDecisionItem `json:"decisions,omitempty"`
+}
+
+// ApprovalDecisionItem is one recorded approver decision.
+type ApprovalDecisionItem struct {
+	Approver  string `json:"approver"`
+	Decision  string `json:"decision"`
+	Reason    string `json:"reason,omitempty"`
+	Timestamp string `json:"timestamp,omitempty"`
 }
 
 // ApprovalDecisionRequest is the body for approve/reject.
