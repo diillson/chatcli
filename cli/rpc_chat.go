@@ -128,10 +128,16 @@ func (cli *ChatCLI) runChatTurnSerialized(
 	// gating, cross-channel hub pull, token-aware compaction (this replaces
 	// the old hard 30-message cap).
 	input, additionalContext, images := cli.processSpecialCommands(ctx, userInput)
-	if o.Attachments != nil {
+	if o.Attachments != nil && len(o.Attachments.Images) > 0 {
 		images = append(images, o.Attachments.Images...)
+		// The saved copies' paths ride in the turn, so the reference
+		// outlives the inline bytes (compaction, a model without vision,
+		// the conversation continued in a loop or in the terminal).
+		additionalContext += cli.saveTurnAttachments(o.Attachments.Images)
 	}
-	images, visionDesc := cli.gateImagesForModel(ctx, images)
+	// The gate judges the model the turn is routed to, not the session's.
+	gateProvider, gateModel := cli.rpcChatRoute(o)
+	images, visionDesc := cli.gateImagesForRoute(ctx, gateProvider, gateModel, images)
 	additionalContext += visionDesc
 	cli.syncHubContext(ctx)
 	cli.compactHistoryIfNeeded(ctx)
@@ -224,25 +230,7 @@ func (cli *ChatCLI) resolveRPCChatClient(
 	modelHint string, o RPCChatOpts,
 ) (client.LLMClient, string, string, error) {
 	if o.Provider != "" || o.Model != "" {
-		provider := o.Provider
-		if provider == "" {
-			provider = cli.Provider
-		}
-		// A call that names the provider only is served by the session's
-		// model on the session's provider, else by that provider's default
-		// model, and the turn is recorded under that id. An empty name here
-		// used to file the usage under "provider:" — unpriced, so the turn
-		// cost nothing on /cost — and to open a second, nameless model node
-		// on the dashboard. A provider with no known default keeps the
-		// client's own name as a last resort.
-		model := o.Model
-		if model == "" {
-			if provider == cli.Provider {
-				model = cli.Model
-			} else {
-				model = cli.providerDefaultModel(provider)
-			}
-		}
+		provider, model := cli.rpcChatRoute(o)
 		c, err := cli.manager.GetClient(provider, model)
 		if err != nil {
 			return nil, "", "", err
@@ -261,6 +249,34 @@ func (cli *ChatCLI) resolveRPCChatClient(
 	}
 	cli.pulseNoteResolvedRoute(resolution, pulseRouteSkill, "rpc chat turn")
 	return resolution.Client, resolution.Provider, resolution.Model, nil
+}
+
+// rpcChatRoute is the provider and model a headless chat turn names: the
+// session's pair when the call names neither. A call that names the
+// provider only is served by the session's model on the session's
+// provider, else by that provider's default model, and the turn is
+// recorded under that id. An empty name here used to file the usage under
+// "provider:" — unpriced, so the turn cost nothing on /cost — and to open
+// a second, nameless model node on the dashboard. A provider with no known
+// default yields an empty model, and the client's own name is the last
+// resort.
+func (cli *ChatCLI) rpcChatRoute(o RPCChatOpts) (string, string) {
+	if o.Provider == "" && o.Model == "" {
+		return cli.Provider, cli.Model
+	}
+	provider := o.Provider
+	if provider == "" {
+		provider = cli.Provider
+	}
+	model := o.Model
+	if model == "" {
+		if provider == cli.Provider {
+			model = cli.Model
+		} else {
+			model = cli.providerDefaultModel(provider)
+		}
+	}
+	return provider, model
 }
 
 // rpcSend performs one model call for an RPC chat turn. With a sink and a

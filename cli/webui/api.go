@@ -45,8 +45,19 @@ func writeErr(w http.ResponseWriter, status int, code, msg string) {
 }
 
 func readJSON(w http.ResponseWriter, r *http.Request, v interface{}) bool {
-	r.Body = http.MaxBytesReader(w, r.Body, maxJSONBody)
+	return readJSONLimit(w, r, v, maxJSONBody)
+}
+
+// readJSONLimit decodes a JSON body of at most limit bytes. A body over
+// the limit is answered with 413 and the limit, not with a decoder error.
+func readJSONLimit(w http.ResponseWriter, r *http.Request, v interface{}, limit int64) bool {
+	r.Body = http.MaxBytesReader(w, r.Body, limit)
 	if err := json.NewDecoder(r.Body).Decode(v); err != nil {
+		var tooLarge *http.MaxBytesError
+		if errors.As(err, &tooLarge) {
+			writeErr(w, http.StatusRequestEntityTooLarge, "too_large", i18n.T("web.body_too_large", limit>>20))
+			return false
+		}
 		writeErr(w, http.StatusBadRequest, "bad_json", i18n.T("web.bad_request", err))
 		return false
 	}
@@ -206,12 +217,19 @@ func newRunID() string {
 // with 409 instead of queueing silently behind the first.
 func (s *Server) handleTurn(w http.ResponseWriter, r *http.Request) {
 	var req turnRequest
-	if !readJSON(w, r, &req) {
+	// A turn carries its image attachments inline: the media limit, since
+	// a single screenshot routinely passes the ordinary one once encoded.
+	if !readJSONLimit(w, r, &req, maxMediaBody) {
 		return
 	}
 	if strings.TrimSpace(req.Text) == "" {
-		writeErr(w, http.StatusBadRequest, "empty", i18n.T("web.empty_turn"))
-		return
+		if len(req.Images) == 0 {
+			writeErr(w, http.StatusBadRequest, "empty", i18n.T("web.empty_turn"))
+			return
+		}
+		// An image sent without a caption is a request to look at it,
+		// as it is from the messaging channels.
+		req.Text = i18n.T("web.image.default_prompt")
 	}
 	flusher, ok := w.(http.Flusher)
 	if !ok {
@@ -299,7 +317,7 @@ func (s *Server) execute(ctx context.Context, rn *run, session, mode, text strin
 		err   error
 	)
 	b := s.opts.Backend
-	if s.routeInline(ctx, rn, session, &mode, &text) {
+	if s.routeInline(ctx, rn, session, &mode, &text, len(o.Images) > 0) {
 		return
 	}
 	switch strings.ToLower(strings.TrimSpace(mode)) {

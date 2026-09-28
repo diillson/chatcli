@@ -1864,16 +1864,16 @@ func (cli *ChatCLI) RunAgentFullOnce(ctx context.Context, task string) error {
 
 	// Processar contextos especiais como @file, @git, etc.
 	query, additionalContext, images := cli.processSpecialCommands(ctx, task)
-	if len(cli.pendingInboundImages) > 0 {
-		images = append(images, cli.pendingInboundImages...)
-		cli.pendingInboundImages = nil
-	}
+	images, inboundNote := cli.takePendingInbound(images)
 	images, visionDesc := cli.gateImagesForModel(ctx, images)
 	additionalContext += visionDesc
 	fullQuery := query
 	if additionalContext != "" {
 		fullQuery = query + "\n\nContexto adicional:\n" + additionalContext
 	}
+	// The note about saved attachments closes the task text, apart from the
+	// additional context it is not.
+	fullQuery += inboundNote
 
 	if cli.agentMode == nil {
 		cli.agentMode = NewAgentMode(cli, cli.logger)
@@ -1896,16 +1896,16 @@ func (cli *ChatCLI) runCoderQuery(ctx context.Context, query string, gatewayPers
 	query, additionalContext, images := cli.processSpecialCommands(ctx, query)
 	// Merge images staged from outside the @file flow (e.g. the gateway), then
 	// gate against the active model (native vision vs describe-fallback).
-	if len(cli.pendingInboundImages) > 0 {
-		images = append(images, cli.pendingInboundImages...)
-		cli.pendingInboundImages = nil
-	}
+	images, inboundNote := cli.takePendingInbound(images)
 	images, visionDesc := cli.gateImagesForModel(ctx, images)
 	additionalContext += visionDesc
 	fullQuery := query
 	if additionalContext != "" {
 		fullQuery = query + "\n\nContexto adicional:\n" + additionalContext
 	}
+	// The note about saved attachments closes the task text, apart from the
+	// additional context it is not.
+	fullQuery += inboundNote
 
 	// Assegurar que o modo agente está inicializado
 	if cli.agentMode == nil {
