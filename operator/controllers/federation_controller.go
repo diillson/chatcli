@@ -11,6 +11,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
@@ -77,6 +78,7 @@ func (r *FederationReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 		if errors.IsNotFound(err) {
 			// Cluster removed: clean up cached client
 			r.remoteClients.Delete(req.Name)
+			r.refreshClusterGauges(ctx, nil)
 			return ctrl.Result{}, nil
 		}
 		return ctrl.Result{}, err
@@ -88,43 +90,23 @@ func (r *FederationReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 	remoteClient, err := r.getOrCreateRemoteClient(ctx, &cr)
 	if err != nil {
 		log.Error(err, "Failed to connect to remote cluster", "cluster", cr.Name)
-		cr.Status.Connected = false
-		now := metav1.Now()
-		cr.Status.LastHealthCheck = &now
-		if statusErr := r.Status().Update(ctx, &cr); statusErr != nil {
-			return ctrl.Result{}, statusErr
-		}
-		federationClustersTotal.WithLabelValues("disconnected").Inc()
-		return ctrl.Result{RequeueAfter: r.healthCheckInterval(&cr)}, nil
+		return r.markDisconnected(ctx, &cr, "KubeconfigUnusable", err)
 	}
 
 	// 2. Health check: list Nodes
 	var nodeList corev1.NodeList
 	if err := remoteClient.List(ctx, &nodeList); err != nil {
 		log.Error(err, "Failed to list nodes on remote cluster", "cluster", cr.Name)
-		cr.Status.Connected = false
-		now := metav1.Now()
-		cr.Status.LastHealthCheck = &now
 		r.remoteClients.Delete(cr.Name) // invalidate cached client
-		if statusErr := r.Status().Update(ctx, &cr); statusErr != nil {
-			return ctrl.Result{}, statusErr
-		}
-		federationClustersTotal.WithLabelValues("disconnected").Inc()
-		return ctrl.Result{RequeueAfter: r.healthCheckInterval(&cr)}, nil
+		return r.markDisconnected(ctx, &cr, "NodeListFailed", err)
 	}
 
 	// 3. Health check: list Namespaces
 	var nsList corev1.NamespaceList
 	if err := remoteClient.List(ctx, &nsList); err != nil {
 		log.Error(err, "Failed to list namespaces on remote cluster", "cluster", cr.Name)
-		cr.Status.Connected = false
-		now := metav1.Now()
-		cr.Status.LastHealthCheck = &now
 		r.remoteClients.Delete(cr.Name)
-		if statusErr := r.Status().Update(ctx, &cr); statusErr != nil {
-			return ctrl.Result{}, statusErr
-		}
-		return ctrl.Result{RequeueAfter: r.healthCheckInterval(&cr)}, nil
+		return r.markDisconnected(ctx, &cr, "NamespaceListFailed", err)
 	}
 
 	// 4. Extract Kubernetes version from first node
@@ -134,9 +116,50 @@ func (r *FederationReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 	}
 
 	// 5. Count active Issues and RemediationPlans in the remote cluster (if CRDs exist)
-	activeIssues := int32(0)
-	activeRemediations := int32(0)
+	activeIssues, activeRemediations := countRemoteActivity(ctx, remoteClient)
 
+	// 6. Update status
+	now := metav1.Now()
+	cr.Status.Connected = true
+	cr.Status.LastHealthCheck = &now
+	cr.Status.KubernetesVersion = kubeVersion
+	cr.Status.NodeCount = clampInt32(len(nodeList.Items))
+	cr.Status.NamespaceCount = clampInt32(len(nsList.Items))
+	cr.Status.ActiveIssues = activeIssues
+	cr.Status.ActiveRemediations = activeRemediations
+	setClusterConditions(&cr, "HealthCheckPassed", "Nodes and namespaces listed", notReadyNodes(nodeList.Items))
+
+	if err := r.Status().Update(ctx, &cr); err != nil {
+		return ctrl.Result{}, err
+	}
+	r.refreshClusterGauges(ctx, &cr)
+
+	log.Info("Cluster health check passed",
+		"cluster", cr.Name,
+		"nodes", cr.Status.NodeCount,
+		"namespaces", cr.Status.NamespaceCount,
+		"activeIssues", activeIssues,
+		"activeRemediations", activeRemediations)
+
+	return ctrl.Result{RequeueAfter: r.healthCheckInterval(&cr)}, nil
+}
+
+// markDisconnected records a failed health check on the registration.
+func (r *FederationReconciler) markDisconnected(ctx context.Context, cr *platformv1alpha1.ClusterRegistration, reason string, cause error) (ctrl.Result, error) {
+	cr.Status.Connected = false
+	now := metav1.Now()
+	cr.Status.LastHealthCheck = &now
+	setClusterConditions(cr, reason, cause.Error(), 0)
+	if statusErr := r.Status().Update(ctx, cr); statusErr != nil {
+		return ctrl.Result{}, statusErr
+	}
+	r.refreshClusterGauges(ctx, cr)
+	return ctrl.Result{RequeueAfter: r.healthCheckInterval(cr)}, nil
+}
+
+// countRemoteActivity counts the open Issues and running RemediationPlans of
+// the remote cluster; a cluster without the CRDs counts zero.
+func countRemoteActivity(ctx context.Context, remoteClient client.Client) (activeIssues, activeRemediations int32) {
 	var issueList platformv1alpha1.IssueList
 	if err := remoteClient.List(ctx, &issueList); err == nil {
 		for _, issue := range issueList.Items {
@@ -157,31 +180,105 @@ func (r *FederationReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 			}
 		}
 	}
+	return activeIssues, activeRemediations
+}
 
-	// 6. Update status
-	now := metav1.Now()
-	cr.Status.Connected = true
-	cr.Status.LastHealthCheck = &now
-	cr.Status.KubernetesVersion = kubeVersion
-	cr.Status.NodeCount = clampInt32(len(nodeList.Items))
-	cr.Status.NamespaceCount = clampInt32(len(nsList.Items))
-	cr.Status.ActiveIssues = activeIssues
-	cr.Status.ActiveRemediations = activeRemediations
+// Cluster health as the federation_clusters_total gauge, the REST API and
+// the registration's conditions report it. The three states are exclusive.
+const (
+	ClusterStatusConnected    = "connected"
+	ClusterStatusDegraded     = "degraded"
+	ClusterStatusDisconnected = "disconnected"
 
-	if err := r.Status().Update(ctx, &cr); err != nil {
-		return ctrl.Result{}, err
+	// ClusterConditionConnected is True while the health check passes.
+	ClusterConditionConnected = "Connected"
+	// ClusterConditionDegraded is True when the cluster answers but some of
+	// its nodes are not Ready.
+	ClusterConditionDegraded = "Degraded"
+)
+
+// notReadyNodes counts the nodes whose Ready condition is not True.
+func notReadyNodes(nodes []corev1.Node) int {
+	notReady := 0
+	for _, node := range nodes {
+		ready := false
+		for _, cond := range node.Status.Conditions {
+			if cond.Type == corev1.NodeReady && cond.Status == corev1.ConditionTrue {
+				ready = true
+				break
+			}
+		}
+		if !ready {
+			notReady++
+		}
 	}
+	return notReady
+}
 
-	federationClustersTotal.WithLabelValues("connected").Inc()
+// setClusterConditions writes the Connected and Degraded conditions from
+// the health check outcome.
+func setClusterConditions(cr *platformv1alpha1.ClusterRegistration, reason, message string, notReady int) {
+	connected := metav1.ConditionFalse
+	if cr.Status.Connected {
+		connected = metav1.ConditionTrue
+	}
+	meta.SetStatusCondition(&cr.Status.Conditions, metav1.Condition{
+		Type: ClusterConditionConnected, Status: connected, Reason: reason, Message: message,
+		ObservedGeneration: cr.Generation,
+	})
+	degraded := metav1.Condition{
+		Type: ClusterConditionDegraded, Status: metav1.ConditionFalse, Reason: "AllNodesReady",
+		Message: "Every node is Ready", ObservedGeneration: cr.Generation,
+	}
+	switch {
+	case !cr.Status.Connected:
+		degraded.Status, degraded.Reason, degraded.Message = metav1.ConditionUnknown, "Disconnected", "The cluster is not reachable"
+	case notReady > 0:
+		degraded.Status, degraded.Reason = metav1.ConditionTrue, "NodesNotReady"
+		degraded.Message = fmt.Sprintf("%d of %d nodes are not Ready", notReady, cr.Status.NodeCount)
+	}
+	meta.SetStatusCondition(&cr.Status.Conditions, degraded)
+}
 
-	log.Info("Cluster health check passed",
-		"cluster", cr.Name,
-		"nodes", cr.Status.NodeCount,
-		"namespaces", cr.Status.NamespaceCount,
-		"activeIssues", activeIssues,
-		"activeRemediations", activeRemediations)
+// ClusterHealth classifies a registration: disconnected when the last
+// health check failed, degraded when it passed with nodes not Ready, and
+// connected otherwise.
+func ClusterHealth(cr *platformv1alpha1.ClusterRegistration) string {
+	if !cr.Status.Connected {
+		return ClusterStatusDisconnected
+	}
+	if meta.IsStatusConditionTrue(cr.Status.Conditions, ClusterConditionDegraded) {
+		return ClusterStatusDegraded
+	}
+	return ClusterStatusConnected
+}
 
-	return ctrl.Result{RequeueAfter: r.healthCheckInterval(&cr)}, nil
+// refreshClusterGauges sets federation_clusters_total for every state from
+// the registrations that exist now, so a cluster that changes state or goes
+// away moves between the series instead of being counted forever. current,
+// when given, is the registration just written and wins over the cache.
+func (r *FederationReconciler) refreshClusterGauges(ctx context.Context, current *platformv1alpha1.ClusterRegistration) {
+	var list platformv1alpha1.ClusterRegistrationList
+	if err := r.List(ctx, &list); err != nil {
+		log.FromContext(ctx).Error(err, "Failed to list cluster registrations for the federation gauge")
+		return
+	}
+	counts := map[string]float64{ClusterStatusConnected: 0, ClusterStatusDegraded: 0, ClusterStatusDisconnected: 0}
+	seenCurrent := false
+	for i := range list.Items {
+		item := &list.Items[i]
+		if current != nil && item.Namespace == current.Namespace && item.Name == current.Name {
+			item = current
+			seenCurrent = true
+		}
+		counts[ClusterHealth(item)]++
+	}
+	if current != nil && !seenCurrent {
+		counts[ClusterHealth(current)]++
+	}
+	for status, n := range counts {
+		federationClustersTotal.WithLabelValues(status).Set(n)
+	}
 }
 
 // getOrCreateRemoteClient reads the kubeconfig Secret and creates or retrieves a cached remote client.
@@ -234,6 +331,18 @@ func (r *FederationReconciler) healthCheckInterval(cr *platformv1alpha1.ClusterR
 	}
 	return 30 * time.Second
 }
+
+// Annotations CorrelateAcrossClusters writes on every correlated Issue, and
+// GET /api/v1/federation/correlations reads.
+const (
+	// AnnotationCrossClusterCorrelation is the correlation ID shared by the group.
+	AnnotationCrossClusterCorrelation = "platform.chatcli.io/cross-cluster-correlation"
+	// AnnotationAffectedClusters is how many clusters the group spans.
+	AnnotationAffectedClusters = "platform.chatcli.io/affected-clusters"
+	// AnnotationSeverityElevated is "true" when correlation raised the
+	// Issue's severity to critical.
+	AnnotationSeverityElevated = "platform.chatcli.io/elevated-severity"
+)
 
 // CorrelateAcrossClusters checks if the same issue type exists across multiple clusters.
 // If the same SignalType appears in 3+ clusters, all matching issues are annotated with
@@ -312,8 +421,19 @@ func (r *FederationReconciler) CorrelateAcrossClusters(ctx context.Context, issu
 		"signalType", issue.Spec.SignalType,
 		"clusterCount", len(clusterSet))
 
-	correlationID := fmt.Sprintf("xcluster-%s", uuid.New().String()[:8])
-	federationCrossClusterIssuesTotal.Inc()
+	// One correlation keeps one ID: a new matching Issue joins the group an
+	// earlier Issue already carries instead of relabeling it.
+	correlationID := ""
+	for _, mi := range matchingIssues {
+		if id := mi.issue.Annotations[AnnotationCrossClusterCorrelation]; id != "" {
+			correlationID = id
+			break
+		}
+	}
+	if correlationID == "" {
+		correlationID = fmt.Sprintf("xcluster-%s", uuid.New().String()[:8])
+		federationCrossClusterIssuesTotal.Inc()
+	}
 
 	// Annotate all matching issues
 	for _, mi := range matchingIssues {
@@ -321,12 +441,13 @@ func (r *FederationReconciler) CorrelateAcrossClusters(ctx context.Context, issu
 		if issueCopy.Annotations == nil {
 			issueCopy.Annotations = make(map[string]string)
 		}
-		issueCopy.Annotations["platform.chatcli.io/cross-cluster-correlation"] = correlationID
-		issueCopy.Annotations["platform.chatcli.io/affected-clusters"] = fmt.Sprintf("%d", len(clusterSet))
+		issueCopy.Annotations[AnnotationCrossClusterCorrelation] = correlationID
+		issueCopy.Annotations[AnnotationAffectedClusters] = fmt.Sprintf("%d", len(clusterSet))
 
 		// Elevate severity to critical if not already
 		if issueCopy.Spec.Severity != platformv1alpha1.IssueSeverityCritical {
 			issueCopy.Spec.Severity = platformv1alpha1.IssueSeverityCritical
+			issueCopy.Annotations[AnnotationSeverityElevated] = "true"
 		}
 
 		// Update on the appropriate client

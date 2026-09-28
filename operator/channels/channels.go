@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/smtp"
 	"strings"
@@ -462,7 +463,7 @@ func (e *EmailSender) Send(ctx context.Context, msg *NotificationMessage) error 
 		msg.Title,
 	)
 
-	addr := fmt.Sprintf("%s:%s", e.config["smtp_host"], e.config["smtp_port"])
+	addr := net.JoinHostPort(e.config["smtp_host"], e.config["smtp_port"])
 	var auth smtp.Auth
 	if e.config["smtp_user"] != "" {
 		auth = smtp.PlainAuth("", e.config["smtp_user"], e.config["smtp_password"], e.config["smtp_host"])
@@ -475,13 +476,14 @@ func (e *EmailSender) Send(ctx context.Context, msg *NotificationMessage) error 
 		tlsConfig.InsecureSkipVerify = true
 	}
 
-	conn, err := smtp.Dial(addr)
+	implicitTLS := e.implicitTLS()
+	conn, err := e.dial(ctx, addr, tlsConfig, implicitTLS)
 	if err != nil {
 		return fmt.Errorf("email: dial: %w", err)
 	}
 	defer conn.Close()
 
-	if ok, _ := conn.Extension("STARTTLS"); ok {
+	if ok, _ := conn.Extension("STARTTLS"); ok && !implicitTLS {
 		if err := conn.StartTLS(tlsConfig); err != nil {
 			return fmt.Errorf("email: starttls: %w", err)
 		}
@@ -514,6 +516,63 @@ func (e *EmailSender) Send(ctx context.Context, msg *NotificationMessage) error 
 	}
 
 	return conn.Quit()
+}
+
+// defaultSMTPTimeout bounds the whole SMTP conversation, dial included, when
+// the channel sets no smtp_timeout.
+const defaultSMTPTimeout = 30 * time.Second
+
+// smtpTimeout reads smtp_timeout (a Go duration), falling back to the default.
+func (e *EmailSender) smtpTimeout() time.Duration {
+	if d, err := time.ParseDuration(strings.TrimSpace(e.config["smtp_timeout"])); err == nil && d > 0 {
+		return d
+	}
+	return defaultSMTPTimeout
+}
+
+// implicitTLS reports whether the connection is TLS from the first byte
+// (SMTPS) rather than upgraded with STARTTLS. smtp_tls chooses explicitly
+// ("implicit" or "starttls"); otherwise port 465 means implicit TLS.
+func (e *EmailSender) implicitTLS() bool {
+	switch strings.ToLower(strings.TrimSpace(e.config["smtp_tls"])) {
+	case "implicit", "tls", "smtps":
+		return true
+	case "starttls":
+		return false
+	}
+	return strings.TrimSpace(e.config["smtp_port"]) == "465"
+}
+
+// dial opens the SMTP session with a dial timeout and a deadline covering
+// the whole conversation, so a silent server cannot hang the reconcile.
+func (e *EmailSender) dial(ctx context.Context, addr string, tlsConfig *tls.Config, implicitTLS bool) (*smtp.Client, error) {
+	timeout := e.smtpTimeout()
+	dialCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
+	netDialer := &net.Dialer{Timeout: timeout}
+	var (
+		conn net.Conn
+		err  error
+	)
+	if implicitTLS {
+		conn, err = (&tls.Dialer{NetDialer: netDialer, Config: tlsConfig}).DialContext(dialCtx, "tcp", addr)
+	} else {
+		conn, err = netDialer.DialContext(dialCtx, "tcp", addr)
+	}
+	if err != nil {
+		return nil, err
+	}
+	if err := conn.SetDeadline(time.Now().Add(timeout)); err != nil {
+		_ = conn.Close()
+		return nil, err
+	}
+	client, err := smtp.NewClient(conn, e.config["smtp_host"])
+	if err != nil {
+		_ = conn.Close()
+		return nil, err
+	}
+	return client, nil
 }
 
 // --- Webhook ---

@@ -2,6 +2,7 @@ package controllers
 
 import (
 	"context"
+	"strings"
 	"time"
 
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -13,67 +14,95 @@ type ComplianceReporter struct {
 	client client.Client
 }
 
+// ComplianceReport is served as-is by GET /api/v1/analytics/compliance.
+// The JSON keys are the Go field names (PascalCase) and every time.Duration
+// is an integer number of nanoseconds: the explicit tags pin that wire
+// format so a rename can never change it silently.
 type ComplianceReport struct {
-	Period             ReportPeriod
-	IncidentMetrics    IncidentMetrics
-	RemediationMetrics RemediationComplianceMetrics
-	SLAMetrics         SLAComplianceMetrics
-	ApprovalMetrics    ApprovalComplianceMetrics
-	AuditSummary       AuditSummaryMetrics
+	Period             ReportPeriod                 `json:"Period"`
+	IncidentMetrics    IncidentMetrics              `json:"IncidentMetrics"`
+	RemediationMetrics RemediationComplianceMetrics `json:"RemediationMetrics"`
+	SLAMetrics         SLAComplianceMetrics         `json:"SLAMetrics"`
+	ApprovalMetrics    ApprovalComplianceMetrics    `json:"ApprovalMetrics"`
+	AuditSummary       AuditSummaryMetrics          `json:"AuditSummary"`
+	// IncidentSLAs lists each IncidentSLA in scope with the counters its
+	// controller keeps.
+	IncidentSLAs []IncidentSLASummary `json:"IncidentSLAs,omitempty"`
 }
 
 type ReportPeriod struct{ Start, End time.Time }
 
 type IncidentMetrics struct {
-	TotalIncidents          int64
-	BySeverity              map[string]int64
-	ByState                 map[string]int64
-	MTTD                    time.Duration
-	MTTR                    time.Duration
-	MeanRemediationAttempts float64
+	TotalIncidents          int64            `json:"TotalIncidents"`
+	BySeverity              map[string]int64 `json:"BySeverity"`
+	ByState                 map[string]int64 `json:"ByState"`
+	MTTD                    time.Duration    `json:"MTTD"`
+	MTTR                    time.Duration    `json:"MTTR"`
+	MeanRemediationAttempts float64          `json:"MeanRemediationAttempts"`
 }
 
 type RemediationComplianceMetrics struct {
-	TotalRemediations   int64
-	SuccessRate         float64
-	ByActionType        map[string]ActionStats
-	AutoRemediatedCount int64
-	AgenticCount        int64
+	TotalRemediations   int64                  `json:"TotalRemediations"`
+	SuccessRate         float64                `json:"SuccessRate"`
+	ByActionType        map[string]ActionStats `json:"ByActionType"`
+	AutoRemediatedCount int64                  `json:"AutoRemediatedCount"`
+	AgenticCount        int64                  `json:"AgenticCount"`
 }
 
 type ActionStats struct{ Count, Success, Failed int64 }
 
+// SLAComplianceMetrics counts the violations the IncidentSLA controller
+// recorded on the Issues of the period. Without any IncidentSLA in scope it
+// falls back to counting Escalated Issues as resolution violations.
 type SLAComplianceMetrics struct {
-	CompliancePercentage    float64
-	ResponseSLAViolations   int64
-	ResolutionSLAViolations int64
-	AverageResponseTime     time.Duration
-	AverageResolutionTime   time.Duration
+	CompliancePercentage    float64       `json:"CompliancePercentage"`
+	ResponseSLAViolations   int64         `json:"ResponseSLAViolations"`
+	ResolutionSLAViolations int64         `json:"ResolutionSLAViolations"`
+	AverageResponseTime     time.Duration `json:"AverageResponseTime"`
+	AverageResolutionTime   time.Duration `json:"AverageResolutionTime"`
+}
+
+// IncidentSLASummary is one IncidentSLA as its controller reports it.
+type IncidentSLASummary struct {
+	Name                 string  `json:"Name"`
+	Namespace            string  `json:"Namespace"`
+	Severity             string  `json:"Severity"`
+	ResponseTime         string  `json:"ResponseTime"`
+	ResolutionTime       string  `json:"ResolutionTime"`
+	CompliancePercentage float64 `json:"CompliancePercentage"`
+	ActiveViolations     int32   `json:"ActiveViolations"`
+	TotalViolations      int64   `json:"TotalViolations"`
+	TotalIssuesTracked   int64   `json:"TotalIssuesTracked"`
 }
 
 type ApprovalComplianceMetrics struct {
-	TotalRequests       int64
-	AutoApproved        int64
-	ManualApproved      int64
-	Rejected            int64
-	Expired             int64
-	AverageDecisionTime time.Duration
+	TotalRequests       int64         `json:"TotalRequests"`
+	AutoApproved        int64         `json:"AutoApproved"`
+	ManualApproved      int64         `json:"ManualApproved"`
+	Rejected            int64         `json:"Rejected"`
+	Expired             int64         `json:"Expired"`
+	AverageDecisionTime time.Duration `json:"AverageDecisionTime"`
 }
 
 type AuditSummaryMetrics struct {
-	TotalEvents int64
-	BySeverity  map[string]int64
-	ByEventType map[string]int64
+	TotalEvents int64            `json:"TotalEvents"`
+	BySeverity  map[string]int64 `json:"BySeverity"`
+	ByEventType map[string]int64 `json:"ByEventType"`
 }
 
 func NewComplianceReporter(c client.Client) *ComplianceReporter {
 	return &ComplianceReporter{client: c}
 }
 
+// GenerateReport covers the window that ends now.
 func (cr *ComplianceReporter) GenerateReport(ctx context.Context, namespace string, window time.Duration) (*ComplianceReport, error) {
 	now := time.Now()
-	start := now.Add(-window)
-	report := &ComplianceReport{Period: ReportPeriod{Start: start, End: now}}
+	return cr.GenerateReportForPeriod(ctx, namespace, now.Add(-window), now)
+}
+
+// GenerateReportForPeriod covers objects created in [start, end].
+func (cr *ComplianceReporter) GenerateReportForPeriod(ctx context.Context, namespace string, start, end time.Time) (*ComplianceReport, error) {
+	report := &ComplianceReport{Period: ReportPeriod{Start: start, End: end}}
 
 	var issues platformv1alpha1.IssueList
 	opts := []client.ListOption{}
@@ -83,16 +112,57 @@ func (cr *ComplianceReporter) GenerateReport(ctx context.Context, namespace stri
 	if err := cr.client.List(ctx, &issues, opts...); err != nil {
 		return nil, err
 	}
+	issues.Items = createdWithin(issues.Items, start, end)
 
 	detectCount, resolveCount := fillIncidentMetrics(report, &issues, start)
-	if err := cr.fillRemediationMetrics(ctx, report, opts, start); err != nil {
+	if err := cr.fillRemediationMetrics(ctx, report, opts, start, end); err != nil {
 		return nil, err
 	}
-	cr.fillApprovalMetrics(ctx, report, opts, start)
-	fillSLAMetrics(report, &issues, start, detectCount, resolveCount)
-	cr.fillAuditSummary(ctx, report, opts, start)
+	cr.fillApprovalMetrics(ctx, report, opts, start, end)
+	slaCount := cr.fillIncidentSLAs(ctx, report, opts)
+	fillSLAMetrics(report, &issues, start, detectCount, resolveCount, slaCount > 0)
+	cr.fillAuditSummary(ctx, report, opts, start, end)
 
 	return report, nil
+}
+
+// createdWithin keeps the Issues created in [start, end].
+func createdWithin(items []platformv1alpha1.Issue, start, end time.Time) []platformv1alpha1.Issue {
+	out := items[:0]
+	for _, iss := range items {
+		if inPeriod(iss.CreationTimestamp.Time, start, end) {
+			out = append(out, iss)
+		}
+	}
+	return out
+}
+
+// inPeriod reports whether t falls in [start, end].
+func inPeriod(t, start, end time.Time) bool {
+	return !t.Before(start) && !t.After(end)
+}
+
+// fillIncidentSLAs lists the IncidentSLAs in scope and returns how many
+// there are. A list failure leaves the section empty.
+func (cr *ComplianceReporter) fillIncidentSLAs(ctx context.Context, report *ComplianceReport, opts []client.ListOption) int {
+	var slas platformv1alpha1.IncidentSLAList
+	if err := cr.client.List(ctx, &slas, opts...); err != nil {
+		return 0
+	}
+	for _, sla := range slas.Items {
+		report.IncidentSLAs = append(report.IncidentSLAs, IncidentSLASummary{
+			Name:                 sla.Name,
+			Namespace:            sla.Namespace,
+			Severity:             string(sla.Spec.Severity),
+			ResponseTime:         sla.Spec.ResponseTime,
+			ResolutionTime:       sla.Spec.ResolutionTime,
+			CompliancePercentage: sla.Status.CompliancePercentage,
+			ActiveViolations:     sla.Status.ActiveViolations,
+			TotalViolations:      sla.Status.TotalViolations,
+			TotalIssuesTracked:   sla.Status.TotalIssuesTracked,
+		})
+	}
+	return len(slas.Items)
 }
 
 // fillIncidentMetrics aggregates incident counts, MTTD and MTTR over the
@@ -135,7 +205,7 @@ func fillIncidentMetrics(report *ComplianceReport, issues *platformv1alpha1.Issu
 
 // fillRemediationMetrics aggregates remediation-plan outcomes and per-action
 // success/failure stats over the window.
-func (cr *ComplianceReporter) fillRemediationMetrics(ctx context.Context, report *ComplianceReport, opts []client.ListOption, start time.Time) error {
+func (cr *ComplianceReporter) fillRemediationMetrics(ctx context.Context, report *ComplianceReport, opts []client.ListOption, start, end time.Time) error {
 	var plans platformv1alpha1.RemediationPlanList
 	if err := cr.client.List(ctx, &plans, opts...); err != nil {
 		return err
@@ -144,7 +214,7 @@ func (cr *ComplianceReporter) fillRemediationMetrics(ctx context.Context, report
 	report.RemediationMetrics.ByActionType = make(map[string]ActionStats)
 	var completed, failed int64
 	for _, plan := range plans.Items {
-		if plan.CreationTimestamp.Time.Before(start) {
+		if !inPeriod(plan.CreationTimestamp.Time, start, end) {
 			continue
 		}
 		report.RemediationMetrics.TotalRemediations++
@@ -178,7 +248,7 @@ func (cr *ComplianceReporter) fillRemediationMetrics(ctx context.Context, report
 
 // fillApprovalMetrics aggregates approval outcomes and mean decision time.
 // List failures leave the section empty — approvals are optional data.
-func (cr *ComplianceReporter) fillApprovalMetrics(ctx context.Context, report *ComplianceReport, opts []client.ListOption, start time.Time) {
+func (cr *ComplianceReporter) fillApprovalMetrics(ctx context.Context, report *ComplianceReport, opts []client.ListOption, start, end time.Time) {
 	var approvals platformv1alpha1.ApprovalRequestList
 	if err := cr.client.List(ctx, &approvals, opts...); err != nil {
 		return
@@ -186,7 +256,7 @@ func (cr *ComplianceReporter) fillApprovalMetrics(ctx context.Context, report *C
 	var totalDecisionDur time.Duration
 	var decisionCount int
 	for _, ar := range approvals.Items {
-		if ar.CreationTimestamp.Time.Before(start) {
+		if !inPeriod(ar.CreationTimestamp.Time, start, end) {
 			continue
 		}
 		report.ApprovalMetrics.TotalRequests++
@@ -213,23 +283,22 @@ func (cr *ComplianceReporter) fillApprovalMetrics(ctx context.Context, report *C
 }
 
 // fillSLAMetrics derives SLA compliance from the incident set:
-// CompliancePercentage = ((totalIncidents - slaViolations) / totalIncidents) * 100.
-func fillSLAMetrics(report *ComplianceReport, issues *platformv1alpha1.IssueList, start time.Time, detectCount, resolveCount int) {
+// CompliancePercentage = ((totalIncidents - violatingIncidents) / totalIncidents) * 100.
+// With IncidentSLAs in scope, a violation is what their controller recorded
+// on the Issue (the sla-violated annotation, response and/or resolution);
+// without any, an Escalated Issue counts as a resolution violation.
+func fillSLAMetrics(report *ComplianceReport, issues *platformv1alpha1.IssueList, start time.Time, detectCount, resolveCount int, haveIncidentSLAs bool) {
 	totalIncidents := report.IncidentMetrics.TotalIncidents
 	if totalIncidents == 0 {
 		report.SLAMetrics.CompliancePercentage = 100 // No incidents = 100% compliance
 		return
 	}
-	// Count SLA violations: issues that were escalated (indicates SLA breach)
-	// or have SLA-related annotations.
 	var violations int64
 	for _, iss := range issues.Items {
 		if iss.CreationTimestamp.Time.Before(start) {
 			continue
 		}
-		// Escalated = SLA resolution time exceeded
-		if iss.Status.State == platformv1alpha1.IssueStateEscalated {
-			report.SLAMetrics.ResolutionSLAViolations++
+		if countSLAViolations(&report.SLAMetrics, &iss, haveIncidentSLAs) {
 			violations++
 		}
 		// Check if response SLA was violated (DetectedAt too late)
@@ -251,9 +320,33 @@ func fillSLAMetrics(report *ComplianceReport, issues *platformv1alpha1.IssueList
 	report.SLAMetrics.CompliancePercentage = float64(totalIncidents-violations) / float64(totalIncidents) * 100
 }
 
+// countSLAViolations adds the Issue's violations to the counters and reports
+// whether the Issue violated any SLA.
+func countSLAViolations(m *SLAComplianceMetrics, iss *platformv1alpha1.Issue, haveIncidentSLAs bool) bool {
+	if !haveIncidentSLAs {
+		if iss.Status.State == platformv1alpha1.IssueStateEscalated {
+			m.ResolutionSLAViolations++
+			return true
+		}
+		return false
+	}
+	violated := false
+	for _, vType := range strings.Split(iss.Annotations["platform.chatcli.io/sla-violated"], ",") {
+		switch strings.TrimSpace(vType) {
+		case "response":
+			m.ResponseSLAViolations++
+			violated = true
+		case "resolution":
+			m.ResolutionSLAViolations++
+			violated = true
+		}
+	}
+	return violated
+}
+
 // fillAuditSummary aggregates audit events by severity and type. List
 // failures leave the section empty — audit data is optional.
-func (cr *ComplianceReporter) fillAuditSummary(ctx context.Context, report *ComplianceReport, opts []client.ListOption, start time.Time) {
+func (cr *ComplianceReporter) fillAuditSummary(ctx context.Context, report *ComplianceReport, opts []client.ListOption, start, end time.Time) {
 	var auditEvents platformv1alpha1.AuditEventList
 	if err := cr.client.List(ctx, &auditEvents, opts...); err != nil {
 		return
@@ -261,7 +354,7 @@ func (cr *ComplianceReporter) fillAuditSummary(ctx context.Context, report *Comp
 	report.AuditSummary.BySeverity = make(map[string]int64)
 	report.AuditSummary.ByEventType = make(map[string]int64)
 	for _, ae := range auditEvents.Items {
-		if ae.CreationTimestamp.Time.Before(start) {
+		if !inPeriod(ae.CreationTimestamp.Time, start, end) {
 			continue
 		}
 		report.AuditSummary.TotalEvents++

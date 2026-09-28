@@ -1,25 +1,25 @@
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: chatcli-grafana-dashboards
-  namespace: monitoring
-  labels:
-    app.kubernetes.io/managed-by: chatcli-operator
-    grafana_dashboard: "1"
-  annotations:
-    grafana-folder: "ChatCLI AIOps"
-data:
-  aiops-overview.json: |
-    # Content loaded from deploy/grafana/aiops-overview.json
-    # Use: kubectl create configmap chatcli-grafana-dashboards --from-file=deploy/grafana/ -n monitoring
-  slo-burn-rate.json: |
-    # Content loaded from deploy/grafana/slo-burn-rate.json
-  incident-timeline.json: |
-    # Content loaded from deploy/grafana/incident-timeline.json
-  remediation-stats.json: |
-    # Content loaded from deploy/grafana/remediation-stats.json
----
-# Grafana Dashboard Provisioning - ServiceMonitor for Prometheus scraping
+# ChatCLI AIOps dashboards for Grafana.
+#
+# This file holds the ServiceMonitors Prometheus needs to scrape the operator
+# and the server. It does NOT carry the dashboards: a ConfigMap written here
+# by hand would hold placeholders instead of the JSON, and applying it would
+# overwrite a good one. Build the dashboard ConfigMap from the JSON files,
+# naming each file (pointing --from-file at the directory would also pack
+# this YAML into the ConfigMap):
+#
+#   kubectl create configmap chatcli-grafana-dashboards -n monitoring \
+#     --from-file=deploy/grafana/aiops-overview.json \
+#     --from-file=deploy/grafana/incident-timeline.json \
+#     --from-file=deploy/grafana/remediation-stats.json \
+#     --from-file=deploy/grafana/slo-burn-rate.json \
+#     --dry-run=client -o yaml | kubectl apply -f -
+#   kubectl label configmap chatcli-grafana-dashboards -n monitoring grafana_dashboard=1 --overwrite
+#   kubectl annotate configmap chatcli-grafana-dashboards -n monitoring grafana-folder="ChatCLI AIOps" --overwrite
+#
+# The grafana_dashboard label is what the Grafana dashboard sidecar watches;
+# the grafana-folder annotation files them under one folder.
+#
+# ServiceMonitor for the operator metrics endpoint (chatcli_operator_*)
 apiVersion: monitoring.coreos.com/v1
 kind: ServiceMonitor
 metadata:

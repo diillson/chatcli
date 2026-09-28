@@ -425,13 +425,14 @@ func (s *APIServer) handleAcknowledgeIncident(w http.ResponseWriter, r *http.Req
 		return
 	}
 
-	// Add acknowledgment annotation.
+	// Add acknowledgment annotation. The notification controller reads it:
+	// an acknowledged Issue stops escalating and sends no repeat.
 	if issue.Annotations == nil {
 		issue.Annotations = make(map[string]string)
 	}
-	issue.Annotations["aiops.chatcli.io/acknowledged"] = "true"
-	issue.Annotations["aiops.chatcli.io/acknowledged-at"] = time.Now().Format(time.RFC3339)
-	issue.Annotations["aiops.chatcli.io/acknowledged-by"] = roleFromContext(ctx)
+	issue.Annotations[controllers.AnnotationIncidentAcknowledged] = "true"
+	issue.Annotations[controllers.AnnotationIncidentAcknowledgedAt] = time.Now().UTC().Format(time.RFC3339)
+	issue.Annotations[controllers.AnnotationIncidentAcknowledgedBy] = roleFromContext(ctx)
 
 	if err := s.client.Update(ctx, issue); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to acknowledge: "+err.Error())
@@ -457,6 +458,10 @@ func (s *APIServer) handleSnoozeIncident(w http.ResponseWriter, r *http.Request,
 		writeError(w, http.StatusBadRequest, "invalid duration: "+err.Error())
 		return
 	}
+	if duration <= 0 {
+		writeError(w, http.StatusBadRequest, "invalid duration: must be positive")
+		return
+	}
 
 	issue, err := s.getIssue(ctx, name, ns)
 	if err != nil {
@@ -464,11 +469,13 @@ func (s *APIServer) handleSnoozeIncident(w http.ResponseWriter, r *http.Request,
 		return
 	}
 
+	// The notification controller reads the snooze: until then the Issue
+	// sends no notification except Resolved and does not escalate.
 	if issue.Annotations == nil {
 		issue.Annotations = make(map[string]string)
 	}
-	issue.Annotations["aiops.chatcli.io/snoozed-until"] = time.Now().Add(duration).Format(time.RFC3339)
-	issue.Annotations["aiops.chatcli.io/snoozed-by"] = roleFromContext(ctx)
+	issue.Annotations[controllers.AnnotationIncidentSnoozedUntil] = time.Now().UTC().Add(duration).Format(time.RFC3339)
+	issue.Annotations[controllers.AnnotationIncidentSnoozedBy] = roleFromContext(ctx)
 
 	if err := s.client.Update(ctx, issue); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to snooze: "+err.Error())
@@ -691,10 +698,9 @@ func (s *APIServer) handleGetSLOBudget(w http.ResponseWriter, r *http.Request, n
 		Window:               slo.Window,
 		State:                slo.State,
 	}
-	// Compute burn rate: used / total (normalized).
-	if budget.ErrorBudgetTotal > 0 {
-		budget.BurnRate = budget.ErrorBudgetUsed / budget.ErrorBudgetTotal
-	}
+	// The burn rate is the controller's 1h burn rate (budget consumption
+	// speed, 1.0 = exactly on budget), not a ratio of the budget used.
+	budget.BurnRate = slo.BurnRate1h
 
 	writeJSON(w, http.StatusOK, APIResponse{
 		APIVersion: "v1",
@@ -1547,11 +1553,8 @@ func (s *APIServer) handleAnalyticsRemediationStats(w http.ResponseWriter, r *ht
 func (s *APIServer) handleAnalyticsCompliance(w http.ResponseWriter, r *http.Request, tr timeRangeParams) {
 	reporter := controllers.NewComplianceReporter(s.client)
 	ns := r.URL.Query().Get("namespace")
-	window := 7 * 24 * time.Hour // default 7 days
-	if tr.From != nil && tr.To != nil {
-		window = tr.To.Sub(*tr.From)
-	}
-	report, err := reporter.GenerateReport(r.Context(), ns, window)
+	start, end := analyticsPeriod(tr, 7*24*time.Hour) // default: the last 7 days
+	report, err := reporter.GenerateReportForPeriod(r.Context(), ns, start, end)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to generate compliance report: "+err.Error())
 		return
@@ -1569,11 +1572,8 @@ func (s *APIServer) handleAnalyticsCompliance(w http.ResponseWriter, r *http.Req
 func (s *APIServer) handleAnalyticsCost(w http.ResponseWriter, r *http.Request, tr timeRangeParams) {
 	tracker := controllers.NewCostTracker(s.client)
 	ns := r.URL.Query().Get("namespace")
-	window := 30 * 24 * time.Hour
-	if tr.From != nil && tr.To != nil {
-		window = tr.To.Sub(*tr.From)
-	}
-	summary, err := tracker.GetCostSummary(r.Context(), ns, window)
+	start, end := analyticsPeriod(tr, 30*24*time.Hour) // default: the last 30 days
+	summary, err := tracker.GetCostSummaryForPeriod(r.Context(), ns, start, end)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to read the cost ledger: "+err.Error())
 		return
@@ -1711,10 +1711,13 @@ func (s *APIServer) handleGlobalClusterStatus(w http.ResponseWriter, r *http.Req
 		cluster := unstructuredToCluster(item)
 		status.Clusters = append(status.Clusters, cluster)
 
-		if cluster.Connected {
-			status.HealthyClusters++
-		} else {
+		switch {
+		case !cluster.Connected:
 			status.OfflineClusters++
+		case cluster.Degraded:
+			status.DegradedClusters++
+		default:
+			status.HealthyClusters++
 		}
 	}
 
@@ -2221,16 +2224,49 @@ func unstructuredToSLO(obj map[string]interface{}) SLOItem {
 		// currentValue is a fraction (0.0-1.0) — convert to percentage for display
 		slo.CurrentValue = toFloat64(status["currentValue"]) * 100
 
+		// errorBudgetTotal is the allowed error fraction (0.001 for 99.9%);
+		// the used part is expressed in the same unit.
 		slo.ErrorBudgetTotal = toFloat64(status["errorBudgetTotal"])
-		slo.ErrorBudgetUsed = toFloat64(status["errorBudgetUsed"])
+		slo.ErrorBudgetUsed = slo.ErrorBudgetTotal * toFloat64(status["errorBudgetConsumedPercentage"]) / 100
 
 		// errorBudgetRemaining is a fraction (0.0-1.0) — convert to percentage
 		slo.ErrorBudgetRemaining = toFloat64(status["errorBudgetRemaining"]) * 100
 
-		slo.State, _ = status["state"].(string)
+		slo.BurnRate1h = toFloat64(status["burnRate1h"])
+		slo.BurnRate6h = toFloat64(status["burnRate6h"])
+		slo.BurnRate24h = toFloat64(status["burnRate24h"])
+		slo.BurnRate72h = toFloat64(status["burnRate72h"])
+		if alerts, ok := status["activeAlerts"].([]interface{}); ok {
+			slo.ActiveAlerts = len(alerts)
+		}
+		slo.State = sloStateFromStatus(status)
 	}
 
 	return slo
+}
+
+// SLO states the REST API derives from the status the SLO controller writes
+// (the CRD has no state field of its own).
+const (
+	sloStateHealthy  = "Healthy"
+	sloStateAtRisk   = "AtRisk"
+	sloStateBreached = "Breached"
+)
+
+// sloStateFromStatus is empty before the first calculation, Breached when
+// the target is missed or the error budget is gone, AtRisk while a burn-rate
+// alert fires, and Healthy otherwise.
+func sloStateFromStatus(status map[string]interface{}) string {
+	if status == nil || status["lastCalculatedAt"] == nil {
+		return ""
+	}
+	if met, _ := status["targetMet"].(bool); !met || toFloat64(status["errorBudgetRemaining"]) <= 0 {
+		return sloStateBreached
+	}
+	if alerts, ok := status["activeAlerts"].([]interface{}); ok && len(alerts) > 0 {
+		return sloStateAtRisk
+	}
+	return sloStateHealthy
 }
 
 func unstructuredToApproval(obj map[string]interface{}) ApprovalItem {
@@ -2304,9 +2340,25 @@ func unstructuredToCluster(obj map[string]interface{}) ClusterItem {
 		if lh, ok := status["lastHealthCheck"].(string); ok {
 			cluster.LastHealthCheck = &lh
 		}
+		cluster.Degraded = cluster.Connected && unstructuredConditionTrue(status, controllers.ClusterConditionDegraded)
 	}
 
 	return cluster
+}
+
+// unstructuredConditionTrue reports whether status.conditions holds the
+// condition type with status True.
+func unstructuredConditionTrue(status map[string]interface{}, condType string) bool {
+	conds, _ := status["conditions"].([]interface{})
+	for _, c := range conds {
+		cond, _ := c.(map[string]interface{})
+		if t, _ := cond["type"].(string); t != condType {
+			continue
+		}
+		st, _ := cond["status"].(string)
+		return st == "True"
+	}
+	return false
 }
 
 func unstructuredToAuditEvent(obj map[string]interface{}) AuditEventItem {
@@ -2537,6 +2589,22 @@ func parseTimeRange(r *http.Request) timeRangeParams {
 	return tr
 }
 
+// analyticsPeriod turns the from/to query into an absolute period. With
+// both given it is exactly [from, to]; with only from it runs to now; with
+// only to it is the default window ending at to; with neither it is the
+// default window ending now.
+func analyticsPeriod(tr timeRangeParams, defaultWindow time.Duration) (start, end time.Time) {
+	end = time.Now()
+	if tr.To != nil {
+		end = *tr.To
+	}
+	start = end.Add(-defaultWindow)
+	if tr.From != nil {
+		start = *tr.From
+	}
+	return start, end
+}
+
 // paginateSlice returns start and end indices for a slice of the given total length.
 func paginateSlice(total int, pp paginationParams) (start, end int) {
 	start = (pp.Page - 1) * pp.PageSize
@@ -2589,17 +2657,17 @@ func (s *APIServer) handleFederationStatus(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	connected, disconnected := 0, 0
+	connected, degraded, disconnected := 0, 0, 0
 	for _, c := range clusterItems {
-		status, _ := c["status"].(map[string]interface{})
-		if status != nil {
-			if conn, _ := status["connected"].(bool); conn {
-				connected++
-			} else {
-				disconnected++
-			}
-		} else {
+		cluster := unstructuredToCluster(c)
+		switch {
+		case !cluster.Connected:
 			disconnected++
+		case cluster.Degraded:
+			degraded++
+			connected++
+		default:
+			connected++
 		}
 	}
 
@@ -2614,6 +2682,7 @@ func (s *APIServer) handleFederationStatus(w http.ResponseWriter, r *http.Reques
 	status := map[string]interface{}{
 		"totalClusters":        len(clusterItems),
 		"connectedClusters":    connected,
+		"degradedClusters":     degraded,
 		"disconnectedClusters": disconnected,
 		"totalActiveIssues":    activeIssues,
 	}
@@ -2662,7 +2731,10 @@ func (s *APIServer) handleFederationCorrelations(w http.ResponseWriter, r *http.
 		if iss.Annotations == nil {
 			continue
 		}
-		corrID := iss.Annotations["platform.chatcli.io/correlation-id"]
+		// The federation controller writes the canonical keys; the legacy
+		// correlation-id / correlated-clusters pair is still read so older
+		// annotations keep showing up.
+		corrID := firstAnnotation(iss.Annotations, controllers.AnnotationCrossClusterCorrelation, legacyAnnotationCorrelationID)
 		if corrID == "" || seen[corrID] {
 			continue
 		}
@@ -2674,8 +2746,8 @@ func (s *APIServer) handleFederationCorrelations(w http.ResponseWriter, r *http.
 			"namespace":          iss.Namespace,
 			"severity":           string(iss.Spec.Severity),
 			"signalType":         iss.Spec.SignalType,
-			"correlatedClusters": iss.Annotations["platform.chatcli.io/correlated-clusters"],
-			"elevated":           iss.Annotations["platform.chatcli.io/elevated-severity"] == "true",
+			"correlatedClusters": firstAnnotation(iss.Annotations, controllers.AnnotationAffectedClusters, legacyAnnotationCorrelatedClusters),
+			"elevated":           iss.Annotations[controllers.AnnotationSeverityElevated] == "true",
 			"cascade":            iss.Annotations["platform.chatcli.io/cascade-detected"] == "true",
 		})
 	}
@@ -2686,6 +2758,23 @@ func (s *APIServer) handleFederationCorrelations(w http.ResponseWriter, r *http.
 		Metadata:   &ListMeta{TotalCount: len(correlations), Page: 1, PageSize: len(correlations)},
 		Items:      correlations,
 	})
+}
+
+// Correlation annotation keys the REST API used to expect before it read the
+// ones the federation controller writes.
+const (
+	legacyAnnotationCorrelationID      = "platform.chatcli.io/correlation-id"
+	legacyAnnotationCorrelatedClusters = "platform.chatcli.io/correlated-clusters"
+)
+
+// firstAnnotation returns the value of the first key that is set.
+func firstAnnotation(annotations map[string]string, keys ...string) string {
+	for _, key := range keys {
+		if v := annotations[key]; v != "" {
+			return v
+		}
+	}
+	return ""
 }
 
 // ========== AI Insights ==========

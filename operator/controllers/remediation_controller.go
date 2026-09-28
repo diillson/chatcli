@@ -101,7 +101,7 @@ type RemediationReconciler struct {
 	ClusterTier  string
 	Federation   *FederationReconciler
 	PatternStore *PatternStore // Records resolution/failure patterns for Decision Engine learning
-	CostTracker  *CostTracker  // Tracks LLM and downtime costs per incident
+	CostTracker  *CostTracker  // Books the LLM cost of agentic steps per incident
 	// EventRecorder, when set, emits Kubernetes Events on a plan, such as
 	// an approval gate that could not be evaluated. Nil emits none.
 	EventRecorder events.EventRecorder
@@ -1818,8 +1818,11 @@ func (r *RemediationReconciler) recordAgenticStepCost(ctx context.Context, issue
 	if provider == "" && model == "" {
 		provider, model = resolveInstanceProvider(ctx, r.Client)
 	}
-	_ = r.CostTracker.RecordAgenticStep(ctx, platformv1alpha1.IssueRef{Name: issue.Name},
-		issue.Namespace, provider, model, inputTokens, outputTokens)
+	if err := r.CostTracker.RecordAgenticStep(ctx, platformv1alpha1.IssueRef{Name: issue.Name},
+		issue.Namespace, provider, model, inputTokens, outputTokens); err != nil {
+		// The step stands; only the ledger misses it.
+		log.FromContext(ctx).Error(err, "Failed to book the agentic step cost on the ledger", "issue", issue.Name)
+	}
 }
 
 // gateByDecisionEngine asks the decision engine whether the plan may run.

@@ -36,7 +36,7 @@
       "options": { "colorMode": "background", "graphMode": "none", "reduceOptions": { "calcs": ["lastNotNull"] } },
       "title": "Total Issues (24h)",
       "type": "stat",
-      "targets": [{ "expr": "sum(increase(chatcli_operator_issues_total[24h]))", "legendFormat": "Total" }]
+      "targets": [{ "expr": "sum(increase(chatcli_operator_issues_total{state=\"Analyzing\"}[24h]))", "legendFormat": "Total" }]
     },
     {
       "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
@@ -103,7 +103,7 @@
       "options": { "tooltip": { "mode": "multi" } },
       "title": "Issues Created Over Time",
       "type": "timeseries",
-      "targets": [{ "expr": "sum by (severity) (increase(chatcli_operator_issues_total[5m]))", "legendFormat": "{{severity}}" }]
+      "targets": [{ "expr": "sum by (severity) (increase(chatcli_operator_issues_total{state=\"Analyzing\"}[5m]))", "legendFormat": "{{severity}}" }]
     },
     {
       "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
@@ -437,7 +437,7 @@
       "options": { "colorMode": "background", "graphMode": "none", "reduceOptions": { "calcs": ["lastNotNull"] } },
       "title": "Chaos Success Rate",
       "type": "gauge",
-      "targets": [{ "expr": "sum(increase(chatcli_operator_chaos_experiments_total{result=\"success\"}[24h])) / sum(increase(chatcli_operator_chaos_experiments_total[24h]))", "legendFormat": "Success" }]
+      "targets": [{ "expr": "sum(increase(chatcli_operator_chaos_experiments_total{result=\"completed\"}[24h])) / sum(increase(chatcli_operator_chaos_experiments_total[24h]))", "legendFormat": "Success" }]
     },
     {
       "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
