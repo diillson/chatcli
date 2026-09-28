@@ -7,6 +7,10 @@ package controllers
 
 import (
 	"context"
+	"encoding/pem"
+	"net/http"
+	"net/http/cgi"
+	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -389,62 +393,301 @@ func TestCloneRepo(t *testing.T) {
 	})
 }
 
-func TestApplyTokenAuth(t *testing.T) {
-	r := &SourceRepositoryReconciler{}
-	ctx := context.Background()
-	repoURL := "https://github.com/org/repo.git"
-	args := []string{"clone", repoURL, "/dest"}
-
-	t.Run("token is injected into the https url", func(t *testing.T) {
-		cmd := r.applyTokenAuth(ctx, repoURL, []string{"GIT_TOKEN=tok123"}, args)
-		joined := strings.Join(cmd.Args, " ")
-		if !strings.Contains(joined, "https://x-access-token:tok123@github.com/org/repo.git") {
-			t.Errorf("token not injected, args: %v", cmd.Args)
-		}
-	})
-
-	t.Run("without token the args are untouched", func(t *testing.T) {
-		cmd := r.applyTokenAuth(ctx, repoURL, nil, args)
-		joined := strings.Join(cmd.Args, " ")
-		if !strings.Contains(joined, repoURL) || strings.Contains(joined, "x-access-token") {
-			t.Errorf("unexpected args: %v", cmd.Args)
-		}
-	})
-}
-
 // --- resolveAuth ---
 
-func TestResolveAuth_SSHKey(t *testing.T) {
-	secret := &corev1.Secret{
-		ObjectMeta: metav1.ObjectMeta{Name: "git-creds", Namespace: "default"},
-		Data:       map[string][]byte{"ssh-key": []byte("fake-key-material")},
-	}
-	c := fake.NewClientBuilder().WithScheme(newScheme()).WithObjects(secret).Build()
-	r := &SourceRepositoryReconciler{Client: c}
+func sshSecret(data map[string][]byte) *corev1.Secret {
+	return &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: "git-creds", Namespace: "default"}, Data: data}
+}
 
+func sshRepo(policy platformv1alpha1.SSHHostKeyPolicy) *platformv1alpha1.SourceRepository {
 	repo := newSourceRepo("git@github.com:org/repo.git", "main")
 	repo.Name = "ssh-auth-test-repo"
 	repo.Spec.AuthType = platformv1alpha1.SourceRepoAuthSSH
 	repo.Spec.SecretRef = "git-creds"
-	keyFile := filepath.Join(sourceRepoBaseDir, ".ssh", repo.Name)
-	t.Cleanup(func() { _ = os.Remove(keyFile) })
+	repo.Spec.SSHHostKeyPolicy = policy
+	return repo
+}
 
-	env, err := r.resolveAuth(context.Background(), repo)
+func envValue(env []string, key string) string {
+	for _, e := range env {
+		if strings.HasPrefix(e, key+"=") {
+			return strings.TrimPrefix(e, key+"=")
+		}
+	}
+	return ""
+}
+
+// With known_hosts in the Secret the host key is checked strictly against
+// it, and the key material does not outlive the sync.
+func TestResolveAuth_SSHKnownHostsIsStrict(t *testing.T) {
+	c := fake.NewClientBuilder().WithScheme(newScheme()).WithObjects(sshSecret(map[string][]byte{
+		"ssh-key":     []byte("fake-key-material"),
+		"known_hosts": []byte("github.com ssh-ed25519 AAAAfixture"),
+	})).Build()
+	r := &SourceRepositoryReconciler{Client: c, BaseDir: t.TempDir()}
+
+	auth, err := r.resolveAuth(context.Background(), sshRepo(""))
 	if err != nil {
 		t.Fatalf("resolveAuth: %v", err)
 	}
-	found := false
-	for _, e := range env {
-		if strings.HasPrefix(e, "GIT_SSH_COMMAND=") && strings.Contains(e, keyFile) {
-			found = true
+	sshCmd := envValue(auth.env, "GIT_SSH_COMMAND")
+	keyFile := filepath.Join(r.sshDir(), "default_ssh-auth-test-repo.key")
+	khFile := filepath.Join(r.sshDir(), "default_ssh-auth-test-repo.known_hosts")
+	for _, want := range []string{"-i " + keyFile, "StrictHostKeyChecking=yes", "UserKnownHostsFile=" + khFile, "BatchMode=yes"} {
+		if !strings.Contains(sshCmd, want) {
+			t.Errorf("GIT_SSH_COMMAND %q lacks %q", sshCmd, want)
 		}
 	}
-	if !found {
-		t.Errorf("GIT_SSH_COMMAND with key file not present in env: %v", env)
+	if strings.Contains(sshCmd, "StrictHostKeyChecking=no") || strings.Contains(sshCmd, "accept-new") {
+		t.Errorf("host key checking weakened: %q", sshCmd)
 	}
-	data, err := os.ReadFile(keyFile)
-	if err != nil || string(data) != "fake-key-material" {
-		t.Errorf("key file not written correctly: %v / %q", err, data)
+	if data, err := os.ReadFile(keyFile); err != nil || string(data) != "fake-key-material\n" {
+		t.Errorf("key file: %v / %q", err, data)
+	}
+	if data, err := os.ReadFile(khFile); err != nil || !strings.Contains(string(data), "AAAAfixture") {
+		t.Errorf("known_hosts file: %v / %q", err, data)
+	}
+
+	auth.done()
+	for _, f := range []string{keyFile, khFile} {
+		if _, err := os.Stat(f); !os.IsNotExist(err) {
+			t.Errorf("%s left behind after the sync: %v", f, err)
+		}
+	}
+}
+
+// Without known_hosts the default policy refuses to connect instead of
+// trusting whatever key answers.
+func TestResolveAuth_SSHWithoutKnownHostsIsRefused(t *testing.T) {
+	c := fake.NewClientBuilder().WithScheme(newScheme()).WithObjects(sshSecret(map[string][]byte{
+		"ssh-key": []byte("fake-key-material"),
+	})).Build()
+	r := &SourceRepositoryReconciler{Client: c, BaseDir: t.TempDir()}
+
+	for _, policy := range []platformv1alpha1.SSHHostKeyPolicy{"", platformv1alpha1.SSHHostKeyStrict} {
+		_, err := r.resolveAuth(context.Background(), sshRepo(policy))
+		if err == nil || !strings.Contains(err.Error(), "known_hosts") || !strings.Contains(err.Error(), "acceptNew") {
+			t.Fatalf("policy %q: expected a known_hosts error naming the opt-in, got %v", policy, err)
+		}
+		if _, statErr := os.Stat(filepath.Join(r.sshDir(), "default_ssh-auth-test-repo.key")); !os.IsNotExist(statErr) {
+			t.Errorf("policy %q: key file left behind after a refused sync", policy)
+		}
+	}
+}
+
+// acceptNew is trust on first use: the first key is recorded in a file
+// that outlives the sync so a changed key is rejected later.
+func TestResolveAuth_SSHAcceptNewOptIn(t *testing.T) {
+	c := fake.NewClientBuilder().WithScheme(newScheme()).WithObjects(sshSecret(map[string][]byte{
+		"ssh-key": []byte("fake-key-material"),
+	})).Build()
+	r := &SourceRepositoryReconciler{Client: c, BaseDir: t.TempDir()}
+
+	auth, err := r.resolveAuth(context.Background(), sshRepo(platformv1alpha1.SSHHostKeyAcceptNew))
+	if err != nil {
+		t.Fatalf("resolveAuth: %v", err)
+	}
+	defer auth.done()
+	sshCmd := envValue(auth.env, "GIT_SSH_COMMAND")
+	tofu := filepath.Join(r.sshDir(), "default_ssh-auth-test-repo.tofu_known_hosts")
+	if !strings.Contains(sshCmd, "StrictHostKeyChecking=accept-new") || !strings.Contains(sshCmd, "UserKnownHostsFile="+tofu) {
+		t.Fatalf("GIT_SSH_COMMAND = %q", sshCmd)
+	}
+	for _, f := range auth.cleanup {
+		if f == tofu {
+			t.Fatal("the trust-on-first-use record must survive the sync")
+		}
+	}
+}
+
+// Basic and token credentials go to git through the askpass helper, from
+// the environment of the git process only.
+func TestResolveAuth_HTTPSUsesAskpass(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("the askpass helper is a POSIX shell script")
+	}
+	password := strings.Join([]string{"pw", "fixture", "value"}, "-")
+	secret := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{Name: "git-creds", Namespace: "default"},
+		Data:       map[string][]byte{"username": []byte("ci-user"), "password": []byte(password), "token": []byte(password)},
+	}
+	c := fake.NewClientBuilder().WithScheme(newScheme()).WithObjects(secret).Build()
+	r := &SourceRepositoryReconciler{Client: c, BaseDir: t.TempDir()}
+
+	for authType, wantUser := range map[platformv1alpha1.SourceRepositoryAuthType]string{
+		platformv1alpha1.SourceRepoAuthBasic: "ci-user",
+		platformv1alpha1.SourceRepoAuthToken: tokenAuthUsername,
+	} {
+		repo := newSourceRepo("https://example.invalid/org/repo.git", "main")
+		repo.Spec.AuthType = authType
+		repo.Spec.SecretRef = "git-creds"
+		auth, err := r.resolveAuth(context.Background(), repo)
+		if err != nil {
+			t.Fatalf("%s: resolveAuth: %v", authType, err)
+		}
+		helper := envValue(auth.env, "GIT_ASKPASS")
+		if helper == "" || envValue(auth.env, "GIT_TERMINAL_PROMPT") != "0" {
+			t.Fatalf("%s: env = %v", authType, auth.env)
+		}
+		script, err := os.ReadFile(helper)
+		if err != nil || strings.Contains(string(script), password) {
+			t.Fatalf("%s: helper must hold no secret: %v", authType, err)
+		}
+		for prompt, want := range map[string]string{
+			"Username for 'https://example.invalid': ":         wantUser,
+			"Password for 'https://ci-user@example.invalid': ": password,
+		} {
+			cmd := exec.Command(helper, prompt)
+			cmd.Env = append(os.Environ(), auth.env...)
+			out, err := cmd.Output()
+			if err != nil || strings.TrimSpace(string(out)) != want {
+				t.Errorf("%s: helper answered %q to %q (err %v)", authType, out, prompt, err)
+			}
+		}
+	}
+}
+
+// --- credentials never persist in the clone ---
+
+// newAuthGitServer serves a repository over HTTPS through git
+// http-backend and demands HTTP basic credentials.
+func newAuthGitServer(t *testing.T, user, pass string) string {
+	t.Helper()
+	if runtime.GOOS == "windows" {
+		t.Skip("the askpass helper is a POSIX shell script")
+	}
+	execPath, err := exec.Command("git", "--exec-path").Output()
+	if err != nil {
+		t.Skipf("git --exec-path: %v", err)
+	}
+	backend := filepath.Join(strings.TrimSpace(string(execPath)), "git-http-backend")
+	if _, err := os.Stat(backend); err != nil {
+		t.Skipf("git-http-backend not available: %v", err)
+	}
+	projectRoot := t.TempDir()
+	runGit(t, projectRoot, "clone", "--bare", newLocalGitRepo(t), "repo.git")
+
+	cgiHandler := &cgi.Handler{
+		Path: backend,
+		Env:  []string{"GIT_PROJECT_ROOT=" + projectRoot, "GIT_HTTP_EXPORT_ALL=1", "PATH=" + os.Getenv("PATH")},
+	}
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		if u, p, ok := req.BasicAuth(); !ok || u != user || p != pass {
+			w.Header().Set("WWW-Authenticate", `Basic realm="git"`)
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+		cgiHandler.ServeHTTP(w, req)
+	}))
+	t.Cleanup(srv.Close)
+
+	caFile := filepath.Join(t.TempDir(), "ca.pem")
+	pemBytes := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: srv.Certificate().Raw})
+	if err := os.WriteFile(caFile, pemBytes, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("GIT_SSL_CAINFO", caFile)
+	return srv.URL + "/repo.git"
+}
+
+func TestCloneAndPull_HTTPSCredentialsNeverPersist(t *testing.T) {
+	password := strings.Join([]string{"pw", "fixture", "value"}, "-")
+	for _, tc := range []struct {
+		authType platformv1alpha1.SourceRepositoryAuthType
+		user     string
+		data     map[string][]byte
+	}{
+		{platformv1alpha1.SourceRepoAuthBasic, "ci-user", map[string][]byte{"username": []byte("ci-user"), "password": []byte(password)}},
+		{platformv1alpha1.SourceRepoAuthToken, tokenAuthUsername, map[string][]byte{"token": []byte(password)}},
+	} {
+		t.Run(string(tc.authType), func(t *testing.T) {
+			repoURL := newAuthGitServer(t, tc.user, password)
+			secret := &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: "git-creds", Namespace: "default"}, Data: tc.data}
+			c := fake.NewClientBuilder().WithScheme(newScheme()).WithObjects(secret).Build()
+			r := &SourceRepositoryReconciler{Client: c, BaseDir: t.TempDir()}
+			repo := newSourceRepo(repoURL, "main")
+			repo.Spec.AuthType = tc.authType
+			repo.Spec.SecretRef = "git-creds"
+			ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+			defer cancel()
+
+			localPath := filepath.Join(r.BaseDir, "default", "test-repo")
+			if err := r.cloneRepo(ctx, repo, localPath, &gitAuth{env: []string{"GIT_TERMINAL_PROMPT=0"}}); err == nil {
+				t.Fatal("clone without credentials must fail against the protected server")
+			}
+			_ = os.RemoveAll(localPath)
+
+			auth, err := r.resolveAuth(ctx, repo)
+			if err != nil {
+				t.Fatalf("resolveAuth: %v", err)
+			}
+			defer auth.done()
+			if err := r.cloneRepo(ctx, repo, localPath, auth); err != nil {
+				t.Fatalf("cloneRepo: %v", err)
+			}
+			if err := r.pullRepo(ctx, repo, localPath, auth); err != nil {
+				t.Fatalf("pullRepo: %v", err)
+			}
+			assertNoSecretInGitDir(t, localPath, password)
+		})
+	}
+}
+
+// assertNoSecretInGitDir reads every file of the clone's .git directory.
+func assertNoSecretInGitDir(t *testing.T, localPath, secret string) {
+	t.Helper()
+	err := filepath.Walk(filepath.Join(localPath, ".git"), func(path string, info os.FileInfo, err error) error {
+		if err != nil || info.IsDir() {
+			return err
+		}
+		data, readErr := os.ReadFile(path)
+		if readErr != nil {
+			return readErr
+		}
+		if strings.Contains(string(data), secret) {
+			t.Errorf("credential persisted in %s", path)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+// A clone made by an earlier version carries the token in its origin URL;
+// the next sync rewrites it and drops the reflog that quoted it.
+func TestScrubOriginURL_RemovesEmbeddedCredential(t *testing.T) {
+	token := strings.Join([]string{"legacy", "fixture", "value"}, "-")
+	work := newLocalGitRepo(t)
+	withCreds := "https://" + tokenAuthUsername + ":" + token + "@example.invalid/org/repo.git"
+	runGit(t, work, "remote", "add", "origin", withCreds)
+	runGit(t, work, "commit", "--allow-empty", "-m", "fetched from "+withCreds)
+
+	if err := scrubOriginURL(context.Background(), work); err != nil {
+		t.Fatalf("scrubOriginURL: %v", err)
+	}
+	out, err := exec.Command("git", "-C", work, "remote", "get-url", "origin").Output()
+	if err != nil || strings.TrimSpace(string(out)) != "https://example.invalid/org/repo.git" {
+		t.Fatalf("origin = %q (err %v)", out, err)
+	}
+	cfg, err := os.ReadFile(filepath.Join(work, ".git", "config"))
+	if err != nil || strings.Contains(string(cfg), token) {
+		t.Fatalf(".git/config still holds the token: %v", err)
+	}
+	if logs, err := os.ReadFile(filepath.Join(work, ".git", "logs", "HEAD")); err == nil && strings.Contains(string(logs), token) {
+		t.Fatal("reflog still quotes the token")
+	}
+
+	// A clean URL is left alone.
+	if err := scrubOriginURL(context.Background(), work); err != nil {
+		t.Fatalf("second scrub: %v", err)
+	}
+}
+
+func TestRedactURLCredentials(t *testing.T) {
+	in := "fatal: unable to access 'https://" + "user:" + "hidden" + "@example.invalid/r.git/'"
+	if got := redactURLCredentials(in); strings.Contains(got, "hidden") || !strings.Contains(got, "https://***@example.invalid") {
+		t.Fatalf("redactURLCredentials = %q", got)
 	}
 }
 

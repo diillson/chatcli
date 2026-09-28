@@ -97,3 +97,12 @@ spec:
             capabilities:
               drop:
                 - ALL
+          volumeMounts:
+            # The root filesystem is read-only: SourceRepository clones and
+            # the per-sync git credential files need a writable /tmp.
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir:
+            sizeLimit: 1Gi

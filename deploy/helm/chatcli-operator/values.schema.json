@@ -669,6 +669,17 @@
           "mountPath"
         ]
       }
+    },
+    "tmpVolume": {
+      "type": "object",
+      "description": "The writable /tmp of the operator pod (emptyDir; the root filesystem is read-only). SourceRepository clones and per-sync git credential files live there.",
+      "properties": {
+        "sizeLimit": {
+          "type": "string",
+          "description": "emptyDir size limit, a Kubernetes quantity. Size it for the SourceRepository clones (shallow, depth 50)."
+        }
+      },
+      "additionalProperties": false
     }
   },
   "additionalProperties": false

@@ -155,12 +155,20 @@ spec:
           resources:
             {{- toYaml . | nindent 12 }}
           {{- end }}
-          {{- with .Values.extraVolumeMounts }}
           volumeMounts:
+            # The root filesystem is read-only: SourceRepository clones and
+            # the per-sync git credential files need a writable /tmp.
+            - name: tmp
+              mountPath: /tmp
+          {{- with .Values.extraVolumeMounts }}
             {{- toYaml . | nindent 12 }}
           {{- end }}
-      {{- with .Values.extraVolumes }}
       volumes:
+        - name: tmp
+          emptyDir:
+            {{- /* dig: an upgrade with --reuse-values carries no tmpVolume key */}}
+            sizeLimit: {{ dig "sizeLimit" "1Gi" (.Values.tmpVolume | default dict) | quote }}
+      {{- with .Values.extraVolumes }}
         {{- toYaml . | nindent 8 }}
       {{- end }}
       {{- with .Values.nodeSelector }}

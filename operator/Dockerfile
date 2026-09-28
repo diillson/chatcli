@@ -34,7 +34,8 @@ ARG TARGETARCH
 RUN CGO_ENABLED=0 GOOS=linux GOARCH=${TARGETARCH} go build -a -o manager main.go
 
 # Runtime — Alpine is required because the SourceRepository controller
-# needs git to clone and sync application repositories.
+# needs git to clone and sync application repositories, and the ssh client
+# for repositories with authType ssh.
 # Pinned to exact patch version; Dependabot keeps this updated.
 FROM alpine:3.24.2 AS runtime
 RUN apk update && apk upgrade --no-cache && \
@@ -42,6 +43,7 @@ RUN apk update && apk upgrade --no-cache && \
         "libcrypto3>=3.5.8-r0" \
         "libssl3>=3.5.8-r0" \
         "libexpat>=2.8.4-r0" \
+        "openssh-client-default>=10.3_p1-r1" \
         git ca-certificates tzdata && \
     adduser -D -u 65532 -g 65532 nonroot
 WORKDIR /

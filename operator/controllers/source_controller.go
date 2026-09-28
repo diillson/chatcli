@@ -15,12 +15,9 @@ import (
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
-
-	corev1 "k8s.io/api/core/v1"
 
 	platformv1alpha1 "github.com/diillson/chatcli/operator/api/v1alpha1"
 )
@@ -36,6 +33,10 @@ const (
 type SourceRepositoryReconciler struct {
 	client.Client
 	Scheme *runtime.Scheme
+
+	// BaseDir overrides where clones and credential files live
+	// (default /tmp/chatcli-repos, an emptyDir in the operator pod).
+	BaseDir string
 }
 
 // +kubebuilder:rbac:groups=platform.chatcli.io,resources=sourcerepositories,verbs=get;list;watch;create;update;patch;delete
@@ -49,16 +50,17 @@ func (r *SourceRepositoryReconciler) Reconcile(ctx context.Context, req ctrl.Req
 	if err := r.Get(ctx, req.NamespacedName, &repo); err != nil {
 		if errors.IsNotFound(err) {
 			// Clean up local clone if the CR was deleted
-			localPath := filepath.Join(sourceRepoBaseDir, req.Namespace, req.Name)
+			localPath := filepath.Join(r.baseDir(), req.Namespace, req.Name)
 			if rmErr := os.RemoveAll(localPath); rmErr != nil {
 				logger.Error(rmErr, "Failed to remove local clone of deleted repository", "path", localPath)
 			}
+			r.removeRepoCredentialFiles(req.Namespace, req.Name)
 			return ctrl.Result{}, nil
 		}
 		return ctrl.Result{}, err
 	}
 
-	localPath := filepath.Join(sourceRepoBaseDir, repo.Namespace, repo.Name)
+	localPath := filepath.Join(r.baseDir(), repo.Namespace, repo.Name)
 
 	// Check if we need to sync
 	needsSync := !repo.Status.Ready ||
@@ -73,24 +75,25 @@ func (r *SourceRepositoryReconciler) Reconcile(ctx context.Context, req ctrl.Req
 	logger.Info("Syncing source repository", "name", repo.Name, "url", repo.Spec.URL)
 
 	// Resolve auth credentials
-	authEnv, err := r.resolveAuth(ctx, &repo)
+	auth, err := r.resolveAuth(ctx, &repo)
 	if err != nil {
 		repo.Status.Ready = false
 		repo.Status.Error = fmt.Sprintf("auth error: %v", err)
 		_ = r.Status().Update(ctx, &repo)
 		return ctrl.Result{RequeueAfter: 5 * time.Minute}, nil
 	}
+	defer auth.done()
 
 	// Clone or pull
 	if _, err := os.Stat(filepath.Join(localPath, ".git")); os.IsNotExist(err) {
-		if err := r.cloneRepo(ctx, &repo, localPath, authEnv); err != nil {
+		if err := r.cloneRepo(ctx, &repo, localPath, auth); err != nil {
 			repo.Status.Ready = false
 			repo.Status.Error = fmt.Sprintf("clone failed: %v", err)
 			_ = r.Status().Update(ctx, &repo)
 			return ctrl.Result{RequeueAfter: 5 * time.Minute}, nil
 		}
 	} else {
-		if err := r.pullRepo(ctx, &repo, localPath, authEnv); err != nil {
+		if err := r.pullRepo(ctx, &repo, localPath, auth); err != nil {
 			repo.Status.Ready = false
 			repo.Status.Error = fmt.Sprintf("pull failed: %v", err)
 			_ = r.Status().Update(ctx, &repo)
@@ -122,56 +125,6 @@ func (r *SourceRepositoryReconciler) Reconcile(ctx context.Context, req ctrl.Req
 	return ctrl.Result{RequeueAfter: interval}, nil
 }
 
-// resolveAuth resolves authentication credentials from a Secret reference.
-func (r *SourceRepositoryReconciler) resolveAuth(ctx context.Context, repo *platformv1alpha1.SourceRepository) ([]string, error) {
-	if repo.Spec.AuthType == platformv1alpha1.SourceRepoAuthNone || repo.Spec.SecretRef == "" {
-		return nil, nil
-	}
-
-	var secret corev1.Secret
-	if err := r.Get(ctx, types.NamespacedName{
-		Name: repo.Spec.SecretRef, Namespace: repo.Namespace,
-	}, &secret); err != nil {
-		return nil, fmt.Errorf("secret %s not found: %w", repo.Spec.SecretRef, err)
-	}
-
-	var env []string
-	switch repo.Spec.AuthType {
-	case platformv1alpha1.SourceRepoAuthToken:
-		token := string(secret.Data["token"])
-		if token == "" {
-			return nil, fmt.Errorf("secret %s missing 'token' key", repo.Spec.SecretRef)
-		}
-		// For HTTPS URLs, inject token into URL via credential helper
-		env = append(env, "GIT_ASKPASS=echo", fmt.Sprintf("GIT_TOKEN=%s", token))
-
-	case platformv1alpha1.SourceRepoAuthSSH:
-		sshKey := secret.Data["ssh-key"]
-		if len(sshKey) == 0 {
-			return nil, fmt.Errorf("secret %s missing 'ssh-key' key", repo.Spec.SecretRef)
-		}
-		// Write SSH key to temp file
-		keyFile := filepath.Join(sourceRepoBaseDir, ".ssh", repo.Name)
-		if err := os.MkdirAll(filepath.Dir(keyFile), 0700); err != nil {
-			return nil, fmt.Errorf("creating SSH key dir: %w", err)
-		}
-		if err := os.WriteFile(keyFile, sshKey, 0600); err != nil {
-			return nil, fmt.Errorf("writing SSH key: %w", err)
-		}
-		env = append(env, fmt.Sprintf("GIT_SSH_COMMAND=ssh -i %s -o StrictHostKeyChecking=no", keyFile))
-
-	case platformv1alpha1.SourceRepoAuthBasic:
-		username := string(secret.Data["username"])
-		password := string(secret.Data["password"])
-		if username == "" || password == "" {
-			return nil, fmt.Errorf("secret %s missing 'username' or 'password' key", repo.Spec.SecretRef)
-		}
-		env = append(env, fmt.Sprintf("GIT_USERNAME=%s", username), fmt.Sprintf("GIT_PASSWORD=%s", password))
-	}
-
-	return env, nil
-}
-
 // gitBranchPattern allows the conservative charset git branch names use in
 // practice; crucially it rejects a leading "-", which git would otherwise
 // parse as an option (e.g. --upload-pack=cmd runs an arbitrary binary).
@@ -193,8 +146,9 @@ func validateGitInputs(repoURL, branch string) error {
 	return nil
 }
 
-// cloneRepo performs a shallow clone of the repository.
-func (r *SourceRepositoryReconciler) cloneRepo(ctx context.Context, repo *platformv1alpha1.SourceRepository, localPath string, authEnv []string) error {
+// cloneRepo performs a shallow clone of the repository. The origin URL is
+// the plain spec URL: credentials come from auth, per command.
+func (r *SourceRepositoryReconciler) cloneRepo(ctx context.Context, repo *platformv1alpha1.SourceRepository, localPath string, auth *gitAuth) error {
 	if err := os.MkdirAll(filepath.Dir(localPath), 0750); err != nil {
 		return fmt.Errorf("creating clone parent dir: %w", err)
 	}
@@ -207,56 +161,15 @@ func (r *SourceRepositoryReconciler) cloneRepo(ctx context.Context, repo *platfo
 		return err
 	}
 
-	args := []string{"clone", "--depth", "50", "--single-branch", "--branch", branch, repo.Spec.URL, localPath}
-
-	cmd := exec.CommandContext(ctx, "git", args...) // #nosec G204 -- fixed git binary; URL/branch validated by validateGitInputs, localPath derived from k8s object names
-	cmd.Env = append(os.Environ(), authEnv...)
-
-	// Apply token auth for HTTPS
-	if repo.Spec.AuthType == platformv1alpha1.SourceRepoAuthToken {
-		// Rewrite URL to include token
-		cmd = r.applyTokenAuth(ctx, repo.Spec.URL, authEnv, args)
-	}
-
-	output, err := cmd.CombinedOutput()
+	output, err := gitCommand(ctx, auth, "clone", "--depth", "50", "--single-branch", "--branch", branch, "--", repo.Spec.URL, localPath).CombinedOutput()
 	if err != nil {
-		return fmt.Errorf("git clone failed: %s: %w", string(output), err)
+		return fmt.Errorf("git clone failed: %s: %w", redactURLCredentials(string(output)), err)
 	}
-
 	return nil
 }
 
-func (r *SourceRepositoryReconciler) applyTokenAuth(ctx context.Context, repoURL string, authEnv []string, args []string) *exec.Cmd {
-	// Extract token from env
-	var token string
-	for _, e := range authEnv {
-		if strings.HasPrefix(e, "GIT_TOKEN=") {
-			token = strings.TrimPrefix(e, "GIT_TOKEN=")
-		}
-	}
-
-	if token != "" && strings.HasPrefix(repoURL, "https://") {
-		// Inject token into URL: https://token@github.com/...
-		authedURL := strings.Replace(repoURL, "https://", fmt.Sprintf("https://x-access-token:%s@", token), 1)
-		newArgs := make([]string, len(args))
-		copy(newArgs, args)
-		for i, a := range newArgs {
-			if a == repoURL {
-				newArgs[i] = authedURL
-			}
-		}
-		cmd := exec.CommandContext(ctx, "git", newArgs...) // #nosec G204 -- fixed git binary; caller validated URL/branch via validateGitInputs
-		cmd.Env = os.Environ()
-		return cmd
-	}
-
-	cmd := exec.CommandContext(ctx, "git", args...) // #nosec G204 -- fixed git binary; caller validated URL/branch via validateGitInputs
-	cmd.Env = append(os.Environ(), authEnv...)
-	return cmd
-}
-
 // pullRepo fetches latest changes.
-func (r *SourceRepositoryReconciler) pullRepo(ctx context.Context, repo *platformv1alpha1.SourceRepository, localPath string, authEnv []string) error {
+func (r *SourceRepositoryReconciler) pullRepo(ctx context.Context, repo *platformv1alpha1.SourceRepository, localPath string, auth *gitAuth) error {
 	branch := repo.Spec.Branch
 	if branch == "" {
 		branch = "main"
@@ -265,15 +178,15 @@ func (r *SourceRepositoryReconciler) pullRepo(ctx context.Context, repo *platfor
 		return err
 	}
 
-	cmd := exec.CommandContext(ctx, "git", "-C", localPath, "fetch", "--depth", "50", "origin") // #nosec G204 -- fixed git binary; localPath derived from k8s object names
-	cmd.Env = append(os.Environ(), authEnv...)
-
-	if output, err := cmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("git fetch: %s: %w", string(output), err)
+	if err := scrubOriginURL(ctx, localPath); err != nil {
+		return fmt.Errorf("git fetch: %w", err)
 	}
 
-	cmd = exec.CommandContext(ctx, "git", "-C", localPath, "reset", "--hard", fmt.Sprintf("origin/%s", branch)) // #nosec G204 -- fixed git binary; branch validated by validateGitInputs
-	if output, err := cmd.CombinedOutput(); err != nil {
+	if output, err := gitCommand(ctx, auth, "-C", localPath, "fetch", "--depth", "50", "origin").CombinedOutput(); err != nil {
+		return fmt.Errorf("git fetch: %s: %w", redactURLCredentials(string(output)), err)
+	}
+
+	if output, err := gitCommand(ctx, nil, "-C", localPath, "reset", "--hard", fmt.Sprintf("origin/%s", branch)).CombinedOutput(); err != nil {
 		return fmt.Errorf("git reset: %s: %w", string(output), err)
 	}
 

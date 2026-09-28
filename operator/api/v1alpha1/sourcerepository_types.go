@@ -13,6 +13,17 @@ const (
 	SourceRepoAuthBasic SourceRepositoryAuthType = "basic"
 )
 
+// SSHHostKeyPolicy decides how an ssh clone checks a host key that the
+// Secret's known_hosts does not provide.
+type SSHHostKeyPolicy string
+
+const (
+	// SSHHostKeyStrict requires the host key in the Secret's known_hosts.
+	SSHHostKeyStrict SSHHostKeyPolicy = "strict"
+	// SSHHostKeyAcceptNew trusts a host's key on first contact.
+	SSHHostKeyAcceptNew SSHHostKeyPolicy = "acceptNew"
+)
+
 // SourceRepositorySpec defines the desired state of a SourceRepository.
 type SourceRepositorySpec struct {
 	// URL is the git repository URL (HTTPS or SSH).
@@ -29,9 +40,20 @@ type SourceRepositorySpec struct {
 	AuthType SourceRepositoryAuthType `json:"authType,omitempty"`
 
 	// SecretRef references a Secret containing auth credentials.
-	// For token: key "token". For basic: keys "username" and "password". For ssh: key "ssh-key".
+	// For token: key "token". For basic: keys "username" and "password". For ssh: key "ssh-key",
+	// plus "known_hosts" (the git server's host keys, e.g. from ssh-keyscan).
+	// Credentials are handed to git per command and never written to the clone's .git/config.
 	// +optional
 	SecretRef string `json:"secretRef,omitempty"`
+
+	// SSHHostKeyPolicy controls how an ssh clone verifies the git server's host key.
+	// When the Secret holds "known_hosts" the host key must match it, whatever this says.
+	// Without it, "strict" (the default) refuses to connect, and "acceptNew" trusts the
+	// key the host presents on first contact and rejects a different key afterwards
+	// (trust on first use, remembered for the life of the operator pod).
+	// +kubebuilder:validation:Enum=strict;acceptNew
+	// +optional
+	SSHHostKeyPolicy SSHHostKeyPolicy `json:"sshHostKeyPolicy,omitempty"`
 
 	// Resource links this repository to a specific Kubernetes resource.
 	Resource ResourceRef `json:"resource"`
