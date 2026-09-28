@@ -145,6 +145,16 @@ spec:
           {{- with include "chatcli.loggingEnv" . }}
             {{- . | nindent 12 }}
           {{- end }}
+          {{- /*
+            Charts up to 1.211.2 kept memory at the PVC root, the directory
+            the server sees as ~/.chatcli/sessions. With memory in its own
+            subPath the server copies its files from there once, on the first
+            start (never moving or overwriting anything).
+          */}}
+          {{- if and .Values.persistence.enabled .Values.memory.enabled .Values.memory.subPath }}
+            - name: CHATCLI_MEMORY_LEGACY_DIR
+              value: /home/chatcli/.chatcli/sessions
+          {{- end }}
           {{- if .Values.prometheusUrl }}
             - name: PROMETHEUS_URL
               value: {{ .Values.prometheusUrl | quote }}
@@ -285,12 +295,10 @@ spec:
           {{- $mounts = append $mounts (dict "name" "tmp" "mountPath" "/tmp") }}
           {{- $mounts = append $mounts (dict "name" "data" "mountPath" "/home/chatcli/.chatcli") }}
           {{- end }}
-          {{- if .Values.agents.enabled }}
-          {{- $agentsCM := .Values.agents.existingConfigMap | default (printf "%s-agents" (include "chatcli.fullname" .)) }}
+          {{- if include "chatcli.configMapName" (list . "agents") }}
           {{- $mounts = append $mounts (dict "name" "agents" "mountPath" "/home/chatcli/.chatcli/agents" "readOnly" true) }}
           {{- end }}
-          {{- if .Values.skills.enabled }}
-          {{- $skillsCM := .Values.skills.existingConfigMap | default (printf "%s-skills" (include "chatcli.fullname" .)) }}
+          {{- if include "chatcli.configMapName" (list . "skills") }}
           {{- $mounts = append $mounts (dict "name" "skills" "mountPath" "/home/chatcli/.chatcli/skills" "readOnly" true) }}
           {{- end }}
           {{- if .Values.plugins.enabled }}
@@ -299,7 +307,7 @@ spec:
           {{- if include "chatcli.mcpConfigEnabled" . }}
           {{- $mounts = append $mounts (dict "name" "mcp-config" "mountPath" "/etc/chatcli/mcp" "readOnly" true) }}
           {{- end }}
-          {{- if .Values.bootstrap.enabled }}
+          {{- if include "chatcli.configMapName" (list . "bootstrap") }}
           {{- $mounts = append $mounts (dict "name" "bootstrap" "mountPath" "/home/chatcli/.chatcli/bootstrap" "readOnly" true) }}
           {{- end }}
           {{- if .Values.memory.enabled }}
@@ -348,7 +356,7 @@ spec:
             periodSeconds: 10
             timeoutSeconds: 3
             failureThreshold: 3
-      {{- if or .Values.persistence.enabled .Values.tls.existingSecret (and .Values.watcher.enabled .Values.watcher.targets) (and .Values.securityContext .Values.securityContext.readOnlyRootFilesystem) .Values.agents.enabled .Values.skills.enabled .Values.plugins.enabled (include "chatcli.mcpConfigEnabled" .) .Values.bootstrap.enabled .Values.memory.enabled .Values.extraVolumes }}
+      {{- if or .Values.persistence.enabled .Values.tls.existingSecret (and .Values.watcher.enabled .Values.watcher.targets) (and .Values.securityContext .Values.securityContext.readOnlyRootFilesystem) (include "chatcli.configMapName" (list . "agents")) (include "chatcli.configMapName" (list . "skills")) .Values.plugins.enabled (include "chatcli.mcpConfigEnabled" .) (include "chatcli.configMapName" (list . "bootstrap")) .Values.memory.enabled .Values.extraVolumes }}
       volumes:
         {{- if .Values.persistence.enabled }}
         - name: sessions
@@ -373,15 +381,15 @@ spec:
           emptyDir:
             sizeLimit: 200Mi
         {{- end }}
-        {{- if .Values.agents.enabled }}
+        {{- with include "chatcli.configMapName" (list . "agents") }}
         - name: agents
           configMap:
-            name: {{ .Values.agents.existingConfigMap | default (printf "%s-agents" (include "chatcli.fullname" .)) }}
+            name: {{ . }}
         {{- end }}
-        {{- if .Values.skills.enabled }}
+        {{- with include "chatcli.configMapName" (list . "skills") }}
         - name: skills
           configMap:
-            name: {{ .Values.skills.existingConfigMap | default (printf "%s-skills" (include "chatcli.fullname" .)) }}
+            name: {{ . }}
         {{- end }}
         {{- if .Values.plugins.enabled }}
         - name: plugins
@@ -398,10 +406,10 @@ spec:
           configMap:
             name: {{ .Values.mcp.existingConfigMap | default (printf "%s-mcp" (include "chatcli.fullname" .)) }}
         {{- end }}
-        {{- if .Values.bootstrap.enabled }}
+        {{- with include "chatcli.configMapName" (list . "bootstrap") }}
         - name: bootstrap
           configMap:
-            name: {{ .Values.bootstrap.existingConfigMap | default (printf "%s-bootstrap" (include "chatcli.fullname" .)) }}
+            name: {{ . }}
         {{- end }}
         {{- if .Values.memory.enabled }}
         - name: memory

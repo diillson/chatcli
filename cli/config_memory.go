@@ -14,6 +14,7 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/diillson/chatcli/cli/workspace/memory"
 	"github.com/diillson/chatcli/config"
 	"github.com/diillson/chatcli/i18n"
 )
@@ -41,7 +42,7 @@ func (cli *ChatCLI) showConfigMemory() {
 		autoRecallVal = defaultMarker + autoRecallVal
 	}
 	kv(p, "CHATCLI_MEMORY_AUTORECALL", autoRecallVal)
-	for _, name := range []string{"CHATCLI_MEMORY_FALLBACK_PROVIDERS", "CHATCLI_MEMORY_MAX_FACTS", "CHATCLI_MEMORY_MAX_SIZE", "CHATCLI_MEMORY_RETENTION_DAYS", "CHATCLI_MEMORY_RETRIEVAL_BUDGET"} {
+	for _, name := range []string{"CHATCLI_MEMORY_FALLBACK_PROVIDERS", "CHATCLI_MEMORY_MAX_FACTS", "CHATCLI_MEMORY_MAX_SIZE", "CHATCLI_MEMORY_RETENTION_DAYS", "CHATCLI_MEMORY_RETRIEVAL_BUDGET", memory.LegacyDirEnv} {
 		kv(p, name, envOr(name))
 	}
 	providerVal := extensionStatus(os.Getenv(MemoryProviderEnv))

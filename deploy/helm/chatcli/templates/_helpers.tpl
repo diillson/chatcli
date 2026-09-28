@@ -240,3 +240,24 @@ extraEnv, so the container never carries it twice.
 {{- toYaml . }}
 {{- end }}
 {{- end }}
+
+{{/*
+Name of the ConfigMap mounted for agents, skills or bootstrap (list . "agents"),
+or nothing when there is none to mount: the feature disabled, or enabled
+with neither inline definitions (which the chart renders into
+<fullname>-<feature>) nor an existingConfigMap. Mounting the chart's
+ConfigMap when it was never rendered left the pod in ContainerCreating;
+without the mount the server simply finds no files in that directory.
+*/}}
+{{- define "chatcli.configMapName" -}}
+{{- $root := index . 0 }}
+{{- $feature := index . 1 }}
+{{- $v := index $root.Values $feature }}
+{{- if $v.enabled }}
+{{- if $v.existingConfigMap }}
+{{- $v.existingConfigMap }}
+{{- else if $v.definitions }}
+{{- printf "%s-%s" (include "chatcli.fullname" $root) $feature }}
+{{- end }}
+{{- end }}
+{{- end }}

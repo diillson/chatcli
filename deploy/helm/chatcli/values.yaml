@@ -581,11 +581,11 @@ memory:
   # 200Mi emptyDir.
   #
   # Charts up to 1.211.2 mounted memory at the PVC root, next to the
-  # sessions. The sessions stay at the root, so no session moves; memory
-  # files written by an older chart stay at the root too and are no longer
-  # read from there. To carry them over, copy the root into the memory
-  # directory once (see the README, "Memory on the sessions PVC"), or set
-  # subPath: "" to keep the old shared layout.
+  # sessions. The sessions stay at the root, so no session moves, and the
+  # chart sets CHATCLI_MEMORY_LEGACY_DIR so the server copies memory's own
+  # files from the root into this directory on its first start: once, never
+  # moving or overwriting anything (README, "Memory on the sessions PVC").
+  # subPath: "" keeps the old shared layout instead.
   subPath: memory
 
 # Shell safety is configured through the agent's own variables, set under

@@ -118,6 +118,28 @@ jobs:
             --set security.corsAllowedOrigins[0]=https://dash.example.com \
             --set security.allowedDiagnosticCommands="kubectl top" \
             > /tmp/rendered/operator-full.yaml
+          # Render-time rules of the server chart that a broken template
+          # would lose silently.
+          dep() { helm template chatcli deploy/helm/chatcli --set server.token=ci-token \
+            --show-only templates/deployment.yaml "$@"; }
+          count() { local pattern="$1"; shift; dep "$@" > /tmp/dep.yaml; grep -Ec "$pattern" /tmp/dep.yaml || true; }
+          expect() { local want="$1" got="$2" what="$3"; [ "$got" = "$want" ] || { echo "::error::$what: got $got, want $want"; exit 1; }; }
+          must_fail() { if dep "$@" >/dev/null 2>&1; then echo "::error::render should fail: $*"; exit 1; fi; }
+          # The one-time memory adoption env: only with persistence, memory
+          # and a memory subPath.
+          env_re='name: CHATCLI_MEMORY_LEGACY_DIR'
+          expect 1 "$(count "$env_re" --set memory.enabled=true)" "legacy memory env with memory on the PVC"
+          expect 0 "$(count "$env_re")" "legacy memory env with memory off"
+          expect 0 "$(count "$env_re" --set memory.enabled=true --set persistence.enabled=false)" "legacy memory env without persistence"
+          expect 0 "$(count "$env_re" --set memory.enabled=true --set memory.subPath=)" "legacy memory env on the legacy layout"
+          # A single-node sessions volume stops the old pod first.
+          expect 1 "$(count 'maxSurge: 0')" "stop-first strategy"
+          # Features enabled without a ConfigMap to mount mount nothing.
+          expect 0 "$(count 'name: chatcli-(agents|skills|bootstrap)$' --set agents.enabled=true --set skills.enabled=true --set bootstrap.enabled=true)" "ConfigMap volumes with nothing to mount"
+          # Mutually exclusive or unworkable inputs fail the render.
+          must_fail --set security.jwtSecret=a --set security.jwtSecretRef.name=b --set security.jwtSecretRef.key=c
+          must_fail --set 'persistence.accessModes[0]=ReadWriteOncePod' --set replicaCount=2
+          must_fail --set logging.maxSizeMB=50
           # CRDs and CRs (Instance etc.) have no upstream JSON schema; the
           # rendered core objects (Deployment, Service, RBAC, ...) are checked
           # strictly. -strict rejects unknown fields, which is what catches a

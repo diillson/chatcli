@@ -314,6 +314,8 @@ watcher:
 | `plugins.initImage` | Init container image whose `/plugins/*` is copied into the plugins directory | `""` |
 | `plugins.existingPVC` | Existing PVC with pre-installed plugins (instead of an emptyDir) | `""` |
 
+`agents`, `skills` and `bootstrap` mount a ConfigMap only when there is one: inline `definitions` (rendered as `<fullname>-agents`, `-skills`, `-bootstrap`) or an `existingConfigMap`. Enabled with neither, nothing is mounted and the server finds no files in that directory (earlier charts mounted a ConfigMap that did not exist, and the pod stayed in `ContainerCreating`).
+
 The server reads the MCP, agents, skills and bootstrap ConfigMaps only at startup. Each one the chart renders (from `mcp.servers` or `*.definitions`) is hashed into a `checksum/<name>` pod annotation, so a `helm upgrade` that edits it rolls the pods; the watcher config (`watcher.targets`) rides `checksum/config`. A ConfigMap you manage yourself (`*.existingConfigMap`) cannot be hashed by Helm: after editing one, restart the pods with `kubectl -n <namespace> rollout restart deploy/<fullname>`.
 
 ```yaml
@@ -343,7 +345,7 @@ agents:
 | `persistence.size` | PVC size | `1Gi` |
 | `strategy` | Deployment update strategy, rendered as written; empty = chosen from persistence (see below) | `{}` |
 | `memory.enabled` | Long-term memory at `~/.chatcli/memory` (on the sessions PVC when persistence is on, a 200Mi emptyDir otherwise) | `false` |
-| `memory.subPath` | Directory of the sessions PVC that holds memory when persistence is on; `""` = the PVC root, shared with the session files (the layout of charts up to 1.211.2) | `memory` |
+| `memory.subPath` | Directory of the sessions PVC that holds memory when persistence is on; memory written at the PVC root by older charts is copied into it once, automatically (see below). `""` = the PVC root, shared with the session files (the layout of charts up to 1.211.2) | `memory` |
 | `pipeline.enabled` | Host the full turn engine behind the `ChatTurn`, `RunCoder`, `RunAgent` and tool RPCs (`CHATCLI_SERVER_PIPELINE`); exec RPCs require an admin caller; exclusive with the co-located gateway | `false` |
 
 **Rollouts.** With `persistence.enabled` and no `ReadWriteMany` access mode, a rollout stops the old pod before starting the new one: the chart renders `RollingUpdate` with `maxSurge: 0` and `maxUnavailable: 1`. Under the API server default (`maxSurge` 25% = one extra pod, `maxUnavailable` 25% = none), a new pod scheduled on another node cannot attach the `ReadWriteOnce` volume while the old pod holds it, and the old pod is only stopped once the new one is ready, so the rollout never finished. Stopping the old pod first means a short gap in service on every rollout. Without persistence, or with `ReadWriteMany`, nothing is rendered and the API server default applies, as before.
@@ -356,48 +358,15 @@ A `ReadWriteOnce` volume attaches to one node at a time, so every replica must r
 
 **Memory on the sessions PVC.** With `memory.enabled` and persistence, the sessions stay at the PVC root (mounted at `~/.chatcli/sessions`) and memory lives in the `memory.subPath` directory of the same PVC (mounted at `~/.chatcli/memory`). kubelet creates that directory on first mount; the default `podSecurityContext.fsGroup` makes it writable by the server. Charts up to 1.211.2 mounted memory at the PVC root too, so its JSON stores sat among the session files: the session list showed them, and session expiry could delete them.
 
-Upgrading an install that ran with `memory.enabled` and persistence: no session moves, but the memory files written at the root stay there, and memory starts from the empty `memory/` directory. Nothing is deleted, yet the old memory is no longer read. The chart cannot move it for you (the server image has no shell to run an init step), so pick one:
+Upgrading an install that ran with `memory.enabled` and persistence migrates automatically. No session moves, and the first time the server opens memory on the new layout it copies memory's own files from the PVC root into the memory directory: the chart sets `CHATCLI_MEMORY_LEGACY_DIR=/home/chatcli/.chatcli/sessions` (the PVC root as the server sees it) whenever persistence, memory and a `memory.subPath` are all on. The copy:
 
-- keep the old shared layout: set `memory.subPath: ""`;
-- or copy the root into the memory directory **before** upgrading, with the server stopped:
+- takes only memory's files (`MEMORY.md` and its backups, `memory_index.json`, `memory_tombstones.json`, `episodes.json`, `user_profile.json`, `topics.json`, `projects.json`, `usage_stats.json`, `graph.json`, `vector_index.json`, `memory_archive.json`, `compactor_state.json`, their `.corrupt` quarantines, the `YYYYMM/` daily notes, `weekly/`, `monthly/` and `pending/`); the session files stay where they are;
+- never moves, deletes or rewrites anything at the root, and never overwrites a file already in the memory directory; each file lands atomically with mode 0600;
+- runs only while the memory directory holds none of memory's files, and writes `.migrated-from-legacy` there when done, so it happens once;
+- skips an unreadable file with a warning; a file sealed with `CHATCLI_ENCRYPTION_KEY` is resealed for its new path, and while the key is missing or wrong the copy stays pending (`.migrating-from-legacy`) and resumes on the next start;
+- logs what it copied (`memory: adopted the legacy memory directory`).
 
-```bash
-kubectl -n <namespace> scale deploy/<fullname> --replicas=0
-kubectl -n <namespace> apply -f - <<'EOF'
-apiVersion: v1
-kind: Pod
-metadata:
-  name: chatcli-memory-copy
-spec:
-  restartPolicy: Never
-  securityContext:
-    runAsNonRoot: true
-    runAsUser: 1000
-    runAsGroup: 1000
-    seccompProfile:
-      type: RuntimeDefault
-  containers:
-    - name: copy
-      image: busybox:1.37
-      command: ["sh", "-c", "cd /data && mkdir -p memory && find . -mindepth 1 -maxdepth 1 ! -name memory -exec cp -a {} memory/ \\;"]
-      securityContext:
-        allowPrivilegeEscalation: false
-        capabilities:
-          drop: ["ALL"]
-      volumeMounts:
-        - name: sessions
-          mountPath: /data
-  volumes:
-    - name: sessions
-      persistentVolumeClaim:
-        claimName: <fullname>-sessions
-EOF
-kubectl -n <namespace> wait --for=jsonpath='{.status.phase}'=Succeeded pod/chatcli-memory-copy
-kubectl -n <namespace> delete pod chatcli-memory-copy
-helm upgrade ...   # then scale back up if the Deployment is still at 0 replicas
-```
-
-The copy carries the session files along too (memory ignores them) and leaves the root untouched. Run it once, before the first start on the new layout: a later run overwrites what memory wrote since. An upgrade with plain `--reuse-values` carries no `memory.subPath` key and keeps the old layout.
+`memory.subPath: ""` keeps the old shared layout instead (no copy, no `CHATCLI_MEMORY_LEGACY_DIR`). An upgrade with plain `--reuse-values` carries no `memory.subPath` key and keeps the old layout too.
 
 ### Service, ingress, network policy
 

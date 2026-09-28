@@ -1103,7 +1103,7 @@
         },
         "subPath": {
           "type": "string",
-          "description": "Directory inside the sessions PVC that holds memory when persistence is enabled (default 'memory'). Empty = the PVC root, shared with the session files, which is how charts up to 1.211.2 mounted it; see the README before changing it on an existing install."
+          "description": "Directory inside the sessions PVC that holds memory when persistence is enabled (default 'memory'); the server copies memory written at the PVC root by charts up to 1.211.2 into it once, on its first start (CHATCLI_MEMORY_LEGACY_DIR). Empty = the PVC root, shared with the session files (the old layout)."
         }
       }
     },
