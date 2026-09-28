@@ -99,9 +99,10 @@ rules:
   - apiGroups: ["apps"]
     resources: ["replicasets"]
     verbs: ["get", "list", "watch"]
+  # create: ApplyManifest may create the kinds its allowlist names.
   - apiGroups: ["apps"]
     resources: ["statefulsets", "daemonsets"]
-    verbs: ["get", "list", "watch", "update", "patch"]
+    verbs: ["get", "list", "watch", "create", "update", "patch"]
   - apiGroups: ["batch"]
     resources: ["jobs", "cronjobs"]
     verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
@@ -114,13 +115,25 @@ rules:
   # ──────────────────────────────────────────────────
   - apiGroups: ["autoscaling"]
     resources: ["horizontalpodautoscalers"]
-    verbs: ["get", "list", "watch", "update", "patch"]
+    verbs: ["get", "list", "watch", "create", "update", "patch"]
   - apiGroups: ["networking.k8s.io"]
-    resources: ["ingresses", "networkpolicies"]
+    resources: ["ingresses"]
+    verbs: ["get", "list", "watch", "create", "update", "patch"]
+  - apiGroups: ["networking.k8s.io"]
+    resources: ["networkpolicies"]
     verbs: ["get", "list", "watch", "update", "patch"]
+  # PDB reads (blast radius) plus ApplyManifest writes.
   - apiGroups: ["policy"]
     resources: ["poddisruptionbudgets"]
-    verbs: ["get", "list", "watch"]
+    verbs: ["get", "list", "watch", "create", "update", "patch"]
+  # ApplyManifest targets from optional CRDs (Prometheus Operator, Istio).
+  # Rules for an API group that is not installed are inert.
+  - apiGroups: ["monitoring.coreos.com"]
+    resources: ["servicemonitors", "podmonitors", "prometheusrules"]
+    verbs: ["get", "create", "update", "patch"]
+  - apiGroups: ["networking.istio.io"]
+    resources: ["serviceentries", "virtualservices", "destinationrules"]
+    verbs: ["get", "create", "update", "patch"]
   - apiGroups: ["discovery.k8s.io"]
     resources: ["endpointslices"]
     verbs: ["get", "list", "watch"]
@@ -165,8 +178,8 @@ rules:
       - chatcli-role-admin
       - chatcli-role-superadmin
     verbs: ["bind"]
-  # ClusterRoleBindings: the operator creates one per Instance (watcher) and one per user
-  # (platform roles). Each binding can only reference the whitelisted ClusterRoles above.
+  # ClusterRoleBindings: the operator creates one per Instance whose watcher reads outside
+  # its namespace. Each binding can only reference the whitelisted ClusterRoles above.
   - apiGroups: ["rbac.authorization.k8s.io"]
     resources: ["clusterrolebindings"]
     verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
@@ -214,6 +227,10 @@ rules:
   - apiGroups: ["apps"]
     resources: ["deployments", "replicasets", "statefulsets", "daemonsets"]
     verbs: ["get", "list", "watch"]
+  # Job and CronJob watch targets.
+  - apiGroups: ["batch"]
+    resources: ["jobs", "cronjobs"]
+    verbs: ["get", "list", "watch"]
   - apiGroups: ["autoscaling"]
     resources: ["horizontalpodautoscalers"]
     verbs: ["get", "list", "watch"]
@@ -229,7 +246,8 @@ rules:
 ---
 # ──────────────────────────────────────────────────
 # Platform role ClusterRoles (viewer / operator / admin / superadmin)
-# Referenced by RoleBindings the operator creates when granting a user a platform role.
+# For cluster administrators to bind to people or groups (RoleBinding or
+# ClusterRoleBinding). The operator creates no binding to them.
 # ──────────────────────────────────────────────────
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole

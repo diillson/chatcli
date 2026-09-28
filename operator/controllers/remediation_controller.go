@@ -2,6 +2,7 @@ package controllers
 
 import (
 	"context"
+	stderrors "errors"
 	"fmt"
 	"sort"
 	"strconv"
@@ -1858,26 +1859,38 @@ func (r *RemediationReconciler) gateByDecisionEngine(ctx context.Context, plan *
 
 // gateByClusterTier parks the plan when the local cluster's tier says a
 // human decides for this severity. Needs both the local registration name
-// and the federation reconciler that holds the registrations.
+// (CHATCLI_OPERATOR_CLUSTER_NAME) and the federation reconciler that holds
+// the registrations; without a name the gate does not apply.
+//
+// A name that no ClusterRegistration carries fails closed: the tier is
+// unknown, so the plan waits for manual approval under the cluster-tier
+// policy, with the reason on the plan. A failure to read the registrations
+// keeps the plan Pending and retries, like the other gates.
 func (r *RemediationReconciler) gateByClusterTier(ctx context.Context, plan *platformv1alpha1.RemediationPlan, issue *platformv1alpha1.Issue, insight *platformv1alpha1.AIInsight) (bool, ctrl.Result, error) {
 	if r.ClusterTier == "" || r.Federation == nil {
 		return false, ctrl.Result{}, nil
 	}
 	log := log.FromContext(ctx)
 	mode, err := r.Federation.GetClusterApprovalMode(ctx, r.ClusterTier)
-	if err != nil {
-		log.Error(err, "Cluster tier unknown; proceeding on policies alone", "cluster", r.ClusterTier)
+	var reason string
+	switch {
+	case stderrors.Is(err, errClusterNotRegistered):
+		reason = fmt.Sprintf("Cluster name %q (CHATCLI_OPERATOR_CLUSTER_NAME) is not registered: no ClusterRegistration carries it, so its tier is unknown and the plan needs manual approval", r.ClusterTier)
+		log.Info("Cluster name not registered; parking the plan for manual approval",
+			"cluster", r.ClusterTier, "plan", plan.Name)
+	case err != nil:
+		return true, ctrl.Result{}, r.approvalGateUnavailable(ctx, plan, "reading the cluster tier", err)
+	case !ClusterTierRequiresApproval(mode, issue.Spec.Severity):
 		return false, ctrl.Result{}, nil
-	}
-	if !ClusterTierRequiresApproval(mode, issue.Spec.Severity) {
-		return false, ctrl.Result{}, nil
+	default:
+		reason = fmt.Sprintf("Cluster %s tier policy %q requires approval for %s severity", r.ClusterTier, mode, issue.Spec.Severity)
 	}
 	decision := &DecisionResult{
 		RequiresApproval:   true,
 		Mode:               DecisionModeApproval,
 		RiskAssessment:     string(issue.Spec.Severity),
 		AdjustedConfidence: float64(insight.Status.Confidence),
-		Reason:             fmt.Sprintf("Cluster %s tier policy %q requires approval for %s severity", r.ClusterTier, mode, issue.Spec.Severity),
+		Reason:             reason,
 	}
 	return r.parkUnderSyntheticPolicy(ctx, plan, issue, insight, ClusterTierPolicyName, decision)
 }

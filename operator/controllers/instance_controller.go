@@ -412,6 +412,9 @@ func (r *InstanceReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		// Watch user-managed Secrets (API keys) so that creating or updating
 		// a Secret triggers a reconcile → hash change → rolling update.
 		Watches(&corev1.Secret{}, handler.EnqueueRequestsFromMapFunc(r.secretToInstance)).
+		// Watch user-managed ConfigMaps mounted as files (MCP, agents,
+		// skills) so an edit rolls the pods that read them at startup.
+		Watches(&corev1.ConfigMap{}, handler.EnqueueRequestsFromMapFunc(r.configMapToInstance)).
 		Complete(r)
 }
 

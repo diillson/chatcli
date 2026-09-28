@@ -248,6 +248,7 @@ rules:
       - get
       - list
       - watch
+  # create: ApplyManifest may create the kinds its allowlist names
   - apiGroups:
       - apps
     resources:
@@ -257,6 +258,7 @@ rules:
       - get
       - list
       - watch
+      - create
       - update
       - patch
   # Batch resources (Jobs, CronJobs) — full CRUD for AIOps remediation
@@ -289,12 +291,23 @@ rules:
       - get
       - list
       - watch
+      - create
       - update
       - patch
   - apiGroups:
       - networking.k8s.io
     resources:
       - ingresses
+    verbs:
+      - get
+      - list
+      - watch
+      - create
+      - update
+      - patch
+  - apiGroups:
+      - networking.k8s.io
+    resources:
       - networkpolicies
     verbs:
       - get
@@ -302,7 +315,7 @@ rules:
       - watch
       - update
       - patch
-  # Policy (PDB checks for blast radius)
+  # Policy (PDB checks for blast radius, ApplyManifest writes)
   - apiGroups:
       - policy
     resources:
@@ -311,6 +324,33 @@ rules:
       - get
       - list
       - watch
+      - create
+      - update
+      - patch
+  # ApplyManifest targets from optional CRDs (Prometheus Operator, Istio).
+  # Rules for an API group that is not installed are inert.
+  - apiGroups:
+      - monitoring.coreos.com
+    resources:
+      - servicemonitors
+      - podmonitors
+      - prometheusrules
+    verbs:
+      - get
+      - create
+      - update
+      - patch
+  - apiGroups:
+      - networking.istio.io
+    resources:
+      - serviceentries
+      - virtualservices
+      - destinationrules
+    verbs:
+      - get
+      - create
+      - update
+      - patch
   # Discovery (endpoint slices for dependency health)
   - apiGroups:
       - discovery.k8s.io
@@ -549,6 +589,10 @@ rules:
   - apiGroups: ["apps"]
     resources: ["deployments", "replicasets", "statefulsets", "daemonsets"]
     verbs: ["get", "list", "watch"]
+  # Job and CronJob watch targets.
+  - apiGroups: ["batch"]
+    resources: ["jobs", "cronjobs"]
+    verbs: ["get", "list", "watch"]
   - apiGroups: ["autoscaling"]
     resources: ["horizontalpodautoscalers"]
     verbs: ["get", "list", "watch"]
@@ -562,8 +606,8 @@ rules:
     resources: ["nodes"]
     verbs: ["get", "list", "watch"]
 ---
-# Platform role ClusterRoles (viewer / operator / admin / superadmin). Referenced by
-# RoleBindings the operator creates when granting a user a platform role.
+# Platform role ClusterRoles (viewer / operator / admin / superadmin). For cluster
+# administrators to bind to people or groups; the operator creates no binding to them.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:

@@ -129,3 +129,74 @@ func TestInstanceTLSWithoutSecretIsNotProvisioned(t *testing.T) {
 		t.Error("no Deployment for TLS without a certificate Secret")
 	}
 }
+
+// On a real API server: persistence switches the Deployment to Recreate
+// (the RWO sessions PVC cannot follow a surge pod to another node) and back
+// to a rolling update when it is turned off, and editing a user-managed
+// ConfigMap mounted as files rolls the pod template through the ConfigMap
+// watch.
+func TestInstanceStrategyAndMountedConfigMapRollout(t *testing.T) {
+	ns := namespace(t, "it-instance-strategy")
+	ctx := context.Background()
+	mustCreate(t, &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{Name: "server-token", Namespace: ns},
+		StringData: map[string]string{"token": "integration-token"},
+	})
+	agents := &corev1.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{Name: "team-agents", Namespace: ns},
+		Data:       map[string]string{"reviewer.md": "v1"},
+	}
+	mustCreate(t, agents)
+	agentsRef := "team-agents"
+	inst := &platformv1alpha1.Instance{
+		ObjectMeta: metav1.ObjectMeta{Name: "persisted", Namespace: ns},
+		Spec: platformv1alpha1.InstanceSpec{
+			Provider:    "CLAUDEAI",
+			Server:      platformv1alpha1.ServerSpec{Token: &platformv1alpha1.SecretKeyRefSpec{Name: "server-token", Key: "token"}},
+			Persistence: &platformv1alpha1.PersistenceSpec{Enabled: true},
+			Agents:      &platformv1alpha1.AgentProvisionSpec{ConfigMapRef: &agentsRef},
+		},
+	}
+	mustCreate(t, inst)
+
+	var deploy appsv1.Deployment
+	eventually(t, wait, "a Recreate Deployment", func() bool {
+		return k8sClient.Get(ctx, key(ns, "persisted"), &deploy) == nil &&
+			deploy.Spec.Strategy.Type == appsv1.RecreateDeploymentStrategyType
+	})
+	if sc := deploy.Spec.Template.Spec.SecurityContext; sc == nil || sc.FSGroup == nil || *sc.FSGroup != 1000 {
+		t.Errorf("default pod security context = %+v", sc)
+	}
+	first := deploy.Spec.Template.Annotations["chatcli.io/mounted-configmaps-hash"]
+	if first == "" {
+		t.Fatal("mounted ConfigMaps hash missing")
+	}
+
+	// Only the ConfigMap watch can bring this edit to the Instance.
+	if err := k8sClient.Get(ctx, key(ns, "team-agents"), agents); err != nil {
+		t.Fatal(err)
+	}
+	agents.Data["reviewer.md"] = "v2"
+	if err := k8sClient.Update(ctx, agents); err != nil {
+		t.Fatal(err)
+	}
+	eventually(t, wait, "the ConfigMap edit to roll the pod template", func() bool {
+		if err := k8sClient.Get(ctx, key(ns, "persisted"), &deploy); err != nil {
+			return false
+		}
+		return deploy.Spec.Template.Annotations["chatcli.io/mounted-configmaps-hash"] != first
+	})
+
+	// Persistence off: the API server accepts the switch back to rolling.
+	if err := k8sClient.Get(ctx, key(ns, "persisted"), inst); err != nil {
+		t.Fatal(err)
+	}
+	inst.Spec.Persistence.Enabled = false
+	if err := k8sClient.Update(ctx, inst); err != nil {
+		t.Fatal(err)
+	}
+	eventually(t, wait, "a RollingUpdate Deployment", func() bool {
+		return k8sClient.Get(ctx, key(ns, "persisted"), &deploy) == nil &&
+			deploy.Spec.Strategy.Type == appsv1.RollingUpdateDeploymentStrategyType
+	})
+}
