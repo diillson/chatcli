@@ -1,3 +1,4 @@
+{{- include "chatcli.validate" . }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -6,6 +7,9 @@ metadata:
     {{- include "chatcli.labels" . | nindent 4 }}
 spec:
   replicas: {{ .Values.replicaCount }}
+  {{- with include "chatcli.strategy" . }}
+  {{- . | trim | nindent 2 }}
+  {{- end }}
   selector:
     matchLabels:
       {{- include "chatcli.selectorLabels" . | nindent 6 }}
@@ -14,6 +18,19 @@ spec:
       annotations:
         checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
         checksum/secret: {{ include (print $.Template.BasePath "/secret.yaml") . | sha256sum }}
+        {{- /*
+          The server reads these ConfigMaps only at startup, so an edit has
+          to roll the pods. The watch config renders from configmap.yaml and
+          rides checksum/config. A ConfigMap the chart does not render (an
+          existingConfigMap) cannot be hashed here: after editing one, run
+          kubectl rollout restart.
+        */}}
+        {{- range $name, $file := dict "mcp" "mcp-configmap.yaml" "agents" "agents-configmap.yaml" "skills" "skills-configmap.yaml" "bootstrap" "bootstrap-configmap.yaml" }}
+        {{- $rendered := include (print $.Template.BasePath "/" $file) $ }}
+        {{- if trim $rendered }}
+        checksum/{{ $name }}: {{ $rendered | sha256sum }}
+        {{- end }}
+        {{- end }}
       labels:
         {{- include "chatcli.selectorLabels" . | nindent 8 }}
     spec:
@@ -125,6 +142,9 @@ spec:
           env:
             - name: HOME
               value: /home/chatcli
+          {{- with include "chatcli.loggingEnv" . }}
+            {{- . | nindent 12 }}
+          {{- end }}
           {{- if .Values.prometheusUrl }}
             - name: PROMETHEUS_URL
               value: {{ .Values.prometheusUrl | quote }}
@@ -138,8 +158,8 @@ spec:
             - name: CHATCLI_JWT_SECRET
               valueFrom:
                 secretKeyRef:
-                  name: {{ .Values.security.jwtSecretRef.name }}
-                  key: {{ .Values.security.jwtSecretRef.key }}
+                  name: {{ .Values.security.jwtSecretRef.name | quote }}
+                  key: {{ .Values.security.jwtSecretRef.key | quote }}
           {{- end }}
           {{- if .Values.security.jwtIssuer }}
             - name: CHATCLI_JWT_ISSUER
@@ -157,8 +177,8 @@ spec:
             - name: CHATCLI_JWT_PUBLIC_KEY
               valueFrom:
                 secretKeyRef:
-                  name: {{ .Values.security.jwtPublicKeyRef.name }}
-                  key: {{ .Values.security.jwtPublicKeyRef.key }}
+                  name: {{ .Values.security.jwtPublicKeyRef.name | quote }}
+                  key: {{ .Values.security.jwtPublicKeyRef.key | quote }}
           {{- end }}
           {{- if .Values.security.tlsClientCA }}
             - name: CHATCLI_SERVER_TLS_CLIENT_CA
@@ -283,7 +303,17 @@ spec:
           {{- $mounts = append $mounts (dict "name" "bootstrap" "mountPath" "/home/chatcli/.chatcli/bootstrap" "readOnly" true) }}
           {{- end }}
           {{- if .Values.memory.enabled }}
-          {{- $mounts = append $mounts (dict "name" "memory" "mountPath" "/home/chatcli/.chatcli/memory") }}
+          {{- /*
+            On the sessions PVC memory gets its own directory (memory.subPath):
+            at the root its JSON stores sat among the session files, where the
+            session list showed them and session expiry could delete them.
+            The sessions stay at the root, where earlier charts wrote them.
+          */}}
+          {{- $memoryMount := dict "name" "memory" "mountPath" "/home/chatcli/.chatcli/memory" }}
+          {{- if and .Values.persistence.enabled .Values.memory.subPath }}
+          {{- $_ := set $memoryMount "subPath" .Values.memory.subPath }}
+          {{- end }}
+          {{- $mounts = append $mounts $memoryMount }}
           {{- end }}
           {{- range .Values.extraVolumeMounts }}
           {{- $mounts = append $mounts . }}

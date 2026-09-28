@@ -722,7 +722,7 @@ The operator is designed with a defense-in-depth approach. All security controls
 
 ### Fail-Closed REST API
 
-The operator REST API requires authentication by default. API keys must be provisioned via a Kubernetes Secret (`chatcli-operator-secrets`) or ConfigMap. There is no development bypass unless `CHATCLI_OPERATOR_DEV_MODE=true` is explicitly set as an environment variable. Production deployments must never enable dev mode.
+The operator REST API requires authentication by default. API keys must be provisioned via a Kubernetes Secret (`chatcli-operator-secrets`) or ConfigMap. There is no development bypass unless `CHATCLI_OPERATOR_DEV_MODE=true` is explicitly set as an environment variable (read case-insensitively with boolean semantics: `true`, `TRUE`, `1` and `t` turn it on; anything else, unset included, leaves it off — the startup log and the API apply the same parse). Production deployments must never enable dev mode.
 
 ### Resource Type Allowlist
 

@@ -11,6 +11,45 @@
       "default": 1,
       "description": "Number of pod replicas to deploy."
     },
+    "strategy": {
+      "type": "object",
+      "description": "Deployment update strategy, rendered as written (type Recreate gets rollingUpdate: null). Empty (default) = chosen from persistence: with persistence on a volume without ReadWriteMany, RollingUpdate with maxSurge 0 and maxUnavailable 1, so the old pod stops before the new one starts (a surge pod on another node would wait forever on Multi-Attach); the API server default (RollingUpdate, 25%/25%) otherwise.",
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": [
+            "Recreate",
+            "RollingUpdate"
+          ],
+          "description": "Recreate or RollingUpdate."
+        },
+        "rollingUpdate": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "description": "RollingUpdate parameters. Only valid with type RollingUpdate.",
+          "additionalProperties": false,
+          "properties": {
+            "maxSurge": {
+              "type": [
+                "integer",
+                "string"
+              ],
+              "description": "Pods created above the desired count during a rollout."
+            },
+            "maxUnavailable": {
+              "type": [
+                "integer",
+                "string"
+              ],
+              "description": "Pods that may be unavailable during a rollout."
+            }
+          }
+        }
+      }
+    },
     "image": {
       "type": "object",
       "description": "Container image configuration.",
@@ -878,6 +917,44 @@
       "type": "string",
       "description": "Deprecated: read by the AIOps operator only. Configure prometheusUrl on the chatcli-operator chart."
     },
+    "logging": {
+      "type": "object",
+      "description": "Rotation of the server log file (~/.chatcli/app.log, on the 200Mi data emptyDir when the root filesystem is read-only). Each field sets its CHATCLI_LOG_* variable; null leaves the variable unset (server default). An extraEnv entry of the same name wins. With the data emptyDir in use, maxSizeMB x (maxBackups + 1) must stay within 100 MB.",
+      "additionalProperties": false,
+      "properties": {
+        "maxSizeMB": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 1,
+          "description": "CHATCLI_LOG_MAX_SIZE_MB: size in MB at which the file rotates (server default 100)."
+        },
+        "maxBackups": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0,
+          "description": "CHATCLI_LOG_MAX_BACKUPS: rotated files kept (server default 3)."
+        },
+        "maxAgeDays": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 1,
+          "description": "CHATCLI_LOG_MAX_AGE_DAYS: days a rotated file is kept (server default 28)."
+        },
+        "compress": {
+          "type": [
+            "boolean",
+            "null"
+          ],
+          "description": "CHATCLI_LOG_COMPRESS: gzip rotated files (server default true)."
+        }
+      }
+    },
     "extraEnv": {
       "type": "array",
       "description": "Additional environment variables for the container.",
@@ -922,9 +999,15 @@
         "accessModes": {
           "type": "array",
           "items": {
-            "type": "string"
+            "type": "string",
+            "enum": [
+              "ReadWriteOnce",
+              "ReadWriteOncePod",
+              "ReadWriteMany",
+              "ReadOnlyMany"
+            ]
           },
-          "description": "Access modes (e.g. ['ReadWriteOnce'])."
+          "description": "Access modes (e.g. ['ReadWriteOnce']). Without ReadWriteMany the default strategy stops the old pod before starting the new one; ReadWriteOncePod fails the render with more than one replica."
         },
         "size": {
           "type": "string",
@@ -1017,6 +1100,10 @@
         "enabled": {
           "type": "boolean",
           "description": "Enable memory feature."
+        },
+        "subPath": {
+          "type": "string",
+          "description": "Directory inside the sessions PVC that holds memory when persistence is enabled (default 'memory'). Empty = the PVC root, shared with the session files, which is how charts up to 1.211.2 mounted it; see the README before changing it on an existing install."
         }
       }
     },

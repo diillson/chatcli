@@ -58,6 +58,16 @@ annotations:
       description: README, values and schema describe gRPC reflection as working, the unauthenticated grpc.health.v1 service, a server that refuses to start when its only credential is JWT material that fails to load, JSON logs on stderr, per-provider fallback models and --reset-then-reuse-values upgrades
     - kind: fixed
       description: The ServiceLevelObjective and ChaosExperiment examples validate against the current CRDs and no longer set fields the operator rejects or ignores
+    - kind: fixed
+      description: With persistence on a volume without ReadWriteMany a rollout stops the old pod before starting the new one (RollingUpdate with maxSurge 0 and maxUnavailable 1, which Helm 3 and Helm 4 server-side apply both accept on an existing release), so a rollout onto another node no longer waits forever on Multi-Attach; the new strategy value overrides it, and ReadWriteOncePod with more than one replica fails the render
+    - kind: fixed
+      description: The logging values set a log rotation that fits the 200Mi data emptyDir (20 MB x 3 backups by default) instead of the server defaults of 100 MB x 3, which could pass the limit and get the pod evicted
+    - kind: fixed
+      description: Editing the chart-rendered MCP, agents, skills or bootstrap ConfigMap rolls the pods through checksum annotations; existingConfigMap edits still need kubectl rollout restart
+    - kind: fixed
+      description: With persistence, memory lives in the memory directory of the sessions PVC (memory.subPath) instead of its root, where its stores showed up as sessions and session expiry could delete them; sessions stay at the root, and memory.subPath "" keeps the old layout
+    - kind: fixed
+      description: Setting both security.jwtSecret and jwtSecretRef, or jwtPublicKey and jwtPublicKeyRef, fails the render instead of defining the variable twice, and the Secret references are quoted
   artifacthub.io/prerelease: 'false'
   artifacthub.io/operator: 'false'
   artifacthub.io/crds: |

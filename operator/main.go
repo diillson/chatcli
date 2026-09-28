@@ -206,10 +206,6 @@ type keyRead struct {
 	err     error
 }
 
-func devModeEnabled() bool {
-	return strings.EqualFold(os.Getenv("CHATCLI_OPERATOR_DEV_MODE"), "true")
-}
-
 // loadAPIKeysFromConfigMap reads the API keys at startup with the same
 // rules the hot reload applies, and returns the reload state to keep
 // polling with.
@@ -301,7 +297,7 @@ func (st *apiKeyWatchState) apply(apiServer *rest.APIServer, tag, source string,
 		setupLog.Info("REST API authentication enabled (from "+source+")", "keys", len(keys))
 	case len(keys) > 0:
 		setupLog.Info("API keys hot-reloaded from "+source, "keys", len(keys))
-	case devModeEnabled():
+	case rest.DevModeEnabled():
 		setupLog.Info("WARNING: no API key configured, REST API running in DEV MODE (no auth)",
 			"secret", apiKeysSecretName, "configmap", apiKeysConfigMapName)
 	default:
