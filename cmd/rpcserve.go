@@ -228,6 +228,9 @@ type rpcBackend struct {
 	// by bindSession. Both guarded by mu.
 	bindings map[string]string
 	bindSync map[string]time.Time
+	// turns remembers the turns the web page ran per live session, for
+	// its /rewind and /retry (see web_turns.go). Guarded by mu.
+	turns map[string][]webTurnMark
 }
 
 // adoptEngineRoute makes the pair the engine booted on the backend's default
@@ -637,6 +640,7 @@ func (b *rpcBackend) ManageSession(_ context.Context, action, session, name stri
 		// RestoreSession must not mistake it for a restart and refill it
 		// from the autosave mirror.
 		b.sessions[session] = nil
+		delete(b.turns, session)
 		b.mu.Unlock()
 		b.unbindSession(session)
 		if !existed {
@@ -682,6 +686,7 @@ func (b *rpcBackend) ManageSession(_ context.Context, action, session, name stri
 		hist = capHistory(hist, historyCap(b.cli != nil))
 		b.mu.Lock()
 		b.sessions[session] = hist
+		delete(b.turns, session)
 		b.mu.Unlock()
 		b.bindSession(session, name)
 		return fmt.Sprintf("loaded saved session %q into live session %q (%d messages) — ask_chatcli with this session id continues that conversation, and turns are written back to %q (cross-surface continuity; use detach to stop)", name, session, len(hist), name), nil
@@ -745,6 +750,7 @@ func (b *rpcBackend) manageAttach(session, name string) (string, error) {
 		hist = capHistory(hist, historyCap(b.cli != nil))
 		b.mu.Lock()
 		b.sessions[session] = hist
+		delete(b.turns, session)
 		b.mu.Unlock()
 	}
 	b.bindSession(session, name)

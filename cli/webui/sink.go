@@ -30,6 +30,9 @@ type event struct {
 	Error     string      `json:"error,omitempty"`
 	Cancelled bool        `json:"cancelled,omitempty"`
 	Mode      string      `json:"mode,omitempty"`
+	// Session is set on "session" events: the page's session changed
+	// under it (a new conversation, a rewind, a retry).
+	Session *sessionEvent `json:"session,omitempty"`
 }
 
 type toolEvent struct {
@@ -62,6 +65,9 @@ type runSink struct {
 	ctx     context.Context
 	events  chan event
 	timeout time.Duration
+
+	// onPlan, when set, is told every plan the run shows (for /plan).
+	onPlan func([]planEntry)
 
 	mu      sync.Mutex
 	seq     int
@@ -111,6 +117,9 @@ func (s *runSink) PlanUpdate(p agentevents.Plan) {
 	entries := make([]planEntry, 0, len(p.Entries))
 	for _, e := range p.Entries {
 		entries = append(entries, planEntry{Content: e.Content, Priority: e.Priority, Status: e.Status})
+	}
+	if s.onPlan != nil {
+		s.onPlan(entries)
 	}
 	s.push(event{Type: "plan", Plan: entries})
 }

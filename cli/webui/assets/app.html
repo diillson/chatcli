@@ -599,6 +599,7 @@ async function sendTurn(text) {
 }
 function handleEvent(ev) {
   switch (ev.type) {
+    case 'session': applySession(ev.session || {}); break;
     case 'run': state.run = ev.run; break;
     case 'mode': setMode(ev.mode); if (ev.text) addMessage('system', ev.text); break;
     case 'chunk': appendChunk(ev.text); break;
@@ -1012,6 +1013,12 @@ function loadHistory(items) {
   setPlan(null); state.streaming = null;
   (items || []).forEach(m => addMessage(m.role, m.content));
   if (!items || !items.length) $('#empty').style.display = '';
+}
+// The server changed the session under the page (/clear, /rewind, /retry,
+// /session): show what it holds now, like "+ New" and attach do.
+function applySession(se) {
+  state.bound = se.bound || ''; loadHistory(se.history); renderSessions(); renderStatus(); refreshSessions();
+  if (se.notice) toast(se.notice, 'ok');
 }
 async function attachSession(name) {
   if (state.run) { toast(t('busy'), 'warn'); return; }
