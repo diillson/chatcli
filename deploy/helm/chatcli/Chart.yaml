@@ -27,7 +27,7 @@ annotations:
   artifacthub.io/containsSecurityUpdates: 'false'
   artifacthub.io/changes: |
     - kind: fixed
-      description: Probes use GET /healthz on the metrics port and a TCP check on the gRPC port; the gRPC probes could never pass because the server registers no grpc.health.v1 service
+      description: Probes use GET /healthz on the metrics port and a TCP check on the gRPC port, which work for every server image version and with or without TLS; kubelet gRPC probes cannot speak TLS
     - kind: security
       description: server.token is delivered as CHATCLI_SERVER_TOKEN from a Secret instead of a --token container argument, including with secrets.existingSecret
     - kind: fixed

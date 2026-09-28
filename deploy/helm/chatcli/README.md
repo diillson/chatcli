@@ -143,7 +143,7 @@ Set one of:
 
 ### Health probes
 
-The server does not register the standard `grpc.health.v1` service, and a kubelet gRPC probe cannot speak TLS, so the chart does not use gRPC probes:
+A kubelet gRPC probe cannot speak TLS, so the chart uses probes that work for every server image version and with or without TLS:
 
 - **startup / liveness**: `GET /healthz` on the metrics port (plain HTTP, no credential), or a TCP check on the gRPC port when `server.metricsPort` is `0`;
 - **readiness**: a TCP check on the gRPC port, so the Service only routes to a pod once the gRPC listener is bound (works with and without TLS).

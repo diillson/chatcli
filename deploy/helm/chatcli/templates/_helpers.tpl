@@ -97,9 +97,9 @@ ConfigMap carrying mcp_servers.json.
 {{/*
 Process probe for liveness and startup. GET /healthz on the metrics
 listener answers 200 as soon as the process is up and needs neither TLS nor
-a credential, which is all the kubelet can offer (it cannot do a gRPC probe
-over TLS, and the server does not register grpc.health.v1). With metrics
-disabled it falls back to a TCP connect on the gRPC port.
+a credential, and works for every server image version and with or without
+TLS (a kubelet gRPC probe cannot speak TLS). With metrics disabled it falls
+back to a TCP connect on the gRPC port.
 */}}
 {{- define "chatcli.processProbe" -}}
 {{- if .Values.server.metricsPort }}

@@ -78,10 +78,10 @@ spec:
           envFrom:
             - secretRef:
                 name: chatcli-server
-          # The server registers no grpc.health.v1 service, so a kubelet
-          # gRPC probe can never pass (nor can it speak TLS). Liveness and
-          # startup use GET /healthz on the metrics port; readiness checks
-          # the gRPC listener with a TCP connect.
+          # No kubelet gRPC probe: it cannot speak TLS. HTTP /healthz and TCP
+          # work for every server image version and with or without TLS.
+          # Liveness and startup use GET /healthz on the metrics port;
+          # readiness checks the gRPC listener with a TCP connect.
           startupProbe:
             httpGet:
               path: /healthz

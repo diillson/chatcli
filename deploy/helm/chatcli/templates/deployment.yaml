@@ -278,8 +278,8 @@ spec:
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
           {{- /*
-            The kubelet cannot run a gRPC probe here: the server registers no
-            grpc.health.v1 service and a gRPC probe cannot speak TLS.
+            No kubelet gRPC probe: it cannot speak TLS. HTTP /healthz and TCP
+            work for every server image version and with or without TLS.
             Liveness and startup ask the process (/healthz on the metrics
             port, TCP on the gRPC port when metrics are off); readiness asks
             the gRPC listener, so the Service only routes to a pod once the

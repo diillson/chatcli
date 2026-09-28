@@ -15,7 +15,8 @@ services:
 
       # The published port above only reaches the server if it listens on
       # the container's interface. Without this the server binds loopback
-      # INSIDE the container and nothing outside can connect.
+      # INSIDE the container: the health check still passes (it runs in
+      # there) while nothing outside can connect.
       CHATCLI_BIND_ADDRESS: "${CHATCLI_BIND_ADDRESS:-0.0.0.0}"
 
       # REQUIRED with the bind above: a server reachable from outside the
@@ -100,12 +101,9 @@ services:
       # Persist memory across restarts
       - chatcli-memory:/home/chatcli/.chatcli/memory
     restart: unless-stopped
-    # The image's HEALTHCHECK runs grpc-health-probe, which calls the
-    # standard grpc.health.v1 service the server does not register, so it
-    # would mark the container unhealthy forever. The distroless image has no
-    # shell or HTTP client to probe /healthz with instead, so it is disabled.
-    healthcheck:
-      disable: true
+    # The image HEALTHCHECK runs grpc-health-probe against :50051 in
+    # plaintext. With TLS enabled on the server, override it with the probe's
+    # -tls flags (e.g. -tls -tls-ca-cert <ca>) or it will report unhealthy.
     read_only: true
     tmpfs:
       - /tmp:size=100M
