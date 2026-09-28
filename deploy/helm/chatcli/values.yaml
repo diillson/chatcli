@@ -77,7 +77,9 @@ llm:
 fallback:
   enabled: false
   # Ordered list of providers to try after llm.provider (first = highest
-  # priority). Each entry needs a corresponding API key in secrets.
+  # priority). Each entry needs a corresponding API key in secrets. Each
+  # entry's model is rendered as CHATCLI_FALLBACK_MODEL_<NAME>; an entry
+  # without one uses that provider's default model.
   providers: []
   #   - name: OPENAI
   #     model: gpt-4o
@@ -198,7 +200,7 @@ watcher:
   interval: "30s"
   window: "2h"
   maxLogLines: 100
-  # Budget maximo de caracteres para contexto LLM (multi-target)
+  # Character budget for the LLM context (multi-target mode only)
   maxContextChars: 32000
 
 serviceAccount:
@@ -362,6 +364,10 @@ security:
   # For production: use jwtSecretRef to reference a Kubernetes Secret instead.
   jwtSecret: ""
   # Reference a Secret key for JWT secret (recommended over plain jwtSecret)
+  # JWT material fails closed: if a public key (or a PEM-looking secret)
+  # cannot be loaded and JWT is the only credential, the server refuses to
+  # start; with a token or mTLS also set, every JWT caller is rejected.
+  # Tokens must carry an exp claim.
   jwtSecretRef: {}
   #   name: chatcli-jwt
   #   key: secret
@@ -381,15 +387,17 @@ security:
   #   key: public.pem
 
   # Mutual TLS: path inside the container to the CA bundle client
-  # certificates are verified against. Requires tls.enabled with
-  # tls.certFile and tls.keyFile — there is no handshake to carry a client
-  # certificate without them — and then EVERY connection must present a
+  # certificates are verified against. Requires tls.enabled (with
+  # tls.existingSecret or both tls.certFile and tls.keyFile) — there is no
+  # handshake to carry a client certificate without it — and then EVERY
+  # connection must present a
   # client certificate. Point it at a ca.crt inside tls.existingSecret
   # (/etc/chatcli/tls/ca.crt), or mount a separate Secret with
   # extraVolumes + extraVolumeMounts (see below).
   tlsClientCA: ""
   # Role granted to callers identified by their client certificate alone
-  # (no bearer token): viewer, user/operator or admin. Default: user.
+  # (no bearer token): viewer/readonly, user/operator or admin. Default:
+  # user; an unknown value means readonly.
   mtlsRole: ""
 
   # Per-client rate limiting
@@ -421,7 +429,7 @@ security:
   # Session TTL in days (default: 90)
   sessionTTL: ""
 
-  # Environment variable redaction: "strict" or "permissive"
+  # Environment variable redaction: "off", "permissive" (default) or "strict"
   envRedactMode: ""
 
   # Allow unsigned plugins (dev only, default: false)
@@ -435,10 +443,16 @@ security:
   # For production: set via extraEnv with secretKeyRef instead.
   encryptionKey: ""
 
-# Extra environment variables
+# Extra environment variables. Logs go to stderr as JSON lines and to a
+# rotated file under /home/chatcli/.chatcli (a 200Mi emptyDir with the
+# read-only root filesystem); CHATCLI_LOG_MAX_SIZE_MB (default 100),
+# CHATCLI_LOG_MAX_BACKUPS (3), CHATCLI_LOG_MAX_AGE_DAYS (28) and
+# CHATCLI_LOG_COMPRESS (true) tune the rotation.
 extraEnv: []
 # - name: LOG_LEVEL
 #   value: "debug"
+# - name: CHATCLI_LOG_MAX_SIZE_MB
+#   value: "20"
 # - name: CHATCLI_AGENT_ALLOWLIST
 #   value: "terraform,ansible,packer"
 # - name: CHATCLI_ENCRYPTION_KEY

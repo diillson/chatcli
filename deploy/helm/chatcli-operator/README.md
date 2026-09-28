@@ -13,19 +13,20 @@ A Kubernetes operator for **autonomous incident detection, AI-powered root cause
 
 - **Autonomous Incident Pipeline**: Detection -> Correlation -> AI Analysis -> Remediation -> PostMortem
 - **17 Custom Resource Definitions**: Complete AIOps platform modeled as Kubernetes-native resources
-- **55 Remediation Actions**: Across Deployments, StatefulSets, DaemonSets, Jobs, CronJobs, nodes, storage, secrets, networking, and GitOps (Helm rollback, ArgoCD sync)
-- **Approval Workflows**: Auto, manual, and quorum modes with blast radius prediction, change windows, and configurable timeouts
+- **55 Remediation Action Types**: Across Deployments, StatefulSets, DaemonSets, Jobs, CronJobs, nodes (cordon, drain through the Eviction API so PodDisruptionBudgets hold), storage, secrets, networking, and GitOps (Helm rollback, ArgoCD sync); `Custom` is the one type never executed automatically
+- **Approval Workflows**: Auto, manual, and quorum modes with blast radius prediction, change windows, and configurable timeouts. The gate fails closed: a plan whose policies, insight or cluster tier cannot be read stays pending
 - **Decision Engine** (opt-in): confidence adjustment and a per-namespace circuit breaker in front of every plan
-- **SLO Monitoring**: Google SRE burn rate alerting with error budget tracking
-- **Chaos Engineering**: 7 experiment types for proactive resilience testing
+- **SLO Monitoring**: burn rate alerting and error budget tracking, optionally paging once when the budget is exhausted; the SLI is computed from the Issues and Anomalies of the SLO's namespace
+- **Incident SLAs**: response and resolution targets per severity (durations such as `15m`, `4h` or `1d`), with compliance tracking
+- **Chaos Engineering**: 5 runnable experiment types (`pod_kill`, `pod_failure`, `cpu_stress`, `memory_stress`, `disk_stress`), stress pods under the `restricted` profile, dry runs and safety checks
 - **Multi-Cluster Federation**: Register clusters and gate severities by cluster tier
-- **Escalation Policies**: L1 -> L2 -> L3 escalation chains with configurable timeouts
-- **Multi-Channel Notifications**: Slack, PagerDuty, Opsgenie, Email, Microsoft Teams, and webhooks, with throttling and deduplication
+- **Escalation Policies**: L1 -> L2 -> L3 escalation chains with configurable timeouts; the last level holds (and repeats with `repeatIntervalMinutes`) until the incident is acknowledged or resolved, and a snooze holds the page
+- **Multi-Channel Notifications**: Slack, PagerDuty, Opsgenie, Email (implicit TLS or STARTTLS, bounded timeout), Microsoft Teams, and webhooks, with throttling and deduplication
 - **Audit Trail**: every platform action recorded as an `AuditEvent` resource, queryable and exportable over the REST API
-- **Code-Aware Analysis**: Link workloads to git repositories for source-level incident diagnostics
-- **REST API**: `/api/v1/` endpoints for incidents, SLOs, runbooks, approvals, postmortems, analytics, clusters, policies and audit (port 8090)
+- **Code-Aware Analysis**: Link workloads to git repositories (token, basic or ssh with host key verification) for source-level incident diagnostics
+- **REST API**: `/api/v1/` endpoints for incidents, SLOs, runbooks, approvals, postmortems, AI insights, remediations, analytics, clusters, federation, policies and audit (port 8090), rate limited per client and per key
 - **Web Dashboard**: Built-in web interface for incident management, served on the same port
-- **Prometheus Metrics**: 30+ `chatcli_operator_*` metrics; 4 Grafana dashboards in [`deploy/grafana`](https://github.com/diillson/chatcli/tree/main/deploy/grafana)
+- **Prometheus Metrics**: 34 `chatcli_operator_*` metrics; 4 Grafana dashboards in [`deploy/grafana`](https://github.com/diillson/chatcli/tree/main/deploy/grafana)
 
 ## Prerequisites
 
@@ -84,13 +85,13 @@ cosign verify ghcr.io/diillson/chatcli-operator:<version> \
 
 The REST API and dashboard (port 8090) are fail-closed: until API keys exist every `/api/` call returns 401 (unless `security.devMode=true`, which is for development only). Keys are sent in the `X-API-Key` header.
 
-The operator reads them from a Secret with the fixed name **`chatcli-operator-secrets`**, key **`api-keys`**, in its own namespace, and re-reads it every 30 seconds. The value is a YAML list of `key` / `role` / `description`; roles are `viewer` (read), `operator` (acknowledge, snooze, resolve, approve, review) and `admin` (everything, including deletes).
+The operator reads them from a Secret with the fixed name **`chatcli-operator-secrets`**, key **`api-keys`**, in its own namespace, and re-reads it every 30 seconds. The value is a YAML list of `key` / `role` / `name` / `description`; roles are `viewer` (read), `operator` (acknowledge, snooze, resolve, approve, reject, review, create and edit runbooks) and `admin` (everything, including deletes). `name` is the identity recorded on the approval decisions the key takes (it falls back to `description`, then to a fingerprint of the key); a quorum counts each key once, so give every approver a key of their own.
 
 Create it yourself (recommended; also works with External Secrets or Vault):
 
 ```bash
 kubectl -n chatcli-system create secret generic chatcli-operator-secrets \
-  --from-literal=api-keys="$(printf -- '- key: "%s"\n  role: admin\n  description: platform team\n' "$(openssl rand -hex 32)")"
+  --from-literal=api-keys="$(printf -- '- key: "%s"\n  role: admin\n  name: platform-team\n' "$(openssl rand -hex 32)")"
 ```
 
 or let the chart render it (the keys are then stored in the Helm release):
@@ -101,10 +102,13 @@ apiKeys:
   entries:
     - key: "<generate with: openssl rand -hex 32>"
       role: admin
+      name: alice
       description: platform team
 ```
 
-A ConfigMap `chatcli-operator-config` with the same `api-keys` key is still read as a fallback when the Secret is absent.
+A ConfigMap `chatcli-operator-config` with the same `api-keys` key is still read as a fallback when the Secret is absent or carries no keys. An edit that is not valid YAML keeps the last good set in force (the error is logged); deleting both the Secret and the ConfigMap revokes every key on the next poll.
+
+`/api/` calls are rate limited: 30 requests per minute per client host without a valid key, 600 per minute per API key. Over the limit the API answers `429` with a `Retry-After` header. `/healthz`, `/readyz` and the dashboard's static files are not limited.
 
 Open the dashboard:
 
@@ -155,7 +159,14 @@ kubectl -n chatcli get instance chatcli \
   -o jsonpath='{range .status.conditions[*]}{.type}={.status} {.reason}: {.message}{"\n"}{end}'
 ```
 
-`AuthenticationConfigured`, `Available` and `ServerReachable` should all be `True`. With `spec.image.tag` unset the server image is pinned to the operator's own release. Only one Instance per cluster drives the AIOps pipeline: the operator connects to the first ready Instance it finds.
+`AuthenticationConfigured`, `TLSConfigured`, `Available` and `ServerReachable` should all be `True` (with a JWT public key, `OperatorCredentialConfigured` too). `ServerReachable` comes from a probe the operator repeats every 5 minutes -- the server's `Health` RPC plus an authenticated `GetServerInfo` call -- so it also turns `False` when a running server stops answering or rejects the operator's credential. With `spec.image.tag` unset the server image is pinned to the operator's own release. Only one Instance per cluster drives the AIOps pipeline: the operator connects to the first ready Instance it finds.
+
+What the operator manages on the server pod:
+
+- **Probes**: startup, readiness and liveness are `GET /healthz` on the `metrics` port (plain HTTP, no credential), so they work with and without TLS.
+- **Rollouts on change**: every Secret the Instance references (`apiKeys`, `server.token`, the TLS and client CA Secrets, the JWT and operator credential Secrets, the CA bundle, the encryption key, `extraEnv` Secret references) and every ConfigMap it mounts is watched, and a hash of what the pod uses is kept in a pod annotation -- rotating a credential or editing a mounted ConfigMap rolls the pods.
+- **Storage**: with `spec.persistence.enabled` the Deployment uses the `Recreate` strategy (a `ReadWriteOnce` volume cannot be attached to the old and new pod at once), and the pod runs with `fsGroup: 1000`.
+- **Fallback**: `spec.fallback` puts `spec.provider` (with `spec.model`) in front of the listed providers unless the list already names it.
 
 A complete sample (namespace, Secrets and Instance) is in [`operator/config/samples/platform_v1alpha1_instance.yaml`](https://github.com/diillson/chatcli/blob/main/operator/config/samples/platform_v1alpha1_instance.yaml).
 
@@ -208,7 +219,7 @@ A complete sample (namespace, Secrets and Instance) is in [`operator/config/samp
 
 | Parameter | Description | Default |
 |-----------|-------------|---------|
-| `replicaCount` | Operator replicas. Only the leader serves the REST API and runs the alert bridge | `1` |
+| `replicaCount` | Operator replicas. Every replica serves the REST API and dashboard behind the Service; the reconcilers and the alert bridge run on the leader only | `1` |
 | `leaderElect` | Leader election (lease `chatcli-operator-lock`); keep it on with more than one replica | `true` |
 | `image.repository` | Operator image | `ghcr.io/diillson/chatcli-operator` |
 | `image.tag` | Image tag (defaults to the chart `appVersion`) | `""` |
@@ -255,7 +266,13 @@ The chart also sets `CHATCLI_OPERATOR_APP_VERSION` to the chart `appVersion`: In
 
 ### RBAC & pod security
 
-The operator needs cluster-wide access to watch and remediate workloads. Its ClusterRole includes read/write on workloads, Secrets and ConfigMaps (it provisions Instance resources and rotates secrets as a remediation), RoleBindings/ClusterRoleBindings for Instance watchers, and `bind` only on the ClusterRoles the chart pre-provisions (`chatcli-watcher`, `chatcli-role-viewer|operator|admin|superadmin`). Review `templates/rbac.yaml` before installing in a regulated cluster.
+The operator needs cluster-wide access to watch and remediate workloads. Its ClusterRole includes:
+
+- read/write (no delete) on Secrets and ConfigMaps -- it provisions Instance resources and rotates secrets as a remediation;
+- write access to the workloads and the kinds `ApplyManifest` may create (HPAs, Ingresses, PodDisruptionBudgets, and the Prometheus Operator and Istio kinds, whose rules stay inert when those APIs are absent), `update`/`patch` on nodes and `create` on `pods/eviction` for cordon and drain, and pod `create`/`delete` for chaos experiments;
+- Roles/RoleBindings and ClusterRoleBindings for Instance watchers, with `bind` only on the ClusterRoles the chart pre-provisions (`chatcli-watcher`, `chatcli-role-viewer|operator|admin|superadmin`). The operator binds `chatcli-watcher` itself; the `chatcli-role-*` roles are for cluster administrators to bind to people or groups.
+
+Review `templates/rbac.yaml` before installing in a regulated cluster.
 
 | Parameter | Description | Default |
 |-----------|-------------|---------|
@@ -270,8 +287,9 @@ The default pod and container security contexts satisfy the `restricted` Pod Sec
 
 ### Security hardening
 
-- **Fail-closed REST API authentication** -- API keys are required for every `/api/` endpoint; there is no anonymous access unless `security.devMode` is enabled
-- **Resource type allowlist for remediation** -- 17 resource kinds are allowed by default; any other kind is refused, and 18 dangerous kinds (Namespace, Node, PersistentVolume, ...) are refused with an explicit reason unless added with `security.allowedResourceTypes`
+- **Fail-closed REST API authentication** -- API keys are required for every `/api/` endpoint; there is no anonymous access unless `security.devMode` is enabled and no key exists; requests are rate limited per client host and per key
+- **Fail-closed approval gate** -- a RemediationPlan whose ApprovalPolicies, AI insight or cluster tier cannot be read stays pending (Warning Event `ApprovalGateUnavailable`) instead of running; decisions made over the REST API go through the same quorum and change-window rules as annotations
+- **Resource type allowlist for remediation** -- 16 resource kinds are allowed by default; any other kind is refused, and 18 dangerous kinds (Namespace, Node, PersistentVolume, ...) are refused with an explicit reason unless added with `security.allowedResourceTypes`
 - **Log scrubbing before LLM submission** -- 18 built-in regex patterns redact secrets, tokens, passwords and PII from log data before it is sent for analysis; extend them with `security.logScrubPatterns`
 - **CORS deny-all default** -- cross-origin requests are rejected unless an origin is configured
 - **TLS 1.3 to every server** -- the operator always dials Instances over TLS 1.3, verifying against the Instance's `ca.crt` (or system CAs), and can present a client certificate for mTLS
@@ -287,7 +305,7 @@ The default pod and container security contexts satisfy the `restricted` Pod Sec
 | `security.grpcTLS.certFile` | Operator-wide client certificate for dialing servers (used when an Instance sets no `operatorClientCertSecretName`) | `""` |
 | `security.grpcTLS.keyFile` | Key for `security.grpcTLS.certFile` | `""` |
 | `security.grpcTLS.caFile` | Operator-wide CA (absolute path), used when an Instance's TLS Secret has no `ca.crt` | `""` |
-| `security.allowedResourceTypes` | Extra comma-separated resource kinds remediation may touch, added to the 17 defaults | `""` |
+| `security.allowedResourceTypes` | Extra comma-separated resource kinds remediation may touch, added to the 16 defaults. The operator's ClusterRole must also allow the kind: the chart grants none beyond the defaults, so bind an extra ClusterRole to the operator ServiceAccount for it | `""` |
 | `security.logScrubPatterns` | Extra comma-separated regex patterns scrubbed from logs before analysis | `""` |
 | `security.allowedDiagnosticCommands` | Extra read-only diagnostic commands the remediation engine may run (comma-separated, appended to the 100 built-ins). Read by the operator, not by Instances | `""` |
 | `security.corsOrigin` | A single allowed CORS origin (kept for compatibility) | `""` |
@@ -318,7 +336,7 @@ extraVolumeMounts:
     mountPath: /etc/chatcli-operator/grpc-ca
     readOnly: true
 security:
-  allowedResourceTypes: "Rollout"   # e.g. an Argo Rollouts kind, on top of the defaults
+  allowedResourceTypes: "Rollout"   # e.g. an Argo Rollouts kind, on top of the defaults (plus your own RBAC for it)
   corsAllowedOrigins: ["https://dashboard.example.com"]
   apiTLS:
     certFile: /etc/chatcli-operator/api-tls/tls.crt
@@ -383,7 +401,7 @@ This chart installs 17 Custom Resource Definitions for the AIOps platform:
 | `ApprovalPolicy` | `ap` | Approval requirements for remediation (auto/manual/quorum) |
 | `ApprovalRequest` | `ar` | Pending approval with blast radius assessment |
 | `AuditEvent` | `ae` | Audit trail of platform actions |
-| `ChaosExperiment` | `chaos` | Chaos engineering experiments (7 types) |
+| `ChaosExperiment` | `chaos` | Chaos engineering experiments (5 runnable types; network faults and schedules are rejected) |
 | `ClusterRegistration` | `cr` | Multi-cluster federation registration |
 | `EscalationPolicy` | `ep` | L1 -> L2 -> L3 escalation chains for incidents |
 | `IncidentSLA` | `sla` | SLA targets for incident response and resolution by severity |
@@ -391,7 +409,7 @@ This chart installs 17 Custom Resource Definitions for the AIOps platform:
 | `Issue` | `iss` | Correlated operational problem detected in the cluster |
 | `NotificationPolicy` | `np` | Multi-channel notification rules |
 | `PostMortem` | `pm` | Auto-generated post-incident report |
-| `RemediationPlan` | `rp` | Remediation plan with 55 action types |
+| `RemediationPlan` | `rp` | Remediation plan (55 action types) |
 | `Runbook` | `rb` | Operational procedures linked to issue types |
 | `ServiceLevelObjective` | `slo` | SLO with burn rate alerting and error budgets |
 | `SourceRepository` | `srcrepo` | Links workloads to source code for code-aware analysis |
@@ -444,12 +462,16 @@ spec:
       timeoutMinutes: 60
 ```
 
+`defaultMode` is informational: the operator does not apply it, and a plan that matches no rule is not gated by the policy. To gate the remaining plans, end the rules with one whose `match` is empty. `allowedDays` takes full English day names.
+
 Approve or reject an `ApprovalRequest` with an annotation whose value is `<approver>:<reason>`:
 
 ```bash
 kubectl annotate approvalrequest <name> platform.chatcli.io/approve="oncall-sre:tested in staging"
 kubectl annotate approvalrequest <name> platform.chatcli.io/reject="oncall-sre:needs a rollback instead"
 ```
+
+or with `POST /api/v1/approvals/<name>/approve` (or `/reject`) and an `operator` key. Both paths only record a decision: the operator then applies the rule, so a quorum needs that many distinct approvers (distinct API keys over REST), the change window still holds, and a single rejection rejects the request.
 
 ### Service Level Objective
 
@@ -464,20 +486,38 @@ spec:
   serviceName: api-server
   indicator:
     type: availability          # availability | latency | error_rate | throughput
-    metricSource: prometheus    # prometheus | watcher | issues
-    prometheusQuery: >-
-      sum(rate(http_requests_total{code!~"5.."}[5m]))
-      / sum(rate(http_requests_total[5m]))
+    metricSource: issues
   target:
     percentage: 99.9
     window: 30d
   alertPolicy:
+    pageOnBudgetExhausted: true
     burnRateWindows:
       - shortWindow: 5m
         longWindow: 1h
         burnRateThreshold: 14.4
         severity: critical
 ```
+
+The SLI is computed from the Issues and Anomalies of the SLO's namespace. `metricSource: prometheus` and `prometheusQuery` are not queried: an SLO that sets them reports `MetricSourceSupported=False` and is still computed from Issues and Anomalies. With `pageOnBudgetExhausted`, an exhausted error budget opens one critical Issue, and pages again only after the budget has recovered.
+
+### Incident SLA
+
+One IncidentSLA per severity. Durations are Go durations with an optional leading day count (`15m`, `4h`, `1d`, `1d12h`); a value that does not parse sets `Ready=False` with reason `InvalidDuration`.
+
+```yaml
+apiVersion: platform.chatcli.io/v1alpha1
+kind: IncidentSLA
+metadata:
+  name: critical-sla
+  namespace: production
+spec:
+  severity: critical
+  responseTime: 15m
+  resolutionTime: 1d
+```
+
+A violation stays active until its Issue resolves; `status.compliancePercentage` counts every violation against the Issues tracked.
 
 ### Escalation Policy
 
@@ -503,11 +543,14 @@ spec:
         - type: team
           name: sre
       notifyChannels: ["slack-oncall", "pagerduty-team"]
+      repeatIntervalMinutes: 30   # re-page at the last level until someone acknowledges
 ```
+
+Escalation starts when an Issue reaches the `Escalated` state and moves one level per `timeoutMinutes`. At the last level it stays there, re-sending only when `repeatIntervalMinutes` is set. Acknowledging the incident (REST `acknowledge` or the dashboard) stops it at the current level, a snooze holds it until the snooze ends, and resolving the Issue closes it. The progress is kept on the Issue's annotations and in the policy's `status.activeEscalations`, so it survives an operator restart.
 
 ### Notification Policy
 
-Channel settings go in `config`, or in a Secret named by `secretRef` whose keys are merged into it (Slack and Teams read `webhook_url`, PagerDuty `routing_key`, webhooks `url`).
+Channel settings go in `config`, or in a Secret named by `secretRef` (in the policy's namespace) whose keys are merged into it: Slack and Teams read `webhook_url`, PagerDuty `routing_key`, Opsgenie `api_key`, webhooks `url` (plus optional `method`, `headers`, `secret`). Email reads `smtp_host`, `smtp_port`, `smtp_user`, `smtp_password`, `from` and `to` (comma-separated); `smtp_tls: implicit` (the default on port 465) speaks TLS from the first byte, otherwise (`smtp_tls: starttls` or unset) the connection is upgraded with STARTTLS when the server offers it, and `smtp_timeout` (a Go duration, default `30s`) bounds the whole delivery.
 
 ```yaml
 apiVersion: platform.chatcli.io/v1alpha1
@@ -554,18 +597,21 @@ metadata:
   namespace: chaos-testing
 spec:
   enabled: true
-  experimentType: pod_failure   # pod_kill | pod_failure | cpu_stress | memory_stress | network_delay | network_loss | disk_stress
+  experimentType: pod_failure   # pod_kill | pod_failure | cpu_stress | memory_stress | disk_stress
   target:
     kind: Deployment
     name: api-server
     namespace: production
-  duration: 5m
-  schedule: "0 3 * * 1"
-  dryRun: true
+  duration: 5m                  # a Go duration (30s, 5m, 1h)
+  dryRun: true                  # report what would run, inject nothing
   safetyChecks:
     minHealthyPods: 1
     abortOnIssueDetected: true
 ```
+
+The CRD still accepts `network_delay` and `network_loss`, but the operator does not deploy the privileged tc/netem injector they need: such an experiment goes straight to `state: Failed` with a message saying nothing was injected. `spec.schedule` is rejected the same way -- recurring experiments are not implemented, so create one ChaosExperiment per run. Stress pods run under the `restricted` Pod Security profile (non-root, read-only root filesystem, no capabilities, no service account token).
+
+Issues raised while an experiment targets a resource are labeled `platform.chatcli.io/source=chaos-experiment` (and `platform.chatcli.io/chaos-experiment=<name>`). They are not escalated and are left out of the MTTD/MTTR figures, but NotificationPolicy rules still match them and remediation still runs.
 
 ### Source Repository (code-aware analysis)
 

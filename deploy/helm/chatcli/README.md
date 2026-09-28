@@ -19,7 +19,7 @@ Deploy **ChatCLI** as a security-hardened gRPC server on Kubernetes -- a multi-p
 - **Kubernetes Watcher**: Multi-target workload monitoring (status, pods, events, logs, metrics, HPA, Prometheus scraping) injected into LLM context
 - **Persistent Memory & Sessions**: Sessions and long-term memory on a PVC
 - **Plugins, Skills & Bootstrap files**: Provisioned from ConfigMaps, an init image or a PVC
-- **gRPC Server**: TLS 1.3, mutual TLS, shared token or per-user JWT (HS256/RS256), per-client rate limiting, message-size limits, Prometheus metrics
+- **gRPC Server**: TLS 1.3, mutual TLS, shared token or per-user JWT (HS256/RS256), per-client rate limiting, a per-host limit on failed authentications, message-size limits, the standard `grpc.health.v1` health service, Prometheus metrics
 - **Hardened pod**: non-root, read-only root filesystem, all capabilities dropped, RuntimeDefault seccomp -- the `restricted` Pod Security Standard
 
 ## Prerequisites
@@ -105,8 +105,8 @@ export CHATCLI_REMOTE_TOKEN="$(kubectl -n chatcli get secret chatcli \
 kubectl -n chatcli port-forward svc/chatcli 50051:50051
 CHATCLI_ALLOW_INSECURE=true chatcli connect localhost:50051 --token "$CHATCLI_REMOTE_TOKEN"
 
-# TLS server
-chatcli connect chatcli.example.com:443 --tls --ca-cert ca.crt --token "$CHATCLI_REMOTE_TOKEN"
+# TLS server (--ca-cert implies --tls; plain --tls verifies against the system CAs)
+chatcli connect chatcli.example.com:443 --ca-cert ca.crt --token "$CHATCLI_REMOTE_TOKEN"
 
 # One-shot mode (CI/CD pipelines)
 chatcli connect chatcli.example.com:443 --tls --token "$CHATCLI_REMOTE_TOKEN" \
@@ -130,6 +130,8 @@ Set one of:
 | Mutual TLS | `tls.*` plus `security.tlsClientCA` | every connection must present a client certificate |
 | No credential | `security.bindAddress: "127.0.0.1"` | the server is only reached from inside its own pod |
 
+JWT material fails closed: when `security.jwtPublicKey*` (or a `jwtSecret` that looks like a PEM key) cannot be loaded and JWT is the only credential, the server refuses to start (`refusing to start: CHATCLI_JWT_PUBLIC_KEY is set but no RSA public key could be loaded ...`); with a shared token or mTLS also configured it keeps serving and rejects every JWT caller. Repeated failed authentications from one host are throttled (5 per minute), valid credentials are never counted.
+
 `server.token` is delivered to the server as `CHATCLI_SERVER_TOKEN` from a Secret, never as a command-line argument. Prefer `security.jwtSecretRef` / `jwtPublicKeyRef` over the inline `jwtSecret` / `jwtPublicKey`: inline values land in the Deployment's env, a reference keeps them in a Secret.
 
 ### gRPC server
@@ -147,6 +149,8 @@ A kubelet gRPC probe cannot speak TLS, so the chart uses probes that work for ev
 
 - **startup / liveness**: `GET /healthz` on the metrics port (plain HTTP, no credential), or a TCP check on the gRPC port when `server.metricsPort` is `0`;
 - **readiness**: a TCP check on the gRPC port, so the Service only routes to a pod once the gRPC listener is bound (works with and without TLS).
+
+The server also answers the standard `grpc.health.v1.Health` service without a credential (`SERVING` once the listener is up, `NOT_SERVING` while it shuts down), for `grpc-health-probe`, load balancers and service meshes that speak TLS. The image's own `HEALTHCHECK` uses it.
 
 ### TLS
 
@@ -196,13 +200,13 @@ tls:
 
 ### Provider fallback chain
 
-When the primary provider fails (rate limit, timeout, auth error, context overflow, model not found) the server tries the next provider, with exponential cooldown. The chain is **`llm.provider` followed by `fallback.providers`**: the chart puts `llm.provider` (with `llm.model`) in front unless you list it yourself, in which case your order is kept. The server installs the chain only when at least two of its providers have working credentials, and uses it for requests that bring no credentials or provider of their own.
+When the primary provider fails (rate limit, timeout, auth error, context overflow, model not found) the server tries the next provider, with exponential cooldown. The chain is **`llm.provider` followed by `fallback.providers`**: the chart puts `llm.provider` (with `llm.model`) in front unless you list it yourself, in which case your order is kept. Each entry runs its own `model` (`CHATCLI_FALLBACK_MODEL_<PROVIDER>`); an entry without one uses that provider's default model. The server installs the chain only when at least two of its providers have working credentials, and uses it for requests that bring no credentials or provider of their own. A non-empty `CHATCLI_FALLBACK_PROVIDERS` is what turns it on; the chart sets no separate enable variable.
 
 | Parameter | Description | Default |
 |-----------|-------------|---------|
 | `fallback.enabled` | Enable provider failover | `false` |
 | `fallback.providers` | Ordered providers to try after `llm.provider`, each `{name, model}` | `[]` |
-| `fallback.maxRetries` | Max retries per provider (`0` = no retries) | `2` |
+| `fallback.maxRetries` | Max retries (`CHATCLI_FALLBACK_MAX_RETRIES`; `0` = no retries) | `2` |
 | `fallback.cooldownBase` | Base cooldown after a failure | `"30s"` |
 | `fallback.cooldownMax` | Maximum cooldown | `"5m"` |
 
@@ -331,12 +335,14 @@ agents:
 
 | Parameter | Description | Default |
 |-----------|-------------|---------|
-| `persistence.enabled` | PVC `<fullname>-sessions` for sessions | `true` |
+| `persistence.enabled` | PVC `<fullname>-sessions` for sessions (see the note on rollouts below) | `true` |
 | `persistence.storageClass` | StorageClass (empty = cluster default, `-` = `storageClassName: ""`) | `""` |
 | `persistence.accessModes` | PVC access modes | `["ReadWriteOnce"]` |
 | `persistence.size` | PVC size | `1Gi` |
 | `memory.enabled` | Long-term memory at `~/.chatcli/memory` (on the sessions PVC when persistence is on) | `false` |
 | `pipeline.enabled` | Host the full turn engine behind the `ChatTurn`, `RunCoder`, `RunAgent` and tool RPCs (`CHATCLI_SERVER_PIPELINE`); exec RPCs require an admin caller; exclusive with the co-located gateway | `false` |
+
+The chart's Deployment keeps the default `RollingUpdate` strategy. With one replica and a `ReadWriteOnce` sessions volume, a rollout whose new pod is scheduled on another node cannot attach the volume until the old pod is gone, and the old pod stays until the new one is ready: pin the pod to a node, use a `ReadWriteMany` storage class, or scale to zero around the upgrade.
 
 ### Service, ingress, network policy
 
@@ -377,8 +383,8 @@ agents:
 | `security.jwtPublicKeyRef` | `{name, key}` of a Secret holding the RSA public key | `{}` |
 | `security.jwtIssuer` | Expected `iss` claim (empty skips the check) | `""` |
 | `security.jwtAudience` | Expected `aud` claim (empty skips the check) | `""` |
-| `security.tlsClientCA` | Path of the CA bundle client certificates are verified against (mTLS). Requires `tls.enabled` with `tls.certFile`/`tls.keyFile`; then every connection needs a client certificate. Use `/etc/chatcli/tls/ca.crt` from `tls.existingSecret`, or mount one with `extraVolumes` | `""` |
-| `security.mtlsRole` | Role for callers identified by a client certificate alone: `viewer`/`readonly`, `user`/`operator`, `admin` | `""` (user) |
+| `security.tlsClientCA` | Path of the CA bundle client certificates are verified against (mTLS). Requires `tls.enabled` (with `tls.existingSecret` or both paths); then every connection needs a client certificate. Use `/etc/chatcli/tls/ca.crt` from `tls.existingSecret`, or mount one with `extraVolumes` | `""` |
+| `security.mtlsRole` | Role for callers identified by a client certificate alone: `viewer`/`readonly`, `user`/`operator`, `admin` (an unknown value means `readonly`) | `""` (user) |
 | `security.rateLimitRps` | Per-client requests/second | `""` (10) |
 | `security.rateLimitBurst` | Per-client burst | `""` (20) |
 | `security.maxRecvMsgSize` | Max gRPC receive message size (bytes) | `""` (50MB) |
@@ -389,7 +395,7 @@ agents:
 | `security.debug` | Stack traces in error logs | `false` |
 | `security.agentSecurityMode` | Agent command validation: `strict` or `permissive` | `""` (strict) |
 | `security.sessionTTL` | Session expiry in days | `""` (90) |
-| `security.envRedactMode` | Env var redaction: `strict` or `permissive` | `""` (permissive) |
+| `security.envRedactMode` | Env var redaction: `off`, `permissive` or `strict` | `""` (permissive) |
 | `security.allowUnsignedPlugins` | Allow unsigned plugins (dev only) | `false` |
 | `security.allowInsecure` | Sets `CHATCLI_ALLOW_INSECURE`, which only the chatcli client reads; it does not change the server listener | `false` |
 | `security.encryptionKey` | Session encryption key, inline (prefer `extraEnv` with a `secretKeyRef`) | `""` |
@@ -427,6 +433,22 @@ extraVolumeMounts:
   - name: audit
     mountPath: /var/log/chatcli
 ```
+
+### Logs
+
+Inside a container the server writes JSON log lines to **stderr** (so `kubectl logs` and log collectors see them) as well as a rotated file, `/home/chatcli/.chatcli/app.log`. With the default read-only root filesystem that directory is an `emptyDir` limited to 200Mi, and the file rotation defaults (100 MB, 3 compressed backups) can come close to it -- lower them with `extraEnv`:
+
+```yaml
+extraEnv:
+  - name: LOG_LEVEL              # debug | info | warn | error
+    value: info
+  - name: CHATCLI_LOG_MAX_SIZE_MB
+    value: "20"
+  - name: CHATCLI_LOG_MAX_BACKUPS
+    value: "2"
+```
+
+`CHATCLI_LOG_MAX_AGE_DAYS` (default 28) and `CHATCLI_LOG_COMPRESS` (default `true`) are honored too. `CHATCLI_LOG_STDERR=false` turns the stderr stream off, `true` forces it on outside a container.
 
 ### Autoscaling and availability
 
@@ -495,7 +517,7 @@ This chart installs the 17 Custom Resource Definitions of the AIOps platform (th
 | `ApprovalPolicy` | `ap` | Approval requirements for remediation (auto/manual/quorum) |
 | `ApprovalRequest` | `ar` | Pending approval with blast radius assessment |
 | `AuditEvent` | `ae` | Audit trail of platform actions |
-| `ChaosExperiment` | `chaos` | Chaos engineering experiments (7 types) |
+| `ChaosExperiment` | `chaos` | Chaos engineering experiments (5 runnable types; network faults and schedules are rejected) |
 | `ClusterRegistration` | `cr` | Multi-cluster federation registration |
 | `EscalationPolicy` | `ep` | L1 -> L2 -> L3 escalation chains for incidents |
 | `IncidentSLA` | `sla` | SLA targets for incident response and resolution by severity |
@@ -503,7 +525,7 @@ This chart installs the 17 Custom Resource Definitions of the AIOps platform (th
 | `Issue` | `iss` | Correlated operational problem detected in the cluster |
 | `NotificationPolicy` | `np` | Multi-channel notification rules |
 | `PostMortem` | `pm` | Auto-generated post-incident report |
-| `RemediationPlan` | `rp` | Remediation plan with 55 action types |
+| `RemediationPlan` | `rp` | Remediation plan (55 action types) |
 | `Runbook` | `rb` | Operational procedures linked to issue types |
 | `ServiceLevelObjective` | `slo` | SLO with burn rate alerting and error budgets |
 | `SourceRepository` | `srcrepo` | Links workloads to source code for code-aware analysis |
@@ -516,8 +538,10 @@ This chart installs the 17 Custom Resource Definitions of the AIOps platform (th
 helm upgrade chatcli oci://ghcr.io/diillson/charts/chatcli \
   --version <version> \
   --namespace chatcli \
-  --reuse-values
+  --reset-then-reuse-values
 ```
+
+`--reset-then-reuse-values` (Helm 3.14+) starts from the new chart's defaults and re-applies your previous overrides. Plain `--reuse-values` re-applies the values stored in the release and skips the defaults of keys added by newer chart versions, so those keys render as if unset (or fail a template that expects them); with an older Helm, pass your values file (`-f my-values.yaml`) instead. The CRD hook refreshes the CRDs first.
 
 ## Uninstalling
 

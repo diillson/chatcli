@@ -7,7 +7,7 @@
     "replicaCount": {
       "type": "integer",
       "minimum": 1,
-      "description": "Number of operator pod replicas.",
+      "description": "Number of operator pod replicas. Every replica serves the REST API and dashboard; the reconcilers and the alert bridge run on the leader.",
       "default": 1
     },
     "image": {
@@ -68,7 +68,7 @@
     },
     "leaderElect": {
       "type": "boolean",
-      "description": "Enable leader election for the operator.",
+      "description": "Enable leader election (lease chatcli-operator-lock). Keep it on with more than one replica.",
       "default": true
     },
     "api": {
@@ -442,7 +442,7 @@
       "properties": {
         "devMode": {
           "type": "boolean",
-          "description": "Enable dev mode (disables REST API auth). NEVER use in production.",
+          "description": "Dev mode: while no API key is configured, the REST API admits every call as admin. NEVER use in production.",
           "default": false
         },
         "apiTLS": {
@@ -474,7 +474,7 @@
         },
         "allowedResourceTypes": {
           "type": "string",
-          "description": "Extra comma-separated resource kinds remediation may touch, added to the built-in defaults."
+          "description": "Extra comma-separated resource kinds remediation may touch, added to the 16 built-in defaults. The operator ClusterRole must also allow the kind."
         },
         "logScrubPatterns": {
           "type": "string",
