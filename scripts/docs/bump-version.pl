@@ -42,10 +42,13 @@ for my $path (@ARGV) {
         if ($in_fence) {
             $line =~ s/$tok/$new/g;
         } else {
-            # inline code spans
-            1 while $line =~ s/(`[^`\n]*?)$tok(?=[^`\n]*`)/$1$new/;
-            # bold spans
-            1 while $line =~ s/(\*\*[^*\n]*?)$tok(?=[^*\n]*\*\*)/$1$new/;
+            # inline code spans, then bold spans. Each line is split on the
+            # delimiter and only the segments inside a pair are rewritten:
+            # a regex that looks ahead for "the next delimiter" pairs a
+            # closing backtick with the following opening one and treats
+            # the prose between two spans as code.
+            $line = bump_spans($line, '`');
+            $line = bump_spans($line, '**');
             # URLs
             1 while $line =~ s/(https?:\/\/[^\s)<>"']*?)$tok/$1$new/;
         }
@@ -60,3 +63,17 @@ for my $path (@ARGV) {
     print "updated $path\n";
 }
 print "bump-version: $changed file(s) updated ($old -> $new)\n";
+
+# bump_spans rewrites the version token only inside complete $delim ... $delim
+# spans of one line. Segments alternate outside/inside; an unmatched trailing
+# delimiter leaves its tail untouched.
+sub bump_spans {
+    my ($text, $delim) = @_;
+    my @parts = split /\Q$delim\E/, $text, -1;
+    return $text if @parts < 3;
+    my $last_inside = @parts % 2 ? $#parts - 1 : $#parts - 2;
+    for (my $i = 1; $i <= $last_inside; $i += 2) {
+        $parts[$i] =~ s/$tok/$new/g;
+    }
+    return join $delim, @parts;
+}
