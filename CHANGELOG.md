@@ -1,5 +1,33 @@
 # Changelog
 
+## [1.212.0](https://github.com/diillson/chatcli/compare/v1.211.2...v1.212.0) (2026-09-28)
+
+
+### Features
+
+* **web:** serve the session slash commands in the browser and run templates as turns ([#1713](https://github.com/diillson/chatcli/issues/1713)) ([d2e3d9a](https://github.com/diillson/chatcli/commit/d2e3d9a2d64e812416d3525a3d0ee9a8f92e251d))
+
+
+### Bug Fixes
+
+* **deploy:** make the charts and raw manifests install, probe and document truthfully ([#1701](https://github.com/diillson/chatcli/issues/1701)) ([cf509a0](https://github.com/diillson/chatcli/commit/cf509a08c4362e6c4d068c41a2fd04eb38295ba0))
+* **deploy:** stop server chart rollouts deadlocking on the sessions volume and keep memory out of it ([#1718](https://github.com/diillson/chatcli/issues/1718)) ([cd22dc9](https://github.com/diillson/chatcli/commit/cd22dc91adf15514f4209cec5e181e6118c34c90))
+* **deploy:** stop the server chart from serving plaintext under tls.enabled and align compose, RBAC and connect with the server ([#1711](https://github.com/diillson/chatcli/issues/1711)) ([060c803](https://github.com/diillson/chatcli/commit/060c803c06a0978363de303615c25a424332f4ed))
+* **operator:** close approval gate bypasses and harden drain and chaos safety ([#1708](https://github.com/diillson/chatcli/issues/1708)) ([1dab650](https://github.com/diillson/chatcli/commit/1dab65080cc8b29fe5c7356185cff436f01b667c))
+* **operator:** close resolved SLA violations, count them in compliance and keep every cost booking ([#1710](https://github.com/diillson/chatcli/issues/1710)) ([6360292](https://github.com/diillson/chatcli/commit/6360292304b5b0dc872c7675d41bf06c1eac089f))
+* **operator:** harden managed Instance runtime and REST API behavior ([#1702](https://github.com/diillson/chatcli/issues/1702)) ([76090d6](https://github.com/diillson/chatcli/commit/76090d6834e92cca80efc1de6b96391642171f91))
+* **operator:** keep SourceRepository credentials out of the clone and verify ssh host keys ([#1716](https://github.com/diillson/chatcli/issues/1716)) ([281982e](https://github.com/diillson/chatcli/commit/281982e1ab7d6320e875ed0e255740e03d6561b1))
+* **operator:** make chaos, capacity, auto-resolve and the REST edges report what really happened ([#1712](https://github.com/diillson/chatcli/issues/1712)) ([5750222](https://github.com/diillson/chatcli/commit/5750222895c52b0bdd08ca303c2954a0194c766a))
+* **operator:** persist escalation, page SLO exhaustion once and export honest federation and dashboard metrics ([#1709](https://github.com/diillson/chatcli/issues/1709)) ([f5bcff9](https://github.com/diillson/chatcli/commit/f5bcff9f704afb5944cd84ddb3a558192fa3b979))
+* **operator:** roll pods on mounted config edits and stop dropping explicit settings ([#1715](https://github.com/diillson/chatcli/issues/1715)) ([d1ccdaa](https://github.com/diillson/chatcli/commit/d1ccdaac62373110dae343a445eb0ccfd65773a3))
+* **release:** stop the docs version bump from rewriting prose between two code spans ([#1719](https://github.com/diillson/chatcli/issues/1719)) ([3134108](https://github.com/diillson/chatcli/commit/3134108ff2840c2196ae2a02526da21e31e0bc5f))
+* **server:** give each fallback provider its own model and honor the command output cap ([#1714](https://github.com/diillson/chatcli/issues/1714)) ([25c9951](https://github.com/diillson/chatcli/commit/25c9951d1409a658ac255136ebe647a140308bac))
+* **server:** refuse to serve open when JWT material fails to load and answer standard gRPC health probes ([#1700](https://github.com/diillson/chatcli/issues/1700)) ([05e8992](https://github.com/diillson/chatcli/commit/05e89920a10064685af4c38f9f55c83c86f88b41))
+* **server:** send service logs to stderr in containers and honor the log rotation settings ([#1707](https://github.com/diillson/chatcli/issues/1707)) ([cab30bb](https://github.com/diillson/chatcli/commit/cab30bbee46c91a84b89385ab77b89d46e49ce24))
+* **server:** stop the auth failure limiter from throttling valid credentials ([#1706](https://github.com/diillson/chatcli/issues/1706)) ([c436d49](https://github.com/diillson/chatcli/commit/c436d49491919aebc95e1738cbba8d8b27cd7d16))
+* **web:** keep image attachments visible to the model and reachable by path ([#1704](https://github.com/diillson/chatcli/issues/1704)) ([134bf34](https://github.com/diillson/chatcli/commit/134bf34443423d5aee12d93be25354eaa903b9c8))
+* **web:** make the microphone work with the embedded speech engines ([#1705](https://github.com/diillson/chatcli/issues/1705)) ([33464b1](https://github.com/diillson/chatcli/commit/33464b1e7eb2cb5a6a0f227c5b23e447ee5afa0f))
+
 ## [1.211.2](https://github.com/diillson/chatcli/compare/v1.211.1...v1.211.2) (2026-09-26)
 
 
