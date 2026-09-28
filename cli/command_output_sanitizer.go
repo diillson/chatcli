@@ -10,6 +10,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 )
 
 const defaultMaxCommandOutput = 100 * 1024 // 100KB
@@ -53,10 +54,15 @@ var promptInjectionPatterns = []string{
 func SanitizeCommandOutput(cmd, output string) string {
 	maxSize := getMaxCommandOutputSize()
 
-	// Truncate if necessary
+	// Truncate if necessary, on a rune boundary: a cut through a multi-byte
+	// character leaves invalid UTF-8 that some providers reject outright.
 	truncated := false
 	if len(output) > maxSize {
-		output = output[:maxSize]
+		cut := maxSize
+		for cut > 0 && !utf8.RuneStart(output[cut]) {
+			cut--
+		}
+		output = output[:cut]
 		truncated = true
 	}
 

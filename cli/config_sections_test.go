@@ -184,6 +184,23 @@ func TestConfigServer_SkippedAndActive(t *testing.T) {
 	}
 }
 
+// CHATCLI_FALLBACK_ENABLED is not read by the server: /config shows it only
+// when set, labeled as such, and the providers list stays the switch.
+func TestConfigServer_FallbackEnabledIsLabeledNotRead(t *testing.T) {
+	c := minimalCLI(t)
+	t.Setenv("CHATCLI_FALLBACK_PROVIDERS", "OPENAI,CLAUDEAI")
+	t.Setenv("CHATCLI_FALLBACK_ENABLED", "")
+	out := captureStdout(t, func() { c.showConfigServer() })
+	if strings.Contains(out, "CHATCLI_FALLBACK_ENABLED") || !strings.Contains(out, "OPENAI,CLAUDEAI") {
+		t.Fatalf("unset CHATCLI_FALLBACK_ENABLED must not be listed:\n%s", out)
+	}
+	t.Setenv("CHATCLI_FALLBACK_ENABLED", "true")
+	out = captureStdout(t, func() { c.showConfigServer() })
+	if !strings.Contains(out, "CHATCLI_FALLBACK_ENABLED") || !strings.Contains(out, "not read") {
+		t.Fatalf("a set CHATCLI_FALLBACK_ENABLED must be labeled as not read:\n%s", out)
+	}
+}
+
 // Per-agent overrides are collected from os.Environ() with sort by key.
 // The snapshot/restore pattern keeps the test hermetic.
 func TestCollectPerAgentOverrides(t *testing.T) {

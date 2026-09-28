@@ -1,0 +1,3 @@
+{
+  "cfg.val.fallback_enabled_not_read": "%s (not read: the server builds the fallback chain from CHATCLI_FALLBACK_PROVIDERS when it lists two or more providers)"
+}
