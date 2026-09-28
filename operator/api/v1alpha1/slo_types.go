@@ -28,11 +28,13 @@ type SLOIndicator struct {
 	// Type of indicator.
 	Type SLOIndicatorType `json:"type"`
 
-	// MetricSource defines where to get the metric data.
+	// MetricSource defines where to get the metric data. Only the Issues and Anomalies
+	// of the SLO namespace are evaluated today: "prometheus" is accepted but not queried,
+	// and the SLO reports condition MetricSourceSupported=False when it is set.
 	// +kubebuilder:default="issues"
 	MetricSource SLOMetricSource `json:"metricSource"`
 
-	// PrometheusQuery is a PromQL query for custom metrics (used when metricSource=prometheus).
+	// PrometheusQuery is reserved for metricSource=prometheus and is not evaluated yet.
 	// +optional
 	PrometheusQuery string `json:"prometheusQuery,omitempty"`
 
@@ -82,11 +84,14 @@ type SLOAlertPolicy struct {
 	// +optional
 	BurnRateWindows []BurnRateWindow `json:"burnRateWindows,omitempty"`
 
-	// PageOnBudgetExhausted creates a critical issue when error budget is fully consumed.
+	// PageOnBudgetExhausted creates one critical issue when error budget is fully consumed.
+	// No further issue is opened while the budget stays exhausted; the page re-arms once
+	// the budget is back above zero.
 	// +optional
 	PageOnBudgetExhausted bool `json:"pageOnBudgetExhausted,omitempty"`
 
-	// NotificationPolicyRef references a NotificationPolicy to use for SLO alerts.
+	// NotificationPolicyRef is reserved and not read yet: SLO Issues are notified by every
+	// enabled NotificationPolicy whose rules match them (signalType slo_violation).
 	// +optional
 	NotificationPolicyRef string `json:"notificationPolicyRef,omitempty"`
 }
@@ -144,6 +149,10 @@ type ServiceLevelObjectiveStatus struct {
 	// ErrorBudgetRemaining is the remaining budget as a fraction (0.0-1.0).
 	ErrorBudgetRemaining float64 `json:"errorBudgetRemaining"`
 
+	// ErrorBudgetRemainingPercentage is ErrorBudgetRemaining as 0-100%.
+	// +optional
+	ErrorBudgetRemainingPercentage float64 `json:"errorBudgetRemainingPercentage"`
+
 	// ErrorBudgetConsumedPercentage is 0-100%.
 	ErrorBudgetConsumedPercentage float64 `json:"errorBudgetConsumedPercentage"`
 
@@ -178,7 +187,7 @@ type ServiceLevelObjectiveStatus struct {
 // +kubebuilder:printcolumn:name="Service",type="string",JSONPath=".spec.serviceName"
 // +kubebuilder:printcolumn:name="Target%",type="number",JSONPath=".spec.target.percentage"
 // +kubebuilder:printcolumn:name="Current",type="number",JSONPath=".status.currentValue"
-// +kubebuilder:printcolumn:name="BudgetRemaining%",type="number",JSONPath=".status.errorBudgetConsumedPercentage"
+// +kubebuilder:printcolumn:name="BudgetRemaining%",type="number",JSONPath=".status.errorBudgetRemainingPercentage"
 // +kubebuilder:printcolumn:name="BurnRate1h",type="number",JSONPath=".status.burnRate1h"
 // +kubebuilder:printcolumn:name="Age",type="date",JSONPath=".metadata.creationTimestamp"
 

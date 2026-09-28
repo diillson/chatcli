@@ -31,6 +31,7 @@ func (cli *ChatCLI) showConfigWeb() {
 		kv(p, i18n.T("cfg.web.session"), bound)
 	}
 	kv(p, i18n.T("cfg.web.log"), webLogPath())
+	cli.showConfigWebVoice(p)
 	fmt.Println(p)
 	fmt.Println(p + colorize(i18n.T("cfg.web.about"), ColorGray))
 	sectionEnd(ColorCyan)

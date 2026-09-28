@@ -95,18 +95,28 @@ func RunWeb(args []string, mgr manager.LLMManager, logger *zap.Logger) error {
 		fmt.Println(i18n.T("web.cli.bound", name))
 	}
 
+	// The page prefers the embedded (keyless, offline) speech engines for
+	// every direction the environment leaves unconfigured, and asks before
+	// their one-time download. Only this surface does: it has a person in
+	// front of a dialog, while the gateway and @speak keep the process
+	// defaults (cached embedded, then system and cloud engines).
+	sttChoice := transcription.SelectPreferEmbedded(logger)
+	voiceChoice := tts.SelectPreferEmbedded(logger)
 	srv, err := webui.Start(webui.Options{
-		Backend:   backend,
-		Page:      webPage,
-		Addr:      *addr,
-		Lang:      webLang(),
-		ThemeName: cli.ActiveThemeName(),
-		ThemeVars: cli.ActiveThemeCSSVars(),
-		Version:   version.GetCurrentVersion().Version,
-		Voice:     tts.NewFromEnv(logger),
-		STT:       transcription.NewFromEnv(logger),
-		Images:    imagegen.NewFromEnvContext(ctx, logger),
-		Logger:    logger,
+		Backend:     backend,
+		Page:        webPage,
+		Addr:        *addr,
+		Lang:        webLang(),
+		ThemeName:   cli.ActiveThemeName(),
+		ThemeVars:   cli.ActiveThemeCSSVars(),
+		Version:     version.GetCurrentVersion().Version,
+		Voice:       voiceChoice.Active,
+		STT:         sttChoice.Active,
+		STTChoice:   &sttChoice,
+		VoiceChoice: &voiceChoice,
+		STTLanguage: os.Getenv("CHATCLI_TRANSCRIPTION_LANG"),
+		Images:      imagegen.NewFromEnvContext(ctx, logger),
+		Logger:      logger,
 	})
 	if err != nil {
 		return fmt.Errorf("%s", i18n.T("web.cli.failed", err))

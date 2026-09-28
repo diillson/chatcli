@@ -186,7 +186,9 @@ func (s *APIServer) foldSLOSummary(ctx context.Context, summary *AnalyticsSummar
 	}
 	summary.TotalSLOs = len(items)
 	for _, item := range items {
-		if isUnstructuredStateOneOf(item, "AtRisk", "Breached") {
+		statusMap, _ := item["status"].(map[string]interface{})
+		switch sloStateFromStatus(statusMap) {
+		case sloStateAtRisk, sloStateBreached:
 			summary.SLOsAtRisk++
 		}
 	}

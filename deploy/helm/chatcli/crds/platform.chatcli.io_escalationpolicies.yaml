@@ -17,9 +17,6 @@ spec:
   scope: Namespaced
   versions:
   - additionalPrinterColumns:
-    - jsonPath: .spec.levels
-      name: Levels
-      type: integer
     - jsonPath: .spec.defaultPolicy
       name: Default
       type: boolean
@@ -81,8 +78,9 @@ spec:
                     repeatIntervalMinutes:
                       default: 0
                       description: |-
-                        RepeatIntervalMinutes re-notifies at this interval until acknowledged or escalated.
-                        0 = no repeat.
+                        RepeatIntervalMinutes re-sends this level's notification at this interval until the
+                        Issue is acknowledged, advances to the next level or resolves. The last level keeps
+                        repeating after its timeout. A snoozed Issue does not repeat. 0 = no repeat.
                       format: int32
                       type: integer
                     targets:
@@ -110,8 +108,10 @@ spec:
                       type: array
                     timeoutMinutes:
                       default: 15
-                      description: TimeoutMinutes is the time to wait before escalating
-                        to the next level.
+                      description: |-
+                        TimeoutMinutes is the time to wait before escalating to the next level. An
+                        acknowledged Issue does not escalate further; a snoozed one holds its level and
+                        the level's clock restarts when the snooze ends.
                       format: int32
                       type: integer
                   required:

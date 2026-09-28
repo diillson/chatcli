@@ -256,7 +256,12 @@ type SLOItem struct {
 	CurrentValue         float64 `json:"currentValue,omitempty"`
 	ErrorBudgetTotal     float64 `json:"errorBudgetTotal,omitempty"`
 	ErrorBudgetUsed      float64 `json:"errorBudgetUsed,omitempty"`
-	ErrorBudgetRemaining float64 `json:"errorBudgetRemaining,omitempty"`
+	ErrorBudgetRemaining float64 `json:"errorBudgetRemaining"`
+	BurnRate1h           float64 `json:"burnRate1h"`
+	BurnRate6h           float64 `json:"burnRate6h"`
+	BurnRate24h          float64 `json:"burnRate24h"`
+	BurnRate72h          float64 `json:"burnRate72h"`
+	ActiveAlerts         int     `json:"activeAlerts"`
 	State                string  `json:"state,omitempty"`
 	CreationTimestamp    string  `json:"creationTimestamp"`
 }
@@ -276,13 +281,15 @@ type SLOBudgetItem struct {
 
 // ClusterItem is the REST representation of a ClusterRegistration (unstructured).
 type ClusterItem struct {
-	Name               string            `json:"name"`
-	Namespace          string            `json:"namespace"`
-	DisplayName        string            `json:"displayName,omitempty"`
-	Region             string            `json:"region,omitempty"`
-	Environment        string            `json:"environment,omitempty"`
-	Tier               string            `json:"tier,omitempty"`
-	Connected          bool              `json:"connected"`
+	Name        string `json:"name"`
+	Namespace   string `json:"namespace"`
+	DisplayName string `json:"displayName,omitempty"`
+	Region      string `json:"region,omitempty"`
+	Environment string `json:"environment,omitempty"`
+	Tier        string `json:"tier,omitempty"`
+	Connected   bool   `json:"connected"`
+	// Degraded is true when the cluster answers but some nodes are not Ready.
+	Degraded           bool              `json:"degraded,omitempty"`
 	Version            string            `json:"version,omitempty"`
 	NodeCount          int64             `json:"nodeCount,omitempty"`
 	NamespaceCount     int64             `json:"namespaceCount,omitempty"`

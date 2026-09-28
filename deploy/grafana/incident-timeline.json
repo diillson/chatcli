@@ -18,9 +18,9 @@
       "gridPos": { "h": 4, "w": 4, "x": 0, "y": 1 },
       "id": 2,
       "options": { "colorMode": "background", "graphMode": "area", "reduceOptions": { "calcs": ["lastNotNull"] } },
-      "title": "Critical Issues (Active)",
+      "title": "Critical Issues Detected (24h)",
       "type": "stat",
-      "targets": [{ "expr": "sum(chatcli_operator_issues_total{severity=\"critical\",state=~\"Detected|Analyzing|Remediating\"}) or vector(0)", "legendFormat": "Critical", "refId": "A" }]
+      "targets": [{ "expr": "sum(increase(chatcli_operator_issues_total{severity=\"critical\",state=\"Analyzing\"}[24h])) or vector(0)", "legendFormat": "Critical", "refId": "A" }]
     },
     {
       "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
@@ -408,7 +408,7 @@
       "type": "gauge",
       "targets": [
         {
-          "expr": "100 * (sum(increase(chatcli_operator_notifications_sent_total{status=\"success\"}[24h])) or vector(0)) / clamp_min(sum(increase(chatcli_operator_notifications_sent_total[24h])) or vector(1), 1)",
+          "expr": "100 * (sum(increase(chatcli_operator_notifications_sent_total{result=\"success\"}[24h])) or vector(0)) / clamp_min(sum(increase(chatcli_operator_notifications_sent_total[24h])) or vector(1), 1)",
           "legendFormat": "Success %",
           "refId": "A"
         }

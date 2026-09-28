@@ -26,7 +26,7 @@ spec:
     - jsonPath: .status.currentValue
       name: Current
       type: number
-    - jsonPath: .status.errorBudgetConsumedPercentage
+    - jsonPath: .status.errorBudgetRemainingPercentage
       name: BudgetRemaining%
       type: number
     - jsonPath: .status.burnRate1h
@@ -96,12 +96,15 @@ spec:
                       type: object
                     type: array
                   notificationPolicyRef:
-                    description: NotificationPolicyRef references a NotificationPolicy
-                      to use for SLO alerts.
+                    description: |-
+                      NotificationPolicyRef is reserved and not read yet: SLO Issues are notified by every
+                      enabled NotificationPolicy whose rules match them (signalType slo_violation).
                     type: string
                   pageOnBudgetExhausted:
-                    description: PageOnBudgetExhausted creates a critical issue when
-                      error budget is fully consumed.
+                    description: |-
+                      PageOnBudgetExhausted creates one critical issue when error budget is fully consumed.
+                      No further issue is opened while the budget stays exhausted; the page re-arms once
+                      the budget is back above zero.
                     type: boolean
                 type: object
               description:
@@ -127,15 +130,18 @@ spec:
                     type: integer
                   metricSource:
                     default: issues
-                    description: MetricSource defines where to get the metric data.
+                    description: |-
+                      MetricSource defines where to get the metric data. Only the Issues and Anomalies
+                      of the SLO namespace are evaluated today: "prometheus" is accepted but not queried,
+                      and the SLO reports condition MetricSourceSupported=False when it is set.
                     enum:
                     - prometheus
                     - watcher
                     - issues
                     type: string
                   prometheusQuery:
-                    description: PrometheusQuery is a PromQL query for custom metrics
-                      (used when metricSource=prometheus).
+                    description: PrometheusQuery is reserved for metricSource=prometheus
+                      and is not evaluated yet.
                     type: string
                   resource:
                     description: Resource is the target resource to measure (used
@@ -301,6 +307,10 @@ spec:
               errorBudgetRemaining:
                 description: ErrorBudgetRemaining is the remaining budget as a fraction
                   (0.0-1.0).
+                type: number
+              errorBudgetRemainingPercentage:
+                description: ErrorBudgetRemainingPercentage is ErrorBudgetRemaining
+                  as 0-100%.
                 type: number
               errorBudgetTotal:
                 description: ErrorBudgetTotal is the total allowed error rate (1 -
