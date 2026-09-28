@@ -36,7 +36,9 @@ func drainFixture() []client.Object {
 		&corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "node-1"}},
 		pod("app", nil),
 		pod("guarded", nil),
-		pod("ds", func(p *corev1.Pod) { p.OwnerReferences = []metav1.OwnerReference{{Kind: "DaemonSet", Name: "d", APIVersion: "apps/v1", UID: "u"}} }),
+		pod("ds", func(p *corev1.Pod) {
+			p.OwnerReferences = []metav1.OwnerReference{{Kind: "DaemonSet", Name: "d", APIVersion: "apps/v1", UID: "u"}}
+		}),
 		pod("mirror", func(p *corev1.Pod) { p.Annotations = map[string]string{corev1.MirrorPodAnnotationKey: "x"} }),
 		pod("elsewhere", func(p *corev1.Pod) { p.Spec.NodeName = "node-2" }),
 	}
