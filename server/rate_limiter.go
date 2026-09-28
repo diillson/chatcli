@@ -73,6 +73,7 @@ type PerClientRateLimiter struct {
 	config   RateLimiterConfig
 	logger   *zap.Logger
 	stopChan chan struct{}
+	stopOnce sync.Once
 }
 
 // NewPerClientRateLimiter creates a rate limiter and starts background cleanup.
@@ -124,9 +125,11 @@ func (rl *PerClientRateLimiter) StreamInterceptor() grpc.StreamServerInterceptor
 	}
 }
 
-// Stop shuts down the background cleanup goroutine.
+// Stop shuts down the background cleanup goroutine. It is safe to call
+// more than once: a server stopped by a signal and then by its owner must
+// not panic on the second close.
 func (rl *PerClientRateLimiter) Stop() {
-	close(rl.stopChan)
+	rl.stopOnce.Do(func() { close(rl.stopChan) })
 }
 
 func (rl *PerClientRateLimiter) extractClientID(ctx context.Context) string {

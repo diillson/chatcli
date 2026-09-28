@@ -206,6 +206,19 @@ jobs:
       # release publishes the same hardened image instead of leaving it
       # to the next drift-remediation cycle. Trade-off: ~2-5 min slower
       # per arch, acceptable for a tag-triggered job.
+      # The server reports this version over GetServerInfo/Health, which the
+      # operator surfaces as the Instance status.serverVersion.
+      - name: Build metadata
+        id: buildmeta
+        env:
+          TAG_NAME: ${{ needs.release_please.outputs.tag_name }}
+        run: |
+          {
+            echo "version=${TAG_NAME}"
+            echo "commit=$(git rev-parse --short HEAD)"
+            echo "date=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          } >> "$GITHUB_OUTPUT"
+
       - name: Build and push by digest
         id: build
         uses: docker/build-push-action@v7
@@ -213,6 +226,10 @@ jobs:
           context: .
           platforms: ${{ matrix.platform }}
           labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            VERSION=${{ steps.buildmeta.outputs.version }}
+            COMMIT_HASH=${{ steps.buildmeta.outputs.commit }}
+            BUILD_DATE=${{ steps.buildmeta.outputs.date }}
           outputs: type=image,name=ghcr.io/diillson/chatcli,push-by-digest=true,name-canonical=true,push=true
           no-cache: true
           provenance: true
