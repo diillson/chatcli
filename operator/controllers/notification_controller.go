@@ -3,6 +3,7 @@ package controllers
 import (
 	"context"
 	"fmt"
+	"reflect"
 	"strconv"
 	"strings"
 	"sync"
@@ -29,9 +30,24 @@ const (
 	annotationEscalationLevel   = "platform.chatcli.io/escalation-level"
 	annotationEscalationTime    = "platform.chatcli.io/escalation-time"
 	annotationEscalationPolicy  = "platform.chatcli.io/escalation-policy"
+	// annotationEscalationNotifiedAt is when the current level was last
+	// notified; repeatIntervalMinutes counts from it.
+	annotationEscalationNotifiedAt = "platform.chatcli.io/escalation-notified-at"
+	// annotationEscalationPendingNotify marks a level notification held back
+	// by a snooze, delivered when the snooze ends.
+	annotationEscalationPendingNotify = "platform.chatcli.io/escalation-pending-notify"
 
 	maxRecentDeliveries = 20
 )
+
+// escalationAnnotationKeys are removed together when an Issue resolves.
+var escalationAnnotationKeys = []string{
+	annotationEscalationLevel,
+	annotationEscalationTime,
+	annotationEscalationPolicy,
+	annotationEscalationNotifiedAt,
+	annotationEscalationPendingNotify,
+}
 
 // Prometheus metrics for the notification controller.
 var (
@@ -55,6 +71,14 @@ var (
 		Name:      "escalation_level_reached",
 		Help:      "Escalation levels reached by policy and level name.",
 	}, []string{"policy", "level"})
+
+	notificationDuration = prometheus.NewHistogramVec(prometheus.HistogramOpts{
+		Namespace: "chatcli",
+		Subsystem: "operator",
+		Name:      "notification_duration_seconds",
+		Help:      "Time spent delivering one notification, by channel type, successful or not.",
+		Buckets:   prometheus.ExponentialBuckets(0.05, 2, 10),
+	}, []string{"channel_type"})
 )
 
 func init() {
@@ -62,7 +86,26 @@ func init() {
 		notificationsSentTotal,
 		notificationsFailedTotal,
 		escalationLevelReached,
+		notificationDuration,
 	)
+}
+
+// timedSend delivers msg and records how long the channel took.
+func timedSend(ctx context.Context, sender channels.ChannelSender, channelType string, msg *channels.NotificationMessage) error {
+	start := time.Now()
+	err := sender.Send(ctx, msg)
+	notificationDuration.WithLabelValues(channelType).Observe(time.Since(start).Seconds())
+	return err
+}
+
+// bypassesThrottle reports whether a delivery must go out even when the
+// deduplication window or the hourly cap would drop it: resolves for the
+// paging channels, which otherwise keep an incident open on their side.
+func bypassesThrottle(channelType platformv1alpha1.NotificationChannelType, state platformv1alpha1.IssueState) bool {
+	if state != platformv1alpha1.IssueStateResolved {
+		return false
+	}
+	return channelType == platformv1alpha1.ChannelPagerDuty || channelType == platformv1alpha1.ChannelOpsGenie
 }
 
 // NotificationReconciler reconciles Issue objects and sends notifications
@@ -100,73 +143,102 @@ func (r *NotificationReconciler) Reconcile(ctx context.Context, req ctrl.Request
 		return ctrl.Result{}, nil
 	}
 
-	// Check if state changed since last notification.
-	annotations := issue.GetAnnotations()
-	if annotations == nil {
-		annotations = make(map[string]string)
-	}
-	lastNotifiedState := annotations[annotationLastNotifiedState]
+	// Every change below touches annotations only. They are written back as
+	// one merge patch against this snapshot, so the escalation level, its
+	// timer and the last-notified state all survive the reconcile whether or
+	// not the Issue state changed.
+	original := issue.DeepCopy()
 
+	lastNotifiedState := issue.GetAnnotations()[annotationLastNotifiedState]
 	stateChanged := lastNotifiedState != currentState
 
-	// Handle escalation timer check even if state has not changed.
+	if stateChanged {
+		logger.Info("issue state changed", "from", lastNotifiedState, "to", currentState)
+		if err := r.notifyStateChange(ctx, &issue); err != nil {
+			return ctrl.Result{}, err
+		}
+		setIssueAnnotation(&issue, annotationLastNotifiedState, currentState)
+	}
+
+	// Handle the escalation timer whether or not the state changed; after
+	// a fresh initiation it yields the first level's timeout.
 	requeueAfter, escalationErr := r.handleEscalationTimer(ctx, &issue)
 	if escalationErr != nil {
 		logger.Error(escalationErr, "failed to handle escalation timer")
 	}
 
-	if !stateChanged {
-		if requeueAfter > 0 {
-			return ctrl.Result{RequeueAfter: requeueAfter}, nil
+	if err := r.persistAnnotations(ctx, original, &issue); err != nil {
+		if errors.IsNotFound(err) {
+			return ctrl.Result{}, nil
 		}
-		return ctrl.Result{}, nil
-	}
-
-	logger.Info("issue state changed", "from", lastNotifiedState, "to", currentState)
-
-	// Find matching NotificationPolicies.
-	var policies platformv1alpha1.NotificationPolicyList
-	if err := r.List(ctx, &policies); err != nil {
-		return ctrl.Result{}, fmt.Errorf("listing notification policies: %w", err)
-	}
-
-	for i := range policies.Items {
-		policy := &policies.Items[i]
-		if !policy.Spec.Enabled {
-			continue
-		}
-		if err := r.processPolicy(ctx, policy, &issue); err != nil {
-			logger.Error(err, "failed to process notification policy", "policy", policy.Name)
-		}
-	}
-
-	// Handle escalation initiation when issue reaches Escalated state.
-	// GAP-04 fix: chaos-induced Issues skip escalation entirely — chaos drills
-	// must not page on-call engineers. The PostMortem still records the timeline
-	// for audit, but no human gets a Slack/PagerDuty ping.
-	if issue.Status.State == platformv1alpha1.IssueStateEscalated && !IsChaosInduced(&issue) {
-		if err := r.initiateEscalation(ctx, &issue); err != nil {
-			logger.Error(err, "failed to initiate escalation")
-		}
-	} else if issue.Status.State == platformv1alpha1.IssueStateEscalated {
-		logger.Info("Skipping escalation: issue is chaos-induced", "issue", issue.Name,
-			"experiment", issue.Labels["platform.chatcli.io/chaos-experiment"])
-	}
-
-	// Update the last-notified-state annotation.
-	annotations[annotationLastNotifiedState] = currentState
-	issue.SetAnnotations(annotations)
-	if err := r.Update(ctx, &issue); err != nil {
-		if errors.IsConflict(err) {
-			return ctrl.Result{RequeueAfter: immediateRequeueDelay}, nil
-		}
-		return ctrl.Result{}, fmt.Errorf("updating issue annotation: %w", err)
+		return ctrl.Result{}, fmt.Errorf("updating issue annotations: %w", err)
 	}
 
 	if requeueAfter > 0 {
 		return ctrl.Result{RequeueAfter: requeueAfter}, nil
 	}
 	return ctrl.Result{}, nil
+}
+
+// notifyStateChange delivers the state-change notifications of every enabled
+// NotificationPolicy and starts escalation when the Issue reached Escalated.
+// A snoozed Issue gets no state-change notification except the one for
+// Resolved, which PagerDuty and OpsGenie need to close the page.
+func (r *NotificationReconciler) notifyStateChange(ctx context.Context, issue *platformv1alpha1.Issue) error {
+	logger := log.FromContext(ctx).WithValues("issue", issue.Name)
+
+	if until, snoozed := IncidentSnoozedUntil(issue, time.Now()); snoozed && issue.Status.State != platformv1alpha1.IssueStateResolved {
+		logger.Info("Issue is snoozed; state-change notification suppressed", "until", until.Format(time.RFC3339))
+	} else {
+		var policies platformv1alpha1.NotificationPolicyList
+		if err := r.List(ctx, &policies); err != nil {
+			return fmt.Errorf("listing notification policies: %w", err)
+		}
+		for i := range policies.Items {
+			policy := &policies.Items[i]
+			if !policy.Spec.Enabled {
+				continue
+			}
+			if err := r.processPolicy(ctx, policy, issue); err != nil {
+				logger.Error(err, "failed to process notification policy", "policy", policy.Name)
+			}
+		}
+	}
+
+	if issue.Status.State != platformv1alpha1.IssueStateEscalated {
+		return nil
+	}
+	// GAP-04 fix: chaos-induced Issues skip escalation entirely — chaos drills
+	// must not page on-call engineers. The PostMortem still records the timeline
+	// for audit, but no human gets a Slack/PagerDuty ping.
+	if IsChaosInduced(issue) {
+		logger.Info("Skipping escalation: issue is chaos-induced", "issue", issue.Name,
+			"experiment", issue.Labels["platform.chatcli.io/chaos-experiment"])
+		return nil
+	}
+	if err := r.initiateEscalation(ctx, issue); err != nil {
+		logger.Error(err, "failed to initiate escalation")
+	}
+	return nil
+}
+
+// persistAnnotations writes the annotation changes made during this reconcile
+// as a merge patch. Nothing is sent when nothing changed.
+func (r *NotificationReconciler) persistAnnotations(ctx context.Context, original, issue *platformv1alpha1.Issue) error {
+	if reflect.DeepEqual(original.GetAnnotations(), issue.GetAnnotations()) {
+		return nil
+	}
+	return r.Patch(ctx, issue, client.MergeFrom(original))
+}
+
+// setIssueAnnotation sets one annotation, allocating the map when needed.
+func setIssueAnnotation(issue *platformv1alpha1.Issue, key, value string) {
+	annotations := issue.GetAnnotations()
+	if annotations == nil {
+		annotations = make(map[string]string)
+	}
+	annotations[key] = value
+	issue.SetAnnotations(annotations)
 }
 
 // processPolicy evaluates a single NotificationPolicy against the issue and sends matching notifications.
@@ -200,9 +272,11 @@ func (r *NotificationReconciler) processPolicy(ctx context.Context, policy *plat
 				continue
 			}
 
-			// Check throttle.
+			// Check throttle. A resolve for PagerDuty or OpsGenie is always
+			// delivered: it is what closes the page on their side, so
+			// throttling it would leave an incident open that is already over.
 			throttleKey := fmt.Sprintf("%s/%s/%s", issue.Namespace, issue.Name, channelName)
-			if r.isThrottled(throttleKey, dedupWindow, maxPerHour) {
+			if r.isThrottled(throttleKey, dedupWindow, maxPerHour) && !bypassesThrottle(ch.Type, issue.Status.State) {
 				logger.Info("notification throttled", "channel", channelName, "issue", issue.Name)
 				continue
 			}
@@ -229,7 +303,7 @@ func (r *NotificationReconciler) processPolicy(ctx context.Context, policy *plat
 
 			// Build and send the notification message.
 			msg := r.buildMessage(issue, policy)
-			if err := sender.Send(ctx, msg); err != nil {
+			if err := timedSend(ctx, sender, string(ch.Type), msg); err != nil {
 				logger.Error(err, "failed to send notification", "channel", channelName)
 				notificationsSentTotal.WithLabelValues(string(ch.Type), string(issue.Spec.Severity), "failure").Inc()
 				notificationsFailedTotal.WithLabelValues(string(ch.Type), "send").Inc()
@@ -558,6 +632,11 @@ func (r *NotificationReconciler) initiateEscalation(ctx context.Context, issue *
 	if _, hasLevel := annotations[annotationEscalationLevel]; hasLevel {
 		return nil
 	}
+	// An acknowledged Issue has an owner: nobody else is paged for it.
+	if IncidentAcknowledged(issue) {
+		logger.Info("Issue is acknowledged; escalation not started")
+		return nil
+	}
 
 	// Find matching escalation policy.
 	var policies platformv1alpha1.EscalationPolicyList
@@ -608,11 +687,27 @@ func (r *NotificationReconciler) initiateEscalation(ctx context.Context, issue *
 
 	escalationLevelReached.WithLabelValues(matched.Name, matched.Spec.Levels[0].Name).Inc()
 
-	// Send notification for escalation level 0.
-	r.sendEscalationNotification(ctx, issue, matched, 0)
+	// Send notification for escalation level 0, or hold it until the snooze
+	// ends: the escalation timer delivers a held notification first thing.
+	r.notifyEscalationLevel(ctx, issue, matched, 0, now)
 
 	// Record active escalation on the policy status.
 	return r.recordActiveEscalation(ctx, matched, issue, 0)
+}
+
+// notifyEscalationLevel sends the notification of an escalation level, or,
+// while the Issue is snoozed, marks it pending so the timer sends it once the
+// snooze is over. Either way the annotations say what happened.
+func (r *NotificationReconciler) notifyEscalationLevel(ctx context.Context, issue *platformv1alpha1.Issue, policy *platformv1alpha1.EscalationPolicy, levelIdx int, now time.Time) {
+	if _, snoozed := IncidentSnoozedUntil(issue, now); snoozed {
+		setIssueAnnotation(issue, annotationEscalationPendingNotify, "true")
+		return
+	}
+	r.sendEscalationNotification(ctx, issue, policy, levelIdx)
+	annotations := issue.GetAnnotations()
+	delete(annotations, annotationEscalationPendingNotify)
+	annotations[annotationEscalationNotifiedAt] = now.UTC().Format(time.RFC3339)
+	issue.SetAnnotations(annotations)
 }
 
 // escalationPolicyMatchesSeverity checks if the policy applies to the given severity.
@@ -628,119 +723,221 @@ func (r *NotificationReconciler) escalationPolicyMatchesSeverity(policy *platfor
 	return false
 }
 
-// handleEscalationTimer checks if the current escalation level has timed out and advances to the next level.
-// Returns the duration to requeue after (for the next level timeout), or 0 if no requeue is needed.
+// escalationCursor is the escalation state an Issue carries in annotations.
+type escalationCursor struct {
+	level      int
+	since      time.Time
+	policyName string
+}
+
+// readEscalationCursor parses the escalation annotations. ok is false when
+// the Issue is not being escalated.
+func readEscalationCursor(annotations map[string]string) (escalationCursor, bool, error) {
+	levelStr, hasLevel := annotations[annotationEscalationLevel]
+	timeStr, hasTime := annotations[annotationEscalationTime]
+	policyName, hasPolicy := annotations[annotationEscalationPolicy]
+	if !hasLevel || !hasTime || !hasPolicy {
+		return escalationCursor{}, false, nil
+	}
+	level, err := strconv.Atoi(levelStr)
+	if err != nil {
+		return escalationCursor{}, false, fmt.Errorf("parsing escalation level: %w", err)
+	}
+	since, err := time.Parse(time.RFC3339, timeStr)
+	if err != nil {
+		return escalationCursor{}, false, fmt.Errorf("parsing escalation time: %w", err)
+	}
+	return escalationCursor{level: level, since: since, policyName: policyName}, true, nil
+}
+
+// handleEscalationTimer checks if the current escalation level has timed out
+// and advances to the next level. It only mutates the Issue's annotations;
+// the caller persists them. Returns the duration to requeue after (the next
+// level timeout, repeat or snooze end), or 0 if no requeue is needed.
+//
+// An acknowledged Issue stops escalating where it is. A snoozed Issue holds
+// its level and its timer: the level's clock restarts when the snooze ends,
+// and a notification held back by the snooze goes out at that point.
 func (r *NotificationReconciler) handleEscalationTimer(ctx context.Context, issue *platformv1alpha1.Issue) (time.Duration, error) {
 	logger := log.FromContext(ctx).WithValues("issue", issue.Name)
 
 	annotations := issue.GetAnnotations()
-	if annotations == nil {
-		return 0, nil
-	}
-
-	levelStr, hasLevel := annotations[annotationEscalationLevel]
-	if !hasLevel {
-		return 0, nil
-	}
-	timeStr, hasTime := annotations[annotationEscalationTime]
-	if !hasTime {
-		return 0, nil
-	}
-	policyName, hasPolicy := annotations[annotationEscalationPolicy]
-	if !hasPolicy {
-		return 0, nil
+	cursor, escalating, err := readEscalationCursor(annotations)
+	if err != nil || !escalating {
+		return 0, err
 	}
 
 	// If the issue is resolved, clean up escalation.
 	if issue.Status.State == platformv1alpha1.IssueStateResolved {
-		delete(annotations, annotationEscalationLevel)
-		delete(annotations, annotationEscalationTime)
-		delete(annotations, annotationEscalationPolicy)
+		for _, key := range escalationAnnotationKeys {
+			delete(annotations, key)
+		}
 		issue.SetAnnotations(annotations)
+		r.clearActiveEscalation(ctx, cursor.policyName, issue)
 		return 0, nil
 	}
 
-	currentLevel, err := strconv.Atoi(levelStr)
+	policy, err := r.fetchEscalationPolicy(ctx, cursor.policyName, issue.Namespace)
 	if err != nil {
-		return 0, fmt.Errorf("parsing escalation level: %w", err)
+		return 0, err
 	}
-
-	escalationTime, err := time.Parse(time.RFC3339, timeStr)
-	if err != nil {
-		return 0, fmt.Errorf("parsing escalation time: %w", err)
-	}
-
-	// Fetch the escalation policy.
-	var policy platformv1alpha1.EscalationPolicy
-	if err := r.Get(ctx, types.NamespacedName{Name: policyName, Namespace: issue.Namespace}, &policy); err != nil {
-		if errors.IsNotFound(err) {
-			// Try cluster-scoped or all namespaces.
-			var policies platformv1alpha1.EscalationPolicyList
-			if listErr := r.List(ctx, &policies); listErr != nil {
-				return 0, fmt.Errorf("listing escalation policies: %w", listErr)
-			}
-			found := false
-			for i := range policies.Items {
-				if policies.Items[i].Name == policyName {
-					policy = policies.Items[i]
-					found = true
-					break
-				}
-			}
-			if !found {
-				return 0, fmt.Errorf("escalation policy %s not found", policyName)
-			}
-		} else {
-			return 0, fmt.Errorf("fetching escalation policy: %w", err)
-		}
-	}
-
-	if currentLevel >= len(policy.Spec.Levels) {
+	if cursor.level >= len(policy.Spec.Levels) {
 		// Already at max level, no further escalation.
 		return 0, nil
 	}
 
-	level := policy.Spec.Levels[currentLevel]
-	timeout := time.Duration(level.TimeoutMinutes) * time.Minute
-	elapsed := time.Since(escalationTime)
+	now := time.Now().UTC()
+	if IncidentAcknowledged(issue) {
+		r.recordEscalationAck(ctx, policy, issue, now)
+		return 0, nil
+	}
+	if until, snoozed := IncidentSnoozedUntil(issue, now); snoozed {
+		return until.Sub(now), nil
+	}
+	if end, ok := incidentSnoozeEnd(issue); ok && end.After(cursor.since) {
+		cursor.since = end
+	}
+	if annotations[annotationEscalationPendingNotify] == "true" {
+		r.notifyEscalationLevel(ctx, issue, policy, cursor.level, now)
+	}
 
+	level := policy.Spec.Levels[cursor.level]
+	timeout := time.Duration(level.TimeoutMinutes) * time.Minute
+	elapsed := now.Sub(cursor.since)
 	if elapsed < timeout {
-		// Not yet timed out; requeue for when it does.
-		return timeout - elapsed, nil
+		// Not yet timed out; requeue for when it does (or for a repeat).
+		return r.repeatEscalation(ctx, issue, policy, cursor, now, timeout-elapsed), nil
 	}
 
 	// Timeout exceeded — advance to the next level.
-	nextLevel := currentLevel + 1
+	nextLevel := cursor.level + 1
 	if nextLevel >= len(policy.Spec.Levels) {
-		logger.Info("escalation reached maximum level", "policy", policyName, "level", currentLevel)
-		return 0, nil
+		logger.Info("escalation reached maximum level", "policy", cursor.policyName, "level", cursor.level)
+		return r.repeatEscalation(ctx, issue, policy, cursor, now, 0), nil
 	}
 
-	now := time.Now().UTC()
+	annotations = issue.GetAnnotations()
 	annotations[annotationEscalationLevel] = strconv.Itoa(nextLevel)
 	annotations[annotationEscalationTime] = now.Format(time.RFC3339)
 	issue.SetAnnotations(annotations)
 
 	nextLevelSpec := policy.Spec.Levels[nextLevel]
 	logger.Info("escalation advanced",
-		"policy", policyName,
+		"policy", cursor.policyName,
 		"from_level", level.Name,
 		"to_level", nextLevelSpec.Name,
 	)
 
-	escalationLevelReached.WithLabelValues(policyName, nextLevelSpec.Name).Inc()
+	escalationLevelReached.WithLabelValues(cursor.policyName, nextLevelSpec.Name).Inc()
 
 	// Send notification for the new escalation level.
-	r.sendEscalationNotification(ctx, issue, &policy, nextLevel)
+	r.notifyEscalationLevel(ctx, issue, policy, nextLevel, now)
 
 	// Update active escalation on the policy status.
-	if err := r.recordActiveEscalation(ctx, &policy, issue, clampInt32(nextLevel)); err != nil {
+	if err := r.recordActiveEscalation(ctx, policy, issue, clampInt32(nextLevel)); err != nil {
 		logger.Error(err, "failed to record active escalation")
 	}
 
 	// Return the timeout for the next level.
 	nextTimeout := time.Duration(nextLevelSpec.TimeoutMinutes) * time.Minute
-	return nextTimeout, nil
+	next := escalationCursor{level: nextLevel, since: now, policyName: cursor.policyName}
+	return r.repeatEscalation(ctx, issue, policy, next, now, nextTimeout), nil
+}
+
+// repeatEscalation re-sends the current level's notification every
+// repeatIntervalMinutes (0 = never) and returns when to look again: the
+// sooner of untilTimeout (0 = no timeout pending) and the next repeat.
+func (r *NotificationReconciler) repeatEscalation(ctx context.Context, issue *platformv1alpha1.Issue, policy *platformv1alpha1.EscalationPolicy, cursor escalationCursor, now time.Time, untilTimeout time.Duration) time.Duration {
+	repeat := time.Duration(policy.Spec.Levels[cursor.level].RepeatIntervalMinutes) * time.Minute
+	if repeat <= 0 {
+		return untilTimeout
+	}
+	last := cursor.since
+	if t, err := time.Parse(time.RFC3339, issue.GetAnnotations()[annotationEscalationNotifiedAt]); err == nil && t.After(last) {
+		last = t
+	}
+	if now.Sub(last) >= repeat {
+		r.notifyEscalationLevel(ctx, issue, policy, cursor.level, now)
+		last = now
+	}
+	untilRepeat := repeat - now.Sub(last)
+	if untilTimeout > 0 && untilTimeout < untilRepeat {
+		return untilTimeout
+	}
+	return untilRepeat
+}
+
+// fetchEscalationPolicy finds the named policy in the Issue's namespace,
+// falling back to any namespace.
+func (r *NotificationReconciler) fetchEscalationPolicy(ctx context.Context, policyName, namespace string) (*platformv1alpha1.EscalationPolicy, error) {
+	var policy platformv1alpha1.EscalationPolicy
+	err := r.Get(ctx, types.NamespacedName{Name: policyName, Namespace: namespace}, &policy)
+	if err == nil {
+		return &policy, nil
+	}
+	if !errors.IsNotFound(err) {
+		return nil, fmt.Errorf("fetching escalation policy: %w", err)
+	}
+	var policies platformv1alpha1.EscalationPolicyList
+	if listErr := r.List(ctx, &policies); listErr != nil {
+		return nil, fmt.Errorf("listing escalation policies: %w", listErr)
+	}
+	for i := range policies.Items {
+		if policies.Items[i].Name == policyName {
+			return &policies.Items[i], nil
+		}
+	}
+	return nil, fmt.Errorf("escalation policy %s not found", policyName)
+}
+
+// recordEscalationAck stamps the acknowledgment on the policy's active
+// escalation entry once. Best effort: a failure only loses the stamp.
+func (r *NotificationReconciler) recordEscalationAck(ctx context.Context, policy *platformv1alpha1.EscalationPolicy, issue *platformv1alpha1.Issue, now time.Time) {
+	var fresh platformv1alpha1.EscalationPolicy
+	if err := r.Get(ctx, types.NamespacedName{Name: policy.Name, Namespace: policy.Namespace}, &fresh); err != nil {
+		return
+	}
+	for i := range fresh.Status.ActiveEscalations {
+		entry := &fresh.Status.ActiveEscalations[i]
+		if entry.IssueName != issue.Name || entry.AcknowledgedAt != nil {
+			continue
+		}
+		at := metav1.NewTime(now)
+		if t, err := time.Parse(time.RFC3339, issue.GetAnnotations()[AnnotationIncidentAcknowledgedAt]); err == nil {
+			at = metav1.NewTime(t)
+		}
+		entry.AcknowledgedAt = &at
+		entry.AcknowledgedBy = issue.GetAnnotations()[AnnotationIncidentAcknowledgedBy]
+		if err := r.Status().Update(ctx, &fresh); err != nil {
+			log.FromContext(ctx).Error(err, "failed to record escalation acknowledgment", "policy", policy.Name)
+		}
+		return
+	}
+}
+
+// clearActiveEscalation drops the Issue's entry from the policy's active
+// escalations once the Issue is resolved. Best effort.
+func (r *NotificationReconciler) clearActiveEscalation(ctx context.Context, policyName string, issue *platformv1alpha1.Issue) {
+	policy, err := r.fetchEscalationPolicy(ctx, policyName, issue.Namespace)
+	if err != nil {
+		return
+	}
+	kept := policy.Status.ActiveEscalations[:0]
+	removed := false
+	for _, entry := range policy.Status.ActiveEscalations {
+		if entry.IssueName == issue.Name {
+			removed = true
+			continue
+		}
+		kept = append(kept, entry)
+	}
+	if !removed {
+		return
+	}
+	policy.Status.ActiveEscalations = kept
+	if err := r.Status().Update(ctx, policy); err != nil {
+		log.FromContext(ctx).Error(err, "failed to clear active escalation", "policy", policyName)
+	}
 }
 
 // sendEscalationNotification sends notifications for a specific escalation level.
@@ -819,7 +1016,7 @@ func (r *NotificationReconciler) sendEscalationNotification(ctx context.Context,
 						notificationsFailedTotal.WithLabelValues(string(ch.Type), "sender_create").Inc()
 						continue
 					}
-					if err := sender.Send(ctx, msg); err != nil {
+					if err := timedSend(ctx, sender, string(ch.Type), msg); err != nil {
 						logger.Error(err, "failed to send escalation notification", "channel", ch.Name)
 						notificationsSentTotal.WithLabelValues(string(ch.Type), severity, "failure").Inc()
 						notificationsFailedTotal.WithLabelValues(string(ch.Type), "send").Inc()

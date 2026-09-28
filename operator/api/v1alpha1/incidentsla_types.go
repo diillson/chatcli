@@ -31,16 +31,25 @@ type IncidentSLASpec struct {
 	Severity IssueSeverity `json:"severity"`
 
 	// ResponseTime is the maximum allowed time from detection to first analysis (e.g., "5m", "15m", "1h").
+	// Whole days may lead the value ("1d", "1d12h").
+	// +kubebuilder:validation:Pattern=`^([0-9]+d)?([0-9]+(\.[0-9]+)?(ns|us|ms|s|m|h))*$`
+	// +kubebuilder:validation:MinLength=2
 	ResponseTime string `json:"responseTime"`
 
 	// ResolutionTime is the maximum allowed time from detection to resolution (e.g., "1h", "4h", "24h").
+	// Whole days may lead the value ("1d", "2d12h").
+	// +kubebuilder:validation:Pattern=`^([0-9]+d)?([0-9]+(\.[0-9]+)?(ns|us|ms|s|m|h))*$`
+	// +kubebuilder:validation:MinLength=2
 	ResolutionTime string `json:"resolutionTime"`
 
-	// EscalationPolicyRef references an EscalationPolicy to trigger on SLA breach.
+	// EscalationPolicyRef is reserved and not read yet: an SLA breach is recorded on this
+	// IncidentSLA, in the audit trail and in chatcli_operator_sla_violations_total, and
+	// escalation follows the EscalationPolicy matched by the Issue severity.
 	// +optional
 	EscalationPolicyRef string `json:"escalationPolicyRef,omitempty"`
 
-	// NotificationPolicyRef references a NotificationPolicy for SLA breach notifications.
+	// NotificationPolicyRef is reserved and not read yet: breaches are not notified on
+	// their own; the Issue's state changes are notified by the matching NotificationPolicies.
 	// +optional
 	NotificationPolicyRef string `json:"notificationPolicyRef,omitempty"`
 
@@ -73,7 +82,7 @@ type SLAViolationRecord struct {
 
 // IncidentSLAStatus defines the observed state of IncidentSLA.
 type IncidentSLAStatus struct {
-	// ActiveViolations is the number of currently open SLA violations.
+	// ActiveViolations is the number of SLA violations whose Issue is not resolved yet.
 	ActiveViolations int32 `json:"activeViolations"`
 
 	// TotalViolations is the total number of SLA violations.

@@ -20,8 +20,6 @@ import (
 	"strings"
 	"time"
 
-	"go.uber.org/zap"
-
 	"github.com/diillson/chatcli/cli/agentevents"
 	"github.com/diillson/chatcli/i18n"
 	"github.com/diillson/chatcli/llm/imagegen"
@@ -269,6 +267,7 @@ func (s *Server) handleTurn(w http.ResponseWriter, r *http.Request) {
 	}()
 
 	session := s.sessionOf(req.Session)
+	rn.sink.onPlan = func(p []planEntry) { s.rememberPlan(session, p) }
 	go s.execute(runCtx, rn, session, req.Mode, req.Text, opts)
 
 	h := w.Header()
@@ -314,31 +313,11 @@ func (s *Server) writeEvent(w http.ResponseWriter, f http.Flusher, ev event) {
 func (s *Server) execute(ctx context.Context, rn *run, session, mode, text string, o TurnOptions) {
 	defer close(rn.done)
 	defer rn.sink.close()
-	var (
-		reply string
-		err   error
-	)
-	b := s.opts.Backend
 	if s.routeInline(ctx, rn, session, &mode, &text, len(o.Images) > 0) {
 		return
 	}
-	switch strings.ToLower(strings.TrimSpace(mode)) {
-	case "coder":
-		reply, err = b.RunCoder(ctx, session, text, o, rn.sink)
-	case "agent":
-		reply, err = b.RunAgent(ctx, session, text, o, rn.sink)
-	default:
-		reply, err = b.Chat(ctx, session, text, o, rn.sink)
-	}
-	switch {
-	case err != nil && (errors.Is(err, context.Canceled) || ctx.Err() != nil):
-		rn.sink.push(event{Type: "done", Reply: reply, Cancelled: true})
-	case err != nil:
-		s.log.Warn("web: turn failed", zap.String("mode", mode), zap.Error(err))
-		rn.sink.push(event{Type: "error", Error: err.Error(), Reply: reply})
-	default:
-		rn.sink.push(event{Type: "done", Reply: reply})
-	}
+	reply, err := s.dispatchTurn(ctx, rn, session, mode, text, o)
+	s.finishTurn(ctx, rn, mode, reply, err)
 }
 
 func turnOptionsFrom(req turnRequest) (TurnOptions, error) {
@@ -450,20 +429,20 @@ func (s *Server) handleSessionAction(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	action, session := strings.TrimSpace(req.Action), s.sessionOf(req.Session)
-	out, err := s.opts.Backend.ManageSession(r.Context(), action, session, strings.TrimSpace(req.Name))
+	var (
+		out string
+		err error
+	)
+	if action == "clear" {
+		// "+ New" starts a conversation of its own, bound to a fresh
+		// web-owned saved session (the file appears on the first turn).
+		out, err = s.startFresh(r.Context(), session)
+	} else {
+		out, err = s.opts.Backend.ManageSession(r.Context(), action, session, strings.TrimSpace(req.Name))
+	}
 	if err != nil {
 		writeErr(w, http.StatusBadRequest, "session", err.Error())
 		return
-	}
-	// "+ New" starts a conversation of its own: bind it to a fresh web-owned
-	// saved session right away (the file appears on the first turn), so it
-	// is written through and listed like every other one instead of living
-	// only in the rolling autosave mirror. Best effort — a backend that does
-	// not bind keeps the cleared live session.
-	if action == "clear" {
-		if _, err := s.opts.Backend.ManageSession(r.Context(), "attach", session, FreshSessionName()); err != nil && s.opts.Logger != nil {
-			s.opts.Logger.Warn("web: binding the new session", zap.Error(err))
-		}
 	}
 	writeJSON(w, http.StatusOK, map[string]interface{}{"result": out, "sessions": s.opts.Backend.SessionCatalog(), "bound": s.boundOf(req.Session), "history": s.historyItems(r.Context(), req.Session)})
 }
@@ -500,7 +479,14 @@ func (s *Server) handleCommand(w http.ResponseWriter, r *http.Request) {
 	if !readJSON(w, r, &req) {
 		return
 	}
-	out, err := s.opts.Backend.RunCommand(r.Context(), s.sessionOf(req.Session), strings.TrimSpace(req.Line))
+	line := strings.TrimSpace(req.Line)
+	// Only what the page advertises runs here, under the page's rules; the
+	// rest of the terminal's commands were never meant for this endpoint.
+	if token, _ := splitLeadingToken(line); !s.commandAdvertised(token) {
+		writeErr(w, http.StatusBadRequest, "command", i18n.T("web.command_unsupported", token))
+		return
+	}
+	out, err := s.runCommand(r.Context(), s.sessionOf(req.Session), line)
 	if err != nil {
 		writeErr(w, http.StatusBadRequest, "command", err.Error())
 		return

@@ -20,9 +20,6 @@ spec:
     - jsonPath: .spec.enabled
       name: Enabled
       type: boolean
-    - jsonPath: .spec.channels
-      name: Channels
-      type: integer
     - jsonPath: .status.totalSent
       name: Sent
       type: integer
@@ -71,7 +68,10 @@ spec:
                         Slack: webhook_url, channel, username
                         PagerDuty: routing_key, severity_map
                         OpsGenie: api_key, responders, tags
-                        Email: smtp_host, smtp_port, smtp_user, smtp_password, from, to, tls_skip_verify
+                        Email: smtp_host, smtp_port, smtp_user, smtp_password, from, to, tls_skip_verify,
+                        smtp_tls ("implicit" or "starttls"; port 465 defaults to implicit TLS, any other
+                        port upgrades with STARTTLS when the server offers it), smtp_timeout (Go duration
+                        bounding the whole SMTP conversation, default 30s)
                         Webhook: url, method, headers, secret
                         Teams: webhook_url
                       type: object
@@ -190,13 +190,16 @@ spec:
                     type: string
                   groupingWindow:
                     default: 1m
-                    description: GroupingWindow groups related notifications within
-                      this window into a single message.
+                    description: |-
+                      GroupingWindow is reserved: the controller does not group notifications yet and
+                      ignores this value. Every matching state change is delivered on its own, subject
+                      to DeduplicationWindow and MaxPerHour.
                     type: string
                   maxPerHour:
                     default: 10
-                    description: MaxPerHour limits the number of notifications per
-                      hour per issue.
+                    description: |-
+                      MaxPerHour limits the number of notifications per hour per issue and channel.
+                      Resolves on pagerduty and opsgenie channels are never throttled: they close the page.
                     format: int32
                     type: integer
                 type: object

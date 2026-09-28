@@ -27,7 +27,10 @@ type NotificationChannel struct {
 	// Slack: webhook_url, channel, username
 	// PagerDuty: routing_key, severity_map
 	// OpsGenie: api_key, responders, tags
-	// Email: smtp_host, smtp_port, smtp_user, smtp_password, from, to, tls_skip_verify
+	// Email: smtp_host, smtp_port, smtp_user, smtp_password, from, to, tls_skip_verify,
+	// smtp_tls ("implicit" or "starttls"; port 465 defaults to implicit TLS, any other
+	// port upgrades with STARTTLS when the server offers it), smtp_timeout (Go duration
+	// bounding the whole SMTP conversation, default 30s)
 	// Webhook: url, method, headers, secret
 	// Teams: webhook_url
 	Config map[string]string `json:"config"`
@@ -69,7 +72,8 @@ type NotificationRule struct {
 
 // ThrottleConfig controls notification rate limiting.
 type ThrottleConfig struct {
-	// MaxPerHour limits the number of notifications per hour per issue.
+	// MaxPerHour limits the number of notifications per hour per issue and channel.
+	// Resolves on pagerduty and opsgenie channels are never throttled: they close the page.
 	// +kubebuilder:default=10
 	// +optional
 	MaxPerHour int32 `json:"maxPerHour,omitempty"`
@@ -79,7 +83,9 @@ type ThrottleConfig struct {
 	// +optional
 	DeduplicationWindow string `json:"deduplicationWindow,omitempty"`
 
-	// GroupingWindow groups related notifications within this window into a single message.
+	// GroupingWindow is reserved: the controller does not group notifications yet and
+	// ignores this value. Every matching state change is delivered on its own, subject
+	// to DeduplicationWindow and MaxPerHour.
 	// +kubebuilder:default="1m"
 	// +optional
 	GroupingWindow string `json:"groupingWindow,omitempty"`
@@ -149,7 +155,6 @@ type NotificationPolicyStatus struct {
 // +kubebuilder:subresource:status
 // +kubebuilder:resource:shortName=np
 // +kubebuilder:printcolumn:name="Enabled",type="boolean",JSONPath=".spec.enabled"
-// +kubebuilder:printcolumn:name="Channels",type="integer",JSONPath=".spec.channels"
 // +kubebuilder:printcolumn:name="Sent",type="integer",JSONPath=".status.totalSent"
 // +kubebuilder:printcolumn:name="Failed",type="integer",JSONPath=".status.failedCount"
 // +kubebuilder:printcolumn:name="Age",type="date",JSONPath=".metadata.creationTimestamp"

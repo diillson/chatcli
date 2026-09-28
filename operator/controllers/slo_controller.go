@@ -140,6 +140,7 @@ func (r *SLOReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.R
 	slo.Status.TargetMet = currentValue >= (target / 100.0)
 	slo.Status.ErrorBudgetTotal = errorBudgetTotal
 	slo.Status.ErrorBudgetRemaining = remaining
+	slo.Status.ErrorBudgetRemainingPercentage = remaining * 100.0
 	slo.Status.ErrorBudgetConsumedPercentage = consumedPercentage
 	slo.Status.BurnRate1h = burnRate1h
 	slo.Status.BurnRate6h = burnRate6h
@@ -177,6 +178,7 @@ func (r *SLOReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.R
 		Message:            condMessage,
 		LastTransitionTime: metav1.Now(),
 	})
+	setMetricSourceCondition(&slo)
 
 	if err := r.Status().Update(ctx, &slo); err != nil {
 		return ctrl.Result{}, err
@@ -248,15 +250,10 @@ func (r *SLOReconciler) calculateErrorRateSLI(ctx context.Context, slo *platform
 	return sli, nil
 }
 
-// calculateLatencySLI estimates latency SLI from issue durations when no Prometheus is available.
+// calculateLatencySLI estimates latency SLI from the latency anomalies in the
+// window. metricSource=prometheus is not evaluated (see setMetricSourceCondition).
 func (r *SLOReconciler) calculateLatencySLI(ctx context.Context, slo *platformv1alpha1.ServiceLevelObjective, window time.Duration) (float64, error) {
-	if slo.Spec.Indicator.MetricSource == platformv1alpha1.SLOSourcePrometheus && slo.Spec.Indicator.PrometheusQuery != "" {
-		// Prometheus integration placeholder: in production, query Prometheus here.
-		// For now, fall through to issue-based estimation.
-		_ = slo.Spec.Indicator.PrometheusQuery
-	}
-
-	// Estimate from issue durations: count issues with latency signal vs total
+	// Estimate from anomalies: count those with a latency signal vs total
 	resourceName := ""
 	if slo.Spec.Indicator.Resource != nil {
 		resourceName = slo.Spec.Indicator.Resource.Name
@@ -359,6 +356,14 @@ func (r *SLOReconciler) checkBurnRateAlerts(ctx context.Context, slo *platformv1
 	logger := log.FromContext(ctx)
 
 	var newActiveAlerts []platformv1alpha1.SLOAlert
+	// The budget-exhausted alert is owned by checkBudgetExhaustion, which
+	// clears it once budget is back. Dropping it here re-opened a critical
+	// Issue on every reconcile while the budget stayed at zero.
+	for _, existing := range slo.Status.ActiveAlerts {
+		if existing.Window == sloBudgetExhaustedWindow {
+			newActiveAlerts = append(newActiveAlerts, existing)
+		}
+	}
 
 	for _, brw := range slo.Spec.AlertPolicy.BurnRateWindows {
 		shortWindow := parseSLODuration(brw.ShortWindow)
@@ -418,39 +423,107 @@ func (r *SLOReconciler) checkBurnRateAlerts(ctx context.Context, slo *platformv1
 	slo.Status.ActiveAlerts = newActiveAlerts
 }
 
-// checkBudgetExhaustion creates a critical issue when error budget is fully consumed.
+// sloBudgetExhaustedWindow is the ActiveAlerts window (and Issue annotation)
+// of the budget-exhaustion page.
+const sloBudgetExhaustedWindow = "budget-exhausted"
+
+// checkBudgetExhaustion creates one critical issue when the error budget is
+// fully consumed and no more while it stays exhausted: the page is tracked
+// in ActiveAlerts until budget is back above zero, which re-arms it.
 func (r *SLOReconciler) checkBudgetExhaustion(ctx context.Context, slo *platformv1alpha1.ServiceLevelObjective) {
 	logger := log.FromContext(ctx)
 
-	if !slo.Spec.AlertPolicy.PageOnBudgetExhausted {
-		return
-	}
-
-	if slo.Status.ErrorBudgetRemaining > 0 {
+	if !slo.Spec.AlertPolicy.PageOnBudgetExhausted || slo.Status.ErrorBudgetRemaining > 0 {
+		clearSLOAlert(slo, sloBudgetExhaustedWindow)
 		return
 	}
 
 	// Check if we already have an active budget exhaustion alert
 	for _, alert := range slo.Status.ActiveAlerts {
-		if alert.Window == "budget-exhausted" {
+		if alert.Window == sloBudgetExhaustedWindow {
 			return // already tracked
 		}
+	}
+
+	exhaustedAlert := platformv1alpha1.SLOAlert{
+		Window:   sloBudgetExhaustedWindow,
+		BurnRate: slo.Status.BurnRate1h,
+		Severity: platformv1alpha1.IssueSeverityCritical,
+		FiredAt:  metav1.Now(),
+	}
+
+	// A lost status write must not page twice: an open exhaustion Issue of
+	// this SLO means the page already went out.
+	open, err := r.hasOpenSLOIssue(ctx, slo, sloBudgetExhaustedWindow)
+	if err != nil {
+		logger.Error(err, "Failed to look up open budget exhaustion issues", "slo", slo.Name)
+		return
+	}
+	if open {
+		slo.Status.ActiveAlerts = append(slo.Status.ActiveAlerts, exhaustedAlert)
+		return
 	}
 
 	logger.Info("Error budget exhausted, creating critical issue", "slo", slo.Name)
 
 	sloViolationsTotal.WithLabelValues(slo.Spec.ServiceName, slo.Name, string(platformv1alpha1.IssueSeverityCritical)).Inc()
 
-	if err := r.createSLOViolationIssue(ctx, slo, "budget-exhausted", slo.Status.BurnRate1h, platformv1alpha1.IssueSeverityCritical); err != nil {
+	if err := r.createSLOViolationIssue(ctx, slo, sloBudgetExhaustedWindow, slo.Status.BurnRate1h, platformv1alpha1.IssueSeverityCritical); err != nil {
 		logger.Error(err, "Failed to create budget exhaustion issue", "slo", slo.Name)
 		return
 	}
 
-	slo.Status.ActiveAlerts = append(slo.Status.ActiveAlerts, platformv1alpha1.SLOAlert{
-		Window:   "budget-exhausted",
-		BurnRate: slo.Status.BurnRate1h,
-		Severity: platformv1alpha1.IssueSeverityCritical,
-		FiredAt:  metav1.Now(),
+	slo.Status.ActiveAlerts = append(slo.Status.ActiveAlerts, exhaustedAlert)
+}
+
+// clearSLOAlert drops the active alert of the given window.
+func clearSLOAlert(slo *platformv1alpha1.ServiceLevelObjective, window string) {
+	kept := make([]platformv1alpha1.SLOAlert, 0, len(slo.Status.ActiveAlerts))
+	for _, alert := range slo.Status.ActiveAlerts {
+		if alert.Window != window {
+			kept = append(kept, alert)
+		}
+	}
+	if len(kept) == 0 {
+		kept = nil
+	}
+	slo.Status.ActiveAlerts = kept
+}
+
+// hasOpenSLOIssue reports whether an unresolved Issue this SLO opened for the
+// window exists in the SLO namespace.
+func (r *SLOReconciler) hasOpenSLOIssue(ctx context.Context, slo *platformv1alpha1.ServiceLevelObjective, window string) (bool, error) {
+	var issues platformv1alpha1.IssueList
+	if err := r.List(ctx, &issues, client.InNamespace(slo.Namespace), client.MatchingLabels{"platform.chatcli.io/signal": "slo_violation"}); err != nil {
+		return false, err
+	}
+	for i := range issues.Items {
+		iss := &issues.Items[i]
+		if iss.Annotations["platform.chatcli.io/slo-name"] != slo.Name || iss.Annotations["platform.chatcli.io/slo-window"] != window {
+			continue
+		}
+		if iss.Status.State != platformv1alpha1.IssueStateResolved {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+// setMetricSourceCondition says plainly when the SLO asks for a metric source
+// the controller does not evaluate. Every indicator is computed from the
+// Issues and Anomalies of the SLO namespace; metricSource=prometheus and
+// prometheusQuery are not queried.
+func setMetricSourceCondition(slo *platformv1alpha1.ServiceLevelObjective) {
+	if slo.Spec.Indicator.MetricSource != platformv1alpha1.SLOSourcePrometheus {
+		meta.RemoveStatusCondition(&slo.Status.Conditions, "MetricSourceSupported")
+		return
+	}
+	meta.SetStatusCondition(&slo.Status.Conditions, metav1.Condition{
+		Type:               "MetricSourceSupported",
+		Status:             metav1.ConditionFalse,
+		Reason:             "PrometheusNotEvaluated",
+		Message:            "metricSource=prometheus is not queried; the SLI is computed from Issues and Anomalies in this namespace",
+		LastTransitionTime: metav1.Now(),
 	})
 }
 
@@ -544,7 +617,9 @@ func countIncidentMinutes(ctx context.Context, c client.Client, serviceName, nam
 		if issue.Spec.Resource.Name == serviceName {
 			isServiceMatch = true
 		}
-		if !isServiceMatch {
+		// The SLO's own violation Issues are the consequence of downtime,
+		// not downtime: counting them made every page deepen the breach.
+		if !isServiceMatch || isSLOViolationIssue(&issue) {
 			continue
 		}
 
@@ -580,6 +655,11 @@ func countIncidentMinutes(ctx context.Context, c client.Client, serviceName, nam
 	}
 
 	return totalMinutes
+}
+
+// isSLOViolationIssue reports whether the Issue was opened by an SLO alert.
+func isSLOViolationIssue(issue *platformv1alpha1.Issue) bool {
+	return issue.Spec.SignalType == "slo_violation" || issue.Labels["platform.chatcli.io/signal"] == "slo_violation"
 }
 
 // countAnomalies counts error-type anomalies vs total anomalies in the given window.

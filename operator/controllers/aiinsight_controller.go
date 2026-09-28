@@ -122,7 +122,10 @@ func (r *AIInsightReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 	if r.CostTracker != nil {
 		inputTokens, outputTokens := usageTokens(resp.GetUsage(), int64(len(combinedContext)/4), int64(len(resp.Analysis)/4))
 		provider, model := servedProviderModel(resp.GetProvider(), resp.GetModel(), insight.Spec.Provider, insight.Spec.Model)
-		_ = r.CostTracker.RecordLLMCost(ctx, insight.Spec.IssueRef, issue.Namespace, provider, model, inputTokens, outputTokens)
+		if err := r.CostTracker.RecordLLMCost(ctx, insight.Spec.IssueRef, issue.Namespace, provider, model, inputTokens, outputTokens); err != nil {
+			// The analysis stands; only the ledger misses this call.
+			logger.Error(err, "Failed to book the analysis cost on the ledger", "issue", issueName)
+		}
 	}
 
 	// Update AIInsight status with the analysis
