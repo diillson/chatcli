@@ -80,6 +80,16 @@ type Options struct {
 	Voice  tts.Provider
 	STT    transcription.Provider
 	Images imagegen.Provider
+	// STTChoice and VoiceChoice, when set, carry the page's engine choice
+	// per direction (transcription.SelectPreferEmbedded,
+	// tts.SelectPreferEmbedded): their Active providers replace STT and
+	// Voice, and the page offers the one-time embedded install they
+	// describe instead of downloading silently on a first click.
+	STTChoice   *transcription.Selection
+	VoiceChoice *tts.Selection
+	// STTLanguage is the default spoken-language hint for transcription;
+	// empty lets the engine detect it.
+	STTLanguage string
 	// PermissionTimeout bounds each permission dialog; 0 uses the default.
 	PermissionTimeout time.Duration
 	Logger            *zap.Logger
@@ -94,6 +104,7 @@ type Server struct {
 	page  []byte
 	srv   *http.Server
 	log   *zap.Logger
+	voice *voiceState
 
 	mu     sync.Mutex
 	active *run
@@ -144,7 +155,7 @@ func Start(opts Options) (*Server, error) {
 		return nil, fmt.Errorf("webui: listening: %w", err)
 	}
 
-	s := &Server{opts: opts, token: hex.EncodeToString(tok[:]), host: ln.Addr().String(), log: opts.Logger}
+	s := &Server{opts: opts, token: hex.EncodeToString(tok[:]), host: ln.Addr().String(), log: opts.Logger, voice: newVoiceState(opts)}
 	s.url = "http://" + s.host + "/?t=" + s.token
 	s.page = s.renderPage()
 
@@ -175,6 +186,7 @@ func (s *Server) Shutdown(ctx context.Context) error {
 	s.closed = true
 	r := s.active
 	s.mu.Unlock()
+	s.voice.shutdown()
 	if r != nil {
 		r.cancel()
 	}
@@ -242,9 +254,10 @@ type features struct {
 
 func (s *Server) features() features {
 	o := s.opts
+	sttOffer, ttsOffer := s.voice.offers()
 	return features{
-		Voice:  o.Voice != nil && !tts.IsNull(o.Voice),
-		STT:    o.STT != nil && !transcription.IsNull(o.STT),
+		Voice:  s.voice.ttsProvider() != nil || ttsOffer,
+		STT:    s.voice.sttProvider() != nil || sttOffer,
 		Images: o.Images != nil && !imagegen.IsNull(o.Images),
 		LLM:    o.Backend.HasLLM(),
 	}

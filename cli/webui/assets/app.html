@@ -151,6 +151,17 @@
   .rel { position:relative; }
   .hint { color:var(--faint); font-size:10.5px; }
   .mic.rec { color:var(--err); border-color:var(--err); animation:blink 1s steps(2) infinite; }
+  .mic.busy { cursor:progress; }
+  .mic.busy::after { content:''; display:inline-block; width:8px; height:8px; margin-left:4px; border:2px solid var(--muted); border-top-color:transparent; border-radius:50%; animation:spin .8s linear infinite; vertical-align:middle; }
+  @keyframes spin { to { transform:rotate(360deg); } }
+  #btnTalk.on { color:var(--accent); border-color:var(--accent); }
+  #voiceModal { position:fixed; inset:0; background:rgba(0,0,0,.5); display:none; align-items:center; justify-content:center; z-index:21; }
+  #voiceModal.on { display:flex; }
+  #voiceModal .card { background:var(--panel); border:1px solid var(--border); border-radius:8px; width:min(480px, 92vw); padding:16px; }
+  #voiceModal h3 { margin:0 0 6px; color:var(--strong); font-size:14px; }
+  #voiceModal .why { color:var(--muted); margin:0 0 10px; font-size:12px; }
+  #voiceModal progress { width:100%; accent-color:var(--brand); }
+  #voiceModal .acts { display:flex; gap:8px; justify-content:flex-end; flex-wrap:wrap; margin-top:12px; }
 
   #modal { position:fixed; inset:0; background:rgba(0,0,0,.5); display:none; align-items:center; justify-content:center; z-index:20; }
   #modal.on { display:flex; }
@@ -223,6 +234,8 @@
           <button class="ghost" id="btnAttach" title="attach image" data-i18n="composer.attach">📎</button>
           <input type="file" id="fileInput" accept="image/*" multiple class="sr">
           <button class="ghost mic" id="btnMic" title="voice" style="display:none">🎙</button>
+          <button class="ghost" id="btnTalk" style="display:none" data-i18n="voice.talk">Talk</button>
+          <span class="hint" id="voiceHint"></span>
           <button class="ghost" id="btnImage" title="generate image" style="display:none" data-i18n="composer.image">🖼</button>
           <span class="hint" id="composerHint"></span>
           <span class="grow"></span>
@@ -242,7 +255,7 @@
       <button data-pane="memory" data-i18n="pane.memory">Memory</button>
       <button data-pane="commands" data-i18n="pane.commands">Commands</button>
     </div>
-    <div class="pane on" data-pane="status"><div class="kv" id="statusKv"></div><div id="costDetail" style="margin-top:10px"></div></div>
+    <div class="pane on" data-pane="status"><div class="kv" id="statusKv"></div><div id="costDetail" style="margin-top:10px"></div><div id="voiceStatus" style="margin-top:10px"></div></div>
     <div class="pane" data-pane="tools"><div class="search" style="padding:0 0 8px"><input type="search" id="toolSearch" data-i18n-placeholder="pane.filter" placeholder="Filter…"></div><div id="toolsList"></div></div>
     <div class="pane" data-pane="skills"><div id="skillsList"></div></div>
     <div class="pane" data-pane="mcp"><div id="mcpList"></div></div>
@@ -260,6 +273,18 @@
     <button class="danger" data-decision="deny_once" data-i18n="perm.deny_once">Deny</button>
     <button data-decision="allow_always" data-i18n="perm.allow_always">Allow always</button>
     <button class="primary" data-decision="allow_once" data-i18n="perm.allow_once">Allow once</button>
+  </div>
+</div></div>
+<div id="voiceModal"><div class="card">
+  <h3 data-i18n="voice.install.title">Offline voice engine</h3>
+  <p class="why" id="voiceWhy"></p>
+  <progress id="voiceProg" max="1" value="0" style="display:none"></progress>
+  <p class="hint" id="voiceProgText"></p>
+  <div class="acts">
+    <button id="voiceLater" data-i18n="voice.install.later">Not now</button>
+    <button id="voiceFallback"></button>
+    <button class="danger" id="voiceCancelDl" style="display:none" data-i18n="voice.install.cancel">Cancel download</button>
+    <button class="primary" id="voiceDownload" data-i18n="voice.install.download">Download</button>
   </div>
 </div></div>
 <div id="toasts"></div>
@@ -288,6 +313,11 @@ const DEFAULTS = {
   'memory.none':'No memory resources.','commands.none':'No commands available.',
   'thought':'Thinking','cancelled':'Cancelled.','error':'Error','copied':'Copied','copy':'copy',
   'stt.recording':'Recording… click to stop','stt.failed':'Transcription failed','tts.speak':'Speak','image.prompt':'Describe the image to generate','image.failed':'Image generation failed',
+  'stt.transcribing':'Transcribing…','stt.empty':'No speech detected','stt.denied':"Microphone access was denied; allow it in the browser's site settings",'stt.unsupported':'This browser cannot record audio here','stt.cancelled':'Recording discarded','stt.hint':'Voice input: click to talk, click again to stop, Esc discards','tts.failed':'Could not speak the reply',
+  'voice.talk':'Talk','voice.talkOn':'Voice conversation on: speak, and the reply is read back','voice.talkOff':'Voice conversation off','voice.listening':'Listening…','voice.none':'No voice engine is available in this process','voice.notInstalled':'offline engine not installed',
+  'voice.install.title':'Offline voice engine','voice.install.body':'Download the embedded voice engine (~{mb} MB, once) to talk offline? It runs on this machine, with no API key and no account.','voice.install.download':'Download','voice.install.fallback':'Use {engine} for now','voice.install.later':'Not now',
+  'voice.install.cancel':'Cancel download','voice.install.progress':'Downloading {file}: {done} of {total} MB','voice.install.extract':'Unpacking {file}…','voice.install.done':'Offline voice engine ready','voice.install.failed':'Voice engine download failed',
+  'voice.install.offer':'Download offline voice (~{mb} MB)','status.voiceIn':'Voice in','status.voiceOut':'Voice out',
   'session.bound':'Bound to {name}','session.new':'New session started','session.deleted':'Session deleted','session.confirmDelete':'Delete saved session {name}?','session.forkName':'Name for the fork','session.live':'live',
   'theme':'theme','lang':'language','offline':'Server unreachable','busy':'A turn is already running',
 };
@@ -314,7 +344,7 @@ function applyStrings() {
   $$('[data-i18n]').forEach(el => { el.textContent = t(el.dataset.i18n); });
   $$('[data-i18n-placeholder]').forEach(el => { el.placeholder = t(el.dataset.i18nPlaceholder); });
   // Panels built from data re-render in the new language.
-  if (typeof renderRoute === 'function' && state.providers) { renderRoute(); renderStatus(); renderTools(); renderSkills(); renderMCP(); renderMemory(); renderCommands(); renderSessions(); }
+  if (typeof renderRoute === 'function' && state.providers) { renderRoute(); renderStatus(); renderTools(); renderSkills(); renderMCP(); renderMemory(); renderCommands(); renderSessions(); renderVoice(); }
 }
 
 // ---------- theme ----------
@@ -358,9 +388,9 @@ const state = {
 };
 
 // ---------- toasts ----------
-function toast(msg, kind) {
+function toast(msg, kind, ms) {
   const el = document.createElement('div'); el.className = 'toast ' + (kind || ''); el.textContent = msg;
-  $('#toasts').appendChild(el); setTimeout(() => el.remove(), 4500);
+  $('#toasts').appendChild(el); setTimeout(() => el.remove(), ms || 4500);
 }
 
 // ---------- markdown (escape first, then a small safe subset) ----------
@@ -470,7 +500,9 @@ function endAssistant(finalText) {
   if (BOOT.features.voice && s.text.trim()) {
     const sp = document.createElement('button'); sp.className = 'ghost'; sp.textContent = '🔊 ' + t('tts.speak'); sp.style.marginTop = '6px';
     sp.onclick = () => speak(s.text); s.el.querySelector('.body').appendChild(sp);
+    if (voice.talk && !voice.quiet) speak(s.text, () => { if (voice.talk) startRecording(); });
   }
+  voice.quiet = false;
   state.lastAssistant = s; state.streaming = null;
 }
 function addThought(text) {
@@ -576,8 +608,8 @@ function handleEvent(ev) {
     case 'tool_end': addToolEnd(ev.tool); break;
     case 'plan': setPlan(ev.plan); break;
     case 'permission': askPermission(ev); break;
-    case 'done': endAssistant(ev.reply); if (ev.cancelled) addMessage('system', t('cancelled')); break;
-    case 'error': endAssistant(ev.reply); addMessage('system', t('error') + ': ' + ev.error); toast(ev.error, 'err'); break;
+    case 'done': voice.quiet = !!ev.cancelled; endAssistant(ev.reply); if (ev.cancelled) addMessage('system', t('cancelled')); break;
+    case 'error': voice.quiet = true; endAssistant(ev.reply); addMessage('system', t('error') + ': ' + ev.error); toast(ev.error, 'err'); break;
   }
 }
 function finishTurn() {
@@ -631,35 +663,247 @@ function renderAtts() {
   $('#composerHint').textContent = state.images.length ? t('composer.images', { n: state.images.length }) : '';
 }
 
-// voice: record with MediaRecorder, transcribe on the server
-if (BOOT.features.stt) {
-  const mic = $('#btnMic'); mic.style.display = '';
-  mic.addEventListener('click', async () => {
-    if (state.recorder) { state.recorder.stop(); return; }
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const rec = new MediaRecorder(stream); const chunks = [];
-      rec.ondataavailable = e => chunks.push(e.data);
-      rec.onstop = async () => {
-        stream.getTracks().forEach(tr => tr.stop()); state.recorder = null; mic.classList.remove('rec'); mic.title = '';
-        const blob = new Blob(chunks, { type: rec.mimeType || 'audio/webm' });
-        try {
-          const r = await fetch('/api/stt?lang=' + encodeURIComponent(BOOT.lang || '') + '&filename=voice.webm', { method: 'POST', headers: { 'X-Web-Token': TOKEN, 'Content-Type': blob.type }, body: blob });
-          const j = await r.json(); if (!r.ok) throw new Error(j.error);
-          input.value = (input.value ? input.value + ' ' : '') + j.text; autosize(); input.focus();
-        } catch (e) { toast(t('stt.failed') + ': ' + e.message, 'err'); }
-      };
-      rec.start(); state.recorder = rec; mic.classList.add('rec'); mic.title = t('stt.recording');
-    } catch (e) { toast(e.message, 'err'); }
+// ---------- voice: embedded engines, WAV recording, voice conversation ----------
+// The recording is decoded and resampled in the browser and sent as 16 kHz
+// mono PCM WAV, the one format every engine reads with no system decoder
+// (the embedded Whisper, a whisper CLI, a self-hosted or cloud endpoint).
+const voice = { status: null, rec: null, stream: null, chunks: [], cancelled: false, busy: false, timer: null, vad: null, audio: null, talk: false, quiet: false, watch: null };
+const VOICE_MAX_MS = 5 * 60 * 1000;
+const WAV_RATE = 16000;
+function fallbackKey(dir) { return 'chatcli_web_voice_fallback_' + dir; }
+function fallbackChosen(dir) { try { return localStorage.getItem(fallbackKey(dir)) === '1'; } catch { return false; } }
+function chooseFallback(dir) { try { localStorage.setItem(fallbackKey(dir), '1'); } catch {} }
+async function refreshVoice() {
+  try { voice.status = await api('voice/status'); } catch { voice.status = null; }
+  renderVoice();
+  return voice.status;
+}
+function dirState(dir) {
+  return (voice.status && voice.status[dir]) || { ready: dir === 'stt' ? !!BOOT.features.stt : !!BOOT.features.voice, offer: false, embedded: {} };
+}
+// A direction asks before use when its embedded engine is on offer and
+// either nothing else serves it or the page prefers it and the visitor did
+// not pick the fallback.
+function needsInstall(dir) { const d = dirState(dir); return d.offer && (!d.ready || (d.prefer_embedded && !fallbackChosen(dir))); }
+// ensureVoice resolves 'ready' when every direction can serve now, 'later'
+// when the visitor postponed the install, 'none' when nothing can serve.
+async function ensureVoice(dirs) {
+  if (!voice.status) await refreshVoice();
+  const missing = dirs.filter(needsInstall);
+  if (missing.length && (await installDialog(missing)) === 'later') return 'later';
+  return dirs.every(d => dirState(d).ready) ? 'ready' : 'none';
+}
+function mb(n) { return Math.max(1, Math.round((n || 0) / 1e6)); }
+function progressText(job) {
+  if (!job || job.state !== 'running') return job && job.state === 'failed' ? t('voice.install.failed') + ': ' + (job.error || '') : '';
+  if (job.phase === 'extract') return t('voice.install.extract', { file: job.file || '' });
+  return t('voice.install.progress', { file: job.file || '…', done: Math.round((job.done || 0) / 1e6), total: job.total > 0 ? mb(job.total) : '?' });
+}
+function setInstallUI(job) {
+  const running = !!job && job.state === 'running';
+  const p = $('#voiceProg');
+  p.style.display = running ? '' : 'none';
+  if (running && job.phase === 'download' && job.total > 0) { p.max = job.total; p.value = job.done; } else p.removeAttribute('value');
+  $('#voiceDownload').style.display = running ? 'none' : ''; $('#voiceCancelDl').style.display = running ? '' : 'none';
+  $('#voiceFallback').disabled = running;
+  $('#voiceProgText').textContent = progressText(job);
+}
+// watchInstall polls the running install until it settles; one poller at a
+// time, whether the dialog is open or the download went to the background.
+function watchInstall() {
+  if (voice.watch) return voice.watch;
+  voice.watch = new Promise(resolve => {
+    const tick = async () => {
+      const st = await refreshVoice(); const job = (st && st.install) || {};
+      setInstallUI(job);
+      if (job.state === 'running') { setTimeout(tick, 500); return; }
+      voice.watch = null;
+      if (job.state === 'done') { toast(t('voice.install.done'), 'ok'); applyVoiceFeatures(); }
+      else if (job.state === 'failed') toast(t('voice.install.failed') + ': ' + (job.error || ''), 'err', 9000);
+      resolve(job.state || 'failed');
+    };
+    tick();
+  });
+  return voice.watch;
+}
+function installDialog(dirs) {
+  return new Promise(resolve => {
+    const st = voice.status || {}; const m = $('#voiceModal');
+    const bytes = dirs.reduce((n, d) => n + ((dirState(d).embedded || {}).download_bytes || 0), 0);
+    $('#voiceWhy').textContent = t('voice.install.body', { mb: mb(bytes) });
+    const fallback = dirs.every(d => dirState(d).ready) ? dirs.map(d => dirState(d).engine).join(' + ') : '';
+    const fb = $('#voiceFallback'); fb.style.display = fallback ? '' : 'none'; fb.textContent = t('voice.install.fallback', { engine: fallback });
+    setInstallUI(st.install);
+    m.classList.add('on');
+    let settled = false;
+    const close = choice => { if (settled) return; settled = true; m.classList.remove('on'); resolve(choice); };
+    $('#voiceDownload').onclick = async () => {
+      try { await api('voice/install', { json: { targets: dirs } }); }
+      catch (e) { $('#voiceProgText').textContent = t('voice.install.failed') + ': ' + e.message; return; }
+      const res = await watchInstall();
+      if (res === 'done') close('installed');
+    };
+    fb.onclick = () => { dirs.forEach(chooseFallback); close('fallback'); };
+    $('#voiceLater').onclick = () => close('later');
+    $('#voiceCancelDl').onclick = () => { api('voice/cancel', { method: 'POST' }).catch(() => {}); };
+    if (st.install && st.install.state === 'running') watchInstall().then(res => { if (res === 'done') close('installed'); });
   });
 }
-async function speak(text) {
+function renderVoice() {
+  const el = $('#voiceStatus'); const st = voice.status;
+  if (!st) { el.innerHTML = ''; return; }
+  const row = (label, d) => '<b>' + esc(label) + '</b><span>' + esc(d.engine || '—') + (d.offer ? ' · ' + esc(t('voice.notInstalled')) : '') + '</span>';
+  let h = '<div class="kv">' + row(t('status.voiceIn'), st.stt) + row(t('status.voiceOut'), st.tts) + '</div>';
+  const offered = ['stt', 'tts'].filter(d => st[d].offer);
+  if (st.install && st.install.state === 'running') h += '<p class="hint">' + esc(progressText(st.install)) + '</p>';
+  else if (offered.length) h += '<button class="ghost" id="btnVoiceInstall">' + esc(t('voice.install.offer', { mb: mb(offered.reduce((n, d) => n + (st[d].embedded.download_bytes || 0), 0)) })) + '</button>';
+  el.innerHTML = h;
+  const b = $('#btnVoiceInstall'); if (b) b.addEventListener('click', () => installDialog(offered));
+}
+function applyVoiceFeatures() {
+  const s = dirState('stt'), o = dirState('tts');
+  BOOT.features.stt = s.ready || s.offer; BOOT.features.voice = o.ready || o.offer;
+  $('#btnMic').style.display = BOOT.features.stt ? '' : 'none';
+  $('#btnTalk').style.display = BOOT.features.stt && BOOT.features.voice ? '' : 'none';
+}
+function micUI(st) {
+  const m = $('#btnMic');
+  m.classList.toggle('rec', st === 'rec'); m.classList.toggle('busy', st === 'busy');
+  m.title = st === 'rec' ? t('stt.recording') : st === 'busy' ? t('stt.transcribing') : t('stt.hint');
+  voice.busy = st === 'busy';
+  $('#voiceHint').textContent = st === 'rec' ? (voice.talk ? t('voice.listening') : t('stt.recording')) : st === 'busy' ? t('stt.transcribing') : '';
+}
+function stopPlayback() { if (voice.audio) { voice.audio.pause(); voice.audio = null; } }
+async function startRecording() {
+  if (voice.rec || voice.busy) return;
+  stopPlayback(); // barge-in: talking over the reply stops it
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia || typeof MediaRecorder === 'undefined') { toast(t('stt.unsupported'), 'err', 9000); return; }
+  let stream;
+  try { stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, channelCount: 1 } }); }
+  catch (e) {
+    const denied = e && (e.name === 'NotAllowedError' || e.name === 'SecurityError');
+    toast(denied ? t('stt.denied') : t('stt.failed') + ': ' + (e.message || e.name), 'err', 9000); return;
+  }
+  let rec;
+  try { rec = new MediaRecorder(stream); } catch (e) { stream.getTracks().forEach(tr => tr.stop()); toast(t('stt.unsupported') + ': ' + e.message, 'err', 9000); return; }
+  voice.chunks = []; voice.cancelled = false; voice.stream = stream; voice.rec = rec;
+  rec.ondataavailable = e => { if (e.data && e.data.size) voice.chunks.push(e.data); };
+  rec.onstop = () => onRecorded(rec);
+  rec.start();
+  voice.timer = setTimeout(() => stopRecording(false), VOICE_MAX_MS);
+  if (voice.talk) watchSilence(stream);
+  micUI('rec');
+}
+function stopRecording(cancel) { if (!voice.rec) return; voice.cancelled = !!cancel; try { voice.rec.stop(); } catch { releaseMic(); micUI(''); } }
+function releaseMic() {
+  clearTimeout(voice.timer);
+  if (voice.vad) { voice.vad.stop(); }
+  if (voice.stream) voice.stream.getTracks().forEach(tr => tr.stop());
+  voice.stream = null; voice.rec = null;
+}
+// In a voice conversation the recording ends by itself after a pause, and
+// a listen that hears nothing ends the loop quietly.
+function watchSilence(stream) {
+  const AC = window.AudioContext || window.webkitAudioContext; if (!AC) return;
+  const ac = new AC(); const an = ac.createAnalyser(); an.fftSize = 1024;
+  ac.createMediaStreamSource(stream).connect(an);
+  const buf = new Float32Array(an.fftSize); const t0 = Date.now(); let last = 0;
+  const vad = { heard: false, stop: () => { clearInterval(iv); ac.close().catch(() => {}); } };
+  const iv = setInterval(() => {
+    an.getFloatTimeDomainData(buf); let sum = 0; for (let i = 0; i < buf.length; i++) sum += buf[i] * buf[i];
+    const now = Date.now();
+    if (Math.sqrt(sum / buf.length) > 0.02) { vad.heard = true; last = now; }
+    if ((vad.heard && now - last > 1300) || (!vad.heard && now - t0 > 8000)) stopRecording(false);
+  }, 100);
+  voice.vad = vad;
+}
+async function onRecorded(rec) {
+  const heard = voice.vad ? voice.vad.heard : true;
+  releaseMic(); voice.vad = null;
+  if (voice.cancelled) { micUI(''); toast(t('stt.cancelled')); return; }
+  const blob = new Blob(voice.chunks, { type: rec.mimeType || 'audio/webm' });
+  if (!heard) { micUI(''); return; }
+  if (!blob.size) { micUI(''); toast(t('stt.empty'), 'warn'); return; }
+  micUI('busy');
+  try {
+    const text = await transcribe(blob);
+    if (!text) { toast(t('stt.empty'), 'warn'); return; }
+    if (voice.talk && !state.run) { micUI(''); sendTurn(text); return; }
+    input.value = (input.value ? input.value + ' ' : '') + text; autosize(); input.focus();
+  } catch (e) { toast(t('stt.failed') + ': ' + e.message, 'err', 9000); }
+  finally { if (voice.busy) micUI(''); }
+}
+async function transcribe(blob) {
+  let body = blob, type = blob.type || 'application/octet-stream';
+  // A browser that cannot decode its own recording sends it as recorded;
+  // the server then tries its decoders and says why when it cannot.
+  try { body = await toWav(blob); type = 'audio/wav'; } catch {}
+  const name = 'voice.' + (type === 'audio/wav' ? 'wav' : /ogg/.test(type) ? 'ogg' : /mp4|aac|m4a/.test(type) ? 'mp4' : 'webm');
+  const r = await fetch('/api/stt?filename=' + encodeURIComponent(name), { method: 'POST', headers: { 'X-Web-Token': TOKEN, 'Content-Type': type }, body });
+  let j = {}; try { j = await r.json(); } catch {}
+  if (!r.ok) { if (j.code === 'voice_install') refreshVoice(); throw new Error(j.error || r.statusText || String(r.status)); }
+  return (j.text || '').trim();
+}
+async function toWav(blob) {
+  const AC = window.AudioContext || window.webkitAudioContext, OAC = window.OfflineAudioContext || window.webkitOfflineAudioContext;
+  if (!AC || !OAC) throw new Error('web audio unavailable');
+  const ac = new AC();
+  let decoded;
+  try { decoded = await ac.decodeAudioData(await blob.arrayBuffer()); } finally { ac.close().catch(() => {}); }
+  const off = new OAC(1, Math.max(1, Math.ceil(decoded.duration * WAV_RATE)), WAV_RATE);
+  const src = off.createBufferSource(); src.buffer = decoded; src.connect(off.destination); src.start();
+  return encodeWav((await off.startRendering()).getChannelData(0), WAV_RATE);
+}
+function encodeWav(samples, rate) {
+  const v = new DataView(new ArrayBuffer(44 + samples.length * 2));
+  const str = (o, x) => { for (let i = 0; i < x.length; i++) v.setUint8(o + i, x.charCodeAt(i)); };
+  str(0, 'RIFF'); v.setUint32(4, 36 + samples.length * 2, true); str(8, 'WAVE'); str(12, 'fmt ');
+  v.setUint32(16, 16, true); v.setUint16(20, 1, true); v.setUint16(22, 1, true); v.setUint32(24, rate, true);
+  v.setUint32(28, rate * 2, true); v.setUint16(32, 2, true); v.setUint16(34, 16, true);
+  str(36, 'data'); v.setUint32(40, samples.length * 2, true);
+  for (let i = 0; i < samples.length; i++) { const x = Math.max(-1, Math.min(1, samples[i])); v.setInt16(44 + i * 2, x < 0 ? x * 0x8000 : x * 0x7fff, true); }
+  return new Blob([v.buffer], { type: 'audio/wav' });
+}
+async function speak(text, after) {
+  stopPlayback();
+  const ok = await ensureVoice(['tts']);
+  if (ok !== 'ready') { if (ok === 'none') toast(t('voice.none'), 'err'); return; }
   try {
     const r = await fetch('/api/tts', { method: 'POST', headers: { 'X-Web-Token': TOKEN, 'Content-Type': 'application/json' }, body: JSON.stringify({ text }) });
-    if (!r.ok) throw new Error((await r.json()).error);
-    const url = URL.createObjectURL(await r.blob()); new Audio(url).play();
-  } catch (e) { toast(e.message, 'err'); }
+    if (!r.ok) { let msg = r.statusText; try { msg = (await r.json()).error || msg; } catch {} throw new Error(msg); }
+    const url = URL.createObjectURL(await r.blob()); const a = new Audio(url);
+    voice.audio = a;
+    a.onended = () => { URL.revokeObjectURL(url); if (voice.audio === a) { voice.audio = null; if (after) after(); } };
+    await a.play();
+  } catch (e) { voice.audio = null; toast(t('tts.failed') + ': ' + (e.message || e.name), 'err', 9000); }
 }
+$('#btnMic').addEventListener('click', async () => {
+  if (voice.rec) { stopRecording(false); return; }
+  if (voice.busy) return;
+  const ok = await ensureVoice(['stt']);
+  if (ok === 'ready') startRecording(); else if (ok === 'none') toast(t('voice.none'), 'err');
+});
+$('#btnTalk').addEventListener('click', async () => {
+  if (voice.talk) {
+    voice.talk = false; $('#btnTalk').classList.remove('on'); stopPlayback();
+    if (voice.rec) stopRecording(true);
+    toast(t('voice.talkOff')); return;
+  }
+  const ok = await ensureVoice(['stt', 'tts']);
+  if (ok !== 'ready') { if (ok === 'none') toast(t('voice.none'), 'err'); return; }
+  voice.talk = true; $('#btnTalk').classList.add('on'); toast(t('voice.talkOn'), 'ok');
+  startRecording();
+});
+// Esc discards a recording or stops the reply being read, before it can
+// reach the turn's own Esc-to-cancel.
+window.addEventListener('keydown', e => {
+  if (e.key !== 'Escape') return;
+  if (voice.rec) { e.stopPropagation(); e.preventDefault(); stopRecording(true); return; }
+  if (voice.audio) { e.stopPropagation(); stopPlayback(); }
+}, true);
+applyVoiceFeatures();
+micUI('');
+if (BOOT.features.stt || BOOT.features.voice) refreshVoice().then(applyVoiceFeatures);
 if (BOOT.features.images) {
   const b = $('#btnImage'); b.style.display = '';
   b.addEventListener('click', async () => {
