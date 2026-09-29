@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.212.1](https://github.com/diillson/chatcli/compare/v1.212.0...v1.212.1) (2026-09-29)
+
+
+### Bug Fixes
+
+* **operator:** recover probe and alert stream quickly after a rollout ([#1720](https://github.com/diillson/chatcli/issues/1720)) ([841b53b](https://github.com/diillson/chatcli/commit/841b53b3b471959e1f1d46585d3dfbfee6af5660))
+
 ## [1.212.0](https://github.com/diillson/chatcli/compare/v1.211.2...v1.212.0) (2026-09-28)
 
 
