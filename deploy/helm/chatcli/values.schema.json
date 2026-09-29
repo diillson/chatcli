@@ -557,7 +557,7 @@
     },
     "crdUpgrade": {
       "type": "object",
-      "description": "GAP-06 fix: pre-install/pre-upgrade hook that re-applies CRDs on every Helm upgrade. Helm 3 only applies files from the chart's crds/ directory on first install; this hook closes that gap so the CRD schema stays in sync with the binary across version bumps.",
+      "description": "Pre-install/pre-upgrade hook that re-applies CRDs on every Helm upgrade. Helm only applies files from the chart's crds/ directory on first install; this hook closes that gap so the CRD schema stays in sync with the binary across version bumps.",
       "additionalProperties": false,
       "properties": {
         "enabled": {
