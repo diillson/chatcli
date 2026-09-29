@@ -233,12 +233,23 @@ func (r *InstanceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 // follow a server that was upgraded, restarted or lost its credential.
 const serverProbeInterval = 5 * time.Minute
 
+// serverProbeRetryInterval is how soon a ready Instance whose last probe
+// failed is probed again. A probe that lands while the pods are being
+// replaced (a Recreate rollout, an upgrade) fails although the new pods
+// serve a moment later; retrying on the full interval left ServerReachable
+// False for minutes after a healthy rollout.
+const serverProbeRetryInterval = 30 * time.Second
+
 // probeRequeueAfter schedules the next probe: only when there is a prober
 // and a ready Deployment to probe. While not ready, the Deployment's own
-// status changes trigger the reconcile that probes it.
+// status changes trigger the reconcile that probes it. A ready Instance the
+// operator could not reach is retried sooner than a reachable one.
 func (r *InstanceReconciler) probeRequeueAfter(instance *platformv1alpha1.Instance) time.Duration {
 	if r.Prober == nil || !instance.Status.Ready {
 		return 0
+	}
+	if c := meta.FindStatusCondition(instance.Status.Conditions, ServerReachableConditionType); c != nil && c.Status != metav1.ConditionTrue {
+		return serverProbeRetryInterval
 	}
 	return serverProbeInterval
 }

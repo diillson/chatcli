@@ -326,6 +326,15 @@ func (wb *WatcherBridge) poll(ctx context.Context) {
 	resp, err := wb.serverClient.GetAlerts(ctx)
 	if err != nil {
 		wb.logger.Warn("GetAlerts RPC failed", zap.Error(err))
+		// The server that answered UNIMPLEMENTED went away. During a
+		// rollout its replacement is usually a newer release with the
+		// stream, so try the stream on the next round instead of polling
+		// out the rest of streamRetryAfter. An old server answers
+		// UNIMPLEMENTED again and the bridge goes back to polling.
+		if status.Code(err) == codes.Unavailable && !wb.streamUnsupportedUntil.IsZero() {
+			wb.streamUnsupportedUntil = time.Time{}
+			wb.logger.Info("Server unavailable while polling; retrying the alert stream on reconnect")
+		}
 		return
 	}
 
