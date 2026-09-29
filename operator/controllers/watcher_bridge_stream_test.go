@@ -13,6 +13,8 @@ import (
 	"time"
 
 	pb "github.com/diillson/chatcli/proto/chatcli/v1"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -25,6 +27,7 @@ type fakeAlertServer struct {
 	withoutStream bool
 	silent        bool // never send anything on the stream: stalls the client
 	current       []*pb.WatcherAlert
+	pollErr       error // returned by GetAlerts when set
 	live          chan *pb.WatcherAlert
 	pollCalls     atomic.Int32
 	streamCalls   atomic.Int32
@@ -32,6 +35,9 @@ type fakeAlertServer struct {
 
 func (f *fakeAlertServer) GetAlerts(context.Context, *pb.GetAlertsRequest) (*pb.GetAlertsResponse, error) {
 	f.pollCalls.Add(1)
+	if f.pollErr != nil {
+		return nil, f.pollErr
+	}
 	return &pb.GetAlertsResponse{Alerts: f.current}, nil
 }
 
@@ -195,4 +201,37 @@ func TestWatcherBridge_ReopensStalledStream(t *testing.T) {
 
 	eventually(t, func() bool { return srv.streamCalls.Load() >= 2 }, "a reopened stream")
 	eventually(t, func() bool { return !wb.serverClient.IsConnected() }, "the connection to be dropped for rediscovery")
+}
+
+// A server without the stream that stops answering while polled was
+// usually replaced by a rollout: the next round tries the stream again
+// instead of polling out the rest of streamRetryAfter. Other poll errors
+// keep the fallback.
+func TestWatcherBridge_UnavailableServerRetriesTheStream(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		err       error
+		wantRetry bool
+	}{
+		{"server went away", status.Error(codes.Unavailable, "connection error"), true},
+		{"server answered with an error", status.Error(codes.Internal, "boom"), false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			wb := streamingBridge(t, &fakeAlertServer{pollErr: tc.err})
+			until := time.Now().Add(streamRetryAfter)
+			wb.streamUnsupportedUntil = until
+			if wb.streamWanted() {
+				t.Fatal("precondition: the stream is on hold")
+			}
+
+			wb.poll(context.Background())
+
+			if got := wb.streamWanted(); got != tc.wantRetry {
+				t.Fatalf("streamWanted after the poll error = %v, want %v", got, tc.wantRetry)
+			}
+			if !tc.wantRetry && !wb.streamUnsupportedUntil.Equal(until) {
+				t.Fatal("a non-transport error must keep the polling hold")
+			}
+		})
+	}
 }

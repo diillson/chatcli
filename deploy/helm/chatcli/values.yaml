@@ -237,10 +237,10 @@ rbac:
 # CRD lifecycle management.
 #
 # Helm only applies files from the chart's crds/ directory on first install —
-# `helm upgrade` skips them by design (Helm 3 hard restriction). That leaves
+# `helm upgrade` skips them by design. That leaves
 # users upgrading between chart versions running the new chatcli binary
-# against the OLD CRD schema, which surfaced as GAP-06 in the 2026-05-23 chaos
-# test (chart 1.121.0 -> 1.122.0 added IssueState Contained and the
+# against the OLD CRD schema, as happened between charts 1.121.0 and 1.122.0
+# (1.122.0 added IssueState Contained and the
 # PostMortemSpec.RequiresHumanAction/RequiredAction fields).
 #
 # This block controls the pre-install/pre-upgrade hook that re-applies every

@@ -297,7 +297,7 @@
 
 ### ⚠ BREAKING CHANGES
 
-* **catalog:** o valor GITHUB_MODELS sai do enum de provider do CRD Instance e do schema do chart Helm. ChatCLIInstance que ainda aponte para ele passa a ser rejeitado na admissao e precisa migrar de provider antes do upgrade. As env vars GITHUB_MODELS_MODEL, GITHUB_MODELS_TOKEN, GITHUB_MODELS_MAX_TOKENS e GITHUB_MODELS_API_URL deixam de ter efeito, e /auth login github-models deixa de existir.
+* **catalog:** o valor GITHUB_MODELS sai do enum de provider do fallback do CRD Instance (spec.fallback.providers[].name) e do schema do chart Helm. Uma Instance que ainda o liste no fallback passa a ser rejeitada na admissao; em spec.provider o CRD ainda aceita o valor, mas o servidor nao tem mais esse provider. Migre os dois antes do upgrade. As env vars GITHUB_MODELS_MODEL, GITHUB_MODELS_TOKEN, GITHUB_MODELS_MAX_TOKENS e GITHUB_MODELS_API_URL deixam de ter efeito, e /auth login github-models deixa de existir.
 
 ### Features
 

@@ -436,6 +436,25 @@ func TestReconcile_RequeuesAReadyInstanceForTheProbe(t *testing.T) {
 		t.Errorf("RequeueAfter = %v, want %v", res.RequeueAfter, serverProbeInterval)
 	}
 
+	// A failed probe (the pods were being replaced) is retried soon, not
+	// after a full interval; once the server answers, the interval is back.
+	r.Prober = fakeProber{err: errors.New("health: rpc error: code = DeadlineExceeded")}
+	res, err = r.Reconcile(context.Background(), req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.RequeueAfter != serverProbeRetryInterval {
+		t.Errorf("RequeueAfter after a failed probe = %v, want %v", res.RequeueAfter, serverProbeRetryInterval)
+	}
+	r.Prober = fakeProber{res: ProbeResult{Healthy: false}}
+	if res, err = r.Reconcile(context.Background(), req); err != nil || res.RequeueAfter != serverProbeRetryInterval {
+		t.Errorf("NOT_SERVING must be retried soon too: %v, %v", res.RequeueAfter, err)
+	}
+	r.Prober = fakeProber{res: ProbeResult{Healthy: true, Version: "1.212.0"}}
+	if res, err = r.Reconcile(context.Background(), req); err != nil || res.RequeueAfter != serverProbeInterval {
+		t.Errorf("a recovered server goes back to the regular interval: %v, %v", res.RequeueAfter, err)
+	}
+
 	// Without a prober there is nothing to refresh.
 	r.Prober = nil
 	res, err = r.Reconcile(context.Background(), req)

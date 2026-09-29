@@ -9,14 +9,14 @@ PostMortem CRs in your cluster.
 {{- if .Values.crdUpgrade.enabled }}
 
 A pre-install/pre-upgrade Helm hook already re-applied every CRD shipped with
-this chart (GAP-06 fix). You don't need to run any manual `kubectl apply -f`
+this chart. You don't need to run any manual `kubectl apply -f`
 to refresh the CRD schema — that is handled automatically on every
 `helm upgrade`. Disable via `--set crdUpgrade.enabled=false` if you manage
 CRDs out of band.
 {{- else }}
 
-⚠️  CRD UPGRADE HOOK DISABLED — you opted out of the GAP-06 fix.
-   Helm 3 does not refresh CRDs on `helm upgrade` by design. If you bump
+⚠️  CRD UPGRADE HOOK DISABLED — you manage the CRDs yourself.
+   Helm does not refresh CRDs on `helm upgrade` by design. If you bump
    the chart version, run this BEFORE upgrading the binary so the API
    server accepts the new fields and enum values:
 
