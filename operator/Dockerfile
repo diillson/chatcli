@@ -44,6 +44,8 @@ RUN apk update && apk upgrade --no-cache && \
         "libssl3>=3.5.8-r0" \
         "libexpat>=2.8.4-r0" \
         "openssh-client-default>=10.3_p1-r1" \
+        "pcre2>=10.49-r0" \
+        "nghttp2-libs>=1.70.0-r0" \
         git ca-certificates tzdata && \
     adduser -D -u 65532 -g 65532 nonroot
 WORKDIR /
