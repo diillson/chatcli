@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.212.2](https://github.com/diillson/chatcli/compare/v1.212.1...v1.212.2) (2026-10-05)
+
+
+### Bug Fixes
+
+* **deps:** bump go modules and pin patched alpine packages in operator image ([#1727](https://github.com/diillson/chatcli/issues/1727)) ([dac0bc4](https://github.com/diillson/chatcli/commit/dac0bc4c88a19153e1d87cf4433d212d32b7744d)), closes [#1722](https://github.com/diillson/chatcli/issues/1722) [#1723](https://github.com/diillson/chatcli/issues/1723) [#1724](https://github.com/diillson/chatcli/issues/1724) [#1725](https://github.com/diillson/chatcli/issues/1725)
+
 ## [1.212.1](https://github.com/diillson/chatcli/compare/v1.212.0...v1.212.1) (2026-09-29)
 
 
