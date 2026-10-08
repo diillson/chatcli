@@ -83,13 +83,13 @@ func TestRefusalFallbackServesOneTurnThenHandsBack(t *testing.T) {
 	turn := []models.Message{{Role: "user", Content: "x"}}
 
 	require.True(t, a.resendTurnAfter(refusalErr(), &turn))
-	assert.Equal(t, "CLAUDEAI:claude-opus-5", cliObj.agentRouteOverrideHandle(), "Fable falls back to Opus on the same provider")
+	assert.Equal(t, "CLAUDEAI:claude-opus-5-5", cliObj.agentRouteOverrideHandle(), "Fable falls back to Opus on the same provider")
 	assert.Len(t, turn, 2, "the nudge travels with the resend")
 
 	// The resend resolves its client: it is the fallback turn.
 	turnClient, _ := a.clientAndCtxForTurn(ctx)
-	assert.Equal(t, "claude-opus-5", turnClient.GetModelName())
-	assert.Equal(t, "CLAUDEAI:claude-opus-5", cliObj.agentRouteOverrideHandle(), "still routed during the fallback turn")
+	assert.Equal(t, "claude-opus-5-5", turnClient.GetModelName())
+	assert.Equal(t, "CLAUDEAI:claude-opus-5-5", cliObj.agentRouteOverrideHandle(), "still routed during the fallback turn")
 
 	// The next turn hands the route back.
 	turnClient, _ = a.clientAndCtxForTurn(ctx)
@@ -134,10 +134,10 @@ func TestRefusalFallbackBecomesStickyAndResetsPerRun(t *testing.T) {
 	assert.True(t, a.refusalSticky)
 	for i := 0; i < 3; i++ {
 		a.clientAndCtxForTurn(ctx)
-		assert.Equal(t, "CLAUDEAI:claude-opus-5", cliObj.agentRouteOverrideHandle(), "sticky: the route stays")
+		assert.Equal(t, "CLAUDEAI:claude-opus-5-5", cliObj.agentRouteOverrideHandle(), "sticky: the route stays")
 	}
 	require.True(t, a.resendTurnAfter(refusalErr(), nil), "refused on the fallback too: one more resend, same route")
-	assert.Equal(t, "CLAUDEAI:claude-opus-5", cliObj.agentRouteOverrideHandle())
+	assert.Equal(t, "CLAUDEAI:claude-opus-5-5", cliObj.agentRouteOverrideHandle())
 
 	// A new run starts clean, on the user's model. (Run clears the override
 	// itself; the refusal state must not resurrect it.)
@@ -150,10 +150,11 @@ func TestRefusalFallbackBecomesStickyAndResetsPerRun(t *testing.T) {
 }
 
 func TestRefusalSiblingFor(t *testing.T) {
-	assert.Equal(t, "CLAUDEAI:claude-opus-5", refusalSiblingFor("CLAUDEAI", "claude-fable-5-1"))
-	assert.Equal(t, "CLAUDEAI:claude-sonnet-5", refusalSiblingFor("claudeai", "claude-opus-5"))
-	assert.Equal(t, "CLAUDEAI:claude-haiku-4-5-20251001", refusalSiblingFor("CLAUDEAI", "claude-sonnet-5"))
-	assert.Empty(t, refusalSiblingFor("CLAUDEAI", "claude-haiku-4-5-20251001"), "no sibling below Haiku")
+	assert.Equal(t, "CLAUDEAI:claude-opus-5-5", refusalSiblingFor("CLAUDEAI", "claude-fable-5-1"))
+	assert.Equal(t, "CLAUDEAI:claude-sonnet-5-5", refusalSiblingFor("claudeai", "claude-opus-5"))
+	assert.Equal(t, "CLAUDEAI:claude-haiku-5-5", refusalSiblingFor("CLAUDEAI", "claude-sonnet-5"))
+	assert.Equal(t, "CLAUDEAI:claude-haiku-4-5-20251001", refusalSiblingFor("CLAUDEAI", "claude-haiku-5-5"))
+	assert.Empty(t, refusalSiblingFor("CLAUDEAI", "claude-haiku-4-5-20251001"), "no sibling below Haiku 4.5")
 	assert.Empty(t, refusalSiblingFor("OPENAI", "gpt-5.6"), "auto knows the Anthropic families only")
 	assert.Empty(t, refusalSiblingFor("GOOGLEAI", "claude-fable-5-1"), "a provider without the sibling gets none")
 }
@@ -184,10 +185,10 @@ func TestRefusalRecommendedModelWins(t *testing.T) {
 	assert.Equal(t, "CLAUDEAI:claude-opus-4-8", refusalRecommendedFor("CLAUDEAI", "claude-opus-5-5", recommended))
 
 	unknown := &llmclient.EmptyResponseError{StopReason: llmclient.StopReasonRefusal, Details: &llmclient.StopDetails{RecommendedModel: "claude-nope-9"}}
-	assert.Equal(t, "CLAUDEAI:claude-sonnet-5", a.refusalFallbackHandle(unknown), "an unknown recommendation falls back to the family table")
+	assert.Equal(t, "CLAUDEAI:claude-sonnet-5-5", a.refusalFallbackHandle(unknown), "an unknown recommendation falls back to the family table")
 	same := &llmclient.EmptyResponseError{StopReason: llmclient.StopReasonRefusal, Details: &llmclient.StopDetails{RecommendedModel: "claude-opus-5-5"}}
-	assert.Equal(t, "CLAUDEAI:claude-sonnet-5", a.refusalFallbackHandle(same), "recommending the refusing model itself is no recommendation")
-	assert.Equal(t, "CLAUDEAI:claude-sonnet-5", a.refusalFallbackHandle(nil), "no details, family table")
+	assert.Equal(t, "CLAUDEAI:claude-sonnet-5-5", a.refusalFallbackHandle(same), "recommending the refusing model itself is no recommendation")
+	assert.Equal(t, "CLAUDEAI:claude-sonnet-5-5", a.refusalFallbackHandle(nil), "no details, family table")
 	assert.Empty(t, refusalRecommendedFor("GOOGLEAI", "gemini-3.8-flash", recommended), "a provider without the model gets none")
 
 	t.Setenv(refusalFallbackEnv, "off")

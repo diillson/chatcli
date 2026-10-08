@@ -26,13 +26,17 @@ import "strings"
 // OpenAI-compatible chat schema accepts reasoning_effort. Shared by the
 // direct OpenAI client, the Responses client, Copilot and
 // the Bedrock OpenAI family, which all speak the same dialect and used to
-// carry their own copy of this list (or none at all).
+// carry their own copy of this list (or none at all). The GPT-6 family
+// (Astra, Sol, Luna, 6.1 Sol) reasons too and was missing, so effort hints
+// never reached it; every value ReasoningEffortForOpenAI emits (low,
+// medium, high) is valid there — 6.1 Sol dropped only none/minimal.
 func SupportsOpenAIReasoningEffort(model string) bool {
 	m := strings.ToLower(model)
 	return strings.HasPrefix(m, "o1") ||
 		strings.HasPrefix(m, "o3") ||
 		strings.HasPrefix(m, "o4") ||
 		strings.HasPrefix(m, "gpt-5") ||
+		strings.HasPrefix(m, "gpt-6") ||
 		strings.Contains(m, "gpt-oss") ||
 		strings.Contains(m, "-reasoning")
 }

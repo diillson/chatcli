@@ -234,10 +234,10 @@ func TestComplete_NeverRefreshesCallerCredentials(t *testing.T) {
 
 func TestComplete_RetriesRefusalOnSiblingWithSameCredentials(t *testing.T) {
 	fable := &routeClient{model: "claude-fable-5-1", errs: []error{refusalErr()}}
-	opus := &routeClient{model: "claude-opus-5", replies: []string{"sibling answered"}}
+	opus := &routeClient{model: "claude-opus-5-5", replies: []string{"sibling answered"}}
 	mgr := &routeManager{byProvider: map[string]client.LLMClient{
 		"CLAUDEAI":                  fable,
-		"CLAUDEAI:claude-opus-5":    opus,
+		"CLAUDEAI:claude-opus-5-5":  opus,
 		"CLAUDEAI:claude-fable-5-1": fable,
 	}}
 	h := NewHandler(mgr, nil, zap.NewNop(), "CLAUDEAI", "claude-fable-5-1")
@@ -247,7 +247,7 @@ func TestComplete_RetriesRefusalOnSiblingWithSameCredentials(t *testing.T) {
 	res, err := h.complete(context.Background(), r, "hi", nil, 10)
 	require.NoError(t, err)
 	assert.Equal(t, "sibling answered", res.text)
-	assert.Equal(t, "claude-opus-5", res.model)
+	assert.Equal(t, "claude-opus-5-5", res.model)
 	assert.Equal(t, "CLAUDEAI", res.provider)
 	assert.Equal(t, int32(1), atomic.LoadInt32(&fable.calls), "resent once, on the sibling, never on the model that refused")
 	assert.Equal(t, int32(1), atomic.LoadInt32(&opus.calls))

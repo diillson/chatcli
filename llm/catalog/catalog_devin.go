@@ -52,6 +52,10 @@ func init() {
 		// -max, with -medium flagged recommended); the bare id below
 		// covers all of them through Resolve()'s prefix pass, the same
 		// way the gpt-5.6-* entries cover their own -medium/-high forms.
+		// GPT-6.1 Sol (Cognition blog, Sep 29 2026: Devin Desktop + CLI at
+		// the $2/$10 list price). The slug is not published; this follows
+		// the vendor id the gpt-6-* rows already use.
+		{"gpt-6.1-sol", 1050000, 128000},
 		{"gpt-6-astra", 1050000, 128000},
 		{"gpt-6-sol", 1050000, 128000},
 		{"gpt-6-luna", 1050000, 128000},

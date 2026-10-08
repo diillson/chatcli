@@ -33,11 +33,16 @@ func TestCopilot_IsASubscriptionNotPerToken(t *testing.T) {
 }
 
 func TestLongContextTiers_PerCall(t *testing.T) {
-	if in, out := longContextMultipliers("CLAUDEAI", "claude-sonnet-5", 250_000); in != 2 || out != 1.5 {
+	// Only the pre-4.6 Sonnets (1M beta) carry Anthropic's 200K premium;
+	// 4.6+ bills the full 1M at standard price (pricing page, Oct 2026).
+	if in, out := longContextMultipliers("CLAUDEAI", "claude-sonnet-4-5", 250_000); in != 2 || out != 1.5 {
 		t.Fatalf("anthropic tier = %v %v", in, out)
 	}
-	if in, out := longContextMultipliers("CLAUDEAI", "claude-sonnet-5", 150_000); in != 1 || out != 1 {
+	if in, out := longContextMultipliers("CLAUDEAI", "claude-sonnet-4-5", 150_000); in != 1 || out != 1 {
 		t.Fatal("under the threshold: no tier")
+	}
+	if in, out := longContextMultipliers("CLAUDEAI", "claude-sonnet-5", 900_000); in != 1 || out != 1 {
+		t.Fatalf("claude 4.6+ has no long-context premium: %v %v", in, out)
 	}
 	if in, out := longContextMultipliers("GOOGLEAI", "gemini-2.5-pro", 300_000); in != 2 || out != 1.5 {
 		t.Fatalf("gemini tier = %v %v", in, out)
@@ -45,20 +50,20 @@ func TestLongContextTiers_PerCall(t *testing.T) {
 	if in, out := longContextMultipliers("XAI", "grok-4", 200_000); in != 2 || out != 2 {
 		t.Fatalf("grok tier = %v %v", in, out)
 	}
-	if in, out := longContextMultipliers("OPENAI", "gpt-5.6", 500_000); in != 1 || out != 1 {
-		t.Fatal("openai has no tier")
+	if in, out := longContextMultipliers("OPENAI", "gpt-5.6", 500_000); in != 2 || out != 1.5 {
+		t.Fatalf("openai bills 2x/1.5x above 272K: %v %v", in, out)
 	}
 	small := &models.UsageInfo{PromptTokens: 100_000, CompletionTokens: 1000, IsReal: true}
 	big := &models.UsageInfo{PromptTokens: 300_000, CompletionTokens: 1000, IsReal: true}
-	base := estimateTurnCostUSD("CLAUDEAI", "claude-sonnet-5", small)
-	tiered := estimateTurnCostUSD("CLAUDEAI", "claude-sonnet-5", big)
+	base := estimateTurnCostUSD("CLAUDEAI", "claude-sonnet-4-5", small)
+	tiered := estimateTurnCostUSD("CLAUDEAI", "claude-sonnet-4-5", big)
 	// 3× the prompt at 2× the price, output at 1.5×: strictly more than 3× base.
 	if base <= 0 || tiered <= base*3 {
 		t.Fatalf("tier must raise the per-turn estimate: base=%v tiered=%v", base, tiered)
 	}
 	// The session tracker books the tiered call as a billed amount.
 	ct := NewCostTracker()
-	ct.RecordRealUsage("CLAUDEAI", "claude-sonnet-5", big)
+	ct.RecordRealUsage("CLAUDEAI", "claude-sonnet-4-5", big)
 	if math.Abs(ct.TotalCost()-tiered) > 1e-9 {
 		t.Fatalf("tracker total %v != tiered %v", ct.TotalCost(), tiered)
 	}

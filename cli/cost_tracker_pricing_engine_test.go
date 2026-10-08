@@ -111,14 +111,14 @@ func TestRecomputeRecordCost_GoldenValues(t *testing.T) {
 	assert.InDelta(t, 3.655, rec.TotalCostUSD, 1e-12)
 
 	// gpt-5.4 subset schema: 600K of the 1M prompt are cache reads at
-	// $1.25, the remaining 400K at $2.5; 10K output at $15.
+	// $0.25 (10%), the remaining 400K at $2.5; 10K output at $15.
 	rec = &ModelUsageRecord{Provider: "OPENAI", Model: "gpt-5.4",
 		PromptTokens: 1_000_000, CompletionTokens: 10_000, CacheReadTokens: 600_000}
 	recomputeRecordCost(rec)
 	assert.InDelta(t, 1.0, rec.InputCostUSD, 1e-12)
-	assert.InDelta(t, 0.75, rec.CacheCostUSD, 1e-12)
+	assert.InDelta(t, 0.15, rec.CacheCostUSD, 1e-12)
 	assert.InDelta(t, 0.15, rec.OutputCostUSD, 1e-12)
-	assert.InDelta(t, 1.9, rec.TotalCostUSD, 1e-12)
+	assert.InDelta(t, 1.3, rec.TotalCostUSD, 1e-12)
 
 	// An unpriced model is zero AND flagged unknown.
 	rec = &ModelUsageRecord{Provider: "UNKNOWN", Model: "mystery", PromptTokens: 1_000_000}
@@ -141,9 +141,15 @@ func TestEstimateTurnCostUSD_DelegatesToEngine(t *testing.T) {
 		assert.Equal(t, want, estimateTurnCostUSD("CLAUDEAI", "claude-sonnet-5", u))
 	}
 	assert.InDelta(t, 0.42, estimateTurnCostUSD("CLAUDEAI", "claude-sonnet-5", usages[1]), 1e-12)
-	// The long-context call is tiered, the record formula alone is not.
-	rec := &ModelUsageRecord{Provider: "CLAUDEAI", Model: "claude-sonnet-5",
+	// The long-context call is tiered on a model with a premium (Sonnet
+	// 4.5's 1M beta), the record formula alone is not; Sonnet 5 runs the
+	// full 1M at standard price, so the two agree there.
+	rec := &ModelUsageRecord{Provider: "CLAUDEAI", Model: "claude-sonnet-4-5",
 		PromptTokens: 100_000, CompletionTokens: 10_000, CacheReadTokens: 200_000}
 	recomputeRecordCost(rec)
-	assert.Greater(t, estimateTurnCostUSD("CLAUDEAI", "claude-sonnet-5", usages[3]), rec.TotalCostUSD)
+	assert.Greater(t, estimateTurnCostUSD("CLAUDEAI", "claude-sonnet-4-5", usages[3]), rec.TotalCostUSD)
+	rec5 := &ModelUsageRecord{Provider: "CLAUDEAI", Model: "claude-sonnet-5",
+		PromptTokens: 100_000, CompletionTokens: 10_000, CacheReadTokens: 200_000}
+	recomputeRecordCost(rec5)
+	assert.InDelta(t, rec5.TotalCostUSD, estimateTurnCostUSD("CLAUDEAI", "claude-sonnet-5", usages[3]), 1e-12)
 }

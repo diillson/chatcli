@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestResolve(t *testing.T) {
@@ -1053,4 +1054,124 @@ func TestSep2026Refresh(t *testing.T) {
 	}
 	m27, _ := Resolve(ProviderMiniMax, "MiniMax-M2.7")
 	assert.Equal(t, "MiniMax-M2.7", m27.ID)
+}
+
+// TestClaude55Entries pins the Sonnet 5.5 (Sep 28 2026) and Haiku 5.5
+// (Oct 7 2026) launches. Before this refresh "claude-sonnet-5-5" resolved
+// to Sonnet 5 through its "sonnet-5" prefix — on Bedrock that inherited
+// bedrock_mantle_only and sent Sonnet 5.5 down the Mantle path, which AWS
+// lists for it in us-gov-west-1 only.
+func TestClaude55Entries(t *testing.T) {
+	for want, ids := range map[string][]string{
+		"claude-sonnet-5-5": {"claude-sonnet-5-5", "sonnet-5-5", "claude-sonnet-5.5", "sonnet-5.5"},
+		"claude-haiku-5-5":  {"claude-haiku-5-5", "haiku-5-5", "claude-haiku-5.5", "haiku-5.5"},
+	} {
+		for _, id := range ids {
+			meta, ok := Resolve(ProviderClaudeAI, id)
+			require.True(t, ok, id)
+			assert.Equal(t, want, meta.ID, "alias %s", id)
+			assert.Equal(t, 1000000, meta.ContextWindow, id)
+			assert.Equal(t, 128000, meta.MaxOutputTokens, id)
+		}
+		for _, capability := range []string{"vision", "tools", "json_mode", "adaptive_thinking", "output_effort", "task_budget", "mid_conversation_system"} {
+			assert.True(t, HasCapability(ProviderClaudeAI, want, capability), "%s should advertise %q", want, capability)
+		}
+		assert.False(t, HasCapability(ProviderClaudeAI, want, "extended_thinking"), "budget_tokens returns 400 on %s", want)
+		assert.False(t, HasCapability(ProviderClaudeAI, want, "fast_mode"), "fast mode is Opus-only")
+	}
+	s5, _ := Resolve(ProviderClaudeAI, "claude-sonnet-5")
+	assert.Equal(t, "claude-sonnet-5", s5.ID, "Sonnet 5 keeps its own entry")
+	assert.False(t, HasCapability(ProviderClaudeAI, "claude-sonnet-5", "task_budget"), "task budgets: Sonnet 5 is Not supported")
+	assert.False(t, HasCapability(ProviderBedrock, "anthropic.claude-sonnet-5", "task_budget"), "same on Bedrock")
+	h45, _ := Resolve(ProviderClaudeAI, "claude-haiku-4-5")
+	assert.Equal(t, "claude-haiku-4-5-20251001", h45.ID, "Haiku 4.5 keeps its own entry")
+
+	for _, tc := range []struct{ provider, id, want string }{
+		{ProviderBedrock, "claude-sonnet-5-5", "global.anthropic.claude-sonnet-5-5"},
+		{ProviderBedrock, "anthropic.claude-sonnet-5-5", "global.anthropic.claude-sonnet-5-5"},
+		{ProviderBedrock, "eu.anthropic.claude-sonnet-5-5", "global.anthropic.claude-sonnet-5-5"},
+		{ProviderBedrock, "jp.anthropic.claude-haiku-5-5", "global.anthropic.claude-haiku-5-5"},
+		{ProviderBedrock, "bedrock-haiku-5.5", "global.anthropic.claude-haiku-5-5"},
+		{ProviderBedrock, "claude-sonnet-5", "anthropic.claude-sonnet-5"},
+		{ProviderOpenRouter, "anthropic/claude-sonnet-5.5", "anthropic/claude-sonnet-5.5"},
+		{ProviderOpenRouter, "anthropic/claude-sonnet-5-5", "anthropic/claude-sonnet-5.5"},
+		{ProviderOpenRouter, "anthropic/claude-haiku-5.5", "anthropic/claude-haiku-5.5"},
+		{ProviderOpenRouter, "anthropic/claude-sonnet-5", "anthropic/claude-sonnet-5"},
+		{ProviderCopilot, "claude-sonnet-5.5", "claude-sonnet-5.5"},
+		{ProviderCopilot, "claude-haiku-5-5", "claude-haiku-5.5"},
+	} {
+		meta, ok := Resolve(tc.provider, tc.id)
+		require.True(t, ok, "%s/%s", tc.provider, tc.id)
+		assert.Equal(t, tc.want, meta.ID, "%s/%s", tc.provider, tc.id)
+	}
+	for _, id := range []string{"global.anthropic.claude-sonnet-5-5", "global.anthropic.claude-haiku-5-5"} {
+		assert.False(t, HasCapability(ProviderBedrock, id, "bedrock_mantle_only"), "%s is served by bedrock-runtime", id)
+		assert.False(t, HasCapability(ProviderBedrock, id, "fast_mode"), id)
+		assert.True(t, HasCapability(ProviderBedrock, id, "adaptive_thinking"), id)
+	}
+	assert.True(t, HasCapability(ProviderBedrock, "anthropic.claude-sonnet-5", "bedrock_mantle_only"), "Sonnet 5 stays on Mantle")
+}
+
+// TestGPT61SolEntries pins GPT-6.1 Sol (Sep 29 2026) on the five providers
+// that serve it. Before this refresh the OPENAI lookup fell through to
+// Astra, whose loose "gpt-6" alias is a prefix of the id.
+func TestGPT61SolEntries(t *testing.T) {
+	for _, id := range []string{"gpt-6.1-sol", "gpt-6-1-sol", "gpt-6.1"} {
+		meta, ok := Resolve(ProviderOpenAI, id)
+		require.True(t, ok, id)
+		assert.Equal(t, "gpt-6.1-sol", meta.ID, id)
+		assert.Equal(t, 1050000, meta.ContextWindow)
+		assert.Equal(t, 128000, meta.MaxOutputTokens)
+		assert.Equal(t, APIResponses, meta.PreferredAPI, "tool calling needs the Responses API")
+	}
+	for _, tc := range []struct{ id, want string }{{"gpt-6", "gpt-6-astra"}, {"gpt-6-sol", "gpt-6-sol"}, {"gpt-6-astra", "gpt-6-astra"}} {
+		meta, _ := Resolve(ProviderOpenAI, tc.id)
+		assert.Equal(t, tc.want, meta.ID, "%s keeps resolving where it did", tc.id)
+	}
+	for _, tc := range []struct{ provider, id, want string }{
+		{ProviderCopilot, "gpt-6.1-sol", "gpt-6.1-sol"},
+		{ProviderOpenRouter, "openai/gpt-6.1-sol", "openai/gpt-6.1-sol"},
+		{ProviderBedrock, "global.openai.gpt-6.1-sol", "global.openai.gpt-6.1-sol"},
+		{ProviderBedrock, "us.openai.gpt-6.1-sol", "global.openai.gpt-6.1-sol"},
+		{ProviderDevin, "gpt-6.1-sol", "gpt-6.1-sol"},
+		{ProviderDevin, "gpt-6.1-sol-high", "gpt-6.1-sol"},
+	} {
+		meta, ok := Resolve(tc.provider, tc.id)
+		require.True(t, ok, "%s/%s", tc.provider, tc.id)
+		assert.Equal(t, tc.want, meta.ID, "%s/%s", tc.provider, tc.id)
+	}
+	assert.True(t, HasCapability(ProviderBedrock, "global.openai.gpt-6.1-sol", "bedrock_converse_only"))
+	b, _ := Resolve(ProviderBedrock, "global.openai.gpt-6.1-sol")
+	assert.Equal(t, 131072, b.MaxOutputTokens, "the Bedrock card caps output at 131,072")
+}
+
+// TestOct2026BedrockAndCopilotRefresh pins the non-Anthropic Bedrock
+// launches (Grok 4.7, Kimi K3, GLM-5.3) and the Copilot retirements.
+func TestOct2026BedrockAndCopilotRefresh(t *testing.T) {
+	for _, tc := range []struct {
+		id, want string
+		ctx      int
+	}{
+		{"global.xai.grok-4.7", "global.xai.grok-4.7", 500000},
+		{"us.xai.grok-4.7", "global.xai.grok-4.7", 500000},
+		{"global.moonshotai.kimi-k3", "global.moonshotai.kimi-k3", 1048576},
+		{"in.moonshotai.kimi-k3", "global.moonshotai.kimi-k3", 1048576},
+		{"global.zai.glm-5.3", "global.zai.glm-5.3", 1000000},
+		{"us.zai.glm-5.3", "global.zai.glm-5.3", 1000000},
+	} {
+		meta, ok := Resolve(ProviderBedrock, tc.id)
+		require.True(t, ok, tc.id)
+		assert.Equal(t, tc.want, meta.ID, tc.id)
+		assert.Equal(t, tc.ctx, meta.ContextWindow, tc.id)
+	}
+	g46, _ := Resolve(ProviderBedrock, "global.xai.grok-4.6")
+	assert.Equal(t, "global.xai.grok-4.6", g46.ID, "Grok 4.6 keeps its own entry")
+	assert.False(t, HasCapability(ProviderBedrock, "global.zai.glm-5.3", "vision"), "GLM-5.3 is text-only")
+
+	for _, retired := range []string{"claude-sonnet-4", "copilot-claude-sonnet-4", "gemini-2.0-flash", "copilot-gemini-2.0-flash"} {
+		_, ok := Resolve(ProviderCopilot, retired)
+		assert.False(t, ok, "%s was retired from Copilot", retired)
+	}
+	_, ok := Resolve(ProviderCopilot, "gpt-4o")
+	assert.True(t, ok, "gpt-4o stays: it is DefaultCopilotModel and GitHub has not dated it")
 }
