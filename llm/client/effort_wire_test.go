@@ -65,7 +65,7 @@ func TestOpenAIEffortOnlyForReasoningModels(t *testing.T) {
 	if got := OpenAIReasoningEffort("gpt-4.1", EffortHigh); got != "" {
 		t.Errorf("a non-reasoning model must not carry the field, got %q", got)
 	}
-	for _, m := range []string{"o1-preview", "o3-mini", "o4", "gpt-5.6-terra", "gpt-oss-120b", "custom-reasoning"} {
+	for _, m := range []string{"o1-preview", "o3-mini", "o4", "gpt-5.6-terra", "gpt-6-astra", "gpt-6-luna", "gpt-6.1-sol", "gpt-oss-120b", "custom-reasoning"} {
 		if !SupportsOpenAIReasoningEffort(m) {
 			t.Errorf("%s should take reasoning_effort", m)
 		}

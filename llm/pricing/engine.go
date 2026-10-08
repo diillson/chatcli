@@ -115,6 +115,13 @@ type RecordInput struct {
 func RecordCost(in RecordInput) Cost {
 	inputCost, outputCost, known := lookupModelPricing(in.Provider, in.Model)
 	cacheWriteCost, cacheReadCost := getCachePricing(in.Provider, in.Model)
+	if cacheWriteCost == 0 {
+		// No published write rate: a reported cache write is still input
+		// the provider processed, so it bills at the input price — the
+		// same rule cache reads follow. A zero here used to price every
+		// write as free (MiniMax's Anthropic-shaped surface, Kimi K3).
+		cacheWriteCost = inputCost
+	}
 
 	unbilled := func(total, billed int64) int64 {
 		if d := total - billed; d > 0 {
@@ -215,26 +222,91 @@ func ReasoningTokensAdditive(provider string) bool {
 // longContextThresholdTokens is the prompt size above which the providers
 // below switch to their long-context tier.
 const (
-	longContextAnthropicTokens = 200_000
-	longContextGeminiTokens    = 200_000
-	longContextGrokTokens      = 128_000
+	longContextAnthropicTokens  = 200_000
+	longContextHaikuTokens      = 100_000
+	longContextGeminiTokens     = 200_000
+	longContextGrokTokens       = 200_000
+	longContextOpenAITokens     = 272_000
+	longContextMiniMaxM3Tokens  = 512_000
+	longContextMultiplierHaiku  = 5
+	longContextMultiplierDouble = 2
 )
 
 // LongContextMultipliers returns the input and output price multipliers a
-// call with promptTokens of context pays: Anthropic (Claude 4+ with the
-// 1M window) and Gemini 2.5 Pro bill 2× input and 1.5× output past 200K;
-// xAI Grok 4 bills 2× both past 128K. 1/1 elsewhere.
+// call with promptTokens of context pays (input covers cache reads and
+// writes too — every vendor below scales them with the input rate):
+//
+//   - Claude: Sonnet 4 / 4.5 with the 1M beta bill 2x input and 1.5x
+//     output past 200K. Claude 4.6 and later run the full 1M at standard
+//     price — except Haiku 5.5, which bills 5x on every line past 100K
+//     (platform.claude.com/docs/en/about-claude/pricing, "Long context
+//     pricing", Oct 2026).
+//   - Gemini 2.5 Pro and 3.1 Pro: 2x input, 1.5x output past 200K; the
+//     Flash and Flash-Lite lines have a single tier.
+//   - xAI Grok 4.x and grok-build: 2x on both once the prompt reaches 200K
+//     (docs.x.ai/docs/models, Oct 2026), whatever the surface spells the
+//     id (grok-4.7, x-ai/grok-4.7, global.xai.grok-4.7).
+//   - OpenAI GPT-6 / 5.6 / 5.5 / 5.4: 2x input, 1.5x output above 272K
+//     input (developers.openai.com/api/docs/pricing, Oct 2026), on the
+//     direct API and the Bedrock global profile alike.
+//   - MiniMax-M3: 2x on both above 512K (pricing-paygo, Oct 2026).
+//
+// 1/1 elsewhere. A provider-billed call (usage.cost, e.g. OpenRouter) is
+// never re-tiered — tieredCallCost checks that before calling here.
 func LongContextMultipliers(provider, model string, promptTokens int) (in, out float64) {
 	p, m := strings.ToLower(provider), strings.ToLower(model)
 	switch {
-	case strings.Contains(m, "claude") && promptTokens > longContextAnthropicTokens:
-		return 2, 1.5
-	case strings.Contains(m, "gemini-2.5-pro") && promptTokens > longContextGeminiTokens:
-		return 2, 1.5
-	case (strings.Contains(p, "xai") || strings.HasPrefix(m, "grok-4")) && strings.HasPrefix(m, "grok-4") && promptTokens > longContextGrokTokens:
-		return 2, 2
+	case strings.Contains(m, "haiku-5-5") || strings.Contains(m, "haiku-5.5"):
+		if promptTokens > longContextHaikuTokens {
+			return longContextMultiplierHaiku, longContextMultiplierHaiku
+		}
+	case strings.Contains(m, "claude"):
+		if claudeHasLongContextPremium(m) && promptTokens > longContextAnthropicTokens {
+			return longContextMultiplierDouble, 1.5
+		}
+	case strings.Contains(m, "gemini-2.5-pro") || strings.Contains(m, "gemini-3.1-pro"):
+		if promptTokens > longContextGeminiTokens {
+			return longContextMultiplierDouble, 1.5
+		}
+	case strings.Contains(m, "grok-4") || strings.Contains(m, "grok-build") ||
+		(strings.Contains(p, "xai") && strings.Contains(m, "grok")):
+		if promptTokens >= longContextGrokTokens {
+			return longContextMultiplierDouble, longContextMultiplierDouble
+		}
+	case openAIHasLongContextTier(m):
+		if promptTokens > longContextOpenAITokens {
+			return longContextMultiplierDouble, 1.5
+		}
+	case strings.Contains(m, "minimax-m3"):
+		if promptTokens > longContextMiniMaxM3Tokens {
+			return longContextMultiplierDouble, longContextMultiplierDouble
+		}
 	}
 	return 1, 1
+}
+
+// claudeHasLongContextPremium reports whether a Claude id is one of the
+// pre-4.6 Sonnets whose 1M window (beta) bills a premium past 200K. Every
+// other Claude either has a 200K window or runs 1M at standard price.
+func claudeHasLongContextPremium(m string) bool {
+	if !strings.Contains(m, "sonnet-4") {
+		return false
+	}
+	return !strings.Contains(m, "sonnet-4-6") && !strings.Contains(m, "sonnet-4.6")
+}
+
+// openAIHasLongContextTier reports whether an OpenAI id is on the pricing
+// page's short/long-context split: the GPT-6 family, the 5.6 tiers, and
+// the gpt-5.5 / gpt-5.4 base models (their pro/mini/nano siblings are
+// not listed with a long-context rate).
+func openAIHasLongContextTier(m string) bool {
+	if strings.Contains(m, "gpt-6") || strings.Contains(m, "gpt-5.6") {
+		return true
+	}
+	if !strings.Contains(m, "gpt-5.5") && !strings.Contains(m, "gpt-5.4") {
+		return false
+	}
+	return !strings.Contains(m, "-pro") && !strings.Contains(m, "-mini") && !strings.Contains(m, "-nano")
 }
 
 // TieredCallCostUSD prices one call with its long-context tier applied; 0

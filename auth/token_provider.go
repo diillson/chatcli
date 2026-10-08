@@ -466,10 +466,14 @@ func (p *oauthTokenProvider) Close() {
 // version ("Claude Code X does not support this model; version Y or newer
 // is required"), so it must track a current Claude Code release; every
 // OAuth request (login, refresh, messages, models) sends the same
-// fingerprint. 2.1.280 is the floor for claude-opus-5-5 (Sep 22 2026).
-// The process can present a newer release than this floor — see
-// EffectiveClaudeCodeVersion (env override, or learned from the error).
-const ClaudeCodeVersion = "2.1.281"
+// fingerprint. Release that first shipped each gated model: 2.1.280 for
+// claude-opus-5-5 (Sep 22 2026), 2.1.284 for claude-sonnet-5-5 (Sep 28)
+// and 2.1.293 for claude-haiku-5-5 (Oct 7) — the floor tracks the newest
+// one, so no catalog model pays the 400-and-resend round trip of the
+// self-heal on its first call. The process can present a newer release
+// than this floor — see EffectiveClaudeCodeVersion (env override, or
+// learned from the error).
+const ClaudeCodeVersion = "2.1.293"
 
 // ClaudeCodeUserAgent is the User-Agent of the OAuth surface.
 const ClaudeCodeUserAgent = "claude-cli/" + ClaudeCodeVersion + " (external, cli)"

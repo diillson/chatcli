@@ -75,6 +75,29 @@ type ModelMeta struct {
 // block for the same reason.
 var registry = []ModelMeta{
 	// ── OpenAI GPT-6 ─────────────────────────────────────────────────
+	// gpt-6.1-sol (GA Sep 29 2026, developers.openai.com/api/docs/models/
+	// gpt-6.1-sol): the refreshed Sol tier — there is no 6.1 Astra, Terra
+	// or Luna, and no -pro on the platform API (the "-pro" slugs exist on
+	// OpenRouter only). 1,050,000 context (922K addressable as input),
+	// 128,000 max output, Apr 30 2026 cutoff. reasoning_effort takes low|
+	// medium(default)|high|xhigh|max — "none" and "minimal" are gone, so
+	// GPT-6 Sol's effort list does not carry over. Tool calling needs the
+	// Responses API: Chat Completions serves the model without tools.
+	// List price $2/$10 with cached input at $0.10 (5%, half of GPT-6
+	// Sol's) and cache writes at $2.50; above 272K input the request
+	// bills 2x input/cache and 1.5x output (llm/pricing models both).
+	// MUST precede Astra: its loose "gpt-6" alias is a prefix of this id
+	// and used to resolve gpt-6.1-sol to Astra.
+	{
+		ID:              "gpt-6.1-sol",
+		Aliases:         []string{"gpt-6.1-sol", "gpt-6-1-sol", "gpt-6.1"},
+		DisplayName:     "GPT-6.1 Sol",
+		Provider:        ProviderOpenAI,
+		ContextWindow:   1050000,
+		MaxOutputTokens: 128000,
+		PreferredAPI:    APIResponses,
+		Capabilities:    []string{"vision", "tools", "json_mode"},
+	},
 	// gpt-6-astra (GA Sep 3 2026): single model, no mini/pro/tier
 	// fan-out. Platform API specs (developers.openai.com/api/docs/models
 	// /gpt-6-astra): 1,050,000 context — 922,000 of it addressable as
@@ -113,8 +136,9 @@ var registry = []ModelMeta{
 	// xhigh|max, Responses API with the built-in tools; Chat Completions
 	// does function calling only at reasoning_effort=none. List prices
 	// $2/$10 (Sol, cached $0.20) and $0.10/$0.50 (Luna, cached $0.01);
-	// above 272K input the whole request bills 2x — the same surcharge
-	// the 5.6 line has and cost_tracker does not model. The bare "gpt-6"
+	// above 272K input the whole request bills 2x input and 1.5x output —
+	// the same tier as the 5.6 line, applied per call by
+	// pricing.LongContextMultipliers. The bare "gpt-6"
 	// alias stays on Astra (flagship).
 	{
 		ID:              "gpt-6-sol",
@@ -244,7 +268,9 @@ var registry = []ModelMeta{
 		// were dropped: no such models exist on the API (404 on the model
 		// docs, absent from /models/all). gpt-5.3-codex-spark was removed
 		// for the same reason — it is a Codex-app-only model
-		// ("API Access: false"), never a platform id.
+		// ("API Access: false"), never a platform id. Deprecated Oct 1 2026
+		// (developers.openai.com/api/docs/deprecations): shuts down Apr 1
+		// 2027, alongside gpt-5.1 and gpt-5.4-nano — migrate to gpt-6.1-sol.
 		ID:              "gpt-5.3-codex",
 		Aliases:         []string{"gpt-5.3-codex"},
 		DisplayName:     "GPT-5.3 Codex",
@@ -282,6 +308,10 @@ var registry = []ModelMeta{
 		Capabilities:    []string{"json_mode", "tools", "vision"},
 	},
 	// ── OpenAI o-series reasoning models ──────────────────────────
+	// o3-mini, o4-mini and gpt-4.1-nano shut down Oct 23 2026; the
+	// dated o3/gpt-5 snapshots on Dec 11 2026 (the bare o3 and gpt-5
+	// aliases are not on the list). They stay until the date passes —
+	// removing a model that still serves would only mis-size live calls.
 	{
 		ID:              "o3",
 		Aliases:         []string{"o3"},
@@ -377,6 +407,8 @@ var registry = []ModelMeta{
 	{
 		// Sonnet 4.5: 200K context, 64K max output. 1M context available
 		// via beta header; default registry tracks the GA limit.
+		// Deprecated Sep 30 2026, retires on the Claude API Nov 30 2026
+		// (model-deprecations; replacement claude-sonnet-5-5).
 		ID:              "claude-sonnet-4-5",
 		Aliases:         []string{"claude-4-5-sonnet", "sonnet-4-5", "claude-4-5-sonnet-", "claude-sonnet-4-5-"},
 		DisplayName:     "Claude sonnet 4.5",
@@ -424,6 +456,81 @@ var registry = []ModelMeta{
 	// after the newer one. Reversing this order silently resolves
 	// "fable-5-1" to the Fable 5 entry (wrong cache price, wrong
 	// capability flags).
+	{
+		// Sonnet 5.5 (claude-sonnet-5-5, Sep 28 2026; platform.claude.com/
+		// docs/en/models/sonnet-5-5/overview + whats-new-sonnet-5-5): the
+		// Sonnet-tier successor to Sonnet 5 at the same $2/$10 per MTok, but
+		// cache reads at $0.10 — 5% of input, like Opus 5.5 (llm/pricing
+		// needs the explicit case: "sonnet-5" is a substring of this id).
+		// 1M context, 128K max output (300K on Batch with the output-300k
+		// beta), Jun 2026 cutoff, 512-token cacheable minimum. Adaptive
+		// thinking is ON by default and CANNOT be disabled —
+		// thinking:{type:"disabled"} and budget_tokens return 400; the
+		// claudeai client omits the field unless effort routing fires,
+		// which sends {type:"adaptive"}. Effort low..max, default "high"
+		// (recalibrated vs Sonnet 5). Forced tool_choice ("any"/"tool")
+		// returns 400, count_tokens included — this client only sends auto.
+		// temperature/top_p/top_k at non-default values return 400.
+		// Text the model writes BETWEEN tool calls now comes back as
+		// thinking blocks (display defaults to "omitted"), so interleaved
+		// narration is not shown; the final answer stays a text block.
+		// Thinking blocks are bound to model+account+conversation: Sonnet
+		// 5.5 cannot read Opus 5/5.5, Fable or Mythos blocks. Unlike Sonnet
+		// 5 it serves task budgets (beta) and mid-conversation system
+		// messages. Refusals: stop_reason "refusal" + stop_details
+		// (server-side fallback to Sonnet 5 for cyber/frontier_llm only).
+		// Claude Code >= 2.1.284 on the OAuth surface. MUST precede Sonnet
+		// 5: "sonnet-5" is a prefix of "sonnet-5-5" and used to resolve
+		// this id to the Sonnet 5 entry.
+		ID:              "claude-sonnet-5-5",
+		Aliases:         []string{"claude-sonnet-5-5", "sonnet-5-5", "claude-sonnet-5.5", "sonnet-5.5", "claude-5.5-sonnet"},
+		DisplayName:     "Claude Sonnet 5.5 (1M context)",
+		Provider:        ProviderClaudeAI,
+		ContextWindow:   1000000,
+		MaxOutputTokens: 128000,
+		PreferredAPI:    APIAnthropicMessages,
+		APIVersion:      config.ClaudeAIAPIVersionDefault,
+		Capabilities: []string{
+			"vision",
+			"json_mode", "tools",
+			"adaptive_thinking", "output_effort", "task_budget", "mid_conversation_system",
+		},
+	},
+	{
+		// Haiku 5.5 (claude-haiku-5-5, Oct 7 2026; platform.claude.com/docs/
+		// en/models/haiku-5-5/overview + migration-guide): the first Haiku
+		// on the 5 line and the newer tokenizer (~30% more tokens than
+		// Haiku 4.5 for the same text). 1M context, 128K max output, Jun
+		// 2026 cutoff, 512-token cacheable minimum. Priced by PROMPT
+		// LENGTH — the only 4.6+ Claude with a long-context tier: $0.10/
+		// $0.50 per MTok up to 100,000 prompt tokens, $0.50/$2.50 (5x on
+		// every line, cache included) above it; cache reads at the standard
+		// 10%. llm/pricing prices the base tier and LongContextMultipliers
+		// applies the 5x. Adaptive thinking on by default; unlike Sonnet
+		// 5.5, thinking:{type:"disabled"} is accepted at effort high or
+		// below (400 at xhigh/max). budget_tokens returns 400. Effort
+		// low..max, default "medium". Forced tool_choice IS accepted (the
+		// response then starts with the tool call, no thinking block).
+		// Sampling: temperature must be 1 and top_p 0.99 if sent, top_k
+		// and the pair together return 400 — this client sends neither on
+		// Haiku (the OAuth title request pins claude-haiku-4-5). Assistant
+		// prefill returns 400. Serves task budgets and mid-conversation
+		// system messages; no fast mode, no Priority Tier. Claude Code >=
+		// 2.1.293 on the OAuth surface.
+		ID:              "claude-haiku-5-5",
+		Aliases:         []string{"claude-haiku-5-5", "haiku-5-5", "claude-haiku-5.5", "haiku-5.5", "claude-5.5-haiku"},
+		DisplayName:     "Claude Haiku 5.5 (1M context)",
+		Provider:        ProviderClaudeAI,
+		ContextWindow:   1000000,
+		MaxOutputTokens: 128000,
+		PreferredAPI:    APIAnthropicMessages,
+		APIVersion:      config.ClaudeAIAPIVersionDefault,
+		Capabilities: []string{
+			"vision",
+			"json_mode", "tools",
+			"adaptive_thinking", "output_effort", "task_budget", "mid_conversation_system",
+		},
+	},
 	{
 		// Fable 5.1 (claude-fable-5-1, Sep 1 2026): successor to Fable 5 in
 		// the same tier above Opus, same $10/$50 per MTok, but cache reads
@@ -551,9 +658,13 @@ var registry = []ModelMeta{
 		// Anthropic cancelled the Sep 1 2026 increase to $3/$15
 		// (platform.claude.com/docs/en/about-claude/pricing), so
 		// cost_tracker's claudePricing has an explicit sonnet-5 case.
-		// No fast_mode (Opus-tier research preview only) and no
-		// mid_conversation_system (documented for Opus 4.8 only). Dateless
-		// pinned-snapshot ID per the Jun 2026 models overview.
+		// No fast_mode (Opus-tier research preview only), no
+		// mid_conversation_system, and NO task budgets: the task-budgets
+		// feature-support table lists Sonnet 5 as "Not supported" (checked
+		// Oct 8 2026), so the capability that used to sit here would have
+		// attached output_config.task_budget to a model that rejects it
+		// whenever the coder ran with a spending ceiling. Sonnet 5.5 has
+		// it. Dateless pinned-snapshot ID per the Jun 2026 models overview.
 		ID:              "claude-sonnet-5",
 		Aliases:         []string{"claude-sonnet-5", "sonnet-5", "claude-5-sonnet"},
 		DisplayName:     "Claude Sonnet 5 (1M context)",
@@ -562,7 +673,7 @@ var registry = []ModelMeta{
 		MaxOutputTokens: 128000,
 		PreferredAPI:    APIAnthropicMessages,
 		APIVersion:      config.ClaudeAIAPIVersionDefault,
-		Capabilities:    []string{"vision", "json_mode", "tools", "adaptive_thinking", "output_effort", "task_budget"},
+		Capabilities:    []string{"vision", "json_mode", "tools", "adaptive_thinking", "output_effort"},
 	},
 	{
 		// Opus 4.8 (claude-opus-4-8, May 28 2026): 1M context by default on
@@ -778,8 +889,8 @@ var registry = []ModelMeta{
 	// gemini-2.0-flash / gemini-2.0-flash-lite (Jun 1 2026) and
 	// gemini-3-pro-preview (Mar 9 2026, replaced by gemini-3.1-pro-preview).
 	// Next scheduled: gemini-3.1-flash-lite retires May 7 2027 → migrate
-	// to gemini-3.5-flash-lite. The Copilot-side gemini-2.0-flash entries
-	// below follow GitHub's lifecycle, not Google's, and stay.
+	// to gemini-3.5-flash-lite. Copilot follows GitHub's lifecycle, not
+	// Google's — its gemini-2.0-flash entry left when GitHub retired it.
 	// GitHub Copilot Models (accessible via Copilot subscription)
 	{
 		// GA in Copilot Sep 4 2026 (github.blog/changelog) for Pro+, Max,
@@ -828,6 +939,42 @@ var registry = []ModelMeta{
 		PreferredAPI:    APIChatCompletions,
 		Capabilities:    []string{"vision", "tools", "json_mode"},
 	},
+	// GA in Copilot (github/docs model-release-status, checked Oct 8
+	// 2026): GPT-6.1 Sol (Sep 29 2026), Claude Sonnet 5.5 and Claude Haiku
+	// 5.5 — Pro+, Max, Business and Enterprise, model policy can disable
+	// them. GitHub publishes display names only; the slugs follow the
+	// vendor-slug convention the entries above already rely on (dotted
+	// version for Anthropic), with the dashed spelling as an alias.
+	{
+		ID:              "gpt-6.1-sol",
+		Aliases:         []string{"copilot-gpt-6.1-sol", "copilot-gpt-6-1-sol", "gpt-6-1-sol"},
+		DisplayName:     "GPT-6.1 Sol (Copilot)",
+		Provider:        ProviderCopilot,
+		ContextWindow:   1050000,
+		MaxOutputTokens: 128000,
+		PreferredAPI:    APIChatCompletions,
+		Capabilities:    []string{"vision", "tools", "json_mode"},
+	},
+	{
+		ID:              "claude-sonnet-5.5",
+		Aliases:         []string{"copilot-claude-sonnet-5.5", "copilot-claude-sonnet-5-5", "claude-sonnet-5-5"},
+		DisplayName:     "Claude Sonnet 5.5 (Copilot)",
+		Provider:        ProviderCopilot,
+		ContextWindow:   1000000,
+		MaxOutputTokens: 128000,
+		PreferredAPI:    APIChatCompletions,
+		Capabilities:    []string{"vision", "tools", "json_mode", "adaptive_thinking"},
+	},
+	{
+		ID:              "claude-haiku-5.5",
+		Aliases:         []string{"copilot-claude-haiku-5.5", "copilot-claude-haiku-5-5", "claude-haiku-5-5"},
+		DisplayName:     "Claude Haiku 5.5 (Copilot)",
+		Provider:        ProviderCopilot,
+		ContextWindow:   1000000,
+		MaxOutputTokens: 128000,
+		PreferredAPI:    APIChatCompletions,
+		Capabilities:    []string{"vision", "tools", "json_mode", "adaptive_thinking"},
+	},
 	{
 		ID:              "claude-opus-5.5",
 		Aliases:         []string{"copilot-claude-opus-5.5", "copilot-claude-opus-5-5", "claude-opus-5-5"},
@@ -858,26 +1005,14 @@ var registry = []ModelMeta{
 		PreferredAPI:    APIChatCompletions,
 		Capabilities:    []string{"vision", "tools", "json_mode"},
 	},
-	{
-		ID:              "claude-sonnet-4",
-		Aliases:         []string{"copilot-claude-sonnet-4"},
-		DisplayName:     "Claude Sonnet 4 (Copilot)",
-		Provider:        ProviderCopilot,
-		ContextWindow:   200000,
-		MaxOutputTokens: 64000,
-		PreferredAPI:    APIChatCompletions,
-		Capabilities:    []string{"vision", "tools", "extended_thinking"},
-	},
-	{
-		ID:              "gemini-2.0-flash",
-		Aliases:         []string{"copilot-gemini-2.0-flash"},
-		DisplayName:     "Gemini 2.0 Flash (Copilot)",
-		Provider:        ProviderCopilot,
-		ContextWindow:   1000000,
-		MaxOutputTokens: 8192,
-		PreferredAPI:    APIChatCompletions,
-		Capabilities:    []string{"vision", "tools"},
-	},
+	// Retired from Copilot and removed here (github/docs
+	// model-deprecation-history, checked Oct 8 2026): claude-sonnet-4
+	// (May 1 2026) and gemini-2.0-flash (Oct 23 2025). GitHub's Sep 18
+	// changelog also schedules GPT-5.5, GPT-5.4, GPT-5.4 mini, GPT-5 mini,
+	// Gemini 3.7 Flash and Grok 4.5 for Oct 19 2026. gpt-4o / gpt-4o-mini
+	// no longer appear in GitHub's model tables but have no published
+	// retirement date, and gpt-4o is still config.DefaultCopilotModel —
+	// they stay until GitHub dates them.
 	// GitHub Models (models.inference.ai.azure.com) was fully retired on
 	// Jul 30 2026 — playground, catalog, inference API and BYOK all went
 	// away for every customer, and the endpoint now answers
@@ -903,8 +1038,8 @@ var registry = []ModelMeta{
 		// grok-4.7 (Sep 21 2026, docs.x.ai/developers/grok-4-7): new
 		// flagship, 500K context, reasoning effort low|medium|high|xhigh,
 		// same $2/$6 tier as 4.6/4.5 with cached input at $0.50 (25%);
-		// above 200K of prompt the request bills 2x ($4/$12), a surcharge
-		// cost_tracker does not model. The "grok-4.7-fast" variant is
+		// from 200K of prompt the request bills 2x ($4/$12), applied per
+		// call by pricing.LongContextMultipliers. The "grok-4.7-fast" variant is
 		// Cursor/Grok-Build only — not on the public API, not listed.
 		ID:              "grok-4.7",
 		Aliases:         []string{"grok-4.7", "grok-4.7-latest"},
@@ -1297,6 +1432,20 @@ var registry = []ModelMeta{
 	// Models use provider/model-name format. Only popular defaults are listed;
 	// the full catalog is fetched dynamically via ListModels.
 	{
+		// openrouter.ai/openai/gpt-6.1-sol (listed Sep 29 2026: 1.05M ctx,
+		// 128K out, $2/$10, cache read $0.10, cache write $2.50). The
+		// "-pro" sibling OpenRouter also lists has no platform-API
+		// counterpart and stays out, like the 6.0 "-pro" slugs.
+		ID:              "openai/gpt-6.1-sol",
+		Aliases:         []string{"openrouter-gpt-6.1-sol", "openrouter-gpt-6-1-sol", "openai/gpt-6-1-sol"},
+		DisplayName:     "GPT-6.1 Sol (OpenRouter)",
+		Provider:        ProviderOpenRouter,
+		ContextWindow:   1050000,
+		MaxOutputTokens: 128000,
+		PreferredAPI:    APIChatCompletions,
+		Capabilities:    []string{"vision", "tools", "json_mode"},
+	},
+	{
 		// openrouter.ai/openai/gpt-6-astra — served by OpenAI and Azure
 		// (US) upstreams, 1.05M context with 128K completions. Listed for
 		// the same reason as the Anthropic 5-family below: until the
@@ -1358,6 +1507,31 @@ var registry = []ModelMeta{
 	// here so context-window sizing is right even before the dynamic
 	// ListModels catalog loads — an uncataloged model falls back to the
 	// 50K default and compacts constantly.
+	{
+		// Sonnet 5.5 (listed Sep 28 2026: 1M ctx, 128K out, $2/$10, cache
+		// read $0.10) and Haiku 5.5 (Oct 7 2026: 1M/128K, $0.10/$0.50 up
+		// to 100K prompt tokens, $0.50/$2.50 above — OpenRouter carries
+		// the same tier as a min_prompt_tokens override). Dotted slugs;
+		// Sonnet 5.5 precedes the Sonnet 5 slug, which is its prefix.
+		ID:              "anthropic/claude-sonnet-5.5",
+		Aliases:         []string{"openrouter-claude-sonnet-5.5", "openrouter-claude-sonnet-5-5", "anthropic/claude-sonnet-5-5"},
+		DisplayName:     "Claude Sonnet 5.5 (OpenRouter)",
+		Provider:        ProviderOpenRouter,
+		ContextWindow:   1000000,
+		MaxOutputTokens: 128000,
+		PreferredAPI:    APIChatCompletions,
+		Capabilities:    []string{"vision", "tools", "json_mode"},
+	},
+	{
+		ID:              "anthropic/claude-haiku-5.5",
+		Aliases:         []string{"openrouter-claude-haiku-5.5", "openrouter-claude-haiku-5-5", "anthropic/claude-haiku-5-5"},
+		DisplayName:     "Claude Haiku 5.5 (OpenRouter)",
+		Provider:        ProviderOpenRouter,
+		ContextWindow:   1000000,
+		MaxOutputTokens: 128000,
+		PreferredAPI:    APIChatCompletions,
+		Capabilities:    []string{"vision", "tools", "json_mode"},
+	},
 	{
 		// OpenRouter spells the 5.5 slug with a dot (anthropic/claude-opus-5.5,
 		// listed Sep 22 2026: 1M ctx, 128K out, $4/$20, cache read $0.20).
@@ -1547,6 +1721,43 @@ var registry = []ModelMeta{
 		PreferredAPI:    APIAnthropicMessages,
 		Capabilities:    []string{"tools", "vision", "json_mode", "adaptive_thinking", "output_effort", "task_budget", "bedrock_mantle_only", "mid_conversation_system"},
 	},
+	// Sonnet 5.5 (Sep 28 2026) and Haiku 5.5 (Oct 7 2026), Bedrock model
+	// cards model-card-anthropic-claude-sonnet-5-5 / -haiku-5-5. Unlike
+	// the rest of the 5 line these are NOT Mantle-only: bedrock-runtime
+	// serves them through Messages, Converse and InvokeModel, while the
+	// Mantle endpoint lists only us-gov-west-1 — so no bedrock_mantle_only
+	// here. Neither has an In-Region option on bedrock-runtime, which is
+	// why the canonical id is the global. profile (the bare
+	// anthropic.claude-*-5-5 id and the first-party spelling stay as
+	// aliases; normalizeBedrockModelID upgrades them to the profile).
+	// Profiles: Sonnet 5.5 global./us./eu. (no au./jp.); Haiku 5.5
+	// global./us./eu./au./jp. 1M / 128K, 512-token cache minimum,
+	// adaptive thinking, mid-conversation system messages on Bedrock.
+	// Per-message effort (mid-conversation-output-config) is NOT served
+	// for them on Bedrock — this client does not send it. Both listed
+	// before Opus 5.5 / Sonnet 5: "claude-sonnet-5" and "sonnet-5" are
+	// prefixes of the Sonnet 5.5 spellings, and the Sonnet 5 entry is
+	// bedrock_mantle_only, which used to route Sonnet 5.5 to Mantle.
+	{
+		ID:              "global.anthropic.claude-sonnet-5-5",
+		Aliases:         []string{"bedrock-sonnet-5-5", "bedrock-sonnet-5.5", "anthropic.claude-sonnet-5-5", "us.anthropic.claude-sonnet-5-5", "eu.anthropic.claude-sonnet-5-5", "claude-sonnet-5-5", "sonnet-5-5", "claude-sonnet-5.5", "sonnet-5.5"},
+		DisplayName:     "Claude Sonnet 5.5 (Bedrock, 1M ctx)",
+		Provider:        ProviderBedrock,
+		ContextWindow:   1000000,
+		MaxOutputTokens: 128000,
+		PreferredAPI:    APIAnthropicMessages,
+		Capabilities:    []string{"tools", "vision", "json_mode", "adaptive_thinking", "output_effort", "task_budget", "mid_conversation_system"},
+	},
+	{
+		ID:              "global.anthropic.claude-haiku-5-5",
+		Aliases:         []string{"bedrock-haiku-5-5", "bedrock-haiku-5.5", "anthropic.claude-haiku-5-5", "us.anthropic.claude-haiku-5-5", "eu.anthropic.claude-haiku-5-5", "au.anthropic.claude-haiku-5-5", "jp.anthropic.claude-haiku-5-5", "claude-haiku-5-5", "haiku-5-5", "claude-haiku-5.5", "haiku-5.5"},
+		DisplayName:     "Claude Haiku 5.5 (Bedrock, 1M ctx)",
+		Provider:        ProviderBedrock,
+		ContextWindow:   1000000,
+		MaxOutputTokens: 128000,
+		PreferredAPI:    APIAnthropicMessages,
+		Capabilities:    []string{"tools", "vision", "json_mode", "adaptive_thinking", "output_effort", "task_budget", "mid_conversation_system"},
+	},
 	// Opus 5.5 (GA on Bedrock Sep 22 2026, model card
 	// model-card-anthropic-claude-opus-5-5): dateless id with the us./eu./
 	// au./global. inference profiles, served through the Messages
@@ -1590,7 +1801,9 @@ var registry = []ModelMeta{
 		ContextWindow:   1000000,
 		MaxOutputTokens: 128000,
 		PreferredAPI:    APIAnthropicMessages,
-		Capabilities:    []string{"tools", "vision", "json_mode", "adaptive_thinking", "output_effort", "task_budget", "bedrock_mantle_only"},
+		// No task_budget: Sonnet 5 is "Not supported" in the task-budgets
+		// feature table (same correction as the CLAUDEAI entry).
+		Capabilities: []string{"tools", "vision", "json_mode", "adaptive_thinking", "output_effort", "bedrock_mantle_only"},
 	},
 	// Claude 4.8 (May 28 2026). Opus 4.8 = 1M / 128K per Anthropic.
 	// Canonical id is the global. inference profile: the bare dateless id
@@ -1823,6 +2036,25 @@ var registry = []ModelMeta{
 	// (it matches OpenAI's short-context pricing tier, not an AWS limit),
 	// so this entry keeps the family convention the 5.6 rows established.
 	{
+		// GPT-6.1 Sol (Sep 29 2026) is the first GPT-6.x with a published
+		// Bedrock card (model-card-openai-gpt-6-1-sol): runtime only through
+		// the us./global. profiles (Responses, Chat Completions, Converse,
+		// InvokeModel — no Messages); the bare openai.gpt-6.1-sol id is the
+		// Mantle in-region form in us-east-1. 1M context, 131,072 max
+		// output; $2/$10 with cache write $2.50 and read $0.10 on global
+		// (US profile +10%), 2x/1.5x above 272K input. Listed first: no
+		// shared prefix with the 6.0 ids, but it keeps the family
+		// newest-first.
+		ID:              "global.openai.gpt-6.1-sol",
+		Aliases:         []string{"bedrock-gpt-6.1-sol", "bedrock-gpt-6-1-sol", "openai.gpt-6.1-sol", "us.openai.gpt-6.1-sol"},
+		DisplayName:     "GPT-6.1 Sol (Bedrock, global)",
+		Provider:        ProviderBedrock,
+		ContextWindow:   1050000,
+		MaxOutputTokens: 131072,
+		PreferredAPI:    APIChatCompletions,
+		Capabilities:    []string{"tools", "vision", "json_mode", "bedrock_converse_only"},
+	},
+	{
 		ID:              "global.openai.gpt-6-astra",
 		Aliases:         []string{"bedrock-gpt-6-astra", "openai.gpt-6-astra", "us.openai.gpt-6-astra"},
 		DisplayName:     "GPT-6 Astra (Bedrock, global)",
@@ -1966,6 +2198,21 @@ var registry = []ModelMeta{
 	// for it. 500K context; xAI publishes no output cap, so the 16K
 	// convention from the ProviderXAI block applies.
 	{
+		// Grok 4.7 (Bedrock Sep 28 2026, model card xai-grok-4-7): same
+		// shape as 4.6 — us./global. profiles, Converse/InvokeModel/
+		// Responses, 500K context, reasoning effort low..xhigh; $2/$6 with
+		// $0.50 cache reads on global (geo +10%). Listed first so the
+		// family stays newest-first.
+		ID:              "global.xai.grok-4.7",
+		Aliases:         []string{"bedrock-grok-4.7", "xai.grok-4.7", "us.xai.grok-4.7", "bedrock-grok-4-7"},
+		DisplayName:     "Grok 4.7 (Bedrock, global)",
+		Provider:        ProviderBedrock,
+		ContextWindow:   500000,
+		MaxOutputTokens: 16384,
+		PreferredAPI:    APIChatCompletions,
+		Capabilities:    []string{"tools", "vision", "json_mode"},
+	},
+	{
 		ID:              "global.xai.grok-4.6",
 		Aliases:         []string{"bedrock-grok-4.6", "xai.grok-4.6", "us.xai.grok-4.6", "bedrock-grok-4-6"},
 		DisplayName:     "Grok 4.6 (Bedrock, global)",
@@ -1974,6 +2221,40 @@ var registry = []ModelMeta{
 		MaxOutputTokens: 16384,
 		PreferredAPI:    APIChatCompletions,
 		Capabilities:    []string{"tools", "vision", "json_mode"},
+	},
+
+	// ── AWS Bedrock — Moonshot Kimi / Z.AI GLM ───────────────────────
+	// Kimi K3 (Sep 18 2026, model card moonshot-ai-kimi-k3) and GLM-5.3
+	// (Oct 5 2026, model card zai-glm-5-3): cross-region profiles only
+	// (us./global., plus in. for Kimi since Oct 6), no in-region access.
+	// Both go down the generic Converse path like the xAI ids. Kimi K3 on
+	// Converse fails a multi-turn request that replays earlier reasoning
+	// blocks (InternalServerException); this client never replays them,
+	// so Converse is safe here. Kimi K3: 1M context, image input (no video
+	// on Bedrock), $3/$15 with $0.30 cache reads on global (US/India
+	// +10%). GLM-5.3: 1M / 128K, text only; the card publishes no price,
+	// so llm/pricing falls back to Z.AI's list rate. Both launched under
+	// AWS's post-Sep-7 lifecycle policy, which allows a 45-day legacy
+	// notice — re-check the lifecycle page on each refresh.
+	{
+		ID:              "global.moonshotai.kimi-k3",
+		Aliases:         []string{"bedrock-kimi-k3", "moonshotai.kimi-k3", "us.moonshotai.kimi-k3", "in.moonshotai.kimi-k3"},
+		DisplayName:     "Kimi K3 (Bedrock, global)",
+		Provider:        ProviderBedrock,
+		ContextWindow:   1048576,
+		MaxOutputTokens: 131072,
+		PreferredAPI:    APIChatCompletions,
+		Capabilities:    []string{"tools", "vision", "json_mode"},
+	},
+	{
+		ID:              "global.zai.glm-5.3",
+		Aliases:         []string{"bedrock-glm-5.3", "bedrock-glm-5-3", "zai.glm-5.3", "us.zai.glm-5.3"},
+		DisplayName:     "GLM-5.3 (Bedrock, global)",
+		Provider:        ProviderBedrock,
+		ContextWindow:   1000000,
+		MaxOutputTokens: 128000,
+		PreferredAPI:    APIChatCompletions,
+		Capabilities:    []string{"tools", "json_mode"},
 	},
 
 	// ── StackSpot AI ─────────────────────────────────────────────────

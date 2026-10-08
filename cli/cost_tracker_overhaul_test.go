@@ -59,7 +59,7 @@ func TestGetCachePricingFamilies(t *testing.T) {
 		{"OPENAI", "gpt-5.6-sol", 4.0 * 1.25, 4.0 * 0.10},
 		{"OPENAI", "gpt-5.6-terra", 2.0 * 1.25, 2.0 * 0.10},
 		{"OPENAI", "gpt-5.6-luna", 0.20 * 1.25, 0.20 * 0.10},
-		{"OPENAI", "gpt-5.5", 0, 5.0 * 0.50},
+		{"OPENAI", "gpt-5.5", 0, 5.0 * 0.10},
 		{"OPENAI", "gpt-4o", 0, 2.50 * 0.50},
 		{"GOOGLEAI", "gemini-2.5-pro", 0, 1.25 * 0.10}, // cached reads 10% of input (Sep/2026 pricing)
 		{"DEEPSEEK", "deepseek-chat", 0, 0.27 * 0.25},
@@ -176,15 +176,16 @@ func TestMixedBilledAndTableCallsAddUp(t *testing.T) {
 func TestZeroRateFamiliesNeverGetFreeCache(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	ct := NewCostTracker()
-	// GLM-5.2 ($1.40/M input, no cache rate): 100K prompt incl. 80K cached.
-	ct.RecordRealUsage("ZAI", "glm-5.2", &models.UsageInfo{
+	// GLM-5-Turbo ($1.20/M input, no published cache rate): 100K prompt
+	// incl. 80K cached.
+	ct.RecordRealUsage("ZAI", "glm-5-turbo", &models.UsageInfo{
 		PromptTokens:         100_000,
 		CacheReadInputTokens: 80_000,
 		IsReal:               true,
 	})
-	// Full input price on ALL 100K: 0.1 × $1.40 = $0.14.
-	if got := ct.TotalCost(); !almostEqual(got, 0.14) {
-		t.Fatalf("zero-rate cache carve-out leaked: total = %v, want 0.14", got)
+	// Full input price on ALL 100K: 0.1 × $1.20 = $0.12.
+	if got := ct.TotalCost(); !almostEqual(got, 0.12) {
+		t.Fatalf("zero-rate cache carve-out leaked: total = %v, want 0.12", got)
 	}
 }
 

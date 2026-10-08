@@ -43,7 +43,7 @@ func TestRecordCost_1hShareNeverExceedsCreation(t *testing.T) {
 
 func TestRecordCost_SubsetCarveOut(t *testing.T) {
 	t.Setenv(OverrideEnv, "")
-	// gpt-5.4: $2.5/$15, cache read at 50% = 1.25, no write rate. The
+	// gpt-5.4: $2.5/$15, cache read at 10% = 0.25, no write rate. The
 	// 600K cached tokens are a SUBSET of the 1M prompt: billed once, at
 	// the read rate.
 	c := RecordCost(RecordInput{
@@ -51,7 +51,7 @@ func TestRecordCost_SubsetCarveOut(t *testing.T) {
 		PromptTokens: 1_000_000, CompletionTokens: 10_000, CacheReadTokens: 600_000,
 	})
 	assert.InDelta(t, 0.4*2.5, c.InputUSD, 1e-12)
-	assert.InDelta(t, 0.6*1.25, c.CacheUSD, 1e-12)
+	assert.InDelta(t, 0.6*0.25, c.CacheUSD, 1e-12)
 	assert.InDelta(t, 0.15, c.OutputUSD, 1e-12)
 
 	// Cached tokens beyond the prompt count clamp the billable input at 0.
@@ -61,14 +61,29 @@ func TestRecordCost_SubsetCarveOut(t *testing.T) {
 
 func TestRecordCost_NoCacheRateKeepsInputPrice(t *testing.T) {
 	t.Setenv(OverrideEnv, "")
-	// MiniMax publishes no cache read rate in the tables: the carve-out
+	// MiniMax-Text-01 has no cache read rate in the tables: the carve-out
 	// must NOT run, otherwise the cached tokens would be free.
 	c := RecordCost(RecordInput{
-		Provider: "MINIMAX", Model: "minimax-m3",
+		Provider: "MINIMAX", Model: "minimax-text-01",
 		PromptTokens: 1_000_000, CacheReadTokens: 400_000,
 	})
-	assert.InDelta(t, 0.30, c.InputUSD, 1e-12)
+	assert.InDelta(t, 0.20, c.InputUSD, 1e-12)
 	assert.Zero(t, c.CacheUSD)
+}
+
+func TestRecordCost_UnpricedCacheWriteBillsAsInput(t *testing.T) {
+	t.Setenv(OverrideEnv, "")
+	// MiniMax-M3 on its Anthropic-shaped surface reports writes beside the
+	// prompt and publishes no write rate: 1M written tokens bill at the
+	// $0.30 input price instead of nothing. Reads keep their own rate.
+	c := RecordCost(RecordInput{
+		Provider: "MINIMAX", Model: "minimax-m3",
+		PromptTokens: 0, CacheCreationTokens: 1_000_000, CacheReadTokens: 1_000_000,
+	})
+	assert.InDelta(t, 0.30+0.06, c.CacheUSD, 1e-12)
+	// A family with a published write rate is untouched (Sonnet 5: $2.50).
+	c = RecordCost(RecordInput{Provider: "CLAUDEAI", Model: "claude-sonnet-5", CacheCreationTokens: 1_000_000})
+	assert.InDelta(t, 2.5, c.CacheUSD, 1e-12)
 }
 
 func TestRecordCost_GeminiReasoningIsAdditive(t *testing.T) {
@@ -152,32 +167,53 @@ func TestCostOf_MatchesRecordCostForOneCall(t *testing.T) {
 
 func TestCostOf_LongContextTier(t *testing.T) {
 	t.Setenv(OverrideEnv, "")
-	// 300K of Claude context: 2x input and cache, 1.5x output.
+	// 300K of Sonnet 4.5 context (1M beta): 2x input and cache, 1.5x output.
 	u := &models.UsageInfo{
 		PromptTokens: 100_000, CompletionTokens: 10_000,
 		CacheReadInputTokens: 200_000, InputTokensTotal: 300_000,
 	}
-	base := RecordCost(callRecordInput("CLAUDEAI", "claude-sonnet-5", u))
-	got := CostOf("CLAUDEAI", "claude-sonnet-5", u)
+	const legacy = "claude-sonnet-4-5"
+	base := RecordCost(callRecordInput("CLAUDEAI", legacy, u))
+	got := CostOf("CLAUDEAI", legacy, u)
 	require.True(t, got.Known)
 	assert.InDelta(t, base.InputUSD*2, got.InputUSD, 1e-12)
 	assert.InDelta(t, base.CacheUSD*2, got.CacheUSD, 1e-12)
 	assert.InDelta(t, base.OutputUSD*1.5, got.OutputUSD, 1e-12)
 	assert.InDelta(t, (base.InputUSD+base.CacheUSD)*2+base.OutputUSD*1.5, got.TotalUSD, 1e-12)
-	assert.InDelta(t, got.TotalUSD, TieredCallCostUSD("CLAUDEAI", "claude-sonnet-5", u), 1e-12)
+	assert.InDelta(t, got.TotalUSD, TieredCallCostUSD("CLAUDEAI", legacy, u), 1e-12)
+
+	// Claude 4.6+ runs the full 1M at standard price: the same 300K call
+	// on Sonnet 5 / Opus 5.5 is not tiered (it used to bill 2x/1.5x).
+	for _, m := range []string{"claude-sonnet-5", "claude-opus-5-5", "claude-sonnet-5-5", "claude-fable-5-1", "claude-sonnet-4-6"} {
+		assert.Zero(t, TieredCallCostUSD("CLAUDEAI", m, u), "%s has no long-context premium", m)
+		assert.InDelta(t, RecordCost(callRecordInput("CLAUDEAI", m, u)).TotalUSD, CostOf("CLAUDEAI", m, u).TotalUSD, 1e-12)
+	}
+
+	// Haiku 5.5 past 100K: every line 5x — $0.50 input, $0.05 cache read,
+	// $2.50 output, exactly the official over-100K row.
+	h := &models.UsageInfo{PromptTokens: 100_000, CompletionTokens: 10_000, CacheReadInputTokens: 100_000, InputTokensTotal: 200_000}
+	hc := CostOf("CLAUDEAI", "claude-haiku-5-5", h)
+	require.True(t, hc.Known)
+	assert.InDelta(t, 0.1*0.50, hc.InputUSD, 1e-12)
+	assert.InDelta(t, 0.1*0.05, hc.CacheUSD, 1e-12)
+	assert.InDelta(t, 0.01*2.50, hc.OutputUSD, 1e-12)
 
 	// Below the threshold nothing is tiered.
 	small := &models.UsageInfo{PromptTokens: 1_000, CompletionTokens: 10, InputTokensTotal: 1_000}
-	assert.Zero(t, TieredCallCostUSD("CLAUDEAI", "claude-sonnet-5", small))
+	assert.Zero(t, TieredCallCostUSD("CLAUDEAI", legacy, small))
 	// An unpriced model in a tier stays zero rather than guessing.
-	assert.Zero(t, TieredCallCostUSD("CLAUDEAI", "claude-mystery", u))
+	// (gpt-6-terra sits in the GPT-6 tier but has no price: no 6.x Terra.)
+	assert.Zero(t, TieredCallCostUSD("OPENAI", "gpt-6-terra", u))
 	// A provider-billed call is never re-tiered.
 	billed := *u
 	billed.CostUSD = 1
-	assert.Zero(t, TieredCallCostUSD("CLAUDEAI", "claude-sonnet-5", &billed))
-	assert.Zero(t, TieredCallCostUSD("CLAUDEAI", "claude-sonnet-5", nil))
+	assert.Zero(t, TieredCallCostUSD("CLAUDEAI", legacy, &billed))
+	assert.Zero(t, TieredCallCostUSD("CLAUDEAI", legacy, nil))
 }
 
+// TestLongContextMultipliers pins each vendor's published long-context
+// tier at its exact threshold (Oct 2026 pricing pages): strict ">" for
+// Anthropic, Google, OpenAI and MiniMax, ">=" for xAI ("reaches").
 func TestLongContextMultipliers(t *testing.T) {
 	type mc struct {
 		provider, model string
@@ -185,14 +221,47 @@ func TestLongContextMultipliers(t *testing.T) {
 		in, out         float64
 	}
 	for _, tc := range []mc{
-		{"CLAUDEAI", "claude-sonnet-5", 200_000, 1, 1},
-		{"CLAUDEAI", "claude-sonnet-5", 200_001, 2, 1.5},
+		// Anthropic: only the pre-4.6 Sonnets with the 1M beta.
+		{"CLAUDEAI", "claude-sonnet-4-5", 200_000, 1, 1},
+		{"CLAUDEAI", "claude-sonnet-4-5", 200_001, 2, 1.5},
+		{"BEDROCK", "global.anthropic.claude-sonnet-4-5-20250929-v1:0", 300_000, 2, 1.5},
+		{"CLAUDEAI", "claude-sonnet-4-6", 900_000, 1, 1},
+		{"CLAUDEAI", "claude-sonnet-5", 900_000, 1, 1},
+		{"CLAUDEAI", "claude-opus-5-5", 900_000, 1, 1},
+		{"BEDROCK", "anthropic.claude-opus-5", 900_000, 1, 1},
+		{"OPENROUTER", "anthropic/claude-fable-5.1", 900_000, 1, 1},
+		// Haiku 5.5: 5x past 100K, on every surface spelling.
+		{"CLAUDEAI", "claude-haiku-5-5", 100_000, 1, 1},
+		{"CLAUDEAI", "claude-haiku-5-5", 100_001, 5, 5},
+		{"BEDROCK", "global.anthropic.claude-haiku-5-5", 150_000, 5, 5},
+		{"OPENROUTER", "anthropic/claude-haiku-5.5", 150_000, 5, 5},
+		{"CLAUDEAI", "claude-haiku-4-5-20251001", 150_000, 1, 1},
+		// Google: 2.5 Pro and 3.1 Pro split at 200K; Flash lines do not.
 		{"GOOGLEAI", "gemini-2.5-pro", 250_000, 2, 1.5},
-		{"GOOGLEAI", "gemini-3.1-pro", 250_000, 1, 1},
-		{"XAI", "grok-4.7", 128_001, 2, 2},
-		{"XAI", "grok-4.7", 128_000, 1, 1},
-		{"OPENROUTER", "x-ai/grok-4.7", 200_000, 1, 1},
-		{"OPENAI", "gpt-5.4", 900_000, 1, 1},
+		{"GOOGLEAI", "gemini-3.1-pro-preview", 200_000, 1, 1},
+		{"GOOGLEAI", "gemini-3.1-pro-preview", 200_001, 2, 1.5},
+		{"GOOGLEAI", "gemini-3.8-flash", 900_000, 1, 1},
+		// xAI: 2x on both from 200K (it used to fire at 128K).
+		{"XAI", "grok-4.7", 199_999, 1, 1},
+		{"XAI", "grok-4.7", 200_000, 2, 2},
+		{"XAI", "grok-4.3", 150_000, 1, 1},
+		{"XAI", "grok-build-0.1", 200_000, 2, 2},
+		{"OPENROUTER", "x-ai/grok-4.7", 200_000, 2, 2},
+		{"BEDROCK", "global.xai.grok-4.7", 250_000, 2, 2},
+		// OpenAI: GPT-6 / 5.6 / 5.5 / 5.4 above 272K.
+		{"OPENAI", "gpt-6.1-sol", 272_000, 1, 1},
+		{"OPENAI", "gpt-6.1-sol", 272_001, 2, 1.5},
+		{"OPENAI", "gpt-6-astra", 300_000, 2, 1.5},
+		{"OPENAI", "gpt-5.6-luna", 300_000, 2, 1.5},
+		{"OPENAI", "gpt-5.4", 900_000, 2, 1.5},
+		{"BEDROCK", "global.openai.gpt-6.1-sol", 300_000, 2, 1.5},
+		{"OPENAI", "gpt-5.4-mini", 300_000, 1, 1},
+		{"OPENAI", "gpt-5.5-pro", 300_000, 1, 1},
+		{"OPENAI", "gpt-4.1", 900_000, 1, 1},
+		// MiniMax-M3: 2x on both above 512K.
+		{"MINIMAX", "minimax-m3", 512_000, 1, 1},
+		{"MINIMAX", "minimax-m3", 512_001, 2, 2},
+		{"MINIMAX", "minimax-m2.7", 900_000, 1, 1},
 	} {
 		in, out := LongContextMultipliers(tc.provider, tc.model, tc.tokens)
 		assert.Equal(t, tc.in, in, "%s/%s@%d in", tc.provider, tc.model, tc.tokens)

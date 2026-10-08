@@ -125,6 +125,11 @@ func claudePricing(model string) (float64, float64, bool) {
 	case strings.Contains(model, "opus"):
 		// Opus 3 / 4.0 / 4.1 legacy pricing.
 		return 15.0, 75.0, true
+	case strings.Contains(model, "sonnet-5-5"), strings.Contains(model, "sonnet-5.5"):
+		// Sonnet 5.5 (Sep 28 2026): same $2/$10 as Sonnet 5 — the case is
+		// explicit so the price does not depend on the "sonnet-5"
+		// substring below; its 5% cache read lives in getCachePricing.
+		return 2.0, 10.0, true
 	case strings.Contains(model, "sonnet-5"):
 		// Sonnet 5: the $2/$10 launch rate became the permanent list price
 		// (Anthropic cancelled the Sep 1 2026 increase). Must precede the
@@ -133,6 +138,12 @@ func claudePricing(model string) (float64, float64, bool) {
 		return 2.0, 10.0, true
 	case strings.Contains(model, "sonnet"):
 		return 3.0, 15.0, true
+	case strings.Contains(model, "haiku-5-5"), strings.Contains(model, "haiku-5.5"):
+		// Haiku 5.5 (Oct 7 2026): $0.10/$0.50 for prompts up to 100K
+		// tokens. Above that every line bills 5x ($0.50/$2.50) — applied
+		// per call by LongContextMultipliers, not here. Must precede the
+		// generic "haiku" tier ($0.25/$1.25, Haiku 3.x).
+		return 0.10, 0.50, true
 	case strings.Contains(model, "haiku-4-5"):
 		return 1.0, 5.0, true
 	case strings.Contains(model, "haiku"):
@@ -141,25 +152,29 @@ func claudePricing(model string) (float64, float64, bool) {
 	return 0, 0, false
 }
 
-// openAIPricing covers both the GPT-* and o-* reasoning families. Ordering
-// matters: more specific tags ("gpt-4o-mini") must come before their parents
-// ("gpt-4o").
-func openAIPricing(model string) (float64, float64, bool) {
+// openAIFrontierPricing prices the GPT-6 family and the 5.6 tiers — the
+// generations with their own cache-write column. Short-context list
+// prices; above 272K input LongContextMultipliers applies OpenAI's 2x
+// input / 1.5x output for the whole request.
+func openAIFrontierPricing(model string) (float64, float64, bool) {
 	switch {
 	// gpt-6-astra (GA 03/Set/2026): $10/$50 no tier curto de contexto
 	// (developers.openai.com/api/docs/pricing). Acima de 272K tokens de
-	// input a OpenAI cobra $20/$75 sobre a request inteira — o mesmo
-	// surcharge de long-context que a família 5.6 tem e que o
-	// cost_tracker não modela (um único tier por modelo), então uma
-	// sessão que estoure 272K é subestimada aqui. O caso cobre também o
+	// input a OpenAI cobra $20/$75 sobre a request inteira — tier que o
+	// LongContextMultipliers aplica por chamada. O caso cobre também o
 	// id do Bedrock (openai.gpt-6-astra) e o slug do OpenRouter
 	// (openai/gpt-6-astra), que repassam a mesma tarifa.
 	case strings.Contains(model, "gpt-6-astra"):
 		return 10.0, 50.0, true
+	// gpt-6.1-sol (GA 29/Set/2026): $2/$10 como o 6-Sol, mas cached input
+	// a $0,10 (5%) — caso próprio no getCachePricing. Cobre o id do
+	// Bedrock (openai.gpt-6.1-sol) e o slug do OpenRouter.
+	case strings.Contains(model, "gpt-6.1-sol"):
+		return 2.0, 10.0, true
 	// gpt-6-sol / gpt-6-luna (GA 22/Set/2026, developers.openai.com/api/
 	// docs/pricing): $2/$10 e $0,10/$0,50 no tier curto; acima de 272K de
-	// input a request inteira dobra (mesmo surcharge da 5.6, não
-	// modelado). Cobrem também os ids do Bedrock (openai.gpt-6-sol/-luna)
+	// input, 2x no input e 1,5x no output (LongContextMultipliers).
+	// Cobrem também os ids do Bedrock (openai.gpt-6-sol/-luna)
 	// e os slugs do OpenRouter. Cache: coluna própria a 1,25x/10% — o
 	// caso "gpt-6" do getCachePricing já pega os dois.
 	case strings.Contains(model, "gpt-6-sol"):
@@ -172,8 +187,8 @@ func openAIPricing(model string) (float64, float64, bool) {
 	// menos até 21/Nov/2026" — revisar na virada). O caso genérico
 	// "gpt-5.6" cobre o alias de família (que o catálogo resolve para
 	// Sol) e precisa vir depois dos tiers específicos. O surcharge de
-	// long-context (>272K input = 2×/1,5×) não é modelado — cost_tracker
-	// trabalha com um único tier por modelo. Os mesmos casos cobrem os
+	// long-context (>272K input = 2×/1,5×) é aplicado por chamada pelo
+	// LongContextMultipliers. Os mesmos casos cobrem os
 	// ids do Bedrock (global.openai.gpt-5.6-*), que a AWS cobra igual no
 	// endpoint global.
 	case strings.Contains(model, "gpt-5.6-terra"):
@@ -182,6 +197,19 @@ func openAIPricing(model string) (float64, float64, bool) {
 		return 0.20, 1.20, true
 	case strings.Contains(model, "gpt-5.6"):
 		return 4.0, 20.0, true
+	}
+	return 0, 0, false
+}
+
+// openAIPricing covers both the GPT-* and o-* reasoning families. Ordering
+// matters: more specific tags ("gpt-4o-mini") must come before their parents
+// ("gpt-4o"). The current generation (GPT-6, 5.6) lives in
+// openAIFrontierPricing, checked first.
+func openAIPricing(model string) (float64, float64, bool) {
+	if in, out, ok := openAIFrontierPricing(model); ok {
+		return in, out, true
+	}
+	switch {
 	// gpt-5.5 … gpt-5 (developers.openai.com/api/docs/pricing, Set/2026).
 	// Antes desta tabela todo id 5.x abaixo do 5.6 caía em "desconhecido"
 	// e o /cost reportava zero. Pro/mini/nano específicos antes do tier
@@ -286,7 +314,7 @@ func grokPricing(model string) (float64, float64, bool) {
 	switch {
 	case strings.Contains(model, "grok-4.7"), strings.Contains(model, "grok-4.6"), strings.Contains(model, "grok-4.5"):
 		// grok-4.7 (21/Set/2026) mantém o tier $2/$6 (<200K de prompt;
-		// acima disso a xAI dobra, surcharge não modelado).
+		// a partir de 200K a xAI dobra — LongContextMultipliers).
 		return 2.0, 6.0, true
 	case strings.Contains(model, "grok-4.3"), strings.Contains(model, "grok-4.20"):
 		return 1.25, 2.50, true
@@ -431,16 +459,26 @@ func providerFallbackPricing(provider, model string) (float64, float64, bool) {
 	switch {
 	case strings.Contains(model, "minimax-m3"):
 		// MiniMax-M3 (platform.minimax.io pricing-paygo, Set/2026): $0.30/
-		// $1.20 até 512K de contexto (2x acima — não modelado), cache read
+		// $1.20 até 512K de contexto (2x acima — LongContextMultipliers), cache read
 		// $0.06. Específico antes do genérico da família.
+		return 0.30, 1.20, true
+	case strings.Contains(model, "minimax-m2.7-highspeed"):
+		// M2.7-highspeed (pricing-paygo, Oct 2026): $0.60/$2.40 — before
+		// M2.7, which is its prefix.
+		return 0.60, 2.40, true
+	case strings.Contains(model, "minimax-m2.7"):
+		// M2.7: $0.30/$1.20 on the official pay-as-you-go page (it used to
+		// fall into the $0.20/$1.10 family fallback below).
 		return 0.30, 1.20, true
 	case strings.Contains(model, "minimax"), strings.Contains(provider, "minimax"):
 		return 0.20, 1.10, true
 	case strings.Contains(provider, "zai"), strings.Contains(model, "glm"):
 		return 0.50, 0.50, true
-	case strings.HasPrefix(model, "kimi-k3"):
+	case strings.Contains(model, "kimi-k3"):
+		// Contains, not HasPrefix: the Bedrock id is
+		// global.moonshotai.kimi-k3 (same $3/$15 on the global profile).
 		return 3.00, 15.00, true
-	case strings.HasPrefix(model, "kimi-k2.7-code-highspeed"):
+	case strings.Contains(model, "kimi-k2.7-code-highspeed"):
 		// K2.7 Code highspeed (platform.kimi.ai pricing, Aug 2026): 2× o
 		// tier padrão K2.x — specific beats generic, senão o match "kimi"
 		// abaixo cobraria a metade.
@@ -513,11 +551,13 @@ func getCachePricing(provider, model string) (cacheWriteCost, cacheReadCost floa
 		// writes keep the 1.25x rule ($12.50). Must precede the generic
 		// Claude case, which would bill reads at 10% ($1).
 		return inputCost * 1.25, inputCost * 0.025
-	case strings.Contains(model, "opus-5-5"), strings.Contains(model, "opus-5.5"):
-		// Opus 5.5: cache reads at $0.20/MTok = 5% of the $4 input price
-		// (platform.claude.com/docs/en/about-claude/pricing); writes keep
-		// the 1.25x rule ($5). Must precede the generic Claude case, which
-		// would bill reads at 10% ($0.40).
+	case strings.Contains(model, "opus-5-5"), strings.Contains(model, "opus-5.5"),
+		strings.Contains(model, "sonnet-5-5"), strings.Contains(model, "sonnet-5.5"):
+		// Opus 5.5 and Sonnet 5.5: cache reads at 5% of input — $0.20 on
+		// the $4 Opus, $0.10 on the $2 Sonnet (platform.claude.com/docs/en/
+		// about-claude/pricing, footnote 2); writes keep the 1.25x rule.
+		// Must precede the generic Claude case, which would bill reads at
+		// 10%. Sonnet 5 itself stays on the generic 10% ($0.20).
 		return inputCost * 1.25, inputCost * 0.05
 	case strings.Contains(model, "claude"):
 		// Anthropic: write = 1.25x input, read = 0.1x input.
@@ -540,6 +580,12 @@ func getCachePricing(provider, model string) (cacheWriteCost, cacheReadCost floa
 		// resources add storage per token-hour, priced separately from
 		// lifecycle events (cli/cost_cache_resources.go).
 		return 0, inputCost * 0.10
+	case strings.Contains(model, "gpt-6.1-sol"):
+		// gpt-6.1-sol: cached input a $0,10 = 5% do input (metade do
+		// 6-Sol) e cache write a $2,50 = 1,25x (developers.openai.com/api/
+		// docs/pricing, Out/2026; o card do Bedrock repete os valores).
+		// Antes do caso "gpt-6", que cobraria a leitura a 10%.
+		return inputCost * 1.25, inputCost * 0.05
 	case strings.Contains(model, "gpt-6"), strings.Contains(model, "gpt-5.6"):
 		// gpt-6-astra e a família 5.6 deixaram o caching automático das
 		// gerações anteriores: a tabela de preços publica coluna própria
@@ -553,6 +599,14 @@ func getCachePricing(provider, model string) (cacheWriteCost, cacheReadCost floa
 		// tokens de cache creation (só Anthropic/Bedrock/Devin o fazem);
 		// está aqui para o dia em que reportar.
 		return inputCost * 1.25, inputCost * 0.10
+	case (strings.Contains(model, "gpt-5.5") || strings.Contains(model, "gpt-5.4")) &&
+		!strings.Contains(model, "-pro") && !strings.Contains(model, "-mini") && !strings.Contains(model, "-nano"):
+		// gpt-5.5 e gpt-5.4: cached input a 10% ($0,50 sobre $5; $0,25
+		// sobre $2,50) e sem coluna de cache write (developers.openai.com/
+		// api/docs/pricing, Out/2026). Caíam no genérico abaixo, que cobra
+		// a leitura a 50% — 5x acima. pro/mini/nano não estão na tabela de
+		// cache e seguem o genérico.
+		return 0, inputCost * 0.10
 	case strings.Contains(model, "gpt"), strings.Contains(model, "o1"),
 		strings.Contains(model, "o3"), strings.Contains(model, "o4"):
 		// OpenAI automatic prompt caching: hits at 50% of input, no write
@@ -561,11 +615,58 @@ func getCachePricing(provider, model string) (cacheWriteCost, cacheReadCost floa
 	case strings.Contains(model, "deepseek"):
 		// DeepSeek cache hit ≈ 25% of the miss price.
 		return 0, inputCost * 0.25
+	case strings.Contains(model, "kimi-k3"):
+		// Kimi K3: cache hit $0.30 on the $3 miss price = 10% (platform.
+		// kimi.ai/docs/pricing/chat, Oct 2026; the Bedrock card bills the
+		// same ratio). Writes cost the plain input price ($3, 5-min TTL),
+		// which is what an unpriced write already bills.
+		return 0, inputCost * 0.10
+	case strings.Contains(model, "kimi-k2.7-code"):
+		// K2.7 Code and its highspeed tier: hit $0.19/$0.38 on $0.95/$1.90
+		// = 20% of input.
+		return 0, inputCost * 0.20
 	case strings.Contains(model, "kimi"), strings.Contains(model, "moonshot"):
 		// Moonshot cache hit ($0.16/M vs $0.95/M miss) ≈ 17% of input.
 		return 0, inputCost * 0.17
+	case strings.Contains(model, "glm"):
+		// Z.AI publishes cached input per model (docs.z.ai/guides/overview/
+		// pricing, Oct 2026) — absolute rates, not one ratio. Ids without
+		// a published cache price (turbo, older GLM-4.x) bill cached
+		// tokens at the input price, as before.
+		return 0, zaiCacheReadPerMTok(model)
+	case strings.Contains(model, "minimax-m2.7-highspeed"):
+		// MiniMax pay-as-you-go (platform.minimax.io pricing-paygo, Oct
+		// 2026): cache read $0.06 on the $0.60 highspeed input = 10%.
+		return 0, inputCost * 0.10
+	case strings.Contains(model, "minimax-m3"), strings.Contains(model, "minimax-m2.7"):
+		// MiniMax-M3 and M2.7: cache read $0.06 on $0.30 = 20%.
+		return 0, inputCost * 0.20
 	}
 	return 0, 0
+}
+
+// zaiCacheReadPerMTok is Z.AI's published cached-input price; 0 when the
+// pricing page lists none. Specific tags first: "glm-5.3-flash" is a
+// prefix of "-flashx", "glm-5.3" of both, "glm-5" of every 5.x.
+func zaiCacheReadPerMTok(model string) float64 {
+	switch {
+	case strings.Contains(model, "glm-5.3-flashx"), strings.Contains(model, "glm-5-3-flashx"):
+		return 0.075
+	case strings.Contains(model, "glm-5.3-flash"), strings.Contains(model, "glm-5-3-flash"):
+		return 0.03
+	case strings.Contains(model, "glm-5.3"), strings.Contains(model, "glm-5-3"),
+		strings.Contains(model, "glm-5.2"), strings.Contains(model, "glm-5-2"),
+		strings.Contains(model, "glm-5.1"), strings.Contains(model, "glm-5-1"):
+		return 0.26
+	case strings.Contains(model, "turbo"):
+		return 0
+	case strings.Contains(model, "glm-5"):
+		return 0.20
+	case strings.Contains(model, "glm-4.7") && !strings.Contains(model, "flash"),
+		strings.Contains(model, "glm-4.5v"):
+		return 0.11
+	}
+	return 0
 }
 
 // getOpenRouterModelPricing returns pricing for models accessed via OpenRouter.

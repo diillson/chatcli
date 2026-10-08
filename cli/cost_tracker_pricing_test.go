@@ -151,7 +151,7 @@ func TestGetModelPricing(t *testing.T) {
 
 		// Provider-keyed fallbacks
 		{"minimax m3 before the family rate", "MINIMAX", "MiniMax-M3", 0.30, 1.20},
-		{"minimax via model", "OTHER", "minimax-m2.7", 0.20, 1.10},
+		{"minimax via model", "OTHER", "minimax-m2.7", 0.30, 1.20},
 		{"minimax via provider", "MINIMAX", "anything", 0.20, 1.10},
 		// Z.AI GLM-5 family — public list prices (docs.z.ai, Jun 2026):
 		// GLM-5.2 $1.40/$4.40, GLM-5 $1.00/$3.20 per MTok. The specific
