@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.213.0](https://github.com/diillson/chatcli/compare/v1.212.2...v1.213.0) (2026-10-08)
+
+
+### Features
+
+* **catalog:** Sonnet 5.5, Haiku 5.5 and GPT-6.1 Sol across providers, long-context and cache pricing matched to the vendors' pages ([#1729](https://github.com/diillson/chatcli/issues/1729)) ([5ed0683](https://github.com/diillson/chatcli/commit/5ed0683f337d3a62a82c6f5f66a51c73acf4d508))
+
 ## [1.212.2](https://github.com/diillson/chatcli/compare/v1.212.1...v1.212.2) (2026-10-05)
 
 
