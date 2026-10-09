@@ -289,6 +289,7 @@ var envDefaults = map[string]envDefault{
 	"CHATCLI_MEMORY_MAX_SIZE":               {Value: "32768", Source: "workspace/memory DefaultConfig.MaxMemoryMDSize (bytes)"},
 	"CHATCLI_MEMORY_RETRIEVAL_BUDGET":       {Value: "4000", Source: "workspace/memory DefaultConfig.RetrievalBudget (chars)"},
 	"CHATCLI_MEMORY_AUTORECALL":             {Value: "true", Source: "memory_autorecall.go (proactive [MEMORY AUTO-RECALL] block)"},
+	"CHATCLI_HOOKS_ENABLED":                 {Value: "true", Source: "hooks/manager.go (kill switch for every hook)", IsBool: true},
 	"CHATCLI_HUB_TTL_HOURS":                 {Value: "24", Source: "hub_local.go defaultHubTTLHours"},
 	"OLLAMA_HOST":                           {Value: "http://localhost:11434", Source: "llm/embedding/ollama.go (local embeddings server)"},
 	"CHATCLI_ENCRYPTION_KEY_PREVIOUS":       {Value: "", Source: "pkg/atrest (comma-separated retired keys that still open sealed stores after a rotation; /config security reseal migrates them)"},

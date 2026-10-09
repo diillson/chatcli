@@ -617,6 +617,9 @@ func TestBinaryExecutorEnv(t *testing.T) {
 	if _, set := m["CHATCLI_MEMORY_ENABLED"]; set {
 		t.Error("--with-memory must leave memory as configured")
 	}
+	if h["CHATCLI_HOOKS_ENABLED"] != "false" || m["CHATCLI_HOOKS_ENABLED"] != "false" {
+		t.Error("user hooks are off in every candidate run, with or without memory")
+	}
 	if m["CHATCLI_SESSION_AUTOSAVE"] != "false" || m["CHATCLI_CODER_CHECKPOINTS"] != "off" {
 		t.Errorf("debris switches stay off with memory: %v", m)
 	}

@@ -99,6 +99,16 @@ cases:
       - contains: "43"
 `
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "suite.yaml"), []byte(suite), 0o600))
+
+	// A user hook on every coder tool call. Inside an eval candidate it must
+	// never fire: it is a side effect on the user's machine, and a hook that
+	// runs an eval would recurse. HOME is the package's isolated home.
+	hookMarker := filepath.Join(t.TempDir(), "hook-fired")
+	hooksDir := filepath.Join(os.Getenv("HOME"), ".chatcli")
+	require.NoError(t, os.MkdirAll(hooksDir, 0o700))
+	hooksFile := filepath.Join(hooksDir, "hooks.json")
+	require.NoError(t, os.WriteFile(hooksFile, []byte(`{"hooks":[{"name":"marker","event":"PostToolUse","type":"command","command":"touch '`+hookMarker+`'"}]}`), 0o600))
+	t.Cleanup(func() { _ = os.Remove(hooksFile) })
 	report := filepath.Join(dir, "report.json")
 	md := filepath.Join(dir, "report.md")
 
@@ -140,6 +150,9 @@ cases:
 	require.Equal(t, evals.StatusPass, byID["chat-answer"].Status, "%+v", byID["chat-answer"].Trials)
 	require.Equal(t, evals.StatusPass, byID["coder-write"].Status, "%+v", byID["coder-write"].Trials)
 	assert.Equal(t, evals.StatusFail, byID["chat-wrong"].Status)
+
+	_, hookErr := os.Stat(hookMarker)
+	assert.True(t, os.IsNotExist(hookErr), "a user hook fired inside an eval candidate")
 
 	coder := byID["coder-write"].Trials[0]
 	assert.Contains(t, coder.ToolCalls, "@coder")
