@@ -1173,5 +1173,5 @@ func TestOct2026BedrockAndCopilotRefresh(t *testing.T) {
 		assert.False(t, ok, "%s was retired from Copilot", retired)
 	}
 	_, ok := Resolve(ProviderCopilot, "gpt-4o")
-	assert.True(t, ok, "gpt-4o stays: it is DefaultCopilotModel and GitHub has not dated it")
+	assert.True(t, ok, "gpt-4o stays resolvable for pinned configs: GitHub has not dated its retirement")
 }

@@ -1011,8 +1011,8 @@ var registry = []ModelMeta{
 	// changelog also schedules GPT-5.5, GPT-5.4, GPT-5.4 mini, GPT-5 mini,
 	// Gemini 3.7 Flash and Grok 4.5 for Oct 19 2026. gpt-4o / gpt-4o-mini
 	// no longer appear in GitHub's model tables but have no published
-	// retirement date, and gpt-4o is still config.DefaultCopilotModel —
-	// they stay until GitHub dates them.
+	// retirement date, so they stay until GitHub dates them; gpt-4o is no
+	// longer config.DefaultCopilotModel (now gpt-6.1-sol).
 	// GitHub Models (models.inference.ai.azure.com) was fully retired on
 	// Jul 30 2026 — playground, catalog, inference API and BYOK all went
 	// away for every customer, and the endpoint now answers

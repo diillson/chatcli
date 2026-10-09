@@ -97,11 +97,11 @@ fallback:
   # without one uses that provider's default model.
   providers: []
   #   - name: OPENAI
-  #     model: gpt-4o
+  #     model: gpt-6.1-sol
   #   - name: CLAUDEAI
-  #     model: claude-sonnet-4-6
+  #     model: claude-sonnet-5-5
   #   - name: GOOGLEAI
-  #     model: gemini-2.5-flash
+  #     model: gemini-3.8-flash
   maxRetries: 2
   cooldownBase: "30s"
   cooldownMax: "5m"
@@ -173,7 +173,7 @@ secrets:
 # Authenticate via /auth login github-copilot (Device Flow OAuth)
 # or set secrets.githubCopilotToken above
 copilot:
-  model: ""           # e.g., gpt-6-astra, gpt-4o, claude-sonnet-4-6, gemini-2.5-flash
+  model: ""           # e.g., gpt-6.1-sol, gpt-6-astra, claude-sonnet-5-5, gemini-3.8-flash
   maxTokens: ""       # max tokens for response (default: provider limit)
   apiBaseUrl: ""      # override for enterprise (default: https://api.githubcopilot.com)
 

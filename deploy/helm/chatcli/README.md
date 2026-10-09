@@ -213,7 +213,7 @@ When the primary provider fails (rate limit, timeout, auth error, context overfl
 ```yaml
 llm:
   provider: CLAUDEAI
-  model: claude-sonnet-4-6
+  model: claude-sonnet-5-5
 secrets:
   anthropicApiKey: <your-anthropic-api-key>
   openaiApiKey: <your-openai-api-key>
@@ -222,9 +222,9 @@ fallback:
   enabled: true
   providers:            # effective chain: CLAUDEAI -> OPENAI -> GOOGLEAI
     - name: OPENAI
-      model: gpt-4o
+      model: gpt-6.1-sol
     - name: GOOGLEAI
-      model: gemini-2.5-flash
+      model: gemini-3.8-flash
 ```
 
 ### MCP (Model Context Protocol)
