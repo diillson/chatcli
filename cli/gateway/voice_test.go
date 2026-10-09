@@ -20,6 +20,10 @@ type recordingAdapter struct {
 	sent []OutboundMessage
 }
 
+// RepliesWithAudio: the recorder stands in for a channel that delivers
+// voice clips, like Telegram.
+func (*recordingAdapter) RepliesWithAudio() bool { return true }
+
 func (*recordingAdapter) Name() string                                       { return "rec" }
 func (*recordingAdapter) Start(context.Context, chan<- InboundMessage) error { return nil }
 func (a *recordingAdapter) Send(_ context.Context, m OutboundMessage) error {

@@ -17,6 +17,7 @@ import (
 	"io"
 	"mime/multipart"
 	"net/http"
+	"net/url"
 	"os"
 	"strconv"
 	"strings"
@@ -133,6 +134,9 @@ func (s *SlackAdapter) Start(ctx context.Context, inbound chan<- InboundMessage)
 	}()
 
 	s.logger.Info("gateway/slack: listening", zap.String("addr", s.addr), zap.String("path", s.path))
+	if strings.TrimSpace(s.signingSecret) == "" {
+		s.logger.Warn("gateway/slack: CHATCLI_SLACK_SIGNING_SECRET is not set; every event, including Slack's URL verification, is refused with 401 until it is")
+	}
 	if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 		return err
 	}
@@ -141,8 +145,8 @@ func (s *SlackAdapter) Start(ctx context.Context, inbound chan<- InboundMessage)
 
 // Send posts a reply via chat.postMessage.
 func (s *SlackAdapter) Send(ctx context.Context, msg OutboundMessage) error {
-	// Image reply: when a picture is attached, upload it via files.upload with
-	// the text as the initial comment. Falls back to text on any failure so a
+	// Image reply: when a picture is attached, upload it as a file shared in
+	// the channel with the text as the initial comment. Falls back to text on any failure so a
 	// reply is never lost.
 	if msg.Image != nil && len(msg.Image.Data) > 0 {
 		if err := s.sendPhoto(ctx, msg); err != nil {
@@ -152,12 +156,107 @@ func (s *SlackAdapter) Send(ctx context.Context, msg OutboundMessage) error {
 		}
 	}
 	payload, _ := json.Marshal(map[string]string{"channel": msg.ChatID, "text": msg.Text})
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, s.apiBase+"/chat.postMessage", bytes.NewReader(payload))
+	_, err := s.callAPI(ctx, "chat.postMessage", "application/json", bytes.NewReader(payload))
+	return err
+}
+
+// slackAPIResult is the envelope every Slack Web API method answers with.
+// Slack replies 200 even when a call fails; success is the "ok" field.
+type slackAPIResult struct {
+	OK        bool   `json:"ok"`
+	Error     string `json:"error"`
+	UploadURL string `json:"upload_url"`
+	FileID    string `json:"file_id"`
+}
+
+// callAPI posts to a Slack Web API method with the bot token and returns
+// the parsed result, or an error for a non-200 status, an unreadable body
+// or ok:false.
+func (s *SlackAdapter) callAPI(ctx context.Context, method, contentType string, body io.Reader) (slackAPIResult, error) {
+	var res slackAPIResult
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, s.apiBase+"/"+method, body)
+	if err != nil {
+		return res, err
+	}
+	req.Header.Set("Content-Type", contentType)
+	req.Header.Set("Authorization", "Bearer "+s.botToken)
+	resp, err := s.http.Do(req)
+	if err != nil {
+		return res, err
+	}
+	defer func() { _ = resp.Body.Close() }()
+	raw, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if resp.StatusCode != http.StatusOK {
+		return res, fmt.Errorf("slack %s status %d", method, resp.StatusCode)
+	}
+	if err := json.Unmarshal(raw, &res); err != nil {
+		return res, fmt.Errorf("slack %s: unreadable response: %w", method, err)
+	}
+	if !res.OK {
+		return res, fmt.Errorf("slack %s error: %s", method, res.Error)
+	}
+	return res, nil
+}
+
+// sendPhoto uploads the image with Slack's external upload flow, which
+// replaced the retired files.upload: files.getUploadURLExternal reserves a
+// file and returns an upload URL, the bytes go to that URL, and
+// files.completeUploadExternal shares the file in the channel with the text
+// as its initial comment. Filename defaults to "reply.png".
+func (s *SlackAdapter) sendPhoto(ctx context.Context, msg OutboundMessage) error {
+	filename := msg.Image.FileName
+	if filename == "" {
+		filename = "reply.png"
+	}
+
+	form := url.Values{}
+	form.Set("filename", filename)
+	form.Set("length", strconv.Itoa(len(msg.Image.Data)))
+	reserved, err := s.callAPI(ctx, "files.getUploadURLExternal",
+		"application/x-www-form-urlencoded", strings.NewReader(form.Encode()))
 	if err != nil {
 		return err
 	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+s.botToken)
+	if reserved.UploadURL == "" || reserved.FileID == "" {
+		return fmt.Errorf("slack files.getUploadURLExternal: no upload_url or file_id")
+	}
+
+	if err := s.uploadBytes(ctx, reserved.UploadURL, filename, msg.Image.Data); err != nil {
+		return err
+	}
+
+	complete := map[string]interface{}{
+		"files":      []map[string]string{{"id": reserved.FileID, "title": filename}},
+		"channel_id": msg.ChatID,
+	}
+	if strings.TrimSpace(msg.Text) != "" {
+		complete["initial_comment"] = msg.Text
+	}
+	payload, _ := json.Marshal(complete)
+	_, err = s.callAPI(ctx, "files.completeUploadExternal", "application/json", bytes.NewReader(payload))
+	return err
+}
+
+// uploadBytes sends the file to the URL files.getUploadURLExternal handed
+// out, as a multipart "file" part. The URL is pre-signed for that one file.
+func (s *SlackAdapter) uploadBytes(ctx context.Context, uploadURL, filename string, data []byte) error {
+	var buf bytes.Buffer
+	w := multipart.NewWriter(&buf)
+	part, err := w.CreateFormFile("file", filename)
+	if err != nil {
+		return err
+	}
+	if _, err := part.Write(data); err != nil {
+		return err
+	}
+	if err := w.Close(); err != nil {
+		return err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, uploadURL, &buf)
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", w.FormDataContentType())
 	resp, err := s.http.Do(req)
 	if err != nil {
 		return err
@@ -165,64 +264,7 @@ func (s *SlackAdapter) Send(ctx context.Context, msg OutboundMessage) error {
 	defer func() { _ = resp.Body.Close() }()
 	_, _ = io.Copy(io.Discard, resp.Body)
 	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("slack chat.postMessage status %d", resp.StatusCode)
-	}
-	return nil
-}
-
-// sendPhoto uploads the image via the files.upload API: a multipart request
-// carrying the channel, the file bytes, a filename and the text as the
-// initial_comment. The bot token authenticates the call. Filename defaults to
-// "reply.png" when none is supplied.
-func (s *SlackAdapter) sendPhoto(ctx context.Context, msg OutboundMessage) error {
-	filename := msg.Image.FileName
-	if filename == "" {
-		filename = "reply.png"
-	}
-
-	var buf bytes.Buffer
-	w := multipart.NewWriter(&buf)
-	_ = w.WriteField("channels", msg.ChatID)
-	if strings.TrimSpace(msg.Text) != "" {
-		_ = w.WriteField("initial_comment", msg.Text)
-	}
-	_ = w.WriteField("filename", filename)
-	part, err := w.CreateFormFile("file", filename)
-	if err != nil {
-		return err
-	}
-	if _, err := part.Write(msg.Image.Data); err != nil {
-		return err
-	}
-	if err := w.Close(); err != nil {
-		return err
-	}
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, s.apiBase+"/files.upload", &buf)
-	if err != nil {
-		return err
-	}
-	req.Header.Set("Content-Type", w.FormDataContentType())
-	req.Header.Set("Authorization", "Bearer "+s.botToken)
-	resp, err := s.http.Do(req)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = resp.Body.Close() }()
-	body, _ := io.ReadAll(resp.Body)
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("slack files.upload status %d", resp.StatusCode)
-	}
-	// Slack always returns 200; success is signaled by the "ok" field.
-	var res struct {
-		OK    bool   `json:"ok"`
-		Error string `json:"error"`
-	}
-	if err := json.Unmarshal(body, &res); err != nil {
-		return err
-	}
-	if !res.OK {
-		return fmt.Errorf("slack files.upload error: %s", res.Error)
+		return fmt.Errorf("slack file upload status %d", resp.StatusCode)
 	}
 	return nil
 }

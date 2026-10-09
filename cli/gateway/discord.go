@@ -213,15 +213,77 @@ func (d *DiscordAdapter) Send(ctx context.Context, msg OutboundMessage) error {
 	// Image reply: when a picture is attached, upload it as a file with the text
 	// as the message content. Falls back to text on any failure so a reply is
 	// never lost.
+	// Discord rejects content over discordMaxContent characters, so a longer
+	// reply goes out as several messages in order; with an image, the first
+	// part rides on the upload and the rest follow as text.
+	chunks := splitDiscordContent(msg.Text, discordMaxContent)
 	if msg.Image != nil && len(msg.Image.Data) > 0 {
-		if err := d.sendPhoto(ctx, msg); err != nil {
+		first := msg
+		first.Text = chunks[0]
+		if err := d.sendPhoto(ctx, first); err != nil {
 			d.logger.Warn("discord: photo send failed, falling back to text", zap.Error(err))
 		} else {
-			return nil
+			return d.postContents(ctx, msg.ChatID, chunks[1:])
 		}
 	}
-	payload, _ := json.Marshal(map[string]string{"content": msg.Text})
-	endpoint := fmt.Sprintf("%s/channels/%s/messages", d.restBase, msg.ChatID)
+	return d.postContents(ctx, msg.ChatID, chunks)
+}
+
+// discordMaxContent is Discord's limit on a message's content, in characters.
+const discordMaxContent = 2000
+
+// splitDiscordContent cuts text into parts of at most limit characters,
+// preferring to break after a newline, then after a space, and only cutting
+// inside a word when a part has neither. Empty text is a single empty part.
+func splitDiscordContent(text string, limit int) []string {
+	runes := []rune(text)
+	if len(runes) <= limit {
+		return []string{text}
+	}
+	var parts []string
+	for len(runes) > limit {
+		cut := lastRuneIndex(runes[:limit], '\n')
+		if cut <= 0 {
+			cut = lastRuneIndex(runes[:limit], ' ')
+		}
+		if cut <= 0 {
+			cut = limit
+		} else {
+			cut++ // keep the separator with the part it ends
+		}
+		parts = append(parts, string(runes[:cut]))
+		runes = runes[cut:]
+	}
+	if len(runes) > 0 {
+		parts = append(parts, string(runes))
+	}
+	return parts
+}
+
+func lastRuneIndex(rs []rune, r rune) int {
+	for i := len(rs) - 1; i >= 0; i-- {
+		if rs[i] == r {
+			return i
+		}
+	}
+	return -1
+}
+
+// postContents sends each part as its own message, in order, and stops at
+// the first failure so parts never arrive out of order.
+func (d *DiscordAdapter) postContents(ctx context.Context, chatID string, parts []string) error {
+	for _, p := range parts {
+		if err := d.postContent(ctx, chatID, p); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// postContent sends one text message via the REST API.
+func (d *DiscordAdapter) postContent(ctx context.Context, chatID, text string) error {
+	payload, _ := json.Marshal(map[string]string{"content": text})
+	endpoint := fmt.Sprintf("%s/channels/%s/messages", d.restBase, chatID)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(payload))
 	if err != nil {
 		return err

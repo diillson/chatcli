@@ -92,7 +92,10 @@ func (a *WhatsAppAdapter) webhookHandler(ctx context.Context, inbound chan<- Inb
 		case http.MethodGet:
 			// Meta verification handshake.
 			q := r.URL.Query()
-			if q.Get("hub.mode") == "subscribe" &&
+			// Fail closed: with no verify token configured, an empty
+			// hub.verify_token would compare equal and anyone could
+			// subscribe the endpoint.
+			if a.verifyToken != "" && q.Get("hub.mode") == "subscribe" &&
 				subtle.ConstantTimeCompare([]byte(q.Get("hub.verify_token")), []byte(a.verifyToken)) == 1 {
 				// Meta's verification handshake: hub.challenge is an integer the
 				// endpoint echoes back. Parsing it (and formatting it fresh)
@@ -155,6 +158,12 @@ func (a *WhatsAppAdapter) Start(ctx context.Context, inbound chan<- InboundMessa
 	}()
 
 	a.logger.Info("gateway/whatsapp: listening", zap.String("addr", a.addr), zap.String("path", a.path))
+	if a.verifyToken == "" {
+		a.logger.Warn("gateway/whatsapp: CHATCLI_WHATSAPP_VERIFY_TOKEN is not set; Meta's webhook verification is refused with 403 until it is")
+	}
+	if a.appSecret == "" {
+		a.logger.Warn("gateway/whatsapp: CHATCLI_WHATSAPP_APP_SECRET is not set; every inbound message is refused with 401 until it is")
+	}
 	if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 		return err
 	}

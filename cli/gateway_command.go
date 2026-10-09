@@ -637,7 +637,8 @@ func (cli *ChatCLI) gatewayAgentFunc(sessions *hubSessions, transcriber transcri
 		// When this reply will be synthesized to audio, tell the model up
 		// front: emojis, bullet lists and tables read terribly out loud, and
 		// only the model can phrase for the ear.
-		if voiceConfigured && gateway.VoiceDecision(gateway.SharedVoicePrefs(), session, globalVoiceMode, msg.Audio != nil) {
+		if voiceConfigured && gateway.PlatformRepliesWithAudio(msg.Platform) &&
+			gateway.VoiceDecision(gateway.SharedVoicePrefs(), session, globalVoiceMode, msg.Audio != nil) {
 			task += "\n\n" + speechReplyDirective
 		}
 
