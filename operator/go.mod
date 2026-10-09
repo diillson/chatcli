@@ -1,6 +1,6 @@
 module github.com/diillson/chatcli/operator
 
-go 1.27.1
+go 1.27.2
 
 require (
 	github.com/diillson/chatcli v0.0.0
@@ -8,7 +8,7 @@ require (
 	github.com/google/uuid v1.6.0
 	github.com/prometheus/client_golang v1.24.1
 	go.uber.org/zap v1.28.0
-	golang.org/x/net v0.59.0
+	golang.org/x/net v0.60.0
 	google.golang.org/grpc v1.83.2
 	gopkg.in/yaml.v3 v3.0.1
 	k8s.io/api v0.37.1
