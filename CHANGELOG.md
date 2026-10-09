@@ -1,5 +1,20 @@
 # Changelog
 
+## [1.214.0](https://github.com/diillson/chatcli/compare/v1.213.1...v1.214.0) (2026-10-09)
+
+
+### Features
+
+* **eval:** chatcli eval, an offline evaluation harness ([fbb0eaf](https://github.com/diillson/chatcli/commit/fbb0eaf125325361fce20eb092e0fabb0af3ccee))
+* **help:** generate /help and chatcli --help from one command registry ([#1737](https://github.com/diillson/chatcli/issues/1737)) ([a46961b](https://github.com/diillson/chatcli/commit/a46961b9a1d176223f0863e00e127864407c44cc))
+
+
+### Bug Fixes
+
+* **coder:** deny policy asks at once when a one-shot has no terminal ([fbb0eaf](https://github.com/diillson/chatcli/commit/fbb0eaf125325361fce20eb092e0fabb0af3ccee))
+* **docs-flatten:** drop inline SVG drawings from flattened MDX ([#1739](https://github.com/diillson/chatcli/issues/1739)) ([9f5cbaf](https://github.com/diillson/chatcli/commit/9f5cbafd3be73b9dfbd5afc5b0dc170be6016f18))
+* **eval:** never fire user hooks inside an eval run ([#1738](https://github.com/diillson/chatcli/issues/1738)) ([591eeac](https://github.com/diillson/chatcli/commit/591eeacfbdeb37a4dba4c06642d272231f278c91))
+
 ## [1.213.1](https://github.com/diillson/chatcli/compare/v1.213.0...v1.213.1) (2026-10-09)
 
 
