@@ -1,0 +1,13 @@
+{
+  "agent.turn.processing": "Processando...",
+  "agent.turn.ai_response_failed": "erro ao obter resposta da IA",
+  "agent.turn.ai_response_failed_turn": "erro ao obter resposta da IA no turno %d",
+  "context.scan.processing_path": "Processando %s",
+  "agent.plan.card_title": "PLANO DE AÇÃO",
+  "agent.card.response": "RESPOSTA",
+  "agent.card.explanation": "EXPLICAÇÃO",
+  "agent.card.plan_generated": "PLANO GERADO",
+  "agent.card.plan_generated_body": "A IA gerou um plano de ação com comandos executáveis. Use o menu abaixo para executar.",
+  "agent.card.batch": "LOTE",
+  "agent.card.batch_actions": "%d ações"
+}

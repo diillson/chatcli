@@ -36,7 +36,7 @@ func TestHandleWrite_Basic(t *testing.T) {
 	if err != nil || string(got) != "hello" {
 		t.Fatalf("content=%q err=%v", got, err)
 	}
-	if !strings.Contains(out.String(), "escrito") {
+	if !strings.Contains(out.String(), "written") {
 		t.Errorf("missing success message: %q", out.String())
 	}
 }
@@ -92,7 +92,7 @@ func TestHandlePatch_Basic(t *testing.T) {
 	if string(got) != "foo QUX baz" {
 		t.Errorf("patched=%q", got)
 	}
-	if !strings.Contains(out.String(), "Patch aplicado") {
+	if !strings.Contains(out.String(), "Patch applied") {
 		t.Errorf("missing success: %q", out.String())
 	}
 	// A backup must have been created.

@@ -736,7 +736,7 @@ func (a *AgentMode) executeCommandsWithOutput(ctx context.Context, block agent.C
 	fmt.Println("\n" + renderer.Colorize(topBorder, agent.ColorGray))
 	fmt.Println(renderer.Colorize(titleContent, agent.ColorLime+agent.ColorBold))
 
-	fmt.Fprintf(&allOutput, "\nExecutando: %s (tipo: %s)\n", block.Description, langNorm)
+	fmt.Fprintf(&allOutput, "\nRunning: %s (type: %s)\n", block.Description, langNorm)
 
 	shell := os.Getenv("SHELL")
 	if shell == "" {

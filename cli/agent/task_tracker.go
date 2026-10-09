@@ -384,7 +384,7 @@ func (t *TaskTracker) FormatProgress() string {
 	}
 
 	var b strings.Builder
-	b.WriteString("\nPlano de Acao:\n")
+	b.WriteString("\nAction plan:\n")
 
 	for i, task := range t.plan.Tasks {
 		var icon string
@@ -422,14 +422,14 @@ func (t *TaskTracker) FormatProgress() string {
 		}
 	}
 
-	fmt.Fprintf(&b, "\nProgresso: %d/%d concluidas", completed, len(t.plan.Tasks))
+	fmt.Fprintf(&b, "\nProgress: %d/%d done", completed, len(t.plan.Tasks))
 	if failed > 0 {
-		fmt.Fprintf(&b, ", %d falhas", failed)
+		fmt.Fprintf(&b, ", %d failed", failed)
 	}
 	b.WriteString("\n")
 
 	if t.plan.NeedsReplan {
-		b.WriteString("\nATENCAO: Multiplas falhas detectadas. Replanejamento necessario!\n")
+		b.WriteString("\nWARNING: multiple failures detected. Replanning required!\n")
 	}
 
 	return b.String()

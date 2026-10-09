@@ -19,7 +19,7 @@ func TestHandleExec_Success(t *testing.T) {
 	if !strings.Contains(s, "hello-exec") {
 		t.Errorf("missing command output: %q", s)
 	}
-	if !strings.Contains(s, "Sucesso") {
+	if !strings.Contains(s, "Success.") {
 		t.Errorf("missing success marker: %q", s)
 	}
 }

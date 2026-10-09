@@ -97,7 +97,7 @@ func (e *Engine) handleExec(ctx context.Context, args []string) error {
 		}
 	}
 
-	e.printf("⚙️ Executando: %s\n", finalCmd)
+	e.printf("⚙️ Running: %s\n", finalCmd)
 
 	execCtx, cancel := context.WithTimeout(ctx, time.Duration(*timeout)*time.Second)
 	defer cancel()
@@ -141,10 +141,10 @@ func (e *Engine) handleExec(ctx context.Context, args []string) error {
 	wg.Wait()
 
 	if err := cmd.Wait(); err != nil {
-		e.printf("❌ Falhou: %v\n", err)
+		e.printf("❌ Failed: %v\n", err)
 		return fmt.Errorf("command failed: %w", err)
 	}
-	e.println("✅ Sucesso.")
+	e.println("✅ Success.")
 	return nil
 }
 
@@ -187,7 +187,7 @@ func (e *Engine) handleTest(ctx context.Context, args []string) error {
 	execCtx, cancel := context.WithTimeout(ctx, time.Duration(*timeout)*time.Second)
 	defer cancel()
 
-	e.printf("🧪 Rodando testes: %s\n", finalCmd)
+	e.printf("🧪 Running tests: %s\n", finalCmd)
 	out, err := e.runSandboxedCommand(execCtx, *dir, finalCmd)
 	return e.printCommandOutput(out, err)
 }

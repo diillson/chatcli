@@ -333,7 +333,7 @@ func (e *Engine) printCommandOutput(out string, err error) error {
 		e.println(strings.TrimRight(out, "\n"))
 	}
 	if err != nil {
-		e.printf("❌ Falhou: %v\n", err)
+		e.printf("❌ Failed: %v\n", err)
 		return fmt.Errorf("command failed: %w", err)
 	}
 	return nil

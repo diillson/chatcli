@@ -250,7 +250,7 @@ func spinnerPreviewWipe(hadPreview bool) string {
 // ticker closure so the frame logic is directly testable — the ticker
 // itself only runs against a real TTY.
 func (a *AgentMode) buildTurnSpinnerFrame(d time.Duration, modelName string, hadPreview bool) (string, bool) {
-	msg := "Processando..."
+	msg := i18n.T("agent.turn.processing")
 	a.cli.messageQueueMu.Lock()
 	queued := len(a.cli.messageQueue)
 	a.cli.messageQueueMu.Unlock()
@@ -259,7 +259,7 @@ func (a *AgentMode) buildTurnSpinnerFrame(d time.Duration, modelName string, had
 	}
 	queued += a.salvagedTypeaheadCount()
 	if queued > 0 {
-		msg = "Processando... " + i18n.T("agent.queue.indicator", queued)
+		msg = i18n.T("agent.turn.processing") + " " + i18n.T("agent.queue.indicator", queued)
 	}
 	// Live type-ahead: what the user is typing renders on its own line
 	// BELOW the spinner (same placement as the dispatch panel), cursor

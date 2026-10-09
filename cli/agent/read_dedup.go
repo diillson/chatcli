@@ -35,8 +35,11 @@ type readBlock struct {
 }
 
 var (
-	readBlockStartRe = regexp.MustCompile(`(?m)^<<< INÍCIO DO ARQUIVO(?: \(base64\))?: (.+?) >>>$`)
-	readBlockEndRe   = regexp.MustCompile(`(?m)^<<< FIM DO ARQUIVO: (.+?) >>>$`)
+	// The engine frames reads with "BEGIN FILE"/"END FILE"; the legacy
+	// Portuguese markers still match so resumed sessions recorded before
+	// the switch keep deduplicating.
+	readBlockStartRe = regexp.MustCompile(`(?m)^<<< (?:BEGIN FILE|INÍCIO DO ARQUIVO)(?: \(base64\))?: (.+?) >>>$`)
+	readBlockEndRe   = regexp.MustCompile(`(?m)^<<< (?:END FILE|FIM DO ARQUIVO): (.+?) >>>$`)
 	readNumberedRe   = regexp.MustCompile(`(?m)^\s*(\d+) \| `)
 )
 
@@ -111,7 +114,7 @@ func DedupRepeatedReads(history []models.Message, ccr *compress.Layer, logger *z
 		if msg.Meta != nil && (msg.Meta.PreserveVerbatim || msg.Meta.IsSummary) {
 			continue
 		}
-		if !strings.Contains(msg.Content, "<<< INÍCIO DO ARQUIVO") {
+		if !strings.Contains(msg.Content, "<<< BEGIN FILE") && !strings.Contains(msg.Content, "<<< INÍCIO DO ARQUIVO") {
 			continue
 		}
 		if blocks := parseReadBlocks(msg.Content); len(blocks) > 0 {

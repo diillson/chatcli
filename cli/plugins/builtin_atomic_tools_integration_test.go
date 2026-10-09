@@ -107,7 +107,7 @@ func TestBuiltinTree_EndToEnd(t *testing.T) {
 }
 
 // TestBuiltinRead_MissingFileSurfacesError pins the failure path. A
-// path outside the workspace boundary surfaces as "BLOQUEADO" in the
+// path outside the workspace boundary surfaces as "BLOCKED" in the
 // engine's stderr stream; the plugin captures that and includes it in
 // the result body. The plugin itself returns nil (engine reports
 // per-file errors as best-effort warnings, not return values) and the
@@ -119,7 +119,7 @@ func TestBuiltinRead_MissingFileSurfacesError(t *testing.T) {
 	require.NoError(t, err, "engine reports per-file errors via stderr, not return")
 	low := strings.ToLower(out)
 	assert.True(t,
-		strings.Contains(low, "bloqueado") || strings.Contains(low, "erro"),
+		strings.Contains(low, "blocked") || strings.Contains(low, "error"),
 		"per-file error message must be surfaced in the captured output, got: %q", out)
 }
 

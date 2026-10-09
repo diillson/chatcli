@@ -539,7 +539,7 @@ func (cli *ChatCLI) processDirectoryChunked(ctx context.Context, path string, to
 	// Configurar opções de processamento de diretório
 	scanOptions := utils.DefaultDirectoryScanOptions(cli.logger)
 	scanOptions.OnFileProcessed = func(info utils.FileInfo) {
-		cli.animation.UpdateMessage(fmt.Sprintf("Processando %s", info.Path))
+		cli.animation.UpdateMessage(i18n.T("context.scan.processing_path", info.Path))
 	}
 
 	// Sem limite de tamanho, vamos coletar tudo e depois dividir

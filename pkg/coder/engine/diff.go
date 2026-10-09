@@ -218,6 +218,6 @@ func (e *Engine) applyHunksToFile(path string, hunks []diffHunk) error {
 	if err := os.WriteFile(path, []byte(newText), 0600); err != nil { //#nosec G703 -- path validated by engine.validatePath / SensitiveReadPaths.IsReadAllowed
 		return fmt.Errorf("erro escrita: %w", err)
 	}
-	e.printf("✅ Diff aplicado em '%s'.\n", path)
+	e.printf("✅ Diff applied to '%s'.\n", path)
 	return nil
 }

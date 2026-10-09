@@ -24,7 +24,7 @@ func TestApplyUnifiedDiff_HappyPath(t *testing.T) {
 	if string(got) != "line1\nCHANGED\nline3\n" {
 		t.Errorf("result = %q", got)
 	}
-	if !strings.Contains(out.String(), "Diff aplicado") {
+	if !strings.Contains(out.String(), "Diff applied") {
 		t.Errorf("missing success msg: %q", out.String())
 	}
 }
