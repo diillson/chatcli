@@ -104,9 +104,16 @@ var routes = []apiRoute{
 	}},
 	{http.MethodPost, "tools", 1, func(s *Server, w http.ResponseWriter, r *http.Request, rest []string) { s.handleTool(w, r, rest[0]) }},
 	{http.MethodGet, "skills", 0, func(s *Server, w http.ResponseWriter, _ *http.Request, _ []string) {
-		writeJSON(w, http.StatusOK, map[string]interface{}{"skills": s.opts.Backend.Skills()})
+		writeJSON(w, http.StatusOK, s.skillsPayload())
 	}},
 	{http.MethodGet, "skills", 1, func(s *Server, w http.ResponseWriter, _ *http.Request, rest []string) { s.handleSkill(w, rest[0]) }},
+	{http.MethodPost, "skills", 1, func(s *Server, w http.ResponseWriter, r *http.Request, rest []string) {
+		s.handleSkillSwitch(w, r, rest[0])
+	}},
+	{http.MethodPost, "mcp", 1, func(s *Server, w http.ResponseWriter, r *http.Request, rest []string) {
+		s.handleMCPSwitch(w, r, rest[0])
+	}},
+	{http.MethodGet, "complete", 0, func(s *Server, w http.ResponseWriter, r *http.Request, _ []string) { s.handleComplete(w, r) }},
 	{http.MethodGet, "commands", 0, func(s *Server, w http.ResponseWriter, _ *http.Request, _ []string) {
 		writeJSON(w, http.StatusOK, map[string]interface{}{"commands": s.opts.Backend.Commands()})
 	}},
@@ -139,18 +146,23 @@ func (s *Server) handleBoot(w http.ResponseWriter, r *http.Request) {
 	if raw, err := b.ProvidersJSON(); err == nil {
 		providers = json.RawMessage(raw)
 	}
-	writeJSON(w, http.StatusOK, map[string]interface{}{
+	out := map[string]interface{}{
 		"boot":      s.bootData(),
 		"status":    b.Status(),
 		"providers": providers,
 		"tools":     b.Tools(),
-		"skills":    b.Skills(),
 		"commands":  b.Commands(),
 		"resources": b.Resources(),
 		"sessions":  b.SessionCatalog(),
 		"bound":     s.boundOf(r.URL.Query().Get("session")),
 		"history":   s.historyItems(r.Context(), r.URL.Query().Get("session")),
-	})
+	}
+	// skills, plus pinned, manual_only and controls when the backend has
+	// the switches.
+	for k, v := range s.skillsPayload() {
+		out[k] = v
+	}
+	writeJSON(w, http.StatusOK, out)
 }
 
 // boundOf names the saved session the live session is bound to, or "" when

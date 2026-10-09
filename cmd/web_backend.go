@@ -181,3 +181,42 @@ func (b *rpcBackend) Status() webui.Status {
 	st.MCP = b.cli.MCPStatusRPC()
 	return st
 }
+
+var _ webui.Controls = (*rpcBackend)(nil)
+
+// SetMCPServer starts or stops one MCP server, as /mcp start|stop does.
+func (b *rpcBackend) SetMCPServer(name string, on bool) error {
+	if b.cli == nil {
+		return errCLIUnavailable
+	}
+	return b.cli.SetMCPServerRunningRPC(name, on)
+}
+
+// SkillState lists the pinned and the manual-only skills.
+func (b *rpcBackend) SkillState() (pinned, manualOnly []string) {
+	if b.cli == nil {
+		return nil, nil
+	}
+	return b.cli.WebSkillStateRPC()
+}
+
+// SetSkillPinned pins or unpins a skill, as /skill pin|unpin does.
+func (b *rpcBackend) SetSkillPinned(name string, on bool) error {
+	if b.cli == nil {
+		return errCLIUnavailable
+	}
+	return b.cli.SetSkillPinnedRPC(name, on)
+}
+
+// Complete completes a slash command line with the REPL's completer.
+func (b *rpcBackend) Complete(line string) []webui.Completion {
+	if b.cli == nil {
+		return nil
+	}
+	items := b.cli.WebCompleteRPC(line)
+	out := make([]webui.Completion, 0, len(items))
+	for _, c := range items {
+		out = append(out, webui.Completion{Text: c.Text, Description: c.Description})
+	}
+	return out
+}

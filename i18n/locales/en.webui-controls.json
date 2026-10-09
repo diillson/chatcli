@@ -1,0 +1,20 @@
+{
+  "web.controls.mcp_name_required": "Name the MCP server to start or stop.",
+  "web.controls.skill_name_required": "Name the skill to pin or unpin.",
+  "web.controls.unsupported": "This web UI cannot change that setting.",
+  "web.controls.on_required": "Send \"on\": true to start the server or false to stop it.",
+  "web.controls.pinned_required": "Send \"pinned\": true to pin the skill or false to unpin it.",
+  "web.ui.mcp.switch": "Run this server",
+  "web.ui.mcp.starting": "starting…",
+  "web.ui.mcp.started": "{name} started.",
+  "web.ui.mcp.stopped": "{name} stopped.",
+  "web.ui.mcp.note": "Like /mcp start and /mcp stop, this lasts while this web UI runs: on the next start, servers come back as configured.",
+  "web.ui.skill.switch": "Pin to every turn",
+  "web.ui.skill.pinned": "pinned",
+  "web.ui.skill.manualOnly": "manual only",
+  "web.ui.skill.pinnedOn": "{name} pinned: it joins every turn of this session.",
+  "web.ui.skill.pinnedOff": "{name} unpinned.",
+  "web.ui.skill.note": "A pinned skill joins every turn of this session, as /skill pin does in the terminal. Manual-only skills run when you call them with /name.",
+  "web.ui.skill.count": "{pinned} pinned of {total}",
+  "web.ui.drawer.close": "Close"
+}

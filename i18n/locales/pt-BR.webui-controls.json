@@ -1,0 +1,20 @@
+{
+  "web.controls.mcp_name_required": "Informe o servidor MCP a iniciar ou parar.",
+  "web.controls.skill_name_required": "Informe a skill a fixar ou desafixar.",
+  "web.controls.unsupported": "Esta interface web não consegue alterar essa configuração.",
+  "web.controls.on_required": "Envie \"on\": true para iniciar o servidor ou false para pará-lo.",
+  "web.controls.pinned_required": "Envie \"pinned\": true para fixar a skill ou false para desafixá-la.",
+  "web.ui.mcp.switch": "Executar este servidor",
+  "web.ui.mcp.starting": "iniciando…",
+  "web.ui.mcp.started": "{name} iniciado.",
+  "web.ui.mcp.stopped": "{name} parado.",
+  "web.ui.mcp.note": "Como /mcp start e /mcp stop, vale enquanto esta interface web estiver rodando: no próximo início, os servidores voltam como configurados.",
+  "web.ui.skill.switch": "Fixar em todos os turnos",
+  "web.ui.skill.pinned": "fixada",
+  "web.ui.skill.manualOnly": "só manual",
+  "web.ui.skill.pinnedOn": "{name} fixada: entra em todos os turnos desta sessão.",
+  "web.ui.skill.pinnedOff": "{name} desafixada.",
+  "web.ui.skill.note": "Uma skill fixada entra em todos os turnos desta sessão, como /skill pin faz no terminal. Skills só manuais rodam quando você as chama com /nome.",
+  "web.ui.skill.count": "{pinned} fixada(s) de {total}",
+  "web.ui.drawer.close": "Fechar"
+}

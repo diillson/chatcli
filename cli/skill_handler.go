@@ -10,6 +10,7 @@ package cli
 import (
 	"bufio"
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"sort"
@@ -1199,26 +1200,27 @@ func (sh *SkillHandler) ShowHelp() {
 		i18n.T("skill.registries.config"), colorize(sh.registryMgr.GetConfigPath(), ColorGray))
 }
 
-// Pin marks a skill to be auto-injected into every turn for the rest of the
-// session, regardless of triggers/paths. Pinning is rejected for skills with
-// `disable-model-invocation: true` (the flag exists precisely to forbid
-// automatic injection; manual invocation via `/<skill-name>` remains the
-// supported path for those).
-func (sh *SkillHandler) Pin(name string) {
+// Errors pinSkill reports; Pin prints them, remote surfaces return them.
+var (
+	errSkillPinNoManager  = errors.New("skill pin: persona manager unavailable")
+	errSkillPinNotFound   = errors.New("skill pin: skill not found")
+	errSkillPinManualOnly = errors.New("skill pin: skill disables model invocation")
+)
+
+// pinSkill adds a skill to the pinned set and returns the skill as the
+// persona manager names it, and whether it was pinned already. It is the
+// one place pinning happens: /skill pin prints its outcome, the web UI
+// returns it.
+func (sh *SkillHandler) pinSkill(name string) (*persona.Skill, bool, error) {
 	if sh.personaMgr == nil {
-		fmt.Printf("\n  %s\n\n", colorize(i18n.T("skill.pin.no_manager"), ColorRed))
-		return
+		return nil, false, errSkillPinNoManager
 	}
 	skill, err := sh.personaMgr.GetSkillByName(name)
 	if err != nil || skill == nil {
-		fmt.Printf("\n  %s %s\n", colorize(i18n.T("skill.pin.not_found")+":", ColorYellow), colorize(name, ColorCyan))
-		fmt.Printf("  %s\n\n", i18n.T("skill.pin.search_hint", colorize("/skill search <query>", ColorCyan)))
-		return
+		return nil, false, errSkillPinNotFound
 	}
 	if skill.DisableModelInvocation {
-		fmt.Printf("\n  %s %s\n", colorize(i18n.T("skill.pin.disabled_invocation")+":", ColorYellow), colorize(skill.Name, ColorCyan))
-		fmt.Printf("  %s\n\n", i18n.T("skill.pin.use_manual_hint", colorize("/"+skill.Name, ColorCyan)))
-		return
+		return skill, false, errSkillPinManualOnly
 	}
 
 	sh.pinnedSkillsMu.Lock()
@@ -1227,14 +1229,54 @@ func (sh *SkillHandler) Pin(name string) {
 	count := len(sh.pinnedSkillNames)
 	sh.pinnedSkillsMu.Unlock()
 
+	if !already {
+		sh.logger.Info("skill pinned",
+			zap.String("skill", skill.Name),
+			zap.Int("total_pinned", count))
+	}
+	return skill, already, nil
+}
+
+// unpinSkill removes a skill from the pinned set and reports whether it
+// was pinned.
+func (sh *SkillHandler) unpinSkill(name string) bool {
+	sh.pinnedSkillsMu.Lock()
+	_, was := sh.pinnedSkillNames[name]
+	if was {
+		delete(sh.pinnedSkillNames, name)
+	}
+	sh.pinnedSkillsMu.Unlock()
+	if was {
+		sh.logger.Info("skill unpinned", zap.String("skill", name))
+	}
+	return was
+}
+
+// Pin marks a skill to be auto-injected into every turn for the rest of the
+// session, regardless of triggers/paths. Pinning is rejected for skills with
+// `disable-model-invocation: true` (the flag exists precisely to forbid
+// automatic injection; manual invocation via `/<skill-name>` remains the
+// supported path for those).
+func (sh *SkillHandler) Pin(name string) {
+	skill, already, err := sh.pinSkill(name)
+	switch {
+	case errors.Is(err, errSkillPinNoManager):
+		fmt.Printf("\n  %s\n\n", colorize(i18n.T("skill.pin.no_manager"), ColorRed))
+		return
+	case errors.Is(err, errSkillPinNotFound):
+		fmt.Printf("\n  %s %s\n", colorize(i18n.T("skill.pin.not_found")+":", ColorYellow), colorize(name, ColorCyan))
+		fmt.Printf("  %s\n\n", i18n.T("skill.pin.search_hint", colorize("/skill search <query>", ColorCyan)))
+		return
+	case errors.Is(err, errSkillPinManualOnly):
+		fmt.Printf("\n  %s %s\n", colorize(i18n.T("skill.pin.disabled_invocation")+":", ColorYellow), colorize(skill.Name, ColorCyan))
+		fmt.Printf("  %s\n\n", i18n.T("skill.pin.use_manual_hint", colorize("/"+skill.Name, ColorCyan)))
+		return
+	}
+
 	if already {
 		fmt.Printf("\n  %s %s\n\n", colorize(i18n.T("skill.pin.already"), ColorGray), colorize(skill.Name, ColorCyan))
 		return
 	}
-
-	sh.logger.Info("skill pinned",
-		zap.String("skill", skill.Name),
-		zap.Int("total_pinned", count))
 
 	fmt.Printf("\n  %s %s\n",
 		colorize(i18n.T("skill.pin.success"), ColorGreen),
@@ -1245,19 +1287,10 @@ func (sh *SkillHandler) Pin(name string) {
 // Unpin removes a skill from the pinned set. No-op (with a friendly notice)
 // when the skill wasn't pinned to begin with.
 func (sh *SkillHandler) Unpin(name string) {
-	sh.pinnedSkillsMu.Lock()
-	_, was := sh.pinnedSkillNames[name]
-	if was {
-		delete(sh.pinnedSkillNames, name)
-	}
-	sh.pinnedSkillsMu.Unlock()
-
-	if !was {
+	if !sh.unpinSkill(name) {
 		fmt.Printf("\n  %s %s\n\n", colorize(i18n.T("skill.unpin.not_pinned"), ColorGray), colorize(name, ColorCyan))
 		return
 	}
-
-	sh.logger.Info("skill unpinned", zap.String("skill", name))
 	fmt.Printf("\n  %s %s\n\n",
 		colorize(i18n.T("skill.unpin.success"), ColorGreen),
 		colorize(name, ColorCyan))

@@ -44,6 +44,7 @@ func (cli *ChatCLI) BudgetBlockedRPC() bool {
 type MCPServerStatusRPC struct {
 	Name         string    `json:"name"`
 	Connected    bool      `json:"connected"`
+	Starting     bool      `json:"starting"`
 	ToolCount    int       `json:"tool_count"`
 	AuthRequired bool      `json:"auth_required"`
 	LastError    string    `json:"last_error,omitempty"`
@@ -58,12 +59,15 @@ func (cli *ChatCLI) MCPStatusRPC() []MCPServerStatusRPC {
 	statuses := cli.mcpManager.GetServerStatus()
 	out := make([]MCPServerStatusRPC, 0, len(statuses))
 	for _, s := range statuses {
-		row := MCPServerStatusRPC{Name: s.Name, Connected: s.Connected, ToolCount: s.ToolCount, AuthRequired: s.AuthRequired, StartedAt: s.StartedAt}
+		row := MCPServerStatusRPC{Name: s.Name, Connected: s.Connected, Starting: s.Starting, ToolCount: s.ToolCount, AuthRequired: s.AuthRequired, StartedAt: s.StartedAt}
 		if s.LastError != nil {
 			row.LastError = s.LastError.Error()
 		}
 		out = append(out, row)
 	}
+	// The manager keeps servers in a map; a stable order keeps the page's
+	// list from reshuffling on every refresh.
+	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
 	return out
 }
 
