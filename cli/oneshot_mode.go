@@ -342,6 +342,13 @@ func (cli *ChatCLI) oneShotSystemMessage(ctx context.Context, userInput string) 
 	return sys
 }
 
+// oneShotProviders is the --provider value list its help prints. Kept as
+// a literal here: the provider-parity gate checks every provider is listed.
+var oneShotProviders = []string{
+	"OPENAI", "OPENAI_ASSISTANT", "CLAUDEAI", "BEDROCK", "GOOGLEAI", "XAI", "ZAI",
+	"MINIMAX", "MOONSHOT", "STACKSPOT", "OLLAMA", "COPILOT", "OPENROUTER", "DEVIN",
+}
+
 // NewFlagSet builds an isolated flag set and the Options it fills. Usage
 // texts resolve through i18n when the set is built: `chatcli --help` and
 // /help build it after i18n.Init, so they print in the active language;
@@ -361,7 +368,7 @@ func NewFlagSet() (*flag.FlagSet, *Options) {
 
 	fs.StringVar(&opts.Prompt, "p", "", i18n.T("oneshot.flag.prompt"))
 	fs.StringVar(&opts.Prompt, "prompt", "", i18n.T("oneshot.flag.prompt"))
-	fs.StringVar(&opts.Provider, "provider", "", i18n.T("oneshot.flag.provider"))
+	fs.StringVar(&opts.Provider, "provider", "", i18n.T("oneshot.flag.provider", strings.Join(oneShotProviders, ", ")))
 	fs.StringVar(&opts.Model, "model", "", i18n.T("oneshot.flag.model"))
 	fs.DurationVar(&opts.Timeout, "timeout", 5*time.Minute, i18n.T("oneshot.flag.timeout"))
 	fs.IntVar(&opts.MaxTokens, "max-tokens", 0, i18n.T("oneshot.flag.max_tokens"))

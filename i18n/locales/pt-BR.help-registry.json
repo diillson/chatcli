@@ -22,7 +22,7 @@
   "oneshot.flag.model": "Override do modelo",
   "oneshot.flag.no_anim": "Desliga as animações no modo one-shot",
   "oneshot.flag.prompt": "Roda este prompt uma vez, sem interação (/coder <tarefa> roda o coder)",
-  "oneshot.flag.provider": "Override do provider (OPENAI, CLAUDEAI, BEDROCK, GOOGLEAI, XAI, ZAI, MINIMAX, MOONSHOT, OPENROUTER, OLLAMA, COPILOT, DEVIN, STACKSPOT, OPENAI_ASSISTANT)",
+  "oneshot.flag.provider": "Override do provider (%s)",
   "oneshot.flag.raw": "Saída pura, sem markdown nem cores ANSI (para scripts e CI)",
   "oneshot.flag.realm": "Override do realm do StackSpot",
   "oneshot.flag.timeout": "Timeout da execução one-shot",
