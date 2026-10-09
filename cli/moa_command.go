@@ -109,7 +109,5 @@ func (cli *ChatCLI) handleMoACommand(ctx context.Context, input string) {
 	cli.history = append(cli.history, models.Message{Role: "assistant", Content: final})
 	cli.mirrorHubTurn(ctx, prompt, final)
 	cli.persistBoundSession()
-	if handoffTask != "" && cli.coderHandoffActive() {
-		cli.noteCoderHandoff(handoffTask)
-	}
+	cli.offerCoderHandoff(handoffTask)
 }

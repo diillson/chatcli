@@ -146,3 +146,31 @@ func TestModeAndLanguagePart_HandoffBlockIsConsistent(t *testing.T) {
 	assert.True(t, instr > 0 && instr < lang, "the instruction sits next to the banner, before the language directive")
 	assert.Equal(t, text, cli.modeAndLanguagePart().Text, "byte-stable across turns: the block is cached")
 }
+
+// The MCP catalog said "describe them, not call them" and nothing else, which
+// read as a dead end; on an attended turn it points at the handoff.
+func TestMCPCatalogFooter_PointsAtTheHandoff(t *testing.T) {
+	plain := mcpCatalogFooter(false)
+	assert.Contains(t, plain, "in chat you can describe them, not call them")
+	assert.NotContains(t, plain, "coder_handoff", "headless surfaces keep the previous note")
+
+	withHandoff := mcpCatalogFooter(true)
+	assert.True(t, strings.HasPrefix(withHandoff, plain), "the note is extended, not replaced")
+	assert.Contains(t, withHandoff, "<coder_handoff>")
+}
+
+// /moa strips a proposal from its aggregated answer and offers it through
+// offerCoderHandoff, exactly as a chat turn does.
+func TestOfferCoderHandoff(t *testing.T) {
+	t.Setenv(coderHandoffEnv, "")
+
+	attended := &ChatCLI{logger: zap.NewNop(), replActive: true}
+	attended.offerCoderHandoff("")
+	assert.Empty(t, attended.pendingCoderHandoff, "no task, no proposal")
+	attended.offerCoderHandoff("run the parser tests")
+	assert.Equal(t, "run the parser tests", attended.pendingCoderHandoff)
+
+	headless := &ChatCLI{logger: zap.NewNop()}
+	headless.offerCoderHandoff("run the parser tests")
+	assert.Empty(t, headless.pendingCoderHandoff, "nothing to confirm with outside the attended REPL")
+}

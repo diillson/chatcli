@@ -141,6 +141,14 @@ func classifyHandoffAnswer(in string) handoffAnswer {
 	return handoffOther
 }
 
+// offerCoderHandoff shows a proposal taken from a reply, when there is one
+// and this turn can be confirmed.
+func (cli *ChatCLI) offerCoderHandoff(task string) {
+	if task != "" && cli.coderHandoffActive() {
+		cli.noteCoderHandoff(task)
+	}
+}
+
 // noteCoderHandoff records the proposal and shows it under the reply.
 func (cli *ChatCLI) noteCoderHandoff(task string) {
 	cli.pendingCoderHandoff = task

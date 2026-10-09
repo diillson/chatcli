@@ -279,13 +279,19 @@ func (cli *ChatCLI) pullMCPCatalog(filter string) string {
 		return fmt.Sprintf("context_pull: no MCP tool matches %q. Call kind=mcp_tools with no name to see all %d.",
 			filter, len(tools))
 	}
-	b.WriteString("\nThese run only in agent/coder mode; in chat you can describe them, not call them.\n")
-	if cli.coderHandoffActive() {
-		// Without this, "describe, not call" read as a dead end and the
-		// model stopped there instead of offering the switch.
-		b.WriteString("When the user needs one of them run, propose the switch with the <coder_handoff> line.\n")
-	}
+	b.WriteString(mcpCatalogFooter(cli.coderHandoffActive()))
 	return b.String()
+}
+
+// mcpCatalogFooter closes the MCP catalog. With the coder handoff on, it
+// points at the handoff: "describe, not call" alone read as a dead end and
+// the model stopped there instead of offering the switch.
+func mcpCatalogFooter(handoff bool) string {
+	footer := "\nThese run only in agent/coder mode; in chat you can describe them, not call them.\n"
+	if handoff {
+		footer += "When the user needs one of them run, propose the switch with the <coder_handoff> line.\n"
+	}
+	return footer
 }
 
 // appendContextPullRound folds one recovery into the conversation being
