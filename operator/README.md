@@ -248,7 +248,7 @@ metadata:
   name: chatcli-copilot
 spec:
   provider: COPILOT
-  model: gpt-6-astra     # or gpt-4o, claude-sonnet-4-6, gemini-2.5-flash
+  model: gpt-6-astra     # or gpt-6.1-sol, claude-sonnet-5.5, gemini-3.8-flash
   replicas: 1
   apiKeys:
     name: chatcli-copilot-keys   # Secret with GITHUB_COPILOT_TOKEN

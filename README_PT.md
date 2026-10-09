@@ -166,7 +166,7 @@ Configuração por projeto: o servidor ACP também sobrepõe o `.env` do projeto
 
 - `OPENAI_API_URL` sobrescreve o endpoint de chat completions da OpenAI. Deve ser a URL **completa** de chat completions (ex.: `https://gateway.example.com/v1/chat/completions`) — a URL de listagem `/models` é derivada dela.
 - A autenticação não muda: as requisições levam `Authorization: Bearer $OPENAI_API_KEY`, então ao redirecionar para um gateway configure `OPENAI_API_KEY` com a key **do gateway**. Não combine URL de terceiros com login OAuth (`/auth login openai`) — o token OAuth seria enviado ao gateway.
-- `OPENAI_RESPONSES_API_URL` sobrescreve o endpoint da Responses API. Uma `OPENAI_API_URL` **custom** (host diferente) força a superfície de chat completions — a preferência do catálogo pela Responses API (ex.: `gpt-5.4`, o default) só vale no host oficial, então a key de um gateway nunca é enviada para `api.openai.com`. Precedência efetiva: OAuth > `OPENAI_USE_RESPONSES=true` > host custom em `OPENAI_API_URL` (chat completions) > preferência do catálogo do modelo > `OPENAI_USE_RESPONSES=false`. Se o seu gateway expõe a Responses API, opte por ela com `OPENAI_USE_RESPONSES=true` e configure também `OPENAI_RESPONSES_API_URL`.
+- `OPENAI_RESPONSES_API_URL` sobrescreve o endpoint da Responses API. Uma `OPENAI_API_URL` **custom** (host diferente) força a superfície de chat completions — a preferência do catálogo pela Responses API (ex.: `gpt-6.1-sol`, o default) só vale no host oficial, então a key de um gateway nunca é enviada para `api.openai.com`. Precedência efetiva: OAuth > `OPENAI_USE_RESPONSES=true` > host custom em `OPENAI_API_URL` (chat completions) > preferência do catálogo do modelo > `OPENAI_USE_RESPONSES=false`. Se o seu gateway expõe a Responses API, opte por ela com `OPENAI_USE_RESPONSES=true` e configure também `OPENAI_RESPONSES_API_URL`.
 - Quando a URL do endpoint aponta para um host customizado, a listagem de modelos **não** é filtrada por família — todos os modelos que o gateway retornar em `/models` aparecem no autocomplete e no `/switch --model`. Contra o endpoint oficial, a listagem mantém apenas as famílias de chat (ocultando embeddings, whisper, tts, dall-e, moderation). A mesma regra vale para `ZAI_API_URL`, `MOONSHOT_API_URL` e `MINIMAX_API_URL`.
 - Para usar um gateway compatível com OpenAI como provider **separado** da OpenAI (inclusive na fallback chain do modo servidor), aponte o preset OpenRouter para ele: `LLM_PROVIDER=OPENROUTER` com `OPENROUTER_API_KEY` e `OPENROUTER_API_URL=https://gateway.example.com/v1/chat/completions`.
 
@@ -290,7 +290,7 @@ spec:
     enabled: true
     providers:
       - name: OPENAI
-        model: gpt-5.4
+        model: gpt-6.1-sol
       - name: MINIMAX
         model: MiniMax-M2.7
 ```
@@ -311,19 +311,19 @@ helm install chatcli oci://ghcr.io/diillson/charts/chatcli \
 
 | Provider | Default Model | Tool Calling | Vision | Reasoning / Thinking |
 |---|---|---|---|---|
-| **OpenAI** | gpt-5.4 | Nativo | Sim | `reasoning_effort` (o-series / gpt-5) |
-| **Anthropic (Claude)** | claude-sonnet-4-6 | Nativo | Sim | Extended thinking com cache |
-| **AWS Bedrock** | claude-sonnet-4-5 | Nativo | Sim | Thinking budget (Anthropic models) |
-| **Google Gemini** | gemini-2.5-flash | Nativo | Sim | — |
+| **OpenAI** | gpt-6.1-sol | Nativo | Sim | `reasoning_effort` (o-series / gpt-5) |
+| **Anthropic (Claude)** | claude-sonnet-5-5 | Nativo | Sim | Extended thinking com cache |
+| **AWS Bedrock** | claude-sonnet-4-6 | Nativo | Sim | Thinking budget (Anthropic models) |
+| **Google Gemini** | gemini-3.8-flash | Nativo | Sim | — |
 | **xAI (Grok)** | grok-4.3 | XML fallback | — | — |
 | **ZAI (Zhipu AI)** | glm-5 | Nativo | Sim | `ZAI_THINKING=enabled\|disabled` · GLM Coding Plan via `ZAI_USE_CODING_PLAN` |
 | **MiniMax** | MiniMax-M2.7 | Nativo | Sim | — |
 | **Moonshot (Kimi)** | kimi-k2.6 | Nativo | Sim | `MOONSHOT_THINKING=enabled\|disabled\|auto` |
-| **GitHub Copilot** | gpt-4o | Nativo | Sim | — |
+| **GitHub Copilot** | gpt-6.1-sol | Nativo | Sim | — |
 | **StackSpot AI** | StackSpotAI | — | — | — |
-| **OpenRouter** | openai/gpt-5.2 | Nativo | Sim | Passthrough |
+| **OpenRouter** | openai/gpt-6.1-sol | Nativo | Sim | Passthrough |
 | **Ollama** | (local) | XML fallback | — | Tags `<thinking>` normalizadas |
-| **OpenAI (Responses API)** | gpt-5.4 | Nativo | Sim | `reasoning_effort` |
+| **OpenAI (Responses API)** | gpt-6.1-sol | Nativo | Sim | `reasoning_effort` |
 
 ```bash
 # Fallback chain configurável

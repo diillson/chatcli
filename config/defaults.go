@@ -13,7 +13,12 @@ const (
 	DefaultStackSpotAgentID  = "default"
 
 	// Valores padrão para OpenAI
-	DefaultOpenAIModel       = "gpt-5.4"
+	// gpt-6.1-sol: the current mid-tier general model, served both on the
+	// API and on the Codex backend that ChatGPT-plan logins use. gpt-5.4,
+	// the previous default, is refused there ("not supported when using
+	// Codex with a ChatGPT account"), so an OAuth user with no OPENAI_MODEL
+	// got a 400 on the first turn (probed Oct 9 2026).
+	DefaultOpenAIModel       = "gpt-6.1-sol"
 	DefaultOpenAiAssistModel = "gpt-4o"
 	OpenAIAPIURL             = "https://api.openai.com/v1/chat/completions"
 	OpenAIResponsesAPIURL    = "https://api.openai.com/v1/responses"
@@ -33,12 +38,16 @@ const (
 	OpenAICodexUserAgent  = "codex_cli_rs/0.144.0"
 
 	// Valores padrão para ClaudeAI
-	DefaultClaudeAIModel      = "claude-sonnet-4-6"
+	// claude-sonnet-5-5: the current Sonnet, the mid tier between Haiku and
+	// Opus, at the same $2/$10 tier as the OpenAI default.
+	DefaultClaudeAIModel      = "claude-sonnet-5-5"
 	ClaudeAIAPIURL            = "https://api.anthropic.com/v1/messages"
 	ClaudeAIAPIVersionDefault = "2023-06-01" // Versão padrão da APIClaudeAI
 
 	// Valores padrão para Google Gemini
-	DefaultGoogleAIModel   = "gemini-2.5-flash"
+	// gemini-3.8-flash: the current Flash. gemini-2.5-flash, the previous
+	// default, now answers 404 "no longer available" (probed Oct 9 2026).
+	DefaultGoogleAIModel   = "gemini-3.8-flash"
 	GoogleAIAPIURL         = "https://generativelanguage.googleapis.com/v1beta"
 	DefaultGoogleAITimeout = 5 * time.Minute
 
@@ -67,7 +76,10 @@ const (
 	MoonshotAPIURL       = "https://api.moonshot.ai/v1/chat/completions"
 
 	// Valores padrão para GitHub Copilot
-	DefaultCopilotModel = "gpt-4o"
+	// gpt-6.1-sol, the same default as OpenAI: GitHub's supported-models
+	// table no longer lists gpt-4o, the previous default (checked Oct 9
+	// 2026), and lists GPT-6.1 Sol as GA.
+	DefaultCopilotModel = "gpt-6.1-sol"
 	CopilotAPIURL       = "https://api.githubcopilot.com/chat/completions"
 
 	// Valores padrão para o provider DEVIN (wrapper do Devin CLI local).
@@ -88,7 +100,9 @@ const (
 	DevinCLIDefaultTimeout = 10 * time.Minute
 
 	// Valores padrão para OpenRouter
-	DefaultOpenRouterModel = "openai/gpt-5.2"
+	// openai/gpt-6.1-sol, the same model as the OpenAI default (listed by
+	// openrouter.ai/api/v1/models, Oct 9 2026).
+	DefaultOpenRouterModel = "openai/gpt-6.1-sol"
 	OpenRouterAPIURL       = "https://openrouter.ai/api/v1/chat/completions"
 
 	// Valores padrão para AWS Bedrock (modelos Anthropic Claude)
