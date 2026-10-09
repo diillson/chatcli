@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/diillson/chatcli/i18n"
 	"github.com/stretchr/testify/assert"
 	"go.uber.org/zap"
 )
@@ -33,6 +34,20 @@ func TestExtractCoderHandoff(t *testing.T) {
 	long := strings.Repeat("x", coderHandoffMaxTask+50)
 	task, _ = extractCoderHandoff("<coder_handoff>" + long + "</coder_handoff>")
 	assert.Len(t, task, coderHandoffMaxTask)
+}
+
+func TestTakeCoderHandoff(t *testing.T) {
+	task, reply := takeCoderHandoff("Sure, I'll list them.\n<coder_handoff>list the files here</coder_handoff>")
+	assert.Equal(t, "list the files here", task)
+	assert.Equal(t, "Sure, I'll list them.", reply)
+
+	task, reply = takeCoderHandoff("<coder_handoff>run the tests</coder_handoff>")
+	assert.Equal(t, "run the tests", task)
+	assert.Equal(t, i18n.T("handoff.only_tag"), reply, "a tag-only reply never stores an empty turn")
+
+	task, reply = takeCoderHandoff("a goroutine is a lightweight thread")
+	assert.Empty(t, task)
+	assert.Equal(t, "a goroutine is a lightweight thread", reply)
 }
 
 func TestClassifyHandoffAnswer(t *testing.T) {
@@ -94,8 +109,68 @@ func TestModeAndLanguagePart_CarriesTheHandoffInstructionOnlyWhenActive(t *testi
 	t.Setenv(coderHandoffEnv, "")
 	cli := &ChatCLI{logger: zap.NewNop()}
 	assert.NotContains(t, cli.modeAndLanguagePart().Text, "<coder_handoff>", "headless: the model is not asked to propose")
+	assert.Contains(t, cli.modeAndLanguagePart().Text, ChatModeSystemHint, "headless: the banner keeps its exact bytes")
 	cli.replActive = true
 	text := cli.modeAndLanguagePart().Text
 	assert.Contains(t, text, "<coder_handoff>")
-	assert.Contains(t, text, ChatModeSystemHint, "the base chat hint stays first")
+	assert.True(t, strings.HasPrefix(text, "[ACTIVE MODE: chat]"), "the mode marker stays first")
+	assert.Equal(t, 0, strings.Index(text, chatModeBanner(true)), "the handoff banner leads the block")
+}
+
+// The redirect rule ("please use /coder") contradicted the handoff
+// instruction and models followed it: "execute ls" got "use /coder ls"
+// instead of a proposal. On an attended REPL turn the rule is replaced.
+func TestChatModeBanner_HandoffReplacesTheRedirectRule(t *testing.T) {
+	assert.Contains(t, ChatModeSystemHint, chatModeRedirectRule,
+		"the banner's rule 3 changed; update chatModeRedirectRule or the handoff banner keeps the contradiction")
+
+	assert.Equal(t, ChatModeSystemHint, chatModeBanner(false), "no handoff: the banner is untouched")
+
+	b := chatModeBanner(true)
+	assert.NotEqual(t, ChatModeSystemHint, b)
+	assert.NotContains(t, b, "please use /coder", "never tell the user to type /coder when a proposal is possible")
+	assert.Contains(t, b, chatModeHandoffRule)
+	assert.Contains(t, b, "[ACTIVE MODE: chat]", "mode detection still sees chat")
+	for _, rule := range []string{"1. You MUST NOT emit execute blocks", "2. Your role is purely conversational", "4. You CAN show code snippets"} {
+		assert.Contains(t, b, rule, "the other rules stay")
+	}
+}
+
+func TestModeAndLanguagePart_HandoffBlockIsConsistent(t *testing.T) {
+	t.Setenv(coderHandoffEnv, "")
+	cli := &ChatCLI{logger: zap.NewNop(), replActive: true}
+	text := cli.modeAndLanguagePart().Text
+	assert.NotContains(t, text, "please use /coder", "no instruction in the block points the user to type /coder")
+	assert.Contains(t, text, "execute ls", "bare commands are named as handoff cases")
+	instr, lang := strings.Index(text, coderHandoffInstruction), strings.Index(text, i18n.T("ai.response_language"))
+	assert.True(t, instr > 0 && instr < lang, "the instruction sits next to the banner, before the language directive")
+	assert.Equal(t, text, cli.modeAndLanguagePart().Text, "byte-stable across turns: the block is cached")
+}
+
+// The MCP catalog said "describe them, not call them" and nothing else, which
+// read as a dead end; on an attended turn it points at the handoff.
+func TestMCPCatalogFooter_PointsAtTheHandoff(t *testing.T) {
+	plain := mcpCatalogFooter(false)
+	assert.Contains(t, plain, "in chat you can describe them, not call them")
+	assert.NotContains(t, plain, "coder_handoff", "headless surfaces keep the previous note")
+
+	withHandoff := mcpCatalogFooter(true)
+	assert.True(t, strings.HasPrefix(withHandoff, plain), "the note is extended, not replaced")
+	assert.Contains(t, withHandoff, "<coder_handoff>")
+}
+
+// /moa strips a proposal from its aggregated answer and offers it through
+// offerCoderHandoff, exactly as a chat turn does.
+func TestOfferCoderHandoff(t *testing.T) {
+	t.Setenv(coderHandoffEnv, "")
+
+	attended := &ChatCLI{logger: zap.NewNop(), replActive: true}
+	attended.offerCoderHandoff("")
+	assert.Empty(t, attended.pendingCoderHandoff, "no task, no proposal")
+	attended.offerCoderHandoff("run the parser tests")
+	assert.Equal(t, "run the parser tests", attended.pendingCoderHandoff)
+
+	headless := &ChatCLI{logger: zap.NewNop()}
+	headless.offerCoderHandoff("run the parser tests")
+	assert.Empty(t, headless.pendingCoderHandoff, "nothing to confirm with outside the attended REPL")
 }

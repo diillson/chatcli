@@ -39,10 +39,34 @@ const coderHandoffTag = "coder_handoff"
 // coderHandoffMaxTask bounds the task the proposal carries.
 const coderHandoffMaxTask = 600
 
-// coderHandoffInstruction is appended to the chat system prompt on attended
-// REPL turns. English on purpose: models follow it more reliably.
+// coderHandoffInstruction follows the chat mode banner on attended REPL
+// turns. English on purpose: models follow it more reliably. It names the
+// shapes a request takes when it needs the workspace — a bare command, a
+// question whose answer needs a run — because a short imperative such as
+// "execute ls" is exactly where models fell back to "use /coder".
 const coderHandoffInstruction = `
-**CODER HANDOFF:** you cannot read or modify files, run commands or tests here. When the user's request needs that (changing code, running or debugging the project, multi-step work in the workspace), do not pretend to do it and do not tell the user to type /coder: answer briefly with your understanding of the task, then end your reply with exactly one line ` + "`<coder_handoff>concise imperative task for the coder</coder_handoff>`" + `. The CLI shows the proposal and the user confirms before coder mode starts. Never emit the tag for questions you can answer directly.`
+**CODER HANDOFF — how you hand work to coder mode:** in chat you cannot read or modify files, run commands or run tests. Whenever a proper answer needs any of that — a request phrased as a command ("execute ls", "run the tests", "rode os testes", "crie o arquivo x.go"), a change to the code, running or debugging the project, or a question whose answer depends on running something or reading the files — never stop at "I can't do that here" and never tell the user to type /coder. Write one or two sentences with your understanding of the task, then end the reply with exactly one line:
+<coder_handoff>concise imperative task for the coder, in the user's language</coder_handoff>
+The CLI shows that line as a proposal and coder mode starts only if the user confirms. Do not emit it for questions you can fully answer from the conversation, for explanations, or for code you only show as an example.`
+
+// chatModeRedirectRule is rule 3 of ChatModeSystemHint: send the user to
+// type /coder. It is right where no confirmation is possible (one-shot,
+// gateway, MCP/ACP), and wrong on an attended REPL turn, where it
+// contradicted the handoff instruction and models followed it instead.
+const chatModeRedirectRule = `3. If the user asks you to run a command, modify a file, or perform any action that requires execution, politely point them to /coder mode (e.g. "To execute that, please use /coder <your request>."). /coder is THE mode to recommend for any task that needs tools or execution — do not suggest /agent unless the user explicitly asks about it.`
+
+// chatModeHandoffRule replaces chatModeRedirectRule on attended REPL turns.
+const chatModeHandoffRule = `3. If the user asks you to run a command (even a single one such as ls or go test), read, create or modify files, run or debug the project, or do any other work in the workspace, do NOT refuse and do NOT tell the user to type /coder: propose the switch with the CODER HANDOFF line described below, and the CLI asks the user to confirm before coder mode starts. That line is not command-execution syntax; it is the proposal. Do not suggest /agent unless the user explicitly asks about it.`
+
+// chatModeBanner is the chat mode banner for this turn: ChatModeSystemHint
+// as is, or, when the user can confirm a handoff, with its redirect rule
+// replaced by the handoff rule so the two never disagree.
+func chatModeBanner(handoff bool) string {
+	if !handoff {
+		return ChatModeSystemHint
+	}
+	return strings.Replace(ChatModeSystemHint, chatModeRedirectRule, chatModeHandoffRule, 1)
+}
 
 var coderHandoffRe = regexp.MustCompile(`(?is)<\s*` + coderHandoffTag + `\s*>(.*?)<\s*/\s*` + coderHandoffTag + `\s*>`)
 
@@ -83,6 +107,18 @@ func extractCoderHandoff(text string) (task, cleaned string) {
 	return task, cleaned
 }
 
+// takeCoderHandoff strips a handoff proposal from a reply that is about to
+// be rendered and stored. A reply that was only the tag becomes a short
+// note, so the transcript never holds an empty assistant turn. Shared by
+// the chat turn and /moa, whose panel gets the same chat briefing.
+func takeCoderHandoff(reply string) (task, cleaned string) {
+	task, cleaned = extractCoderHandoff(reply)
+	if task != "" && cleaned == "" {
+		cleaned = i18n.T("handoff.only_tag")
+	}
+	return task, cleaned
+}
+
 // handoffAnswer classifies the user's next input while a proposal waits.
 type handoffAnswer int
 
@@ -103,6 +139,14 @@ func classifyHandoffAnswer(in string) handoffAnswer {
 		return handoffDecline
 	}
 	return handoffOther
+}
+
+// offerCoderHandoff shows a proposal taken from a reply, when there is one
+// and this turn can be confirmed.
+func (cli *ChatCLI) offerCoderHandoff(task string) {
+	if task != "" && cli.coderHandoffActive() {
+		cli.noteCoderHandoff(task)
+	}
 }
 
 // noteCoderHandoff records the proposal and shows it under the reply.
