@@ -87,7 +87,7 @@ func TestCoderTest_OrdinaryCommandsStillRun(t *testing.T) {
 	if _, err := os.Stat(marker); err != nil {
 		t.Fatalf("the command did not run: %v", err)
 	}
-	if !strings.Contains(out.String(), "Rodando testes") {
+	if !strings.Contains(out.String(), "Running tests") {
 		t.Errorf("output lost its heading: %q", out.String())
 	}
 }

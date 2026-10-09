@@ -32,27 +32,27 @@ func (e *Engine) handleRead(args []string) error {
 
 	for _, f := range files {
 		if err := e.validatePath(f); err != nil {
-			e.printf("❌ BLOQUEADO %s: %v\n", f, err)
+			e.printf("❌ BLOCKED %s: %v\n", f, err)
 			continue
 		}
 		content, truncated, err := readFileWithLimit(f, *maxBytes)
 		if err != nil {
-			e.printf("❌ ERRO AO LER '%s': %v\n", f, err)
+			e.printf("❌ ERROR READING '%s': %v\n", f, err)
 			continue
 		}
 
 		if strings.EqualFold(*encoding, "base64") {
 			encoded := base64.StdEncoding.EncodeToString([]byte(content))
-			e.printf("<<< INÍCIO DO ARQUIVO (base64): %s >>>\n", f)
+			e.printf("<<< BEGIN FILE (base64): %s >>>\n", f)
 			e.println(encoded)
-			e.printf("<<< FIM DO ARQUIVO: %s >>>\n\n", f)
+			e.printf("<<< END FILE: %s >>>\n\n", f)
 			continue
 		}
 
 		lines := strings.Split(content, "\n")
 		startIdx, endIdx := computeLineRange(len(lines), *start, *end, *head, *tail)
 		if startIdx < 0 || endIdx < 0 {
-			e.printf("❌ Range inválido para '%s'\n", f)
+			e.printf("❌ Invalid range for '%s'\n", f)
 			continue
 		}
 		// No range asked: a whole-file read is capped at DefaultMaxLines
@@ -64,17 +64,17 @@ func (e *Engine) handleRead(args []string) error {
 			lineCapped = true
 		}
 
-		e.printf("<<< INÍCIO DO ARQUIVO: %s >>>\n", f)
+		e.printf("<<< BEGIN FILE: %s >>>\n", f)
 		for i := startIdx; i < endIdx; i++ {
 			e.printf("%4d | %s\n", i+1, lines[i])
 		}
 		if lineCapped {
-			e.printf("... [%d de %d linhas; continue com --start %d] ...\n", DefaultMaxLines, len(lines), endIdx+1)
+			e.printf("... [%d of %d lines; continue with --start %d] ...\n", DefaultMaxLines, len(lines), endIdx+1)
 		}
 		if truncated {
-			e.printf("... [TRUNCADO EM %d BYTES] ...\n", *maxBytes)
+			e.printf("... [TRUNCATED AT %d BYTES] ...\n", *maxBytes)
 		}
-		e.printf("<<< FIM DO ARQUIVO: %s >>>\n\n", f)
+		e.printf("<<< END FILE: %s >>>\n\n", f)
 	}
 	return nil
 }
@@ -126,7 +126,7 @@ func (e *Engine) handleWrite(args []string) error {
 		}
 	}
 
-	e.printf("✅ Arquivo '%s' escrito (%d bytes).\n", *file, len(data))
+	e.printf("✅ File '%s' written (%d bytes).\n", *file, len(data))
 	return nil
 }
 
@@ -184,7 +184,7 @@ func (e *Engine) handlePatch(args []string) error {
 	if err := os.WriteFile(*file, []byte(newContent), 0600); err != nil { //#nosec G703 -- path validated by engine.validatePath / SensitiveReadPaths.IsReadAllowed
 		return fmt.Errorf("erro escrita: %w", err)
 	}
-	e.printf("✅ Patch aplicado em '%s'.\n", *file)
+	e.printf("✅ Patch applied to '%s'.\n", *file)
 	return nil
 }
 
@@ -207,7 +207,7 @@ func (e *Engine) handleRollback(args []string) error {
 	if err := os.WriteFile(*file, c, 0600); err != nil { //#nosec G703 -- path validated by engine.validatePath / SensitiveReadPaths.IsReadAllowed
 		return fmt.Errorf("erro ao restaurar arquivo: %w", err)
 	}
-	e.println("✅ Rollback ok.")
+	e.println("✅ Rollback done.")
 	return nil
 }
 
@@ -236,22 +236,22 @@ func (e *Engine) handleClean(args []string) error {
 	})
 
 	if len(matches) == 0 {
-		e.println("Nenhum arquivo para limpar.")
+		e.println("No files to clean.")
 		return nil
 	}
 
 	if !*force {
-		e.println("🧹 Dry-run: arquivos que seriam removidos:")
+		e.println("🧹 Dry-run: files that would be removed:")
 		for _, m := range matches {
 			e.println(m)
 		}
-		e.println("Use --force para remover.")
+		e.println("Use --force to remove them.")
 		return nil
 	}
 
 	for _, m := range matches {
 		_ = os.Remove(m)
 	}
-	e.printf("✅ Removidos %d arquivos.\n", len(matches))
+	e.printf("✅ Removed %d files.\n", len(matches))
 	return nil
 }

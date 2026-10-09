@@ -124,7 +124,7 @@ func TestBuildTurnSpinnerFrame(t *testing.T) {
 	if had {
 		t.Fatal("quiet frame must not report a preview")
 	}
-	if !strings.Contains(frame, "claude-sonnet-5") || !strings.Contains(frame, "Processando") {
+	if !strings.Contains(frame, "claude-sonnet-5") || !strings.Contains(frame, "Processing...") {
 		t.Errorf("frame must carry model and status: %q", frame)
 	}
 	if strings.Contains(frame, "❯") {

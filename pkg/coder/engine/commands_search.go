@@ -65,11 +65,11 @@ func (e *Engine) handleTree(args []string) error {
 		return nil
 	})
 	if err != nil && !strings.Contains(err.Error(), "limit reached") {
-		e.printf("Erro ao gerar árvore: %v\n", err)
+		e.printf("Error building tree: %v\n", err)
 	}
 
 	if count >= *maxEntries {
-		e.printf("... [LIMITADO EM %d ENTRADAS] ...\n", *maxEntries)
+		e.printf("... [LIMITED TO %d ENTRIES] ...\n", *maxEntries)
 	}
 	return nil
 }

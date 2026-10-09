@@ -17,11 +17,11 @@ import (
 
 func readResult(path string, first, last int) string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "<<< INÍCIO DO ARQUIVO: %s >>>\n", path)
+	fmt.Fprintf(&b, "<<< BEGIN FILE: %s >>>\n", path)
 	for i := first; i <= last; i++ {
 		fmt.Fprintf(&b, "%4d | line %d of %s\n", i, i, path)
 	}
-	fmt.Fprintf(&b, "<<< FIM DO ARQUIVO: %s >>>\n\n", path)
+	fmt.Fprintf(&b, "<<< END FILE: %s >>>\n\n", path)
 	return b.String()
 }
 
@@ -32,12 +32,26 @@ func TestParseReadBlocks(t *testing.T) {
 		blocks[1].Path != "b.go" || blocks[1].FirstLine != 10 || blocks[1].LastLine != 20 {
 		t.Fatalf("blocks = %+v", blocks)
 	}
-	b64 := "<<< INÍCIO DO ARQUIVO (base64): x.bin >>>\nAAAA\n<<< FIM DO ARQUIVO: x.bin >>>\n"
+	b64 := "<<< BEGIN FILE (base64): x.bin >>>\nAAAA\n<<< END FILE: x.bin >>>\n"
 	if blocks := parseReadBlocks(b64); len(blocks) != 1 || !blocks[0].Whole {
 		t.Fatalf("base64 block = %+v", blocks)
 	}
 	if parseReadBlocks("plain exec output") != nil {
 		t.Fatal("non-read content must not parse")
+	}
+}
+
+// TestParseReadBlocks_LegacyMarkers keeps sessions recorded before the
+// engine switched to English markers deduplicating after a resume.
+func TestParseReadBlocks_LegacyMarkers(t *testing.T) {
+	legacy := "<<< INÍCIO DO ARQUIVO: old.go >>>\n   1 | package old\n   2 | \n<<< FIM DO ARQUIVO: old.go >>>\n"
+	blocks := parseReadBlocks(legacy)
+	if len(blocks) != 1 || blocks[0].Path != "old.go" || blocks[0].FirstLine != 1 || blocks[0].LastLine != 2 {
+		t.Fatalf("legacy blocks = %+v", blocks)
+	}
+	b64 := "<<< INÍCIO DO ARQUIVO (base64): x.bin >>>\nAAAA\n<<< FIM DO ARQUIVO: x.bin >>>\n"
+	if blocks := parseReadBlocks(b64); len(blocks) != 1 || !blocks[0].Whole {
+		t.Fatalf("legacy base64 block = %+v", blocks)
 	}
 }
 

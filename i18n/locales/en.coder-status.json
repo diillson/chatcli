@@ -1,0 +1,13 @@
+{
+  "agent.turn.processing": "Processing...",
+  "agent.turn.ai_response_failed": "failed to get the AI response",
+  "agent.turn.ai_response_failed_turn": "failed to get the AI response on turn %d",
+  "context.scan.processing_path": "Processing %s",
+  "agent.plan.card_title": "ACTION PLAN",
+  "agent.card.response": "RESPONSE",
+  "agent.card.explanation": "EXPLANATION",
+  "agent.card.plan_generated": "PLAN GENERATED",
+  "agent.card.plan_generated_body": "The AI produced an action plan with runnable commands. Use the menu below to run them.",
+  "agent.card.batch": "BATCH",
+  "agent.card.batch_actions": "%d actions"
+}

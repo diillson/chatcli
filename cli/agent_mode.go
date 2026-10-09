@@ -1950,7 +1950,7 @@ func (a *AgentMode) RunOnce(ctx context.Context, query string, autoExecute bool)
 	}
 	a.cli.animation.StopThinkingAnimation()
 	if err != nil {
-		return fmt.Errorf("erro ao obter resposta da IA: %w", err)
+		return fmt.Errorf("%s: %w", i18n.T("agent.turn.ai_response_failed"), err)
 	}
 
 	// Track cost for agent mode initial call
@@ -2844,7 +2844,7 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 				}
 			}
 
-			return fmt.Errorf("erro ao obter resposta da IA no turno %d: %w", turn+1, err)
+			return fmt.Errorf("%s: %w", i18n.T("agent.turn.ai_response_failed_turn", turn+1), err)
 		}
 
 		// Max-output-tokens recovery: detect truncation and escalate
@@ -3056,7 +3056,7 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 			case isMinimal:
 				renderer.RenderTimelineEvent("📝", "NOTA", compactText(explanation, 2, 220), agent.ColorLime)
 			default:
-				renderMDCard("📌", "EXPLICAÇÃO", explanation, agent.ColorLime)
+				renderMDCard("📌", i18n.T("agent.card.explanation"), explanation, agent.ColorLime)
 			}
 		}
 		// Helper para renderizar progresso atualizado do plano
@@ -3075,7 +3075,7 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 			case isMinimal:
 				renderer.RenderTimelineEvent("🧩", "STATUS", compactText(progress, 2, 220), agent.ColorLime)
 			default:
-				renderMDCard("🧩", "PLANO DE AÇÃO", progress, agent.ColorLime)
+				renderMDCard("🧩", i18n.T("agent.plan.card_title"), progress, agent.ColorLime)
 			}
 		}
 
@@ -3115,7 +3115,7 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 			case isMinimal:
 				renderer.RenderTimelineEvent("💬", "RESUMO", compactText(remaining, 2, 220), agent.ColorGray)
 			default:
-				renderAssistantMDCard("💬", "RESPOSTA", remaining, agent.ColorGray)
+				renderAssistantMDCard("💬", i18n.T("agent.card.response"), remaining, agent.ColorGray)
 			}
 		}
 
@@ -3439,7 +3439,7 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 				case isCompact:
 					// Compact mode: no batch header, just tool lines.
 				case isMinimal:
-					renderer.RenderTimelineEvent("📦", "LOTE", fmt.Sprintf("%d ações", totalActions), agent.ColorPurple)
+					renderer.RenderTimelineEvent("📦", i18n.T("agent.card.batch"), i18n.T("agent.card.batch_actions", totalActions), agent.ColorPurple)
 				default:
 					renderer.RenderBatchHeader(totalActions)
 				}
@@ -4220,7 +4220,7 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 				if a.taskTracker != nil && a.taskTracker.NeedsReplanning() {
 					a.cli.history = append(a.cli.history, models.Message{
 						Role:    "user",
-						Content: "ATENÇÃO: Múltiplas falhas detectadas. Crie um NOVO <plan> com uma lista replanejada de tarefas, considerando os erros anteriores.",
+						Content: "WARNING: multiple failures detected. Write a NEW <plan> with a replanned task list that accounts for the previous errors.",
 					})
 				}
 			} else if batchHasError && !strings.Contains(batchOutputBuilder.String(), "Resultado da Ação") {
@@ -4238,7 +4238,7 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 				// back to the user.
 				feedbackForAI := i18n.T("agent.feedback.tool_output", toolCallNamesLabel(toolCalls), batchOutputBuilder.String())
 				if a.taskTracker != nil && a.taskTracker.NeedsReplanning() {
-					feedbackForAI += "\n\nATENÇÃO: Múltiplas falhas detectadas. Crie um NOVO <plan> com uma lista replanejada de tarefas, considerando os erros anteriores."
+					feedbackForAI += "\n\nWARNING: multiple failures detected. Write a NEW <plan> with a replanned task list that accounts for the previous errors."
 				}
 				a.cli.history = append(a.cli.history, buildBatchFeedbackMessage(feedbackForAI, toolCalls))
 			}
@@ -4296,7 +4296,7 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 				continue
 			}
 
-			renderMDCard("🧩", "PLANO GERADO", "A IA gerou um plano de ação com comandos executáveis. Use o menu abaixo para executar.", agent.ColorLime)
+			renderMDCard("🧩", i18n.T("agent.card.plan_generated"), i18n.T("agent.card.plan_generated_body"), agent.ColorLime)
 			a.handleCommandBlocks(ctx, commandBlocks)
 			return nil
 		}
