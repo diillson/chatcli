@@ -23,10 +23,18 @@ import (
 // launched: a test binary has no watcher, so without this every run of the
 // suite left a headless Chrome behind.
 func TestMain(m *testing.M) {
+	// The integration test runs this test binary as the watcher, the way
+	// main routes the hidden subcommand.
+	if len(os.Args) > 1 && os.Args[1] == testReaperSubcommand {
+		os.Exit(RunBrowserReaper(os.Args[2:]))
+	}
 	code := m.Run()
 	ShutdownRenderBrowser()
 	os.Exit(code)
 }
+
+// testReaperSubcommand routes this test binary to the watcher.
+const testReaperSubcommand = "__test-browser-reaper"
 
 // fakeProcs records what the watcher killed and decides who is alive.
 type fakeProcs struct {

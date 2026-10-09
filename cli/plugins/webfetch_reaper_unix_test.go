@@ -88,3 +88,55 @@ func TestProcessAlive(t *testing.T) {
 	require.NoError(t, short.Run())
 	assert.False(t, processAlive(short.Process.Pid), "a finished, reaped process is not alive")
 }
+
+// End to end through the real watcher process: this test binary is run as
+// the watcher, learns the browser pid over the pipe, and reaps the browser
+// group and its profile as soon as the pipe closes, which is what the
+// owner's death looks like to it.
+func TestBrowserWatch_RealWatcherReapsOnPipeEOF(t *testing.T) {
+	browserReaper.mu.Lock()
+	savedExe, savedSub := browserReaper.exe, browserReaper.subcommand
+	browserReaper.mu.Unlock()
+	t.Cleanup(func() {
+		browserReaper.mu.Lock()
+		browserReaper.exe, browserReaper.subcommand = savedExe, savedSub
+		browserReaper.mu.Unlock()
+	})
+	EnableBrowserReaper(testReaperSubcommand)
+
+	dir := newRenderProfileDir()
+	require.NoError(t, os.MkdirAll(dir, 0o750))
+	t.Cleanup(func() { _ = os.RemoveAll(dir) })
+
+	watch := spawnBrowserReaper(dir)
+	require.NotNil(t, watch, "the watcher starts once enabled")
+	browser := startFakeBrowser(t, dir)
+	watch.announce(browser.Process.Pid)
+
+	_ = watch.pipe.Close() // the owner is gone
+
+	assert.Eventually(t, func() bool { return groupGone(browser.Process.Pid) }, 10*time.Second, 50*time.Millisecond,
+		"the watcher kills the browser group once its owner is gone")
+	assert.Eventually(t, func() bool { _, err := os.Stat(dir); return os.IsNotExist(err) }, 5*time.Second, 50*time.Millisecond,
+		"and removes the profile")
+	assert.Eventually(t, func() bool { return !processAlive(watch.cmd.Process.Pid) }, 5*time.Second, 50*time.Millisecond,
+		"and exits")
+}
+
+// A watcher whose browser never started is stopped by its owner.
+func TestBrowserWatch_StopEndsTheWatcher(t *testing.T) {
+	browserReaper.mu.Lock()
+	savedExe, savedSub := browserReaper.exe, browserReaper.subcommand
+	browserReaper.mu.Unlock()
+	t.Cleanup(func() {
+		browserReaper.mu.Lock()
+		browserReaper.exe, browserReaper.subcommand = savedExe, savedSub
+		browserReaper.mu.Unlock()
+	})
+	EnableBrowserReaper(testReaperSubcommand)
+
+	watch := spawnBrowserReaper(newRenderProfileDir())
+	require.NotNil(t, watch)
+	watch.stop()
+	assert.Eventually(t, func() bool { return !processAlive(watch.cmd.Process.Pid) }, 5*time.Second, 50*time.Millisecond)
+}
