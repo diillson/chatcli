@@ -139,6 +139,10 @@ func newRPCBackend(kind string, mgr manager.LLMManager, logger *zap.Logger) (*rp
 		chatCLI.OnManagerRebuild(backend.setManager)
 		go chatCLI.CleanExpiredMachineSessionsRPC()
 		cleanups = append(cleanups, func() { chatCLI.FinalizeSpend(context.Background()) })
+		// Runs before FinalizeSpend (cleanups unwind in reverse): the
+		// memory pass started by the last turn finishes its queue write
+		// and books its usage before spend is settled.
+		cleanups = append(cleanups, chatCLI.StopMemoryWorker)
 	}
 	return backend, func() {
 		for i := len(cleanups) - 1; i >= 0; i-- {

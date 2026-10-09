@@ -34,6 +34,11 @@ type memoryWorker struct {
 	lastProcessedIdx int // index of last message processed for memory (guarded by mu)
 	mu               sync.Mutex
 	stopCh           chan struct{}
+	// lifeMu orders spawn against stop: once stopped is set no goroutine
+	// is added to wg, so stopAndWait's Wait can never miss a late pass
+	// (a turn finishing while the surface shuts down).
+	lifeMu  sync.Mutex
+	stopped bool
 	// wg tracks the loop and every extraction goroutine so shutdown can
 	// wait (bounded) for an in-flight pass instead of killing it mid-write.
 	wg sync.WaitGroup
@@ -130,9 +135,17 @@ func (mw *memoryWorker) start(ctx context.Context) {
 	mw.spawn(func() { mw.loop(context.WithoutCancel(ctx)) })
 }
 
-// spawn runs fn on a tracked goroutine.
+// spawn runs fn on a tracked goroutine. After stop it is a no-op: the
+// work stays in the on-disk queue for the next session instead of racing
+// the shutdown that is already waiting on wg.
 func (mw *memoryWorker) spawn(fn func()) {
+	mw.lifeMu.Lock()
+	if mw.stopped {
+		mw.lifeMu.Unlock()
+		return
+	}
 	mw.wg.Add(1)
+	mw.lifeMu.Unlock()
 	go func() {
 		defer mw.wg.Done()
 		fn()
@@ -178,10 +191,10 @@ func (mw *memoryWorker) stopAndWait(timeout time.Duration) bool {
 
 // stop signals the worker to stop.
 func (mw *memoryWorker) stop() {
-	select {
-	case <-mw.stopCh:
-		// already closed
-	default:
+	mw.lifeMu.Lock()
+	defer mw.lifeMu.Unlock()
+	if !mw.stopped {
+		mw.stopped = true
 		close(mw.stopCh)
 	}
 }

@@ -38,3 +38,16 @@ func (cli *ChatCLI) settleSpendOnExit(ctx context.Context) {
 	// tail of its recording, the switch it had just made included.
 	cli.shutdownPulse()
 }
+
+// StopMemoryWorker stops the background memory worker and waits, bounded
+// by memoryStopWait, for an in-flight extraction pass. The REPL does this
+// in cleanup; the headless surfaces (web, MCP/ACP, the server pipeline)
+// call it on exit, so a pass started by their last turn finishes its
+// write to the memory queue instead of being cut off mid-write. Safe to
+// call more than once and with memory disabled.
+func (cli *ChatCLI) StopMemoryWorker() {
+	if cli == nil || cli.memWorker == nil {
+		return
+	}
+	cli.memWorker.stopAndWait(memoryStopWait)
+}
