@@ -437,7 +437,7 @@ const state = {
   mode: 'chat', session: 'web', bound: '', provider: '', model: '', providers: [],
   run: null, streaming: null, images: [], status: {}, tools: [], skills: [], commands: [], resources: [], sessions: [],
   controls: false, pinned: [], manualOnly: [], mcpPending: new Set(),
-  lastAssistant: null, recorder: null,
+  lastAssistant: null, recorder: null, busy: false,
 };
 
 // ---------- toasts ----------
@@ -617,23 +617,33 @@ function setBusy(on) {
   $('#btnSend').style.display = on ? 'none' : ''; $('#btnCancel').style.display = on ? '' : 'none';
   $('#beat').classList.toggle('busy', on);
   $('#composerHint').textContent = on ? t('composer.busy') : '';
-  $('#input').disabled = on;
+  // The composer stays editable during a turn, so the next message can be
+  // typed while this one runs; state.busy is what keeps it from being sent.
+  // Disabling it dropped the focus, and nothing gave it back.
+  state.busy = on;
+  $('#input').setAttribute('aria-busy', on ? 'true' : 'false');
+}
+// Back to the composer after a send or a finished turn, unless the reader
+// has moved on to another field (the panel filter, a selector).
+function refocusComposer() {
+  const a = document.activeElement;
+  if (!a || a === document.body || a === $('#input') || a.closest('#composer')) $('#input').focus();
 }
 async function sendTurn(text) {
-  if (state.run) { toast(t('busy'), 'warn'); return; }
+  if (state.run || state.busy) { toast(t('busy'), 'warn'); return; }
   text = (text || $('#input').value).trim();
   if (!text && !state.images.length) return;
   const images = state.images.slice();
   const previews = images.map(i => 'data:' + i.media_type + ';base64,' + i.data);
   addMessage('user', text, previews);
   $('#input').value = ''; autosize(); state.images = []; renderAtts();
-  setBusy(true); setPlan(null); beginAssistant();
+  setBusy(true); setPlan(null); beginAssistant(); refocusComposer();
   let resp;
   try {
     resp = await fetch('/api/turn', { method: 'POST', headers: { 'X-Web-Token': TOKEN, 'Content-Type': 'application/json' },
       body: JSON.stringify({ session: state.session, mode: state.mode, text, provider: state.provider, model: state.model, images }) });
-  } catch (e) { endAssistant(''); setBusy(false); toast(t('offline'), 'err'); return; }
-  if (!resp.ok) { endAssistant(''); setBusy(false); let msg = resp.statusText; try { msg = (await resp.json()).error || msg; } catch {} toast(msg, 'err'); return; }
+  } catch (e) { endAssistant(''); setBusy(false); refocusComposer(); toast(t('offline'), 'err'); return; }
+  if (!resp.ok) { endAssistant(''); setBusy(false); refocusComposer(); let msg = resp.statusText; try { msg = (await resp.json()).error || msg; } catch {} toast(msg, 'err'); return; }
   const reader = resp.body.getReader(); const dec = new TextDecoder(); let buf = '';
   try {
     for (;;) {
@@ -669,7 +679,7 @@ function handleEvent(ev) {
 function finishTurn() {
   if (state.streaming) endAssistant('');
   state.run = null; setBusy(false); $('#modal').classList.remove('on');
-  refreshStatus(); refreshSessions();
+  refreshStatus(); refreshSessions(); refocusComposer();
 }
 $('#btnSend').addEventListener('click', () => sendTurn());
 $('#btnCancel').addEventListener('click', async () => { if (state.run) { try { await api('runs/' + state.run + '/cancel', { method: 'POST' }); } catch {} } });
