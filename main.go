@@ -7,6 +7,8 @@ package main
 
 import (
 	"context"
+	"errors"
+	"flag"
 	"fmt"
 	"io"
 	"log"
@@ -35,6 +37,14 @@ func dispatchSubcommand() bool {
 		return false
 	}
 	subcmd := os.Args[1]
+	// Subcommands with no usage text of their own (mcp-server, acp, gateway,
+	// dash, tool) used to start their server, or misread "--help" as a tool
+	// name, when asked for help; they answer from the subcommand registry.
+	if sc, ok := cli.LookupSubcommand(subcmd); ok && !sc.OwnHelp && cli.IsHelpArg(os.Args[2:]) {
+		_ = loadDotenvThenI18n()
+		cli.PrintSubcommandUsage(os.Stdout, sc)
+		return true
+	}
 	switch subcmd {
 	case "server", "serve", "connect", "watch", "mcp-server", "mcp-serve", "acp", "gateway", "tool", "web":
 		runSubcommand(subcmd, os.Args[2:])
@@ -226,7 +236,9 @@ func main() {
 	args := cli.PreprocessArgs(os.Args[1:])
 	opts, err := cli.Parse(args)
 	if err != nil {
-		fmt.Println(err)
+		_ = loadDotenvThenI18n()
+		fmt.Fprintln(os.Stderr, err)
+		fmt.Fprintln(os.Stderr, i18n.T("help.usage.parse_error_hint"))
 		os.Exit(2)
 	}
 
@@ -234,6 +246,10 @@ func main() {
 
 	if opts.Version {
 		printVersionInfo()
+		return
+	}
+	if opts.Help {
+		cli.PrintUsage(os.Stdout)
 		return
 	}
 
@@ -366,16 +382,16 @@ func runSubcommand(subcmd string, args []string) {
 
 	switch subcmd {
 	case "server", "serve":
-		if err := cmd.RunServer(args, llmMgr, logger); err != nil {
+		if err := cmd.RunServer(args, llmMgr, logger); err != nil && !helpRequested(err) {
 			logger.Fatal("Server failed", zap.Error(err))
 		}
 	case "connect":
-		if err := cmd.RunConnect(ctx, args, llmMgr, logger); err != nil {
+		if err := cmd.RunConnect(ctx, args, llmMgr, logger); err != nil && !helpRequested(err) {
 			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 			os.Exit(1)
 		}
 	case "watch":
-		if err := cmd.RunWatch(ctx, args, llmMgr, logger); err != nil {
+		if err := cmd.RunWatch(ctx, args, llmMgr, logger); err != nil && !helpRequested(err) {
 			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 			os.Exit(1)
 		}
@@ -397,12 +413,16 @@ func runSubcommand(subcmd string, args []string) {
 			os.Exit(1)
 		}
 	case "web":
-		if err := cmd.RunWeb(args, llmMgr, logger); err != nil {
+		if err := cmd.RunWeb(args, llmMgr, logger); err != nil && !helpRequested(err) {
 			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 			os.Exit(1)
 		}
 	}
 }
+
+// helpRequested reports a flag set's answer to -h/--help: its usage is
+// already printed, so the subcommand exits successfully instead of failing.
+func helpRequested(err error) bool { return errors.Is(err, flag.ErrHelp) }
 
 // runUpdateSubcommand handles `chatcli update [check]` — a superfície
 // one-shot do /update para scripts e automação. Boot e contrato de exit code

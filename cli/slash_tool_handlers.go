@@ -16,50 +16,13 @@ import (
 	"github.com/diillson/chatcli/version"
 )
 
-// helpText produces a compact, LLM-friendly summary of the available
-// slash commands and context modifiers. We deliberately do not return
-// the full colored / boxed help that /help prints to the user — the
-// model gets a plain-text catalog it can paraphrase or reference.
-//
-// Keeping this distinct from showHelp() lets the human-facing UX evolve
-// (colors, sectioning, ASCII art) without polluting the model's prompt
-// surface with terminal escape codes.
+// helpText is the /help catalog for the model: the same generated listing
+// the user sees (every registered command, alias, context modifier, flag and
+// subcommand), rendered without terminal colors so it can be paraphrased or
+// referenced. One renderer, so the model's catalog is never out of date.
 func (cli *ChatCLI) helpText() string {
 	var b strings.Builder
-	fmt.Fprintln(&b, i18n.T("help.header.title"))
-	fmt.Fprintln(&b, i18n.T("help.header.subtitle1"))
-	fmt.Fprintln(&b)
-
-	emit := func(section string, entries [][2]string) {
-		fmt.Fprintf(&b, "## %s\n", section)
-		for _, e := range entries {
-			fmt.Fprintf(&b, "  %-32s  %s\n", e[0], e[1])
-		}
-		fmt.Fprintln(&b)
-	}
-
-	emit(i18n.T("help.section.general"), [][2]string{
-		{"/help", i18n.T("help.command.help")},
-		{"/exit | /quit", i18n.T("help.command.exit")},
-		{"/newsession", i18n.T("help.command.newsession")},
-		{"/version | /v", i18n.T("help.command.version")},
-		{"/update [check]", i18n.T("help.command.update")},
-		{"/compact [instruction]", i18n.T("help.command.compact")},
-		{"/memory [subcommand]", i18n.T("help.command.memory")},
-	})
-	emit(i18n.T("help.section.config"), [][2]string{
-		{"/switch", i18n.T("help.command.switch")},
-		{"/model <name>", i18n.T("help.command.model")},
-		{"/max-tokens <num>", i18n.T("help.command.maxtokens")},
-		{"/config | /status", i18n.T("help.command.config")},
-		{"/reload", i18n.T("help.command.reload")},
-	})
-	emit(i18n.T("help.section.context"), [][2]string{
-		{"@file <path>", i18n.T("help.command.file")},
-		{"@git", i18n.T("help.command.git")},
-		{"@history", i18n.T("help.command.history")},
-		{"@env", i18n.T("help.command.env")},
-	})
+	cli.renderHelp(&b, helpStyle{})
 	return b.String()
 }
 
