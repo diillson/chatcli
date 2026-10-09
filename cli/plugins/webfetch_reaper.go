@@ -109,7 +109,7 @@ func spawnBrowserReaper(dataDir string) *browserWatch {
 	if exe == "" || dataDir == "" {
 		return nil
 	}
-	cmd := exec.Command(exe, sub, "--owner", strconv.Itoa(os.Getpid()), "--data-dir", dataDir)
+	cmd := exec.Command(exe, sub, "--owner", strconv.Itoa(os.Getpid()), "--data-dir", dataDir) // #nosec G204 -- runs this very executable (os.Executable) with arguments built here: a pid and a generated profile path
 	cmd.Stdout, cmd.Stderr = nil, nil
 	pipe, err := cmd.StdinPipe()
 	if err != nil {

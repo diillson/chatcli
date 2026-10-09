@@ -74,7 +74,7 @@ func killBrowsersUsingDir(dir string) {
 	script := fmt.Sprintf(
 		"Get-CimInstance Win32_Process | Where-Object { $_.ProcessId -ne %d -and $_.CommandLine -and $_.CommandLine.Contains('%s') } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }",
 		os.Getpid(), needle)
-	cmd := exec.Command("powershell", "-NoProfile", "-NonInteractive", "-Command", script)
+	cmd := exec.Command("powershell", "-NoProfile", "-NonInteractive", "-Command", script) // #nosec G204 -- fixed script; the only input is a validated rod profile path with quotes escaped
 	cmd.SysProcAttr = &syscall.SysProcAttr{CreationFlags: windows.CREATE_NO_WINDOW}
 	_ = cmd.Run()
 }
