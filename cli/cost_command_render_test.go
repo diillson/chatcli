@@ -123,7 +123,7 @@ func TestHandleCostCommandWithoutTracker(t *testing.T) {
 func TestShowHelpRendersCommandColumns(t *testing.T) {
 	pinPlainProfile(t)
 	c := &ChatCLI{}
-	out := captureCommandStdout(t, func() { c.showHelp() })
+	out := captureCommandStdout(t, func() { c.handleHelpCommand("/help") })
 	for _, want := range []string{"/help", "/exit", "/switch"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("/help output missing %q", want)

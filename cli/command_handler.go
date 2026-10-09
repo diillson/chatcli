@@ -202,7 +202,6 @@ func (ch *CommandHandler) buildRoutes() {
 	ch.routes = &commandRoutes{}
 	ch.routes.exact = map[string]cmdFunc{
 		"/exit": exit, "exit": exit, "/quit": exit, "quit": exit,
-		"/help":       func(_ context.Context, _ string) bool { c.showHelp(); return false },
 		"/nextchunk":  func(ctx context.Context, _ string) bool { return c.handleNextChunk(ctx) },
 		"/retry":      func(ctx context.Context, _ string) bool { return c.handleRetryLastChunk(ctx) },
 		"/retryall":   func(_ context.Context, _ string) bool { return c.handleRetryAllChunks() },
@@ -231,6 +230,7 @@ func (ch *CommandHandler) buildRoutes() {
 	// Order preserved from the historical switch. word=true entries match
 	// "exact or +space"; word=false entries are raw-prefix sub-command groups.
 	ch.routes.prefixes = []prefixRoute{
+		{"/help", true, func(_ context.Context, in string) bool { c.handleHelpCommand(in); return false }},
 		{"/cost", true, func(_ context.Context, in string) bool {
 			c.handleCostCommand(strings.TrimSpace(strings.TrimPrefix(in, "/cost")))
 			return false

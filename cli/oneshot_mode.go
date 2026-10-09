@@ -342,28 +342,42 @@ func (cli *ChatCLI) oneShotSystemMessage(ctx context.Context, userInput string) 
 	return sys
 }
 
-// NewFlagSet cria um FlagSet isolado e as Options para parsing
+// oneShotProviders is the --provider value list its help prints. Kept as
+// a literal here: the provider-parity gate checks every provider is listed.
+var oneShotProviders = []string{
+	"OPENAI", "OPENAI_ASSISTANT", "CLAUDEAI", "BEDROCK", "GOOGLEAI", "XAI", "ZAI",
+	"MINIMAX", "MOONSHOT", "STACKSPOT", "OLLAMA", "COPILOT", "OPENROUTER", "DEVIN",
+}
+
+// NewFlagSet builds an isolated flag set and the Options it fills. Usage
+// texts resolve through i18n when the set is built: `chatcli --help` and
+// /help build it after i18n.Init, so they print in the active language;
+// Parse builds it before Init and never prints usage (parse errors are
+// reported by the caller), so the untranslated keys never reach the user.
+// Aliases share one usage key, which is how help folds them onto one line.
 func NewFlagSet() (*flag.FlagSet, *Options) {
 	fs := flag.NewFlagSet("chatcli", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	fs.Usage = func() {}
 	opts := &Options{}
 
-	fs.BoolVar(&opts.Version, "version", false, "Mostra versão e sai")
-	fs.BoolVar(&opts.Version, "v", false, "Mostra versão e sai (alias)")
-	fs.BoolVar(&opts.Help, "help", false, "Mostra ajuda e sai")
-	fs.BoolVar(&opts.Help, "h", false, "Mostra ajuda e sai (alias)")
+	fs.BoolVar(&opts.Version, "version", false, i18n.T("oneshot.flag.version"))
+	fs.BoolVar(&opts.Version, "v", false, i18n.T("oneshot.flag.version"))
+	fs.BoolVar(&opts.Help, "help", false, i18n.T("oneshot.flag.help"))
+	fs.BoolVar(&opts.Help, "h", false, i18n.T("oneshot.flag.help"))
 
-	fs.StringVar(&opts.Prompt, "p", "", "Prompt a executar uma única vez (modo não interativo) - (alias)")
-	fs.StringVar(&opts.Prompt, "prompt", "", "Prompt a executar uma única vez (modo não interativo)")
-	fs.StringVar(&opts.Provider, "provider", "", "Override do provider (OPENAI, OPENAI_ASSISTANT, CLAUDEAI, BEDROCK, GOOGLEAI, XAI, ZAI, MINIMAX, MOONSHOT, STACKSPOT, OLLAMA, COPILOT, OPENROUTER, DEVIN)")
-	fs.StringVar(&opts.Model, "model", "", "Override do modelo(LLM)")
-	fs.DurationVar(&opts.Timeout, "timeout", 5*time.Minute, "Timeout da chamada one-shot")
-	fs.IntVar(&opts.MaxTokens, "max-tokens", 0, "Override do máximo de tokens para a resposta")
-	fs.BoolVar(&opts.NoAnim, "no-anim", false, "Desabilita animações no modo one-shot")
-	fs.BoolVar(&opts.Raw, "raw", false, "Desabilita formatação markdown/ANSI no output (útil para CI/CD)")
-	fs.BoolVar(&opts.AgentAutoExec, "agent-auto-exec", false, "No modo agente one-shot, executa o primeiro comando sugerido automaticamente se for seguro.")
+	fs.StringVar(&opts.Prompt, "p", "", i18n.T("oneshot.flag.prompt"))
+	fs.StringVar(&opts.Prompt, "prompt", "", i18n.T("oneshot.flag.prompt"))
+	fs.StringVar(&opts.Provider, "provider", "", i18n.T("oneshot.flag.provider", strings.Join(oneShotProviders, ", ")))
+	fs.StringVar(&opts.Model, "model", "", i18n.T("oneshot.flag.model"))
+	fs.DurationVar(&opts.Timeout, "timeout", 5*time.Minute, i18n.T("oneshot.flag.timeout"))
+	fs.IntVar(&opts.MaxTokens, "max-tokens", 0, i18n.T("oneshot.flag.max_tokens"))
+	fs.BoolVar(&opts.NoAnim, "no-anim", false, i18n.T("oneshot.flag.no_anim"))
+	fs.BoolVar(&opts.Raw, "raw", false, i18n.T("oneshot.flag.raw"))
+	fs.BoolVar(&opts.AgentAutoExec, "agent-auto-exec", false, i18n.T("oneshot.flag.agent_auto_exec"))
 
-	fs.StringVar(&opts.Realm, "realm", "", "Override do realm (apenas para StackSpot)")
-	fs.StringVar(&opts.AgentID, "agent-id", "", "Override do Agent ID (apenas para StackSpot)")
+	fs.StringVar(&opts.Realm, "realm", "", i18n.T("oneshot.flag.realm"))
+	fs.StringVar(&opts.AgentID, "agent-id", "", i18n.T("oneshot.flag.agent_id"))
 
 	return fs, opts
 }

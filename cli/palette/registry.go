@@ -173,6 +173,34 @@ var rootCommands = []RootCommand{
 	{"/auth", CatSystem, "complete.root.auth", ""},
 }
 
+// rootAliases lists the other spellings the router accepts for a command.
+// Kept beside RootCommand rather than inside it so the exported struct stays
+// comparable. Help shows them next to the canonical name; the router↔registry
+// parity test treats them as covered.
+var rootAliases = map[string][]string{
+	"/config":    {"/status", "/settings"},
+	"/version":   {"/v"},
+	"/redraw":    {"/reset"},
+	"/ratelimit": {"/limits"},
+	"/menu":      {"/commands", "/palette"},
+}
+
+// Aliases returns the other spellings of a root command (nil when none).
+func Aliases(name string) []string { return rootAliases[name] }
+
+// Canonical resolves an alias to its root command name; any other name is
+// returned unchanged.
+func Canonical(name string) string {
+	for root, aliases := range rootAliases {
+		for _, a := range aliases {
+			if a == name {
+				return root
+			}
+		}
+	}
+	return name
+}
+
 // Provider contributes dynamic entries to the root listing — slash-command
 // templates and user-invocable skills, whose sets change at runtime (file
 // edits, /reload). Called on every RootCommands read; providers must be
