@@ -49,6 +49,11 @@ jobs:
       - name: Docs version bump self-test
         run: bash scripts/docs/test-bump-version.sh
 
+      # The same release job writes the release-notes pages, the home strip
+      # and the Releases sidebar of the docs site from CHANGELOG.md.
+      - name: Docs release notes self-test
+        run: bash scripts/docs/test-gen-release-notes.sh
+
       - name: Go vet
         run: go vet ./...
 
