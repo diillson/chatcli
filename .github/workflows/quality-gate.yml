@@ -152,14 +152,14 @@ jobs:
         # silently outside PR diffs.
         uses: golangci/golangci-lint-action@v9
         with:
-          version: v2.13.2
+          version: v2.14.0
           install-mode: goinstall
           args: --timeout=8m
 
       - name: golangci-lint (operator, full module)
         uses: golangci/golangci-lint-action@v9
         with:
-          version: v2.13.2
+          version: v2.14.0
           install-mode: goinstall
           working-directory: operator
           args: --timeout=8m
