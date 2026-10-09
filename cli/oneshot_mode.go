@@ -88,7 +88,11 @@ func (cli *ChatCLI) HandleOneShotOrFatal(ctx context.Context, opts *Options) boo
 	// one-shot run: the interactive teardown never runs here, and Fatal
 	// exits without unwinding, so the failure paths tear down explicitly.
 	defer cli.shutdownToolProcesses(ctx)
+	// The eval harness reads this run's report from CHATCLI_EVAL_RECORD;
+	// the failure path writes it too, before Fatal exits without unwinding.
+	evalMode := evalModeChat
 	fatal := func(userMsg, logMsg string, err error) {
+		cli.writeEvalRecord(evalMode, err)
 		fmt.Fprintln(os.Stderr, userMsg+"\n\n"+i18n.T("oneshot.details_label")+":\n```\n"+err.Error()+"\n```")
 		cli.shutdownToolProcesses(ctx)
 		cli.logger.Fatal(logMsg, zap.Error(err))
@@ -100,11 +104,13 @@ func (cli *ChatCLI) HandleOneShotOrFatal(ctx context.Context, opts *Options) boo
 	// terminal — a piped stdin cannot answer a pre-exec approval prompt,
 	// so the gate resolves through policy there (fail-safe deny on ask).
 	input, coderRoute := cli.resolveOneShotCommand(ctxOne, input)
+	evalMode = evalModeFor(input, coderRoute)
 	if coderRoute {
 		// mode:coder command: same engine and error contract as -p "/coder …".
 		if err := cli.runCoderQuery(ctxOne, input, false); err != nil {
 			fatal(i18n.T("oneshot.error.coder_failed"), "Erro no modo coder one-shot", err)
 		}
+		cli.writeEvalRecord(evalMode, nil)
 		cli.queueOneShotMemory()
 		return true
 	}
@@ -124,6 +130,7 @@ func (cli *ChatCLI) HandleOneShotOrFatal(ctx context.Context, opts *Options) boo
 		}
 	}
 
+	cli.writeEvalRecord(evalMode, nil)
 	cli.queueOneShotMemory()
 	return true
 }

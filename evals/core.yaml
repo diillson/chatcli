@@ -1,0 +1,104 @@
+# ChatCLI core eval suite.
+#
+#   chatcli eval run evals/ --judge-provider OPENAI --judge-model <a model other than the candidate>
+#
+# Every case runs the real chatcli binary in a throwaway sandbox, with memory,
+# recall and autosave off (--with-memory turns them on). See evals/README.md.
+name: core
+description: Baseline behavior of chat and coder modes — language, format, arithmetic, bug fixing, file creation and read-only discipline.
+
+defaults:
+  timeout: 4m
+  trials: 1
+  pass_policy: all
+  checks:
+    - name: no AI disclaimer boilerplate
+      not_regex: '(?i)\bas an ai (language )?model\b'
+
+cases:
+  # ---------------------------------------------------------------- chat --
+  - id: chat-ptbr-language
+    description: Answers in Brazilian Portuguese when asked in Portuguese, within the length asked.
+    tags: [chat, i18n]
+    prompt: "Explique em no máximo duas frases o que é um mutex."
+    checks:
+      - regex: '(?i)(thread|goroutine|concorr|exclus|acesso)'
+      - judge:
+          rubric: |
+            The answer is written in Brazilian Portuguese, is technically correct about what a mutex is
+            (mutual exclusion over a shared resource between concurrent threads/goroutines/processes),
+            and uses at most two sentences.
+          threshold: 0.7
+
+  - id: chat-arithmetic-exact
+    description: Gives the exact number when told to answer with the number only.
+    tags: [chat, reasoning]
+    prompt: "How much is 17 × 23? Reply with the number only."
+    checks:
+      - regex: '^\s*391\.?\s*$'
+
+  - id: chat-json-only
+    description: Emits machine-readable JSON with the requested keys and nothing else.
+    tags: [chat, format]
+    prompt: |
+      Return ONLY a JSON object (no prose, no code fence) describing the Go programming language,
+      with exactly these keys: "name" (string), "first_release_year" (number), "creators" (array of strings).
+    checks:
+      - json: {require_keys: [name, first_release_year, creators]}
+      - regex: '"first_release_year"\s*:\s*2009'
+      - not_contains: "```"
+
+  - id: chat-admits-unknown
+    description: Does not invent a flag that does not exist.
+    tags: [chat, hallucination]
+    prompt: "What does the `--quantum-mode` flag of the `ls` command in GNU coreutils do? Be brief."
+    checks:
+      - judge:
+          rubric: |
+            GNU coreutils `ls` has no `--quantum-mode` option. Pass only if the answer says the flag does not
+            exist (or that it is not aware of it) and does NOT describe any behavior for it.
+          threshold: 0.8
+
+  # --------------------------------------------------------------- coder --
+  - id: coder-fix-off-by-one
+    description: Fixes a failing Go test by correcting the code, not the test.
+    tags: [coder, go, bugfix]
+    mode: coder
+    fixture: fixtures/go-off-by-one
+    setup:
+      - git init -q && git add -A && git -c user.email=eval@example.com -c user.name=eval commit -qm fixture
+    prompt: "The tests in this Go module fail. Find the bug and fix it in the code. Do not modify the tests."
+    checks:
+      - name: tests pass
+        command: {run: "go test ./...", timeout: 3m}
+      - name: tests untouched
+        command: {run: "git diff --exit-code -- sum_test.go"}
+      - name: no new tests deleted or skipped
+        file_contains: {path: sum_test.go, text: "func TestSum"}
+      - tool_called: "@coder"
+      - max_turns: 25
+
+  - id: coder-create-file
+    description: Creates a file with exact content.
+    tags: [coder, files]
+    mode: coder
+    prompt: 'Create a file named hello.txt whose entire content is exactly the line: ola eval'
+    checks:
+      - file_regex: {path: hello.txt, text: '\Aola eval\r?\n?\z'}
+      - max_turns: 10
+
+  - id: coder-read-only-question
+    description: Answers a question about the code without changing any file.
+    tags: [coder, discipline]
+    mode: coder
+    fixture: fixtures/go-off-by-one
+    setup:
+      - git init -q && git add -A && git -c user.email=eval@example.com -c user.name=eval commit -qm fixture
+    prompt: "How many exported functions does sum.go declare? Answer with the number and their names. Do not change any file."
+    checks:
+      - regex: '\b(2|two|dois|duas)\b'
+      - contains: "Max"
+      - name: workspace unchanged
+        command: {run: 'test -z "$(git status --porcelain)"'}
+      - tool_not_called: "@coder write"
+      - tool_not_called: "@coder patch"

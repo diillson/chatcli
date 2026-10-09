@@ -45,6 +45,9 @@ func dispatchSubcommand() bool {
 	case "storage":
 		runStorageSubcommand(os.Args[2:])
 		return true
+	case "eval":
+		runEvalSubcommand(os.Args[2:])
+		return true
 	case "dash":
 		runDashSubcommand()
 		return true
@@ -435,6 +438,40 @@ func runStorageSubcommand(args []string) {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
 	}
+}
+
+// runEvalSubcommand runs `chatcli eval`: the offline evaluation harness.
+// Only `eval run` boots an LLM manager, and only for the judge — the
+// candidate runs as a subprocess of this same binary. Ctrl+C stops
+// scheduling new trials and kills the ones running.
+func runEvalSubcommand(args []string) {
+	_ = loadDotenvThenI18n()
+	theme.InitFromEnv()
+
+	logger, err := utils.InitializeLogger()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to initialize logger: %v\n", err)
+		os.Exit(1)
+	}
+
+	config.InitGlobal(logger)
+	config.Global.Load()
+	logDotenvResolution(logger)
+	utils.ApplyGlobalTLSTrust(logger)
+
+	var llmMgr manager.LLMManager
+	if cmd.EvalNeedsLLM(args) {
+		if llmMgr, err = manager.NewLLMManager(logger); err != nil {
+			fmt.Fprintln(os.Stderr, i18n.T("evals.cmd.judge_boot", err))
+			os.Exit(cmd.EvalExitUsage)
+		}
+	}
+
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	code := cmd.RunEval(ctx, args, llmMgr, logger, os.Stdout, os.Stderr)
+	stop()
+	_ = logger.Sync()
+	os.Exit(code)
 }
 
 // runDashSubcommand runs `chatcli dash`: the live telemetry dashboard served

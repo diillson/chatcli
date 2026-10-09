@@ -28,6 +28,7 @@ var configExempt = map[string]string{
 	"CHATCLI_NOT_IN_FILE":      "fixture for the env-file discovery tests",
 	"CHATCLI_DEFINITELY_UNSET": "fixture asserting an unset variable",
 	"CHATCLI_OPERATOR_":        "read by the operator module, which has its own surface",
+	"CHATCLI_EVAL_RECORD":      "set per run by `chatcli eval` on the binary it drives; always unset in a session",
 	// Names built at runtime from a provider or setting: the literal in
 	// the source is a prefix, and /config shows the resolved values in
 	// the fallback and quality sections instead.
