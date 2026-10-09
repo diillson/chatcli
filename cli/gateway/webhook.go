@@ -119,7 +119,10 @@ func (w *WebhookAdapter) inboundHandler(ctx context.Context, inbound chan<- Inbo
 // Start runs the HTTP server until ctx is canceled.
 func (w *WebhookAdapter) Start(ctx context.Context, inbound chan<- InboundMessage) error {
 	if w.secret == "" {
-		w.logger.Warn("gateway/webhook: no CHATCLI_WEBHOOK_SECRET set — inbound endpoint is unauthenticated")
+		w.logger.Warn("gateway/webhook: CHATCLI_WEBHOOK_SECRET is not set; every request is refused with 401 until it is")
+	}
+	if w.callbackURL == "" {
+		w.logger.Warn("gateway/webhook: CHATCLI_WEBHOOK_CALLBACK_URL is not set; requests are accepted but replies are not delivered anywhere")
 	}
 	mux := http.NewServeMux()
 	mux.HandleFunc(w.path, w.inboundHandler(ctx, inbound))

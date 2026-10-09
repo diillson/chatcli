@@ -162,6 +162,29 @@ func Progress(ctx context.Context) func(string) {
 	return func(string) {}
 }
 
+// AudioReplier is implemented by adapters whose Send delivers
+// OutboundMessage.Audio to the user. Voice replies are synthesized only for
+// those: on the others the clip would be paid for and then dropped.
+type AudioReplier interface {
+	RepliesWithAudio() bool
+}
+
+// audioReplyPlatforms names the platforms whose adapter is an AudioReplier,
+// for callers that hold a platform name rather than the adapter (the agent
+// loop deciding whether to tell the model its reply will be heard). A test
+// keeps it in step with the adapters.
+var audioReplyPlatforms = map[string]bool{telegramPlatform: true}
+
+// PlatformRepliesWithAudio reports whether replies on platform can carry a
+// voice clip.
+func PlatformRepliesWithAudio(platform string) bool { return audioReplyPlatforms[platform] }
+
+// adapterRepliesWithAudio reports whether a delivers audio replies.
+func adapterRepliesWithAudio(a Adapter) bool {
+	ar, ok := a.(AudioReplier)
+	return ok && ar.RepliesWithAudio()
+}
+
 // --- adapter registry (for discovery/config) ---
 
 var (

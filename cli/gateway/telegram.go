@@ -52,6 +52,10 @@ func NewTelegramAdapter(token string, allowedUserIDs []string, logger *zap.Logge
 	}
 }
 
+// RepliesWithAudio implements AudioReplier: Send delivers a voice clip as a
+// voice note (sendVoice) or an audio file (sendAudio).
+func (t *TelegramAdapter) RepliesWithAudio() bool { return true }
+
 // Name implements Adapter.
 func (t *TelegramAdapter) Name() string { return telegramPlatform }
 

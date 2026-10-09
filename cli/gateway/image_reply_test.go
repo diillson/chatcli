@@ -112,16 +112,35 @@ func TestDiscordSendPhoto(t *testing.T) {
 	}
 }
 
-// image attached → Slack files.upload with the text as initial_comment.
+// image attached → Slack external upload: reserve the file, upload the bytes
+// to the returned URL, then share it in the channel with the text as the
+// initial comment.
 func TestSlackSendPhoto(t *testing.T) {
-	var path, ctype string
-	var body []byte
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		path = r.URL.Path
-		ctype = r.Header.Get("Content-Type")
-		body, _ = io.ReadAll(r.Body)
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte(`{"ok":true}`))
+	var calls []string
+	var uploaded []byte
+	var uploadCtype string
+	var complete map[string]interface{}
+	var srv *httptest.Server
+	srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls = append(calls, r.URL.Path)
+		switch {
+		case strings.HasSuffix(r.URL.Path, "/files.getUploadURLExternal"):
+			_ = r.ParseForm()
+			if r.Form.Get("filename") != "reply.png" || r.Form.Get("length") != "8" {
+				t.Errorf("reserve form = %v", r.Form)
+			}
+			_, _ = w.Write([]byte(`{"ok":true,"upload_url":"` + srv.URL + `/upload/F1","file_id":"F1"}`))
+		case strings.HasPrefix(r.URL.Path, "/upload/"):
+			uploadCtype = r.Header.Get("Content-Type")
+			uploaded, _ = io.ReadAll(r.Body)
+			w.WriteHeader(http.StatusOK)
+		case strings.HasSuffix(r.URL.Path, "/files.completeUploadExternal"):
+			b, _ := io.ReadAll(r.Body)
+			_ = json.Unmarshal(b, &complete)
+			_, _ = w.Write([]byte(`{"ok":true}`))
+		default:
+			t.Errorf("unexpected call %s", r.URL.Path)
+		}
 	}))
 	defer srv.Close()
 
@@ -134,23 +153,29 @@ func TestSlackSendPhoto(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(path, "/files.upload") {
-		t.Fatalf("expected files.upload, got %q", path)
+	want := []string{"/files.getUploadURLExternal", "/upload/F1", "/files.completeUploadExternal"}
+	if strings.Join(calls, ",") != strings.Join(want, ",") {
+		t.Fatalf("calls = %v, want %v", calls, want)
 	}
-	if !strings.HasPrefix(ctype, "multipart/form-data") {
-		t.Fatalf("expected multipart, got %q", ctype)
+	if !strings.HasPrefix(uploadCtype, "multipart/form-data") || !strings.Contains(string(uploaded), "SLACKIMG") {
+		t.Fatalf("upload body missing image bytes (ctype %q)", uploadCtype)
 	}
-	if !strings.Contains(string(body), "SLACKIMG") || !strings.Contains(string(body), "slack caption") {
-		t.Fatalf("multipart body missing image/initial_comment")
+	if complete["channel_id"] != "C123" || complete["initial_comment"] != "slack caption" {
+		t.Fatalf("complete payload = %v", complete)
+	}
+	for _, c := range calls {
+		if strings.Contains(c, "/files.upload") && !strings.Contains(c, "URLExternal") {
+			t.Fatalf("retired files.upload was called")
+		}
 	}
 }
 
-// slack ok:false → falls back to chat.postMessage text.
+// slack ok:false while reserving the upload → falls back to chat.postMessage text.
 func TestSlackSendPhoto_FallsBackToText(t *testing.T) {
 	var hitUpload, hitText bool
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
-		case strings.Contains(r.URL.Path, "/files.upload"):
+		case strings.Contains(r.URL.Path, "/files.getUploadURLExternal"):
 			hitUpload = true
 			w.WriteHeader(http.StatusOK)
 			_, _ = w.Write([]byte(`{"ok":false,"error":"not_authed"}`))

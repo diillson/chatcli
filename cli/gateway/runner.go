@@ -100,8 +100,11 @@ func (r *Runner) SetImageProvider(fn func(ctx context.Context, session string) *
 func (r *Runner) SetVoicePrefs(p *VoicePrefs) { r.voicePrefs = p }
 
 // wantsVoice reports whether the final answer to msg should carry audio.
+// Only adapters that deliver audio get a clip; the others would drop it
+// after it was synthesized.
 func (r *Runner) wantsVoice(msg *InboundMessage) bool {
 	return r.voice != nil &&
+		adapterRepliesWithAudio(r.adapters[msg.Platform]) &&
 		VoiceDecision(r.voicePrefs, msg.SessionKey(), r.voiceMode, msg.Audio != nil)
 }
 

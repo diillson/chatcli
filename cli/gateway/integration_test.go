@@ -114,6 +114,7 @@ func TestSlackSend(t *testing.T) {
 		_ = json.Unmarshal(b, &p)
 		gotChannel = p["channel"]
 		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"ok":true}`))
 	}))
 	defer api.Close()
 	a := NewSlackAdapter("xoxb-tok", "", ":0", "/x", zap.NewNop())
