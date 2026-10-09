@@ -74,6 +74,14 @@ func printLogo() {
            ╚═════╝ ╚═╝  ╚═╝╚═╝  ╚═╝   ╚═╝    ╚═════╝╚══════╝╚═╝
         `
 
+	// Truecolor and 256-color terminals get the gradient banner; the others
+	// keep the single-color one below.
+	if rows, ok := gradientLogo(strings.Split(logo, "\n"), theme.ActiveProfile(), bannerRampFor(theme.Active())); ok {
+		logo = strings.Join(rows, "\n")
+		printCenteredLogo(logo)
+		return
+	}
+
 	coloredLogo := strings.ReplaceAll(logo, "█", colorize("█", ColorLime))
 	coloredLogo = strings.ReplaceAll(coloredLogo, "╗", colorize("╗", ColorGray))
 	coloredLogo = strings.ReplaceAll(coloredLogo, "╔", colorize("╔", ColorGray))
@@ -82,6 +90,12 @@ func printLogo() {
 	coloredLogo = strings.ReplaceAll(coloredLogo, "═", colorize("═", ColorGray))
 	coloredLogo = strings.ReplaceAll(coloredLogo, "║", colorize("║", ColorGray))
 
+	printCenteredLogo(coloredLogo)
+}
+
+// printCenteredLogo prints the non-blank rows of a colored logo centered in
+// 80 columns.
+func printCenteredLogo(coloredLogo string) {
 	width := 80
 	for _, line := range strings.Split(coloredLogo, "\n") {
 		if strings.TrimSpace(line) == "" {
