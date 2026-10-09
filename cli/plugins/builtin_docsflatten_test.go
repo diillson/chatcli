@@ -197,6 +197,60 @@ func TestSanitizeMDX(t *testing.T) {
 	}
 }
 
+func TestSanitizeMDX_DropsInlineSVG(t *testing.T) {
+	doc := strings.Join([]string{
+		`# Intro`,
+		`<div className="banner">`,
+		`  <svg role="img" aria-label="Logo" viewBox="0 0 10 10">`,
+		`    <g className="fills">`,
+		`      <rect x="1" y="2" width="3" height="4" />`,
+		`      <path d="M1 2 L3 4" />`,
+		`    </g>`,
+		`  </svg>`,
+		`</div>`,
+		`Before <svg viewBox="0 0 1 1"><path d="M0 0" /></svg> after.`,
+		`An <svgish> word and svg in prose stay.`,
+		"```html",
+		`<svg>kept inside a fence</svg>`,
+		"```",
+		`Closing prose.`,
+	}, "\n")
+
+	got := sanitizeMDX(doc)
+
+	for _, banned := range []string{"<svg role", "<rect", "<path", `d="M1 2`, "</svg>\n</div>"} {
+		if strings.Contains(got, banned) {
+			t.Errorf("inline SVG survived (%q):\n%s", banned, got)
+		}
+	}
+	for _, kept := range []string{"# Intro", "Before  after.", "An <svgish> word and svg in prose stay.", "<svg>kept inside a fence</svg>", "Closing prose."} {
+		if !strings.Contains(got, kept) {
+			t.Errorf("lost %q:\n%s", kept, got)
+		}
+	}
+}
+
+func TestStripInlineSVG(t *testing.T) {
+	cases := []struct {
+		line, want string
+		in, wantIn bool
+		wantKeep   bool
+	}{
+		{"plain prose", "plain prose", false, false, true},
+		{"<svg viewBox=\"0 0 1 1\">", "", false, true, false},
+		{"  <rect x=\"1\" />", "", true, true, false},
+		{"</svg> tail", " tail", true, false, true},
+		{"a <svg><path/></svg> b", "a  b", false, false, true},
+		{"<SVG>upper</SVG>", "", false, false, false},
+	}
+	for _, c := range cases {
+		got, in, keep := stripInlineSVG(c.line, c.in)
+		if got != c.want || in != c.wantIn || keep != c.wantKeep {
+			t.Errorf("%q (in=%v) = %q,%v,%v want %q,%v,%v", c.line, c.in, got, in, keep, c.want, c.wantIn, c.wantKeep)
+		}
+	}
+}
+
 func TestParseDocsFlattenArgs(t *testing.T) {
 	t.Run("flat json", func(t *testing.T) {
 		cfg, err := parseDocsFlattenArgs([]string{`{"root":"./docs","format":"jsonl","maxChars":500,"stripFrontMatter":false,"output":"/tmp/x.jsonl"}`})
