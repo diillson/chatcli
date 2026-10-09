@@ -325,12 +325,21 @@ func (cli *ChatCLI) mcpRestartOne(name string) {
 	fmt.Println()
 }
 
+// mcpSetRunning starts or stops one configured MCP server: the single
+// code path behind /mcp start, /mcp stop and the web UI's toggle.
+func (cli *ChatCLI) mcpSetRunning(name string, on bool) error {
+	if on {
+		return cli.mcpManager.StartOne(cli.mcpCtx, name)
+	}
+	return cli.mcpManager.StopOne(cli.mcpCtx, name)
+}
+
 func (cli *ChatCLI) mcpStart(name string) {
 	if name == "" {
 		fmt.Println(colorize("  "+i18n.T("mcp.cmd.usage_start"), ColorYellow))
 		return
 	}
-	if err := cli.mcpManager.StartOne(cli.mcpCtx, name); err != nil {
+	if err := cli.mcpSetRunning(name, true); err != nil {
 		fmt.Println(colorize("  "+i18n.T("mcp.cmd.start_error", translateMCPError(err)), ColorRed))
 		return
 	}
@@ -342,7 +351,7 @@ func (cli *ChatCLI) mcpStop(name string) {
 		fmt.Println(colorize("  "+i18n.T("mcp.cmd.usage_stop"), ColorYellow))
 		return
 	}
-	if err := cli.mcpManager.StopOne(cli.mcpCtx, name); err != nil {
+	if err := cli.mcpSetRunning(name, false); err != nil {
 		fmt.Println(colorize("  "+i18n.T("mcp.cmd.stop_error", translateMCPError(err)), ColorRed))
 		return
 	}
