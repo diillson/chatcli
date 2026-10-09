@@ -191,6 +191,7 @@ type renderSession struct {
 	launcher *launcher.Launcher
 	browser  *rod.Browser
 	idle     *time.Timer
+	watch    *browserWatch
 
 	consecutiveFailures int
 	cooldownUntil       time.Time
@@ -234,23 +235,37 @@ func (s *renderSession) acquire() (*rod.Browser, error) {
 // launchLocked starts Chromium and connects CDP. Callers hold mu.
 func (s *renderSession) launchLocked(bin string) error {
 	// Leakless is disabled on purpose: it ships an embedded helper binary
-	// that corporate AV products routinely quarantine. The idle shutdown
-	// timer is our recovery path for orphaned browsers instead.
+	// that corporate AV products routinely quarantine. The idle timer and
+	// ShutdownRenderBrowser close the browser while this process runs, and
+	// the watcher started below closes it when this process ends first
+	// (webfetch_reaper.go).
 	l := launcher.New().Headless(true).Leakless(false)
 	if bin != "" {
 		l = l.Bin(bin)
 	}
+	// The profile directory is chosen up front so the watcher, started
+	// before the browser, already knows it: a process that dies while the
+	// browser is still starting must not leave it behind either.
+	dataDir := newRenderProfileDir()
+	if dataDir != "" {
+		l = l.UserDataDir(dataDir)
+	}
+	watch := spawnBrowserReaper(dataDir)
 	controlURL, err := l.Launch()
 	if err != nil {
+		watch.stop()
 		l.Cleanup()
 		return fmt.Errorf("launching headless browser: %w", err)
 	}
+	watch.announce(l.PID())
 	b := rod.New().ControlURL(controlURL)
 	if err := b.Connect(); err != nil {
 		l.Kill()
 		l.Cleanup()
+		watch.stop()
 		return fmt.Errorf("connecting to headless browser: %w", err)
 	}
+	s.watch = watch
 	s.launcher, s.browser = l, b
 	return nil
 }
@@ -289,6 +304,10 @@ func (s *renderSession) closeLocked() {
 		s.launcher.Kill()
 		s.launcher.Cleanup()
 		s.launcher = nil
+	}
+	if s.watch != nil {
+		s.watch.stop()
+		s.watch = nil
 	}
 	if s.idle != nil {
 		s.idle.Stop()
