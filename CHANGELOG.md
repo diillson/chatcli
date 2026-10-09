@@ -1,5 +1,14 @@
 # Changelog
 
+## [1.213.1](https://github.com/diillson/chatcli/compare/v1.213.0...v1.213.1) (2026-10-09)
+
+
+### Bug Fixes
+
+* **coder:** render coder and agent output in the active language, with English tool markers ([#1733](https://github.com/diillson/chatcli/issues/1733)) ([d4ee91c](https://github.com/diillson/chatcli/commit/d4ee91cadd3ed0ba857879913b716ecaccb7de84))
+* **deps:** build with Go 1.27.2 and golang.org/x/net v0.60.0 ([#1734](https://github.com/diillson/chatcli/issues/1734)) ([492eb9c](https://github.com/diillson/chatcli/commit/492eb9cbcbe64e49605556e9e85950e68d38c5bf))
+* **web:** join the memory worker when headless surfaces shut down ([#1731](https://github.com/diillson/chatcli/issues/1731)) ([f954b14](https://github.com/diillson/chatcli/commit/f954b14a98def20c4e31c4de3c51fa95a16e8c7e))
+
 ## [1.213.0](https://github.com/diillson/chatcli/compare/v1.212.2...v1.213.0) (2026-10-08)
 
 
