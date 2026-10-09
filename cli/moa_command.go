@@ -83,6 +83,11 @@ func (cli *ChatCLI) handleMoACommand(ctx context.Context, input string) {
 		return
 	}
 
+	// The panel is briefed with the chat prompt, coder handoff included: a
+	// proposal in the aggregated answer is stripped and offered exactly as
+	// on a regular chat turn, never printed or stored as a raw tag.
+	handoffTask, final := takeCoderHandoff(final)
+
 	// Show which references contributed.
 	for _, r := range results {
 		status := colorize("✓", ColorGreen)
@@ -104,4 +109,7 @@ func (cli *ChatCLI) handleMoACommand(ctx context.Context, input string) {
 	cli.history = append(cli.history, models.Message{Role: "assistant", Content: final})
 	cli.mirrorHubTurn(ctx, prompt, final)
 	cli.persistBoundSession()
+	if handoffTask != "" && cli.coderHandoffActive() {
+		cli.noteCoderHandoff(handoffTask)
+	}
 }

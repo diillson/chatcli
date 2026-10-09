@@ -243,13 +243,17 @@ func (cli *ChatCLI) assembleChatSystemPrompt(
 func (cli *ChatCLI) modeAndLanguagePart() models.ContentBlock {
 	// Output-token reduction: the verbosity directive is a static string per
 	// level, so appending it keeps this Part 0 block cacheable.
-	text := ChatModeSystemHint + "\n" + i18n.T("ai.response_language") + verbosityDirectiveBlock()
 	// Attended REPL only: the model proposes the switch to coder mode and
-	// the user confirms at the prompt (coder_handoff.go). Static text, so
-	// the block stays cacheable.
+	// the user confirms at the prompt (coder_handoff.go). The banner's
+	// redirect rule gives way to the handoff rule and the handoff
+	// instruction follows the banner directly, so the model reads one
+	// consistent rule. Static text either way, so the block stays
+	// cacheable; headless surfaces keep the exact previous bytes.
+	text := ChatModeSystemHint
 	if cli.coderHandoffActive() {
-		text += "\n" + coderHandoffInstruction
+		text = chatModeBanner(true) + coderHandoffInstruction
 	}
+	text += "\n" + i18n.T("ai.response_language") + verbosityDirectiveBlock()
 	// Where the session is rooted and how to read a relative path against
 	// it is fixed for the whole session, so it belongs in the cached
 	// prefix. It used to ride in the per-turn context message, which paid
@@ -1068,11 +1072,8 @@ func (cli *ChatCLI) handleChatTurnResult(
 	// A coder handoff proposal rides as a tag at the end of the reply: it
 	// is stripped before the reply is stored and rendered, and shown as a
 	// proposal under the envelope once the turn is finalized.
-	if task, cleaned := extractCoderHandoff(aiResponse); task != "" {
+	if task, cleaned := takeCoderHandoff(aiResponse); task != "" {
 		aiResponse = cleaned
-		if aiResponse == "" {
-			aiResponse = i18n.T("handoff.only_tag")
-		}
 		if cli.coderHandoffActive() {
 			defer cli.noteCoderHandoff(task)
 		}

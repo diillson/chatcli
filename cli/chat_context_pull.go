@@ -280,6 +280,11 @@ func (cli *ChatCLI) pullMCPCatalog(filter string) string {
 			filter, len(tools))
 	}
 	b.WriteString("\nThese run only in agent/coder mode; in chat you can describe them, not call them.\n")
+	if cli.coderHandoffActive() {
+		// Without this, "describe, not call" read as a dead end and the
+		// model stopped there instead of offering the switch.
+		b.WriteString("When the user needs one of them run, propose the switch with the <coder_handoff> line.\n")
+	}
 	return b.String()
 }
 
