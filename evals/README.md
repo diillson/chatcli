@@ -66,4 +66,4 @@ A directory argument loads every `*.yaml` / `*.yml` file directly inside it, wit
 
 Checks accept `name:` (shown in reports) and `weight:`, which weights the trial score. A trial passes only if every check passes. File paths in checks must be relative and must stay inside the sandbox.
 
-Fixtures that are Go modules need their own `go.mod`. That keeps them out of ChatCLI's `go test ./...`, which matters because a fixture is often deliberately broken.
+A fixture is often deliberately broken, so keep it away from tooling that scans the host repository. A fixture directory that is a Go module needs its own `go.mod`, which keeps it out of `go test ./...`. For small fixtures, prefer inline `files:`, which is what `core.yaml` does for its Go module. A YAML anchor (`files: &name` … `files: *name`) shares the same files between cases.

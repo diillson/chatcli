@@ -2,6 +2,10 @@
 #
 #   chatcli eval run evals/ --judge-provider OPENAI --judge-model <a model other than the candidate>
 #
+# The Go module of the coder cases is inline (files:, shared through a YAML
+# anchor) rather than a fixture directory: a deliberately broken .go file in
+# the repository would be picked up by tooling that scans every Go file.
+#
 # Every case runs the real chatcli binary in a throwaway sandbox, with memory,
 # recall and autosave off (--with-memory turns them on). See evals/README.md.
 name: core
@@ -64,7 +68,64 @@ cases:
     description: Fixes a failing Go test by correcting the code, not the test.
     tags: [coder, go, bugfix]
     mode: coder
-    fixture: fixtures/go-off-by-one
+    files: &go-off-by-one
+      go.mod: |
+        module example.com/sum
+
+        go 1.22
+      sum.go: |
+        // Package sum adds numbers.
+        package sum
+
+        // Sum returns the sum of every element of xs.
+        func Sum(xs []int) int {
+        	total := 0
+        	for i := 0; i < len(xs)-1; i++ {
+        		total += xs[i]
+        	}
+        	return total
+        }
+
+        // Max returns the largest element of xs, or 0 for an empty slice.
+        func Max(xs []int) int {
+        	if len(xs) == 0 {
+        		return 0
+        	}
+        	m := xs[0]
+        	for _, x := range xs[1:] {
+        		if x > m {
+        			m = x
+        		}
+        	}
+        	return m
+        }
+      sum_test.go: |
+        package sum
+
+        import "testing"
+
+        func TestSum(t *testing.T) {
+        	cases := []struct {
+        		in   []int
+        		want int
+        	}{
+        		{nil, 0},
+        		{[]int{5}, 5},
+        		{[]int{1, 2, 3}, 6},
+        		{[]int{-1, 1, 10}, 10},
+        	}
+        	for _, c := range cases {
+        		if got := Sum(c.in); got != c.want {
+        			t.Errorf("Sum(%v) = %d, want %d", c.in, got, c.want)
+        		}
+        	}
+        }
+
+        func TestMax(t *testing.T) {
+        	if got := Max([]int{3, 9, 2}); got != 9 {
+        		t.Errorf("Max = %d, want 9", got)
+        	}
+        }
     setup:
       - git init -q && git add -A && git -c user.email=eval@example.com -c user.name=eval commit -qm fixture
     prompt: "The tests in this Go module fail. Find the bug and fix it in the code. Do not modify the tests."
@@ -91,7 +152,7 @@ cases:
     description: Answers a question about the code without changing any file.
     tags: [coder, discipline]
     mode: coder
-    fixture: fixtures/go-off-by-one
+    files: *go-off-by-one
     setup:
       - git init -q && git add -A && git -c user.email=eval@example.com -c user.name=eval commit -qm fixture
     prompt: "How many exported functions does sum.go declare? Answer with the number and their names. Do not change any file."
