@@ -97,10 +97,38 @@ func (m *Manager) LoadFromSettings() {
 	}
 }
 
+// EnabledEnv is the kill switch for every hook: "false", "0", "off" or
+// "no" stops all of them; unset keeps them on.
+const EnabledEnv = "CHATCLI_HOOKS_ENABLED"
+
+// evalRecordEnv marks a process driven by `chatcli eval` (pkg/evals
+// RecordEnv; a test keeps the two equal). Hooks never fire there: a user
+// hook that runs an eval would otherwise fire again inside every candidate
+// the eval spawns, without end, and a UserPromptSubmit hook that injects
+// context would change the outcome the eval is measuring.
+const evalRecordEnv = "CHATCLI_EVAL_RECORD"
+
+// Suppressed reports whether hooks must not fire in this process, and why
+// ("disabled" by the kill switch, "eval" inside an eval run).
+func Suppressed() (bool, string) {
+	if strings.TrimSpace(os.Getenv(evalRecordEnv)) != "" {
+		return true, "eval"
+	}
+	switch strings.ToLower(strings.TrimSpace(os.Getenv(EnabledEnv))) {
+	case "false", "0", "off", "no":
+		return true, "disabled"
+	}
+	return false, ""
+}
+
 // Fire dispatches an event to all matching hooks.
 // For PreToolUse events, returns a HookResult — if Blocked is true, the action should be prevented.
 // Other events are fire-and-forget (errors are logged but not returned).
+// Nothing fires while Suppressed reports true.
 func (m *Manager) Fire(ctx context.Context, event HookEvent) *HookResult {
+	if off, _ := Suppressed(); off {
+		return nil
+	}
 	m.mu.RLock()
 	hooks := make([]HookConfig, len(m.hooks))
 	copy(hooks, m.hooks)

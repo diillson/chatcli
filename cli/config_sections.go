@@ -40,6 +40,7 @@ import (
 	"github.com/diillson/chatcli/cli/agent"
 	"github.com/diillson/chatcli/cli/coder"
 	"github.com/diillson/chatcli/cli/gateway"
+	"github.com/diillson/chatcli/cli/hooks"
 	"github.com/diillson/chatcli/cli/plugins"
 	"github.com/diillson/chatcli/cli/workspace/memory"
 	"github.com/diillson/chatcli/config"
@@ -1187,6 +1188,10 @@ func (cli *ChatCLI) showConfigIntegrations(ctx context.Context) {
 
 	fmt.Println(p)
 	subheader(p, "cfg.sub.integ.hooks")
+	kv(p, hooks.EnabledEnv, envBool(hooks.EnabledEnv))
+	if off, why := hooks.Suppressed(); off && why == "eval" {
+		kv(p, i18n.T("cfg.kv.hooks_suppressed"), i18n.T("cfg.val.hooks_suppressed_eval"))
+	}
 	if cli.hookManager != nil {
 		kv(p, i18n.T("cfg.kv.configured"), fmt.Sprintf("%d", cli.hookManager.Count()))
 		for _, h := range cli.hookManager.GetHooks() {

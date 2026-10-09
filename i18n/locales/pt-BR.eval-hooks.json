@@ -1,0 +1,4 @@
+{
+  "cfg.kv.hooks_suppressed": "Hooks suprimidos",
+  "cfg.val.hooks_suppressed_eval": "sim: este processo é uma execução do chatcli eval, onde hooks nunca disparam"
+}

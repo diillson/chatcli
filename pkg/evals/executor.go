@@ -56,6 +56,7 @@ var hermeticEnv = map[string]string{
 	"CHATCLI_CODER_CHECKPOINTS":     "off",
 	"CHATCLI_DISABLE_HISTORY":       "true",
 	"CHATCLI_DISABLE_VERSION_CHECK": "true",
+	"CHATCLI_HOOKS_ENABLED":         "false",
 }
 
 // alwaysEnv applies even with WithMemory: none of it changes what the model
@@ -65,6 +66,10 @@ var alwaysEnv = map[string]string{
 	"CHATCLI_CODER_CHECKPOINTS":     "off",
 	"CHATCLI_DISABLE_HISTORY":       "true",
 	"CHATCLI_DISABLE_VERSION_CHECK": "true",
+	// The user's hooks are side effects on their machine, not part of the
+	// answer, and a hook that runs an eval would recurse; the hooks package
+	// also refuses to fire under RecordEnv, whatever this says.
+	"CHATCLI_HOOKS_ENABLED": "false",
 }
 
 // BinaryExecutor runs `chatcli -p` as a subprocess inside the sandbox.
