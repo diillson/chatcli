@@ -819,18 +819,22 @@ var mdxComponentTag = regexp.MustCompile(`</?[A-Z][A-Za-z0-9.]*(\s[^<>]*)?/?>`)
 
 // sanitizeMDX strips the MDX layer (Mintlify, Docusaurus MDX pages) so chunks
 // carry prose, not JSX plumbing: top-level import/export statements go away
-// and component tags are removed while their inner text is preserved. Fenced
-// code blocks pass through untouched. Multi-line component tags (attributes
-// spread across lines, as Mintlify emits) are joined before stripping.
+// and component tags are removed while their inner text is preserved. Inline
+// <svg>…</svg> drawings are dropped whole: hundreds of path coordinates are
+// no prose, and would crowd the real text out of every chunk they land in.
+// Fenced code blocks pass through untouched. Multi-line component tags
+// (attributes spread across lines, as Mintlify emits) are joined before
+// stripping.
 func sanitizeMDX(content string) string {
 	lines := strings.Split(content, "\n")
 	out := make([]string, 0, len(lines))
 	inFence := false
+	inSVG := false
 	var pendingTag []string
 
 	for _, line := range lines {
 		trimmed := strings.TrimSpace(line)
-		if strings.HasPrefix(trimmed, "```") || strings.HasPrefix(trimmed, "~~~") {
+		if !inSVG && (strings.HasPrefix(trimmed, "```") || strings.HasPrefix(trimmed, "~~~")) {
 			inFence = !inFence
 			out = append(out, line)
 			continue
@@ -839,6 +843,12 @@ func sanitizeMDX(content string) string {
 			out = append(out, line)
 			continue
 		}
+
+		var keep bool
+		if line, inSVG, keep = stripInlineSVG(line, inSVG); !keep {
+			continue
+		}
+		trimmed = strings.TrimSpace(line)
 
 		// Continuation of a component tag opened on a previous line.
 		if len(pendingTag) > 0 {
@@ -868,6 +878,40 @@ func sanitizeMDX(content string) string {
 		out = append(out, pendingTag...)
 	}
 	return strings.Join(out, "\n")
+}
+
+// stripInlineSVG removes inline SVG markup from one line. inSVG says whether
+// an <svg> element opened on an earlier line is still open; the returned
+// state carries it to the next line. keep is false when nothing but SVG was
+// on the line. Text before an opening tag or after a closing one survives.
+func stripInlineSVG(line string, inSVG bool) (string, bool, bool) {
+	var b strings.Builder
+	rest := line
+	for {
+		lower := strings.ToLower(rest)
+		if inSVG {
+			end := strings.Index(lower, "</svg>")
+			if end < 0 {
+				break
+			}
+			rest = rest[end+len("</svg>"):]
+			inSVG = false
+			continue
+		}
+		start := strings.Index(lower, "<svg")
+		if start < 0 || (len(lower) > start+4 && !strings.ContainsRune(" \t>/", rune(lower[start+4]))) {
+			b.WriteString(rest)
+			break
+		}
+		b.WriteString(rest[:start])
+		rest = rest[start:]
+		inSVG = true
+	}
+	out := b.String()
+	if out == line {
+		return line, inSVG, true
+	}
+	return out, inSVG, strings.TrimSpace(out) != ""
 }
 
 // mdxOpensUnclosedTag reports whether the line starts a capitalized JSX
