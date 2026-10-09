@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/diillson/chatcli/cli"
+	"github.com/diillson/chatcli/cli/plugins"
 	"github.com/diillson/chatcli/cmd"
 	"github.com/diillson/chatcli/config"
 	"github.com/diillson/chatcli/i18n"
@@ -30,6 +31,10 @@ import (
 	"go.uber.org/zap"
 )
 
+// browserReaperSubcommand is the hidden subcommand the headless browser
+// watcher runs as. Not listed anywhere: only chatcli itself invokes it.
+const browserReaperSubcommand = "__browser-reaper"
+
 // isSubcommand reports whether arg is a recognized top-level subcommand and
 // dispatches it. It returns true when a subcommand was handled.
 func dispatchSubcommand() bool {
@@ -37,6 +42,11 @@ func dispatchSubcommand() bool {
 		return false
 	}
 	subcmd := os.Args[1]
+	// The headless browser watcher (see plugins.EnableBrowserReaper): no
+	// boot at all, it only waits on two processes.
+	if subcmd == browserReaperSubcommand {
+		os.Exit(plugins.RunBrowserReaper(os.Args[2:]))
+	}
 	// Subcommands with no usage text of their own (mcp-server, acp, gateway,
 	// dash, tool) used to start their server, or misread "--help" as a tool
 	// name, when asked for help; they answer from the subcommand registry.
@@ -226,6 +236,12 @@ func main() {
 	// prints (spinners, colors, \r repaints). No-op elsewhere and on handles
 	// that are not a console.
 	utils.EnableVirtualTerminal()
+
+	// A headless browser launched for a JS-rendered fetch is closed on a
+	// clean exit here, and by its watcher when this process ends any other
+	// way (os.Exit, a crash, a kill).
+	plugins.EnableBrowserReaper(browserReaperSubcommand)
+	defer plugins.ShutdownRenderBrowser()
 
 	// Check for subcommands (server, connect) before processing standard flags.
 	// These subcommands have their own flag sets and should not go through cli.Parse().
