@@ -1,0 +1,3 @@
+{
+  "coder.security.no_terminal_denied": "%s needs confirmation, but there is no terminal to ask (stdin is not a TTY): denied. Allow it in coder_policy.json, or run interactively."
+}

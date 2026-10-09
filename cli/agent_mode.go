@@ -3502,6 +3502,11 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 								batchHasError = true
 								break
 							}
+						} else if action == coder.ActionAsk && a.noTerminalAskBlocked(tc.Name, tc.Args, renderError) {
+							// One-shot without a terminal: nobody can answer
+							// the prompt, so it would block until timeout.
+							batchHasError = true
+							break
 						} else if action == coder.ActionAsk {
 							decision := coder.PromptSecurityCheckGuarded(ctx, tc.Name, tc.Args, a.stdinLines)
 							// The prompt forced cooked mode (stty sane); re-arm

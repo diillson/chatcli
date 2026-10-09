@@ -168,6 +168,13 @@ func (a *workerPolicyAdapter) CheckAndPrompt(ctx context.Context, toolName, args
 			return true, ""
 		}
 
+		// No terminal (scripted one-shot, CI, eval): the prompt could never
+		// be answered and would hold the worker until its timeout.
+		if denied, msg := workerNoTerminalDenial(toolName); denied {
+			a.logger.Info("Worker tool call denied (no terminal to confirm)", zap.String("tool", toolName))
+			return false, msg
+		}
+
 		// Serialize prompts: only one worker prompts the user at a time.
 		a.mu.Lock()
 		defer a.mu.Unlock()
