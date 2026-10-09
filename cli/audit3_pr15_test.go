@@ -127,3 +127,29 @@ func TestShutdown_QueuesTheUnextractedTail(t *testing.T) {
 		t.Fatal("watermark advanced past the queued tail")
 	}
 }
+
+// A turn that finishes while a headless surface shuts down must not start
+// an extraction the shutdown no longer waits for: its segment stays in the
+// queue for the next session, and nothing writes after stop returned.
+func TestMemoryWorker_NoPassSpawnedAfterStop(t *testing.T) {
+	active := &scriptedClient{name: "claude", response: "NOTHING_NEW"}
+	mw := newResilienceWorker(t, active)
+	mw.cli.memWorker = mw
+	mw.cli.StopMemoryWorker()
+
+	seg := []models.Message{
+		{Role: "user", Content: "q1"}, {Role: "assistant", Content: "a1"},
+		{Role: "user", Content: "q2"}, {Role: "assistant", Content: "a2"},
+	}
+	mw.nudgeSegment(context.Background(), seg)
+	mw.nudge(context.Background())
+	mw.wg.Wait()
+
+	if n := len(mw.pendingFiles()); n != 1 {
+		t.Fatalf("the late segment must stay queued for the next session: %d queued", n)
+	}
+	if n := active.calls.Load(); n != 0 {
+		t.Fatalf("no extraction may run after stop: %d model call(s)", n)
+	}
+	mw.cli.StopMemoryWorker() // idempotent
+}

@@ -113,6 +113,9 @@ func runRPC(kind string, mgr manager.LLMManager, logger *zap.Logger) error {
 		// MCP/ACP servers exit with their client: persist spend and release
 		// paid caches like every other surface.
 		defer chatCLI.FinalizeSpend(context.WithoutCancel(ctx))
+		// Deferred after FinalizeSpend so it runs first: the memory pass
+		// started by the last turn finishes before spend is settled.
+		defer chatCLI.StopMemoryWorker()
 	}
 	defer stop()
 

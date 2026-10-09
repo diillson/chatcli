@@ -173,13 +173,18 @@ func startE2EWeb(t *testing.T) *e2eWeb {
 	t.Setenv("CHATCLI_LANG", "en")
 	t.Setenv("LLM_PROVIDER", "OPENAI")
 	t.Setenv("OPENAI_MODEL", "gpt-4o")
-	t.Setenv("CHATCLI_MEMORY", "off")
 	t.Chdir(t.TempDir())
 	model := &e2eModel{}
 	engine, err := cli.NewChatCLI(context.Background(), &e2eManager{model: model}, zap.NewNop())
 	if err != nil {
 		t.Fatalf("engine: %v", err)
 	}
+	// The memory worker is on, as in production: every turn queues its
+	// segment under HOME and starts an extraction pass. Registered before
+	// the server's cleanup so it runs after it, the way the surfaces shut
+	// down: the server stops taking turns, then the engine joins the last
+	// pass, before t.TempDir removes HOME.
+	t.Cleanup(engine.StopMemoryWorker)
 	engine.SetUnattended(true)
 	backend := &rpcBackend{mgr: &e2eManager{model: model}, cli: engine, store: engine, provider: "OPENAI", model: "gpt-4o", sessions: map[string][]models.Message{}}
 	srv, err := webui.Start(webui.Options{Backend: backend, Version: "t"})
