@@ -90,11 +90,20 @@ func (a *sendPluginAdapter) Send(ctx context.Context, target, message string) (s
 	if chatID == "" {
 		chatID = strings.TrimSpace(os.Getenv(homeChannelEnv(platform)))
 		if chatID == "" {
-			return "", fmt.Errorf("%s", i18n.T("send.tool.no_chatid", platform, homeChannelEnv(platform)))
+			return "", fmt.Errorf("%s", i18n.T("send.tool.no_chatid", platform, platform, homeChannelEnv(platform)))
 		}
 	}
 
-	if err := ad.Send(ctx, gateway.OutboundMessage{ChatID: chatID, Text: message}); err != nil {
+	// A platform can be configured to receive while having nowhere to deliver
+	// (the webhook without a callback URL); say so instead of reporting a send
+	// that went nowhere.
+	if oc, ok := ad.(gateway.OutboundChecker); ok {
+		if missing := oc.MissingOutbound(); missing != "" {
+			return "", fmt.Errorf("%s", i18n.T("send.tool.no_outbound", platform, missing))
+		}
+	}
+
+	if err := ad.Send(ctx, gateway.OutboundMessage{ChatID: chatID, Text: message, Kind: gateway.OutboundProactive}); err != nil {
 		a.log().Warn("@send delivery failed", zap.String("platform", platform), zap.String("chat_id", chatID), zap.Error(err))
 		return "", fmt.Errorf("%s: %w", i18n.T("send.tool.failed", platform), err)
 	}

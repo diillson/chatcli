@@ -20,7 +20,15 @@ type fakeGatewayAdapter struct {
 	lastChat string
 	lastText string
 	sendErr  error
+	lastKind string
+	missing  string // returned by MissingOutbound when the fake implements it
 }
+
+// fakeReceiveOnlyAdapter is configured to receive but has nowhere to deliver,
+// like the webhook without a callback URL.
+type fakeReceiveOnlyAdapter struct{ fakeGatewayAdapter }
+
+func (f *fakeReceiveOnlyAdapter) MissingOutbound() string { return f.missing }
 
 func (f *fakeGatewayAdapter) Name() string { return f.name }
 func (f *fakeGatewayAdapter) Start(context.Context, chan<- gateway.InboundMessage) error {
@@ -29,6 +37,7 @@ func (f *fakeGatewayAdapter) Start(context.Context, chan<- gateway.InboundMessag
 func (f *fakeGatewayAdapter) Send(_ context.Context, msg gateway.OutboundMessage) error {
 	f.lastChat = msg.ChatID
 	f.lastText = msg.Text
+	f.lastKind = msg.Kind
 	return f.sendErr
 }
 
@@ -94,8 +103,48 @@ func TestSendAdapter_NoHomeChannel(t *testing.T) {
 	gateway.RegisterBuilder(fake.name, func() (gateway.Adapter, error) { return fake, nil })
 
 	a := &sendPluginAdapter{cli: nil}
-	if _, err := a.Send(context.Background(), fake.name, "ping"); err == nil {
+	_, err := a.Send(context.Background(), fake.name, "ping")
+	if err == nil {
 		t.Fatal("expected error when no chat id and no home channel")
+	}
+	// The hint names both ways out, with every placeholder filled.
+	if msg := err.Error(); strings.Contains(msg, "%!") ||
+		!strings.Contains(msg, fake.name+":chat_id") || !strings.Contains(msg, homeChannelEnv(fake.name)) {
+		t.Fatalf("hint is malformed: %q", msg)
+	}
+}
+
+func TestSendAdapter_ProactiveKind(t *testing.T) {
+	fake := &fakeGatewayAdapter{name: "sendtestkind"}
+	gateway.RegisterBuilder(fake.name, func() (gateway.Adapter, error) { return fake, nil })
+
+	a := &sendPluginAdapter{cli: nil}
+	if _, err := a.Send(context.Background(), fake.name+":c", "x"); err != nil {
+		t.Fatal(err)
+	}
+	if fake.lastKind != gateway.OutboundProactive {
+		t.Fatalf("kind = %q, want %q", fake.lastKind, gateway.OutboundProactive)
+	}
+}
+
+// A platform that can receive but not deliver must fail the send, not report
+// a message that went nowhere.
+func TestSendAdapter_NowhereToDeliver(t *testing.T) {
+	fake := &fakeReceiveOnlyAdapter{fakeGatewayAdapter{name: "sendtestrecvonly", missing: "CHATCLI_FAKE_CALLBACK"}}
+	gateway.RegisterBuilder(fake.name, func() (gateway.Adapter, error) { return fake, nil })
+
+	a := &sendPluginAdapter{cli: nil}
+	_, err := a.Send(context.Background(), fake.name+":c", "x")
+	if err == nil || !strings.Contains(err.Error(), "CHATCLI_FAKE_CALLBACK") {
+		t.Fatalf("expected a nowhere-to-deliver error naming the setting, got %v", err)
+	}
+	if fake.lastText != "" {
+		t.Fatal("nothing must be handed to the adapter")
+	}
+
+	fake.missing = ""
+	if _, err := a.Send(context.Background(), fake.name+":c", "x"); err != nil {
+		t.Fatalf("a wired platform must send: %v", err)
 	}
 }
 

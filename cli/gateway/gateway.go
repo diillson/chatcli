@@ -86,6 +86,29 @@ type OutboundMessage struct {
 	Text   string
 	Audio  *OutboundAudio
 	Image  *OutboundImage
+	// Kind says what this message is within an exchange: OutboundThinking,
+	// OutboundProgress, OutboundFinal, or OutboundProactive (@send). Empty
+	// is treated as a standalone message. Adapters whose consumers cannot
+	// see the difference on their own (the generic webhook) forward it.
+	Kind string
+}
+
+// Outbound message kinds carried on OutboundMessage.Kind.
+const (
+	OutboundThinking  = "thinking"
+	OutboundProgress  = "progress"
+	OutboundFinal     = "final"
+	OutboundProactive = "proactive"
+)
+
+// OutboundChecker is an optional adapter capability for platforms that can
+// receive messages without being able to deliver any: the generic webhook
+// accepts inbound requests with no callback URL configured. MissingOutbound
+// names the setting that is missing, or returns "" when delivery is wired.
+// Proactive senders check it so a message with nowhere to go is reported as
+// a failure instead of a success.
+type OutboundChecker interface {
+	MissingOutbound() string
 }
 
 // OutboundImage is an image reply (generated/edited) to deliver alongside or

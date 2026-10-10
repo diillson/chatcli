@@ -1,0 +1,3 @@
+{
+  "send.tool.no_outbound": "%s has nowhere to deliver messages: set %s."
+}
