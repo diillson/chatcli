@@ -127,7 +127,7 @@ func tlsServer(t *testing.T, server *testCert, clientCA *testCert) grpc.ServerOp
 	return grpc.Creds(credentials.NewTLS(cfg))
 }
 
-func runHealthcheck(t *testing.T, args ...string) (code int, out, errOut string) {
+func healthcheckCLI(t *testing.T, args ...string) (code int, out, errOut string) {
 	t.Helper()
 	i18n.Init()
 	var stdout, stderr bytes.Buffer
@@ -148,17 +148,17 @@ func clearServerTLSEnv(t *testing.T) {
 func TestHealthcheckPlaintext(t *testing.T) {
 	clearServerTLSEnv(t)
 	addr := startHealthServer(t, healthpb.HealthCheckResponse_SERVING)
-	if code, out, errOut := runHealthcheck(t, "-addr", addr); code != healthcheckServing || out == "" {
+	if code, out, errOut := healthcheckCLI(t, "-addr", addr); code != healthcheckServing || out == "" {
 		t.Fatalf("serving server: code %d, out %q, err %q", code, out, errOut)
 	}
 
 	draining := startHealthServer(t, healthpb.HealthCheckResponse_NOT_SERVING)
-	if code, _, errOut := runHealthcheck(t, "-addr", draining); code != healthcheckNotServing || !strings.Contains(errOut, "NOT_SERVING") {
+	if code, _, errOut := healthcheckCLI(t, "-addr", draining); code != healthcheckNotServing || !strings.Contains(errOut, "NOT_SERVING") {
 		t.Fatalf("draining server: code %d, err %q", code, errOut)
 	}
 
 	// A service the server does not report is an error, not a pass.
-	if code, _, _ := runHealthcheck(t, "-addr", addr, "-service", "nope.v1.Missing"); code != healthcheckNotServing {
+	if code, _, _ := healthcheckCLI(t, "-addr", addr, "-service", "nope.v1.Missing"); code != healthcheckNotServing {
 		t.Fatalf("unknown service: code %d", code)
 	}
 }
@@ -168,7 +168,7 @@ func TestHealthcheckNoServer(t *testing.T) {
 	lis, _ := net.Listen("tcp", "127.0.0.1:0")
 	addr := lis.Addr().String()
 	_ = lis.Close()
-	if code, _, _ := runHealthcheck(t, "-addr", addr, "-timeout", "500ms"); code != healthcheckNotServing {
+	if code, _, _ := healthcheckCLI(t, "-addr", addr, "-timeout", "500ms"); code != healthcheckNotServing {
 		t.Fatalf("closed port: code %d", code)
 	}
 }
@@ -182,13 +182,13 @@ func TestHealthcheckTLSTrustsTheServersOwnCertificate(t *testing.T) {
 	addr := startHealthServer(t, healthpb.HealthCheckResponse_SERVING, tlsServer(t, server, nil))
 
 	t.Setenv("CHATCLI_SERVER_TLS_CERT", certPath) // what the server's container already sets
-	if code, _, errOut := runHealthcheck(t, "-addr", addr); code != healthcheckServing {
+	if code, _, errOut := healthcheckCLI(t, "-addr", addr); code != healthcheckServing {
 		t.Fatalf("TLS server: code %d, err %q", code, errOut)
 	}
 
 	// Without TLS configured the probe speaks plaintext and must fail.
 	t.Setenv("CHATCLI_SERVER_TLS_CERT", "")
-	if code, _, _ := runHealthcheck(t, "-addr", addr); code != healthcheckNotServing {
+	if code, _, _ := healthcheckCLI(t, "-addr", addr); code != healthcheckNotServing {
 		t.Fatalf("plaintext against TLS: code %d", code)
 	}
 }
@@ -199,7 +199,7 @@ func TestHealthcheckTLSRejectsAnotherCertificate(t *testing.T) {
 	addr := startHealthServer(t, healthpb.HealthCheckResponse_SERVING, tlsServer(t, server, nil))
 
 	other, _ := validCert(t, nil, false).write(t, "other")
-	if code, _, _ := runHealthcheck(t, "-addr", addr, "-tls-cert", other); code != healthcheckNotServing {
+	if code, _, _ := healthcheckCLI(t, "-addr", addr, "-tls-cert", other); code != healthcheckNotServing {
 		t.Fatalf("a server presenting another certificate must fail, got %d", code)
 	}
 }
@@ -210,7 +210,7 @@ func TestHealthcheckTLSRejectsAnExpiredCertificate(t *testing.T) {
 	expired := issueCert(t, nil, false, []string{"chatcli.test"}, nil, time.Now().Add(-2*time.Hour), time.Now().Add(-time.Hour))
 	certPath, _ := expired.write(t, "expired")
 	addr := startHealthServer(t, healthpb.HealthCheckResponse_SERVING, tlsServer(t, expired, nil))
-	if code, _, _ := runHealthcheck(t, "-addr", addr, "-tls-cert", certPath); code != healthcheckNotServing {
+	if code, _, _ := healthcheckCLI(t, "-addr", addr, "-tls-cert", certPath); code != healthcheckNotServing {
 		t.Fatalf("expired certificate: code %d", code)
 	}
 }
@@ -225,7 +225,7 @@ func TestHealthcheckMutualTLS(t *testing.T) {
 
 	t.Setenv("CHATCLI_SERVER_TLS_CERT", certPath)
 	t.Setenv("CHATCLI_SERVER_TLS_CLIENT_CA", caPath)
-	code, _, errOut := runHealthcheck(t, "-addr", addr)
+	code, _, errOut := healthcheckCLI(t, "-addr", addr)
 	if code != healthcheckNotServing || !strings.Contains(errOut, "CHATCLI_TLS_CLIENT_CERT") {
 		t.Fatalf("mTLS without a client pair must say what is missing: code %d, err %q", code, errOut)
 	}
@@ -233,7 +233,7 @@ func TestHealthcheckMutualTLS(t *testing.T) {
 	clientCert, clientKey := validCert(t, ca, false).write(t, "client")
 	t.Setenv("CHATCLI_TLS_CLIENT_CERT", clientCert)
 	t.Setenv("CHATCLI_TLS_CLIENT_KEY", clientKey)
-	if code, _, errOut := runHealthcheck(t, "-addr", addr); code != healthcheckServing {
+	if code, _, errOut := healthcheckCLI(t, "-addr", addr); code != healthcheckServing {
 		t.Fatalf("mTLS with a client pair: code %d, err %q", code, errOut)
 	}
 }
@@ -251,13 +251,13 @@ func TestCertificateName(t *testing.T) {
 
 func TestHealthcheckUsage(t *testing.T) {
 	clearServerTLSEnv(t)
-	if code, _, _ := runHealthcheck(t, "-h"); code != healthcheckServing {
+	if code, _, _ := healthcheckCLI(t, "-h"); code != healthcheckServing {
 		t.Errorf("-h: code %d", code)
 	}
-	if code, _, _ := runHealthcheck(t, "extra"); code != healthcheckUsage {
+	if code, _, _ := healthcheckCLI(t, "extra"); code != healthcheckUsage {
 		t.Errorf("stray argument: code %d", code)
 	}
-	if code, _, _ := runHealthcheck(t, "-timeout", "0s"); code != healthcheckUsage {
+	if code, _, _ := healthcheckCLI(t, "-timeout", "0s"); code != healthcheckUsage {
 		t.Errorf("zero timeout: code %d", code)
 	}
 }
