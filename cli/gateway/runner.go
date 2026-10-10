@@ -215,6 +215,7 @@ func (r *Runner) handle(ctx context.Context, msg InboundMessage) {
 		zap.String("platform", msg.Platform),
 		zap.String("session", msg.SessionKey()),
 		zap.String("user", msg.UserName),
+		zap.String("user_id", msg.UserID),
 		zap.Int("chars", len(msg.Text)))
 
 	// send delivers one outbound message and logs the result. kind is
@@ -222,18 +223,18 @@ func (r *Runner) handle(ctx context.Context, msg InboundMessage) {
 	send := func(kind, text string) {
 		t0 := time.Now()
 		clipped := clip(text, maxMessageRunes)
-		out := OutboundMessage{ChatID: msg.ChatID, Text: clipped}
+		out := OutboundMessage{ChatID: msg.ChatID, Text: clipped, Kind: kind}
 		// Attach a synthesized voice clip to the final answer when voice
 		// replies are enabled for this exchange — every reply in always mode,
 		// or replies to voice messages in the default in-kind mode. Progress
 		// chunks stay text-only.
-		if kind == "final" && r.wantsVoice(&msg) {
+		if kind == OutboundFinal && r.wantsVoice(&msg) {
 			if audio := r.voice(ctx, clipped); audio != nil {
 				out.Audio = audio
 			}
 		}
 		// Attach an image the agent produced during this run (final only).
-		if kind == "final" && r.image != nil {
+		if kind == OutboundFinal && r.image != nil {
 			if img := r.image(ctx, msg.SessionKey()); img != nil {
 				out.Image = img
 			}
@@ -259,7 +260,7 @@ func (r *Runner) handle(ctx context.Context, msg InboundMessage) {
 	// otherwise. Stopped the moment the agent returns.
 	stopThinking := r.startThinking(ctx, adapter, msg, send)
 
-	sink := newProgressSink(func(s string) { send("progress", s) })
+	sink := newProgressSink(func(s string) { send(OutboundProgress, s) })
 	reply, err := r.agent(WithProgress(WithInbound(ctx, msg), sink.emit), msg.SessionKey(), msg.Text)
 	stopThinking()
 	sink.flush() // deliver any progress buffered since the last flush
@@ -278,7 +279,7 @@ func (r *Runner) handle(ctx context.Context, msg InboundMessage) {
 	if reply == "" {
 		return
 	}
-	send("final", reply)
+	send(OutboundFinal, reply)
 }
 
 // startThinking signals that the assistant is working: a native typing
@@ -322,7 +323,7 @@ func (r *Runner) startThinking(ctx context.Context, adapter Adapter, msg Inbound
 		case <-done:
 		case <-ctx.Done():
 		case <-time.After(delay):
-			send("thinking", notice)
+			send(OutboundThinking, notice)
 		}
 	}()
 	var once sync.Once
