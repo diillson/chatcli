@@ -150,7 +150,7 @@ A kubelet gRPC probe cannot speak TLS, so the chart uses probes that work for ev
 - **startup / liveness**: `GET /healthz` on the metrics port (plain HTTP, no credential), or a TCP check on the gRPC port when `server.metricsPort` is `0`;
 - **readiness**: a TCP check on the gRPC port, so the Service only routes to a pod once the gRPC listener is bound (works with and without TLS).
 
-The server also answers the standard `grpc.health.v1.Health` service without a credential (`SERVING` once the listener is up, `NOT_SERVING` while it shuts down), for `grpc-health-probe`, load balancers and service meshes that speak TLS. The image's own `HEALTHCHECK` uses it.
+The server also answers the standard `grpc.health.v1.Health` service without a credential (`SERVING` once the listener is up, `NOT_SERVING` while it shuts down), for `chatcli healthcheck` (the image's own `HEALTHCHECK`), `grpc-health-probe`, load balancers and service meshes that speak TLS.
 
 ### TLS
 

@@ -26,29 +26,18 @@ RUN CGO_ENABLED=0 GOOS=linux GOARCH=${TARGETARCH} go build \
     -ldflags="-s -w -X 'github.com/diillson/chatcli/version.Version=${VERSION}' -X 'github.com/diillson/chatcli/version.CommitHash=${COMMIT_HASH}' -X 'github.com/diillson/chatcli/version.BuildDate=${BUILD_DATE}'" \
     -o chatcli .
 
-# Build grpc_health_probe with patched dependencies:
-#   CVE-2026-34986 (go-jose/v4), GHSA-hrxh-6v49-42gf (grpc),
-#   CVE-2026-46600 (x/net), CVE-2026-56852 (x/text), CVE-2026-84304 (grpc <1.83.1)
-RUN git clone --depth 1 https://github.com/grpc-ecosystem/grpc-health-probe /tmp/ghp && \
-    cd /tmp/ghp && \
-    go get github.com/go-jose/go-jose/v4@v4.1.4 \
-        google.golang.org/grpc@v1.83.2 \
-        golang.org/x/net@v0.58.0 \
-        golang.org/x/text@v0.41.0 && \
-    go mod tidy && \
-    CGO_ENABLED=0 GOOS=linux GOARCH=${TARGETARCH} go build -ldflags="-s -w" -o /usr/local/bin/grpc-health-probe . && \
-    rm -rf /tmp/ghp
-
 # --- Runtime stage ---
 # Distroless static image: zero OS packages, zero CVEs, nonroot by default.
 FROM gcr.io/distroless/static-debian12:nonroot
 
 COPY --from=builder /app/chatcli /usr/local/bin/chatcli
-COPY --from=builder /usr/local/bin/grpc-health-probe /usr/local/bin/grpc-health-probe
 
 EXPOSE 50051
 
+# The server checks itself: `chatcli healthcheck` asks grpc.health.v1 on the
+# port, bind and TLS settings the running server resolved, from its flags or
+# its CHATCLI_SERVER_* variables, so the check follows any configuration.
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
-    CMD ["/usr/local/bin/grpc-health-probe", "-addr=:50051"]
+    CMD ["/usr/local/bin/chatcli", "healthcheck"]
 
 ENTRYPOINT ["chatcli", "server"]
