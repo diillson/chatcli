@@ -66,9 +66,20 @@ type ServerOptions struct {
 
 // RunServer executes the 'chatcli server' subcommand.
 func RunServer(args []string, llmMgr manager.LLMManager, logger *zap.Logger) error {
-	fs := flag.NewFlagSet("server", flag.ContinueOnError)
-
 	opts := &ServerOptions{}
+	fs := serverFlagSet(opts)
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	return startServer(opts, llmMgr, logger)
+}
+
+// serverFlagSet defines the `chatcli server` flags into opts, each one
+// defaulting to its CHATCLI_* variable. `chatcli healthcheck` parses a
+// running server's arguments with it, so the two never disagree about the
+// port or the TLS files.
+func serverFlagSet(opts *ServerOptions) *flag.FlagSet {
+	fs := flag.NewFlagSet("server", flag.ContinueOnError)
 	fs.IntVar(&opts.Port, "port", getEnvInt("CHATCLI_SERVER_PORT", 50051), "gRPC server port")
 	fs.StringVar(&opts.Token, "token", os.Getenv("CHATCLI_SERVER_TOKEN"), "Authentication token (empty = no auth, accepted only on a loopback bind address; any other bind requires a credential)")
 	fs.StringVar(&opts.CertFile, "tls-cert", os.Getenv("CHATCLI_SERVER_TLS_CERT"), "TLS certificate file path")
@@ -96,11 +107,11 @@ func RunServer(args []string, llmMgr manager.LLMManager, logger *zap.Logger) err
 	fs.IntVar(&opts.WatchMaxLogs, "watch-max-log-lines", getEnvInt("CHATCLI_WATCH_MAX_LOG_LINES", 100), "Max log lines per pod")
 	fs.StringVar(&opts.WatchKubeconfig, "watch-kubeconfig", os.Getenv("CHATCLI_KUBECONFIG"), "Path to kubeconfig for watcher")
 	fs.StringVar(&opts.WatchConfig, "watch-config", os.Getenv("CHATCLI_WATCH_CONFIG"), "Path to multi-target watch config YAML")
+	return fs
+}
 
-	if err := fs.Parse(args); err != nil {
-		return err
-	}
-
+// startServer starts the server with parsed options.
+func startServer(opts *ServerOptions, llmMgr manager.LLMManager, logger *zap.Logger) error {
 	// A certificate without its key (or the reverse) used to fall through
 	// to a plaintext listener without a word. Refuse it before anything
 	// starts; stderr as well as the error, because the logger may not flush

@@ -16,8 +16,10 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"net"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"time"
 
 	"google.golang.org/grpc"
@@ -51,9 +53,9 @@ type healthcheckOptions struct {
 
 // RunHealthcheck executes `chatcli healthcheck`: a single
 // grpc.health.v1.Health/Check against a ChatCLI server, exiting 0 when it
-// answers SERVING and 1 otherwise. It reads the same CHATCLI_SERVER_*
-// settings as `chatcli server`, so inside the server's own container it
-// needs no flags, in plaintext, TLS or mutual TLS.
+// answers SERVING and 1 otherwise. It works out the server's effective
+// settings the way the server does (see localServerSettings), so inside the
+// server's own container it needs no flags, in plaintext, TLS or mutual TLS.
 //
 // With TLS, the probe trusts exactly the certificate the server is
 // configured to serve and verifies it by one of that certificate's names:
@@ -86,16 +88,18 @@ func RunHealthcheck(args []string, stdout, stderr io.Writer) int {
 }
 
 func parseHealthcheckFlags(args []string, stderr io.Writer) (healthcheckOptions, error) {
-	var opts healthcheckOptions
+	server := localServerSettings(procRoot)
+	opts := healthcheckOptions{clientCA: server.ClientCAFile}
 	fs := flag.NewFlagSet("healthcheck", flag.ContinueOnError)
 	fs.SetOutput(stderr)
-	fs.StringVar(&opts.addr, "addr", "localhost:"+strconv.Itoa(getEnvInt("CHATCLI_SERVER_PORT", 50051)), i18n.T("healthcheck.flag.addr"))
+	fs.StringVar(&opts.addr, "addr", net.JoinHostPort(dialHost(os.Getenv("CHATCLI_BIND_ADDRESS")), strconv.Itoa(server.Port)), i18n.T("healthcheck.flag.addr"))
 	fs.StringVar(&opts.service, "service", "", i18n.T("healthcheck.flag.service"))
 	fs.DurationVar(&opts.timeout, "timeout", 4*time.Second, i18n.T("healthcheck.flag.timeout"))
-	fs.StringVar(&opts.serverCert, "tls-cert", os.Getenv("CHATCLI_SERVER_TLS_CERT"), i18n.T("healthcheck.flag.tls_cert"))
+	fs.StringVar(&opts.serverCert, "tls-cert", server.CertFile, i18n.T("healthcheck.flag.tls_cert"))
 	fs.StringVar(&opts.serverName, "tls-server-name", "", i18n.T("healthcheck.flag.tls_server_name"))
-	fs.StringVar(&opts.clientCert, "tls-client-cert", os.Getenv("CHATCLI_HEALTHCHECK_TLS_CLIENT_CERT"), i18n.T("healthcheck.flag.tls_client_cert"))
-	fs.StringVar(&opts.clientKey, "tls-client-key", os.Getenv("CHATCLI_HEALTHCHECK_TLS_CLIENT_KEY"), i18n.T("healthcheck.flag.tls_client_key"))
+	// The same client pair `chatcli connect` presents to an mTLS server.
+	fs.StringVar(&opts.clientCert, "tls-client-cert", os.Getenv("CHATCLI_TLS_CLIENT_CERT"), i18n.T("healthcheck.flag.tls_client_cert"))
+	fs.StringVar(&opts.clientKey, "tls-client-key", os.Getenv("CHATCLI_TLS_CLIENT_KEY"), i18n.T("healthcheck.flag.tls_client_key"))
 	if err := fs.Parse(args); err != nil {
 		return opts, err
 	}
@@ -105,8 +109,71 @@ func parseHealthcheckFlags(args []string, stderr io.Writer) (healthcheckOptions,
 	if opts.timeout <= 0 {
 		return opts, errors.New(i18n.T("healthcheck.bad_timeout"))
 	}
-	opts.clientCA = os.Getenv("CHATCLI_SERVER_TLS_CLIENT_CA")
 	return opts, nil
+}
+
+// procRoot is where running processes are listed (Linux).
+var procRoot = "/proc"
+
+// localServerSettings returns the port and TLS files of the local server as
+// the server itself resolves them: the CHATCLI_SERVER_* variables, overridden
+// by the flags of a running `chatcli server` process when one is visible, as
+// in the server's own container whether it runs as PID 1 or under an init.
+// The operator, for one, configures the server through flags.
+func localServerSettings(procRoot string) *ServerOptions {
+	opts := &ServerOptions{}
+	fs := serverFlagSet(opts)
+	fs.SetOutput(io.Discard)
+	// A server that rejected its own flags is not running; the variables
+	// alone are the best answer then.
+	if err := fs.Parse(runningServerArgs(procRoot)); err != nil {
+		opts = &ServerOptions{}
+		_ = serverFlagSet(opts).Parse(nil)
+	}
+	return opts
+}
+
+// runningServerArgs returns the flags of the oldest `chatcli server` (or
+// `serve`) process listed under procRoot, or nil when there is none or the
+// system has no such listing.
+func runningServerArgs(procRoot string) []string {
+	entries, err := os.ReadDir(procRoot)
+	if err != nil {
+		return nil
+	}
+	oldest := -1
+	var args []string
+	for _, e := range entries {
+		pid, err := strconv.Atoi(e.Name())
+		if err != nil {
+			continue
+		}
+		raw, err := os.ReadFile(filepath.Join(procRoot, e.Name(), "cmdline")) // #nosec G304 -- fixed /proc layout, read-only
+		if err != nil {
+			continue
+		}
+		argv := strings.Split(strings.TrimRight(string(raw), "\x00"), "\x00")
+		if len(argv) < 2 || filepath.Base(argv[0]) != "chatcli" || (argv[1] != "server" && argv[1] != "serve") {
+			continue
+		}
+		if oldest == -1 || pid < oldest {
+			oldest, args = pid, argv[2:]
+		}
+	}
+	return args
+}
+
+// dialHost is where to reach a server bound to bind: its loopback for a
+// wildcard or loopback bind (the server's default), the address itself
+// otherwise.
+func dialHost(bind string) string {
+	switch strings.TrimSpace(bind) {
+	case "", "0.0.0.0", "127.0.0.1":
+		return "127.0.0.1"
+	case "::", "[::]", "::1", "[::1]":
+		return "::1"
+	}
+	return strings.Trim(strings.TrimSpace(bind), "[]")
 }
 
 // probeHealth asks the server once and returns its answer.

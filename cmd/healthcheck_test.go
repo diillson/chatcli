@@ -136,7 +136,11 @@ func runHealthcheck(t *testing.T, args ...string) (code int, out, errOut string)
 }
 
 func clearServerTLSEnv(t *testing.T) {
-	for _, k := range []string{"CHATCLI_SERVER_TLS_CERT", "CHATCLI_SERVER_TLS_CLIENT_CA", "CHATCLI_HEALTHCHECK_TLS_CLIENT_CERT", "CHATCLI_HEALTHCHECK_TLS_CLIENT_KEY"} {
+	// No real process listing: only what a test fakes is visible.
+	old := procRoot
+	procRoot = t.TempDir()
+	t.Cleanup(func() { procRoot = old })
+	for _, k := range []string{"CHATCLI_SERVER_TLS_CERT", "CHATCLI_SERVER_TLS_CLIENT_CA", "CHATCLI_TLS_CLIENT_CERT", "CHATCLI_TLS_CLIENT_KEY", "CHATCLI_SERVER_PORT", "CHATCLI_BIND_ADDRESS"} {
 		t.Setenv(k, "")
 	}
 }
@@ -222,13 +226,13 @@ func TestHealthcheckMutualTLS(t *testing.T) {
 	t.Setenv("CHATCLI_SERVER_TLS_CERT", certPath)
 	t.Setenv("CHATCLI_SERVER_TLS_CLIENT_CA", caPath)
 	code, _, errOut := runHealthcheck(t, "-addr", addr)
-	if code != healthcheckNotServing || !strings.Contains(errOut, "CHATCLI_HEALTHCHECK_TLS_CLIENT_CERT") {
+	if code != healthcheckNotServing || !strings.Contains(errOut, "CHATCLI_TLS_CLIENT_CERT") {
 		t.Fatalf("mTLS without a client pair must say what is missing: code %d, err %q", code, errOut)
 	}
 
 	clientCert, clientKey := validCert(t, ca, false).write(t, "client")
-	t.Setenv("CHATCLI_HEALTHCHECK_TLS_CLIENT_CERT", clientCert)
-	t.Setenv("CHATCLI_HEALTHCHECK_TLS_CLIENT_KEY", clientKey)
+	t.Setenv("CHATCLI_TLS_CLIENT_CERT", clientCert)
+	t.Setenv("CHATCLI_TLS_CLIENT_KEY", clientKey)
 	if code, _, errOut := runHealthcheck(t, "-addr", addr); code != healthcheckServing {
 		t.Fatalf("mTLS with a client pair: code %d, err %q", code, errOut)
 	}
@@ -258,12 +262,80 @@ func TestHealthcheckUsage(t *testing.T) {
 	}
 }
 
-// Defaults come from the server's own settings.
-func TestHealthcheckDefaultsFollowTheServer(t *testing.T) {
+// fakeProcess lists a process under the fake proc root.
+func fakeProcess(t *testing.T, pid string, argv ...string) {
+	t.Helper()
+	dir := filepath.Join(procRoot, pid)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "cmdline"), []byte(strings.Join(argv, "\x00")+"\x00"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// Without a running server, the defaults are the server's variables.
+func TestHealthcheckDefaultsFollowTheServerVariables(t *testing.T) {
 	clearServerTLSEnv(t)
 	t.Setenv("CHATCLI_SERVER_PORT", "6123")
+	t.Setenv("CHATCLI_SERVER_TLS_CERT", "/env/server.crt")
 	opts, err := parseHealthcheckFlags(nil, &bytes.Buffer{})
-	if err != nil || opts.addr != "localhost:6123" || opts.serverCert != "" {
+	if err != nil || opts.addr != "127.0.0.1:6123" || opts.serverCert != "/env/server.crt" {
 		t.Fatalf("defaults: %+v, %v", opts, err)
+	}
+}
+
+// The operator configures the server through flags: those of the running
+// server win over the variables, wherever the server sits in the process
+// list (PID 1, or under an init).
+func TestHealthcheckDefaultsFollowTheRunningServersFlags(t *testing.T) {
+	clearServerTLSEnv(t)
+	t.Setenv("CHATCLI_SERVER_PORT", "6123")
+	fakeProcess(t, "1", "/sbin/tini", "--", "chatcli", "server")
+	fakeProcess(t, "7", "/usr/local/bin/chatcli", "server", "--port", "7001",
+		"--tls-cert", "/etc/chatcli/tls/tls.crt", "--tls-key", "/etc/chatcli/tls/tls.key",
+		"--tls-client-ca", "/etc/chatcli/client-ca/ca.crt")
+	fakeProcess(t, "9", "/usr/local/bin/chatcli", "healthcheck")
+	fakeProcess(t, "self", "chatcli", "server", "--port", "1")
+
+	opts, err := parseHealthcheckFlags(nil, &bytes.Buffer{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if opts.addr != "127.0.0.1:7001" || opts.serverCert != "/etc/chatcli/tls/tls.crt" || opts.clientCA != "/etc/chatcli/client-ca/ca.crt" {
+		t.Fatalf("running server's flags not followed: %+v", opts)
+	}
+
+	// Explicit flags still win.
+	opts, _ = parseHealthcheckFlags([]string{"-addr", "10.0.0.9:50051", "-tls-cert", "/x.crt"}, &bytes.Buffer{})
+	if opts.addr != "10.0.0.9:50051" || opts.serverCert != "/x.crt" {
+		t.Fatalf("explicit flags lost: %+v", opts)
+	}
+}
+
+// Flags the server itself would reject mean no server is running with them.
+func TestHealthcheckIgnoresUnparsableServerFlags(t *testing.T) {
+	clearServerTLSEnv(t)
+	t.Setenv("CHATCLI_SERVER_PORT", "6123")
+	fakeProcess(t, "1", "chatcli", "server", "--no-such-flag")
+	opts, _ := parseHealthcheckFlags(nil, &bytes.Buffer{})
+	if opts.addr != "127.0.0.1:6123" {
+		t.Fatalf("addr %q, want the variables' answer", opts.addr)
+	}
+}
+
+func TestDialHost(t *testing.T) {
+	for bind, want := range map[string]string{
+		"": "127.0.0.1", "0.0.0.0": "127.0.0.1", "127.0.0.1": "127.0.0.1",
+		"::": "::1", "[::1]": "::1", "10.1.2.3": "10.1.2.3", "[fd00::5]": "fd00::5",
+	} {
+		if got := dialHost(bind); got != want {
+			t.Errorf("dialHost(%q) = %q, want %q", bind, got, want)
+		}
+	}
+	clearServerTLSEnv(t)
+	t.Setenv("CHATCLI_BIND_ADDRESS", "10.1.2.3")
+	if opts, _ := parseHealthcheckFlags(nil, &bytes.Buffer{}); opts.addr != "10.1.2.3:50051" {
+		t.Errorf("specific bind: addr %q", opts.addr)
 	}
 }

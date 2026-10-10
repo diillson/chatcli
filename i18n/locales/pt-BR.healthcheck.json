@@ -9,12 +9,12 @@
   "healthcheck.no_cert": "nenhum certificado PEM em %s",
   "healthcheck.no_san": "o certificado do servidor não tem nome DNS nem endereço IP; passe -tls-server-name",
   "healthcheck.client_pair": "carregando o certificado de cliente",
-  "healthcheck.mtls_needs_client_cert": "o servidor exige certificado de cliente (CHATCLI_SERVER_TLS_CLIENT_CA): defina CHATCLI_HEALTHCHECK_TLS_CLIENT_CERT e CHATCLI_HEALTHCHECK_TLS_CLIENT_KEY com um par emitido por essa CA",
-  "healthcheck.flag.addr": "endereço do servidor (padrão: localhost na CHATCLI_SERVER_PORT)",
+  "healthcheck.mtls_needs_client_cert": "o servidor exige certificado de cliente: defina CHATCLI_TLS_CLIENT_CERT e CHATCLI_TLS_CLIENT_KEY com um par emitido pela CA dele (o mesmo par do chatcli connect)",
+  "healthcheck.flag.addr": "endereço do servidor (padrão: a porta e o bind do servidor local)",
   "healthcheck.flag.service": "serviço consultado; vazio é o servidor inteiro",
   "healthcheck.flag.timeout": "quanto esperar pela resposta",
-  "healthcheck.flag.tls_cert": "certificado que o servidor serve; liga o TLS e é o único confiável (padrão: CHATCLI_SERVER_TLS_CERT)",
+  "healthcheck.flag.tls_cert": "certificado que o servidor serve; liga o TLS e é o único confiável (padrão: o do servidor local)",
   "healthcheck.flag.tls_server_name": "nome pelo qual verificar o certificado do servidor (padrão: o primeiro nome DNS ou IP dele)",
-  "healthcheck.flag.tls_client_cert": "certificado de cliente para um servidor que exige mTLS (padrão: CHATCLI_HEALTHCHECK_TLS_CLIENT_CERT)",
-  "healthcheck.flag.tls_client_key": "chave de cliente do -tls-client-cert (padrão: CHATCLI_HEALTHCHECK_TLS_CLIENT_KEY)"
+  "healthcheck.flag.tls_client_cert": "certificado de cliente para um servidor que exige mTLS (padrão: CHATCLI_TLS_CLIENT_CERT)",
+  "healthcheck.flag.tls_client_key": "chave de cliente do -tls-client-cert (padrão: CHATCLI_TLS_CLIENT_KEY)"
 }

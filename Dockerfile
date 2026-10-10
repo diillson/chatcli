@@ -35,8 +35,8 @@ COPY --from=builder /app/chatcli /usr/local/bin/chatcli
 EXPOSE 50051
 
 # The server checks itself: `chatcli healthcheck` asks grpc.health.v1 on the
-# port and with the TLS settings the server reads (CHATCLI_SERVER_PORT,
-# CHATCLI_SERVER_TLS_CERT), so the probe follows any configuration.
+# port, bind and TLS settings the running server resolved, from its flags or
+# its CHATCLI_SERVER_* variables, so the check follows any configuration.
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
     CMD ["/usr/local/bin/chatcli", "healthcheck"]
 
