@@ -43,6 +43,7 @@ var subcommands = []Subcommand{
 	{Name: "dash", Usage: "chatcli dash", SummaryKey: "subcmd.dash"},
 	{Name: "web", Usage: "chatcli web [flags]", SummaryKey: "subcmd.web", OwnHelp: true},
 	{Name: "server", Aliases: []string{"serve"}, Usage: "chatcli server [flags]", SummaryKey: "subcmd.server", OwnHelp: true},
+	{Name: "healthcheck", Usage: "chatcli healthcheck [flags]", SummaryKey: "subcmd.healthcheck", OwnHelp: true},
 	{Name: "connect", Usage: "chatcli connect [flags] [address]", SummaryKey: "subcmd.connect", OwnHelp: true},
 	{Name: "watch", Usage: "chatcli watch [flags]", SummaryKey: "subcmd.watch", OwnHelp: true},
 	{Name: "gateway", Usage: "chatcli gateway", SummaryKey: "subcmd.gateway"},

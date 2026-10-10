@@ -112,9 +112,11 @@ services:
       # Drop plugin binaries into ~/.chatcli/plugins inside this volume.
       - chatcli-home:/home/nonroot
     restart: unless-stopped
-    # The image HEALTHCHECK runs grpc-health-probe against :50051 in
-    # plaintext. With TLS enabled on the server, override it with the probe's
-    # -tls flags (e.g. -tls -tls-ca-cert <ca>) or it will report unhealthy.
+    # The image HEALTHCHECK runs `chatcli healthcheck`, which reads the same
+    # CHATCLI_SERVER_PORT and CHATCLI_SERVER_TLS_CERT as the server, so it
+    # follows TLS on its own. With mutual TLS (CHATCLI_SERVER_TLS_CLIENT_CA)
+    # also set CHATCLI_TLS_CLIENT_CERT and CHATCLI_TLS_CLIENT_KEY, the client
+    # pair chatcli connect uses.
     read_only: true
     tmpfs:
       - /tmp:size=100M

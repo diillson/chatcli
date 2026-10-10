@@ -17,8 +17,8 @@ import (
 
 // The standard gRPC health service, next to ChatCLIService/Health.
 //
-// Kubelet gRPC probes, grpc-health-probe (shipped in the server image and
-// used by its HEALTHCHECK) and most load balancers speak only
+// Kubelet gRPC probes, `chatcli healthcheck` (the server image's
+// HEALTHCHECK) and most load balancers speak only
 // grpc.health.v1.Health. Without it they get Unimplemented and report the
 // server as down no matter how healthy it is.
 //

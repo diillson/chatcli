@@ -1,0 +1,20 @@
+{
+  "subcmd.healthcheck": "Probe a ChatCLI server's gRPC health (exit 0 when serving); the image HEALTHCHECK",
+  "healthcheck.serving": "%s is serving.",
+  "healthcheck.not_serving": "%s answered %s.",
+  "healthcheck.failed": "%s did not answer the health check: %v",
+  "healthcheck.unexpected_args": "unexpected arguments: %v",
+  "healthcheck.bad_timeout": "-timeout must be greater than zero",
+  "healthcheck.read_cert": "reading the server certificate %s",
+  "healthcheck.no_cert": "no PEM certificate in %s",
+  "healthcheck.no_san": "the server certificate names no DNS name or IP address; pass -tls-server-name",
+  "healthcheck.client_pair": "loading the client certificate",
+  "healthcheck.mtls_needs_client_cert": "the server requires client certificates: set CHATCLI_TLS_CLIENT_CERT and CHATCLI_TLS_CLIENT_KEY to a pair its CA issued (the same pair chatcli connect uses)",
+  "healthcheck.flag.addr": "server address (default: the local server's port and bind)",
+  "healthcheck.flag.service": "service to ask about; empty means the whole server",
+  "healthcheck.flag.timeout": "how long to wait for the answer",
+  "healthcheck.flag.tls_cert": "certificate the server serves; enables TLS and is the only one trusted (default: the local server's)",
+  "healthcheck.flag.tls_server_name": "name to verify the server certificate by (default: its first DNS name or IP address)",
+  "healthcheck.flag.tls_client_cert": "client certificate for a server that requires mTLS (default: CHATCLI_TLS_CLIENT_CERT)",
+  "healthcheck.flag.tls_client_key": "client key for -tls-client-cert (default: CHATCLI_TLS_CLIENT_KEY)"
+}
