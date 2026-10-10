@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.215.1](https://github.com/diillson/chatcli/compare/v1.215.0...v1.215.1) (2026-10-10)
+
+
+### Bug Fixes
+
+* **docker:** health-check the server image with chatcli itself ([#1750](https://github.com/diillson/chatcli/issues/1750)) ([424843a](https://github.com/diillson/chatcli/commit/424843a626e3a9f584c93287821d1da3d2951082))
+* **gateway:** close the webhook channel delivery gaps ([#1749](https://github.com/diillson/chatcli/issues/1749)) ([380f706](https://github.com/diillson/chatcli/commit/380f706daf375c45a845515c6a82494b07e8eb3f))
+
 ## [1.215.0](https://github.com/diillson/chatcli/compare/v1.214.0...v1.215.0) (2026-10-10)
 
 
