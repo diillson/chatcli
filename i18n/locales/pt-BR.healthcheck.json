@@ -1,0 +1,20 @@
+{
+  "subcmd.healthcheck": "Verifica a saúde gRPC de um servidor ChatCLI (sai com 0 quando está servindo); é o HEALTHCHECK da imagem",
+  "healthcheck.serving": "%s está servindo.",
+  "healthcheck.not_serving": "%s respondeu %s.",
+  "healthcheck.failed": "%s não respondeu à verificação de saúde: %v",
+  "healthcheck.unexpected_args": "argumentos inesperados: %v",
+  "healthcheck.bad_timeout": "-timeout precisa ser maior que zero",
+  "healthcheck.read_cert": "lendo o certificado do servidor %s",
+  "healthcheck.no_cert": "nenhum certificado PEM em %s",
+  "healthcheck.no_san": "o certificado do servidor não tem nome DNS nem endereço IP; passe -tls-server-name",
+  "healthcheck.client_pair": "carregando o certificado de cliente",
+  "healthcheck.mtls_needs_client_cert": "o servidor exige certificado de cliente (CHATCLI_SERVER_TLS_CLIENT_CA): defina CHATCLI_HEALTHCHECK_TLS_CLIENT_CERT e CHATCLI_HEALTHCHECK_TLS_CLIENT_KEY com um par emitido por essa CA",
+  "healthcheck.flag.addr": "endereço do servidor (padrão: localhost na CHATCLI_SERVER_PORT)",
+  "healthcheck.flag.service": "serviço consultado; vazio é o servidor inteiro",
+  "healthcheck.flag.timeout": "quanto esperar pela resposta",
+  "healthcheck.flag.tls_cert": "certificado que o servidor serve; liga o TLS e é o único confiável (padrão: CHATCLI_SERVER_TLS_CERT)",
+  "healthcheck.flag.tls_server_name": "nome pelo qual verificar o certificado do servidor (padrão: o primeiro nome DNS ou IP dele)",
+  "healthcheck.flag.tls_client_cert": "certificado de cliente para um servidor que exige mTLS (padrão: CHATCLI_HEALTHCHECK_TLS_CLIENT_CERT)",
+  "healthcheck.flag.tls_client_key": "chave de cliente do -tls-client-cert (padrão: CHATCLI_HEALTHCHECK_TLS_CLIENT_KEY)"
+}

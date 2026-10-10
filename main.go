@@ -65,6 +65,11 @@ func dispatchSubcommand() bool {
 	case "storage":
 		runStorageSubcommand(os.Args[2:])
 		return true
+	case "healthcheck":
+		// A container runtime runs this every few seconds on a read-only
+		// filesystem: settings and translations, then one gRPC call.
+		_ = loadDotenvThenI18n()
+		os.Exit(cmd.RunHealthcheck(os.Args[2:], os.Stdout, os.Stderr))
 	case "eval":
 		runEvalSubcommand(os.Args[2:])
 		return true
