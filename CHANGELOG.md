@@ -1,5 +1,22 @@
 # Changelog
 
+## [1.215.0](https://github.com/diillson/chatcli/compare/v1.214.0...v1.215.0) (2026-10-10)
+
+
+### Features
+
+* **cli:** paint the startup banner with the teal brand ramp ([#1748](https://github.com/diillson/chatcli/issues/1748)) ([5f6b9c9](https://github.com/diillson/chatcli/commit/5f6b9c9a26593c62f45404c956d956d48934d791))
+* **ui:** paint the startup banner with the ChatCLI gradient ([#1740](https://github.com/diillson/chatcli/issues/1740)) ([ed39abb](https://github.com/diillson/chatcli/commit/ed39abb5ebd643676cd97982d376ed16876debf8))
+* **web:** switch MCP servers and pinned skills from the page, complete command arguments ([#1741](https://github.com/diillson/chatcli/issues/1741)) ([907813a](https://github.com/diillson/chatcli/commit/907813ac598fb7d027e80bf18cb5f75f9124201a))
+
+
+### Bug Fixes
+
+* **chat:** offer the coder handoff instead of telling the user to type /coder ([#1745](https://github.com/diillson/chatcli/issues/1745)) ([23770e6](https://github.com/diillson/chatcli/commit/23770e6026298796639a97927cee300955dec5df))
+* **config:** default to models the providers serve today ([#1746](https://github.com/diillson/chatcli/issues/1746)) ([bfa99e3](https://github.com/diillson/chatcli/commit/bfa99e3c02c2212647f71de7d621eb599941528f))
+* **gateway:** deliver long Discord replies, surface Slack errors, fail closed on WhatsApp verification ([#1743](https://github.com/diillson/chatcli/issues/1743)) ([97e1742](https://github.com/diillson/chatcli/commit/97e1742bd1afc876c1d40964eac6126578b91545))
+* **webfetch:** close the headless browser when chatcli exits, however it exits ([#1747](https://github.com/diillson/chatcli/issues/1747)) ([e6d0001](https://github.com/diillson/chatcli/commit/e6d0001ebaf095f2e8c60116b24147b650fbb1fe))
+
 ## [1.214.0](https://github.com/diillson/chatcli/compare/v1.213.1...v1.214.0) (2026-10-09)
 
 
