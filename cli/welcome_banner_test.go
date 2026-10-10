@@ -41,14 +41,14 @@ func TestPrintLogo_TrueColorPaintsALeftToRightGradient(t *testing.T) {
 		require.NotEmpty(t, cells, "every block cell carries its own truecolor escape")
 		assert.Equal(t, strings.Count(stripANSIWelcome(out), "█"), len(cells), "no block cell is left uncolored")
 
-		// The first row starts on the coral end of the brand ramp and ends
-		// toward amber: green rises left to right.
+		// The first row starts on the teal end of the brand ramp and ends
+		// toward blue: blue rises left to right.
 		first := strings.SplitN(out, "\n", 2)[0]
 		row := trueColorFg.FindAllStringSubmatch(first, -1)
 		require.GreaterOrEqual(t, len(row), 2)
-		g0, _ := strconv.Atoi(row[0][2])
-		gN, _ := strconv.Atoi(row[len(row)-1][2])
-		assert.Less(t, g0, gN, "the gradient runs coral to amber")
+		b0, _ := strconv.Atoi(row[0][3])
+		bN, _ := strconv.Atoi(row[len(row)-1][3])
+		assert.Less(t, b0, bN, "the gradient runs teal to blue")
 
 		plain := stripANSIWelcome(out)
 		for _, glyph := range []string{"╔", "╝", "║", "╚", "╗", "═"} {

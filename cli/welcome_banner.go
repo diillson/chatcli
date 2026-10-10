@@ -5,8 +5,8 @@
  *
  * The block letters of the startup banner are painted column by column with
  * a left-to-right gradient, the same one the documentation site draws its
- * banner with. The default themes use the ChatCLI brand ramp (coral, orange,
- * amber); every other theme runs from its own Primary to its Secondary, so a
+ * banner with. The default themes use the ChatCLI brand ramp (teal, cyan,
+ * blue); every other theme runs from its own Primary to its Secondary, so a
  * theme switch still re-skins the banner.
  *
  * The gradient needs per-cell colors, so it is emitted only where the
@@ -31,8 +31,8 @@ type bannerRamp [3][3]float64
 
 // Brand ramps, matching the docs site (style.css, --cb-a/--cb-b/--cb-c).
 var (
-	bannerRampDark  = bannerRamp{{255, 95, 69}, {255, 138, 92}, {255, 192, 97}}
-	bannerRampLight = bannerRamp{{224, 73, 44}, {232, 98, 46}, {194, 120, 18}}
+	bannerRampDark  = bannerRamp{{45, 212, 191}, {34, 211, 238}, {96, 165, 250}}
+	bannerRampLight = bannerRamp{{13, 148, 136}, {8, 145, 178}, {37, 99, 235}}
 )
 
 // bannerRampFor picks the ramp for a theme: the brand ramp for the two
