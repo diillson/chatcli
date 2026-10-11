@@ -14,6 +14,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/diillson/chatcli/utils"
 )
 
 // browserNavigationAllowed is the policy for every document the @browser
@@ -42,13 +44,15 @@ func browserNavigationAllowed(raw string) error {
 }
 
 // browserArtifactDir is where screenshot and pdf write: the session
-// scratch directory (CHATCLI_AGENT_TMPDIR) or, without one, a directory
-// under the system temp dir. It matches how @webfetch confines save_path.
-func browserArtifactDir() string {
+// scratch directory (CHATCLI_AGENT_TMPDIR) or, without one, an owner-only
+// directory under the user's state root, never a fixed name in the shared
+// temp directory that another local user could pre-create or fill with
+// symbolic links. It matches how @webfetch confines save_path.
+func browserArtifactDir() (string, error) {
 	if scratch := strings.TrimSpace(os.Getenv("CHATCLI_AGENT_TMPDIR")); scratch != "" {
-		return scratch
+		return scratch, nil
 	}
-	return filepath.Join(os.TempDir(), "chatcli-browser")
+	return utils.PrivateStateDir("browser")
 }
 
 // browserArtifactPath confines a screenshot or pdf file to
@@ -57,7 +61,10 @@ func browserArtifactDir() string {
 // name is generated from prefix and ext. An existing entry that is not a
 // regular file (a planted symlink) is refused.
 func browserArtifactPath(requested, prefix, ext string) (string, error) {
-	dir := browserArtifactDir()
+	dir, err := browserArtifactDir()
+	if err != nil {
+		return "", err
+	}
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return "", err
 	}

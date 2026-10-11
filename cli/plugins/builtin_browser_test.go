@@ -358,7 +358,7 @@ func TestBrowserExecute_ScreenshotScrollBackNetwork(t *testing.T) {
 
 	// --file names a file in the browser output directory, never a path
 	// elsewhere.
-	want := filepath.Join(browserArtifactDir(), "x.png")
+	want := filepath.Join(mustBrowserArtifactDir(t), "x.png")
 	out, err := p.Execute(context.Background(), []string{"screenshot", "--file", "/tmp/x.png"})
 	if err != nil || !strings.Contains(out, "x.png") {
 		t.Fatalf("screenshot: out=%q err=%v", out, err)
@@ -672,7 +672,7 @@ func TestBrowserExecute_ExtendedVerbs(t *testing.T) {
 	if out := run("html", "#app"); fake.lastOp != "html" || fake.lastTarget != "#app" || !strings.Contains(out, "<div") {
 		t.Fatalf("html: %q", out)
 	}
-	if out := run(`{"cmd":"pdf","args":{"file":"/tmp/p.pdf"}}`); fake.lastTarget != mustAbs(t, filepath.Join(browserArtifactDir(), "p.pdf")) || !strings.Contains(out, "PDF saved") {
+	if out := run(`{"cmd":"pdf","args":{"file":"/tmp/p.pdf"}}`); fake.lastTarget != mustAbs(t, filepath.Join(mustBrowserArtifactDir(t), "p.pdf")) || !strings.Contains(out, "PDF saved") {
 		t.Fatalf("pdf: %q", out)
 	}
 	if out := run("pdf"); !strings.HasSuffix(fake.lastTarget, ".pdf") || !strings.Contains(out, "PDF saved") {
@@ -694,7 +694,7 @@ func TestBrowserExecute_ExtendedVerbs(t *testing.T) {
 		t.Fatal("resize without dims must error")
 	}
 	run(`{"cmd":"screenshot","args":{"full":true,"file":"/tmp/full.png"}}`)
-	if fake.lastOp != "screenshot-full" || fake.lastTarget != mustAbs(t, filepath.Join(browserArtifactDir(), "full.png")) {
+	if fake.lastOp != "screenshot-full" || fake.lastTarget != mustAbs(t, filepath.Join(mustBrowserArtifactDir(t), "full.png")) {
 		t.Fatalf("screenshot full: %s %s", fake.lastOp, fake.lastTarget)
 	}
 	run("screenshot", "--full")
@@ -859,4 +859,13 @@ func TestBrowserExecute_WaitChangedAndTimeoutMentionsMove(t *testing.T) {
 	if err != nil || strings.Contains(out, "did move") {
 		t.Fatalf("timeout without move: out=%q err=%v", out, err)
 	}
+}
+
+func mustBrowserArtifactDir(t *testing.T) string {
+	t.Helper()
+	dir, err := browserArtifactDir()
+	if err != nil {
+		t.Fatalf("browserArtifactDir: %v", err)
+	}
+	return dir
 }

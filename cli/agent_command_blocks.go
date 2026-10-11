@@ -424,10 +424,16 @@ func (a *AgentMode) cmdSaveOutput(renderer *agent.UIRenderer, outputs []*Command
 		_ = a.getInput(renderer.Colorize(i18n.T("agent.status.press_enter"), agent.ColorGray))
 		return
 	}
-	dir := filepath.Join(os.TempDir(), "chatcli-agent-logs")
-	_ = os.MkdirAll(dir, 0o700)
+	// The owner-only agent-logs directory under the state root, never a
+	// fixed name in the shared temp dir that another user could pre-create.
+	dir, dirErr := utils.PrivateStateDir("agent-logs")
+	if dirErr != nil {
+		fmt.Println(i18n.T("agent.status.error_saving"), dirErr)
+		_ = a.getInput(renderer.Colorize(i18n.T("agent.status.press_enter"), agent.ColorGray))
+		return
+	}
 	fpath := filepath.Join(dir, fmt.Sprintf("cmd-%d-%d.log", n, time.Now().Unix()))
-	// #nosec G703 -- every component is generated: os.TempDir, a constant
+	// #nosec G703 -- every component is generated: the private state
 	// directory, and a filename built from a bounds-checked index and a
 	// timestamp. No caller-supplied string reaches this path.
 	if writeErr := os.WriteFile(fpath, []byte(outputs[n-1].Output), 0o600); writeErr != nil {

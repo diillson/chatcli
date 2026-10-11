@@ -2,18 +2,24 @@ package auth
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"sync"
 
 	"github.com/diillson/chatcli/i18n"
+	"github.com/diillson/chatcli/utils"
 	"go.uber.org/zap"
 )
 
 var (
 	storeMu     sync.Mutex
 	cachedStore *AuthProfileStore
+	// storeLoadErr records why the store on disk could not be opened. While
+	// it is set the store is read-only: the in-memory store is empty, and
+	// saving it would overwrite every credential the file still holds.
+	storeLoadErr error
 )
 
 // DefaultStorePath retorna o caminho padrão do arquivo de perfis de autenticação.
@@ -59,33 +65,18 @@ func loadStoreUnlocked(logger *zap.Logger) *AuthProfileStore {
 			cachedStore = store
 			return store
 		}
-		if logger != nil {
-			logger.Error(i18n.T("auth.store.read_failed"), zap.Error(err))
-		}
-		store := NewAuthProfileStore()
-		cachedStore = store
-		return store
+		return lockStoreUnlocked(storePath, i18n.T("auth.store.read_failed"), err, logger)
 	}
 
 	// H3: Decrypt data (transparently handles unencrypted legacy stores)
 	plaintext, err := decryptData(data)
 	if err != nil {
-		if logger != nil {
-			logger.Error(i18n.T("auth.store.decrypt_failed"), zap.Error(err))
-		}
-		s := NewAuthProfileStore()
-		cachedStore = s
-		return s
+		return lockStoreUnlocked(storePath, i18n.T("auth.store.decrypt_failed"), err, logger)
 	}
 
 	var store AuthProfileStore
 	if err := json.Unmarshal(plaintext, &store); err != nil {
-		if logger != nil {
-			logger.Error(i18n.T("auth.store.parse_failed"), zap.Error(err))
-		}
-		s := NewAuthProfileStore()
-		cachedStore = s
-		return s
+		return lockStoreUnlocked(storePath, i18n.T("auth.store.parse_failed"), err, logger)
 	}
 
 	if store.Profiles == nil {
@@ -102,6 +93,21 @@ func loadStoreUnlocked(logger *zap.Logger) *AuthProfileStore {
 	return &store
 }
 
+// lockStoreUnlocked records that the store at path could not be opened and
+// returns an empty in-memory store. Reads see no profiles; every write is
+// refused until the cause is fixed and the process restarts (or the cache
+// is invalidated), so the file is never replaced by the empty store.
+func lockStoreUnlocked(path, what string, cause error, logger *zap.Logger) *AuthProfileStore {
+	storeLoadErr = fmt.Errorf("%s: %w", what, cause)
+	if logger != nil {
+		logger.Error(what, zap.String("path", path), zap.Error(cause))
+		logger.Error(i18n.T("auth.store.locked", path, getKeyPath(), keychainEnvVar))
+	}
+	s := NewAuthProfileStore()
+	cachedStore = s
+	return s
+}
+
 // SaveStore salva o store no disco.
 func SaveStore(store *AuthProfileStore, logger *zap.Logger) error {
 	storeMu.Lock()
@@ -112,6 +118,15 @@ func SaveStore(store *AuthProfileStore, logger *zap.Logger) error {
 
 func saveStoreUnlocked(store *AuthProfileStore, logger *zap.Logger) error {
 	storePath := DefaultStorePath()
+
+	// A save that was not preceded by a load still has to know whether the
+	// file on disk opens: only then is replacing it safe.
+	if cachedStore == nil {
+		loadStoreUnlocked(logger)
+	}
+	if storeLoadErr != nil {
+		return fmt.Errorf("%s: %w", i18n.T("auth.store.locked", storePath, getKeyPath(), keychainEnvVar), storeLoadErr)
+	}
 
 	if err := EnsureStoreDir(storePath); err != nil {
 		return fmt.Errorf("%s: %w", i18n.T("auth.store.create_dir_failed"), err)
@@ -128,7 +143,12 @@ func saveStoreUnlocked(store *AuthProfileStore, logger *zap.Logger) error {
 		return fmt.Errorf("%s: %w", i18n.T("auth.store.encrypt_failed"), err)
 	}
 
-	if err := os.WriteFile(storePath, encrypted, 0o600); err != nil {
+	if err := backupStoreFile(storePath); err != nil {
+		return fmt.Errorf("%s: %w", i18n.T("auth.store.write_failed"), err)
+	}
+	// fsync'd temp file and rename: a crash mid-write never leaves a
+	// truncated credential store behind.
+	if err := utils.AtomicWriteFile(storePath, encrypted, 0o600); err != nil {
 		return fmt.Errorf("%s: %w", i18n.T("auth.store.write_failed"), err)
 	}
 
@@ -184,4 +204,22 @@ func InvalidateCache() {
 	storeMu.Lock()
 	defer storeMu.Unlock()
 	cachedStore = nil
+	storeLoadErr = nil
+}
+
+// storeBackupSuffix names the copy of the previous store kept next to it.
+const storeBackupSuffix = ".bak"
+
+// backupStoreFile copies the current store file to path+".bak" (0600)
+// before it is replaced, so a write can always be undone by hand. A missing
+// store needs no backup.
+func backupStoreFile(path string) error {
+	data, err := os.ReadFile(filepath.Clean(path)) //#nosec G304 -- the credential store path (CHATCLI_AUTH_DIR or ~/.chatcli)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	return utils.AtomicWriteFile(path+storeBackupSuffix, data, 0o600)
 }

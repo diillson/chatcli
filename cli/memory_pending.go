@@ -17,6 +17,7 @@ package cli
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"github.com/diillson/chatcli/pkg/atrest"
 	"os"
@@ -171,11 +172,11 @@ func (mw *memoryWorker) persistPending(messages []models.Message) (string, error
 	if err != nil {
 		return "", err
 	}
-	if data, err = atrest.Seal(data); err != nil {
-		return "", err
-	}
 	// Zero-padded so lexicographic file order is chronological order.
 	path := filepath.Join(dir, fmt.Sprintf("seg-%020d.json", time.Now().UnixNano()))
+	if data, err = atrest.SealAt(path, data); err != nil {
+		return "", err
+	}
 	tmp := path + ".tmp"
 	if err := os.WriteFile(tmp, data, 0o600); err != nil {
 		return "", err
@@ -193,7 +194,7 @@ func (mw *memoryWorker) rewritePending(path string, seg pendingSegment) {
 	if err != nil {
 		return
 	}
-	if data, err = atrest.Seal(data); err != nil {
+	if data, err = atrest.SealAt(path, data); err != nil {
 		return
 	}
 	tmp := path + ".tmp"
@@ -292,6 +293,26 @@ func (mw *memoryWorker) pendingFiles() []string {
 	return matches
 }
 
+// errPendingUnreadable marks a segment that could not be read or opened
+// (I/O error, missing or wrong key): it stays queued, unlike a segment
+// that opens but does not parse.
+var errPendingUnreadable = errors.New("pending segment unreadable")
+
+// readPendingSegment loads one queued segment, opening it with the binding
+// to its own path that persistPending and /config security reseal write.
+func readPendingSegment(path string) (pendingSegment, error) {
+	var seg pendingSegment
+	data, err := os.ReadFile(path) // #nosec G304 -- our own queue dir under ~/.chatcli
+	if err == nil {
+		data, err = atrest.OpenAt(path, data)
+	}
+	if err != nil {
+		return seg, fmt.Errorf("%w: %w", errPendingUnreadable, err)
+	}
+	err = json.Unmarshal(data, &seg)
+	return seg, err
+}
+
 // drainPending retries up to pendingDrainBatch queued segments and returns how
 // many were processed. It stops at the first still-failing segment — the
 // provider is likely still down, and order preserves conversation causality.
@@ -302,15 +323,11 @@ func (mw *memoryWorker) drainPending(ctx context.Context) int {
 		if processed >= pendingDrainBatch {
 			break
 		}
-		data, err := os.ReadFile(path) // #nosec G304 -- our own queue dir under ~/.chatcli
-		if err == nil {
-			data, err = atrest.Open(data)
-		}
-		if err != nil {
+		seg, err := readPendingSegment(path)
+		if errors.Is(err, errPendingUnreadable) {
 			continue
 		}
-		var seg pendingSegment
-		if err := json.Unmarshal(data, &seg); err != nil || len(seg.Messages) == 0 {
+		if err != nil || len(seg.Messages) == 0 {
 			mw.logger.Warn("Memory worker: removing corrupt pending segment", zap.String("file", path))
 			_ = os.Remove(path)
 			continue

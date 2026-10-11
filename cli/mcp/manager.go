@@ -16,6 +16,7 @@ import (
 	"github.com/diillson/chatcli/i18n"
 	"github.com/diillson/chatcli/models"
 	"github.com/diillson/chatcli/pkg/pulse"
+	"github.com/diillson/chatcli/utils"
 	"go.uber.org/zap"
 )
 
@@ -1090,7 +1091,7 @@ func (m *Manager) logTrustModeIfEnabled(cfg ServerConfig) {
 func (m *Manager) startSSEServer(ctx context.Context, conn *ServerConnection) error {
 	m.logger.Info("connecting to MCP SSE server",
 		zap.String("server", conn.Config.Name),
-		zap.String("url", conn.Config.URL))
+		zap.String("url", utils.RedactURLForLog(conn.Config.URL)))
 
 	transport, err := newSSETransport(ctx, conn.Config, m.logger, m.channels, conn.Config.Name)
 	if err != nil {
@@ -1133,7 +1134,7 @@ func (m *Manager) startSSEServer(ctx context.Context, conn *ServerConnection) er
 func (m *Manager) startHTTPServer(ctx context.Context, conn *ServerConnection) error {
 	m.logger.Info("connecting to MCP HTTP server",
 		zap.String("server", conn.Config.Name),
-		zap.String("url", conn.Config.URL))
+		zap.String("url", utils.RedactURLForLog(conn.Config.URL)))
 
 	transport, err := newHTTPTransport(ctx, conn.Config, m.logger, m.channels, conn.Config.Name)
 	if err != nil {

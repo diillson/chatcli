@@ -109,7 +109,7 @@ func loadCostSnapshotFrom(path string) (*SessionCostData, error) {
 	if err != nil {
 		return nil, err
 	}
-	if b, err = atrest.Open(b); err != nil {
+	if b, err = atrest.OpenAt(path, b); err != nil {
 		return nil, err
 	}
 	var data SessionCostData

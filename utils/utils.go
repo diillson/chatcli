@@ -112,7 +112,14 @@ var sensitiveTextPatterns = []struct {
 	// Chaves de API comuns (OpenAI, Anthropic, Stripe, etc.)
 	{regexp.MustCompile(`(?i)(sk|pk)_(test|live)_[a-zA-Z0-9]{20,}`), "[REDACTED_API_KEY]"},
 	{regexp.MustCompile(`sk-ant-[a-zA-Z0-9_-]{20,}`), "sk-ant-[REDACTED]"},
+	// OpenAI project, service-account and admin keys, OpenRouter keys: a
+	// hyphenated prefix followed by a base64url body.
+	{regexp.MustCompile(`sk-(?:proj|svcacct|admin|or-v1)-[A-Za-z0-9_-]{20,}`), "sk-[REDACTED]"},
 	{regexp.MustCompile(`sk-[a-zA-Z0-9]{20,}`), "sk-[REDACTED]"},
+	// Groq keys, GitLab personal access tokens, Google OAuth access tokens
+	{regexp.MustCompile(`gsk_[A-Za-z0-9]{20,}`), "gsk_[REDACTED]"},
+	{regexp.MustCompile(`glpat-[A-Za-z0-9_-]{20,}`), "glpat-[REDACTED]"},
+	{regexp.MustCompile(`ya29\.[A-Za-z0-9_-]{20,}`), "ya29.[REDACTED]"},
 	// L3: xAI / Grok API keys
 	{regexp.MustCompile(`xai-[a-zA-Z0-9]{20,}`), "xai-[REDACTED]"},
 	// L3: StackSpot tokens (stk_ prefix)
@@ -124,12 +131,15 @@ var sensitiveTextPatterns = []struct {
 	// L3: HuggingFace tokens
 	{regexp.MustCompile(`hf_[a-zA-Z0-9]{20,}`), "hf_[REDACTED]"},
 	// L3: GitHub tokens
-	{regexp.MustCompile(`gh[ps]_[a-zA-Z0-9]{20,}`), "[REDACTED_GH_TOKEN]"},
+	// GitHub tokens: personal (ghp_), OAuth (gho_), user-to-server (ghu_),
+	// server-to-server (ghs_) and refresh (ghr_).
+	{regexp.MustCompile(`gh[pousr]_[a-zA-Z0-9]{20,}`), "[REDACTED_GH_TOKEN]"},
 	{regexp.MustCompile(`github_pat_[a-zA-Z0-9_]{20,}`), "[REDACTED_GH_PAT]"},
 	// Google AI
 	{regexp.MustCompile(`AIza[0-9A-Za-z\-_]{30,}`), "[REDACTED_GOOGLE_API_KEY]"},
-	// AWS keys (access key id; secret access key by assignment)
-	{regexp.MustCompile(`AKIA[0-9A-Z]{16}`), "[REDACTED_AWS_KEY]"},
+	// AWS keys (long-term AKIA and temporary STS ASIA access key ids;
+	// secret access key by assignment)
+	{regexp.MustCompile(`(?:AKIA|ASIA)[0-9A-Z]{16}`), "[REDACTED_AWS_KEY]"},
 	{regexp.MustCompile(`(?i)(aws_secret_access_key\s*[=:]\s*"?)[A-Za-z0-9/+=]{40}`), "${1}[REDACTED_AWS_SECRET]"},
 	// Slack tokens (bot, user, app, refresh, config) and webhooks
 	{regexp.MustCompile(`xox[baprs]-[A-Za-z0-9-]{10,}`), "[REDACTED_SLACK_TOKEN]"},
@@ -145,11 +155,24 @@ var sensitiveTextPatterns = []struct {
 	// Bearer tokens e JWTs (parte do meio)
 	{regexp.MustCompile(`(?i)Bearer\s+[A-Za-z0-9\.\-_]+`), "Bearer [REDACTED]"},
 	{regexp.MustCompile(`ey[A-Za-z0-9-_=]+\.ey[A-Za-z0-9-_=]+\.[A-Za-z0-9-_.+/=]+`), "[REDACTED_JWT]"},
-	// Campos em JSON
-	{regexp.MustCompile(`("access_token"|"refresh_token"|"client_secret"|"client_key"|"api_key"|"password"|"token")\s*:\s*"[^"]+"`), `${1}:"[REDACTED]"`},
-	// Formato KEY=VALUE
-	{regexp.MustCompile(`(?im)^(API_KEY|ACCESS_TOKEN|CLIENT_SECRET|CLIENT_KEY|SECRET|PASSWORD)\s*=\s*.*$`), "$1=[REDACTED]"},
+	// Credential fields in JSON, any case and separator style (api_key,
+	// apiKey, api-key, secretAccessKey, sessionToken, x-api-key, ...)
+	{regexp.MustCompile(`(?i)("` + credentialFieldName + `")\s*:\s*"[^"]+"`), `${1}:"[REDACTED]"`},
+	// The same fields as YAML mappings, one per line
+	{regexp.MustCompile(`(?im)^(\s*(?:-\s+)?["']?` + credentialFieldName + `["']?\s*:[ \t]*)(?:"[^"\n]+"|'[^'\n]+'|[^\s#"'{\[][^\n]*)$`), "${1}[REDACTED]"},
+	// API key headers (curl -H, raw HTTP dumps)
+	{regexp.MustCompile(`(?i)\b((?:x-)?api-key|x-auth-token|x-goog-api-key)(\s*:\s*)[^\s"',\[]+`), "${1}${2}[REDACTED]"},
+	// KEY=VALUE where the name is a credential or merely ends in one
+	// (OPENAI_API_KEY, GITLAB_TOKEN, MY_APP_SECRET, ...)
+	{regexp.MustCompile(`(?im)^(\s*(?:export\s+)?(?:[A-Z0-9_]*_)?(?:API_KEY|TOKEN|SECRET|SECRET_ACCESS_KEY|ACCESS_TOKEN|CLIENT_SECRET|CLIENT_KEY|PASSWORD))\s*=\s*[^\s\[].*$`), "$1=[REDACTED]"},
 }
+
+// credentialFieldName matches the names of credential-bearing fields in
+// structured text, case-insensitively and with any of the usual separators
+// between words. Bare "token" and the compound token forms are listed
+// explicitly so pagination cursors such as next_page_token are left alone.
+const credentialFieldName = `(?:(?:[a-z0-9]+[_-]?)?(?:api[_-]?key|secret[_-]?access[_-]?key|client[_-]?secret|client[_-]?key|password|passwd|private[_-]?key)` +
+	`|(?:x[_-])?(?:access|refresh|session|id|auth|api|bearer|security)[_-]?token|token|secret)`
 
 func maskSensitiveInText(s string) string {
 	out := s

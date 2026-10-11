@@ -1,0 +1,3 @@
+{
+  "state.root.repair_failed": "chatcli: não foi possível tornar privado o diretório de estado ~/.chatcli (%v). Confirme que é um diretório seu e então rode: chmod 700 ~/.chatcli"
+}

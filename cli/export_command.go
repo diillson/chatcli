@@ -49,12 +49,18 @@ func (cli *ChatCLI) handleExportCommand(input string) {
 		return
 	}
 
-	f, err := os.Create(path) //#nosec G304 -- user-provided export path
+	// The trajectory is the whole conversation: owner-only, including when
+	// it replaces an existing file that was readable by others.
+	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600) //#nosec G304 -- user-provided export path
 	if err != nil {
 		fmt.Printf("  %s %v\n", colorize("ERR", ColorRed), err)
 		return
 	}
 	defer func() { _ = f.Close() }()
+	if err := f.Chmod(0o600); err != nil {
+		fmt.Printf("  %s %v\n", colorize("ERR", ColorRed), err)
+		return
+	}
 
 	n, err := trajectory.WriteJSONL(f, cli.history)
 	if err != nil {

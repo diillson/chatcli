@@ -1,0 +1,3 @@
+{
+  "state.root.repair_failed": "chatcli: could not make the state directory ~/.chatcli private (%v). Make sure it is a directory you own, then run: chmod 700 ~/.chatcli"
+}
