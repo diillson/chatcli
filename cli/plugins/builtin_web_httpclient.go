@@ -70,6 +70,25 @@ func webHTTPClient() *http.Client {
 	return webClient
 }
 
+// NewGuardedHTTPClient returns an HTTP client on the web tools' hardened
+// transport, for other code that fetches URLs it was given: the SSRF dial
+// guard (cloud metadata and link-local always refused, private ranges
+// under CHATCLI_WEBFETCH_BLOCK_PRIVATE), redirect validation that drops
+// credentials on a cross-host hop, the corporate proxy variables and the
+// CA bundle. insecureSkipVerify turns off certificate verification for
+// a caller whose user opted in.
+func NewGuardedHTTPClient(timeout time.Duration, insecureSkipVerify bool) *http.Client {
+	tr := newWebTransport()
+	if insecureSkipVerify {
+		tr.TLSClientConfig.InsecureSkipVerify = true //#nosec G402 -- explicit per-request opt-in by the user
+	}
+	return &http.Client{
+		Timeout:       timeout,
+		Transport:     utils.MeterTransport(&proxyAuthTransport{base: tr}),
+		CheckRedirect: validateRedirect,
+	}
+}
+
 // fallbackUserAgent is the non-browser User-Agent used when a gateway rejects
 // the browser UA. Corporate TLS-intercepting gateways (Secure Web Gateways)
 // routinely answer a browser-looking UA with 401/407 because they expect a real

@@ -128,21 +128,97 @@ func validateRedirect(req *http.Request, via []*http.Request) error {
 	if _, err := validateWebTarget(req.URL.String()); err != nil {
 		return fmt.Errorf("refusing redirect to %q: %w", req.URL.Redacted(), err)
 	}
-	if len(via) > 0 && req.URL.Host != via[0].URL.Host {
-		req.Header.Del("Authorization")
-		req.Header.Del("Proxy-Authorization")
-		req.Header.Del("Cookie")
-		req.Header.Del("Api-Key")
-		req.Header.Del("X-Api-Key")
+	if len(via) == 0 {
+		return nil
+	}
+	// The hop carries the headers of the original request. Any header
+	// outside the plain content-negotiation set may be a credential: the
+	// tools send API keys under names such as X-Subscription-Token or
+	// Private-Token, so a denylist of known names always lags behind.
+	if via[0].URL.Scheme == "https" && req.URL.Scheme == "http" && hasCredentialHeaders(req.Header) {
+		return fmt.Errorf("refusing redirect from https to %q: the request carries credentials that would be sent unencrypted", req.URL.Redacted())
+	}
+	if !strings.EqualFold(req.URL.Host, via[0].URL.Host) {
+		for name := range req.Header {
+			if !redirectSafeHeaders[http.CanonicalHeaderKey(name)] {
+				req.Header.Del(name)
+			}
+		}
 	}
 	return nil
+}
+
+// redirectSafeHeaders are the request headers that carry no credential
+// and survive a redirect to another host.
+var redirectSafeHeaders = map[string]bool{
+	"Accept":          true,
+	"Accept-Encoding": true,
+	"Accept-Language": true,
+	"Cache-Control":   true,
+	"Content-Type":    true,
+	"Pragma":          true,
+	"User-Agent":      true,
+}
+
+// hasCredentialHeaders reports whether h holds any header outside the
+// redirect-safe set.
+func hasCredentialHeaders(h http.Header) bool {
+	for name := range h {
+		if !redirectSafeHeaders[http.CanonicalHeaderKey(name)] {
+			return true
+		}
+	}
+	return false
+}
+
+// alwaysBlockedNets are metadata and credential endpoints outside the
+// link-local ranges, plus addresses that reach the local host without
+// looking like loopback. None is a destination a web tool needs.
+var alwaysBlockedNets = parseCIDRs(
+	"0.0.0.0/8",          // "this network": 0.0.0.0 reaches local listeners
+	"100.100.100.200/32", // Alibaba Cloud metadata
+	"168.63.129.16/32",   // Azure WireServer
+	"fd00:ec2::/64",      // AWS IPv6 IMDS (::254) and EKS Pod Identity (::23)
+	"::/128",             // unspecified
+)
+
+// embeddedIPv4Prefixes are IPv6 translation prefixes whose address carries
+// an IPv4 destination in its last four bytes (NAT64: RFC 6052 and the
+// local-use RFC 8215 prefix); a gateway forwards to that IPv4 address.
+var embeddedIPv4Prefixes = parseCIDRs("64:ff9b::/96", "64:ff9b:1::/48")
+
+// parseCIDRs parses constant CIDR literals; the tests assert that every
+// one of them parsed.
+func parseCIDRs(cidrs ...string) []*net.IPNet {
+	out := make([]*net.IPNet, 0, len(cidrs))
+	for _, c := range cidrs {
+		if _, n, err := net.ParseCIDR(c); err == nil {
+			out = append(out, n)
+		}
+	}
+	return out
 }
 
 // checkWebIP enforces the always-blocked (metadata/link-local) set and the
 // opt-in private/loopback block.
 func checkWebIP(ip net.IP, blockPrivate bool, host string) error {
+	if ip.To4() == nil && len(ip) == net.IPv6len {
+		for _, n := range embeddedIPv4Prefixes {
+			if n.Contains(ip) {
+				embedded := net.IPv4(ip[12], ip[13], ip[14], ip[15])
+				if err := checkWebIP(embedded, blockPrivate, host); err != nil {
+					return fmt.Errorf("blocked NAT64 address %s: %w", ip, err)
+				}
+			}
+		}
+	}
 	if ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() {
 		return fmt.Errorf("blocked metadata/link-local address %s (host %q)", ip, host)
+	}
+	for _, n := range alwaysBlockedNets {
+		if n.Contains(ip) {
+			return fmt.Errorf("blocked metadata or local-host address %s (host %q); use 127.0.0.1 or localhost for a local service", ip, host)
+		}
 	}
 	if blockPrivate && (ip.IsLoopback() || ip.IsPrivate() || ip.IsUnspecified()) {
 		return fmt.Errorf("blocked private address %s (host %q); unset CHATCLI_WEBFETCH_BLOCK_PRIVATE to allow", ip, host)

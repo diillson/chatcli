@@ -18,7 +18,6 @@ package action
 import (
 	"bytes"
 	"context"
-	"crypto/tls"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -26,8 +25,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/diillson/chatcli/cli/plugins"
 	"github.com/diillson/chatcli/cli/scheduler"
-	"github.com/diillson/chatcli/utils"
 )
 
 // Webhook implements scheduler.ActionExecutor.
@@ -106,14 +105,11 @@ func (Webhook) Execute(ctx context.Context, action scheduler.Action, env *schedu
 		req.Header.Set("User-Agent", "chatcli-scheduler/1.0")
 	}
 
-	client := &http.Client{
-		Timeout: timeout,
-		// Metered so the webhook target shows on the live dashboard.
-		Transport: utils.MeterTransport(&http.Transport{
-			TLSClientConfig:       &tls.Config{InsecureSkipVerify: insecure}, //#nosec G402 -- opt-in
-			ResponseHeaderTimeout: timeout,
-		}),
-	}
+	// The web tools' hardened client: the SSRF dial guard and redirect
+	// checks, the proxy variables and the CA bundle, metered for the live
+	// dashboard. A webhook URL is stored data, and a bare transport let it
+	// reach the cloud metadata service.
+	client := plugins.NewGuardedHTTPClient(timeout, insecure)
 	resp, err := client.Do(req)
 	if err != nil {
 		return scheduler.ActionResult{

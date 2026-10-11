@@ -413,6 +413,11 @@ func (s *Session) SwitchTab(ctx context.Context, which string) (TabInfo, error) 
 	if pick.Current {
 		return *pick, nil
 	}
+	// A tab the page opened (a popup, a target=_blank link) loaded without
+	// the document guard of this session; reading it must pass the guard.
+	if err := checkNavigation(pick.URL); err != nil {
+		return TabInfo{}, err
+	}
 	res, err := s.conn.call(ctx, "", "Target.attachToTarget", map[string]interface{}{
 		"targetId": pick.ID, "flatten": true,
 	})
@@ -429,6 +434,9 @@ func (s *Session) SwitchTab(ctx context.Context, which string) (TabInfo, error) 
 		if _, err := s.conn.call(ctx, attached.SessionID, method, nil); err != nil {
 			return TabInfo{}, fmt.Errorf("%s: %w", method, err)
 		}
+	}
+	if err := s.enableDocumentGuard(ctx, attached.SessionID); err != nil {
+		return TabInfo{}, fmt.Errorf("%s: %w", "Fetch.enable", err)
 	}
 	s.mu.Lock()
 	s.targetID, s.sessionID = pick.ID, attached.SessionID

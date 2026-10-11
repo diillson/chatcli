@@ -404,9 +404,10 @@ func hijackPageRequests(page *rod.Page) error {
 // renderRequestAllowed enforces the SSRF policy on a sub-request issued by
 // the rendered page. Non-HTTP schemes (data:, blob:, about:) never leave
 // the renderer and are allowed. For HTTP(S), the same upfront validation
-// as the static path applies; in hardened deployments (block-private set)
-// hostnames are additionally resolved and range-checked, since Chromium
-// dials by itself and ssrfDialControl cannot intercept it.
+// as the static path applies, and hostnames are resolved and range-checked
+// on every request: Chromium dials by itself, so ssrfDialControl never
+// sees the address, and a hostname that resolves to the metadata service
+// must be refused whether or not private ranges are blocked.
 func renderRequestAllowed(rawURL string) bool {
 	parsed, err := url.Parse(rawURL)
 	if err != nil {
@@ -415,13 +416,27 @@ func renderRequestAllowed(rawURL string) bool {
 	if parsed.Scheme != "http" && parsed.Scheme != "https" {
 		return true
 	}
+	return webHostTargetAllowed(rawURL, parsed) == nil
+}
+
+// webHostTargetAllowed applies validateWebTarget and then resolves a
+// hostname and checks every address it returns. A name that does not
+// resolve locally is allowed only when a proxy carries the request, since
+// the proxy is then the egress point and does its own resolution.
+func webHostTargetAllowed(rawURL string, parsed *url.URL) error {
 	if _, err := validateWebTarget(rawURL); err != nil {
-		return false
+		return err
 	}
-	if !webBlockPrivate() {
-		return true
+	host := parsed.Hostname()
+	if resolvedHostAllowed(host) {
+		return nil
 	}
-	return resolvedHostAllowed(parsed.Hostname())
+	if !hostResolves(host) {
+		if p, _ := webProxyForURL(parsed); p != nil {
+			return nil
+		}
+	}
+	return fmt.Errorf("host %q resolves to a blocked address or does not resolve", host)
 }
 
 // hostVerdicts memoizes resolve-and-check results per hostname: an SPA
@@ -437,6 +452,16 @@ type hostVerdict struct {
 	expires time.Time
 }
 
+// webLookupIP is the resolver the render and browser guards use; tests
+// replace it to stand in for a name that resolves to a blocked address.
+var webLookupIP = net.LookupIP
+
+// hostResolves reports whether host has any address in local DNS.
+func hostResolves(host string) bool {
+	ips, err := webLookupIP(host)
+	return err == nil && len(ips) > 0
+}
+
 // resolvedHostAllowed resolves host and applies checkWebIP to every
 // address. Literal IPs were already handled by validateWebTarget; a
 // resolution failure fails closed (the request is blocked).
@@ -445,8 +470,15 @@ func resolvedHostAllowed(host string) bool {
 		return true
 	}
 
+	// The verdict depends on the private-range policy, so it is part of
+	// the key.
+	key := host
+	if webBlockPrivate() {
+		key = "private-blocked|" + host
+	}
+
 	hostVerdicts.mu.Lock()
-	if v, ok := hostVerdicts.entries[host]; ok && time.Now().Before(v.expires) {
+	if v, ok := hostVerdicts.entries[key]; ok && time.Now().Before(v.expires) {
 		hostVerdicts.mu.Unlock()
 		return v.allowed
 	}
@@ -458,18 +490,18 @@ func resolvedHostAllowed(host string) bool {
 	if len(hostVerdicts.entries) >= ssrfVerdictMaxEntries {
 		hostVerdicts.entries = map[string]hostVerdict{}
 	}
-	hostVerdicts.entries[host] = hostVerdict{allowed: allowed, expires: time.Now().Add(ssrfVerdictTTL)}
+	hostVerdicts.entries[key] = hostVerdict{allowed: allowed, expires: time.Now().Add(ssrfVerdictTTL)}
 	hostVerdicts.mu.Unlock()
 	return allowed
 }
 
 func resolveAndCheckHost(host string) bool {
-	ips, err := net.LookupIP(host)
+	ips, err := webLookupIP(host)
 	if err != nil {
 		return false
 	}
 	for _, ip := range ips {
-		if err := checkWebIP(ip, true, host); err != nil {
+		if err := checkWebIP(ip, webBlockPrivate(), host); err != nil {
 			return false
 		}
 	}
