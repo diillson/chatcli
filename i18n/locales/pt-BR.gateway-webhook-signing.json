@@ -1,0 +1,4 @@
+{
+  "gateway.webhook.no_secret": "webhook: %s não está definida, então o adaptador se recusa a iniciar. Defina-a com a chave compartilhada que os dois lados usam para assinar as requisições (HMAC-SHA256).",
+  "gateway.webhook.callback_insecure": "webhook: %s precisa ser uma URL https (http simples só é aceito para um host de loopback como 127.0.0.1); recebido %s"
+}

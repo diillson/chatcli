@@ -216,14 +216,10 @@ func TestWebhookHandlerAndSend(t *testing.T) {
 		t.Errorf("missing secret should be 401, got %d", r1.StatusCode)
 	}
 	_ = r1.Body.Close()
-	// With secret -> accepted + inbound.
-	req, _ := http.NewRequest(http.MethodPost, srv.URL, strings.NewReader(`{"chat_id":"c1","text":"hello hook"}`))
-	req.Header.Set("X-ChatCLI-Secret", "s3cret")
-	r2, _ := http.DefaultClient.Do(req)
-	if r2.StatusCode != http.StatusAccepted {
-		t.Errorf("expected 202, got %d", r2.StatusCode)
+	// Signed with the secret -> accepted + inbound.
+	if status, body, _ := postWebhook(t, srv.URL, "s3cret", `{"chat_id":"c1","text":"hello hook"}`); status != http.StatusAccepted {
+		t.Errorf("expected 202, got %d %s", status, body)
 	}
-	_ = r2.Body.Close()
 	if m := recvWithin(t, ch, time.Second); m.Text != "hello hook" {
 		t.Errorf("inbound wrong: %+v", m)
 	}

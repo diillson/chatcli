@@ -154,7 +154,7 @@ func (r *Runner) Run(ctx context.Context) error {
 		return fmt.Errorf("gateway: no agent function configured")
 	}
 	// Refuse to serve anything when one adapter would refuse to start (an
-	// empty sender allowlist, for one): starting the others
+	// empty sender allowlist, an unsigned webhook): starting the others
 	// would hide the misconfiguration behind a half-working daemon.
 	if err := Preflight(r.order); err != nil {
 		return err

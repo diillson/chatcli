@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
@@ -15,13 +16,28 @@ import (
 	"go.uber.org/zap"
 )
 
+// postWebhook sends body signed with secret (unsigned when secret is empty)
+// at the current time.
 func postWebhook(t *testing.T, url, secret, body string) (int, string, http.Header) {
+	t.Helper()
+	return postWebhookAt(t, url, secret, body, time.Now())
+}
+
+// postWebhookAt is postWebhook with an explicit signing time.
+func postWebhookAt(t *testing.T, url, secret, body string, at time.Time) (int, string, http.Header) {
 	t.Helper()
 	req, _ := http.NewRequest(http.MethodPost, url, strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	if secret != "" {
-		req.Header.Set("X-ChatCLI-Secret", secret)
+		ts := strconv.FormatInt(at.Unix(), 10)
+		req.Header.Set(webhookTimestampHeader, ts)
+		req.Header.Set(webhookSignatureHeader, signWebhook(secret, ts, []byte(body)))
 	}
+	return doWebhookRequest(t, req)
+}
+
+func doWebhookRequest(t *testing.T, req *http.Request) (int, string, http.Header) {
+	t.Helper()
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatal(err)
@@ -90,8 +106,29 @@ func TestWebhookBodyCapFitsBase64Media(t *testing.T) {
 
 // An attachment URL is fetched after the 202, so a slow host never holds the
 // caller; and a failed download reaches the agent as a note, not silence.
+// mediaVia points the adapter's attachment client at srv, reached through
+// the public name example.com (which the test certificate covers): the URL
+// rules of netguard still apply, while the dial lands on the test server.
+// It returns the base URL to use for attachments.
+func mediaVia(t *testing.T, a *WebhookAdapter, srv *httptest.Server) string {
+	t.Helper()
+	c := srv.Client()
+	tr, ok := c.Transport.(*http.Transport)
+	if !ok {
+		t.Fatal("unexpected test transport")
+	}
+	addr := srv.Listener.Addr().String()
+	tr.DialContext = func(ctx context.Context, network, _ string) (net.Conn, error) {
+		var d net.Dialer
+		return d.DialContext(ctx, network, addr)
+	}
+	a.state.media = c
+	_, port, _ := net.SplitHostPort(addr)
+	return "https://example.com:" + port
+}
+
 func TestWebhookAcceptsBeforeDownloadAndNotesFailures(t *testing.T) {
-	slow := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	slow := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		time.Sleep(400 * time.Millisecond)
 		w.WriteHeader(http.StatusNotFound)
 	}))
@@ -99,11 +136,12 @@ func TestWebhookAcceptsBeforeDownloadAndNotesFailures(t *testing.T) {
 
 	ch := make(chan InboundMessage, 4)
 	a := NewWebhookAdapter(":0", "/in", "s", "", zap.NewNop())
+	slowURL := mediaVia(t, a, slow)
 	srv := httptest.NewServer(a.inboundHandler(context.Background(), ch))
 	defer srv.Close()
 
 	t0 := time.Now()
-	status, _, _ := postWebhook(t, srv.URL, "s", `{"chat_id":"c","text":"look","image_url":"`+slow.URL+`"}`)
+	status, _, _ := postWebhook(t, srv.URL, "s", `{"chat_id":"c","text":"look","image_url":"`+slowURL+`"}`)
 	if status != http.StatusAccepted {
 		t.Fatalf("status %d", status)
 	}
@@ -111,12 +149,16 @@ func TestWebhookAcceptsBeforeDownloadAndNotesFailures(t *testing.T) {
 		t.Errorf("202 took %v; the download must not hold the caller", d)
 	}
 	m := recvWithin(t, ch, 2*time.Second)
-	if m.Image != nil || !strings.HasPrefix(m.Text, "look\n\n[The image") || !strings.Contains(m.Text, "404") {
+	if m.Image != nil || !strings.HasPrefix(m.Text, "look\n\n[The image") {
 		t.Errorf("failed download not noted: image=%v text=%q", m.Image, m.Text)
+	}
+	// The note is generic: the status the host saw stays in the log.
+	if strings.Contains(m.Text, "404") {
+		t.Errorf("the note must not echo what the host reached: %q", m.Text)
 	}
 
 	// No text at all: the note becomes the message.
-	postWebhook(t, srv.URL, "s", `{"chat_id":"c","audio_url":"`+slow.URL+`"}`)
+	postWebhook(t, srv.URL, "s", `{"chat_id":"c","audio_url":"`+slowURL+`"}`)
 	if m := recvWithin(t, ch, 2*time.Second); !strings.HasPrefix(m.Text, "[The audio") {
 		t.Errorf("audio-only failure not noted: %q", m.Text)
 	}
@@ -125,7 +167,7 @@ func TestWebhookAcceptsBeforeDownloadAndNotesFailures(t *testing.T) {
 // Messages of one chat reach the agent in the order they were accepted,
 // even when an earlier one waits on a download; other chats are not held.
 func TestWebhookKeepsPerChatOrder(t *testing.T) {
-	slow := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	slow := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		time.Sleep(300 * time.Millisecond)
 		_, _ = w.Write([]byte("PNG"))
 	}))
@@ -133,10 +175,11 @@ func TestWebhookKeepsPerChatOrder(t *testing.T) {
 
 	ch := make(chan InboundMessage, 4)
 	a := NewWebhookAdapter(":0", "/in", "s", "", zap.NewNop())
+	slowURL := mediaVia(t, a, slow)
 	srv := httptest.NewServer(a.inboundHandler(context.Background(), ch))
 	defer srv.Close()
 
-	postWebhook(t, srv.URL, "s", `{"chat_id":"A","text":"first","image_url":"`+slow.URL+`"}`)
+	postWebhook(t, srv.URL, "s", `{"chat_id":"A","text":"first","image_url":"`+slowURL+`"}`)
 	postWebhook(t, srv.URL, "s", `{"chat_id":"A","text":"second"}`)
 	postWebhook(t, srv.URL, "s", `{"chat_id":"B","text":"other"}`)
 
@@ -187,15 +230,18 @@ type callbackRecorder struct {
 	statuses []int // status to answer per attempt; 200 once exhausted
 	hits     []http.Header
 	bodies   []map[string]string
+	raw      [][]byte
 }
 
 func (c *callbackRecorder) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	raw, _ := io.ReadAll(r.Body)
 	var body map[string]string
-	_ = json.NewDecoder(r.Body).Decode(&body)
+	_ = json.Unmarshal(raw, &body)
 	c.hits = append(c.hits, r.Header.Clone())
 	c.bodies = append(c.bodies, body)
+	c.raw = append(c.raw, raw)
 	status := http.StatusOK
 	if n := len(c.hits); n <= len(c.statuses) {
 		status = c.statuses[n-1]
@@ -230,8 +276,14 @@ func TestWebhookRetriesTheFinalReply(t *testing.T) {
 		if h.Get("X-ChatCLI-Delivery-Attempt") != strconv.Itoa(i+1) {
 			t.Errorf("attempt header %q", h.Get("X-ChatCLI-Delivery-Attempt"))
 		}
-		if h.Get("X-ChatCLI-Secret") != "s" {
-			t.Error("every attempt must carry the secret")
+		if h.Get("X-ChatCLI-Secret") != "" {
+			t.Error("the raw secret must never be sent")
+		}
+		if h.Get(webhookTimestampHeader) == "" || h.Get(webhookSignatureHeader) == "" {
+			t.Error("every attempt must be signed")
+		}
+		if !webhookSignatureValid("s", h.Get(webhookTimestampHeader), rec.raw[i], h.Get(webhookSignatureHeader)) {
+			t.Errorf("attempt %d carries an invalid signature", i+1)
 		}
 	}
 	if rec.bodies[2]["kind"] != OutboundFinal || rec.bodies[2]["text"] != "done" {
