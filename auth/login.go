@@ -92,6 +92,11 @@ func exchangeAnthropicToken(ctx context.Context, tokenURL string, payload map[st
 	return doTokenExchange(hc, req)
 }
 
+// maxTokenResponseBytes caps an OAuth token-endpoint response. Real responses
+// are well under a kilobyte; the endpoint can be attacker-influenced in the
+// MCP flow, so a larger body is refused rather than read into memory.
+const maxTokenResponseBytes = 1 << 20
+
 func doTokenExchange(hc *http.Client, req *http.Request) (*OAuthTokenResponse, error) {
 	// Set User-Agent to avoid Cloudflare blocking Go's default "Go-http-client/2.0"
 	if req.Header.Get("User-Agent") == "" {
@@ -102,9 +107,16 @@ func doTokenExchange(hc *http.Client, req *http.Request) (*OAuthTokenResponse, e
 		return nil, err
 	}
 	defer resp.Body.Close()
-	raw, err := io.ReadAll(resp.Body)
+	// The token endpoint is not always a trusted provider: in the MCP OAuth
+	// flow it is the authorization server the (possibly hostile) MCP server
+	// names, so a malicious endpoint could stream an unbounded body. A real
+	// token response is a few hundred bytes; cap it and fail on overflow.
+	raw, err := io.ReadAll(io.LimitReader(resp.Body, maxTokenResponseBytes+1))
 	if err != nil {
 		return nil, fmt.Errorf("reading token response body: %w", err)
+	}
+	if len(raw) > maxTokenResponseBytes {
+		return nil, fmt.Errorf("token response exceeds the %d-byte limit", maxTokenResponseBytes)
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		// Sanitize response body to prevent leaking tokens in error messages
