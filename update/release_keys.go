@@ -15,7 +15,8 @@ package update
 // trusts old and new keys, switch the workflow to the new seed, then drop
 // the old key in a later release.
 //
-// PLACEHOLDER: no release key is embedded yet. With this list empty the
-// self-update channel refuses to install anything (fail closed) and tells
-// the user to update through Homebrew, go install or a manual download.
-var releaseSigningPublicKeys = []string{}
+// The first key was generated on 2026-10-11; its seed is stored only as the
+// CHATCLI_RELEASE_SIGNING_KEY secret of the production environment.
+var releaseSigningPublicKeys = []string{
+	"fGzwHE08ZsW5iNNVnGO23S6dwCi3UHa8SK9+UU7YQQ4=",
+}
