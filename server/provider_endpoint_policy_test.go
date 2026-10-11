@@ -19,6 +19,8 @@ import (
 	"github.com/diillson/chatcli/llm/ollama"
 	pb "github.com/diillson/chatcli/proto/chatcli/v1"
 	"go.uber.org/zap"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 // countingServer records every request that reaches it.
@@ -52,6 +54,9 @@ func TestProviderConfig_ClientBaseURLRefusedByDefault(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), providerEndpointsEnv) {
 		t.Fatalf("error does not say how to allow an endpoint: %v", err)
+	}
+	if code := status.Code(err); code != codes.InvalidArgument {
+		t.Fatalf("code = %v, want InvalidArgument: a refused client configuration is a client error", code)
 	}
 	mgr.AssertNotCalled(t, "CreateClientWithConfig")
 }
