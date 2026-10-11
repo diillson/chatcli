@@ -206,7 +206,7 @@ func TestPersistPending_RedactsAndSealsAtRest(t *testing.T) {
 	if !atrest.IsEncrypted(raw) {
 		t.Fatal("the pending queue must be sealed when the key is set")
 	}
-	plain, err := atrest.Open(raw)
+	plain, err := atrest.OpenAt(path, raw)
 	if err != nil {
 		t.Fatal(err)
 	}

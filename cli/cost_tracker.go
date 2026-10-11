@@ -657,15 +657,15 @@ func (ct *CostTracker) SaveSession() error {
 	if err != nil {
 		return fmt.Errorf("marshal cost session: %w", err)
 	}
-	if b, err = atrest.Seal(b); err != nil {
-		return fmt.Errorf("seal cost session: %w", err)
-	}
-
 	// Atomic write with a UNIQUE temp name: concurrent saves (worker
 	// recorder goroutines race the main turn) must never interleave writes
 	// into one shared temp file, and a crash mid-write must never corrupt
-	// the snapshot.
+	// the snapshot. The payload is bound to its final path, the same
+	// binding /config security reseal writes.
 	path := filepath.Join(dir, data.SessionID+".json")
+	if b, err = atrest.SealAt(path, b); err != nil {
+		return fmt.Errorf("seal cost session: %w", err)
+	}
 	tmp, err := os.CreateTemp(dir, data.SessionID+"-*.tmp")
 	if err != nil {
 		return err
@@ -738,7 +738,7 @@ func LoadCostSnapshot(sessionID string) (*SessionCostData, error) {
 	path := filepath.Join(costStoreDir(), filepath.Base(sessionID)+".json")
 	b, err := os.ReadFile(filepath.Clean(path))
 	if err == nil {
-		b, err = atrest.Open(b)
+		b, err = atrest.OpenAt(path, b)
 	}
 	if err != nil {
 		return nil, err
