@@ -194,14 +194,40 @@ func TestServer_RefusesNonLoopbackAndUnauthenticated(t *testing.T) {
 	if code, body := call(t, srv, http.MethodGet, "/api/status", nil, true); code != http.StatusOK || !strings.Contains(string(body), `"provider":"FAKE"`) {
 		t.Fatalf("status = %d %s", code, body)
 	}
-	// The page carries the boot JSON with the token; the API token is never
-	// accepted from the query.
+	// The page is served with the token in ?t= and does not embed it; the
+	// API token is never accepted from the query.
 	code, body := call(t, srv, http.MethodGet, "/?t="+srv.Token(), nil, false)
-	if code != http.StatusOK || !strings.Contains(string(body), srv.Token()) {
-		t.Fatalf("index = %d", code)
+	if code != http.StatusOK || strings.Contains(string(body), srv.Token()) {
+		t.Fatalf("index = %d, token embedded = %v", code, strings.Contains(string(body), srv.Token()))
 	}
 	if code, _ := call(t, srv, http.MethodGet, "/api/status?t="+srv.Token(), nil, false); code != http.StatusForbidden {
 		t.Fatal("token in the query must not authenticate")
+	}
+}
+
+// GET / is the door to the token: without the exact Host and the right
+// ?t= value it answers 403 and serves no page.
+func TestServer_IndexRequiresToken(t *testing.T) {
+	srv, _ := startTest(t)
+	for _, path := range []string{"/", "/?t=", "/?t=deadbeef", "/?t=" + srv.Token() + "x"} {
+		code, body := call(t, srv, http.MethodGet, path, nil, false)
+		if code != http.StatusForbidden {
+			t.Errorf("GET %s = %d, want 403", path, code)
+		}
+		if strings.Contains(string(body), "id=\"composer\"") {
+			t.Errorf("GET %s served the page", path)
+		}
+	}
+	// A rebinding page sends its own Host, and is refused even with the token.
+	req, _ := http.NewRequest(http.MethodGet, "http://"+srv.Host()+"/?t="+srv.Token(), nil)
+	req.Host = "attacker.example:80"
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusForbidden {
+		t.Errorf("wrong Host = %d, want 403", resp.StatusCode)
 	}
 }
 

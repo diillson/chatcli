@@ -13,13 +13,24 @@
  *
  * Bound to 127.0.0.1 on an ephemeral port (no configuration, no new envs);
  * the caller receives the URL to print/open.
+ *
+ * Local is not open: the run state carries task prompts and agent output.
+ * Every request must carry the exact Host the server is bound to (closing
+ * DNS rebinding from a web page) and the random token minted at start: in
+ * ?t= for the page, which the user receives in the URL, and in the
+ * X-Dash-Token header for the API, so the API never reads it from a query.
+ * Responses carry the same security headers and CSP as the other local
+ * dashboards.
  */
 package dash
 
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
+	"crypto/subtle"
 	_ "embed"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"net"
@@ -38,11 +49,18 @@ var dashHTML []byte
 // readHeaderTimeout bounds header reads on the local listener.
 const readHeaderTimeout = 10 * time.Second
 
+const (
+	tokenHeader = "X-Dash-Token" // #nosec G101 -- the NAME of the request header, not a credential; the token is random per server
+	tokenParam  = "t"
+)
+
 // Server is one running dashboard over a taskgraph base directory.
 type Server struct {
 	baseDir string
 	srv     *http.Server
 	url     string
+	host    string
+	token   string
 
 	mu     sync.Mutex
 	closed bool
@@ -51,24 +69,61 @@ type Server struct {
 // Start binds 127.0.0.1:0 and serves the dashboard for baseDir. The caller
 // owns Shutdown.
 func Start(baseDir string) (*Server, error) {
+	var tok [16]byte
+	if _, err := rand.Read(tok[:]); err != nil {
+		return nil, fmt.Errorf("dashboard token: %w", err)
+	}
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		return nil, fmt.Errorf("dashboard listen: %w", err)
 	}
-	s := &Server{baseDir: baseDir}
+	s := &Server{baseDir: baseDir, host: ln.Addr().String(), token: hex.EncodeToString(tok[:])}
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", s.handleIndex)
-	mux.HandleFunc("/api/runs", s.handleRuns)
-	mux.HandleFunc("/api/state", s.handleState)
-	mux.HandleFunc("/api/events", s.handleEvents)
+	mux.HandleFunc("/api/runs", s.guard(s.handleRuns))
+	mux.HandleFunc("/api/state", s.guard(s.handleState))
+	mux.HandleFunc("/api/events", s.guard(s.handleEvents))
 	s.srv = &http.Server{Handler: mux, ReadHeaderTimeout: readHeaderTimeout}
-	s.url = "http://" + ln.Addr().String() + "/"
+	s.url = "http://" + s.host + "/?" + tokenParam + "=" + s.token
 	go func() { _ = s.srv.Serve(ln) }()
 	return s, nil
 }
 
-// URL returns the dashboard's address.
+// URL returns the dashboard's address, token included. Callers add more
+// query parameters with net/url, never by string concatenation.
 func (s *Server) URL() string { return s.url }
+
+func secureHeaders(w http.ResponseWriter) {
+	h := w.Header()
+	h.Set("X-Content-Type-Options", "nosniff")
+	h.Set("X-Frame-Options", "DENY")
+	h.Set("Referrer-Policy", "no-referrer")
+	h.Set("Cache-Control", "no-store")
+	h.Set("Content-Security-Policy", "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self'; img-src data:; base-uri 'none'; form-action 'none'; frame-ancestors 'none'")
+}
+
+// hostOK accepts only the exact authority the server is bound to.
+func (s *Server) hostOK(r *http.Request) bool { return r.Host == s.host }
+
+func (s *Server) tokenOK(got string) bool {
+	return subtle.ConstantTimeCompare([]byte(got), []byte(s.token)) == 1
+}
+
+// guard enforces method, Host and the header token on the API.
+func (s *Server) guard(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		secureHeaders(w)
+		if r.Method != http.MethodGet {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		if !s.hostOK(r) || !s.tokenOK(r.Header.Get(tokenHeader)) {
+			http.Error(w, "forbidden", http.StatusForbidden)
+			return
+		}
+		next(w, r)
+	}
+}
 
 // Shutdown stops the server. Idempotent.
 func (s *Server) Shutdown(ctx context.Context) error {
@@ -83,8 +138,13 @@ func (s *Server) Shutdown(ctx context.Context) error {
 }
 
 func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
-	if r.URL.Path != "/" {
+	secureHeaders(w)
+	if r.URL.Path != "/" || r.Method != http.MethodGet {
 		http.NotFound(w, r)
+		return
+	}
+	if !s.hostOK(r) || !s.tokenOK(r.URL.Query().Get(tokenParam)) {
+		http.Error(w, "forbidden", http.StatusForbidden)
 		return
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
