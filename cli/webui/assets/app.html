@@ -417,7 +417,9 @@ function applyTheme(name) {
 })();
 
 // ---------- API ----------
-const TOKEN = BOOT.token;
+// The token arrives in the page URL (?t=) and stays there so a reload keeps
+// working; it is never embedded in the HTML, and API calls send it in a header.
+const TOKEN = new URLSearchParams(location.search).get('t') || '';
 async function api(path, opts) {
   const o = Object.assign({ headers: {} }, opts || {});
   o.headers['X-Web-Token'] = TOKEN;

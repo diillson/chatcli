@@ -72,7 +72,7 @@ func TestServer_ServesBundledPageWithBoot(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() { _ = srv.Shutdown(context.Background()) }()
-	code, body := call(t, srv, http.MethodGet, "/", nil, false)
+	code, body := call(t, srv, http.MethodGet, "/?t="+srv.Token(), nil, false)
 	if code != http.StatusOK || strings.Contains(string(body), bootPlaceholder) || !strings.Contains(string(body), "id=\"composer\"") {
 		t.Fatalf("index = %d, page not rendered", code)
 	}
@@ -82,7 +82,11 @@ func TestServer_ServesBundledPageWithBoot(t *testing.T) {
 	if err := json.Unmarshal(body[start:start+end], &b); err != nil {
 		t.Fatalf("boot JSON: %v", err)
 	}
-	if b.Version != "9.9" || b.Lang != "pt-BR" || b.Token != srv.Token() || b.Strings["composer.send"] == "" {
+	if b.Version != "9.9" || b.Lang != "pt-BR" || b.Strings["composer.send"] == "" {
 		t.Fatalf("boot = %+v", b)
+	}
+	// The token is read by the page from its own URL, never embedded.
+	if strings.Contains(string(body), srv.Token()) {
+		t.Fatal("the page HTML must not carry the API token")
 	}
 }

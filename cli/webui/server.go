@@ -212,13 +212,23 @@ func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	if !s.hostOK(r) {
+	// The page is served only to whoever holds the URL the user was handed
+	// (exact Host plus the token in ?t=). The token is not in the HTML: the
+	// page reads it from its own address, as the pulse dashboard does, so a
+	// local process that can reach the port but never saw the URL gets
+	// nothing.
+	got := r.URL.Query().Get(pageTokenParam)
+	if !s.hostOK(r) || subtle.ConstantTimeCompare([]byte(got), []byte(s.token)) != 1 {
 		http.Error(w, "forbidden", http.StatusForbidden)
 		return
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	_, _ = w.Write(s.page)
 }
+
+// pageTokenParam is the query parameter that carries the token on the page
+// URL. The API never reads it from the query: see guard.
+const pageTokenParam = "t"
 
 // guard authenticates every API call: exact Host (DNS rebinding) and the
 // per-run token in a header. The token is never read from the query so it
@@ -243,7 +253,6 @@ type boot struct {
 	ThemeName string                       `json:"theme"`
 	ThemeVars map[string]string            `json:"theme_vars,omitempty"`
 	Version   string                       `json:"version"`
-	Token     string                       `json:"token"`
 	Features  features                     `json:"features"`
 }
 
@@ -270,7 +279,7 @@ func (s *Server) bootData() boot {
 	if lang == "" {
 		lang = "en"
 	}
-	return boot{Lang: lang, Strings: s.opts.Strings, Catalogs: UICatalogs(), ThemeName: s.opts.ThemeName, ThemeVars: s.opts.ThemeVars, Version: s.opts.Version, Token: s.token, Features: s.features()}
+	return boot{Lang: lang, Strings: s.opts.Strings, Catalogs: UICatalogs(), ThemeName: s.opts.ThemeName, ThemeVars: s.opts.ThemeVars, Version: s.opts.Version, Features: s.features()}
 }
 
 func (s *Server) renderPage() []byte {
