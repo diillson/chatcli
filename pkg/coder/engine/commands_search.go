@@ -23,6 +23,10 @@ func (e *Engine) handleTree(args []string) error {
 	if err := parseFlags(fs, args); err != nil {
 		return err
 	}
+	*dir = expandPath(*dir)
+	if err := e.validatePath(*dir); err != nil {
+		return err
+	}
 
 	ignoreSet := parseCSVSet(*ignore)
 	defaultIgnore := map[string]bool{".git": true, "node_modules": true, "vendor": true}
@@ -91,6 +95,10 @@ func (e *Engine) handleSearch(ctx context.Context, args []string) error {
 	if *term == "" {
 		return fmt.Errorf("--term requerido")
 	}
+	*dir = expandPath(*dir)
+	if err := e.validatePath(*dir); err != nil {
+		return err
+	}
 
 	if rgPath, err := exec.LookPath("rg"); err == nil {
 		return e.runRipgrep(ctx, rgPath, *term, *dir, *useRegex, *caseSensitive, *contextLines, *maxResults, *glob)
@@ -116,7 +124,9 @@ func (e *Engine) runRipgrep(ctx context.Context, rgPath, term, dir string, useRe
 	for _, g := range splitCSV(glob) {
 		args = append(args, "--glob", g)
 	}
-	args = append(args, term, dir)
+	// The end-of-options marker keeps a term or directory that begins with
+	// "-" from being parsed as an option: rg --pre runs a program per file.
+	args = append(args, "--", term, dir)
 
 	out, err := runCommandCtx(ctx, "", rgPath, args...)
 	return e.printCommandOutput(out, err)
@@ -147,6 +157,11 @@ func (e *Engine) fallbackSearch(term, dir string, useRegex, caseSensitive bool, 
 			case ".git", "node_modules", "vendor":
 				return filepath.SkipDir
 			}
+			return nil
+		}
+		// Walk reports the link itself; reading it would follow a symlink
+		// out of the validated root, which rg does not do by default either.
+		if !info.Mode().IsRegular() {
 			return nil
 		}
 

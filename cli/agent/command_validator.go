@@ -13,6 +13,7 @@ import (
 	"strings"
 
 	"github.com/diillson/chatcli/i18n"
+	"github.com/diillson/chatcli/pkg/coder/engine"
 	"go.uber.org/zap"
 )
 
@@ -160,6 +161,10 @@ func (v *CommandValidator) IsDangerous(cmd string) bool {
 				return true
 			}
 		}
+	}
+
+	if engine.IsDownloadAndExecute(cmd) {
+		return true
 	}
 
 	for _, pattern := range v.dangerousPatterns {

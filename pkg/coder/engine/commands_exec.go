@@ -108,6 +108,7 @@ func (e *Engine) handleExec(ctx context.Context, args []string) error {
 	}
 	name, cmdArgs := e.sandboxedCommand(finalCmd, workDir)
 	cmd := exec.CommandContext(execCtx, name, cmdArgs...) //#nosec G204 -- agent/CLI tool execution; commands validated by command_validator + policy_manager upstream, optionally OS-sandboxed
+	cmd.Env = withExplicitBareRepos(os.Environ())
 	if *dir != "" {
 		if err := e.validatePath(*dir); err != nil {
 			return err
@@ -197,6 +198,7 @@ func (e *Engine) handleTest(ctx context.Context, args []string) error {
 func (e *Engine) runSandboxedCommand(ctx context.Context, dir, cmdLine string) (string, error) {
 	name, cmdArgs := e.sandboxedCommand(cmdLine, dir)
 	cmd := exec.CommandContext(ctx, name, cmdArgs...) //#nosec G204 -- agent/CLI tool execution; command validated by IsUnsafeCommand + policy_manager upstream, optionally OS-sandboxed
+	cmd.Env = withExplicitBareRepos(os.Environ())
 	if dir != "" {
 		cmd.Dir = dir
 	}
@@ -264,6 +266,9 @@ func IsUnsafeCommand(cmd string, allowSudo bool) (bool, string) {
 		`(?i)\b[A-Z_]+=.*;\s*(sh|bash|zsh)\b`,
 		`\bkill\s+-9\s+1\b`,
 		`\b:>\s*/`,
+	}
+	if IsDownloadAndExecute(cmd) {
+		return true, "Download piped into an interpreter"
 	}
 	for _, p := range dangerPatterns {
 		re, err := regexp.Compile(p)
