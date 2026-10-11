@@ -116,8 +116,25 @@ func (cli *ChatCLI) printPolicyStatus() {
 	}
 	if pm, err := coder.NewPolicyManager(cli.logger); err == nil {
 		fmt.Println("  " + i18n.T("policy.status.rules", pm.RulesCount(), pm.ActivePolicyPath()))
+		for _, note := range localPolicyNotes(pm) {
+			fmt.Println("  " + note)
+		}
 	}
 	fmt.Println("  " + i18n.T("policy.status.usage_hint"))
+}
+
+// localPolicyNotes explains what happened to the workspace coder_policy.json:
+// ignored because the workspace is not trusted, or loaded with its allow
+// rules dropped (a workspace policy can only tighten).
+func localPolicyNotes(pm *coder.PolicyManager) []string {
+	var notes []string
+	if p := pm.UntrustedLocalPolicyPath(); p != "" {
+		notes = append(notes, i18n.T("wstrust.policy.untrusted", p))
+	}
+	if n := pm.LocalIgnoredAllows(); n > 0 {
+		notes = append(notes, i18n.T("wstrust.policy.allow_ignored", pm.LocalPolicyPath(), n))
+	}
+	return notes
 }
 
 // askAutoApproved reports whether a coder-policy "ask" verdict should

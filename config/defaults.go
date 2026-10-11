@@ -123,7 +123,10 @@ const (
 	// Provedor padrão
 	DefaultLLMProvider = "OPENAI"
 
-	// Definição do tamanho de historico
+	// Definição do tamanho de historico. DefaultHistoryFile is the legacy
+	// per-directory history name: the history now lives in
+	// ~/.chatcli/history, and a ./.chatcli_history is only read, never
+	// written (cli/history_manager.go).
 	DefaultMaxHistorySize = 100 * 1024 * 1024 // 100MB
 	DefaultHistoryFile    = ".chatcli_history"
 

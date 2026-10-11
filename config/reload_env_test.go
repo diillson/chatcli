@@ -87,6 +87,7 @@ func TestReload_FileStillWinsAndRemovalStillApplies(t *testing.T) {
 }
 
 func TestReload_ReappliesProjectOverlay(t *testing.T) {
+	trustWorkspaces(t, true)
 	ResetBootEnvForTest()
 	ResetProjectDotenvForTest()
 	t.Cleanup(func() { ResetBootEnvForTest(); ResetProjectDotenvForTest() })

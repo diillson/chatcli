@@ -115,6 +115,9 @@ func (cli *ChatCLI) configSecurityListRules() {
 	if lp := pm.LocalPolicyPath(); lp != "" {
 		fmt.Printf("  %s %s (merge=%v)\n", colorize(i18n.T("sec.cmd.rules_local_path"), ColorGray), lp, pm.LocalMergeEnabled())
 	}
+	for _, note := range localPolicyNotes(pm) {
+		fmt.Println("  " + colorize(note, ColorYellow))
+	}
 	fmt.Println()
 
 	printBucket := func(label string, action coder.Action, color string) {

@@ -71,8 +71,8 @@ func (d *Duration) UnmarshalYAML(n *yaml.Node) error {
 // D returns the value as a time.Duration.
 func (d Duration) D() time.Duration { return time.Duration(d) }
 
-// PolicyRule is one coder security-policy rule installed in a coder case's
-// sandbox (the workspace-local coder_policy.json, merged over the user's
+// PolicyRule is one coder security-policy rule installed for a coder case
+// (a policy file outside the sandbox named by PolicyEnv, merged over the user's
 // global policy). Safety-immune operations keep asking regardless — and an
 // eval has no human to answer, so they are denied.
 type PolicyRule struct {
