@@ -289,7 +289,7 @@ func TestWebhookSendPhoto(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	a := NewWebhookAdapter(":0", "", "", srv.URL, zap.NewNop())
+	a := NewWebhookAdapter(":0", "", "s", srv.URL, zap.NewNop())
 	err := a.Send(context.Background(), OutboundMessage{
 		ChatID: "abc", Text: "webhook caption",
 		Image: &OutboundImage{Data: []byte("HOOKIMG"), Mime: "image/png", FileName: "reply.png"},

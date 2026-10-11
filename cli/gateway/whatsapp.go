@@ -46,6 +46,28 @@ type WhatsAppAdapter struct {
 	graphBase string // overridable for tests; defaults to https://graph.facebook.com/v21.0
 	http      *http.Client
 	logger    *zap.Logger
+	// allowed holds CHATCLI_WHATSAPP_ALLOWED_USERS: the senders' WhatsApp
+	// ids (wa_id, the phone number in international format without "+"
+	// that the webhook carries in "from"). Empty refuses to start.
+	allowed *senderAllowlist
+}
+
+// WithAllowedUsers sets the sender allowlist and returns the adapter so the
+// builder can chain it. An entry is a WhatsApp id as the webhook reports it
+// in "from" (digits only, country code first); a leading "+" is ignored;
+// "*" admits everyone. Without it the adapter refuses to start.
+func (a *WhatsAppAdapter) WithAllowedUsers(ids []string) *WhatsAppAdapter {
+	norm := make([]string, 0, len(ids))
+	for _, id := range ids {
+		norm = append(norm, strings.TrimPrefix(strings.TrimSpace(id), "+"))
+	}
+	a.allowed = newSenderAllowlist(norm)
+	return a
+}
+
+// preflight implements preflighter.
+func (a *WhatsAppAdapter) preflight() error {
+	return a.allowed.preflight(whatsappPlatform, envWhatsAppAllowed)
 }
 
 // NewWhatsAppAdapter builds a WhatsApp Cloud API adapter.
@@ -124,6 +146,16 @@ func (a *WhatsAppAdapter) webhookHandler(ctx context.Context, inbound chan<- Inb
 			}
 			rw.WriteHeader(http.StatusOK) // ack fast; Meta retries on non-200
 			for _, msg := range parseWhatsAppInbound(body) {
+				// Sender allowlist first: a stranger's message is dropped
+				// before any media download or queueing, and gets no reply.
+				if !a.allowed.permits(msg.UserID) {
+					if a.logger != nil {
+						a.logger.Warn("gateway/whatsapp: dropped message from non-allowlisted user",
+							zap.String("user", msg.UserID))
+					}
+					continue
+				}
+				msg.SenderListed = a.allowed.listed(msg.UserID)
 				a.hydrateAudio(ctx, &msg)
 				a.hydrateImages(ctx, &msg)
 				if strings.TrimSpace(msg.Text) == "" && msg.Audio == nil && msg.Image == nil {
@@ -143,6 +175,9 @@ func (a *WhatsAppAdapter) webhookHandler(ctx context.Context, inbound chan<- Inb
 
 // Start runs the webhook HTTP server until ctx is canceled.
 func (a *WhatsAppAdapter) Start(ctx context.Context, inbound chan<- InboundMessage) error {
+	if err := a.allowed.checkStart(whatsappPlatform, envWhatsAppAllowed, a.logger); err != nil {
+		return err
+	}
 	mux := http.NewServeMux()
 	mux.HandleFunc(a.path, a.webhookHandler(ctx, inbound))
 
@@ -195,7 +230,7 @@ func (a *WhatsAppAdapter) Send(ctx context.Context, msg OutboundMessage) error {
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+a.accessToken)
-	resp, err := a.http.Do(req)
+	resp, err := doHTTP(a.http, req)
 	if err != nil {
 		return err
 	}
@@ -232,7 +267,7 @@ func (a *WhatsAppAdapter) sendPhoto(ctx context.Context, msg OutboundMessage) er
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+a.accessToken)
-	resp, err := a.http.Do(req)
+	resp, err := doHTTP(a.http, req)
 	if err != nil {
 		return err
 	}
@@ -282,7 +317,7 @@ func (a *WhatsAppAdapter) uploadMedia(ctx context.Context, img *OutboundImage) (
 	}
 	req.Header.Set("Content-Type", w.FormDataContentType())
 	req.Header.Set("Authorization", "Bearer "+a.accessToken)
-	resp, err := a.http.Do(req)
+	resp, err := doHTTP(a.http, req)
 	if err != nil {
 		return "", err
 	}
@@ -422,7 +457,7 @@ func (a *WhatsAppAdapter) downloadMedia(ctx context.Context, mediaID string, lim
 		return nil, "", err
 	}
 	req.Header.Set("Authorization", "Bearer "+a.accessToken)
-	resp, err := a.http.Do(req)
+	resp, err := doHTTP(a.http, req)
 	if err != nil {
 		return nil, "", err
 	}
@@ -468,7 +503,8 @@ func init() {
 			addr,
 			os.Getenv("CHATCLI_WHATSAPP_PATH"),
 			zap.NewNop(),
-		).WithAppSecret(os.Getenv("CHATCLI_WHATSAPP_APP_SECRET")), nil
+		).WithAppSecret(os.Getenv("CHATCLI_WHATSAPP_APP_SECRET")).
+			WithAllowedUsers(allowlistFromEnv(envWhatsAppAllowed)), nil
 	})
 }
 

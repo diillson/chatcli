@@ -314,14 +314,14 @@ func TestDiscordHydrateAudio(t *testing.T) {
 }
 
 func TestWebhookHydrateAudio(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "audio/ogg")
 		_, _ = w.Write([]byte("WH-AUDIO"))
 	}))
 	defer srv.Close()
 
 	ad := NewWebhookAdapter("", "", "", "", zap.NewNop())
-	msg := InboundMessage{Audio: &InboundAudio{ref: srv.URL}}
+	msg := InboundMessage{Audio: &InboundAudio{ref: mediaVia(t, ad, srv) + "/a.ogg"}}
 	ad.hydrateAudio(context.Background(), &msg)
 	if msg.Audio == nil || string(msg.Audio.Data) != "WH-AUDIO" {
 		t.Fatalf("audio not hydrated: %+v", msg.Audio)

@@ -30,7 +30,38 @@ func gatewayBindingHarness(t *testing.T) (*ChatCLI, *hubSessions, context.Contex
 }
 
 func gwMsg(text string) gateway.InboundMessage {
-	return gateway.InboundMessage{Platform: "telegram", ChatID: "1", UserID: "1", Text: text}
+	return gateway.InboundMessage{Platform: "telegram", ChatID: "1", UserID: "1", Text: text, SenderListed: true}
+}
+
+// A sender admitted by the public "*" entry, or by a channel with no
+// per-sender list, reaches the agent but not the saved sessions: in the
+// default single-user hub those are the operator's own. Nothing is listed,
+// read, bound or written for them.
+func TestGatewaySessionCommand_RefusesSendersNotListedByID(t *testing.T) {
+	c, sessions, ctx := gatewayBindingHarness(t)
+	if err := c.sessionManager.SaveSessionV2("operator-private", &SessionData{Version: 2,
+		ChatHistory: []models.Message{{Role: "user", Content: "segredo do operador"}}}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	for _, cmd := range []string{"/session list", "/session attach operator-private", "/session save operator-private", "/session new", "/session status"} {
+		m := gwMsg(cmd)
+		m.SenderListed = false
+		reply, handled := c.handleGatewaySessionCommand(ctx, sessions, m)
+		if !handled {
+			t.Fatalf("%s: a session command must be answered, not passed to the agent", cmd)
+		}
+		if strings.Contains(reply, "operator-private") {
+			t.Fatalf("%s: reply leaks the operator's sessions: %q", cmd, reply)
+		}
+	}
+	principal := sessions.principalFor(ctx, "telegram", "1")
+	if got := sessions.sessionBindingFor(ctx, principal); got != "" {
+		t.Fatalf("an unlisted sender must not bind a session, got %q", got)
+	}
+	sd, err := c.sessionManager.LoadSessionV2("operator-private")
+	if err != nil || len(sd.ChatHistory) != 1 {
+		t.Fatalf("an unlisted sender must not overwrite a saved session: err=%v n=%d", err, len(sd.ChatHistory))
+	}
 }
 
 // Channel /session commands: attach persists the binding (settings survive a

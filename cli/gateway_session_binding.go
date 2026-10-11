@@ -23,8 +23,8 @@
  * the same live-read mechanism as CHATCLI_HUB_ISOLATE — a restart keeps them,
  * and a co-running CLI could inspect them via /config hub.
  *
- * Channel users control the binding with /session commands in the chat
- * (attach/detach/status/save/list/new). delete is deliberately NOT exposed to
+ * Channel users listed by id in the channel's allowlist control the binding
+ * with /session commands in the chat (attach/detach/status/save/list/new). delete is deliberately NOT exposed to
  * channels: a gateway conversation may be multi-user, and destroying store
  * state stays an operator/REPL decision.
  */
@@ -161,6 +161,18 @@ func (cli *ChatCLI) handleGatewaySessionCommand(ctx context.Context, sessions *h
 	fields := strings.Fields(strings.TrimSpace(msg.Text))
 	if len(fields) == 0 || fields[0] != "/session" {
 		return "", false
+	}
+	// Session commands read, list and overwrite saved sessions. In the
+	// default single-user hub every sender maps to the operator's shared
+	// principal and the operator's own session store, so they are reserved
+	// for senders the operator named in the channel's allowlist. A sender
+	// admitted only by the public "*" entry (or arriving on a channel with no
+	// per-sender list, such as the generic webhook) is refused here, before
+	// the principal is resolved or any store is touched. With
+	// CHATCLI_HUB_ISOLATE=true a listed sender still only reaches its own
+	// tenant store set, installed by enterGatewayTenant before this runs.
+	if !msg.SenderListed {
+		return i18n.T("gateway.session.not_listed"), true
 	}
 	if sessions == nil || sessions.store == nil || cli.sessionManager == nil {
 		return i18n.T("gateway.session.unavailable"), true

@@ -50,6 +50,36 @@ type DiscordAdapter struct {
 	http       *http.Client
 	logger     *zap.Logger
 	dialer     *websocket.Dialer
+	// allowed holds CHATCLI_DISCORD_ALLOWED_USERS: Discord user ids (the
+	// numeric snowflake of the message author). Empty refuses to start.
+	allowed *senderAllowlist
+}
+
+// WithAllowedUsers sets the sender allowlist and returns the adapter so the
+// builder can chain it. An entry is a Discord user id (the author's numeric
+// snowflake); "*" admits everyone. Without it the adapter refuses to start.
+func (d *DiscordAdapter) WithAllowedUsers(ids []string) *DiscordAdapter {
+	d.allowed = newSenderAllowlist(ids)
+	return d
+}
+
+// preflight implements preflighter.
+func (d *DiscordAdapter) preflight() error {
+	return d.allowed.preflight(discordPlatform, envDiscordAllowed)
+}
+
+// admit applies the sender allowlist to a parsed message before any
+// attachment is downloaded. Strangers are dropped without a reply.
+func (d *DiscordAdapter) admit(msg *InboundMessage) bool {
+	if msg.UserID == "" || !d.allowed.permits(msg.UserID) {
+		if d.logger != nil {
+			d.logger.Warn("gateway/discord: dropped message from non-allowlisted user",
+				zap.String("user", msg.UserID))
+		}
+		return false
+	}
+	msg.SenderListed = d.allowed.listed(msg.UserID)
+	return true
 }
 
 // NewDiscordAdapter builds a Discord adapter from a bot token.
@@ -77,6 +107,9 @@ func (d *DiscordAdapter) SetLogger(l *zap.Logger) {
 // Start connects to the gateway and streams messages until ctx is canceled,
 // reconnecting with backoff on transient failures.
 func (d *DiscordAdapter) Start(ctx context.Context, inbound chan<- InboundMessage) error {
+	if err := d.allowed.checkStart(discordPlatform, envDiscordAllowed, d.logger); err != nil {
+		return err
+	}
 	d.logger.Info("gateway/discord: starting")
 	backoff := time.Second
 	for {
@@ -192,6 +225,9 @@ func (d *DiscordAdapter) runSession(ctx context.Context, inbound chan<- InboundM
 		case dOpDispatch:
 			if t == "MESSAGE_CREATE" {
 				if msg, ok := parseDiscordMessage(dData); ok {
+					if !d.admit(&msg) {
+						continue
+					}
 					d.hydrateAudio(sessionCtx, &msg)
 					d.hydrateImages(sessionCtx, &msg)
 					if strings.TrimSpace(msg.Text) == "" && msg.Audio == nil && msg.Image == nil {
@@ -290,7 +326,7 @@ func (d *DiscordAdapter) postContent(ctx context.Context, chatID, text string) e
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bot "+d.token)
-	resp, err := d.http.Do(req)
+	resp, err := doHTTP(d.http, req)
 	if err != nil {
 		return err
 	}
@@ -335,7 +371,7 @@ func (d *DiscordAdapter) sendPhoto(ctx context.Context, msg OutboundMessage) err
 	}
 	req.Header.Set("Content-Type", w.FormDataContentType())
 	req.Header.Set("Authorization", "Bot "+d.token)
-	resp, err := d.http.Do(req)
+	resp, err := doHTTP(d.http, req)
 	if err != nil {
 		return err
 	}
@@ -506,6 +542,6 @@ func init() {
 		if token == "" {
 			return nil, nil
 		}
-		return NewDiscordAdapter(token, zap.NewNop()), nil
+		return NewDiscordAdapter(token, zap.NewNop()).WithAllowedUsers(allowlistFromEnv(envDiscordAllowed)), nil
 	})
 }

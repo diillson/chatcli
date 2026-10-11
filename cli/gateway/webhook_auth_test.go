@@ -4,39 +4,8 @@ import (
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/hex"
-	"net/http"
-	"net/http/httptest"
-	"strings"
 	"testing"
 )
-
-// An adapter with no secret configured cannot tell a real caller from
-// anyone who found the address, and what it reaches approves its own tool
-// calls. It used to accept everything in that case.
-func TestGenericWebhookRefusesWithoutASecret(t *testing.T) {
-	w := NewWebhookAdapter(":0", "/hook", "", "", nil)
-	req := httptest.NewRequest(http.MethodPost, "/hook", strings.NewReader(`{"text":"hi"}`))
-	if w.authorized(req) {
-		t.Error("an unconfigured webhook must accept nothing")
-	}
-}
-
-func TestGenericWebhookChecksTheSecret(t *testing.T) {
-	w := NewWebhookAdapter(":0", "/hook", "s3cr3t", "", nil)
-
-	req := httptest.NewRequest(http.MethodPost, "/hook", strings.NewReader(`{"text":"hi"}`))
-	if w.authorized(req) {
-		t.Error("a request with no secret header must be refused")
-	}
-	req.Header.Set("X-ChatCLI-Secret", "wrong")
-	if w.authorized(req) {
-		t.Error("a wrong secret must be refused")
-	}
-	req.Header.Set("X-ChatCLI-Secret", "s3cr3t")
-	if !w.authorized(req) {
-		t.Error("the configured secret must be accepted")
-	}
-}
 
 func TestMetaSignatureVerification(t *testing.T) {
 	const secret = "app-secret"

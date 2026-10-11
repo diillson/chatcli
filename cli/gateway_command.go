@@ -119,6 +119,13 @@ func (cli *ChatCLI) gatewayStartDetached() {
 		fmt.Println(colorize("  "+i18n.T("gateway.no_platforms"), ColorYellow))
 		return
 	}
+	// The detached daemon would refuse to serve (empty sender allowlist,
+	// unsigned webhook); say why here instead of reporting a start that
+	// exits right away.
+	if err := gateway.Preflight(adapters); err != nil {
+		fmt.Printf("  %s %v\n", colorize("ERR", ColorRed), err)
+		return
+	}
 	names := make([]string, 0, len(adapters))
 	for _, a := range adapters {
 		names = append(names, a.Name())

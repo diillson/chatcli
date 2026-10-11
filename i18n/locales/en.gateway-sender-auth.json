@@ -1,0 +1,4 @@
+{
+  "gateway.allowlist.empty": "%s: no sender allowlist, so the adapter refuses to start (every message it accepts drives an agent that runs tools on this host). Set %s to the user ids allowed to talk to the bot, comma-separated, or to * to accept anyone.",
+  "gateway.session.not_listed": "Session commands are only available to senders listed by id in this channel's allowlist."
+}
