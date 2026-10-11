@@ -4,9 +4,10 @@ on:
   push:
     branches: [develop]
 
+# The PR is opened with GH_RELEASE_TOKEN; the job token only reads the
+# repository history.
 permissions:
-  pull-requests: write
-  contents: write # 'write' é necessário para fazer o checkout e ler o histórico
+  contents: read
 
 concurrency:
   group: open-pr-develop-to-main
@@ -30,11 +31,12 @@ jobs:
       # Security (M16): Mask API key to prevent accidental log exposure
       - name: Mask sensitive environment variables
         run: |
-          echo "::add-mask::${{ secrets.OPENAI_API_KEY }}"
+          echo "::add-mask::${OPENAI_API_KEY}"
 
       - name: Checkout repository
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          persist-credentials: false
           # fetch-depth: 0 é essencial para buscar todo o histórico e poder comparar as branches
           fetch-depth: 0
 
@@ -42,7 +44,7 @@ jobs:
         run: git fetch origin main
 
       - name: Set up Go
-        uses: actions/setup-go@v7
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
 
@@ -50,7 +52,7 @@ jobs:
         run: go install github.com/diillson/chatcli@latest
 
       - name: Add Go bin to PATH
-        run: echo "${{ env.GOPATH }}/bin" >> $GITHUB_PATH
+        run: echo "${GOPATH}/bin" >> "$GITHUB_PATH"
 
       - name: Generate PR Content with ChatCLI
         id: generate-pr-content
@@ -97,12 +99,18 @@ jobs:
           
           # 4. Salvar a resposta completa para o próximo passo
           # Usamos a sintaxe recomendada para outputs de múltiplas linhas
-          echo "ai_response<<EOF" >> $GITHUB_OUTPUT
-          echo "$AI_RESPONSE" >> $GITHUB_OUTPUT
-          echo "EOF" >> $GITHUB_OUTPUT
+          # Random delimiter: the response is built from commit subjects, so
+          # a fixed marker could be closed early by a line in that text and
+          # the rest would be read as extra step outputs.
+          DELIM="ai_response_$(openssl rand -hex 16)"
+          {
+            echo "ai_response<<${DELIM}"
+            echo "$AI_RESPONSE"
+            echo "${DELIM}"
+          } >> "$GITHUB_OUTPUT"
 
       - name: Open or reuse PR develop -> main
-        uses: actions/github-script@v9
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         env:
           AI_RESPONSE_CONTENT: ${{ steps.generate-pr-content.outputs.ai_response }}
         with:
