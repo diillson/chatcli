@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"regexp"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -81,8 +82,7 @@ func (e *Engine) handleExec(ctx context.Context, args []string) error {
 	dir := fs.String("dir", "", "")
 	registerDirAliases(fs, dir)
 	timeout := fs.Int("timeout", 600, "")
-	allowUnsafe := fs.Bool("allow-unsafe", false, "")
-	allowSudo := fs.Bool("allow-sudo", false, "")
+	registerIgnoredElevationFlags(fs)
 	if err := parseFlags(fs, args); err != nil {
 		return err
 	}
@@ -91,10 +91,8 @@ func (e *Engine) handleExec(ctx context.Context, args []string) error {
 	}
 
 	finalCmd := html.UnescapeString(*cmdStr)
-	if !*allowUnsafe {
-		if unsafe, reason := IsUnsafeCommand(finalCmd, *allowSudo); unsafe {
-			return fmt.Errorf("comando bloqueado: %s", reason)
-		}
+	if err := checkUnsafeCommand(finalCmd); err != nil {
+		return err
 	}
 
 	e.printf("⚙️ Running: %s\n", finalCmd)
@@ -154,8 +152,7 @@ func (e *Engine) handleTest(ctx context.Context, args []string) error {
 	registerDirAliases(fs, dir)
 	cmd := fs.String("cmd", "", "")
 	timeout := fs.Int("timeout", 1800, "")
-	allowUnsafe := fs.Bool("allow-unsafe", false, "")
-	allowSudo := fs.Bool("allow-sudo", false, "")
+	registerIgnoredElevationFlags(fs)
 	if err := parseFlags(fs, args); err != nil {
 		return err
 	}
@@ -176,12 +173,9 @@ func (e *Engine) handleTest(ctx context.Context, args []string) error {
 	// through none of the guards `exec` applies: not the dangerous-pattern
 	// check, not the sandbox. A subcommand named after running tests is not
 	// a smaller privilege than one named after running commands, and the
-	// same escape hatches exist here so a test suite that legitimately needs
-	// them is not newly refused.
-	if !*allowUnsafe {
-		if unsafe, reason := IsUnsafeCommand(finalCmd, *allowSudo); unsafe {
-			return fmt.Errorf("comando bloqueado: %s", reason)
-		}
+	// same operator escape hatches apply here.
+	if err := checkUnsafeCommand(finalCmd); err != nil {
+		return err
 	}
 
 	execCtx, cancel := context.WithTimeout(ctx, time.Duration(*timeout)*time.Second)
@@ -275,9 +269,53 @@ func IsUnsafeCommand(cmd string, allowSudo bool) (bool, string) {
 		}
 	}
 	if !allowSudo && regexp.MustCompile(`(?i)\bsudo\b`).MatchString(cmd) {
-		return true, "sudo usage blocked (use --allow-sudo)"
+		return true, "sudo usage blocked (operator setting " + AllowSudoEnv + "=true allows it)"
 	}
 	return false, ""
+}
+
+// AllowUnsafeEnv is the operator setting that lifts the dangerous-pattern
+// block on exec/test. Tool arguments cannot lift it.
+const AllowUnsafeEnv = "CHATCLI_CODER_ALLOW_UNSAFE"
+
+// AllowSudoEnv is the operator setting that permits sudo, shared with the
+// agent command validator. Tool arguments cannot grant it.
+const AllowSudoEnv = "CHATCLI_AGENT_ALLOW_SUDO"
+
+// operatorAllows reads a boolean operator setting; anything unparsable is
+// false.
+func operatorAllows(env string) bool {
+	on, err := strconv.ParseBool(strings.TrimSpace(os.Getenv(env)))
+	return err == nil && on
+}
+
+// registerIgnoredElevationFlags keeps --allow-unsafe and --allow-sudo
+// parseable so older prompts and saved sessions do not fail on an unknown
+// flag, but their values are discarded: the caller of a tool (a model, a
+// remote client) must never be able to lift the block on its own command.
+func registerIgnoredElevationFlags(fs *flag.FlagSet) {
+	fs.Var(ignoredBoolValue{}, "allow-unsafe", "ignored; operator setting "+AllowUnsafeEnv)
+	fs.Var(ignoredBoolValue{}, "allow-sudo", "ignored; operator setting "+AllowSudoEnv)
+}
+
+// ignoredBoolValue is a boolean flag.Value that discards what it is given,
+// so "--allow-unsafe" parses without consuming the next argument.
+type ignoredBoolValue struct{}
+
+func (ignoredBoolValue) String() string   { return "false" }
+func (ignoredBoolValue) Set(string) error { return nil }
+func (ignoredBoolValue) IsBoolFlag() bool { return true }
+
+// checkUnsafeCommand refuses a shell line that matches the dangerous-pattern
+// list unless the operator set AllowUnsafeEnv; sudo needs AllowSudoEnv.
+func checkUnsafeCommand(cmdLine string) error {
+	if operatorAllows(AllowUnsafeEnv) {
+		return nil
+	}
+	if unsafe, reason := IsUnsafeCommand(cmdLine, operatorAllows(AllowSudoEnv)); unsafe {
+		return fmt.Errorf("comando bloqueado: %s; tool arguments cannot lift this block, only the operator setting %s=true", reason, AllowUnsafeEnv)
+	}
+	return nil
 }
 
 func runCommandCtx(ctx context.Context, dir, cmd string, args ...string) (string, error) {

@@ -191,6 +191,8 @@ func (h *Handler) GetSkillContent(ctx context.Context, req *pb.GetSkillContentRe
 
 // ExecuteRemotePlugin executes a plugin on the server and returns the output.
 // Security (C1): Requires at least "user" role — readonly users cannot execute plugins.
+// @coder runs shell commands on the server, so it requires "admin" and passes
+// the coder security policy with no human approver (see authorizeRemoteCoder).
 func (h *Handler) ExecuteRemotePlugin(ctx context.Context, req *pb.ExecuteRemotePluginRequest) (*pb.ExecuteRemotePluginResponse, error) {
 	// Access control: readonly users cannot execute plugins
 	if user := UserFromContext(ctx); user != nil && !user.HasRole(RoleUser) {
@@ -207,6 +209,11 @@ func (h *Handler) ExecuteRemotePlugin(ctx context.Context, req *pb.ExecuteRemote
 	plugin, ok := h.pluginManager.GetPlugin(req.PluginName)
 	if !ok {
 		return nil, status.Errorf(codes.NotFound, "%s", i18n.T("server.remote.plugin_not_found", req.PluginName))
+	}
+	if isRemoteCoderPlugin(plugin.Name()) {
+		if err := h.authorizeRemoteCoder(ctx, req.Args); err != nil {
+			return nil, err
+		}
 	}
 
 	h.logger.Info(i18n.T("server.remote.plugin_executing"),

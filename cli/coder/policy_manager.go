@@ -78,9 +78,12 @@ func NewPolicyManager(logger *zap.Logger) (*PolicyManager, error) {
 	return pm, nil
 }
 
+// Check resolves the verdict for one tool call and records the matched rule
+// for LastMatchedRule. It takes the write lock because it writes lastRule:
+// under the read lock, concurrent checks (parallel workers) raced on it.
 func (pm *PolicyManager) Check(toolName, args string) Action {
-	pm.mu.RLock()
-	defer pm.mu.RUnlock()
+	pm.mu.Lock()
+	defer pm.mu.Unlock()
 
 	sub, normalized := NormalizeCoderArgs(args)
 	var fullCommand string
@@ -157,11 +160,11 @@ func (pm *PolicyManager) Check(toolName, args string) Action {
 		return ActionAllow
 	}
 
-	// Priority 4: No explicit rule — check if it's a read-only exec command
+	// Priority 4: No explicit rule — check if it's a read-only exec command.
+	// The classifier must see exactly the line exec will run; when that
+	// cannot be determined without doubt, there is no auto-allow.
 	if sub == "exec" {
-		_, cmdNormalized := NormalizeCoderArgs(args)
-		shellCmd := extractShellCommand(cmdNormalized)
-		if shellCmd != "" && IsReadOnlyCommand(shellCmd) {
+		if shellCmd, ok := execShellCommand(args); ok && !chainsCommands(shellCmd) && IsReadOnlyCommand(shellCmd) {
 			pm.lastRule = nil
 			return ActionAllow
 		}
@@ -184,30 +187,6 @@ func (pm *PolicyManager) Check(toolName, args string) Action {
 
 	pm.lastRule = nil
 	return ActionAsk
-}
-
-// extractShellCommand extracts the shell command from normalized coder exec args.
-func extractShellCommand(normalized string) string {
-	// normalized is like: "exec --cmd ls -la --dir /tmp"
-	// We need the value after --cmd
-	fields := strings.Fields(normalized)
-	for i, f := range fields {
-		if f == "--cmd" && i+1 < len(fields) {
-			// Everything after --cmd until the next -- flag is the command
-			var cmd strings.Builder
-			for j := i + 1; j < len(fields); j++ {
-				if strings.HasPrefix(fields[j], "--") && !strings.ContainsAny(fields[j], "=") {
-					break
-				}
-				if cmd.Len() > 0 {
-					cmd.WriteByte(' ')
-				}
-				cmd.WriteString(fields[j])
-			}
-			return cmd.String()
-		}
-	}
-	return ""
 }
 
 func (pm *PolicyManager) AddRule(pattern string, action Action) error {

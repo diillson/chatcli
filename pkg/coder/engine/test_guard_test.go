@@ -60,13 +60,17 @@ func TestCoderTest_RefusesTheSamePatternsAsExec(t *testing.T) {
 	}
 }
 
-// The escape hatches exist on exec, so they must exist here too: a suite
-// that legitimately needs them must not be newly refused.
+// The legacy --allow-sudo / --allow-unsafe flags still parse on test exactly
+// as on exec (older prompts keep working), but they lift nothing: only the
+// operator settings do (see elevation_flags_test.go).
 func TestCoderTest_EscapeHatchesMatchExec(t *testing.T) {
 	e, _, _, dir := newGuardEngine(t)
 
 	if err := e.Execute(context.Background(), "test", []string{"--cmd", "sudo true", "--dir", dir}); err == nil {
-		t.Fatal("sudo was accepted without --allow-sudo")
+		t.Fatal("sudo was accepted without the operator setting")
+	}
+	if err := e.Execute(context.Background(), "test", []string{"--cmd", "sudo true", "--allow-sudo", "--dir", dir}); err == nil {
+		t.Fatal("a tool-supplied --allow-sudo lifted the sudo block")
 	}
 	if err := e.Execute(context.Background(), "test", []string{"--cmd", "true", "--allow-sudo", "--dir", dir}); err != nil {
 		t.Fatalf("--allow-sudo broke a harmless command: %v", err)

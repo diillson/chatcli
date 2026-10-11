@@ -1,0 +1,12 @@
+{
+  "agent.policy.unattended_denied": "%s precisa de aprovação e ninguém pode aprovar nesta superfície: negado. Libere em coder_policy.json ou defina CHATCLI_POLICY_AUTOMODE=true para que as regras 'ask' sejam aprovadas automaticamente.",
+  "agent.policy.manager_unavailable": "A política de segurança não pôde ser carregada (%v): %s negado. Corrija a configuração da política e tente de novo.",
+  "rpc.tool.policy_denied": "Ferramenta %q bloqueada por uma regra da política de segurança.",
+  "rpc.tool.policy_needs_approval": "A ferramenta %q precisa de aprovação e ninguém pode aprovar nesta superfície: negado. Libere em coder_policy.json ou defina CHATCLI_POLICY_AUTOMODE=true para que as regras 'ask' sejam aprovadas automaticamente.",
+  "rpc.tool.policy_unavailable": "Ferramenta %q negada: a política de segurança não pôde ser carregada (%v).",
+  "server.remote.coder_requires_admin": "Executar @coder no servidor exige o papel admin.",
+  "server.remote.coder_policy_unavailable": "@coder negado: a política de segurança do servidor não pôde ser carregada.",
+  "server.remote.coder_policy_denied": "Chamada @coder bloqueada por uma regra da política de segurança do servidor.",
+  "server.remote.coder_policy_needs_approval": "A chamada @coder precisa de aprovação e ninguém pode aprovar no servidor: negado. Libere no coder_policy.json do servidor ou defina CHATCLI_POLICY_AUTOMODE=true no servidor para que as regras 'ask' sejam aprovadas automaticamente.",
+  "taskgraph.gate.policy_denied": "Comando de gate %q bloqueado pela política de segurança: %s"
+}

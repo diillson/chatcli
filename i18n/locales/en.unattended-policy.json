@@ -1,0 +1,12 @@
+{
+  "agent.policy.unattended_denied": "%s needs approval and no one can approve it on this surface: denied. Allow it in coder_policy.json, or set CHATCLI_POLICY_AUTOMODE=true to let 'ask' rules auto-approve.",
+  "agent.policy.manager_unavailable": "Security policy could not be loaded (%v): %s denied. Fix the policy setup and retry.",
+  "rpc.tool.policy_denied": "Tool %q blocked by a security policy rule.",
+  "rpc.tool.policy_needs_approval": "Tool %q needs approval and no one can approve it on this surface: denied. Allow it in coder_policy.json, or set CHATCLI_POLICY_AUTOMODE=true to let 'ask' rules auto-approve.",
+  "rpc.tool.policy_unavailable": "Tool %q denied: the security policy could not be loaded (%v).",
+  "server.remote.coder_requires_admin": "Executing @coder on the server requires the admin role.",
+  "server.remote.coder_policy_unavailable": "@coder denied: the server security policy could not be loaded.",
+  "server.remote.coder_policy_denied": "@coder call blocked by a server security policy rule.",
+  "server.remote.coder_policy_needs_approval": "@coder call needs approval and no one can approve it on the server: denied. Allow it in the server coder_policy.json, or set CHATCLI_POLICY_AUTOMODE=true on the server to let 'ask' rules auto-approve.",
+  "taskgraph.gate.policy_denied": "Gate command %q blocked by the security policy: %s"
+}

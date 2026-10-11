@@ -1462,6 +1462,8 @@ func (cli *ChatCLI) showConfigSecurity() {
 	kv(p, "CHATCLI_AGENT_ALLOWLIST", envOr("CHATCLI_AGENT_ALLOWLIST"))
 	kv(p, "CHATCLI_AGENT_DENYLIST", envOr("CHATCLI_AGENT_DENYLIST"))
 	kv(p, "CHATCLI_AGENT_ALLOW_SUDO", envBool("CHATCLI_AGENT_ALLOW_SUDO"))
+	kv(p, "CHATCLI_CODER_ALLOW_UNSAFE", envBool("CHATCLI_CODER_ALLOW_UNSAFE"))
+	kv(p, "CHATCLI_POLICY_AUTOMODE", envBool("CHATCLI_POLICY_AUTOMODE"))
 
 	fmt.Println(p)
 	subheader(p, "cfg.sub.sec.workspace")

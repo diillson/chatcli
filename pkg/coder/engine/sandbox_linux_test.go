@@ -40,3 +40,19 @@ func TestWrapWithSandbox_LinuxShape(t *testing.T) {
 		}
 	}
 }
+
+// TestBuildBwrapArgs_ProtectsChatcliState: ~/.chatcli is re-bound read-only
+// after the writable binds, so a workspace at $HOME cannot expose it.
+func TestBuildBwrapArgs_ProtectsChatcliState(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	args := strings.Join(buildBwrapArgs(SandboxWorkspace, home), " ")
+	ro := "--ro-bind-try " + home + "/.chatcli " + home + "/.chatcli"
+	rw := "--bind-try " + home + " " + home
+	if !strings.Contains(args, ro) {
+		t.Fatalf("chatcli state must be bound read-only:\n%s", args)
+	}
+	if strings.Index(args, ro) < strings.Index(args, rw) {
+		t.Fatalf("the read-only bind must come after the writable workspace bind:\n%s", args)
+	}
+}

@@ -1154,6 +1154,10 @@ func NewChatCLI(ctx context.Context, manager manager.LLMManager, logger *zap.Log
 		}
 	})
 
+	// Operator opt-in to autonomy (CHATCLI_POLICY_AUTOMODE): without it,
+	// surfaces with nobody to answer a policy "ask" refuse the action.
+	cli.seedPolicyAutoModeFromEnv()
+
 	history, err := cli.historyManager.LoadHistory()
 	if err != nil {
 		cli.logger.Error("Erro ao carregar o histórico", zap.Error(err))

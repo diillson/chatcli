@@ -12,7 +12,8 @@
  * pidfile + log under ~/.chatcli/. The child runs RunGatewayForeground.
  *
  * In the daemon, each inbound message runs through the real agent loop fully
- * unattended (no stdin confirmations; full autonomy — the operator opted in).
+ * unattended: no stdin confirmations, so a policy "ask" or a dangerous-command
+ * confirmation is declined unless the operator set CHATCLI_POLICY_AUTOMODE=true.
  * Progress streams back as a short, filtered action feed and the run closes
  * with the model's clean prose answer. Access control is at the edge: Telegram
  * allow-list, Slack signing secret, webhook secret, plus the agent security
