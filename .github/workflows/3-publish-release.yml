@@ -199,6 +199,26 @@ jobs:
             exit 1
           fi
 
+      # The signature must verify against a public key the released binary
+      # embeds, or self-update would refuse this release. A seed that does
+      # not match update/release_keys.go stops the release here.
+      - name: Verify the signature against the embedded release keys
+        run: |
+          set -euo pipefail
+          keys=$(grep -oE '"[A-Za-z0-9+/]{43}="' update/release_keys.go | tr -d '"')
+          if [ -z "$keys" ]; then
+            echo "::error::update/release_keys.go embeds no release key"
+            exit 1
+          fi
+          for k in $keys; do
+            if "$RUNNER_TEMP/releasesign" verify checksums.txt checksums.txt.sig "$k"; then
+              echo "checksums.txt.sig verifies against an embedded key"
+              exit 0
+            fi
+          done
+          echo "::error::checksums.txt.sig does not verify against any key in update/release_keys.go"
+          exit 1
+
       - name: Upload signature
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
