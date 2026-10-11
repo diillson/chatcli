@@ -30,12 +30,12 @@ const DefaultConcurrency = 2
 // maxFinalInReport caps the answer text stored per trial in the report.
 const maxFinalInReport = 4000
 
-// defaultCoderPolicy is installed in a coder case's sandbox when the case
-// declares none: the coder may use every @coder subcommand inside its
-// throwaway workspace. Each subcommand is listed by its exact pattern because
-// policy precedence goes to the most specific pattern: a user's global
-// "@coder patch: ask" outranks a local "@coder: allow", while a local rule
-// with the SAME pattern replaces the global one when the files merge. The
+// defaultCoderPolicy is installed for a coder case when the case declares
+// none: the coder may use every @coder subcommand inside its throwaway
+// workspace. Each subcommand is listed by its exact pattern because policy
+// precedence goes to the most specific pattern: a user's global
+// "@coder patch: ask" outranks an overlay "@coder: allow", while an overlay
+// rule with the SAME pattern replaces the global one when the files merge. The
 // list comes from the engine's own schema, so a new subcommand is covered
 // without touching the harness. Deny rules still win, safety-immune
 // operations still ask, and with no human to answer they are denied.
@@ -229,11 +229,19 @@ func runTrial(ctx context.Context, j job, opts Options) TrialResult {
 		return tr
 	}
 
+	env, cleanupPolicy, err := casePolicyEnv(c)
+	defer cleanupPolicy()
+	if err != nil {
+		tr.Status = StatusError
+		tr.Error = err.Error()
+		return tr
+	}
+
 	ex, runErr := opts.Executor.Execute(ctx, Request{
 		Mode:    c.Mode,
 		Prompt:  c.Prompt,
 		Workdir: sandbox,
-		Env:     c.Env,
+		Env:     env,
 		Timeout: timeout,
 	})
 	if ex != nil {
@@ -285,8 +293,44 @@ func runTrial(ctx context.Context, j job, opts Options) TrialResult {
 	return tr
 }
 
+// PolicyEnv names the policy file a coder candidate merges over the user's
+// global policy (cli/coder PolicyOverlayEnv; a test keeps the two equal).
+// The rules travel outside the sandbox: a workspace coder_policy.json can
+// only tighten the policy, and the candidate must not be able to rewrite
+// its own permissions.
+const PolicyEnv = "CHATCLI_CODER_POLICY_OVERLAY"
+
+// casePolicyEnv writes a coder case's policy rules to a file of their own
+// and returns the candidate environment pointing at it, plus its cleanup.
+// Chat cases get the case environment unchanged.
+func casePolicyEnv(c *Case) (map[string]string, func(), error) {
+	if c.Mode != ModeCoder {
+		return c.Env, func() {}, nil
+	}
+	rules := c.Policy
+	if len(rules) == 0 {
+		rules = defaultCoderPolicy()
+	}
+	data, _ := json.MarshalIndent(map[string]any{"rules": rules}, "", "  ")
+	dir, err := os.MkdirTemp("", "chatcli-eval-policy-*")
+	if err != nil {
+		return nil, func() {}, err
+	}
+	cleanup := func() { _ = os.RemoveAll(dir) }
+	path := filepath.Join(dir, "coder_policy.json")
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		return nil, cleanup, err
+	}
+	env := make(map[string]string, len(c.Env)+1)
+	for k, v := range c.Env {
+		env[k] = v
+	}
+	env[PolicyEnv] = path
+	return env, cleanup, nil
+}
+
 // prepareSandbox builds the case's throwaway workspace: fixture copy, inline
-// files, coder policy and setup commands. It returns the directory even on
+// files and setup commands. It returns the directory even on
 // error so the caller can clean it up.
 func prepareSandbox(ctx context.Context, c *Case) (string, error) {
 	dir, err := os.MkdirTemp("", "chatcli-eval-"+c.ID+"-*")
@@ -317,19 +361,6 @@ func prepareSandbox(ctx context.Context, c *Case) (string, error) {
 			return dir, err
 		}
 		if err := os.WriteFile(p, []byte(c.Files[name]), 0o600); err != nil {
-			return dir, err
-		}
-	}
-	if c.Mode == ModeCoder {
-		rules := c.Policy
-		if len(rules) == 0 {
-			rules = defaultCoderPolicy()
-		}
-		data, err := json.MarshalIndent(map[string]any{"merge": true, "rules": rules}, "", "  ")
-		if err != nil {
-			return dir, err
-		}
-		if err := os.WriteFile(filepath.Join(dir, "coder_policy.json"), data, 0o600); err != nil {
 			return dir, err
 		}
 	}

@@ -47,15 +47,15 @@ func newGitRepo(t *testing.T) string {
 	return dir
 }
 
-func newGitTestEngine() (*Engine, *bytes.Buffer) {
+func newGitTestEngine(workspace string) (*Engine, *bytes.Buffer) {
 	var out bytes.Buffer
-	e := NewEngine(&out, &out, "")
+	e := NewEngine(&out, &out, workspace)
 	return e, &out
 }
 
 func TestHandleGitStatus(t *testing.T) {
 	dir := newGitRepo(t)
-	e, out := newGitTestEngine()
+	e, out := newGitTestEngine(dir)
 	if err := e.Execute(context.Background(), "git-status", []string{"--dir", dir}); err != nil {
 		t.Fatalf("git-status: %v", err)
 	}
@@ -70,7 +70,7 @@ func TestHandleGitStatus(t *testing.T) {
 
 func TestHandleGitBranch(t *testing.T) {
 	dir := newGitRepo(t)
-	e, out := newGitTestEngine()
+	e, out := newGitTestEngine(dir)
 	if err := e.Execute(context.Background(), "git-branch", []string{"--dir", dir}); err != nil {
 		t.Fatalf("git-branch: %v", err)
 	}
@@ -81,7 +81,7 @@ func TestHandleGitBranch(t *testing.T) {
 
 func TestHandleGitLog(t *testing.T) {
 	dir := newGitRepo(t)
-	e, out := newGitTestEngine()
+	e, out := newGitTestEngine(dir)
 	if err := e.Execute(context.Background(), "git-log", []string{"--dir", dir, "--limit", "5"}); err != nil {
 		t.Fatalf("git-log: %v", err)
 	}
@@ -96,7 +96,7 @@ func TestHandleGitDiff(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "tracked.txt"), []byte("hello\nworld\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	e, out := newGitTestEngine()
+	e, out := newGitTestEngine(dir)
 	if err := e.Execute(context.Background(), "git-diff", []string{"--dir", dir, "--context", "1"}); err != nil {
 		t.Fatalf("git-diff: %v", err)
 	}
@@ -110,7 +110,7 @@ func TestHandleGitDiff_NameOnlyAndStat(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "tracked.txt"), []byte("hello\nchanged\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	e, out := newGitTestEngine()
+	e, out := newGitTestEngine(dir)
 	if err := e.Execute(context.Background(), "git-diff",
 		[]string{"--dir", dir, "--name-only", "--stat", "--path", "tracked.txt"}); err != nil {
 		t.Fatalf("git-diff: %v", err)
@@ -122,7 +122,7 @@ func TestHandleGitDiff_NameOnlyAndStat(t *testing.T) {
 
 func TestHandleGitChanged(t *testing.T) {
 	dir := newGitRepo(t)
-	e, out := newGitTestEngine()
+	e, out := newGitTestEngine(dir)
 	if err := e.Execute(context.Background(), "git-changed", []string{"--dir", dir}); err != nil {
 		t.Fatalf("git-changed: %v", err)
 	}
@@ -132,7 +132,7 @@ func TestHandleGitChanged(t *testing.T) {
 }
 
 func TestHandleGit_BadFlag(t *testing.T) {
-	e, _ := newGitTestEngine()
+	e, _ := newGitTestEngine(t.TempDir())
 	err := e.Execute(context.Background(), "git-status", []string{"--nonexistent-flag"})
 	if err == nil {
 		t.Error("expected error for unknown flag")

@@ -13,6 +13,7 @@ import (
 	"github.com/diillson/chatcli/cli/agent/workers"
 	"github.com/diillson/chatcli/cli/coder"
 	"github.com/diillson/chatcli/cli/metrics"
+	"github.com/diillson/chatcli/i18n"
 	"go.uber.org/zap"
 )
 
@@ -33,10 +34,10 @@ type workerPolicyAdapter struct {
 	// a goroutine on os.Stdin, avoiding orphaned readers after Ctrl+C.
 	stdinCh <-chan string
 
-	// unattended marks the gateway daemon: there is no human to answer an
-	// "ask" prompt and PromptSecurityCheck would block on a dead stdin
-	// forever, so "ask" auto-approves (the operator opted into full autonomy;
-	// access is gated at the messaging edge). ActionDeny still blocks.
+	// unattended marks a run with no human to answer an "ask" prompt
+	// (gateway, server, RPC surfaces): PromptSecurityCheck would block on a
+	// dead stdin forever, so "ask" is refused unless autoApprove admits it
+	// (the operator's policy automode opt-in). ActionDeny always blocks.
 	unattended bool
 
 	// autoApprove, when set, is consulted on an "ask" verdict before any
@@ -153,19 +154,21 @@ func (a *workerPolicyAdapter) CheckAndPrompt(ctx context.Context, toolName, args
 		return false, "AÇÃO BLOQUEADA (Regra de Segurança). NÃO TENTE NOVAMENTE."
 
 	case coder.ActionAsk:
-		if a.unattended {
-			// Gateway: no human to answer; blocking on stdin would hang the
-			// worker silently. Auto-approve (see field doc).
-			a.logger.Info("Worker tool call auto-approved (unattended gateway)",
-				zap.String("tool", toolName))
-			return true, ""
-		}
 		if a.autoApprove != nil && a.autoApprove(toolName, args) {
 			// Session automode (/policy mode auto): same convenience the
 			// orchestrator's loop gets, with the same safety-immunity carve-out.
 			a.logger.Info("Worker tool call auto-approved (policy automode)",
 				zap.String("tool", toolName))
 			return true, ""
+		}
+
+		// Unattended (gateway, server, RPC): nobody can answer, and blocking
+		// on stdin would hang the worker. Without the automode opt-in above,
+		// "ask" is refused.
+		if a.unattended {
+			a.logger.Info("Worker tool call denied (unattended, no automode opt-in)",
+				zap.String("tool", toolName))
+			return false, i18n.T("agent.policy.unattended_denied", toolName)
 		}
 
 		// No terminal (scripted one-shot, CI, eval): the prompt could never

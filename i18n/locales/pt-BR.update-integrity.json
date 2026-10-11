@@ -1,0 +1,6 @@
+{
+  "update.integrity.bad_signature": "Release v%s: o checksums.txt não está assinado por uma chave de release confiável do ChatCLI, então o download foi recusado. Não instale manualmente; reporte em https://github.com/diillson/chatcli/security.",
+  "update.integrity.bad_tag": "A tag da release mais recente %q não é uma versão válida, então nada foi baixado.",
+  "update.integrity.no_release_keys": "Este build não embute chave de assinatura de release, então o self-update não consegue verificar o download e se recusa a rodar. Atualize com `brew upgrade diillson/chatcli/chatcli` ou `go install github.com/diillson/chatcli@latest`, ou baixe a release manualmente: %s",
+  "update.integrity.no_signature": "A release v%s não publica checksums.txt.sig, então os checksums não podem ser autenticados e o download foi recusado. Atualize manualmente: %s"
+}

@@ -189,14 +189,22 @@ func (s *APIServer) Start(ctx context.Context) error {
 	))
 
 	// Serve Web UI from embedded static files.
+	// The dashboard is served only with its Content-Security-Policy: a
+	// policy that cannot be built leaves the dashboard unserved rather than
+	// unprotected.
 	webFS, err := fs.Sub(web.StaticFiles, "static")
+	var csp string
+	if err == nil {
+		csp, err = dashboardCSP(webFS)
+	}
 	if err == nil {
 		fileServer := http.FileServer(http.FS(webFS))
 		mux.Handle("/", chain(
-			fileServer,
+			withDashboardHeaders(csp, fileServer),
 			s.corsMiddleware,
 		))
 	} else {
+		log.Printf("[REST] dashboard disabled: %v", err)
 		// Fallback: CORS preflight for non-api paths.
 		mux.Handle("/", chain(
 			http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

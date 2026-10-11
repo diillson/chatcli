@@ -188,6 +188,9 @@ func printUpdateError(logger *zap.Logger, err error, info update.Info, latest st
 	var unsupported *update.UnsupportedPlatformError
 	var noChecksums *update.ChecksumsUnavailableError
 	var mismatch *update.ChecksumMismatchError
+	var noSig *update.SignatureUnavailableError
+	var badSig *update.SignatureInvalidError
+	var badTag *update.InvalidTagError
 
 	warn := func(msg string) { fmt.Println(colorize("  ❌ "+msg, ColorYellow)) }
 
@@ -205,6 +208,16 @@ func printUpdateError(logger *zap.Logger, err error, info update.Info, latest st
 	case errors.As(err, &noChecksums):
 		warn(i18n.T("update.err.no_checksums", latest,
 			"https://github.com/diillson/chatcli/releases/latest"))
+	case errors.Is(err, update.ErrNoReleaseKeys):
+		warn(i18n.T("update.integrity.no_release_keys",
+			"https://github.com/diillson/chatcli/releases/latest"))
+	case errors.As(err, &noSig):
+		warn(i18n.T("update.integrity.no_signature", latest,
+			"https://github.com/diillson/chatcli/releases/latest"))
+	case errors.As(err, &badSig):
+		warn(i18n.T("update.integrity.bad_signature", latest))
+	case errors.As(err, &badTag):
+		warn(i18n.T("update.integrity.bad_tag", badTag.Tag))
 	case errors.As(err, &mismatch):
 		warn(i18n.T("update.err.mismatch"))
 		logger.Warn("self-update: checksum mismatch",

@@ -106,6 +106,12 @@ type RemediationReconciler struct {
 	// EventRecorder, when set, emits Kubernetes Events on a plan, such as
 	// an approval gate that could not be evaluated. Nil emits none.
 	EventRecorder events.EventRecorder
+	// AIOpsInstance is the pinned Instance (CHATCLI_OPERATOR_AIOPS_INSTANCE)
+	// whose provider and model the agentic steps ask for.
+	AIOpsInstance types.NamespacedName
+	// RemediationMode is how much the operator may act on its own (see
+	// RemediationMode). Unset means approve.
+	RemediationMode RemediationMode
 }
 
 // +kubebuilder:rbac:groups=platform.chatcli.io,resources=remediationplans,verbs=get;list;watch;create;update;patch;delete
@@ -173,8 +179,18 @@ func (r *RemediationReconciler) handleWaitingApproval(ctx context.Context, plan 
 	log := log.FromContext(ctx)
 
 	// Always check the ApprovalRequest CR status directly — not just the annotation.
-	// This prevents bypass via manual annotation deletion.
-	arName := fmt.Sprintf("approval-%s", plan.Name)
+	// This prevents bypass via manual annotation deletion. An agentic plan
+	// parked on one step waits on that step's own request.
+	arName := approvalRequestName(plan)
+	pendingStep, stepErr := pendingAgenticStepOf(plan)
+	if stepErr != nil {
+		plan.Status.State = platformv1alpha1.RemediationStateFailed
+		plan.Status.Result = fmt.Sprintf("Pending agentic step is unreadable: %v", stepErr)
+		return ctrl.Result{}, r.Status().Update(ctx, plan)
+	}
+	if pendingStep != nil {
+		arName = pendingStep.Approval
+	}
 	var ar platformv1alpha1.ApprovalRequest
 	if err := r.Get(ctx, types.NamespacedName{Name: arName, Namespace: plan.Namespace}, &ar); err != nil {
 		log.Info("Approval request not found, failing plan", "plan", plan.Name)
@@ -190,7 +206,9 @@ func (r *RemediationReconciler) handleWaitingApproval(ctx context.Context, plan 
 		r.auditApprovalDecision(ctx, &ar, "approved")
 		now := metav1.Now()
 		plan.Status.State = platformv1alpha1.RemediationStateExecuting
-		plan.Status.StartedAt = &now
+		if pendingStep == nil {
+			plan.Status.StartedAt = &now
+		}
 		plan.Status.Result = ""
 		return ctrl.Result{RequeueAfter: conflictRetryDelay}, r.Status().Update(ctx, plan)
 
@@ -259,7 +277,7 @@ func (r *RemediationReconciler) gateByApproval(ctx context.Context, plan *platfo
 			log.Error(err, "Failed to create approval request; retrying, the plan stays pending", "plan", plan.Name)
 			return true, ctrl.Result{RequeueAfter: conflictRetryDelay}, nil
 		}
-		r.auditApprovalRequested(ctx, plan)
+		r.auditApprovalRequested(ctx, plan, approvalRequestName(plan))
 		plan.Status.State = platformv1alpha1.RemediationStateWaitingApproval
 		plan.Status.Result = fmt.Sprintf("Waiting for %s approval (policy: %s, rule: %s)", rule.Mode, policy.Name, rule.Name)
 		if err := r.Status().Update(ctx, plan); err != nil {
@@ -275,7 +293,14 @@ func (r *RemediationReconciler) gateByApproval(ctx context.Context, plan *platfo
 	if parked, res, err := r.gateByClusterTier(ctx, plan, &issue, &insight); parked || err != nil {
 		return true, res, err
 	}
-	return r.gateByDecisionEngine(ctx, plan, &issue, &insight)
+	if parked, res, err := r.gateByDecisionEngine(ctx, plan, &issue, &insight); parked || err != nil {
+		return true, res, err
+	}
+	// Only an explicit allow counts: a policy auto rule that matched, or a
+	// decision engine that was asked and said yes. The cluster tier never
+	// allows on its own: the registration it reads is not authenticated.
+	allowedByGate := required || r.DecisionEngine != nil
+	return r.gateByRemediationMode(ctx, plan, &issue, &insight, allowedByGate)
 }
 
 // approvalGateUnavailable logs and records an event for a gate that could
@@ -302,11 +327,14 @@ func (r *RemediationReconciler) handlePending(ctx context.Context, plan *platfor
 	log := log.FromContext(ctx)
 	log.Info("Starting remediation", "plan", plan.Name, "attempt", plan.Spec.Attempt)
 
-	if parked, res, err := r.gateByApproval(ctx, plan); parked || err != nil {
-		return res, err
+	if r.remediationMode() == RemediationModeObserve {
+		return r.failObservedPlan(ctx, plan)
 	}
 
-	// Validate safety constraints (skip for agentic mode — no pre-planned actions)
+	// Validate safety constraints before any gate: an approved plan goes
+	// straight to Executing, so a check after the gate would never run for
+	// it. Agentic plans carry no actions yet; every step they take is
+	// validated when it is proposed.
 	if !plan.Spec.AgenticMode {
 		if err := r.validateSafetyConstraints(plan.Spec.Actions, plan.Spec.SafetyConstraints); err != nil {
 			plan.Status.State = platformv1alpha1.RemediationStateFailed
@@ -314,6 +342,10 @@ func (r *RemediationReconciler) handlePending(ctx context.Context, plan *platfor
 			remediationsTotal.WithLabelValues("validation", "failed").Inc()
 			return ctrl.Result{}, r.Status().Update(ctx, plan)
 		}
+	}
+
+	if parked, res, err := r.gateByApproval(ctx, plan); parked || err != nil {
+		return res, err
 	}
 
 	now := metav1.Now()
@@ -727,6 +759,11 @@ func (r *RemediationReconciler) executeAction(ctx context.Context, resource plat
 	if !ok {
 		return fmt.Errorf("unsupported action type: %s", action.Type)
 	}
+	if nodeActions[action.Type] {
+		if err := r.ensureNodeBoundToResource(ctx, resource, action.Params["node"]); err != nil {
+			return err
+		}
+	}
 	return exec(r, ctx, resource, action.Params)
 }
 
@@ -742,6 +779,16 @@ const defaultAgenticMaxSteps int32 = 10
 // keeps cyclomatic complexity bounded.
 func (r *RemediationReconciler) handleAgenticExecuting(ctx context.Context, plan *platformv1alpha1.RemediationPlan) (ctrl.Result, error) {
 	log := log.FromContext(ctx)
+
+	// A step a human approved runs before anything else: it is the action
+	// the plan was parked on, not a new proposal.
+	pending, err := pendingAgenticStepOf(plan)
+	if err != nil {
+		return r.failAgenticStepPlan(ctx, plan, fmt.Sprintf("Pending agentic step is unreadable: %v", err))
+	}
+	if pending != nil {
+		return r.resumeAgenticStep(ctx, plan, pending, log)
+	}
 
 	maxSteps := plan.Spec.AgenticMaxSteps
 	if maxSteps == 0 {
@@ -856,7 +903,7 @@ func (r *RemediationReconciler) callAgenticStepRPC(ctx context.Context, plan *pl
 	resource := issue.Spec.Resource
 	kubeCtx := r.buildAgenticKubeContext(ctx, resource, log)
 	history := buildAgenticHistoryEntries(plan.Spec.AgenticHistory)
-	provider, model := resolveInstanceProvider(ctx, r.Client)
+	provider, model := resolveInstanceProvider(ctx, r.Client, r.AIOpsInstance)
 	insightAnalysis, insightConfidence, insightRecs, insightActions := r.loadAIInsightForAgenticContext(ctx, issue, log)
 
 	resp, err := r.ServerClient.AgenticStep(ctx, &pb.AgenticStepRequest{
@@ -866,7 +913,7 @@ func (r *RemediationReconciler) callAgenticStepRPC(ctx context.Context, plan *pl
 		ResourceName:            resource.Name,
 		SignalType:              issue.Spec.SignalType,
 		Severity:                string(issue.Spec.Severity),
-		Description:             issue.Spec.Description,
+		Description:             scrubForLLM(issue.Spec.Description),
 		RiskScore:               issue.Spec.RiskScore,
 		Provider:                provider,
 		Model:                   model,
@@ -982,6 +1029,12 @@ func (r *RemediationReconciler) executeAgenticAction(ctx context.Context, plan *
 	nextAction := &platformv1alpha1.RemediationAction{
 		Type:   mapActionType(resp.NextAction.Action),
 		Params: resp.NextAction.Params,
+	}
+
+	// Every step passes the safety validator and the approval gates for its
+	// own action before it runs.
+	if handled, res, err := r.gateAgenticStep(ctx, plan, issue, resp, currentStep, nextAction); handled {
+		return res, err
 	}
 
 	log.Info("Agentic executing action", "plan", plan.Name, "step", currentStep, "action", nextAction.Type)
@@ -1817,7 +1870,7 @@ func (r *RemediationReconciler) recordAgenticStepCost(ctx context.Context, issue
 	inputTokens, outputTokens := usageTokens(resp.GetUsage(), 0, int64(len(resp.GetReasoning())/4))
 	provider, model := servedProviderModel(resp.GetProvider(), resp.GetModel(), "", "")
 	if provider == "" && model == "" {
-		provider, model = resolveInstanceProvider(ctx, r.Client)
+		provider, model = resolveInstanceProvider(ctx, r.Client, r.AIOpsInstance)
 	}
 	if err := r.CostTracker.RecordAgenticStep(ctx, platformv1alpha1.IssueRef{Name: issue.Name},
 		issue.Namespace, provider, model, inputTokens, outputTokens); err != nil {
@@ -1909,7 +1962,7 @@ func (r *RemediationReconciler) parkUnderSyntheticPolicy(ctx context.Context, pl
 		log.Error(err, "Failed to create approval request for the verdict; retrying", "plan", plan.Name, "policy", policyName)
 		return true, ctrl.Result{RequeueAfter: conflictRetryDelay}, nil
 	}
-	r.auditApprovalRequested(ctx, plan)
+	r.auditApprovalRequested(ctx, plan, approvalRequestName(plan))
 	plan.Status.State = platformv1alpha1.RemediationStateWaitingApproval
 	plan.Status.Result = decision.Reason
 	if err := r.Status().Update(ctx, plan); err != nil {
@@ -1930,12 +1983,12 @@ func (r *RemediationReconciler) annotatePlan(ctx context.Context, plan *platform
 }
 
 // auditApprovalRequested records the request the plan is now waiting on.
-func (r *RemediationReconciler) auditApprovalRequested(ctx context.Context, plan *platformv1alpha1.RemediationPlan) {
+func (r *RemediationReconciler) auditApprovalRequested(ctx context.Context, plan *platformv1alpha1.RemediationPlan, arName string) {
 	if r.AuditRecorder == nil {
 		return
 	}
 	var ar platformv1alpha1.ApprovalRequest
-	if err := r.Get(ctx, types.NamespacedName{Name: "approval-" + plan.Name, Namespace: plan.Namespace}, &ar); err != nil {
+	if err := r.Get(ctx, types.NamespacedName{Name: arName, Namespace: plan.Namespace}, &ar); err != nil {
 		return
 	}
 	if err := r.AuditRecorder.RecordApprovalRequested(ctx, &ar); err != nil {

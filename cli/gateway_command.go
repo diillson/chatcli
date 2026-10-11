@@ -12,7 +12,8 @@
  * pidfile + log under ~/.chatcli/. The child runs RunGatewayForeground.
  *
  * In the daemon, each inbound message runs through the real agent loop fully
- * unattended (no stdin confirmations; full autonomy — the operator opted in).
+ * unattended: no stdin confirmations, so a policy "ask" or a dangerous-command
+ * confirmation is declined unless the operator set CHATCLI_POLICY_AUTOMODE=true.
  * Progress streams back as a short, filtered action feed and the run closes
  * with the model's clean prose answer. Access control is at the edge: Telegram
  * allow-list, Slack signing secret, webhook secret, plus the agent security
@@ -116,6 +117,13 @@ func (cli *ChatCLI) gatewayStartDetached() {
 	}
 	if len(adapters) == 0 {
 		fmt.Println(colorize("  "+i18n.T("gateway.no_platforms"), ColorYellow))
+		return
+	}
+	// The detached daemon would refuse to serve (empty sender allowlist,
+	// unsigned webhook); say why here instead of reporting a start that
+	// exits right away.
+	if err := gateway.Preflight(adapters); err != nil {
+		fmt.Printf("  %s %v\n", colorize("ERR", ColorRed), err)
 		return
 	}
 	names := make([]string, 0, len(adapters))

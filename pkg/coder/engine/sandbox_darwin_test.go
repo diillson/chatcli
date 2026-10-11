@@ -8,6 +8,9 @@
 package engine
 
 import (
+	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -44,5 +47,36 @@ func TestWrapWithSandbox_DarwinShape(t *testing.T) {
 		if !strings.Contains(note, "strict") {
 			t.Fatalf("note should mention strict: %q", note)
 		}
+	}
+}
+
+// TestSandboxExec_ChatcliStateReadOnly runs a real confined command with the
+// workspace at $HOME: it may write the workspace, but not ~/.chatcli, where
+// the policy, hooks and skills live.
+func TestSandboxExec_ChatcliStateReadOnly(t *testing.T) {
+	if _, err := exec.LookPath(sandboxBinary); err != nil {
+		t.Skip("sandbox-exec not available")
+	}
+	home, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("HOME", home)
+	state := filepath.Join(home, ".chatcli")
+	if err := os.MkdirAll(state, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	run := func(target string) error {
+		name, args, _ := wrapWithSandbox(SandboxWorkspace, home, "sh", "-c", "echo x > "+target)
+		return exec.Command(name, args...).Run() //#nosec G204 -- test-built sandbox invocation over a temp dir
+	}
+	if err := run(filepath.Join(home, "ok.txt")); err != nil {
+		t.Fatalf("the workspace must stay writable: %v", err)
+	}
+	if err := run(filepath.Join(state, "coder_policy.json")); err == nil {
+		t.Fatal("a confined command wrote into ~/.chatcli")
+	}
+	if _, err := os.Stat(filepath.Join(state, "coder_policy.json")); err == nil {
+		t.Fatal("the protected file exists after the confined write")
 	}
 }

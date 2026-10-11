@@ -71,7 +71,7 @@ func saveReleaseCache(release ReleaseInfo) {
 // parseável, junto com a idade dela — SEM aplicar o TTL. Validade de
 // exibição e throttle de fetch são decisões separadas: um cache vencido
 // ainda é o melhor dado conhecido para exibir, mas obriga um novo fetch.
-// Cache corrompido ou sem tag conta como ausente.
+// Cache corrompido, sem tag ou com tag fora do semver conta como ausente.
 func loadReleaseCacheEntry() (releaseCacheEntry, bool) {
 	path, err := releaseCachePath()
 	if err != nil {
@@ -85,7 +85,9 @@ func loadReleaseCacheEntry() (releaseCacheEntry, bool) {
 	if err := json.Unmarshal(data, &entry); err != nil {
 		return releaseCacheEntry{}, false
 	}
-	if entry.Release.TagName == "" {
+	// Same ingestion rule as the network path: a tag that is not strict
+	// semver (a hand-edited or older cache) counts as no cache at all.
+	if !IsValidTag(entry.Release.TagName) {
 		return releaseCacheEntry{}, false
 	}
 	return entry, true

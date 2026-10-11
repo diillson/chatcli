@@ -9,7 +9,6 @@ import (
 	"bytes"
 	"context"
 	"crypto/rand"
-	"crypto/subtle"
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
@@ -23,6 +22,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/diillson/chatcli/i18n"
+	"github.com/diillson/chatcli/pkg/netguard"
 	"go.uber.org/zap"
 )
 
@@ -36,9 +37,14 @@ const webhookPlatform = "webhook"
 // Inbound  (POST <path>): {"chat_id":"...", "user_id":"...", "text":"..."}
 // Outbound (POST callbackURL): {"chat_id":"...", "kind":"final", "text":"..."}
 //
-// SecOps: the shared secret is required in the X-ChatCLI-Secret header and
-// compared in constant time; with no secret configured every request is
-// refused.
+// SecOps: every request, in both directions, is signed with the shared
+// secret (see webhook_sign.go): X-ChatCLI-Timestamp carries unix seconds and
+// X-ChatCLI-Signature carries "sha256=" plus the hex HMAC-SHA256 of
+// "<timestamp>.<raw body>". Inbound requests are verified before the body is
+// parsed, within a five-minute window, once each. The secret itself is never
+// sent. The adapter refuses to start without a secret, and with a callback
+// URL that is not https (plain http only for a loopback host). Attachment
+// URLs are fetched over https from public addresses only.
 //
 // Delivery model: an accepted request is answered 202 right away and queued
 // on a per-chat lane, so attachment downloads never hold the caller and the
@@ -63,6 +69,12 @@ type webhookState struct {
 	lanes   map[string]chan InboundMessage
 	// retryBackoff is the wait before each callback retry; len+1 attempts.
 	retryBackoff []time.Duration
+	// replay remembers the inbound signatures accepted within the window.
+	replay *webhookReplayGuard
+	// media fetches attachment URLs; it reaches public https hosts only.
+	media *http.Client
+	// now is the clock the signature window is checked against.
+	now func() time.Time
 }
 
 // Webhook error codes, returned as {"error":"<code>"} so a caller can tell
@@ -70,6 +82,8 @@ type webhookState struct {
 const (
 	whErrMethod       = "method_not_allowed"
 	whErrUnauthorized = "unauthorized"
+	whErrStale        = "stale_timestamp"
+	whErrReplayed     = "replayed"
 	whErrTooLarge     = "payload_too_large"
 	whErrInvalidJSON  = "invalid_json"
 	whErrNoChatID     = "missing_chat_id"
@@ -105,8 +119,24 @@ func NewWebhookAdapter(addr, path, secret, callbackURL string, logger *zap.Logge
 		state: &webhookState{
 			lanes:        make(map[string]chan InboundMessage),
 			retryBackoff: defaultWebhookRetryBackoff,
+			replay:       newWebhookReplayGuard(),
+			media:        netguard.NewClient(30 * time.Second),
+			now:          time.Now,
 		},
 	}
+}
+
+// preflight implements preflighter: a webhook without a secret cannot tell
+// its caller from anyone else, and a callback over plain http to another
+// host would carry every reply in clear text.
+func (w *WebhookAdapter) preflight() error {
+	if strings.TrimSpace(w.secret) == "" {
+		return fmt.Errorf("%s", i18n.T("gateway.webhook.no_secret", "CHATCLI_WEBHOOK_SECRET"))
+	}
+	if strings.TrimSpace(w.callbackURL) != "" {
+		return checkWebhookCallbackURL(w.callbackURL)
+	}
+	return nil
 }
 
 // MissingOutbound implements OutboundChecker: without a callback URL there
@@ -153,8 +183,17 @@ func (w *WebhookAdapter) inboundHandler(ctx context.Context, inbound chan<- Inbo
 			writeWebhookError(rw, http.StatusMethodNotAllowed, whErrMethod)
 			return
 		}
-		if !w.authorized(r) {
+		// Cheap checks first, so an unsigned or stale request is refused
+		// before its body is read.
+		ts, sig := r.Header.Get(webhookTimestampHeader), r.Header.Get(webhookSignatureHeader)
+		if w.secret == "" || ts == "" || sig == "" {
 			writeWebhookError(rw, http.StatusUnauthorized, whErrUnauthorized)
+			return
+		}
+		now := w.state.now()
+		at, fresh := webhookTimestampFresh(ts, now)
+		if !fresh {
+			writeWebhookError(rw, http.StatusUnauthorized, whErrStale)
 			return
 		}
 		body, err := io.ReadAll(http.MaxBytesReader(rw, r.Body, maxWebhookBodyBytes()))
@@ -165,6 +204,20 @@ func (w *WebhookAdapter) inboundHandler(ctx context.Context, inbound chan<- Inbo
 				return
 			}
 			writeWebhookError(rw, http.StatusBadRequest, whErrInvalidJSON)
+			return
+		}
+		// The signature is verified over the raw bytes before any of them
+		// is parsed.
+		if !webhookSignatureValid(w.secret, ts, body, sig) {
+			writeWebhookError(rw, http.StatusUnauthorized, whErrUnauthorized)
+			return
+		}
+		switch w.state.replay.record(strings.TrimSpace(sig), at, now) {
+		case webhookReplayed:
+			writeWebhookError(rw, http.StatusConflict, whErrReplayed)
+			return
+		case webhookReplayFull:
+			writeWebhookError(rw, http.StatusTooManyRequests, whErrQueueFull)
 			return
 		}
 		msg, reason := parseWebhookRequest(body)
@@ -251,8 +304,8 @@ func (w *WebhookAdapter) drainLane(ctx context.Context, chatID string, lane chan
 
 // Start runs the HTTP server until ctx is canceled.
 func (w *WebhookAdapter) Start(ctx context.Context, inbound chan<- InboundMessage) error {
-	if w.secret == "" {
-		w.logger.Warn("gateway/webhook: CHATCLI_WEBHOOK_SECRET is not set; every request is refused with 401 until it is")
+	if err := w.preflight(); err != nil {
+		return err
 	}
 	if w.callbackURL == "" {
 		w.logger.Warn("gateway/webhook: CHATCLI_WEBHOOK_CALLBACK_URL is not set; requests are accepted but replies are not delivered anywhere")
@@ -278,20 +331,6 @@ func (w *WebhookAdapter) Start(ctx context.Context, inbound chan<- InboundMessag
 	return nil
 }
 
-// authorized checks the shared secret on an inbound delivery.
-//
-// Fail closed: an adapter with no secret configured cannot tell a real
-// caller from anyone who found the address, and what it reaches is an
-// agent that approves its own tool calls. It used to accept everything in
-// that case, which made the secret optional in name only.
-func (w *WebhookAdapter) authorized(r *http.Request) bool {
-	if w.secret == "" {
-		return false
-	}
-	got := r.Header.Get("X-ChatCLI-Secret")
-	return subtle.ConstantTimeCompare([]byte(got), []byte(w.secret)) == 1
-}
-
 // Send POSTs the reply to the configured callback URL. A final or proactive
 // message is retried on transient failures (network errors, 408, 429, 5xx);
 // the "working" notice and progress updates get one attempt, so a slow
@@ -301,6 +340,11 @@ func (w *WebhookAdapter) Send(ctx context.Context, msg OutboundMessage) error {
 	if w.callbackURL == "" {
 		// No callback configured: nothing to deliver to (inbound-only mode).
 		return nil
+	}
+	// Send is also reached without Start (the @send tool), so the transport
+	// and signing rules are enforced here too.
+	if err := w.preflight(); err != nil {
+		return err
 	}
 	out := map[string]string{"chat_id": msg.ChatID, "text": msg.Text}
 	if msg.Kind != "" {
@@ -350,12 +394,16 @@ func (w *WebhookAdapter) postCallback(ctx context.Context, payload []byte, deliv
 		return false, err
 	}
 	req.Header.Set("Content-Type", "application/json")
-	if w.secret != "" {
-		req.Header.Set("X-ChatCLI-Secret", w.secret)
-	}
+	// Signed, never the raw secret: the secret stays off the wire, so a
+	// proxy, a load balancer or an access log in front of the receiver
+	// never sees the credential that authenticates inbound requests. Each
+	// attempt is signed afresh so a retry carries a current timestamp.
+	ts := strconv.FormatInt(w.state.now().Unix(), 10)
+	req.Header.Set(webhookTimestampHeader, ts)
+	req.Header.Set(webhookSignatureHeader, signWebhook(w.secret, ts, payload))
 	req.Header.Set("X-ChatCLI-Delivery-ID", deliveryID)
 	req.Header.Set("X-ChatCLI-Delivery-Attempt", strconv.Itoa(attempt))
-	resp, err := w.http.Do(req)
+	resp, err := doHTTP(w.http, req)
 	if err != nil {
 		return ctx.Err() == nil, err
 	}
@@ -448,11 +496,11 @@ func (w *WebhookAdapter) hydrateAudio(ctx context.Context, msg *InboundMessage) 
 	if msg.Audio == nil || len(msg.Audio.Data) > 0 {
 		return
 	}
-	data, mime, err := fetchAudioBytes(ctx, w.http, msg.Audio.ref, "", maxAudioBytes())
+	data, mime, err := w.fetchAttachment(ctx, msg.Audio.ref, maxAudioBytes())
 	if err != nil {
 		w.logger.Warn("gateway/webhook: audio download failed", zap.String("user", msg.UserID), zap.Error(err))
 		msg.Audio = nil
-		noteFailedAttachment(msg, "audio", err)
+		noteFailedAttachment(msg, "audio")
 		return
 	}
 	msg.Audio.Data = data
@@ -468,11 +516,11 @@ func (w *WebhookAdapter) hydrateImages(ctx context.Context, msg *InboundMessage)
 	if msg.Image == nil || len(msg.Image.Data) > 0 {
 		return
 	}
-	data, mime, err := fetchAudioBytes(ctx, w.http, msg.Image.ref, "", maxImageBytes())
+	data, mime, err := w.fetchAttachment(ctx, msg.Image.ref, maxImageBytes())
 	if err != nil {
 		w.logger.Warn("gateway/webhook: image download failed", zap.String("user", msg.UserID), zap.Error(err))
 		msg.Image = nil
-		noteFailedAttachment(msg, "image", err)
+		noteFailedAttachment(msg, "image")
 		return
 	}
 	msg.Image.Data = data
@@ -481,12 +529,26 @@ func (w *WebhookAdapter) hydrateImages(ctx context.Context, msg *InboundMessage)
 	}
 }
 
+// fetchAttachment downloads an attachment URL the caller supplied. The URL
+// is chosen by whoever sends the request, so it is held to the netguard
+// rules: https only, public addresses only (checked again after DNS
+// resolution and on every redirect hop), no proxy.
+func (w *WebhookAdapter) fetchAttachment(ctx context.Context, ref string, limit int64) ([]byte, string, error) {
+	if _, err := netguard.CheckURL(ref); err != nil {
+		return nil, "", err
+	}
+	return fetchAudioBytes(ctx, w.state.media, ref, "", limit)
+}
+
 // noteFailedAttachment tells the agent that an attachment sent by URL never
 // arrived, so the reply says so instead of answering as if nothing had been
 // attached. The message still runs: a request was already accepted with 202,
-// and the reply is the only channel left to report the problem.
-func noteFailedAttachment(msg *InboundMessage, kind string, err error) {
-	note := fmt.Sprintf("[The %s attached to this message by URL could not be downloaded (%v). Tell the user it was not received and ask them to send it again.]", kind, err)
+// and the reply is the only channel left to report the problem. The note is
+// deliberately generic: the reason (refused address, status, network error)
+// goes to the operator's log only, so the reply cannot be used to map what
+// the host can reach.
+func noteFailedAttachment(msg *InboundMessage, kind string) {
+	note := fmt.Sprintf("[The %s attached to this message by URL could not be downloaded. Tell the user it was not received and ask them to send it again, inline or from a public https URL.]", kind)
 	if strings.TrimSpace(msg.Text) == "" {
 		msg.Text = note
 		return

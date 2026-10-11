@@ -47,7 +47,7 @@ func fetchAudioBytes(ctx context.Context, client *http.Client, url, bearer strin
 	if bearer != "" {
 		req.Header.Set("Authorization", "Bearer "+bearer)
 	}
-	resp, err := client.Do(req)
+	resp, err := doHTTP(client, req)
 	if err != nil {
 		return nil, "", err
 	}

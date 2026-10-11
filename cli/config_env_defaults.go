@@ -269,7 +269,7 @@ var envDefaults = map[string]envDefault{
 	"CHATCLI_MCP_ENABLED":                   {Value: "false", IsBool: true, Source: "mcp manager"},
 	"CHATCLI_MCP_DYNAMIC_TOOLS":             {Value: "true", IsBool: true, Source: "mcp.dynamicToolRefreshEnabled — refresh on tools/list_changed"},
 	"CHATCLI_MCP_DANGER":                    {Value: "allow", Source: "cmd/rpcserve.go (mcp-server unattended danger policy: allow|block)"},
-	"CHATCLI_MCP_ELICITATION":               {Value: "on", Source: "cli/rpcserve/mcp.go (permission dialogs via elicitation/create: on|off; off restores the legacy unattended contract)"},
+	"CHATCLI_MCP_ELICITATION":               {Value: "on", Source: "cli/rpcserve/mcp.go (permission dialogs via elicitation/create: on|off; off leaves asks without a dialog, so they are denied unless CHATCLI_POLICY_AUTOMODE=true)"},
 	"CHATCLI_MCP_PERMISSION_TIMEOUT":        {Value: "600s", Source: "cli/rpcserve (max wait for the client's permission dialog, MCP elicitation and ACP request_permission; duration or seconds; 0|off lifts the bound to a 24h ceiling — never truly unbounded; tune below MCP clients' own tools/call timeout)"},
 	"CHATCLI_MCP_OAUTH_PORT":                {Value: "8765", Source: "cli/mcp/oauth.go (fixed loopback port for the OAuth callback; keeps redirect_uri and client registration stable; falls back to an ephemeral port when busy)"},
 	"CHATCLI_MCP_RESOURCES":                 {Value: "on", Source: "cli/rpc_support_resources.go (chatcli:// read-only resources: on|off)"},
@@ -311,6 +311,8 @@ var envDefaults = map[string]envDefault{
 	// ─── Security ────────────────────────────────────────────────
 	"CHATCLI_AGENT_SECURITY_MODE":    {Value: "strict", Source: "agent.command_allowlist (default unless permissive)"},
 	"CHATCLI_AGENT_ALLOW_SUDO":       {Value: "false", IsBool: true, Source: "command_allowlist"},
+	"CHATCLI_CODER_ALLOW_UNSAFE":     {Value: "false", IsBool: true, Source: "pkg/coder/engine/commands_exec.go (operator-only lift of the exec/test dangerous-pattern block)"},
+	"CHATCLI_POLICY_AUTOMODE":        {Value: "false", IsBool: true, Source: "cli/coder/unattended_gate.go (start sessions in policy automode; 'ask' is denied without a human otherwise)"},
 	"CHATCLI_AGENT_WORKSPACE_STRICT": {Value: "true", IsBool: true, Source: "session_workspace"},
 	"CHATCLI_AGENT_ALLOW_KUBECONFIG": {Value: "false", IsBool: true, Source: "session_workspace"},
 	"CHATCLI_BLOCK_TMP_WRITES":       {Value: "false", IsBool: true, Source: "session_workspace.go:150"},
@@ -329,14 +331,15 @@ var envDefaults = map[string]envDefault{
 	// The numbers an operator sizes a deployment against. They live here
 	// so `/config server` answers with what the runtime actually uses,
 	// rather than leaving the reader to trust a table somewhere else.
-	"CHATCLI_BIND_ADDRESS":           {Value: "127.0.0.1 (0.0.0.0 under Kubernetes)", Source: "server.go Start"},
-	"CHATCLI_RATE_LIMIT_RPS":         {Value: "10", Source: "server.DefaultRateLimiterConfig"},
-	"CHATCLI_MTLS_ROLE":              {Value: "user", Source: "server.mtlsRoleFromEnv"},
-	"CHATCLI_SERVER_PIPELINE":        {Value: "false", IsBool: true, Source: "cmd/server_pipeline.go (host the full ChatCLI turn engine behind ChatTurn, RunCoder, RunAgent and tool RPCs)"},
-	"CHATCLI_RATE_LIMIT_BURST":       {Value: "20", Source: "server.DefaultRateLimiterConfig"},
-	"CHATCLI_MAX_RECV_MSG_SIZE":      {Value: "52428800", Source: "server.New (50MB)"},
-	"CHATCLI_MAX_SEND_MSG_SIZE":      {Value: "52428800", Source: "server.New (50MB)"},
-	"CHATCLI_MAX_CONCURRENT_STREAMS": {Value: "100", Source: "server.New"},
+	"CHATCLI_BIND_ADDRESS":              {Value: "127.0.0.1 (0.0.0.0 under Kubernetes)", Source: "server.go Start"},
+	"CHATCLI_RATE_LIMIT_RPS":            {Value: "10", Source: "server.DefaultRateLimiterConfig"},
+	"CHATCLI_MTLS_ROLE":                 {Value: "user", Source: "server.mtlsRoleFromEnv"},
+	"CHATCLI_SERVER_PROVIDER_ENDPOINTS": {Value: "(unset: clients cannot choose a provider endpoint)", Source: "server.originAllowlisted (comma-separated http(s) origins)"},
+	"CHATCLI_SERVER_PIPELINE":           {Value: "false", IsBool: true, Source: "cmd/server_pipeline.go (host the full ChatCLI turn engine behind ChatTurn, RunCoder, RunAgent and tool RPCs)"},
+	"CHATCLI_RATE_LIMIT_BURST":          {Value: "20", Source: "server.DefaultRateLimiterConfig"},
+	"CHATCLI_MAX_RECV_MSG_SIZE":         {Value: "52428800", Source: "server.New (50MB)"},
+	"CHATCLI_MAX_SEND_MSG_SIZE":         {Value: "52428800", Source: "server.New (50MB)"},
+	"CHATCLI_MAX_CONCURRENT_STREAMS":    {Value: "100", Source: "server.New"},
 }
 
 // lookupEnvDefault returns the registered default for `name`, or

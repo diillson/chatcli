@@ -2,10 +2,8 @@ package cli
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"github.com/diillson/chatcli/cli/workspace"
-	"os"
 	"strconv"
 	"strings"
 	"sync"
@@ -264,12 +262,8 @@ func (mw *memoryWorker) nudgeSegment(ctx context.Context, segment []models.Messa
 func (mw *memoryWorker) pendingBacklogCount() int {
 	total := 0
 	for _, path := range mw.pendingFiles() {
-		data, err := os.ReadFile(path) // #nosec G304 -- our own queue dir under ~/.chatcli
+		seg, err := readPendingSegment(path)
 		if err != nil {
-			continue
-		}
-		var seg pendingSegment
-		if err := json.Unmarshal(data, &seg); err != nil {
 			continue
 		}
 		total += len(seg.Messages)

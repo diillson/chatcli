@@ -31,10 +31,10 @@ func (h *Handler) SendPrompt(ctx context.Context, req *pb.SendPromptRequest) (*p
 		return nil, status.Errorf(codes.InvalidArgument, "%s", i18n.T("server.session.prompt_empty"))
 	}
 
-	route, err := h.resolveRoute(req.Provider, req.Model, req.ClientApiKey, req.ProviderConfig)
+	route, err := h.resolveRoute(ctx, req.Provider, req.Model, req.ClientApiKey, req.ProviderConfig)
 	if err != nil {
 		h.logger.Error(i18n.T("server.session.llm_client_failed"), zap.Error(err))
-		return nil, status.Errorf(codes.Internal, "%s", i18n.T("server.session.get_client_error", err))
+		return nil, routeFailure(err, "server.session.get_client_error")
 	}
 
 	history := protoToHistory(req.History)
@@ -63,10 +63,10 @@ func (h *Handler) StreamPrompt(req *pb.StreamPromptRequest, stream pb.ChatCLISer
 		return status.Errorf(codes.InvalidArgument, "%s", i18n.T("server.session.prompt_empty"))
 	}
 
-	route, err := h.resolveRoute(req.Provider, req.Model, req.ClientApiKey, req.ProviderConfig)
+	route, err := h.resolveRoute(stream.Context(), req.Provider, req.Model, req.ClientApiKey, req.ProviderConfig)
 	if err != nil {
 		h.logger.Error(i18n.T("server.session.stream_client_failed"), zap.Error(err))
-		return status.Errorf(codes.Internal, "%s", i18n.T("server.session.get_client_error", err))
+		return routeFailure(err, "server.session.get_client_error")
 	}
 
 	history := protoToHistory(req.History)
@@ -125,7 +125,13 @@ func (h *Handler) InteractiveSession(stream pb.ChatCLIService_InteractiveSession
 			mu.Lock()
 			history = append(history, models.Message{Role: "user", Content: msg.Content})
 
-			route, err := h.resolveRoute(msg.Metadata["provider"], msg.Metadata["model"], msg.Metadata["client_api_key"], nil)
+			route, err := h.resolveRoute(stream.Context(), msg.Metadata["provider"], msg.Metadata["model"], msg.Metadata["client_api_key"], nil)
+			if s, ok := status.FromError(err); err != nil && ok && s.Code() == codes.PermissionDenied {
+				// An authorization refusal ends the session: the caller
+				// asked for something its role does not allow.
+				mu.Unlock()
+				return err
+			}
 			if err != nil {
 				mu.Unlock()
 				sendErr := stream.Send(&pb.SessionMessage{
@@ -179,13 +185,14 @@ func (h *Handler) InteractiveSession(stream pb.ChatCLIService_InteractiveSession
 	}
 }
 
-// ListSessions returns all saved session names.
+// ListSessions returns the names of the caller's saved sessions.
 func (h *Handler) ListSessions(ctx context.Context, req *pb.ListSessionsRequest) (*pb.ListSessionsResponse, error) {
-	if h.sessionManager == nil {
-		return nil, status.Errorf(codes.Unavailable, "%s", i18n.T("server.session.mgmt_unavailable"))
+	store, err := h.sessionStoreFor(ctx, sessionOpList, "")
+	if err != nil {
+		return nil, err
 	}
 
-	sessions, err := h.sessionManager.ListSessions()
+	sessions, err := store.ListSessions()
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "%s", i18n.T("server.session.list_error", err))
 	}
@@ -196,18 +203,18 @@ func (h *Handler) ListSessions(ctx context.Context, req *pb.ListSessionsRequest)
 	return &pb.ListSessionsResponse{Sessions: sessions}, nil
 }
 
-// LoadSession loads a saved session.
+// LoadSession loads one of the caller's saved sessions.
 func (h *Handler) LoadSession(ctx context.Context, req *pb.LoadSessionRequest) (*pb.LoadSessionResponse, error) {
-	if h.sessionManager == nil {
-		return nil, status.Errorf(codes.Unavailable, "%s", i18n.T("server.session.mgmt_unavailable"))
-	}
-
 	if req.Name == "" {
 		return nil, status.Errorf(codes.InvalidArgument, "%s", i18n.T("server.session.name_empty"))
 	}
+	store, err := h.sessionStoreFor(ctx, sessionOpLoad, req.Name)
+	if err != nil {
+		return nil, err
+	}
 
 	// Try v2 first if store supports it
-	if v2Store, ok := h.sessionManager.(SessionStoreV2); ok {
+	if v2Store, ok := store.(SessionStoreV2); ok {
 		sd, err := v2Store.LoadSessionV2(req.Name)
 		if err != nil {
 			return nil, status.Errorf(codes.NotFound, "%s", i18n.T("server.session.not_found", err))
@@ -222,7 +229,7 @@ func (h *Handler) LoadSession(ctx context.Context, req *pb.LoadSessionRequest) (
 	}
 
 	// Fallback to v1
-	msgs, err := h.sessionManager.LoadSession(req.Name)
+	msgs, err := store.LoadSession(req.Name)
 	if err != nil {
 		return nil, status.Errorf(codes.NotFound, "%s", i18n.T("server.session.not_found", err))
 	}
@@ -233,19 +240,19 @@ func (h *Handler) LoadSession(ctx context.Context, req *pb.LoadSessionRequest) (
 	return &pb.LoadSessionResponse{Messages: historyToProto(msgs)}, nil
 }
 
-// SaveSession saves the conversation history.
+// SaveSession saves the conversation history in the caller's store.
 func (h *Handler) SaveSession(ctx context.Context, req *pb.SaveSessionRequest) (*pb.SaveSessionResponse, error) {
-	if h.sessionManager == nil {
-		return nil, status.Errorf(codes.Unavailable, "%s", i18n.T("server.session.mgmt_unavailable"))
-	}
-
 	if req.Name == "" {
 		return nil, status.Errorf(codes.InvalidArgument, "%s", i18n.T("server.session.name_empty"))
+	}
+	store, err := h.sessionStoreFor(ctx, sessionOpSave, req.Name)
+	if err != nil {
+		return nil, err
 	}
 
 	// Prefer v2 if client sent session_data AND store supports v2
 	if req.SessionData != nil {
-		if v2Store, ok := h.sessionManager.(SessionStoreV2); ok {
+		if v2Store, ok := store.(SessionStoreV2); ok {
 			sd := protoSessionDataToModels(req.SessionData)
 			if err := v2Store.SaveSessionV2(req.Name, sd); err != nil {
 				return nil, status.Errorf(codes.Internal, "%s", i18n.T("server.session.save_error", err))
@@ -259,7 +266,7 @@ func (h *Handler) SaveSession(ctx context.Context, req *pb.SaveSessionRequest) (
 
 	// Fallback to v1
 	history := protoToHistory(req.Messages)
-	if err := h.sessionManager.SaveSession(req.Name, history); err != nil {
+	if err := store.SaveSession(req.Name, history); err != nil {
 		return nil, status.Errorf(codes.Internal, "%s", i18n.T("server.session.save_error", err))
 	}
 
@@ -269,17 +276,17 @@ func (h *Handler) SaveSession(ctx context.Context, req *pb.SaveSessionRequest) (
 	return &pb.SaveSessionResponse{Success: true}, nil
 }
 
-// DeleteSession removes a saved session.
+// DeleteSession removes one of the caller's saved sessions.
 func (h *Handler) DeleteSession(ctx context.Context, req *pb.DeleteSessionRequest) (*pb.DeleteSessionResponse, error) {
-	if h.sessionManager == nil {
-		return nil, status.Errorf(codes.Unavailable, "%s", i18n.T("server.session.mgmt_unavailable"))
-	}
-
 	if req.Name == "" {
 		return nil, status.Errorf(codes.InvalidArgument, "%s", i18n.T("server.session.name_empty"))
 	}
+	store, err := h.sessionStoreFor(ctx, sessionOpDelete, req.Name)
+	if err != nil {
+		return nil, err
+	}
 
-	if err := h.sessionManager.DeleteSession(req.Name); err != nil {
+	if err := store.DeleteSession(req.Name); err != nil {
 		return nil, status.Errorf(codes.Internal, "%s", i18n.T("server.session.delete_error", err))
 	}
 

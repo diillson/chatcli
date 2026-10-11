@@ -5,10 +5,12 @@ import (
 	"crypto/cipher"
 	"crypto/rand"
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/diillson/chatcli/i18n"
 )
@@ -49,16 +51,61 @@ func newRandomKey() ([]byte, error) {
 	return key, nil
 }
 
-// writeKeyFile persists the key with owner-only permissions.
+// writeKeyFile persists the key with owner-only permissions. It never
+// replaces an existing key file: see createKeyFile.
 func writeKeyFile(keyPath string, key []byte) error {
+	_, err := createKeyFile(keyPath, key)
+	return err
+}
+
+// keyFileSettle bounds how long a process that lost the first-run race
+// waits for the winner to finish writing its key.
+const keyFileSettle = 2 * time.Second
+
+// createKeyFile creates the key file holding key and returns the key now in
+// effect. The file is created exclusively (O_CREATE|O_EXCL): when two
+// processes start for the first time together, exactly one creates it and
+// the other reads that key back instead of writing its own over it, so
+// both encrypt with the same key.
+func createKeyFile(keyPath string, key []byte) ([]byte, error) {
 	dir := filepath.Dir(keyPath)
 	if err := os.MkdirAll(dir, 0o700); err != nil {
-		return fmt.Errorf("%s: %w", i18n.T("auth.crypto.keydir_failed"), err)
+		return nil, fmt.Errorf("%s: %w", i18n.T("auth.crypto.keydir_failed"), err)
 	}
-	if err := os.WriteFile(keyPath, key, 0o600); err != nil {
-		return fmt.Errorf("%s: %w", i18n.T("auth.crypto.keysave_failed"), err)
+	f, err := os.OpenFile(filepath.Clean(keyPath), os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600) //#nosec G304 -- key path derived from CHATCLI_AUTH_DIR or the home directory
+	if errors.Is(err, os.ErrExist) {
+		return awaitKeyFile(keyPath)
 	}
-	return nil
+	if err != nil {
+		return nil, fmt.Errorf("%s: %w", i18n.T("auth.crypto.keysave_failed"), err)
+	}
+	_, werr := f.Write(key)
+	if serr := f.Sync(); werr == nil {
+		werr = serr
+	}
+	if cerr := f.Close(); werr == nil {
+		werr = cerr
+	}
+	if werr != nil {
+		// A partial key file would block every later start; remove it so
+		// the next attempt can create a whole one.
+		_ = os.Remove(keyPath)
+		return nil, fmt.Errorf("%s: %w", i18n.T("auth.crypto.keysave_failed"), werr)
+	}
+	return key, nil
+}
+
+// awaitKeyFile reads the key another process just created, giving it a
+// moment to finish writing.
+func awaitKeyFile(keyPath string) ([]byte, error) {
+	deadline := time.Now().Add(keyFileSettle)
+	for {
+		key, err := readKeyFileStrict(keyPath)
+		if err == nil || time.Now().After(deadline) {
+			return key, err
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
 }
 
 func encryptData(plaintext []byte) ([]byte, error) {

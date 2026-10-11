@@ -133,7 +133,18 @@ type WatcherBridge struct {
 
 	// active is true while Start runs, i.e. on the elected leader.
 	active atomic.Bool
+
+	// pin is the only Instance the bridge connects to
+	// (CHATCLI_OPERATOR_AIOPS_INSTANCE). Empty, the bridge stays
+	// disconnected. pinReported keeps the missing-pin error to one log line.
+	pin         types.NamespacedName
+	pinReported bool
 }
+
+// errAIOpsInstanceNotPinned is returned by discovery while no Instance is
+// pinned: the bridge never picks one on its own.
+var errAIOpsInstanceNotPinned = stderrors.New("no AIOps Instance pinned: set " + AIOpsInstanceEnv +
+	"=<namespace>/<name> (Helm values aiops.instance.namespace and aiops.instance.name) to the Instance whose server may drive the AIOps pipeline")
 
 // dedupEntry tracks the resource the hash referred to so InvalidateDedupForResource
 // can invalidate by name+namespace without having to brute-force every known
@@ -164,6 +175,12 @@ func (wb *WatcherBridge) SetAlertTransport(t AlertTransport) {
 	wb.transport = t
 }
 
+// SetAIOpsInstance pins the one Instance the bridge connects to. Without a
+// pin the bridge stays disconnected. Call it before Start.
+func (wb *WatcherBridge) SetAIOpsInstance(pin types.NamespacedName) {
+	wb.pin = pin
+}
+
 // Start implements manager.Runnable. It keeps the bridge attached to a ready
 // Instance until the context is canceled: streaming alerts when the server
 // offers StreamAlerts, polling GetAlerts otherwise.
@@ -192,7 +209,7 @@ func (wb *WatcherBridge) cycle(ctx context.Context, backoff *time.Duration) {
 	}
 	if !wb.serverClient.IsConnected() {
 		if err := wb.discoverAndConnect(ctx); err != nil {
-			wb.logger.Debug("Server discovery failed", zap.Error(err))
+			wb.reportDiscoveryFailure(err)
 			sleepCtx(ctx, wb.pollInterval)
 			return
 		}
@@ -358,16 +375,47 @@ func (wb *WatcherBridge) handleAlert(ctx context.Context, alert *pb.WatcherAlert
 	if wb.isDuplicate(hash) {
 		return
 	}
+	ns := alert.Namespace
+	if ns == "" {
+		ns = "default"
+	}
+	inScope, err := wb.alertInScope(ctx, ns)
+	if err != nil {
+		wb.logger.Warn("Dropping alert: the pinned Instance's watch targets cannot be read",
+			zap.String("alert_type", alert.Type), zap.String("namespace", ns), zap.Error(err))
+		return
+	}
+	if !inScope {
+		wb.logger.Warn("Dropping alert outside the pinned Instance's watch targets",
+			zap.String("alert_type", alert.Type), zap.String("namespace", ns),
+			zap.String("resource", alert.Deployment), zap.String("instance", wb.pin.String()))
+		// Remembered like a handled alert, so a server repeating it every
+		// round is logged once per dedup window.
+		wb.markSeen(hash, alert.Deployment, ns)
+		return
+	}
 
 	if err := wb.createAnomaly(ctx, alert); err != nil {
 		wb.logger.Error("Failed to create Anomaly CR", zap.Error(err), zap.String("alert_type", alert.Type))
 		return
 	}
-	ns := alert.Namespace
-	if ns == "" {
-		ns = "default"
-	}
 	wb.markSeen(hash, alert.Deployment, ns)
+}
+
+// alertInScope reports whether an alert's namespace is one the pinned
+// Instance's watcher declares. The server's alerts become Anomalies, Issues
+// and remediations in that namespace, so a server must not reach past what
+// its Instance says it watches. The Instance is read live; an error means
+// the scope is unknown and the alert must be dropped.
+func (wb *WatcherBridge) alertInScope(ctx context.Context, ns string) (bool, error) {
+	if wb.pin.Name == "" || wb.pin.Namespace == "" {
+		return false, errAIOpsInstanceNotPinned
+	}
+	var inst platformv1alpha1.Instance
+	if err := wb.client.Get(ctx, wb.pin, &inst); err != nil {
+		return false, fmt.Errorf("reading the pinned Instance %s: %w", wb.pin, err)
+	}
+	return watchedNamespaces(&inst)[ns], nil
 }
 
 // sleepCtx waits for d or until ctx ends, whichever comes first.
@@ -380,54 +428,63 @@ func sleepCtx(ctx context.Context, d time.Duration) {
 	}
 }
 
-// discoverAndConnect finds a ready Instance CR and connects to its server.
+// reportDiscoveryFailure logs why the bridge is not connected. A missing
+// pin is a configuration error and is logged once at error level, with what
+// to set; the rest repeats every round and stays at debug.
+func (wb *WatcherBridge) reportDiscoveryFailure(err error) {
+	if stderrors.Is(err, errAIOpsInstanceNotPinned) {
+		if !wb.pinReported {
+			wb.pinReported = true
+			wb.logger.Error("AIOps bridge disconnected: no alerts, analyses or agentic remediations will run", zap.Error(err))
+		}
+		return
+	}
+	wb.logger.Debug("Server discovery failed", zap.Error(err))
+}
+
+// discoverAndConnect connects to the pinned Instance's server, and to no
+// other: whoever creates an Instance chooses its image, so an Instance is
+// trusted only when the operator's configuration names it.
 func (wb *WatcherBridge) discoverAndConnect(ctx context.Context) error {
-	var instances platformv1alpha1.InstanceList
-	if err := wb.client.List(ctx, &instances); err != nil {
-		return fmt.Errorf("listing instances: %w", err)
+	if wb.pin.Name == "" || wb.pin.Namespace == "" {
+		return errAIOpsInstanceNotPinned
 	}
-
-	for _, inst := range instances.Items {
-		if !inst.Status.Ready {
-			continue
-		}
-		port := inst.Spec.Server.Port
-		if port == 0 {
-			port = 50051
-		}
-		address := fmt.Sprintf("dns:///%s.%s.svc.cluster.local:%d", inst.Name, inst.Namespace, port)
-
-		// Build connection options from Instance spec
-		opts, err := wb.buildConnectionOpts(ctx, &inst)
-		if err != nil {
-			wb.logger.Warn("Failed to build connection opts",
-				zap.String("instance", inst.Name),
-				zap.Error(err))
-			continue
-		}
-		// Best effort: without a fingerprint the connection is simply not
-		// checked for rotation, and the silent-stream rediscovery still
-		// applies.
-		fingerprint, fpErr := operatorCredentialFingerprint(ctx, wb.client, &inst)
-		if fpErr != nil {
-			wb.logger.Debug("Could not fingerprint the operator credential", zap.String("instance", inst.Name), zap.Error(fpErr))
-		}
-
-		if err := wb.serverClient.Connect(address, opts); err != nil {
-			wb.logger.Warn("Failed to connect to Instance",
-				zap.String("instance", inst.Name),
-				zap.String("address", address),
-				zap.Error(err))
-			continue
-		}
-		wb.logger.Info("Connected to Instance", zap.String("instance", inst.Name), zap.String("address", address))
-		instCopy := inst
-		wb.connectedInstance = &instCopy
-		wb.connectedFingerprint = fingerprint
-		return nil
+	var inst platformv1alpha1.Instance
+	if err := wb.client.Get(ctx, wb.pin, &inst); err != nil {
+		return fmt.Errorf("reading the pinned Instance %s: %w", wb.pin, err)
 	}
+	if !inst.Status.Ready {
+		return fmt.Errorf("pinned Instance %s is not ready", wb.pin)
+	}
+	address := instanceServerAddress(&inst)
 
-	return fmt.Errorf("no ready Instance found")
+	opts, err := wb.buildConnectionOpts(ctx, &inst)
+	if err != nil {
+		return fmt.Errorf("building connection options for Instance %s: %w", wb.pin, err)
+	}
+	// Best effort: without a fingerprint the connection is simply not
+	// checked for rotation, and the silent-stream rediscovery still
+	// applies.
+	fingerprint, fpErr := operatorCredentialFingerprint(ctx, wb.client, &inst)
+	if fpErr != nil {
+		wb.logger.Debug("Could not fingerprint the operator credential", zap.String("instance", inst.Name), zap.Error(fpErr))
+	}
+	if err := wb.serverClient.Connect(address, opts); err != nil {
+		return fmt.Errorf("connecting to Instance %s at %s: %w", wb.pin, address, err)
+	}
+	wb.logger.Info("Connected to Instance", zap.String("instance", wb.pin.String()), zap.String("address", address))
+	wb.connectedInstance = &inst
+	wb.connectedFingerprint = fingerprint
+	return nil
+}
+
+// instanceServerAddress is the gRPC address of an Instance's server.
+func instanceServerAddress(inst *platformv1alpha1.Instance) string {
+	port := inst.Spec.Server.Port
+	if port == 0 {
+		port = 50051
+	}
+	return fmt.Sprintf("dns:///%s.%s.svc.cluster.local:%d", inst.Name, inst.Namespace, port)
 }
 
 // buildConnectionOpts reads the transport and credential configuration of
@@ -835,23 +892,18 @@ func (wb *WatcherBridge) dropConnection() {
 	wb.connectedFingerprint = ""
 }
 
-// ResolveServerAddress looks up Instance CRs and returns the gRPC address of the first ready instance.
+// ResolveServerAddress returns the gRPC address of the pinned Instance when
+// it is ready. No other Instance is ever considered.
 func (wb *WatcherBridge) ResolveServerAddress(ctx context.Context) (string, error) {
-	var instances platformv1alpha1.InstanceList
-	if err := wb.client.List(ctx, &instances); err != nil {
-		return "", fmt.Errorf("listing instances: %w", err)
+	if wb.pin.Name == "" || wb.pin.Namespace == "" {
+		return "", errAIOpsInstanceNotPinned
 	}
-
-	for _, inst := range instances.Items {
-		if !inst.Status.Ready {
-			continue
-		}
-		port := inst.Spec.Server.Port
-		if port == 0 {
-			port = 50051
-		}
-		return fmt.Sprintf("dns:///%s.%s.svc.cluster.local:%d", inst.Name, inst.Namespace, port), nil
+	var inst platformv1alpha1.Instance
+	if err := wb.client.Get(ctx, wb.pin, &inst); err != nil {
+		return "", fmt.Errorf("reading the pinned Instance %s: %w", wb.pin, err)
 	}
-
-	return "", fmt.Errorf("no ready Instance found")
+	if !inst.Status.Ready {
+		return "", fmt.Errorf("pinned Instance %s is not ready", wb.pin)
+	}
+	return instanceServerAddress(&inst), nil
 }

@@ -19,6 +19,8 @@ import (
 	"archive/tar"
 	"compress/bzip2"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -88,8 +90,22 @@ func SherpaAssetBytes(goos, goarch string) int64 {
 }
 
 // DownloadArchive fetches url to dest atomically, rejecting bodies smaller
-// than minBytes (error pages served with status 200).
+// than minBytes (error pages served with status 200) and any body whose
+// SHA-256 differs from the pin for the archive name (see PinnedSHA256).
 func DownloadArchive(ctx context.Context, url, dest string, minBytes int64) error {
+	want, err := PinnedSHA256(archiveName(url))
+	if err != nil {
+		return err
+	}
+	return downloadVerified(ctx, url, dest, want, minBytes)
+}
+
+// downloadVerified streams url into dest+".part" while hashing it and only
+// renames it into place when the digest equals wantSHA256 (hex).
+func downloadVerified(ctx context.Context, url, dest, wantSHA256 string, minBytes int64) error {
+	if raw, err := hex.DecodeString(wantSHA256); err != nil || len(raw) != sha256.Size {
+		return fmt.Errorf("refusing to download %s without a valid expected SHA-256", archiveName(url))
+	}
 	client := utils.NewHTTPClient(zap.NewNop(), Timeout)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
@@ -109,7 +125,8 @@ func DownloadArchive(ctx context.Context, url, dest string, minBytes int64) erro
 	if err != nil {
 		return err
 	}
-	n, copyErr := io.Copy(out, progressBody(ctx, resp.Body, url, resp.ContentLength))
+	hasher := sha256.New()
+	n, copyErr := io.Copy(io.MultiWriter(out, hasher), progressBody(ctx, resp.Body, url, resp.ContentLength))
 	closeErr := out.Close()
 	if copyErr != nil {
 		_ = os.Remove(tmp)
@@ -122,6 +139,11 @@ func DownloadArchive(ctx context.Context, url, dest string, minBytes int64) erro
 	if n < minBytes {
 		_ = os.Remove(tmp)
 		return fmt.Errorf("downloaded archive too small (%d bytes) — likely an error response", n)
+	}
+	if got := hex.EncodeToString(hasher.Sum(nil)); !strings.EqualFold(got, wantSHA256) {
+		_ = os.Remove(tmp)
+		return fmt.Errorf("checksum mismatch for %s: expected sha256 %s, got %s — the download was discarded",
+			archiveName(url), strings.ToLower(wantSHA256), got)
 	}
 	return os.Rename(tmp, dest)
 }
@@ -136,71 +158,89 @@ func ExtractTarBz2(archive, destDir string) error {
 	return extractTar(bzip2.NewReader(f), destDir)
 }
 
-// extractTar unpacks a tar stream into destDir, rejecting entries that would
-// escape it (path traversal) and bounding total output (tar bomb). Split from
+// extractTar unpacks a tar stream into destDir. Every filesystem operation
+// goes through an os.Root opened at destDir, so no entry — including one
+// reached through a chain of symlinks the archive itself created — can
+// create, truncate or link anything outside it: the confinement makes an
+// escape impossible by construction rather than by path arithmetic. On top
+// of that, entries with absolute or ".." names are refused, symlink and
+// hard-link targets must stay inside destDir, every symlink is re-resolved
+// inside the root once the archive is fully unpacked (an archive cannot
+// leave behind a link that points out), total output is bounded (tar bomb)
+// and only the exec bit survives from header modes. Split from
 // ExtractTarBz2 so tests can feed a plain tar built in memory — the stdlib
 // bzip2 package only decompresses.
 func extractTar(r io.Reader, destDir string) error {
 	destDir = filepath.Clean(destDir)
+	if err := os.MkdirAll(destDir, 0o750); err != nil {
+		return err
+	}
+	root, err := os.OpenRoot(destDir)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = root.Close() }()
+
 	tr := tar.NewReader(r)
 	var written int64
+	var links []string
 	for {
 		hdr, err := tr.Next()
 		if errors.Is(err, io.EOF) {
-			return nil
+			break
 		}
 		if err != nil {
 			return err
 		}
-		target, err := safeJoin(destDir, hdr.Name)
+		name, err := entryName(hdr.Name)
 		if err != nil {
 			return err
 		}
 		switch hdr.Typeflag {
 		case tar.TypeDir:
-			if err := os.MkdirAll(target, 0o750); err != nil {
+			if err := root.MkdirAll(name, 0o750); err != nil {
 				return err
 			}
 		case tar.TypeReg:
-			n, err := writeFileFromTar(target, tr, hdr, maxExtractBytes-written)
+			n, err := writeFileFromTar(root, name, tr, hdr, maxExtractBytes-written)
 			if err != nil {
 				return err
 			}
 			written += n
 		case tar.TypeSymlink:
-			if err := writeSymlinkFromTar(destDir, target, hdr.Linkname); err != nil {
+			if err := writeSymlinkFromTar(root, name, hdr.Linkname); err != nil {
+				return err
+			}
+			links = append(links, name)
+		case tar.TypeLink:
+			if err := writeHardlinkFromTar(root, name, hdr.Linkname); err != nil {
 				return err
 			}
 		default:
-			// Hard links, devices and friends do not appear in upstream
+			// Devices, FIFOs and friends do not appear in upstream
 			// tarballs; skip rather than fail on exotic entries.
 		}
 	}
+	return verifyLinksStayInside(root, links)
 }
 
-// safeJoin joins name under destDir, failing on absolute names or any path
-// that escapes destDir.
-func safeJoin(destDir, name string) (string, error) {
-	target := filepath.Join(destDir, filepath.FromSlash(name)) // Join also cleans
-	if !withinDir(destDir, target) {
-		return "", fmt.Errorf("archive entry escapes extraction dir: %s", name)
+// entryName validates an archive member name and returns it as a local,
+// OS-separated path relative to the extraction root.
+func entryName(raw string) (string, error) {
+	name := filepath.Clean(filepath.FromSlash(raw))
+	if !filepath.IsLocal(name) {
+		return "", fmt.Errorf("archive entry escapes extraction dir: %s", raw)
 	}
-	return target, nil
-}
-
-// withinDir reports whether path equals dir or lives beneath it. Both inputs
-// must already be clean.
-func withinDir(dir, path string) bool {
-	return path == dir || strings.HasPrefix(path, dir+string(os.PathSeparator))
+	return name, nil
 }
 
 // writeFileFromTar writes one regular file from the tar stream, preserving
 // the executable bit and enforcing the remaining extraction budget.
-func writeFileFromTar(target string, tr io.Reader, hdr *tar.Header, budget int64) (int64, error) {
+func writeFileFromTar(root *os.Root, name string, tr io.Reader, hdr *tar.Header, budget int64) (int64, error) {
 	if budget <= 0 {
 		return 0, fmt.Errorf("archive exceeds extraction budget")
 	}
-	if err := os.MkdirAll(filepath.Dir(target), 0o750); err != nil {
+	if err := root.MkdirAll(filepath.Dir(name), 0o750); err != nil {
 		return 0, err
 	}
 	// Archive entries become either a plain file or an executable — nothing
@@ -210,7 +250,12 @@ func writeFileFromTar(target string, tr io.Reader, hdr *tar.Header, budget int64
 	if hdr.Mode&0o111 != 0 {
 		mode = 0o755
 	}
-	out, err := os.OpenFile(target, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, mode) // #nosec G304 -- under our cache dir, safeJoin-validated
+	// A previous entry may sit at this name (a symlink or an earlier copy);
+	// remove it so the new entry never writes through it.
+	if err := removeIfPresent(root, name); err != nil {
+		return 0, err
+	}
+	out, err := root.OpenFile(name, os.O_CREATE|os.O_EXCL|os.O_WRONLY, mode)
 	if err != nil {
 		return 0, err
 	}
@@ -226,27 +271,106 @@ func writeFileFromTar(target string, tr io.Reader, hdr *tar.Header, budget int64
 	return n, closeErr
 }
 
-// writeSymlinkFromTar materializes a symlink, requiring the resolved target
-// to stay inside destDir (the upstream tarballs use relative library links).
-func writeSymlinkFromTar(destDir, target, linkname string) error {
-	if filepath.IsAbs(linkname) {
-		return fmt.Errorf("archive symlink with absolute target: %s", linkname)
+// localLinkTarget checks a link target lexically: relative, and inside the
+// root once joined with the directory holding the link. It returns the
+// target in OS form.
+func localLinkTarget(name, linkname string) (string, error) {
+	target := filepath.FromSlash(linkname)
+	if linkname == "" || filepath.IsAbs(target) || filepath.VolumeName(target) != "" || strings.HasPrefix(linkname, "/") {
+		return "", fmt.Errorf("archive link with absolute target: %s", linkname)
 	}
-	resolved := filepath.Join(filepath.Dir(target), filepath.FromSlash(linkname))
-	if !withinDir(destDir, resolved) {
-		return fmt.Errorf("archive symlink escapes extraction dir: %s", linkname)
+	if !filepath.IsLocal(filepath.Join(filepath.Dir(name), target)) {
+		return "", fmt.Errorf("archive link escapes extraction dir: %s", linkname)
 	}
-	if err := os.MkdirAll(filepath.Dir(target), 0o750); err != nil {
+	return target, nil
+}
+
+// writeSymlinkFromTar materializes a symlink inside the root. The lexical
+// check rejects the obvious escapes early. A chain of links that only
+// escapes once resolved (s -> ., s/s2 -> ., s/s2/t -> ../..) passes every
+// lexical check, so it is handled structurally: the link is created through
+// the root, which refuses to resolve its parent outside destDir, later
+// entries written through it are confined the same way, and every link is
+// re-resolved after extraction by verifyLinksStayInside.
+func writeSymlinkFromTar(root *os.Root, name, linkname string) error {
+	target, err := localLinkTarget(name, linkname)
+	if err != nil {
 		return err
 	}
-	_ = os.Remove(target) // re-extract over a previous attempt
-	return os.Symlink(linkname, target)
+	if err := root.MkdirAll(filepath.Dir(name), 0o750); err != nil {
+		return err
+	}
+	if err := removeIfPresent(root, name); err != nil { // re-extract over a previous attempt
+		return err
+	}
+	return root.Symlink(target, name)
+}
+
+// writeHardlinkFromTar materializes a hard link to a regular file already
+// extracted inside the root. Both ends are resolved by the root, so neither
+// can reach outside destDir.
+func writeHardlinkFromTar(root *os.Root, name, linkname string) error {
+	oldname, err := entryName(linkname)
+	if err != nil {
+		return fmt.Errorf("archive hard link escapes extraction dir: %s", linkname)
+	}
+	fi, err := root.Lstat(oldname)
+	if err != nil {
+		return fmt.Errorf("archive hard link to missing entry %s: %w", linkname, err)
+	}
+	if !fi.Mode().IsRegular() {
+		return fmt.Errorf("archive hard link to non-regular entry: %s", linkname)
+	}
+	if err := root.MkdirAll(filepath.Dir(name), 0o750); err != nil {
+		return err
+	}
+	if err := removeIfPresent(root, name); err != nil {
+		return err
+	}
+	return root.Link(oldname, name)
+}
+
+// removeIfPresent deletes name inside the root when it exists, without
+// following a final symlink.
+func removeIfPresent(root *os.Root, name string) error {
+	if _, err := root.Lstat(name); err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return nil
+		}
+		return err
+	}
+	return root.Remove(name)
+}
+
+// verifyLinksStayInside resolves every extracted symlink through the root
+// once the whole archive is in place. os.Root refuses any resolution that
+// leaves destDir, so a link whose target escapes — directly or through
+// other links — fails here and the extraction is rejected. A dangling link
+// is rejected too: nothing the engine needs is a link to nothing.
+func verifyLinksStayInside(root *os.Root, links []string) error {
+	for _, name := range links {
+		if _, err := root.Stat(name); err != nil {
+			return fmt.Errorf("archive symlink %s does not resolve inside the extraction dir: %w", filepath.ToSlash(name), err)
+		}
+	}
+	return nil
 }
 
 // ProvisionArchive downloads url and extracts it into targetDir atomically:
 // the tarball lands next to targetDir as a temp file, extraction happens in
-// targetDir.tmp, and only a fully extracted tree is renamed into place.
+// targetDir.tmp, and only a fully extracted tree is renamed into place. The
+// download must match the pinned SHA-256 for the archive name.
 func ProvisionArchive(ctx context.Context, url, targetDir string, minBytes int64) error {
+	want, err := PinnedSHA256(archiveName(url))
+	if err != nil {
+		return err
+	}
+	return ProvisionVerifiedArchive(ctx, url, want, targetDir, minBytes)
+}
+
+// ProvisionVerifiedArchive is ProvisionArchive with an explicit expected
+// SHA-256 (hex). Nothing is extracted unless the download matches it.
+func ProvisionVerifiedArchive(ctx context.Context, url, wantSHA256, targetDir string, minBytes int64) error {
 	tmpTar := targetDir + ".tar.bz2.part-src"
 	tmpDir := targetDir + ".tmp"
 	defer func() {
@@ -254,7 +378,7 @@ func ProvisionArchive(ctx context.Context, url, targetDir string, minBytes int64
 		_ = os.RemoveAll(tmpDir)
 	}()
 
-	if err := DownloadArchive(ctx, url, tmpTar, minBytes); err != nil {
+	if err := downloadVerified(ctx, url, tmpTar, wantSHA256, minBytes); err != nil {
 		return err
 	}
 	if err := os.RemoveAll(tmpDir); err != nil {

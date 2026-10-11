@@ -29,7 +29,9 @@ func setupFakeRemediationReconciler(objs ...client.Object) (*RemediationReconcil
 		cb = cb.WithObjects(objs...)
 	}
 	c := cb.Build()
-	return &RemediationReconciler{Client: c, Scheme: s}, c
+	// Auto: these tests exercise the executors and the plan state machine.
+	// The approve default is covered in remediation_mode_test.go.
+	return &RemediationReconciler{Client: c, Scheme: s, RemediationMode: RemediationModeAuto}, c
 }
 
 func newRemediationPlan(name, ns string) *platformv1alpha1.RemediationPlan {
@@ -942,7 +944,8 @@ func setupAgenticReconciler(mock *mockAgenticStepper, objs ...client.Object) (*R
 		cb = cb.WithObjects(objs...)
 	}
 	c := cb.Build()
-	return &RemediationReconciler{Client: c, Scheme: s, ServerClient: mock}, c
+	// Auto: the per-step approval gate is covered in agentic_step_gate_test.go.
+	return &RemediationReconciler{Client: c, Scheme: s, ServerClient: mock, RemediationMode: RemediationModeAuto}, c
 }
 
 func newAgenticPlan(name, ns, issueName string) *platformv1alpha1.RemediationPlan {

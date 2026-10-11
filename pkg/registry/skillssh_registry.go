@@ -635,7 +635,10 @@ func FormatSocketAlerts(audit *PartnerAudit) string {
 }
 
 // ParseSnapshotFiles parses snapshot JSON into individual files.
-// Returns the files list and content hash, or an error.
+// Returns the files list and content hash, or an error. Every path must be
+// local in the OS form the installer writes it in, and when the snapshot
+// carries a hash the files must match it; either failure rejects the whole
+// snapshot.
 func ParseSnapshotFiles(data []byte) ([]SnapshotFile, string, error) {
 	var resp skillsshDownloadResponse
 	if err := json.Unmarshal(data, &resp); err != nil {
@@ -644,15 +647,17 @@ func ParseSnapshotFiles(data []byte) ([]SnapshotFile, string, error) {
 
 	files := make([]SnapshotFile, len(resp.Files))
 	for i, f := range resp.Files {
-		// Validate path — reject path traversal
-		cleaned := path.Clean(f.Path)
-		if strings.HasPrefix(cleaned, "..") || strings.HasPrefix(cleaned, "/") {
-			return nil, "", fmt.Errorf("unsafe path in snapshot: %q", f.Path)
+		cleaned, err := snapshotRelPath(f.Path)
+		if err != nil {
+			return nil, "", err
 		}
 		files[i] = SnapshotFile{
 			Path:     cleaned,
 			Contents: f.Contents,
 		}
+	}
+	if err := verifySnapshotHash(resp.Files, resp.Hash); err != nil {
+		return nil, "", err
 	}
 
 	return files, resp.Hash, nil

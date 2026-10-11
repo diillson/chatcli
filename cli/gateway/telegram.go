@@ -30,24 +30,18 @@ type TelegramAdapter struct {
 	token   string
 	baseURL string // overridable for tests; defaults to https://api.telegram.org
 	http    *http.Client
-	allowed map[string]bool // allowlisted user ids; empty = open (with warning)
+	allowed *senderAllowlist // CHATCLI_TELEGRAM_ALLOWED_USERS; empty refuses to start
 	logger  *zap.Logger
 	offset  int64
 }
 
 // NewTelegramAdapter builds an adapter from explicit config.
 func NewTelegramAdapter(token string, allowedUserIDs []string, logger *zap.Logger) *TelegramAdapter {
-	allowed := make(map[string]bool, len(allowedUserIDs))
-	for _, id := range allowedUserIDs {
-		if id = strings.TrimSpace(id); id != "" {
-			allowed[id] = true
-		}
-	}
 	return &TelegramAdapter{
 		token:   token,
 		baseURL: "https://api.telegram.org",
 		http:    &http.Client{Timeout: 70 * time.Second}, // > long-poll timeout
-		allowed: allowed,
+		allowed: newSenderAllowlist(allowedUserIDs),
 		logger:  logger,
 	}
 }
@@ -66,11 +60,18 @@ func (t *TelegramAdapter) SetLogger(l *zap.Logger) {
 	t.http = newLoggingClient(t.http, l, telegramPlatform)
 }
 
+// preflight implements preflighter: without an allowlist the adapter
+// refuses to start.
+func (t *TelegramAdapter) preflight() error {
+	return t.allowed.preflight(telegramPlatform, envTelegramAllowed)
+}
+
 // Start long-polls getUpdates until ctx is canceled, pushing messages to
 // inbound. Transient errors are logged and retried with a short backoff.
+// It refuses to start when the sender allowlist is empty.
 func (t *TelegramAdapter) Start(ctx context.Context, inbound chan<- InboundMessage) error {
-	if len(t.allowed) == 0 {
-		t.logger.Warn("gateway/telegram: no CHATCLI_TELEGRAM_ALLOWED_USERS set — accepting messages from ANY user")
+	if err := t.allowed.checkStart(telegramPlatform, envTelegramAllowed, t.logger); err != nil {
+		return err
 	}
 	t.logger.Info("gateway/telegram: started")
 
@@ -95,11 +96,6 @@ func (t *TelegramAdapter) Start(ctx context.Context, inbound chan<- InboundMessa
 			t.offset = maxID + 1
 		}
 		for _, m := range msgs {
-			if !t.permitted(m.UserID) {
-				t.logger.Warn("gateway/telegram: dropped message from non-allowlisted user",
-					zap.String("user", m.UserID))
-				continue
-			}
 			select {
 			case <-ctx.Done():
 				return nil
@@ -110,14 +106,28 @@ func (t *TelegramAdapter) Start(ctx context.Context, inbound chan<- InboundMessa
 }
 
 func (t *TelegramAdapter) permitted(userID string) bool {
-	if len(t.allowed) == 0 {
-		return true
-	}
-	return t.allowed[userID]
+	return t.allowed.permits(userID)
 }
 
-// poll performs one getUpdates long-poll and returns parsed messages plus the
-// highest update id seen.
+// admit keeps the messages whose sender is on the allowlist and marks the
+// explicitly listed ones. It runs before any attachment is downloaded, so a
+// stranger's message costs nothing but this check. Strangers get no reply.
+func (t *TelegramAdapter) admit(msgs []InboundMessage) []InboundMessage {
+	out := msgs[:0]
+	for _, m := range msgs {
+		if !t.permitted(m.UserID) {
+			t.logger.Warn("gateway/telegram: dropped message from non-allowlisted user",
+				zap.String("user", m.UserID))
+			continue
+		}
+		m.SenderListed = t.allowed.listed(m.UserID)
+		out = append(out, m)
+	}
+	return out
+}
+
+// poll performs one getUpdates long-poll and returns the allowlisted
+// messages, attachments downloaded, plus the highest update id seen.
 func (t *TelegramAdapter) poll(ctx context.Context) ([]InboundMessage, int64, error) {
 	q := url.Values{}
 	q.Set("timeout", "30")
@@ -128,7 +138,7 @@ func (t *TelegramAdapter) poll(ctx context.Context) ([]InboundMessage, int64, er
 	if err != nil {
 		return nil, 0, err
 	}
-	resp, err := t.http.Do(req)
+	resp, err := doHTTP(t.http, req)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -144,7 +154,7 @@ func (t *TelegramAdapter) poll(ctx context.Context) ([]InboundMessage, int64, er
 	if err != nil {
 		return nil, 0, err
 	}
-	return t.hydrateAudio(ctx, msgs), maxID, nil
+	return t.hydrateAudio(ctx, t.admit(msgs)), maxID, nil
 }
 
 // hydrateImages downloads the bytes for any photo/image attachment using the
@@ -204,7 +214,7 @@ func (t *TelegramAdapter) downloadFile(ctx context.Context, fileID string, limit
 	if err != nil {
 		return nil, "", err
 	}
-	resp, err := t.http.Do(req)
+	resp, err := doHTTP(t.http, req)
 	if err != nil {
 		return nil, "", err
 	}
@@ -263,7 +273,7 @@ func (t *TelegramAdapter) Send(ctx context.Context, msg OutboundMessage) error {
 		return err
 	}
 	req.Header.Set("Content-Type", "application/json")
-	resp, err := t.http.Do(req)
+	resp, err := doHTTP(t.http, req)
 	if err != nil {
 		return err
 	}
@@ -310,7 +320,7 @@ func (t *TelegramAdapter) sendVoice(ctx context.Context, msg OutboundMessage) er
 		return err
 	}
 	req.Header.Set("Content-Type", w.FormDataContentType())
-	resp, err := t.http.Do(req)
+	resp, err := doHTTP(t.http, req)
 	if err != nil {
 		return err
 	}
@@ -354,7 +364,7 @@ func (t *TelegramAdapter) sendPhoto(ctx context.Context, msg OutboundMessage) er
 		return err
 	}
 	req.Header.Set("Content-Type", w.FormDataContentType())
-	resp, err := t.http.Do(req)
+	resp, err := doHTTP(t.http, req)
 	if err != nil {
 		return err
 	}
@@ -376,7 +386,7 @@ func (t *TelegramAdapter) SendTyping(ctx context.Context, chatID string) error {
 		return err
 	}
 	req.Header.Set("Content-Type", "application/json")
-	resp, err := t.http.Do(req)
+	resp, err := doHTTP(t.http, req)
 	if err != nil {
 		return err
 	}
@@ -526,10 +536,6 @@ func init() {
 		if token == "" {
 			return nil, nil
 		}
-		var allowed []string
-		if raw := os.Getenv("CHATCLI_TELEGRAM_ALLOWED_USERS"); raw != "" {
-			allowed = strings.FieldsFunc(raw, func(r rune) bool { return r == ',' || r == ' ' || r == ';' })
-		}
-		return NewTelegramAdapter(token, allowed, zap.NewNop()), nil
+		return NewTelegramAdapter(token, allowlistFromEnv(envTelegramAllowed), zap.NewNop()), nil
 	})
 }

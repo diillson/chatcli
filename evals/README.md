@@ -21,7 +21,7 @@ Exit codes: `0` ok, `1` pass rate below `--min-pass-rate` (default 1.0), `2` usa
 ## How a trial runs
 
 1. A temp directory is created. The case's `fixture` is copied into it, its inline `files` are written, and its `setup` commands are run.
-2. For `coder` cases, a workspace-local `coder_policy.json` (merged over your global policy) is written. It allows `@coder`, including `exec`, inside the sandbox; set `policy:` on a case to narrow it. Safety-immune operations still require approval, and with nobody there to approve they are denied.
+2. For `coder` cases, a policy file outside the sandbox (passed to the candidate in `CHATCLI_CODER_POLICY_OVERLAY` and merged over your global policy) is written. It allows `@coder`, including `exec`, inside the sandbox; set `policy:` on a case to narrow it. Safety-immune operations still require approval, and with nobody there to approve they are denied.
 3. `chatcli -p "<prompt>" --raw --no-anim` runs with no stdin. By default the run is **hermetic**: long-term memory, bootstrap, memory and session recall, session autosave, coder checkpoints and history are all off. `--with-memory` evaluates with your real memory instead, and that run may also write to it.
 4. The binary reports its final answer, tool calls, turns, tokens and cost through `CHATCLI_EVAL_RECORD`, a file outside the sandbox.
 5. Checks run against the answer and the sandbox. The sandbox is deleted afterwards unless you pass `--keep`.

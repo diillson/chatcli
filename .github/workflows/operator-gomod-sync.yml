@@ -40,9 +40,24 @@ concurrency:
 jobs:
   sync:
     name: Sync operator go.sum
-    # Only Dependabot PRs. The commit pushed below re-triggers this workflow
-    # with github.actor = token owner (not dependabot[bot]), so it does not loop.
-    if: github.actor == 'dependabot[bot]'
+    # Only Dependabot's own PRs. github.actor alone is not enough: it names
+    # whoever caused this particular event, and Dependabot can be the actor
+    # of an event on a PR it did not write (for example after being asked to
+    # rebase or recreate on someone else's branch), which would hand the
+    # write token to code from another author. So all of these must hold:
+    #   * the event is a pull_request (not a fork-controlled target event);
+    #   * the PR was opened by dependabot[bot] (pull_request.user is fixed
+    #     at creation and cannot be changed by later pushes);
+    #   * the head branch lives in this repository, not in a fork;
+    #   * this event was also triggered by dependabot[bot]. The commit pushed
+    #     below re-triggers the workflow with github.actor = token owner, so
+    #     that run is skipped and the job does not loop. Dependabot secrets
+    #     are only provided to Dependabot-triggered runs in any case.
+    if: >-
+      github.event_name == 'pull_request' &&
+      github.event.pull_request.user.login == 'dependabot[bot]' &&
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      github.actor == 'dependabot[bot]'
     runs-on: ubuntu-latest
     steps:
       - name: Check sync token is configured
@@ -59,14 +74,14 @@ jobs:
 
       - name: Checkout PR head
         if: steps.token.outputs.present == 'true'
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ github.head_ref }}
           token: ${{ secrets.DEPENDABOT_TIDY_TOKEN }}
 
       - name: Set up Go
         if: steps.token.outputs.present == 'true'
-        uses: actions/setup-go@v7
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
 

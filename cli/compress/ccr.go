@@ -337,7 +337,7 @@ const ccrSweepInterval = time.Hour
 func NewDiskStore(dir string, maxBytes int64, ttl time.Duration) (*DiskStore, error) {
 	// #nosec G703 -- dir is the operator-configured CCR store path
 	// (CHATCLI_COMPRESSION_CCR_DIR or ~/.chatcli/ccr), not attacker input.
-	if err := os.MkdirAll(dir, 0o750); err != nil {
+	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return nil, err
 	}
 	s := &DiskStore{
@@ -425,7 +425,7 @@ func (s *DiskStore) Put(content string) (string, error) {
 		return "", err
 	}
 	tmpName := tmp.Name()
-	payload, serr := atrest.Seal([]byte(content))
+	payload, serr := atrest.SealAt(final, []byte(content))
 	if serr != nil {
 		_ = tmp.Close()
 		_ = os.Remove(tmpName)
@@ -500,7 +500,7 @@ func (s *DiskStore) Get(key string) (string, bool, error) {
 		}
 		return "", false, err
 	}
-	if data, err = atrest.Open(data); err != nil {
+	if data, err = atrest.OpenAt(s.path(key), data); err != nil {
 		return "", false, err
 	}
 	now := time.Now()
@@ -527,7 +527,7 @@ func (s *DiskStore) adoptFromDiskLocked(key string) (string, bool, error) {
 	s.entries[key] = &diskEntry{size: int64(len(data)), lastAccess: now}
 	s.totalBytes += int64(len(data))
 	_ = os.Chtimes(s.path(key), now, now)
-	if data, err = atrest.Open(data); err != nil {
+	if data, err = atrest.OpenAt(s.path(key), data); err != nil {
 		return "", false, err
 	}
 	return string(data), true, nil

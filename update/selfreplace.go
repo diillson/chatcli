@@ -7,6 +7,7 @@ package update
 
 import (
 	"context"
+	"crypto/ed25519"
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
@@ -19,6 +20,7 @@ import (
 	"time"
 
 	"github.com/diillson/chatcli/pkg/pulse"
+	"github.com/diillson/chatcli/version"
 )
 
 // downloadBaseURL é a raiz dos assets de release; var (não const) para os
@@ -59,24 +61,34 @@ func assetNameFor(goos, goarch string) (string, error) {
 // forma atômica. Em Unix o rename por cima é suficiente (o processo em
 // execução segue no inode antigo); em Windows o binário atual é renomeado
 // para .old antes — CleanupStaleArtifacts remove o resto no próximo boot.
-// Sem checksums.txt na release (releases antigas) a instalação é recusada.
+// O checksums.txt só é aceito com checksums.txt.sig válido contra uma das
+// chaves de release embutidas (release_keys.go); sem chave embutida, sem
+// .sig, com assinatura inválida, sem checksums.txt ou com tag fora do semver
+// estrito a instalação é recusada.
 func SelfReplace(ctx context.Context, execPath, tag string) error {
 	if execPath == "" {
 		return fmt.Errorf("update: executable path unresolved")
+	}
+	tag, err := releaseTag(tag)
+	if err != nil {
+		return err
 	}
 	asset, err := AssetName()
 	if err != nil {
 		return err
 	}
-	if !strings.HasPrefix(tag, "v") {
-		tag = "v" + tag
+	// Fail closed before touching the network: without an embedded release
+	// key there is nothing that could authenticate checksums.txt.
+	keys, err := trustedReleaseKeys()
+	if err != nil {
+		return err
 	}
 
 	// Metered so the release download shows on the live dashboard, with its
 	// real size: the body is counted as it is read, never buffered.
 	client := &http.Client{Timeout: downloadTimeout, Transport: pulse.MeterTransport(nil)}
 
-	expected, err := fetchExpectedChecksum(ctx, client, tag, asset)
+	expected, err := fetchExpectedChecksum(ctx, client, tag, asset, keys)
 	if err != nil {
 		return err
 	}
@@ -120,10 +132,13 @@ func SelfReplace(ctx context.Context, execPath, tag string) error {
 	return nil
 }
 
-// fetchExpectedChecksum baixa o checksums.txt da release e extrai o hash do
-// asset desta plataforma. 404 vira ChecksumsUnavailableError — release
-// anterior à publicação de checksums, sem instalação não verificada.
-func fetchExpectedChecksum(ctx context.Context, client *http.Client, tag, asset string) (string, error) {
+// fetchExpectedChecksum baixa o checksums.txt da release e o
+// checksums.txt.sig, verifica a assinatura Ed25519 contra as chaves de
+// release embutidas ANTES de interpretar o conteúdo, e só então extrai o
+// hash do asset desta plataforma. 404 no checksums.txt vira
+// ChecksumsUnavailableError; 404 no .sig vira SignatureUnavailableError —
+// em nenhum dos casos há instalação não verificada.
+func fetchExpectedChecksum(ctx context.Context, client *http.Client, tag, asset string, keys []ed25519.PublicKey) (string, error) {
 	body, status, err := httpGet(ctx, client, releaseAssetURL(tag, "checksums.txt"))
 	if err != nil {
 		return "", fmt.Errorf("update: fetching checksums.txt: %w", err)
@@ -133,6 +148,20 @@ func fetchExpectedChecksum(ctx context.Context, client *http.Client, tag, asset 
 	}
 	if status != http.StatusOK {
 		return "", fmt.Errorf("update: fetching checksums.txt: status %d", status)
+	}
+
+	sig, status, err := httpGet(ctx, client, releaseAssetURL(tag, "checksums.txt.sig"))
+	if err != nil {
+		return "", fmt.Errorf("update: fetching checksums.txt.sig: %w", err)
+	}
+	if status == http.StatusNotFound {
+		return "", &SignatureUnavailableError{Tag: tag}
+	}
+	if status != http.StatusOK {
+		return "", fmt.Errorf("update: fetching checksums.txt.sig: status %d", status)
+	}
+	if err := verifyReleaseSignature(body, sig, keys); err != nil {
+		return "", &SignatureInvalidError{Tag: tag}
 	}
 	return parseChecksums(string(body), asset)
 }
@@ -198,10 +227,24 @@ func ManualDownloadURL(tag string) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	tag, err = releaseTag(tag)
+	if err != nil {
+		return "", err
+	}
+	return releaseAssetURL(tag, asset), nil
+}
+
+// releaseTag normalizes tag to the "vX.Y.Z" form of the release and
+// rejects anything that is not strict semver, so the value spliced into a
+// download URL can never carry a path separator, "..", or a query.
+func releaseTag(tag string) (string, error) {
+	if !version.IsValidTag(tag) {
+		return "", &InvalidTagError{Tag: tag}
+	}
 	if !strings.HasPrefix(tag, "v") {
 		tag = "v" + tag
 	}
-	return releaseAssetURL(tag, asset), nil
+	return tag, nil
 }
 
 // parseChecksums lê o formato do sha256sum ("<hex>  <arquivo>", um por

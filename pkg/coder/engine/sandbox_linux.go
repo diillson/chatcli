@@ -30,6 +30,11 @@ func buildBwrapArgs(mode SandboxMode, workspace string) []string {
 		// paths that do not exist rather than aborting the whole sandbox.
 		args = append(args, "--bind-try", p, p)
 	}
+	// Re-bind the protected paths read-only last so a writable parent (a
+	// workspace at $HOME) cannot expose them.
+	for _, p := range sandboxProtectedPaths() {
+		args = append(args, "--ro-bind-try", p, p)
+	}
 	if mode == SandboxStrict {
 		args = append(args, "--unshare-net")
 	}

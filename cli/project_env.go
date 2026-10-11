@@ -20,11 +20,13 @@
 package cli
 
 import (
+	"os"
 	"strings"
 	"sync"
 
 	"github.com/diillson/chatcli/config"
 	"github.com/diillson/chatcli/llm/manager"
+	"github.com/diillson/chatcli/pkg/workspacetrust"
 	"go.uber.org/zap"
 )
 
@@ -54,6 +56,14 @@ func (cli *ChatCLI) ApplyProjectEnv(dir string) (manager.LLMManager, config.Proj
 		}
 		if !rep.Present {
 			cli.logger.Debug("no project .env", zap.String("dir", rep.Dir))
+			return
+		}
+		if rep.Untrusted {
+			// stderr: stdout carries the ACP protocol.
+			cli.logger.Warn("project .env ignored: the workspace is not trusted", zap.String("path", rep.Path))
+			if ins, err := workspacetrust.Inspect(rep.Dir); err == nil {
+				workspacetrust.Warn(os.Stderr, ins)
+			}
 			return
 		}
 		cli.logger.Info("project .env applied",

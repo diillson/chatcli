@@ -1,0 +1,4 @@
+{
+  "gateway.webhook.no_secret": "webhook: %s is not set, so the adapter refuses to start. Set it to the shared key both sides use to sign requests (HMAC-SHA256).",
+  "gateway.webhook.callback_insecure": "webhook: %s must be an https URL (plain http is accepted only for a loopback host such as 127.0.0.1); got %s"
+}

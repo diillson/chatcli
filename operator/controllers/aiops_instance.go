@@ -8,7 +8,11 @@ package controllers
 
 import (
 	"context"
+	"fmt"
+	"strings"
 
+	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/apimachinery/pkg/util/validation"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	platformv1alpha1 "github.com/diillson/chatcli/operator/api/v1alpha1"
@@ -21,37 +25,92 @@ const (
 	labelSourceInstanceNamespace = "platform.chatcli.io/instance-namespace"
 )
 
-// aiopsInstance returns the Instance whose AIOps settings apply to an
-// object: the one its source labels name, else the Instance the
-// WatcherBridge connects to (the first Ready one in list order), else the
-// first Instance. It returns nil when there is none. Reading Items[0]
-// picked an arbitrary Instance whenever several existed.
-func aiopsInstance(ctx context.Context, c client.Reader, labels map[string]string) *platformv1alpha1.Instance {
-	var instances platformv1alpha1.InstanceList
-	if err := c.List(ctx, &instances); err != nil || len(instances.Items) == 0 {
-		return nil
+// AIOpsInstanceEnv names the environment variable that pins the Instance
+// whose server drives the AIOps pipeline, as "namespace/name".
+const AIOpsInstanceEnv = "CHATCLI_OPERATOR_AIOPS_INSTANCE"
+
+// ParseAIOpsInstancePin reads the CHATCLI_OPERATOR_AIOPS_INSTANCE value.
+// An empty value means no pin: the AIOps bridge then stays disconnected.
+// Anything else must be "namespace/name" with two valid Kubernetes names.
+//
+// The pin exists because whoever creates an Instance chooses its image:
+// connecting to any Ready Instance would let that image drive alerts,
+// analyses and remediations with the operator's cluster-wide permissions.
+func ParseAIOpsInstancePin(v string) (types.NamespacedName, error) {
+	v = strings.TrimSpace(v)
+	if v == "" {
+		return types.NamespacedName{}, nil
 	}
-	name, ns := labels[labelSourceInstance], labels[labelSourceInstanceNamespace]
-	if name != "" {
-		for i := range instances.Items {
-			inst := &instances.Items[i]
-			if inst.Name == name && (ns == "" || inst.Namespace == ns) {
-				return inst
-			}
-		}
+	ns, name, ok := strings.Cut(v, "/")
+	if !ok || strings.Contains(name, "/") {
+		return types.NamespacedName{}, fmt.Errorf("%s=%q: want namespace/name", AIOpsInstanceEnv, v)
 	}
-	for i := range instances.Items {
-		if instances.Items[i].Status.Ready {
-			return &instances.Items[i]
-		}
+	if errs := validation.IsDNS1123Label(ns); len(errs) > 0 {
+		return types.NamespacedName{}, fmt.Errorf("%s=%q: invalid namespace: %s", AIOpsInstanceEnv, v, strings.Join(errs, "; "))
 	}
-	return &instances.Items[0]
+	if errs := validation.IsDNS1123Subdomain(name); len(errs) > 0 {
+		return types.NamespacedName{}, fmt.Errorf("%s=%q: invalid name: %s", AIOpsInstanceEnv, v, strings.Join(errs, "; "))
+	}
+	return types.NamespacedName{Namespace: ns, Name: name}, nil
 }
 
-// aiopsSpecFor is the AIOps block of aiopsInstance, nil when there is none.
-func aiopsSpecFor(ctx context.Context, c client.Reader, labels map[string]string) *platformv1alpha1.AIOpsSpec {
-	if inst := aiopsInstance(ctx, c, labels); inst != nil {
+// aiopsInstance returns the pinned Instance, the only one whose AIOps
+// settings and provider apply. It returns nil when no Instance is pinned or
+// the pinned one cannot be read. Source labels on an object are not
+// consulted: anyone who can create an Anomaly can set them.
+func aiopsInstance(ctx context.Context, c client.Reader, pin types.NamespacedName) *platformv1alpha1.Instance {
+	if pin.Name == "" || pin.Namespace == "" {
+		return nil
+	}
+	var inst platformv1alpha1.Instance
+	if err := c.Get(ctx, pin, &inst); err != nil {
+		return nil
+	}
+	return &inst
+}
+
+// aiopsSpecFor is the AIOps block of the pinned Instance, nil when there is
+// none.
+func aiopsSpecFor(ctx context.Context, c client.Reader, pin types.NamespacedName) *platformv1alpha1.AIOpsSpec {
+	if inst := aiopsInstance(ctx, c, pin); inst != nil {
 		return inst.Spec.AIOps
 	}
 	return nil
+}
+
+// resolveInstanceProvider returns the provider and model of the pinned
+// Instance. Empty strings let the server use its own defaults.
+func resolveInstanceProvider(ctx context.Context, c client.Reader, pin types.NamespacedName) (provider, model string) {
+	if inst := aiopsInstance(ctx, c, pin); inst != nil {
+		return inst.Spec.Provider, inst.Spec.Model
+	}
+	return "", ""
+}
+
+// watchedNamespaces returns the namespaces an Instance's watcher declares:
+// the namespace of every target, or the legacy single-target namespace.
+// An omitted namespace is "default", as the server reads it. A watcher that
+// is disabled or absent declares none.
+func watchedNamespaces(inst *platformv1alpha1.Instance) map[string]bool {
+	out := map[string]bool{}
+	w := inst.Spec.Watcher
+	if w == nil || !w.Enabled {
+		return out
+	}
+	add := func(ns string) {
+		if ns == "" {
+			ns = "default"
+		}
+		out[ns] = true
+	}
+	if len(w.Targets) > 0 {
+		for _, t := range w.Targets {
+			add(t.Namespace)
+		}
+		return out
+	}
+	if w.Deployment != "" {
+		add(w.Namespace)
+	}
+	return out
 }

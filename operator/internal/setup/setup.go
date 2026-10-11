@@ -17,6 +17,7 @@ import (
 	"strings"
 
 	"go.uber.org/zap"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes"
 	ctrl "sigs.k8s.io/controller-runtime"
 
@@ -41,6 +42,31 @@ type Options struct {
 	// ClusterName is the local cluster's ClusterRegistration name. When set,
 	// the registration's tier decides which severities wait for a human.
 	ClusterName string
+	// AIOpsInstance is the only Instance whose server may drive the AIOps
+	// pipeline (CHATCLI_OPERATOR_AIOPS_INSTANCE). Empty, the bridge stays
+	// disconnected and logs what to set.
+	AIOpsInstance types.NamespacedName
+	// RemediationMode is observe, approve or auto
+	// (CHATCLI_OPERATOR_REMEDIATION_MODE). Empty means approve.
+	RemediationMode controllers.RemediationMode
+	// OperatorNamespace is the namespace the operator runs in; kubeconfig
+	// Secrets for federation are read only from it.
+	OperatorNamespace string
+}
+
+// serviceAccountNamespaceFile is where Kubernetes mounts the pod's namespace.
+const serviceAccountNamespaceFile = "/var/run/secrets/kubernetes.io/serviceaccount/namespace"
+
+// OperatorNamespace returns the namespace the operator runs in, from
+// POD_NAMESPACE or the mounted ServiceAccount, and "" when neither says.
+func OperatorNamespace() string {
+	if ns := strings.TrimSpace(os.Getenv("POD_NAMESPACE")); ns != "" {
+		return ns
+	}
+	if data, err := os.ReadFile(serviceAccountNamespaceFile); err == nil {
+		return strings.TrimSpace(string(data))
+	}
+	return ""
 }
 
 // Components are the long-lived pieces main may need after wiring.
@@ -54,14 +80,25 @@ func OptionsFromEnv(clientset kubernetes.Interface, sc *controllers.ServerClient
 	if err != nil {
 		return Options{}, fmt.Errorf("invalid CHATCLI_OPERATOR_ALERT_TRANSPORT: %w", err)
 	}
+	pin, err := controllers.ParseAIOpsInstancePin(os.Getenv(controllers.AIOpsInstanceEnv))
+	if err != nil {
+		return Options{}, err
+	}
+	mode, err := controllers.ParseRemediationMode(os.Getenv(controllers.RemediationModeEnv))
+	if err != nil {
+		return Options{}, fmt.Errorf("invalid %s: %w", controllers.RemediationModeEnv, err)
+	}
 	return Options{
-		Clientset:      clientset,
-		ServerClient:   sc,
-		Logger:         logger,
-		AlertTransport: transport,
-		PrometheusURL:  os.Getenv("PROMETHEUS_URL"),
-		DecisionEngine: strings.EqualFold(os.Getenv("CHATCLI_OPERATOR_DECISION_ENGINE"), "true"),
-		ClusterName:    strings.TrimSpace(os.Getenv("CHATCLI_OPERATOR_CLUSTER_NAME")),
+		Clientset:         clientset,
+		ServerClient:      sc,
+		Logger:            logger,
+		AlertTransport:    transport,
+		PrometheusURL:     os.Getenv("PROMETHEUS_URL"),
+		DecisionEngine:    strings.EqualFold(os.Getenv("CHATCLI_OPERATOR_DECISION_ENGINE"), "true"),
+		ClusterName:       strings.TrimSpace(os.Getenv("CHATCLI_OPERATOR_CLUSTER_NAME")),
+		AIOpsInstance:     pin,
+		RemediationMode:   mode,
+		OperatorNamespace: OperatorNamespace(),
 	}, nil
 }
 
@@ -75,6 +112,7 @@ func Controllers(mgr ctrl.Manager, o Options) (*Components, error) {
 
 	watcherBridge := controllers.NewWatcherBridge(c, s, o.ServerClient, o.Logger)
 	watcherBridge.SetAlertTransport(o.AlertTransport)
+	watcherBridge.SetAIOpsInstance(o.AIOpsInstance)
 	if err := mgr.Add(watcherBridge); err != nil {
 		return nil, fmt.Errorf("adding WatcherBridge: %w", err)
 	}
@@ -83,7 +121,7 @@ func Controllers(mgr ctrl.Manager, o Options) (*Components, error) {
 
 	// One federation reconciler serves both its own controller and the
 	// Issue and Remediation reconcilers: it owns the remote client cache.
-	federation := &controllers.FederationReconciler{Client: c, Scheme: s}
+	federation := &controllers.FederationReconciler{Client: c, Scheme: s, OperatorNamespace: o.OperatorNamespace}
 	var engine *controllers.DecisionEngine
 	if o.DecisionEngine {
 		engine = &controllers.DecisionEngine{}
@@ -118,15 +156,17 @@ func Controllers(mgr ctrl.Manager, o Options) (*Components, error) {
 		}).SetupWithManager},
 		{"Issue", (&controllers.IssueReconciler{
 			Client: c, Scheme: s, DedupInvalidator: watcherBridge, AuditRecorder: auditRecorder, Federation: federation,
+			AIOpsInstance: o.AIOpsInstance, RemediationMode: o.RemediationMode,
 		}).SetupWithManager},
 		{"Remediation", (&controllers.RemediationReconciler{
 			Client: c, Scheme: s, ServerClient: o.ServerClient, ContextBuilder: contextBuilder,
 			AuditRecorder: auditRecorder, PatternStore: patternStore, CostTracker: costTracker,
 			DecisionEngine: engine, ClusterTier: o.ClusterName, Federation: federation,
 			EventRecorder: mgr.GetEventRecorder("chatcli-remediation"),
+			AIOpsInstance: o.AIOpsInstance, RemediationMode: o.RemediationMode,
 		}).SetupWithManager},
 		{"Anomaly", (&controllers.AnomalyReconciler{
-			Client: c, Scheme: s, NoiseReducer: noiseReducer,
+			Client: c, Scheme: s, NoiseReducer: noiseReducer, AIOpsInstance: o.AIOpsInstance,
 		}).SetupWithManager},
 		{"AIInsight", (&controllers.AIInsightReconciler{
 			Client: c, Scheme: s, ServerClient: o.ServerClient, ContextBuilder: contextBuilder,

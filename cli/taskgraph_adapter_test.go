@@ -7,6 +7,7 @@ package cli
 
 import (
 	"context"
+	"net/url"
 	"strings"
 	"testing"
 	"time"
@@ -111,7 +112,8 @@ func TestTaskGraphMaxParallelEnv(t *testing.T) {
 }
 
 func TestCoderGateRunnerCapturesOutputAndFailure(t *testing.T) {
-	r := &coderGateRunner{workspace: t.TempDir()}
+	allow := func(context.Context, string, string) (bool, string) { return true, "" }
+	r := &coderGateRunner{workspace: t.TempDir(), check: allow}
 	out, err := r.RunGateStep(context.Background(), t.TempDir(), "echo hello-gate", nil)
 	if err != nil {
 		t.Fatalf("RunGateStep: %v", err)
@@ -227,11 +229,26 @@ func TestTaskGraphAdapterDashServesAndReuses(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Dash 2: %v", err)
 	}
-	if !strings.Contains(out2, "?run=tg-something") {
+	dashURL := func(out string) *url.URL {
+		t.Helper()
+		f := strings.Fields(out)
+		if len(f) < 4 {
+			t.Fatalf("unexpected Dash output %q", out)
+		}
+		u, perr := url.Parse(f[3])
+		if perr != nil {
+			t.Fatalf("Dash URL %q: %v", f[3], perr)
+		}
+		return u
+	}
+	u1, u2 := dashURL(out1), dashURL(out2)
+	if u2.Query().Get("run") != "tg-something" {
 		t.Fatalf("run focus must land in the URL: %q", out2)
 	}
-	u1 := out1[strings.Index(out1, "http") : strings.Index(out1, "/ ")+1]
-	if !strings.Contains(out2, u1[:strings.LastIndex(u1, "/")]) {
+	if u1.Query().Get("t") == "" || u1.Query().Get("t") != u2.Query().Get("t") {
+		t.Fatalf("both URLs must carry the same access token: %q vs %q", out1, out2)
+	}
+	if u1.Host != u2.Host {
 		t.Fatalf("second Dash must reuse the same server: %q vs %q", out1, out2)
 	}
 	a.shutdownDash(context.Background())

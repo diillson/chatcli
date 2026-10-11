@@ -52,7 +52,7 @@ func postSlackSigned(t *testing.T, url, secret, body string) *http.Response {
 func TestSlackEventsHandler(t *testing.T) {
 	const secret = "slack-signing-secret"
 	ch := make(chan InboundMessage, 1)
-	a := NewSlackAdapter("tok", secret, ":0", "/slack/events", zap.NewNop())
+	a := NewSlackAdapter("tok", secret, ":0", "/slack/events", zap.NewNop()).WithAllowedUsers([]string{"U1"})
 	srv := httptest.NewServer(a.eventsHandler(context.Background(), ch))
 	defer srv.Close()
 
@@ -129,7 +129,7 @@ func TestSlackSend(t *testing.T) {
 
 func TestWhatsAppHandler(t *testing.T) {
 	ch := make(chan InboundMessage, 1)
-	a := NewWhatsAppAdapter("tok", "phone1", "verifytok", ":0", "/wa", zap.NewNop()).WithAppSecret("appsecret")
+	a := NewWhatsAppAdapter("tok", "phone1", "verifytok", ":0", "/wa", zap.NewNop()).WithAppSecret("appsecret").WithAllowedUsers([]string{"55119"})
 	srv := httptest.NewServer(a.webhookHandler(context.Background(), ch))
 	defer srv.Close()
 
@@ -216,14 +216,10 @@ func TestWebhookHandlerAndSend(t *testing.T) {
 		t.Errorf("missing secret should be 401, got %d", r1.StatusCode)
 	}
 	_ = r1.Body.Close()
-	// With secret -> accepted + inbound.
-	req, _ := http.NewRequest(http.MethodPost, srv.URL, strings.NewReader(`{"chat_id":"c1","text":"hello hook"}`))
-	req.Header.Set("X-ChatCLI-Secret", "s3cret")
-	r2, _ := http.DefaultClient.Do(req)
-	if r2.StatusCode != http.StatusAccepted {
-		t.Errorf("expected 202, got %d", r2.StatusCode)
+	// Signed with the secret -> accepted + inbound.
+	if status, body, _ := postWebhook(t, srv.URL, "s3cret", `{"chat_id":"c1","text":"hello hook"}`); status != http.StatusAccepted {
+		t.Errorf("expected 202, got %d %s", status, body)
 	}
-	_ = r2.Body.Close()
 	if m := recvWithin(t, ch, time.Second); m.Text != "hello hook" {
 		t.Errorf("inbound wrong: %+v", m)
 	}
@@ -286,7 +282,7 @@ func TestDiscordGatewaySession(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	d := NewDiscordAdapter("tok", zap.NewNop())
+	d := NewDiscordAdapter("tok", zap.NewNop()).WithAllowedUsers([]string{"U1"})
 	d.gatewayURL = "ws" + strings.TrimPrefix(srv.URL, "http") // ws://127.0.0.1:port
 
 	ch := make(chan InboundMessage, 1)
@@ -347,7 +343,7 @@ func TestTelegramBuilderConfigured(t *testing.T) {
 func TestSlackSignedPath(t *testing.T) {
 	ch := make(chan InboundMessage, 1)
 	secret := "shh"
-	a := NewSlackAdapter("tok", secret, ":0", "/x", zap.NewNop())
+	a := NewSlackAdapter("tok", secret, ":0", "/x", zap.NewNop()).WithAllowedUsers([]string{"U"})
 	srv := httptest.NewServer(a.eventsHandler(context.Background(), ch))
 	defer srv.Close()
 

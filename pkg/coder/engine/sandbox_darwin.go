@@ -34,6 +34,11 @@ func buildSandboxProfile(mode SandboxMode, workspace string) string {
 	// Terminals and standard streams must stay writable or the command's own
 	// output is lost.
 	b.WriteString("  (literal \"/dev/stdout\")\n  (literal \"/dev/stderr\")\n  (regex #\"^/dev/tty\")\n)\n")
+	// Later rules win in SBPL: the protected paths stay read-only even when
+	// a writable path above contains them (a workspace at $HOME).
+	for _, p := range sandboxProtectedPaths() {
+		fmt.Fprintf(&b, "(deny file-write* (subpath %q))\n", p)
+	}
 	return b.String()
 }
 

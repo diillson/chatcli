@@ -29,10 +29,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"os"
-	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/diillson/chatcli/pkg/browser"
@@ -63,8 +62,13 @@ type browserIdentity interface {
 // launching (or relaunching) the browser as needed. Package variable so
 // tests inject a fake without a real Chrome.
 var acquireBrowser = func(ctx context.Context, mode browser.Mode) (BrowserBackend, error) {
+	browserGuardOnce.Do(func() { browser.SetNavigationGuard(browserNavigationAllowed) })
 	return browser.AcquireMode(ctx, mode)
 }
+
+// browserGuardOnce installs the navigation guard before the first session
+// is created, so every session intercepts its document requests.
+var browserGuardOnce sync.Once
 
 const (
 	browserOpenTimeout = 60 * time.Second // may include a cold browser launch
@@ -112,9 +116,9 @@ Subcommands:
   upload {target} {file}           attach a local file to an <input type=file> (the OS picker never opens under automation)
   scroll [down|up|top|bottom|--to target]   move the viewport
   eval {javascript}                run a JS expression in the page, returns its value
-  screenshot [--file path] [--full]   capture the viewport (or the whole page with --full) as PNG, returns the path
+  screenshot [--file name] [--full]   capture the viewport (or the whole page with --full) as PNG in the session scratch dir, returns the path
   html [target] [--max N]          outerHTML of an element (or the document) — for debugging markup
-  pdf [--file path]                save the page as PDF (headless only)
+  pdf [--file name]                save the page as PDF in the session scratch dir (headless only)
   resize {width} {height} [--mobile]   emulate a viewport (e.g. 390 844 --mobile) to verify responsive layouts
   tabs                             list open tabs (popups such as OAuth windows appear here)
   tab {n}                          switch to tab n from the tabs list
@@ -157,9 +161,9 @@ func (*BuiltinBrowserPlugin) Schema() string {
 			{"name": "upload", "description": "attach local file(s) to an <input type=file>", "examples": []string{`{"cmd":"upload","args":{"target":"2","file":"/tmp/report.pdf"}}`, `{"cmd":"upload","args":{"target":"2","files":["/tmp/a.png","/tmp/b.png"]}}`}},
 			{"name": "scroll", "description": "scroll the viewport (down|up|top|bottom) or to a target", "examples": []string{`{"cmd":"scroll","args":{"direction":"down"}}`}},
 			{"name": "eval", "description": "run a JavaScript expression in the page", "examples": []string{`{"cmd":"eval","args":{"js":"document.querySelectorAll('li').length"}}`}},
-			{"name": "screenshot", "description": "capture the viewport as PNG; full:true captures the whole page", "examples": []string{`{"cmd":"screenshot"}`, `{"cmd":"screenshot","args":{"full":true,"file":"/tmp/page.png"}}`}},
+			{"name": "screenshot", "description": "capture the viewport as PNG in the session scratch dir (file is a file name there); full:true captures the whole page", "examples": []string{`{"cmd":"screenshot"}`, `{"cmd":"screenshot","args":{"full":true,"file":"page.png"}}`}},
 			{"name": "html", "description": "outerHTML of an element (target) or the whole document, capped at max bytes", "examples": []string{`{"cmd":"html","args":{"target":"#app","max":4000}}`}},
-			{"name": "pdf", "description": "save the page as PDF (headless only)", "examples": []string{`{"cmd":"pdf","args":{"file":"/tmp/page.pdf"}}`}},
+			{"name": "pdf", "description": "save the page as PDF in the session scratch dir (file is a file name there; headless only)", "examples": []string{`{"cmd":"pdf","args":{"file":"page.pdf"}}`}},
 			{"name": "resize", "description": "emulate a viewport; mobile:true also enables touch", "examples": []string{`{"cmd":"resize","args":{"width":390,"height":844,"mobile":true}}`}},
 			{"name": "tabs", "description": "list open tabs (popups included)", "examples": []string{`{"cmd":"tabs"}`}},
 			{"name": "tab", "description": "switch to tab n from the tabs list", "examples": []string{`{"cmd":"tab","args":{"target":"2"}}`}},
@@ -530,6 +534,9 @@ func browserCmdOpen(ctx context.Context, b BrowserBackend, inv browserInvocation
 		return "", errors.New(`@browser open: missing url. Example: {"cmd":"open","args":{"url":"http://localhost:3000"}}`)
 	}
 	inv.url = browserNormalizeURL(inv.url)
+	if err := browserNavigationAllowed(inv.url); err != nil {
+		return "", fmt.Errorf("@browser open: %w", err)
+	}
 	if _, _, err := b.Navigate(ctx, inv.url); err != nil {
 		return "", fmt.Errorf("@browser open: %w", err)
 	}
@@ -537,7 +544,8 @@ func browserCmdOpen(ctx context.Context, b BrowserBackend, inv browserInvocation
 }
 
 // browserNormalizeURL defaults a bare host to https:// while leaving
-// scheme-carrying URLs (about:blank, data:, file:, javascript:) alone.
+// scheme-carrying URLs (about:blank, data:, file:, javascript:) alone, so
+// browserNavigationAllowed refuses them by their real scheme.
 func browserNormalizeURL(raw string) string {
 	u := strings.TrimSpace(raw)
 	if strings.Contains(u, "://") {
@@ -598,13 +606,12 @@ func browserCmdEval(ctx context.Context, b BrowserBackend, inv browserInvocation
 	return out, nil
 }
 
-// browserCmdScreenshot captures the viewport, defaulting the path under the
-// temp dir.
+// browserCmdScreenshot captures the viewport into the browser output
+// directory; --file names the file there, never a path elsewhere.
 func browserCmdScreenshot(ctx context.Context, b BrowserBackend, inv browserInvocation) (string, error) {
-	path := inv.file
-	if path == "" {
-		path = filepath.Join(os.TempDir(), "chatcli-browser",
-			fmt.Sprintf("screenshot-%d.png", time.Now().UnixMilli()))
+	path, err := browserArtifactPath(inv.file, "screenshot", ".png")
+	if err != nil {
+		return "", fmt.Errorf("@browser screenshot: %w", err)
 	}
 	if inv.full {
 		ext, err := browserExt(b, "screenshot --full")

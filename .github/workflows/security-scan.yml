@@ -8,10 +8,10 @@ on:
     - cron: '0 6 * * 1'
   workflow_dispatch:
 
+# Read-only by default; only the jobs that upload SARIF can write
+# code-scanning results.
 permissions:
   contents: read
-  security-events: write
-  packages: read
 
 jobs:
   govulncheck:
@@ -23,9 +23,11 @@ jobs:
     # running for drift detection.
     if: github.event_name != 'pull_request' || !startsWith(github.head_ref, 'release-please--')
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
-      - uses: actions/setup-go@v7
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
 
@@ -45,11 +47,16 @@ jobs:
   gosec:
     name: Go Security Analysis
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
     if: github.event_name != 'pull_request' || !startsWith(github.head_ref, 'release-please--')
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
-      - uses: actions/setup-go@v7
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
 
@@ -67,13 +74,13 @@ jobs:
         run: gosec -exclude-generated -fmt sarif -out gosec-operator.sarif ./... || true
 
       - name: Upload SARIF results (root)
-        uses: github/codeql-action/upload-sarif@v4
+        uses: github/codeql-action/upload-sarif@24c54180a607b1449ed407dd24f251e4e9147c8d # v4.38.3
         if: always()
         with:
           sarif_file: gosec-results.sarif
 
       - name: Upload SARIF results (operator)
-        uses: github/codeql-action/upload-sarif@v4
+        uses: github/codeql-action/upload-sarif@24c54180a607b1449ed407dd24f251e4e9147c8d # v4.38.3
         if: always()
         with:
           sarif_file: operator/gosec-operator.sarif
@@ -84,9 +91,11 @@ jobs:
     runs-on: ubuntu-latest
     if: github.event_name == 'pull_request'
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
-      - uses: actions/dependency-review-action@v5
+      - uses: actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294 # v5.0.0
         with:
           fail-on-severity: high
           deny-licenses: GPL-3.0, AGPL-3.0
@@ -94,15 +103,20 @@ jobs:
   trivy-image-chatcli:
     name: Trivy — ChatCLI Image
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
     if: github.event_name != 'pull_request' || !startsWith(github.head_ref, 'release-please--')
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v4
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
 
       - name: Build ChatCLI image for scanning
-        uses: docker/build-push-action@v7
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: .
           push: false
@@ -112,7 +126,7 @@ jobs:
 
       # SARIF upload — informational, all severities, never blocks
       - name: Trivy scan (SARIF report)
-        uses: aquasecurity/trivy-action@master
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
           image-ref: chatcli:scan
           format: sarif
@@ -120,7 +134,7 @@ jobs:
           exit-code: '0'
 
       - name: Upload Trivy SARIF results
-        uses: github/codeql-action/upload-sarif@v4
+        uses: github/codeql-action/upload-sarif@24c54180a607b1449ed407dd24f251e4e9147c8d # v4.38.3
         if: always()
         with:
           sarif_file: trivy-chatcli.sarif
@@ -128,7 +142,7 @@ jobs:
 
       # Gate — only fails on fixable HIGH/CRITICAL OS vulns (Go vulns covered by govulncheck)
       - name: Trivy gate (fixable HIGH/CRITICAL)
-        uses: aquasecurity/trivy-action@master
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
           image-ref: chatcli:scan
           format: table
@@ -141,15 +155,20 @@ jobs:
   trivy-image-operator:
     name: Trivy — Operator Image
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
     if: github.event_name != 'pull_request' || !startsWith(github.head_ref, 'release-please--')
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v4
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
 
       - name: Build Operator image for scanning
-        uses: docker/build-push-action@v7
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: .
           file: ./operator/Dockerfile
@@ -160,7 +179,7 @@ jobs:
 
       # SARIF upload — informational, all severities, never blocks
       - name: Trivy scan (SARIF report)
-        uses: aquasecurity/trivy-action@master
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
           image-ref: chatcli-operator:scan
           format: sarif
@@ -168,7 +187,7 @@ jobs:
           exit-code: '0'
 
       - name: Upload Trivy SARIF results
-        uses: github/codeql-action/upload-sarif@v4
+        uses: github/codeql-action/upload-sarif@24c54180a607b1449ed407dd24f251e4e9147c8d # v4.38.3
         if: always()
         with:
           sarif_file: trivy-operator.sarif
@@ -176,7 +195,7 @@ jobs:
 
       # Gate — only fails on fixable HIGH/CRITICAL OS vulns (Go vulns covered by govulncheck)
       - name: Trivy gate (fixable HIGH/CRITICAL)
-        uses: aquasecurity/trivy-action@master
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
           image-ref: chatcli-operator:scan
           format: table

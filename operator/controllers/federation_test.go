@@ -112,8 +112,8 @@ func TestFederation_CorrelationReusesIDAndMarksElevation(t *testing.T) {
 	remoteA := fake.NewClientBuilder().WithScheme(s).WithObjects(mkIssue("a-oom", map[string]string{AnnotationCrossClusterCorrelation: "xcluster-keepme"})).Build()
 	remoteB := fake.NewClientBuilder().WithScheme(s).WithObjects(mkIssue("b-oom", nil)).Build()
 	r := &FederationReconciler{Client: local, Scheme: s}
-	r.remoteClients.Store("a", remoteA)
-	r.remoteClients.Store("b", remoteB)
+	r.remoteClients.Store("fed/a", remoteA)
+	r.remoteClients.Store("fed/b", remoteB)
 
 	trigger := mkIssue("local-oom", nil)
 	if err := r.CorrelateAcrossClusters(context.Background(), trigger); err != nil {

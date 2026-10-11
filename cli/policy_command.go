@@ -11,9 +11,11 @@
  * policy "ask" verdict auto-approves, so the agent runs uninterrupted;
  * explicit deny rules, the dangerous-command validator and safety-immune
  * operations keep gating exactly as in interactive mode. The mode is never
- * persisted: a new session always starts interactive. Exposed on all three
- * surfaces — terminal REPL, ACP (slash command), MCP (manage_session
- * policy_mode action).
+ * persisted: a new session starts interactive unless the operator set
+ * CHATCLI_POLICY_AUTOMODE=true. Automode is also the only opt-in that lets
+ * surfaces with nobody to ask (gateway, server, tool passthrough) approve an
+ * "ask"; without it they refuse. Exposed on all three surfaces — terminal
+ * REPL, ACP (slash command), MCP (manage_session policy_mode action).
  */
 package cli
 
@@ -35,7 +37,8 @@ func (cli *ChatCLI) PolicyAutoMode() bool {
 }
 
 // SetPolicyAutoMode switches the session's policy mode. Session-scoped by
-// design — never persisted, so every new process starts interactive.
+// design — never persisted, so every new process starts interactive unless
+// the operator set CHATCLI_POLICY_AUTOMODE=true.
 func (cli *ChatCLI) SetPolicyAutoMode(on bool) {
 	cli.policyAutoMode.Store(on)
 	if cli.logger != nil {
@@ -116,8 +119,25 @@ func (cli *ChatCLI) printPolicyStatus() {
 	}
 	if pm, err := coder.NewPolicyManager(cli.logger); err == nil {
 		fmt.Println("  " + i18n.T("policy.status.rules", pm.RulesCount(), pm.ActivePolicyPath()))
+		for _, note := range localPolicyNotes(pm) {
+			fmt.Println("  " + note)
+		}
 	}
 	fmt.Println("  " + i18n.T("policy.status.usage_hint"))
+}
+
+// localPolicyNotes explains what happened to the workspace coder_policy.json:
+// ignored because the workspace is not trusted, or loaded with its allow
+// rules dropped (a workspace policy can only tighten).
+func localPolicyNotes(pm *coder.PolicyManager) []string {
+	var notes []string
+	if p := pm.UntrustedLocalPolicyPath(); p != "" {
+		notes = append(notes, i18n.T("wstrust.policy.untrusted", p))
+	}
+	if n := pm.LocalIgnoredAllows(); n > 0 {
+		notes = append(notes, i18n.T("wstrust.policy.allow_ignored", pm.LocalPolicyPath(), n))
+	}
+	return notes
 }
 
 // askAutoApproved reports whether a coder-policy "ask" verdict should

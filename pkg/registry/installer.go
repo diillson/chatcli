@@ -132,8 +132,13 @@ func (inst *Installer) InstallFromSnapshot(meta *SkillMeta, files []SnapshotFile
 		if f.Path == "" {
 			continue
 		}
-		// Path already validated by ParseSnapshotFiles (rejects ".." and absolute paths)
-		targetPath := filepath.Clean(filepath.Join(tmpDir, filepath.FromSlash(f.Path))) // #nosec G304 -- path validated upstream
+		// Re-validated here because this entry point is exported: the same
+		// OS-form locality check ParseSnapshotFiles applies.
+		rel, err := snapshotRelPath(f.Path)
+		if err != nil {
+			return nil, err
+		}
+		targetPath := filepath.Clean(filepath.Join(tmpDir, filepath.FromSlash(rel))) // #nosec G304 -- rel validated local by snapshotRelPath
 
 		// Create parent directories as needed
 		parentDir := filepath.Dir(targetPath)

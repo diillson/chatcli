@@ -14,6 +14,7 @@ package cli
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/url"
@@ -26,8 +27,10 @@ import (
 	"time"
 
 	"github.com/diillson/chatcli/cli/agent/workers"
+	"github.com/diillson/chatcli/cli/coder"
 	"github.com/diillson/chatcli/cli/taskgraph"
 	"github.com/diillson/chatcli/cli/taskgraph/dash"
+	"github.com/diillson/chatcli/i18n"
 	"github.com/diillson/chatcli/models"
 	coderengine "github.com/diillson/chatcli/pkg/coder/engine"
 	"go.uber.org/zap"
@@ -315,7 +318,13 @@ func (a *taskGraphAdapter) Dash(runID string) (string, error) {
 
 	dashURL := srv.URL()
 	if runID = strings.TrimSpace(runID); runID != "" {
-		dashURL += "?run=" + url.QueryEscape(runID)
+		// The server URL already carries the access token in its query.
+		if u, perr := url.Parse(dashURL); perr == nil {
+			q := u.Query()
+			q.Set("run", runID)
+			u.RawQuery = q.Encode()
+			dashURL = u.String()
+		}
 	}
 	if term.IsTerminal(int(os.Stdout.Fd())) {
 		_ = openBrowserURL(dashURL)
@@ -374,7 +383,7 @@ func (a *taskGraphAdapter) execute(ctx context.Context, g *taskgraph.Graph, stor
 	}
 	cfg := taskgraph.Config{
 		Dispatcher:  disp,
-		Gate:        &coderGateRunner{workspace: workspace},
+		Gate:        &coderGateRunner{workspace: workspace, check: a.gatePolicyChecker()},
 		MaxParallel: taskGraphMaxParallel(),
 		Workspace:   workspace,
 		Checkpoint: func(label string) {
@@ -454,14 +463,66 @@ func taskGraphMaxParallel() int {
 	return taskgraph.DefaultMaxParallel
 }
 
+// gatePolicyCheck decides whether one gate command may run, with the same
+// contract as workers.PolicyChecker.CheckAndPrompt.
+type gatePolicyCheck func(ctx context.Context, toolName, args string) (bool, string)
+
 // coderGateRunner runs validation commands through the coder engine so gates
-// inherit the sandbox, the unsafe-command denylist and path validation.
+// inherit the sandbox, the unsafe-command denylist and path validation. Gate
+// commands come from the plan the model wrote, so each one first passes the
+// security policy exactly like a worker's exec; a nil check refuses.
 type coderGateRunner struct {
 	workspace string
+	check     gatePolicyCheck
+}
+
+// gatePolicyChecker resolves the policy gate for gate commands: the live
+// worker policy adapter when the session has one (it prompts interactively,
+// honors automode and refuses unattended asks), else a non-interactive
+// resolution where "ask" is refused unless the session is in automode.
+func (a *taskGraphAdapter) gatePolicyChecker() gatePolicyCheck {
+	if a.cli != nil && a.cli.agentMode != nil && a.cli.agentMode.policyAdapter != nil {
+		return a.cli.agentMode.policyAdapter.CheckAndPrompt
+	}
+	autoMode := a.cli != nil && a.cli.PolicyAutoMode()
+	return func(_ context.Context, toolName, args string) (bool, string) {
+		pm, err := coder.NewPolicyManager(a.logger)
+		if err != nil {
+			return false, i18n.T("agent.policy.manager_unavailable", err, toolName)
+		}
+		switch coder.ResolveWithoutApprover(pm, toolName, args, autoMode) {
+		case coder.ActionAllow:
+			return true, ""
+		case coder.ActionDeny:
+			return false, i18n.T("rpc.tool.policy_denied", toolName)
+		default:
+			return false, i18n.T("agent.policy.unattended_denied", toolName)
+		}
+	}
+}
+
+// gateExecPolicyArgs renders a gate command as the @coder exec envelope a
+// worker's native exec call is checked with.
+func gateExecPolicyArgs(cmd string) string {
+	data, err := json.Marshal(map[string]interface{}{
+		"cmd":  "exec",
+		"args": map[string]string{"cmd": cmd},
+	})
+	if err != nil {
+		return "exec --cmd " + cmd
+	}
+	return string(data)
 }
 
 // RunGateStep implements taskgraph.GateRunner.
 func (r *coderGateRunner) RunGateStep(ctx context.Context, dir, cmd string, onLine func(string)) (string, error) {
+	allowed, reason := false, ""
+	if r.check != nil {
+		allowed, reason = r.check(ctx, "@coder", gateExecPolicyArgs(cmd))
+	}
+	if !allowed {
+		return "", errors.New(i18n.T("taskgraph.gate.policy_denied", cmd, reason))
+	}
 	var buf strings.Builder
 	var mu sync.Mutex
 	sink := coderengine.NewStreamWriter(func(line string) {

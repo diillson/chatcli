@@ -123,15 +123,12 @@ func TestDiscoverResolvesAuthServer(t *testing.T) {
 	base = srv.URL
 
 	disc := newOAuthDiscoverer(zap.NewNop())
-	asMeta, prm, err := disc.discover(context.Background(), base+"/mcp", oauthChallenge{})
+	asMeta, err := disc.discover(context.Background(), base+"/mcp", oauthChallenge{})
 	if err != nil {
 		t.Fatalf("discover: %v", err)
 	}
 	if asMeta.TokenEndpoint != base+"/token" || asMeta.AuthorizationEndpoint != base+"/authorize" {
 		t.Fatalf("unexpected AS metadata: %+v", asMeta)
-	}
-	if prm.Resource != base+"/mcp" {
-		t.Errorf("resource = %q, want %q", prm.Resource, base+"/mcp")
 	}
 }
 

@@ -106,6 +106,13 @@ func main() {
 	if setupOpts.PrometheusURL != "" {
 		setupLog.Info("Prometheus metrics collector enabled", "url", setupOpts.PrometheusURL)
 	}
+	setupLog.Info("Remediation mode", "mode", setupOpts.RemediationMode)
+	if setupOpts.AIOpsInstance.Name == "" {
+		setupLog.Info("WARNING: no AIOps Instance pinned; the AIOps bridge stays disconnected until " +
+			controllers.AIOpsInstanceEnv + " names one as namespace/name")
+	} else {
+		setupLog.Info("AIOps Instance pinned", "instance", setupOpts.AIOpsInstance.String())
+	}
 
 	// REST API Gateway — provides HTTP API access to AIOps resources
 	aiopsPort := os.Getenv("CHATCLI_AIOPS_PORT")
@@ -160,13 +167,11 @@ func main() {
 	}
 }
 
-// resolveNamespace returns the namespace the operator is running in.
+// resolveNamespace returns the namespace the operator is running in, and
+// chatcli-system when the environment does not say.
 func resolveNamespace() string {
-	if ns := os.Getenv("POD_NAMESPACE"); ns != "" {
+	if ns := setup.OperatorNamespace(); ns != "" {
 		return ns
-	}
-	if data, err := os.ReadFile("/var/run/secrets/kubernetes.io/serviceaccount/namespace"); err == nil {
-		return strings.TrimSpace(string(data))
 	}
 	return "chatcli-system"
 }

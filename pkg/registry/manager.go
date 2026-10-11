@@ -225,15 +225,7 @@ func (rm *RegistryManager) Install(ctx context.Context, nameOrSlug string) (*Ins
 	var result *InstallResult
 	var installErr error
 	if IsSkillsShSource(meta.RegistryName) {
-		files, hash, parseErr := ParseSnapshotFiles(content)
-		if parseErr != nil {
-			// Fallback to regular install if snapshot parsing fails
-			rm.logger.Debug("snapshot parse failed, falling back to regular install",
-				zap.String("name", nameOrSlug), zap.Error(parseErr))
-			result, installErr = rm.installer.Install(meta, content)
-		} else {
-			result, installErr = rm.installer.InstallFromSnapshot(meta, files, hash)
-		}
+		result, installErr = rm.installSnapshot(meta, content)
 	} else {
 		result, installErr = rm.installer.Install(meta, content)
 	}
@@ -291,14 +283,7 @@ func (rm *RegistryManager) InstallFrom(ctx context.Context, nameOrSlug string, r
 	var result *InstallResult
 	var installErr error
 	if IsSkillsShSource(meta.RegistryName) {
-		files, hash, parseErr := ParseSnapshotFiles(content)
-		if parseErr != nil {
-			rm.logger.Debug("snapshot parse failed, falling back to regular install",
-				zap.String("name", nameOrSlug), zap.Error(parseErr))
-			result, installErr = rm.installer.Install(meta, content)
-		} else {
-			result, installErr = rm.installer.InstallFromSnapshot(meta, files, hash)
-		}
+		result, installErr = rm.installSnapshot(meta, content)
 	} else {
 		result, installErr = rm.installer.Install(meta, content)
 	}
@@ -562,4 +547,17 @@ func shortenError(err error) string {
 		return msg[:57] + "..."
 	}
 	return msg
+}
+
+// installSnapshot installs a skills.sh download. The content must parse as
+// a snapshot with safe paths and a matching hash; anything else is refused.
+// There is deliberately no fallback to installing the raw bytes as a
+// SKILL.md: a snapshot that failed validation is exactly the input that
+// must not reach the disk.
+func (rm *RegistryManager) installSnapshot(meta *SkillMeta, content []byte) (*InstallResult, error) {
+	files, hash, err := ParseSnapshotFiles(content)
+	if err != nil {
+		return nil, fmt.Errorf("refusing skill '%s' from %s: %w", meta.Name, meta.RegistryName, err)
+	}
+	return rm.installer.InstallFromSnapshot(meta, files, hash)
 }

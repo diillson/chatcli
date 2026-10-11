@@ -7,6 +7,8 @@ package transcription
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -15,6 +17,8 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+
+	"github.com/diillson/chatcli/llm/internal/provision"
 )
 
 // provisionFakeSTTCache builds a complete cache layout whose "engine" is a
@@ -209,6 +213,7 @@ func TestEmbeddedWhisper_ProvisionFromHTTP(t *testing.T) {
 	e.binBaseURL = srv.URL + "/"
 	e.modelBaseURL = srv.URL + "/"
 	e.minBinBytes, e.minModelBytes = 16, 16
+	e.pins = pinSTTFixtures(engineTar, whisperTar)
 	stubFFmpegMissing(t)
 
 	got, err := e.Transcribe(context.Background(), []byte("RIFFfakewav"), "audio/wav", "note.wav", "")
@@ -247,9 +252,59 @@ func TestEmbeddedWhisper_ProvisionRejectsUndersizedDownload(t *testing.T) {
 	e.binBaseURL = srv.URL + "/"
 	e.modelBaseURL = srv.URL + "/"
 	e.minBinBytes, e.minModelBytes = 1024, 1024
+	// Pinned to the short body itself, so the size floor is what refuses it.
+	e.pins = pinSTTFixtures([]byte("short"), []byte("short"))
 
-	if err := e.EnsureReady(context.Background()); err == nil {
-		t.Fatal("undersized archives must fail provisioning")
+	if err := e.EnsureReady(context.Background()); err == nil || !strings.Contains(err.Error(), "too small") {
+		t.Fatalf("undersized archives must fail provisioning on the size floor, got %v", err)
+	}
+}
+
+// pinSTTFixtures pins the fixture archives the way the production table
+// pins the real ones: the engine by platform asset name, the model by name.
+func pinSTTFixtures(engine, model []byte) provision.PinSource {
+	asset, _ := provision.SherpaAsset(runtime.GOOS, runtime.GOARCH)
+	return provision.FixedPins{asset: sttSHA256Hex(engine), "sherpa-onnx-whisper-base.tar.bz2": sttSHA256Hex(model)}
+}
+
+func sttSHA256Hex(b []byte) string {
+	sum := sha256.Sum256(b)
+	return hex.EncodeToString(sum[:])
+}
+
+// TestEmbeddedWhisper_ProvisionRejectsTamperedModel: a model archive that
+// differs from its pin (a re-uploaded asset under the rolling asr-models
+// tag) is discarded before extraction.
+func TestEmbeddedWhisper_ProvisionRejectsTamperedModel(t *testing.T) {
+	engineTar, err := os.ReadFile(filepath.Join("testdata", "fake-sherpa-asr.tar.bz2"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	whisperTar, err := os.ReadFile(filepath.Join("testdata", "fake-whisper.tar.bz2"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.Contains(r.URL.Path, "whisper") {
+			_, _ = w.Write(append(append([]byte{}, whisperTar...), 0))
+			return
+		}
+		_, _ = w.Write(engineTar)
+	}))
+	defer srv.Close()
+
+	root := t.TempDir()
+	e := newTestEmbeddedSTT(t, root)
+	e.binBaseURL = srv.URL + "/"
+	e.modelBaseURL = srv.URL + "/"
+	e.minBinBytes, e.minModelBytes = 16, 16
+	e.pins = pinSTTFixtures(engineTar, whisperTar)
+
+	if err := e.EnsureReady(context.Background()); err == nil || !strings.Contains(err.Error(), "checksum mismatch") {
+		t.Fatalf("tampered model must be refused, got %v", err)
+	}
+	if _, statErr := os.Stat(filepath.Join(root, "whisper-base")); statErr == nil {
+		t.Fatal("nothing may be extracted from a tampered archive")
 	}
 }
 

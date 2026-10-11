@@ -57,6 +57,9 @@ func TestRunAnyRPCToolArgv_Guards(t *testing.T) {
 func TestRunAnyRPCToolArgv_PreservesArgs(t *testing.T) {
 	rec := &argvRecorderPlugin{}
 	c := &ChatCLI{pluginManager: newTestPluginManagerWith(t, rec)}
+	// The recorder is not read-only, so the policy asks; automode is the
+	// opt-in that lets the tool surface run it without a human.
+	c.policyAutoMode.Store(true)
 	t.Setenv("CHATCLI_MCP_TOOLS", "all")
 	if _, err := c.RunAnyRPCToolArgv(context.Background(), rec.Name(), []string{"--term", "two words"}); err != nil {
 		t.Fatalf("execute: %v", err)

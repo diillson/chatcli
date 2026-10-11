@@ -63,6 +63,17 @@ func NewClient(baseURL, model string, logger *zap.Logger, maxAttempts int, backo
 	}
 }
 
+// NewClientWithHTTPClient is NewClient over a caller-supplied HTTP client.
+// The gRPC server uses it for a client-chosen endpoint, so that every
+// connection goes through its dial-time address guard.
+func NewClientWithHTTPClient(baseURL, model string, logger *zap.Logger, maxAttempts int, backoff time.Duration, httpClient *http.Client) *Client {
+	c := NewClient(baseURL, model, logger, maxAttempts, backoff)
+	if httpClient != nil {
+		c.httpClient = httpClient
+	}
+	return c
+}
+
 func (c *Client) GetModelName() string {
 	// Caso não tenha cadastro no catálogo, retorna o próprio ID
 	return catalog.GetDisplayName(catalog.ProviderOllama, c.model)

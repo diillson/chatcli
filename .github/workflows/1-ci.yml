@@ -4,6 +4,9 @@ on:
   pull_request:
     branches: [develop, main]
 
+permissions:
+  contents: read
+
 concurrency:
   group: ci-${{ github.head_ref }}
   cancel-in-progress: true
@@ -16,10 +19,12 @@ jobs:
     if: github.actor != 'release-please[bot]' && github.actor != 'github-actions[bot]'
     steps:
       - name: Checkout code
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Set up Go
-        uses: actions/setup-go@v7
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
           cache: true
@@ -29,7 +34,7 @@ jobs:
         # enforcement was fully paid down (misspell in PR #1055, the five
         # heavy linters in #1056, the remainder here), so the whole module
         # is enforced: debt can no longer accumulate outside PR diffs.
-        uses: golangci/golangci-lint-action@v9
+        uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
         with:
           version: v2.14.0
           install-mode: goinstall
@@ -63,7 +68,7 @@ jobs:
           go tool cover -func=coverage.out > coverage.txt
 
       - name: Upload coverage report artifact
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: coverage-report
           path: coverage.txt
@@ -78,10 +83,12 @@ jobs:
     if: github.actor != 'release-please[bot]' && github.actor != 'github-actions[bot]'
     steps:
       - name: Checkout code
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Set up Helm
-        uses: azure/setup-helm@v5
+        uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
         with:
           version: v3.22.0
 

@@ -74,6 +74,9 @@ type routeRequest struct {
 	model          string
 	clientAPIKey   string
 	providerConfig map[string]string
+	// agentAllowed records that the caller was admin when the route was
+	// first resolved, so retries may stay on an agent provider.
+	agentAllowed bool
 }
 
 // fallbackChainClient is the slice of *fallback.Chain the router uses. An
@@ -94,13 +97,31 @@ type turnResult struct {
 
 // resolveRoute picks the client for a request. See the file header for the
 // precedence. The route is resolved once per request; retries rebuild it
-// through the same rules.
-func (h *Handler) resolveRoute(provider, model, clientAPIKey string, providerConfig map[string]string) (llmRoute, error) {
+// through the same rules. A non-admin caller never gets a route to an agent
+// provider (see agent_provider_guard.go).
+func (h *Handler) resolveRoute(ctx context.Context, provider, model, clientAPIKey string, providerConfig map[string]string) (llmRoute, error) {
 	req := routeRequest{provider: provider, model: model, clientAPIKey: clientAPIKey, providerConfig: providerConfig}
-	callerCreds := clientAPIKey != "" || len(providerConfig) > 0
-	explicit := strings.TrimSpace(provider) != "" || strings.TrimSpace(model) != ""
+	if err := h.authorizeRouteProvider(ctx, provider, req.usesChain(h)); err != nil {
+		return llmRoute{}, err
+	}
+	req.agentAllowed = callerIsAdmin(ctx)
+	return h.resolveRouteFor(req)
+}
 
-	if !callerCreds && !explicit && h.fallbackChain != nil {
+// usesChain reports whether the request falls through to the fallback
+// chain: it names no provider, no model and carries no credential.
+func (r routeRequest) usesChain(h *Handler) bool {
+	callerCreds := r.clientAPIKey != "" || len(r.providerConfig) > 0
+	explicit := strings.TrimSpace(r.provider) != "" || strings.TrimSpace(r.model) != ""
+	return !callerCreds && !explicit && h.fallbackChain != nil
+}
+
+// resolveRouteFor builds the route for an already authorized request.
+func (h *Handler) resolveRouteFor(req routeRequest) (llmRoute, error) {
+	provider, model, clientAPIKey, providerConfig := req.provider, req.model, req.clientAPIKey, req.providerConfig
+	callerCreds := clientAPIKey != "" || len(providerConfig) > 0
+
+	if req.usesChain(h) {
 		return llmRoute{
 			client:   h.fallbackChain,
 			provider: h.defaultProvider,
@@ -278,7 +299,7 @@ func (h *Handler) routeAfterAuthError(err error, r llmRoute) (llmRoute, bool) {
 	if h.refreshServerCredentials() {
 		h.logger.Info(i18n.T("server.route.auth_refreshed"), zap.String("provider", r.provider))
 	}
-	retry, rerr := h.resolveRoute(r.request.provider, r.request.model, r.request.clientAPIKey, r.request.providerConfig)
+	retry, rerr := h.resolveRouteFor(r.request)
 	if rerr != nil {
 		h.logger.Warn(i18n.T("server.route.auth_reroute_failed"), zap.String("provider", r.provider), zap.Error(rerr))
 		return llmRoute{}, false
@@ -312,6 +333,9 @@ func (h *Handler) routeAfterRefusal(err error, r llmRoute) (llmRoute, bool) {
 	}
 	handle := catalog.RefusalSibling(r.provider, r.model)
 	provider, model, ok := catalog.SplitRouteHandle(handle)
+	if ok && isAgentProvider(provider) && !r.request.agentAllowed {
+		ok = false
+	}
 	if !ok {
 		h.logger.Warn(i18n.T("server.route.refusal_no_sibling"), zap.String("provider", r.provider), zap.String("model", r.model))
 		return llmRoute{}, false

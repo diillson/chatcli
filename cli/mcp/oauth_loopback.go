@@ -13,6 +13,7 @@ package mcp
 
 import (
 	"context"
+	"crypto/subtle"
 	"fmt"
 	"net"
 	"net/http"
@@ -57,6 +58,9 @@ func buildAuthorizeURL(p loopbackAuthParams, challenge, state string) string {
 	return p.authorizationEndpoint + "?" + q.Encode()
 }
 
+// openAuthURL opens the authorization request in the user's browser.
+var openAuthURL = auth.OpenInBrowser
+
 // runLoopbackAuth opens the browser at the authorization endpoint and waits for
 // the callback, returning the authorization code and the PKCE verifier used.
 // The listener is owned by the caller for binding, but this function serves and
@@ -90,11 +94,13 @@ func runLoopbackAuth(ctx context.Context, listener net.Listener, p loopbackAuthP
 			http.NotFound(w, r)
 			return
 		}
-		if r.URL.Query().Get("state") != state {
+		if subtle.ConstantTimeCompare([]byte(r.URL.Query().Get("state")), []byte(state)) != 1 {
+			// Not this login's callback. Any page can send one, so it is
+			// refused without ending the login the user is completing.
 			writeCallbackHTML(w, http.StatusForbidden, callbackPage(toneFailure,
 				i18n.T("mcp.oauth.page.failed_title"), i18n.T("mcp.oauth.page.csrf_body"),
 				i18n.T("mcp.oauth.page.close_hint")))
-			errCh <- fmt.Errorf("%s", i18n.T("mcp.oauth.callback_csrf"))
+			logger.Warn("MCP OAuth: callback with a wrong state ignored")
 			return
 		}
 		if oauthErr := r.URL.Query().Get("error"); oauthErr != "" {
@@ -102,7 +108,7 @@ func runLoopbackAuth(ctx context.Context, listener net.Listener, p loopbackAuthP
 			writeCallbackHTML(w, http.StatusBadRequest, callbackPage(toneFailure,
 				i18n.T("mcp.oauth.page.failed_title"), i18n.T("mcp.oauth.page.error_body"),
 				i18n.T("mcp.oauth.page.retry_hint")))
-			errCh <- fmt.Errorf("%s", i18n.T("mcp.oauth.callback_server_error", oauthErr, desc))
+			errCh <- fmt.Errorf("%s", i18n.T("mcp.oauth.callback_server_error", printable(oauthErr), printable(desc)))
 			return
 		}
 		c := r.URL.Query().Get("code")
@@ -132,7 +138,7 @@ func runLoopbackAuth(ctx context.Context, listener net.Listener, p loopbackAuthP
 	}()
 
 	fmt.Println(i18n.T("mcp.oauth.opening_browser"))
-	if openErr := auth.OpenInBrowser(authURL); openErr != nil {
+	if openErr := openAuthURL(authURL); openErr != nil {
 		fmt.Println(i18n.T("mcp.oauth.browser_failed"))
 		fmt.Println(authURL)
 	} else {

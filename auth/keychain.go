@@ -6,6 +6,7 @@
 package auth
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -24,6 +25,17 @@ const (
 )
 
 const keychainServiceName = "chatcli"
+
+// errKeychainItemNotFound is what every backend returns when it was reached
+// and holds no entry for the account. It wraps os.ErrNotExist, so callers
+// test it with errors.Is. Any other error means the backend could not answer
+// (locked, access denied, helper failing), which is not the same thing: a
+// caller that treats it as "no key yet" would replace a key that exists.
+var errKeychainItemNotFound = fmt.Errorf("keychain item not found: %w", os.ErrNotExist)
+
+// macItemNotFoundExit is the exit status of the security tool for
+// errSecItemNotFound (-25300): the low byte of the OSStatus.
+const macItemNotFoundExit = 44
 
 // keychainOps is the platform's credential store, behind an interface so
 // the backend-selection logic can be exercised without a real keychain —
@@ -202,22 +214,66 @@ func (ks *KeychainStore) macGet(account string) ([]byte, error) {
 		"-s", keychainServiceName, "-a", account, "-w")
 	out, err := cmd.Output()
 	if err != nil {
+		var exitErr *exec.ExitError
+		if errors.As(err, &exitErr) && exitErr.ExitCode() == macItemNotFoundExit {
+			return nil, errKeychainItemNotFound
+		}
 		return nil, fmt.Errorf("keychain get failed: %w", err)
 	}
 	return []byte(strings.TrimSpace(string(out))), nil
 }
 
 func (ks *KeychainStore) macSet(account string, data []byte) error {
-	// Delete first (update = delete + add in macOS keychain)
-	_ = ks.macDelete(account) // ignore error if not exists
-
-	cmd := exec.Command("security", "add-generic-password", // #nosec G204
-		"-s", keychainServiceName, "-a", account,
-		"-w", string(data), "-U")
+	cmd, err := macSetCommand(account, data)
+	if err != nil {
+		return err
+	}
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("keychain set failed: %w", err)
 	}
 	return nil
+}
+
+// macSetCommand builds the security invocation that stores data for
+// account. The secret never goes on the command line, where any local user
+// can read it from the process table: the tool runs in interactive mode
+// (-i) and reads the add-generic-password command from stdin.
+//
+// -U updates an existing item in place. The item is never deleted first,
+// so a write that fails leaves the previous key where it was.
+//
+// Interactive mode splits the line on whitespace and honors quotes and
+// backslashes. Rather than quoting, every token is restricted to a charset
+// with none of those characters (base64, which is what the key is stored
+// as, fits it), and anything else is refused.
+func macSetCommand(account string, data []byte) (*exec.Cmd, error) {
+	for _, tok := range []string{keychainServiceName, account, string(data)} {
+		if !isMacInteractiveSafe(tok) {
+			return nil, fmt.Errorf("keychain set failed: the value for %q has characters the security tool cannot take on stdin", account)
+		}
+	}
+	line := "add-generic-password -s " + keychainServiceName + " -a " + account + " -w " + string(data) + " -U\n"
+	cmd := exec.Command("security", "-i") // #nosec G204 -- fixed program and flag; the command itself is written to stdin
+	cmd.Stdin = strings.NewReader(line)
+	return cmd, nil
+}
+
+// isMacInteractiveSafe reports whether tok is non-empty and made only of
+// characters the security tool's interactive parser passes through as they
+// are: letters, digits and + / = . _ : @ -.
+func isMacInteractiveSafe(tok string) bool {
+	if tok == "" {
+		return false
+	}
+	for _, r := range tok {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9':
+		case strings.ContainsRune("+/=._:@-", r):
+		default:
+			return false
+		}
+	}
+	return true
 }
 
 func (ks *KeychainStore) macDelete(account string) error {
@@ -235,7 +291,17 @@ func (ks *KeychainStore) linuxGet(account string) ([]byte, error) {
 		"service", keychainServiceName, "account", account)
 	out, err := cmd.Output()
 	if err != nil {
+		// secret-tool exits 1 and prints nothing when the lookup finds no
+		// item; a failure to reach the Secret Service also exits 1 but
+		// explains itself on stderr.
+		var exitErr *exec.ExitError
+		if errors.As(err, &exitErr) && exitErr.ExitCode() == 1 && len(strings.TrimSpace(string(exitErr.Stderr))) == 0 {
+			return nil, errKeychainItemNotFound
+		}
 		return nil, fmt.Errorf("secret-tool lookup failed: %w", err)
+	}
+	if len(out) == 0 {
+		return nil, errKeychainItemNotFound
 	}
 	return out, nil
 }

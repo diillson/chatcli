@@ -47,6 +47,13 @@ type InboundMessage struct {
 	// A single pointer (not a slice) keeps InboundMessage comparable; adapters
 	// carry the primary attachment.
 	Image *InboundImage
+
+	// SenderListed is set by the adapter when the sender matched an explicit
+	// entry of the platform's allowlist, as opposed to being admitted by the
+	// public "*" entry. Commands that reach beyond the conversation itself
+	// (the /session family, which reads and writes saved sessions) require
+	// it.
+	SenderListed bool
 }
 
 // InboundAudio is a voice/audio attachment on an inbound message.

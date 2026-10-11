@@ -23,6 +23,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/diillson/chatcli/utils"
 )
 
 // TabInfo describes one page target in the browser.
@@ -307,10 +309,17 @@ func (s *Session) PDF(ctx context.Context, path string) error {
 	if err != nil {
 		return fmt.Errorf("decode pdf: %w", err)
 	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
+	return writeArtifactFile(path, data)
+}
+
+// writeArtifactFile writes data to path owner-only through a temp file and
+// a rename, which replaces a symbolic link planted at path instead of
+// following it as a plain write would.
+func writeArtifactFile(path string, data []byte) error {
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return err
 	}
-	return os.WriteFile(path, data, 0o600)
+	return utils.AtomicWriteFile(path, data, 0o600)
 }
 
 // Resize emulates a viewport of width×height CSS pixels; mobile also turns
@@ -413,6 +422,11 @@ func (s *Session) SwitchTab(ctx context.Context, which string) (TabInfo, error) 
 	if pick.Current {
 		return *pick, nil
 	}
+	// A tab the page opened (a popup, a target=_blank link) loaded without
+	// the document guard of this session; reading it must pass the guard.
+	if err := checkNavigation(pick.URL); err != nil {
+		return TabInfo{}, err
+	}
 	res, err := s.conn.call(ctx, "", "Target.attachToTarget", map[string]interface{}{
 		"targetId": pick.ID, "flatten": true,
 	})
@@ -429,6 +443,9 @@ func (s *Session) SwitchTab(ctx context.Context, which string) (TabInfo, error) 
 		if _, err := s.conn.call(ctx, attached.SessionID, method, nil); err != nil {
 			return TabInfo{}, fmt.Errorf("%s: %w", method, err)
 		}
+	}
+	if err := s.enableDocumentGuard(ctx, attached.SessionID); err != nil {
+		return TabInfo{}, fmt.Errorf("%s: %w", "Fetch.enable", err)
 	}
 	s.mu.Lock()
 	s.targetID, s.sessionID = pick.ID, attached.SessionID

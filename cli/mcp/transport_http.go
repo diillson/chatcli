@@ -52,6 +52,7 @@ import (
 
 	"github.com/diillson/chatcli/auth"
 	"github.com/diillson/chatcli/i18n"
+	"github.com/diillson/chatcli/utils"
 	"go.uber.org/zap"
 )
 
@@ -147,7 +148,7 @@ func newHTTPTransport(ctx context.Context, cfg ServerConfig, logger *zap.Logger,
 		// init) so a slow tools/call doesn't get killed by a short
 		// initialize budget, and an initialize that legitimately
 		// takes longer than callTimeout still completes.
-		httpClient:  &http.Client{Timeout: maxDuration(callTimeout, initTimeout)},
+		httpClient:  &http.Client{Timeout: maxDuration(callTimeout, initTimeout), CheckRedirect: sameOriginRedirect},
 		logger:      logger,
 		ctx:         tctx,
 		cancel:      cancel,
@@ -161,7 +162,7 @@ func newHTTPTransport(ctx context.Context, cfg ServerConfig, logger *zap.Logger,
 
 	logger.Debug("MCP streamable HTTP transport ready",
 		zap.String("server", serverName),
-		zap.String("endpoint", t.endpoint))
+		zap.String("endpoint", utils.RedactURLForLog(t.endpoint)))
 
 	return t, nil
 }
@@ -584,7 +585,7 @@ func (t *httpTransport) pushRunOnce(ctx context.Context) (bool, error) {
 	// open as long as the server wants it to. Share the underlying
 	// Transport so the connection pool, proxy settings, and TLS
 	// config match the POST path.
-	c := &http.Client{Transport: t.httpClient.Transport}
+	c := &http.Client{Transport: t.httpClient.Transport, CheckRedirect: sameOriginRedirect}
 	resp, err := c.Do(req)
 	if err != nil {
 		return false, fmt.Errorf("push connect: %w", err)
@@ -597,7 +598,7 @@ func (t *httpTransport) pushRunOnce(ctx context.Context) (bool, error) {
 	case http.StatusMethodNotAllowed, http.StatusNotImplemented, http.StatusNotFound:
 		// Server does not support server-initiated push. Common on
 		// minimal MCP implementations — bail without retry storms.
-		return true, fmt.Errorf("server returned %d on GET %s", resp.StatusCode, t.endpoint)
+		return true, fmt.Errorf("server returned %d on GET %s", resp.StatusCode, utils.RedactURLForLog(t.endpoint))
 	default:
 		// Anything else is transient: 5xx, 429, network-mediated
 		// "Bad Gateway", etc. Let the supervisor back off and retry.

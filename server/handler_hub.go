@@ -7,6 +7,7 @@ package server
 
 import (
 	"context"
+	"errors"
 
 	"github.com/diillson/chatcli/i18n"
 	"github.com/diillson/chatcli/models"
@@ -60,6 +61,28 @@ func (h *Handler) authorizeConv(ctx context.Context, convID, principal string) e
 		return nil
 	}
 	return status.Errorf(codes.PermissionDenied, "%s", i18n.T("server.hub.conv_forbidden"))
+}
+
+// authorizeRebind refuses to move a channel identity that is already bound
+// to another principal unless the caller is admin. Bind is an upsert, so
+// without this check any user could take over another principal's
+// identity and receive that principal's later gateway messages in a
+// conversation the taker owns.
+func (h *Handler) authorizeRebind(ctx context.Context, platform, userID, principal string) error {
+	if u := UserFromContext(ctx); u != nil && u.HasRole(RoleAdmin) {
+		return nil
+	}
+	current, err := h.hub.ResolvePrincipal(ctx, platform, userID)
+	switch {
+	case errors.Is(err, hub.ErrUnboundChannel):
+		return nil
+	case err != nil:
+		h.logger.Error("hub binding lookup failed", zap.Error(err))
+		return status.Errorf(codes.Internal, "%s", i18n.T("server.hub.bind_error", err))
+	case current != principal:
+		return status.Errorf(codes.PermissionDenied, "%s", i18n.T("server.session_tenancy.rebind_denied"))
+	}
+	return nil
 }
 
 func (h *Handler) hubReady() error {
@@ -201,6 +224,9 @@ func (h *Handler) SetBinding(ctx context.Context, req *pb.SetBindingRequest) (*p
 	}
 	if req.GetPlatform() == "" || req.GetUserId() == "" || principal == "" {
 		return nil, status.Errorf(codes.InvalidArgument, "%s", i18n.T("server.hub.bind_missing"))
+	}
+	if err := h.authorizeRebind(ctx, req.GetPlatform(), req.GetUserId(), principal); err != nil {
+		return nil, err
 	}
 	if err := h.hub.Bind(ctx, req.GetPlatform(), req.GetUserId(), principal); err != nil {
 		h.logger.Error("hub bind failed", zap.Error(err))

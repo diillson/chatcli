@@ -19,7 +19,8 @@ type fakeKeychain struct {
 	items     map[string][]byte
 	available bool
 	failSet   bool
-	loseWrite bool // accepts the write and returns nothing afterwards
+	loseWrite bool  // accepts the write and returns nothing afterwards
+	getErr    error // a backend that cannot answer (locked, access denied)
 }
 
 func newFakeKeychain() *fakeKeychain {
@@ -33,6 +34,9 @@ func (f *fakeKeychain) store(backend KeychainBackend) *KeychainStore {
 func (f *fakeKeychain) Available() bool { return f.available }
 
 func (f *fakeKeychain) Get(account string) ([]byte, error) {
+	if f.getErr != nil {
+		return nil, f.getErr
+	}
 	v, ok := f.items[account]
 	if !ok {
 		return nil, os.ErrNotExist

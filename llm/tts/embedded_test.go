@@ -7,6 +7,8 @@ package tts
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -15,6 +17,8 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+
+	"github.com/diillson/chatcli/llm/internal/provision"
 )
 
 // provisionFakeCache builds a complete cache layout whose "engine" is a shell
@@ -206,6 +210,7 @@ func TestEmbedded_ProvisionFromHTTP(t *testing.T) {
 	e.binBaseURL = srv.URL + "/"
 	e.modelURL = srv.URL + "/kokoro.tar.bz2"
 	e.minBinBytes, e.minModelBytes = 16, 16
+	e.pins = pinFixtures(sherpaTar, kokoroTar)
 
 	audio, err := e.Synthesize(context.Background(), "Provisioning end to end now.", "", "wav")
 	if err != nil {
@@ -233,6 +238,73 @@ func TestEmbedded_ProvisionFromHTTP(t *testing.T) {
 	}
 }
 
+// pinFixtures pins the fixture archives the way the production table pins
+// the real ones: the engine by its platform asset name, the model by name.
+func pinFixtures(engine, model []byte) provision.PinSource {
+	asset, _ := provision.SherpaAsset(runtime.GOOS, runtime.GOARCH)
+	return provision.FixedPins{asset: sha256Hex(engine), kokoroArchive: sha256Hex(model)}
+}
+
+func sha256Hex(b []byte) string {
+	sum := sha256.Sum256(b)
+	return hex.EncodeToString(sum[:])
+}
+
+// TestEmbedded_ProvisionRejectsTamperedArchive: an engine archive whose
+// digest differs from the pin is never extracted, so it never runs.
+func TestEmbedded_ProvisionRejectsTamperedArchive(t *testing.T) {
+	sherpaTar, err := os.ReadFile(filepath.Join("testdata", "fake-sherpa.tar.bz2"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	kokoroTar, err := os.ReadFile(filepath.Join("testdata", "fake-kokoro.tar.bz2"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.Contains(r.URL.Path, "kokoro") {
+			_, _ = w.Write(kokoroTar)
+			return
+		}
+		_, _ = w.Write(append(append([]byte{}, sherpaTar...), 0)) // one byte off
+	}))
+	defer srv.Close()
+
+	root := t.TempDir()
+	e := newTestEmbedded(t, root)
+	e.binBaseURL = srv.URL + "/"
+	e.modelURL = srv.URL + "/kokoro.tar.bz2"
+	e.minBinBytes, e.minModelBytes = 16, 16
+	e.pins = pinFixtures(sherpaTar, kokoroTar)
+
+	_, err = e.Synthesize(context.Background(), "This must fail to provision.", "", "wav")
+	if err == nil || !strings.Contains(err.Error(), "checksum mismatch") {
+		t.Fatalf("tampered engine must be refused, got %v", err)
+	}
+	if _, statErr := os.Stat(filepath.Join(root, "sherpa-v"+sherpaVersion)); statErr == nil {
+		t.Fatal("nothing may be extracted from a tampered archive")
+	}
+}
+
+// The production pin table fails closed for an archive it does not list.
+func TestEmbedded_DefaultPinFailsClosed(t *testing.T) {
+	hits := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		hits++
+	}))
+	defer srv.Close()
+	e := newTestEmbedded(t, t.TempDir())
+	e.pins = provision.CompiledPins{}
+	e.binBaseURL = srv.URL + "/"
+	e.modelURL = srv.URL + "/not-in-table.tar.bz2"
+	if err := e.provisionPiece(context.Background(), e.modelURL, "not-in-table.tar.bz2", filepath.Join(t.TempDir(), "m"), 1, "model"); err == nil {
+		t.Fatal("an unpinned archive must not be provisioned")
+	}
+	if hits != 0 {
+		t.Fatal("an unpinned archive must not be requested")
+	}
+}
+
 func TestEmbedded_ProvisionRejectsUndersizedDownload(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte("short"))
@@ -243,9 +315,12 @@ func TestEmbedded_ProvisionRejectsUndersizedDownload(t *testing.T) {
 	e.binBaseURL = srv.URL + "/"
 	e.modelURL = srv.URL + "/kokoro.tar.bz2"
 	e.minBinBytes, e.minModelBytes = 1024, 1024
+	// Pinned to the short body itself, so the size floor is what refuses it.
+	e.pins = pinFixtures([]byte("short"), []byte("short"))
 
-	if _, err := e.Synthesize(context.Background(), "This must fail to provision.", "", "wav"); err == nil {
-		t.Fatal("undersized archives must fail provisioning")
+	_, err := e.Synthesize(context.Background(), "This must fail to provision.", "", "wav")
+	if err == nil || !strings.Contains(err.Error(), "too small") {
+		t.Fatalf("undersized archives must fail provisioning on the size floor, got %v", err)
 	}
 }
 

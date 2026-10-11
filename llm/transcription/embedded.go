@@ -38,6 +38,8 @@ import (
 const (
 	// whisperAssetBase hosts the Whisper ONNX exports that track the pinned
 	// sherpa-onnx release (provision.SherpaVersion); bump them together.
+	// asr-models is a rolling tag: every archive's SHA-256 is pinned in
+	// provision.PinnedSHA256, so a replaced asset fails verification.
 	whisperAssetBase = "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/"
 
 	// asrBinName is the recognition executable inside the engine tarball.
@@ -78,6 +80,9 @@ type embeddedWhisper struct {
 	modelBaseURL  string
 	minBinBytes   int64
 	minModelBytes int64
+	// pins resolves the expected SHA-256 of an archive by file name; the
+	// production default is the table compiled into provision.
+	pins provision.PinSource
 
 	once    sync.Once
 	paths   sttPaths
@@ -98,6 +103,7 @@ func NewEmbeddedWhisper(model string, logger *zap.Logger) *embeddedWhisper {
 		modelBaseURL:  whisperAssetBase,
 		minBinBytes:   minEngineBytes,
 		minModelBytes: minWhisperModelBytes,
+		pins:          provision.CompiledPins{},
 	}
 }
 
@@ -404,11 +410,11 @@ func (e *embeddedWhisper) provision(ctx context.Context) (sttPaths, error) {
 
 	engineDir := filepath.Join(root, "sherpa-v"+provision.SherpaVersion)
 	modelDir := filepath.Join(root, "whisper-"+e.size)
-	if err := e.provisionPiece(ctx, e.binBaseURL+asset, engineDir, e.minBinBytes, "engine (~25MB)"); err != nil {
+	if err := e.provisionPiece(ctx, e.binBaseURL+asset, asset, engineDir, e.minBinBytes, "engine (~25MB)"); err != nil {
 		return sttPaths{}, err
 	}
-	modelURL := e.modelBaseURL + "sherpa-onnx-whisper-" + e.size + ".tar.bz2"
-	if err := e.provisionPiece(ctx, modelURL, modelDir, e.minModelBytes, "whisper model ("+e.size+")"); err != nil {
+	modelArchive := "sherpa-onnx-whisper-" + e.size + ".tar.bz2"
+	if err := e.provisionPiece(ctx, e.modelBaseURL+modelArchive, modelArchive, modelDir, e.minModelBytes, "whisper model ("+e.size+")"); err != nil {
 		return sttPaths{}, err
 	}
 
@@ -434,13 +440,18 @@ func (e *embeddedWhisper) provision(ctx context.Context) (sttPaths, error) {
 }
 
 // provisionPiece downloads and extracts one archive unless its directory is
-// already in place from a previous (atomic) run.
-func (e *embeddedWhisper) provisionPiece(ctx context.Context, url, targetDir string, minBytes int64, what string) error {
+// already in place from a previous (atomic) run. The download must match
+// the SHA-256 pinned for pinName; without a pin nothing is fetched.
+func (e *embeddedWhisper) provisionPiece(ctx context.Context, url, pinName, targetDir string, minBytes int64, what string) error {
 	if fi, err := os.Stat(targetDir); err == nil && fi.IsDir() {
 		return nil
 	}
+	want, err := e.pins.PinnedSHA256(pinName)
+	if err != nil {
+		return fmt.Errorf("transcription: provision %s: %w", what, err)
+	}
 	e.logger.Info("transcription: downloading embedded "+what+" (one-time)", zap.String("url", url))
-	if err := provision.ProvisionArchive(ctx, url, targetDir, minBytes); err != nil {
+	if err := provision.ProvisionVerifiedArchive(ctx, url, want, targetDir, minBytes); err != nil {
 		return fmt.Errorf("transcription: provision %s: %w", what, err)
 	}
 	return nil

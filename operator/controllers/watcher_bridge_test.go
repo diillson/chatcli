@@ -278,6 +278,7 @@ func TestWatcherBridge_CreateAnomalyIdempotent(t *testing.T) {
 func TestWatcherBridge_ResolveServerAddress(t *testing.T) {
 	// No ready instances
 	wb := setupFakeWatcherBridge()
+	wb.SetAIOpsInstance(types.NamespacedName{Namespace: "chatcli-system", Name: "chatcli-prod"})
 	ctx := context.Background()
 
 	_, err := wb.ResolveServerAddress(ctx)
@@ -303,6 +304,10 @@ func TestWatcherBridge_ResolveServerAddress(t *testing.T) {
 		},
 	}
 	wb2 := setupFakeWatcherBridge(inst)
+	if _, err := wb2.ResolveServerAddress(ctx); err == nil {
+		t.Fatal("without a pin no Instance may be resolved, even a ready one")
+	}
+	wb2.SetAIOpsInstance(types.NamespacedName{Namespace: "chatcli-system", Name: "chatcli-prod"})
 
 	addr, err := wb2.ResolveServerAddress(ctx)
 	if err != nil {
@@ -329,6 +334,7 @@ func TestWatcherBridge_ResolveServerAddress_DefaultPort(t *testing.T) {
 		},
 	}
 	wb := setupFakeWatcherBridge(inst)
+	wb.SetAIOpsInstance(types.NamespacedName{Namespace: "default", Name: "chatcli"})
 	ctx := context.Background()
 
 	addr, err := wb.ResolveServerAddress(ctx)

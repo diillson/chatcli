@@ -211,6 +211,9 @@ func (s *Session) attachFreshTarget(ctx context.Context) error {
 			return fmt.Errorf("%s: %w", method, err)
 		}
 	}
+	if err := s.enableDocumentGuard(ctx, attached.SessionID); err != nil {
+		return fmt.Errorf("%s: %w", "Fetch.enable", err)
+	}
 	return nil
 }
 
@@ -268,6 +271,12 @@ func (s *Session) PageClosed() bool {
 
 // handleEvent routes CDP events into the capture rings and load waiters.
 func (s *Session) handleEvent(method string, params json.RawMessage, sessionID string) {
+	if method == "Fetch.requestPaused" {
+		// Answered for any session, including a tab the session switched
+		// away from: a paused request nobody answers hangs that tab.
+		go s.resolvePausedRequest(params, sessionID)
+		return
+	}
 	s.mu.Lock()
 	current := s.sessionID
 	s.mu.Unlock()
@@ -410,6 +419,9 @@ func (s *Session) appendConsole(e ConsoleEntry) {
 // Navigate loads url and waits for the load event (bounded — a page that
 // never fires load still returns with its current state).
 func (s *Session) Navigate(ctx context.Context, url string) (title, finalURL string, err error) {
+	if err := checkNavigation(url); err != nil {
+		return "", "", err
+	}
 	s.mu.Lock()
 	s.loadCh = make(chan struct{})
 	loadCh := s.loadCh

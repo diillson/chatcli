@@ -29,21 +29,6 @@ import (
 
 const issueFinalizerName = "platform.chatcli.io/issue-finalizer"
 
-// resolveInstanceProvider looks up the first ready Instance CR and returns its provider and model.
-// Falls back to empty strings if no ready Instance is found (the server will use its own defaults).
-func resolveInstanceProvider(ctx context.Context, c client.Client) (provider, model string) {
-	var instances platformv1alpha1.InstanceList
-	if err := c.List(ctx, &instances); err != nil {
-		return "", ""
-	}
-	for _, inst := range instances.Items {
-		if inst.Status.Ready {
-			return inst.Spec.Provider, inst.Spec.Model
-		}
-	}
-	return "", ""
-}
-
 var (
 	issuesTotal = prometheus.NewCounterVec(prometheus.CounterOpts{
 		Namespace: "chatcli",
@@ -130,6 +115,13 @@ type IssueReconciler struct {
 	// clusters and flags staging-to-production cascades. It must be the
 	// same instance the manager runs: it holds the remote client cache.
 	Federation *FederationReconciler
+	// AIOpsInstance is the pinned Instance (CHATCLI_OPERATOR_AIOPS_INSTANCE)
+	// whose AIOps settings, provider and model apply. Empty, the defaults do.
+	AIOpsInstance types.NamespacedName
+	// RemediationMode decides what happens once an Issue is analyzed:
+	// observe escalates it to a human without creating a plan; approve and
+	// auto create the plan, which the remediation reconciler gates.
+	RemediationMode RemediationMode
 }
 
 // +kubebuilder:rbac:groups=platform.chatcli.io,resources=issues,verbs=get;list;watch;create;update;patch;delete
@@ -220,7 +212,7 @@ func (r *IssueReconciler) handleDetected(ctx context.Context, issue *platformv1a
 		},
 	}
 
-	provider, model := resolveInstanceProvider(ctx, r.Client)
+	provider, model := resolveInstanceProvider(ctx, r.Client, r.AIOpsInstance)
 
 	// Early runbook matching — inject ALL candidates into AIInsight so the AI can choose
 	candidateRunbooks := r.findAllMatchingRunbooks(ctx, issue)
@@ -347,6 +339,12 @@ func (r *IssueReconciler) handleAnalyzing(ctx context.Context, issue *platformv1
 		return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
 	}
 
+	// In observe mode the analysis is the deliverable: no plan is created
+	// and a human takes the Issue from here.
+	if r.RemediationMode.effective() == RemediationModeObserve {
+		return r.escalateObserved(ctx, issue)
+	}
+
 	// 1. Find matching runbooks and check if AI validated one
 	var runbook *platformv1alpha1.Runbook
 	candidates := r.findAllMatchingRunbooks(ctx, issue)
@@ -462,6 +460,28 @@ func (r *IssueReconciler) handleAnalyzing(ctx context.Context, issue *platformv1
 	}
 
 	return ctrl.Result{RequeueAfter: 15 * time.Second}, nil
+}
+
+// escalateObserved hands an analyzed Issue to a human without creating a
+// plan: the operator runs in observe mode.
+func (r *IssueReconciler) escalateObserved(ctx context.Context, issue *platformv1alpha1.Issue) (ctrl.Result, error) {
+	log.FromContext(ctx).Info("Remediation mode is observe; escalating the analyzed Issue without a plan", "issue", issue.Name)
+	issue.Status.State = platformv1alpha1.IssueStateEscalated
+	meta.SetStatusCondition(&issue.Status.Conditions, metav1.Condition{
+		Type:   "Escalated",
+		Status: metav1.ConditionTrue,
+		Reason: "ObserveMode",
+		Message: fmt.Sprintf("Analysis complete; the operator runs in remediation mode %q and creates no plan. Set %s=approve to run plans after human approval.",
+			RemediationModeObserve, RemediationModeEnv),
+		LastTransitionTime: metav1.Now(),
+	})
+	issuesTotal.WithLabelValues(string(issue.Spec.Severity), string(platformv1alpha1.IssueStateEscalated)).Inc()
+	if r.AuditRecorder != nil {
+		if err := r.AuditRecorder.RecordIssueEscalated(ctx, issue); err != nil {
+			log.FromContext(ctx).Error(err, "Failed to record audit event for escalated issue")
+		}
+	}
+	return ctrl.Result{}, r.Status().Update(ctx, issue)
 }
 
 // handleRemediating processes an issue in the Remediating state.
@@ -1361,9 +1381,9 @@ func (r *IssueReconciler) invalidateDedup(issue *platformv1alpha1.Issue) {
 }
 
 // getMaxRemediationAttempts reads the max attempts from the AIOps settings
-// of the Instance the WatcherBridge uses (see aiopsInstance).
+// of the pinned Instance (see aiopsInstance).
 func (r *IssueReconciler) getMaxRemediationAttempts(ctx context.Context) int32 {
-	if inst := aiopsInstance(ctx, r.Client, nil); inst != nil {
+	if inst := aiopsInstance(ctx, r.Client, r.AIOpsInstance); inst != nil {
 		return inst.Spec.AIOps.GetMaxRemediationAttempts()
 	}
 	return 5 // default
@@ -1378,10 +1398,10 @@ func (r *IssueReconciler) getAgenticMaxSteps(ctx context.Context) int32 {
 	return 10 // default
 }
 
-// getAIOpsConfig reads the AIOps settings of the Instance the WatcherBridge
-// uses (see aiopsInstance), not an arbitrary first Instance.
+// getAIOpsConfig reads the AIOps settings of the pinned Instance (see
+// aiopsInstance), never of an arbitrary Instance.
 func (r *IssueReconciler) getAIOpsConfig(ctx context.Context) *platformv1alpha1.AIOpsSpec {
-	return aiopsSpecFor(ctx, r.Client, nil)
+	return aiopsSpecFor(ctx, r.Client, r.AIOpsInstance)
 }
 
 // createAgenticRemediationPlan creates a RemediationPlan in agentic mode (AI-driven step-by-step).

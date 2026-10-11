@@ -43,9 +43,13 @@ func TestParseTelegramUpdates_NotOK(t *testing.T) {
 }
 
 func TestTelegramPermitted(t *testing.T) {
-	open := NewTelegramAdapter("tok", nil, zap.NewNop())
-	if !open.permitted("anyone") {
-		t.Error("empty allowlist should permit all")
+	// Fail closed: an empty allowlist admits nobody (and refuses to start).
+	if NewTelegramAdapter("tok", nil, zap.NewNop()).permitted("anyone") {
+		t.Error("an empty allowlist must permit nobody")
+	}
+	// The explicit public entry admits everyone.
+	if !NewTelegramAdapter("tok", []string{"*"}, zap.NewNop()).permitted("anyone") {
+		t.Error("\"*\" must permit everyone")
 	}
 	gated := NewTelegramAdapter("tok", []string{"7"}, zap.NewNop())
 	if !gated.permitted("7") || gated.permitted("8") {
@@ -87,7 +91,7 @@ func TestTelegramPollViaHTTPTest(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	a := NewTelegramAdapter("tok", nil, zap.NewNop())
+	a := NewTelegramAdapter("tok", []string{"2"}, zap.NewNop())
 	a.baseURL = srv.URL
 	msgs, maxID, err := a.poll(context.Background())
 	if err != nil {

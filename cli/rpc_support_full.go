@@ -165,13 +165,22 @@ func (cli *ChatCLI) RunAnyRPCTool(ctx context.Context, name, args string) (strin
 	if parseErr != nil {
 		return "", fmt.Errorf("invalid args for %q: %w", name, parseErr)
 	}
-	return cli.RunAnyRPCToolArgv(ctx, name, argv)
+	// The policy sees the raw args, the same shape the agent loop checks.
+	return cli.runRPCTool(ctx, name, argv, args)
 }
 
 // RunAnyRPCToolArgv is the argv-native entry: callers that already hold a
 // real argv (the `chatcli tool` subcommand) pass it verbatim — joining and
 // re-splitting would corrupt values containing whitespace.
 func (cli *ChatCLI) RunAnyRPCToolArgv(ctx context.Context, name string, argv []string) (string, error) {
+	return cli.runRPCTool(ctx, name, argv, strings.Join(argv, " "))
+}
+
+// runRPCTool executes one RPC tool call after the exposure policy and the
+// coder security policy (policyArgs is what the policy matches against)
+// admit it. Nobody can answer a prompt on these surfaces, so a policy "ask"
+// is refused unless the session is in policy automode.
+func (cli *ChatCLI) runRPCTool(ctx context.Context, name string, argv []string, policyArgs string) (string, error) {
 	if cli.pluginManager == nil {
 		return "", fmt.Errorf("plugins not available")
 	}
@@ -183,6 +192,9 @@ func (cli *ChatCLI) RunAnyRPCToolArgv(ctx context.Context, name string, argv []s
 	mode, allow := rpcToolPolicy()
 	if !rpcToolAllowed(p, mode, allow) {
 		return "", fmt.Errorf("tool %q is not exposed under the current CHATCLI_MCP_TOOLS policy (%s)", name, mode)
+	}
+	if err := cli.rpcToolPolicyGate(p.Name(), policyArgs); err != nil {
+		return "", err
 	}
 
 	// Capture stdout for the duration: plugins that print progress would

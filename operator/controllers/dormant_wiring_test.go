@@ -180,10 +180,24 @@ func TestRemediation_DecisionEngineParksAndAnnotates(t *testing.T) {
 		t.Fatalf("auto-notify verdict not annotated: %v", p.Annotations)
 	}
 
+	// Engine off, approve mode (the default): nothing allowed the plan, so
+	// it waits for a human under the remediation-mode policy.
 	r, c = mk(platformv1alpha1.IssueSeverityCritical, 0.99, false)
 	reconcile(r)
+	if p = load(c); p.Status.State != platformv1alpha1.RemediationStateWaitingApproval {
+		t.Fatalf("engine off in approve mode must park the plan: state=%s", p.Status.State)
+	}
+	var modeAR platformv1alpha1.ApprovalRequest
+	if err := c.Get(ctx, types.NamespacedName{Name: "approval-plan-1", Namespace: "default"}, &modeAR); err != nil || modeAR.Spec.PolicyRef != RemediationModePolicyName {
+		t.Fatalf("remediation-mode request = %+v (err=%v)", modeAR.Spec, err)
+	}
+
+	// Engine off, auto mode: the plan runs untouched.
+	r, c = mk(platformv1alpha1.IssueSeverityCritical, 0.99, false)
+	r.RemediationMode = RemediationModeAuto
+	reconcile(r)
 	if p = load(c); p.Status.State != platformv1alpha1.RemediationStateExecuting || p.Annotations[annotationDecisionMode] != "" {
-		t.Fatalf("engine off must leave the plan alone: state=%s ann=%v", p.Status.State, p.Annotations)
+		t.Fatalf("engine off in auto mode must leave the plan alone: state=%s ann=%v", p.Status.State, p.Annotations)
 	}
 }
 
@@ -301,6 +315,7 @@ func TestAudit_SLABreachAndNotificationAreRecorded(t *testing.T) {
 // no registration (fail closed; it used to proceed on policies alone).
 func TestRemediation_ClusterTierGate(t *testing.T) {
 	ctx := context.Background()
+	mode := RemediationModeAuto
 	run := func(tier, clusterName string) (platformv1alpha1.RemediationPlan, client.Client) {
 		t.Helper()
 		issue := newIssue("test-issue", "default")
@@ -314,7 +329,7 @@ func TestRemediation_ClusterTierGate(t *testing.T) {
 		c := fake.NewClientBuilder().WithScheme(newScheme()).WithStatusSubresource(
 			&platformv1alpha1.RemediationPlan{}, &platformv1alpha1.Issue{}, &platformv1alpha1.ApprovalRequest{}, &platformv1alpha1.ClusterRegistration{},
 		).WithObjects(issue, plan, reg, newDeployment("web", "default", 2)).Build()
-		r := &RemediationReconciler{Client: c, Scheme: newScheme(), ClusterTier: clusterName, Federation: &FederationReconciler{Client: c, Scheme: newScheme()}}
+		r := &RemediationReconciler{Client: c, Scheme: newScheme(), ClusterTier: clusterName, Federation: &FederationReconciler{Client: c, Scheme: newScheme()}, RemediationMode: mode}
 		if _, err := r.Reconcile(ctx, ctrl.Request{NamespacedName: types.NamespacedName{Name: "plan-1", Namespace: "default"}}); err != nil {
 			t.Fatal(err)
 		}
@@ -334,8 +349,18 @@ func TestRemediation_ClusterTierGate(t *testing.T) {
 		t.Fatalf("cluster-tier request = %+v (err=%v)", ar.Spec, err)
 	}
 	if p, _ = run("non-critical", "prod-east"); p.Status.State != platformv1alpha1.RemediationStateExecuting {
-		t.Fatalf("non-critical tier: state=%s", p.Status.State)
+		t.Fatalf("non-critical tier in auto mode: state=%s", p.Status.State)
 	}
+	// A tier that waives approval is not an allow in approve mode: the
+	// registration it comes from is not authenticated.
+	mode = RemediationModeApprove
+	if p, c = run("non-critical", "prod-east"); p.Status.State != platformv1alpha1.RemediationStateWaitingApproval {
+		t.Fatalf("non-critical tier in approve mode: state=%s", p.Status.State)
+	}
+	if err := c.Get(ctx, types.NamespacedName{Name: "approval-plan-1", Namespace: "default"}, &ar); err != nil || ar.Spec.PolicyRef != RemediationModePolicyName {
+		t.Fatalf("non-critical tier in approve mode request = %+v (err=%v)", ar.Spec, err)
+	}
+	mode = RemediationModeAuto
 	p, c = run("critical", "somewhere-else")
 	if p.Status.State != platformv1alpha1.RemediationStateWaitingApproval || !strings.Contains(p.Status.Result, `"somewhere-else"`) || !strings.Contains(p.Status.Result, "not registered") {
 		t.Fatalf("unregistered cluster name must park the plan: state=%s result=%q", p.Status.State, p.Status.Result)

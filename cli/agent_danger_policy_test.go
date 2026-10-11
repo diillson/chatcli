@@ -22,16 +22,23 @@ func TestDangerBlocked_PolicyMatrix(t *testing.T) {
 		name        string
 		unattended  bool
 		dangerBlock bool
+		autoMode    bool
 		want        bool
 	}{
-		{"attended sem policy", false, false, false},
-		{"attended com policy", false, true, false},
-		{"unattended sem policy (gateway)", true, false, false},
-		{"unattended com policy (mcp block)", true, true, true},
+		{"attended sem policy", false, false, false, false},
+		{"attended com policy", false, true, false, false},
+		// Nobody to confirm and no operator opt-in: declined.
+		{"unattended sem policy sem automode (gateway default)", true, false, false, true},
+		{"unattended com policy (mcp block)", true, true, false, true},
+		// Operator opted into automode: the confirmation auto-approves...
+		{"unattended automode", true, false, true, false},
+		// ...unless CHATCLI_MCP_DANGER=block re-arms the gate.
+		{"unattended automode com policy block", true, true, true, true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			c := &ChatCLI{unattended: tc.unattended, dangerBlock: tc.dangerBlock}
+			c.policyAutoMode.Store(tc.autoMode)
 			a := NewAgentMode(c, logger)
 			if got := a.dangerBlocked(); got != tc.want {
 				t.Fatalf("dangerBlocked() = %v, want %v", got, tc.want)
@@ -42,6 +49,9 @@ func TestDangerBlocked_PolicyMatrix(t *testing.T) {
 
 func TestSetRPCDangerPolicy(t *testing.T) {
 	c := &ChatCLI{unattended: true}
+	// The block policy only changes the outcome under the automode opt-in;
+	// without it the unattended gate is always armed.
+	c.policyAutoMode.Store(true)
 	c.SetRPCDangerPolicy(true)
 	a := NewAgentMode(c, zap.NewNop())
 	if !a.dangerBlocked() {

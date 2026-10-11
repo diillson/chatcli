@@ -6,6 +6,7 @@
 package controllers
 
 import (
+	"os"
 	"regexp"
 	"strings"
 	"sync"
@@ -91,6 +92,12 @@ func NewLogScrubber(additionalPatterns string) *LogScrubber {
 	}
 
 	return ls
+}
+
+// scrubForLLM redacts sensitive data from text bound for the LLM with the
+// default patterns plus the operator's CHATCLI_LOG_SCRUB_PATTERNS.
+func scrubForLLM(text string) string {
+	return NewLogScrubber(os.Getenv("CHATCLI_LOG_SCRUB_PATTERNS")).ScrubText(text)
 }
 
 // ScrubText replaces all sensitive data in the text with [REDACTED:type] markers.
