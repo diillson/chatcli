@@ -10,6 +10,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
@@ -61,6 +62,9 @@ type AnomalyReconciler struct {
 	Scheme            *runtime.Scheme
 	CorrelationEngine *CorrelationEngine
 	NoiseReducer      *NoiseReducer // Suppresses repetitive/seasonal/flapping anomalies
+	// AIOpsInstance is the pinned Instance (CHATCLI_OPERATOR_AIOPS_INSTANCE)
+	// whose AIOps settings apply. Empty, the defaults do.
+	AIOpsInstance types.NamespacedName
 }
 
 // +kubebuilder:rbac:groups=platform.chatcli.io,resources=anomalies,verbs=get;list;watch;create;update;patch;delete
@@ -123,7 +127,7 @@ func (r *AnomalyReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	// Cooldown: check if same resource was recently resolved (suppress stale
 	// re-triggers). resolutionCooldownMinutes 0 turns the check off.
 	var recentlyResolved *platformv1alpha1.Issue
-	if resolutionCooldown := r.getResolutionCooldown(ctx, anomaly.Labels); resolutionCooldown > 0 {
+	if resolutionCooldown := r.getResolutionCooldown(ctx); resolutionCooldown > 0 {
 		recentlyResolved, err = r.CorrelationEngine.FindRecentlyResolvedIssue(ctx, resource, resolutionCooldown)
 		if err != nil {
 			log.Error(err, "Failed to check recently resolved issues")
@@ -245,9 +249,10 @@ func (r *AnomalyReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 }
 
 // getResolutionCooldown reads the cooldown from the AIOps settings of the
-// Instance the anomaly came from (see aiopsInstance).
-func (r *AnomalyReconciler) getResolutionCooldown(ctx context.Context, labels map[string]string) time.Duration {
-	if inst := aiopsInstance(ctx, r.Client, labels); inst != nil {
+// pinned Instance (see aiopsInstance). The anomaly's source labels are not
+// trusted to pick another Instance.
+func (r *AnomalyReconciler) getResolutionCooldown(ctx context.Context) time.Duration {
+	if inst := aiopsInstance(ctx, r.Client, r.AIOpsInstance); inst != nil {
 		return inst.Spec.AIOps.GetResolutionCooldown()
 	}
 	return 10 * time.Minute // default

@@ -47,7 +47,7 @@ const (
 // IsSyntheticApprovalPolicy reports whether a policy name is one the
 // operator raises on its own rather than an ApprovalPolicy object.
 func IsSyntheticApprovalPolicy(name string) bool {
-	return name == DecisionEnginePolicyName || name == ClusterTierPolicyName
+	return name == DecisionEnginePolicyName || name == ClusterTierPolicyName || name == RemediationModePolicyName
 }
 
 // SyntheticApprovalPolicy returns the stand-in policy object for a

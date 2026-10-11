@@ -35,7 +35,8 @@ func setupPipelineReconcilers(objs ...client.Object) (*AnomalyReconciler, *Issue
 		CorrelationEngine: NewCorrelationEngine(c),
 	}
 	issueR := &IssueReconciler{Client: c, Scheme: s}
-	remediationR := &RemediationReconciler{Client: c, Scheme: s}
+	// Auto: the pipeline runs end to end without a human.
+	remediationR := &RemediationReconciler{Client: c, Scheme: s, RemediationMode: RemediationModeAuto}
 
 	return anomalyR, issueR, remediationR, c
 }

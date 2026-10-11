@@ -70,6 +70,7 @@ func TestAnomaly_ZeroCooldownDisablesSuppression(t *testing.T) {
 	resolved.Status.ResolvedAt = &now
 	anomaly := newAnomaly("fresh", "default", platformv1alpha1.SignalErrorRate, res)
 	r, c := setupFakeAnomalyReconciler(inst, resolved, anomaly)
+	r.AIOpsInstance = types.NamespacedName{Namespace: "default", Name: "main"}
 	if _, err := r.Reconcile(context.Background(), ctrl.Request{NamespacedName: types.NamespacedName{Name: "fresh", Namespace: "default"}}); err != nil {
 		t.Fatal(err)
 	}
@@ -82,23 +83,46 @@ func TestAnomaly_ZeroCooldownDisablesSuppression(t *testing.T) {
 	}
 }
 
-// The AIOps settings come from the Instance an object names, else the
-// Instance the WatcherBridge connects to (first Ready), not Items[0].
+// The AIOps settings, provider and model come from the pinned Instance
+// only: never from the first Ready one, and never from an Instance the
+// object's (forgeable) source labels name.
 func TestAIOpsInstanceSelection(t *testing.T) {
-	notReady := newInstance("aaa-not-ready", "default")
-	ready := newInstance("zzz-ready", "default")
-	ready.Status.Ready = true
-	c := fake.NewClientBuilder().WithScheme(newScheme()).WithObjects(notReady, ready).Build()
+	pinned := newInstance("aiops", "ops")
+	pinned.Spec.Provider = "OPENAI"
+	other := newInstance("rogue", "tenant")
+	other.Status.Ready = true
+	other.Spec.Provider = "ROGUE"
+	c := fake.NewClientBuilder().WithScheme(newScheme()).WithObjects(pinned, other).Build()
 	ctx := context.Background()
-	if got := aiopsInstance(ctx, c, nil); got == nil || got.Name != "zzz-ready" {
-		t.Fatalf("default selection = %v, want the Ready Instance", got)
+	pin := types.NamespacedName{Namespace: "ops", Name: "aiops"}
+	if got := aiopsInstance(ctx, c, pin); got == nil || got.Name != "aiops" {
+		t.Fatalf("pinned selection = %v, want ops/aiops", got)
 	}
-	labels := map[string]string{labelSourceInstance: "aaa-not-ready", labelSourceInstanceNamespace: "default"}
-	if got := aiopsInstance(ctx, c, labels); got == nil || got.Name != "aaa-not-ready" {
-		t.Fatalf("labeled selection = %v, want the named Instance", got)
+	if got := aiopsInstance(ctx, c, types.NamespacedName{}); got != nil {
+		t.Fatalf("without a pin nothing is selected, got %s/%s", got.Namespace, got.Name)
 	}
-	if got := aiopsInstance(ctx, fake.NewClientBuilder().WithScheme(newScheme()).Build(), nil); got != nil {
-		t.Fatalf("no Instance must select nothing, got %v", got)
+	if p, _ := resolveInstanceProvider(ctx, c, types.NamespacedName{}); p != "" {
+		t.Fatalf("provider without a pin = %q, want empty (server default), never the Ready rogue Instance", p)
+	}
+	if p, _ := resolveInstanceProvider(ctx, c, pin); p != "OPENAI" {
+		t.Fatalf("provider = %q, want the pinned Instance's", p)
+	}
+	if got := aiopsInstance(ctx, c, types.NamespacedName{Namespace: "ops", Name: "missing"}); got != nil {
+		t.Fatalf("a missing pinned Instance must select nothing, got %v", got)
+	}
+}
+
+func TestParseAIOpsInstancePin(t *testing.T) {
+	if pin, err := ParseAIOpsInstancePin(""); err != nil || pin.Name != "" {
+		t.Fatalf("empty = %v, %v; want no pin and no error", pin, err)
+	}
+	if pin, err := ParseAIOpsInstancePin(" ops/aiops "); err != nil || pin.Namespace != "ops" || pin.Name != "aiops" {
+		t.Fatalf("ops/aiops = %v, %v", pin, err)
+	}
+	for _, bad := range []string{"aiops", "/aiops", "ops/", "ops/a/b", "Ops/aiops", "ops/AI_OPS"} {
+		if _, err := ParseAIOpsInstancePin(bad); err == nil {
+			t.Errorf("%q must be refused", bad)
+		}
 	}
 }
 

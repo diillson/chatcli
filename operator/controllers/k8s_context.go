@@ -102,7 +102,11 @@ func (b *KubernetesContextBuilder) BuildContext(ctx context.Context, resource pl
 		sb.WriteString(hpaCtx)
 	}
 
-	result := sb.String()
+	// Logs, events and container specs carry whatever the workload printed
+	// or was configured with. They are scrubbed here, where every caller
+	// (the AIInsight analysis and each agentic step) gets them, before
+	// anything leaves for the LLM.
+	result := scrubForLLM(sb.String())
 	if len(result) > maxContextChars {
 		result = result[:maxContextChars-3] + "..."
 	}

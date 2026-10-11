@@ -432,6 +432,34 @@
         }
       }
     },
+    "aiops": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "instance": {
+          "type": "object",
+          "description": "The single Instance (namespace and name) whose server drives the AIOps pipeline. Empty, the AIOps bridge stays disconnected.",
+          "additionalProperties": false,
+          "properties": {
+            "namespace": {
+              "type": "string"
+            },
+            "name": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    "remediationMode": {
+      "type": "string",
+      "enum": [
+        "observe",
+        "approve",
+        "auto"
+      ],
+      "description": "observe: analyze and escalate, never run a plan. approve (default): run only plans an ApprovalPolicy auto rule or the decision engine allows; everything else and every high-risk action waits for a human. auto: run every ungated plan."
+    },
     "clusterName": {
       "type": "string",
       "description": "This cluster's ClusterRegistration name; its tier decides which severities wait for a human. A name no registration carries sends every plan to manual approval."

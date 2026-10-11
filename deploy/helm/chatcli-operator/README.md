@@ -236,8 +236,16 @@ The chart also sets `CHATCLI_OPERATOR_APP_VERSION` to the chart `appVersion`: In
 |-----------|-------------|---------|
 | `alertTransport` | How alerts arrive from the server: `stream` (StreamAlerts, falls back to polling while the server lacks the RPC) or `poll` (GetAlerts every 30s) | `stream` |
 | `decisionEngine.enabled` | Adjust AI confidence by history, patterns, time of day, concurrent issues and severity before a plan runs; 3 failed remediations in a namespace within an hour trip a circuit breaker | `false` |
+| `aiops.instance.namespace`, `aiops.instance.name` | The single Instance whose server drives the AIOps pipeline (`CHATCLI_OPERATOR_AIOPS_INSTANCE`). Empty, the AIOps bridge stays disconnected; alerts outside the Instance's watch-target namespaces are dropped | `""` |
+| `remediationMode` | `observe` (analyze and escalate, never run a plan), `approve` (run only plans an ApprovalPolicy auto rule or the decision engine allows; everything else, and every high-risk action, waits for a human; agentic plans are approved step by step) or `auto` (run every ungated plan) (`CHATCLI_OPERATOR_REMEDIATION_MODE`) | `approve` |
 | `clusterName` | Name of this cluster's `ClusterRegistration`; its tier decides which severities wait for a human. A name no registration carries sends every plan to manual approval | `""` |
 | `prometheusUrl` | Prometheus URL queried for CPU/memory/latency/error-rate trends during analysis | `""` |
+
+The AIOps bridge connects only to the Instance named by `aiops.instance`: whoever creates an Instance chooses its image, so the operator never adopts one on its own. In `approve` mode an approved plan runs exactly the actions its `ApprovalRequest` lists; an agentic plan raises one request per step (`approval-<plan>-step-<n>`) naming that step's action, and the step runs only once that request is approved. Node actions (`CordonNode`, `UncordonNode`, `DrainNode`, `CordonAndDeleteDaemonSetPod`) must target a node that runs a pod of the Issue's workload (or the Issue's own node).
+
+#### Federation kubeconfig Secrets
+
+A `ClusterRegistration`'s `kubeconfigSecretRef` is resolved in the operator's namespace, never in the registration's, and the Secret must name the registration in its `platform.chatcli.io/cluster-registration` annotation (`<namespace>/<name>`, comma-separated for several). The kubeconfig may carry inline credentials only: `token`, `client-certificate-data`, `client-key-data` and `certificate-authority-data`, with an `https` server. `exec`, `auth-provider`, `tokenFile`, file paths for certificates and keys, basic auth, `proxy-url` and `insecure-skip-tls-verify` are refused, in every cluster and user of the file.
 
 ### API & ports
 

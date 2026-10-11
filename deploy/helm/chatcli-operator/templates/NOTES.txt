@@ -48,6 +48,20 @@ A. EVERY INSTANCE NEEDS A CREDENTIAL AND TLS
 
        kubectl get instance <name> -n <namespace> -o jsonpath='{range .status.conditions[*]}{.type}={.status} {.reason}{"\n"}{end}'
 
+{{- if not (and .Values.aiops.instance.namespace .Values.aiops.instance.name) }}
+
+   AIOPS INSTANCE NOT PINNED: the AIOps bridge stays disconnected (no alerts,
+   analyses or remediations) until you name the Instance it may trust:
+
+       --set aiops.instance.namespace=<namespace> --set aiops.instance.name=<instance>
+{{- end }}
+
+   Remediation mode: {{ .Values.remediationMode | default "approve" }}.
+{{- if eq (.Values.remediationMode | default "approve") "auto" }}
+   Every plan no ApprovalPolicy, cluster tier or decision engine parks runs
+   without a human, high-risk actions included.
+{{- end }}
+
 B. DASHBOARD / REST API KEYS
 {{- if .Values.security.devMode }}
    security.devMode=true: the REST API accepts unauthenticated calls as admin

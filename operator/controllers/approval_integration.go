@@ -129,9 +129,42 @@ func CreateApprovalRequest(
 	policy *platformv1alpha1.ApprovalPolicy,
 	rule *platformv1alpha1.ApprovalRule,
 ) error {
+	return raiseApprovalRequest(ctx, c, scheme, approvalTarget{
+		plan: plan, issue: issue, insight: insight, policy: policy, rule: rule,
+		name: approvalRequestName(plan), actions: plan.Spec.Actions,
+	})
+}
+
+// approvalRequestName is the request a whole plan waits on.
+func approvalRequestName(plan *platformv1alpha1.RemediationPlan) string {
+	return fmt.Sprintf("approval-%s", plan.Name)
+}
+
+// approvalTarget is what one ApprovalRequest asks a human to decide: the
+// plan it belongs to, the actions it would run and the rule that applies.
+// A whole plan asks for its actions; one agentic step asks for the single
+// action the AI proposed, under its own name.
+type approvalTarget struct {
+	plan    *platformv1alpha1.RemediationPlan
+	issue   *platformv1alpha1.Issue
+	insight *platformv1alpha1.AIInsight
+	policy  *platformv1alpha1.ApprovalPolicy
+	rule    *platformv1alpha1.ApprovalRule
+	name    string
+	actions []platformv1alpha1.RemediationAction
+	labels  map[string]string
+	// planAnnotations are set on the plan in the same write that marks it
+	// as waiting on the request.
+	planAnnotations map[string]string
+}
+
+// raiseApprovalRequest raises the ApprovalRequest for t and marks the plan
+// as waiting on it.
+func raiseApprovalRequest(ctx context.Context, c client.Client, scheme *runtime.Scheme, t approvalTarget) error {
+	plan, issue, insight, policy, rule := t.plan, t.issue, t.insight, t.policy, t.rule
 
 	// Calculate blast radius
-	blastRadius, err := CalculateBlastRadius(ctx, c, issue.Spec.Resource, plan.Spec.Actions)
+	blastRadius, err := CalculateBlastRadius(ctx, c, issue.Spec.Resource, t.actions)
 	if err != nil {
 		// Non-fatal: proceed without blast radius
 		blastRadius = &platformv1alpha1.BlastRadiusAssessment{
@@ -141,24 +174,33 @@ func CreateApprovalRequest(
 	}
 
 	// Calculate historical success rate
-	successRate, previousAttempts := calculateHistoricalSuccessRateForPlan(ctx, c, plan)
+	historyPlan := plan
+	if len(plan.Spec.Actions) == 0 && len(t.actions) > 0 {
+		historyPlan = plan.DeepCopy()
+		historyPlan.Spec.Actions = t.actions
+	}
+	successRate, previousAttempts := calculateHistoricalSuccessRateForPlan(ctx, c, historyPlan)
 
+	labels := map[string]string{
+		"platform.chatcli.io/issue":            issue.Name,
+		"platform.chatcli.io/remediation-plan": plan.Name,
+		"platform.chatcli.io/policy":           policy.Name,
+	}
+	for k, v := range t.labels {
+		labels[k] = v
+	}
 	ar := &platformv1alpha1.ApprovalRequest{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      fmt.Sprintf("approval-%s", plan.Name),
+			Name:      t.name,
 			Namespace: plan.Namespace,
-			Labels: map[string]string{
-				"platform.chatcli.io/issue":            issue.Name,
-				"platform.chatcli.io/remediation-plan": plan.Name,
-				"platform.chatcli.io/policy":           policy.Name,
-			},
+			Labels:    labels,
 		},
 		Spec: platformv1alpha1.ApprovalRequestSpec{
 			IssueRef:           plan.Spec.IssueRef,
 			RemediationPlanRef: plan.Name,
 			PolicyRef:          policy.Name,
 			RuleName:           rule.Name,
-			RequestedActions:   plan.Spec.Actions,
+			RequestedActions:   t.actions,
 			Requester:          "chatcli-operator",
 			BlastRadius:        blastRadius,
 			Evidence: &platformv1alpha1.ApprovalEvidence{
@@ -205,6 +247,9 @@ func CreateApprovalRequest(
 		annotations = make(map[string]string)
 	}
 	annotations[annotationApprovalPending] = ar.Name
+	for k, v := range t.planAnnotations {
+		annotations[k] = v
+	}
 	plan.SetAnnotations(annotations)
 	if err := c.Patch(ctx, plan, client.MergeFrom(base)); err != nil {
 		return fmt.Errorf("annotating remediation plan: %w", err)

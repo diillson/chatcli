@@ -62,6 +62,19 @@ spec:
             # lockstep with the operator image by release-please.
             - name: CHATCLI_OPERATOR_APP_VERSION
               value: "1.215.1" # x-release-please-version
+            # Federation reads kubeconfig Secrets only from this namespace.
+            - name: POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+            # observe | approve | auto. approve parks every plan no
+            # ApprovalPolicy auto rule or decision engine allows.
+            - name: CHATCLI_OPERATOR_REMEDIATION_MODE
+              value: approve
+            # The single Instance whose server drives the AIOps pipeline, as
+            # namespace/name. Unset, the AIOps bridge stays disconnected.
+            # - name: CHATCLI_OPERATOR_AIOPS_INSTANCE
+            #   value: chatcli-system/aiops
           ports:
             - containerPort: 8080
               name: metrics
