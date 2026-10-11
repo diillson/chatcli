@@ -8,6 +8,7 @@
 package auth
 
 import (
+	"errors"
 	"fmt"
 	"syscall"
 	"unsafe"
@@ -29,7 +30,7 @@ var (
 	procCredWriteW    = advapi32.NewProc("CredWriteW")
 	procCredDeleteW   = advapi32.NewProc("CredDeleteW")
 	procCredFree      = advapi32.NewProc("CredFree")
-	errCredentialGone = fmt.Errorf("credential not found")
+	errCredentialGone = fmt.Errorf("credential not found: %w", errKeychainItemNotFound)
 )
 
 const (
@@ -87,6 +88,12 @@ func platformGet(account string) ([]byte, error) {
 		uintptr(unsafe.Pointer(&cred)),
 	)
 	if ret == 0 {
+		// ERROR_NOT_FOUND is the one answer that means "no such credential";
+		// anything else is the Credential Manager failing, and must not be
+		// mistaken for an empty store.
+		if errors.Is(callErr, windows.ERROR_NOT_FOUND) {
+			return nil, errCredentialGone
+		}
 		return nil, fmt.Errorf("credential read failed: %w", callErr)
 	}
 	defer procCredFree.Call(uintptr(unsafe.Pointer(cred))) //nolint:errcheck // CredFree has no failure mode worth handling

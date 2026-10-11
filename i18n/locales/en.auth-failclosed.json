@@ -1,0 +1,6 @@
+{
+  "auth.keychain.unreadable": "the OS keychain could not be read, so no new credential key was created and the stored credentials were left untouched. Unlock the keychain (or allow chatcli to access it) and retry; on a machine with no usable keychain, set %s=file",
+  "auth.keyfile.invalid": "the credential key file %s could not be used and was left untouched. Restore it, or move it aside to create a new key and log in again",
+  "auth.keyfile.bad_length": "it holds %d bytes, a key is 32",
+  "auth.store.locked": "the credential store %s could not be opened, so it is read-only and nothing was written to it. Restore the key that encrypted it (unlock the OS keychain, or restore %s; %s selects the backend) and restart; to start over instead, move the file aside and log in again"
+}

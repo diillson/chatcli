@@ -1,0 +1,6 @@
+{
+  "auth.keychain.unreadable": "o keychain do sistema não pôde ser lido, então nenhuma chave nova de credenciais foi criada e as credenciais guardadas não foram tocadas. Desbloqueie o keychain (ou permita o acesso do chatcli a ele) e tente de novo; numa máquina sem keychain utilizável, defina %s=file",
+  "auth.keyfile.invalid": "o arquivo de chave de credenciais %s não pôde ser usado e não foi alterado. Restaure-o, ou mova-o para outro lugar para criar uma chave nova e faça login de novo",
+  "auth.keyfile.bad_length": "ele tem %d bytes, uma chave tem 32",
+  "auth.store.locked": "o armazenamento de credenciais %s não pôde ser aberto, então está somente leitura e nada foi gravado nele. Restaure a chave que o cifrou (desbloqueie o keychain do sistema, ou restaure %s; %s escolhe o backend) e reinicie; para recomeçar, mova o arquivo para outro lugar e faça login de novo"
+}
