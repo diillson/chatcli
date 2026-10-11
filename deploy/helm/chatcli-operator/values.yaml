@@ -129,6 +129,35 @@ alertTransport: stream
 decisionEngine:
   enabled: false
 
+# The single Instance whose ChatCLI server drives the AIOps pipeline
+# (CHATCLI_OPERATOR_AIOPS_INSTANCE). Its alerts become Anomalies and Issues,
+# it writes the AI analyses and proposes the agentic remediation steps, all
+# carried out with the operator's cluster-wide permissions. Whoever creates
+# an Instance chooses its image, so the operator never picks one on its own:
+# with no Instance named here the AIOps bridge stays disconnected (and logs
+# what to set). Alerts are accepted only for the namespaces the pinned
+# Instance's spec.watcher declares (its targets, or the legacy namespace).
+# Set both fields, e.g. namespace: chatcli-system, name: aiops.
+aiops:
+  instance:
+    namespace: ""
+    name: ""
+
+# How much the operator may act on its own (CHATCLI_OPERATOR_REMEDIATION_MODE):
+#   observe  analyze Issues and escalate them to a human; no plan is created
+#            and no plan ever runs.
+#   approve  (default) a plan runs only when an ApprovalPolicy auto rule or
+#            the decision engine allows it; every other plan, and every
+#            high-risk action (node cordon/drain, Secret rotation, manifest
+#            apply, Ingress and NetworkPolicy changes, custom actions), waits
+#            in WaitingApproval for a human through an ApprovalRequest.
+#            Agentic plans are gated step by step: each step the AI proposes
+#            is approved on its own, with its concrete action.
+#   auto     run every plan that no ApprovalPolicy, cluster tier or decision
+#            engine parks, high-risk actions included. The behavior of
+#            earlier releases; choose it only deliberately.
+remediationMode: approve
+
 # Name of this cluster's ClusterRegistration. When set, the registration's
 # tier decides which severities wait for a human: critical clusters always,
 # standard clusters for critical and high, non-critical clusters never. A

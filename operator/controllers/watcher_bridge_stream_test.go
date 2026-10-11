@@ -16,6 +16,7 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	platformv1alpha1 "github.com/diillson/chatcli/operator/api/v1alpha1"
@@ -82,15 +83,29 @@ func alertFixture(object, deployment string) *pb.WatcherAlert {
 	}
 }
 
+// pinnedWatcherInstance is a Ready Instance whose watcher targets the given
+// namespaces.
+func pinnedWatcherInstance(name, ns string, watched ...string) *platformv1alpha1.Instance {
+	inst := &platformv1alpha1.Instance{ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: ns}}
+	inst.Status.Ready = true
+	inst.Spec.Watcher = &platformv1alpha1.WatcherSpec{Enabled: true}
+	for _, w := range watched {
+		inst.Spec.Watcher.Targets = append(inst.Spec.Watcher.Targets, platformv1alpha1.WatchTargetSpec{Name: "web", Namespace: w})
+	}
+	return inst
+}
+
 // streamingBridge wires a bridge to an in-memory server, already connected,
 // with short timers so the tests run in milliseconds.
 func streamingBridge(t *testing.T, srv pb.ChatCLIServiceServer) *WatcherBridge {
 	t.Helper()
-	wb := setupFakeWatcherBridge()
+	inst := pinnedWatcherInstance("chatcli-prod", "chatcli-system", "default")
+	wb := setupFakeWatcherBridge(inst)
+	wb.SetAIOpsInstance(types.NamespacedName{Namespace: "chatcli-system", Name: "chatcli-prod"})
 	wb.serverClient = bufconnServerClient(t, srv)
 	wb.pollInterval = 20 * time.Millisecond
 	wb.heartbeatTimeout = 60 * time.Millisecond
-	wb.connectedInstance = &platformv1alpha1.Instance{ObjectMeta: metav1.ObjectMeta{Name: "chatcli-prod", Namespace: "chatcli-system"}}
+	wb.connectedInstance = inst
 	return wb
 }
 

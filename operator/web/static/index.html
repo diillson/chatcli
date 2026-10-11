@@ -639,28 +639,28 @@ tr.expandable { cursor:pointer; }
   </h1>
   <div class="tools">
     <div class="time-range-picker" id="timeRangePicker">
-      <button class="btn" onclick="toggleTimeDropdown()" title="Time range filter" data-i18n-title="time.filterTitle" aria-haspopup="true">
+      <button class="btn" data-action="toggleTimeDropdown" title="Time range filter" data-i18n-title="time.filterTitle" aria-haspopup="true">
         <span id="timeRangeLabel" data-i18n="time.all">All time</span> ▾
       </button>
       <div class="time-dropdown" id="timeDropdown" style="display:none">
         <div class="time-presets">
-          <button onclick="setTimeRange('1h')" data-i18n="time.last1h">Last 1h</button>
-          <button onclick="setTimeRange('6h')" data-i18n="time.last6h">Last 6h</button>
-          <button onclick="setTimeRange('24h')" data-i18n="time.last24h">Last 24h</button>
-          <button onclick="setTimeRange('7d')" data-i18n="time.last7d">Last 7d</button>
-          <button onclick="setTimeRange('30d')" data-i18n="time.last30d">Last 30d</button>
-          <button onclick="setTimeRange('all')" data-i18n="time.all">All time</button>
+          <button data-action="setTimeRange" data-range="1h" data-i18n="time.last1h">Last 1h</button>
+          <button data-action="setTimeRange" data-range="6h" data-i18n="time.last6h">Last 6h</button>
+          <button data-action="setTimeRange" data-range="24h" data-i18n="time.last24h">Last 24h</button>
+          <button data-action="setTimeRange" data-range="7d" data-i18n="time.last7d">Last 7d</button>
+          <button data-action="setTimeRange" data-range="30d" data-i18n="time.last30d">Last 30d</button>
+          <button data-action="setTimeRange" data-range="all" data-i18n="time.all">All time</button>
         </div>
         <div class="time-custom">
           <label><span data-i18n="time.from">From</span> <input type="datetime-local" id="timeFrom"></label>
           <label><span data-i18n="time.to">To</span> <input type="datetime-local" id="timeTo"></label>
-          <button onclick="applyCustomRange()" data-i18n="time.apply">Apply</button>
+          <button data-action="applyCustomRange" data-i18n="time.apply">Apply</button>
         </div>
       </div>
     </div>
     <div class="refresh-indicator">
       <label for="refreshSelect" class="sr-label" data-i18n="refresh.label">Auto-refresh interval</label>
-      <select id="refreshSelect" class="filter-select" onchange="changeRefreshInterval()" title="Auto-refresh interval" data-i18n-title="refresh.label">
+      <select id="refreshSelect" class="filter-select" data-action="changeRefreshInterval" data-on="change" title="Auto-refresh interval" data-i18n-title="refresh.label">
         <option value="0" data-i18n="refresh.off">Off</option>
         <option value="10">10s</option>
         <option value="30" selected>30s</option>
@@ -669,22 +669,22 @@ tr.expandable { cursor:pointer; }
         <option value="300">5m</option>
       </select>
       <span id="refreshTimer" class="refresh-timer">30s</span>
-      <button class="btn btn-icon" onclick="manualRefresh()" title="Refresh now" aria-label="Refresh now" data-i18n-title="refresh.now" data-i18n-aria="refresh.now">&#8635;</button>
+      <button class="btn btn-icon" data-action="manualRefresh" title="Refresh now" aria-label="Refresh now" data-i18n-title="refresh.now" data-i18n-aria="refresh.now">&#8635;</button>
     </div>
     <div class="switchers">
       <label for="themeSelect" class="sr-label" data-i18n="theme.label">Theme</label>
-      <select id="themeSelect" class="filter-select" onchange="changeTheme()" title="Theme" aria-label="Theme" data-i18n-title="theme.label" data-i18n-aria="theme.label">
+      <select id="themeSelect" class="filter-select" data-action="changeTheme" data-on="change" title="Theme" aria-label="Theme" data-i18n-title="theme.label" data-i18n-aria="theme.label">
         <option value="system" data-i18n="theme.system">System</option>
         <option value="dark" data-i18n="theme.dark">Dark</option>
         <option value="light" data-i18n="theme.light">Light</option>
       </select>
       <label for="langSelect" class="sr-label" data-i18n="lang.label">Language</label>
-      <select id="langSelect" class="filter-select" onchange="changeLanguage()" title="Language" aria-label="Language" data-i18n-title="lang.label" data-i18n-aria="lang.label">
+      <select id="langSelect" class="filter-select" data-action="changeLanguage" data-on="change" title="Language" aria-label="Language" data-i18n-title="lang.label" data-i18n-aria="lang.label">
         <option value="en" lang="en">English</option>
         <option value="pt-BR" lang="pt-BR">Português (BR)</option>
       </select>
     </div>
-    <button class="btn btn-icon" id="logoutBtn" style="display:none" onclick="logoutApiKey()" title="Change API key" aria-label="Change API key" data-i18n-title="auth.changeKey" data-i18n-aria="auth.changeKey">&#128274;</button>
+    <button class="btn btn-icon" id="logoutBtn" style="display:none" data-action="logoutApiKey" title="Change API key" aria-label="Change API key" data-i18n-title="auth.changeKey" data-i18n-aria="auth.changeKey">&#128274;</button>
   </div>
 </header>
 
@@ -814,7 +814,7 @@ tr.expandable { cursor:pointer; }
         <option value="only" data-i18n="filter.onlyChaos">Only chaos drills</option>
       </select>
       <input class="filter-input" id="incNamespaceFilter" placeholder="Namespace..." aria-label="Namespace" data-i18n-placeholder="filter.namespace" data-i18n-aria="col.namespace" style="width:150px">
-      <button class="btn btn-primary" onclick="loadIncidents()" data-i18n="filter.apply">Apply</button>
+      <button class="btn btn-primary" data-action="loadIncidents" data-i18n="filter.apply">Apply</button>
     </div>
     <div class="panel">
       <div class="panel-header">
@@ -843,7 +843,7 @@ tr.expandable { cursor:pointer; }
         <option value="Approved" data-i18n="state.Approved">Approved</option>
         <option value="Rejected" data-i18n="state.Rejected">Rejected</option>
       </select>
-      <button class="btn btn-primary" onclick="loadApprovals()" data-i18n="filter.apply">Apply</button>
+      <button class="btn btn-primary" data-action="loadApprovals" data-i18n="filter.apply">Apply</button>
     </div>
     <div id="approvalsList"></div>
   </div>
@@ -852,7 +852,7 @@ tr.expandable { cursor:pointer; }
   <div class="page" id="page-aiinsights" role="tabpanel">
     <div class="filters">
       <input class="filter-input" id="insightIssueFilter" placeholder="Filter by incident..." aria-label="Incident" data-i18n-placeholder="filter.byIncident" data-i18n-aria="col.incident" style="width:200px">
-      <button class="btn btn-primary" onclick="loadAIInsights()" data-i18n="filter.apply">Apply</button>
+      <button class="btn btn-primary" data-action="loadAIInsights" data-i18n="filter.apply">Apply</button>
     </div>
     <div class="panel">
       <div class="panel-header">
@@ -876,7 +876,7 @@ tr.expandable { cursor:pointer; }
         <option value="RolledBack" data-i18n="state.RolledBack">RolledBack</option>
       </select>
       <input class="filter-input" id="remediationIssueFilter" placeholder="Filter by incident..." aria-label="Incident" data-i18n-placeholder="filter.byIncident" data-i18n-aria="col.incident" style="width:200px">
-      <button class="btn btn-primary" onclick="loadRemediations()" data-i18n="filter.apply">Apply</button>
+      <button class="btn btn-primary" data-action="loadRemediations" data-i18n="filter.apply">Apply</button>
     </div>
     <div class="panel">
       <div class="panel-header">
@@ -974,8 +974,8 @@ tr.expandable { cursor:pointer; }
         <option value="warning" data-i18n="severity.warning">Warning</option>
         <option value="critical" data-i18n="severity.critical">Critical</option>
       </select>
-      <button class="btn btn-primary" onclick="loadAudit()" data-i18n="filter.apply">Apply</button>
-      <button class="btn" onclick="exportAudit()" data-i18n="audit.export">Export JSON</button>
+      <button class="btn btn-primary" data-action="loadAudit" data-i18n="filter.apply">Apply</button>
+      <button class="btn" data-action="exportAudit" data-i18n="audit.export">Export JSON</button>
     </div>
     <div class="panel">
       <div class="panel-header">
@@ -2283,11 +2283,12 @@ function rowKey(item, idx) {
   return ((item.namespace || '') + '/' + item.name).replace(/[^A-Za-z0-9_.\/-]/g, '_');
 }
 
+// escapeHtml makes text safe in element content and in quoted attribute
+// values alike: & < > " and ' are all replaced.
+const HTML_ESCAPES = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
 function escapeHtml(str) {
   if (!str) return '';
-  const d = document.createElement('div');
-  d.textContent = str;
-  return d.innerHTML.replace(/'/g, '&#39;');
+  return String(str).replace(/[&<>"']/g, c => HTML_ESCAPES[c]);
 }
 
 function timeAgo(dateStr) {
@@ -2334,7 +2335,8 @@ function showLoading(el) {
 }
 
 function showError(el, msg, retryFn) {
-  el.innerHTML = `<div class="error-state"><p>${escapeHtml(msg)}</p>${retryFn ? '<button class="btn btn-primary" onclick="' + retryFn + '">' + t('common.retry') + '</button>' : ''}</div>`;
+  const action = retryFn ? String(retryFn).replace(/\(\)$/, '') : '';
+  el.innerHTML = `<div class="error-state"><p>${escapeHtml(msg)}</p>${ACTIONS[action] ? '<button class="btn btn-primary" data-action="' + escapeHtml(action) + '">' + escapeHtml(t('common.retry')) + '</button>' : ''}</div>`;
 }
 
 function showEmpty(el, msg) {
@@ -2903,7 +2905,7 @@ function renderRemediationTimeline() {
   const items = remediationItems.slice().sort((a, b) => remediationOldestFirst ? stamp(a) - stamp(b) : stamp(b) - stamp(a));
   const label = remediationOldestFirst ? t('timeline.sortOldest') : t('timeline.sortNewest');
   el.innerHTML = `<div class="timeline-toolbar">
-      <button type="button" class="btn btn-icon" id="remediationSortToggle" title="${t('timeline.sortHint')}" onclick="toggleRemediationSort()">${label} ${remediationOldestFirst ? '▲' : '▼'}</button>
+      <button type="button" class="btn btn-icon" id="remediationSortToggle" title="${escapeHtml(t('timeline.sortHint'))}" data-action="toggleRemediationSort">${label} ${remediationOldestFirst ? '▲' : '▼'}</button>
     </div>
     <div class="timeline">
       ${items.map(i => `
@@ -2992,9 +2994,9 @@ async function loadIncidents() {
         <td data-sort-value="${item.riskScore || 0}">${item.riskScore != null ? fmtNum(item.riskScore, 1) : '-'}</td>
         <td data-sort-value="${new Date(item.creationTimestamp || 0).getTime()}">${timeAgo(item.creationTimestamp)}</td>
         <td class="btn-group">
-          ${item.state !== 'Resolved' && item.state !== 'Contained' ? `<button class="btn btn-success" onclick="event.stopPropagation(); ackIncident('${escapeHtml(item.name)}', '${escapeHtml(item.namespace)}')">${t('action.ack')}</button>` : ''}
-          ${item.state !== 'Resolved' && item.state !== 'Contained' ? `<button class="btn" onclick="event.stopPropagation(); snoozeIncident('${escapeHtml(item.name)}', '${escapeHtml(item.namespace)}')">${t('action.snooze')}</button>` : ''}
-          ${(item.state === 'Escalated' || item.state === 'Contained') ? `<button class="btn" style="background:var(--sev-low);color:#000;font-weight:700" onclick="event.stopPropagation(); resolveIncident('${escapeHtml(item.name)}', '${escapeHtml(item.namespace)}')">${t('action.resolve')}</button>` : ''}
+          ${item.state !== 'Resolved' && item.state !== 'Contained' ? `<button class="btn btn-success" data-action="ackIncident" data-name="${escapeHtml(item.name)}" data-ns="${escapeHtml(item.namespace)}" data-stop="1">${t('action.ack')}</button>` : ''}
+          ${item.state !== 'Resolved' && item.state !== 'Contained' ? `<button class="btn" data-action="snoozeIncident" data-name="${escapeHtml(item.name)}" data-ns="${escapeHtml(item.namespace)}" data-stop="1">${t('action.snooze')}</button>` : ''}
+          ${(item.state === 'Escalated' || item.state === 'Contained') ? `<button class="btn" style="background:var(--sev-low);color:#000;font-weight:700" data-action="resolveIncident" data-name="${escapeHtml(item.name)}" data-ns="${escapeHtml(item.namespace)}" data-stop="1">${t('action.resolve')}</button>` : ''}
         </td>
       `;
       mainRow.addEventListener('click', () => toggleIncidentExpand(id, item, mainRow));
@@ -3248,8 +3250,8 @@ async function loadApprovals() {
             <input type="text" id="approval-reason-${escapeHtml(item.name)}" placeholder="${escapeHtml(t('approval.reasonPlaceholder'))}">
           </div>
           <div class="approval-actions">
-            <button class="btn btn-success" onclick="approveRequest('${escapeHtml(item.name)}', '${escapeHtml(item.namespace)}')">${t('approval.approve')}</button>
-            <button class="btn btn-danger" onclick="rejectRequest('${escapeHtml(item.name)}', '${escapeHtml(item.namespace)}')">${t('approval.reject')}</button>
+            <button class="btn btn-success" data-action="approveRequest" data-name="${escapeHtml(item.name)}" data-ns="${escapeHtml(item.namespace)}">${t('approval.approve')}</button>
+            <button class="btn btn-danger" data-action="rejectRequest" data-name="${escapeHtml(item.name)}" data-ns="${escapeHtml(item.namespace)}">${t('approval.reject')}</button>
           </div>
         ` : `
           <div style="font-size:0.8rem; color:var(--text-muted); margin-top:0.5rem;">
@@ -3435,9 +3437,9 @@ async function loadPostMortems() {
         <td>${escapeHtml(item.issueRef || '-')}</td>
         <td data-sort-value="${new Date(item.creationTimestamp || 0).getTime()}">${timeAgo(item.creationTimestamp)}</td>
         <td class="btn-group">
-          ${item.state !== 'Closed' && !item.requiresHumanAction ? `<button class="btn" onclick="event.stopPropagation(); reviewPM('${escapeHtml(item.name)}', '${escapeHtml(item.namespace)}')">${t('pm.review')}</button>` : ''}
-          ${item.state !== 'Closed' && !item.requiresHumanAction ? `<button class="btn btn-success" onclick="event.stopPropagation(); closePM('${escapeHtml(item.name)}', '${escapeHtml(item.namespace)}')">${t('pm.close')}</button>` : ''}
-          ${item.requiresHumanAction ? `<button class="btn" style="background:var(--violet);color:var(--on-accent);font-weight:700" onclick="event.stopPropagation(); ackHumanAction('${escapeHtml(item.name)}', '${escapeHtml(item.namespace)}')" title="${escapeHtml(t('pm.ackHumanTitle'))}">${t('pm.ackHuman')}</button>` : ''}
+          ${item.state !== 'Closed' && !item.requiresHumanAction ? `<button class="btn" data-action="reviewPM" data-name="${escapeHtml(item.name)}" data-ns="${escapeHtml(item.namespace)}" data-stop="1">${t('pm.review')}</button>` : ''}
+          ${item.state !== 'Closed' && !item.requiresHumanAction ? `<button class="btn btn-success" data-action="closePM" data-name="${escapeHtml(item.name)}" data-ns="${escapeHtml(item.namespace)}" data-stop="1">${t('pm.close')}</button>` : ''}
+          ${item.requiresHumanAction ? `<button class="btn" style="background:var(--violet);color:var(--on-accent);font-weight:700" data-action="ackHumanAction" data-name="${escapeHtml(item.name)}" data-ns="${escapeHtml(item.namespace)}" data-stop="1" title="${escapeHtml(t('pm.ackHumanTitle'))}">${t('pm.ackHuman')}</button>` : ''}
         </td>
       `;
       mainRow.addEventListener('click', () => togglePMExpand(id, item, mainRow));
@@ -3506,7 +3508,7 @@ function buildPMExpandRow(item) {
             <div style="display:flex; gap:1rem; align-items:center; flex-wrap:wrap;">
               <label style="min-width:140px;">${t('pm.accuracy')}:</label>
               <span class="star-rating" data-pm="${escapeHtml(item.name)}">
-                ${[1,2,3,4,5].map(n => `<span class="star" data-value="${n}" style="cursor:pointer; font-size:1.3rem; color:var(--text-muted)" onmouseover="previewStars(this)" onmouseout="resetStars(this)" onclick="selectStar(this)">☆</span>`).join('')}
+                ${[1,2,3,4,5].map(n => `<span class="star" data-value="${n}" style="cursor:pointer; font-size:1.3rem; color:var(--text-muted)" data-action="selectStar">☆</span>`).join('')}
               </span>
               <input type="hidden" id="fb-accuracy-${escapeHtml(item.name)}" value="0">
             </div>
@@ -3523,7 +3525,7 @@ function buildPMExpandRow(item) {
               <textarea id="fb-comments-${escapeHtml(item.name)}" rows="2" placeholder="${escapeHtml(t('pm.commentsPlaceholder'))}" style="background:var(--bg); color:var(--text); border:1px solid var(--border); border-radius:4px; padding:0.4rem 0.6rem; flex:1; min-width:150px; resize:vertical;"></textarea>
             </div>
             <div style="text-align:right;">
-              <button class="btn btn-success" onclick="event.stopPropagation(); submitFeedback('${escapeHtml(item.name)}', '${escapeHtml(item.namespace)}')">${t('pm.submitFeedback')}</button>
+              <button class="btn btn-success" data-action="submitFeedback" data-name="${escapeHtml(item.name)}" data-ns="${escapeHtml(item.namespace)}" data-stop="1">${t('pm.submitFeedback')}</button>
             </div>
           </div>
         </div>
@@ -4082,6 +4084,70 @@ async function updateApprovalBadge() {
 $('#themeSelect').value = storedTheme();
 $('#langSelect').value = lang;
 applyTranslations();
+
+// ===== ACTIONS =====
+// The dashboard has no inline event handlers: its Content-Security-Policy
+// forbids them. An element names what it does with data-action (data-on
+// for an event other than click) and carries its arguments in data-*
+// attributes, so no text from the API is ever parsed as script.
+const ACTIONS = {
+  toggleTimeDropdown: () => toggleTimeDropdown(),
+  setTimeRange: el => setTimeRange(el.dataset.range),
+  applyCustomRange: () => applyCustomRange(),
+  changeRefreshInterval: () => changeRefreshInterval(),
+  manualRefresh: () => manualRefresh(),
+  changeTheme: () => changeTheme(),
+  changeLanguage: () => changeLanguage(),
+  logoutApiKey: () => logoutApiKey(),
+  exportAudit: () => exportAudit(),
+  toggleRemediationSort: () => toggleRemediationSort(),
+  loadIncidents: () => loadIncidents(),
+  loadApprovals: () => loadApprovals(),
+  loadAIInsights: () => loadAIInsights(),
+  loadRemediations: () => loadRemediations(),
+  loadAudit: () => loadAudit(),
+  loadPolicies: () => loadPolicies(),
+  loadSeverityPie: () => loadSeverityPie(),
+  loadPlatformResources: () => loadPlatformResources(),
+  loadMttdMttrTrend: () => loadMttdMttrTrend(),
+  loadRecentIncidents: () => loadRecentIncidents(),
+  loadRemediationTimeline: () => loadRemediationTimeline(),
+  loadSLOs: () => loadSLOs(),
+  loadRunbooks: () => loadRunbooks(),
+  loadPostMortems: () => loadPostMortems(),
+  loadClusters: () => loadClusters(),
+  ackIncident: el => ackIncident(el.dataset.name, el.dataset.ns),
+  snoozeIncident: el => snoozeIncident(el.dataset.name, el.dataset.ns),
+  resolveIncident: el => resolveIncident(el.dataset.name, el.dataset.ns),
+  approveRequest: el => approveRequest(el.dataset.name, el.dataset.ns),
+  rejectRequest: el => rejectRequest(el.dataset.name, el.dataset.ns),
+  reviewPM: el => reviewPM(el.dataset.name, el.dataset.ns),
+  closePM: el => closePM(el.dataset.name, el.dataset.ns),
+  ackHumanAction: el => ackHumanAction(el.dataset.name, el.dataset.ns),
+  submitFeedback: el => submitFeedback(el.dataset.name, el.dataset.ns),
+  selectStar: el => selectStar(el),
+};
+
+function dispatchAction(e, type) {
+  const el = e.target.closest && e.target.closest('[data-action]');
+  if (!el || (el.dataset.on || 'click') !== type) return;
+  const fn = Object.prototype.hasOwnProperty.call(ACTIONS, el.dataset.action) ? ACTIONS[el.dataset.action] : null;
+  if (!fn) return;
+  // Capture phase: a row's own click handler must not see a button click
+  // that asked to stop there.
+  if (el.dataset.stop) e.stopPropagation();
+  fn(el, e);
+}
+document.addEventListener('click', e => dispatchAction(e, 'click'), true);
+document.addEventListener('change', e => dispatchAction(e, 'change'));
+document.addEventListener('mouseover', e => {
+  const star = e.target.closest && e.target.closest('.star-rating .star');
+  if (star) previewStars(star);
+});
+document.addEventListener('mouseout', e => {
+  const star = e.target.closest && e.target.closest('.star-rating .star');
+  if (star) resetStars(star);
+});
 
 document.addEventListener('DOMContentLoaded', () => {
   updateLogoutBtn();

@@ -3,7 +3,6 @@ package controllers
 import (
 	"context"
 	"fmt"
-	"os"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -179,8 +178,7 @@ func (r *AIInsightReconciler) buildAnalysisContext(ctx context.Context, insight 
 	raw := r.gatherEnrichmentSources(ctx, insight, issue, incidentTime)
 
 	// Security (M1): Scrub sensitive data from logs before sending to LLM
-	scrubber := NewLogScrubber(os.Getenv("CHATCLI_LOG_SCRUB_PATTERNS"))
-	combined = truncateContextRuneSafe(scrubber.ScrubText(raw), 30000)
+	combined = truncateContextRuneSafe(scrubForLLM(raw), 30000)
 
 	// Read failure context from annotation (set by retry re-analysis flow)
 	if insight.Annotations != nil {

@@ -47,6 +47,22 @@ spec:
           # operator then rolls the managed server pods in lockstep.
             - name: CHATCLI_OPERATOR_APP_VERSION
               value: {{ .Chart.AppVersion | quote }}
+          # Federation reads kubeconfig Secrets only from the operator's own
+          # namespace.
+            - name: POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+            - name: CHATCLI_OPERATOR_REMEDIATION_MODE
+              value: {{ .Values.remediationMode | default "approve" | quote }}
+          {{- with .Values.aiops.instance }}
+          {{- if and .namespace .name }}
+            - name: CHATCLI_OPERATOR_AIOPS_INSTANCE
+              value: {{ printf "%s/%s" .namespace .name | quote }}
+          {{- else if or .namespace .name }}
+          {{- fail "aiops.instance needs both namespace and name" }}
+          {{- end }}
+          {{- end }}
           {{- if .Values.prometheusUrl }}
             - name: PROMETHEUS_URL
               value: {{ .Values.prometheusUrl | quote }}

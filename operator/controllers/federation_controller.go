@@ -16,7 +16,6 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
-	"k8s.io/client-go/tools/clientcmd"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
@@ -59,8 +58,20 @@ func init() {
 // FederationReconciler watches ClusterRegistration CRs and manages remote cluster connectivity.
 type FederationReconciler struct {
 	client.Client
-	Scheme        *runtime.Scheme
-	remoteClients sync.Map // name -> client.Client
+	Scheme *runtime.Scheme
+	// OperatorNamespace is where kubeconfig Secrets are read from. Only
+	// cluster administrators write there; a registration in another
+	// namespace cannot point the operator at a Secret of its own. Empty,
+	// no remote cluster is connected.
+	OperatorNamespace string
+	remoteClients     sync.Map // "namespace/name" of the registration -> client.Client
+}
+
+// remoteClientKey keys the remote client cache by namespace and name: two
+// registrations with the same name in different namespaces must never
+// share a client.
+func remoteClientKey(cr *platformv1alpha1.ClusterRegistration) string {
+	return cr.Namespace + "/" + cr.Name
 }
 
 // +kubebuilder:rbac:groups=platform.chatcli.io,resources=clusterregistrations,verbs=get;list;watch;create;update;patch;delete
@@ -78,7 +89,7 @@ func (r *FederationReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 	if err := r.Get(ctx, req.NamespacedName, &cr); err != nil {
 		if errors.IsNotFound(err) {
 			// Cluster removed: clean up cached client
-			r.remoteClients.Delete(req.Name)
+			r.remoteClients.Delete(req.String())
 			r.refreshClusterGauges(ctx, nil)
 			return ctrl.Result{}, nil
 		}
@@ -98,7 +109,7 @@ func (r *FederationReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 	var nodeList corev1.NodeList
 	if err := remoteClient.List(ctx, &nodeList); err != nil {
 		log.Error(err, "Failed to list nodes on remote cluster", "cluster", cr.Name)
-		r.remoteClients.Delete(cr.Name) // invalidate cached client
+		r.remoteClients.Delete(remoteClientKey(&cr)) // invalidate cached client
 		return r.markDisconnected(ctx, &cr, "NodeListFailed", err)
 	}
 
@@ -106,7 +117,7 @@ func (r *FederationReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 	var nsList corev1.NamespaceList
 	if err := remoteClient.List(ctx, &nsList); err != nil {
 		log.Error(err, "Failed to list namespaces on remote cluster", "cluster", cr.Name)
-		r.remoteClients.Delete(cr.Name)
+		r.remoteClients.Delete(remoteClientKey(&cr))
 		return r.markDisconnected(ctx, &cr, "NamespaceListFailed", err)
 	}
 
@@ -283,20 +294,31 @@ func (r *FederationReconciler) refreshClusterGauges(ctx context.Context, current
 }
 
 // getOrCreateRemoteClient reads the kubeconfig Secret and creates or retrieves a cached remote client.
+//
+// The Secret is read from the operator's own namespace, never the
+// registration's, and must name the registration in its
+// platform.chatcli.io/cluster-registration annotation. Its kubeconfig may
+// carry inline credentials only (see restConfigFromUntrustedKubeconfig).
 func (r *FederationReconciler) getOrCreateRemoteClient(ctx context.Context, cr *platformv1alpha1.ClusterRegistration) (client.Client, error) {
-	// Check cache first
-	if cached, ok := r.remoteClients.Load(cr.Name); ok {
+	cacheKey := remoteClientKey(cr)
+	if cached, ok := r.remoteClients.Load(cacheKey); ok {
 		return cached.(client.Client), nil
 	}
 
-	// Read Secret containing kubeconfig
+	if r.OperatorNamespace == "" {
+		return nil, fmt.Errorf("the operator namespace is unknown (set POD_NAMESPACE); kubeconfig Secrets are only read from it")
+	}
 	var secret corev1.Secret
 	secretRef := types.NamespacedName{
 		Name:      cr.Spec.KubeconfigSecretRef.Name,
-		Namespace: cr.Namespace,
+		Namespace: r.OperatorNamespace,
 	}
 	if err := r.Get(ctx, secretRef, &secret); err != nil {
-		return nil, fmt.Errorf("failed to get kubeconfig secret %s: %w", secretRef, err)
+		return nil, fmt.Errorf("failed to get kubeconfig secret %s (kubeconfig Secrets live in the operator namespace): %w", secretRef, err)
+	}
+	if !secretBoundToRegistration(secret.Annotations, cacheKey) {
+		return nil, fmt.Errorf("secret %s is not bound to ClusterRegistration %s: add %q to its %s annotation",
+			secretRef, cacheKey, cacheKey, AnnotationClusterRegistrationBinding)
 	}
 
 	kubeconfigBytes, ok := secret.Data["kubeconfig"]
@@ -304,21 +326,18 @@ func (r *FederationReconciler) getOrCreateRemoteClient(ctx context.Context, cr *
 		return nil, fmt.Errorf("secret %s does not contain 'kubeconfig' key", secretRef)
 	}
 
-	// Create REST config from kubeconfig data
-	restConfig, err := clientcmd.RESTConfigFromKubeConfig(kubeconfigBytes)
+	restConfig, err := restConfigFromUntrustedKubeconfig(kubeconfigBytes)
 	if err != nil {
-		return nil, fmt.Errorf("failed to parse kubeconfig: %w", err)
+		return nil, fmt.Errorf("secret %s: %w", secretRef, err)
 	}
 
 	// Build a controller-runtime client for the remote cluster
-	scheme := r.Scheme
-	remoteClient, err := client.New(restConfig, client.Options{Scheme: scheme})
+	remoteClient, err := client.New(restConfig, client.Options{Scheme: r.Scheme})
 	if err != nil {
 		return nil, fmt.Errorf("failed to create remote client: %w", err)
 	}
 
-	// Cache the client
-	r.remoteClients.Store(cr.Name, remoteClient)
+	r.remoteClients.Store(cacheKey, remoteClient)
 	return remoteClient, nil
 }
 
@@ -386,7 +405,7 @@ func (r *FederationReconciler) CorrelateAcrossClusters(ctx context.Context, issu
 			continue
 		}
 
-		cached, ok := r.remoteClients.Load(cr.Name)
+		cached, ok := r.remoteClients.Load(remoteClientKey(&cr))
 		if !ok {
 			continue
 		}
@@ -401,7 +420,7 @@ func (r *FederationReconciler) CorrelateAcrossClusters(ctx context.Context, issu
 		for _, iss := range remoteIssues.Items {
 			if iss.Spec.SignalType == issue.Spec.SignalType && !isTerminalIssueState(iss.Status.State) {
 				matchingIssues = append(matchingIssues, clusterIssue{
-					clusterName: cr.Name,
+					clusterName: remoteClientKey(&cr),
 					issue:       iss,
 				})
 			}
@@ -503,7 +522,7 @@ func (r *FederationReconciler) DetectCascade(ctx context.Context, issue *platfor
 
 	// Check staging clusters for issues with the same resource name
 	for _, staging := range stagingClusters {
-		cached, ok := r.remoteClients.Load(staging.Name)
+		cached, ok := r.remoteClients.Load(remoteClientKey(&staging))
 		if !ok {
 			continue
 		}
