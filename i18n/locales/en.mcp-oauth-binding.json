@@ -1,0 +1,5 @@
+{
+  "mcp.oauth.prm_resource_mismatch": "the protected-resource metadata describes resource %q, not this MCP server (%s); login refused (RFC 9728, section 3.3)",
+  "mcp.oauth.prm_cross_origin": "the MCP server pointed to protected-resource metadata on another origin (%s); it is only accepted on the server's own origin (%s)",
+  "mcp.oauth.document_too_large": "OAuth document exceeds the %d-byte limit"
+}

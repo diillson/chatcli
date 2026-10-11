@@ -307,15 +307,28 @@ func (t *sseTransport) runOnce(ctx context.Context) error {
 	return io.EOF
 }
 
+// resolveMessagesURL turns the data of an "endpoint" event into the URL the
+// transport POSTs to: a path is joined to the configured server URL, and an
+// absolute URL is accepted only on that URL's origin.
+func (t *sseTransport) resolveMessagesURL(data string) (string, bool) {
+	data = strings.TrimSpace(data)
+	if strings.HasPrefix(data, "/") && !strings.HasPrefix(data, "//") {
+		return t.baseURL + data, true
+	}
+	return data, sameOrigin(data, t.baseURL)
+}
+
 // handleSSEEvent processes a single SSE event.
 func (t *sseTransport) handleSSEEvent(eventType, data string) {
 	switch eventType {
 	case "endpoint":
-		var resolved string
-		if strings.HasPrefix(data, "/") {
-			resolved = t.baseURL + data
-		} else {
-			resolved = data
+		resolved, ok := t.resolveMessagesURL(data)
+		if !ok {
+			// Every POST carries the server's credentials, so the
+			// messages endpoint must stay on the server's own origin.
+			t.logger.Error("MCP SSE: ignoring messages endpoint outside the server's origin",
+				zap.String("server", t.serverName), zap.String("endpoint", data))
+			return
 		}
 		t.endpointMu.Lock()
 		t.messagesURL = resolved

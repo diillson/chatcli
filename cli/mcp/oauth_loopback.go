@@ -57,6 +57,9 @@ func buildAuthorizeURL(p loopbackAuthParams, challenge, state string) string {
 	return p.authorizationEndpoint + "?" + q.Encode()
 }
 
+// openAuthURL opens the authorization request in the user's browser.
+var openAuthURL = auth.OpenInBrowser
+
 // runLoopbackAuth opens the browser at the authorization endpoint and waits for
 // the callback, returning the authorization code and the PKCE verifier used.
 // The listener is owned by the caller for binding, but this function serves and
@@ -132,7 +135,7 @@ func runLoopbackAuth(ctx context.Context, listener net.Listener, p loopbackAuthP
 	}()
 
 	fmt.Println(i18n.T("mcp.oauth.opening_browser"))
-	if openErr := auth.OpenInBrowser(authURL); openErr != nil {
+	if openErr := openAuthURL(authURL); openErr != nil {
 		fmt.Println(i18n.T("mcp.oauth.browser_failed"))
 		fmt.Println(authURL)
 	} else {

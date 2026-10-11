@@ -35,6 +35,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"net/url"
@@ -261,10 +262,15 @@ func saveOAuthMeta(meta *oauthServerMeta) error {
 }
 
 // hasStoredMCPOAuth reports whether we already hold OAuth metadata AND a
-// credential for the server (i.e. a prior login succeeded).
-func hasStoredMCPOAuth(server string, logger *zap.Logger) bool {
+// credential for the server at serverURL (i.e. a prior login succeeded). A
+// credential bound to another resource does not count: it is never sent.
+func hasStoredMCPOAuth(server, serverURL string, logger *zap.Logger) bool {
 	meta, err := loadOAuthMeta(server)
 	if err != nil || meta == nil || meta.ClientID == "" {
+		return false
+	}
+	resource, err := canonicalResource(serverURL)
+	if err != nil || !sameResource(meta.Resource, resource) {
 		return false
 	}
 	cred := auth.GetProfile(mcpOAuthProfileID(server), logger)
@@ -282,37 +288,51 @@ func newOAuthDiscoverer(logger *zap.Logger) *oauthDiscoverer {
 	return &oauthDiscoverer{hc: utils.NewHTTPClient(logger, 30*time.Second), logger: logger}
 }
 
-// discover resolves the authorization-server metadata for an MCP server,
-// starting from an optional resource_metadata URL (from the 401 challenge) and
-// falling back to the well-known path on the server's own origin.
-func (d *oauthDiscoverer) discover(ctx context.Context, serverURL string, ch oauthChallenge) (*authServerMetadata, *protectedResourceMetadata, error) {
-	prmURL := strings.TrimSpace(ch.ResourceMetadata)
-	if prmURL == "" {
-		origin, err := originOf(serverURL)
-		if err != nil {
-			return nil, nil, err
-		}
-		prmURL = origin + "/.well-known/oauth-protected-resource"
+// discover resolves the authorization-server metadata protecting the MCP
+// server whose canonical URI is resource (see canonicalResource).
+//
+// The protected-resource metadata comes from the resource_metadata URL of
+// the 401 challenge, which must be on the server's own origin, or else from
+// the RFC 9728 well-known URIs of that origin: the path-inserted one first,
+// then the root. Metadata that names a different resource is refused, as
+// RFC 9728 section 3.3 requires. Whatever the metadata says, the token is
+// requested for resource and nothing else, so a server can never pick the
+// audience of the token the user consents to.
+func (d *oauthDiscoverer) discover(ctx context.Context, resource string, ch oauthChallenge) (*authServerMetadata, error) {
+	origin, err := originOf(resource)
+	if err != nil {
+		return nil, err
+	}
+	candidates, err := prmCandidates(resource, origin, ch)
+	if err != nil {
+		return nil, err
 	}
 
-	prm, err := fetchJSON[protectedResourceMetadata](ctx, d.hc, prmURL)
-	if err != nil {
+	var prm *protectedResourceMetadata
+	for _, prmURL := range candidates {
+		p, ferr := fetchJSON[protectedResourceMetadata](ctx, d.hc, prmURL)
+		if ferr != nil {
+			d.logger.Debug("MCP OAuth: protected-resource metadata unavailable",
+				zap.String("prm_url", prmURL), zap.Error(ferr))
+			continue
+		}
+		if !describesResource(p.Resource, resource) {
+			return nil, fmt.Errorf("%s", i18n.T("mcp.oauth.prm_resource_mismatch", p.Resource, resource))
+		}
+		prm = p
+		break
+	}
+	if prm == nil {
 		// Some servers skip RFC 9728 and expose the AS directly on their
 		// origin. Fall back to treating the server origin as the issuer.
-		d.logger.Debug("MCP OAuth: protected-resource metadata unavailable, trying origin as issuer",
-			zap.String("prm_url", prmURL), zap.Error(err))
-		origin, oerr := originOf(serverURL)
-		if oerr != nil {
-			return nil, nil, err
-		}
 		asMeta, aerr := d.fetchAuthServerMetadata(ctx, origin)
 		if aerr != nil {
-			return nil, nil, fmt.Errorf("%s: %w", i18n.T("mcp.oauth.discovery_failed"), aerr)
+			return nil, fmt.Errorf("%s: %w", i18n.T("mcp.oauth.discovery_failed"), aerr)
 		}
-		return asMeta, &protectedResourceMetadata{Resource: origin}, nil
+		return asMeta, nil
 	}
 	if len(prm.AuthorizationServers) == 0 {
-		return nil, nil, fmt.Errorf("%s", i18n.T("mcp.oauth.no_auth_servers"))
+		return nil, fmt.Errorf("%s", i18n.T("mcp.oauth.no_auth_servers"))
 	}
 
 	// Use the first advertised authorization server. Spec allows many; the
@@ -324,9 +344,110 @@ func (d *oauthDiscoverer) discover(ctx context.Context, serverURL string, ch oau
 			lastErr = err
 			continue
 		}
-		return asMeta, prm, nil
+		return asMeta, nil
 	}
-	return nil, nil, fmt.Errorf("%s: %w", i18n.T("mcp.oauth.discovery_failed"), lastErr)
+	return nil, fmt.Errorf("%s: %w", i18n.T("mcp.oauth.discovery_failed"), lastErr)
+}
+
+// prmCandidates lists where to look for the protected-resource metadata of
+// resource, in order. A resource_metadata URL from the challenge is the only
+// candidate, and only when it is on the server's own origin: anything else
+// would let the server send the client to fetch, and trust, a document
+// published by someone else.
+func prmCandidates(resource, origin string, ch oauthChallenge) ([]string, error) {
+	if advertised := strings.TrimSpace(ch.ResourceMetadata); advertised != "" {
+		if !sameOrigin(advertised, resource) {
+			return nil, fmt.Errorf("%s", i18n.T("mcp.oauth.prm_cross_origin", advertised, origin))
+		}
+		return []string{advertised}, nil
+	}
+	const wellKnown = "/.well-known/oauth-protected-resource"
+	var out []string
+	if u, err := url.Parse(resource); err == nil {
+		if path := strings.Trim(u.EscapedPath(), "/"); path != "" {
+			out = append(out, origin+wellKnown+"/"+path) // RFC 9728 section 3.1
+		}
+	}
+	return append(out, origin+wellKnown), nil
+}
+
+// canonicalResource returns the canonical URI of an MCP server, the value
+// sent as the RFC 8707 resource indicator: the configured URL with its
+// scheme and host lowercased and any fragment dropped.
+func canonicalResource(serverURL string) (string, error) {
+	u, err := url.Parse(strings.TrimSpace(serverURL))
+	if err != nil || u.Scheme == "" || u.Host == "" {
+		return "", fmt.Errorf("%s", i18n.T("mcp.oauth.bad_server_url", serverURL))
+	}
+	u.Scheme = strings.ToLower(u.Scheme)
+	u.Host = strings.ToLower(u.Host)
+	u.Fragment, u.RawFragment = "", ""
+	return u.String(), nil
+}
+
+// sameResource reports whether stored names exactly the resource whose
+// canonical URI is resource. A token recorded for any other resource was
+// minted for another audience and must not be sent to this server.
+func sameResource(stored, resource string) bool {
+	if strings.TrimSpace(stored) == "" {
+		return false
+	}
+	c, err := canonicalResource(stored)
+	return err == nil && c == resource
+}
+
+// describesResource reports whether protected-resource metadata claiming
+// claimed may describe resource: no claim at all, or a claim on the same
+// origin whose path is resource's path or one of its parent paths (a server
+// publishing one document for its whole origin). The claim is only checked,
+// never used: the token is always requested for resource itself.
+func describesResource(claimed, resource string) bool {
+	if strings.TrimSpace(claimed) == "" {
+		return true
+	}
+	c, err := url.Parse(strings.TrimSpace(claimed))
+	if err != nil || c.Fragment != "" || !sameOrigin(claimed, resource) {
+		return false
+	}
+	r, err := url.Parse(resource)
+	if err != nil {
+		return false
+	}
+	if c.RawQuery != "" && c.RawQuery != r.RawQuery {
+		return false
+	}
+	cp := strings.TrimRight(c.EscapedPath(), "/")
+	rp := strings.TrimRight(r.EscapedPath(), "/")
+	return cp == "" || cp == rp || strings.HasPrefix(rp, cp+"/")
+}
+
+// sameOrigin reports whether two absolute URLs share scheme, host and port,
+// with the scheme's default port made explicit.
+func sameOrigin(a, b string) bool {
+	oa, ok := urlOrigin(a)
+	if !ok {
+		return false
+	}
+	ob, ok := urlOrigin(b)
+	return ok && oa == ob
+}
+
+func urlOrigin(raw string) (string, bool) {
+	u, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil || u.Scheme == "" || u.Hostname() == "" {
+		return "", false
+	}
+	scheme := strings.ToLower(u.Scheme)
+	port := u.Port()
+	if port == "" {
+		switch scheme {
+		case "https":
+			port = "443"
+		case "http":
+			port = "80"
+		}
+	}
+	return scheme + "://" + net.JoinHostPort(strings.ToLower(u.Hostname()), port), true
 }
 
 // fetchAuthServerMetadata tries the RFC 8414 well-known endpoints (OAuth AS
@@ -442,8 +563,7 @@ func (d *oauthDiscoverer) registerClient(ctx context.Context, registrationEndpoi
 		Error    string `json:"error"`
 		ErrDesc  string `json:"error_description"`
 	}
-	dec := json.NewDecoder(resp.Body)
-	_ = dec.Decode(&reg)
+	_ = decodeBoundedJSON(resp.Body, &reg)
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 || reg.ClientID == "" {
 		msg := reg.ErrDesc
 		if msg == "" {
@@ -458,8 +578,9 @@ func (d *oauthDiscoverer) registerClient(ctx context.Context, registrationEndpoi
 }
 
 // LoginServer runs the full interactive OAuth authorization for an MCP server
-// and persists the resulting credential + metadata. serverURL is the canonical
-// MCP endpoint (used as the RFC 8707 resource indicator). ch is the challenge
+// and persists the resulting credential + metadata. serverURL is the MCP
+// endpoint the user configured; its canonical form is the RFC 8707 resource
+// indicator of every token request. ch is the challenge
 // parsed from a prior 401, if any (empty is fine — discovery falls back to the
 // well-known path).
 //
@@ -469,19 +590,28 @@ func (d *oauthDiscoverer) registerClient(ctx context.Context, registrationEndpoi
 func LoginServer(ctx context.Context, serverName, serverURL string, ch oauthChallenge, logger *zap.Logger) error {
 	disc := newOAuthDiscoverer(logger)
 
+	// The token is always requested for the server the user configured.
+	resource, err := canonicalResource(serverURL)
+	if err != nil {
+		return err
+	}
+
 	// Reuse cached metadata when present so we skip discovery/registration on
-	// re-login; fall back to full discovery otherwise.
+	// re-login; fall back to full discovery otherwise. Metadata recorded for
+	// another resource (the server URL changed, or an older release took the
+	// resource from the server's own claim) is discarded, client included.
 	meta, _ := loadOAuthMeta(serverName)
+	if meta != nil && !sameResource(meta.Resource, resource) {
+		meta = nil
+	}
 
 	var asMeta *authServerMetadata
-	var resource string
 	if meta == nil || meta.AuthorizationEndpoint == "" || meta.TokenEndpoint == "" {
-		am, prm, err := disc.discover(ctx, serverURL, ch)
+		am, err := disc.discover(ctx, resource, ch)
 		if err != nil {
 			return err
 		}
 		asMeta = am
-		resource = firstNonEmpty(prm.Resource, serverURL)
 	} else {
 		asMeta = &authServerMetadata{
 			Issuer:                meta.Issuer,
@@ -489,7 +619,6 @@ func LoginServer(ctx context.Context, serverName, serverURL string, ch oauthChal
 			TokenEndpoint:         meta.TokenEndpoint,
 			RegistrationEndpoint:  meta.RegistrationEndpoint,
 		}
-		resource = firstNonEmpty(meta.Resource, serverURL)
 	}
 
 	scope := chooseScope(ch, asMeta)
@@ -578,7 +707,18 @@ func mcpTokenProvider(serverName, serverURL string, logger *zap.Logger) (auth.To
 		return nil, nil
 	}
 
-	resource := firstNonEmpty(meta.Resource, serverURL)
+	// A credential recorded for another resource was minted for another
+	// audience: never send it to this server. Without a provider the server
+	// answers 401 and the user is asked to log in again.
+	resource, err := canonicalResource(serverURL)
+	if err != nil {
+		return nil, err
+	}
+	if !sameResource(meta.Resource, resource) {
+		logger.Warn("MCP OAuth: stored credential is bound to a different resource; log in again",
+			zap.String("server", serverName), zap.String("stored_resource", meta.Resource), zap.String("resource", resource))
+		return nil, nil
+	}
 	refresh := newMCPRefreshFunc(meta.TokenEndpoint, meta.ClientID, resource, meta.Scope)
 	return auth.NewOAuthTokenProviderWithRefresh(cred, mcpOAuthProfileID(serverName), "auth-store", refresh, logger), nil
 }
@@ -667,10 +807,27 @@ func fetchJSON[T any](ctx context.Context, hc *http.Client, url string) (*T, err
 		return nil, fmt.Errorf("%s", i18n.T("mcp.oauth.http_get_failed", url, resp.StatusCode))
 	}
 	var out T
-	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+	if err := decodeBoundedJSON(resp.Body, &out); err != nil {
 		return nil, err
 	}
 	return &out, nil
+}
+
+// maxOAuthDocumentBytes caps a discovery or registration response. Real
+// documents are a few kilobytes; the servers serving them are not trusted.
+const maxOAuthDocumentBytes = 1 << 20
+
+// decodeBoundedJSON decodes one JSON document from r into v, refusing a
+// document larger than maxOAuthDocumentBytes.
+func decodeBoundedJSON(r io.Reader, v any) error {
+	data, err := io.ReadAll(io.LimitReader(r, maxOAuthDocumentBytes+1))
+	if err != nil {
+		return err
+	}
+	if len(data) > maxOAuthDocumentBytes {
+		return fmt.Errorf("%s", i18n.T("mcp.oauth.document_too_large", maxOAuthDocumentBytes))
+	}
+	return json.Unmarshal(data, v)
 }
 
 // mcpOAuthLoopbackPort returns the preferred fixed loopback port (env override

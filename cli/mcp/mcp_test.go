@@ -823,10 +823,37 @@ func TestSSEHandleEndpointEventAbsolute(t *testing.T) {
 		pending: make(map[int64]chan *jsonRPCResponse),
 	}
 
-	tr.handleSSEEvent("endpoint", "http://other-host:9090/messages")
+	tr.handleSSEEvent("endpoint", "http://localhost:8080/messages?session=1")
 
-	if tr.messagesURL != "http://other-host:9090/messages" {
+	if tr.messagesURL != "http://localhost:8080/messages?session=1" {
 		t.Errorf("messagesURL = %q", tr.messagesURL)
+	}
+}
+
+// TestSSEHandleEndpointEventOtherOrigin pins that a server cannot point the
+// POSTs, and the credentials they carry, at another origin.
+func TestSSEHandleEndpointEventOtherOrigin(t *testing.T) {
+	for _, endpoint := range []string{
+		"http://other-host:9090/messages",
+		"//other-host/messages",
+		"https://localhost:8080/messages",
+		"http://localhost:8081/messages",
+	} {
+		tr := &sseTransport{
+			baseURL: "http://localhost:8080",
+			ready:   make(chan struct{}),
+			pending: make(map[int64]chan *jsonRPCResponse),
+			logger:  zap.NewNop(),
+		}
+		tr.handleSSEEvent("endpoint", endpoint)
+		if tr.messagesURL != "" {
+			t.Errorf("endpoint %q accepted as %q", endpoint, tr.messagesURL)
+		}
+		select {
+		case <-tr.ready:
+			t.Errorf("endpoint %q marked the transport ready", endpoint)
+		default:
+		}
 	}
 }
 
