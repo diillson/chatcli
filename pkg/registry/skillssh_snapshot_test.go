@@ -88,12 +88,22 @@ func TestParseSnapshotFilesVerifiesHash(t *testing.T) {
 	}
 }
 
-// The digest is order-independent: files are sorted by path first.
-func TestSnapshotDigestIsOrderIndependent(t *testing.T) {
-	a := []skillsshSnapshotFile{{Path: "b", Contents: "2"}, {Path: "a", Contents: "1"}}
-	b := []skillsshSnapshotFile{{Path: "a", Contents: "1"}, {Path: "b", Contents: "2"}}
-	if snapshotDigest(a) != snapshotDigest(b) {
-		t.Fatal("digest must not depend on the order files arrive in")
+// TestSnapshotDigestMatchesSkillsSh pins the digest to the scheme skills.sh
+// uses (path NUL contents NUL per file, in the listed order); the expected
+// value was computed independently for this synthetic snapshot.
+func TestSnapshotDigestMatchesSkillsSh(t *testing.T) {
+	files := []skillsshSnapshotFile{
+		{Path: "SKILL.md", Contents: "# Demo\n"},
+		{Path: "scripts/run.sh", Contents: "echo hi\n"},
+	}
+	const want = "fe2fd0837a9e39a969453ac935e783dddecbcc5b3ccfc11aa8a71f8ef932f60e"
+	if got := snapshotDigest(files); got != want {
+		t.Fatalf("snapshotDigest = %s, want %s", got, want)
+	}
+	// The listed order is part of the digest, as on skills.sh.
+	swapped := []skillsshSnapshotFile{files[1], files[0]}
+	if snapshotDigest(swapped) == want {
+		t.Fatal("reordering the files must change the digest")
 	}
 }
 

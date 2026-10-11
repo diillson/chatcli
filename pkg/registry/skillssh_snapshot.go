@@ -11,7 +11,6 @@ import (
 	"fmt"
 	"path"
 	"path/filepath"
-	"sort"
 	"strings"
 )
 
@@ -34,16 +33,16 @@ func snapshotRelPath(p string) (string, error) {
 }
 
 // snapshotDigest is the content digest a skills.sh snapshot carries in its
-// "hash" field: SHA-256, hex encoded, over the files sorted by path, each
-// contributing its path bytes followed by its content bytes.
+// "hash" field: SHA-256, hex encoded, over the files in the order the
+// snapshot lists them, each contributing its path, a NUL byte, its contents
+// and a NUL byte. The scheme was checked against live skills.sh snapshots.
 func snapshotDigest(files []skillsshSnapshotFile) string {
-	sorted := make([]skillsshSnapshotFile, len(files))
-	copy(sorted, files)
-	sort.Slice(sorted, func(i, j int) bool { return sorted[i].Path < sorted[j].Path })
 	h := sha256.New()
-	for _, f := range sorted {
+	for _, f := range files {
 		h.Write([]byte(f.Path))
+		h.Write([]byte{0})
 		h.Write([]byte(f.Contents))
+		h.Write([]byte{0})
 	}
 	return hex.EncodeToString(h.Sum(nil))
 }
