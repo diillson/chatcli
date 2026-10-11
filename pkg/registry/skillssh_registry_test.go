@@ -283,8 +283,8 @@ func TestSkillsShRegistryDownloadSkill(t *testing.T) {
 						Contents: "# Detailed Reference\n\nMore info.",
 					},
 				},
-				Hash: "abc123def456",
 			}
+			resp.Hash = snapshotDigest(resp.Files)
 			w.Header().Set("Content-Type", "application/json")
 			_ = json.NewEncoder(w).Encode(resp)
 			return
@@ -317,7 +317,7 @@ func TestSkillsShRegistryDownloadSkill(t *testing.T) {
 	// Verify it's valid snapshot JSON
 	files, hash, parseErr := ParseSnapshotFiles(content)
 	require.NoError(t, parseErr)
-	assert.Equal(t, "abc123def456", hash)
+	assert.Len(t, hash, 64)
 	assert.Len(t, files, 3)
 	assert.Equal(t, "SKILL.md", files[0].Path)
 	assert.Contains(t, files[0].Contents, "frontend-design")
@@ -362,17 +362,21 @@ func TestSkillsShRegistryDownloadRejectsMissingSKILLMD(t *testing.T) {
 // --- ParseSnapshotFiles tests ---
 
 func TestParseSnapshotFiles(t *testing.T) {
+	want := snapshotDigest([]skillsshSnapshotFile{
+		{Path: "SKILL.md", Contents: "# My Skill"},
+		{Path: "scripts/run.sh", Contents: "#!/bin/bash\necho hi"},
+	})
 	data := `{
 		"files": [
 			{"path": "SKILL.md", "contents": "# My Skill"},
 			{"path": "scripts/run.sh", "contents": "#!/bin/bash\necho hi"}
 		],
-		"hash": "deadbeef"
+		"hash": "` + want + `"
 	}`
 
 	files, hash, err := ParseSnapshotFiles([]byte(data))
 	require.NoError(t, err)
-	assert.Equal(t, "deadbeef", hash)
+	assert.Equal(t, want, hash)
 	assert.Len(t, files, 2)
 	assert.Equal(t, "SKILL.md", files[0].Path)
 	assert.Equal(t, "scripts/run.sh", files[1].Path)

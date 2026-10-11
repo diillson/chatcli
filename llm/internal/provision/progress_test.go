@@ -9,6 +9,8 @@ package provision
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -42,7 +44,7 @@ func TestProvisionArchiveReportsProgress(t *testing.T) {
 	var steps []Progress
 	ctx := WithProgress(context.Background(), func(p Progress) { steps = append(steps, p) })
 	target := filepath.Join(t.TempDir(), "piece")
-	if err := ProvisionArchive(ctx, srv.URL+"/assets/piece.tar.bz2", target, 1); err == nil {
+	if err := ProvisionVerifiedArchive(ctx, srv.URL+"/assets/piece.tar.bz2", sha256Hex(payload), target, 1); err == nil {
 		t.Fatal("a non-bzip2 payload must fail extraction")
 	}
 	if len(steps) < 3 {
@@ -67,14 +69,20 @@ func TestWithProgressNilHookAndPlainDownload(t *testing.T) {
 	if WithProgress(ctx, nil) != ctx {
 		t.Fatal("a nil hook must leave the context untouched")
 	}
+	body := bytes.Repeat([]byte("C"), 64)
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		_, _ = w.Write(bytes.Repeat([]byte("C"), 64))
+		_, _ = w.Write(body)
 	}))
 	defer srv.Close()
-	if err := DownloadArchive(ctx, srv.URL+"/x", filepath.Join(t.TempDir(), "x"), 1); err != nil {
+	if err := downloadVerified(ctx, srv.URL+"/x", filepath.Join(t.TempDir(), "x"), sha256Hex(body), 1); err != nil {
 		t.Fatal(err)
 	}
 	if archiveName("no-slash") != "no-slash" {
 		t.Fatal("a bare name is its own archive name")
 	}
+}
+
+func sha256Hex(b []byte) string {
+	sum := sha256.Sum256(b)
+	return hex.EncodeToString(sum[:])
 }

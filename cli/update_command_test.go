@@ -335,6 +335,10 @@ func TestPrintUpdateErrorMapsTypedErrors(t *testing.T) {
 		{"unsupported", &update.UnsupportedPlatformError{OS: "linux", Arch: "arm64"}, "linux/arm64"},
 		{"no checksums", &update.ChecksumsUnavailableError{Tag: "v1.0.0"}, "checksums"},
 		{"mismatch", &update.ChecksumMismatchError{Asset: "a", Expected: "x", Actual: "y"}, "Checksum"},
+		{"no release keys", update.ErrNoReleaseKeys, "go install github.com/diillson/chatcli@latest"},
+		{"no signature", &update.SignatureUnavailableError{Tag: "v1.6.0"}, "checksums.txt.sig"},
+		{"bad signature", &update.SignatureInvalidError{Tag: "v1.6.0"}, "release key"},
+		{"bad tag", &update.InvalidTagError{Tag: "v9.9.9/../x"}, "v9.9.9/../x"},
 		{"generic", errors.New("boom"), "boom"},
 	}
 	for _, tc := range cases {

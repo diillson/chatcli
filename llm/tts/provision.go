@@ -29,7 +29,11 @@ const (
 	// them together.
 	sherpaVersion     = provision.SherpaVersion
 	sherpaReleaseBase = provision.SherpaReleaseBase
-	kokoroModelURL    = "https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/kokoro-int8-multi-lang-v1_0.tar.bz2"
+	// kokoroArchive is the model archive name; its SHA-256 is pinned in
+	// provision.PinnedSHA256, which is what makes the rolling tts-models
+	// tag safe: a replaced asset fails verification.
+	kokoroArchive  = "kokoro-int8-multi-lang-v1_0.tar.bz2"
+	kokoroModelURL = "https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/" + kokoroArchive
 
 	// sherpaBinName is the TTS executable inside the release tarball.
 	sherpaBinName = "sherpa-onnx-offline-tts"

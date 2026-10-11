@@ -46,6 +46,9 @@ type embeddedSynth struct {
 	modelURL      string
 	minBinBytes   int64
 	minModelBytes int64
+	// pins resolves the expected SHA-256 of an archive by file name; the
+	// production default is the table compiled into provision.
+	pins provision.PinSource
 
 	once    sync.Once
 	paths   provisionedPaths
@@ -76,6 +79,7 @@ func NewEmbedded(enVoice, ptVoice string, logger *zap.Logger) *embeddedSynth {
 		modelURL:      kokoroModelURL,
 		minBinBytes:   minSherpaBytes,
 		minModelBytes: minKokoroBytes,
+		pins:          provision.CompiledPins{},
 	}
 }
 
@@ -177,10 +181,10 @@ func (e *embeddedSynth) provision(ctx context.Context) (provisionedPaths, error)
 
 	binDir := filepath.Join(root, "sherpa-v"+sherpaVersion)
 	modelDir := filepath.Join(root, "kokoro")
-	if err := e.provisionPiece(ctx, e.binBaseURL+asset, binDir, e.minBinBytes, "engine (~25MB)"); err != nil {
+	if err := e.provisionPiece(ctx, e.binBaseURL+asset, asset, binDir, e.minBinBytes, "engine (~25MB)"); err != nil {
 		return provisionedPaths{}, err
 	}
-	if err := e.provisionPiece(ctx, e.modelURL, modelDir, e.minModelBytes, "voice model (~126MB)"); err != nil {
+	if err := e.provisionPiece(ctx, e.modelURL, kokoroArchive, modelDir, e.minModelBytes, "voice model (~126MB)"); err != nil {
 		return provisionedPaths{}, err
 	}
 
@@ -205,13 +209,18 @@ func (e *embeddedSynth) provision(ctx context.Context) (provisionedPaths, error)
 }
 
 // provisionPiece downloads and extracts one archive unless its directory is
-// already in place from a previous (atomic) run.
-func (e *embeddedSynth) provisionPiece(ctx context.Context, url, targetDir string, minBytes int64, what string) error {
+// already in place from a previous (atomic) run. The download must match
+// the SHA-256 pinned for pinName; without a pin nothing is fetched.
+func (e *embeddedSynth) provisionPiece(ctx context.Context, url, pinName, targetDir string, minBytes int64, what string) error {
 	if fi, err := os.Stat(targetDir); err == nil && fi.IsDir() {
 		return nil
 	}
+	want, err := e.pins.PinnedSHA256(pinName)
+	if err != nil {
+		return fmt.Errorf("tts: provision %s: %w", what, err)
+	}
 	e.logger.Info("tts: downloading embedded voice "+what+" (one-time)", zap.String("url", url))
-	if err := provision.ProvisionArchive(ctx, url, targetDir, minBytes); err != nil {
+	if err := provision.ProvisionVerifiedArchive(ctx, url, want, targetDir, minBytes); err != nil {
 		return fmt.Errorf("tts: provision %s: %w", what, err)
 	}
 	return nil
