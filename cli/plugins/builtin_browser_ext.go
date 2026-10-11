@@ -16,8 +16,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -156,9 +154,9 @@ func browserExtHTML(ctx context.Context, _ BrowserBackend, ext BrowserExtBackend
 }
 
 func browserExtPDF(ctx context.Context, _ BrowserBackend, ext BrowserExtBackend, inv browserInvocation) (string, error) {
-	path := inv.file
-	if path == "" {
-		path = filepath.Join(os.TempDir(), "chatcli-browser", fmt.Sprintf("page-%d.pdf", time.Now().UnixMilli()))
+	path, err := browserArtifactPath(inv.file, "page", ".pdf")
+	if err != nil {
+		return "", fmt.Errorf("@browser pdf: %w", err)
 	}
 	if err := ext.PDF(ctx, path); err != nil {
 		return "", fmt.Errorf("@browser pdf: %w", err)

@@ -16,6 +16,8 @@ package plugins
 import (
 	"context"
 	"errors"
+	"net"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -153,10 +155,38 @@ func (f *fakeBrowserBackend) Back(context.Context) (string, string, error) {
 func (f *fakeBrowserBackend) ConsoleTail(int) []browser.ConsoleEntry { return f.console }
 func (f *fakeBrowserBackend) NetworkTail(int) []browser.NetworkEntry { return f.network }
 
+// mustAbs returns the absolute form of p.
+func mustAbs(t *testing.T, p string) string {
+	t.Helper()
+	a, err := filepath.Abs(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return a
+}
+
+// stubPublicLookup makes every hostname resolve to a public documentation
+// address, so the navigation guard passes without the network.
+func stubPublicLookup(t *testing.T) {
+	t.Helper()
+	prev := webLookupIP
+	webLookupIP = func(string) ([]net.IP, error) { return []net.IP{net.ParseIP("203.0.113.10")}, nil }
+	hostVerdicts.mu.Lock()
+	hostVerdicts.entries = map[string]hostVerdict{}
+	hostVerdicts.mu.Unlock()
+	t.Cleanup(func() {
+		webLookupIP = prev
+		hostVerdicts.mu.Lock()
+		hostVerdicts.entries = map[string]hostVerdict{}
+		hostVerdicts.mu.Unlock()
+	})
+}
+
 // withFakeBrowser injects a fake backend and records every mode the plugin
 // asked for, so visibility requests are observable.
 func withFakeBrowser(t *testing.T) *fakeBrowserBackend {
 	t.Helper()
+	stubPublicLookup(t)
 	fake := &fakeBrowserBackend{}
 	prev := acquireBrowser
 	acquireBrowser = func(_ context.Context, mode browser.Mode) (BrowserBackend, error) {
@@ -170,6 +200,7 @@ func withFakeBrowser(t *testing.T) *fakeBrowserBackend {
 // modeRecorder swaps acquireBrowser for one that records the requested modes.
 func modeRecorder(t *testing.T) (*fakeBrowserBackend, *[]browser.Mode) {
 	t.Helper()
+	stubPublicLookup(t)
 	fake := &fakeBrowserBackend{}
 	var modes []browser.Mode
 	prev := acquireBrowser
@@ -325,12 +356,15 @@ func TestBrowserExecute_ScreenshotScrollBackNetwork(t *testing.T) {
 	fake.network = []browser.NetworkEntry{{Method: "GET", URL: "http://api/y", Status: 404, Type: "Fetch"}}
 	p := NewBuiltinBrowserPlugin()
 
+	// --file names a file in the browser output directory, never a path
+	// elsewhere.
+	want := filepath.Join(browserArtifactDir(), "x.png")
 	out, err := p.Execute(context.Background(), []string{"screenshot", "--file", "/tmp/x.png"})
-	if err != nil || !strings.Contains(out, "/tmp/x.png") {
+	if err != nil || !strings.Contains(out, "x.png") {
 		t.Fatalf("screenshot: out=%q err=%v", out, err)
 	}
-	if fake.lastTarget != "/tmp/x.png" {
-		t.Fatalf("path not forwarded: %q", fake.lastTarget)
+	if got, _ := filepath.Abs(fake.lastTarget); got != mustAbs(t, want) {
+		t.Fatalf("screenshot path = %q, want %q", fake.lastTarget, want)
 	}
 
 	out, err = p.Execute(context.Background(), []string{"screenshot"})
@@ -638,7 +672,7 @@ func TestBrowserExecute_ExtendedVerbs(t *testing.T) {
 	if out := run("html", "#app"); fake.lastOp != "html" || fake.lastTarget != "#app" || !strings.Contains(out, "<div") {
 		t.Fatalf("html: %q", out)
 	}
-	if out := run(`{"cmd":"pdf","args":{"file":"/tmp/p.pdf"}}`); fake.lastTarget != "/tmp/p.pdf" || !strings.Contains(out, "PDF saved") {
+	if out := run(`{"cmd":"pdf","args":{"file":"/tmp/p.pdf"}}`); fake.lastTarget != mustAbs(t, filepath.Join(browserArtifactDir(), "p.pdf")) || !strings.Contains(out, "PDF saved") {
 		t.Fatalf("pdf: %q", out)
 	}
 	if out := run("pdf"); !strings.HasSuffix(fake.lastTarget, ".pdf") || !strings.Contains(out, "PDF saved") {
@@ -660,7 +694,7 @@ func TestBrowserExecute_ExtendedVerbs(t *testing.T) {
 		t.Fatal("resize without dims must error")
 	}
 	run(`{"cmd":"screenshot","args":{"full":true,"file":"/tmp/full.png"}}`)
-	if fake.lastOp != "screenshot-full" || fake.lastTarget != "/tmp/full.png" {
+	if fake.lastOp != "screenshot-full" || fake.lastTarget != mustAbs(t, filepath.Join(browserArtifactDir(), "full.png")) {
 		t.Fatalf("screenshot full: %s %s", fake.lastOp, fake.lastTarget)
 	}
 	run("screenshot", "--full")

@@ -16,7 +16,6 @@ package condition
 
 import (
 	"context"
-	"crypto/tls"
 	"fmt"
 	"io"
 	"net/http"
@@ -25,8 +24,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/diillson/chatcli/cli/plugins"
 	"github.com/diillson/chatcli/cli/scheduler"
-	"github.com/diillson/chatcli/utils"
 )
 
 // HTTPStatus implements scheduler.ConditionEvaluator.
@@ -134,15 +133,10 @@ func (h *HTTPStatus) client(timeout time.Duration, insecure bool) *http.Client {
 	if c, ok := h.clients[key]; ok {
 		return c
 	}
-	tr := &http.Transport{
-		TLSClientConfig:       &tls.Config{InsecureSkipVerify: insecure}, //#nosec G402 -- opt-in via spec.allow_insecure
-		ResponseHeaderTimeout: timeout,
-		IdleConnTimeout:       30 * time.Second,
-	}
-	c := &http.Client{
-		Transport: utils.MeterTransport(tr), // shows the probed host on the live dashboard
-		Timeout:   timeout,
-	}
+	// The web tools' hardened client: the SSRF dial guard and redirect
+	// checks, the proxy variables and the CA bundle, metered for the live
+	// dashboard.
+	c := plugins.NewGuardedHTTPClient(timeout, insecure)
 	h.clients[key] = c
 	return c
 }

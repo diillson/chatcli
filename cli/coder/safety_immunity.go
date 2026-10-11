@@ -17,6 +17,8 @@ package coder
 import (
 	"regexp"
 	"strings"
+
+	"github.com/diillson/chatcli/pkg/coder/engine"
 )
 
 // immunePatterns are compiled regex patterns that ALWAYS require confirmation.
@@ -103,6 +105,11 @@ func init() {
 // regardless of any allow rules in the policy.
 func IsSafetyImmune(toolName, args string) bool {
 	fullCommand := strings.TrimSpace(toolName + " " + args)
+	// Downloaded or decoded content piped into an interpreter runs code
+	// nobody has read; no allow rule covers that.
+	if engine.IsDownloadAndExecute(fullCommand) {
+		return true
+	}
 	for _, pattern := range immunePatterns {
 		if pattern.MatchString(fullCommand) {
 			return true
@@ -115,6 +122,9 @@ func IsSafetyImmune(toolName, args string) bool {
 // or empty string if it's not immune.
 func GetImmuneReason(toolName, args string) string {
 	fullCommand := strings.TrimSpace(toolName + " " + args)
+	if engine.IsDownloadAndExecute(fullCommand) {
+		return "This operation matches a safety-critical pattern and always requires explicit approval."
+	}
 	for _, pattern := range immunePatterns {
 		if pattern.MatchString(fullCommand) {
 			return "This operation matches a safety-critical pattern and always requires explicit approval."

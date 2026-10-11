@@ -47,6 +47,9 @@ func (e *Engine) handleOutline(args []string) error {
 		return fmt.Errorf("--file requerido")
 	}
 	path := expandPath(*file)
+	if err := e.validatePath(path); err != nil {
+		return err
+	}
 	entries, lang, err := outlineFile(path)
 	if err != nil {
 		return err
@@ -77,6 +80,9 @@ func (e *Engine) handleMap(args []string) error {
 		return err
 	}
 	root := expandPath(*dir)
+	if err := e.validatePath(root); err != nil {
+		return err
+	}
 
 	type fileMap struct {
 		rel     string
@@ -97,7 +103,7 @@ func (e *Engine) handleMap(args []string) error {
 			}
 			return nil
 		}
-		if !isMappableSource(name) || info.Size() > 1<<20 {
+		if !info.Mode().IsRegular() || !isMappableSource(name) || info.Size() > 1<<20 {
 			return nil
 		}
 		entries, _, err := outlineFile(p)

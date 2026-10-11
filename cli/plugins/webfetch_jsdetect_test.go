@@ -1,6 +1,7 @@
 package plugins
 
 import (
+	"net"
 	"strings"
 	"testing"
 )
@@ -137,7 +138,9 @@ func TestRenderRequestAllowed_Policy(t *testing.T) {
 	if renderRequestAllowed("http://metadata.google.internal/computeMetadata/v1/") {
 		t.Error("metadata hostname must be blocked")
 	}
-	// Public HTTPS passes the upfront policy.
+	// Public HTTPS passes the policy; the resolver answer is stubbed so the
+	// test needs no network.
+	stubWebLookup(t, map[string][]net.IP{"example.com": {net.ParseIP("203.0.113.10")}})
 	if !renderRequestAllowed("https://example.com/app.js") {
 		t.Error("public https sub-request must be allowed")
 	}
