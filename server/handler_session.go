@@ -31,10 +31,10 @@ func (h *Handler) SendPrompt(ctx context.Context, req *pb.SendPromptRequest) (*p
 		return nil, status.Errorf(codes.InvalidArgument, "%s", i18n.T("server.session.prompt_empty"))
 	}
 
-	route, err := h.resolveRoute(req.Provider, req.Model, req.ClientApiKey, req.ProviderConfig)
+	route, err := h.resolveRoute(ctx, req.Provider, req.Model, req.ClientApiKey, req.ProviderConfig)
 	if err != nil {
 		h.logger.Error(i18n.T("server.session.llm_client_failed"), zap.Error(err))
-		return nil, status.Errorf(codes.Internal, "%s", i18n.T("server.session.get_client_error", err))
+		return nil, routeFailure(err, "server.session.get_client_error")
 	}
 
 	history := protoToHistory(req.History)
@@ -63,10 +63,10 @@ func (h *Handler) StreamPrompt(req *pb.StreamPromptRequest, stream pb.ChatCLISer
 		return status.Errorf(codes.InvalidArgument, "%s", i18n.T("server.session.prompt_empty"))
 	}
 
-	route, err := h.resolveRoute(req.Provider, req.Model, req.ClientApiKey, req.ProviderConfig)
+	route, err := h.resolveRoute(stream.Context(), req.Provider, req.Model, req.ClientApiKey, req.ProviderConfig)
 	if err != nil {
 		h.logger.Error(i18n.T("server.session.stream_client_failed"), zap.Error(err))
-		return status.Errorf(codes.Internal, "%s", i18n.T("server.session.get_client_error", err))
+		return routeFailure(err, "server.session.get_client_error")
 	}
 
 	history := protoToHistory(req.History)
@@ -125,7 +125,13 @@ func (h *Handler) InteractiveSession(stream pb.ChatCLIService_InteractiveSession
 			mu.Lock()
 			history = append(history, models.Message{Role: "user", Content: msg.Content})
 
-			route, err := h.resolveRoute(msg.Metadata["provider"], msg.Metadata["model"], msg.Metadata["client_api_key"], nil)
+			route, err := h.resolveRoute(stream.Context(), msg.Metadata["provider"], msg.Metadata["model"], msg.Metadata["client_api_key"], nil)
+			if s, ok := status.FromError(err); err != nil && ok && s.Code() == codes.PermissionDenied {
+				// An authorization refusal ends the session: the caller
+				// asked for something its role does not allow.
+				mu.Unlock()
+				return err
+			}
 			if err != nil {
 				mu.Unlock()
 				sendErr := stream.Send(&pb.SessionMessage{

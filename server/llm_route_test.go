@@ -117,30 +117,30 @@ func TestResolveRoute_Precedence(t *testing.T) {
 	mgr := &routeManager{byProvider: map[string]client.LLMClient{"OPENAI": def, "CLAUDEAI": claude}}
 	h := newRouteHandler(mgr)
 
-	r, err := h.resolveRoute("", "", "", nil)
+	r, err := h.resolveRoute(context.Background(), "", "", "", nil)
 	require.NoError(t, err)
 	assert.Same(t, def, r.client, "no chain: the server default client")
 	assert.Equal(t, "OPENAI", r.provider)
 	assert.False(t, r.callerCreds)
 
 	h.SetFallbackChain(chainOf(&routeClient{model: "a"}, &routeClient{model: "b"}))
-	r, err = h.resolveRoute("", "", "", nil)
+	r, err = h.resolveRoute(context.Background(), "", "", "", nil)
 	require.NoError(t, err)
 	assert.NotNil(t, r.chain, "nothing named: the fallback chain serves")
 
-	r, err = h.resolveRoute("CLAUDEAI", "", "", nil)
+	r, err = h.resolveRoute(context.Background(), "CLAUDEAI", "", "", nil)
 	require.NoError(t, err)
 	assert.Nil(t, r.chain, "an explicit provider bypasses the chain")
 	assert.Same(t, claude, r.client)
 	assert.Equal(t, "CLAUDEAI", r.provider)
 
-	r, err = h.resolveRoute("", "", "sk-caller", nil)
+	r, err = h.resolveRoute(context.Background(), "", "", "sk-caller", nil)
 	require.NoError(t, err)
 	assert.Nil(t, r.chain, "caller credentials bypass the chain")
 	assert.True(t, r.callerCreds)
 	assert.Equal(t, "OPENAI", r.provider, "default provider with the caller's key")
 
-	_, err = h.resolveRoute("NOPE", "", "", nil)
+	_, err = h.resolveRoute(context.Background(), "NOPE", "", "", nil)
 	assert.Error(t, err)
 }
 
@@ -157,7 +157,7 @@ func TestEffectiveMaxTokens_RequestThenEnvThenCatalog(t *testing.T) {
 func TestComplete_AttributesUsageAndStopReason(t *testing.T) {
 	def := &routeClient{model: "gpt-6-astra", replies: []string{"hello"}, usage: &models.UsageInfo{PromptTokens: 7, CompletionTokens: 2, IsReal: true}, stop: "end_turn"}
 	h := newRouteHandler(&routeManager{byProvider: map[string]client.LLMClient{"OPENAI": def}})
-	r, err := h.resolveRoute("", "", "", nil)
+	r, err := h.resolveRoute(context.Background(), "", "", "", nil)
 	require.NoError(t, err)
 	res, err := h.complete(context.Background(), r, "hi", nil, 100)
 	require.NoError(t, err)
@@ -185,7 +185,7 @@ func TestComplete_EstimatesUsageWhenProviderReportsNone(t *testing.T) {
 	mgr := &mockLLMManager{}
 	mgr.On("GetClient", "OPENAI", "gpt-6-astra").Return(plain, nil)
 	h := NewHandler(mgr, nil, zap.NewNop(), "OPENAI", "gpt-6-astra")
-	r, err := h.resolveRoute("", "", "", nil)
+	r, err := h.resolveRoute(context.Background(), "", "", "", nil)
 	require.NoError(t, err)
 	res, err := h.complete(context.Background(), r, "12345678", []models.Message{{Role: "user", Content: "abcd"}}, 10)
 	require.NoError(t, err)
@@ -199,7 +199,7 @@ func TestComplete_RefreshesServerCredentialsOnceAndRetries(t *testing.T) {
 	expired := &routeClient{model: "gpt-6-astra", errs: []error{&utils.APIError{StatusCode: 401, Message: "expired"}}, replies: []string{"", "after refresh"}}
 	mgr := &routeManager{byProvider: map[string]client.LLMClient{"OPENAI": expired}}
 	h := newRouteHandler(mgr)
-	r, err := h.resolveRoute("", "", "", nil)
+	r, err := h.resolveRoute(context.Background(), "", "", "", nil)
 	require.NoError(t, err)
 
 	res, err := h.complete(context.Background(), r, "hi", nil, 10)
@@ -224,7 +224,7 @@ func TestComplete_NeverRefreshesCallerCredentials(t *testing.T) {
 	expired := &routeClient{model: "gpt-6-astra", errs: []error{&utils.APIError{StatusCode: 401, Message: "bad key"}}}
 	mgr := &routeManager{byProvider: map[string]client.LLMClient{"OPENAI": expired}}
 	h := newRouteHandler(mgr)
-	r, err := h.resolveRoute("", "", "sk-caller", nil)
+	r, err := h.resolveRoute(context.Background(), "", "", "sk-caller", nil)
 	require.NoError(t, err)
 	_, err = h.complete(context.Background(), r, "hi", nil, 10)
 	require.Error(t, err)
@@ -242,7 +242,7 @@ func TestComplete_RetriesRefusalOnSiblingWithSameCredentials(t *testing.T) {
 	}}
 	h := NewHandler(mgr, nil, zap.NewNop(), "CLAUDEAI", "claude-fable-5-1")
 
-	r, err := h.resolveRoute("", "", "sk-caller", nil)
+	r, err := h.resolveRoute(context.Background(), "", "", "sk-caller", nil)
 	require.NoError(t, err)
 	res, err := h.complete(context.Background(), r, "hi", nil, 10)
 	require.NoError(t, err)
@@ -258,7 +258,7 @@ func TestComplete_RefusalWithoutSiblingSurfacesTheError(t *testing.T) {
 	gpt := &routeClient{model: "gpt-6-astra", errs: []error{refusalErr()}}
 	mgr := &routeManager{byProvider: map[string]client.LLMClient{"OPENAI": gpt}}
 	h := newRouteHandler(mgr)
-	r, err := h.resolveRoute("", "", "", nil)
+	r, err := h.resolveRoute(context.Background(), "", "", "", nil)
 	require.NoError(t, err)
 	_, err = h.complete(context.Background(), r, "hi", nil, 10)
 	require.Error(t, err)
@@ -269,7 +269,7 @@ func TestComplete_RefusalWithoutSiblingSurfacesTheError(t *testing.T) {
 func TestStream_ForwardsChunksAndFinalUsage(t *testing.T) {
 	sc := &routeClient{model: "gpt-6-astra", replies: []string{"abc"}, stream: true, usage: &models.UsageInfo{PromptTokens: 1, CompletionTokens: 3, IsReal: true}, stop: "end_turn"}
 	h := newRouteHandler(&routeManager{byProvider: map[string]client.LLMClient{"OPENAI": sc}})
-	r, err := h.resolveRoute("", "", "", nil)
+	r, err := h.resolveRoute(context.Background(), "", "", "", nil)
 	require.NoError(t, err)
 	var got []string
 	res, err := h.stream(context.Background(), r, "hi", nil, 10, func(c string) error { got = append(got, c); return nil })
@@ -283,7 +283,7 @@ func TestStream_ForwardsChunksAndFinalUsage(t *testing.T) {
 func TestStream_NonStreamingRouteDeliversOneChunk(t *testing.T) {
 	plain := &routeClient{model: "gpt-6-astra", replies: []string{"whole"}}
 	h := newRouteHandler(&routeManager{byProvider: map[string]client.LLMClient{"OPENAI": plain}})
-	r, err := h.resolveRoute("", "", "", nil)
+	r, err := h.resolveRoute(context.Background(), "", "", "", nil)
 	require.NoError(t, err)
 	var got []string
 	res, err := h.stream(context.Background(), r, "hi", nil, 10, func(c string) error { got = append(got, c); return nil })
@@ -297,7 +297,7 @@ func TestStream_ChainAttributionComesFromTheEntryThatAnswered(t *testing.T) {
 	up := &routeClient{model: "model-b", stream: true, replies: []string{"via b"}}
 	h := newRouteHandler(&routeManager{byProvider: map[string]client.LLMClient{}})
 	h.SetFallbackChain(chainOf(down, up))
-	r, err := h.resolveRoute("", "", "", nil)
+	r, err := h.resolveRoute(context.Background(), "", "", "", nil)
 	require.NoError(t, err)
 	var got string
 	res, err := h.stream(context.Background(), r, "hi", nil, 10, func(c string) error { got += c; return nil })

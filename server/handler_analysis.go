@@ -42,10 +42,10 @@ func (h *Handler) AnalyzeIssue(ctx context.Context, req *pb.AnalyzeIssueRequest)
 		return nil, status.Errorf(codes.InvalidArgument, "%s", i18n.T("server.analysis.issue_name_required"))
 	}
 
-	route, err := h.resolveRoute(req.Provider, req.Model, "", nil)
+	route, err := h.resolveRoute(ctx, req.Provider, req.Model, "", nil)
 	if err != nil {
 		h.logger.Error(i18n.T("server.analysis.llm_client_failed"), zap.Error(err))
-		return nil, status.Errorf(codes.Internal, "%s", i18n.T("server.analysis.get_client_error", err))
+		return nil, routeFailure(err, "server.analysis.get_client_error")
 	}
 
 	prompt := buildAnalysisPrompt(req)
@@ -530,10 +530,10 @@ func (h *Handler) AgenticStep(ctx context.Context, req *pb.AgenticStepRequest) (
 		return nil, status.Errorf(codes.InvalidArgument, "%s", i18n.T("server.agentic.issue_name_required"))
 	}
 
-	route, err := h.resolveRoute(req.Provider, req.Model, "", nil)
+	route, err := h.resolveRoute(ctx, req.Provider, req.Model, "", nil)
 	if err != nil {
 		h.logger.Error(i18n.T("server.agentic.llm_client_failed"), zap.Error(err))
-		return nil, status.Errorf(codes.Internal, "%s", i18n.T("server.agentic.get_client_error", err))
+		return nil, routeFailure(err, "server.agentic.get_client_error")
 	}
 
 	prompt := buildAgenticStepPrompt(req)
