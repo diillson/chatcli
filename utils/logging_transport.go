@@ -187,24 +187,62 @@ func (t *LoggingTransport) RoundTrip(req *http.Request) (*http.Response, error) 
 		return resp, nil
 	}
 
-	var respBodyBytes []byte
-	if resp.Body != nil {
-		var err error
-		respBodyBytes, err = io.ReadAll(resp.Body)
-		if err != nil {
-			t.Logger.Error("Erro ao ler o corpo da resposta", zap.Error(err))
-			_ = resp.Body.Close()
-			conn.Fail(err)
-			return resp, err
-		}
-		resp.Body = io.NopCloser(bytes.NewBuffer(respBodyBytes)) // Resetar o Body
-		// Remover dados sensíveis do corpo
-		sanitizedBody := t.sanitizeBody(resp.Header.Get("Content-Type"), respBodyBytes)
-		t.Logger.Debug("Corpo da Resposta", zap.ByteString("Body", sanitizedBody))
+	if resp.Body == nil {
+		conn.Finish(resp.StatusCode, 0)
+		return resp, nil
 	}
-
-	conn.Finish(resp.StatusCode, int64(len(respBodyBytes)))
+	// O corpo segue em streaming para o chamador: lê-lo inteiro aqui
+	// colocaria em memória o que o servidor quisesse mandar, antes de
+	// qualquer limite do chamador valer. Para o log, basta o começo dele,
+	// registrado quando o chamador termina de ler.
+	contentType := resp.Header.Get("Content-Type")
+	resp.Body = &loggedBody{
+		ReadCloser: conn.Stream(resp.StatusCode, resp.Body),
+		limit:      t.MaxBodySize,
+		done: func(head []byte, total int64) {
+			body := t.sanitizeBody(contentType, head)
+			if total > int64(len(head)) {
+				body = []byte(fmt.Sprintf("[Corpo muito grande para ser logado, tamanho: %d bytes]", total))
+			}
+			t.Logger.Debug("Corpo da Resposta", zap.ByteString("Body", body))
+		},
+	}
 	return resp, nil
+}
+
+// loggedBody repassa o corpo de uma resposta guardando só os primeiros
+// limit bytes, e chama done uma vez, no fim da leitura ou no Close.
+type loggedBody struct {
+	io.ReadCloser
+	limit  int
+	head   []byte
+	total  int64
+	logged bool
+	done   func(head []byte, total int64)
+}
+
+func (b *loggedBody) Read(p []byte) (int, error) {
+	n, err := b.ReadCloser.Read(p)
+	b.total += int64(n)
+	if room := b.limit - len(b.head); room > 0 && n > 0 {
+		b.head = append(b.head, p[:min(n, room)]...)
+	}
+	if err == io.EOF {
+		b.finish()
+	}
+	return n, err
+}
+
+func (b *loggedBody) Close() error {
+	b.finish()
+	return b.ReadCloser.Close()
+}
+
+func (b *loggedBody) finish() {
+	if !b.logged {
+		b.logged = true
+		b.done(b.head, b.total)
+	}
 }
 
 // isEventStream reporta se o Content-Type é text/event-stream, ignorando

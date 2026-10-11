@@ -99,7 +99,7 @@ func newSSETransport(ctx context.Context, cfg ServerConfig, logger *zap.Logger, 
 		// embedded http.Client) so a long-held GET stays open as
 		// long as the supervisor wants it to. Generous timeout
 		// here is just a safety net for the POST side.
-		httpClient:  &http.Client{Timeout: maxDuration(callTimeout, initTimeout) * 2},
+		httpClient:  &http.Client{Timeout: maxDuration(callTimeout, initTimeout) * 2, CheckRedirect: sameOriginRedirect},
 		pending:     make(map[int64]chan *jsonRPCResponse),
 		logger:      logger,
 		ctx:         tctx,
@@ -262,7 +262,7 @@ func (t *sseTransport) runOnce(ctx context.Context) error {
 	// embedded Timeout on httpClient would kill the long-held GET,
 	// so we issue this request through a dedicated client without
 	// a Timeout field.
-	c := &http.Client{Transport: t.httpClient.Transport}
+	c := &http.Client{Transport: t.httpClient.Transport, CheckRedirect: sameOriginRedirect}
 	resp, err := c.Do(req)
 	if err != nil {
 		return fmt.Errorf("sse connect: %w", err)

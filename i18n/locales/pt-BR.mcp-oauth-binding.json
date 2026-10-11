@@ -1,5 +1,9 @@
 {
   "mcp.oauth.prm_resource_mismatch": "os metadados de recurso protegido descrevem o recurso %q, não este servidor MCP (%s); login recusado (RFC 9728, seção 3.3)",
   "mcp.oauth.prm_cross_origin": "o servidor MCP indicou metadados de recurso protegido em outra origem (%s); só são aceitos na origem do próprio servidor (%s)",
-  "mcp.oauth.document_too_large": "documento OAuth maior que o limite de %d bytes"
+  "mcp.oauth.document_too_large": "documento OAuth maior que o limite de %d bytes",
+  "mcp.oauth.issuer_mismatch": "os metadados do authorization server declaram o issuer %q, mas foram buscados para %q (RFC 8414, seção 3.3)",
+  "mcp.oauth.insecure_endpoint": "endpoint OAuth recusado: %s (exige https; http só em localhost)",
+  "mcp.oauth.no_s256": "o authorization server não oferece PKCE S256 (métodos: %s)",
+  "mcp.transport.cross_origin_redirect": "redirecionamento recusado de %s para %s: credenciais do servidor MCP só seguem dentro da mesma origem"
 }

@@ -305,3 +305,136 @@ func TestOAuthDocumentSizeIsBounded(t *testing.T) {
 		t.Fatal("oversized document decoded")
 	}
 }
+
+func TestAuthServerMetadataMustNameItsIssuer(t *testing.T) {
+	var base string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_ = json.NewEncoder(w).Encode(authServerMetadata{
+			Issuer:                "https://other-issuer.example",
+			AuthorizationEndpoint: base + "/authorize",
+			TokenEndpoint:         base + "/token",
+		})
+	}))
+	defer srv.Close()
+	base = srv.URL
+	if _, err := newOAuthDiscoverer(zap.NewNop()).fetchAuthServerMetadata(context.Background(), base); err == nil {
+		t.Fatal("metadata naming another issuer accepted")
+	}
+}
+
+func TestValidateAuthServer(t *testing.T) {
+	ok := &authServerMetadata{
+		AuthorizationEndpoint: "https://as.example/authorize",
+		TokenEndpoint:         "https://as.example/token",
+		RegistrationEndpoint:  "http://127.0.0.1:9000/register",
+	}
+	if err := validateAuthServer(ok); err != nil {
+		t.Fatalf("valid metadata refused: %v", err)
+	}
+	for name, meta := range map[string]*authServerMetadata{
+		"http token endpoint":     {AuthorizationEndpoint: "https://as.example/a", TokenEndpoint: "http://as.example/token"},
+		"custom scheme authorize": {AuthorizationEndpoint: "smb://as.example/a", TokenEndpoint: "https://as.example/token"},
+		"file authorize":          {AuthorizationEndpoint: "file:///etc/passwd", TokenEndpoint: "https://as.example/token"},
+		"http registration":       {AuthorizationEndpoint: "https://as.example/a", TokenEndpoint: "https://as.example/t", RegistrationEndpoint: "http://10.0.0.1/register"},
+		"no S256":                 {AuthorizationEndpoint: "https://as.example/a", TokenEndpoint: "https://as.example/t", CodeChallengeMethodsSupported: []string{"plain"}},
+	} {
+		if err := validateAuthServer(meta); err == nil {
+			t.Errorf("%s: accepted", name)
+		}
+	}
+}
+
+func TestSameOriginRedirect(t *testing.T) {
+	from, _ := http.NewRequest(http.MethodPost, "https://mcp.example/mcp", nil)
+	for target, allowed := range map[string]bool{
+		"https://mcp.example/mcp/":       true,
+		"https://mcp.example:443/other":  true,
+		"http://mcp.example/mcp/":        false,
+		"https://evil.example/mcp":       false,
+		"https://mcp.example:8443/mcp":   false,
+		"http://169.254.169.254/latest/": false,
+	} {
+		to, _ := http.NewRequest(http.MethodPost, target, nil)
+		err := sameOriginRedirect(to, []*http.Request{from})
+		if (err == nil) != allowed {
+			t.Errorf("redirect to %s: err=%v, want allowed=%v", target, err, allowed)
+		}
+	}
+}
+
+// TestRedirectDoesNotCarryCredentialsAcrossOrigins drives the real HTTP
+// transport: a server answering with a redirect to another origin must not
+// receive the configured credential there.
+func TestRedirectDoesNotCarryCredentialsAcrossOrigins(t *testing.T) {
+	var leaked atomic.Int32
+	elsewhere := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("X-API-Key") != "" || r.Header.Get("Authorization") != "" {
+			leaked.Add(1)
+		}
+	}))
+	defer elsewhere.Close()
+	origin := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, elsewhere.URL+"/mcp", http.StatusTemporaryRedirect)
+	}))
+	defer origin.Close()
+
+	tr, err := newHTTPTransport(context.Background(), ServerConfig{
+		Name:      "srv",
+		Transport: TransportStreamableHTTP,
+		URL:       origin.URL + "/mcp",
+		Auth:      &AuthConfig{Type: "header", Header: "X-API-Key", Token: "secret"},
+	}, zap.NewNop(), nil, "srv")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = tr.Close(context.Background()) }()
+	_, _ = tr.Call("initialize", map[string]any{})
+	if n := leaked.Load(); n != 0 {
+		t.Fatalf("credential reached another origin %d times", n)
+	}
+}
+
+func TestWrongStateDoesNotAbortLogin(t *testing.T) {
+	isolateOAuth(t)
+	f := newOAuthFixture(t, func(base string) string { return base + "/mcp" })
+	prev := openAuthURL
+	openAuthURL = func(u string) error {
+		parsed, err := url.Parse(u)
+		if err != nil {
+			return err
+		}
+		redirect := parsed.Query().Get("redirect_uri")
+		// A hostile page fires first; the user's real consent follows.
+		if resp, err := http.Get(redirect + "?code=forged&state=wrong"); err == nil {
+			_ = resp.Body.Close()
+		}
+		return prev(u)
+	}
+	defer func() { openAuthURL = prev }()
+
+	if err := LoginServer(context.Background(), "srv", f.srv.URL+"/mcp", oauthChallenge{}, zap.NewNop()); err != nil {
+		t.Fatalf("login aborted by a forged callback: %v", err)
+	}
+	if len(f.tokenGrant) != 1 || f.tokenGrant[0].Get("code") != "code-1" {
+		t.Errorf("token grants = %v", f.tokenGrant)
+	}
+}
+
+func TestOAuthMetaBelongsToItsServer(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	if err := saveOAuthMeta(&oauthServerMeta{Server: "a b", TokenEndpoint: "https://as/t"}); err != nil {
+		t.Fatal(err)
+	}
+	if meta, err := loadOAuthMeta("a_b"); err == nil || meta != nil {
+		t.Fatalf("server a_b read the record of server %q", meta.Server)
+	}
+	if meta, err := loadOAuthMeta("a b"); err != nil || meta.Server != "a b" {
+		t.Fatalf("own record = %+v, %v", meta, err)
+	}
+}
+
+func TestPrintableDropsControlCharacters(t *testing.T) {
+	if got := printable("bad\x1b]8;;https://evil\x07link\x1b[0m\r\n"); strings.ContainsAny(got, "\x1b\x07\r\n") {
+		t.Errorf("printable = %q", got)
+	}
+}

@@ -43,6 +43,7 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/diillson/chatcli/auth"
 	"github.com/diillson/chatcli/i18n"
@@ -238,6 +239,11 @@ func loadOAuthMeta(server string) (*oauthServerMeta, error) {
 	var meta oauthServerMeta
 	if err := json.Unmarshal(data, &meta); err != nil {
 		return nil, err
+	}
+	// Distinct names can sanitize to one file; a record written for
+	// another server is not this server's.
+	if meta.Server != server {
+		return nil, os.ErrNotExist
 	}
 	return &meta, nil
 }
@@ -457,6 +463,10 @@ func urlOrigin(raw string) (string, bool) {
 // interoperate with the range of real servers.
 func (d *oauthDiscoverer) fetchAuthServerMetadata(ctx context.Context, issuer string) (*authServerMetadata, error) {
 	issuer = strings.TrimRight(strings.TrimSpace(issuer), "/")
+	// Metadata fetched in clear text could name any endpoint.
+	if err := validateEndpointURL(issuer); err != nil {
+		return nil, err
+	}
 	candidates := wellKnownCandidates(issuer)
 	var lastErr error
 	for _, u := range candidates {
@@ -468,6 +478,15 @@ func (d *oauthDiscoverer) fetchAuthServerMetadata(ctx context.Context, issuer st
 		if meta.AuthorizationEndpoint == "" || meta.TokenEndpoint == "" {
 			lastErr = fmt.Errorf("%s", i18n.T("mcp.oauth.incomplete_metadata", u))
 			continue
+		}
+		// RFC 8414 section 3.3: metadata naming another issuer is not
+		// this issuer's, whoever served it.
+		if strings.TrimRight(strings.TrimSpace(meta.Issuer), "/") != issuer {
+			lastErr = fmt.Errorf("%s", i18n.T("mcp.oauth.issuer_mismatch", meta.Issuer, issuer))
+			continue
+		}
+		if err := validateAuthServer(meta); err != nil {
+			return nil, err
 		}
 		return meta, nil
 	}
@@ -572,7 +591,7 @@ func (d *oauthDiscoverer) registerClient(ctx context.Context, registrationEndpoi
 		if msg == "" {
 			msg = resp.Status
 		}
-		return "", fmt.Errorf("%s", i18n.T("mcp.oauth.registration_failed", msg))
+		return "", fmt.Errorf("%s", i18n.T("mcp.oauth.registration_failed", printable(msg)))
 	}
 	return reg.ClientID, nil
 }
@@ -618,6 +637,9 @@ func LoginServer(ctx context.Context, serverName, serverURL string, ch oauthChal
 			AuthorizationEndpoint: meta.AuthorizationEndpoint,
 			TokenEndpoint:         meta.TokenEndpoint,
 			RegistrationEndpoint:  meta.RegistrationEndpoint,
+		}
+		if err := validateAuthServer(asMeta); err != nil {
+			return err
 		}
 	}
 
@@ -719,6 +741,11 @@ func mcpTokenProvider(serverName, serverURL string, logger *zap.Logger) (auth.To
 			zap.String("server", serverName), zap.String("stored_resource", meta.Resource), zap.String("resource", resource))
 		return nil, nil
 	}
+	if err := validateEndpointURL(meta.TokenEndpoint); err != nil {
+		logger.Warn("MCP OAuth: stored token endpoint is not acceptable; log in again",
+			zap.String("server", serverName), zap.Error(err))
+		return nil, nil
+	}
 	refresh := newMCPRefreshFunc(meta.TokenEndpoint, meta.ClientID, resource, meta.Scope)
 	return auth.NewOAuthTokenProviderWithRefresh(cred, mcpOAuthProfileID(serverName), "auth-store", refresh, logger), nil
 }
@@ -811,6 +838,82 @@ func fetchJSON[T any](ctx context.Context, hc *http.Client, url string) (*T, err
 		return nil, err
 	}
 	return &out, nil
+}
+
+// validateAuthServer checks the endpoints of authorization-server metadata
+// before any of them is used: each must be an https URL (plain http only on
+// a loopback host), and a server listing its PKCE methods must offer S256,
+// the only one ChatCLI uses.
+func validateAuthServer(meta *authServerMetadata) error {
+	for _, u := range []string{meta.AuthorizationEndpoint, meta.TokenEndpoint, meta.RegistrationEndpoint} {
+		if strings.TrimSpace(u) == "" {
+			continue
+		}
+		if err := validateEndpointURL(u); err != nil {
+			return err
+		}
+	}
+	if methods := meta.CodeChallengeMethodsSupported; len(methods) > 0 {
+		for _, m := range methods {
+			if m == "S256" {
+				return nil
+			}
+		}
+		return fmt.Errorf("%s", i18n.T("mcp.oauth.no_s256", strings.Join(methods, ", ")))
+	}
+	return nil
+}
+
+// validateEndpointURL accepts an absolute https URL, or http on a loopback
+// host. Authorization codes, PKCE verifiers and refresh tokens travel to
+// these endpoints, and the authorization endpoint is opened in the browser.
+func validateEndpointURL(raw string) error {
+	u, err := url.Parse(strings.TrimSpace(raw))
+	if err == nil && u.Host != "" {
+		switch strings.ToLower(u.Scheme) {
+		case "https":
+			return nil
+		case "http":
+			if isLoopbackHost(u.Hostname()) {
+				return nil
+			}
+		}
+	}
+	return fmt.Errorf("%s", i18n.T("mcp.oauth.insecure_endpoint", raw))
+}
+
+// isLoopbackHost reports whether host names this machine.
+func isLoopbackHost(host string) bool {
+	if strings.EqualFold(host, "localhost") {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
+}
+
+// sameOriginRedirect is the redirect policy of the MCP transports: their
+// requests carry the server's credentials and custom headers, so they
+// follow a redirect only within the origin they were sent to, which also
+// refuses a downgrade from https to http.
+func sameOriginRedirect(req *http.Request, via []*http.Request) error {
+	if len(via) >= 10 {
+		return errors.New("stopped after 10 redirects")
+	}
+	if !sameOrigin(req.URL.String(), via[0].URL.String()) {
+		return fmt.Errorf("%s", i18n.T("mcp.transport.cross_origin_redirect", via[0].URL.Redacted(), req.URL.Redacted()))
+	}
+	return nil
+}
+
+// printable drops control characters from text an authorization server
+// supplied, so it cannot drive the terminal it is printed to.
+func printable(s string) string {
+	return strings.Map(func(r rune) rune {
+		if unicode.IsControl(r) {
+			return -1
+		}
+		return r
+	}, s)
 }
 
 // maxOAuthDocumentBytes caps a discovery or registration response. Real
