@@ -7,13 +7,10 @@ package version
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"os"
 	"runtime/debug"
-	"strconv"
 	"strings"
 	"time"
 
@@ -79,16 +76,7 @@ var FetchLatestReleaseImpl = func(ctx context.Context) (ReleaseInfo, error) {
 		return ReleaseInfo{}, fmt.Errorf("erro ao verificar versão: status %d", resp.StatusCode)
 	}
 
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return ReleaseInfo{}, err
-	}
-
-	var releaseInfo ReleaseInfo
-	if err := json.Unmarshal(body, &releaseInfo); err != nil {
-		return ReleaseInfo{}, err
-	}
-	return releaseInfo, nil
+	return decodeReleaseInfo(resp.Body)
 }
 
 // enrichedFromRelease retorna uma cópia de v com CommitHash/BuildDate
@@ -224,66 +212,34 @@ func ExtractBaseVersion(version string) string {
 }
 
 // NeedsUpdate verifica semanticamente se a versão atual precisa ser atualizada.
+// Ambas as versões precisam ser semver estrito (prefixo "v" opcional): uma
+// versão malformada nunca é tratada como mais nova — a resposta é false, e a
+// tag jamais chega a uma URL de download ou ao argumento do go install.
 func NeedsUpdate(currentVersion, latestVersion string) bool {
-	// Remove prefixo "v" se houver
 	currentVersion = strings.TrimPrefix(currentVersion, "v")
 	latestVersion = strings.TrimPrefix(latestVersion, "v")
 
-	// Tratar casos de versão de desenvolvimento que não devem ser comparados
+	// Versões de desenvolvimento não são comparadas.
 	if currentVersion == "" || currentVersion == "dev" || currentVersion == "unknown" || strings.HasPrefix(currentVersion, "0.0.0-") {
 		return false
 	}
 
-	// Separar a versão principal dos sufixos de pré-lançamento
-	currentParts := strings.SplitN(currentVersion, "-", 2)
-	latestParts := strings.SplitN(latestVersion, "-", 2)
-
-	currentBase := currentParts[0]
-	latestBase := latestParts[0]
-
-	// Comparar as partes numéricas (major.minor.patch)
-	currentNumeric := strings.Split(currentBase, ".")
-	latestNumeric := strings.Split(latestBase, ".")
-
-	for len(currentNumeric) < 3 {
-		currentNumeric = append(currentNumeric, "0")
+	cur, curPre, ok := semverParts(currentVersion)
+	if !ok {
+		return false
 	}
-	for len(latestNumeric) < 3 {
-		latestNumeric = append(latestNumeric, "0")
+	lat, latPre, ok := semverParts(latestVersion)
+	if !ok {
+		return false
 	}
-
 	for i := 0; i < 3; i++ {
-		current, _ := strconv.Atoi(currentNumeric[i])
-		latest, _ := strconv.Atoi(latestNumeric[i])
-		if latest > current {
-			return true // Versão mais recente é numericamente maior
-		}
-		if current > latest {
-			return false // Versão atual já é maior
+		if lat[i] != cur[i] {
+			return lat[i] > cur[i]
 		}
 	}
-
-	// Se as partes numéricas são iguais, comparar os sufixos de pré-lançamento
-	// Regra SemVer: uma versão sem sufixo é sempre mais nova que uma com sufixo.
-
-	hasCurrentSuffix := len(currentParts) > 1
-	hasLatestSuffix := len(latestParts) > 1
-
-	if hasCurrentSuffix && !hasLatestSuffix {
-		return true // Ex: current é 1.2.3-alpha, latest é 1.2.3 (precisa atualizar)
-	}
-
-	if !hasCurrentSuffix && hasLatestSuffix {
-		return false // Ex: current é 1.2.3, latest é 1.2.3-beta (não precisa "atualizar")
-	}
-
-	if hasCurrentSuffix && hasLatestSuffix {
-		// Compara os sufixos alfabeticamente. "beta" > "alpha"
-		return latestParts[1] > currentParts[1]
-	}
-
-	// Se chegou aqui, as versões são idênticas
-	return false
+	// Núcleo igual: regra SemVer de precedência do pré-lançamento (versão
+	// sem sufixo é mais nova que qualquer uma com sufixo).
+	return comparePrerelease(latPre, curPre) > 0
 }
 
 // ansiColor aplica uma cor ANSI simples (para uso em FormatVersionInfo sem depender de cli)

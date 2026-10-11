@@ -7,7 +7,10 @@ package update
 
 import (
 	"context"
+	"crypto/ed25519"
+	"crypto/rand"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -56,11 +59,36 @@ func TestParseChecksums(t *testing.T) {
 	}
 }
 
-// newReleaseServer sobe um servidor fake de release e aponta downloadBaseURL
-// para ele. assets mapeia nome → conteúdo; checksums é o corpo publicado
-// (string vazia = 404).
+// newReleaseServer sobe um servidor fake de release, assina o checksums.txt
+// com uma chave de teste gerada aqui (instalada como única chave de release
+// confiável) e aponta downloadBaseURL para ele. assets mapeia nome →
+// conteúdo; checksums é o corpo publicado (string vazia = 404).
 func newReleaseServer(t *testing.T, tag, checksums string, assets map[string]string) {
 	t.Helper()
+	_, priv := installTestReleaseKey(t)
+	sig := base64.StdEncoding.EncodeToString(ed25519.Sign(priv, []byte(checksums)))
+	serveRelease(t, tag, checksums, &sig, assets)
+}
+
+// installTestReleaseKey gera um par Ed25519 e o instala como a lista de
+// chaves de release embutidas durante o teste.
+func installTestReleaseKey(t *testing.T) (ed25519.PublicKey, ed25519.PrivateKey) {
+	t.Helper()
+	pub, priv, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	orig := releaseSigningPublicKeys
+	releaseSigningPublicKeys = []string{base64.StdEncoding.EncodeToString(pub)}
+	t.Cleanup(func() { releaseSigningPublicKeys = orig })
+	return pub, priv
+}
+
+// serveRelease publica checksums.txt, checksums.txt.sig (nil = 404) e os
+// assets sob /<tag>/, contando os downloads de asset em hits.
+func serveRelease(t *testing.T, tag, checksums string, sig *string, assets map[string]string) *int {
+	t.Helper()
+	hits := new(int)
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		prefix := "/" + tag + "/"
@@ -69,12 +97,20 @@ func newReleaseServer(t *testing.T, tag, checksums string, assets map[string]str
 			return
 		}
 		name := strings.TrimPrefix(r.URL.Path, prefix)
-		if name == "checksums.txt" {
+		switch name {
+		case "checksums.txt":
 			if checksums == "" {
 				http.NotFound(w, r)
 				return
 			}
 			fmt.Fprint(w, checksums)
+			return
+		case "checksums.txt.sig":
+			if sig == nil {
+				http.NotFound(w, r)
+				return
+			}
+			fmt.Fprint(w, *sig)
 			return
 		}
 		body, ok := assets[name]
@@ -82,6 +118,7 @@ func newReleaseServer(t *testing.T, tag, checksums string, assets map[string]str
 			http.NotFound(w, r)
 			return
 		}
+		*hits++
 		fmt.Fprint(w, body)
 	})
 	srv := httptest.NewServer(mux)
@@ -91,6 +128,7 @@ func newReleaseServer(t *testing.T, tag, checksums string, assets map[string]str
 		downloadBaseURL = orig
 		srv.Close()
 	})
+	return hits
 }
 
 func sha256Hex(s string) string {

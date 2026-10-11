@@ -72,3 +72,38 @@ type ChecksumMismatchError struct {
 func (e *ChecksumMismatchError) Error() string {
 	return fmt.Sprintf("update: checksum mismatch for %s: expected %s, got %s", e.Asset, e.Expected, e.Actual)
 }
+
+// ErrNoReleaseKeys: this build embeds no release signing public key, so
+// checksums.txt cannot be authenticated and the self-replace refuses to
+// run. The Homebrew and go install channels are unaffected.
+var ErrNoReleaseKeys = errors.New("update: this build embeds no release signing key; refusing unverified self-update")
+
+// InvalidTagError: the release tag is not a strict semantic version. It is
+// never spliced into a download URL.
+type InvalidTagError struct {
+	Tag string
+}
+
+func (e *InvalidTagError) Error() string {
+	return fmt.Sprintf("update: release tag %q is not a valid semantic version", e.Tag)
+}
+
+// SignatureUnavailableError: the release publishes no checksums.txt.sig.
+// Without a signature the checksums cannot be trusted, so nothing installs.
+type SignatureUnavailableError struct {
+	Tag string
+}
+
+func (e *SignatureUnavailableError) Error() string {
+	return fmt.Sprintf("update: release %s does not publish checksums.txt.sig; refusing unverified install", e.Tag)
+}
+
+// SignatureInvalidError: checksums.txt.sig does not verify against any
+// release key embedded in this build.
+type SignatureInvalidError struct {
+	Tag string
+}
+
+func (e *SignatureInvalidError) Error() string {
+	return fmt.Sprintf("update: checksums.txt of release %s is not signed by a trusted release key", e.Tag)
+}

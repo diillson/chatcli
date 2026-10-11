@@ -43,9 +43,9 @@ func connEnds(t *testing.T) func(n int) []pulse.Event {
 	}
 }
 
-// A self-update downloads the checksums and then the release binary. Both
-// show as connections, the second with the real size of the download, which
-// is counted while it is read and never buffered.
+// A self-update downloads the checksums, their signature and then the
+// release binary. All show as connections, the last with the real size of
+// the download, which is counted while it is read and never buffered.
 func TestSelfUpdateDownloadsShowAsConnections(t *testing.T) {
 	asset, err := AssetName()
 	if err != nil {
@@ -62,7 +62,7 @@ func TestSelfUpdateDownloadsShowAsConnections(t *testing.T) {
 		t.Fatalf("SelfReplace: %v", err)
 	}
 
-	ends := collect(2)
+	ends := collect(3)
 	sawBinary := false
 	for _, end := range ends {
 		if end.Name != "127.0.0.1" || end.Attrs["status"] != "200" {
