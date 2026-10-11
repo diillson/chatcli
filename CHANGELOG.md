@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.215.3](https://github.com/diillson/chatcli/compare/v1.215.2...v1.215.3) (2026-10-11)
+
+
+### Bug Fixes
+
+* **auth:** cap the OAuth token-endpoint response size ([#1754](https://github.com/diillson/chatcli/issues/1754)) ([861a0bb](https://github.com/diillson/chatcli/commit/861a0bb61d60e0e32e6fcca8005a300e8077f6ae))
+
 ## [1.215.2](https://github.com/diillson/chatcli/compare/v1.215.1...v1.215.2) (2026-10-11)
 
 
