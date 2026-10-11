@@ -1,0 +1,4 @@
+{
+  "gateway.allowlist.empty": "%s: sem allowlist de remetentes, então o adaptador se recusa a iniciar (toda mensagem aceita aciona um agente que executa ferramentas neste host). Defina %s com os ids de usuário que podem falar com o bot, separados por vírgula, ou com * para aceitar qualquer pessoa.",
+  "gateway.session.not_listed": "Os comandos de sessão estão disponíveis apenas para remetentes listados por id na allowlist deste canal."
+}

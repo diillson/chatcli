@@ -40,6 +40,33 @@ type SlackAdapter struct {
 	apiBase       string // overridable for tests; defaults to https://slack.com/api
 	http          *http.Client
 	logger        *zap.Logger
+	// allowed holds CHATCLI_SLACK_ALLOWED_USERS: Slack user ids ("U0123"),
+	// optionally pinned to a workspace ("T0456:U0123"). Empty refuses to
+	// start.
+	allowed *senderAllowlist
+}
+
+// WithAllowedUsers sets the sender allowlist and returns the adapter so the
+// builder can chain it. An entry is a Slack user id, optionally prefixed by
+// the workspace (team) id and a colon to admit that user only from that
+// workspace; "*" admits everyone. Without it the adapter refuses to start.
+func (s *SlackAdapter) WithAllowedUsers(ids []string) *SlackAdapter {
+	s.allowed = newSenderAllowlist(ids)
+	return s
+}
+
+// slackSenderKeys are the allowlist keys a sender matches: the bare user id
+// and, when the workspace is known, "team:user".
+func slackSenderKeys(team, user string) []string {
+	if team == "" {
+		return []string{user}
+	}
+	return []string{user, team + ":" + user}
+}
+
+// preflight implements preflighter.
+func (s *SlackAdapter) preflight() error {
+	return s.allowed.preflight(slackPlatform, envSlackAllowed)
 }
 
 // NewSlackAdapter builds a Slack adapter.
@@ -104,6 +131,17 @@ func (s *SlackAdapter) eventsHandler(ctx context.Context, inbound chan<- Inbound
 		}
 		rw.WriteHeader(http.StatusOK) // ack fast; Slack retries on slow/!200
 		if hasMsg {
+			// Sender allowlist first: a stranger's message is dropped
+			// before any download or queueing, and gets no reply.
+			keys := slackSenderKeys(slackSenderTeam(body), msg.UserID)
+			if msg.UserID == "" || !s.allowed.permits(keys...) {
+				if s.logger != nil {
+					s.logger.Warn("gateway/slack: dropped message from non-allowlisted user",
+						zap.String("user", msg.UserID))
+				}
+				return
+			}
+			msg.SenderListed = s.allowed.listed(keys...)
 			s.hydrateAudio(ctx, &msg)
 			s.hydrateImages(ctx, &msg)
 			if strings.TrimSpace(msg.Text) == "" && msg.Audio == nil && msg.Image == nil {
@@ -119,6 +157,9 @@ func (s *SlackAdapter) eventsHandler(ctx context.Context, inbound chan<- Inbound
 
 // Start runs the Events API HTTP server until ctx is canceled.
 func (s *SlackAdapter) Start(ctx context.Context, inbound chan<- InboundMessage) error {
+	if err := s.allowed.checkStart(slackPlatform, envSlackAllowed, s.logger); err != nil {
+		return err
+	}
 	mux := http.NewServeMux()
 	mux.HandleFunc(s.path, s.eventsHandler(ctx, inbound))
 
@@ -180,7 +221,7 @@ func (s *SlackAdapter) callAPI(ctx context.Context, method, contentType string, 
 	}
 	req.Header.Set("Content-Type", contentType)
 	req.Header.Set("Authorization", "Bearer "+s.botToken)
-	resp, err := s.http.Do(req)
+	resp, err := doHTTP(s.http, req)
 	if err != nil {
 		return res, err
 	}
@@ -257,7 +298,7 @@ func (s *SlackAdapter) uploadBytes(ctx context.Context, uploadURL, filename stri
 		return err
 	}
 	req.Header.Set("Content-Type", w.FormDataContentType())
-	resp, err := s.http.Do(req)
+	resp, err := doHTTP(s.http, req)
 	if err != nil {
 		return err
 	}
@@ -287,6 +328,28 @@ func verifySlackSignature(secret, timestamp string, body []byte, signature strin
 	mac.Write(body)
 	expected := "v0=" + hex.EncodeToString(mac.Sum(nil))
 	return subtle.ConstantTimeCompare([]byte(expected), []byte(signature)) == 1
+}
+
+// slackSenderTeam returns the workspace the sender belongs to: the event's
+// user_team (set for users of another workspace in a shared channel), else
+// the event's team, else the envelope's team_id.
+func slackSenderTeam(body []byte) string {
+	var env struct {
+		TeamID string `json:"team_id"`
+		Event  struct {
+			Team     string `json:"team"`
+			UserTeam string `json:"user_team"`
+		} `json:"event"`
+	}
+	if json.Unmarshal(body, &env) != nil {
+		return ""
+	}
+	for _, t := range []string{env.Event.UserTeam, env.Event.Team, env.TeamID} {
+		if t = strings.TrimSpace(t); t != "" {
+			return t
+		}
+	}
+	return ""
 }
 
 type slackEventEnvelope struct {
@@ -404,6 +467,6 @@ func init() {
 			addr,
 			os.Getenv("CHATCLI_SLACK_PATH"),
 			zap.NewNop(),
-		), nil
+		).WithAllowedUsers(allowlistFromEnv(envSlackAllowed)), nil
 	})
 }

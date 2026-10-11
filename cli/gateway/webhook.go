@@ -355,7 +355,7 @@ func (w *WebhookAdapter) postCallback(ctx context.Context, payload []byte, deliv
 	}
 	req.Header.Set("X-ChatCLI-Delivery-ID", deliveryID)
 	req.Header.Set("X-ChatCLI-Delivery-Attempt", strconv.Itoa(attempt))
-	resp, err := w.http.Do(req)
+	resp, err := doHTTP(w.http, req)
 	if err != nil {
 		return ctx.Err() == nil, err
 	}
