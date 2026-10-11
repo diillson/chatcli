@@ -14,6 +14,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/diillson/chatcli/pkg/workspacetrust"
 	"go.uber.org/zap"
 )
 
@@ -67,13 +68,18 @@ func (m *Manager) LoadFromFile(path string) error {
 
 // LoadFromSettings loads hooks from the chatcli settings hierarchy.
 // Checks: workspace/.chatcli/hooks.json > ~/.chatcli/hooks.json
+//
+// Workspace hooks run shell commands, so they load only from a trusted
+// workspace (pkg/workspacetrust): a cloned repository must not run code
+// just because chatcli was started inside it.
 func (m *Manager) LoadFromSettings() {
 	home, _ := os.UserHomeDir()
 	globalPath := filepath.Join(home, ".chatcli", "hooks.json")
 
 	// Try workspace-local first
 	workspacePath := ""
-	if wd, err := os.Getwd(); err == nil {
+	wd, err := os.Getwd()
+	if err == nil {
 		workspacePath = filepath.Join(wd, ".chatcli", "hooks.json")
 	}
 
@@ -84,6 +90,11 @@ func (m *Manager) LoadFromSettings() {
 
 	// Merge workspace hooks (additive, workspace hooks run after global)
 	if workspacePath != "" && workspacePath != globalPath {
+		if _, err := os.Stat(workspacePath); err == nil && !workspacetrust.Allowed(wd) {
+			m.logger.Warn("Workspace hooks ignored: the workspace is not trusted",
+				zap.String("path", workspacePath))
+			return
+		}
 		data, err := os.ReadFile(workspacePath) //#nosec G304 -- path supplied by user/agent through validated tool surface (boundary check upstream)
 		if err == nil {
 			var config HooksConfig

@@ -24,11 +24,13 @@ import (
 	"github.com/diillson/chatcli/config"
 	"github.com/diillson/chatcli/i18n"
 	"github.com/diillson/chatcli/llm/manager"
+	"github.com/diillson/chatcli/pkg/workspacetrust"
 	"github.com/diillson/chatcli/ui/theme"
 	"github.com/diillson/chatcli/utils"
 	"github.com/diillson/chatcli/version"
 	"github.com/joho/godotenv"
 	"go.uber.org/zap"
+	"golang.org/x/term"
 )
 
 // browserReaperSubcommand is the hidden subcommand the headless browser
@@ -88,6 +90,11 @@ func dispatchSubcommand() bool {
 			os.Exit(1)
 		}
 		return true
+	case "trust":
+		// Workspace trust for CI and scripts: it records consent, so it
+		// loads no project file and boots no further than i18n.
+		i18n.Init()
+		os.Exit(workspacetrust.RunCLI(os.Args[2:], os.Stdout, os.Stderr))
 	case "plugin":
 		// Plugin supply chain (keygen/sign/verify/trust/quarantine) — key
 		// management an operator or a CI job runs, so it boots no further
@@ -118,14 +125,61 @@ type dotenvBootstrap struct {
 // init-first order silently ignored a dotenv-only CHATCLI_LANG, masked on
 // Unix by LANG but pinning Windows cmd/PowerShell (no LANG) to English.
 func loadDotenvThenI18n() dotenvBootstrap {
-	// config.ResolveDotenv is the single discovery rule shared by every
-	// entrypoint: $CHATCLI_DOTENV, else ./.env, ~/.chatcli/.env, ~/.env.
-	// The home fallbacks are what keep `chatcli acp` / `mcp-server` working
-	// when an editor spawns them without the user's shell environment.
+	return bootstrapEnvironment(nil)
+}
+
+// trustPrompt is the terminal an interactive REPL boot asks on.
+type trustPrompt struct {
+	in  io.Reader
+	out io.Writer
+}
+
+// bootstrapEnvironment is loadDotenvThenI18n with the workspace trust
+// decision in front of it. Covered project files (./.env, hooks, the coder
+// policy) of an untrusted working directory never load: with a terminal
+// (prompt != nil) the user is asked once, before anything is read; every
+// other surface skips them and says so on stderr.
+func bootstrapEnvironment(prompt *trustPrompt) dotenvBootstrap {
 	// Snapshot what the shell — or the editor/MCP client's env block — gave
 	// us, BEFORE the file is loaded: /reload restores from it so a
 	// client-provided variable is not lost when the file does not repeat it.
 	config.CaptureBootEnv()
+	ws, wsErr := workspacetrust.Inspect(".")
+	if wsErr == nil && ws.NeedsDecision() && prompt != nil {
+		initI18nForTrustPrompt()
+		workspacetrust.Ask(ws, prompt.in, prompt.out)
+	}
+	b := loadDotenvAndI18n()
+	if wsErr == nil && ws.NeedsDecision() && prompt == nil {
+		workspacetrust.Warn(os.Stderr, ws)
+	}
+	return b
+}
+
+// initI18nForTrustPrompt latches the language before the dotenv load, so the
+// trust prompt speaks the user's language. A CHATCLI_LANG kept only in the
+// user's own environment file is honored by reading it from the file that
+// would load without the project one; it is removed again so the regular
+// load sets it as usual.
+func initI18nForTrustPrompt() {
+	if _, set := os.LookupEnv("CHATCLI_LANG"); !set {
+		if res := config.ResolveDotenv(); res.Exists {
+			if vals, err := godotenv.Read(res.Path); err == nil && vals["CHATCLI_LANG"] != "" {
+				_ = os.Setenv("CHATCLI_LANG", vals["CHATCLI_LANG"])
+				defer func() { _ = os.Unsetenv("CHATCLI_LANG") }()
+			}
+		}
+	}
+	i18n.Init()
+}
+
+// loadDotenvAndI18n loads the environment file, the managed configuration
+// and then i18n.
+func loadDotenvAndI18n() dotenvBootstrap {
+	// config.ResolveDotenv is the single discovery rule shared by every
+	// entrypoint: $CHATCLI_DOTENV, else ./.env, ~/.chatcli/.env, ~/.env.
+	// The home fallbacks are what keep `chatcli acp` / `mcp-server` working
+	// when an editor spawns them without the user's shell environment.
 	res := config.ResolveDotenv()
 	config.SetActiveDotenv(res)
 	b := dotenvBootstrap{path: res.Path, expandErr: res.ExpandErr, resolution: res}
@@ -136,6 +190,17 @@ func loadDotenvThenI18n() dotenvBootstrap {
 	b.managed = config.ApplyManaged()
 	i18n.Init()
 	return b
+}
+
+// replTrustPrompt returns the terminal for the workspace trust question, or
+// nil when this run is not an interactive REPL: -p, piped stdin, --version,
+// --help or no terminal never prompt.
+func replTrustPrompt(opts *cli.Options) *trustPrompt {
+	if opts.PromptFlagUsed || opts.Version || opts.Help || cli.HasStdin() ||
+		!term.IsTerminal(int(os.Stdin.Fd())) || !term.IsTerminal(int(os.Stdout.Fd())) {
+		return nil
+	}
+	return &trustPrompt{in: os.Stdin, out: os.Stdout}
 }
 
 // reportDotenvBootstrap prints the deferred bootstrap warnings now that
@@ -263,7 +328,7 @@ func main() {
 		os.Exit(2)
 	}
 
-	reportDotenvBootstrap(loadDotenvThenI18n())
+	reportDotenvBootstrap(bootstrapEnvironment(replTrustPrompt(opts)))
 
 	if opts.Version {
 		printVersionInfo()

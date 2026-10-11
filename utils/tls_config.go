@@ -8,10 +8,15 @@ package utils
 import (
 	"crypto/tls"
 	"crypto/x509"
+	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"strings"
+	"sync"
 	"sync/atomic"
+
+	"github.com/diillson/chatcli/i18n"
 
 	"go.uber.org/zap"
 )
@@ -60,6 +65,7 @@ func GlobalTLSConfig() *tls.Config {
 // seen. Idempotent; calling it with no overrides set is a no-op that leaves
 // http.DefaultTransport untouched.
 func ApplyGlobalTLSTrust(logger *zap.Logger) {
+	warnInsecureTLS()
 	cfg := newTLSConfigFromEnv(logger)
 	globalTLSConfig.Store(cfg)
 	if cfg == nil {
@@ -67,6 +73,28 @@ func ApplyGlobalTLSTrust(logger *zap.Logger) {
 	}
 	if t, ok := http.DefaultTransport.(*http.Transport); ok {
 		t.TLSClientConfig = cfg.Clone()
+	}
+}
+
+// insecureTLSWarnings is where the disabled-verification notice goes; a log
+// line alone is invisible to most users, so it is printed. Tests swap it.
+var (
+	insecureTLSWarnings io.Writer = os.Stderr
+	insecureTLSWarned   sync.Map
+)
+
+// warnInsecureTLS prints one visible notice per process for each variable
+// that disables certificate verification, the global one and the Bedrock
+// one alike.
+func warnInsecureTLS() {
+	for _, name := range []string{envInsecureSkipVerify, "CHATCLI_BEDROCK_INSECURE_SKIP_VERIFY"} {
+		if !strings.EqualFold(strings.TrimSpace(os.Getenv(name)), "true") {
+			continue
+		}
+		if _, dup := insecureTLSWarned.LoadOrStore(name, true); dup {
+			continue
+		}
+		_, _ = fmt.Fprintln(insecureTLSWarnings, i18n.T("wstrust.tls.insecure", name))
 	}
 }
 

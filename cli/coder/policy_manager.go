@@ -8,6 +8,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/diillson/chatcli/pkg/workspacetrust"
 	"github.com/diillson/chatcli/utils"
 	"go.uber.org/zap"
 )
@@ -33,7 +34,27 @@ type PolicyManager struct {
 	lastRule   *Rule
 	logger     *zap.Logger
 	mu         sync.RWMutex
+
+	// globalRules is what the global policy file holds — the only rules
+	// ever persisted. overlayRules come from the file named by
+	// CHATCLI_CODER_POLICY_OVERLAY and localRules from a trusted
+	// workspace's coder_policy.json; Rules is the effective combination.
+	globalRules  []Rule
+	overlayRules []Rule
+	localRules   []Rule
+	// localIgnoredAllows counts the allow rules dropped from the local file;
+	// localUntrusted is a local file ignored because the workspace is not
+	// trusted.
+	localIgnoredAllows int
+	localUntrusted     string
 }
+
+// PolicyOverlayEnv names a policy file merged over the global one with full
+// effect, allow rules included, for automation that owns the run — the eval
+// harness installs each case's rules this way. It is read from the process
+// environment only: an untrusted project .env never loads, and the project
+// overlay of editor sessions does not allow it.
+const PolicyOverlayEnv = "CHATCLI_CODER_POLICY_OVERLAY"
 
 type policyFile struct {
 	Rules []Rule `json:"rules"`
@@ -205,20 +226,22 @@ func (pm *PolicyManager) AddRule(pattern string, action Action) error {
 
 	pm.logger.Info("Updating security policy", zap.String("pattern", pattern), zap.String("action", string(action)))
 
+	// Decisions always persist to the global policy, never to a
+	// workspace file.
 	updated := false
-	for i, rule := range pm.Rules {
+	for i, rule := range pm.globalRules {
 		if rule.Pattern == pattern {
-			pm.Rules[i].Action = action
+			pm.globalRules[i].Action = action
 			updated = true
 			break
 		}
 	}
 
 	if !updated {
-		pm.Rules = append(pm.Rules, Rule{Pattern: pattern, Action: action})
+		pm.globalRules = append(pm.globalRules, Rule{Pattern: pattern, Action: action})
 	}
 
-	pm.lastRule = nil
+	pm.recompute()
 	return pm.save()
 }
 
@@ -238,17 +261,17 @@ func (pm *PolicyManager) DeleteRule(pattern string) (bool, error) {
 		return false, fmt.Errorf("empty policy pattern")
 	}
 
-	filtered := pm.Rules[:0]
+	filtered := pm.globalRules[:0]
 	removed := false
-	for _, r := range pm.Rules {
+	for _, r := range pm.globalRules {
 		if r.Pattern == pattern {
 			removed = true
 			continue
 		}
 		filtered = append(filtered, r)
 	}
-	pm.Rules = filtered
-	pm.lastRule = nil
+	pm.globalRules = filtered
+	pm.recompute()
 
 	if !removed {
 		return false, nil
@@ -274,7 +297,7 @@ func (pm *PolicyManager) load() {
 
 	if _, err := os.Stat(globalPath); os.IsNotExist(err) {
 		pm.defaultRules()
-		globalRules = pm.Rules
+		globalRules = pm.globalRules
 	} else {
 		data, err := os.ReadFile(globalPath) //#nosec G304 -- path supplied by user/agent through validated tool surface (boundary check upstream)
 		if err != nil {
@@ -288,47 +311,142 @@ func (pm *PolicyManager) load() {
 			}
 		}
 	}
+	pm.globalRules = globalRules
+	pm.overlayRules = pm.readOverlay()
+	pm.loadLocal()
+	pm.recompute()
+}
+
+// recompute rebuilds the effective rules: the global policy, the overlay
+// merged over it, then the workspace rules, which can only tighten.
+func (pm *PolicyManager) recompute() {
+	base := append([]Rule(nil), pm.globalRules...)
+	if len(pm.overlayRules) > 0 {
+		base = mergeRules(base, pm.overlayRules)
+	}
+	pm.Rules = tightenRules(base, pm.localRules)
+	pm.lastRule = nil
+}
+
+// readOverlay loads the PolicyOverlayEnv file, if any. Failures drop the
+// overlay, which can only make the policy stricter.
+func (pm *PolicyManager) readOverlay() []Rule {
+	path := strings.TrimSpace(os.Getenv(PolicyOverlayEnv))
+	if path == "" {
+		return nil
+	}
+	rules, err := readPolicyRules(path)
+	if err != nil {
+		pm.logger.Warn("Failed to load policy overlay", zap.String("path", path), zap.Error(err))
+	}
+	return rules
+}
+
+// readPolicyRules reads the rules of a policy file.
+func readPolicyRules(path string) ([]Rule, error) {
+	data, err := os.ReadFile(path) //#nosec G304 -- the overlay named by the environment or the workspace policy
+	if err != nil {
+		return nil, err
+	}
+	var pf policyFile
+	if err := json.Unmarshal(data, &pf); err != nil {
+		return nil, err
+	}
+	return pf.Rules, nil
+}
+
+// policyNoticeOnce keeps the per-call PolicyManager from repeating the same
+// warning on every tool call.
+var policyNoticeOnce sync.Map
+
+func (pm *PolicyManager) warnOnce(key, msg string, fields ...zap.Field) {
+	if _, seen := policyNoticeOnce.LoadOrStore(key, true); !seen {
+		pm.logger.Warn(msg, fields...)
+	}
+}
+
+// loadLocal reads the working directory's coder_policy.json. It loads only
+// from a trusted workspace, and even then it can only tighten: allow rules
+// are dropped (a cloned repository must never widen what the coder may do)
+// and the "merge" flag no longer lets it replace the global policy.
+func (pm *PolicyManager) loadLocal() {
+	pm.localRules, pm.localPath, pm.mergeLocal = nil, "", false
+	pm.localIgnoredAllows, pm.localUntrusted = 0, ""
 
 	localPath := findLocalPolicyPath()
 	if localPath == "" {
-		pm.Rules = globalRules
-		pm.localPath = ""
-		pm.mergeLocal = false
+		return
+	}
+	if !workspacetrust.Allowed(filepath.Dir(localPath)) {
+		pm.localUntrusted = localPath
+		pm.warnOnce("untrusted:"+localPath, "Local security policy ignored: the workspace is not trusted",
+			zap.String("path", localPath))
 		return
 	}
 
-	localData, err := os.ReadFile(localPath) //#nosec G304 -- path supplied by user/agent through validated tool surface (boundary check upstream)
+	rules, err := readPolicyRules(localPath)
 	if err != nil {
-		pm.logger.Warn("Failed to read local security policy", zap.Error(err))
-		pm.Rules = globalRules
-		pm.localPath = ""
-		pm.mergeLocal = false
+		pm.logger.Warn("Failed to load local security policy", zap.Error(err))
 		return
 	}
-
-	var local policyFile
-	if err := json.Unmarshal(localData, &local); err != nil {
-		pm.logger.Warn("Failed to parse local security policy", zap.Error(err))
-		pm.Rules = globalRules
-		pm.localPath = ""
-		pm.mergeLocal = false
-		return
+	for _, r := range rules {
+		switch r.Action {
+		case ActionAsk, ActionDeny:
+			pm.localRules = append(pm.localRules, r)
+		default:
+			pm.localIgnoredAllows++
+		}
 	}
-
-	if local.Merge {
-		pm.Rules = mergeRules(globalRules, local.Rules)
-	} else {
-		pm.Rules = local.Rules
+	if pm.localIgnoredAllows > 0 {
+		pm.warnOnce(fmt.Sprintf("allow:%s:%d", localPath, pm.localIgnoredAllows),
+			"Local security policy: allow rules ignored, a workspace policy can only add ask or deny",
+			zap.String("path", localPath), zap.Int("ignored", pm.localIgnoredAllows))
 	}
-
-	// Se existe policy local, persistir alterações nela.
-	pm.configPath = localPath
 	pm.localPath = localPath
-	pm.mergeLocal = local.Merge
+	pm.mergeLocal = true
+}
+
+// tightenRules layers local rules over base without ever loosening it: a
+// local rule for a pattern base already has replaces it only when stricter,
+// and new patterns are appended.
+func tightenRules(base, local []Rule) []Rule {
+	out := append([]Rule(nil), base...)
+	index := make(map[string]int, len(out))
+	for i, r := range out {
+		index[r.Pattern] = i
+	}
+	for _, r := range local {
+		if i, ok := index[r.Pattern]; ok {
+			if strictness(r.Action) > strictness(out[i].Action) {
+				out[i].Action = r.Action
+			}
+			continue
+		}
+		index[r.Pattern] = len(out)
+		out = append(out, r)
+	}
+	return out
+}
+
+// strictness orders actions: deny > ask > allow.
+func strictness(a Action) int {
+	switch a {
+	case ActionDeny:
+		return 2
+	case ActionAsk:
+		return 1
+	case ActionAllow:
+		return 0
+	}
+	return -1
 }
 
 func (pm *PolicyManager) save() error {
-	data, err := json.MarshalIndent(pm, "", "  ")
+	// Only the global rules are persisted: overlay and workspace rules stay
+	// in their own files.
+	data, err := json.MarshalIndent(struct {
+		Rules []Rule `json:"rules"`
+	}{Rules: pm.globalRules}, "", "  ")
 	if err != nil {
 		return err
 	}
@@ -343,7 +461,7 @@ func (pm *PolicyManager) save() error {
 }
 
 func (pm *PolicyManager) defaultRules() {
-	pm.Rules = []Rule{
+	pm.globalRules = []Rule{
 		{Pattern: "@coder read", Action: ActionAllow},
 		{Pattern: "@coder tree", Action: ActionAllow},
 		{Pattern: "@coder search", Action: ActionAllow},
@@ -355,6 +473,7 @@ func (pm *PolicyManager) defaultRules() {
 		// exec always requires per-command approval (never auto-allow)
 		{Pattern: "@coder exec", Action: ActionAsk},
 	}
+	pm.Rules = append([]Rule(nil), pm.globalRules...)
 	_ = pm.save()
 }
 
@@ -459,6 +578,22 @@ func (pm *PolicyManager) LocalMergeEnabled() bool {
 	pm.mu.RLock()
 	defer pm.mu.RUnlock()
 	return pm.mergeLocal
+}
+
+// LocalIgnoredAllows returns how many allow rules of the workspace policy
+// were dropped (a workspace policy can only tighten).
+func (pm *PolicyManager) LocalIgnoredAllows() int {
+	pm.mu.RLock()
+	defer pm.mu.RUnlock()
+	return pm.localIgnoredAllows
+}
+
+// UntrustedLocalPolicyPath returns the workspace policy file that was
+// ignored because the workspace is not trusted, or "".
+func (pm *PolicyManager) UntrustedLocalPolicyPath() string {
+	pm.mu.RLock()
+	defer pm.mu.RUnlock()
+	return pm.localUntrusted
 }
 
 func (pm *PolicyManager) RulesCount() int {

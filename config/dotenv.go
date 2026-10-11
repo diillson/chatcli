@@ -26,6 +26,7 @@
  * first, then in the user's ChatCLI directory, then in the home directory.
  * The resolution is recorded (ActiveDotenv) so /config can show which file is
  * actually in effect and credential errors can say why a variable is missing.
+ * ./.env is only a candidate in a trusted workspace (SetWorkspaceTrustGate).
  */
 package config
 
@@ -66,6 +67,35 @@ type DotenvResolution struct {
 	Exists     bool         // the file is present and readable
 	ExpandErr  error        // $CHATCLI_DOTENV could not be expanded (path kept verbatim)
 	Candidates []string     // every path considered, in order
+	// Untrusted is ./.env when it exists but was skipped because the working
+	// directory is not a trusted workspace; empty otherwise.
+	Untrusted string
+}
+
+// workspaceTrustGate answers whether a directory is a trusted workspace, so
+// its project files may be loaded. It is installed by the workspace trust
+// module (pkg/workspacetrust); config cannot import it, since that module
+// builds on utils, which imports config.
+var (
+	workspaceTrustMu   sync.RWMutex
+	workspaceTrustGate func(dir string) bool
+)
+
+// SetWorkspaceTrustGate installs the function that decides whether a
+// directory is a trusted workspace. Without one every directory is
+// untrusted: project files are never loaded by default.
+func SetWorkspaceTrustGate(gate func(dir string) bool) {
+	workspaceTrustMu.Lock()
+	defer workspaceTrustMu.Unlock()
+	workspaceTrustGate = gate
+}
+
+// workspaceTrusted consults the installed gate, failing closed.
+func workspaceTrusted(dir string) bool {
+	workspaceTrustMu.RLock()
+	gate := workspaceTrustGate
+	workspaceTrustMu.RUnlock()
+	return gate != nil && gate(dir)
 }
 
 // expandHome expands a leading "~" like utils.ExpandPath does. It is
@@ -103,7 +133,9 @@ func fileExists(path string) bool {
 //  1. $CHATCLI_DOTENV — explicit intent always wins, missing file included
 //     (the caller warns, exactly as before).
 //  2. ./.env — the historical behavior, so a project-local file still wins
-//     over the user-wide one.
+//     over the user-wide one. Only when the working directory is a trusted
+//     workspace: an untrusted ./.env is skipped (reported in Untrusted) and
+//     the next candidate becomes the first hit.
 //  3. ~/.chatcli/.env — ChatCLI's own directory.
 //  4. ~/.env — the conventional location, and where users who export
 //     CHATCLI_DOTENV=~/.env from their shell profile already keep it.
@@ -141,9 +173,17 @@ func ResolveDotenv() DotenvResolution {
 		if res.Exists {
 			continue // keep listing candidates for /config, first hit wins
 		}
-		if fileExists(c.path) {
-			res.Path, res.Origin, res.Exists = c.path, c.origin, true
+		if !fileExists(c.path) {
+			continue
 		}
+		if c.origin == DotenvFromWorkdir && !workspaceTrusted(".") {
+			res.Untrusted = c.path
+			if abs, err := filepath.Abs(c.path); err == nil {
+				res.Untrusted = abs
+			}
+			continue
+		}
+		res.Path, res.Origin, res.Exists = c.path, c.origin, true
 	}
 	return res
 }
@@ -194,10 +234,10 @@ func LoadDotenv() (DotenvResolution, error) {
 type ProjectDotenvMode string
 
 const (
-	// ProjectDotenvSafe (default) applies a project .env except for
-	// credential and endpoint variables — see projectDotenvBlocked.
+	// ProjectDotenvSafe (default) applies only the harmless per-project keys
+	// of a trusted project .env — see projectDotenvAllowed.
 	ProjectDotenvSafe ProjectDotenvMode = "safe"
-	// ProjectDotenvAll applies every key the project file declares.
+	// ProjectDotenvAll applies every key a trusted project file declares.
 	ProjectDotenvAll ProjectDotenvMode = "all"
 	// ProjectDotenvOff ignores project files entirely.
 	ProjectDotenvOff ProjectDotenvMode = "off"
@@ -218,33 +258,48 @@ func ProjectDotenvPolicy() ProjectDotenvMode {
 	}
 }
 
-// projectDotenvBlocked reports whether a key is refused in "safe" mode.
+// projectDotenvSafeKeys is the complete set of keys a project .env may set
+// in "safe" mode.
 //
 // A project directory is attacker-controlled input: cloning a repository and
 // opening it in an editor must not let its .env redirect ChatCLI's traffic
-// (a *_BASE_URL / *_API_URL pointing at an exfiltration host would carry the
-// user's own key with it) or inject credentials and encryption material.
-// Everything else — LLM_PROVIDER, LLM_MODEL, AWS_PROFILE, BEDROCK_REGION,
-// feature toggles — is per-project configuration and passes.
-func projectDotenvBlocked(key string) bool {
-	k := strings.ToUpper(strings.TrimSpace(key))
-	for _, suffix := range []string{
-		"_API_KEY", "_APIKEY", "_KEY", "_TOKEN", "_SECRET", "_PASSWORD",
-		"_BASE_URL", "_API_URL", "_ENDPOINT", "_ENDPOINT_URL", "_CREDENTIALS",
-	} {
-		if strings.HasSuffix(k, suffix) {
-			return true
-		}
-	}
-	switch k {
-	case "CLIENT_ID", "CLIENT_KEY", "AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY",
-		"AWS_SESSION_TOKEN", "AWS_WEB_IDENTITY_TOKEN_FILE", "AWS_CONFIG_FILE",
-		"AWS_SHARED_CREDENTIALS_FILE", "CHATCLI_DOTENV", "CHATCLI_MANAGED_CONFIG",
-		"CHATCLI_AUDIT_LOG_PATH", "CHATCLI_CA_BUNDLE", "CHATCLI_BEDROCK_CA_BUNDLE",
-		"HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY", "PATH", "LD_PRELOAD":
-		return true
-	}
-	return false
+// (base URLs, proxies, CDP endpoints), weaken TLS, inject credentials or key
+// material, point at executables or config files that spawn processes (MCP
+// config, LSP or helper commands, plugin signing), move state directories, or
+// relax any security switch. A denylist cannot keep up with that surface — a
+// new variable is exposed until someone remembers to block it — so safe mode
+// is an allowlist of keys that only SELECT among things the user already
+// configured:
+//
+//   - provider and model choice: a provider without the user's own
+//     credentials simply does not resolve, and a model name selects a model,
+//     it does not route traffic anywhere new;
+//   - output token caps per provider: bounded by the provider itself;
+//   - AWS region and named profile: the profile must already exist in the
+//     user's own AWS configuration, which the project cannot write;
+//   - UI language and theme: presentation only.
+//
+// Anything else needs CHATCLI_PROJECT_ENV=all, and every mode requires the
+// project to be a trusted workspace.
+var projectDotenvSafeKeys = map[string]bool{
+	"LLM_PROVIDER": true, "LLM_MODEL": true,
+	"OPENAI_MODEL": true, "OPENAI_ASSISTANT_MODEL": true, "ANTHROPIC_MODEL": true,
+	"GOOGLEAI_MODEL": true, "XAI_MODEL": true, "OLLAMA_MODEL": true,
+	"BEDROCK_MODEL": true, "COPILOT_MODEL": true, "DEVIN_MODEL": true,
+	"ZAI_MODEL": true, "MINIMAX_MODEL": true, "MOONSHOT_MODEL": true,
+	"OPENROUTER_MODEL":  true,
+	"OPENAI_MAX_TOKENS": true, "ANTHROPIC_MAX_TOKENS": true, "GOOGLEAI_MAX_TOKENS": true,
+	"XAI_MAX_TOKENS": true, "OLLAMA_MAX_TOKENS": true, "BEDROCK_MAX_TOKENS": true,
+	"COPILOT_MAX_TOKENS": true, "ZAI_MAX_TOKENS": true, "MINIMAX_MAX_TOKENS": true,
+	"MOONSHOT_MAX_TOKENS": true, "OPENROUTER_MAX_TOKENS": true, "STACKSPOT_MAX_TOKENS": true,
+	"AWS_PROFILE": true, "BEDROCK_PROFILE": true,
+	"AWS_REGION": true, "AWS_DEFAULT_REGION": true, "BEDROCK_REGION": true,
+	"CHATCLI_LANG": true, "CHATCLI_THEME": true,
+}
+
+// projectDotenvAllowed reports whether a key may be applied in "safe" mode.
+func projectDotenvAllowed(key string) bool {
+	return projectDotenvSafeKeys[strings.ToUpper(strings.TrimSpace(key))]
 }
 
 // ProjectDotenvReport is the outcome of one project overlay.
@@ -255,8 +310,11 @@ type ProjectDotenvReport struct {
 	Mode    ProjectDotenvMode
 	Applied []string // keys that filled an unset variable
 	Skipped []string // keys already set in the process (never overridden)
-	Refused []string // keys blocked by the safe policy
+	Refused []string // keys outside the safe allowlist
 	Err     error    // read/parse failure (the file is then ignored)
+	// Untrusted is set when the file exists but the project is not a
+	// trusted workspace: nothing was read or applied.
+	Untrusted bool
 }
 
 // ApplyProjectDotenv loads <dir>/.env as a FILL-ONLY overlay: a variable
@@ -266,7 +324,8 @@ type ProjectDotenvReport struct {
 // twice, or the file already loaded as the active dotenv, is a no-op.
 //
 // It exists for surfaces that learn about the user's project only after boot
-// — the ACP server receives it as session/new's cwd.
+// — the ACP server receives it as session/new's cwd. Whatever the mode, the
+// file is only read when the project is a trusted workspace.
 func ApplyProjectDotenv(dir string) ProjectDotenvReport {
 	rep := ProjectDotenvReport{Dir: dir, Mode: ProjectDotenvPolicy()}
 	if strings.TrimSpace(dir) == "" || rep.Mode == ProjectDotenvOff {
@@ -283,6 +342,10 @@ func ApplyProjectDotenv(dir string) ProjectDotenvReport {
 		return rep
 	}
 	rep.Present = true
+	if !workspaceTrusted(abs) {
+		rep.Untrusted = true
+		return rep
+	}
 
 	active := ActiveDotenv()
 	if activeAbs, err := filepath.Abs(active.Path); err == nil && activeAbs == rep.Path {
@@ -304,7 +367,7 @@ func ApplyProjectDotenv(dir string) ProjectDotenvReport {
 	}
 	for key, value := range values {
 		switch {
-		case rep.Mode == ProjectDotenvSafe && projectDotenvBlocked(key):
+		case rep.Mode == ProjectDotenvSafe && !projectDotenvAllowed(key):
 			rep.Refused = append(rep.Refused, key)
 		case isEnvSet(key):
 			rep.Skipped = append(rep.Skipped, key)

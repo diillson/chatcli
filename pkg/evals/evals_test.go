@@ -348,6 +348,7 @@ type fakeExec struct {
 	script  map[string][]fakeRun
 	calls   map[string]int
 	workdir map[string]string
+	policy  map[string]string // policy file content seen per case id
 }
 
 type fakeRun struct {
@@ -365,6 +366,10 @@ func (f *fakeExec) Execute(_ context.Context, req Request) (*Execution, error) {
 	if f.workdir != nil {
 		f.workdir[id] = req.Workdir
 	}
+	if path := req.Env[PolicyEnv]; path != "" && f.policy != nil {
+		data, _ := os.ReadFile(path) // #nosec G304 -- test fixture written by the runner
+		f.policy[id] = string(data)
+	}
 	runs := f.script[id]
 	r := runs[n%len(runs)]
 	f.mu.Unlock()
@@ -378,7 +383,7 @@ func (f *fakeExec) Execute(_ context.Context, req Request) (*Execution, error) {
 }
 
 func newFakeExec(script map[string][]fakeRun) *fakeExec {
-	return &fakeExec{script: script, calls: map[string]int{}, workdir: map[string]string{}}
+	return &fakeExec{script: script, calls: map[string]int{}, workdir: map[string]string{}, policy: map[string]string{}}
 }
 
 func mkCase(id, policy string, trials int, checks ...Check) *Case {
@@ -453,7 +458,6 @@ func TestRunSandboxFixtureFilesPolicyAndCleanup(t *testing.T) {
 			{FileContains: &FileCheck{Path: "seed.txt", Text: "seed"}},
 			{FileContains: &FileCheck{Path: "sub/inline.txt", Text: "inline"}},
 			{FileContains: &FileCheck{Path: "setup.txt", Text: "from-setup"}},
-			{FileContains: &FileCheck{Path: "coder_policy.json", Text: `"@coder exec"`}},
 			{FileContains: &FileCheck{Path: "out.txt", Text: "written"}},
 		},
 	}
@@ -466,6 +470,12 @@ func TestRunSandboxFixtureFilesPolicyAndCleanup(t *testing.T) {
 	if _, err := os.Stat(ex.workdir["coder"]); !errors.Is(err, os.ErrNotExist) {
 		t.Errorf("sandbox not removed: %v", err)
 	}
+	// The case policy reaches the candidate through PolicyEnv, from a file
+	// outside the sandbox: a workspace policy can only tighten, and the
+	// candidate must not be able to rewrite its own permissions.
+	if !strings.Contains(ex.policy["coder"], `"@coder exec"`) {
+		t.Errorf("coder case policy not passed through %s: %q", PolicyEnv, ex.policy["coder"])
+	}
 
 	rep = Run(context.Background(), []*Suite{{Name: "s", Cases: []*Case{c}}}, Options{Executor: ex, Keep: true})
 	kept := rep.Cases[0].Trials[0].Sandbox
@@ -475,6 +485,9 @@ func TestRunSandboxFixtureFilesPolicyAndCleanup(t *testing.T) {
 	defer func() { _ = os.RemoveAll(kept) }()
 	if _, err := os.Stat(filepath.Join(kept, "out.txt")); err != nil {
 		t.Errorf("kept sandbox lost its files: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(kept, "coder_policy.json")); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("the case policy must not live inside the sandbox: %v", err)
 	}
 }
 

@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/diillson/chatcli/config"
+	"github.com/diillson/chatcli/i18n"
 	"github.com/diillson/chatcli/utils"
 	"go.uber.org/zap"
 )
@@ -26,10 +27,51 @@ type HistoryManager struct {
 	logger         *zap.Logger
 	maxHistorySize int64
 	mu             sync.Mutex
+	// legacyFile is a ./.chatcli_history left by the old per-directory
+	// default: still read so no history is lost, never written again.
+	legacyFile string
+}
+
+// historyFileName is the prompt history under ~/.chatcli. It used to default
+// to config.DefaultHistoryFile in the working directory, which put typed
+// prompts inside project trees, where they got committed.
+const historyFileName = "history"
+
+// defaultHistoryPath returns ~/.chatcli/history, or "" without a home
+// directory (history is then not persisted rather than written into the
+// working directory).
+func defaultHistoryPath() string {
+	home, err := os.UserHomeDir()
+	if err != nil || home == "" {
+		return ""
+	}
+	return filepath.Join(home, ".chatcli", historyFileName)
+}
+
+// legacyHistoryPath returns the absolute path of a ./.chatcli_history from
+// the old default when it is a regular file (not a symlink) owned by the
+// current user, or "".
+func legacyHistoryPath() string {
+	abs, err := filepath.Abs(config.DefaultHistoryFile)
+	if err != nil {
+		return ""
+	}
+	info, err := os.Lstat(abs)
+	if err != nil || !info.Mode().IsRegular() || !ownedByCurrentUser(info) {
+		return ""
+	}
+	return abs
 }
 
 func NewHistoryManager(logger *zap.Logger) *HistoryManager {
-	rawPath := utils.GetEnvOrDefault("HISTORY_FILE", config.DefaultHistoryFile)
+	rawPath, explicit := os.LookupEnv("HISTORY_FILE")
+	legacy := ""
+	if !explicit || rawPath == "" {
+		rawPath = defaultHistoryPath()
+		if l := legacyHistoryPath(); l != "" && l != rawPath {
+			legacy = l
+		}
+	}
 
 	finalPath, err := utils.ExpandPath(rawPath)
 	if err != nil {
@@ -53,6 +95,7 @@ func NewHistoryManager(logger *zap.Logger) *HistoryManager {
 		historyFile:    finalPath,
 		logger:         logger,
 		maxHistorySize: getMaxHistorySizeFromEnv(),
+		legacyFile:     legacy,
 	}
 }
 
@@ -79,7 +122,27 @@ func getMaxHistorySizeFromEnv() int64 {
 func (hm *HistoryManager) LoadHistory() ([]string, error) {
 	hm.mu.Lock()
 	defer hm.mu.Unlock()
-	f, err := os.Open(hm.historyFile)
+	var history []string
+	if hm.legacyFile != "" {
+		// Older entries first, so recall order is preserved.
+		if legacy, err := hm.readHistoryFile(hm.legacyFile); err == nil {
+			history = legacy
+			fmt.Fprintln(os.Stderr, i18n.T("wstrust.history.legacy", hm.legacyFile, hm.historyFile))
+		}
+	}
+	if hm.historyFile == "" {
+		return history, nil
+	}
+	current, err := hm.readHistoryFile(hm.historyFile)
+	if err != nil {
+		return history, err
+	}
+	return append(history, current...), nil
+}
+
+// readHistoryFile reads one history file, opening sealed lines.
+func (hm *HistoryManager) readHistoryFile(path string) ([]string, error) {
+	f, err := os.Open(path) // #nosec G304 -- the history file or the user's own legacy one
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil, nil // Nenhum histórico para carregar
@@ -205,7 +268,7 @@ func redactHistoryEntry(entry string) string {
 
 func (hm *HistoryManager) AppendAndRotateHistory(newCommands []string) error {
 	// Security (L11): Respect CHATCLI_DISABLE_HISTORY
-	if strings.EqualFold(os.Getenv("CHATCLI_DISABLE_HISTORY"), "true") {
+	if strings.EqualFold(os.Getenv("CHATCLI_DISABLE_HISTORY"), "true") || hm.historyFile == "" {
 		return nil
 	}
 

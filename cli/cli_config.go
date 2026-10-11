@@ -4,12 +4,14 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/diillson/chatcli/config"
 	"github.com/diillson/chatcli/i18n"
 	"github.com/diillson/chatcli/llm/manager"
+	"github.com/diillson/chatcli/pkg/workspacetrust"
 	"github.com/diillson/chatcli/ui/theme"
 	"github.com/diillson/chatcli/utils"
 	"github.com/diillson/chatcli/version"
@@ -111,6 +113,12 @@ func (cli *ChatCLI) reloadConfiguration(ctx context.Context) {
 	config.SetActiveDotenv(res)
 	if res.ExpandErr != nil {
 		fmt.Println(i18n.T("main.warn_expand_path", res.Path, res.ExpandErr))
+	}
+	if res.Untrusted != "" {
+		// An edited ./.env lapses the workspace trust: say why it was skipped.
+		if ins, err := workspacetrust.Inspect(filepath.Dir(res.Untrusted)); err == nil {
+			workspacetrust.Warn(os.Stdout, ins)
+		}
 	}
 	envFilePath := res.Path
 	for _, variable := range reloadableEnvVars {

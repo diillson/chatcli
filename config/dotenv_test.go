@@ -16,6 +16,14 @@ func setHome(t *testing.T, dir string) {
 	}
 }
 
+// trustWorkspaces installs a workspace trust gate for the test: every
+// directory is trusted when trusted is true, none otherwise.
+func trustWorkspaces(t *testing.T, trusted bool) {
+	t.Helper()
+	SetWorkspaceTrustGate(func(string) bool { return trusted })
+	t.Cleanup(func() { SetWorkspaceTrustGate(nil) })
+}
+
 func writeEnvFile(t *testing.T, path, body string) {
 	t.Helper()
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
@@ -90,10 +98,21 @@ func TestResolveDotenv_FallbackOrder(t *testing.T) {
 		t.Fatalf("~/.chatcli/.env must outrank ~/.env: %+v", res)
 	}
 
-	// 3) The working directory still wins over both (historical behavior).
+	// 3) An untrusted working directory is skipped entirely: the next
+	// candidate becomes the first hit. No gate installed fails closed.
 	writeEnvFile(t, workEnv, "A=3\n")
-	if res := ResolveDotenv(); res.Origin != DotenvFromWorkdir {
-		t.Fatalf("./.env must win: %+v", res)
+	if res := ResolveDotenv(); res.Origin != DotenvFromChatCLIDir || res.Untrusted == "" {
+		t.Fatalf("an untrusted ./.env must be skipped: %+v", res)
+	}
+	trustWorkspaces(t, false)
+	if res := ResolveDotenv(); res.Origin != DotenvFromChatCLIDir {
+		t.Fatalf("an untrusted ./.env must be skipped: %+v", res)
+	}
+
+	// 4) A trusted working directory still wins over both.
+	trustWorkspaces(t, true)
+	if res := ResolveDotenv(); res.Origin != DotenvFromWorkdir || res.Untrusted != "" {
+		t.Fatalf("a trusted ./.env must win: %+v", res)
 	}
 }
 
@@ -112,6 +131,7 @@ func TestResolveDotenv_NothingFound(t *testing.T) {
 }
 
 func TestApplyProjectDotenv_FillOnly(t *testing.T) {
+	trustWorkspaces(t, true)
 	ResetProjectDotenvForTest()
 	t.Cleanup(ResetProjectDotenvForTest)
 	setHome(t, t.TempDir())
@@ -142,6 +162,7 @@ func TestApplyProjectDotenv_FillOnly(t *testing.T) {
 }
 
 func TestApplyProjectDotenv_SafeModeRefusesCredentialsAndEndpoints(t *testing.T) {
+	trustWorkspaces(t, true)
 	ResetProjectDotenvForTest()
 	t.Cleanup(ResetProjectDotenvForTest)
 	setHome(t, t.TempDir())
@@ -172,6 +193,7 @@ func TestApplyProjectDotenv_SafeModeRefusesCredentialsAndEndpoints(t *testing.T)
 }
 
 func TestApplyProjectDotenv_ModesOffAndAll(t *testing.T) {
+	trustWorkspaces(t, true)
 	setHome(t, t.TempDir())
 	dir := t.TempDir()
 	writeEnvFile(t, filepath.Join(dir, ".env"), "OPENAI_API_KEY=sk-project\n")
@@ -196,6 +218,7 @@ func TestApplyProjectDotenv_ModesOffAndAll(t *testing.T) {
 }
 
 func TestApplyProjectDotenv_SkipsTheActiveDotenvAndRepeats(t *testing.T) {
+	trustWorkspaces(t, true)
 	ResetProjectDotenvForTest()
 	t.Cleanup(ResetProjectDotenvForTest)
 	setHome(t, t.TempDir())
@@ -212,4 +235,73 @@ func TestApplyProjectDotenv_SkipsTheActiveDotenvAndRepeats(t *testing.T) {
 	if len(ProjectDotenvOverlays()) != 0 {
 		t.Fatal("no overlay should have been recorded")
 	}
+}
+
+// Every key below can redirect traffic, weaken TLS, spawn a process, move
+// state or relax a security switch. The safe overlay must refuse each one,
+// including those a suffix denylist used to miss.
+func TestApplyProjectDotenv_SafeAllowlistRefusesDangerousKeys(t *testing.T) {
+	trustWorkspaces(t, true)
+	ResetProjectDotenvForTest()
+	t.Cleanup(ResetProjectDotenvForTest)
+	setHome(t, t.TempDir())
+	t.Setenv(ProjectDotenvEnv, "")
+
+	dangerous := []string{
+		"CHATCLI_TLS_INSECURE_SKIP_VERIFY", "CHATCLI_BEDROCK_INSECURE_SKIP_VERIFY",
+		"ALL_PROXY", "CHATCLI_PROXY_AUTH", "CHATCLI_BROWSER_CDP_URL", "CHATCLI_MCP_CONFIG",
+		"CHATCLI_AUTH_DIR", "CHATCLI_ENV_REDACT_MODE", "CHATCLI_ALLOW_UNSIGNED_PLUGINS",
+		"CHATCLI_LSP_GO_CMD", "CHATCLI_LATEST_VERSION_URL", "SSL_CERT_FILE", "SSL_CERT_DIR",
+		"GOPROXY", "HTTPS_PROXY", "ANTHROPIC_BASE_URL", "OPENAI_API_URL", "OPENAI_API_KEY",
+		"CHATCLI_CODER_POLICY_OVERLAY", "CHATCLI_AGENT_SECURITY_MODE", "CHATCLI_PROJECT_ENV",
+		"CHATCLI_HOOKS_ENABLED", "CHATCLI_CA_BUNDLE", "PATH", "LD_PRELOAD",
+	}
+	body := "LLM_PROVIDER=BEDROCK\nAWS_PROFILE=project\n"
+	for _, k := range dangerous {
+		body += k + "=hostile\n"
+	}
+	dir := t.TempDir()
+	writeEnvFile(t, filepath.Join(dir, ".env"), body)
+	for _, k := range append([]string{"LLM_PROVIDER", "AWS_PROFILE"}, dangerous...) {
+		if k == "PATH" {
+			continue
+		}
+		t.Setenv(k, "")
+		_ = os.Unsetenv(k)
+	}
+
+	rep := ApplyProjectDotenv(dir)
+	refused := map[string]bool{}
+	for _, k := range rep.Refused {
+		refused[k] = true
+	}
+	for _, k := range dangerous {
+		if !refused[k] {
+			t.Errorf("safe mode applied %s", k)
+		}
+		if os.Getenv(k) == "hostile" {
+			t.Errorf("%s reached the environment", k)
+		}
+	}
+	if os.Getenv("LLM_PROVIDER") != "BEDROCK" || os.Getenv("AWS_PROFILE") != "project" {
+		t.Errorf("allowlisted selection keys must apply: %+v", rep)
+	}
+}
+
+// An untrusted project is not read at all, whatever the mode.
+func TestApplyProjectDotenv_UntrustedProjectIsIgnored(t *testing.T) {
+	setHome(t, t.TempDir())
+	dir := t.TempDir()
+	writeEnvFile(t, filepath.Join(dir, ".env"), "AWS_PROFILE=project\n")
+	t.Setenv("AWS_PROFILE", "")
+	_ = os.Unsetenv("AWS_PROFILE")
+	for _, mode := range []string{"", "all"} {
+		ResetProjectDotenvForTest()
+		t.Setenv(ProjectDotenvEnv, mode)
+		rep := ApplyProjectDotenv(dir)
+		if !rep.Present || !rep.Untrusted || len(rep.Applied) != 0 || os.Getenv("AWS_PROFILE") != "" {
+			t.Fatalf("mode %q: an untrusted project must not apply: %+v", mode, rep)
+		}
+	}
+	ResetProjectDotenvForTest()
 }
