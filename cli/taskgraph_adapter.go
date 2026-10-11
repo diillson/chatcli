@@ -315,7 +315,13 @@ func (a *taskGraphAdapter) Dash(runID string) (string, error) {
 
 	dashURL := srv.URL()
 	if runID = strings.TrimSpace(runID); runID != "" {
-		dashURL += "?run=" + url.QueryEscape(runID)
+		// The server URL already carries the access token in its query.
+		if u, perr := url.Parse(dashURL); perr == nil {
+			q := u.Query()
+			q.Set("run", runID)
+			u.RawQuery = q.Encode()
+			dashURL = u.String()
+		}
 	}
 	if term.IsTerminal(int(os.Stdout.Fd())) {
 		_ = openBrowserURL(dashURL)
