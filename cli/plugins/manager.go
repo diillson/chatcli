@@ -22,6 +22,7 @@ type Manager struct {
 	pluginsDir string
 	logger     *zap.Logger
 	mu         sync.RWMutex
+	reloadMu   sync.Mutex // serializes Reload; never held with mu across a plugin exec
 	watcher    *fsnotify.Watcher
 	closeOnce  sync.Once
 	quarantine *Quarantine
@@ -114,11 +115,14 @@ func (m *Manager) PluginsDir() string {
 }
 
 // Reload limpa e recarrega todos os plugins do diretório de plugins.
+//
+// Verificação, cópia privada e as chamadas --metadata/--schema rodam SEM o
+// lock do manager: um plugin lento (ou travado até o timeout do probe) não
+// bloqueia GetPlugin/GetPlugins de ninguém. Só a troca final do mapa é feita
+// sob o lock; reloadMu serializa reloads concorrentes (watcher + /reload).
 func (m *Manager) Reload() {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	m.plugins = make(map[string]Plugin)
+	m.reloadMu.Lock()
+	defer m.reloadMu.Unlock()
 
 	if err := os.MkdirAll(m.pluginsDir, 0o700); err != nil {
 		m.logger.Error("Não foi possível criar o diretório de plugins", zap.String("path", m.pluginsDir), zap.Error(err))
@@ -140,82 +144,138 @@ func (m *Manager) Reload() {
 	// The quarantine window is read fresh, so /reload picks up a change to
 	// CHATCLI_PLUGIN_QUARANTINE the same way every other reloadable setting
 	// is picked up.
-	m.quarantine = NewQuarantine(m.pluginsDir)
+	quarantine := NewQuarantine(m.pluginsDir)
+	m.mu.Lock()
+	m.quarantine = quarantine
+	m.mu.Unlock()
 	if raw, bad := ConfiguredButUnparseable(); bad {
 		m.logger.Warn("CHATCLI_PLUGIN_QUARANTINE is not a duration; quarantine stays off",
 			zap.String("value", raw))
 	}
 
 	present := make(map[string]struct{}, len(entries))
+	var loaded []*ExecutablePlugin
 
 	for _, entry := range entries {
 		if strings.HasSuffix(entry.Name(), ".sig") || strings.HasPrefix(entry.Name(), ".") {
 			continue // skip signature files and hidden files
 		}
-		pluginPath := filepath.Join(m.pluginsDir, entry.Name())
 		present[entry.Name()] = struct{}{}
-
-		// Inspect the signature, then apply policy. The two are separate
-		// because "unsigned" and "signature does not verify" are different
-		// facts that call for different handling.
-		switch status, err := verifier.Inspect(pluginPath); status {
-		case StatusVerified:
-			// Signed by a key this machine trusts: load it.
-
-		case StatusUnsigned, StatusUnverifiable:
-			// Unverifiable joins unsigned here on purpose: with no trusted
-			// key on this machine, a signature is not evidence of anything,
-			// so it neither helps nor should it start refusing a plugin that
-			// loaded before.
-			if !verifier.AllowsUnsigned() {
-				m.logger.Warn("Plugin signature cannot be trusted and unsigned plugins are not allowed, skipping",
-					zap.String("plugin", entry.Name()), zap.Error(err))
-				continue
-			}
-			// Unsigned, and unsigned is tolerated. Quarantine — when
-			// configured — is the remaining gate: a binary that just
-			// appeared waits before it can run with this process's
-			// permissions.
-			if admitted, remaining := m.quarantine.Admit(pluginPath); !admitted {
-				m.logger.Warn("Plugin held in quarantine",
-					zap.String("plugin", entry.Name()),
-					zap.Duration("remaining", remaining.Round(time.Second)))
-				continue
-			}
-			m.logger.Warn("Loading unsigned plugin (dev mode)", zap.String("plugin", entry.Name()))
-
-		default:
-			m.logger.Warn("Plugin signature verification failed, skipping",
-				zap.String("plugin", entry.Name()), zap.Error(err))
-			continue
+		if plugin := m.loadEntry(verifier, quarantine, entry.Name()); plugin != nil {
+			loaded = append(loaded, plugin)
 		}
+	}
 
-		plugin, err := NewPluginFromPath(pluginPath)
-		if err != nil {
-			m.logger.Warn("Arquivo inválido no diretório de plugins, pulando.", zap.String("path", pluginPath), zap.Error(err))
+	inUse := make(map[string]struct{})
+	m.mu.Lock()
+	m.plugins = make(map[string]Plugin)
+	for _, plugin := range loaded {
+		// A plugin can never take a built-in's name: the built-in is what
+		// the agent, the policy and the docs mean by that name.
+		if builtin, clash := m.builtinNameClash(plugin.Name()); clash {
+			m.logger.Warn("Plugin name collides with a built-in tool, skipping",
+				zap.String("plugin", plugin.Path()), zap.String("name", plugin.Name()), zap.String("builtin", builtin))
 			continue
 		}
 		m.plugins[plugin.Name()] = plugin
-	}
-
-	// Re-inject builtins that were not overridden by external plugins
-	for name, bp := range m.builtins {
-		if _, exists := m.plugins[name]; !exists {
-			m.plugins[name] = bp
+		if plugin.execPath != "" {
+			inUse[plugin.execPath] = struct{}{}
 		}
 	}
+	for name, bp := range m.builtins {
+		m.plugins[name] = bp
+	}
+	count := len(m.plugins)
+	m.mu.Unlock()
+
+	pruneVerifiedCache(verifiedCacheDir(m.pluginsDir), inUse)
 
 	// A plugin that is gone must not leave a record that would admit a
 	// future binary of the same name without its own waiting period.
-	if m.quarantine.Enabled() {
-		for _, e := range m.quarantine.List() {
+	if quarantine.Enabled() {
+		for _, e := range quarantine.List() {
 			if _, still := present[e.Name]; !still {
-				m.quarantine.Forget(e.Name)
+				quarantine.Forget(e.Name)
 			}
 		}
 	}
 
-	m.logger.Info("Plugins recarregados.", zap.Int("count", len(m.plugins)))
+	m.logger.Info("Plugins recarregados.", zap.Int("count", count))
+}
+
+// loadEntry applies the signature policy to one file in the plugins
+// directory and, when admitted, builds the plugin. Runs without m.mu.
+func (m *Manager) loadEntry(verifier *PluginVerifier, quarantine *Quarantine, fileName string) *ExecutablePlugin {
+	pluginPath := filepath.Join(m.pluginsDir, fileName)
+	execPath := pluginPath
+
+	// Inspect the signature, then apply policy. The two are separate
+	// because "unsigned" and "signature does not verify" are different
+	// facts that call for different handling.
+	switch status, verified, err := verifier.inspectWithBytes(pluginPath); status {
+	case StatusVerified:
+		// Signed by a key this machine trusts: run a private copy of the
+		// exact bytes that verified, never the path again.
+		staged, err := stageVerifiedBinary(verifiedCacheDir(m.pluginsDir), verified, fileName)
+		if err != nil {
+			m.logger.Warn("Could not stage verified plugin, skipping",
+				zap.String("plugin", fileName), zap.Error(err))
+			return nil
+		}
+		execPath = staged
+
+	case StatusUnsigned, StatusUnverifiable:
+		// Unverifiable joins unsigned here on purpose: with no trusted
+		// key on this machine, a signature is not evidence of anything,
+		// so it neither helps nor should it start refusing a plugin that
+		// loaded before.
+		if !verifier.AllowsUnsigned() {
+			m.logger.Warn("Plugin signature cannot be trusted and unsigned plugins are not allowed, skipping",
+				zap.String("plugin", fileName), zap.Error(err))
+			return nil
+		}
+		// Unsigned, and unsigned is tolerated. Quarantine — when
+		// configured — is the remaining gate: a binary that just
+		// appeared waits before it can run with this process's
+		// permissions.
+		if admitted, remaining := quarantine.Admit(pluginPath); !admitted {
+			m.logger.Warn("Plugin held in quarantine",
+				zap.String("plugin", fileName),
+				zap.Duration("remaining", remaining.Round(time.Second)))
+			return nil
+		}
+		m.logger.Warn("Loading unsigned plugin (dev mode)", zap.String("plugin", fileName))
+
+	default:
+		m.logger.Warn("Plugin signature verification failed, skipping",
+			zap.String("plugin", fileName), zap.Error(err))
+		return nil
+	}
+
+	plugin, err := newPluginFromExec(pluginPath, execPath)
+	if err != nil {
+		m.logger.Warn("Arquivo inválido no diretório de plugins, pulando.", zap.String("path", pluginPath), zap.Error(err))
+		return nil
+	}
+	return plugin
+}
+
+// toolKey normalizes a tool name for collision checks: the leading "@" is
+// optional at lookup (GetPlugin) and case must not make two names distinct.
+func toolKey(name string) string {
+	return strings.ToLower(strings.TrimPrefix(strings.TrimSpace(name), "@"))
+}
+
+// builtinNameClash reports the built-in that name would shadow. Caller
+// holds m.mu.
+func (m *Manager) builtinNameClash(name string) (string, bool) {
+	key := toolKey(name)
+	for builtin := range m.builtins {
+		if toolKey(builtin) == key {
+			return builtin, true
+		}
+	}
+	return "", false
 }
 
 // Quarantine exposes the gate so the /plugin surface can list what is
@@ -270,15 +330,23 @@ func (m *Manager) SetShadowedBuiltins(names []string) {
 }
 
 // RegisterBuiltinPlugin registers a builtin plugin. It is stored in a separate
-// map so that Reload() can re-inject it when no external override exists.
+// map so that Reload() re-injects it on every reload. A built-in always wins
+// its name: an executable plugin loaded earlier under the same name (with
+// or without "@", in any case) is dropped, since the first Reload runs
+// before the built-ins are registered.
 func (m *Manager) RegisterBuiltinPlugin(plugin Plugin) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.builtins[plugin.Name()] = plugin
-	// Only inject if no external plugin already loaded with the same name
-	if _, exists := m.plugins[plugin.Name()]; !exists {
-		m.plugins[plugin.Name()] = plugin
+	key := toolKey(plugin.Name())
+	for name, existing := range m.plugins {
+		if _, external := existing.(*ExecutablePlugin); external && toolKey(name) == key {
+			m.logger.Warn("Plugin name collides with a built-in tool, unloading it",
+				zap.String("plugin", existing.Path()), zap.String("builtin", plugin.Name()))
+			delete(m.plugins, name)
+		}
 	}
+	m.plugins[plugin.Name()] = plugin
 }
 
 // RegisterRemotePlugin registers a remote plugin in the manager without saving to disk.

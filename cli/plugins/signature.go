@@ -98,22 +98,35 @@ const (
 // a status display. Inspect answers the factual question and leaves the
 // policy to the caller.
 func (v *PluginVerifier) Inspect(pluginPath string) (VerificationStatus, error) {
+	status, _, err := v.inspectWithBytes(pluginPath)
+	return status, err
+}
+
+// inspectWithBytes is Inspect that also returns the exact bytes a StatusVerified
+// verdict is about. The binary is read once; the signature is checked over
+// those bytes, and the loader executes a private copy of those same bytes —
+// never the path again, which could have been swapped in between.
+func (v *PluginVerifier) inspectWithBytes(pluginPath string) (VerificationStatus, []byte, error) {
 	sigPath := filepath.Clean(pluginPath + SignatureSuffix)
 
 	sigData, err := os.ReadFile(sigPath) // #nosec G304 -- path derived from plugin dir, validated by manager
 	if err != nil {
 		if os.IsNotExist(err) {
-			return StatusUnsigned, ErrNoSignature
+			return StatusUnsigned, nil, ErrNoSignature
 		}
-		return StatusUntrusted, fmt.Errorf("failed to read signature file: %w", err)
+		return StatusUntrusted, nil, fmt.Errorf("failed to read signature file: %w", err)
 	}
-	if err := v.verifySignature(pluginPath, sigData); err != nil {
+	pluginData, err := os.ReadFile(filepath.Clean(pluginPath)) // #nosec G304 -- path derived from plugin dir, validated by manager
+	if err != nil {
+		return StatusUntrusted, nil, fmt.Errorf("failed to read plugin binary: %w", err)
+	}
+	if err := v.verifySignature(pluginData, sigData); err != nil {
 		if errors.Is(err, ErrNoTrustedKeys) {
-			return StatusUnverifiable, err
+			return StatusUnverifiable, nil, err
 		}
-		return StatusUntrusted, err
+		return StatusUntrusted, nil, err
 	}
-	return StatusVerified, nil
+	return StatusVerified, pluginData, nil
 }
 
 // VerifyPlugin checks the Ed25519 signature of a plugin binary.
@@ -127,9 +140,9 @@ func (v *PluginVerifier) VerifyPlugin(pluginPath string) error {
 	return err
 }
 
-// verifySignature checks signature bytes against the plugin binary and the
+// verifySignature checks signature bytes against the plugin bytes and the
 // trusted keys.
-func (v *PluginVerifier) verifySignature(pluginPath string, sigData []byte) error {
+func (v *PluginVerifier) verifySignature(pluginData, sigData []byte) error {
 
 	// Parse signature (first line is base64-encoded signature)
 	lines := strings.SplitN(strings.TrimSpace(string(sigData)), "\n", 2)
@@ -144,12 +157,6 @@ func (v *PluginVerifier) verifySignature(pluginPath string, sigData []byte) erro
 
 	if len(sig) != ed25519.SignatureSize {
 		return fmt.Errorf("invalid signature size: expected %d, got %d", ed25519.SignatureSize, len(sig))
-	}
-
-	// Compute SHA256 hash of the plugin binary
-	pluginData, err := os.ReadFile(filepath.Clean(pluginPath)) // #nosec G304
-	if err != nil {
-		return fmt.Errorf("failed to read plugin binary: %w", err)
 	}
 
 	hash := sha256.Sum256(pluginData)
