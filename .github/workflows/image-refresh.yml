@@ -14,9 +14,16 @@ name: Image Refresh (drift remediation)
 #                                            |
 #                                            +-> build (matrix image+tag+arch on native runners)
 #                                                  |
-#                                                  +-> merge (matrix image+tag)
+#                                                  +-> gate (matrix image+tag, Trivy, read-only token)
 #                                                        |
-#                                                        +-> report (singular, always)
+#                                                        +-> merge (matrix image+tag, push tag + sign)
+#                                                              |
+#                                                              +-> report (singular, always)
+#
+# Permissions are granted per job. The third-party scanner runs only in
+# jobs whose token can read packages and nothing else; the job that can
+# push tags and mint an OIDC signing identity runs no scanner and only acts
+# on the verdict the gate job recorded for that exact digest.
 
 on:
   schedule:
@@ -37,9 +44,6 @@ on:
 
 permissions:
   contents: read
-  packages: write
-  id-token: write
-  issues: write
 
 concurrency:
   group: image-refresh
@@ -49,12 +53,15 @@ jobs:
   discover:
     name: Discover target tags
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     outputs:
       scan_matrix: ${{ steps.compute.outputs.scan_matrix }}
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
+          persist-credentials: false
 
       - name: Resolve target matrix
         id: compute
@@ -73,6 +80,15 @@ jobs:
             echo "::error::No semver tags resolved"
             exit 1
           fi
+          # Every downstream job puts the tag into a checkout ref, an image
+          # reference and shell commands, so only plain MAJOR.MINOR.PATCH
+          # values get through. Anything else stops the run here.
+          while IFS= read -r t; do
+            if ! [[ "$t" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+              echo "::error::Refusing tag '$t': expected MAJOR.MINOR.PATCH, optionally prefixed with v"
+              exit 1
+            fi
+          done <<< "$TAGS"
           echo "Resolved tags:"
           echo "$TAGS"
           INCLUDES=$(echo "$TAGS" | jq -R -s -c '
@@ -87,19 +103,23 @@ jobs:
     name: "Scan ${{ matrix.image }}:${{ matrix.tag }}"
     needs: discover
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: read
     strategy:
       fail-fast: false
       matrix: ${{ fromJson(needs.discover.outputs.scan_matrix) }}
     steps:
       - name: Checkout source at tag (for .trivyignore.yaml)
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: "v${{ matrix.tag }}"
           fetch-depth: 1
           sparse-checkout: .trivyignore.yaml
+          persist-credentials: false
 
       - name: Login to GHCR
-        uses: docker/login-action@v4
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
         with:
           registry: ghcr.io
           username: ${{ github.repository_owner }}
@@ -108,7 +128,7 @@ jobs:
       - name: Trivy scan published image
         id: trivy
         continue-on-error: true
-        uses: aquasecurity/trivy-action@master
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
           image-ref: "ghcr.io/diillson/${{ matrix.image }}:${{ matrix.tag }}"
           format: table
@@ -150,7 +170,7 @@ jobs:
           echo "::notice::${IMAGE}:${TAG} -> refresh=${REFRESH} (${REASON})"
 
       - name: Upload decision
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: decision-${{ matrix.image }}-${{ matrix.tag }}
           path: decisions/*.json
@@ -161,13 +181,15 @@ jobs:
     name: Plan rebuilds
     needs: scan
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     outputs:
       any_refresh:  ${{ steps.compute.outputs.any_refresh }}
       arch_matrix:  ${{ steps.compute.outputs.arch_matrix }}
       merge_matrix: ${{ steps.compute.outputs.merge_matrix }}
     steps:
       - name: Download all decisions
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           pattern: decision-*
           path: /tmp/decisions
@@ -215,21 +237,25 @@ jobs:
     needs: plan
     if: needs.plan.outputs.any_refresh == 'true'
     runs-on: ${{ matrix.runner }}
+    permissions:
+      contents: read
+      packages: write
     strategy:
       fail-fast: false
       matrix: ${{ fromJson(needs.plan.outputs.arch_matrix) }}
     steps:
       - name: Checkout source at tag
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: "v${{ matrix.tag }}"
           fetch-depth: 1
+          persist-credentials: false
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v4
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
 
       - name: Login to GHCR
-        uses: docker/login-action@v4
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
         with:
           registry: ghcr.io
           username: ${{ github.repository_owner }}
@@ -240,16 +266,18 @@ jobs:
       # operator Dockerfile does not declare these args and ignores them.
       - name: Build metadata
         id: buildmeta
+        env:
+          TAG: ${{ matrix.tag }}
         run: |
           {
-            echo "version=v${{ matrix.tag }}"
+            echo "version=v${TAG}"
             echo "commit=$(git rev-parse --short HEAD)"
             echo "date=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
           } >> "$GITHUB_OUTPUT"
 
       - name: Build & push by digest
         id: build
-        uses: docker/build-push-action@v7
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: ${{ matrix.context }}
           file: ${{ matrix.dockerfile }}
@@ -264,45 +292,48 @@ jobs:
           outputs: type=image,name=ghcr.io/diillson/${{ matrix.image }},push-by-digest=true,name-canonical=true,push=true
 
       - name: Export digest file
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
         run: |
           mkdir -p /tmp/digests
-          digest="${{ steps.build.outputs.digest }}"
-          touch "/tmp/digests/${digest#sha256:}"
+          touch "/tmp/digests/${DIGEST#sha256:}"
 
       - name: Upload digest
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: digest-${{ matrix.image }}-${{ matrix.tag }}-${{ matrix.arch }}
           path: /tmp/digests/*
           retention-days: 1
           if-no-files-found: error
 
-  merge:
-    name: "Merge & sign ${{ matrix.image }}:${{ matrix.tag }}"
+  # The Trivy gate runs here, in a job whose token can only read: a
+  # compromised scanner cannot push a tag or obtain a signing identity. It
+  # does not fail on findings (continue-on-error, as before); it records the
+  # verdict for the exact amd64 digest it scanned, and the merge job below
+  # publishes and signs only when that verdict says "success" for the same
+  # digest. A missing or unreadable verdict blocks the target.
+  gate:
+    name: "Gate ${{ matrix.image }}:${{ matrix.tag }}"
     needs: [plan, build]
     if: needs.plan.outputs.any_refresh == 'true'
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: read
     strategy:
       fail-fast: false
       matrix: ${{ fromJson(needs.plan.outputs.merge_matrix) }}
     steps:
       - name: Checkout source at tag (for .trivyignore.yaml)
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: "v${{ matrix.tag }}"
           fetch-depth: 1
           sparse-checkout: .trivyignore.yaml
+          persist-credentials: false
 
-      - name: Download digests for this target
-        uses: actions/download-artifact@v8
-        with:
-          pattern: digest-${{ matrix.image }}-${{ matrix.tag }}-*
-          path: /tmp/digests
-          merge-multiple: true
-
-      - name: Resolve amd64 digest (for gate)
-        id: amd64
-        uses: actions/download-artifact@v8
+      - name: Resolve amd64 digest
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: digest-${{ matrix.image }}-${{ matrix.tag }}-amd64
           path: /tmp/digest-amd64
@@ -310,20 +341,25 @@ jobs:
       - name: Compute amd64 digest sha
         id: digest
         run: |
+          set -euo pipefail
           SHA="sha256:$(ls /tmp/digest-amd64)"
+          if ! [[ "$SHA" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+            echo "::error::Unexpected amd64 digest artifact content: $SHA"
+            exit 1
+          fi
           echo "sha=$SHA" >> "$GITHUB_OUTPUT"
 
       - name: Login to GHCR
-        uses: docker/login-action@v4
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
         with:
           registry: ghcr.io
           username: ${{ github.repository_owner }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Trivy gate on rebuilt amd64 digest
-        id: gate
+        id: trivy
         continue-on-error: true
-        uses: aquasecurity/trivy-action@master
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
           image-ref: "ghcr.io/diillson/${{ matrix.image }}@${{ steps.digest.outputs.sha }}"
           format: table
@@ -333,27 +369,147 @@ jobs:
           scanners: vuln
           exit-code: '1'
 
+      - name: Record gate verdict
+        env:
+          IMAGE: ${{ matrix.image }}
+          TAG: ${{ matrix.tag }}
+          OUTCOME: ${{ steps.trivy.outcome }}
+          DIGEST_AMD64: ${{ steps.digest.outputs.sha }}
+        run: |
+          set -euo pipefail
+          mkdir -p gate
+          jq -nc \
+            --arg outcome "$OUTCOME" \
+            --arg digest  "$DIGEST_AMD64" \
+            '{outcome:$outcome, digest:$digest}' \
+            > "gate/${IMAGE}-${TAG}.json"
+          echo "::notice::${IMAGE}:${TAG} gate=${OUTCOME} (${DIGEST_AMD64})"
+
+      - name: Upload gate verdict
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: gate-${{ matrix.image }}-${{ matrix.tag }}
+          path: gate/*.json
+          retention-days: 14
+          if-no-files-found: error
+
+  merge:
+    name: "Merge & sign ${{ matrix.image }}:${{ matrix.tag }}"
+    needs: [plan, build, gate]
+    # Runs per target even when another target's gate job broke, so one
+    # target cannot hold back the others; each target still needs its own
+    # "success" verdict (checked below, fail closed) before anything is
+    # pushed or signed. A build failure skips every merge, as before.
+    if: ${{ !cancelled() && needs.plan.outputs.any_refresh == 'true' && needs.build.result == 'success' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJson(needs.plan.outputs.merge_matrix) }}
+    steps:
+      - name: Download digests for this target
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: digest-${{ matrix.image }}-${{ matrix.tag }}-*
+          path: /tmp/digests
+          merge-multiple: true
+
+      - name: Resolve amd64 digest
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: digest-${{ matrix.image }}-${{ matrix.tag }}-amd64
+          path: /tmp/digest-amd64
+
+      - name: Compute amd64 digest sha
+        id: digest
+        run: |
+          set -euo pipefail
+          SHA="sha256:$(ls /tmp/digest-amd64)"
+          if ! [[ "$SHA" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+            echo "::error::Unexpected amd64 digest artifact content: $SHA"
+            exit 1
+          fi
+          echo "sha=$SHA" >> "$GITHUB_OUTPUT"
+
+      - name: Download gate verdict
+        continue-on-error: true
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: gate-${{ matrix.image }}-${{ matrix.tag }}
+          path: /tmp/gate
+
+      - name: Read gate verdict
+        id: gate
+        env:
+          IMAGE: ${{ matrix.image }}
+          TAG: ${{ matrix.tag }}
+          DIGEST_AMD64: ${{ steps.digest.outputs.sha }}
+        run: |
+          set -euo pipefail
+          VERDICT="/tmp/gate/${IMAGE}-${TAG}.json"
+          OUTCOME="missing"
+          if [ -f "$VERDICT" ]; then
+            SCANNED=$(jq -r '.digest // ""' "$VERDICT")
+            if [ "$SCANNED" = "$DIGEST_AMD64" ]; then
+              OUTCOME=$(jq -r '.outcome // "missing"' "$VERDICT")
+            else
+              OUTCOME="digest-mismatch"
+            fi
+          fi
+          echo "outcome=$OUTCOME" >> "$GITHUB_OUTPUT"
+          if [ "$OUTCOME" != "success" ]; then
+            echo "::warning::${IMAGE}:${TAG} not published: gate verdict is '${OUTCOME}'"
+          fi
+
+      - name: Login to GHCR
+        if: steps.gate.outputs.outcome == 'success'
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.repository_owner }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Set up Docker Buildx
-        if: steps.gate.outcome == 'success'
-        uses: docker/setup-buildx-action@v4
+        if: steps.gate.outputs.outcome == 'success'
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
 
       - name: Create multi-arch manifest and push tag
-        if: steps.gate.outcome == 'success'
+        id: manifest
+        if: steps.gate.outputs.outcome == 'success'
         working-directory: /tmp/digests
+        env:
+          REF: ghcr.io/diillson/${{ matrix.image }}
+          TAG: ${{ matrix.tag }}
         run: |
+          set -euo pipefail
           docker buildx imagetools create \
-            -t "ghcr.io/diillson/${{ matrix.image }}:${{ matrix.tag }}" \
-            $(printf 'ghcr.io/diillson/${{ matrix.image }}@sha256:%s ' *)
+            -t "${REF}:${TAG}" \
+            $(printf "${REF}@sha256:%s " *)
+          # The signature goes on the digest just pushed: a tag can be moved
+          # between this step and the signature, a digest cannot.
+          DIGEST=$(docker buildx imagetools inspect "${REF}:${TAG}" --format '{{json .Manifest}}' | jq -r '.digest')
+          if ! [[ "$DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+            echo "::error::Could not resolve the manifest digest of ${REF}:${TAG}"
+            exit 1
+          fi
+          echo "digest=$DIGEST" >> "$GITHUB_OUTPUT"
 
       - name: Install Cosign
-        if: steps.gate.outcome == 'success'
-        uses: sigstore/cosign-installer@v3
+        if: steps.gate.outputs.outcome == 'success'
+        uses: sigstore/cosign-installer@398d4b0eeef1380460a10c8013a76f728fb906ac # v3.9.1
 
-      - name: Sign refreshed manifest (keyless OIDC)
-        if: steps.gate.outcome == 'success'
+      - name: Sign refreshed manifest by digest (keyless OIDC)
+        id: sign
+        if: steps.gate.outputs.outcome == 'success'
+        env:
+          REF: ghcr.io/diillson/${{ matrix.image }}
+          DIGEST: ${{ steps.manifest.outputs.digest }}
         run: |
-          cosign sign --yes --recursive \
-            "ghcr.io/diillson/${{ matrix.image }}:${{ matrix.tag }}"
+          set -euo pipefail
+          cosign sign --yes --recursive "${REF}@${DIGEST}"
 
       - name: Record result
         if: always()
@@ -361,12 +517,20 @@ jobs:
           IMAGE: ${{ matrix.image }}
           TAG: ${{ matrix.tag }}
           REASON: ${{ matrix.reason }}
-          GATE: ${{ steps.gate.outcome }}
+          GATE: ${{ steps.gate.outputs.outcome }}
+          SIGN: ${{ steps.sign.outcome }}
           DIGEST_AMD64: ${{ steps.digest.outputs.sha }}
         run: |
           set -euo pipefail
           mkdir -p results
-          STATUS=$([ "$GATE" = "success" ] && echo "refreshed" || echo "gate_failed")
+          if [ "$GATE" != "success" ]; then
+            STATUS="gate_failed"
+          elif [ "$SIGN" = "success" ]; then
+            STATUS="refreshed"
+          else
+            # Gate passed but the manifest push or the signature failed.
+            STATUS="build_failed"
+          fi
           jq -nc \
             --arg image  "$IMAGE" \
             --arg tag    "$TAG" \
@@ -378,7 +542,7 @@ jobs:
 
       - name: Upload result
         if: always()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: result-${{ matrix.image }}-${{ matrix.tag }}
           path: results/*.json
@@ -390,18 +554,23 @@ jobs:
     needs: [scan, plan, merge]
     if: always() && needs.scan.result != 'skipped'
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Download decisions
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           pattern: decision-*
           path: /tmp/decisions
           merge-multiple: true
 
       - name: Download results (may be empty)
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         continue-on-error: true
         with:
           pattern: result-*
@@ -442,7 +611,7 @@ jobs:
           {
             echo "## Image refresh report — $(date -u +%Y-%m-%d)"
             echo ""
-            echo "Triggered by \`${{ github.event_name }}\` (run [#${{ github.run_number }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}))"
+            echo "Triggered by \`${GITHUB_EVENT_NAME}\` (run [#${GITHUB_RUN_NUMBER}](${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}))"
             echo ""
             if [ "$FAILED_N" -gt 0 ]; then
               echo "### ❌ Failures (manual triage required)"

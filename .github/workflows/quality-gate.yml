@@ -16,11 +16,11 @@ concurrency:
   group: quality-gate-${{ github.event.pull_request.number }}
   cancel-in-progress: true
 
+# Read-only by default; the jobs that need more declare it themselves
+# (test-coverage reads commit statuses, secrets-scan reads the PR, the
+# aggregator writes the sticky comment).
 permissions:
   contents: read
-  pull-requests: write
-  statuses: read
-  checks: read
 
 env:
   GO_VERSION_FILE: go.mod
@@ -40,8 +40,9 @@ jobs:
       labels: ${{ steps.decide.outputs.labels }}
       base_ref: ${{ steps.decide.outputs.base_ref }}
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          persist-credentials: false
           fetch-depth: 0
 
       - name: Install yq + jq
@@ -51,15 +52,20 @@ jobs:
 
       - id: decide
         shell: bash
+        # PR-controlled values (head branch name, actor) reach the script
+        # only through the environment, never spliced into its source.
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITHUB_EVENT_PATH: ${{ github.event_path }}
+          PR_ACTOR: ${{ github.actor }}
+          PR_BASE_REF: ${{ github.base_ref }}
+          PR_HEAD_REF: ${{ github.head_ref }}
         run: |
           set -euo pipefail
           source scripts/qg/lib.sh
 
           # Skip release-please / bot PRs
-          actor='${{ github.actor }}'
+          actor="$PR_ACTOR"
           mapfile -t skip_actors < <(qg_yq '.skip_actors[]?')
           skip="false"
           for a in "${skip_actors[@]}"; do
@@ -74,8 +80,8 @@ jobs:
             echo "::warning::Quality Gate bypassed via 'quality-gate-skip' label"
           fi
 
-          base_ref="origin/${{ github.base_ref }}"
-          git fetch origin "${{ github.base_ref }}" --quiet || true
+          base_ref="origin/${PR_BASE_REF}"
+          git fetch origin "${PR_BASE_REF}" --quiet || true
 
           # docs-only detection
           export QG_BASE_REF="$base_ref"
@@ -87,7 +93,7 @@ jobs:
           # and CHANGELOG, so the heavy floors are noise — we keep
           # commit-lint running as a sanity check and skip the rest.
           release_please="false"
-          head_ref='${{ github.head_ref }}'
+          head_ref="$PR_HEAD_REF"
           if [[ "$head_ref" == release-please--* ]]; then
             release_please="true"
           fi
@@ -115,8 +121,10 @@ jobs:
     if: needs.meta.outputs.skip != 'true' && needs.meta.outputs.release_please != 'true'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-go@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: ${{ env.GO_VERSION_FILE }}
           cache: true
@@ -150,14 +158,14 @@ jobs:
         # module — in the change that flipped this), so enforcement covers
         # the whole tree: pre-existing debt can no longer accumulate
         # silently outside PR diffs.
-        uses: golangci/golangci-lint-action@v9
+        uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
         with:
           version: v2.14.0
           install-mode: goinstall
           args: --timeout=8m
 
       - name: golangci-lint (operator, full module)
-        uses: golangci/golangci-lint-action@v9
+        uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
         with:
           version: v2.14.0
           install-mode: goinstall
@@ -173,17 +181,21 @@ jobs:
     needs: meta
     if: needs.meta.outputs.skip != 'true' && needs.meta.outputs.release_please != 'true'
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      statuses: read
     outputs:
       passed: ${{ steps.ratchet.outputs.passed }}
       current: ${{ steps.ratchet.outputs.current }}
       baseline: ${{ steps.ratchet.outputs.baseline }}
       delta: ${{ steps.ratchet.outputs.delta }}
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          persist-credentials: false
           fetch-depth: 0
 
-      - uses: actions/setup-go@v7
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: ${{ env.GO_VERSION_FILE }}
           cache: true
@@ -222,7 +234,7 @@ jobs:
           go tool cover -func=coverage.out | tail -n 1
 
       - name: Upload coverage profile
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: coverage-out
           path: coverage.out
@@ -248,11 +260,12 @@ jobs:
       percent: ${{ steps.patch.outputs.percent }}
       threshold: ${{ steps.patch.outputs.threshold }}
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          persist-credentials: false
           fetch-depth: 0
 
-      - uses: actions/setup-go@v7
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: ${{ env.GO_VERSION_FILE }}
           cache: true
@@ -262,7 +275,7 @@ jobs:
           sudo wget -qO /usr/local/bin/yq https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
           sudo chmod +x /usr/local/bin/yq
 
-      - uses: actions/download-artifact@v6
+      - uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53 # v6.0.0
         with:
           name: coverage-out
 
@@ -286,8 +299,9 @@ jobs:
     outputs:
       passed: ${{ steps.scan.outputs.passed }}
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          persist-credentials: false
           fetch-depth: 0
 
       - name: Install yq
@@ -316,8 +330,9 @@ jobs:
       code_loc: ${{ steps.scope.outputs.code_loc }}
       tooling_loc: ${{ steps.scope.outputs.tooling_loc }}
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          persist-credentials: false
           fetch-depth: 0
 
       - name: Install yq
@@ -341,8 +356,10 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-go@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: ${{ env.GO_VERSION_FILE }}
           cache: true
@@ -361,8 +378,9 @@ jobs:
     outputs:
       passed: ${{ steps.lint.outputs.passed }}
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          persist-credentials: false
           fetch-depth: 0
 
       - name: Install yq
@@ -387,11 +405,12 @@ jobs:
       passed: ${{ steps.cyclo.outputs.passed }}
       checked: ${{ steps.cyclo.outputs.checked }}
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          persist-credentials: false
           fetch-depth: 0
 
-      - uses: actions/setup-go@v7
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: ${{ env.GO_VERSION_FILE }}
           cache: true
@@ -414,13 +433,17 @@ jobs:
     needs: meta
     if: needs.meta.outputs.skip != 'true' && needs.meta.outputs.release_please != 'true'
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          persist-credentials: false
           fetch-depth: 0
 
       - name: gitleaks (PR scope)
-        uses: gitleaks/gitleaks-action@v3
+        uses: gitleaks/gitleaks-action@e0c47f4f8be36e29cdc102c57e68cb5cbf0e8d1e # v3.0.0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITLEAKS_ENABLE_COMMENTS: "false"
@@ -439,8 +462,10 @@ jobs:
       missing_keys: ${{ steps.parity.outputs.missing_keys }}
       unknown_usages: ${{ steps.parity.outputs.unknown_usages }}
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-go@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: ${{ env.GO_VERSION_FILE }}
           cache: true
@@ -465,10 +490,11 @@ jobs:
       passed: ${{ steps.drift.outputs.passed }}
       drifted_files: ${{ steps.drift.outputs.drifted_files }}
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          persist-credentials: false
           fetch-depth: 0
-      - uses: actions/setup-go@v7
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: ${{ env.GO_VERSION_FILE }}
           cache: true
@@ -493,8 +519,9 @@ jobs:
       passed: ${{ steps.headers.outputs.passed }}
       missing_count: ${{ steps.headers.outputs.missing_count }}
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          persist-credentials: false
           fetch-depth: 0
       - name: Install yq
         run: |
@@ -517,10 +544,11 @@ jobs:
       passed: ${{ steps.apidiff.outputs.passed }}
       incompatible_count: ${{ steps.apidiff.outputs.incompatible_count }}
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          persist-credentials: false
           fetch-depth: 0
-      - uses: actions/setup-go@v7
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: ${{ env.GO_VERSION_FILE }}
           cache: true
@@ -547,10 +575,11 @@ jobs:
       chatcli_bytes: ${{ steps.size.outputs.chatcli_bytes }}
       operator_bytes: ${{ steps.size.outputs.operator_bytes }}
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          persist-credentials: false
           fetch-depth: 0
-      - uses: actions/setup-go@v7
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: ${{ env.GO_VERSION_FILE }}
           cache: true
@@ -576,8 +605,10 @@ jobs:
       violations: ${{ steps.parity.outputs.violations }}
       providers: ${{ steps.parity.outputs.providers }}
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-go@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: ${{ env.GO_VERSION_FILE }}
           cache: true
@@ -613,9 +644,14 @@ jobs:
       - provider-parity
     if: always()
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-go@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: ${{ env.GO_VERSION_FILE }}
           cache: true
@@ -683,7 +719,7 @@ jobs:
           } >> "$GITHUB_OUTPUT"
 
       - name: Sticky comment on PR
-        uses: marocchino/sticky-pull-request-comment@v3
+        uses: marocchino/sticky-pull-request-comment@5770ad5eb8f42dd2c4f34da00c94c5381e49af88 # v3.0.5
         with:
           header: quality-gate
           message: ${{ steps.verdict.outputs.body }}

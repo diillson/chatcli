@@ -15,7 +15,6 @@ on:
 
 permissions:
   contents: read
-  statuses: write
 
 concurrency:
   group: quality-gate-baseline-${{ github.ref }}
@@ -26,9 +25,14 @@ jobs:
     name: Publish coverage baseline
     runs-on: ubuntu-latest
     if: github.actor != 'release-please[bot]'
+    permissions:
+      contents: read
+      statuses: write
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-go@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
           cache: true
@@ -77,11 +81,13 @@ jobs:
             -f description="coverage ${PCT}%"
 
       - name: Step summary
+        env:
+          PCT: ${{ steps.cov.outputs.pct }}
         run: |
           {
             echo "## Coverage baseline updated"
             echo ""
             echo "- Branch: \`${GITHUB_REF_NAME}\`"
             echo "- Commit: \`${GITHUB_SHA}\`"
-            echo "- Total coverage: **${{ steps.cov.outputs.pct }}%**"
+            echo "- Total coverage: **${PCT}%**"
           } >> "$GITHUB_STEP_SUMMARY"
