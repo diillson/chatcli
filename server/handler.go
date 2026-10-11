@@ -24,6 +24,8 @@ import (
 	"github.com/diillson/chatcli/server/hub"
 	"github.com/diillson/chatcli/version"
 	"go.uber.org/zap"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 // Handler implements the ChatCLIService gRPC server.
@@ -212,7 +214,9 @@ func (h *Handler) getClient(provider, model, clientAPIKey string, providerConfig
 			zap.String("provider", provider),
 			zap.Error(err),
 		)
-		return nil, err
+		// The caller sent a configuration this server refuses: a client
+		// error, not a server fault.
+		return nil, status.Error(codes.InvalidArgument, err.Error())
 	}
 
 	switch {

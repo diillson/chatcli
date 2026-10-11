@@ -72,7 +72,7 @@ func (h *Handler) authorizeRouteProvider(ctx context.Context, provider string, u
 // routeFailure turns a resolveRoute error into the RPC status: a refusal
 // keeps its PermissionDenied code, anything else is Internal with msgKey.
 func routeFailure(err error, msgKey string) error {
-	if s, ok := status.FromError(err); ok && s.Code() == codes.PermissionDenied {
+	if s, ok := status.FromError(err); ok && (s.Code() == codes.PermissionDenied || s.Code() == codes.InvalidArgument) {
 		return err
 	}
 	return status.Errorf(codes.Internal, "%s", i18n.T(msgKey, err))
