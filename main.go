@@ -242,6 +242,12 @@ func main() {
 	// that are not a console.
 	utils.EnableVirtualTerminal()
 
+	// Create ~/.chatcli owner-only, and repair modes older versions left
+	// open, before anything writes there: the logger creates its directory
+	// (lumberjack uses 0755) and every store below follows. A failure is
+	// reported once translations are loaded; it never blocks the start.
+	stateRootErr := utils.EnsureStateRoot()
+
 	// A headless browser launched for a JS-rendered fetch is closed on a
 	// clean exit here, and by its watcher when this process ends any other
 	// way (os.Exit, a crash, a kill).
@@ -264,6 +270,9 @@ func main() {
 	}
 
 	reportDotenvBootstrap(loadDotenvThenI18n())
+	if stateRootErr != nil {
+		fmt.Fprintln(os.Stderr, i18n.T("state.root.repair_failed", stateRootErr))
+	}
 
 	if opts.Version {
 		printVersionInfo()

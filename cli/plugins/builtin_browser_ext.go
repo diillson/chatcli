@@ -16,13 +16,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/diillson/chatcli/pkg/browser"
+	"github.com/diillson/chatcli/utils"
 )
 
 // BrowserExtBackend is the optional surface for the second-tier verbs. The
@@ -155,10 +155,22 @@ func browserExtHTML(ctx context.Context, _ BrowserBackend, ext BrowserExtBackend
 	return out, nil
 }
 
+// browserArtifactDir is the default directory for files @browser saves
+// without an explicit path: owner-only, under the user's state root, rather
+// than a fixed name in the shared temp directory that another local user
+// could pre-create or fill with symbolic links.
+func browserArtifactDir() (string, error) {
+	return utils.PrivateStateDir("browser")
+}
+
 func browserExtPDF(ctx context.Context, _ BrowserBackend, ext BrowserExtBackend, inv browserInvocation) (string, error) {
 	path := inv.file
 	if path == "" {
-		path = filepath.Join(os.TempDir(), "chatcli-browser", fmt.Sprintf("page-%d.pdf", time.Now().UnixMilli()))
+		dir, err := browserArtifactDir()
+		if err != nil {
+			return "", fmt.Errorf("@browser pdf: %w", err)
+		}
+		path = filepath.Join(dir, fmt.Sprintf("page-%d.pdf", time.Now().UnixMilli()))
 	}
 	if err := ext.PDF(ctx, path); err != nil {
 		return "", fmt.Errorf("@browser pdf: %w", err)

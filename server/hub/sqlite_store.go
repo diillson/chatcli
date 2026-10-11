@@ -19,6 +19,7 @@ import (
 	_ "modernc.org/sqlite" // pure-Go driver, registers as "sqlite" (no CGO — keeps cross-compilation, incl. Windows, working)
 
 	"github.com/diillson/chatcli/models"
+	"github.com/diillson/chatcli/utils"
 )
 
 // schema is the embedded-DB layout. The events table uses a global
@@ -93,6 +94,12 @@ type SQLiteStore struct {
 func OpenSQLiteStore(ctx context.Context, path string, logger *zap.Logger) (*SQLiteStore, error) {
 	if logger == nil {
 		logger = zap.NewNop()
+	}
+	// The database holds every channel's conversation. Create it owner-only
+	// before SQLite opens it (SQLite gives the -wal and -shm files it
+	// creates the database file's mode) and tighten an existing one.
+	if err := utils.RestrictSQLiteFiles(path); err != nil {
+		return nil, fmt.Errorf("hub: restrict sqlite files at %s: %w", path, err)
 	}
 	// WAL gives concurrent readers alongside one writer; busy_timeout absorbs
 	// brief contention without surfacing errors.

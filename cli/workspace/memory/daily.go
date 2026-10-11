@@ -35,7 +35,7 @@ func (d *DailyNoteStore) TodayNotePath() string {
 func (d *DailyNoteStore) WriteDailyNote(entry string) error {
 	path := d.TodayNotePath()
 	dir := filepath.Dir(path)
-	if err := os.MkdirAll(dir, 0o750); err != nil {
+	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return fmt.Errorf("creating daily notes dir: %w", err)
 	}
 

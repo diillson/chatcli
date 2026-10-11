@@ -94,9 +94,8 @@ func NewOpenAIAssistantClient(ctx context.Context, provider auth.TokenProvider, 
 		},
 	)
 
-	// Criar o diretório de cache se não existir
-	cacheDir := filepath.Join(os.TempDir(), "chatcli-openai-cache")
-	if err := os.MkdirAll(cacheDir, 0o700); err != nil {
+	cacheDir, err := assistantCacheDir()
+	if err != nil {
 		return nil, fmt.Errorf("%s: %w", i18n.T("llm.assistant.create_cache_dir_error"), err)
 	}
 
@@ -349,6 +348,18 @@ func (c *OpenAIAssistantClient) initializeAssistant(ctx context.Context) error {
 	return nil
 }
 
+// assistantCacheDirName is the assistant cache directory under the
+// per-user state root.
+const assistantCacheDirName = "openai-cache"
+
+// assistantCacheDir returns the owner-only cache directory for assistant and
+// file ids. It lives under the user's state root rather than under a fixed
+// name in the shared temp directory, where another local user could
+// pre-create it or plant a symbolic link the cache write would follow.
+func assistantCacheDir() (string, error) {
+	return utils.PrivateStateDir(assistantCacheDirName)
+}
+
 // verifyAssistantExists verifica se um assistente ainda existe na API
 func (c *OpenAIAssistantClient) verifyAssistantExists(ctx context.Context, assistantID string) bool {
 	_, err := c.client.Get(ctx, fmt.Sprintf("/assistants/%s", assistantID))
@@ -357,7 +368,11 @@ func (c *OpenAIAssistantClient) verifyAssistantExists(ctx context.Context, assis
 
 // loadAssistantIDFromCache carrega o ID do assistente do cache
 func (c *OpenAIAssistantClient) loadAssistantIDFromCache() (string, error) {
-	cacheFile := filepath.Join(os.TempDir(), "chatcli-openai-cache", "assistant.json")
+	cacheDir, err := assistantCacheDir()
+	if err != nil {
+		return "", err
+	}
+	cacheFile := filepath.Join(cacheDir, "assistant.json")
 	data, err := os.ReadFile(cacheFile) //#nosec G304 -- path supplied by user/agent through validated tool surface (boundary check upstream)
 	if err != nil {
 		return "", err
@@ -382,8 +397,8 @@ func (c *OpenAIAssistantClient) loadAssistantIDFromCache() (string, error) {
 
 // saveAssistantIDToCache salva o ID do assistente no cache
 func (c *OpenAIAssistantClient) saveAssistantIDToCache(assistantID string) error {
-	cacheDir := filepath.Join(os.TempDir(), "chatcli-openai-cache")
-	if err := os.MkdirAll(cacheDir, 0o700); err != nil {
+	cacheDir, err := assistantCacheDir()
+	if err != nil {
 		return err
 	}
 

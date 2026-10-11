@@ -23,6 +23,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/diillson/chatcli/utils"
 )
 
 // TabInfo describes one page target in the browser.
@@ -307,10 +309,17 @@ func (s *Session) PDF(ctx context.Context, path string) error {
 	if err != nil {
 		return fmt.Errorf("decode pdf: %w", err)
 	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
+	return writeArtifactFile(path, data)
+}
+
+// writeArtifactFile writes data to path owner-only through a temp file and
+// a rename, which replaces a symbolic link planted at path instead of
+// following it as a plain write would.
+func writeArtifactFile(path string, data []byte) error {
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return err
 	}
-	return os.WriteFile(path, data, 0o600)
+	return utils.AtomicWriteFile(path, data, 0o600)
 }
 
 // Resize emulates a viewport of width×height CSS pixels; mobile also turns
