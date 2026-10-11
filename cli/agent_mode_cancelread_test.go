@@ -105,8 +105,18 @@ func TestReadLineSignal_NilChannelBlocksForInput(t *testing.T) {
 // TestReadLineSignal_UnattendedAutoApproves keeps the daemon contract:
 // unattended runs have no human/stdin, so confirmations auto-approve regardless
 // of the cancel channel.
-func TestReadLineSignal_UnattendedAutoApproves(t *testing.T) {
+func TestReadLineSignal_UnattendedDeclinesWithoutAutoMode(t *testing.T) {
 	a := &AgentMode{cli: &ChatCLI{unattended: true}}
+
+	got := a.readLineSignal(nil)
+
+	assert.Equal(t, "", got, "unattended without the automode opt-in must decline every confirmation")
+}
+
+func TestReadLineSignal_UnattendedAutoApprovesWithAutoMode(t *testing.T) {
+	c := &ChatCLI{unattended: true}
+	c.policyAutoMode.Store(true)
+	a := &AgentMode{cli: c}
 
 	got := a.readLineSignal(nil)
 

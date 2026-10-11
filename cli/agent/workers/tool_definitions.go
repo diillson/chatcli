@@ -466,6 +466,14 @@ func NativeToolNameToSubcmd(toolName string) (string, bool) {
 	return toolName, false
 }
 
+// operatorOnlyToolArgs are argument names that only operator configuration
+// may set (CHATCLI_CODER_ALLOW_UNSAFE, CHATCLI_AGENT_ALLOW_SUDO); they are
+// dropped from model-supplied tool calls, in either spelling.
+var operatorOnlyToolArgs = map[string]bool{
+	"allow_unsafe": true, "allow-unsafe": true, "allowUnsafe": true,
+	"allow_sudo": true, "allow-sudo": true, "allowSudo": true,
+}
+
 // NativeToolArgsToFlags converts structured tool call arguments to CLI-style flags
 // for the coder engine. This is the bridge between native function calling and
 // the existing engine.Execute(cmd, args) interface.
@@ -501,8 +509,6 @@ func NativeToolArgsToFlags(subcmd string, args map[string]interface{}) []string 
 		"force":          "--force",
 		"pattern":        "--pattern",
 		"append":         "--append",
-		"allow_unsafe":   "--allow-unsafe",
-		"allow_sudo":     "--allow-sudo",
 		"case_sensitive": "--case-sensitive",
 		"encoding":       "--encoding",
 		"diff":           "--diff",
@@ -511,6 +517,11 @@ func NativeToolArgsToFlags(subcmd string, args map[string]interface{}) []string 
 	}
 
 	for key, val := range args {
+		// Elevation is operator configuration only: a model-supplied
+		// allow_unsafe/allow_sudo never reaches the engine.
+		if operatorOnlyToolArgs[key] {
+			continue
+		}
 		flagName, ok := argToFlag[key]
 		if !ok {
 			flagName = "--" + key

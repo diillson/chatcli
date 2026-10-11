@@ -269,7 +269,7 @@ var envDefaults = map[string]envDefault{
 	"CHATCLI_MCP_ENABLED":                   {Value: "false", IsBool: true, Source: "mcp manager"},
 	"CHATCLI_MCP_DYNAMIC_TOOLS":             {Value: "true", IsBool: true, Source: "mcp.dynamicToolRefreshEnabled — refresh on tools/list_changed"},
 	"CHATCLI_MCP_DANGER":                    {Value: "allow", Source: "cmd/rpcserve.go (mcp-server unattended danger policy: allow|block)"},
-	"CHATCLI_MCP_ELICITATION":               {Value: "on", Source: "cli/rpcserve/mcp.go (permission dialogs via elicitation/create: on|off; off restores the legacy unattended contract)"},
+	"CHATCLI_MCP_ELICITATION":               {Value: "on", Source: "cli/rpcserve/mcp.go (permission dialogs via elicitation/create: on|off; off leaves asks without a dialog, so they are denied unless CHATCLI_POLICY_AUTOMODE=true)"},
 	"CHATCLI_MCP_PERMISSION_TIMEOUT":        {Value: "600s", Source: "cli/rpcserve (max wait for the client's permission dialog, MCP elicitation and ACP request_permission; duration or seconds; 0|off lifts the bound to a 24h ceiling — never truly unbounded; tune below MCP clients' own tools/call timeout)"},
 	"CHATCLI_MCP_OAUTH_PORT":                {Value: "8765", Source: "cli/mcp/oauth.go (fixed loopback port for the OAuth callback; keeps redirect_uri and client registration stable; falls back to an ephemeral port when busy)"},
 	"CHATCLI_MCP_RESOURCES":                 {Value: "on", Source: "cli/rpc_support_resources.go (chatcli:// read-only resources: on|off)"},
@@ -311,6 +311,8 @@ var envDefaults = map[string]envDefault{
 	// ─── Security ────────────────────────────────────────────────
 	"CHATCLI_AGENT_SECURITY_MODE":    {Value: "strict", Source: "agent.command_allowlist (default unless permissive)"},
 	"CHATCLI_AGENT_ALLOW_SUDO":       {Value: "false", IsBool: true, Source: "command_allowlist"},
+	"CHATCLI_CODER_ALLOW_UNSAFE":     {Value: "false", IsBool: true, Source: "pkg/coder/engine/commands_exec.go (operator-only lift of the exec/test dangerous-pattern block)"},
+	"CHATCLI_POLICY_AUTOMODE":        {Value: "false", IsBool: true, Source: "cli/coder/unattended_gate.go (start sessions in policy automode; 'ask' is denied without a human otherwise)"},
 	"CHATCLI_AGENT_WORKSPACE_STRICT": {Value: "true", IsBool: true, Source: "session_workspace"},
 	"CHATCLI_AGENT_ALLOW_KUBECONFIG": {Value: "false", IsBool: true, Source: "session_workspace"},
 	"CHATCLI_BLOCK_TMP_WRITES":       {Value: "false", IsBool: true, Source: "session_workspace.go:150"},

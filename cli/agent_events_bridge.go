@@ -368,9 +368,11 @@ func (a *AgentMode) requestActionPermission(tc agentevents.ToolCall, reason stri
 // action, renders the refusal, tells the model (so it can replan) and closes
 // the tool_call for the client. The persistent choices are only offered when
 // a suggested pattern exists — exec commands never get one, by design.
-// Without a reachable dialog the historical unattended contract holds —
-// "ask" auto-approves (the operator opted into autonomy; explicit deny rules
-// still block upstream).
+// Without a reachable dialog nobody can approve the action, so it is
+// refused: "ask" is never approval by default. The operator's opt-in is
+// policy automode (CHATCLI_POLICY_AUTOMODE=true, or /policy mode auto),
+// which the caller resolves before reaching here; safety-immune operations
+// never take that shortcut and land here, so they are refused too.
 func (a *AgentMode) unattendedAskBlocked(toolName, rawArgs string, pm *coder.PolicyManager, renderError func(string)) bool {
 	title := agent.CompactToolLabel(extractSubcmdFromArgs(rawArgs), rawArgs)
 	if strings.TrimSpace(title) == "" {
@@ -393,10 +395,16 @@ func (a *AgentMode) unattendedAskBlocked(toolName, rawArgs string, pm *coder.Pol
 	})
 	if !asked {
 		if a.logger != nil {
-			a.logger.Info("coder policy: 'ask' auto-approved (unattended, no permission dialog)",
+			a.logger.Info("coder policy: 'ask' denied (unattended, no permission dialog, no automode opt-in)",
 				zap.String("tool", toolName))
 		}
-		return false
+		msg := i18n.T("agent.policy.unattended_denied", title)
+		renderError(msg)
+		a.emitBlockedTool(toolName, rawArgs, msg)
+		a.cli.history = append(a.cli.history, models.Message{Role: "user", Content: fmt.Sprintf(
+			"SECURITY BLOCK: %q needs approval, but this run has no one who can approve it (unattended surface, no permission dialog). The action was NOT executed and the user did not deny it. DO NOT retry it; continue without it, and in your final answer say which action needs approval: the operator can allow it in coder_policy.json or set CHATCLI_POLICY_AUTOMODE=true.",
+			title)})
+		return true
 	}
 	// An unanswered dialog (client declared the capability but never
 	// rendered/answered it) is not a human denial: block fail-safe, but tell
@@ -405,7 +413,7 @@ func (a *AgentMode) unattendedAskBlocked(toolName, rawArgs string, pm *coder.Pol
 	if errors.Is(reqErr, agentevents.ErrPermissionTimeout) {
 		msg := i18n.T("agent.policy.ask_timeout", title)
 		feedback := fmt.Sprintf(
-			"SECURITY BLOCK: The permission request for %q got NO RESPONSE from the user (the approval dialog timed out — the client may not display permission dialogs). The action was NOT executed. DO NOT retry it; continue without it, or tell the user their client did not surface the approval dialog and that session policy automode (the /policy command, or the manage_session policy_mode action over MCP) restores unattended auto-approval.",
+			"SECURITY BLOCK: The permission request for %q got NO RESPONSE from the user (the approval dialog timed out — the client may not display permission dialogs). The action was NOT executed. DO NOT retry it; continue without it, or tell the user their client did not surface the approval dialog and that session policy automode (the /policy command, or the manage_session policy_mode action over MCP) lets ask rules auto-approve.",
 			title)
 		renderError(msg)
 		a.emitBlockedTool(toolName, rawArgs, msg)
@@ -420,7 +428,7 @@ func (a *AgentMode) unattendedAskBlocked(toolName, rawArgs string, pm *coder.Pol
 	if reqErr != nil {
 		msg := i18n.T("agent.policy.ask_failed", title)
 		feedback := fmt.Sprintf(
-			"SECURITY BLOCK: The permission request for %q could not be delivered or answered (the dialog round-trip failed: %v). This was NOT a user denial. The action was NOT executed. DO NOT retry it; continue without it, or tell the user the approval dialog failed and that session policy automode (the /policy command, or the manage_session policy_mode action over MCP) restores unattended auto-approval.",
+			"SECURITY BLOCK: The permission request for %q could not be delivered or answered (the dialog round-trip failed: %v). This was NOT a user denial. The action was NOT executed. DO NOT retry it; continue without it, or tell the user the approval dialog failed and that session policy automode (the /policy command, or the manage_session policy_mode action over MCP) lets ask rules auto-approve.",
 			title, reqErr)
 		renderError(msg)
 		a.emitBlockedTool(toolName, rawArgs, msg)

@@ -86,7 +86,14 @@ func (m SandboxMode) String() string {
 // command may write to beyond the workspace: temp dirs and the language
 // toolchains' caches, so `go build`, `npm install`, `pip`, cargo etc. keep
 // working. A confinement that broke the module cache would be worse than
-// none, so this errs toward permissive.
+// none, so this errs toward permissive for toolchain caches.
+//
+// ~/.chatcli is deliberately absent: it holds the security policy, hooks,
+// skills, plugins and credentials, and a confined command writing there
+// could rewrite the rules that confine it. Nothing a confined command does
+// needs it — checkpoints, memory and logs are written by the chatcli process
+// itself, which is not confined, and the session scratch and tool-result
+// directories live under the temp dir.
 func sandboxWritablePaths(workspace string) []string {
 	paths := []string{workspace}
 	if tmp := os.TempDir(); tmp != "" {
@@ -96,7 +103,6 @@ func sandboxWritablePaths(workspace string) []string {
 	home, err := os.UserHomeDir()
 	if err == nil && home != "" {
 		for _, rel := range []string{
-			".chatcli",       // checkpoints, memory, logs
 			".cache",         // go-build (linux), pip, many tools
 			"Library/Caches", // go-build (macOS), others
 			"go/pkg",         // GOMODCACHE
@@ -107,6 +113,17 @@ func sandboxWritablePaths(workspace string) []string {
 		}
 	}
 	return dedupPaths(paths)
+}
+
+// sandboxProtectedPaths are kept read-only for a confined command even when
+// a writable path contains them (a workspace at $HOME, for one): the
+// chatcli state directory with the policy, hooks, skills and plugins.
+func sandboxProtectedPaths() []string {
+	home, err := os.UserHomeDir()
+	if err != nil || home == "" {
+		return nil
+	}
+	return []string{home + "/.chatcli"}
 }
 
 func dedupPaths(in []string) []string {

@@ -72,9 +72,10 @@ func runRPC(kind string, mgr manager.LLMManager, logger *zap.Logger) error {
 	if chatCLI != nil {
 		// stdin carries the JSON-RPC protocol: any interactive confirmation
 		// would consume protocol frames and hang the run. Unattended mode
-		// auto-approves every prompt at the source (same regime as the
-		// gateway daemon); CHATCLI_MCP_DANGER=block re-arms the dangerous-
-		// command gate as an in-band refusal instead of a stdin read.
+		// never reads stdin: confirmations go to the client's permission
+		// dialog when it has one and are otherwise declined, unless the
+		// operator opted into policy automode (CHATCLI_POLICY_AUTOMODE);
+		// CHATCLI_MCP_DANGER=block declines dangerous commands even then.
 		chatCLI.SetUnattended(true)
 		chatCLI.SetRPCDangerPolicy(strings.EqualFold(os.Getenv("CHATCLI_MCP_DANGER"), "block"))
 

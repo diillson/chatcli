@@ -87,31 +87,52 @@ func TestUnattendedAskBlocked_AllowedByClient(t *testing.T) {
 	}
 }
 
-// TestUnattendedAskBlocked_NoRequester: without any requester (gateway
-// daemon, MCP client without elicitation) the historical unattended contract
-// holds — ask auto-approves.
-func TestUnattendedAskBlocked_NoRequester(t *testing.T) {
-	a, c := newUnattendedAgent(&sinkRecorder{}) // sink without PermissionRequester
-	if a.unattendedAskBlocked("@coder", `{"cmd":"exec"}`, nil, func(string) {}) {
-		t.Fatal("without a requester, ask must keep the legacy auto-approve")
+// assertNeedsApprovalFeedback checks that a refused unattended ask told the
+// model it needed approval (not that the user denied it).
+func assertNeedsApprovalFeedback(t *testing.T, c *ChatCLI) {
+	t.Helper()
+	var feedback string
+	for _, m := range c.history {
+		if strings.Contains(m.Content, "SECURITY BLOCK") {
+			feedback = m.Content
+		}
 	}
-	if len(c.history) != 0 {
-		t.Fatal("legacy auto-approve must not touch history")
+	if feedback == "" {
+		t.Fatal("the refusal must reach the model through history so it can replan")
+	}
+	if !strings.Contains(feedback, "needs approval") || !strings.Contains(feedback, "CHATCLI_POLICY_AUTOMODE") {
+		t.Fatalf("feedback must say approval is needed and how to opt in, got: %s", feedback)
+	}
+	if strings.Contains(feedback, "DENIED by the user") {
+		t.Fatalf("nobody denied it; feedback must not claim a user denial: %s", feedback)
 	}
 }
 
-// TestUnattendedAskBlocked_UnsupportedClientFallsBack: a client that answers
-// "method not found" (wrapped/minimal ACP clients) falls back to the legacy
-// auto-approve instead of bricking every ask-gated action.
-func TestUnattendedAskBlocked_UnsupportedClientFallsBack(t *testing.T) {
+// TestUnattendedAskBlocked_NoRequester: without any requester (gateway
+// daemon, MCP client without elicitation) nobody can approve, so the ask is
+// refused and the model is told which approval is missing.
+func TestUnattendedAskBlocked_NoRequester(t *testing.T) {
+	rec := &sinkRecorder{} // sink without PermissionRequester
+	a, c := newUnattendedAgent(rec)
+	if !a.unattendedAskBlocked("@coder", `{"cmd":"exec"}`, nil, func(string) {}) {
+		t.Fatal("without a requester, an unattended ask must be refused")
+	}
+	assertNeedsApprovalFeedback(t, c)
+	if len(rec.ends) != 1 || !rec.ends[0].IsError {
+		t.Fatalf("the refused call must be closed as an error for the client, got %+v", rec.ends)
+	}
+}
+
+// TestUnattendedAskBlocked_UnsupportedClientDenies: a client that answers
+// "method not found" (wrapped/minimal ACP clients) has no dialog, so the ask
+// is refused like any other run without an approver.
+func TestUnattendedAskBlocked_UnsupportedClientDenies(t *testing.T) {
 	rec := &permRecorder{err: agentevents.ErrPermissionUnsupported}
 	a, c := newUnattendedAgent(rec)
-	if a.unattendedAskBlocked("@coder", `{"cmd":"exec"}`, nil, func(string) {}) {
-		t.Fatal("unsupported permission method must fall back to legacy auto-approve")
+	if !a.unattendedAskBlocked("@coder", `{"cmd":"exec"}`, nil, func(string) {}) {
+		t.Fatal("unsupported permission method means no approver: the ask must be refused")
 	}
-	if len(c.history) != 0 {
-		t.Fatal("fallback must not touch history")
-	}
+	assertNeedsApprovalFeedback(t, c)
 }
 
 // TestUnattendedAskBlocked_TransportErrorDenies: any other requester failure
@@ -247,19 +268,17 @@ func TestUnattendedAskBlocked_ExecNeverOffersAlways(t *testing.T) {
 }
 
 // TestUnattendedAskBlocked_DeciderErrorContracts: the decision surface must
-// honor the same error contracts as the boolean one — unsupported falls back
-// to legacy auto-approve, transport errors deny fail-safe.
+// honor the same error contracts as the boolean one — unsupported means no
+// approver (refused), transport errors deny fail-safe.
 func TestUnattendedAskBlocked_DeciderErrorContracts(t *testing.T) {
 	pm := newSandboxedPolicyManager(t)
 
 	uns := &decisionRecorder{err: agentevents.ErrPermissionUnsupported}
 	a, c := newUnattendedAgent(uns)
-	if a.unattendedAskBlocked("@coder", `{"cmd":"write"}`, pm, func(string) {}) {
-		t.Fatal("unsupported decider must fall back to legacy auto-approve")
+	if !a.unattendedAskBlocked("@coder", `{"cmd":"write"}`, pm, func(string) {}) {
+		t.Fatal("unsupported decider means no approver: the ask must be refused")
 	}
-	if len(c.history) != 0 {
-		t.Fatal("fallback must not touch history")
-	}
+	assertNeedsApprovalFeedback(t, c)
 
 	boom := &decisionRecorder{err: errFixed("client disconnected")}
 	a2, _ := newUnattendedAgent(boom)

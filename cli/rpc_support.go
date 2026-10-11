@@ -66,9 +66,9 @@ var rpcCaptureActive atomic.Bool
 // SetRPCDangerPolicy toggles the unattended dangerous-command policy. With
 // block=true, a command classified dangerous by the CommandValidator is
 // declined in-band (the model sees the refusal in the transcript and can
-// replan) instead of auto-approved the way the gateway daemon runs. The MCP
-// server sets this from CHATCLI_MCP_DANGER; the gateway never calls it, so
-// its opt-in auto-approve behavior is unchanged.
+// replan) even when the operator opted into policy automode. Without the
+// automode opt-in such commands are declined regardless. The MCP server sets
+// this from CHATCLI_MCP_DANGER.
 func (cli *ChatCLI) SetRPCDangerPolicy(block bool) {
 	cli.dangerBlock = block
 }

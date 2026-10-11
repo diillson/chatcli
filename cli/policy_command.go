@@ -11,9 +11,11 @@
  * policy "ask" verdict auto-approves, so the agent runs uninterrupted;
  * explicit deny rules, the dangerous-command validator and safety-immune
  * operations keep gating exactly as in interactive mode. The mode is never
- * persisted: a new session always starts interactive. Exposed on all three
- * surfaces — terminal REPL, ACP (slash command), MCP (manage_session
- * policy_mode action).
+ * persisted: a new session starts interactive unless the operator set
+ * CHATCLI_POLICY_AUTOMODE=true. Automode is also the only opt-in that lets
+ * surfaces with nobody to ask (gateway, server, tool passthrough) approve an
+ * "ask"; without it they refuse. Exposed on all three surfaces — terminal
+ * REPL, ACP (slash command), MCP (manage_session policy_mode action).
  */
 package cli
 
@@ -35,7 +37,8 @@ func (cli *ChatCLI) PolicyAutoMode() bool {
 }
 
 // SetPolicyAutoMode switches the session's policy mode. Session-scoped by
-// design — never persisted, so every new process starts interactive.
+// design — never persisted, so every new process starts interactive unless
+// the operator set CHATCLI_POLICY_AUTOMODE=true.
 func (cli *ChatCLI) SetPolicyAutoMode(on bool) {
 	cli.policyAutoMode.Store(on)
 	if cli.logger != nil {

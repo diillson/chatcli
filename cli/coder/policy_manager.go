@@ -57,9 +57,12 @@ func NewPolicyManager(logger *zap.Logger) (*PolicyManager, error) {
 	return pm, nil
 }
 
+// Check resolves the verdict for one tool call and records the matched rule
+// for LastMatchedRule. It takes the write lock because it writes lastRule:
+// under the read lock, concurrent checks (parallel workers) raced on it.
 func (pm *PolicyManager) Check(toolName, args string) Action {
-	pm.mu.RLock()
-	defer pm.mu.RUnlock()
+	pm.mu.Lock()
+	defer pm.mu.Unlock()
 
 	sub, normalized := NormalizeCoderArgs(args)
 	var fullCommand string

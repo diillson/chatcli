@@ -228,8 +228,12 @@ func TestStripCommandBlocksText(t *testing.T) {
 
 func TestReadLine_Unattended(t *testing.T) {
 	a := &AgentMode{cli: &ChatCLI{unattended: true}}
+	if got := a.readLine(); got != "" {
+		t.Errorf("unattended readLine without the automode opt-in must decline, got %q", got)
+	}
+	a.cli.policyAutoMode.Store(true)
 	if got := a.readLine(); got != unattendedConfirmAnswer {
-		t.Errorf("unattended readLine should auto-confirm, got %q", got)
+		t.Errorf("unattended readLine under automode should auto-confirm, got %q", got)
 	}
 }
 

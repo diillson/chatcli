@@ -176,8 +176,6 @@ func GetSchema() string {
 					{Name: "--cmd", Type: "string", Description: "Comando a executar.", Required: true},
 					{Name: "--dir", Type: "string", Description: "Diretório de execução."},
 					{Name: "--timeout", Type: "int", Default: "600", Description: "Timeout em segundos."},
-					{Name: "--allow-unsafe", Type: "bool", Description: "Permite comandos perigosos."},
-					{Name: "--allow-sudo", Type: "bool", Description: "Permite sudo (ainda bloqueia comandos perigosos)."},
 				},
 			},
 			{

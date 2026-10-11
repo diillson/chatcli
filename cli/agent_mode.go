@@ -631,17 +631,22 @@ func (a *AgentMode) handleAgentAsk(ctx context.Context, argsJSON string) (string
 }
 
 // dangerBlocked reports whether a dangerous command must be declined rather
-// than auto-approved: only in unattended mode with the block policy set (MCP
-// server default-off opt-in via CHATCLI_MCP_DANGER=block). Attended runs keep
-// the interactive confirmation; the gateway daemon keeps auto-approve.
+// than auto-approved. Unattended runs have nobody to confirm it, so it is
+// declined unless the operator opted into policy automode; CHATCLI_MCP_DANGER
+// =block declines it even then. Attended runs keep the interactive
+// confirmation.
 func (a *AgentMode) dangerBlocked() bool {
-	return a.cli != nil && a.cli.unattended && a.cli.dangerBlock
+	if a.cli == nil || !a.cli.unattended {
+		return false
+	}
+	return a.cli.dangerBlock || !a.cli.PolicyAutoMode()
 }
 
-// unattendedConfirmAnswer is what readLine returns in unattended mode (the
-// gateway daemon). It is the explicit phrase the dangerous-command guard in
-// executeCommandsWithOutput expects, so confirmations auto-approve without any
-// human or stdin. It also starts with "s", satisfying the lighter [s/y] prompts.
+// unattendedConfirmAnswer is what readLine returns in unattended mode when
+// the operator opted into policy automode. It is the explicit phrase the
+// dangerous-command guard in executeCommandsWithOutput expects, and it also
+// starts with "s", satisfying the lighter [s/y] prompts. Without the opt-in
+// readLine answers "" and every confirmation is declined.
 const unattendedConfirmAnswer = "sim, quero executar conscientemente"
 
 // setCancelSignal publishes the active loop's cancellation channel so blocking
@@ -679,13 +684,18 @@ func (a *AgentMode) readLine() string {
 // A nil cancel channel never fires (select treats it as "never"), so callers
 // with no operation in flight simply block on input as before.
 //
-// In unattended mode there is no human/stdin, so every confirmation
-// auto-approves. When the centralized reader is inactive (tests, non-TTY) it
-// falls back to a direct blocking read; that path has no concurrent operation
-// to cancel, so it is intentionally not cancellation-aware.
+// In unattended mode there is no human/stdin: every confirmation is declined
+// with "" unless the operator opted into policy automode, in which case it
+// answers with unattendedConfirmAnswer. When the centralized reader is
+// inactive (tests, non-TTY) it falls back to a direct blocking read; that path
+// has no concurrent operation to cancel, so it is intentionally not
+// cancellation-aware.
 func (a *AgentMode) readLineSignal(cancel <-chan struct{}) string {
 	if a.cli != nil && a.cli.unattended {
-		return unattendedConfirmAnswer
+		if a.cli.PolicyAutoMode() {
+			return unattendedConfirmAnswer
+		}
+		return ""
 	}
 	if a.stdinLines != nil {
 		select {
@@ -1846,8 +1856,9 @@ func (cli *ChatCLI) RunCoderOnce(ctx context.Context, input string) error {
 // messaging gateway: same engine and tools (create/edit files, run commands,
 // iterate) but with the gateway persona layered on the system prompt so the
 // answer is concise, chat-friendly prose. The caller is expected to have set
-// cli.unattended so every confirmation auto-approves — the gateway must never
-// block on a stdin prompt the daemon has no way to answer.
+// cli.unattended so no confirmation blocks on a stdin prompt the daemon has
+// no way to answer: they are declined unless the operator opted into policy
+// automode (CHATCLI_POLICY_AUTOMODE=true).
 func (cli *ChatCLI) RunGatewayCoderOnce(ctx context.Context, task string) error {
 	return cli.runCoderQuery(ctx, task, true)
 }
@@ -1994,9 +2005,9 @@ func (a *AgentMode) RunOnce(ctx context.Context, query string, autoExecute bool)
 
 	blockToExecute := commandBlocks[0]
 
-	// Unattended runs (gateway daemon, full-autonomy) skip the danger gate —
-	// the operator opted in and access is controlled at the gateway edge.
-	// The MCP server can re-arm it via CHATCLI_MCP_DANGER=block.
+	// Unattended runs skip the danger gate only when the operator opted into
+	// policy automode; CHATCLI_MCP_DANGER=block re-arms it even then (see
+	// dangerBlocked).
 	if !a.cli.unattended || a.dangerBlocked() {
 		for _, cmd := range blockToExecute.Commands {
 			if a.validator.IsDangerous(cmd) {
@@ -3450,37 +3461,12 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 				// --- SECURITY CHECK START ---
 				if a.isCoderMode {
 					pm, err := coder.NewPolicyManager(a.logger)
+					if a.policyUnavailableBlocked(err, tc.Name, tc.Args, renderError) {
+						batchHasError = true
+						break
+					}
 					if err == nil {
-						action := pm.Check(tc.Name, tc.Args)
-						if rule, ok := pm.LastMatchedRule(); ok {
-							a.lastPolicyMatch = &rule
-						} else {
-							a.lastPolicyMatch = nil
-						}
-						// Slash-command allowed-tools overlay: a tool outside
-						// the command's declared list escalates to "ask" even
-						// when policy would allow — the command author scoped
-						// the run, the human (or policy automode) arbitrates
-						// the exception. Never a silent widen, never a silent
-						// deny.
-						if action == coder.ActionAllow && !a.commandScopeAllows(tc.Name) {
-							if a.logger != nil {
-								a.logger.Info("tool outside slash-command allowed-tools scope, escalating to ask",
-									zap.String("tool", tc.Name))
-							}
-							action = coder.ActionAsk
-						}
-						// Session automode (/policy mode auto): "ask" verdicts
-						// auto-approve. Deny rules were already resolved above
-						// ask by the policy check, and safety-immune operations
-						// never take this shortcut — they keep prompting.
-						if action == coder.ActionAsk && a.askAutoApproved(tc.Name, tc.Args) {
-							if a.logger != nil {
-								a.logger.Info("coder policy: 'ask' auto-approved (session automode)",
-									zap.String("tool", tc.Name))
-							}
-							action = coder.ActionAllow
-						}
+						action := a.toolPolicyVerdict(pm, tc.Name, tc.Args)
 						if action == coder.ActionDeny {
 							msg := "AÇÃO BLOQUEADA (Regra de Segurança)"
 							renderError(msg)
@@ -3495,9 +3481,9 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 							// JSON-RPC channel). When the connected client offers
 							// a permission dialog (ACP request_permission, MCP
 							// elicitation) the human decides there; without one,
-							// the historical contract holds — the operator opted
-							// into autonomy, so "ask" auto-approves. An explicit
-							// ActionDeny above still blocks either way.
+							// nobody can approve, so the action is refused (the
+							// automode opt-in was already applied above). An
+							// explicit ActionDeny above still blocks either way.
 							if a.unattendedAskBlocked(tc.Name, tc.Args, pm, renderError) {
 								batchHasError = true
 								break
@@ -4571,13 +4557,16 @@ func (a *AgentMode) initMultiAgent(ctx context.Context) bool {
 
 	// Attach policy enforcement so parallel workers respect security rules
 	if pa, err := newWorkerPolicyAdapter(a.logger); err == nil {
-		pa.unattended = a.cli.unattended // gateway: auto-approve "ask" instead of blocking on stdin
+		pa.unattended = a.cli.unattended // no human: "ask" is refused unless automode admits it
 		pa.autoApprove = a.askAutoApproved
 		a.policyAdapter = pa
 		a.agentDispatcher.SetPolicyChecker(pa)
 		a.logger.Info("Policy enforcement enabled for parallel workers")
 	} else {
-		a.logger.Warn("Failed to initialize policy checker for parallel workers", zap.Error(err))
+		// A nil checker would let workers run every tool unchecked: an
+		// unreadable policy denies instead.
+		a.logger.Error("Failed to initialize policy checker for parallel workers; worker tool calls will be denied", zap.Error(err))
+		a.agentDispatcher.SetPolicyChecker(policyUnavailableChecker{err: err})
 	}
 
 	// Proactive recall for workers: each dispatched task gets the same

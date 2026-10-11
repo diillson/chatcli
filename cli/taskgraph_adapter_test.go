@@ -111,7 +111,8 @@ func TestTaskGraphMaxParallelEnv(t *testing.T) {
 }
 
 func TestCoderGateRunnerCapturesOutputAndFailure(t *testing.T) {
-	r := &coderGateRunner{workspace: t.TempDir()}
+	allow := func(context.Context, string, string) (bool, string) { return true, "" }
+	r := &coderGateRunner{workspace: t.TempDir(), check: allow}
 	out, err := r.RunGateStep(context.Background(), t.TempDir(), "echo hello-gate", nil)
 	if err != nil {
 		t.Fatalf("RunGateStep: %v", err)

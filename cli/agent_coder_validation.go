@@ -34,17 +34,48 @@ func (a *AgentMode) isCoderExecDangerous(toolArgs []string) (bool, string) {
 	if !coderShellSubcommands[sub] {
 		return false, ""
 	}
-	// Extract the --cmd value from parsed args
-	for i, arg := range toolArgs {
-		if (arg == "--cmd" || arg == "-cmd" || arg == "--command") && i+1 < len(toolArgs) {
-			shellCmd := toolArgs[i+1]
-			if shellCmd != "" && a.validator.IsDangerous(shellCmd) {
-				return true, shellCmd
-			}
-			return false, shellCmd
+	// Every --cmd value is checked: Go's flag parser accepts both the
+	// "--cmd value" and "--cmd=value" forms and keeps the LAST occurrence,
+	// so checking only the first spaced form let a dangerous command through.
+	values := coderShellCmdValues(toolArgs[1:])
+	for _, shellCmd := range values {
+		if shellCmd != "" && a.validator.IsDangerous(shellCmd) {
+			return true, shellCmd
 		}
 	}
-	return false, ""
+	if len(values) == 0 {
+		return false, ""
+	}
+	return false, values[len(values)-1]
+}
+
+// coderShellCmdNames are the spellings of the shell-line flag, without the
+// leading dashes.
+var coderShellCmdNames = map[string]bool{"cmd": true, "command": true}
+
+// coderShellCmdValues returns every value given to the shell-line flag in
+// argv, in order, accepting "-cmd v", "--cmd v", "-cmd=v" and "--cmd=v".
+func coderShellCmdValues(argv []string) []string {
+	var out []string
+	for i := 0; i < len(argv); i++ {
+		arg := argv[i]
+		if !strings.HasPrefix(arg, "-") {
+			continue
+		}
+		name, value, hasValue := strings.Cut(strings.TrimLeft(arg, "-"), "=")
+		if !coderShellCmdNames[name] {
+			continue
+		}
+		if hasValue {
+			out = append(out, value)
+			continue
+		}
+		if i+1 < len(argv) {
+			out = append(out, argv[i+1])
+			i++
+		}
+	}
+	return out
 }
 
 // isCoderArgsMissingRequiredValue verifica se o comando @coder contém flags
