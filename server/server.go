@@ -380,6 +380,12 @@ func (s *Server) SetWatcher(cfg WatcherConfig) {
 	s.handler.SetWatcher(cfg)
 }
 
+// SetPrincipalSessionStores enables per-principal session storage for
+// non-admin callers. See Handler.SetPrincipalSessionStores.
+func (s *Server) SetPrincipalSessionStores(open PrincipalSessionStoreFactory) {
+	s.handler.SetPrincipalSessionStores(open)
+}
+
 // SetPluginManager configures plugin management for remote discovery and execution.
 func (s *Server) SetPluginManager(pm *plugins.Manager) {
 	s.handler.SetPluginManager(pm)

@@ -90,7 +90,7 @@ func RunConnect(ctx context.Context, args []string, llmMgr manager.LLMManager, l
 	fs.StringVar(&opts.ClientKey, "client-key", "", "StackSpot: Client Key for authentication")
 	fs.StringVar(&opts.Realm, "realm", "", "StackSpot: Realm/Tenant")
 	fs.StringVar(&opts.AgentID, "agent-id", "", "StackSpot: Agent ID")
-	fs.StringVar(&opts.OllamaURL, "ollama-url", "", "Ollama: Base URL as the server reaches it (e.g., https://ollama.internal:11434)")
+	fs.StringVar(&opts.OllamaURL, "ollama-url", "", "Ollama: Base URL as the server reaches it (e.g., https://ollama.example.com:11434); the server accepts it only when its origin is listed in the server's CHATCLI_SERVER_PROVIDER_ENDPOINTS")
 	fs.StringVar(&opts.Prompt, "p", "", "One-shot prompt (sends and exits)")
 	fs.BoolVar(&opts.Raw, "raw", false, "Raw output (no formatting)")
 	fs.IntVar(&opts.MaxTokens, "max-tokens", 0, "Max tokens for response")
@@ -287,7 +287,7 @@ Flags:
   --agent-id <string>   StackSpot Agent ID
 
   Ollama flags:
-  --ollama-url <url>    Ollama base URL as the server reaches it (e.g., https://ollama.internal:11434)
+  --ollama-url <url>    Ollama base URL; the server must list its origin in CHATCLI_SERVER_PROVIDER_ENDPOINTS
 
 Credential modes (pick one):
   1. Server credentials (default): Server uses its own API keys from env vars

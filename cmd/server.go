@@ -136,11 +136,9 @@ func startServer(opts *ServerOptions, llmMgr manager.LLMManager, logger *zap.Log
 		}
 	}
 
-	// Create session manager for server-side session persistence
-	sessionMgr, err := cli.NewSessionManager(logger)
-	if err != nil {
-		logger.Warn(i18n.T("cmd.server.session_init_failed"), zap.Error(err))
-	}
+	// Session stores for server-side persistence: the shared legacy
+	// namespace (admin only) and one store per authenticated principal.
+	sessionStore, principalSessions := serverSessionStores(logger)
 
 	cfg := server.Config{
 		Port:            opts.Port,
@@ -155,7 +153,8 @@ func startServer(opts *ServerOptions, llmMgr manager.LLMManager, logger *zap.Log
 		EnableReflection: opts.EnableReflection,
 	}
 
-	srv := server.New(cfg, llmMgr, sessionMgr, logger)
+	srv := server.New(cfg, llmMgr, sessionStore, logger)
+	srv.SetPrincipalSessionStores(principalSessions)
 
 	// Initialize plugin manager for remote discovery and execution
 	pluginMgr, pluginErr := plugins.NewManager(logger)

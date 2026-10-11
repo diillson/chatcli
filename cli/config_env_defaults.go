@@ -329,14 +329,15 @@ var envDefaults = map[string]envDefault{
 	// The numbers an operator sizes a deployment against. They live here
 	// so `/config server` answers with what the runtime actually uses,
 	// rather than leaving the reader to trust a table somewhere else.
-	"CHATCLI_BIND_ADDRESS":           {Value: "127.0.0.1 (0.0.0.0 under Kubernetes)", Source: "server.go Start"},
-	"CHATCLI_RATE_LIMIT_RPS":         {Value: "10", Source: "server.DefaultRateLimiterConfig"},
-	"CHATCLI_MTLS_ROLE":              {Value: "user", Source: "server.mtlsRoleFromEnv"},
-	"CHATCLI_SERVER_PIPELINE":        {Value: "false", IsBool: true, Source: "cmd/server_pipeline.go (host the full ChatCLI turn engine behind ChatTurn, RunCoder, RunAgent and tool RPCs)"},
-	"CHATCLI_RATE_LIMIT_BURST":       {Value: "20", Source: "server.DefaultRateLimiterConfig"},
-	"CHATCLI_MAX_RECV_MSG_SIZE":      {Value: "52428800", Source: "server.New (50MB)"},
-	"CHATCLI_MAX_SEND_MSG_SIZE":      {Value: "52428800", Source: "server.New (50MB)"},
-	"CHATCLI_MAX_CONCURRENT_STREAMS": {Value: "100", Source: "server.New"},
+	"CHATCLI_BIND_ADDRESS":              {Value: "127.0.0.1 (0.0.0.0 under Kubernetes)", Source: "server.go Start"},
+	"CHATCLI_RATE_LIMIT_RPS":            {Value: "10", Source: "server.DefaultRateLimiterConfig"},
+	"CHATCLI_MTLS_ROLE":                 {Value: "user", Source: "server.mtlsRoleFromEnv"},
+	"CHATCLI_SERVER_PROVIDER_ENDPOINTS": {Value: "(unset: clients cannot choose a provider endpoint)", Source: "server.originAllowlisted (comma-separated http(s) origins)"},
+	"CHATCLI_SERVER_PIPELINE":           {Value: "false", IsBool: true, Source: "cmd/server_pipeline.go (host the full ChatCLI turn engine behind ChatTurn, RunCoder, RunAgent and tool RPCs)"},
+	"CHATCLI_RATE_LIMIT_BURST":          {Value: "20", Source: "server.DefaultRateLimiterConfig"},
+	"CHATCLI_MAX_RECV_MSG_SIZE":         {Value: "52428800", Source: "server.New (50MB)"},
+	"CHATCLI_MAX_SEND_MSG_SIZE":         {Value: "52428800", Source: "server.New (50MB)"},
+	"CHATCLI_MAX_CONCURRENT_STREAMS":    {Value: "100", Source: "server.New"},
 }
 
 // lookupEnvDefault returns the registered default for `name`, or

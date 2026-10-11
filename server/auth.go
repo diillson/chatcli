@@ -128,7 +128,7 @@ func (a *TokenAuthInterceptor) authorize(ctx context.Context, method string) (co
 	// Skip auth if no token, no JWT and no certificate identity configured
 	if a.token == "" && !a.jwtConfigured() && !a.mtlsIdentity {
 		// No auth configured — inject default admin user for backward compat
-		return ContextWithUser(ctx, &UserInfo{Subject: "system", Role: RoleAdmin}), nil
+		return contextWithPrincipal(ctx, &UserInfo{Subject: "system", Role: RoleAdmin}, authSourceNone), nil
 	}
 
 	// Always allow health checks without auth
@@ -141,7 +141,7 @@ func (a *TokenAuthInterceptor) authorize(ctx context.Context, method string) (co
 	// issuer chose, which is more specific than the certificate's default.
 	certUser := a.certIdentity(ctx)
 	if certUser != nil && !hasBearer(ctx) {
-		return ContextWithUser(ctx, certUser), nil
+		return contextWithPrincipal(ctx, certUser, authSourceMTLS), nil
 	}
 
 	// Check auth failure rate limiting
@@ -175,7 +175,7 @@ func (a *TokenAuthInterceptor) authorize(ctx context.Context, method string) (co
 	// Try JWT validation first if configured
 	if a.jwtConfigured() {
 		if user, err := a.validateJWT(token); err == nil {
-			return ContextWithUser(ctx, user), nil
+			return contextWithPrincipal(ctx, user, authSourceJWT), nil
 		}
 		// JWT validation failed — fall through to legacy token check
 	}
@@ -183,10 +183,10 @@ func (a *TokenAuthInterceptor) authorize(ctx context.Context, method string) (co
 	// Legacy shared token validation
 	if a.token != "" && subtle.ConstantTimeCompare([]byte(token), []byte(a.token)) == 1 {
 		// Legacy token — assign default admin role
-		return ContextWithUser(ctx, &UserInfo{
+		return contextWithPrincipal(ctx, &UserInfo{
 			Subject: "legacy-token",
 			Role:    RoleAdmin,
-		}), nil
+		}, authSourceLegacy), nil
 	}
 
 	a.recordFailure(peerAddr)

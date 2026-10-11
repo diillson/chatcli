@@ -1,0 +1,16 @@
+{
+  "server.session_tenancy.no_principal": "session RPCs require an authenticated principal",
+  "server.session_tenancy.readonly_write": "role %q may list and load its own sessions but cannot save or delete them",
+  "server.session_tenancy.admin_access": "admin access to the shared session namespace",
+  "server.session_tenancy.unavailable": "per-principal session storage is not configured on this server; only an admin can use saved sessions here",
+  "server.session_tenancy.open_failed": "could not open the principal's session store",
+  "server.session_tenancy.rebind_denied": "this channel identity is bound to another principal; only an admin can move it",
+  "server.provider_endpoint.key_refused": "provider_config key %q is not accepted by this server (accepted: client_id, client_key, realm, agent_id, base_url)",
+  "server.provider_endpoint.segment_invalid": "provider_config %s must be a single path segment of letters, digits, dot, dash or underscore",
+  "server.provider_endpoint.base_url_provider": "provider_config base_url only applies to provider OLLAMA, not %q",
+  "server.provider_endpoint.invalid": "provider_config base_url must be an http or https URL without credentials, query or fragment",
+  "server.provider_endpoint.not_allowlisted": "this server does not accept the client-chosen endpoint %s. Configure the endpoint on the server itself (OLLAMA_BASE_URL), or have the server operator add this origin to %s",
+  "server.provider_endpoint.allowlist_entry_invalid": "ignoring an invalid entry in the provider endpoint allowlist",
+  "server.provider_endpoint.dial_blocked": "refusing to connect to %s: loopback, private, link-local, multicast and metadata addresses cannot be reached through a client-chosen endpoint",
+  "server.provider_endpoint.refused_log": "refused client provider_config"
+}

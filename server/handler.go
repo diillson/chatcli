@@ -7,7 +7,6 @@ package server
 
 import (
 	"context"
-	"fmt"
 	"strings"
 	"time"
 
@@ -17,6 +16,7 @@ import (
 	"github.com/diillson/chatcli/llm/client"
 	"github.com/diillson/chatcli/llm/fallback"
 	"github.com/diillson/chatcli/llm/manager"
+	"github.com/diillson/chatcli/llm/ollama"
 	"github.com/diillson/chatcli/metrics"
 	"github.com/diillson/chatcli/models"
 	"github.com/diillson/chatcli/pkg/persona"
@@ -67,6 +67,10 @@ type Handler struct {
 
 	// Security: SSRF validator for provider URL checking (H1)
 	ssrfValidator *SSRFValidator
+
+	// Per-principal session stores (optional, nil until
+	// SetPrincipalSessionStores). See session_tenancy.go.
+	principalSessions *principalSessionStores
 
 	// Conversation hub broker for cross-channel continuity (optional, nil when
 	// the hub is disabled). Set via SetHub.
@@ -198,36 +202,44 @@ func (h *Handler) getClient(provider, model, clientAPIKey string, providerConfig
 		model = h.defaultModel
 	}
 
-	var (
-		c   client.LLMClient
-		err error
-	)
+	var c client.LLMClient
 
-	// Security: SSRF prevention — validate provider_config URLs before use (H1)
-	if len(providerConfig) > 0 && h.ssrfValidator != nil {
-		if err := h.ssrfValidator.ValidateProviderConfig(providerConfig); err != nil {
-			h.logger.Warn("SSRF: blocked provider config",
-				zap.String("provider", provider),
-				zap.Error(err),
-			)
-			return nil, fmt.Errorf("invalid provider configuration: %w", err)
-		}
+	// Security: the caller's provider_config never chooses an endpoint the
+	// operator did not allow (see provider_endpoint_policy.go).
+	vetted, err := h.vetProviderConfig(provider, providerConfig)
+	if err != nil {
+		h.logger.Warn(i18n.T("server.provider_endpoint.refused_log"),
+			zap.String("provider", provider),
+			zap.Error(err),
+		)
+		return nil, err
 	}
 
-	// Client-forwarded credentials with provider-specific config (StackSpot, Ollama, etc.)
-	if len(providerConfig) > 0 {
+	switch {
+	case vetted.endpoint != nil:
+		// Allowlisted client endpoint: built here so every connection goes
+		// through the dial-time address guard.
 		h.logger.Info(i18n.T("server.handler.client_config"),
 			zap.String("provider", provider),
 			zap.Int("config_keys", len(providerConfig)),
 		)
-		c, err = h.llmManager.CreateClientWithConfig(provider, model, clientAPIKey, providerConfig)
-	} else if clientAPIKey != "" {
+		maxRetries, backoff := providerRetryPolicy()
+		c = ollama.NewClientWithHTTPClient(vetted.endpoint.String(), model, h.logger, maxRetries, backoff,
+			guardedProviderHTTPClient(h.logger, providerEndpointTimeout))
+	case len(vetted.config) > 0:
+		// Client-forwarded credentials with provider-specific config (StackSpot)
+		h.logger.Info(i18n.T("server.handler.client_config"),
+			zap.String("provider", provider),
+			zap.Int("config_keys", len(vetted.config)),
+		)
+		c, err = h.llmManager.CreateClientWithConfig(provider, model, clientAPIKey, vetted.config)
+	case clientAPIKey != "":
 		// Client-forwarded API key only (OpenAI, Claude, Google, xAI)
 		h.logger.Info(i18n.T("server.handler.client_api_key"),
 			zap.String("provider", provider),
 		)
 		c, err = h.llmManager.CreateClientWithKey(provider, model, clientAPIKey)
-	} else {
+	default:
 		c, err = h.llmManager.GetClient(provider, model)
 	}
 

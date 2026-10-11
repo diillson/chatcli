@@ -144,3 +144,29 @@ func TestHubUnauthenticatedRejected(t *testing.T) {
 		t.Fatalf("expected Unauthenticated without user, got %v", err)
 	}
 }
+
+// A non-admin cannot take over a channel identity another principal owns:
+// Bind is an upsert, and the taker would then receive that principal's
+// later gateway messages.
+func TestHubSetBindingCannotStealAnotherPrincipalsIdentity(t *testing.T) {
+	h := newHubHandler(t)
+	if _, err := h.SetBinding(userCtx("bob", RoleUser), &pb.SetBindingRequest{Platform: "telegram", UserId: "555"}); err != nil {
+		t.Fatalf("bob self-bind: %v", err)
+	}
+
+	_, err := h.SetBinding(userCtx("alice", RoleUser), &pb.SetBindingRequest{Platform: "telegram", UserId: "555"})
+	if status.Code(err) != codes.PermissionDenied {
+		t.Fatalf("alice rebinding bob's identity: got %v, want PermissionDenied", err)
+	}
+	if owner, _ := h.hub.ResolvePrincipal(context.Background(), "telegram", "555"); owner != "bob" {
+		t.Fatalf("identity now bound to %q, want bob", owner)
+	}
+
+	// Rebinding to oneself is idempotent, and an admin may move it.
+	if _, err := h.SetBinding(userCtx("bob", RoleUser), &pb.SetBindingRequest{Platform: "telegram", UserId: "555"}); err != nil {
+		t.Fatalf("bob re-bind: %v", err)
+	}
+	if _, err := h.SetBinding(userCtx("root", RoleAdmin), &pb.SetBindingRequest{Platform: "telegram", UserId: "555", Principal: "alice"}); err != nil {
+		t.Fatalf("admin move: %v", err)
+	}
+}
