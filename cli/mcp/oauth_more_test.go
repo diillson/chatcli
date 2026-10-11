@@ -90,7 +90,7 @@ func TestOAuthMetaPathSanitizes(t *testing.T) {
 
 func TestHasStoredAndTokenProviderAbsent(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
-	if hasStoredMCPOAuth("nope", zap.NewNop()) {
+	if hasStoredMCPOAuth("nope", "https://x/mcp", zap.NewNop()) {
 		t.Errorf("expected no stored oauth for fresh HOME")
 	}
 	provider, err := mcpTokenProvider("nope", "https://x/mcp", zap.NewNop())
@@ -140,7 +140,7 @@ func TestStoredOAuthProvider(t *testing.T) {
 		t.Fatalf("UpsertProfile: %v", err)
 	}
 
-	if !hasStoredMCPOAuth("aws", zap.NewNop()) {
+	if !hasStoredMCPOAuth("aws", "https://x/mcp", zap.NewNop()) {
 		t.Fatalf("expected hasStoredMCPOAuth true")
 	}
 	provider, err := mcpTokenProvider("aws", "https://x/mcp", zap.NewNop())
@@ -160,7 +160,7 @@ func TestStoredOAuthProvider(t *testing.T) {
 	if err := LogoutServer("aws", zap.NewNop()); err != nil {
 		t.Fatalf("LogoutServer: %v", err)
 	}
-	if hasStoredMCPOAuth("aws", zap.NewNop()) {
+	if hasStoredMCPOAuth("aws", "https://x/mcp", zap.NewNop()) {
 		t.Fatalf("expected credential gone after logout")
 	}
 }
@@ -240,14 +240,11 @@ func TestDiscoverFallbackToOriginIssuer(t *testing.T) {
 	base = srv.URL
 
 	disc := newOAuthDiscoverer(zap.NewNop())
-	asMeta, prm, err := disc.discover(context.Background(), base+"/mcp", oauthChallenge{})
+	asMeta, err := disc.discover(context.Background(), base+"/mcp", oauthChallenge{})
 	if err != nil {
 		t.Fatalf("discover fallback: %v", err)
 	}
 	if asMeta.TokenEndpoint != base+"/token" {
 		t.Errorf("token endpoint = %q", asMeta.TokenEndpoint)
-	}
-	if prm.Resource != base {
-		t.Errorf("resource fallback = %q, want origin %q", prm.Resource, base)
 	}
 }

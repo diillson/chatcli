@@ -605,7 +605,13 @@ func (m *Manager) LogoutOAuth(ctx context.Context, serverName string) error {
 // HasOAuthCredential reports whether the named server has a stored MCP OAuth
 // credential from a previous successful login.
 func (m *Manager) HasOAuthCredential(serverName string) bool {
-	return hasStoredMCPOAuth(serverName, m.logger)
+	m.mu.RLock()
+	conn, ok := m.servers[serverName]
+	m.mu.RUnlock()
+	if !ok {
+		return false
+	}
+	return hasStoredMCPOAuth(serverName, conn.Config.URL, m.logger)
 }
 
 // AuthRequiredServers returns, in alphabetical order, the names of servers
