@@ -1,5 +1,37 @@
 # Changelog
 
+## [1.215.2](https://github.com/diillson/chatcli/compare/v1.215.1...v1.215.2) (2026-10-11)
+
+
+### Bug Fixes
+
+* **atrest:** bind cost, CCR and pending memory stores to their path ([f535b2c](https://github.com/diillson/chatcli/commit/f535b2c63f9ec75030eed7e7021a0b78ba6528ec))
+* **auth:** fail closed when the credential key cannot be read ([45a9a5f](https://github.com/diillson/chatcli/commit/45a9a5faa0daa45625278d0b83c0d16360e7fcab))
+* **coder:** classify the exact exec command for the read-only auto-allow ([f750160](https://github.com/diillson/chatcli/commit/f750160648a01903615cf5013a08e41f46b454f4))
+* **coder:** close command and path injection in the coder tools ([2ebbc06](https://github.com/diillson/chatcli/commit/2ebbc06a689c4a74ab213a7abea6d03550df2131))
+* **gateway:** require a sender allowlist on every chat adapter ([0621549](https://github.com/diillson/chatcli/commit/0621549602cb0346ca3dd424ea73068c1a85eaa1))
+* **gateway:** sign webhook traffic and guard attachment URLs ([24cf554](https://github.com/diillson/chatcli/commit/24cf554eadcfc88ab10febbc8214c22023b4cdd4))
+* **mcp:** bind MCP OAuth tokens to the configured server URL ([951fe24](https://github.com/diillson/chatcli/commit/951fe24b8e090eae86bf8edb13a788916b1e6c91))
+* **mcp:** validate the OAuth authorization server and confine MCP redirects ([352c54c](https://github.com/diillson/chatcli/commit/352c54cd1064f76415c79689cc7da64372c374e7))
+* **operator:** enforce trust boundaries for the AIOps pipeline ([51466b2](https://github.com/diillson/chatcli/commit/51466b29b2909bfb0438691ab75b79b07a812753))
+* **plugins:** execute the verified bytes and never let a plugin shadow a built-in ([435528d](https://github.com/diillson/chatcli/commit/435528d29b25ff59f2432b24f2e153c10c9550c3))
+* **plugins:** guard browser navigation and harden web tool egress ([f380090](https://github.com/diillson/chatcli/commit/f38009024ad42e875810932e99e69643d742313a))
+* **provision:** fill in the pinned digests of the engine and model archives ([2e8d83e](https://github.com/diillson/chatcli/commit/2e8d83ef5eedfcae4c79f490d5d8a7665376c9f2))
+* **provision:** pin embedded engine and model digests and confine tar extraction ([b81b668](https://github.com/diillson/chatcli/commit/b81b66839a0ba05efc4868793aadf4d04d88e800))
+* **redact:** cover current key formats in the redactor and HTTP logs ([3623409](https://github.com/diillson/chatcli/commit/3623409c5709d06ab07f3795977f72ad53705877))
+* **registry:** match the skills.sh snapshot digest scheme ([48a3b2a](https://github.com/diillson/chatcli/commit/48a3b2a72476e0153b941026aed029a1590b54dc))
+* **registry:** validate skills.sh snapshot paths in OS form and verify their hash ([6b8fbfa](https://github.com/diillson/chatcli/commit/6b8fbfa3b2bea18b591c2ea2fc0ff034a0f3c572))
+* **security:** deny unattended policy asks and operator-gate exec elevation ([71dfbcd](https://github.com/diillson/chatcli/commit/71dfbcd8436f0e83b67798035f13dd30584e6d6d))
+* **security:** load project configuration only from trusted workspaces ([8b88a9f](https://github.com/diillson/chatcli/commit/8b88a9f25127cc5e92b1a129491a1416fdbdb90d))
+* **server:** isolate saved sessions per principal and refuse client endpoints ([aba4c6d](https://github.com/diillson/chatcli/commit/aba4c6d00860b293c831628739de0c01908ebb94))
+* **server:** report a refused client provider_config as InvalidArgument ([9cb5883](https://github.com/diillson/chatcli/commit/9cb5883c9f45a311f0fc0774901023efaa57728a))
+* **server:** restrict agent providers to admin callers ([ff02bbd](https://github.com/diillson/chatcli/commit/ff02bbd5cdfc839c0903440c4c6aebf903050e6c))
+* **state:** keep the state directory and its stores owner-only ([e425b00](https://github.com/diillson/chatcli/commit/e425b00d13091620f421692c2a31989edf1329c1))
+* **taskgraph:** guard the dashboard with a token and an exact Host ([55eca95](https://github.com/diillson/chatcli/commit/55eca9559fed2d897daa8b7026e0433c8e3e7e06))
+* **update:** embed the release signing public key ([789a667](https://github.com/diillson/chatcli/commit/789a6673596ecea01659ae0d3ece76c6c5380457))
+* **update:** verify a signed checksums.txt and accept only strict semver tags ([b60eb2a](https://github.com/diillson/chatcli/commit/b60eb2a0653bbd3a66be14d45554506a0daef59c))
+* **webui:** serve the page only with the token and stop embedding it ([8e5c45c](https://github.com/diillson/chatcli/commit/8e5c45c67c87507b05958e248fb8748a3dbd6646))
+
 ## [1.215.1](https://github.com/diillson/chatcli/compare/v1.215.0...v1.215.1) (2026-10-10)
 
 
