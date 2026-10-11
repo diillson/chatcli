@@ -222,27 +222,18 @@ func (t *LoggingTransport) sanitizeURL(urlStr string) string {
 		return "[URL_INVÁLIDA]"
 	}
 
+	// Credentials embedded as user:password@ never reach the log.
+	if u.User != nil {
+		u.User = url.User("[REDACTED]")
+	}
+
 	// Obter query parameters
 	query := u.Query()
 
-	// Lista de parâmetros sensíveis para sanitizar
-	sensitiveParams := []string{
-		"key",
-		"api_key",
-		"apikey",
-		"api-key",
-		"token",
-		"access_token",
-		"refresh_token",
-		"client_secret",
-		"client_key",
-		"password",
-		"secret",
-	}
-
-	// Sanitizar parâmetros sensíveis
-	for _, param := range sensitiveParams {
-		if query.Has(param) {
+	// Sanitizar parâmetros sensíveis (same names, any case or separator
+	// style, as the body fields: key, apiKey, code, code_verifier, ...)
+	for param := range query {
+		if isSensitiveKey(param) {
 			query.Set(param, "[REDACTED]")
 		}
 	}
@@ -290,45 +281,55 @@ func headersToString(headers http.Header) string {
 	return buf.String()
 }
 
-// sensitiveKeys is the set of JSON keys whose values should be redacted.
+// sensitiveKeyNames lists the JSON, form and query keys whose values are
+// redacted. Matching ignores case and the _ - . separators (see
+// normalizeSensitiveKey), so api_key, apiKey, API-KEY and secretAccessKey
+// are all covered by one entry each.
 // Security (M14): Extended with comprehensive patterns.
-var sensitiveKeys = map[string]bool{
-	"api_key":        true,
-	"apikey":         true,
-	"password":       true,
-	"passwd":         true,
-	"token":          true,
-	"access_token":   true,
-	"refresh_token":  true,
-	"id_token":       true,
-	"client_secret":  true,
-	"client_key":     true,
-	"authorization":  true,
-	"secret":         true,
-	"key":            true,
-	"private_key":    true,
-	"signing_key":    true,
-	"encryption_key": true,
-	"session_secret": true,
-	"jwt_secret":     true,
-	"bearer":         true,
-	"credentials":    true,
-	"auth":           true,
-	"x-api-key":      true,
-	"x-auth-token":   true,
-	"cookie":         true,
-	"set-cookie":     true,
+var sensitiveKeyNames = []string{
+	"api_key", "password", "passwd", "token",
+	"access_token", "refresh_token", "id_token", "session_token",
+	"client_secret", "client_key", "authorization", "secret", "key",
+	"private_key", "signing_key", "encryption_key", "session_secret",
+	"jwt_secret", "bearer", "credentials", "auth",
+	"x_api_key", "x_auth_token", "cookie", "set_cookie",
+	"secret_access_key", "aws_secret_access_key", "aws_session_token",
+	// OAuth: the authorization code, the PKCE verifier, the device-flow
+	// code and the dynamic client registration token all grant access.
+	"code", "code_verifier", "device_code", "registration_access_token",
+}
+
+// sensitiveKeys is the set of normalized key names whose values should be
+// redacted.
+var sensitiveKeys = func() map[string]bool {
+	m := make(map[string]bool, len(sensitiveKeyNames))
+	for _, k := range sensitiveKeyNames {
+		m[normalizeSensitiveKey(k)] = true
+	}
+	return m
+}()
+
+// normalizeSensitiveKey folds case and drops the separators between words,
+// so snake_case, kebab-case and camelCase spellings compare equal.
+func normalizeSensitiveKey(k string) string {
+	k = strings.ToLower(k)
+	return strings.NewReplacer("_", "", "-", "", ".", "").Replace(k)
+}
+
+// isSensitiveKey reports whether a field named k carries a secret.
+func isSensitiveKey(k string) bool {
+	return sensitiveKeys[normalizeSensitiveKey(k)]
 }
 
 // sanitizeJSON recursively sanitizes sensitive fields in any JSON value.
+// Everything under a sensitive key is redacted, including the members of an
+// object or array held there ("credentials": {"accessKeyId": ...}).
 func sanitizeJSON(v interface{}) interface{} {
 	switch val := v.(type) {
 	case map[string]interface{}:
 		for k, child := range val {
-			if sensitiveKeys[strings.ToLower(k)] {
-				if s, ok := child.(string); ok && s != "" {
-					val[k] = "[REDACTED]"
-				}
+			if isSensitiveKey(k) {
+				val[k] = redactJSONValue(child)
 			} else {
 				val[k] = sanitizeJSON(child)
 			}
@@ -342,6 +343,56 @@ func sanitizeJSON(v interface{}) interface{} {
 	default:
 		return v
 	}
+}
+
+// redactJSONValue replaces every non-empty string in v with [REDACTED],
+// keeping the shape of objects and arrays so the log still shows what kind
+// of value was there.
+func redactJSONValue(v interface{}) interface{} {
+	switch val := v.(type) {
+	case string:
+		if val == "" {
+			return val
+		}
+		return "[REDACTED]"
+	case map[string]interface{}:
+		for k, child := range val {
+			val[k] = redactJSONValue(child)
+		}
+		return val
+	case []interface{}:
+		for i, item := range val {
+			val[i] = redactJSONValue(item)
+		}
+		return val
+	default:
+		return v
+	}
+}
+
+// RedactURLForLog returns rawURL fit for a log line: user information is
+// dropped and every query value is replaced, since servers configured by URL
+// (MCP endpoints, webhooks) often carry their API key there. Scheme, host,
+// path and the query parameter names are kept for diagnosis. A string that
+// does not parse is replaced entirely.
+func RedactURLForLog(rawURL string) string {
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return "[REDACTED_URL]"
+	}
+	if u.User != nil {
+		u.User = url.User("[REDACTED]")
+	}
+	if u.RawQuery != "" {
+		q := u.Query()
+		for k := range q {
+			q.Set(k, "[REDACTED]")
+		}
+		u.RawQuery = q.Encode()
+	}
+	u.Fragment = ""
+	u.RawFragment = ""
+	return u.String()
 }
 
 // sanitizeBody remove ou mascara dados sensíveis do corpo da requisição/resposta
@@ -364,7 +415,7 @@ func (t *LoggingTransport) sanitizeBody(contentType string, body []byte) []byte 
 		values, err := url.ParseQuery(string(body))
 		if err == nil {
 			for param := range values {
-				if sensitiveKeys[strings.ToLower(param)] {
+				if isSensitiveKey(param) {
 					values.Set(param, "[REDACTED]")
 				}
 			}

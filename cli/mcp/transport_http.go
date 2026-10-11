@@ -52,6 +52,7 @@ import (
 
 	"github.com/diillson/chatcli/auth"
 	"github.com/diillson/chatcli/i18n"
+	"github.com/diillson/chatcli/utils"
 	"go.uber.org/zap"
 )
 
@@ -161,7 +162,7 @@ func newHTTPTransport(ctx context.Context, cfg ServerConfig, logger *zap.Logger,
 
 	logger.Debug("MCP streamable HTTP transport ready",
 		zap.String("server", serverName),
-		zap.String("endpoint", t.endpoint))
+		zap.String("endpoint", utils.RedactURLForLog(t.endpoint)))
 
 	return t, nil
 }
@@ -597,7 +598,7 @@ func (t *httpTransport) pushRunOnce(ctx context.Context) (bool, error) {
 	case http.StatusMethodNotAllowed, http.StatusNotImplemented, http.StatusNotFound:
 		// Server does not support server-initiated push. Common on
 		// minimal MCP implementations — bail without retry storms.
-		return true, fmt.Errorf("server returned %d on GET %s", resp.StatusCode, t.endpoint)
+		return true, fmt.Errorf("server returned %d on GET %s", resp.StatusCode, utils.RedactURLForLog(t.endpoint))
 	default:
 		// Anything else is transient: 5xx, 429, network-mediated
 		// "Bad Gateway", etc. Let the supervisor back off and retry.
