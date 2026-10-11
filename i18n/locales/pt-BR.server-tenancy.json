@@ -1,0 +1,16 @@
+{
+  "server.session_tenancy.no_principal": "as RPCs de sessão exigem um principal autenticado",
+  "server.session_tenancy.readonly_write": "o papel %q pode listar e carregar as próprias sessões, mas não pode salvá-las nem apagá-las",
+  "server.session_tenancy.admin_access": "acesso de admin ao namespace compartilhado de sessões",
+  "server.session_tenancy.unavailable": "o armazenamento de sessões por principal não está configurado neste servidor; aqui só um admin pode usar sessões salvas",
+  "server.session_tenancy.open_failed": "não foi possível abrir o armazenamento de sessões do principal",
+  "server.session_tenancy.rebind_denied": "esta identidade de canal está vinculada a outro principal; só um admin pode movê-la",
+  "server.provider_endpoint.key_refused": "a chave %q de provider_config não é aceita por este servidor (aceitas: client_id, client_key, realm, agent_id, base_url)",
+  "server.provider_endpoint.segment_invalid": "provider_config %s deve ser um único segmento de caminho com letras, dígitos, ponto, hífen ou sublinhado",
+  "server.provider_endpoint.base_url_provider": "provider_config base_url só se aplica ao provider OLLAMA, não a %q",
+  "server.provider_endpoint.invalid": "provider_config base_url deve ser uma URL http ou https sem credenciais, query ou fragmento",
+  "server.provider_endpoint.not_allowlisted": "este servidor não aceita o endpoint %s escolhido pelo cliente. Configure o endpoint no próprio servidor (OLLAMA_BASE_URL) ou peça ao operador do servidor para incluir essa origem em %s",
+  "server.provider_endpoint.allowlist_entry_invalid": "ignorando uma entrada inválida na allowlist de endpoints de provider",
+  "server.provider_endpoint.dial_blocked": "recusando conexão com %s: endereços de loopback, privados, link-local, multicast e de metadados não podem ser alcançados por um endpoint escolhido pelo cliente",
+  "server.provider_endpoint.refused_log": "provider_config do cliente recusado"
+}

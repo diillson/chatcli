@@ -1,0 +1,5 @@
+{
+  "server.agent_provider.denied": "o provider %s executa um agente com ferramentas próprias no host do servidor; só um admin pode selecioná-lo",
+  "server.agent_provider.default_denied": "o provider padrão deste servidor, %s, executa um agente com ferramentas próprias no host do servidor, então só um admin pode usá-lo; informe um provider de modelo na requisição ou peça ao operador outro padrão (--provider ou LLM_PROVIDER)",
+  "server.agent_provider.chain_denied": "a cadeia de fallback deste servidor inclui %s, que executa um agente com ferramentas próprias no host do servidor, então só um admin pode usá-la; informe um provider na requisição ou peça ao operador para removê-lo de CHATCLI_FALLBACK_PROVIDERS"
+}

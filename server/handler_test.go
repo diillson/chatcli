@@ -222,7 +222,7 @@ func TestHandler_ListSessions(t *testing.T) {
 		logger:         logger,
 	}
 
-	resp, err := handler.ListSessions(context.Background(), &pb.ListSessionsRequest{})
+	resp, err := handler.ListSessions(legacyAdminCtx(), &pb.ListSessionsRequest{})
 	assert.NoError(t, err)
 	assert.Equal(t, []string{"session1", "session2"}, resp.Sessions)
 }
@@ -245,7 +245,7 @@ func TestHandler_SaveAndLoadSession(t *testing.T) {
 	}
 
 	// Save
-	saveResp, err := handler.SaveSession(context.Background(), &pb.SaveSessionRequest{
+	saveResp, err := handler.SaveSession(legacyAdminCtx(), &pb.SaveSessionRequest{
 		Name: "test",
 		Messages: []*pb.ChatMessage{
 			{Role: "user", Content: "hello"},
@@ -256,7 +256,7 @@ func TestHandler_SaveAndLoadSession(t *testing.T) {
 	assert.True(t, saveResp.Success)
 
 	// Load
-	loadResp, err := handler.LoadSession(context.Background(), &pb.LoadSessionRequest{Name: "test"})
+	loadResp, err := handler.LoadSession(legacyAdminCtx(), &pb.LoadSessionRequest{Name: "test"})
 	assert.NoError(t, err)
 	assert.Len(t, loadResp.Messages, 2)
 	assert.Equal(t, "user", loadResp.Messages[0].Role)
@@ -273,7 +273,7 @@ func TestHandler_DeleteSession(t *testing.T) {
 		logger:         logger,
 	}
 
-	resp, err := handler.DeleteSession(context.Background(), &pb.DeleteSessionRequest{Name: "old-session"})
+	resp, err := handler.DeleteSession(legacyAdminCtx(), &pb.DeleteSessionRequest{Name: "old-session"})
 	assert.NoError(t, err)
 	assert.True(t, resp.Success)
 }
@@ -285,7 +285,7 @@ func TestHandler_NoSessionManager(t *testing.T) {
 		logger:         logger,
 	}
 
-	_, err := handler.ListSessions(context.Background(), &pb.ListSessionsRequest{})
+	_, err := handler.ListSessions(legacyAdminCtx(), &pb.ListSessionsRequest{})
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "session management not available")
 }
@@ -510,7 +510,7 @@ func TestHandler_SaveSession_V2(t *testing.T) {
 	}
 
 	protoSD := modelsSessionDataToProto(sd)
-	resp, err := handler.SaveSession(context.Background(), &pb.SaveSessionRequest{
+	resp, err := handler.SaveSession(legacyAdminCtx(), &pb.SaveSessionRequest{
 		Name:        "test-v2",
 		Messages:    []*pb.ChatMessage{{Role: "user", Content: "hello"}}, // v1 compat
 		SessionData: protoSD,
@@ -545,7 +545,7 @@ func TestHandler_LoadSession_V2(t *testing.T) {
 		logger:         logger,
 	}
 
-	resp, err := handler.LoadSession(context.Background(), &pb.LoadSessionRequest{Name: "test-v2"})
+	resp, err := handler.LoadSession(legacyAdminCtx(), &pb.LoadSessionRequest{Name: "test-v2"})
 	assert.NoError(t, err)
 
 	// V1 compat: messages field should contain chat history
@@ -576,7 +576,7 @@ func TestHandler_SaveSession_V1Fallback(t *testing.T) {
 	}
 
 	// Even with session_data present, v1 store should use messages field
-	resp, err := handler.SaveSession(context.Background(), &pb.SaveSessionRequest{
+	resp, err := handler.SaveSession(legacyAdminCtx(), &pb.SaveSessionRequest{
 		Name:     "test-v1",
 		Messages: []*pb.ChatMessage{{Role: "user", Content: "hello"}},
 		SessionData: &pb.SessionDataV2{
@@ -605,7 +605,7 @@ func TestHandler_LoadSession_V1Fallback(t *testing.T) {
 		logger:         logger,
 	}
 
-	resp, err := handler.LoadSession(context.Background(), &pb.LoadSessionRequest{Name: "test-v1"})
+	resp, err := handler.LoadSession(legacyAdminCtx(), &pb.LoadSessionRequest{Name: "test-v1"})
 	assert.NoError(t, err)
 	assert.Len(t, resp.Messages, 1)
 	assert.Nil(t, resp.SessionData) // No v2 data from v1 store

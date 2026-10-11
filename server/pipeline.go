@@ -125,6 +125,11 @@ func (h *Handler) ChatTurn(ctx context.Context, req *pb.ChatTurnRequest) (*pb.Ch
 	if strings.TrimSpace(req.GetText()) == "" {
 		return nil, status.Errorf(codes.InvalidArgument, "%s", i18n.T("server.pipeline.text_required"))
 	}
+	// The hosted engine resolves an empty provider to the server default,
+	// so the same agent-provider rule as the prompt RPCs applies.
+	if err := h.authorizeRouteProvider(ctx, req.GetProvider(), false); err != nil {
+		return nil, err
+	}
 	session := pipelineSession(ctx, req.GetSession())
 	reply, err := backend.ChatTurn(ctx, session, req.GetText(), PipelineRunOpts{
 		Provider: req.GetProvider(), Model: req.GetModel(), Plain: req.GetPlain(),
