@@ -123,8 +123,10 @@ func expandUserPath(path string) string {
 func smartDecode(content, enc string) ([]byte, error) {
 	switch strings.ToLower(strings.TrimSpace(enc)) {
 	case "base64":
-		reg := regexp.MustCompile("[^a-zA-Z0-9+/=]")
-		clean := reg.ReplaceAllString(content, "")
+		clean, err := cleanBase64(content)
+		if err != nil {
+			return nil, err
+		}
 		decoded, err := base64.StdEncoding.DecodeString(clean)
 		if err != nil {
 			decoded, err = base64.URLEncoding.DecodeString(clean)
@@ -135,16 +137,37 @@ func smartDecode(content, enc string) ([]byte, error) {
 		return decoded, err
 	case "auto":
 		if !strings.Contains(content, " ") && !strings.Contains(content, "\n") && len(content) >= 4 && len(content)%4 == 0 {
-			reg := regexp.MustCompile("[^a-zA-Z0-9+/=]")
-			clean := reg.ReplaceAllString(content, "")
-			if d, err := base64.StdEncoding.DecodeString(clean); err == nil && utf8.Valid(d) {
-				return d, nil
+			if clean, err := cleanBase64(content); err == nil {
+				if d, err := base64.StdEncoding.DecodeString(clean); err == nil && utf8.Valid(d) {
+					return d, nil
+				}
 			}
 		}
 		return []byte(content), nil
 	default:
 		return []byte(content), nil
 	}
+}
+
+// cleanBase64 drops only the whitespace models use to wrap long payloads and
+// rejects anything else outside the base64 alphabets. Stripping foreign
+// characters silently (a corrupted model token like a Cyrillic "Р" inside the
+// payload) shifts every following sextet and writes garbage to disk with no
+// error; failing names the offset so the model can re-encode.
+func cleanBase64(content string) (string, error) {
+	var b strings.Builder
+	b.Grow(len(content))
+	for i, r := range content {
+		switch {
+		case r == ' ' || r == '\t' || r == '\n' || r == '\r':
+		case r >= 'A' && r <= 'Z', r >= 'a' && r <= 'z', r >= '0' && r <= '9',
+			r == '+', r == '/', r == '=', r == '-', r == '_':
+			b.WriteRune(r)
+		default:
+			return "", fmt.Errorf("invalid base64 character %q at byte offset %d; re-encode the content", r, i)
+		}
+	}
+	return b.String(), nil
 }
 
 func collectFiles(primary string, extras []string) []string {
