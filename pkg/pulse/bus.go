@@ -35,6 +35,11 @@ type Stats struct {
 
 type subscriber struct {
 	ch chan Event
+	// after is the last sequence number handed out before the subscriber
+	// joined. Events up to it were published for whoever was listening
+	// then; they may still sit in the queue, but they are not this
+	// subscriber's to see.
+	after uint64
 }
 
 // Bus fans events out to subscribers. The zero value is not usable; build
@@ -154,6 +159,9 @@ func (b *Bus) pump() {
 	for ev := range b.queue {
 		b.mu.Lock()
 		for _, s := range b.subs {
+			if ev.Seq <= s.after {
+				continue
+			}
 			select {
 			case s.ch <- ev:
 			default:
@@ -167,13 +175,15 @@ func (b *Bus) pump() {
 // Subscribe returns a channel of events and a cancel func. The channel is
 // closed by cancel, which is safe to call more than once. A subscriber that
 // falls more than buffer events behind loses events rather than slowing the
-// bus; consumers detect the gap from Event.Seq.
+// bus; consumers detect the gap from Event.Seq. A subscriber sees only
+// events published after it subscribed, never ones still queued from before.
 func (b *Bus) Subscribe(buffer int) (<-chan Event, func()) {
 	if buffer <= 0 {
 		buffer = DefaultSubscriberBuffer
 	}
 	s := &subscriber{ch: make(chan Event, buffer)}
 	b.mu.Lock()
+	s.after = b.seq.Load()
 	id := b.nextSub
 	b.nextSub++
 	b.subs[id] = s
