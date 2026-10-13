@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.215.5](https://github.com/diillson/chatcli/compare/v1.215.4...v1.215.5) (2026-10-13)
+
+
+### Bug Fixes
+
+* **coder:** recover unbalanced args envelope and reject corrupted base64 ([#1772](https://github.com/diillson/chatcli/issues/1772)) ([5d7390e](https://github.com/diillson/chatcli/commit/5d7390efe4fe8f4749bf3e7eb939aa7e4ce6b3a7))
+
 ## [1.215.4](https://github.com/diillson/chatcli/compare/v1.215.3...v1.215.4) (2026-10-13)
 
 
