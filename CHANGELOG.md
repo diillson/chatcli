@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.215.4](https://github.com/diillson/chatcli/compare/v1.215.3...v1.215.4) (2026-10-13)
+
+
+### Bug Fixes
+
+* **deps:** consolidate dependabot batch of 2026-10-13 for root and operator ([#1770](https://github.com/diillson/chatcli/issues/1770)) ([584c014](https://github.com/diillson/chatcli/commit/584c014cecc137056a38f530de8ec907a8cb8b7c)), closes [#1756](https://github.com/diillson/chatcli/issues/1756) [#1757](https://github.com/diillson/chatcli/issues/1757) [#1758](https://github.com/diillson/chatcli/issues/1758) [#1759](https://github.com/diillson/chatcli/issues/1759) [#1760](https://github.com/diillson/chatcli/issues/1760) [#1761](https://github.com/diillson/chatcli/issues/1761) [#1762](https://github.com/diillson/chatcli/issues/1762) [#1763](https://github.com/diillson/chatcli/issues/1763) [#1764](https://github.com/diillson/chatcli/issues/1764) [#1765](https://github.com/diillson/chatcli/issues/1765) [#1766](https://github.com/diillson/chatcli/issues/1766) [#1767](https://github.com/diillson/chatcli/issues/1767) [#1768](https://github.com/diillson/chatcli/issues/1768) [#1769](https://github.com/diillson/chatcli/issues/1769)
+
 ## [1.215.3](https://github.com/diillson/chatcli/compare/v1.215.2...v1.215.3) (2026-10-11)
 
 
