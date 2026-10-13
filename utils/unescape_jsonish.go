@@ -173,3 +173,46 @@ func doublePathBackslashes(content string) string {
 	}
 	return b.String()
 }
+
+// CloseUnbalancedJSON completa um objeto/array JSON ao qual faltam apenas os
+// fechamentos finais — modelos às vezes emitem o envelope inteiro e esquecem
+// o último "}" (`{"file":"x","content":"..."` sem a chave final).
+//
+// O reparo é conservador de propósito: só fecha colchetes/chaves pendentes
+// quando TODAS as strings estão terminadas. Uma string sem fecho indica saída
+// cortada no meio (ex.: max_tokens) e completar aquilo gravaria conteúdo
+// truncado como se fosse íntegro — nesse caso o input volta inalterado e o
+// erro de parse segue para o chamador. Fechamento fora de ordem também não é
+// reparado.
+func CloseUnbalancedJSON(s string) string {
+	var stack []byte
+	for i := 0; i < len(s); i++ {
+		switch s[i] {
+		case '"':
+			_, end := scanJSONStringLiteral(s, i+1)
+			if end >= len(s) {
+				return s
+			}
+			i = end
+		case '{':
+			stack = append(stack, '}')
+		case '[':
+			stack = append(stack, ']')
+		case '}', ']':
+			if len(stack) == 0 || stack[len(stack)-1] != s[i] {
+				return s
+			}
+			stack = stack[:len(stack)-1]
+		}
+	}
+	if len(stack) == 0 {
+		return s
+	}
+	var b strings.Builder
+	b.Grow(len(s) + len(stack))
+	b.WriteString(s)
+	for k := len(stack) - 1; k >= 0; k-- {
+		b.WriteByte(stack[k])
+	}
+	return b.String()
+}

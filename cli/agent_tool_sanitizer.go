@@ -578,17 +578,8 @@ func parseToolArgsMaybeJSON(argLine string) ([]string, bool, error) {
 	}
 
 	var payload any
-	if err := json.Unmarshal([]byte(trimmed), &payload); err != nil {
-		// Salvage pass: models emit Windows paths with single backslashes
-		// ("C:\Users\x"), which are invalid JSON escapes. Repair and retry
-		// before surfacing the error (lenient parsing keeps the loop moving).
-		repaired := utils.RepairJSONInvalidEscapes(trimmed)
-		if repaired == trimmed {
-			return nil, true, err
-		}
-		if err2 := json.Unmarshal([]byte(repaired), &payload); err2 != nil {
-			return nil, true, err
-		}
+	if err := unmarshalJSONLenient(trimmed, &payload); err != nil {
+		return nil, true, err
 	}
 
 	switch v := payload.(type) {
@@ -661,7 +652,10 @@ func buildArgvFromJSONMap(m map[string]any) ([]string, bool, error) {
 	}
 
 	argv := []string{cmd}
-	argsMap := collectArgsMap(m)
+	argsMap, err := collectArgsMap(m)
+	if err != nil {
+		return nil, true, err
+	}
 
 	keys := make([]string, 0, len(argsMap))
 	for k := range argsMap {
@@ -688,8 +682,10 @@ func buildArgvFromJSONMap(m map[string]any) ([]string, bool, error) {
 // ({"cmd":"describe","name":"x"} instead of nesting under "args") and those
 // keys carry the call's actual arguments, so they must not be dropped —
 // then the explicit args/flags maps, which win on key conflicts. "command"
-// folds onto "cmd" at every level.
-func collectArgsMap(m map[string]any) map[string]any {
+// folds onto "cmd" at every level. A string envelope that looks like a JSON
+// object but cannot be recovered is an error: dropping it silently left only
+// the subcommand behind and the model got a misleading "missing --file".
+func collectArgsMap(m map[string]any) (map[string]any, error) {
 	argsMap := map[string]any{}
 	put := func(k string, v any) {
 		if k == "command" {
@@ -715,35 +711,41 @@ func collectArgsMap(m map[string]any) map[string]any {
 			// Models sometimes double-encode the envelope as a JSON string
 			// ({"cmd":"write","args":"{\"file\":...}"}); recover it instead
 			// of dropping every argument.
-			if obj, ok := decodeJSONObjectLenient(mm); ok {
-				for k, v := range obj {
-					put(k, v)
-				}
+			trimmed := strings.TrimSpace(mm)
+			if !strings.HasPrefix(trimmed, "{") {
+				continue
+			}
+			var obj map[string]any
+			if err := unmarshalJSONLenient(trimmed, &obj); err != nil {
+				return nil, fmt.Errorf("o campo %q é uma string JSON inválida (%w); envie %q como objeto JSON, não como string", envelope, err, envelope)
+			}
+			for k, v := range obj {
+				put(k, v)
 			}
 		}
 	}
-	return argsMap
+	return argsMap, nil
 }
 
-// decodeJSONObjectLenient parses a string that should contain a JSON object,
-// repairing invalid backslash escapes (Windows paths) when a strict parse
-// fails.
-func decodeJSONObjectLenient(s string) (map[string]any, bool) {
-	trimmed := strings.TrimSpace(s)
-	if !strings.HasPrefix(trimmed, "{") {
-		return nil, false
+// unmarshalJSONLenient decodes model-emitted JSON, retrying with the salvage
+// passes before surfacing the original error (lenient parsing keeps the loop
+// moving): invalid backslash escapes from Windows paths ("C:\Users\x") and
+// a missing trailing "}"/"]" on an otherwise complete payload.
+func unmarshalJSONLenient(s string, v any) error {
+	err := json.Unmarshal([]byte(s), v)
+	if err == nil {
+		return nil
 	}
-	var obj map[string]any
-	if err := json.Unmarshal([]byte(trimmed), &obj); err != nil {
-		repaired := utils.RepairJSONInvalidEscapes(trimmed)
-		if repaired == trimmed {
-			return nil, false
+	escaped := utils.RepairJSONInvalidEscapes(s)
+	for _, candidate := range []string{escaped, utils.CloseUnbalancedJSON(s), utils.CloseUnbalancedJSON(escaped)} {
+		if candidate == s {
+			continue
 		}
-		if err2 := json.Unmarshal([]byte(repaired), &obj); err2 != nil {
-			return nil, false
+		if json.Unmarshal([]byte(candidate), v) == nil {
+			return nil
 		}
 	}
-	return obj, true
+	return err
 }
 
 func normalizeFlagName(name string) string {

@@ -49,6 +49,10 @@ func TestSmartDecode(t *testing.T) {
 		{"base64 decode", "aGVsbG8=", "base64", "hello", false},
 		{"auto text", "hello world", "auto", "hello world", false},
 		{"empty text", "", "text", "", false},
+		{"base64 wrapped lines", "aGVs\nbG8=", "base64", "hello", false},
+		{"base64 url alphabet", "Pz8_", "base64", "???", false},
+		{"base64 foreign char rejected", "aGVsР8=", "base64", "", true},
+		{"auto with foreign char stays text", "aGVsР8=", "auto", "aGVsР8=", false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

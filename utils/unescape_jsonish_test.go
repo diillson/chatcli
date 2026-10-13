@@ -96,3 +96,29 @@ func TestRepairJSONInvalidEscapes_ParsesAfterRepair(t *testing.T) {
 		t.Errorf("file = %q, want the original Windows path", got)
 	}
 }
+
+func TestCloseUnbalancedJSON(t *testing.T) {
+	cases := []struct {
+		name, in, want string
+	}{
+		{"balanced untouched", `{"a":1}`, `{"a":1}`},
+		{"missing brace", `{"a":"x"`, `{"a":"x"}`},
+		{"nested missing", `{"a":{"b":[1,2]`, `{"a":{"b":[1,2]}}`},
+		{"brace inside string ignored", `{"a":"}{["`, `{"a":"}{["}`},
+		{"escaped quote in string", `{"a":"x\"y"`, `{"a":"x\"y"}`},
+		{"unterminated string refused", `{"a":"trunc`, `{"a":"trunc`},
+		{"mismatched close refused", `{"a":[1}`, `{"a":[1}`},
+		{"not json", `hello`, `hello`},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := CloseUnbalancedJSON(tc.in)
+			if got != tc.want {
+				t.Fatalf("CloseUnbalancedJSON(%q) = %q, want %q", tc.in, got, tc.want)
+			}
+			if got != tc.in && !json.Valid([]byte(got)) {
+				t.Fatalf("repaired output is not valid JSON: %q", got)
+			}
+		})
+	}
+}
