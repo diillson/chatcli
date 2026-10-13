@@ -207,3 +207,21 @@ func TestEventWithAndTook(t *testing.T) {
 		t.Fatalf("Took(0) = %d", got)
 	}
 }
+
+// An event still queued when a subscriber joins was published for whoever
+// was listening then. Delivering it late to the newcomer showed one test's
+// session update inside the next test's collector.
+func TestSubscriberNeverSeesEventsQueuedBeforeIt(t *testing.T) {
+	b := New("t")
+	b.enabled.Store(true) // recording, but the pump has not run yet
+	b.Emit(Event{Kind: KindSession, Phase: PhaseUpdate, ID: "stale"})
+
+	ch, cancel := b.Subscribe(4)
+	defer cancel()
+	b.SetEnabled(true) // starts the pump with "stale" still in the queue
+	b.Emit(Event{Kind: KindSession, Phase: PhaseUpdate, ID: "fresh"})
+
+	if ev := recv(t, ch); ev.ID != "fresh" {
+		t.Fatalf("got %q first; an event queued before Subscribe leaked in", ev.ID)
+	}
+}
