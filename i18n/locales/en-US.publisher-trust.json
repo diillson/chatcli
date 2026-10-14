@@ -21,5 +21,6 @@
   "plugin.install.refused_key_changed": "%s was installed from publisher %s, but this bundle is signed by %s. Nothing was installed. If the publisher really rotated its key, uninstall the plugin and install it again to trust the new key.",
   "plugin.install.refused_trust_mismatch": "--trust %s does not match the publisher that signed the bundle (%s). Nothing was installed.",
   "plugin.install.refused_no_bundled_key": "%s is signed by a key this machine does not trust, and the bundle carries no publisher key (<binary>.pub) to trust.",
-  "plugin.install.refused_not_trusted": "%s is signed by %s, a publisher this machine does not trust yet. Confirm it in an interactive terminal, or pass --trust %s."
+  "plugin.install.refused_not_trusted": "%s is signed by %s, a publisher this machine does not trust yet. Confirm it in an interactive terminal, or pass --trust %s.",
+  "plugincli.keygen.fingerprint": "fingerprint (announce it where your users download the plugin): %s"
 }

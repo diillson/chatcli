@@ -116,6 +116,16 @@ func KeyFingerprint(key ed25519.PublicKey) string {
 	return "SHA256:" + base64.RawStdEncoding.EncodeToString(sum[:])
 }
 
+// PublicKeyFingerprint reads a public key file and returns its fingerprint
+// — what a publisher announces so users can compare it before trusting.
+func PublicKeyFingerprint(pubPath string) (string, error) {
+	key, err := loadEd25519PublicKey(pubPath)
+	if err != nil {
+		return "", err
+	}
+	return KeyFingerprint(key), nil
+}
+
 // ManagedTrustedKeysDir is the administrator-controlled key directory next
 // to the managed configuration file: /etc/chatcli/trusted-keys, or
 // %ProgramData%\chatcli\trusted-keys on Windows.

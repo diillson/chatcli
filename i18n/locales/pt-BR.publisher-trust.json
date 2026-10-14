@@ -21,5 +21,6 @@
   "plugin.install.refused_key_changed": "%s foi instalado do publicador %s, mas este pacote está assinado por %s. Nada foi instalado. Se o publicador trocou mesmo de chave, desinstale o plugin e instale de novo para confiar na nova chave.",
   "plugin.install.refused_trust_mismatch": "--trust %s não corresponde ao publicador que assinou o pacote (%s). Nada foi instalado.",
   "plugin.install.refused_no_bundled_key": "%s está assinado por uma chave em que esta máquina não confia, e o pacote não traz a chave do publicador (<binário>.pub) para confiar.",
-  "plugin.install.refused_not_trusted": "%s está assinado por %s, um publicador em que esta máquina ainda não confia. Confirme num terminal interativo ou passe --trust %s."
+  "plugin.install.refused_not_trusted": "%s está assinado por %s, um publicador em que esta máquina ainda não confia. Confirme num terminal interativo ou passe --trust %s.",
+  "plugincli.keygen.fingerprint": "fingerprint (divulgue onde seus usuários baixam o plugin): %s"
 }

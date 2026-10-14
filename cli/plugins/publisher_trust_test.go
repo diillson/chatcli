@@ -244,3 +244,21 @@ func TestBundleName(t *testing.T) {
 		}
 	}
 }
+
+func TestPublicKeyFingerprintMatchesInstallPrompt(t *testing.T) {
+	trustSandbox(t)
+	bin, keyDir := publisher(t, "fp-tool", "x")
+	fp, err := PublicKeyFingerprint(filepath.Join(keyDir, SigningPubFileName))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var seen string
+	_, _ = InstallBundle(context.Background(), bin, InstallOptions{Kind: KindTool, DestDir: t.TempDir(),
+		Confirm: func(_ string, p Publisher) bool { seen = p.Fingerprint; return false }})
+	if seen != fp {
+		t.Fatalf("keygen fingerprint %q differs from the install prompt %q", fp, seen)
+	}
+	if _, err := PublicKeyFingerprint(filepath.Join(keyDir, "missing.pub")); err == nil {
+		t.Fatal("missing key must fail")
+	}
+}

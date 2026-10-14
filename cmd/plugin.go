@@ -123,6 +123,9 @@ func runPluginKeygen(args []string) error {
 		return err
 	}
 	fmt.Println(i18n.T("plugincli.keygen.done", keyPath, pubPath))
+	if fp, err := plugins.PublicKeyFingerprint(pubPath); err == nil {
+		fmt.Println(i18n.T("plugincli.keygen.fingerprint", fp))
+	}
 	fmt.Println(i18n.T("plugincli.keygen.next", pubPath))
 	return nil
 }
