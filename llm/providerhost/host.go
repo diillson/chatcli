@@ -14,10 +14,11 @@ package providerhost
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"math/rand/v2"
+	"math/big"
 	"os"
 	"os/exec"
 	"runtime"
@@ -41,6 +42,7 @@ const (
 	breakerThreshold = 5
 	breakerCooldown  = 2 * time.Minute
 	stderrTailBytes  = 16 << 10
+	crashSettle      = 2 * time.Second
 )
 
 // ErrUnavailable reports a plugin that cannot serve right now (failed to
@@ -175,6 +177,13 @@ func (h *Host) callWith(ctx context.Context, method string, params, out any, onD
 	}
 	err = p.conn.CallObserved(ctx, method, params, out, onID)
 	if errors.Is(err, providerproto.ErrClosed) {
+		// The connection closes before exec finishes copying the process's
+		// stderr (that completes inside Wait); wait for the exit, briefly,
+		// so the error can quote what the plugin printed as it died.
+		select {
+		case <-p.done:
+		case <-time.After(crashSettle):
+		}
 		h.markCrashed(p)
 		return fmt.Errorf("%w: %s exited: %s", ErrUnavailable, h.name(), h.crashDetail(p))
 	}
@@ -307,9 +316,9 @@ func (h *Host) recordFailure(err error) {
 	if delay <= 0 || delay > maxRestartDelay {
 		delay = maxRestartDelay
 	}
-	// Full jitter keeps many sessions from restarting a shared plugin in
+	// Jitter keeps many sessions from restarting a shared plugin in
 	// lockstep.
-	delay = delay/2 + time.Duration(rand.Int64N(int64(delay/2)+1))
+	delay = delay/2 + jitter(delay/2)
 	h.nextStart = time.Now().Add(delay)
 	if h.failures >= breakerThreshold {
 		h.openUntil = time.Now().Add(breakerCooldown)
@@ -533,4 +542,16 @@ func (t *tailBuffer) String() string {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	return t.buf.String()
+}
+
+// jitter returns a uniformly distributed duration in [0, limit].
+func jitter(limit time.Duration) time.Duration {
+	if limit <= 0 {
+		return 0
+	}
+	n, err := rand.Int(rand.Reader, big.NewInt(int64(limit)+1))
+	if err != nil {
+		return limit / 2
+	}
+	return time.Duration(n.Int64())
 }
