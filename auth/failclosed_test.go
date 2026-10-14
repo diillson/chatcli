@@ -223,3 +223,37 @@ func TestMacSetCommand_KeepsTheSecretOutOfArgv(t *testing.T) {
 		}
 	}
 }
+
+// The fallback for filesystems without hard links keeps the exclusive,
+// never-overwrite contract.
+func TestCreateKeyFileExclusiveFallback(t *testing.T) {
+	path := keyPathIn(t)
+	first, err := createKeyFileExclusive(path, bytes.Repeat([]byte{0x01}, 32))
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := createKeyFileExclusive(path, bytes.Repeat([]byte{0x02}, 32))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(first, second) {
+		t.Fatal("the fallback overwrote or ignored the existing key")
+	}
+}
+
+// No temp file is left behind after publishing the key.
+func TestCreateKeyFileLeavesNoTempFiles(t *testing.T) {
+	path := keyPathIn(t)
+	if _, err := createKeyFile(path, bytes.Repeat([]byte{0x03}, 32)); err != nil {
+		t.Fatal(err)
+	}
+	entries, err := os.ReadDir(filepath.Dir(path))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range entries {
+		if strings.HasPrefix(e.Name(), ".auth-key-") {
+			t.Fatalf("temp file left behind: %s", e.Name())
+		}
+	}
+}
