@@ -1,5 +1,25 @@
 # Changelog
 
+## [1.216.0](https://github.com/diillson/chatcli/compare/v1.215.5...v1.216.0) (2026-10-14)
+
+
+### Features
+
+* **cli:** /models alias of /model ([#1777](https://github.com/diillson/chatcli/issues/1777)) ([ce9cbf4](https://github.com/diillson/chatcli/commit/ce9cbf43333005e7f1df03959750d67a5921aeaf))
+* **plugins:** one quarantine command for tool and provider plugins ([54880e9](https://github.com/diillson/chatcli/commit/54880e9d6af4d6dd987ba8815ab3146a11269ade))
+* **plugins:** trust a plugin publisher once instead of copying keys ([#1781](https://github.com/diillson/chatcli/issues/1781)) ([4db85db](https://github.com/diillson/chatcli/commit/4db85dbcfeae87971e346fafa4f52afa509262b8))
+* **providerhost:** anthropic, gemini and responses dialects for provider plugins ([#1782](https://github.com/diillson/chatcli/issues/1782)) ([94f922a](https://github.com/diillson/chatcli/commit/94f922a94e4f1a4f55ef8891faf3469ba51fbaae))
+* **providerhost:** load provider plugins as first-class providers ([54880e9](https://github.com/diillson/chatcli/commit/54880e9d6af4d6dd987ba8815ab3146a11269ade))
+* **providerproto:** provider plugin protocol, Go SDK and conformance kit ([#1775](https://github.com/diillson/chatcli/issues/1775)) ([aa2f1a2](https://github.com/diillson/chatcli/commit/aa2f1a25d27887695087d840c67dfb44351ca04e))
+* **server:** provider plugins in the server, operator and Helm chart ([#1783](https://github.com/diillson/chatcli/issues/1783)) ([662b9df](https://github.com/diillson/chatcli/commit/662b9dff62a32f11a06e071e16cbd42284430018))
+
+
+### Bug Fixes
+
+* **auth:** publish the credential key atomically on first run ([#1779](https://github.com/diillson/chatcli/issues/1779)) ([ba4bbad](https://github.com/diillson/chatcli/commit/ba4bbad7455d62a1fec38653c84035ca6e64c3cf))
+* **cli:** only the terminal's owner may change it, fixing the REPL after /web ([#1780](https://github.com/diillson/chatcli/issues/1780)) ([e096158](https://github.com/diillson/chatcli/commit/e096158fbf99d253c45a47fec15a24210cc25c20))
+* **providerhost:** quote crash output reliably and use crypto jitter ([54880e9](https://github.com/diillson/chatcli/commit/54880e9d6af4d6dd987ba8815ab3146a11269ade))
+
 ## [1.215.5](https://github.com/diillson/chatcli/compare/v1.215.4...v1.215.5) (2026-10-13)
 
 
