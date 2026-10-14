@@ -30,6 +30,10 @@ const (
 	// endpoints and client_id are discovered at runtime and kept alongside
 	// the credential rather than hard-coded here (see cli/mcp/oauth.go).
 	ProviderMCP ProviderID = "mcp"
+	// ProviderPlugin is the base provider id for credentials minted by
+	// provider plugins. Each plugin stores its opaque credential under the
+	// profile id "plugin:<NAME>" (see llm/providerhost).
+	ProviderPlugin ProviderID = "plugin"
 )
 
 // AuthMode indica como a autenticação foi resolvida.

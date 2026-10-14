@@ -49,6 +49,7 @@ import (
 	"github.com/diillson/chatcli/llm/client"
 	"github.com/diillson/chatcli/llm/manager"
 	"github.com/diillson/chatcli/llm/openaiassistant"
+	"github.com/diillson/chatcli/llm/providerhost"
 	"github.com/diillson/chatcli/llm/tokenizer"
 	"github.com/diillson/chatcli/pkg/browser"
 	"github.com/diillson/chatcli/pkg/persona"
@@ -249,6 +250,7 @@ type ChatCLI struct {
 	sessionAutosaved    bool      // autosave-on-exit ran (cleanup can be reached twice)
 	UserMaxTokens       int
 	pluginManager       *plugins.Manager
+	providerPlugins     *providerhost.Set // external provider plugins (llm/providerhost)
 	contextHandler      *ContextHandler
 	personaHandler      *PersonaHandler
 	skillHandler        *SkillHandler
@@ -868,6 +870,9 @@ func NewChatCLI(ctx context.Context, manager manager.LLMManager, logger *zap.Log
 		}
 	}
 
+	// Provider plugins register before the initial provider is chosen, so
+	// LLM_PROVIDER (and --provider) can name one.
+	cli.loadProviderPlugins(ctx)
 	cli.configureProviderAndModel()
 
 	client, err := manager.GetClient(cli.Provider, cli.Model)
@@ -2358,6 +2363,7 @@ func (cli *ChatCLI) cleanup(ctx context.Context) {
 	if cli.pluginManager != nil {
 		cli.pluginManager.Close()
 	}
+	cli.closeProviderPlugins(ctx)
 	cli.shutdownToolProcesses(ctx)
 	// Cancel an in-flight task graph run so its workers stop with the
 	// session, and stop the dashboard server if one was opened.

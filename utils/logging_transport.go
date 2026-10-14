@@ -306,6 +306,8 @@ func headersToString(headers http.Header) string {
 			lowerKey == "api-key" ||
 			lowerKey == "x-api-key" ||
 			lowerKey == "x-goog-api-key" || // Google API key header
+			strings.Contains(lowerKey, "apikey") ||
+			strings.Contains(lowerKey, "api-key") ||
 			strings.Contains(lowerKey, "secret") ||
 			strings.Contains(lowerKey, "token") ||
 			strings.Contains(lowerKey, "password") {

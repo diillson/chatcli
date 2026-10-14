@@ -33,6 +33,9 @@ func (ch *CommandHandler) handleAuthCommand(ctx context.Context, userInput strin
 	switch sub {
 	case "status":
 		fmt.Println(auth.FormatAuthStatus(ch.cli.logger))
+		if s := ch.cli.providerPluginStatus(ctx); s != "" {
+			fmt.Println(s)
+		}
 	case "login":
 		if len(args) < 3 {
 			fmt.Println(i18n.T("auth.login.usage"))
@@ -74,6 +77,9 @@ func (ch *CommandHandler) handleAuthCommand(ctx context.Context, userInput strin
 				utils.GetEnvOrDefault("COPILOT_MODEL", config.DefaultCopilotModel))
 			return
 		default:
+			if ch.cli.loginProviderPlugin(ctx, args[2]) {
+				return
+			}
 			fmt.Println(i18n.T("auth.error.unknown_provider"))
 			return
 		}
@@ -92,6 +98,9 @@ func (ch *CommandHandler) handleAuthCommand(ctx context.Context, userInput strin
 		case "github-copilot", "copilot", "gh-copilot":
 			pid = auth.ProviderGitHubCopilot
 		default:
+			if ch.cli.logoutProviderPlugin(ctx, args[2]) {
+				return
+			}
 			fmt.Println(i18n.T("auth.error.unknown_provider"))
 			return
 		}

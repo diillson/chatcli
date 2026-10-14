@@ -1,6 +1,6 @@
 {
-  "subcmd.provider": "Provider plugins: run the conformance kit against a plugin binary",
-  "provider.cli.usage": "Usage: chatcli provider test [flags] <plugin> [plugin args...]\n\nRuns the provider-plugin conformance kit against a plugin binary and exits non-zero when a check fails.\n\nFlags:\n  --input id=value        answer an auth/login prompt field (repeatable)\n  --credential-file path  JSON credential to use instead of logging in\n  --model id              model for the chat checks (default: first listed)\n  --timeout 30s           per-check timeout\n  --json                  print the report as JSON",
+  "subcmd.provider": "Provider plugins: list, log in, log out and run the conformance kit",
+  "provider.cli.usage": "Usage: chatcli provider <command> [flags]\n\nCommands:\n  list                         Installed provider plugins and their login state\n  login <name> [--input id=v]  Log in to a provider plugin (flags answer prompt fields for unattended use)\n  logout <name>                Revoke and delete a provider plugin's credential\n  test [flags] <plugin> [args] Run the conformance kit against a plugin binary\n\ntest flags:\n  --input id=value        answer an auth/login prompt field (repeatable)\n  --credential-file path  JSON credential to use instead of logging in\n  --model id              model for the chat checks (default: first listed)\n  --timeout 30s           per-check timeout\n  --json                  print the report as JSON",
   "provider.cli.unknown": "unknown provider subcommand %q",
   "provider.cli.missing_plugin": "missing plugin command: chatcli provider test <plugin> [args...]",
   "provider.cli.bad_input": "invalid --input %q (want id=value)",
@@ -83,5 +83,22 @@
   "provider.check.chat.skip_not_logged_in": "not logged in",
   "provider.check.problems": "%s",
   "provider.check.chat_send.usage": "usage in=%d out=%d",
-  "provider.check.chat_send.no_usage": "no usage reported (cost tracking will estimate)"
+  "provider.check.chat_send.no_usage": "no usage reported (cost tracking will estimate)",
+  "complete.auth.provider_plugin": "Provider plugin: %s",
+  "provider.cli.list.empty": "No provider plugins installed in %s",
+  "provider.cli.list.failed": "  not loaded: %s — %v",
+  "provider.cli.login.usage": "Usage: chatcli provider login <name> [--input id=value]...",
+  "provider.cli.logout.usage": "Usage: chatcli provider logout <name>",
+  "provider.cli.not_installed": "no provider plugin named %q is installed (see chatcli provider list)",
+  "provider.plugin.login.device_code": "Open %s and enter the code: %s",
+  "provider.plugin.login.not_needed": "%s does not need a login.",
+  "provider.plugin.login.open_url": "Open this URL to sign in: %s",
+  "provider.plugin.login.press_enter": "Press Enter once you have finished in the browser... ",
+  "provider.plugin.status.error": "status unavailable: %v",
+  "provider.plugin.status.expired": "credential expired",
+  "provider.plugin.status.header": "Provider plugins:",
+  "provider.plugin.status.logged_in": "logged in",
+  "provider.plugin.status.logged_in_as": "logged in as %s",
+  "provider.plugin.status.logged_out": "not logged in",
+  "provider.plugin.status.no_login": "no login required"
 }

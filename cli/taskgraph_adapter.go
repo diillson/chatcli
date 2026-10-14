@@ -347,11 +347,11 @@ func (a *taskGraphAdapter) shutdownDash(ctx context.Context) {
 func openBrowserURL(rawURL string) error {
 	switch runtime.GOOS {
 	case "darwin":
-		return exec.Command("open", rawURL).Start() //#nosec G204 -- local dashboard URL built by this process, not user/model input
+		return exec.Command("open", rawURL).Start() //#nosec G204 -- a local dashboard URL built by this process, or a provider-plugin login URL limited to https/loopback by safeBrowserURL
 	case "linux":
-		return exec.Command("xdg-open", rawURL).Start() //#nosec G204 -- local dashboard URL built by this process, not user/model input
+		return exec.Command("xdg-open", rawURL).Start() //#nosec G204 -- a local dashboard URL built by this process, or a provider-plugin login URL limited to https/loopback by safeBrowserURL
 	case "windows":
-		return exec.Command("rundll32", "url.dll,FileProtocolHandler", rawURL).Start() //#nosec G204 -- local dashboard URL built by this process, not user/model input
+		return exec.Command("rundll32", "url.dll,FileProtocolHandler", rawURL).Start() //#nosec G204 -- a local dashboard URL built by this process, or a provider-plugin login URL limited to https/loopback by safeBrowserURL
 	default:
 		return fmt.Errorf("unsupported platform for browser open: %s", runtime.GOOS)
 	}

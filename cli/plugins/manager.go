@@ -188,7 +188,7 @@ func (m *Manager) Reload() {
 	count := len(m.plugins)
 	m.mu.Unlock()
 
-	pruneVerifiedCache(verifiedCacheDir(m.pluginsDir), inUse)
+	pruneVerifiedCache(VerifiedCacheDir(m.pluginsDir), inUse)
 
 	// A plugin that is gone must not leave a record that would admit a
 	// future binary of the same name without its own waiting period.
@@ -207,50 +207,15 @@ func (m *Manager) Reload() {
 // directory and, when admitted, builds the plugin. Runs without m.mu.
 func (m *Manager) loadEntry(verifier *PluginVerifier, quarantine *Quarantine, fileName string) *ExecutablePlugin {
 	pluginPath := filepath.Join(m.pluginsDir, fileName)
-	execPath := pluginPath
-
-	// Inspect the signature, then apply policy. The two are separate
-	// because "unsigned" and "signature does not verify" are different
-	// facts that call for different handling.
-	switch status, verified, err := verifier.inspectWithBytes(pluginPath); status {
-	case StatusVerified:
-		// Signed by a key this machine trusts: run a private copy of the
-		// exact bytes that verified, never the path again.
-		staged, err := stageVerifiedBinary(verifiedCacheDir(m.pluginsDir), verified, fileName)
-		if err != nil {
-			m.logger.Warn("Could not stage verified plugin, skipping",
-				zap.String("plugin", fileName), zap.Error(err))
-			return nil
-		}
-		execPath = staged
-
-	case StatusUnsigned, StatusUnverifiable:
-		// Unverifiable joins unsigned here on purpose: with no trusted
-		// key on this machine, a signature is not evidence of anything,
-		// so it neither helps nor should it start refusing a plugin that
-		// loaded before.
-		if !verifier.AllowsUnsigned() {
-			m.logger.Warn("Plugin signature cannot be trusted and unsigned plugins are not allowed, skipping",
-				zap.String("plugin", fileName), zap.Error(err))
-			return nil
-		}
-		// Unsigned, and unsigned is tolerated. Quarantine — when
-		// configured — is the remaining gate: a binary that just
-		// appeared waits before it can run with this process's
-		// permissions.
-		if admitted, remaining := quarantine.Admit(pluginPath); !admitted {
-			m.logger.Warn("Plugin held in quarantine",
-				zap.String("plugin", fileName),
-				zap.Duration("remaining", remaining.Round(time.Second)))
-			return nil
-		}
-		m.logger.Warn("Loading unsigned plugin (dev mode)", zap.String("plugin", fileName))
-
-	default:
-		m.logger.Warn("Plugin signature verification failed, skipping",
-			zap.String("plugin", fileName), zap.Error(err))
+	decision, err := verifier.ResolveExec(quarantine, VerifiedCacheDir(m.pluginsDir), pluginPath)
+	if err != nil {
+		m.logger.Warn("Plugin not loaded", zap.String("plugin", fileName), zap.Error(err))
 		return nil
 	}
+	if decision.Unsigned {
+		m.logger.Warn("Loading unsigned plugin (dev mode)", zap.String("plugin", fileName))
+	}
+	execPath := decision.ExecPath
 
 	plugin, err := newPluginFromExec(pluginPath, execPath)
 	if err != nil {

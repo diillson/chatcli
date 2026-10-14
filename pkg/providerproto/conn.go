@@ -419,7 +419,18 @@ func (c *Conn) callHandler(ctx context.Context, req *Request) (result json.RawMe
 // Call sends a request and decodes its result into out (which may be nil).
 // Cancelling ctx sends $/cancelRequest to the peer and returns ctx.Err().
 func (c *Conn) Call(ctx context.Context, method string, params, out any) error {
+	return c.CallObserved(ctx, method, params, out, nil)
+}
+
+// CallObserved is Call that first hands the request's id to onID (when not
+// nil), before the request is written — so notifications the peer sends
+// for this request (chat/delta carries it as requestId) can be routed even
+// if they arrive before Call would return.
+func (c *Conn) CallObserved(ctx context.Context, method string, params, out any, onID func(json.RawMessage)) error {
 	id := json.RawMessage(strconv.FormatInt(c.nextID.Add(1), 10))
+	if onID != nil {
+		onID(id)
+	}
 	key := idKey(id)
 	ch := make(chan *wireIn, 1)
 

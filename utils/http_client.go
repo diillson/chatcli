@@ -22,6 +22,15 @@ const maxRedirects = 10
 // Cada chamada cria um http.Transport dedicado para evitar compartilhamento
 // de pool de conexões e cache TLS entre providers diferentes.
 func NewHTTPClient(logger *zap.Logger, timeout time.Duration) *http.Client {
+	return NewHTTPClientWithTransport(logger, timeout, NewDefaultTransport())
+}
+
+// NewDefaultTransport builds the transport NewHTTPClient uses: proxies from
+// the environment, HTTP/2 and the corporate TLS trust overrides. Callers that
+// need a wrapping RoundTripper below the logging layer (so the headers it
+// adds never reach the request log) wrap this and pass the result to
+// NewHTTPClientWithTransport.
+func NewDefaultTransport() *http.Transport {
 	transport := &http.Transport{
 		Proxy: http.ProxyFromEnvironment,
 		DialContext: (&net.Dialer{
@@ -40,7 +49,7 @@ func NewHTTPClient(logger *zap.Logger, timeout time.Duration) *http.Client {
 	if tlsCfg := GlobalTLSConfig(); tlsCfg != nil {
 		transport.TLSClientConfig = tlsCfg.Clone()
 	}
-	return NewHTTPClientWithTransport(logger, timeout, transport)
+	return transport
 }
 
 // NewHTTPClientH1 is like NewHTTPClient but pins the connection to HTTP/1.1.

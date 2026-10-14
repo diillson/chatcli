@@ -1682,6 +1682,14 @@ func (cli *ChatCLI) getAuthSuggestions(d prompt.Document) []prompt.Suggest {
 					{Text: "openai-codex", Description: i18n.T("complete.auth.provider_openai_codex")},
 					{Text: "github-copilot", Description: i18n.T("complete.auth.provider_github_copilot")},
 				}
+				for _, p := range cli.providerPlugins.List() {
+					if p.RequiresLogin() {
+						suggestions = append(suggestions, prompt.Suggest{
+							Text:        strings.ToLower(p.Name()),
+							Description: i18n.T("complete.auth.provider_plugin", p.DisplayName(activeLang())),
+						})
+					}
+				}
 				return prompt.FilterHasPrefix(suggestions, d.GetWordBeforeCursor(), true)
 			}
 		}

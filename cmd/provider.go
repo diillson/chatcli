@@ -17,9 +17,13 @@ import (
 	"strings"
 	"time"
 
+	"github.com/diillson/chatcli/cli"
 	"github.com/diillson/chatcli/i18n"
+	"github.com/diillson/chatcli/llm/providerhost"
 	"github.com/diillson/chatcli/pkg/providerproto"
 	"github.com/diillson/chatcli/pkg/providerproto/conformance"
+	"go.uber.org/zap"
+	"golang.org/x/term"
 )
 
 // Exit codes of `chatcli provider`.
@@ -46,6 +50,12 @@ func RunProviderCLI(ctx context.Context, args []string, stdout, stderr io.Writer
 	switch args[0] {
 	case "test":
 		return runProviderTest(ctx, args[1:], stdout, stderr)
+	case "list":
+		return runProviderList(ctx, stdout)
+	case "login":
+		return runProviderLogin(ctx, args[1:], stdout, stderr)
+	case "logout":
+		return runProviderLogout(ctx, args[1:], stdout, stderr)
 	default:
 		fmt.Fprintln(stderr, i18n.T("provider.cli.unknown", args[0]))
 		fmt.Fprintln(stderr, i18n.T("provider.cli.usage"))
@@ -165,4 +175,109 @@ func printProviderReport(w io.Writer, rep *conformance.Report) {
 		fmt.Fprintln(w, i18n.T("provider.cli.stderr_tail"))
 		fmt.Fprintln(w, strings.TrimSpace(rep.Stderr))
 	}
+}
+
+// loadInstalledProviders starts the installed provider plugins under the
+// same signature policy the REPL applies.
+func loadInstalledProviders(ctx context.Context, interactive bool) *providerhost.Set {
+	return providerhost.Load(ctx, cli.ProviderPluginLoadOptions(zap.NewNop(), interactive))
+}
+
+func runProviderList(ctx context.Context, stdout io.Writer) int {
+	set := loadInstalledProviders(ctx, false)
+	defer set.Close(ctx)
+	plugins, errs := set.List(), set.Errors()
+	if len(plugins) == 0 && len(errs) == 0 {
+		fmt.Fprintln(stdout, i18n.T("provider.cli.list.empty", providerhost.DefaultDir()))
+		return providerExitOK
+	}
+	for _, p := range plugins {
+		info := p.Info()
+		state := i18n.T("provider.plugin.status.no_login")
+		if p.RequiresLogin() {
+			if p.Available() {
+				state = i18n.T("provider.plugin.status.logged_in")
+			} else {
+				state = i18n.T("provider.plugin.status.logged_out")
+			}
+		}
+		fmt.Fprintf(stdout, "%-20s %s %s (%s) — %s\n", p.Name(), p.DisplayName(i18n.ActiveTag().String()), info.Provider.Version, info.Mode, state)
+	}
+	for _, e := range errs {
+		fmt.Fprintln(stdout, i18n.T("provider.cli.list.failed", e.Path, e.Err))
+	}
+	if len(errs) > 0 {
+		return providerExitFail
+	}
+	return providerExitOK
+}
+
+func runProviderLogin(ctx context.Context, args []string, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("provider login", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	inputs := inputFlags{}
+	fs.Var(inputs, "input", i18n.T("provider.cli.flag.input"))
+	// The name usually comes first (`login acme --input k=v`), and the flag
+	// package stops at the first positional: lift it out before parsing.
+	var name string
+	if len(args) > 0 && !strings.HasPrefix(args[0], "-") {
+		name, args = args[0], args[1:]
+	}
+	if err := fs.Parse(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return providerExitOK
+		}
+		return providerExitUsage
+	}
+	if name == "" && fs.NArg() == 1 {
+		name = fs.Arg(0)
+	} else if fs.NArg() != 0 {
+		name = ""
+	}
+	if name == "" {
+		fmt.Fprintln(stderr, i18n.T("provider.cli.login.usage"))
+		return providerExitUsage
+	}
+	interactive := term.IsTerminal(int(os.Stdin.Fd())) // #nosec G115 -- a file descriptor always fits in int
+	set := loadInstalledProviders(ctx, interactive)
+	defer set.Close(ctx)
+	p, ok := set.Get(name)
+	if !ok {
+		fmt.Fprintln(stderr, i18n.T("provider.cli.not_installed", name))
+		return providerExitFail
+	}
+	var ui providerhost.LoginUI
+	if interactive {
+		ui = cli.TerminalLoginUI()
+	}
+	account, err := p.Login(ctx, ui, inputs)
+	if err != nil {
+		fmt.Fprintln(stderr, i18n.T("auth.login.failed", err))
+		return providerExitFail
+	}
+	if account == "" {
+		account = p.Name()
+	}
+	fmt.Fprintln(stdout, i18n.T("auth.login.success", p.DisplayName(i18n.ActiveTag().String()), account))
+	return providerExitOK
+}
+
+func runProviderLogout(ctx context.Context, args []string, stdout, stderr io.Writer) int {
+	if len(args) != 1 {
+		fmt.Fprintln(stderr, i18n.T("provider.cli.logout.usage"))
+		return providerExitUsage
+	}
+	set := loadInstalledProviders(ctx, false)
+	defer set.Close(ctx)
+	p, ok := set.Get(args[0])
+	if !ok {
+		fmt.Fprintln(stderr, i18n.T("provider.cli.not_installed", args[0]))
+		return providerExitFail
+	}
+	if err := p.Logout(ctx); err != nil {
+		fmt.Fprintln(stderr, i18n.T("auth.logout.failed", err))
+		return providerExitFail
+	}
+	fmt.Fprintln(stdout, i18n.T("auth.logout.success"))
+	return providerExitOK
 }

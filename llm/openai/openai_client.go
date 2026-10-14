@@ -41,6 +41,53 @@ type OpenAIClient struct {
 	// lastRequest remembers the body of the last request for
 	// KeepPromptCacheWarm (keepalive.go).
 	lastRequest client.LastRequestKeeper
+
+	// chatURL overrides OPENAI_API_URL; catalogProvider overrides the
+	// catalog provider used for display names and max-tokens sizing. Both
+	// are empty for the built-in OPENAI provider (see ClientOptions).
+	chatURL         string
+	catalogProvider string
+}
+
+// ClientOptions points an OpenAIClient at an OpenAI-compatible endpoint other
+// than the one the environment configures — a provider plugin in dialect
+// mode, for instance. The zero value reproduces NewOpenAIClient.
+type ClientOptions struct {
+	// ChatURL is the full chat-completions URL; empty means OPENAI_API_URL.
+	ChatURL string
+	// WrapTransport wraps the network transport below the request logger,
+	// so headers it injects never appear in the HTTP log.
+	WrapTransport func(http.RoundTripper) http.RoundTripper
+	// CatalogProvider names the catalog provider for display names and
+	// max-tokens sizing (and its *_MAX_TOKENS override); empty means OPENAI.
+	CatalogProvider string
+}
+
+// NewOpenAIClientWithOptions is NewOpenAIClient with endpoint overrides.
+func NewOpenAIClientWithOptions(provider auth.TokenProvider, model string, logger *zap.Logger, maxAttempts int, backoff time.Duration, opts ClientOptions) *OpenAIClient {
+	c := NewOpenAIClient(provider, model, logger, maxAttempts, backoff)
+	c.chatURL = strings.TrimSpace(opts.ChatURL)
+	c.catalogProvider = strings.ToUpper(strings.TrimSpace(opts.CatalogProvider))
+	if opts.WrapTransport != nil {
+		c.client = utils.NewHTTPClientWithTransport(logger, 900*time.Second, opts.WrapTransport(utils.NewDefaultTransport()))
+	}
+	return c
+}
+
+// apiURL returns the chat-completions URL this client targets.
+func (c *OpenAIClient) apiURL() string {
+	if c.chatURL != "" {
+		return c.chatURL
+	}
+	return utils.GetEnvOrDefault("OPENAI_API_URL", config.OpenAIAPIURL)
+}
+
+// catalogName returns the catalog provider that sizes this client's models.
+func (c *OpenAIClient) catalogName() string {
+	if c.catalogProvider != "" {
+		return c.catalogProvider
+	}
+	return catalog.ProviderOpenAI
 }
 
 // LastUsage returns the token usage from the most recent API call.
@@ -65,10 +112,13 @@ func NewOpenAIClient(provider auth.TokenProvider, model string, logger *zap.Logg
 
 // GetModelName retorna o nome amigável do modelo OpenAI via catálogo.
 func (c *OpenAIClient) GetModelName() string {
-	return catalog.GetDisplayName(catalog.ProviderOpenAI, c.model)
+	return catalog.GetDisplayName(c.catalogName(), c.model)
 }
 
 func (c *OpenAIClient) getMaxTokens() int {
+	if c.catalogProvider != "" {
+		return catalog.GetMaxTokens(c.catalogProvider, c.model, catalog.MaxTokensEnvOverride(c.catalogProvider))
+	}
 	if tokenStr := os.Getenv("OPENAI_MAX_TOKENS"); tokenStr != "" {
 		if parsedTokens, err := strconv.Atoi(tokenStr); err == nil && parsedTokens > 0 {
 			c.logger.Debug("Usando OPENAI_MAX_TOKENS personalizado", zap.Int("max_tokens", parsedTokens))
@@ -182,7 +232,7 @@ func (c *OpenAIClient) SendPrompt(ctx context.Context, prompt string, history []
 
 // sendRequest envia a requisição para a API da OpenAI
 func (c *OpenAIClient) sendRequest(ctx context.Context, jsonValue []byte, token string) (*http.Response, error) {
-	apiURL := utils.GetEnvOrDefault("OPENAI_API_URL", config.OpenAIAPIURL)
+	apiURL := c.apiURL()
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, apiURL, utils.NewJSONReader(jsonValue))
 	if err != nil {
@@ -265,7 +315,7 @@ func keepModel(id string, custom bool) bool {
 // ListModels fetches available models from the OpenAI /v1/models endpoint.
 func (c *OpenAIClient) ListModels(ctx context.Context) ([]client.ModelInfo, error) {
 	// Derive base URL from the chat completions URL
-	apiURL := utils.GetEnvOrDefault("OPENAI_API_URL", config.OpenAIAPIURL)
+	apiURL := c.apiURL()
 	modelsURL := strings.TrimSuffix(apiURL, "/chat/completions") + "/models"
 
 	resp, err := auth.DoWithRefresh(ctx, c.provider, func(token string) (*http.Response, error) {
