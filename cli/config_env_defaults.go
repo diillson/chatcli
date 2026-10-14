@@ -239,9 +239,10 @@ var envDefaults = map[string]envDefault{
 	"CHATCLI_IMAGE_PROVIDER":      {Value: "auto", Source: "imagegen.NewFromEnv"},
 	"CHATCLI_IMAGE_API":           {Value: "images", Source: "imagegen (images|responses)"},
 	"CHATCLI_IMAGE_URL":           {Value: "(none)", Source: "imagegen self-hosted endpoint"},
+	"CHATCLI_IMAGE_URL_EDITS":     {Value: "true", IsBool: true, Source: "imagegen.selfHostedEdits (false = the CHATCLI_IMAGE_URL server only generates)"},
 	"CHATCLI_IMAGE_MODEL":         {Value: "gpt-image-2", Source: "imagegen.defaultImageModel"},
-	"CHATCLI_IMAGE_EDIT_PROVIDER": {Value: "(inherit)", Source: "imagegen edit fallback when active provider can't edit"},
-	"CHATCLI_IMAGE_EDIT_MODEL":    {Value: "(default)", Source: "imagegen edit fallback model"},
+	"CHATCLI_IMAGE_EDIT_PROVIDER": {Value: "(inherit)", Source: "imagegen.ResolveEditor (pinned edit backend when the active one can't edit; never implicit)"},
+	"CHATCLI_IMAGE_EDIT_MODEL":    {Value: "(default)", Source: "imagegen.ResolveEditor (model for the pinned edit backend)"},
 
 	// ─── Diagram rendering (@diagram) ────────────────────────────
 	"CHATCLI_DIAGRAM_BACKEND": {Value: "auto", Source: "plugins.configuredDiagramBackend: auto|system|embedded"},

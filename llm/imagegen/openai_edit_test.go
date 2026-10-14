@@ -49,6 +49,7 @@ func TestOpenAIEdit_PartContentType(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	p.edit = editMultipart // as cloudOrNull wires OpenAI
 	in := Image{Data: []byte("not-really-jpeg-but-mime-is-explicit"), Mime: "image/jpeg", Ext: "jpg"}
 	if _, err := p.Edit(context.Background(), "make it winter", []Image{in},
 		EditOptions{Mask: []byte("maskbytes")}); err != nil {

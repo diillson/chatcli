@@ -1,0 +1,6 @@
+{
+  "image.edit.unsupported": "@image: image backend %s does not edit images, so nothing was sent. Editing backends: openai (gpt-image-2), openai-responses, xai (grok-imagine), google (Gemini image), bedrock (SD3.5 Large, Stable Image Ultra), sdwebui (img2img), and a CHATCLI_IMAGE_URL server unless CHATCLI_IMAGE_URL_EDITS=false. Switch the image model, or set CHATCLI_IMAGE_EDIT_PROVIDER to edit on one of them.",
+  "image.edit.bedrock_model": "@image: Bedrock model %s does not edit images, so nothing was sent. On Bedrock, stability.sd3-5-large-v1:0 and stability.stable-image-ultra-v1:1 edit; pick one with /model-image, or set CHATCLI_IMAGE_EDIT_PROVIDER=bedrock with CHATCLI_IMAGE_EDIT_MODEL.",
+  "image.edit.pinned_unavailable": "@image: image backend %s does not edit images, and CHATCLI_IMAGE_EDIT_PROVIDER=%s cannot edit either (missing credentials, unknown name, or a generate-only model), so nothing was sent.",
+  "image.edit.pinned_routed": "ℹ  Image backend %q does not edit images; this edit ran on %q, as CHATCLI_IMAGE_EDIT_PROVIDER pins."
+}

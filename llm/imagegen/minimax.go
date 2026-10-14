@@ -65,6 +65,10 @@ func NewMiniMax(baseURL, apiKey, model string, logger *zap.Logger) (*MiniMax, er
 // Name returns "minimax".
 func (*MiniMax) Name() string { return "minimax" }
 
+// Model returns the MiniMax image model. MiniMax has no edit endpoint, so it
+// implements no Edit and AsEditor reports it generate-only.
+func (m *MiniMax) Model() string { return m.model }
+
 // Generate posts the prompt and decodes the base64 images MiniMax returns.
 func (m *MiniMax) Generate(ctx context.Context, prompt string, opts Options) ([]Image, error) {
 	if strings.TrimSpace(prompt) == "" {

@@ -17,6 +17,7 @@ package imagegen
 
 import (
 	"context"
+	"errors"
 	"fmt"
 )
 
@@ -54,7 +55,7 @@ type EditOptions struct {
 // Editor is an OPTIONAL capability: turn one or more input images plus a
 // prompt into edited output image(s). Backends that support image-to-image
 // (SD WebUI img2img, OpenAI /images/edits, etc.) implement it; callers
-// type-assert via AsEditor and degrade gracefully when it is absent.
+// type-assert via AsEditor and fail explicitly when it is absent.
 type Editor interface {
 	Provider
 	// Edit returns edited image(s) derived from inputs guided by prompt.
@@ -62,19 +63,24 @@ type Editor interface {
 }
 
 // editCapable lets a backend that structurally has an Edit method declare at
-// runtime whether the configured endpoint actually supports editing. The
-// OpenAI-compatible client implements Edit for all OpenAI-shaped providers, but
-// only some of them (OpenAI proper, self-hosted img2img servers) expose an
-// /images/edits endpoint — xAI/Z.AI generate only. A backend that does not
-// implement this interface is assumed editing-capable (e.g. SD WebUI img2img).
+// runtime whether the configured endpoint and model actually edit. Editing is
+// not one contract: OpenAI Images takes multipart, xAI takes JSON with a data
+// URI, Bedrock edits only with some Stability/Amazon models, Z.AI has no edit
+// endpoint at all. A backend that does not implement this interface is assumed
+// editing-capable (SD WebUI img2img, Google Gemini image).
 type editCapable interface {
 	supportsEdit() bool
 }
 
+// ErrEditUnsupported is returned by Edit on a backend/model that cannot edit,
+// so a caller that skipped AsEditor still fails explicitly instead of firing a
+// request the endpoint would reject.
+var ErrEditUnsupported = errors.New("imagegen: this image backend does not edit images")
+
 // AsEditor returns the Editor view of p when p supports editing. Beyond the
 // structural Edit method it honors editCapable, so a generation-only backend
-// (xAI, Z.AI) is reported as non-editing and the caller degrades cleanly
-// instead of firing a request the endpoint will reject.
+// or model (Z.AI, Bedrock Stable Image Core) is reported as non-editing and
+// the caller fails with a clear message instead of a doomed request.
 func AsEditor(p Provider) (Editor, bool) {
 	if IsNull(p) {
 		return nil, false
@@ -87,6 +93,20 @@ func AsEditor(p Provider) (Editor, bool) {
 		return nil, false
 	}
 	return e, true
+}
+
+// modelNamer is implemented by backends that run a specific model.
+type modelNamer interface {
+	Model() string
+}
+
+// ModelOf returns the model p runs, "" when the backend has no model notion
+// (SD WebUI runs whatever checkpoint the server loaded).
+func ModelOf(p Provider) string {
+	if m, ok := p.(modelNamer); ok {
+		return m.Model()
+	}
+	return ""
 }
 
 // IsNull reports whether p is the disabled (no-op) provider.

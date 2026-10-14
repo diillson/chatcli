@@ -56,6 +56,37 @@ func NewBedrock(ctx context.Context, region, profile, model string, logger *zap.
 // Name returns "bedrock".
 func (*Bedrock) Name() string { return "bedrock" }
 
+// Model returns the Bedrock image model id.
+func (b *Bedrock) Model() string { return b.model }
+
+// Bedrock edit families. Editing is a per-model capability on Bedrock: SD3.5
+// Large and Stable Image Ultra take an input image, Stable Image Core and the
+// other Stability models only generate.
+const (
+	bedrockEditNone   = ""
+	bedrockEditSD35   = "sd35"   // mode "image-to-image" + image + strength
+	bedrockEditUltra  = "ultra"  // image + strength (its mode enum is text-to-image only)
+	bedrockEditAmazon = "amazon" // IMAGE_VARIATION (Nova Canvas / Titan)
+)
+
+// bedrockEditFamily maps a model id (or a cross-region inference profile such
+// as "us.stability.sd3-5-large-v1:0") to its edit request family.
+func bedrockEditFamily(model string) string {
+	m := strings.ToLower(strings.TrimSpace(model))
+	switch {
+	case strings.Contains(m, "stability.sd3-5-large"):
+		return bedrockEditSD35
+	case strings.Contains(m, "stability.stable-image-ultra"):
+		return bedrockEditUltra
+	case strings.Contains(m, "amazon.nova-canvas"), strings.Contains(m, "amazon.titan-image"):
+		return bedrockEditAmazon
+	}
+	return bedrockEditNone
+}
+
+// supportsEdit reports whether the configured model edits images.
+func (b *Bedrock) supportsEdit() bool { return bedrockEditFamily(b.model) != bedrockEditNone }
+
 // Generate invokes the configured Bedrock image model (Stability text-to-image
 // or the legacy Amazon TEXT_IMAGE task, selected per model family).
 func (b *Bedrock) Generate(ctx context.Context, prompt string, opts Options) ([]Image, error) {
@@ -76,10 +107,13 @@ func (b *Bedrock) Generate(ctx context.Context, prompt string, opts Options) ([]
 	return parseBedrockImages(out.Body)
 }
 
-// Edit transforms an input image guided by prompt. Stability models use the
-// "image-to-image" mode; the Amazon models (Nova Canvas / Titan) use the
-// IMAGE_VARIATION task. Both return the shared {"images":["<b64>"]} shape.
+// Edit transforms an input image guided by prompt, in the request shape of
+// the configured model's family (see bedrockEditFamily). All of them return
+// the shared {"images":["<b64>"]} shape.
 func (b *Bedrock) Edit(ctx context.Context, prompt string, inputs []Image, opts EditOptions) ([]Image, error) {
+	if !b.supportsEdit() {
+		return nil, fmt.Errorf("%w (bedrock model %s)", ErrEditUnsupported, b.model)
+	}
 	if strings.TrimSpace(prompt) == "" {
 		return nil, fmt.Errorf("imagegen: empty prompt")
 	}
@@ -99,23 +133,28 @@ func (b *Bedrock) Edit(ctx context.Context, prompt string, inputs []Image, opts 
 	return parseBedrockImages(out.Body)
 }
 
-// buildBedrockEditRequest builds the image-to-image InvokeModel body per model
-// family. Stability: mode "image-to-image" with the base64 image + strength.
-// Amazon (Nova Canvas / Titan): IMAGE_VARIATION conditioned on the input image.
+// buildBedrockEditRequest builds the image-to-image InvokeModel body for the
+// model's edit family. SD3.5 Large: mode "image-to-image" with the base64
+// image + strength. Stable Image Ultra: image + strength without mode (its
+// mode enum only names text-to-image). Amazon (Nova Canvas / Titan):
+// IMAGE_VARIATION conditioned on the input image.
 func buildBedrockEditRequest(model, prompt string, img []byte, opts EditOptions) []byte {
 	b64 := base64.StdEncoding.EncodeToString(img)
-	if strings.HasPrefix(strings.ToLower(model), "stability.") {
+	if family := bedrockEditFamily(model); family == bedrockEditSD35 || family == bedrockEditUltra {
 		strength := opts.Strength
 		if strength <= 0 || strength > 1 {
 			strength = 0.6
 		}
-		body, _ := json.Marshal(map[string]interface{}{
+		req := map[string]interface{}{
 			"prompt":        prompt,
-			"mode":          "image-to-image",
 			"image":         b64,
 			"strength":      strength,
 			"output_format": "png",
-		})
+		}
+		if family == bedrockEditSD35 {
+			req["mode"] = "image-to-image"
+		}
+		body, _ := json.Marshal(req)
 		return body
 	}
 	// Amazon Nova Canvas / Titan IMAGE_VARIATION. similarityStrength (0.2–1.0):

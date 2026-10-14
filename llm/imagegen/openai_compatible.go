@@ -3,9 +3,10 @@
  * Copyright (c) 2024 Edilson Freitas
  * License: Apache-2.0
  *
- * POST {base}/images/generations with {model, prompt, n, size,
- * response_format:"b64_json"} returning base64 PNGs. Serves OpenAI and
- * compatible self-hosted servers (LocalAI, etc.).
+ * POST {base}/images/generations with {model, prompt, n, size} returning
+ * base64 PNGs or image URLs. Serves OpenAI and the OpenAI-shaped generators
+ * (xAI, Z.AI, self-hosted servers like LocalAI). Generation is one shape for
+ * all of them; editing is not, so each instance carries its own editShape.
  */
 package imagegen
 
@@ -38,22 +39,41 @@ const (
 	maxErrBody        = 300
 )
 
+// editShape is the /images/edits contract an OpenAI-shaped endpoint speaks.
+// The providers share the generation request but not the edit one, so the
+// factory sets it per provider rather than assuming OpenAI's.
+type editShape int
+
+const (
+	// editNone: the endpoint only generates (Z.AI, a self-hosted server
+	// declared generate-only). Edit fails with ErrEditUnsupported.
+	editNone editShape = iota
+	// editMultipart: OpenAI Images API — multipart/form-data with the image
+	// file part(s), plus servers that copy it (LocalAI and similar).
+	editMultipart
+	// editJSONImageURL: xAI — application/json with the input as
+	// image.url (a data URI or public URL), several inputs as images[];
+	// "size" is not accepted and the result comes back as a URL.
+	editJSONImageURL
+)
+
 // OpenAICompatible generates images against an OpenAI-shaped endpoint.
 type OpenAICompatible struct {
 	baseURL  string
 	apiKey   string
 	model    string
 	label    string
-	omitSize bool // some servers (xAI grok-image) reject the "size" field
-	omitN    bool // some servers (Z.AI CogView/GLM-Image) reject the "n" field
-	canEdit  bool // whether the endpoint exposes /images/edits (OpenAI, self-hosted) vs generate-only (xAI, Z.AI)
+	omitSize bool      // some servers (xAI grok-image) reject the "size" field
+	omitN    bool      // some servers (Z.AI CogView/GLM-Image) reject the "n" field
+	edit     editShape // the edit contract this endpoint speaks; editNone = generate-only
 	client   *http.Client
 }
 
-// supportsEdit reports whether this endpoint exposes image editing. Set by the
-// factory: true for OpenAI proper and self-hosted OpenAI-compatible servers,
-// false for generation-only providers (xAI Aurora/grok-image, Z.AI CogView).
-func (o *OpenAICompatible) supportsEdit() bool { return o.canEdit }
+// supportsEdit reports whether this endpoint edits images at all.
+func (o *OpenAICompatible) supportsEdit() bool { return o.edit != editNone }
+
+// Model returns the model this endpoint runs.
+func (o *OpenAICompatible) Model() string { return o.model }
 
 // NewOpenAICompatible builds the provider. baseURL is required; apiKey may be
 // empty for keyless self-hosted servers; model falls back to dall-e-3.
@@ -137,12 +157,12 @@ func (o *OpenAICompatible) Generate(ctx context.Context, prompt string, opts Opt
 	return o.decodeImageResponse(ctx, resp.Body)
 }
 
-// Edit posts the input image and prompt to the /images/edits endpoint as
-// multipart/form-data (required by OpenAI image edits). gpt-image-1 returns
-// b64_json; legacy shapes returning a URL are handled too. Only the first
-// input image is sent as the primary `image` (with any extra inputs appended
-// as image[] for models that accept multiple references).
+// Edit sends the input image(s) and prompt to {base}/images/edits in the
+// contract this endpoint speaks (see editShape).
 func (o *OpenAICompatible) Edit(ctx context.Context, prompt string, inputs []Image, opts EditOptions) ([]Image, error) {
+	if o.edit == editNone {
+		return nil, fmt.Errorf("%w (%s)", ErrEditUnsupported, o.label)
+	}
 	if strings.TrimSpace(prompt) == "" {
 		return nil, fmt.Errorf("imagegen: empty prompt")
 	}
@@ -153,14 +173,89 @@ func (o *OpenAICompatible) Edit(ctx context.Context, prompt string, inputs []Ima
 	if n <= 0 {
 		n = 1
 	}
+	var (
+		body        io.Reader
+		contentType string
+		err         error
+	)
+	if o.edit == editJSONImageURL {
+		body, contentType, err = o.jsonEditBody(prompt, inputs, opts, n)
+	} else {
+		body, contentType, err = o.multipartEditBody(prompt, inputs, opts, n)
+	}
+	if err != nil {
+		return nil, err
+	}
 
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, o.baseURL+imagesEditPath, body)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", contentType)
+	if o.apiKey != "" {
+		req.Header.Set("Authorization", "Bearer "+o.apiKey)
+	}
+	resp, err := o.client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("imagegen: request failed: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK {
+		snippet, _ := io.ReadAll(io.LimitReader(resp.Body, maxErrBody))
+		err := fmt.Errorf("imagegen: %s edit returned %d: %s", o.label, resp.StatusCode, strings.TrimSpace(string(snippet)))
+		if o.label == "selfhosted" && (resp.StatusCode == http.StatusNotFound || resp.StatusCode == http.StatusMethodNotAllowed) {
+			// Many OpenAI-compatible servers only generate.
+			err = fmt.Errorf("%w — this server has no /images/edits; set %s=false to declare it generate-only", err, envSelfHostedEdits)
+		}
+		return nil, err
+	}
+	return o.decodeImageResponse(ctx, resp.Body)
+}
+
+// jsonEditBody builds xAI's JSON edit request. One input rides as image, more
+// as images[]; each is a data URI so no public hosting is needed. size is
+// never sent (xAI rejects it); the response defaults to an image URL.
+func (o *OpenAICompatible) jsonEditBody(prompt string, inputs []Image, opts EditOptions, n int) (io.Reader, string, error) {
+	refs := make([]map[string]string, 0, len(inputs))
+	for _, in := range inputs {
+		if len(in.Data) == 0 {
+			continue
+		}
+		refs = append(refs, map[string]string{"url": dataURI(partContentType(in), in.Data), "type": "image_url"})
+	}
+	payload := map[string]interface{}{
+		"model":  o.model,
+		"prompt": prompt,
+	}
+	if len(refs) == 1 {
+		payload["image"] = refs[0]
+	} else {
+		payload["images"] = refs
+	}
+	if len(opts.Mask) > 0 {
+		payload["mask"] = map[string]string{"url": dataURI("image/png", opts.Mask)}
+	}
+	if n > 1 && !o.omitN {
+		payload["n"] = n
+	}
+	raw, err := json.Marshal(payload)
+	if err != nil {
+		return nil, "", err
+	}
+	return bytes.NewReader(raw), "application/json", nil
+}
+
+// multipartEditBody builds OpenAI's multipart/form-data edit request. Only
+// the first input is the primary image; extra inputs ride as image[] for
+// models that accept several references.
+func (o *OpenAICompatible) multipartEditBody(prompt string, inputs []Image, opts EditOptions, n int) (io.Reader, string, error) {
 	var buf bytes.Buffer
 	mw := multipart.NewWriter(&buf)
 	if err := mw.WriteField("model", o.model); err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	if err := mw.WriteField("prompt", prompt); err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	if !o.omitN {
 		_ = mw.WriteField("n", fmt.Sprintf("%d", n))
@@ -182,36 +277,19 @@ func (o *OpenAICompatible) Edit(ctx context.Context, prompt string, inputs []Ima
 		// /images/edits rejects ("unsupported mimetype"). Derive it from the
 		// image's MIME (sniffed at load time), falling back to the extension.
 		if err := writeImagePart(mw, field, imageFormName(in, i), partContentType(in), in.Data); err != nil {
-			return nil, err
+			return nil, "", err
 		}
 	}
 	if len(opts.Mask) > 0 {
 		if err := writeImagePart(mw, "mask", "mask.png", "image/png", opts.Mask); err != nil {
-			return nil, err
+			return nil, "", err
 		}
 	}
 	if err := mw.Close(); err != nil {
-		return nil, err
+		return nil, "", err
 	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, o.baseURL+imagesEditPath, &buf)
-	if err != nil {
-		return nil, err
-	}
-	req.Header.Set("Content-Type", mw.FormDataContentType())
-	if o.apiKey != "" {
-		req.Header.Set("Authorization", "Bearer "+o.apiKey)
-	}
-	resp, err := o.client.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("imagegen: request failed: %w", err)
-	}
-	defer func() { _ = resp.Body.Close() }()
-	if resp.StatusCode != http.StatusOK {
-		snippet, _ := io.ReadAll(io.LimitReader(resp.Body, maxErrBody))
-		return nil, fmt.Errorf("imagegen: %s edit returned %d: %s", o.label, resp.StatusCode, strings.TrimSpace(string(snippet)))
-	}
-	return o.decodeImageResponse(ctx, resp.Body)
+	return &buf, mw.FormDataContentType(), nil
 }
 
 // imageFormName returns a plausible multipart filename with the right
@@ -258,6 +336,11 @@ func writeImagePart(mw *multipart.Writer, field, filename, contentType string, d
 	return err
 }
 
+// dataURI inlines bytes as a base64 data URI.
+func dataURI(mime string, data []byte) string {
+	return "data:" + mime + ";base64," + base64.StdEncoding.EncodeToString(data)
+}
+
 // escapeQuotes mirrors the stdlib's multipart quoting for header values.
 func escapeQuotes(s string) string {
 	return strings.NewReplacer("\\", "\\\\", `"`, "\\\"").Replace(s)
@@ -279,27 +362,45 @@ func (o *OpenAICompatible) decodeImageResponse(ctx context.Context, body io.Read
 		return nil, fmt.Errorf("imagegen: %s returned no images", o.label)
 	}
 	images := make([]Image, 0, len(out.Data))
+	var firstErr error // why an entry was dropped, reported when none survive
 	for _, d := range out.Data {
 		if d.B64 != "" {
-			if raw, derr := base64.StdEncoding.DecodeString(d.B64); derr == nil && len(raw) > 0 {
+			raw, derr := base64.StdEncoding.DecodeString(d.B64)
+			if derr == nil && len(raw) > 0 {
 				images = append(images, Image{Data: raw, Mime: "image/png", Ext: "png"})
+			} else if firstErr == nil {
+				firstErr = dropReason("decode b64_json", derr)
 			}
 			continue
 		}
 		if d.URL != "" {
-			if raw, mime, derr := o.fetchURL(ctx, d.URL); derr == nil && len(raw) > 0 {
+			raw, mime, derr := o.fetchURL(ctx, d.URL)
+			if derr == nil && len(raw) > 0 {
 				ext := "png"
 				if strings.Contains(mime, "jpeg") {
 					ext = "jpg"
 				}
 				images = append(images, Image{Data: raw, Mime: mime, Ext: ext})
+			} else if firstErr == nil {
+				firstErr = dropReason("download result", derr)
 			}
 		}
 	}
 	if len(images) == 0 {
+		if firstErr != nil {
+			return nil, fmt.Errorf("imagegen: %s returned no decodable images: %w", o.label, firstErr)
+		}
 		return nil, fmt.Errorf("imagegen: %s returned no decodable images", o.label)
 	}
 	return images, nil
+}
+
+// dropReason explains why a result entry yielded no image.
+func dropReason(step string, err error) error {
+	if err != nil {
+		return fmt.Errorf("%s: %w", step, err)
+	}
+	return fmt.Errorf("%s: empty image", step)
 }
 
 // fetchURL downloads an image the API returned by URL (dall-e default shape).

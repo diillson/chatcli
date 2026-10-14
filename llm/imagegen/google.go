@@ -63,6 +63,9 @@ func NewGoogle(apiKey, model string, logger *zap.Logger) (*Google, error) {
 // Name returns "google".
 func (*Google) Name() string { return "google" }
 
+// Model returns the configured Google image model.
+func (g *Google) Model() string { return g.model }
+
 // isGeminiModel reports whether the configured model is a Gemini image model
 // (gen + edit via :generateContent) rather than an Imagen model (:predict).
 func isGeminiModel(model string) bool {

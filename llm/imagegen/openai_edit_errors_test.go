@@ -11,6 +11,7 @@ import (
 
 func TestOpenAIEdit_Errors(t *testing.T) {
 	p, _ := NewOpenAICompatible("https://api.openai.com/v1", "k", "gpt-image-1", "openai", zap.NewNop())
+	p.edit = editMultipart // as cloudOrNull wires OpenAI
 
 	if _, err := p.Edit(context.Background(), "", []Image{{Data: []byte("x"), Mime: "image/png"}}, EditOptions{}); err == nil {
 		t.Error("empty prompt should error")
@@ -27,6 +28,7 @@ func TestOpenAIEdit_Non200(t *testing.T) {
 	}))
 	defer srv.Close()
 	p, _ := NewOpenAICompatible(srv.URL, "k", "gpt-image-1", "openai", zap.NewNop())
+	p.edit = editMultipart // as cloudOrNull wires OpenAI
 	if _, err := p.Edit(context.Background(), "x",
 		[]Image{{Data: []byte("x"), Mime: "image/png", Ext: "png"}}, EditOptions{}); err == nil {
 		t.Error("non-200 response should error")
