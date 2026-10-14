@@ -74,7 +74,7 @@ func (*BuiltinImagePlugin) Name() string { return "@image" }
 
 // Description surfaces the tool.
 func (*BuiltinImagePlugin) Description() string {
-	return "Generate OR edit images using the configured backend (self-hosted Stable Diffusion WebUI, a compatible endpoint, or OpenAI) and save them to file. Use 'gen' when asked to 'generate an image of', 'create a picture', 'draw', 'make an illustration'; use 'edit' when asked to 'edit', 'modify', 'change', 'alter' an existing image (image-to-image / img2img)."
+	return "Generate OR edit images using the configured backend (OpenAI, xAI, Google, Bedrock, Z.AI, MiniMax, self-hosted Stable Diffusion WebUI or a compatible endpoint; edit runs on that same backend and fails clearly when it can't edit) and save them to file. Use 'gen' when asked to 'generate an image of', 'create a picture', 'draw', 'make an illustration'; use 'edit' when asked to 'edit', 'modify', 'change', 'alter' an existing image (image-to-image / img2img)."
 }
 
 // Usage explains the canonical invocation.
@@ -93,7 +93,7 @@ Subcommands (cmd + args):
        mask      optional path to a PNG mask for inpainting
        strength  optional 0..1 — how much to change the input (img2img)
        out       optional output file path or directory
-  status  show the effective image backend
+  status  show the effective image backend and whether it edits
   models  list image-capable models (catalog + your OpenAI account)`
 }
 
@@ -164,7 +164,14 @@ func (p *BuiltinImagePlugin) ExecuteWithStream(ctx context.Context, args []strin
 		if imagegen.IsNull(provider) {
 			return "@image: no image backend configured. Set CHATCLI_IMAGE_PROVIDER=sdwebui (self-hosted Stable Diffusion), CHATCLI_IMAGE_URL, or OPENAI_API_KEY.", nil
 		}
-		return "@image backend: " + provider.Name(), nil
+		status := "@image backend: " + provider.Name()
+		if m := imagegen.ModelOf(provider); m != "" {
+			status += " (model " + m + ")"
+		}
+		if _, edits := imagegen.AsEditor(provider); edits {
+			return status + " — generates and edits", nil
+		}
+		return status + " — generates only (edit needs CHATCLI_IMAGE_EDIT_PROVIDER)", nil
 	case "models":
 		return imageModelsList(ctx), nil
 	case "gen":
@@ -219,12 +226,13 @@ func (p *BuiltinImagePlugin) ExecuteWithStream(ctx context.Context, args []strin
 		if imagegen.IsNull(provider) {
 			return "", imagegen.ErrDisabled
 		}
-		// Editing inherits the configured backend (the one /model-image picks).
-		// Only if that backend can't edit does ResolveEditor route to an
-		// edit-capable fallback — reported below so the switch is explicit.
-		editor, used, fellBack, ok := imagegen.ResolveEditor(ctx, provider, nil)
+		// Editing uses the configured backend (the one /model-image picks), in
+		// that backend's own edit contract. A backend that can't edit fails
+		// here, before any request — unless CHATCLI_IMAGE_EDIT_PROVIDER pins
+		// another one, which is then named in the reply.
+		editor, used, routed, ok := imagegen.ResolveEditor(ctx, provider, nil)
 		if !ok {
-			return "", fmt.Errorf("@image: backend %q does not support image editing and no edit-capable fallback is configured. Editing backends: sdwebui (img2img, keyless), openai (gpt-image-2), google (Gemini image), bedrock (Stability/Nova). Set CHATCLI_IMAGE_EDIT_PROVIDER or switch the image provider. Generation-only: xai, zai, minimax", provider.Name())
+			return "", errors.New(editUnavailableMessage(imagegen.EditUnavailable(provider), provider))
 		}
 		inputs, err := loadInputImages(paths)
 		if err != nil {
@@ -246,14 +254,30 @@ func (p *BuiltinImagePlugin) ExecuteWithStream(ctx context.Context, args []strin
 		}
 		RecordGeneratedImages(outPaths...)
 		msg := i18n.T("image.tool.edited", len(outPaths), used, strings.Join(outPaths, "\n  "))
-		if fellBack {
-			// Configured backend can't edit; we routed to one that can.
-			msg = i18n.T("image.edit.routed", provider.Name(), used) + "\n" + msg
+		if routed {
+			// The configured backend can't edit; the pinned edit backend did.
+			msg = i18n.T("image.edit.pinned_routed", provider.Name(), used) + "\n" + msg
 		}
 		return msg, nil
 	default:
 		return "", fmt.Errorf("@image: unknown cmd %q (valid: gen|edit|status|models)", cmd)
 	}
+}
+
+// editUnavailableMessage explains, in the user's language, why the edit did
+// not run and how to make it run.
+func editUnavailableMessage(ue *imagegen.EditUnavailableError, provider imagegen.Provider) string {
+	backend := ue.Backend
+	if ue.Model != "" {
+		backend = fmt.Sprintf("%s (%s)", ue.Backend, ue.Model)
+	}
+	if ue.Pinned != "" {
+		return i18n.T("image.edit.pinned_unavailable", backend, ue.Pinned)
+	}
+	if provider.Name() == "bedrock" {
+		return i18n.T("image.edit.bedrock_model", backend)
+	}
+	return i18n.T("image.edit.unsupported", backend)
 }
 
 // loadInputImages reads the given file paths into imagegen.Image values,

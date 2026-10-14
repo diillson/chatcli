@@ -30,6 +30,7 @@ package imagegen
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"strconv"
 	"strings"
@@ -37,9 +38,14 @@ import (
 	"go.uber.org/zap"
 )
 
-const (
+// Cloud endpoints. Variables so tests can point a backend at a local server
+// and prove which account a request reached.
+var (
 	openAIBaseURL = "https://api.openai.com/v1"
 	xaiBaseURL    = "https://api.x.ai/v1"
+)
+
+const (
 	// defaultXAIModel is xAI's current image model. grok-2-image was retired
 	// (404s now); grok-imagine-image-2.0 is the newest Grok Imagine generator
 	// and the one xAI's docs recommend (OpenAI-shaped /images/generations,
@@ -153,12 +159,43 @@ func NewFromEnvContext(ctx context.Context, logger *zap.Logger) Provider {
 	return NewNull()
 }
 
-// ResolveEditor returns an edit-capable provider for image editing. It first
-// honors the CONFIGURED backend (the one /model-image / CHATCLI_IMAGE_* selects)
-// so a single model choice serves both generation and editing. Only when that
-// backend cannot edit (xAI, Z.AI, MiniMax) does it route to an
-// edit-capable fallback, reporting the backend actually used so the caller can
-// tell the user a switch happened. Returns ok=false when no editor is reachable.
+// envEditProvider names the backend that edits when the active one cannot.
+// It is the only way an edit reaches a backend other than the active one.
+const envEditProvider = "CHATCLI_IMAGE_EDIT_PROVIDER"
+
+// EditUnavailableError says why no editor serves an @image edit: the active
+// backend (or its model) does not edit, and either no edit backend is pinned
+// or the pinned one cannot edit either.
+type EditUnavailableError struct {
+	Backend string // active backend name
+	Model   string // active model, "" when the backend has none
+	Pinned  string // CHATCLI_IMAGE_EDIT_PROVIDER value, "" when unset
+}
+
+func (e *EditUnavailableError) Error() string {
+	msg := fmt.Sprintf("imagegen: backend %q", e.Backend)
+	if e.Model != "" {
+		msg += fmt.Sprintf(" (model %q)", e.Model)
+	}
+	msg += " does not edit images"
+	if e.Pinned != "" {
+		msg += fmt.Sprintf(", and %s=%q cannot edit either (missing credentials, unknown name, or a generate-only model)", envEditProvider, e.Pinned)
+	}
+	return msg
+}
+
+// Unwrap lets callers match ErrEditUnsupported.
+func (e *EditUnavailableError) Unwrap() error { return ErrEditUnsupported }
+
+// ResolveEditor returns the editor for an image edit. The active backend (the
+// one /model-image / CHATCLI_IMAGE_* selects) edits whenever it can, in its
+// own contract. When it cannot, the edit goes elsewhere ONLY if the user
+// pinned a backend with CHATCLI_IMAGE_EDIT_PROVIDER — fellBack is then true
+// so the caller says so. It never falls through to whichever other account
+// happens to have a key: that charged a different account than the one
+// configured (and failed there when it had no credit) while the active
+// backend could have edited or should have said it can't. When ok is false,
+// EditUnavailable(primary) explains why.
 func ResolveEditor(ctx context.Context, primary Provider, logger *zap.Logger) (ed Editor, used string, fellBack bool, ok bool) {
 	if logger == nil {
 		logger = zap.NewNop()
@@ -166,49 +203,36 @@ func ResolveEditor(ctx context.Context, primary Provider, logger *zap.Logger) (e
 	if e, isEd := AsEditor(primary); isEd {
 		return e, primary.Name(), false, true
 	}
-	if fb, name := editorFallback(ctx, logger); fb != nil {
-		return fb, name, true, true
+	pinned := pinnedEditProvider()
+	if pinned == "" {
+		return nil, "", false, false
 	}
-	return nil, "", false, false
+	p := buildEditProvider(ctx, pinned, strings.TrimSpace(os.Getenv("CHATCLI_IMAGE_EDIT_MODEL")), logger)
+	if p == nil {
+		return nil, "", false, false
+	}
+	e, isEd := AsEditor(p)
+	if !isEd {
+		return nil, "", false, false
+	}
+	return e, p.Name(), true, true
 }
 
-// editorFallback picks an edit-capable backend when the configured one can't
-// edit. Order: explicit CHATCLI_IMAGE_EDIT_PROVIDER → self-hosted SD WebUI (if a
-// URL is configured, keyless) → OpenAI → Google → Bedrock, each gated on its
-// credential being present so it never routes to a backend that can't run.
-func editorFallback(ctx context.Context, logger *zap.Logger) (Editor, string) {
-	if ep := strings.ToLower(strings.TrimSpace(os.Getenv("CHATCLI_IMAGE_EDIT_PROVIDER"))); ep != "" {
-		if p := buildEditProvider(ctx, ep, strings.TrimSpace(os.Getenv("CHATCLI_IMAGE_EDIT_MODEL")), logger); p != nil {
-			if e, ok := AsEditor(p); ok {
-				return e, p.Name()
-			}
-		}
-	}
-	if url := strings.TrimSpace(os.Getenv("CHATCLI_IMAGE_URL")); url != "" {
-		if e, ok := AsEditor(sdOrNull(url, logger)); ok {
-			return e, "sdwebui"
-		}
-	}
-	if strings.TrimSpace(os.Getenv("OPENAI_API_KEY")) != "" {
-		if e, ok := AsEditor(cloudOrNull(openAIBaseURL, os.Getenv("OPENAI_API_KEY"), defaultImageModel, "openai", logger, "")); ok {
-			return e, "openai"
-		}
-	}
-	if googleImageKey() != "" {
-		if e, ok := AsEditor(googleOrNull(defaultGeminiImageModel, logger, "")); ok {
-			return e, "google"
-		}
-	}
-	if bedrockImageRegion() != "" {
-		if e, ok := AsEditor(bedrockOrNull(ctx, "", logger)); ok {
-			return e, "bedrock"
-		}
-	}
-	return nil, ""
+// EditUnavailable describes why ResolveEditor found no editor for primary:
+// the backend and model that do not edit, and the pinned edit backend that
+// could not stand in, if any.
+func EditUnavailable(primary Provider) *EditUnavailableError {
+	return &EditUnavailableError{Backend: primary.Name(), Model: ModelOf(primary), Pinned: pinnedEditProvider()}
+}
+
+// pinnedEditProvider is the CHATCLI_IMAGE_EDIT_PROVIDER value, normalized.
+func pinnedEditProvider() string {
+	return strings.ToLower(strings.TrimSpace(os.Getenv(envEditProvider)))
 }
 
 // buildEditProvider builds a specific backend by name for the explicit
-// CHATCLI_IMAGE_EDIT_PROVIDER override.
+// CHATCLI_IMAGE_EDIT_PROVIDER pin. An empty model takes each backend's own
+// default; a backend whose credential is missing yields Null (not an editor).
 func buildEditProvider(ctx context.Context, name, model string, logger *zap.Logger) Provider {
 	switch name {
 	case "sdwebui", "automatic1111", "sd":
@@ -221,12 +245,20 @@ func buildEditProvider(ctx context.Context, name, model string, logger *zap.Logg
 			m = defaultImageModel
 		}
 		return cloudOrNull(openAIBaseURL, os.Getenv("OPENAI_API_KEY"), m, "openai", logger, "")
+	case "responses", "openai-responses":
+		return responsesOrNull(model, logger, "")
 	case "google", "gemini", "imagen":
 		m := model
 		if m == "" {
 			m = defaultGeminiImageModel
 		}
 		return googleOrNull(m, logger, "")
+	case "xai", "grok":
+		return xaiOrNull(model, logger, "")
+	case "zai", "zhipu", "glm", "cogview", "glm-image":
+		return zaiOrNull(model, logger, "")
+	case "minimax", "hailuo":
+		return minimaxOrNull(model, logger, "")
 	case "bedrock", "aws":
 		return bedrockOrNull(ctx, model, logger)
 	}
@@ -269,8 +301,9 @@ func responsesOrNull(model string, logger *zap.Logger, missingMsg string) Provid
 	return p
 }
 
-// xaiOrNull builds the xAI grok-image backend (OpenAI-shaped, but the size
-// field is omitted because xAI rejects it).
+// xaiOrNull builds the xAI grok-image backend (OpenAI-shaped generation, but
+// the size field is omitted because xAI rejects it). It edits through xAI's
+// own JSON /images/edits contract, not OpenAI's multipart one.
 func xaiOrNull(model string, logger *zap.Logger, missingMsg string) Provider {
 	key := strings.TrimSpace(os.Getenv("XAI_API_KEY"))
 	if key == "" {
@@ -289,13 +322,16 @@ func xaiOrNull(model string, logger *zap.Logger, missingMsg string) Provider {
 		return NewNull()
 	}
 	p.omitSize = true
+	p.edit = editJSONImageURL
 	return p
 }
 
 // zaiOrNull builds the Z.AI (Zhipu) image backend — CogView-4 / GLM-Image.
 // They speak the OpenAI /images/generations shape, so the shared client serves
 // them, but they return image URLs (downloaded automatically) and reject the
-// "n" field. Reuses the same ZAI_API_KEY as the Z.AI chat provider.
+// "n" field. Reuses the same ZAI_API_KEY as the Z.AI chat provider. Z.AI has
+// no image edit endpoint, so the backend is generate-only (edit stays
+// editNone) and an edit fails with a message saying so.
 func zaiOrNull(model string, logger *zap.Logger, missingMsg string) Provider {
 	key := strings.TrimSpace(os.Getenv("ZAI_API_KEY"))
 	if key == "" {
@@ -374,10 +410,28 @@ func selfHostedOrNull(url, model string, logger *zap.Logger) Provider {
 		logger.Warn("imagegen: invalid CHATCLI_IMAGE_URL; image generation disabled", zap.Error(err))
 		return NewNull()
 	}
-	// A self-hosted OpenAI-compatible server (LocalAI, etc.) generally exposes
-	// /images/edits; enable editing and let the endpoint reject if it doesn't.
-	p.canEdit = true
+	// An OpenAI-compatible server may or may not copy /images/edits (LocalAI
+	// and similar often only generate). Editing is on by default, in OpenAI's
+	// multipart shape; CHATCLI_IMAGE_URL_EDITS=false declares the server
+	// generate-only so an edit fails up front with a clear message.
+	if selfHostedEdits() {
+		p.edit = editMultipart
+	}
 	return p
+}
+
+// envSelfHostedEdits declares whether the CHATCLI_IMAGE_URL server edits.
+const envSelfHostedEdits = "CHATCLI_IMAGE_URL_EDITS"
+
+// selfHostedEdits reports whether the self-hosted endpoint edits: true unless
+// CHATCLI_IMAGE_URL_EDITS is a false value.
+func selfHostedEdits() bool {
+	v := strings.TrimSpace(os.Getenv(envSelfHostedEdits))
+	if v == "" {
+		return true
+	}
+	on, err := strconv.ParseBool(v)
+	return err != nil || on
 }
 
 // providerFromModel infers the image provider/backend from a model id so `auto`
@@ -432,8 +486,10 @@ func cloudOrNull(baseURL, key, model, label string, logger *zap.Logger, missingM
 		logger.Warn("imagegen: provider init failed; image generation disabled", zap.Error(err))
 		return NewNull()
 	}
-	// OpenAI proper exposes /images/edits (gpt-image-1). Other cloud labels
+	// OpenAI proper exposes /images/edits (multipart). Other cloud labels
 	// routed through this helper are generation-only.
-	p.canEdit = label == "openai"
+	if label == "openai" {
+		p.edit = editMultipart
+	}
 	return p
 }

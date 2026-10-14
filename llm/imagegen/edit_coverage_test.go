@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -121,7 +122,7 @@ func TestPartContentType(t *testing.T) {
 }
 
 // genOnly is a Provider with no Edit method (generation-only), used to drive
-// ResolveEditor's fallback path.
+// ResolveEditor when the active backend can't edit.
 type genOnly struct{}
 
 func (genOnly) Name() string { return "genonly" }
@@ -130,39 +131,57 @@ func (genOnly) Generate(context.Context, string, Options) ([]Image, error) {
 }
 
 func TestResolveEditor_PrimaryEdits(t *testing.T) {
-	// OpenAI proper is edit-capable, so it is returned as-is (no fallback).
-	p, _ := NewOpenAICompatible("https://api.openai.com/v1", "k", "gpt-image-1", "openai", zap.NewNop())
-	p.canEdit = true
-	ed, used, fellBack, ok := ResolveEditor(context.Background(), p, zap.NewNop())
-	if !ok || ed == nil || fellBack || used != "openai" {
-		t.Fatalf("expected primary editor openai, got used=%q fellBack=%v ok=%v", used, fellBack, ok)
+	// OpenAI proper is edit-capable, so it is returned as-is (no routing).
+	p := cloudOrNull("https://api.openai.com/v1", "k", "gpt-image-2", "openai", zap.NewNop(), "")
+	ed, used, routed, ok := ResolveEditor(context.Background(), p, zap.NewNop())
+	if !ok || ed == nil || routed || used != "openai" {
+		t.Fatalf("expected primary editor openai, got used=%q routed=%v ok=%v", used, routed, ok)
 	}
 }
 
-func TestResolveEditor_FallsBack(t *testing.T) {
-	// A generation-only primary routes to an explicit edit provider.
+func TestResolveEditor_RoutesOnlyToThePinnedBackend(t *testing.T) {
 	t.Setenv("CHATCLI_IMAGE_EDIT_PROVIDER", "sdwebui")
 	t.Setenv("CHATCLI_IMAGE_URL", "http://localhost:7860")
-	ed, used, fellBack, ok := ResolveEditor(context.Background(), genOnly{}, zap.NewNop())
-	if !ok || ed == nil || !fellBack || used != "sdwebui" {
-		t.Fatalf("expected fallback to sdwebui, got used=%q fellBack=%v ok=%v", used, fellBack, ok)
+	ed, used, routed, ok := ResolveEditor(context.Background(), genOnly{}, zap.NewNop())
+	if !ok || ed == nil || !routed || used != "sdwebui" {
+		t.Fatalf("expected pinned sdwebui, got used=%q routed=%v ok=%v", used, routed, ok)
 	}
 }
 
-func TestResolveEditor_NoEditorAvailable(t *testing.T) {
-	// Generation-only primary and no credentials/URL for any editor → ok=false.
+// Credentials for other editing backends must not pull an edit away from
+// the active backend: without a pin, a backend that can't edit is an error.
+func TestResolveEditor_NeverRoutesImplicitly(t *testing.T) {
 	t.Setenv("CHATCLI_IMAGE_EDIT_PROVIDER", "")
-	t.Setenv("CHATCLI_IMAGE_URL", "")
+	t.Setenv("CHATCLI_IMAGE_URL", "http://localhost:7860")
+	t.Setenv("OPENAI_API_KEY", "k")
+	t.Setenv("GEMINI_API_KEY", "k")
+	t.Setenv("AWS_REGION", "us-east-1")
+	if _, _, _, ok := ResolveEditor(context.Background(), genOnly{}, zap.NewNop()); ok {
+		t.Fatal("a backend that can't edit must not resolve without a pin")
+	}
+	ue := EditUnavailable(genOnly{})
+	if ue.Backend != "genonly" || ue.Pinned != "" {
+		t.Fatalf("EditUnavailable = %+v", ue)
+	}
+	if !errors.Is(ue, ErrEditUnsupported) {
+		t.Error("EditUnavailableError must match ErrEditUnsupported")
+	}
+}
+
+func TestResolveEditor_PinnedBackendThatCannotEdit(t *testing.T) {
+	t.Setenv("CHATCLI_IMAGE_EDIT_PROVIDER", "zai")
+	t.Setenv("ZAI_API_KEY", "k")
+	if _, _, _, ok := ResolveEditor(context.Background(), genOnly{}, zap.NewNop()); ok {
+		t.Fatal("a pin that can't edit must not resolve")
+	}
+	if ue := EditUnavailable(genOnly{}); ue.Pinned != "zai" || !strings.Contains(ue.Error(), "zai") {
+		t.Fatalf("EditUnavailable must name the pin, got %+v", ue)
+	}
+
+	t.Setenv("CHATCLI_IMAGE_EDIT_PROVIDER", "openai")
 	t.Setenv("OPENAI_API_KEY", "")
-	t.Setenv("GOOGLEAI_API_KEY", "")
-	t.Setenv("GEMINI_API_KEY", "")
-	t.Setenv("GOOGLE_API_KEY", "")
-	t.Setenv("BEDROCK_REGION", "")
-	t.Setenv("AWS_REGION", "")
-	t.Setenv("AWS_DEFAULT_REGION", "")
-	_, _, _, ok := ResolveEditor(context.Background(), genOnly{}, zap.NewNop())
-	if ok {
-		t.Error("expected ok=false when no editor is reachable")
+	if _, _, _, ok := ResolveEditor(context.Background(), genOnly{}, zap.NewNop()); ok {
+		t.Fatal("a pin without credentials must not resolve")
 	}
 }
 
@@ -176,6 +195,12 @@ func TestBuildEditProvider_OpenAIAndGoogle(t *testing.T) {
 	t.Setenv("GEMINI_API_KEY", "k")
 	if p := buildEditProvider(context.Background(), "google", "", zap.NewNop()); p == nil {
 		t.Error("google edit provider should build with a key")
+	}
+	t.Setenv("XAI_API_KEY", "k")
+	if p := buildEditProvider(context.Background(), "xai", "", zap.NewNop()); p == nil {
+		t.Error("xai edit provider should build with a key")
+	} else if _, ok := AsEditor(p); !ok {
+		t.Error("xai built provider should be an editor")
 	}
 	if p := buildEditProvider(context.Background(), "bogus", "", zap.NewNop()); p != nil {
 		t.Error("unknown provider name should return nil")

@@ -13,6 +13,10 @@
  * The response's output array contains an "image_generation_call" item whose
  * "result" is a base64 PNG. This backend covers that path so users can pick
  * either API.
+ *
+ * Editing is NOT the Images API's /images/edits: the input image rides in the
+ * same /responses call as an input_image content part and the tool is told
+ * action:"edit", so the model edits that image instead of drawing a new one.
  */
 package imagegen
 
@@ -71,6 +75,9 @@ func NewOpenAIResponses(baseURL, apiKey, model string, logger *zap.Logger) (*Ope
 // Name returns "openai-responses".
 func (*OpenAIResponses) Name() string { return "openai-responses" }
 
+// Model returns the chat/reasoning model driving the image tool.
+func (o *OpenAIResponses) Model() string { return o.model }
+
 // Generate asks the model to produce an image via the image_generation tool.
 func (o *OpenAIResponses) Generate(ctx context.Context, prompt string, opts Options) ([]Image, error) {
 	if strings.TrimSpace(prompt) == "" {
@@ -80,9 +87,45 @@ func (o *OpenAIResponses) Generate(ctx context.Context, prompt string, opts Opti
 	if strings.TrimSpace(opts.Size) != "" {
 		tool["size"] = opts.Size
 	}
+	return o.call(ctx, prompt, tool)
+}
+
+// Edit sends the input image(s) as input_image parts next to the instruction
+// and forces the tool's edit action. A mask applies to the first image.
+func (o *OpenAIResponses) Edit(ctx context.Context, prompt string, inputs []Image, opts EditOptions) ([]Image, error) {
+	if strings.TrimSpace(prompt) == "" {
+		return nil, fmt.Errorf("imagegen: empty prompt")
+	}
+	if len(inputs) == 0 || len(inputs[0].Data) == 0 {
+		return nil, fmt.Errorf("imagegen: edit requires an input image")
+	}
+	content := []map[string]interface{}{{"type": "input_text", "text": prompt}}
+	for _, in := range inputs {
+		if len(in.Data) == 0 {
+			continue
+		}
+		content = append(content, map[string]interface{}{
+			"type":      "input_image",
+			"image_url": dataURI(partContentType(in), in.Data),
+		})
+	}
+	tool := map[string]interface{}{"type": "image_generation", "action": "edit"}
+	if strings.TrimSpace(opts.Size) != "" {
+		tool["size"] = opts.Size
+	}
+	if len(opts.Mask) > 0 {
+		tool["input_image_mask"] = map[string]string{"image_url": dataURI("image/png", opts.Mask)}
+	}
+	input := []map[string]interface{}{{"role": "user", "content": content}}
+	return o.call(ctx, input, tool)
+}
+
+// call posts one /responses request with the image_generation tool and
+// decodes the image_generation_call results.
+func (o *OpenAIResponses) call(ctx context.Context, input interface{}, tool map[string]interface{}) ([]Image, error) {
 	body, _ := json.Marshal(map[string]interface{}{
 		"model": o.model,
-		"input": prompt,
+		"input": input,
 		"tools": []map[string]interface{}{tool},
 	})
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, o.baseURL+responsesPath, bytes.NewReader(body))

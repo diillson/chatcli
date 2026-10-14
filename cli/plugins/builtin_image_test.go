@@ -144,3 +144,51 @@ func TestImage_SchemaAndMeta(t *testing.T) {
 		t.Fatal("empty description")
 	}
 }
+
+// An edit on a backend that can't edit fails with a message naming it, and
+// never reaches another account whose key happens to be set (the edit used
+// to fall through to OpenAI and die there on a 429).
+func TestImage_EditOnGenerateOnlyBackendFailsClearly(t *testing.T) {
+	for _, k := range []string{"CHATCLI_IMAGE_URL", "CHATCLI_IMAGE_MODEL", "CHATCLI_IMAGE_API", "CHATCLI_IMAGE_EDIT_PROVIDER", "CHATCLI_IMAGE_EDIT_MODEL"} {
+		t.Setenv(k, "")
+	}
+	t.Setenv("CHATCLI_IMAGE_PROVIDER", "zai")
+	t.Setenv("ZAI_API_KEY", "zai-key")
+	t.Setenv("OPENAI_API_KEY", "openai-key")
+	img := filepath.Join(t.TempDir(), "in.png")
+	if err := os.WriteFile(img, []byte("\x89PNG\r\n\x1a\n0000000000000000"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	p := NewBuiltinImagePlugin()
+	_, err := p.Execute(context.Background(), []string{`{"cmd":"edit","args":{"prompt":"winter","image":"` + filepath.ToSlash(img) + `"}}`})
+	if err == nil {
+		t.Fatal("an edit on Z.AI must fail")
+	}
+	if !strings.Contains(err.Error(), "image.edit.unsupported") && !strings.Contains(err.Error(), "does not edit images") {
+		t.Fatalf("error should be the localized edit-unsupported message, got %q", err)
+	}
+	if !strings.Contains(err.Error(), "zai") {
+		t.Fatalf("error should name the active backend, got %q", err)
+	}
+}
+
+func TestImage_StatusSaysWhetherTheBackendEdits(t *testing.T) {
+	t.Setenv("CHATCLI_IMAGE_URL", "")
+	t.Setenv("CHATCLI_IMAGE_MODEL", "")
+	t.Setenv("CHATCLI_IMAGE_PROVIDER", "zai")
+	t.Setenv("ZAI_API_KEY", "zai-key")
+	out, err := NewBuiltinImagePlugin().Execute(context.Background(), []string{`{"cmd":"status"}`})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, "zai") || !strings.Contains(out, "generates only") {
+		t.Fatalf("status = %q, want zai reported as generate-only", out)
+	}
+	t.Setenv("CHATCLI_IMAGE_PROVIDER", "xai")
+	t.Setenv("XAI_API_KEY", "xai-key")
+	out, _ = NewBuiltinImagePlugin().Execute(context.Background(), []string{`{"cmd":"status"}`})
+	if !strings.Contains(out, "xai") || !strings.Contains(out, "generates and edits") {
+		t.Fatalf("status = %q, want xai reported as editing", out)
+	}
+}

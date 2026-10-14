@@ -7,29 +7,27 @@ import (
 )
 
 // TestAsEditor_GatesGenerationOnlyBackends proves the editing capability is
-// gated per-endpoint: OpenAI and self-hosted expose edits; xAI/Z.AI (which
-// share the OpenAI-compatible client but have no /images/edits) are reported
-// as non-editing so @image edit degrades cleanly instead of firing a doomed
-// request. SD WebUI (img2img) stays editable.
+// declared per backend, as the factory builds them: OpenAI and self-hosted
+// edit in OpenAI's multipart shape, xAI edits in its own JSON shape, and Z.AI
+// (no edit endpoint) is reported as non-editing so @image edit fails clearly
+// instead of firing a doomed request. SD WebUI (img2img) stays editable.
 func TestAsEditor_GatesGenerationOnlyBackends(t *testing.T) {
-	mk := func(label string, canEdit bool) *OpenAICompatible {
-		p, err := NewOpenAICompatible("https://x.example", "k", "m", label, zap.NewNop())
-		if err != nil {
-			t.Fatal(err)
-		}
-		p.canEdit = canEdit
-		return p
-	}
+	t.Setenv("OPENAI_API_KEY", "k")
+	t.Setenv("XAI_API_KEY", "k")
+	t.Setenv("ZAI_API_KEY", "k")
+	t.Setenv("CHATCLI_IMAGE_URL_EDITS", "")
+	log := zap.NewNop()
 
 	cases := []struct {
 		name   string
 		p      Provider
 		wantOK bool
 	}{
-		{"openai", mk("openai", true), true},
-		{"selfhosted", mk("selfhosted", true), true},
-		{"xai", mk("xai", false), false},
-		{"zai", mk("zai", false), false},
+		{"openai", cloudOrNull(openAIBaseURL, "k", "", "openai", log, ""), true},
+		{"selfhosted", selfHostedOrNull("http://localhost:8080/v1", "", log), true},
+		{"xai", xaiOrNull("", log, ""), true},
+		{"zai", zaiOrNull("", log, ""), false},
+		{"minimax", minimaxOrNull("", log, ""), false},
 	}
 	for _, c := range cases {
 		if _, ok := AsEditor(c.p); ok != c.wantOK {
