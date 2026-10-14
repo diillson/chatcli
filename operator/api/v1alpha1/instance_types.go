@@ -15,7 +15,8 @@ type InstanceSpec struct {
 	// +optional
 	Replicas *int32 `json:"replicas,omitempty"`
 
-	// Provider is the LLM provider (OPENAI, OPENAI_ASSISTANT, CLAUDEAI, BEDROCK, GOOGLEAI, XAI, ZAI, MINIMAX, MOONSHOT, STACKSPOT, OLLAMA, COPILOT, OPENROUTER, DEVIN).
+	// Provider is the LLM provider (OPENAI, OPENAI_ASSISTANT, CLAUDEAI, BEDROCK, GOOGLEAI, XAI, ZAI, MINIMAX, MOONSHOT, STACKSPOT, OLLAMA, COPILOT, OPENROUTER, DEVIN),
+	// or the name of a provider plugin delivered through spec.plugins.
 	// BEDROCK uses the AWS credentials chain (IAM role via IRSA, static keys in the Secret, or instance profile).
 	Provider string `json:"provider"`
 
@@ -583,13 +584,21 @@ type AgentProvisionSpec struct {
 
 // PluginProvisionSpec configures plugin provisioning for the instance.
 type PluginProvisionSpec struct {
-	// Image is an init container image containing plugin binaries in /plugins/.
+	// Image is an init container image containing tool plugin binaries in
+	// /plugins/ and provider plugin binaries in /providers/, each with its
+	// detached .sig.
 	// +optional
 	Image string `json:"image,omitempty"`
 
 	// PVCName references a PVC with pre-installed plugin binaries.
 	// +optional
 	PVCName string `json:"pvcName,omitempty"`
+
+	// TrustedKeysConfigMap names a ConfigMap of publisher public keys
+	// (<name>.pub entries) mounted as the managed trusted-keys directory,
+	// so signed plugins verify without unsigned mode.
+	// +optional
+	TrustedKeysConfigMap string `json:"trustedKeysConfigMap,omitempty"`
 }
 
 // FallbackSpec configures automatic provider failover.
@@ -627,8 +636,9 @@ type FallbackSpec struct {
 
 // FallbackProviderEntry defines a single provider in the fallback chain.
 type FallbackProviderEntry struct {
-	// Name is the provider name (OPENAI, OPENAI_ASSISTANT, CLAUDEAI, BEDROCK, GOOGLEAI, XAI, ZAI, MINIMAX, MOONSHOT, STACKSPOT, OLLAMA, COPILOT, OPENROUTER, DEVIN).
-	// +kubebuilder:validation:Enum=OPENAI;OPENAI_ASSISTANT;CLAUDEAI;BEDROCK;GOOGLEAI;XAI;ZAI;MINIMAX;MOONSHOT;STACKSPOT;OLLAMA;COPILOT;OPENROUTER;DEVIN
+	// Name is the provider name (OPENAI, OPENAI_ASSISTANT, CLAUDEAI, BEDROCK, GOOGLEAI, XAI, ZAI, MINIMAX, MOONSHOT, STACKSPOT, OLLAMA, COPILOT, OPENROUTER, DEVIN),
+	// or the name of a provider plugin delivered through spec.plugins.
+	// +kubebuilder:validation:Pattern=`^[A-Z][A-Z0-9_]{1,31}$`
 	Name string `json:"name"`
 
 	// Model is the LLM model to use for this provider.

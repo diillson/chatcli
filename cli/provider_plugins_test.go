@@ -177,3 +177,48 @@ func TestTerminalLoginPromptReadsFields(t *testing.T) {
 		t.Fatalf("answers = %v", got)
 	}
 }
+
+// The server loads plugins without a terminal and shares the set with the
+// ChatCLI it embeds (the colocated gateway), which must neither start the
+// plugins again nor stop them on shutdown.
+func TestProviderPluginsHeadlessAndShared(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	t.Setenv("CHATCLI_ALLOW_UNSIGNED_PLUGINS", "true")
+	dir := filepath.Join(home, ".chatcli", "providers")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	name := "echo-provider"
+	if runtime.GOOS == "windows" {
+		name += ".exe"
+	}
+	out, err := exec.Command("go", "build", "-o", filepath.Join(dir, name),
+		"github.com/diillson/chatcli/pkg/providersdk/examples/echo").CombinedOutput()
+	if err != nil {
+		t.Fatalf("build echo: %v\n%s", err, out)
+	}
+
+	ctx := context.Background()
+	mgr := &registrarManager{registered: map[string]func(string) (client.LLMClient, error){}}
+	set := LoadProviderPlugins(ctx, mgr, zap.NewNop())
+	t.Cleanup(func() { set.Close(ctx) })
+	p, ok := set.Get("ECHO")
+	if !ok {
+		t.Fatalf("echo not loaded headless: %v", set.Errors())
+	}
+	if mgr.has("ECHO") {
+		t.Fatal("a plugin that requires login was registered without a credential")
+	}
+
+	embedded := &ChatCLI{logger: zap.NewNop(), manager: mgr}
+	embedded.loadProviderPlugins(WithProviderPlugins(ctx, set))
+	if embedded.providerPlugins != set || !embedded.providerPluginsShared {
+		t.Fatal("the embedded ChatCLI must use the shared set")
+	}
+	embedded.closeProviderPlugins(ctx)
+	if _, err := p.Models(ctx); err != nil {
+		t.Fatalf("closing the embedded ChatCLI stopped the shared plugin: %v", err)
+	}
+}

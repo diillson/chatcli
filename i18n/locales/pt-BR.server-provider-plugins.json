@@ -1,0 +1,4 @@
+{
+  "cmd.server.provider_plugin_loaded": "Plugin de provider carregado",
+  "cmd.server.provider_plugin_failed": "Plugin de provider não carregado"
+}

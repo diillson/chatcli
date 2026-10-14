@@ -173,7 +173,7 @@ tls:
 
 | Parameter | Description | Default |
 |-----------|-------------|---------|
-| `llm.provider` | Default provider: `OPENAI`, `OPENAI_ASSISTANT`, `CLAUDEAI`, `BEDROCK`, `GOOGLEAI`, `XAI`, `ZAI`, `MINIMAX`, `MOONSHOT`, `STACKSPOT`, `OLLAMA`, `COPILOT`, `OPENROUTER` (empty = first provider with credentials). `DEVIN` is a local-CLI transport and is not available in the server image | `""` |
+| `llm.provider` | Default provider: `OPENAI`, `OPENAI_ASSISTANT`, `CLAUDEAI`, `BEDROCK`, `GOOGLEAI`, `XAI`, `ZAI`, `MINIMAX`, `MOONSHOT`, `STACKSPOT`, `OLLAMA`, `COPILOT`, `OPENROUTER` (empty = first provider with credentials), or the name of a provider plugin delivered with `plugins.initImage`. `DEVIN` is a local-CLI transport and is not available in the server image | `""` |
 | `llm.model` | Default model | `""` |
 | `secrets.existingSecret` | Use an existing Secret (loaded with `envFrom`) instead of creating one | `""` |
 | `secrets.openaiApiKey` | `OPENAI_API_KEY` | `""` |
@@ -311,8 +311,9 @@ watcher:
 | `skillRegistry.registryDisable` | Comma-separated registries to disable | `""` |
 | `skillRegistry.installDir` | Skill install directory override | `""` |
 | `plugins.enabled` | Mount a plugins directory at `~/.chatcli/plugins` | `false` |
-| `plugins.initImage` | Init container image whose `/plugins/*` is copied into the plugins directory | `""` |
+| `plugins.initImage` | Init container image whose `/plugins/*` (tool plugins) and `/providers/*` (provider plugins) are copied into the plugin directories | `""` |
 | `plugins.existingPVC` | Existing PVC with pre-installed plugins (instead of an emptyDir) | `""` |
+| `plugins.trustedKeysConfigMap` | ConfigMap of publisher public keys (`<name>.pub`), mounted at `/etc/chatcli/trusted-keys` so signed plugins verify | `""` |
 
 `agents`, `skills` and `bootstrap` mount a ConfigMap only when there is one: inline `definitions` (rendered as `<fullname>-agents`, `-skills`, `-bootstrap`) or an `existingConfigMap`. Enabled with neither, nothing is mounted and the server finds no files in that directory (earlier charts mounted a ConfigMap that did not exist, and the pod stayed in `ContainerCreating`).
 

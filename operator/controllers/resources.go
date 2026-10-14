@@ -558,10 +558,26 @@ func (r *InstanceReconciler) buildInstanceVolumes(instance *platformv1alpha1.Ins
 			}
 			volumes = append(volumes, pluginsVolume)
 
+			// Provider plugins come from /providers/ in the same image.
+			volumeMounts = append(volumeMounts, corev1.VolumeMount{
+				Name:      "providers",
+				MountPath: "/home/chatcli/.chatcli/providers",
+			})
+			volumes = append(volumes, corev1.Volume{
+				Name: "providers",
+				VolumeSource: corev1.VolumeSource{
+					EmptyDir: &corev1.EmptyDirVolumeSource{
+						SizeLimit: resourceQuantity("500Mi"),
+					},
+				},
+			})
+
 			initContainers = append(initContainers, corev1.Container{
-				Name:    "plugin-loader",
-				Image:   instance.Spec.Plugins.Image,
-				Command: []string{"sh", "-c", "cp -a /plugins/* /target-plugins/ 2>/dev/null || true"},
+				Name:  "plugin-loader",
+				Image: instance.Spec.Plugins.Image,
+				Command: []string{"sh", "-c",
+					"cp -a /plugins/* /target-plugins/ 2>/dev/null || true; " +
+						"cp -a /providers/* /target-providers/ 2>/dev/null || true"},
 				// Same restricted context as the server container: the copy
 				// only writes to the emptyDir, and a pod whose init container
 				// lacks it is rejected under the restricted Pod Security
@@ -572,6 +588,28 @@ func (r *InstanceReconciler) buildInstanceVolumes(instance *platformv1alpha1.Ins
 						Name:      "plugins",
 						MountPath: "/target-plugins",
 					},
+					{
+						Name:      "providers",
+						MountPath: "/target-providers",
+					},
+				},
+			})
+		}
+
+		// Publisher keys become the managed trusted-keys directory, which
+		// every plugin load (tool and provider) trusts.
+		if cm := instance.Spec.Plugins.TrustedKeysConfigMap; cm != "" {
+			volumeMounts = append(volumeMounts, corev1.VolumeMount{
+				Name:      "trusted-keys",
+				MountPath: managedTrustedKeysDir,
+				ReadOnly:  true,
+			})
+			volumes = append(volumes, corev1.Volume{
+				Name: "trusted-keys",
+				VolumeSource: corev1.VolumeSource{
+					ConfigMap: &corev1.ConfigMapVolumeSource{
+						LocalObjectReference: corev1.LocalObjectReference{Name: cm},
+					},
 				},
 			})
 		}
@@ -579,6 +617,10 @@ func (r *InstanceReconciler) buildInstanceVolumes(instance *platformv1alpha1.Ins
 
 	return volumeMounts, volumes, initContainers
 }
+
+// managedTrustedKeysDir is where chatcli reads administrator-managed
+// publisher keys on Linux (next to /etc/chatcli/managed.env).
+const managedTrustedKeysDir = "/etc/chatcli/trusted-keys"
 
 func (r *InstanceReconciler) buildContainerArgs(instance *platformv1alpha1.Instance) []string {
 	var args []string

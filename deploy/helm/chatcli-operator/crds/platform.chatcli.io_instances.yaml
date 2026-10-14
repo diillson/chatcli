@@ -344,24 +344,10 @@ spec:
                           description: Model is the LLM model to use for this provider.
                           type: string
                         name:
-                          description: Name is the provider name (OPENAI, OPENAI_ASSISTANT,
-                            CLAUDEAI, BEDROCK, GOOGLEAI, XAI, ZAI, MINIMAX, MOONSHOT,
-                            STACKSPOT, OLLAMA, COPILOT, OPENROUTER, DEVIN).
-                          enum:
-                          - OPENAI
-                          - OPENAI_ASSISTANT
-                          - CLAUDEAI
-                          - BEDROCK
-                          - GOOGLEAI
-                          - XAI
-                          - ZAI
-                          - MINIMAX
-                          - MOONSHOT
-                          - STACKSPOT
-                          - OLLAMA
-                          - COPILOT
-                          - OPENROUTER
-                          - DEVIN
+                          description: |-
+                            Name is the provider name (OPENAI, OPENAI_ASSISTANT, CLAUDEAI, BEDROCK, GOOGLEAI, XAI, ZAI, MINIMAX, MOONSHOT, STACKSPOT, OLLAMA, COPILOT, OPENROUTER, DEVIN),
+                            or the name of a provider plugin delivered through spec.plugins.
+                          pattern: ^[A-Z][A-Z0-9_]{1,31}$
                           type: string
                       required:
                       - name
@@ -599,17 +585,26 @@ spec:
                 description: Plugins configures plugin provisioning for the instance.
                 properties:
                   image:
-                    description: Image is an init container image containing plugin
-                      binaries in /plugins/.
+                    description: |-
+                      Image is an init container image containing tool plugin binaries in
+                      /plugins/ and provider plugin binaries in /providers/, each with its
+                      detached .sig.
                     type: string
                   pvcName:
                     description: PVCName references a PVC with pre-installed plugin
                       binaries.
                     type: string
+                  trustedKeysConfigMap:
+                    description: |-
+                      TrustedKeysConfigMap names a ConfigMap of publisher public keys
+                      (<name>.pub entries) mounted as the managed trusted-keys directory,
+                      so signed plugins verify without unsigned mode.
+                    type: string
                 type: object
               provider:
                 description: |-
-                  Provider is the LLM provider (OPENAI, OPENAI_ASSISTANT, CLAUDEAI, BEDROCK, GOOGLEAI, XAI, ZAI, MINIMAX, MOONSHOT, STACKSPOT, OLLAMA, COPILOT, OPENROUTER, DEVIN).
+                  Provider is the LLM provider (OPENAI, OPENAI_ASSISTANT, CLAUDEAI, BEDROCK, GOOGLEAI, XAI, ZAI, MINIMAX, MOONSHOT, STACKSPOT, OLLAMA, COPILOT, OPENROUTER, DEVIN),
+                  or the name of a provider plugin delivered through spec.plugins.
                   BEDROCK uses the AWS credentials chain (IAM role via IRSA, static keys in the Secret, or instance profile).
                 type: string
               replicas:

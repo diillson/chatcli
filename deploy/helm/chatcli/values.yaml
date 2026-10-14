@@ -608,8 +608,13 @@ skillRegistry:
 # Plugin provisioning (remote resource discovery)
 plugins:
   enabled: false
-  # Init container image containing plugin binaries in /plugins/
-  # The init container copies binaries to the chatcli plugins directory
+  # Init container image containing tool plugin binaries in /plugins/ and
+  # provider plugin binaries in /providers/, each with its detached .sig.
+  # The init container copies them to the chatcli plugin directories.
   initImage: ""
   # Or reference an existing PVC with pre-installed plugin binaries
   existingPVC: ""
+  # ConfigMap of publisher public keys (<name>.pub entries), mounted as the
+  # managed trusted-keys directory (/etc/chatcli/trusted-keys) so signed
+  # plugins verify without allowUnsignedPlugins.
+  trustedKeysConfigMap: ""

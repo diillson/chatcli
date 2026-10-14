@@ -23,6 +23,7 @@ import (
 	"github.com/diillson/chatcli/k8s"
 	"github.com/diillson/chatcli/llm/fallback"
 	"github.com/diillson/chatcli/llm/manager"
+	"github.com/diillson/chatcli/llm/providerhost"
 	"github.com/diillson/chatcli/metrics"
 	"github.com/diillson/chatcli/pkg/persona"
 	"github.com/diillson/chatcli/server"
@@ -121,6 +122,13 @@ func startServer(opts *ServerOptions, llmMgr manager.LLMManager, logger *zap.Log
 		return err
 	}
 
+	// Provider plugins register before the provider is resolved, so
+	// --provider / LLM_PROVIDER (and the fallback chain) can name one.
+	providerPlugins := cli.LoadProviderPlugins(context.Background(), llmMgr, logger)
+	defer providerPlugins.Close(context.Background())
+	pluginCtx := cli.WithProviderPlugins(context.Background(), providerPlugins)
+	logProviderPlugins(providerPlugins, logger)
+
 	// Resolve provider if not set
 	if opts.Provider == "" {
 		available := llmMgr.GetAvailableProviders()
@@ -128,6 +136,8 @@ func startServer(opts *ServerOptions, llmMgr manager.LLMManager, logger *zap.Log
 			opts.Provider = available[0]
 		}
 	}
+
+	applyProviderPluginDefaultModel(pluginCtx, providerPlugins, opts)
 
 	// Resolve model name from the client if possible
 	if opts.Model == "" && opts.Provider != "" {
@@ -293,7 +303,7 @@ func startServer(opts *ServerOptions, llmMgr manager.LLMManager, logger *zap.Log
 
 	// Co-locate the messaging gateway in this process when requested, sharing
 	// the server's hub broker for real-time cross-channel push.
-	if stopGW := startColocatedGateway(llmMgr, srv, logger); stopGW != nil {
+	if stopGW := startColocatedGateway(pluginCtx, llmMgr, srv, logger); stopGW != nil {
 		defer stopGW()
 	}
 
@@ -310,8 +320,38 @@ func startServer(opts *ServerOptions, llmMgr manager.LLMManager, logger *zap.Log
 // when CHATCLI_GATEWAY_IN_SERVER=true, sharing the server's in-memory hub
 // broker so a Telegram/Slack message pushes to a connected notebook CLI in real
 // time (cross-process deployments only sync on connect/resync). It returns a
+// logProviderPlugins reports which provider plugins loaded, whether each
+// has the credential it needs, and why any failed.
+func logProviderPlugins(set *providerhost.Set, logger *zap.Logger) {
+	for _, p := range set.List() {
+		logger.Info(i18n.T("cmd.server.provider_plugin_loaded"),
+			zap.String("provider", p.Name()), zap.Bool("available", p.Available()))
+	}
+	for _, e := range set.Errors() {
+		logger.Warn(i18n.T("cmd.server.provider_plugin_failed"), zap.Error(e))
+	}
+}
+
+// applyProviderPluginDefaultModel sets opts.Model, when empty, to the first
+// model the provider lists if the provider is a usable plugin — a plugin
+// has no catalog default.
+func applyProviderPluginDefaultModel(ctx context.Context, set *providerhost.Set, opts *ServerOptions) {
+	if opts.Model != "" || opts.Provider == "" {
+		return
+	}
+	p, ok := set.Get(opts.Provider)
+	if !ok || !p.Available() {
+		return
+	}
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	if models, err := p.Models(ctx); err == nil && len(models) > 0 {
+		opts.Model = models[0].ID
+	}
+}
+
 // stop function to defer, or nil when co-location is disabled or unavailable.
-func startColocatedGateway(llmMgr manager.LLMManager, srv *server.Server, logger *zap.Logger) func() {
+func startColocatedGateway(ctx context.Context, llmMgr manager.LLMManager, srv *server.Server, logger *zap.Logger) func() {
 	if !strings.EqualFold(os.Getenv("CHATCLI_GATEWAY_IN_SERVER"), "true") {
 		return nil
 	}
@@ -320,13 +360,13 @@ func startColocatedGateway(llmMgr manager.LLMManager, srv *server.Server, logger
 		logger.Warn(i18n.T("cmd.server.gateway_hub_disabled"))
 		return nil
 	}
-	gwCLI, err := cli.NewChatCLI(context.Background(), llmMgr, logger)
+	gwCLI, err := cli.NewChatCLI(ctx, llmMgr, logger)
 	if err != nil {
 		logger.Warn(i18n.T("cmd.server.gateway_init_failed"), zap.Error(err))
 		return nil
 	}
 	gwCLI.SetAuditSurface("gateway")
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(ctx)
 	go func() {
 		if err := gwCLI.RunGatewayWithBroker(ctx, broker); err != nil && ctx.Err() == nil {
 			logger.Error(i18n.T("cmd.server.gateway_stopped"), zap.Error(err))

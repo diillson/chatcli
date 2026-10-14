@@ -1,0 +1,4 @@
+{
+  "cmd.server.provider_plugin_loaded": "Provider plugin loaded",
+  "cmd.server.provider_plugin_failed": "Provider plugin not loaded"
+}
