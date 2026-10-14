@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.216.2](https://github.com/diillson/chatcli/compare/v1.216.1...v1.216.2) (2026-10-14)
+
+
+### Bug Fixes
+
+* **imagegen:** edit on the active backend in its own contract, never on another account ([#1786](https://github.com/diillson/chatcli/issues/1786)) ([e24b2d2](https://github.com/diillson/chatcli/commit/e24b2d2b84a8fcafbd0085106ab8ea3cd5a2d34f))
+
 ## [1.216.1](https://github.com/diillson/chatcli/compare/v1.216.0...v1.216.1) (2026-10-14)
 
 
