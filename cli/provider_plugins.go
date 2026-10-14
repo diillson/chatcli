@@ -65,12 +65,38 @@ func ProviderPluginLoadOptions(logger *zap.Logger, interactive bool) providerhos
 	}
 }
 
+// sharedProviderPluginsKey carries a plugin set loaded by the process that
+// embeds a ChatCLI (the server), so the embedded instance uses it instead
+// of starting every plugin a second time.
+type sharedProviderPluginsKey struct{}
+
+// WithProviderPlugins returns a context whose ChatCLI instances use set
+// instead of loading their own; the caller keeps ownership and closes it.
+func WithProviderPlugins(ctx context.Context, set *providerhost.Set) context.Context {
+	return context.WithValue(ctx, sharedProviderPluginsKey{}, set)
+}
+
+// LoadProviderPlugins starts the installed provider plugins without a
+// terminal and registers the available ones with mgr. It is how processes
+// other than the REPL (the server) get plugins: credentials come from the
+// credential store or from the plugin's declared environment variables,
+// never from a prompt. The caller closes the set.
+func LoadProviderPlugins(ctx context.Context, mgr manager.LLMManager, logger *zap.Logger) *providerhost.Set {
+	set := providerhost.Load(ctx, ProviderPluginLoadOptions(logger, false))
+	registerProviderPluginSet(ctx, mgr, set, logger)
+	return set
+}
+
 // loadProviderPlugins starts the installed provider plugins and registers
 // the available ones with the manager. It runs before the initial provider
 // is chosen, so LLM_PROVIDER can name a plugin.
 func (cli *ChatCLI) loadProviderPlugins(ctx context.Context) {
-	interactive := term.IsTerminal(int(os.Stdin.Fd())) // #nosec G115 -- a file descriptor always fits in int
-	cli.providerPlugins = providerhost.Load(ctx, ProviderPluginLoadOptions(cli.logger, interactive))
+	if set, ok := ctx.Value(sharedProviderPluginsKey{}).(*providerhost.Set); ok && set != nil {
+		cli.providerPlugins, cli.providerPluginsShared = set, true
+	} else {
+		interactive := term.IsTerminal(int(os.Stdin.Fd())) // #nosec G115 -- a file descriptor always fits in int
+		cli.providerPlugins = providerhost.Load(ctx, ProviderPluginLoadOptions(cli.logger, interactive))
+	}
 	cli.registerProviderPlugins(ctx)
 }
 
@@ -78,17 +104,24 @@ func (cli *ChatCLI) loadProviderPlugins(ctx context.Context) {
 // current manager. Call it again after the manager is rebuilt (reload,
 // project .env) — a new manager starts with built-ins only.
 func (cli *ChatCLI) registerProviderPlugins(ctx context.Context) {
-	reg, ok := cli.manager.(manager.ProviderRegistrar)
-	if !ok || cli.providerPlugins == nil {
+	registerProviderPluginSet(ctx, cli.manager, cli.providerPlugins, cli.logger)
+}
+
+// registerProviderPluginSet registers set's available plugins with mgr and
+// unregisters the rest; a manager without runtime registration is left
+// alone.
+func registerProviderPluginSet(ctx context.Context, mgr manager.LLMManager, set *providerhost.Set, logger *zap.Logger) {
+	reg, ok := mgr.(manager.ProviderRegistrar)
+	if !ok || set == nil {
 		return
 	}
-	for _, p := range cli.providerPlugins.List() {
+	for _, p := range set.List() {
 		if !p.Available() {
 			reg.UnregisterProvider(p.Name())
 			continue
 		}
 		reg.RegisterProvider(p.Name(), p.NewClient)
-		go cli.refreshProviderPluginModels(ctx, p)
+		go refreshProviderPluginModels(ctx, p, logger)
 	}
 }
 
@@ -96,11 +129,11 @@ func (cli *ChatCLI) registerProviderPlugins(ctx context.Context) {
 // model list (window, output cap, price) in the background. It is detached
 // from ctx's cancellation: the command that triggered it usually returns
 // first.
-func (cli *ChatCLI) refreshProviderPluginModels(ctx context.Context, p *providerhost.Plugin) {
+func refreshProviderPluginModels(ctx context.Context, p *providerhost.Plugin, logger *zap.Logger) {
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), providerModelsRefreshTimeout)
 	defer cancel()
 	if _, err := p.Models(ctx); err != nil {
-		cli.logger.Debug("provider plugin model refresh failed", zap.String("provider", p.Name()), zap.Error(err))
+		logger.Debug("provider plugin model refresh failed", zap.String("provider", p.Name()), zap.Error(err))
 	}
 }
 
@@ -113,9 +146,10 @@ func (cli *ChatCLI) backgroundCtx() context.Context {
 	return context.Background()
 }
 
-// closeProviderPlugins stops every plugin process.
+// closeProviderPlugins stops every plugin process this instance started; a
+// shared set belongs to the process that loaded it.
 func (cli *ChatCLI) closeProviderPlugins(ctx context.Context) {
-	if cli.providerPlugins != nil {
+	if cli.providerPlugins != nil && !cli.providerPluginsShared {
 		cli.providerPlugins.Close(ctx)
 	}
 }

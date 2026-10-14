@@ -329,6 +329,42 @@ func TestBuildPodSpecPluginInitContainer(t *testing.T) {
 	}
 }
 
+// Provider plugins ride in the same image (/providers/) and publisher keys
+// come from a ConfigMap mounted as the managed trusted-keys directory.
+func TestBuildPodSpecProviderPluginsAndTrustedKeys(t *testing.T) {
+	r := &InstanceReconciler{}
+	instance := &platformv1alpha1.Instance{
+		ObjectMeta: metav1.ObjectMeta{Name: "demo"},
+		Spec: platformv1alpha1.InstanceSpec{
+			Plugins: &platformv1alpha1.PluginProvisionSpec{Image: "ghcr.io/x/plugins:v1", TrustedKeysConfigMap: "publisher-keys"},
+		},
+	}
+	spec := r.buildPodSpec(instance)
+	mounts := map[string]corev1.VolumeMount{}
+	for _, m := range spec.Containers[0].VolumeMounts {
+		mounts[m.Name] = m
+	}
+	if m := mounts["providers"]; m.MountPath != "/home/chatcli/.chatcli/providers" {
+		t.Fatalf("providers mount = %+v", m)
+	}
+	if m := mounts["trusted-keys"]; m.MountPath != "/etc/chatcli/trusted-keys" || !m.ReadOnly {
+		t.Fatalf("trusted-keys mount = %+v", m)
+	}
+	init := spec.InitContainers[0]
+	if !strings.Contains(strings.Join(init.Command, " "), "/providers/* /target-providers/") {
+		t.Fatalf("plugin-loader does not copy provider plugins: %v", init.Command)
+	}
+	var cm string
+	for _, v := range spec.Volumes {
+		if v.Name == "trusted-keys" && v.ConfigMap != nil {
+			cm = v.ConfigMap.Name
+		}
+	}
+	if cm != "publisher-keys" {
+		t.Fatalf("trusted-keys volume ConfigMap = %q", cm)
+	}
+}
+
 // --- blast_radius: checkQuota (the SA4004 loop→head-take rewrite) ---
 
 func TestCheckQuotaUsesFirstQuotaAndWarnsNearLimit(t *testing.T) {

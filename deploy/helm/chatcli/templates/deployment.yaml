@@ -57,10 +57,12 @@ spec:
           securityContext:
             {{- toYaml . | nindent 12 }}
           {{- end }}
-          command: ["sh", "-c", "cp -a /plugins/* /target-plugins/ 2>/dev/null || true"]
+          command: ["sh", "-c", "cp -a /plugins/* /target-plugins/ 2>/dev/null || true; cp -a /providers/* /target-providers/ 2>/dev/null || true"]
           volumeMounts:
             - name: plugins
               mountPath: /target-plugins
+            - name: providers
+              mountPath: /target-providers
       {{- end }}
       containers:
         - name: {{ .Chart.Name }}
@@ -303,6 +305,12 @@ spec:
           {{- end }}
           {{- if .Values.plugins.enabled }}
           {{- $mounts = append $mounts (dict "name" "plugins" "mountPath" "/home/chatcli/.chatcli/plugins") }}
+          {{- if .Values.plugins.initImage }}
+          {{- $mounts = append $mounts (dict "name" "providers" "mountPath" "/home/chatcli/.chatcli/providers") }}
+          {{- end }}
+          {{- end }}
+          {{- if .Values.plugins.trustedKeysConfigMap }}
+          {{- $mounts = append $mounts (dict "name" "trusted-keys" "mountPath" "/etc/chatcli/trusted-keys" "readOnly" true) }}
           {{- end }}
           {{- if include "chatcli.mcpConfigEnabled" . }}
           {{- $mounts = append $mounts (dict "name" "mcp-config" "mountPath" "/etc/chatcli/mcp" "readOnly" true) }}
@@ -400,6 +408,16 @@ spec:
           emptyDir:
             sizeLimit: 500Mi
           {{- end }}
+        {{- if .Values.plugins.initImage }}
+        - name: providers
+          emptyDir:
+            sizeLimit: 500Mi
+        {{- end }}
+        {{- end }}
+        {{- with .Values.plugins.trustedKeysConfigMap }}
+        - name: trusted-keys
+          configMap:
+            name: {{ . }}
         {{- end }}
         {{- if include "chatcli.mcpConfigEnabled" . }}
         - name: mcp-config

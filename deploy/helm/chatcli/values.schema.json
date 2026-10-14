@@ -157,23 +157,8 @@
       "properties": {
         "provider": {
           "type": "string",
-          "enum": [
-            "",
-            "OPENAI",
-            "OPENAI_ASSISTANT",
-            "CLAUDEAI",
-            "BEDROCK",
-            "GOOGLEAI",
-            "XAI",
-            "ZAI",
-            "MINIMAX",
-            "MOONSHOT",
-            "STACKSPOT",
-            "OLLAMA",
-            "COPILOT",
-            "OPENROUTER"
-          ],
-          "description": "LLM provider to use."
+          "pattern": "^([A-Z][A-Z0-9_]{1,31})?$",
+          "description": "LLM provider to use: a built-in (OPENAI, CLAUDEAI, GOOGLEAI, ...) or a provider plugin name."
         },
         "model": {
           "type": "string",
@@ -1146,6 +1131,10 @@
         "existingPVC": {
           "type": "string",
           "description": "Name of an existing PersistentVolumeClaim for plugin storage."
+        },
+        "trustedKeysConfigMap": {
+          "type": "string",
+          "description": "ConfigMap of publisher public keys mounted as the managed trusted-keys directory."
         }
       }
     },

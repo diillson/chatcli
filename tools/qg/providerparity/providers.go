@@ -268,10 +268,14 @@ func DefaultTouchPoints() []TouchPoint {
 			Pattern:     "{Upper}",
 		},
 		{
+			// Provider fields are pattern-validated so provider plugin names
+			// pass; TestCRDProviderPatternAdmitsEveryProvider proves every
+			// built-in matches the pattern, and this point keeps each one
+			// documented in the generated field description.
 			ID:          "operator.crd.yaml",
-			Description: "operator CRD YAML enum lists {Upper}",
+			Description: "operator CRD YAML documents {Upper}",
 			Path:        "operator/config/crd/bases/platform.chatcli.io_instances.yaml",
-			Pattern:     "- {Upper}",
+			Pattern:     "{Upper}",
 		},
 		{
 			ID:          "operator.cost",

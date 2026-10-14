@@ -237,31 +237,34 @@ type ChatCLI struct {
 	// NewChatCLI and refreshed by Start. Interactive slash-command handlers
 	// that have no per-request context of their own (e.g. /nextchunk) derive
 	// their LLM-call deadline from it instead of context.Background().
-	sessionCtx          context.Context
-	isExecuting         atomic.Bool
-	processingDone      chan struct{}
-	messageQueue        []string   // FIFO queue of user messages typed during processing
-	messageQueueMu      sync.Mutex // protects messageQueue
-	prefixSpinnerIdx    int32      // atomic counter for animated prefix spinner
-	sessionManager      *SessionManager
-	currentSessionName  string
-	boundSessionSync    time.Time // store mtime of the active named session as of our last load/save (cross-surface refresh watermark)
-	boundRemoteOnly     bool      // active named session lives only on the remote server (user's explicit choice): local write-through/refresh stand down
-	sessionAutosaved    bool      // autosave-on-exit ran (cleanup can be reached twice)
-	UserMaxTokens       int
-	pluginManager       *plugins.Manager
-	providerPlugins     *providerhost.Set // external provider plugins (llm/providerhost)
-	contextHandler      *ContextHandler
-	personaHandler      *PersonaHandler
-	skillHandler        *SkillHandler
-	executionProfile    ExecutionProfile
-	pendingAction       string // stores intended action before panic (for Windows go-prompt tearDown workaround)
-	replActive          bool   // true only inside the interactive Start() loop (gates the palette trigger)
-	promptRunning       bool   // true only while go-prompt owns the terminal (gates the theme-driven prompt rebuild)
-	themeReloadPending  bool   // a theme switch landed mid-prompt; go-prompt must be rebuilt to repaint the input line
-	paletteRequested    bool   // a handler asked to open the command palette; the executor runs it in place
-	paletteTarget       string // command to scope the palette to ("" opens the categorized root)
-	suppressPaletteOnce bool   // skip the palette trigger for the next handled command (the palette's own selection)
+	sessionCtx         context.Context
+	isExecuting        atomic.Bool
+	processingDone     chan struct{}
+	messageQueue       []string   // FIFO queue of user messages typed during processing
+	messageQueueMu     sync.Mutex // protects messageQueue
+	prefixSpinnerIdx   int32      // atomic counter for animated prefix spinner
+	sessionManager     *SessionManager
+	currentSessionName string
+	boundSessionSync   time.Time // store mtime of the active named session as of our last load/save (cross-surface refresh watermark)
+	boundRemoteOnly    bool      // active named session lives only on the remote server (user's explicit choice): local write-through/refresh stand down
+	sessionAutosaved   bool      // autosave-on-exit ran (cleanup can be reached twice)
+	UserMaxTokens      int
+	pluginManager      *plugins.Manager
+	providerPlugins    *providerhost.Set // external provider plugins (llm/providerhost)
+	// providerPluginsShared marks providerPlugins as owned by the embedding
+	// process (see WithProviderPlugins), which closes it.
+	providerPluginsShared bool
+	contextHandler        *ContextHandler
+	personaHandler        *PersonaHandler
+	skillHandler          *SkillHandler
+	executionProfile      ExecutionProfile
+	pendingAction         string // stores intended action before panic (for Windows go-prompt tearDown workaround)
+	replActive            bool   // true only inside the interactive Start() loop (gates the palette trigger)
+	promptRunning         bool   // true only while go-prompt owns the terminal (gates the theme-driven prompt rebuild)
+	themeReloadPending    bool   // a theme switch landed mid-prompt; go-prompt must be rebuilt to repaint the input line
+	paletteRequested      bool   // a handler asked to open the command palette; the executor runs it in place
+	paletteTarget         string // command to scope the palette to ("" opens the categorized root)
+	suppressPaletteOnce   bool   // skip the palette trigger for the next handled command (the palette's own selection)
 
 	// Remote connection state (for /connect and /disconnect)
 	localClient   client.LLMClient           // saved local client when connected to remote
