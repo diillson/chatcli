@@ -261,7 +261,7 @@ func (ch *CommandHandler) buildRoutes() {
 		}},
 		{"/context", false, func(ctx context.Context, in string) bool { ch.handleContextCommand(ctx, in); return false }},
 		{"/auth", false, func(ctx context.Context, in string) bool { ch.handleAuthCommand(ctx, in); return false }},
-		{"/plugin", false, func(_ context.Context, in string) bool { ch.handlePluginCommand(in); return false }},
+		{"/plugin", false, func(ctx context.Context, in string) bool { ch.handlePluginCommand(ctx, in); return false }},
 		{"/skill", false, func(ctx context.Context, in string) bool {
 			ch.handleSkillCommand(ctx, in)
 			ch.cli.markGraphDirty()

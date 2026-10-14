@@ -134,7 +134,7 @@ func (ch *CommandHandler) handleSkillCommand(ctx context.Context, userInput stri
 	}
 }
 
-func (ch *CommandHandler) handlePluginCommand(userInput string) {
+func (ch *CommandHandler) handlePluginCommand(ctx context.Context, userInput string) {
 	if ch.cli.pluginManager == nil {
 		ch.cli.logger.Error("O gerenciador de plugins não está inicializado. O comando /plugin está desabilitado.")
 		fmt.Println(i18n.T("plugin.error.manager_disabled"))
@@ -196,7 +196,7 @@ func (ch *CommandHandler) handlePluginCommand(userInput string) {
 		}
 
 	case "install":
-		ch.pluginInstall(args)
+		ch.pluginInstall(ctx, args)
 
 	case "uninstall":
 		ch.pluginUninstall(args)
@@ -215,13 +215,31 @@ func (ch *CommandHandler) handlePluginCommand(userInput string) {
 }
 
 // pluginInstall clona, compila e instala um plugin a partir de uma URL git.
-func (ch *CommandHandler) pluginInstall(args []string) {
+func (ch *CommandHandler) pluginInstall(ctx context.Context, args []string) {
 	pluginManager := ch.cli.pluginManager
 	if len(args) < 3 {
 		fmt.Println(i18n.T("plugin.install.usage"))
 		return
 	}
 	rawURL := args[2]
+
+	// A prebuilt bundle — a local binary, or a URL marked --binary — goes
+	// through publisher trust instead of a source build.
+	if bundle, ok := bundleSource(args[2:]); ok {
+		res, err := plugins.InstallBundle(ctx, bundle, plugins.InstallOptions{
+			Kind:          plugins.KindTool,
+			DestDir:       pluginManager.PluginsDir(),
+			Confirm:       PublisherConfirm(),
+			AllowUnsigned: plugins.NewPluginVerifier().AllowsUnsigned(),
+		})
+		if err != nil {
+			fmt.Println(colorize("  "+InstallErrorMessage(err), ColorYellow))
+			return
+		}
+		PrintInstallResult(os.Stdout, res)
+		pluginManager.Reload()
+		return
+	}
 
 	// Parse the URL: detect GitHub/GitLab tree URLs and extract repo, branch, subdir.
 	cloneURL, branch, subDir := parseGitURL(rawURL)
@@ -295,6 +313,15 @@ func (ch *CommandHandler) pluginInstall(args []string) {
 	if err := os.Chmod(filepath.Join(pluginManager.PluginsDir(), pluginName), 0o755); err != nil { //#nosec G302 -- plugin binary must be world-executable
 		fmt.Println(i18n.T("plugin.install.error.chmod", err))
 		return
+	}
+
+	// The person confirmed this source and it was built here: sign the
+	// result with the machine's local key so it loads with signature
+	// enforcement on, without a separate keygen/trust step.
+	if err := plugins.SignWithLocalKey(filepath.Join(pluginManager.PluginsDir(), pluginName)); err != nil {
+		fmt.Println(colorize("  "+i18n.T("plugin.install.local_sign_failed", err), ColorYellow))
+	} else {
+		fmt.Println(colorize("  "+i18n.T("plugin.install.local_signed"), ColorGray))
 	}
 
 	fmt.Println(i18n.T("plugin.reloading"))
@@ -504,4 +531,18 @@ func printQuarantineEntries(entries []plugins.QuarantineEntry) {
 			fmt.Println(i18n.T("plugincli.quarantine.row_admitted", e.Name))
 		}
 	}
+}
+
+// bundleSource picks a prebuilt bundle from /plugin install arguments: an
+// existing local file, or a URL after --binary.
+func bundleSource(args []string) (string, bool) {
+	if len(args) >= 2 && args[0] == "--binary" {
+		return args[1], true
+	}
+	if len(args) >= 1 {
+		if info, err := os.Stat(args[0]); err == nil && info.Mode().IsRegular() {
+			return args[0], true
+		}
+	}
+	return "", false
 }

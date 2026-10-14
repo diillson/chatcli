@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/diillson/chatcli/cli"
+	"github.com/diillson/chatcli/cli/plugins"
 	"github.com/diillson/chatcli/i18n"
 	"github.com/diillson/chatcli/llm/providerhost"
 	"github.com/diillson/chatcli/pkg/providerproto"
@@ -56,6 +57,12 @@ func RunProviderCLI(ctx context.Context, args []string, stdout, stderr io.Writer
 		return runProviderLogin(ctx, args[1:], stdout, stderr)
 	case "logout":
 		return runProviderLogout(ctx, args[1:], stdout, stderr)
+	case "install":
+		if err := runBundleInstall(ctx, plugins.KindProvider, args[1:], stdout); err != nil {
+			fmt.Fprintln(stderr, err)
+			return providerExitFail
+		}
+		return providerExitOK
 	default:
 		fmt.Fprintln(stderr, i18n.T("provider.cli.unknown", args[0]))
 		fmt.Fprintln(stderr, i18n.T("provider.cli.usage"))
