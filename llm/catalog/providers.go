@@ -1,3 +1,9 @@
+/*
+ * ChatCLI - Command Line Interface for LLM interaction
+ * Copyright (c) 2024 Edilson Freitas
+ * License: Apache-2.0
+ */
+
 package catalog
 
 import (
@@ -32,17 +38,17 @@ type ProviderDescriptor struct {
 	ModelFallbackEnv string
 	DefaultModel     string
 
-	// MaxTokensEnv forces the per-request max_tokens for the provider.
-	MaxTokensEnv string
+	// MaxOutputEnv forces the per-request max_tokens for the provider.
+	MaxOutputEnv string
 
 	// AuthProvider is the auth.ProviderID of the provider's OAuth/local
 	// credential flow ("" when it has none). Kept as a plain string so this
 	// package stays dependency-free.
 	AuthProvider string
 
-	// SecretEnv lists the env vars holding the provider's credentials; they
+	// AuthEnv lists the env vars holding the provider's credentials; they
 	// are always treated as secrets by the env redactor.
-	SecretEnv []string
+	AuthEnv []string
 
 	// PreferredAPI is the API family used for models absent from the model
 	// registry; "" means chat completions.
@@ -87,7 +93,7 @@ func (d ProviderDescriptor) preferredAPI() PreferredAPI {
 // clone detaches the descriptor's slices so callers cannot mutate the
 // registry through a returned copy.
 func (d ProviderDescriptor) clone() ProviderDescriptor {
-	d.SecretEnv = append([]string(nil), d.SecretEnv...)
+	d.AuthEnv = append([]string(nil), d.AuthEnv...)
 	return d
 }
 
@@ -105,9 +111,9 @@ var builtinProviders = []ProviderDescriptor{
 		DisplayName:  "OpenAI",
 		ModelEnv:     "OPENAI_MODEL",
 		DefaultModel: config.DefaultOpenAIModel,
-		MaxTokensEnv: "OPENAI_MAX_TOKENS",
+		MaxOutputEnv: "OPENAI_MAX_TOKENS",
 		AuthProvider: "openai",
-		SecretEnv:    []string{"OPENAI_API_KEY"},
+		AuthEnv:      []string{"OPENAI_API_KEY"},
 		PreferredAPI: APIChatCompletions,
 		FallbackMaxTokens: func(model string) int {
 			m := strings.ToLower(model)
@@ -133,7 +139,7 @@ var builtinProviders = []ProviderDescriptor{
 		ModelEnv:              "OPENAI_ASSISTANT_MODEL",
 		ModelFallbackEnv:      "OPENAI_MODEL",
 		DefaultModel:          config.DefaultOpenAiAssistModel,
-		SecretEnv:             []string{"OPENAI_API_KEY"},
+		AuthEnv:               []string{"OPENAI_API_KEY"},
 		PreferredAPI:          APIAssistants,
 		FallbackContextWindow: fixedTokens(128000),
 	},
@@ -142,9 +148,9 @@ var builtinProviders = []ProviderDescriptor{
 		DisplayName:  "Claude (Anthropic)",
 		ModelEnv:     "ANTHROPIC_MODEL",
 		DefaultModel: config.DefaultClaudeAIModel,
-		MaxTokensEnv: "ANTHROPIC_MAX_TOKENS",
+		MaxOutputEnv: "ANTHROPIC_MAX_TOKENS",
 		AuthProvider: "anthropic",
-		SecretEnv:    []string{"ANTHROPIC_API_KEY", "ANTHROPIC_OAUTH_TOKEN"},
+		AuthEnv:      []string{"ANTHROPIC_API_KEY", "ANTHROPIC_OAUTH_TOKEN"},
 		PreferredAPI: APIAnthropicMessages,
 		// Claude 3+ família toda usa 200K input; output varia 4K-128K.
 		// 64K é o teto comum dos modelos atuais (sonnet 4.x, opus 4.5+).
@@ -158,8 +164,8 @@ var builtinProviders = []ProviderDescriptor{
 		DefaultModel: config.DefaultBedrockModel,
 		// BEDROCK_MAX_TOKENS is the primary env the Bedrock client reads (it
 		// also accepts ANTHROPIC_MAX_TOKENS as a secondary, handled client-side).
-		MaxTokensEnv:      "BEDROCK_MAX_TOKENS",
-		SecretEnv:         []string{"AWS_BEARER_TOKEN_BEDROCK"},
+		MaxOutputEnv:      "BEDROCK_MAX_TOKENS",
+		AuthEnv:           []string{"AWS_BEARER_TOKEN_BEDROCK"},
 		FallbackMaxTokens: bedrockFallbackMaxTokens,
 		// Modelos fora do catálogo: application inference profiles com ID
 		// opaco, marketplace e lançamentos recentes. Sem esta regra eles
@@ -184,8 +190,8 @@ var builtinProviders = []ProviderDescriptor{
 		DisplayName:  "Google Gemini",
 		ModelEnv:     "GOOGLEAI_MODEL",
 		DefaultModel: config.DefaultGoogleAIModel,
-		MaxTokensEnv: "GOOGLEAI_MAX_TOKENS",
-		SecretEnv:    []string{"GOOGLEAI_API_KEY", "GOOGLE_AI_API_KEY", "GEMINI_API_KEY"},
+		MaxOutputEnv: "GOOGLEAI_MAX_TOKENS",
+		AuthEnv:      []string{"GOOGLEAI_API_KEY", "GOOGLE_AI_API_KEY", "GEMINI_API_KEY"},
 		PreferredAPI: PreferredAPI("gemini_api"),
 		// Gemini 2.x todos a 65K output.
 		FallbackMaxTokens:     fixedTokens(65536),
@@ -196,8 +202,8 @@ var builtinProviders = []ProviderDescriptor{
 		DisplayName:  "xAI (Grok)",
 		ModelEnv:     "XAI_MODEL",
 		DefaultModel: config.DefaultXAIModel,
-		MaxTokensEnv: "XAI_MAX_TOKENS",
-		SecretEnv:    []string{"XAI_API_KEY", "GROK_API_KEY"},
+		MaxOutputEnv: "XAI_MAX_TOKENS",
+		AuthEnv:      []string{"XAI_API_KEY", "GROK_API_KEY"},
 		// Grok 3/4 expõem ≥16K na prática; manter cap conservador
 		// porque xAI não publica limite oficial.
 		FallbackMaxTokens:     fixedTokens(16384),
@@ -208,8 +214,8 @@ var builtinProviders = []ProviderDescriptor{
 		DisplayName:           "ZAI (Zhipu AI)",
 		ModelEnv:              "ZAI_MODEL",
 		DefaultModel:          config.DefaultZAIModel,
-		MaxTokensEnv:          "ZAI_MAX_TOKENS",
-		SecretEnv:             []string{"ZAI_API_KEY", "ZHIPU_API_KEY"},
+		MaxOutputEnv:          "ZAI_MAX_TOKENS",
+		AuthEnv:               []string{"ZAI_API_KEY", "ZHIPU_API_KEY"},
 		FallbackMaxTokens:     fixedTokens(65535),
 		FallbackContextWindow: fixedTokens(202752),
 	},
@@ -218,8 +224,8 @@ var builtinProviders = []ProviderDescriptor{
 		DisplayName:           "Moonshot (Kimi)",
 		ModelEnv:              "MOONSHOT_MODEL",
 		DefaultModel:          config.DefaultMoonshotModel,
-		MaxTokensEnv:          "MOONSHOT_MAX_TOKENS",
-		SecretEnv:             []string{"MOONSHOT_API_KEY"},
+		MaxOutputEnv:          "MOONSHOT_MAX_TOKENS",
+		AuthEnv:               []string{"MOONSHOT_API_KEY"},
 		FallbackMaxTokens:     fixedTokens(131072),
 		FallbackContextWindow: fixedTokens(262144),
 	},
@@ -228,8 +234,8 @@ var builtinProviders = []ProviderDescriptor{
 		DisplayName:           "MiniMax",
 		ModelEnv:              "MINIMAX_MODEL",
 		DefaultModel:          config.DefaultMiniMaxModel,
-		MaxTokensEnv:          "MINIMAX_MAX_TOKENS",
-		SecretEnv:             []string{"MINIMAX_API_KEY"},
+		MaxOutputEnv:          "MINIMAX_MAX_TOKENS",
+		AuthEnv:               []string{"MINIMAX_API_KEY"},
 		FallbackMaxTokens:     fixedTokens(131072),
 		FallbackContextWindow: fixedTokens(204800),
 	},
@@ -237,8 +243,8 @@ var builtinProviders = []ProviderDescriptor{
 		// The model is an agent (realm/agent-id), so there is no *_MODEL env.
 		Name:         ProviderStackSpot,
 		DisplayName:  "StackSpot AI",
-		MaxTokensEnv: "STACKSPOT_MAX_TOKENS",
-		SecretEnv:    []string{"CLIENT_ID", "CLIENT_KEY", "STACKSPOT_CLIENT_ID", "STACKSPOT_CLIENT_SECRET"},
+		MaxOutputEnv: "STACKSPOT_MAX_TOKENS",
+		AuthEnv:      []string{"CLIENT_ID", "CLIENT_KEY", "STACKSPOT_CLIENT_ID", "STACKSPOT_CLIENT_SECRET"},
 		// The StackSpot agent API ignores client-side max_tokens; this
 		// value only feeds local bookkeeping, so keep it aligned with
 		// the registry entry instead of artificially low.
@@ -253,7 +259,7 @@ var builtinProviders = []ProviderDescriptor{
 		DisplayName:           "Ollama (Local)",
 		ModelEnv:              "OLLAMA_MODEL",
 		DefaultModel:          config.DefaultOllamaModel,
-		MaxTokensEnv:          "OLLAMA_MAX_TOKENS",
+		MaxOutputEnv:          "OLLAMA_MAX_TOKENS",
 		FallbackMaxTokens:     fixedTokens(8192),
 		FallbackContextWindow: fixedTokens(8192),
 	},
@@ -262,9 +268,9 @@ var builtinProviders = []ProviderDescriptor{
 		DisplayName:           "GitHub Copilot",
 		ModelEnv:              "COPILOT_MODEL",
 		DefaultModel:          config.DefaultCopilotModel,
-		MaxTokensEnv:          "COPILOT_MAX_TOKENS",
+		MaxOutputEnv:          "COPILOT_MAX_TOKENS",
 		AuthProvider:          "github-copilot",
-		SecretEnv:             []string{"GITHUB_COPILOT_TOKEN"},
+		AuthEnv:               []string{"GITHUB_COPILOT_TOKEN"},
 		FallbackMaxTokens:     fixedTokens(16384),
 		FallbackContextWindow: fixedTokens(128000),
 	},
@@ -273,8 +279,8 @@ var builtinProviders = []ProviderDescriptor{
 		DisplayName:           "OpenRouter",
 		ModelEnv:              "OPENROUTER_MODEL",
 		DefaultModel:          config.DefaultOpenRouterModel,
-		MaxTokensEnv:          "OPENROUTER_MAX_TOKENS",
-		SecretEnv:             []string{"OPENROUTER_API_KEY"},
+		MaxOutputEnv:          "OPENROUTER_MAX_TOKENS",
+		AuthEnv:               []string{"OPENROUTER_API_KEY"},
 		FallbackMaxTokens:     fixedTokens(16384),
 		FallbackContextWindow: fixedTokens(128000),
 	},
@@ -283,7 +289,7 @@ var builtinProviders = []ProviderDescriptor{
 		DisplayName:  "Devin",
 		ModelEnv:     "DEVIN_MODEL",
 		DefaultModel: config.DefaultDevinModel,
-		SecretEnv:    []string{"DEVIN_API_KEY"},
+		AuthEnv:      []string{"DEVIN_API_KEY"},
 		// Modelos fora do catálogo servidos pelo Devin CLI: teto do lado
 		// do cliente é só bookkeeping (o backend impõe o real).
 		FallbackMaxTokens: fixedTokens(32000),
@@ -370,7 +376,7 @@ func RegisterProvider(d ProviderDescriptor) error {
 		}
 	}
 	d.builtin = false
-	d.SecretEnv = append([]string(nil), d.SecretEnv...)
+	d.AuthEnv = append([]string(nil), d.AuthEnv...)
 	providersMu.Lock()
 	defer providersMu.Unlock()
 	runtimeProviders[d.Name] = d

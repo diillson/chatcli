@@ -149,8 +149,8 @@ func TestRegisterProviderValidation(t *testing.T) {
 	require.NoError(t, RegisterProvider(ProviderDescriptor{
 		Name:         "acme",
 		DisplayName:  "Acme Gateway",
-		MaxTokensEnv: "ACME_MAX_TOKENS",
-		SecretEnv:    []string{"ACME_CLIENT_SECRET"},
+		MaxOutputEnv: "ACME_MAX_TOKENS",
+		AuthEnv:      []string{"ACME_CLIENT_SECRET"},
 	}))
 	d, ok := LookupProvider("Acme")
 	require.True(t, ok)
@@ -165,9 +165,9 @@ func TestRegisterProviderValidation(t *testing.T) {
 	assert.Equal(t, defaultFallbackTokens, GetContextWindow("ACME", "anything"))
 
 	// Returned copies never alias the registry.
-	d.SecretEnv[0] = "MUTATED"
+	d.AuthEnv[0] = "MUTATED"
 	again, _ := LookupProvider("ACME")
-	assert.Equal(t, "ACME_CLIENT_SECRET", again.SecretEnv[0])
+	assert.Equal(t, "ACME_CLIENT_SECRET", again.AuthEnv[0])
 
 	UnregisterProvider("ACME")
 	_, ok = LookupProvider("ACME")

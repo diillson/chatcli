@@ -15,7 +15,7 @@ import (
 // StackSpot's CLIENT_ID is declared on its descriptor, and a provider
 // registered at runtime (an external provider plugin) is covered without
 // rebuilding the redactor.
-func TestEnvRedactorCoversProviderSecretEnv(t *testing.T) {
+func TestEnvRedactorCoversProviderAuthEnv(t *testing.T) {
 	r := NewEnvRedactor()
 	if !r.isSensitive("CLIENT_ID", "abc") {
 		t.Error("CLIENT_ID (StackSpot credential) must be treated as a secret")
@@ -28,7 +28,7 @@ func TestEnvRedactorCoversProviderSecretEnv(t *testing.T) {
 	if err := catalog.RegisterProvider(catalog.ProviderDescriptor{
 		Name:        "ACME",
 		DisplayName: "Acme Gateway",
-		SecretEnv:   []string{"ACME_TENANT_REF"},
+		AuthEnv:     []string{"ACME_TENANT_REF"},
 	}); err != nil {
 		t.Fatal(err)
 	}

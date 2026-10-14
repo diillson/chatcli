@@ -199,7 +199,7 @@ func (r *EnvRedactor) isSensitive(key, value string) bool {
 	// Exact match, including every provider's declared credential env —
 	// read from the catalog on each check so providers registered after the
 	// redactor was built (external provider plugins) are covered too.
-	if r.sensitiveExact[upperKey] || isProviderSecretEnv(upperKey) {
+	if r.sensitiveExact[upperKey] || isProviderAuthEnv(upperKey) {
 		return true
 	}
 
@@ -246,12 +246,12 @@ func isHexDigit(c rune) bool {
 	return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F')
 }
 
-// isProviderSecretEnv reports whether key is a credential env var declared
+// isProviderAuthEnv reports whether key is a credential env var declared
 // by any provider descriptor (StackSpot's CLIENT_ID, for instance, matches
 // none of the suffix patterns).
-func isProviderSecretEnv(upperKey string) bool {
+func isProviderAuthEnv(upperKey string) bool {
 	for _, d := range catalog.Providers() {
-		for _, k := range d.SecretEnv {
+		for _, k := range d.AuthEnv {
 			if strings.EqualFold(k, upperKey) {
 				return true
 			}

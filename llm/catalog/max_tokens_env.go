@@ -20,10 +20,10 @@ import (
 // means the same thing everywhere.
 func MaxTokensEnvVar(provider string) (string, bool) {
 	d, ok := LookupProvider(provider)
-	if !ok || d.MaxTokensEnv == "" {
+	if !ok || d.MaxOutputEnv == "" {
 		return "", false
 	}
-	return d.MaxTokensEnv, true
+	return d.MaxOutputEnv, true
 }
 
 // MaxTokensEnvOverride reads the provider's override env var and returns
