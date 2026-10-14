@@ -90,6 +90,10 @@ func createKeyFile(keyPath string, key []byte) ([]byte, error) {
 // errNoHardLinks reports a filesystem that cannot hard-link the key file.
 var errNoHardLinks = errors.New("filesystem does not support hard links")
 
+// linkFile publishes the key; a variable so tests can simulate filesystems
+// without hard links.
+var linkFile = os.Link
+
 func linkKeyFile(dir, keyPath string, key []byte) ([]byte, error) {
 	tmp, err := os.CreateTemp(dir, ".auth-key-*")
 	if err != nil {
@@ -110,7 +114,7 @@ func linkKeyFile(dir, keyPath string, key []byte) ([]byte, error) {
 	if werr != nil {
 		return nil, fmt.Errorf("%s: %w", i18n.T("auth.crypto.keysave_failed"), werr)
 	}
-	if err := os.Link(tmpName, filepath.Clean(keyPath)); err != nil {
+	if err := linkFile(tmpName, filepath.Clean(keyPath)); err != nil {
 		if errors.Is(err, os.ErrExist) {
 			return awaitKeyFile(keyPath)
 		}
