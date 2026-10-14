@@ -260,3 +260,24 @@ func (q *Quarantine) saveLocked() {
 	}
 	_ = os.WriteFile(q.statePath, data, 0o600)
 }
+
+// ReleaseIn releases name in the first quarantine that holds it. Tool
+// plugins and provider plugins keep separate state (each directory has its
+// own file, so same-named binaries never reset each other's window), but a
+// reviewer releases them through one command.
+func ReleaseIn(name string, qs ...*Quarantine) error {
+	var first error
+	for _, q := range qs {
+		err := q.Release(name)
+		if err == nil {
+			return nil
+		}
+		if first == nil {
+			first = err
+		}
+	}
+	if first == nil {
+		first = fmt.Errorf("quarantine is not configured")
+	}
+	return first
+}

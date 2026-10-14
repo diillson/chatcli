@@ -17,8 +17,10 @@ import (
 	"time"
 
 	"github.com/diillson/chatcli/auth"
+	"github.com/diillson/chatcli/cli/plugins"
 	"github.com/diillson/chatcli/config"
 	"github.com/diillson/chatcli/i18n"
+	"github.com/diillson/chatcli/llm/providerhost"
 	"github.com/diillson/chatcli/ui/kit"
 	"github.com/diillson/chatcli/utils"
 )
@@ -459,23 +461,19 @@ func (ch *CommandHandler) pluginQuarantine(args []string) {
 		sub = args[2]
 	}
 
+	pq := plugins.NewQuarantine(providerhost.DefaultDir())
 	switch sub {
 	case "list":
-		entries := q.List()
-		if len(entries) == 0 {
+		entries, providerEntries := q.List(), pq.List()
+		if len(entries) == 0 && len(providerEntries) == 0 {
 			fmt.Println(i18n.T("plugincli.quarantine.empty", q.Window().String()))
 			return
 		}
 		fmt.Println(i18n.T("plugincli.quarantine.header", q.Window().String()))
-		for _, e := range entries {
-			switch {
-			case e.Released:
-				fmt.Println(i18n.T("plugincli.quarantine.row_released", e.Name))
-			case e.Remaining > 0:
-				fmt.Println(i18n.T("plugincli.quarantine.row_waiting", e.Name, e.Remaining.Round(time.Second).String()))
-			default:
-				fmt.Println(i18n.T("plugincli.quarantine.row_admitted", e.Name))
-			}
+		printQuarantineEntries(entries)
+		if len(providerEntries) > 0 {
+			fmt.Println(i18n.T("plugincli.quarantine.providers_header"))
+			printQuarantineEntries(providerEntries)
 		}
 
 	case "release":
@@ -483,7 +481,7 @@ func (ch *CommandHandler) pluginQuarantine(args []string) {
 			fmt.Println(i18n.T("plugincli.quarantine.release_name_required"))
 			return
 		}
-		if err := q.Release(args[3]); err != nil {
+		if err := plugins.ReleaseIn(args[3], q, pq); err != nil {
 			fmt.Println(i18n.T("plugincli.verify.failed", err))
 			return
 		}
@@ -492,5 +490,18 @@ func (ch *CommandHandler) pluginQuarantine(args []string) {
 
 	default:
 		fmt.Println(i18n.T("plugincli.quarantine.unknown_verb", sub))
+	}
+}
+
+func printQuarantineEntries(entries []plugins.QuarantineEntry) {
+	for _, e := range entries {
+		switch {
+		case e.Released:
+			fmt.Println(i18n.T("plugincli.quarantine.row_released", e.Name))
+		case e.Remaining > 0:
+			fmt.Println(i18n.T("plugincli.quarantine.row_waiting", e.Name, e.Remaining.Round(time.Second).String()))
+		default:
+			fmt.Println(i18n.T("plugincli.quarantine.row_admitted", e.Name))
+		}
 	}
 }

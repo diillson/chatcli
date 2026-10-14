@@ -100,5 +100,6 @@
   "provider.plugin.status.logged_in": "logado",
   "provider.plugin.status.logged_in_as": "logado como %s",
   "provider.plugin.status.logged_out": "não logado",
-  "provider.plugin.status.no_login": "não exige login"
+  "provider.plugin.status.no_login": "não exige login",
+  "plugincli.quarantine.providers_header": "Plugins de provider:"
 }
