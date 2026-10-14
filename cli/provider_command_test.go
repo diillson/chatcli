@@ -12,6 +12,8 @@ import (
 
 	prompt "github.com/c-bata/go-prompt"
 	"go.uber.org/zap"
+
+	"github.com/diillson/chatcli/llm/catalog"
 )
 
 // TestProviderDefaultModel checks that every provider the picker can switch to
@@ -20,11 +22,13 @@ import (
 // which share applyProviderSwitch → providerDefaultModel.
 func TestProviderDefaultModel(t *testing.T) {
 	c := &ChatCLI{}
-	known := []string{
-		"OPENAI", "CLAUDEAI", "OPENAI_ASSISTANT", "GOOGLEAI", "XAI", "ZAI",
-		"MINIMAX", "MOONSHOT", "OLLAMA", "COPILOT",
-	}
-	for _, p := range known {
+	// Every provider with a model of its own — BEDROCK, OPENROUTER and
+	// DEVIN used to fall through to "" here while boot resolved them.
+	for _, d := range catalog.Providers() {
+		if d.ModelEnv == "" {
+			continue
+		}
+		p := d.Name
 		if got := c.providerDefaultModel(p); got == "" {
 			t.Errorf("providerDefaultModel(%q) = \"\", want a default model", p)
 		}

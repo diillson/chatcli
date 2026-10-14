@@ -13,7 +13,6 @@ import (
 	"github.com/diillson/chatcli/auth"
 	"github.com/diillson/chatcli/cli/agent"
 	"github.com/diillson/chatcli/cli/hooks"
-	"github.com/diillson/chatcli/config"
 	"github.com/diillson/chatcli/i18n"
 	"github.com/diillson/chatcli/llm/catalog"
 	"github.com/diillson/chatcli/llm/client"
@@ -289,32 +288,12 @@ func (cli *ChatCLI) handleProviderSelection(in string) {
 }
 
 // providerDefaultModel returns the model a provider should start on when no
-// explicit model is given — the configured env override, else the built-in
-// default. An unknown provider yields "", letting the client pick its own.
+// explicit model is given. It shares DefaultModelForProvider with boot so
+// /switch, /provider, eval and the RPC backends honor the persisted config
+// exactly like startup does. An unknown provider yields "", letting the
+// client pick its own.
 func (cli *ChatCLI) providerDefaultModel(provider string) string {
-	switch provider {
-	case "OPENAI":
-		return utils.GetEnvOrDefault("OPENAI_MODEL", config.DefaultOpenAIModel)
-	case "CLAUDEAI":
-		return utils.GetEnvOrDefault("ANTHROPIC_MODEL", config.DefaultClaudeAIModel)
-	case "OPENAI_ASSISTANT":
-		return utils.GetEnvOrDefault("OPENAI_ASSISTANT_MODEL", utils.GetEnvOrDefault("OPENAI_MODEL", config.DefaultOpenAiAssistModel))
-	case "GOOGLEAI":
-		return utils.GetEnvOrDefault("GOOGLEAI_MODEL", config.DefaultGoogleAIModel)
-	case "XAI":
-		return utils.GetEnvOrDefault("XAI_MODEL", config.DefaultXAIModel)
-	case "ZAI":
-		return utils.GetEnvOrDefault("ZAI_MODEL", config.DefaultZAIModel)
-	case "MINIMAX":
-		return utils.GetEnvOrDefault("MINIMAX_MODEL", config.DefaultMiniMaxModel)
-	case "MOONSHOT":
-		return utils.GetEnvOrDefault("MOONSHOT_MODEL", config.DefaultMoonshotModel)
-	case "OLLAMA":
-		return utils.GetEnvOrDefault("OLLAMA_MODEL", config.DefaultOllamaModel)
-	case "COPILOT":
-		return utils.GetEnvOrDefault("COPILOT_MODEL", config.DefaultCopilotModel)
-	}
-	return ""
+	return DefaultModelForProvider(provider)
 }
 
 // applyProviderSwitch switches the active provider (and its default model),

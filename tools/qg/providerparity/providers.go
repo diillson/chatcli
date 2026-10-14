@@ -73,10 +73,12 @@ func isUpper(c byte) bool { return c >= 'A' && c <= 'Z' }
 
 // TouchPoint is a single requirement against the codebase. ID is stable
 // across releases (it appears in the exemption table); Description is for
-// humans; Path is repo-relative; Pattern uses `{Upper}` and `{lower}`
-// placeholders. We deliberately do not support a Pascal placeholder
-// because Go's acronym-aware casing ("ClaudeAI", "OpenAIAssistant") cannot
-// be derived mechanically from "CLAUDEAI" or "OPENAI_ASSISTANT".
+// humans; Path is repo-relative; Pattern uses `{Upper}`, `{lower}` and
+// `{Const}` (the Go constant name) placeholders, and is matched with runs
+// of spaces/tabs collapsed. {Const} reads the declared constant name rather
+// than deriving a Pascal form, because Go's acronym-aware casing
+// ("ClaudeAI", "OpenAIAssistant") cannot be derived mechanically from
+// "CLAUDEAI" or "OPENAI_ASSISTANT".
 type TouchPoint struct {
 	ID          string
 	Description string
@@ -89,6 +91,33 @@ func (t TouchPoint) Render(provider string) string {
 	out := strings.ReplaceAll(t.Pattern, "{Upper}", provider)
 	out = strings.ReplaceAll(out, "{lower}", strings.ToLower(provider))
 	return out
+}
+
+// RenderFor is Render plus the {Const} placeholder, which expands to the
+// provider's Go constant name (e.g. ProviderOpenAI) for touch points that
+// reference the declaration itself rather than its string value.
+func (t TouchPoint) RenderFor(p Provider) string {
+	return strings.ReplaceAll(t.Render(p.Value), "{Const}", p.ConstName)
+}
+
+// collapseSpace folds every run of spaces/tabs into one space so patterns
+// survive gofmt's column alignment of key/value blocks.
+func collapseSpace(s string) string {
+	var b strings.Builder
+	b.Grow(len(s))
+	inRun := false
+	for _, r := range s {
+		if r == ' ' || r == '\t' {
+			if !inRun {
+				b.WriteByte(' ')
+			}
+			inRun = true
+			continue
+		}
+		inRun = false
+		b.WriteRune(r)
+	}
+	return b.String()
 }
 
 // Violation describes a missing touch point.
@@ -133,6 +162,7 @@ func Check(rootDir string, providers []Provider, points []TouchPoint, ex Exempti
 		if err != nil {
 			return nil, err
 		}
+		data = []byte(collapseSpace(string(data)))
 		cache[path] = data
 		return data, nil
 	}
@@ -146,7 +176,7 @@ func Check(rootDir string, providers []Provider, points []TouchPoint, ex Exempti
 			if ex.IsExempt(p.Value, tp.ID) {
 				continue
 			}
-			needle := tp.Render(p.Value)
+			needle := collapseSpace(tp.RenderFor(p))
 			data, err := read(tp.Path)
 			if err != nil {
 				return nil, fmt.Errorf("providerparity: read %s: %w", tp.Path, err)
@@ -196,22 +226,16 @@ func DefaultTouchPoints() []TouchPoint {
 			Pattern:     "cfg.sub.prov.{lower}",
 		},
 		{
-			ID:          "boot.model",
-			Description: "boot resolves the provider's model env/default via bootModelSources",
-			Path:        "cli/cli_config.go",
-			Pattern:     `"{Upper}":`,
+			ID:          "catalog.descriptor",
+			Description: "llm/catalog/providers.go declares the provider's descriptor (default model, max-tokens env, auth flow, secrets, fallback sizing) read by boot, /switch, oneshot/connect help, routing and the env redactor",
+			Path:        "llm/catalog/providers.go",
+			Pattern:     "Name: {Const},",
 		},
 		{
 			ID:          "env.redactor",
 			Description: "env redactor marks {Upper}_API_KEY as a secret",
 			Path:        "cli/env_redactor.go",
 			Pattern:     "{Upper}_API_KEY",
-		},
-		{
-			ID:          "oneshot.help",
-			Description: "oneshot CLI --provider help lists the value",
-			Path:        "cli/oneshot_mode.go",
-			Pattern:     "{Upper}",
 		},
 		{
 			ID:          "cost.cli",
@@ -291,7 +315,6 @@ func DefaultExemptions() Exemptions {
 			"cost.cli",        // proprietary, no public pricing
 			"operator.cost",   // ditto
 			"manager.refresh", // StackSpot uses TokenManager init path
-			"boot.model",      // model = agent (realm/agent-id), no *_MODEL env
 		},
 		"OLLAMA": {
 			"env.redactor",    // local, no API key

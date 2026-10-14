@@ -12,34 +12,18 @@ import (
 	"strings"
 )
 
-// maxTokensEnvByProvider maps each provider (canonical, upper-cased name) to
-// the operator-facing env var that forces the per-request max_tokens for
-// it. Shared by every surface that resolves max tokens without a session
-// override: the interactive CLI, the gRPC server and the RPC backends read
-// the same table, so an operator's *_MAX_TOKENS setting means the same
-// thing everywhere.
-var maxTokensEnvByProvider = map[string]string{
-	ProviderOpenAI:    "OPENAI_MAX_TOKENS",
-	ProviderClaudeAI:  "ANTHROPIC_MAX_TOKENS",
-	ProviderGoogleAI:  "GOOGLEAI_MAX_TOKENS",
-	ProviderXAI:       "XAI_MAX_TOKENS",
-	ProviderZAI:       "ZAI_MAX_TOKENS",
-	ProviderMiniMax:   "MINIMAX_MAX_TOKENS",
-	ProviderMoonshot:  "MOONSHOT_MAX_TOKENS",
-	ProviderOllama:    "OLLAMA_MAX_TOKENS",
-	ProviderStackSpot: "STACKSPOT_MAX_TOKENS",
-	ProviderCopilot:   "COPILOT_MAX_TOKENS",
-	// BEDROCK_MAX_TOKENS is the primary env the Bedrock client reads (it
-	// also accepts ANTHROPIC_MAX_TOKENS as a secondary, handled client-side).
-	ProviderBedrock:    "BEDROCK_MAX_TOKENS",
-	ProviderOpenRouter: "OPENROUTER_MAX_TOKENS",
-}
-
 // MaxTokensEnvVar returns the env var that overrides max_tokens for the
-// provider, and false when the provider has none registered.
+// provider, and false when the provider has none registered. The env lives
+// on the provider's descriptor, so every surface that resolves max tokens
+// without a session override (the interactive CLI, the gRPC server and the
+// RPC backends) reads the same value and an operator's *_MAX_TOKENS setting
+// means the same thing everywhere.
 func MaxTokensEnvVar(provider string) (string, bool) {
-	name, ok := maxTokensEnvByProvider[strings.ToUpper(strings.TrimSpace(provider))]
-	return name, ok
+	d, ok := LookupProvider(provider)
+	if !ok || d.MaxOutputEnv == "" {
+		return "", false
+	}
+	return d.MaxOutputEnv, true
 }
 
 // MaxTokensEnvOverride reads the provider's override env var and returns

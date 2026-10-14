@@ -341,7 +341,7 @@ func (ch *CommandHandler) resolveLocalAuth(ctx context.Context, provider string)
 	defer cancel()
 
 	if provider != "" {
-		authProvider, ok := llmProviderToAuthProvider(provider)
+		authProvider, ok := auth.ForLLMProvider(provider)
 		if !ok {
 			return "", "", fmt.Errorf(
 				"--use-local-auth only supports OAuth providers (CLAUDEAI, OPENAI, COPILOT). "+
@@ -377,20 +377,6 @@ func (ch *CommandHandler) resolveLocalAuth(ctx context.Context, provider string)
 	}
 
 	return "", "", fmt.Errorf("no local OAuth credentials found. Run '/auth login anthropic' or '/auth login openai-codex' or '/auth login github-copilot' first")
-}
-
-// llmProviderToAuthProvider maps LLMManager provider names to auth.ProviderID.
-func llmProviderToAuthProvider(provider string) (auth.ProviderID, bool) {
-	switch strings.ToUpper(provider) {
-	case "CLAUDEAI":
-		return auth.ProviderAnthropic, true
-	case "OPENAI":
-		return auth.ProviderOpenAI, true
-	case "COPILOT":
-		return auth.ProviderGitHubCopilot, true
-	default:
-		return "", false
-	}
 }
 
 // autoSwitchProvider switches the active provider and model after a successful OAuth login.

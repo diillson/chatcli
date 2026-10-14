@@ -242,7 +242,7 @@ func CatalogProviderOf(model string) string {
 	if model == "" {
 		return ""
 	}
-	for _, p := range KnownProviders {
+	for _, p := range catalog.ProviderNames() {
 		if _, ok := catalog.Resolve(p, model); ok {
 			return p
 		}
@@ -292,13 +292,12 @@ func FamilyProviderOf(model string) string {
 	return ""
 }
 
-// KnownProviders enumerates the canonical provider ids used by the manager
-// registry. Exported so cli and workers packages can share the same list.
+// KnownProviders enumerates the built-in provider ids.
 //
-// Order matters: CatalogProviderOf scans it front-to-back, so for models
-// mirrored on several providers the earliest entry wins bare-hint routing.
-// CLAUDEAI precedes BEDROCK on purpose — shared claude-* ids resolve to the
-// direct Anthropic API unless the hint qualifies BEDROCK explicitly.
+// Deprecated: use catalog.ProviderNames, which also covers providers
+// registered at runtime and owns the routing order (CLAUDEAI before BEDROCK,
+// so shared claude-* ids resolve to the direct Anthropic API). This list is
+// kept for API compatibility and pinned to the catalog by a test.
 var KnownProviders = []string{
 	"OPENAI", "OPENAI_ASSISTANT", "CLAUDEAI", "BEDROCK", "GOOGLEAI", "XAI",
 	"ZAI", "MOONSHOT", "MINIMAX", "STACKSPOT", "OLLAMA", "COPILOT",
@@ -308,7 +307,7 @@ var KnownProviders = []string{
 // SplitQualifiedHint recognizes the explicit "PROVIDER:model" hint form and
 // returns the canonical provider id plus the bare model id. The prefix is
 // matched (case-insensitively) against the configured providers first, then
-// KnownProviders; anything else — including Ollama model tags such as
+// every catalog provider; anything else — including Ollama model tags such as
 // "qwen2.5:14b", whose prefix is not a provider — returns ok=false so the
 // caller treats the whole hint as a model id. Only the FIRST colon splits,
 // so "OLLAMA:qwen2.5:14b" keeps the tag colon inside the model part.
@@ -322,7 +321,7 @@ func SplitQualifiedHint(hint string, availableProviders []string) (provider, mod
 	if prefix == "" || rest == "" {
 		return "", "", false
 	}
-	for _, list := range [][]string{availableProviders, KnownProviders} {
+	for _, list := range [][]string{availableProviders, catalog.ProviderNames()} {
 		for _, p := range list {
 			if strings.EqualFold(p, prefix) {
 				return p, rest, true

@@ -53,6 +53,36 @@ func TestTouchPoint_Render(t *testing.T) {
 	}
 }
 
+func TestTouchPoint_RenderForConst(t *testing.T) {
+	tp := TouchPoint{Pattern: "Name: {Const}, // {Upper}"}
+	got := tp.RenderFor(Provider{ConstName: "ProviderOpenAIAssistant", Value: "OPENAI_ASSISTANT"})
+	if got != "Name: ProviderOpenAIAssistant, // OPENAI_ASSISTANT" {
+		t.Errorf("RenderFor = %q", got)
+	}
+}
+
+// A descriptor pattern must match through gofmt's key/value alignment and
+// still catch a provider whose descriptor is missing.
+func TestCheck_ConstPatternSurvivesAlignment(t *testing.T) {
+	dir := t.TempDir()
+	src := "{\n\tName:         ProviderOpenAI,\n\tDisplayName:  \"OpenAI\",\n}\n"
+	if err := os.WriteFile(filepath.Join(dir, "providers.go"), []byte(src), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	providers := []Provider{
+		{ConstName: "ProviderOpenAI", Value: "OPENAI"},
+		{ConstName: "ProviderMoonshot", Value: "MOONSHOT"},
+	}
+	points := []TouchPoint{{ID: "d", Description: "descriptor", Path: "providers.go", Pattern: "Name: {Const},"}}
+	vs, err := Check(dir, providers, points, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(vs) != 1 || vs[0].Provider != "MOONSHOT" {
+		t.Fatalf("violations = %+v, want only MOONSHOT", vs)
+	}
+}
+
 func TestExemptions_IsExempt(t *testing.T) {
 	ex := Exemptions{
 		"BEDROCK":          {"env.redactor", "cost.cli"},

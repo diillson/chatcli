@@ -18,17 +18,21 @@ import (
 // fallbacks, so the whole session ran with a degraded max-tokens and
 // context window. /model worked; starting preconfigured did not.
 func TestConfigureProviderAndModelCoversEveryProvider(t *testing.T) {
-	for provider, src := range bootModelSources {
+	for _, d := range catalog.Providers() {
+		if d.ModelEnv == "" {
+			continue // STACKSPOT: the model is the agent, no *_MODEL env
+		}
+		provider, envVar := d.Name, d.ModelEnv
 		t.Run(provider, func(t *testing.T) {
 			t.Setenv("LLM_PROVIDER", provider)
-			t.Setenv(src.envVar, "custom-model-under-test")
+			t.Setenv(envVar, "custom-model-under-test")
 			cli := &ChatCLI{}
 			cli.configureProviderAndModel()
 			if cli.Provider != provider {
 				t.Fatalf("Provider = %q, want %q", cli.Provider, provider)
 			}
 			if cli.Model != "custom-model-under-test" {
-				t.Fatalf("Model = %q — the %s env must reach cli.Model at boot", cli.Model, src.envVar)
+				t.Fatalf("Model = %q — the %s env must reach cli.Model at boot", cli.Model, envVar)
 			}
 		})
 	}

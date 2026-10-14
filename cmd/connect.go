@@ -20,6 +20,7 @@ import (
 	"github.com/diillson/chatcli/cli"
 	"github.com/diillson/chatcli/client/remote"
 	"github.com/diillson/chatcli/i18n"
+	"github.com/diillson/chatcli/llm/catalog"
 	"github.com/diillson/chatcli/llm/manager"
 	"go.uber.org/zap"
 )
@@ -50,20 +51,6 @@ type ConnectOptions struct {
 	MaxTokens int
 }
 
-// llmProviderToAuthProvider maps LLMManager provider names to auth.ProviderID.
-func llmProviderToAuthProvider(provider string) (auth.ProviderID, bool) {
-	switch strings.ToUpper(provider) {
-	case "CLAUDEAI":
-		return auth.ProviderAnthropic, true
-	case "OPENAI":
-		return auth.ProviderOpenAI, true
-	case "COPILOT":
-		return auth.ProviderGitHubCopilot, true
-	default:
-		return "", false
-	}
-}
-
 // RunConnect executes the 'chatcli connect' subcommand.
 func RunConnect(ctx context.Context, args []string, llmMgr manager.LLMManager, logger *zap.Logger) error {
 	// Pre-process: if the first arg is not a flag, extract it as the positional address.
@@ -84,7 +71,7 @@ func RunConnect(ctx context.Context, args []string, llmMgr manager.LLMManager, l
 	fs.StringVar(&opts.CertFile, "ca-cert", "", "CA certificate file for TLS (implies --tls)")
 	fs.StringVar(&opts.ClientAPIKey, "llm-key", os.Getenv("CHATCLI_CLIENT_API_KEY"), "Your own LLM API key/OAuth token (forwarded to server)")
 	fs.BoolVar(&opts.UseLocalAuth, "use-local-auth", false, "Use OAuth/API key from local auth store (~/.chatcli/auth-profiles.json)")
-	fs.StringVar(&opts.Provider, "provider", "", "Override server's default LLM provider (OPENAI, OPENAI_ASSISTANT, CLAUDEAI, BEDROCK, GOOGLEAI, XAI, ZAI, MINIMAX, MOONSHOT, STACKSPOT, OLLAMA, COPILOT, OPENROUTER)")
+	fs.StringVar(&opts.Provider, "provider", "", "Override server's default LLM provider ("+strings.Join(catalog.ProviderNames(), ", ")+")")
 	fs.StringVar(&opts.Model, "model", "", "Override server's default LLM model (e.g., gpt-6.1-sol, gemini-3.8-flash)")
 	fs.StringVar(&opts.ClientID, "client-id", "", "StackSpot: Client ID for authentication")
 	fs.StringVar(&opts.ClientKey, "client-key", "", "StackSpot: Client Key for authentication")
@@ -220,7 +207,7 @@ func RunConnect(ctx context.Context, args []string, llmMgr manager.LLMManager, l
 func resolveLocalAuth(ctx context.Context, provider string, logger *zap.Logger) (apiKey string, resolvedProvider string, err error) {
 	// If provider specified, resolve directly
 	if provider != "" {
-		authProvider, ok := llmProviderToAuthProvider(provider)
+		authProvider, ok := auth.ForLLMProvider(provider)
 		if !ok {
 			return "", "", fmt.Errorf("%s", i18n.T("cmd.connect.auth_unsupported", provider))
 		}
@@ -257,7 +244,7 @@ func resolveLocalAuth(ctx context.Context, provider string, logger *zap.Logger) 
 
 // PrintConnectUsage prints help for the connect subcommand.
 func PrintConnectUsage() {
-	fmt.Println(`Usage: chatcli connect [flags] [address]
+	fmt.Printf(`Usage: chatcli connect [flags] [address]
 
 Connect to a remote ChatCLI gRPC server.
 
@@ -267,8 +254,7 @@ Arguments:
 Flags:
   --addr <host:port>    Server address (env: CHATCLI_REMOTE_ADDR)
   --token <string>      Server auth token (env: CHATCLI_REMOTE_TOKEN)
-  --provider <string>   Override LLM provider (OPENAI, OPENAI_ASSISTANT, CLAUDEAI, BEDROCK, GOOGLEAI, XAI,
-                        ZAI, MINIMAX, MOONSHOT, STACKSPOT, OLLAMA, COPILOT, OPENROUTER)
+  --provider <string>   Override LLM provider (%s)
   --model <string>      Override LLM model (e.g., gpt-5.6-sol, gemini-2.5-flash)
   --llm-key <string>    Your own LLM API key/OAuth token (env: CHATCLI_CLIENT_API_KEY)
   --use-local-auth      Use OAuth credentials from local auth store (from /auth login)
@@ -333,5 +319,6 @@ Examples:
   chatcli connect myserver:50051 --use-local-auth --provider COPILOT
 
   # One-shot with local auth
-  chatcli connect myserver:50051 --use-local-auth -p "Explain K8s pods"`)
+  chatcli connect myserver:50051 --use-local-auth -p "Explain K8s pods"
+`, strings.Join(catalog.ProviderNames(), ", "))
 }
