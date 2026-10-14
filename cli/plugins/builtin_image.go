@@ -230,9 +230,9 @@ func (p *BuiltinImagePlugin) ExecuteWithStream(ctx context.Context, args []strin
 		// that backend's own edit contract. A backend that can't edit fails
 		// here, before any request — unless CHATCLI_IMAGE_EDIT_PROVIDER pins
 		// another one, which is then named in the reply.
-		editor, used, routed, rerr := imagegen.ResolveEditor(ctx, provider, nil)
-		if rerr != nil {
-			return "", errors.New(editUnavailableMessage(rerr, provider))
+		editor, used, routed, ok := imagegen.ResolveEditor(ctx, provider, nil)
+		if !ok {
+			return "", errors.New(editUnavailableMessage(imagegen.EditUnavailable(provider), provider))
 		}
 		inputs, err := loadInputImages(paths)
 		if err != nil {
@@ -266,11 +266,7 @@ func (p *BuiltinImagePlugin) ExecuteWithStream(ctx context.Context, args []strin
 
 // editUnavailableMessage explains, in the user's language, why the edit did
 // not run and how to make it run.
-func editUnavailableMessage(err error, provider imagegen.Provider) string {
-	var ue *imagegen.EditUnavailableError
-	if !errors.As(err, &ue) {
-		return "@image: " + err.Error()
-	}
+func editUnavailableMessage(ue *imagegen.EditUnavailableError, provider imagegen.Provider) string {
 	backend := ue.Backend
 	if ue.Model != "" {
 		backend = fmt.Sprintf("%s (%s)", ue.Backend, ue.Model)

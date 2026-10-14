@@ -160,9 +160,9 @@ func TestImageEdit_ActiveXAIEditsAndNeverCallsOpenAI(t *testing.T) {
 	t.Setenv("OPENAI_API_KEY", "openai-key")
 
 	active := NewFromEnv(zap.NewNop())
-	ed, used, routed, err := ResolveEditor(context.Background(), active, zap.NewNop())
-	if err != nil || used != "xai" || routed {
-		t.Fatalf("ResolveEditor = used %q routed %v err %v, want the active xai", used, routed, err)
+	ed, used, routed, ok := ResolveEditor(context.Background(), active, zap.NewNop())
+	if !ok || used != "xai" || routed {
+		t.Fatalf("ResolveEditor = used %q routed %v ok %v, want the active xai", used, routed, ok)
 	}
 	if _, err := ed.Edit(context.Background(), "make it winter", []Image{pngInput}, EditOptions{}); err != nil {
 		t.Fatalf("Edit: %v", err)
@@ -187,10 +187,11 @@ func TestImageEdit_GenerateOnlyBackendFailsWithoutCrossRequest(t *testing.T) {
 	t.Setenv("XAI_API_KEY", "xai-key")
 
 	active := NewFromEnv(zap.NewNop())
-	_, _, _, err := ResolveEditor(context.Background(), active, zap.NewNop())
-	var ue *EditUnavailableError
-	if !errors.As(err, &ue) || ue.Backend != "zai" || ue.Model != defaultZAIImageModel {
-		t.Fatalf("want EditUnavailableError for zai/%s, got %v", defaultZAIImageModel, err)
+	if _, _, _, ok := ResolveEditor(context.Background(), active, zap.NewNop()); ok {
+		t.Fatal("zai must not resolve an editor")
+	}
+	if ue := EditUnavailable(active); ue.Backend != "zai" || ue.Model != defaultZAIImageModel {
+		t.Fatalf("EditUnavailable = %+v, want zai/%s", ue, defaultZAIImageModel)
 	}
 	if n := openai.hits.Load() + xai.hits.Load(); n != 0 {
 		t.Fatalf("%d request(s) reached another account", n)
@@ -213,9 +214,9 @@ func TestImageEdit_PinnedBackendIsTheOnlyRoute(t *testing.T) {
 	t.Setenv("OPENAI_API_KEY", "openai-key")
 	t.Setenv("CHATCLI_IMAGE_EDIT_PROVIDER", "xai")
 
-	ed, used, routed, err := ResolveEditor(context.Background(), NewFromEnv(zap.NewNop()), zap.NewNop())
-	if err != nil || used != "xai" || !routed {
-		t.Fatalf("ResolveEditor = used %q routed %v err %v, want the pinned xai", used, routed, err)
+	ed, used, routed, ok := ResolveEditor(context.Background(), NewFromEnv(zap.NewNop()), zap.NewNop())
+	if !ok || used != "xai" || !routed {
+		t.Fatalf("ResolveEditor = used %q routed %v ok %v, want the pinned xai", used, routed, ok)
 	}
 	if _, err := ed.Edit(context.Background(), "x", []Image{pngInput}, EditOptions{}); err != nil {
 		t.Fatal(err)

@@ -190,33 +190,44 @@ func (e *EditUnavailableError) Unwrap() error { return ErrEditUnsupported }
 // ResolveEditor returns the editor for an image edit. The active backend (the
 // one /model-image / CHATCLI_IMAGE_* selects) edits whenever it can, in its
 // own contract. When it cannot, the edit goes elsewhere ONLY if the user
-// pinned a backend with CHATCLI_IMAGE_EDIT_PROVIDER — routed is then true so
-// the caller says so. It never falls through to whichever other account
+// pinned a backend with CHATCLI_IMAGE_EDIT_PROVIDER — fellBack is then true
+// so the caller says so. It never falls through to whichever other account
 // happens to have a key: that charged a different account than the one
 // configured (and failed there when it had no credit) while the active
-// backend could have edited or should have said it can't.
-func ResolveEditor(ctx context.Context, primary Provider, logger *zap.Logger) (ed Editor, used string, routed bool, err error) {
+// backend could have edited or should have said it can't. When ok is false,
+// EditUnavailable(primary) explains why.
+func ResolveEditor(ctx context.Context, primary Provider, logger *zap.Logger) (ed Editor, used string, fellBack bool, ok bool) {
 	if logger == nil {
 		logger = zap.NewNop()
 	}
 	if e, isEd := AsEditor(primary); isEd {
-		return e, primary.Name(), false, nil
+		return e, primary.Name(), false, true
 	}
-	unavailable := &EditUnavailableError{Backend: primary.Name(), Model: ModelOf(primary)}
-	pinned := strings.ToLower(strings.TrimSpace(os.Getenv(envEditProvider)))
+	pinned := pinnedEditProvider()
 	if pinned == "" {
-		return nil, "", false, unavailable
+		return nil, "", false, false
 	}
-	unavailable.Pinned = pinned
 	p := buildEditProvider(ctx, pinned, strings.TrimSpace(os.Getenv("CHATCLI_IMAGE_EDIT_MODEL")), logger)
 	if p == nil {
-		return nil, "", false, unavailable
+		return nil, "", false, false
 	}
 	e, isEd := AsEditor(p)
 	if !isEd {
-		return nil, "", false, unavailable
+		return nil, "", false, false
 	}
-	return e, p.Name(), true, nil
+	return e, p.Name(), true, true
+}
+
+// EditUnavailable describes why ResolveEditor found no editor for primary:
+// the backend and model that do not edit, and the pinned edit backend that
+// could not stand in, if any.
+func EditUnavailable(primary Provider) *EditUnavailableError {
+	return &EditUnavailableError{Backend: primary.Name(), Model: ModelOf(primary), Pinned: pinnedEditProvider()}
+}
+
+// pinnedEditProvider is the CHATCLI_IMAGE_EDIT_PROVIDER value, normalized.
+func pinnedEditProvider() string {
+	return strings.ToLower(strings.TrimSpace(os.Getenv(envEditProvider)))
 }
 
 // buildEditProvider builds a specific backend by name for the explicit
