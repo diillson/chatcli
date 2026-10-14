@@ -45,6 +45,11 @@ type ClaudeClient struct {
 	backoff     time.Duration
 	apiURL      string
 
+	// catalogProvider and upstreamModel are set for provider plugins in
+	// dialect mode (see ClientOptions); empty for the built-in provider.
+	catalogProvider string
+	upstreamModel   string
+
 	// turnScoped records the emitter of the request currently being built,
 	// so the clear_at beta header is added only when a turn-scoped system
 	// message actually travels. Held as a pointer: the emitter is per
@@ -191,13 +196,65 @@ func NewClaudeClient(provider auth.TokenProvider, model string, logger *zap.Logg
 	}
 }
 
+// ClientOptions points a ClaudeClient at an Anthropic Messages-compatible
+// endpoint other than the one the environment configures — a provider
+// plugin in dialect mode. The zero value reproduces NewClaudeClient.
+type ClientOptions struct {
+	// MessagesURL is the full Messages endpoint; empty keeps the default.
+	MessagesURL string
+	// WrapTransport wraps the network transport below the request logger,
+	// so headers it injects never appear in the HTTP log.
+	WrapTransport func(http.RoundTripper) http.RoundTripper
+	// CatalogProvider names the catalog provider for display names, the
+	// context window and max-tokens sizing (with its *_MAX_TOKENS
+	// override); empty means CLAUDEAI.
+	CatalogProvider string
+	// UpstreamModel is the Anthropic model a gateway id fronts; capability
+	// checks (thinking, effort, fast mode, task budget) resolve it in the
+	// Anthropic catalog. Empty means the model itself.
+	UpstreamModel string
+}
+
+// NewClaudeClientWithOptions is NewClaudeClient with endpoint overrides.
+func NewClaudeClientWithOptions(provider auth.TokenProvider, model string, logger *zap.Logger, maxAttempts int, backoff time.Duration, opts ClientOptions) *ClaudeClient {
+	c := NewClaudeClient(provider, model, logger, maxAttempts, backoff)
+	if u := strings.TrimSpace(opts.MessagesURL); u != "" {
+		c.apiURL = u
+	}
+	if opts.WrapTransport != nil {
+		c.client = utils.NewHTTPClientWithTransport(logger, 900*time.Second, opts.WrapTransport(utils.NewDefaultTransport()))
+	}
+	c.catalogProvider = strings.ToUpper(strings.TrimSpace(opts.CatalogProvider))
+	c.upstreamModel = strings.ToLower(strings.TrimSpace(opts.UpstreamModel))
+	return c
+}
+
+// catalogName returns the catalog provider that sizes this client's models.
+func (c *ClaudeClient) catalogName() string {
+	if c.catalogProvider != "" {
+		return c.catalogProvider
+	}
+	return catalog.ProviderClaudeAI
+}
+
+// capModel is the model Anthropic capability checks resolve.
+func (c *ClaudeClient) capModel() string {
+	if c.upstreamModel != "" {
+		return c.upstreamModel
+	}
+	return c.model
+}
+
 // GetModelName retorna o nome amigável do modelo ClaudeAI
 func (c *ClaudeClient) GetModelName() string {
-	return catalog.GetDisplayName(catalog.ProviderClaudeAI, c.model)
+	return catalog.GetDisplayName(c.catalogName(), c.model)
 }
 
 // getMaxTokens obtém o limite de tokens configurado
 func (c *ClaudeClient) getMaxTokens() int {
+	if c.catalogProvider != "" {
+		return catalog.GetMaxTokens(c.catalogProvider, c.model, catalog.MaxTokensEnvOverride(c.catalogProvider))
+	}
 	if tokenStr := os.Getenv("ANTHROPIC_MAX_TOKENS"); tokenStr != "" {
 		if parsedTokens, err := strconv.Atoi(tokenStr); err == nil && parsedTokens > 0 {
 			c.logger.Debug("Usando max_tokens personalizado", zap.Int("max_tokens", parsedTokens))
@@ -332,11 +389,11 @@ func (c *ClaudeClient) SendPrompt(ctx context.Context, prompt string, history []
 	// Skill effort hint → thinking. Opus 4.7+ only accepts adaptive
 	// thinking; older 4.x and Sonnet 3.7 accept budgeted extended
 	// thinking. applyThinkingForEffort routes by catalog capability.
-	thinkingAttached := applyThinkingForEffort(reqBody, c.model, ctx)
+	thinkingAttached := applyThinkingForEffort(reqBody, c.capModel(), ctx)
 	// After the effort routing, and outside it: a spending ceiling is not
 	// a reasoning setting, and lived inside one long enough to never be
 	// sent (see applyTaskBudget).
-	applyTaskBudget(reqBody, c.model, ctx)
+	applyTaskBudget(reqBody, c.capModel(), ctx)
 	if thinkingAttached {
 		c.logger.Debug("claudeai: thinking enabled from skill effort hint",
 			zap.Any("thinking", reqBody["thinking"]),
@@ -344,7 +401,7 @@ func (c *ClaudeClient) SendPrompt(ctx context.Context, prompt string, history []
 	}
 
 	// Fast mode opt-in (Opus 5.5 / Opus 4.8; research preview, premium pricing).
-	if applyFastModeIfRequested(reqBody, c.model) {
+	if applyFastModeIfRequested(reqBody, c.capModel()) {
 		c.logger.Debug("claudeai: fast mode enabled (ANTHROPIC_SPEED=fast)",
 			zap.String("model", c.model))
 	}

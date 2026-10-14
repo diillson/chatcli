@@ -38,6 +38,45 @@ type OpenAIResponsesClient struct {
 	maxAttempts int
 	backoff     time.Duration
 	usageState  client.UsageState
+
+	// responsesURL and catalogProvider are set for provider plugins in
+	// dialect mode (see ClientOptions); empty for the built-in provider.
+	responsesURL    string
+	catalogProvider string
+}
+
+// ClientOptions points an OpenAIResponsesClient at a Responses-compatible
+// endpoint other than the one the environment configures — a provider
+// plugin in dialect mode. The zero value reproduces NewOpenAIResponsesClient.
+type ClientOptions struct {
+	// ResponsesURL is the full /responses endpoint; empty keeps the
+	// environment's (OPENAI_RESPONSES_API_URL or the default).
+	ResponsesURL string
+	// WrapTransport wraps the network transport below the request logger,
+	// so headers it injects never appear in the HTTP log.
+	WrapTransport func(http.RoundTripper) http.RoundTripper
+	// CatalogProvider names the catalog provider for display names and
+	// max-tokens sizing (with its *_MAX_TOKENS override); empty means OPENAI.
+	CatalogProvider string
+}
+
+// NewOpenAIResponsesClientWithOptions is NewOpenAIResponsesClient with
+// endpoint overrides.
+func NewOpenAIResponsesClientWithOptions(provider auth.TokenProvider, model string, logger *zap.Logger, maxAttempts int, backoff time.Duration, opts ClientOptions) *OpenAIResponsesClient {
+	c := NewOpenAIResponsesClient(provider, model, logger, maxAttempts, backoff)
+	c.responsesURL = strings.TrimSpace(opts.ResponsesURL)
+	if opts.WrapTransport != nil {
+		c.httpClient = utils.NewHTTPClientWithTransport(logger, 900*time.Second, opts.WrapTransport(utils.NewDefaultTransport()))
+	}
+	c.catalogProvider = strings.ToUpper(strings.TrimSpace(opts.CatalogProvider))
+	return c
+}
+
+func (c *OpenAIResponsesClient) catalogName() string {
+	if c.catalogProvider != "" {
+		return c.catalogProvider
+	}
+	return catalog.ProviderOpenAI
 }
 
 // LastUsage returns the token usage from the most recent API call.
@@ -67,10 +106,13 @@ func NewOpenAIResponsesClient(provider auth.TokenProvider, model string, logger 
 }
 
 func (c *OpenAIResponsesClient) GetModelName() string {
-	return catalog.GetDisplayName(catalog.ProviderOpenAI, c.model)
+	return catalog.GetDisplayName(c.catalogName(), c.model)
 }
 
 func (c *OpenAIResponsesClient) getMaxTokens() int {
+	if c.catalogProvider != "" {
+		return catalog.GetMaxTokens(c.catalogProvider, c.model, catalog.MaxTokensEnvOverride(c.catalogProvider))
+	}
 	if tokenStr := os.Getenv("OPENAI_MAX_TOKENS"); tokenStr != "" {
 		if parsedTokens, err := strconv.Atoi(tokenStr); err == nil && parsedTokens > 0 {
 			c.logger.Debug("Usando OPENAI_MAX_TOKENS personalizado", zap.Int("max_tokens", parsedTokens))
@@ -222,7 +264,9 @@ func (c *OpenAIResponsesClient) SendPrompt(ctx context.Context, prompt string, h
 func (c *OpenAIResponsesClient) sendRequest(ctx context.Context, body []byte, token string) (*http.Response, error) {
 	// OAuth tokens use the ChatGPT backend; API keys use the platform API
 	var apiURL string
-	if c.provider.Mode() == auth.AuthModeOAuth {
+	if c.responsesURL != "" {
+		apiURL = c.responsesURL
+	} else if c.provider.Mode() == auth.AuthModeOAuth {
 		apiURL = utils.GetEnvOrDefault("OPENAI_RESPONSES_API_URL", config.OpenAIOAuthResponsesURL)
 	} else {
 		apiURL = utils.GetEnvOrDefault("OPENAI_RESPONSES_API_URL", config.OpenAIResponsesAPIURL)

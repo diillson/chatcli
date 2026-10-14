@@ -94,19 +94,19 @@ func (c *ClaudeClient) SendPromptWithTools(ctx context.Context, prompt string, h
 	}
 	// Provider context engine: let Anthropic clear stale tool results
 	// server-side (context editing beta) on top of the local compaction.
-	if cm := client.AnthropicContextManagementFor(catalog.GetContextWindow(catalog.ProviderClaudeAI, c.model)); cm != nil && len(toolDefs) > 0 {
+	if cm := client.AnthropicContextManagementFor(catalog.GetContextWindow(c.catalogName(), c.model)); cm != nil && len(toolDefs) > 0 {
 		reqBody["context_management"] = cm
 	}
 
 	// Skill effort hint → thinking (tool-use path). Opus 4.7+ uses adaptive,
 	// older models use budgeted extended thinking — see applyThinkingForEffort.
-	applyThinkingForEffort(reqBody, c.model, ctx)
+	applyThinkingForEffort(reqBody, c.capModel(), ctx)
 	// A spending ceiling is not a reasoning setting: it travels whether or
 	// not an effort was chosen. See applyTaskBudget.
-	applyTaskBudget(reqBody, c.model, ctx)
+	applyTaskBudget(reqBody, c.capModel(), ctx)
 
 	// Fast mode opt-in via ANTHROPIC_SPEED=fast (Opus 5.5 / Opus 4.8).
-	applyFastModeIfRequested(reqBody, c.model)
+	applyFastModeIfRequested(reqBody, c.capModel())
 
 	// Rolling conversation breakpoint on the last user/tool_result message —
 	// in a tool loop this is the bulk of every request and was re-tokenized

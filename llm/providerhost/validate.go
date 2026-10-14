@@ -41,8 +41,7 @@ func validateInfo(info providerproto.InitializeResult) error {
 			return fmt.Errorf("provider %s: dialect mode without a dialect", name)
 		}
 		if !supportedDialect(info.Dialect.API) {
-			return fmt.Errorf("provider %s: dialect %q is not supported by this chatcli (supported: %s)",
-				name, info.Dialect.API, providerproto.DialectOpenAIChat)
+			return fmt.Errorf("provider %s: dialect %q is not supported by this chatcli", name, info.Dialect.API)
 		}
 		u, err := url.Parse(info.Dialect.BaseURL)
 		if err != nil || (u.Scheme != "https" && u.Scheme != "http") || u.Host == "" {
@@ -57,5 +56,10 @@ func validateInfo(info providerproto.InitializeResult) error {
 // supportedDialect lists the wire formats this host can drive with a
 // built-in client.
 func supportedDialect(api providerproto.DialectAPI) bool {
-	return api == providerproto.DialectOpenAIChat
+	switch api {
+	case providerproto.DialectOpenAIChat, providerproto.DialectOpenAIResponses,
+		providerproto.DialectAnthropicMessages, providerproto.DialectGemini:
+		return true
+	}
+	return false
 }

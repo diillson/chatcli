@@ -27,7 +27,16 @@ func TestMain(m *testing.M) {
 	base := strings.TrimSuffix(filepath.Base(os.Args[0]), ".exe")
 	switch {
 	case strings.HasPrefix(base, "ph-dialect"):
-		serve(dialectFixture{})
+		api := providerproto.DialectOpenAIChat
+		switch {
+		case strings.HasSuffix(base, "-anthropic"):
+			api = providerproto.DialectAnthropicMessages
+		case strings.HasSuffix(base, "-gemini"):
+			api = providerproto.DialectGemini
+		case strings.HasSuffix(base, "-responses"):
+			api = providerproto.DialectOpenAIResponses
+		}
+		serve(dialectFixture{api: api})
 	case strings.HasPrefix(base, "ph-crash"):
 		serve(crashFixture{})
 	case strings.HasPrefix(base, "ph-impostor"):
@@ -54,7 +63,7 @@ func fixtureURLFile() string {
 // dialectFixture is an OpenAI-compatible gateway plugin: prompt login,
 // rotating bearer tokens, a per-model routing header, and an authEnv
 // variable echoed back so the test can see what reached the process.
-type dialectFixture struct{}
+type dialectFixture struct{ api providerproto.DialectAPI }
 
 var tokenSerial atomic.Int64
 
@@ -62,9 +71,9 @@ func (dialectFixture) Info() providerproto.ProviderInfo {
 	return providerproto.ProviderInfo{Name: "PH_GATEWAY", DisplayName: map[string]string{"en": "PH Gateway", "pt-BR": "Gateway PH"}, Version: "1.0.0"}
 }
 func (dialectFixture) Mode() providerproto.Mode { return providerproto.ModeDialect }
-func (dialectFixture) Dialect() providerproto.Dialect {
+func (d dialectFixture) Dialect() providerproto.Dialect {
 	raw, _ := os.ReadFile(fixtureURLFile())
-	return providerproto.Dialect{API: providerproto.DialectOpenAIChat, BaseURL: strings.TrimSpace(string(raw)) + "/v1"}
+	return providerproto.Dialect{API: d.api, BaseURL: strings.TrimSpace(string(raw)) + "/v1"}
 }
 func (dialectFixture) AuthEnv() []string { return []string{"PH_TEST_SECRET"} }
 func (dialectFixture) AuthStatus(_ context.Context, c providerproto.Credential) (providerproto.AuthStatusResult, error) {
