@@ -109,6 +109,7 @@ var rootCommands = []RootCommand{
 	{"/switch", CatModel, "complete.root.switch", ""},
 	{"/provider", CatModel, "complete.root.provider", ""},
 	{"/model", CatModel, "complete.root.model", ""},
+	{"/models", CatModel, "complete.root.models", ""},
 	{"/model-image", CatModel, "complete.root.model_image", ""},
 	{"/max-tokens", CatModel, "complete.root.maxtokens", ""},
 

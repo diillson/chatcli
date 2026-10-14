@@ -48,7 +48,7 @@ type ACPCommandInfo struct {
 // /agent, /coder and /run are NOT here: the ACP prompt handler drains them
 // first as session mode switches (they panic-request mode in the REPL).
 var acpCommandAllow = map[string]bool{
-	"/switch": true, "/provider": true, "/model": true, "/max-tokens": true,
+	"/switch": true, "/provider": true, "/model": true, "/models": true, "/max-tokens": true,
 	"/config": true, "/session": true, "/newsession": true, "/compact": true,
 	"/export": true, "/context": true, "/memory": true,
 	"/thinking": true, "/refine": true, "/verify": true, "/reflect": true, "/moa": true,

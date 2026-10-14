@@ -47,6 +47,7 @@ var slashPrefixRoutes = []slashPrefixRoute{
 	{"/switch", (*ChatCLI).getSwitchSuggestions},
 	{"/provider", (*ChatCLI).getProviderSuggestions},
 	{"/model-image", (*ChatCLI).getImageModelSuggestions}, // before "/model" — it shadows this prefix
+	{"/models", (*ChatCLI).getModelSuggestions},           // alias of /model
 	{"/model", (*ChatCLI).getModelSuggestions},
 	{"/max-tokens", (*ChatCLI).getMaxTokensSuggestions},
 	{"/auth", (*ChatCLI).getAuthSuggestions},
@@ -396,6 +397,7 @@ func (cli *ChatCLI) GetInternalCommands() []prompt.Suggest {
 		{Text: "/switch", Description: i18n.T("complete.root.switch")},
 		{Text: "/provider", Description: i18n.T("complete.root.provider")},
 		{Text: "/model", Description: i18n.T("complete.root.model")},
+		{Text: "/models", Description: i18n.T("complete.root.models")},
 		{Text: "/model-image", Description: i18n.T("complete.root.model_image")},
 		{Text: "/max-tokens", Description: i18n.T("complete.root.maxtokens")},
 		{Text: "/help", Description: i18n.T("complete.root.help")},
@@ -1526,11 +1528,14 @@ func (cli *ChatCLI) getModelSuggestions(d prompt.Document) []prompt.Suggest {
 	args := strings.Fields(line)
 	wordBeforeCursor := d.GetWordBeforeCursor()
 
-	// Just typed "/model" without a trailing space.
+	// Just typed the command (/model or /models) without a trailing space:
+	// echo it back so the alias is never rewritten to the other spelling.
 	if len(args) == 1 && !strings.HasSuffix(line, " ") {
-		return []prompt.Suggest{
-			{Text: "/model", Description: i18n.T("complete.root.model")},
+		key := "complete.root.model"
+		if args[0] == "/models" {
+			key = "complete.root.models"
 		}
+		return []prompt.Suggest{{Text: args[0], Description: i18n.T(key)}}
 	}
 
 	models := cli.getCachedModels()
