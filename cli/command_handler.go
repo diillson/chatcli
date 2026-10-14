@@ -243,7 +243,10 @@ func (ch *CommandHandler) buildRoutes() {
 		{"/provider", false, func(ctx context.Context, in string) bool { c.handleProviderCommand(ctx, in); return false }},
 		// Must precede "/model" (raw-prefix) so it isn't shadowed by it.
 		{"/model-image", true, func(ctx context.Context, in string) bool { c.handleImageModelCommand(ctx, in); return false }},
-		{"/model", false, func(ctx context.Context, in string) bool { c.handleModelCommand(ctx, in); return false }},
+		// Word routes: "/models" is an alias, and a raw "/model" prefix used to
+		// swallow it (and "/modelx") as a switch to the model "s"/"x".
+		{"/models", true, func(ctx context.Context, in string) bool { c.handleModelCommand(ctx, in); return false }},
+		{"/model", true, func(ctx context.Context, in string) bool { c.handleModelCommand(ctx, in); return false }},
 		{"/max-tokens", false, func(ctx context.Context, in string) bool { c.handleMaxTokensCommand(ctx, in); return false }},
 		{"/config", true, ch.cmdConfig},
 		{"/status", true, ch.cmdConfig},

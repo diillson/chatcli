@@ -371,7 +371,11 @@ func (cli *ChatCLI) handleMaxTokensCommand(ctx context.Context, input string) {
 // delegates to handleSwitchCommand so model-cache refresh, error handling and
 // the gateway runtime-state mirror all stay in one place.
 func (cli *ChatCLI) handleModelCommand(ctx context.Context, input string) {
-	rest := strings.TrimSpace(strings.TrimPrefix(input, "/model"))
+	// The first token is the command itself (/model or its /models alias).
+	rest := ""
+	if _, after, found := strings.Cut(strings.TrimSpace(input), " "); found {
+		rest = strings.TrimSpace(after)
+	}
 	if rest == "" {
 		cli.handleSwitchCommand(ctx, "/switch --model")
 		return
