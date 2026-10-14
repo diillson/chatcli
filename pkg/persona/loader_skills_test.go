@@ -68,6 +68,10 @@ func TestLoadSkillFromPackage(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Equal(t, "frontend-design", skill.Name)
 	assert.Equal(t, "Frontend skill", skill.Description)
+	// The source file is known, so injection blocks can cite it for an
+	// on-demand re-read (they used to point at a path that was never set).
+	abs, _ := filepath.Abs(filepath.Join(globalSkills, "frontend-design", "SKILL.md"))
+	assert.Equal(t, abs, skill.Path)
 	// Subskill mapped.
 	assert.Contains(t, skill.Subskills, "advanced.md")
 	// Script mapped under "scripts/run.sh".

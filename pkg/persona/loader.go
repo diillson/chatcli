@@ -499,7 +499,11 @@ func (l *Loader) loadSkillFromPackage(dirPath string) (*Skill, error) {
 	absDir, _ := filepath.Abs(dirPath)
 
 	skill := &Skill{
-		Dir:       absDir,
+		Dir: absDir,
+		// The main file is the skill's source: injection blocks cite it so a
+		// body left out of the prompt (budget, or already shown earlier) can
+		// be re-read on demand.
+		Path:      filepath.Join(absDir, "SKILL.md"),
 		Content:   content,
 		Subskills: make(map[string]string),
 		Scripts:   make(map[string]string),
