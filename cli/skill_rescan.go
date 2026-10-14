@@ -99,16 +99,32 @@ func rescanNewSkills(mgr *persona.Manager, injected map[string]bool, cooldown ma
 }
 
 // rescanSurface composes the text scanned by the mid-loop skill re-activation
-// for one assistant turn: the response text plus the JSON arguments of every
-// NATIVE tool call. XML-fallback calls are already embedded in the response
-// text; native calls arrive in a separate struct, so without this append a
-// `paths:`-glob skill would never see the files the agent is touching when
-// the provider uses native tool calling.
-func rescanSurface(aiResponse string, nativeToolCalls []models.ToolCall) string {
-	if len(nativeToolCalls) == 0 {
+// for one assistant turn: the provider-native reasoning, the response text
+// (which carries the <plan>) and the JSON arguments of every NATIVE tool
+// call.
+//
+// The reasoning comes first because that is where the model decides what to
+// do: with extended thinking on, "I'll open it in the browser and fill the
+// form" often appears only there, and the visible text that follows is a
+// terse plan or nothing at all. Scanning only the visible text missed the
+// very intent this re-scan exists to catch. Redacted blocks carry no
+// readable text and contribute nothing.
+//
+// XML-fallback calls are already embedded in the response text; native calls
+// arrive in a separate struct, so without this append a `paths:`-glob skill
+// would never see the files the agent is touching when the provider uses
+// native tool calling.
+func rescanSurface(aiResponse string, nativeToolCalls []models.ToolCall, thinking []models.ThinkingBlock) string {
+	if len(nativeToolCalls) == 0 && len(thinking) == 0 {
 		return aiResponse
 	}
 	var b strings.Builder
+	for _, tb := range thinking {
+		if text := strings.TrimSpace(tb.Thinking); text != "" {
+			b.WriteString(text)
+			b.WriteString("\n")
+		}
+	}
 	b.WriteString(aiResponse)
 	for _, tc := range nativeToolCalls {
 		b.WriteString("\n")

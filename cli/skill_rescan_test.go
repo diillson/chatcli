@@ -251,7 +251,7 @@ func TestRescanSurface_AppendsNativeToolCallArgs(t *testing.T) {
 		{Name: "write_file", Arguments: map[string]interface{}{"file": "deploy/chart/values.yaml"}},
 		{Name: "read_file", Arguments: map[string]interface{}{"file": "main.go"}},
 	}
-	surface := rescanSurface("I'll update the chart values now.", calls)
+	surface := rescanSurface("I'll update the chart values now.", calls, nil)
 	for _, want := range []string{"I'll update the chart values now.", "deploy/chart/values.yaml", "main.go", "write_file"} {
 		if !strings.Contains(surface, want) {
 			t.Fatalf("surface missing %q:\n%s", want, surface)
@@ -271,7 +271,27 @@ func TestRescanSurface_AppendsNativeToolCallArgs(t *testing.T) {
 }
 
 func TestRescanSurface_NoNativeCallsIsIdentity(t *testing.T) {
-	if got := rescanSurface("plain response", nil); got != "plain response" {
+	if got := rescanSurface("plain response", nil, nil); got != "plain response" {
 		t.Fatalf("identity expected, got %q", got)
+	}
+}
+
+// The model decides what to do in its reasoning; with extended thinking on,
+// that is often the only place the intent is spelled out. Readable thinking
+// must reach the trigger matcher; redacted blocks carry no text.
+func TestRescanSurface_IncludesReasoning(t *testing.T) {
+	thinking := []models.ThinkingBlock{
+		{Type: "thinking", Thinking: "I'll write a Helm chart for this service.", Signature: "sig"},
+		{Type: "redacted_thinking", Data: "opaque-payload"},
+	}
+	surface := rescanSurface("<plan>1. scaffold</plan>", nil, thinking)
+	if !strings.Contains(surface, "Helm chart") {
+		t.Fatalf("reasoning text missing from the surface:\n%s", surface)
+	}
+	if !strings.Contains(surface, "<plan>1. scaffold</plan>") {
+		t.Fatalf("response text missing from the surface:\n%s", surface)
+	}
+	if strings.Contains(surface, "opaque-payload") {
+		t.Fatalf("redacted payload must not be scanned:\n%s", surface)
 	}
 }
