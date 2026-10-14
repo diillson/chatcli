@@ -100,6 +100,60 @@ func TestMatchesTrigger_MultiWordNeedsWholeTokens(t *testing.T) {
 	}
 }
 
+// pt-BR users type without accents and in the plural as often as not; the
+// trigger must fire either way. These are inputs that failed to activate a
+// real skill before folding and stemming.
+func TestMatchesTrigger_AccentsAndPlurals(t *testing.T) {
+	s := &Skill{Triggers: StringList{"próximo jogo flamengo", "configuração"}}
+	cases := []struct {
+		name string
+		in   string
+		want bool
+	}{
+		{"accented, as written", "veja quando é o próximo jogo do flamengo", true},
+		{"typed without accents", "veja quando é o proximo jogo do flamengo", true},
+		{"plural nouns", "quais os proximos jogos do flamengo?", true},
+		{"uppercase accented text", "PRÓXIMO JOGO DO FLAMENGO", true},
+		{"single word, no accent", "ajusta a configuracao do proxy", true},
+		{"single word, plural", "revisa as configurações", true},
+		{"missing a word", "proximo jogo do vasco", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := s.MatchesTrigger(tc.in); got != tc.want {
+				t.Fatalf("MatchesTrigger(%q) = %v, want %v", tc.in, got, tc.want)
+			}
+		})
+	}
+
+	// A one-word trigger with punctuation keeps its literal spelling: the
+	// bare word it contains is not the trigger.
+	literal := &Skill{Triggers: StringList{"file://", "@browser"}}
+	for _, in := range []string{"list the files here", "create a file named hello.txt", "which browser do you use"} {
+		if literal.MatchesTrigger(in) {
+			t.Fatalf("punctuated one-word trigger must not fire on %q", in)
+		}
+	}
+	if !literal.MatchesTrigger("abre file:///tmp/x.html no @browser") {
+		t.Fatal("punctuated trigger must still match its literal spelling")
+	}
+
+	// A plural trigger fires on the singular too.
+	plural := &Skill{Triggers: StringList{"deploys"}}
+	if !plural.MatchesTrigger("faz o deploy agora") {
+		t.Fatal("plural trigger must match the singular form")
+	}
+}
+
+// An empty or blank trigger is a substring of every text; it must be
+// ignored instead of firing the skill on every turn.
+func TestMatchesTrigger_BlankTriggerNeverMatches(t *testing.T) {
+	s := &Skill{Triggers: StringList{"", "   "}}
+	if s.MatchesTrigger("qualquer coisa") {
+		t.Fatal("blank triggers must not match")
+	}
+}
+
 func TestMatchesPath_Basic(t *testing.T) {
 	s := &Skill{Paths: StringList{"*_test.go"}}
 	cases := []struct {

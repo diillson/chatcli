@@ -11,6 +11,7 @@ import (
 	"strings"
 	"unicode"
 
+	"github.com/diillson/chatcli/pkg/textfold"
 	"gopkg.in/yaml.v3"
 )
 
@@ -129,60 +130,78 @@ type Skill struct {
 }
 
 // MatchesTrigger checks if the given text matches any of the skill's trigger
-// keywords. Matching is case-insensitive and has two tiers:
+// keywords. Both sides are lowercased and diacritic-folded first, so a user
+// typing "proximo jogo" without accents still fires the trigger "próximo
+// jogo". Matching then has two tiers:
 //
 //  1. Fast path — the whole trigger appears as a contiguous substring
 //     (historical behavior, always tried first).
-//  2. Multi-word triggers — every word of the trigger appears as a WHOLE
-//     token in the text, in any order. "servicenow login" therefore also
-//     fires on "preciso fazer o login no servicenow".
+//  2. Word match — every word of the trigger appears as a WHOLE token in the
+//     text, in any order, compared by stem so plural and singular forms are
+//     the same word ("próximos jogos do flamengo" fires "próximo jogo
+//     flamengo"). "servicenow login" therefore also fires on "preciso fazer
+//     o login no servicenow". A one-word trigger takes part only when it is
+//     a plain word: "file://" or "@browser" keep their literal spelling.
 //
 // Tier 2 deliberately requires whole tokens, not per-word substrings: short
 // trigger words ("me", "on", "no") hide inside unrelated words far too often
 // (e.g. "message me" would otherwise fire on any text containing the word
-// "message"). Both sides are tokenized with the same splitter, so trigger
+// "message"). Both sides are tokenized and stemmed the same way, so trigger
 // words carrying punctuation ("unit-tests") match texts the same way.
 func (s *Skill) MatchesTrigger(text string) bool {
 	if len(s.Triggers) == 0 {
 		return false
 	}
-	textLower := strings.ToLower(text)
-	var textTokens map[string]bool // built lazily, only when a tier-2 check runs
+	textNorm := normalizeTriggerText(text)
+	var textStems map[string]bool // built lazily, only when a tier-2 check runs
 	for _, trigger := range s.Triggers {
-		triggerLower := strings.ToLower(trigger)
-		if strings.Contains(textLower, triggerLower) {
+		triggerNorm := strings.TrimSpace(normalizeTriggerText(trigger))
+		if triggerNorm == "" {
+			continue // an empty trigger is a substring of every text
+		}
+		if strings.Contains(textNorm, triggerNorm) {
 			return true
 		}
-		words := splitTriggerTokens(triggerLower)
-		if len(words) < 2 {
+		words := splitTriggerTokens(triggerNorm)
+		if len(words) == 0 || (len(words) == 1 && words[0] != triggerNorm) {
+			// A one-word trigger written with punctuation ("file://",
+			// "@browser") means that literal spelling; reducing it to its
+			// bare word would fire on every "files" or "browser".
 			continue
 		}
-		if textTokens == nil {
-			textTokens = make(map[string]bool)
-			for _, tok := range splitTriggerTokens(textLower) {
-				textTokens[tok] = true
+		if textStems == nil {
+			textStems = make(map[string]bool)
+			for _, tok := range splitTriggerTokens(textNorm) {
+				textStems[textfold.Stem(tok)] = true
 			}
 		}
-		if allTokensPresent(textTokens, words) {
+		if allStemsPresent(textStems, words) {
 			return true
 		}
 	}
 	return false
 }
 
-// splitTriggerTokens splits lowered text into letter/digit runs. Punctuation,
-// hyphens and symbols are separators, so "unit-tests" and "servicenow.com"
-// yield the tokens their words would produce in prose.
+// normalizeTriggerText lowercases and folds diacritics, the form both
+// triggers and texts are compared in.
+func normalizeTriggerText(s string) string {
+	return textfold.Fold(strings.ToLower(s))
+}
+
+// splitTriggerTokens splits normalized text into letter/digit runs.
+// Punctuation, hyphens and symbols are separators, so "unit-tests" and
+// "servicenow.com" yield the tokens their words would produce in prose.
 func splitTriggerTokens(s string) []string {
 	return strings.FieldsFunc(s, func(r rune) bool {
 		return !unicode.IsLetter(r) && !unicode.IsNumber(r)
 	})
 }
 
-// allTokensPresent reports whether every word is a whole token of the text.
-func allTokensPresent(textTokens map[string]bool, words []string) bool {
+// allStemsPresent reports whether every trigger word, by stem, is a whole
+// token of the text.
+func allStemsPresent(textStems map[string]bool, words []string) bool {
 	for _, w := range words {
-		if !textTokens[w] {
+		if !textStems[textfold.Stem(w)] {
 			return false
 		}
 	}
