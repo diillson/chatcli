@@ -8,6 +8,7 @@ package providersdk
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"strings"
@@ -62,7 +63,7 @@ func host(t *testing.T, p Provider) (*providerproto.Conn, <-chan providerproto.C
 		_ = pw.Close()
 	}()
 	deltas := make(chan providerproto.ChatDelta, 64)
-	h := func(_ context.Context, req *providerproto.Request) (any, error) {
+	h := func(_ context.Context, req *providerproto.Request) (json.RawMessage, error) {
 		if req.Method == providerproto.MethodChatDelta {
 			var d providerproto.ChatDelta
 			if err := decode(req.Params, &d); err == nil {

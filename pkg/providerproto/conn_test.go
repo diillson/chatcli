@@ -11,6 +11,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"strings"
 	"sync/atomic"
@@ -38,12 +39,10 @@ func pair(t *testing.T, a, b Handler) (*Conn, *Conn) {
 	return ca, cb
 }
 
-func echoHandler(_ context.Context, req *Request) (any, error) {
+func echoHandler(_ context.Context, req *Request) (json.RawMessage, error) {
 	switch req.Method {
 	case "echo":
-		var v map[string]any
-		_ = json.Unmarshal(req.Params, &v)
-		return v, nil
+		return req.Params, nil
 	case "fail":
 		return nil, NewError(ErrCodeRateLimited, "slow down")
 	case "boom":
@@ -51,7 +50,7 @@ func echoHandler(_ context.Context, req *Request) (any, error) {
 	case "plain":
 		return nil, errors.New("plain failure")
 	}
-	return nil, NewError(ErrCodeMethodNotFound, "unknown %s", req.Method)
+	return nil, NewError(ErrCodeMethodNotFound, fmt.Sprintf("unknown %s", req.Method))
 }
 
 func TestCallRoundTrip(t *testing.T) {
@@ -99,7 +98,7 @@ func TestPanicDoesNotKillTheSession(t *testing.T) {
 func TestCancelPropagatesToPeer(t *testing.T) {
 	started := make(chan struct{})
 	observed := make(chan error, 1)
-	plugin := func(ctx context.Context, req *Request) (any, error) {
+	plugin := func(ctx context.Context, req *Request) (json.RawMessage, error) {
 		if req.Method != "slow" {
 			return nil, nil
 		}
@@ -132,7 +131,7 @@ func TestCancelPropagatesToPeer(t *testing.T) {
 func TestNotificationsAndRequestIDInContext(t *testing.T) {
 	got := make(chan string, 1)
 	var id atomic.Value
-	plugin := func(ctx context.Context, req *Request) (any, error) {
+	plugin := func(ctx context.Context, req *Request) (json.RawMessage, error) {
 		switch req.Method {
 		case "note":
 			if !req.IsNotification() {

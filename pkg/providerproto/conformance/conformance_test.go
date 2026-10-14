@@ -8,6 +8,7 @@ package conformance
 
 import (
 	"context"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
@@ -89,8 +90,11 @@ func TestMissingInputsSkipInsteadOfFailing(t *testing.T) {
 }
 
 func TestBrokenPluginIsReported(t *testing.T) {
-	bin := build(t, "./testdata/noisy")
-	rep, err := Run(context.Background(), Options{Command: []string{bin}, Timeout: 10 * time.Second})
+	rep, err := Run(context.Background(), Options{
+		Command: []string{os.Args[0], "-test.run=^$"},
+		Env:     []string{noisyEnv + "=1"},
+		Timeout: 10 * time.Second,
+	})
 	if err != nil {
 		t.Fatal(err)
 	}

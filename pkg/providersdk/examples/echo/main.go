@@ -133,7 +133,7 @@ func (echo) Chat(ctx context.Context, p providerproto.ChatParams, emit func(prov
 		return providerproto.ChatResult{}, providerproto.NewError(providerproto.ErrCodeAuthRequired, "not logged in")
 	}
 	if p.Model != "echo-1" && p.Model != "echo-slow" {
-		return providerproto.ChatResult{}, providerproto.NewError(providerproto.ErrCodeModelNotFound, "unknown model %q", p.Model)
+		return providerproto.ChatResult{}, providerproto.NewError(providerproto.ErrCodeModelNotFound, fmt.Sprintf("unknown model %q", p.Model))
 	}
 	prompt := lastUserText(p.Messages)
 	reply := "echo: " + prompt

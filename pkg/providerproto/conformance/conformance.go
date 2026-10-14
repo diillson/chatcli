@@ -161,12 +161,12 @@ func Run(ctx context.Context, opts Options) (*Report, error) {
 	return r.report, nil
 }
 
-func (r *runner) handle(_ context.Context, req *providerproto.Request) (any, error) {
+func (r *runner) handle(_ context.Context, req *providerproto.Request) (json.RawMessage, error) {
 	switch req.Method {
 	case providerproto.MethodChatDelta:
 		var d providerproto.ChatDelta
 		if json.Unmarshal(req.Params, &d) == nil {
-			key := fmt.Sprint(d.RequestID)
+			key := string(d.RequestID)
 			r.deltaMu.Lock()
 			r.deltas[key] = append(r.deltas[key], d)
 			r.deltaMu.Unlock()

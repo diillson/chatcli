@@ -6,6 +6,8 @@
 
 package providerproto
 
+import "encoding/json"
+
 // ProtocolVersion is the wire contract version. The host sends the versions
 // it speaks in InitializeParams; the plugin answers with the one it chose.
 // Additive changes (new optional fields, new optional methods) do not bump
@@ -149,7 +151,7 @@ type LogParams struct {
 
 // CancelParams asks the peer to abandon an in-flight request.
 type CancelParams struct {
-	ID any `json:"id"`
+	ID json.RawMessage `json:"id"`
 }
 
 // --------------------------------------------------------------------- auth
@@ -391,10 +393,10 @@ type ChatResult struct {
 // ChatDelta is an incremental chunk of a streaming chat/send. RequestID
 // echoes the JSON-RPC id of the chat/send it belongs to.
 type ChatDelta struct {
-	RequestID any       `json:"requestId"`
-	Text      string    `json:"text,omitempty"`
-	Thinking  string    `json:"thinking,omitempty"`
-	ToolCall  *ToolCall `json:"toolCall,omitempty"`
+	RequestID json.RawMessage `json:"requestId"`
+	Text      string          `json:"text,omitempty"`
+	Thinking  string          `json:"thinking,omitempty"`
+	ToolCall  *ToolCall       `json:"toolCall,omitempty"`
 }
 
 // TokensCountParams is tokens/count's request.

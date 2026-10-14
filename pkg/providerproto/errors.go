@@ -73,8 +73,8 @@ func (e *Error) Retryable() bool {
 }
 
 // NewError builds an Error.
-func NewError(code int, format string, args ...any) *Error {
-	return &Error{Code: code, Message: fmt.Sprintf(format, args...)}
+func NewError(code int, message string) *Error {
+	return &Error{Code: code, Message: message}
 }
 
 // errorFromRaw decodes a wire error, tolerating peers that send extra or

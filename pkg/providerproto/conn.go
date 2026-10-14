@@ -62,7 +62,7 @@ func (r *Request) IsNotification() bool { return len(r.ID) == 0 }
 // always observed before the chat/send result that follows it; a
 // notification handler must therefore return quickly (hand work off to a
 // channel). Requests run concurrently, bounded by Options.MaxInflight.
-type Handler func(ctx context.Context, req *Request) (any, error)
+type Handler func(ctx context.Context, req *Request) (json.RawMessage, error)
 
 type ctxKey int
 
@@ -143,7 +143,7 @@ type wireRequest struct {
 type wireResult struct {
 	JSONRPC string          `json:"jsonrpc"`
 	ID      json.RawMessage `json:"id"`
-	Result  any             `json:"result"`
+	Result  json.RawMessage `json:"result"`
 }
 
 type wireError struct {
@@ -158,7 +158,7 @@ func NewConn(r io.Reader, w io.Writer, handler Handler, opts Options) *Conn {
 		opts.MaxInflight = DefaultMaxInflight
 	}
 	if handler == nil {
-		handler = func(context.Context, *Request) (any, error) {
+		handler = func(context.Context, *Request) (json.RawMessage, error) {
 			return nil, NewError(ErrCodeMethodNotFound, "no handler")
 		}
 	}
@@ -392,11 +392,14 @@ func (c *Conn) serve(ctx context.Context, req *Request) {
 				if errors.Is(reqCtx.Err(), context.Canceled) {
 					perr = NewError(ErrCodeCancelled, "request cancelled")
 				} else {
-					perr = NewError(ErrCodeInternal, "%v", err)
+					perr = NewError(ErrCodeInternal, fmt.Sprintf("%v", err))
 				}
 			}
 			_ = c.writeError(req.ID, perr)
 			return
+		}
+		if len(result) == 0 {
+			result = json.RawMessage("null")
 		}
 		_ = c.write(context.Background(), wireResult{JSONRPC: "2.0", ID: req.ID, Result: result})
 	}()
@@ -404,10 +407,10 @@ func (c *Conn) serve(ctx context.Context, req *Request) {
 
 // callHandler converts a handler panic into an internal error so one bad
 // request cannot take the whole session down.
-func (c *Conn) callHandler(ctx context.Context, req *Request) (result any, err error) {
+func (c *Conn) callHandler(ctx context.Context, req *Request) (result json.RawMessage, err error) {
 	defer func() {
 		if r := recover(); r != nil {
-			err = NewError(ErrCodeInternal, "handler panic: %v", r)
+			err = NewError(ErrCodeInternal, fmt.Sprintf("handler panic: %v", r))
 		}
 	}()
 	return c.handler(ctx, req)

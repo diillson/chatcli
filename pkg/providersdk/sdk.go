@@ -205,12 +205,11 @@ func (s *server) exited() bool {
 
 type logKey struct{}
 
-// Logf sends a $/log notification to the host from inside a handler.
-func Logf(ctx context.Context, level, format string, args ...any) {
+// Log sends a $/log notification to the host from inside a handler; level
+// is debug, info, warn or error.
+func Log(ctx context.Context, level, message string) {
 	if conn, ok := ctx.Value(logKey{}).(*providerproto.Conn); ok {
-		_ = conn.Notify(ctx, providerproto.MethodLog, providerproto.LogParams{
-			Level: level, Message: fmt.Sprintf(format, args...),
-		})
+		_ = conn.Notify(ctx, providerproto.MethodLog, providerproto.LogParams{Level: level, Message: message})
 	}
 }
 
@@ -219,17 +218,29 @@ func decode(raw json.RawMessage, v any) error {
 		return nil
 	}
 	if err := json.Unmarshal(raw, v); err != nil {
-		return providerproto.NewError(providerproto.ErrCodeInvalidParams, "invalid params: %v", err)
+		return providerproto.NewError(providerproto.ErrCodeInvalidParams, fmt.Sprintf("invalid params: %v", err))
 	}
 	return nil
 }
 
 func notSupported(method string) error {
-	return providerproto.NewError(providerproto.ErrCodeMethodNotFound, "%s is not supported by this plugin", method)
+	return providerproto.NewError(providerproto.ErrCodeMethodNotFound, fmt.Sprintf("%s is not supported by this plugin", method))
 }
 
-func (s *server) handle(ctx context.Context, req *providerproto.Request) (any, error) {
-	ctx = context.WithValue(ctx, logKey{}, s.conn)
+// handle adapts dispatch to the wire: results are marshaled here, once.
+func (s *server) handle(ctx context.Context, req *providerproto.Request) (json.RawMessage, error) {
+	res, err := s.dispatch(context.WithValue(ctx, logKey{}, s.conn), req)
+	if err != nil || res == nil {
+		return nil, err
+	}
+	b, err := json.Marshal(res)
+	if err != nil {
+		return nil, providerproto.NewError(providerproto.ErrCodeInternal, "encode result: "+err.Error())
+	}
+	return b, nil
+}
+
+func (s *server) dispatch(ctx context.Context, req *providerproto.Request) (any, error) {
 
 	seq := providerproto.RequestSeqFromContext(ctx)
 	s.mu.Lock()
@@ -335,8 +346,8 @@ func (s *server) initialize(req *providerproto.Request) (any, error) {
 		}
 	}
 	if !supported {
-		return nil, providerproto.NewError(providerproto.ErrCodeInvalidRequest,
-			"protocol versions %v not supported; this plugin speaks %q", p.ProtocolVersions, providerproto.ProtocolVersion)
+		return nil, providerproto.NewError(providerproto.ErrCodeInvalidRequest, fmt.Sprintf(
+			"protocol versions %v not supported; this plugin speaks %q", p.ProtocolVersions, providerproto.ProtocolVersion))
 	}
 	s.mu.Lock()
 	s.initialized = true
