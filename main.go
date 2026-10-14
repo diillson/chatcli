@@ -95,6 +95,11 @@ func dispatchSubcommand() bool {
 		// loads no project file and boots no further than i18n.
 		i18n.Init()
 		os.Exit(workspacetrust.RunCLI(os.Args[2:], os.Stdout, os.Stderr))
+	case "provider":
+		// Provider-plugin tooling (conformance kit). It spawns the plugin
+		// under test only — no LLM manager, no full ChatCLI boot.
+		i18n.Init()
+		os.Exit(cmd.RunProviderCLI(context.Background(), os.Args[2:], os.Stdout, os.Stderr))
 	case "plugin":
 		// Plugin supply chain (keygen/sign/verify/trust/quarantine) — key
 		// management an operator or a CI job runs, so it boots no further
