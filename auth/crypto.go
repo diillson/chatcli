@@ -72,6 +72,60 @@ func createKeyFile(keyPath string, key []byte) ([]byte, error) {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return nil, fmt.Errorf("%s: %w", i18n.T("auth.crypto.keydir_failed"), err)
 	}
+	// Publish atomically: the whole key goes to a private temp file first
+	// and is then hard-linked into place. Link refuses an existing name (as
+	// exclusive as O_EXCL) and the name only ever appears holding the
+	// complete key, so a concurrent first run can never read an empty file
+	// and fail closed on it.
+	published, err := linkKeyFile(dir, keyPath, key)
+	if err == nil {
+		return published, nil
+	}
+	if !errors.Is(err, errNoHardLinks) {
+		return nil, err
+	}
+	return createKeyFileExclusive(keyPath, key)
+}
+
+// errNoHardLinks reports a filesystem that cannot hard-link the key file.
+var errNoHardLinks = errors.New("filesystem does not support hard links")
+
+// linkFile publishes the key; a variable so tests can simulate filesystems
+// without hard links.
+var linkFile = os.Link
+
+func linkKeyFile(dir, keyPath string, key []byte) ([]byte, error) {
+	tmp, err := os.CreateTemp(dir, ".auth-key-*")
+	if err != nil {
+		return nil, fmt.Errorf("%s: %w", i18n.T("auth.crypto.keysave_failed"), err)
+	}
+	tmpName := tmp.Name()
+	defer func() { _ = os.Remove(tmpName) }()
+	_, werr := tmp.Write(key)
+	if serr := tmp.Sync(); werr == nil {
+		werr = serr
+	}
+	if cerr := tmp.Close(); werr == nil {
+		werr = cerr
+	}
+	if werr == nil {
+		werr = os.Chmod(tmpName, 0o600)
+	}
+	if werr != nil {
+		return nil, fmt.Errorf("%s: %w", i18n.T("auth.crypto.keysave_failed"), werr)
+	}
+	if err := linkFile(tmpName, filepath.Clean(keyPath)); err != nil {
+		if errors.Is(err, os.ErrExist) {
+			return awaitKeyFile(keyPath)
+		}
+		return nil, errNoHardLinks
+	}
+	return key, nil
+}
+
+// createKeyFileExclusive is the fallback for filesystems without hard
+// links: exclusive create, then write.
+func createKeyFileExclusive(keyPath string, key []byte) ([]byte, error) {
 	f, err := os.OpenFile(filepath.Clean(keyPath), os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600) //#nosec G304 -- key path derived from CHATCLI_AUTH_DIR or the home directory
 	if errors.Is(err, os.ErrExist) {
 		return awaitKeyFile(keyPath)
