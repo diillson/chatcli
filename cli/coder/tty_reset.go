@@ -10,6 +10,8 @@ import (
 	"os"
 	"os/exec"
 	"runtime"
+
+	"github.com/diillson/chatcli/utils"
 )
 
 // RestoreCookedMode is the exported entry-point that callers outside
@@ -38,6 +40,12 @@ import (
 // (occasionally-broken-on-resume) behavior, which is what we are
 // trying to improve.
 func RestoreCookedMode() bool {
+	// Only the terminal's owner may reset it: a child surface sharing the
+	// controlling terminal (the /web UI process) would flip the REPL's raw
+	// terminal to cooked mode under go-prompt.
+	if !utils.OwnsTerminal() {
+		return false
+	}
 	if runtime.GOOS == "windows" {
 		return restoreCookedModeWindows()
 	}

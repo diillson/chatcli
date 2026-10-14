@@ -12,6 +12,8 @@ import (
 	"os"
 
 	"golang.org/x/sys/unix"
+
+	"github.com/diillson/chatcli/utils"
 )
 
 // flushTTYInput discards data the kernel has queued for the controlling
@@ -19,6 +21,11 @@ import (
 // the input queue. We target /dev/tty explicitly so the operation does the
 // right thing even if stdin is redirected.
 func flushTTYInput() error {
+	// Never discard input on a terminal this process does not own: a child
+	// surface would throw away what the user is typing into the REPL.
+	if !utils.OwnsTerminal() {
+		return nil
+	}
 	tty, err := os.OpenFile("/dev/tty", os.O_RDWR, 0)
 	if err != nil {
 		return nil
