@@ -40,6 +40,10 @@ type GeminiClient struct {
 	baseURL     string
 	usageState  client.UsageState
 
+	// catalogProvider is set for provider plugins in dialect mode (see
+	// ClientOptions); empty for the built-in provider.
+	catalogProvider string
+
 	// explicit is the cachedContents state (explicit_cache.go); lazily
 	// built so clients that never opt in pay nothing.
 	explicit     *explicitCache
@@ -111,9 +115,44 @@ func NewGeminiClient(provider auth.TokenProvider, model string, logger *zap.Logg
 	}
 }
 
+// ClientOptions points a GeminiClient at a Gemini API-compatible endpoint
+// other than Google's — a provider plugin in dialect mode. The zero value
+// reproduces NewGeminiClient.
+type ClientOptions struct {
+	// BaseURL is the API root ("…/v1beta"); empty keeps Google's.
+	BaseURL string
+	// WrapTransport wraps the network transport below the request logger,
+	// so headers it injects never appear in the HTTP log.
+	WrapTransport func(http.RoundTripper) http.RoundTripper
+	// CatalogProvider names the catalog provider for display names and
+	// max-tokens sizing (with its *_MAX_TOKENS override); empty means
+	// GOOGLEAI.
+	CatalogProvider string
+}
+
+// NewGeminiClientWithOptions is NewGeminiClient with endpoint overrides.
+func NewGeminiClientWithOptions(provider auth.TokenProvider, model string, logger *zap.Logger, maxAttempts int, backoff time.Duration, opts ClientOptions) *GeminiClient {
+	c := NewGeminiClient(provider, model, logger, maxAttempts, backoff)
+	if u := strings.TrimRight(strings.TrimSpace(opts.BaseURL), "/"); u != "" {
+		c.baseURL = u
+	}
+	if opts.WrapTransport != nil {
+		c.client = utils.NewHTTPClientWithTransport(logger, config.DefaultGoogleAITimeout, opts.WrapTransport(utils.NewDefaultTransport()))
+	}
+	c.catalogProvider = strings.ToUpper(strings.TrimSpace(opts.CatalogProvider))
+	return c
+}
+
+func (c *GeminiClient) catalogName() string {
+	if c.catalogProvider != "" {
+		return c.catalogProvider
+	}
+	return catalog.ProviderGoogleAI
+}
+
 // GetModelName retorna o nome amigável do modelo Gemini
 func (c *GeminiClient) GetModelName() string {
-	return catalog.GetDisplayName(catalog.ProviderGoogleAI, c.model)
+	return catalog.GetDisplayName(c.catalogName(), c.model)
 }
 
 // SendPrompt envia um prompt para o Gemini e retorna a resposta
@@ -482,6 +521,9 @@ func (c *GeminiClient) sanitizeErrorResponse(response string) string {
 
 // getMaxTokens obtém o limite de tokens configurado
 func (c *GeminiClient) getMaxTokens() int {
+	if c.catalogProvider != "" {
+		return catalog.GetMaxTokens(c.catalogProvider, c.model, catalog.MaxTokensEnvOverride(c.catalogProvider))
+	}
 	if tokenStr := os.Getenv("GOOGLEAI_MAX_TOKENS"); tokenStr != "" {
 		if parsedTokens, err := strconv.Atoi(tokenStr); err == nil && parsedTokens > 0 {
 			c.logger.Debug("Usando max_tokens personalizado", zap.Int("max_tokens", parsedTokens))

@@ -418,7 +418,7 @@ func TestValidateInfo(t *testing.T) {
 		t.Fatal(err)
 	}
 	bad := ok
-	bad.Dialect = &providerproto.Dialect{API: providerproto.DialectGemini, BaseURL: "https://x.example"}
+	bad.Dialect = &providerproto.Dialect{API: providerproto.DialectAPI("smoke-signals"), BaseURL: "https://x.example"}
 	if err := validateInfo(bad); err == nil || !strings.Contains(err.Error(), "not supported") {
 		t.Fatalf("unsupported dialect = %v", err)
 	}
