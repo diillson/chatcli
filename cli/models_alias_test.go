@@ -7,6 +7,7 @@
 package cli
 
 import (
+	"context"
 	"testing"
 
 	prompt "github.com/c-bata/go-prompt"
@@ -41,6 +42,32 @@ func TestModelSuggestionsEchoTheTypedAlias(t *testing.T) {
 		got := cli.getModelSuggestions(*buf.Document())
 		if len(got) != 1 || got[0].Text != cmd {
 			t.Fatalf("suggestions for %q = %+v, want the command echoed back", cmd, got)
+		}
+	}
+}
+
+// Running the routed handler, not just resolving it: /models <name> switches
+// exactly like /model <name>, and the bare alias never turns into a switch
+// to a model named after a stray suffix.
+func TestModelsAliasSwitchesLikeModel(t *testing.T) {
+	ctx := context.Background()
+	for _, cmd := range []string{"/model", "/models"} {
+		c := newProviderTestCLI("OPENAI", []string{"OPENAI"})
+		ch := NewCommandHandler(c)
+		fn, ok := ch.lookup(cmd + " gpt-x")
+		if !ok {
+			t.Fatalf("no route for %s", cmd)
+		}
+		fn(ctx, cmd+" gpt-x")
+		if c.Model != "gpt-x" {
+			t.Fatalf("%s gpt-x: model = %q, want gpt-x", cmd, c.Model)
+		}
+
+		bare := newProviderTestCLI("OPENAI", []string{"OPENAI"})
+		bfn, _ := NewCommandHandler(bare).lookup(cmd)
+		bfn(ctx, cmd)
+		if bare.Model != "m0" {
+			t.Fatalf("bare %s switched the model to %q", cmd, bare.Model)
 		}
 	}
 }
