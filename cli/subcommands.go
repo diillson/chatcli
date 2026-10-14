@@ -51,8 +51,8 @@ var subcommands = []Subcommand{
 	{Name: "mcp-server", Aliases: []string{"mcp-serve"}, Usage: "chatcli mcp-server", SummaryKey: "subcmd.mcp_server"},
 	{Name: "acp", Usage: "chatcli acp", SummaryKey: "subcmd.acp"},
 	{Name: "mcp", Usage: "chatcli mcp add|list|get|remove …", SummaryKey: "subcmd.mcp", OwnHelp: true},
-	{Name: "plugin", Usage: "chatcli plugin keygen|sign|verify|trust|quarantine …", SummaryKey: "subcmd.plugin", OwnHelp: true},
-	{Name: "provider", Usage: "chatcli provider list | login <name> | logout <name> | test [flags] <plugin> [args…]", SummaryKey: "subcmd.provider", OwnHelp: true},
+	{Name: "plugin", Usage: "chatcli plugin install|keygen|sign|verify|trust|quarantine …", SummaryKey: "subcmd.plugin", OwnHelp: true},
+	{Name: "provider", Usage: "chatcli provider install <src> | list | login <name> | logout <name> | test [flags] <plugin> [args…]", SummaryKey: "subcmd.provider", OwnHelp: true},
 	{Name: "trust", Usage: "chatcli trust [--list | --revoke] [dir]", SummaryKey: "subcmd.trust", OwnHelp: true},
 }
 

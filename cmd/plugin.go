@@ -7,13 +7,18 @@
 package cmd
 
 import (
+	"context"
+	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
+	"github.com/diillson/chatcli/cli"
 	"github.com/diillson/chatcli/cli/plugins"
 	"github.com/diillson/chatcli/i18n"
 	"github.com/diillson/chatcli/llm/providerhost"
@@ -43,7 +48,12 @@ func RunPluginCLI(args []string) error {
 	case "verify":
 		return runPluginVerify(rest)
 	case "trust":
+		if len(rest) > 0 && rest[0] == "list" {
+			return runPluginTrustList()
+		}
 		return runPluginTrust(rest)
+	case "install":
+		return runBundleInstall(context.Background(), plugins.KindTool, rest, os.Stdout)
 	case "quarantine":
 		return runPluginQuarantine(rest)
 	case "help", "-h", "--help":
@@ -71,6 +81,16 @@ func printPluginUsage() {
   chatcli plugin trust --key <path> [--name <name>]
       Register a public key so plugins signed with the matching private key
       verify on this machine.
+
+  chatcli plugin trust list
+      Trusted keys (yours and the administrator's managed keys) with their
+      fingerprints, and the publisher pinned for each installed plugin.
+
+  chatcli plugin install <path|https-url> [--trust <fingerprint>]
+      Install a prebuilt plugin. <src>.sig and <src>.pub are read beside it;
+      an unknown publisher is confirmed once by fingerprint (or with --trust
+      when no person is at the terminal) and pinned: a later bundle for the
+      same plugin signed by another key is refused.
 
   chatcli plugin quarantine [list]
       Show unsigned plugins still inside their waiting period.
@@ -240,4 +260,75 @@ func printQuarantineRows(entries []plugins.QuarantineEntry) {
 			fmt.Println(i18n.T("plugincli.quarantine.row_admitted", e.Name))
 		}
 	}
+}
+
+// runBundleInstall installs a prebuilt tool or provider plugin bundle.
+func runBundleInstall(ctx context.Context, kind string, args []string, stdout io.Writer) error {
+	var src string
+	if len(args) > 0 && !strings.HasPrefix(args[0], "-") {
+		src, args = args[0], args[1:]
+	}
+	fs := flag.NewFlagSet(kind+" install", flag.ContinueOnError)
+	trust := fs.String("trust", "", "publisher fingerprint you vouch for (SHA256:...)")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if src == "" && fs.NArg() == 1 {
+		src = fs.Arg(0)
+	}
+	if src == "" {
+		return fmt.Errorf("%s", i18n.T("plugincli.install.usage"))
+	}
+	dest, err := bundleDest(kind)
+	if err != nil {
+		return err
+	}
+	res, err := plugins.InstallBundle(ctx, src, plugins.InstallOptions{
+		Kind:          kind,
+		DestDir:       dest,
+		Trust:         strings.TrimSpace(*trust),
+		Confirm:       cli.PublisherConfirm(),
+		AllowUnsigned: plugins.NewPluginVerifier().AllowsUnsigned(),
+	})
+	if err != nil {
+		return errors.New(cli.InstallErrorMessage(err))
+	}
+	cli.PrintInstallResult(stdout, res)
+	return nil
+}
+
+func bundleDest(kind string) (string, error) {
+	if kind == plugins.KindProvider {
+		return providerhost.DefaultDir(), nil
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(home, ".chatcli", "plugins"), nil
+}
+
+func runPluginTrustList() error {
+	keys := plugins.ListTrustedKeys()
+	if len(keys) == 0 {
+		fmt.Println(i18n.T("plugincli.trust.list.empty"))
+	} else {
+		fmt.Println(i18n.T("plugincli.trust.list.keys_header"))
+		for _, k := range keys {
+			fmt.Println(i18n.T("plugincli.trust.list.key_row", k.Name, k.Fingerprint, k.Source))
+		}
+	}
+	pins := plugins.ListPins()
+	if len(pins) > 0 {
+		fmt.Println(i18n.T("plugincli.trust.list.pins_header"))
+		names := make([]string, 0, len(pins))
+		for n := range pins {
+			names = append(names, n)
+		}
+		sort.Strings(names)
+		for _, n := range names {
+			fmt.Println(i18n.T("plugincli.trust.list.pin_row", n, pins[n].Fingerprint))
+		}
+	}
+	return nil
 }

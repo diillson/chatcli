@@ -39,6 +39,11 @@ func NewPluginVerifier() *PluginVerifier {
 		allowUnsigned: strings.EqualFold(os.Getenv("CHATCLI_ALLOW_UNSIGNED_PLUGINS"), "true"),
 	}
 
+	// The administrator's keys apply whatever happens below — a managed
+	// machine where the user never created a trusted-keys directory is the
+	// case they exist for.
+	defer v.loadManagedKeys()
+
 	// Load trusted public keys
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -64,6 +69,14 @@ func NewPluginVerifier() *PluginVerifier {
 	}
 
 	return v
+}
+
+// loadManagedKeys adds the administrator's keys (ManagedTrustedKeysDir):
+// every user of the machine trusts them without copying anything.
+func (v *PluginVerifier) loadManagedKeys() {
+	for _, k := range readKeyDir(ManagedTrustedKeysDir(), "managed") {
+		v.trustedKeys = append(v.trustedKeys, k.key)
+	}
 }
 
 // VerificationStatus is what inspecting a plugin's signature concluded.

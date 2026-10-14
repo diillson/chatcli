@@ -5,7 +5,7 @@
   "help.command.plugin_quarantine": "unsigned plugins still inside their waiting period, and how to admit one",
   "plugin.quarantine.held": "held in quarantine, %s remaining",
   "plugincli.keygen.done": "signing key pair created\n  private: %s (keep this secret)\n  public:  %s",
-  "plugincli.keygen.next": "register the public key on every machine that installs your plugins:\n  chatcli plugin trust --key %s",
+  "plugincli.keygen.next": "publish it next to each binary as <binary>.pub, with <binary>.sig — installs confirm your fingerprint once and pin it.\n  Administrators can put it in the managed trusted-keys directory instead. To trust it on this machine only:\n  chatcli plugin trust --key %s",
   "plugincli.keygen.output_required": "--output is required: name the directory to write the key pair into",
   "plugincli.quarantine.disabled": "quarantine is off. Set CHATCLI_PLUGIN_QUARANTINE to a duration (for example 24h) to hold newly seen unsigned plugins before they can run.",
   "plugincli.quarantine.empty": "quarantine is on with a %s window; no plugin is waiting",

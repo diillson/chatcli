@@ -862,7 +862,7 @@
   "plugin.inspect.details_for": "🛠 PLUGIN INSPECTION: %s",
   "plugin.inspect.path": "Executable Path",
   "plugin.inspect.permissions": "Permissions",
-  "plugin.install.usage": "Usage: /plugin install <git-repository-url>",
+  "plugin.install.usage": "Usage: /plugin install <git-repository-url> | <path-to-binary> | --binary <https-url>",
   "plugin.install.security_warning": " ⚠ WARNING: You are about to clone, compile, and execute code from a third-party repository. Only install from trusted sources.",
   "plugin.install.confirm": "Do you wish to continue with the installation of '%s'? (y/N): ",
   "plugin.install.canceled": "Installation cancelled.",

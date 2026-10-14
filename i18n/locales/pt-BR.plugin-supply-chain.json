@@ -5,7 +5,7 @@
   "help.command.plugin_quarantine": "plugins não assinados ainda na janela de espera, e como liberar um",
   "plugin.quarantine.held": "em quarentena, faltam %s",
   "plugincli.keygen.done": "par de chaves de assinatura criado\n  privada: %s (mantenha em segredo)\n  pública: %s",
-  "plugincli.keygen.next": "registre a chave pública em toda máquina que instala seus plugins:\n  chatcli plugin trust --key %s",
+  "plugincli.keygen.next": "publique-a ao lado de cada binário como <binário>.pub, junto do <binário>.sig — as instalações confirmam seu fingerprint uma vez e o fixam.\n  Administradores podem colocá-la no diretório de chaves gerenciadas. Para confiar só nesta máquina:\n  chatcli plugin trust --key %s",
   "plugincli.keygen.output_required": "--output é obrigatório: informe o diretório onde gravar o par de chaves",
   "plugincli.quarantine.disabled": "a quarentena está desligada. Defina CHATCLI_PLUGIN_QUARANTINE com uma duração (por exemplo 24h) para segurar plugins não assinados recém-vistos antes que possam executar.",
   "plugincli.quarantine.empty": "quarentena ligada com janela de %s; nenhum plugin aguardando",
