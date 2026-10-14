@@ -12,6 +12,8 @@ import (
 	"os"
 
 	"golang.org/x/sys/unix"
+
+	"github.com/diillson/chatcli/utils"
 )
 
 // flushTTYInput on BSD-family systems uses TIOCFLUSH with the FREAD bit set
@@ -24,6 +26,11 @@ import (
 // coincidence the same numeric value is exposed as unix.TCIFLUSH on Darwin,
 // which we use as a self-documenting alias.
 func flushTTYInput() error {
+	// Never discard input on a terminal this process does not own: a child
+	// surface would throw away what the user is typing into the REPL.
+	if !utils.OwnsTerminal() {
+		return nil
+	}
 	tty, err := os.OpenFile("/dev/tty", os.O_RDWR, 0)
 	if err != nil {
 		return nil

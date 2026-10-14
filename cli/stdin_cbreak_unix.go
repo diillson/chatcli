@@ -12,7 +12,7 @@ import (
 	"os/exec"
 	"strings"
 
-	"golang.org/x/term"
+	"github.com/diillson/chatcli/utils"
 )
 
 // enableStdinCbreak switches the controlling TTY to a cbreak-style mode for
@@ -27,7 +27,7 @@ import (
 // state captured with `stty -g`. Non-TTY stdin (gateway, tests, pipes) is
 // a no-op.
 func enableStdinCbreak() func() {
-	if !term.IsTerminal(int(os.Stdin.Fd())) {
+	if !utils.OwnsTerminal() {
 		return func() {}
 	}
 	tty, err := os.Open("/dev/tty")

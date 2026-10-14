@@ -12,8 +12,10 @@ import (
 	"time"
 
 	"github.com/charmbracelet/lipgloss"
-	"github.com/diillson/chatcli/i18n"
 	"golang.org/x/term"
+
+	"github.com/diillson/chatcli/i18n"
+	"github.com/diillson/chatcli/utils"
 )
 
 type SecurityDecision int
@@ -84,6 +86,9 @@ func detectTerminalWidth() int {
 // swallowed: the prompt is best-effort UX and any failure here just
 // degrades to the previous (broken-on-resume) behavior.
 func resetTTYToSane() bool {
+	if !utils.OwnsTerminal() {
+		return false
+	}
 	if runtime.GOOS == "windows" {
 		return restoreCookedModeWindows()
 	}

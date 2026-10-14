@@ -41,6 +41,8 @@ import (
 	"time"
 
 	"golang.org/x/sys/unix"
+
+	"github.com/diillson/chatcli/utils"
 )
 
 // errTTYInjectUnsupported indicates the platform / OS configuration
@@ -62,6 +64,9 @@ var errTTYInjectUnsupported = errors.New("tty inject: TIOCSTI not permitted on t
 func injectTTYLine(line string) error {
 	if line == "" {
 		return nil
+	}
+	if !utils.OwnsTerminal() {
+		return errTTYInjectUnsupported
 	}
 	fd, closer, err := openControllingTTY()
 	if err != nil {
