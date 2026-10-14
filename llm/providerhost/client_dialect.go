@@ -15,8 +15,11 @@ import (
 	"time"
 
 	"github.com/diillson/chatcli/auth"
+	"github.com/diillson/chatcli/llm/claudeai"
 	"github.com/diillson/chatcli/llm/client"
+	"github.com/diillson/chatcli/llm/googleai"
 	"github.com/diillson/chatcli/llm/openai"
+	"github.com/diillson/chatcli/llm/openairesponses"
 	"github.com/diillson/chatcli/pkg/providerproto"
 	"go.uber.org/zap"
 )
@@ -27,43 +30,91 @@ const (
 	dialectBackoff     = 2 * time.Second
 )
 
-// dialectClient is chatcli's built-in OpenAI chat-completions client aimed
-// at the plugin's backend. Native tools, streaming, prompt-cache usage,
-// token counting and keep-alive all come from the embedded client; only the
-// model list is served by the plugin.
-type dialectClient struct {
+// Dialect clients are chatcli's built-in clients aimed at the plugin's
+// backend. Native tools, streaming, prompt-cache usage, token counting and
+// keep-alive all come from the embedded client; only the model list is
+// served by the plugin. One wrapper per client type, so each keeps the
+// optional interfaces its embedded client implements.
+type dialectOpenAIChat struct {
 	*openai.OpenAIClient
 	plugin *Plugin
 }
 
-// ListModels serves the plugin's list instead of the backend's /models.
-func (c *dialectClient) ListModels(ctx context.Context) ([]client.ModelInfo, error) {
+func (c *dialectOpenAIChat) ListModels(ctx context.Context) ([]client.ModelInfo, error) {
 	return listModels(ctx, c.plugin)
 }
 
-// placeholderToken satisfies the embedded client's Authorization header;
+type dialectOpenAIResponses struct {
+	*openairesponses.OpenAIResponsesClient
+	plugin *Plugin
+}
+
+func (c *dialectOpenAIResponses) ListModels(ctx context.Context) ([]client.ModelInfo, error) {
+	return listModels(ctx, c.plugin)
+}
+
+type dialectAnthropic struct {
+	*claudeai.ClaudeClient
+	plugin *Plugin
+}
+
+func (c *dialectAnthropic) ListModels(ctx context.Context) ([]client.ModelInfo, error) {
+	return listModels(ctx, c.plugin)
+}
+
+type dialectGemini struct {
+	*googleai.GeminiClient
+	plugin *Plugin
+}
+
+func (c *dialectGemini) ListModels(ctx context.Context) ([]client.ModelInfo, error) {
+	return listModels(ctx, c.plugin)
+}
+
+// placeholderToken satisfies the embedded client's own auth header;
 // headerTransport replaces or removes it before the request leaves.
 const placeholderToken = "provider-plugin"
 
 func newDialectClient(p *Plugin, model string, logger *zap.Logger) (client.LLMClient, error) {
 	api := p.info.Dialect.API
-	if m, ok := p.Model(model); ok && m.Dialect != "" {
-		api = m.Dialect
+	entry, listed := p.Model(model)
+	if listed && entry.Dialect != "" {
+		api = entry.Dialect
 	}
 	if !supportedDialect(api) {
 		return nil, fmt.Errorf("%s: dialect %q is not supported by this chatcli", p.Name(), api)
 	}
-	chatURL := strings.TrimRight(p.info.Dialect.BaseURL, "/") + "/chat/completions"
+	base := strings.TrimRight(p.info.Dialect.BaseURL, "/")
 	tokens := auth.NewStaticTokenProvider(placeholderToken, auth.AuthModeAPIKey, auth.ProviderPlugin)
-	inner := openai.NewOpenAIClientWithOptions(tokens, model, logger, dialectMaxAttempts, dialectBackoff, openai.ClientOptions{
-		ChatURL:         chatURL,
-		CatalogProvider: p.Name(),
-		WrapTransport: func(next http.RoundTripper) http.RoundTripper {
-			return &headerTransport{plugin: p, model: model, next: next}
-		},
-	})
-	return &dialectClient{OpenAIClient: inner, plugin: p}, nil
+	wrap := func(next http.RoundTripper) http.RoundTripper {
+		return &headerTransport{plugin: p, model: model, next: next}
+	}
+	switch api {
+	case providerproto.DialectOpenAIResponses:
+		inner := openairesponses.NewOpenAIResponsesClientWithOptions(tokens, model, logger, dialectMaxAttempts, dialectBackoff,
+			openairesponses.ClientOptions{ResponsesURL: base + "/responses", WrapTransport: wrap, CatalogProvider: p.Name()})
+		return &dialectOpenAIResponses{OpenAIResponsesClient: inner, plugin: p}, nil
+	case providerproto.DialectAnthropicMessages:
+		upstream := ""
+		if listed && entry.Upstream != nil {
+			upstream = entry.Upstream.Model
+		}
+		inner := claudeai.NewClaudeClientWithOptions(tokens, model, logger, dialectMaxAttempts, dialectBackoff,
+			claudeai.ClientOptions{MessagesURL: base + "/messages", WrapTransport: wrap, CatalogProvider: p.Name(), UpstreamModel: upstream})
+		return &dialectAnthropic{ClaudeClient: inner, plugin: p}, nil
+	case providerproto.DialectGemini:
+		inner := googleai.NewGeminiClientWithOptions(tokens, model, logger, dialectMaxAttempts, dialectBackoff,
+			googleai.ClientOptions{BaseURL: base, WrapTransport: wrap, CatalogProvider: p.Name()})
+		return &dialectGemini{GeminiClient: inner, plugin: p}, nil
+	default:
+		inner := openai.NewOpenAIClientWithOptions(tokens, model, logger, dialectMaxAttempts, dialectBackoff,
+			openai.ClientOptions{ChatURL: base + "/chat/completions", WrapTransport: wrap, CatalogProvider: p.Name()})
+		return &dialectOpenAIChat{OpenAIClient: inner, plugin: p}, nil
+	}
 }
+
+// builtinAuthHeaders are the credential headers the embedded clients set.
+var builtinAuthHeaders = []string{"Authorization", "X-Api-Key", "X-Goog-Api-Key", "Api-Key"}
 
 // headerTransport attaches the plugin's auth/token headers (and the
 // model's own headers) to every request. It sits below the request logger,
@@ -101,25 +152,19 @@ func (t *headerTransport) send(req *http.Request, force bool) (*http.Response, e
 		}
 		r.Body = body
 	}
-	providesAuth := false
+	// The embedded clients authenticate with one of these headers and the
+	// placeholder token; any of them the plugin does not set itself is
+	// removed, so the placeholder never leaves the process.
+	for _, h := range builtinAuthHeaders {
+		r.Header.Del(h)
+	}
 	for k, v := range headers {
-		if strings.EqualFold(k, "Authorization") {
-			providesAuth = true
-		}
 		r.Header.Set(k, v)
 	}
 	if m, ok := t.plugin.Model(t.model); ok {
 		for k, v := range m.Headers {
-			if strings.EqualFold(k, "Authorization") {
-				providesAuth = true
-			}
 			r.Header.Set(k, v)
 		}
-	}
-	if !providesAuth {
-		// The plugin authenticates with its own headers; never send the
-		// embedded client's placeholder bearer.
-		r.Header.Del("Authorization")
 	}
 	return t.next.RoundTrip(r)
 }
