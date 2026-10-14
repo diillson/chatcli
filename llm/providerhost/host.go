@@ -188,15 +188,31 @@ func (h *Host) name() string {
 	return h.opts.Path
 }
 
+// crashDetailLines is how much of the stderr tail a crash error quotes: a
+// runtime warning or the last frame of a trace often follows the real cause.
+const (
+	crashDetailLines = 3
+	crashDetailBytes = 400
+)
+
 func (h *Host) crashDetail(p *process) string {
-	tail := strings.TrimSpace(p.stderr.String())
-	if i := strings.LastIndexByte(tail, '\n'); i >= 0 {
-		tail = tail[i+1:]
+	var lines []string
+	for _, l := range strings.Split(p.stderr.String(), "\n") {
+		if l = strings.TrimSpace(l); l != "" {
+			lines = append(lines, l)
+		}
 	}
-	if tail == "" {
+	if len(lines) == 0 {
 		return "no stderr output"
 	}
-	return tail
+	if len(lines) > crashDetailLines {
+		lines = lines[len(lines)-crashDetailLines:]
+	}
+	detail := strings.Join(lines, " | ")
+	if len(detail) > crashDetailBytes {
+		detail = "…" + detail[len(detail)-crashDetailBytes:]
+	}
+	return detail
 }
 
 // handle serves plugin → host messages: chat/delta routing and $/log.
