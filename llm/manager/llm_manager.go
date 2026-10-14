@@ -627,6 +627,35 @@ func (m *LLMManagerImpl) clientFactory(provider string) (func(string) (client.LL
 	return factoryFunc, ok
 }
 
+// ProviderRegistrar is implemented by managers that accept providers at
+// runtime (external provider plugins). It is a separate interface so
+// LLMManager — and every fake of it — stays unchanged.
+type ProviderRegistrar interface {
+	// RegisterProvider adds or replaces the factory for name.
+	RegisterProvider(name string, factory func(model string) (client.LLMClient, error))
+	// UnregisterProvider removes name; built-in providers re-register on
+	// the next RefreshProviders.
+	UnregisterProvider(name string)
+}
+
+// RegisterProvider implements ProviderRegistrar.
+func (m *LLMManagerImpl) RegisterProvider(name string, factory func(model string) (client.LLMClient, error)) {
+	name = strings.ToUpper(strings.TrimSpace(name))
+	if name == "" || factory == nil {
+		return
+	}
+	m.clientsMu.Lock()
+	defer m.clientsMu.Unlock()
+	m.clients[name] = factory
+}
+
+// UnregisterProvider implements ProviderRegistrar.
+func (m *LLMManagerImpl) UnregisterProvider(name string) {
+	m.clientsMu.Lock()
+	defer m.clientsMu.Unlock()
+	delete(m.clients, strings.ToUpper(strings.TrimSpace(name)))
+}
+
 // GetAvailableProviders retorna uma lista de provedores disponíveis configurados
 func (m *LLMManagerImpl) GetAvailableProviders() []string {
 	m.clientsMu.RLock()

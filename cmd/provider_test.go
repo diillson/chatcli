@@ -90,3 +90,77 @@ func TestRunProviderTestMissingBinaryFails(t *testing.T) {
 		t.Fatalf("exit = %d, want %d", code, providerExitFail)
 	}
 }
+
+// installEchoProvider builds the reference plugin into a temporary
+// ~/.chatcli/providers and points HOME and the auth store at the sandbox.
+func installEchoProvider(t *testing.T) {
+	t.Helper()
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	t.Setenv("CHATCLI_AUTH_DIR", filepath.Join(home, ".chatcli"))
+	t.Setenv("CHATCLI_ALLOW_UNSIGNED_PLUGINS", "true")
+	t.Setenv("CHATCLI_PLUGIN_QUARANTINE", "")
+	dir := filepath.Join(home, ".chatcli", "providers")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	bin := buildEchoProvider(t)
+	data, err := os.ReadFile(bin)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, filepath.Base(bin)), data, 0o755); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestProviderListLoginLogout(t *testing.T) {
+	i18n.Init()
+	installEchoProvider(t)
+	ctx := context.Background()
+
+	var out, errb bytes.Buffer
+	if code := RunProviderCLI(ctx, []string{"list"}, &out, &errb); code != providerExitOK {
+		t.Fatalf("list exit %d: %s %s", code, out.String(), errb.String())
+	}
+	if !bytes.Contains(out.Bytes(), []byte("ECHO")) {
+		t.Fatalf("list did not show ECHO: %s", out.String())
+	}
+
+	out.Reset()
+	errb.Reset()
+	// Both orders work: the name first (how people type it) and last.
+	for _, args := range [][]string{{"login", "echo", "--input", "token=demo"}, {"login", "--input", "token=demo", "echo"}} {
+		if code := RunProviderCLI(ctx, args, &out, &errb); code != providerExitOK {
+			t.Fatalf("%v exit %d: %s", args, code, errb.String())
+		}
+	}
+	if code := RunProviderCLI(ctx, []string{"login", "echo", "extra"}, &out, &errb); code != providerExitUsage {
+		t.Fatalf("login with two names = %d", code)
+	}
+	out.Reset()
+	if code := RunProviderCLI(ctx, []string{"login"}, &out, &errb); code != providerExitUsage {
+		t.Fatalf("login without a name = %d", code)
+	}
+	if code := RunProviderCLI(ctx, []string{"login", "nope"}, &out, &errb); code != providerExitFail {
+		t.Fatalf("login to a missing plugin = %d", code)
+	}
+	if code := RunProviderCLI(ctx, []string{"logout", "echo"}, &out, &errb); code != providerExitOK {
+		t.Fatalf("logout exit %d: %s", code, errb.String())
+	}
+	if code := RunProviderCLI(ctx, []string{"logout"}, &out, &errb); code != providerExitUsage {
+		t.Fatalf("logout without a name = %d", code)
+	}
+}
+
+func TestProviderListEmpty(t *testing.T) {
+	i18n.Init()
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	var out, errb bytes.Buffer
+	if code := RunProviderCLI(context.Background(), []string{"list"}, &out, &errb); code != providerExitOK {
+		t.Fatalf("exit %d", code)
+	}
+}

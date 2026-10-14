@@ -16,6 +16,7 @@ import (
 
 	"github.com/diillson/chatcli/cli/plugins"
 	"github.com/diillson/chatcli/i18n"
+	"github.com/diillson/chatcli/llm/providerhost"
 )
 
 // RunPluginCLI implements `chatcli plugin ...` — the plugin supply chain:
@@ -181,6 +182,7 @@ func runPluginQuarantine(args []string) error {
 		return err
 	}
 	q := plugins.NewQuarantine(filepath.Join(home, ".chatcli", "plugins"))
+	pq := plugins.NewQuarantine(providerhost.DefaultDir())
 
 	sub := "list"
 	if len(args) > 0 {
@@ -193,29 +195,14 @@ func runPluginQuarantine(args []string) error {
 			fmt.Println(i18n.T("plugincli.quarantine.disabled"))
 			return nil
 		}
-		entries := q.List()
-		if len(entries) == 0 {
-			fmt.Println(i18n.T("plugincli.quarantine.empty", q.Window().String()))
-			return nil
-		}
-		fmt.Println(i18n.T("plugincli.quarantine.header", q.Window().String()))
-		for _, e := range entries {
-			switch {
-			case e.Released:
-				fmt.Println(i18n.T("plugincli.quarantine.row_released", e.Name))
-			case e.Remaining > 0:
-				fmt.Println(i18n.T("plugincli.quarantine.row_waiting", e.Name, e.Remaining.Round(time.Second).String()))
-			default:
-				fmt.Println(i18n.T("plugincli.quarantine.row_admitted", e.Name))
-			}
-		}
+		printQuarantine(q, pq)
 		return nil
 
 	case "release":
 		if len(args) < 2 {
 			return fmt.Errorf("%s", i18n.T("plugincli.quarantine.release_name_required"))
 		}
-		if err := q.Release(args[1]); err != nil {
+		if err := plugins.ReleaseIn(args[1], q, pq); err != nil {
 			return err
 		}
 		fmt.Println(i18n.T("plugincli.quarantine.released", args[1]))
@@ -223,5 +210,34 @@ func runPluginQuarantine(args []string) error {
 
 	default:
 		return fmt.Errorf("%s", i18n.T("plugincli.quarantine.unknown_verb", sub))
+	}
+}
+
+// printQuarantine lists what the tool-plugin quarantine (q) and the
+// provider-plugin quarantine (pq) hold.
+func printQuarantine(q, pq *plugins.Quarantine) {
+	entries, providerEntries := q.List(), pq.List()
+	if len(entries) == 0 && len(providerEntries) == 0 {
+		fmt.Println(i18n.T("plugincli.quarantine.empty", q.Window().String()))
+		return
+	}
+	fmt.Println(i18n.T("plugincli.quarantine.header", q.Window().String()))
+	printQuarantineRows(entries)
+	if len(providerEntries) > 0 {
+		fmt.Println(i18n.T("plugincli.quarantine.providers_header"))
+		printQuarantineRows(providerEntries)
+	}
+}
+
+func printQuarantineRows(entries []plugins.QuarantineEntry) {
+	for _, e := range entries {
+		switch {
+		case e.Released:
+			fmt.Println(i18n.T("plugincli.quarantine.row_released", e.Name))
+		case e.Remaining > 0:
+			fmt.Println(i18n.T("plugincli.quarantine.row_waiting", e.Name, e.Remaining.Round(time.Second).String()))
+		default:
+			fmt.Println(i18n.T("plugincli.quarantine.row_admitted", e.Name))
+		}
 	}
 }

@@ -90,6 +90,7 @@ func (cli *ChatCLI) ApplyProjectEnv(dir string) (manager.LLMManager, config.Proj
 			return
 		}
 		cli.manager = rebuilt
+		cli.registerProviderPlugins(cli.backgroundCtx())
 		notifyManagerRebuilt(rebuilt)
 		mgr = rebuilt
 		cli.adoptProviderAfterOverlay(rep)

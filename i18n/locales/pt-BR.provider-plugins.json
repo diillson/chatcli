@@ -1,6 +1,6 @@
 {
-  "subcmd.provider": "Plugins de provider: roda o kit de conformidade contra o binário de um plugin",
-  "provider.cli.usage": "Uso: chatcli provider test [flags] <plugin> [args do plugin...]\n\nRoda o kit de conformidade de plugins de provider contra o binário de um plugin e sai com código diferente de zero quando alguma checagem falha.\n\nFlags:\n  --input id=valor        responde um campo do prompt de auth/login (repetível)\n  --credential-file path  credencial JSON usada no lugar do login\n  --model id              modelo das checagens de chat (padrão: o primeiro listado)\n  --timeout 30s           timeout por checagem\n  --json                  imprime o relatório em JSON",
+  "subcmd.provider": "Plugins de provider: lista, login, logout e kit de conformidade",
+  "provider.cli.usage": "Uso: chatcli provider <comando> [flags]\n\nComandos:\n  list                         Plugins de provider instalados e o estado do login\n  login <nome> [--input id=v]  Faz login num plugin de provider (as flags respondem campos do prompt para uso sem pessoa)\n  logout <nome>                Revoga e apaga a credencial de um plugin de provider\n  test [flags] <plugin> [args] Roda o kit de conformidade contra o binário de um plugin\n\nflags do test:\n  --input id=valor        responde um campo do prompt de auth/login (repetível)\n  --credential-file path  credencial JSON usada no lugar do login\n  --model id              modelo das checagens de chat (padrão: o primeiro listado)\n  --timeout 30s           timeout por checagem\n  --json                  imprime o relatório em JSON",
   "provider.cli.unknown": "subcomando de provider desconhecido %q",
   "provider.cli.missing_plugin": "faltou o comando do plugin: chatcli provider test <plugin> [args...]",
   "provider.cli.bad_input": "--input inválido %q (esperado id=valor)",
@@ -83,5 +83,23 @@
   "provider.check.protocol_unknown_method.unknown_methods_must_fail_with_got": "métodos desconhecidos devem falhar com %d, veio %v",
   "provider.check.tokens_count.count_for_a_non_empty_prompt": "contagem %d para um prompt não vazio",
   "provider.check.tokens_count.plugin_declares_no_tokens_count": "o plugin não declara tokens/count",
-  "provider.check.tokens_count.token_s": "%d token(s)"
+  "provider.check.tokens_count.token_s": "%d token(s)",
+  "complete.auth.provider_plugin": "Plugin de provider: %s",
+  "provider.cli.list.empty": "Nenhum plugin de provider instalado em %s",
+  "provider.cli.list.failed": "  não carregado: %s — %v",
+  "provider.cli.login.usage": "Uso: chatcli provider login <nome> [--input id=valor]...",
+  "provider.cli.logout.usage": "Uso: chatcli provider logout <nome>",
+  "provider.cli.not_installed": "nenhum plugin de provider chamado %q está instalado (veja chatcli provider list)",
+  "provider.plugin.login.device_code": "Abra %s e informe o código: %s",
+  "provider.plugin.login.not_needed": "%s não precisa de login.",
+  "provider.plugin.login.open_url": "Abra esta URL para entrar: %s",
+  "provider.plugin.login.press_enter": "Pressione Enter quando terminar no navegador... ",
+  "provider.plugin.status.error": "status indisponível: %v",
+  "provider.plugin.status.expired": "credencial expirada",
+  "provider.plugin.status.header": "Plugins de provider:",
+  "provider.plugin.status.logged_in": "logado",
+  "provider.plugin.status.logged_in_as": "logado como %s",
+  "provider.plugin.status.logged_out": "não logado",
+  "provider.plugin.status.no_login": "não exige login",
+  "plugincli.quarantine.providers_header": "Plugins de provider:"
 }

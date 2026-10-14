@@ -185,6 +185,9 @@ func (cli *ChatCLI) reloadConfiguration(ctx context.Context) {
 	}
 
 	cli.manager = manager
+	// A new manager knows only the built-ins: put the provider plugins back
+	// before anything resolves a client from it.
+	cli.registerProviderPlugins(ctx)
 	// Servers that cached the manager (MCP/ACP backend) must follow the
 	// rebuild, or a reload from the client changes nothing for them.
 	notifyManagerRebuilt(manager)

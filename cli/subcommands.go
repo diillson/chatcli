@@ -52,7 +52,7 @@ var subcommands = []Subcommand{
 	{Name: "acp", Usage: "chatcli acp", SummaryKey: "subcmd.acp"},
 	{Name: "mcp", Usage: "chatcli mcp add|list|get|remove …", SummaryKey: "subcmd.mcp", OwnHelp: true},
 	{Name: "plugin", Usage: "chatcli plugin keygen|sign|verify|trust|quarantine …", SummaryKey: "subcmd.plugin", OwnHelp: true},
-	{Name: "provider", Usage: "chatcli provider test [flags] <plugin> [args…]", SummaryKey: "subcmd.provider", OwnHelp: true},
+	{Name: "provider", Usage: "chatcli provider list | login <name> | logout <name> | test [flags] <plugin> [args…]", SummaryKey: "subcmd.provider", OwnHelp: true},
 	{Name: "trust", Usage: "chatcli trust [--list | --revoke] [dir]", SummaryKey: "subcmd.trust", OwnHelp: true},
 }
 

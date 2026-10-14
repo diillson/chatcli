@@ -9,6 +9,7 @@ import (
 	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -39,7 +40,9 @@ const verifiedCacheGrace = 24 * time.Hour
 // verifiedCacheDir derives the private cache from the plugins directory:
 // <pluginsDir>/../cache/verified-plugins, i.e. ~/.chatcli/cache/... in
 // production and a sibling temp dir in tests.
-func verifiedCacheDir(pluginsDir string) string {
+// VerifiedCacheDir is where verified binaries of plugins in pluginsDir are
+// staged before they run: <pluginsDir>/../cache/verified-plugins.
+func VerifiedCacheDir(pluginsDir string) string {
 	return filepath.Join(filepath.Dir(pluginsDir), "cache", verifiedCacheDirName)
 }
 
@@ -122,4 +125,63 @@ func pruneVerifiedCache(cacheDir string, inUse map[string]struct{}) {
 			_ = os.Remove(p)
 		}
 	}
+}
+
+// ErrPluginNotTrusted reports a binary the signature policy refused.
+var ErrPluginNotTrusted = errors.New("plugin signature cannot be trusted")
+
+// ErrPluginQuarantined reports an unsigned binary still inside its
+// quarantine window.
+var ErrPluginQuarantined = errors.New("plugin held in quarantine")
+
+// ExecDecision is the signature policy's verdict for one binary.
+type ExecDecision struct {
+	// ExecPath is what to run: a private staged copy of the exact bytes
+	// that verified, or the original path when an unsigned binary is
+	// tolerated.
+	ExecPath string
+	// Unsigned is true when the binary runs only because
+	// CHATCLI_ALLOW_UNSIGNED_PLUGINS is set.
+	Unsigned bool
+}
+
+// ResolveExec applies the plugin signature policy to binaryPath, the same
+// one tool plugins and provider plugins share:
+//
+//   - signed by a trusted key: stage the verified bytes under cacheDir and
+//     run that copy, never the path again;
+//   - unsigned, or signed with no trusted key to check against: refused
+//     unless unsigned plugins are allowed, and then still held while the
+//     quarantine window (when configured) runs;
+//   - anything else (bad signature, untrusted signer): refused.
+func (v *PluginVerifier) ResolveExec(q *Quarantine, cacheDir, binaryPath string) (ExecDecision, error) {
+	status, verified, err := v.inspectWithBytes(binaryPath)
+	switch status {
+	case StatusVerified:
+		staged, err := stageVerifiedBinary(cacheDir, verified, filepath.Base(binaryPath))
+		if err != nil {
+			return ExecDecision{}, err
+		}
+		return ExecDecision{ExecPath: staged}, nil
+	case StatusUnsigned, StatusUnverifiable:
+		// Unverifiable joins unsigned on purpose: with no trusted key on
+		// this machine a signature is not evidence of anything.
+		if !v.AllowsUnsigned() {
+			return ExecDecision{}, fmt.Errorf("%w: unsigned plugins are not allowed%s", ErrPluginNotTrusted, errSuffix(err))
+		}
+		if admitted, remaining := q.Admit(binaryPath); !admitted {
+			return ExecDecision{}, fmt.Errorf("%w for another %s", ErrPluginQuarantined, remaining.Round(time.Second))
+		}
+		return ExecDecision{ExecPath: binaryPath, Unsigned: true}, nil
+	default:
+		return ExecDecision{}, fmt.Errorf("%w%s", ErrPluginNotTrusted, errSuffix(err))
+	}
+}
+
+// errSuffix renders an optional cause as ": cause" (empty for nil).
+func errSuffix(err error) string {
+	if err == nil {
+		return ""
+	}
+	return ": " + err.Error()
 }
