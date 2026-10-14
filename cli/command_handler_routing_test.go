@@ -25,6 +25,7 @@ func TestCommandRoutingCoverage(t *testing.T) {
 		"/moa hi", "/thinking", "/refine", "/verify", "/reflect",
 		"/worktree", "/schedule x", "/wait x", "/jobs", "/parked", "/resume x",
 		"/cancel-park", "/channel", "/websearch x",
+		"/model", "/model gpt-x", "/models", "/models gpt-x", "/model-image",
 	}
 	for _, in := range known {
 		if _, ok := ch.lookup(in); !ok {
@@ -40,7 +41,7 @@ func TestCommandRoutingCoverage(t *testing.T) {
 		}
 	}
 
-	notCommands := []string{"/totallyunknown", "hello world", "/exporting", "/moax", "just text"}
+	notCommands := []string{"/totallyunknown", "hello world", "/exporting", "/moax", "just text", "/modelx", "/modelsx"}
 	for _, in := range notCommands {
 		if _, ok := ch.lookup(in); ok {
 			t.Errorf("did not expect a route for %q", in)
