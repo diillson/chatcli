@@ -7,11 +7,8 @@ package memory
 
 import (
 	"strings"
-	"unicode"
 
-	"golang.org/x/text/runes"
-	"golang.org/x/text/transform"
-	"golang.org/x/text/unicode/norm"
+	"github.com/diillson/chatcli/pkg/textfold"
 )
 
 // This file owns the semantics of profile LIST fields (certifications, skills,
@@ -132,7 +129,7 @@ func stemOf(item string) string {
 	s = strings.NewReplacer("*", "", "`", "", "~", "").Replace(s)
 	s = cutStatusSuffix(s)
 	s = stripParentheticals(s)
-	s = foldDiacritics(s)
+	s = textfold.Fold(s)
 	s = strings.Join(strings.Fields(s), " ")
 	return strings.TrimRight(s, " .,;:!?")
 }
@@ -162,17 +159,6 @@ var statusTailMarkers = []string{
 
 func isStatusTail(tail string) bool {
 	return containsAny(strings.ToLower(tail), statusTailMarkers...)
-}
-
-// foldDiacritics strips combining marks so pt-BR accent variants of the same
-// entry ("violão"/"violao") share a stem. Falls back to the input on error.
-func foldDiacritics(s string) string {
-	t := transform.Chain(norm.NFD, runes.Remove(runes.In(unicode.Mn)), norm.NFC)
-	out, _, err := transform.String(t, s)
-	if err != nil {
-		return s
-	}
-	return out
 }
 
 // stripParentheticals removes ( … ) segments, tolerating nesting and unmatched

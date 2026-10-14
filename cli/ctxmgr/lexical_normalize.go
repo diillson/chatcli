@@ -18,9 +18,8 @@ package ctxmgr
 import (
 	"os"
 	"strings"
-	"unicode"
 
-	"golang.org/x/text/unicode/norm"
+	"github.com/diillson/chatcli/pkg/textfold"
 )
 
 // KnowledgeNormalizeEnv selects the lexical normalization: off | fold | stem.
@@ -50,66 +49,9 @@ func KnowledgeNormalizeMode() NormalizeMode {
 func normalizeTerm(t string, mode NormalizeMode) string {
 	switch mode {
 	case NormalizeFold:
-		return foldDiacritics(t)
+		return textfold.Fold(t)
 	case NormalizeStem:
-		return lightStem(foldDiacritics(t))
-	}
-	return t
-}
-
-// foldDiacritics removes combining marks (NFD → drop Mn → NFC), so
-// "ação" → "acao", "café" → "cafe", "naïve" → "naive".
-func foldDiacritics(s string) string {
-	ascii := true
-	for i := 0; i < len(s); i++ {
-		if s[i] >= 0x80 {
-			ascii = false
-			break
-		}
-	}
-	if ascii {
-		return s
-	}
-	var b strings.Builder
-	b.Grow(len(s))
-	for _, r := range norm.NFD.String(s) {
-		if unicode.Is(unicode.Mn, r) {
-			continue
-		}
-		b.WriteRune(r)
-	}
-	return norm.NFC.String(b.String())
-}
-
-// stemSuffixes are stripped in order (longest first per language family):
-// pt plurals/verb forms/adverbs, en plurals/participles/gerunds.
-var stemSuffixes = []struct {
-	suffix, replace string
-	minLen          int
-}{
-	{"coes", "cao", 6}, // configuracoes → configuracao (after folding)
-	{"mente", "", 8},   // rapidamente → rapida
-	{"ing", "", 6},     // deploying → deploy
-	{"ers", "er", 6},   // handlers → handler
-	{"ies", "y", 6},    // queries → query
-	{"eis", "el", 6},   // papeis → papel
-	{"ais", "al", 6},   // locais → local
-	{"ores", "or", 7},  // servidores → servidor
-	{"ando", "ar", 7},  // configurando → configurar
-	{"endo", "er", 7},  // escrevendo → escrever
-	{"indo", "ir", 7},  // definindo → definir
-	{"ed", "", 5},      // deployed → deploy
-	{"es", "", 6},      // processes → process
-	{"s", "", 5},       // deploys → deploy, tokens → token
-}
-
-// lightStem strips one common suffix; too-short tokens are left alone so
-// identifiers and acronyms keep their exact form.
-func lightStem(t string) string {
-	for _, r := range stemSuffixes {
-		if len(t) >= r.minLen && strings.HasSuffix(t, r.suffix) {
-			return t[:len(t)-len(r.suffix)] + r.replace
-		}
+		return textfold.Stem(textfold.Fold(t))
 	}
 	return t
 }

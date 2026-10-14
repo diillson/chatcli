@@ -9,6 +9,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -206,6 +207,57 @@ func TestApplySkillCandidates_EvolvesUserSkillWithReversibleBackup(t *testing.T)
 	}
 	if plugins.HasBackup("xpto") {
 		t.Fatal("backup should be consumed after restore")
+	}
+}
+
+// An evolution adds to a skill; it never takes away. Triggers the model
+// proposes join the existing ones, and frontmatter the engine does not
+// author (allowed-tools, paths) survives the rewrite — the regression that
+// stripped allowed-tools from every evolved skill.
+func TestApplySkillCandidates_EvolveAddsTriggersAndKeepsFrontmatter(t *testing.T) {
+	dir := t.TempDir()
+	plugins.SetSkillsDirOverride(dir)
+	t.Cleanup(func() { plugins.SetSkillsDirOverride("") })
+	cli := newTestCLI()
+
+	userContent := "---\nname: xpto\ndescription: my xpto skill\n" +
+		"allowed-tools: [\"@browser\", \"@webfetch\"]\n" +
+		"paths:\n  - \"web/**/*.html\"\n" +
+		"triggers:\n  - próximo jogo\n  - agenda\n---\n\n# My xpto\n\noriginal step\n"
+	if err := os.MkdirAll(filepath.Dir(skillFile(dir, "xpto")), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(skillFile(dir, "xpto"), []byte(userContent), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	// "proximo jogo" differs from the stored trigger only by an accent: it
+	// is the same trigger and must not be added twice.
+	resp := "## SKILL_CANDIDATES\n[[skill]]\nname: xpto\naction: evolve\n" +
+		"triggers: proximo jogo, resultado\nimprovement:\n- add new improved step\n[[/skill]]\n"
+	sum := cli.applySkillCandidates(context.Background(), resp, selfEvolveAuto, stubMerger)
+	if len(sum.EvolvedBackup) != 1 {
+		t.Fatalf("expected xpto evolved, got %+v", sum)
+	}
+
+	if _, got := plugins.StoredSkillMeta("xpto"); !reflect.DeepEqual(got, []string{"próximo jogo", "agenda", "resultado"}) {
+		t.Fatalf("triggers = %v", got)
+	}
+	data, _ := os.ReadFile(skillFile(dir, "xpto"))
+	for _, want := range []string{"@browser", "@webfetch", "web/**/*.html", "add new improved step"} {
+		if !strings.Contains(string(data), want) {
+			t.Fatalf("evolved skill lost %q:\n%s", want, data)
+		}
+	}
+}
+
+func TestMergeTriggers(t *testing.T) {
+	got := mergeTriggers([]string{"Próximo Jogo", " deploy "}, []string{"proximo jogo", "", "ship it", "DEPLOY"})
+	if want := []string{"Próximo Jogo", "deploy", "ship it"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("mergeTriggers = %v, want %v", got, want)
+	}
+	if got := mergeTriggers(nil, nil); len(got) != 0 {
+		t.Fatalf("empty merge = %v", got)
 	}
 }
 

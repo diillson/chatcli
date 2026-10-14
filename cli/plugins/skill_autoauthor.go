@@ -19,6 +19,8 @@ package plugins
 import (
 	"os"
 	"path/filepath"
+
+	"github.com/diillson/chatcli/pkg/persona"
 )
 
 // AutoSkillInput is the cross-package payload for programmatic skill authoring.
@@ -155,3 +157,27 @@ func RestoreSkill(name string) (bool, error) {
 // self-evolution engine's integration tests, which exercise authoring against
 // a temp directory; production code never calls it.
 func SetSkillsDirOverride(dir string) { skillsDirOverride = dir }
+
+// StoredSkillMeta returns the description and triggers saved in name's
+// SKILL.md, triggers in either shape the loader accepts (list or
+// comma-separated scalar). The self-evolution engine reads them from the
+// very file it is about to rewrite — not through the persona loader, which
+// may resolve a same-named project-local skill — so an evolution builds on
+// exactly what is on disk.
+func StoredSkillMeta(name string) (description string, triggers []string) {
+	skillMD, _, err := skillPaths(name)
+	if err != nil {
+		return "", nil
+	}
+	st, ok := readStoredSkill(skillMD)
+	if !ok {
+		return "", nil
+	}
+	if pair, has := st.fields["triggers"]; has {
+		var list persona.StringList
+		if err := pair[1].Decode(&list); err == nil {
+			triggers = []string(list)
+		}
+	}
+	return st.value("description"), triggers
+}

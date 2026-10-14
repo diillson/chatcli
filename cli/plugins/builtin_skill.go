@@ -376,12 +376,6 @@ func writeSkill(dir string, mustExist bool, in skillInput) (string, error) {
 	if !skillNameRe.MatchString(name) {
 		return "", fmt.Errorf("@skill: invalid name %q (use kebab-case: a-z, 0-9, dash)", in.Name)
 	}
-	if strings.TrimSpace(in.Description) == "" {
-		return "", errors.New(`@skill: "description" is required`)
-	}
-	if strings.TrimSpace(in.Content) == "" {
-		return "", errors.New(`@skill: "content" is required`)
-	}
 	skillDir := filepath.Join(dir, name)
 	file := filepath.Join(skillDir, "SKILL.md")
 	_, statErr := os.Stat(file)
@@ -393,10 +387,31 @@ func writeSkill(dir string, mustExist bool, in skillInput) (string, error) {
 		return "", fmt.Errorf("@skill create: %q already exists (use update to change it)", name)
 	}
 
+	// An update starts from what is on disk: whatever the caller left out
+	// keeps its stored value instead of being erased.
+	var stored *storedSkill
+	if mustExist {
+		if st, ok := readStoredSkill(file); ok {
+			stored = &st
+			if strings.TrimSpace(in.Description) == "" {
+				in.Description = st.value("description")
+			}
+			if strings.TrimSpace(in.Content) == "" {
+				in.Content = st.body
+			}
+		}
+	}
+	if strings.TrimSpace(in.Description) == "" {
+		return "", errors.New(`@skill: "description" is required`)
+	}
+	if strings.TrimSpace(in.Content) == "" {
+		return "", errors.New(`@skill: "content" is required`)
+	}
+
 	if err := os.MkdirAll(skillDir, 0o700); err != nil {
 		return "", err
 	}
-	if err := os.WriteFile(file, []byte(renderSkill(name, in)), 0o600); err != nil {
+	if err := os.WriteFile(file, []byte(renderSkill(name, in, stored)), 0o600); err != nil {
 		return "", err
 	}
 	key := "skill.tool.created"
@@ -406,17 +421,30 @@ func writeSkill(dir string, mustExist bool, in skillInput) (string, error) {
 	return i18n.T(key, name, file), nil
 }
 
+// renderedSkillKeys are the frontmatter keys renderSkill writes from the
+// input; every other stored key is carried over on update.
+var renderedSkillKeys = map[string]bool{
+	"name": true, "description": true, "allowed-tools": true, "triggers": true,
+}
+
 // renderSkill builds the SKILL.md text. Scalars are JSON-encoded, which is valid
 // YAML for double-quoted strings — safe for descriptions with colons/quotes.
-func renderSkill(name string, in skillInput) string {
+// stored, when non-nil, is the skill being updated: allowed-tools and triggers
+// the input left out, and every key renderSkill does not own, are kept as
+// they were written.
+func renderSkill(name string, in skillInput, stored *storedSkill) string {
 	var b strings.Builder
 	b.WriteString("---\n")
 	b.WriteString("name: " + skillScalar(name) + "\n")
 	b.WriteString("description: " + skillScalar(in.Description) + "\n")
-	if len(in.AllowedTools) > 0 {
+	switch {
+	case len(in.AllowedTools) > 0:
 		b.WriteString("allowed-tools: " + skillFlowList(in.AllowedTools) + "\n")
+	case stored != nil && stored.has("allowed-tools"):
+		stored.renderField(&b, "allowed-tools")
 	}
-	if len(in.Triggers) > 0 {
+	switch {
+	case hasNonBlank(in.Triggers):
 		b.WriteString("triggers:\n")
 		for _, t := range in.Triggers {
 			if strings.TrimSpace(t) == "" {
@@ -424,12 +452,31 @@ func renderSkill(name string, in skillInput) string {
 			}
 			b.WriteString("  - " + skillScalar(t) + "\n")
 		}
+	case stored != nil && stored.has("triggers"):
+		stored.renderField(&b, "triggers")
+	}
+	if stored != nil {
+		for _, key := range stored.order {
+			if !renderedSkillKeys[key] {
+				stored.renderField(&b, key)
+			}
+		}
 	}
 	b.WriteString("---\n\n")
 	body := strings.TrimRight(in.Content, "\n")
 	b.WriteString(body)
 	b.WriteString("\n")
 	return b.String()
+}
+
+// hasNonBlank reports whether items holds at least one non-blank entry.
+func hasNonBlank(items []string) bool {
+	for _, it := range items {
+		if strings.TrimSpace(it) != "" {
+			return true
+		}
+	}
+	return false
 }
 
 func listSkills(dir string) (string, error) {

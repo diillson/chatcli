@@ -38,6 +38,7 @@ import (
 	"github.com/diillson/chatcli/config"
 	"github.com/diillson/chatcli/i18n"
 	"github.com/diillson/chatcli/pkg/pulse"
+	"github.com/diillson/chatcli/pkg/textfold"
 )
 
 // selfEvolveMode is the autonomy level for skill authoring.
@@ -346,17 +347,15 @@ func (cli *ChatCLI) evolveExistingSkill(ctx context.Context, c skillCandidate, e
 		return false // merge produced nothing new
 	}
 
-	// Carry over description/triggers the model omitted from an evolve block.
-	desc, triggers := strings.TrimSpace(c.Description), c.Triggers
-	if desc == "" || len(triggers) == 0 {
-		ed, et := cli.existingSkillMeta(c.Name)
-		if desc == "" {
-			desc = ed
-		}
-		if len(triggers) == 0 {
-			triggers = et
-		}
+	// Carry over the description the model omitted from an evolve block, and
+	// ADD its triggers to the existing ones: an evolution teaches the skill
+	// new ways to be asked for, it never makes the old ones stop working.
+	storedDesc, storedTriggers := plugins.StoredSkillMeta(c.Name)
+	desc := strings.TrimSpace(c.Description)
+	if desc == "" {
+		desc = storedDesc
 	}
+	triggers := mergeTriggers(storedTriggers, c.Triggers)
 	if desc == "" {
 		desc = c.Name // writeSkill requires a non-empty description
 	}
@@ -387,17 +386,23 @@ func (cli *ChatCLI) evolveExistingSkill(ctx context.Context, c skillCandidate, e
 	return true
 }
 
-// existingSkillMeta returns the description and triggers of an already-saved
-// skill, so an evolve block that omits them keeps the originals.
-func (cli *ChatCLI) existingSkillMeta(name string) (desc string, triggers []string) {
-	if cli.personaHandler == nil {
-		return "", nil
+// mergeTriggers returns existing followed by the added triggers that are not
+// already there. Two triggers are the same when they differ only in case,
+// accents or surrounding space — the matcher treats them as one anyway.
+func mergeTriggers(existing, added []string) []string {
+	out := make([]string, 0, len(existing)+len(added))
+	seen := make(map[string]bool, len(existing)+len(added))
+	for _, list := range [][]string{existing, added} {
+		for _, t := range list {
+			key := textfold.Fold(strings.ToLower(strings.TrimSpace(t)))
+			if key == "" || seen[key] {
+				continue
+			}
+			seen[key] = true
+			out = append(out, strings.TrimSpace(t))
+		}
 	}
-	s, err := cli.personaHandler.GetManager().GetSkillByName(name)
-	if err != nil || s == nil {
-		return "", nil
-	}
-	return s.Description, []string(s.Triggers)
+	return out
 }
 
 // buildSkillIndex renders the compact, stable index card injected into the
