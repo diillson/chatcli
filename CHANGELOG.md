@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.216.1](https://github.com/diillson/chatcli/compare/v1.216.0...v1.216.1) (2026-10-14)
+
+
+### Bug Fixes
+
+* **skills:** triggers match accents and plurals, updates keep frontmatter, reasoning activates skills ([#1784](https://github.com/diillson/chatcli/issues/1784)) ([080133f](https://github.com/diillson/chatcli/commit/080133fb6bd57eecab0c2baf31bd447866876ff2))
+
 ## [1.216.0](https://github.com/diillson/chatcli/compare/v1.215.5...v1.216.0) (2026-10-14)
 
 
