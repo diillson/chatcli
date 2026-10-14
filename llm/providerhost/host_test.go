@@ -447,3 +447,28 @@ func TestDiscoverSkipsNonPlugins(t *testing.T) {
 		t.Fatalf("missing dir = %v, %v", got, err)
 	}
 }
+
+// A model refresh racing Close must not outlive it: Close waits for the
+// refresh, and a refresh after Close neither calls the plugin nor writes
+// the cache.
+func TestModelsAfterCloseDoesNotWriteCache(t *testing.T) {
+	dir := t.TempDir()
+	installFixture(t, dir, "ph-dialect")
+	if err := os.WriteFile(filepath.Join(dir, "backend-url"), []byte("http://127.0.0.1:1"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cache := t.TempDir()
+	set := Load(context.Background(), LoadOptions{Dir: dir, Store: newMemStore(), CacheDir: cache, HostVersion: "test"})
+	p, ok := set.Get("PH_GATEWAY")
+	if !ok {
+		t.Fatalf("plugin not loaded: %v", set.Errors())
+	}
+	set.Close(context.Background())
+	if _, err := p.Models(context.Background()); !errors.Is(err, providerproto.ErrClosed) {
+		t.Fatalf("Models after Close = %v, want ErrClosed", err)
+	}
+	entries, _ := os.ReadDir(cache)
+	if len(entries) != 0 {
+		t.Fatalf("cache written after Close: %v", entries)
+	}
+}

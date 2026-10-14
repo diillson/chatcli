@@ -39,6 +39,11 @@ type Plugin struct {
 	headerAt time.Time
 	headerTo time.Time
 	models   []providerproto.Model
+
+	// closed stops new model refreshes; listing tracks the ones in flight
+	// so Close returns only after none can write the cache or the catalog.
+	closed  bool
+	listing sync.WaitGroup
 }
 
 // tokenSkew refreshes auth/token headers this long before they expire.
@@ -152,6 +157,14 @@ func (p *Plugin) Models(ctx context.Context) ([]providerproto.Model, error) {
 	if !p.info.Capabilities.Models {
 		return nil, nil
 	}
+	p.mu.Lock()
+	if p.closed {
+		p.mu.Unlock()
+		return p.CachedModels(), fmt.Errorf("%s: %w", p.Name(), providerproto.ErrClosed)
+	}
+	p.listing.Add(1)
+	p.mu.Unlock()
+	defer p.listing.Done()
 	cred, _ := p.Credential()
 	var res providerproto.ModelsListResult
 	if err := p.host.Call(ctx, providerproto.MethodModelsList, providerproto.CredentialParams{Credential: cred}, &res); err != nil {
@@ -406,7 +419,16 @@ func (p *Plugin) Logout(ctx context.Context) error {
 }
 
 // Close stops the plugin process.
-func (p *Plugin) Close(ctx context.Context) { p.host.Close(ctx) }
+func (p *Plugin) Close(ctx context.Context) {
+	p.mu.Lock()
+	p.closed = true
+	p.mu.Unlock()
+	p.host.Close(ctx)
+	// The stopped host fails in-flight calls at once; wait for them so a
+	// late result never writes the cache or re-registers the catalog
+	// entries Set.Close removes.
+	p.listing.Wait()
+}
 
 // ------------------------------------------------------------------ Set
 
