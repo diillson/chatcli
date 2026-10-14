@@ -8,6 +8,8 @@ package cli
 import (
 	"os"
 	"strings"
+
+	"github.com/diillson/chatcli/llm/catalog"
 )
 
 // EnvRedactMode controls how environment variable redaction works.
@@ -194,8 +196,10 @@ func (r *EnvRedactor) isSensitive(key, value string) bool {
 	// Permissive mode: check against known sensitive patterns
 	upperKey := strings.ToUpper(key)
 
-	// Exact match
-	if r.sensitiveExact[upperKey] {
+	// Exact match, including every provider's declared credential env —
+	// read from the catalog on each check so providers registered after the
+	// redactor was built (external provider plugins) are covered too.
+	if r.sensitiveExact[upperKey] || isProviderSecretEnv(upperKey) {
 		return true
 	}
 
@@ -240,4 +244,18 @@ func isHexString(s string) bool {
 // isHexDigit reports whether c is an ASCII hexadecimal digit of either case.
 func isHexDigit(c rune) bool {
 	return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F')
+}
+
+// isProviderSecretEnv reports whether key is a credential env var declared
+// by any provider descriptor (StackSpot's CLIENT_ID, for instance, matches
+// none of the suffix patterns).
+func isProviderSecretEnv(upperKey string) bool {
+	for _, d := range catalog.Providers() {
+		for _, k := range d.SecretEnv {
+			if strings.EqualFold(k, upperKey) {
+				return true
+			}
+		}
+	}
+	return false
 }

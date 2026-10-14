@@ -13,6 +13,8 @@ package client
 import (
 	"strings"
 	"testing"
+
+	"github.com/diillson/chatcli/llm/catalog"
 )
 
 // fakeRouter satisfies ProviderRouter for resolver tests, recording every
@@ -29,20 +31,20 @@ func (f *fakeRouter) GetClient(provider, model string) (LLMClient, error) {
 
 func (f *fakeRouter) GetAvailableProviders() []string { return f.available }
 
-// TestKnownProvidersCoversManagerRegistry pins the full canonical provider
-// list. BEDROCK, MOONSHOT and DEVIN were registered in the manager after this
-// list was written and were missing from it — which silently disabled
-// cross-provider routing to them for bare (unqualified) hints.
-func TestKnownProvidersCoversManagerRegistry(t *testing.T) {
-	required := []string{
-		"OPENAI", "OPENAI_ASSISTANT", "CLAUDEAI", "BEDROCK", "GOOGLEAI",
-		"XAI", "ZAI", "MOONSHOT", "MINIMAX", "STACKSPOT", "OLLAMA",
-		"COPILOT", "OPENROUTER", "DEVIN",
-	}
-	for _, p := range required {
-		if !ContainsProvider(KnownProviders, p) {
-			t.Errorf("KnownProviders is missing %q — CatalogProviderOf can never route bare hints to it", p)
+// TestKnownProvidersMatchesCatalog pins the deprecated KnownProviders list
+// to the catalog's built-in providers, in routing order. BEDROCK, MOONSHOT
+// and DEVIN were once registered in the manager but missing from a
+// hand-kept list — which silently disabled cross-provider routing to them
+// for bare (unqualified) hints.
+func TestKnownProvidersMatchesCatalog(t *testing.T) {
+	var builtins []string
+	for _, d := range catalog.Providers() {
+		if d.Builtin() {
+			builtins = append(builtins, d.Name)
 		}
+	}
+	if strings.Join(KnownProviders, ",") != strings.Join(builtins, ",") {
+		t.Fatalf("KnownProviders = %v, want catalog built-ins %v", KnownProviders, builtins)
 	}
 }
 

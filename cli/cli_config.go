@@ -10,6 +10,7 @@ import (
 
 	"github.com/diillson/chatcli/config"
 	"github.com/diillson/chatcli/i18n"
+	"github.com/diillson/chatcli/llm/catalog"
 	"github.com/diillson/chatcli/llm/manager"
 	"github.com/diillson/chatcli/pkg/workspacetrust"
 	"github.com/diillson/chatcli/ui/theme"
@@ -212,37 +213,6 @@ func (cli *ChatCLI) reloadConfiguration(ctx context.Context) {
 	}
 }
 
-// bootModelSource declara de onde vem o modelo de cada provider no boot:
-// env primária, env de fallback opcional e o default do config. Cada
-// provider suportado pelo manager PRECISA de uma entrada aqui — um provider
-// ausente deixava cli.Model vazio, o catálogo resolvia (provider, "") para
-// os fallbacks conservadores e a sessão inteira rodava com max-tokens e
-// janela de contexto degradados, mesmo com o client interno falando com o
-// modelo certo (foi o caso do BEDROCK: 128K virando default).
-// STACKSPOT fica de fora por desenho: o "modelo" é o agent (realm/agent-id),
-// e o fallback de provider do catálogo já cobre a sizing.
-type bootModelSource struct {
-	envVar      string
-	fallbackEnv string
-	defaultName string
-}
-
-var bootModelSources = map[string]bootModelSource{
-	"OPENAI":           {envVar: "OPENAI_MODEL", defaultName: config.DefaultOpenAIModel},
-	"OPENAI_ASSISTANT": {envVar: "OPENAI_ASSISTANT_MODEL", fallbackEnv: "OPENAI_MODEL", defaultName: config.DefaultOpenAiAssistModel},
-	"CLAUDEAI":         {envVar: "ANTHROPIC_MODEL", defaultName: config.DefaultClaudeAIModel},
-	"GOOGLEAI":         {envVar: "GOOGLEAI_MODEL", defaultName: config.DefaultGoogleAIModel},
-	"XAI":              {envVar: "XAI_MODEL", defaultName: config.DefaultXAIModel},
-	"ZAI":              {envVar: "ZAI_MODEL", defaultName: config.DefaultZAIModel},
-	"MINIMAX":          {envVar: "MINIMAX_MODEL", defaultName: config.DefaultMiniMaxModel},
-	"MOONSHOT":         {envVar: "MOONSHOT_MODEL", defaultName: config.DefaultMoonshotModel},
-	"OLLAMA":           {envVar: "OLLAMA_MODEL", defaultName: config.DefaultOllamaModel},
-	"COPILOT":          {envVar: "COPILOT_MODEL", defaultName: config.DefaultCopilotModel},
-	"BEDROCK":          {envVar: "BEDROCK_MODEL", defaultName: config.DefaultBedrockModel},
-	"OPENROUTER":       {envVar: "OPENROUTER_MODEL", defaultName: config.DefaultOpenRouterModel},
-	"DEVIN":            {envVar: "DEVIN_MODEL", defaultName: config.DefaultDevinModel},
-}
-
 // resolveBootModelEnv resolve uma env de modelo no boot com a mesma
 // precedência que as factories do manager usam: ambiente do processo
 // primeiro, depois o config.Global (.env/config persistido).
@@ -267,17 +237,22 @@ func resolveBootModelEnv(name string) string {
 // is empty for a provider without a model of its own (STACKSPOT) and for an
 // unknown provider. The provider name is case-insensitive.
 func DefaultModelForProvider(provider string) string {
-	src, ok := bootModelSources[strings.ToUpper(strings.TrimSpace(provider))]
+	// Every provider needs its model source on the descriptor: a provider
+	// without one left cli.Model empty, the catalog resolved (provider, "")
+	// to the conservative fallbacks and the whole session ran with degraded
+	// max tokens and context window (BEDROCK hit this: 128K became the
+	// default). STACKSPOT has none by design — its "model" is the agent.
+	d, ok := catalog.LookupProvider(provider)
 	if !ok {
 		return ""
 	}
-	if m := resolveBootModelEnv(src.envVar); m != "" {
+	if m := resolveBootModelEnv(d.ModelEnv); m != "" {
 		return m
 	}
-	if m := resolveBootModelEnv(src.fallbackEnv); m != "" {
+	if m := resolveBootModelEnv(d.ModelFallbackEnv); m != "" {
 		return m
 	}
-	return src.defaultName
+	return d.DefaultModel
 }
 
 func (cli *ChatCLI) configureProviderAndModel() {

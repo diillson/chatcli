@@ -2355,60 +2355,12 @@ func GetMaxTokens(provider, model string, override int) int {
 	// provedor (Apr 2026). O critério é "menor MaxOutput observado entre
 	// os modelos atuais do provedor" — alto o suficiente para não
 	// estrangular saídas legítimas, baixo o suficiente para um modelo
-	// desconhecido não estourar limites do servidor.
-	switch strings.ToUpper(provider) {
-	case ProviderOpenAI:
-		m := strings.ToLower(model)
-		// gpt-5 family (5, 5.x, 5.5/pro): real cap is 128K.
-		if strings.HasPrefix(m, "gpt-5") {
-			return 128000
-		}
-		// gpt-4.1 / gpt-4o family: real cap 16K-32K, use 32K.
-		if m == "gpt-4o" || m == "gpt-4o-mini" || strings.HasPrefix(m, "gpt-4") {
-			return 32000
-		}
-		// o-series reasoning models cap at 100K.
-		if strings.HasPrefix(m, "o3") || strings.HasPrefix(m, "o4") {
-			return 100000
-		}
-		return 16384
-	case ProviderClaudeAI:
-		// Claude 3+ família toda usa 200K input; output varia 4K-128K.
-		// 64K é o teto comum dos modelos atuais (sonnet 4.x, opus 4.5+).
-		return 64000
-	case ProviderBedrock:
-		return bedrockFallbackMaxTokens(model)
-	case ProviderStackSpot:
-		// The StackSpot agent API ignores client-side max_tokens; this
-		// value only feeds local bookkeeping, so keep it aligned with
-		// the registry entry instead of artificially low.
-		return 128000
-	case ProviderGoogleAI:
-		// Gemini 2.x todos a 65K output.
-		return 65536
-	case ProviderXAI:
-		// Grok 3/4 expõem ≥16K na prática; manter cap conservador
-		// porque xAI não publica limite oficial.
-		return 16384
-	case ProviderZAI:
-		return 65535
-	case ProviderMiniMax:
-		return 131072
-	case ProviderMoonshot:
-		return 131072
-	case ProviderOllama:
-		return 8192
-	case ProviderCopilot:
-		return 16384
-	case ProviderOpenRouter:
-		return 16384
-	case ProviderDevin:
-		// Modelos fora do catálogo servidos pelo Devin CLI: teto do lado
-		// do cliente é só bookkeeping (o backend impõe o real).
-		return 32000
-	default:
-		return 50000
+	// desconhecido não estourar limites do servidor. Cada regra vive no
+	// descritor do provedor (providers.go).
+	if d, ok := LookupProvider(provider); ok {
+		return d.maxTokensFor(model)
 	}
+	return defaultFallbackTokens
 }
 
 // bedrockFallbackMaxTokens escolhe o teto de saída para um modelo Bedrock
@@ -2471,55 +2423,10 @@ func GetContextWindow(provider, model string) int {
 	if meta, ok := Resolve(provider, model); ok && meta.ContextWindow > 0 {
 		return meta.ContextWindow
 	}
-	switch strings.ToUpper(provider) {
-	case ProviderGoogleAI:
-		return 1000000
-	case ProviderClaudeAI:
-		return 200000
-	case ProviderOpenAI, ProviderOpenAIAssistant:
-		return 128000
-	case ProviderBedrock:
-		// Modelos fora do catálogo: application inference profiles com ID
-		// opaco, marketplace e lançamentos recentes. Sem este case eles
-		// caíam no default genérico de 50K e a compactação de histórico
-		// disparava em quase todo turno de agent — mesma classe de bug do
-		// StackSpot (PR #1044). Claude desconhecido no Bedrock é lançamento
-		// novo — a família atual (Fable 5, Sonnet 5, Opus 4.6+) é toda 1M e
-		// os modelos antigos de 200K têm entrada própria no catálogo; um
-		// overshoot é recuperável (compact + retry no context-too-long),
-		// um undershoot compacta cedo demais a cada turno. O resto do
-		// catálogo AWS (Nova, Llama, Mistral, DeepSeek) senta em 128K.
-		m := strings.ToLower(model)
-		if strings.Contains(m, "anthropic") || strings.Contains(m, "claude") {
-			return 1000000
-		}
-		return 128000
-	case ProviderStackSpot:
-		// StackSpot agents sit on top of current frontier models (128K+
-		// windows); the generic 50K default made compaction fire on
-		// almost every agent turn.
-		return 128000
-	case ProviderXAI:
-		return 128000
-	case ProviderZAI:
-		return 202752
-	case ProviderMiniMax:
-		return 204800
-	case ProviderMoonshot:
-		return 262144
-	case ProviderOllama:
-		return 8192
-	case ProviderCopilot:
-		return 128000
-	case ProviderOpenRouter:
-		return 128000
-	case ProviderDevin:
-		// Modelo desconhecido servido pelo Devin CLI: janela conservadora;
-		// CHATCLI_CONTEXT_WINDOW é o escape para deployments que diferem.
-		return 200000
-	default:
-		return 50000
+	if d, ok := LookupProvider(provider); ok {
+		return d.contextWindowFor(model)
 	}
+	return defaultFallbackTokens
 }
 
 // GetAnthropicAPIVersion retorna a versão da API para Anthropic (Claude),
@@ -2545,18 +2452,10 @@ func GetPreferredAPI(provider, model string) PreferredAPI {
 	if meta, ok := Resolve(provider, model); ok && meta.PreferredAPI != "" {
 		return meta.PreferredAPI
 	}
-	switch strings.ToUpper(provider) {
-	case ProviderOpenAI:
-		return APIChatCompletions
-	case ProviderOpenAIAssistant:
-		return APIAssistants
-	case ProviderClaudeAI:
-		return APIAnthropicMessages
-	case ProviderGoogleAI:
-		return PreferredAPI("gemini_api")
-	default:
-		return APIChatCompletions
+	if d, ok := LookupProvider(provider); ok {
+		return d.preferredAPI()
 	}
+	return APIChatCompletions
 }
 
 // HasCapability verifica se o modelo anuncia determinada capacidade (best-effort).

@@ -2,9 +2,9 @@
 # scripts/qg/provider-parity.sh — Floor 15, LLM provider integration matrix.
 #
 # Verifies that every provider declared in llm/catalog/catalog.go has been
-# wired through every touch point the project requires (manager factory,
-# cost tracker, /config providers section, env redactor, oneshot help,
-# i18n locales, operator CRD enum, operator cost tracker). The matrix
+# wired through every touch point the project requires (catalog provider
+# descriptor, manager factory, cost tracker, /config providers section, env
+# redactor, i18n locales, operator CRD enum, operator cost tracker). The matrix
 # lives in tools/qg/providerparity/providers.go.
 #
 # Runs against the whole repo state (not just the diff) — adding a
