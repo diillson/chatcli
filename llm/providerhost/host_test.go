@@ -90,7 +90,7 @@ func buildEcho(t *testing.T, dir string) {
 	}
 }
 
-func load(t *testing.T, dir string, store CredentialStore) *Set {
+func loadSet(t *testing.T, dir string, store CredentialStore) *Set {
 	t.Helper()
 	set := Load(context.Background(), LoadOptions{Dir: dir, Store: store, CacheDir: t.TempDir(), HostVersion: "test"})
 	t.Cleanup(func() { set.Close(context.Background()) })
@@ -101,7 +101,7 @@ func TestFullModePluginEndToEnd(t *testing.T) {
 	dir := t.TempDir()
 	buildEcho(t, dir)
 	store := newMemStore()
-	set := load(t, dir, store)
+	set := loadSet(t, dir, store)
 	if errs := set.Errors(); len(errs) > 0 {
 		t.Fatalf("load errors: %v", errs)
 	}
@@ -225,7 +225,7 @@ func TestDialectModeInjectsPluginHeaders(t *testing.T) {
 	t.Setenv("PH_TEST_LEAK", "must-not-reach-the-plugin")
 
 	store := newMemStore()
-	set := load(t, dir, store)
+	set := loadSet(t, dir, store)
 	if errs := set.Errors(); len(errs) > 0 {
 		t.Fatalf("load errors: %v", errs)
 	}
@@ -282,7 +282,7 @@ func TestDialectModeInjectsPluginHeaders(t *testing.T) {
 func TestCrashedPluginRestartsOnNextCall(t *testing.T) {
 	dir := t.TempDir()
 	installFixture(t, dir, "ph-crash")
-	set := load(t, dir, newMemStore())
+	set := loadSet(t, dir, newMemStore())
 	p, ok := set.Get("PH_CRASH")
 	if !ok {
 		t.Fatalf("PH_CRASH not loaded: %v", set.Errors())
@@ -302,7 +302,7 @@ func TestCrashedPluginRestartsOnNextCall(t *testing.T) {
 func TestImpostorIsRejected(t *testing.T) {
 	dir := t.TempDir()
 	installFixture(t, dir, "ph-impostor")
-	set := load(t, dir, newMemStore())
+	set := loadSet(t, dir, newMemStore())
 	if len(set.List()) != 0 {
 		t.Fatal("an impostor plugin was loaded")
 	}
