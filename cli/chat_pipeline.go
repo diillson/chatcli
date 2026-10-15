@@ -828,6 +828,7 @@ const turnContextHeader = "[TURN CONTEXT — injected by ChatCLI for this turn, 
 // context message spliced right before the user's turn.
 func (cli *ChatCLI) buildChatTempHistoryWithContext(
 	parts []models.ContentBlock, turnContext []models.ContentBlock, userInput, additionalContext string, images []models.ImageContent,
+	docs ...models.DocumentContent,
 ) []models.Message {
 	// Purge stale `[ACTIVE MODE: …]` system messages left behind by a
 	// previous /agent or /coder run in the same session. Without this,
@@ -856,9 +857,10 @@ func (cli *ChatCLI) buildChatTempHistoryWithContext(
 		tempHistory = append(tempHistory, models.TurnContextMessage(text))
 	}
 	tempHistory = append(tempHistory, models.Message{
-		Role:    "user",
-		Content: userInput + additionalContext,
-		Images:  images,
+		Role:      "user",
+		Content:   userInput + additionalContext,
+		Images:    images,
+		Documents: docs,
 	})
 	return tempHistory
 }

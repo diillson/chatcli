@@ -14,6 +14,7 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"runtime"
 	"strings"
 	"syscall"
 	"time"
@@ -292,18 +293,51 @@ func applyStackSpotFlags(llmManager manager.LLMManager, targetProvider string, o
 func installSignalHandlers(isExecuting func() bool, cancelOperation, cancelRoot func(), logger *zap.Logger) {
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
+	// The terminal as the process found it, restored on a forced exit (the
+	// REPL may hold it in raw mode).
+	var ttyState *term.State
+	if fd := int(os.Stdin.Fd()); term.IsTerminal(fd) { //#nosec G115 -- a file descriptor fits in int
+		ttyState, _ = term.GetState(fd)
+	}
 
 	go func() {
+		shuttingDown := false
 		for sig := range sigChan {
-			if sig == syscall.SIGINT && isExecuting() {
+			if sig == syscall.SIGINT && isExecuting() && !shuttingDown {
 				logger.Info("Cancelando operação em andamento (SIGINT)")
 				cancelOperation()
 				continue
 			}
+			if shuttingDown {
+				// A second termination signal: the user wants out now.
+				forceExit(logger, ttyState, "second signal "+sig.String())
+			}
+			shuttingDown = true
 			logger.Info("Encerrando aplicação", zap.String("signal", sig.String()))
 			cancelRoot()
+			// Cancellation is cooperative: a call that ignores its context
+			// would keep the process alive forever after the signal.
+			time.AfterFunc(shutdownGrace, func() { forceExit(logger, ttyState, "shutdown grace period elapsed") })
 		}
 	}()
+}
+
+// shutdownGrace is how long a cancelled process may take to wind down
+// before it is ended.
+const shutdownGrace = 10 * time.Second
+
+// forceExit ends a process whose shutdown stalled, logging every goroutine's
+// stack first so the call that ignored cancellation can be found.
+func forceExit(logger *zap.Logger, tty *term.State, reason string) {
+	buf := make([]byte, 256<<10)
+	buf = buf[:runtime.Stack(buf, true)]
+	logger.Warn("Encerramento forçado: o processo não terminou após o cancelamento",
+		zap.String("reason", reason), zap.ByteString("goroutines", buf))
+	_ = logger.Sync()
+	if tty != nil {
+		_ = term.Restore(int(os.Stdin.Fd()), tty) //#nosec G115 -- a file descriptor fits in int
+	}
+	os.Exit(143)
 }
 
 func main() {

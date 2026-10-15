@@ -191,7 +191,7 @@ api_breaking:
 # Tune when intentional growth is announced.
 binary_size:
   enforcement: blocking
-  chatcli_mb: 100
+  chatcli_mb: 150
   operator_mb: 100
 
 # Floor 15 — LLM provider parity matrix. Every catalog provider

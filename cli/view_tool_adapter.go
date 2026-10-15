@@ -25,7 +25,9 @@ import (
 const (
 	viewMsgStagedFmt    = "Image %s staged — it will be attached to the conversation on the next turn; analyze what is visible then."
 	viewMsgDescribedFmt = "The current model has no native vision; text description of %s:\n%s"
-	viewMsgPDF          = "PDFs are not supported yet — render the page to an image (png/jpeg) first"
+	viewMsgPDFStagedFmt = "PDF %s staged (%s) — it will be attached to the conversation on the next turn; read it then."
+	viewMsgPDFTextFmt   = "Text of PDF %s (%s):\n%s"
+	viewMsgPDFUnreadFmt = "%q is not a readable PDF within the %d MB limit"
 	viewMsgNotImageFmt  = "%q is not a readable png/jpeg/gif/webp image within the attachment size limit"
 	viewMsgNoLoop       = "no agent loop is running to attach the image to — in chat mode use @file instead"
 	viewMsgDisabled     = "vision input is disabled or unavailable for the current model (see CHATCLI_VISION_INPUT)"
@@ -38,8 +40,14 @@ type viewToolAdapter struct {
 
 // ViewImage implements plugins.ViewAdapter.
 func (a *viewToolAdapter) ViewImage(ctx context.Context, path string) (string, error) {
-	if strings.HasSuffix(strings.ToLower(strings.TrimSpace(path)), ".pdf") {
-		return "", errors.New(viewMsgPDF)
+	if doc, ok, err := a.cli.loadPDFAttachment(ctx, path); ok || strings.HasSuffix(strings.ToLower(strings.TrimSpace(path)), ".pdf") {
+		if err != nil {
+			return "", err
+		}
+		if !ok {
+			return "", fmt.Errorf(viewMsgPDFUnreadFmt, path, maxPDFAttachmentBytes>>20)
+		}
+		return a.viewPDF(ctx, path, doc)
 	}
 	img, ok := a.cli.loadImageAttachment(path)
 	if !ok {
@@ -59,4 +67,26 @@ func (a *viewToolAdapter) ViewImage(ctx context.Context, path string) (string, e
 		return fmt.Sprintf(viewMsgDescribedFmt, path, desc), nil
 	}
 	return "", errors.New(viewMsgDisabled)
+}
+
+// viewPDF attaches a PDF to the running loop (native for models that read
+// PDFs, extracted text for the rest — decided when the message is sent), or,
+// with no loop to attach to, returns its extracted text.
+func (a *viewToolAdapter) viewPDF(ctx context.Context, path string, doc models.DocumentContent) (string, error) {
+	docs := a.cli.gateDocumentsForRoute(ctx, a.cli.Provider, a.cli.Model, []models.DocumentContent{doc})
+	if len(docs) == 0 {
+		return "", errors.New(viewMsgDisabled)
+	}
+	pages := "unknown page count"
+	if docs[0].Pages > 0 {
+		pages = fmt.Sprintf("%d pages", docs[0].Pages)
+	}
+	if am := a.cli.agentMode; am != nil {
+		am.stageViewedDocument(docs[0])
+		return fmt.Sprintf(viewMsgPDFStagedFmt, path, pages), nil
+	}
+	if strings.TrimSpace(docs[0].Text) == "" {
+		return "", fmt.Errorf(viewMsgPDFUnreadFmt, path, maxPDFAttachmentBytes>>20)
+	}
+	return fmt.Sprintf(viewMsgPDFTextFmt, path, pages, docs[0].Text), nil
 }

@@ -89,6 +89,7 @@ const (
 	whErrNoChatID     = "missing_chat_id"
 	whErrAudioB64     = "invalid_audio_b64"
 	whErrImageB64     = "invalid_image_b64"
+	whErrDocumentB64  = "invalid_document_b64"
 	whErrEmpty        = "empty_message"
 	whErrQueueFull    = "queue_full"
 	whErrShutdown     = "shutting_down"
@@ -172,6 +173,11 @@ type webhookInbound struct {
 	ImageB64  string `json:"image_b64"`
 	ImageURL  string `json:"image_url"`
 	ImageMime string `json:"image_mime"`
+	// Optional PDF: inline base64 (document_b64) or a URL (document_url,
+	// fetched by the adapter); document_name is shown to the model.
+	DocumentB64  string `json:"document_b64"`
+	DocumentURL  string `json:"document_url"`
+	DocumentName string `json:"document_name"`
 }
 
 // inboundHandler builds the HTTP handler. Extracted from Start so it can be
@@ -249,7 +255,7 @@ func writeWebhookError(rw http.ResponseWriter, status int, code string) {
 // gateway accepts, both base64-encoded inline, plus 1 MB for the text and
 // the JSON around them.
 func maxWebhookBodyBytes() int64 {
-	return base64Len(maxAudioBytes()) + base64Len(maxImageBytes()) + 1<<20
+	return base64Len(maxAudioBytes()) + base64Len(maxImageBytes()) + base64Len(maxDocumentBytes()) + 1<<20
 }
 
 func base64Len(n int64) int64 { return (n + 2) / 3 * 4 }
@@ -291,6 +297,7 @@ func (w *WebhookAdapter) drainLane(ctx context.Context, chatID string, lane chan
 		msg := <-lane
 		w.hydrateAudio(ctx, &msg)
 		w.hydrateImages(ctx, &msg)
+		hydrateDocument(ctx, &msg, w.fetchAttachment, w.logger, "webhook")
 		select {
 		case inbound <- msg:
 		case <-ctx.Done():
@@ -472,7 +479,19 @@ func parseWebhookRequest(body []byte) (InboundMessage, string) {
 		image = &InboundImage{ref: strings.TrimSpace(in.ImageURL), MimeType: in.ImageMime}
 	}
 
-	if strings.TrimSpace(in.Text) == "" && audio == nil && image == nil {
+	var document *InboundDocument
+	switch {
+	case strings.TrimSpace(in.DocumentB64) != "":
+		data, err := base64.StdEncoding.DecodeString(strings.TrimSpace(in.DocumentB64))
+		if err != nil || len(data) == 0 || !bytes.Contains(data[:min(len(data), 1024)], []byte("%PDF-")) {
+			return InboundMessage{}, whErrDocumentB64
+		}
+		document = &InboundDocument{Data: data, MimeType: "application/pdf", FileName: in.DocumentName}
+	case strings.TrimSpace(in.DocumentURL) != "":
+		document = &InboundDocument{ref: strings.TrimSpace(in.DocumentURL), MimeType: "application/pdf", FileName: in.DocumentName}
+	}
+
+	if strings.TrimSpace(in.Text) == "" && audio == nil && image == nil && document == nil {
 		return InboundMessage{}, whErrEmpty
 	}
 	userID := strings.TrimSpace(in.UserID)
@@ -486,6 +505,7 @@ func parseWebhookRequest(body []byte) (InboundMessage, string) {
 		Text:     in.Text,
 		Audio:    audio,
 		Image:    image,
+		Document: document,
 	}, ""
 }
 

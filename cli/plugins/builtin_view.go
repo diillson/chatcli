@@ -65,7 +65,7 @@ func (*BuiltinViewPlugin) Name() string { return "@view" }
 
 // Description surfaces the tool in /plugin list and the agent tool catalog.
 func (*BuiltinViewPlugin) Description() string {
-	return "Look at a local image file with your own eyes: screenshots (pairs with @browser screenshot), design mocks, diagrams, charts, UI states. The image is attached to the conversation through the session's vision pipeline — native multimodal when the model supports it, a text description otherwise. Use it whenever what a file LOOKS like matters; reading bytes with @coder read cannot show you a picture."
+	return "Look at a local image or PDF with your own eyes: screenshots (pairs with @browser screenshot), design mocks, diagrams, charts, UI states, PDF reports, contracts, invoices, scanned documents. The file is attached to the conversation — natively when the model reads images/PDFs, as a text description or the PDF's extracted text otherwise. Use it whenever what a file LOOKS like or SAYS matters; reading bytes with @coder read cannot show you a picture or a PDF page."
 }
 
 // Usage explains the canonical invocation forms.
@@ -73,14 +73,14 @@ func (*BuiltinViewPlugin) Usage() string {
 	return `<tool_call name="@view" args='{"cmd":"view","args":{"file":"/tmp/chatcli-browser/screenshot-1.png"}}' />
 
 Subcommands:
-  view {file}   attach a local image (png, jpeg, gif, webp) to the conversation
+  view {file}   attach a local image (png, jpeg, gif, webp) or PDF to the conversation
 
-The image lands on the NEXT turn: request it, then analyze what is visible.
-PDFs are not supported yet — render the relevant page to an image first.`
+The file lands on the NEXT turn: request it, then analyze what it shows.
+PDFs up to 50 MB; scanned PDFs work on models that read PDFs natively.`
 }
 
 // Version returns the plugin contract version.
-func (*BuiltinViewPlugin) Version() string { return "1.0.0" }
+func (*BuiltinViewPlugin) Version() string { return "1.1.0" }
 
 // Path identifies the plugin as builtin.
 func (*BuiltinViewPlugin) Path() string { return "[builtin]" }
@@ -89,10 +89,10 @@ func (*BuiltinViewPlugin) Path() string { return "[builtin]" }
 func (*BuiltinViewPlugin) Schema() string {
 	schema := map[string]interface{}{
 		"name":        "@view",
-		"description": "Attach a local image to the conversation through the vision pipeline.",
+		"description": "Attach a local image or PDF to the conversation through the vision/document pipeline.",
 		"argsFormat":  "JSON envelope {cmd, args} (e.g. {\"cmd\":\"view\",\"args\":{\"file\":\"shot.png\"}}); a bare path also works.",
 		"subcommands": []map[string]interface{}{
-			{"name": "view", "description": "attach a local image (png, jpeg, gif, webp)", "examples": []string{`{"cmd":"view","args":{"file":"shot.png"}}`}},
+			{"name": "view", "description": "attach a local image (png, jpeg, gif, webp) or PDF", "examples": []string{`{"cmd":"view","args":{"file":"shot.png"}}`, `{"cmd":"view","args":{"file":"report.pdf"}}`}},
 		},
 	}
 	b, _ := json.MarshalIndent(schema, "", "  ")

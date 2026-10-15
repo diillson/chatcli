@@ -197,7 +197,8 @@ func (t *TelegramAdapter) hydrateAudio(ctx context.Context, msgs []InboundMessag
 			}
 		}
 		t.hydrateImages(ctx, &m)
-		if strings.TrimSpace(m.Text) == "" && m.Audio == nil && m.Image == nil {
+		hydrateDocument(ctx, &m, t.downloadFile, t.logger, "telegram")
+		if strings.TrimSpace(m.Text) == "" && m.Audio == nil && m.Image == nil && m.Document == nil {
 			continue // download failed and there was no text — nothing to do
 		}
 		out = append(out, m)
@@ -457,6 +458,14 @@ func (m *tgMessage) imageFiles() []*tgFile {
 	return out
 }
 
+// pdfFile returns the message's PDF document, if it carries one.
+func (m *tgMessage) pdfFile() *tgFile {
+	if m.Document != nil && m.Document.FileID != "" && isPDFAttachment(m.Document.MimeType, m.Document.FileName) {
+		return m.Document
+	}
+	return nil
+}
+
 type tgUpdate struct {
 	UpdateID int64      `json:"update_id"`
 	Message  *tgMessage `json:"message"`
@@ -488,12 +497,13 @@ func parseTelegramUpdates(body []byte) ([]InboundMessage, int64, error) {
 		}
 		af := u.Message.audioFile()
 		imgs := u.Message.imageFiles()
+		pdf := u.Message.pdfFile()
 		text := u.Message.Text
-		if (af != nil || len(imgs) > 0) && strings.TrimSpace(text) == "" {
-			text = u.Message.Caption // a caption on a voice/audio/photo note
+		if (af != nil || len(imgs) > 0 || pdf != nil) && strings.TrimSpace(text) == "" {
+			text = u.Message.Caption // a caption on a voice/audio/photo/document
 		}
-		// Skip only when there is nothing usable — neither text, audio, nor image.
-		if strings.TrimSpace(text) == "" && af == nil && len(imgs) == 0 {
+		// Skip only when there is nothing usable — no text, audio, image or PDF.
+		if strings.TrimSpace(text) == "" && af == nil && len(imgs) == 0 && pdf == nil {
 			continue
 		}
 		userID, userName := "", ""
@@ -515,6 +525,10 @@ func parseTelegramUpdates(body []byte) ([]InboundMessage, int64, error) {
 			img := imgs[0]
 			image = &InboundImage{ref: img.FileID, MimeType: img.MimeType, FileName: img.FileName}
 		}
+		var document *InboundDocument
+		if pdf != nil {
+			document = &InboundDocument{ref: pdf.FileID, MimeType: pdf.MimeType, FileName: pdf.FileName}
+		}
 		msgs = append(msgs, InboundMessage{
 			Platform: telegramPlatform,
 			ChatID:   strconv.FormatInt(u.Message.Chat.ID, 10),
@@ -523,6 +537,7 @@ func parseTelegramUpdates(body []byte) ([]InboundMessage, int64, error) {
 			Text:     text,
 			Audio:    audio,
 			Image:    image,
+			Document: document,
 		})
 	}
 	return msgs, maxID, nil

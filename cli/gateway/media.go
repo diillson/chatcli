@@ -12,6 +12,7 @@
 package gateway
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"io"
@@ -19,6 +20,8 @@ import (
 	"os"
 	"strconv"
 	"strings"
+
+	"go.uber.org/zap"
 )
 
 // defaultMaxAudioBytes bounds a downloaded voice clip. 20MB comfortably covers
@@ -99,4 +102,69 @@ func isImageMime(mime string) bool {
 		return true
 	}
 	return false
+}
+
+// defaultMaxDocumentBytes caps an inbound PDF (the largest native limit a
+// provider documents is 50 MB). CHATCLI_GATEWAY_MAX_DOCUMENT_BYTES overrides.
+const defaultMaxDocumentBytes = 50 << 20
+
+// maxDocumentBytes returns the inbound PDF size cap.
+func maxDocumentBytes() int64 {
+	if v := strings.TrimSpace(os.Getenv("CHATCLI_GATEWAY_MAX_DOCUMENT_BYTES")); v != "" {
+		if n, err := strconv.ParseInt(v, 10, 64); err == nil && n > 0 {
+			return n
+		}
+	}
+	return defaultMaxDocumentBytes
+}
+
+// isPDFAttachment reports whether an attachment is a PDF, by MIME type or,
+// when the platform sends a generic type, by file name.
+func isPDFAttachment(mime, name string) bool {
+	m := strings.ToLower(strings.TrimSpace(mime))
+	if strings.HasPrefix(m, "application/pdf") || strings.HasPrefix(m, "application/x-pdf") {
+		return true
+	}
+	return (m == "" || m == "application/octet-stream") && strings.HasSuffix(strings.ToLower(strings.TrimSpace(name)), ".pdf")
+}
+
+// hydrateDocument downloads the bytes of a message's PDF through the
+// adapter's own fetcher; a failed download (or a file that is not a PDF)
+// clears Document so the message degrades to its text.
+func hydrateDocument(ctx context.Context, msg *InboundMessage, fetch func(ctx context.Context, ref string, limit int64) ([]byte, string, error), logger *zap.Logger, platform string) {
+	if msg.Document == nil || len(msg.Document.Data) > 0 {
+		return
+	}
+	data, mime, err := fetch(ctx, msg.Document.ref, maxDocumentBytes())
+	if err != nil || !bytes.Contains(data[:min(len(data), 1024)], []byte("%PDF-")) {
+		if logger != nil {
+			logger.Warn("gateway/"+platform+": document download failed or not a PDF", zap.String("user", msg.UserID), zap.Error(err))
+		}
+		msg.Document = nil
+		noteLostDocument(msg, platform)
+		return
+	}
+	msg.Document.Data = data
+	if msg.Document.MimeType == "" {
+		msg.Document.MimeType = mime
+	}
+}
+
+// lostDocumentNote tells the agent that a PDF sent on a chat channel never
+// arrived, so the reply says so instead of answering as if nothing had been
+// attached. The reason stays in the operator's log.
+const lostDocumentNote = "[The PDF attached to this message could not be downloaded or is not a valid PDF. Tell the user it was not received and ask them to send it again.]"
+
+// noteLostDocument adds the lost-PDF note to the message text. The webhook
+// uses its URL wording, since there the caller chose the URL.
+func noteLostDocument(msg *InboundMessage, platform string) {
+	if platform == webhookPlatform {
+		noteFailedAttachment(msg, "PDF document")
+		return
+	}
+	if strings.TrimSpace(msg.Text) == "" {
+		msg.Text = lostDocumentNote
+		return
+	}
+	msg.Text += "\n\n" + lostDocumentNote
 }

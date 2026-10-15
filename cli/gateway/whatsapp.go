@@ -158,7 +158,8 @@ func (a *WhatsAppAdapter) webhookHandler(ctx context.Context, inbound chan<- Inb
 				msg.SenderListed = a.allowed.listed(msg.UserID)
 				a.hydrateAudio(ctx, &msg)
 				a.hydrateImages(ctx, &msg)
-				if strings.TrimSpace(msg.Text) == "" && msg.Audio == nil && msg.Image == nil {
+				hydrateDocument(ctx, &msg, a.downloadMedia, a.logger, "whatsapp")
+				if strings.TrimSpace(msg.Text) == "" && msg.Audio == nil && msg.Image == nil && msg.Document == nil {
 					continue // audio/image download failed and there was no text
 				}
 				select {
@@ -359,7 +360,14 @@ type whatsAppWebhook struct {
 					Image *struct {
 						ID       string `json:"id"`
 						MimeType string `json:"mime_type"`
+						Caption  string `json:"caption"`
 					} `json:"image"`
+					Document *struct {
+						ID       string `json:"id"`
+						MimeType string `json:"mime_type"`
+						Filename string `json:"filename"`
+						Caption  string `json:"caption"`
+					} `json:"document"`
 				} `json:"messages"`
 			} `json:"value"`
 		} `json:"changes"`
@@ -403,6 +411,15 @@ func parseWhatsAppInbound(body []byte) []InboundMessage {
 						ChatID:   m.From,
 						UserID:   m.From,
 						Image:    &InboundImage{ref: m.Image.ID, MimeType: m.Image.MimeType},
+						Text:     m.Image.Caption,
+					})
+				case m.Type == "document" && m.Document != nil && m.Document.ID != "" && isPDFAttachment(m.Document.MimeType, m.Document.Filename):
+					out = append(out, InboundMessage{
+						Platform: whatsappPlatform,
+						ChatID:   m.From,
+						UserID:   m.From,
+						Text:     m.Document.Caption,
+						Document: &InboundDocument{ref: m.Document.ID, MimeType: m.Document.MimeType, FileName: m.Document.Filename},
 					})
 				}
 			}

@@ -76,7 +76,7 @@ func TestBuildToolMessages_RepairedParkHistorySatisfiesAdjacency(t *testing.T) {
 	repaired, report := agent.EnsureToolResultPairing(history, nil)
 	require.True(t, report.HasRepairs())
 
-	messages := buildToolMessages("", repaired)
+	messages := buildToolMessages("", repaired, "")
 	validateMoonshotAdjacency(t, messages)
 }
 
@@ -91,7 +91,7 @@ func TestBuildToolMessages_UnrepairedParkHistoryFailsAdjacency(t *testing.T) {
 		{Role: "user", Content: "[@park completed] outcome=elapsed"},
 	}
 
-	messages := buildToolMessages("", history)
+	messages := buildToolMessages("", history, "")
 
 	m := messages[0].(map[string]interface{})
 	calls := m["tool_calls"].([]map[string]interface{})

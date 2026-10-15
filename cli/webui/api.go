@@ -325,7 +325,7 @@ func (s *Server) writeEvent(w http.ResponseWriter, f http.Flusher, ev event) {
 func (s *Server) execute(ctx context.Context, rn *run, session, mode, text string, o TurnOptions) {
 	defer close(rn.done)
 	defer rn.sink.close()
-	if s.routeInline(ctx, rn, session, &mode, &text, len(o.Images) > 0) {
+	if s.routeInline(ctx, rn, session, &mode, &text, len(o.Images) > 0 || len(o.Documents) > 0) {
 		return
 	}
 	reply, err := s.dispatchTurn(ctx, rn, session, mode, text, o)
@@ -340,6 +340,14 @@ func turnOptionsFrom(req turnRequest) (TurnOptions, error) {
 			return o, fmt.Errorf("%s", i18n.T("web.bad_image", img.Name))
 		}
 		mime := img.MediaType
+		if strings.EqualFold(mime, models.PDFMediaType) || models.IsPDF(data) {
+			// The page sends PDFs through the same attachment list.
+			if !models.IsPDF(data) {
+				return o, fmt.Errorf("%s", i18n.T("web.bad_document", img.Name))
+			}
+			o.Documents = append(o.Documents, DocumentInput{Name: img.Name, Data: data})
+			continue
+		}
 		if _, ok := models.NormalizeImageMediaType(mime); !ok {
 			if sniffed, ok2 := models.DetectImageMediaType(data); ok2 {
 				mime = sniffed

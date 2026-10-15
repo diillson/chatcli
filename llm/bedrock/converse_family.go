@@ -23,6 +23,7 @@ import (
 	"github.com/diillson/chatcli/i18n"
 	"github.com/diillson/chatcli/llm/catalog"
 	"github.com/diillson/chatcli/llm/client"
+	"github.com/diillson/chatcli/llm/internal/visionwire"
 	"github.com/diillson/chatcli/models"
 	"github.com/diillson/chatcli/utils"
 	"go.uber.org/zap"
@@ -45,7 +46,7 @@ func (c *BedrockClient) sendPromptConverse(ctx context.Context, prompt string, h
 		effectiveMaxTokens = c.getMaxTokensConverse()
 	}
 
-	messages, system := buildConverseMessages(prompt, history)
+	messages, system := buildConverseMessages(prompt, history, c.model)
 	if len(messages) == 0 {
 		return "", fmt.Errorf("%s", i18n.T("llm.error.no_response", "Bedrock"))
 	}
@@ -193,7 +194,42 @@ func bedrockImageBlocks(images []models.ImageContent) []bedrockruntimetypes.Cont
 	return blocks
 }
 
-func buildConverseMessages(prompt string, history []models.Message) ([]bedrockruntimetypes.Message, []bedrockruntimetypes.SystemContentBlock) {
+// bedrockConverseMaxPDF and bedrockConverseMaxDocs are Converse's
+// DocumentBlock limits; a PDF beyond them goes as extracted text.
+const (
+	bedrockConverseMaxPDF  = 4_500_000
+	bedrockConverseMaxDocs = 5
+)
+
+// bedrockDocumentBlocks converts the PDFs a Converse model reads natively
+// into DocumentBlocks (the name is sanitized: Converse rejects dots and
+// most punctuation). It returns the blocks and the documents that did not
+// fit, for the caller to send as text.
+func bedrockDocumentBlocks(docs []models.DocumentContent) ([]bedrockruntimetypes.ContentBlock, []models.DocumentContent) {
+	var blocks []bedrockruntimetypes.ContentBlock
+	var rest []models.DocumentContent
+	used := map[string]int{}
+	for _, d := range docs {
+		if len(d.Data) > bedrockConverseMaxPDF || len(blocks) >= bedrockConverseMaxDocs {
+			rest = append(rest, d)
+			continue
+		}
+		name := visionwire.BedrockDocumentName(d.Name())
+		if used[name]++; used[name] > 1 {
+			name = fmt.Sprintf("%s (%d)", name, used[name]) // names must be unique per message
+		}
+		blocks = append(blocks, &bedrockruntimetypes.ContentBlockMemberDocument{
+			Value: bedrockruntimetypes.DocumentBlock{
+				Format: bedrockruntimetypes.DocumentFormatPdf,
+				Name:   aws.String(name),
+				Source: &bedrockruntimetypes.DocumentSourceMemberBytes{Value: d.Data},
+			},
+		})
+	}
+	return blocks, rest
+}
+
+func buildConverseMessages(prompt string, history []models.Message, model string) ([]bedrockruntimetypes.Message, []bedrockruntimetypes.SystemContentBlock) {
 	var messages []bedrockruntimetypes.Message
 	var systemBlocks []bedrockruntimetypes.SystemContentBlock
 
@@ -204,13 +240,27 @@ func buildConverseMessages(prompt string, history []models.Message) ([]bedrockru
 		systemBlocks = append(systemBlocks, &bedrockruntimetypes.SystemContentBlockMemberText{Value: text})
 	}
 
-	appendMessage := func(role bedrockruntimetypes.ConversationRole, text string, images []models.ImageContent) {
+	appendMessage := func(role bedrockruntimetypes.ConversationRole, text string, images []models.ImageContent, docs []models.DocumentContent) {
 		imageBlocks := bedrockImageBlocks(images)
-		if strings.TrimSpace(text) == "" && len(imageBlocks) == 0 {
+		var docBlocks []bedrockruntimetypes.ContentBlock
+		if role == bedrockruntimetypes.ConversationRoleUser && len(docs) > 0 {
+			var native, rest []models.DocumentContent
+			text, native = visionwire.SplitDocuments(catalog.ProviderBedrock, model, text, docs)
+			docBlocks, rest = bedrockDocumentBlocks(native)
+			text += visionwire.DocumentsAsText(rest)
+			if len(docBlocks) > 0 && strings.TrimSpace(text) == "" {
+				text = "Read the attached document." // Converse needs a text block next to a document
+			}
+		} else if len(docs) > 0 {
+			text += visionwire.DocumentsAsText(docs)
+		}
+		if strings.TrimSpace(text) == "" && len(imageBlocks) == 0 && len(docBlocks) == 0 {
 			return
 		}
-		// Image blocks first (better grounding), then the text block.
-		blocks := imageBlocks
+		// Document and image blocks first (better grounding), then the text block.
+		blocks := make([]bedrockruntimetypes.ContentBlock, 0, len(docBlocks)+len(imageBlocks)+1)
+		blocks = append(blocks, docBlocks...)
+		blocks = append(blocks, imageBlocks...)
 		if strings.TrimSpace(text) != "" {
 			blocks = append(blocks, &bedrockruntimetypes.ContentBlockMemberText{Value: text})
 		}
@@ -237,14 +287,14 @@ func buildConverseMessages(prompt string, history []models.Message) ([]bedrockru
 				flushSystem(msg.Content)
 			}
 		case "assistant":
-			appendMessage(bedrockruntimetypes.ConversationRoleAssistant, msg.Content, msg.Images)
+			appendMessage(bedrockruntimetypes.ConversationRoleAssistant, msg.Content, msg.Images, msg.Documents)
 		default:
-			appendMessage(bedrockruntimetypes.ConversationRoleUser, msg.Content, msg.Images)
+			appendMessage(bedrockruntimetypes.ConversationRoleUser, msg.Content, msg.Images, msg.Documents)
 		}
 	}
 
 	if len(history) == 0 || history[len(history)-1].Role != "user" || history[len(history)-1].Content != prompt {
-		appendMessage(bedrockruntimetypes.ConversationRoleUser, prompt, nil)
+		appendMessage(bedrockruntimetypes.ConversationRoleUser, prompt, nil, nil)
 	}
 
 	// Converse rejects requests that start with an assistant message.

@@ -112,7 +112,7 @@ func (c *Client) SendPrompt(ctx context.Context, prompt string, history []models
 		}
 		messages = append(messages, map[string]interface{}{
 			"role":    role,
-			"content": visionwire.OpenAIContent(msg.Content, msg.Images),
+			"content": visionwire.OpenAIMessageContent(catalog.ProviderCopilot, c.model, msg),
 		})
 	}
 

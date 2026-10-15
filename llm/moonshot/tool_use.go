@@ -17,6 +17,7 @@ import (
 
 	"github.com/diillson/chatcli/auth"
 	"github.com/diillson/chatcli/i18n"
+	"github.com/diillson/chatcli/llm/catalog"
 	"github.com/diillson/chatcli/llm/client"
 	"github.com/diillson/chatcli/llm/internal/visionwire"
 	"github.com/diillson/chatcli/llm/toolshim"
@@ -47,7 +48,7 @@ func (c *MoonshotClient) SendPromptWithTools(ctx context.Context, prompt string,
 	}
 
 	sortedTools := client.SortToolDefinitions(tools)
-	messages := buildToolMessages(prompt, history)
+	messages := buildToolMessages(prompt, history, c.model)
 
 	toolDefs := make([]map[string]interface{}, 0, len(sortedTools))
 	for _, t := range sortedTools {
@@ -130,7 +131,7 @@ func (c *MoonshotClient) SendPromptWithTools(ctx context.Context, prompt string,
 }
 
 // buildToolMessages constructs the messages array supporting tool calls and results.
-func buildToolMessages(prompt string, history []models.Message) []interface{} {
+func buildToolMessages(prompt string, history []models.Message, model string) []interface{} {
 	var messages []interface{}
 
 	for _, msg := range history {
@@ -168,18 +169,18 @@ func buildToolMessages(prompt string, history []models.Message) []interface{} {
 			} else {
 				messages = append(messages, map[string]interface{}{
 					"role":    "assistant",
-					"content": visionwire.OpenAIContent(msg.Content, msg.Images),
+					"content": visionwire.OpenAIMessageContent(catalog.ProviderMoonshot, model, msg),
 				})
 			}
 		case "system", "user":
 			messages = append(messages, map[string]interface{}{
 				"role":    role,
-				"content": visionwire.OpenAIContent(msg.Content, msg.Images),
+				"content": visionwire.OpenAIMessageContent(catalog.ProviderMoonshot, model, msg),
 			})
 		default:
 			messages = append(messages, map[string]interface{}{
 				"role":    "user",
-				"content": visionwire.OpenAIContent(msg.Content, msg.Images),
+				"content": visionwire.OpenAIMessageContent(catalog.ProviderMoonshot, model, msg),
 			})
 		}
 	}

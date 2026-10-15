@@ -402,8 +402,10 @@ type acpPromptParams struct {
 		Name string `json:"name"`
 		// resource carries embedded context (embeddedContext capability).
 		Resource *struct {
-			URI  string `json:"uri"`
-			Text string `json:"text"`
+			URI      string `json:"uri"`
+			Text     string `json:"text"`
+			Blob     string `json:"blob"` // base64 binary contents (a PDF)
+			MimeType string `json:"mimeType"`
 		} `json:"resource"`
 	} `json:"prompt"`
 }
@@ -413,7 +415,7 @@ type acpPromptParams struct {
 // agent's tools can open; resource embeds the provided contents inline.
 // Parts are joined with newlines — concatenating them raw glued words from
 // adjacent blocks together ("/coder" + "do X" = "/coderdo X").
-func flattenPromptParts(p acpPromptParams) string {
+func flattenPromptParts(ctx context.Context, p acpPromptParams) string {
 	var parts []string
 	for _, part := range p.Prompt {
 		switch part.Type {
@@ -427,12 +429,26 @@ func flattenPromptParts(p acpPromptParams) string {
 				ref = part.Name
 			}
 			if ref != "" {
-				parts = append(parts, "Referenced file: "+strings.TrimPrefix(ref, "file://"))
+				path := strings.TrimPrefix(ref, "file://")
+				if text, ok := acpPDFFromPath(ctx, path); ok {
+					parts = append(parts, text)
+					continue
+				}
+				parts = append(parts, "Referenced file: "+path)
 			}
 		case "resource":
-			if part.Resource != nil && strings.TrimSpace(part.Resource.Text) != "" {
-				name := strings.TrimPrefix(part.Resource.URI, "file://")
+			if part.Resource == nil {
+				continue
+			}
+			name := strings.TrimPrefix(part.Resource.URI, "file://")
+			if strings.TrimSpace(part.Resource.Text) != "" {
 				parts = append(parts, "Attached context ("+name+"):\n"+part.Resource.Text)
+				continue
+			}
+			if part.Resource.Blob != "" {
+				if text, ok := acpPDFFromBlob(ctx, name, part.Resource.MimeType, part.Resource.Blob); ok {
+					parts = append(parts, text)
+				}
 			}
 		}
 	}
@@ -454,7 +470,7 @@ func (a *ACP) prompt(ctx context.Context, params json.RawMessage) (interface{}, 
 		return nil, errf(CodeInvalidParams, "unknown session %q — call session/new first", p.SessionID)
 	}
 
-	text := flattenPromptParts(p)
+	text := flattenPromptParts(ctx, p)
 	if text == "" {
 		return map[string]interface{}{"stopReason": "end_turn"}, nil
 	}

@@ -143,8 +143,9 @@ func TestParseDiscord_AudioAttachment(t *testing.T) {
 	if im.Image == nil || im.Image.ref != "https://cdn/x.png" || im.Image.MimeType != "image/png" {
 		t.Errorf("image = %+v", im.Image)
 	}
-	// A non-image, non-audio attachment with no text is still rejected.
-	doc := []byte(`{"channel_id":"C1","content":"","author":{"id":"u1"},"attachments":[{"url":"https://cdn/x.pdf","content_type":"application/pdf"}]}`)
+	// An attachment that is not audio, an image or a PDF, with no text, is
+	// still rejected.
+	doc := []byte(`{"channel_id":"C1","content":"","author":{"id":"u1"},"attachments":[{"url":"https://cdn/x.zip","content_type":"application/zip"}]}`)
 	if _, ok := parseDiscordMessage(doc); ok {
 		t.Error("non-media attachment with no text must be rejected")
 	}
@@ -159,8 +160,9 @@ func TestParseSlack_AudioFile(t *testing.T) {
 	if msg.Audio == nil || msg.Audio.ref != "https://files/a.m4a" {
 		t.Errorf("audio = %+v", msg.Audio)
 	}
-	// A non-media file_share (e.g. a PDF) with no text is ignored.
-	doc := []byte(`{"type":"event_callback","event":{"type":"message","subtype":"file_share","channel":"C1","user":"U1","files":[{"mimetype":"application/pdf","url_private":"https://files/d.pdf"}]}}`)
+	// A file_share that is not audio, an image or a PDF (e.g. a zip) with no
+	// text is ignored.
+	doc := []byte(`{"type":"event_callback","event":{"type":"message","subtype":"file_share","channel":"C1","user":"U1","files":[{"mimetype":"application/zip","url_private":"https://files/d.zip"}]}}`)
 	if _, _, has, _ := parseSlackEvent(doc); has {
 		t.Error("non-media file_share must be ignored")
 	}

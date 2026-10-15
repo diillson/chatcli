@@ -199,10 +199,12 @@ type ChatCLI struct {
 	// run when they arrive from outside the interactive @file flow (e.g. the
 	// messaging gateway). runCoderQuery merges and clears them. Transient.
 	pendingInboundImages []models.ImageContent
-	pendingInboundNote   string      // where the saved copies of pendingInboundImages are (saveTurnAttachments)
-	failedChunks         []FileChunk // Chunks que falharam no processamento
-	lastFailedChunk      *FileChunk  // Referência ao último chunk que falhou
-	agentMode            *AgentMode  // Modo de agente
+	pendingInboundNote   string // where the saved copies of pendingInboundImages are (saveTurnAttachments)
+	// pendingInboundDocuments stages PDFs the same way (channels, RPC).
+	pendingInboundDocuments []models.DocumentContent
+	failedChunks            []FileChunk // Chunks que falharam no processamento
+	lastFailedChunk         *FileChunk  // Referência ao último chunk que falhou
+	agentMode               *AgentMode  // Modo de agente
 	// taskGraphAdapter backs the @taskgraph builtin and /taskgraph; kept on
 	// the struct so cleanup can cancel an in-flight graph run.
 	taskGraphAdapter *taskGraphAdapter
@@ -1859,15 +1861,18 @@ func (cli *ChatCLI) runAgentLogic(ctx context.Context) {
 		{i18n.T("agent.banner.mode"), i18n.T("agent.banner.mode_value")},
 	})
 
-	query, additionalContext, images := cli.processSpecialCommands(ctx, query)
+	query, additionalContext, images, docs := cli.processSpecialCommands(ctx, query)
 	images, visionDesc := cli.gateImagesForModel(ctx, images)
 	additionalContext += visionDesc
+	docs = cli.gateDocumentsForRoute(ctx, cli.Provider, cli.Model, docs)
+	additionalContext += attachedPDFNote(docs)
 
 	if cli.agentMode == nil {
 		cli.agentMode = NewAgentMode(cli, cli.logger)
 	}
 
 	cli.agentMode.pendingUserImages = images
+	cli.agentMode.pendingUserDocuments = docs
 	cli.agentMode.isOneShot = false // interactive /agent: keep the loop conversational
 	cli.runWithCancellation(ctx, "Agent Mode", func(ctx context.Context) error {
 		return cli.agentMode.Run(ctx, query, additionalContext, "")
@@ -1913,15 +1918,18 @@ func (cli *ChatCLI) runCoderLogic(ctx context.Context) {
 		{i18n.T("coder.banner.policy"), i18n.T("coder.banner.policy_value")},
 	})
 
-	query, additionalContext, images := cli.processSpecialCommands(ctx, query)
+	query, additionalContext, images, docs := cli.processSpecialCommands(ctx, query)
 	images, visionDesc := cli.gateImagesForModel(ctx, images)
 	additionalContext += visionDesc
+	docs = cli.gateDocumentsForRoute(ctx, cli.Provider, cli.Model, docs)
+	additionalContext += attachedPDFNote(docs)
 
 	if cli.agentMode == nil {
 		cli.agentMode = NewAgentMode(cli, cli.logger)
 	}
 
 	cli.agentMode.pendingUserImages = images
+	cli.agentMode.pendingUserDocuments = docs
 	cli.agentMode.isOneShot = false // interactive /coder: wait for input between turns
 	cli.runWithCancellation(ctx, "Coder Mode", func(ctx context.Context) error {
 		return cli.agentMode.Run(ctx, query, additionalContext, CoderSystemPrompt)

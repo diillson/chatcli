@@ -218,12 +218,13 @@ var envDefaults = map[string]envDefault{
 	"CHATCLI_BOOTSTRAP_ENABLED": {Value: "true", IsBool: true, Source: "bootstrap.go"},
 
 	// ─── Gateway: voice transcription ────────────────────────────
-	"CHATCLI_TRANSCRIPTION_PROVIDER":  {Value: "auto", Source: "transcription.NewFromEnv: auto|embedded|command|url|groq|openai"},
-	"CHATCLI_TRANSCRIPTION_MODEL":     {Value: "whisper-1", Source: "transcription.defaultModel; embedded default base"},
-	"CHATCLI_TRANSCRIPTION_LANG":      {Value: "(auto)", Source: "transcription.NewFromEnv"},
-	"CHATCLI_TRANSCRIPTION_CACHE_DIR": {Value: "(os cache dir)", Source: "transcription embedded engine/model cache"},
-	"CHATCLI_GATEWAY_MAX_AUDIO_BYTES": {Value: "20971520", Source: "gateway.defaultMaxAudioBytes"},
-	"CHATCLI_GATEWAY_MAX_IMAGE_BYTES": {Value: "20971520", Source: "gateway.defaultMaxImageBytes"},
+	"CHATCLI_TRANSCRIPTION_PROVIDER":     {Value: "auto", Source: "transcription.NewFromEnv: auto|embedded|command|url|groq|openai"},
+	"CHATCLI_TRANSCRIPTION_MODEL":        {Value: "whisper-1", Source: "transcription.defaultModel; embedded default base"},
+	"CHATCLI_TRANSCRIPTION_LANG":         {Value: "(auto)", Source: "transcription.NewFromEnv"},
+	"CHATCLI_TRANSCRIPTION_CACHE_DIR":    {Value: "(os cache dir)", Source: "transcription embedded engine/model cache"},
+	"CHATCLI_GATEWAY_MAX_AUDIO_BYTES":    {Value: "20971520", Source: "gateway.defaultMaxAudioBytes"},
+	"CHATCLI_GATEWAY_MAX_IMAGE_BYTES":    {Value: "20971520", Source: "gateway.defaultMaxImageBytes"},
+	"CHATCLI_GATEWAY_MAX_DOCUMENT_BYTES": {Value: "52428800", Source: "gateway.defaultMaxDocumentBytes"},
 
 	// ─── Text-to-speech (@speak + gateway voice replies) ─────────
 	"CHATCLI_TTS_PROVIDER":                {Value: "auto", Source: "tts.NewFromEnv: auto|embedded|command|url|openai|groq|google"},
@@ -256,6 +257,7 @@ var envDefaults = map[string]envDefault{
 
 	// ─── Vision input (image understanding / describe-fallback) ───
 	"CHATCLI_VISION_INPUT":    {Value: "auto", Source: "vision input mode: auto|native|describe|off"},
+	"CHATCLI_PDF_INPUT":       {Value: "auto", Source: "PDF input: auto (native where the model reads PDFs, text elsewhere)|native|text|off"},
 	"CHATCLI_VISION_PROVIDER": {Value: "(auto)", Source: "vision describe-fallback provider override"},
 	"CHATCLI_VISION_MODEL":    {Value: "(auto)", Source: "vision describe-fallback model override"},
 

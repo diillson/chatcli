@@ -26,9 +26,10 @@ import (
 // a huge binary.
 const maxImageAttachmentBytes = 20 * 1024 * 1024 // 20 MB
 
-func (cli *ChatCLI) processFileCommand(ctx context.Context, userInput string) (string, string, []models.ImageContent) {
+func (cli *ChatCLI) processFileCommand(ctx context.Context, userInput string) (string, string, []models.ImageContent, []models.DocumentContent) {
 	var additionalContext string
 	var images []models.ImageContent
+	var docs []models.DocumentContent
 
 	if strings.Contains(strings.ToLower(userInput), "@file") {
 		// Removida a verificação especial para o OpenAI Assistant
@@ -37,7 +38,7 @@ func (cli *ChatCLI) processFileCommand(ctx context.Context, userInput string) (s
 		paths, options, err := extractFileCommandOptions(userInput)
 		if err != nil {
 			cli.logger.Error("Erro ao processar os comandos @file", zap.Error(err))
-			return userInput, fmt.Sprintf("\nErro ao processar @file: %s\n", err.Error()), nil
+			return userInput, fmt.Sprintf("\nErro ao processar @file: %s\n", err.Error()), nil, nil
 		}
 
 		// Usar o modo a partir das opções já extraídas
@@ -58,6 +59,17 @@ func (cli *ChatCLI) processFileCommand(ctx context.Context, userInput string) (s
 			// de texto normal.
 			if img, ok := cli.loadImageAttachment(path); ok {
 				images = append(images, img)
+				continue
+			}
+			// PDF: attached as a document (native for models that read
+			// PDFs, extracted text for the rest) instead of pasting its
+			// binary as text.
+			if doc, ok, perr := cli.loadPDFAttachment(ctx, path); ok {
+				if perr != nil {
+					additionalContext += "\n" + perr.Error() + "\n"
+					continue
+				}
+				docs = append(docs, doc)
 				continue
 			}
 
@@ -193,7 +205,7 @@ func (cli *ChatCLI) processFileCommand(ctx context.Context, userInput string) (s
 		userInput = removeAllFileCommands(userInput)
 	}
 
-	return userInput, additionalContext, images
+	return userInput, additionalContext, images, docs
 }
 
 // gateImagesForModel decides what to do with attached images given the active

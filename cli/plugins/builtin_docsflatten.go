@@ -641,7 +641,7 @@ func walkDocsFlatten(ctx context.Context, root string, cfg docsFlattenArgs, prov
 		if !docsFlattenAcceptExt(d.Name(), cfg.Kind) {
 			return nil
 		}
-		if info, statErr := d.Info(); statErr == nil && info.Size() > docsFlattenMaxFileSize(cfg) {
+		if info, statErr := d.Info(); statErr == nil && info.Size() > docsFlattenFileCap(cfg, d.Name()) {
 			emit(fmt.Sprintf("skipping %s: %s exceeds size cap", filepath.ToSlash(d.Name()), humanByteSize(int(info.Size()))))
 			return nil
 		}
@@ -654,7 +654,7 @@ func walkDocsFlatten(ctx context.Context, root string, cfg docsFlattenArgs, prov
 			return nil
 		}
 
-		fileChunks, err := docsFlattenFile(path, rel, cfg, &chunkIndex, prov)
+		fileChunks, err := docsFlattenFile(ctx, path, rel, cfg, &chunkIndex, prov)
 		if err != nil {
 			emit(fmt.Sprintf("skipping %s: %v", rel, err))
 			return nil
@@ -686,7 +686,7 @@ func docsFlattenSelected(rel string, cfg docsFlattenArgs) bool {
 // Markdown path or a structure-aware code/config path by the file's flavor. The
 // JSONL record shape is identical either way, so knowledge-mode ingestion is
 // unchanged.
-func docsFlattenFile(absPath, relPath string, cfg docsFlattenArgs, chunkIndex *int, prov docsFlattenProvenance) ([]docsFlattenChunk, error) {
+func docsFlattenFile(ctx context.Context, absPath, relPath string, cfg docsFlattenArgs, chunkIndex *int, prov docsFlattenProvenance) ([]docsFlattenChunk, error) {
 	data, err := os.ReadFile(absPath) // #nosec G304 -- path comes from the walked tree the user pointed the tool at
 	if err != nil {
 		return nil, err
@@ -694,6 +694,11 @@ func docsFlattenFile(absPath, relPath string, cfg docsFlattenArgs, chunkIndex *i
 
 	var pieces []flatChunk
 	switch flavor := docsFlattenFlavor(relPath); {
+	case strings.EqualFold(filepath.Ext(relPath), ".pdf"):
+		var err error
+		if pieces, err = pdfPieces(ctx, data, relPath, cfg.MaxChars); err != nil {
+			return nil, err
+		}
 	case diagramFileLang(relPath) != "":
 		var ok bool
 		if pieces, ok = diagramFilePieces(string(data), relPath, cfg.MaxChars); !ok {

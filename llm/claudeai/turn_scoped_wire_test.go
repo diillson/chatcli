@@ -108,7 +108,7 @@ func TestBuildMessages_UnsupportedModelIsUnchanged(t *testing.T) {
 // used tools, and the prompt cache would miss on every switch.
 func TestBuildClaudeToolMessages_PlacesTheBlockIdentically(t *testing.T) {
 	e := client.NewTurnContextEmitter(catalog.ProviderClaudeAI, "claude-opus-5")
-	messages := buildClaudeToolMessages("second question", turnScopedHistory(), e)
+	messages := buildClaudeToolMessages("second question", turnScopedHistory(), e, "")
 
 	var roles []string
 	for _, m := range messages {
@@ -136,7 +136,7 @@ func TestBuildClaudeToolMessages_PlacesTheBlockIdentically(t *testing.T) {
 func TestBuildClaudeToolMessages_StablePositionAcrossRequests(t *testing.T) {
 	history := turnScopedHistory()
 	first := buildClaudeToolMessages("second question", history,
-		client.NewTurnContextEmitter(catalog.ProviderClaudeAI, "claude-opus-5"))
+		client.NewTurnContextEmitter(catalog.ProviderClaudeAI, "claude-opus-5"), "claude-opus-5")
 
 	// The conversation moves on: the answer lands, a new turn context and
 	// a new user turn are appended.
@@ -145,7 +145,7 @@ func TestBuildClaudeToolMessages_StablePositionAcrossRequests(t *testing.T) {
 		models.TurnContextMessage("today is Saturday; cwd is /repo"),
 		models.Message{Role: "user", Content: "third question"})
 	second := buildClaudeToolMessages("third question", grown,
-		client.NewTurnContextEmitter(catalog.ProviderClaudeAI, "claude-opus-5"))
+		client.NewTurnContextEmitter(catalog.ProviderClaudeAI, "claude-opus-5"), "claude-opus-5")
 
 	if len(second) <= len(first) {
 		t.Fatalf("the array must only grow: %d then %d", len(first), len(second))
@@ -375,7 +375,7 @@ func TestTurnScoped_PlacementIsLegalOnEveryHistoryShape(t *testing.T) {
 			assertSystemPlacementLegal(t, "oauth builder", asAny(oauth))
 
 			tool := buildClaudeToolMessages(last, history,
-				client.NewTurnContextEmitter(catalog.ProviderClaudeAI, "claude-opus-5"))
+				client.NewTurnContextEmitter(catalog.ProviderClaudeAI, "claude-opus-5"), "claude-opus-5")
 			assertSystemPlacementLegal(t, "tool loop", tool)
 		})
 	}

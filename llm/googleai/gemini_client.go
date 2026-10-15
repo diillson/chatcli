@@ -279,7 +279,7 @@ func (c *GeminiClient) buildContentsAndSystem(history []models.Message, prompt s
 		case "assistant":
 			contents = append(contents, map[string]interface{}{
 				"role":  "model",
-				"parts": visionwire.GeminiParts(msg.Content, msg.Images).PrependThought(msg.Thinking),
+				"parts": visionwire.GeminiMessageParts(catalog.ProviderGoogleAI, c.model, msg).PrependThought(msg.Thinking),
 			})
 		case "system":
 			// Gemini v1beta aceita system_instruction como top-level.
@@ -287,7 +287,7 @@ func (c *GeminiClient) buildContentsAndSystem(history []models.Message, prompt s
 		default: // "user"
 			contents = append(contents, map[string]interface{}{
 				"role":  "user",
-				"parts": visionwire.GeminiParts(msg.Content, msg.Images),
+				"parts": visionwire.GeminiMessageParts(catalog.ProviderGoogleAI, c.model, msg),
 			})
 		}
 	}

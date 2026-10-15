@@ -55,7 +55,7 @@ func TestBuildConverseMessages_WithImage(t *testing.T) {
 			{MediaType: "image/png", Data: []byte("imgbytes")},
 		}},
 	}
-	msgs, _ := buildConverseMessages("", history)
+	msgs, _ := buildConverseMessages("", history, "")
 	if len(msgs) != 1 {
 		t.Fatalf("expected 1 message, got %d", len(msgs))
 	}

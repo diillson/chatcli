@@ -1,0 +1,6 @@
+{
+  "pdf.warn.scanned_unreadable": "O PDF %s não tem camada de texto (é um documento escaneado) e %s não lê PDF nativamente; nenhum modelo configurado conseguiu transcrevê-lo. Use um modelo que leia PDF (Claude, GPT-4o ou posterior, Gemini) ou aponte CHATCLI_VISION_PROVIDER/CHATCLI_VISION_MODEL para um deles.",
+  "pdf.info.transcribed": "O PDF %s é escaneado; transcrito por %s para o modelo atual.",
+  "gateway.document.default_prompt": "Leia o PDF anexado e resuma o que ele diz.",
+  "web.bad_document": "%s não é um PDF legível."
+}

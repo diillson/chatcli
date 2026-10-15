@@ -15,6 +15,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/diillson/chatcli/llm/internal/visionwire"
 	"github.com/diillson/chatcli/llm/toolshim"
 	"github.com/diillson/chatcli/models"
 	"github.com/diillson/chatcli/pkg/providerproto"
@@ -74,8 +75,10 @@ func toProtoMessage(m models.Message) providerproto.Message {
 				Type: providerproto.PartText, Text: sp.Text, CacheBreakpoint: sp.CacheControl != nil,
 			})
 		}
-	} else if m.Content != "" {
-		pm.Content = append(pm.Content, providerproto.Part{Type: providerproto.PartText, Text: m.Content})
+	} else if text := visionwire.TextWithDocuments(m); text != "" {
+		// The plugin protocol has no document part: PDFs travel as their
+		// extracted text.
+		pm.Content = append(pm.Content, providerproto.Part{Type: providerproto.PartText, Text: text})
 	}
 
 	for _, img := range m.Images {

@@ -632,7 +632,7 @@ func (c *BedrockClient) buildMessagesAndSystem(prompt string, history []models.M
 		case "assistant":
 			messages = append(messages, map[string]interface{}{
 				"role":    "assistant",
-				"content": visionwire.AnthropicContent(msg.Content, msg.Images).PrependThinking(msg.Thinking),
+				"content": visionwire.AnthropicMessageContent(catalog.ProviderBedrock, c.model, msg).PrependThinking(msg.Thinking),
 			})
 		case "system":
 			if len(msg.SystemParts) > 0 {
@@ -654,7 +654,7 @@ func (c *BedrockClient) buildMessagesAndSystem(prompt string, history []models.M
 				plainSystemParts = append(plainSystemParts, msg.Content)
 			}
 		default:
-			messages = append(messages, map[string]interface{}{"role": "user", "content": visionwire.AnthropicContent(msg.Content, msg.Images)})
+			messages = append(messages, map[string]interface{}{"role": "user", "content": visionwire.AnthropicMessageContent(catalog.ProviderBedrock, c.model, msg)})
 		}
 	}
 

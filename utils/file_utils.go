@@ -49,6 +49,7 @@ func DefaultDirectoryScanOptions(logger *zap.Logger) DirectoryScanOptions {
 			".cs", ".rb", ".php", ".html", ".css", ".scss", ".less", ".json", ".xml", ".yaml",
 			".yml", ".md", ".txt", ".sql", ".sh", ".bash", ".zsh", ".env", ".toml", ".ini",
 			".config", ".rs", ".dart", ".swift", ".kt", ".groovy", ".scala", ".pl", ".pm", ".tf",
+			".pdf", // read as its extracted text
 		},
 		ExcludeDirs: []string{
 			".git", "node_modules", "vendor", "build", "dist", "target",
@@ -69,6 +70,7 @@ func DefaultDirectoryScanOptions(logger *zap.Logger) DirectoryScanOptions {
 func DetectFileType(filePath string) string {
 	fileTypes := map[string]string{
 		".go":     "Go",
+		".pdf":    "PDF",
 		".tf":     "Terraform",
 		".py":     "Python",
 		".js":     "JavaScript",
@@ -154,7 +156,7 @@ func ProcessDirectory(ctx context.Context, dirPath string, options DirectoryScan
 	}
 
 	if !fileInfo.IsDir() {
-		content, err := ReadFileContent(dirPath, options.MaxTotalSize)
+		content, err := ReadFileContentContext(ctx, dirPath, options.MaxTotalSize)
 		if err != nil {
 			return nil, err
 		}
@@ -194,7 +196,7 @@ func ProcessDirectory(ctx context.Context, dirPath string, options DirectoryScan
 					if !ok {
 						return
 					}
-					content, err := ReadFileContent(path, options.MaxTotalSize)
+					content, err := ReadFileContentContext(ctx, path, options.MaxTotalSize)
 					if err != nil {
 						options.Logger.Warn("Erro ao ler arquivo, pulando", zap.String("path", path), zap.Error(err))
 						continue

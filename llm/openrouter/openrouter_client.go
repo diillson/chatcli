@@ -100,7 +100,7 @@ func (c *OpenRouterClient) buildMessages(prompt string, history []models.Message
 
 		msgMap := map[string]interface{}{
 			"role":    role,
-			"content": visionwire.OpenAIContent(msg.Content, msg.Images),
+			"content": visionwire.OpenAIMessageContent(catalog.ProviderOpenRouter, c.model, msg),
 		}
 
 		// Preserve tool_call_id for tool response messages and prefix

@@ -46,11 +46,13 @@ func (cli *ChatCLI) processLLMRequest(parentCtx context.Context, in string) {
 	cli.fireUserPromptSubmitHook(ctx, in)
 	cli.animation.ShowThinkingAnimation(cli.Client.GetModelName())
 
-	userInput, additionalContext, images := cli.processSpecialCommands(ctx, in)
+	userInput, additionalContext, images, docs := cli.processSpecialCommands(ctx, in)
 	// Vision gating (hybrid B+A): keep native images for vision models, or
 	// fold a textual description into the prompt for text-only models.
 	images, visionDesc := cli.gateImagesForModel(ctx, images)
 	additionalContext += visionDesc
+	docs = cli.gateDocumentsForRoute(ctx, cli.Provider, cli.Model, docs)
+	additionalContext += attachedPDFNote(docs)
 	// Cross-surface continuity: adopt writes another surface (MCP/ACP,
 	// gateway, another terminal) made to the active named session, then pull
 	// turns that arrived on other hub channels (Telegram/…) into history so
@@ -67,11 +69,11 @@ func (cli *ChatCLI) processLLMRequest(parentCtx context.Context, in string) {
 	if turnContextIsRedundant(cli.Provider, cli.Model, cli.history, turnContextText(turnCtx)) {
 		turnCtx = nil
 	}
-	tempHistory := cli.buildChatTempHistoryWithContext(assembly.parts, turnCtx, userInput, additionalContext, images)
+	tempHistory := cli.buildChatTempHistoryWithContext(assembly.parts, turnCtx, userInput, additionalContext, images, docs...)
 	cli.setPendingTurnContext(turnContextText(turnCtx))
 	// What the wire carries this turn — the calibrator's chars side.
 	cli.lastPromptChars = promptCharsOf(tempHistory) + len(userInput+additionalContext)
-	userMessage := models.Message{Role: "user", Content: userInput + additionalContext, Images: images}
+	userMessage := models.Message{Role: "user", Content: userInput + additionalContext, Images: images, Documents: docs}
 
 	effectiveMaxTokens := cli.getMaxTokensForCurrentLLM()
 	cli.ensureModelCacheWarm(ctx)
@@ -92,7 +94,7 @@ func (cli *ChatCLI) processLLMRequest(parentCtx context.Context, in string) {
 		fmt.Printf("\r\033[K  %s\n", colorize(msg, ColorYellow))
 	})
 	for llmErr != nil && cli.recoverOverflow(ctx, rec, llmErr) {
-		tempHistory = cli.buildChatTempHistoryWithContext(assembly.parts, assembly.turnContext, userInput, additionalContext, images)
+		tempHistory = cli.buildChatTempHistoryWithContext(assembly.parts, assembly.turnContext, userInput, additionalContext, images, docs...)
 		cli.lastPromptChars = promptCharsOf(tempHistory) + len(userInput+additionalContext)
 		cli.animation.ShowThinkingAnimation(resolution.Client.GetModelName())
 		aiResponse, llmErr = cli.executeLLMTurn(

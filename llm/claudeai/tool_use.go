@@ -58,7 +58,7 @@ func (c *ClaudeClient) SendPromptWithTools(ctx context.Context, prompt string, h
 
 	// Build messages (excluding system messages)
 	turnScoped := client.NewTurnContextEmitter(catalog.ProviderClaudeAI, c.model)
-	messages := buildClaudeToolMessages(prompt, history, turnScoped)
+	messages := buildClaudeToolMessages(prompt, history, turnScoped, c.model)
 	c.turnScoped = turnScoped
 
 	// Build tool definitions for Anthropic format.
@@ -243,7 +243,7 @@ func buildSystemBlocks(history []models.Message) []map[string]interface{} {
 // they render on the turn they belong to and clear afterwards; it claims
 // nothing on a model without the capability, and the loop is then exactly
 // what it was.
-func buildClaudeToolMessages(prompt string, history []models.Message, turnScoped *client.TurnContextEmitter) []interface{} {
+func buildClaudeToolMessages(prompt string, history []models.Message, turnScoped *client.TurnContextEmitter, model string) []interface{} {
 	// One wire message per history entry, plus the prompt: system entries
 	// leave a hole and turn-scoped blocks fill one, so this is the shape,
 	// not a guarantee.
@@ -331,13 +331,13 @@ func buildClaudeToolMessages(prompt string, history []models.Message, turnScoped
 		case "user":
 			messages = append(messages, map[string]interface{}{
 				"role":    "user",
-				"content": visionwire.AnthropicContent(msg.Content, msg.Images),
+				"content": visionwire.AnthropicMessageContent(catalog.ProviderClaudeAI, model, msg),
 			})
 
 		default:
 			messages = append(messages, map[string]interface{}{
 				"role":    "user",
-				"content": visionwire.AnthropicContent(msg.Content, msg.Images),
+				"content": visionwire.AnthropicMessageContent(catalog.ProviderClaudeAI, model, msg),
 			})
 		}
 	}

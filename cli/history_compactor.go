@@ -296,6 +296,9 @@ func messageWeight(msg models.Message) int {
 	for _, img := range msg.Images {
 		w += models.EstimateImageTokens(img) * weightCharsPerToken
 	}
+	for _, d := range msg.Documents {
+		w += models.EstimateDocumentTokens(d) * weightCharsPerToken
+	}
 	// SystemParts normally duplicate Content (Content is the flattened join
 	// of the parts), so charge only the excess — max(Content, parts), never
 	// the sum of both.

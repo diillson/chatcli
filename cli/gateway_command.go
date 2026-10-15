@@ -613,16 +613,9 @@ func (cli *ChatCLI) gatewayAgentFunc(sessions *hubSessions, transcriber transcri
 			msg.Text = expanded
 		}
 
-		// Image message: stage the attachment(s) for the coder run. The run's
-		// model gating decides native vision vs the describe-fallback. An
-		// image with no caption still gets a default instruction so the engine
-		// has a task.
-		if imgs := inboundImageToModels(msg.Image); len(imgs) > 0 {
-			cli.pendingInboundImages = imgs
-			if strings.TrimSpace(msg.Text) == "" {
-				msg.Text = i18n.T("gateway.image.default_prompt")
-			}
-		}
+		// Attachments (an image, a PDF) are staged for the run; a message
+		// that is only an attachment gets a default instruction.
+		cli.stageInboundAttachments(ctx, &msg)
 
 		// Resolve the sender's shared conversation and record the incoming turn
 		// before running, so the message survives even if the run fails. preamble
@@ -1017,4 +1010,27 @@ func renderGatewayPreamble(events []models.ConversationEvent) string {
 		b.WriteString(text)
 	}
 	return b.String()
+}
+
+// stageInboundAttachments stages a channel message's image and PDF for the
+// coder run. The run's model gating decides native input vs the fallbacks
+// (vision describe, PDF text). An attachment without a caption still gets a
+// default instruction so the engine has a task.
+func (cli *ChatCLI) stageInboundAttachments(ctx context.Context, msg *gateway.InboundMessage) {
+	if imgs := inboundImageToModels(msg.Image); len(imgs) > 0 {
+		cli.pendingInboundImages = imgs
+		if strings.TrimSpace(msg.Text) == "" {
+			msg.Text = i18n.T("gateway.image.default_prompt")
+		}
+	}
+	if msg.Document != nil && len(msg.Document.Data) > 0 {
+		name := msg.Document.FileName
+		if strings.TrimSpace(name) == "" {
+			name = "document.pdf"
+		}
+		cli.pendingInboundDocuments = []models.DocumentContent{cli.readPDF(ctx, msg.Document.Data, name)}
+		if strings.TrimSpace(msg.Text) == "" {
+			msg.Text = i18n.T("gateway.document.default_prompt")
+		}
+	}
 }

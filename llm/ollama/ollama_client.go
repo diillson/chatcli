@@ -22,6 +22,7 @@ import (
 	"github.com/diillson/chatcli/i18n"
 	"github.com/diillson/chatcli/llm/catalog"
 	"github.com/diillson/chatcli/llm/client"
+	"github.com/diillson/chatcli/llm/internal/visionwire"
 	"github.com/diillson/chatcli/models"
 	"github.com/diillson/chatcli/utils"
 	"go.uber.org/zap"
@@ -106,7 +107,8 @@ func (c *Client) SendPrompt(ctx context.Context, prompt string, history []models
 		default:
 			role = "user"
 		}
-		msg := map[string]interface{}{"role": role, "content": m.Content}
+		// Ollama has no document input: PDFs go as their extracted text.
+		msg := map[string]interface{}{"role": role, "content": visionwire.TextWithDocuments(m)}
 		// Ollama native /api/chat carries images as an array of raw standard
 		// base64 strings (no data: prefix, no mime) on the message object.
 		// Only images with bytes are usable here — Ollama needs raw bytes,

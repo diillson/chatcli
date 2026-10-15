@@ -120,13 +120,21 @@ func writeAttachment(dir, stamp string, img models.ImageContent) (string, error)
 			return "", nil
 		}
 	}
+	return writeAttachmentBytes(dir, stamp, img.Data, img.FileName, attachmentExt[mime])
+}
+
+// writeAttachmentBytes saves one attachment as a new file (never over an
+// existing one), sealed when encryption at rest is on, readable by the
+// owner only. The name is the stamp, random hex and a sanitized stem of
+// the name the user gave; ext comes from the content, never from that name.
+func writeAttachmentBytes(dir, stamp string, raw []byte, fileName, ext string) (string, error) {
 	var rnd [4]byte
 	if _, err := rand.Read(rnd[:]); err != nil {
 		return "", err
 	}
-	name := stamp + "-" + hex.EncodeToString(rnd[:]) + "-" + attachmentStem(img.FileName) + attachmentExt[mime]
+	name := stamp + "-" + hex.EncodeToString(rnd[:]) + "-" + attachmentStem(fileName) + ext
 	path := filepath.Join(dir, name)
-	data, err := atrest.SealAt(path, img.Data)
+	data, err := atrest.SealAt(path, raw)
 	if err != nil {
 		return "", err
 	}
@@ -186,12 +194,25 @@ func withoutAttachmentNote(content string) string {
 	if i := strings.Index(content, attachmentNoteHeader); i >= 0 {
 		return strings.TrimSpace(content[:i])
 	}
+	if i := strings.Index(content, documentNoteHeader); i >= 0 {
+		return strings.TrimSpace(content[:i])
+	}
 	return content
 }
 
 // takePendingInbound merges the images staged from outside the @file flow
 // (the web UI, the gateway) into a loop run's images and returns the note
 // about their saved copies, clearing both: they belong to one run.
+// takePendingInboundDocuments merges and clears the PDFs staged from outside
+// the @file flow (channels, RPC).
+func (cli *ChatCLI) takePendingInboundDocuments(docs []models.DocumentContent) []models.DocumentContent {
+	if len(cli.pendingInboundDocuments) > 0 {
+		docs = append(docs, cli.pendingInboundDocuments...)
+		cli.pendingInboundDocuments = nil
+	}
+	return docs
+}
+
 func (cli *ChatCLI) takePendingInbound(images []models.ImageContent) ([]models.ImageContent, string) {
 	if len(cli.pendingInboundImages) > 0 {
 		images = append(images, cli.pendingInboundImages...)

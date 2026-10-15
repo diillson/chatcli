@@ -29,11 +29,18 @@ type ImageInput struct {
 	Data      []byte
 }
 
+// DocumentInput is a PDF the page attached to a turn.
+type DocumentInput struct {
+	Name string
+	Data []byte
+}
+
 // TurnOptions parameterize one turn as the page requested it.
 type TurnOptions struct {
-	Provider string
-	Model    string
-	Images   []ImageInput
+	Provider  string
+	Model     string
+	Images    []ImageInput
+	Documents []DocumentInput // PDFs
 }
 
 // Status is what the page shows in its header and settings: the active

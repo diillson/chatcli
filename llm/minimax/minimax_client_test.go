@@ -409,7 +409,7 @@ func TestBuildToolMessages_WithAllRoles(t *testing.T) {
 		{Role: "tool", ToolCallID: "tc1", Content: "result data"},
 	}
 
-	msgs := buildToolMessages("", history)
+	msgs := buildToolMessages("", history, "")
 	require.Len(t, msgs, 6)
 
 	assert.Equal(t, "system", msgs[0].(map[string]interface{})["role"])

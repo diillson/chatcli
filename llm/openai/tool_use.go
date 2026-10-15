@@ -16,6 +16,7 @@ import (
 
 	"github.com/diillson/chatcli/auth"
 	"github.com/diillson/chatcli/i18n"
+	"github.com/diillson/chatcli/llm/catalog"
 	"github.com/diillson/chatcli/llm/client"
 	"github.com/diillson/chatcli/llm/internal/visionwire"
 	"github.com/diillson/chatcli/llm/toolshim"
@@ -47,7 +48,7 @@ func (c *OpenAIClient) SendPromptWithTools(ctx context.Context, prompt string, h
 	sortedTools := client.SortToolDefinitions(tools)
 
 	// Build messages with tool call support
-	messages := buildToolMessages(prompt, history)
+	messages := buildToolMessages(prompt, history, c.model)
 
 	// Build tools payload
 	toolDefs := make([]map[string]interface{}, 0, len(sortedTools))
@@ -132,7 +133,7 @@ func (c *OpenAIClient) SendPromptWithTools(ctx context.Context, prompt string, h
 }
 
 // buildToolMessages constructs the messages array supporting tool calls and results.
-func buildToolMessages(prompt string, history []models.Message) []interface{} {
+func buildToolMessages(prompt string, history []models.Message, model string) []interface{} {
 	var messages []interface{}
 
 	for _, msg := range history {
@@ -182,12 +183,12 @@ func buildToolMessages(prompt string, history []models.Message) []interface{} {
 		case "system", "user":
 			messages = append(messages, map[string]interface{}{
 				"role":    role,
-				"content": visionwire.OpenAIContent(msg.Content, msg.Images),
+				"content": visionwire.OpenAIMessageContent(catalog.ProviderOpenAI, model, msg),
 			})
 		default:
 			messages = append(messages, map[string]interface{}{
 				"role":    "user",
-				"content": visionwire.OpenAIContent(msg.Content, msg.Images),
+				"content": visionwire.OpenAIMessageContent(catalog.ProviderOpenAI, model, msg),
 			})
 		}
 	}

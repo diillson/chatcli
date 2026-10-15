@@ -36,7 +36,7 @@ func (c *MoonshotClient) countTokensURL() string {
 
 // CountTokens implements client.TokenCounter.
 func (c *MoonshotClient) CountTokens(ctx context.Context, prompt string, history []models.Message) (int, error) {
-	messages := buildToolMessages(prompt, history)
+	messages := buildToolMessages(prompt, history, c.model)
 	if len(messages) == 0 {
 		return 0, nil
 	}

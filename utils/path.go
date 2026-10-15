@@ -6,11 +6,14 @@
 package utils
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/diillson/chatcli/pkg/pdftext"
 )
 
 // sensitivePaths contains paths that should not be read by automated tools (LLM, coder mode).
@@ -53,6 +56,12 @@ func IsSensitivePath(absPath string) bool {
 // ReadFileContent lê o conteúdo de um arquivo, expandindo ~ para o diretório home,
 // mostrando um indicador de progresso para arquivos grandes.
 func ReadFileContent(filePath string, maxSize int64) (string, error) {
+	return ReadFileContentContext(context.Background(), filePath, maxSize)
+}
+
+// ReadFileContentContext is ReadFileContent with a context, which bounds the
+// text extraction of a PDF.
+func ReadFileContentContext(ctx context.Context, filePath string, maxSize int64) (string, error) {
 	// Definir um limite de tamanho padrão (1MB) se maxSize não for especificado
 	if maxSize == 0 {
 		maxSize = 1 * 1024 * 1024 // 1MB
@@ -87,6 +96,12 @@ func ReadFileContent(filePath string, maxSize int64) (string, error) {
 	// L1: Block access to known sensitive paths
 	if IsSensitivePath(absPath) {
 		return "", fmt.Errorf("access denied: %s is a sensitive path", absPath)
+	}
+
+	// A PDF reads as its extracted text: the size cap applies to that text,
+	// and the file itself may be up to maxPDFFileBytes.
+	if strings.EqualFold(filepath.Ext(absPath), ".pdf") {
+		return readPDFText(ctx, absPath, info.Size(), maxSize)
 	}
 
 	// Verificar o tamanho do arquivo
@@ -181,4 +196,32 @@ func ExpandPath(path string) (string, error) {
 
 	// Retorna o caminho original se não começar com ~
 	return path, nil
+}
+
+// maxPDFFileBytes caps a PDF read as text.
+const maxPDFFileBytes = 50 << 20
+
+// readPDFText extracts a PDF's text ("--- page N ---" per page), capped at
+// maxChars. A scanned PDF (no text layer) says so instead of returning
+// nothing, so a context built from it is not silently empty.
+func readPDFText(ctx context.Context, path string, size, maxChars int64) (string, error) {
+	if size > maxPDFFileBytes {
+		return "", fmt.Errorf("o PDF '%s' é muito grande (%.2f MB, limite de %d MB)", path, float64(size)/1024/1024, maxPDFFileBytes>>20)
+	}
+	data, err := os.ReadFile(path) //#nosec G304 -- path supplied by user/agent through validated tool surface (boundary check upstream)
+	if err != nil {
+		return "", fmt.Errorf("erro ao ler o arquivo: %w", err)
+	}
+	res, err := pdftext.Extract(ctx, data, pdftext.Limits{MaxChars: int(maxChars)})
+	if err != nil {
+		return "", fmt.Errorf("PDF '%s': %w", filepath.Base(path), err)
+	}
+	if res.Scanned {
+		return fmt.Sprintf("[PDF %s — %d pages with no extractable text (a scanned document); attach it with @file or @view to a model that reads PDFs natively]", filepath.Base(path), res.TotalPages), nil
+	}
+	text := res.Text()
+	if int64(len(text)) > maxChars {
+		text = text[:maxChars]
+	}
+	return text, nil
 }

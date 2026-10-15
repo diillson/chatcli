@@ -150,9 +150,9 @@ func (e *TurnContextEmitter) Claim(msg models.Message) bool {
 	if e == nil || !e.enabled || !msg.IsTurnContext() || msg.Content == "" {
 		return false
 	}
-	// Images cannot ride on a system message; a block carrying them is
-	// rendered the old way rather than losing them.
-	if len(msg.Images) > 0 {
+	// Images and documents cannot ride on a system message; a block
+	// carrying them is rendered the old way rather than losing them.
+	if len(msg.Images) > 0 || len(msg.Documents) > 0 {
 		return false
 	}
 	e.pending = append(e.pending, TurnScopedSystem{

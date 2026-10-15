@@ -104,6 +104,9 @@ type AgentMode struct {
 	// when the user message is appended. Transient per-turn state — the Run
 	// reentrancy guard ensures it is never read across concurrent runs.
 	pendingUserImages []models.ImageContent
+	// pendingUserDocuments carries the PDFs attached to the NEXT user turn,
+	// alongside pendingUserImages.
+	pendingUserDocuments []models.DocumentContent
 
 	// stagedViewImages carries images the @view tool attached mid-run; they
 	// are drained into a user message at the next turn boundary (the same
@@ -112,6 +115,9 @@ type AgentMode struct {
 	stagedViewMu     sync.Mutex
 	stagedViewImages []models.ImageContent
 	stagedViewNames  []string
+	// stagedViewDocs are PDFs @view attached mid-run, flushed with the
+	// images on the next turn boundary.
+	stagedViewDocs []models.DocumentContent
 	// gatewayPersona layers a messaging-gateway directive on top of the coder
 	// system prompt: keep the coder engine's full tool capability (create/edit
 	// files, run commands, iterate) but answer concisely in plain chat-friendly
@@ -1422,8 +1428,9 @@ func (a *AgentMode) Run(ctx context.Context, query string, additionalContext str
 	}
 
 	a.appendTurnContext(turnContextText)
-	a.cli.history = append(a.cli.history, models.Message{Role: "user", Content: currentQuery, Images: a.pendingUserImages})
+	a.cli.history = append(a.cli.history, models.Message{Role: "user", Content: currentQuery, Images: a.pendingUserImages, Documents: a.pendingUserDocuments})
 	a.pendingUserImages = nil
+	a.pendingUserDocuments = nil
 
 	// Phase 2 (#2): Plan-and-Solve / ReWOO. When the quality config asks
 	// for it (mode=always, mode=auto + high complexity, or the user-set
@@ -1775,6 +1782,22 @@ func (a *AgentMode) stageViewedImage(img models.ImageContent, name string) {
 	a.stagedViewNames = append(a.stagedViewNames, name)
 }
 
+// stageViewedDocument queues a PDF @view opened for the next turn.
+func (a *AgentMode) stageViewedDocument(doc models.DocumentContent) {
+	a.stagedViewMu.Lock()
+	defer a.stagedViewMu.Unlock()
+	a.stagedViewDocs = append(a.stagedViewDocs, doc)
+}
+
+// drainViewedDocuments returns and clears the staged @view PDFs.
+func (a *AgentMode) drainViewedDocuments() []models.DocumentContent {
+	a.stagedViewMu.Lock()
+	defer a.stagedViewMu.Unlock()
+	docs := a.stagedViewDocs
+	a.stagedViewDocs = nil
+	return docs
+}
+
 // drainViewedImages returns and clears the staged @view attachments.
 func (a *AgentMode) drainViewedImages() ([]models.ImageContent, []string) {
 	a.stagedViewMu.Lock()
@@ -1874,10 +1897,13 @@ func (cli *ChatCLI) RunAgentFullOnce(ctx context.Context, task string) error {
 	defer cli.setExecutionProfile(ProfileNormal)
 
 	// Processar contextos especiais como @file, @git, etc.
-	query, additionalContext, images := cli.processSpecialCommands(ctx, task)
+	query, additionalContext, images, docs := cli.processSpecialCommands(ctx, task)
 	images, inboundNote := cli.takePendingInbound(images)
+	docs = cli.takePendingInboundDocuments(docs)
 	images, visionDesc := cli.gateImagesForModel(ctx, images)
 	additionalContext += visionDesc
+	docs = cli.gateDocumentsForRoute(ctx, cli.Provider, cli.Model, docs)
+	additionalContext += attachedPDFNote(docs)
 	fullQuery := query
 	if additionalContext != "" {
 		fullQuery = query + "\n\nContexto adicional:\n" + additionalContext
@@ -1891,6 +1917,7 @@ func (cli *ChatCLI) RunAgentFullOnce(ctx context.Context, task string) error {
 	}
 
 	cli.agentMode.pendingUserImages = images
+	cli.agentMode.pendingUserDocuments = docs
 	cli.agentMode.isCoderMode = false
 	cli.agentMode.isOneShot = true
 	return cli.agentMode.Run(ctx, fullQuery, "", "")
@@ -1904,12 +1931,15 @@ func (cli *ChatCLI) runCoderQuery(ctx context.Context, query string, gatewayPers
 	defer cli.setExecutionProfile(ProfileNormal)
 
 	// Processar contextos especiais como @file, @git, etc.
-	query, additionalContext, images := cli.processSpecialCommands(ctx, query)
+	query, additionalContext, images, docs := cli.processSpecialCommands(ctx, query)
 	// Merge images staged from outside the @file flow (e.g. the gateway), then
 	// gate against the active model (native vision vs describe-fallback).
 	images, inboundNote := cli.takePendingInbound(images)
+	docs = cli.takePendingInboundDocuments(docs)
 	images, visionDesc := cli.gateImagesForModel(ctx, images)
 	additionalContext += visionDesc
+	docs = cli.gateDocumentsForRoute(ctx, cli.Provider, cli.Model, docs)
+	additionalContext += attachedPDFNote(docs)
 	fullQuery := query
 	if additionalContext != "" {
 		fullQuery = query + "\n\nContexto adicional:\n" + additionalContext
@@ -1924,6 +1954,7 @@ func (cli *ChatCLI) runCoderQuery(ctx context.Context, query string, gatewayPers
 	}
 
 	cli.agentMode.pendingUserImages = images
+	cli.agentMode.pendingUserDocuments = docs
 	cli.agentMode.isCoderMode = true
 	cli.agentMode.isOneShot = true
 	cli.agentMode.gatewayPersona = gatewayPersona
@@ -1947,8 +1978,9 @@ func (a *AgentMode) RunOnce(ctx context.Context, query string, autoExecute bool)
 	}
 
 	a.cli.history = append(a.cli.history, models.Message{Role: "system", Content: systemInstruction})
-	a.cli.history = append(a.cli.history, models.Message{Role: "user", Content: enrichedQuery, Images: a.pendingUserImages})
+	a.cli.history = append(a.cli.history, models.Message{Role: "user", Content: enrichedQuery, Images: a.pendingUserImages, Documents: a.pendingUserDocuments})
 	a.pendingUserImages = nil
+	a.pendingUserDocuments = nil
 
 	a.cli.animation.ShowThinkingAnimation(a.cli.Client.GetModelName())
 
@@ -2400,6 +2432,13 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 				Role:    "user",
 				Content: "[Viewed image(s) attached: " + strings.Join(names, ", ") + "] Analyze what is visible.",
 				Images:  imgs,
+			})
+		}
+		if docs := a.drainViewedDocuments(); len(docs) > 0 {
+			a.cli.history = append(a.cli.history, models.Message{
+				Role:      "user",
+				Content:   strings.TrimSpace(attachedPDFNote(docs)) + " Read the document(s) to continue the task.",
+				Documents: docs,
 			})
 		}
 
