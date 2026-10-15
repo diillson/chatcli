@@ -24,7 +24,7 @@ func TestImage_StatusDisabled(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(out, "no image backend") {
+	if !hasMsg(out, "image.status.none", "no image backend") {
 		t.Fatalf("expected disabled status, got %q", out)
 	}
 }
@@ -182,13 +182,115 @@ func TestImage_StatusSaysWhetherTheBackendEdits(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(out, "zai") || !strings.Contains(out, "generates only") {
+	if !strings.Contains(out, "zai") || !hasMsg(out, "image.status.gen_only", "generates only") {
 		t.Fatalf("status = %q, want zai reported as generate-only", out)
 	}
 	t.Setenv("CHATCLI_IMAGE_PROVIDER", "xai")
 	t.Setenv("XAI_API_KEY", "xai-key")
 	out, _ = NewBuiltinImagePlugin().Execute(context.Background(), []string{`{"cmd":"status"}`})
-	if !strings.Contains(out, "xai") || !strings.Contains(out, "generates and edits") {
+	if !strings.Contains(out, "xai") || !hasMsg(out, "image.status.gen_edit", "generates and edits") {
 		t.Fatalf("status = %q, want xai reported as editing", out)
+	}
+}
+
+// hasMsg matches a localized message whether or not the test binary loaded
+// the catalogs (without them i18n.T returns the key).
+func hasMsg(out, key, english string) bool {
+	return strings.Contains(out, key) || strings.Contains(out, english)
+}
+
+func isolateImageCreds(t *testing.T) {
+	t.Helper()
+	for _, k := range []string{"CHATCLI_IMAGE_PROVIDER", "CHATCLI_IMAGE_API", "CHATCLI_IMAGE_MODEL", "CHATCLI_IMAGE_URL",
+		"CHATCLI_IMAGE_EDIT_PROVIDER", "CHATCLI_IMAGE_EDIT_MODEL", "OPENAI_API_KEY", "GOOGLEAI_API_KEY", "GEMINI_API_KEY",
+		"GOOGLE_API_KEY", "XAI_API_KEY", "ZAI_API_KEY", "MINIMAX_API_KEY", "AWS_PROFILE", "BEDROCK_PROFILE",
+		"AWS_ACCESS_KEY_ID", "AWS_BEARER_TOKEN_BEDROCK", "AWS_WEB_IDENTITY_TOKEN_FILE",
+		"AWS_CONTAINER_CREDENTIALS_FULL_URI", "AWS_CONTAINER_CREDENTIALS_RELATIVE_URI"} {
+		t.Setenv(k, "")
+	}
+	t.Setenv("AWS_CONFIG_FILE", "/nonexistent/aws-config")
+	t.Setenv("AWS_SHARED_CREDENTIALS_FILE", "/nonexistent/aws-credentials")
+}
+
+// The AI switches the image backend by asking for a model; the next call
+// builds that backend.
+func TestImage_UseSwitchesBackendAndModel(t *testing.T) {
+	isolateImageCreds(t)
+	t.Setenv("XAI_API_KEY", "xk")
+	t.Setenv("ZAI_API_KEY", "zk")
+	p := NewBuiltinImagePlugin()
+
+	out, err := p.Execute(context.Background(), []string{`{"cmd":"use","args":{"model":"grok-imagine-image"}}`})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if os.Getenv("CHATCLI_IMAGE_PROVIDER") != "xai" || os.Getenv("CHATCLI_IMAGE_MODEL") != "grok-imagine-image" {
+		t.Fatalf("env = %q/%q", os.Getenv("CHATCLI_IMAGE_PROVIDER"), os.Getenv("CHATCLI_IMAGE_MODEL"))
+	}
+	if !strings.Contains(out, "grok-imagine-image") {
+		t.Fatalf("confirmation = %q", out)
+	}
+	status, _ := p.Execute(context.Background(), []string{`{"cmd":"status"}`})
+	if !strings.Contains(status, "xai") || !strings.Contains(status, "grok-imagine-image") {
+		t.Fatalf("status after use = %q", status)
+	}
+
+	// Provider only → its default; for=edit pins the edit backend.
+	if _, err := p.Execute(context.Background(), []string{`{"cmd":"use","args":{"provider":"zai"}}`}); err != nil {
+		t.Fatal(err)
+	}
+	if os.Getenv("CHATCLI_IMAGE_MODEL") != "glm-image" {
+		t.Fatalf("default model = %q", os.Getenv("CHATCLI_IMAGE_MODEL"))
+	}
+	if _, err := p.Execute(context.Background(), []string{`{"cmd":"use","args":{"provider":"xai","for":"edit"}}`}); err != nil {
+		t.Fatal(err)
+	}
+	if os.Getenv("CHATCLI_IMAGE_EDIT_PROVIDER") != "xai" || os.Getenv("CHATCLI_IMAGE_PROVIDER") != "zai" {
+		t.Fatal("for=edit must pin the edit backend and keep the generation backend")
+	}
+
+	// A provider without credentials is refused and nothing changes.
+	_, err = p.Execute(context.Background(), []string{`{"cmd":"use","args":{"model":"gemini-nano-banana-2.1"}}`})
+	if err == nil || !strings.Contains(err.Error(), "GOOGLEAI_API_KEY") {
+		t.Fatalf("err = %v, want the missing credential named", err)
+	}
+	if os.Getenv("CHATCLI_IMAGE_PROVIDER") != "zai" {
+		t.Fatal("a refused switch must not change the backend")
+	}
+}
+
+func TestImage_ModelsListsPerBackendOffline(t *testing.T) {
+	isolateImageCreds(t)
+	t.Setenv("ZAI_API_KEY", "zk")
+	t.Setenv("CHATCLI_IMAGE_PROVIDER", "zai")
+	out, err := NewBuiltinImagePlugin().Execute(context.Background(), []string{`{"cmd":"models","args":{"live":false}}`})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"glm-image", "gpt-image-2.5-flare", "gemini-nano-banana-2.1", "stability.stable-image-inpaint-v1:0", "us-west-2"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("models output lacks %q", want)
+		}
+	}
+	only, err := NewBuiltinImagePlugin().Execute(context.Background(), []string{`{"cmd":"models","args":{"provider":"bedrock","live":false}}`})
+	if err != nil || strings.Contains(only, "glm-image") || !strings.Contains(only, "stability.") {
+		t.Fatalf("provider filter: %v\n%s", err, only)
+	}
+	if _, err := NewBuiltinImagePlugin().Execute(context.Background(), []string{`{"cmd":"models","args":{"provider":"nope"}}`}); err == nil {
+		t.Fatal("unknown provider must fail")
+	}
+}
+
+func TestImage_EditFailsOnUnreadableMask(t *testing.T) {
+	isolateImageCreds(t)
+	t.Setenv("OPENAI_API_KEY", "ok")
+	t.Setenv("CHATCLI_IMAGE_PROVIDER", "openai")
+	img := filepath.Join(t.TempDir(), "in.png")
+	if err := os.WriteFile(img, []byte("\x89PNG\r\n\x1a\n0000000000000000"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	_, err := NewBuiltinImagePlugin().Execute(context.Background(), []string{`{"cmd":"edit","args":{"prompt":"x","image":"` + filepath.ToSlash(img) + `","mask":"/nonexistent/mask.png"}}`})
+	if err == nil || !strings.Contains(err.Error(), "mask") {
+		t.Fatalf("err = %v, want the unreadable mask reported", err)
 	}
 }
