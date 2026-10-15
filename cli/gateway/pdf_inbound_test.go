@@ -10,6 +10,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 )
 
@@ -70,15 +71,22 @@ func TestHydrateDocument(t *testing.T) {
 	hydrateDocument(context.Background(), &bad, func(context.Context, string, int64) ([]byte, string, error) {
 		return []byte("<html>login</html>"), "text/html", nil
 	}, nil, "test")
-	if bad.Document != nil {
-		t.Fatal("a download that is not a PDF is dropped")
+	if bad.Document != nil || !strings.Contains(bad.Text, "could not be downloaded") {
+		t.Fatalf("a download that is not a PDF is dropped and the agent told: %+v", bad)
 	}
 	failed := InboundMessage{Document: &InboundDocument{ref: "r"}}
 	hydrateDocument(context.Background(), &failed, func(context.Context, string, int64) ([]byte, string, error) {
 		return nil, "", errors.New("boom")
 	}, nil, "test")
-	if failed.Document != nil {
-		t.Fatal("a failed download clears the document")
+	if failed.Document != nil || failed.Text == "" {
+		t.Fatal("a failed download clears the document and leaves a note")
+	}
+	hook := InboundMessage{Text: "resuma", Document: &InboundDocument{ref: "r"}}
+	hydrateDocument(context.Background(), &hook, func(context.Context, string, int64) ([]byte, string, error) {
+		return nil, "", errors.New("refused")
+	}, nil, webhookPlatform)
+	if !strings.HasPrefix(hook.Text, "resuma\n\n") || !strings.Contains(hook.Text, "public https URL") {
+		t.Fatalf("webhook note = %q", hook.Text)
 	}
 	if !isPDFAttachment("", "x.PDF") || isPDFAttachment("image/png", "x.pdf") || !isPDFAttachment("application/pdf", "") {
 		t.Fatal("isPDFAttachment")

@@ -141,10 +141,30 @@ func hydrateDocument(ctx context.Context, msg *InboundMessage, fetch func(ctx co
 			logger.Warn("gateway/"+platform+": document download failed or not a PDF", zap.String("user", msg.UserID), zap.Error(err))
 		}
 		msg.Document = nil
+		noteLostDocument(msg, platform)
 		return
 	}
 	msg.Document.Data = data
 	if msg.Document.MimeType == "" {
 		msg.Document.MimeType = mime
 	}
+}
+
+// lostDocumentNote tells the agent that a PDF sent on a chat channel never
+// arrived, so the reply says so instead of answering as if nothing had been
+// attached. The reason stays in the operator's log.
+const lostDocumentNote = "[The PDF attached to this message could not be downloaded or is not a valid PDF. Tell the user it was not received and ask them to send it again.]"
+
+// noteLostDocument adds the lost-PDF note to the message text. The webhook
+// uses its URL wording, since there the caller chose the URL.
+func noteLostDocument(msg *InboundMessage, platform string) {
+	if platform == webhookPlatform {
+		noteFailedAttachment(msg, "PDF document")
+		return
+	}
+	if strings.TrimSpace(msg.Text) == "" {
+		msg.Text = lostDocumentNote
+		return
+	}
+	msg.Text += "\n\n" + lostDocumentNote
 }
