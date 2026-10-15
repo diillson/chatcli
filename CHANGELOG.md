@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.218.0](https://github.com/diillson/chatcli/compare/v1.217.0...v1.218.0) (2026-10-15)
+
+
+### Features
+
+* **docs-flatten:** describe referenced images by default ([#1792](https://github.com/diillson/chatcli/issues/1792)) ([2607bc4](https://github.com/diillson/chatcli/commit/2607bc4c721d350b7fe664456ef2f4d29f13a605))
+
 ## [1.217.0](https://github.com/diillson/chatcli/compare/v1.216.2...v1.217.0) (2026-10-15)
 
 
