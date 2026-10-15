@@ -283,6 +283,7 @@ func TestDocsFlatten_VisualsEndToEnd(t *testing.T) {
 type fakeDescriber struct {
 	calls atomic.Int32
 	fail  bool
+	alt   string // the alt text the prompt must carry ("" = the fixture's)
 }
 
 func (f *fakeDescriber) DescribeImage(_ context.Context, prompt string, img models.ImageContent) (string, string, error) {
@@ -290,7 +291,11 @@ func (f *fakeDescriber) DescribeImage(_ context.Context, prompt string, img mode
 	if f.fail {
 		return "", "", errors.New("vision down")
 	}
-	if img.MediaType != "image/png" || !strings.Contains(prompt, "Transcribe ALL visible text") || !strings.Contains(prompt, "alt text: Order architecture") {
+	alt := f.alt
+	if alt == "" {
+		alt = "alt text: Order architecture"
+	}
+	if img.MediaType != "image/png" || !strings.Contains(prompt, "Transcribe ALL visible text") || !strings.Contains(prompt, alt) {
 		return "", "", errors.New("unexpected request")
 	}
 	return "Architecture diagram.\n- App → Orders API: HTTPS\nText: Orders API", "fake/vision-1", nil
@@ -381,7 +386,7 @@ func TestLoadImageJob_Filters(t *testing.T) {
 		"../outside.png":   "not found",
 	}
 	for asset, want := range cases {
-		if got := loadImageJob(&docsImageJob{asset: asset}, root, nil); got != want {
+		if got := loadImageJob(&docsImageJob{asset: asset}, root, nil, nil); got != want {
 			t.Errorf("%s: reason %q, want %q", asset, got, want)
 		}
 	}
@@ -507,5 +512,64 @@ func TestDocsFlatten_HelpAndSchemaDocumentImageDefault(t *testing.T) {
 	}
 	if !found {
 		t.Fatalf("schema images flag does not document the default:\n%s", p.Schema())
+	}
+}
+
+// Every common way of writing an image reaches the corpus and resolves to
+// the file on disk: percent-encoded names, <paths with spaces>, reference
+// definitions in angle brackets and Obsidian embeds (found by file name).
+func TestDocsFlatten_ImageReferenceForms(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	root := t.TempDir()
+	for i, f := range []string{"arquitetura/img/modelo de células.png", "arquitetura/img/fluxo pedidos.png",
+		"anexos/vault-diagram.png", "arquitetura/img/ref def.png"} {
+		p := filepath.Join(root, filepath.FromSlash(f))
+		if err := os.MkdirAll(filepath.Dir(p), 0o750); err != nil {
+			t.Fatal(err)
+		}
+		writePNG(t, p, 200+i, 120) // distinct content: each one is described
+	}
+	doc := "# Células\n\n![modelo de células](img/modelo%20de%20c%C3%A9lulas.png)\n\n" +
+		"![fluxo](<img/fluxo pedidos.png> \"Fluxo\")\n\n![[vault-diagram.png|300]]\n\n![[notas.md]]\n\n" +
+		"![def][r]\n\n[r]: <img/ref def.png>\n"
+	if err := os.WriteFile(filepath.Join(root, "arquitetura", "celulas.md"), []byte(doc), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	fake := &fakeDescriber{alt: "alt text: "}
+	SetDocsImageDescriber(fake)
+	t.Cleanup(func() { SetDocsImageDescriber(nil) })
+
+	chunks, summary := flattenFixture(t, `{"root":"`+filepath.ToSlash(root)+`","format":"jsonl","output":"OUT"}`)
+	if !strings.Contains(summary, "4 referenced, 4 described") || strings.Contains(summary, "not found") {
+		t.Fatalf("summary = %q", summary)
+	}
+	content := chunks[0].Content
+	for _, want := range []string{"[image: modelo de células — arquitetura/img/modelo de células.png",
+		"[image: fluxo — Fluxo — arquitetura/img/fluxo pedidos.png", "[image: vault-diagram — ", "[image: def — arquitetura/img/ref def.png"} {
+		if !strings.Contains(content, want) {
+			t.Errorf("missing %q in:\n%s", want, content)
+		}
+	}
+	if !strings.Contains(content, "![[notas.md]]") {
+		t.Error("an embedded note is not an image and stays as written")
+	}
+}
+
+func TestImageNameIndex_UniqueOnly(t *testing.T) {
+	root := t.TempDir()
+	for _, f := range []string{"a/one.png", "b/dup.png", "c/dup.png", ".git/hidden.png"} {
+		p := filepath.Join(root, filepath.FromSlash(f))
+		_ = os.MkdirAll(filepath.Dir(p), 0o750)
+		_ = os.WriteFile(p, []byte("x"), 0o600)
+	}
+	x := &imageNameIndex{root: root}
+	if got := x.unique("ONE.png"); got != filepath.Join(root, "a", "one.png") {
+		t.Errorf("unique = %q", got)
+	}
+	if x.unique("dup.png") != "" || x.unique("hidden.png") != "" || x.unique("none.png") != "" {
+		t.Error("ambiguous, hidden and missing names do not resolve")
+	}
+	if !isDimension("300x200") || isDimension("alt text") || isDimension("") {
+		t.Error("isDimension")
 	}
 }

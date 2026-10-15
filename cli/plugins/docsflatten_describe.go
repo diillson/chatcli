@@ -34,6 +34,7 @@ import (
 	_ "image/gif"  // register decoders for DecodeConfig
 	_ "image/jpeg" // (dimension filter)
 	_ "image/png"
+	"io/fs"
 	"os"
 	"path"
 	"path/filepath"
@@ -249,7 +250,7 @@ func decorativeName(asset string) bool {
 
 // loadImageJob reads and filters one image. reason is non-empty when it is
 // skipped.
-func loadImageJob(j *docsImageJob, root string, fetch func(string) ([]byte, error)) (reason string) {
+func loadImageJob(j *docsImageJob, root string, fetch func(string) ([]byte, error), names *imageNameIndex) (reason string) {
 	ext := strings.ToLower(path.Ext(strings.SplitN(j.asset, "?", 2)[0]))
 	switch {
 	case ext == ".svg":
@@ -271,6 +272,10 @@ func loadImageJob(j *docsImageJob, root string, fetch func(string) ([]byte, erro
 		data = b
 	} else {
 		j.file = resolveLocalImage(root, j.asset)
+		if j.file == "" && names != nil {
+			// Obsidian-style vaults link images by file name alone.
+			j.file = names.unique(path.Base(j.asset))
+		}
 		if j.file == "" {
 			return "not found"
 		}
@@ -387,9 +392,13 @@ func describeDocsImages(ctx context.Context, chunks []docsFlattenChunk, cfg docs
 	if maxImages <= 0 {
 		maxImages = defaultDocsMaxImages
 	}
+	var names *imageNameIndex
+	if root != "" {
+		names = &imageNameIndex{root: root}
+	}
 	var eligible []*docsImageJob
 	for _, j := range jobs {
-		if reason := loadImageJob(j, root, fetch); reason != "" {
+		if reason := loadImageJob(j, root, fetch, names); reason != "" {
 			rep.skip(reason)
 			continue
 		}
@@ -545,3 +554,47 @@ func extendImageMarkers(content, asset, short string) string {
 
 // errNoImagesMode guards the argument values.
 var errNoImagesMode = errors.New(`invalid images mode (valid: markers|describe|estimate)`)
+
+// maxImageIndexFiles bounds the walk that indexes image file names.
+const maxImageIndexFiles = 200_000
+
+// imageNameIndex finds an image by file name anywhere under the corpus root,
+// for links that name the file without its folder. Built on first use;
+// a name found in more than one place is ambiguous and not resolved.
+type imageNameIndex struct {
+	root  string
+	once  sync.Once
+	paths map[string][]string // lower-cased base name → files
+}
+
+func (x *imageNameIndex) unique(name string) string {
+	x.once.Do(x.build)
+	if hits := x.paths[strings.ToLower(name)]; len(hits) == 1 {
+		return hits[0]
+	}
+	return ""
+}
+
+func (x *imageNameIndex) build() {
+	x.paths = map[string][]string{}
+	seen := 0
+	_ = filepath.WalkDir(x.root, func(p string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return nil
+		}
+		if d.IsDir() {
+			if n := d.Name(); p != x.root && (strings.HasPrefix(n, ".") || n == "node_modules" || n == "vendor") {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if seen++; seen > maxImageIndexFiles {
+			return filepath.SkipAll
+		}
+		if describableExts[strings.ToLower(filepath.Ext(p))] && d.Type().IsRegular() {
+			k := strings.ToLower(d.Name())
+			x.paths[k] = append(x.paths[k], p)
+		}
+		return nil
+	})
+}
