@@ -30,12 +30,11 @@ import (
 
 const (
 	googleImageBase = "https://generativelanguage.googleapis.com"
-	// defaultGeminiImageModel is the current Gemini image model ("Nano Banana
-	// 2"), generating AND editing via :generateContent. It is the default for
-	// both because the whole Imagen :predict family was shut down on
-	// 2026-08-17 (Google's stated replacement is this model); pinned imagen-*
-	// ids still route to :predict and surface Google's own error.
-	defaultGeminiImageModel = "gemini-3.1-flash-image"
+	// defaultGeminiImageModel is Google's recommended image model ("Nano
+	// Banana 2.1", 2026-10), generating AND editing via :generateContent. The
+	// Imagen :predict family was shut down on 2026-08-17; pinned imagen-* ids
+	// still route to :predict and surface Google's own error.
+	defaultGeminiImageModel = "gemini-nano-banana-2.1"
 )
 
 // Google generates images via the Imagen predict endpoint.
@@ -68,8 +67,10 @@ func (g *Google) Model() string { return g.model }
 
 // isGeminiModel reports whether the configured model is a Gemini image model
 // (gen + edit via :generateContent) rather than an Imagen model (:predict).
+// Everything but imagen-* is: Google also names image models
+// "nano-banana-pro-preview" or "gemini-nano-banana-2.1".
 func isGeminiModel(model string) bool {
-	return strings.HasPrefix(strings.ToLower(strings.TrimSpace(model)), "gemini")
+	return !strings.HasPrefix(strings.ToLower(strings.TrimSpace(model)), "imagen")
 }
 
 // Generate produces images from a text prompt. Imagen models use the :predict
