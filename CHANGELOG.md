@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.219.0](https://github.com/diillson/chatcli/compare/v1.218.0...v1.219.0) (2026-10-15)
+
+
+### Features
+
+* **docs-flatten:** describe every image a doc references, asking before large runs ([#1794](https://github.com/diillson/chatcli/issues/1794)) ([29405e5](https://github.com/diillson/chatcli/commit/29405e56fb0788c8c228a9b08d2a30a4cd98170f))
+
+
+### Bug Fixes
+
+* **cli:** no daily-spend or vocabulary write after a surface shuts down ([#1795](https://github.com/diillson/chatcli/issues/1795)) ([d813a4b](https://github.com/diillson/chatcli/commit/d813a4b6f0d1991ce5c4553e7558b493ed8af832))
+
 ## [1.218.0](https://github.com/diillson/chatcli/compare/v1.217.0...v1.218.0) (2026-10-15)
 
 
