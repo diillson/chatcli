@@ -478,3 +478,34 @@ func TestDocsFlatten_DescribesImagesByDefault(t *testing.T) {
 		t.Fatalf("without a vision model the run still succeeds and says why: %q", summary)
 	}
 }
+
+// The help and the tool schema tell the user and the model that describing
+// images is the default and how to opt out.
+func TestDocsFlatten_HelpAndSchemaDocumentImageDefault(t *testing.T) {
+	p := NewBuiltinDocsFlattenPlugin()
+	if u := p.Usage(); !strings.Contains(u, "(default: describe)") || !strings.Contains(u, "markers = no model") {
+		t.Fatalf("usage:\n%s", u)
+	}
+	var schema struct {
+		Subcommands []struct {
+			Flags []struct {
+				Name        string `json:"name"`
+				Description string `json:"description"`
+			} `json:"flags"`
+		} `json:"subcommands"`
+	}
+	if err := json.Unmarshal([]byte(p.Schema()), &schema); err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, sc := range schema.Subcommands {
+		for _, f := range sc.Flags {
+			if f.Name == "images" {
+				found = strings.Contains(f.Description, "Default describe") && strings.Contains(f.Description, "markers: no model call")
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("schema images flag does not document the default:\n%s", p.Schema())
+	}
+}

@@ -240,3 +240,23 @@ func TestResolveDocsFlattenLink_SkipsAssetsAndSchemes(t *testing.T) {
 		t.Errorf("relative resolve = %q", got)
 	}
 }
+
+// A crawl honors images=markers (no model call) as well as the describe
+// default.
+func TestDocsFlattenURL_ImageModes(t *testing.T) {
+	srv := docsSiteServer(t, "http://example.invalid")
+	fake := &fakeDescriber{}
+	SetDocsImageDescriber(fake)
+	t.Cleanup(func() { SetDocsImageDescriber(nil) })
+
+	for _, mode := range []string{"markers", "describe"} {
+		out, err := NewBuiltinDocsFlattenPlugin().Execute(context.Background(),
+			[]string{fmt.Sprintf(`{"url":%q,"format":"jsonl","images":%q}`, srv.URL, mode)})
+		if err != nil || !strings.Contains(out, `"source"`) {
+			t.Fatalf("%s: err=%v out=%.200s", mode, err, out)
+		}
+	}
+	if fake.calls.Load() != 0 {
+		t.Fatalf("a site without images needs no description: calls=%d", fake.calls.Load())
+	}
+}

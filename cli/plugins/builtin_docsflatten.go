@@ -156,7 +156,7 @@ Flags (flat JSON or {"cmd":"flatten","args":{...}} envelope):
 }
 
 // Version is semver. 2.x marks the builtin port of the 1.x external example.
-func (*BuiltinDocsFlattenPlugin) Version() string { return "2.1.0" }
+func (*BuiltinDocsFlattenPlugin) Version() string { return "2.2.0" }
 
 // Path is empty for builtin plugins.
 func (*BuiltinDocsFlattenPlugin) Path() string { return "" }
