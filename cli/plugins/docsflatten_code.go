@@ -79,6 +79,8 @@ func docsFlattenCodeCandidates(root string) (count int, exts []string) {
 type flatChunk struct {
 	Content string
 	Title   string
+	Kind    string             // "" for text; chunkKindDiagram / chunkKindImage
+	Assets  []docsFlattenAsset // images and diagrams the piece carries
 }
 
 // codeFlavor selects the chunking strategy for a file, derived from its
@@ -160,6 +162,12 @@ func docsFlattenAcceptExt(name, kind string) bool {
 	lower := strings.ToLower(name)
 	ext := fileExt(lower)
 
+	// Diagram files are documentation in every kind: a draw.io, mermaid or
+	// PlantUML file often is the only description of a flow. An SVG is kept
+	// only when it carries text (an icon yields nothing and is dropped).
+	if diagramFileLang(lower) != "" {
+		return true
+	}
 	if kind == "docs" {
 		return markdownExts[ext]
 	}

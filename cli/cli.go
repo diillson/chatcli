@@ -1038,6 +1038,9 @@ func NewChatCLI(ctx context.Context, manager manager.LLMManager, logger *zap.Log
 	// Wire the @view tool to the session vision pipeline (image loading,
 	// compression, native-vs-describe gating and agent-loop staging).
 	plugins.SetViewAdapter(&viewToolAdapter{cli: cli})
+	// @docs-flatten images:"describe" — the same vision pipeline describes
+	// the images a documentation corpus references.
+	plugins.SetDocsImageDescriber(&docsImageDescriber{cli: cli})
 	// @context adapter — lets the agent create/attach/detach/inspect its own
 	// context bases over the same live manager.
 	plugins.SetContextAdapter(&contextPluginAdapter{cli: cli})

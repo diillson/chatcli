@@ -50,6 +50,11 @@ type docsFlattenChunk struct {
 	ChunkSize int    `json:"chunkSize" yaml:"chunkSize"`
 	RepoURL   string `json:"repoUrl,omitempty" yaml:"repoUrl,omitempty"`
 	Commit    string `json:"commit,omitempty" yaml:"commit,omitempty"`
+	// Kind is "diagram" or "image" for chunks that describe one; empty for
+	// text. Assets lists the images and diagrams the chunk carries. Both are
+	// additive: consumers that ignore them read the corpus as before.
+	Kind   string             `json:"kind,omitempty" yaml:"kind,omitempty"`
+	Assets []docsFlattenAsset `json:"assets,omitempty" yaml:"assets,omitempty"`
 }
 
 // docsFlattenArgs is the typed view of @docs-flatten's JSON input.
@@ -76,6 +81,12 @@ type docsFlattenArgs struct {
 	// silently start pulling in stray source/config files.
 	Kind    string
 	MaxSize int // skip files larger than this many bytes (0 = default 1 MiB)
+	// Images: "markers" (default — image references become alt/caption/path
+	// markers and diagrams get text summaries), "describe" (also describe
+	// the referenced images with a vision model) or "estimate" (count them
+	// and the tokens describe would spend, without calling a model).
+	Images    string
+	MaxImages int // cap on images described per run (0 = default 50)
 }
 
 // Front-matter title extractors. Quoted and unquoted values are both
@@ -127,13 +138,20 @@ Flags (flat JSON or {"cmd":"flatten","args":{...}} envelope):
   include   comma-separated globs to include (** supported, e.g. src/**/*.go)
   exclude   comma-separated globs to exclude
   stripFrontMatter  remove front matter, keep title as heading (default: true)
+  images    markers | describe | estimate (default: markers). markers = image
+            references become [image: alt — path] markers and diagrams
+            (mermaid, PlantUML, dot, d2, draw.io, SVG) get a text summary of
+            their flows. describe = ALSO describe each referenced image with
+            the session's vision model (cached by content) into its own
+            chunk. estimate = count images and tokens, no model call.
+  maxImages cap on images described per run (default: 50)
   output    file to write the result to. STRONGLY preferred for large corpora
             — without it the flattened content is returned (and truncated)
             in the tool result.`
 }
 
 // Version is semver. 2.x marks the builtin port of the 1.x external example.
-func (*BuiltinDocsFlattenPlugin) Version() string { return "2.0.0" }
+func (*BuiltinDocsFlattenPlugin) Version() string { return "2.1.0" }
 
 // Path is empty for builtin plugins.
 func (*BuiltinDocsFlattenPlugin) Path() string { return "" }
@@ -165,6 +183,8 @@ func (*BuiltinDocsFlattenPlugin) Schema() string {
 					{"name": "include", "type": "string", "description": "Comma-separated include globs, ** crosses directories (e.g. 'src/**/*.go'). Bare names match by basename."},
 					{"name": "exclude", "type": "string", "description": "Comma-separated exclude globs (e.g. 'node_modules/**,*.lock')."},
 					{"name": "stripFrontMatter", "type": "boolean", "description": "Strip YAML/TOML front matter, re-emitting its title as a heading. Default: true."},
+					{"name": "images", "type": "string", "description": "markers | describe | estimate. Default markers: image references become [image: alt — path] markers, diagrams (mermaid, PlantUML, dot, d2, draw.io, SVG) get a text summary of their flows. describe: ALSO describe every referenced image (architecture PNGs, screenshots) with the session's vision model into its own chunk — use it for documentation whose diagrams are images; cached, so re-runs are free. estimate: count images and tokens first, no model call."},
+					{"name": "maxImages", "type": "integer", "description": "Cap on images described per run. Default: 50."},
 					{"name": "output", "type": "string", "description": "File path to write the result to. Required in practice for large corpora."},
 				},
 				"examples": []string{
@@ -224,12 +244,20 @@ func (p *BuiltinDocsFlattenPlugin) ExecuteWithStream(ctx context.Context, args [
 		return fmt.Sprintf("@docs-flatten: no matching files under %s (kind=%s)", root, cfg.Kind), nil
 	}
 
+	var imageReport *docsImageReport
+	if cfg.Images != docsImagesMarkers {
+		chunks, imageReport = describeDocsImages(ctx, chunks, cfg, root, nil, currentDocsImageDescriber(), emit)
+	}
+
 	rendered, err := renderDocsFlatten(chunks, cfg.Format)
 	if err != nil {
 		return "", fmt.Errorf("@docs-flatten: %w", err)
 	}
 
 	if cfg.Output == "" {
+		if line := imageReport.String(); line != "" {
+			return rendered + "\n" + line, nil
+		}
 		return rendered, nil
 	}
 	if err := writeDocsFlattenOutput(cfg.Output, rendered); err != nil {
@@ -237,6 +265,12 @@ func (p *BuiltinDocsFlattenPlugin) ExecuteWithStream(ctx context.Context, args [
 	}
 	summary := fmt.Sprintf("@docs-flatten: %d chunks from %d files → %s (format=%s, %s)",
 		len(chunks), files, cfg.Output, cfg.Format, humanByteSize(len(rendered)))
+	if n := countVisualChunks(chunks); n != "" {
+		summary += "\n" + n
+	}
+	if line := imageReport.String(); line != "" {
+		summary += "\n" + line
+	}
 	if provenance.RepoURL != "" {
 		summary += fmt.Sprintf("\nsource: %s @ %s", provenance.RepoURL, provenance.Commit)
 	}
@@ -244,6 +278,26 @@ func (p *BuiltinDocsFlattenPlugin) ExecuteWithStream(ctx context.Context, args [
 		summary += fmt.Sprintf("\nready for: /context create <name> %s --mode knowledge", cfg.Output)
 	}
 	return summary, nil
+}
+
+// countVisualChunks reports the diagrams and image references a corpus
+// carries ("" when none).
+func countVisualChunks(chunks []docsFlattenChunk) string {
+	diagrams, images := map[string]bool{}, map[string]bool{}
+	for _, c := range chunks {
+		for _, a := range c.Assets {
+			switch a.Kind {
+			case chunkKindDiagram:
+				diagrams[a.Path+"\x00"+a.Alt] = true
+			case chunkKindImage:
+				images[a.Path] = true
+			}
+		}
+	}
+	if len(diagrams) == 0 && len(images) == 0 {
+		return ""
+	}
+	return fmt.Sprintf("visuals: %d diagram(s) summarized, %d image reference(s) kept as markers", len(diagrams), len(images))
 }
 
 // docsFlattenProvenance records where a cloned corpus came from.
@@ -255,7 +309,7 @@ type docsFlattenProvenance struct {
 // parseDocsFlattenArgs supports flat JSON, the {"cmd","args"} envelope and
 // --flag argv form.
 func parseDocsFlattenArgs(args []string) (docsFlattenArgs, error) {
-	out := docsFlattenArgs{Branch: "main", Format: "text", MaxChars: 16000, StripFrontMatter: true, MaxPages: 50, MaxDepth: 2, SameHost: true, Kind: "docs"}
+	out := docsFlattenArgs{Branch: "main", Format: "text", MaxChars: 16000, StripFrontMatter: true, MaxPages: 50, MaxDepth: 2, SameHost: true, Kind: "docs", Images: docsImagesMarkers}
 	payload := strings.TrimSpace(strings.Join(args, " "))
 	var raw map[string]json.RawMessage
 	switch {
@@ -316,6 +370,22 @@ func parseDocsFlattenArgs(args []string) (docsFlattenArgs, error) {
 		out.MaxSize = jsonInt(raw, "maxSize")
 	} else if _, ok := raw["max-size"]; ok {
 		out.MaxSize = jsonInt(raw, "max-size")
+	}
+
+	if v := strings.ToLower(jsonString(raw, "images")); v != "" {
+		out.Images = v
+	}
+	if v, ok := raw["maxImages"]; ok && len(v) > 0 {
+		out.MaxImages = jsonInt(raw, "maxImages")
+	} else if _, ok := raw["max-images"]; ok {
+		out.MaxImages = jsonInt(raw, "max-images")
+	}
+	switch out.Images {
+	case docsImagesMarkers, docsImagesDescribe, docsImagesEstimate:
+	case "off", "none", "false":
+		out.Images = docsImagesMarkers
+	default:
+		return out, errNoImagesMode
 	}
 
 	if err := validateDocsFlattenSource(&out); err != nil {
@@ -623,9 +693,15 @@ func docsFlattenFile(absPath, relPath string, cfg docsFlattenArgs, chunkIndex *i
 	}
 
 	var pieces []flatChunk
-	if flavor := docsFlattenFlavor(relPath); flavor == flavorMarkdown {
+	switch flavor := docsFlattenFlavor(relPath); {
+	case diagramFileLang(relPath) != "":
+		var ok bool
+		if pieces, ok = diagramFilePieces(string(data), relPath, cfg.MaxChars); !ok {
+			return nil, nil
+		}
+	case flavor == flavorMarkdown:
 		pieces = markdownPieces(string(data), relPath, cfg)
-	} else {
+	default:
 		pieces = chunkCode(flavor, string(data), cfg.MaxChars)
 	}
 
@@ -639,6 +715,8 @@ func docsFlattenFile(absPath, relPath string, cfg docsFlattenArgs, chunkIndex *i
 			ChunkSize: len(p.Content),
 			RepoURL:   prov.RepoURL,
 			Commit:    prov.Commit,
+			Kind:      p.Kind,
+			Assets:    p.Assets,
 		})
 		*chunkIndex++
 	}
@@ -658,6 +736,9 @@ func markdownPieces(raw, relPath string, cfg docsFlattenArgs) []flatChunk {
 			content = "# " + title + "\n\n" + body
 		}
 	}
+	// Images and diagrams first: sanitizeMDX would drop the attributes of
+	// an <Image alt=… caption=…/> along with the tag.
+	content, assets := annotateVisuals(content, relPath)
 	if strings.EqualFold(filepath.Ext(relPath), ".mdx") {
 		content = sanitizeMDX(content)
 	}
@@ -668,7 +749,7 @@ func markdownPieces(raw, relPath string, cfg docsFlattenArgs) []flatChunk {
 	parts := chunkMarkdown(content, cfg.MaxChars)
 	pieces := make([]flatChunk, 0, len(parts))
 	for _, c := range parts {
-		pieces = append(pieces, flatChunk{Content: c, Title: title})
+		pieces = append(pieces, flatChunk{Content: c, Title: title, Assets: chunkAssets(c, assets)})
 	}
 	return pieces
 }
@@ -757,7 +838,7 @@ func chunkMarkdown(text string, maxChars int) []string {
 	for _, sec := range splitMarkdownSections(text) {
 		if len(sec) > maxChars {
 			flush()
-			chunks = append(chunks, chunkLines(sec, maxChars)...)
+			chunks = append(chunks, chunkSectionFenceAware(sec, maxChars)...)
 			continue
 		}
 		if buf.Len() > 0 && buf.Len()+len(sec)+1 > maxChars {

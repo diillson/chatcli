@@ -72,6 +72,11 @@ func (p *BuiltinDocsFlattenPlugin) executeURL(ctx context.Context, cfg docsFlatt
 		return fmt.Sprintf("@docs-flatten: crawled %s but extracted no text from %d page(s)", cfg.URL, pages), nil
 	}
 
+	var imageReport *docsImageReport
+	if cfg.Images != docsImagesMarkers {
+		chunks, imageReport = describeDocsImages(ctx, chunks, cfg, "", docsFlattenImageFetcher(ctx, cfg), currentDocsImageDescriber(), emit)
+	}
+
 	rendered, err := renderDocsFlatten(chunks, cfg.Format)
 	if err != nil {
 		return "", fmt.Errorf("@docs-flatten: %w", err)
@@ -83,6 +88,9 @@ func (p *BuiltinDocsFlattenPlugin) executeURL(ctx context.Context, cfg docsFlatt
 	}
 
 	if cfg.Output == "" {
+		if line := imageReport.String(); line != "" {
+			rendered += "\n# " + line
+		}
 		if capNote != "" {
 			return rendered + "\n# note:" + capNote, nil
 		}
@@ -94,6 +102,12 @@ func (p *BuiltinDocsFlattenPlugin) executeURL(ctx context.Context, cfg docsFlatt
 	summary := fmt.Sprintf("@docs-flatten: %d chunks from %d page(s) of %s → %s (format=%s, %s)",
 		len(chunks), pages, seedHost, cfg.Output, cfg.Format, humanByteSize(len(rendered)))
 	summary += fmt.Sprintf("\nsource: %s (crawl maxPages=%d maxDepth=%d sameHost=%t)", cfg.URL, cfg.MaxPages, cfg.MaxDepth, cfg.SameHost)
+	if n := countVisualChunks(chunks); n != "" {
+		summary += "\n" + n
+	}
+	if line := imageReport.String(); line != "" {
+		summary += "\n" + line
+	}
 	if capNote != "" {
 		summary += "\nNOTE:" + capNote
 	}
@@ -138,7 +152,7 @@ func crawlDocsFlatten(ctx context.Context, cfg docsFlattenArgs, emit func(string
 		item := queue[0]
 		queue = queue[1:]
 
-		pageText, pageTitle, links, ok := fetchDocsFlattenPage(ctx, item.url, emit)
+		pageText, pageTitle, links, assets, ok := fetchDocsFlattenPage(ctx, item.url, emit)
 		if !ok {
 			continue
 		}
@@ -153,6 +167,7 @@ func crawlDocsFlatten(ctx context.Context, cfg docsFlattenArgs, emit func(string
 				Content:   c,
 				ChunkSize: len(c),
 				RepoURL:   cfg.URL,
+				Assets:    chunkAssets(c, assets),
 			})
 			chunkIndex++
 		}
@@ -189,11 +204,11 @@ func crawlDocsFlatten(ctx context.Context, cfg docsFlattenArgs, emit func(string
 // client, returning the cleaned text, a title and the raw <a href> targets.
 // ok is false (and the page skipped) on a validation error, transport error
 // or non-200 status — a single bad link must not abort the whole crawl.
-func fetchDocsFlattenPage(ctx context.Context, pageURL string, emit func(string)) (text, title string, links []string, ok bool) {
+func fetchDocsFlattenPage(ctx context.Context, pageURL string, emit func(string)) (text, title string, links []string, assets []docsFlattenAsset, ok bool) {
 	safeURL, err := validateWebTarget(pageURL)
 	if err != nil {
 		emit(fmt.Sprintf("skipping %s: %v", pageURL, err))
-		return "", "", nil, false
+		return "", "", nil, nil, false
 	}
 
 	resp, err := webGet(ctx, safeURL, map[string]string{
@@ -202,31 +217,33 @@ func fetchDocsFlattenPage(ctx context.Context, pageURL string, emit func(string)
 	})
 	if err != nil {
 		emit(fmt.Sprintf("skipping %s: %v", pageURL, err))
-		return "", "", nil, false
+		return "", "", nil, nil, false
 	}
 	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != 200 {
 		emit(fmt.Sprintf("skipping %s: HTTP %d", pageURL, resp.StatusCode))
-		return "", "", nil, false
+		return "", "", nil, nil, false
 	}
 
 	body, err := io.ReadAll(io.LimitReader(resp.Body, docsFlattenMaxBodyBytes))
 	if err != nil {
 		emit(fmt.Sprintf("skipping %s: reading body: %v", pageURL, err))
-		return "", "", nil, false
+		return "", "", nil, nil, false
 	}
 
 	htmlContent := string(body)
-	text = extractText(htmlContent)
+	// Images and diagrams become text before the cleaner drops them.
+	visual, assets := htmlVisuals(htmlContent, pageURL)
+	text = extractText(visual)
 	if strings.TrimSpace(text) == "" {
-		return "", "", nil, false
+		return "", "", nil, nil, false
 	}
 	title, links = parseDocsFlattenHTML(htmlContent)
 	if title == "" {
 		title = firstDocsFlattenHeading(text)
 	}
-	return text, title, links, true
+	return text, title, links, assets, true
 }
 
 // parseDocsFlattenHTML extracts the document <title> and every <a href> from
