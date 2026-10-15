@@ -18,6 +18,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/diillson/chatcli/llm/catalog"
 	"github.com/diillson/chatcli/llm/client"
 	"github.com/diillson/chatcli/llm/internal/visionwire"
 	"github.com/diillson/chatcli/models"
@@ -36,14 +37,14 @@ func (c *ZAIClient) countTokensURL() string {
 }
 
 // countMessages mirrors SendPrompt's message shaping.
-func countMessages(prompt string, history []models.Message) []map[string]interface{} {
+func countMessages(prompt string, history []models.Message, model string) []map[string]interface{} {
 	messages := make([]map[string]interface{}, 0, len(history)+1)
 	for _, msg := range history {
 		role := strings.ToLower(strings.TrimSpace(msg.Role))
 		if role != "system" && role != "user" && role != "assistant" {
 			role = "user"
 		}
-		messages = append(messages, map[string]interface{}{"role": role, "content": visionwire.OpenAIContent(msg.Content, msg.Images)})
+		messages = append(messages, map[string]interface{}{"role": role, "content": visionwire.OpenAIMessageContent(catalog.ProviderZAI, model, msg)})
 	}
 	if (len(history) == 0 || history[len(history)-1].Role != "user" || history[len(history)-1].Content != prompt) && strings.TrimSpace(prompt) != "" {
 		messages = append(messages, map[string]interface{}{"role": "user", "content": prompt})
@@ -53,7 +54,7 @@ func countMessages(prompt string, history []models.Message) []map[string]interfa
 
 // CountTokens implements client.TokenCounter.
 func (c *ZAIClient) CountTokens(ctx context.Context, prompt string, history []models.Message) (int, error) {
-	messages := countMessages(prompt, history)
+	messages := countMessages(prompt, history, c.model)
 	if len(messages) == 0 {
 		return 0, nil
 	}

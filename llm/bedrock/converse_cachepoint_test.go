@@ -32,7 +32,7 @@ func TestApplyConverseCachePoints_SystemAndLastUser(t *testing.T) {
 		{Role: "assistant", Content: "ok"},
 		{Role: "user", Content: "second"},
 	}
-	messages, system := buildConverseMessages("second", history)
+	messages, system := buildConverseMessages("second", history, "")
 	system, messages = applyConverseCachePoints(system, messages, "")
 
 	if len(system) != 2 {

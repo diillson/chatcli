@@ -477,7 +477,7 @@ func TestBuildToolMessages_WithAllRoles(t *testing.T) {
 		{Role: "tool", ToolCallID: "t1", Content: "result"},
 	}
 
-	msgs := buildToolMessages("", history)
+	msgs := buildToolMessages("", history, "")
 	require.Len(t, msgs, 6)
 
 	assert.Equal(t, "system", msgs[0].(map[string]interface{})["role"])
@@ -502,13 +502,13 @@ func TestBuildToolMessages_UnknownRoleFallsBackToUser(t *testing.T) {
 	history := []models.Message{
 		{Role: "weird", Content: "fallback content"},
 	}
-	msgs := buildToolMessages("", history)
+	msgs := buildToolMessages("", history, "")
 	require.Len(t, msgs, 1)
 	assert.Equal(t, "user", msgs[0].(map[string]interface{})["role"])
 }
 
 func TestBuildToolMessages_AppendsTrailingPrompt(t *testing.T) {
-	msgs := buildToolMessages("trailing q", []models.Message{{Role: "assistant", Content: "prior"}})
+	msgs := buildToolMessages("trailing q", []models.Message{{Role: "assistant", Content: "prior"}}, "")
 	require.Len(t, msgs, 2)
 	last := msgs[1].(map[string]interface{})
 	assert.Equal(t, "user", last["role"])

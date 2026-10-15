@@ -69,7 +69,7 @@ func (c *BedrockClient) CountTokens(ctx context.Context, prompt string, history 
 func (c *BedrockClient) countTokensInput(prompt string, history []models.Message) (bedrockruntimetypes.CountTokensInput, error) {
 	switch resolveFamily(c.model) {
 	case familyConverse:
-		messages, system := buildConverseMessages(prompt, history)
+		messages, system := buildConverseMessages(prompt, history, c.model)
 		if len(messages) == 0 {
 			return nil, nil
 		}

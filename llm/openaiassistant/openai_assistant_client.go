@@ -19,6 +19,7 @@ import (
 	"github.com/diillson/chatcli/auth"
 	"github.com/diillson/chatcli/i18n"
 	"github.com/diillson/chatcli/llm/client"
+	"github.com/diillson/chatcli/llm/internal/visionwire"
 	"github.com/diillson/chatcli/models"
 	"github.com/diillson/chatcli/utils"
 	"go.uber.org/zap"
@@ -129,6 +130,11 @@ func (c *OpenAIAssistantClient) GetModelName() string {
 
 // SendPrompt envia uma mensagem para o thread atual e retorna a resposta
 func (c *OpenAIAssistantClient) SendPrompt(ctx context.Context, prompt string, history []models.Message, maxTokens int) (string, error) {
+	// The thread receives only the prompt: a PDF attached to this turn
+	// goes along as its extracted text.
+	if n := len(history); n > 0 && history[n-1].Role == "user" && len(history[n-1].Documents) > 0 {
+		prompt += visionwire.DocumentsAsText(history[n-1].Documents)
+	}
 	// A response without a usage block must not re-book the previous
 	// call's tokens as this call's: reset before the request.
 	c.usageState.StoreUsage(nil)

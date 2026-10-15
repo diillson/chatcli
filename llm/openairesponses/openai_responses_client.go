@@ -149,7 +149,7 @@ func (c *OpenAIResponsesClient) SendPrompt(ctx context.Context, prompt string, h
 
 	if isOAuth {
 		// ChatGPT backend requires "instructions" and structured input
-		instructions, conversationInput := buildOAuthPayload(history, prompt)
+		instructions, conversationInput := buildOAuthPayload(history, prompt, c.model)
 		reqBody = map[string]interface{}{
 			"model":        c.model,
 			"instructions": instructions,
@@ -157,12 +157,13 @@ func (c *OpenAIResponsesClient) SendPrompt(ctx context.Context, prompt string, h
 			"store":        false,
 			"stream":       true,
 		}
-	} else if historyHasImages(history) {
-		// Vision: the Responses API cannot carry images in a flattened text
-		// string, so switch to the structured role+parts input array (same
-		// shape as the OAuth path). Only taken when an image is actually
-		// attached, so text-only requests keep the byte-identical flat path.
-		instructions, conversationInput := buildOAuthPayload(history, prompt)
+	} else if historyHasImages(history) || historyHasDocuments(history) {
+		// Vision and PDFs: the Responses API cannot carry images or files
+		// in a flattened text string, so switch to the structured role+parts
+		// input array (same shape as the OAuth path). Only taken when an
+		// attachment is present, so text-only requests keep the
+		// byte-identical flat path.
+		instructions, conversationInput := buildOAuthPayload(history, prompt, c.model)
 		reqBody = map[string]interface{}{
 			"model":             c.model,
 			"instructions":      instructions,
@@ -476,9 +477,19 @@ func historyHasImages(history []models.Message) bool {
 	return false
 }
 
+// historyHasDocuments reports whether any message carries a PDF.
+func historyHasDocuments(history []models.Message) bool {
+	for _, m := range history {
+		if len(m.Documents) > 0 {
+			return true
+		}
+	}
+	return false
+}
+
 // buildOAuthPayload extracts system messages as instructions and builds
 // structured conversation items for the ChatGPT backend Responses API.
-func buildOAuthPayload(history []models.Message, prompt string) (string, []map[string]interface{}) {
+func buildOAuthPayload(history []models.Message, prompt, model string) (string, []map[string]interface{}) {
 	var instructions strings.Builder
 	var input []map[string]interface{}
 
@@ -493,7 +504,7 @@ func buildOAuthPayload(history []models.Message, prompt string) (string, []map[s
 		case "assistant":
 			input = append(input, map[string]interface{}{"role": "assistant", "content": m.Content})
 		default:
-			input = append(input, map[string]interface{}{"role": "user", "content": visionwire.ResponsesUserContent(m.Content, m.Images)})
+			input = append(input, map[string]interface{}{"role": "user", "content": visionwire.ResponsesMessageContent(catalog.ProviderOpenAI, model, m)})
 		}
 	}
 

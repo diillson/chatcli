@@ -107,7 +107,7 @@ func (c *MiniMaxClient) SendPrompt(ctx context.Context, prompt string, history [
 			}
 			messages = append(messages, map[string]interface{}{
 				"role":    role,
-				"content": visionwire.OpenAIContent(msg.Content, msg.Images),
+				"content": visionwire.OpenAIMessageContent(catalog.ProviderMiniMax, c.model, msg),
 			})
 		}
 
@@ -295,7 +295,7 @@ func (c *MiniMaxClient) buildAnthropicPayload(prompt string, history []models.Me
 	}
 
 	for _, msg := range history {
-		appendMsg(msg.Role, msg.Content, msg.Images)
+		appendMsg(msg.Role, visionwire.TextWithDocuments(msg), msg.Images)
 	}
 
 	if len(history) == 0 || history[len(history)-1].Role != "user" || history[len(history)-1].Content != prompt {

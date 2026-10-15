@@ -91,7 +91,7 @@ func (c *XAIClient) SendPrompt(ctx context.Context, prompt string, history []mod
 		if role != "system" && role != "user" && role != "assistant" {
 			role = "user"
 		}
-		messages = append(messages, map[string]interface{}{"role": role, "content": visionwire.OpenAIContent(msg.Content, msg.Images)})
+		messages = append(messages, map[string]interface{}{"role": role, "content": visionwire.OpenAIMessageContent(catalog.ProviderXAI, c.model, msg)})
 	}
 
 	payload := map[string]interface{}{

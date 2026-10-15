@@ -35,7 +35,7 @@ func TestBuildOAuthPayload_WithImage(t *testing.T) {
 			{MediaType: "image/png", Data: []byte("x")},
 		}},
 	}
-	instructions, input := buildOAuthPayload(history, "describe")
+	instructions, input := buildOAuthPayload(history, "describe", "")
 	if !strings.Contains(instructions, "be helpful") {
 		t.Errorf("system text should become instructions, got %q", instructions)
 	}

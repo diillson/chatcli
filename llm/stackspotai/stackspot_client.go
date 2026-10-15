@@ -18,6 +18,7 @@ import (
 	"github.com/diillson/chatcli/config"
 	"github.com/diillson/chatcli/i18n"
 	"github.com/diillson/chatcli/llm/client"
+	"github.com/diillson/chatcli/llm/internal/visionwire"
 	"github.com/diillson/chatcli/llm/token"
 	"github.com/diillson/chatcli/models"
 	"github.com/diillson/chatcli/utils"
@@ -203,7 +204,7 @@ func formatConversationHistory(history []models.Message) string {
 		if msg.Role == "assistant" {
 			role = "Assistente"
 		}
-		fmt.Fprintf(&conversationBuilder, "%s: %s\n", role, msg.Content)
+		fmt.Fprintf(&conversationBuilder, "%s: %s\n", role, visionwire.TextWithDocuments(msg))
 	}
 	return conversationBuilder.String()
 }

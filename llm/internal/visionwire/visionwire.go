@@ -87,14 +87,20 @@ func DataURL(ic models.ImageContent) string {
 // array: a text part (when text is non-empty) followed by one image_url part
 // per image. Shared by openai, xai, zai, openrouter, copilot,
 // moonshot, minimax, ollama.
-func OpenAIContent(text string, imgs []models.ImageContent) Content {
+//
+// docs are PDFs this model reads natively (see SplitDocuments); each becomes
+// a file part.
+func OpenAIContent(text string, imgs []models.ImageContent, docs ...models.DocumentContent) Content {
 	valid := validImages(imgs)
-	if len(valid) == 0 {
+	if len(valid) == 0 && len(docs) == 0 {
 		return textContent(text)
 	}
-	parts := make([]any, 0, len(valid)+1)
+	parts := make([]any, 0, len(valid)+len(docs)+1)
 	if strings.TrimSpace(text) != "" {
 		parts = append(parts, map[string]interface{}{"type": "text", "text": text})
+	}
+	for _, d := range docs {
+		parts = append(parts, openAIFilePart(d))
 	}
 	for _, ic := range valid {
 		parts = append(parts, map[string]interface{}{
@@ -109,20 +115,23 @@ func OpenAIContent(text string, imgs []models.ImageContent) Content {
 // user/assistant turn. With no valid images it is the plain string. With images
 // it is a blocks array with the images first (Anthropic's recommended ordering
 // for best grounding) followed by a text block.
-func AnthropicContent(text string, imgs []models.ImageContent) Content {
+//
+// docs are PDFs this model reads natively; each becomes a document block,
+// placed first like images.
+func AnthropicContent(text string, imgs []models.ImageContent, docs ...models.DocumentContent) Content {
 	valid := validImages(imgs)
-	if len(valid) == 0 {
+	if len(valid) == 0 && len(docs) == 0 {
 		return textContent(text)
 	}
-	return Content{parts: anthropicBlocks(text, valid), array: true}
+	return Content{parts: anthropicBlocks(text, valid, docs), array: true}
 }
 
 // AnthropicOAuthContent is the OAuth (claude.ai) flavor, which always wraps a
 // turn's content in a blocks array — even text-only. It produces
 // [image blocks..., {type:text,text}], matching the hand-built oauthTextBlock
 // shape so the wire bytes are unchanged for text-only turns.
-func AnthropicOAuthContent(text string, imgs []models.ImageContent) Content {
-	return Content{parts: anthropicBlocks(text, validImages(imgs)), array: true}
+func AnthropicOAuthContent(text string, imgs []models.ImageContent, docs ...models.DocumentContent) Content {
+	return Content{parts: anthropicBlocks(text, validImages(imgs), docs), array: true}
 }
 
 // PrependThought places Gemini thought parts ahead of the turn's existing
@@ -197,8 +206,11 @@ func (c Content) PrependThinking(blocks []models.ThinkingBlock) Content {
 
 // anthropicBlocks builds the image-first, text-last blocks slice shared by the
 // API-key (when images present) and OAuth (always) Anthropic paths.
-func anthropicBlocks(text string, valid []models.ImageContent) []any {
-	blocks := make([]any, 0, len(valid)+1)
+func anthropicBlocks(text string, valid []models.ImageContent, docs []models.DocumentContent) []any {
+	blocks := make([]any, 0, len(valid)+len(docs)+1)
+	for _, d := range docs {
+		blocks = append(blocks, anthropicDocumentBlock(d))
+	}
 	for _, ic := range valid {
 		blocks = append(blocks, anthropicImageBlock(ic))
 	}
@@ -232,14 +244,17 @@ func anthropicImageBlock(ic models.ImageContent) map[string]interface{} {
 // user message. With no valid images it is the plain string. With images it is
 // the parts array using the Responses item types (input_text + input_image,
 // where image_url is a data URL string).
-func ResponsesUserContent(text string, imgs []models.ImageContent) Content {
+func ResponsesUserContent(text string, imgs []models.ImageContent, docs ...models.DocumentContent) Content {
 	valid := validImages(imgs)
-	if len(valid) == 0 {
+	if len(valid) == 0 && len(docs) == 0 {
 		return textContent(text)
 	}
-	parts := make([]any, 0, len(valid)+1)
+	parts := make([]any, 0, len(valid)+len(docs)+1)
 	if strings.TrimSpace(text) != "" {
 		parts = append(parts, map[string]interface{}{"type": "input_text", "text": text})
+	}
+	for _, d := range docs {
+		parts = append(parts, responsesFilePart(d))
 	}
 	for _, ic := range valid {
 		parts = append(parts, map[string]interface{}{
@@ -254,11 +269,14 @@ func ResponsesUserContent(text string, imgs []models.ImageContent) Content {
 // no valid images it is a single text part (byte-identical to the legacy
 // single-text-part path). With images it appends an inline_data part per image.
 // Gemini requires inline bytes, so URL-only images are skipped.
-func GeminiParts(text string, imgs []models.ImageContent) Content {
+func GeminiParts(text string, imgs []models.ImageContent, docs ...models.DocumentContent) Content {
 	valid := validImages(imgs)
-	parts := make([]any, 0, len(valid)+1)
-	if strings.TrimSpace(text) != "" || len(valid) == 0 {
+	parts := make([]any, 0, len(valid)+len(docs)+1)
+	if strings.TrimSpace(text) != "" || (len(valid) == 0 && len(docs) == 0) {
 		parts = append(parts, map[string]interface{}{"text": text})
+	}
+	for _, d := range docs {
+		parts = append(parts, geminiPDFPart(d))
 	}
 	for _, ic := range valid {
 		if len(ic.Data) == 0 {

@@ -353,7 +353,7 @@ func TestBuildToolMessages_WithAllRoles(t *testing.T) {
 		{Role: "tool", ToolCallID: "tc1", Content: "result data"},
 	}
 
-	msgs := buildToolMessages("", history)
+	msgs := buildToolMessages("", history, "")
 	require.Len(t, msgs, 6)
 
 	// system

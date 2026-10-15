@@ -35,7 +35,7 @@ func (c *BedrockClient) sendPromptOpenAI(ctx context.Context, prompt string, his
 		effectiveMaxTokens = c.getMaxTokensOpenAI()
 	}
 
-	messages := buildOpenAIMessages(prompt, history)
+	messages := buildOpenAIMessages(prompt, history, c.model)
 
 	reqBody := map[string]interface{}{
 		"messages":              messages,
@@ -126,7 +126,7 @@ func (c *BedrockClient) getMaxTokensOpenAI() int {
 // buildOpenAIMessages converts the internal history into the OpenAI
 // Chat Completions array expected by Bedrock's OpenAI-family endpoint.
 // Role mapping: assistant/system kept as-is, everything else becomes "user".
-func buildOpenAIMessages(prompt string, history []models.Message) []map[string]interface{} {
+func buildOpenAIMessages(prompt string, history []models.Message, model string) []map[string]interface{} {
 	var messages []map[string]interface{}
 	var systemParts []string
 
@@ -136,7 +136,7 @@ func buildOpenAIMessages(prompt string, history []models.Message) []map[string]i
 		case "assistant":
 			messages = append(messages, map[string]interface{}{
 				"role":    "assistant",
-				"content": visionwire.OpenAIContent(msg.Content, msg.Images),
+				"content": visionwire.OpenAIMessageContent(catalog.ProviderBedrock, model, msg),
 			})
 		case "system":
 			// SystemParts (with cache_control) have no OpenAI equivalent —
@@ -153,7 +153,7 @@ func buildOpenAIMessages(prompt string, history []models.Message) []map[string]i
 		default:
 			messages = append(messages, map[string]interface{}{
 				"role":    "user",
-				"content": visionwire.OpenAIContent(msg.Content, msg.Images),
+				"content": visionwire.OpenAIMessageContent(catalog.ProviderBedrock, model, msg),
 			})
 		}
 	}

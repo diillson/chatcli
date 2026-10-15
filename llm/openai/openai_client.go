@@ -160,7 +160,7 @@ func (c *OpenAIClient) SendPrompt(ctx context.Context, prompt string, history []
 		}
 		messages = append(messages, map[string]interface{}{
 			"role":    role,
-			"content": visionwire.OpenAIContent(msg.Content, msg.Images),
+			"content": visionwire.OpenAIMessageContent(catalog.ProviderOpenAI, c.model, msg),
 		})
 	}
 
@@ -404,7 +404,7 @@ func (c *OpenAIClient) SendPromptStream(ctx context.Context, prompt string, hist
 		default:
 			role = "user"
 		}
-		messages = append(messages, map[string]interface{}{"role": role, "content": visionwire.OpenAIContent(msg.Content, msg.Images)})
+		messages = append(messages, map[string]interface{}{"role": role, "content": visionwire.OpenAIMessageContent(catalog.ProviderOpenAI, c.model, msg)})
 	}
 	if len(history) == 0 || history[len(history)-1].Role != "user" || history[len(history)-1].Content != prompt {
 		if strings.TrimSpace(prompt) != "" {

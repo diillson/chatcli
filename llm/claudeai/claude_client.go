@@ -715,7 +715,7 @@ func (c *ClaudeClient) buildMessagesAndSystem(prompt string, history []models.Me
 		messages = appendTurnScopedBefore(messages, turnScoped, role)
 		switch role {
 		case "assistant":
-			messages = append(messages, map[string]interface{}{"role": "assistant", "content": visionwire.AnthropicContent(msg.Content, msg.Images)})
+			messages = append(messages, map[string]interface{}{"role": "assistant", "content": visionwire.AnthropicMessageContent(catalog.ProviderClaudeAI, c.model, msg)})
 		case "system":
 			// If structured SystemParts are available, use them for cache_control
 			if len(msg.SystemParts) > 0 {
@@ -733,7 +733,7 @@ func (c *ClaudeClient) buildMessagesAndSystem(prompt string, history []models.Me
 				plainSystemParts = append(plainSystemParts, msg.Content)
 			}
 		default:
-			messages = append(messages, map[string]interface{}{"role": "user", "content": visionwire.AnthropicContent(msg.Content, msg.Images)})
+			messages = append(messages, map[string]interface{}{"role": "user", "content": visionwire.AnthropicMessageContent(catalog.ProviderClaudeAI, c.model, msg)})
 		}
 	}
 
@@ -782,7 +782,7 @@ func (c *ClaudeClient) buildOAuthMessagesAndSystem(prompt string, history []mode
 		case "assistant":
 			messages = append(messages, map[string]interface{}{
 				"role":    "assistant",
-				"content": visionwire.AnthropicOAuthContent(msg.Content, msg.Images),
+				"content": visionwire.AnthropicOAuthMessageContent(catalog.ProviderClaudeAI, c.model, msg),
 			})
 		case "system":
 			// If structured SystemParts are available, use them for cache_control
@@ -803,7 +803,7 @@ func (c *ClaudeClient) buildOAuthMessagesAndSystem(prompt string, history []mode
 		default:
 			messages = append(messages, map[string]interface{}{
 				"role":    "user",
-				"content": visionwire.AnthropicOAuthContent(msg.Content, msg.Images),
+				"content": visionwire.AnthropicOAuthMessageContent(catalog.ProviderClaudeAI, c.model, msg),
 			})
 		}
 	}

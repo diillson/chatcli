@@ -44,6 +44,7 @@ import (
 	"github.com/diillson/chatcli/i18n"
 	"github.com/diillson/chatcli/llm/catalog"
 	"github.com/diillson/chatcli/llm/client"
+	"github.com/diillson/chatcli/llm/internal/visionwire"
 	"github.com/diillson/chatcli/models"
 	"github.com/diillson/chatcli/utils"
 	"go.uber.org/zap"
@@ -553,7 +554,7 @@ func buildConversation(history []models.Message, prompt string) string {
 		// Scrub any sentinel that leaked into a stored message (from a turn
 		// where the model mangled the framing): replaying it here teaches the
 		// model that replies carry the markers, contaminating every turn after.
-		b.WriteString(stripHistorySentinels(m.Content))
+		b.WriteString(stripHistorySentinels(visionwire.TextWithDocuments(m)))
 		b.WriteString("\n")
 	}
 	if len(history) == 0 || history[len(history)-1].Role != "user" || history[len(history)-1].Content != prompt {

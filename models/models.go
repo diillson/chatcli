@@ -110,6 +110,14 @@ type Message struct {
 	// text in Content still applies — an image usually rides with a caption.
 	Images []ImageContent `json:"images,omitempty"`
 
+	// Documents carries PDF input attached to this turn. Adapters whose
+	// model reads PDFs natively serialize each entry into their document
+	// block (Anthropic document, OpenAI file part, Gemini inline data,
+	// Bedrock DocumentBlock); for the others the caller folds the
+	// document's extracted text into Content before sending (see
+	// DocumentContent.Text) and leaves this empty.
+	Documents []DocumentContent `json:"documents,omitempty"`
+
 	// IsError marks this tool-result message as a business-level
 	// failure (the tool ran, but reported an error: command exit code,
 	// HTTP 4xx, missing file). Provider adapters use it to set the
@@ -157,8 +165,9 @@ func (m *Message) IsValid() bool {
 	if m.Role == "assistant" && len(m.ToolCalls) > 0 {
 		return true
 	}
-	// A turn carrying an image (with or without a text caption) is valid.
-	return validRoles[m.Role] && (m.Content != "" || len(m.Images) > 0)
+	// A turn carrying an image or a document (with or without a text
+	// caption) is valid.
+	return validRoles[m.Role] && (m.Content != "" || len(m.Images) > 0 || len(m.Documents) > 0)
 }
 
 // ResponseData representa os dados de resposta da LLM.
