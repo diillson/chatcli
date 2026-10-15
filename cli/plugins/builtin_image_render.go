@@ -66,7 +66,7 @@ func RenderImageModels(listings []imagegen.BackendListing) string {
 		b.WriteString("\n\n")
 		state := i18n.T("image.models.ready")
 		if !l.Configured {
-			state = i18n.T("image.models.needs", l.Credential)
+			state = i18n.T("image.models.needs", l.Requires)
 		}
 		marker := ""
 		if l.Active {

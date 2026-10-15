@@ -28,8 +28,9 @@ type Backend struct {
 	// Catalog is the catalog provider name its models carry ("openai" for
 	// both OpenAI backends).
 	Catalog string
-	// Credential names what the backend needs.
-	Credential string
+	// Requires names what the backend needs configured (environment
+	// variable names, never values).
+	Requires string
 	// Configured reports whether that credential is present.
 	Configured bool
 }
@@ -38,15 +39,15 @@ type Backend struct {
 func Backends() []Backend {
 	openai := strings.TrimSpace(os.Getenv("OPENAI_API_KEY")) != ""
 	return []Backend{
-		{Name: "openai", Catalog: "openai", Credential: "OPENAI_API_KEY", Configured: openai},
-		{Name: "responses", Catalog: "openai", Credential: "OPENAI_API_KEY", Configured: openai},
-		{Name: "google", Catalog: "google", Credential: "GOOGLEAI_API_KEY or GEMINI_API_KEY", Configured: googleImageKey() != ""},
-		{Name: "xai", Catalog: "xai", Credential: "XAI_API_KEY", Configured: strings.TrimSpace(os.Getenv("XAI_API_KEY")) != ""},
-		{Name: "zai", Catalog: "zai", Credential: "ZAI_API_KEY", Configured: strings.TrimSpace(os.Getenv("ZAI_API_KEY")) != ""},
-		{Name: "minimax", Catalog: "minimax", Credential: "MINIMAX_API_KEY", Configured: strings.TrimSpace(os.Getenv("MINIMAX_API_KEY")) != ""},
-		{Name: "bedrock", Catalog: "bedrock", Credential: "AWS credentials (AWS_PROFILE/BEDROCK_PROFILE, access keys or AWS_BEARER_TOKEN_BEDROCK)", Configured: bedrockConfigured()},
-		{Name: "sdwebui", Catalog: "sdwebui", Credential: "CHATCLI_IMAGE_URL", Configured: strings.TrimSpace(os.Getenv("CHATCLI_IMAGE_URL")) != ""},
-		{Name: "url", Catalog: "url", Credential: "CHATCLI_IMAGE_URL", Configured: strings.TrimSpace(os.Getenv("CHATCLI_IMAGE_URL")) != ""},
+		{Name: "openai", Catalog: "openai", Requires: "OPENAI_API_KEY", Configured: openai},
+		{Name: "responses", Catalog: "openai", Requires: "OPENAI_API_KEY", Configured: openai},
+		{Name: "google", Catalog: "google", Requires: "GOOGLEAI_API_KEY or GEMINI_API_KEY", Configured: googleImageKey() != ""},
+		{Name: "xai", Catalog: "xai", Requires: "XAI_API_KEY", Configured: strings.TrimSpace(os.Getenv("XAI_API_KEY")) != ""},
+		{Name: "zai", Catalog: "zai", Requires: "ZAI_API_KEY", Configured: strings.TrimSpace(os.Getenv("ZAI_API_KEY")) != ""},
+		{Name: "minimax", Catalog: "minimax", Requires: "MINIMAX_API_KEY", Configured: strings.TrimSpace(os.Getenv("MINIMAX_API_KEY")) != ""},
+		{Name: "bedrock", Catalog: "bedrock", Requires: "AWS credentials (AWS_PROFILE/BEDROCK_PROFILE, access keys or AWS_BEARER_TOKEN_BEDROCK)", Configured: bedrockConfigured()},
+		{Name: "sdwebui", Catalog: "sdwebui", Requires: "CHATCLI_IMAGE_URL", Configured: strings.TrimSpace(os.Getenv("CHATCLI_IMAGE_URL")) != ""},
+		{Name: "url", Catalog: "url", Requires: "CHATCLI_IMAGE_URL", Configured: strings.TrimSpace(os.Getenv("CHATCLI_IMAGE_URL")) != ""},
 	}
 }
 
@@ -244,7 +245,7 @@ func Select(backend, model string, forEdit bool) (Selection, error) {
 		return Selection{}, fmt.Errorf("unknown image provider %q (valid: openai, responses, google, xai, zai, minimax, bedrock, sdwebui, url)", backend)
 	}
 	if !b.Configured {
-		return Selection{}, fmt.Errorf("provider %s is not configured: set %s", b.Name, b.Credential)
+		return Selection{}, fmt.Errorf("provider %s is not configured: set %s", b.Name, b.Requires)
 	}
 	sel := Selection{Backend: b.Name, Model: model, ForEdit: forEdit, Env: map[string]string{}}
 	if model == "" {

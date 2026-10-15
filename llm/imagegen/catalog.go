@@ -51,6 +51,25 @@ type ModelInfo struct {
 	Default bool
 }
 
+// catalogNow is the clock KnownModels filters by; tests replace it.
+var catalogNow = time.Now
+
+// KnownModels returns the curated catalog of image models still in service:
+// entries whose shutdown date has arrived are left out, so a model that
+// reaches its retirement leaves the list on that day without a release.
+func KnownModels() []ModelInfo {
+	today := catalogNow().UTC().Format("2006-01-02")
+	all := allModels()
+	out := make([]ModelInfo, 0, len(all))
+	for _, m := range all {
+		if m.Retires != "" && m.Retires <= today {
+			continue
+		}
+		out = append(out, m)
+	}
+	return out
+}
+
 // Bedrock regions, from the model cards and ListFoundationModels.
 const (
 	// Stable Image Core/Ultra and SD3.5 Large: In-Region in us-west-2 only.
@@ -127,25 +146,6 @@ func allModels() []ModelInfo {
 		{Name: "stability.stable-fast-upscale-v1:0", Provider: "bedrock", API: "stability", Edit: true, Status: "active", Regions: svc, Profile: true, Note: "Fast 4x upscale; no prompt."},
 		{Name: "amazon.nova-canvas-v1:0", Provider: "bedrock", API: "native", Generate: true, Edit: true, Status: "deprecated", Retires: "2026-09-30"},
 	}
-}
-
-// catalogNow is the clock KnownModels filters by; tests replace it.
-var catalogNow = time.Now
-
-// KnownModels returns the curated catalog of image models still in service:
-// entries whose shutdown date has arrived are left out, so a model that
-// reaches its retirement leaves the list on that day without a release.
-func KnownModels() []ModelInfo {
-	today := catalogNow().UTC().Format("2006-01-02")
-	all := allModels()
-	out := make([]ModelInfo, 0, len(all))
-	for _, m := range all {
-		if m.Retires != "" && m.Retires <= today {
-			continue
-		}
-		out = append(out, m)
-	}
-	return out
 }
 
 // LookupModel returns the catalog entry for id (case-insensitive; a Bedrock
