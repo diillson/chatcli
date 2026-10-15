@@ -230,7 +230,8 @@ func (d *DiscordAdapter) runSession(ctx context.Context, inbound chan<- InboundM
 					}
 					d.hydrateAudio(sessionCtx, &msg)
 					d.hydrateImages(sessionCtx, &msg)
-					if strings.TrimSpace(msg.Text) == "" && msg.Audio == nil && msg.Image == nil {
+					hydrateDocument(sessionCtx, &msg, d.fetchCDN, d.logger, "discord")
+					if strings.TrimSpace(msg.Text) == "" && msg.Audio == nil && msg.Image == nil && msg.Document == nil {
 						continue // audio/image download failed and there was no text
 					}
 					select {
@@ -474,6 +475,7 @@ func parseDiscordMessage(d json.RawMessage) (InboundMessage, bool) {
 	}
 	var audio *InboundAudio
 	var image *InboundImage
+	var document *InboundDocument
 	for _, at := range m.Attachments {
 		if at.URL == "" {
 			continue
@@ -484,9 +486,11 @@ func parseDiscordMessage(d json.RawMessage) (InboundMessage, bool) {
 		case image == nil && isImageMime(at.ContentType):
 			// Keep the first image attachment as the primary one.
 			image = &InboundImage{ref: at.URL, MimeType: at.ContentType, FileName: at.Filename}
+		case document == nil && isPDFAttachment(at.ContentType, at.Filename):
+			document = &InboundDocument{ref: at.URL, MimeType: at.ContentType, FileName: at.Filename}
 		}
 	}
-	if strings.TrimSpace(m.Content) == "" && audio == nil && image == nil {
+	if strings.TrimSpace(m.Content) == "" && audio == nil && image == nil && document == nil {
 		return InboundMessage{}, false
 	}
 	return InboundMessage{
@@ -497,7 +501,14 @@ func parseDiscordMessage(d json.RawMessage) (InboundMessage, bool) {
 		Text:     m.Content,
 		Audio:    audio,
 		Image:    image,
+		Document: document,
 	}, true
+}
+
+// fetchCDN downloads a Discord attachment from its CDN URL (already signed —
+// no auth header needed).
+func (d *DiscordAdapter) fetchCDN(ctx context.Context, ref string, limit int64) ([]byte, string, error) {
+	return fetchAudioBytes(ctx, d.http, ref, "", limit)
 }
 
 // hydrateAudio downloads a Discord audio attachment from its CDN URL (already

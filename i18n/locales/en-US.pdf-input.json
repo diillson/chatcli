@@ -1,0 +1,6 @@
+{
+  "pdf.warn.scanned_unreadable": "PDF %s has no text layer (a scanned document) and %s cannot read PDFs natively; no configured model could transcribe it. Use a model that reads PDFs (Claude, GPT-4o or later, Gemini) or set CHATCLI_VISION_PROVIDER/CHATCLI_VISION_MODEL to one.",
+  "pdf.info.transcribed": "PDF %s is a scanned document; transcribed by %s for the current model.",
+  "gateway.document.default_prompt": "Read the attached PDF and summarize what it says.",
+  "web.bad_document": "%s is not a readable PDF."
+}

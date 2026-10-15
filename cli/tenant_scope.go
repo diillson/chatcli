@@ -85,6 +85,7 @@ type tenantStores struct {
 	promptBreakdownModes map[string]*promptBreakdown
 	pendingInboundImages []models.ImageContent
 	pendingInboundNote   string
+	pendingInboundDocs   []models.DocumentContent
 	lastAgentReply       string
 
 	graphWired bool
@@ -163,6 +164,7 @@ func (cli *ChatCLI) captureStores(into *tenantStores) {
 	into.preCompaction = cli.preCompaction
 	into.pendingInboundImages = cli.pendingInboundImages
 	into.pendingInboundNote = cli.pendingInboundNote
+	into.pendingInboundDocs = cli.pendingInboundDocuments
 	into.lastAgentReply = cli.lastAgentReply
 	into.promptCacheTTL = llmclient.HeldPromptCacheTTL()
 	cli.recallTraceMu.Lock()
@@ -199,6 +201,7 @@ func (cli *ChatCLI) applyStores(ts *tenantStores) {
 	cli.preCompaction = ts.preCompaction
 	cli.pendingInboundImages = ts.pendingInboundImages
 	cli.pendingInboundNote = ts.pendingInboundNote
+	cli.pendingInboundDocuments = ts.pendingInboundDocs
 	cli.lastAgentReply = ts.lastAgentReply
 	llmclient.RestorePromptCacheTTL(ts.promptCacheTTL)
 	cli.recallTraceMu.Lock()

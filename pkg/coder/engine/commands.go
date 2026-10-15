@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"context"
 	"encoding/base64"
 	"flag"
 	"fmt"
@@ -9,7 +10,7 @@ import (
 	"strings"
 )
 
-func (e *Engine) handleRead(args []string) error {
+func (e *Engine) handleRead(ctx context.Context, args []string) error {
 	fs := flag.NewFlagSet("read", flag.ContinueOnError)
 	file := fs.String("file", "", "Arquivo")
 	start := fs.Int("start", 0, "Linha inicial (1-based)")
@@ -43,7 +44,7 @@ func (e *Engine) handleRead(args []string) error {
 		} else {
 			// A PDF reads as its extracted text, page by page: the raw
 			// bytes are unreadable to a model.
-			content, truncated, err = readTextFileWithLimit(f, *maxBytes)
+			content, truncated, err = readTextFileWithLimit(ctx, f, *maxBytes)
 		}
 		if err != nil {
 			e.printf("❌ ERROR READING '%s': %v\n", f, err)

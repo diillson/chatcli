@@ -1899,6 +1899,7 @@ func (cli *ChatCLI) RunAgentFullOnce(ctx context.Context, task string) error {
 	// Processar contextos especiais como @file, @git, etc.
 	query, additionalContext, images, docs := cli.processSpecialCommands(ctx, task)
 	images, inboundNote := cli.takePendingInbound(images)
+	docs = cli.takePendingInboundDocuments(docs)
 	images, visionDesc := cli.gateImagesForModel(ctx, images)
 	additionalContext += visionDesc
 	docs = cli.gateDocumentsForRoute(ctx, cli.Provider, cli.Model, docs)
@@ -1934,6 +1935,7 @@ func (cli *ChatCLI) runCoderQuery(ctx context.Context, query string, gatewayPers
 	// Merge images staged from outside the @file flow (e.g. the gateway), then
 	// gate against the active model (native vision vs describe-fallback).
 	images, inboundNote := cli.takePendingInbound(images)
+	docs = cli.takePendingInboundDocuments(docs)
 	images, visionDesc := cli.gateImagesForModel(ctx, images)
 	additionalContext += visionDesc
 	docs = cli.gateDocumentsForRoute(ctx, cli.Provider, cli.Model, docs)

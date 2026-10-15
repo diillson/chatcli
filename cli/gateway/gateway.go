@@ -48,6 +48,11 @@ type InboundMessage struct {
 	// carry the primary attachment.
 	Image *InboundImage
 
+	// Document carries a PDF attachment, with the same two-phase lifecycle
+	// as Image. Fed to the run as a models.DocumentContent: natively to
+	// models that read PDFs, as extracted text to the others.
+	Document *InboundDocument
+
 	// SenderListed is set by the adapter when the sender matched an explicit
 	// entry of the platform's allowlist, as opposed to being admitted by the
 	// public "*" entry. Commands that reach beyond the conversation itself
@@ -73,6 +78,18 @@ type InboundAudio struct {
 type InboundImage struct {
 	Data     []byte // the raw image, populated by the adapter after download
 	MimeType string // e.g. "image/jpeg" — best-effort, may be empty
+	FileName string // best-effort original name, may be empty
+
+	// ref is the platform-opaque download handle resolved to Data by the
+	// owning adapter. It never leaves the gateway package.
+	ref string
+}
+
+// InboundDocument is a PDF attached to an inbound message. It mirrors
+// InboundImage's two-phase (parse metadata → hydrate bytes) lifecycle.
+type InboundDocument struct {
+	Data     []byte // the raw PDF, populated by the adapter after download
+	MimeType string // e.g. "application/pdf" — best-effort, may be empty
 	FileName string // best-effort original name, may be empty
 
 	// ref is the platform-opaque download handle resolved to Data by the

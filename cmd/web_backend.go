@@ -45,12 +45,15 @@ func (b *rpcBackend) SetDefaults(provider, model string) {
 }
 
 func attachmentsOf(o webui.TurnOptions) *cli.TurnAttachments {
-	if len(o.Images) == 0 {
+	if len(o.Images) == 0 && len(o.Documents) == 0 {
 		return nil
 	}
 	att := &cli.TurnAttachments{}
 	for _, img := range o.Images {
 		att.Images = append(att.Images, models.ImageContent{MediaType: img.MediaType, Data: img.Data, FileName: img.Name})
+	}
+	for _, d := range o.Documents {
+		att.Documents = append(att.Documents, models.DocumentContent{MediaType: models.PDFMediaType, Data: d.Data, FileName: d.Name})
 	}
 	return att
 }

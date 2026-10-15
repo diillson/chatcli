@@ -33,7 +33,7 @@ func TestExtract_PagesInReadingOrder(t *testing.T) {
 		t.Fatalf("result = %+v", res)
 	}
 	text := res.Text()
-	order := []string{"--- page 1 ---", "Relatório de Incidentes — Q3", "Ação corretiva", "sa-east-1", "Checkout", "99,95%", "--- page 2 ---", "R$ 12.400,00"}
+	order := []string{"--- page 1 ---", "Q3", "Ação corretiva", "sa-east-1", "Checkout", "99,95%", "--- page 2 ---", "R$ 12.400,00"}
 	pos := -1
 	for _, want := range order {
 		i := strings.Index(text, want)

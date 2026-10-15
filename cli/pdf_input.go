@@ -139,37 +139,62 @@ func (cli *ChatCLI) gateDocumentsForRoute(ctx context.Context, provider, model s
 // errNoNativePDFModel is returned when no configured provider reads PDFs.
 var errNoNativePDFModel = errors.New("no configured model reads PDFs natively")
 
+// maxPDFTranscribeAttempts bounds how many providers a transcription tries.
+const maxPDFTranscribeAttempts = 3
+
 // transcribePDF asks a model with native PDF input to transcribe a document
-// (OCR of scanned pages included). It prefers the vision override
-// (CHATCLI_VISION_PROVIDER/MODEL), then the current provider, then any
-// configured provider.
+// (OCR of scanned pages included). Candidates come in preference order
+// (the vision override, the current provider, then any configured
+// provider); a candidate whose client or call fails — a provider listed as
+// available whose credentials do not resolve, a quota error — hands over to
+// the next instead of ending the attempt.
 func (cli *ChatCLI) transcribePDF(ctx context.Context, doc models.DocumentContent) (string, string, error) {
-	provider, model, ok := cli.resolvePDFTranscribeModel()
-	if !ok {
+	candidates := cli.pdfTranscribeCandidates()
+	if len(candidates) == 0 {
 		return "", "", errNoNativePDFModel
 	}
-	client, err := cli.manager.GetClient(provider, model)
-	if err != nil {
-		return "", "", err
-	}
 	prompt := "Transcribe this document to plain text, page by page, keeping its structure (headings, lists, tables as rows). " +
-		"Mark each page as \"--- page N ---\". Transcribe all visible text verbatim, including text inside figures; describe figures and diagrams briefly in brackets. No preamble."
+		"Mark each page as \"--- page N ---\". Transcribe all visible text verbatim, including text inside figures; describe figures and diagrams briefly in brackets (their boxes and arrows, with labels). No preamble."
 	msg := models.Message{Role: "user", Content: prompt, Documents: []models.DocumentContent{doc}}
-	text, err := client.SendPrompt(ctx, prompt, []models.Message{msg}, pdfTranscribeMaxTokens)
-	if err != nil {
-		return "", "", err
+	var errs []error
+	for i, c := range candidates {
+		if i >= maxPDFTranscribeAttempts {
+			break
+		}
+		client, err := cli.manager.GetClient(c[0], c[1])
+		if err != nil {
+			errs = append(errs, fmt.Errorf("%s/%s: %w", c[0], c[1], err))
+			continue
+		}
+		text, err := client.SendPrompt(ctx, prompt, []models.Message{msg}, pdfTranscribeMaxTokens)
+		if err != nil || strings.TrimSpace(text) == "" {
+			if err == nil {
+				err = errors.New("empty transcription")
+			}
+			errs = append(errs, fmt.Errorf("%s/%s: %w", c[0], c[1], err))
+			continue
+		}
+		return strings.TrimSpace(text), strings.ToLower(c[0]) + "/" + c[1], nil
 	}
-	if strings.TrimSpace(text) == "" {
-		return "", "", errors.New("empty transcription")
-	}
-	return strings.TrimSpace(text), strings.ToLower(provider) + "/" + model, nil
+	return "", "", errors.Join(errs...)
 }
 
-// resolvePDFTranscribeModel picks a model that reads PDFs natively.
-func (cli *ChatCLI) resolvePDFTranscribeModel() (string, string, bool) {
+// pdfTranscribeCandidates lists provider/model pairs that read PDFs
+// natively, in preference order, one model per provider.
+func (cli *ChatCLI) pdfTranscribeCandidates() [][2]string {
+	var out [][2]string
+	seen := map[string]bool{}
+	add := func(p, m string) {
+		key := strings.ToUpper(p)
+		if p == "" || m == "" || seen[key] {
+			return
+		}
+		seen[key] = true
+		out = append(out, [2]string{p, m})
+	}
 	if p, m := strings.TrimSpace(os.Getenv("CHATCLI_VISION_PROVIDER")), strings.TrimSpace(os.Getenv("CHATCLI_VISION_MODEL")); p != "" && m != "" &&
 		catalog.SupportsNativePDF(p, m) {
-		return p, m, true
+		add(p, m)
 	}
 	available := cli.manager.GetAvailableProviders()
 	ordered := make([]string, 0, len(available)+1)
@@ -185,13 +210,18 @@ func (cli *ChatCLI) resolvePDFTranscribeModel() (string, string, bool) {
 		if !providerAvailable(available, p) {
 			continue
 		}
+		if strings.EqualFold(p, cli.Provider) && catalog.SupportsNativePDF(p, cli.Model) {
+			add(p, cli.Model)
+			continue
+		}
 		for _, meta := range catalog.ListByProvider(p) {
 			if catalog.SupportsNativePDF(p, meta.ID) && metaHasVision(meta) {
-				return p, meta.ID, true
+				add(p, meta.ID)
+				break
 			}
 		}
 	}
-	return "", "", false
+	return out
 }
 
 // attachedPDFNote tells the model which PDFs ride with the turn.
@@ -208,4 +238,20 @@ func attachedPDFNote(docs []models.DocumentContent) string {
 		names = append(names, n)
 	}
 	return "\n[Attached PDF: " + strings.Join(names, ", ") + "]"
+}
+
+// completeDocuments fills page count and extracted text for documents that
+// arrived as bytes only (web UI, RPC clients).
+func (cli *ChatCLI) completeDocuments(ctx context.Context, docs []models.DocumentContent) []models.DocumentContent {
+	out := make([]models.DocumentContent, 0, len(docs))
+	for _, d := range docs {
+		if !models.IsPDF(d.Data) {
+			continue
+		}
+		if d.Pages == 0 && d.Text == "" {
+			d = cli.readPDF(ctx, d.Data, d.Name())
+		}
+		out = append(out, d)
+	}
+	return out
 }

@@ -165,7 +165,7 @@ func docsFlattenAcceptExt(name, kind string) bool {
 	// Diagram files are documentation in every kind: a draw.io, mermaid or
 	// PlantUML file often is the only description of a flow. An SVG is kept
 	// only when it carries text (an icon yields nothing and is dropped).
-	if diagramFileLang(lower) != "" {
+	if diagramFileLang(lower) != "" || ext == ".pdf" {
 		return true
 	}
 	if kind == "docs" {

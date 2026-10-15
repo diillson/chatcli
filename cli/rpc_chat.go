@@ -137,7 +137,7 @@ func (cli *ChatCLI) runChatTurnSerialized(
 		additionalContext += cli.saveTurnAttachments(o.Attachments.Images)
 	}
 	if o.Attachments != nil && len(o.Attachments.Documents) > 0 {
-		docs = append(docs, o.Attachments.Documents...)
+		docs = append(docs, cli.completeDocuments(ctx, o.Attachments.Documents)...)
 		additionalContext += cli.saveTurnDocuments(o.Attachments.Documents)
 	}
 	// The gate judges the model the turn is routed to, not the session's.

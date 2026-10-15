@@ -1270,6 +1270,7 @@ func (cli *ChatCLI) showConfigIntegrations(ctx context.Context) {
 	kv(p, "CHATCLI_TRANSCRIPTION_KEY", presence(os.Getenv("CHATCLI_TRANSCRIPTION_KEY")))
 	kv(p, "CHATCLI_GATEWAY_MAX_AUDIO_BYTES", envOr("CHATCLI_GATEWAY_MAX_AUDIO_BYTES"))
 	kv(p, "CHATCLI_GATEWAY_MAX_IMAGE_BYTES", envOr("CHATCLI_GATEWAY_MAX_IMAGE_BYTES"))
+	kv(p, "CHATCLI_GATEWAY_MAX_DOCUMENT_BYTES", envOr("CHATCLI_GATEWAY_MAX_DOCUMENT_BYTES"))
 
 	fmt.Println(p)
 	subheader(p, "cfg.sub.integ.gateway_tts")
@@ -1324,6 +1325,7 @@ func (cli *ChatCLI) showConfigIntegrations(ctx context.Context) {
 	kv(p, "CHATCLI_IMAGE_EDIT_PROVIDER", envOr("CHATCLI_IMAGE_EDIT_PROVIDER"))
 	kv(p, "CHATCLI_IMAGE_EDIT_MODEL", envOr("CHATCLI_IMAGE_EDIT_MODEL"))
 	kv(p, "CHATCLI_VISION_INPUT", envOr("CHATCLI_VISION_INPUT"))
+	kv(p, "CHATCLI_PDF_INPUT", envOrDefault("CHATCLI_PDF_INPUT", "auto"))
 	kv(p, "CHATCLI_VISION_PROVIDER", envOr("CHATCLI_VISION_PROVIDER"))
 	kv(p, "CHATCLI_VISION_MODEL", envOr("CHATCLI_VISION_MODEL"))
 	kv(p, "CHATCLI_VISION_COMPRESS", envOrDefault("CHATCLI_VISION_COMPRESS", "on"))

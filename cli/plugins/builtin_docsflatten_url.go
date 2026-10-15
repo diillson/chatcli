@@ -48,10 +48,14 @@ const docsFlattenMaxBodyBytes = 4 * 1024 * 1024
 var docsFlattenAssetExts = map[string]bool{
 	".png": true, ".jpg": true, ".jpeg": true, ".gif": true, ".svg": true,
 	".webp": true, ".ico": true, ".css": true, ".js": true, ".mjs": true,
-	".pdf": true, ".zip": true, ".tar": true, ".gz": true, ".woff": true,
+	".zip": true, ".tar": true, ".gz": true, ".woff": true,
 	".woff2": true, ".ttf": true, ".eot": true, ".mp4": true, ".webm": true,
 	".mp3": true, ".wav": true, ".json": true, ".xml": true,
 }
+
+// PDFs linked from crawled pages are followed (same rules as pages) and
+// flattened from their extracted text; the docsFlattenAssetExts list above
+// therefore does not name .pdf.
 
 // docsFlattenCrawlItem is one node in the BFS frontier.
 type docsFlattenCrawlItem struct {
@@ -212,7 +216,7 @@ func fetchDocsFlattenPage(ctx context.Context, pageURL string, emit func(string)
 	}
 
 	resp, err := webGet(ctx, safeURL, map[string]string{
-		"Accept":          "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+		"Accept":          "text/html,application/xhtml+xml,application/xml;q=0.9,application/pdf;q=0.8,*/*;q=0.7",
 		"Accept-Language": "en-US,en;q=0.9",
 	})
 	if err != nil {
@@ -224,6 +228,11 @@ func fetchDocsFlattenPage(ctx context.Context, pageURL string, emit func(string)
 	if resp.StatusCode != 200 {
 		emit(fmt.Sprintf("skipping %s: HTTP %d", pageURL, resp.StatusCode))
 		return "", "", nil, nil, false
+	}
+
+	if strings.Contains(strings.ToLower(resp.Header.Get("Content-Type")), "application/pdf") ||
+		strings.HasSuffix(strings.ToLower(strings.SplitN(pageURL, "?", 2)[0]), ".pdf") {
+		return fetchedPDFPage(ctx, resp.Body, pageURL, emit)
 	}
 
 	body, err := io.ReadAll(io.LimitReader(resp.Body, docsFlattenMaxBodyBytes))
@@ -376,4 +385,20 @@ func hostOf(raw string) string {
 		return ""
 	}
 	return strings.ToLower(u.Host)
+}
+
+// fetchedPDFPage flattens a crawled PDF: its extracted text, pages as
+// "## Page N" sections. It has no links to follow.
+func fetchedPDFPage(ctx context.Context, body io.Reader, pageURL string, emit func(string)) (string, string, []string, []docsFlattenAsset, bool) {
+	data, err := io.ReadAll(io.LimitReader(body, defaultDocsFlattenMaxPDFSize))
+	if err != nil {
+		emit(fmt.Sprintf("skipping %s: reading PDF: %v", pageURL, err))
+		return "", "", nil, nil, false
+	}
+	pieces, err := pdfPieces(ctx, data, pageURL, 0)
+	if err != nil || len(pieces) == 0 {
+		emit(fmt.Sprintf("skipping %s: %v", pageURL, err))
+		return "", "", nil, nil, false
+	}
+	return pieces[0].Content, pieces[0].Title, nil, nil, true
 }

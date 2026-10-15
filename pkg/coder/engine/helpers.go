@@ -187,13 +187,13 @@ func collectFiles(primary string, extras []string) []string {
 
 // readTextFileWithLimit is readFileWithLimit for a text read: a PDF yields
 // its extracted text ("--- page N ---" per page) instead of its bytes.
-func readTextFileWithLimit(path string, maxBytes int) (string, bool, error) {
+func readTextFileWithLimit(ctx context.Context, path string, maxBytes int) (string, bool, error) {
 	data, err := os.ReadFile(path) //#nosec G304 -- path supplied by user/agent through validated tool surface (boundary check upstream)
 	if err != nil {
 		return "", false, err
 	}
 	if bytes.Contains(data[:min(len(data), 1024)], []byte("%PDF-")) {
-		res, perr := pdftext.Extract(context.Background(), data, pdftext.Limits{})
+		res, perr := pdftext.Extract(ctx, data, pdftext.Limits{})
 		if perr != nil {
 			return "", false, fmt.Errorf("PDF: %w", perr)
 		}

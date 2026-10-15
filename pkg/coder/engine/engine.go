@@ -272,7 +272,7 @@ func (e *Engine) validatePathForAccess(target string, write bool) error {
 func (e *Engine) Execute(ctx context.Context, cmd string, args []string) error {
 	switch cmd {
 	case "read":
-		return e.handleRead(args)
+		return e.handleRead(ctx, args)
 	case "write":
 		e.autoCheckpoint(ctx, "write")
 		return e.handleWrite(args)

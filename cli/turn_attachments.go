@@ -203,6 +203,16 @@ func withoutAttachmentNote(content string) string {
 // takePendingInbound merges the images staged from outside the @file flow
 // (the web UI, the gateway) into a loop run's images and returns the note
 // about their saved copies, clearing both: they belong to one run.
+// takePendingInboundDocuments merges and clears the PDFs staged from outside
+// the @file flow (channels, RPC).
+func (cli *ChatCLI) takePendingInboundDocuments(docs []models.DocumentContent) []models.DocumentContent {
+	if len(cli.pendingInboundDocuments) > 0 {
+		docs = append(docs, cli.pendingInboundDocuments...)
+		cli.pendingInboundDocuments = nil
+	}
+	return docs
+}
+
 func (cli *ChatCLI) takePendingInbound(images []models.ImageContent) ([]models.ImageContent, string) {
 	if len(cli.pendingInboundImages) > 0 {
 		images = append(images, cli.pendingInboundImages...)

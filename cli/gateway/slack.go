@@ -144,7 +144,8 @@ func (s *SlackAdapter) eventsHandler(ctx context.Context, inbound chan<- Inbound
 			msg.SenderListed = s.allowed.listed(keys...)
 			s.hydrateAudio(ctx, &msg)
 			s.hydrateImages(ctx, &msg)
-			if strings.TrimSpace(msg.Text) == "" && msg.Audio == nil && msg.Image == nil {
+			hydrateDocument(ctx, &msg, s.fetchPrivate, s.logger, "slack")
+			if strings.TrimSpace(msg.Text) == "" && msg.Audio == nil && msg.Image == nil && msg.Document == nil {
 				return // audio/image download failed and there was no text
 			}
 			select {
@@ -392,6 +393,7 @@ func parseSlackEvent(body []byte) (challenge string, msg InboundMessage, hasMsg 
 	// later.
 	var audio *InboundAudio
 	var image *InboundImage
+	var document *InboundDocument
 	for _, f := range e.Files {
 		if f.URLPrivate == "" {
 			continue
@@ -401,11 +403,13 @@ func parseSlackEvent(body []byte) (challenge string, msg InboundMessage, hasMsg 
 			audio = &InboundAudio{ref: f.URLPrivate, MimeType: f.Mimetype, FileName: f.Name}
 		case image == nil && isImageMime(f.Mimetype):
 			image = &InboundImage{ref: f.URLPrivate, MimeType: f.Mimetype, FileName: f.Name}
+		case document == nil && isPDFAttachment(f.Mimetype, f.Name):
+			document = &InboundDocument{ref: f.URLPrivate, MimeType: f.Mimetype, FileName: f.Name}
 		}
 	}
 	// Reject other subtypes (edits, joins, …) and empty messages unless they
-	// carry audio or an image.
-	if audio == nil && image == nil && (e.SubType != "" || strings.TrimSpace(e.Text) == "") {
+	// carry audio, an image or a PDF.
+	if audio == nil && image == nil && document == nil && (e.SubType != "" || strings.TrimSpace(e.Text) == "") {
 		return "", InboundMessage{}, false, nil
 	}
 	return "", InboundMessage{
@@ -415,7 +419,13 @@ func parseSlackEvent(body []byte) (challenge string, msg InboundMessage, hasMsg 
 		Text:     e.Text,
 		Audio:    audio,
 		Image:    image,
+		Document: document,
 	}, true, nil
+}
+
+// fetchPrivate downloads a Slack url_private file with the bot token.
+func (s *SlackAdapter) fetchPrivate(ctx context.Context, ref string, limit int64) ([]byte, string, error) {
+	return fetchAudioBytes(ctx, s.http, ref, s.botToken, limit)
 }
 
 // hydrateAudio downloads a Slack file (url_private requires the bot token as a

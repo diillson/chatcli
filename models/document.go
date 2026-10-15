@@ -41,12 +41,17 @@ func (d DocumentContent) IsValid() bool {
 	return strings.EqualFold(d.MediaType, PDFMediaType) && len(d.Data) > 0
 }
 
-// Name returns the file name, or "document.pdf".
+// Name returns the file's base name (whatever path a client sent with it),
+// or "document.pdf".
 func (d DocumentContent) Name() string {
-	if strings.TrimSpace(d.FileName) != "" {
-		return d.FileName
+	n := strings.TrimSpace(strings.ReplaceAll(d.FileName, "\\", "/"))
+	if i := strings.LastIndexByte(n, '/'); i >= 0 {
+		n = n[i+1:]
 	}
-	return "document.pdf"
+	if n == "" || n == "." || n == ".." {
+		return "document.pdf"
+	}
+	return n
 }
 
 // EstimateDocumentTokens approximates the input tokens a document costs

@@ -116,7 +116,7 @@ func Extract(ctx context.Context, data []byte, lim Limits) (res Result, err erro
 			}
 			done <- o
 		}()
-		o.res, o.err = extract(ctx, data, lim)
+		o.res, o.err = extractPages(ctx, data, lim)
 	}()
 	select {
 	case o := <-done:
@@ -126,7 +126,7 @@ func Extract(ctx context.Context, data []byte, lim Limits) (res Result, err erro
 	}
 }
 
-func extract(ctx context.Context, data []byte, lim Limits) (Result, error) {
+func extractPages(ctx context.Context, data []byte, lim Limits) (Result, error) {
 	if !bytes.Contains(head(data), []byte("%PDF-")) {
 		return Result{}, errors.New("not a PDF file")
 	}

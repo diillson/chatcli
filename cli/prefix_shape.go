@@ -124,6 +124,11 @@ func shapeOf(history []models.Message, tools []models.ToolDefinition) prefixShap
 			continue
 		}
 		parts := []string{m.Role, m.Content, m.ToolCallID, strconv.Itoa(len(m.Images))}
+		if len(m.Documents) > 0 {
+			// Only messages that carry PDFs gain the field: every other
+			// message keeps the shape hash it always had.
+			parts = append(parts, "docs:"+strconv.Itoa(len(m.Documents)))
+		}
 		for _, tc := range m.ToolCalls {
 			args, _ := json.Marshal(tc.Arguments)
 			parts = append(parts, tc.ID, tc.Name, string(args))

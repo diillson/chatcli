@@ -258,7 +258,9 @@ func buildConverseMessages(prompt string, history []models.Message, model string
 			return
 		}
 		// Document and image blocks first (better grounding), then the text block.
-		blocks := append(docBlocks, imageBlocks...)
+		blocks := make([]bedrockruntimetypes.ContentBlock, 0, len(docBlocks)+len(imageBlocks)+1)
+		blocks = append(blocks, docBlocks...)
+		blocks = append(blocks, imageBlocks...)
 		if strings.TrimSpace(text) != "" {
 			blocks = append(blocks, &bedrockruntimetypes.ContentBlockMemberText{Value: text})
 		}

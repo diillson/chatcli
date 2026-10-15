@@ -457,6 +457,12 @@ func (cli *ChatCLI) runLoopRPC(ctx context.Context, o RPCRunOpts, fn func(contex
 			cli.pendingInboundNote = cli.saveTurnAttachments(o.Attachments.Images)
 			defer func() { cli.pendingInboundImages, cli.pendingInboundNote = prevImages, prevNote }()
 		}
+		if o.Attachments != nil && len(o.Attachments.Documents) > 0 {
+			prevDocs, prevNote := cli.pendingInboundDocuments, cli.pendingInboundNote
+			cli.pendingInboundDocuments = cli.completeDocuments(ctx, o.Attachments.Documents)
+			cli.pendingInboundNote += cli.saveTurnDocuments(o.Attachments.Documents)
+			defer func() { cli.pendingInboundDocuments, cli.pendingInboundNote = prevDocs, prevNote }()
+		}
 		// Per-session conversation swap (mirrors runChatTurnSerialized):
 		// the loop starts from the caller's history and the updated
 		// conversation is handed back through HistoryOut. Checkpoints are

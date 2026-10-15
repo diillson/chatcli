@@ -156,6 +156,12 @@ func messageHash(m models.Message) string {
 	}
 	h.Write([]byte{0})
 	h.Write([]byte(strconv.Itoa(len(m.Images))))
+	if len(m.Documents) > 0 {
+		// Only a message carrying PDFs adds to its identity; every other
+		// message hashes exactly as before.
+		h.Write([]byte{0})
+		h.Write([]byte("docs:" + strconv.Itoa(len(m.Documents))))
+	}
 	writeThinkingIdentity(h, m.Thinking)
 	return hex.EncodeToString(h.Sum(nil))
 }

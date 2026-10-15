@@ -56,6 +56,12 @@ func IsSensitivePath(absPath string) bool {
 // ReadFileContent lê o conteúdo de um arquivo, expandindo ~ para o diretório home,
 // mostrando um indicador de progresso para arquivos grandes.
 func ReadFileContent(filePath string, maxSize int64) (string, error) {
+	return ReadFileContentContext(context.Background(), filePath, maxSize)
+}
+
+// ReadFileContentContext is ReadFileContent with a context, which bounds the
+// text extraction of a PDF.
+func ReadFileContentContext(ctx context.Context, filePath string, maxSize int64) (string, error) {
 	// Definir um limite de tamanho padrão (1MB) se maxSize não for especificado
 	if maxSize == 0 {
 		maxSize = 1 * 1024 * 1024 // 1MB
@@ -95,7 +101,7 @@ func ReadFileContent(filePath string, maxSize int64) (string, error) {
 	// A PDF reads as its extracted text: the size cap applies to that text,
 	// and the file itself may be up to maxPDFFileBytes.
 	if strings.EqualFold(filepath.Ext(absPath), ".pdf") {
-		return readPDFText(absPath, info.Size(), maxSize)
+		return readPDFText(ctx, absPath, info.Size(), maxSize)
 	}
 
 	// Verificar o tamanho do arquivo
@@ -198,7 +204,7 @@ const maxPDFFileBytes = 50 << 20
 // readPDFText extracts a PDF's text ("--- page N ---" per page), capped at
 // maxChars. A scanned PDF (no text layer) says so instead of returning
 // nothing, so a context built from it is not silently empty.
-func readPDFText(path string, size, maxChars int64) (string, error) {
+func readPDFText(ctx context.Context, path string, size, maxChars int64) (string, error) {
 	if size > maxPDFFileBytes {
 		return "", fmt.Errorf("o PDF '%s' é muito grande (%.2f MB, limite de %d MB)", path, float64(size)/1024/1024, maxPDFFileBytes>>20)
 	}
@@ -206,7 +212,7 @@ func readPDFText(path string, size, maxChars int64) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("erro ao ler o arquivo: %w", err)
 	}
-	res, err := pdftext.Extract(context.Background(), data, pdftext.Limits{MaxChars: int(maxChars)})
+	res, err := pdftext.Extract(ctx, data, pdftext.Limits{MaxChars: int(maxChars)})
 	if err != nil {
 		return "", fmt.Errorf("PDF '%s': %w", filepath.Base(path), err)
 	}

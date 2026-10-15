@@ -199,10 +199,12 @@ type ChatCLI struct {
 	// run when they arrive from outside the interactive @file flow (e.g. the
 	// messaging gateway). runCoderQuery merges and clears them. Transient.
 	pendingInboundImages []models.ImageContent
-	pendingInboundNote   string      // where the saved copies of pendingInboundImages are (saveTurnAttachments)
-	failedChunks         []FileChunk // Chunks que falharam no processamento
-	lastFailedChunk      *FileChunk  // Referência ao último chunk que falhou
-	agentMode            *AgentMode  // Modo de agente
+	pendingInboundNote   string // where the saved copies of pendingInboundImages are (saveTurnAttachments)
+	// pendingInboundDocuments stages PDFs the same way (channels, RPC).
+	pendingInboundDocuments []models.DocumentContent
+	failedChunks            []FileChunk // Chunks que falharam no processamento
+	lastFailedChunk         *FileChunk  // Referência ao último chunk que falhou
+	agentMode               *AgentMode  // Modo de agente
 	// taskGraphAdapter backs the @taskgraph builtin and /taskgraph; kept on
 	// the struct so cleanup can cancel an in-flight graph run.
 	taskGraphAdapter *taskGraphAdapter

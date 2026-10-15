@@ -82,7 +82,7 @@ func DocumentsAsText(docs []models.DocumentContent) string {
 		}
 		text := strings.TrimSpace(d.Text)
 		if text == "" {
-			fmt.Fprintf(&b, "\n\n[PDF %s%s: no extractable text (a scanned document?). This model cannot read its pages; a model with native PDF input (Claude, GPT-4o or later, Gemini) can.]", d.Name(), pages)
+			fmt.Fprintf(&b, "\n\n[PDF %s%s: no extractable text (a scanned document?) and this model cannot read its pages. You do NOT know what it contains: do not guess or describe it — tell the user it could not be read and that a model with native PDF input (Claude, GPT-4o or later, Gemini) can read it.]", d.Name(), pages)
 			continue
 		}
 		fmt.Fprintf(&b, "\n\n[PDF %s%s — extracted text]\n%s\n[end of PDF %s]", d.Name(), pages, text, d.Name())
