@@ -283,8 +283,14 @@ func (cli *ChatCLI) ApplyOverrides(ctx context.Context, mgr manager.LLMManager, 
 	if provider != "" {
 		prov = strings.ToUpper(provider)
 	}
-	if model != "" {
+	switch {
+	case model != "":
 		mod = model
+	case prov != cli.Provider:
+		// A new provider without a model starts on its own default, like
+		// /provider does: the current model belongs to the old provider
+		// (--provider MOONSHOT used to send claude-sonnet-* to Moonshot).
+		mod = DefaultModelForProvider(prov)
 	}
 	if prov == cli.Provider && mod == cli.Model {
 		return nil

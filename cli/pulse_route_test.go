@@ -195,3 +195,17 @@ func TestPulseRouteIsSilentWhileOff(t *testing.T) {
 	assert.Equal(t, before, bus.Stats().Published)
 	assert.Empty(t, cliObj.pulseRoute.model, "nothing is remembered while off")
 }
+
+// --provider without --model starts the new provider on its own default
+// model, never on the old provider's.
+func TestApplyOverrides_ProviderWithoutModelUsesItsDefault(t *testing.T) {
+	cliObj, mgr := newRoutingTestCLI()
+	t.Setenv("MOONSHOT_MODEL", "kimi-k3")
+	require.NoError(t, cliObj.ApplyOverrides(context.Background(), mgr, "moonshot", ""))
+	assert.Equal(t, "MOONSHOT", cliObj.Provider)
+	assert.Equal(t, "kimi-k3", cliObj.Model)
+
+	// A model alone keeps the provider.
+	require.NoError(t, cliObj.ApplyOverrides(context.Background(), mgr, "", "kimi-k2.6"))
+	assert.Equal(t, "MOONSHOT:kimi-k2.6", cliObj.Provider+":"+cliObj.Model)
+}
