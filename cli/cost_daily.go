@@ -80,7 +80,15 @@ func (ct *CostTracker) accrueDailyLocked() {
 	// must write to the store it was scheduled for, never to whatever HOME
 	// points at 1.5s later (another tenant, another test's directory).
 	path := ct.dailySpendPath()
-	ct.dailySaveTimer = time.AfterFunc(dailySpendSaveDelay, func() { ct.saveDailySpendTo(path) })
+	gen := ct.dailySaveGen.Load()
+	ct.dailySaveTimer = time.AfterFunc(dailySpendSaveDelay, func() {
+		ct.dailySaveMu.Lock()
+		defer ct.dailySaveMu.Unlock()
+		if ct.dailySaveGen.Load() != gen {
+			return // a flush already wrote this state
+		}
+		ct.saveDailySpendTo(path)
+	})
 }
 
 // saveDailySpend persists today's spend (best-effort, atomic).
@@ -128,6 +136,12 @@ func (ct *CostTracker) FlushDailySpend() {
 		ct.dailySaveTimer = nil
 	}
 	ct.mu.Unlock()
+	// Invalidate a timer that fired but has not written yet, and wait for
+	// one mid-write: once this returns, nothing writes the file until the
+	// next accrual.
+	ct.dailySaveGen.Add(1)
+	ct.dailySaveMu.Lock()
+	defer ct.dailySaveMu.Unlock()
 	ct.saveDailySpend()
 }
 

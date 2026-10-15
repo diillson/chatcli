@@ -197,6 +197,11 @@ type CostTracker struct {
 	dailyDate      string
 	dailyBaseline  float64 // totalCostUSD already folded into dailySpentUSD
 	dailySaveTimer *time.Timer
+	// dailySaveMu serializes daily-spend writes; dailySaveGen invalidates a
+	// debounced write once a flush has written the same state, so a timer
+	// that already fired never writes after the surface shut down.
+	dailySaveMu  sync.Mutex
+	dailySaveGen atomic.Uint64
 
 	// lastAnnouncedLevel arms the one-shot proactive budget notice: a
 	// transition is reported once per escalation, not on every turn.
