@@ -213,9 +213,11 @@ func PreprocessArgs(args []string) []string {
 }
 
 func (cli *ChatCLI) RunOnce(ctx context.Context, input string, disableAnimation bool, rawOutput bool) error {
-	userInput, additionalContext, images := cli.processSpecialCommands(ctx, input)
+	userInput, additionalContext, images, docs := cli.processSpecialCommands(ctx, input)
 	images, visionDesc := cli.gateImagesForModel(ctx, images)
 	additionalContext += visionDesc
+	docs = cli.gateDocumentsForRoute(ctx, cli.Provider, cli.Model, docs)
+	additionalContext += attachedPDFNote(docs)
 
 	// Skill parity with the interactive chat turn: pinned skills and
 	// trigger/path auto-activation fire on the one-shot prompt exactly like
@@ -247,9 +249,10 @@ func (cli *ChatCLI) RunOnce(ctx context.Context, input string, disableAnimation 
 	ctx = cli.applyChatEffortHint(ctx, routeEffortForPrompt(userInput, skillEffort))
 
 	cli.history = append(cli.history, models.Message{
-		Role:    "user",
-		Content: userInput + additionalContext,
-		Images:  images,
+		Role:      "user",
+		Content:   userInput + additionalContext,
+		Images:    images,
+		Documents: docs,
 	})
 
 	// Compact history if over budget. In one-shot mode we keep the status

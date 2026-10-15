@@ -15,7 +15,7 @@ import (
 	"go.uber.org/zap"
 )
 
-func (cli *ChatCLI) processSpecialCommands(ctx context.Context, userInput string) (string, string, []models.ImageContent) {
+func (cli *ChatCLI) processSpecialCommands(ctx context.Context, userInput string) (string, string, []models.ImageContent, []models.DocumentContent) {
 	var additionalContext string
 
 	// Pre-process @path/to/file mentions into @file path/to/file
@@ -33,7 +33,7 @@ func (cli *ChatCLI) processSpecialCommands(ctx context.Context, userInput string
 	userInput, context = cli.processEnvCommand(userInput)
 	additionalContext += context
 
-	userInput, context, images := cli.processFileCommand(ctx, userInput)
+	userInput, context, images, docs := cli.processFileCommand(ctx, userInput)
 	additionalContext += context
 
 	// Everything assembled above (git/env/file context) is content the
@@ -50,7 +50,7 @@ func (cli *ChatCLI) processSpecialCommands(ctx context.Context, userInput string
 	// Remover espaços extras
 	userInput = strings.TrimSpace(userInput)
 
-	return userInput, additionalContext, images
+	return userInput, additionalContext, images, docs
 }
 
 func removeCommandAndNormalizeSpaces(userInput, command string) string {

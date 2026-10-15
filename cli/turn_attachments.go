@@ -120,13 +120,21 @@ func writeAttachment(dir, stamp string, img models.ImageContent) (string, error)
 			return "", nil
 		}
 	}
+	return writeAttachmentBytes(dir, stamp, img.Data, img.FileName, attachmentExt[mime])
+}
+
+// writeAttachmentBytes saves one attachment as a new file (never over an
+// existing one), sealed when encryption at rest is on, readable by the
+// owner only. The name is the stamp, random hex and a sanitized stem of
+// the name the user gave; ext comes from the content, never from that name.
+func writeAttachmentBytes(dir, stamp string, raw []byte, fileName, ext string) (string, error) {
 	var rnd [4]byte
 	if _, err := rand.Read(rnd[:]); err != nil {
 		return "", err
 	}
-	name := stamp + "-" + hex.EncodeToString(rnd[:]) + "-" + attachmentStem(img.FileName) + attachmentExt[mime]
+	name := stamp + "-" + hex.EncodeToString(rnd[:]) + "-" + attachmentStem(fileName) + ext
 	path := filepath.Join(dir, name)
-	data, err := atrest.SealAt(path, img.Data)
+	data, err := atrest.SealAt(path, raw)
 	if err != nil {
 		return "", err
 	}
@@ -184,6 +192,9 @@ func attachmentDisplayName(img models.ImageContent) string {
 // the places that summarize what the user wrote (the session title).
 func withoutAttachmentNote(content string) string {
 	if i := strings.Index(content, attachmentNoteHeader); i >= 0 {
+		return strings.TrimSpace(content[:i])
+	}
+	if i := strings.Index(content, documentNoteHeader); i >= 0 {
 		return strings.TrimSpace(content[:i])
 	}
 	return content

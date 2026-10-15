@@ -35,7 +35,16 @@ func (e *Engine) handleRead(args []string) error {
 			e.printf("❌ BLOCKED %s: %v\n", f, err)
 			continue
 		}
-		content, truncated, err := readFileWithLimit(f, *maxBytes)
+		var content string
+		var truncated bool
+		var err error
+		if strings.EqualFold(*encoding, "base64") {
+			content, truncated, err = readFileWithLimit(f, *maxBytes)
+		} else {
+			// A PDF reads as its extracted text, page by page: the raw
+			// bytes are unreadable to a model.
+			content, truncated, err = readTextFileWithLimit(f, *maxBytes)
+		}
 		if err != nil {
 			e.printf("❌ ERROR READING '%s': %v\n", f, err)
 			continue

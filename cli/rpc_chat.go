@@ -52,7 +52,8 @@ type RPCChatOpts struct {
 
 // TurnAttachments are the binary inputs of one turn.
 type TurnAttachments struct {
-	Images []models.ImageContent
+	Images    []models.ImageContent
+	Documents []models.DocumentContent // PDFs
 }
 
 // ChunkSink receives streamed reply text.
@@ -127,7 +128,7 @@ func (cli *ChatCLI) runChatTurnSerialized(
 	// Same pre-flight as the REPL turn: @file/@git/… special contexts, vision
 	// gating, cross-channel hub pull, token-aware compaction (this replaces
 	// the old hard 30-message cap).
-	input, additionalContext, images := cli.processSpecialCommands(ctx, userInput)
+	input, additionalContext, images, docs := cli.processSpecialCommands(ctx, userInput)
 	if o.Attachments != nil && len(o.Attachments.Images) > 0 {
 		images = append(images, o.Attachments.Images...)
 		// The saved copies' paths ride in the turn, so the reference
@@ -135,15 +136,21 @@ func (cli *ChatCLI) runChatTurnSerialized(
 		// the conversation continued in a loop or in the terminal).
 		additionalContext += cli.saveTurnAttachments(o.Attachments.Images)
 	}
+	if o.Attachments != nil && len(o.Attachments.Documents) > 0 {
+		docs = append(docs, o.Attachments.Documents...)
+		additionalContext += cli.saveTurnDocuments(o.Attachments.Documents)
+	}
 	// The gate judges the model the turn is routed to, not the session's.
 	gateProvider, gateModel := cli.rpcChatRoute(o)
 	images, visionDesc := cli.gateImagesForRoute(ctx, gateProvider, gateModel, images)
 	additionalContext += visionDesc
+	docs = cli.gateDocumentsForRoute(ctx, gateProvider, gateModel, docs)
+	additionalContext += attachedPDFNote(docs)
 	cli.syncHubContext(ctx)
 	cli.compactHistoryIfNeeded(ctx)
 
 	assembly := cli.assembleChatSystemPrompt(ctx, input, additionalContext)
-	tempHistory := cli.buildChatTempHistoryWithContext(assembly.parts, assembly.turnContext, input, additionalContext, images)
+	tempHistory := cli.buildChatTempHistoryWithContext(assembly.parts, assembly.turnContext, input, additionalContext, images, docs...)
 	turnCtx := turnContextText(assembly.turnContext)
 
 	activeClient, resProvider, resModel, err := cli.resolveRPCChatClient(assembly.modelHint, o)
@@ -176,7 +183,7 @@ func (cli *ChatCLI) runChatTurnSerialized(
 	// the turn outright where the REPL agent loop recovered.
 	rec := cli.newOverflowRecovery("rpc", nil)
 	for err != nil && cli.recoverOverflow(ctx, rec, err) {
-		tempHistory = cli.buildChatTempHistoryWithContext(assembly.parts, assembly.turnContext, input, additionalContext, images)
+		tempHistory = cli.buildChatTempHistoryWithContext(assembly.parts, assembly.turnContext, input, additionalContext, images, docs...)
 		reply, usage, err = send()
 	}
 	if err != nil {
@@ -189,7 +196,7 @@ func (cli *ChatCLI) runChatTurnSerialized(
 		reply = cleaned
 	}
 
-	userMessage := models.Message{Role: "user", Content: input + additionalContext, Images: images}
+	userMessage := models.Message{Role: "user", Content: input + additionalContext, Images: images, Documents: docs}
 	if turnCtx != "" {
 		cli.history = append(cli.history, models.TurnContextMessage(turnCtx))
 	}

@@ -1,6 +1,8 @@
 package engine
 
 import (
+	"bytes"
+	"context"
 	"encoding/base64"
 	"flag"
 	"fmt"
@@ -11,6 +13,8 @@ import (
 	"runtime"
 	"strings"
 	"unicode/utf8"
+
+	"github.com/diillson/chatcli/pkg/pdftext"
 )
 
 // pathFlagNames are the path-bearing string flags whose shell-style references
@@ -179,6 +183,30 @@ func collectFiles(primary string, extras []string) []string {
 		files = append(files, strings.Trim(f, "\"'"))
 	}
 	return files
+}
+
+// readTextFileWithLimit is readFileWithLimit for a text read: a PDF yields
+// its extracted text ("--- page N ---" per page) instead of its bytes.
+func readTextFileWithLimit(path string, maxBytes int) (string, bool, error) {
+	data, err := os.ReadFile(path) //#nosec G304 -- path supplied by user/agent through validated tool surface (boundary check upstream)
+	if err != nil {
+		return "", false, err
+	}
+	if bytes.Contains(data[:min(len(data), 1024)], []byte("%PDF-")) {
+		res, perr := pdftext.Extract(context.Background(), data, pdftext.Limits{})
+		if perr != nil {
+			return "", false, fmt.Errorf("PDF: %w", perr)
+		}
+		text := fmt.Sprintf("[PDF %s — %d pages, extracted text]\n%s", filepath.Base(path), res.TotalPages, res.Text())
+		if res.Scanned {
+			text = fmt.Sprintf("[PDF %s — %d pages, no extractable text: a scanned document. Open it with @view to read its pages.]", filepath.Base(path), res.TotalPages)
+		}
+		data = []byte(text)
+	}
+	if maxBytes > 0 && len(data) > maxBytes {
+		return string(data[:maxBytes]), true, nil
+	}
+	return string(data), false, nil
 }
 
 func readFileWithLimit(path string, maxBytes int) (string, bool, error) {
