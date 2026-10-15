@@ -247,6 +247,8 @@ func (p *BuiltinDocsFlattenPlugin) ExecuteWithStream(ctx context.Context, args [
 	var imageReport *docsImageReport
 	if cfg.Images != docsImagesMarkers {
 		chunks, imageReport = describeDocsImages(ctx, chunks, cfg, root, nil, currentDocsImageDescriber(), emit)
+	} else {
+		imageReport = markersImageReport(chunks)
 	}
 
 	rendered, err := renderDocsFlatten(chunks, cfg.Format)

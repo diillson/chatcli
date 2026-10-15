@@ -435,3 +435,18 @@ func TestHTMLVisuals(t *testing.T) {
 		t.Fatalf("assets = %+v", assets)
 	}
 }
+
+// The default markers run calls no model but says the images were left
+// undescribed and how to describe them.
+func TestDocsFlatten_MarkersSaysImagesUndescribed(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	root := writeDocsFixture(t)
+	fake := &fakeDescriber{}
+	SetDocsImageDescriber(fake)
+	t.Cleanup(func() { SetDocsImageDescriber(nil) })
+
+	_, summary := flattenFixture(t, `{"root":"`+filepath.ToSlash(root)+`","format":"jsonl","output":"OUT"}`)
+	if fake.calls.Load() != 0 || !strings.Contains(summary, "markers only") || !strings.Contains(summary, "images=describe") {
+		t.Fatalf("calls=%d summary=%q", fake.calls.Load(), summary)
+	}
+}
