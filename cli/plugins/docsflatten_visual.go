@@ -20,6 +20,7 @@ package plugins
 
 import (
 	"fmt"
+	"net/url"
 	"path"
 	"regexp"
 	"strings"
@@ -50,10 +51,12 @@ const (
 
 var (
 	// ![alt](src "title") — the title is optional; src may be <wrapped>.
-	mdImageRe = regexp.MustCompile(`!\[([^\]]*)\]\(\s*<?([^)\s>]+)>?(?:\s+["']([^"']*)["'])?\s*\)`)
+	mdImageRe = regexp.MustCompile(`!\[([^\]]*)\]\(\s*(?:<([^<>\n]+)>|([^)\s]+))(?:\s+["']([^"']*)["'])?\s*\)`)
+	// Obsidian / wiki embeds: ![[diagram.png]], ![[img/a.png|alt or width]].
+	wikiImageRe = regexp.MustCompile(`!\[\[([^\]|#\n]+)(?:#[^\]|\n]*)?(?:\|([^\]\n]*))?\]\]`)
 	// ![alt][ref] — reference-style; the definition is resolved per file.
 	mdImageRefRe = regexp.MustCompile(`!\[([^\]]*)\]\[([^\]]*)\]`)
-	mdRefDefRe   = regexp.MustCompile(`(?m)^\s*\[([^\]]+)\]:\s*<?(\S+?)>?(?:\s+["'(]([^"')]*)["')])?\s*$`)
+	mdRefDefRe   = regexp.MustCompile(`(?m)^\s*\[([^\]]+)\]:\s*(?:<([^<>\n]+)>|(\S+))(?:\s+["'(]([^"')]*)["')])?\s*$`)
 	// <img …> and capitalized MDX components that carry an image or caption
 	// (<Image src alt/>, <Frame caption>, <Figure>, <ThemedImage sources>).
 	htmlImgRe    = regexp.MustCompile(`(?is)<img\b([^>]*)>`)
@@ -90,7 +93,7 @@ func annotateVisuals(content, relPath string) (string, []docsFlattenAsset) {
 	notes := &visualNotes{}
 	refs := map[string][2]string{}
 	for _, m := range mdRefDefRe.FindAllStringSubmatch(content, -1) {
-		refs[strings.ToLower(m[1])] = [2]string{m[2], m[3]}
+		refs[strings.ToLower(m[1])] = [2]string{m[2] + m[3], m[4]}
 	}
 
 	var out strings.Builder
@@ -195,7 +198,19 @@ func annotateProse(text, relPath string, refs map[string][2]string, notes *visua
 	})
 	text = mdImageRe.ReplaceAllStringFunc(text, func(s string) string {
 		m := mdImageRe.FindStringSubmatch(s)
-		return imageMarker(m[1], m[3], m[2], relPath, notes)
+		return imageMarker(m[1], m[4], m[2]+m[3], relPath, notes)
+	})
+	text = wikiImageRe.ReplaceAllStringFunc(text, func(s string) string {
+		m := wikiImageRe.FindStringSubmatch(s)
+		target := strings.TrimSpace(m[1])
+		alt := strings.TrimSpace(m[2])
+		if !describableExts[strings.ToLower(path.Ext(target))] && strings.ToLower(path.Ext(target)) != ".svg" {
+			return s // an embedded note or PDF, not an image
+		}
+		if alt == "" || isDimension(alt) {
+			alt = strings.TrimSuffix(path.Base(target), path.Ext(target))
+		}
+		return imageMarker(alt, "", target, relPath, notes)
 	})
 	text = mdImageRefRe.ReplaceAllStringFunc(text, func(s string) string {
 		m := mdImageRefRe.FindStringSubmatch(s)
@@ -286,6 +301,11 @@ func resolveAssetPath(relPath, src string) string {
 	}
 	if i := strings.IndexAny(src, "?#"); i >= 0 {
 		src = src[:i]
+	}
+	// Markdown writes spaces and accents percent-encoded
+	// (modelo%20de%20c%C3%A9lulas.png); the file on disk is not.
+	if dec, err := url.PathUnescape(src); err == nil {
+		src = dec
 	}
 	if strings.HasPrefix(src, "/") {
 		return strings.TrimPrefix(path.Clean(src), "/")
@@ -379,4 +399,18 @@ func chunkSectionFenceAware(sec string, maxChars int) []string {
 		chunks = append(chunks, buf.String())
 	}
 	return chunks
+}
+
+// isDimension reports whether a wiki-embed option is a size ("300",
+// "300x200") rather than alt text.
+func isDimension(s string) bool {
+	if s == "" {
+		return false
+	}
+	for _, r := range s {
+		if (r < '0' || r > '9') && r != 'x' {
+			return false
+		}
+	}
+	return true
 }

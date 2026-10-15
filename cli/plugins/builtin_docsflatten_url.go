@@ -82,6 +82,9 @@ func (p *BuiltinDocsFlattenPlugin) executeURL(ctx context.Context, cfg docsFlatt
 	} else {
 		imageReport = markersImageReport(chunks)
 	}
+	if imageReport.NeedConfirm > 0 {
+		return imageReport.confirmRequest(), nil
+	}
 
 	rendered, err := renderDocsFlatten(chunks, cfg.Format)
 	if err != nil {

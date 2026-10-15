@@ -6,6 +6,7 @@
 package cmd
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"reflect"
@@ -13,6 +14,7 @@ import (
 	"testing"
 
 	"github.com/diillson/chatcli/cli"
+	"github.com/diillson/chatcli/cli/plugins"
 )
 
 // fakeToolRunner scripts the toolRunner surface and records the call made.
@@ -23,17 +25,20 @@ type fakeToolRunner struct {
 	gotName string
 	gotJSON string
 	gotArgv []string
+	direct  bool // the call carried the user's direct-use mark
 	viaJSON bool
 	viaArgv bool
 }
 
 func (f *fakeToolRunner) ListAllRPCTools() []cli.RPCToolInfo { return f.tools }
-func (f *fakeToolRunner) RunAnyRPCTool(_ context.Context, name, args string) (string, error) {
+func (f *fakeToolRunner) RunAnyRPCTool(ctx context.Context, name, args string) (string, error) {
 	f.viaJSON, f.gotName, f.gotJSON = true, name, args
+	f.direct = plugins.IsDirectUse(ctx)
 	return f.out, f.err
 }
-func (f *fakeToolRunner) RunAnyRPCToolArgv(_ context.Context, name string, argv []string) (string, error) {
+func (f *fakeToolRunner) RunAnyRPCToolArgv(ctx context.Context, name string, argv []string) (string, error) {
 	f.viaArgv, f.gotName, f.gotArgv = true, name, append([]string(nil), argv...)
+	f.direct = plugins.IsDirectUse(ctx)
 	return f.out, f.err
 }
 
@@ -138,5 +143,18 @@ func TestParseToolInvocation(t *testing.T) {
 				t.Fatalf("parseToolInvocation(%v) = %+v, want %+v", tc.args, got, tc.want)
 			}
 		})
+	}
+}
+
+// A tool the user runs with `chatcli tool` is marked as their own call, so
+// a tool that asks a model caller to confirm a large spend runs directly.
+func TestRunToolWith_MarksDirectUse(t *testing.T) {
+	f := &fakeToolRunner{out: "ok"}
+	var buf bytes.Buffer
+	if err := runToolWith(context.Background(), f, []string{"@docs-flatten", `{"root":"."}`}, &buf); err != nil {
+		t.Fatal(err)
+	}
+	if !f.direct {
+		t.Fatal("chatcli tool must mark the call as the user's own")
 	}
 }

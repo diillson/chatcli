@@ -12,8 +12,12 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"golang.org/x/image/bmp"
+	"golang.org/x/image/tiff"
 	"image"
 	"image/color"
+	"image/jpeg"
 	"image/png"
 	"net/url"
 	"os"
@@ -283,6 +287,7 @@ func TestDocsFlatten_VisualsEndToEnd(t *testing.T) {
 type fakeDescriber struct {
 	calls atomic.Int32
 	fail  bool
+	alt   string // the alt text the prompt must carry ("" = the fixture's)
 }
 
 func (f *fakeDescriber) DescribeImage(_ context.Context, prompt string, img models.ImageContent) (string, string, error) {
@@ -290,7 +295,11 @@ func (f *fakeDescriber) DescribeImage(_ context.Context, prompt string, img mode
 	if f.fail {
 		return "", "", errors.New("vision down")
 	}
-	if img.MediaType != "image/png" || !strings.Contains(prompt, "Transcribe ALL visible text") || !strings.Contains(prompt, "alt text: Order architecture") {
+	alt := f.alt
+	if alt == "" {
+		alt = "alt text: Order architecture"
+	}
+	if img.MediaType != "image/png" || !strings.Contains(prompt, "Transcribe ALL visible text") || !strings.Contains(prompt, alt) {
 		return "", "", errors.New("unexpected request")
 	}
 	return "Architecture diagram.\n- App → Orders API: HTTPS\nText: Orders API", "fake/vision-1", nil
@@ -379,11 +388,51 @@ func TestLoadImageJob_Filters(t *testing.T) {
 		"diagram.svg":      "svg (its text is already in the corpus)",
 		"https://x/y.png":  "remote (not downloaded)",
 		"../outside.png":   "not found",
+		"photo.heic":       "unsupported format .heic",
+		"big-icons.png":    "", // a large "icons" image is content, not a logo
+		"scan.bmp":         "",
+		"scan.tiff":        "",
+		"foto.jfif":        "",
 	}
+	writePNG(t, filepath.Join(root, "big-icons.png"), 900, 600)
+	writeConverted(t, filepath.Join(root, "scan.bmp"), "bmp")
+	writeConverted(t, filepath.Join(root, "scan.tiff"), "tiff")
+	writeConverted(t, filepath.Join(root, "foto.jfif"), "jpeg")
 	for asset, want := range cases {
-		if got := loadImageJob(&docsImageJob{asset: asset}, root, nil); got != want {
+		j := &docsImageJob{asset: asset}
+		if got := loadImageJob(j, root, nil, nil); got != want {
 			t.Errorf("%s: reason %q, want %q", asset, got, want)
 		}
+		if want == "" && (asset == "scan.bmp" || asset == "scan.tiff") && j.mime != "image/png" {
+			t.Errorf("%s must reach the model as PNG, got %q", asset, j.mime)
+		}
+	}
+}
+
+// writeConverted writes a noisy 200x150 image in format (bmp, tiff, jpeg).
+func writeConverted(t *testing.T, p, format string) {
+	t.Helper()
+	img := image.NewRGBA(image.Rect(0, 0, 200, 150))
+	for x := 0; x < 200; x++ {
+		for y := 0; y < 150; y++ {
+			img.Set(x, y, color.RGBA{uint8(x * y), uint8(x + y), uint8(x ^ y), 255})
+		}
+	}
+	var buf bytes.Buffer
+	var err error
+	switch format {
+	case "bmp":
+		err = bmp.Encode(&buf, img)
+	case "tiff":
+		err = tiff.Encode(&buf, img, nil)
+	default:
+		err = jpeg.Encode(&buf, img, nil)
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(p, buf.Bytes(), 0o600); err != nil {
+		t.Fatal(err)
 	}
 }
 
@@ -507,5 +556,130 @@ func TestDocsFlatten_HelpAndSchemaDocumentImageDefault(t *testing.T) {
 	}
 	if !found {
 		t.Fatalf("schema images flag does not document the default:\n%s", p.Schema())
+	}
+}
+
+// Every common way of writing an image reaches the corpus and resolves to
+// the file on disk: percent-encoded names, <paths with spaces>, reference
+// definitions in angle brackets and Obsidian embeds (found by file name).
+func TestDocsFlatten_ImageReferenceForms(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	root := t.TempDir()
+	for i, f := range []string{"arquitetura/img/modelo de células.png", "arquitetura/img/fluxo pedidos.png",
+		"anexos/vault-diagram.png", "arquitetura/img/ref def.png"} {
+		p := filepath.Join(root, filepath.FromSlash(f))
+		if err := os.MkdirAll(filepath.Dir(p), 0o750); err != nil {
+			t.Fatal(err)
+		}
+		writePNG(t, p, 200+i, 120) // distinct content: each one is described
+	}
+	doc := "# Células\n\n![modelo de células](img/modelo%20de%20c%C3%A9lulas.png)\n\n" +
+		"![fluxo](<img/fluxo pedidos.png> \"Fluxo\")\n\n![[vault-diagram.png|300]]\n\n![[notas.md]]\n\n" +
+		"![def][r]\n\n[r]: <img/ref def.png>\n"
+	if err := os.WriteFile(filepath.Join(root, "arquitetura", "celulas.md"), []byte(doc), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	fake := &fakeDescriber{alt: "alt text: "}
+	SetDocsImageDescriber(fake)
+	t.Cleanup(func() { SetDocsImageDescriber(nil) })
+
+	chunks, summary := flattenFixture(t, `{"root":"`+filepath.ToSlash(root)+`","format":"jsonl","output":"OUT"}`)
+	if !strings.Contains(summary, "4 referenced, 4 described") || strings.Contains(summary, "not found") {
+		t.Fatalf("summary = %q", summary)
+	}
+	content := chunks[0].Content
+	for _, want := range []string{"[image: modelo de células — arquitetura/img/modelo de células.png",
+		"[image: fluxo — Fluxo — arquitetura/img/fluxo pedidos.png", "[image: vault-diagram — ", "[image: def — arquitetura/img/ref def.png"} {
+		if !strings.Contains(content, want) {
+			t.Errorf("missing %q in:\n%s", want, content)
+		}
+	}
+	if !strings.Contains(content, "![[notas.md]]") {
+		t.Error("an embedded note is not an image and stays as written")
+	}
+}
+
+func TestImageNameIndex_UniqueOnly(t *testing.T) {
+	root := t.TempDir()
+	for _, f := range []string{"a/one.png", "b/dup.png", "c/dup.png", ".git/hidden.png"} {
+		p := filepath.Join(root, filepath.FromSlash(f))
+		_ = os.MkdirAll(filepath.Dir(p), 0o750)
+		_ = os.WriteFile(p, []byte("x"), 0o600)
+	}
+	x := &imageNameIndex{root: root}
+	if got := x.unique("ONE.png"); got != filepath.Join(root, "a", "one.png") {
+		t.Errorf("unique = %q", got)
+	}
+	if x.unique("dup.png") != "" || x.unique("hidden.png") != "" || x.unique("none.png") != "" {
+		t.Error("ambiguous, hidden and missing names do not resolve")
+	}
+	if !isDimension("300x200") || isDimension("alt text") || isDimension("") {
+		t.Error("isDimension")
+	}
+}
+
+// manyImagesFixture writes a doc referencing n distinct images.
+func manyImagesFixture(t *testing.T, n, height int) string {
+	t.Helper()
+	root := t.TempDir()
+	var doc strings.Builder
+	doc.WriteString("# Galeria\n\n")
+	if err := os.MkdirAll(filepath.Join(root, "img"), 0o750); err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < n; i++ {
+		writePNG(t, filepath.Join(root, "img", fmt.Sprintf("tela-%02d.png", i)), 120+i, height) // height keeps galleries distinct
+		fmt.Fprintf(&doc, "![tela %d](img/tela-%02d.png)\n\n", i, i)
+	}
+	if err := os.WriteFile(filepath.Join(root, "galeria.md"), []byte(doc.String()), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return root
+}
+
+// A model calling the tool on many images stops before spending and tells
+// it to ask the user; the user's answer (confirmImages, maxImages) or the
+// user's own `chatcli tool` call runs it. No default cap remains.
+func TestDocsFlatten_LargeDescribeAsksTheUserFirst(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	root := manyImagesFixture(t, 25, 90)
+	fake := &fakeDescriber{alt: "alt text: "}
+	SetDocsImageDescriber(fake)
+	t.Cleanup(func() { SetDocsImageDescriber(nil) })
+	out := filepath.Join(t.TempDir(), "corpus.jsonl")
+	args := func(extra string) []string {
+		return []string{`{"root":"` + filepath.ToSlash(root) + `","format":"jsonl","output":"` + filepath.ToSlash(out) + `"` + extra + `}`}
+	}
+	p := NewBuiltinDocsFlattenPlugin()
+
+	res, err := p.Execute(context.Background(), args(""))
+	if err != nil || fake.calls.Load() != 0 || !strings.Contains(res, "STOPPED") || !strings.Contains(res, "25 image(s)") ||
+		!strings.Contains(res, "ASK THE USER") || !strings.Contains(res, "confirmImages=true") {
+		t.Fatalf("calls=%d err=%v res=%s", fake.calls.Load(), err, res)
+	}
+	if _, statErr := os.Stat(out); !os.IsNotExist(statErr) {
+		t.Fatal("a stopped run must not write the corpus")
+	}
+
+	res, _ = p.Execute(context.Background(), args(`,"maxImages":5`))
+	if fake.calls.Load() != 5 || !strings.Contains(res, "over maxImages=5") {
+		t.Fatalf("maxImages=5: calls=%d res=%s", fake.calls.Load(), res)
+	}
+
+	// 5 are cached now: 20 left, at the threshold, so it runs without asking.
+	res, _ = p.Execute(context.Background(), args(""))
+	if fake.calls.Load() != 25 || !strings.Contains(res, "25 described (5 from cache)") {
+		t.Fatalf("cached images do not count toward the question: calls=%d res=%s", fake.calls.Load(), res)
+	}
+
+	other := manyImagesFixture(t, 22, 91)
+	res, _ = p.Execute(WithDirectUse(context.Background()), []string{`{"root":"` + filepath.ToSlash(other) + `","format":"jsonl"}`})
+	if strings.Contains(res, "STOPPED") || fake.calls.Load() != 47 {
+		t.Fatalf("the user's own call runs directly: calls=%d", fake.calls.Load())
+	}
+	third := manyImagesFixture(t, 23, 92)
+	res, _ = p.Execute(context.Background(), []string{`{"root":"` + filepath.ToSlash(third) + `","format":"jsonl","confirmImages":true}`})
+	if strings.Contains(res, "STOPPED") || fake.calls.Load() != 70 {
+		t.Fatalf("confirmImages=true runs: calls=%d", fake.calls.Load())
 	}
 }

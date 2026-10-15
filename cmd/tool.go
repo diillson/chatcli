@@ -23,6 +23,7 @@ import (
 	"strings"
 
 	"github.com/diillson/chatcli/cli"
+	"github.com/diillson/chatcli/cli/plugins"
 	"github.com/diillson/chatcli/i18n"
 	"github.com/diillson/chatcli/llm/manager"
 	"go.uber.org/zap"
@@ -82,6 +83,9 @@ func RunTool(ctx context.Context, args []string, mgr manager.LLMManager, logger 
 
 // runToolWith is the boot-free body of RunTool.
 func runToolWith(ctx context.Context, r toolRunner, args []string, w io.Writer) error {
+	// The user typed this call: tools that ask a model-driven caller to
+	// confirm a large spend first (describing hundreds of images) run it.
+	ctx = plugins.WithDirectUse(ctx)
 	inv := parseToolInvocation(args)
 	if inv.List {
 		printToolCatalog(w, r.ListAllRPCTools())
