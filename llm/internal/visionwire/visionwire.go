@@ -91,11 +91,11 @@ func DataURL(ic models.ImageContent) string {
 // docs are PDFs this model reads natively (see SplitDocuments); each becomes
 // a file part.
 func OpenAIContent(text string, imgs []models.ImageContent) Content {
-	return openAIContent(text, imgs, nil)
+	return openAIContentWithDocs(text, imgs, nil)
 }
 
-// openAIContent is OpenAIContent with PDF documents.
-func openAIContent(text string, imgs []models.ImageContent, docs []models.DocumentContent) Content {
+// openAIContentWithDocs is OpenAIContent with PDF documents.
+func openAIContentWithDocs(text string, imgs []models.ImageContent, docs []models.DocumentContent) Content {
 	valid := validImages(imgs)
 	if len(valid) == 0 && len(docs) == 0 {
 		return textContent(text)
@@ -124,11 +124,11 @@ func openAIContent(text string, imgs []models.ImageContent, docs []models.Docume
 // docs are PDFs this model reads natively; each becomes a document block,
 // placed first like images.
 func AnthropicContent(text string, imgs []models.ImageContent) Content {
-	return anthropicContent(text, imgs, nil)
+	return anthropicContentWithDocs(text, imgs, nil)
 }
 
-// anthropicContent is AnthropicContent with PDF documents.
-func anthropicContent(text string, imgs []models.ImageContent, docs []models.DocumentContent) Content {
+// anthropicContentWithDocs is AnthropicContent with PDF documents.
+func anthropicContentWithDocs(text string, imgs []models.ImageContent, docs []models.DocumentContent) Content {
 	valid := validImages(imgs)
 	if len(valid) == 0 && len(docs) == 0 {
 		return textContent(text)
@@ -141,11 +141,11 @@ func anthropicContent(text string, imgs []models.ImageContent, docs []models.Doc
 // [image blocks..., {type:text,text}], matching the hand-built oauthTextBlock
 // shape so the wire bytes are unchanged for text-only turns.
 func AnthropicOAuthContent(text string, imgs []models.ImageContent) Content {
-	return anthropicOAuthContent(text, imgs, nil)
+	return anthropicOAuthContentWithDocs(text, imgs, nil)
 }
 
-// anthropicOAuthContent is AnthropicOAuthContent with PDF documents.
-func anthropicOAuthContent(text string, imgs []models.ImageContent, docs []models.DocumentContent) Content {
+// anthropicOAuthContentWithDocs is AnthropicOAuthContent with PDF documents.
+func anthropicOAuthContentWithDocs(text string, imgs []models.ImageContent, docs []models.DocumentContent) Content {
 	return Content{parts: anthropicBlocks(text, validImages(imgs), docs), array: true}
 }
 
@@ -260,11 +260,11 @@ func anthropicImageBlock(ic models.ImageContent) map[string]interface{} {
 // the parts array using the Responses item types (input_text + input_image,
 // where image_url is a data URL string).
 func ResponsesUserContent(text string, imgs []models.ImageContent) Content {
-	return responsesUserContent(text, imgs, nil)
+	return responsesUserContentWithDocs(text, imgs, nil)
 }
 
-// responsesUserContent is ResponsesUserContent with PDF documents.
-func responsesUserContent(text string, imgs []models.ImageContent, docs []models.DocumentContent) Content {
+// responsesUserContentWithDocs is ResponsesUserContent with PDF documents.
+func responsesUserContentWithDocs(text string, imgs []models.ImageContent, docs []models.DocumentContent) Content {
 	valid := validImages(imgs)
 	if len(valid) == 0 && len(docs) == 0 {
 		return textContent(text)
@@ -290,11 +290,11 @@ func responsesUserContent(text string, imgs []models.ImageContent, docs []models
 // single-text-part path). With images it appends an inline_data part per image.
 // Gemini requires inline bytes, so URL-only images are skipped.
 func GeminiParts(text string, imgs []models.ImageContent) Content {
-	return geminiParts(text, imgs, nil)
+	return geminiPartsWithDocs(text, imgs, nil)
 }
 
-// geminiParts is GeminiParts with PDF documents.
-func geminiParts(text string, imgs []models.ImageContent, docs []models.DocumentContent) Content {
+// geminiPartsWithDocs is GeminiParts with PDF documents.
+func geminiPartsWithDocs(text string, imgs []models.ImageContent, docs []models.DocumentContent) Content {
 	valid := validImages(imgs)
 	parts := make([]any, 0, len(valid)+len(docs)+1)
 	if strings.TrimSpace(text) != "" || (len(valid) == 0 && len(docs) == 0) {

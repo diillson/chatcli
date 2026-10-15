@@ -179,31 +179,31 @@ func BedrockDocumentName(name string) string {
 // otherwise.
 func OpenAIMessageContent(provider, model string, msg models.Message) Content {
 	text, docs := SplitDocuments(provider, model, msg.Content, msg.Documents)
-	return openAIContent(text, msg.Images, docs)
+	return openAIContentWithDocs(text, msg.Images, docs)
 }
 
 // AnthropicMessageContent is AnthropicContent for a history message.
 func AnthropicMessageContent(provider, model string, msg models.Message) Content {
 	text, docs := SplitDocuments(provider, model, msg.Content, msg.Documents)
-	return anthropicContent(text, msg.Images, docs)
+	return anthropicContentWithDocs(text, msg.Images, docs)
 }
 
 // AnthropicOAuthMessageContent is AnthropicOAuthContent for a history message.
 func AnthropicOAuthMessageContent(provider, model string, msg models.Message) Content {
 	text, docs := SplitDocuments(provider, model, msg.Content, msg.Documents)
-	return anthropicOAuthContent(text, msg.Images, docs)
+	return anthropicOAuthContentWithDocs(text, msg.Images, docs)
 }
 
 // ResponsesMessageContent is ResponsesUserContent for a history message.
 func ResponsesMessageContent(provider, model string, msg models.Message) Content {
 	text, docs := SplitDocuments(provider, model, msg.Content, msg.Documents)
-	return responsesUserContent(text, msg.Images, docs)
+	return responsesUserContentWithDocs(text, msg.Images, docs)
 }
 
 // GeminiMessageParts is GeminiParts for a history message.
 func GeminiMessageParts(provider, model string, msg models.Message) Content {
 	text, docs := SplitDocuments(provider, model, msg.Content, msg.Documents)
-	return geminiParts(text, msg.Images, docs)
+	return geminiPartsWithDocs(text, msg.Images, docs)
 }
 
 // TextWithDocuments is a message's text with its PDFs folded in as
