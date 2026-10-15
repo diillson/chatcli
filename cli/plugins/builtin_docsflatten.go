@@ -81,10 +81,13 @@ type docsFlattenArgs struct {
 	// silently start pulling in stray source/config files.
 	Kind    string
 	MaxSize int // skip files larger than this many bytes (0 = default 1 MiB)
-	// Images: "markers" (default — image references become alt/caption/path
-	// markers and diagrams get text summaries), "describe" (also describe
-	// the referenced images with a vision model) or "estimate" (count them
-	// and the tokens describe would spend, without calling a model).
+	// Images: "describe" (default — image references become alt/caption/path
+	// markers, diagrams get text summaries, and the referenced images are
+	// described with a vision model so a corpus does not lose what its
+	// pictures show), "markers" (markers and summaries only, no model call)
+	// or "estimate" (count the images and the tokens describe would spend,
+	// without calling a model). With no vision model in the session,
+	// describe keeps the markers and says so.
 	Images    string
 	MaxImages int // cap on images described per run (0 = default 50)
 }
@@ -138,12 +141,14 @@ Flags (flat JSON or {"cmd":"flatten","args":{...}} envelope):
   include   comma-separated globs to include (** supported, e.g. src/**/*.go)
   exclude   comma-separated globs to exclude
   stripFrontMatter  remove front matter, keep title as heading (default: true)
-  images    markers | describe | estimate (default: markers). markers = image
-            references become [image: alt — path] markers and diagrams
-            (mermaid, PlantUML, dot, d2, draw.io, SVG) get a text summary of
-            their flows. describe = ALSO describe each referenced image with
-            the session's vision model (cached by content) into its own
-            chunk. estimate = count images and tokens, no model call.
+  images    describe | markers | estimate (default: describe). Diagrams
+            (mermaid, PlantUML, dot, d2, draw.io, SVG) always get a text
+            summary of their flows and image references become
+            [image: alt — path] markers. describe = ALSO describe each
+            referenced image (PNG, JPEG…) with the session's vision model
+            (cached by content) into its own chunk; without a vision model
+            the markers are kept and the summary says so. markers = no model
+            call. estimate = count images and tokens, no model call.
   maxImages cap on images described per run (default: 50)
   output    file to write the result to. STRONGLY preferred for large corpora
             — without it the flattened content is returned (and truncated)
@@ -151,7 +156,7 @@ Flags (flat JSON or {"cmd":"flatten","args":{...}} envelope):
 }
 
 // Version is semver. 2.x marks the builtin port of the 1.x external example.
-func (*BuiltinDocsFlattenPlugin) Version() string { return "2.1.0" }
+func (*BuiltinDocsFlattenPlugin) Version() string { return "2.2.0" }
 
 // Path is empty for builtin plugins.
 func (*BuiltinDocsFlattenPlugin) Path() string { return "" }
@@ -183,7 +188,7 @@ func (*BuiltinDocsFlattenPlugin) Schema() string {
 					{"name": "include", "type": "string", "description": "Comma-separated include globs, ** crosses directories (e.g. 'src/**/*.go'). Bare names match by basename."},
 					{"name": "exclude", "type": "string", "description": "Comma-separated exclude globs (e.g. 'node_modules/**,*.lock')."},
 					{"name": "stripFrontMatter", "type": "boolean", "description": "Strip YAML/TOML front matter, re-emitting its title as a heading. Default: true."},
-					{"name": "images", "type": "string", "description": "markers | describe | estimate. Default markers: image references become [image: alt — path] markers, diagrams (mermaid, PlantUML, dot, d2, draw.io, SVG) get a text summary of their flows. describe: ALSO describe every referenced image (architecture PNGs, screenshots) with the session's vision model into its own chunk — use it for documentation whose diagrams are images; cached, so re-runs are free. estimate: count images and tokens first, no model call."},
+					{"name": "images", "type": "string", "description": "describe | markers | estimate. Diagrams (mermaid, PlantUML, dot, d2, draw.io, SVG) always get a text summary of their flows and image references become [image: alt — path] markers. Default describe: ALSO describe every referenced image (architecture PNGs, screenshots) with the session's vision model into its own chunk, so the corpus keeps what the pictures show; cached, so re-runs are free. markers: no model call (the corpus only knows each image's alt text and path). estimate: count images and tokens, no model call."},
 					{"name": "maxImages", "type": "integer", "description": "Cap on images described per run. Default: 50."},
 					{"name": "output", "type": "string", "description": "File path to write the result to. Required in practice for large corpora."},
 				},
@@ -247,6 +252,8 @@ func (p *BuiltinDocsFlattenPlugin) ExecuteWithStream(ctx context.Context, args [
 	var imageReport *docsImageReport
 	if cfg.Images != docsImagesMarkers {
 		chunks, imageReport = describeDocsImages(ctx, chunks, cfg, root, nil, currentDocsImageDescriber(), emit)
+	} else {
+		imageReport = markersImageReport(chunks)
 	}
 
 	rendered, err := renderDocsFlatten(chunks, cfg.Format)
@@ -297,7 +304,7 @@ func countVisualChunks(chunks []docsFlattenChunk) string {
 	if len(diagrams) == 0 && len(images) == 0 {
 		return ""
 	}
-	return fmt.Sprintf("visuals: %d diagram(s) summarized, %d image reference(s) kept as markers", len(diagrams), len(images))
+	return fmt.Sprintf("visuals: %d diagram(s) summarized, %d image reference(s) marked in place", len(diagrams), len(images))
 }
 
 // docsFlattenProvenance records where a cloned corpus came from.
@@ -309,7 +316,7 @@ type docsFlattenProvenance struct {
 // parseDocsFlattenArgs supports flat JSON, the {"cmd","args"} envelope and
 // --flag argv form.
 func parseDocsFlattenArgs(args []string) (docsFlattenArgs, error) {
-	out := docsFlattenArgs{Branch: "main", Format: "text", MaxChars: 16000, StripFrontMatter: true, MaxPages: 50, MaxDepth: 2, SameHost: true, Kind: "docs", Images: docsImagesMarkers}
+	out := docsFlattenArgs{Branch: "main", Format: "text", MaxChars: 16000, StripFrontMatter: true, MaxPages: 50, MaxDepth: 2, SameHost: true, Kind: "docs", Images: docsImagesDescribe}
 	payload := strings.TrimSpace(strings.Join(args, " "))
 	var raw map[string]json.RawMessage
 	switch {

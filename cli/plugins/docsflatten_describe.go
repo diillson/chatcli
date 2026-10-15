@@ -74,8 +74,8 @@ func currentDocsImageDescriber() DocsImageDescriber {
 
 // Image handling modes.
 const (
-	docsImagesMarkers  = "markers" // default: alt/caption/path markers only
-	docsImagesDescribe = "describe"
+	docsImagesMarkers  = "markers"  // alt/caption/path markers only, no model call
+	docsImagesDescribe = "describe" // default: markers plus vision descriptions
 	docsImagesEstimate = "estimate"
 )
 
@@ -134,6 +134,12 @@ func (r *docsImageReport) String() string {
 	}
 	var b strings.Builder
 	switch r.Mode {
+	case docsImagesMarkers:
+		// Said out loud: a model reading the corpus sees only the marker,
+		// and whoever ran the tool would not otherwise know the images
+		// could be described.
+		fmt.Fprintf(&b, "images: %d referenced, kept as [image: …] markers only (no model call), so the knowledge base does not know what they show; "+
+			"re-run with images=describe to describe them with a vision model (images=estimate first to see the cost)", r.Found)
 	case docsImagesEstimate:
 		fmt.Fprintf(&b, "images: %d referenced, %d would be described (~%d input tokens, plus ~%d output); re-run with images=describe",
 			r.Found, r.Eligible, r.Tokens, r.Eligible*400)
@@ -358,6 +364,11 @@ func (c docsVisionCache) put(data []byte, d cachedDescription) {
 	}
 	b, _ := json.Marshal(d)
 	_ = os.WriteFile(filepath.Join(c.dir, c.key(data)+".json"), b, 0o600)
+}
+
+// markersImageReport counts the images a markers run left undescribed.
+func markersImageReport(chunks []docsFlattenChunk) *docsImageReport {
+	return &docsImageReport{Mode: docsImagesMarkers, Found: len(collectImageJobs(chunks))}
 }
 
 // describeDocsImages runs the images mode over the flattened chunks: it

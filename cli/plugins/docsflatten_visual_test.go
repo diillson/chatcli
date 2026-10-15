@@ -435,3 +435,77 @@ func TestHTMLVisuals(t *testing.T) {
 		t.Fatalf("assets = %+v", assets)
 	}
 }
+
+// A markers run calls no model but says the images were left undescribed
+// and how to describe them.
+func TestDocsFlatten_MarkersSaysImagesUndescribed(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	root := writeDocsFixture(t)
+	fake := &fakeDescriber{}
+	SetDocsImageDescriber(fake)
+	t.Cleanup(func() { SetDocsImageDescriber(nil) })
+
+	_, summary := flattenFixture(t, `{"root":"`+filepath.ToSlash(root)+`","format":"jsonl","output":"OUT","images":"markers"}`)
+	if fake.calls.Load() != 0 || !strings.Contains(summary, "markers only") || !strings.Contains(summary, "images=describe") {
+		t.Fatalf("calls=%d summary=%q", fake.calls.Load(), summary)
+	}
+}
+
+// Describing is the default, so a corpus does not lose what its pictures
+// show; without a vision model the markers stay and the summary says so.
+func TestDocsFlatten_DescribesImagesByDefault(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	root := writeDocsFixture(t)
+	fake := &fakeDescriber{}
+	SetDocsImageDescriber(fake)
+	t.Cleanup(func() { SetDocsImageDescriber(nil) })
+
+	chunks, summary := flattenFixture(t, `{"root":"`+filepath.ToSlash(root)+`","format":"jsonl","output":"OUT"}`)
+	if fake.calls.Load() != 1 || !strings.Contains(summary, "1 described") {
+		t.Fatalf("calls=%d summary=%q", fake.calls.Load(), summary)
+	}
+	described := false
+	for _, c := range chunks {
+		described = described || c.Kind == chunkKindImage
+	}
+	if !described {
+		t.Fatal("the image's description must become a chunk")
+	}
+
+	SetDocsImageDescriber(nil)
+	chunks, summary = flattenFixture(t, `{"root":"`+filepath.ToSlash(root)+`","format":"jsonl","output":"OUT"}`)
+	if !strings.Contains(summary, "no vision pipeline") || len(chunks) == 0 {
+		t.Fatalf("without a vision model the run still succeeds and says why: %q", summary)
+	}
+}
+
+// The help and the tool schema tell the user and the model that describing
+// images is the default and how to opt out.
+func TestDocsFlatten_HelpAndSchemaDocumentImageDefault(t *testing.T) {
+	p := NewBuiltinDocsFlattenPlugin()
+	if u := p.Usage(); !strings.Contains(u, "(default: describe)") || !strings.Contains(u, "markers = no model") {
+		t.Fatalf("usage:\n%s", u)
+	}
+	var schema struct {
+		Subcommands []struct {
+			Flags []struct {
+				Name        string `json:"name"`
+				Description string `json:"description"`
+			} `json:"flags"`
+		} `json:"subcommands"`
+	}
+	if err := json.Unmarshal([]byte(p.Schema()), &schema); err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, sc := range schema.Subcommands {
+		for _, f := range sc.Flags {
+			if f.Name == "images" {
+				found = strings.Contains(f.Description, "Default describe") && strings.Contains(f.Description, "markers: no model call")
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("schema images flag does not document the default:\n%s", p.Schema())
+	}
+}

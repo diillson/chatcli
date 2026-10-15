@@ -79,6 +79,8 @@ func (p *BuiltinDocsFlattenPlugin) executeURL(ctx context.Context, cfg docsFlatt
 	var imageReport *docsImageReport
 	if cfg.Images != docsImagesMarkers {
 		chunks, imageReport = describeDocsImages(ctx, chunks, cfg, "", docsFlattenImageFetcher(ctx, cfg), currentDocsImageDescriber(), emit)
+	} else {
+		imageReport = markersImageReport(chunks)
 	}
 
 	rendered, err := renderDocsFlatten(chunks, cfg.Format)
