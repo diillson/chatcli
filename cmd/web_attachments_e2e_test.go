@@ -184,6 +184,9 @@ func startE2EWeb(t *testing.T) *e2eWeb {
 	// the server's cleanup so it runs after it, the way the surfaces shut
 	// down: the server stops taking turns, then the engine joins the last
 	// pass, before t.TempDir removes HOME.
+	// Spend is settled last, as newRPCBackend's cleanup does: a debounced
+	// daily-spend write would otherwise land in HOME while it is removed.
+	t.Cleanup(func() { engine.FinalizeSpend(context.Background()) })
 	t.Cleanup(engine.StopMemoryWorker)
 	engine.SetUnattended(true)
 	backend := &rpcBackend{mgr: &e2eManager{model: model}, cli: engine, store: engine, provider: "OPENAI", model: "gpt-4o", sessions: map[string][]models.Message{}}
