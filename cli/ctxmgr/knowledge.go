@@ -51,6 +51,10 @@ type docFlattenChunk struct {
 	ChunkSize int    `json:"chunkSize"`
 	RepoURL   string `json:"repoUrl,omitempty"`
 	Commit    string `json:"commit,omitempty"`
+	// Kind is "diagram" or "image" for chunks @docs-flatten wrote about a
+	// diagram or an image (their source may be an .svg/.png path; the
+	// content is Markdown text).
+	Kind string `json:"kind,omitempty"`
 }
 
 // isJSONLPath reports whether path names a JSONL corpus file.
@@ -112,7 +116,7 @@ func ingestKnowledgeJSONL(path string, logger *zap.Logger) ([]utils.FileInfo, ma
 			Path:    c.ID,
 			Content: c.Content,
 			Size:    int64(len(c.Content)),
-			Type:    knowledgeChunkType(c.Source),
+			Type:    knowledgeChunkTypeOf(c),
 		})
 		sources[c.Source] = struct{}{}
 		if c.RepoURL != "" {
@@ -145,6 +149,15 @@ func ingestKnowledgeJSONL(path string, logger *zap.Logger) ([]utils.FileInfo, ma
 
 // knowledgeChunkType derives the file-type tag from the chunk's source path so
 // downstream formatting (code fences, digests) can hint the language.
+// knowledgeChunkTypeOf types a chunk: a diagram or image description is
+// Markdown whatever its source file's extension.
+func knowledgeChunkTypeOf(c docFlattenChunk) string {
+	if c.Kind != "" {
+		return "md"
+	}
+	return knowledgeChunkType(c.Source)
+}
+
 func knowledgeChunkType(source string) string {
 	ext := strings.TrimPrefix(strings.ToLower(filepath.Ext(source)), ".")
 	if ext == "" {

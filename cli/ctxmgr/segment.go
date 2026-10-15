@@ -217,6 +217,11 @@ func segmentOne(f utils.FileInfo, opts SegmentOptions) []Segment {
 		}
 	}
 
+	// Lines inside Markdown code fences are never boundaries: a "# comment"
+	// in a shell sample or a dot diagram is not a heading, and a cut there
+	// splits the block between two passages.
+	fenced := markdownFencedLines(lines, f.Type)
+
 	var out []Segment
 	start := 0 // 0-based index into lines
 	for start < len(lines) {
@@ -237,7 +242,7 @@ func segmentOne(f utils.FileInfo, opts SegmentOptions) []Segment {
 		// replayed inside the previous passage.
 		cutAtBoundary := false
 		if opts.Boundaries && end < len(lines) {
-			if b := boundaryCut(lines, f.Type, start, end); b < end {
+			if b := boundaryCut(lines, f.Type, start, end, fenced); b < end {
 				end, cutAtBoundary = b, true
 			}
 		}
@@ -383,7 +388,7 @@ func itoa(n int) string {
 // outrank closing braces; among equals the latest line wins so windows
 // stay as full as the structure allows. The returned end is exclusive
 // and the boundary line opens the next segment.
-func boundaryCut(lines []string, fileType string, start, end int) int {
+func boundaryCut(lines []string, fileType string, start, end int, fenced []bool) int {
 	span := end - start
 	if span < 4 {
 		return end
@@ -394,11 +399,43 @@ func boundaryCut(lines []string, fileType string, start, end int) int {
 	}
 	best, bestScore := end, 0
 	for i := end - 1; i > end-1-lookback && i > start; i-- {
+		if fenced != nil && fenced[i] {
+			continue
+		}
 		if s := boundaryScore(lines[i], fileType); s > bestScore {
 			best, bestScore = i, s
 		}
 	}
 	return best
+}
+
+// markdownFencedLines marks the lines inside ``` / ~~~ fences (closing fence
+// included) of a Markdown file; nil for other file types.
+func markdownFencedLines(lines []string, fileType string) []bool {
+	switch strings.ToLower(strings.TrimPrefix(fileType, ".")) {
+	case "md", "markdown", "mdx":
+	default:
+		return nil
+	}
+	fenced := make([]bool, len(lines))
+	mark := ""
+	for i, l := range lines {
+		t := strings.TrimSpace(l)
+		if mark == "" {
+			for _, c := range []string{"`", "~"} {
+				if n := len(t) - len(strings.TrimLeft(t, c)); n >= 3 {
+					mark = strings.Repeat(c, n)
+					break
+				}
+			}
+			continue
+		}
+		fenced[i] = true
+		if strings.HasPrefix(t, mark) && strings.Trim(t, mark[:1]) == "" {
+			mark = ""
+		}
+	}
+	return fenced
 }
 
 func boundaryScore(line, fileType string) int {
