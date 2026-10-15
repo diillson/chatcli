@@ -74,7 +74,7 @@ func (*BuiltinImagePlugin) Name() string { return "@image" }
 
 // Description surfaces the tool.
 func (*BuiltinImagePlugin) Description() string {
-	return "Generate OR edit images using the configured backend (OpenAI, xAI, Google, Bedrock, Z.AI, MiniMax, self-hosted Stable Diffusion WebUI or a compatible endpoint; edit runs on that same backend and fails clearly when it can't edit) and save them to file. Use 'gen' when asked to 'generate an image of', 'create a picture', 'draw', 'make an illustration'; use 'edit' when asked to 'edit', 'modify', 'change', 'alter' an existing image (image-to-image / img2img)."
+	return "Generate OR edit images and choose the image backend/model. Backends: OpenAI (Images or Responses API), Google Gemini, xAI Grok Imagine, AWS Bedrock (Stability), Z.AI, MiniMax, self-hosted SD WebUI or a compatible endpoint. Use 'gen' for 'generate/create/draw an image of', 'edit' to modify an existing image (image-to-image, inpainting with a mask, background removal, upscaling on Bedrock), 'models' to see which models each backend offers on this account (live), 'use' to switch backend and/or model when asked (e.g. 'use Gemini for images'), 'status' for the active backend. Edits run on the active backend; one that cannot edit fails unless an edit backend is pinned with use {for:\"edit\"}."
 }
 
 // Usage explains the canonical invocation.
@@ -93,12 +93,20 @@ Subcommands (cmd + args):
        mask      optional path to a PNG mask for inpainting
        strength  optional 0..1 — how much to change the input (img2img)
        out       optional output file path or directory
-  status  show the effective image backend and whether it edits
-  models  list image-capable models (catalog + your OpenAI account)`
+  models {provider?, live?}
+       per backend: which models it offers to this account (live listing
+       where the provider has one, else the catalog), gen/edit support,
+       shutdown dates, Bedrock regions
+  use {provider?, model?, for?}
+       switch the image backend and/or model for the session; with only a
+       model the provider is inferred, with only a provider its default
+       model is used; for:"edit" pins the backend used when the active one
+       cannot edit
+  status  the active backend and model, whether it edits, configured backends`
 }
 
 // Version is semver.
-func (*BuiltinImagePlugin) Version() string { return "1.0.0" }
+func (*BuiltinImagePlugin) Version() string { return "1.1.0" }
 
 // Path is empty for builtin plugins.
 func (*BuiltinImagePlugin) Path() string { return "" }
@@ -121,18 +129,41 @@ func (*BuiltinImagePlugin) Schema() string {
 			},
 			{
 				"name":        "edit",
-				"description": "Edit/transform an existing image (image-to-image) guided by a prompt.",
+				"description": "Edit/transform existing image(s) with a prompt on the active backend (image-to-image; Bedrock models also inpaint with a mask, remove backgrounds, upscale).",
 				"flags": []map[string]interface{}{
 					{"name": "prompt", "type": "string", "required": true, "description": "How to transform the image."},
 					{"name": "image", "type": "string", "required": true, "description": "Path to the input image."},
+					{"name": "images", "type": "array", "required": false, "description": "Several input image paths (models that take references)."},
+					{"name": "mask", "type": "string", "required": false, "description": "PNG mask path: white = area to change (inpainting)."},
 					{"name": "strength", "type": "number", "required": false, "description": "0..1 how much to change the input (img2img)."},
+					{"name": "size", "type": "string", "required": false, "description": "Output WxH when the backend supports it."},
+					{"name": "n", "type": "number", "required": false, "description": "Number of variations."},
 					{"name": "out", "type": "string", "required": false, "description": "Output file or directory."},
 				},
 				"examples": []string{`{"cmd":"edit","args":{"prompt":"make it look like winter","image":"/tmp/photo.png"}}`},
 			},
 			{
+				"name":        "models",
+				"description": "List image models per backend: availability on this account (live), gen/edit support, shutdown dates, Bedrock regions.",
+				"flags": []map[string]interface{}{
+					{"name": "provider", "type": "string", "required": false, "description": "Only this backend: openai|responses|google|xai|zai|minimax|bedrock|sdwebui|url."},
+					{"name": "live", "type": "boolean", "required": false, "description": "Ask the providers' APIs (default true); false = catalog only, no network."},
+				},
+				"examples": []string{`{"cmd":"models"}`, `{"cmd":"models","args":{"provider":"bedrock"}}`},
+			},
+			{
+				"name":        "use",
+				"description": "Switch the image backend and/or model for this session. Only a model: the provider is inferred. Only a provider: its default model. for=edit pins the backend used for edits when the active one cannot edit.",
+				"flags": []map[string]interface{}{
+					{"name": "provider", "type": "string", "required": false, "description": "openai|responses|google|xai|zai|minimax|bedrock|sdwebui|url."},
+					{"name": "model", "type": "string", "required": false, "description": "Model id, as @image models lists it."},
+					{"name": "for", "type": "string", "required": false, "description": "gen (default) or edit."},
+				},
+				"examples": []string{`{"cmd":"use","args":{"model":"gemini-nano-banana-2.1"}}`, `{"cmd":"use","args":{"provider":"bedrock","model":"stability.sd3-5-large-v1:0"}}`, `{"cmd":"use","args":{"provider":"xai","for":"edit"}}`},
+			},
+			{
 				"name":        "status",
-				"description": "Show the effective image backend.",
+				"description": "Active backend and model, whether it edits, the pinned edit backend, configured backends.",
 				"examples":    []string{`{"cmd":"status"}`},
 			},
 		},
@@ -161,19 +192,34 @@ func (p *BuiltinImagePlugin) ExecuteWithStream(ctx context.Context, args []strin
 
 	switch cmd {
 	case "status":
-		if imagegen.IsNull(provider) {
-			return "@image: no image backend configured. Set CHATCLI_IMAGE_PROVIDER=sdwebui (self-hosted Stable Diffusion), CHATCLI_IMAGE_URL, or OPENAI_API_KEY.", nil
-		}
-		status := "@image backend: " + provider.Name()
-		if m := imagegen.ModelOf(provider); m != "" {
-			status += " (model " + m + ")"
-		}
-		if _, edits := imagegen.AsEditor(provider); edits {
-			return status + " — generates and edits", nil
-		}
-		return status + " — generates only (edit needs CHATCLI_IMAGE_EDIT_PROVIDER)", nil
+		return ImageStatus(provider), nil
 	case "models":
-		return imageModelsList(ctx), nil
+		var in struct {
+			Provider string `json:"provider"`
+			Live     *bool  `json:"live"`
+		}
+		_ = json.Unmarshal([]byte(inner), &in)
+		live := in.Live == nil || *in.Live
+		if in.Provider != "" {
+			if _, ok := imagegen.LookupBackend(in.Provider); !ok {
+				return "", fmt.Errorf("@image models: unknown provider %q (valid: openai, responses, google, xai, zai, minimax, bedrock, sdwebui, url)", in.Provider)
+			}
+		}
+		return RenderImageModels(imagegen.ListModels(ctx, in.Provider, imagegen.ActiveBackend(provider), live, nil)), nil
+	case "use":
+		var in struct {
+			Provider string `json:"provider"`
+			Model    string `json:"model"`
+			For      string `json:"for"`
+		}
+		_ = json.Unmarshal([]byte(inner), &in)
+		forEdit := strings.EqualFold(strings.TrimSpace(in.For), "edit")
+		sel, err := imagegen.Select(in.Provider, in.Model, forEdit)
+		if err != nil {
+			return "", fmt.Errorf("@image use: %w", err)
+		}
+		sel.Apply()
+		return RenderImageSelection(sel, imagegen.NewFromEnvContext(ctx, nil)), nil
 	case "gen":
 		var in struct {
 			Prompt string `json:"prompt"`
@@ -240,9 +286,13 @@ func (p *BuiltinImagePlugin) ExecuteWithStream(ctx context.Context, args []strin
 		}
 		opts := imagegen.EditOptions{Size: in.Size, N: in.N, Strength: in.Strength}
 		if strings.TrimSpace(in.Mask) != "" {
-			if mask, mErr := os.ReadFile(in.Mask); mErr == nil {
-				opts.Mask = mask
+			mask, mErr := os.ReadFile(in.Mask) //#nosec G304 -- user/agent-specified mask path for @image edit
+			if mErr != nil {
+				// An inpainting edit without its mask would repaint the
+				// whole image instead of the masked area.
+				return "", fmt.Errorf("@image edit: read mask: %w", mErr)
 			}
+			opts.Mask = mask
 		}
 		images, err := editor.Edit(ctx, in.Prompt, inputs, opts)
 		if err != nil {
@@ -260,7 +310,7 @@ func (p *BuiltinImagePlugin) ExecuteWithStream(ctx context.Context, args []strin
 		}
 		return msg, nil
 	default:
-		return "", fmt.Errorf("@image: unknown cmd %q (valid: gen|edit|status|models)", cmd)
+		return "", fmt.Errorf("@image: unknown cmd %q (valid: gen|edit|status|models|use)", cmd)
 	}
 }
 
@@ -359,7 +409,7 @@ func parseImageInvocation(args []string) (string, string, error) {
 		canon := canonicalImageCmd(cmdStr)
 		if canon == "" {
 			if !isFlatArgs(raw) {
-				return "", "", fmt.Errorf("missing or unknown cmd %q (valid: gen|status)", cmdStr)
+				return "", "", fmt.Errorf("missing or unknown cmd %q (valid: gen|edit|status|models|use)", cmdStr)
 			}
 			canon = "gen" // flat native args, e.g. {"prompt":"..."}
 		}
@@ -393,23 +443,8 @@ func canonicalImageCmd(s string) string {
 		return "status"
 	case "models", "catalog", "list":
 		return "models"
+	case "use", "switch", "set", "select":
+		return "use"
 	}
 	return ""
-}
-
-// imageModelsList renders the static image-model catalog and, when an OpenAI key
-// is present, the live image-capable models from the account.
-func imageModelsList(ctx context.Context) string {
-	var b strings.Builder
-	b.WriteString("Image-capable models (catalog):\n")
-	for _, m := range imagegen.KnownModels() {
-		fmt.Fprintf(&b, "  • %-26s %-8s %-9s %s\n", m.Name, m.Provider, m.API, m.Note)
-	}
-	if key := strings.TrimSpace(os.Getenv("OPENAI_API_KEY")); key != "" {
-		if ids, err := imagegen.FetchOpenAIModels(ctx, "", key, nil); err == nil && len(ids) > 0 {
-			b.WriteString("\nAvailable on your OpenAI account:\n  ")
-			b.WriteString(strings.Join(ids, ", "))
-		}
-	}
-	return strings.TrimRight(b.String(), "\n")
 }

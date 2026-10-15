@@ -161,7 +161,7 @@ func TestAspectRatio(t *testing.T) {
 }
 
 func TestKnownModels_NewIDs(t *testing.T) {
-	want := map[string]bool{"gpt-image-2": false, "gpt-image-1-mini": false, "gpt-5.6-sol": false, "grok-imagine-image-2.0": false, "grok-imagine-image": false, "gemini-3.1-flash-image": false, "gemini-3.1-flash-lite-image": false, "gemini-2.5-flash-image": false, "amazon.nova-canvas-v1:0": false, "stability.sd3-5-large-v1:0": false}
+	want := map[string]bool{"gpt-image-2.5-flare": false, "gpt-image-2.5-sunburst": false, "gpt-image-2": false, "gpt-5.6-sol": false, "grok-imagine-image-2.0": false, "grok-imagine-image": false, "gemini-nano-banana-2.1": false, "gemini-3.1-flash-image": false, "gemini-3.1-flash-lite-image": false, "stability.sd3-5-large-v1:0": false, "stability.stable-image-inpaint-v1:0": false}
 	for _, m := range KnownModels() {
 		if _, ok := want[m.Name]; ok {
 			want[m.Name] = true
@@ -180,7 +180,7 @@ func TestBuildBedrockRequest(t *testing.T) {
 		t.Fatalf("nova body wrong: %s", nova)
 	}
 	stab := string(buildBedrockRequest("stability.sd3-5-large-v1:0", "a fox", Options{Size: "1920x1080"}))
-	if !strings.Contains(stab, "text-to-image") || !strings.Contains(stab, "16:9") {
+	if strings.Contains(stab, `"mode"`) || !strings.Contains(stab, "16:9") {
 		t.Fatalf("stability body wrong: %s", stab)
 	}
 }

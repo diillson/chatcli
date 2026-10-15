@@ -446,16 +446,14 @@ func providerFromModel(model string) string {
 	if model == "" {
 		return ""
 	}
-	for _, m := range KnownModels() {
-		if strings.ToLower(m.Name) == model {
-			if m.Provider == "openai" && m.API == "responses" {
-				return "openai-responses"
-			}
-			return m.Provider
+	if m, _, ok := LookupModel(model); ok {
+		if m.Provider == "openai" && m.API == "responses" {
+			return "openai-responses"
 		}
+		return m.Provider
 	}
 	switch {
-	case strings.HasPrefix(model, "stability."), strings.HasPrefix(model, "amazon."),
+	case strings.HasPrefix(strings.TrimPrefix(model, "us."), "stability."), strings.HasPrefix(model, "amazon."),
 		strings.Contains(model, "nova-canvas"), strings.Contains(model, "titan-image"):
 		return "bedrock"
 	case strings.HasPrefix(model, "glm-image"), strings.HasPrefix(model, "cogview"), strings.HasPrefix(model, "glm-"):
@@ -464,9 +462,9 @@ func providerFromModel(model string) string {
 		return "minimax"
 	case strings.HasPrefix(model, "grok"):
 		return "xai"
-	case strings.HasPrefix(model, "imagen"), strings.HasPrefix(model, "gemini"):
+	case strings.HasPrefix(model, "imagen"), strings.HasPrefix(model, "gemini"), strings.Contains(model, "nano-banana"):
 		return "google"
-	case strings.HasPrefix(model, "gpt-image"), strings.HasPrefix(model, "dall-e"):
+	case strings.HasPrefix(model, "gpt-image"), strings.HasPrefix(model, "chatgpt-image"), strings.HasPrefix(model, "dall-e"):
 		return "openai"
 	case strings.HasPrefix(model, "gpt-5"), strings.HasPrefix(model, "gpt-4"):
 		return "openai-responses"

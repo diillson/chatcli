@@ -15,6 +15,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/aws"
 	awsconfig "github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/feature/ec2/imds"
+	bedrocksvc "github.com/aws/aws-sdk-go-v2/service/bedrock"
 	"github.com/aws/aws-sdk-go-v2/service/bedrockruntime"
 	"go.uber.org/zap"
 )
@@ -161,4 +162,36 @@ func LoadBedrockRuntime(ctx context.Context, region, profile string, logger *zap
 			zap.String("endpoint", base))
 	}
 	return bedrockruntime.NewFromConfig(cfg, clientOpts...), cfg.Region, nil
+}
+
+// LoadBedrockControl builds the Bedrock control-plane client (model and
+// inference-profile listing) with the same credential chain, region
+// resolution, IMDS gating and corporate-CA support as LoadBedrockRuntime.
+// BEDROCK_CONTROL_BASE_URL, then BEDROCK_BASE_URL, override the endpoint, as
+// they do for the chat client. The returned region is the one in use.
+func LoadBedrockControl(ctx context.Context, region, profile string, logger *zap.Logger) (*bedrocksvc.Client, string, error) {
+	if logger == nil {
+		return nil, "", fmt.Errorf("bedrock: logger is required (pass zap.NewNop() if you don't need logs)")
+	}
+	cfg, err := awsconfig.LoadDefaultConfig(ctx, awsLoadOptions(region, profile, logger)...)
+	if err != nil {
+		return nil, "", fmt.Errorf("bedrock: failed to load AWS config: %w", err)
+	}
+	if cfg.Region == "" {
+		return nil, "", fmt.Errorf("bedrock: AWS region not configured (set AWS_REGION, BEDROCK_REGION, or configure ~/.aws/config)")
+	}
+	base, err := envBaseURL("BEDROCK_CONTROL_BASE_URL")
+	if err != nil {
+		return nil, "", err
+	}
+	if base == "" {
+		if base, err = envBaseURL("BEDROCK_BASE_URL"); err != nil {
+			return nil, "", err
+		}
+	}
+	var opts []func(*bedrocksvc.Options)
+	if base != "" {
+		opts = append(opts, func(o *bedrocksvc.Options) { o.BaseEndpoint = aws.String(base) })
+	}
+	return bedrocksvc.NewFromConfig(cfg, opts...), cfg.Region, nil
 }

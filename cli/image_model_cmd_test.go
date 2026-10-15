@@ -55,13 +55,13 @@ func TestImageModelSuggestionsListCatalog(t *testing.T) {
 
 // handleImageModelCommand with an id sets CHATCLI_IMAGE_MODEL at runtime.
 func TestHandleImageModelCommandSetsEnv(t *testing.T) {
-	t.Setenv("CHATCLI_IMAGE_MODEL", "")
-	t.Setenv("OPENAI_API_KEY", "") // keep imageModelsCatalog from hitting the network
+	isolateImageEnv(t)
+	t.Setenv("MINIMAX_API_KEY", "k") // image-01 is MiniMax's
 	cli := newTestCLI()
 
 	cli.handleImageModelCommand(context.Background(), "/model-image image-01")
-	if got := os.Getenv("CHATCLI_IMAGE_MODEL"); got != "image-01" {
-		t.Fatalf("CHATCLI_IMAGE_MODEL = %q, want image-01", got)
+	if got := os.Getenv("CHATCLI_IMAGE_MODEL"); got != "image-01" || os.Getenv("CHATCLI_IMAGE_PROVIDER") != "minimax" {
+		t.Fatalf("CHATCLI_IMAGE_MODEL = %q provider %q, want image-01 on minimax", got, os.Getenv("CHATCLI_IMAGE_PROVIDER"))
 	}
 
 	// Bare form prints the catalog and must not mutate the model.

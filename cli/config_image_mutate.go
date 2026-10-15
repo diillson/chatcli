@@ -11,7 +11,8 @@
  *   /config image                      # status
  *   /config image provider <name>      # sdwebui|url|openai|responses|google|xai|zai|minimax|bedrock|auto
  *   /config image api images|responses # OpenAI: Images API vs Responses API
- *   /config image model <id>           # CHATCLI_IMAGE_MODEL
+ *   /config image model <id>           # model, and the provider that serves it
+ *   /config image edit <provider|model> [model] # backend used when the active one cannot edit
  *   /config image url <url>            # CHATCLI_IMAGE_URL (self-hosted/SD WebUI)
  *   /config image models               # list the image-model catalog
  *   /config image reset                # clear the overrides above
@@ -29,6 +30,7 @@ import (
 	"time"
 
 	"github.com/c-bata/go-prompt"
+	"github.com/diillson/chatcli/cli/plugins"
 	"github.com/diillson/chatcli/i18n"
 	"github.com/diillson/chatcli/llm/imagegen"
 )
@@ -47,13 +49,15 @@ func (cli *ChatCLI) routeConfigImage(ctx context.Context, args []string) {
 	case "api":
 		cli.setImageEnv(ctx, "CHATCLI_IMAGE_API", args[1:])
 	case "model":
-		cli.setImageEnv(ctx, "CHATCLI_IMAGE_MODEL", args[1:])
+		cli.selectImage(ctx, "", strings.Join(args[1:], " "), false)
+	case "edit":
+		cli.selectImageEdit(ctx, args[1:])
 	case "url":
 		cli.setImageEnv(ctx, "CHATCLI_IMAGE_URL", args[1:])
 	case "models", "catalog":
 		fmt.Println(cli.imageModelsCatalog(ctx))
 	case "reset":
-		for _, k := range []string{"CHATCLI_IMAGE_PROVIDER", "CHATCLI_IMAGE_API", "CHATCLI_IMAGE_MODEL", "CHATCLI_IMAGE_URL"} {
+		for _, k := range []string{"CHATCLI_IMAGE_PROVIDER", "CHATCLI_IMAGE_API", "CHATCLI_IMAGE_MODEL", "CHATCLI_IMAGE_URL", "CHATCLI_IMAGE_EDIT_PROVIDER", "CHATCLI_IMAGE_EDIT_MODEL"} {
 			_ = os.Unsetenv(k)
 		}
 		fmt.Println(colorize("  "+i18n.T("cfg.image.reset_ok"), ColorGreen))
@@ -76,7 +80,34 @@ func (cli *ChatCLI) handleImageModelCommand(ctx context.Context, input string) {
 		fmt.Println(cli.imageModelsCatalog(ctx))
 		return
 	}
-	cli.setImageEnv(ctx, "CHATCLI_IMAGE_MODEL", []string{rest})
+	cli.selectImage(ctx, "", rest, false)
+}
+
+// selectImage switches the image backend and/or model the way @image use
+// does: a model alone selects the provider that serves it, so picking a
+// Gemini model while the provider is pinned to xAI does not send a Gemini
+// id to xAI.
+func (cli *ChatCLI) selectImage(ctx context.Context, provider, model string, forEdit bool) {
+	sel, err := imagegen.Select(provider, model, forEdit)
+	if err != nil {
+		fmt.Println(colorize("  "+err.Error(), ColorYellow))
+		return
+	}
+	sel.Apply()
+	fmt.Println(plugins.RenderImageSelection(sel, imagegen.NewFromEnvContext(ctx, cli.logger)))
+}
+
+// selectImageEdit handles `/config image edit <provider|model> [model]`.
+func (cli *ChatCLI) selectImageEdit(ctx context.Context, args []string) {
+	if len(args) == 0 {
+		fmt.Println(colorize("  "+i18n.T("cfg.image.value_required", "CHATCLI_IMAGE_EDIT_PROVIDER"), ColorYellow))
+		return
+	}
+	provider, model := args[0], strings.Join(args[1:], " ")
+	if _, isBackend := imagegen.LookupBackend(provider); !isBackend {
+		provider, model = "", strings.Join(args, " ") // a model alone
+	}
+	cli.selectImage(ctx, provider, model, true)
 }
 
 // getImageModelSuggestions autocompletes the `/model-image <id>` shorthand with
@@ -126,6 +157,8 @@ func (cli *ChatCLI) showConfigImage(ctx context.Context) {
 	kv(p, "CHATCLI_IMAGE_API", envOr("CHATCLI_IMAGE_API"))
 	kv(p, "CHATCLI_IMAGE_MODEL", envOr("CHATCLI_IMAGE_MODEL"))
 	kv(p, "CHATCLI_IMAGE_URL", envOr("CHATCLI_IMAGE_URL"))
+	kv(p, "CHATCLI_IMAGE_EDIT_PROVIDER", envOr("CHATCLI_IMAGE_EDIT_PROVIDER"))
+	kv(p, "CHATCLI_IMAGE_EDIT_MODEL", envOr("CHATCLI_IMAGE_EDIT_MODEL"))
 
 	fmt.Println(p)
 	fmt.Println(p + colorize(i18n.T("cfg.image.about"), ColorGray))
@@ -152,6 +185,7 @@ func (cli *ChatCLI) getConfigImageSuggestions(d prompt.Document) []prompt.Sugges
 			{Text: "api", Description: i18n.T("complete.configimage.api")},
 			{Text: "model", Description: i18n.T("complete.configimage.model")},
 			{Text: "url", Description: i18n.T("complete.configimage.url")},
+			{Text: "edit", Description: i18n.T("complete.configimage.edit")},
 			{Text: "models", Description: i18n.T("complete.configimage.models")},
 			{Text: "reset", Description: i18n.T("complete.configimage.reset")},
 		}, word, true)
@@ -173,6 +207,12 @@ func (cli *ChatCLI) getConfigImageSuggestions(d prompt.Document) []prompt.Sugges
 				{Text: "bedrock", Description: i18n.T("complete.configimage.val")},
 				{Text: "url", Description: i18n.T("complete.configimage.val")},
 			}, word, true)
+		case "edit":
+			out := make([]prompt.Suggest, 0)
+			for _, b := range imagegen.Backends() {
+				out = append(out, prompt.Suggest{Text: b.Name, Description: i18n.T("complete.configimage.val")})
+			}
+			return prompt.FilterHasPrefix(out, word, true)
 		case "api":
 			return prompt.FilterHasPrefix([]prompt.Suggest{
 				{Text: "images", Description: i18n.T("complete.configimage.val")},
@@ -189,21 +229,11 @@ func (cli *ChatCLI) getConfigImageSuggestions(d prompt.Document) []prompt.Sugges
 	return nil
 }
 
-// imageModelsCatalog renders the static image-model catalog plus, when an
-// OpenAI key is present, the image-capable models on the account.
+// imageModelsCatalog renders the models per backend: the catalog merged
+// with each configured provider's live listing (same view as @image models).
 func (cli *ChatCLI) imageModelsCatalog(ctx context.Context) string {
-	var b strings.Builder
-	b.WriteString(i18n.T("cfg.image.catalog_header"))
-	b.WriteByte('\n')
-	for _, m := range imagegen.KnownModels() {
-		fmt.Fprintf(&b, "  • %-26s %-8s %-10s %s\n", m.Name, m.Provider, m.API, m.Note)
-	}
-	if key := strings.TrimSpace(os.Getenv("OPENAI_API_KEY")); key != "" {
-		ctx, cancel := context.WithTimeout(ctx, 20*time.Second)
-		defer cancel()
-		if ids, err := imagegen.FetchOpenAIModels(ctx, "", key, cli.logger); err == nil && len(ids) > 0 {
-			b.WriteString("\n" + i18n.T("cfg.image.catalog_live") + "\n  " + strings.Join(ids, ", "))
-		}
-	}
-	return strings.TrimRight(b.String(), "\n")
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	active := imagegen.ActiveBackend(imagegen.NewFromEnvContext(ctx, cli.logger))
+	return plugins.RenderImageModels(imagegen.ListModels(ctx, "", active, true, cli.logger))
 }

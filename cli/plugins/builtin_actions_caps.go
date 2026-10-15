@@ -46,8 +46,19 @@ func (*BuiltinImagePlugin) DescribeCall(args []string) string {
 	if err != nil {
 		return i18n.T("plugins.image.describe.default")
 	}
-	if cmd == "status" {
+	switch cmd {
+	case "status":
 		return i18n.T("plugins.image.describe.status")
+	case "models":
+		return i18n.T("plugins.image.describe.models")
+	case "use":
+		target := describeStr(inner, "model")
+		if target == "" {
+			target = describeStr(inner, "provider")
+		}
+		return i18n.T("plugins.image.describe.use", describeTrunc(target, 50))
+	case "edit":
+		return i18n.T("plugins.image.describe.edit", describeTrunc(describeStr(inner, "prompt"), 50))
 	}
 	return i18n.T("plugins.image.describe.gen", describeTrunc(describeStr(inner, "prompt"), 50))
 }
