@@ -436,8 +436,8 @@ func TestHTMLVisuals(t *testing.T) {
 	}
 }
 
-// The default markers run calls no model but says the images were left
-// undescribed and how to describe them.
+// A markers run calls no model but says the images were left undescribed
+// and how to describe them.
 func TestDocsFlatten_MarkersSaysImagesUndescribed(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	root := writeDocsFixture(t)
@@ -445,8 +445,36 @@ func TestDocsFlatten_MarkersSaysImagesUndescribed(t *testing.T) {
 	SetDocsImageDescriber(fake)
 	t.Cleanup(func() { SetDocsImageDescriber(nil) })
 
-	_, summary := flattenFixture(t, `{"root":"`+filepath.ToSlash(root)+`","format":"jsonl","output":"OUT"}`)
+	_, summary := flattenFixture(t, `{"root":"`+filepath.ToSlash(root)+`","format":"jsonl","output":"OUT","images":"markers"}`)
 	if fake.calls.Load() != 0 || !strings.Contains(summary, "markers only") || !strings.Contains(summary, "images=describe") {
 		t.Fatalf("calls=%d summary=%q", fake.calls.Load(), summary)
+	}
+}
+
+// Describing is the default, so a corpus does not lose what its pictures
+// show; without a vision model the markers stay and the summary says so.
+func TestDocsFlatten_DescribesImagesByDefault(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	root := writeDocsFixture(t)
+	fake := &fakeDescriber{}
+	SetDocsImageDescriber(fake)
+	t.Cleanup(func() { SetDocsImageDescriber(nil) })
+
+	chunks, summary := flattenFixture(t, `{"root":"`+filepath.ToSlash(root)+`","format":"jsonl","output":"OUT"}`)
+	if fake.calls.Load() != 1 || !strings.Contains(summary, "1 described") {
+		t.Fatalf("calls=%d summary=%q", fake.calls.Load(), summary)
+	}
+	described := false
+	for _, c := range chunks {
+		described = described || c.Kind == chunkKindImage
+	}
+	if !described {
+		t.Fatal("the image's description must become a chunk")
+	}
+
+	SetDocsImageDescriber(nil)
+	chunks, summary = flattenFixture(t, `{"root":"`+filepath.ToSlash(root)+`","format":"jsonl","output":"OUT"}`)
+	if !strings.Contains(summary, "no vision pipeline") || len(chunks) == 0 {
+		t.Fatalf("without a vision model the run still succeeds and says why: %q", summary)
 	}
 }

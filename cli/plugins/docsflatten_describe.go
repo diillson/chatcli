@@ -74,8 +74,8 @@ func currentDocsImageDescriber() DocsImageDescriber {
 
 // Image handling modes.
 const (
-	docsImagesMarkers  = "markers" // default: alt/caption/path markers only
-	docsImagesDescribe = "describe"
+	docsImagesMarkers  = "markers"  // alt/caption/path markers only, no model call
+	docsImagesDescribe = "describe" // default: markers plus vision descriptions
 	docsImagesEstimate = "estimate"
 )
 
