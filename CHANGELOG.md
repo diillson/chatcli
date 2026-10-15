@@ -1,5 +1,14 @@
 # Changelog
 
+## [1.217.0](https://github.com/diillson/chatcli/compare/v1.216.2...v1.217.0) (2026-10-15)
+
+
+### Features
+
+* **docs-flatten:** images and diagrams become knowledge instead of being dropped ([#1790](https://github.com/diillson/chatcli/issues/1790)) ([bb4094f](https://github.com/diillson/chatcli/commit/bb4094f3e4f85e476f18a4b7d4f1f14f92602375))
+* **image:** current image catalog, live model listing, Bedrock regions and model switching for the AI ([#1788](https://github.com/diillson/chatcli/issues/1788)) ([d4315f9](https://github.com/diillson/chatcli/commit/d4315f92266939e446afcafd632656df39bdd5ee))
+* **pdf:** PDF input across every provider and surface ([#1791](https://github.com/diillson/chatcli/issues/1791)) ([0f2ca02](https://github.com/diillson/chatcli/commit/0f2ca02327785cf67758e120cb47c6d7f839c8a1))
+
 ## [1.216.2](https://github.com/diillson/chatcli/compare/v1.216.1...v1.216.2) (2026-10-14)
 
 
