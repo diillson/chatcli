@@ -89,7 +89,10 @@ type docsFlattenArgs struct {
 	// without calling a model). With no vision model in the session,
 	// describe keeps the markers and says so.
 	Images    string
-	MaxImages int // cap on images described per run (0 = default 50)
+	MaxImages int // optional cap on images described per run (0 = all)
+	// ConfirmImages is the user's go-ahead to describe every image when a
+	// model, not the user, called the tool (see docsImagesConfirmAbove).
+	ConfirmImages bool
 }
 
 // Front-matter title extractors. Quoted and unquoted values are both
@@ -145,11 +148,17 @@ Flags (flat JSON or {"cmd":"flatten","args":{...}} envelope):
             (mermaid, PlantUML, dot, d2, draw.io, SVG) always get a text
             summary of their flows and image references become
             [image: alt — path] markers. describe = ALSO describe each
-            referenced image (PNG, JPEG…) with the session's vision model
+            referenced image (PNG, JPEG, GIF, WebP; BMP and TIFF converted to
+            PNG) with the session's vision model
             (cached by content) into its own chunk; without a vision model
             the markers are kept and the summary says so. markers = no model
             call. estimate = count images and tokens, no model call.
-  maxImages cap on images described per run (default: 50)
+  maxImages optional cap on images described per run (default: all)
+  confirmImages  the user agreed to describe every image. When a model
+            calls the tool and more than 20 images still need a description,
+            the run stops before describing and reports the count and the
+            estimated tokens: ask the user, then re-run with
+            confirmImages=true, maxImages=N or images=markers.
   output    file to write the result to. STRONGLY preferred for large corpora
             — without it the flattened content is returned (and truncated)
             in the tool result.`
@@ -188,8 +197,9 @@ func (*BuiltinDocsFlattenPlugin) Schema() string {
 					{"name": "include", "type": "string", "description": "Comma-separated include globs, ** crosses directories (e.g. 'src/**/*.go'). Bare names match by basename."},
 					{"name": "exclude", "type": "string", "description": "Comma-separated exclude globs (e.g. 'node_modules/**,*.lock')."},
 					{"name": "stripFrontMatter", "type": "boolean", "description": "Strip YAML/TOML front matter, re-emitting its title as a heading. Default: true."},
-					{"name": "images", "type": "string", "description": "describe | markers | estimate. Diagrams (mermaid, PlantUML, dot, d2, draw.io, SVG) always get a text summary of their flows and image references become [image: alt — path] markers. Default describe: ALSO describe every referenced image (architecture PNGs, screenshots) with the session's vision model into its own chunk, so the corpus keeps what the pictures show; cached, so re-runs are free. markers: no model call (the corpus only knows each image's alt text and path). estimate: count images and tokens, no model call."},
-					{"name": "maxImages", "type": "integer", "description": "Cap on images described per run. Default: 50."},
+					{"name": "images", "type": "string", "description": "describe | markers | estimate. Diagrams (mermaid, PlantUML, dot, d2, draw.io, SVG) always get a text summary of their flows and image references become [image: alt — path] markers. Default describe: ALSO describe every referenced image (PNG, JPEG, GIF, WebP; BMP and TIFF are converted to PNG — architecture diagrams, screenshots) with the session's vision model into its own chunk, so the corpus keeps what the pictures show; cached, so re-runs are free. markers: no model call (the corpus only knows each image's alt text and path). estimate: count images and tokens, no model call."},
+					{"name": "maxImages", "type": "integer", "description": "Optional cap on images described per run. Default: no cap, every referenced image is described."},
+					{"name": "confirmImages", "type": "boolean", "description": "Set to true ONLY after the user agreed to describe all the images. When more than 20 images still need a vision description, the run STOPS before describing (nothing is written) and reports how many and the estimated tokens: ask the user (use @ask) whether to describe them all, then re-run with confirmImages=true, or maxImages=N, or images=markers."},
 					{"name": "output", "type": "string", "description": "File path to write the result to. Required in practice for large corpora."},
 				},
 				"examples": []string{
@@ -254,6 +264,9 @@ func (p *BuiltinDocsFlattenPlugin) ExecuteWithStream(ctx context.Context, args [
 		chunks, imageReport = describeDocsImages(ctx, chunks, cfg, root, nil, currentDocsImageDescriber(), emit)
 	} else {
 		imageReport = markersImageReport(chunks)
+	}
+	if imageReport.NeedConfirm > 0 {
+		return imageReport.confirmRequest(), nil
 	}
 
 	rendered, err := renderDocsFlatten(chunks, cfg.Format)
@@ -381,6 +394,9 @@ func parseDocsFlattenArgs(args []string) (docsFlattenArgs, error) {
 
 	if v := strings.ToLower(jsonString(raw, "images")); v != "" {
 		out.Images = v
+	}
+	if v, present := jsonBoolLookup(raw, "confirmImages", "confirm-images"); present {
+		out.ConfirmImages = v
 	}
 	if v, ok := raw["maxImages"]; ok && len(v) > 0 {
 		out.MaxImages = jsonInt(raw, "maxImages")

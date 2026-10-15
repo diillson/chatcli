@@ -33,7 +33,7 @@ import (
 	"image"
 	_ "image/gif"  // register decoders for DecodeConfig
 	_ "image/jpeg" // (dimension filter)
-	_ "image/png"
+	"image/png"
 	"io/fs"
 	"os"
 	"path"
@@ -43,6 +43,8 @@ import (
 	"sync"
 	"sync/atomic"
 
+	_ "golang.org/x/image/bmp"  // BMP and TIFF are converted to PNG for
+	_ "golang.org/x/image/tiff" // the vision models, which do not take them
 	_ "golang.org/x/image/webp" // webp dimensions
 
 	"github.com/diillson/chatcli/models"
@@ -86,16 +88,27 @@ const docsImagePromptVersion = "docs-image-v1"
 
 // Defaults and filters.
 const (
-	defaultDocsMaxImages = 50
-	minDescribeEdge      = 64       // smaller is an icon or a badge
-	minDescribeBytes     = 1024     // tiny files are spacers and bullets
-	maxDescribeBytes     = 20 << 20 // the vision pipeline's own attachment cap
-	describeWorkers      = 3
-	markerSummaryRunes   = 240
+	// docsImagesConfirmAbove: when a model calls the tool and more images
+	// than this still need a description, the run stops and asks for the
+	// user's go-ahead (the user's own `chatcli tool` call runs directly).
+	docsImagesConfirmAbove = 20
+	minDescribeEdge        = 64       // smaller is an icon or a badge
+	minDescribeBytes       = 1024     // tiny files are spacers and bullets
+	maxDescribeBytes       = 20 << 20 // the vision pipeline's own attachment cap
+	describeWorkers        = 3
+	markerSummaryRunes     = 240
 )
 
 // describableExts are the raster formats vision models read.
-var describableExts = map[string]bool{".png": true, ".jpg": true, ".jpeg": true, ".gif": true, ".webp": true}
+var describableExts = map[string]bool{
+	".png": true, ".gif": true, ".webp": true,
+	".jpg": true, ".jpeg": true, ".jfif": true, ".jpe": true, ".pjpeg": true, ".pjp": true,
+	".bmp": true, ".tif": true, ".tiff": true, // converted to PNG
+}
+
+// maxDecorativeEdge: a "logo"/"icon" file is skipped only when it is this
+// small; a large one (an architecture-icons overview) is content.
+const maxDecorativeEdge = 512
 
 // docsImageJob is one image to describe.
 type docsImageJob struct {
@@ -119,6 +132,24 @@ type docsImageReport struct {
 	Tokens    int            // estimated input tokens (estimate mode)
 	Models    map[string]int
 	Err       string
+	// NeedConfirm is the number of images still to describe when the run
+	// stopped to ask the user first; Tokens holds their estimated cost.
+	NeedConfirm int
+}
+
+// docsImagesConfirmFmt is the model-facing stop message: it names the
+// count and cost and tells the model to ask the user before spending.
+const docsImagesConfirmFmt = "@docs-flatten: STOPPED before describing images — nothing was written.\n" +
+	"%d image(s) need a vision-model description (%d more already cached, free), about %d input + %d output tokens.\n" +
+	"ASK THE USER (use @ask) whether to describe all %d images, then re-run the SAME command adding one of:\n" +
+	"  confirmImages=true   describe them all (descriptions are cached: later runs only pay for new images)\n" +
+	"  maxImages=N          describe only the first N\n" +
+	"  images=markers       no descriptions (the corpus keeps only each image's alt text and path)"
+
+// confirmRequest renders the stop message for a run that needs the user's
+// go-ahead.
+func (r *docsImageReport) confirmRequest() string {
+	return fmt.Sprintf(docsImagesConfirmFmt, r.NeedConfirm, r.Cached, r.Tokens, r.NeedConfirm*400, r.NeedConfirm)
 }
 
 func (r *docsImageReport) skip(reason string) {
@@ -256,9 +287,10 @@ func loadImageJob(j *docsImageJob, root string, fetch func(string) ([]byte, erro
 	case ext == ".svg":
 		return "svg (its text is already in the corpus)"
 	case !describableExts[ext]:
-		return "unsupported format"
-	case decorativeName(j.asset):
-		return "logos/icons"
+		if ext == "" {
+			return "unsupported format (no extension)"
+		}
+		return "unsupported format " + ext
 	}
 	var data []byte
 	if strings.Contains(j.asset, "://") || strings.HasPrefix(j.asset, "//") {
@@ -292,12 +324,23 @@ func loadImageJob(j *docsImageJob, root string, fetch func(string) ([]byte, erro
 	if len(data) < minDescribeBytes {
 		return "tiny"
 	}
+	cfg, format, cfgErr := image.DecodeConfig(bytes.NewReader(data))
+	if cfgErr == nil && (cfg.Width < minDescribeEdge || cfg.Height < minDescribeEdge) {
+		return "tiny"
+	}
+	if decorativeName(j.asset) && cfgErr == nil && max(cfg.Width, cfg.Height) <= maxDecorativeEdge {
+		return "logos/icons"
+	}
+	if format == "bmp" || format == "tiff" {
+		converted, err := toPNG(data)
+		if err != nil {
+			return "unreadable " + format
+		}
+		data = converted
+	}
 	mime, ok := models.DetectImageMediaType(data)
 	if !ok {
 		return "not an image"
-	}
-	if cfg, _, err := image.DecodeConfig(bytes.NewReader(data)); err == nil && (cfg.Width < minDescribeEdge || cfg.Height < minDescribeEdge) {
-		return "tiny"
 	}
 	j.data, j.mime = data, mime
 	return ""
@@ -389,9 +432,6 @@ func describeDocsImages(ctx context.Context, chunks []docsFlattenChunk, cfg docs
 		return chunks, rep
 	}
 	maxImages := cfg.MaxImages
-	if maxImages <= 0 {
-		maxImages = defaultDocsMaxImages
-	}
 	var names *imageNameIndex
 	if root != "" {
 		names = &imageNameIndex{root: root}
@@ -402,7 +442,7 @@ func describeDocsImages(ctx context.Context, chunks []docsFlattenChunk, cfg docs
 			rep.skip(reason)
 			continue
 		}
-		if len(eligible) >= maxImages {
+		if maxImages > 0 && len(eligible) >= maxImages {
 			rep.skip(fmt.Sprintf("over maxImages=%d", maxImages))
 			continue
 		}
@@ -421,6 +461,22 @@ func describeDocsImages(ctx context.Context, chunks []docsFlattenChunk, cfg docs
 	}
 
 	cache := openDocsVisionCache()
+	if needsUserGoAhead(ctx, cfg) {
+		var uncached []*docsImageJob
+		for _, j := range eligible {
+			if _, ok := cache.get(j.data); !ok {
+				uncached = append(uncached, j)
+			}
+		}
+		if len(uncached) > docsImagesConfirmAbove {
+			rep.NeedConfirm = len(uncached)
+			rep.Cached = len(eligible) - len(uncached)
+			for _, j := range uncached {
+				rep.Tokens += models.EstimateImageTokens(models.ImageContent{MediaType: j.mime, Data: j.data}) + len(docsImagePrompt(j))/4
+			}
+			return chunks, rep
+		}
+	}
 	results := make(map[string]cachedDescription, len(eligible))
 	var mu sync.Mutex
 	var firstErr error
@@ -597,4 +653,24 @@ func (x *imageNameIndex) build() {
 		}
 		return nil
 	})
+}
+
+// needsUserGoAhead reports whether a large describe run must stop and ask:
+// a model called the tool and the user has not set the scope (agreed to
+// all, or capped it).
+func needsUserGoAhead(ctx context.Context, cfg docsFlattenArgs) bool {
+	return !IsDirectUse(ctx) && !cfg.ConfirmImages && cfg.MaxImages <= 0
+}
+
+// toPNG re-encodes an image the vision models do not accept (BMP, TIFF).
+func toPNG(data []byte) ([]byte, error) {
+	img, _, err := image.Decode(bytes.NewReader(data))
+	if err != nil {
+		return nil, err
+	}
+	var buf bytes.Buffer
+	if err := png.Encode(&buf, img); err != nil {
+		return nil, err
+	}
+	return buf.Bytes(), nil
 }
