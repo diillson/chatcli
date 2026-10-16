@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/diillson/chatcli/pkg/pulse"
+	"github.com/diillson/chatcli/pkg/pulse/pulsetest"
 )
 
 // Each distinct method name becomes a node and the name comes off the wire:
@@ -120,9 +121,39 @@ func TestOutboundRequestIsReportedUntilItResolves(t *testing.T) {
 }
 
 func TestRPCTelemetryIsSilentWhileOff(t *testing.T) {
-	if pulseInbound("x") != nil || pulseOutbound("x") != nil {
-		t.Fatal("dashboard off: no spans")
+	ctx := context.Background()
+	got, span := pulseInbound(ctx, "x")
+	if span != nil || got != ctx || pulseOutbound(ctx, "x") != nil {
+		t.Fatal("dashboard off: no spans and the context untouched")
 	}
 	pulseEndRPC(nil, nil)
 	pulseEndRPC(nil, errf(CodeInternalError, "x"))
+}
+
+// The handler runs under the request's node, so a turn or a tool the request
+// starts hangs from the RPC instead of floating at the session, and a dialog
+// the handler opens toward the client hangs from it too.
+func TestInboundHandlerRunsUnderTheRequestNode(t *testing.T) {
+	rec := pulsetest.Record(t)
+
+	var out bytes.Buffer
+	var handlerParent string
+	var srv *Server
+	srv = NewServer(strings.NewReader(""), &out, func(ctx context.Context, _ string, _ json.RawMessage) (interface{}, *RPCError) {
+		handlerParent = pulse.ParentFrom(ctx)
+		cctx, stop := context.WithTimeout(ctx, 10*time.Millisecond)
+		defer stop()
+		_, _ = srv.Request(cctx, "session/request_permission", nil)
+		return nil, nil
+	})
+	srv.dispatch(context.Background(), []byte(`{"jsonrpc":"2.0","id":1,"method":"session/prompt"}`))
+
+	start := rec.WaitFor(t, "inbound start", pulsetest.Is(pulse.KindRPC, "session/prompt", pulse.PhaseStart))
+	if handlerParent == "" || handlerParent != start.ID {
+		t.Fatalf("handler parent = %q, want the RPC span %q", handlerParent, start.ID)
+	}
+	dialog := rec.WaitFor(t, "outbound start", pulsetest.Is(pulse.KindRPC, "client:session/request_permission", pulse.PhaseStart))
+	if dialog.Parent != start.ID {
+		t.Fatalf("outbound parent = %q, want %q", dialog.Parent, start.ID)
+	}
 }

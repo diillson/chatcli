@@ -9,6 +9,7 @@ package cli
 import (
 	"context"
 	"errors"
+	"strconv"
 	"strings"
 	"sync"
 
@@ -78,6 +79,18 @@ func (j *EvalJudge) Model() string {
 func (j *EvalJudge) Send(ctx context.Context, prompt string) (string, float64, error) {
 	j.mu.Lock()
 	defer j.mu.Unlock()
+	ctx, span := beginMediaTool(ctx, pulseEvalJudge)
+	span.With("provider", strings.ToLower(j.provider)).With("model", j.Model())
+	reply, cost, err := j.grade(ctx, prompt)
+	if err == nil && cost > 0 {
+		span.With("cost_usd", strconv.FormatFloat(cost, 'f', 4, 64))
+	}
+	span.EndErr(err)
+	return reply, cost, err
+}
+
+// grade is Send under its dashboard node; the caller holds j.mu.
+func (j *EvalJudge) grade(ctx context.Context, prompt string) (string, float64, error) {
 	history := []models.Message{{Role: "user", Content: prompt}}
 	reply, err := j.client.SendPrompt(ctx, prompt, history, 0)
 	// An expired OAuth token: the session refresh reloads the providers;

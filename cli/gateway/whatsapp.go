@@ -82,7 +82,7 @@ func NewWhatsAppAdapter(accessToken, phoneID, verifyToken, addr, path string, lo
 		addr:        addr,
 		path:        path,
 		graphBase:   "https://graph.facebook.com/v21.0",
-		http:        &http.Client{Timeout: 15 * time.Second},
+		http:        newPlatformClient(15*time.Second, whatsappPlatform),
 		logger:      logger,
 	}
 }

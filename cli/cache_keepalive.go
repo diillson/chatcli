@@ -254,7 +254,9 @@ func (cli *ChatCLI) firePromptCacheKeepAlive(gen uint64) bool {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
+	ctx, span := pulseKeepAliveBegin(ctx, provider, model, reason, refreshes+1)
 	usage, err := warmer.KeepPromptCacheWarm(ctx)
+	pulseKeepAliveEnd(span, usage, err)
 	if err != nil {
 		if !errors.Is(err, llmclient.ErrPromptCacheKeepAliveUnsupported) {
 			cli.logger.Debug("prompt cache keep-alive failed; stopping for this stretch", zap.Error(err))

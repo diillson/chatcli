@@ -18,6 +18,7 @@ import (
 	"github.com/diillson/chatcli/cli/workspace/threatscan"
 	"github.com/diillson/chatcli/llm/embedding"
 	"github.com/diillson/chatcli/models"
+	"github.com/diillson/chatcli/pkg/pulse"
 	"github.com/diillson/chatcli/utils"
 	"github.com/google/uuid"
 	"go.uber.org/zap"
@@ -920,6 +921,21 @@ func (m *Manager) BuildRetrievedContextMessages(ctx context.Context, sessionID, 
 	if engine == nil || len(wanted) == 0 || strings.TrimSpace(query) == "" {
 		return nil, nil
 	}
+	ctx, span := pulse.BeginCtx(ctx, pulse.KindBackground, pulseContextRetrieveNode, "")
+	var (
+		messages                []models.Message
+		used, passages, skipped int
+		exhausted               bool
+	)
+	defer func() {
+		span.With("contexts", itoa(len(wanted))).
+			With("blocks", itoa(len(messages))).
+			With("passages", itoa(passages)).
+			With("failed", itoa(skipped)).
+			With("chars", itoa(used)).
+			With("budget_exhausted", btoa(exhausted)).
+			End(pulse.StatusOK)
+	}()
 
 	sort.Slice(attachments, func(i, j int) bool {
 		return attachments[i].Priority < attachments[j].Priority
@@ -930,15 +946,15 @@ func (m *Manager) BuildRetrievedContextMessages(ctx context.Context, sessionID, 
 	// without bound. Passages already emitted by a higher-priority
 	// attachment (same id, or same content at the same place) are dropped.
 	budget := m.retrievedBudget()
-	used := 0
 	seen := make(map[string]struct{}, 64)
-	messages := make([]models.Message, 0, len(wanted))
+	messages = make([]models.Message, 0, len(wanted))
 	for _, a := range attachments {
 		fc, ok := wanted[a.ContextID]
 		if !ok {
 			continue
 		}
 		if used >= budget {
+			exhausted = true
 			m.logger.Info("retrieved block budget exhausted; skipping attachment", zap.String("context", fc.Name), zap.Int("budget_chars", budget))
 			break
 		}
@@ -950,6 +966,7 @@ func (m *Manager) BuildRetrievedContextMessages(ctx context.Context, sessionID, 
 			if err != nil {
 				m.logger.Warn("knowledge retrieval failed; skipping",
 					zap.String("context", fc.Name), zap.Error(err))
+				skipped++
 				continue
 			}
 		} else {
@@ -960,6 +977,7 @@ func (m *Manager) BuildRetrievedContextMessages(ctx context.Context, sessionID, 
 			if err != nil {
 				m.logger.Warn("context semantic retrieval failed; skipping",
 					zap.String("context", fc.Name), zap.Error(err))
+				skipped++
 				continue
 			}
 		}
@@ -988,6 +1006,7 @@ func (m *Manager) BuildRetrievedContextMessages(ctx context.Context, sessionID, 
 			}
 		}
 		used += len(block)
+		passages += len(segs)
 		messages = append(messages, models.Message{Role: "system", Content: block})
 	}
 	return messages, nil

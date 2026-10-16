@@ -14,6 +14,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/diillson/chatcli/pkg/pulse"
 	"io"
 	"net/http"
 	"strconv"
@@ -133,11 +134,26 @@ func (s *Server) routeAPI(w http.ResponseWriter, r *http.Request) {
 	rest := segs[1:]
 	for _, rt := range routes {
 		if rt.method == r.Method && rt.resource == segs[0] && rt.segments == len(rest) {
-			rt.handle(s, w, r, rest)
+			if !pulse.Enabled() {
+				rt.handle(s, w, r, rest)
+				return
+			}
+			ctx, span := pulseBeginRoute(r.Context(), rt.method, pulseRouteName(rt.method, rt.resource, rt.segments))
+			if span == nil {
+				rt.handle(s, w, r, rest)
+				return
+			}
+			sw := &pulseStatusWriter{ResponseWriter: w}
+			rt.handle(s, sw, r.WithContext(ctx), rest)
+			pulseEndRoute(span, sw.status())
 			return
 		}
 	}
+	// An unknown path is one node whatever it was: neither the path nor the
+	// method (both come off the wire) is reported.
+	_, span := pulseBeginRoute(r.Context(), "", "web:unmatched")
 	writeErr(w, http.StatusNotFound, "not_found", i18n.T("web.unknown_endpoint", r.URL.Path))
+	pulseEndRoute(span, http.StatusNotFound)
 }
 
 func (s *Server) handleBoot(w http.ResponseWriter, r *http.Request) {
@@ -545,7 +561,7 @@ func (s *Server) handleTTS(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusUnprocessableEntity, "tts_empty", i18n.T("web.tts_empty"))
 		return
 	}
-	audio, err := p.Synthesize(r.Context(), spoken, req.Voice, req.Format)
+	audio, err := tts.SynthesizeTraced(r.Context(), p, spoken, req.Voice, req.Format)
 	if err != nil {
 		writeErr(w, http.StatusBadGateway, "tts", i18n.T("web.tts_failed", p.Name(), err))
 		return
@@ -593,7 +609,7 @@ func (s *Server) handleSTT(w http.ResponseWriter, r *http.Request) {
 	if lang == "" {
 		lang = sttLanguage(s.opts.STTLanguage)
 	}
-	text, err := p.Transcribe(r.Context(), audio, mime, filename, lang)
+	text, err := transcription.TranscribeTraced(r.Context(), p, audio, mime, filename, lang)
 	if errors.Is(err, transcription.ErrNeedsFFmpeg) {
 		if kind == "" {
 			kind = mime
@@ -621,7 +637,7 @@ func (s *Server) handleImage(w http.ResponseWriter, r *http.Request) {
 	if !readJSON(w, r, &req) {
 		return
 	}
-	imgs, err := s.opts.Images.Generate(r.Context(), req.Prompt, imagegen.Options{Size: req.Size, N: req.N})
+	imgs, err := imagegen.GenerateTraced(r.Context(), s.opts.Images, req.Prompt, imagegen.Options{Size: req.Size, N: req.N})
 	if err != nil {
 		writeErr(w, http.StatusBadGateway, "image", err.Error())
 		return

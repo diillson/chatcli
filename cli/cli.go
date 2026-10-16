@@ -405,11 +405,17 @@ type ChatCLI struct {
 	// pulse records live telemetry for the dashboard; nil when no spool
 	// root can be resolved.
 	pulse *pulse.Controller
+	// pulseOwner is set when this ChatCLI started the process recorder: only
+	// the owner detaches the taps and closes it on shutdown.
+	pulseOwner bool
 	// dash is the live dashboard server this session started, if any.
 	dash dashState
 	web  webState
 	// pulseCompaction is the telemetry span of the compaction in flight.
 	pulseCompaction atomic.Pointer[pulse.Span]
+	// pulseCompactionRuns is the compactor's run count when that span
+	// opened, so its end reports only a shape produced inside it.
+	pulseCompactionRuns atomic.Uint64
 	// pendingTurnContext is the chat turn's injected context text between
 	// assembly and commit (turn_context.go).
 	pendingTurnContext string

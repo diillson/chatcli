@@ -13,6 +13,8 @@ import (
 	"strings"
 	"sync/atomic"
 	"time"
+
+	"github.com/diillson/chatcli/pkg/pulse"
 )
 
 // recallToolName is the bare name of the @recall builtin (without the '@'
@@ -269,13 +271,60 @@ func (l *Layer) CompressHinted(h Hint, content string) (string, Result) {
 	if ExtractKeys(content) != nil {
 		return content, passthrough(content)
 	}
+	threshold := l.Threshold()
+	var span *pulse.Span
+	if len(content) >= threshold && pulse.Enabled() {
+		span = pulse.Begin(pulse.KindBackground, pulseCompressNode, "")
+	}
 	res := l.router.Load().Compress(content, h, Options{
 		Mode:      l.Mode(),
 		Store:     l.store,
-		Threshold: l.Threshold(),
+		Threshold: threshold,
 		Metrics:   l.metrics,
 	})
+	endCompressSpan(span, h, res)
 	return res.Compressed, res
+}
+
+// Live-dashboard nodes of the compression layer. Fixed names: the tool and
+// strategy ride as attributes, the content never does.
+const (
+	pulseCompressNode = "compress:tool-output"
+	pulseArchiveNode  = "compress:archive"
+	pulseRecallNode   = "compress:recall"
+)
+
+// endCompressSpan closes a compression span with its sizes and outcome.
+func endCompressSpan(span *pulse.Span, h Hint, res Result) {
+	if span == nil {
+		return
+	}
+	ratio := 1.0
+	if res.OriginalSize > 0 {
+		ratio = float64(res.CompressedSize) / float64(res.OriginalSize)
+	}
+	span.With("tool", strings.TrimPrefix(strings.TrimSpace(h.ToolName), "@")).
+		With("strategy", res.Strategy).
+		With("in_bytes", strconv.Itoa(res.OriginalSize)).
+		With("out_bytes", strconv.Itoa(res.CompressedSize)).
+		With("ratio", strconv.FormatFloat(ratio, 'f', 2, 64)).
+		With("archived", strconv.FormatBool(res.CacheKey != "")).
+		End(pulse.StatusOK)
+}
+
+// pulseArchivePoint reports one verbatim archive attempt.
+func pulseArchivePoint(bytes int, stored bool) {
+	if !pulse.Enabled() {
+		return
+	}
+	status := pulse.StatusOK
+	if !stored {
+		status = pulse.StatusError
+	}
+	pulse.Point(pulse.KindBackground, pulseArchiveNode, "", status, map[string]string{
+		"bytes":    strconv.Itoa(bytes),
+		"archived": strconv.FormatBool(stored),
+	})
 }
 
 // Archive stores content in the CCR store verbatim and returns its retrieval
@@ -294,6 +343,7 @@ func (l *Layer) Archive(content string) (string, bool) {
 		return "", false
 	}
 	key, err := l.store.Put(content)
+	pulseArchivePoint(len(content), err == nil)
 	if err != nil {
 		// The largest cuts are exactly the ones that lose "recoverable via
 		// @recall" here; count it so the callers can say so instead of
@@ -322,9 +372,24 @@ func (l *Layer) Recall(key string) (string, bool) {
 	content, ok, err := l.store.Get(key)
 	if err != nil || !ok {
 		l.metrics.RecordCCRMiss()
+		if pulse.Enabled() {
+			// A miss is the expected answer for an evicted key; a store
+			// failure is not.
+			status := pulse.StatusOK
+			if err != nil {
+				status = pulse.StatusError
+			}
+			pulse.Point(pulse.KindBackground, pulseRecallNode, "", status, map[string]string{"hit": "false"})
+		}
 		return "", false
 	}
 	l.metrics.RecordCCRHit()
+	if pulse.Enabled() {
+		pulse.Point(pulse.KindBackground, pulseRecallNode, "", pulse.StatusOK, map[string]string{
+			"hit":   "true",
+			"bytes": strconv.Itoa(len(content)),
+		})
+	}
 	return content, true
 }
 

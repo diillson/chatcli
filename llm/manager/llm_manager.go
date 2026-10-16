@@ -39,6 +39,7 @@ import (
 	"github.com/diillson/chatcli/llm/token"
 	"github.com/diillson/chatcli/llm/xai"
 	"github.com/diillson/chatcli/llm/zai"
+	"github.com/diillson/chatcli/pkg/pulse"
 	"github.com/diillson/chatcli/utils"
 	"go.uber.org/zap"
 )
@@ -482,7 +483,7 @@ func (m *LLMManagerImpl) configurarOllamaClient(maxRetries int, initialBackoff t
 		return
 	}
 
-	hc := &http.Client{Timeout: 3 * time.Second}
+	hc := &http.Client{Timeout: 3 * time.Second, Transport: pulse.MeterTransport(nil)}
 	checkURL := strings.TrimRight(baseURL, "/") + "/api/tags"
 
 	resp, err := hc.Get(checkURL)

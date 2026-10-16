@@ -34,10 +34,12 @@ package cli
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 	"sync"
 
 	"github.com/diillson/chatcli/cli/board"
+	"github.com/diillson/chatcli/pkg/pulse"
 )
 
 // bootstrapMaxBoardTitles caps how many doing-column card titles the board
@@ -105,13 +107,17 @@ func (cli *ChatCLI) memoryBootstrapCards() (chatCard, agentCard string) {
 		if loadMemoryMode() == memModeOff {
 			return
 		}
-		lines := cli.bootstrapSnapshotLines()
+		span := pulse.Begin(pulse.KindBackground, pulseMemoryBootstrapNode, "")
+		lines := cli.bootstrapSnapshotLines(span)
+		span.With("surfaces", strconv.Itoa(len(lines)))
 		if len(lines) == 0 {
+			span.With("state", "empty").End(pulse.StatusOK)
 			return
 		}
 		body := bootstrapCardHeader + strings.Join(lines, "\n") + "\n"
 		st.chat = body + bootstrapCardChatDirective
 		st.agent = body + bootstrapCardAgentDirective
+		span.With("chars", strconv.Itoa(len(st.agent))).With("state", "card built").End(pulse.StatusOK)
 	})
 	return st.chat, st.agent
 }
@@ -147,10 +153,14 @@ func (cli *ChatCLI) memoryBootstrapCardAgent() string {
 	return a
 }
 
+// pulseMemoryBootstrapNode is the live-dashboard node of the session-start
+// memory card: the one-time snapshot of what durable memory holds.
+const pulseMemoryBootstrapNode = "memory:bootstrap"
+
 // bootstrapSnapshotLines renders the live counts, one line per surface that
 // actually has content. Every probe is best-effort: a failing store simply
-// drops its line.
-func (cli *ChatCLI) bootstrapSnapshotLines() []string {
+// drops its line. The counts also ride on span (nil-safe) as attributes.
+func (cli *ChatCLI) bootstrapSnapshotLines(span *pulse.Span) []string {
 	var lines []string
 
 	if cli.memoryStore != nil {
@@ -162,6 +172,7 @@ func (cli *ChatCLI) bootstrapSnapshotLines() []string {
 			if mgr.Episodes != nil {
 				episodes = mgr.Episodes.Count()
 			}
+			span.With("facts", strconv.Itoa(facts)).With("episodes", strconv.Itoa(episodes))
 			if facts > 0 || episodes > 0 {
 				lines = append(lines, fmt.Sprintf(
 					"- Long-term facts: %d · Episodes (dated work log): %d", facts, episodes))
@@ -171,6 +182,7 @@ func (cli *ChatCLI) bootstrapSnapshotLines() []string {
 
 	if cli.sessionManager != nil {
 		if names, err := cli.sessionManager.ListSessions(); err == nil && len(names) > 0 {
+			span.With("sessions", strconv.Itoa(len(names)))
 			line := fmt.Sprintf("- Saved conversations: %d", len(names))
 			if name, saved, title := cli.sessionManager.LatestSessionInfo(); name != "" {
 				line += fmt.Sprintf(" — latest: %q (%s", name, formatSessionAge(saved))

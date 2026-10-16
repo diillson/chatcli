@@ -35,6 +35,7 @@ import (
 	"github.com/diillson/chatcli/cli/agent/moa"
 	"github.com/diillson/chatcli/i18n"
 	"github.com/diillson/chatcli/models"
+	"github.com/diillson/chatcli/pkg/pulse"
 )
 
 func (cli *ChatCLI) handleMoACommand(ctx context.Context, input string) {
@@ -102,6 +103,12 @@ func (cli *ChatCLI) runMoACommand(ctx context.Context, input string) error {
 
 	runCtx, cancel := context.WithTimeout(ctx, time.Duration(layers)*moaLayerTimeout)
 	defer cancel()
+	// A /moa is a turn of this session like a chat message: the panel, its
+	// members and their requests hang from it on the live dashboard.
+	runCtx, turnSpan := pulse.BeginCtx(runCtx, pulse.KindTurn, pulseTurnMoA, "")
+	turnSpan.With("members", strconv.Itoa(len(refs))).With("layers", strconv.Itoa(layers)).
+		With("aggregator", strings.ToLower(aggregator.Provider)+":"+aggregator.Model)
+	defer turnSpan.End(pulse.StatusCancelled)
 
 	// Each member's position prints as soon as it lands, round by round;
 	// the synthesis follows once the last round is done.
@@ -112,6 +119,7 @@ func (cli *ChatCLI) runMoACommand(ctx context.Context, input string) error {
 	}
 
 	out, err := moa.RunLayers(runCtx, prompt, tempHistory, refs, aggregator, turn, moa.Config{Layers: layers, Hooks: hooks})
+	turnSpan.EndErr(err)
 	if err != nil {
 		return err
 	}

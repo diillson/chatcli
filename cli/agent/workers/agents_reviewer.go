@@ -156,7 +156,7 @@ func diffReviewScript(ctx context.Context, input map[string]string, _ *engine.En
 		})
 
 		eng := engine.NewEngine(outWriter, errWriter, "")
-		err := eng.Execute(ctx, c.cmd, c.args)
+		err := directExecute(ctx, eng, c.cmd, c.args)
 		outWriter.Flush()
 		errWriter.Flush()
 
@@ -199,7 +199,7 @@ func scanLintScript(ctx context.Context, input map[string]string, _ *engine.Engi
 		})
 
 		eng := engine.NewEngine(outWriter, errWriter, "")
-		err := eng.Execute(ctx, "exec", []string{"--cmd", l.cmd})
+		err := directExecute(ctx, eng, "exec", []string{"--cmd", l.cmd})
 		outWriter.Flush()
 		errWriter.Flush()
 

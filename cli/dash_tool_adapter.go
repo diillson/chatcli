@@ -352,6 +352,9 @@ func renderDashNode(n *pulse.Node) string {
 		parts = appendAttr(parts, a, "cost", "")
 		parts = appendAttr(parts, a, "tokens", " tokens")
 	}
+	if n.ParentNode != "" {
+		parts = append(parts, "← "+n.ParentNode)
+	}
 	return strings.Join(parts, " · ")
 }
 

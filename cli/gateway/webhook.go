@@ -114,7 +114,7 @@ func NewWebhookAdapter(addr, path, secret, callbackURL string, logger *zap.Logge
 		path:        path,
 		secret:      secret,
 		callbackURL: callbackURL,
-		http:        &http.Client{Timeout: 15 * time.Second},
+		http:        newPlatformClient(15*time.Second, webhookPlatform),
 		logger:      logger,
 
 		state: &webhookState{

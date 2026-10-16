@@ -127,7 +127,7 @@ func runTestsScript(ctx context.Context, input map[string]string, _ *engine.Engi
 	})
 
 	eng := engine.NewEngine(outWriter, errWriter, "")
-	err := eng.Execute(ctx, "test", []string{"--dir", dir})
+	err := directExecute(ctx, eng, "test", []string{"--dir", dir})
 	outWriter.Flush()
 	errWriter.Flush()
 
@@ -177,7 +177,7 @@ func buildCheckScript(ctx context.Context, input map[string]string, _ *engine.En
 		})
 
 		eng := engine.NewEngine(outWriter, errWriter, "")
-		err := eng.Execute(ctx, "exec", []string{"--cmd", c.cmd})
+		err := directExecute(ctx, eng, "exec", []string{"--cmd", c.cmd})
 		outWriter.Flush()
 		errWriter.Flush()
 

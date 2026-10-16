@@ -8,11 +8,13 @@ package cli
 import (
 	"context"
 	"os"
+	"strconv"
 	"strings"
 
 	"github.com/diillson/chatcli/i18n"
 	"github.com/diillson/chatcli/llm/catalog"
 	"github.com/diillson/chatcli/models"
+	"github.com/diillson/chatcli/pkg/pulse"
 	"go.uber.org/zap"
 )
 
@@ -105,33 +107,43 @@ func (cli *ChatCLI) describeImagesFallback(ctx context.Context, images []models.
 	if len(images) == 0 {
 		return "", false
 	}
+	ctx, span := beginMediaPattern(ctx, pulseVisionDescribe)
+	span.With("images", strconv.Itoa(len(images))).With("bytes_in", strconv.Itoa(imagesBytes(images)))
 
 	provider, model, ok := cli.resolveVisionDescribeModel()
 	if !ok {
+		span.Outcome(pulse.StatusError, "no vision model")
 		return "", false
 	}
+	span.With("provider", strings.ToLower(provider)).With("model", model)
 
 	client, err := cli.manager.GetClient(provider, model)
 	if err != nil {
 		cli.logger.Warn("vision describe-fallback: falha ao obter client",
 			zap.String("provider", provider), zap.String("model", model), zap.Error(err))
+		span.Outcome(pulse.StatusError, "client unavailable")
 		return "", false
 	}
 
 	instruction := i18n.T("vision.describe.instruction")
 	userMsg := models.Message{Role: "user", Content: instruction, Images: images}
 
-	cli.animation.UpdateMessage(i18n.T("vision.describe.in_progress", model))
+	if cli.animation != nil {
+		cli.animation.UpdateMessage(i18n.T("vision.describe.in_progress", model))
+	}
 	desc, err := client.SendPrompt(ctx, instruction, []models.Message{userMsg}, describeMaxTokens)
 	if err != nil {
 		cli.logger.Warn("vision describe-fallback: SendPrompt falhou",
 			zap.String("provider", provider), zap.String("model", model), zap.Error(err))
+		span.Outcome(pulse.StatusOf(err), "describe failed")
 		return "", false
 	}
 	desc = strings.TrimSpace(desc)
 	if desc == "" {
+		span.Outcome(pulse.StatusError, "empty description")
 		return "", false
 	}
+	span.With("chars_out", strconv.Itoa(len(desc))).Outcome(pulse.StatusOK, "described")
 
 	// Wrap the description so the downstream (text-only) model knows this is a
 	// machine-generated transcription of one or more attached images.

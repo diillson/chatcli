@@ -237,7 +237,7 @@ func (p *BuiltinImagePlugin) ExecuteWithStream(ctx context.Context, args []strin
 		// No progress line here: the agent loop runs an animated spinner during
 		// execution (a streamed line would stop it, then the blocking call would
 		// look frozen). The spinner's label already names the operation.
-		images, err := provider.Generate(ctx, in.Prompt, imagegen.Options{Size: in.Size, N: in.N})
+		images, err := imagegen.GenerateTraced(ctx, provider, in.Prompt, imagegen.Options{Size: in.Size, N: in.N})
 		if err != nil {
 			return "", fmt.Errorf("@image: %w", err)
 		}
@@ -294,7 +294,7 @@ func (p *BuiltinImagePlugin) ExecuteWithStream(ctx context.Context, args []strin
 			}
 			opts.Mask = mask
 		}
-		images, err := editor.Edit(ctx, in.Prompt, inputs, opts)
+		images, err := imagegen.EditTraced(ctx, editor, in.Prompt, inputs, opts)
 		if err != nil {
 			return "", fmt.Errorf("@image: %w", err)
 		}

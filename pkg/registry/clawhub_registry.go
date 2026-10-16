@@ -114,16 +114,14 @@ func NewClawHubRegistry(entry RegistryEntry, logger *zap.Logger) *ClawHubRegistr
 		cacheTTL = 5 * time.Minute
 	}
 	return &ClawHubRegistry{
-		name:    entry.Name,
-		baseURL: entry.URL,
-		enabled: entry.IsActive,
-		token:   entry.Token,
-		httpClient: &http.Client{
-			Timeout: 30 * time.Second,
-		},
-		cacheTTL: cacheTTL,
-		cache:    make(map[string]clawhubCacheEntry),
-		logger:   logger,
+		name:       entry.Name,
+		baseURL:    entry.URL,
+		enabled:    entry.IsActive,
+		token:      entry.Token,
+		httpClient: newRegistryHTTPClient(30 * time.Second),
+		cacheTTL:   cacheTTL,
+		cache:      make(map[string]clawhubCacheEntry),
+		logger:     logger,
 	}
 }
 

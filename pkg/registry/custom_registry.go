@@ -69,16 +69,14 @@ func NewCustomRegistry(entry RegistryEntry, logger *zap.Logger) *CustomRegistry 
 		cacheTTL = 10 * time.Minute
 	}
 	return &CustomRegistry{
-		name:    entry.Name,
-		baseURL: entry.URL,
-		enabled: entry.IsActive,
-		token:   entry.Token,
-		httpClient: &http.Client{
-			Timeout: 30 * time.Second,
-		},
-		cacheTTL: cacheTTL,
-		cache:    make(map[string]customCacheEntry),
-		logger:   logger,
+		name:       entry.Name,
+		baseURL:    entry.URL,
+		enabled:    entry.IsActive,
+		token:      entry.Token,
+		httpClient: newRegistryHTTPClient(30 * time.Second),
+		cacheTTL:   cacheTTL,
+		cache:      make(map[string]customCacheEntry),
+		logger:     logger,
 	}
 }
 

@@ -34,6 +34,7 @@ import (
 	"github.com/diillson/chatcli/llm/client"
 	"github.com/diillson/chatcli/models"
 	"github.com/diillson/chatcli/pkg/persona"
+	"github.com/diillson/chatcli/pkg/pulse"
 	"go.uber.org/zap"
 )
 
@@ -367,11 +368,14 @@ func (b *schedulerBridge) runHeadlessAgent(ctx context.Context, task, systemPref
 	pc := newSchedulerPolicyChecker(b, b.cli.logger, dangerousConfirmed)
 	// Register in the run registry so /agents and @agents can observe (and
 	// cancel) scheduler-driven executions like any other agent run.
+	// CallID names the job that fired this run, so its agent node on the
+	// live dashboard links back to the scheduler job node.
 	runCtx, liveRun := runs.Default().Begin(ctx, runs.Info{
 		Kind:   runs.KindHeadless,
 		Agent:  "scheduler",
 		Task:   description + ": " + task,
 		Origin: "scheduler",
+		CallID: schedulerJobNodeFrom(ctx),
 	})
 	res, err := workers.RunWorkerReAct(
 		runCtx,
@@ -391,6 +395,15 @@ func (b *schedulerBridge) runHeadlessAgent(ctx context.Context, task, systemPref
 		return "", fmt.Errorf("scheduler: headless agent returned nil result")
 	}
 	return res.Output, nil
+}
+
+// schedulerJobNodeFrom returns the dashboard node of the scheduler job whose
+// action runs under ctx, "" when ctx is not a job's.
+func schedulerJobNodeFrom(ctx context.Context) string {
+	if id := pulse.ParentFrom(ctx); strings.HasPrefix(id, scheduler.PulseJobNodePrefix) {
+		return id
+	}
+	return ""
 }
 
 // resolveSkillBlock re-resolves persona skill names into an injection

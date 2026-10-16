@@ -10,13 +10,20 @@
  * instrumented wrapper measures what left the process — texts and
  * characters — and hands it to an observer; the tracker prices it with
  * the provider's list rate per token (chars/4, an estimate marked as such).
+ *
+ * The same chokepoint puts each call on the live dashboard as one "embed"
+ * node under whatever asked for it: provider, model, batch size, vector
+ * dimension and whether the engine runs locally. Never the texts.
  */
 package embedding
 
 import (
 	"context"
+	"strconv"
 	"strings"
 	"sync"
+
+	"github.com/diillson/chatcli/pkg/pulse"
 )
 
 // UsageObserver receives one record per Embed call.
@@ -52,7 +59,9 @@ func Instrument(p Provider) Provider {
 
 // Embed implements Provider.
 func (i *Instrumented) Embed(ctx context.Context, texts []string) ([][]float32, error) {
+	ctx, span := beginEmbedSpan(ctx, i.Name(), len(texts))
 	out, err := i.Provider.Embed(ctx, texts)
+	endEmbedSpan(span, out, err)
 	usageMu.RLock()
 	fn := usageObserver
 	usageMu.RUnlock()
@@ -64,6 +73,35 @@ func (i *Instrumented) Embed(ctx context.Context, texts []string) ([][]float32, 
 		fn(i.Name(), len(texts), chars, err)
 	}
 	return out, err
+}
+
+// beginEmbedSpan opens the dashboard node of one Embed call. name is the
+// provider's "provider:model".
+func beginEmbedSpan(ctx context.Context, name string, texts int) (context.Context, *pulse.Span) {
+	if !pulse.Enabled() {
+		return ctx, nil
+	}
+	provider, model, _ := strings.Cut(name, ":")
+	engine := "remote"
+	if provider == "ollama" {
+		engine = "local"
+	}
+	ctx, span := pulse.BeginCtx(ctx, pulse.KindTool, "embed", "")
+	span.With("provider", provider).With("model", model).With("engine", engine).
+		With("texts", strconv.Itoa(texts))
+	return ctx, span
+}
+
+// endEmbedSpan closes the node with the vectors' count and dimension.
+func endEmbedSpan(span *pulse.Span, out [][]float32, err error) {
+	if span == nil {
+		return
+	}
+	span.With("vectors", strconv.Itoa(len(out)))
+	if len(out) > 0 {
+		span.With("dims", strconv.Itoa(len(out[0])))
+	}
+	span.EndErr(err)
 }
 
 // Unwrap returns the underlying provider.

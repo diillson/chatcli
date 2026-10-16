@@ -311,7 +311,7 @@ func appendMoaToolRound(history []models.Message, prompt, toolName, callJSON, re
 // uses. Errors come back as a tool-result string so the participant can
 // correct the call instead of its whole turn failing.
 func runMoaRecall(ctx context.Context, argsJSON string) string {
-	out, err := plugins.NewBuiltinRecallPlugin().Execute(ctx, []string{argsJSON})
+	out, err := tracedExecute(ctx, plugins.NewBuiltinRecallPlugin(), []string{argsJSON}, "moa")
 	if err != nil {
 		return "recall error: " + err.Error()
 	}
@@ -359,7 +359,7 @@ func runMoaMemory(ctx context.Context, argsJSON string) string {
 	if err != nil {
 		return "memory error: " + err.Error()
 	}
-	out, err := plugins.NewBuiltinMemoryPlugin().Execute(ctx, []string{string(envelope)})
+	out, err := tracedExecute(ctx, plugins.NewBuiltinMemoryPlugin(), []string{string(envelope)}, "moa")
 	if err != nil {
 		return "memory error: " + err.Error()
 	}

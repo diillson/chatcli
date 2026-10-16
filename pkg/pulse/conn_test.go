@@ -127,3 +127,31 @@ func TestMeterTransportReportsADialFailure(t *testing.T) {
 		t.Fatalf("end = %+v", evs[1])
 	}
 }
+
+// rwBody is the read-write body of an upgraded (101) response.
+type rwBody struct{ io.Reader }
+
+func (rwBody) Write(p []byte) (int, error) { return len(p), nil }
+func (rwBody) Close() error                { return nil }
+
+type upgradeTransport struct{}
+
+func (upgradeTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	return &http.Response{StatusCode: http.StatusSwitchingProtocols, Body: rwBody{strings.NewReader("")}, Request: req}, nil
+}
+
+func TestMeterTransportLeavesAnUpgradedBodyAlone(t *testing.T) {
+	b := Default()
+	was := b.Enabled()
+	b.SetEnabled(true)
+	t.Cleanup(func() { b.SetEnabled(was) })
+	req, _ := http.NewRequest(http.MethodGet, "http://example.test/ws", nil)
+	resp, err := MeterTransport(upgradeTransport{}).RoundTrip(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if _, ok := resp.Body.(io.ReadWriteCloser); !ok {
+		t.Fatalf("a 101 body must stay read-write, got %T", resp.Body)
+	}
+}

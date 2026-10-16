@@ -80,7 +80,7 @@ func NewSlackAdapter(botToken, signingSecret, addr, path string, logger *zap.Log
 		addr:          addr,
 		path:          path,
 		apiBase:       "https://slack.com/api",
-		http:          &http.Client{Timeout: 15 * time.Second},
+		http:          newPlatformClient(15*time.Second, slackPlatform),
 		logger:        logger,
 	}
 }

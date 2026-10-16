@@ -17,11 +17,14 @@
 package ratelimit
 
 import (
+	"math"
 	"net/http"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/diillson/chatcli/pkg/pulse"
 )
 
 // Bucket is a single rate-limit dimension (requests or tokens).
@@ -147,7 +150,45 @@ func Record(provider string, h http.Header) {
 	mu.Lock()
 	store[provider] = Snapshot{Provider: provider, Requests: req, Tokens: tok, UpdatedAt: time.Now()}
 	mu.Unlock()
+	pulseHeadroom(provider, req, tok)
 }
+
+// pulseHeadroom reports the provider's remaining rate-limit headroom on the
+// live dashboard, one node per provider. A bucket nearly spent reads as an
+// error, so the card turns red before the provider starts refusing.
+func pulseHeadroom(provider string, req, tok Bucket) {
+	if !pulse.Enabled() {
+		return
+	}
+	attrs := map[string]string{}
+	worst := 0.0
+	for _, b := range []struct {
+		name string
+		b    Bucket
+	}{{"req", req}, {"tok", tok}} {
+		if !b.b.Valid() {
+			continue
+		}
+		attrs[b.name+"_remaining"] = strconv.Itoa(b.b.Remaining)
+		if b.b.Limit > 0 {
+			attrs[b.name+"_limit"] = strconv.Itoa(b.b.Limit)
+		}
+		if secs := b.b.RemainingSeconds(); secs > 0 {
+			attrs[b.name+"_reset_s"] = strconv.FormatFloat(secs, 'f', 0, 64)
+		}
+		worst = math.Max(worst, b.b.UsagePct()*100)
+	}
+	attrs["usage_pct"] = strconv.FormatFloat(worst, 'f', 0, 64)
+	status := pulse.StatusOK
+	if worst >= pulseHeadroomAlarmPct {
+		status = pulse.StatusError
+	}
+	pulse.Point(pulse.KindBackground, "ratelimit:"+strings.ToLower(provider), "", status, attrs)
+}
+
+// pulseHeadroomAlarmPct is the bucket usage at which the headroom node
+// turns red.
+const pulseHeadroomAlarmPct = 90
 
 // Get returns the latest snapshot for a provider and whether one exists.
 func Get(provider string) (Snapshot, bool) {

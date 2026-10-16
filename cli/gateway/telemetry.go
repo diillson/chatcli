@@ -42,6 +42,17 @@ type loggingTransport struct {
 	platform string
 }
 
+// newPlatformClient returns the HTTP client an adapter starts with. Builders
+// run before the daemon's logger exists, so it carries no logger yet — but
+// its requests already show on the live dashboard, and SetLogger later swaps
+// in a logging transport over the same base instead of stacking a second one.
+func newPlatformClient(timeout time.Duration, platform string) *http.Client {
+	return &http.Client{
+		Timeout:   timeout,
+		Transport: &loggingTransport{base: http.DefaultTransport, platform: platform},
+	}
+}
+
 // newLoggingClient returns c with its transport wrapped so requests are logged.
 // A nil client yields a fresh one; a nil logger leaves the client untouched.
 func newLoggingClient(c *http.Client, logger *zap.Logger, platform string) *http.Client {
@@ -69,6 +80,9 @@ func (lt *loggingTransport) RoundTrip(req *http.Request) (*http.Response, error)
 	resp, err := lt.base.RoundTrip(req)
 	dur := time.Since(start)
 	endPlatformSpan(span, resp, err)
+	if lt.logger == nil {
+		return resp, err // not logging yet: dashboard only
+	}
 
 	fields := []zap.Field{
 		zap.String("platform", lt.platform),
@@ -116,7 +130,9 @@ func isPollPath(p string) bool {
 // beginPlatformSpan opens the live-dashboard span of a platform API request.
 // Long-poll receive loops fire continuously while idle and would bury every
 // other node, so they are left out, as they are left out of the Info log.
-// Only the hostname leaves the process: platform paths embed bot tokens.
+// Only the hostname leaves the process: platform paths embed bot tokens. The
+// request hangs from the node its context carries — the inbound message whose
+// reply it delivers — so a slow send shows under the exchange it belongs to.
 func beginPlatformSpan(req *http.Request, platform string) *pulse.Span {
 	if !pulse.Enabled() || req == nil || req.URL == nil || isPollPath(req.URL.Path) {
 		return nil
@@ -125,7 +141,7 @@ func beginPlatformSpan(req *http.Request, platform string) *pulse.Span {
 	if host == "" {
 		return nil
 	}
-	return pulse.Begin(pulse.KindConn, host, "").With("method", req.Method).With("platform", platform)
+	return pulse.Begin(pulse.KindConn, host, pulse.ParentFrom(req.Context())).With("method", req.Method).With("platform", platform)
 }
 
 // endPlatformSpan closes the span with the outcome of the request.

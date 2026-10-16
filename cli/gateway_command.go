@@ -42,6 +42,7 @@ import (
 	"github.com/diillson/chatcli/llm/transcription"
 	"github.com/diillson/chatcli/llm/tts"
 	"github.com/diillson/chatcli/models"
+	"github.com/diillson/chatcli/pkg/pulse"
 	"github.com/diillson/chatcli/server/hub"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
@@ -400,7 +401,7 @@ func (cli *ChatCLI) maybeEnableVoiceReplies(runner *gateway.Runner) {
 		if spoken == "" {
 			return nil
 		}
-		audio, err := provider.Synthesize(ctx, spoken, voice, format)
+		audio, err := tts.SynthesizeTraced(ctx, provider, spoken, voice, format)
 		if err != nil {
 			cli.logger.Warn("gateway: TTS synthesis failed; sending text", zap.Error(err))
 			return nil
@@ -742,7 +743,7 @@ func (cli *ChatCLI) transcribeInbound(ctx context.Context, t transcription.Provi
 
 	tctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer cancel()
-	out, err := t.Transcribe(tctx, msg.Audio.Data, msg.Audio.MimeType, msg.Audio.FileName, lang)
+	out, err := transcription.TranscribeTraced(tctx, t, msg.Audio.Data, msg.Audio.MimeType, msg.Audio.FileName, lang)
 	if err != nil {
 		cli.logger.Warn("gateway: transcription failed", zap.Error(err))
 		return "", true, transcriptionFailureReply(err)
@@ -934,35 +935,41 @@ type gatewayTurn struct {
 func (s *hubSessions) begin(ctx context.Context, msg gateway.InboundMessage) *gatewayTurn {
 	turn := &gatewayTurn{sessions: s, channel: msg.Platform}
 	if s.store == nil {
+		pulse.Point(pulse.KindBackground, "hub:begin", pulse.ParentFrom(ctx), pulse.StatusBlocked, map[string]string{"reason": "no_store"})
 		s.noStoreOnce.Do(func() {
 			s.logger.Warn("gateway: serving WITHOUT conversation hub — replies have no dialog context and are not shared with the CLI")
 		})
 		return turn
 	}
+	ctx, span := pulseBeginHub(ctx, "hub:begin")
+	span.With("channel", msg.Platform)
 	turn.principal = s.principalFor(ctx, msg.Platform, msg.UserID)
 	convID, err := s.store.Resolve(ctx, turn.principal)
 	if err != nil {
+		span.EndErr(err)
 		s.logger.Warn("gateway: hub resolve failed; no continuity this turn", zap.Error(err))
 		return turn
 	}
 	turn.convID = convID
 
 	// Context first, from the dialog so far (before this message lands).
-	recent, err := s.store.Read(ctx, convID, 0, 0)
-	if err != nil {
-		s.logger.Warn("gateway: hub read failed", zap.Error(err))
+	recent, readErr := s.store.Read(ctx, convID, 0, 0)
+	if readErr != nil {
+		s.logger.Warn("gateway: hub read failed", zap.Error(readErr))
 	}
 	turn.preamble = renderGatewayPreamble(recent)
 
-	if _, err := s.store.Append(ctx, models.ConversationEvent{
+	_, appendErr := s.store.Append(ctx, models.ConversationEvent{
 		ConvID:    convID,
 		Principal: turn.principal,
 		Channel:   msg.Platform,
 		Role:      models.ConvRoleUser,
 		Content:   msg.Text,
-	}); err != nil {
-		s.logger.Warn("gateway: hub append (user) failed", zap.Error(err))
+	})
+	if appendErr != nil {
+		s.logger.Warn("gateway: hub append (user) failed", zap.Error(appendErr))
 	}
+	span.With("history", strconv.Itoa(len(recent))).EndErr(errors.Join(readErr, appendErr))
 	return turn
 }
 
@@ -971,13 +978,17 @@ func (t *gatewayTurn) finish(ctx context.Context, reply string) {
 	if t.sessions == nil || t.sessions.store == nil || t.convID == "" || reply == "" {
 		return
 	}
-	if _, err := t.sessions.store.Append(ctx, models.ConversationEvent{
+	ctx, span := pulseBeginHub(ctx, "hub:finish")
+	span.With("channel", t.channel)
+	_, err := t.sessions.store.Append(ctx, models.ConversationEvent{
 		ConvID:    t.convID,
 		Principal: t.principal,
 		Channel:   t.channel,
 		Role:      models.ConvRoleAssistant,
 		Content:   reply,
-	}); err != nil {
+	})
+	span.EndErr(err)
+	if err != nil {
 		t.sessions.logger.Warn("gateway: hub append (assistant) failed", zap.Error(err))
 	}
 }

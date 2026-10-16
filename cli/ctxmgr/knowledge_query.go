@@ -17,6 +17,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/diillson/chatcli/pkg/pulse"
 	"go.uber.org/zap"
 )
 
@@ -103,18 +104,37 @@ func (m *Manager) knowledgeTargets(sessionID, kb string) ([]*FileContext, error)
 // KnowledgeSearch runs hybrid retrieval over the attached knowledge bases
 // (one of them when kb is set) and returns up to k passages per base.
 func (m *Manager) KnowledgeSearch(ctx context.Context, sessionID, kb, query string, k int) ([]KnowledgeHit, error) {
+	ctx, span := pulse.BeginCtx(ctx, pulse.KindBackground, pulseKnowledgeSearchNode, "")
+	hits, st, err := m.searchKnowledgeBases(ctx, sessionID, kb, query, k)
+	span.With("kbs", itoa(st.kbs)).
+		With("top_k", itoa(st.topK)).
+		With("hits", itoa(len(hits))).
+		With("failed", itoa(st.failed)).
+		EndErr(err)
+	return hits, err
+}
+
+// knowledgeSearchStats is what one knowledge search touched, for its span.
+type knowledgeSearchStats struct {
+	kbs, topK, failed int
+}
+
+// searchKnowledgeBases is KnowledgeSearch without the telemetry.
+func (m *Manager) searchKnowledgeBases(ctx context.Context, sessionID, kb, query string, k int) ([]KnowledgeHit, knowledgeSearchStats, error) {
+	var st knowledgeSearchStats
 	targets, err := m.knowledgeTargets(sessionID, kb)
 	if err != nil {
-		return nil, err
+		return nil, st, err
 	}
 	if k <= 0 {
 		k = DefaultRetrievalTopK
 	}
+	st.kbs, st.topK = len(targets), k
 	m.mu.RLock()
 	engine := m.retrieval
 	m.mu.RUnlock()
 	if engine == nil {
-		return nil, fmt.Errorf("knowledge retrieval engine unavailable")
+		return nil, st, fmt.Errorf("knowledge retrieval engine unavailable")
 	}
 	var hits []KnowledgeHit
 	for _, fc := range targets {
@@ -122,6 +142,7 @@ func (m *Manager) KnowledgeSearch(ctx context.Context, sessionID, kb, query stri
 		if err != nil {
 			m.logger.Warn("knowledge search failed for context; skipping",
 				zap.String("context", fc.Name), zap.Error(err))
+			st.failed++
 			continue
 		}
 		weight := m.AttachWeight(sessionID, fc.ID)
@@ -133,7 +154,7 @@ func (m *Manager) KnowledgeSearch(ctx context.Context, sessionID, kb, query stri
 	// passages outrank a 1.0 base's at equal relevance. Stable so equal
 	// scores keep base order (targets are sorted by name).
 	sort.SliceStable(hits, func(i, j int) bool { return hits[i].Score > hits[j].Score })
-	return hits, nil
+	return hits, st, nil
 }
 
 // KnowledgeDocument returns one page of a source document (all chunks whose

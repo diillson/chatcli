@@ -58,35 +58,35 @@ func (cli *ChatCLI) runWorkerContextTool(ctx context.Context, tool string, argsJ
 		if err != nil {
 			return "", err
 		}
-		return plugins.NewBuiltinMemoryPlugin().Execute(ctx, []string{env})
+		return tracedExecute(ctx, plugins.NewBuiltinMemoryPlugin(), []string{env}, "worker")
 
 	case workers.ContextToolSessionSearch:
 		env, err := envelope("search", pick("query", "limit"))
 		if err != nil {
 			return "", err
 		}
-		return plugins.NewBuiltinSessionPlugin().Execute(ctx, []string{env})
+		return tracedExecute(ctx, plugins.NewBuiltinSessionPlugin(), []string{env}, "worker")
 
 	case workers.ContextToolSessionGet:
 		env, err := envelope("get", pick("name", "offset", "limit", "query", "message"))
 		if err != nil {
 			return "", err
 		}
-		return plugins.NewBuiltinSessionPlugin().Execute(ctx, []string{env})
+		return tracedExecute(ctx, plugins.NewBuiltinSessionPlugin(), []string{env}, "worker")
 
 	case workers.ContextToolKnowledgeSearch:
 		env, err := envelope("search", pick("query", "top_k", "kb"))
 		if err != nil {
 			return "", err
 		}
-		return plugins.NewBuiltinKnowledgePlugin().Execute(ctx, []string{env})
+		return tracedExecute(ctx, plugins.NewBuiltinKnowledgePlugin(), []string{env}, "worker")
 
 	case workers.ContextToolKnowledgeGet:
 		env, err := envelope("get", pick("source", "offset", "kb"))
 		if err != nil {
 			return "", err
 		}
-		return plugins.NewBuiltinKnowledgePlugin().Execute(ctx, []string{env})
+		return tracedExecute(ctx, plugins.NewBuiltinKnowledgePlugin(), []string{env}, "worker")
 	}
 
 	return "", fmt.Errorf("unknown worker context tool %q", tool)

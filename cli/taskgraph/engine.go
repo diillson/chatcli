@@ -24,6 +24,7 @@ import (
 	"github.com/diillson/chatcli/cli/agent/runs"
 	"github.com/diillson/chatcli/cli/agent/workers"
 	"github.com/diillson/chatcli/models"
+	"github.com/diillson/chatcli/pkg/pulse"
 	"go.uber.org/zap"
 )
 
@@ -237,7 +238,7 @@ func (e *Engine) Run(ctx context.Context) (string, error) {
 		}
 		msg := <-doneCh
 		inFlight--
-		e.propagateBlocked(msg.id)
+		e.propagateBlocked(msg.id, liveRun.ID())
 	}
 
 	e.mu.Lock()
@@ -358,8 +359,9 @@ func (e *Engine) readyTasks() []*Task {
 }
 
 // propagateBlocked marks every pending task downstream of a failed/blocked
-// dependency as blocked, transitively.
-func (e *Engine) propagateBlocked(_ string) {
+// dependency as blocked, transitively. Each one shows on the dashboard as a
+// blocked point under the graph's run (parentRunID).
+func (e *Engine) propagateBlocked(_, parentRunID string) {
 	for {
 		var blocked *Task
 		e.mu.Lock()
@@ -382,6 +384,7 @@ func (e *Engine) propagateBlocked(_ string) {
 			return
 		}
 		e.setStatus(blocked, StatusBlocked, EventTaskBlocked, "dependency failed")
+		e.pulseBlocked(parentRunID, blocked)
 	}
 }
 
@@ -403,6 +406,7 @@ func (e *Engine) runTask(ctx context.Context, t *Task) {
 			return
 		}
 		attempt := e.beginAttempt(t, n)
+		span := e.pulseAttemptBegin(ctx, t, n)
 		if e.cfg.Checkpoint != nil {
 			e.cfg.Checkpoint("taskgraph:" + t.ID)
 		}
@@ -416,6 +420,7 @@ func (e *Engine) runTask(ctx context.Context, t *Task) {
 		if execRes.Error != nil {
 			feedback = "executor error: " + execRes.Error.Error()
 			e.endAttempt(t, attempt, feedback)
+			span.Outcome(pulseFailStatus(ctx), pulseOutcomeExecError)
 			continue
 		}
 
@@ -423,11 +428,13 @@ func (e *Engine) runTask(ctx context.Context, t *Task) {
 		if !gateOK {
 			feedback = gateFeedback
 			e.endAttempt(t, attempt, feedback)
+			span.Outcome(pulse.StatusError, pulseOutcomeGateFail)
 			continue
 		}
 
 		if !e.graph.RequiresReview(t) {
 			e.finishTask(t, attempt, reviewWaivedByGraph, execRes.Output)
+			span.Outcome(pulse.StatusOK, pulseOutcomeWaived)
 			return
 		}
 
@@ -443,10 +450,12 @@ func (e *Engine) runTask(ctx context.Context, t *Task) {
 
 		if verdict == verdictPass {
 			e.finishTask(t, attempt, evidence, execRes.Output)
+			span.Outcome(pulse.StatusOK, pulseOutcomePass)
 			return
 		}
 		feedback = evidence
 		e.endAttempt(t, attempt, "review FAIL: "+evidence)
+		span.Outcome(pulse.StatusError, pulseOutcomeReviewFail)
 	}
 	e.failTask(t, fmt.Sprintf("exhausted %d attempts; last feedback: %s", t.MaxAttempts, firstLine(feedback)))
 }

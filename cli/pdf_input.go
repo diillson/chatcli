@@ -26,6 +26,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -34,6 +35,7 @@ import (
 	"github.com/diillson/chatcli/models"
 	"github.com/diillson/chatcli/pkg/atrest"
 	"github.com/diillson/chatcli/pkg/pdftext"
+	"github.com/diillson/chatcli/pkg/pulse"
 	"github.com/diillson/chatcli/utils"
 	"go.uber.org/zap"
 )
@@ -89,16 +91,23 @@ func (cli *ChatCLI) loadPDFAttachment(ctx context.Context, path string) (models.
 // an encrypted PDF is still attached, since a native model may open it.
 func (cli *ChatCLI) readPDF(ctx context.Context, data []byte, name string) models.DocumentContent {
 	doc := models.DocumentContent{MediaType: models.PDFMediaType, Data: data, FileName: name}
+	ctx, span := beginMediaTool(ctx, pulsePDFExtract)
+	span.With("bytes_in", strconv.Itoa(len(data)))
 	res, err := pdftext.Extract(ctx, data, pdftext.Limits{Timeout: 60 * time.Second})
 	if err != nil {
 		cli.logger.Warn("PDF: extração de texto falhou", zap.String("file", name), zap.Error(err))
 		doc.Pages = pdftext.PageCount(data)
+		span.With("pages", strconv.Itoa(doc.Pages)).EndErr(err)
 		return doc
 	}
 	doc.Pages = res.TotalPages
 	if !res.Scanned {
 		doc.Text = res.Text()
 	}
+	span.With("pages", strconv.Itoa(doc.Pages)).
+		With("scanned", pulseBool(res.Scanned)).
+		With("chars_out", strconv.Itoa(len(doc.Text))).
+		End(pulse.StatusOK)
 	return doc
 }
 
@@ -114,11 +123,14 @@ func (cli *ChatCLI) gateDocumentsForRoute(ctx context.Context, provider, model s
 	}
 	if strings.EqualFold(strings.TrimSpace(os.Getenv("CHATCLI_PDF_INPUT")), "off") {
 		cli.logger.Info("PDF: input disabled by CHATCLI_PDF_INPUT=off", zap.Int("documents", len(docs)))
+		pulsePDFRouteDecision(ctx, "off", docs)
 		return nil
 	}
 	if catalog.NativePDFInput(provider, model) {
+		pulsePDFRouteDecision(ctx, "native", docs)
 		return docs
 	}
+	pulsePDFRouteDecision(ctx, "text", docs)
 	for i := range docs {
 		if strings.TrimSpace(docs[i].Text) != "" {
 			continue
@@ -149,18 +161,39 @@ const maxPDFTranscribeAttempts = 3
 // available whose credentials do not resolve, a quota error — hands over to
 // the next instead of ending the attempt.
 func (cli *ChatCLI) transcribePDF(ctx context.Context, doc models.DocumentContent) (string, string, error) {
+	ctx, span := beginMediaPattern(ctx, pulsePDFTranscribe)
+	span.With("pages", strconv.Itoa(doc.Pages)).With("bytes_in", strconv.Itoa(len(doc.Data)))
 	candidates := cli.pdfTranscribeCandidates()
 	if len(candidates) == 0 {
+		span.Outcome(pulse.StatusError, "no native PDF model")
 		return "", "", errNoNativePDFModel
 	}
+	text, by, attempts, err := cli.transcribePDFWith(ctx, doc, candidates)
+	span.With("attempts", strconv.Itoa(attempts))
+	if err != nil {
+		span.Outcome(pulse.StatusOf(err), "transcription failed")
+		return "", "", err
+	}
+	provider, model, _ := strings.Cut(by, "/")
+	span.With("provider", provider).With("model", model).
+		With("chars_out", strconv.Itoa(len(text))).
+		Outcome(pulse.StatusOK, "transcribed")
+	return text, by, nil
+}
+
+// transcribePDFWith tries the candidates in order and reports how many it
+// tried.
+func (cli *ChatCLI) transcribePDFWith(ctx context.Context, doc models.DocumentContent, candidates [][2]string) (string, string, int, error) {
 	prompt := "Transcribe this document to plain text, page by page, keeping its structure (headings, lists, tables as rows). " +
 		"Mark each page as \"--- page N ---\". Transcribe all visible text verbatim, including text inside figures; describe figures and diagrams briefly in brackets (their boxes and arrows, with labels). No preamble."
 	msg := models.Message{Role: "user", Content: prompt, Documents: []models.DocumentContent{doc}}
 	var errs []error
+	attempts := 0
 	for i, c := range candidates {
 		if i >= maxPDFTranscribeAttempts {
 			break
 		}
+		attempts++
 		client, err := cli.manager.GetClient(c[0], c[1])
 		if err != nil {
 			errs = append(errs, fmt.Errorf("%s/%s: %w", c[0], c[1], err))
@@ -174,9 +207,9 @@ func (cli *ChatCLI) transcribePDF(ctx context.Context, doc models.DocumentConten
 			errs = append(errs, fmt.Errorf("%s/%s: %w", c[0], c[1], err))
 			continue
 		}
-		return strings.TrimSpace(text), strings.ToLower(c[0]) + "/" + c[1], nil
+		return strings.TrimSpace(text), strings.ToLower(c[0]) + "/" + c[1], attempts, nil
 	}
-	return "", "", errors.Join(errs...)
+	return "", "", attempts, errors.Join(errs...)
 }
 
 // pdfTranscribeCandidates lists provider/model pairs that read PDFs

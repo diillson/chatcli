@@ -53,6 +53,31 @@ type HistoryCompactor struct {
 	// pay a summarizer call each to land in Level 3 anyway).
 	l2Backoff  int
 	lastReport CompactReport
+	// lastShape is the size of the history before and after the most
+	// recent Compact that produced a result, for the live dashboard; runs
+	// counts those results so a reader can tell a fresh shape from a stale
+	// one.
+	lastShape compactShape
+	runs      uint64
+}
+
+// compactShape is the before/after size of one compaction.
+type compactShape struct {
+	level                   int
+	beforeMsgs, afterMsgs   int
+	beforeChars, afterChars int
+}
+
+// shapeSince returns the shape of the most recent compaction when one
+// finished after the reader saw run count since (ok=false otherwise), plus
+// the current run count.
+func (hc *HistoryCompactor) shapeSince(since uint64) (shape compactShape, runs uint64, ok bool) {
+	if hc == nil {
+		return compactShape{}, 0, false
+	}
+	hc.statusMu.RLock()
+	defer hc.statusMu.RUnlock()
+	return hc.lastShape, hc.runs, hc.runs > since
 }
 
 // CompactReport describes the last Compact run: the level that produced
@@ -73,9 +98,20 @@ func (hc *HistoryCompactor) LastReport() CompactReport {
 	return hc.lastReport
 }
 
-func (hc *HistoryCompactor) setReport(rep CompactReport) {
+// finish records the report and the before/after shape of a Compact that
+// produced a result.
+func (hc *HistoryCompactor) finish(rep CompactReport, beforeMsgs, beforeChars int, after []models.Message) {
+	shape := compactShape{
+		level:       rep.Level,
+		beforeMsgs:  beforeMsgs,
+		afterMsgs:   len(after),
+		beforeChars: beforeChars,
+		afterChars:  totalChars(after),
+	}
 	hc.statusMu.Lock()
 	hc.lastReport = rep
+	hc.lastShape = shape
+	hc.runs++
 	hc.statusMu.Unlock()
 }
 
@@ -368,7 +404,7 @@ func (hc *HistoryCompactor) Compact(
 		)
 		hc.emitStatus(CompactStageDone, i18n.T("compact.status.trim_sufficient",
 			FormatPayloadSize(before), FormatPayloadSize(current)))
-		hc.setReport(CompactReport{Level: 1})
+		hc.finish(CompactReport{Level: 1}, beforeMsgs, before, history)
 		return history, nil
 	}
 
@@ -379,7 +415,7 @@ func (hc *HistoryCompactor) Compact(
 	if current <= budget {
 		hc.emitStatus(CompactStageDone, i18n.T("compact.status.trim_sufficient",
 			FormatPayloadSize(before), FormatPayloadSize(current)))
-		hc.setReport(CompactReport{Level: 1})
+		hc.finish(CompactReport{Level: 1}, beforeMsgs, before, history)
 		return history, nil
 	}
 
@@ -428,7 +464,7 @@ func (hc *HistoryCompactor) Compact(
 			)
 			hc.emitStatus(CompactStageDone, i18n.T("compact.status.summarize_applied",
 				beforeMsgs, len(history), FormatPayloadSize(before), FormatPayloadSize(current)))
-			hc.setReport(rep)
+			hc.finish(rep, beforeMsgs, before, history)
 			return history, nil
 		}
 		// The summary alone did not fit: the next compactions go straight
@@ -457,7 +493,7 @@ func (hc *HistoryCompactor) Compact(
 	)
 	hc.emitStatus(CompactStageDone, i18n.T("compact.status.truncated", beforeMsgs, len(history)))
 	rep.Level = 3
-	hc.setReport(rep)
+	hc.finish(rep, beforeMsgs, before, history)
 
 	return history, nil
 }

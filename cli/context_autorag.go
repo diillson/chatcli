@@ -16,9 +16,11 @@ package cli
 
 import (
 	"os"
+	"strconv"
 	"strings"
 
 	"github.com/diillson/chatcli/cli/ctxmgr"
+	"github.com/diillson/chatcli/pkg/pulse"
 )
 
 // attachAutoRagEnvVar is the global kill switch for the automatic RAG
@@ -54,18 +56,42 @@ func attachAutoRagEnabled() bool {
 //   - the kill switch is off;
 //   - no embedding provider (retrieval would silently degrade anyway);
 //   - the context is small enough that verbatim is the better deal.
+//
+// The decision is reported on the live dashboard with the guard that made
+// it, so an attach that silently stayed verbatim is explainable.
 func (h *ContextHandler) shouldAutoRag(ctx *ctxmgr.FileContext, flags attachFlags) bool {
+	upgrade, reason := h.autoRagDecision(ctx, flags)
+	if pulse.Enabled() {
+		pulse.Point(pulse.KindBackground, pulseAutoRagNode, "", pulse.StatusOK, map[string]string{
+			"upgraded": strconv.FormatBool(upgrade),
+			"reason":   reason,
+			"bytes":    strconv.FormatInt(ctx.TotalSize, 10),
+		})
+	}
+	return upgrade
+}
+
+// pulseAutoRagNode is the live-dashboard node of the /context attach
+// auto-RAG decision.
+const pulseAutoRagNode = "context:auto-rag"
+
+// autoRagDecision is shouldAutoRag with the guard that decided, as a fixed
+// label.
+func (h *ContextHandler) autoRagDecision(ctx *ctxmgr.FileContext, flags attachFlags) (bool, string) {
 	if flags.full || flags.retrievalTopK > 0 || len(flags.selectedChunks) > 0 {
-		return false
+		return false, "explicit choice"
 	}
 	if ctx.Mode == ctxmgr.ModeKnowledge {
-		return false
+		return false, "knowledge mode"
 	}
 	if !attachAutoRagEnabled() {
-		return false
+		return false, "disabled"
 	}
 	if !h.manager.RetrievalEnabled() {
-		return false
+		return false, "no embeddings"
 	}
-	return ctx.TotalSize >= attachAutoRagMinBytes
+	if ctx.TotalSize < attachAutoRagMinBytes {
+		return false, "small"
+	}
+	return true, "large"
 }

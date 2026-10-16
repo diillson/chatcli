@@ -25,6 +25,8 @@ import (
 	"os"
 	"strings"
 	"time"
+
+	"github.com/diillson/chatcli/pkg/pulse"
 )
 
 // CDPURLEnv attaches the session to an already running browser instead of
@@ -53,7 +55,7 @@ func resolveDevToolsWS(ctx context.Context, endpoint string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	client := &http.Client{Timeout: 5 * time.Second}
+	client := &http.Client{Timeout: 5 * time.Second, Transport: pulse.MeterTransport(nil)}
 	resp, err := client.Do(req) // #nosec G107 -- operator-set CHATCLI_BROWSER_CDP_URL, local DevTools endpoint
 	if err != nil {
 		return "", fmt.Errorf("reach %s: %w (start the browser with --remote-debugging-port=9222)", versionURL, err)

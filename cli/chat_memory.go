@@ -100,7 +100,7 @@ func memoryToolDefinition() models.ToolDefinition {
 // uses (global adapter). Errors come back as a tool-result string so the
 // model can correct the call instead of the turn failing.
 func (cli *ChatCLI) runChatMemory(ctx context.Context, argsJSON string) string {
-	out, err := plugins.NewBuiltinMemoryPlugin().Execute(ctx, []string{argsJSON})
+	out, err := tracedExecute(ctx, plugins.NewBuiltinMemoryPlugin(), []string{argsJSON}, "chat")
 	if err != nil {
 		return "memory error: " + err.Error()
 	}

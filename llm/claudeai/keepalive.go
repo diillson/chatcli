@@ -48,7 +48,13 @@ func (c *ClaudeClient) KeepPromptCacheWarm(ctx context.Context) (*models.UsageIn
 	if err != nil {
 		return nil, err
 	}
+	return client.LogKeepAliveRequest(ctx, c.logger, "CLAUDEAI", c.model, len(body), func() (*models.UsageInfo, error) {
+		return c.sendKeepAlive(ctx, body)
+	})
+}
 
+// sendKeepAlive posts one keep-alive body and returns the usage it reported.
+func (c *ClaudeClient) sendKeepAlive(ctx context.Context, body []byte) (*models.UsageInfo, error) {
 	resp, err := auth.DoWithRefresh(ctx, c.provider, func(token string) (*http.Response, error) {
 		req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.apiURL, bytes.NewReader(body))
 		if err != nil {

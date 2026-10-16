@@ -103,7 +103,10 @@ func (cli *ChatCLI) runChatTurnSerialized(
 	// One node per chat turn on the live dashboard, as the REPL turn has:
 	// a turn served over MCP, ACP, the gateway or the web UI is a turn of
 	// this process too. The outcome is the turn's error, if any.
-	span := pulse.Begin(pulse.KindTurn, pulseTurnChat, "")
+	ctx, span := pulse.BeginCtx(ctx, pulse.KindTurn, pulseTurnChat, "")
+	if span != nil {
+		span.With("provider", strings.ToLower(firstNonEmpty(o.Provider, cli.Provider))).With("model", firstNonEmpty(o.Model, cli.Model))
+	}
 	defer func() { span.EndErr(err) }()
 
 	// Swap in the session state; ALWAYS restore, error included — the REPL

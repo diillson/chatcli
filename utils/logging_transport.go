@@ -181,6 +181,12 @@ func (t *LoggingTransport) RoundTrip(req *http.Request) (*http.Response, error) 
 	// Resposta em streaming (SSE): ler o corpo inteiro aqui seguraria o
 	// stream até o servidor fechá-lo — o chamador receberia tudo de uma vez,
 	// com o corpo todo em memória. O corpo segue intocado para o chamador.
+	// Conexão promovida (101, ex.: WebSocket): o corpo é o stream de leitura
+	// e escrita que o chamador assume; embrulhá-lo esconderia o Write.
+	if resp.StatusCode == http.StatusSwitchingProtocols {
+		conn.Finish(resp.StatusCode, 0)
+		return resp, nil
+	}
 	if isEventStream(resp.Header.Get("Content-Type")) {
 		t.Logger.Debug("Corpo da Resposta em streaming: não capturado")
 		resp.Body = conn.Stream(resp.StatusCode, resp.Body)

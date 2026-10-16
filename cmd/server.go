@@ -303,17 +303,36 @@ func startServer(opts *ServerOptions, llmMgr manager.LLMManager, logger *zap.Log
 
 	// Co-locate the messaging gateway in this process when requested, sharing
 	// the server's hub broker for real-time cross-channel push.
-	if stopGW := startColocatedGateway(pluginCtx, llmMgr, srv, logger); stopGW != nil {
+	stopGW := startColocatedGateway(pluginCtx, llmMgr, srv, logger)
+	if stopGW != nil {
 		defer stopGW()
 	}
 
 	// Full turn engine over gRPC (opt-in): ChatTurn, RunCoder, RunAgent
 	// and tool RPCs on a ChatCLI hosted in this process.
-	if stopPipeline := initPipelineBackend(llmMgr, srv, logger); stopPipeline != nil {
+	stopPipeline := initPipelineBackend(llmMgr, srv, logger)
+	if stopPipeline != nil {
 		defer stopPipeline()
 	}
 
+	if stopPulse := startServerPulse(stopGW != nil || stopPipeline != nil, logger); stopPulse != nil {
+		defer stopPulse()
+	}
+
 	return srv.Start()
+}
+
+// startServerPulse starts live telemetry recording for a server that hosts no
+// ChatCLI. A hosted ChatCLI (the co-located gateway, the pipeline backend)
+// already records for the whole process, and a second recorder on the same
+// bus would spool every event twice; without either, nothing would record and
+// the gRPC calls would never reach the dashboard. It returns the stop func to
+// defer, or nil when the hosted ChatCLI records.
+func startServerPulse(hostsChatCLI bool, logger *zap.Logger) func() {
+	if hostsChatCLI {
+		return nil
+	}
+	return cli.StartPulseRecorder(context.Background(), "server", logger)
 }
 
 // startColocatedGateway runs the messaging gateway inside the server process

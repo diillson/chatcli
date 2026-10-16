@@ -29,9 +29,11 @@ import (
 	"context"
 	"github.com/diillson/chatcli/cli/workspace/memory"
 	"os"
+	"strconv"
 	"strings"
 
 	"github.com/diillson/chatcli/pkg/knowledge"
+	"github.com/diillson/chatcli/pkg/pulse"
 )
 
 const (
@@ -127,32 +129,79 @@ func (cli *ChatCLI) memoryAutoRecallBlockCtx(ctx context.Context, hints []string
 	if !memoryAutoRecallEnabled() || len(hints) == 0 {
 		return ""
 	}
+	ctx, span := pulse.BeginCtx(ctx, pulse.KindBackground, pulseAutoRecallNode, "")
+	var st autoRecallStats
 	block := ""
 	if !memoryProviderExclusive(os.Getenv(MemoryProviderEnv)) {
-		block = cli.builtinAutoRecallBlock(ctx, hints, query)
+		block = cli.builtinAutoRecallBlock(ctx, hints, query, &st)
 	}
 	// External memory provider (CHATCLI_MEMORY_PROVIDER=mcp:<server>): its
 	// answer rides after the embedded block, bounded, never blocking.
 	if ext := cli.externalMemoryRecall(ctx, query, hints); ext != "" {
+		st.external = true
 		fenced := externalRecallHeader + strings.TrimSpace(ext)
 		if block == "" {
-			return fenced
+			block = fenced
+		} else {
+			block = block + "\n" + fenced
 		}
-		return block + "\n" + fenced
 	}
+	st.report(span, len(hints), len(block))
 	return block
+}
+
+// pulseAutoRecallNode is the live-dashboard node of per-turn memory
+// auto-recall.
+const pulseAutoRecallNode = "memory:auto-recall"
+
+// autoRecallStats is what one auto-recall found, reported on its span.
+type autoRecallStats struct {
+	ranked   int  // candidates that cleared the floors
+	semantic bool // the vector index contributed scores
+	facts    int  // fact lines injected
+	episodes int  // episode lines injected
+	related  bool // the graph line was appended
+	external bool // the external provider answered
+}
+
+// report closes the auto-recall span with the counts. Content-free: only
+// sizes and booleans.
+func (st autoRecallStats) report(span *pulse.Span, hints, chars int) {
+	if span == nil {
+		return
+	}
+	span.With("hints", strconv.Itoa(hints)).
+		With("hits", strconv.Itoa(st.ranked)).
+		With("facts", strconv.Itoa(st.facts)).
+		With("episodes", strconv.Itoa(st.episodes)).
+		With("semantic", strconv.FormatBool(st.semantic)).
+		With("related", strconv.FormatBool(st.related)).
+		With("external", strconv.FormatBool(st.external)).
+		With("chars", strconv.Itoa(chars))
+	state := "nothing relevant"
+	if chars > 0 {
+		state = "injected"
+	}
+	span.Outcome(pulse.StatusOK, state)
 }
 
 // rankedAutoRecall ranks the facts auto-recall would inject for the turn
 // (lexical + semantic + temporal blend, floors applied, capped), with the
 // signals that ranked them. Shared by the block builder and /memory recall.
 func (cli *ChatCLI) rankedAutoRecall(ctx context.Context, hints []string, query string) []memory.RankedFact {
+	ranked, _ := cli.rankedAutoRecallSignals(ctx, hints, query)
+	return ranked
+}
+
+// rankedAutoRecallSignals is rankedAutoRecall reporting also whether the
+// vector index contributed semantic scores.
+func (cli *ChatCLI) rankedAutoRecallSignals(ctx context.Context, hints []string, query string) ([]memory.RankedFact, bool) {
 	if cli == nil || cli.memoryStore == nil {
-		return nil
+		return nil, false
 	}
 	mgr := cli.memoryStore.Manager()
 	if mgr == nil || mgr.Facts == nil {
-		return nil
+		return nil, false
 	}
 	cfg := mgr.GetConfig()
 	var semantic map[string]float64
@@ -175,11 +224,12 @@ func (cli *ChatCLI) rankedAutoRecall(ctx context.Context, hints []string, query 
 	if len(ranked) > autoRecallMaxFacts {
 		ranked = ranked[:autoRecallMaxFacts]
 	}
-	return ranked
+	return ranked, semantic != nil
 }
 
 // builtinAutoRecallBlock is the embedded facts + episodes recall.
-func (cli *ChatCLI) builtinAutoRecallBlock(ctx context.Context, hints []string, query string) string {
+// st (non-nil) receives what was found, for the auto-recall span.
+func (cli *ChatCLI) builtinAutoRecallBlock(ctx context.Context, hints []string, query string, st *autoRecallStats) string {
 	if cli.memoryStore == nil {
 		return ""
 	}
@@ -188,7 +238,8 @@ func (cli *ChatCLI) builtinAutoRecallBlock(ctx context.Context, hints []string, 
 		return ""
 	}
 
-	ranked := cli.rankedAutoRecall(ctx, hints, query)
+	ranked, semantic := cli.rankedAutoRecallSignals(ctx, hints, query)
+	st.ranked, st.semantic = len(ranked), semantic
 	if len(ranked) == 0 {
 		return ""
 	}
@@ -221,6 +272,7 @@ func (cli *ChatCLI) builtinAutoRecallBlock(ctx context.Context, hints []string, 
 	if len(accessed) == 0 {
 		return ""
 	}
+	st.facts = len(accessed)
 	// Reinforcement waits for evidence: the reply must draw on a fact
 	// before its access counter moves (memory_recall_evidence.go).
 	cli.noteRecalledFacts(shown)
@@ -236,6 +288,7 @@ func (cli *ChatCLI) builtinAutoRecallBlock(ctx context.Context, hints []string, 
 			}
 			b.WriteString(line)
 			b.WriteByte('\n')
+			st.episodes++
 		}
 	}
 
@@ -248,6 +301,7 @@ func (cli *ChatCLI) builtinAutoRecallBlock(ctx context.Context, hints []string, 
 		len(line)+1 <= autoRecallRelatedBudget {
 		b.WriteString(line)
 		b.WriteByte('\n')
+		st.related = true
 	}
 	return strings.TrimRight(b.String(), "\n")
 }

@@ -148,7 +148,7 @@ func formatCodeScript(ctx context.Context, input map[string]string, _ *engine.En
 		})
 
 		eng := engine.NewEngine(outWriter, errWriter, "")
-		err := eng.Execute(ctx, "exec", []string{"--cmd", f.cmd})
+		err := directExecute(ctx, eng, "exec", []string{"--cmd", f.cmd})
 		outWriter.Flush()
 		errWriter.Flush()
 
@@ -202,7 +202,7 @@ func fixImportsScript(ctx context.Context, input map[string]string, _ *engine.En
 	})
 
 	eng := engine.NewEngine(outWriter, errWriter, "")
-	err := eng.Execute(ctx, "exec", []string{"--cmd", cmd})
+	err := directExecute(ctx, eng, "exec", []string{"--cmd", cmd})
 	outWriter.Flush()
 	errWriter.Flush()
 

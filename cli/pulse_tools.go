@@ -12,10 +12,16 @@
 package cli
 
 import (
+	"context"
+	"encoding/json"
 	"errors"
+	"regexp"
 	"strconv"
+	"strings"
 
+	"github.com/diillson/chatcli/cli/agent/runs"
 	"github.com/diillson/chatcli/cli/agentevents"
+	"github.com/diillson/chatcli/cli/plugins"
 	"github.com/diillson/chatcli/pkg/pulse"
 )
 
@@ -33,6 +39,12 @@ func (a *AgentMode) pulseToolBegin(tc agentevents.ToolCall) {
 		a.pulseTools = make(map[string]*pulse.Span)
 	}
 	a.pulseTools[tc.ID] = span
+}
+
+// pulseToolContext returns ctx with the tool call's span as the innermost
+// parent, so what the tool starts hangs from it.
+func (a *AgentMode) pulseToolContext(ctx context.Context, callID string) context.Context {
+	return a.pulseTools[callID].Context(ctx)
 }
 
 // pulseToolEnd closes the span of a finished tool call.
@@ -74,3 +86,46 @@ func (a *AgentMode) pulseReactEnd(span *pulse.Span, err error) {
 	}
 	span.Outcome(pulse.StatusOf(err), turns)
 }
+
+// tracedExecute runs a builtin outside the agent loop's dispatch — a chat
+// turn's sanctioned tools, a MoA member's recall, a worker's context tools
+// — as a tool node on the dashboard, hung from whatever started it. origin
+// says which path ran it; arguments and output stay off the bus, only the
+// subcommand and the output size travel.
+func tracedExecute(ctx context.Context, p plugins.Plugin, argv []string, origin string) (string, error) {
+	ctx, span := pulse.BeginCtx(ctx, pulse.KindTool, p.Name(), runs.FromContext(ctx).ID())
+	if span == nil {
+		return p.Execute(ctx, argv)
+	}
+	span.With("origin", origin).With("subcmd", toolSubcmd(argv))
+	out, err := p.Execute(ctx, argv)
+	span.With("out_bytes", strconv.Itoa(len(out))).EndErr(err)
+	return out, err
+}
+
+// toolSubcmd is the subcommand of a call in envelope ({"cmd":...}) or argv
+// form, "" when there is none. Only a short identifier counts: a builtin
+// that takes a positional value first (@webfetch's URL, @websearch's query
+// words) must never put that value on the bus.
+func toolSubcmd(argv []string) string {
+	if len(argv) == 0 {
+		return ""
+	}
+	first := strings.TrimSpace(argv[0])
+	if strings.HasPrefix(first, "{") {
+		var env struct {
+			Cmd string `json:"cmd"`
+		}
+		if json.Unmarshal([]byte(first), &env) != nil {
+			return ""
+		}
+		first = env.Cmd
+	}
+	if !toolSubcmdRe.MatchString(first) {
+		return ""
+	}
+	return first
+}
+
+// toolSubcmdRe is what a subcommand looks like: a short lower-case word.
+var toolSubcmdRe = regexp.MustCompile(`^[a-z][a-z0-9_-]{0,23}$`)

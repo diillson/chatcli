@@ -137,7 +137,7 @@ func smartCommitScript(ctx context.Context, input map[string]string, _ *engine.E
 		})
 
 		eng := engine.NewEngine(outWriter, errWriter, "")
-		err := eng.Execute(ctx, c.cmd, c.args)
+		err := directExecute(ctx, eng, c.cmd, c.args)
 		outWriter.Flush()
 		errWriter.Flush()
 
@@ -176,7 +176,7 @@ func reviewChangesScript(ctx context.Context, input map[string]string, _ *engine
 		})
 
 		eng := engine.NewEngine(outWriter, errWriter, "")
-		err := eng.Execute(ctx, c.cmd, c.args)
+		err := directExecute(ctx, eng, c.cmd, c.args)
 		outWriter.Flush()
 		errWriter.Flush()
 

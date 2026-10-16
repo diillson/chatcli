@@ -94,13 +94,19 @@ func (r *RelevanceRetriever) SetGraph(src GraphSource) {
 // empty string to skip augmentation entirely (rare; callers usually
 // have at least one user message to feed in).
 func (r *RelevanceRetriever) RetrieveWithHyDE(ctx context.Context, query string, hints []string, augmenter *HyDEAugmenter, vectors *VectorIndex) string {
+	return r.assemble(r.rankWithHyDE(ctx, query, hints, augmenter, vectors))
+}
+
+// rankWithHyDE is the ranking half of RetrieveWithHyDE: the facts it would
+// assemble, best first.
+func (r *RelevanceRetriever) rankWithHyDE(ctx context.Context, query string, hints []string, augmenter *HyDEAugmenter, vectors *VectorIndex) []*Fact {
 	hasVectors := vectors != nil && vectors.Enabled()
 
 	// Strict no-regression: with neither augmenter nor a live vector index
 	// there is no semantic signal to fuse, so fall through to the exact
 	// keyword path callers relied on before HyDE existed.
 	if augmenter == nil && !hasVectors {
-		return r.Retrieve(hints)
+		return r.rank(hints)
 	}
 
 	// Phase 3a — widen the lexical net with hypothesis-derived keywords.
@@ -131,8 +137,7 @@ func (r *RelevanceRetriever) RetrieveWithHyDE(ctx context.Context, query string,
 		}
 	}
 
-	ranked := r.facts.SearchBlended(expanded, semantic, r.config.RankWeights)
-	return r.assemble(ranked)
+	return r.facts.SearchBlended(expanded, semantic, r.config.RankWeights)
 }
 
 // Retrieve returns memory context tailored to the current conversation.
@@ -140,13 +145,15 @@ func (r *RelevanceRetriever) RetrieveWithHyDE(ctx context.Context, query string,
 // It uses the lexical+temporal scorer (Search); the semantic blend is reserved
 // for the HyDE path, which is the only caller with a query to embed.
 func (r *RelevanceRetriever) Retrieve(hints []string) string {
-	var ranked []*Fact
+	return r.assemble(r.rank(hints))
+}
+
+// rank is the ranking half of Retrieve: the facts it would assemble.
+func (r *RelevanceRetriever) rank(hints []string) []*Fact {
 	if len(hints) > 0 {
-		ranked = r.facts.Search(hints)
-	} else {
-		ranked = r.facts.GetAll()
+		return r.facts.Search(hints)
 	}
-	return r.assemble(ranked)
+	return r.facts.GetAll()
 }
 
 // assemble renders the budget-bounded memory context from a PRE-RANKED fact

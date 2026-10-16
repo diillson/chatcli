@@ -23,6 +23,7 @@ import (
 	"context"
 	"os"
 	"regexp"
+	"strconv"
 	"strings"
 	"sync/atomic"
 
@@ -199,12 +200,13 @@ func (cli *ChatCLI) RunCoderCaptured(ctx context.Context, task string) (string, 
 
 // execBuiltin runs a plugin, capturing any streamed output into the result.
 func execBuiltin(ctx context.Context, p plugins.Plugin, argv []string) (string, error) {
-	var span *pulse.Span
-	if pulse.Enabled() {
-		span = pulse.Begin(pulse.KindTool, p.Name(), runs.FromContext(ctx).ID())
+	ctx, span := pulse.BeginCtx(ctx, pulse.KindTool, p.Name(), runs.FromContext(ctx).ID())
+	if span == nil {
+		return runBuiltin(ctx, p, argv)
 	}
+	span.With("origin", "rpc").With("subcmd", toolSubcmd(argv))
 	out, err := runBuiltin(ctx, p, argv)
-	span.EndErr(err)
+	span.With("out_bytes", strconv.Itoa(len(out))).EndErr(err)
 	return out, err
 }
 

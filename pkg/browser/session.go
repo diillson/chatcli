@@ -419,6 +419,8 @@ func (s *Session) appendConsole(e ConsoleEntry) {
 // Navigate loads url and waits for the load event (bounded — a page that
 // never fires load still returns with its current state).
 func (s *Session) Navigate(ctx context.Context, url string) (title, finalURL string, err error) {
+	span := s.beginAction(ctx, "navigate")
+	defer func() { endNavigation(span, url, finalURL, err) }()
 	if err := checkNavigation(url); err != nil {
 		return "", "", err
 	}
@@ -443,7 +445,9 @@ func (s *Session) Navigate(ctx context.Context, url string) (title, finalURL str
 
 // Back goes one step back in history and reports the new identity.
 func (s *Session) Back(ctx context.Context) (title, finalURL string, err error) {
-	_, err = s.Eval(ctx, "history.back()")
+	span := s.beginAction(ctx, "back")
+	defer func() { endNavigation(span, "", finalURL, err) }()
+	_, err = s.evalRaw(ctx, "history.back()")
 	if err != nil {
 		return "", "", err
 	}
@@ -503,6 +507,14 @@ const snapshotJS = `(() => {
 // interactive elements (click/type targets) and visible text capped at
 // maxBytes (0 = default).
 func (s *Session) Snapshot(ctx context.Context, maxBytes int) (string, error) {
+	span := s.beginAction(ctx, "snapshot")
+	v, err := s.doSnapshot(ctx, maxBytes)
+	span.EndErr(err)
+	return v, err
+}
+
+// doSnapshot is Snapshot under its dashboard node.
+func (s *Session) doSnapshot(ctx context.Context, maxBytes int) (string, error) {
 	if maxBytes <= 0 {
 		maxBytes = defaultSnapshotBytes
 	}
@@ -557,6 +569,14 @@ func resolveSelector(target string) string {
 
 // Click clicks the element addressed by a snapshot ref or CSS selector.
 func (s *Session) Click(ctx context.Context, target string) error {
+	span := s.beginAction(ctx, "click")
+	err := s.doClick(ctx, target)
+	span.EndErr(err)
+	return err
+}
+
+// doClick is Click under its dashboard node.
+func (s *Session) doClick(ctx context.Context, target string) error {
 	sel := resolveSelector(target)
 	selJSON, _ := json.Marshal(sel)
 	js := fmt.Sprintf(`(() => {
@@ -579,6 +599,14 @@ func (s *Session) Click(ctx context.Context, target string) error {
 // Type focuses the element, sets its value with proper input events, and
 // optionally submits the enclosing form.
 func (s *Session) Type(ctx context.Context, target, text string, submit bool) error {
+	span := s.beginAction(ctx, "type")
+	err := s.doType(ctx, target, text, submit)
+	span.EndErr(err)
+	return err
+}
+
+// doType is Type under its dashboard node.
+func (s *Session) doType(ctx context.Context, target, text string, submit bool) error {
 	sel := resolveSelector(target)
 	selJSON, _ := json.Marshal(sel)
 	textJSON, _ := json.Marshal(text)
@@ -610,6 +638,14 @@ func (s *Session) Type(ctx context.Context, target, text string, submit bool) er
 // Scroll moves the viewport: direction up|down|top|bottom, or into view of a
 // ref/selector when target is non-empty.
 func (s *Session) Scroll(ctx context.Context, direction, target string) error {
+	span := s.beginAction(ctx, "scroll")
+	err := s.doScroll(ctx, direction, target)
+	span.EndErr(err)
+	return err
+}
+
+// doScroll is Scroll under its dashboard node.
+func (s *Session) doScroll(ctx context.Context, direction, target string) error {
 	var js string
 	if strings.TrimSpace(target) != "" {
 		selJSON, _ := json.Marshal(resolveSelector(target))
@@ -639,6 +675,14 @@ func (s *Session) Scroll(ctx context.Context, direction, target string) error {
 // Eval runs a JavaScript expression in the page and returns its value
 // rendered as text (JSON for objects).
 func (s *Session) Eval(ctx context.Context, expression string) (string, error) {
+	span := s.beginAction(ctx, "eval")
+	v, err := s.doEval(ctx, expression)
+	span.EndErr(err)
+	return v, err
+}
+
+// doEval is Eval under its dashboard node.
+func (s *Session) doEval(ctx context.Context, expression string) (string, error) {
 	return s.evalRaw(ctx, expression)
 }
 
@@ -690,6 +734,14 @@ func (s *Session) evalRaw(ctx context.Context, expression string) (string, error
 
 // Screenshot captures the viewport as PNG into path (directories created).
 func (s *Session) Screenshot(ctx context.Context, path string) error {
+	span := s.beginAction(ctx, "screenshot")
+	err := s.doScreenshot(ctx, path)
+	span.EndErr(err)
+	return err
+}
+
+// doScreenshot is Screenshot under its dashboard node.
+func (s *Session) doScreenshot(ctx context.Context, path string) error {
 	return s.captureScreenshot(ctx, path, map[string]interface{}{"format": "png"})
 }
 

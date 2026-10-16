@@ -8,9 +8,11 @@ package cli
 import (
 	"context"
 	"errors"
+	"strconv"
 	"sync"
 
 	"github.com/diillson/chatcli/models"
+	"github.com/diillson/chatcli/pkg/pulse"
 	"go.uber.org/zap"
 )
 
@@ -61,7 +63,9 @@ func newHubSync(client HubClient, logger *zap.Logger) *HubSync {
 // one — so we never load an old conversation or let the database grow. The hub
 // is a momentary cross-channel bridge; long-term recall lives in the memory
 // system, not here.
-func (hs *HubSync) startFresh(ctx context.Context) error {
+func (hs *HubSync) startFresh(ctx context.Context) (err error) {
+	ctx, span := pulseBeginHub(ctx, "hub:open")
+	defer func() { span.With("mode", "fresh").EndErr(err) }()
 	_, principal, err := hs.client.ResolveActiveConversation(ctx, "")
 	if err != nil {
 		return err
@@ -88,7 +92,9 @@ const hubResumeMaxEvents = 24
 // the point is picking up the thread the user has going in the REPL or on
 // the gateway channels. The watermark is advanced so the first pull splices
 // only a bounded tail of the backlog.
-func (hs *HubSync) startResume(ctx context.Context) error {
+func (hs *HubSync) startResume(ctx context.Context) (err error) {
+	ctx, span := pulseBeginHub(ctx, "hub:open")
+	defer func() { span.With("mode", "resume").EndErr(err) }()
 	convID, principal, err := hs.client.ResolveActiveConversation(ctx, "")
 	if err != nil {
 		return err
@@ -114,8 +120,10 @@ func (hs *HubSync) mirrorTurn(ctx context.Context, userText, assistantText strin
 	if convID == "" {
 		return
 	}
-	hs.append(ctx, convID, models.ConvRoleUser, userText)
-	hs.append(ctx, convID, models.ConvRoleAssistant, assistantText)
+	ctx, span := pulseBeginHub(ctx, "hub:mirror")
+	n, errUser := hs.append(ctx, convID, models.ConvRoleUser, userText)
+	m, errAssistant := hs.append(ctx, convID, models.ConvRoleAssistant, assistantText)
+	span.With("events", strconv.Itoa(n+m)).EndErr(errors.Join(errUser, errAssistant))
 }
 
 // pull fetches turns appended since the last sync (by any channel except our
@@ -130,8 +138,10 @@ func (hs *HubSync) pull(ctx context.Context) []models.Message {
 	if convID == "" {
 		return nil
 	}
+	ctx, span := pulseBeginHub(ctx, "hub:pull")
 	events, err := hs.client.ReadConversation(ctx, convID, since, 0)
 	if err != nil {
+		span.EndErr(err)
 		hs.logger.Warn("hub sync: pull failed", zap.Error(err))
 		return nil
 	}
@@ -147,12 +157,15 @@ func (hs *HubSync) pull(ctx context.Context) []models.Message {
 		msgs = append(msgs, ev.ToMessage())
 	}
 	hs.mu.Unlock()
+	// events: what the hub returned; spliced: what came from other channels.
+	span.With("events", strconv.Itoa(len(events))).With("spliced", strconv.Itoa(len(msgs))).End(pulse.StatusOK)
 	return msgs
 }
 
-func (hs *HubSync) append(ctx context.Context, convID, role, content string) {
+// append records one event and reports how many were stored (0 or 1).
+func (hs *HubSync) append(ctx context.Context, convID, role, content string) (int, error) {
 	if content == "" {
-		return
+		return 0, nil
 	}
 	stored, err := hs.client.AppendEvent(ctx, models.ConversationEvent{
 		ConvID:  convID,
@@ -162,18 +175,21 @@ func (hs *HubSync) append(ctx context.Context, convID, role, content string) {
 	})
 	if err != nil {
 		hs.logger.Warn("hub sync: append failed", zap.String("role", role), zap.Error(err))
-		return
+		return 0, err
 	}
 	hs.mu.Lock()
 	if stored.Seq > hs.lastSeq {
 		hs.lastSeq = stored.Seq
 	}
 	hs.mu.Unlock()
+	return 1, nil
 }
 
 // newSession rotates the shared conversation to a fresh thread, propagated to
 // every channel resolving the same principal on their next turn.
-func (hs *HubSync) newSession(ctx context.Context) error {
+func (hs *HubSync) newSession(ctx context.Context) (err error) {
+	ctx, span := pulseBeginHub(ctx, "hub:open")
+	defer func() { span.With("mode", "rotate").EndErr(err) }()
 	convID, err := hs.client.NewConversation(ctx, "")
 	if err != nil {
 		return err
@@ -326,4 +342,14 @@ func (cli *ChatCLI) mirrorHubTurn(ctx context.Context, userText, assistantText s
 		return
 	}
 	cli.hubSync.mirrorTurn(ctx, persistRedact(userText), persistRedact(assistantText))
+}
+
+// pulseBeginHub opens the dashboard span of one exchange with the
+// conversation hub, under the turn or request in ctx. Only counts and the
+// outcome are reported: never a conversation id, a principal or a message.
+func pulseBeginHub(ctx context.Context, name string) (context.Context, *pulse.Span) {
+	if !pulse.Enabled() {
+		return ctx, nil
+	}
+	return pulse.BeginCtx(ctx, pulse.KindBackground, name, "")
 }

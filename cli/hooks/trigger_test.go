@@ -17,7 +17,7 @@ import (
 func TestCommandHook_ReceivesTrigger(t *testing.T) {
 	m := NewManager(zap.NewNop())
 	res := m.executeCommandHook(context.Background(), HookConfig{Name: "t", Event: EventPreCompact, Type: HookTypeCommand, Command: "echo trigger=$CHATCLI_HOOK_TRIGGER; cat"},
-		HookEvent{Type: EventPreCompact, Trigger: "recovery", Timestamp: time.Now()}, 5*time.Second)
+		HookEvent{Type: EventPreCompact, Trigger: "recovery", Timestamp: time.Now()}, 5*time.Second, &hookTrace{})
 	if res == nil || !strings.Contains(res.Output, "trigger=recovery") || !strings.Contains(res.Output, `"trigger":"recovery"`) {
 		t.Fatalf("trigger must reach env and JSON: %+v", res)
 	}

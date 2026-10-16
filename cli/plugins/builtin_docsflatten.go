@@ -233,9 +233,18 @@ func (p *BuiltinDocsFlattenPlugin) ExecuteWithStream(ctx context.Context, args [
 			onOutput(line)
 		}
 	}
+	ctx, span := beginDocsFlattenSpan(ctx, cfg)
+	st := &docsFlattenStats{}
+	out, err := p.flatten(ctx, cfg, emit, st)
+	st.end(span, err)
+	return out, err
+}
 
+// flatten runs the pipeline for parsed arguments, recording what it did in
+// st for the dashboard.
+func (p *BuiltinDocsFlattenPlugin) flatten(ctx context.Context, cfg docsFlattenArgs, emit func(string), st *docsFlattenStats) (string, error) {
 	if cfg.URL != "" {
-		return p.executeURL(ctx, cfg, emit)
+		return p.executeURL(ctx, cfg, emit, st)
 	}
 
 	root, provenance, cleanup, err := resolveDocsFlattenRoot(ctx, cfg, emit)
@@ -248,6 +257,7 @@ func (p *BuiltinDocsFlattenPlugin) ExecuteWithStream(ctx context.Context, args [
 	if err != nil {
 		return "", fmt.Errorf("@docs-flatten: %w", err)
 	}
+	st.files, st.chunks = files, len(chunks)
 	if len(chunks) == 0 {
 		if cfg.Kind == "docs" {
 			if n, exts := docsFlattenCodeCandidates(root); n > 0 {
@@ -265,6 +275,7 @@ func (p *BuiltinDocsFlattenPlugin) ExecuteWithStream(ctx context.Context, args [
 	} else {
 		imageReport = markersImageReport(chunks)
 	}
+	st.images, st.chunks = imageReport, len(chunks)
 	if imageReport.NeedConfirm > 0 {
 		return imageReport.confirmRequest(), nil
 	}

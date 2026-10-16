@@ -98,15 +98,13 @@ func NewSkillsShRegistry(entry RegistryEntry, logger *zap.Logger) *SkillsShRegis
 	}
 	baseURL := strings.TrimRight(entry.URL, "/")
 	return &SkillsShRegistry{
-		name:    entry.Name,
-		baseURL: baseURL,
-		enabled: entry.IsActive,
-		httpClient: &http.Client{
-			Timeout: 30 * time.Second,
-		},
-		cacheTTL: cacheTTL,
-		cache:    make(map[string]skillsshCacheEntry),
-		logger:   logger,
+		name:       entry.Name,
+		baseURL:    baseURL,
+		enabled:    entry.IsActive,
+		httpClient: newRegistryHTTPClient(30 * time.Second),
+		cacheTTL:   cacheTTL,
+		cache:      make(map[string]skillsshCacheEntry),
+		logger:     logger,
 	}
 }
 
@@ -582,7 +580,7 @@ func FetchAuditData(ctx context.Context, source string, skillSlugs []string) (Au
 	req.Header.Set("User-Agent", skillsshUserAgent)
 	req.Header.Set("Accept", "application/json")
 
-	client := &http.Client{Timeout: skillsshAuditTimeout}
+	client := newRegistryHTTPClient(skillsshAuditTimeout)
 	resp, err := client.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("fetching audit data: %w", err)

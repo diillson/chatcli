@@ -134,6 +134,11 @@ func New(cfg Config, llmMgr manager.LLMManager, sessionStore SessionStore, logge
 		auditLogger.StreamInterceptor(),
 	}, streamChain...)
 
+	// Live dashboard outermost: a call refused by validation, auth or the
+	// rate limiter still shows, and the handler runs under the call's node.
+	unaryChain = append([]grpc.UnaryServerInterceptor{pulseUnaryInterceptor()}, unaryChain...)
+	streamChain = append([]grpc.StreamServerInterceptor{pulseStreamInterceptor()}, streamChain...)
+
 	// --- Security: Message Size Limits (H2) ---
 	maxRecvMsgSize := envIntOrDefault("CHATCLI_MAX_RECV_MSG_SIZE", 50*1024*1024) // 50MB
 	maxSendMsgSize := envIntOrDefault("CHATCLI_MAX_SEND_MSG_SIZE", 50*1024*1024) // 50MB

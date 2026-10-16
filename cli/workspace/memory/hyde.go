@@ -94,7 +94,14 @@ func (h *HyDEAugmenter) Augment(ctx context.Context, query string, originalHints
 	prompt := h.cfg.Prompt + "\n\nQuestion: " + q + "\n\nHypothetical answer:"
 	var span *pulse.Span
 	if pulse.Enabled() {
-		span = pulse.BeginPattern(pulse.PatternRAGHyDE, runs.FromContext(ctx).ID())
+		// Under the memory retrieval that asked for it when there is one,
+		// else under the run.
+		parent := pulse.ParentFrom(ctx)
+		if parent == "" {
+			parent = runs.FromContext(ctx).ID()
+		}
+		span = pulse.BeginPattern(pulse.PatternRAGHyDE, parent)
+		ctx = span.Context(ctx)
 	}
 	hyp, err := h.llm(ctx, prompt)
 	if err != nil {

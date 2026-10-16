@@ -196,7 +196,7 @@ func renameSymbolScript(ctx context.Context, input map[string]string, _ *engine.
 
 			patched := 0
 			for j := 0; j < count; j++ {
-				patchErr := eng.Execute(ctx, "patch", []string{
+				patchErr := directExecute(ctx, eng, "patch", []string{
 					"--file", filePath,
 					"--search", oldName,
 					"--replace", newName,
