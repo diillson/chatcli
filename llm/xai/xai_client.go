@@ -93,6 +93,15 @@ func (c *XAIClient) SendPrompt(ctx context.Context, prompt string, history []mod
 		}
 		messages = append(messages, map[string]interface{}{"role": role, "content": visionwire.OpenAIMessageContent(catalog.ProviderXAI, c.model, msg)})
 	}
+	// The prompt is the turn's request: send it unless the history already
+	// ends with it, as every other client does. Callers that pass a prompt
+	// outside the history (a MoA review round or aggregation, a one-off
+	// helper call) otherwise sent Grok no request at all.
+	if len(history) == 0 || history[len(history)-1].Role != "user" || history[len(history)-1].Content != prompt {
+		if strings.TrimSpace(prompt) != "" {
+			messages = append(messages, map[string]interface{}{"role": "user", "content": prompt})
+		}
+	}
 
 	payload := map[string]interface{}{
 		"model":      c.model,
