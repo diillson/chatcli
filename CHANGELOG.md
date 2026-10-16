@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.220.0](https://github.com/diillson/chatcli/compare/v1.219.0...v1.220.0) (2026-10-16)
+
+
+### Features
+
+* **moa:** show each panel member's position and where the answers diverged ([#1797](https://github.com/diillson/chatcli/issues/1797)) ([4531828](https://github.com/diillson/chatcli/commit/45318283785d7d65724d95443bd5f78bf3dfddec))
+
 ## [1.219.0](https://github.com/diillson/chatcli/compare/v1.218.0...v1.219.0) (2026-10-15)
 
 
