@@ -668,12 +668,9 @@ chatcli/
 
 ## Contributing
 
-1. Fork the repository
-2. Create a branch from `main`: `git checkout -b feature/my-feature`
-3. Commit and push
-4. Open a Pull Request
+Contributions are welcome. [CONTRIBUTING.md](CONTRIBUTING.md) covers the setup, the conventions and what CI checks on every pull request, and everyone taking part follows the [Code of Conduct](CODE_OF_CONDUCT.md).
 
-See [`docs/`](docs/) for detailed architecture, quality pipeline, and operator guides.
+Found a vulnerability? Report it privately as described in [SECURITY.md](SECURITY.md), never in a public issue.
 
 ---
 
