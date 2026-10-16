@@ -8,12 +8,18 @@
 
 <p align="center">
   <strong>One binary for AI everywhere you work:<br>
-  the terminal, your editor, your chat apps, a gRPC server and Kubernetes.</strong>
+  the terminal, your editor, your chat apps and webhooks, a gRPC server and Kubernetes.</strong>
 </p>
 
 <p align="center">
   <sub>14 LLM providers · an autonomous coder agent · a seven-pattern quality harness<br>
   Mixture-of-Agents with cross-review · a live APM-style dashboard</sub>
+</p>
+
+<p align="center">
+  <a href="https://chatcli.edilsonfreitas.com"><img src="https://img.shields.io/static/v1?label=%F0%9F%93%96%20Read%20the%20docs&message=https%3A%2F%2Fchatcli.edilsonfreitas.com&color=0d9488&style=for-the-badge" alt="Read the documentation at https://chatcli.edilsonfreitas.com"></a><br>
+  <a href="https://chatcli.edilsonfreitas.com"><strong>https://chatcli.edilsonfreitas.com</strong></a><br>
+  <sub>The official website: guides, cookbooks, configuration and the full reference for every feature, in English and Portuguese.</sub>
 </p>
 
 <p align="center">
@@ -55,7 +61,7 @@
 - **Every major model, one interface.** Switch provider or model mid-conversation; fail over automatically; keep cost, tokens and prompt-cache use in view.
 - **An agent that does the work.** `/coder` reads, edits, runs and tests code under a security policy you control, with checkpoints you can rewind.
 - **Answers you can trust more.** Self-Refine, Chain-of-Verification, Reflexion, RAG with HyDE and Mixture-of-Agents with cross-review cross-check what models say.
-- **The same brain everywhere.** The terminal, a browser UI, editors over ACP, any MCP client, Telegram, Slack, Discord, WhatsApp, a gRPC server and a Kubernetes operator share sessions, memory and tools.
+- **The same brain everywhere.** The terminal, a browser UI, editors over ACP, any MCP client, Telegram, Slack, Discord, WhatsApp, webhooks, a gRPC server and a Kubernetes operator share sessions, memory and tools.
 - **Built to run where it matters.** Signed releases, fail-closed defaults, workspace trust, audit logs and a published security process.
 
 ## Quick start
