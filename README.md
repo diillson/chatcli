@@ -1,689 +1,253 @@
 <p align="center">
   <a href="https://chatcli.edilsonfreitas.com">
-    <img src="https://raw.githubusercontent.com/diillson/chatcli/main/assets/chatcli.png" alt="ChatCLI Logo" width="300">
+    <img src="https://raw.githubusercontent.com/diillson/chatcli/main/assets/chatcli.png" alt="ChatCLI" width="280">
   </a>
 </p>
 
 <h1 align="center">ChatCLI</h1>
-<p align="center">
-  <strong>Unified AI platform for terminal, gRPC server, and Kubernetes.</strong><br>
-  <sub>14 providers · 14 autonomous agents · 7-pattern quality pipeline · one binary.</sub>
-</p>
-
-<div align="center">
-
-<a href="https://github.com/diillson/chatcli/actions/workflows/1-ci.yml"><img src="https://github.com/diillson/chatcli/actions/workflows/1-ci.yml/badge.svg" alt="CI"/></a>
-<a href="https://github.com/diillson/chatcli/actions/workflows/security-scan.yml"><img src="https://github.com/diillson/chatcli/actions/workflows/security-scan.yml/badge.svg" alt="Security Scan"/></a>
-<a href="https://github.com/diillson/chatcli/releases"><img src="https://img.shields.io/github/v/release/diillson/chatcli" alt="Release"/></a>
-<a href="https://artifacthub.io/packages/search?ts_query_web=chatcli&sort=relevance&page=1"><img src="https://img.shields.io/endpoint?url=https://artifacthub.io/badge/repository/chatcli" alt="ArtifactHub"/></a>
-<a href="https://pkg.go.dev/github.com/diillson/chatcli"><img src="https://pkg.go.dev/badge/github.com/diillson/chatcli.svg" alt="Go Reference"/></a>
-
-<br>
-
-<img src="https://img.shields.io/github/go-mod/go-version/diillson/chatcli?label=Go" alt="Go version"/>
-<img src="https://img.shields.io/github/license/diillson/chatcli" alt="License"/>
-<img src="https://img.shields.io/github/last-commit/diillson/chatcli" alt="Last commit"/>
-<img src="https://img.shields.io/github/languages/code-size/diillson/chatcli" alt="Code size"/>
-<img src="https://img.shields.io/badge/platforms-linux%20%7C%20macOS%20%7C%20windows-informational" alt="Platforms"/>
-<img src="https://img.shields.io/badge/Trivy-image%20scanning-00C9A7?logo=aquasecurity" alt="Trivy"/>
-<img src="https://img.shields.io/badge/Sigstore-cosign%20signed-4B32C3?logo=sigstore" alt="Cosign Signed"/>
-<img src="https://img.shields.io/badge/SBOM-CycloneDX-green" alt="SBOM"/>
-<img src="https://img.shields.io/badge/observability-Prometheus-E6522C?logo=prometheus" alt="Prometheus"/>
-
-</div>
-
-<br>
 
 <p align="center">
-  <a href="README_PT.md">Português</a> &bull;
-  <a href="https://chatcli.edilsonfreitas.com">Full documentation</a> &bull;
-  <a href="#architecture">Architecture</a> &bull;
-  <a href="#observability">Observability</a>
+  <strong>One binary for AI in the terminal, in your editor, on your chat apps, behind a gRPC server and inside Kubernetes.</strong><br>
+  <sub>14 LLM providers · an autonomous coder agent · a seven-pattern quality harness · Mixture-of-Agents with cross-review · a live APM-style dashboard</sub>
 </p>
-
----
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/diillson/chatcli/main/assets/chatcli-demo.gif" alt="ChatCLI Demo" width="800">
+  <a href="https://github.com/diillson/chatcli/actions/workflows/1-ci.yml"><img src="https://github.com/diillson/chatcli/actions/workflows/1-ci.yml/badge.svg" alt="CI"></a>
+  <a href="https://github.com/diillson/chatcli/actions/workflows/quality-gate.yml"><img src="https://github.com/diillson/chatcli/actions/workflows/quality-gate.yml/badge.svg" alt="Quality Gate"></a>
+  <a href="https://github.com/diillson/chatcli/actions/workflows/security-scan.yml"><img src="https://github.com/diillson/chatcli/actions/workflows/security-scan.yml/badge.svg" alt="Security Scan"></a>
+  <a href="https://github.com/diillson/chatcli/releases/latest"><img src="https://img.shields.io/github/v/release/diillson/chatcli?sort=semver&color=2ea44f" alt="Latest release"></a>
+  <a href="https://pkg.go.dev/github.com/diillson/chatcli"><img src="https://pkg.go.dev/badge/github.com/diillson/chatcli.svg" alt="Go Reference"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/github/license/diillson/chatcli?color=blue" alt="License"></a>
 </p>
 
-<br>
+<p align="center">
+  <a href="SECURITY.md#verifying-what-you-install"><img src="https://img.shields.io/badge/releases-Ed25519%20signed-1f6feb" alt="Signed releases"></a>
+  <a href="SECURITY.md#verifying-what-you-install"><img src="https://img.shields.io/badge/images-cosign%20signed-4B32C3?logo=sigstore&logoColor=white" alt="Cosign-signed images"></a>
+  <img src="https://img.shields.io/badge/SBOM-included-3fb950" alt="SBOM">
+  <img src="https://img.shields.io/badge/scanned-Trivy%20%C2%B7%20CodeQL%20%C2%B7%20gosec-00C9A7" alt="Scanned">
+  <a href="https://artifacthub.io/packages/search?ts_query_web=chatcli"><img src="https://img.shields.io/endpoint?url=https://artifacthub.io/badge/repository/chatcli" alt="Artifact Hub"></a>
+</p>
 
-> **ChatCLI** connects the industry's leading LLMs to a single, extensible interface — from `chatcli -p` in your terminal to a Kubernetes operator with an autonomous AIOps pipeline, passing through a production-ready gRPC server with authentication, failover, and Prometheus metrics.
+<p align="center">
+  <img src="https://img.shields.io/github/go-mod/go-version/diillson/chatcli?logo=go&label=Go" alt="Go version">
+  <img src="https://img.shields.io/badge/platforms-Linux%20%C2%B7%20macOS%20%C2%B7%20Windows-informational" alt="Platforms">
+  <img src="https://img.shields.io/badge/i18n-English%20%C2%B7%20Portugu%C3%AAs-informational" alt="Languages">
+  <a href="https://github.com/diillson/chatcli/stargazers"><img src="https://img.shields.io/github/stars/diillson/chatcli?style=flat&logo=github" alt="Stars"></a>
+  <img src="https://img.shields.io/github/last-commit/diillson/chatcli" alt="Last commit">
+</p>
 
-<br>
+<p align="center">
+  <a href="https://chatcli.edilsonfreitas.com"><strong>Documentation</strong></a> ·
+  <a href="#quick-start"><strong>Quick start</strong></a> ·
+  <a href="#highlights"><strong>Highlights</strong></a> ·
+  <a href="#security"><strong>Security</strong></a> ·
+  <a href="CONTRIBUTING.md"><strong>Contributing</strong></a> ·
+  <a href="README_PT.md"><strong>Português</strong></a>
+</p>
+
+<p align="center">
+  <img src="https://raw.githubusercontent.com/diillson/chatcli/main/assets/chatcli-demo.gif" alt="ChatCLI in action" width="820">
+</p>
+
+## Why ChatCLI
+
+- **Every major model, one interface.** Switch provider or model mid-conversation; fail over automatically; keep cost, tokens and prompt-cache use in view.
+- **An agent that does the work.** `/coder` reads, edits, runs and tests code under a security policy you control, with checkpoints you can rewind.
+- **Answers you can trust more.** Self-Refine, Chain-of-Verification, Reflexion, RAG with HyDE and Mixture-of-Agents with cross-review cross-check what models say.
+- **The same brain everywhere.** The terminal, a browser UI, editors over ACP, any MCP client, Telegram, Slack, Discord, WhatsApp, a gRPC server and a Kubernetes operator share sessions, memory and tools.
+- **Built to run where it matters.** Signed releases, fail-closed defaults, workspace trust, audit logs and a published security process.
+
+## Quick start
+
+```bash
+# Homebrew (macOS, Linux)
+brew tap diillson/chatcli && brew install chatcli
+
+# or Go
+go install github.com/diillson/chatcli@latest
+
+# or a signed binary from the releases page
+# https://github.com/diillson/chatcli/releases/latest
+```
+
+Point it at a model, with an API key or an OAuth login:
+
+```bash
+export LLM_PROVIDER=OPENAI OPENAI_API_KEY=sk-...   # or CLAUDEAI, GOOGLEAI, BEDROCK, XAI, OLLAMA, …
+chatcli                                            # then /auth login <provider> for OAuth
+```
+
+Then:
+
+```bash
+chatcli -p "Explain this repository"               # one-shot, pipeable
+git diff | chatcli -p "Write the commit message"
+chatcli                                            # interactive
+  > /coder add tests for the utils package         # the autonomous coder
+  > /moa --layers 2 Should we migrate to Karpenter? # several models, cross-reviewed
+  > /dash                                          # watch everything live
+```
+
+ChatCLI keeps itself current with `/update` (Homebrew, `go install` or a signature-verified self-replace). [Installation guide →](https://chatcli.edilsonfreitas.com/start/installation)
 
 ## Highlights
 
+<table>
+<tr>
+<td width="50%" valign="top">
+
+### 🤖 Coder agent
+A ReAct loop with 46 builtin tools: files, search, shell, git, tests, LSP diagnostics, a real browser, Git forges, background processes. Every call goes through an allow/ask/deny policy; edits are checkpointed in a shadow repository; an optional OS sandbox confines commands. [Coder mode →](https://chatcli.edilsonfreitas.com/usage/coder-mode)
+
+</td>
+<td width="50%" valign="top">
+
+### 🧠 Mixture-of-Agents with cross-review
+`/moa` asks several models at once. With `--layers 2`, each model reads the others' answers and revises its own, and the synthesis keeps a section on where they still disagree. The AI can call it too, as `@moa`. [MoA →](https://chatcli.edilsonfreitas.com/agents/mixture-of-agents)
+
+</td>
+</tr>
+<tr>
+<td valign="top">
+
+### ✅ Quality harness
+Seven patterns, composable and observable: ReAct, Plan-and-Solve, Reflexion with a durable queue, RAG + HyDE, Self-Refine with semantic convergence, Chain-of-Verification and a cross-provider reasoning backbone. [Harness →](https://chatcli.edilsonfreitas.com/agents/harness/overview)
+
+</td>
+<td valign="top">
+
+### 📈 Live dashboard, like an APM
+`/dash` draws the whole runtime as a service map, across every ChatCLI process on the machine: who called whom, from the turn to the agent, the tool, the model and the host, with cost, latency, errors, policy decisions and fallbacks. Metadata only. [Live dashboard →](https://chatcli.edilsonfreitas.com/usage/live-dashboard)
+
+</td>
+</tr>
+<tr>
+<td valign="top">
+
+### 👥 Squads and task graphs
+Specialist workers run in parallel under a dispatcher; `@taskgraph` turns an approved plan into a verified DAG where the engine runs each task's checks and a fresh reviewer gives the verdict. [Task graph →](https://chatcli.edilsonfreitas.com/agents/task-graph)
+
+</td>
+<td valign="top">
+
+### 🔌 MCP, ACP and plugins
+An MCP client (stdio, SSE, HTTP with OAuth) and an MCP server that re-exports everything; an ACP server for editors; signed plugins; provider plugins that add a whole LLM provider; skills from several registries; slash commands compatible with nine other CLIs. [Extensions →](https://chatcli.edilsonfreitas.com/extensions/plugin-system)
+
+</td>
+</tr>
+<tr>
+<td valign="top">
+
+### 💬 Chat gateway
+Telegram, Slack, Discord, WhatsApp and webhooks run the same agent, with voice notes transcribed offline and answered in voice, sender allowlists that fail closed and one conversation across channels. [Gateway →](https://chatcli.edilsonfreitas.com/gateway/chat-gateway)
+
+</td>
+<td valign="top">
+
+### ☸️ Kubernetes and AIOps
+A gRPC server with TLS 1.3, JWT and roles, and an operator with 17 CRDs that watches workloads, opens incidents, proposes and applies remediations behind approvals, and writes post-mortems. [Kubernetes →](https://chatcli.edilsonfreitas.com/kubernetes/k8s-operator)
+
+</td>
+</tr>
+<tr>
+<td valign="top">
+
+### 📄 Documents and media, on every provider
+PDFs and images reach every model, natively where it can read them and as text where it cannot; image generation, offline speech-to-text and text-to-speech, diagrams and an interactive knowledge graph. [PDF input →](https://chatcli.edilsonfreitas.com/usage/pdf-input)
+
+</td>
+<td valign="top">
+
+### 🗂️ Memory and context
+Long-term memory with a profile and facts, a knowledge base with keyless BM25 retrieval, reversible compression where nothing is lost (`@recall` pages long originals), and sessions that continue across surfaces. [Context →](https://chatcli.edilsonfreitas.com/context/bootstrap-memory)
+
+</td>
+</tr>
+<tr>
+<td valign="top">
+
+### ⏱️ Scheduler
+Durable jobs with cron, wait-until conditions and dependencies; a daemon keeps them running with the terminal closed; agents can park themselves and wake on a condition. [Scheduler →](https://chatcli.edilsonfreitas.com/tools/scheduler)
+
+</td>
+<td valign="top">
+
+### 🧪 Evals
+`chatcli eval` runs YAML suites against the real binary in a sandbox, graded by deterministic checks and an LLM judge, with pass@k, baselines and CI-friendly exit codes. [Evals →](https://chatcli.edilsonfreitas.com/agents/harness/evals)
+
+</td>
+</tr>
+</table>
+
+## Where it runs
+
+| Surface | Start it with | |
+|---|---|---|
+| Interactive terminal | `chatcli` | chat, `/coder`, `/agent`, `/moa`, every slash command |
+| One-shot and pipes | `chatcli -p "…"` | scripts, CI, `git diff \| chatcli -p …` |
+| Browser UI | `/web` or `chatcli web` | the same session as the terminal |
+| Editors (ACP) | `chatcli acp` | Zed and other ACP clients |
+| Any MCP client | `chatcli mcp-server` | every tool, the agent loops, skills as prompts |
+| Chat apps | `/gateway start` | Telegram, Slack, Discord, WhatsApp, webhooks |
+| Shared backend | `chatcli server` | gRPC with TLS 1.3, JWT and roles |
+| Kubernetes | Helm chart `chatcli-operator` | AIOps operator |
+| Live dashboard | `/dash` or `chatcli dash` | every ChatCLI process on the machine |
+
+## Providers
+
+14 built-in providers behind one interface, with a fallback chain, cross-provider reasoning control (`/thinking`) and prompt caching where the provider offers it. Provider plugins add more without rebuilding ChatCLI.
+
+| Provider | `LLM_PROVIDER` | Auth |
+|---|---|---|
+| OpenAI | `OPENAI` | `OPENAI_API_KEY`, or OAuth with `/auth login openai-codex` (Responses API) |
+| OpenAI Assistants | `OPENAI_ASSISTANT` | `OPENAI_API_KEY` |
+| Anthropic Claude | `CLAUDEAI` | `ANTHROPIC_API_KEY`, or OAuth with `/auth login anthropic` |
+| AWS Bedrock | `BEDROCK` | AWS profile, SSO, `aws login` or the credentials chain |
+| Google Gemini | `GOOGLEAI` | `GOOGLEAI_API_KEY` |
+| xAI Grok | `XAI` | `XAI_API_KEY` |
+| Z.AI (GLM) | `ZAI` | `ZAI_API_KEY`, including the GLM Coding Plan |
+| Moonshot Kimi | `MOONSHOT` | `MOONSHOT_API_KEY` |
+| MiniMax | `MINIMAX` | `MINIMAX_API_KEY` |
+| OpenRouter | `OPENROUTER` | `OPENROUTER_API_KEY` |
+| GitHub Copilot | `COPILOT` | `/auth login github-copilot` (device flow) or `GITHUB_COPILOT_TOKEN` |
+| Ollama | `OLLAMA` | local, no key |
+| StackSpot AI | `STACKSPOT` | `CLIENT_ID` and `CLIENT_KEY` |
+| Devin (Cognition) | `DEVIN` | the local Devin CLI |
+
+Models, prices and context windows come from a live catalog: `/switch --model` lists what each account really serves. [Supported models →](https://chatcli.edilsonfreitas.com/providers/supported-models) · [All settings →](https://chatcli.edilsonfreitas.com/reference/environment-variables)
+
+## Security
+
+ChatCLI runs commands and holds credentials, so security is the default, not an option:
+
+- **Policy-gated tools**: every agent action is allowed, asked or denied by a policy you control; unattended surfaces refuse instead of approving.
+- **Workspace trust**: a project's `.env`, hooks and policy load only after `chatcli trust`.
+- **Fail-closed integrations**: chat channels refuse to start without a sender allowlist; signed webhooks are verified with HMAC.
+- **Encrypted at rest**: credentials and state are encrypted with AES-256-GCM; OAuth uses PKCE.
+- **Signed supply chain**: Ed25519-signed release checksums verified by `chatcli update`, Cosign-signed images, an SBOM, and Trivy, CodeQL, gosec and govulncheck on every change.
+
+Report vulnerabilities privately: see [SECURITY.md](SECURITY.md). [Security overview →](https://chatcli.edilsonfreitas.com/security/overview)
+
+## Documentation
+
 | | |
 |---|---|
-| **Multi-provider with failover** | 14 LLM providers (OpenAI · OpenAI Responses · Anthropic · Bedrock · Google · xAI · ZAI · MiniMax · Moonshot (Kimi) · Copilot · StackSpot · OpenRouter · Ollama · Devin CLI) with intelligent error classification, exponential backoff, and per-provider cooldown. The Devin provider wraps the local Devin CLI as an LLM transport — no undocumented Cognition APIs, full ChatCLI harness and headroom on top. |
-| **Autonomous agents** | 14 built-in workers coordinated by a ReAct engine (Reason + Act): 12 orchestration specialists run in parallel + 2 quality agents (refiner, verifier), plus a 7-pattern quality pipeline. |
-| **Quality pipeline** | Self-Refine, Chain-of-Verification (CoVe), Reflexion, RAG + HyDE, Plan-and-Solve (ReWOO), cross-provider reasoning backbone — all composed via a thread-safe state machine with circuit breakers and hot reload. |
-| **Evals (`chatcli eval`)** | Offline evaluation suites that prove ChatCLI answers correctly instead of assuming it: each YAML case runs the real binary (chat or `/coder`) in a throwaway sandbox (fixture, inline files, setup commands, a scoped coder policy), hermetic by default (memory, recall, autosave off; `--with-memory` to opt in). It is graded by deterministic checks (text, regex, JSON, files, shell commands like `go test`, tools called, cost/turn/time budgets) and an LLM judge with a rubric that never learns which model answered, with self-grading flagged. Repeated trials give pass@k, pass^k and flakiness; reports save as JSON/Markdown and compare against a baseline. Exit codes gate CI on regressions. `--max-cost` caps spend. |
-| **Scheduler (Chronos)** | Durable scheduling with cron + wait-until + DAG + daemon mode. `/schedule`, `/wait`, `/jobs` + `@scheduler` tool for agents. CRC32 WAL, snapshots, rate limiter, circuit breakers, JSONL audit, 13 Prometheus metrics. Jobs survive crashes and CLI exit. |
-| **Durable Reflexion** | WAL-backed queue with worker pool, dead letter queue, boot replay, exponential retry with jitter — lessons survive process crashes. |
-| **Semantic convergence** | char → Jaccard → embedding cosine cascade for Self-Refine, with LRU/TTL cache and quality regression detection. |
-| **Production-ready** | gRPC + TLS 1.3, JWT + RBAC, AES-256-GCM, rate limiting, audit logging, 50+ Prometheus metrics. |
-| **Kubernetes-native** | Operator with 17 CRDs and an autonomous AIOps pipeline (54+ remediation actions), SLO monitoring, post-mortems. |
-| **Extensible** | Plugins with Ed25519 signature verification, multi-registry skills (skills.sh, ClawHub, ChatCLI.dev), slash-command templates with 9-CLI interop (Claude Code, Devin, Gemini, Codex, …), lifecycle hooks, MCP client (stdio, SSE, HTTP + OAuth). |
-
----
-
-## Installation
-
-```bash
-# Homebrew (macOS / Linux)
-brew tap diillson/chatcli && brew install chatcli
-
-# Go install
-go install github.com/diillson/chatcli@latest
-
-# Pre-built, cosign-signed binaries
-# https://github.com/diillson/chatcli/releases
-```
-
-Once installed, ChatCLI keeps itself current: `/update` upgrades through the
-same channel you installed with (Homebrew, `go install`, or verified binary
-self-replace for release downloads), and `CHATCLI_AUTO_UPDATE=auto` stages
-updates silently in the background — the next start opens on the new version.
-Docker images and source builds are never touched; they get instructions
-instead. See `/config update` for the current policy and detected channel.
-
-For scripts and automation there is a one-shot surface: `chatcli update`
-applies the same flow without entering the REPL, and `chatcli update check`
-only reports. Exit codes: `0` updated or already current, `1` check/apply
-failure or a manual channel with a pending update, `2` invalid usage.
-
-<details>
-<summary><strong>Build from source</strong></summary>
-
-```bash
-git clone https://github.com/diillson/chatcli.git && cd chatcli
-go mod tidy && go build -o chatcli
-
-# With version metadata injected via ldflags
-VERSION=$(git describe --tags --always --dirty 2>/dev/null || echo "dev")
-go build -ldflags "-X github.com/diillson/chatcli/version.Version=${VERSION}" -o chatcli
-```
-
-</details>
-
----
-
-## Quick Setup
-
-```bash
-LLM_PROVIDER=OPENAI    # OPENAI, CLAUDEAI, BEDROCK, GOOGLEAI, XAI, ZAI, MINIMAX, MOONSHOT,
-                       # COPILOT, OLLAMA, STACKSPOT, OPENROUTER
-OPENAI_API_KEY=sk-xxx
-```
-
-<details>
-<summary><strong>Full provider configuration reference</strong></summary>
-
-| Provider | API Key | Model | Extras |
-|---|---|---|---|
-| OpenAI | `OPENAI_API_KEY` | `OPENAI_MODEL` | `OPENAI_MAX_TOKENS`, `OPENAI_USE_RESPONSES`, `OPENAI_API_URL` |
-| Anthropic | `ANTHROPIC_API_KEY` | `ANTHROPIC_MODEL` | `ANTHROPIC_MAX_TOKENS` |
-| AWS Bedrock | IAM / SSO / `aws login` / credentials chain | `BEDROCK_MODEL` | `BEDROCK_PROFILE` or `AWS_PROFILE`, `BEDROCK_REGION` or `AWS_REGION`, `BEDROCK_CROSS_REGION` |
-| Google Gemini | `GOOGLEAI_API_KEY` | `GOOGLEAI_MODEL` | `GOOGLEAI_MAX_TOKENS` |
-| xAI | `XAI_API_KEY` | `XAI_MODEL` | `XAI_MAX_TOKENS` |
-| ZAI | `ZAI_API_KEY` | `ZAI_MODEL` | `ZAI_MAX_TOKENS`, `ZAI_USE_CODING_PLAN`, `ZAI_THINKING`, `ZAI_API_URL` |
-| MiniMax | `MINIMAX_API_KEY` | `MINIMAX_MODEL` | `MINIMAX_MAX_TOKENS` |
-| Moonshot (Kimi) | `MOONSHOT_API_KEY` | `MOONSHOT_MODEL` | `MOONSHOT_MAX_TOKENS`, `MOONSHOT_THINKING` |
-| GitHub Copilot | `GITHUB_COPILOT_TOKEN` | `COPILOT_MODEL` | or `/auth login github-copilot` |
-| StackSpot | `CLIENT_ID`, `CLIENT_KEY` | — | `STACKSPOT_REALM`, `STACKSPOT_AGENT_ID` |
-| OpenRouter | `OPENROUTER_API_KEY` | — | `OPENROUTER_MAX_TOKENS`, `OPENROUTER_FALLBACK_MODELS`, `OPENROUTER_API_URL` |
-| Ollama | — | `OLLAMA_MODEL` | `OLLAMA_ENABLED=true`, `OLLAMA_BASE_URL` |
-| OpenAI (Responses API) | `OPENAI_API_KEY` | `OPENAI_MODEL` | `OPENAI_RESPONSES_API_URL` |
-
-> **Removed provider — GitHub Models.** GitHub retired GitHub Models on
-> July 30 2026 (playground, model catalog, inference API and BYOK, for
-> every customer), so the `GITHUB_MODELS` provider was dropped. The env
-> vars `GITHUB_MODELS_MODEL`, `GITHUB_MODELS_TOKEN`,
-> `GITHUB_MODELS_MAX_TOKENS` and `GITHUB_MODELS_API_URL` no longer have
-> any effect, and `GITHUB_MODELS` is no longer accepted as a provider
-> value (including in the operator's `Instance` CRD). **GitHub Copilot is
-> a different product and is unaffected** — if you were on GitHub Models
-> for OpenAI models, `COPILOT` or `OPENAI` are the direct replacements.
-
-#### Environment file (.env) discovery
-
-ChatCLI looks for its environment file in this order, and the **first file that exists wins**:
-
-1. `$CHATCLI_DOTENV` (explicit; honored even when missing, so a typo is reported instead of silently ignored)
-2. `./.env` — the working directory
-3. `~/.chatcli/.env`
-4. `~/.env`
-
-The home fallbacks matter for the **non-interactive surfaces**: an editor spawning `chatcli acp`, or an MCP client spawning `chatcli mcp-server`, does **not** run your shell profile — `CHATCLI_DOTENV` and any variable you export from `.zshrc`/`.bashrc` never reach the child process, and its working directory is the project, which usually has no `.env`. Before this fallback existed those servers ran with no environment file at all: providers keyed by an env var disappeared and `AWS_PROFILE` went missing, so Bedrock authenticated as the `default` profile instead of the account you logged into. Keep your file at `~/.chatcli/.env` (or `~/.env`) and every surface agrees. `/config` shows the file in effect, its origin, and the effective AWS profile.
-
-Per-project settings: the ACP server also layers the `.env` of the project the editor opened (`session/new`'s `cwd`) on top, **fill-only** — it can add variables you have not set, never override one already in effect, and only the first project announced applies. Because a project directory is untrusted input, `CHATCLI_PROJECT_ENV=safe` (the default) refuses credential and endpoint variables (`*_API_KEY`, `*_TOKEN`, `*_BASE_URL`, `*_API_URL`, …) from that file; `all` accepts everything, `off` disables the overlay.
-
-#### Custom endpoints and OpenAI-compatible gateways
-
-- `OPENAI_API_URL` overrides the OpenAI chat completions endpoint. It must be the **full** chat completions URL (e.g. `https://gateway.example.com/v1/chat/completions`) — the `/models` listing URL is derived from it.
-- Authentication is unchanged: requests carry `Authorization: Bearer $OPENAI_API_KEY`, so when redirecting to a gateway set `OPENAI_API_KEY` to the **gateway's** key. Do not combine a third-party URL with an OAuth login (`/auth login openai`) — the OAuth token would be sent to the gateway.
-- `OPENAI_RESPONSES_API_URL` overrides the Responses API endpoint. A **custom** `OPENAI_API_URL` (different host) forces the chat completions surface — the catalog preference for the Responses API (e.g. `gpt-6.1-sol`, the default) only applies on the official host, so a gateway key is never sent to `api.openai.com`. Effective precedence: OAuth > `OPENAI_USE_RESPONSES=true` > custom `OPENAI_API_URL` host (chat completions) > model catalog preference > `OPENAI_USE_RESPONSES=false`. If your gateway does expose the Responses API, opt in with `OPENAI_USE_RESPONSES=true` and set `OPENAI_RESPONSES_API_URL` too.
-- When the endpoint URL points to a custom host, the model listing is **not** filtered by model family — every model the gateway returns on `/models` appears in the autocomplete and `/switch --model`. Against the official endpoint, the listing keeps only chat-capable families (hiding embeddings, whisper, tts, dall-e, moderation). The same rule applies to `ZAI_API_URL`, `MOONSHOT_API_URL` and `MINIMAX_API_URL`.
-- To use a third-party OpenAI-compatible gateway as a provider **separate** from OpenAI (including in the server fallback chain), point the OpenRouter preset at it: `LLM_PROVIDER=OPENROUTER` with `OPENROUTER_API_KEY` and `OPENROUTER_API_URL=https://gateway.example.com/v1/chat/completions`.
-
-#### Z.AI GLM Coding Plan (subscription)
-
-- `ZAI_USE_CODING_PLAN=true` points the ZAI provider at the subscription endpoint (`https://api.z.ai/api/coding/paas/v4/chat/completions`). The **same** platform API key works on both endpoints — the `/coding/` path is what makes requests draw from the plan instead of pay-as-you-go credits.
-- The plan serves `glm-5.3` and `glm-5.3-flash`; requests for older GLM ids are routed to them server-side. `/cost` reports these calls at $0: usage is covered by the subscription, not billed per token.
-- An explicit `ZAI_API_URL` always wins over the toggle — set it to the full chat completions URL (e.g. the mainland endpoint `https://open.bigmodel.cn/api/coding/paas/v4/chat/completions`). Any URL with an `/api/coding/` path is treated as plan usage.
-- `ZAI_THINKING=enabled|disabled` controls the GLM thinking mode on both the plain and tool-calling paths (unset keeps the backend default; `enabled` also preserves interleaved reasoning across turns).
-
-</details>
-
----
-
-## Three Modes of Operation
-
-<table>
-<tr>
-<td width="33%" valign="top">
-
-### Interactive CLI
-
-AI-powered terminal with a Bubble Tea TUI, project context, tool calling, and autonomous agents.
-
-```bash
-chatcli
-chatcli -p "Explain this repo"
-git diff | chatcli -p "Summarize"
-```
-
-</td>
-<td width="33%" valign="top">
-
-### gRPC Server
-
-Shared backend with TLS 1.3, JWT (HS256/RS256) and mTLS identity, RBAC, the fallback chain on every request, real streaming with token usage and cost on the wire, Prometheus metrics and plugin discovery. `CHATCLI_SERVER_PIPELINE=true` also serves the full ChatCLI turn engine (`ChatTurn`, `RunCoder`, `RunAgent`, tools) to thin clients and the operator.
-
-```bash
-chatcli server --port 50051 \
-  --token my-token
-chatcli connect \
-  --addr host:50051 \
-  --token my-token
-```
-
-</td>
-<td width="33%" valign="top">
-
-### Kubernetes Operator
-
-Autonomous AIOps pipeline with 17 CRDs, 54+ remediation actions, SLO monitoring, and post-mortems.
-
-```bash
-helm install chatcli-operator \
-  oci://ghcr.io/diillson/charts/chatcli-operator \
-  --namespace chatcli-system \
-  --create-namespace
-```
-
-</td>
-</tr>
-</table>
-
-### Autonomous scheduler (Chronos)
-
-The scheduler runs embedded in the CLI and optionally as a daemon. Jobs survive restarts via WAL + snapshot.
-
-```bash
-# Fire a command in 30s
-/schedule ping --when +30s --do "/run curl https://api.example.com/health"
-
-# Daily cron with retry
-/schedule backup --cron "0 2 * * *" --do "shell: ./backup.sh" --max-retries 3
-
-# Deploy + K8s wait + trigger smoke
-/schedule deploy --when +0s --do "shell: terraform apply -auto-approve" \
-  --wait "k8s:deployment/prod/api:Available" --timeout 15m \
-  --triggers smoke-tests
-
-# Daemon to keep running with the CLI closed
-chatcli daemon start --detach
-chatcli daemon status
-
-# List / inspect / cancel
-/jobs list
-/jobs show <id>
-/jobs tree
-/jobs cancel <id>
-```
-
-Agents get the `@scheduler` tool and can pause themselves waiting on conditions — see [Cookbook: scheduler automation](https://chatcli.edilsonfreitas.com/en/cookbook/scheduler-automations) and the [feature doc](https://chatcli.edilsonfreitas.com/en/features/scheduler).
-
-<details>
-<summary><strong>Context commands (CLI mode)</strong></summary>
-
-Inject environment data directly into your prompt:
-
-| Command | Description |
-|---|---|
-| `@git` | Status, branches, and recent commits |
-| `@file <path>` | File or directory contents |
-| `@env` | Environment variables |
-| `@history` | Recent shell commands |
-| `@command <cmd>` | Execute a command and inject its output |
-
-</details>
-
-<details>
-<summary><strong>Kubernetes manifest example (Instance CRD)</strong></summary>
-
-```yaml
-apiVersion: platform.chatcli.io/v1alpha1
-kind: Instance
-metadata:
-  name: chatcli-prod
-spec:
-  provider: ZAI
-  model: glm-5
-  replicas: 2
-  fallback:
-    enabled: true
-    providers:
-      - name: OPENAI
-        model: gpt-6.1-sol
-      - name: MINIMAX
-        model: MiniMax-M2.7
-```
-
-```bash
-helm install chatcli oci://ghcr.io/diillson/charts/chatcli \
-  --namespace chatcli --create-namespace \
-  --set llm.provider=OPENAI --set secrets.openaiApiKey=sk-xxx
-```
-
-</details>
-
----
-
-## Supported Providers
-
-> 14 providers with a unified interface. Automatic failover with intelligent error classification, cross-provider extended thinking, and prompt caching where available.
-
-| Provider | Default Model | Tool Calling | Vision | Reasoning / Thinking |
-|---|---|---|---|---|
-| **OpenAI** | gpt-6.1-sol | Native | Yes | `reasoning_effort` (o-series / gpt-5) |
-| **Anthropic (Claude)** | claude-sonnet-5-5 | Native | Yes | Extended thinking with cache |
-| **AWS Bedrock** | claude-sonnet-4-6 | Native | Yes | Thinking budget (Anthropic models) |
-| **Google Gemini** | gemini-3.8-flash | Native | Yes | — |
-| **xAI (Grok)** | grok-4.3 | XML fallback | — | — |
-| **ZAI (Zhipu AI)** | glm-5 | Native | Yes | `ZAI_THINKING=enabled\|disabled` · GLM Coding Plan via `ZAI_USE_CODING_PLAN` |
-| **MiniMax** | MiniMax-M2.7 | Native | Yes | — |
-| **Moonshot (Kimi)** | kimi-k2.6 | Native | Yes | `MOONSHOT_THINKING=enabled\|disabled\|auto` |
-| **GitHub Copilot** | gpt-6.1-sol | Native | Yes | — |
-| **StackSpot AI** | StackSpotAI | — | — | — |
-| **OpenRouter** | openai/gpt-6.1-sol | Native | Yes | Passthrough |
-| **Ollama** | (local) | XML fallback | — | `<thinking>` tag normalization |
-| **Devin CLI (Cognition)** | claude-sonnet-4.6 | XML fallback | — | Model-dependent (server-side) |
-| **OpenAI (Responses API)** | gpt-6.1-sol | Native | Yes | `reasoning_effort` |
-
-```bash
-# Configurable fallback chain
-CHATCLI_FALLBACK_PROVIDERS=OPENAI,CLAUDEAI,BEDROCK,ZAI,MINIMAX,MOONSHOT,OPENROUTER
-```
-
-`/thinking on|off|auto` enables extended thinking / reasoning_effort on any provider that supports it — the cross-provider mapping is automatic.
-
----
-
-## Autonomous Agents
-
-> ReAct engine (Reason + Act) with **14 built-in agents**: 12 orchestration specialists running in parallel (`file, coder, shell, git, search, planner, reviewer, tester, refactor, diagnostics, formatter, deps`) + 2 quality-harness agents (`refiner`, `verifier`).
-
-```bash
-/coder "Refactor the auth module to use JWT"
-chatcli -p "Create tests for the utils package" --agent-auto-exec
-```
-
-| Agent | Responsibility |
-|---|---|
-| **File** | File reading, writing, and manipulation |
-| **Coder** | Code generation and editing |
-| **Shell** | System command execution |
-| **Git** | Version control operations |
-| **Search** | Code and file search |
-| **Planner** | Complex task decomposition (Plan-and-Solve / ReWOO) |
-| **Reviewer** | Automated code review |
-| **Tester** | Test generation and execution |
-| **Refactor** | Safe code refactoring |
-| **Diagnostics** | Problem analysis and debugging |
-| **Formatter** | Formatting and linting |
-| **Deps** | Dependency management |
-| **Refiner** | Self-Refine post-hook (critique → revise) |
-| **Verifier** | Chain-of-Verification (questions + final answer) |
-
-Workers are coordinated by the **dispatcher** with a configurable semaphore (`CHATCLI_AGENT_MAX_WORKERS`), retry policy, and `FileLockManager` synchronization.
-
----
-
-## Harness/Quality Pipeline
-
-> Seven prompting/execution patterns composed via a pluggable pipeline with state machine, hot reload, and per-hook isolation.
-
-| # | Pattern | Status | Opt-in |
-|---|---|---|---|
-| 1 | **ReAct** (Reason + Act) | ✅ agent core | — |
-| 2 | **Plan-and-Solve / ReWOO** | ✅ | `/plan`, `CHATCLI_QUALITY_PLAN_FIRST_MODE` |
-| 3 | **Reflexion** (with durable queue) | ✅ | on by default |
-| 4 | **RAG + HyDE** | ✅ | `CHATCLI_QUALITY_HYDE_ENABLED=1` |
-| 5 | **Self-Refine** (with semantic convergence) | ✅ | `CHATCLI_QUALITY_REFINE_ENABLED=1` |
-| 6 | **Chain-of-Verification** (CoVe) | ✅ | `CHATCLI_QUALITY_VERIFY_ENABLED=1` |
-| 7 | **Cross-provider reasoning backbone** | ✅ | `CHATCLI_QUALITY_REASONING_MODE=auto` |
-
-### Pipeline Architecture
-
-- **State machine** (Active → Draining → Closed) with atomic CAS transitions.
-- **Copy-on-Write** via `atomic.Pointer[snapshot]` — `AddPre/AddPost/SwapConfig` are atomic, zero locks on the hot path.
-- **Per-hook isolation**: panic recovery, timeout enforcement (default 30s), circuit breaker (5 failures → open for 30s).
-- **Priority-based ordering** via optional `Prioritized` interface (backward-compatible — unmarked hooks default to 100).
-- **Short-circuit sentinels**: `ErrSkipExecution` (cache-hit before `agent.Execute`) and `ErrSkipRemainingHooks` (ensemble patterns).
-- **Graceful shutdown** via `DrainAndClose(timeout)` honoring in-flight calls.
-
-### Durable Reflexion (WAL + DLQ)
-
-Reflexion triggers (error, hallucination flagged by CoVe, low quality) flow through a lesson queue with enterprise guarantees — lessons survive process crashes:
-
-- **WAL** with double CRC32, atomic rename, dir fsync — torn writes detected automatically.
-- **Worker pool** (default 2) with per-job timeout, exponential backoff with jitter, configurable `MaxAttempts`.
-- **Persistent DLQ** (same WAL format) with `/reflect failed`, `/reflect retry <id>`, `/reflect purge <id>`.
-- **Drain-on-boot**: pending lessons from a previous session are reprocessed automatically.
-- **Idempotency** via `sha256(task | trigger | attempt)` — re-triggering the same situation is a no-op.
-- **Stale discard** (default 7d) — old lessons dropped at replay time.
-
-```bash
-/reflect list              # current queue + DLQ
-/reflect failed            # DLQ with last error per entry
-/reflect retry <job-id>    # re-queue a failed lesson
-/reflect purge <job-id>    # permanently remove a DLQ entry
-/reflect drain             # force WAL replay
-```
-
-### Semantic Convergence (Self-Refine)
-
-Self-Refine uses a char → Jaccard → embedding cascade to detect when to stop iterating. Catches "same meaning, different words" that the char-level heuristic missed:
-
-| Stage | Cost | When it fires |
-|---|---|---|
-| **Char** | μs | Always. Early-exit when sim > 0.99 (identical) or sim < 0.3 (diverged) |
-| **Jaccard** | ms | Borderline, normalized token sets with EN/PT stop-words |
-| **Embedding** | ms + $ | Borderline after Jaccard. Opt-in via `CHATCLI_QUALITY_REFINE_CONVERGENCE_EMBEDDING=1` |
-
-- **LRU cache with TTL** (default 256 entries / 5min) avoids re-embedding identical text.
-- **Per-scorer circuit breaker** — provider outage degrades to Jaccard without blocking refine.
-- **Quality regression detection**: when pass N gets worse (>15% sim loss vs best) → revert to best draft + set `refine_rolled_back` metadata so Reflexion can learn.
-- **Strict mode**: refuses to declare convergence without embedding when stakes are high.
-
-<details>
-<summary><strong>Full quality pipeline config</strong></summary>
-
-```bash
-# Master switch
-CHATCLI_QUALITY_ENABLED=true
-
-# Self-Refine (#5) + semantic convergence
-CHATCLI_QUALITY_REFINE_ENABLED=false            # opt-in
-CHATCLI_QUALITY_REFINE_MAX_PASSES=1
-CHATCLI_QUALITY_REFINE_CONVERGENCE_ENABLED=true
-CHATCLI_QUALITY_REFINE_CONVERGENCE_EMBEDDING=false
-CHATCLI_QUALITY_REFINE_CONVERGENCE_STRICT=false
-
-# Chain-of-Verification (#6)
-CHATCLI_QUALITY_VERIFY_ENABLED=false
-CHATCLI_QUALITY_VERIFY_NUM_QUESTIONS=3
-CHATCLI_QUALITY_VERIFY_REWRITE=true
-
-# Reflexion (#3) + durable queue
-CHATCLI_QUALITY_REFLEXION_ENABLED=true
-CHATCLI_QUALITY_REFLEXION_QUEUE_ENABLED=true    # WAL + worker pool + DLQ
-CHATCLI_QUALITY_REFLEXION_QUEUE_WORKERS=2
-CHATCLI_QUALITY_REFLEXION_QUEUE_MAX_ATTEMPTS=5
-CHATCLI_QUALITY_REFLEXION_QUEUE_STALE_AFTER=168h
-
-# Plan-and-Solve / ReWOO (#2)
-CHATCLI_QUALITY_PLAN_FIRST_MODE=auto             # off|auto|always
-
-# HyDE (#4)
-CHATCLI_QUALITY_HYDE_ENABLED=false
-CHATCLI_QUALITY_HYDE_USE_VECTORS=false
-
-# Reasoning backbone (#7)
-CHATCLI_QUALITY_REASONING_MODE=auto              # off|on|auto
-CHATCLI_QUALITY_REASONING_BUDGET=8000
-```
-
-All exposed via `/config quality` with runtime state (registered hooks, queue depth, DLQ size).
-
-</details>
-
----
-
-## Observability
-
-> End-to-end Prometheus integration in the `chatcli` namespace. 50+ metrics covering LLM, agents, pipeline, queue, and lesson queue.
-
-```bash
-chatcli server --port 50051 --metrics-port 9090
-curl http://localhost:9090/metrics | grep chatcli_
-curl http://localhost:9090/healthz
-```
-
-### Key metrics
-
-| Subsystem | Metric | Type |
-|---|---|---|
-| `chatcli_llm_*` | `requests_total`, `request_duration_seconds`, `tokens_used_total`, `errors_total` | Counter, Histogram |
-| `chatcli_quality_pipeline_*` | `dispatch_total`, `hook_duration_seconds`, `hook_errors_total`, `hook_circuit_state`, `generation` | Counter, Histogram, Gauge |
-| `chatcli_lessonq_*` | `enqueue_total`, `queue_depth`, `dlq_size`, `processing_duration_seconds`, `wal_corruption_total`, `retry_total` | Counter, Gauge, Histogram |
-| `chatcli_session_*` | duration, commands executed, signals | Counter, Gauge |
-| `chatcli_grpc_*` | unary + stream interceptors | Counter, Histogram |
-
-Standard Go runtime and `process_*` collectors are registered automatically.
-
----
-
-## Enterprise Security
-
-> Security is not a feature flag. It is the foundation of every layer of ChatCLI.
-
-<table>
-<tr>
-<td width="50%" valign="top">
-
-**Authentication & authorization**
-- JWT with RBAC (admin / user / readonly)
-- OAuth PKCE + Device Flow (RFC 8628)
-- Automatic token refresh per provider
-
-**Encryption**
-- AES-256-GCM for credentials at rest
-- TLS 1.3 for gRPC communication
-- Encrypted session store on disk
-
-**Network**
-- Built-in SSRF prevention
-- Per-client rate limiting
-- Operator webhook validation
-
-</td>
-<td width="50%" valign="top">
-
-**Plugin & agent security**
-- Ed25519 plugin signature verification
-- Agent command allowlist (150+ approved commands)
-- Schema validation during plugin discovery
-
-**Auditing & compliance**
-- Structured audit logging (JSON Lines)
-- Per-session cost tracking per provider
-- Prometheus metrics for observability
-
-**CI/CD security**
-- `govulncheck` + `gosec` on every PR
-- Automated Trivy image scanning
-- Cosign-signed releases + CycloneDX SBOM
-
-</td>
-</tr>
-</table>
-
-<details>
-<summary><strong>Built-in OAuth</strong></summary>
-
-```
-/auth login openai-codex       # OAuth PKCE + local callback
-/auth login anthropic          # OAuth PKCE + manual code
-/auth login github-copilot     # Device Flow (RFC 8628)
-/auth status                   # All provider status
-```
-
-Credentials are stored with **AES-256-GCM** at `~/.chatcli/auth-profiles.json`.
-
-</details>
-
----
-
-## Command Reference
-
-| Category | Commands |
-|---|---|
-| **Core** | `/help` · `/version` · `/update [check]` · `/reload` · `/exit` · `/reset` |
-| **Sessions** | `/session {save,load,attach,detach,status,list,delete,new,fork,search}` · `/export` · `/newsession` · `/rewind` |
-| **Context** | `/context {create,attach,list,remove}` · `@git` · `@file` · `@env` · `@history` · `@command` |
-| **Config** | `/config [section]` · `/status` · `/settings` · `/switch <provider\|model>` |
-| **Agent mode** | `/agent [task]` · `/run` · `/coder` · `/plan [query]` · `/moa <prompt>` — in chat, the assistant proposes switching to `/coder` for a task that needs the workspace and you confirm with Enter (`CHATCLI_CHAT_CODER_HANDOFF`) |
-| **Quality pipeline** | `/thinking [on\|off\|auto]` · `/refine [draft]` · `/verify [answer]` · `/reflect [list\|failed\|retry\|purge\|drain\|<text>]` |
-| **Memory & graph** | `/memory {longterm,list,profile,facts,remember,forget,profile set,compact}` · `@memory` (remember/recall/forget/profile/neighbors/map) — profile with lifecycle: list fields upsert (restating an item supersedes instead of duplicating) and `_replace`/`_done`/`_remove` key suffixes rewrite (e.g. `goals_done=` removes the finished goal; record `milestone=` and `certifications=` alongside); new `interests`, `directives` (hard rules vs preferences; per-project scope with `"[scope:<project>] rule"` — injected only when the matching workspace is active), `milestone` (dated timeline), `stance` (technical position with its why, `"position :: reason"`) and `env_<key>` (structured environment) fields; per-field provenance+freshness (user vs extraction, re-affirmation bumps `confirmed_at`, aging fields get flagged as possibly stale) and a privacy tier (finance/health/family keys auto-tagged `[sensitive]`: they personalize answers but never enter code/examples/artifacts; `sensitive_mark`/`sensitive_unmark`); daily notes consolidate into weekly and monthly digests (Trajectory section in context); profile updates also work in chat (sanctioned exception, `/config chat memory`, `CHATCLI_CHAT_MEMORY`) · `/graph [subject]` · `/compact [ratio]` |
-| **Extensibility** | `/mcp {init,list,invoke,config}` · `/plugin {list,load,unload}` · `/skill <name>` · `/hooks {list,enable,disable,test}` |
-| **Messaging & Servers** | `/gateway {start,status}` (Telegram/Slack/Discord/WhatsApp/webhook) · `chatcli mcp-server` · `chatcli acp` |
-| **Remote** | `/auth {login,logout,status}` · `/connect <server>` · `/disconnect` |
-| **Tools** | `/watch {pid\|file}` · `/worktree {create,list,remove}` · `/channel {create,switch}` · `/websearch <query>` · `/lsp <file>` — plus agent builtins `@browser`, `@forge`, `@view`, `@proc` (background + interactive PTY), `@taskgraph` (verified DAG orchestration, watch with `/taskgraph`), the whole-runtime live dashboard `/dash`, and `@coder` subcommands `outline`/`map`/`checkpoint` |
-| **Scheduler** | `/schedule <name> --when <t> --do <a>` · `/wait --until <cond>` · `/jobs {list,show,tree,cancel,pause,resume,logs,daemon}` · `chatcli daemon {start,stop,status,ping,install}` |
-| **Diagnostics** | `/metrics` · `/cost` · `/ratelimit` (`/limits`) |
-
----
-
-## Core Features
-
-> Every feature is designed to compose with the others. Plugins discover skills. Hooks drive tools. Contexts feed agents.
-
-| Feature | Description |
-|---|---|
-| **Native tool calling** | Native APIs from OpenAI, Anthropic, Bedrock, Google, ZAI, MiniMax, Moonshot, OpenRouter. `ephemeral` cache for Anthropic. Automatic XML fallback for providers without native support. |
-| **Browser automation (@browser)** | Drives a real local Chrome/Chromium/Brave/Edge over the DevTools Protocol — spoken straight over the shipped websocket client, **no new dependency, no driver, no key**. `open`/`snapshot` (page as text with numbered interactive elements)/`click`/`type`/`press`/`hover`/`select`/`upload`/`eval`/`screenshot` (`--full`)/`html`/`pdf`/`resize`/`tabs`/`cookies`/`console`/`network`. The verification loop for web work: build a frontend, then SEE it and debug it from its console/network. **Visible hand-off**: `show` puts the window on the user's screen so they log in themselves, `wait` blocks until the page reaches a URL/text/element, `hide` goes back to headless — the profile (logins) survives the switch. `CHATCLI_BROWSER_BIN`, `CHATCLI_BROWSER_HEADLESS`, `CHATCLI_BROWSER_PROFILE` (persistent logins), `CHATCLI_BROWSER_CDP_URL` (drive the user's own Chrome). |
-| **Git forge (@forge)** | Pull requests, issues and CI through the user's OWN authenticated `gh`/`glab` — **keyless**, auto-detected from the git remote. `pr-list/view/diff/checks/create/comment`, `issue-*`, `ci-status`, `ci-logs` (failed-step logs). Closes the loop branch → PR → watch CI → fix without leaving the agent; reads auto-approved, mutations behind the security gate. |
-| **Image input (@view)** | The agent LOOKS at a local image mid-task — a `@browser` screenshot, a mock, a diagram — through the vision pipeline (native multimodal or describe-fallback), staged and attached on the next turn. |
-| **Task graph (@taskgraph)** | An approved multi-task plan becomes a persisted DAG: independent tasks run in parallel on squad workers, dependencies gate execution, and *done is never the executor's self-report* — the engine runs each task's validation commands itself and a fresh reviewer worker issues the verdict (done or retry with feedback). Real per-task cost from provider usage, shadow-git checkpoint before each executor, resumable runs under `~/.chatcli/taskgraph/`. Humans watch mid-run via `/taskgraph` (status, per-task evidence, cancel) or the **live browser dashboard** (`/taskgraph dash`): animated DAG canvas with phase swimlanes, pan/zoom, per-task popovers with reviewer evidence and gate outputs, critical path and real per-task cost — served read-only on 127.0.0.1, so closing it never affects the run. Worth it from ~5+ genuinely independent tasks. |
-| **Web UI (/web)** | A browser app on the same engine as the terminal, opened next to it with `/web` on the **same session**: what you say in the browser continues in the terminal, MCP, ACP and your channels, and back, through the shared saved session and the Conversation Hub. Chat streams token by token; coder and agent stream thoughts, tool cards and the plan, and the permission dialogs the loops raise (`ask` rules, dangerous commands) are answered from the page with allow/deny once or always. Sessions with titles, provider and model selectors from the catalog and the live lists, tools, skills, MCP servers, memory resources, commands, cost and budget in a side panel; images by file or paste (a caption is optional; each image travels with the turn and stays in the conversation, and a private copy is saved under `~/.chatcli/attachments` and named in the turn so coder and agent can open it again with `@view`; `@view <image file>` in chat attaches a local image like `@file`), voice input and read-aloud when STT/TTS are configured, image generation when an image provider is. Loopback only, one token per run, strict CSP, one embedded page that works offline; `chatcli web` serves it without a terminal. |
-| **Live dashboard (/dash)** | A real-time graph of the whole runtime in the browser, across **every chatcli process on the machine** (REPL, gateway, ACP inside an IDE, the MCP server, the scheduler daemon): agents as a tree by their real parent, and hubs for LLM models, tools, skills, MCP servers, outbound connections, background work (scheduler, `@proc`, memory worker, compaction, LSP, `@browser`) and the **seven harness patterns with what each one concluded** (`rewrote draft`, `found discrepancy`, `lesson saved`, …). Each LLM request hangs from the agent that made it; the session card names the pair that serves the next request and follows every switch (`@model use`, a skill's model hint, `/switch`, `/provider`, the gateway), each one a line in the feed. Each process band carries its cost, requests, context fill and error count; the header has an error badge for the last minute, a search that dims everything else, and an events-per-second sparkline; the feed filters by kind or errors only, shows the phase marks an agent leaves with `@dash mark`, and every model hub shows its prompt-cache hit; the whole spool exports as NDJSON. The page has one deliberate look, a dark terminal (the palette of the ChatCLI deck): a macOS-style window per process, big mono stat tiles, a `$ tail -f` feed and a status bar; a light terminal theme is the one thing that re-dresses it. Off by default and free while off (one atomic load per instrumented point); recording follows a lease the dashboard keeps alive only while a browser is watching, or `CHATCLI_DASH=1` from boot. Metadata only: never prompts, tool arguments or output, URL paths, command lines. Served on 127.0.0.1 with a one-time token and an exact-Host check; read-only, so closing it never affects a session. `/dash` works mid-run and over ACP; `chatcli dash` serves it from a terminal of its own. |
-| **Exec sandbox** | Opt-in OS-level confinement for `@coder exec`: `CHATCLI_CODER_SANDBOX=off\|workspace\|strict\|docker`. Native `sandbox-exec` (macOS) / `bwrap` (Linux) / **Docker-Podman container on ANY OS incl. Windows**; `strict` also cuts the network. Confines what a permitted command can touch, on top of the validator and policy that gate what runs. |
-| **Shadow-git checkpoints** | An automatic workspace snapshot before every mutating `@coder` subcommand, into a shadow git repo under `~/.chatcli` — your own `.git` is never touched. `@coder checkpoint {list,create,restore}` rewinds multi-file edits and exec side effects. Snapshots are bounded: workspaces as broad as your home directory are never auto-snapshotted, each snapshot runs under a hard deadline (`CHATCLI_CODER_CHECKPOINT_TIMEOUT` seconds), and repeated failures back off and disable snapshots for the session. `CHATCLI_CODER_CHECKPOINTS=off`. |
-| **Post-edit diagnostics** | After a successful `@coder` write/patch, the language server's diagnostics for the touched files are auto-injected into the tool result — a broken edit is caught turns earlier than a failing test. `CHATCLI_CODER_AUTODIAG=off`. Plus `@coder outline`/`map` for code-structure orientation (repo map via `go/ast`) without reading whole files. |
-| **Interactive processes (@proc pty)** | `@proc start {pty:true}` runs a program on a real pseudo-terminal (REPLs, debuggers, `ssh`) and `@proc stdin` types into it — programs that demand a TTY no longer dead-end the agent (Unix-first). |
-| **MCP (Model Context Protocol)** | Client via stdio, SSE, and streamable HTTP for expanded context. Remote (HTTP/SSE) servers gated behind OAuth 2.1 are supported end-to-end: on a `401` the client discovers the authorization server (RFC 9728/8414), registers dynamically (RFC 7591), runs a PKCE browser flow, and refreshes tokens transparently (stored AES-256-GCM in the encrypted auth store). Authorize with `/mcp login <server>`, or let the agent call the `@mcp-login` tool when a call reports "authorization required". Server (`chatcli mcp-server`) exposes the FULL surface: every built-in tool with read-only annotations, the agent/coder loops with per-call provider/model routing and quality-harness toggles, provider discovery, and all installed skills served as MCP prompts — plus every tool discovered from the MCP servers ChatCLI itself is connected to, re-exported under their `mcp_*` names with the origin JSON Schema intact (ChatCLI as an MCP hub: many servers aggregated behind one endpoint, with `tools/list_changed` notifications as they connect). Exposure policy via `CHATCLI_MCP_TOOLS` (all/safe/allowlist; `safe` honors the origin `readOnlyHint`, allowlists name proxied tools as `mcp_<tool>`). Clients also get `manage_session` (save/load/attach/detach/status/list/delete/clear/search/fork the conversations behind `ask_chatcli`'s `session` parameter, sharing the `/session` store; save/load/attach bind the live session so every turn is written through and writes from other surfaces — REPL, gateway, another server — are adopted before each turn: cross-surface session continuity) and `list_providers` with live API model listings merged with the catalog — the same discovery the interactive picker uses. **Full-experience parity**: `ask_chatcli` runs the SAME pipeline as an interactive turn — the user's long-term memory and profile, `/context` attachments per session, pinned and trigger-activated skills, knowledge retrieval and token-aware compaction (`plain=true` keeps a raw passthrough) — and `agent_task` runs the real ReAct loop with session-scoped contexts. Local state is browsable as **MCP resources** under `chatcli://` URIs (memory index/longterm/profile/projects, contexts, knowledge TOC + paged documents, skills with triggers, saved sessions; `CHATCLI_MCP_RESOURCES=off` disables). The server joins the **conversation hub in resume mode**, so a thread started in the REPL or on a gateway channel continues from any MCP client (`CHATCLI_MCP_HUB=off` opts out, `CHATCLI_MCP_HUB_PRINCIPAL` isolates). Dangerous commands auto-approve like the gateway daemon; set `CHATCLI_MCP_DANGER=block` to decline them in-band instead. ACP server (`chatcli acp`) with chat/agent/coder session modes, live streaming, cancellation and `session/load` restore (capability `loadSession: true` — a prior session id comes back from live state or its autosave mirror, with the conversation replayed to the client; `/session` from the prompt box operates per session and joins the same cross-surface continuity), for editors (Zed) and agent-to-agent use. |
-| **Chat Gateway** | Runs as a messaging daemon (Telegram, Slack, Discord, WhatsApp, webhook): each message runs through the agent loop and progress is streamed back to the chat. Voice messages are transcribed (local-first whisper) and answered in voice by default (`CHATCLI_GATEWAY_VOICE_REPLY=auto\|always\|never`); each conversation controls it by asking in natural language ("answer me in audio" / "stop sending audio") via the `@voice` tool, with the preference persisted. |
-| **Embedded voice (TTS)** | `CHATCLI_TTS_PROVIDER=embedded` — offline Kokoro neural voice, no API key and no cgo: downloads the sherpa-onnx engine + model once (~150MB) and works the same on Linux/macOS/Windows. Routes pt-BR/English by reply language (`CHATCLI_TTS_VOICE=bm_george`, `CHATCLI_TTS_VOICE_PT=pm_alex`); the other backends (say/espeak, self-hosted, OpenAI/Groq/Gemini) remain available. |
-| **Embedded transcription (STT)** | Offline multilingual Whisper via sherpa-onnx, no API key and no cgo — and the automatic fallback: with nothing configured, the gateway downloads the engine + an ONNX model once (~200MB for `base`; `CHATCLI_TRANSCRIPTION_MODEL=tiny\|base\|small\|…`) at startup and transcribes voice notes auto-detecting the spoken language. OGG/Opus voice notes (Telegram/WhatsApp) decode in pure Go — no ffmpeg needed; only residual formats (mp3/m4a) require ffmpeg, and the gateway preflight + `/gateway status` warn with your platform's install command. `CHATCLI_TRANSCRIPTION_PROVIDER=embedded` forces it over the other backends (local whisper CLI, self-hosted, Groq/OpenAI), which remain available. |
-| **Mixture-of-Agents** | `/moa` — several models propose in parallel and an aggregator synthesizes (Wang et al., 2406.04692). Every participant gets the same briefing as a chat turn (attached contexts, workspace memory, skills) plus read-only knowledge retrieval, CCR recall and long-term memory recall. |
-| **Dashboard tool (@dash)** | The agent manages the live dashboard the way the user does with `/dash` and reads what it sees: `open`/`url` start it and hand the address over, `off` stops it, `status` says who is recording, `summary` renders the reduced graph of this process or every chatcli process (session model, route and cost, agents, LLM requests per model with tokens and cost, tools, skills, MCP servers, patterns, background work, connections, recent errors), `events` returns the newest raw events filterable by kind and status, and `mark` leaves a phase label on the timeline. Metadata only, never content. Kill switch: `CHATCLI_AGENT_DASH_TOOL=false`. |
-| **Refusal recovery** | A reply the provider's safety classifier stops (Anthropic `stop_reason: refusal`, OpenAI `content_filter`) no longer ends a coder session as "no response". The error names the cause — including the classifier's `stop_details` category (`cyber`, `bio`, `frontier_llm`, `reasoning_extraction`, `general_harms`) and explanation when Anthropic gives them; the loop tells the model nothing ran and resends the turn on the model the provider **recommends** for that category, else on a **sibling model of the same provider** (Fable → Opus, Opus → Sonnet, Sonnet → Haiku, newest release first, only models that provider really serves; `CHATCLI_AGENT_REFUSAL_FALLBACK=auto|off|PROVIDER:model`), then returns to your model on the next turn. A run refused more than twice keeps the fallback for the rest of the run. The switch is a route change on the live dashboard (`via refusal fallback`). |
-| **Model routing (@model)** | The agent routes itself: `@model list` shows every provider's models with a price-derived tier (fast-cheap/balanced/frontier), cost per 1M tokens, context window and capabilities; `use` switches the rest of the task to another model/provider (task-scoped, never mutates the session); `delegate` one-shots a subtask on a cheaper model keeping the main loop's history and prompt cache intact. Kill switch: `CHATCLI_AGENT_MODEL_TOOL=false`. |
-| **LSP diagnostics** | `/lsp <file>` — compiler errors/warnings via the Language Server Protocol (gopls, pyright, rust-analyzer, clangd, …). |
-| **Rate limits** | `/ratelimit` — provider limits parsed from `x-ratelimit-*` headers (requests/tokens, % used, reset). |
-| **Trajectory export** | `/export` — current conversation as ShareGPT JSONL for fine-tuning/analysis. |
-| **Persistent contexts** | `/context create`, `/context attach` — inject whole projects into the system prompt with cache hints. |
-| **Prefix curation (chat)** | The chat prefix pays for the same bytes on every turn, so what is stable moves into the cached prefix and what is bulky moves behind a pull. The workspace half that does not depend on the question (bootstrap files, memory index, knowledge-graph card) is cached instead of re-sent per turn; an auto-activated skill whose body is already in the conversation says so rather than shipping it again (re-inlined the moment the copy leaves the history, and whenever the skill changes on disk); the MCP catalog is listed by name. Nothing becomes unreachable: the `context_pull` tool is the third sanctioned chat exception (read-only, local — skill bodies, the installed-skill catalog, the full MCP catalog with descriptions), and every deferral names the exact call that brings its content back. Turning it off (`/config chat pull`, `CHATCLI_CHAT_CONTEXT_PULL`) disarms the curation and inlines everything again, because a summary the model cannot expand is a capability loss, not a saving. The prompt-cache lifetime follows the same evidence-first rule: the hour-long entry costs 2x the write, so it is requested only after the session has watched its own prefix expire during a pause the hour would have covered. |
-| **Knowledge base (keyless RAG)** | `/context create docs corpus.jsonl --mode knowledge` — documentation corpora (e.g. JSONL from the builtin `@docs-flatten` tool, which flattens local or git-repo Markdown/MDX docs) become a knowledge base: attaching injects only an index card (~900 fixed tokens, even at 6MB+) and relevant passages are retrieved per turn via pure-Go BM25 (no API key) + embeddings when configured. The `@knowledge` tool (search/get/toc) interrogates the base iteratively in agent/coder and also in chat (read-only exception, `/config chat knowledge`) — including authoring skills from the docs with `@skill`. |
-| **Bootstrap & Memory** | `SOUL.md`, `USER.md`, `IDENTITY.md`, `RULES.md` + long-term memory with facts (confidence + provenance + contradiction reconciliation), topics with rolling summaries, and decay. |
-| **Self-evolution** | Skills author and evolve themselves on the memory extraction pass (no extra LLM call): reusable procedures become auto-activating skills; an insight evolves an existing skill by additive merge, with a reversible backup (`@skill restore`). `CHATCLI_SELFEVOLVE_MODE=off\|suggest\|auto`; observability under `/config selfevolve`. |
-| **Knowledge graph (Obsidian in the core)** | Facts, topics, projects, skills and tags become an on-demand graph: `@memory neighbors <subject>` / `map` pull backlinks and related notes, a tiny index card rides each turn, and `/graph [subject]` renders the graph to an image (embedded go-graphviz). `CHATCLI_GRAPH_INDEX=on\|off`. |
-| **Plugins** | Auto-detection, schema validation, Ed25519 signatures, remote plugins. |
-| **Skills** | Self-authoring (`@skill`), multi-registry (skills.sh, ClawHub, ChatCLI.dev), fuzzy search, security audits, source preferences, atomic install. |
-| **Slash commands** | Markdown prompt templates invoked as `/name args` on EVERY surface (REPL, coder mid-run, one-shot, gateway, ACP, MCP prompts) and with every provider — expansion is pure prompt rewriting. Project `.chatcli/commands/` + personal `~/.chatcli/commands/`, with **zero-migration interop** for Claude Code, Devin, Windsurf, Cursor, opencode, Codex, Gemini CLI, Qwen Code and GitHub Copilot command files (their placeholder and TOML dialects included). `!` pre-execution runs through the coder security gate; `allowed-tools` scopes the run; the model discovers the catalog via `@commands`. A command that needs tools declares `mode: coder` (inferred automatically when `allowed-tools` is present) and, invoked from chat, is **auto-routed through a coder one-shot run** — it executes and returns to chat instead of being refused by the tool-less chat mode (`mode: chat` vetoes the inference; opt out globally with `CHATCLI_COMMANDS_AUTOROUTE=off`). Panel under `/config commands`. |
-| **Custom personas** | Markdown with YAML frontmatter (model, tools, skills). |
-| **Hooks** | PreToolUse, PostToolUse, SessionStart/End, UserPromptSubmit, Pre/PostCompact — shell or webhook. |
-| **WebFetch / WebSearch** | DuckDuckGo + fetch with text extraction. |
-| **Cost tracking** | Real API usage across all providers, `/cost` (+ `reset`, `last`, `sessions`, `export`), session budgets with optional hard stop, persisted snapshots. |
-| **Git Worktrees** | Isolated work on parallel branches. |
-| **K8s Watcher** | Multi-target: metrics, logs, events, Prometheus scraping. |
-| **i18n** | Portuguese and English with automatic detection. |
-| **Session management** | Save, load, fork, export. |
-
----
-
-## Architecture
-
-```
-chatcli/
-  cli/
-    agent/
-      quality/              7-pattern pipeline (state machine + COW snapshots)
-        convergence/        Semantic convergence (char → jaccard → embedding)
-        lessonq/            Reflexion durable queue (WAL + worker pool + DLQ)
-      workers/              14 agents + dispatcher + FileLockManager
-    hooks/                  Lifecycle events (shell/webhook)
-    mcp/                    MCP client (stdio, SSE, HTTP + OAuth)
-    plugins/                Plugin manager + signature verification
-    scheduler/              Chronos — durable scheduler (WAL + cron + DAG + daemon)
-      condition/            10 evaluators (shell, http, k8s, docker, tcp, llm, ...)
-      action/               8 executors (slash, shell, agent, webhook, ...)
-      builtins/             Aggregated registry for evaluators + executors
-    workspace/memory/       Facts, topics, patterns, vector index (HyDE)
-    tui/                    Bubble Tea adapters
-  llm/
-    openai/  openai_responses/  openai_assistant/
-    claudeai/  bedrock/
-    googleai/  xai/  zai/  minimax/
-    copilot/  stackspotai/  openrouter/  ollama/
-    fallback/  catalog/  registry/  token/  toolshim/  embedding/
-  metrics/                  Prometheus registry + /metrics + /healthz
-  server/                   gRPC + TLS + JWT + MCP + plugin discovery
-  operator/                 Kubernetes Operator (17 CRDs, AIOps pipeline)
-  k8s/                      Watcher (collectors, store, summarizer)
-  models/                   ToolDefinition, ToolCall, LLMResponse, Message
-  auth/                     OAuth PKCE, Device Flow, AES-256-GCM store
-  config/                   ConfigManager with versioned migration
-  i18n/                     embed.FS + golang.org/x/text (PT / EN)
-```
-
-> **Design principle:** each package declares its own interfaces and self-registers. The `llm/` registry lets you add a new provider by implementing a single interface. The quality pipeline is pluggable via `AddPre`/`AddPost` with atomic swap. The operator coordinates independent CRDs via the controller pattern.
-
----
-
-## CI/CD & Releases
-
-- **CI** (`.github/workflows/1-ci.yml`): golangci-lint, gofmt, `go vet`, `go test -race -coverprofile`, coverage HTML as artifact.
-- **Security scan** (`security-scan.yml`): continuous Trivy image scanning.
-- **Release automation** (`release-please` + `publish-release.yml`): multi-platform builds, cosign signatures, CycloneDX SBOM, ArtifactHub publishing.
-- **Makefile**: `make build`, `make test`, `make lint`, `make install` with `Version`, `CommitHash`, `BuildDate` injected via ldflags.
-
----
-
-## Contributing
-
-Contributions are welcome. [CONTRIBUTING.md](CONTRIBUTING.md) covers the setup, the conventions and what CI checks on every pull request, and everyone taking part follows the [Code of Conduct](CODE_OF_CONDUCT.md).
-
-Found a vulnerability? Report it privately as described in [SECURITY.md](SECURITY.md), never in a public issue.
-
----
+| **Get started** | [Installation](https://chatcli.edilsonfreitas.com/start/installation) · [Quickstart](https://chatcli.edilsonfreitas.com/start/quickstart) · [Basic usage](https://chatcli.edilsonfreitas.com/usage/basic-usage) |
+| **Agents** | [Coder mode](https://chatcli.edilsonfreitas.com/usage/coder-mode) · [Squads](https://chatcli.edilsonfreitas.com/agents/agent-squad) · [Task graph](https://chatcli.edilsonfreitas.com/agents/task-graph) · [Mixture-of-Agents](https://chatcli.edilsonfreitas.com/agents/mixture-of-agents) · [Harness](https://chatcli.edilsonfreitas.com/agents/harness/overview) |
+| **Context** | [Memory](https://chatcli.edilsonfreitas.com/context/bootstrap-memory) · [Knowledge base](https://chatcli.edilsonfreitas.com/context/knowledge-base) · [Compression](https://chatcli.edilsonfreitas.com/context/context-compression) · [Sessions](https://chatcli.edilsonfreitas.com/context/session-management) |
+| **Extend** | [Plugins](https://chatcli.edilsonfreitas.com/extensions/plugin-system) · [Provider plugins](https://chatcli.edilsonfreitas.com/extensions/provider-plugins) · [MCP](https://chatcli.edilsonfreitas.com/extensions/mcp-integration) · [Skills](https://chatcli.edilsonfreitas.com/extensions/skill-registry) · [Hooks](https://chatcli.edilsonfreitas.com/extensions/hooks-system) · [Slash commands](https://chatcli.edilsonfreitas.com/extensions/slash-commands) |
+| **Run it** | [Server mode](https://chatcli.edilsonfreitas.com/server/server-mode) · [Gateway](https://chatcli.edilsonfreitas.com/gateway/chat-gateway) · [Kubernetes operator](https://chatcli.edilsonfreitas.com/kubernetes/k8s-operator) · [Docker](https://chatcli.edilsonfreitas.com/start/docker-deployment) |
+| **Reference** | [Commands](https://chatcli.edilsonfreitas.com/reference/command-reference) · [Environment variables](https://chatcli.edilsonfreitas.com/reference/environment-variables) · [Architecture](https://chatcli.edilsonfreitas.com/reference/architecture) · [Releases](https://chatcli.edilsonfreitas.com/releases) |
+
+## Community
+
+- **Contribute**: read [CONTRIBUTING.md](CONTRIBUTING.md) for the setup, the conventions and what CI checks.
+- **Conduct**: everyone taking part follows the [Code of Conduct](CODE_OF_CONDUCT.md).
+- **Security**: report vulnerabilities privately as described in [SECURITY.md](SECURITY.md).
+- **Bugs and ideas**: [open an issue](https://github.com/diillson/chatcli/issues).
+
+If ChatCLI is useful to you, a ⭐ helps others find it.
 
 ## License
 
-[Apache License 2.0](LICENSE)
-
----
-
-<p align="center">
-  <a href="https://chatcli.edilsonfreitas.com"><strong>Documentation</strong></a> &bull;
-  <a href="https://github.com/diillson/chatcli/releases"><strong>Releases</strong></a> &bull;
-  <a href="https://artifacthub.io/packages/search?ts_query_web=chatcli&sort=relevance&page=1"><strong>Helm Charts</strong></a> &bull;
-  <a href="https://pkg.go.dev/github.com/diillson/chatcli"><strong>Go Reference</strong></a> &bull;
-  <a href="https://github.com/diillson/chatcli/issues"><strong>Issues</strong></a>
-</p>
+[Apache License 2.0](LICENSE) © Edilson Freitas
