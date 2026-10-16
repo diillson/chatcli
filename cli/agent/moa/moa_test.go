@@ -201,3 +201,55 @@ func TestHistoryForAggregation_NoDuplicateTrailingTurn(t *testing.T) {
 		t.Errorf("history without a duplicate trailing user turn must be kept, got %d messages", len(got))
 	}
 }
+
+// Every reference answer reaches the observer once, before aggregation,
+// and calls never overlap.
+func TestRunSessionObserved_ReportsEachMember(t *testing.T) {
+	var mu sync.Mutex
+	inside, seen := 0, map[string]bool{}
+	aggregated := false
+	turn := func(_ context.Context, ref Ref, prompt string, _ []models.Message) (string, error) {
+		if ref.Provider == "agg" {
+			mu.Lock()
+			aggregated = true
+			mu.Unlock()
+			return "final", nil
+		}
+		if ref.Provider == "bad" {
+			return "", errors.New("boom")
+		}
+		return "answer from " + ref.Provider, nil
+	}
+	observer := func(r RefResult) {
+		mu.Lock()
+		inside++
+		if inside > 1 {
+			t.Error("observer calls overlapped")
+		}
+		if aggregated {
+			t.Error("observer called after aggregation")
+		}
+		seen[r.Ref.Provider] = true
+		mu.Unlock()
+		mu.Lock()
+		inside--
+		mu.Unlock()
+	}
+	refs := []Ref{{Provider: "a"}, {Provider: "b"}, {Provider: "bad"}}
+	final, results, err := RunSessionObserved(context.Background(), "q", nil, refs, Ref{Provider: "agg"}, turn, observer)
+	if err != nil || final != "final" || len(results) != 3 {
+		t.Fatalf("RunSessionObserved = %q, %d results, %v", final, len(results), err)
+	}
+	for _, p := range []string{"a", "b", "bad"} {
+		if !seen[p] {
+			t.Errorf("observer never saw %s", p)
+		}
+	}
+}
+
+func TestBuildAggregationPrompt_KeepsDivergence(t *testing.T) {
+	p := BuildAggregationPrompt("q", []RefResult{{Ref: Ref{Provider: "a"}, Output: "x"}})
+	if !strings.Contains(p, DivergenceInstruction) || strings.Contains(p, "that aggregation occurred") {
+		t.Fatalf("aggregation prompt should ask for the divergence section:\n%s", p)
+	}
+}

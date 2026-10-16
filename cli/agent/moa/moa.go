@@ -117,6 +117,18 @@ func RunWithHistory(ctx context.Context, prompt string, history []models.Message
 // capabilities the host granted (system context, tool rounds), so proposers
 // and aggregator behave like the host's regular conversation turns.
 func RunSession(ctx context.Context, prompt string, history []models.Message, refs []Ref, aggregator Ref, turn Turn) (string, []RefResult, error) {
+	return RunSessionObserved(ctx, prompt, history, refs, aggregator, turn, nil)
+}
+
+// Observer is told about each reference answer as soon as it arrives, in
+// completion order, before the aggregator runs. Calls are serialized, so an
+// observer may print without its own locking.
+type Observer func(RefResult)
+
+// RunSessionObserved is RunSession reporting each reference answer to
+// onDone (nil for none) as it lands, so a host can show the panel's
+// positions while the slower members are still answering.
+func RunSessionObserved(ctx context.Context, prompt string, history []models.Message, refs []Ref, aggregator Ref, turn Turn, onDone Observer) (string, []RefResult, error) {
 	if len(refs) == 0 {
 		return "", nil, fmt.Errorf("no reference models configured")
 	}
@@ -125,6 +137,7 @@ func RunSession(ctx context.Context, prompt string, history []models.Message, re
 	}
 
 	results := make([]RefResult, len(refs))
+	var observeMu sync.Mutex
 	var wg sync.WaitGroup
 	for i, ref := range refs {
 		wg.Add(1)
@@ -140,6 +153,11 @@ func RunSession(ctx context.Context, prompt string, history []models.Message, re
 			out, err := turn(refCtx, ref, prompt, history)
 			liveRun.End(err)
 			results[i] = RefResult{Ref: ref, Output: out, Err: err}
+			if onDone != nil {
+				observeMu.Lock()
+				onDone(results[i])
+				observeMu.Unlock()
+			}
 		}(i, ref)
 	}
 	wg.Wait()
@@ -185,14 +203,23 @@ func countOK(results []RefResult) int {
 	return n
 }
 
+// DivergenceInstruction asks an aggregator to keep the panel's
+// disagreements visible instead of smoothing them away: where independent
+// answers split is often the most useful part of a panel's verdict.
+const DivergenceInstruction = "If the candidates disagree on a material point, end with a short section titled, in the user's language, " +
+	"\"Where the answers diverged\": one bullet per point, the competing positions, and which one you took and why. " +
+	"Omit that section when they agree. Answer in the same language as the user's request."
+
 // BuildAggregationPrompt assembles the synthesizer prompt from the reference
 // answers, following the MoA pattern: present the candidate responses and ask
 // the aggregator to produce a single best answer.
 func BuildAggregationPrompt(userPrompt string, results []RefResult) string {
 	var b strings.Builder
 	b.WriteString("You are an aggregator. Several models answered the user's request below. ")
-	b.WriteString("Synthesize a single, correct, high-quality response. Do not mention the models or that aggregation occurred. ")
-	b.WriteString("Resolve contradictions by reasoning about correctness, and keep the best details from each.\n\n")
+	b.WriteString("Synthesize a single, correct, high-quality response. Do not name the models. ")
+	b.WriteString("Resolve contradictions by reasoning about correctness, and keep the best details from each. ")
+	b.WriteString(DivergenceInstruction)
+	b.WriteString("\n\n")
 	b.WriteString("## User request\n")
 	b.WriteString(userPrompt)
 	b.WriteString("\n\n## Candidate responses\n")

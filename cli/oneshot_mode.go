@@ -120,6 +120,11 @@ func (cli *ChatCLI) HandleOneShotOrFatal(ctx context.Context, opts *Options) boo
 		if err := cli.RunAgentOnce(ctxOne, input, opts.AgentAutoExec); err != nil {
 			fatal(i18n.T("oneshot.error.agent_failed"), "Erro no modo agente one-shot", err)
 		}
+	} else if input == "/moa" || strings.HasPrefix(input, "/moa ") {
+		// Mixture-of-Agents panel: same run, same output as the REPL's /moa.
+		if err := cli.runMoACommand(ctxOne, input); err != nil {
+			fatal(i18n.T("oneshot.error.moa_failed"), "Erro no /moa one-shot", err)
+		}
 	} else if strings.HasPrefix(input, "/coder ") {
 		// coder one-shot (mesma experiência do modo /coder interativo)
 		if err := cli.RunCoderOnce(ctxOne, input); err != nil {
