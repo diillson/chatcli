@@ -169,7 +169,7 @@ func (*BuiltinRecallPlugin) Name() string { return "@recall" }
 
 // Description surfaces the tool in /plugin list and the agent tool catalog.
 func (*BuiltinRecallPlugin) Description() string {
-	return "Retrieve the full, uncompressed original of content that was compressed earlier in this session. When a tool's output shows a '<<ccr:KEY>>' marker, it means the detail was offloaded to save context; call @recall with that key to read the complete original verbatim. Use it when the compressed view omitted something you need."
+	return "Retrieve the full, uncompressed original of content that was compressed earlier in this session. When a tool's output shows a '<<ccr:KEY>>' marker, it means the detail was offloaded to save context; call @recall with that key to read the complete original verbatim. Use it when the compressed view omitted something you need. A long original comes back one page at a time, with the exact call for the next page; pass match to get only the lines that contain a text."
 }
 
 // Usage explains the canonical invocation forms.
@@ -182,11 +182,17 @@ Accepts the bare key or the full marker (THE_KEY is the 16-hex id shown in the m
 
 Lenient on paste-back variants ("ccr:THE_KEY", uppercase hex, extra text around
 the marker) and accepts multiple markers in one call — each original is
-returned in a labeled section.`
+returned in a labeled section.
+
+A long original comes back one page at a time, cut at a line break, with a
+footer giving the next call:
+  {"key":"THE_KEY","offset":18000}             next page
+  {"key":"THE_KEY","offset":0,"max_chars":4000} a smaller page
+  {"key":"THE_KEY","match":"error"}            only the lines containing "error"`
 }
 
 // Version is semver; bumped when the surface changes.
-func (*BuiltinRecallPlugin) Version() string { return "1.1.0" }
+func (*BuiltinRecallPlugin) Version() string { return "1.2.0" }
 
 // Path is empty for builtin plugins.
 func (*BuiltinRecallPlugin) Path() string { return "" }
@@ -194,11 +200,14 @@ func (*BuiltinRecallPlugin) Path() string { return "" }
 // Schema exposes the structured description the agent prompt builder renders.
 func (*BuiltinRecallPlugin) Schema() string {
 	schema := map[string]interface{}{
-		"argsFormat": "JSON object {key}",
+		"argsFormat": "JSON object {key, offset?, max_chars?, match?}",
 		"flags": []map[string]interface{}{
 			{"name": "key", "type": "string", "required": true, "description": "The CCR key from a '<<ccr:KEY>>' marker — 16 hex chars. Bare key, 'ccr:KEY' or the full marker all accepted; multiple markers in one call return labeled sections."},
+			{"name": "offset", "type": "integer", "required": false, "description": "First character to return, for the next page of a long original; the footer of each page gives it."},
+			{"name": "max_chars", "type": "integer", "required": false, "description": "Page size in characters (default and maximum: what fits one tool result)."},
+			{"name": "match", "type": "string", "required": false, "description": "Return only the lines containing this text (case-insensitive), numbered, instead of a page."},
 		},
-		"examples": []string{`{"key":"THE_KEY"}`},
+		"examples": []string{`{"key":"THE_KEY"}`, `{"key":"THE_KEY","offset":18000}`, `{"key":"THE_KEY","match":"error"}`},
 	}
 	data, _ := json.Marshal(schema)
 	return string(data)
@@ -217,26 +226,34 @@ func (p *BuiltinRecallPlugin) ExecuteWithStream(_ context.Context, args []string
 	}
 	payload := strings.TrimSpace(strings.Join(args, " "))
 	keys := extractCCRKeys(payload)
+	if len(keys) == 0 && !strings.HasPrefix(payload, "{") {
+		keys = argvCCRKeys(args)
+	}
 	if len(keys) == 0 {
 		return "", fmt.Errorf(
 			`@recall: no CCR key found in %q — pass the value from a <<ccr:KEY>> marker (16 hex chars), e.g. {"key":"<<ccr:KEY>>"} or {"key":"KEY"}`,
 			truncateForLog(payload, 120))
 	}
 
-	// Single key: return the original verbatim — recall's contract is a
-	// byte-identical restore, and downstream guards (the compression layer's
-	// recall passthrough, the history trimmer) rely on that.
+	opts := parseRecallOptions(args)
+
+	// Single key: an original that fits one tool result comes back verbatim
+	// — recall's contract is a byte-identical restore, and downstream guards
+	// (the compression layer's recall passthrough, the history trimmer) rely
+	// on that. A larger one comes back one page at a time (recall_paging.go):
+	// returned whole, the agent loop would cut it to a short preview.
 	if len(keys) == 1 {
 		content, ok := adapter.Recall(keys[0])
 		if !ok {
 			return "", fmt.Errorf("@recall: key %q not found (it may have expired or been evicted from the local store)", keys[0])
 		}
-		return content, nil
+		return recallPage(keys[0], content, opts), nil
 	}
 
 	// Multiple keys in one call: label each section so the model can tell
 	// them apart. Partial hits still return — a missing key is reported in
-	// place instead of failing the whole batch.
+	// place instead of failing the whole batch. The sections share one page.
+	share := recallPageSize() / len(keys)
 	var b strings.Builder
 	found := 0
 	for i, key := range keys {
@@ -249,13 +266,35 @@ func (p *BuiltinRecallPlugin) ExecuteWithStream(_ context.Context, args []string
 			b.WriteString("[not found — expired or evicted from the local store]")
 			continue
 		}
-		b.WriteString(content)
+		if opts.match != "" {
+			b.WriteString(recallMatch(key, content, opts.match))
+		} else {
+			b.WriteString(recallSection(content, share))
+		}
 		found++
 	}
 	if found == 0 {
 		return "", fmt.Errorf("@recall: none of the %d keys were found (they may have expired or been evicted from the local store)", len(keys))
 	}
 	return b.String(), nil
+}
+
+// argvCCRKeys reads the key from the argv form the agent loop produces from a
+// {"cmd":...} envelope ("--key KEY --offset N"), where the bare key is not the
+// whole payload and the strict fallback of extractCCRKeys cannot see it.
+func argvCCRKeys(args []string) []string {
+	flags, _, positionals := splitFlatArgs(args)
+	for _, field := range []string{"key", "keys", "marker", "markers", "ccr", "id"} {
+		if keys := extractCCRKeys(flags[field]); len(keys) > 0 {
+			return keys
+		}
+	}
+	for _, p := range positionals {
+		if keys := extractCCRKeys(p); len(keys) > 0 {
+			return keys
+		}
+	}
+	return nil
 }
 
 // truncateForLog clamps a payload echo used in error messages.
