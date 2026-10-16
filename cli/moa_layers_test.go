@@ -88,9 +88,16 @@ func TestMoaPositionsReport(t *testing.T) {
 	if strings.Count(lead, "- c") != 1 {
 		t.Fatalf("a member left out of a round must not be listed in it:\n%s", lead)
 	}
-	full := moaPositionsReport(moaPanelFull, out)
-	if !strings.Contains(full, "#### b [revised]\nYes, but only after a canary. Now.\n") {
-		t.Fatalf("full report should carry whole answers:\n%s", full)
+	if full := moaPositionsReport(moaPanelFull, out); full != lead {
+		t.Fatalf("with positions=full the positions stay compact; whole answers go to the appendix:\n%s", full)
+	}
+	appendix := moaFullAnswersAppendix(moaPanelFull, out)
+	if !strings.HasPrefix(appendix, moaFullAnswersHeading) ||
+		!strings.Contains(appendix, "#### b [revised]\nYes, but only after a canary. Now.\n") || strings.Contains(appendix, "#### c") {
+		t.Fatalf("the appendix carries every whole answer, failures left out:\n%s", appendix)
+	}
+	if moaFullAnswersAppendix(moaPanelLead, out) != "" || moaFullAnswersAppendix(moaPanelFull, moa.Outcome{}) != "" {
+		t.Fatal("the appendix is only for positions=full")
 	}
 	if moaPositionsReport(moaPanelOff, out) != "" || moaPositionsReport(moaPanelLead, moa.Outcome{}) != "" {
 		t.Fatal("off (or nothing to report) renders nothing")
@@ -336,5 +343,27 @@ func TestMoaToolCall_AgentArgvPath(t *testing.T) {
 	if got.Layers != 2 || got.Positions != "full" || got.Prompt != "PDB com maxUnavailable 0?" ||
 		got.Aggregator != "claudeai" || len(got.Members) != 2 {
 		t.Fatalf("argv %v reached the tool as %+v", argv, got)
+	}
+}
+
+// A result cut to fit the agent's context must keep the positions and the
+// synthesis: the whole answers of positions=full come last.
+func TestMoaRunRequest_FullAnswersComeAfterTheSynthesis(t *testing.T) {
+	mgr := &moaFakeManager{
+		minimalManager: &minimalManager{providers: []string{"a", "b", "agg"}},
+		answers:        map[string]string{"a": "Yes, migrate. A long body.", "b": "No, wait. B long body.", "agg": "VERDICT"},
+	}
+	ad := &moaPluginAdapter{cli: newMoaCLI(mgr, "agg", "m")}
+	t.Setenv("CHATCLI_MOA_AGGREGATOR", "")
+	out, err := ad.RunRequest(context.Background(), plugins.MoaRequest{Prompt: "q", Members: []string{"a", "b"}, Layers: 2, Positions: "full"}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	iPos, iSyn, iFull := strings.Index(out, moaPositionsHeading), strings.Index(out, "VERDICT"), strings.Index(out, moaFullAnswersHeading)
+	if iPos < 0 || iSyn < 0 || iFull < 0 || iPos >= iSyn || iSyn >= iFull {
+		t.Fatalf("want positions, then the synthesis, then the full answers:\n%s", out)
+	}
+	if !strings.Contains(out[iFull:], "A long body.") || strings.Contains(out[:iFull], "A long body.") {
+		t.Fatalf("whole answers belong only to the appendix:\n%s", out)
 	}
 }

@@ -105,9 +105,9 @@ Subcommands (cmd + args):
        layers      optional 1-4: rounds where each model reads the others'
                    answers and revises its own before the synthesis
                    (default: CHATCLI_MOA_LAYERS, else 1)
-       positions   "lead" (each model's bottom line), "full" (each whole
-                   answer) or "off"; shown before the synthesis so you can
-                   see where the models diverged
+       positions   "lead" (each model's bottom line per round, before the
+                   synthesis), "full" (that, plus every whole answer after
+                   the synthesis; long) or "off"
                    (default: CHATCLI_MOA_PANEL, else lead)
   list  show providers/models available to participate`
 }
@@ -131,7 +131,7 @@ func (*BuiltinMoaPlugin) Schema() string {
 					{"name": "models", "type": "array", "required": false, "description": "Member models: each 'provider' or 'provider:model'. Defaults to configured providers."},
 					{"name": "aggregator", "type": "string", "required": false, "description": "Model that synthesizes the final answer. Defaults to the current session model."},
 					{"name": "layers", "type": "integer", "required": false, "description": "Rounds (1-4). From the second on, each model reads the others' answers and revises its own before the synthesis; use 2 for contested, high-stakes questions. Defaults to CHATCLI_MOA_LAYERS, else 1."},
-					{"name": "positions", "type": "string", "required": false, "description": "How much of each model's own answer the result shows before the synthesis: 'lead' (its bottom line), 'full' (the whole answer) or 'off'. Defaults to CHATCLI_MOA_PANEL, else lead."},
+					{"name": "positions", "type": "string", "required": false, "description": "How much of each model's own answer the result shows: 'lead' (each model's bottom line per round, before the synthesis), 'full' (the same, plus every whole answer appended after the synthesis; long with several rounds) or 'off'. Defaults to CHATCLI_MOA_PANEL, else lead."},
 				},
 				"examples": []string{
 					`{"cmd":"ask","args":{"prompt":"What are the trade-offs of event sourcing?"}}`,
