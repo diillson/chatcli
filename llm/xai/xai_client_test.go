@@ -2,6 +2,7 @@ package xai
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -77,4 +78,42 @@ func TestXAIClient_ListModels(t *testing.T) {
 	list, err := client.ListModels(context.Background())
 	assert.NoError(t, err)
 	assert.NotEmpty(t, list)
+}
+
+func TestXAIClient_SendPrompt_SendsPromptOutsideHistory(t *testing.T) {
+	var got struct {
+		Messages []struct {
+			Role    string `json:"role"`
+			Content string `json:"content"`
+		} `json:"messages"`
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.NoError(t, json.NewDecoder(r.Body).Decode(&got))
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"choices": [{"message": {"role": "assistant", "content": "ok"}}]}`))
+	}))
+	defer server.Close()
+
+	client := NewXAIClient(testProvider("k"), "grok-4", zap.NewNop(), 1, 0)
+	client.apiURL = server.URL
+
+	cases := []struct {
+		name    string
+		history []models.Message
+		want    []string
+	}{
+		{"system only", []models.Message{{Role: "system", Content: "sys"}}, []string{"system:sys", "user:review this"}},
+		{"no history", nil, []string{"user:review this"}},
+		{"already last", []models.Message{{Role: "user", Content: "review this"}}, []string{"user:review this"}},
+		{"after assistant", []models.Message{{Role: "user", Content: "q"}, {Role: "assistant", Content: "a"}}, []string{"user:q", "assistant:a", "user:review this"}},
+	}
+	for _, c := range cases {
+		_, err := client.SendPrompt(context.Background(), "review this", c.history, 0)
+		assert.NoError(t, err, c.name)
+		var roles []string
+		for _, m := range got.Messages {
+			roles = append(roles, m.Role+":"+m.Content)
+		}
+		assert.Equal(t, c.want, roles, c.name)
+	}
 }
