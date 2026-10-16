@@ -8,7 +8,7 @@ By taking part you agree to follow our [Code of Conduct](CODE_OF_CONDUCT.md).
 
 ## Where to start
 
-- **Bugs and ideas**: search the [issues](https://github.com/diillson/chatcli/issues) first, then open one with the version (`chatcli --version`), your OS, the provider and model, and the steps to reproduce.
+- **Bugs and ideas**: search the [issues](https://github.com/diillson/chatcli/issues) first, then open one with the bug report or feature request form, which asks for the version (`chatcli --version`), your OS, the provider and model, and the steps to reproduce.
 - **Larger changes** (a new provider, a new builtin tool, a new surface, anything that changes defaults or security behavior): open an issue to agree on the approach before writing the code.
 - **Documentation** lives in its own repository, [diillson/chatcli.ai](https://github.com/diillson/chatcli.ai), published at [chatcli.edilsonfreitas.com](https://chatcli.edilsonfreitas.com). Every page exists in English and Portuguese; change both.
 
@@ -45,7 +45,7 @@ The Kubernetes operator is a separate Go module: run `go test ./...` inside [`op
    ```
 2. Write the change and its tests. A bug fix comes with a test that fails without it.
 3. Run `gofmt -w`, `make lint` and `go test ./...` before pushing.
-4. Open a pull request against `main` with a [Conventional Commits](https://www.conventionalcommits.org/) title. Describe what changed and why, and how you verified it.
+4. Open a pull request against `main` with a [Conventional Commits](https://www.conventionalcommits.org/) title. The pull request template asks what changed and why, how you verified it, and walks through the checklist below.
 
 Pull requests are squash-merged, so the PR title becomes the commit on `main` and feeds the changelog. Releases are cut by the maintainers with release-please: do not bump the project version yourself.
 

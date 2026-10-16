@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Report a security vulnerability
+    url: https://github.com/diillson/chatcli/security/advisories/new
+    about: Report it privately. Never open a public issue for a security problem.
+  - name: Documentation
+    url: https://chatcli.edilsonfreitas.com
+    about: Guides, configuration and the full command reference.

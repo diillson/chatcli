@@ -1,0 +1,73 @@
+name: Bug report
+description: Something in ChatCLI does not work as documented.
+title: "bug: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report this. **Security problems go through [private reporting](https://github.com/diillson/chatcli/security/advisories/new), never a public issue.** Remove API keys, tokens and personal data from everything you paste.
+  - type: input
+    id: version
+    attributes:
+      label: ChatCLI version
+      description: Output of `chatcli --version`.
+      placeholder: "1.221.0"
+    validations:
+      required: true
+  - type: dropdown
+    id: surface
+    attributes:
+      label: Where it happens
+      multiple: true
+      options:
+        - Interactive terminal (chat)
+        - /coder or /agent
+        - One-shot (chatcli -p)
+        - Web UI
+        - ACP (editor)
+        - MCP server
+        - Chat gateway (Telegram, Slack, Discord, WhatsApp, webhook)
+        - Server mode (gRPC)
+        - Kubernetes operator
+        - Live dashboard
+        - Install, update or packaging
+        - Other
+    validations:
+      required: true
+  - type: input
+    id: provider
+    attributes:
+      label: Provider and model
+      description: The `LLM_PROVIDER` and model in use, if it matters.
+      placeholder: "CLAUDEAI / claude-sonnet-5-5"
+  - type: input
+    id: environment
+    attributes:
+      label: Operating system and install channel
+      placeholder: "macOS 15, Homebrew"
+    validations:
+      required: true
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What you did, what you expected, and what happened instead.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Run `chatcli ...`
+        2. Type `...`
+        3. See ...
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: Relevant output, ideally with `LOG_LEVEL=debug`. Secrets removed.
+      render: text
