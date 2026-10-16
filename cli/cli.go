@@ -688,191 +688,8 @@ func NewChatCLI(ctx context.Context, manager manager.LLMManager, logger *zap.Log
 	}
 	cli.pluginManager = pluginMgr
 	if pluginMgr != nil {
-		pluginMgr.RegisterBuiltinPlugin(plugins.NewBuiltinCoderPlugin())
-		pluginMgr.RegisterBuiltinPlugin(plugins.NewBuiltinWebFetchPlugin())
-		pluginMgr.RegisterBuiltinPlugin(plugins.NewBuiltinWebSearchPlugin())
-		pluginMgr.RegisterBuiltinPlugin(plugins.NewBuiltinSchedulerPlugin())
-		pluginMgr.RegisterBuiltinPlugin(plugins.NewBuiltinParkPlugin())
-		pluginMgr.RegisterBuiltinPlugin(plugins.NewBuiltinAskPlugin())
-		// @commands — model-facing discovery/expansion of the slash-command
-		// template catalog (the user-facing side is the /name dispatch).
-		pluginMgr.RegisterBuiltinPlugin(plugins.NewBuiltinCommandsPlugin())
-		// @send — proactive outbound messaging through the gateway
-		// platform adapters (Telegram/WhatsApp/Discord/Slack/webhook).
-		// The adapter is wired below; gateway.BuildConfigured() reads the
-		// live platform credentials each call, so this works whether or
-		// not the gateway daemon is running.
-		pluginMgr.RegisterBuiltinPlugin(plugins.NewBuiltinSendPlugin())
-		// @moa — Mixture-of-Agents: fan a prompt out to several models and
-		// synthesize one best answer. Wired below to the LLM manager.
-		pluginMgr.RegisterBuiltinPlugin(plugins.NewBuiltinMoaPlugin())
-		// @model and @dash have kill switches; see registerGatedBuiltins.
-		registerGatedBuiltins(pluginMgr)
-		// @osv — keyless dependency vulnerability scanning via OSV.dev.
-		// Self-contained (HTTP + filesystem), no adapter wiring needed.
-		pluginMgr.RegisterBuiltinPlugin(plugins.NewBuiltinOsvPlugin())
-		// @session — search past saved conversations. Wired below to the
-		// SessionManager.
-		pluginMgr.RegisterBuiltinPlugin(plugins.NewBuiltinSessionPlugin())
-		// @speak — text-to-speech to an audio file (local/keyless-first).
-		// Self-contained via llm/tts; no adapter wiring needed.
-		pluginMgr.RegisterBuiltinPlugin(plugins.NewBuiltinSpeakPlugin())
-		// @voice — per-conversation voice reply control for the messaging
-		// gateway: the model calls it when the user asks to start/stop
-		// receiving audio answers. Backed by the shared preference store.
-		pluginMgr.RegisterBuiltinPlugin(plugins.NewBuiltinVoicePlugin(nil))
-		// @image — text-to-image generation to a file (self-hosted/keyless
-		// first via Stable Diffusion WebUI). Self-contained via llm/imagegen.
-		pluginMgr.RegisterBuiltinPlugin(plugins.NewBuiltinImagePlugin())
-		// @embed — ad-hoc semantic text operations (similarity, ranking,
-		// raw vectors) over the configured embedding backend. Persistent
-		// RAG stays with @context/@knowledge. Self-contained via
-		// llm/embedding; no adapter wiring needed.
-		pluginMgr.RegisterBuiltinPlugin(plugins.NewBuiltinEmbedPlugin())
-		// @skill — self-authoring skills: the agent writes/evolves its own
-		// skills from what it learns, persisted to the global skills dir and
-		// auto-activated in future sessions. Self-contained.
-		pluginMgr.RegisterBuiltinPlugin(plugins.NewBuiltinSkillPlugin())
-		// @memory — deterministic long-term memory writes/recall. The
-		// adapter is wired below once the memory store exists; until then
-		// the tool reports "memory not enabled" rather than panicking.
-		pluginMgr.RegisterBuiltinPlugin(plugins.NewBuiltinMemoryPlugin())
-		// @knowledge — pull-side of /context --mode knowledge: search, read
-		// and walk attached documentation corpora on demand. Adapter wired
-		// below once the context handler exists.
-		pluginMgr.RegisterBuiltinPlugin(plugins.NewBuiltinKnowledgePlugin())
-		// @lsp — semantic code navigation through real language servers:
-		// diagnostics, definition, references, symbols, hover. Adapter wired
-		// below over a lazily created, session-scoped server pool.
-		pluginMgr.RegisterBuiltinPlugin(plugins.NewBuiltinLSPPlugin())
-		// @mcp-login — authorize an OAuth-protected remote MCP server so its
-		// tools become usable. The agent invokes it after an mcp_* call fails
-		// with an "authorization required" error. Adapter wired below over the
-		// live MCP manager.
-		pluginMgr.RegisterBuiltinPlugin(plugins.NewBuiltinMCPLoginPlugin())
-		// @tools — tool-catalog meta-tool behind the deferred catalog: the
-		// model pulls full definitions of indexed tools on demand instead of
-		// every definition riding in every prompt. Adapter wired below.
-		pluginMgr.RegisterBuiltinPlugin(plugins.NewBuiltinToolsPlugin())
-		pluginMgr.RegisterBuiltinPlugin(plugins.NewBuiltinChannelsPlugin())
-		// @proc — background-process supervision: start/status/logs/stop for
-		// long-running commands (dev servers, watchers). Adapter wired below
-		// over a session supervisor sharing the agent exec validator.
-		pluginMgr.RegisterBuiltinPlugin(plugins.NewBuiltinProcPlugin())
-		// @http — structured HTTP client for testing APIs (pairs with @proc:
-		// start the server, hit its endpoints). Self-contained: shares the
-		// hardened proxy/TLS/SSRF web client with @webfetch.
-		pluginMgr.RegisterBuiltinPlugin(plugins.NewBuiltinHTTPPlugin())
-		// @api-explorer — end-to-end API reconnaissance: from a base URL it
-		// auto-discovers the OpenAPI/Swagger spec (JSON or YAML) across ~18
-		// well-known locations, fingerprints server tech/auth/rate-limit from
-		// response headers, catalogs every path/method/parameter/security
-		// scheme, deep-dives a single endpoint, and introspects GraphQL
-		// schemas. Read-only (GET/HEAD/OPTIONS + GraphQL introspection).
-		// Self-contained: shares the hardened proxy/TLS/SSRF web client.
-		pluginMgr.RegisterBuiltinPlugin(plugins.NewBuiltinAPIExplorerPlugin())
-		// @browser — drive a real local Chrome/Chromium over the DevTools
-		// protocol: open, snapshot (numbered interactive elements), click,
-		// type, eval, screenshot, console and network capture. The web
-		// verification loop. Self-contained: speaks CDP directly over the
-		// websocket client already shipped — no driver, no new dependency;
-		// requires a locally installed Chromium-family browser.
-		pluginMgr.RegisterBuiltinPlugin(plugins.NewBuiltinBrowserPlugin())
-		// @view — attach a local image to the conversation through the
-		// vision pipeline (native multimodal or describe-fallback), so the
-		// agent can LOOK at screenshots, mocks and diagrams mid-task.
-		// Adapter wired below over the session vision pipeline.
-		pluginMgr.RegisterBuiltinPlugin(plugins.NewBuiltinViewPlugin())
-		// @forge — pull requests, issues and CI through the user's own
-		// authenticated gh/glab CLI (keyless: no stored credentials).
-		// Reads are auto-approved; pr-create/comments hit the security gate.
-		pluginMgr.RegisterBuiltinPlugin(plugins.NewBuiltinForgePlugin())
-		// @docs-flatten — push-side companion of @knowledge: flattens a
-		// Markdown/MDX docs tree (local dir or git repo) into the JSONL
-		// corpus /context --mode knowledge ingests. Self-contained.
-		// @context — autonomous knowledge-base management: the agent builds,
-		// attaches/detaches and inspects its own context/knowledge bases without
-		// the user running /context. Adapter wired below.
-		pluginMgr.RegisterBuiltinPlugin(plugins.NewBuiltinContextPlugin())
-		pluginMgr.RegisterBuiltinPlugin(plugins.NewBuiltinDocsFlattenPlugin())
-		// @registry-tags — keyless container image tag discovery across
-		// public/private OCI registries (Docker Hub, GCR, GHCR, Quay, ACR,
-		// Harbor, Artifactory). Reads ~/.docker/config.json for private
-		// repos and performs the OCI Bearer-token dance for anonymous ones.
-		// Self-contained (HTTP only), no adapter wiring needed.
-		pluginMgr.RegisterBuiltinPlugin(plugins.NewBuiltinRegistryTagsPlugin())
-		// @wikipedia — keyless factual lookup via the public MediaWiki API
-		// (search titles / read an article intro), language-configurable.
-		// A companion to @websearch/@webfetch/@knowledge. Self-contained.
-		pluginMgr.RegisterBuiltinPlugin(plugins.NewBuiltinWikipediaPlugin())
-		// @diagram — render architecture/dependency/flow diagrams to
-		// PNG/SVG/JPG from Graphviz DOT, with crisp and exactly-correct text
-		// labels. Graphviz is embedded as WASM (go-graphviz + wazero): no cgo,
-		// no external `dot` to install, no network. Also builds the real Go
-		// import graph of a module via `go list`. Self-contained.
-		pluginMgr.RegisterBuiltinPlugin(plugins.NewBuiltinDiagramPlugin())
-		// @graphview — render an INTERACTIVE, Obsidian-style force-directed
-		// graph (drag/zoom/pan/search/filter) to a self-contained HTML file
-		// and open it in the browser. The physics engine is embedded JS on a
-		// canvas: no CDN, no network, no API key. Sources: json (model-
-		// supplied nodes/edges — e.g. the conversation), knowledge (the
-		// in-core knowledge graph) and conversation (a structural session
-		// graph). Provider for the latter two wired below.
-		pluginMgr.RegisterBuiltinPlugin(plugins.NewBuiltinGraphViewPlugin())
-		// @compress / @recall — content-aware, reversible context compression
-		// (CCR). @compress shrinks bulky payloads (logs/search/diff/JSON) on
-		// demand; @recall restores the byte-identical original from a
-		// "<<ccr:KEY>>" marker. The same layer also compresses tool output
-		// automatically in the agent/coder loop. Adapter wired below once the
-		// compression layer exists.
-		pluginMgr.RegisterBuiltinPlugin(plugins.NewBuiltinCompressPlugin())
-		pluginMgr.RegisterBuiltinPlugin(plugins.NewBuiltinRecallPlugin())
-		// Atomic read-only tools (Claude Code parity, Item 1). Narrow,
-		// flat-schema tools that route into the same engine as @coder
-		// read/search/tree but give the LLM a dedicated entry point —
-		// the model picks @read instead of remembering the @coder
-		// envelope, and the orchestrator can fan them out in parallel
-		// because each declares IsConcurrencySafe.
-		pluginMgr.RegisterBuiltinPlugin(plugins.NewBuiltinReadPlugin())
-		pluginMgr.RegisterBuiltinPlugin(plugins.NewBuiltinSearchPlugin())
-		pluginMgr.RegisterBuiltinPlugin(plugins.NewBuiltinTreePlugin())
+		registerCoreBuiltins(pluginMgr)
 
-		// @todo (Claude Code TodoWrite parity, Item 2). Lets the LLM
-		// own its plan: write the full list each turn (canonical TodoWrite
-		// semantics), list the current state, or mark a single item by
-		// id. Adapter wired below routes into the live AgentMode's
-		// TaskTracker.
-		pluginMgr.RegisterBuiltinPlugin(plugins.NewBuiltinTodoPlugin())
-
-		// @agents — squad observability: lets the LLM list live agent runs
-		// (workers, subagents, MoA members, scheduler headless), inspect
-		// per-run progress and cancel a stuck run. Adapter wired below over
-		// the process-wide run registry.
-		pluginMgr.RegisterBuiltinPlugin(plugins.NewBuiltinAgentsPlugin())
-
-		// @board — the squad work board: the orchestrator LLM breaks goals
-		// into cards, assigns worker agent types, moves them across the
-		// kanban and records review/delivery notes. Humans watch via /board.
-		pluginMgr.RegisterBuiltinPlugin(plugins.NewBuiltinBoardPlugin())
-
-		// @mail — squad messaging for the orchestrator: message workers
-		// (delivered on their next turn), drain its own inbox, audit
-		// traffic. Workers use their native send_mail tool; humans /mail.
-		pluginMgr.RegisterBuiltinPlugin(plugins.NewBuiltinMailPlugin())
-
-		// @taskgraph — DAG orchestration for approved multi-task plans:
-		// parallel squad workers per task, validation gates run by the
-		// engine itself and an independent reviewer verdict before any
-		// task counts as done. Adapter wired below over the live
-		// dispatcher; humans watch via /taskgraph.
-		pluginMgr.RegisterBuiltinPlugin(plugins.NewBuiltinTaskGraphPlugin())
-
-		// Slash-as-tool: register the curated subset of slash commands
-		// (currently /help and /version) as plugins so the LLM can invoke
-		// them via the same native tool dispatch path used by @coder,
-		// @websearch, etc. The bindings live in slash_tool_registry.go +
-		// slash_tool_handlers.go; expanding the set is a deliberate
-		// review-gated decision (see registerBuiltinSlashTools doc).
 		cli.registerBuiltinSlashTools()
 		for _, entry := range AllSlashTools() {
 			if plugin := NewSlashToolPlugin(entry); plugin != nil {
@@ -2418,6 +2235,198 @@ func (cli *ChatCLI) cleanup(ctx context.Context) {
 			fmt.Fprintf(os.Stderr, "Falha ao sincronizar logger: %v\n", err)
 		}
 	}
+}
+
+// registerCoreBuiltins registers every builtin tool the agent can call (the
+// slash-command tools aside, which mirror the slash commands). NewChatCLI and
+// the builtin versioning test share it, so the test sees exactly the set the
+// model sees.
+func registerCoreBuiltins(pluginMgr *plugins.Manager) {
+	pluginMgr.RegisterBuiltinPlugin(plugins.NewBuiltinCoderPlugin())
+	pluginMgr.RegisterBuiltinPlugin(plugins.NewBuiltinWebFetchPlugin())
+	pluginMgr.RegisterBuiltinPlugin(plugins.NewBuiltinWebSearchPlugin())
+	pluginMgr.RegisterBuiltinPlugin(plugins.NewBuiltinSchedulerPlugin())
+	pluginMgr.RegisterBuiltinPlugin(plugins.NewBuiltinParkPlugin())
+	pluginMgr.RegisterBuiltinPlugin(plugins.NewBuiltinAskPlugin())
+	// @commands — model-facing discovery/expansion of the slash-command
+	// template catalog (the user-facing side is the /name dispatch).
+	pluginMgr.RegisterBuiltinPlugin(plugins.NewBuiltinCommandsPlugin())
+	// @send — proactive outbound messaging through the gateway
+	// platform adapters (Telegram/WhatsApp/Discord/Slack/webhook).
+	// The adapter is wired below; gateway.BuildConfigured() reads the
+	// live platform credentials each call, so this works whether or
+	// not the gateway daemon is running.
+	pluginMgr.RegisterBuiltinPlugin(plugins.NewBuiltinSendPlugin())
+	// @moa — Mixture-of-Agents: fan a prompt out to several models and
+	// synthesize one best answer. Wired below to the LLM manager.
+	pluginMgr.RegisterBuiltinPlugin(plugins.NewBuiltinMoaPlugin())
+	// @model and @dash have kill switches; see registerGatedBuiltins.
+	registerGatedBuiltins(pluginMgr)
+	// @osv — keyless dependency vulnerability scanning via OSV.dev.
+	// Self-contained (HTTP + filesystem), no adapter wiring needed.
+	pluginMgr.RegisterBuiltinPlugin(plugins.NewBuiltinOsvPlugin())
+	// @session — search past saved conversations. Wired below to the
+	// SessionManager.
+	pluginMgr.RegisterBuiltinPlugin(plugins.NewBuiltinSessionPlugin())
+	// @speak — text-to-speech to an audio file (local/keyless-first).
+	// Self-contained via llm/tts; no adapter wiring needed.
+	pluginMgr.RegisterBuiltinPlugin(plugins.NewBuiltinSpeakPlugin())
+	// @voice — per-conversation voice reply control for the messaging
+	// gateway: the model calls it when the user asks to start/stop
+	// receiving audio answers. Backed by the shared preference store.
+	pluginMgr.RegisterBuiltinPlugin(plugins.NewBuiltinVoicePlugin(nil))
+	// @image — text-to-image generation to a file (self-hosted/keyless
+	// first via Stable Diffusion WebUI). Self-contained via llm/imagegen.
+	pluginMgr.RegisterBuiltinPlugin(plugins.NewBuiltinImagePlugin())
+	// @embed — ad-hoc semantic text operations (similarity, ranking,
+	// raw vectors) over the configured embedding backend. Persistent
+	// RAG stays with @context/@knowledge. Self-contained via
+	// llm/embedding; no adapter wiring needed.
+	pluginMgr.RegisterBuiltinPlugin(plugins.NewBuiltinEmbedPlugin())
+	// @skill — self-authoring skills: the agent writes/evolves its own
+	// skills from what it learns, persisted to the global skills dir and
+	// auto-activated in future sessions. Self-contained.
+	pluginMgr.RegisterBuiltinPlugin(plugins.NewBuiltinSkillPlugin())
+	// @memory — deterministic long-term memory writes/recall. The
+	// adapter is wired below once the memory store exists; until then
+	// the tool reports "memory not enabled" rather than panicking.
+	pluginMgr.RegisterBuiltinPlugin(plugins.NewBuiltinMemoryPlugin())
+	// @knowledge — pull-side of /context --mode knowledge: search, read
+	// and walk attached documentation corpora on demand. Adapter wired
+	// below once the context handler exists.
+	pluginMgr.RegisterBuiltinPlugin(plugins.NewBuiltinKnowledgePlugin())
+	// @lsp — semantic code navigation through real language servers:
+	// diagnostics, definition, references, symbols, hover. Adapter wired
+	// below over a lazily created, session-scoped server pool.
+	pluginMgr.RegisterBuiltinPlugin(plugins.NewBuiltinLSPPlugin())
+	// @mcp-login — authorize an OAuth-protected remote MCP server so its
+	// tools become usable. The agent invokes it after an mcp_* call fails
+	// with an "authorization required" error. Adapter wired below over the
+	// live MCP manager.
+	pluginMgr.RegisterBuiltinPlugin(plugins.NewBuiltinMCPLoginPlugin())
+	// @tools — tool-catalog meta-tool behind the deferred catalog: the
+	// model pulls full definitions of indexed tools on demand instead of
+	// every definition riding in every prompt. Adapter wired below.
+	pluginMgr.RegisterBuiltinPlugin(plugins.NewBuiltinToolsPlugin())
+	pluginMgr.RegisterBuiltinPlugin(plugins.NewBuiltinChannelsPlugin())
+	// @proc — background-process supervision: start/status/logs/stop for
+	// long-running commands (dev servers, watchers). Adapter wired below
+	// over a session supervisor sharing the agent exec validator.
+	pluginMgr.RegisterBuiltinPlugin(plugins.NewBuiltinProcPlugin())
+	// @http — structured HTTP client for testing APIs (pairs with @proc:
+	// start the server, hit its endpoints). Self-contained: shares the
+	// hardened proxy/TLS/SSRF web client with @webfetch.
+	pluginMgr.RegisterBuiltinPlugin(plugins.NewBuiltinHTTPPlugin())
+	// @api-explorer — end-to-end API reconnaissance: from a base URL it
+	// auto-discovers the OpenAPI/Swagger spec (JSON or YAML) across ~18
+	// well-known locations, fingerprints server tech/auth/rate-limit from
+	// response headers, catalogs every path/method/parameter/security
+	// scheme, deep-dives a single endpoint, and introspects GraphQL
+	// schemas. Read-only (GET/HEAD/OPTIONS + GraphQL introspection).
+	// Self-contained: shares the hardened proxy/TLS/SSRF web client.
+	pluginMgr.RegisterBuiltinPlugin(plugins.NewBuiltinAPIExplorerPlugin())
+	// @browser — drive a real local Chrome/Chromium over the DevTools
+	// protocol: open, snapshot (numbered interactive elements), click,
+	// type, eval, screenshot, console and network capture. The web
+	// verification loop. Self-contained: speaks CDP directly over the
+	// websocket client already shipped — no driver, no new dependency;
+	// requires a locally installed Chromium-family browser.
+	pluginMgr.RegisterBuiltinPlugin(plugins.NewBuiltinBrowserPlugin())
+	// @view — attach a local image to the conversation through the
+	// vision pipeline (native multimodal or describe-fallback), so the
+	// agent can LOOK at screenshots, mocks and diagrams mid-task.
+	// Adapter wired below over the session vision pipeline.
+	pluginMgr.RegisterBuiltinPlugin(plugins.NewBuiltinViewPlugin())
+	// @forge — pull requests, issues and CI through the user's own
+	// authenticated gh/glab CLI (keyless: no stored credentials).
+	// Reads are auto-approved; pr-create/comments hit the security gate.
+	pluginMgr.RegisterBuiltinPlugin(plugins.NewBuiltinForgePlugin())
+	// @docs-flatten — push-side companion of @knowledge: flattens a
+	// Markdown/MDX docs tree (local dir or git repo) into the JSONL
+	// corpus /context --mode knowledge ingests. Self-contained.
+	// @context — autonomous knowledge-base management: the agent builds,
+	// attaches/detaches and inspects its own context/knowledge bases without
+	// the user running /context. Adapter wired below.
+	pluginMgr.RegisterBuiltinPlugin(plugins.NewBuiltinContextPlugin())
+	pluginMgr.RegisterBuiltinPlugin(plugins.NewBuiltinDocsFlattenPlugin())
+	// @registry-tags — keyless container image tag discovery across
+	// public/private OCI registries (Docker Hub, GCR, GHCR, Quay, ACR,
+	// Harbor, Artifactory). Reads ~/.docker/config.json for private
+	// repos and performs the OCI Bearer-token dance for anonymous ones.
+	// Self-contained (HTTP only), no adapter wiring needed.
+	pluginMgr.RegisterBuiltinPlugin(plugins.NewBuiltinRegistryTagsPlugin())
+	// @wikipedia — keyless factual lookup via the public MediaWiki API
+	// (search titles / read an article intro), language-configurable.
+	// A companion to @websearch/@webfetch/@knowledge. Self-contained.
+	pluginMgr.RegisterBuiltinPlugin(plugins.NewBuiltinWikipediaPlugin())
+	// @diagram — render architecture/dependency/flow diagrams to
+	// PNG/SVG/JPG from Graphviz DOT, with crisp and exactly-correct text
+	// labels. Graphviz is embedded as WASM (go-graphviz + wazero): no cgo,
+	// no external `dot` to install, no network. Also builds the real Go
+	// import graph of a module via `go list`. Self-contained.
+	pluginMgr.RegisterBuiltinPlugin(plugins.NewBuiltinDiagramPlugin())
+	// @graphview — render an INTERACTIVE, Obsidian-style force-directed
+	// graph (drag/zoom/pan/search/filter) to a self-contained HTML file
+	// and open it in the browser. The physics engine is embedded JS on a
+	// canvas: no CDN, no network, no API key. Sources: json (model-
+	// supplied nodes/edges — e.g. the conversation), knowledge (the
+	// in-core knowledge graph) and conversation (a structural session
+	// graph). Provider for the latter two wired below.
+	pluginMgr.RegisterBuiltinPlugin(plugins.NewBuiltinGraphViewPlugin())
+	// @compress / @recall — content-aware, reversible context compression
+	// (CCR). @compress shrinks bulky payloads (logs/search/diff/JSON) on
+	// demand; @recall restores the byte-identical original from a
+	// "<<ccr:KEY>>" marker. The same layer also compresses tool output
+	// automatically in the agent/coder loop. Adapter wired below once the
+	// compression layer exists.
+	pluginMgr.RegisterBuiltinPlugin(plugins.NewBuiltinCompressPlugin())
+	pluginMgr.RegisterBuiltinPlugin(plugins.NewBuiltinRecallPlugin())
+	// Atomic read-only tools (Claude Code parity, Item 1). Narrow,
+	// flat-schema tools that route into the same engine as @coder
+	// read/search/tree but give the LLM a dedicated entry point —
+	// the model picks @read instead of remembering the @coder
+	// envelope, and the orchestrator can fan them out in parallel
+	// because each declares IsConcurrencySafe.
+	pluginMgr.RegisterBuiltinPlugin(plugins.NewBuiltinReadPlugin())
+	pluginMgr.RegisterBuiltinPlugin(plugins.NewBuiltinSearchPlugin())
+	pluginMgr.RegisterBuiltinPlugin(plugins.NewBuiltinTreePlugin())
+
+	// @todo (Claude Code TodoWrite parity, Item 2). Lets the LLM
+	// own its plan: write the full list each turn (canonical TodoWrite
+	// semantics), list the current state, or mark a single item by
+	// id. Adapter wired below routes into the live AgentMode's
+	// TaskTracker.
+	pluginMgr.RegisterBuiltinPlugin(plugins.NewBuiltinTodoPlugin())
+
+	// @agents — squad observability: lets the LLM list live agent runs
+	// (workers, subagents, MoA members, scheduler headless), inspect
+	// per-run progress and cancel a stuck run. Adapter wired below over
+	// the process-wide run registry.
+	pluginMgr.RegisterBuiltinPlugin(plugins.NewBuiltinAgentsPlugin())
+
+	// @board — the squad work board: the orchestrator LLM breaks goals
+	// into cards, assigns worker agent types, moves them across the
+	// kanban and records review/delivery notes. Humans watch via /board.
+	pluginMgr.RegisterBuiltinPlugin(plugins.NewBuiltinBoardPlugin())
+
+	// @mail — squad messaging for the orchestrator: message workers
+	// (delivered on their next turn), drain its own inbox, audit
+	// traffic. Workers use their native send_mail tool; humans /mail.
+	pluginMgr.RegisterBuiltinPlugin(plugins.NewBuiltinMailPlugin())
+
+	// @taskgraph — DAG orchestration for approved multi-task plans:
+	// parallel squad workers per task, validation gates run by the
+	// engine itself and an independent reviewer verdict before any
+	// task counts as done. Adapter wired below over the live
+	// dispatcher; humans watch via /taskgraph.
+	pluginMgr.RegisterBuiltinPlugin(plugins.NewBuiltinTaskGraphPlugin())
+
+	// Slash-as-tool: register the curated subset of slash commands
+	// (currently /help and /version) as plugins so the LLM can invoke
+	// them via the same native tool dispatch path used by @coder,
+	// @websearch, etc. The bindings live in slash_tool_registry.go +
+	// slash_tool_handlers.go; expanding the set is a deliberate
+	// review-gated decision (see registerBuiltinSlashTools doc).
 }
 
 // registerGatedBuiltins registers the builtins that an environment switch

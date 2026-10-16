@@ -64,7 +64,7 @@ func TestDeferredCatalogKeepsCoreAndIndexesRest(t *testing.T) {
 	if strings.Contains(out, "- Ferramenta: @diagram") {
 		t.Fatal("@diagram must be deferred to the index, not fully rendered")
 	}
-	if !strings.Contains(out, "- @diagram: ") {
+	if !strings.Contains(out, "- @diagram (v") {
 		t.Fatal("@diagram missing from the index")
 	}
 	if !strings.Contains(out, "@tools") || !strings.Contains(out, "Tool index:") {

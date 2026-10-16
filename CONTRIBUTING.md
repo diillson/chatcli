@@ -61,6 +61,7 @@ Para garantir um processo tranquilo, siga estes passos para configurar seu ambie
     *   `style:` para mudanças de formatação que não alteram a lógica.
     *   `refactor:` para refatorações de código.
     *   `test:` para adicionar ou corrigir testes.
+*   **Versão dos tools builtin** (`cli/plugins/builtin_*.go`): todo tool builtin tem uma versão semântica em `Version()`, que o modelo vê no catálogo e no `@tools describe`. Ao mudar a descrição, o uso, o schema ou o comportamento em que o modelo se apoia, suba a versão: **patch** para texto, exemplos ou uma correção; **minor** para um subcomando, argumento ou capacidade nova; **major** para um subcomando ou argumento removido ou renomeado. O teste `TestBuiltinVersions` falha quando a superfície muda sem bump; depois de subir a versão, registre com `UPDATE_BUILTIN_VERSIONS=1 go test ./cli -run TestBuiltinVersions`.
 
 ---
 

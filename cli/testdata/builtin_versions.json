@@ -1,0 +1,186 @@
+{
+  "@agents": {
+    "version": "1.0.0",
+    "surface": "675b661338696405"
+  },
+  "@api-explorer": {
+    "version": "2.0.0",
+    "surface": "ddc16ce2b762723c"
+  },
+  "@ask": {
+    "version": "1.0.0",
+    "surface": "df0cfaa13004c3c9"
+  },
+  "@board": {
+    "version": "1.0.0",
+    "surface": "6b81c1870987476d"
+  },
+  "@browser": {
+    "version": "1.0.0",
+    "surface": "6638fd3ee460133d"
+  },
+  "@channels": {
+    "version": "1.0.0",
+    "surface": "bbb496c9565d9f4e"
+  },
+  "@coder": {
+    "version": "2.0.0",
+    "surface": "b06a8ed622e38c01"
+  },
+  "@commands": {
+    "version": "1.0.0",
+    "surface": "a54ccca1bcfc7b96"
+  },
+  "@compress": {
+    "version": "1.0.0",
+    "surface": "7220391f38a63bd3"
+  },
+  "@context": {
+    "version": "1.0.0",
+    "surface": "27d51385134562d0"
+  },
+  "@dash": {
+    "version": "1.0.0",
+    "surface": "276b3a8b8ffc2bf6"
+  },
+  "@diagram": {
+    "version": "1.0.0",
+    "surface": "966e614c9f5f1d4e"
+  },
+  "@docs-flatten": {
+    "version": "2.2.0",
+    "surface": "a44c968d2cd12787"
+  },
+  "@embed": {
+    "version": "1.0.0",
+    "surface": "33ec260cb181718e"
+  },
+  "@forge": {
+    "version": "1.0.0",
+    "surface": "27ebd46a36e1709d"
+  },
+  "@graphview": {
+    "version": "1.0.0",
+    "surface": "d8d93c77e6e7f695"
+  },
+  "@http": {
+    "version": "1.0.0",
+    "surface": "8ad2fb42c0c34966"
+  },
+  "@image": {
+    "version": "1.1.0",
+    "surface": "3248811e7506d197"
+  },
+  "@knowledge": {
+    "version": "1.0.0",
+    "surface": "a23ec7f45998f3e0"
+  },
+  "@lsp": {
+    "version": "1.0.0",
+    "surface": "46f0d5d1694e6488"
+  },
+  "@mail": {
+    "version": "1.0.0",
+    "surface": "b34c4c67aa3b2530"
+  },
+  "@mcp-login": {
+    "version": "1.0.0",
+    "surface": "6a9a6b03d9d04f25"
+  },
+  "@memory": {
+    "version": "1.2.1",
+    "surface": "79f2cd25082917fb"
+  },
+  "@moa": {
+    "version": "1.1.0",
+    "surface": "674eed3978be2ffc"
+  },
+  "@model": {
+    "version": "1.0.0",
+    "surface": "c0798287cca9e140"
+  },
+  "@osv": {
+    "version": "1.0.0",
+    "surface": "e247554b012bf4e7"
+  },
+  "@park": {
+    "version": "1.0.0",
+    "surface": "c0b4c4913df6339f"
+  },
+  "@proc": {
+    "version": "1.0.0",
+    "surface": "40c9524230149669"
+  },
+  "@read": {
+    "version": "1.0.0",
+    "surface": "205ee7da52dc597f"
+  },
+  "@recall": {
+    "version": "1.2.0",
+    "surface": "ec34835e25c5fdc3"
+  },
+  "@registry-tags": {
+    "version": "2.0.0",
+    "surface": "b6bf8d08e3d92a01"
+  },
+  "@scheduler": {
+    "version": "1.1.0",
+    "surface": "5f2f0a3e7cff6ec3"
+  },
+  "@search": {
+    "version": "1.0.0",
+    "surface": "c4e9775814d2ec71"
+  },
+  "@send": {
+    "version": "1.0.0",
+    "surface": "7c25b756ed796be3"
+  },
+  "@session": {
+    "version": "1.2.0",
+    "surface": "e2b065d7d5af7e72"
+  },
+  "@skill": {
+    "version": "1.0.0",
+    "surface": "83f5ed1dab3b9c98"
+  },
+  "@speak": {
+    "version": "1.0.0",
+    "surface": "df2da12174b88fda"
+  },
+  "@taskgraph": {
+    "version": "1.0.0",
+    "surface": "3cc7b970b29436aa"
+  },
+  "@todo": {
+    "version": "1.0.0",
+    "surface": "75a8595d3eb0341c"
+  },
+  "@tools": {
+    "version": "1.1.0",
+    "surface": "f25d857293fd20ef"
+  },
+  "@tree": {
+    "version": "1.0.0",
+    "surface": "7a1a3ad492406dba"
+  },
+  "@view": {
+    "version": "1.1.0",
+    "surface": "ec8014fc55e9b845"
+  },
+  "@voice": {
+    "version": "1.0.0",
+    "surface": "90d23c8cf9801fb9"
+  },
+  "@webfetch": {
+    "version": "1.2.0",
+    "surface": "c18f9141bd98f3ea"
+  },
+  "@websearch": {
+    "version": "2.1.0",
+    "surface": "d541893ef9a57165"
+  },
+  "@wikipedia": {
+    "version": "2.0.0",
+    "surface": "6c81448bb4dd94d8"
+  }
+}
