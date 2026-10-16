@@ -135,6 +135,9 @@ func TestRunMoACommand_PrintsPanelThenSynthesis(t *testing.T) {
 	if ia < 0 || ib < 0 || isyn < 0 || ifinal < 0 || isyn > ifinal || ia > isyn || ib > isyn {
 		t.Fatalf("expected both positions, then the synthesizing line, then the answer:\n%s", out)
 	}
+	if !strings.Contains(out, "MoA · agg:m") || !strings.Contains(out, "2/2") {
+		t.Fatalf("the synthesis should sit in an envelope naming the aggregator and the 2/2 tally:\n%s", out)
+	}
 	if n := len(c.history); n != 2 || c.history[1].Content != "FINAL SYNTHESIS" {
 		t.Fatalf("history should record the turn, got %d messages", n)
 	}

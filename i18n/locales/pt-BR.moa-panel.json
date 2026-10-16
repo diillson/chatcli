@@ -1,5 +1,6 @@
 {
   "moa.panel.synthesizing": "Sintetizando com %s...",
   "moa.panel.empty": "resposta vazia",
-  "oneshot.error.moa_failed": " ❌ Erro ao executar o /moa em modo one-shot"
+  "oneshot.error.moa_failed": " ❌ Erro ao executar o /moa em modo one-shot",
+  "moa.panel.envelope": "%d/%d modelos · %s"
 }

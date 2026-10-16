@@ -21,6 +21,7 @@ import (
 	"time"
 	"unicode"
 
+	"github.com/diillson/chatcli/cli/agent"
 	"github.com/diillson/chatcli/cli/agent/moa"
 	"github.com/diillson/chatcli/i18n"
 	"github.com/diillson/chatcli/ui/kit"
@@ -70,6 +71,28 @@ func (cli *ChatCLI) moaPanelPrinter(mode string, start time.Time) moa.Observer {
 			}
 		}
 	}
+}
+
+// renderMoAEnvelope draws the synthesis in the same response envelope as
+// a chat reply — word-wrapped to the terminal — labeled with the
+// aggregator, how many members answered and the round's wall time.
+func (cli *ChatCLI) renderMoAEnvelope(final string, aggregator moa.Ref, results []moa.RefResult, elapsed time.Duration) {
+	answered := 0
+	for _, r := range results {
+		if r.OK() {
+			answered++
+		}
+	}
+	agg := moa.Ref{Provider: strings.ToLower(aggregator.Provider), Model: aggregator.Model}.String()
+	renderer := agent.NewUIRendererWithStyle(cli.logger, agent.UIStyleFull)
+	renderer.RenderResponseEnvelope(agent.ResponseEnvelopeOptions{
+		HeaderLeft:  colorize(" MoA · "+agg+" ", ColorPurple+ColorBold),
+		HeaderRight: colorize(" "+i18n.T("moa.panel.envelope", answered, len(results), formatLatency(elapsed))+" ", ColorGray),
+		Body:        ensureANSIReset(cli.renderMarkdown(final)),
+		Color:       agent.ColorGray,
+		Typewriter:  true,
+	})
+	fmt.Println()
 }
 
 // moaLead is the opening statement of an answer: the first line of prose

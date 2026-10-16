@@ -97,7 +97,8 @@ func (cli *ChatCLI) runMoACommand(ctx context.Context, input string) error {
 	// Each member's position prints as soon as it lands; the synthesis
 	// follows once the slowest member is done.
 	var landed atomic.Int32
-	printMember := cli.moaPanelPrinter(moaPanelMode(), time.Now())
+	start := time.Now()
+	printMember := cli.moaPanelPrinter(moaPanelMode(), start)
 	observer := func(r moa.RefResult) {
 		printMember(r)
 		if int(landed.Add(1)) == len(refs) {
@@ -105,7 +106,7 @@ func (cli *ChatCLI) runMoACommand(ctx context.Context, input string) error {
 		}
 	}
 
-	final, _, err := moa.RunSessionObserved(runCtx, prompt, tempHistory, refs, aggregator, turn, observer)
+	final, results, err := moa.RunSessionObserved(runCtx, prompt, tempHistory, refs, aggregator, turn, observer)
 	if err != nil {
 		return err
 	}
@@ -116,7 +117,7 @@ func (cli *ChatCLI) runMoACommand(ctx context.Context, input string) error {
 	handoffTask, final := takeCoderHandoff(final)
 
 	fmt.Println()
-	fmt.Println(cli.renderMarkdown(final))
+	cli.renderMoAEnvelope(final, aggregator, results, time.Since(start))
 
 	// Record the turn in history so a follow-up /moa or a normal message has the
 	// context — same as a regular chat turn. Mirror onto the cross-channel hub.
