@@ -19,9 +19,10 @@ import (
 	"os"
 	"sort"
 	"strings"
-	"sync"
+	"time"
 
 	"github.com/diillson/chatcli/cli/agent/moa"
+	"github.com/diillson/chatcli/cli/plugins"
 	"github.com/diillson/chatcli/i18n"
 	"github.com/diillson/chatcli/llm/client"
 	"go.uber.org/zap"
@@ -43,11 +44,10 @@ type moaMember struct {
 	model    string
 }
 
-// moaResult is one member's answer (or error).
+// moaResult is one member's successful answer.
 type moaResult struct {
 	label  string
 	answer string
-	err    error
 }
 
 func (a *moaPluginAdapter) log() *zap.Logger {
@@ -170,48 +170,66 @@ func (a *moaPluginAdapter) resolveMembers(specs []string) []moaMember {
 	return out
 }
 
-// Run executes the Mixture-of-Agents flow.
+// Run executes the Mixture-of-Agents flow with the default layers and
+// positions.
 func (a *moaPluginAdapter) Run(ctx context.Context, prompt string, memberSpecs []string, aggregatorSpec string) (string, error) {
+	return a.RunRequest(ctx, plugins.MoaRequest{Prompt: prompt, Members: memberSpecs, Aggregator: aggregatorSpec}, nil)
+}
+
+// RunRequest executes the Mixture-of-Agents flow. Members answer in
+// parallel — then cross-review, for more than one layer — and the
+// aggregator synthesizes. onProgress (nil for none) gets the panel as it
+// runs: a line per round and per member. The result carries each member's
+// position per round before the synthesis, so the calling model sees where
+// the panel split, as the /moa panel shows the user.
+func (a *moaPluginAdapter) RunRequest(ctx context.Context, req plugins.MoaRequest, onProgress func(string)) (string, error) {
 	if a.cli == nil || a.cli.manager == nil {
 		return "", fmt.Errorf("%s", i18n.T("moa.tool.unavailable"))
 	}
 
-	members := a.resolveMembers(memberSpecs)
+	members := a.resolveMembers(req.Members)
 	if len(members) == 0 {
 		return "", fmt.Errorf("%s", i18n.T("moa.tool.no_members"))
 	}
-
-	// Fan out: each member answers the same prompt in parallel, through the
-	// shared tool-aware turn executor — members hold the same read-only
-	// exceptions (knowledge retrieval, CCR recall) the /moa panel grants, so a
-	// member can ground its answer instead of guessing. The session history is
-	// passed so a context-dependent @moa is answered with the prior
-	// conversation (mirrors the /moa command).
-	turn := a.cli.moaTurn(a.cli.moaToolsetForRun(a.cli.history))
-	results := make([]moaResult, len(members))
-	var wg sync.WaitGroup
-	for i, m := range members {
-		wg.Add(1)
-		go func(i int, m moaMember) {
-			defer wg.Done()
-			ans, err := turn(ctx, moa.Ref{Provider: m.provider, Model: m.model}, prompt, a.cli.history)
-			results[i] = moaResult{label: m.label, answer: ans, err: err}
-		}(i, m)
+	layers := req.Layers
+	if layers <= 0 {
+		layers = moaLayersFromEnv()
 	}
-	wg.Wait()
+	positions := moaPositionsMode(req.Positions)
+
+	// Every member runs through the shared tool-aware turn executor —
+	// members hold the same read-only exceptions (knowledge retrieval,
+	// memory) the /moa panel grants, so a member can ground its answer
+	// instead of guessing. Members answer the prompt alone: @moa is called
+	// from an agent loop, whose history is the agent's own transcript (its
+	// system prompt, tool protocol, tool calls and results). Handed that,
+	// members answered as the agent would, with plans and tool calls,
+	// instead of answering the question. The calling model writes a
+	// self-contained prompt, as the tool's description asks.
+	refs := make([]moa.Ref, len(members))
+	for i, m := range members {
+		refs[i] = moa.Ref{Provider: m.provider, Model: m.model}
+	}
+	turn := a.cli.moaTurn(a.cli.moaToolsetForRun(nil))
+	start := time.Now()
+	panel := newMoAToolPanel(onProgress, start)
+	out, err := moa.Propose(ctx, req.Prompt, nil, refs, turn, moa.Config{Layers: layers, Hooks: panel.hooks()})
+	if err != nil && len(out.Answers) == 0 {
+		return "", err
+	}
 
 	var ok []moaResult
 	var firstErr error
-	for _, r := range results {
-		if r.err != nil {
-			a.log().Warn("@moa member failed", zap.String("member", r.label), zap.Error(r.err))
+	for i, r := range out.Answers {
+		if r.Err != nil {
+			a.log().Warn("@moa member failed", zap.String("member", members[i].label), zap.Error(r.Err))
 			if firstErr == nil {
-				firstErr = fmt.Errorf("%s: %w", r.label, r.err)
+				firstErr = fmt.Errorf("%s: %w", members[i].label, r.Err)
 			}
 			continue
 		}
-		if strings.TrimSpace(r.answer) != "" {
-			ok = append(ok, r)
+		if strings.TrimSpace(r.Output) != "" {
+			ok = append(ok, moaResult{label: members[i].label, answer: r.Output})
 		}
 	}
 	if len(ok) == 0 {
@@ -222,20 +240,24 @@ func (a *moaPluginAdapter) Run(ctx context.Context, prompt string, memberSpecs [
 		}
 		return "", fmt.Errorf("%s", i18n.T("moa.tool.all_failed"))
 	}
-
-	// A single successful member needs no synthesis.
+	// A single successful member needs no synthesis, and has no panel
+	// positions to compare.
 	if len(ok) == 1 {
 		return ok[0].answer, nil
 	}
+	report := moaPositionsReport(positions, out)
 
 	// Synthesize — through the same tool-aware turn, so the aggregator can
 	// also ground its verdict. Any failure (aggregator unavailable, empty
 	// output) falls back to the longest candidate rather than failing the call.
-	aggProvider, aggModel := a.resolveAggregator(aggregatorSpec)
-	synthPrompt := buildSynthesisPrompt(prompt, ok)
-	final, err := turn(ctx, moa.Ref{Provider: aggProvider, Model: aggModel}, synthPrompt, nil)
+	aggProvider, aggModel := a.resolveAggregator(req.Aggregator)
+	panel.synthesizing(moa.Ref{Provider: strings.ToLower(aggProvider), Model: aggModel})
+	final, err := turn(ctx, moa.Ref{Provider: aggProvider, Model: aggModel}, buildSynthesisPrompt(req.Prompt, ok), nil)
 	if err != nil || strings.TrimSpace(final) == "" {
 		a.log().Warn("@moa synthesis failed, returning best candidate", zap.Error(err))
+		if report != "" {
+			return report + moaFallbackHeading + bestCandidate(ok), nil
+		}
 		return bestCandidate(ok), nil
 	}
 
@@ -243,14 +265,25 @@ func (a *moaPluginAdapter) Run(ctx context.Context, prompt string, memberSpecs [
 	for _, r := range ok {
 		labels = append(labels, r.label)
 	}
-	header := i18n.T("moa.tool.synthesized", strings.Join(labels, ", "), aggProvider)
+	aggLabel := strings.ToLower(aggProvider)
+	header := i18n.T("moa.tool.synthesized", strings.Join(labels, ", "), aggLabel)
+	if len(out.Layers) > 1 {
+		header = i18n.T("moa.tool.synthesized_layers", strings.Join(labels, ", "), len(out.Layers), aggLabel)
+	}
+	if report != "" {
+		return header + "\n\n" + report + moaSynthesisHeading + final, nil
+	}
 	return header + "\n\n" + final, nil
 }
 
-// resolveAggregator picks the synthesizer: explicit spec, else the session's
-// current provider/model.
+// resolveAggregator picks the synthesizer: explicit spec, else
+// CHATCLI_MOA_AGGREGATOR (as /moa does), else the session's current
+// provider/model.
 func (a *moaPluginAdapter) resolveAggregator(spec string) (provider, model string) {
-	if strings.TrimSpace(spec) != "" {
+	if strings.TrimSpace(spec) == "" {
+		spec = strings.TrimSpace(os.Getenv("CHATCLI_MOA_AGGREGATOR"))
+	}
+	if spec != "" {
 		m := parseMember(spec)
 		return a.canonicalProvider(m.provider), m.model
 	}
@@ -287,12 +320,14 @@ func buildSynthesisPrompt(question string, candidates []moaResult) string {
 	b.WriteString("reconcile disagreements (state the most defensible position and why), ")
 	b.WriteString("drop hallucinations and errors, and do not name the models. ")
 	b.WriteString(moa.DivergenceInstruction)
+	b.WriteString(" ")
+	b.WriteString(moa.DivergenceHeadingNote)
 	b.WriteString("\n\n")
 	b.WriteString("## Question\n")
 	b.WriteString(question)
 	b.WriteString("\n\n## Candidate answers\n")
 	for i, c := range candidates {
-		fmt.Fprintf(&b, "\n### Candidate %d (%s)\n%s\n", i+1, c.label, c.answer)
+		fmt.Fprintf(&b, "\n### Candidate %d\n%s\n", i+1, c.answer)
 	}
 	b.WriteString("\n## Your synthesized answer\n")
 	return b.String()

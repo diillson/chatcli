@@ -39,6 +39,27 @@ type MoaAdapter interface {
 	List(ctx context.Context) (string, error)
 }
 
+// MoaRequest is one @moa ask with every option the tool exposes.
+type MoaRequest struct {
+	Prompt     string
+	Members    []string // "provider" or "provider:model"; empty means the default set
+	Aggregator string   // empty means the session's current model
+	// Layers is the number of rounds; from the second on, each member reads
+	// its peers' answers and revises its own before the synthesis. 0 means
+	// the host's default.
+	Layers int
+	// Positions is how much of each member's answer the result carries:
+	// "lead", "full" or "off"; empty means the host's default.
+	Positions string
+}
+
+// MoaRequestRunner is a MoaAdapter that takes the full request and reports
+// the panel's progress (one line per round and per member) as it runs.
+type MoaRequestRunner interface {
+	MoaAdapter
+	RunRequest(ctx context.Context, req MoaRequest, onProgress func(string)) (string, error)
+}
+
 type moaAdapterHolder struct{ a MoaAdapter }
 
 var moaAdapterAtom atomic.Value // stores moaAdapterHolder
@@ -66,7 +87,7 @@ func (*BuiltinMoaPlugin) Name() string { return "@moa" }
 
 // Description surfaces the tool in the catalog.
 func (*BuiltinMoaPlugin) Description() string {
-	return "Mixture-of-Agents: ask several models the same question in parallel and synthesize one best answer. Use for hard, high-stakes, or ambiguous questions where cross-checking multiple models improves accuracy."
+	return "Mixture-of-Agents: ask several models the same question in parallel and synthesize one best answer. Use for hard, high-stakes, or ambiguous questions where cross-checking multiple models improves accuracy. The models do not see this conversation: put in prompt everything they need (the question, the relevant facts, constraints, code or config excerpts). Set layers to 2 for contested questions: each model then reads the others' answers and revises its own before the synthesis. The result lists each model's position per round, then the synthesis with a section on where the answers diverged."
 }
 
 // Usage explains the canonical invocation.
@@ -74,17 +95,25 @@ func (*BuiltinMoaPlugin) Usage() string {
 	return `<tool_call name="@moa" args='{"cmd":"ask","args":{"prompt":"Design a rate limiter for 1M rps"}}' />
 
 Subcommands (cmd + args):
-  ask {prompt, models?, aggregator?}
-       prompt      the question (required)
+  ask {prompt, models?, aggregator?, layers?, positions?}
+       prompt      the question (required); self-contained: the models do
+                   not see this conversation
        models      optional list like ["openai","anthropic:claude-opus-4-8","googleai"]
                    (default: a set drawn from your configured providers)
        aggregator  optional "provider" or "provider:model" to synthesize
                    (default: your current session model)
+       layers      optional 1-4: rounds where each model reads the others'
+                   answers and revises its own before the synthesis
+                   (default: CHATCLI_MOA_LAYERS, else 1)
+       positions   "lead" (each model's bottom line), "full" (each whole
+                   answer) or "off"; shown before the synthesis so you can
+                   see where the models diverged
+                   (default: CHATCLI_MOA_PANEL, else lead)
   list  show providers/models available to participate`
 }
 
 // Version is semver.
-func (*BuiltinMoaPlugin) Version() string { return "1.0.0" }
+func (*BuiltinMoaPlugin) Version() string { return "1.1.0" }
 
 // Path is empty for builtin plugins.
 func (*BuiltinMoaPlugin) Path() string { return "" }
@@ -98,13 +127,16 @@ func (*BuiltinMoaPlugin) Schema() string {
 				"name":        "ask",
 				"description": "Query several models in parallel and synthesize one best answer.",
 				"flags": []map[string]interface{}{
-					{"name": "prompt", "type": "string", "required": true, "description": "The question to ask all member models."},
+					{"name": "prompt", "type": "string", "required": true, "description": "The question to ask all member models, self-contained: they do not see this conversation, so include the facts, constraints and excerpts they need."},
 					{"name": "models", "type": "array", "required": false, "description": "Member models: each 'provider' or 'provider:model'. Defaults to configured providers."},
 					{"name": "aggregator", "type": "string", "required": false, "description": "Model that synthesizes the final answer. Defaults to the current session model."},
+					{"name": "layers", "type": "integer", "required": false, "description": "Rounds (1-4). From the second on, each model reads the others' answers and revises its own before the synthesis; use 2 for contested, high-stakes questions. Defaults to CHATCLI_MOA_LAYERS, else 1."},
+					{"name": "positions", "type": "string", "required": false, "description": "How much of each model's own answer the result shows before the synthesis: 'lead' (its bottom line), 'full' (the whole answer) or 'off'. Defaults to CHATCLI_MOA_PANEL, else lead."},
 				},
 				"examples": []string{
 					`{"cmd":"ask","args":{"prompt":"What are the trade-offs of event sourcing?"}}`,
 					`{"cmd":"ask","args":{"prompt":"Review this design","models":["openai","anthropic","googleai"]}}`,
+					`{"cmd":"ask","args":{"prompt":"Should we migrate to Karpenter?","layers":2}}`,
 				},
 			},
 			{
@@ -123,8 +155,9 @@ func (p *BuiltinMoaPlugin) Execute(ctx context.Context, args []string) (string, 
 	return p.ExecuteWithStream(ctx, args, nil)
 }
 
-// ExecuteWithStream ignores the stream callback (no incremental output).
-func (p *BuiltinMoaPlugin) ExecuteWithStream(ctx context.Context, args []string, _ func(string)) (string, error) {
+// ExecuteWithStream streams the panel's progress (each round, each member
+// as it answers) to onOutput when the adapter reports it.
+func (p *BuiltinMoaPlugin) ExecuteWithStream(ctx context.Context, args []string, onOutput func(string)) (string, error) {
 	adapter := currentMoaAdapter()
 	if adapter == nil {
 		return "", errors.New("@moa: mixture-of-agents is not available in this session")
@@ -141,13 +174,20 @@ func (p *BuiltinMoaPlugin) ExecuteWithStream(ctx context.Context, args []string,
 	switch cmd {
 	case "ask":
 		var in struct {
-			Prompt     string   `json:"prompt"`
-			Models     []string `json:"models"`
-			Aggregator string   `json:"aggregator"`
+			Prompt     string          `json:"prompt"`
+			Models     []string        `json:"models"`
+			Aggregator string          `json:"aggregator"`
+			Layers     json.RawMessage `json:"layers"`
+			Positions  string          `json:"positions"`
 		}
 		_ = json.Unmarshal([]byte(inner), &in)
 		if strings.TrimSpace(in.Prompt) == "" {
 			return "", errors.New(`@moa ask: "prompt" is required`)
+		}
+		if runner, ok := adapter.(MoaRequestRunner); ok {
+			return runner.RunRequest(ctx, MoaRequest{
+				Prompt: in.Prompt, Members: in.Models, Aggregator: in.Aggregator, Layers: lenientInt(in.Layers), Positions: in.Positions,
+			}, onOutput)
 		}
 		return adapter.Run(ctx, in.Prompt, in.Models, in.Aggregator)
 	case "list":
@@ -199,7 +239,7 @@ func parseMoaInvocation(args []string) (string, string, error) {
 			args[0],
 		)
 	}
-	return canon, argvInner(args[1:], "prompt", map[string]bool{"models": true}, nil), nil
+	return canon, argvInner(args[1:], "prompt", map[string]bool{"models": true}, map[string]bool{"layers": true}), nil
 }
 
 // canonicalMoaCmd folds aliases.
