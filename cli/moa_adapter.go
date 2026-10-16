@@ -245,7 +245,11 @@ func (a *moaPluginAdapter) RunRequest(ctx context.Context, req plugins.MoaReques
 	if len(ok) == 1 {
 		return ok[0].answer, nil
 	}
+	// Compact positions first, then the synthesis, then (positions=full)
+	// the whole answers: a result cut to fit the agent's context loses the
+	// detail at the end, never who said what or the verdict.
 	report := moaPositionsReport(positions, out)
+	appendix := moaFullAnswersAppendix(positions, out)
 
 	// Synthesize — through the same tool-aware turn, so the aggregator can
 	// also ground its verdict. Any failure (aggregator unavailable, empty
@@ -256,7 +260,7 @@ func (a *moaPluginAdapter) RunRequest(ctx context.Context, req plugins.MoaReques
 	if err != nil || strings.TrimSpace(final) == "" {
 		a.log().Warn("@moa synthesis failed, returning best candidate", zap.Error(err))
 		if report != "" {
-			return report + moaFallbackHeading + bestCandidate(ok), nil
+			return report + moaFallbackHeading + bestCandidate(ok) + appendix, nil
 		}
 		return bestCandidate(ok), nil
 	}
@@ -271,7 +275,7 @@ func (a *moaPluginAdapter) RunRequest(ctx context.Context, req plugins.MoaReques
 		header = i18n.T("moa.tool.synthesized_layers", strings.Join(labels, ", "), len(out.Layers), aggLabel)
 	}
 	if report != "" {
-		return header + "\n\n" + report + moaSynthesisHeading + final, nil
+		return header + "\n\n" + report + moaSynthesisHeading + final + appendix, nil
 	}
 	return header + "\n\n" + final, nil
 }

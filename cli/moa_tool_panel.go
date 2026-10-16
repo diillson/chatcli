@@ -34,6 +34,7 @@ const (
 	moaFailedLineFmt      = "- %s: no answer (%s)\n"
 	moaStanceTagFmt       = " [%s]"
 	moaSynthesisHeading   = "\n## Synthesis\n"
+	moaFullAnswersHeading = "\n\n## Full answers\n"
 	moaFallbackHeading    = "\n## Longest answer (the synthesis failed)\n"
 	moaProgressMemberFmt  = "  ✓ %s  %s%s"
 	moaProgressFailedFmt  = "  ✗ %s  %s  %s"
@@ -122,7 +123,8 @@ func (p *moaToolPanel) synthesizing(aggregator moa.Ref) {
 
 // moaPositionsReport renders every member's position per round for the
 // model that called @moa: its bottom line ("lead") or whole answer
-// ("full"), tagged [kept]/[revised] in review rounds. "off" renders
+// (with "full" as well; the whole answers go to moaFullAnswersAppendix),
+// tagged [kept]/[revised] in review rounds. "off" renders
 // nothing. Members left out of a round are not listed in it.
 func moaPositionsReport(mode string, out moa.Outcome) string {
 	if mode == moaPanelOff || len(out.Layers) == 0 {
@@ -152,15 +154,37 @@ func moaPositionsReport(mode string, out moa.Outcome) string {
 			if li < len(out.Stances) && out.Stances[li][i] != moa.StanceNone {
 				tag = fmt.Sprintf(moaStanceTagFmt, out.Stances[li][i])
 			}
-			if mode == moaPanelFull {
-				fmt.Fprintf(&b, moaFullAnswerFmt, moaRefLabel(r.Ref), tag, strings.TrimSpace(r.Output))
-				continue
-			}
 			lead := moaLead(r.Output)
 			if lead == "" {
 				lead = moaClip(moaOneLine(r.Output), moaProgressLeadMaxCol)
 			}
 			fmt.Fprintf(&b, moaLeadLineFmt, moaRefLabel(r.Ref), tag, lead)
+		}
+	}
+	return b.String()
+}
+
+// moaFullAnswersAppendix renders every member's whole answer per round,
+// for positions=full. It goes after the synthesis: whole answers from a
+// multi-round panel run long, and a result cut to fit the agent's context
+// must lose this detail, never the positions or the synthesis.
+func moaFullAnswersAppendix(mode string, out moa.Outcome) string {
+	if mode != moaPanelFull || len(out.Layers) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString(moaFullAnswersHeading)
+	for li, layer := range out.Layers {
+		fmt.Fprintf(&b, moaRoundHeadingFmt, li+1)
+		for i, r := range layer {
+			if !r.OK() {
+				continue
+			}
+			tag := ""
+			if li < len(out.Stances) && out.Stances[li][i] != moa.StanceNone {
+				tag = fmt.Sprintf(moaStanceTagFmt, out.Stances[li][i])
+			}
+			fmt.Fprintf(&b, moaFullAnswerFmt, moaRefLabel(r.Ref), tag, strings.TrimSpace(r.Output))
 		}
 	}
 	return b.String()
