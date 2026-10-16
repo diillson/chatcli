@@ -7,33 +7,34 @@
 <h1 align="center">ChatCLI</h1>
 
 <p align="center">
-  <strong>One binary for AI in the terminal, in your editor, on your chat apps, behind a gRPC server and inside Kubernetes.</strong><br>
-  <sub>14 LLM providers · an autonomous coder agent · a seven-pattern quality harness · Mixture-of-Agents with cross-review · a live APM-style dashboard</sub>
+  <strong>One binary for AI everywhere you work:<br>
+  the terminal, your editor, your chat apps, a gRPC server and Kubernetes.</strong>
 </p>
 
 <p align="center">
-  <a href="https://github.com/diillson/chatcli/actions/workflows/1-ci.yml"><img src="https://github.com/diillson/chatcli/actions/workflows/1-ci.yml/badge.svg" alt="CI"></a>
-  <a href="https://github.com/diillson/chatcli/actions/workflows/quality-gate.yml"><img src="https://github.com/diillson/chatcli/actions/workflows/quality-gate.yml/badge.svg" alt="Quality Gate"></a>
-  <a href="https://github.com/diillson/chatcli/actions/workflows/security-scan.yml"><img src="https://github.com/diillson/chatcli/actions/workflows/security-scan.yml/badge.svg" alt="Security Scan"></a>
-  <a href="https://github.com/diillson/chatcli/releases/latest"><img src="https://img.shields.io/github/v/release/diillson/chatcli?sort=semver&color=2ea44f" alt="Latest release"></a>
-  <a href="https://pkg.go.dev/github.com/diillson/chatcli"><img src="https://pkg.go.dev/badge/github.com/diillson/chatcli.svg" alt="Go Reference"></a>
-  <a href="LICENSE"><img src="https://img.shields.io/github/license/diillson/chatcli?color=blue" alt="License"></a>
+  <sub>14 LLM providers · an autonomous coder agent · a seven-pattern quality harness<br>
+  Mixture-of-Agents with cross-review · a live APM-style dashboard</sub>
 </p>
 
 <p align="center">
+  <a href="https://github.com/diillson/chatcli/actions/workflows/1-ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/diillson/chatcli/1-ci.yml?label=CI&logo=github" alt="CI"></a>
+  <a href="https://github.com/diillson/chatcli/actions/workflows/quality-gate.yml"><img src="https://img.shields.io/github/actions/workflow/status/diillson/chatcli/quality-gate.yml?label=quality%20gate&logo=github" alt="Quality gate"></a>
+  <a href="https://github.com/diillson/chatcli/actions/workflows/security-scan.yml"><img src="https://img.shields.io/github/actions/workflow/status/diillson/chatcli/security-scan.yml?label=security%20scan&logo=github" alt="Security scan"></a>
+  <a href="https://github.com/diillson/chatcli/releases/latest"><img src="https://img.shields.io/github/v/release/diillson/chatcli" alt="Latest release"></a>
+  <br>
+  <img src="https://img.shields.io/github/go-mod/go-version/diillson/chatcli?logo=go&label=Go" alt="Go version">
+  <a href="https://pkg.go.dev/github.com/diillson/chatcli"><img src="https://img.shields.io/badge/Go-reference-007d9c?logo=go&logoColor=white" alt="Go Reference"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache--2.0-blue" alt="License: Apache-2.0"></a>
+  <a href="https://artifacthub.io/packages/search?ts_query_web=chatcli"><img src="https://img.shields.io/endpoint?url=https://artifacthub.io/badge/repository/chatcli" alt="Artifact Hub"></a>
+  <br>
   <a href="SECURITY.md#verifying-what-you-install"><img src="https://img.shields.io/badge/releases-Ed25519%20signed-1f6feb" alt="Signed releases"></a>
   <a href="SECURITY.md#verifying-what-you-install"><img src="https://img.shields.io/badge/images-cosign%20signed-4B32C3?logo=sigstore&logoColor=white" alt="Cosign-signed images"></a>
   <img src="https://img.shields.io/badge/SBOM-included-3fb950" alt="SBOM">
-  <img src="https://img.shields.io/badge/scanned-Trivy%20%C2%B7%20CodeQL%20%C2%B7%20gosec-00C9A7" alt="Scanned">
-  <a href="https://artifacthub.io/packages/search?ts_query_web=chatcli"><img src="https://img.shields.io/endpoint?url=https://artifacthub.io/badge/repository/chatcli" alt="Artifact Hub"></a>
-</p>
-
-<p align="center">
-  <img src="https://img.shields.io/github/go-mod/go-version/diillson/chatcli?logo=go&label=Go" alt="Go version">
+  <img src="https://img.shields.io/badge/scanned-Trivy%20%C2%B7%20CodeQL%20%C2%B7%20gosec-00C9A7" alt="Security scans">
+  <br>
   <img src="https://img.shields.io/badge/platforms-Linux%20%C2%B7%20macOS%20%C2%B7%20Windows-informational" alt="Platforms">
   <img src="https://img.shields.io/badge/i18n-English%20%C2%B7%20Portugu%C3%AAs-informational" alt="Languages">
-  <a href="https://github.com/diillson/chatcli/stargazers"><img src="https://img.shields.io/github/stars/diillson/chatcli?style=flat&logo=github" alt="Stars"></a>
-  <img src="https://img.shields.io/github/last-commit/diillson/chatcli" alt="Last commit">
+  <a href="https://github.com/diillson/chatcli/stargazers"><img src="https://img.shields.io/github/stars/diillson/chatcli?style=flat&logo=github&label=stars" alt="Stars"></a>
 </p>
 
 <p align="center">
