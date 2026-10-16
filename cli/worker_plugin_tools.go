@@ -148,8 +148,10 @@ func nativeNameForBuiltin(grant string) string {
 // every builtin's own lenient parser.
 func synthesizePluginDef(defName string, plugin plugins.Plugin) (models.ToolDefinition, bool) {
 	var schema struct {
-		Description string `json:"description"`
-		ArgsFormat  string `json:"argsFormat"`
+		Description string                 `json:"description"`
+		ArgsFormat  string                 `json:"argsFormat"`
+		Parameters  map[string]interface{} `json:"parameters"`
+		Flags       []toolSchemaFlag       `json:"flags"`
 		Subcommands []struct {
 			Name        string `json:"name"`
 			Description string `json:"description"`
@@ -157,6 +159,21 @@ func synthesizePluginDef(defName string, plugin plugins.Plugin) (models.ToolDefi
 	}
 	if json.Unmarshal([]byte(plugin.Schema()), &schema) != nil {
 		return models.ToolDefinition{}, false
+	}
+	// A tool without subcommands takes its arguments flat: hand the model
+	// those arguments (the JSON Schema the tool ships, or one built from its
+	// flags) instead of a cmd/args envelope with nothing inside.
+	if len(schema.Subcommands) == 0 {
+		params := schema.Parameters
+		if params == nil {
+			params = flagsJSONSchema(schema.Flags)
+		}
+		if params != nil {
+			return models.ToolDefinition{
+				Type:     "function",
+				Function: models.ToolFunctionDef{Name: defName, Description: plugin.Description(), Parameters: params},
+			}, true
+		}
 	}
 	cmds := make([]string, 0, len(schema.Subcommands))
 	var b strings.Builder
@@ -194,4 +211,39 @@ func synthesizePluginDef(defName string, plugin plugins.Plugin) (models.ToolDefi
 			},
 		},
 	}, true
+}
+
+// flagsJSONSchema turns a builtin's top-level flags into the JSON Schema of a
+// native tool's parameters, nil when there are none.
+func flagsJSONSchema(flags []toolSchemaFlag) map[string]interface{} {
+	if len(flags) == 0 {
+		return nil
+	}
+	props := make(map[string]interface{}, len(flags))
+	var required []string
+	for _, f := range flags {
+		typ := strings.ToLower(strings.TrimSpace(f.Type))
+		switch typ {
+		case "string", "integer", "number", "boolean", "array", "object":
+		case "int":
+			typ = "integer"
+		case "bool":
+			typ = "boolean"
+		default:
+			typ = "string"
+		}
+		prop := map[string]interface{}{"type": typ, "description": f.Description}
+		if typ == "array" {
+			prop["items"] = map[string]interface{}{}
+		}
+		props[f.Name] = prop
+		if f.Required {
+			required = append(required, f.Name)
+		}
+	}
+	out := map[string]interface{}{"type": "object", "properties": props}
+	if len(required) > 0 {
+		out["required"] = required
+	}
+	return out
 }

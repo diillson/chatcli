@@ -59,7 +59,7 @@ func isCoreTool(name string) bool { return coreToolNames[name] }
 // an on-demand description is byte-identical to an inline one.
 func renderToolBlock(plugin plugins.Plugin, compact bool) string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "- Ferramenta: %s\n", plugin.Name())
+	fmt.Fprintf(&b, "- Ferramenta: %s%s\n", plugin.Name(), toolVersionTag(plugin))
 	fmt.Fprintf(&b, "  Descrição: %s\n", plugin.Description())
 
 	if plugin.Schema() == "" {
@@ -68,7 +68,9 @@ func renderToolBlock(plugin plugins.Plugin, compact bool) string {
 	}
 
 	var schema struct {
-		ArgsFormat  string `json:"argsFormat"`
+		ArgsFormat  string           `json:"argsFormat"`
+		Flags       []toolSchemaFlag `json:"flags"`    // tools without subcommands
+		Examples    []string         `json:"examples"` // tool-level examples
 		Subcommands []struct {
 			Name        string   `json:"name"`
 			Description string   `json:"description"`
@@ -90,6 +92,14 @@ func renderToolBlock(plugin plugins.Plugin, compact bool) string {
 	if schema.ArgsFormat != "" {
 		fmt.Fprintf(&b, "  Formato args: %s\n", schema.ArgsFormat)
 	}
+	// A tool without subcommands documents its arguments at the top level;
+	// before, only subcommand flags were rendered and such a tool reached the
+	// model with no arguments at all.
+	if len(schema.Subcommands) == 0 {
+		renderTopLevelFlags(&b, schema.Flags, schema.Examples, compact)
+		return b.String()
+	}
+
 	if compact {
 		b.WriteString("  Subcomandos:\n")
 		for _, sub := range schema.Subcommands {
@@ -138,14 +148,83 @@ func renderToolBlock(plugin plugins.Plugin, compact bool) string {
 			}
 		}
 	}
+	renderToolExamples(&b, schema.Examples, "  ", toolExamplesShown)
 	return b.String()
 }
 
+// toolExamplesShown bounds the tool-level examples a full block carries.
+const toolExamplesShown = 3
+
+// renderTopLevelFlags renders the arguments of a tool without subcommands.
+// compact keeps the required ones and one example.
+func renderTopLevelFlags(b *strings.Builder, flags []toolSchemaFlag, examples []string, compact bool) {
+	if compact {
+		var required []string
+		for _, f := range flags {
+			if f.Required {
+				required = append(required, fmt.Sprintf("%s (%s)", f.Name, f.Type))
+			}
+		}
+		if len(required) > 0 {
+			b.WriteString("  Obrigatórios: " + strings.Join(required, ", ") + "\n")
+		}
+		renderToolExamples(b, examples, "  ", 1)
+		return
+	}
+	if len(flags) > 0 {
+		b.WriteString("  Flags:\n")
+		for _, f := range flags {
+			req := ""
+			if f.Required {
+				req = " [obrigatório]"
+			}
+			line := fmt.Sprintf("    - %s (%s)%s: %s", f.Name, f.Type, req, f.Description)
+			if f.Default != "" {
+				line += fmt.Sprintf(" (padrão: %s)", f.Default)
+			}
+			b.WriteString(line + "\n")
+		}
+	}
+	renderToolExamples(b, examples, "  ", toolExamplesShown)
+}
+
+// toolSchemaFlag is one argument as a builtin's Schema() declares it.
+type toolSchemaFlag struct {
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	Type        string `json:"type"`
+	Default     string `json:"default"`
+	Required    bool   `json:"required"`
+}
+
+// renderToolExamples writes up to limit tool-level examples.
+func renderToolExamples(b *strings.Builder, examples []string, indent string, limit int) {
+	if len(examples) == 0 || limit <= 0 {
+		return
+	}
+	if len(examples) < limit {
+		limit = len(examples)
+	}
+	b.WriteString(indent + "Exemplos:\n")
+	for _, e := range examples[:limit] {
+		fmt.Fprintf(b, "%s  - %s\n", indent, e)
+	}
+}
+
+// toolVersionTag renders a builtin's version for the catalog, so the model
+// (and whoever reads a transcript) knows which revision of a tool it used.
+func toolVersionTag(plugin plugins.Plugin) string {
+	if v := strings.TrimSpace(plugin.Version()); v != "" {
+		return " (v" + v + ")"
+	}
+	return ""
+}
+
 // renderToolIndexLine renders one deferred tool as a single catalog line:
-// name plus the first sentence of its description. The full definition is one
-// @tools describe away.
+// name, version and the first sentence of its description. The full
+// definition is one @tools describe away.
 func renderToolIndexLine(plugin plugins.Plugin) string {
-	return fmt.Sprintf("- %s: %s\n", plugin.Name(), firstSentence(plugin.Description()))
+	return fmt.Sprintf("- %s%s: %s\n", plugin.Name(), toolVersionTag(plugin), firstSentence(plugin.Description()))
 }
 
 // firstSentence trims a description to its first sentence (bounded fallback

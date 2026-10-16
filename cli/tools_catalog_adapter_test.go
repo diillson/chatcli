@@ -60,7 +60,7 @@ func TestToolCatalogAdapterList(t *testing.T) {
 	if err != nil {
 		t.Fatalf("List: %v", err)
 	}
-	if !strings.Contains(out, "- @diagram: ") || !strings.Contains(out, "- @tools: ") {
+	if !strings.Contains(out, "- @diagram (v") || !strings.Contains(out, "- @tools (v") {
 		t.Fatalf("List missing index lines: %q", out)
 	}
 	if strings.Contains(out, "Subcomandos") {

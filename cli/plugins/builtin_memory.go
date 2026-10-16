@@ -151,7 +151,7 @@ examples or generated artifacts.`
 }
 
 // Version is semver; bumped when the surface changes.
-func (*BuiltinMemoryPlugin) Version() string { return "1.2.0" }
+func (*BuiltinMemoryPlugin) Version() string { return "1.2.1" }
 
 // Path is empty for builtin plugins.
 func (*BuiltinMemoryPlugin) Path() string { return "" }
