@@ -8,7 +8,7 @@
 
 <p align="center">
   <strong>Um binário para IA em todo lugar em que você trabalha:<br>
-  o terminal, o seu editor, os seus apps de chat, um servidor gRPC e o Kubernetes.</strong>
+  o terminal, o seu editor, os seus apps de chat e webhooks, um servidor gRPC e o Kubernetes.</strong>
 </p>
 
 <p align="center">
@@ -17,8 +17,9 @@
 </p>
 
 <p align="center">
-  <a href="https://chatcli.edilsonfreitas.com/pt"><img src="https://img.shields.io/badge/%F0%9F%93%96%20Leia%20a%20documenta%C3%A7%C3%A3o-chatcli.edilsonfreitas.com-0d9488?style=for-the-badge" alt="Leia a documentação em chatcli.edilsonfreitas.com"></a><br>
-  <sub>Guias, cookbooks, configuração e a referência completa de cada recurso, em português e inglês.</sub>
+  <a href="https://chatcli.edilsonfreitas.com/pt"><img src="https://img.shields.io/static/v1?label=%F0%9F%93%96%20Leia%20a%20documenta%C3%A7%C3%A3o&message=https%3A%2F%2Fchatcli.edilsonfreitas.com&color=0d9488&style=for-the-badge" alt="Leia a documentação em https://chatcli.edilsonfreitas.com"></a><br>
+  <a href="https://chatcli.edilsonfreitas.com/pt"><strong>https://chatcli.edilsonfreitas.com</strong></a><br>
+  <sub>O site oficial: guias, cookbooks, configuração e a referência completa de cada recurso, em português e inglês.</sub>
 </p>
 
 <p align="center">
@@ -60,7 +61,7 @@
 - **Todos os grandes modelos, uma interface.** Troque de provider ou modelo no meio da conversa, faça failover automático e acompanhe custo, tokens e uso de cache de prompt.
 - **Um agente que faz o trabalho.** O `/coder` lê, edita, executa e testa código sob uma política de segurança que você controla, com checkpoints que dá para desfazer.
 - **Respostas mais confiáveis.** Self-Refine, Chain-of-Verification, Reflexion, RAG com HyDE e Mixture-of-Agents com revisão cruzada conferem o que os modelos dizem.
-- **O mesmo cérebro em todo lugar.** O terminal, uma UI no navegador, editores via ACP, qualquer cliente MCP, Telegram, Slack, Discord, WhatsApp, um servidor gRPC e um operator do Kubernetes compartilham sessões, memória e tools.
+- **O mesmo cérebro em todo lugar.** O terminal, uma UI no navegador, editores via ACP, qualquer cliente MCP, Telegram, Slack, Discord, WhatsApp, webhooks, um servidor gRPC e um operator do Kubernetes compartilham sessões, memória e tools.
 - **Feito para rodar onde importa.** Releases assinadas, padrões que falham fechado, confiança de workspace, logs de auditoria e um processo de segurança publicado.
 
 ## Começo rápido
