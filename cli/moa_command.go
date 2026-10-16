@@ -18,14 +18,17 @@
  *
  *   CHATCLI_MOA_MODELS="openai:gpt-5,claudeai:claude-opus-4-8,googleai:gemini-2.5-pro"
  *   CHATCLI_MOA_AGGREGATOR="claudeai:claude-opus-4-8"   (defaults to current model)
+ *   CHATCLI_MOA_PANEL=lead|full|off   (each member's position, see moa_panel.go)
  */
 package cli
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/diillson/chatcli/cli/agent/moa"
@@ -34,10 +37,24 @@ import (
 )
 
 func (cli *ChatCLI) handleMoACommand(ctx context.Context, input string) {
+	if err := cli.runMoACommand(ctx, input); err != nil {
+		fmt.Printf("  %s %v\n", colorize("ERR", ColorRed), err)
+	}
+}
+
+// errMoAUsage and errMoANoModels are reported by runMoACommand after the
+// hint was printed, so a one-shot run exits non-zero.
+var (
+	errMoAUsage    = errors.New("/moa needs a prompt")
+	errMoANoModels = errors.New("no MoA models configured")
+)
+
+// runMoACommand runs one /moa turn; shared by the REPL and one-shot (-p).
+func (cli *ChatCLI) runMoACommand(ctx context.Context, input string) error {
 	prompt := strings.TrimSpace(strings.TrimPrefix(input, "/moa"))
 	if prompt == "" {
 		fmt.Println(colorize("  "+i18n.T("moa.usage"), ColorGray))
-		return
+		return errMoAUsage
 	}
 
 	refs := moa.ParseRefs(os.Getenv("CHATCLI_MOA_MODELS"))
@@ -48,7 +65,7 @@ func (cli *ChatCLI) handleMoACommand(ctx context.Context, input string) {
 	}
 	if len(refs) == 0 {
 		fmt.Println(colorize("  "+i18n.T("moa.no_models"), ColorYellow))
-		return
+		return errMoANoModels
 	}
 
 	aggregator := moa.Ref{Provider: cli.Provider, Model: cli.Model}
@@ -77,10 +94,20 @@ func (cli *ChatCLI) handleMoACommand(ctx context.Context, input string) {
 	runCtx, cancel := context.WithTimeout(ctx, 5*time.Minute)
 	defer cancel()
 
-	final, results, err := moa.RunSession(runCtx, prompt, tempHistory, refs, aggregator, turn)
+	// Each member's position prints as soon as it lands; the synthesis
+	// follows once the slowest member is done.
+	var landed atomic.Int32
+	printMember := cli.moaPanelPrinter(moaPanelMode(), time.Now())
+	observer := func(r moa.RefResult) {
+		printMember(r)
+		if int(landed.Add(1)) == len(refs) {
+			fmt.Printf("  %s\n", colorize(i18n.T("moa.panel.synthesizing", moa.Ref{Provider: strings.ToLower(aggregator.Provider), Model: aggregator.Model}.String()), ColorCyan))
+		}
+	}
+
+	final, _, err := moa.RunSessionObserved(runCtx, prompt, tempHistory, refs, aggregator, turn, observer)
 	if err != nil {
-		fmt.Printf("  %s %v\n", colorize("ERR", ColorRed), err)
-		return
+		return err
 	}
 
 	// The panel is briefed with the chat prompt, coder handoff included: a
@@ -88,14 +115,6 @@ func (cli *ChatCLI) handleMoACommand(ctx context.Context, input string) {
 	// on a regular chat turn, never printed or stored as a raw tag.
 	handoffTask, final := takeCoderHandoff(final)
 
-	// Show which references contributed.
-	for _, r := range results {
-		status := colorize("✓", ColorGreen)
-		if !r.OK() {
-			status = colorize("✗", ColorRed)
-		}
-		fmt.Printf("    %s %s\n", status, colorize(r.Ref.String(), ColorGray))
-	}
 	fmt.Println()
 	fmt.Println(cli.renderMarkdown(final))
 
@@ -110,4 +129,5 @@ func (cli *ChatCLI) handleMoACommand(ctx context.Context, input string) {
 	cli.mirrorHubTurn(ctx, prompt, final)
 	cli.persistBoundSession()
 	cli.offerCoderHandoff(handoffTask)
+	return nil
 }

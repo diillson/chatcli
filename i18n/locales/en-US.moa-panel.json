@@ -1,0 +1,5 @@
+{
+  "moa.panel.synthesizing": "Synthesizing with %s...",
+  "moa.panel.empty": "empty answer",
+  "oneshot.error.moa_failed": " ❌ Error running /moa in one-shot mode"
+}
