@@ -87,7 +87,7 @@ func (*BuiltinMoaPlugin) Name() string { return "@moa" }
 
 // Description surfaces the tool in the catalog.
 func (*BuiltinMoaPlugin) Description() string {
-	return "Mixture-of-Agents: ask several models the same question in parallel and synthesize one best answer. Use for hard, high-stakes, or ambiguous questions where cross-checking multiple models improves accuracy. Set layers to 2 for contested questions: each model then reads the others' answers and revises its own before the synthesis. The result lists each model's position per round, then the synthesis with a section on where the answers diverged."
+	return "Mixture-of-Agents: ask several models the same question in parallel and synthesize one best answer. Use for hard, high-stakes, or ambiguous questions where cross-checking multiple models improves accuracy. The models do not see this conversation: put in prompt everything they need (the question, the relevant facts, constraints, code or config excerpts). Set layers to 2 for contested questions: each model then reads the others' answers and revises its own before the synthesis. The result lists each model's position per round, then the synthesis with a section on where the answers diverged."
 }
 
 // Usage explains the canonical invocation.
@@ -96,7 +96,8 @@ func (*BuiltinMoaPlugin) Usage() string {
 
 Subcommands (cmd + args):
   ask {prompt, models?, aggregator?, layers?, positions?}
-       prompt      the question (required)
+       prompt      the question (required); self-contained: the models do
+                   not see this conversation
        models      optional list like ["openai","anthropic:claude-opus-4-8","googleai"]
                    (default: a set drawn from your configured providers)
        aggregator  optional "provider" or "provider:model" to synthesize
@@ -126,7 +127,7 @@ func (*BuiltinMoaPlugin) Schema() string {
 				"name":        "ask",
 				"description": "Query several models in parallel and synthesize one best answer.",
 				"flags": []map[string]interface{}{
-					{"name": "prompt", "type": "string", "required": true, "description": "The question to ask all member models."},
+					{"name": "prompt", "type": "string", "required": true, "description": "The question to ask all member models, self-contained: they do not see this conversation, so include the facts, constraints and excerpts they need."},
 					{"name": "models", "type": "array", "required": false, "description": "Member models: each 'provider' or 'provider:model'. Defaults to configured providers."},
 					{"name": "aggregator", "type": "string", "required": false, "description": "Model that synthesizes the final answer. Defaults to the current session model."},
 					{"name": "layers", "type": "integer", "required": false, "description": "Rounds (1-4). From the second on, each model reads the others' answers and revises its own before the synthesis; use 2 for contested, high-stakes questions. Defaults to CHATCLI_MOA_LAYERS, else 1."},
@@ -173,11 +174,11 @@ func (p *BuiltinMoaPlugin) ExecuteWithStream(ctx context.Context, args []string,
 	switch cmd {
 	case "ask":
 		var in struct {
-			Prompt     string   `json:"prompt"`
-			Models     []string `json:"models"`
-			Aggregator string   `json:"aggregator"`
-			Layers     int      `json:"layers"`
-			Positions  string   `json:"positions"`
+			Prompt     string          `json:"prompt"`
+			Models     []string        `json:"models"`
+			Aggregator string          `json:"aggregator"`
+			Layers     json.RawMessage `json:"layers"`
+			Positions  string          `json:"positions"`
 		}
 		_ = json.Unmarshal([]byte(inner), &in)
 		if strings.TrimSpace(in.Prompt) == "" {
@@ -185,7 +186,7 @@ func (p *BuiltinMoaPlugin) ExecuteWithStream(ctx context.Context, args []string,
 		}
 		if runner, ok := adapter.(MoaRequestRunner); ok {
 			return runner.RunRequest(ctx, MoaRequest{
-				Prompt: in.Prompt, Members: in.Models, Aggregator: in.Aggregator, Layers: in.Layers, Positions: in.Positions,
+				Prompt: in.Prompt, Members: in.Models, Aggregator: in.Aggregator, Layers: lenientInt(in.Layers), Positions: in.Positions,
 			}, onOutput)
 		}
 		return adapter.Run(ctx, in.Prompt, in.Models, in.Aggregator)
@@ -238,7 +239,7 @@ func parseMoaInvocation(args []string) (string, string, error) {
 			args[0],
 		)
 	}
-	return canon, argvInner(args[1:], "prompt", map[string]bool{"models": true}, nil), nil
+	return canon, argvInner(args[1:], "prompt", map[string]bool{"models": true}, map[string]bool{"layers": true}), nil
 }
 
 // canonicalMoaCmd folds aliases.

@@ -97,7 +97,7 @@ func (p *moaToolPanel) hooks() moa.Hooks {
 				if r.Err != nil {
 					reason = moaOneLine(r.Err.Error())
 				}
-				p.line(fmt.Sprintf(moaProgressFailedFmt, r.Ref.String(), elapsed, moaClip(reason, moaProgressLeadMaxCol)))
+				p.line(fmt.Sprintf(moaProgressFailedFmt, moaRefLabel(r.Ref), elapsed, moaClip(reason, moaProgressLeadMaxCol)))
 				return
 			}
 			badge := ""
@@ -107,7 +107,7 @@ func (p *moaToolPanel) hooks() moa.Hooks {
 			case moa.StanceKept:
 				badge = "  = " + i18n.T("moa.layers.kept")
 			}
-			p.line(fmt.Sprintf(moaProgressMemberFmt, r.Ref.String(), elapsed, badge))
+			p.line(fmt.Sprintf(moaProgressMemberFmt, moaRefLabel(r.Ref), elapsed, badge))
 			if lead := moaLead(r.Output); lead != "" {
 				p.line(fmt.Sprintf(moaProgressLeadFmt, moaClip(lead, moaProgressLeadMaxCol)))
 			}
@@ -145,7 +145,7 @@ func moaPositionsReport(mode string, out moa.Outcome) string {
 				if r.Err != nil {
 					reason = moaOneLine(r.Err.Error())
 				}
-				fmt.Fprintf(&b, moaFailedLineFmt, r.Ref.String(), reason)
+				fmt.Fprintf(&b, moaFailedLineFmt, moaRefLabel(r.Ref), reason)
 				continue
 			}
 			tag := ""
@@ -153,15 +153,22 @@ func moaPositionsReport(mode string, out moa.Outcome) string {
 				tag = fmt.Sprintf(moaStanceTagFmt, out.Stances[li][i])
 			}
 			if mode == moaPanelFull {
-				fmt.Fprintf(&b, moaFullAnswerFmt, r.Ref.String(), tag, strings.TrimSpace(r.Output))
+				fmt.Fprintf(&b, moaFullAnswerFmt, moaRefLabel(r.Ref), tag, strings.TrimSpace(r.Output))
 				continue
 			}
 			lead := moaLead(r.Output)
 			if lead == "" {
 				lead = moaClip(moaOneLine(r.Output), moaProgressLeadMaxCol)
 			}
-			fmt.Fprintf(&b, moaLeadLineFmt, r.Ref.String(), tag, lead)
+			fmt.Fprintf(&b, moaLeadLineFmt, moaRefLabel(r.Ref), tag, lead)
 		}
 	}
 	return b.String()
+}
+
+// moaRefLabel prints a member as /moa does: provider in lower case. The
+// tool resolves providers to their registered keys (upper case), which
+// would otherwise show up in the panel as OPENAI:gpt-….
+func moaRefLabel(r moa.Ref) string {
+	return moa.Ref{Provider: strings.ToLower(r.Provider), Model: r.Model}.String()
 }

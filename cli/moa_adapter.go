@@ -198,19 +198,22 @@ func (a *moaPluginAdapter) RunRequest(ctx context.Context, req plugins.MoaReques
 	positions := moaPositionsMode(req.Positions)
 
 	// Every member runs through the shared tool-aware turn executor —
-	// members hold the same read-only exceptions (knowledge retrieval, CCR
-	// recall) the /moa panel grants, so a member can ground its answer
-	// instead of guessing. The session history is passed so a
-	// context-dependent @moa is answered with the prior conversation
-	// (mirrors the /moa command).
+	// members hold the same read-only exceptions (knowledge retrieval,
+	// memory) the /moa panel grants, so a member can ground its answer
+	// instead of guessing. Members answer the prompt alone: @moa is called
+	// from an agent loop, whose history is the agent's own transcript (its
+	// system prompt, tool protocol, tool calls and results). Handed that,
+	// members answered as the agent would, with plans and tool calls,
+	// instead of answering the question. The calling model writes a
+	// self-contained prompt, as the tool's description asks.
 	refs := make([]moa.Ref, len(members))
 	for i, m := range members {
 		refs[i] = moa.Ref{Provider: m.provider, Model: m.model}
 	}
-	turn := a.cli.moaTurn(a.cli.moaToolsetForRun(a.cli.history))
+	turn := a.cli.moaTurn(a.cli.moaToolsetForRun(nil))
 	start := time.Now()
 	panel := newMoAToolPanel(onProgress, start)
-	out, err := moa.Propose(ctx, req.Prompt, a.cli.history, refs, turn, moa.Config{Layers: layers, Hooks: panel.hooks()})
+	out, err := moa.Propose(ctx, req.Prompt, nil, refs, turn, moa.Config{Layers: layers, Hooks: panel.hooks()})
 	if err != nil && len(out.Answers) == 0 {
 		return "", err
 	}
@@ -262,9 +265,10 @@ func (a *moaPluginAdapter) RunRequest(ctx context.Context, req plugins.MoaReques
 	for _, r := range ok {
 		labels = append(labels, r.label)
 	}
-	header := i18n.T("moa.tool.synthesized", strings.Join(labels, ", "), aggProvider)
+	aggLabel := strings.ToLower(aggProvider)
+	header := i18n.T("moa.tool.synthesized", strings.Join(labels, ", "), aggLabel)
 	if len(out.Layers) > 1 {
-		header = i18n.T("moa.tool.synthesized_layers", strings.Join(labels, ", "), len(out.Layers), aggProvider)
+		header = i18n.T("moa.tool.synthesized_layers", strings.Join(labels, ", "), len(out.Layers), aggLabel)
 	}
 	if report != "" {
 		return header + "\n\n" + report + moaSynthesisHeading + final, nil
