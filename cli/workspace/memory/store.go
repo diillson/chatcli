@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/diillson/chatcli/pkg/knowledge"
+	"github.com/diillson/chatcli/pkg/pulse"
 	"go.uber.org/zap"
 
 	"github.com/diillson/chatcli/llm/embedding"
@@ -123,7 +124,29 @@ func (m *Manager) GetMemoryContext() string {
 
 // GetRelevantContext returns memory context tailored to conversation hints.
 func (m *Manager) GetRelevantContext(hints []string) string {
-	return m.retriever.Retrieve(hints)
+	span := pulse.Begin(pulse.KindBackground, pulseRetrieveNode, "")
+	ranked := m.retriever.rank(hints)
+	out := m.retriever.assemble(ranked)
+	endRetrieveSpan(span, len(hints), len(ranked), len(out), false, false)
+	return out
+}
+
+// pulseRetrieveNode is the live-dashboard node of a memory retrieval (the
+// relevance-ranked context injected into a prompt).
+const pulseRetrieveNode = "memory:retrieve"
+
+// endRetrieveSpan closes a retrieval span with its counts: hints in, facts
+// ranked, characters out, and which semantic signals were available.
+func endRetrieveSpan(span *pulse.Span, hints, hits, chars int, hyde, vectors bool) {
+	if span == nil {
+		return
+	}
+	span.With("hints", strconv.Itoa(hints)).
+		With("hits", strconv.Itoa(hits)).
+		With("chars", strconv.Itoa(chars)).
+		With("hyde", strconv.FormatBool(hyde)).
+		With("vectors", strconv.FormatBool(vectors)).
+		End(pulse.StatusOK)
 }
 
 // GetMemoryIndex returns a COMPACT, STABLE digest of what memory knows: a
@@ -273,7 +296,12 @@ func capStrings(xs []string, n int) []string {
 // query is the raw user question used to seed the hypothesis. Pass
 // "" to skip augmentation entirely.
 func (m *Manager) GetRelevantContextWithHyDE(ctx context.Context, query string, hints []string, augmenter *HyDEAugmenter) string {
-	out := m.retriever.RetrieveWithHyDE(ctx, query, hints, augmenter, m.vectors)
+	ctx, span := pulse.BeginCtx(ctx, pulse.KindBackground, pulseRetrieveNode, "")
+	ranked := m.retriever.rankWithHyDE(ctx, query, hints, augmenter, m.vectors)
+	out := m.retriever.assemble(ranked)
+	defer func() {
+		endRetrieveSpan(span, len(hints), len(ranked), len(out), augmenter != nil, m.vectors != nil && m.vectors.Enabled())
+	}()
 
 	// Lazy backfill: fire-and-forget embedding of any facts visible to
 	// the current scorer that lack a vector. Bounded so a cold cache
@@ -485,8 +513,19 @@ func (m *Manager) RememberFact(content, category string) bool {
 	// background extractor's inferences.
 	added := m.Facts.AddFactWithMeta(content, cat, extractTags(content), m.workspaceDir, ConfidenceUser, ProvenanceUser)
 	m.compactor.RegenerateMemoryMD()
+	if pulse.Enabled() {
+		pulse.Point(pulse.KindBackground, pulseRememberNode, "", pulse.StatusOK, map[string]string{
+			"category": cat,
+			"added":    strconv.FormatBool(added),
+			"chars":    strconv.Itoa(len(content)),
+		})
+	}
 	return added
 }
+
+// pulseRememberNode is the live-dashboard node of a deterministic fact
+// write (/memory remember, the @memory tool).
+const pulseRememberNode = "memory:remember"
 
 // UpdateProfile applies deterministic profile updates and returns whether
 // anything changed. Backs /memory profile set and the @memory tool.

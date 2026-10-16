@@ -178,7 +178,9 @@ func (s *Server) dispatch(ctx context.Context, line []byte) {
 		_ = s.write(Response{JSONRPC: "2.0", ID: req.ID, Error: errf(CodeInvalidRequest, "missing method")})
 		return
 	}
-	span := pulseInbound(req.Method)
+	// The handler runs under the request's node, so the turns, tools and
+	// LLM calls it starts hang from the RPC on the dashboard.
+	ctx, span := pulseInbound(ctx, req.Method)
 	result, rpcErr := s.handler(ctx, req.Method, req.Params)
 	pulseEndRPC(span, rpcErr)
 	if req.IsNotification() {
@@ -223,7 +225,7 @@ func (s *Server) routeClientResponse(line []byte, id json.RawMessage) {
 // Request sends a server-initiated request to the client and blocks until the
 // client responds or ctx is done. Used by ACP's session/request_permission.
 func (s *Server) Request(ctx context.Context, method string, params interface{}) (json.RawMessage, error) {
-	span := pulseOutbound(method)
+	span := pulseOutbound(ctx, method)
 	out, err := s.requestClient(ctx, method, params)
 	span.EndErr(err)
 	return out, err

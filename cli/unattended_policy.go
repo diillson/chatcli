@@ -33,10 +33,13 @@ func (cli *ChatCLI) seedPolicyAutoModeFromEnv() {
 // rule for /config), the slash-command allowed-tools overlay and the session
 // automode. A remaining ActionAsk still needs an approver; unattended runs
 // refuse it when no permission dialog exists.
-func (a *AgentMode) toolPolicyVerdict(pm *coder.PolicyManager, toolName, args string) coder.Action {
-	action := pm.Check(toolName, args)
+func (a *AgentMode) toolPolicyVerdict(pm *coder.PolicyManager, toolName, args string) (action coder.Action) {
+	source := pulsePolicySourceDefault
+	defer func() { a.pulsePolicyVerdict(toolName, action, source) }()
+	action = pm.Check(toolName, args)
 	if rule, ok := pm.LastMatchedRule(); ok {
 		a.lastPolicyMatch = &rule
+		source = pulsePolicySourceRule
 	} else {
 		a.lastPolicyMatch = nil
 	}
@@ -50,6 +53,7 @@ func (a *AgentMode) toolPolicyVerdict(pm *coder.PolicyManager, toolName, args st
 				zap.String("tool", toolName))
 		}
 		action = coder.ActionAsk
+		source = pulsePolicySourceScope
 	}
 	// Session automode (/policy mode auto, or CHATCLI_POLICY_AUTOMODE):
 	// "ask" verdicts auto-approve. Deny rules were already resolved above ask
@@ -61,6 +65,7 @@ func (a *AgentMode) toolPolicyVerdict(pm *coder.PolicyManager, toolName, args st
 				zap.String("tool", toolName))
 		}
 		action = coder.ActionAllow
+		source = pulsePolicySourceAutomode
 	}
 	return action
 }

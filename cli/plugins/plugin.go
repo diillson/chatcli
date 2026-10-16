@@ -93,7 +93,9 @@ func (p *ExecutablePlugin) ExecuteWithStream(ctx context.Context, args []string,
 		return "", err
 	}
 
+	span := p.pulseProcessBegin(ctx)
 	if err := cmd.Start(); err != nil {
+		span.EndErr(err)
 		return "", fmt.Errorf("falha ao iniciar plugin: %w", err)
 	}
 
@@ -163,6 +165,7 @@ func (p *ExecutablePlugin) ExecuteWithStream(ctx context.Context, args []string,
 
 	wg.Wait()
 	err = cmd.Wait()
+	pulseProcessEnd(span, ctx, execCtx, cmd.ProcessState, err)
 
 	if ctx.Err() == context.Canceled {
 		return "", context.Canceled

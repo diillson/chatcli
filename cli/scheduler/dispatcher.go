@@ -31,6 +31,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/diillson/chatcli/pkg/pulse"
 	"go.uber.org/zap"
 )
 
@@ -136,7 +137,8 @@ func (s *Scheduler) rearmRecurring(j *Job, r ExecutionResult) {
 	j.unlock()
 
 	s.emit(NewEvent(EventJobCompleted).WithJob(j).WithExecution(r).
-		WithMessage(fmt.Sprintf("cycle %d completed; re-armed", r.CycleNum)))
+		WithMessage(fmt.Sprintf("cycle %d completed; re-armed", r.CycleNum)).
+		WithData(nextFireDataKey, next))
 	s.queue.Enqueue(j.ID, next)
 	s.version.Add(1)
 }
@@ -353,6 +355,9 @@ func (s *Scheduler) runAction(ctx context.Context, j *Job) {
 	}
 	execCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
+	// What the action starts — a resumed agent, a headless run, a tool —
+	// hangs from this job's node on the live dashboard.
+	execCtx = pulse.WithParent(execCtx, pulseJobNodeID(j.ID))
 
 	br := s.actBreakers.Get(string(action.Type))
 	release, bErr := br.Acquire()

@@ -161,6 +161,7 @@ func LoadBedrockRuntime(ctx context.Context, region, profile string, logger *zap
 		logger.Info("bedrock: custom runtime endpoint configured via BEDROCK_BASE_URL",
 			zap.String("endpoint", base))
 	}
+	clientOpts = append(clientOpts, meterRuntimeClient)
 	return bedrockruntime.NewFromConfig(cfg, clientOpts...), cfg.Region, nil
 }
 
@@ -193,5 +194,6 @@ func LoadBedrockControl(ctx context.Context, region, profile string, logger *zap
 	if base != "" {
 		opts = append(opts, func(o *bedrocksvc.Options) { o.BaseEndpoint = aws.String(base) })
 	}
+	opts = append(opts, meterControlClient)
 	return bedrocksvc.NewFromConfig(cfg, opts...), cfg.Region, nil
 }

@@ -23,8 +23,12 @@ type Node struct {
 	ID     string
 	Name   string
 	Parent string
-	Status string
-	Single bool
+	// ParentNode names the node Parent points at, as "kind:name" — a run
+	// shows as "agent:<name>", a span as its hub ("turn:chat",
+	// "pattern:moa"); empty when Parent is the session or unknown.
+	ParentNode string
+	Status     string
+	Single     bool
 
 	Calls   int
 	Active  int
@@ -66,6 +70,7 @@ var kindRank = map[Kind]int{
 // Snapshot events (replayed state) count like live ones, as on the page.
 func Summarize(events []Event) Summary {
 	nodes := make(map[string]*Node)
+	byID := make(map[string]*Node) // span and run IDs -> the node they belong to
 	var sum Summary
 	for _, ev := range events {
 		sum.Events++
@@ -83,6 +88,11 @@ func Summarize(events []Event) Summary {
 				n.Name = ev.ID
 			}
 			nodes[key] = n
+		}
+		if ev.ID != "" {
+			if _, seen := byID[ev.ID]; !seen {
+				byID[ev.ID] = n
+			}
 		}
 		if ev.Name != "" && single {
 			n.Name = ev.Name
@@ -110,6 +120,9 @@ func Summarize(events []Event) Summary {
 	}
 	sum.Nodes = make([]*Node, 0, len(nodes))
 	for _, n := range nodes {
+		if p := byID[n.Parent]; p != nil && p != n && p.Kind != KindSession {
+			n.ParentNode = string(p.Kind) + ":" + p.Name
+		}
 		sum.Nodes = append(sum.Nodes, n)
 	}
 	sort.SliceStable(sum.Nodes, func(i, j int) bool {

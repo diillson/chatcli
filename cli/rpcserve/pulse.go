@@ -16,6 +16,8 @@
 package rpcserve
 
 import (
+	"context"
+
 	"github.com/diillson/chatcli/pkg/pulse"
 )
 
@@ -41,22 +43,25 @@ func pulseMethodName(method string) string {
 	return method
 }
 
-// pulseInbound opens the span of a request the client sent.
-func pulseInbound(method string) *pulse.Span {
+// pulseInbound opens the span of a request the client sent and returns the
+// context the handler must run under, so whatever the request starts nests
+// under its node.
+func pulseInbound(ctx context.Context, method string) (context.Context, *pulse.Span) {
 	if !pulse.Enabled() {
-		return nil
+		return ctx, nil
 	}
-	return pulse.Begin(pulse.KindRPC, pulseMethodName(method), "").With("direction", "inbound")
+	ctx, span := pulse.BeginCtx(ctx, pulse.KindRPC, pulseMethodName(method), "")
+	return ctx, span.With("direction", "inbound")
 }
 
 // pulseOutbound opens the span of a request the server sends to the client
 // and waits on, which is where a permission dialog nobody answers shows up as
 // a call that never ends.
-func pulseOutbound(method string) *pulse.Span {
+func pulseOutbound(ctx context.Context, method string) *pulse.Span {
 	if !pulse.Enabled() {
 		return nil
 	}
-	return pulse.Begin(pulse.KindRPC, "client:"+pulseMethodName(method), "").With("direction", "outbound")
+	return pulse.Begin(pulse.KindRPC, "client:"+pulseMethodName(method), pulse.ParentFrom(ctx)).With("direction", "outbound")
 }
 
 // pulseEndRPC closes an inbound span from the handler's outcome.

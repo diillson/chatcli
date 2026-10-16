@@ -8,12 +8,14 @@ package cli
 
 import (
 	"os"
+	"strconv"
 	"strings"
 
 	"github.com/diillson/chatcli/cli/agent"
 	"github.com/diillson/chatcli/cli/agent/trajectory"
 	"github.com/diillson/chatcli/models"
 	"github.com/diillson/chatcli/pkg/evals"
+	"github.com/diillson/chatcli/pkg/pulse"
 	"go.uber.org/zap"
 )
 
@@ -33,9 +35,28 @@ func (cli *ChatCLI) writeEvalRecord(mode string, runErr error) {
 		return
 	}
 	rec := cli.buildEvalRecord(mode, runErr)
+	pulseEvalRecord(rec, runErr)
 	if err := evals.WriteRecord(path, rec); err != nil && cli.logger != nil {
 		cli.logger.Warn("eval record not written", zap.String("path", path), zap.Error(err))
 	}
+}
+
+// pulseEvalRecord reports the candidate run the record describes: its mode,
+// how many turns, tool calls and requests it took, and whether it failed.
+// Never the answer, the transcript or the error text.
+func pulseEvalRecord(rec *evals.Record, runErr error) {
+	if !pulse.Enabled() || rec == nil {
+		return
+	}
+	attrs := map[string]string{
+		"mode":       rec.Mode,
+		"turns":      strconv.Itoa(rec.Turns),
+		"tool_calls": strconv.Itoa(len(rec.ToolCalls)),
+		"requests":   strconv.Itoa(rec.Requests),
+		"provider":   strings.ToLower(rec.Provider),
+		"model":      rec.Model,
+	}
+	pulse.Point(pulse.KindBackground, pulseEvalRecordName, "", pulse.StatusOf(runErr), attrs)
 }
 
 // buildEvalRecord assembles the run's answer, tool trail and spend.

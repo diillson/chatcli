@@ -33,7 +33,10 @@ func (cli *ChatCLI) processLLMRequest(parentCtx context.Context, in string) {
 	// One node per chat turn on the live dashboard. The deferred End is the
 	// safety net for an early exit; the real outcome is reported below and
 	// only the first End counts.
-	turn := pulse.Begin(pulse.KindTurn, pulseTurnChat, "")
+	parentCtx, turn := pulse.BeginCtx(parentCtx, pulse.KindTurn, pulseTurnChat, "")
+	if turn != nil {
+		turn.With("provider", strings.ToLower(cli.Provider)).With("model", cli.Model)
+	}
 	defer turn.End(pulse.StatusCancelled)
 
 	stopSpinner := cli.startProcessingLifecycle()
@@ -249,7 +252,7 @@ func (cli *ChatCLI) compactHistoryIfNeeded(ctx context.Context) {
 	})
 	cli.flushMemoryBeforeCompaction(ctx)
 	cli.beforeCompaction(ctx, compactTriggerAuto)
-	compacted, err := cli.historyCompactor.Compact(ctx, cli.history, cli.Client, cfg)
+	compacted, err := cli.historyCompactor.Compact(cli.compactionCtx(ctx), cli.history, cli.Client, cfg)
 	cli.historyCompactor.SetStatusCallback(nil)
 	if err != nil || historiesEqual(compacted, cli.history) {
 		cli.compactionSkipped(ctx, compactTriggerAuto)

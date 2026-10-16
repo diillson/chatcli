@@ -127,6 +127,13 @@ func NewChain(logger *zap.Logger, entries []FallbackEntry, opts ...Option) *Chai
 
 // SendPrompt attempts the request through the chain, falling back on failure.
 func (c *Chain) SendPrompt(ctx context.Context, prompt string, history []models.Message, maxTokens int) (string, error) {
+	ctx, tr := c.trace(ctx, "send")
+	resp, err := c.tryPrompt(ctx, tr, prompt, history, maxTokens)
+	tr.end(err)
+	return resp, err
+}
+
+func (c *Chain) tryPrompt(ctx context.Context, tr *chainTrace, prompt string, history []models.Message, maxTokens int) (string, error) {
 	var lastErr error
 
 	for _, entry := range c.entries {
@@ -135,6 +142,7 @@ func (c *Chain) SendPrompt(ctx context.Context, prompt string, history []models.
 		}
 
 		if !c.isAvailable(entry.Provider) {
+			tr.skip()
 			c.logger.Debug(i18n.T("llm.fallback.skipping_cooldown"),
 				zap.String("provider", entry.Provider))
 			continue
@@ -149,10 +157,12 @@ func (c *Chain) SendPrompt(ctx context.Context, prompt string, history []models.
 			if err == nil {
 				c.markSuccess(entry.Provider)
 				c.setLastServed(entry)
+				tr.served(entry)
 				return resp, nil
 			}
 
 			errClass := ClassifyError(err)
+			tr.fail(entry.Provider, attempt, errClass)
 			c.logger.Warn(i18n.T("llm.fallback.request_failed"),
 				zap.String("provider", entry.Provider),
 				zap.Int("attempt", attempt+1),
@@ -191,6 +201,13 @@ func (c *Chain) SendPrompt(ctx context.Context, prompt string, history []models.
 
 // SendPromptWithTools attempts tool-aware requests through the chain.
 func (c *Chain) SendPromptWithTools(ctx context.Context, prompt string, history []models.Message, tools []models.ToolDefinition, maxTokens int) (*models.LLMResponse, error) {
+	ctx, tr := c.trace(ctx, "tools")
+	resp, err := c.tryPromptWithTools(ctx, tr, prompt, history, tools, maxTokens)
+	tr.end(err)
+	return resp, err
+}
+
+func (c *Chain) tryPromptWithTools(ctx context.Context, tr *chainTrace, prompt string, history []models.Message, tools []models.ToolDefinition, maxTokens int) (*models.LLMResponse, error) {
 	var lastErr error
 
 	for _, entry := range c.entries {
@@ -198,6 +215,7 @@ func (c *Chain) SendPromptWithTools(ctx context.Context, prompt string, history 
 			return nil, ctx.Err()
 		}
 		if !c.isAvailable(entry.Provider) {
+			tr.skip()
 			continue
 		}
 
@@ -217,10 +235,12 @@ func (c *Chain) SendPromptWithTools(ctx context.Context, prompt string, history 
 			if err == nil {
 				c.markSuccess(entry.Provider)
 				c.setLastServed(entry)
+				tr.served(entry)
 				return resp, nil
 			}
 
 			errClass := ClassifyError(err)
+			tr.fail(entry.Provider, attempt, errClass)
 			if errClass == ErrorClassAuth || errClass == ErrorClassModelNotFound || errClass == ErrorClassContextTooLong {
 				c.markFailure(entry.Provider, err, errClass)
 				lastErr = err
@@ -267,21 +287,31 @@ func (c *Chain) SupportsStreaming() bool {
 // support answer through SendPrompt as one chunk, so a chain mixing both
 // kinds still streams from the ones that can.
 func (c *Chain) SendPromptStream(ctx context.Context, prompt string, history []models.Message, maxTokens int) (<-chan client.StreamChunk, error) {
+	ctx, tr := c.trace(ctx, "stream")
+	out, err := c.tryPromptStream(ctx, tr, prompt, history, maxTokens)
+	tr.end(err)
+	return out, err
+}
+
+func (c *Chain) tryPromptStream(ctx context.Context, tr *chainTrace, prompt string, history []models.Message, maxTokens int) (<-chan client.StreamChunk, error) {
 	var lastErr error
 	for _, entry := range c.entries {
 		if ctx.Err() != nil {
 			return nil, ctx.Err()
 		}
 		if !c.isAvailable(entry.Provider) {
+			tr.skip()
 			c.logger.Debug(i18n.T("llm.fallback.skipping_cooldown"),
 				zap.String("provider", entry.Provider))
 			continue
 		}
 		out, err := c.streamEntry(ctx, entry, prompt, history, maxTokens)
 		if err == nil {
+			tr.served(entry)
 			return out, nil
 		}
 		errClass := ClassifyError(err)
+		tr.fail(entry.Provider, 0, errClass)
 		c.logger.Warn(i18n.T("llm.fallback.request_failed"),
 			zap.String("provider", entry.Provider),
 			zap.Int("attempt", 1),

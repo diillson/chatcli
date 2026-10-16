@@ -5,8 +5,10 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"strconv"
 	"time"
 
+	"github.com/diillson/chatcli/pkg/pulse"
 	"go.uber.org/zap"
 )
 
@@ -47,6 +49,7 @@ func Retry[T any](ctx context.Context, logger *zap.Logger, maxAttempts int, init
 				zap.Error(err),
 				zap.Duration("backoff", backoff))
 			if attempt < maxAttempts {
+				pulseRetry(ctx, attempt, maxAttempts, backoff, err)
 				time.Sleep(backoff)
 				backoff *= 2 // Backoff exponencial
 				if backoff > maxBackoff {
@@ -86,4 +89,24 @@ func IsTemporaryError(err error) bool {
 		err = errors.Unwrap(err) // Desembrulha para checar inner errors
 	}
 	return false
+}
+
+// pulseRetry reports a retried request on the live dashboard, hung from the
+// node that made it: which attempt failed, the wait before the next one and
+// what kind of failure it was (the status code, or "timeout"). The error
+// text never travels.
+func pulseRetry(ctx context.Context, attempt, maxAttempts int, backoff time.Duration, err error) {
+	if !pulse.Enabled() {
+		return
+	}
+	class := "timeout"
+	var apiErr *APIError
+	if errors.As(err, &apiErr) {
+		class = strconv.Itoa(apiErr.StatusCode)
+	}
+	pulse.Point(pulse.KindPattern, "retry", pulse.ParentFrom(ctx), pulse.StatusError, map[string]string{
+		"attempt":    strconv.Itoa(attempt) + "/" + strconv.Itoa(maxAttempts),
+		"backoff_ms": strconv.FormatInt(backoff.Milliseconds(), 10),
+		"cause":      class,
+	})
 }

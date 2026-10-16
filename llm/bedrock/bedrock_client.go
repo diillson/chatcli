@@ -379,6 +379,7 @@ func (c *BedrockClient) ensureRuntime(ctx context.Context) error {
 	}
 	c.region = resolvedRegion
 	c.runtime = runtime
+	controlOpts = append(controlOpts, meterControlClient)
 	c.control = bedrocksvc.NewFromConfig(cfg, controlOpts...)
 	c.credentials = cfg.Credentials
 	c.logger.Info(i18n.T("llm.info.configuring_provider", "Bedrock"),

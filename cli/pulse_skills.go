@@ -27,6 +27,7 @@ const (
 const (
 	pulseTurnChat    = "chat"
 	pulseTurnOneShot = "one-shot"
+	pulseTurnMoA     = "moa"
 )
 
 // pulseSkillsActivated reports skills delivered to the model. parent is the

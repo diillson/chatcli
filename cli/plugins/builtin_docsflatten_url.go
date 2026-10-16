@@ -65,13 +65,14 @@ type docsFlattenCrawlItem struct {
 
 // executeURL runs the web-crawl source end to end: crawl → render → write or
 // return, mirroring the local/git path's output contract.
-func (p *BuiltinDocsFlattenPlugin) executeURL(ctx context.Context, cfg docsFlattenArgs, emit func(string)) (string, error) {
+func (p *BuiltinDocsFlattenPlugin) executeURL(ctx context.Context, cfg docsFlattenArgs, emit func(string), st *docsFlattenStats) (string, error) {
 	seedHost := hostOf(cfg.URL)
 
 	chunks, pages, capped, err := crawlDocsFlatten(ctx, cfg, emit)
 	if err != nil {
 		return "", fmt.Errorf("@docs-flatten: %w", err)
 	}
+	st.pages, st.chunks, st.capped = pages, len(chunks), capped
 	if len(chunks) == 0 {
 		return fmt.Sprintf("@docs-flatten: crawled %s but extracted no text from %d page(s)", cfg.URL, pages), nil
 	}
@@ -82,6 +83,7 @@ func (p *BuiltinDocsFlattenPlugin) executeURL(ctx context.Context, cfg docsFlatt
 	} else {
 		imageReport = markersImageReport(chunks)
 	}
+	st.images, st.chunks = imageReport, len(chunks)
 	if imageReport.NeedConfirm > 0 {
 		return imageReport.confirmRequest(), nil
 	}

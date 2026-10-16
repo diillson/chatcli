@@ -266,9 +266,18 @@ func (sm *SessionManager) SaveSession(name string, history []models.Message) err
 
 // SaveSessionV2 salva uma sessão completa com históricos escopados.
 func (sm *SessionManager) SaveSessionV2(name string, sd *SessionData) error {
+	span := pulseBeginSessionIO("session:save", sd)
+	written, err := sm.writeSessionV2(name, sd)
+	pulseEndSessionIO(span, written, err)
+	return err
+}
+
+// writeSessionV2 is the body of SaveSessionV2, which wraps it with telemetry.
+// It returns what was written: the byte count and whether it was sealed.
+func (sm *SessionManager) writeSessionV2(name string, sd *SessionData) (sessionIOStat, error) {
 	// Security (L4): Validate session name
 	if err := validateSessionName(name); err != nil {
-		return err
+		return sessionIOStat{}, err
 	}
 
 	sd.Version = 2
@@ -294,7 +303,7 @@ func (sm *SessionManager) SaveSessionV2(name string, sd *SessionData) error {
 	data, err := json.MarshalIndent(sd, "", "  ")
 	if err != nil {
 		sm.logger.Error("Erro ao serializar a sessão para JSON", zap.String("session", name), zap.Error(err))
-		return fmt.Errorf("erro ao serializar a sessão: %w", err)
+		return sessionIOStat{}, fmt.Errorf("erro ao serializar a sessão: %w", err)
 	}
 
 	// Encryption at rest (opt-in via CHATCLI_ENCRYPTION_KEY): sealed right
@@ -304,7 +313,7 @@ func (sm *SessionManager) SaveSessionV2(name string, sd *SessionData) error {
 	data, err = atrest.SealAt(filePath, data)
 	if err != nil {
 		sm.logger.Error("Erro ao criptografar a sessão", zap.String("session", name), zap.Error(err))
-		return fmt.Errorf("%s: %w", i18n.T("session.encrypt_failed"), err)
+		return sessionIOStat{}, fmt.Errorf("%s: %w", i18n.T("session.encrypt_failed"), err)
 	}
 
 	// Atomic same-directory temp + rename: the REPL, the gateway daemon and
@@ -314,11 +323,11 @@ func (sm *SessionManager) SaveSessionV2(name string, sd *SessionData) error {
 	// clobbering each other's in-flight write; last rename wins whole-file.
 	if err := atomicWriteSessionFile(filePath, data); err != nil {
 		sm.logger.Error("Erro ao salvar o arquivo da sessão", zap.String("path", filePath), zap.Error(err))
-		return fmt.Errorf("erro ao salvar o arquivo da sessão: %w", err)
+		return sessionIOStat{}, fmt.Errorf("erro ao salvar o arquivo da sessão: %w", err)
 	}
 
 	sm.logger.Info("Sessão salva com sucesso", zap.String("session", name), zap.String("path", filePath))
-	return nil
+	return sessionIOStat{bytes: len(data), encrypted: atrest.IsEncrypted(data)}, nil
 }
 
 // SessionModTime returns the store file's last-modified time for a saved
@@ -361,6 +370,17 @@ func (sm *SessionManager) LoadSession(name string) ([]models.Message, error) {
 
 // LoadSessionV2 carrega uma sessão completa com suporte a formato v2 e legacy.
 func (sm *SessionManager) LoadSessionV2(name string) (*SessionData, error) {
+	span := pulseBeginSessionIO("session:load", nil)
+	var read sessionIOStat
+	sd, err := sm.readSessionV2(name, &read)
+	pulseEndSessionIO(span.With("messages", pulseSessionMessages(sd)), read, err)
+	return sd, err
+}
+
+// readSessionV2 is the body of LoadSessionV2, which wraps it with telemetry.
+// read receives what was read from disk: the byte count and whether the file
+// was sealed.
+func (sm *SessionManager) readSessionV2(name string, read *sessionIOStat) (*SessionData, error) {
 	filePath := sm.getSessionPath(name)
 	if _, err := os.Stat(filePath); os.IsNotExist(err) {
 		return nil, fmt.Errorf("sessão '%s' não encontrada", name)
@@ -371,6 +391,7 @@ func (sm *SessionManager) LoadSessionV2(name string) (*SessionData, error) {
 		sm.logger.Error("Erro ao ler o arquivo da sessão", zap.String("path", filePath), zap.Error(err))
 		return nil, fmt.Errorf("erro ao ler o arquivo da sessão: %w", err)
 	}
+	*read = sessionIOStat{bytes: len(data), encrypted: atrest.IsEncrypted(data)}
 
 	// Transparent at-rest handling: plaintext files (written before a key
 	// was configured) pass through and are sealed on their next save; an

@@ -17,13 +17,14 @@ package cli
 
 import (
 	"context"
-	"github.com/diillson/chatcli/llm/client"
-	"go.uber.org/zap"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/diillson/chatcli/llm/client"
 	"github.com/diillson/chatcli/models"
+	"go.uber.org/zap"
 )
 
 const (
@@ -237,7 +238,14 @@ func (cli *ChatCLI) calibrateExact(ctx context.Context) (int, bool) {
 	if !ok {
 		return 0, false
 	}
+	ctx, span := beginMediaTool(ctx, pulseTokensCount)
+	span.With("provider", strings.ToLower(cli.Provider)).With("model", cli.Model).
+		With("messages", strconv.Itoa(len(cli.history)))
 	tokens, err := tc.CountTokens(ctx, "", cli.history)
+	if err == nil && tokens > 0 {
+		span.With("tokens", strconv.Itoa(tokens))
+	}
+	span.EndErr(err)
 	if err != nil || tokens <= 0 {
 		if err != nil && cli.logger != nil {
 			cli.logger.Debug("exact token count unavailable; keeping the learned ratio", zap.Error(err))

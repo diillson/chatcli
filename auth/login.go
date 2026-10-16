@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/diillson/chatcli/pkg/pulse"
 	"github.com/diillson/chatcli/utils"
 	"go.uber.org/zap"
 )
@@ -80,7 +81,9 @@ func exchangeAnthropicToken(ctx context.Context, tokenURL string, payload map[st
 		return nil, err
 	}
 
-	hc := &http.Client{Timeout: 60 * time.Second}
+	// Metering wraps the default transport, so the TLS fingerprint the
+	// comment above protects is unchanged.
+	hc := &http.Client{Timeout: 60 * time.Second, Transport: pulse.MeterTransport(nil)}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, tokenURL, bytes.NewReader(body))
 	if err != nil {
 		return nil, err
@@ -152,7 +155,7 @@ func fetchAnthropicEmailFrom(ctx context.Context, profileURL, accessToken string
 	if accessToken == "" {
 		return ""
 	}
-	hc := &http.Client{Timeout: 15 * time.Second}
+	hc := &http.Client{Timeout: 15 * time.Second, Transport: pulse.MeterTransport(nil)}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, profileURL, nil)
 	if err != nil {
 		logger.Debug("anthropic profile fetch: request build failed", zap.Error(err))

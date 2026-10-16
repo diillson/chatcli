@@ -29,11 +29,13 @@ import (
 	"fmt"
 	"os"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/diillson/chatcli/cli/workspace/memory"
 	"github.com/diillson/chatcli/models"
+	"github.com/diillson/chatcli/pkg/pulse"
 )
 
 const (
@@ -149,8 +151,17 @@ func (cli *ChatCLI) sessionAutoRecallBlockWithHeader(hints []string, lastUserMsg
 	if !temporal {
 		from, to = time.Time{}, time.Time{}
 	}
+	span := pulse.Begin(pulse.KindBackground, pulseSessionRecallNode, "").
+		With("referential", strconv.FormatBool(referential)).
+		With("temporal", strconv.FormatBool(temporal))
 	hits, err := cli.sessionManager.searchSessionsFiltered(query, 1, window, from, to)
-	if err != nil || len(hits) == 0 {
+	span.With("hits", strconv.Itoa(len(hits)))
+	if err != nil {
+		span.EndErr(err)
+		return ""
+	}
+	if len(hits) == 0 {
+		span.Outcome(pulse.StatusOK, "nothing relevant")
 		return ""
 	}
 	referential = referential || temporal
@@ -190,11 +201,19 @@ func (cli *ChatCLI) sessionAutoRecallBlockWithHeader(hints []string, lastUserMsg
 		b.WriteByte('\n')
 		written++
 	}
+	span.With("sessions", strconv.Itoa(written))
 	if written == 0 {
+		span.Outcome(pulse.StatusOK, "nothing relevant")
 		return ""
 	}
-	return strings.TrimRight(b.String(), "\n")
+	out := strings.TrimRight(b.String(), "\n")
+	span.With("chars", strconv.Itoa(len(out))).Outcome(pulse.StatusOK, "injected")
+	return out
 }
+
+// pulseSessionRecallNode is the live-dashboard node of per-turn saved-session
+// recall.
+const pulseSessionRecallNode = "memory:session-recall"
 
 // formatSessionAge renders a save time as a compact model-facing age label.
 func formatSessionAge(saved time.Time) string {

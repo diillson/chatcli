@@ -151,3 +151,35 @@ func TestIsEventStream(t *testing.T) {
 		}
 	}
 }
+
+func TestLoggingTransport_UpgradedBodyStaysReadWrite(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		conn, rw, err := http.NewResponseController(w).Hijack()
+		if err != nil {
+			t.Errorf("hijack: %v", err)
+			return
+		}
+		defer conn.Close()
+		_, _ = rw.WriteString("HTTP/1.1 101 Switching Protocols\r\nUpgrade: test\r\nConnection: Upgrade\r\n\r\n")
+		_ = rw.Flush()
+	}))
+	defer srv.Close()
+
+	c := NewHTTPClient(zap.NewNop(), 10*time.Second)
+	req, _ := http.NewRequest(http.MethodGet, srv.URL, nil)
+	req.Header.Set("Connection", "Upgrade")
+	req.Header.Set("Upgrade", "test")
+	// The transport itself, not the client: a client with a Timeout wraps
+	// every body in its own timer reader, which is net/http's behavior.
+	resp, err := c.Transport.RoundTrip(req)
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusSwitchingProtocols {
+		t.Fatalf("status = %d", resp.StatusCode)
+	}
+	if _, ok := resp.Body.(io.ReadWriteCloser); !ok {
+		t.Fatalf("an upgraded body must stay read-write, got %T", resp.Body)
+	}
+}

@@ -123,6 +123,13 @@ func fieldsToStrings(fields []zap.Field) map[string]string {
 			out[f.Key] = time.Duration(f.Integer).String()
 		case zapcore.Float64Type:
 			out[f.Key] = formatFloatBits(f.Integer)
+		case zapcore.InlineMarshalerType:
+			if ci, ok := f.Interface.(callerInfo); ok {
+				if ci.caller != "" {
+					out[CallerFieldKey] = ci.caller
+				}
+				out[ParentFieldKey] = ci.parent
+			}
 		}
 	}
 	return out

@@ -49,7 +49,7 @@ func (cli *ChatCLI) handleCompactCommand(ctx context.Context, userInput string) 
 			fmt.Printf("  %s %s\n", colorize("│", ColorCyan), colorize(msg, ColorGray))
 		})
 		cli.flushMemoryBeforeCompaction(ctx)
-		compacted, err := cli.historyCompactor.Compact(ctx, cli.history, cli.Client, cfg)
+		compacted, err := cli.historyCompactor.Compact(cli.compactionCtx(ctx), cli.history, cli.Client, cfg)
 		cli.historyCompactor.SetStatusCallback(nil)
 		if err != nil || historiesEqual(compacted, cli.history) {
 			cli.compactionSkipped(ctx, compactTriggerManual)
@@ -153,7 +153,7 @@ CONVERSATION TO COMPACT:
 	if cfg.SummarizerClient != nil {
 		summarizer, usingSession = cfg.SummarizerClient, false
 	}
-	summarizeCtx, cancelSummary := context.WithTimeout(ctx, 10*time.Minute)
+	summarizeCtx, cancelSummary := context.WithTimeout(cli.compactionCtx(ctx), 10*time.Minute)
 	defer cancelSummary()
 
 	var response string

@@ -14,7 +14,7 @@
  * "which agents are alive right now and what is each one doing", consumed by
  * the live dispatch panel, the /agents REPL command and the @agents tool.
  *
- * The package is a leaf: stdlib only, importable from cli, cli/agent/workers,
+ * The package is a leaf: stdlib plus pkg/pulse (itself stdlib only), importable from cli, cli/agent/workers,
  * cli/metrics and cli/plugins without cycles. All exported types are safe for
  * concurrent use; *Run methods are nil-safe so instrumentation call sites can
  * update progress unconditionally.
@@ -32,6 +32,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/diillson/chatcli/pkg/pulse"
 )
 
 // Kind classifies what spawned the agent execution.
@@ -73,22 +75,27 @@ func (s Status) Terminal() bool {
 // define the wire projection used when a run is mirrored outside the
 // process (hub persistence); Elapsed is derived, so both timestamps travel.
 type Info struct {
-	ID        string    `json:"id"`
-	CallID    string    `json:"call_id,omitempty"` // dispatcher <agent_call> ID when applicable
-	Kind      Kind      `json:"kind"`
-	Agent     string    `json:"agent"` // agent type name: "coder", "reviewer", ...
-	Task      string    `json:"task,omitempty"`
-	ParentID  string    `json:"parent_id,omitempty"`
-	Origin    string    `json:"origin,omitempty"`   // "repl", "gateway", "scheduler", "mcp", "acp"
-	Instance  string    `json:"instance,omitempty"` // owning-process token; set by Begin
-	Status    Status    `json:"status"`
-	Turn      int       `json:"turn,omitempty"`
-	MaxTurns  int       `json:"max_turns,omitempty"`
-	Action    string    `json:"action,omitempty"` // current action label, e.g. "read cli/foo.go"
-	ToolCalls int       `json:"tool_calls,omitempty"`
-	StartedAt time.Time `json:"started_at"`
-	EndedAt   time.Time `json:"ended_at,omitempty"`
-	Err       string    `json:"err,omitempty"`
+	ID       string `json:"id"`
+	CallID   string `json:"call_id,omitempty"` // dispatcher <agent_call> ID when applicable
+	Kind     Kind   `json:"kind"`
+	Agent    string `json:"agent"` // agent type name: "coder", "reviewer", ...
+	Task     string `json:"task,omitempty"`
+	ParentID string `json:"parent_id,omitempty"`
+	// PulseParent is the innermost telemetry node the run was started
+	// under (a span such as a MoA panel or a chat turn, or a run), for the
+	// live dashboard. ParentID stays the run tree that cancellation and
+	// /agents follow.
+	PulseParent string    `json:"-"`
+	Origin      string    `json:"origin,omitempty"`   // "repl", "gateway", "scheduler", "mcp", "acp"
+	Instance    string    `json:"instance,omitempty"` // owning-process token; set by Begin
+	Status      Status    `json:"status"`
+	Turn        int       `json:"turn,omitempty"`
+	MaxTurns    int       `json:"max_turns,omitempty"`
+	Action      string    `json:"action,omitempty"` // current action label, e.g. "read cli/foo.go"
+	ToolCalls   int       `json:"tool_calls,omitempty"`
+	StartedAt   time.Time `json:"started_at"`
+	EndedAt     time.Time `json:"ended_at,omitempty"`
+	Err         string    `json:"err,omitempty"`
 }
 
 // Elapsed returns the run's wall-clock duration so far (or total when done).
@@ -352,6 +359,9 @@ func (g *Registry) Begin(ctx context.Context, meta Info) (context.Context, *Run)
 			meta.Origin = snap.Origin
 		}
 	}
+	if meta.PulseParent == "" {
+		meta.PulseParent = pulse.ParentFrom(ctx)
+	}
 	ctx, cancel := context.WithCancel(ctx)
 
 	meta.ID = "run-" + g.instance + "-" + strconv.FormatUint(g.seq.Add(1), 10)
@@ -368,7 +378,7 @@ func (g *Registry) Begin(ctx context.Context, meta Info) (context.Context, *Run)
 	g.mu.Unlock()
 
 	g.notify(meta)
-	return WithRun(ctx, run), run
+	return pulse.WithParent(WithRun(ctx, run), meta.ID), run
 }
 
 // retire moves a finished run out of the active set into the history ring.

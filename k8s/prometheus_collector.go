@@ -15,6 +15,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/diillson/chatcli/pkg/pulse"
 	"go.uber.org/zap"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
@@ -52,7 +53,7 @@ func NewPrometheusCollector(
 		port:       port,
 		path:       path,
 		filters:    filters,
-		httpClient: &http.Client{Timeout: 5 * time.Second},
+		httpClient: &http.Client{Timeout: 5 * time.Second, Transport: pulse.MeterTransport(nil)},
 		logger:     logger,
 	}
 }
@@ -79,7 +80,7 @@ func NewResourcePrometheusCollector(
 		port:       port,
 		path:       path,
 		filters:    filters,
-		httpClient: &http.Client{Timeout: 5 * time.Second},
+		httpClient: &http.Client{Timeout: 5 * time.Second, Transport: pulse.MeterTransport(nil)},
 		logger:     logger,
 	}
 }

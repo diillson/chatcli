@@ -200,24 +200,30 @@ func (m *Manager) GetHooks() []HookConfig {
 	return result
 }
 
-// executeHook runs a single hook and returns the result.
+// executeHook runs a single hook and returns the result. Each run is a
+// background node on the live dashboard (see pulse.go).
 func (m *Manager) executeHook(ctx context.Context, hook HookConfig, event HookEvent) *HookResult {
 	timeout := time.Duration(hook.GetTimeout()) * time.Millisecond
+	span := pulseHookBegin(ctx, hook, event)
+	var tr hookTrace
 
+	var result *HookResult
 	switch hook.Type {
 	case HookTypeCommand:
-		return m.executeCommandHook(ctx, hook, event, timeout)
+		result = m.executeCommandHook(ctx, hook, event, timeout, &tr)
 	case HookTypeHTTP:
-		return m.executeHTTPHook(ctx, hook, event, timeout)
+		result = m.executeHTTPHook(ctx, hook, event, timeout, &tr)
 	default:
 		m.logger.Warn("Unknown hook type", zap.String("type", string(hook.Type)), zap.String("name", hook.Name))
-		return &HookResult{ExitCode: -1, Error: "unknown hook type"}
+		result = &HookResult{ExitCode: -1, Error: "unknown hook type"}
 	}
+	pulseHookEnd(span, hook, result, tr)
+	return result
 }
 
 // executeCommandHook runs a shell command hook.
 // The event JSON is passed via stdin. Exit code 0 = allow, 2 = block.
-func (m *Manager) executeCommandHook(ctx context.Context, hook HookConfig, event HookEvent, timeout time.Duration) *HookResult {
+func (m *Manager) executeCommandHook(ctx context.Context, hook HookConfig, event HookEvent, timeout time.Duration, tr *hookTrace) *HookResult {
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
@@ -240,6 +246,7 @@ func (m *Manager) executeCommandHook(ctx context.Context, hook HookConfig, event
 	)
 
 	err := cmd.Run()
+	tr.timedOut = errors.Is(ctx.Err(), context.DeadlineExceeded)
 
 	result := &HookResult{
 		Output: stdout.String(),
@@ -275,7 +282,7 @@ func (m *Manager) executeCommandHook(ctx context.Context, hook HookConfig, event
 }
 
 // executeHTTPHook sends the event as a POST request.
-func (m *Manager) executeHTTPHook(ctx context.Context, hook HookConfig, event HookEvent, timeout time.Duration) *HookResult {
+func (m *Manager) executeHTTPHook(ctx context.Context, hook HookConfig, event HookEvent, timeout time.Duration, tr *hookTrace) *HookResult {
 	eventJSON, _ := json.Marshal(event)
 
 	ctx, cancel := context.WithTimeout(ctx, timeout)
@@ -288,12 +295,14 @@ func (m *Manager) executeHTTPHook(ctx context.Context, hook HookConfig, event Ho
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("User-Agent", "chatcli-hooks/1.0")
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := hookHTTPClient().Do(req)
 	if err != nil {
+		tr.timedOut = errors.Is(ctx.Err(), context.DeadlineExceeded)
 		m.logger.Debug("HTTP hook failed", zap.String("name", hook.Name), zap.Error(err))
 		return &HookResult{ExitCode: -1, Error: err.Error()}
 	}
 	defer resp.Body.Close()
+	tr.httpStatus = resp.StatusCode
 
 	result := &HookResult{ExitCode: 0}
 

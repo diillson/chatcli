@@ -105,7 +105,7 @@ func isGraphViewToolName(name string) bool {
 // agent uses. Errors come back as a tool-result string so the model can correct
 // the call instead of the turn failing.
 func (cli *ChatCLI) runChatGraphView(ctx context.Context, argsJSON string) string {
-	out, err := plugins.NewBuiltinGraphViewPlugin().Execute(ctx, []string{argsJSON})
+	out, err := tracedExecute(ctx, plugins.NewBuiltinGraphViewPlugin(), []string{argsJSON}, "chat")
 	if err != nil {
 		return "graphview error: " + err.Error()
 	}

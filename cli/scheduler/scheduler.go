@@ -489,7 +489,9 @@ func (s *Scheduler) Enqueue(ctx context.Context, job *Job) (*Job, error) {
 
 	s.emit(NewEvent(EventJobCreated).WithJob(job).
 		WithMessage(fmt.Sprintf("job %q created (status=%s)", clone.Name, clone.Status)).
-		WithData("action", string(clone.Action.Type)))
+		WithData("action", string(clone.Action.Type)).
+		WithData("schedule", string(clone.Schedule.Kind)).
+		WithData(nextFireDataKey, clone.NextFireAt))
 
 	return clone, nil
 }

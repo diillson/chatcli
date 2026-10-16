@@ -40,7 +40,7 @@ func NewTelegramAdapter(token string, allowedUserIDs []string, logger *zap.Logge
 	return &TelegramAdapter{
 		token:   token,
 		baseURL: "https://api.telegram.org",
-		http:    &http.Client{Timeout: 70 * time.Second}, // > long-poll timeout
+		http:    newPlatformClient(70*time.Second, telegramPlatform), // > long-poll timeout
 		allowed: newSenderAllowlist(allowedUserIDs),
 		logger:  logger,
 	}

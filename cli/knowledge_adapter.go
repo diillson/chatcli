@@ -14,10 +14,12 @@ package cli
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/diillson/chatcli/cli/ctxmgr"
+	"github.com/diillson/chatcli/pkg/pulse"
 )
 
 const (
@@ -77,10 +79,16 @@ func (a *knowledgePluginAdapter) Get(source, kb string, offset int) (string, err
 	if mgr == nil {
 		return "", fmt.Errorf("context manager unavailable in this session")
 	}
+	span := pulse.Begin(pulse.KindBackground, pulseKnowledgeGetNode, "")
 	page, total, next, err := mgr.KnowledgeDocument(a.sessionID(), kb, source, offset)
 	if err != nil {
+		span.EndErr(err)
 		return "", err
 	}
+	span.With("page_chars", strconv.Itoa(len(page))).
+		With("total_chars", strconv.Itoa(total)).
+		With("more", strconv.FormatBool(next > 0)).
+		End(pulse.StatusOK)
 	var b strings.Builder
 	fmt.Fprintf(&b, "📄 %s (chars %d-%d of %d)\n\n", source, offset, offset+len(page), total)
 	b.WriteString(page)
@@ -89,6 +97,10 @@ func (a *knowledgePluginAdapter) Get(source, kb string, offset int) (string, err
 	}
 	return b.String(), nil
 }
+
+// pulseKnowledgeGetNode is the live-dashboard node of a paged knowledge
+// document read (the @knowledge tool's get).
+const pulseKnowledgeGetNode = "knowledge:get"
 
 // TOC lists document paths, optionally narrowed by prefix.
 func (a *knowledgePluginAdapter) TOC(kb, prefix string) (string, error) {

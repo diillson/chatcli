@@ -69,16 +69,14 @@ func NewChatCLIRegistry(entry RegistryEntry, logger *zap.Logger) *ChatCLIRegistr
 		cacheTTL = 15 * time.Minute
 	}
 	return &ChatCLIRegistry{
-		name:    entry.Name,
-		baseURL: entry.URL,
-		enabled: entry.IsActive,
-		token:   entry.Token,
-		httpClient: &http.Client{
-			Timeout: 30 * time.Second,
-		},
-		cacheTTL: cacheTTL,
-		cache:    make(map[string]chatcliCacheEntry),
-		logger:   logger,
+		name:       entry.Name,
+		baseURL:    entry.URL,
+		enabled:    entry.IsActive,
+		token:      entry.Token,
+		httpClient: newRegistryHTTPClient(30 * time.Second),
+		cacheTTL:   cacheTTL,
+		cache:      make(map[string]chatcliCacheEntry),
+		logger:     logger,
 	}
 }
 

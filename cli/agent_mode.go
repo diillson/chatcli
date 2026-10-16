@@ -2545,7 +2545,7 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 					renderer.Colorize(msg, agent.ColorGray))
 			})
 			a.cli.beforeCompaction(ctx, compactTriggerAuto)
-			compacted, compactErr := a.cli.historyCompactor.Compact(ctx, a.cli.history, a.cli.Client, cfg)
+			compacted, compactErr := a.cli.historyCompactor.Compact(a.cli.compactionCtx(ctx), a.cli.history, a.cli.Client, cfg)
 			a.cli.historyCompactor.SetStatusCallback(nil)
 			switch {
 			case compactErr == nil && !historiesEqual(compacted, a.cli.history):
@@ -3534,7 +3534,9 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 							batchHasError = true
 							break
 						} else if action == coder.ActionAsk {
+							approval := a.pulseApprovalBegin(tc.Name)
 							decision := coder.PromptSecurityCheckGuarded(ctx, tc.Name, tc.Args, a.stdinLines)
+							a.pulseApprovalEnd(approval, decision)
 							// The prompt forced cooked mode (stty sane); re-arm
 							// cbreak so live type-ahead survives the rest of
 							// the turn instead of degrading until the boundary.
@@ -3642,6 +3644,9 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 					}
 				}
 				eventTC := a.emitToolStart(toolName, eventTitle, normalizedArgsStr, toolArgs)
+				// Work the tool starts (an LLM request, a connection, an
+				// MCP call) hangs from the tool's node on the dashboard.
+				toolCtx := a.pulseToolContext(ctx, eventTC.ID)
 
 				// --- Preparação da Execução ---
 				// MCP tools handle their own arg parsing (JSON), so check them BEFORE parseErr
@@ -3701,7 +3706,7 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 									zap.Bool("coder_mode", a.isCoderMode))
 							}
 
-							result, mcpErr := a.cli.mcpManager.ExecuteTool(ctx, mcpToolName, mcpArgs)
+							result, mcpErr := a.cli.mcpManager.ExecuteTool(toolCtx, mcpToolName, mcpArgs)
 							if mcpErr != nil {
 								execErr = mcpErr
 								toolOutput = fmt.Sprintf("MCP tool error: %v", mcpErr)
@@ -3964,7 +3969,7 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 									if !isCompact {
 										a.cli.animation.ShowThinkingAnimation(spinnerMessage(boxLabel))
 									}
-									toolOutput, execErr = plugin.ExecuteWithStream(ctx, toolArgs, streamCallback)
+									toolOutput, execErr = plugin.ExecuteWithStream(toolCtx, toolArgs, streamCallback)
 									a.cli.animation.StopThinkingAnimation()
 								}
 							}

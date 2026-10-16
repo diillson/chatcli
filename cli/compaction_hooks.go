@@ -14,6 +14,7 @@ package cli
 import (
 	"context"
 	"os"
+	"strconv"
 	"time"
 
 	"github.com/diillson/chatcli/cli/compress"
@@ -36,7 +37,7 @@ func (cli *ChatCLI) beforeCompaction(ctx context.Context, trigger string) {
 	if cli == nil {
 		return
 	}
-	cli.pulseCompactionBegin(trigger)
+	cli.pulseCompactionBegin(ctx, trigger)
 	cli.rememberPreCompaction()
 	if cli.hookManager == nil {
 		return
@@ -173,24 +174,55 @@ func archiveDroppedMessages(layer *compress.Layer, before, after []models.Messag
 // a hang; on the dashboard it is a span that says what is going on.
 const pulseCompactionNode = "compaction"
 
-// pulseCompactionBegin opens the span. beforeCompaction and the post-compact
-// outcome bracket every compaction on every surface.
-func (cli *ChatCLI) pulseCompactionBegin(trigger string) {
+// pulseCompactionBegin opens the span, under the turn or run in ctx.
+// beforeCompaction and the post-compact outcome bracket every compaction on
+// every surface.
+func (cli *ChatCLI) pulseCompactionBegin(ctx context.Context, trigger string) {
 	if !pulse.Enabled() {
 		return
 	}
-	span := pulse.Begin(pulse.KindBackground, pulseCompactionNode, "").With("trigger", trigger)
+	_, runs, _ := cli.historyCompactor.shapeSince(0)
+	cli.pulseCompactionRuns.Store(runs)
+	span := pulse.Begin(pulse.KindBackground, pulseCompactionNode, pulse.ParentFrom(ctx)).With("trigger", trigger)
 	if prev := cli.pulseCompaction.Swap(span); prev != nil {
 		prev.End(pulse.StatusCancelled) // a compaction that never reported its outcome
 	}
 }
 
-// pulseCompactionEnd closes the span with the outcome reported to the hooks.
+// compactionCtx returns ctx with the running compaction's node as the
+// innermost parent, so the summarizer's LLM request hangs from it.
+func (cli *ChatCLI) compactionCtx(ctx context.Context) context.Context {
+	if cli == nil {
+		return ctx
+	}
+	return cli.pulseCompaction.Load().Context(ctx)
+}
+
+// pulseCompactionEnd closes the span with the outcome reported to the hooks
+// and, when the history compactor ran inside it, the history's size before
+// and after plus what the summarizer consumed.
 func (cli *ChatCLI) pulseCompactionEnd(outcome string) {
 	if cli == nil {
 		return
 	}
-	if span := cli.pulseCompaction.Swap(nil); span != nil {
-		span.With("state", outcome).End(pulse.StatusOK)
+	span := cli.pulseCompaction.Swap(nil)
+	if span == nil {
+		return
 	}
+	if shape, _, ok := cli.historyCompactor.shapeSince(cli.pulseCompactionRuns.Load()); ok {
+		span.With("level", strconv.Itoa(shape.level)).
+			With("msgs_before", strconv.Itoa(shape.beforeMsgs)).
+			With("msgs_after", strconv.Itoa(shape.afterMsgs)).
+			With("chars_before", strconv.Itoa(shape.beforeChars)).
+			With("chars_after", strconv.Itoa(shape.afterChars))
+		rep := cli.historyCompactor.LastReport()
+		span.With("summarizer_skipped", strconv.FormatBool(rep.Level2SkippedByBO))
+		if rep.SummaryUsage != nil {
+			span.With("provider", rep.SummaryProvider).
+				With("model", rep.SummaryModel).
+				With("summary_tokens_in", strconv.Itoa(rep.SummaryUsage.PromptTokens)).
+				With("summary_tokens_out", strconv.Itoa(rep.SummaryUsage.CompletionTokens))
+		}
+	}
+	span.With("state", outcome).End(pulse.StatusOK)
 }

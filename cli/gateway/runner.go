@@ -12,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/diillson/chatcli/pkg/pulse"
 	"go.uber.org/zap"
 )
 
@@ -217,6 +218,13 @@ func (r *Runner) handle(ctx context.Context, msg InboundMessage) {
 	}
 
 	start := time.Now()
+	// The exchange runs under its own dashboard node: the agent run, the
+	// replies and the platform calls behind them all hang from it. It fails
+	// when the agent fails or the final answer is not delivered; reply_kind
+	// is what the final answer carried ("none" when nothing was sent).
+	ctx, span := pulseBeginInbound(ctx, &msg)
+	replyKind, status := "none", pulse.StatusOK
+	defer func() { span.With("reply_kind", replyKind).End(status) }()
 	r.logger.Info("gateway: message received",
 		zap.String("platform", msg.Platform),
 		zap.String("session", msg.SessionKey()),
@@ -235,8 +243,12 @@ func (r *Runner) handle(ctx context.Context, msg InboundMessage) {
 		// or replies to voice messages in the default in-kind mode. Progress
 		// chunks stay text-only.
 		if kind == OutboundFinal && r.wantsVoice(&msg) {
-			if audio := r.voice(ctx, clipped); audio != nil {
+			vctx, vspan := pulseBeginVoice(ctx, msg.Platform)
+			if audio := r.voice(vctx, clipped); audio != nil {
 				out.Audio = audio
+				vspan.End(pulse.StatusOK)
+			} else {
+				vspan.End(pulse.StatusError)
 			}
 		}
 		// Attach an image the agent produced during this run (final only).
@@ -245,7 +257,16 @@ func (r *Runner) handle(ctx context.Context, msg InboundMessage) {
 				out.Image = img
 			}
 		}
-		if err := adapter.Send(ctx, out); err != nil {
+		sctx, sspan := pulseBeginSend(ctx, msg.Platform, kind)
+		if kind == OutboundFinal {
+			replyKind = pulseReplyKind(&out)
+		}
+		err := adapter.Send(sctx, out)
+		sspan.EndErr(err)
+		if err != nil && kind == OutboundFinal {
+			status = pulse.StatusError
+		}
+		if err != nil {
 			r.logger.Warn("gateway: send failed",
 				zap.String("platform", msg.Platform),
 				zap.String("session", msg.SessionKey()),
@@ -271,6 +292,7 @@ func (r *Runner) handle(ctx context.Context, msg InboundMessage) {
 	stopThinking()
 	sink.flush() // deliver any progress buffered since the last flush
 	if err != nil {
+		status = pulse.StatusOf(err)
 		r.logger.Warn("gateway: agent run failed",
 			zap.String("session", msg.SessionKey()),
 			zap.Duration("dur", time.Since(start)),

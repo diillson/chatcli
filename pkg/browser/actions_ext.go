@@ -90,6 +90,14 @@ var modifierBits = map[string]int{
 // "ArrowDown", a single printable character, or a chord like "Control+a"
 // / "Meta+Enter".
 func (s *Session) Press(ctx context.Context, chord string) error {
+	span := s.beginAction(ctx, "press")
+	err := s.doPress(ctx, chord)
+	span.EndErr(err)
+	return err
+}
+
+// doPress is Press under its dashboard node.
+func (s *Session) doPress(ctx context.Context, chord string) error {
 	parts := strings.Split(strings.TrimSpace(chord), "+")
 	if len(parts) == 0 || parts[len(parts)-1] == "" {
 		return fmt.Errorf("press: empty key")
@@ -159,6 +167,14 @@ func (s *Session) elementCenter(ctx context.Context, target string) (x, y float6
 
 // Hover moves the mouse over the element so hover menus and tooltips open.
 func (s *Session) Hover(ctx context.Context, target string) error {
+	span := s.beginAction(ctx, "hover")
+	err := s.doHover(ctx, target)
+	span.EndErr(err)
+	return err
+}
+
+// doHover is Hover under its dashboard node.
+func (s *Session) doHover(ctx context.Context, target string) error {
 	x, y, err := s.elementCenter(ctx, target)
 	if err != nil {
 		return err
@@ -172,6 +188,14 @@ func (s *Session) Hover(ctx context.Context, target string) error {
 // Select chooses an option of a <select> by value or visible text
 // (case-insensitive) and fires the input/change events frameworks listen to.
 func (s *Session) Select(ctx context.Context, target, option string) error {
+	span := s.beginAction(ctx, "select")
+	err := s.doSelect(ctx, target, option)
+	span.EndErr(err)
+	return err
+}
+
+// doSelect is Select under its dashboard node.
+func (s *Session) doSelect(ctx context.Context, target, option string) error {
 	selJSON, _ := json.Marshal(resolveSelector(target))
 	optJSON, _ := json.Marshal(option)
 	js := fmt.Sprintf(`(() => {
@@ -208,6 +232,14 @@ func (s *Session) Select(ctx context.Context, target, option string) error {
 // Upload sets the files of an <input type=file> — the only way to feed a
 // file to a page, since the OS picker never opens under automation.
 func (s *Session) Upload(ctx context.Context, target string, paths []string) error {
+	span := s.beginAction(ctx, "upload")
+	err := s.doUpload(ctx, target, paths)
+	span.EndErr(err)
+	return err
+}
+
+// doUpload is Upload under its dashboard node.
+func (s *Session) doUpload(ctx context.Context, target string, paths []string) error {
 	abs := make([]string, 0, len(paths))
 	for _, p := range paths {
 		a, err := filepath.Abs(p)
@@ -264,6 +296,14 @@ func (s *Session) nodeIDFor(ctx context.Context, target string) (int, error) {
 // HTML returns the outerHTML of the element (or the whole document when
 // target is empty), capped at maxBytes (0 = 20000).
 func (s *Session) HTML(ctx context.Context, target string, maxBytes int) (string, error) {
+	span := s.beginAction(ctx, "html")
+	v, err := s.doHTML(ctx, target, maxBytes)
+	span.EndErr(err)
+	return v, err
+}
+
+// doHTML is HTML under its dashboard node.
+func (s *Session) doHTML(ctx context.Context, target string, maxBytes int) (string, error) {
 	if maxBytes <= 0 {
 		maxBytes = 20_000
 	}
@@ -290,6 +330,14 @@ func (s *Session) HTML(ctx context.Context, target string, maxBytes int) (string
 // PDF renders the page to a PDF file. Chrome only implements printToPDF
 // headless; a visible session gets a clear hint.
 func (s *Session) PDF(ctx context.Context, path string) error {
+	span := s.beginAction(ctx, "pdf")
+	err := s.doPDF(ctx, path)
+	span.EndErr(err)
+	return err
+}
+
+// doPDF is PDF under its dashboard node.
+func (s *Session) doPDF(ctx context.Context, path string) error {
 	res, err := s.call(ctx, "Page.printToPDF", map[string]interface{}{
 		"printBackground": true, "preferCSSPageSize": true,
 	})
@@ -325,6 +373,14 @@ func writeArtifactFile(path string, data []byte) error {
 // Resize emulates a viewport of width×height CSS pixels; mobile also turns
 // on touch/mobile UA hints so responsive layouts switch.
 func (s *Session) Resize(ctx context.Context, width, height int, mobile bool) error {
+	span := s.beginAction(ctx, "resize")
+	err := s.doResize(ctx, width, height, mobile)
+	span.EndErr(err)
+	return err
+}
+
+// doResize is Resize under its dashboard node.
+func (s *Session) doResize(ctx context.Context, width, height int, mobile bool) error {
 	if width <= 0 || height <= 0 {
 		return fmt.Errorf("resize: width and height must be positive")
 	}
@@ -345,6 +401,14 @@ func (s *Session) Resize(ctx context.Context, width, height int, mobile bool) er
 // ScreenshotFull captures the whole scrollable page (not just the viewport)
 // as PNG into path.
 func (s *Session) ScreenshotFull(ctx context.Context, path string) error {
+	span := s.beginAction(ctx, "screenshot-full")
+	err := s.doScreenshotFull(ctx, path)
+	span.EndErr(err)
+	return err
+}
+
+// doScreenshotFull is ScreenshotFull under its dashboard node.
+func (s *Session) doScreenshotFull(ctx context.Context, path string) error {
 	res, err := s.call(ctx, "Page.getLayoutMetrics", nil)
 	if err != nil {
 		return err
@@ -370,6 +434,14 @@ func (s *Session) ScreenshotFull(ctx context.Context, path string) error {
 // Tabs lists the page targets in the browser, marking the one the session
 // drives. Popups (OAuth windows, target=_blank links) show up here.
 func (s *Session) Tabs(ctx context.Context) ([]TabInfo, error) {
+	span := s.beginAction(ctx, "tabs")
+	v, err := s.doTabs(ctx)
+	span.EndErr(err)
+	return v, err
+}
+
+// doTabs is Tabs under its dashboard node.
+func (s *Session) doTabs(ctx context.Context) ([]TabInfo, error) {
 	res, err := s.conn.call(ctx, "", "Target.getTargets", nil)
 	if err != nil {
 		return nil, err
@@ -398,6 +470,14 @@ func (s *Session) Tabs(ctx context.Context) ([]TabInfo, error) {
 // SwitchTab attaches the session to another page target, addressed by its
 // 1-based index in Tabs or by target id, and brings it to the front.
 func (s *Session) SwitchTab(ctx context.Context, which string) (TabInfo, error) {
+	span := s.beginAction(ctx, "switch-tab")
+	v, err := s.doSwitchTab(ctx, which)
+	span.EndErr(err)
+	return v, err
+}
+
+// doSwitchTab is SwitchTab under its dashboard node.
+func (s *Session) doSwitchTab(ctx context.Context, which string) (TabInfo, error) {
 	tabs, err := s.Tabs(ctx)
 	if err != nil {
 		return TabInfo{}, err
@@ -460,6 +540,14 @@ func (s *Session) SwitchTab(ctx context.Context, which string) (TabInfo, error) 
 // Cookies lists the browser's cookies (names, domains, expiry — never
 // values), optionally filtered to those whose domain contains domainFilter.
 func (s *Session) Cookies(ctx context.Context, domainFilter string) ([]CookieInfo, error) {
+	span := s.beginAction(ctx, "cookies")
+	v, err := s.doCookies(ctx, domainFilter)
+	span.EndErr(err)
+	return v, err
+}
+
+// doCookies is Cookies under its dashboard node.
+func (s *Session) doCookies(ctx context.Context, domainFilter string) ([]CookieInfo, error) {
 	res, err := s.conn.call(ctx, "", "Storage.getCookies", nil)
 	if err != nil {
 		return nil, err
@@ -494,6 +582,14 @@ func (s *Session) Cookies(ctx context.Context, domainFilter string) ([]CookieInf
 
 // ClearCookies wipes every cookie in the browser — a logout of everything.
 func (s *Session) ClearCookies(ctx context.Context) error {
+	span := s.beginAction(ctx, "clear-cookies")
+	err := s.doClearCookies(ctx)
+	span.EndErr(err)
+	return err
+}
+
+// doClearCookies is ClearCookies under its dashboard node.
+func (s *Session) doClearCookies(ctx context.Context) error {
 	_, err := s.conn.call(ctx, "", "Storage.clearCookies", nil)
 	return err
 }

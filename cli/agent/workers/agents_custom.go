@@ -390,7 +390,7 @@ func makeScriptRunner(scriptPath string) SkillFunc {
 		})
 
 		execEng := engine.NewEngine(outWriter, errWriter, "")
-		err := execEng.Execute(ctx, "exec", []string{"--cmd", cmd})
+		err := directExecute(ctx, execEng, "exec", []string{"--cmd", cmd})
 		outWriter.Flush()
 		errWriter.Flush()
 		return outBuf.String(), err

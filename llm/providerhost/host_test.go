@@ -134,6 +134,17 @@ func TestFullModePluginEndToEnd(t *testing.T) {
 		t.Fatalf("status = %+v, %v", st, err)
 	}
 
+	// A plugin's requests go through the same audit chokepoint as every
+	// built-in adapter, which feeds the request log and the live dashboard.
+	var auditMu sync.Mutex
+	var audit []client.RequestAuditEvent
+	client.RegisterRequestAuditorKeyed("providerhost-test", func(ev client.RequestAuditEvent) {
+		auditMu.Lock()
+		audit = append(audit, ev)
+		auditMu.Unlock()
+	})
+	t.Cleanup(func() { client.RegisterRequestAuditorKeyed("providerhost-test", nil) })
+
 	c, err := p.NewClient("echo-1")
 	if err != nil {
 		t.Fatal(err)
@@ -189,6 +200,26 @@ func TestFullModePluginEndToEnd(t *testing.T) {
 
 	if err := p.Logout(ctx); err != nil || p.Available() {
 		t.Fatalf("logout err=%v available=%v", err, p.Available())
+	}
+
+	auditMu.Lock()
+	defer auditMu.Unlock()
+	var sends, succeeded, failed int
+	for _, ev := range audit {
+		if ev.Provider != "ECHO" {
+			continue
+		}
+		switch {
+		case ev.Phase == "send":
+			sends++
+		case ev.Status == "success" && ev.Fields["output_tokens"] != "" && ev.Fields["output_tokens"] != "0":
+			succeeded++
+		case ev.Status == "error" && ev.Model == "no-such-model":
+			failed++
+		}
+	}
+	if sends != 3 || succeeded != 2 || failed != 1 {
+		t.Fatalf("audit: %d sends, %d successes with usage, %d failures; want 3, 2, 1: %+v", sends, succeeded, failed, audit)
 	}
 }
 

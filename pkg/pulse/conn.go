@@ -129,6 +129,13 @@ func (m *meterTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 		conn.Fail(err)
 		return resp, err
 	}
+	if resp.StatusCode == http.StatusSwitchingProtocols {
+		// An upgraded connection's body is the read-write stream the caller
+		// takes over (a WebSocket): wrapping it would hide its Write. Report
+		// the handshake and hand the body back untouched.
+		conn.Finish(resp.StatusCode, 0)
+		return resp, nil
+	}
 	resp.Body = conn.Stream(resp.StatusCode, resp.Body)
 	return resp, nil
 }

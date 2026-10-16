@@ -270,7 +270,7 @@ func (cli *ChatCLI) RunOnce(ctx context.Context, input string, disableAnimation 
 			fmt.Fprintf(os.Stderr, "  %s\n", msg)
 		})
 		cli.beforeCompaction(ctx, compactTriggerAuto)
-		if compacted, compactErr := cli.historyCompactor.Compact(ctx, cli.history, activeClient, cfg); compactErr == nil && !historiesEqual(compacted, cli.history) {
+		if compacted, compactErr := cli.historyCompactor.Compact(cli.compactionCtx(ctx), cli.history, activeClient, cfg); compactErr == nil && !historiesEqual(compacted, cli.history) {
 			cli.history = compacted
 			cli.noteCompactionApplied(ctx, compactTriggerAuto)
 		} else {
@@ -284,7 +284,10 @@ func (cli *ChatCLI) RunOnce(ctx context.Context, input string, disableAnimation 
 	}
 
 	effectiveMaxTokens := cli.getMaxTokensForCurrentLLM()
-	turn := pulse.Begin(pulse.KindTurn, pulseTurnOneShot, "")
+	ctx, turn := pulse.BeginCtx(ctx, pulse.KindTurn, pulseTurnOneShot, "")
+	if turn != nil {
+		turn.With("provider", strings.ToLower(cli.Provider)).With("model", cli.Model)
+	}
 	defer turn.End(pulse.StatusCancelled)
 	aiResponse, err := activeClient.SendPrompt(ctx, userInput+additionalContext, cli.history, effectiveMaxTokens)
 	// Auto-retry on OAuth token expiration (401)

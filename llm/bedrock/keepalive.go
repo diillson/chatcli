@@ -32,6 +32,14 @@ func (c *BedrockClient) KeepPromptCacheWarm(ctx context.Context) (*models.UsageI
 	if err != nil {
 		return nil, err
 	}
+	return client.LogKeepAliveRequest(ctx, c.logger, "BEDROCK", c.model, len(body), func() (*models.UsageInfo, error) {
+		return c.sendKeepAlive(ctx, body)
+	})
+}
+
+// sendKeepAlive posts one keep-alive body to Mantle and returns the usage
+// it reported.
+func (c *BedrockClient) sendKeepAlive(ctx context.Context, body []byte) (*models.UsageInfo, error) {
 	c.resetUsage()
 	if _, err := c.doMantleRequest(ctx, mantleMessagesURL(c.region), body); err != nil {
 		return nil, err

@@ -160,7 +160,7 @@ func checkDepsScript(ctx context.Context, input map[string]string, _ *engine.Eng
 		})
 
 		eng := engine.NewEngine(outWriter, errWriter, "")
-		err := eng.Execute(ctx, "exec", []string{"--cmd", c.cmd})
+		err := directExecute(ctx, eng, "exec", []string{"--cmd", c.cmd})
 		outWriter.Flush()
 		errWriter.Flush()
 

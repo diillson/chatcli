@@ -8,8 +8,10 @@ package cli
 import (
 	"errors"
 	"fmt"
+	"strconv"
 
 	"github.com/diillson/chatcli/i18n"
+	"github.com/diillson/chatcli/pkg/pulse"
 )
 
 // maybeAnnounceBudget prints the one-shot budget notice when the session
@@ -37,6 +39,11 @@ func (cli *ChatCLI) maybeAnnounceBudget() {
 // budget is exhausted. Nil when turns may proceed.
 func (cli *ChatCLI) budgetBlockedErr() error {
 	if cli.costTracker != nil && cli.costTracker.BudgetBlocked() {
+		// Every refused call is a point on the dashboard: a run that keeps
+		// hitting the hard stop shows up instead of silently doing nothing.
+		pulse.Point(pulse.KindPattern, "budget", "", pulse.StatusBlocked, map[string]string{
+			"spent_usd": strconv.FormatFloat(cli.costTracker.TotalCost(), 'f', 4, 64),
+		})
 		return errors.New(i18n.T("cost.budget.blocked"))
 	}
 	return nil

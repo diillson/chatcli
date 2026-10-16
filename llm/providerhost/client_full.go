@@ -10,11 +10,13 @@ import (
 	"context"
 	"errors"
 	"strings"
+	"time"
 
 	"github.com/diillson/chatcli/llm/catalog"
 	"github.com/diillson/chatcli/llm/client"
 	"github.com/diillson/chatcli/models"
 	"github.com/diillson/chatcli/pkg/providerproto"
+	"go.uber.org/zap"
 )
 
 // ErrNotSupported reports an optional capability the plugin did not declare.
@@ -91,13 +93,46 @@ func (c *fullClient) SendPromptWithTools(ctx context.Context, prompt string, his
 }
 
 func (c *fullClient) send(ctx context.Context, p providerproto.ChatParams) (*models.LLMResponse, error) {
+	start := c.logStart(ctx, p)
 	var res providerproto.ChatResult
 	if err := c.plugin.host.Call(ctx, providerproto.MethodChatSend, p, &res); err != nil {
+		c.logFinish(ctx, start, nil, err)
 		return nil, mapError(c.plugin.Name(), err)
 	}
 	resp := fromProtoResult(res)
 	c.record(resp)
+	c.logFinish(ctx, start, resp, nil)
 	return resp, nil
+}
+
+// logStart and logFinish put a plugin's requests through the same
+// chokepoint every built-in adapter uses, so they reach the request log,
+// the audit trail and the live dashboard like any other model call.
+func (c *fullClient) logStart(ctx context.Context, p providerproto.ChatParams) time.Time {
+	client.LogRequestStart(c.plugin.logger, c.plugin.Name(), c.model, client.CallerField(ctx),
+		zap.Int("history_len", len(p.Messages)),
+		zap.Int("tool_count", len(p.Tools)),
+		zap.Int("max_tokens", p.MaxTokens),
+		zap.Bool("stream", p.Stream),
+	)
+	return time.Now()
+}
+
+func (c *fullClient) logFinish(ctx context.Context, start time.Time, resp *models.LLMResponse, err error) {
+	if err != nil {
+		client.LogRequestFinish(c.plugin.logger, c.plugin.Name(), c.model, "error", time.Since(start), client.CallerField(ctx))
+		return
+	}
+	fields := []zap.Field{client.CallerField(ctx), zap.String("stop_reason", resp.StopReason)}
+	if u := resp.Usage; u != nil {
+		fields = append(fields,
+			zap.Int("input_tokens", u.PromptTokens),
+			zap.Int("output_tokens", u.CompletionTokens),
+			zap.Int("cache_read_tokens", u.CacheReadInputTokens),
+			zap.Int("cache_creation_tokens", u.CacheCreationInputTokens),
+		)
+	}
+	client.LogRequestFinish(c.plugin.logger, c.plugin.Name(), c.model, "success", time.Since(start), fields...)
 }
 
 func (c *fullClient) record(resp *models.LLMResponse) {
@@ -118,10 +153,12 @@ func (c *fullClient) SendPromptStream(ctx context.Context, prompt string, histor
 		return nil, ErrNotSupported
 	}
 	out := make(chan client.StreamChunk, 64)
+	params := c.params(prompt, history, nil, maxTokens, true)
+	start := c.logStart(ctx, params)
 	go func() {
 		defer close(out)
 		var res providerproto.ChatResult
-		err := c.plugin.host.CallStreaming(ctx, providerproto.MethodChatSend, c.params(prompt, history, nil, maxTokens, true), &res,
+		err := c.plugin.host.CallStreaming(ctx, providerproto.MethodChatSend, params, &res,
 			func(d providerproto.ChatDelta) {
 				if d.Text == "" {
 					return
@@ -132,11 +169,13 @@ func (c *fullClient) SendPromptStream(ctx context.Context, prompt string, histor
 				}
 			})
 		if err != nil {
+			c.logFinish(ctx, start, nil, err)
 			out <- client.StreamChunk{Done: true, Error: mapError(c.plugin.Name(), err)}
 			return
 		}
 		resp := fromProtoResult(res)
 		c.record(resp)
+		c.logFinish(ctx, start, resp, nil)
 		out <- client.StreamChunk{Done: true, Usage: resp.Usage, StopReason: resp.StopReason}
 	}()
 	return out, nil

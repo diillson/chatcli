@@ -103,14 +103,23 @@ func ClampLayers(n int) int {
 // aggregator failed; a member failing a review round keeps its previous
 // answer.
 func RunLayers(ctx context.Context, prompt string, history []models.Message, refs []Ref, aggregator Ref, turn Turn, cfg Config) (Outcome, error) {
-	out, err := Propose(ctx, prompt, history, refs, turn, cfg)
+	return runPanel(ctx, prompt, history, refs, aggregator, turn, cfg)
+}
+
+func runPanel(ctx context.Context, prompt string, history []models.Message, refs []Ref, aggregator Ref, turn Turn, cfg Config) (out Outcome, err error) {
+	ctx, panel := beginPanel(ctx, prompt)
+	defer func() { panel.End(err) }()
+	out, err = runProposals(ctx, panel, prompt, history, refs, turn, cfg)
 	if err != nil {
 		return out, err
 	}
 	if cfg.Hooks.OnSynthesis != nil {
 		cfg.Hooks.OnSynthesis()
 	}
-	final, err := turn(ctx, aggregator, BuildAggregationPrompt(prompt, out.Answers), historyForAggregation(history, prompt))
+	panel.SetAction("synthesizing")
+	aggCtx, aggRun := runs.Default().Begin(ctx, runs.Info{Kind: runs.KindMoA, Agent: aggregator.String() + " (aggregator)", Task: prompt})
+	final, err := turn(aggCtx, aggregator, BuildAggregationPrompt(prompt, out.Answers), historyForAggregation(history, prompt))
+	aggRun.End(err)
 	if err != nil {
 		return out, fmt.Errorf("aggregation failed: %w", err)
 	}
@@ -121,6 +130,20 @@ func RunLayers(ctx context.Context, prompt string, history []models.Message, ref
 // Propose runs the proposal layers without aggregating, for hosts that
 // synthesize on their own terms.
 func Propose(ctx context.Context, prompt string, history []models.Message, refs []Ref, turn Turn, cfg Config) (Outcome, error) {
+	ctx, panel := beginPanel(ctx, prompt)
+	out, err := runProposals(ctx, panel, prompt, history, refs, turn, cfg)
+	panel.End(err)
+	return out, err
+}
+
+// beginPanel registers the panel itself as a run: its members and its
+// aggregator are runs under it, so the live dashboard and /agents show
+// one MoA with its rounds instead of loose model runs.
+func beginPanel(ctx context.Context, prompt string) (context.Context, *runs.Run) {
+	return runs.Default().Begin(ctx, runs.Info{Kind: runs.KindMoA, Agent: "moa", Task: prompt})
+}
+
+func runProposals(ctx context.Context, panel *runs.Run, prompt string, history []models.Message, refs []Ref, turn Turn, cfg Config) (Outcome, error) {
 	if len(refs) == 0 {
 		return Outcome{}, fmt.Errorf("no reference models configured")
 	}
@@ -142,6 +165,7 @@ func Propose(ctx context.Context, prompt string, history []models.Message, refs 
 		if layer > 1 && len(active) < 2 {
 			break // a review round needs peers to read
 		}
+		panel.SetTurn(layer, layers)
 		if cfg.Hooks.OnLayer != nil {
 			hook(func() { cfg.Hooks.OnLayer(layer, layers, len(active)) })
 		}
@@ -162,13 +186,19 @@ func Propose(ctx context.Context, prompt string, history []models.Message, refs 
 				defer wg.Done()
 				// Each panel member registers as a run so the /agents view
 				// shows the MoA fan-out alongside worker dispatches.
+				// The run shows its round as turn N/L and, in a review
+				// round, whether the member kept or revised its position.
 				refCtx, liveRun := runs.Default().Begin(ctx, runs.Info{Kind: runs.KindMoA, Agent: refs[i].String(), Task: prompt})
+				liveRun.SetTurn(layer, layers)
 				text, err := turn(refCtx, refs[i], memberPrompt, memberHistory)
-				liveRun.End(err)
 				stance := StanceNone
 				if layer > 1 {
 					stance, text = TakeStance(text)
 				}
+				if stance != StanceNone {
+					liveRun.SetAction(string(stance))
+				}
+				liveRun.End(err)
 				results[i] = RefResult{Ref: refs[i], Output: text, Err: err}
 				stances[i] = stance
 				if cfg.Hooks.OnDone != nil {

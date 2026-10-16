@@ -88,7 +88,7 @@ func NewDiscordAdapter(token string, logger *zap.Logger) *DiscordAdapter {
 		token:      token,
 		gatewayURL: "wss://gateway.discord.gg/?v=10&encoding=json",
 		restBase:   "https://discord.com/api/v10",
-		http:       &http.Client{Timeout: 15 * time.Second},
+		http:       newPlatformClient(15*time.Second, discordPlatform),
 		logger:     logger,
 		dialer:     websocket.DefaultDialer,
 	}

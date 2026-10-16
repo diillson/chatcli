@@ -52,6 +52,7 @@ import (
 
 	"github.com/diillson/chatcli/auth"
 	"github.com/diillson/chatcli/i18n"
+	"github.com/diillson/chatcli/pkg/pulse"
 	"github.com/diillson/chatcli/utils"
 	"go.uber.org/zap"
 )
@@ -148,7 +149,7 @@ func newHTTPTransport(ctx context.Context, cfg ServerConfig, logger *zap.Logger,
 		// init) so a slow tools/call doesn't get killed by a short
 		// initialize budget, and an initialize that legitimately
 		// takes longer than callTimeout still completes.
-		httpClient:  &http.Client{Timeout: maxDuration(callTimeout, initTimeout), CheckRedirect: sameOriginRedirect},
+		httpClient:  &http.Client{Timeout: maxDuration(callTimeout, initTimeout), Transport: pulse.MeterTransport(nil), CheckRedirect: sameOriginRedirect},
 		logger:      logger,
 		ctx:         tctx,
 		cancel:      cancel,

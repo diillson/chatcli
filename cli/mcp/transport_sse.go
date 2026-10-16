@@ -41,6 +41,7 @@ import (
 
 	"github.com/diillson/chatcli/auth"
 	"github.com/diillson/chatcli/i18n"
+	"github.com/diillson/chatcli/pkg/pulse"
 	"go.uber.org/zap"
 )
 
@@ -99,7 +100,7 @@ func newSSETransport(ctx context.Context, cfg ServerConfig, logger *zap.Logger, 
 		// embedded http.Client) so a long-held GET stays open as
 		// long as the supervisor wants it to. Generous timeout
 		// here is just a safety net for the POST side.
-		httpClient:  &http.Client{Timeout: maxDuration(callTimeout, initTimeout) * 2, CheckRedirect: sameOriginRedirect},
+		httpClient:  &http.Client{Timeout: maxDuration(callTimeout, initTimeout) * 2, Transport: pulse.MeterTransport(nil), CheckRedirect: sameOriginRedirect},
 		pending:     make(map[int64]chan *jsonRPCResponse),
 		logger:      logger,
 		ctx:         tctx,

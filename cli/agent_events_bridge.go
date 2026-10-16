@@ -383,6 +383,7 @@ func (a *AgentMode) unattendedAskBlocked(toolName, rawArgs string, pm *coder.Pol
 	if pm != nil {
 		pattern = coder.GetSuggestedPattern(toolName, rawArgs)
 	}
+	approval := a.pulseApprovalBegin(toolName).With("via", "client")
 	decision, asked, reqErr := a.requestActionDecision(agentevents.PermissionRequest{
 		Tool: agentevents.ToolCall{
 			Name:     toolName,
@@ -393,6 +394,7 @@ func (a *AgentMode) unattendedAskBlocked(toolName, rawArgs string, pm *coder.Pol
 		Reason:      i18n.T("agent.permission.policy_ask", toolName),
 		OfferAlways: pattern != "",
 	})
+	pulseClientApprovalEnd(approval, decision, asked, reqErr)
 	if !asked {
 		if a.logger != nil {
 			a.logger.Info("coder policy: 'ask' denied (unattended, no permission dialog, no automode opt-in)",

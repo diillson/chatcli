@@ -38,6 +38,13 @@ func (c *OpenAIClient) KeepPromptCacheWarm(ctx context.Context) (*models.UsageIn
 	if err != nil {
 		return nil, err
 	}
+	return client.LogKeepAliveRequest(ctx, c.logger, "OPENAI", c.model, len(body), func() (*models.UsageInfo, error) {
+		return c.sendKeepAlive(ctx, body)
+	})
+}
+
+// sendKeepAlive posts one keep-alive body and returns the usage it reported.
+func (c *OpenAIClient) sendKeepAlive(ctx context.Context, body []byte) (*models.UsageInfo, error) {
 	resp, err := auth.DoWithRefresh(ctx, c.provider, func(token string) (*http.Response, error) {
 		return c.sendRequest(ctx, body, token)
 	})

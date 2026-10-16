@@ -63,8 +63,32 @@ func (cli *ChatCLI) initPulse(ctx context.Context, surface string) {
 	if cli == nil || cli.pulse != nil {
 		return
 	}
+	logger := cli.logger
+	ctl, started := startProcessPulse(ctx, surface, logger)
+	if started {
+		pulse.Default().RegisterSnapshotter("00-session", cli.pulseSessionSnapshot)
+	}
+	cli.pulse, cli.pulseOwner = ctl, started
+}
+
+// The process records through one controller, whichever entry point
+// started it: a second ChatCLI in the same process (a server hosting the
+// gateway and a pipeline backend) shares it, so no event is spooled twice.
+var (
+	pulseProcMu  sync.Mutex
+	pulseProcCtl *pulse.Controller
+)
+
+// startProcessPulse installs the taps every surface needs — agent runs, LLM
+// requests and the caller behind each request — and starts the recording
+// controller once per process. started is false when one was running.
+func startProcessPulse(ctx context.Context, surface string, logger *zap.Logger) (ctl *pulse.Controller, started bool) {
+	pulseProcMu.Lock()
+	defer pulseProcMu.Unlock()
+	if pulseProcCtl != nil {
+		return pulseProcCtl, false
+	}
 	bus := pulse.Default()
-	bus.RegisterSnapshotter("00-session", cli.pulseSessionSnapshot)
 	bus.RegisterSnapshotter("10-runs", pulseRunsSnapshot)
 	runs.Default().OnEventKeyed(pulseObserverKey, func(info runs.Info) { bus.Emit(pulseRunEvent(info)) })
 	llmTap := newPulseLLMTap(bus)
@@ -73,12 +97,14 @@ func (cli *ChatCLI) initPulse(ctx context.Context, surface string) {
 	// the agent that made it instead of from the session. It also lands in
 	// the request log and the audit trail, where it was just as missing.
 	client.SetCallerResolver(func(ctx context.Context) string { return runs.FromContext(ctx).ID() })
+	// On the dashboard a request hangs from the innermost node instead (a
+	// chat turn, a MoA panel, a tool call), never loose under the session.
+	client.SetParentResolver(pulseCallerFrom)
 
 	wd, _ := os.Getwd()
-	logger := cli.logger
 	// The controller outlives any request: bound by process shutdown, not
 	// by the constructor's context.
-	cli.pulse = pulse.Start(context.WithoutCancel(ctx), pulse.Options{
+	pulseProcCtl = pulse.Start(context.WithoutCancel(ctx), pulse.Options{
 		Bus:      bus,
 		ForcedFn: pulseForced,
 		Meta: pulse.Meta{
@@ -93,14 +119,33 @@ func (cli *ChatCLI) initPulse(ctx context.Context, surface string) {
 			}
 		},
 	})
+	return pulseProcCtl, true
+}
+
+// stopProcessPulse closes the process controller started by
+// startProcessPulse, so a later entry point may start a new one.
+func stopProcessPulse(ctl *pulse.Controller) {
+	pulseProcMu.Lock()
+	defer pulseProcMu.Unlock()
+	if ctl == nil || ctl != pulseProcCtl {
+		return
+	}
+	ctl.Close()
+	pulseProcCtl = nil
 }
 
 // StartPulseRecorder starts live telemetry recording for an entry point that
-// never builds a ChatCLI — the standalone scheduler daemon. It gets the same
+// never builds a ChatCLI — the standalone scheduler daemon, a bare server. It gets the same
 // lease-driven lifecycle and the same CHATCLI_DASH switch as every other
 // surface, and a session node of its own so its jobs have a root to hang
 // from. The returned func stops recording and flushes the spool.
 func StartPulseRecorder(ctx context.Context, surface string, logger *zap.Logger) func() {
+	ctl, started := startProcessPulse(ctx, surface, logger)
+	if !started {
+		// Another entry point already records this process; it owns the
+		// session node and the controller.
+		return func() {}
+	}
 	bus := pulse.Default()
 	bus.RegisterSnapshotter("00-session", func() []pulse.Event {
 		return []pulse.Event{{
@@ -111,20 +156,9 @@ func StartPulseRecorder(ctx context.Context, surface string, logger *zap.Logger)
 			Status: pulse.StatusRunning,
 		}}
 	})
-	wd, _ := os.Getwd()
-	ctl := pulse.Start(context.WithoutCancel(ctx), pulse.Options{
-		Bus:      bus,
-		ForcedFn: pulseForced,
-		Meta:     pulse.Meta{PID: os.Getpid(), Surface: surface, Version: version.Version, WorkDir: filepath.Base(wd)},
-		OnError: func(err error) {
-			if logger != nil {
-				logger.Debug("pulse: spool error", zap.Error(err))
-			}
-		},
-	})
 	return func() {
 		bus.RegisterSnapshotter("00-session", nil)
-		ctl.Close()
+		stopProcessPulse(ctl)
 	}
 }
 
@@ -141,6 +175,11 @@ func (cli *ChatCLI) shutdownPulse() {
 	if cli == nil || cli.pulse == nil {
 		return
 	}
+	if !cli.pulseOwner {
+		// Another entry point owns the process recorder and its taps.
+		cli.pulse = nil
+		return
+	}
 	runs.Default().OnEventKeyed(pulseObserverKey, nil)
 	client.RegisterRequestAuditorKeyed(pulseObserverKey, nil)
 	bus := pulse.Default()
@@ -148,7 +187,7 @@ func (cli *ChatCLI) shutdownPulse() {
 	bus.RegisterSnapshotter("10-runs", nil)
 	bus.RegisterSnapshotter(pulseMCPSnapshotKey, nil)
 	bus.RegisterSnapshotter(pulseProcSnapshotKey, nil)
-	cli.pulse.Close()
+	stopProcessPulse(cli.pulse)
 	cli.pulse = nil
 }
 
@@ -183,6 +222,14 @@ func pulseRunEvent(info runs.Info) pulse.Event {
 		ID:     info.ID,
 		Parent: info.ParentID,
 		Name:   info.Agent,
+	}
+	// A run hangs from the span it started under when that span is an
+	// entry point (a chat turn, an inbound RPC), which the dashboard draws
+	// to the left of the agents. Under a tool or a pattern it keeps its run
+	// parent, so the map keeps reading left to right.
+	switch pulse.KindOf(info.PulseParent) {
+	case pulse.KindTurn, pulse.KindRPC:
+		ev.Parent = info.PulseParent
 	}
 	if ev.Parent == "" {
 		ev.Parent = pulseSessionNodeID
@@ -251,6 +298,9 @@ func (t *pulseLLMTap) observe(ev client.RequestAuditEvent) {
 		return
 	}
 	caller := ev.Fields[client.CallerFieldKey]
+	if p := ev.Fields[client.ParentFieldKey]; p != "" {
+		caller = p
+	}
 	out := pulse.Event{
 		Kind:   pulse.KindLLM,
 		Parent: pulseSessionNodeID,
@@ -303,4 +353,13 @@ func (t *pulseLLMTap) observe(ev client.RequestAuditEvent) {
 		out = out.With(k, ev.Fields[k])
 	}
 	t.bus.Emit(out)
+}
+
+// pulseCallerFrom names the node a request made under ctx hangs from: the
+// innermost span or run, else the run attached to ctx.
+func pulseCallerFrom(ctx context.Context) string {
+	if id := pulse.ParentFrom(ctx); id != "" {
+		return id
+	}
+	return runs.FromContext(ctx).ID()
 }

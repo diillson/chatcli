@@ -125,7 +125,7 @@ func (p *BuiltinSpeakPlugin) ExecuteWithStream(ctx context.Context, args []strin
 		if tts.IsNull(provider) {
 			return "", tts.ErrDisabled
 		}
-		audio, err := provider.Synthesize(ctx, in.Text, in.Voice, in.Format)
+		audio, err := tts.SynthesizeTraced(ctx, provider, in.Text, in.Voice, in.Format)
 		if err != nil {
 			return "", fmt.Errorf("@speak: %w", err)
 		}

@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/aws/aws-sdk-go-v2/aws"
 	awshttp "github.com/aws/aws-sdk-go-v2/aws/transport/http"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -189,8 +190,10 @@ func TestEnsureRuntimeControlPlaneGetsCorporateHTTPClient(t *testing.T) {
 	c := NewBedrockClient("anthropic.claude-sonnet-5", "", "", zap.NewNop(), 1, 0)
 	require.NoError(t, c.ensureRuntime(context.Background()))
 
-	assertCorporateTLS := func(name string, httpClient interface{}) {
-		bc, ok := httpClient.(*awshttp.BuildableClient)
+	assertCorporateTLS := func(name string, httpClient aws.HTTPClient) {
+		metered, ok := httpClient.(*meteredAWSClient)
+		require.True(t, ok, "%s: expected the dashboard-metered client, got %T", name, httpClient)
+		bc, ok := metered.unwrap().(*awshttp.BuildableClient)
 		require.True(t, ok, "%s: expected the corporate BuildableClient, got %T", name, httpClient)
 		tr := bc.GetTransport()
 		require.NotNil(t, tr.TLSClientConfig, "%s: corporate transport must carry a TLS config", name)

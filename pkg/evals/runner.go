@@ -172,10 +172,12 @@ func Run(ctx context.Context, suites []*Suite, opts Options) *Report {
 				switch {
 				case ctx.Err() != nil:
 					tr = TrialResult{N: j.n, Status: StatusSkipped, Error: i18n.T("evals.run.canceled")}
+					pulseSkippedTrial(ctx, j, "canceled")
 				case overBudget:
 					tr = TrialResult{N: j.n, Status: StatusSkipped, Error: i18n.T("evals.run.budget", opts.MaxCostUSD)}
+					pulseSkippedTrial(ctx, j, "budget")
 				default:
-					tr = runTrial(ctx, j, opts)
+					tr = runTrialTraced(ctx, j, opts)
 				}
 
 				mu.Lock()

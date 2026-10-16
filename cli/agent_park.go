@@ -145,6 +145,8 @@ func (a *AgentMode) handleAgentPark(
 			WithData("eta", parkRequestETA(req)))
 	}
 
+	a.pulseParked(ctx, req, jobID, time.Now())
+
 	a.logger.Info("agent parked",
 		zap.String("token", snap.Token),
 		zap.String("mode", string(req.Mode)),
@@ -336,7 +338,9 @@ func (a *AgentMode) RunResumed(ctx context.Context, snap *park.Snapshot, outcome
 // park-sentinel-to-nil mapping. runParkedInline calls it from INSIDE a Run()
 // that already holds runInflight, and needs the raw sentinel to know the
 // monitoring cycle re-parked.
-func (a *AgentMode) runResumedCore(ctx context.Context, snap *park.Snapshot, outcome, detail string) error {
+func (a *AgentMode) runResumedCore(ctx context.Context, snap *park.Snapshot, outcome, detail string) (err error) {
+	ctx, span := a.pulseResumeBegin(ctx, snap, outcome)
+	defer func() { pulseResumeEnd(span, err) }()
 	a.logger.Info("agent resuming from park",
 		zap.String("token", snap.Token),
 		zap.String("outcome", outcome),
@@ -418,7 +422,7 @@ func (a *AgentMode) runResumedCore(ctx context.Context, snap *park.Snapshot, out
 	// the resumed loop gets its own turn budget so a long park doesn't
 	// borrow turns from the original Run.
 	maxTurns := AgentMaxTurns()
-	err := a.processAIResponseAndAct(ctx, maxTurns)
+	err = a.processAIResponseAndAct(ctx, maxTurns)
 
 	// Parking again mid-resume: propagate the sentinel untouched — the next
 	// cycle's snapshot + scheduler job already exist. RunResumed maps it to
