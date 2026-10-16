@@ -126,8 +126,8 @@ func TestMoaRun_AggregatorFallback(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Run error: %v", err)
 	}
-	if out != "a much longer answer" {
-		t.Fatalf("expected best-candidate fallback, got %q", out)
+	if !strings.HasSuffix(out, moaFallbackHeading+"a much longer answer") || !strings.Contains(out, "- b: a much longer answer") {
+		t.Fatalf("expected the positions, then the best-candidate fallback, got %q", out)
 	}
 }
 

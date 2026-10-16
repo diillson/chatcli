@@ -1,0 +1,14 @@
+{
+  "moa.layers.usage": "Rodadas de revisão cruzada: /moa --layers N <prompt> (1-4; ou CHATCLI_MOA_LAYERS). A partir da rodada 2, cada modelo lê as respostas dos outros e revisa a sua.",
+  "moa.layers.running": "Consultando %d modelos em %d rodadas (após a rodada 1, cada modelo revisa os outros) e sintetizando...",
+  "moa.layers.first": "Rodada %d/%d · respostas independentes (%d modelos)",
+  "moa.layers.review": "Rodada %d/%d · revisão cruzada: cada modelo lê os outros e revisa (%d modelos)",
+  "moa.layers.revised": "revisou",
+  "moa.layers.kept": "manteve",
+  "moa.layers.envelope": "%d/%d modelos · %d rodadas · %s",
+  "moa.tool.synthesized_layers": "Resposta sintetizada de: %s após %d rodadas de revisão cruzada (agregador: %s)",
+  "complete.moa.layers": "Rodadas de revisão cruzada antes da síntese (1-4)",
+  "complete.moa.layers_1": "Só respostas independentes",
+  "complete.moa.layers_2": "Uma rodada de revisão cruzada: cada modelo lê os outros e revisa",
+  "complete.moa.layers_3": "Duas rodadas de revisão cruzada"
+}

@@ -11,6 +11,10 @@
  *   lead  each member's opening statement, one line (default)
  *   full  each member's whole answer
  *   off   only which members answered
+ *
+ * With more than one layer (CHATCLI_MOA_LAYERS, /moa --layers N) each round
+ * gets a header, and a review round marks whether each member kept or
+ * revised its position.
  */
 package cli
 
@@ -49,45 +53,86 @@ func moaPanelMode() string {
 // moaPanelPrinter returns the observer that prints each member as it
 // finishes, timed from start.
 func (cli *ChatCLI) moaPanelPrinter(mode string, start time.Time) moa.Observer {
-	return func(r moa.RefResult) {
-		elapsed := fmt.Sprintf("%.1fs", time.Since(start).Seconds())
-		if !r.OK() {
-			reason := i18n.T("moa.panel.empty")
-			if r.Err != nil {
-				reason = moaOneLine(r.Err.Error())
+	return func(r moa.RefResult) { cli.printMoAMember(mode, start, r, moa.StanceNone) }
+}
+
+// moaPanelHooks prints a layered run: a header per round when there is
+// more than one, then each member as it finishes, with whether a review
+// round kept or revised its position.
+func (cli *ChatCLI) moaPanelHooks(mode string, start time.Time) moa.Hooks {
+	return moa.Hooks{
+		OnLayer: func(layer, total, members int) {
+			if total < 2 {
+				return
 			}
-			fmt.Printf("    %s %s  %s\n      %s\n", colorize("✗", ColorRed), colorize(r.Ref.String(), ColorGray),
-				colorize(elapsed, ColorGray), colorize(moaClip(reason, kit.TermWidth()-8), ColorGray))
-			return
+			key := "moa.layers.review"
+			if layer == 1 {
+				key = "moa.layers.first"
+			}
+			fmt.Printf("  %s\n", colorize(i18n.T(key, layer, total, members), ColorCyan))
+		},
+		OnDone: func(_ int, r moa.RefResult, stance moa.Stance) {
+			cli.printMoAMember(mode, start, r, stance)
+		},
+	}
+}
+
+// moaStanceBadge labels a review answer's stance ("" for none).
+func moaStanceBadge(stance moa.Stance) string {
+	switch stance {
+	case moa.StanceRevised:
+		return "  " + colorize("↻ "+i18n.T("moa.layers.revised"), ColorYellow)
+	case moa.StanceKept:
+		return "  " + colorize("= "+i18n.T("moa.layers.kept"), ColorGray)
+	default:
+		return ""
+	}
+}
+
+// printMoAMember prints one member's outcome for the panel.
+func (cli *ChatCLI) printMoAMember(mode string, start time.Time, r moa.RefResult, stance moa.Stance) {
+	elapsed := fmt.Sprintf("%.1fs", time.Since(start).Seconds())
+	if !r.OK() {
+		reason := i18n.T("moa.panel.empty")
+		if r.Err != nil {
+			reason = moaOneLine(r.Err.Error())
 		}
-		fmt.Printf("    %s %s  %s\n", colorize("✓", ColorGreen), r.Ref.String(), colorize(elapsed, ColorGray))
-		switch mode {
-		case moaPanelFull:
-			fmt.Println(cli.renderMarkdown(r.Output))
-			fmt.Println()
-		case moaPanelLead:
-			if lead := moaLead(r.Output); lead != "" {
-				fmt.Printf("      %s\n", colorize(moaClip(lead, kit.TermWidth()-8), ColorGray))
-			}
+		fmt.Printf("    %s %s  %s\n      %s\n", colorize("✗", ColorRed), colorize(r.Ref.String(), ColorGray),
+			colorize(elapsed, ColorGray), colorize(moaClip(reason, kit.TermWidth()-8), ColorGray))
+		return
+	}
+	fmt.Printf("    %s %s  %s%s\n", colorize("✓", ColorGreen), r.Ref.String(), colorize(elapsed, ColorGray), moaStanceBadge(stance))
+	switch mode {
+	case moaPanelFull:
+		fmt.Println(cli.renderMarkdown(r.Output))
+		fmt.Println()
+	case moaPanelLead:
+		if lead := moaLead(r.Output); lead != "" {
+			fmt.Printf("      %s\n", colorize(moaClip(lead, kit.TermWidth()-8), ColorGray))
 		}
 	}
 }
 
 // renderMoAEnvelope draws the synthesis in the same response envelope as
 // a chat reply — word-wrapped to the terminal — labeled with the
-// aggregator, how many members answered and the round's wall time.
-func (cli *ChatCLI) renderMoAEnvelope(final string, aggregator moa.Ref, results []moa.RefResult, elapsed time.Duration) {
+// aggregator, how many members answered, the rounds and the run's wall
+// time.
+func (cli *ChatCLI) renderMoAEnvelope(final string, aggregator moa.Ref, out moa.Outcome, elapsed time.Duration) {
 	answered := 0
-	for _, r := range results {
+	for _, r := range out.Answers {
 		if r.OK() {
 			answered++
 		}
+	}
+	right := i18n.T("moa.panel.envelope", answered, len(out.Answers), formatLatency(elapsed))
+	if len(out.Layers) > 1 {
+		right = i18n.T("moa.layers.envelope", answered, len(out.Answers), len(out.Layers), formatLatency(elapsed))
 	}
 	agg := moa.Ref{Provider: strings.ToLower(aggregator.Provider), Model: aggregator.Model}.String()
 	renderer := agent.NewUIRendererWithStyle(cli.logger, agent.UIStyleFull)
 	renderer.RenderResponseEnvelope(agent.ResponseEnvelopeOptions{
 		HeaderLeft:  colorize(" MoA · "+agg+" ", ColorPurple+ColorBold),
-		HeaderRight: colorize(" "+i18n.T("moa.panel.envelope", answered, len(results), formatLatency(elapsed))+" ", ColorGray),
+		HeaderRight: colorize(" "+right+" ", ColorGray),
 		Body:        ensureANSIReset(cli.renderMarkdown(final)),
 		Color:       agent.ColorGray,
 		Typewriter:  true,

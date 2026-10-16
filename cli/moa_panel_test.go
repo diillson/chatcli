@@ -145,7 +145,7 @@ func TestRunMoACommand_PrintsPanelThenSynthesis(t *testing.T) {
 
 func TestBuildSynthesisPrompt_KeepsDivergence(t *testing.T) {
 	p := buildSynthesisPrompt("q", []moaResult{{label: "a", answer: "x"}, {label: "b", answer: "y"}})
-	if !strings.Contains(p, moa.DivergenceInstruction) {
+	if !strings.Contains(p, moa.DivergenceInstruction) || !strings.Contains(p, moa.DivergenceHeadingNote) || strings.Contains(p, "(a)") {
 		t.Fatalf("@moa synthesis prompt should ask for the divergence section:\n%s", p)
 	}
 }

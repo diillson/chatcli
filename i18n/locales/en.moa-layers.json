@@ -1,0 +1,14 @@
+{
+  "moa.layers.usage": "Cross-review rounds: /moa --layers N <prompt> (1-4; or CHATCLI_MOA_LAYERS). From round 2 on, each model reads the others' answers and revises its own.",
+  "moa.layers.running": "Querying %d models in %d rounds (each model reviews the others after round 1), then synthesizing...",
+  "moa.layers.first": "Round %d/%d · independent answers (%d models)",
+  "moa.layers.review": "Round %d/%d · cross-review: each model reads the others and revises (%d models)",
+  "moa.layers.revised": "revised",
+  "moa.layers.kept": "kept",
+  "moa.layers.envelope": "%d/%d models · %d rounds · %s",
+  "moa.tool.synthesized_layers": "Answer synthesized from: %s after %d rounds of cross-review (aggregator: %s)",
+  "complete.moa.layers": "Cross-review rounds before the synthesis (1-4)",
+  "complete.moa.layers_1": "Independent answers only",
+  "complete.moa.layers_2": "One cross-review round: each model reads the others and revises",
+  "complete.moa.layers_3": "Two cross-review rounds"
+}
