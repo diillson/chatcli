@@ -173,3 +173,26 @@ func TestMoa_AskPassesLayersAndPositions(t *testing.T) {
 		t.Fatal("schema and usage should document layers and positions")
 	}
 }
+
+// The agent loop flattens a {"cmd","args"} envelope into argv before the
+// tool runs, so flag values arrive as strings; layers must survive that.
+func TestMoa_AskLayersSurviveTheAgentArgvForm(t *testing.T) {
+	cases := map[string][]string{
+		"argv":           {"ask", "--layers", "2", "--positions", "lead", "--prompt", "q"},
+		"argv equals":    {"ask", "--layers=3", "--prompt", "q"},
+		"string in json": {`{"cmd":"ask","args":{"prompt":"q","layers":"2"}}`},
+		"float in json":  {`{"cmd":"ask","args":{"prompt":"q","layers":2.0}}`},
+	}
+	want := map[string]int{"argv": 2, "argv equals": 3, "string in json": 2, "float in json": 2}
+	for name, args := range cases {
+		r := &fakeMoaRunner{}
+		SetMoaAdapter(r)
+		if _, err := NewBuiltinMoaPlugin().Execute(context.Background(), args); err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		if r.req.Layers != want[name] || r.req.Prompt != "q" {
+			t.Errorf("%s: request = %+v, want layers %d", name, r.req, want[name])
+		}
+	}
+	SetMoaAdapter(nil)
+}

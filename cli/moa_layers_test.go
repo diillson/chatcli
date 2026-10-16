@@ -17,6 +17,8 @@ import (
 	"github.com/diillson/chatcli/cli/agent/moa"
 	"github.com/diillson/chatcli/cli/plugins"
 	"github.com/diillson/chatcli/i18n"
+	"github.com/diillson/chatcli/llm/client"
+	"github.com/diillson/chatcli/models"
 	"go.uber.org/zap"
 )
 
@@ -248,5 +250,91 @@ func TestGetMoASuggestions(t *testing.T) {
 	}
 	if got := texts("/moa --layers 2 why "); len(got) != 0 {
 		t.Fatalf("free text gets no suggestions, got %v", got)
+	}
+}
+
+// moaCaptureClient records the history each call received.
+type moaCaptureClient struct {
+	mu        *sync.Mutex
+	histories *[][]models.Message
+	answer    string
+}
+
+func (c *moaCaptureClient) GetModelName() string { return "capture" }
+func (c *moaCaptureClient) SendPrompt(_ context.Context, _ string, h []models.Message, _ int) (string, error) {
+	c.mu.Lock()
+	*c.histories = append(*c.histories, h)
+	c.mu.Unlock()
+	return c.answer, nil
+}
+
+type moaCaptureManager struct {
+	*moaFakeManager
+	mu        sync.Mutex
+	histories [][]models.Message
+}
+
+func (m *moaCaptureManager) GetClient(provider, _ string) (client.LLMClient, error) {
+	return &moaCaptureClient{mu: &m.mu, histories: &m.histories, answer: "answer from " + provider}, nil
+}
+
+func TestMoaRunRequest_MembersDoNotSeeTheAgentTranscript(t *testing.T) {
+	mgr := &moaCaptureManager{moaFakeManager: &moaFakeManager{minimalManager: &minimalManager{providers: []string{"OPENAI", "XAI", "agg"}}}}
+	c := &ChatCLI{Provider: "agg", Model: "m", manager: mgr, logger: zap.NewNop()}
+	c.history = []models.Message{
+		{Role: "system", Content: "You are the coder agent. Always open with <plan>…</plan> and call tools."},
+		{Role: "user", Content: "fix the build"},
+		{Role: "assistant", Content: `<plan>ask the panel</plan><tool_call name="@moa" args='{}' />`},
+	}
+	t.Setenv("CHATCLI_MOA_AGGREGATOR", "")
+	ad := &moaPluginAdapter{cli: c}
+	out, err := ad.RunRequest(context.Background(), plugins.MoaRequest{Prompt: "Is PDB maxUnavailable 0 safe?", Members: []string{"openai", "xai"}}, nil)
+	if err != nil {
+		t.Fatalf("RunRequest: %v", err)
+	}
+	if len(mgr.histories) != 3 {
+		t.Fatalf("expected 2 members + 1 aggregator call, got %d", len(mgr.histories))
+	}
+	for i, h := range mgr.histories {
+		for _, m := range h {
+			if strings.Contains(m.Content, "coder agent") || strings.Contains(m.Content, "<plan>") {
+				t.Fatalf("call %d received the agent transcript: %+v", i, h)
+			}
+		}
+	}
+	if !strings.Contains(out, "- openai: answer from OPENAI") || strings.Contains(out, "- OPENAI") ||
+		!strings.Contains(out, i18n.T("moa.tool.synthesized", "openai, xai", "agg")) {
+		t.Fatalf("members and aggregator should be labeled in lower case, as /moa does:\n%s", out)
+	}
+}
+
+type moaRecordingRunner struct{ req plugins.MoaRequest }
+
+func (r *moaRecordingRunner) Run(context.Context, string, []string, string) (string, error) {
+	return "", errors.New("RunRequest should be used")
+}
+func (r *moaRecordingRunner) List(context.Context) (string, error) { return "", nil }
+func (r *moaRecordingRunner) RunRequest(_ context.Context, req plugins.MoaRequest, _ func(string)) (string, error) {
+	r.req = req
+	return "ok", nil
+}
+
+// The coder flattens the tool call's JSON into argv before running the
+// tool; every @moa option must come through that path intact.
+func TestMoaToolCall_AgentArgvPath(t *testing.T) {
+	r := &moaRecordingRunner{}
+	plugins.SetMoaAdapter(r)
+	t.Cleanup(func() { plugins.SetMoaAdapter(nil) })
+	argv, err := parseToolArgsWithJSON(`{"cmd":"ask","args":{"prompt":"PDB com maxUnavailable 0?","layers":2,"positions":"full","models":["openai","xai"],"aggregator":"claudeai"}}`)
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if _, err := plugins.NewBuiltinMoaPlugin().Execute(context.Background(), argv); err != nil {
+		t.Fatalf("execute %v: %v", argv, err)
+	}
+	got := r.req
+	if got.Layers != 2 || got.Positions != "full" || got.Prompt != "PDB com maxUnavailable 0?" ||
+		got.Aggregator != "claudeai" || len(got.Members) != 2 {
+		t.Fatalf("argv %v reached the tool as %+v", argv, got)
 	}
 }
