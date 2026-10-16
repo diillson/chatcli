@@ -17,6 +17,11 @@
 </p>
 
 <p align="center">
+  <a href="https://chatcli.edilsonfreitas.com"><img src="https://img.shields.io/badge/%F0%9F%93%96%20Read%20the%20docs-chatcli.edilsonfreitas.com-0d9488?style=for-the-badge" alt="Read the documentation at chatcli.edilsonfreitas.com"></a><br>
+  <sub>Guides, cookbooks, configuration and the full reference for every feature, in English and Portuguese.</sub>
+</p>
+
+<p align="center">
   <a href="https://github.com/diillson/chatcli/actions/workflows/1-ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/diillson/chatcli/1-ci.yml?label=CI&logo=github" alt="CI"></a>
   <a href="https://github.com/diillson/chatcli/actions/workflows/quality-gate.yml"><img src="https://img.shields.io/github/actions/workflow/status/diillson/chatcli/quality-gate.yml?label=quality%20gate&logo=github" alt="Quality gate"></a>
   <a href="https://github.com/diillson/chatcli/actions/workflows/security-scan.yml"><img src="https://img.shields.io/github/actions/workflow/status/diillson/chatcli/security-scan.yml?label=security%20scan&logo=github" alt="Security scan"></a>
