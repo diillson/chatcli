@@ -19,9 +19,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
-	"sync"
 
-	"github.com/diillson/chatcli/cli/agent/runs"
 	"github.com/diillson/chatcli/models"
 )
 
@@ -129,55 +127,16 @@ type Observer func(RefResult)
 // onDone (nil for none) as it lands, so a host can show the panel's
 // positions while the slower members are still answering.
 func RunSessionObserved(ctx context.Context, prompt string, history []models.Message, refs []Ref, aggregator Ref, turn Turn, onDone Observer) (string, []RefResult, error) {
-	if len(refs) == 0 {
-		return "", nil, fmt.Errorf("no reference models configured")
+	cfg := Config{Layers: 1}
+	if onDone != nil {
+		cfg.Hooks.OnDone = func(_ int, r RefResult, _ Stance) { onDone(r) }
 	}
-	if turn == nil {
-		return "", nil, fmt.Errorf("no turn executor configured")
+	out, err := RunLayers(ctx, prompt, history, refs, aggregator, turn, cfg)
+	var results []RefResult
+	if len(out.Layers) > 0 {
+		results = out.Layers[0]
 	}
-
-	results := make([]RefResult, len(refs))
-	var observeMu sync.Mutex
-	var wg sync.WaitGroup
-	for i, ref := range refs {
-		wg.Add(1)
-		go func(i int, ref Ref) {
-			defer wg.Done()
-			// Each panel member registers as a run so the /agents view shows
-			// the MoA fan-out alongside worker dispatches.
-			refCtx, liveRun := runs.Default().Begin(ctx, runs.Info{
-				Kind:  runs.KindMoA,
-				Agent: ref.String(),
-				Task:  prompt,
-			})
-			out, err := turn(refCtx, ref, prompt, history)
-			liveRun.End(err)
-			results[i] = RefResult{Ref: ref, Output: out, Err: err}
-			if onDone != nil {
-				observeMu.Lock()
-				onDone(results[i])
-				observeMu.Unlock()
-			}
-		}(i, ref)
-	}
-	wg.Wait()
-
-	if countOK(results) == 0 {
-		// Surface the first underlying error so the failure is diagnosable
-		// (provider not available, 401, etc.) instead of an opaque message.
-		for _, r := range results {
-			if r.Err != nil {
-				return "", results, fmt.Errorf("all %d reference models failed: %s: %w", len(refs), r.Ref.String(), r.Err)
-			}
-		}
-		return "", results, fmt.Errorf("all %d reference models failed", len(refs))
-	}
-
-	final, err := turn(ctx, aggregator, BuildAggregationPrompt(prompt, results), historyForAggregation(history, prompt))
-	if err != nil {
-		return "", results, fmt.Errorf("aggregation failed: %w", err)
-	}
-	return final, results, nil
+	return out.Final, results, err
 }
 
 // historyForAggregation prepares the shared history for the aggregator turn.
@@ -210,6 +169,10 @@ const DivergenceInstruction = "If the candidates disagree on a material point, e
 	"\"Where the answers diverged\": one bullet per point, the competing positions, and which one you took and why. " +
 	"Omit that section when they agree. Answer in the same language as the user's request."
 
+// DivergenceHeadingNote follows DivergenceInstruction: models otherwise
+// tend to print the heading in English with a translation beside it.
+const DivergenceHeadingNote = "Write that section's heading in the user's language only, never in two languages."
+
 // BuildAggregationPrompt assembles the synthesizer prompt from the reference
 // answers, following the MoA pattern: present the candidate responses and ask
 // the aggregator to produce a single best answer.
@@ -217,8 +180,11 @@ func BuildAggregationPrompt(userPrompt string, results []RefResult) string {
 	var b strings.Builder
 	b.WriteString("You are an aggregator. Several models answered the user's request below. ")
 	b.WriteString("Synthesize a single, correct, high-quality response. Do not name the models. ")
-	b.WriteString("Resolve contradictions by reasoning about correctness, and keep the best details from each. ")
+	b.WriteString("Critically evaluate each candidate: some may be biased, outdated or wrong. ")
+	b.WriteString("Do not just copy one; resolve contradictions by reasoning about correctness, and keep the best details from each. ")
 	b.WriteString(DivergenceInstruction)
+	b.WriteString(" ")
+	b.WriteString(DivergenceHeadingNote)
 	b.WriteString("\n\n")
 	b.WriteString("## User request\n")
 	b.WriteString(userPrompt)

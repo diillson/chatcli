@@ -64,6 +64,7 @@ var slashPrefixRoutes = []slashPrefixRoute{
 	{"/config", (*ChatCLI).getConfigSuggestions},
 	{"/status", (*ChatCLI).getConfigSuggestions},
 	{"/settings", (*ChatCLI).getConfigSuggestions},
+	{"/moa", (*ChatCLI).getMoASuggestions},
 	{"/thinking", (*ChatCLI).getThinkingSuggestions},
 	{"/refine", (*ChatCLI).getRefineSuggestions},
 	{"/verify", (*ChatCLI).getVerifySuggestions},

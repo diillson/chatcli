@@ -19,6 +19,7 @@
  *   CHATCLI_MOA_MODELS="openai:gpt-5,claudeai:claude-opus-4-8,googleai:gemini-2.5-pro"
  *   CHATCLI_MOA_AGGREGATOR="claudeai:claude-opus-4-8"   (defaults to current model)
  *   CHATCLI_MOA_PANEL=lead|full|off   (each member's position, see moa_panel.go)
+ *   CHATCLI_MOA_LAYERS=1..4           (cross-review rounds; /moa --layers N per run)
  */
 package cli
 
@@ -27,8 +28,8 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
-	"sync/atomic"
 	"time"
 
 	"github.com/diillson/chatcli/cli/agent/moa"
@@ -51,9 +52,13 @@ var (
 
 // runMoACommand runs one /moa turn; shared by the REPL and one-shot (-p).
 func (cli *ChatCLI) runMoACommand(ctx context.Context, input string) error {
-	prompt := strings.TrimSpace(strings.TrimPrefix(input, "/moa"))
+	layers, prompt, err := parseMoALayers(strings.TrimSpace(strings.TrimPrefix(input, "/moa")))
+	if err != nil {
+		printMoAUsage()
+		return err
+	}
 	if prompt == "" {
-		fmt.Println(colorize("  "+i18n.T("moa.usage"), ColorGray))
+		printMoAUsage()
 		return errMoAUsage
 	}
 
@@ -86,30 +91,31 @@ func (cli *ChatCLI) runMoACommand(ctx context.Context, input string) error {
 	toolset := cli.moaToolsetForRun(tempHistory)
 	turn := cli.moaTurn(toolset)
 
-	fmt.Printf("  %s\n", colorize(i18n.T("moa.running", len(refs)), ColorCyan))
+	if layers > 1 {
+		fmt.Printf("  %s\n", colorize(i18n.T("moa.layers.running", len(refs), layers), ColorCyan))
+	} else {
+		fmt.Printf("  %s\n", colorize(i18n.T("moa.running", len(refs)), ColorCyan))
+	}
 	if caps := moaToolsetLabel(toolset); caps != "" {
 		fmt.Printf("  %s\n", colorize(i18n.T("moa.tools", caps), ColorGray))
 	}
 
-	runCtx, cancel := context.WithTimeout(ctx, 5*time.Minute)
+	runCtx, cancel := context.WithTimeout(ctx, time.Duration(layers)*moaLayerTimeout)
 	defer cancel()
 
-	// Each member's position prints as soon as it lands; the synthesis
-	// follows once the slowest member is done.
-	var landed atomic.Int32
+	// Each member's position prints as soon as it lands, round by round;
+	// the synthesis follows once the last round is done.
 	start := time.Now()
-	printMember := cli.moaPanelPrinter(moaPanelMode(), start)
-	observer := func(r moa.RefResult) {
-		printMember(r)
-		if int(landed.Add(1)) == len(refs) {
-			fmt.Printf("  %s\n", colorize(i18n.T("moa.panel.synthesizing", moa.Ref{Provider: strings.ToLower(aggregator.Provider), Model: aggregator.Model}.String()), ColorCyan))
-		}
+	hooks := cli.moaPanelHooks(moaPanelMode(), start)
+	hooks.OnSynthesis = func() {
+		fmt.Printf("  %s\n", colorize(i18n.T("moa.panel.synthesizing", moa.Ref{Provider: strings.ToLower(aggregator.Provider), Model: aggregator.Model}.String()), ColorCyan))
 	}
 
-	final, results, err := moa.RunSessionObserved(runCtx, prompt, tempHistory, refs, aggregator, turn, observer)
+	out, err := moa.RunLayers(runCtx, prompt, tempHistory, refs, aggregator, turn, moa.Config{Layers: layers, Hooks: hooks})
 	if err != nil {
 		return err
 	}
+	final := out.Final
 
 	// The panel is briefed with the chat prompt, coder handoff included: a
 	// proposal in the aggregated answer is stripped and offered exactly as
@@ -117,7 +123,7 @@ func (cli *ChatCLI) runMoACommand(ctx context.Context, input string) error {
 	handoffTask, final := takeCoderHandoff(final)
 
 	fmt.Println()
-	cli.renderMoAEnvelope(final, aggregator, results, time.Since(start))
+	cli.renderMoAEnvelope(final, aggregator, out, time.Since(start))
 
 	// Record the turn in history so a follow-up /moa or a normal message has the
 	// context — same as a regular chat turn. Mirror onto the cross-channel hub.
@@ -131,4 +137,41 @@ func (cli *ChatCLI) runMoACommand(ctx context.Context, input string) error {
 	cli.persistBoundSession()
 	cli.offerCoderHandoff(handoffTask)
 	return nil
+}
+
+// moaLayerTimeout bounds one round of a /moa run.
+const moaLayerTimeout = 5 * time.Minute
+
+// errMoALayers reports a --layers value that is not a number.
+var errMoALayers = errors.New("/moa --layers needs a number")
+
+// moaLayersFromEnv reads CHATCLI_MOA_LAYERS (1 when unset or invalid).
+func moaLayersFromEnv() int {
+	n, err := strconv.Atoi(strings.TrimSpace(os.Getenv("CHATCLI_MOA_LAYERS")))
+	if err != nil {
+		return 1
+	}
+	return moa.ClampLayers(n)
+}
+
+// parseMoALayers takes a leading "--layers N" (or "--layers=N") off a /moa
+// prompt; without one the layer count comes from CHATCLI_MOA_LAYERS.
+func parseMoALayers(args string) (int, string, error) {
+	rest, ok := strings.CutPrefix(args, "--layers")
+	if !ok || (rest != "" && rest[0] != ' ' && rest[0] != '=') {
+		return moaLayersFromEnv(), args, nil
+	}
+	rest = strings.TrimLeft(rest, " =")
+	value, prompt, _ := strings.Cut(rest, " ")
+	n, err := strconv.Atoi(value)
+	if err != nil {
+		return 0, "", errMoALayers
+	}
+	return moa.ClampLayers(n), strings.TrimSpace(prompt), nil
+}
+
+// printMoAUsage prints the /moa usage, layers included.
+func printMoAUsage() {
+	fmt.Println(colorize("  "+i18n.T("moa.usage"), ColorGray))
+	fmt.Println(colorize("  "+i18n.T("moa.layers.usage"), ColorGray))
 }
