@@ -7,6 +7,7 @@
 package atrest
 
 import (
+	"crypto/sha256"
 	"encoding/base64"
 	"errors"
 	"fmt"
@@ -333,3 +334,41 @@ func RecoveryKey() (string, error) {
 // ErrNoRecoveryKey reports that no default key is active: encryption is
 // off, or the key already comes from CHATCLI_ENCRYPTION_KEY.
 var ErrNoRecoveryKey = errors.New("no default key is active")
+
+// FingerprintFor is KeyFingerprint for a given secret: the fingerprint the
+// stores would show if that secret were the active key.
+func FingerprintFor(secret string) string {
+	enc, err := legacyEncryptor(secret)
+	if err != nil {
+		return ""
+	}
+	sum := sha256.Sum256(enc.key)
+	return fmt.Sprintf("%x", sum[:4])
+}
+
+// OpensWith reports whether payload (sealed for the store at path) opens
+// with secret, without touching the active key: a way to check which key
+// sealed a store before changing where the key lives.
+func OpensWith(secret, path string, payload []byte) bool {
+	if isV2(payload) {
+		enc, err := v2Encryptor(secret)
+		if err != nil {
+			return false
+		}
+		for _, aad := range [][]byte{aadFor(path), nil} {
+			if _, err := enc.decryptV2(payload, aad); err == nil {
+				return true
+			}
+		}
+		return false
+	}
+	if !IsEncrypted(payload) {
+		return false
+	}
+	enc, err := legacyEncryptor(secret)
+	if err != nil {
+		return false
+	}
+	_, err = enc.Decrypt(payload)
+	return err == nil
+}

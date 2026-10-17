@@ -44,11 +44,17 @@ var (
 // previousKeychainAccount; the key is read back before the file goes.
 // The key itself does not change, so nothing sealed with it is affected.
 // moved is false (with no error) when there is no key file to move.
-func MoveFileKeyToKeychain() (moved bool, err error) {
-	return moveKeyFileInto(NewKeychainStore(), getKeyPath())
+//
+// opensData, when given, receives the data secret derived from the file key
+// and reports whether it opens the data already sealed at rest (true when
+// there is none). It is the proof for an installation that never stored a
+// credential: without auth-profiles.json, the encrypted stores are what the
+// file key must open.
+func MoveFileKeyToKeychain(opensData func(dataSecret string) bool) (moved bool, err error) {
+	return moveKeyFileInto(NewKeychainStore(), getKeyPath(), opensData)
 }
 
-func moveKeyFileInto(ks *KeychainStore, keyPath string) (bool, error) {
+func moveKeyFileInto(ks *KeychainStore, keyPath string, opensData func(string) bool) (bool, error) {
 	if os.Getenv("CHATCLI_AUTH_DIR") != "" {
 		return false, ErrCustomAuthDir
 	}
@@ -72,7 +78,7 @@ func moveKeyFileInto(ks *KeychainStore, keyPath string) (bool, error) {
 		removeAdoptedKeyFile(keyPath)
 		return true, nil
 	case err == nil:
-		if !keyOpensCredentialStore(fileKey, filepath.Join(filepath.Dir(keyPath), "auth-profiles.json")) {
+		if !fileKeyProven(fileKey, keyPath, opensData) {
 			return false, ErrKeyFileNotProven
 		}
 		if serr := ks.Set(previousKeychainAccount, []byte(base64.StdEncoding.EncodeToString(held))); serr != nil {
@@ -87,6 +93,20 @@ func moveKeyFileInto(ks *KeychainStore, keyPath string) (bool, error) {
 	markKeyInKeychain(keyPath)
 	removeAdoptedKeyFile(keyPath)
 	return true, nil
+}
+
+// fileKeyProven reports whether the file key is the key this installation
+// sealed its credentials and its data with: it must open the credential
+// store when there is an encrypted one, and the sealed data stores.
+func fileKeyProven(fileKey []byte, keyPath string, opensData func(string) bool) bool {
+	if !keyOpensCredentialStore(fileKey, filepath.Join(filepath.Dir(keyPath), "auth-profiles.json")) {
+		return false
+	}
+	if opensData == nil {
+		return true
+	}
+	secret, err := deriveDataSecret(fileKey)
+	return err == nil && opensData(secret)
 }
 
 // keyOpensCredentialStore reports whether key decrypts the credential store

@@ -9,6 +9,7 @@
 package cli
 
 import (
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"github.com/diillson/chatcli/pkg/auditchain"
@@ -662,7 +663,7 @@ func (cli *ChatCLI) restoreWithRecoveryKey(key string) {
 // still lives in the key file: the key moves into the OS keychain as it is,
 // so nothing sealed with it changes.
 func (cli *ChatCLI) moveDefaultKeyToKeychain() {
-	moved, err := moveFileKeyToKeychain()
+	moved, err := moveFileKeyToKeychain(cli.dataOpensWith)
 	switch {
 	case err != nil:
 		fmt.Println(colorize("  "+i18n.T("sec.cmd.keyfile_move_failed", err.Error()), ColorYellow))
@@ -675,3 +676,52 @@ func (cli *ChatCLI) moveDefaultKeyToKeychain() {
 
 // moveFileKeyToKeychain is auth.MoveFileKeyToKeychain; a variable for tests.
 var moveFileKeyToKeychain = auth.MoveFileKeyToKeychain
+
+// dataOpensWith reports whether secret is the key the stores are sealed
+// with: the fingerprint the last full seal recorded when there is one,
+// otherwise the first sealed store file found. With nothing sealed, no
+// data depends on any key and the answer is true.
+func (cli *ChatCLI) dataOpensWith(secret string) bool {
+	if raw, err := os.ReadFile(cli.atRestMarkerPath()); err == nil { // #nosec G304 -- fixed marker name under the state root
+		if fp := strings.TrimSpace(string(raw)); fp != "" {
+			return fp == atrest.FingerprintFor(secret)
+		}
+	}
+	var payload []byte
+	var at string
+	for _, st := range cli.atRestStoreDirs() {
+		walkStore(st, func(path string, d os.DirEntry) {
+			if payload != nil || !sealableIn(st.Kind, d.Name()) || !alreadySealed(path, d.Name()) {
+				return
+			}
+			payload, at = sealedPayload(path, d.Name())
+		})
+		if payload != nil {
+			break
+		}
+	}
+	if payload == nil {
+		return true
+	}
+	return atrest.OpensWith(secret, at, payload)
+}
+
+// sealedPayload returns the sealed bytes of a store file and the path they
+// are bound to: the whole file, or the first sealed line of a journal.
+func sealedPayload(path, name string) ([]byte, string) {
+	data, err := os.ReadFile(path) // #nosec G304 -- store path enumerated from the state root
+	if err != nil {
+		return nil, ""
+	}
+	if !strings.HasSuffix(name, ".jsonl") {
+		return data, path
+	}
+	for _, line := range strings.Split(string(data), "\n") {
+		if strings.HasPrefix(line, sealedLinePrefix) {
+			if raw, derr := base64.StdEncoding.DecodeString(line[len(sealedLinePrefix):]); derr == nil {
+				return raw, path
+			}
+		}
+	}
+	return nil, ""
+}

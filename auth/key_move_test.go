@@ -26,7 +26,7 @@ func TestMoveFileKeyToKeychain_ReplacesAStaleKeychainKeyOnRequest(t *testing.T) 
 	fk := newFakeKeychain()
 	fk.items[keychainAccount] = encodedKey(stale)
 
-	moved, err := moveKeyFileInto(fk.store(KeychainAuto), path)
+	moved, err := moveKeyFileInto(fk.store(KeychainAuto), path, nil)
 	if err != nil || !moved {
 		t.Fatalf("move = %v, %v", moved, err)
 	}
@@ -57,7 +57,7 @@ func TestMoveFileKeyToKeychain_RefusesAnUnprovenFile(t *testing.T) {
 	fk := newFakeKeychain()
 	fk.items[keychainAccount] = encodedKey(other)
 
-	if _, err := moveKeyFileInto(fk.store(KeychainAuto), path); !errors.Is(err, ErrKeyFileNotProven) {
+	if _, err := moveKeyFileInto(fk.store(KeychainAuto), path, nil); !errors.Is(err, ErrKeyFileNotProven) {
 		t.Fatalf("err = %v, want ErrKeyFileNotProven", err)
 	}
 	if !bytes.Equal(fk.items[keychainAccount], encodedKey(other)) {
@@ -77,7 +77,7 @@ func TestMoveFileKeyToKeychain_EdgeCases(t *testing.T) {
 	key := writeKey(t, path, 0x75)
 	fk := newFakeKeychain()
 	fk.items[keychainAccount] = encodedKey(key)
-	if moved, err := moveKeyFileInto(fk.store(KeychainAuto), path); err != nil || !moved {
+	if moved, err := moveKeyFileInto(fk.store(KeychainAuto), path, nil); err != nil || !moved {
 		t.Fatalf("same key: %v, %v", moved, err)
 	}
 	if _, ok := fk.items[previousKeychainAccount]; ok {
@@ -85,17 +85,17 @@ func TestMoveFileKeyToKeychain_EdgeCases(t *testing.T) {
 	}
 
 	// No key file: nothing to do.
-	if moved, err := moveKeyFileInto(newFakeKeychain().store(KeychainAuto), keyPathIn(t)); err != nil || moved {
+	if moved, err := moveKeyFileInto(newFakeKeychain().store(KeychainAuto), keyPathIn(t), nil); err != nil || moved {
 		t.Fatalf("no file: %v, %v", moved, err)
 	}
 
 	// No keychain, or the file backend pinned.
 	noKC := newFakeKeychain()
 	noKC.available = false
-	if _, err := moveKeyFileInto(noKC.store(KeychainAuto), keyPathIn(t)); !errors.Is(err, ErrKeychainNotUsable) {
+	if _, err := moveKeyFileInto(noKC.store(KeychainAuto), keyPathIn(t), nil); !errors.Is(err, ErrKeychainNotUsable) {
 		t.Fatalf("no keychain: %v", err)
 	}
-	if _, err := moveKeyFileInto(newFakeKeychain().store(KeychainFile), keyPathIn(t)); !errors.Is(err, ErrKeychainNotUsable) {
+	if _, err := moveKeyFileInto(newFakeKeychain().store(KeychainFile), keyPathIn(t), nil); !errors.Is(err, ErrKeychainNotUsable) {
 		t.Fatalf("file backend: %v", err)
 	}
 
@@ -104,7 +104,7 @@ func TestMoveFileKeyToKeychain_EdgeCases(t *testing.T) {
 	locked.getErr = os.ErrPermission
 	lp := keyPathIn(t)
 	writeKey(t, lp, 0x76)
-	if _, err := moveKeyFileInto(locked.store(KeychainAuto), lp); err == nil {
+	if _, err := moveKeyFileInto(locked.store(KeychainAuto), lp, nil); err == nil {
 		t.Fatal("a locked keychain reported a move")
 	}
 	if _, err := os.Stat(lp); err != nil {
@@ -113,14 +113,41 @@ func TestMoveFileKeyToKeychain_EdgeCases(t *testing.T) {
 
 	// A custom auth directory never moves.
 	t.Setenv("CHATCLI_AUTH_DIR", t.TempDir())
-	if _, err := moveKeyFileInto(newFakeKeychain().store(KeychainAuto), keyPathIn(t)); !errors.Is(err, ErrCustomAuthDir) {
+	if _, err := moveKeyFileInto(newFakeKeychain().store(KeychainAuto), keyPathIn(t), nil); !errors.Is(err, ErrCustomAuthDir) {
 		t.Fatalf("custom dir: %v", err)
 	}
 }
 
 func TestMoveFileKeyToKeychain_PublicEntryPoint(t *testing.T) {
 	t.Setenv("CHATCLI_AUTH_DIR", t.TempDir())
-	if _, err := MoveFileKeyToKeychain(); !errors.Is(err, ErrCustomAuthDir) {
+	if _, err := MoveFileKeyToKeychain(nil); !errors.Is(err, ErrCustomAuthDir) {
 		t.Fatalf("err = %v", err)
+	}
+}
+
+// No credential store at all (never logged in): the sealed data is the
+// proof. A file key whose data key does not open it never moves in.
+func TestMoveFileKeyToKeychain_WithoutCredentialsTheDataIsTheProof(t *testing.T) {
+	resetAdopt(t)
+	t.Setenv("CHATCLI_AUTH_DIR", "")
+	fk := newFakeKeychain()
+	fk.items[keychainAccount] = encodedKey(bytes.Repeat([]byte{0x77}, 32))
+
+	path := keyPathIn(t)
+	fileKey := writeKey(t, path, 0x78)
+	want, _ := deriveDataSecret(fileKey)
+	var got string
+	moved, err := moveKeyFileInto(fk.store(KeychainAuto), path, func(s string) bool { got = s; return false })
+	if !errors.Is(err, ErrKeyFileNotProven) || moved {
+		t.Fatalf("data that does not open: %v, %v", moved, err)
+	}
+	if got != want {
+		t.Fatal("the data check did not receive the file key's data secret")
+	}
+	if _, err := os.Stat(path); err != nil {
+		t.Fatal("the key file was removed")
+	}
+	if moved, err := moveKeyFileInto(fk.store(KeychainAuto), path, func(string) bool { return true }); err != nil || !moved {
+		t.Fatalf("data that opens: %v, %v", moved, err)
 	}
 }
