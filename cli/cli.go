@@ -324,6 +324,10 @@ type ChatCLI struct {
 	workspaceDir    string
 	tenants         *tenantPool
 
+	// atRestMigrationState tracks the background sealing of stores written
+	// before encryption at rest was on (atrest_migration.go).
+	atRestMigrationState atRestMigration
+
 	// recalled tracks the facts auto-recall injected this turn so only
 	// the ones the reply evidently used get reinforced.
 	recalled recallEvidence
@@ -1018,6 +1022,10 @@ func NewChatCLI(ctx context.Context, manager manager.LLMManager, logger *zap.Log
 	// Initialize scheduler subsystem (in-process or daemon client).
 	cli.initScheduler(ctx)
 
+	// Seal, once and in the background, what earlier versions left in
+	// plaintext (encryption at rest is on by default).
+	cli.startAtRestMigration()
+
 	return cli, nil
 }
 
@@ -1270,6 +1278,7 @@ func (cli *ChatCLI) Start(ctx context.Context) {
 	go cli.backgroundUpdateFlow(ctx)
 	cli.PrintWelcomeScreen()
 	cli.printLastSessionNotice()
+	cli.printRecoveryKeyNotice()
 	cli.startHubSync(ctx) // resume the shared cross-channel conversation, if connected
 
 	// Mark the interactive REPL as active so the command-palette trigger only

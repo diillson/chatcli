@@ -607,6 +607,13 @@ func (cli *ChatCLI) forkTranscriptJournal() string {
 		}
 		return ""
 	}
+	data, err = rebindSealedLines(data, src, dst)
+	if err != nil {
+		if cli.logger != nil {
+			cli.logger.Warn("transcript fork: cannot re-seal the parent journal", zap.Error(err))
+		}
+		return ""
+	}
 	if err := utils.AtomicWriteFile(dst, data, 0o600); err != nil {
 		if cli.logger != nil {
 			cli.logger.Warn("transcript fork: cannot seed the new journal", zap.Error(err))
@@ -614,6 +621,51 @@ func (cli *ChatCLI) forkTranscriptJournal() string {
 		return ""
 	}
 	return id
+}
+
+// rebindSealedLines re-seals every sealed journal line read from src for
+// dst. Lines are bound to their file's path (the AAD), so bytes copied to
+// a new name would no longer open there.
+func rebindSealedLines(data []byte, src, dst string) ([]byte, error) {
+	if !bytes.Contains(data, []byte(sealedLinePrefix)) {
+		return data, nil
+	}
+	lines := bytes.SplitAfter(data, []byte("\n"))
+	var out bytes.Buffer
+	for i, line := range lines {
+		body := bytes.TrimSuffix(line, []byte("\n"))
+		if !bytes.HasPrefix(body, []byte(sealedLinePrefix)) {
+			out.Write(line)
+			continue
+		}
+		// A torn tail (a crash mid-append) is skipped, as the reader skips
+		// it; anywhere else a line that does not open aborts the fork.
+		torn := !bytes.HasSuffix(line, []byte("\n")) || i == len(lines)-1
+		raw, err := base64.StdEncoding.DecodeString(string(body[len(sealedLinePrefix):]))
+		if err != nil {
+			if torn {
+				continue
+			}
+			return nil, err
+		}
+		plain, err := atrest.OpenAt(src, raw)
+		if err != nil {
+			if torn && !errors.Is(err, atrest.ErrKeyMissing) {
+				continue
+			}
+			return nil, err
+		}
+		if atrest.Enabled() {
+			sealed, serr := atrest.SealAt(dst, plain)
+			if serr != nil {
+				return nil, serr
+			}
+			plain = []byte(sealedLinePrefix + base64.StdEncoding.EncodeToString(sealed))
+		}
+		out.Write(plain)
+		out.WriteByte('\n')
+	}
+	return out.Bytes(), nil
 }
 
 // adoptTranscript switches the journal to the id a loaded session carries,

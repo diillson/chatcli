@@ -65,6 +65,10 @@ func (cli *ChatCLI) routeConfigSecurity(args []string) {
 		cli.configSecurityReseal()
 	case "verify-audit", "audit-verify":
 		cli.configSecurityVerifyAudit(rest)
+	case "recovery-key":
+		cli.configSecurityRecoveryKey()
+	case "use-keychain":
+		cli.configSecurityUseKeychain()
 	default:
 		fmt.Println(colorize("  "+i18n.T("sec.cmd.unknown_sub", sub), ColorYellow))
 		cli.printConfigSecurityUsage()
@@ -80,6 +84,10 @@ func (cli *ChatCLI) printConfigSecurityUsage() {
 	fmt.Println("  /config security deny   \"@coder exec <cmd-prefix>\"  [--yes]")
 	fmt.Println("  /config security forget \"<pattern>\"                 [--yes]")
 	fmt.Println("  /config security reload")
+	fmt.Println("  /config security reseal")
+	fmt.Println("  /config security recovery-key")
+	fmt.Println("  /config security use-keychain")
+	fmt.Println("  /config security verify-audit [path]")
 	fmt.Println()
 	fmt.Println(colorize("  "+i18n.T("sec.cmd.usage_note_pattern"), ColorGray))
 	fmt.Println(colorize("  "+i18n.T("sec.cmd.usage_note_scope"), ColorGray))

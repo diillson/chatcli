@@ -607,12 +607,18 @@ func appendFactsToArchive(facts []*Fact, archivePath string) error {
 		return nil
 	}
 	archive := make([]*Fact, 0, len(facts))
-	if data, err := os.ReadFile(archivePath); err == nil { //#nosec G304 -- path supplied by user/agent through validated tool surface (boundary check upstream)
+	data, err := readStoreFile(archivePath)
+	switch {
+	case err == nil:
 		_ = json.Unmarshal(data, &archive)
+	case !os.IsNotExist(err):
+		// A sealed archive this process cannot open must not be replaced
+		// by one holding only the new facts.
+		return err
 	}
 	archive = append(archive, facts...)
 
-	data, err := json.MarshalIndent(archive, "", "  ")
+	data, err = json.MarshalIndent(archive, "", "  ")
 	if err != nil {
 		return err
 	}

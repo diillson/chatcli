@@ -7,6 +7,7 @@ package cli
 
 import (
 	"fmt"
+	"github.com/diillson/chatcli/pkg/atrest"
 	"strconv"
 	"strings"
 
@@ -327,6 +328,9 @@ func (h *ContextHandler) handleExport(args []string) error {
 	}
 
 	fmt.Println(colorize(i18n.T("context.export.success", targetPath), ColorGreen))
+	if atrest.Enabled() {
+		fmt.Println(colorize(i18n.T("export.plaintext_notice"), ColorYellow))
+	}
 
 	return nil
 }

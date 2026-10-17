@@ -19,6 +19,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/diillson/chatcli/pkg/atrest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -286,7 +287,7 @@ func (p *BuiltinImagePlugin) ExecuteWithStream(ctx context.Context, args []strin
 		}
 		opts := imagegen.EditOptions{Size: in.Size, N: in.N, Strength: in.Strength}
 		if strings.TrimSpace(in.Mask) != "" {
-			mask, mErr := os.ReadFile(in.Mask) //#nosec G304 -- user/agent-specified mask path for @image edit
+			mask, mErr := atrest.ReadAttachment(in.Mask)
 			if mErr != nil {
 				// An inpainting edit without its mask would repaint the
 				// whole image instead of the masked area.
@@ -335,7 +336,7 @@ func editUnavailableMessage(ue *imagegen.EditUnavailableError, provider imagegen
 func loadInputImages(paths []string) ([]imagegen.Image, error) {
 	out := make([]imagegen.Image, 0, len(paths))
 	for _, p := range paths {
-		data, err := os.ReadFile(p) //#nosec G304 -- user/agent-specified image path for @image edit
+		data, err := atrest.ReadAttachment(p)
 		if err != nil {
 			return nil, fmt.Errorf("read %q: %w", p, err)
 		}

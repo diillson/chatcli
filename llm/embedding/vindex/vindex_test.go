@@ -6,7 +6,9 @@
 package vindex
 
 import (
+	"bytes"
 	"context"
+	"github.com/diillson/chatcli/pkg/atrest"
 	"os"
 	"path/filepath"
 	"testing"
@@ -201,5 +203,40 @@ func TestIndex_ScoreAgainst(t *testing.T) {
 	off := New(filepath.Join(t.TempDir(), "v2.json"), embedding.NewNull())
 	if off.ScoreAgainst(qv, []string{"alpha"}, 0) != nil {
 		t.Fatal("disabled index must return nil")
+	}
+}
+
+func TestIndex_SealedAtRestAndKeptWithoutTheKey(t *testing.T) {
+	t.Setenv(atrest.EnvKey, "vindex-test-key-vindex-test-key-000")
+	dir := t.TempDir()
+	path := filepath.Join(dir, "v.json")
+	p := newProvider()
+	x1 := New(path, p)
+	_ = x1.Upsert(context.Background(), map[string]string{"a": "aaa", "b": "bbb"})
+
+	raw, err := os.ReadFile(path)
+	if err != nil || !atrest.IsEncrypted(raw) {
+		t.Fatalf("index not sealed on disk: %v", err)
+	}
+	if x2 := New(path, p); x2.Count() != 2 {
+		t.Fatalf("sealed index did not reload, count=%d", x2.Count())
+	}
+
+	t.Setenv(atrest.EnvKey, "")
+	if x3 := New(path, p); x3.Count() != 0 {
+		t.Fatal("a sealed index loaded without the key")
+	}
+	if _, err := os.Stat(path); err != nil {
+		t.Fatal("a sealed index was discarded as corrupt when the key was missing")
+	}
+	x4 := New(path, p)
+	_ = x4.Upsert(context.Background(), map[string]string{"c": "ccc"})
+	after, _ := os.ReadFile(path)
+	if !bytes.Equal(after, raw) {
+		t.Fatal("a sealed index this process cannot open was overwritten")
+	}
+	t.Setenv(atrest.EnvKey, "vindex-test-key-vindex-test-key-000")
+	if x5 := New(path, p); x5.Count() != 2 {
+		t.Fatalf("the index did not come back with the key, count=%d", x5.Count())
 	}
 }

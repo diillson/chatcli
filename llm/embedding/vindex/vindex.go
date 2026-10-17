@@ -28,6 +28,7 @@ import (
 	"sync"
 
 	"github.com/diillson/chatcli/llm/embedding"
+	"github.com/diillson/chatcli/pkg/atrest"
 	"github.com/diillson/chatcli/utils"
 	"go.uber.org/zap"
 )
@@ -49,6 +50,10 @@ type Index struct {
 	// dimFromDisk marks a dimension taken from the cache file while the
 	// provider had not reported one yet (lazy probe on first embed).
 	dimFromDisk bool
+	// sealedUnreadable marks an index file sealed with a key this process
+	// does not hold: it is never overwritten, so it opens again once the
+	// key is back. Searches run on what this process embeds in memory.
+	sealedUnreadable bool
 }
 
 // Option customizes an Index at construction.
@@ -358,6 +363,15 @@ func (x *Index) load() {
 		}
 		return
 	}
+	// Vectors can be inverted toward the text they embed, so the index is
+	// sealed like the store it indexes. Without the key the sealed file is
+	// left alone (it is not corrupt, and persist refuses to replace it) and
+	// the index starts empty.
+	if data, err = atrest.OpenAt(x.path, data); err != nil {
+		x.logger.Warn("vindex is encrypted at rest and cannot be opened", zap.String("path", x.path), zap.Error(err))
+		x.sealedUnreadable = true
+		return
+	}
 	var f indexFile
 	if err := json.Unmarshal(data, &f); err != nil {
 		// A torn/corrupt vector cache has no recovery value (vectors are
@@ -405,6 +419,10 @@ func (x *Index) discardStale() {
 
 func (x *Index) persist() error {
 	x.mu.RLock()
+	if x.sealedUnreadable {
+		x.mu.RUnlock()
+		return nil
+	}
 	f := indexFile{Dimension: x.dim, Provider: x.provider.Name(), Entries: x.entries}
 	x.mu.RUnlock()
 	if err := os.MkdirAll(filepath.Dir(x.path), 0o750); err != nil {
@@ -425,6 +443,9 @@ func (x *Index) persist() error {
 	// utils.AtomicWriteFile fsyncs the temp file before the rename (and the
 	// directory after), so a power loss cannot leave an empty or truncated
 	// index behind the new name.
+	if data, err = atrest.SealAt(x.path, data); err != nil {
+		return err
+	}
 	unlock := flock.Lock(x.path)
 	defer unlock()
 	return utils.AtomicWriteFile(x.path, data, 0o600)

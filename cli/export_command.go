@@ -15,6 +15,7 @@ package cli
 
 import (
 	"fmt"
+	"github.com/diillson/chatcli/pkg/atrest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -69,6 +70,9 @@ func (cli *ChatCLI) handleExportCommand(input string) {
 	}
 
 	fmt.Printf("  %s %s\n", colorize("OK", ColorGreen), i18n.T("export.done", n, path))
+	if atrest.Enabled() {
+		fmt.Println(colorize("  "+i18n.T("export.plaintext_notice"), ColorYellow))
+	}
 }
 
 func defaultExportDir() (string, error) {

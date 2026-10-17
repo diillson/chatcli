@@ -98,7 +98,7 @@ func Open(path string, opts Options) (*Writer, error) {
 		w.maxBytes = DefaultMaxBytes
 	}
 	if w.seal == nil {
-		w.seal = atrest.Enabled
+		w.seal = sealWithOperatorKey
 	}
 	w.refreshTail()
 	return w, nil
@@ -319,13 +319,20 @@ func hashOf(m map[string]json.RawMessage, prev string) (string, error) {
 	return hex.EncodeToString(h.Sum(nil)), nil
 }
 
-// decodeLine opens a sealed line; plain lines pass through.
+// sealWithOperatorKey seals the trail only under a key from
+// CHATCLI_ENCRYPTION_KEY, as it always did. The trail is a file operators
+// ship to a log pipeline, and the default key lives in one machine's
+// keychain: sealing with it would turn a working pipeline into ciphertext.
+func sealWithOperatorKey() bool {
+	src, _, _ := atrest.KeyStatus()
+	return src == atrest.KeySourceEnv
+}
+
+// decodeLine opens a sealed line (with any key this process can read,
+// including under CHATCLI_ENCRYPTION_KEY=off); plain lines pass through.
 func decodeLine(line []byte) ([]byte, error) {
 	if !bytes.HasPrefix(line, []byte(sealedPrefix)) {
 		return line, nil
-	}
-	if !atrest.Enabled() {
-		return nil, errors.New("sealed entry and no encryption key configured")
 	}
 	sealed, err := base64.StdEncoding.DecodeString(string(line[len(sealedPrefix):]))
 	if err != nil {

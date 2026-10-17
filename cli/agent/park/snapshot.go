@@ -168,9 +168,9 @@ func (s *Snapshot) Save() error {
 	if err != nil {
 		return fmt.Errorf("park: marshal snapshot: %w", err)
 	}
-	// The snapshot embeds the whole conversation history; it follows the
-	// same opt-in encryption at rest as saved sessions.
-	if data, err = atrest.Seal(data); err != nil {
+	// The snapshot embeds the whole conversation history; it is sealed at
+	// rest like saved sessions, bound to its own path.
+	if data, err = atrest.SealAt(path, data); err != nil {
 		return fmt.Errorf("park: encrypt snapshot: %w", err)
 	}
 
@@ -239,7 +239,7 @@ func Load(token string) (*Snapshot, error) {
 		}
 		return nil, fmt.Errorf("park: read: %w", err)
 	}
-	if data, err = atrest.Open(data); err != nil {
+	if data, err = atrest.OpenAt(path, data); err != nil {
 		return nil, fmt.Errorf("park: decrypt: %w", err)
 	}
 	var s Snapshot

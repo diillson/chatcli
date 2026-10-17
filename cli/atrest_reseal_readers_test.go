@@ -23,6 +23,7 @@ func resealFixture(t *testing.T) (*ChatCLI, string) {
 	t.Helper()
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home) // windows
 	t.Setenv(atrest.EnvKey, "")
 	t.Setenv(atrest.EnvPreviousKeys, "")
 	root := filepath.Join(home, ".chatcli")
@@ -32,7 +33,7 @@ func resealFixture(t *testing.T) (*ChatCLI, string) {
 func mustReseal(t *testing.T, c *ChatCLI, wantRewritten int) {
 	t.Helper()
 	t.Setenv(atrest.EnvKey, "reseal-readers-key")
-	rep := c.resealAtRestStores()
+	rep := c.resealAtRestStores(0)
 	if len(rep.Errors) != 0 || rep.Rewritten != wantRewritten {
 		t.Fatalf("reseal report = %+v, want %d rewritten and no errors", rep, wantRewritten)
 	}

@@ -14,11 +14,13 @@
 // the exact derivation the original cli.SessionEncryptor documented, so a file
 // written by either path opens with the other.
 //
-// Policy: encryption is an explicit opt-in — Seal encrypts only while
-// CHATCLI_ENCRYPTION_KEY is set, and Open transparently passes plaintext
-// through, so an existing plaintext store keeps loading and is re-written
-// encrypted on its next save (transparent migration). An encrypted file with
-// no key present is an error, never silently empty.
+// Policy: Seal encrypts whenever a secret is available — CHATCLI_ENCRYPTION_KEY,
+// or the key provider the CLI installs at startup (a data key derived from
+// the secret in the OS keychain; see keysource.go). CHATCLI_ENCRYPTION_KEY=off
+// turns encryption off. Open transparently passes plaintext through, so an
+// existing plaintext store keeps loading and is re-written encrypted on its
+// next save (transparent migration). An encrypted file with no key present
+// is an error, never silently empty.
 package atrest
 
 import (
@@ -145,7 +147,7 @@ func IsEncrypted(data []byte) bool {
 
 // Enabled reports whether the process opted into encryption at rest.
 func Enabled() bool {
-	return os.Getenv(EnvKey) != ""
+	return currentSecret() != ""
 }
 
 // fromEnv builds the version-1 Encryptor from CHATCLI_ENCRYPTION_KEY
@@ -153,9 +155,9 @@ func Enabled() bool {
 // costs microseconds and reading the environment each time keeps
 // behavior consistent with a runtime reload.
 func fromEnv() (*Encryptor, error) {
-	secret := os.Getenv(EnvKey)
+	secret := readSecret()
 	if secret == "" {
-		return nil, ErrKeyMissing
+		return nil, missingKey()
 	}
 	return legacyEncryptor(secret)
 }
@@ -228,7 +230,7 @@ func SealAt(path string, plaintext []byte) ([]byte, error) {
 	if !Enabled() {
 		return plaintext, nil
 	}
-	enc, err := v2Encryptor(os.Getenv(EnvKey))
+	enc, err := v2Encryptor(currentSecret())
 	if err != nil {
 		return nil, err
 	}
@@ -242,9 +244,9 @@ func OpenAt(path string, data []byte) ([]byte, error) {
 	if !isV2(data) {
 		return Open(data)
 	}
-	secret := os.Getenv(EnvKey)
+	secret := readSecret()
 	if secret == "" {
-		return nil, ErrKeyMissing
+		return nil, missingKey()
 	}
 	// Bound to this path first; a payload sealed without a location (Seal,
 	// or a store that has not been resealed at its path yet) carries no
@@ -328,7 +330,7 @@ func Seal(plaintext []byte) ([]byte, error) {
 	if !Enabled() {
 		return plaintext, nil
 	}
-	enc, err := v2Encryptor(os.Getenv(EnvKey))
+	enc, err := v2Encryptor(currentSecret())
 	if err != nil {
 		return nil, err
 	}
@@ -368,19 +370,23 @@ func Open(data []byte) ([]byte, error) {
 	return nil, err
 }
 
-// previousSecrets parses EnvPreviousKeys (comma-separated, blanks skipped).
+// previousSecrets parses EnvPreviousKeys (comma-separated, blanks
+// skipped). While CHATCLI_ENCRYPTION_KEY names a secret, the provider's
+// secret (the keychain key) is a retired key too: moving from the default
+// key to one of your own is set the variable, then reseal.
 func previousSecrets() []string {
-	raw := os.Getenv(EnvPreviousKeys)
-	if raw == "" {
-		return nil
-	}
 	var out []string
-	for _, s := range strings.Split(raw, ",") {
+	if v := os.Getenv(EnvKey); v != "" && !isOffValue(v) {
+		if secret, _, err := providedSecret(); err == nil && secret != "" && secret != v {
+			out = append(out, secret)
+		}
+	}
+	for _, s := range strings.Split(os.Getenv(EnvPreviousKeys), ",") {
 		if s = strings.TrimSpace(s); s != "" {
 			out = append(out, s)
 		}
 	}
-	return out
+	return append(out, fallbackSecrets()...)
 }
 
 // SealedWithCurrentKey reports whether data opens with the current key
@@ -395,7 +401,7 @@ func sealedWithCurrentKeyAt(path string, data []byte) bool {
 	if !isV2(data) {
 		return false
 	}
-	enc, err := v2Encryptor(os.Getenv(EnvKey))
+	enc, err := v2Encryptor(currentSecret())
 	if err != nil {
 		return false
 	}
@@ -406,6 +412,9 @@ func sealedWithCurrentKeyAt(path string, data []byte) bool {
 // KeyFingerprint identifies the current key for display (first 8 hex of
 // SHA-256 of the derived key), "" when encryption is off.
 func KeyFingerprint() string {
+	if !Enabled() {
+		return ""
+	}
 	enc, err := fromEnv()
 	if err != nil {
 		return ""
@@ -421,6 +430,10 @@ func KeyFingerprint() string {
 func ResealFile(path string) (bool, error) {
 	if !Enabled() {
 		return false, ErrKeyMissing
+	}
+	before, err := os.Stat(path) // #nosec G703 -- operator-owned store path
+	if err != nil {
+		return false, err
 	}
 	data, err := os.ReadFile(path) // #nosec G304 G703 -- store path enumerated by the caller's walk of the operator-owned state root, never model or network input
 	if err != nil {
@@ -441,20 +454,109 @@ func ResealFile(path string) (bool, error) {
 	if err != nil {
 		return false, err
 	}
+	if !sameContent(info, before) {
+		return false, ErrChangedDuringReseal
+	}
 	// fsync'd temp + rename: a power loss between the write and the rename
 	// must never leave an empty store behind the old name.
 	if err := utils.AtomicWriteFile(path, sealed, info.Mode().Perm()); err != nil {
 		return false, err
 	}
+	keepModTime(path, before)
 	return true, nil
+}
+
+// keepModTime gives a resealed file back the modification time it had:
+// the content did not change, and session recency, retention TTLs and
+// "continue the last session" all read it.
+func keepModTime(path string, before os.FileInfo) {
+	_ = os.Chtimes(path, before.ModTime(), before.ModTime()) // #nosec G703 -- store path enumerated by the caller's walk of the state root
+}
+
+// ErrChangedDuringReseal reports a file another writer replaced while it
+// was being resealed. It is left as that writer saved it — sealed by the
+// writer itself when encryption is on — and the next pass picks it up.
+var ErrChangedDuringReseal = errors.New("store changed while it was being resealed; left for the next pass")
+
+// sameContent reports whether a file still has the size and modification
+// time it had when it was read.
+func sameContent(now, before os.FileInfo) bool {
+	return before != nil && now.Size() == before.Size() && now.ModTime().Equal(before.ModTime())
 }
 
 // ResealLines rewrites a line-oriented store (one sealed record per line,
 // prefixed by linePrefix and base64-encoded) with the current key. Lines
 // that are plaintext or already current are copied as they are.
 func ResealLines(path, linePrefix string) (int, error) {
+	return rewriteLines(path, linePrefix, func(i int, line string) (string, bool, error) {
+		if !strings.HasPrefix(line, linePrefix) {
+			return line, false, nil
+		}
+		return resealLine(path, linePrefix, i, line, true)
+	})
+}
+
+// SealLines seals every record of a line-oriented store with the current
+// key: plaintext lines are sealed (the migration of a store written before
+// encryption was on) and lines sealed with a retired key move to the
+// current one. bound selects the path binding: true seals with SealAt(path),
+// false with Seal, matching how the store's own writer seals. Blank lines
+// are kept. Returns how many lines were rewritten.
+func SealLines(path, linePrefix string, bound bool) (int, error) {
+	at := ""
+	if bound {
+		at = path
+	}
+	return rewriteLines(path, linePrefix, func(i int, line string) (string, bool, error) {
+		if strings.HasPrefix(line, linePrefix) {
+			return resealLine(at, linePrefix, i, line, bound)
+		}
+		if strings.TrimSpace(line) == "" {
+			return line, false, nil
+		}
+		sealed, err := SealAt(at, []byte(line))
+		if err != nil {
+			return line, false, err
+		}
+		return linePrefix + base64.StdEncoding.EncodeToString(sealed), true, nil
+	})
+}
+
+// resealLine moves one sealed line to the current key; at is the path the
+// line is bound to ("" for unbound). A line already current, or one whose
+// payload is not base64, is kept. skipBad keeps ResealLines' tolerance of
+// undecodable lines.
+func resealLine(at, linePrefix string, i int, line string, skipBad bool) (string, bool, error) {
+	raw, err := base64.StdEncoding.DecodeString(line[len(linePrefix):])
+	if err != nil {
+		if skipBad {
+			return line, false, nil
+		}
+		return line, false, fmt.Errorf("line %d: %w", i+1, err)
+	}
+	if sealedWithCurrentKeyAt(at, raw) {
+		return line, false, nil
+	}
+	plain, err := OpenAt(at, raw)
+	if err != nil {
+		return line, false, fmt.Errorf("line %d: %w", i+1, err)
+	}
+	sealed, err := SealAt(at, plain)
+	if err != nil {
+		return line, false, err
+	}
+	return linePrefix + base64.StdEncoding.EncodeToString(sealed), true, nil
+}
+
+// rewriteLines applies fn to every line of path and atomically replaces the
+// file when any line changed. An error from fn aborts with the file intact.
+func rewriteLines(path, linePrefix string, fn func(i int, line string) (string, bool, error)) (int, error) {
 	if !Enabled() {
 		return 0, ErrKeyMissing
+	}
+	before, err := os.Stat(path) // #nosec G703 -- operator-owned store path
+	if err != nil {
+		return 0, err
 	}
 	data, err := os.ReadFile(path) // #nosec G304 G703 -- store path enumerated by the caller's walk of the operator-owned state root, never model or network input
 	if err != nil {
@@ -463,23 +565,14 @@ func ResealLines(path, linePrefix string) (int, error) {
 	lines := strings.Split(string(data), "\n")
 	changed := 0
 	for i, line := range lines {
-		if !strings.HasPrefix(line, linePrefix) {
-			continue
-		}
-		raw, err := base64.StdEncoding.DecodeString(line[len(linePrefix):])
-		if err != nil || sealedWithCurrentKeyAt(path, raw) {
-			continue
-		}
-		plain, err := OpenAt(path, raw)
+		out, did, err := fn(i, line)
 		if err != nil {
-			return changed, fmt.Errorf("line %d: %w", i+1, err)
+			return 0, err
 		}
-		sealed, err := SealAt(path, plain)
-		if err != nil {
-			return changed, err
+		if did {
+			lines[i] = out
+			changed++
 		}
-		lines[i] = linePrefix + base64.StdEncoding.EncodeToString(sealed)
-		changed++
 	}
 	if changed == 0 {
 		return 0, nil
@@ -488,8 +581,12 @@ func ResealLines(path, linePrefix string) (int, error) {
 	if err != nil {
 		return 0, err
 	}
+	if !sameContent(info, before) {
+		return 0, ErrChangedDuringReseal
+	}
 	if err := utils.AtomicWriteFile(path, []byte(strings.Join(lines, "\n")), info.Mode().Perm()); err != nil {
 		return 0, err
 	}
+	keepModTime(path, before)
 	return changed, nil
 }

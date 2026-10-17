@@ -437,3 +437,28 @@ func TestTranscriptIndex_ResolvesHashesRecordedByEarlierBuilds(t *testing.T) {
 		t.Fatal("an exact reasoning-free match must win over the alias of a reasoning-carrying twin")
 	}
 }
+
+// A fork of a sealed journal must open under its own name: lines are bound
+// to their file's path, so copying the bytes is not enough.
+func TestForkTranscriptJournal_SealedLinesOpenUnderTheNewName(t *testing.T) {
+	t.Setenv(atrest.EnvKey, "journal-fork-key-journal-fork-key-0")
+	dir := t.TempDir()
+	j, _ := openTranscriptJournal(dir, "tr-parent")
+	if err := j.Sync([]models.Message{{Role: "user", Content: "first"}, {Role: "assistant", Content: "second"}}); err != nil {
+		t.Fatal(err)
+	}
+	c := &ChatCLI{logger: zap.NewNop(), transcript: j}
+	id := c.forkTranscriptJournal()
+	if id == "" {
+		t.Fatal("fork failed")
+	}
+	forked := filepath.Join(dir, id+".jsonl")
+	raw, _ := os.ReadFile(forked)
+	if strings.Contains(string(raw), "first") {
+		t.Fatal("the forked journal holds plaintext")
+	}
+	msgs, err := readTranscript(forked)
+	if err != nil || len(msgs) != 2 || msgs[1].Content != "second" {
+		t.Fatalf("forked journal does not read back: %v %+v", err, msgs)
+	}
+}

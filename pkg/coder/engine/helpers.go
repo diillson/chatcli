@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"flag"
 	"fmt"
+	"github.com/diillson/chatcli/pkg/atrest"
 	"io"
 	"os"
 	"path/filepath"
@@ -188,7 +189,7 @@ func collectFiles(primary string, extras []string) []string {
 // readTextFileWithLimit is readFileWithLimit for a text read: a PDF yields
 // its extracted text ("--- page N ---" per page) instead of its bytes.
 func readTextFileWithLimit(ctx context.Context, path string, maxBytes int) (string, bool, error) {
-	data, err := os.ReadFile(path) //#nosec G304 -- path supplied by user/agent through validated tool surface (boundary check upstream)
+	data, err := atrest.ReadAttachment(path)
 	if err != nil {
 		return "", false, err
 	}
@@ -210,7 +211,7 @@ func readTextFileWithLimit(ctx context.Context, path string, maxBytes int) (stri
 }
 
 func readFileWithLimit(path string, maxBytes int) (string, bool, error) {
-	data, err := os.ReadFile(path) //#nosec G304 -- path supplied by user/agent through validated tool surface (boundary check upstream)
+	data, err := atrest.ReadAttachment(path)
 	if err != nil {
 		return "", false, err
 	}
