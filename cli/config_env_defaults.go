@@ -327,9 +327,10 @@ var envDefaults = map[string]envDefault{
 	"CHATCLI_KEYCHAIN_BACKEND":       {Value: "auto", Source: "auth.NewKeychainStore (auto|keychain|file)"},
 
 	// ─── Server mode ─────────────────────────────────────────────
-	"CHATCLI_GRPC_REFLECTION":   {Value: "false", IsBool: true, Source: "server.go"},
-	"CHATCLI_FALLBACK_ENABLED":  {Value: "false", IsBool: true, Source: "not read by the server (CHATCLI_FALLBACK_PROVIDERS is the switch)"},
-	"CHATCLI_OPERATOR_DEV_MODE": {Value: "false", IsBool: true, Source: "operator"},
+	"CHATCLI_GRPC_REFLECTION":       {Value: "false", IsBool: true, Source: "server.go"},
+	"CHATCLI_SERVER_SHUTDOWN_DELAY": {Value: "0", Source: "server.drainAndStop (serving after SIGTERM before stopping)"},
+	"CHATCLI_FALLBACK_ENABLED":      {Value: "false", IsBool: true, Source: "not read by the server (CHATCLI_FALLBACK_PROVIDERS is the switch)"},
+	"CHATCLI_OPERATOR_DEV_MODE":     {Value: "false", IsBool: true, Source: "operator"},
 
 	// ─── Server mode: limits ─────────────────────────────────────
 	// The numbers an operator sizes a deployment against. They live here
