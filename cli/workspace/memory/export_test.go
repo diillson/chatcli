@@ -10,6 +10,7 @@ import (
 	"bytes"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -80,7 +81,9 @@ func TestExportImport_SealedWithKey(t *testing.T) {
 	if _, err := dst.ImportFromFile(path); err == nil || !strings.Contains(err.Error(), "sealed") {
 		t.Fatalf("a sealed file without the key must fail explicitly: %v", err)
 	}
-	if fi, _ := os.Stat(path); fi.Mode().Perm() != 0o600 {
+	// Unix permission bits; on Windows the user profile's ACL keeps the
+	// file private and Go reports every writable file as 0666.
+	if fi, _ := os.Stat(path); runtime.GOOS != "windows" && fi.Mode().Perm() != 0o600 {
 		t.Fatal("exports are private files")
 	}
 }

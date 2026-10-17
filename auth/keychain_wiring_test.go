@@ -12,6 +12,7 @@ import (
 	"encoding/base64"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sync"
 	"testing"
 )
@@ -555,7 +556,9 @@ func TestWriteKeyFile_UsesOwnerOnlyPermissions(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if perm := info.Mode().Perm(); perm != 0o600 {
+	// Unix permission bits; on Windows the user profile's ACL is what
+	// keeps the file private, and Go reports every writable file as 0666.
+	if perm := info.Mode().Perm(); runtime.GOOS != "windows" && perm != 0o600 {
 		t.Errorf("key file mode = %v, want 0600", perm)
 	}
 	got, ok := readKeyFile(path)
@@ -610,5 +613,59 @@ func TestResolveKey_ConcurrentFirstRunsAgreeOnOneKey(t *testing.T) {
 		if err != nil || !bytes.Equal(again, keys[0]) {
 			t.Fatalf("keychain=%v: the stored key is not the one handed out", withKeychain)
 		}
+	}
+}
+
+// A stray key file next to a marker, in a context with no keychain at all,
+// is an error: the file is not trusted over a keychain it cannot consult.
+func TestResolveKey_StrayFileWithoutAKeychainFailsClosed(t *testing.T) {
+	resetAdopt(t)
+	t.Setenv("CHATCLI_AUTH_DIR", "")
+	path := keyPathIn(t)
+	writeKey(t, path, 0x31)
+	fk := newFakeKeychain()
+	if _, err := resolveEncryptionKey(fk.store(KeychainAuto), path); err != nil {
+		t.Fatal(err)
+	}
+	writeKey(t, path, 0x32)
+	fk.available = false
+	if _, err := resolveEncryptionKey(fk.store(KeychainAuto), path); err == nil {
+		t.Fatal("a stray file was used where the keychain could not be consulted")
+	}
+}
+
+// A marker left behind after the keychain item was removed by hand: the key
+// file is the only key left, and it is adopted again.
+func TestResolveKey_StaleMarkerReadoptsTheFile(t *testing.T) {
+	resetAdopt(t)
+	t.Setenv("CHATCLI_AUTH_DIR", "")
+	path := keyPathIn(t)
+	key := writeKey(t, path, 0x41)
+	markKeyInKeychain(path)
+	fk := newFakeKeychain()
+	got, err := resolveEncryptionKey(fk.store(KeychainAuto), path)
+	if err != nil || !bytes.Equal(got, key) {
+		t.Fatalf("resolve = %v, want the file key", err)
+	}
+	if !bytes.Equal(fk.items[keychainAccount], encodedKey(key)) {
+		t.Error("the file key was not adopted again")
+	}
+}
+
+// publishNewKey adopts the key another process left in the keychain when
+// its own write did not stick.
+func TestPublishNewKey_AdoptsTheKeyTheKeychainHolds(t *testing.T) {
+	fk := newFakeKeychain()
+	held := bytes.Repeat([]byte{0x51}, 32)
+	fk.items[keychainAccount] = encodedKey(held)
+	fk.loseWrite = true
+	got, ok := publishNewKey(fk.store(KeychainAuto), bytes.Repeat([]byte{0x52}, 32))
+	if !ok || !bytes.Equal(got, held) {
+		t.Fatalf("publishNewKey = %v, want the held key", ok)
+	}
+	fk2 := newFakeKeychain()
+	fk2.failSet = true
+	if _, ok := publishNewKey(fk2.store(KeychainAuto), held); ok {
+		t.Fatal("a refused write reported a published key")
 	}
 }
