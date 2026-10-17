@@ -435,7 +435,7 @@ Minimum IAM policy:
 }
 ```
 
-See the [Bedrock feature docs](https://chatcli.edilsonfreitas.com/features/bedrock) for model ids, inference profiles, and corporate-proxy troubleshooting.
+See the [Bedrock feature docs](https://chatcli.edilsonfreitas.com/providers/bedrock) for model ids, inference profiles, and corporate-proxy troubleshooting.
 
 ### Anomaly (Auto-created by WatcherBridge)
 
@@ -815,6 +815,6 @@ make deploy IMG=ghcr.io/diillson/chatcli-operator:latest
 
 ## Documentation
 
-Full documentation at [https://chatcli.edilsonfreitas.com/features/k8s-operator](https://chatcli.edilsonfreitas.com/features/k8s-operator/)
+Full documentation at [https://chatcli.edilsonfreitas.com/kubernetes/k8s-operator](https://chatcli.edilsonfreitas.com/kubernetes/k8s-operator/)
 
-Deep-dive AIOps architecture at [https://chatcli.edilsonfreitas.com/features/aiops-platform](https://chatcli.edilsonfreitas.com/features/aiops-platform/)
+Deep-dive AIOps architecture at [https://chatcli.edilsonfreitas.com/kubernetes/aiops-platform](https://chatcli.edilsonfreitas.com/kubernetes/aiops-platform/)

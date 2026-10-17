@@ -214,7 +214,7 @@ annotations:
     - name: Documentation
       url: https://chatcli.edilsonfreitas.com
     - name: Server mode guide
-      url: https://chatcli.edilsonfreitas.com/features/server-mode
+      url: https://chatcli.edilsonfreitas.com/server/server-mode
     - name: Source
       url: https://github.com/diillson/chatcli
   artifacthub.io/maintainers: |

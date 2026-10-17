@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/go-logr/logr"
 	"github.com/prometheus/client_golang/prometheus"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -90,10 +91,39 @@ type InstanceReconciler struct {
 // +kubebuilder:rbac:groups=rbac.authorization.k8s.io,resources=roles;rolebindings;clusterroles;clusterrolebindings,verbs=get;list;watch;create;update;patch;delete
 // The operator creates each Instance's encryption-at-rest key Secret, and
 // must itself hold get on secrets to grant it in the Instance's Role (RBAC
-// escalation rule).
-// +kubebuilder:rbac:groups=core,resources=secrets,verbs=get;list;watch;create
+// escalation rule); patch removes the owner reference 1.221.0 and 1.221.1
+// set on that Secret.
+// +kubebuilder:rbac:groups=core,resources=secrets,verbs=get;list;watch;create;patch
 
+// conflictRetryInterval is how soon a reconcile that lost an optimistic
+// concurrency race runs again.
+const conflictRetryInterval = time.Second
+
+// Reconcile runs one reconcile of an Instance. A write that lost an
+// optimistic concurrency race ("the object has been modified") is not a
+// failure: the Deployment controller, the kubelet or a previous reconcile
+// changed the object since the cache read it, which happens on every
+// rollout. It is retried shortly with the latest version instead of being
+// reported as a reconciler error.
 func (r *InstanceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
+	res, err := r.reconcileInstance(ctx, req)
+	if err != nil && errors.IsConflict(err) {
+		log.FromContext(ctx).V(1).Info("An object changed during the reconcile; retrying with the latest version", "reason", err.Error())
+		return ctrl.Result{RequeueAfter: conflictRetryInterval}, nil
+	}
+	return res, err
+}
+
+// logReconcileError logs a failed reconcile step, except an optimistic
+// concurrency conflict, which Reconcile retries without reporting.
+func logReconcileError(logger logr.Logger, err error, msg string) {
+	if errors.IsConflict(err) {
+		return
+	}
+	logger.Error(err, msg)
+}
+
+func (r *InstanceReconciler) reconcileInstance(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	log := log.FromContext(ctx)
 	start := time.Now()
 
@@ -144,7 +174,7 @@ func (r *InstanceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 
 	// 4. Reconcile owned resources
 	if err := r.reconcileServiceAccount(ctx, &instance); err != nil {
-		log.Error(err, "failed to reconcile ServiceAccount")
+		logReconcileError(log, err, "failed to reconcile ServiceAccount")
 		reconciliationsTotal.WithLabelValues("error").Inc()
 		reconcileDuration.Observe(time.Since(start).Seconds())
 		return ctrl.Result{}, err
@@ -152,7 +182,7 @@ func (r *InstanceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 
 	if instance.Spec.Watcher != nil && instance.Spec.Watcher.Enabled {
 		if err := r.reconcileRBAC(ctx, &instance); err != nil {
-			log.Error(err, "failed to reconcile RBAC")
+			logReconcileError(log, err, "failed to reconcile RBAC")
 			reconciliationsTotal.WithLabelValues("error").Inc()
 			reconcileDuration.Observe(time.Since(start).Seconds())
 			return ctrl.Result{}, err
@@ -162,7 +192,7 @@ func (r *InstanceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 	// The encryption-at-rest key Secret exists before the Deployment, so
 	// the server never needs to create it.
 	if err := r.reconcileAtrestKey(ctx, &instance); err != nil {
-		log.Error(err, "failed to reconcile the encryption-at-rest key")
+		logReconcileError(log, err, "failed to reconcile the encryption-at-rest key")
 		reconciliationsTotal.WithLabelValues("error").Inc()
 		reconcileDuration.Observe(time.Since(start).Seconds())
 		return ctrl.Result{}, err
@@ -176,7 +206,7 @@ func (r *InstanceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 
 	if instance.Spec.Persistence != nil && instance.Spec.Persistence.Enabled {
 		if err := r.reconcilePVC(ctx, &instance); err != nil {
-			log.Error(err, "failed to reconcile PVC")
+			logReconcileError(log, err, "failed to reconcile PVC")
 			reconciliationsTotal.WithLabelValues("error").Inc()
 			reconcileDuration.Observe(time.Since(start).Seconds())
 			return ctrl.Result{}, err
@@ -184,7 +214,7 @@ func (r *InstanceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 	}
 
 	if err := r.reconcileService(ctx, &instance); err != nil {
-		log.Error(err, "failed to reconcile Service")
+		logReconcileError(log, err, "failed to reconcile Service")
 		reconciliationsTotal.WithLabelValues("error").Inc()
 		reconcileDuration.Observe(time.Since(start).Seconds())
 		return ctrl.Result{}, err
@@ -199,7 +229,7 @@ func (r *InstanceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 	authBlocked := applyAuthCondition(ctx, &instance)
 	if tlsBlocked || authBlocked {
 		if err := r.writeStatusIfChanged(ctx, &instance, observed); err != nil {
-			log.Error(err, "failed to record the provisioning precheck conditions")
+			logReconcileError(log, err, "failed to record the provisioning precheck conditions")
 		}
 		reconciliationsTotal.WithLabelValues("success").Inc()
 		reconcileDuration.Observe(time.Since(start).Seconds())
@@ -207,7 +237,7 @@ func (r *InstanceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 	}
 
 	if err := r.reconcileDeployment(ctx, &instance); err != nil {
-		log.Error(err, "failed to reconcile Deployment")
+		logReconcileError(log, err, "failed to reconcile Deployment")
 		reconciliationsTotal.WithLabelValues("error").Inc()
 		reconcileDuration.Observe(time.Since(start).Seconds())
 		return ctrl.Result{}, err
@@ -215,7 +245,7 @@ func (r *InstanceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 
 	// 5. Update status
 	if err := r.updateStatusFrom(ctx, &instance, observed); err != nil {
-		log.Error(err, "failed to update status")
+		logReconcileError(log, err, "failed to update status")
 		reconciliationsTotal.WithLabelValues("error").Inc()
 		reconcileDuration.Observe(time.Since(start).Seconds())
 		return ctrl.Result{}, err
@@ -479,18 +509,18 @@ func (r *InstanceReconciler) reconcileConfigMaps(ctx context.Context, instance *
 	log := log.FromContext(ctx)
 
 	if err := r.reconcileConfigMap(ctx, instance); err != nil {
-		log.Error(err, "failed to reconcile ConfigMap")
+		logReconcileError(log, err, "failed to reconcile ConfigMap")
 		return err
 	}
 	if instance.Spec.MCP != nil && instance.Spec.MCP.Enabled {
 		if err := r.reconcileMCPConfigMap(ctx, instance); err != nil {
-			log.Error(err, "failed to reconcile MCP ConfigMap")
+			logReconcileError(log, err, "failed to reconcile MCP ConfigMap")
 			return err
 		}
 	}
 	if instance.Spec.Watcher != nil && instance.Spec.Watcher.Enabled && len(instance.Spec.Watcher.Targets) > 0 {
 		if err := r.reconcileWatchConfigMap(ctx, instance); err != nil {
-			log.Error(err, "failed to reconcile watch config ConfigMap")
+			logReconcileError(log, err, "failed to reconcile watch config ConfigMap")
 			return err
 		}
 	}

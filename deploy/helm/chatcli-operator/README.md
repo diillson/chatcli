@@ -179,11 +179,21 @@ The server's stores (sessions, memory, transcripts and the rest) are encrypted w
 | Your own variable | a `spec.extraEnv` entry named `CHATCLI_ENCRYPTION_KEY` | nothing of its own |
 | Operator-managed key (**default**) | neither of the above, `spec.features.encryptionAtRest` unset or `true` | creates the Secret `<instance>-atrest-key` and points the server at it with `CHATCLI_ENCRYPTION_KEY_SECRET` |
 
-In the operator-managed mode the operator creates `<instance>-atrest-key` in the Instance namespace before the Deployment, with a random 32-byte key under `encryption-key` and an owner reference to the Instance (the same lifecycle as the sessions PVC: deleting the Instance deletes the key along with the data). It never updates or overwrites an existing Secret of that name. It also creates a Role and RoleBinding `<instance>-atrest-key` that let the Instance ServiceAccount `get` that one Secret (`resourceNames`), and sets `automountServiceAccountToken: true` on the pod; since the operator pre-creates the Secret, the server needs no `create`. The server reads the Secret only when `CHATCLI_ENCRYPTION_KEY` is empty, so a key supplied through `encryptionKeyRef` or `spec.extraEnv` always wins, and with `CHATCLI_ENCRYPTION_KEY_SECRET` set it never starts without its key.
+In the operator-managed mode the operator creates `<instance>-atrest-key` in the Instance namespace before the Deployment, with a random 32-byte key under `encryption-key` and no owner reference: deleting the Instance keeps the key (as `helm uninstall` keeps the key of the server chart), because data sealed with it outlives the Instance in volume snapshots and backups, and an Instance recreated with the same name picks it up again. It never changes the key of an existing Secret of that name. A key Secret created by 1.221.0 or 1.221.1 carries an owner reference to the Instance; the operator removes it on the next reconcile and logs `Released the encryption-at-rest key Secret`. It also creates a Role and RoleBinding `<instance>-atrest-key` that let the Instance ServiceAccount `get` that one Secret (`resourceNames`), and sets `automountServiceAccountToken: true` on the pod; since the operator pre-creates the Secret, the server needs no `create`. The server reads the Secret only when `CHATCLI_ENCRYPTION_KEY` is empty, so a key supplied through `encryptionKeyRef` or `spec.extraEnv` always wins, and with `CHATCLI_ENCRYPTION_KEY_SECRET` set it never starts without its key.
 
 `spec.features.encryptionAtRest: false` disables the operator-managed key: the operator removes the Role and RoleBinding it created (never the Secret) and the stores are written in plaintext unless a key comes from `encryptionKeyRef` or `spec.extraEnv`.
 
-**Back the key up with the data.** Deleting `<instance>-atrest-key`, or changing its value, makes everything encrypted with it unreadable; the operator never answers that with a new key. After creating the Secret it records it on the Instance (annotation `platform.chatcli.io/atrest-key-created`); if the Secret later disappears, the reconcile stops with an error naming it instead of creating a key that could not open the sealed data, and the server, which may only `get` the Secret, does not start. Restore the Secret from your backup and the Instance recovers; to start over and discard the sealed data, remove the annotation. Back the Secret up together with the PVC data (Velero, or your secret manager).
+**Back the key up with the data.** Deleting `<instance>-atrest-key`, or changing its value, makes everything encrypted with it unreadable; the operator never answers that with a new key. After creating the Secret it records it on the Instance (annotation `platform.chatcli.io/atrest-key-created`); if the Secret later disappears, the reconcile stops with an error naming it instead of creating a key that could not open the sealed data, and the server, which may only `get` the Secret, does not start. Restore the Secret from your backup and the Instance recovers; to start over and discard the sealed data, remove the annotation. Back the Secret up together with the PVC data (Velero, or your secret manager). By hand, keep only the key, not the whole object: a Secret restored with the `ownerReferences` of an Instance that no longer exists is deleted again by the garbage collector.
+
+```bash
+# Back up (the file holds the key: store it like a password)
+kubectl -n <namespace> get secret <instance>-atrest-key \
+  -o jsonpath='{.data.encryption-key}' | base64 -d > <instance>-atrest-key.txt
+
+# Restore
+kubectl -n <namespace> create secret generic <instance>-atrest-key \
+  --from-file=encryption-key=<instance>-atrest-key.txt
+```
 
 **Upgrading the operator.** Existing Instances switch to the operator-managed key on the first reconcile (their pods roll once for the new variable). Stores written in plaintext keep loading and are sealed as they are rewritten. There is no server-side path back to plaintext (the reseal that writes stores back in plaintext, `/config security reseal` with `CHATCLI_ENCRYPTION_KEY=off`, is a CLI command), so once data is sealed keep the Secret: setting `encryptionAtRest: false` afterwards leaves the server unable to read the sealed stores. To keep the key but manage it yourself, set `encryptionKeyRef: {name: <instance>-atrest-key, key: encryption-key}`.
 
@@ -810,6 +820,8 @@ spec:
 | `x509: certificate is not valid for any names` | No SAN for `<instance>.<namespace>.svc.cluster.local` | Regenerate the cert with the SANs above |
 | `x509: certificate signed by unknown authority` | Private CA, no `ca.crt` in the Secret | Add `ca.crt` to the TLS Secret |
 | `connection refused` after fixing TLS | Server not listening / Service without endpoints | `kubectl get endpoints <instance> -n <namespace>` must list pod IPs |
+| Operator logs `Alert stream ended; reopening` with `no children to pick from` during an upgrade | The Instance pods are being replaced (`Recreate` with persistence) | None: the bridge reconnects with backoff and logs `Connected to Instance` and `Alert stream open` once the new pods serve |
+| `encryption-at-rest key Secret ... is missing` and the Instance pods do not start | The key Secret the operator created was deleted | Restore it from your backup (see Encryption at rest); to discard the sealed data, remove the `platform.chatcli.io/atrest-key-created` annotation |
 
 ### Production checklist (TLS)
 
@@ -851,5 +863,5 @@ The `rewrite-target` + capture group is required when mounting the dashboard und
 
 ## Documentation
 
-- Operator guide: [chatcli.edilsonfreitas.com/features/k8s-operator](https://chatcli.edilsonfreitas.com/features/k8s-operator)
+- Operator guide: [chatcli.edilsonfreitas.com/kubernetes/k8s-operator](https://chatcli.edilsonfreitas.com/kubernetes/k8s-operator)
 - Production setup: [chatcli.edilsonfreitas.com/cookbook/aiops-production-setup](https://chatcli.edilsonfreitas.com/cookbook/aiops-production-setup)
