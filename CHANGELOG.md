@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.221.2](https://github.com/diillson/chatcli/compare/v1.221.1...v1.221.2) (2026-10-17)
+
+
+### Bug Fixes
+
+* **operator:** keep the at-rest key when the Instance is deleted and retry write conflicts quietly ([#1818](https://github.com/diillson/chatcli/issues/1818)) ([5616342](https://github.com/diillson/chatcli/commit/56163422a90adf03d2d1ae8ba0957de5ed4b3c09))
+
 ## [1.221.1](https://github.com/diillson/chatcli/compare/v1.221.0...v1.221.1) (2026-10-17)
 
 
