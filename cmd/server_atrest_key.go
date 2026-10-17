@@ -42,7 +42,7 @@ const (
 	// envEncryptionKeySecretName names the Secret (in the pod's namespace) that
 	// holds the encryption-at-rest key. It is read only when
 	// CHATCLI_ENCRYPTION_KEY is empty, so an injected key always wins.
-	envEncryptionKeySecretName = "CHATCLI_ENCRYPTION_KEY_SECRET"
+	envEncryptionKeySecretName = "CHATCLI_ENCRYPTION_KEY_SECRET" // #nosec G101 -- the name of an environment variable, not a credential
 
 	// atrestSecretDataKey is the Secret data entry that carries the key.
 	atrestSecretDataKey = "encryption-key"

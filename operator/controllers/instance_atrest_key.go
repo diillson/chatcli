@@ -44,7 +44,7 @@ const (
 	// envEncryptionKey is the variable a directly supplied key arrives in.
 	envEncryptionKey = "CHATCLI_ENCRYPTION_KEY"
 	// envEncryptionKeySecretName points the server at the key Secret.
-	envEncryptionKeySecretName = "CHATCLI_ENCRYPTION_KEY_SECRET"
+	envEncryptionKeySecretName = "CHATCLI_ENCRYPTION_KEY_SECRET" // #nosec G101 -- the name of an environment variable, not a credential
 	// atrestKeyBytes is the size of a generated key before base64.
 	atrestKeyBytes = 32
 	// atrestKeyCreatedAnnotation records on the Instance that the operator
