@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.221.3](https://github.com/diillson/chatcli/compare/v1.221.2...v1.221.3) (2026-10-17)
+
+
+### Bug Fixes
+
+* **server:** drain for a few seconds after SIGTERM so rolling updates do not drop new connections ([#1820](https://github.com/diillson/chatcli/issues/1820)) ([c3d9074](https://github.com/diillson/chatcli/commit/c3d907468150fdcafe739d7f5b220a67c58c746a))
+
 ## [1.221.2](https://github.com/diillson/chatcli/compare/v1.221.1...v1.221.2) (2026-10-17)
 
 
