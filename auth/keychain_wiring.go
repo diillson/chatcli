@@ -149,7 +149,14 @@ func resolveEncryptionKey(ks *KeychainStore, keyPath string) ([]byte, error) {
 
 	switch ks.backend {
 	case KeychainFile:
-		// Explicit file backend: never touch the keychain.
+		// Explicit file backend: the keychain is not used. The one
+		// exception is switching to it from the keychain: the key lives
+		// there (the marker says so) and no file exists yet, so the same
+		// key is copied into the file instead of failing — or, worse,
+		// creating a different one.
+		if !hasFile && keyIsInKeychain(keyPath) {
+			return moveKeychainKeyToFile(ks, keyPath)
+		}
 
 	case KeychainNative:
 		key, kerr := lookupKeychainKey(ks)

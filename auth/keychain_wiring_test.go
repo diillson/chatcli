@@ -192,10 +192,10 @@ func TestResolveKey_AutoDifferentKeyLeavesTheKeychainAlone(t *testing.T) {
 // such item". A new key would orphan every store sealed with the real one.
 func TestResolveKey_AfterTheMoveNoNewKeyIsEverCreated(t *testing.T) {
 	cases := map[string]func(fk *fakeKeychain) KeychainBackend{
-		"file backend":      func(fk *fakeKeychain) KeychainBackend { return KeychainFile },
-		"no keychain here":  func(fk *fakeKeychain) KeychainBackend { fk.available = false; return KeychainAuto },
-		"item gone":         func(fk *fakeKeychain) KeychainBackend { delete(fk.items, keychainAccount); return KeychainAuto },
-		"native, item gone": func(fk *fakeKeychain) KeychainBackend { delete(fk.items, keychainAccount); return KeychainNative },
+		"file backend, keychain unreadable": func(fk *fakeKeychain) KeychainBackend { fk.available = false; return KeychainFile },
+		"no keychain here":                  func(fk *fakeKeychain) KeychainBackend { fk.available = false; return KeychainAuto },
+		"item gone":                         func(fk *fakeKeychain) KeychainBackend { delete(fk.items, keychainAccount); return KeychainAuto },
+		"native, item gone":                 func(fk *fakeKeychain) KeychainBackend { delete(fk.items, keychainAccount); return KeychainNative },
 	}
 	for name, setup := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -668,4 +668,40 @@ func TestPublishNewKey_AdoptsTheKeyTheKeychainHolds(t *testing.T) {
 	if _, ok := publishNewKey(fk2.store(KeychainAuto), held); ok {
 		t.Fatal("a refused write reported a published key")
 	}
+}
+
+// Switching backends after the key moved never changes the key: auto ->
+// file copies the keychain key into the file, file -> keychain reads it
+// from the keychain, and back to auto the file is adopted again.
+func TestResolveKey_SwitchingBackendsKeepsTheSameKey(t *testing.T) {
+	resetAdopt(t)
+	t.Setenv("CHATCLI_AUTH_DIR", "")
+	path := keyPathIn(t)
+	original := writeKey(t, path, 0x61)
+	fk := newFakeKeychain()
+	step := func(name string, backend KeychainBackend) {
+		t.Helper()
+		resetAdopt(t)
+		got, err := resolveEncryptionKey(fk.store(backend), path)
+		if err != nil || !bytes.Equal(got, original) {
+			t.Fatalf("%s: resolve = %v, the key changed", name, err)
+		}
+	}
+	step("auto (moves the file into the keychain)", KeychainAuto)
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Fatal("the file was not moved")
+	}
+	step("file", KeychainFile)
+	if got, err := os.ReadFile(path); err != nil || !bytes.Equal(got, original) {
+		t.Fatal("switching to file did not write the same key to the file")
+	}
+	if keyIsInKeychain(path) {
+		t.Error("the marker survived the switch to the file backend")
+	}
+	if !bytes.Equal(fk.items[keychainAccount], encodedKey(original)) {
+		t.Error("the keychain item was dropped on the switch to file")
+	}
+	step("keychain", KeychainNative)
+	step("auto again", KeychainAuto)
+	step("file again", KeychainFile)
 }

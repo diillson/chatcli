@@ -122,3 +122,34 @@ func strayFileKey(ks *KeychainStore, keyPath string, fileKey []byte) ([]byte, er
 		return nil, keychainUnreadableError(err)
 	}
 }
+
+// moveKeychainKeyToFile serves a switch to CHATCLI_KEYCHAIN_BACKEND=file
+// after the key moved to the keychain: the keychain key is written to the
+// key file (0600, never over an existing file) and the marker is removed,
+// since the file is the key's home from now on. The keychain item is kept,
+// so switching back finds the same key. A keychain this process cannot
+// read is the usual fail-closed error.
+func moveKeychainKeyToFile(ks *KeychainStore, keyPath string) ([]byte, error) {
+	if ks == nil || ks.ops == nil || !ks.ops.Available() {
+		return nil, errKeyNotInKeychain(keyPath)
+	}
+	direct := &KeychainStore{backend: KeychainNative, ops: ks.ops}
+	key, err := lookupKeychainKey(direct)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil, errKeyNotInKeychain(keyPath)
+		}
+		return nil, keychainUnreadableError(err)
+	}
+	held, err := createKeyFile(keyPath, key)
+	if err != nil {
+		return nil, err
+	}
+	if subtle.ConstantTimeCompare(held, key) != 1 {
+		// Another process wrote a different file first: that is a key
+		// nobody can vouch for; refuse rather than pick one.
+		return nil, errKeyNotInKeychain(keyPath)
+	}
+	_ = os.Remove(keychainMarkerPath(keyPath))
+	return key, nil
+}
