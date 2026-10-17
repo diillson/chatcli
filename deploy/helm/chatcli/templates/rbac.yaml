@@ -45,9 +45,10 @@ rules:
   - apiGroups: [ "platform.chatcli.io" ]
     resources: [ "runbooks", "sourcerepositories", "sourcerepositories/status" ]
     verbs: [ "get", "list", "watch", "create", "update", "patch", "delete" ]
-  # Core resources for watcher + remediation. No Secrets: nothing in the
-  # server reads or writes one through the API (its own credentials arrive
-  # as mounted env and files); grant access through rbac.additionalRules
+  # Core resources for watcher + remediation. No Secrets: the server's own
+  # credentials arrive as mounted env and files, and the one Secret it reads
+  # through the API (the encryption-at-rest key) has its own narrow Role in
+  # atrest-key-rbac.yaml; grant other access through rbac.additionalRules
   # only for a plugin that really needs it.
   - apiGroups: [""]
     resources: ["configmaps", "persistentvolumeclaims"]
@@ -126,9 +127,10 @@ rules:
   - apiGroups: [ "platform.chatcli.io" ]
     resources: [ "runbooks", "sourcerepositories", "sourcerepositories/status" ]
     verbs: [ "get", "list", "watch", "create", "update", "patch", "delete" ]
-  # Core resources for watcher + remediation. No Secrets: nothing in the
-  # server reads or writes one through the API (its own credentials arrive
-  # as mounted env and files); grant access through rbac.additionalRules
+  # Core resources for watcher + remediation. No Secrets: the server's own
+  # credentials arrive as mounted env and files, and the one Secret it reads
+  # through the API (the encryption-at-rest key) has its own narrow Role in
+  # atrest-key-rbac.yaml; grant other access through rbac.additionalRules
   # only for a plugin that really needs it.
   - apiGroups: [""]
     resources: ["configmaps", "persistentvolumeclaims"]

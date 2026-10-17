@@ -159,6 +159,11 @@ jobs:
             --set autoscaling.enabled=true --set podDisruptionBudget.enabled=true \
             --set serviceMonitor.enabled=true --set security.jwtSecret=ci-secret \
             --set memory.enabled=true > /tmp/rendered/server-full.yaml
+          # Encryption key from an existing Secret instead of the
+          # chart-managed one.
+          helm template chatcli deploy/helm/chatcli \
+            --set server.token=ci-token \
+            --set security.encryptionKeySecret.name=chatcli-key > /tmp/rendered/server-atrest-ref.yaml
           # Operator chart: default and with TLS + CORS + diagnostics allowlist.
           helm template chatcli-operator deploy/helm/chatcli-operator \
             > /tmp/rendered/operator-default.yaml
@@ -185,6 +190,23 @@ jobs:
           expect 1 "$(count 'maxSurge: 0')" "stop-first strategy"
           # Features enabled without a ConfigMap to mount mount nothing.
           expect 0 "$(count 'name: chatcli-(agents|skills|bootstrap)$' --set agents.enabled=true --set skills.enabled=true --set bootstrap.enabled=true)" "ConfigMap volumes with nothing to mount"
+          # Encryption at rest: the chart-managed key Secret by default; an
+          # explicit key source (Secret ref, values, extraEnv) or
+          # encryptionAtRest=false turns it off, and the chart never sets
+          # CHATCLI_ENCRYPTION_KEY=off.
+          atrest_re='name: CHATCLI_ENCRYPTION_KEY_SECRET'
+          key_re='name: CHATCLI_ENCRYPTION_KEY$'
+          expect 1 "$(count "$atrest_re")" "chart-managed key Secret by default"
+          expect 1 "$(count 'automountServiceAccountToken: true')" "service account token for the key Secret"
+          expect 0 "$(count "$atrest_re" --set security.encryptionAtRest=false)" "key Secret with encryptionAtRest=false"
+          expect 0 "$(count "$key_re" --set security.encryptionAtRest=false)" "encryption key with encryptionAtRest=false"
+          expect 0 "$(count "$atrest_re" --set security.encryptionKeySecret.name=k)" "key Secret with encryptionKeySecret"
+          expect 1 "$(count 'optional: false' --set security.encryptionKeySecret.name=k)" "required secretKeyRef with encryptionKeySecret"
+          expect 0 "$(count "$atrest_re" --set 'extraEnv[0].name=CHATCLI_ENCRYPTION_KEY' --set 'extraEnv[0].value=k')" "key Secret with an extraEnv key"
+          atrest_rbac() { helm template chatcli deploy/helm/chatcli --set server.token=ci-token "$@" | grep -c 'resourceNames: \["chatcli-atrest-key"\]' || true; }
+          expect 1 "$(atrest_rbac)" "key Secret Role restricted by name"
+          expect 0 "$(atrest_rbac --set rbac.create=false)" "key Secret Role without rbac.create"
+          expect 0 "$(atrest_rbac --set security.encryptionAtRest=false)" "key Secret Role with encryptionAtRest=false"
           # Mutually exclusive or unworkable inputs fail the render.
           must_fail --set security.jwtSecret=a --set security.jwtSecretRef.name=b --set security.jwtSecretRef.key=c
           must_fail --set 'persistence.accessModes[0]=ReadWriteOncePod' --set replicaCount=2

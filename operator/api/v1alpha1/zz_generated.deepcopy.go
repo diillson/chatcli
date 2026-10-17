@@ -1428,6 +1428,11 @@ func (in *FeaturesSpec) DeepCopyInto(out *FeaturesSpec) {
 		*out = new(SecretKeyRefSpec)
 		**out = **in
 	}
+	if in.EncryptionAtRest != nil {
+		in, out := &in.EncryptionAtRest, &out.EncryptionAtRest
+		*out = new(bool)
+		**out = **in
+	}
 	if in.LogRotation != nil {
 		in, out := &in.LogRotation, &out.LogRotation
 		*out = new(LogRotationSpec)

@@ -1241,7 +1241,26 @@
         },
         "encryptionKey": {
           "type": "string",
-          "description": "Encryption key for sessions at rest. Use secretKeyRef via extraEnv for production."
+          "description": "Deprecated: plaintext encryption-at-rest key in the values. Prefer encryptionKeySecret, or leave both empty for the chart-managed key Secret (encryptionAtRest)."
+        },
+        "encryptionAtRest": {
+          "type": "boolean",
+          "description": "Encryption at rest with a key held in a Kubernetes Secret (<fullname>-atrest-key) that the server creates on first start when absent. Used only when neither encryptionKeySecret.name, encryptionKey nor an extraEnv CHATCLI_ENCRYPTION_KEY supplies a key. false leaves the stores in plaintext unless a key arrives through extraEnv or secrets.existingSecret."
+        },
+        "encryptionKeySecret": {
+          "type": "object",
+          "description": "Existing Secret holding the encryption-at-rest key, injected as CHATCLI_ENCRYPTION_KEY. Takes precedence over encryptionKey and encryptionAtRest.",
+          "additionalProperties": false,
+          "properties": {
+            "name": {
+              "type": "string",
+              "description": "Secret name; empty disables this source."
+            },
+            "key": {
+              "type": "string",
+              "description": "Data key inside the Secret (default encryption-key)."
+            }
+          }
         },
         "jwtIssuer": {
           "type": "string",

@@ -1,0 +1,7 @@
+{
+  "cmd.server.atrest_secret.no_namespace": "CHATCLI_ENCRYPTION_KEY_SECRET=%s is set but the pod namespace is unknown (set POD_NAMESPACE or mount the service account); the server does not start without its encryption-at-rest key",
+  "cmd.server.atrest_secret.no_client": "cannot reach the Kubernetes API to load the encryption-at-rest key from Secret %s/%s (run the server in a pod with its service account token mounted, or set CHATCLI_ENCRYPTION_KEY); the server does not start without it",
+  "cmd.server.atrest_secret.api_failed": "cannot read or create Secret %s/%s holding the encryption-at-rest key; the server's service account needs get on that Secret, plus create on secrets in the namespace unless the Secret is pre-created; the server does not start without the key",
+  "cmd.server.atrest_secret.empty_key": "Secret %s/%s exists but its %q entry is empty or missing; the server never overwrites it, because a new key would make the data sealed with the old one unreadable: restore the key, or delete the Secret only if nothing was encrypted with it yet",
+  "cmd.server.atrest_secret.lost": "Secret %s/%s holding the encryption-at-rest key is missing, but the server's stores already hold encrypted data (%s). A new key could not open it, so none is created: restore the Secret from your backup, or set CHATCLI_ENCRYPTION_KEY to the original key. Delete the encrypted stores only if you mean to discard them."
+}

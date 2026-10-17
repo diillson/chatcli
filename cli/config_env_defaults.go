@@ -296,6 +296,7 @@ var envDefaults = map[string]envDefault{
 	"CHATCLI_HUB_TTL_HOURS":                 {Value: "24", Source: "hub_local.go defaultHubTTLHours"},
 	"OLLAMA_HOST":                           {Value: "http://localhost:11434", Source: "llm/embedding/ollama.go (local embeddings server)"},
 	"CHATCLI_ENCRYPTION_KEY_PREVIOUS":       {Value: "", Source: "pkg/atrest (comma-separated retired keys that still open sealed stores after a rotation; /config security reseal migrates them)"},
+	"CHATCLI_ENCRYPTION_KEY_SECRET":         {Value: "", Source: "cmd/server_atrest_key.go (chatcli server in Kubernetes: Secret in the pod namespace holding the encryption-at-rest key, created with a random key when absent; read only when CHATCLI_ENCRYPTION_KEY is empty; the Helm chart and the operator set it)"},
 	"CHATCLI_SESSION_AUTORECALL":            {Value: "true", IsBool: true, Source: "cli/session_autorecall.go (proactive saved-session recall block in chat/agent/coder turns)"},
 	"CHATCLI_COMMANDS":                      {Value: "true", IsBool: true, Source: "cli/commands_integration.go (slash-command templates: .chatcli/commands + ~/.chatcli/commands + .claude/commands + .devin/workflows)"},
 	"CHATCLI_COMMANDS_AUTOROUTE":            {Value: "true", IsBool: true, Source: "cli/commands_integration.go (auto-route mode:coder slash commands from chat into a coder one-shot run)"},

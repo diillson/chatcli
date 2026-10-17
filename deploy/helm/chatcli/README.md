@@ -20,6 +20,7 @@ Deploy **ChatCLI** as a security-hardened gRPC server on Kubernetes -- a multi-p
 - **Persistent Memory & Sessions**: Sessions and long-term memory on a PVC
 - **Plugins, Skills & Bootstrap files**: Provisioned from ConfigMaps, an init image or a PVC
 - **gRPC Server**: TLS 1.3, mutual TLS, shared token or per-user JWT (HS256/RS256), per-client rate limiting, a per-host limit on failed authentications, message-size limits, the standard `grpc.health.v1` health service, Prometheus metrics
+- **Encryption at rest by default**: AES-256-GCM stores with the key in a Kubernetes Secret -- your own, or one the server creates on its first start
 - **Hardened pod**: non-root, read-only root filesystem, all capabilities dropped, RuntimeDefault seccomp -- the `restricted` Pod Security Standard
 
 ## Prerequisites
@@ -133,6 +134,34 @@ Set one of:
 JWT material fails closed: when `security.jwtPublicKey*` (or a `jwtSecret` that looks like a PEM key) cannot be loaded and JWT is the only credential, the server refuses to start (`refusing to start: CHATCLI_JWT_PUBLIC_KEY is set but no RSA public key could be loaded ...`); with a shared token or mTLS also configured it keeps serving and rejects every JWT caller. Repeated failed authentications from one host are throttled (5 per minute), valid credentials are never counted.
 
 `server.token` is delivered to the server as `CHATCLI_SERVER_TOKEN` from a Secret, never as a command-line argument. Prefer `security.jwtSecretRef` / `jwtPublicKeyRef` over the inline `jwtSecret` / `jwtPublicKey`: inline values land in the Deployment's env, a reference keeps them in a Secret.
+
+### Encryption at rest
+
+The server's stores under `/home/chatcli/.chatcli` (sessions, memory, transcripts and the rest) are encrypted with AES-256-GCM, **on by default**. The key never lives in the image or the pod: it comes from a Kubernetes Secret, through the first of these sources that supplies one:
+
+| Mode | Values | What the chart renders |
+|---|---|---|
+| Existing Secret (**recommended for production**) | `security.encryptionKeySecret.name` (and `.key`, default `encryption-key`) | `CHATCLI_ENCRYPTION_KEY` from a `secretKeyRef` (`optional: false`: the pod does not start without it). Manage the Secret with External Secrets, Sealed Secrets, Vault or your own tooling |
+| Inline key (**deprecated**) | `security.encryptionKey` | `CHATCLI_ENCRYPTION_KEY` in plaintext in the Deployment |
+| Your own variable | an `extraEnv` entry named `CHATCLI_ENCRYPTION_KEY` | nothing of its own |
+| Chart-managed key (**default**) | `security.encryptionAtRest: true` and none of the above | `CHATCLI_ENCRYPTION_KEY_SECRET=<fullname>-atrest-key`, plus a Role and RoleBinding for the server's ServiceAccount (with `rbac.create`) |
+
+In the chart-managed mode the server, on its first start, creates the Secret `<fullname>-atrest-key` in the release namespace holding a random 32-byte key (labels `app.kubernetes.io/managed-by: chatcli-server`, `app.kubernetes.io/component: atrest-key`). Every later start, and every other replica, reads the same Secret; if two replicas race to create it, the loser reads the winner's. The server never overwrites the Secret: one that exists without an `encryption-key` entry stops the server with an error, and so does any API error (for example a missing RBAC grant). With `CHATCLI_ENCRYPTION_KEY_SECRET` set the server never starts without its key.
+
+The Role the chart adds, `<fullname>-atrest-key`, has two rules:
+
+- `get` on `secrets`, restricted with `resourceNames` to `<fullname>-atrest-key`;
+- `create` on `secrets`. Kubernetes cannot restrict `create` by `resourceNames` (the object's name is not part of the authorization request when the object does not exist yet), so this rule allows creating any Secret in the namespace. It grants no read, update or delete. To avoid it, create the Secret yourself and use `security.encryptionKeySecret` instead.
+
+The watcher Role (`rbac.yaml`) still grants nothing on Secrets. With `rbac.create: false`, grant the two rules above yourself. The pod sets `automountServiceAccountToken: true` in this mode, since the server reads the Secret with its token.
+
+**A key you supply always wins.** The server reads the key Secret only when `CHATCLI_ENCRYPTION_KEY` is empty, so a key arriving through `extraEnv` or through `secrets.existingSecret` (envFrom) is used as is. The chart never sets `CHATCLI_ENCRYPTION_KEY=off` or any other placeholder that would mask it.
+
+**Opting out.** `security.encryptionAtRest: false` renders nothing: the stores are written in plaintext unless a key arrives through `extraEnv` or `secrets.existingSecret`.
+
+**Back the key up with the data.** The key Secret is created by the server, not by Helm, so `helm uninstall` keeps it. Deleting it, or changing its value, makes everything encrypted with it unreadable: back it up together with the PVC data (Velero, or your secret manager). Data sealed with a lost key cannot be recovered. A deleted Secret is never replaced behind your back: when it is missing but the server's stores already hold encrypted data, the server does not create a new key and does not start, and its error names the Secret to restore. Delete the encrypted stores only if you mean to discard them.
+
+**Upgrading an existing install.** Stores written in plaintext by earlier chart versions keep loading: encrypted and plaintext files are told apart on read, and each store is sealed the next time it is rewritten. There is no server-side path back to plaintext (the reseal that writes stores back in plaintext, `/config security reseal` with `CHATCLI_ENCRYPTION_KEY=off`, is a CLI command), so once data is sealed keep the key for as long as the data matters: turning `encryptionAtRest` off afterwards leaves the server without the key, unable to read the sealed stores. To stop the chart from managing the key while keeping it, point `security.encryptionKeySecret.name` at `<fullname>-atrest-key`.
 
 ### gRPC server
 
@@ -394,7 +423,7 @@ Upgrading an install that ran with `memory.enabled` and persistence migrates aut
 | `serviceAccount.create` | Create a ServiceAccount | `true` |
 | `serviceAccount.name` | ServiceAccount name override | `""` |
 | `serviceAccount.annotations` | Annotations (IRSA / Workload Identity) | `{}` |
-| `rbac.create` | Create RBAC for the watcher (no access to Secrets: the server never reads one through the API) | `true` |
+| `rbac.create` | Create RBAC for the watcher (no access to Secrets) and, in the chart-managed encryption mode, the narrow Role that lets the server get and create its key Secret | `true` |
 | `rbac.clusterWide` | ClusterRole instead of a namespaced Role | `false` |
 | `rbac.additionalRules` | Extra RBAC rules (e.g. Secret access for a plugin that needs it, scoped with `resourceNames`) | `[]` |
 
@@ -423,7 +452,10 @@ Upgrading an install that ran with `memory.enabled` and persistence migrates aut
 | `security.envRedactMode` | Env var redaction: `off`, `permissive` or `strict` | `""` (permissive) |
 | `security.allowUnsignedPlugins` | Allow unsigned plugins (dev only) | `false` |
 | `security.allowInsecure` | Sets `CHATCLI_ALLOW_INSECURE`, which only the chatcli client reads; it does not change the server listener | `false` |
-| `security.encryptionKey` | Session encryption key, inline (prefer `extraEnv` with a `secretKeyRef`) | `""` |
+| `security.encryptionAtRest` | Chart-managed encryption-at-rest key: the server creates and reads the `<fullname>-atrest-key` Secret (see [Encryption at rest](#encryption-at-rest)). Used only when no other key source is set; `false` renders nothing | `true` |
+| `security.encryptionKeySecret.name` | Existing Secret holding the key, injected as `CHATCLI_ENCRYPTION_KEY` (recommended for production); wins over every other source | `""` |
+| `security.encryptionKeySecret.key` | Data key inside that Secret | `encryption-key` |
+| `security.encryptionKey` | **Deprecated.** The key inline, in plaintext in the Deployment; use `encryptionKeySecret` | `""` |
 | `extraEnv` | Extra environment variables; an entry for a `CHATCLI_LOG_*` variable replaces the chart's `logging` value | `[]` |
 | `extraVolumes` | Extra pod volumes | `[]` |
 | `extraVolumeMounts` | Extra mounts for the server container | `[]` |
@@ -582,7 +614,7 @@ helm upgrade chatcli oci://ghcr.io/diillson/charts/chatcli \
 helm uninstall chatcli -n chatcli
 ```
 
-> **Note:** `helm uninstall` also deletes the sessions PVC (`<fullname>-sessions`) -- back it up first if the sessions matter. Helm does not remove CRDs; deleting them deletes every resource of those kinds in the cluster:
+> **Note:** `helm uninstall` also deletes the sessions PVC (`<fullname>-sessions`) -- back it up first if the sessions matter. The encryption key Secret the server created (`<fullname>-atrest-key`) is not a release resource and stays; delete it only together with the data it protects. Helm does not remove CRDs; deleting them deletes every resource of those kinds in the cluster:
 > ```bash
 > kubectl get crd -o name | grep platform.chatcli.io | xargs kubectl delete
 > ```

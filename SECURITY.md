@@ -120,7 +120,7 @@ ChatCLI applies defense in depth across its components. The [security overview](
 
 **Credentials and data**
 - OAuth with PKCE.
-- Encryption at rest on by default (AES-256-GCM) for sessions, transcripts, prompt history, memory, contexts, attachments and credentials, with the key in the OS keychain on macOS, Linux and Windows. `chatcli server` seals with `CHATCLI_ENCRYPTION_KEY` (the operator injects it from a Secret). See [Encryption at Rest](https://chatcli.edilsonfreitas.com/security/encryption-at-rest).
+- Encryption at rest on by default (AES-256-GCM) for sessions, transcripts, prompt history, memory, contexts, attachments and credentials, with the key in the OS keychain on macOS, Linux and Windows. `chatcli server` seals with `CHATCLI_ENCRYPTION_KEY`, and in Kubernetes the Helm chart and the operator keep that key in a Secret by default (`CHATCLI_ENCRYPTION_KEY_SECRET`). See [Encryption at Rest](https://chatcli.edilsonfreitas.com/security/encryption-at-rest).
 - Outbound TLS 1.2 or later.
 
 **Plugins**

@@ -88,6 +88,10 @@ type InstanceReconciler struct {
 // +kubebuilder:rbac:groups=networking.k8s.io,resources=ingresses,verbs=get;list;watch
 // +kubebuilder:rbac:groups=metrics.k8s.io,resources=pods,verbs=get;list
 // +kubebuilder:rbac:groups=rbac.authorization.k8s.io,resources=roles;rolebindings;clusterroles;clusterrolebindings,verbs=get;list;watch;create;update;patch;delete
+// The operator creates each Instance's encryption-at-rest key Secret, and
+// must itself hold get on secrets to grant it in the Instance's Role (RBAC
+// escalation rule).
+// +kubebuilder:rbac:groups=core,resources=secrets,verbs=get;list;watch;create
 
 func (r *InstanceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	log := log.FromContext(ctx)
@@ -153,6 +157,15 @@ func (r *InstanceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 			reconcileDuration.Observe(time.Since(start).Seconds())
 			return ctrl.Result{}, err
 		}
+	}
+
+	// The encryption-at-rest key Secret exists before the Deployment, so
+	// the server never needs to create it.
+	if err := r.reconcileAtrestKey(ctx, &instance); err != nil {
+		log.Error(err, "failed to reconcile the encryption-at-rest key")
+		reconciliationsTotal.WithLabelValues("error").Inc()
+		reconcileDuration.Observe(time.Since(start).Seconds())
+		return ctrl.Result{}, err
 	}
 
 	if err := r.reconcileConfigMaps(ctx, &instance); err != nil {

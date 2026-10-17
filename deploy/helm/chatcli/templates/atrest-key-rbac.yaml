@@ -1,0 +1,45 @@
+{{- /*
+  RBAC for the chart-managed encryption-at-rest key (security.encryptionAtRest
+  with no other key source): the server reads the <fullname>-atrest-key
+  Secret at startup and creates it, with a random key, the first time.
+  Kept apart from rbac.yaml so the watcher/remediation Role stays free of
+  Secrets, and so rbac.clusterWide never widens this grant beyond the
+  release namespace.
+*/ -}}
+{{- if and .Values.rbac.create (eq (include "chatcli.atrestMode" .) "auto") }}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ include "chatcli.atrestKeySecretName" . }}
+  labels:
+    {{- include "chatcli.labels" . | nindent 4 }}
+rules:
+  # Read only the key Secret.
+  - apiGroups: [""]
+    resources: ["secrets"]
+    resourceNames: [{{ include "chatcli.atrestKeySecretName" . | quote }}]
+    verbs: ["get"]
+  # Create it on the first start. Kubernetes cannot restrict create by
+  # resourceNames (the name is not known when the request is authorized), so
+  # this rule covers any Secret name in the namespace; it grants no read,
+  # update or delete. Pre-create the Secret and drop this rule (rbac.create
+  # false plus your own Role) to avoid it.
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["create"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ include "chatcli.atrestKeySecretName" . }}
+  labels:
+    {{- include "chatcli.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ include "chatcli.atrestKeySecretName" . }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "chatcli.serviceAccountName" . }}
+    namespace: {{ .Release.Namespace }}
+{{- end }}

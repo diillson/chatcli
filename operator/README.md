@@ -198,7 +198,9 @@ spec:
   #   budget: { sessionUSD: "5", dailyUSD: "50", hardStop: true }
   #   hub: true
   #   caBundleSecretName: corp-ca    # ca.crt trusted by every outbound TLS connection
-  #   encryptionKeyRef: { name: chatcli-at-rest, key: key }
+  #   encryptionKeyRef: { name: chatcli-at-rest, key: key }   # your own key Secret (recommended)
+  #   encryptionAtRest: false      # default true: without encryptionKeyRef the operator creates
+  #                                # <instance>-atrest-key and the server reads it (never overwritten)
   #   logRotation: { maxSizeMB: 200, maxBackups: 3, maxAgeDays: 7, compress: true }
   # scheduling:                      # pod placement
   #   nodeSelector: { pool: ai }

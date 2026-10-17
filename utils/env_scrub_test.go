@@ -8,7 +8,7 @@ package utils
 import "testing"
 
 func TestScrubSecretEnv_DropsChatCLISecretsKeepsTheRest(t *testing.T) {
-	env := []string{"PATH=/usr/bin", "CHATCLI_ENCRYPTION_KEY=k", "CHATCLI_ENCRYPTION_KEY_PREVIOUS=old",
+	env := []string{"PATH=/usr/bin", "CHATCLI_ENCRYPTION_KEY=k", "CHATCLI_ENCRYPTION_KEY_PREVIOUS=old", "CHATCLI_ENCRYPTION_KEY_SECRET=chatcli-atrest-key",
 		"CHATCLI_JWT_SECRET=j", "CHATCLI_AUTH_DIR=/a", "CHATCLI_AUDIT_LOG_PATH=/l", "CHATCLI_MANAGED_CONFIG=/m", "OPENAI_API_KEY=x", "HOME=/h"}
 	got := ScrubSecretEnv(env, nil)
 	want := []string{"PATH=/usr/bin", "OPENAI_API_KEY=x", "HOME=/h"}
