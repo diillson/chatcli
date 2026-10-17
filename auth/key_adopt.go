@@ -81,7 +81,7 @@ func adoptFileKey(ks *KeychainStore, keyPath string, fileKey []byte) {
 		markKeyInKeychain(keyPath)
 		removeAdoptedKeyFile(keyPath)
 	case err == nil:
-		keychainWarnf("the OS keychain holds a different credential key than %s; keeping the file and leaving the keychain untouched", keyPath)
+		keychainWarnf("the OS keychain holds a different credential key than %s; still using the file (nothing is affected). To move this key into the keychain, run /config security use-keychain: it checks the file key first and keeps the keychain's current value as auth-key.previous", keyPath)
 	case errors.Is(err, os.ErrNotExist):
 		if storeKeyInKeychain(ks, fileKey) {
 			markKeyInKeychain(keyPath)

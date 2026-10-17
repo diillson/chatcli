@@ -505,7 +505,12 @@ func (cli *ChatCLI) configSecurityRecoveryKey() {
 // still open with the old key listed in CHATCLI_ENCRYPTION_KEY_PREVIOUS.
 func (cli *ChatCLI) configSecurityUseKeychain() {
 	old := os.Getenv(atrest.EnvKey)
-	if src, _, _ := atrest.KeyStatus(); src != atrest.KeySourceEnv {
+	src, where, _ := atrest.KeyStatus()
+	if src == atrest.KeySourceProvider && where == "file" {
+		cli.moveDefaultKeyToKeychain()
+		return
+	}
+	if src != atrest.KeySourceEnv {
 		fmt.Println(colorize("  "+i18n.T("sec.cmd.use_keychain_not_env"), ColorGray))
 		return
 	}
@@ -652,3 +657,21 @@ func (cli *ChatCLI) restoreWithRecoveryKey(key string) {
 	_ = os.Setenv(atrest.EnvKey, key)
 	cli.configSecurityUseKeychain()
 }
+
+// moveDefaultKeyToKeychain is use-keychain for the default key while it
+// still lives in the key file: the key moves into the OS keychain as it is,
+// so nothing sealed with it changes.
+func (cli *ChatCLI) moveDefaultKeyToKeychain() {
+	moved, err := moveFileKeyToKeychain()
+	switch {
+	case err != nil:
+		fmt.Println(colorize("  "+i18n.T("sec.cmd.keyfile_move_failed", err.Error()), ColorYellow))
+	case moved:
+		fmt.Println(colorize("  "+i18n.T("sec.cmd.keyfile_moved", auth.KeyFilePath()), ColorGreen))
+	default:
+		fmt.Println(colorize("  "+i18n.T("sec.cmd.use_keychain_not_env"), ColorGray))
+	}
+}
+
+// moveFileKeyToKeychain is auth.MoveFileKeyToKeychain; a variable for tests.
+var moveFileKeyToKeychain = auth.MoveFileKeyToKeychain
