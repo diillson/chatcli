@@ -261,3 +261,40 @@ without the mount the server simply finds no files in that directory.
 {{- end }}
 {{- end }}
 {{- end }}
+
+{{/*
+Name of the Secret holding the encryption-at-rest key in the chart-managed
+mode (security.encryptionAtRest). The server creates it on its first start.
+*/}}
+{{- define "chatcli.atrestKeySecretName" -}}
+{{- printf "%s-atrest-key" (include "chatcli.fullname" .) | trunc 63 | trimSuffix "-" }}
+{{- end }}
+
+{{/*
+Where the encryption-at-rest key comes from, in precedence order:
+  secretRef  security.encryptionKeySecret.name (secretKeyRef)
+  plain      security.encryptionKey (deprecated)
+  extraEnv   an extraEnv entry named CHATCLI_ENCRYPTION_KEY
+  auto       security.encryptionAtRest: the server loads (or creates) the
+             <fullname>-atrest-key Secret through CHATCLI_ENCRYPTION_KEY_SECRET
+  off        nothing set by the chart
+A values file without the encryptionAtRest key (an upgrade with plain
+--reuse-values skips the defaults of keys added by newer chart versions)
+gets the chart default, true.
+*/}}
+{{- define "chatcli.atrestMode" -}}
+{{- $sec := .Values.security | default dict }}
+{{- $ref := $sec.encryptionKeySecret | default dict }}
+{{- $fromExtra := false }}
+{{- range .Values.extraEnv }}
+{{- if eq (.name | toString) "CHATCLI_ENCRYPTION_KEY" }}
+{{- $fromExtra = true }}
+{{- end }}
+{{- end }}
+{{- if $ref.name }}secretRef
+{{- else if $sec.encryptionKey }}plain
+{{- else if $fromExtra }}extraEnv
+{{- else if and (hasKey $sec "encryptionAtRest") (not $sec.encryptionAtRest) }}off
+{{- else }}auto
+{{- end }}
+{{- end }}

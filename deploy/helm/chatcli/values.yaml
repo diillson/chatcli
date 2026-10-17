@@ -457,8 +457,35 @@ security:
   # dial a plaintext server); it does not change the server listener.
   allowInsecure: false
 
-  # Encryption key for sessions at rest (leave empty to use auth key)
-  # For production: set via extraEnv with secretKeyRef instead.
+  # Encryption at rest (sessions, memory, transcripts and the other stores
+  # under /home/chatcli/.chatcli, AES-256-GCM). The key comes from the
+  # first source that supplies one:
+  #   1. encryptionKeySecret.name: an existing Secret, injected as
+  #      CHATCLI_ENCRYPTION_KEY through a secretKeyRef.
+  #   2. encryptionKey: the key in plaintext in the values (deprecated).
+  #   3. an extraEnv entry named CHATCLI_ENCRYPTION_KEY (the chart then
+  #      adds nothing of its own).
+  #   4. encryptionAtRest: true (the default): the chart sets
+  #      CHATCLI_ENCRYPTION_KEY_SECRET=<fullname>-atrest-key and grants the
+  #      server's ServiceAccount get on that Secret plus create on Secrets
+  #      in the release namespace (with rbac.create). On its first start the
+  #      server creates the Secret with a random 32-byte key; afterwards it
+  #      only reads it, and never overwrites it. The Secret is not part of
+  #      the release, so `helm uninstall` keeps it alongside the PVC:
+  #      deleting it makes the encrypted data unreadable. Back it up.
+  # A CHATCLI_ENCRYPTION_KEY carried by secrets.existingSecret (envFrom)
+  # still wins over source 4: the server reads the Secret only when no key
+  # was injected. Stores written in plaintext before the key existed stay
+  # readable and are sealed as they are rewritten.
+  # encryptionAtRest: false sets nothing: the stores stay in plaintext unless
+  # a key arrives through extraEnv or secrets.existingSecret.
+  encryptionAtRest: true
+  encryptionKeySecret:
+    name: ""
+    key: encryption-key
+  # Deprecated: the key in plaintext in the values (and in the rendered
+  # Deployment). Use encryptionKeySecret, or leave it empty for the
+  # chart-managed key Secret above.
   encryptionKey: ""
 
 # Log file rotation. Logs go to stderr as JSON lines and to a rotated file,

@@ -230,7 +230,7 @@ O ChatCLI executa comandos e guarda credenciais, então segurança é o padrão,
 - **Tools sob política**: toda ação do agente é permitida, perguntada ou negada por uma política que você controla; superfícies sem ninguém para aprovar recusam em vez de aprovar.
 - **Confiança de workspace**: o `.env`, os hooks e a política de um projeto só carregam depois do `chatcli trust`.
 - **Integrações que falham fechado**: os canais de chat não sobem sem allowlist de remetentes; webhooks assinados são verificados com HMAC.
-- **Criptografia em repouso por padrão**: conversas, memória, contextos, anexos e credenciais são cifrados com AES-256-GCM, com a chave no keychain do sistema (macOS, Linux, Windows); o OAuth usa PKCE.
+- **Criptografia em repouso por padrão**: conversas, memória, contextos, anexos e credenciais são cifrados com AES-256-GCM, com a chave no keychain do sistema (macOS, Linux, Windows) ou, no Kubernetes, num Secret; o OAuth usa PKCE.
 - **Cadeia de suprimentos assinada**: checksums das releases assinados com Ed25519 e verificados pelo `chatcli update`, imagens assinadas com Cosign, SBOM, e Trivy, CodeQL, gosec e govulncheck em toda mudança.
 
 Reporte vulnerabilidades de forma privada: veja o [SECURITY.md](SECURITY.md). [Visão geral de segurança →](https://chatcli.edilsonfreitas.com/pt/security/overview)

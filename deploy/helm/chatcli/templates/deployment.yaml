@@ -39,6 +39,16 @@ spec:
         {{- toYaml . | nindent 8 }}
       {{- end }}
       serviceAccountName: {{ include "chatcli.serviceAccountName" . }}
+      {{- /*
+        The chart-managed encryption key is read through the API with the
+        pod's service account token. The chart never disables the token,
+        but an existing ServiceAccount (serviceAccount.create=false) may
+        have automountServiceAccountToken: false; the pod setting wins over
+        it, and without the token the server refuses to start.
+      */}}
+      {{- if eq (include "chatcli.atrestMode" .) "auto" }}
+      automountServiceAccountToken: true
+      {{- end }}
       {{- with .Values.podSecurityContext }}
       securityContext:
         {{- toYaml . | nindent 8 }}
@@ -252,9 +262,27 @@ spec:
             - name: CHATCLI_ALLOW_INSECURE
               value: "true"
           {{- end }}
-          {{- if .Values.security.encryptionKey }}
+          {{- /*
+            Encryption at rest: see chatcli.atrestMode for the precedence.
+            The chart-managed mode never sets CHATCLI_ENCRYPTION_KEY itself
+            (not even "off"), so a key carried by secrets.existingSecret
+            through envFrom keeps winning: the server reads the Secret only
+            when no key was injected.
+          */}}
+          {{- $atrestMode := include "chatcli.atrestMode" . }}
+          {{- if eq $atrestMode "secretRef" }}
+            - name: CHATCLI_ENCRYPTION_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.security.encryptionKeySecret.name | quote }}
+                  key: {{ .Values.security.encryptionKeySecret.key | default "encryption-key" | quote }}
+                  optional: false
+          {{- else if eq $atrestMode "plain" }}
             - name: CHATCLI_ENCRYPTION_KEY
               value: {{ .Values.security.encryptionKey | quote }}
+          {{- else if eq $atrestMode "auto" }}
+            - name: CHATCLI_ENCRYPTION_KEY_SECRET
+              value: {{ include "chatcli.atrestKeySecretName" . | quote }}
           {{- end }}
           {{- /*
             server.token, from a Secret. Declared explicitly (not only

@@ -122,6 +122,14 @@ func startServer(opts *ServerOptions, llmMgr manager.LLMManager, logger *zap.Log
 		return err
 	}
 
+	// The encryption-at-rest key from a Kubernetes Secret, before any
+	// store opens, so the rest of the process sees CHATCLI_ENCRYPTION_KEY
+	// exactly as if it had been injected.
+	if err := ensureServerAtrestKey(context.Background(), logger, defaultAtrestKeyDeps()); err != nil {
+		fmt.Fprintln(os.Stderr, "FATAL: "+err.Error())
+		return err
+	}
+
 	// Provider plugins register before the provider is resolved, so
 	// --provider / LLM_PROVIDER (and the fallback chain) can name one.
 	providerPlugins := cli.LoadProviderPlugins(context.Background(), llmMgr, logger)

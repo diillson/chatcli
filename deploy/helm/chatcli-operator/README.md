@@ -166,7 +166,28 @@ What the operator manages on the server pod:
 - **Probes**: startup, readiness and liveness are `GET /healthz` on the `metrics` port (plain HTTP, no credential), so they work with and without TLS.
 - **Rollouts on change**: every Secret the Instance references (`apiKeys`, `server.token`, the TLS and client CA Secrets, the JWT and operator credential Secrets, the CA bundle, the encryption key, `extraEnv` Secret references) and every ConfigMap it mounts is watched, and a hash of what the pod uses is kept in a pod annotation -- rotating a credential or editing a mounted ConfigMap rolls the pods.
 - **Storage**: with `spec.persistence.enabled` the Deployment uses the `Recreate` strategy (a `ReadWriteOnce` volume cannot be attached to the old and new pod at once), and the pod runs with `fsGroup: 1000`.
+- **Encryption at rest**: on by default, with the key in a Secret (see below).
 - **Fallback**: `spec.fallback` puts `spec.provider` (with `spec.model`) in front of the listed providers unless the list already names it.
+
+#### Encryption at rest
+
+The server's stores (sessions, memory, transcripts and the rest) are encrypted with AES-256-GCM, **on by default**. The key comes from the first source that supplies one:
+
+| Mode | Instance spec | What the operator does |
+|---|---|---|
+| Existing Secret (**recommended for production**) | `spec.features.encryptionKeyRef: {name, key}` | injects `CHATCLI_ENCRYPTION_KEY` from that Secret. Manage it with External Secrets, Sealed Secrets, Vault or your own tooling |
+| Your own variable | a `spec.extraEnv` entry named `CHATCLI_ENCRYPTION_KEY` | nothing of its own |
+| Operator-managed key (**default**) | neither of the above, `spec.features.encryptionAtRest` unset or `true` | creates the Secret `<instance>-atrest-key` and points the server at it with `CHATCLI_ENCRYPTION_KEY_SECRET` |
+
+In the operator-managed mode the operator creates `<instance>-atrest-key` in the Instance namespace before the Deployment, with a random 32-byte key under `encryption-key` and an owner reference to the Instance (the same lifecycle as the sessions PVC: deleting the Instance deletes the key along with the data). It never updates or overwrites an existing Secret of that name. It also creates a Role and RoleBinding `<instance>-atrest-key` that let the Instance ServiceAccount `get` that one Secret (`resourceNames`), and sets `automountServiceAccountToken: true` on the pod; since the operator pre-creates the Secret, the server needs no `create`. The server reads the Secret only when `CHATCLI_ENCRYPTION_KEY` is empty, so a key supplied through `encryptionKeyRef` or `spec.extraEnv` always wins, and with `CHATCLI_ENCRYPTION_KEY_SECRET` set it never starts without its key.
+
+`spec.features.encryptionAtRest: false` disables the operator-managed key: the operator removes the Role and RoleBinding it created (never the Secret) and the stores are written in plaintext unless a key comes from `encryptionKeyRef` or `spec.extraEnv`.
+
+**Back the key up with the data.** Deleting `<instance>-atrest-key`, or changing its value, makes everything encrypted with it unreadable; a deleted Secret is recreated with a *new* key, which cannot open the old data. Back it up together with the PVC data (Velero, or your secret manager).
+
+**Upgrading the operator.** Existing Instances switch to the operator-managed key on the first reconcile (their pods roll once for the new variable). Stores written in plaintext keep loading and are sealed as they are rewritten. There is no server-side path back to plaintext (the reseal that writes stores back in plaintext, `/config security reseal` with `CHATCLI_ENCRYPTION_KEY=off`, is a CLI command), so once data is sealed keep the Secret: setting `encryptionAtRest: false` afterwards leaves the server unable to read the sealed stores. To keep the key but manage it yourself, set `encryptionKeyRef: {name: <instance>-atrest-key, key: encryption-key}`.
+
+The operator's own ClusterRole already carries what this needs: `create` on `secrets` for the key, and `get` on `secrets`, which Kubernetes requires the operator to hold before it can grant it in a Role (the RBAC escalation rule).
 
 A complete sample (namespace, Secrets and Instance) is in [`operator/config/samples/platform_v1alpha1_instance.yaml`](https://github.com/diillson/chatcli/blob/main/operator/config/samples/platform_v1alpha1_instance.yaml).
 
@@ -276,9 +297,9 @@ A `ClusterRegistration`'s `kubeconfigSecretRef` is resolved in the operator's na
 
 The operator needs cluster-wide access to watch and remediate workloads. Its ClusterRole includes:
 
-- read/write (no delete) on Secrets and ConfigMaps -- it provisions Instance resources and rotates secrets as a remediation;
+- read/write (no delete) on Secrets and ConfigMaps -- it provisions Instance resources (each Instance's encryption-at-rest key Secret included) and rotates secrets as a remediation;
 - write access to the workloads and the kinds `ApplyManifest` may create (HPAs, Ingresses, PodDisruptionBudgets, and the Prometheus Operator and Istio kinds, whose rules stay inert when those APIs are absent), `update`/`patch` on nodes and `create` on `pods/eviction` for cordon and drain, and pod `create`/`delete` for chaos experiments;
-- Roles/RoleBindings and ClusterRoleBindings for Instance watchers, with `bind` only on the ClusterRoles the chart pre-provisions (`chatcli-watcher`, `chatcli-role-viewer|operator|admin|superadmin`). The operator binds `chatcli-watcher` itself; the `chatcli-role-*` roles are for cluster administrators to bind to people or groups.
+- Roles/RoleBindings and ClusterRoleBindings for Instance watchers and for the server's read access to its encryption key, with `bind` only on the ClusterRoles the chart pre-provisions (`chatcli-watcher`, `chatcli-role-viewer|operator|admin|superadmin`). The operator binds `chatcli-watcher` itself; the `chatcli-role-*` roles are for cluster administrators to bind to people or groups.
 
 Review `templates/rbac.yaml` before installing in a regulated cluster.
 

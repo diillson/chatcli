@@ -394,6 +394,15 @@ type FeaturesSpec struct {
 	// encryption key for the server's stores (CHATCLI_ENCRYPTION_KEY).
 	// +optional
 	EncryptionKeyRef *SecretKeyRefSpec `json:"encryptionKeyRef,omitempty"`
+	// EncryptionAtRest turns on the operator-managed encryption-at-rest
+	// key when EncryptionKeyRef is not set. Default true: the operator
+	// creates the Secret <instance>-atrest-key (a random key under
+	// encryption-key, owned by the Instance, never overwritten) and points
+	// the server at it (CHATCLI_ENCRYPTION_KEY_SECRET). false disables the
+	// operator-managed key; the stores stay in plaintext unless a key comes
+	// from EncryptionKeyRef or spec.extraEnv.
+	// +optional
+	EncryptionAtRest *bool `json:"encryptionAtRest,omitempty"`
 	// LogRotation configures the server log file rotation.
 	// +optional
 	LogRotation *LogRotationSpec `json:"logRotation,omitempty"`

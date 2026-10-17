@@ -30,6 +30,30 @@ with "refusing to serve an unauthenticated API". Set one of:
     --set security.jwtSecretRef.name=<secret> --set security.jwtSecretRef.key=<key>
 {{- end }}
 {{- end }}
+{{- $atrestMode := include "chatcli.atrestMode" . }}
+{{- if eq $atrestMode "auto" }}
+
+Encryption at rest: on. The server keeps its key in Secret
+{{ include "chatcli.atrestKeySecretName" . }} (created on its first start, never overwritten, kept by
+helm uninstall). Deleting it makes the encrypted data unreadable: back it up
+with the PVC data.
+{{- if not .Values.rbac.create }}
+rbac.create=false: grant the server's ServiceAccount get on that Secret and
+create on secrets, or the server refuses to start.
+{{- end }}
+{{- else if eq $atrestMode "secretRef" }}
+
+Encryption at rest: on, key from Secret {{ .Values.security.encryptionKeySecret.name }}.
+{{- else if eq $atrestMode "plain" }}
+
+Encryption at rest: on, but security.encryptionKey is deprecated (the key is in
+plaintext in the Deployment): move it to a Secret and set
+security.encryptionKeySecret.name.
+{{- else if eq $atrestMode "off" }}
+
+Encryption at rest: not set by the chart (security.encryptionAtRest=false); the
+stores are plaintext unless secrets.existingSecret carries CHATCLI_ENCRYPTION_KEY.
+{{- end }}
 
 Connect from your machine:
 

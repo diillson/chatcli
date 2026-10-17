@@ -42,6 +42,10 @@ A. EVERY INSTANCE NEEDS A CREDENTIAL AND TLS
      with tls.crt, tls.key and (for a private/self-signed CA) ca.crt, valid
      for <instance>.<namespace>.svc.cluster.local. Without TLS the server runs
      but ServerReachable=False and the AIOps pipeline cannot reach it.
+   Encryption at rest is on by default: without features.encryptionKeyRef the
+   operator creates Secret <instance>-atrest-key (owned by the Instance, never
+   overwritten). Deleting it makes the encrypted data unreadable: back it up
+   with the PVC data, or opt out with features.encryptionAtRest: false.
    ServerReachable is re-probed every 5 minutes. Rotating a referenced Secret
    or editing a mounted ConfigMap rolls the Instance pods.
    Check the conditions with:

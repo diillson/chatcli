@@ -263,6 +263,7 @@ func (r *InstanceReconciler) buildPodSpec(instance *platformv1alpha1.Instance) c
 	}
 
 	container.Env = append(container.Env, featureEnv(instance.Spec.Features)...)
+	container.Env = append(container.Env, atrestKeyEnv(instance)...)
 
 	// RS256 verification key, issuer and audience from spec.server.security
 	if sec := instance.Spec.Server.Security; sec != nil {
@@ -311,6 +312,12 @@ func (r *InstanceReconciler) buildPodSpec(instance *platformv1alpha1.Instance) c
 		InitContainers:     initContainers,
 		Containers:         []corev1.Container{container},
 		Volumes:            volumes,
+	}
+	// The server reads the operator-managed encryption key through the
+	// API with its service account token, so the token must be mounted
+	// even where a mutating policy defaults it off.
+	if operatorManagedAtrestKey(instance) {
+		podSpec.AutomountServiceAccountToken = boolPtr(true)
 	}
 	if sched := instance.Spec.Scheduling; sched != nil {
 		podSpec.NodeSelector = sched.NodeSelector
