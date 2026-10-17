@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.221.1](https://github.com/diillson/chatcli/compare/v1.221.0...v1.221.1) (2026-10-17)
+
+
+### Bug Fixes
+
+* **atrest:** let use-keychain move the key file when the keychain holds another key ([#1816](https://github.com/diillson/chatcli/issues/1816)) ([d25cbd1](https://github.com/diillson/chatcli/commit/d25cbd1e4f59e110befbf20608f017c7da252c4f))
+
 ## [1.221.0](https://github.com/diillson/chatcli/compare/v1.220.0...v1.221.0) (2026-10-17)
 
 
