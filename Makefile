@@ -10,7 +10,7 @@ LD_FLAGS = -X github.com/diillson/chatcli/version.Version=$(VERSION) \
 
 .PHONY: build
 build:
-	go build -ldflags "$(LD_FLAGS)" -o bin/chatcli main.go
+	go build -ldflags "$(LD_FLAGS)" -o bin/chatcli .
 
 .PHONY: install
 install:

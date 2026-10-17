@@ -4,6 +4,17 @@ on:
   push:
     branches:
       - main
+  # Recovery path for a release that was published without its binaries
+  # (a build step failed after release-please created the tag): rebuilds,
+  # signs and uploads the release assets and updates Homebrew for an
+  # existing tag, from that tag's source, without touching images, charts,
+  # docs or the release itself.
+  workflow_dispatch:
+    inputs:
+      assets_tag:
+        description: "Existing release tag to (re)build and upload the binaries for, e.g. v1.221.0"
+        required: true
+        type: string
 
 # Read-only by default. Every job below declares exactly what it needs, so a
 # compromised step can only use the rights of its own job.
@@ -32,11 +43,31 @@ jobs:
     permissions:
       contents: read
     outputs:
-      tag_name: ${{ steps.rp1.outputs.tag_name || steps.rp2.outputs.tag_name || steps.rp3.outputs.tag_name }}
-      release_created: ${{ steps.rp1.outputs.release_created || steps.rp2.outputs.release_created || steps.rp3.outputs.release_created }}
+      tag_name: ${{ steps.assets.outputs.tag_name || steps.rp1.outputs.tag_name || steps.rp2.outputs.tag_name || steps.rp3.outputs.tag_name }}
+      release_created: ${{ steps.assets.outputs.release_created || steps.rp1.outputs.release_created || steps.rp2.outputs.release_created || steps.rp3.outputs.release_created }}
+      # true on a manual assets run: only the binary jobs below run.
+      assets_only: ${{ github.event_name == 'workflow_dispatch' }}
     steps:
+      - name: Resolve the release to rebuild assets for
+        id: assets
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ASSETS_TAG: ${{ inputs.assets_tag }}
+        run: |
+          set -euo pipefail
+          if ! [[ "$ASSETS_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::assets_tag must look like v1.2.3, got '$ASSETS_TAG'"
+            exit 1
+          fi
+          # Only an already published release: this path never creates one.
+          gh release view "$ASSETS_TAG" --repo "$GITHUB_REPOSITORY" --json tagName >/dev/null
+          echo "tag_name=$ASSETS_TAG" >> "$GITHUB_OUTPUT"
+          echo "release_created=true" >> "$GITHUB_OUTPUT"
+
       - name: Release Please (attempt 1/3)
         id: rp1
+        if: github.event_name == 'push'
         continue-on-error: true
         uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5.0.0
         with:
@@ -46,12 +77,12 @@ jobs:
           manifest-file: .release-please-manifest.json
 
       - name: Backoff before retry 2
-        if: steps.rp1.outcome == 'failure'
+        if: github.event_name == 'push' && steps.rp1.outcome == 'failure'
         run: sleep 30
 
       - name: Release Please (attempt 2/3)
         id: rp2
-        if: steps.rp1.outcome == 'failure'
+        if: github.event_name == 'push' && steps.rp1.outcome == 'failure'
         continue-on-error: true
         uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5.0.0
         with:
@@ -61,12 +92,12 @@ jobs:
           manifest-file: .release-please-manifest.json
 
       - name: Backoff before retry 3
-        if: steps.rp1.outcome == 'failure' && steps.rp2.outcome == 'failure'
+        if: github.event_name == 'push' && steps.rp1.outcome == 'failure' && steps.rp2.outcome == 'failure'
         run: sleep 60
 
       - name: Release Please (attempt 3/3)
         id: rp3
-        if: steps.rp1.outcome == 'failure' && steps.rp2.outcome == 'failure'
+        if: github.event_name == 'push' && steps.rp1.outcome == 'failure' && steps.rp2.outcome == 'failure'
         uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5.0.0
         with:
           token: ${{ secrets.GH_RELEASE_TOKEN }}
@@ -113,10 +144,13 @@ jobs:
           LDFLAGS="-X 'github.com/diillson/chatcli/version.Version=${VERSION}' -X 'github.com/diillson/chatcli/version.CommitHash=${COMMIT_HASH}' -X 'github.com/diillson/chatcli/version.BuildDate=${BUILD_DATE}'"
 
           mkdir -p dist
-          GOOS=linux   GOARCH=amd64 go build -ldflags="${LDFLAGS}" -o dist/chatcli-linux-amd64       ./main.go
-          GOOS=darwin  GOARCH=amd64 go build -ldflags="${LDFLAGS}" -o dist/chatcli-darwin-amd64      ./main.go
-          GOOS=darwin  GOARCH=arm64 go build -ldflags="${LDFLAGS}" -o dist/chatcli-darwin-arm64      ./main.go
-          GOOS=windows GOARCH=amd64 go build -ldflags="${LDFLAGS}" -o dist/chatcli-windows-amd64.exe ./main.go
+          # Build the main package (.), never a single file: package main
+          # spans several files, and `go build ./main.go` compiles main.go
+          # alone (v1.221.0 shipped without binaries because of it).
+          GOOS=linux   GOARCH=amd64 go build -ldflags="${LDFLAGS}" -o dist/chatcli-linux-amd64       .
+          GOOS=darwin  GOARCH=amd64 go build -ldflags="${LDFLAGS}" -o dist/chatcli-darwin-amd64      .
+          GOOS=darwin  GOARCH=arm64 go build -ldflags="${LDFLAGS}" -o dist/chatcli-darwin-arm64      .
+          GOOS=windows GOARCH=amd64 go build -ldflags="${LDFLAGS}" -o dist/chatcli-windows-amd64.exe .
 
           # checksums.txt alimenta a verificação SHA-256 do self-update
           # (update.SelfReplace) — sem ele, binários baixados não são verificáveis.
@@ -308,7 +342,7 @@ jobs:
   docker_chatcli_build:
     name: "Build ChatCLI (${{ matrix.arch }})"
     needs: [release_please]
-    if: needs.release_please.outputs.release_created == 'true'
+    if: needs.release_please.outputs.release_created == 'true' && needs.release_please.outputs.assets_only != 'true'
     runs-on: ${{ matrix.runner }}
     strategy:
       matrix:
@@ -400,7 +434,7 @@ jobs:
   docker_chatcli_trivy:
     name: "Trivy scan — ChatCLI"
     needs: [release_please, docker_chatcli_build]
-    if: needs.release_please.outputs.release_created == 'true'
+    if: needs.release_please.outputs.release_created == 'true' && needs.release_please.outputs.assets_only != 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -444,7 +478,7 @@ jobs:
   docker_chatcli_merge:
     name: "Merge & Sign — ChatCLI manifest"
     needs: [release_please, docker_chatcli_build, docker_chatcli_trivy]
-    if: needs.release_please.outputs.release_created == 'true'
+    if: needs.release_please.outputs.release_created == 'true' && needs.release_please.outputs.assets_only != 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -515,7 +549,7 @@ jobs:
   docker_operator_build:
     name: "Build Operator (${{ matrix.arch }})"
     needs: [release_please]
-    if: needs.release_please.outputs.release_created == 'true'
+    if: needs.release_please.outputs.release_created == 'true' && needs.release_please.outputs.assets_only != 'true'
     runs-on: ${{ matrix.runner }}
     strategy:
       matrix:
@@ -587,7 +621,7 @@ jobs:
   docker_operator_trivy:
     name: "Trivy scan — Operator"
     needs: [release_please, docker_operator_build]
-    if: needs.release_please.outputs.release_created == 'true'
+    if: needs.release_please.outputs.release_created == 'true' && needs.release_please.outputs.assets_only != 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -631,7 +665,7 @@ jobs:
   docker_operator_merge:
     name: "Merge & Sign — Operator manifest"
     needs: [release_please, docker_operator_build, docker_operator_trivy]
-    if: needs.release_please.outputs.release_created == 'true'
+    if: needs.release_please.outputs.release_created == 'true' && needs.release_please.outputs.assets_only != 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -809,7 +843,7 @@ jobs:
   helm_charts:
     name: Publish Helm Charts to GHCR (OCI)
     needs: [release_please]
-    if: needs.release_please.outputs.release_created == 'true'
+    if: needs.release_please.outputs.release_created == 'true' && needs.release_please.outputs.assets_only != 'true'
     runs-on: ubuntu-latest
 
     permissions:
@@ -938,7 +972,7 @@ jobs:
   update_docs_version:
     name: Update docs version (chatcli.ai)
     needs: [release_please]
-    if: needs.release_please.outputs.release_created == 'true'
+    if: needs.release_please.outputs.release_created == 'true' && needs.release_please.outputs.assets_only != 'true'
     runs-on: ubuntu-latest
     # Pushes to the docs repository with GH_RELEASE_TOKEN (kept by its
     # checkout for the final git push); the job token only reads.
@@ -1028,7 +1062,7 @@ jobs:
   # Opcional: sincroniza main -> develop após publicar a release
   sync_main_to_develop:
     needs: [release_please]
-    if: needs.release_please.outputs.release_created == 'true'
+    if: needs.release_please.outputs.release_created == 'true' && needs.release_please.outputs.assets_only != 'true'
     runs-on: ubuntu-latest
     # The only job that writes with the job token: it force-pushes develop
     # using the credentials the checkout below keeps.
