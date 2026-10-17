@@ -554,7 +554,7 @@ func (cli *ChatCLI) routeRecoveryKey(args []string) {
 	if err != nil {
 		path = args[1]
 	}
-	if !term.IsTerminal(int(os.Stdin.Fd())) { //#nosec G115 -- a file descriptor fits in int
+	if !stdinIsInteractive() {
 		fmt.Println(colorize("  "+i18n.T("sec.cmd.recovery_not_tty"), ColorYellow))
 		return
 	}
@@ -565,8 +565,11 @@ func (cli *ChatCLI) routeRecoveryKey(args []string) {
 	cli.restoreRecoveryFile(path)
 }
 
-// readPassphrase reads a passphrase from the terminal without echo.
-func readPassphrase(label string) (string, error) {
+// readPassphrase reads a passphrase from the terminal without echo; a
+// variable so tests can answer the prompt.
+var readPassphrase = readPassphraseFromTerminal
+
+func readPassphraseFromTerminal(label string) (string, error) {
 	fmt.Print("  " + label + ": ")
 	raw, err := term.ReadPassword(int(os.Stdin.Fd())) //#nosec G115 -- a file descriptor fits in int
 	fmt.Println()

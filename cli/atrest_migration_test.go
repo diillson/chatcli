@@ -9,6 +9,7 @@ package cli
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -372,4 +373,70 @@ func TestAtRestRestoreRecoveryKey_MovesStoresToThisMachine(t *testing.T) {
 	if plain, err := atrest.OpenAt(session, raw); err != nil || string(plain) != `{"old":true}` {
 		t.Fatalf("the store does not open with this machine's key: %v", err)
 	}
+}
+
+// The /config security recovery-key --save and --restore flows end to end,
+// with the passphrase prompts answered by the test.
+func TestRecoveryKeyFile_SaveAndRestoreCommands(t *testing.T) {
+	root := t.TempDir()
+	park.SetBaseDir(filepath.Join(root, "parked"))
+	t.Cleanup(func() { park.SetBaseDir("") })
+	t.Setenv(atrest.EnvPreviousKeys, "")
+	useDefaultKey(t, "5656565656565656565656565656565656565656565656565656565656565656")
+	session := filepath.Join(root, "sessions", "s.json")
+	sealed, err := atrest.SealAt(session, []byte(`{"kept":true}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeOld(t, session, string(sealed))
+
+	origInteractive, origRead := stdinIsInteractive, readPassphrase
+	t.Cleanup(func() { stdinIsInteractive, readPassphrase = origInteractive, origRead })
+	stdinIsInteractive = func() bool { return true }
+	answers := []string{"a passphrase long enough", "a passphrase long enough"}
+	readPassphrase = func(string) (string, error) {
+		a := answers[0]
+		answers = answers[1:]
+		return a, nil
+	}
+	cli := &ChatCLI{logger: zap.NewNop(), stateRoot: root}
+	file := filepath.Join(t.TempDir(), "recovery.json")
+	cli.routeRecoveryKey([]string{"--save", file})
+	if info, err := os.Stat(file); err != nil || (runtime.GOOS != "windows" && info.Mode().Perm() != 0o600) {
+		t.Fatalf("recovery file not written privately: %v", err)
+	}
+	before, _ := os.ReadFile(file)
+	answers = []string{"a passphrase long enough", "a passphrase long enough"}
+	cli.routeRecoveryKey([]string{"--save", file})
+	if after, _ := os.ReadFile(file); string(after) != string(before) {
+		t.Fatal("an existing recovery file was overwritten")
+	}
+
+	// Mismatched passphrases write nothing.
+	other := filepath.Join(t.TempDir(), "other.json")
+	answers = []string{"a passphrase long enough", "a different passphrase!"}
+	cli.routeRecoveryKey([]string{"--save", other})
+	if _, err := os.Stat(other); !os.IsNotExist(err) {
+		t.Fatal("a recovery file was written with mismatched passphrases")
+	}
+
+	// New machine: a different keychain key; restore moves the store onto it.
+	atrest.SetKeyProvider(func() (string, string, error) {
+		return "7878787878787878787878787878787878787878787878787878787878787878", "keychain", nil
+	})
+	answers = []string{"wrong passphrase here"}
+	cli.routeRecoveryKey([]string{"--restore", file})
+	answers = []string{"a passphrase long enough"}
+	cli.routeRecoveryKey([]string{"--restore", file})
+	t.Setenv(atrest.EnvKey, "")
+	t.Setenv(atrest.EnvPreviousKeys, "")
+	raw, _ := os.ReadFile(session)
+	if plain, err := atrest.OpenAt(session, raw); err != nil || string(plain) != `{"kept":true}` {
+		t.Fatalf("restore did not move the store onto this machine's key: %v", err)
+	}
+
+	cli.routeRecoveryKey([]string{"--bogus"})
+	stdinIsInteractive = func() bool { return false }
+	cli.routeRecoveryKey([]string{"--save", filepath.Join(t.TempDir(), "x.json")})
+	cli.routeRecoveryKey([]string{"--restore", filepath.Join(t.TempDir(), "missing.json")})
 }
