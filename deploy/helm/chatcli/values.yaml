@@ -35,6 +35,15 @@ server:
   # GET /healthz, which the liveness and startup probes use; with 0 the
   # probes fall back to a TCP connect on the gRPC port.
   metricsPort: 9090
+  # How long the server keeps serving after SIGTERM, with health already
+  # NOT_SERVING, before it stops (CHATCLI_SERVER_SHUTDOWN_DELAY). It lets a
+  # pod leave the Service endpoints and the cluster DNS before it refuses
+  # connections. Empty (default) = 5s when new pods start before old ones
+  # stop (no persistence, ReadWriteMany, or an explicit RollingUpdate), off
+  # when the old pod stops first (a ReadWriteOnce sessions volume, or
+  # Recreate). "0s" turns it off. Keep it below terminationGracePeriodSeconds
+  # (30s).
+  shutdownDelay: ""
   # Authentication token for the gRPC server.
   #
   # REQUIRED for any in-cluster install. Inside Kubernetes the server binds

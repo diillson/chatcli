@@ -153,6 +153,32 @@ func deploymentStrategy(instance *platformv1alpha1.Instance) appsv1.DeploymentSt
 	return appsv1.DeploymentStrategy{}
 }
 
+// envShutdownDelay makes the server keep serving after SIGTERM, health
+// already NOT_SERVING, before it stops.
+const envShutdownDelay = "CHATCLI_SERVER_SHUTDOWN_DELAY"
+
+// rollingShutdownDelay covers the endpoint and DNS propagation of a pod
+// that is going away (the cluster DNS caches Service records for 5s).
+const rollingShutdownDelay = "5s"
+
+// shutdownDrainEnv turns the drain on when pods are replaced one by one
+// (RollingUpdate, no persistence): a new connection that still resolves an
+// old pod is then answered instead of refused. With persistence the
+// Deployment uses Recreate, every old pod stops before any new one starts,
+// and a drain would only lengthen the downtime. A value in spec.extraEnv
+// wins.
+func shutdownDrainEnv(instance *platformv1alpha1.Instance) []corev1.EnvVar {
+	if deploymentStrategy(instance).Type == appsv1.RecreateDeploymentStrategyType {
+		return nil
+	}
+	for _, e := range instance.Spec.ExtraEnv {
+		if e.Name == envShutdownDelay {
+			return nil
+		}
+	}
+	return []corev1.EnvVar{{Name: envShutdownDelay, Value: rollingShutdownDelay}}
+}
+
 func (r *InstanceReconciler) buildPodSpec(instance *platformv1alpha1.Instance) corev1.PodSpec {
 	// Build container args
 	args := r.buildContainerArgs(instance)
@@ -264,6 +290,7 @@ func (r *InstanceReconciler) buildPodSpec(instance *platformv1alpha1.Instance) c
 
 	container.Env = append(container.Env, featureEnv(instance.Spec.Features)...)
 	container.Env = append(container.Env, atrestKeyEnv(instance)...)
+	container.Env = append(container.Env, shutdownDrainEnv(instance)...)
 
 	// RS256 verification key, issuer and audience from spec.server.security
 	if sec := instance.Spec.Server.Security; sec != nil {

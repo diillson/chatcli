@@ -1,0 +1,3 @@
+{
+  "server.shutdown.draining": "Draining before shutdown: health checks report NOT_SERVING while requests are still served"
+}

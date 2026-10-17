@@ -202,6 +202,10 @@ spec:
                   name: {{ .Values.security.jwtPublicKeyRef.name | quote }}
                   key: {{ .Values.security.jwtPublicKeyRef.key | quote }}
           {{- end }}
+          {{- with include "chatcli.shutdownDelay" . }}
+            - name: CHATCLI_SERVER_SHUTDOWN_DELAY
+              value: {{ . | quote }}
+          {{- end }}
           {{- if .Values.security.tlsClientCA }}
             - name: CHATCLI_SERVER_TLS_CLIENT_CA
               value: {{ .Values.security.tlsClientCA | quote }}
