@@ -1,5 +1,26 @@
 # Changelog
 
+## [1.221.0](https://github.com/diillson/chatcli/compare/v1.220.0...v1.221.0) (2026-10-17)
+
+
+### Features
+
+* **atrest:** encrypt at rest by default in Kubernetes, key in a Secret ([#1814](https://github.com/diillson/chatcli/issues/1814)) ([3c23c7f](https://github.com/diillson/chatcli/commit/3c23c7f3391ab522f840e9f478c0a94fa064ed92))
+* **atrest:** encrypt local data at rest by default with an OS keychain key ([#1812](https://github.com/diillson/chatcli/issues/1812)) ([eef99e9](https://github.com/diillson/chatcli/commit/eef99e9b89d8105ffa24a316e98eb72be1165185))
+* **atrest:** passphrase-protected recovery file to save and restore the recovery key ([#1813](https://github.com/diillson/chatcli/issues/1813)) ([bf2fcbd](https://github.com/diillson/chatcli/commit/bf2fcbd804e2c09e05f0d343981af47733822ae4))
+* **moa:** layered cross-review rounds with rotated peers and stance panel ([#1800](https://github.com/diillson/chatcli/issues/1800)) ([3128b0f](https://github.com/diillson/chatcli/commit/3128b0f3fde159003fc75a61037b802712eda45c))
+* **plugins:** version every builtin tool and show the model all its arguments ([#1807](https://github.com/diillson/chatcli/issues/1807)) ([34f93cd](https://github.com/diillson/chatcli/commit/34f93cdcd8d99861de7d0ce7c797d98cda8ed5ef))
+* **pulse:** report everything ChatCLI does on the live dashboard ([#1805](https://github.com/diillson/chatcli/issues/1805)) ([35c00fa](https://github.com/diillson/chatcli/commit/35c00faf52f0781259cf1435546c25ff68319231))
+* **recall:** page long originals and find lines with match ([#1806](https://github.com/diillson/chatcli/issues/1806)) ([51b5c0a](https://github.com/diillson/chatcli/commit/51b5c0af56e313d779a352bf7d0d304b408e8e09))
+
+
+### Bug Fixes
+
+* **coder:** let [@recall](https://github.com/recall) and [@memory](https://github.com/memory) reads run without confirmation ([#1802](https://github.com/diillson/chatcli/issues/1802)) ([1042c99](https://github.com/diillson/chatcli/commit/1042c9933be48de1b59aba5bb0b6c3916d88663b))
+* **moa:** give [@moa](https://github.com/moa) members the prompt alone and honor layers from the agent ([#1803](https://github.com/diillson/chatcli/issues/1803)) ([4448d53](https://github.com/diillson/chatcli/commit/4448d5364dd7219e22c86688fa7cb0d07cc9413a))
+* **moa:** put [@moa](https://github.com/moa) whole answers after the synthesis ([#1804](https://github.com/diillson/chatcli/issues/1804)) ([4b0632d](https://github.com/diillson/chatcli/commit/4b0632d67432bc2eb758fd6839222af778b4b3e9))
+* **xai:** send the prompt when the history does not end with it ([#1799](https://github.com/diillson/chatcli/issues/1799)) ([815e770](https://github.com/diillson/chatcli/commit/815e770e73817ab789e37d5b9249396ee814c930))
+
 ## [1.220.0](https://github.com/diillson/chatcli/compare/v1.219.0...v1.220.0) (2026-10-16)
 
 
