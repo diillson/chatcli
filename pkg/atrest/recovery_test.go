@@ -60,3 +60,33 @@ func TestRecoveryFile_RejectsShortPassphraseAndTampering(t *testing.T) {
 		t.Fatal("garbage parsed as a recovery file")
 	}
 }
+
+func TestRecoveryFile_RefusesMalformedFiles(t *testing.T) {
+	if _, err := SealRecoveryKey("", "a long enough passphrase", ""); err == nil {
+		t.Fatal("an empty key was sealed")
+	}
+	data, err := SealRecoveryKey("recovery-key-value", "a long enough passphrase", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	mutate := func(field string, value any) []byte {
+		var f map[string]any
+		_ = json.Unmarshal(data, &f)
+		f[field] = value
+		out, _ := json.Marshal(f)
+		return out
+	}
+	cases := map[string][]byte{
+		"format":  mutate("format", "something-else"),
+		"kdf":     mutate("kdf", "scrypt"),
+		"time":    mutate("time", 0),
+		"threads": mutate("threads", 0),
+		"salt":    mutate("salt", []byte("short")),
+		"nonce":   mutate("nonce", []byte("bad")),
+	}
+	for name, file := range cases {
+		if _, err := OpenRecoveryKey(file, "a long enough passphrase"); err == nil {
+			t.Errorf("%s: a malformed recovery file opened", name)
+		}
+	}
+}
