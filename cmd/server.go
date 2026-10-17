@@ -41,6 +41,10 @@ type ServerOptions struct {
 	Model        string
 	MetricsPort  int
 
+	// ShutdownDelay is how long the server keeps serving after SIGTERM,
+	// health already NOT_SERVING, before it stops (0 = at once).
+	ShutdownDelay time.Duration
+
 	// EnableReflection registers gRPC server reflection. It defaults to
 	// CHATCLI_GRPC_REFLECTION=true, the switch the Helm chart and the
 	// Instance CRD set, which otherwise had no flag to pair with.
@@ -89,6 +93,7 @@ func serverFlagSet(opts *ServerOptions) *flag.FlagSet {
 	fs.StringVar(&opts.Provider, "provider", os.Getenv("LLM_PROVIDER"), "Default LLM provider")
 	fs.StringVar(&opts.Model, "model", "", "Default LLM model")
 	fs.IntVar(&opts.MetricsPort, "metrics-port", getEnvInt("CHATCLI_METRICS_PORT", 9090), "Prometheus metrics HTTP port (0 = disabled)")
+	fs.DurationVar(&opts.ShutdownDelay, "shutdown-delay", getEnvDuration("CHATCLI_SERVER_SHUTDOWN_DELAY", 0), "Keep serving this long after SIGTERM, health NOT_SERVING, before stopping (0 = stop at once)")
 	fs.BoolVar(&opts.EnableReflection, "enable-reflection", strings.EqualFold(os.Getenv("CHATCLI_GRPC_REFLECTION"), "true"), "Register gRPC server reflection (also CHATCLI_GRPC_REFLECTION=true; keep off in production)")
 
 	// Fallback chain flags
@@ -167,6 +172,7 @@ func startServer(opts *ServerOptions, llmMgr manager.LLMManager, logger *zap.Log
 		Provider:        opts.Provider,
 		Model:           opts.Model,
 		MetricsPort:     opts.MetricsPort,
+		ShutdownDelay:   opts.ShutdownDelay,
 
 		EnableReflection: opts.EnableReflection,
 	}
@@ -564,6 +570,9 @@ Flags:
   --provider <name>   Default LLM provider (env: LLM_PROVIDER)
   --model <name>      Default LLM model
   --metrics-port <n>  Prometheus metrics HTTP port (default: 9090, 0=disabled, env: CHATCLI_METRICS_PORT)
+  --shutdown-delay <dur>  Keep serving this long after SIGTERM, with health already NOT_SERVING,
+                      before stopping, so a pod leaves the Service endpoints first
+                      (default: 0, env: CHATCLI_SERVER_SHUTDOWN_DELAY)
   --enable-reflection Register gRPC server reflection (env: CHATCLI_GRPC_REFLECTION=true);
                       reflection calls still need the credential. Keep off in production
 

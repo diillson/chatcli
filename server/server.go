@@ -47,6 +47,12 @@ type Config struct {
 	Model            string
 	EnableReflection bool // enable gRPC reflection (default: false, check CHATCLI_GRPC_REFLECTION env)
 	MetricsPort      int  // Prometheus metrics HTTP port (0 = disabled, default: 9090)
+	// ShutdownDelay keeps the server answering requests this long after
+	// SIGTERM, with health already NOT_SERVING, before it stops accepting
+	// connections (0 = stop at once). Behind a Kubernetes Service the pod
+	// leaves the endpoints and DNS only after a short propagation delay;
+	// without the drain, new connections in that window fail.
+	ShutdownDelay time.Duration
 }
 
 // Server wraps the gRPC server and its dependencies.
@@ -322,11 +328,7 @@ func (s *Server) Start() error {
 	go func() {
 		sig := <-sigChan
 		s.logger.Info(i18n.T("server.shutdown.signal"), zap.String("signal", sig.String()))
-		setHealth(s.health, healthpb.HealthCheckResponse_NOT_SERVING)
-		if s.metricsServer != nil {
-			s.metricsServer.Stop()
-		}
-		s.grpcServer.GracefulStop()
+		s.drainAndStop(sigChan)
 	}()
 
 	s.logger.Info(i18n.T("server.starting"),
@@ -355,6 +357,28 @@ func (s *Server) Start() error {
 
 	s.logger.Info(i18n.T("server.stopped"))
 	return nil
+}
+
+// drainAndStop is the signal-driven shutdown: health goes NOT_SERVING at
+// once, so load balancers and health-checking clients stop sending new
+// work; requests keep being served for ShutdownDelay (cut short by a
+// second signal) while the pod leaves the Service endpoints and DNS; then
+// the listener closes and in-flight calls finish.
+func (s *Server) drainAndStop(interrupt <-chan os.Signal) {
+	setHealth(s.health, healthpb.HealthCheckResponse_NOT_SERVING)
+	if d := s.config.ShutdownDelay; d > 0 {
+		s.logger.Info(i18n.T("server.shutdown.draining"), zap.Duration("delay", d))
+		timer := time.NewTimer(d)
+		select {
+		case <-timer.C:
+		case <-interrupt:
+			timer.Stop()
+		}
+	}
+	if s.metricsServer != nil {
+		s.metricsServer.Stop()
+	}
+	s.grpcServer.GracefulStop()
 }
 
 // Stop gracefully stops the server and cleans up resources.

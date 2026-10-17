@@ -169,6 +169,7 @@ The watcher Role (`rbac.yaml`) still grants nothing on Secrets. With `rbac.creat
 |-----------|-------------|---------|
 | `server.port` | gRPC server port | `50051` |
 | `server.metricsPort` | Prometheus metrics and `/healthz` port (`0` disables metrics; probes then use a TCP check on the gRPC port) | `9090` |
+| `server.shutdownDelay` | How long the server keeps serving after SIGTERM, health already `NOT_SERVING`, before it stops (`CHATCLI_SERVER_SHUTDOWN_DELAY`), so a pod being replaced leaves the Service endpoints and the cluster DNS before it refuses connections. Empty = `5s` when new pods start before old ones stop (no persistence, `ReadWriteMany`, or an explicit `RollingUpdate`), off when the old pod stops first (a `ReadWriteOnce` sessions volume, or `Recreate`). `"0s"` turns it off | `""` |
 | `server.token` | Shared bearer token. **Required in-cluster** unless JWT or mTLS is set | `""` |
 | `server.grpcReflection` | Sets `CHATCLI_GRPC_REFLECTION=true`, which registers gRPC server reflection (grpcurl and similar tools can list the services); reflection calls still need the server credential. Keep off in production | `false` |
 

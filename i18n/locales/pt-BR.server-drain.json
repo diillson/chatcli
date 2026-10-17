@@ -1,0 +1,3 @@
+{
+  "server.shutdown.draining": "Drenando antes de desligar: os health checks respondem NOT_SERVING enquanto as requisições continuam sendo atendidas"
+}

@@ -166,6 +166,7 @@ What the operator manages on the server pod:
 - **Probes**: startup, readiness and liveness are `GET /healthz` on the `metrics` port (plain HTTP, no credential), so they work with and without TLS.
 - **Rollouts on change**: every Secret the Instance references (`apiKeys`, `server.token`, the TLS and client CA Secrets, the JWT and operator credential Secrets, the CA bundle, the encryption key, `extraEnv` Secret references) and every ConfigMap it mounts is watched, and a hash of what the pod uses is kept in a pod annotation -- rotating a credential or editing a mounted ConfigMap rolls the pods.
 - **Storage**: with `spec.persistence.enabled` the Deployment uses the `Recreate` strategy (a `ReadWriteOnce` volume cannot be attached to the old and new pod at once), and the pod runs with `fsGroup: 1000`.
+- **Rolling replacement**: without persistence the Deployment uses `RollingUpdate`, and the operator sets `CHATCLI_SERVER_SHUTDOWN_DELAY=5s`: on SIGTERM the server reports `NOT_SERVING` but keeps answering for 5 seconds while the pod leaves the Service endpoints and the cluster DNS, so a new connection that still resolves the old pod is served instead of refused. A `CHATCLI_SERVER_SHUTDOWN_DELAY` entry in `spec.extraEnv` replaces the value; with persistence (`Recreate`) the drain is not set, since it would only lengthen the downtime.
 - **Encryption at rest**: on by default, with the key in a Secret (see below).
 - **Fallback**: `spec.fallback` puts `spec.provider` (with `spec.model`) in front of the listed providers unless the list already names it.
 

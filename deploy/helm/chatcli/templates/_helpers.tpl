@@ -124,6 +124,24 @@ persistence on, and neither ReadWriteMany nor ReadOnlyMany requested.
 {{- end }}
 
 {{/*
+How long the server keeps serving after SIGTERM, health already
+NOT_SERVING, before it stops (CHATCLI_SERVER_SHUTDOWN_DELAY): a new
+connection that still resolves a pod being replaced is answered instead of
+refused. server.shutdownDelay wins when set ("0s" turns it off). Otherwise
+5s when new pods start before old ones stop (RollingUpdate with surge), and
+nothing when the old pod stops first (a single-node sessions volume, or
+Recreate), where a drain would only lengthen the downtime.
+*/}}
+{{- define "chatcli.shutdownDelay" -}}
+{{- if .Values.server.shutdownDelay }}
+{{- .Values.server.shutdownDelay }}
+{{- else if .Values.strategy }}
+{{- if ne (.Values.strategy.type | default "RollingUpdate") "Recreate" }}5s{{ end }}
+{{- else if not (include "chatcli.sessionsVolumeSingleNode" .) }}5s
+{{- end }}
+{{- end }}
+
+{{/*
 Deployment update strategy. An explicit .Values.strategy is rendered as
 written. Otherwise a single-node sessions volume stops the old pod before
 the new one starts: with the API server default (RollingUpdate, maxSurge
