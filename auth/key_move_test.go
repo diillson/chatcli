@@ -151,3 +151,38 @@ func TestMoveFileKeyToKeychain_WithoutCredentialsTheDataIsTheProof(t *testing.T)
 		t.Fatalf("data that opens: %v, %v", moved, err)
 	}
 }
+
+func TestKeyOpensCredentialStore_Shapes(t *testing.T) {
+	dir := t.TempDir()
+	key := bytes.Repeat([]byte{0x7a}, 32)
+	store := dir + "/auth-profiles.json"
+	if !keyOpensCredentialStore(key, store) {
+		t.Error("an absent store must not block the move")
+	}
+	cases := map[string]struct {
+		content string
+		want    bool
+	}{
+		"plaintext":   {`{"profiles":{}}`, true},
+		"bad base64":  {encryptedPrefix + "%%%not-base64%%%", false},
+		"too short":   {encryptedPrefix + "QUJD", false},
+		"another key": {"", false},
+	}
+	for name, c := range cases {
+		content := c.content
+		if name == "another key" {
+			sealStoreWith(t, dir+"/.auth-key", bytes.Repeat([]byte{0x7b}, 32))
+			raw, _ := os.ReadFile(store)
+			content = string(raw)
+		}
+		if err := os.WriteFile(store, []byte(content), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if got := keyOpensCredentialStore(key, store); got != c.want {
+			t.Errorf("%s: got %v, want %v", name, got, c.want)
+		}
+	}
+	if _, err := openWithKey([]byte("short"), []byte("x")); err == nil {
+		t.Error("an invalid AES key opened something")
+	}
+}

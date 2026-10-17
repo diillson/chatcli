@@ -299,3 +299,40 @@ func TestRecoveryKey_OpensDataWithoutTheProvider(t *testing.T) {
 		t.Fatalf("an env key reported a default recovery key: %v", err)
 	}
 }
+
+func TestOpensWithAndFingerprintFor(t *testing.T) {
+	right := "c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3"
+	wrong := "d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4"
+	t.Setenv(EnvKey, right)
+	path := filepath.Join(t.TempDir(), ".chatcli", "sessions", "s.json")
+	bound, err := SealAt(path, []byte("x"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	unbound, err := Seal([]byte("x"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	enc, _ := legacyEncryptor(right)
+	v1, err := enc.Encrypt([]byte("x"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, payload := range map[string][]byte{"bound": bound, "unbound": unbound, "v1": v1} {
+		if !OpensWith(right, path, payload) {
+			t.Errorf("%s: the sealing key did not open it", name)
+		}
+		if OpensWith(wrong, path, payload) {
+			t.Errorf("%s: another key opened it", name)
+		}
+	}
+	if OpensWith(right, path, []byte("plaintext")) {
+		t.Error("plaintext counted as sealed with a key")
+	}
+	if got := FingerprintFor(right); got == "" || got != KeyFingerprint() {
+		t.Errorf("FingerprintFor = %q, KeyFingerprint = %q", got, KeyFingerprint())
+	}
+	if FingerprintFor(right) == FingerprintFor(wrong) {
+		t.Error("two keys share a fingerprint")
+	}
+}
