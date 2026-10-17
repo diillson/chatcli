@@ -51,7 +51,7 @@ func TestDataKeyFallbacks_OffersTheKeyNotInUse(t *testing.T) {
 	fk := newFakeKeychain()
 	fk.items[keychainAccount] = encodedKey(other)
 
-	got := dataKeyFallbacks(fk.store(KeychainAuto), path)
+	got := fallbackDataSecrets(fk.store(KeychainAuto), path)
 	want, _ := deriveDataSecret(other)
 	if len(got) != 1 || got[0] != want {
 		t.Fatalf("fallbacks = %v, want the keychain key's data secret", got)
@@ -62,7 +62,7 @@ func TestDataKeyFallbacks_OffersTheKeyNotInUse(t *testing.T) {
 			t.Fatal("the active key was offered as a fallback")
 		}
 	}
-	if fb := dataKeyFallbacks(newFakeKeychain().store(KeychainFile), keyPathIn(t)); len(fb) != 0 {
+	if fb := fallbackDataSecrets(newFakeKeychain().store(KeychainFile), keyPathIn(t)); len(fb) != 0 {
 		t.Fatalf("a single key produced fallbacks: %v", fb)
 	}
 }

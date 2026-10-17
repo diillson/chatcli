@@ -48,11 +48,11 @@ func DataKeySecret() (secret, where string, err error) {
 // them was active keep opening (read only; writes use the active key), so
 // a key that changed under a store never strands it.
 func DataKeyFallbacks() []string {
-	return dataKeyFallbacks(NewKeychainStore(), getKeyPath())
+	return fallbackDataSecrets(NewKeychainStore(), getKeyPath())
 }
 
-// dataKeyFallbacks is DataKeyFallbacks against a given store and key path.
-func dataKeyFallbacks(ks *KeychainStore, keyPath string) []string {
+// fallbackDataSecrets is DataKeyFallbacks against a given store and key path.
+func fallbackDataSecrets(ks *KeychainStore, keyPath string) []string {
 	active, err := resolveEncryptionKey(ks, keyPath)
 	if err != nil {
 		active = nil
