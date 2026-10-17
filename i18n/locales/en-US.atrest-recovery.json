@@ -1,0 +1,9 @@
+{
+  "sec.cmd.recovery_file_exists": "%s already exists; choose another file (an existing recovery file is never overwritten).",
+  "sec.cmd.recovery_pass_new": "Passphrase for the recovery file (at least %d characters)",
+  "sec.cmd.recovery_pass_again": "Repeat the passphrase",
+  "sec.cmd.recovery_pass": "Recovery file passphrase",
+  "sec.cmd.recovery_pass_mismatch": "The passphrases do not match; nothing was written.",
+  "sec.cmd.recovery_file_failed": "Recovery file: %s",
+  "sec.cmd.recovery_file_saved": "Recovery file written to %s. It opens nothing without the passphrase: keep the file and the passphrase in different places."
+}

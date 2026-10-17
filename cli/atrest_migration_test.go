@@ -332,3 +332,44 @@ func TestAtRestUseKeychain_MovesStoresOffTheVariable(t *testing.T) {
 		t.Error("the marker does not name the keychain key")
 	}
 }
+
+// A new machine: the old keychain key is gone, a new one is in place, and
+// the recovery key from the old machine moves every store onto it.
+func TestAtRestRestoreRecoveryKey_MovesStoresToThisMachine(t *testing.T) {
+	root := t.TempDir()
+	park.SetBaseDir(filepath.Join(root, "parked"))
+	t.Cleanup(func() { park.SetBaseDir("") })
+	t.Setenv(atrest.EnvPreviousKeys, "")
+	oldMachine := "1212121212121212121212121212121212121212121212121212121212121212"
+	useDefaultKey(t, oldMachine)
+	session := filepath.Join(root, "sessions", "s.json")
+	sealed, err := atrest.SealAt(session, []byte(`{"old":true}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeOld(t, session, string(sealed))
+	recovery, err := atrest.RecoveryKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	file, err := atrest.SealRecoveryKey(recovery, "a passphrase long enough", atrest.KeyFingerprint())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	newMachine := "3434343434343434343434343434343434343434343434343434343434343434"
+	atrest.SetKeyProvider(func() (string, string, error) { return newMachine, "keychain", nil })
+	key, err := atrest.OpenRecoveryKey(file, "a passphrase long enough")
+	if err != nil {
+		t.Fatal(err)
+	}
+	cli := &ChatCLI{logger: zap.NewNop(), stateRoot: root}
+	cli.restoreWithRecoveryKey(key)
+
+	t.Setenv(atrest.EnvKey, "")
+	t.Setenv(atrest.EnvPreviousKeys, "")
+	raw, _ := os.ReadFile(session)
+	if plain, err := atrest.OpenAt(session, raw); err != nil || string(plain) != `{"old":true}` {
+		t.Fatalf("the store does not open with this machine's key: %v", err)
+	}
+}

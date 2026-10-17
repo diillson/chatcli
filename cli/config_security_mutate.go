@@ -66,7 +66,7 @@ func (cli *ChatCLI) routeConfigSecurity(args []string) {
 	case "verify-audit", "audit-verify":
 		cli.configSecurityVerifyAudit(rest)
 	case "recovery-key":
-		cli.configSecurityRecoveryKey()
+		cli.routeRecoveryKey(rest)
 	case "use-keychain":
 		cli.configSecurityUseKeychain()
 	default:
@@ -85,7 +85,7 @@ func (cli *ChatCLI) printConfigSecurityUsage() {
 	fmt.Println("  /config security forget \"<pattern>\"                 [--yes]")
 	fmt.Println("  /config security reload")
 	fmt.Println("  /config security reseal")
-	fmt.Println("  /config security recovery-key")
+	fmt.Println("  /config security recovery-key [--save <file> | --restore <file>]")
 	fmt.Println("  /config security use-keychain")
 	fmt.Println("  /config security verify-audit [path]")
 	fmt.Println()

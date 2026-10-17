@@ -538,3 +538,114 @@ func (cli *ChatCLI) configSecurityUseKeychain() {
 	}
 	fmt.Println(colorize("  "+i18n.T("sec.cmd.use_keychain_partial", atrest.EnvKey, atrest.EnvPreviousKeys), ColorYellow))
 }
+
+// routeRecoveryKey is /config security recovery-key [--save <file> |
+// --restore <file>].
+func (cli *ChatCLI) routeRecoveryKey(args []string) {
+	if len(args) == 0 {
+		cli.configSecurityRecoveryKey()
+		return
+	}
+	if len(args) != 2 || (args[0] != "--save" && args[0] != "--restore") {
+		fmt.Println(colorize("  /config security recovery-key [--save <file> | --restore <file>]", ColorYellow))
+		return
+	}
+	path, err := utils.ExpandPath(args[1])
+	if err != nil {
+		path = args[1]
+	}
+	if !term.IsTerminal(int(os.Stdin.Fd())) { //#nosec G115 -- a file descriptor fits in int
+		fmt.Println(colorize("  "+i18n.T("sec.cmd.recovery_not_tty"), ColorYellow))
+		return
+	}
+	if args[0] == "--save" {
+		cli.saveRecoveryFile(path)
+		return
+	}
+	cli.restoreRecoveryFile(path)
+}
+
+// readPassphrase reads a passphrase from the terminal without echo.
+func readPassphrase(label string) (string, error) {
+	fmt.Print("  " + label + ": ")
+	raw, err := term.ReadPassword(int(os.Stdin.Fd())) //#nosec G115 -- a file descriptor fits in int
+	fmt.Println()
+	return string(raw), err
+}
+
+// saveRecoveryFile writes the recovery key sealed with a passphrase the
+// user types twice: a file that can live anywhere, since it opens nothing
+// without the passphrase.
+func (cli *ChatCLI) saveRecoveryFile(path string) {
+	key, err := atrest.RecoveryKey()
+	if err != nil {
+		fmt.Println(colorize("  "+i18n.T("sec.cmd.recovery_unavailable", err.Error()), ColorYellow))
+		return
+	}
+	if _, err := os.Stat(path); err == nil {
+		fmt.Println(colorize("  "+i18n.T("sec.cmd.recovery_file_exists", path), ColorYellow))
+		return
+	}
+	pass, err := readPassphrase(i18n.T("sec.cmd.recovery_pass_new", atrest.MinRecoveryPassphrase))
+	if err != nil {
+		return
+	}
+	again, err := readPassphrase(i18n.T("sec.cmd.recovery_pass_again"))
+	if err != nil {
+		return
+	}
+	if pass != again {
+		fmt.Println(colorize("  "+i18n.T("sec.cmd.recovery_pass_mismatch"), ColorYellow))
+		return
+	}
+	data, err := atrest.SealRecoveryKey(key, pass, atrest.KeyFingerprint())
+	if err != nil {
+		fmt.Println(colorize("  "+i18n.T("sec.cmd.recovery_file_failed", err.Error()), ColorRed))
+		return
+	}
+	if err := utils.AtomicWriteFile(path, data, 0o600); err != nil {
+		fmt.Println(colorize("  "+i18n.T("sec.cmd.recovery_file_failed", err.Error()), ColorRed))
+		return
+	}
+	fmt.Println(colorize("  "+i18n.T("sec.cmd.recovery_file_saved", path), ColorGreen))
+}
+
+// restoreRecoveryFile opens a recovery file and moves the stores it opens
+// onto this machine's keychain key: the way back after a reinstall or on a
+// new machine, without the key ever being typed or shown.
+func (cli *ChatCLI) restoreRecoveryFile(path string) {
+	data, err := os.ReadFile(path) //#nosec G304 -- a recovery file the user named
+	if err != nil {
+		fmt.Println(colorize("  "+i18n.T("sec.cmd.recovery_file_failed", err.Error()), ColorRed))
+		return
+	}
+	pass, err := readPassphrase(i18n.T("sec.cmd.recovery_pass"))
+	if err != nil {
+		return
+	}
+	key, err := atrest.OpenRecoveryKey(data, pass)
+	if err != nil {
+		fmt.Println(colorize("  "+i18n.T("sec.cmd.recovery_file_failed", err.Error()), ColorRed))
+		return
+	}
+	cli.restoreWithRecoveryKey(key)
+}
+
+// restoreWithRecoveryKey moves the stores the recovery key opens onto the
+// active key: this machine's keychain key, or a key of your own when one
+// is set.
+func (cli *ChatCLI) restoreWithRecoveryKey(key string) {
+	if src, _, _ := atrest.KeyStatus(); src == atrest.KeySourceEnv {
+		// A key of your own is active: keep it, and let the recovered key
+		// open what it sealed while the stores move onto the active key.
+		retired := key
+		if prev := os.Getenv(atrest.EnvPreviousKeys); prev != "" {
+			retired = key + "," + prev
+		}
+		_ = os.Setenv(atrest.EnvPreviousKeys, retired)
+		cli.configSecurityReseal()
+		return
+	}
+	_ = os.Setenv(atrest.EnvKey, key)
+	cli.configSecurityUseKeychain()
+}
