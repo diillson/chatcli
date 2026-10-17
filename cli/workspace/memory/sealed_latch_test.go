@@ -7,10 +7,13 @@ package memory
 
 import (
 	"bytes"
+	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/diillson/chatcli/pkg/atrest"
 	"go.uber.org/zap"
@@ -101,7 +104,10 @@ func TestSealedStores_LockReadOnlyWithoutTheKey(t *testing.T) {
 	}
 }
 
-func TestDailyNotes_StayPlainMarkdownWithTheKey(t *testing.T) {
+// Daily notes hold what happened in each turn, so they are sealed like the
+// other stores. Appending reopens the sealed day (a second append must not
+// corrupt it), and a note edited by hand in plaintext still reads.
+func TestDailyNotes_SealedAppendableAndHandEditsRead(t *testing.T) {
 	t.Setenv(atrest.EnvKey, "daily-key")
 	d := NewDailyNoteStore(t.TempDir(), zap.NewNop())
 	if err := d.WriteDailyNote("first"); err != nil {
@@ -111,12 +117,23 @@ func TestDailyNotes_StayPlainMarkdownWithTheKey(t *testing.T) {
 		t.Fatal(err)
 	}
 	raw, _ := os.ReadFile(d.TodayNotePath())
-	if atrest.IsEncrypted(raw) || !strings.Contains(string(raw), "first") || !strings.Contains(string(raw), "second") {
-		t.Fatalf("daily notes must stay readable Markdown: %q", raw)
+	if !atrest.IsEncrypted(raw) || strings.Contains(string(raw), "first") {
+		t.Fatalf("daily notes must be sealed on disk: %q", raw)
 	}
 	notes := d.GetRecentDailyNotes(1)
-	if len(notes) != 1 || !strings.Contains(notes[0].Content, "second") {
+	if len(notes) != 1 || !strings.Contains(notes[0].Content, "first") || !strings.Contains(notes[0].Content, "second") {
 		t.Fatal("readers must see both entries")
+	}
+
+	if err := os.WriteFile(d.TodayNotePath(), []byte("## edited by hand\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := d.WriteDailyNote("third"); err != nil {
+		t.Fatal(err)
+	}
+	notes = d.GetRecentDailyNotes(1)
+	if len(notes) != 1 || !strings.Contains(notes[0].Content, "edited by hand") || !strings.Contains(notes[0].Content, "third") {
+		t.Fatalf("a hand-edited note must keep reading and appending: %+v", notes)
 	}
 }
 
@@ -141,5 +158,41 @@ func TestMultiProcessMerge_WorksOnSealedStores(t *testing.T) {
 	pb.Update(map[string]string{"role": "SRE"})
 	if p := NewUserProfileStore(dir, zap.NewNop()).Get(); p.Name != "Dev" || p.Role != "SRE" {
 		t.Fatalf("sealed profile merge: %+v", p)
+	}
+}
+
+// A rollup never digests a week or month whose notes are sealed with a key
+// this process lacks: the digest would be written once without them and
+// never rebuilt.
+func TestRollup_DeferredWhileASourceNoteIsSealed(t *testing.T) {
+	dir := t.TempDir()
+	monday := startOfISOWeek(time.Now().AddDate(0, 0, -70))
+	writeDailyNoteAt(t, dir, monday, "plain day")
+	t.Setenv(atrest.EnvKey, "rollup-key-rollup-key-rollup-key-00")
+	sealedDay := monday.AddDate(0, 0, 1)
+	path := filepath.Join(dir, sealedDay.Format("200601"), sealedDay.Format("20060102")+".md")
+	if err := atomicWriteFile(path, []byte("## 10:00\n\n- sealed day\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv(atrest.EnvKey, "")
+
+	rs := NewRollupStore(dir, zap.NewNop())
+	if _, err := rs.Run(context.Background(), nil); err != nil {
+		t.Fatal(err)
+	}
+	year, week := monday.ISOWeek()
+	if _, err := os.Stat(filepath.Join(dir, "weekly", fmt.Sprintf("%04d-W%02d.md", year, week))); !os.IsNotExist(err) {
+		t.Fatal("a weekly digest was built without the sealed note")
+	}
+	if entries, _ := os.ReadDir(filepath.Join(dir, "monthly")); len(entries) != 0 {
+		t.Fatal("a monthly digest was built without the sealed note")
+	}
+
+	t.Setenv(atrest.EnvKey, "rollup-key-rollup-key-rollup-key-00")
+	if _, err := rs.Run(context.Background(), nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "weekly", fmt.Sprintf("%04d-W%02d.md", year, week))); err != nil {
+		t.Fatal("the digest was not built once the key was back")
 	}
 }

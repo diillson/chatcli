@@ -9,7 +9,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/diillson/chatcli/utils"
 	"go.uber.org/zap"
 )
 
@@ -43,15 +42,16 @@ func (d *DailyNoteStore) WriteDailyNote(entry string) error {
 	// never leave a torn note, and readers only ever see a whole file.
 	d.writeMu.Lock()
 	defer d.writeMu.Unlock()
-	existing, err := os.ReadFile(path) //#nosec G304 -- path under the memory dir
+	existing, err := readStoreFile(path)
 	if err != nil && !os.IsNotExist(err) {
 		return fmt.Errorf("reading daily note: %w", err)
 	}
 	ts := time.Now().Format("15:04")
 	next := append(existing, []byte(fmt.Sprintf("\n## %s\n\n%s\n", ts, entry))...)
-	// Daily notes are human-editable Markdown by contract (never sealed):
-	// the plain atomic writer, not the sealing one.
-	if err := utils.AtomicWriteFile(path, next, 0o600); err != nil {
+	// Daily notes carry what happened in each turn, so they are sealed like
+	// every other memory store; a note edited by hand in plaintext still
+	// reads (and is sealed on its next append).
+	if err := atomicWriteFile(path, next, 0o600); err != nil {
 		return fmt.Errorf("writing daily note: %w", err)
 	}
 	return nil
@@ -65,7 +65,7 @@ func (d *DailyNoteStore) GetRecentDailyNotes(days int) []DailyNote {
 	for i := 0; i < days; i++ {
 		date := now.AddDate(0, 0, -i)
 		path := filepath.Join(d.memoryDir, date.Format("200601"), date.Format("20060102")+".md")
-		data, err := os.ReadFile(path) //#nosec G304 -- path supplied by user/agent through validated tool surface (boundary check upstream)
+		data, err := readStoreFile(path)
 		if err != nil {
 			continue
 		}

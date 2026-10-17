@@ -154,6 +154,10 @@ func (hm *HistoryManager) readHistoryFile(path string) ([]string, error) {
 
 	var history []string
 	scanner := bufio.NewScanner(f)
+	// A sealed entry is a third longer than its text and keeps a multi-line
+	// paste on one line: the default 64 KiB token limit would fail the
+	// whole load on one long entry.
+	scanner.Buffer(make([]byte, 0, 64*1024), 16*1024*1024)
 	for scanner.Scan() {
 		line := scanner.Text()
 		if strings.HasPrefix(line, historySealedPrefix) {

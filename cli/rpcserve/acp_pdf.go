@@ -10,6 +10,7 @@ import (
 	"context"
 	"encoding/base64"
 	"fmt"
+	"github.com/diillson/chatcli/pkg/atrest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -42,7 +43,7 @@ func acpPDFFromPath(ctx context.Context, path string) (string, bool) {
 	if err != nil || info.IsDir() || info.Size() > acpMaxPDFBytes {
 		return "", false
 	}
-	data, err := os.ReadFile(path) // #nosec G304 -- a file the ACP client (the user's editor) attached to the prompt
+	data, err := atrest.ReadFile(path)
 	if err != nil {
 		return "", false
 	}
@@ -76,9 +77,17 @@ func acpPDFText(ctx context.Context, name, path string, data []byte) (string, bo
 	if path == "" {
 		if dir, derr := utils.PrivateStateDir("attachments"); derr == nil {
 			if f, ferr := os.CreateTemp(dir, "acp-*.pdf"); ferr == nil {
-				_, _ = f.Write(data)
+				// Sealed at rest like every other attachment; @view opens it.
+				sealed, serr := atrest.SealAt(f.Name(), data)
+				if serr == nil {
+					_, serr = f.Write(sealed)
+				}
 				_ = f.Close()
-				path = f.Name()
+				if serr == nil {
+					path = f.Name()
+				} else {
+					_ = os.Remove(f.Name())
+				}
 			}
 		}
 	}

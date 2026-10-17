@@ -7,15 +7,19 @@ package auth
 
 import (
 	"bytes"
+	"crypto/aes"
+	"crypto/cipher"
 	"encoding/base64"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 )
 
 // fakeKeychain stands in for the OS store, so the wiring can be exercised
 // on any platform without touching a real keychain.
 type fakeKeychain struct {
+	mu        sync.Mutex
 	items     map[string][]byte
 	available bool
 	failSet   bool
@@ -34,6 +38,8 @@ func (f *fakeKeychain) store(backend KeychainBackend) *KeychainStore {
 func (f *fakeKeychain) Available() bool { return f.available }
 
 func (f *fakeKeychain) Get(account string) ([]byte, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	if f.getErr != nil {
 		return nil, f.getErr
 	}
@@ -45,6 +51,8 @@ func (f *fakeKeychain) Get(account string) ([]byte, error) {
 }
 
 func (f *fakeKeychain) Set(account string, data []byte) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	if f.failSet {
 		return os.ErrPermission
 	}
@@ -56,6 +64,8 @@ func (f *fakeKeychain) Set(account string, data []byte) error {
 }
 
 func (f *fakeKeychain) Delete(account string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	delete(f.items, account)
 	return nil
 }
@@ -74,8 +84,41 @@ func writeKey(t *testing.T, path string, b byte) []byte {
 	return key
 }
 
-// The default must not move a working installation's key.
-func TestResolveKey_AutoKeepsAnExistingFileKey(t *testing.T) {
+// resetAdopt forgets which key paths this process already tried to adopt.
+func resetAdopt(t *testing.T) {
+	t.Helper()
+	adoptMu.Lock()
+	adoptDone = map[string]bool{}
+	adoptMu.Unlock()
+}
+
+// sealStoreWith writes an auth-profiles.json next to keyPath encrypted with
+// key, the way encryptData does.
+func sealStoreWith(t *testing.T, keyPath string, key []byte) {
+	t.Helper()
+	block, err := aes.NewCipher(key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	gcm, err := cipher.NewGCM(block)
+	if err != nil {
+		t.Fatal(err)
+	}
+	nonce := make([]byte, gcm.NonceSize())
+	sealed := gcm.Seal(nonce, nonce, []byte(`{"profiles":{}}`), nil)
+	data := encryptedPrefix + base64.StdEncoding.EncodeToString(sealed)
+	if err := os.WriteFile(filepath.Join(filepath.Dir(keyPath), "auth-profiles.json"), []byte(data), 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func encodedKey(key []byte) []byte { return []byte(base64.StdEncoding.EncodeToString(key)) }
+
+// The default moves the key file into the keychain: verified read-back,
+// then the file goes away.
+func TestResolveKey_AutoAdoptsTheFileKeyIntoTheKeychain(t *testing.T) {
+	resetAdopt(t)
+	t.Setenv("CHATCLI_AUTH_DIR", "")
 	path := keyPathIn(t)
 	want := writeKey(t, path, 0x11)
 	fk := newFakeKeychain()
@@ -87,11 +130,156 @@ func TestResolveKey_AutoKeepsAnExistingFileKey(t *testing.T) {
 	if !bytes.Equal(got, want) {
 		t.Error("auto did not return the existing file key")
 	}
-	if len(fk.items) != 0 {
-		t.Error("auto migrated a key into the keychain without being asked")
+	if !bytes.Equal(fk.items[keychainAccount], encodedKey(want)) {
+		t.Error("the file key was not moved into the keychain")
+	}
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Error("the key file is still on disk after the move")
+	}
+	again, err := resolveEncryptionKey(fk.store(KeychainAuto), path)
+	if err != nil || !bytes.Equal(again, want) {
+		t.Fatalf("the next resolve did not find the key in the keychain: %v", err)
+	}
+}
+
+// A keychain holding the same key only costs the file.
+func TestResolveKey_AutoSameKeyRemovesTheFile(t *testing.T) {
+	resetAdopt(t)
+	t.Setenv("CHATCLI_AUTH_DIR", "")
+	path := keyPathIn(t)
+	want := writeKey(t, path, 0x22)
+	fk := newFakeKeychain()
+	fk.items[keychainAccount] = encodedKey(want)
+
+	if _, err := resolveEncryptionKey(fk.store(KeychainAuto), path); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Error("the key file is still on disk")
+	}
+}
+
+// A different key in the keychain is never overwritten: another
+// installation may depend on it. The file keeps being used.
+func TestResolveKey_AutoDifferentKeyLeavesTheKeychainAlone(t *testing.T) {
+	resetAdopt(t)
+	t.Setenv("CHATCLI_AUTH_DIR", "")
+	path := keyPathIn(t)
+	fileKey := writeKey(t, path, 0x33)
+	sealStoreWith(t, path, fileKey)
+	other := bytes.Repeat([]byte{0x44}, 32)
+	fk := newFakeKeychain()
+	fk.items[keychainAccount] = encodedKey(other)
+
+	got, err := resolveEncryptionKey(fk.store(KeychainAuto), path)
+	if err != nil || !bytes.Equal(got, fileKey) {
+		t.Fatalf("resolve = %v, want the file key as before", err)
+	}
+	if !bytes.Equal(fk.items[keychainAccount], encodedKey(other)) {
+		t.Error("the keychain's key was overwritten")
 	}
 	if _, err := os.Stat(path); err != nil {
-		t.Error("auto removed the key file")
+		t.Error("the key file was removed")
+	}
+	if keyIsInKeychain(path) {
+		t.Error("the marker claims the key is in the keychain")
+	}
+}
+
+// After the move, nothing creates a new key: not the file backend (a cron
+// job), not a context without a keychain, not a keychain that answers "no
+// such item". A new key would orphan every store sealed with the real one.
+func TestResolveKey_AfterTheMoveNoNewKeyIsEverCreated(t *testing.T) {
+	cases := map[string]func(fk *fakeKeychain) KeychainBackend{
+		"file backend":      func(fk *fakeKeychain) KeychainBackend { return KeychainFile },
+		"no keychain here":  func(fk *fakeKeychain) KeychainBackend { fk.available = false; return KeychainAuto },
+		"item gone":         func(fk *fakeKeychain) KeychainBackend { delete(fk.items, keychainAccount); return KeychainAuto },
+		"native, item gone": func(fk *fakeKeychain) KeychainBackend { delete(fk.items, keychainAccount); return KeychainNative },
+	}
+	for name, setup := range cases {
+		t.Run(name, func(t *testing.T) {
+			resetAdopt(t)
+			t.Setenv("CHATCLI_AUTH_DIR", "")
+			path := keyPathIn(t)
+			writeKey(t, path, 0x55)
+			fk := newFakeKeychain()
+			if _, err := resolveEncryptionKey(fk.store(KeychainAuto), path); err != nil {
+				t.Fatal(err)
+			}
+			if !keyIsInKeychain(path) {
+				t.Fatal("the move did not leave its marker")
+			}
+			backend := setup(fk)
+			before := len(fk.items)
+			if _, err := resolveEncryptionKey(fk.store(backend), path); err == nil {
+				t.Fatal("a new key was handed out after the key moved to the keychain")
+			}
+			if _, err := os.Stat(path); !os.IsNotExist(err) {
+				t.Error("a new key file was created")
+			}
+			if len(fk.items) > before {
+				t.Error("a new key was written to the keychain")
+			}
+		})
+	}
+}
+
+// A key file that shows up after the move (a restored backup, a container
+// with the directory mounted) never replaces the keychain key the stores
+// are sealed with.
+func TestResolveKey_StrayFileAfterTheMoveUsesTheKeychainKey(t *testing.T) {
+	resetAdopt(t)
+	t.Setenv("CHATCLI_AUTH_DIR", "")
+	path := keyPathIn(t)
+	moved := writeKey(t, path, 0x66)
+	fk := newFakeKeychain()
+	if _, err := resolveEncryptionKey(fk.store(KeychainAuto), path); err != nil {
+		t.Fatal(err)
+	}
+	writeKey(t, path, 0x77)
+	resetAdopt(t)
+	got, err := resolveEncryptionKey(fk.store(KeychainAuto), path)
+	if err != nil || !bytes.Equal(got, moved) {
+		t.Fatalf("resolve = %v, want the keychain key", err)
+	}
+	if !bytes.Equal(fk.items[keychainAccount], encodedKey(moved)) {
+		t.Error("the stray file replaced the keychain key")
+	}
+	fk.getErr = os.ErrPermission
+	if _, err := resolveEncryptionKey(fk.store(KeychainAuto), path); err == nil {
+		t.Error("a locked keychain fell back to the stray file")
+	}
+}
+
+// A keychain that cannot answer, a lost write, or a custom auth directory
+// leave the file in place.
+func TestResolveKey_AutoKeepsTheFileWhenTheMoveIsUnsafe(t *testing.T) {
+	cases := map[string]func(fk *fakeKeychain, t *testing.T){
+		"locked":     func(fk *fakeKeychain, t *testing.T) { fk.getErr = os.ErrPermission },
+		"lost write": func(fk *fakeKeychain, t *testing.T) { fk.loseWrite = true },
+		"set fails":  func(fk *fakeKeychain, t *testing.T) { fk.failSet = true },
+		"custom dir": func(fk *fakeKeychain, t *testing.T) { t.Setenv("CHATCLI_AUTH_DIR", t.TempDir()) },
+		"no keychain": func(fk *fakeKeychain, t *testing.T) {
+			fk.available = false
+		},
+	}
+	for name, setup := range cases {
+		t.Run(name, func(t *testing.T) {
+			resetAdopt(t)
+			t.Setenv("CHATCLI_AUTH_DIR", "")
+			path := keyPathIn(t)
+			want := writeKey(t, path, 0x77)
+			fk := newFakeKeychain()
+			setup(fk, t)
+
+			got, err := resolveEncryptionKey(fk.store(KeychainAuto), path)
+			if err != nil || !bytes.Equal(got, want) {
+				t.Fatalf("resolve = %v, want the file key", err)
+			}
+			if _, err := os.Stat(path); err != nil {
+				t.Error("the key file was removed")
+			}
+		})
 	}
 }
 
@@ -387,5 +575,40 @@ func TestNewRandomKey_IsAUsableAESKey(t *testing.T) {
 	}
 	if bytes.Equal(a, b) {
 		t.Error("two calls produced the same key")
+	}
+}
+
+// Processes starting together on a machine with no key yet all end up
+// with the same key: creation is serialized, and each one looks again
+// under the lock before generating.
+func TestResolveKey_ConcurrentFirstRunsAgreeOnOneKey(t *testing.T) {
+	for _, withKeychain := range []bool{true, false} {
+		path := keyPathIn(t)
+		fk := newFakeKeychain()
+		fk.available = withKeychain
+		const n = 16
+		keys := make([][]byte, n)
+		errs := make([]error, n)
+		var wg sync.WaitGroup
+		for i := 0; i < n; i++ {
+			wg.Add(1)
+			go func(i int) {
+				defer wg.Done()
+				keys[i], errs[i] = resolveEncryptionKey(fk.store(KeychainAuto), path)
+			}(i)
+		}
+		wg.Wait()
+		for i := 0; i < n; i++ {
+			if errs[i] != nil {
+				t.Fatalf("keychain=%v: resolve %d: %v", withKeychain, i, errs[i])
+			}
+			if !bytes.Equal(keys[i], keys[0]) {
+				t.Fatalf("keychain=%v: two first runs ended with different keys", withKeychain)
+			}
+		}
+		again, err := resolveEncryptionKey(fk.store(KeychainAuto), path)
+		if err != nil || !bytes.Equal(again, keys[0]) {
+			t.Fatalf("keychain=%v: the stored key is not the one handed out", withKeychain)
+		}
 	}
 }

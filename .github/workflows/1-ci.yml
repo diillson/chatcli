@@ -74,6 +74,38 @@ jobs:
           path: coverage.txt
           retention-days: 7 # O artefato só precisa existir por 7 dias
 
+  # Encryption at rest, the credential key and the stores it seals behave
+  # per platform (macOS Keychain, Linux Secret Service or key file, Windows
+  # Credential Manager; path separators in the sealed-payload binding), so
+  # those packages are tested on every OS ChatCLI supports, not only Linux.
+  cross-os-at-rest:
+    name: At-rest encryption tests (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    if: github.actor != 'release-please[bot]' && github.actor != 'github-actions[bot]'
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-latest]
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Test
+        shell: bash
+        run: >-
+          go test -count=1
+          ./pkg/atrest/... ./auth/... ./cli/workspace/memory/...
+          ./llm/embedding/vindex/... ./cli/agent/park/...
+          && go test -count=1 ./cli/ -run 'AtRest|Reseal|Transcript|SealedLines|History'
+
   # JOB 2: the Helm charts ship with every release, so they get the same
   # PR-time gate as the Go code: strict lint, a render of the shapes users
   # actually deploy, and schema validation of the rendered manifests.

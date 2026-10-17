@@ -31,7 +31,7 @@ import (
 
 // attachmentsDirName is the store the saved attachments live in, under the
 // state root (~/.chatcli, or a gateway tenant's root).
-const attachmentsDirName = "attachments"
+const attachmentsDirName = atrest.AttachmentsDirName
 
 // Model-facing text of the attachment note (English, like every other
 // model-facing string the engine writes).

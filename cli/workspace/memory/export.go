@@ -71,7 +71,12 @@ func (r ExportReport) Total() int {
 // Export writes every store as JSONL to w.
 func (m *Manager) Export(w io.Writer) (ExportReport, error) {
 	var rep ExportReport
-	rep.Sealed = atrest.Enabled()
+	// Sealed only under a key that travels: CHATCLI_ENCRYPTION_KEY. The
+	// default key lives in this machine's keychain, and an export sealed
+	// with it would import nowhere else; that export is plaintext and the
+	// command says so, like a session export.
+	src, _, _ := atrest.KeyStatus()
+	rep.Sealed = src == atrest.KeySourceEnv
 	bw := bufio.NewWriter(w)
 	write := func(rec ExportRecord) error {
 		line, err := json.Marshal(rec)
@@ -190,14 +195,14 @@ func (m *Manager) Import(r io.Reader) (ImportReport, error) {
 		}
 		rep.Lines++
 		if strings.HasPrefix(string(line), exportSealedPrefix) {
-			if !atrest.Enabled() {
-				return rep, ErrSealedImport
-			}
 			raw, err := base64.StdEncoding.DecodeString(string(line[len(exportSealedPrefix):]))
 			if err != nil {
 				return rep, fmt.Errorf("memory import: corrupt sealed line %d: %w", rep.Lines, err)
 			}
 			if line, err = atrest.Open(raw); err != nil {
+				if errors.Is(err, atrest.ErrKeyMissing) {
+					return rep, ErrSealedImport
+				}
 				return rep, fmt.Errorf("memory import: line %d: %w", rep.Lines, err)
 			}
 		}

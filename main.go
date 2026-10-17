@@ -358,6 +358,8 @@ func main() {
 	plugins.EnableBrowserReaper(browserReaperSubcommand)
 	defer plugins.ShutdownRenderBrowser()
 
+	installAtRestKeyProvider(os.Args[1:])
+
 	// Check for subcommands (server, connect) before processing standard flags.
 	// These subcommands have their own flag sets and should not go through cli.Parse().
 	if dispatchSubcommand() {

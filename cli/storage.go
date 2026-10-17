@@ -17,6 +17,7 @@ package cli
 import (
 	"context"
 	"encoding/json"
+	"github.com/diillson/chatcli/pkg/atrest"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -450,7 +451,7 @@ func costSnapshotCandidates(dir string, cutoff, now time.Time, burst bool) []can
 // snapshots count as many, so the burst rule never removes what it cannot
 // read.
 func costSnapshotRequests(path string) int {
-	data, err := os.ReadFile(path) // #nosec G304 -- path enumerated from the store dir
+	data, err := atrest.ReadFile(path)
 	if err != nil {
 		return int(^uint(0) >> 1)
 	}

@@ -167,13 +167,21 @@ func TestResealWalk_SealsPlaintextStores(t *testing.T) {
 	_ = os.WriteFile(filepath.Join(root, "transcripts", "t.jsonl"), []byte("{\"kind\":\"msg\"}\n"), 0o600)
 	cli.configSecurityReseal() // no key: message only
 	t.Setenv(atrest.EnvKey, "walk-key")
-	rep := cli.resealAtRestStores()
-	if rep.Rewritten != 5 || len(rep.Errors) != 0 {
+	rep := cli.resealAtRestStores(0)
+	// Five whole-file stores plus the transcript, whose plaintext line is
+	// sealed too (a journal written before encryption was on).
+	if rep.Rewritten != 6 || rep.Lines != 1 || len(rep.Errors) != 0 {
 		t.Fatalf("report = %+v", rep)
 	}
 	raw, _ := os.ReadFile(filepath.Join(root, "memory", "memory_index.json"))
 	if !atrest.IsEncrypted(raw) {
 		t.Fatal("plaintext store must be sealed by the walk")
+	}
+	if tr := readFileString(t, filepath.Join(root, "transcripts", "t.jsonl")); !strings.HasPrefix(tr, sealedLinePrefix) {
+		t.Fatalf("plaintext journal line must be sealed: %q", tr)
+	}
+	if msgs, err := readTranscript(filepath.Join(root, "transcripts", "t.jsonl")); err != nil {
+		t.Fatalf("sealed journal must read back: %v %v", msgs, err)
 	}
 	cli.routeConfigSecurity([]string{"reseal"})
 	cli.routeConfigSecurity([]string{"verify-audit", filepath.Join(root, "nope")})

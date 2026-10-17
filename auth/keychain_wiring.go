@@ -15,6 +15,7 @@ import (
 	"sync"
 
 	"github.com/diillson/chatcli/i18n"
+	"github.com/diillson/chatcli/pkg/flock"
 )
 
 // keychainAccount is the account name the credential-encryption key is
@@ -129,10 +130,11 @@ const keychainEnvVar = "CHATCLI_KEYCHAIN_BACKEND"
 //   - keychain: the keychain. A key already in the file is migrated into it
 //     once, and the file is removed only after the keychain has been read
 //     back successfully.
-//   - auto (the default): an existing file key keeps being used, exactly as
-//     before. Only a key being created for the first time goes to the
-//     keychain, and only where one is available. Moving a working
-//     installation's key without being asked is not a default's business.
+//   - auto (the default): the keychain wherever one is available. A key
+//     already in the default key file is moved into it (adoptFileKey:
+//     verified read-back, nothing destroyed, the file removed last), so the
+//     key stops sitting on disk next to the data it protects. With a custom
+//     CHATCLI_AUTH_DIR, or no keychain, the file keeps being used.
 //
 // A new key is generated only when every backend in play answered that it
 // holds none. A keychain that cannot be read, or a key file that exists but
@@ -152,6 +154,7 @@ func resolveEncryptionKey(ks *KeychainStore, keyPath string) ([]byte, error) {
 	case KeychainNative:
 		key, kerr := lookupKeychainKey(ks)
 		if kerr == nil {
+			markKeyInKeychain(keyPath)
 			return key, nil
 		}
 		if !ks.IsNativeAvailable() {
@@ -164,6 +167,7 @@ func resolveEncryptionKey(ks *KeychainStore, keyPath string) ([]byte, error) {
 		if hasFile {
 			// One-time migration, verified before the file goes away.
 			if storeKeyInKeychain(ks, fileKey) {
+				markKeyInKeychain(keyPath)
 				if err := os.Remove(keyPath); err != nil {
 					keychainWarnf("credential key copied to the OS keychain, but %s could not be removed (%v)", keyPath, err)
 				}
@@ -173,10 +177,15 @@ func resolveEncryptionKey(ks *KeychainStore, keyPath string) ([]byte, error) {
 
 	default: // KeychainAuto
 		if hasFile {
+			if keyIsInKeychain(keyPath) {
+				return strayFileKey(ks, keyPath, fileKey)
+			}
+			adoptFileKey(ks, keyPath, fileKey)
 			return fileKey, nil
 		}
 		key, kerr := lookupKeychainKey(ks)
 		if kerr == nil {
+			markKeyInKeychain(keyPath)
 			return key, nil
 		}
 		if !errors.Is(kerr, os.ErrNotExist) {
@@ -188,6 +197,35 @@ func resolveEncryptionKey(ks *KeychainStore, keyPath string) ([]byte, error) {
 		return fileKey, nil
 	}
 
+	// First key on this machine. Creation is serialized across processes:
+	// two ChatCLI processes starting together (a REPL and the gateway
+	// daemon, two terminals) would otherwise each generate a key, each
+	// verify its own write, and the one whose keychain write lost would
+	// seal data with a key nobody can find again. Under the lock, look
+	// again: the other process may have created it while this one waited.
+	unlock := flock.Lock(keyPath)
+	defer unlock()
+	if held, err := readKeyFileStrict(keyPath); err == nil {
+		return held, nil
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return nil, err
+	}
+	if ks.backend != KeychainFile && ks.IsNativeAvailable() {
+		held, kerr := lookupKeychainKey(ks)
+		if kerr == nil {
+			markKeyInKeychain(keyPath)
+			return held, nil
+		}
+		if !errors.Is(kerr, os.ErrNotExist) {
+			return nil, keychainUnreadableError(kerr)
+		}
+	}
+	// The key was in the keychain once: whatever made it unreachable here,
+	// a new key would orphan everything sealed with it.
+	if keyIsInKeychain(keyPath) {
+		return nil, errKeyNotInKeychain(keyPath)
+	}
+
 	key, err := newRandomKey()
 	if err != nil {
 		return nil, err
@@ -197,6 +235,7 @@ func resolveEncryptionKey(ks *KeychainStore, keyPath string) ([]byte, error) {
 	// operator has not pinned the file backend.
 	if ks.backend != KeychainFile && ks.IsNativeAvailable() {
 		if held, ok := publishNewKey(ks, key); ok {
+			markKeyInKeychain(keyPath)
 			return held, nil
 		}
 	}

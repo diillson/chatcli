@@ -7,6 +7,7 @@ package memory
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -94,7 +95,14 @@ func (rs *RollupStore) Run(ctx context.Context, summarize SummarizeFunc) (int, e
 		// Episodes lead the source: the durable dated record grounds the
 		// digest, the notes add color. A week whose daily notes already
 		// expired still rolls from its episodes alone.
-		source := rs.episodesSection(wk.start, wk.end.AddDate(0, 0, 1)) + wk.content()
+		notes, complete := wk.content()
+		if !complete {
+			// A sealed note this process cannot open: a digest built
+			// without it would be written once and never rebuilt.
+			rs.logger.Warn("weekly rollup deferred: a daily note is sealed and cannot be opened", zap.String("week", wk.label))
+			continue
+		}
+		source := rs.episodesSection(wk.start, wk.end.AddDate(0, 0, 1)) + notes
 		if strings.TrimSpace(source) == "" {
 			continue
 		}
@@ -134,7 +142,12 @@ func (rs *RollupStore) rollMonths(ctx context.Context, summarize SummarizeFunc, 
 		if fileExists(path) {
 			continue
 		}
-		source := rs.monthEpisodesSection(month) + rs.monthSource(month)
+		notes, complete := rs.monthSource(month)
+		if !complete {
+			rs.logger.Warn("monthly rollup deferred: a source note is sealed and cannot be opened", zap.String("month", month))
+			continue
+		}
+		source := rs.monthEpisodesSection(month) + notes
 		if strings.TrimSpace(source) == "" {
 			continue
 		}
@@ -318,10 +331,13 @@ type isoWeek struct {
 	files      []dailyFile
 }
 
-func (w isoWeek) content() string {
+func (w isoWeek) content() (string, bool) {
 	var sb strings.Builder
 	for _, f := range w.files {
-		data, err := os.ReadFile(f.path) //#nosec G304 -- paths enumerated from the memory dir itself
+		data, err := readStoreFile(f.path)
+		if isSealedStoreErr(err) {
+			return "", false
+		}
 		if err != nil {
 			continue
 		}
@@ -329,7 +345,7 @@ func (w isoWeek) content() string {
 		sb.Write(data)
 		sb.WriteString("\n")
 	}
-	return sb.String()
+	return sb.String(), true
 }
 
 func groupByISOWeek(files []dailyFile) []isoWeek {
@@ -399,35 +415,43 @@ func (rs *RollupStore) listSourceMonths() ([]string, error) {
 // monthSource prefers weekly digests whose week STARTS inside the month
 // (they survive daily cleanup); when none exist it falls back to the raw
 // daily notes of that month.
-func (rs *RollupStore) monthSource(month string) string {
+func (rs *RollupStore) monthSource(month string) (string, bool) {
 	var sb strings.Builder
 	for _, w := range rs.sortedFiles("weekly") {
 		base := strings.TrimSuffix(filepath.Base(w), ".md")
 		if wk, ok := parseWeekLabel(base); ok && wk.Format("2006-01") == month {
-			if data, err := os.ReadFile(w); err == nil { //#nosec G304 -- paths enumerated from the memory dir itself
+			data, err := readStoreFile(w)
+			if isSealedStoreErr(err) {
+				return "", false
+			}
+			if err == nil {
 				sb.Write(data)
 				sb.WriteString("\n")
 			}
 		}
 	}
 	if sb.Len() > 0 {
-		return sb.String()
+		return sb.String(), true
 	}
 	dailies, err := rs.listDailyNotes()
 	if err != nil {
-		return ""
+		return "", true
 	}
 	for _, d := range dailies {
 		if d.date.Format("2006-01") != month {
 			continue
 		}
-		if data, err := os.ReadFile(d.path); err == nil { //#nosec G304 -- paths enumerated from the memory dir itself
+		data, err := readStoreFile(d.path)
+		if isSealedStoreErr(err) {
+			return "", false
+		}
+		if err == nil {
 			sb.WriteString("### " + d.date.Format("2006-01-02") + "\n")
 			sb.Write(data)
 			sb.WriteString("\n")
 		}
 	}
-	return sb.String()
+	return sb.String(), true
 }
 
 // monthEpisodesSection renders the month's episodes as the leading monthly
@@ -497,9 +521,16 @@ func (rs *RollupStore) latestFile(sub string) string {
 	return files[len(files)-1]
 }
 
+// isSealedStoreErr reports a store file sealed with a key this process
+// does not hold.
+func isSealedStoreErr(err error) bool {
+	var sealed *SealedStoreError
+	return errors.As(err, &sealed)
+}
+
 // readHead returns up to maxChars of a file, trimmed.
 func readHead(path string, maxChars int) string {
-	data, err := os.ReadFile(path) //#nosec G304 -- paths enumerated from the memory dir itself
+	data, err := readStoreFile(path)
 	if err != nil {
 		return ""
 	}

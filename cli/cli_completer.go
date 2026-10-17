@@ -2019,6 +2019,8 @@ func (cli *ChatCLI) getConfigSecuritySuggestions(d prompt.Document) []prompt.Sug
 			{Text: "forget", Description: i18n.T("sec.cmd.rules_word")},
 			{Text: "reload", Description: i18n.T("sec.cmd.reloaded")},
 			{Text: "reseal", Description: i18n.T("sec.cmd.suggest_reseal")},
+			{Text: "recovery-key", Description: i18n.T("sec.cmd.suggest_recovery_key")},
+			{Text: "use-keychain", Description: i18n.T("sec.cmd.suggest_use_keychain")},
 			{Text: "verify-audit", Description: i18n.T("sec.cmd.suggest_verify_audit")},
 			{Text: "help", Description: i18n.T("sec.cmd.usage_header")},
 		}
