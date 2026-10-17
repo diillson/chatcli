@@ -7,6 +7,7 @@
 package cli
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -439,4 +440,61 @@ func TestRecoveryKeyFile_SaveAndRestoreCommands(t *testing.T) {
 	stdinIsInteractive = func() bool { return false }
 	cli.routeRecoveryKey([]string{"--save", filepath.Join(t.TempDir(), "x.json")})
 	cli.routeRecoveryKey([]string{"--restore", filepath.Join(t.TempDir(), "missing.json")})
+}
+
+// With the default key still in the key file, use-keychain moves that key
+// into the keychain (auth.MoveFileKeyToKeychain) instead of saying there
+// is nothing to do.
+func TestAtRestUseKeychain_MovesTheDefaultKeyFile(t *testing.T) {
+	t.Setenv(atrest.EnvKey, "")
+	atrest.SetKeyProvider(func() (string, string, error) {
+		return "9090909090909090909090909090909090909090909090909090909090909090", "file", nil
+	})
+	t.Cleanup(func() { atrest.SetKeyProvider(nil) })
+	orig := moveFileKeyToKeychain
+	t.Cleanup(func() { moveFileKeyToKeychain = orig })
+	calls := 0
+	for _, result := range []struct {
+		moved bool
+		err   error
+	}{{true, nil}, {false, nil}, {false, errors.New("keychain locked")}} {
+		moveFileKeyToKeychain = func(func(string) bool) (bool, error) { calls++; return result.moved, result.err }
+		(&ChatCLI{logger: zap.NewNop(), stateRoot: t.TempDir()}).configSecurityUseKeychain()
+	}
+	if calls != 3 {
+		t.Fatalf("the key move ran %d times, want 3", calls)
+	}
+}
+
+// The data proof: the marker's fingerprint when a full seal recorded one,
+// else the first sealed store file; nothing sealed means nothing depends
+// on any key.
+func TestAtRestDataOpensWith(t *testing.T) {
+	root := t.TempDir()
+	park.SetBaseDir(filepath.Join(root, "parked"))
+	t.Cleanup(func() { park.SetBaseDir("") })
+	right := "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1"
+	wrong := "b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2"
+	cli := &ChatCLI{logger: zap.NewNop(), stateRoot: root}
+	if !cli.dataOpensWith(wrong) {
+		t.Fatal("with nothing sealed any key must pass")
+	}
+
+	t.Setenv(atrest.EnvKey, right)
+	journal := filepath.Join(root, "transcripts", "t.jsonl")
+	writeOld(t, journal, "{\"kind\":\"msg\"}\n")
+	if _, err := atrest.SealLines(journal, sealedLinePrefix, true); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv(atrest.EnvKey, "")
+	if !cli.dataOpensWith(right) || cli.dataOpensWith(wrong) {
+		t.Fatal("the sealed journal did not tell the keys apart")
+	}
+
+	if err := os.WriteFile(cli.atRestMarkerPath(), []byte(atrest.FingerprintFor(right)+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if !cli.dataOpensWith(right) || cli.dataOpensWith(wrong) {
+		t.Fatal("the marker fingerprint did not tell the keys apart")
+	}
 }

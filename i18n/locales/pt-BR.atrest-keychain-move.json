@@ -1,0 +1,4 @@
+{
+  "sec.cmd.keyfile_moved": "A chave de %s agora está no keychain do sistema e o arquivo foi removido. É a mesma chave: seus dados, credenciais e chave de recuperação não mudam. O que o keychain guardava antes ficou como auth-key.previous.",
+  "sec.cmd.keyfile_move_failed": "A chave não foi movida: %s. Nada mudou; o arquivo de chave continua em uso."
+}

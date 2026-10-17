@@ -1,0 +1,4 @@
+{
+  "sec.cmd.keyfile_moved": "The key from %s is now in the OS keychain and the file was removed. It is the same key: your data, credentials and recovery key are unaffected. Anything the keychain held before is kept as auth-key.previous.",
+  "sec.cmd.keyfile_move_failed": "The key was not moved: %s. Nothing changed; the key file keeps being used."
+}
