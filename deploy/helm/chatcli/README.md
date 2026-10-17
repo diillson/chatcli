@@ -621,5 +621,5 @@ helm uninstall chatcli -n chatcli
 
 ## Documentation
 
-- Server mode: [chatcli.edilsonfreitas.com/features/server-mode](https://chatcli.edilsonfreitas.com/features/server-mode)
+- Server mode: [chatcli.edilsonfreitas.com/server/server-mode](https://chatcli.edilsonfreitas.com/server/server-mode)
 - Full documentation: [chatcli.edilsonfreitas.com](https://chatcli.edilsonfreitas.com)

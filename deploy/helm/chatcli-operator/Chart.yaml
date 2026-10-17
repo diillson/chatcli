@@ -186,7 +186,7 @@ annotations:
     - name: Documentation
       url: https://chatcli.edilsonfreitas.com
     - name: Operator guide
-      url: https://chatcli.edilsonfreitas.com/features/k8s-operator
+      url: https://chatcli.edilsonfreitas.com/kubernetes/k8s-operator
     - name: Source
       url: https://github.com/diillson/chatcli
   artifacthub.io/maintainers: |

@@ -33,8 +33,15 @@ import (
 // server is pointed at it through CHATCLI_ENCRYPTION_KEY_SECRET and reads it
 // at startup with its own service account, which a Role allows to get that
 // one Secret. The operator creates the Secret before the Deployment, so the
-// server never needs create; and it never updates an existing one, because
-// replacing the key makes everything sealed with it unreadable.
+// server never needs create; and it never changes the key of an existing
+// one, because replacing the key makes everything sealed with it unreadable.
+//
+// The Secret has no owner reference: deleting the Instance keeps it, as
+// helm uninstall keeps the key of the server chart. Data sealed with the key
+// outlives the Instance in volume snapshots and backups, and an Instance
+// recreated with the same name picks the key up again. A Secret restored
+// from a backup that still carries the owner reference of a deleted
+// Instance would be removed again by the garbage collector.
 
 const (
 	// atrestKeySecretSuffix names the key Secret after the Instance.
@@ -55,7 +62,8 @@ const (
 
 // errAtrestKeyLost reports a key Secret that was created once and is gone.
 var errAtrestKeyLost = stderrors.New("the encryption-at-rest key Secret this operator created is missing; " +
-	"a new key could not open the data sealed with it, so none is created: restore the Secret from a backup, " +
+	"a new key could not open the data sealed with it, so none is created: restore the Secret from a backup " +
+	"(without metadata.ownerReferences, uid and resourceVersion), " +
 	"or, to start over and discard that data, remove the " + atrestKeyCreatedAnnotation + " annotation from the Instance")
 
 // atrestKeySecretName is the key Secret (and its Role and RoleBinding) of
@@ -113,6 +121,9 @@ func (r *InstanceReconciler) ensureAtrestKeySecret(ctx context.Context, instance
 	var existing corev1.Secret
 	err := r.Get(ctx, types.NamespacedName{Name: name, Namespace: instance.Namespace}, &existing)
 	if err == nil {
+		if err := r.releaseAtrestKeySecret(ctx, instance, &existing); err != nil {
+			return err
+		}
 		// Upgrades from a version that did not record it yet.
 		return r.markAtrestKeyCreated(ctx, instance)
 	}
@@ -143,11 +154,6 @@ func (r *InstanceReconciler) ensureAtrestKeySecret(ctx context.Context, instance
 			atrestKeyDataKey: []byte(base64.StdEncoding.EncodeToString(raw)),
 		},
 	}
-	// Same lifecycle as the sessions PVC: the key goes when the Instance
-	// (and with it the data it protects) goes.
-	if err := controllerutil.SetControllerReference(instance, secret, r.Scheme); err != nil {
-		return err
-	}
 	if err := r.Create(ctx, secret); err != nil {
 		// A stale cache read: the Secret exists, and is left alone.
 		if errors.IsAlreadyExists(err) {
@@ -157,6 +163,29 @@ func (r *InstanceReconciler) ensureAtrestKeySecret(ctx context.Context, instance
 	}
 	log.FromContext(ctx).Info("Created the encryption-at-rest key Secret", "secret", name)
 	return r.markAtrestKeyCreated(ctx, instance)
+}
+
+// releaseAtrestKeySecret removes the owner reference to this Instance from
+// a key Secret, which 1.221.0 and 1.221.1 set, so that deleting the Instance
+// no longer deletes the key. Only the owner reference is patched; the key and
+// any other owner are left as they are.
+func (r *InstanceReconciler) releaseAtrestKeySecret(ctx context.Context, instance *platformv1alpha1.Instance, secret *corev1.Secret) error {
+	refs := make([]metav1.OwnerReference, 0, len(secret.OwnerReferences))
+	for _, ref := range secret.OwnerReferences {
+		if ref.UID != instance.UID {
+			refs = append(refs, ref)
+		}
+	}
+	if len(refs) == len(secret.OwnerReferences) {
+		return nil
+	}
+	patch := client.MergeFrom(secret.DeepCopy())
+	secret.OwnerReferences = refs
+	if err := r.Patch(ctx, secret, patch); err != nil {
+		return err
+	}
+	log.FromContext(ctx).Info("Released the encryption-at-rest key Secret from the Instance: deleting the Instance no longer deletes the key", "secret", secret.Name)
+	return nil
 }
 
 // markAtrestKeyCreated records on the Instance that its key Secret exists,

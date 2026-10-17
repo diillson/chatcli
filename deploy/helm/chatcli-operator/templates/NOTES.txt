@@ -43,9 +43,18 @@ A. EVERY INSTANCE NEEDS A CREDENTIAL AND TLS
      for <instance>.<namespace>.svc.cluster.local. Without TLS the server runs
      but ServerReachable=False and the AIOps pipeline cannot reach it.
    Encryption at rest is on by default: without features.encryptionKeyRef the
-   operator creates Secret <instance>-atrest-key (owned by the Instance, never
-   overwritten). Deleting it makes the encrypted data unreadable: back it up
-   with the PVC data, or opt out with features.encryptionAtRest: false.
+   operator creates Secret <instance>-atrest-key (never overwritten, kept when
+   the Instance is deleted). Deleting it makes the encrypted data unreadable:
+   back up the key with the PVC data, or opt out with
+   features.encryptionAtRest: false. Back it up with:
+
+       kubectl -n <namespace> get secret <instance>-atrest-key \
+         -o jsonpath='{.data.encryption-key}' | base64 -d > <instance>-atrest-key.txt
+
+   and restore it with:
+
+       kubectl -n <namespace> create secret generic <instance>-atrest-key \
+         --from-file=encryption-key=<instance>-atrest-key.txt
    ServerReachable is re-probed every 5 minutes. Rotating a referenced Secret
    or editing a mounted ConfigMap rolls the Instance pods.
    Check the conditions with:
@@ -154,5 +163,5 @@ B. DASHBOARD / REST API KEYS
    pod_failure, cpu_stress, memory_stress and disk_stress run; network_delay,
    network_loss and any spec.schedule fail at once without injecting.
 
-Operator guide: https://chatcli.edilsonfreitas.com/features/k8s-operator
+Operator guide: https://chatcli.edilsonfreitas.com/kubernetes/k8s-operator
 Production setup: https://chatcli.edilsonfreitas.com/cookbook/aiops-production-setup

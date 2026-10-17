@@ -29,7 +29,7 @@ func getAtrestSecret(t *testing.T, r *InstanceReconciler, inst *platformv1alpha1
 	return sec
 }
 
-// The key Secret is created once, owned by the Instance, and never
+// The key Secret is created once, without an owner reference, and never
 // overwritten by later reconciles.
 func TestReconcileAtrestKey_CreatesSecretOnceAndNeverOverwrites(t *testing.T) {
 	inst := newInstance("enc", "default")
@@ -45,8 +45,8 @@ func TestReconcileAtrestKey_CreatesSecretOnceAndNeverOverwrites(t *testing.T) {
 	if err != nil || len(raw) != 32 {
 		t.Fatalf("key must be 32 random bytes in base64, got %d bytes (err %v)", len(raw), err)
 	}
-	if !metav1.IsControlledBy(&sec, inst) {
-		t.Error("the key Secret must be owned by the Instance, like the sessions PVC")
+	if len(sec.OwnerReferences) != 0 {
+		t.Errorf("the key Secret must outlive the Instance, got owner references %v", sec.OwnerReferences)
 	}
 
 	if err := r.reconcileAtrestKey(ctx, inst); err != nil {
@@ -236,4 +236,39 @@ func TestReconcileAtrestKey_DeletedSecretIsNotRecreated(t *testing.T) {
 		t.Fatalf("after removing the annotation: %v", err)
 	}
 	getAtrestSecret(t, r, inst)
+}
+
+// A key Secret created by 1.221.0/1.221.1 carries an owner reference to the
+// Instance; the reconcile removes it (keeping any other owner and the key),
+// so deleting the Instance no longer deletes the key.
+func TestReconcileAtrestKey_ReleasesSecretOwnedByTheInstance(t *testing.T) {
+	inst := newInstance("legacy", "default")
+	inst.UID = "legacy-uid"
+	other := metav1.OwnerReference{APIVersion: "v1", Kind: "ConfigMap", Name: "other", UID: "other-uid"}
+	isController := true
+	secret := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "legacy-atrest-key",
+			Namespace: "default",
+			OwnerReferences: []metav1.OwnerReference{
+				{APIVersion: platformv1alpha1.GroupVersion.String(), Kind: "Instance", Name: inst.Name, UID: inst.UID, Controller: &isController},
+				other,
+			},
+		},
+		Data: map[string][]byte{"encryption-key": []byte("sealed-data-key")},
+	}
+	r := &InstanceReconciler{Client: fakeClientWith(inst, secret), Scheme: newScheme()}
+
+	for i := 0; i < 2; i++ {
+		if err := r.reconcileAtrestKey(context.Background(), inst); err != nil {
+			t.Fatal(err)
+		}
+	}
+	sec := getAtrestSecret(t, r, inst)
+	if string(sec.Data["encryption-key"]) != "sealed-data-key" {
+		t.Fatal("releasing the Secret must not touch the key")
+	}
+	if len(sec.OwnerReferences) != 1 || sec.OwnerReferences[0].UID != other.UID {
+		t.Fatalf("owner references = %v, want only the unrelated owner", sec.OwnerReferences)
+	}
 }
