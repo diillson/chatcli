@@ -1,0 +1,9 @@
+{
+  "sec.cmd.recovery_file_exists": "%s já existe; escolha outro arquivo (um arquivo de recuperação existente nunca é sobrescrito).",
+  "sec.cmd.recovery_pass_new": "Senha do arquivo de recuperação (mínimo de %d caracteres)",
+  "sec.cmd.recovery_pass_again": "Repita a senha",
+  "sec.cmd.recovery_pass": "Senha do arquivo de recuperação",
+  "sec.cmd.recovery_pass_mismatch": "As senhas não conferem; nada foi gravado.",
+  "sec.cmd.recovery_file_failed": "Arquivo de recuperação: %s",
+  "sec.cmd.recovery_file_saved": "Arquivo de recuperação gravado em %s. Ele não abre nada sem a senha: guarde o arquivo e a senha em lugares diferentes."
+}
