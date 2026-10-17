@@ -8,7 +8,7 @@ Security fixes ship in a new release of the current line. Older releases do not 
 
 | Version | Supported |
 |---------|-----------|
-| 1.220.0 (latest release) and later <!-- x-release-please-version --> | ✅ |
+| 1.221.0 (latest release) and later <!-- x-release-please-version --> | ✅ |
 | Any earlier release | ❌ upgrade |
 
 The version above is updated automatically by the release pipeline.
