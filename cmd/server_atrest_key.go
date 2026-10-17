@@ -7,12 +7,15 @@
 package cmd
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"io"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -60,6 +63,7 @@ var (
 	errAtrestNoClient    = errors.New("no in-cluster Kubernetes client")
 	errAtrestAPI         = errors.New("kubernetes API error")
 	errAtrestEmptyKey    = errors.New("encryption key entry empty or missing")
+	errAtrestKeyLost     = errors.New("encryption key Secret missing while sealed data exists")
 )
 
 // atrestSecretsAPI is the slice of the typed Secrets client the resolver
@@ -75,6 +79,9 @@ type atrestSecretsAPI interface {
 type atrestKeyDeps struct {
 	namespaceFile string
 	secretsFor    func(namespace string) (atrestSecretsAPI, error)
+	// sealedData reports a store file already sealed at rest (its path), so
+	// a missing Secret is never answered with a new key that cannot open it.
+	sealedData func() (string, bool)
 }
 
 // defaultAtrestKeyDeps reads the real namespace file and builds an
@@ -83,6 +90,7 @@ func defaultAtrestKeyDeps() atrestKeyDeps {
 	return atrestKeyDeps{
 		namespaceFile: serviceAccountNamespaceFile,
 		secretsFor:    inClusterSecrets,
+		sealedData:    sealedStateFile,
 	}
 }
 
@@ -125,7 +133,7 @@ func ensureServerAtrestKey(ctx context.Context, logger *zap.Logger, deps atrestK
 
 	ctx, cancel := context.WithTimeout(ctx, atrestSecretTimeout)
 	defer cancel()
-	key, created, err := resolveAtrestKey(ctx, secrets, namespace, secretName)
+	key, created, err := resolveAtrestKey(ctx, secrets, namespace, secretName, deps.sealedData)
 	if err != nil {
 		return err
 	}
@@ -166,7 +174,7 @@ func podNamespace(namespaceFile string) (string, error) {
 // an existing Secret: a missing or empty entry is an error, because
 // replacing a key makes everything sealed with it unreadable. created
 // reports whether this call created the Secret.
-func resolveAtrestKey(ctx context.Context, secrets atrestSecretsAPI, namespace, name string) (key string, created bool, err error) {
+func resolveAtrestKey(ctx context.Context, secrets atrestSecretsAPI, namespace, name string, sealedData func() (string, bool)) (key string, created bool, err error) {
 	sec, err := secrets.Get(ctx, name, metav1.GetOptions{})
 	if err == nil {
 		key, err = atrestKeyFromSecret(sec, namespace, name)
@@ -174,6 +182,14 @@ func resolveAtrestKey(ctx context.Context, secrets atrestSecretsAPI, namespace, 
 	}
 	if !apierrors.IsNotFound(err) {
 		return "", false, atrestAPIError(namespace, name, err)
+	}
+	// No Secret, but data sealed with some key is already on the volume:
+	// the Secret was deleted (or this is a restore without it). A new key
+	// would seal new data next to data nothing can open; refuse instead.
+	if sealedData != nil {
+		if path, found := sealedData(); found {
+			return "", false, fmt.Errorf("%s: %w", i18n.T("cmd.server.atrest_secret.lost", namespace, name, path), errAtrestKeyLost)
+		}
 	}
 
 	fresh, err := newAtrestSecret(name)
@@ -241,4 +257,63 @@ func newAtrestSecret(name string) (*corev1.Secret, error) {
 			atrestSecretDataKey: []byte(base64.StdEncoding.EncodeToString(raw)),
 		},
 	}, nil
+}
+
+// sealedScanLimit bounds the startup scan for sealed data: enough to find a
+// sealed store in any real state root, cheap on a large one.
+const sealedScanLimit = 5000
+
+// sealedStateFile looks under the server's state root (~/.chatcli) for a
+// file sealed at rest — a sealed header, or a journal line with the sealed
+// prefix — and returns the first one found.
+func sealedStateFile() (string, bool) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", false
+	}
+	return findSealedFile(filepath.Join(home, ".chatcli"), sealedScanLimit)
+}
+
+// findSealedFile walks root (skipping hidden directories) and returns the
+// first sealed file, looking at no more than limit files.
+func findSealedFile(root string, limit int) (string, bool) {
+	var found string
+	seen := 0
+	_ = filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return nil
+		}
+		if d.IsDir() {
+			if path != root && strings.HasPrefix(d.Name(), ".") {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if !d.Type().IsRegular() {
+			return nil
+		}
+		if seen++; seen > limit {
+			return filepath.SkipAll
+		}
+		if fileLooksSealed(path) {
+			found = path
+			return filepath.SkipAll
+		}
+		return nil
+	})
+	return found, found != ""
+}
+
+// fileLooksSealed reads the first bytes of path: the sealed-file header, or
+// the prefix a sealed journal or history line starts with.
+func fileLooksSealed(path string) bool {
+	f, err := os.Open(path) // #nosec G304 -- a file enumerated from the server's own state root
+	if err != nil {
+		return false
+	}
+	defer func() { _ = f.Close() }()
+	head := make([]byte, 32)
+	n, _ := io.ReadFull(f, head)
+	head = head[:n]
+	return atrest.IsEncrypted(head) || bytes.HasPrefix(head, []byte("enc:"))
 }

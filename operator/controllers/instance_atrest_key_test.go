@@ -9,6 +9,7 @@ package controllers
 import (
 	"context"
 	"encoding/base64"
+	stderrors "errors"
 	"testing"
 
 	platformv1alpha1 "github.com/diillson/chatcli/operator/api/v1alpha1"
@@ -194,4 +195,45 @@ func TestReconcileAtrestKey_OptOutKeepsForeignRole(t *testing.T) {
 	if err := r.Get(context.Background(), types.NamespacedName{Name: "own-atrest-key", Namespace: "default"}, &rbacv1.Role{}); err != nil {
 		t.Errorf("foreign Role must survive: %v", err)
 	}
+}
+
+// A key Secret the operator created and that later disappeared is a lost
+// key: no new one is created (it could not open the data sealed with the
+// old one) until the user restores the Secret or removes the annotation.
+func TestReconcileAtrestKey_DeletedSecretIsNotRecreated(t *testing.T) {
+	inst := newInstance("lost", "default")
+	r := &InstanceReconciler{Client: fakeClientWith(inst), Scheme: newScheme()}
+	ctx := context.Background()
+	if err := r.reconcileAtrestKey(ctx, inst); err != nil {
+		t.Fatal(err)
+	}
+	var fresh platformv1alpha1.Instance
+	if err := r.Get(ctx, types.NamespacedName{Name: inst.Name, Namespace: inst.Namespace}, &fresh); err != nil {
+		t.Fatal(err)
+	}
+	if fresh.Annotations[atrestKeyCreatedAnnotation] == "" {
+		t.Fatal("the Instance does not record that its key Secret was created")
+	}
+
+	sec := getAtrestSecret(t, r, inst)
+	if err := r.Delete(ctx, &sec); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.reconcileAtrestKey(ctx, &fresh); !stderrors.Is(err, errAtrestKeyLost) {
+		t.Fatalf("err = %v, want errAtrestKeyLost", err)
+	}
+	var gone corev1.Secret
+	if err := r.Get(ctx, types.NamespacedName{Name: sec.Name, Namespace: sec.Namespace}, &gone); !errors.IsNotFound(err) {
+		t.Fatal("a new key Secret was created after the original was deleted")
+	}
+
+	// Starting over is an explicit choice: removing the annotation.
+	delete(fresh.Annotations, atrestKeyCreatedAnnotation)
+	if err := r.Update(ctx, &fresh); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.reconcileAtrestKey(ctx, &fresh); err != nil {
+		t.Fatalf("after removing the annotation: %v", err)
+	}
+	getAtrestSecret(t, r, inst)
 }

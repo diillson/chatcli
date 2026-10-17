@@ -254,3 +254,53 @@ func TestEnsureServerAtrestKey_UnsetIsNoop(t *testing.T) {
 		t.Fatal("encryption must stay off")
 	}
 }
+
+// A missing Secret next to data already sealed on the volume (the Secret
+// was deleted, or a restore left it behind) is never answered with a new
+// key that could not open that data.
+func TestEnsureServerAtrestKey_MissingSecretWithSealedDataRefuses(t *testing.T) {
+	atrestTestEnv(t, "", testAtrestSecret)
+	cs := fake.NewClientset()
+	deps := fakeDeps(cs)
+	deps.sealedData = func() (string, bool) { return "/home/chatcli/.chatcli/sessions/s.json", true }
+
+	err := ensureServerAtrestKey(context.Background(), nil, deps)
+	if !errors.Is(err, errAtrestKeyLost) {
+		t.Fatalf("err = %v, want errAtrestKeyLost", err)
+	}
+	if n := countActions(cs, "create"); n != 0 {
+		t.Fatalf("a new key Secret was created next to sealed data (%d creates)", n)
+	}
+	if os.Getenv(atrest.EnvKey) != "" {
+		t.Fatal("a key was set")
+	}
+}
+
+func TestFindSealedFile_SpotsSealedFilesAndJournals(t *testing.T) {
+	root := t.TempDir()
+	write := func(rel, content string) {
+		p := filepath.Join(root, rel)
+		if err := os.MkdirAll(filepath.Dir(p), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(p, []byte(content), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write("sessions/plain.json", `{"plain":true}`)
+	write(".hidden/x.json", "CHATCLI_ENC_v2\nxxxx")
+	if _, found := findSealedFile(root, 100); found {
+		t.Fatal("plaintext stores (or a hidden directory) counted as sealed data")
+	}
+	write("transcripts/t.jsonl", "enc:QUJD\n")
+	if path, found := findSealedFile(root, 100); !found || filepath.Base(path) != "t.jsonl" {
+		t.Fatalf("a sealed journal was not found: %q", path)
+	}
+	write("sessions/s.json", "CHATCLI_ENC_v2\nxxxx")
+	if _, found := findSealedFile(root, 1); found {
+		t.Fatal("the scan looked past its file limit")
+	}
+	if _, found := findSealedFile(filepath.Join(root, "missing"), 100); found {
+		t.Fatal("a missing root reported sealed data")
+	}
+}

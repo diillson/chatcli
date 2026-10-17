@@ -10,6 +10,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/base64"
+	stderrors "errors"
 	"fmt"
 
 	corev1 "k8s.io/api/core/v1"
@@ -46,7 +47,16 @@ const (
 	envEncryptionKeySecretName = "CHATCLI_ENCRYPTION_KEY_SECRET"
 	// atrestKeyBytes is the size of a generated key before base64.
 	atrestKeyBytes = 32
+	// atrestKeyCreatedAnnotation records on the Instance that the operator
+	// created its key Secret. With it present, a missing Secret is a lost
+	// key, not a first run: the operator does not create another one.
+	atrestKeyCreatedAnnotation = "platform.chatcli.io/atrest-key-created"
 )
+
+// errAtrestKeyLost reports a key Secret that was created once and is gone.
+var errAtrestKeyLost = stderrors.New("the encryption-at-rest key Secret this operator created is missing; " +
+	"a new key could not open the data sealed with it, so none is created: restore the Secret from a backup, " +
+	"or, to start over and discard that data, remove the " + atrestKeyCreatedAnnotation + " annotation from the Instance")
 
 // atrestKeySecretName is the key Secret (and its Role and RoleBinding) of
 // an Instance.
@@ -103,10 +113,14 @@ func (r *InstanceReconciler) ensureAtrestKeySecret(ctx context.Context, instance
 	var existing corev1.Secret
 	err := r.Get(ctx, types.NamespacedName{Name: name, Namespace: instance.Namespace}, &existing)
 	if err == nil {
-		return nil
+		// Upgrades from a version that did not record it yet.
+		return r.markAtrestKeyCreated(ctx, instance)
 	}
 	if !errors.IsNotFound(err) {
 		return err
+	}
+	if instance.Annotations[atrestKeyCreatedAnnotation] != "" {
+		return errAtrestKeyLost
 	}
 
 	raw := make([]byte, atrestKeyBytes)
@@ -137,12 +151,26 @@ func (r *InstanceReconciler) ensureAtrestKeySecret(ctx context.Context, instance
 	if err := r.Create(ctx, secret); err != nil {
 		// A stale cache read: the Secret exists, and is left alone.
 		if errors.IsAlreadyExists(err) {
-			return nil
+			return r.markAtrestKeyCreated(ctx, instance)
 		}
 		return err
 	}
 	log.FromContext(ctx).Info("Created the encryption-at-rest key Secret", "secret", name)
-	return nil
+	return r.markAtrestKeyCreated(ctx, instance)
+}
+
+// markAtrestKeyCreated records on the Instance that its key Secret exists,
+// so a later deletion of the Secret is recognized as a lost key.
+func (r *InstanceReconciler) markAtrestKeyCreated(ctx context.Context, instance *platformv1alpha1.Instance) error {
+	if instance.Annotations[atrestKeyCreatedAnnotation] != "" {
+		return nil
+	}
+	patch := client.MergeFrom(instance.DeepCopy())
+	if instance.Annotations == nil {
+		instance.Annotations = map[string]string{}
+	}
+	instance.Annotations[atrestKeyCreatedAnnotation] = atrestKeySecretName(instance)
+	return r.Patch(ctx, instance, patch)
 }
 
 // atrestKeyPolicyRules lets the server get its key Secret and nothing else.
