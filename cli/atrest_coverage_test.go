@@ -42,6 +42,7 @@ func TestAtRest_CoversMemoryContextsCCRAndCosts(t *testing.T) {
 
 	// Knowledge contexts (NewStorage roots itself at $HOME/.chatcli/contexts).
 	t.Setenv("HOME", root)
+	t.Setenv("USERPROFILE", root) // windows
 	st, err := ctxmgr.NewStorage(zap.NewNop())
 	if err != nil {
 		t.Fatal(err)

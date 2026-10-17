@@ -29,5 +29,7 @@
   "sec.cmd.use_keychain_not_env": "Your stores already use the default key (or encryption is off): nothing to move.",
   "sec.cmd.use_keychain_unavailable": "The OS keychain key is not available here (%s); nothing was changed.",
   "sec.cmd.use_keychain_done": "Every store now uses the OS keychain key. Remove %s from your environment (.env, shell profile) — it is no longer needed.",
-  "sec.cmd.use_keychain_partial": "Some stores were not moved (in use or unreadable). Keep the old key: remove %s, set it in %s, and run /config security reseal again."
+  "sec.cmd.use_keychain_partial": "Some stores were not moved (in use or unreadable). Keep the old key: remove %s, set it in %s, and run /config security reseal again.",
+  "atrest.recovery.notice": "Your local ChatCLI data is now encrypted at rest, with a key kept in this machine's keychain.",
+  "atrest.recovery.notice_hint": "Keep a copy outside this machine so a reinstall or a new computer never locks you out: /config security recovery-key"
 }

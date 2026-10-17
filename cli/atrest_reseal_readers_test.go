@@ -23,6 +23,7 @@ func resealFixture(t *testing.T) (*ChatCLI, string) {
 	t.Helper()
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home) // windows
 	t.Setenv(atrest.EnvKey, "")
 	t.Setenv(atrest.EnvPreviousKeys, "")
 	root := filepath.Join(home, ".chatcli")

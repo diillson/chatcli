@@ -22,6 +22,7 @@ import (
 	"github.com/diillson/chatcli/pkg/atrest"
 	"github.com/diillson/chatcli/utils"
 	"go.uber.org/zap"
+	"golang.org/x/term"
 )
 
 const (
@@ -132,4 +133,30 @@ func (cli *ChatCLI) startAtRestMigration() {
 			}
 		}
 	}()
+}
+
+// recoveryHintMarker records, under the state root, that the recovery-key
+// notice was shown, so it appears once per installation.
+const recoveryHintMarker = ".atrest-recovery-hinted"
+
+// printRecoveryKeyNotice tells the user, once, that their data is now
+// encrypted with a key only the OS keychain holds, and how to keep a copy:
+// a reinstalled system or a new machine would otherwise leave every sealed
+// store unreadable. Interactive REPL only, and only for the default key
+// (a key from CHATCLI_ENCRYPTION_KEY is already one the user holds).
+func (cli *ChatCLI) printRecoveryKeyNotice() {
+	if src, _, _ := atrest.KeyStatus(); src != atrest.KeySourceProvider {
+		return
+	}
+	if !term.IsTerminal(int(os.Stdout.Fd())) { //#nosec G115 -- a file descriptor fits in int
+		return
+	}
+	marker := filepath.Join(cli.atRestRoot(), recoveryHintMarker)
+	if _, err := os.Stat(marker); err == nil {
+		return
+	}
+	fmt.Println(colorize("  🔒 "+i18n.T("atrest.recovery.notice"), ColorCyan))
+	fmt.Println(colorize("     "+i18n.T("atrest.recovery.notice_hint"), ColorGray))
+	fmt.Println()
+	_ = utils.AtomicWriteFile(marker, []byte("shown\n"), 0o600)
 }

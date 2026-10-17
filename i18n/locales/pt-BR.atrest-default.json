@@ -29,5 +29,7 @@
   "sec.cmd.use_keychain_not_env": "Seus stores já usam a chave padrão (ou a criptografia está desligada): nada a mover.",
   "sec.cmd.use_keychain_unavailable": "A chave do keychain do sistema não está disponível aqui (%s); nada foi alterado.",
   "sec.cmd.use_keychain_done": "Todos os stores agora usam a chave do keychain do sistema. Remova %s do seu ambiente (.env, perfil do shell) — ela não é mais necessária.",
-  "sec.cmd.use_keychain_partial": "Alguns stores não foram movidos (em uso ou ilegíveis). Guarde a chave antiga: remova %s, coloque-a em %s e rode /config security reseal de novo."
+  "sec.cmd.use_keychain_partial": "Alguns stores não foram movidos (em uso ou ilegíveis). Guarde a chave antiga: remova %s, coloque-a em %s e rode /config security reseal de novo.",
+  "atrest.recovery.notice": "Seus dados locais do ChatCLI agora são cifrados em repouso, com uma chave guardada no keychain desta máquina.",
+  "atrest.recovery.notice_hint": "Guarde uma cópia fora desta máquina para que uma reinstalação ou um computador novo nunca te tranquem para fora: /config security recovery-key"
 }

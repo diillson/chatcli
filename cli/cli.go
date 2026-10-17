@@ -1278,6 +1278,7 @@ func (cli *ChatCLI) Start(ctx context.Context) {
 	go cli.backgroundUpdateFlow(ctx)
 	cli.PrintWelcomeScreen()
 	cli.printLastSessionNotice()
+	cli.printRecoveryKeyNotice()
 	cli.startHubSync(ctx) // resume the shared cross-channel conversation, if connected
 
 	// Mark the interactive REPL as active so the command-palette trigger only
