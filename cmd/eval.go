@@ -28,6 +28,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -124,6 +125,21 @@ func newEvalRunFlagSet(f *evalRunFlags, stderr io.Writer) *flag.FlagSet {
 	fs.BoolVar(&f.quiet, "quiet", false, i18n.T("evals.flag.quiet"))
 	fs.StringVar(&f.bin, "bin", "", i18n.T("evals.flag.bin"))
 	return fs
+}
+
+// resolveEvalBin names the binary that runs each case. Every candidate
+// runs inside its own sandbox, and a relative path in exec.Cmd resolves
+// against that directory, so --bin ./x would point into the sandbox. A path
+// is made absolute against the current directory first; a bare name keeps
+// its PATH lookup, which does not depend on the directory.
+func resolveEvalBin(bin string) (string, error) {
+	if bin == "" {
+		return os.Executable()
+	}
+	if !strings.ContainsAny(bin, `/\`) {
+		return bin, nil
+	}
+	return filepath.Abs(bin)
 }
 
 // parseInterleaved parses flags that may appear before or after the
@@ -270,12 +286,10 @@ func evalRun(ctx context.Context, args []string, mgr manager.LLMManager, logger 
 		}
 	}
 
-	bin := f.bin
-	if bin == "" {
-		if bin, err = os.Executable(); err != nil {
-			fmt.Fprintln(stderr, i18n.T("evals.cmd.no_binary", err))
-			return EvalExitUsage
-		}
+	bin, err := resolveEvalBin(f.bin)
+	if err != nil {
+		fmt.Fprintln(stderr, i18n.T("evals.cmd.no_binary", err))
+		return EvalExitUsage
 	}
 	exec := &evals.BinaryExecutor{
 		Bin:        bin,
