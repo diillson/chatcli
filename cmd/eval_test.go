@@ -13,6 +13,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -153,5 +154,45 @@ func TestSameTargetAndSuiteJudge(t *testing.T) {
 	p, m := suiteJudge([]*evals.Suite{{}, {Judge: evals.JudgeTarget{Provider: "X", Model: "y"}}})
 	if p != "X" || m != "y" {
 		t.Errorf("suite judge: %s %s", p, m)
+	}
+}
+
+func TestResolveEvalBin(t *testing.T) {
+	self, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, err := resolveEvalBin(""); err != nil || got != self {
+		t.Errorf("empty: %q, %v; want this binary", got, err)
+	}
+	if got, err := resolveEvalBin("chatcli-dev"); err != nil || got != "chatcli-dev" {
+		t.Errorf("a bare name must keep its PATH lookup: %q, %v", got, err)
+	}
+	got, err := resolveEvalBin(filepath.Join("bin", "fake"))
+	if err != nil || !filepath.IsAbs(got) {
+		t.Errorf("a relative path must become absolute: %q, %v", got, err)
+	}
+}
+
+// A relative --bin used to resolve against each case's sandbox, where the
+// binary does not exist, and every trial ended as an error.
+func TestRunEvalRelativeBin(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("sh stand-in candidate")
+	}
+	dir := t.TempDir()
+	fake := filepath.Join(dir, "fake-candidate")
+	script := "#!/bin/sh\nprintf '{\"schema\":1,\"mode\":\"chat\",\"final\":\"no-op\",\"turns\":1}' > \"$" + evals.RecordEnv + "\"\n"
+	if err := os.WriteFile(fake, []byte(script), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(fake, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	suite := writeEvalSuite(t, "name: s\ncases:\n  - {id: a, prompt: p, checks: [{contains: no-op}]}\n")
+	t.Chdir(dir)
+	code, _, errb := runEvalCmd("run", suite, "--bin", "./fake-candidate", "--quiet")
+	if code != EvalExitOK {
+		t.Fatalf("relative --bin: exit %d, stderr %q", code, errb)
 	}
 }
