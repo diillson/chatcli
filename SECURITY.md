@@ -55,6 +55,7 @@ In scope:
 - server mode (gRPC), the chat gateway and its channels, webhooks, the Kubernetes operator;
 - the plugin system (signature verification, quarantine, provider plugins), skills, hooks and MCP integration;
 - the official release artifacts: binaries, container images on `ghcr.io/diillson`, Helm charts;
+- encryption at rest and key handling: sealed data read without the key, a store written in plaintext where it should be sealed, a key replaced or regenerated so that sealed data is orphaned, a recovery file that opens without its passphrase;
 - a bypass of a security boundary through model output: a prompt injection that makes the agent run, read or send something the [coder policy](https://chatcli.edilsonfreitas.com/coder/coder-security), workspace trust or an allowlist should have stopped.
 
 Out of scope:
@@ -93,6 +94,43 @@ If you are unsure whether something is in scope, ask us first through a private 
       --certificate-identity-regexp '^https://github.com/diillson/chatcli/'
     ```
 
+## Your data
+
+ChatCLI has no backend of its own. Your prompts, the files it reads and the answers go to the LLM providers, MCP servers and tools you configure.
+
+- **No telemetry by default.**
+  - Metrics leave the machine only when you set `OTEL_EXPORTER_OTLP_ENDPOINT` to your own collector.
+  - ChatCLI checks the GitHub API for a newer release; `CHATCLI_DISABLE_VERSION_CHECK=true` turns that check off.
+- **Local data is encrypted at rest by default** (AES-256-GCM). This covers:
+  - sessions, transcripts and prompt history;
+  - long-term memory, knowledge contexts and their vectors;
+  - attachments, archives, park snapshots and cost snapshots;
+  - stored OAuth credentials.
+
+  A sealed file is bound to its store and tenant, so a file copied into another tenant's directory does not open there.
+- **The key lives in the OS keychain**: macOS Keychain, Linux secret-service or Windows Credential Manager.
+  - One root secret protects both credentials and data, with a separate key derived for each use (HKDF-SHA256).
+  - The key stays in a `0600` file only where no keychain is available.
+- **It fails closed.**
+  - Once the key is in the keychain, no process creates a new one for that installation.
+  - A keychain that cannot be read gives an error, never a fresh key.
+  - A sealed file opened without the key gives an error and is never treated as empty.
+  - A memory store this process cannot open becomes read-only, so a process without the key cannot overwrite it.
+- **Keep a recovery key.** If you lose the keychain, sealed data cannot be recovered, by you or by us.
+  - `/config security recovery-key` prints the key.
+  - `--save <file>` writes the key sealed with a passphrase of at least 12 characters (Argon2id + AES-256-GCM).
+  - `--restore <file>` brings the key back on a new machine.
+- **Server and Kubernetes.**
+  - `chatcli server` never creates a key on its own.
+  - The Helm chart and the operator keep the key in a Secret (`<release>-atrest-key`, `<instance>-atrest-key`). The Secret survives `helm uninstall` and the deletion of the Instance.
+  - A missing Secret is never recreated over volumes that already hold sealed data.
+- **Not sealed yet:**
+  - the conversation hub database (SQLite) and the scheduler and reflexion queues: keep them on an encrypted volume;
+  - the audit trail, which is sealed only under a key from `CHATCLI_ENCRYPTION_KEY`, because operators ship it to log pipelines.
+- **Turning it off.** `CHATCLI_ENCRYPTION_KEY=off` stops sealing new writes and still opens what is sealed. `/config security reseal` then writes the stores back in plaintext.
+
+[Encryption at Rest](https://chatcli.edilsonfreitas.com/security/encryption-at-rest) has the full details: migration from older versions, key rotation and backing up the key in Kubernetes.
+
 ## Security controls
 
 ChatCLI applies defense in depth across its components. The [security overview](https://chatcli.edilsonfreitas.com/security/overview) documents each control.
@@ -120,7 +158,7 @@ ChatCLI applies defense in depth across its components. The [security overview](
 
 **Credentials and data**
 - OAuth with PKCE.
-- Encryption at rest on by default (AES-256-GCM) for sessions, transcripts, prompt history, memory, contexts, attachments and credentials, with the key in the OS keychain on macOS, Linux and Windows. `chatcli server` seals with `CHATCLI_ENCRYPTION_KEY`, and in Kubernetes the Helm chart and the operator keep that key in a Secret by default (`CHATCLI_ENCRYPTION_KEY_SECRET`). See [Encryption at Rest](https://chatcli.edilsonfreitas.com/security/encryption-at-rest).
+- Encryption at rest on by default, with the key in the OS keychain or, in Kubernetes, in a Secret. A recovery key can be saved to a passphrase-protected file. See [Your data](#your-data).
 - Outbound TLS 1.2 or later.
 
 **Plugins**
