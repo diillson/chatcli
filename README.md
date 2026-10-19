@@ -230,10 +230,11 @@ ChatCLI runs commands and holds credentials, so security is the default, not an 
 - **Policy-gated tools**: every agent action is allowed, asked or denied by a policy you control; unattended surfaces refuse instead of approving.
 - **Workspace trust**: a project's `.env`, hooks and policy load only after `chatcli trust`.
 - **Fail-closed integrations**: chat channels refuse to start without a sender allowlist; signed webhooks are verified with HMAC.
-- **Encrypted at rest by default**: conversations, memory, contexts, attachments and credentials are sealed with AES-256-GCM, with the key in the OS keychain (macOS, Linux, Windows) or, in Kubernetes, in a Secret; OAuth uses PKCE.
+- **Encrypted at rest by default**: conversations, memory, contexts, attachments and credentials are sealed with AES-256-GCM, with the key in the OS keychain (macOS, Linux, Windows) or, in Kubernetes, in a Secret; OAuth uses PKCE. Save a recovery key with `/config security recovery-key`: without it, a lost keychain means the data cannot be opened.
+- **No telemetry**: your data goes only to the providers and tools you configure; metrics leave the machine only if you point OTLP at your own collector.
 - **Signed supply chain**: Ed25519-signed release checksums verified by `chatcli update`, Cosign-signed images, an SBOM, and Trivy, CodeQL, gosec and govulncheck on every change.
 
-Report vulnerabilities privately: see [SECURITY.md](SECURITY.md). [Security overview →](https://chatcli.edilsonfreitas.com/security/overview)
+Report vulnerabilities privately: see [SECURITY.md](SECURITY.md). [What happens to your data →](SECURITY.md#your-data) · [Security overview →](https://chatcli.edilsonfreitas.com/security/overview)
 
 ## Documentation
 
