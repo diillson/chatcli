@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.222.0](https://github.com/diillson/chatcli/compare/v1.221.3...v1.222.0) (2026-10-19)
+
+
+### Features
+
+* **evals:** read a files: entry from disk with the !file tag ([#1830](https://github.com/diillson/chatcli/issues/1830)) ([21e2341](https://github.com/diillson/chatcli/commit/21e2341cd926c79b3205fe6a21d35554b66bcfb2))
+
+
+### Bug Fixes
+
+* **evals:** resolve a relative --bin against the current directory ([#1832](https://github.com/diillson/chatcli/issues/1832)) ([34e85fc](https://github.com/diillson/chatcli/commit/34e85fc5c119a584222ee54199cf300db390c2e8))
+
 ## [1.221.3](https://github.com/diillson/chatcli/compare/v1.221.2...v1.221.3) (2026-10-17)
 
 
