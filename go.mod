@@ -7,8 +7,8 @@ require (
 	github.com/aws/aws-sdk-go-v2 v1.47.3
 	github.com/aws/aws-sdk-go-v2/config v1.33.9
 	github.com/aws/aws-sdk-go-v2/feature/ec2/imds v1.20.3
-	github.com/aws/aws-sdk-go-v2/service/bedrock v1.73.1
-	github.com/aws/aws-sdk-go-v2/service/bedrockruntime v1.63.1
+	github.com/aws/aws-sdk-go-v2/service/bedrock v1.73.4
+	github.com/aws/aws-sdk-go-v2/service/bedrockruntime v1.63.4
 	github.com/aws/smithy-go v1.28.5
 	github.com/c-bata/go-prompt v0.2.6
 	github.com/charmbracelet/bubbletea v1.3.10
@@ -23,9 +23,9 @@ require (
 	github.com/google/uuid v1.6.0
 	github.com/gorilla/websocket v1.5.4-0.20250319132907-e064f32e3674
 	github.com/joho/godotenv v1.5.1
-	github.com/klauspost/compress v1.20.1
+	github.com/klauspost/compress v1.20.3
 	github.com/ledongthuc/pdf v0.0.0-20260907135840-6c8c28e0e8a0
-	github.com/mattn/go-runewidth v0.0.30
+	github.com/mattn/go-runewidth v0.0.31
 	github.com/muesli/termenv v0.16.0
 	github.com/pion/opus v0.1.0
 	github.com/pkoukk/tiktoken-go v0.1.8
@@ -56,7 +56,7 @@ require (
 
 require (
 	github.com/alecthomas/chroma/v2 v2.20.0 // indirect
-	github.com/aws/aws-sdk-go-v2/aws/protocol/eventstream v1.7.20 // indirect
+	github.com/aws/aws-sdk-go-v2/aws/protocol/eventstream v1.7.22 // indirect
 	github.com/aws/aws-sdk-go-v2/credentials v1.20.9 // indirect
 	github.com/aws/aws-sdk-go-v2/internal/configsources v1.5.6 // indirect
 	github.com/aws/aws-sdk-go-v2/internal/endpoints/v2 v2.8.6 // indirect
