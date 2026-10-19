@@ -18,10 +18,13 @@
 package evals
 
 import (
+	"errors"
 	"fmt"
+	"io/fs"
 	"strings"
 	"time"
 
+	"github.com/diillson/chatcli/i18n"
 	"gopkg.in/yaml.v3"
 )
 
@@ -65,7 +68,7 @@ func (d *Duration) UnmarshalYAML(n *yaml.Node) error {
 		*d = Duration(time.Duration(secs) * time.Second)
 		return nil
 	}
-	return fmt.Errorf("invalid duration %q (use e.g. 90s, 2m)", s)
+	return errors.New(i18n.T("evals.load.duration", s))
 }
 
 // D returns the value as a time.Duration.
@@ -120,7 +123,7 @@ type Case struct {
 	Mode        string            `yaml:"mode"`
 	Prompt      string            `yaml:"prompt"`
 	Fixture     string            `yaml:"fixture"` // directory copied into the sandbox
-	Files       map[string]string `yaml:"files"`   // inline files written into the sandbox
+	Files       map[string]string `yaml:"files"`   // files written into the sandbox: inline content, or !file <path>
 	Setup       []string          `yaml:"setup"`   // shell commands run in the sandbox first
 	Timeout     Duration          `yaml:"timeout"`
 	Trials      int               `yaml:"trials"`
@@ -132,6 +135,10 @@ type Case struct {
 
 	// FixtureDir is Fixture resolved against the suite directory.
 	FixtureDir string `yaml:"-"`
+
+	// filePerms holds the permission bits of the files: entries read with
+	// !file, so an executable script stays executable in the sandbox.
+	filePerms map[string]fs.FileMode
 }
 
 // Check is one assertion. Exactly one kind field is set; Name, Weight and

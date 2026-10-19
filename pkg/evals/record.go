@@ -87,7 +87,7 @@ func ReadRecord(path string) (*Record, error) {
 	}
 	var rec Record
 	if err := json.Unmarshal(data, &rec); err != nil {
-		return nil, fmt.Errorf("eval record %s: %w", path, err)
+		return nil, fmt.Errorf("%s: %w", i18n.T("evals.record.parse", path), err)
 	}
 	if rec.Schema > RecordSchema {
 		return nil, errors.New(i18n.T("evals.record.schema", path, rec.Schema, RecordSchema))
