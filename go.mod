@@ -25,7 +25,7 @@ require (
 	github.com/joho/godotenv v1.5.1
 	github.com/klauspost/compress v1.20.1
 	github.com/ledongthuc/pdf v0.0.0-20260907135840-6c8c28e0e8a0
-	github.com/mattn/go-runewidth v0.0.30
+	github.com/mattn/go-runewidth v0.0.31
 	github.com/muesli/termenv v0.16.0
 	github.com/pion/opus v0.1.0
 	github.com/pkoukk/tiktoken-go v0.1.8
