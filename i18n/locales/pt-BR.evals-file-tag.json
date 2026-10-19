@@ -1,0 +1,15 @@
+{
+  "evals.load.case_prefix": "caso %q",
+  "evals.load.check_prefix": "checagem #%d",
+  "evals.load.duration": "duração inválida %q (use, por exemplo, 90s, 2m)",
+  "evals.load.file_tag_dir": "entrada %q de files: !file %q é um diretório; use fixture: para copiar um diretório",
+  "evals.load.file_tag_empty": "entrada %q de files: o !file precisa de um caminho",
+  "evals.load.file_tag_irregular": "entrada %q de files: !file %q não é um arquivo comum",
+  "evals.load.file_tag_missing": "entrada %q de files: !file %q não encontrado",
+  "evals.load.file_tag_read": "entrada %q de files: não foi possível ler o !file %q: %v",
+  "evals.load.file_tag_too_big": "entrada %q de files: !file %q tem %d bytes, mais que o limite de %d bytes; use fixture: para arquivos grandes",
+  "evals.load.fixture_not_dir": "a fixture %q é um arquivo, não um diretório: aponte o fixture: para o diretório que o contém, ou use files: com !file para um arquivo só",
+  "evals.load.tag_misplaced": "linha %d: !file só funciona como valor de uma entrada de files:, por exemplo go.mod: !file testdata/go.mod",
+  "evals.load.tag_unknown": "linha %d: tag desconhecida %s (a única tag que uma suíte aceita é !file, numa entrada de files:)",
+  "evals.record.parse": "o registro do eval %s não é um JSON válido"
+}

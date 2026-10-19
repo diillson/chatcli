@@ -362,7 +362,8 @@ func prepareSandbox(ctx context.Context, c *Case) (string, error) {
 		if err := os.MkdirAll(filepath.Dir(p), 0o750); err != nil {
 			return dir, err
 		}
-		if err := os.WriteFile(p, []byte(c.Files[name]), 0o600); err != nil {
+		perm, fromDisk := c.filePerms[name]
+		if err := writeCaseFile(p, c.Files[name], perm, fromDisk); err != nil {
 			return dir, err
 		}
 	}
@@ -376,6 +377,28 @@ func prepareSandbox(ctx context.Context, c *Case) (string, error) {
 		}
 	}
 	return dir, nil
+}
+
+// writeCaseFile writes one files: entry. An entry read with !file keeps the
+// permission bits of its source; it replaces a fixture file of the same name
+// instead of inheriting that file's mode. An inline entry is written 0600,
+// and over a fixture file it keeps the fixture's mode, as it always has.
+func writeCaseFile(p, content string, perm fs.FileMode, fromDisk bool) error {
+	if !fromDisk {
+		return os.WriteFile(p, []byte(content), 0o600)
+	}
+	if err := os.Remove(p); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return err
+	}
+	out, err := os.OpenFile(p, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, perm|0o600) //#nosec G304 -- destination inside the sandbox
+	if err != nil {
+		return err
+	}
+	if _, err := io.WriteString(out, content); err != nil {
+		_ = out.Close()
+		return err
+	}
+	return out.Close()
 }
 
 // copyTree copies a fixture directory into dst, preserving file modes.

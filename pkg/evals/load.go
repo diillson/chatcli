@@ -94,6 +94,9 @@ func LoadFile(path string) (*Suite, error) {
 	}
 	s.Path = abs
 	s.Dir = filepath.Dir(abs)
+	if err := s.resolveFileTags(data); err != nil {
+		return nil, fmt.Errorf("%s: %w", path, err)
+	}
 	if strings.TrimSpace(s.Name) == "" {
 		s.Name = strings.TrimSuffix(filepath.Base(path), filepath.Ext(path))
 	}
@@ -158,7 +161,7 @@ func (s *Suite) normalize() error {
 		c.Checks = append(append([]Check(nil), c.Checks...), d.Checks...)
 
 		if err := c.validate(s.Dir); err != nil {
-			return fmt.Errorf("case %q: %w", c.ID, err)
+			return fmt.Errorf("%s: %w", i18n.T("evals.load.case_prefix", c.ID), err)
 		}
 	}
 	return nil
@@ -207,8 +210,11 @@ func (c *Case) validate(suiteDir string) error {
 			dir = filepath.Join(suiteDir, dir)
 		}
 		st, err := os.Stat(dir)
-		if err != nil || !st.IsDir() {
+		if err != nil {
 			return errors.New(i18n.T("evals.load.fixture", c.Fixture))
+		}
+		if !st.IsDir() {
+			return errors.New(i18n.T("evals.load.fixture_not_dir", c.Fixture))
 		}
 		c.FixtureDir = dir
 	}
@@ -222,7 +228,7 @@ func (c *Case) validate(suiteDir string) error {
 	}
 	for i := range c.Checks {
 		if err := c.Checks[i].validate(); err != nil {
-			return fmt.Errorf("check #%d: %w", i+1, err)
+			return fmt.Errorf("%s: %w", i18n.T("evals.load.check_prefix", i+1), err)
 		}
 	}
 	return nil

@@ -44,7 +44,9 @@ cases:
     tags: [chat]
     prompt: "..."
     fixture: fixtures/dir      # copied into the sandbox (relative to the suite file)
-    files: {notes.md: "..."}   # inline files
+    files:                     # written over the fixture
+      notes.md: "..."          # inline content
+      go.mod: !file testdata/go.mod   # content read from a file (relative to the suite file)
     policy: [{pattern: "@coder exec", action: deny}]
     skip: "reason"             # keep the case but do not run it
     checks: [...]
@@ -66,4 +68,6 @@ A directory argument loads every `*.yaml` / `*.yml` file directly inside it, wit
 
 Checks accept `name:` (shown in reports) and `weight:`, which weights the trial score. A trial passes only if every check passes. File paths in checks must be relative and must stay inside the sandbox.
 
-A fixture is often deliberately broken, so keep it away from tooling that scans the host repository. A fixture directory that is a Go module needs its own `go.mod`, which keeps it out of `go test ./...`. For small fixtures, prefer inline `files:`, which is what `core.yaml` does for its Go module. A YAML anchor (`files: &name` … `files: *name`) shares the same files between cases.
+The sandbox is built in this order: the `fixture` directory is copied, then the `files:` entries are written over it, then `setup` runs. A `files:` value is the file's content; `!file <path>` reads it from a file instead, resolved against the suite file like `fixture`, and keeps that file's permission bits. `fixture` must name a directory, even for one file, and `!file` must name a regular file of at most 16 MiB. The suite accepts no other tag: a misspelled one (`!fiel`) is an error, never content.
+
+A fixture is often deliberately broken, so keep it away from tooling that scans the host repository. Name its directory `testdata/`, which `go build`, `go test ./...` and `go vet` skip, and give a Go fixture its own `go.mod`. `core.yaml` keeps its Go module inline under `files:` because this repository's coverage and license-header gates scan every `.go` file. A YAML anchor (`files: &name` … `files: *name`) shares the same files between cases, `!file` entries included.
