@@ -1,0 +1,20 @@
+{
+  "started": "2026-10-20T12:56:32",
+  "binary": "chatcli built from commit 320c1d93ab3e21584c53934d2778ce1af7916cb7",
+  "binary_sha256": "22093df22fdb2b99439ace32c27add12c632671d64a24a79a4fb192cb7882b17",
+  "binary_version": "\n── ChatCLI · Versão ───────────────────────────────────────────────────────────────────\n\n  Instalada            v1.222.1-0.20261020153938-320c1d93ab3e\n  Build                320c1d93ab3e · 2026-10-20 15:39:38\n  Canal de instalação  go install\n  Última release       v1.222.0\n\n  ✓ Você já está na versão mais recente.\n\n",
+  "dataset": "longmemeval_s_cleaned.json (huggingface.co/datasets/xiaowu0162/longmemeval-cleaned)",
+  "dataset_sha256": "d6f21ea9d60a0d56f34a05b609c79c88a451d2ae03597821ea3d5a9678c3a442",
+  "harness_sha256": "f6e2f6957c57dc33046b3f25d0147d896c66cf3268876c8ba7d52d8af5e2fd6a",
+  "judge_prompts_sha256": "b5c88d0a0de08cc7ec3c68471bb4e39a1fb204fd399024d464707b48acf8adcc",
+  "answer_model": "claude-sonnet-5-5",
+  "judge_model": "claude-sonnet-5-5",
+  "mode": "coder",
+  "question_frame": "Answer my question using what you know about me from our previous conversations (they are saved as chat sessions). If those conversations do not contain the answer, say so. End with a short, direct final answer.\n\nQuestion: {q}",
+  "reference_clock": true,
+  "workers": 4,
+  "timeout_s": 600,
+  "picked": 500,
+  "finished": "2026-10-20T13:57:05",
+  "commit": "320c1d93ab3e21584c53934d2778ce1af7916cb7"
+}

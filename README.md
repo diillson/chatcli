@@ -168,6 +168,8 @@ PDFs and images reach every model, natively where it can read them and as text w
 ### 🗂️ Memory and context
 Long-term memory with a profile and facts, a knowledge base with keyless BM25 retrieval, reversible compression where nothing is lost (`@recall` pages long originals), and sessions that continue across surfaces. [Context →](https://chatcli.edilsonfreitas.com/context/bootstrap-memory)
 
+Measured, not claimed: on [LongMemEval-S](https://chatcli.edilsonfreitas.com/context/longmemeval) (500 questions over about 115k tokens of past conversations each), chatcli answered **90.8%** through its own session recall, 90.0% on the questions not used while tuning it. [Method, data and every answer →](evals/longmemeval)
+
 </td>
 </tr>
 <tr>
@@ -242,7 +244,7 @@ Report vulnerabilities privately: see [SECURITY.md](SECURITY.md). [What happens 
 |---|---|
 | **Get started** | [Installation](https://chatcli.edilsonfreitas.com/start/installation) · [Quickstart](https://chatcli.edilsonfreitas.com/start/quickstart) · [Basic usage](https://chatcli.edilsonfreitas.com/usage/basic-usage) |
 | **Agents** | [Coder mode](https://chatcli.edilsonfreitas.com/usage/coder-mode) · [Squads](https://chatcli.edilsonfreitas.com/agents/agent-squad) · [Task graph](https://chatcli.edilsonfreitas.com/agents/task-graph) · [Mixture-of-Agents](https://chatcli.edilsonfreitas.com/agents/mixture-of-agents) · [Harness](https://chatcli.edilsonfreitas.com/agents/harness/overview) |
-| **Context** | [Memory](https://chatcli.edilsonfreitas.com/context/bootstrap-memory) · [Knowledge base](https://chatcli.edilsonfreitas.com/context/knowledge-base) · [Compression](https://chatcli.edilsonfreitas.com/context/context-compression) · [Sessions](https://chatcli.edilsonfreitas.com/context/session-management) |
+| **Context** | [Memory](https://chatcli.edilsonfreitas.com/context/bootstrap-memory) · [LongMemEval results](https://chatcli.edilsonfreitas.com/context/longmemeval) · [Knowledge base](https://chatcli.edilsonfreitas.com/context/knowledge-base) · [Compression](https://chatcli.edilsonfreitas.com/context/context-compression) · [Sessions](https://chatcli.edilsonfreitas.com/context/session-management) |
 | **Extend** | [Plugins](https://chatcli.edilsonfreitas.com/extensions/plugin-system) · [Provider plugins](https://chatcli.edilsonfreitas.com/extensions/provider-plugins) · [MCP](https://chatcli.edilsonfreitas.com/extensions/mcp-integration) · [Skills](https://chatcli.edilsonfreitas.com/extensions/skill-registry) · [Hooks](https://chatcli.edilsonfreitas.com/extensions/hooks-system) · [Slash commands](https://chatcli.edilsonfreitas.com/extensions/slash-commands) |
 | **Run it** | [Server mode](https://chatcli.edilsonfreitas.com/server/server-mode) · [Gateway](https://chatcli.edilsonfreitas.com/gateway/chat-gateway) · [Kubernetes operator](https://chatcli.edilsonfreitas.com/kubernetes/k8s-operator) · [Docker](https://chatcli.edilsonfreitas.com/start/docker-deployment) |
 | **Reference** | [Commands](https://chatcli.edilsonfreitas.com/reference/command-reference) · [Environment variables](https://chatcli.edilsonfreitas.com/reference/environment-variables) · [Architecture](https://chatcli.edilsonfreitas.com/reference/architecture) · [Releases](https://chatcli.edilsonfreitas.com/releases) |
