@@ -17,12 +17,15 @@ import (
 	"fmt"
 	"math"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	"github.com/diillson/chatcli/cli/ctxmgr"
+	"github.com/diillson/chatcli/cli/workspace/memory"
 	"github.com/diillson/chatcli/i18n"
 	"github.com/diillson/chatcli/models"
 	"github.com/diillson/chatcli/pkg/textfold"
+	"github.com/diillson/chatcli/utils"
 )
 
 // sessionPluginAdapter is the concrete plugins.SessionAdapter.
@@ -42,16 +45,79 @@ func (a *sessionPluginAdapter) Search(_ context.Context, query string, limit int
 	if len(hits) == 0 {
 		return i18n.T("session.tool.no_match", query), nil
 	}
+	return renderSessionHits(i18n.T("session.tool.match_header", query), hits, utils.ReferenceNow()), nil
+}
 
+// SearchWindow implements plugins.SessionWindowSearcher: the same search
+// bounded to sessions saved in a date window, with relative expressions
+// (in from, to or query) counted from asOf for this call only.
+func (a *sessionPluginAdapter) SearchWindow(_ context.Context, query string, limit int, from, to, asOf string) (string, error) {
+	if a.cli == nil || a.cli.sessionManager == nil {
+		return "", fmt.Errorf("%s", i18n.T("session.tool.unavailable"))
+	}
+	now, err := resolveRecallAnchor(asOf)
+	if err != nil {
+		return "", err
+	}
+	var fromT, toT time.Time
+	if strings.TrimSpace(from) != "" {
+		start, _, ok := parseTimelineBound(from, now)
+		if !ok {
+			return "", fmt.Errorf("%s", i18n.T("session.tool.bad_bound", "from", from))
+		}
+		fromT = start
+	}
+	if strings.TrimSpace(to) != "" {
+		_, end, ok := parseTimelineBound(to, now)
+		if !ok {
+			return "", fmt.Errorf("%s", i18n.T("session.tool.bad_bound", "to", to))
+		}
+		toT = end
+	}
+	q := strings.TrimSpace(query)
+	if fromT.IsZero() && toT.IsZero() && q != "" {
+		// A time expression inside the query sets the window, like the
+		// per-turn recall does; the rest of the words rank the hits.
+		if start, end, cleaned, ok := memory.ParseTemporalRange(q, now); ok {
+			fromT, toT, q = start, end, strings.TrimSpace(cleaned)
+		}
+	}
+
+	hits, err := a.cli.sessionManager.searchSessionsAt(q, limit, 0, fromT, toT, now)
+	if err != nil {
+		return "", err
+	}
+	window := i18n.T("session.tool.as_of", now.Format("2006-01-02"))
+	if !fromT.IsZero() || !toT.IsZero() {
+		window = i18n.T("session.tool.window", boundLabel(fromT), lastDayLabel(toT), now.Format("2006-01-02"))
+	}
+	if len(hits) == 0 {
+		return i18n.T("session.tool.no_match_window", q, window), nil
+	}
+	header := i18n.T("session.tool.match_header", q)
+	if q == "" {
+		header = i18n.T("session.tool.window_list_header")
+	}
+	return renderSessionHits(header+" "+window, hits, now), nil
+}
+
+// renderSessionHits formats search hits for the model, each with its save
+// date and its age measured from now, so a "how long ago" question can be
+// answered from the result alone.
+func renderSessionHits(header string, hits []SessionSearchHit, now time.Time) string {
 	var b strings.Builder
-	b.WriteString(i18n.T("session.tool.match_header", query))
+	b.WriteString(header)
 	b.WriteByte('\n')
 	for _, h := range hits {
 		label := h.Session
 		if h.Title != "" {
 			label += " — " + h.Title
 		}
-		fmt.Fprintf(&b, "\n• %s (%s)\n", label, i18n.T("session.tool.match_count", h.Matches))
+		meta := i18n.T("session.tool.match_count", h.Matches)
+		if !h.SavedAt.IsZero() {
+			meta += " · " + i18n.T("session.tool.saved_at", h.SavedAt.Format("2006-01-02 15:04"), formatSessionAgeAt(h.SavedAt, now))
+		}
+		fmt.Fprintf(&b, "\n• %s (%s)\n", label, meta)
 		for _, sn := range h.Snippets {
 			sn = strings.TrimSpace(sn)
 			if sn != "" {
@@ -59,7 +125,7 @@ func (a *sessionPluginAdapter) Search(_ context.Context, query string, limit int
 			}
 		}
 	}
-	return strings.TrimRight(b.String(), "\n"), nil
+	return strings.TrimRight(b.String(), "\n")
 }
 
 // getPageLimit is the default @session get page size, in messages.
