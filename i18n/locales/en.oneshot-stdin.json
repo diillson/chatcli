@@ -1,0 +1,3 @@
+{
+  "oneshot.error.stdin_timeout": "❌ stdin is open but did not reach end of input within --timeout (%v). Close it, pipe the input in, or redirect from /dev/null (for example: chatcli -p \"...\" < /dev/null)."
+}

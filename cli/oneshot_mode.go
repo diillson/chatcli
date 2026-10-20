@@ -61,11 +61,20 @@ func (cli *ChatCLI) HandleOneShotOrFatal(ctx context.Context, opts *Options) boo
 		cli.logger.Fatal("Erro ao aplicar provider/model via flags", zap.Error(err))
 	}
 
+	// --timeout bounds the whole run, reading stdin included: a caller
+	// that leaves stdin open without writing to it (a harness, an editor,
+	// a parent shell) would otherwise hang the run before it starts.
+	ctxOne, cancelOne := context.WithTimeout(ctx, opts.Timeout)
+	defer cancelOne()
+
 	// Monta input a partir de -p e/ou stdin
 	input := strings.TrimSpace(opts.Prompt)
 	if HasStdin() {
-		b, _ := io.ReadAll(os.Stdin)
-		stdinText := strings.TrimSpace(string(b))
+		stdinText, err := readOneShotStdin(ctxOne, os.Stdin)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, i18n.T("oneshot.error.stdin_timeout", opts.Timeout))
+			cli.logger.Fatal("One-shot: stdin did not reach EOF within --timeout", zap.Error(err))
+		}
 		if input == "" {
 			input = stdinText
 		} else if stdinText != "" {
@@ -83,8 +92,6 @@ func (cli *ChatCLI) HandleOneShotOrFatal(ctx context.Context, opts *Options) boo
 		cli.logger.Fatal("One-shot acionado sem input (prompt vazio e sem stdin)")
 	}
 
-	ctxOne, cancelOne := context.WithTimeout(ctx, opts.Timeout)
-	defer cancelOne()
 	// Tool helper processes (browser, LSP, @proc) must not outlive a
 	// one-shot run: the interactive teardown never runs here, and Fatal
 	// exits without unwinding, so the failure paths tear down explicitly.
@@ -180,6 +187,27 @@ func (cli *ChatCLI) resolveOneShotCommand(ctx context.Context, input string) (st
 		fmt.Fprintln(os.Stderr, i18n.T("commands.autoroute.notice_oneshot", cmd.InvocationName()))
 	}
 	return expanded, coderRoute
+}
+
+// readOneShotStdin reads stdin to EOF, giving up when ctx ends. The read
+// goroutine is left blocked on a stdin that never closes; the process
+// exits right after, so it does not outlive the run.
+func readOneShotStdin(ctx context.Context, r io.Reader) (string, error) {
+	type result struct {
+		data []byte
+		err  error
+	}
+	done := make(chan result, 1)
+	go func() {
+		b, err := io.ReadAll(r)
+		done <- result{b, err}
+	}()
+	select {
+	case res := <-done:
+		return strings.TrimSpace(string(res.data)), nil
+	case <-ctx.Done():
+		return "", ctx.Err()
+	}
 }
 
 // Detecta se há dados no stdin (pipe/arquivo ao invés de TTY).
