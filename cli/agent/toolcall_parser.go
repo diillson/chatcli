@@ -290,6 +290,12 @@ func scanTagEnd(text string, pos int) (int, bool) {
 		case '"':
 			inDouble = true
 		case '\'':
+			// args='{"query":"Mary's"}': an apostrophe inside a JSON string
+			// does not close the attribute.
+			if end := jsonSingleQuoteEnd(text, i); end > 0 {
+				i = end
+				continue
+			}
 			inSingle = true
 		case '/':
 			if i+1 < n && text[i+1] == '>' {
@@ -379,9 +385,23 @@ func extractQuotedValue(text string, pos int) (string, error) {
 	quote := text[pos]
 	var buf strings.Builder
 	i := pos + 1
+	// A single-quoted JSON value ends at the quote after its last bracket,
+	// so an apostrophe inside one of its strings is literal text.
+	end := len(text)
+	jsonValue := false
+	if quote == '\'' {
+		if e := jsonSingleQuoteEnd(text, pos); e > 0 {
+			end, jsonValue = e, true
+		}
+	}
 
-	for i < len(text) {
+	for i < end {
 		ch := text[i]
+		if jsonValue && strings.HasPrefix(text[i:end], shellQuotedApostrophe) {
+			buf.WriteByte('\'')
+			i += len(shellQuotedApostrophe)
+			continue
+		}
 
 		if ch == '\\' && i+1 < len(text) {
 			next := text[i+1]
@@ -397,7 +417,7 @@ func extractQuotedValue(text string, pos int) (string, error) {
 			continue
 		}
 
-		if ch == quote {
+		if ch == quote && !jsonValue {
 			// Found closing quote
 			return buf.String(), nil
 		}
@@ -405,11 +425,73 @@ func extractQuotedValue(text string, pos int) (string, error) {
 		buf.WriteByte(ch)
 		i++
 	}
+	if jsonValue {
+		return buf.String(), nil
+	}
 
 	// If we reach here, the quote was never closed.
 	// Be lenient: return what we have (common with malformed AI output)
 	return buf.String(), nil
 }
+
+// jsonSingleQuoteEnd finds the quote that closes a single-quoted attribute
+// whose value is JSON (opens with '{' or '['): the first quote after the
+// value's brackets balance, tracked outside JSON strings. Models write
+// args='{"query":"Hitchhiker's Guide"}' with the apostrophe unescaped; the
+// first quote would cut the JSON there and the rest of the text would be
+// read as stray attributes and calls. It returns -1 when the value is not
+// JSON or never balances, and the caller falls back to the first quote.
+func jsonSingleQuoteEnd(text string, open int) int {
+	i := open + 1
+	for i < len(text) && isJSONSpace(text[i]) {
+		i++
+	}
+	if i >= len(text) || (text[i] != '{' && text[i] != '[') {
+		return -1
+	}
+	depth, inString := 0, false
+	for ; i < len(text); i++ {
+		ch := text[i]
+		if inString {
+			if strings.HasPrefix(text[i:], shellQuotedApostrophe) {
+				i += len(shellQuotedApostrophe) - 1
+				continue
+			}
+			switch ch {
+			case '\\':
+				i++
+			case '"':
+				inString = false
+			}
+			continue
+		}
+		switch ch {
+		case '"':
+			inString = true
+		case '{', '[':
+			depth++
+		case '}', ']':
+			depth--
+			if depth == 0 {
+				j := i + 1
+				for j < len(text) && isJSONSpace(text[j]) {
+					j++
+				}
+				if j < len(text) && text[j] == '\'' {
+					return j
+				}
+				return -1
+			}
+		}
+	}
+	return -1
+}
+
+// shellQuotedApostrophe is the shell idiom for an apostrophe inside a
+// single-quoted string ('"'"'), which models carry over into args='…'.
+const shellQuotedApostrophe = `'"'"'`
+
+func isJSONSpace(b byte) bool { return b == ' ' || b == '\t' || b == '\n' || b == '\r' }
 
 func isAttrNameChar(b byte) bool {
 	return (b >= 'a' && b <= 'z') || (b >= 'A' && b <= 'Z') ||
@@ -454,7 +536,9 @@ func parseJSONToolCalls(text string) []ToolCall {
 				if json.Unmarshal([]byte(recovered), &obj) != nil {
 					continue
 				}
-				jsonStr = recovered
+				// The recovered text only feeds the args below: Raw and the
+				// scan position stay on the source span, so a call embedded
+				// in an XML attribute is still recognized as already parsed.
 			} else {
 				continue
 			}

@@ -208,3 +208,14 @@ func truncForLog(s string) string {
 	}
 	return s
 }
+
+// A call whose JSON argument holds an apostrophe is compacted like any
+// other, including the <tool …> alias.
+func TestCompactToolCalls_ApostropheInArgs(t *testing.T) {
+	tr := &MessageTrimmer{}
+	in := `checking <tool_call name="@session" args='{"cmd":"search","args":{"query":"St. Mary's mass"}}' /> and <tool name="@coder" args='{"cmd":"read","args":{"file":"Bob's notes.md"}}' />`
+	out := tr.compactToolCalls(in)
+	if strings.Contains(out, "<tool") || !strings.Contains(out, "[tool: @session") || !strings.Contains(out, "[tool: @coder read Bob's notes.md]") {
+		t.Errorf("compacted = %q", out)
+	}
+}
