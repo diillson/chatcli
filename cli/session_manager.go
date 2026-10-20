@@ -718,10 +718,15 @@ func (sm *SessionManager) recentSessionHits(corpus *sessionCorpus, inScope map[s
 // BM25 scores are close: at most +25% for a session saved right now, fading
 // with a one-week half-life. Match density still dominates the ranking.
 func sessionRecencyBoost(saved time.Time) float64 {
+	return sessionRecencyBoostAt(saved, utils.ReferenceNow())
+}
+
+// sessionRecencyBoostAt is sessionRecencyBoost measured from now.
+func sessionRecencyBoostAt(saved, now time.Time) float64 {
 	if saved.IsZero() {
 		return 1
 	}
-	ageWeeks := utils.ReferenceNow().Sub(saved).Hours() / (24 * 7)
+	ageWeeks := now.Sub(saved).Hours() / (24 * 7)
 	if ageWeeks < 0 {
 		ageWeeks = 0
 	}
@@ -761,12 +766,21 @@ func (sm *SessionManager) searchSessionsScoped(query string, maxSnippetsPerSessi
 }
 
 // searchSessionsFiltered additionally bounds hits to sessions saved within
-// [from, to) when from is non-zero — the backing for temporal recall
-// questions ("o que fizemos há 2 semanas?").
+// [from, to) when either bound is non-zero — the backing for temporal recall
+// questions ("o que fizemos há 2 semanas?"). Recency is measured from the
+// reference time.
 func (sm *SessionManager) searchSessionsFiltered(query string, maxSnippetsPerSession, recentOnly int, from, to time.Time) ([]SessionSearchHit, error) {
+	return sm.searchSessionsAt(query, maxSnippetsPerSession, recentOnly, from, to, utils.ReferenceNow())
+}
+
+// searchSessionsAt is searchSessionsFiltered with recency measured from now
+// (the @session search as_of anchor). With a window, an empty query lists
+// the window's sessions newest first.
+func (sm *SessionManager) searchSessionsAt(query string, maxSnippetsPerSession, recentOnly int, from, to, now time.Time) ([]SessionSearchHit, error) {
 	normQuery := normalizeForSearch(strings.TrimSpace(query))
 	rawTerms := strings.Fields(normQuery)
-	if len(rawTerms) == 0 {
+	windowed := !from.IsZero() || !to.IsZero()
+	if len(rawTerms) == 0 && !windowed {
 		return nil, fmt.Errorf("empty query")
 	}
 	terms := significantSearchTerms(rawTerms)
@@ -784,9 +798,9 @@ func (sm *SessionManager) searchSessionsFiltered(query string, maxSnippetsPerSes
 		if recentOnly > 0 && i >= recentOnly {
 			break
 		}
-		if !from.IsZero() {
+		if windowed {
 			saved := corpus.saved[name]
-			if saved.Before(from) || (!to.IsZero() && !saved.Before(to)) {
+			if (!from.IsZero() && saved.Before(from)) || (!to.IsZero() && !saved.Before(to)) {
 				continue
 			}
 		}
@@ -820,7 +834,7 @@ func (sm *SessionManager) searchSessionsFiltered(query string, maxSnippetsPerSes
 	}
 	ranked := ctxmgr.RankDocsBM25(contents, normQuery, len(contents))
 
-	return aggregateSessionHits(corpus, docs, ranked, qualifies, terms, maxSnippetsPerSession), nil
+	return aggregateSessionHits(corpus, docs, ranked, qualifies, terms, maxSnippetsPerSession, now), nil
 }
 
 // qualifySessionsByTerms applies the session-level significant-term filter,
@@ -858,7 +872,7 @@ func qualifySessionsByTerms(corpus *sessionCorpus, inScope map[string]bool, term
 // aggregateSessionHits folds ranked message hits into per-session results,
 // preserving BM25 order so each session's snippets are its strongest
 // messages, then orders sessions by recency-boosted aggregate score.
-func aggregateSessionHits(corpus *sessionCorpus, docs []sessionSearchDoc, ranked []ctxmgr.DocHit, qualifies map[string]bool, terms []string, maxSnippetsPerSession int) []SessionSearchHit {
+func aggregateSessionHits(corpus *sessionCorpus, docs []sessionSearchDoc, ranked []ctxmgr.DocHit, qualifies map[string]bool, terms []string, maxSnippetsPerSession int, now time.Time) []SessionSearchHit {
 	bySession := make(map[string]*SessionSearchHit)
 	order := make([]string, 0)
 	for _, h := range ranked {
@@ -899,8 +913,8 @@ func aggregateSessionHits(corpus *sessionCorpus, docs []sessionSearchDoc, ranked
 		hits = append(hits, *bySession[name])
 	}
 	sort.SliceStable(hits, func(i, j int) bool {
-		si := hits[i].Score * sessionRecencyBoost(hits[i].SavedAt)
-		sj := hits[j].Score * sessionRecencyBoost(hits[j].SavedAt)
+		si := hits[i].Score * sessionRecencyBoostAt(hits[i].SavedAt, now)
+		sj := hits[j].Score * sessionRecencyBoostAt(hits[j].SavedAt, now)
 		if si != sj {
 			return si > sj
 		}

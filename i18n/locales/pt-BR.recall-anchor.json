@@ -1,0 +1,9 @@
+{
+  "recall.anchor.invalid": "as_of %q não é uma data; use 2006-01-02, 2006-01-02 15:04 ou RFC 3339",
+  "session.tool.as_of": "(datas contadas a partir de %s)",
+  "session.tool.bad_bound": "%s %q não é uma data nem uma expressão de tempo; use uma data ISO (2023-05-01, 2023-05) ou uma expressão como \"há 3 semanas\"",
+  "session.tool.no_match_window": "Nenhuma sessão salva corresponde a %q %s.",
+  "session.tool.saved_at": "salva em %s, %s",
+  "session.tool.window": "(salvas de %s a %s; datas contadas a partir de %s)",
+  "session.tool.window_list_header": "Sessões salvas na janela:"
+}

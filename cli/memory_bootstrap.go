@@ -68,6 +68,7 @@ const bootstrapCardAgentDirective = "Never claim you have no memory of past sess
 	"Before answering that you don't know or don't remember something about this user or past work, pull first:\n" +
 	`- @session search {"cmd":"search","args":{"query":"<keywords>"}} then @session get — past conversations (including work discussed through MCP tools like Jira/ServiceNow).` + "\n" +
 	`- @memory recall {"cmd":"recall","args":{"query":"<keywords>"}} — long-term facts; {"cmd":"timeline"} for dated episodes.` + "\n" +
+	`- WHEN / how-long-ago questions: @session search shows each session's save date and its age from the current date — compute from those, not from guesses. Narrow with "from"/"to" (ISO date or "3 weeks ago"); "as_of":"YYYY-MM-DD" counts relative dates from another day for that one call (nothing else changes). @memory recall and timeline take "as_of" too.` + "\n" +
 	"- @board list — the local work board.\n" +
 	"If a pull returns nothing relevant, say what memory DOES contain — never deny that memory exists."
 

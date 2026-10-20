@@ -88,8 +88,8 @@
     "surface": "6a9a6b03d9d04f25"
   },
   "@memory": {
-    "version": "1.2.1",
-    "surface": "79f2cd25082917fb"
+    "version": "1.3.0",
+    "surface": "66f4fdb090d5808e"
   },
   "@moa": {
     "version": "1.1.0",
@@ -136,8 +136,8 @@
     "surface": "7c25b756ed796be3"
   },
   "@session": {
-    "version": "1.2.0",
-    "surface": "e2b065d7d5af7e72"
+    "version": "1.3.0",
+    "surface": "ee14c6ab8e50c529"
   },
   "@skill": {
     "version": "1.0.0",

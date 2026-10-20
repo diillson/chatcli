@@ -70,6 +70,16 @@ type TimelineAccessor interface {
 	Timeline(project, from, to, query string, limit int) (string, error)
 }
 
+// AnchoredRecaller is an OPTIONAL capability behind the as_of flag of
+// @memory recall and timeline: relative time expressions ("3 months ago",
+// "há 2 semanas") are resolved against asOf for this call only instead of
+// the current date. asOf is 2006-01-02, 2006-01-02 15:04[:05] or RFC 3339;
+// "" means the reference time (CHATCLI_NOW or the wall clock).
+type AnchoredRecaller interface {
+	RecallAt(query, asOf string) (string, error)
+	TimelineAt(project, from, to, query string, limit int, asOf string) (string, error)
+}
+
 // memAdapterHolder wraps the adapter so atomic.Value always receives a
 // consistent, non-nil concrete type — storing a bare nil interface (or
 // switching concrete types) would panic. The wrapper lets SetMemoryAdapter(nil)
@@ -105,7 +115,7 @@ func (*BuiltinMemoryPlugin) Name() string { return "@memory" }
 
 // Description surfaces the tool in /plugin list and the help.
 func (*BuiltinMemoryPlugin) Description() string {
-	return "Persist or recall long-term memory, and explore the knowledge graph of how it connects. Use it the moment the user reveals a durable fact about themselves (certifications, skills, role, preferences, goals) or the project — don't wait for background extraction. Use 'recall' to find facts by content, 'timeline' for WHEN questions (\"what did we do 3 months ago?\", per-project work history), and 'neighbors'/'map' to see how a subject connects (backlinks, related notes)."
+	return "Persist or recall long-term memory, and explore the knowledge graph of how it connects. Use it the moment the user reveals a durable fact about themselves (certifications, skills, role, preferences, goals) or the project — don't wait for background extraction. Use 'recall' to find facts by content, 'timeline' for WHEN questions (\"what did we do 3 months ago?\", per-project work history; as_of counts relative dates from another day for that one call), and 'neighbors'/'map' to see how a subject connects (backlinks, related notes)."
 }
 
 // Usage explains the canonical invocation forms.
@@ -116,8 +126,9 @@ Subcommands (cmd + args):
   remember {content, category?:architecture|pattern|preference|gotcha|project|personal|general}
   profile  {fields:{certifications:"AWS SAA", role:"SRE", goals:"...", interests:"...", directives:"...", milestone:"...", ...}}
   forget    {match:"<substring of the fact to remove>"}
-  recall    {query?:"topic to recall"}
-  timeline  {project?, from?, to?, query?, limit?}   dated episode history (WHEN)
+  recall    {query?:"topic to recall", as_of?}
+  timeline  {project?, from?, to?, query?, limit?, as_of?}   dated episode history (WHEN);
+            as_of (YYYY-MM-DD) counts "3 months ago" from that day, this call only
   neighbors {query:"<subject or node id>"}   local graph: backlinks + related notes
   map                                         knowledge-graph overview (counts + hubs)
 
@@ -151,7 +162,7 @@ examples or generated artifacts.`
 }
 
 // Version is semver; bumped when the surface changes.
-func (*BuiltinMemoryPlugin) Version() string { return "1.2.1" }
+func (*BuiltinMemoryPlugin) Version() string { return "1.3.0" }
 
 // Path is empty for builtin plugins.
 func (*BuiltinMemoryPlugin) Path() string { return "" }
@@ -196,9 +207,10 @@ func (*BuiltinMemoryPlugin) Schema() string {
 			},
 			{
 				"name":        "recall",
-				"description": "Retrieve relevant stored memory (profile + scored facts), optionally filtered by a query.",
+				"description": "Retrieve relevant stored memory (profile + scored facts), optionally filtered by a query. A time expression in query also pulls the matching slice of the episode timeline; as_of sets the date it is counted from.",
 				"flags": []map[string]interface{}{
 					{"name": "query", "type": "string", "description": "Optional topic to narrow recall."},
+					{"name": "as_of", "type": "string", "description": "Date relative expressions in query are counted from, for this call only (2006-01-02 or RFC 3339). Default: the current date."},
 				},
 				"examples": []string{`{"cmd":"recall","args":{"query":"certifications"}}`},
 			},
@@ -211,9 +223,11 @@ func (*BuiltinMemoryPlugin) Schema() string {
 					{"name": "to", "type": "string", "description": "Window end: ISO date or natural expression."},
 					{"name": "query", "type": "string", "description": "Content filter; may embed the time expression."},
 					{"name": "limit", "type": "number", "description": "Max episodes returned (default 30, most recent win)."},
+					{"name": "as_of", "type": "string", "description": "Date natural from/to/query expressions are counted from, for this call only (2006-01-02 or RFC 3339). Default: the current date."},
 				},
 				"examples": []string{
 					`{"cmd":"timeline","args":{"query":"3 months ago"}}`,
+					`{"cmd":"timeline","args":{"from":"2 weeks ago","as_of":"2023-05-30"}}`,
 					`{"cmd":"timeline","args":{"project":"chatcli","from":"2026-04","to":"2026-06"}}`,
 				},
 			},
@@ -290,8 +304,16 @@ func (p *BuiltinMemoryPlugin) ExecuteWithStream(_ context.Context, args []string
 	case "recall":
 		var in struct {
 			Query string `json:"query"`
+			AsOf  string `json:"as_of"`
 		}
 		_ = json.Unmarshal([]byte(inner), &in)
+		if strings.TrimSpace(in.AsOf) != "" {
+			ar, ok := adapter.(AnchoredRecaller)
+			if !ok {
+				return "", errors.New("@memory recall: as_of is not available in this session")
+			}
+			return ar.RecallAt(in.Query, in.AsOf)
+		}
 		return adapter.Recall(in.Query)
 	case "timeline":
 		ta, ok := adapter.(TimelineAccessor)
@@ -304,8 +326,16 @@ func (p *BuiltinMemoryPlugin) ExecuteWithStream(_ context.Context, args []string
 			To      string          `json:"to"`
 			Query   string          `json:"query"`
 			Limit   json.RawMessage `json:"limit"`
+			AsOf    string          `json:"as_of"`
 		}
 		_ = json.Unmarshal([]byte(inner), &in)
+		if strings.TrimSpace(in.AsOf) != "" {
+			ar, ok := adapter.(AnchoredRecaller)
+			if !ok {
+				return "", errors.New("@memory timeline: as_of is not available in this session")
+			}
+			return ar.TimelineAt(in.Project, in.From, in.To, in.Query, lenientInt(in.Limit), in.AsOf)
+		}
 		return ta.Timeline(in.Project, in.From, in.To, in.Query, lenientInt(in.Limit))
 	case "map":
 		ga, ok := adapter.(GraphAccessor)

@@ -89,6 +89,20 @@ func (a *memoryPluginAdapter) Forget(match string) (string, error) {
 // fizemos em abril") additionally get the matching slice of the episodic
 // timeline prepended — relevance ranking alone cannot answer "when".
 func (a *memoryPluginAdapter) Recall(query string) (string, error) {
+	return a.recallFrom(query, utils.ReferenceNow())
+}
+
+// RecallAt implements plugins.AnchoredRecaller: Recall with relative time
+// expressions counted from asOf for this call only.
+func (a *memoryPluginAdapter) RecallAt(query, asOf string) (string, error) {
+	now, err := resolveRecallAnchor(asOf)
+	if err != nil {
+		return "", err
+	}
+	return a.recallFrom(query, now)
+}
+
+func (a *memoryPluginAdapter) recallFrom(query string, now time.Time) (string, error) {
 	if a.cli.memoryStore == nil {
 		return "", fmt.Errorf("memory not enabled")
 	}
@@ -102,7 +116,7 @@ func (a *memoryPluginAdapter) Recall(query string) (string, error) {
 
 	var timelineSection string
 	if q != "" {
-		if from, to, cleaned, ok := memory.ParseTemporalRange(q, utils.ReferenceNow()); ok {
+		if from, to, cleaned, ok := memory.ParseTemporalRange(q, now); ok {
 			if eps := conversationalTimeline(a.cli.memoryStore.Manager(), from, to, "", cleaned, 15); len(eps) > 0 {
 				timelineSection = fmt.Sprintf("## Timeline %s → %s\n\n%s",
 					from.Format("2006-01-02"), to.Format("2006-01-02"), memory.FormatEpisodes(eps))
@@ -173,11 +187,24 @@ func conversationalTimeline(mgr *memory.Manager, from, to time.Time, project, cl
 // "abril"); when both are empty, a time expression inside query sets the
 // window instead.
 func (a *memoryPluginAdapter) Timeline(project, from, to, query string, limit int) (string, error) {
+	return a.timelineFrom(project, from, to, query, limit, utils.ReferenceNow())
+}
+
+// TimelineAt implements plugins.AnchoredRecaller: Timeline with natural
+// from/to/query expressions counted from asOf for this call only.
+func (a *memoryPluginAdapter) TimelineAt(project, from, to, query string, limit int, asOf string) (string, error) {
+	now, err := resolveRecallAnchor(asOf)
+	if err != nil {
+		return "", err
+	}
+	return a.timelineFrom(project, from, to, query, limit, now)
+}
+
+func (a *memoryPluginAdapter) timelineFrom(project, from, to, query string, limit int, now time.Time) (string, error) {
 	if a.cli.memoryStore == nil {
 		return "", fmt.Errorf("memory not enabled")
 	}
 
-	now := utils.ReferenceNow()
 	q := strings.TrimSpace(query)
 	var fromT, toT time.Time
 	windowFromQuery := false
@@ -239,6 +266,28 @@ func parseTimelineBound(s string, now time.Time) (time.Time, time.Time, bool) {
 
 // boundLabel renders a window bound for the timeline header, tolerating the
 // open ("…") side.
+// resolveRecallAnchor turns a recall tool's as_of into the time relative
+// expressions are counted from: the reference time when empty, the given
+// date otherwise. A value that does not parse is an error the model can
+// correct, never a silent fallback to today.
+func resolveRecallAnchor(asOf string) (time.Time, error) {
+	if strings.TrimSpace(asOf) == "" {
+		return utils.ReferenceNow(), nil
+	}
+	if t, ok := utils.ParseReferenceTime(asOf); ok {
+		return t, nil
+	}
+	return time.Time{}, fmt.Errorf("%s", i18n.T("recall.anchor.invalid", asOf))
+}
+
+// lastDayLabel renders an exclusive window end as the last day it includes.
+func lastDayLabel(end time.Time) string {
+	if end.IsZero() {
+		return boundLabel(end)
+	}
+	return end.Add(-time.Nanosecond).Format("2006-01-02")
+}
+
 func boundLabel(t time.Time) string {
 	if t.IsZero() {
 		return "…"

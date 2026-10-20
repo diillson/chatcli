@@ -220,10 +220,15 @@ const pulseSessionRecallNode = "memory:session-recall"
 // measured from the reference time (CHATCLI_NOW) like every other date the
 // model reasons about. A save after the reference time reads as just now.
 func formatSessionAge(saved time.Time) string {
+	return formatSessionAgeAt(saved, utils.ReferenceNow())
+}
+
+// formatSessionAgeAt is formatSessionAge measured from now (an as_of anchor).
+func formatSessionAgeAt(saved, now time.Time) string {
 	if saved.IsZero() {
 		return "age unknown"
 	}
-	age := max(utils.ReferenceNow().Sub(saved), 0)
+	age := max(now.Sub(saved), 0)
 	switch {
 	case age < time.Hour:
 		return fmt.Sprintf("%dm ago", int(age.Minutes()))

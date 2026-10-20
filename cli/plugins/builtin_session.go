@@ -52,6 +52,17 @@ type SessionMessageReader interface {
 	GetMessage(ctx context.Context, name string, index int) (string, error)
 }
 
+// SessionWindowSearcher is an OPTIONAL capability behind the date flags of
+// @session search. from and to bound the save date (ISO date or a natural
+// EN/PT expression such as "3 weeks ago"); asOf is the date those
+// expressions, and any inside query, are resolved against for this call
+// only — "" means the reference time (CHATCLI_NOW or the wall clock).
+// query may be empty when a window is given: the window's sessions are
+// listed newest first.
+type SessionWindowSearcher interface {
+	SearchWindow(ctx context.Context, query string, limit int, from, to, asOf string) (string, error)
+}
+
 // SessionWriter is an OPTIONAL capability a SessionAdapter may implement to
 // back the NON-destructive write subcommands (save/fork/attach/detach) —
 // same optional-interface pattern as SessionReader, so read-only adapters
@@ -104,7 +115,7 @@ func (*BuiltinSessionPlugin) Name() string { return "@session" }
 
 // Description surfaces the tool.
 func (*BuiltinSessionPlugin) Description() string {
-	return "Search, read and manage saved conversations: recall what was discussed earlier, list sessions, save or fork the current conversation under a name, and attach/detach the live session binding. Use when the user refers to a prior conversation ('what did we decide about X', 'continue where we left off') or asks to keep working under a named session."
+	return "Search, read and manage saved conversations: recall what was discussed earlier (each search hit shows its save date and age; filter by date with from/to and count relative dates from as_of), list sessions, save or fork the current conversation under a name, and attach/detach the live session binding. Use when the user refers to a prior conversation ('what did we decide about X', 'continue where we left off') or asks to keep working under a named session."
 }
 
 // Usage explains the canonical invocation.
@@ -112,7 +123,11 @@ func (*BuiltinSessionPlugin) Usage() string {
 	return `<tool_call name="@session" args='{"cmd":"search","args":{"query":"rate limiter design"}}' />
 
 Subcommands (cmd + args):
-  search {query, limit?}   search saved sessions; returns matching sessions + snippets
+  search {query, limit?, from?, to?, as_of?}
+                           search saved sessions; returns matching sessions + snippets,
+                           each with its save date and age. from/to bound the save date
+                           (ISO date or "3 weeks ago"); as_of is the date relative
+                           expressions are counted from, for this call only
   get {name, offset?, limit?, query?, message?}   read one saved session page by page;
                            query jumps to the best match; message=<index> returns that
                            single message nearly in full (follow up on truncated entries)
@@ -134,7 +149,7 @@ that matter. To keep working under a name: save (new) or attach (existing).`
 }
 
 // Version is semver.
-func (*BuiltinSessionPlugin) Version() string { return "1.2.0" }
+func (*BuiltinSessionPlugin) Version() string { return "1.3.0" }
 
 // Path is empty for builtin plugins.
 func (*BuiltinSessionPlugin) Path() string { return "" }
@@ -146,12 +161,19 @@ func (*BuiltinSessionPlugin) Schema() string {
 		"subcommands": []map[string]interface{}{
 			{
 				"name":        "search",
-				"description": "Search saved conversations for a query; returns matching sessions with snippets.",
+				"description": "Search saved conversations for a query; returns matching sessions with snippets, each with its save date and its age relative to the current date. Narrow by date with from/to, and pass as_of to count relative expressions (\"2 weeks ago\", \"last month\") from a date other than today — for this call only; nothing else changes. A time expression inside query sets the window when from/to are absent.",
 				"flags": []map[string]interface{}{
-					{"name": "query", "type": "string", "required": true, "description": "Free-text search across saved sessions."},
+					{"name": "query", "type": "string", "required": false, "description": "Free-text search across saved sessions. Required unless from or to is given (then the window's sessions are listed newest first)."},
 					{"name": "limit", "type": "number", "required": false, "description": "Max snippets per session (default 3)."},
+					{"name": "from", "type": "string", "required": false, "description": "Earliest save date: ISO date (2023-05-01, 2023-05) or natural expression (\"3 weeks ago\", \"abril\")."},
+					{"name": "to", "type": "string", "required": false, "description": "Latest save date, same forms as from; a day or month includes all of it."},
+					{"name": "as_of", "type": "string", "required": false, "description": "Date relative expressions are counted from (2006-01-02, 2006-01-02 15:04 or RFC 3339). Default: the current date."},
 				},
-				"examples": []string{`{"cmd":"search","args":{"query":"auth refactor"}}`},
+				"examples": []string{
+					`{"cmd":"search","args":{"query":"auth refactor"}}`,
+					`{"cmd":"search","args":{"query":"airbnb booking","from":"2023-01","to":"2023-03"}}`,
+					`{"cmd":"search","args":{"query":"ibotta","to":"3 weeks ago","as_of":"2023-05-30"}}`,
+				},
 			},
 			{
 				"name":        "get",
@@ -234,13 +256,23 @@ func (p *BuiltinSessionPlugin) ExecuteWithStream(ctx context.Context, args []str
 		var in struct {
 			Query string `json:"query"`
 			Limit int    `json:"limit"`
+			From  string `json:"from"`
+			To    string `json:"to"`
+			AsOf  string `json:"as_of"`
 		}
 		_ = json.Unmarshal([]byte(inner), &in)
-		if strings.TrimSpace(in.Query) == "" {
-			return "", errors.New(`@session search: "query" is required`)
+		windowed := strings.TrimSpace(in.From) != "" || strings.TrimSpace(in.To) != ""
+		if strings.TrimSpace(in.Query) == "" && !windowed {
+			return "", errors.New(`@session search: "query" is required (or give from/to to list a date window)`)
 		}
 		if in.Limit <= 0 {
 			in.Limit = 3
+		}
+		if ws, ok := adapter.(SessionWindowSearcher); ok {
+			return ws.SearchWindow(ctx, in.Query, in.Limit, in.From, in.To, in.AsOf)
+		}
+		if windowed || strings.TrimSpace(in.AsOf) != "" {
+			return "", errors.New("@session search: date filters are not available in this session")
 		}
 		return adapter.Search(ctx, in.Query, in.Limit)
 	case "get":
