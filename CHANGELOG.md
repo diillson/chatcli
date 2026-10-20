@@ -1,5 +1,23 @@
 # Changelog
 
+## [1.223.0](https://github.com/diillson/chatcli/compare/v1.222.0...v1.223.0) (2026-10-20)
+
+
+### Features
+
+* **config:** move the whole state directory with CHATCLI_STATE_DIR ([#1835](https://github.com/diillson/chatcli/issues/1835)) ([b7f0992](https://github.com/diillson/chatcli/commit/b7f099270bd768ef6675f50316699ab7716d8ccd))
+* **memory:** date flags and dated hits for session and memory recall ([#1840](https://github.com/diillson/chatcli/issues/1840)) ([320c1d9](https://github.com/diillson/chatcli/commit/320c1d93ab3e21584c53934d2778ce1af7916cb7))
+* **memory:** pin the date ChatCLI reasons about with CHATCLI_NOW ([#1833](https://github.com/diillson/chatcli/issues/1833)) ([0fcbc66](https://github.com/diillson/chatcli/commit/0fcbc663197e28ab1e4490595796b9e02bca2da8))
+
+
+### Bug Fixes
+
+* **agent:** read tool call arguments that contain an apostrophe ([#1842](https://github.com/diillson/chatcli/issues/1842)) ([c6416c1](https://github.com/diillson/chatcli/commit/c6416c1e12faaab861c1a3e0f9da693d59adc985))
+* **auth:** renew an OAuth token once across processes ([#1836](https://github.com/diillson/chatcli/issues/1836)) ([6eb3ae0](https://github.com/diillson/chatcli/commit/6eb3ae0779181632ec179b5782860860a067b930))
+* **memory:** measure saved-session ages from the reference time ([#1837](https://github.com/diillson/chatcli/issues/1837)) ([299f548](https://github.com/diillson/chatcli/commit/299f548247ec823526c953799e547ef1f115a2cb))
+* **oneshot:** bound the stdin read by --timeout ([#1839](https://github.com/diillson/chatcli/issues/1839)) ([88bcf6f](https://github.com/diillson/chatcli/commit/88bcf6f12c536a3fd5388aebbec901ea2f55c98e))
+* **text:** never cut a UTF-8 character in half when capping text ([#1838](https://github.com/diillson/chatcli/issues/1838)) ([2e3806c](https://github.com/diillson/chatcli/commit/2e3806c835e98d49b196ffdd1e6da200c361643a))
+
 ## [1.222.0](https://github.com/diillson/chatcli/compare/v1.221.3...v1.222.0) (2026-10-19)
 
 
