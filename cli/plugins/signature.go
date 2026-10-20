@@ -15,6 +15,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/diillson/chatcli/pkg/stateroot"
 )
 
 var (
@@ -50,7 +52,7 @@ func NewPluginVerifier() *PluginVerifier {
 		return v
 	}
 
-	keysDir := filepath.Join(home, ".chatcli", "trusted-keys")
+	keysDir := filepath.Join(stateroot.Under(home), "trusted-keys")
 	entries, err := os.ReadDir(keysDir)
 	if err != nil {
 		return v // no keys directory is fine

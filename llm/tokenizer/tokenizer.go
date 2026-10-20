@@ -36,6 +36,7 @@ import (
 
 	"github.com/diillson/chatcli/models"
 	"github.com/diillson/chatcli/pkg/pulse"
+	"github.com/diillson/chatcli/pkg/stateroot"
 	"github.com/diillson/chatcli/utils"
 	tiktoken "github.com/pkoukk/tiktoken-go"
 )
@@ -194,7 +195,7 @@ var (
 // system temp dir when the home is unknown.
 func stateDir() string {
 	if home, err := os.UserHomeDir(); err == nil && home != "" {
-		return filepath.Join(home, ".chatcli", "tokenizers")
+		return filepath.Join(stateroot.Under(home), "tokenizers")
 	}
 	return filepath.Join(os.TempDir(), "chatcli-tokenizers")
 }

@@ -54,6 +54,7 @@ import (
 	"github.com/diillson/chatcli/pkg/browser"
 	"github.com/diillson/chatcli/pkg/persona"
 	"github.com/diillson/chatcli/pkg/pulse"
+	"github.com/diillson/chatcli/pkg/stateroot"
 	"github.com/diillson/chatcli/ui/kit"
 	"github.com/diillson/chatcli/ui/theme"
 	"github.com/fsnotify/fsnotify"
@@ -747,7 +748,7 @@ func NewChatCLI(ctx context.Context, manager manager.LLMManager, logger *zap.Log
 
 	// Initialize workspace context (bootstrap files + memory)
 	homeDir, _ := os.UserHomeDir()
-	globalDir := filepath.Join(homeDir, ".chatcli")
+	globalDir := stateroot.Under(homeDir)
 	cli.stateRoot = globalDir
 	cli.installTokenEstimator()
 	workspaceDir := detectProjectDir()
@@ -776,7 +777,7 @@ func NewChatCLI(ctx context.Context, manager manager.LLMManager, logger *zap.Log
 
 	var memStore *workspace.MemoryStore
 	if memoryEnabled {
-		memDir := filepath.Join(homeDir, ".chatcli")
+		memDir := stateroot.Under(homeDir)
 		// An older layout (the Helm chart up to 1.211.2) kept memory in a
 		// directory shared with the sessions; carry it over once, before
 		// the stores open, so the first start on the new layout keeps it.
@@ -811,7 +812,7 @@ func NewChatCLI(ctx context.Context, manager manager.LLMManager, logger *zap.Log
 	if tokenizer.IsGPTModel(cli.Model) {
 		tokenizer.Prefetch(cli.Model)
 	}
-	cli.compressionLayer = compress.NewLayerFromEnv(filepath.Join(homeDir, ".chatcli"))
+	cli.compressionLayer = compress.NewLayerFromEnv(stateroot.Under(homeDir))
 	if err := cli.compressionLayer.StoreFallback(); err != nil {
 		// The layer already degraded to a bounded in-memory store; surface the
 		// cause so the loss of cross-restart recall is never silent.

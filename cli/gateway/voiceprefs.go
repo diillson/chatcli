@@ -22,6 +22,8 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+
+	"github.com/diillson/chatcli/pkg/stateroot"
 )
 
 // Per-session voice preference values. Empty (unset) defers to the global mode.
@@ -50,7 +52,7 @@ func SharedVoicePrefs() *VoicePrefs {
 	sharedVoicePrefsOnce.Do(func() {
 		path := ""
 		if home, err := os.UserHomeDir(); err == nil {
-			path = filepath.Join(home, ".chatcli", "gateway_voice_prefs.json")
+			path = filepath.Join(stateroot.Under(home), "gateway_voice_prefs.json")
 		}
 		sharedVoicePrefs = NewVoicePrefs(path)
 	})

@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"time"
@@ -20,6 +21,7 @@ import (
 	"github.com/diillson/chatcli/config"
 
 	"github.com/diillson/chatcli/pkg/pulse"
+	"github.com/diillson/chatcli/pkg/stateroot"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 	"gopkg.in/natefinch/lumberjack.v2"
@@ -40,6 +42,10 @@ func InitializeLogger() (*zap.Logger, error) {
 
 	// 2. Ler configurações de arquivo e rotação do ambiente
 	logFile := GetEnvOrDefault("LOG_FILE", GetEnvOrDefault("CHATCLI_LOG_FILE", config.DefaultLogFile))
+	if logFile == config.DefaultLogFile && stateroot.Custom() {
+		// The default log lives in the state directory, wherever it is.
+		logFile = filepath.Join(stateroot.Under(""), filepath.Base(config.DefaultLogFile))
+	}
 	if expanded, err := ExpandPath(logFile); err == nil {
 		logFile = expanded
 	} else {

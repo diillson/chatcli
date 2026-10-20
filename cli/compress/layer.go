@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/diillson/chatcli/pkg/pulse"
+	"github.com/diillson/chatcli/pkg/stateroot"
 )
 
 // recallToolName is the bare name of the @recall builtin (without the '@'
@@ -154,7 +155,7 @@ func newCCRStoreFromEnv(stateDir string) (Store, error) {
 	if dir == "" {
 		if stateDir == "" {
 			if home, err := os.UserHomeDir(); err == nil {
-				stateDir = filepath.Join(home, ".chatcli")
+				stateDir = stateroot.Under(home)
 			} else {
 				stateDir = filepath.Join(os.TempDir(), "chatcli")
 			}

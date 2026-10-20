@@ -279,6 +279,7 @@ var envDefaults = map[string]envDefault{
 	"CHATCLI_MCP_MAX_HISTORY":               {Value: "0", Source: "cmd/rpcserve.go (0 = token-aware compaction bounds the history)"},
 	"CHATCLI_MCP_SESSION_AUTOSAVE":          {Value: "true", IsBool: true, Source: "cmd/rpcserve.go (persist live MCP sessions as mcp-<session>; unset follows CHATCLI_SESSION_AUTOSAVE)"},
 	"CHATCLI_SESSION_AUTOSAVE_KEEP":         {Value: "600", Source: "cli/cli_session_autosave.go (machine-session keep-count backstop; TTL is the primary retention)"},
+	"CHATCLI_STATE_DIR":                     {Value: "~/.chatcli", Source: "pkg/stateroot (the directory every store lives in: sessions, memory, transcripts, costs, plugins, skills, the credential store and the global .env; process environment only, an environment file cannot set it; CHATCLI_AUTH_DIR still moves the credential store on its own)"},
 	"CHATCLI_ENCRYPTION_KEY":                {Value: "(unset — masked when set)", Source: "pkg/atrest (your own at-rest key in place of the OS keychain key used by default; off disables sealing; ≥32 random bytes recommended, shorter secrets are stretched with Argon2id)"},
 	"CHATCLI_AUDIT_LOG_PATH":                {Value: "", Source: "llm_audit.go (absolute path of the hash-chained audit trail; LLM and gRPC entries share it)"},
 	"CHATCLI_COMPRESSION":                   {Value: "lossy-with-ccr", Source: "compress/layer.go NewLayerFromEnv (off | lossless | lossy-with-ccr; /config compression mode changes it live)"},

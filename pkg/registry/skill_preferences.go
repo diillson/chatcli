@@ -21,10 +21,12 @@ package registry
 
 import (
 	"fmt"
-	"github.com/diillson/chatcli/utils"
 	"os"
 	"path/filepath"
 	"sync"
+
+	"github.com/diillson/chatcli/pkg/stateroot"
+	"github.com/diillson/chatcli/utils"
 
 	"gopkg.in/yaml.v3"
 )
@@ -40,7 +42,7 @@ type SkillPreferences struct {
 // PreferencesPath returns the path to the skill preferences file.
 func PreferencesPath() string {
 	homeDir, _ := os.UserHomeDir()
-	return filepath.Join(homeDir, ".chatcli", "skill-preferences.yaml")
+	return filepath.Join(stateroot.Under(homeDir), "skill-preferences.yaml")
 }
 
 // LoadPreferences reads skill preferences from disk.

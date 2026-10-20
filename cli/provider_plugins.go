@@ -23,6 +23,7 @@ import (
 	"github.com/diillson/chatcli/llm/manager"
 	"github.com/diillson/chatcli/llm/providerhost"
 	"github.com/diillson/chatcli/pkg/providerproto"
+	"github.com/diillson/chatcli/pkg/stateroot"
 	"github.com/diillson/chatcli/ui/kit"
 	"github.com/diillson/chatcli/version"
 	"go.uber.org/zap"
@@ -43,7 +44,7 @@ func ProviderPluginLoadOptions(logger *zap.Logger, interactive bool) providerhos
 	quarantine := plugins.NewQuarantine(dir)
 	cacheDir := ""
 	if home, err := os.UserHomeDir(); err == nil {
-		cacheDir = filepath.Join(home, ".chatcli", "cache", "provider-plugins")
+		cacheDir = filepath.Join(stateroot.Under(home), "cache", "provider-plugins")
 	}
 	return providerhost.LoadOptions{
 		Dir: dir,

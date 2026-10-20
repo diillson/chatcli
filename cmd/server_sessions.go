@@ -11,6 +11,7 @@ import (
 
 	"github.com/diillson/chatcli/cli"
 	"github.com/diillson/chatcli/i18n"
+	"github.com/diillson/chatcli/pkg/stateroot"
 	"github.com/diillson/chatcli/server"
 	"github.com/diillson/chatcli/utils"
 	"go.uber.org/zap"
@@ -40,7 +41,7 @@ func serverSessionStores(logger *zap.Logger) (shared server.SessionStore, perPri
 		logger.Warn(i18n.T("cmd.server.session_init_failed"), zap.Error(err))
 		return shared, nil
 	}
-	return shared, principalSessionFactory(filepath.Join(home, ".chatcli", "server", "principals"), logger)
+	return shared, principalSessionFactory(filepath.Join(stateroot.Under(home), "server", "principals"), logger)
 }
 
 // principalSessionFactory opens a principal's store under root.

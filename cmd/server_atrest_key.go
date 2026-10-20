@@ -21,6 +21,7 @@ import (
 
 	"github.com/diillson/chatcli/i18n"
 	"github.com/diillson/chatcli/pkg/atrest"
+	"github.com/diillson/chatcli/pkg/stateroot"
 	"go.uber.org/zap"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -271,7 +272,7 @@ func sealedStateFile() (string, bool) {
 	if err != nil {
 		return "", false
 	}
-	return findSealedFile(filepath.Join(home, ".chatcli"), sealedScanLimit)
+	return findSealedFile(stateroot.Under(home), sealedScanLimit)
 }
 
 // findSealedFile walks root (skipping hidden directories) and returns the

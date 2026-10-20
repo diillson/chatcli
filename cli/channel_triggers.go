@@ -39,6 +39,7 @@ import (
 	"github.com/diillson/chatcli/cli/mcp"
 	"github.com/diillson/chatcli/cli/mcp/triggers"
 	"github.com/diillson/chatcli/i18n"
+	"github.com/diillson/chatcli/pkg/stateroot"
 	"go.uber.org/zap"
 )
 
@@ -90,7 +91,7 @@ func (cli *ChatCLI) initChannelTriggers() {
 		processedIDs:   make(map[uint64]struct{}),
 	}
 	if home, err := os.UserHomeDir(); err == nil && home != "" {
-		st.rulesPath = filepath.Join(home, ".chatcli", "mcp", "triggers.json")
+		st.rulesPath = filepath.Join(stateroot.Under(home), "mcp", "triggers.json")
 	}
 
 	if err := cli.loadChannelTriggerRules(st); err != nil {

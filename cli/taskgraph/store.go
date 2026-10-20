@@ -23,6 +23,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/diillson/chatcli/pkg/stateroot"
 	"github.com/diillson/chatcli/utils"
 )
 
@@ -39,7 +40,7 @@ func DefaultBaseDir() (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("resolve home dir: %w", err)
 	}
-	return filepath.Join(home, ".chatcli", "taskgraph"), nil
+	return filepath.Join(stateroot.Under(home), "taskgraph"), nil
 }
 
 // RunStore is the on-disk home of one run.

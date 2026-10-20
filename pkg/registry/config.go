@@ -6,11 +6,13 @@
 package registry
 
 import (
-	"github.com/diillson/chatcli/utils"
 	"os"
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/diillson/chatcli/pkg/stateroot"
+	"github.com/diillson/chatcli/utils"
 
 	"gopkg.in/yaml.v3"
 )
@@ -60,7 +62,7 @@ func DefaultConfig() RegistriesConfig {
 				Type:     "skillssh",
 			},
 		},
-		InstallDir:      filepath.Join(homeDir, ".chatcli", "skills"),
+		InstallDir:      filepath.Join(stateroot.Under(homeDir), "skills"),
 		MaxConcurrent:   3,
 		SearchCacheSize: 50,
 	}
@@ -69,7 +71,7 @@ func DefaultConfig() RegistriesConfig {
 // ConfigPath returns the path to the registries config file.
 func ConfigPath() string {
 	homeDir, _ := os.UserHomeDir()
-	return filepath.Join(homeDir, ".chatcli", "registries.yaml")
+	return filepath.Join(stateroot.Under(homeDir), "registries.yaml")
 }
 
 // LoadConfig reads the registries config from disk.
@@ -98,7 +100,7 @@ func LoadConfig() (RegistriesConfig, error) {
 	// Apply defaults for missing fields
 	if cfg.InstallDir == "" {
 		homeDir, _ := os.UserHomeDir()
-		cfg.InstallDir = filepath.Join(homeDir, ".chatcli", "skills")
+		cfg.InstallDir = filepath.Join(stateroot.Under(homeDir), "skills")
 	}
 	if cfg.MaxConcurrent <= 0 {
 		cfg.MaxConcurrent = 3

@@ -30,6 +30,7 @@ import (
 
 	"github.com/diillson/chatcli/config"
 	"github.com/diillson/chatcli/pkg/flock"
+	"github.com/diillson/chatcli/pkg/stateroot"
 	"github.com/diillson/chatcli/utils"
 )
 
@@ -172,7 +173,7 @@ func StorePath() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(home, ".chatcli", StoreFileName), nil
+	return filepath.Join(stateroot.Under(home), StoreFileName), nil
 }
 
 // List returns the trusted workspaces.

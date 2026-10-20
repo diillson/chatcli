@@ -18,6 +18,7 @@ import (
 	"github.com/diillson/chatcli/i18n"
 	"github.com/diillson/chatcli/models"
 	"github.com/diillson/chatcli/pkg/atrest"
+	"github.com/diillson/chatcli/pkg/stateroot"
 	"github.com/diillson/chatcli/utils"
 	"go.uber.org/zap"
 )
@@ -47,7 +48,7 @@ func NewSessionManager(logger *zap.Logger) (*SessionManager, error) {
 	if err != nil {
 		return nil, fmt.Errorf("não foi possível obter o diretório home: %w", err)
 	}
-	return NewSessionManagerAt(filepath.Join(homeDir, ".chatcli", "sessions"), logger)
+	return NewSessionManagerAt(filepath.Join(stateroot.Under(homeDir), "sessions"), logger)
 }
 
 // ErrSessionSchemaNewer marks a session file written by a newer ChatCLI.

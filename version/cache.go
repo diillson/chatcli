@@ -11,6 +11,8 @@ import (
 	"os"
 	"path/filepath"
 	"time"
+
+	"github.com/diillson/chatcli/pkg/stateroot"
 )
 
 // releaseCacheTTL limita a consulta à API do GitHub a no máximo uma por dia
@@ -30,7 +32,7 @@ func releaseCachePath() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(home, ".chatcli", "cache", "latest-release.json"), nil
+	return filepath.Join(stateroot.Under(home), "cache", "latest-release.json"), nil
 }
 
 // saveReleaseCache persiste os metadados da release de forma atômica

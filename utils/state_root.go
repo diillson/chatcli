@@ -12,6 +12,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/diillson/chatcli/pkg/stateroot"
 )
 
 // Owner-only modes for the state root (~/.chatcli) and what it holds.
@@ -38,7 +40,7 @@ func privateStateRoot() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return ensurePrivateRoot(filepath.Join(home, ".chatcli"))
+	return ensurePrivateRoot(stateroot.Under(home))
 }
 
 // EnsureStateRoot creates the state root owner-only (0700) and, on every

@@ -35,6 +35,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/diillson/chatcli/pkg/stateroot"
 )
 
 // Column is a kanban column.
@@ -127,7 +129,7 @@ func DefaultPath() string {
 	if err != nil {
 		return filepath.Join(".", ".chatcli", "board.json")
 	}
-	return filepath.Join(home, ".chatcli", "board.json")
+	return filepath.Join(stateroot.Under(home), "board.json")
 }
 
 // NewStore opens a store at path ("" = DefaultPath()). The file is created

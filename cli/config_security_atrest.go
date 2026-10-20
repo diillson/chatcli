@@ -12,13 +12,15 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
-	"github.com/diillson/chatcli/pkg/auditchain"
 	"io"
 	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
 	"time"
+
+	"github.com/diillson/chatcli/pkg/auditchain"
+	"github.com/diillson/chatcli/pkg/stateroot"
 
 	"github.com/diillson/chatcli/auth"
 	"github.com/diillson/chatcli/cli/agent/park"
@@ -151,7 +153,7 @@ func (cli *ChatCLI) atRestRoot() string {
 		return cli.stateRoot
 	}
 	home, _ := os.UserHomeDir()
-	return filepath.Join(home, ".chatcli")
+	return stateroot.Under(home)
 }
 
 // resealSkipped reports files the walk never rewrites in any store:

@@ -16,6 +16,7 @@ import (
 
 	"github.com/diillson/chatcli/llm/catalog"
 	"github.com/diillson/chatcli/llm/pricing"
+	"github.com/diillson/chatcli/pkg/stateroot"
 )
 
 // snapshotFileName is the on-disk copy of the last successful model listing
@@ -31,7 +32,7 @@ var snapshotPath = func() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(home, ".chatcli", snapshotFileName), nil
+	return filepath.Join(stateroot.Under(home), snapshotFileName), nil
 }
 
 type modelSnapshot struct {

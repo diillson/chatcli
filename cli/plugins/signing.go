@@ -17,6 +17,8 @@ import (
 	"strings"
 
 	"crypto/x509"
+
+	"github.com/diillson/chatcli/pkg/stateroot"
 )
 
 // Filenames the key pair is written under. They are fixed rather than
@@ -155,7 +157,7 @@ func TrustedKeysDir() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(home, ".chatcli", "trusted-keys"), nil
+	return filepath.Join(stateroot.Under(home), "trusted-keys"), nil
 }
 
 // TrustPublicKey registers a public key so plugins signed with the matching

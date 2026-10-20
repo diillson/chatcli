@@ -14,12 +14,14 @@ package cli
 import (
 	"context"
 	"fmt"
-	"github.com/diillson/chatcli/pkg/auditchain"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/diillson/chatcli/pkg/auditchain"
+	"github.com/diillson/chatcli/pkg/stateroot"
 
 	"github.com/diillson/chatcli/cli/compress"
 	"github.com/diillson/chatcli/cli/taskgraph"
@@ -110,7 +112,7 @@ func (cli *ChatCLI) storageRoot() string {
 	if err != nil {
 		return ""
 	}
-	return filepath.Join(home, ".chatcli")
+	return stateroot.Under(home)
 }
 
 // pruneFilesOlderThan removes the regular files of dir (with the given

@@ -38,6 +38,7 @@ import (
 
 	"github.com/diillson/chatcli/models"
 	"github.com/diillson/chatcli/pkg/atrest"
+	"github.com/diillson/chatcli/pkg/stateroot"
 	"github.com/diillson/chatcli/utils"
 	"go.uber.org/zap"
 )
@@ -99,7 +100,7 @@ func transcriptDir() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	dir := filepath.Join(home, ".chatcli", transcriptDirName)
+	dir := filepath.Join(stateroot.Under(home), transcriptDirName)
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return "", err
 	}

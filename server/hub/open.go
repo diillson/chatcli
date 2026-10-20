@@ -14,6 +14,7 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/diillson/chatcli/pkg/stateroot"
 	"github.com/diillson/chatcli/utils"
 )
 
@@ -27,7 +28,7 @@ func DefaultDBPath() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	dir := filepath.Join(homeDir, ".chatcli")
+	dir := stateroot.Under(homeDir)
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return "", err
 	}

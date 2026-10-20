@@ -126,6 +126,7 @@ func (cli *ChatCLI) reloadConfiguration(ctx context.Context) {
 	for _, variable := range reloadableEnvVars {
 		_ = os.Unsetenv(variable)
 	}
+	keepStateDir := config.KeepStateDir()
 	err := godotenv.Overload(envFilePath)
 	if err != nil && !os.IsNotExist(err) {
 		cli.logger.Error("Erro ao carregar o arquivo .env", zap.Error(err))
@@ -134,6 +135,9 @@ func (cli *ChatCLI) reloadConfiguration(ctx context.Context) {
 	// defaults re-filled after the user's .env has been applied.
 	if rep := config.ApplyManaged(); rep.Err != nil {
 		cli.logger.Warn("managed config unreadable; ignored", zap.String("path", rep.Path), zap.Error(rep.Err))
+	}
+	if ignored := keepStateDir(); ignored != "" {
+		fmt.Println(i18n.T("main.warn_state_dir_from_file", ignored))
 	}
 	// Anything the file does NOT define falls back to what the shell — or an
 	// editor/MCP client's env block — provided at boot, instead of staying

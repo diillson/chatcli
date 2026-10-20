@@ -8,6 +8,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/diillson/chatcli/pkg/stateroot"
 	"github.com/diillson/chatcli/pkg/workspacetrust"
 	"github.com/diillson/chatcli/utils"
 	"go.uber.org/zap"
@@ -67,7 +68,7 @@ func NewPolicyManager(logger *zap.Logger) (*PolicyManager, error) {
 		return nil, err
 	}
 
-	configPath := filepath.Join(home, ".chatcli", "coder_policy.json")
+	configPath := filepath.Join(stateroot.Under(home), "coder_policy.json")
 
 	pm := &PolicyManager{
 		Rules:      make([]Rule, 0),

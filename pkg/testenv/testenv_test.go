@@ -40,3 +40,18 @@ func TestIsolate_RedirectsHomeAndPinsTheFileKeychain(t *testing.T) {
 		t.Fatalf("cleanup left %q behind (%v)", home, err)
 	}
 }
+
+func TestIsolate_DropsStateAndCredentialRelocation(t *testing.T) {
+	realHome, _ := os.UserHomeDir()
+	t.Setenv("HOME", realHome)
+	t.Setenv("CHATCLI_STATE_DIR", filepath.Join(realHome, "some-real-state"))
+	t.Setenv("CHATCLI_AUTH_DIR", filepath.Join(realHome, ".chatcli"))
+
+	_, cleanup := Isolate()
+	defer cleanup()
+	for _, name := range []string{"CHATCLI_STATE_DIR", "CHATCLI_AUTH_DIR"} {
+		if v, set := os.LookupEnv(name); set {
+			t.Errorf("%s = %q survived isolation; the suite would write to a real store", name, v)
+		}
+	}
+}

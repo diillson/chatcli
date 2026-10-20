@@ -37,6 +37,7 @@ import (
 	"github.com/diillson/chatcli/cli/commands"
 	"github.com/diillson/chatcli/cli/palette"
 	"github.com/diillson/chatcli/i18n"
+	"github.com/diillson/chatcli/pkg/stateroot"
 	"github.com/diillson/chatcli/utils"
 	"go.uber.org/zap"
 )
@@ -107,7 +108,7 @@ const (
 func (cli *ChatCLI) initSlashCommands(projectDir string) {
 	globalDir := ""
 	if home, err := os.UserHomeDir(); err == nil {
-		globalDir = filepath.Join(home, ".chatcli", "commands")
+		globalDir = filepath.Join(stateroot.Under(home), "commands")
 	}
 	var isReserved func(string) bool
 	if cli.commandHandler != nil {

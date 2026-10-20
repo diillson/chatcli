@@ -1,0 +1,4 @@
+{
+  "cfg.val.state_dir_default": "%s (~/.chatcli)",
+  "main.warn_state_dir_from_file": "⚠ CHATCLI_STATE_DIR=%q num arquivo de ambiente foi ignorada: o diretório de estado só pode vir do ambiente do processo (exporte-a antes de iniciar o chatcli)."
+}

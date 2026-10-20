@@ -8,7 +8,6 @@ package cli
 import (
 	"encoding/json"
 	"fmt"
-	"github.com/diillson/chatcli/pkg/atrest"
 	"os"
 	"path/filepath"
 	"sort"
@@ -17,6 +16,9 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/diillson/chatcli/pkg/atrest"
+	"github.com/diillson/chatcli/pkg/stateroot"
 
 	"github.com/diillson/chatcli/i18n"
 	"github.com/diillson/chatcli/llm/pricing"
@@ -918,7 +920,7 @@ func (ct *CostTracker) budgetMessageLocked() string {
 
 func costStoreDir() string {
 	home, _ := os.UserHomeDir()
-	return filepath.Join(home, ".chatcli", "costs")
+	return filepath.Join(stateroot.Under(home), "costs")
 }
 
 func formatTokenCount64(tokens int64) string {

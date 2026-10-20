@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/diillson/chatcli/pkg/stateroot"
 	"github.com/diillson/chatcli/version"
 )
 
@@ -34,7 +35,7 @@ var cacheDirFn = func() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(home, ".chatcli", "cache"), nil
+	return filepath.Join(stateroot.Under(home), "cache"), nil
 }
 
 func stagedRecordPath() (string, error) {

@@ -21,6 +21,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/diillson/chatcli/pkg/stateroot"
 )
 
 // ProfileEnv selects the profile the browser runs on. Empty (default) is a
@@ -28,10 +30,6 @@ import (
 // 1/true/on/yes/persistent use the default persistent location under the
 // ChatCLI home.
 const ProfileEnv = "CHATCLI_BROWSER_PROFILE"
-
-// defaultProfileRel is the persistent profile location relative to the
-// user's home directory.
-const defaultProfileRel = ".chatcli/browser/profile"
 
 // persistentProfileDir resolves ProfileEnv: "" when the session should use a
 // throwaway profile, otherwise the directory to persist cookies and storage
@@ -45,11 +43,11 @@ func persistentProfileDir() string {
 	case "0", "false", "off", "no", "none", "ephemeral", "temp":
 		return ""
 	case "1", "true", "on", "yes", "persistent", "default":
-		home, err := os.UserHomeDir()
-		if err != nil || home == "" {
+		dir, err := stateroot.Dir()
+		if err != nil {
 			return ""
 		}
-		return filepath.Join(home, filepath.FromSlash(defaultProfileRel))
+		return filepath.Join(dir, "browser", "profile")
 	}
 	if strings.HasPrefix(raw, "~") {
 		if home, err := os.UserHomeDir(); err == nil && home != "" {

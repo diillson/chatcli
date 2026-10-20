@@ -16,6 +16,7 @@ import (
 	"github.com/diillson/chatcli/i18n"
 	"github.com/diillson/chatcli/models"
 	"github.com/diillson/chatcli/pkg/pulse"
+	"github.com/diillson/chatcli/pkg/stateroot"
 	"github.com/diillson/chatcli/utils"
 	"go.uber.org/zap"
 )
@@ -127,7 +128,7 @@ const mcpLogRingCapacity = 200
 func NewManager(logger *zap.Logger) *Manager {
 	opts := ChannelManagerOptions{}
 	if home, err := os.UserHomeDir(); err == nil && home != "" {
-		opts.PersistDir = filepath.Join(home, ".chatcli", "mcp")
+		opts.PersistDir = filepath.Join(stateroot.Under(home), "mcp")
 	}
 	channels := NewChannelManagerWithOptions(logger, opts)
 	m := &Manager{
@@ -223,7 +224,7 @@ func (m *Manager) LoadConfig(configPath string) error {
 // DefaultConfigPath returns the default MCP config file path.
 func DefaultConfigPath() string {
 	home, _ := os.UserHomeDir()
-	return filepath.Join(home, ".chatcli", "mcp_servers.json")
+	return filepath.Join(stateroot.Under(home), "mcp_servers.json")
 }
 
 // StartAll starts all configured MCP servers.

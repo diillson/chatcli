@@ -43,6 +43,7 @@ import (
 	"github.com/diillson/chatcli/llm/tts"
 	"github.com/diillson/chatcli/models"
 	"github.com/diillson/chatcli/pkg/pulse"
+	"github.com/diillson/chatcli/pkg/stateroot"
 	"github.com/diillson/chatcli/server/hub"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
@@ -826,7 +827,7 @@ func gatewayStatePath(name string) string {
 	if err != nil {
 		return filepath.Join(os.TempDir(), name)
 	}
-	return filepath.Join(home, ".chatcli", name)
+	return filepath.Join(stateroot.Under(home), name)
 }
 
 // gatewayRunningPID returns the daemon PID if the pidfile points at a live

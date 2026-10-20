@@ -17,13 +17,15 @@ package cli
 import (
 	"context"
 	"encoding/json"
-	"github.com/diillson/chatcli/pkg/atrest"
 	"os"
 	"path/filepath"
 	"regexp"
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/diillson/chatcli/pkg/atrest"
+	"github.com/diillson/chatcli/pkg/stateroot"
 
 	"github.com/diillson/chatcli/cli/compress"
 	"github.com/diillson/chatcli/cli/taskgraph"
@@ -165,7 +167,7 @@ func RunStorage(ctx context.Context, opts StorageOptions) (StorageResult, error)
 		if err != nil {
 			return StorageResult{}, err
 		}
-		opts.Root = filepath.Join(home, ".chatcli")
+		opts.Root = stateroot.Under(home)
 	}
 	if opts.Now.IsZero() {
 		opts.Now = time.Now()

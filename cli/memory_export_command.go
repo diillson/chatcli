@@ -18,6 +18,7 @@ import (
 
 	"github.com/diillson/chatcli/cli/workspace/memory"
 	"github.com/diillson/chatcli/i18n"
+	"github.com/diillson/chatcli/pkg/stateroot"
 )
 
 // memoryRecallTrace is what the last auto-recall injected and why.
@@ -37,7 +38,7 @@ func (cli *ChatCLI) exportMemory(path string) {
 	}
 	if path == "" {
 		home, _ := os.UserHomeDir()
-		path = filepath.Join(home, ".chatcli", "exports", "memory-"+time.Now().Format("20060102-150405")+".jsonl")
+		path = filepath.Join(stateroot.Under(home), "exports", "memory-"+time.Now().Format("20060102-150405")+".jsonl")
 	} else if expanded, err := expandUserPath(path); err == nil {
 		path = expanded
 	}

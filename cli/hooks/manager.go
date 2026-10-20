@@ -14,6 +14,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/diillson/chatcli/pkg/stateroot"
 	"github.com/diillson/chatcli/pkg/workspacetrust"
 	"go.uber.org/zap"
 )
@@ -74,7 +75,7 @@ func (m *Manager) LoadFromFile(path string) error {
 // just because chatcli was started inside it.
 func (m *Manager) LoadFromSettings() {
 	home, _ := os.UserHomeDir()
-	globalPath := filepath.Join(home, ".chatcli", "hooks.json")
+	globalPath := filepath.Join(stateroot.Under(home), "hooks.json")
 
 	// Try workspace-local first
 	workspacePath := ""
