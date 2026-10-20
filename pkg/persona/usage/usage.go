@@ -14,12 +14,14 @@ package usage
 
 import (
 	"encoding/json"
-	"github.com/diillson/chatcli/utils"
 	"os"
 	"path/filepath"
 	"sort"
 	"sync"
 	"time"
+
+	"github.com/diillson/chatcli/pkg/stateroot"
+	"github.com/diillson/chatcli/utils"
 )
 
 // Entry is the recorded usage for one skill.
@@ -47,7 +49,7 @@ func Default() *Store {
 	if err != nil {
 		return nil
 	}
-	return New(filepath.Join(home, ".chatcli", "skill-usage.json"))
+	return New(filepath.Join(stateroot.Under(home), "skill-usage.json"))
 }
 
 // Record increments the activation count for each name and stamps LastUsed.

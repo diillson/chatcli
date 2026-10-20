@@ -22,6 +22,7 @@ import (
 	"github.com/diillson/chatcli/llm/catalog"
 	"github.com/diillson/chatcli/llm/pricing"
 	"github.com/diillson/chatcli/pkg/providerproto"
+	"github.com/diillson/chatcli/pkg/stateroot"
 	"github.com/diillson/chatcli/utils"
 	"go.uber.org/zap"
 )
@@ -470,7 +471,7 @@ func DefaultDir() string {
 	if err != nil {
 		return ""
 	}
-	return filepath.Join(home, ".chatcli", "providers")
+	return filepath.Join(stateroot.Under(home), "providers")
 }
 
 // Discover lists candidate plugin binaries in dir: regular files that are

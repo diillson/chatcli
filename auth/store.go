@@ -9,6 +9,7 @@ import (
 	"sync"
 
 	"github.com/diillson/chatcli/i18n"
+	"github.com/diillson/chatcli/pkg/stateroot"
 	"github.com/diillson/chatcli/utils"
 	"go.uber.org/zap"
 )
@@ -31,7 +32,7 @@ func DefaultStorePath() string {
 	if err != nil {
 		home = "."
 	}
-	return filepath.Join(home, ".chatcli", "auth-profiles.json")
+	return filepath.Join(stateroot.Under(home), "auth-profiles.json")
 }
 
 // EnsureStoreDir ensures the directory for the store file exists.

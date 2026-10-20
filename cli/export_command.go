@@ -15,11 +15,13 @@ package cli
 
 import (
 	"fmt"
-	"github.com/diillson/chatcli/pkg/atrest"
 	"os"
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/diillson/chatcli/pkg/atrest"
+	"github.com/diillson/chatcli/pkg/stateroot"
 
 	"github.com/diillson/chatcli/cli/agent/trajectory"
 	"github.com/diillson/chatcli/i18n"
@@ -80,5 +82,5 @@ func defaultExportDir() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(home, ".chatcli", "exports"), nil
+	return filepath.Join(stateroot.Under(home), "exports"), nil
 }

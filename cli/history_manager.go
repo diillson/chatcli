@@ -9,12 +9,14 @@ import (
 	"bufio"
 	"encoding/base64"
 	"fmt"
-	"github.com/diillson/chatcli/pkg/atrest"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/diillson/chatcli/pkg/atrest"
+	"github.com/diillson/chatcli/pkg/stateroot"
 
 	"github.com/diillson/chatcli/config"
 	"github.com/diillson/chatcli/i18n"
@@ -45,7 +47,7 @@ func defaultHistoryPath() string {
 	if err != nil || home == "" {
 		return ""
 	}
-	return filepath.Join(home, ".chatcli", historyFileName)
+	return filepath.Join(stateroot.Under(home), historyFileName)
 }
 
 // legacyHistoryPath returns the absolute path of a ./.chatcli_history from

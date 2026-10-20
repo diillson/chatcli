@@ -15,6 +15,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/diillson/chatcli/pkg/stateroot"
 	"go.uber.org/zap"
 )
 
@@ -459,7 +460,7 @@ func loadIgnorePatterns(rootDir string, logger *zap.Logger) (excludeDirs []strin
 	// 3. Prioridade Baixa: Arquivo .chatcliignore global no diretório de configuração do usuário
 	homeDir, err := GetHomeDir()
 	if err == nil {
-		globalIgnorePath := filepath.Join(homeDir, ".chatcli", ".chatignore")
+		globalIgnorePath := filepath.Join(stateroot.Under(homeDir), ".chatignore")
 		dirs, patterns := readIgnoreFile(globalIgnorePath, logger)
 		if dirs != nil || patterns != nil {
 			logger.Info("Usando arquivo de ignore global do usuário.", zap.String("path", globalIgnorePath))

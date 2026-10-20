@@ -215,3 +215,21 @@ func TestSandboxContainerEndToEnd(t *testing.T) {
 		t.Fatalf("container command output missing:\n%s", out.String())
 	}
 }
+
+func TestSandboxProtectsTheCustomStateDir(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("CHATCLI_STATE_DIR", "")
+	if got := sandboxProtectedPaths(); len(got) != 1 || got[0] != home+"/.chatcli" {
+		t.Fatalf("default: %v", got)
+	}
+	state := t.TempDir()
+	t.Setenv("CHATCLI_STATE_DIR", state)
+	got := strings.Join(sandboxProtectedPaths(), "\n")
+	// The real ~/.chatcli stays protected: it can still hold credentials.
+	for _, want := range []string{home + "/.chatcli", state} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("protected paths missing %q:\n%s", want, got)
+		}
+	}
+}

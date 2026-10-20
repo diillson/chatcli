@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/diillson/chatcli/pkg/stateroot"
 	"github.com/diillson/chatcli/utils"
 	"github.com/fsnotify/fsnotify"
 	"go.uber.org/zap"
@@ -33,7 +34,7 @@ func NewManager(logger *zap.Logger) (*Manager, error) {
 	if err != nil {
 		return nil, fmt.Errorf("não foi possível encontrar o diretório home para plugins: %w", err)
 	}
-	pluginsDir := filepath.Join(home, ".chatcli", "plugins")
+	pluginsDir := filepath.Join(stateroot.Under(home), "plugins")
 
 	// Garante que o diretório de plugins exista
 	if err := os.MkdirAll(pluginsDir, 0o700); err != nil {

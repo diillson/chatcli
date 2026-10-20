@@ -36,6 +36,7 @@ import (
 
 	"github.com/diillson/chatcli/i18n"
 	"github.com/diillson/chatcli/pkg/persona/usage"
+	"github.com/diillson/chatcli/pkg/stateroot"
 )
 
 // skillNameRe constrains skill names to a safe slug (no path traversal).
@@ -540,7 +541,7 @@ func resolveSkillsDir() (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("cannot resolve home directory: %w", err)
 	}
-	return filepath.Join(home, ".chatcli", "skills"), nil
+	return filepath.Join(stateroot.Under(home), "skills"), nil
 }
 
 func skillScalar(s string) string {

@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 
 	"github.com/diillson/chatcli/pkg/atrest"
+	"github.com/diillson/chatcli/pkg/stateroot"
 )
 
 // SessionEncryptor provides AES-256-GCM encryption for session files.
@@ -71,7 +72,7 @@ func loadMasterKey() ([]byte, error) {
 		return nil, fmt.Errorf("cannot determine home directory: %w", err)
 	}
 
-	keyPath := filepath.Clean(filepath.Join(homeDir, ".chatcli", ".auth-key"))
+	keyPath := filepath.Clean(filepath.Join(stateroot.Under(homeDir), ".auth-key"))
 	key, err := os.ReadFile(keyPath) // #nosec G304 -- path is constructed from user's home dir, not user input
 	if err != nil {
 		if os.IsNotExist(err) {

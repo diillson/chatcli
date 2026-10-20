@@ -22,6 +22,7 @@ import (
 	"github.com/diillson/chatcli/cli/plugins"
 	"github.com/diillson/chatcli/i18n"
 	"github.com/diillson/chatcli/llm/providerhost"
+	"github.com/diillson/chatcli/pkg/stateroot"
 )
 
 // RunPluginCLI implements `chatcli plugin ...` — the plugin supply chain:
@@ -115,7 +116,7 @@ func runPluginKeygen(args []string) error {
 		if err != nil {
 			return fmt.Errorf("%s", i18n.T("plugincli.keygen.output_required"))
 		}
-		dir = filepath.Join(home, ".chatcli", "plugin-keys")
+		dir = filepath.Join(stateroot.Under(home), "plugin-keys")
 	}
 
 	keyPath, pubPath, err := plugins.GenerateSigningKeyPair(dir)
@@ -204,7 +205,7 @@ func runPluginQuarantine(args []string) error {
 	if err != nil {
 		return err
 	}
-	q := plugins.NewQuarantine(filepath.Join(home, ".chatcli", "plugins"))
+	q := plugins.NewQuarantine(filepath.Join(stateroot.Under(home), "plugins"))
 	pq := plugins.NewQuarantine(providerhost.DefaultDir())
 
 	sub := "list"
@@ -308,7 +309,7 @@ func bundleDest(kind string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(home, ".chatcli", "plugins"), nil
+	return filepath.Join(stateroot.Under(home), "plugins"), nil
 }
 
 func runPluginTrustList() error {

@@ -38,6 +38,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/diillson/chatcli/pkg/stateroot"
 	"github.com/joho/godotenv"
 )
 
@@ -164,7 +165,7 @@ func ResolveDotenv() DotenvResolution {
 	candidates := []candidate{{".env", DotenvFromWorkdir}}
 	if home, err := os.UserHomeDir(); err == nil && home != "" {
 		candidates = append(candidates,
-			candidate{filepath.Join(home, ".chatcli", ".env"), DotenvFromChatCLIDir},
+			candidate{filepath.Join(stateroot.Under(home), ".env"), DotenvFromChatCLIDir},
 			candidate{filepath.Join(home, ".env"), DotenvFromHome},
 		)
 	}
@@ -227,7 +228,10 @@ func LoadDotenv() (DotenvResolution, error) {
 	CaptureBootEnv()
 	res := ResolveDotenv()
 	SetActiveDotenv(res)
-	return res, godotenv.Load(res.Path)
+	keepStateDir := KeepStateDir()
+	err := godotenv.Load(res.Path)
+	keepStateDir()
+	return res, err
 }
 
 // ProjectDotenvMode is the policy for project-supplied environment files.

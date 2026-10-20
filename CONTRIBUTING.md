@@ -103,7 +103,7 @@ Make sure every argument a tool accepts appears in its `Schema()`: that is what 
 ### Tests
 
 - **The suite is hermetic.** Nothing is written to your real `~/.chatcli`, and the system keychain is never queried.
-- **Packages that touch the home store or the credentials key** need setup. This covers the cost tracker, checkpoints, memory, sessions and logs. Such a package declares a `TestMain` that calls `testenv.Main(m)` from [`pkg/testenv`](pkg/testenv). It points `HOME` at a throwaway directory and sets `CHATCLI_KEYCHAIN_BACKEND=file`.
+- **Packages that touch the home store or the credentials key** need setup. This covers the cost tracker, checkpoints, memory, sessions and logs. Such a package declares a `TestMain` that calls `testenv.Main(m)` from [`pkg/testenv`](pkg/testenv). It points `HOME` at a throwaway directory, sets `CHATCLI_KEYCHAIN_BACKEND=file` and clears `CHATCLI_STATE_DIR` and `CHATCLI_AUTH_DIR`, so a value exported in your shell cannot send test writes to a real store.
 - **If a new test writes outside `t.TempDir()`,** fix it in `TestMain`, never with a real path.
 - **To check,** run this; it must list nothing:
   ```bash

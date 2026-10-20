@@ -22,6 +22,7 @@ import (
 	"golang.org/x/term"
 
 	"github.com/diillson/chatcli/i18n"
+	"github.com/diillson/chatcli/pkg/stateroot"
 )
 
 // /web opens the local web UI next to the terminal. The UI runs as a child
@@ -87,7 +88,7 @@ func webLogPath() string {
 	if err != nil {
 		return filepath.Join(os.TempDir(), "chatcli-web.log")
 	}
-	return filepath.Join(home, ".chatcli", "web.log")
+	return filepath.Join(stateroot.Under(home), "web.log")
 }
 
 func (cli *ChatCLI) handleWebCommand(ctx context.Context, userInput string) {

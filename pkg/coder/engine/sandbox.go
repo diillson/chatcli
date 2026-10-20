@@ -25,6 +25,8 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+
+	"github.com/diillson/chatcli/pkg/stateroot"
 )
 
 // SandboxEnv selects the confinement level for exec.
@@ -123,7 +125,11 @@ func sandboxProtectedPaths() []string {
 	if err != nil || home == "" {
 		return nil
 	}
-	return []string{home + "/.chatcli"}
+	paths := []string{home + "/.chatcli"}
+	if stateroot.Custom() {
+		paths = append(paths, stateroot.Under(home))
+	}
+	return paths
 }
 
 func dedupPaths(in []string) []string {

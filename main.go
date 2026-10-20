@@ -123,6 +123,9 @@ type dotenvBootstrap struct {
 	loadErr    error
 	managed    config.ManagedReport
 	resolution config.DotenvResolution
+	// stateDirIgnored is a CHATCLI_STATE_DIR an environment file tried to
+	// set; only the process environment may move the state directory.
+	stateDirIgnored string
 }
 
 // loadDotenvThenI18n resolves and loads the dotenv file and only then
@@ -189,11 +192,13 @@ func loadDotenvAndI18n() dotenvBootstrap {
 	res := config.ResolveDotenv()
 	config.SetActiveDotenv(res)
 	b := dotenvBootstrap{path: res.Path, expandErr: res.ExpandErr, resolution: res}
+	keepStateDir := config.KeepStateDir()
 	b.loadErr = godotenv.Load(b.path)
 	// Organization-managed defaults and locked policies (config/managed.go):
 	// after the user's .env so defaults fill only what is unset, and before
 	// i18n so a managed CHATCLI_LANG is honored too.
 	b.managed = config.ApplyManaged()
+	b.stateDirIgnored = keepStateDir()
 	i18n.Init()
 	return b
 }
@@ -220,6 +225,9 @@ func reportDotenvBootstrap(b dotenvBootstrap) {
 	}
 	if b.managed.Err != nil {
 		fmt.Println(i18n.T("main.warn_managed_config", b.managed.Path, b.managed.Err))
+	}
+	if b.stateDirIgnored != "" {
+		fmt.Println(i18n.T("main.warn_state_dir_from_file", b.stateDirIgnored))
 	}
 }
 

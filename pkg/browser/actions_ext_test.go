@@ -438,3 +438,13 @@ func TestAcquireMode_AttachedIgnoresVisibilityFlips(t *testing.T) {
 		t.Fatal("attached session has no profile of its own")
 	}
 }
+
+func TestPersistentProfileDirFollowsTheStateDir(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	state := filepath.Join(t.TempDir(), "state")
+	t.Setenv("CHATCLI_STATE_DIR", state)
+	t.Setenv(ProfileEnv, "persistent")
+	if got, want := persistentProfileDir(), filepath.Join(state, "browser", "profile"); got != want {
+		t.Fatalf("got %q want %q", got, want)
+	}
+}

@@ -66,6 +66,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/diillson/chatcli/pkg/stateroot"
 )
 
 // Config bundles every scheduler knob. Callers typically build one via
@@ -119,7 +121,7 @@ func DefaultConfig() Config {
 	home, _ := os.UserHomeDir()
 	return Config{
 		Enabled: true,
-		DataDir: filepath.Join(home, ".chatcli", "scheduler"),
+		DataDir: filepath.Join(stateroot.Under(home), "scheduler"),
 
 		MaxJobs: 256,
 
@@ -166,7 +168,7 @@ func DefaultConfig() Config {
 		AuditMaxBackups: 7,
 		AuditMaxAgeDays: 30,
 
-		DaemonSocket:      filepath.Join(home, ".chatcli", "scheduler", "daemon.sock"),
+		DaemonSocket:      filepath.Join(stateroot.Under(home), "scheduler", "daemon.sock"),
 		DaemonAutoConnect: true,
 
 		SnapshotInterval: 5 * time.Minute,

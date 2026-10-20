@@ -44,6 +44,7 @@ import (
 
 	"github.com/diillson/chatcli/cli/bus"
 	"github.com/diillson/chatcli/cli/hooks"
+	"github.com/diillson/chatcli/pkg/stateroot"
 	"go.uber.org/zap"
 )
 
@@ -122,7 +123,7 @@ func New(cfg Config, bridge CLIBridge, deps SchedulerDeps, logger *zap.Logger) (
 	}
 	if cfg.DataDir == "" {
 		home, _ := os.UserHomeDir()
-		cfg.DataDir = filepath.Join(home, ".chatcli", "scheduler")
+		cfg.DataDir = filepath.Join(stateroot.Under(home), "scheduler")
 	}
 	if err := os.MkdirAll(cfg.DataDir, 0o750); err != nil {
 		return nil, fmt.Errorf("scheduler: mkdir data dir: %w", err)

@@ -24,11 +24,17 @@ import (
 	"os"
 	"runtime"
 	"testing"
+
+	"github.com/diillson/chatcli/pkg/stateroot"
 )
 
 // KeychainBackendEnv is the variable auth.NewKeychainStore reads; "file"
 // keeps every test away from the OS credential store.
 const KeychainBackendEnv = "CHATCLI_KEYCHAIN_BACKEND"
+
+// relocationEnvs move ChatCLI's stores away from the home directory; an
+// isolated process must not inherit them.
+var relocationEnvs = []string{stateroot.Env, "CHATCLI_AUTH_DIR"}
 
 // Isolate redirects the process home directory to a fresh temporary
 // directory and selects the file keychain backend. It returns the
@@ -51,6 +57,11 @@ func Isolate() (home string, cleanup func()) {
 		_ = os.Setenv("APPDATA", home)
 	}
 	_ = os.Setenv(KeychainBackendEnv, "file")
+	// A state or credential directory exported in the developer's shell
+	// would win over the throwaway home and send writes to a real store.
+	for _, name := range relocationEnvs {
+		_ = os.Unsetenv(name)
+	}
 	return home, func() { _ = os.RemoveAll(home) }
 }
 

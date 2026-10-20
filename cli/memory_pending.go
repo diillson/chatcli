@@ -19,12 +19,14 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/diillson/chatcli/pkg/atrest"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/diillson/chatcli/pkg/atrest"
+	"github.com/diillson/chatcli/pkg/stateroot"
 
 	"github.com/diillson/chatcli/llm/client"
 	"github.com/diillson/chatcli/models"
@@ -364,5 +366,5 @@ func defaultPendingDir() string {
 	if err != nil {
 		return ""
 	}
-	return filepath.Join(home, ".chatcli", "memory", "pending")
+	return filepath.Join(stateroot.Under(home), "memory", "pending")
 }

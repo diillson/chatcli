@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/diillson/chatcli/pkg/stateroot"
 	"go.uber.org/zap"
 	"gopkg.in/yaml.v3"
 )
@@ -33,7 +34,7 @@ func NewLoader(logger *zap.Logger) *Loader {
 		// Fallback to current directory to avoid panic, though behavior might be degraded
 		home = "."
 	}
-	baseDir := filepath.Join(home, ".chatcli")
+	baseDir := stateroot.Under(home)
 
 	return &Loader{
 		logger:    logger,

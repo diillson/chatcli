@@ -9,10 +9,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/diillson/chatcli/pkg/flock"
 	"os"
 	"path/filepath"
 	"time"
+
+	"github.com/diillson/chatcli/pkg/flock"
+	"github.com/diillson/chatcli/pkg/stateroot"
 
 	"github.com/diillson/chatcli/pkg/atrest"
 	"github.com/diillson/chatcli/utils"
@@ -57,7 +59,7 @@ func NewStorage(logger *zap.Logger) (*Storage, error) {
 		return nil, fmt.Errorf("erro ao obter diretório home: %w", err)
 	}
 
-	basePath := filepath.Join(homeDir, ".chatcli", "contexts")
+	basePath := filepath.Join(stateroot.Under(homeDir), "contexts")
 	if err := os.MkdirAll(basePath, 0o700); err != nil {
 		return nil, fmt.Errorf("erro ao criar diretório de contextos: %w", err)
 	}

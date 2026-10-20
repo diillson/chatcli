@@ -47,6 +47,7 @@ import (
 
 	"github.com/diillson/chatcli/auth"
 	"github.com/diillson/chatcli/i18n"
+	"github.com/diillson/chatcli/pkg/stateroot"
 	"github.com/diillson/chatcli/utils"
 	"go.uber.org/zap"
 )
@@ -207,7 +208,7 @@ func oauthMetaDir() (string, error) {
 	if err != nil || home == "" {
 		return "", fmt.Errorf("%s", i18n.T("mcp.oauth.no_home"))
 	}
-	return filepath.Join(home, ".chatcli", "mcp_oauth"), nil
+	return filepath.Join(stateroot.Under(home), "mcp_oauth"), nil
 }
 
 func oauthMetaPath(server string) (string, error) {

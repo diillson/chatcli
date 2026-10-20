@@ -58,6 +58,7 @@ import (
 	"time"
 
 	"github.com/diillson/chatcli/pkg/fspath"
+	"github.com/diillson/chatcli/pkg/stateroot"
 )
 
 // checkpointEnv is the kill switch for automatic workspace snapshots.
@@ -289,7 +290,7 @@ func shadowGitDir(root string) (string, error) {
 		return "", err
 	}
 	sum := sha256.Sum256([]byte(root))
-	return filepath.Join(home, ".chatcli", "checkpoints", hex.EncodeToString(sum[:8])), nil
+	return filepath.Join(stateroot.Under(home), "checkpoints", hex.EncodeToString(sum[:8])), nil
 }
 
 // shadowGit runs one git command against the shadow repo/worktree pair,

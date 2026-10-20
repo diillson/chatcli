@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/diillson/chatcli/i18n"
+	"github.com/diillson/chatcli/pkg/stateroot"
 )
 
 const (
@@ -28,7 +29,7 @@ func getKeyPath() string {
 	if err != nil {
 		home = "."
 	}
-	return filepath.Join(home, ".chatcli", keyFileName)
+	return filepath.Join(stateroot.Under(home), keyFileName)
 }
 
 // loadOrCreateKey returns the key that encrypts stored credentials,

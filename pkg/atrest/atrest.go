@@ -37,6 +37,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/diillson/chatcli/pkg/stateroot"
 	"github.com/diillson/chatcli/utils"
 	"golang.org/x/crypto/argon2"
 	"golang.org/x/crypto/hkdf"
@@ -215,6 +216,10 @@ func aadFor(path string) []byte {
 		if j := strings.IndexByte(rest, '/'); j > 0 {
 			tenant, rel = rest[:j], rest[j+1:]
 		}
+	} else if rest, ok := underCustomRoot(clean); ok {
+		// CHATCLI_STATE_DIR: the same path relative to the root as under
+		// ~/.chatcli, so a state directory copied between roots still opens.
+		rel = rest
 	} else if i := strings.Index(clean, "/.chatcli/"); i >= 0 {
 		rel = clean[i+len("/.chatcli/"):]
 	} else {
@@ -222,6 +227,19 @@ func aadFor(path string) []byte {
 		rel = filepath.ToSlash(filepath.Join(filepath.Base(filepath.Dir(clean)), filepath.Base(clean)))
 	}
 	return []byte("v2\x00" + rel + "\x00" + tenant)
+}
+
+// underCustomRoot returns clean relative to CHATCLI_STATE_DIR when that is
+// set and contains it.
+func underCustomRoot(clean string) (string, bool) {
+	if !stateroot.Custom() {
+		return "", false
+	}
+	root := filepath.ToSlash(filepath.Clean(stateroot.Under(""))) + "/"
+	if !strings.HasPrefix(clean, root) {
+		return "", false
+	}
+	return clean[len(root):], true
 }
 
 // SealAt encrypts plaintext bound to the store at path (version 2). A

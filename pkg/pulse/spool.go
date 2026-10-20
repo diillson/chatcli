@@ -18,6 +18,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/diillson/chatcli/pkg/stateroot"
 )
 
 // On-disk layout, one directory per process:
@@ -75,7 +77,7 @@ func DefaultRoot() (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("pulse: resolving home: %w", err)
 	}
-	return filepath.Join(home, ".chatcli", "pulse"), nil
+	return filepath.Join(stateroot.Under(home), "pulse"), nil
 }
 
 // Spool appends the events of one process to its instance directory.

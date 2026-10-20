@@ -26,6 +26,7 @@ import (
 	"time"
 
 	"github.com/diillson/chatcli/config"
+	"github.com/diillson/chatcli/pkg/stateroot"
 	"github.com/diillson/chatcli/utils"
 	"go.uber.org/zap"
 )
@@ -198,7 +199,7 @@ func localKeyDir() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(home, ".chatcli", localKeyDirName), nil
+	return filepath.Join(stateroot.Under(home), localKeyDirName), nil
 }
 
 // EnsureLocalSigningKey returns this machine's signing key, creating it and
