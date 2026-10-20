@@ -52,6 +52,7 @@ import (
 	"github.com/diillson/chatcli/llm/transcription"
 	"github.com/diillson/chatcli/llm/tts"
 	"github.com/diillson/chatcli/ui/kit"
+	"github.com/diillson/chatcli/utils"
 )
 
 // ─── Routing ───────────────────────────────────────────────────
@@ -363,6 +364,21 @@ func shorten(s string, maxLen int) string {
 		return s[:maxLen]
 	}
 	return s[:maxLen-3] + "..."
+}
+
+// referenceTimeValue renders CHATCLI_NOW for /config: the pinned time when
+// set, the wall clock marked as default when unset, and a warning when the
+// value does not parse (ReferenceNow ignores it).
+func referenceTimeValue() string {
+	raw := strings.TrimSpace(os.Getenv(utils.ReferenceTimeEnv))
+	if raw == "" {
+		return defaultMarker + i18n.T("cfg.val.reference_time_wall_clock", time.Now().Format(time.RFC3339))
+	}
+	t, ok := utils.ParseReferenceTime(raw)
+	if !ok {
+		return i18n.T("cfg.val.reference_time_invalid", raw)
+	}
+	return t.Format(time.RFC3339)
 }
 
 // humanDuration formats a duration as "2h 34m" / "12m 3s" / "45s".
@@ -1002,6 +1018,7 @@ func (cli *ChatCLI) showConfigSession() {
 		recallVal = defaultMarker + recallVal
 	}
 	kv(p, "CHATCLI_SESSION_AUTORECALL", recallVal)
+	kv(p, utils.ReferenceTimeEnv, referenceTimeValue())
 
 	fmt.Println(p)
 	subheader(p, "cfg.sub.session.cost")

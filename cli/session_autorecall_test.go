@@ -143,3 +143,47 @@ func TestSessionAutoRecall_TwoWeeksOld(t *testing.T) {
 		t.Errorf("ambient recall must stay within the recent window, got: %s", block)
 	}
 }
+
+// TestSessionAutoRecall_ReferenceTime: with CHATCLI_NOW pinned, "two weeks
+// ago" is measured from the pinned date, so a conversation replayed from the
+// past is recalled against the day it happened rather than the day it runs.
+func TestSessionAutoRecall_ReferenceTime(t *testing.T) {
+	c := &ChatCLI{sessionManager: newTestSessionManager(t), logger: zap.NewNop()}
+	if err := c.sessionManager.SaveSessionV2("replay-oauth", &SessionData{
+		Version: 2,
+		ChatHistory: []models.Message{
+			{Role: "user", Content: "implementar oauth para servidores mcp remotos"},
+			{Role: "assistant", Content: "Discovery RFC 9728 mais DCR e PKCE loopback implementados."},
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	held := time.Date(2023, 5, 16, 15, 0, 0, 0, time.Local)
+	if err := os.Chtimes(c.sessionManager.getSessionPath("replay-oauth"), held, held); err != nil {
+		t.Fatal(err)
+	}
+	const question = "lembra do que fizemos sobre oauth no mcp há 2 semanas?"
+
+	t.Setenv("CHATCLI_NOW", "2023-05-30T10:00:00")
+	if block := c.sessionAutoRecallBlock(nil, question); !strings.Contains(block, "replay-oauth") {
+		t.Errorf("two weeks before the pinned date must reach the session, got: %s", block)
+	}
+
+	// Control: against the wall clock the same words point years later.
+	t.Setenv("CHATCLI_NOW", "")
+	if block := c.sessionAutoRecallBlock(nil, question); strings.Contains(block, "replay-oauth") {
+		t.Errorf("without a pinned date the window is relative to today, got: %s", block)
+	}
+}
+
+func TestSessionRecencyBoost_ReferenceTime(t *testing.T) {
+	saved := time.Date(2023, 5, 30, 0, 0, 0, 0, time.UTC)
+	t.Setenv("CHATCLI_NOW", "2023-05-30T00:00:00Z")
+	if got := sessionRecencyBoost(saved); got != 1.25 {
+		t.Errorf("a session saved at the pinned date is the newest: boost = %v, want 1.25", got)
+	}
+	t.Setenv("CHATCLI_NOW", "")
+	if got := sessionRecencyBoost(saved); got >= 1.01 {
+		t.Errorf("against the wall clock the 2023 session is old: boost = %v", got)
+	}
+}

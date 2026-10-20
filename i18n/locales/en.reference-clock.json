@@ -1,0 +1,4 @@
+{
+  "cfg.val.reference_time_wall_clock": "wall clock (%s)",
+  "cfg.val.reference_time_invalid": "%q is not a valid date; using the wall clock"
+}

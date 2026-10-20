@@ -1,0 +1,4 @@
+{
+  "cfg.val.reference_time_wall_clock": "relógio do sistema (%s)",
+  "cfg.val.reference_time_invalid": "%q não é uma data válida; usando o relógio do sistema"
+}

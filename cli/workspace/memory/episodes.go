@@ -23,13 +23,15 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
-	"github.com/diillson/chatcli/cli/ctxmgr"
-	"github.com/diillson/chatcli/pkg/flock"
 	"os"
 	"sort"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/diillson/chatcli/cli/ctxmgr"
+	"github.com/diillson/chatcli/pkg/flock"
+	"github.com/diillson/chatcli/utils"
 
 	"go.uber.org/zap"
 )
@@ -161,7 +163,7 @@ func (es *EpisodeStore) Range(from, to time.Time, project, query string, limit i
 // Recent returns the newest episodes within the last d, capped at limit —
 // the retriever's "what have we been doing lately" section.
 func (es *EpisodeStore) Recent(d time.Duration, limit int) []*Episode {
-	return es.Range(time.Now().Add(-d), time.Time{}, "", "", limit)
+	return es.Range(utils.ReferenceNow().Add(-d), time.Time{}, "", "", limit)
 }
 
 // Count returns the number of stored episodes.

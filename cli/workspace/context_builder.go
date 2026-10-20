@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/diillson/chatcli/cli/workspace/memory"
+	"github.com/diillson/chatcli/utils"
 )
 
 // ContextBuilder assembles the full system prompt from workspace sources.
@@ -301,7 +302,7 @@ func appendMatchingRules(rules *RulesLoader, hints []string, parts []string) []s
 // caller places in the cached prefix. Both halves reach the model on every
 // turn as before; only one of them is paid for again each time.
 func (cb *ContextBuilder) BuildDynamicContext() string {
-	now := time.Now()
+	now := utils.ReferenceNow()
 	// Day resolution on purpose: this block rides in the per-turn context
 	// message, and a wall-clock second would make it differ on every
 	// request for nothing the model needs.
