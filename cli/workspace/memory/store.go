@@ -13,6 +13,7 @@ import (
 
 	"github.com/diillson/chatcli/pkg/knowledge"
 	"github.com/diillson/chatcli/pkg/pulse"
+	"github.com/diillson/chatcli/pkg/textfold"
 	"go.uber.org/zap"
 
 	"github.com/diillson/chatcli/llm/embedding"
@@ -765,21 +766,19 @@ func parseEnhancedResponse(response string) (daily, longTerm string, profile map
 	projects = make(map[string]string)
 	topics = make(map[string]string)
 
-	upper := strings.ToUpper(response)
-
 	// Find all section positions
 	type section struct {
 		name string
 		idx  int
 	}
 	sections := []section{
-		{"DAILY", findSection(upper, "DAILY")},
-		{"LONGTERM", findSection(upper, "LONGTERM")},
-		{"PROFILE_UPDATE", findSection(upper, "PROFILE_UPDATE")},
-		{"PROFILE", findSection(upper, "PROFILE")},
-		{"TOPICS", findSection(upper, "TOPICS")},
-		{"PROJECTS", findSection(upper, "PROJECTS")},
-		{"EPISODES", findSection(upper, "EPISODES")},
+		{"DAILY", findSection(response, "DAILY")},
+		{"LONGTERM", findSection(response, "LONGTERM")},
+		{"PROFILE_UPDATE", findSection(response, "PROFILE_UPDATE")},
+		{"PROFILE", findSection(response, "PROFILE")},
+		{"TOPICS", findSection(response, "TOPICS")},
+		{"PROJECTS", findSection(response, "PROJECTS")},
+		{"EPISODES", findSection(response, "EPISODES")},
 	}
 
 	// Filter found sections and sort by position (stable: PROFILE_UPDATE and
@@ -845,7 +844,10 @@ func parseEnhancedResponse(response string) (daily, longTerm string, profile map
 	return
 }
 
-func findSection(upper string, keyword string) int {
+// findSection returns the offset in response of the earliest header for
+// keyword, matched case-insensitively in response itself (offsets taken
+// from a strings.ToUpper copy drift when upper-casing changes byte length).
+func findSection(response string, keyword string) int {
 	patterns := []string{
 		"## " + keyword,
 		"##" + keyword,
@@ -854,7 +856,7 @@ func findSection(upper string, keyword string) int {
 	}
 	best := -1
 	for _, p := range patterns {
-		idx := strings.Index(upper, p)
+		idx, _ := textfold.IndexIgnoreCase(response, p)
 		if idx >= 0 && (best < 0 || idx < best) {
 			best = idx
 		}
@@ -863,7 +865,7 @@ func findSection(upper string, keyword string) int {
 	if keyword == "LONGTERM" {
 		for _, alt := range []string{"LONG-TERM", "LONG_TERM"} {
 			for _, p := range []string{"## " + alt, "##" + alt, "# " + alt} {
-				idx := strings.Index(upper, p)
+				idx, _ := textfold.IndexIgnoreCase(response, p)
 				if idx >= 0 && (best < 0 || idx < best) {
 					best = idx
 				}

@@ -12,6 +12,7 @@ import (
 
 	"github.com/diillson/chatcli/cli/ctxmgr"
 	"github.com/diillson/chatcli/models"
+	"github.com/diillson/chatcli/pkg/textfold"
 )
 
 // Deferred tool definitions.
@@ -172,7 +173,7 @@ func firstSentence(s string) string {
 	if len(s) <= 200 {
 		return s
 	}
-	cut := s[:200]
+	cut := textfold.Cut(s, 200)
 	if i := strings.LastIndex(cut, " "); i > 0 {
 		cut = cut[:i]
 	}

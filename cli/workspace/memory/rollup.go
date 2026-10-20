@@ -15,6 +15,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/diillson/chatcli/pkg/textfold"
 	"go.uber.org/zap"
 )
 
@@ -183,7 +184,7 @@ func (rs *RollupStore) FormatTrajectory(maxChars int) string {
 	}
 	out := strings.Join(parts, "\n\n")
 	if len(out) > maxChars {
-		out = out[:maxChars]
+		out = textfold.Cut(out, maxChars)
 	}
 	return strings.TrimSpace(out)
 }
@@ -236,7 +237,7 @@ func (rs *RollupStore) allWeeks(dailies []dailyFile) []isoWeek {
 // bullet extraction when no summarizer is available or it fails.
 func (rs *RollupStore) digest(ctx context.Context, summarize SummarizeFunc, prompt, source string) string {
 	if len(source) > rollupInputCap {
-		source = source[:rollupInputCap]
+		source = textfold.Cut(source, rollupInputCap)
 	}
 	if summarize != nil {
 		sctx, cancel := context.WithTimeout(ctx, rollupSummarizeTimeout)
@@ -274,7 +275,7 @@ func condenseBullets(source string, maxBullets int) string {
 	}
 	if len(bullets) == 0 {
 		if len(source) > 400 {
-			source = source[:400]
+			source = textfold.Cut(source, 400)
 		}
 		return strings.TrimSpace(source)
 	}
@@ -536,7 +537,7 @@ func readHead(path string, maxChars int) string {
 	}
 	s := strings.TrimSpace(string(data))
 	if len(s) > maxChars {
-		s = s[:maxChars]
+		s = textfold.Cut(s, maxChars)
 	}
 	return s
 }

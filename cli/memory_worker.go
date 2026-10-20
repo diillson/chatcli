@@ -3,17 +3,19 @@ package cli
 import (
 	"context"
 	"fmt"
-	"github.com/diillson/chatcli/cli/workspace"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/diillson/chatcli/cli/workspace"
 
 	"github.com/diillson/chatcli/cli/workspace/memory"
 	"github.com/diillson/chatcli/i18n"
 	"github.com/diillson/chatcli/llm/client"
 	"github.com/diillson/chatcli/models"
 	"github.com/diillson/chatcli/pkg/pulse"
+	"github.com/diillson/chatcli/pkg/textfold"
 	"go.uber.org/zap"
 )
 
@@ -710,7 +712,7 @@ func truncateForLog(s string, maxLen int) string {
 	if len(s) <= maxLen {
 		return s
 	}
-	return s[:maxLen] + "..."
+	return textfold.Cut(s, maxLen) + "..."
 }
 
 // showStatus logs the memory worker status.

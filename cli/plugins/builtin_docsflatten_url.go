@@ -35,6 +35,7 @@ import (
 	"net/url"
 	"strings"
 
+	"github.com/diillson/chatcli/pkg/textfold"
 	"golang.org/x/net/html"
 )
 
@@ -300,7 +301,7 @@ func firstDocsFlattenHeading(text string) string {
 	for _, line := range strings.Split(text, "\n") {
 		if t := strings.TrimSpace(line); t != "" {
 			if len(t) > 120 {
-				t = t[:120]
+				t = textfold.Cut(t, 120)
 			}
 			return t
 		}

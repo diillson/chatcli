@@ -35,6 +35,7 @@ import (
 	"time"
 
 	"github.com/diillson/chatcli/pkg/browser"
+	"github.com/diillson/chatcli/pkg/textfold"
 )
 
 // BrowserBackend is the session surface the plugin drives. Concrete: one
@@ -598,7 +599,7 @@ func browserCmdEval(ctx context.Context, b BrowserBackend, inv browserInvocation
 		return "", fmt.Errorf("@browser eval: %w", err)
 	}
 	if len(out) > 8000 {
-		out = out[:8000] + "\n… (result truncated)"
+		out = textfold.Cut(out, 8000) + "\n… (result truncated)"
 	}
 	if strings.TrimSpace(out) == "" {
 		out = browserMsgNoValue

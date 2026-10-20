@@ -9,6 +9,8 @@ package cli
 import (
 	"fmt"
 	"strings"
+
+	"github.com/diillson/chatcli/pkg/textfold"
 )
 
 // coderShellSubcommands are the @coder subcommands that run an arbitrary
@@ -244,7 +246,7 @@ func buildCoderSingleLineArgsEnforcementPrompt(originalArgs string) string {
 
 	preview := trimmed
 	if len(preview) > 200 {
-		preview = preview[:200] + "..."
+		preview = textfold.Cut(preview, 200) + "..."
 	}
 
 	return fmt.Sprintf(

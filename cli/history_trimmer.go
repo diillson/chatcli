@@ -7,6 +7,7 @@ import (
 
 	"github.com/diillson/chatcli/cli/compress"
 	"github.com/diillson/chatcli/models"
+	"github.com/diillson/chatcli/pkg/textfold"
 	"go.uber.org/zap"
 )
 
@@ -217,9 +218,9 @@ func (t *MessageTrimmer) trimToolFeedback(content string) string {
 			return match
 		}
 		// Keep first 2000 chars + last 500 chars
-		truncated := output[:2000] +
+		truncated := textfold.Cut(output, 2000) +
 			fmt.Sprintf("\n\n... [%d chars omitted] ...\n\n", len(output)-2500) +
-			output[len(output)-500:]
+			textfold.Tail(output, 500)
 		return "<tool_output>\n" + truncated + "\n</tool_output>"
 	})
 
@@ -297,7 +298,7 @@ func (t *MessageTrimmer) trimInjectedContext(content string) string {
 	}
 
 	truncated := header + "\n\n" +
-		content[len(header)+1:min(len(header)+2000, len(content))] +
+		textfold.Cut(content[len(header)+1:], 2000) +
 		fmt.Sprintf("\n\n... [%d chars of context omitted during compaction] ...", len(content)-2000)
 
 	t.logger.Debug("Trimmed injected context message",
@@ -323,9 +324,9 @@ func truncatePreservingStructure(s string, maxLen int) string {
 	}
 	headLen := maxLen * 2 / 3
 	tailLen := maxLen / 3
-	return s[:headLen] +
+	return textfold.Cut(s, headLen) +
 		fmt.Sprintf("\n\n... [%d chars omitted for context efficiency] ...\n\n", len(s)-headLen-tailLen) +
-		s[len(s)-tailLen:]
+		textfold.Tail(s, tailLen)
 }
 
 // cleanExcessiveWhitespace collapses runs of 3+ newlines into 2.
@@ -339,5 +340,5 @@ func truncateStr(s string, maxLen int) string {
 	if len(s) <= maxLen {
 		return s
 	}
-	return s[:maxLen-3] + "..."
+	return textfold.Cut(s, maxLen-3) + "..."
 }

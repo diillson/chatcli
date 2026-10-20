@@ -16,6 +16,7 @@ import (
 	"strings"
 
 	"github.com/diillson/chatcli/cli/mcp"
+	"github.com/diillson/chatcli/pkg/textfold"
 )
 
 // channelsMsgContentMax clamps each message body inside tool output. The
@@ -88,7 +89,7 @@ func renderChannelMessagesForModel(msgs []mcp.ChannelMessage, unread int) string
 	for _, msg := range msgs {
 		content := strings.TrimSpace(strings.ReplaceAll(msg.Content, "\n", " "))
 		if len(content) > channelsMsgContentMax {
-			content = content[:channelsMsgContentMax] + "…"
+			content = textfold.Cut(content, channelsMsgContentMax) + "…"
 		}
 		fmt.Fprintf(&b, "[seq %d] %s/%s at %s: %s\n",
 			msg.Seq, msg.ServerName, msg.Channel,

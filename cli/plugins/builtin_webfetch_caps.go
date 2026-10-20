@@ -8,6 +8,7 @@ package plugins
 
 import (
 	"github.com/diillson/chatcli/i18n"
+	"github.com/diillson/chatcli/pkg/textfold"
 )
 
 // Fase 2.1 capability advertisements for BuiltinWebFetchPlugin, kept
@@ -36,7 +37,7 @@ func (p *BuiltinWebFetchPlugin) DescribeCall(args []string) string {
 		return p.Description()
 	}
 	if len(u) > 70 {
-		u = u[:70] + "..."
+		u = textfold.Cut(u, 70) + "..."
 	}
 	return i18n.T("plugins.webfetch.describe", u)
 }

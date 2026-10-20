@@ -16,6 +16,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/diillson/chatcli/pkg/textfold"
 	"github.com/diillson/chatcli/utils"
 )
 
@@ -82,7 +83,7 @@ func (c *httpProbeClient) Do(ctx context.Context, method, url string, headers ma
 	}
 	bodyStr := string(body)
 	if len(bodyStr) > httpProbeBodyCap {
-		bodyStr = bodyStr[:httpProbeBodyCap] + "\n…[truncated]…"
+		bodyStr = textfold.Cut(bodyStr, httpProbeBodyCap) + "\n…[truncated]…"
 	}
 	// Trim trailing whitespace so probes that return "OK\n" match
 	// success_when:body=OK without LLM authors having to remember

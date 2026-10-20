@@ -16,6 +16,8 @@ import (
 	"strconv"
 	"strings"
 	"syscall"
+
+	"github.com/diillson/chatcli/pkg/textfold"
 )
 
 // exitCodePrefix is the stable, locale-independent code prefix returned
@@ -178,7 +180,7 @@ func leadingWord(s string) string {
 		}
 	}
 	if len(s) > 24 {
-		return s[:24]
+		return textfold.Cut(s, 24)
 	}
 	return s
 }
@@ -205,7 +207,7 @@ func TelemetrySafe(err error) string {
 	msg := err.Error()
 	msg = strings.ReplaceAll(msg, "\n", " ")
 	if len(msg) > 200 {
-		msg = msg[:200] + "..."
+		msg = textfold.Cut(msg, 200) + "..."
 	}
 	return msg
 }

@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/diillson/chatcli/pkg/auditchain"
+	"github.com/diillson/chatcli/pkg/textfold"
 
 	"github.com/google/uuid"
 	"go.uber.org/zap"
@@ -259,7 +260,7 @@ func isSecuritySensitive(method string) bool {
 func sanitizeErrorForAudit(msg string) string {
 	// Truncate long errors
 	if len(msg) > 500 {
-		return msg[:500] + "...[truncated]"
+		return textfold.Cut(msg, 500) + "...[truncated]"
 	}
 	return msg
 }

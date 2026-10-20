@@ -17,6 +17,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/diillson/chatcli/pkg/textfold"
 )
 
 // relativeAgoRe matches "3 months ago", "2 weeks ago", "10 days ago" and the
@@ -72,7 +74,7 @@ func ParseTemporalRange(query string, now time.Time) (from, to time.Time, cleane
 	// Exact dates first — the most specific signal wins.
 	if m := isoDayRe.FindStringSubmatch(lower); m != nil {
 		if day, err := time.ParseInLocation("2006-01-02", m[0], now.Location()); err == nil {
-			return day, day.AddDate(0, 0, 1), removeSpan(q, lower, m[0]), true
+			return day, day.AddDate(0, 0, 1), removeSpan(q, m[0]), true
 		}
 	}
 	if m := isoMonthRe.FindStringSubmatch(lower); m != nil {
@@ -80,7 +82,7 @@ func ParseTemporalRange(query string, now time.Time) (from, to time.Time, cleane
 		monthNum, _ := strconv.Atoi(m[2])
 		if monthNum >= 1 && monthNum <= 12 {
 			start := time.Date(year, time.Month(monthNum), 1, 0, 0, 0, 0, now.Location())
-			return start, start.AddDate(0, 1, 0), removeSpan(q, lower, m[0]), true
+			return start, start.AddDate(0, 1, 0), removeSpan(q, m[0]), true
 		}
 	}
 
@@ -98,7 +100,7 @@ func ParseTemporalRange(query string, now time.Time) (from, to time.Time, cleane
 			default: // month | mês | mes | meses
 				start, end = monthOffset(-n)(now)
 			}
-			return start, end, removeSpan(q, lower, m[0]), true
+			return start, end, removeSpan(q, m[0]), true
 		}
 	}
 
@@ -106,7 +108,7 @@ func ParseTemporalRange(query string, now time.Time) (from, to time.Time, cleane
 	for _, nr := range namedRanges {
 		if idx := strings.Index(lower, nr.phrase); idx >= 0 {
 			start, end := nr.rangeF(now)
-			return start, end, removeSpan(q, lower, nr.phrase), true
+			return start, end, removeSpan(q, nr.phrase), true
 		}
 	}
 
@@ -133,7 +135,7 @@ func ParseTemporalRange(query string, now time.Time) (from, to time.Time, cleane
 			year--
 		}
 		start := time.Date(year, month, 1, 0, 0, 0, 0, now.Location())
-		return start, start.AddDate(0, 1, 0), removeSpan(q, lower, w), true
+		return start, start.AddDate(0, 1, 0), removeSpan(q, w), true
 	}
 
 	return time.Time{}, time.Time{}, query, false
@@ -142,12 +144,14 @@ func ParseTemporalRange(query string, now time.Time) (from, to time.Time, cleane
 // removeSpan deletes the recognized temporal expression (and adjacent
 // connective words) from the original-case query, collapsing whitespace so
 // what remains is a clean content query.
-func removeSpan(original, lower, span string) string {
-	idx := strings.Index(lower, span)
-	if idx < 0 {
+func removeSpan(original, span string) string {
+	// Located in original itself: offsets from a lowered copy drift when
+	// lowering changes a character's byte length.
+	start, end := textfold.IndexIgnoreCase(original, span)
+	if start < 0 {
 		return original
 	}
-	out := original[:idx] + original[idx+len(span):]
+	out := original[:start] + original[end:]
 	// Strip dangling connectives left behind ("in", "em", "de", "no", "na").
 	fields := strings.Fields(out)
 	cleaned := make([]string, 0, len(fields))

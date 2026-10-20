@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/diillson/chatcli/i18n"
+	"github.com/diillson/chatcli/pkg/textfold"
 )
 
 // Fase 2.1 capability advertisements for BuiltinCoderPlugin, kept in a
@@ -57,7 +58,7 @@ func (p *BuiltinCoderPlugin) DescribeCall(args []string) string {
 	case "exec":
 		if c := extractNestedArg(args, "cmd", "command"); c != "" {
 			if len(c) > 60 {
-				c = c[:60] + "..."
+				c = textfold.Cut(c, 60) + "..."
 			}
 			return i18n.T("plugins.coder.describe.exec", c)
 		}

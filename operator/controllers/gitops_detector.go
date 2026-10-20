@@ -17,6 +17,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	platformv1alpha1 "github.com/diillson/chatcli/operator/api/v1alpha1"
+	"github.com/diillson/chatcli/pkg/textfold"
 )
 
 // GitOpsDetector detects and interacts with Helm releases, ArgoCD Applications,
@@ -633,7 +634,7 @@ func (ctx *GitOpsContext) FormatForAI() string {
 
 	result := sb.String()
 	if len(result) > 3000 {
-		result = result[:2997] + "..."
+		result = textfold.Cut(result, 2997) + "..."
 	}
 	return result
 }

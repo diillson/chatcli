@@ -61,6 +61,7 @@ import (
 	"time"
 
 	"github.com/diillson/chatcli/cli/scheduler"
+	"github.com/diillson/chatcli/pkg/textfold"
 )
 
 // ParkPoll implements scheduler.ActionExecutor.
@@ -171,13 +172,13 @@ func (s probeSummary) short() string {
 	if s.HTTPStatus != 0 {
 		preview := s.Body
 		if len(preview) > 80 {
-			preview = preview[:80] + "…"
+			preview = textfold.Cut(preview, 80) + "…"
 		}
 		return fmt.Sprintf("status=%d body=%q", s.HTTPStatus, preview)
 	}
 	preview := s.Body
 	if len(preview) > 80 {
-		preview = preview[:80] + "…"
+		preview = textfold.Cut(preview, 80) + "…"
 	}
 	return fmt.Sprintf("exit=%d body=%q", s.ExitCode, preview)
 }
@@ -188,7 +189,7 @@ func (s probeSummary) short() string {
 func (s probeSummary) detail() string {
 	body := s.Body
 	if len(body) > 8192 {
-		body = body[:8192] + "\n…[truncated]…"
+		body = textfold.Cut(body, 8192) + "\n…[truncated]…"
 	}
 	if s.HTTPStatus != 0 {
 		return fmt.Sprintf("HTTP %d\n%s", s.HTTPStatus, body)

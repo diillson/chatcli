@@ -19,6 +19,7 @@ import (
 	"github.com/diillson/chatcli/llm/embedding"
 	"github.com/diillson/chatcli/models"
 	"github.com/diillson/chatcli/pkg/pulse"
+	"github.com/diillson/chatcli/pkg/textfold"
 	"github.com/diillson/chatcli/utils"
 	"github.com/google/uuid"
 	"go.uber.org/zap"
@@ -1092,7 +1093,7 @@ func fitSegments(segs []Segment, remaining int) []Segment {
 				// Rune-safe cut, and the citation range shrinks with it so
 				// the line numbers in the header stay true.
 				cut := alignRuneBefore(s.Content, remaining-overhead-1)
-				s.Content = s.Content[:cut] + "…"
+				s.Content = textfold.Cut(s.Content, cut) + "…"
 				s.EndLine = s.StartLine + strings.Count(s.Content, "\n")
 				out = append(out, s)
 			}

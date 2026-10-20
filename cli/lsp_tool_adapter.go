@@ -22,6 +22,7 @@ import (
 
 	"github.com/diillson/chatcli/cli/agent/lsp"
 	"github.com/diillson/chatcli/cli/plugins"
+	"github.com/diillson/chatcli/pkg/textfold"
 	"github.com/diillson/chatcli/utils"
 )
 
@@ -261,7 +262,7 @@ func truncateHoverRuneSafe(text string, limit int) string {
 	for limit > 0 && !utf8.RuneStart(text[limit]) {
 		limit--
 	}
-	return text[:limit] + "\n… (hover truncated)"
+	return textfold.Cut(text, limit) + "\n… (hover truncated)"
 }
 
 // lspPos converts 1-based tool positions to the 0-based LSP wire format.

@@ -14,6 +14,7 @@ import (
 	"time"
 
 	platformv1alpha1 "github.com/diillson/chatcli/operator/api/v1alpha1"
+	"github.com/diillson/chatcli/pkg/textfold"
 )
 
 // MetricsCollector queries Prometheus for metric data relevant to incident analysis.
@@ -472,7 +473,7 @@ func (s *MetricsSnapshot) FormatForAI() string {
 
 	result := sb.String()
 	if len(result) > 4000 {
-		result = result[:3997] + "..."
+		result = textfold.Cut(result, 3997) + "..."
 	}
 	return result
 }

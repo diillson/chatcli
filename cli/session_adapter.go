@@ -22,6 +22,7 @@ import (
 	"github.com/diillson/chatcli/cli/ctxmgr"
 	"github.com/diillson/chatcli/i18n"
 	"github.com/diillson/chatcli/models"
+	"github.com/diillson/chatcli/pkg/textfold"
 )
 
 // sessionPluginAdapter is the concrete plugins.SessionAdapter.
@@ -202,7 +203,7 @@ func truncateRunesafe(s string, capBytes int) string {
 	for cut > 0 && !utf8.RuneStart(s[cut]) {
 		cut--
 	}
-	return s[:cut] + "…"
+	return textfold.Cut(s, cut) + "…"
 }
 
 // List returns the saved session names. Delegates to sessionListText, which

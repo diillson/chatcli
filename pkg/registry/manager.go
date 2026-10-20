@@ -16,6 +16,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/diillson/chatcli/pkg/textfold"
 	"go.uber.org/zap"
 )
 
@@ -544,7 +545,7 @@ func shortenError(err error) string {
 		return "TLS error"
 	}
 	if len(msg) > 60 {
-		return msg[:57] + "..."
+		return textfold.Cut(msg, 57) + "..."
 	}
 	return msg
 }

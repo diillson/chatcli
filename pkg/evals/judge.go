@@ -16,6 +16,7 @@ import (
 	"strings"
 
 	"github.com/diillson/chatcli/i18n"
+	"github.com/diillson/chatcli/pkg/textfold"
 )
 
 // maxJudgeAnswer caps the candidate answer shown to the judge; maxJudgeTools
@@ -89,7 +90,7 @@ func BuildJudgePrompt(req JudgeRequest) string {
 	b.WriteString("\n\n### CANDIDATE ANSWER\n")
 	answer := req.Answer
 	if len(answer) > maxJudgeAnswer {
-		answer = answer[:maxJudgeAnswer] + "\n… [truncated]"
+		answer = textfold.Cut(answer, maxJudgeAnswer) + "\n… [truncated]"
 	}
 	if strings.TrimSpace(answer) == "" {
 		answer = "(empty)"

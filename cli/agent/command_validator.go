@@ -14,6 +14,7 @@ import (
 
 	"github.com/diillson/chatcli/i18n"
 	"github.com/diillson/chatcli/pkg/coder/engine"
+	"github.com/diillson/chatcli/pkg/textfold"
 	"go.uber.org/zap"
 )
 
@@ -193,7 +194,7 @@ func truncateForLog(s string, maxLen int) string {
 	if len(s) <= maxLen {
 		return s
 	}
-	return s[:maxLen] + "..."
+	return textfold.Cut(s, maxLen) + "..."
 }
 
 // ValidateCommand valida um comando antes da execução

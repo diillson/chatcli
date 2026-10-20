@@ -6,6 +6,8 @@ import (
 	"html"
 	"regexp"
 	"strings"
+
+	"github.com/diillson/chatcli/pkg/textfold"
 )
 
 // ToolCall represents a parsed tool invocation from AI output text.
@@ -304,13 +306,10 @@ func scanTagEnd(text string, pos int) (int, bool) {
 // extractAttrStateful extracts an attribute value using stateful scanning
 // instead of regex, properly handling nested quotes and special characters.
 func extractAttrStateful(attrText, key string) (string, error) {
-	lower := strings.ToLower(attrText)
-	keyLower := strings.ToLower(key)
-
 	// Find key= pattern
 	searchFrom := 0
 	for {
-		idx := strings.Index(lower[searchFrom:], keyLower)
+		idx := indexCaseInsensitive(attrText[searchFrom:], key)
 		if idx < 0 {
 			return "", fmt.Errorf("attribute %q not found", key)
 		}
@@ -417,10 +416,13 @@ func isAttrNameChar(b byte) bool {
 		(b >= '0' && b <= '9') || b == '-' || b == '_'
 }
 
-// indexCaseInsensitive finds needle in haystack (case-insensitive).
+// indexCaseInsensitive finds needle in haystack (case-insensitive) and
+// returns the offset in haystack itself. Searching a strings.ToLower copy
+// drifted whenever lowering changed a character's byte length (İ before the
+// tag), so the offsets cut the model's text in the wrong place.
 func indexCaseInsensitive(haystack, needle string) int {
-	lower := strings.ToLower(haystack)
-	return strings.Index(lower, strings.ToLower(needle))
+	start, _ := textfold.IndexIgnoreCase(haystack, needle)
+	return start
 }
 
 // parseJSONToolCalls attempts to find JSON-formatted tool calls in the text.

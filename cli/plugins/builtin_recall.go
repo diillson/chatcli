@@ -25,6 +25,8 @@ import (
 	"regexp"
 	"strings"
 	"sync/atomic"
+
+	"github.com/diillson/chatcli/pkg/textfold"
 )
 
 // CompressionAdapter is the interface the recall/compress builtins use to
@@ -302,5 +304,5 @@ func truncateForLog(s string, maxLen int) string {
 	if len(s) <= maxLen {
 		return s
 	}
-	return s[:maxLen] + "..."
+	return textfold.Cut(s, maxLen) + "..."
 }

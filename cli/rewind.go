@@ -11,6 +11,7 @@ import (
 
 	"github.com/diillson/chatcli/i18n"
 	"github.com/diillson/chatcli/models"
+	"github.com/diillson/chatcli/pkg/textfold"
 	"github.com/diillson/chatcli/ui/kit"
 	"github.com/diillson/chatcli/ui/theme"
 )
@@ -42,7 +43,7 @@ func (cli *ChatCLI) saveCheckpoint() {
 	// Truncate label
 	label = strings.ReplaceAll(label, "\n", " ")
 	if len(label) > 60 {
-		label = label[:57] + "..."
+		label = textfold.Cut(label, 57) + "..."
 	}
 
 	// Deep copy history

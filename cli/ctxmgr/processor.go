@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/diillson/chatcli/pkg/textfold"
 	"github.com/diillson/chatcli/utils"
 	"go.uber.org/zap"
 )
@@ -171,7 +172,7 @@ func (p *Processor) createSummaryView(files []utils.FileInfo) []utils.FileInfo {
 		}
 
 		if len(preview) > maxPreviewChars {
-			preview = preview[:maxPreviewChars] + "..."
+			preview = textfold.Cut(preview, maxPreviewChars) + "..."
 		}
 
 		summaryFiles[i] = utils.FileInfo{

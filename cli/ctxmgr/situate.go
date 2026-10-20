@@ -8,6 +8,8 @@ package ctxmgr
 import (
 	"path/filepath"
 	"strings"
+
+	"github.com/diillson/chatcli/pkg/textfold"
 )
 
 // Situating a passage in its document.
@@ -100,7 +102,7 @@ func trimStructureLine(line string) string {
 	t = strings.TrimSuffix(t, "{")
 	t = strings.TrimSpace(t)
 	if len(t) > situateHeaderMax {
-		cut := t[:situateHeaderMax]
+		cut := textfold.Cut(t, situateHeaderMax)
 		if i := strings.LastIndex(cut, " "); i > situateHeaderMax/2 {
 			cut = cut[:i]
 		}

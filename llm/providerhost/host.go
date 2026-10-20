@@ -28,6 +28,7 @@ import (
 	"time"
 
 	"github.com/diillson/chatcli/pkg/providerproto"
+	"github.com/diillson/chatcli/pkg/textfold"
 	"go.uber.org/zap"
 )
 
@@ -219,7 +220,7 @@ func (h *Host) crashDetail(p *process) string {
 	}
 	detail := strings.Join(lines, " | ")
 	if len(detail) > crashDetailBytes {
-		detail = "…" + detail[len(detail)-crashDetailBytes:]
+		detail = "…" + textfold.Tail(detail, crashDetailBytes)
 	}
 	return detail
 }

@@ -43,6 +43,7 @@ import (
 	"github.com/diillson/chatcli/llm/client"
 	"github.com/diillson/chatcli/models"
 	"github.com/diillson/chatcli/pkg/persona"
+	"github.com/diillson/chatcli/pkg/textfold"
 	"go.uber.org/zap"
 )
 
@@ -625,7 +626,7 @@ func (cli *ChatCLI) skillBodyStillInHistory(skill *persona.Skill) bool {
 	}
 	probe := body
 	if len(probe) > skillVisibilityProbeChars {
-		probe = probe[:skillVisibilityProbeChars]
+		probe = textfold.Cut(probe, skillVisibilityProbeChars)
 	}
 	for _, msg := range cli.history {
 		if strings.Contains(msg.Content, probe) {

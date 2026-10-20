@@ -34,6 +34,7 @@ import (
 	"github.com/diillson/chatcli/i18n"
 	llmclient "github.com/diillson/chatcli/llm/client"
 	"github.com/diillson/chatcli/models"
+	"github.com/diillson/chatcli/pkg/textfold"
 	"go.uber.org/zap"
 )
 
@@ -283,7 +284,7 @@ func describeParkRequest(r park.Request) string {
 	case park.ModeForCmd:
 		cmd := r.Command
 		if len(cmd) > 60 {
-			cmd = cmd[:60] + "…"
+			cmd = textfold.Cut(cmd, 60) + "…"
 		}
 		if r.Note != "" {
 			return fmt.Sprintf("polling %q every %s — %s", cmd, r.Interval, r.Note)

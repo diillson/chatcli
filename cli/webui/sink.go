@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/diillson/chatcli/cli/agentevents"
+	"github.com/diillson/chatcli/pkg/textfold"
 )
 
 // event is one server-sent event on a run's stream. Type names the kind;
@@ -129,7 +130,7 @@ func toolEventFrom(tc agentevents.ToolCall) *toolEvent {
 	if tc.OmitContent {
 		out = ""
 	} else if len(out) > toolOutputCap {
-		out = out[:toolOutputCap] + "\n…"
+		out = textfold.Cut(out, toolOutputCap) + "\n…"
 	}
 	return &toolEvent{
 		ID: tc.ID, Name: tc.Name, Title: tc.Title, Kind: string(tc.Kind), Status: string(tc.Status),

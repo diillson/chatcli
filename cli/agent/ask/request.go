@@ -18,6 +18,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"unicode/utf8"
 )
 
 // MaxQuestions caps how many questions a single @ask call may bundle. Kept
@@ -77,7 +78,7 @@ func ParseRequest(argsJSON string) ([]Question, error) {
 			return nil, fmt.Errorf("ask: parse questions array: %w", err)
 		}
 	default:
-		return nil, fmt.Errorf("ask: args must be a JSON object or array, got %q", s[:1])
+		return nil, fmt.Errorf("ask: args must be a JSON object or array, got %q", firstRune(s))
 	}
 
 	if err := validate(questions); err != nil {
@@ -114,4 +115,11 @@ func validate(qs []Question) error {
 		}
 	}
 	return nil
+}
+
+// firstRune returns the first character of s for an error message; a byte
+// slice would quote half of a multi-byte character.
+func firstRune(s string) string {
+	_, size := utf8.DecodeRuneInString(s)
+	return s[:size]
 }

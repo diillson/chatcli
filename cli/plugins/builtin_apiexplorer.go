@@ -50,6 +50,7 @@ import (
 	"time"
 
 	"github.com/diillson/chatcli/i18n"
+	"github.com/diillson/chatcli/pkg/textfold"
 	"gopkg.in/yaml.v3"
 )
 
@@ -789,7 +790,7 @@ var htmlSpecPatterns = []*regexp.Regexp{
 // resolves each candidate to an absolute URL against the page URL.
 func extractSpecURLsFromHTML(html, pageURL string) []string {
 	if len(html) > apiExplorerMaxHTMLBody {
-		html = html[:apiExplorerMaxHTMLBody]
+		html = textfold.Cut(html, apiExplorerMaxHTMLBody)
 	}
 	base, _ := url.Parse(pageURL)
 	seen := map[string]bool{}

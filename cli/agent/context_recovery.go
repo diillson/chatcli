@@ -25,6 +25,7 @@ import (
 
 	"github.com/diillson/chatcli/llm/client"
 	"github.com/diillson/chatcli/models"
+	"github.com/diillson/chatcli/pkg/textfold"
 	"go.uber.org/zap"
 )
 
@@ -387,8 +388,8 @@ func truncatePreservingEnd(text string, maxLen int) string {
 		tailLen = 0
 	}
 
-	head := text[:headLen]
-	tail := text[len(text)-tailLen:]
+	head := textfold.Cut(text, headLen)
+	tail := textfold.Tail(text, tailLen)
 
 	return head + "\n... [truncated] ...\n" + tail
 }

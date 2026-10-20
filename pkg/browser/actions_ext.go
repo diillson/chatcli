@@ -24,6 +24,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/diillson/chatcli/pkg/textfold"
 	"github.com/diillson/chatcli/utils"
 )
 
@@ -322,7 +323,7 @@ func (s *Session) doHTML(ctx context.Context, target string, maxBytes int) (stri
 		return "", fmt.Errorf("no element matches %q — run snapshot first and use one of its [n] refs", target)
 	}
 	if len(out) > maxBytes {
-		out = out[:maxBytes] + "\n… (html truncated)"
+		out = textfold.Cut(out, maxBytes) + "\n… (html truncated)"
 	}
 	return out, nil
 }

@@ -6,7 +6,10 @@
 
 package plugins
 
-import "github.com/diillson/chatcli/i18n"
+import (
+	"github.com/diillson/chatcli/i18n"
+	"github.com/diillson/chatcli/pkg/textfold"
+)
 
 // Capability advertisements for BuiltinSearchPlugin.
 
@@ -25,7 +28,7 @@ func (p *BuiltinSearchPlugin) DescribeCall(args []string) string {
 	}
 	t := parsed.Term
 	if len(t) > 60 {
-		t = t[:60] + "..."
+		t = textfold.Cut(t, 60) + "..."
 	}
 	return i18n.T("plugins.search.describe", t)
 }

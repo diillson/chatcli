@@ -15,6 +15,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	platformv1alpha1 "github.com/diillson/chatcli/operator/api/v1alpha1"
+	"github.com/diillson/chatcli/pkg/textfold"
 )
 
 // BlastRadiusPredictor predicts the impact of remediation actions before execution.
@@ -709,7 +710,7 @@ func (p *BlastRadiusPrediction) FormatForAI() string {
 
 	result := sb.String()
 	if len(result) > 2000 {
-		result = result[:1997] + "..."
+		result = textfold.Cut(result, 1997) + "..."
 	}
 	return result
 }

@@ -31,6 +31,8 @@ import (
 	"strings"
 	"time"
 	"unicode/utf8"
+
+	"github.com/diillson/chatcli/pkg/textfold"
 )
 
 const (
@@ -288,7 +290,7 @@ func boundRuneSafe(s string, limit int) string {
 	for limit > 0 && !utf8.RuneStart(s[limit]) {
 		limit--
 	}
-	return s[:limit] + "\n… (body truncated)"
+	return textfold.Cut(s, limit) + "\n… (body truncated)"
 }
 
 // httpInvocationMethod extracts the resolved method for the caps layer.

@@ -32,6 +32,7 @@ import (
 
 	"github.com/diillson/chatcli/cli/compress"
 	"github.com/diillson/chatcli/models"
+	"github.com/diillson/chatcli/pkg/textfold"
 	"go.uber.org/zap"
 )
 
@@ -227,13 +228,13 @@ func truncateToolResultPreview(content string, headChars, tailChars int) string 
 		return content
 	}
 
-	head := content[:headChars]
+	head := textfold.Cut(content, headChars)
 	// Cut at last newline
 	if idx := strings.LastIndex(head, "\n"); idx > headChars/2 {
 		head = head[:idx+1]
 	}
 
-	tail := content[len(content)-tailChars:]
+	tail := textfold.Tail(content, tailChars)
 	// Cut at first newline
 	if idx := strings.Index(tail, "\n"); idx > 0 && idx < tailChars/2 {
 		tail = tail[idx+1:]
@@ -254,13 +255,13 @@ func buildToolResultSummary(content, toolCallID string) string {
 	switch {
 	case strings.HasPrefix(trimmed, "{") || strings.HasPrefix(trimmed, "["):
 		contentType = "JSON"
-	case strings.Contains(trimmed[:min(200, len(trimmed))], "package "):
+	case strings.Contains(textfold.Cut(trimmed, 200), "package "):
 		contentType = "Go source"
-	case strings.Contains(trimmed[:min(200, len(trimmed))], "import "):
+	case strings.Contains(textfold.Cut(trimmed, 200), "import "):
 		contentType = "source code"
-	case strings.Contains(trimmed[:min(200, len(trimmed))], "def "):
+	case strings.Contains(textfold.Cut(trimmed, 200), "def "):
 		contentType = "Python source"
-	case strings.Contains(trimmed[:min(200, len(trimmed))], "function "):
+	case strings.Contains(textfold.Cut(trimmed, 200), "function "):
 		contentType = "JavaScript source"
 	case strings.HasPrefix(trimmed, "diff ") || strings.HasPrefix(trimmed, "--- "):
 		contentType = "diff"

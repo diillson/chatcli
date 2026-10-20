@@ -9,6 +9,7 @@ import (
 	"context"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/diillson/chatcli/cli/mcp"
 	"github.com/diillson/chatcli/cli/plugins"
@@ -20,6 +21,7 @@ import (
 	"github.com/diillson/chatcli/metrics"
 	"github.com/diillson/chatcli/models"
 	"github.com/diillson/chatcli/pkg/persona"
+	"github.com/diillson/chatcli/pkg/textfold"
 	pb "github.com/diillson/chatcli/proto/chatcli/v1"
 	"github.com/diillson/chatcli/server/hub"
 	"github.com/diillson/chatcli/version"
@@ -469,9 +471,11 @@ func chunkResponse(text string, targetSize int) []string {
 		}
 
 		// Look for a natural break point within the target window
-		end := targetSize
-		if end > len(remaining) {
-			end = len(remaining)
+		// The window ends on a rune boundary, so a hard split never cuts a
+		// character; a first rune wider than the target still advances.
+		end := len(textfold.Cut(remaining, targetSize))
+		if end == 0 {
+			_, end = utf8.DecodeRuneInString(remaining)
 		}
 
 		// Try paragraph break first (\n\n)

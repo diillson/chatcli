@@ -27,6 +27,7 @@ import (
 
 	"github.com/diillson/chatcli/cli/agentevents"
 	"github.com/diillson/chatcli/i18n"
+	"github.com/diillson/chatcli/pkg/textfold"
 )
 
 // acpToolContentCap bounds the content of one tool_call_update. Full outputs
@@ -318,7 +319,7 @@ func toolCallPayload(tc agentevents.ToolCall, full bool) map[string]interface{} 
 			for cut > 0 && !utf8.RuneStart(out[cut]) {
 				cut--
 			}
-			out = out[:cut] + "\n… (output truncated for display; the agent received the full text)"
+			out = textfold.Cut(out, cut) + "\n… (output truncated for display; the agent received the full text)"
 		}
 		p["content"] = []map[string]interface{}{
 			{"type": "content", "content": map[string]interface{}{"type": "text", "text": out}},

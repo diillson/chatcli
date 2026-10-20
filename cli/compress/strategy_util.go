@@ -6,7 +6,11 @@
 
 package compress
 
-import "strings"
+import (
+	"strings"
+
+	"github.com/diillson/chatcli/pkg/textfold"
+)
 
 // offload persists the full original to the CCR store when lossy reduction is
 // permitted, returning the retrieval marker to embed and the key. When CCR is
@@ -86,11 +90,11 @@ const (
 // equivalent to splitLines.
 func detectSampleLines(s string) []string {
 	if len(s) > detectSampleMaxBytes {
-		headEnd := detectSampleMaxBytes / 2
+		headEnd := len(textfold.Cut(s, detectSampleMaxBytes/2))
 		if cut := strings.LastIndexByte(s[:headEnd], '\n'); cut > 0 {
 			headEnd = cut
 		}
-		tailStart := len(s) - detectSampleMaxBytes/2
+		tailStart := len(s) - len(textfold.Tail(s, detectSampleMaxBytes/2))
 		if cut := strings.IndexByte(s[tailStart:], '\n'); cut >= 0 {
 			tailStart += cut + 1
 		}

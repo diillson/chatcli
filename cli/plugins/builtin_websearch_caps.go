@@ -8,6 +8,7 @@ package plugins
 
 import (
 	"github.com/diillson/chatcli/i18n"
+	"github.com/diillson/chatcli/pkg/textfold"
 )
 
 // This file isolates the Fase 2.1 capability advertisements for
@@ -38,7 +39,7 @@ func (p *BuiltinWebSearchPlugin) DescribeCall(args []string) string {
 		return p.Description()
 	}
 	if len(q) > 60 {
-		q = q[:60] + "..."
+		q = textfold.Cut(q, 60) + "..."
 	}
 	return i18n.T("plugins.websearch.describe", q)
 }

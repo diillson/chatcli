@@ -19,6 +19,7 @@ import (
 	"github.com/diillson/chatcli/cli/agent/proc"
 	"github.com/diillson/chatcli/cli/plugins"
 	"github.com/diillson/chatcli/pkg/pulse"
+	"github.com/diillson/chatcli/pkg/textfold"
 	"github.com/diillson/chatcli/utils"
 )
 
@@ -135,7 +136,7 @@ func (a *procToolAdapter) List() (string, error) {
 func formatProcInfo(info proc.Info) string {
 	cmd := info.Command
 	if len(cmd) > 80 {
-		cmd = cmd[:77] + "..."
+		cmd = textfold.Cut(cmd, 77) + "..."
 	}
 	if info.State == proc.StateRunning {
 		return fmt.Sprintf("%s running (pid %d, up %s): %s",

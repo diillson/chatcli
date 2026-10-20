@@ -25,6 +25,8 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+
+	"github.com/diillson/chatcli/pkg/textfold"
 )
 
 const (
@@ -986,7 +988,7 @@ func firstLine(s string) string {
 	}
 	const maxLen = 200
 	if len(s) > maxLen {
-		s = s[:maxLen] + "…"
+		s = textfold.Cut(s, maxLen) + "…"
 	}
 	return s
 }

@@ -9,6 +9,8 @@ package plugins
 import (
 	"fmt"
 	"strings"
+
+	"github.com/diillson/chatcli/pkg/textfold"
 )
 
 // TruncationAware is implemented by plugins that want fine-grained
@@ -78,16 +80,16 @@ func TruncateForLLM(s string, maxChars int) string {
 	if preview+suffix >= maxChars {
 		// Cap too small for both halves; cut at maxChars and append
 		// a marker.
-		return s[:maxChars] + "\n\n... [TRUNCATED]"
+		return textfold.Cut(s, maxChars) + "\n\n... [TRUNCATED]"
 	}
-	head := s[:preview]
-	tail := s[len(s)-suffix:]
-	dropped := len(s) - preview - suffix
+	head := textfold.Cut(s, preview)
+	tail := textfold.Tail(s, suffix)
+	kept := len(head) + len(tail)
 	var b strings.Builder
-	b.Grow(preview + suffix + 64)
+	b.Grow(kept + 64)
 	b.WriteString(head)
 	b.WriteString("\n\n... [TRUNCATED ")
-	fmt.Fprintf(&b, "%d chars omitted, %d kept", dropped, preview+suffix)
+	fmt.Fprintf(&b, "%d chars omitted, %d kept", len(s)-kept, kept)
 	b.WriteString("] ...\n\n")
 	b.WriteString(tail)
 	return b.String()

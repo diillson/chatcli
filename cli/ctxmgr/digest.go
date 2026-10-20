@@ -18,6 +18,8 @@ import (
 	"sort"
 	"strings"
 	"unicode/utf8"
+
+	"github.com/diillson/chatcli/pkg/textfold"
 )
 
 const (
@@ -124,7 +126,7 @@ func digestLine(s digestSource) string {
 		// Rune-aligned cut: pt-BR titles are multi-byte, and this line lands
 		// in the CACHED system-prompt prefix — invalid UTF-8 there poisons
 		// every turn.
-		title = title[:alignRuneBefore(title, digestMaxTitleChars-1)] + "…"
+		title = textfold.Cut(title, alignRuneBefore(title, digestMaxTitleChars-1)) + "…"
 	}
 	if title != "" {
 		return fmt.Sprintf("- %s (%d passages) — %s\n", s.path, s.chunks, title)

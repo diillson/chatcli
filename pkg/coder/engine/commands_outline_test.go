@@ -19,6 +19,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"unicode/utf8"
 )
 
 const outlineGoFixture = `package sample
@@ -151,5 +152,22 @@ func TestMapEmptyDir(t *testing.T) {
 	}
 	if !strings.Contains(out.String(), "No source files") {
 		t.Fatalf("empty dir message missing:\n%s", out.String())
+	}
+}
+
+// A long declaration line is cut for the outline without splitting a
+// multi-byte character.
+func TestOutlineGeneric_LongLineKeepsUTF8Valid(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "x.py")
+	line := "def f(): # " + strings.Repeat("a", 108) + "日本語" + strings.Repeat("b", 40)
+	if err := os.WriteFile(path, []byte(line+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	out, err := outlineGeneric(path)
+	if err != nil || len(out) != 1 {
+		t.Fatalf("outline = %v, %v", out, err)
+	}
+	if !utf8.ValidString(out[0]) || !strings.HasSuffix(out[0], "…") {
+		t.Fatalf("outline entry = %q", out[0])
 	}
 }

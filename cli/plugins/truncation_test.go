@@ -9,6 +9,7 @@ package plugins
 import (
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/stretchr/testify/assert"
 )
@@ -94,4 +95,21 @@ func TestBuiltinReadPlugin_HasGenerousTruncation(t *testing.T) {
 	assert.GreaterOrEqual(t, NewBuiltinReadPlugin().MaxResultChars(), 50_000)
 	assert.GreaterOrEqual(t, NewBuiltinSearchPlugin().MaxResultChars(), 50_000)
 	assert.GreaterOrEqual(t, NewBuiltinTreePlugin().MaxResultChars(), 30_000)
+}
+
+// A tool result reaches the model through TruncateForLLM; a cut inside a
+// multi-byte character there puts invalid UTF-8 into the request body.
+func TestTruncateForLLM_KeepsUTF8ValidAtBothCuts(t *testing.T) {
+	// "é" straddles the head cut (byte TruncationPreviewSize) and "日"
+	// straddles the tail cut (TruncationSuffixSize bytes from the end).
+	s := strings.Repeat("a", TruncationPreviewSize-1) + "é" +
+		strings.Repeat("m", 40_000) +
+		"日" + strings.Repeat("z", TruncationSuffixSize-1)
+	got := TruncateForLLM(s, 10_000)
+	if !utf8.ValidString(got) {
+		t.Fatal("TruncateForLLM produced invalid UTF-8")
+	}
+	if !strings.Contains(got, "chars omitted") {
+		t.Fatalf("expected the head/tail form, got %d bytes", len(got))
+	}
 }

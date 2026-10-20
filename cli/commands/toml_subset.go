@@ -25,6 +25,8 @@ package commands
 import (
 	"fmt"
 	"strings"
+
+	"github.com/diillson/chatcli/pkg/textfold"
 )
 
 // geminiCommandTOML is the parsed subset.
@@ -162,7 +164,7 @@ func parseTripleQuoted(rest string, lines []string, start int, delim string, _ b
 
 func truncateForErr(s string) string {
 	if len(s) > 40 {
-		return s[:40] + "…"
+		return textfold.Cut(s, 40) + "…"
 	}
 	return s
 }

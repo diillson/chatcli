@@ -35,6 +35,7 @@ import (
 	"strings"
 
 	"github.com/diillson/chatcli/i18n"
+	"github.com/diillson/chatcli/pkg/textfold"
 	"gopkg.in/yaml.v3"
 )
 
@@ -1008,9 +1009,8 @@ func stripInlineSVG(line string, inSVG bool) (string, bool, bool) {
 	var b strings.Builder
 	rest := line
 	for {
-		lower := strings.ToLower(rest)
 		if inSVG {
-			end := strings.Index(lower, "</svg>")
+			end, _ := textfold.IndexIgnoreCase(rest, "</svg>")
 			if end < 0 {
 				break
 			}
@@ -1018,8 +1018,8 @@ func stripInlineSVG(line string, inSVG bool) (string, bool, bool) {
 			inSVG = false
 			continue
 		}
-		start := strings.Index(lower, "<svg")
-		if start < 0 || (len(lower) > start+4 && !strings.ContainsRune(" \t>/", rune(lower[start+4]))) {
+		start, _ := textfold.IndexIgnoreCase(rest, "<svg")
+		if start < 0 || (len(rest) > start+4 && !strings.ContainsRune(" \t>/", rune(rest[start+4]))) {
 			b.WriteString(rest)
 			break
 		}

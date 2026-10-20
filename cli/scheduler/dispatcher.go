@@ -32,6 +32,7 @@ import (
 	"time"
 
 	"github.com/diillson/chatcli/pkg/pulse"
+	"github.com/diillson/chatcli/pkg/textfold"
 	"go.uber.org/zap"
 )
 
@@ -674,7 +675,7 @@ func truncate(s string, n int) string {
 	if len(s) <= n {
 		return s
 	}
-	return s[:n] + "…"
+	return textfold.Cut(s, n) + "…"
 }
 
 func errString(err error) string {

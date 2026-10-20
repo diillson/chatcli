@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"github.com/diillson/chatcli/i18n"
+	"github.com/diillson/chatcli/pkg/textfold"
 	pb "github.com/diillson/chatcli/proto/chatcli/v1"
 	"go.uber.org/zap"
 	"google.golang.org/grpc/codes"
@@ -144,7 +145,7 @@ func truncate(s string, n int) string {
 	if len(s) <= n {
 		return s
 	}
-	return s[:n] + "…"
+	return textfold.Cut(s, n) + "…"
 }
 
 // sanitizeForPrompt escapes user-provided text to prevent prompt injection.

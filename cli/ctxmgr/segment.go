@@ -22,6 +22,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"github.com/diillson/chatcli/pkg/textfold"
 	"github.com/diillson/chatcli/utils"
 )
 
@@ -213,7 +214,7 @@ func segmentOne(f utils.FileInfo, opts SegmentOptions) []Segment {
 	}
 	for i, l := range lines {
 		if len(l) > capBytes {
-			lines[i] = l[:alignRuneBefore(l, capBytes)] + "…"
+			lines[i] = textfold.Cut(l, alignRuneBefore(l, capBytes)) + "…"
 		}
 	}
 

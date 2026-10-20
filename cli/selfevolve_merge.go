@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/diillson/chatcli/models"
+	"github.com/diillson/chatcli/pkg/textfold"
 )
 
 const (
@@ -57,7 +58,7 @@ func (cli *ChatCLI) mergeSkillBody(ctx context.Context, name, currentBody, impro
 
 	body := currentBody
 	if len(body) > selfEvolveMergeBodyCap {
-		body = body[:selfEvolveMergeBodyCap] + "\n... [truncated] ..."
+		body = textfold.Cut(body, selfEvolveMergeBodyCap) + "\n... [truncated] ..."
 	}
 	prompt := fmt.Sprintf(skillMergePrompt, name, body, strings.TrimSpace(improvement))
 

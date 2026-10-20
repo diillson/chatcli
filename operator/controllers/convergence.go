@@ -6,6 +6,7 @@ import (
 	"time"
 
 	platformv1alpha1 "github.com/diillson/chatcli/operator/api/v1alpha1"
+	"github.com/diillson/chatcli/pkg/textfold"
 )
 
 // ConvergenceDetector analyzes agentic remediation loops for convergence, oscillation, and progress.
@@ -21,7 +22,7 @@ func (cd *ConvergenceDetector) IsConverged(history []platformv1alpha1.AgenticSte
 	obs1 := normalizeObs(last3[1].Observation)
 	obs2 := normalizeObs(last3[2].Observation)
 	if obs0 == obs1 && obs1 == obs2 && obs0 != "" {
-		return true, fmt.Sprintf("Last 3 observations identical: %q", obs0[:min(80, len(obs0))])
+		return true, fmt.Sprintf("Last 3 observations identical: %q", textfold.Cut(obs0, 80))
 	}
 	return false, ""
 }

@@ -22,6 +22,8 @@ import (
 	"strconv"
 	"strings"
 	"unicode/utf8"
+
+	"github.com/diillson/chatcli/pkg/textfold"
 )
 
 // Model-facing layout of a paged recall.
@@ -174,7 +176,7 @@ func recallMatch(key, content, match string) string {
 			continue
 		}
 		if len(line) > recallMatchLineMaxLen {
-			line = line[:runeStart(line, recallMatchLineMaxLen)] + "…"
+			line = textfold.Cut(line, runeStart(line, recallMatchLineMaxLen)) + "…"
 		}
 		fmt.Fprintf(&b, recallMatchLineFmt, i+1, line)
 		shown++
@@ -195,7 +197,7 @@ func recallSection(content string, share int) string {
 		return content
 	}
 	end := lineCut(content, 0, runeStart(content, share))
-	return content[:end] + fmt.Sprintf(recallSectionTrimFmt, end, len(content))
+	return textfold.Cut(content, end) + fmt.Sprintf(recallSectionTrimFmt, end, len(content))
 }
 
 // runeStart moves i back to the start of the rune it falls in.

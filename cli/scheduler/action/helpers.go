@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/diillson/chatcli/cli/scheduler"
+	"github.com/diillson/chatcli/pkg/textfold"
 )
 
 func asString(m map[string]any, key string) string {
@@ -81,7 +82,7 @@ func truncate(s string, n int) string {
 	if len(s) <= n {
 		return s
 	}
-	return s[:n] + "…"
+	return textfold.Cut(s, n) + "…"
 }
 
 // payloadInt64 reads an int-shaped payload field with cross-encoding

@@ -35,6 +35,7 @@ import (
 	"github.com/diillson/chatcli/models"
 	"github.com/diillson/chatcli/pkg/persona"
 	"github.com/diillson/chatcli/pkg/pulse"
+	"github.com/diillson/chatcli/pkg/textfold"
 	"go.uber.org/zap"
 )
 
@@ -777,7 +778,7 @@ func truncateBridge(s string, n int) string {
 	if len(s) <= n {
 		return s
 	}
-	return s[:n] + "…"
+	return textfold.Cut(s, n) + "…"
 }
 
 // NotifyParkComplete is called by the AgentResume scheduler action when

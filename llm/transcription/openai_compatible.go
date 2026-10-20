@@ -27,6 +27,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/diillson/chatcli/pkg/textfold"
 	"github.com/diillson/chatcli/utils"
 	"go.uber.org/zap"
 )
@@ -199,7 +200,7 @@ func extensionForMime(mime string) string {
 func snippet(b []byte) string {
 	s := strings.TrimSpace(string(b))
 	if len(s) > maxErrorBodyToShow {
-		return s[:maxErrorBodyToShow] + "…"
+		return textfold.Cut(s, maxErrorBodyToShow) + "…"
 	}
 	return s
 }

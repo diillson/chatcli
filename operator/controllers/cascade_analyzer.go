@@ -12,6 +12,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	platformv1alpha1 "github.com/diillson/chatcli/operator/api/v1alpha1"
+	"github.com/diillson/chatcli/pkg/textfold"
 )
 
 // CascadeAnalyzer detects cascade failures across services by analyzing
@@ -416,7 +417,7 @@ func (r *CascadeResult) FormatForAI() string {
 
 	result := sb.String()
 	if len(result) > 3000 {
-		result = result[:2997] + "..."
+		result = textfold.Cut(result, 2997) + "..."
 	}
 	return result
 }

@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/diillson/chatcli/pkg/textfold"
 	"go.uber.org/zap"
 )
 
@@ -53,8 +54,8 @@ func (pm *ProcessManager) TruncateOutput(output string, maxBytes int64) (string,
 	tailSize := int(maxBytes * 40 / 100)
 	truncated := int64(len(output)) - maxBytes
 
-	head := output[:headSize]
-	tail := output[len(output)-tailSize:]
+	head := textfold.Cut(output, headSize)
+	tail := textfold.Tail(output, tailSize)
 
 	marker := fmt.Sprintf("\n\n[... truncated %s (%d bytes) ...]\n\n",
 		formatBytes(truncated), truncated)
