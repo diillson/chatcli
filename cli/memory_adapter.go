@@ -25,6 +25,7 @@ import (
 	"github.com/diillson/chatcli/cli/agent/quality"
 	"github.com/diillson/chatcli/cli/workspace/memory"
 	"github.com/diillson/chatcli/i18n"
+	"github.com/diillson/chatcli/utils"
 )
 
 // memoryPluginAdapter is the concrete plugins.MemoryAdapter.
@@ -101,7 +102,7 @@ func (a *memoryPluginAdapter) Recall(query string) (string, error) {
 
 	var timelineSection string
 	if q != "" {
-		if from, to, cleaned, ok := memory.ParseTemporalRange(q, time.Now()); ok {
+		if from, to, cleaned, ok := memory.ParseTemporalRange(q, utils.ReferenceNow()); ok {
 			if eps := conversationalTimeline(a.cli.memoryStore.Manager(), from, to, "", cleaned, 15); len(eps) > 0 {
 				timelineSection = fmt.Sprintf("## Timeline %s → %s\n\n%s",
 					from.Format("2006-01-02"), to.Format("2006-01-02"), memory.FormatEpisodes(eps))
@@ -176,7 +177,7 @@ func (a *memoryPluginAdapter) Timeline(project, from, to, query string, limit in
 		return "", fmt.Errorf("memory not enabled")
 	}
 
-	now := time.Now()
+	now := utils.ReferenceNow()
 	q := strings.TrimSpace(query)
 	var fromT, toT time.Time
 	windowFromQuery := false

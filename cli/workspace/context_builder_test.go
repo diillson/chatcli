@@ -118,3 +118,12 @@ func TestContextBuilder_InvalidateCache(t *testing.T) {
 		t.Error("expected content after cache invalidation")
 	}
 }
+
+func TestContextBuilder_DynamicContextReferenceTime(t *testing.T) {
+	cb := NewContextBuilder(NewBootstrapLoader(t.TempDir(), t.TempDir(), testLogger()),
+		NewMemoryStore(t.TempDir(), testLogger()), t.TempDir())
+	t.Setenv("CHATCLI_NOW", "2023-05-30T23:40:00")
+	if dyn := cb.BuildDynamicContext(); !strings.HasPrefix(dyn, "Current date: 2023-05-30 (Tuesday, ") {
+		t.Errorf("the date line must follow CHATCLI_NOW, got %q", dyn)
+	}
+}

@@ -720,7 +720,7 @@ func sessionRecencyBoost(saved time.Time) float64 {
 	if saved.IsZero() {
 		return 1
 	}
-	ageWeeks := time.Since(saved).Hours() / (24 * 7)
+	ageWeeks := utils.ReferenceNow().Sub(saved).Hours() / (24 * 7)
 	if ageWeeks < 0 {
 		ageWeeks = 0
 	}

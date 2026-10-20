@@ -36,6 +36,7 @@ import (
 	"github.com/diillson/chatcli/cli/workspace/memory"
 	"github.com/diillson/chatcli/models"
 	"github.com/diillson/chatcli/pkg/pulse"
+	"github.com/diillson/chatcli/utils"
 )
 
 const (
@@ -129,7 +130,7 @@ func (cli *ChatCLI) sessionAutoRecallBlockWithHeader(hints []string, lastUserMsg
 	// A temporal expression in the user's words ("há 2 semanas", "last
 	// week", "em 2026-07-05") is an explicit recall request too: scope the
 	// search to that date window and drop the expression from the query.
-	from, to, cleaned, temporal := memory.ParseTemporalRange(lastUserMsg, time.Now())
+	from, to, cleaned, temporal := memory.ParseTemporalRange(lastUserMsg, utils.ReferenceNow())
 
 	query := strings.Join(hints, " ")
 	if (referential || temporal) && strings.TrimSpace(lastUserMsg) != "" {

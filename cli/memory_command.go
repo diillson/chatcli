@@ -3,12 +3,14 @@ package cli
 import (
 	"context"
 	"fmt"
-	"github.com/diillson/chatcli/pkg/atrest"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/diillson/chatcli/pkg/atrest"
+	"github.com/diillson/chatcli/utils"
 
 	prompt "github.com/c-bata/go-prompt"
 	"github.com/diillson/chatcli/cli/workspace/memory"
@@ -576,7 +578,7 @@ func (cli *ChatCLI) showMemoryFacts(category string) {
 func (cli *ChatCLI) showMemoryTimeline(query string) {
 	mgr := cli.memoryStore.Manager()
 
-	now := time.Now()
+	now := utils.ReferenceNow()
 	var from, to time.Time
 	q := strings.TrimSpace(query)
 	windowFromQuery := false
