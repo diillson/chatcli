@@ -187,3 +187,26 @@ func TestSessionRecencyBoost_ReferenceTime(t *testing.T) {
 		t.Errorf("against the wall clock the 2023 session is old: boost = %v", got)
 	}
 }
+
+// The age the model reads is measured from CHATCLI_NOW: a replayed 2023
+// conversation must not report a gap of years to the wall clock.
+func TestFormatSessionAge_ReferenceTime(t *testing.T) {
+	saved := time.Date(2023, 4, 16, 10, 0, 0, 0, time.UTC)
+	t.Setenv("CHATCLI_NOW", "2023-05-07T10:00:00Z")
+	if got := formatSessionAge(saved); got != "21d ago" {
+		t.Errorf("age from the pinned date = %q, want 21d ago", got)
+	}
+	t.Setenv("CHATCLI_NOW", "2023-04-16T10:30:00Z")
+	if got := formatSessionAge(saved); got != "30m ago" {
+		t.Errorf("got %q, want 30m ago", got)
+	}
+	// A save after the reference time (written during the run) is not negative.
+	t.Setenv("CHATCLI_NOW", "2023-04-15T10:00:00Z")
+	if got := formatSessionAge(saved); got != "0m ago" {
+		t.Errorf("future save = %q, want 0m ago", got)
+	}
+	t.Setenv("CHATCLI_NOW", "")
+	if got := formatSessionAge(saved); got == "21d ago" {
+		t.Errorf("against the wall clock the age is years, got %q", got)
+	}
+}
