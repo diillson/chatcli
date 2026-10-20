@@ -216,12 +216,14 @@ func (cli *ChatCLI) sessionAutoRecallBlockWithHeader(hints []string, lastUserMsg
 // recall.
 const pulseSessionRecallNode = "memory:session-recall"
 
-// formatSessionAge renders a save time as a compact model-facing age label.
+// formatSessionAge renders a save time as a compact model-facing age label,
+// measured from the reference time (CHATCLI_NOW) like every other date the
+// model reasons about. A save after the reference time reads as just now.
 func formatSessionAge(saved time.Time) string {
 	if saved.IsZero() {
 		return "age unknown"
 	}
-	age := time.Since(saved)
+	age := max(utils.ReferenceNow().Sub(saved), 0)
 	switch {
 	case age < time.Hour:
 		return fmt.Sprintf("%dm ago", int(age.Minutes()))
