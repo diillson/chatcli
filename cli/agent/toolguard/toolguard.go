@@ -27,6 +27,8 @@ import (
 	"sort"
 	"strings"
 	"sync"
+
+	"github.com/diillson/chatcli/pkg/textfold"
 )
 
 // Config tunes the thresholds. Zero value yields sane defaults via New.
@@ -270,5 +272,5 @@ func truncate(s string, maxLen int) string {
 	if len(s) <= maxLen {
 		return s
 	}
-	return s[:maxLen] + "..."
+	return textfold.Cut(s, maxLen) + "..."
 }

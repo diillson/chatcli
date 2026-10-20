@@ -18,6 +18,7 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/diillson/chatcli/i18n"
+	"github.com/diillson/chatcli/pkg/textfold"
 	"github.com/diillson/chatcli/ui/kit"
 	"github.com/diillson/chatcli/ui/theme"
 	"go.uber.org/zap"
@@ -667,7 +668,7 @@ func (r *UIRenderer) RenderToolResult(output string, isError bool) {
 	// O agente recebe tudo, mas o humano vê um resumo se for gigante
 	displayOutput := output
 	if len(output) > 2000 {
-		displayOutput = output[:2000] + i18n.T("agent.ui.result_truncated")
+		displayOutput = textfold.Cut(output, 2000) + i18n.T("agent.ui.result_truncated")
 	}
 
 	// Tool output cru (YAML/JSON/tabelas) usa o wrap que preserva
@@ -710,7 +711,7 @@ func (r *UIRenderer) RenderToolResultMinimal(output string, isError bool) {
 		display = display[:idx]
 	}
 	if len(display) > 240 {
-		display = display[:240] + "..."
+		display = textfold.Cut(display, 240) + "..."
 	}
 	if display == "" {
 		display = i18n.T("agent.ui.result_empty")
@@ -860,7 +861,7 @@ func (r *UIRenderer) CompactLine(icon, label, text string, color string) {
 		text = first
 	}
 	if len(text) > 120 {
-		text = text[:117] + "..."
+		text = textfold.Cut(text, 117) + "..."
 	}
 
 	fmt.Printf("  %s %s %s\n",
@@ -954,7 +955,7 @@ func (r *UIRenderer) EchoUserInput(text string) {
 func (r *UIRenderer) CompactError(msg string) {
 	msg = strings.TrimSpace(msg)
 	if len(msg) > 120 {
-		msg = msg[:117] + "..."
+		msg = textfold.Cut(msg, 117) + "..."
 	}
 	fmt.Printf("  %s %s\n",
 		r.Colorize("✗", ColorRed+ColorBold),
@@ -1026,7 +1027,7 @@ func CompactToolLabel(subcmd string, rawArgs string) string {
 
 	// Truncate long args
 	if len(arg) > 60 {
-		arg = arg[:57] + "..."
+		arg = textfold.Cut(arg, 57) + "..."
 	}
 
 	return fmt.Sprintf("%s(%s)", name, arg)

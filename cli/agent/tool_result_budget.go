@@ -35,6 +35,7 @@ import (
 	"sync"
 
 	"github.com/diillson/chatcli/models"
+	"github.com/diillson/chatcli/pkg/textfold"
 	"go.uber.org/zap"
 )
 
@@ -266,7 +267,7 @@ func truncateWithDiskPersist(content, toolCallID string, maxSize int, logger *za
 		if logger != nil {
 			logger.Warn("Failed to create budget result directory", zap.Error(err))
 		}
-		return content[:maxSize] + "\n... [output truncated — dir creation failed]"
+		return textfold.Cut(content, maxSize) + "\n... [output truncated — dir creation failed]"
 	}
 
 	fullPath := filepath.Join(dir, overflowFileName(toolCallID, content))
@@ -277,7 +278,7 @@ func truncateWithDiskPersist(content, toolCallID string, maxSize int, logger *za
 				zap.Error(err))
 		}
 		// Fall back to hard truncation
-		return content[:maxSize] + "\n... [output truncated — disk write failed]"
+		return textfold.Cut(content, maxSize) + "\n... [output truncated — disk write failed]"
 	}
 
 	// Build preview: head + tail + reference
@@ -288,7 +289,7 @@ func truncateWithDiskPersist(content, toolCallID string, maxSize int, logger *za
 		headEnd = len(content)
 	}
 
-	head := content[:headEnd]
+	head := textfold.Cut(content, headEnd)
 	// Cut at last newline for cleaner output
 	if lastNL := strings.LastIndex(head, "\n"); lastNL > headEnd/2 {
 		head = head[:lastNL+1]
@@ -303,7 +304,7 @@ func truncateWithDiskPersist(content, toolCallID string, maxSize int, logger *za
 		tailStart = 0
 	}
 	if tailStart > headEnd {
-		tail := content[tailStart:]
+		tail := textfold.Tail(content, len(content)-tailStart)
 		// Cut at first newline for cleaner output
 		if firstNL := strings.Index(tail, "\n"); firstNL > 0 && firstNL < len(tail)/2 {
 			tail = tail[firstNL+1:]

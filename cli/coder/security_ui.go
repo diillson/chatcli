@@ -15,6 +15,7 @@ import (
 	"golang.org/x/term"
 
 	"github.com/diillson/chatcli/i18n"
+	"github.com/diillson/chatcli/pkg/textfold"
 	"github.com/diillson/chatcli/utils"
 )
 
@@ -154,7 +155,7 @@ func PromptSecurityCheckWithContext(ctx context.Context, toolName, args string, 
 		if secCtx.TaskDesc != "" {
 			taskDisplay := secCtx.TaskDesc
 			if len(taskDisplay) > 120 {
-				taskDisplay = taskDisplay[:120] + "..."
+				taskDisplay = textfold.Cut(taskDisplay, 120) + "..."
 			}
 			fmt.Fprintf(&b, "%s📋 %s%s  %s%s%s%s\n",
 				gray, i18n.T("coder.security.task"), reset, gray+"·  "+reset, white, taskDisplay, reset)
@@ -398,7 +399,7 @@ func formatFallback(subcmd, toolName, toolLower, rawArgs string) (string, []stri
 // historical cap, so we preserve it byte-for-byte.
 func truncate150(s string) string {
 	if len(s) > 150 {
-		return s[:150] + "..."
+		return textfold.Cut(s, 150) + "..."
 	}
 	return s
 }

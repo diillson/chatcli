@@ -9,6 +9,7 @@ import (
 	"sync/atomic"
 
 	"github.com/diillson/chatcli/cli/agent"
+	"github.com/diillson/chatcli/pkg/textfold"
 )
 
 func init() {
@@ -139,11 +140,11 @@ func overflowToDisk(label, content string, previewBytes int) string {
 
 	if err := os.WriteFile(fullPath, []byte(content), 0o600); err != nil {
 		// If we can't save, just truncate hard
-		return content[:MaxInlineResultBytes] + "\n... [output truncated — write to disk failed]"
+		return textfold.Cut(content, MaxInlineResultBytes) + "\n... [output truncated — write to disk failed]"
 	}
 
 	// Return preview + reference
-	preview := content[:previewBytes]
+	preview := textfold.Cut(content, previewBytes)
 	// Try to cut at a newline boundary for cleaner output
 	if lastNL := strings.LastIndex(preview, "\n"); lastNL > previewBytes/2 {
 		preview = preview[:lastNL+1]

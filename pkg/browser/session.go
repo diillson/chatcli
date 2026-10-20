@@ -35,6 +35,7 @@ import (
 	"time"
 
 	"github.com/diillson/chatcli/pkg/pulse"
+	"github.com/diillson/chatcli/pkg/textfold"
 )
 
 const (
@@ -542,7 +543,7 @@ func (s *Session) doSnapshot(ctx context.Context, maxBytes int) (string, error) 
 	}
 	text := strings.TrimSpace(snap.Text)
 	if len(text) > maxBytes {
-		text = text[:maxBytes] + "\n… (page text truncated)"
+		text = textfold.Cut(text, maxBytes) + "\n… (page text truncated)"
 	}
 	if text != "" {
 		b.WriteString("\nPage text:\n")

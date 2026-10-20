@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/diillson/chatcli/i18n"
+	"github.com/diillson/chatcli/pkg/textfold"
 	"github.com/google/uuid"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
@@ -81,7 +82,7 @@ func sanitizePanicValue(r interface{}) string {
 		strings.ReplaceAll(fmt.Sprint(r), "\n", " "), "\r", ""), "\t", " "))
 	// Truncate to prevent log flooding
 	if len(s) > 500 {
-		s = s[:500] + "...[truncated]"
+		s = textfold.Cut(s, 500) + "...[truncated]"
 	}
 	return s
 }

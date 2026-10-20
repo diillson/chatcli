@@ -27,6 +27,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"unicode/utf8"
 )
 
 // DefaultMapBudget bounds the map output in characters: enough structure to
@@ -305,7 +306,11 @@ func outlineGeneric(path string) ([]string, error) {
 		if genericDeclRe.MatchString(line) {
 			trimmed := strings.TrimSpace(line)
 			if len(trimmed) > 120 {
-				trimmed = trimmed[:120] + "…"
+				cut := 120
+				for cut > 0 && !utf8.RuneStart(trimmed[cut]) {
+					cut--
+				}
+				trimmed = trimmed[:cut] + "…"
 			}
 			out = append(out, fmt.Sprintf("L%d %s", i+1, trimmed))
 		}

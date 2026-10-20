@@ -27,6 +27,7 @@ import (
 	"time"
 
 	"github.com/diillson/chatcli/cli/scheduler"
+	"github.com/diillson/chatcli/pkg/textfold"
 )
 
 // LLMCheck implements scheduler.ConditionEvaluator.
@@ -75,7 +76,7 @@ func (LLMCheck) Evaluate(ctx context.Context, cond scheduler.Condition, env *sch
 			snippet += "\n--- stderr ---\n" + stderr
 		}
 		if len(snippet) > 16*1024 {
-			snippet = snippet[:16*1024] + "\n…[truncated]"
+			snippet = textfold.Cut(snippet, 16*1024) + "\n…[truncated]"
 		}
 		full = prompt + "\n\nCurrent state:\n```\n" + snippet + "\n```"
 	}

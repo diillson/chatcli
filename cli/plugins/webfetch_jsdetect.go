@@ -17,6 +17,8 @@ package plugins
 import (
 	"regexp"
 	"strings"
+
+	"github.com/diillson/chatcli/pkg/textfold"
 )
 
 const (
@@ -100,7 +102,7 @@ func extractEmbeddedState(rawHTML string) (string, bool) {
 		return "", false
 	}
 	if len(state) > maxEmbeddedStateBytes {
-		state = state[:maxEmbeddedStateBytes] + "\n…(embedded state truncated)"
+		state = textfold.Cut(state, maxEmbeddedStateBytes) + "\n…(embedded state truncated)"
 	}
 	return state, true
 }

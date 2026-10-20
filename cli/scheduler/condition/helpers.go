@@ -7,6 +7,8 @@ package condition
 import (
 	"fmt"
 	"strings"
+
+	"github.com/diillson/chatcli/pkg/textfold"
 )
 
 // asString reads a string field, returning "" when absent or wrong-typed.
@@ -71,7 +73,7 @@ func truncate(s string, n int) string {
 	if len(s) <= n {
 		return s
 	}
-	return s[:n] + "…"
+	return textfold.Cut(s, n) + "…"
 }
 
 // nonNilErr returns the first non-nil error.

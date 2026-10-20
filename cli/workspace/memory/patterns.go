@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/diillson/chatcli/pkg/textfold"
 	"go.uber.org/zap"
 )
 
@@ -219,7 +220,7 @@ func (pd *PatternDetector) FormatForPrompt() string {
 		if top.Count >= 3 {
 			msg := top.Pattern
 			if len(msg) > 80 {
-				msg = msg[:80] + "…"
+				msg = textfold.Cut(msg, 80) + "…"
 			}
 			parts = append(parts, formatStat("Recurring error (%dx): %s", top.Count, msg))
 		}
@@ -244,11 +245,11 @@ func (pd *PatternDetector) FormatForPrompt() string {
 func (pd *PatternDetector) recordError(errMsg string) {
 	// Normalize: take first 100 chars
 	if len(errMsg) > 100 {
-		errMsg = errMsg[:100]
+		errMsg = textfold.Cut(errMsg, 100)
 	}
 
 	for i, ep := range pd.stats.CommonErrors {
-		if strings.Contains(strings.ToLower(ep.Pattern), strings.ToLower(errMsg[:min(50, len(errMsg))])) {
+		if strings.Contains(strings.ToLower(ep.Pattern), strings.ToLower(textfold.Cut(errMsg, 50))) {
 			pd.stats.CommonErrors[i].Count++
 			pd.stats.CommonErrors[i].LastSeen = time.Now()
 			return

@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/diillson/chatcli/i18n"
+	"github.com/diillson/chatcli/pkg/textfold"
 )
 
 // padRight pads s with spaces to w runes (rune-aware, unlike %-*s which counts
@@ -362,5 +363,5 @@ func truncRender(s string, n int) string {
 	if len(s) <= n {
 		return s
 	}
-	return s[:n] + "…"
+	return textfold.Cut(s, n) + "…"
 }

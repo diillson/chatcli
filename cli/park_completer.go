@@ -12,6 +12,7 @@ import (
 	"github.com/c-bata/go-prompt"
 	"github.com/diillson/chatcli/cli/agent/park"
 	"github.com/diillson/chatcli/i18n"
+	"github.com/diillson/chatcli/pkg/textfold"
 )
 
 // parkedSubcommandSuggestions lists the verbs /parked accepts after
@@ -110,14 +111,14 @@ func describeParkRequestShort(r park.Request) string {
 		if r.URL != "" {
 			u := r.URL
 			if len(u) > 40 {
-				u = u[:40] + "…"
+				u = textfold.Cut(u, 40) + "…"
 			}
 			return u
 		}
 	case park.ModeForCmd:
 		c := r.Command
 		if len(c) > 40 {
-			c = c[:40] + "…"
+			c = textfold.Cut(c, 40) + "…"
 		}
 		return c
 	}

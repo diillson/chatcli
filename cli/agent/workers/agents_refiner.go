@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/diillson/chatcli/models"
+	"github.com/diillson/chatcli/pkg/textfold"
 )
 
 // RefineDirective is the leading marker that toggles structured input
@@ -160,12 +161,11 @@ func (a *RefinerAgent) Execute(ctx context.Context, task string, deps *WorkerDep
 // parseRefineSections splits a "Task: …\n\nDraft: …" body into its two
 // halves. Tolerant of extra whitespace and case in the headers.
 func parseRefineSections(body string) (originalTask, draft string) {
-	lower := strings.ToLower(body)
-	idx := strings.Index(lower, "draft:")
+	idx, _ := textfold.IndexIgnoreCase(body, "draft:")
 	if idx < 0 {
 		return "", body
 	}
-	taskHeader := strings.Index(lower, "task:")
+	taskHeader, _ := textfold.IndexIgnoreCase(body, "task:")
 	if taskHeader < 0 {
 		return "", strings.TrimSpace(body[idx+len("draft:"):])
 	}

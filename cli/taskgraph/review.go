@@ -18,6 +18,7 @@ import (
 	"strings"
 
 	"github.com/diillson/chatcli/cli/agent/workers"
+	"github.com/diillson/chatcli/pkg/textfold"
 )
 
 // Verdict values recorded on an attempt.
@@ -162,8 +163,7 @@ func parseVerdict(output string) (string, string) {
 	lines := strings.Split(output, "\n")
 	for i := len(lines) - 1; i >= 0; i-- {
 		line := strings.TrimSpace(lines[i])
-		upper := strings.ToUpper(line)
-		idx := strings.Index(upper, "VERDICT")
+		idx, _ := textfold.IndexIgnoreCase(line, "VERDICT")
 		if idx < 0 {
 			continue
 		}

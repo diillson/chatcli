@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"strings"
 	"time"
-	"unicode/utf8"
 
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -15,6 +14,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
+	"github.com/diillson/chatcli/pkg/textfold"
 	pb "github.com/diillson/chatcli/proto/chatcli/v1"
 
 	platformv1alpha1 "github.com/diillson/chatcli/operator/api/v1alpha1"
@@ -287,10 +287,7 @@ func truncateContextRuneSafe(s string, limit int) string {
 	if len(s) <= limit {
 		return s
 	}
-	for limit > 0 && !utf8.RuneStart(s[limit]) {
-		limit--
-	}
-	return s[:limit] + "\n... (context truncated)"
+	return textfold.Cut(s, limit) + "\n... (context truncated)"
 }
 
 // SetupWithManager sets up the controller with the Manager.

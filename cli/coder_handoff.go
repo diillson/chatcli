@@ -28,6 +28,7 @@ import (
 	"strings"
 
 	"github.com/diillson/chatcli/i18n"
+	"github.com/diillson/chatcli/pkg/textfold"
 )
 
 // coderHandoffEnv toggles the handoff. Unset means enabled.
@@ -101,7 +102,7 @@ func extractCoderHandoff(text string) (task, cleaned string) {
 		}
 	}
 	if len(task) > coderHandoffMaxTask {
-		task = strings.TrimSpace(task[:coderHandoffMaxTask])
+		task = strings.TrimSpace(textfold.Cut(task, coderHandoffMaxTask))
 	}
 	cleaned = strings.TrimSpace(coderHandoffRe.ReplaceAllString(text, ""))
 	return task, cleaned

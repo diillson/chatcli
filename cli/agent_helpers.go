@@ -17,6 +17,7 @@ import (
 
 	"github.com/diillson/chatcli/cli/agent/runs"
 	"github.com/diillson/chatcli/config"
+	"github.com/diillson/chatcli/pkg/textfold"
 )
 
 // allowedEditors is the set of known safe editors for the EDITOR env var.
@@ -94,7 +95,7 @@ func compactText(input string, maxLines int, maxLen int) string {
 	}
 	joined := strings.Join(out, " · ")
 	if maxLen > 0 && len(joined) > maxLen {
-		joined = joined[:maxLen] + "..."
+		joined = textfold.Cut(joined, maxLen) + "..."
 	}
 	return joined
 }
@@ -169,7 +170,7 @@ func truncateForUI(s string, maxLen int) string {
 	if len(s) <= maxLen {
 		return s
 	}
-	return s[:maxLen] + "..."
+	return textfold.Cut(s, maxLen) + "..."
 }
 
 // formatRunChildLine renders one live child run (e.g. a delegate subagent

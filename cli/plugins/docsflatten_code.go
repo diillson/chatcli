@@ -18,6 +18,8 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+
+	"github.com/diillson/chatcli/pkg/textfold"
 )
 
 // defaultDocsFlattenMaxFileSize caps per-file ingestion at 1 MiB: anything
@@ -525,7 +527,7 @@ func clampTitle(s string) string {
 	s = strings.Join(strings.Fields(s), " ")
 	const maxTitleLen = 80
 	if len(s) > maxTitleLen {
-		s = strings.TrimSpace(s[:maxTitleLen])
+		s = strings.TrimSpace(textfold.Cut(s, maxTitleLen))
 	}
 	return s
 }

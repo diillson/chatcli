@@ -16,6 +16,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	platformv1alpha1 "github.com/diillson/chatcli/operator/api/v1alpha1"
+	"github.com/diillson/chatcli/pkg/textfold"
 )
 
 // maxContextChars limits the K8s context section size. This is one of several
@@ -108,7 +109,7 @@ func (b *KubernetesContextBuilder) BuildContext(ctx context.Context, resource pl
 	// anything leaves for the LLM.
 	result := scrubForLLM(sb.String())
 	if len(result) > maxContextChars {
-		result = result[:maxContextChars-3] + "..."
+		result = textfold.Cut(result, maxContextChars-3) + "..."
 	}
 	return result, nil
 }

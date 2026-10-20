@@ -25,6 +25,7 @@ import (
 	"time"
 
 	"github.com/diillson/chatcli/cli/agentevents"
+	"github.com/diillson/chatcli/pkg/textfold"
 )
 
 // gatewayEventsSink converts agent events into progress lines. Safe for
@@ -66,7 +67,7 @@ func (s *gatewayEventsSink) send(line string) {
 func oneLine(text string, maxLen int) string {
 	text = strings.Join(strings.Fields(text), " ")
 	if len(text) > maxLen {
-		return text[:maxLen] + "…"
+		return textfold.Cut(text, maxLen) + "…"
 	}
 	return text
 }

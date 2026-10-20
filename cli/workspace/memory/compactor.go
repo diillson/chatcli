@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/diillson/chatcli/pkg/textfold"
 	"go.uber.org/zap"
 )
 
@@ -265,7 +266,7 @@ func (c *Compactor) parseCompactionResponse(response string, originalFacts []*Fa
 		// Try to find matching original fact to preserve metadata
 		var matchedFact *Fact
 		for _, of := range originalFacts {
-			if strings.Contains(strings.ToLower(of.Content), strings.ToLower(line[:min(50, len(line))])) {
+			if strings.Contains(strings.ToLower(of.Content), strings.ToLower(textfold.Cut(line, 50))) {
 				matchedFact = of
 				break
 			}

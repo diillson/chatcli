@@ -24,6 +24,7 @@ import (
 	"github.com/diillson/chatcli/i18n"
 	"github.com/diillson/chatcli/models"
 	"github.com/diillson/chatcli/pkg/atrest"
+	"github.com/diillson/chatcli/pkg/textfold"
 )
 
 // transcriptSearchHits is how many hits /session transcript search prints.
@@ -287,20 +288,17 @@ func (cli *ChatCLI) showTranscript(from, count int) {
 // term (case-insensitive), single-line.
 func transcriptSnippet(content, query string, width int) string {
 	flat := strings.Join(strings.Fields(content), " ")
-	lower := strings.ToLower(flat)
 	pos := -1
-	for _, term := range strings.Fields(strings.ToLower(query)) {
-		if p := strings.Index(lower, term); p >= 0 && (pos < 0 || p < pos) {
+	for _, term := range strings.Fields(query) {
+		if p, _ := textfold.IndexIgnoreCase(flat, term); p >= 0 && (pos < 0 || p < pos) {
 			pos = p
 		}
 	}
 	if pos < 0 {
 		pos = 0
 	}
-	start := pos - width/3
-	if start < 0 {
-		start = 0
-	}
+	// Open the window a third of its width before the match, on a rune start.
+	start := len(flat[:pos]) - len(textfold.Tail(flat[:pos], width/3))
 	out := truncateRunes(flat[start:], width)
 	if start > 0 {
 		out = "…" + out

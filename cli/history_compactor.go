@@ -15,6 +15,7 @@ import (
 	"github.com/diillson/chatcli/llm/catalog"
 	"github.com/diillson/chatcli/llm/client"
 	"github.com/diillson/chatcli/models"
+	"github.com/diillson/chatcli/pkg/textfold"
 	"go.uber.org/zap"
 )
 
@@ -770,7 +771,7 @@ func summaryPassesGate(response string, segmentChars int) bool {
 	}
 	head := strings.ToLower(text)
 	if len(head) > 160 {
-		head = head[:160]
+		head = textfold.Cut(head, 160)
 	}
 	for _, refusal := range []string{"i'm sorry", "i am sorry", "i cannot", "i can't", "as an ai", "não posso", "desculpe"} {
 		if strings.HasPrefix(head, refusal) {
@@ -838,7 +839,7 @@ func renderSegmentForSummary(layer *compress.Layer, msgs []models.Message, budge
 			if tail < 0 {
 				tail = 0
 			}
-			content = content[:head] + summaryCutMarker + content[len(content)-tail:]
+			content = textfold.Cut(content, head) + summaryCutMarker + textfold.Tail(content, tail)
 		}
 		if len(msg.ToolCalls) > 0 {
 			names := make([]string, 0, len(msg.ToolCalls))

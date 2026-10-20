@@ -10,7 +10,6 @@ import (
 	"sort"
 	"strings"
 	"time"
-	"unicode/utf8"
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -18,6 +17,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	platformv1alpha1 "github.com/diillson/chatcli/operator/api/v1alpha1"
+	"github.com/diillson/chatcli/pkg/textfold"
 )
 
 // LogAnalyzer performs advanced log analysis for root cause detection.
@@ -821,11 +821,7 @@ func (r *LogAnalysisResult) FormatForAI() string {
 	if len(result) > 6000 {
 		// Cut on a rune boundary: log content is arbitrary UTF-8 and this
 		// text is injected into the LLM context.
-		cut := 5997
-		for cut > 0 && !utf8.RuneStart(result[cut]) {
-			cut--
-		}
-		result = result[:cut] + "..."
+		result = textfold.Cut(result, 5997) + "..."
 	}
 	return result
 }
@@ -1043,7 +1039,7 @@ func truncateLine(s string, maxLen int) string {
 	if len(s) <= maxLen {
 		return s
 	}
-	return s[:maxLen-3] + "..."
+	return textfold.Cut(s, maxLen-3) + "..."
 }
 
 // Ensure metav1 import is used.

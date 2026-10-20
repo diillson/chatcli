@@ -35,6 +35,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/diillson/chatcli/pkg/textfold"
 	"go.uber.org/zap"
 )
 
@@ -351,7 +352,7 @@ func truncateForKey(s string) string {
 	if len(s) <= maxKeyLen {
 		return s
 	}
-	return s[:maxKeyLen]
+	return textfold.Cut(s, maxKeyLen)
 }
 
 // Close drains and closes the actions channel. Idempotent — safe to

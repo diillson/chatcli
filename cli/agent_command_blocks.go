@@ -21,6 +21,7 @@ import (
 	"github.com/diillson/chatcli/i18n"
 	"github.com/diillson/chatcli/llm/openaiassistant"
 	"github.com/diillson/chatcli/models"
+	"github.com/diillson/chatcli/pkg/textfold"
 	"github.com/diillson/chatcli/ui/kit"
 	"github.com/diillson/chatcli/utils"
 )
@@ -146,7 +147,7 @@ func (a *AgentMode) extractCommandBlocks(response string) []CommandBlock {
 									cleanLine = strings.TrimSpace(cleanLine)
 
 									if len(cleanLine) > 60 {
-										derivedDesc = cleanLine[:57] + "..."
+										derivedDesc = textfold.Cut(cleanLine, 57) + "..."
 									} else {
 										derivedDesc = cleanLine
 									}
@@ -242,8 +243,7 @@ func findDescriptionBeforeBlock(response, block string) string {
 		return ""
 	}
 
-	startIndex := max(0, blockIndex-200)
-	prefix := response[startIndex:blockIndex]
+	prefix := textfold.Tail(response[:blockIndex], 200)
 
 	lines := strings.Split(prefix, "\n")
 	for i := len(lines) - 1; i >= 0; i-- {

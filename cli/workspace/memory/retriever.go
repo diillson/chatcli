@@ -9,6 +9,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/diillson/chatcli/pkg/knowledge"
+	"github.com/diillson/chatcli/pkg/textfold"
 )
 
 // RelevanceRetriever selects the most relevant memories for the current conversation.
@@ -245,7 +246,7 @@ func (r *RelevanceRetriever) assemble(rankedFacts []*Fact) string {
 				maxNoteLen = 200
 			}
 			if len(noteContent) > maxNoteLen {
-				noteContent = noteContent[:maxNoteLen] + "\n...(truncated)"
+				noteContent = textfold.Cut(noteContent, maxNoteLen) + "\n...(truncated)"
 			}
 			notesParts = append(notesParts, fmt.Sprintf("### %s\n\n%s", dateStr, noteContent))
 		}
@@ -254,7 +255,7 @@ func (r *RelevanceRetriever) assemble(rankedFacts []*Fact) string {
 			sections = append(sections, section)
 		} else if remaining > 300 {
 			// Fit what we can
-			section = section[:remaining]
+			section = textfold.Cut(section, remaining)
 			sections = append(sections, section)
 		}
 	}

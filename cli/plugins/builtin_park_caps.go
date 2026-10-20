@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/diillson/chatcli/i18n"
+	"github.com/diillson/chatcli/pkg/textfold"
 )
 
 // Fase 2.1 capability advertisements for BuiltinParkPlugin. Park is a
@@ -54,7 +55,7 @@ func (p *BuiltinParkPlugin) DescribeCall(args []string) string {
 	case "for_url":
 		if u := extractStringArg(args, "url"); u != "" {
 			if len(u) > 60 {
-				u = u[:60] + "..."
+				u = textfold.Cut(u, 60) + "..."
 			}
 			return i18n.T("plugins.park.describe.for_url", u)
 		}
@@ -64,7 +65,7 @@ func (p *BuiltinParkPlugin) DescribeCall(args []string) string {
 		// name "for_cmd" — collides with the same key at the inner level).
 		if c := extractNestedArg(args, "cmd", "command"); c != "" {
 			if len(c) > 60 {
-				c = c[:60] + "..."
+				c = textfold.Cut(c, 60) + "..."
 			}
 			return i18n.T("plugins.park.describe.for_cmd", c)
 		}

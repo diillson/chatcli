@@ -18,12 +18,14 @@ package workspace
 
 import (
 	"fmt"
-	"go.uber.org/zap"
 	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
 	"unicode/utf8"
+
+	"github.com/diillson/chatcli/pkg/textfold"
+	"go.uber.org/zap"
 )
 
 const (
@@ -251,5 +253,5 @@ func capInstructionDoc(doc string, limit int) string {
 	if i := strings.LastIndexByte(doc[:cut], '\n'); i > limit/2 {
 		cut = i
 	}
-	return doc[:cut] + fmt.Sprintf("\n\n<!-- instruction files truncated at %d KiB -->", limit/1024)
+	return textfold.Cut(doc, cut) + fmt.Sprintf("\n\n<!-- instruction files truncated at %d KiB -->", limit/1024)
 }

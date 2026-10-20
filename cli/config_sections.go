@@ -52,6 +52,7 @@ import (
 	"github.com/diillson/chatcli/llm/transcription"
 	"github.com/diillson/chatcli/llm/tts"
 	"github.com/diillson/chatcli/pkg/stateroot"
+	"github.com/diillson/chatcli/pkg/textfold"
 	"github.com/diillson/chatcli/ui/kit"
 	"github.com/diillson/chatcli/utils"
 )
@@ -362,9 +363,9 @@ func shorten(s string, maxLen int) string {
 		return s
 	}
 	if maxLen < 8 {
-		return s[:maxLen]
+		return textfold.Cut(s, maxLen)
 	}
-	return s[:maxLen-3] + "..."
+	return textfold.Cut(s, maxLen-3) + "..."
 }
 
 // referenceTimeValue renders CHATCLI_NOW for /config: the pinned time when

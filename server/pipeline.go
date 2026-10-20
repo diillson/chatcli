@@ -29,6 +29,7 @@ import (
 	"strings"
 
 	"github.com/diillson/chatcli/i18n"
+	"github.com/diillson/chatcli/pkg/textfold"
 	pb "github.com/diillson/chatcli/proto/chatcli/v1"
 	"go.uber.org/zap"
 	"google.golang.org/grpc/codes"
@@ -102,7 +103,7 @@ func pipelineSession(ctx context.Context, requested string) string {
 		sid = "default"
 	}
 	if len(sid) > pipelineSessionMaxLen {
-		sid = sid[:pipelineSessionMaxLen]
+		sid = textfold.Cut(sid, pipelineSessionMaxLen)
 	}
 	return principal + "/" + sid
 }

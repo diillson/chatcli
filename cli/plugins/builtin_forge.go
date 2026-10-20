@@ -26,6 +26,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/diillson/chatcli/pkg/textfold"
 )
 
 const (
@@ -42,7 +44,7 @@ var forgeRunner = func(ctx context.Context, bin string, args []string) (string, 
 	out, err := exec.CommandContext(ctx, bin, args...).CombinedOutput() // #nosec G204 -- bin is a fixed forge CLI name, args built from a validated allowlist
 	text := strings.TrimSpace(string(out))
 	if len(text) > forgeMaxOutput {
-		text = text[:forgeMaxOutput] + "\n… (output truncated)"
+		text = textfold.Cut(text, forgeMaxOutput) + "\n… (output truncated)"
 	}
 	if err != nil {
 		if text == "" {

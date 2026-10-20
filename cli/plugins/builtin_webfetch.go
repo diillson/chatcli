@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/diillson/chatcli/pkg/textfold"
 	"golang.org/x/net/html"
 )
 
@@ -261,12 +262,12 @@ func buildFetchOutput(parsed fetchArgs, filtered, fullContent, savedPath string,
 			previewSize = 2000
 		}
 		if len(output) > previewSize {
-			output = output[:previewSize] + "\n...(auto-truncated — full body saved to disk)"
+			output = textfold.Cut(output, previewSize) + "\n...(auto-truncated — full body saved to disk)"
 		}
 	}
 	truncated := false
 	if len(output) > parsed.MaxLength {
-		output = output[:parsed.MaxLength] + "\n...(truncated)"
+		output = textfold.Cut(output, parsed.MaxLength) + "\n...(truncated)"
 		truncated = true
 	}
 

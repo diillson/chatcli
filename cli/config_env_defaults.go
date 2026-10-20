@@ -33,6 +33,7 @@ import (
 	"strings"
 
 	"github.com/diillson/chatcli/config"
+	"github.com/diillson/chatcli/pkg/textfold"
 )
 
 // envDefault describes the runtime fallback for one env var.
@@ -374,5 +375,5 @@ func formatDefaultValue(v string) string {
 	if len(v) <= maxDisplay {
 		return v
 	}
-	return v[:maxDisplay-3] + "..."
+	return textfold.Cut(v, maxDisplay-3) + "..."
 }

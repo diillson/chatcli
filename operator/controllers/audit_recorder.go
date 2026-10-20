@@ -6,13 +6,13 @@ import (
 	"fmt"
 	"strings"
 	"time"
-	"unicode/utf8"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	platformv1alpha1 "github.com/diillson/chatcli/operator/api/v1alpha1"
+	"github.com/diillson/chatcli/pkg/textfold"
 )
 
 type AuditRecorder struct {
@@ -252,8 +252,5 @@ func truncate(s string, limit int) string {
 	}
 	// Cut on a rune boundary: audit detail is arbitrary UTF-8, and a mid-rune
 	// byte slice would store invalid text in the audit record.
-	for limit > 0 && !utf8.RuneStart(s[limit]) {
-		limit--
-	}
-	return s[:limit] + "..."
+	return textfold.Cut(s, limit) + "..."
 }

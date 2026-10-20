@@ -49,6 +49,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/diillson/chatcli/pkg/textfold"
 	"github.com/go-rod/rod"
 	"github.com/go-rod/rod/lib/launcher"
 	"github.com/go-rod/rod/lib/proto"
@@ -375,7 +376,7 @@ func navigateAndSerialize(page *rod.Page, target string) (string, error) {
 		return "", fmt.Errorf("serializing rendered DOM: %w", err)
 	}
 	if len(html) > maxRenderedHTMLBytes {
-		html = html[:maxRenderedHTMLBytes]
+		html = textfold.Cut(html, maxRenderedHTMLBytes)
 	}
 	return html, nil
 }

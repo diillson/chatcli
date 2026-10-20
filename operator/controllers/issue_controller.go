@@ -25,6 +25,7 @@ import (
 	ctrlmetrics "sigs.k8s.io/controller-runtime/pkg/metrics"
 
 	platformv1alpha1 "github.com/diillson/chatcli/operator/api/v1alpha1"
+	"github.com/diillson/chatcli/pkg/textfold"
 )
 
 const issueFinalizerName = "platform.chatcli.io/issue-finalizer"
@@ -229,7 +230,7 @@ func (r *IssueReconciler) handleDetected(ctx context.Context, issue *platformv1a
 			// Truncate description to avoid bloating the context
 			desc := rb.Spec.Description
 			if len(desc) > 200 {
-				desc = desc[:200] + "..."
+				desc = textfold.Cut(desc, 200) + "..."
 			}
 			sections = append(sections, fmt.Sprintf(
 				"RUNBOOK: %s\nDescription: %s\nTrigger: %s + %s + %s\nSteps:\n%s",

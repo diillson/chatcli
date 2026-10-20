@@ -14,6 +14,7 @@ import (
 	"strings"
 
 	"github.com/diillson/chatcli/pkg/pdftext"
+	"github.com/diillson/chatcli/pkg/textfold"
 )
 
 // sensitivePaths contains paths that should not be read by automated tools (LLM, coder mode).
@@ -221,7 +222,7 @@ func readPDFText(ctx context.Context, path string, size, maxChars int64) (string
 	}
 	text := res.Text()
 	if int64(len(text)) > maxChars {
-		text = text[:maxChars]
+		text = textfold.Cut(text, int(maxChars))
 	}
 	return text, nil
 }

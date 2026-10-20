@@ -25,6 +25,7 @@ import (
 	"github.com/diillson/chatcli/llm/client"
 	"github.com/diillson/chatcli/llm/internal/visionwire"
 	"github.com/diillson/chatcli/models"
+	"github.com/diillson/chatcli/pkg/textfold"
 	"github.com/diillson/chatcli/utils"
 	"go.uber.org/zap"
 )
@@ -408,7 +409,7 @@ func (c *GeminiClient) parseResponse(bodyBytes []byte) (string, error) {
 		c.logger.Error(i18n.T("llm.googleai.decode_error"),
 			zap.Error(err),
 			zap.String("model", c.model),
-			zap.String("raw_response", sanitizedResponse[:min(500, len(sanitizedResponse))]))
+			zap.String("raw_response", textfold.Cut(sanitizedResponse, 500)))
 		return "", fmt.Errorf("%s: %w", i18n.T("llm.error.decode_response"), err)
 	}
 

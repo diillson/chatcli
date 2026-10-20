@@ -20,6 +20,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	platformv1alpha1 "github.com/diillson/chatcli/operator/api/v1alpha1"
+	"github.com/diillson/chatcli/pkg/textfold"
 )
 
 const (
@@ -746,7 +747,7 @@ func readConfigFiles(localPath string, configFiles []string) []ConfigFileContent
 
 		content := string(data)
 		if len(content) > 2000 {
-			content = content[:2000] + "\n... (truncated)"
+			content = textfold.Cut(content, 2000) + "\n... (truncated)"
 		}
 
 		configs = append(configs, ConfigFileContent{
@@ -843,7 +844,7 @@ func (ctx *SourceCodeContext) FormatForAI() string {
 
 	result := sb.String()
 	if len(result) > maxSourceContextChars {
-		result = result[:maxSourceContextChars-3] + "..."
+		result = textfold.Cut(result, maxSourceContextChars-3) + "..."
 	}
 	return result
 }

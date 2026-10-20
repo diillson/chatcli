@@ -14,6 +14,7 @@ import (
 	"github.com/diillson/chatcli/i18n"
 	"github.com/diillson/chatcli/pkg/persona"
 	"github.com/diillson/chatcli/pkg/persona/builtin"
+	"github.com/diillson/chatcli/pkg/textfold"
 	"go.uber.org/zap"
 )
 
@@ -274,7 +275,7 @@ func (h *PersonaHandler) ShowActive(full bool) {
 		// Show first 800 chars of prompt or full if requested
 		preview := prompt.FullPrompt
 		if !full && len(preview) > 800 {
-			preview = preview[:800] + "\n... " + i18n.T("agent.persona.show.truncated")
+			preview = textfold.Cut(preview, 800) + "\n... " + i18n.T("agent.persona.show.truncated")
 		}
 		if full {
 			// Use less for pagination when --full is used

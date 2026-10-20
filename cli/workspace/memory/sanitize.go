@@ -12,6 +12,8 @@ package memory
 import (
 	"strings"
 	"sync/atomic"
+
+	"github.com/diillson/chatcli/pkg/textfold"
 )
 
 // maxFactContentChars bounds one stored fact; longer text is not a fact.
@@ -39,10 +41,7 @@ func SetRedactor(fn func(string) string) {
 func SanitizeFactContent(content string) string {
 	c := strings.Join(strings.Fields(content), " ")
 	if len(c) > maxFactContentChars {
-		c = c[:maxFactContentChars]
-		for len(c) > 0 && c[len(c)-1]&0xC0 == 0x80 { // never split a rune
-			c = c[:len(c)-1]
-		}
+		c = textfold.Cut(c, maxFactContentChars)
 		c = strings.TrimSpace(c) + "…"
 	}
 	if fn := redactor.Load(); fn != nil {

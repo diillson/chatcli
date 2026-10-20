@@ -2,11 +2,13 @@ package memory
 
 import (
 	"encoding/json"
-	"github.com/diillson/chatcli/pkg/flock"
 	"sort"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/diillson/chatcli/pkg/flock"
+	"github.com/diillson/chatcli/pkg/textfold"
 
 	"go.uber.org/zap"
 )
@@ -99,7 +101,7 @@ func (tt *TopicTracker) RecordWithSummary(topics map[string]string) {
 		}
 		summary = strings.TrimSpace(summary)
 		if len(summary) > topicSummaryCap {
-			summary = strings.TrimSpace(summary[:topicSummaryCap])
+			summary = strings.TrimSpace(textfold.Cut(summary, topicSummaryCap))
 		}
 
 		t, ok := tt.topics[name]
@@ -212,7 +214,7 @@ func (tt *TopicTracker) FormatForPrompt(limit int) string {
 		// carries what was discussed, not just the topic name.
 		if s := strings.TrimSpace(t.Summary); s != "" {
 			if len(s) > 80 {
-				s = strings.TrimSpace(s[:80])
+				s = strings.TrimSpace(textfold.Cut(s, 80))
 			}
 			parts = append(parts, t.Name+" — "+s)
 		} else {

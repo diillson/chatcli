@@ -47,6 +47,7 @@ import (
 	"github.com/diillson/chatcli/models"
 	"github.com/diillson/chatcli/pkg/persona"
 	"github.com/diillson/chatcli/pkg/pulse"
+	"github.com/diillson/chatcli/pkg/textfold"
 	"github.com/diillson/chatcli/utils"
 	"go.uber.org/zap"
 	"golang.org/x/term"
@@ -4078,7 +4079,7 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 					// Truncate output for hook payload
 					hookOutput := toolOutput
 					if len(hookOutput) > 2000 {
-						hookOutput = hookOutput[:2000] + "...(truncated)"
+						hookOutput = textfold.Cut(hookOutput, 2000) + "...(truncated)"
 					}
 					a.cli.hookManager.FireAsync(ctx, hooks.HookEvent{
 						Type:       eventType,

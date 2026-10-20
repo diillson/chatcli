@@ -21,6 +21,7 @@ import (
 	"github.com/diillson/chatcli/i18n"
 	"github.com/diillson/chatcli/pkg/persona"
 	"github.com/diillson/chatcli/pkg/registry"
+	"github.com/diillson/chatcli/pkg/textfold"
 	"go.uber.org/zap"
 )
 
@@ -372,7 +373,7 @@ func (sh *SkillHandler) Install(ctx context.Context, name string, fromRegistry s
 				if m.Description != "" {
 					desc := m.Description
 					if len(desc) > 100 {
-						desc = desc[:97] + "..."
+						desc = textfold.Cut(desc, 97) + "..."
 					}
 					fmt.Printf("       %s\n", colorize(desc, ColorGray))
 				}
@@ -1413,7 +1414,7 @@ func shortenRegistryError(err error) string {
 		return i18n.T("skill.cmd.err_not_found")
 	}
 	if len(msg) > 60 {
-		return msg[:57] + "..."
+		return textfold.Cut(msg, 57) + "..."
 	}
 	return msg
 }

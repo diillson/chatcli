@@ -25,6 +25,7 @@ import (
 
 	"github.com/diillson/chatcli/cli/mcp"
 	"github.com/diillson/chatcli/cli/plugins"
+	"github.com/diillson/chatcli/pkg/textfold"
 )
 
 // toolCatalogEnvVar selects the catalog mode: "deferred" (default) or "full".
@@ -240,7 +241,7 @@ func firstSentence(s string) string {
 		for cut > 0 && !utf8.RuneStart(s[cut]) {
 			cut--
 		}
-		return s[:cut] + "…"
+		return textfold.Cut(s, cut) + "…"
 	}
 	return s
 }
