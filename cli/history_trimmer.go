@@ -5,6 +5,7 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/diillson/chatcli/cli/agent"
 	"github.com/diillson/chatcli/cli/compress"
 	"github.com/diillson/chatcli/models"
 	"github.com/diillson/chatcli/pkg/textfold"
@@ -52,11 +53,7 @@ func (t *MessageTrimmer) compressOrEmpty(s string) string {
 var (
 	reasoningBlockRe   = regexp.MustCompile(`(?s)<plan>.*?</plan>|<reasoning>.*?</reasoning>`)
 	explanationBlockRe = regexp.MustCompile(`(?s)<explanation>.*?</explanation>`)
-	// (?:_call)? also compacts the <tool ...> alias emitted by CLI-backed
-	// models (Devin/Codex/Claude Code); groups stay 1=name, 2=args.
-	toolCallRe        = regexp.MustCompile(`(?s)<tool(?:_call)?\s+name="([^"]*?)"\s+args='([^']*?)'\s*/>`)
-	toolCallAltRe     = regexp.MustCompile(`(?s)<tool(?:_call)?\s+name="([^"]*?)"\s+args="([^"]*?)"\s*/>`)
-	toolOutputBlockRe = regexp.MustCompile(`(?s)<tool_output>\n?(.*?)\n?</tool_output>`)
+	toolOutputBlockRe  = regexp.MustCompile(`(?s)<tool_output>\n?(.*?)\n?</tool_output>`)
 	// Pattern to detect tool feedback messages (from agent_mode.go format)
 	toolFeedbackPrefixRe = regexp.MustCompile(`^(?:The tool '|A ferramenta '|--- Resultado da Ação)`)
 	formatErrorPrefixRe  = regexp.MustCompile(`^FORMAT ERROR:`)
@@ -151,27 +148,24 @@ func (t *MessageTrimmer) trimAssistantMessage(content string) string {
 // compactToolCalls replaces verbose <tool_call> XML with compact references.
 // Example: <tool_call name="@coder" args='{"cmd":"read","args":{"file":"main.go"}}' />
 // becomes: [tool: @coder read main.go]
+//
+// Calls are located by the agent's own tool call parser, so an argument
+// holding an apostrophe ("Mary's") is compacted like any other instead of
+// slipping past a quote-delimited pattern and staying verbatim.
 func (t *MessageTrimmer) compactToolCalls(content string) string {
-	// Handle single-quoted args
-	content = toolCallRe.ReplaceAllStringFunc(content, func(match string) string {
-		return compactSingleToolCall(match, toolCallRe)
-	})
-	// Handle double-quoted args
-	content = toolCallAltRe.ReplaceAllStringFunc(content, func(match string) string {
-		return compactSingleToolCall(match, toolCallAltRe)
-	})
+	calls, _ := agent.ParseToolCalls(content)
+	for _, c := range calls {
+		raw := strings.TrimSpace(c.Raw)
+		if !strings.HasPrefix(raw, "<tool") || !strings.HasSuffix(raw, "/>") {
+			continue // only self-closing XML calls are compacted
+		}
+		content = strings.Replace(content, c.Raw, compactSingleToolCall(c.Name, c.Args), 1)
+	}
 	return content
 }
 
-// compactSingleToolCall converts a tool_call match into a compact reference.
-func compactSingleToolCall(match string, re *regexp.Regexp) string {
-	groups := re.FindStringSubmatch(match)
-	if len(groups) < 3 {
-		return match
-	}
-	toolName := groups[1]
-	argsStr := groups[2]
-
+// compactSingleToolCall converts one tool call into a compact reference.
+func compactSingleToolCall(toolName, argsStr string) string {
 	// Try to extract cmd and key arg for a readable compact form
 	cmd := extractJSONField(argsStr, "cmd")
 	file := extractJSONField(argsStr, "file")
