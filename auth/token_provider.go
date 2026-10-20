@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/diillson/chatcli/i18n"
+	"github.com/diillson/chatcli/pkg/flock"
 	"go.uber.org/zap"
 )
 
@@ -327,6 +328,26 @@ func (p *oauthTokenProvider) Token(ctx context.Context) (string, error) {
 }
 
 func (p *oauthTokenProvider) runRefresh(ctx context.Context, snapshot *AuthProfileCredential) error {
+	if p.profileID != "" {
+		// Refresh tokens rotate: two processes renewing the same profile at
+		// once leave one of them holding a refresh token the server already
+		// replaced, and the user logged out. The lock beside the store makes
+		// the renewal one at a time across processes; whoever comes second
+		// finds the token the first one stored and adopts it instead.
+		unlock := flock.Lock(DefaultStorePath() + refreshLockSuffix)
+		defer unlock()
+		if stored := storedProfileFromDisk(p.profileID, p.logger); stored != nil &&
+			stored.Access != "" && stored.Access != snapshot.Access && !stored.IsExpired() {
+			p.mu.Lock()
+			p.cred.Access = stored.Access
+			if stored.Refresh != "" {
+				p.cred.Refresh = stored.Refresh
+			}
+			p.cred.Expires = stored.Expires
+			p.mu.Unlock()
+			return nil
+		}
+	}
 	refreshed, err := p.refreshFn(ctx, snapshot, p.logger)
 	if err != nil {
 		return err
@@ -342,6 +363,32 @@ func (p *oauthTokenProvider) runRefresh(ctx context.Context, snapshot *AuthProfi
 
 	p.persistToStore(refreshed)
 	return nil
+}
+
+// refreshLockSuffix names the lock that serializes OAuth renewals of the
+// credential store across processes.
+const refreshLockSuffix = ".refresh"
+
+// storedProfileFromDisk rereads the credential store, dropping this
+// process's cached copy, which another process may have made stale, and
+// returns a copy of the profile (nil when absent or unreadable). The
+// persist that follows a renewal then writes over the current file, not
+// over the stale copy.
+func storedProfileFromDisk(profileID string, logger *zap.Logger) *AuthProfileCredential {
+	storeMu.Lock()
+	defer storeMu.Unlock()
+	cachedStore = nil
+	storeLoadErr = nil
+	store := loadStoreUnlocked(logger)
+	if store == nil {
+		return nil
+	}
+	existing := store.Profiles[profileID]
+	if existing == nil {
+		return nil
+	}
+	copied := *existing
+	return &copied
 }
 
 func (p *oauthTokenProvider) persistToStore(refreshed *AuthProfileCredential) {
