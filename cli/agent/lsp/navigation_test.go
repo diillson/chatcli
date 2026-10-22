@@ -72,6 +72,26 @@ func navFakeServer(t *testing.T, serverIn io.Reader, serverOut io.Writer, flatSy
 			reply(m.ID, map[string]interface{}{
 				"contents": map[string]interface{}{"kind": "markdown", "value": "```go\nfunc Attach(id string) error\n```"},
 			})
+		case "textDocument/implementation":
+			reply(m.ID, []map[string]interface{}{{"uri": "file:///src/impl.go", "range": rng(42, 6)}})
+		case "workspace/symbol":
+			// WorkspaceSymbol shape: location may carry only a uri.
+			reply(m.ID, []map[string]interface{}{
+				{"name": "Manager", "kind": 23, "containerName": "ctxmgr", "location": map[string]interface{}{"uri": "file:///src/a.go", "range": rng(10, 0)}},
+				{"name": "ManagerOpt", "kind": 12, "location": map[string]interface{}{"uri": "file:///src/opt.go"}},
+			})
+		case "textDocument/rename":
+			// documentChanges shape with a versioned TextDocumentEdit plus a
+			// `changes` entry for another file — both must decode.
+			reply(m.ID, map[string]interface{}{
+				"changes": map[string]interface{}{
+					"file:///src/b.go": []map[string]interface{}{{"range": rng(7, 2), "newText": "Renamed"}},
+				},
+				"documentChanges": []map[string]interface{}{{
+					"textDocument": map[string]interface{}{"uri": "file:///src/a.go", "version": 1},
+					"edits":        []map[string]interface{}{{"range": rng(3, 1), "newText": "Renamed"}},
+				}},
+			})
 		case "shutdown":
 			reply(m.ID, nil)
 		}

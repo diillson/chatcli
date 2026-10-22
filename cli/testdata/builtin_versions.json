@@ -36,8 +36,8 @@
     "surface": "a54ccca1bcfc7b96"
   },
   "@compress": {
-    "version": "1.0.0",
-    "surface": "7220391f38a63bd3"
+    "version": "1.1.0",
+    "surface": "181999e4756a7dcf"
   },
   "@context": {
     "version": "1.1.0",
@@ -84,8 +84,8 @@
     "surface": "a23ec7f45998f3e0"
   },
   "@lsp": {
-    "version": "1.0.0",
-    "surface": "46f0d5d1694e6488"
+    "version": "1.1.0",
+    "surface": "62b9fc2e1941f681"
   },
   "@mail": {
     "version": "1.1.0",

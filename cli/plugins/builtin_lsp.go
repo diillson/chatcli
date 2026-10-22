@@ -35,6 +35,26 @@ type LSPAdapter interface {
 	Hover(file string, line, column int) (string, error)
 }
 
+// LSPWorkspaceNavigator is an OPTIONAL capability of the wired LSPAdapter:
+// the workspace-wide, read-only requests (textDocument/implementation and
+// workspace/symbol). A separate interface because LSPAdapter is exported
+// API — extending it would break existing implementers.
+type LSPWorkspaceNavigator interface {
+	// Implementation lists where the symbol at the position is implemented
+	// (concrete types of an interface, overrides of a method).
+	Implementation(file string, line, column int) (string, error)
+	// WorkspaceSymbol searches the whole workspace for symbols matching
+	// query. file is optional and only selects the language server.
+	WorkspaceSymbol(file, query string, limit int) (string, error)
+}
+
+// LSPRenamer is the OPTIONAL mutating capability: textDocument/rename.
+// dryRun lists every file/range that would change; false applies the edits
+// to disk (inside the workspace, atomic per file).
+type LSPRenamer interface {
+	Rename(file string, line, column int, newName string, dryRun bool) (string, error)
+}
+
 type lspAdapterHolder struct{ a LSPAdapter }
 
 var lspAdapterAtom atomic.Value // lspAdapterHolder
@@ -78,14 +98,20 @@ Subcommands (cmd + args; line/column are 1-based):
   references  {file, line, column, include_declaration?, limit?}  every usage of the symbol
   symbols     {file}                                   outline: functions, types, methods
   hover       {file, line, column}                     signature/type/docs at the position
+  implementation   {file, line, column}                concrete implementations of the interface/method at the position
+  workspace_symbol {query, file?, limit?}              search symbols across the whole workspace (file only picks the language server)
+  rename      {file, line, column, new_name, dry_run?} rename the symbol everywhere. dry_run defaults to TRUE and only
+                                                       lists the files/ranges that would change; pass "dry_run": false
+                                                       to write the edits (inside the workspace, atomic per file)
 
 Workflow: after editing a file, diagnostics tells you if it still compiles;
 before changing a symbol, references shows the blast radius; symbols maps an
-unfamiliar file faster than reading it.`
+unfamiliar file faster than reading it; rename with dry_run first, then
+dry_run:false, then diagnostics on the touched files.`
 }
 
 // Version is semver; bumped when the surface changes.
-func (*BuiltinLSPPlugin) Version() string { return "1.0.0" }
+func (*BuiltinLSPPlugin) Version() string { return "1.1.0" }
 
 // Path is empty for builtin plugins.
 func (*BuiltinLSPPlugin) Path() string { return "" }
@@ -131,6 +157,34 @@ func (*BuiltinLSPPlugin) Schema() string {
 				"description": "signature, type and docs of the symbol at file:line:column",
 				"flags":       []map[string]interface{}{fileFlag, lineFlag, colFlag},
 				"examples":    []string{`{"cmd":"hover","args":{"file":"cli/cli.go","line":128,"column":14}}`},
+			},
+			{
+				"name":        "implementation",
+				"description": "list where the symbol at file:line:column is implemented (concrete types of an interface, overrides of a method)",
+				"flags":       []map[string]interface{}{fileFlag, lineFlag, colFlag},
+				"examples":    []string{`{"cmd":"implementation","args":{"file":"cli/plugins/plugin.go","line":40,"column":6}}`},
+			},
+			{
+				"name":        "workspace_symbol",
+				"description": "search symbols across the whole workspace by (partial) name",
+				"flags": []map[string]interface{}{
+					{"name": "query", "description": "symbol name or fragment to search for", "type": "string", "required": true},
+					{"name": "file", "description": "optional: any source file of the language to search — selects (and starts) the language server; omit to reuse a running one", "type": "string", "required": false},
+					{"name": "limit", "description": "max symbols returned", "type": "int", "default": "50"},
+				},
+				"examples": []string{`{"cmd":"workspace_symbol","args":{"query":"ChatCLI","file":"cli/cli.go"}}`},
+			},
+			{
+				"name":        "rename",
+				"description": "rename the symbol at file:line:column everywhere it is referenced. dry_run (default true) only lists the files and ranges that would change; dry_run:false writes the edits to disk (workspace-bounded, atomic per file, refused if a target changed meanwhile)",
+				"flags": []map[string]interface{}{fileFlag, lineFlag, colFlag,
+					{"name": "new_name", "description": "the new identifier", "type": "string", "required": true},
+					{"name": "dry_run", "description": "true (default) previews; false applies the edits", "type": "bool", "default": "true"},
+				},
+				"examples": []string{
+					`{"cmd":"rename","args":{"file":"cli/cli.go","line":128,"column":14,"new_name":"handleTurn"}}`,
+					`{"cmd":"rename","args":{"file":"cli/cli.go","line":128,"column":14,"new_name":"handleTurn","dry_run":false}}`,
+				},
 			},
 		},
 	}
@@ -194,26 +248,92 @@ func (p *BuiltinLSPPlugin) ExecuteWithStream(_ context.Context, args []string, _
 			return "", err
 		}
 		return adapter.Hover(in.File, in.Line, in.Column)
+	case "implementation":
+		nav, ok := adapter.(LSPWorkspaceNavigator)
+		if !ok {
+			return "", errors.New("@lsp implementation: not available in this session")
+		}
+		in, err := decodeLSPArgs(inner, true)
+		if err != nil {
+			return "", err
+		}
+		return nav.Implementation(in.File, in.Line, in.Column)
+	case "workspace_symbol":
+		nav, ok := adapter.(LSPWorkspaceNavigator)
+		if !ok {
+			return "", errors.New("@lsp workspace_symbol: not available in this session")
+		}
+		in := decodeLSPRaw(inner)
+		if in.Query == "" {
+			return "", errors.New(`@lsp workspace_symbol: "query" is required`)
+		}
+		return nav.WorkspaceSymbol(in.File, in.Query, in.Limit)
+	case "rename":
+		rn, ok := adapter.(LSPRenamer)
+		if !ok {
+			return "", errors.New("@lsp rename: not available in this session")
+		}
+		in, err := decodeLSPArgs(inner, true)
+		if err != nil {
+			return "", err
+		}
+		if in.NewName == "" {
+			return "", errors.New(`@lsp rename: "new_name" is required`)
+		}
+		return rn.Rename(in.File, in.Line, in.Column, in.NewName, in.DryRun)
 	default:
-		return "", fmt.Errorf("@lsp: unknown cmd %q (valid: diagnostics|definition|references|symbols|hover)", cmd)
+		return "", fmt.Errorf("@lsp: unknown cmd %q (valid: %s)", cmd, lspValidCmds)
 	}
 }
 
+// lspValidCmds is the canonical verb list echoed in parse errors.
+const lspValidCmds = "diagnostics|definition|references|symbols|hover|implementation|workspace_symbol|rename"
+
 // lspArgs is the shared argument shape across subcommands.
 type lspArgs struct {
-	File               string `json:"file"`
-	Line               int    `json:"line"`
-	Column             int    `json:"column"`
-	IncludeDeclaration *bool  `json:"include_declaration"`
-	Limit              int    `json:"limit"`
+	File               string
+	Line               int
+	Column             int
+	IncludeDeclaration *bool
+	Limit              int
+	Query              string
+	NewName            string
+	// DryRun defaults to true: a rename never writes unless asked to.
+	DryRun bool
+}
+
+// decodeLSPRaw reads the inner args leniently: aliased keys, stringified
+// ints ("128") and stringified booleans ("false") are all accepted — the
+// agent flattener and the various providers produce every one of them.
+func decodeLSPRaw(inner string) lspArgs {
+	var raw map[string]json.RawMessage
+	_ = json.Unmarshal([]byte(inner), &raw)
+	in := lspArgs{
+		File:    strings.TrimSpace(jsonString(raw, "file", "path", "filepath")),
+		Line:    jsonInt(raw, "line", "row"),
+		Column:  jsonInt(raw, "column", "col", "character"),
+		Limit:   jsonInt(raw, "limit", "max"),
+		Query:   strings.TrimSpace(jsonString(raw, "query", "q", "name", "symbol")),
+		NewName: strings.TrimSpace(jsonString(raw, "new_name", "newName", "new", "to")),
+		DryRun:  true,
+	}
+	if v, present := jsonBoolLookup(raw, "include_declaration", "includeDeclaration"); present {
+		in.IncludeDeclaration = &v
+	}
+	if v, present := jsonBoolLookup(raw, "dry_run", "dryRun", "preview"); present {
+		in.DryRun = v
+	}
+	if v, present := jsonBoolLookup(raw, "apply", "write"); present && v {
+		in.DryRun = false
+	}
+	return in
 }
 
 // decodeLSPArgs parses the inner args, enforcing file (always) and 1-based
 // line/column (when the subcommand is positional).
 func decodeLSPArgs(inner string, needsPosition bool) (lspArgs, error) {
-	var in lspArgs
-	_ = json.Unmarshal([]byte(inner), &in)
-	if strings.TrimSpace(in.File) == "" {
+	in := decodeLSPRaw(inner)
+	if in.File == "" {
 		return in, errors.New(`"file" is required`)
 	}
 	if needsPosition {
@@ -237,6 +357,12 @@ func canonicalLSPCmd(cmd string) string {
 		return "symbols"
 	case "hover", "type", "signature", "doc":
 		return "hover"
+	case "implementation", "implementations", "impl", "impls", "implementors", "implementers":
+		return "implementation"
+	case "workspace_symbol", "workspace_symbols", "workspace-symbol", "workspace-symbols", "wsymbol", "search", "search_symbol", "find_symbol":
+		return "workspace_symbol"
+	case "rename", "refactor-rename", "rename_symbol":
+		return "rename"
 	default:
 		return ""
 	}
@@ -247,7 +373,7 @@ func canonicalLSPCmd(cmd string) string {
 func parseLSPInvocation(args []string) (string, string, error) {
 	payload := strings.TrimSpace(strings.Join(args, " "))
 	if payload == "" {
-		return "", "", fmt.Errorf("missing cmd (valid: diagnostics|definition|references|symbols|hover)")
+		return "", "", fmt.Errorf("missing cmd (valid: %s)", lspValidCmds)
 	}
 
 	if strings.HasPrefix(payload, "{") {
@@ -263,7 +389,7 @@ func parseLSPInvocation(args []string) (string, string, error) {
 		}
 		canon := canonicalLSPCmd(cmdStr)
 		if canon == "" {
-			return "", "", fmt.Errorf("missing or unknown cmd %q (valid: diagnostics|definition|references|symbols|hover)", cmdStr)
+			return "", "", fmt.Errorf("missing or unknown cmd %q (valid: %s)", cmdStr, lspValidCmds)
 		}
 		var inner string
 		if rargs, ok := raw["args"]; ok && len(rargs) > 0 {
@@ -278,25 +404,35 @@ func parseLSPInvocation(args []string) (string, string, error) {
 
 	canon := canonicalLSPCmd(args[0])
 	if canon == "" {
-		return "", "", fmt.Errorf("unknown cmd %q (valid: diagnostics|definition|references|symbols|hover)", args[0])
+		return "", "", fmt.Errorf("unknown cmd %q (valid: %s)", args[0], lspValidCmds)
 	}
 	// argv form: the agent flattener delivers the {cmd,args} envelope as
 	// "--flag value" pairs; the legacy positional "file [line column]" form
+	// (or "workspace_symbol <query>", "rename <file> <line> <column> <new>")
 	// stays supported when no flag token is present.
 	tail := args[1:]
 	if !hasFlagToken(tail) {
 		in := map[string]interface{}{}
-		if len(tail) > 0 {
+		if canon == "workspace_symbol" {
+			in["query"] = strings.Join(tail, " ")
+		} else if len(tail) > 0 {
 			in["file"] = tail[0]
 		}
-		if len(tail) > 2 {
+		if canon != "workspace_symbol" && len(tail) > 2 {
 			in["line"] = atoiSafe(tail[1])
 			in["column"] = atoiSafe(tail[2])
+		}
+		if canon == "rename" && len(tail) > 3 {
+			in["new_name"] = tail[3]
 		}
 		b, _ := json.Marshal(in)
 		return canon, string(b), nil
 	}
-	return canon, argvInner(tail, "file", nil, map[string]bool{"line": true, "column": true, "limit": true}), nil
+	primary := "file"
+	if canon == "workspace_symbol" {
+		primary = "query"
+	}
+	return canon, argvInner(tail, primary, nil, map[string]bool{"line": true, "column": true, "limit": true}), nil
 }
 
 // hasFlagToken reports whether any argv token is flag-shaped.

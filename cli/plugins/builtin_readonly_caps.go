@@ -188,23 +188,44 @@ func (*BuiltinVoicePlugin) DescribeCall(args []string) string {
 
 // --- @compress ----------------------------------------------------------
 
-// IsReadOnly reports true: compressing stores a key in the session's
-// in-memory CCR store and stats reads it — nothing outside the session
-// changes. It is the counterpart of @recall, which is read-only for the
-// same reason: a confirmation prompt on it would stall the turn that
-// needs it.
-func (*BuiltinCompressPlugin) IsReadOnly(_ []string) bool { return true }
-
-// IsConcurrencySafe reports true: the CCR store is safe for concurrent use.
-func (*BuiltinCompressPlugin) IsConcurrencySafe(_ []string) bool { return true }
-
-// DescribeCall distinguishes stats from a compression in the spinner.
-func (*BuiltinCompressPlugin) DescribeCall(args []string) string {
-	payload := strings.TrimSpace(strings.Join(args, " "))
-	if strings.EqualFold(payload, "stats") || strings.Contains(payload, `"stats"`) {
-		return i18n.T("plugins.compress.describe.stats")
+// compressWrites reports whether the call writes to disk ("out" given). A
+// parse failure counts as writing (fail closed).
+func compressWrites(args []string) bool {
+	in, err := parseCompressArgs(args)
+	if err != nil {
+		return true
 	}
-	return i18n.T("plugins.compress.describe.compress")
+	return in.Out != ""
+}
+
+// IsReadOnly reports true unless "out" is given: compressing stores a key
+// in the session's in-memory CCR store and stats reads it — nothing outside
+// the session changes. It is the counterpart of @recall, which is read-only
+// for the same reason: a confirmation prompt on it would stall the turn
+// that needs it. Writing the result to a file is a real side effect.
+func (*BuiltinCompressPlugin) IsReadOnly(args []string) bool { return !compressWrites(args) }
+
+// IsConcurrencySafe reports true: the CCR store is safe for concurrent use;
+// a file write is not batched with other tools.
+func (*BuiltinCompressPlugin) IsConcurrencySafe(args []string) bool { return !compressWrites(args) }
+
+// DescribeCall distinguishes stats, a file compression and an inline
+// compression in the spinner.
+func (*BuiltinCompressPlugin) DescribeCall(args []string) string {
+	in, err := parseCompressArgs(args)
+	if err != nil {
+		return i18n.T("plugins.compress.describe.compress")
+	}
+	switch {
+	case strings.EqualFold(in.Cmd, "stats"):
+		return i18n.T("plugins.compress.describe.stats")
+	case len(in.Files) == 1:
+		return i18n.T("plugins.compress.describe.file", describeTrim(in.Files[0]))
+	case len(in.Files) > 1:
+		return i18n.T("plugins.compress.describe.files", len(in.Files))
+	default:
+		return i18n.T("plugins.compress.describe.compress")
+	}
 }
 
 // --- @recall ------------------------------------------------------------

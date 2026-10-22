@@ -7,23 +7,33 @@
 package plugins
 
 import (
-	"encoding/json"
-
 	"github.com/diillson/chatcli/i18n"
 )
 
 // Capability advertisements for BuiltinLSPPlugin, in the same per-plugin caps
 // file shape as @knowledge/@read/@park.
 
-// IsReadOnly reports true for every invocation: @lsp only queries language
-// servers about source files — it never edits code or state. (The servers it
-// launches are curated presets from the LSP registry, overridable only via
-// the operator's CHATCLI_LSP_*_CMD env vars, not by tool arguments.)
-func (p *BuiltinLSPPlugin) IsReadOnly(_ []string) bool { return true }
+// lspMutates reports whether an invocation writes to disk: only a rename
+// with dry_run:false does. A parse failure counts as mutating (fail closed).
+func lspMutates(args []string) bool {
+	cmd, inner, err := parseLSPInvocation(args)
+	if err != nil {
+		return true
+	}
+	return cmd == "rename" && !decodeLSPRaw(inner).DryRun
+}
 
-// IsConcurrencySafe reports true: the session pool serializes access to each
-// language server behind its own lock, so parallel queries never conflict.
-func (p *BuiltinLSPPlugin) IsConcurrencySafe(_ []string) bool { return true }
+// IsReadOnly reports true for every query: @lsp only asks language servers
+// about source files. (The servers it launches are curated presets from the
+// LSP registry, overridable only via the operator's CHATCLI_LSP_*_CMD env
+// vars, not by tool arguments.) The single exception is rename with
+// dry_run:false, which rewrites files.
+func (p *BuiltinLSPPlugin) IsReadOnly(args []string) bool { return !lspMutates(args) }
+
+// IsConcurrencySafe mirrors IsReadOnly: the session pool serializes access
+// to each language server behind its own lock, so parallel queries never
+// conflict; an applied rename must not race other file edits.
+func (p *BuiltinLSPPlugin) IsConcurrencySafe(args []string) bool { return !lspMutates(args) }
 
 // DescribeCall surfaces what is being navigated so the spinner reads
 // "LSP: references of cli/cli.go:128" instead of the raw JSON envelope.
@@ -32,11 +42,13 @@ func (p *BuiltinLSPPlugin) DescribeCall(args []string) string {
 	if err != nil {
 		return i18n.T("plugins.lsp.describe_generic")
 	}
-	var in struct {
-		File string `json:"file"`
-		Line int    `json:"line"`
+	in := decodeLSPRaw(inner)
+	if cmd == "workspace_symbol" {
+		if in.Query == "" {
+			return i18n.T("plugins.lsp.describe_generic")
+		}
+		return i18n.T("plugins.lsp.describe_workspace_symbol", describeTrim(in.Query))
 	}
-	_ = json.Unmarshal([]byte(inner), &in)
 	if in.File == "" {
 		return i18n.T("plugins.lsp.describe_generic")
 	}
@@ -52,6 +64,13 @@ func (p *BuiltinLSPPlugin) DescribeCall(args []string) string {
 		return i18n.T("plugins.lsp.describe_symbols", target)
 	case "hover":
 		return i18n.T("plugins.lsp.describe_hover", target, in.Line)
+	case "implementation":
+		return i18n.T("plugins.lsp.describe_implementation", target, in.Line)
+	case "rename":
+		if in.DryRun {
+			return i18n.T("plugins.lsp.describe_rename_preview", target, in.Line, describeTrim(in.NewName))
+		}
+		return i18n.T("plugins.lsp.describe_rename", target, in.Line, describeTrim(in.NewName))
 	default:
 		return i18n.T("plugins.lsp.describe_generic")
 	}

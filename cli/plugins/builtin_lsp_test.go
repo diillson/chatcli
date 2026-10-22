@@ -112,7 +112,7 @@ func TestLSPValidationErrors(t *testing.T) {
 		{[]string{`{"cmd":"diagnostics","args":{}}`}, `"file" is required`},
 		{[]string{`{"cmd":"definition","args":{"file":"a.go"}}`}, "1-based"},
 		{[]string{`{"cmd":"definition","args":{"file":"a.go","line":0,"column":3}}`}, "1-based"},
-		{[]string{`{"cmd":"rename","args":{"file":"a.go"}}`}, "unknown cmd"},
+		{[]string{`{"cmd":"bogus","args":{"file":"a.go"}}`}, "unknown cmd"},
 	}
 	for _, c := range cases {
 		if _, err := p.Execute(context.Background(), c.args); err == nil || !strings.Contains(err.Error(), c.want) {
@@ -131,8 +131,12 @@ func TestLSPNoAdapterWired(t *testing.T) {
 
 func TestLSPCapsReadOnlyAndConcurrent(t *testing.T) {
 	p := NewBuiltinLSPPlugin()
-	if !p.IsReadOnly(nil) || !p.IsConcurrencySafe(nil) {
-		t.Fatal("@lsp must advertise read-only + concurrency-safe")
+	read := []string{`{"cmd":"symbols","args":{"file":"a.go"}}`}
+	if !p.IsReadOnly(read) || !p.IsConcurrencySafe(read) {
+		t.Fatal("@lsp must advertise read-only + concurrency-safe for queries")
+	}
+	if p.IsReadOnly(nil) || p.IsConcurrencySafe(nil) {
+		t.Fatal("@lsp must fail closed on an unparseable (empty) invocation")
 	}
 	if p.Schema() == "" || !strings.Contains(p.Schema(), "diagnostics") {
 		t.Fatal("schema must describe subcommands")
