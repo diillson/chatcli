@@ -1,0 +1,3 @@
+{
+  "plugins.proc.describe_wait": "Waiting on process %s"
+}
