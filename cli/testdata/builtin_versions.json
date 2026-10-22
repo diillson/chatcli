@@ -47,6 +47,10 @@
     "version": "1.0.0",
     "surface": "966e614c9f5f1d4e"
   },
+  "@diff": {
+    "version": "1.0.0",
+    "surface": "46e081995da09b82"
+  },
   "@docs-flatten": {
     "version": "2.2.0",
     "surface": "a44c968d2cd12787"

@@ -7,5 +7,12 @@
   "plugins.json.describe.query": "Consultando: %s",
   "plugins.json.describe.schema": "Inferindo formato: %s",
   "plugins.json.describe.validate": "Validando: %s",
-  "plugins.json.describe.pretty": "Formatando: %s"
+  "plugins.json.describe.pretty": "Formatando: %s",
+  "plugins.diff.description": "Diffs unificados: compara dois arquivos, dois textos inline ou dois diretórios, e aplica um patch unificado a um arquivo (dry run por padrão, backup .bak ao gravar).",
+  "plugins.diff.describe.default": "Diff",
+  "plugins.diff.describe.files": "Comparando %s ↔ %s",
+  "plugins.diff.describe.text": "Comparando texto inline",
+  "plugins.diff.describe.dirs": "Comparando diretórios %s ↔ %s",
+  "plugins.diff.describe.apply_dry": "Prevendo patch em %s",
+  "plugins.diff.describe.apply": "Aplicando patch em %s"
 }

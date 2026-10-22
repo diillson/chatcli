@@ -7,5 +7,12 @@
   "plugins.json.describe.query": "Querying: %s",
   "plugins.json.describe.schema": "Inferring shape: %s",
   "plugins.json.describe.validate": "Validating: %s",
-  "plugins.json.describe.pretty": "Formatting: %s"
+  "plugins.json.describe.pretty": "Formatting: %s",
+  "plugins.diff.description": "Unified diffs: compare two files, two inline texts or two directories, and apply a unified patch to one file (dry run by default, .bak backup when writing).",
+  "plugins.diff.describe.default": "Diff",
+  "plugins.diff.describe.files": "Diffing %s ↔ %s",
+  "plugins.diff.describe.text": "Diffing inline text",
+  "plugins.diff.describe.dirs": "Comparing directories %s ↔ %s",
+  "plugins.diff.describe.apply_dry": "Previewing patch on %s",
+  "plugins.diff.describe.apply": "Applying patch to %s"
 }

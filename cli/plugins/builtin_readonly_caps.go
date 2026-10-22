@@ -231,3 +231,19 @@ func (*BuiltinJSONPlugin) IsReadOnly(args []string) bool {
 
 // IsConcurrencySafe mirrors IsReadOnly: parallel reads never conflict.
 func (p *BuiltinJSONPlugin) IsConcurrencySafe(args []string) bool { return p.IsReadOnly(args) }
+
+// --- @diff --------------------------------------------------------------
+
+// IsReadOnly reports true for files/text/dirs and for apply while it is a
+// dry run (the default); apply with dry_run:false rewrites the target file.
+// Unparseable args fail closed.
+func (*BuiltinDiffPlugin) IsReadOnly(args []string) bool {
+	cmd, raw, err := parseDiffToolInvocation(args)
+	if err != nil {
+		return false
+	}
+	return cmd != "apply" || diffToolArgsFrom(raw).dryRun
+}
+
+// IsConcurrencySafe mirrors IsReadOnly.
+func (p *BuiltinDiffPlugin) IsConcurrencySafe(args []string) bool { return p.IsReadOnly(args) }
