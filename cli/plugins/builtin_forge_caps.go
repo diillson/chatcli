@@ -51,6 +51,20 @@ func (p *BuiltinForgePlugin) DescribeCall(args []string) string {
 		return i18n.T("plugins.forge.describe_pr_create", describeTrim(inv.title))
 	case "pr-comment", "issue-comment":
 		return i18n.T("plugins.forge.describe_comment", inv.number)
+	case "pr-review":
+		return i18n.T("plugins.forge.describe_pr_review", inv.number)
+	case "pr-merge":
+		return i18n.T("plugins.forge.describe_pr_merge", inv.number)
+	case "pr-checkout":
+		return i18n.T("plugins.forge.describe_pr_checkout", inv.number)
+	case "pr-close", "issue-close":
+		return i18n.T("plugins.forge.describe_close", inv.number)
+	case "pr-ready":
+		return i18n.T("plugins.forge.describe_pr_ready", inv.number)
+	case "issue-create":
+		return i18n.T("plugins.forge.describe_issue_create", describeTrim(inv.title))
+	case "ci-rerun":
+		return i18n.T("plugins.forge.describe_ci_rerun", inv.run)
 	case "issue-list":
 		return i18n.T("plugins.forge.describe_issue_list")
 	case "issue-view":

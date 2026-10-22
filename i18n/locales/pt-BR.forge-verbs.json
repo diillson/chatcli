@@ -1,0 +1,9 @@
+{
+  "plugins.forge.describe_pr_review": "Forge: revisando PR %s",
+  "plugins.forge.describe_pr_merge": "Forge: mesclando PR %s",
+  "plugins.forge.describe_pr_checkout": "Forge: fazendo checkout do PR %s",
+  "plugins.forge.describe_close": "Forge: fechando %s",
+  "plugins.forge.describe_pr_ready": "Forge: marcando PR %s como pronto",
+  "plugins.forge.describe_issue_create": "Forge: abrindo issue %s",
+  "plugins.forge.describe_ci_rerun": "Forge: reexecutando run %s"
+}
