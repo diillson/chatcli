@@ -1,6 +1,6 @@
 module github.com/diillson/chatcli
 
-go 1.27.2
+go 1.27.3
 
 require (
 	github.com/andybalholm/brotli v1.2.6
