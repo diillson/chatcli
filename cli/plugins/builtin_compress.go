@@ -157,28 +157,8 @@ func parseCompressArgs(args []string) (compressArgs, error) {
 	if f := strings.TrimSpace(jsonString(raw, "file", "path")); f != "" {
 		in.Files = append(in.Files, f)
 	}
-	in.Files = append(in.Files, jsonStringList(raw, "files", "paths")...)
+	in.Files = append(in.Files, trimNonEmpty(jsonStringList(raw, "files", "paths"))...)
 	return in, nil
-}
-
-// jsonStringList reads a string array, or a comma-separated string, from
-// any of the aliased keys.
-func jsonStringList(raw map[string]json.RawMessage, keys ...string) []string {
-	for _, k := range keys {
-		v, ok := raw[k]
-		if !ok {
-			continue
-		}
-		var list []string
-		if err := json.Unmarshal(v, &list); err == nil {
-			return trimNonEmpty(list)
-		}
-		var s string
-		if err := json.Unmarshal(v, &s); err == nil {
-			return trimNonEmpty(strings.Split(s, ","))
-		}
-	}
-	return nil
 }
 
 // Execute parses the args and dispatches to the adapter.
