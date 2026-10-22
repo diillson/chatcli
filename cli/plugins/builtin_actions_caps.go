@@ -270,3 +270,24 @@ func (*BuiltinArchivePlugin) DescribeCall(args []string) string {
 	}
 	return i18n.T("plugins.archive.describe.list", file)
 }
+
+// --- @date ---
+
+func (*BuiltinDatePlugin) DescribeCall(args []string) string {
+	cmd, raw, err := parseDateToolInvocation(args)
+	if err != nil {
+		return i18n.T("plugins.date.describe.default")
+	}
+	switch cmd {
+	case "diff":
+		return i18n.T("plugins.date.describe.diff",
+			describeTrunc(jsonString(raw, "from", "start", "a"), 30), describeTrunc(jsonString(raw, "to", "end", "b"), 30))
+	case "add":
+		return i18n.T("plugins.date.describe.add", describeTrunc(jsonString(raw, "date", "from", "base"), 30))
+	case "weekday":
+		return i18n.T("plugins.date.describe.weekday", describeTrunc(jsonString(raw, "date", "day"), 30))
+	case "resolve":
+		return i18n.T("plugins.date.describe.resolve", describeTrunc(jsonString(raw, "expr", "expression", "phrase"), 40))
+	}
+	return i18n.T("plugins.date.describe.now")
+}

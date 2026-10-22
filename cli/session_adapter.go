@@ -115,7 +115,10 @@ func renderSessionHits(header string, hits []SessionSearchHit, now time.Time) st
 		}
 		meta := i18n.T("session.tool.match_count", h.Matches)
 		if !h.SavedAt.IsZero() {
-			meta += " · " + i18n.T("session.tool.saved_at", h.SavedAt.Format("2006-01-02 15:04"), formatSessionAgeAt(h.SavedAt, now))
+			meta += " · " + i18n.T("session.tool.saved_at", h.SavedAt.Format("2006-01-02 (Mon) 15:04"), formatSessionAgeAt(h.SavedAt, now))
+		}
+		if h.Partial {
+			meta += " · " + i18n.T("session.tool.partial_match", h.Covered, h.Terms)
 		}
 		fmt.Fprintf(&b, "\n• %s (%s)\n", label, meta)
 		for _, sn := range h.Snippets {

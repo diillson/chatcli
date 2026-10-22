@@ -567,6 +567,12 @@ type SessionSearchHit struct {
 	Snippets []string
 	SavedAt  time.Time // session file mtime; zero when unknown
 	Title    string    // stored session title; "" when absent
+
+	// Partial marks a session that matched only some of the query's terms and
+	// is listed after the full matches; Covered of Terms says how many.
+	Partial bool
+	Covered int
+	Terms   int
 }
 
 // sessionSearchDoc maps one BM25 document (a message) back to its session.
@@ -824,7 +830,7 @@ func (sm *SessionManager) searchSessionsAt(query string, maxSnippetsPerSession, 
 		return sm.recentSessionHits(corpus, inScope, maxSnippetsPerSession), nil
 	}
 
-	qualifies := qualifySessionsByTerms(corpus, inScope, terms)
+	qualifies, partial := qualifySessionsByTerms(corpus, inScope, terms)
 
 	// Rank over the normalized view so accents don't break token matching;
 	// indices still map 1:1 onto docs.
@@ -834,47 +840,104 @@ func (sm *SessionManager) searchSessionsAt(query string, maxSnippetsPerSession, 
 	}
 	ranked := ctxmgr.RankDocsBM25(contents, normQuery, len(contents))
 
-	return aggregateSessionHits(corpus, docs, ranked, qualifies, terms, maxSnippetsPerSession, now), nil
+	return aggregateSessionHits(corpus, docs, ranked, qualifies, partial, terms, maxSnippetsPerSession, now), nil
 }
+
+// Graded recall bounds. A query that names several things ("the cover and the
+// spray I bought") is satisfied by a session that holds all of them, but the
+// fact that finishes an answer (a later update, a second item) often sits in
+// a session that shares only some of the words. Those sessions follow the
+// full matches instead of being dropped, bounded so a long history cannot
+// turn one query into a dump.
+const (
+	// maxUserSnippets is how many of a session's snippets the user's own
+	// turns may take.
+	maxUserSnippets = 2
+	// partialMinTerms is the fewest significant terms a query needs before
+	// partial matches are listed beside full ones; with two terms one shared
+	// word is too weak a signal.
+	partialMinTerms = 3
+	// maxPartialSessions caps the partial matches listed after the full ones.
+	maxPartialSessions = 4
+)
 
 // qualifySessionsByTerms applies the session-level significant-term filter,
 // widening when strictness would return nothing: AND (every term somewhere
 // in the session) → OR (at least one term) when AND finds nothing. A query
-// whose terms appear in NO session still qualifies nothing.
-func qualifySessionsByTerms(corpus *sessionCorpus, inScope map[string]bool, terms []string) map[string]bool {
-	qualifies := make(map[string]bool, len(inScope))
-	anyQualified := false
+// whose terms appear in NO session still qualifies nothing. When AND does
+// find sessions and the query has enough terms, up to maxPartialSessions
+// sessions that hold at least half of the terms qualify too, and are
+// reported in partial with how many terms each holds.
+func qualifySessionsByTerms(corpus *sessionCorpus, inScope map[string]bool, terms []string) (qualifies map[string]bool, partial map[string]int) {
+	qualifies = make(map[string]bool, len(inScope))
+	covered := make(map[string]int, len(inScope))
+	full := 0
 	for name := range inScope {
 		text := corpus.text[name]
-		all := true
+		n := 0
 		for _, t := range terms {
-			if !strings.Contains(text, t) {
-				all = false
-				break
+			if strings.Contains(text, t) {
+				n++
 			}
 		}
-		qualifies[name] = all
-		anyQualified = anyQualified || all
+		covered[name] = n
+		if n == len(terms) {
+			qualifies[name] = true
+			full++
+		}
 	}
-	if !anyQualified && len(terms) > 1 {
-		for name := range inScope {
-			for _, t := range terms {
-				if strings.Contains(corpus.text[name], t) {
+	if full == 0 {
+		if len(terms) > 1 {
+			for name, n := range covered {
+				if n > 0 {
 					qualifies[name] = true
-					break
 				}
 			}
 		}
+		return qualifies, nil
 	}
-	return qualifies
+	if len(terms) < partialMinTerms {
+		return qualifies, nil
+	}
+	minCovered := (len(terms) + 1) / 2
+	type cand struct {
+		name  string
+		n     int
+		saved time.Time
+	}
+	var cands []cand
+	for name, n := range covered {
+		if !qualifies[name] && n >= minCovered {
+			cands = append(cands, cand{name, n, corpus.saved[name]})
+		}
+	}
+	sort.Slice(cands, func(i, j int) bool {
+		if cands[i].n != cands[j].n {
+			return cands[i].n > cands[j].n
+		}
+		if !cands[i].saved.Equal(cands[j].saved) {
+			return cands[i].saved.After(cands[j].saved)
+		}
+		return cands[i].name < cands[j].name
+	})
+	if len(cands) > maxPartialSessions {
+		cands = cands[:maxPartialSessions]
+	}
+	partial = make(map[string]int, len(cands))
+	for _, c := range cands {
+		qualifies[c.name] = true
+		partial[c.name] = c.n
+	}
+	return qualifies, partial
 }
 
 // aggregateSessionHits folds ranked message hits into per-session results,
 // preserving BM25 order so each session's snippets are its strongest
 // messages, then orders sessions by recency-boosted aggregate score.
-func aggregateSessionHits(corpus *sessionCorpus, docs []sessionSearchDoc, ranked []ctxmgr.DocHit, qualifies map[string]bool, terms []string, maxSnippetsPerSession int, now time.Time) []SessionSearchHit {
+func aggregateSessionHits(corpus *sessionCorpus, docs []sessionSearchDoc, ranked []ctxmgr.DocHit, qualifies map[string]bool, partial map[string]int, terms []string, maxSnippetsPerSession int, now time.Time) []SessionSearchHit {
 	bySession := make(map[string]*SessionSearchHit)
 	order := make([]string, 0)
+	snippetUsers := make(map[string]int)
 	for _, h := range ranked {
 		d := docs[h.Index]
 		if !qualifies[d.session] {
@@ -887,24 +950,56 @@ func aggregateSessionHits(corpus *sessionCorpus, docs []sessionSearchDoc, ranked
 				SavedAt: corpus.saved[d.session],
 				Title:   corpus.titles[d.session],
 			}
+			if n, isPartial := partial[d.session]; isPartial {
+				hit.Partial, hit.Covered, hit.Terms = true, n, len(terms)
+			}
 			bySession[d.session] = hit
 			order = append(order, d.session)
 		}
 		hit.Matches++
 		hit.Score += h.Score
-		if len(hit.Snippets) < maxSnippetsPerSession {
-			// Anchor lookup happens on the normalized view; the byte index
-			// only centers a cosmetic window, and snippetAround snaps slice
-			// bounds to rune boundaries, so accent-folding length drift
-			// cannot corrupt the output.
-			anchor := terms[0]
-			for _, t := range terms {
-				if strings.Contains(d.norm, t) {
-					anchor = t
+		// What the user said about themselves (a number, a place, a change of
+		// mind) lives in their own turns, while assistant turns are long and
+		// mostly generic, so a long session's strongest assistant matches must
+		// not crowd the user's statement out of the snippets. A user match
+		// takes the slot of the last kept assistant snippet when the session
+		// is full, up to maxUserSnippets.
+		isUser := d.role == "user"
+		full := len(hit.Snippets) >= maxSnippetsPerSession
+		if full && (!isUser || snippetUsers[d.session] >= maxUserSnippets) {
+			continue
+		}
+		slot := -1
+		if full {
+			for i := len(hit.Snippets) - 1; i >= 0; i-- {
+				if !strings.HasPrefix(hit.Snippets[i], "user: ") {
+					slot = i
 					break
 				}
 			}
-			hit.Snippets = append(hit.Snippets, d.role+": "+snippetAround(d.content, d.norm, anchor))
+			if slot < 0 {
+				continue
+			}
+		}
+		// Anchor lookup happens on the normalized view; the byte index
+		// only centers a cosmetic window, and snippetAround snaps slice
+		// bounds to rune boundaries, so accent-folding length drift
+		// cannot corrupt the output.
+		anchor := terms[0]
+		for _, t := range terms {
+			if strings.Contains(d.norm, t) {
+				anchor = t
+				break
+			}
+		}
+		snippet := d.role + ": " + snippetAround(d.content, d.norm, anchor)
+		if slot >= 0 {
+			hit.Snippets[slot] = snippet
+		} else {
+			hit.Snippets = append(hit.Snippets, snippet)
+		}
+		if isUser {
+			snippetUsers[d.session]++
 		}
 	}
 
@@ -913,6 +1008,11 @@ func aggregateSessionHits(corpus *sessionCorpus, docs []sessionSearchDoc, ranked
 		hits = append(hits, *bySession[name])
 	}
 	sort.SliceStable(hits, func(i, j int) bool {
+		// Full matches first; the partial ones follow, each group ranked by
+		// the same recency-boosted score.
+		if hits[i].Partial != hits[j].Partial {
+			return !hits[i].Partial
+		}
 		si := hits[i].Score * sessionRecencyBoostAt(hits[i].SavedAt, now)
 		sj := hits[j].Score * sessionRecencyBoostAt(hits[j].SavedAt, now)
 		if si != sj {

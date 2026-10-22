@@ -1,0 +1,9 @@
+{
+  "plugins.date.description": "Aritmética de calendário sem chute: dias, semanas e meses entre duas datas, data mais um deslocamento, dia da semana de uma data e expressões relativas (sábado passado, há 3 semanas) como datas concretas.",
+  "plugins.date.describe.default": "Calculando uma data",
+  "plugins.date.describe.now": "Lendo a data atual",
+  "plugins.date.describe.diff": "Dias entre %s e %s",
+  "plugins.date.describe.add": "Deslocando uma data: %s",
+  "plugins.date.describe.weekday": "Dia da semana de %s",
+  "plugins.date.describe.resolve": "Resolvendo: %s"
+}

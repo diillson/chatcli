@@ -295,3 +295,15 @@ func (*BuiltinDiffPlugin) IsReadOnly(args []string) bool {
 
 // IsConcurrencySafe mirrors IsReadOnly.
 func (p *BuiltinDiffPlugin) IsConcurrencySafe(args []string) bool { return p.IsReadOnly(args) }
+
+// --- @date --------------------------------------------------------------
+
+// IsReadOnly reports true for every @date invocation that parses: all five
+// verbs are pure calendar arithmetic. Unparseable args fail closed.
+func (*BuiltinDatePlugin) IsReadOnly(args []string) bool {
+	_, _, err := parseDateToolInvocation(args)
+	return err == nil
+}
+
+// IsConcurrencySafe mirrors IsReadOnly: pure computations never conflict.
+func (p *BuiltinDatePlugin) IsConcurrencySafe(args []string) bool { return p.IsReadOnly(args) }

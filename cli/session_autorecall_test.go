@@ -210,3 +210,26 @@ func TestFormatSessionAge_ReferenceTime(t *testing.T) {
 		t.Errorf("against the wall clock the age is years, got %q", got)
 	}
 }
+
+// A label that counts calendar days: saved on the 15th in the evening and
+// asked about early on the 18th is 3 days ago, not the 2 that flooring the
+// 55 elapsed hours gives. A save late one evening and a question early the
+// next morning is yesterday.
+func TestFormatSessionAge_CalendarDays(t *testing.T) {
+	cases := []struct {
+		saved, now time.Time
+		want       string
+	}{
+		{time.Date(2023, 4, 15, 18, 11, 0, 0, time.UTC), time.Date(2023, 4, 18, 1, 48, 0, 0, time.UTC), "3d ago"},
+		{time.Date(2023, 4, 15, 8, 0, 0, 0, time.UTC), time.Date(2023, 4, 18, 22, 0, 0, 0, time.UTC), "3d ago"},
+		{time.Date(2023, 4, 17, 23, 30, 0, 0, time.UTC), time.Date(2023, 4, 18, 9, 30, 0, 0, time.UTC), "yesterday"},
+		{time.Date(2023, 4, 18, 3, 0, 0, 0, time.UTC), time.Date(2023, 4, 18, 9, 30, 0, 0, time.UTC), "6h ago"},
+		{time.Date(2023, 4, 16, 10, 0, 0, 0, time.UTC), time.Date(2023, 5, 7, 10, 0, 0, 0, time.UTC), "21d ago"},
+		{time.Date(2023, 2, 27, 20, 0, 0, 0, time.UTC), time.Date(2023, 3, 1, 8, 0, 0, 0, time.UTC), "2d ago"},
+	}
+	for _, c := range cases {
+		if got := formatSessionAgeAt(c.saved, c.now); got != c.want {
+			t.Errorf("saved %s, now %s: %q, want %q", c.saved, c.now, got, c.want)
+		}
+	}
+}
