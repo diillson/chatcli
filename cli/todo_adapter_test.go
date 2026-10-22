@@ -134,3 +134,29 @@ func TestLiveTodoAdapter_StatusDefaultsToPending(t *testing.T) {
 	require.NoError(t, err)
 	assert.Contains(t, out, "[ ]", "empty status defaults to pending [ ]")
 }
+
+func TestLiveTodoAdapter_AddAndUpdate(t *testing.T) {
+	tracker := agent.NewTaskTracker(zap.NewNop())
+	adapter := newLiveTodoAdapter(func() *agent.TaskTracker { return tracker })
+	if _, err := adapter.Write([]plugins.TodoItem{{Description: "First", Status: "pending"}}); err != nil {
+		t.Fatal(err)
+	}
+	out, err := adapter.Add([]plugins.TodoItem{{Description: "Second", Status: "pending"}, {Description: "Third", Status: "in_progress"}})
+	require.NoError(t, err)
+	assert.Contains(t, out, "Added 2 task(s)")
+	assert.Contains(t, out, "Second")
+	assert.Contains(t, out, "Third")
+	assert.Contains(t, out, "First", "existing tasks stay in the plan")
+
+	out, err = adapter.Update(2, "Second, reworded")
+	require.NoError(t, err)
+	assert.Contains(t, out, "Second, reworded")
+	_, err = adapter.Update(9, "nope")
+	require.Error(t, err, "unknown id must error")
+
+	gone := newLiveTodoAdapter(func() *agent.TaskTracker { return nil })
+	_, err = gone.Add([]plugins.TodoItem{{Description: "x"}})
+	require.Error(t, err)
+	_, err = gone.Update(1, "x")
+	require.Error(t, err)
+}
