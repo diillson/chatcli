@@ -131,6 +131,10 @@
     "version": "1.1.0",
     "surface": "4df97055dac1aa3c"
   },
+  "@secrets": {
+    "version": "1.0.0",
+    "surface": "547e6de7c4a6cd8e"
+  },
   "@send": {
     "version": "1.0.0",
     "surface": "7c25b756ed796be3"

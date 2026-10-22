@@ -176,3 +176,25 @@ func (*BuiltinMoaPlugin) DescribeCall(args []string) string {
 	}
 	return i18n.T("plugins.moa.describe.ask")
 }
+
+// --- @secrets ---
+
+func (*BuiltinSecretsPlugin) DescribeCall(args []string) string {
+	cmd, in, err := parseSecretsInvocation(args)
+	if err != nil {
+		return i18n.T("plugins.secrets.describe.default")
+	}
+	switch cmd {
+	case "check":
+		return i18n.T("plugins.secrets.describe.check")
+	case "rules":
+		return i18n.T("plugins.secrets.describe.rules")
+	}
+	target := jsonString(in, "path", "dir", "file")
+	if jsonBool(in, "staged") {
+		target = "git index"
+	} else if target == "" {
+		target = "."
+	}
+	return i18n.T("plugins.secrets.describe.scan", describeTrunc(target, 50))
+}

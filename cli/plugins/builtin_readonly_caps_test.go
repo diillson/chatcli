@@ -37,6 +37,13 @@ func TestReadOnlyCaps_PureReadsSkipTheGate(t *testing.T) {
 		{[]string{"check", "--ecosystem", "Go", "--package", "x", "--version", "1"}, true, true},
 		{[]string{`{not json`}, false, false},
 	})
+	checkCaps(t, "@secrets", NewBuiltinSecretsPlugin(), []capsCase{
+		{nil, true, true},
+		{[]string{`{"cmd":"scan","args":{"path":".","staged":true}}`}, true, true},
+		{[]string{"check", "--text", "x"}, true, true},
+		{[]string{`{"cmd":"rules"}`}, true, true},
+		{[]string{`{not json`}, false, false},
+	})
 	checkCaps(t, "@commands", NewBuiltinCommandsPlugin(), []capsCase{
 		{[]string{`{"cmd":"list"}`}, true, true},
 		{[]string{"get", "review-pr", "12"}, true, true},

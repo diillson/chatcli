@@ -38,6 +38,21 @@ func (*BuiltinOsvPlugin) IsReadOnly(args []string) bool {
 // only reads files and queries a read-only API.
 func (p *BuiltinOsvPlugin) IsConcurrencySafe(args []string) bool { return p.IsReadOnly(args) }
 
+// --- @secrets -----------------------------------------------------------
+
+// IsReadOnly reports true for every @secrets invocation that parses: scan,
+// check and rules only read files (or the git index) and never write.
+func (*BuiltinSecretsPlugin) IsReadOnly(args []string) bool {
+	if len(args) == 0 {
+		return true // bare call = scan the current directory
+	}
+	_, _, err := parseSecretsInvocation(args)
+	return err == nil
+}
+
+// IsConcurrencySafe mirrors IsReadOnly: scans are independent reads.
+func (p *BuiltinSecretsPlugin) IsConcurrencySafe(args []string) bool { return p.IsReadOnly(args) }
+
 // --- @commands ----------------------------------------------------------
 
 // IsReadOnly reports true: list and get only read the command catalog.

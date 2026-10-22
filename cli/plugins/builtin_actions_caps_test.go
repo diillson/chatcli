@@ -29,6 +29,9 @@ func TestDescribeCall_ContextualLabels(t *testing.T) {
 		{"send list", NewBuiltinSendPlugin().DescribeCall([]string{"list"}), "list"},
 		{"moa ask", NewBuiltinMoaPlugin().DescribeCall([]string{"ask", "--prompt", "why"}), "moa"},
 		{"moa list", NewBuiltinMoaPlugin().DescribeCall([]string{"list"}), "list"},
+		{"secrets scan", NewBuiltinSecretsPlugin().DescribeCall([]string{"scan", "--path", "config"}), "config"},
+		{"secrets staged", NewBuiltinSecretsPlugin().DescribeCall([]string{`{"cmd":"scan","args":{"staged":true}}`}), "git index"},
+		{"secrets check", NewBuiltinSecretsPlugin().DescribeCall([]string{"check", "--text", "x"}), "check"},
 	}
 	for _, c := range cases {
 		if strings.TrimSpace(c.got) == "" {
@@ -51,6 +54,7 @@ func TestDescribeCall_DefaultsOnBadArgs(t *testing.T) {
 		NewBuiltinMoaPlugin().DescribeCall(nil),
 		NewBuiltinSendPlugin().DescribeCall(nil),
 		NewBuiltinSessionPlugin().DescribeCall(nil),
+		NewBuiltinSecretsPlugin().DescribeCall(nil),
 	} {
 		if strings.TrimSpace(got) == "" {
 			t.Error("DescribeCall(nil) returned empty")

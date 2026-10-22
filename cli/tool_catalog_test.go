@@ -15,6 +15,7 @@ import (
 // catalogPlugins builds the full builtin set the way cli.go registers it.
 func catalogPlugins() []plugins.Plugin {
 	return []plugins.Plugin{
+		plugins.NewBuiltinSecretsPlugin(),
 		plugins.NewBuiltinAskPlugin(), plugins.NewBuiltinCoderPlugin(), plugins.NewBuiltinCompressPlugin(),
 		plugins.NewBuiltinContextPlugin(), plugins.NewBuiltinDiagramPlugin(), plugins.NewBuiltinDocsFlattenPlugin(),
 		plugins.NewBuiltinGraphViewPlugin(), plugins.NewBuiltinImagePlugin(), plugins.NewBuiltinKnowledgePlugin(),
