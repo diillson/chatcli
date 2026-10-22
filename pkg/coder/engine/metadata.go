@@ -38,11 +38,16 @@ type PluginSchema struct {
 	Subcommands []SubcommandDefinition `json:"subcommands"`
 }
 
-// PluginVersion is the version of the @coder tool surface the model sees:
+// pluginVersion is the version of the @coder tool surface the model sees:
 // bumped whenever a subcommand, flag or its documented behavior changes
-// (the builtin versions test enforces it). Version above is the engine's
-// original contract constant and stays as it is for API compatibility.
-const PluginVersion = "2.2.0"
+// (the builtin versions test enforces it). It is read through
+// PluginSurfaceVersion so a bump is a behavior change, not an API change;
+// Version above is the engine's original contract constant and stays as
+// it is for API compatibility.
+const pluginVersion = "2.2.0"
+
+// PluginSurfaceVersion returns the version of the @coder tool surface.
+func PluginSurfaceVersion() string { return pluginVersion }
 
 // GetMetadata returns the @coder plugin metadata.
 func GetMetadata() Metadata {
@@ -50,7 +55,7 @@ func GetMetadata() Metadata {
 		Name:        "@coder",
 		Description: "Full engineering suite (IO, search, exec, git, test, backup, rollback, patch).",
 		Usage:       `@coder <read|stat|write|patch|multipatch|find|move|delete|tree|search|outline|map|checkpoint|exec|git-status|git-diff|git-log|git-changed|git-branch|git-show|git-blame|test|rollback|clean> [flags]`,
-		Version:     PluginVersion,
+		Version:     pluginVersion,
 	}
 }
 
