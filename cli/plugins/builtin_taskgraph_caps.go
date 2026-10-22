@@ -47,6 +47,9 @@ func (p *BuiltinTaskGraphPlugin) DescribeCall(args []string) string {
 	case "plan", "create", "validate":
 		return i18n.T("plugins.taskgraph.describe_plan")
 	case "run", "start", "resume", "exec":
+		if taskGraphWantsBackground(payload) {
+			return i18n.T("plugins.taskgraph.describe_run_background")
+		}
 		return i18n.T("plugins.taskgraph.describe_run")
 	case "retry", "reopen":
 		return i18n.T("plugins.taskgraph.describe_retry", describeTrim(jsonString(payload, "task", "task_id", "taskId")))

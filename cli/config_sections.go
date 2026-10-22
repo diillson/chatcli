@@ -330,6 +330,40 @@ func envOr(name string) string {
 	return i18n.T("cfg.val.not_set")
 }
 
+// showRegistryCredentialEnv renders the @registry-tags credential variables:
+// presence only, never the value. The per-host variants
+// (CHATCLI_REGISTRY_<HOST>_TOKEN/_USERNAME/_PASSWORD) are whatever the
+// environment holds, so they are discovered rather than listed.
+func showRegistryCredentialEnv(p string) {
+	kv(p, "CHATCLI_REGISTRY_TOKEN", presence(os.Getenv("CHATCLI_REGISTRY_TOKEN")))
+	kv(p, "CHATCLI_REGISTRY_USERNAME", envOr("CHATCLI_REGISTRY_USERNAME"))
+	kv(p, "CHATCLI_REGISTRY_PASSWORD", presence(os.Getenv("CHATCLI_REGISTRY_PASSWORD")))
+	for _, name := range registryCredentialEnvNames(os.Environ()) {
+		kv(p, name, presence(os.Getenv(name)))
+	}
+}
+
+// registryCredentialEnvNames returns, sorted, the per-host @registry-tags
+// credential variables present in environ: CHATCLI_REGISTRY_<HOST>_TOKEN,
+// _USERNAME or _PASSWORD, excluding the generic (host-less) three that are
+// listed on their own lines. Names only — the caller renders presence.
+func registryCredentialEnvNames(environ []string) []string {
+	const prefix = "CHATCLI_REGISTRY_"
+	generic := map[string]bool{"CHATCLI_REGISTRY_TOKEN": true, "CHATCLI_REGISTRY_USERNAME": true, "CHATCLI_REGISTRY_PASSWORD": true}
+	var names []string
+	for _, kv := range environ {
+		name, _, _ := strings.Cut(kv, "=")
+		if !strings.HasPrefix(name, prefix) || generic[name] {
+			continue
+		}
+		if strings.HasSuffix(name, "_TOKEN") || strings.HasSuffix(name, "_USERNAME") || strings.HasSuffix(name, "_PASSWORD") {
+			names = append(names, name)
+		}
+	}
+	sort.Strings(names)
+	return names
+}
+
 // envBool renders the localized enabled/disabled/default labels for boolean
 // envs (accepts 1/true/yes). When the var is unset and the default
 // registry has a known boolean fallback, the rendered line is the
@@ -1251,6 +1285,7 @@ func (cli *ChatCLI) showConfigIntegrations(ctx context.Context) {
 		}
 		kv(p, "CHATCLI_ALLOW_UNSIGNED_PLUGINS", envBool("CHATCLI_ALLOW_UNSIGNED_PLUGINS"))
 		kv(p, "CHATCLI_PLUGIN_QUARANTINE", envOr("CHATCLI_PLUGIN_QUARANTINE"))
+		showRegistryCredentialEnv(p)
 	}
 
 	fmt.Println(p)

@@ -28,6 +28,7 @@ import (
 
 	"github.com/diillson/chatcli/cli/agent/workers"
 	"github.com/diillson/chatcli/cli/coder"
+	"github.com/diillson/chatcli/cli/plugins"
 	"github.com/diillson/chatcli/cli/taskgraph"
 	"github.com/diillson/chatcli/cli/taskgraph/dash"
 	"github.com/diillson/chatcli/i18n"
@@ -219,6 +220,35 @@ func (a *taskGraphAdapter) Run(ctx context.Context, runID, graphJSON string, onO
 	}
 	return a.execute(ctx, g, store, onOutput)
 }
+
+// ResolveRunID implements plugins.TaskGraphRunResolver: persists graphJSON
+// as a new run (or resolves runID, latest when empty) and returns the
+// concrete id, so a background run can be addressed before it executes.
+func (a *taskGraphAdapter) ResolveRunID(runID, graphJSON string) (string, error) {
+	base, err := a.baseDir()
+	if err != nil {
+		return "", err
+	}
+	if strings.TrimSpace(graphJSON) != "" {
+		g, err := taskgraph.ParseGraph(graphJSON)
+		if err != nil {
+			return "", fmt.Errorf("@taskgraph run: %w", err)
+		}
+		store, err := taskgraph.CreateRun(base, g)
+		if err != nil {
+			return "", fmt.Errorf("@taskgraph run: %w", err)
+		}
+		return store.RunID(), nil
+	}
+	store, _, err := a.loadRun(base, runID)
+	if err != nil {
+		return "", err
+	}
+	return store.RunID(), nil
+}
+
+// compile-time assertion for the optional background-run capability.
+var _ plugins.TaskGraphRunResolver = (*taskGraphAdapter)(nil)
 
 // Retry implements plugins.TaskGraphAdapter: re-opens one failed task plus
 // its blocked successors, extends the attempt budget by one, and resumes.
