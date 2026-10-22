@@ -87,7 +87,7 @@ cycle's report.`
 }
 
 // Version is bumped whenever the surface changes.
-func (*BuiltinParkPlugin) Version() string { return "1.2.0" }
+func (*BuiltinParkPlugin) Version() string { return "1.2.1" }
 
 // Path is empty for builtin plugins.
 func (*BuiltinParkPlugin) Path() string { return "" }
@@ -506,6 +506,9 @@ func executeParkNote(inner string) (string, error) {
 // JSON object — the same surface shape the JSON envelope emits in its
 // args field. Object/array values are parsed when they look like JSON
 // so {"headers":{"X-Token":"abc"}} survives via flag form.
+// parkTextFlags are the flags whose value is always text.
+var parkTextFlags = map[string]struct{}{"token": {}, "id": {}, "reason": {}, "text": {}, "note": {}}
+
 func parkFlagsToJSON(argv []string) (string, error) {
 	obj := map[string]interface{}{}
 	for i := 0; i < len(argv); i++ {
@@ -521,7 +524,15 @@ func parkFlagsToJSON(argv []string) (string, error) {
 		val := argv[i+1]
 		i++
 		// Try to parse JSON-ish values so headers/object/array survive
-		// the round-trip. Strings remain strings.
+		// the round-trip. Strings remain strings, and so do the flags that
+		// name or describe something: a token prefix is hex, so 1 in 40 of
+		// them is all digits (27182501, or 00123456 that would lose its
+		// zeros, or 1e456789 that reads as an exponent) and must not turn
+		// into a number.
+		if _, text := parkTextFlags[strings.ToLower(key)]; text {
+			obj[key] = val
+			continue
+		}
 		if v, ok := tryParseJSONScalar(val); ok {
 			obj[key] = v
 			continue
