@@ -119,6 +119,11 @@ type AgentMode struct {
 	// stagedViewDocs are PDFs @view attached mid-run, flushed with the
 	// images on the next turn boundary.
 	stagedViewDocs []models.DocumentContent
+	// toolResultCaps remembers the result budget each native tool call ran
+	// under (tool-call id → chars), so the per-result budget pass honors a
+	// tool's larger declared cap instead of cutting its result down to the
+	// global default on the way to the API.
+	toolResultCaps map[string]int
 	// gatewayPersona layers a messaging-gateway directive on top of the coder
 	// system prompt: keep the coder engine's full tool capability (create/edit
 	// files, run commands, iterate) but answer concisely in plain chat-friendly
@@ -1774,6 +1779,24 @@ func (a *AgentMode) commandScopeAllows(toolName string) bool {
 	return false
 }
 
+// rememberToolResultCap records the result budget a native tool call ran
+// under, for the per-result budget pass.
+func (a *AgentMode) rememberToolResultCap(toolCallID string, maxChars int) {
+	if a.toolResultCaps == nil {
+		a.toolResultCaps = make(map[string]int)
+	}
+	a.toolResultCaps[toolCallID] = maxChars
+}
+
+// toolResultCapFor answers the per-result budget pass: the cap the call
+// ran under, or 0 when unknown (the default then applies).
+func (a *AgentMode) toolResultCapFor(toolCallID string) int {
+	if a == nil || a.toolResultCaps == nil {
+		return 0
+	}
+	return a.toolResultCaps[toolCallID]
+}
+
 // stageViewedImage queues an image the @view tool attached mid-run for the
 // next turn boundary.
 func (a *AgentMode) stageViewedImage(img models.ImageContent, name string) {
@@ -2610,7 +2633,7 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 
 		// Build the outgoing turn history and enforce budget before sending to API
 		turnHistory := buildTurnHistoryWithAnchor()
-		turnHistory, _ = agent.EnforceToolResultBudget(turnHistory, a.logger)
+		turnHistory, _ = agent.EnforceToolResultBudgetFor(turnHistory, 0, 0, a.toolResultCapFor, a.logger)
 
 		// Detect native function calling support
 		var nativeToolCalls []models.ToolCall
@@ -4120,19 +4143,27 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 					toolOutput, _ = a.cli.compressionLayer.CompressToolOutput(tc.Name, toolOutput)
 				}
 
-				// Per-tool truncation (Item 6) BEFORE the structured capture:
+				// Per-tool budget BEFORE the structured capture:
 				// turnToolResults feeds the persistent history and park
 				// snapshots via the structured emission paths, so an
 				// untruncated multi-hundred-KB fetch must never be captured.
 				// Plugins that implement plugins.TruncationAware get their
-				// own per-call cap; the rest use the global default. Errors
-				// are left verbatim so the model can debug them in full.
+				// own per-call cap; the rest use the global default. The
+				// result past the cap is not discarded: the full output is
+				// saved to the session's tool-results directory and the
+				// preview names the file and the @read call that continues
+				// it. Errors are left verbatim so the model can debug them.
 				if execErr == nil {
 					maxChars := plugins.DefaultMaxResultChars
 					if p, ok := a.cli.pluginManager.GetPlugin(tc.Name); ok && p != nil {
 						maxChars = plugins.EffectiveMaxResultChars(p)
 					}
-					toolOutput = plugins.TruncateForLLM(toolOutput, maxChars)
+					label := strings.TrimPrefix(tc.Name, "@")
+					if i < len(nativeToolCalls) && nativeToolCalls[i].ID != "" {
+						label = nativeToolCalls[i].ID
+						a.rememberToolResultCap(label, maxChars)
+					}
+					toolOutput = agent.PreviewWithDiskPersist(toolOutput, label, maxChars, a.logger)
 				}
 
 				// Capture the structured outcome for downstream phases.
