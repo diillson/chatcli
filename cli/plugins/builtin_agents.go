@@ -93,7 +93,7 @@ func (p *BuiltinAgentsPlugin) Description() string { return i18n.T("plugins.agen
 func (p *BuiltinAgentsPlugin) Usage() string {
 	return "@agents list|show|wait|transcript|cancel"
 }
-func (p *BuiltinAgentsPlugin) Version() string { return "1.1.0" }
+func (p *BuiltinAgentsPlugin) Version() string { return "1.2.0" }
 func (p *BuiltinAgentsPlugin) Path() string    { return "[builtin]" }
 
 // Schema documents the tool for the agent system prompt catalog.
@@ -126,7 +126,7 @@ func (p *BuiltinAgentsPlugin) Schema() string {
 			},
 			{
 				"name":        "transcript",
-				"description": "Last N lines of a run's activity log: turn changes, action labels, the final status and an excerpt of a worker's final output. The runtime keeps this log, not the run's LLM conversation.",
+				"description": "Last N lines of a run's activity log: turn changes, action labels, the final status and an excerpt of a worker's final output. The runtime keeps this log, not the run's LLM conversation. Runs of other processes (via the hub) expose the newest 100 entries their owner mirrored.",
 				"flags": []map[string]interface{}{
 					{"name": "id", "type": "string", "required": true, "description": "run ID, e.g. run-3"},
 					{"name": "tail", "type": "integer", "required": false, "description": "lines from the end (default 200, max 2000)"},

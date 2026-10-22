@@ -11,6 +11,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -75,10 +76,29 @@ CREATE TABLE IF NOT EXISTS agent_runs (
     payload          TEXT NOT NULL,
     cancel_requested INTEGER NOT NULL DEFAULT 0,
     updated_at       INTEGER NOT NULL,
-    ended_at         INTEGER NOT NULL DEFAULT 0
+    ended_at         INTEGER NOT NULL DEFAULT 0,
+    activity         TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS idx_agent_runs_instance ON agent_runs(instance);
+
+CREATE TABLE IF NOT EXISTS park_mirror (
+    token             TEXT PRIMARY KEY,
+    instance          TEXT NOT NULL,
+    origin            TEXT NOT NULL DEFAULT '',
+    heartbeat_at      INTEGER NOT NULL,
+    wake_outcome      TEXT NOT NULL DEFAULT '',
+    wake_detail       TEXT NOT NULL DEFAULT '',
+    wake_requested_at INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_park_mirror_instance ON park_mirror(instance);
 `
+
+// addedColumns lists columns added to existing tables after their first
+// release. CREATE TABLE IF NOT EXISTS leaves an old database without them,
+// so OpenSQLiteStore adds each one that is missing (see ensureColumn).
+var addedColumns = []struct{ table, column, ddl string }{
+	{"agent_runs", "activity", "TEXT NOT NULL DEFAULT ''"},
+}
 
 // SQLiteStore is the WAL-backed implementation of Store. It is safe for
 // concurrent use: reads go through the connection pool, writes are serialized
@@ -116,7 +136,55 @@ func OpenSQLiteStore(ctx context.Context, path string, logger *zap.Logger) (*SQL
 		_ = db.Close()
 		return nil, fmt.Errorf("hub: migrate schema: %w", err)
 	}
+	for _, c := range addedColumns {
+		if err := ensureColumn(ctx, db, c.table, c.column, c.ddl); err != nil {
+			_ = db.Close()
+			return nil, fmt.Errorf("hub: migrate %s.%s: %w", c.table, c.column, err)
+		}
+	}
 	return &SQLiteStore{db: db, logger: logger}, nil
+}
+
+// ensureColumn adds column to table when the table lacks it. SQLite has no
+// ADD COLUMN IF NOT EXISTS, so the table's columns are read first; a
+// concurrent process adding the same column between the check and the ALTER
+// surfaces as a duplicate-column error, which is the desired end state and
+// is tolerated.
+func ensureColumn(ctx context.Context, db *sql.DB, table, column, ddl string) error {
+	rows, err := db.QueryContext(ctx, "PRAGMA table_info("+table+")")
+	if err != nil {
+		return err
+	}
+	found := false
+	for rows.Next() {
+		var (
+			cid     int
+			name    string
+			ctype   string
+			notNull int
+			dflt    sql.NullString
+			pk      int
+		)
+		if err := rows.Scan(&cid, &name, &ctype, &notNull, &dflt, &pk); err != nil {
+			_ = rows.Close()
+			return err
+		}
+		if name == column {
+			found = true
+		}
+	}
+	_ = rows.Close()
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	if found {
+		return nil
+	}
+	_, err = db.ExecContext(ctx, "ALTER TABLE "+table+" ADD COLUMN "+column+" "+ddl)
+	if err != nil && strings.Contains(err.Error(), "duplicate column") {
+		return nil
+	}
+	return err
 }
 
 // Close releases the underlying database.

@@ -192,24 +192,35 @@ func (a *liveAgentsAdapter) Wait(ctx context.Context, id string, timeout time.Du
 
 // Transcript implements plugins.AgentsWatcher: the last tail entries of the
 // run's activity log (turns, actions, final status, output excerpt). The
-// registry keeps that log, not the run's LLM conversation, and only for
-// runs owned by this process.
+// registry keeps that log, not the run's LLM conversation. A run owned by
+// another process is read from the tail its owner mirrors through the hub
+// (the newest runsHubActivityTail entries, refreshed as the run advances).
 func (a *liveAgentsAdapter) Transcript(id string, tail int) (string, error) {
 	log, ok := a.reg.ActivityLog(id)
-	if !ok {
-		if _, found := findRemoteAgentRun(id); found {
-			return "", fmt.Errorf("@agents transcript: run %q belongs to another process; its activity log is not mirrored", id)
-		}
-		return "", fmt.Errorf("@agents transcript: no run with id %q (use list to see IDs)", id)
-	}
 	info, _ := a.reg.Get(id)
+	scope := ""
+	if !ok {
+		remote, found := findRemoteAgentRun(id)
+		if !found {
+			return "", fmt.Errorf("@agents transcript: no run with id %q (use list to see IDs)", id)
+		}
+		entries, mirrored := remoteAgentRunActivity(id)
+		if !mirrored {
+			return "", fmt.Errorf("@agents transcript: run %q belongs to another process (%s) and has mirrored no activity yet; retry in a moment or use show", id, remoteRunOrigin(remote))
+		}
+		log, info = entries, remote.Info
+		scope = fmt.Sprintf(", mirrored from %s via the hub (newest %d entries at most)", remoteRunOrigin(remote), runsHubActivityTail)
+		if remote.Stale {
+			scope += ", owner heartbeat silent"
+		}
+	}
 	total := len(log)
 	if tail > 0 && tail < total {
 		log = log[total-tail:]
 	}
 	var b strings.Builder
-	fmt.Fprintf(&b, "ACTIVITY LOG %s status=%s (%d of %d entries, oldest first; the runtime keeps turns/actions/status, not the LLM conversation):\n",
-		id, info.Status, len(log), total)
+	fmt.Fprintf(&b, "ACTIVITY LOG %s status=%s (%d of %d entries, oldest first%s; the runtime keeps turns/actions/status, not the LLM conversation):\n",
+		id, info.Status, len(log), total, scope)
 	if total == 0 {
 		b.WriteString("(nothing recorded yet)\n")
 	}
@@ -217,6 +228,18 @@ func (a *liveAgentsAdapter) Transcript(id string, tail int) (string, error) {
 		fmt.Fprintf(&b, "%s %s\n", e.At.Format("15:04:05"), e.Text)
 	}
 	return b.String(), nil
+}
+
+// remoteRunOrigin names the process that mirrored a run: its origin
+// ("gateway", "scheduler"…), falling back to its instance token.
+func remoteRunOrigin(r remoteAgentRun) string {
+	if r.Info.Origin != "" {
+		return r.Info.Origin
+	}
+	if r.Info.Instance != "" {
+		return "instance " + r.Info.Instance
+	}
+	return "another process"
 }
 
 // formatRunLine renders one run as a single compact key=value line.

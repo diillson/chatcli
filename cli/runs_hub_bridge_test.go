@@ -9,6 +9,7 @@ import (
 	"context"
 	"encoding/json"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -134,5 +135,86 @@ func TestRemoteRunsProviderFiltersOwnInstance(t *testing.T) {
 	}
 	if !byID["run-eeee-1"].Stale {
 		t.Error("heartbeat-silent foreign run must be flagged stale")
+	}
+}
+
+// The owner mirrors its activity-log tail: another process reads it through
+// the provider and @agents transcript renders it. Heartbeats never erase
+// the mirrored log, and a note appended later reaches the mirror.
+func TestRunsHubBridgeMirrorsActivityForRemoteTranscript(t *testing.T) {
+	t.Setenv("CHATCLI_HUB_POLL_MS", "50")
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	store, err := hub.OpenSQLiteStore(ctx, filepath.Join(t.TempDir(), "hub.db"), nil)
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	defer func() { _ = store.Close() }()
+
+	owner := runs.NewRegistry(10)
+	stop := startRunsHubBridge(ctx, store, owner, nil)
+	defer stop()
+
+	_, live := owner.Begin(ctx, runs.Info{Kind: runs.KindWorker, Agent: "coder", Task: "mirror me", Origin: "gateway"})
+	live.SetTurn(1, 5)
+	live.SetAction("read main.go")
+	if !waitFor(t, 3*time.Second, func() bool {
+		entries, ok := remoteAgentRunActivity(live.ID())
+		return ok && len(entries) >= 2
+	}) {
+		t.Fatal("activity tail was not mirrored")
+	}
+	// Several heartbeat ticks later the tail is still there.
+	time.Sleep(200 * time.Millisecond)
+	if entries, ok := remoteAgentRunActivity(live.ID()); !ok || len(entries) < 2 {
+		t.Fatalf("heartbeats must keep the mirrored tail: ok=%v n=%d", ok, len(entries))
+	}
+	live.Note("output: all good")
+	live.End(nil)
+	if !waitFor(t, 3*time.Second, func() bool {
+		entries, ok := remoteAgentRunActivity(live.ID())
+		return ok && len(entries) > 0 && strings.Contains(entries[len(entries)-1].Text, "end status=completed")
+	}) {
+		t.Fatal("final entries were not mirrored")
+	}
+
+	// A second process (its own bridge and registry, which do not know the
+	// run) reads the transcript through the mirror. The owner's bridge is
+	// stopped first: one process hosts one bridge, and the provider only
+	// lists runs of OTHER instances.
+	stop()
+	otherReg := runs.NewRegistry(10)
+	stopOther := startRunsHubBridge(ctx, store, otherReg, nil)
+	defer stopOther()
+	other := newLiveAgentsAdapter(otherReg)
+	out, err := other.Transcript(live.ID(), 3)
+	if err != nil {
+		t.Fatalf("remote transcript: %v", err)
+	}
+	for _, want := range []string{"mirrored from gateway via the hub", "status=completed", "output: all good", "3 of "} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("transcript lacks %q:\n%s", want, out)
+		}
+	}
+}
+
+func TestEncodeActivityTailBounds(t *testing.T) {
+	var log []runs.Entry
+	for i := 0; i < runsHubActivityTail+20; i++ {
+		log = append(log, runs.Entry{At: time.Now(), Text: strings.Repeat("x", runsHubActivityTextBytes+50)})
+	}
+	var tail []runs.Entry
+	if err := json.Unmarshal([]byte(encodeActivityTail(log)), &tail); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(tail) != runsHubActivityTail {
+		t.Fatalf("tail must keep the newest %d entries, got %d", runsHubActivityTail, len(tail))
+	}
+	if len(tail[0].Text) > runsHubActivityTextBytes+len("…") {
+		t.Fatalf("entry text not bounded: %d bytes", len(tail[0].Text))
+	}
+	if encodeActivityTail(nil) != "" {
+		t.Fatal("empty log encodes as empty string (keeps the stored tail)")
 	}
 }
