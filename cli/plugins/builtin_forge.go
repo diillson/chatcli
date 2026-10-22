@@ -76,7 +76,7 @@ func (*BuiltinForgePlugin) Name() string { return "@forge" }
 
 // Description surfaces the tool in /plugin list and the agent tool catalog.
 func (*BuiltinForgePlugin) Description() string {
-	return "Git-forge operations through the user's authenticated gh (GitHub) or glab (GitLab) CLI: list/view/diff pull requests, watch their CI checks and read failing run logs, list/view issues, and — behind confirmation — create PRs and post comments. The forge is auto-detected from the git remote. Use it to close the loop branch -> PR -> CI -> fix without leaving the agent."
+	return "Git-forge operations through the user's authenticated gh (GitHub) or glab (GitLab) CLI: list (by state, search, author, label), view and diff pull requests, watch their CI checks, read failing run logs by pattern or tail, list/view issues, and — behind confirmation — create, review, merge, check out, close or undraft PRs, create and close issues, comment, and rerun workflows. The forge is auto-detected from the git remote. Use it to close the loop branch -> PR -> CI -> fix -> merge without leaving the agent."
 }
 
 // Usage explains the canonical invocation forms.
@@ -84,24 +84,32 @@ func (*BuiltinForgePlugin) Usage() string {
 	return `<tool_call name="@forge" args='{"cmd":"pr-checks","args":{"number":42}}' />
 
 Subcommands:
-  pr-list [--limit N]              open pull requests
+  pr-list [--limit N] [--state open|closed|merged|all] [--search TEXT] [--author USER] [--label L]   pull requests (open by default)
   pr-view {number}                 one PR: title, body, state, reviews
   pr-diff {number}                 the PR's diff (capped)
   pr-checks {number}               CI check status for the PR
   pr-create --title T [--body B] [--base BR] [--draft]   create a PR from the current branch
   pr-comment {number} --body B     comment on a PR
-  issue-list [--limit N]           open issues
+  pr-review {number} --event approve|request-changes|comment [--body B]   review a PR
+  pr-merge {number} [--method squash|merge|rebase] [--delete-branch]   merge a PR (squash by default)
+  pr-checkout {number}             check the PR's branch out locally
+  pr-close {number}                close a PR without merging
+  pr-ready {number}                mark a draft PR ready for review
+  issue-list [--limit N] [--state ...] [--search TEXT] [--author USER] [--label L]   issues (open by default)
   issue-view {number}              one issue with its discussion
+  issue-create --title T [--body B] [--labels a,b]   open an issue
   issue-comment {number} --body B  comment on an issue
+  issue-close {number}             close an issue
   ci-status [--branch BR]          latest workflow runs (current branch by default)
-  ci-logs {run-id}                 the failed steps' logs of a run
+  ci-logs {run-id} [--grep RE] [--tail N]   the failed steps' logs of a run; --grep keeps matching lines (case-insensitive regexp), --tail the last N
+  ci-rerun {run-id} [--failed]     rerun a workflow run (only its failed jobs with --failed)
   detect                           which forge CLI would be used (gh or glab) and why
 
 GitLab remotes route to glab automatically; pass {"host":"github"} or {"host":"gitlab"} to force.`
 }
 
 // Version returns the plugin contract version.
-func (*BuiltinForgePlugin) Version() string { return "1.0.0" }
+func (*BuiltinForgePlugin) Version() string { return "1.1.0" }
 
 // Path identifies the plugin as builtin.
 func (*BuiltinForgePlugin) Path() string { return "[builtin]" }
@@ -113,17 +121,25 @@ func (*BuiltinForgePlugin) Schema() string {
 		"description": "Pull requests, issues and CI via the user's authenticated gh/glab CLI.",
 		"argsFormat":  "JSON envelope {cmd, args} (e.g. {\"cmd\":\"pr-view\",\"args\":{\"number\":42}}); two-token (pr view 42) and flat argv also accepted.",
 		"subcommands": []map[string]interface{}{
-			{"name": "pr-list", "description": "open pull requests", "examples": []string{`{"cmd":"pr-list"}`}},
+			{"name": "pr-list", "description": "pull requests (open by default); state open|closed|merged|all, search, author, label", "examples": []string{`{"cmd":"pr-list"}`, `{"cmd":"pr-list","args":{"state":"merged","search":"browser","limit":5}}`}},
 			{"name": "pr-view", "description": "one PR in detail", "examples": []string{`{"cmd":"pr-view","args":{"number":42}}`}},
 			{"name": "pr-diff", "description": "the PR's diff", "examples": []string{`{"cmd":"pr-diff","args":{"number":42}}`}},
 			{"name": "pr-checks", "description": "CI check status for a PR", "examples": []string{`{"cmd":"pr-checks","args":{"number":42}}`}},
 			{"name": "pr-create", "description": "create a PR from the current branch", "examples": []string{`{"cmd":"pr-create","args":{"title":"fix: x","body":"...","base":"main"}}`}},
 			{"name": "pr-comment", "description": "comment on a PR", "examples": []string{`{"cmd":"pr-comment","args":{"number":42,"body":"..."}}`}},
-			{"name": "issue-list", "description": "open issues", "examples": []string{`{"cmd":"issue-list"}`}},
+			{"name": "pr-review", "description": "review a PR: event approve, request-changes or comment (body required unless approve)", "examples": []string{`{"cmd":"pr-review","args":{"number":42,"event":"approve"}}`, `{"cmd":"pr-review","args":{"number":42,"event":"request-changes","body":"..."}}`}},
+			{"name": "pr-merge", "description": "merge a PR; method squash (default), merge or rebase; delete_branch removes the head branch", "examples": []string{`{"cmd":"pr-merge","args":{"number":42}}`, `{"cmd":"pr-merge","args":{"number":42,"method":"rebase","delete_branch":true}}`}},
+			{"name": "pr-checkout", "description": "check the PR's branch out locally", "examples": []string{`{"cmd":"pr-checkout","args":{"number":42}}`}},
+			{"name": "pr-close", "description": "close a PR without merging", "examples": []string{`{"cmd":"pr-close","args":{"number":42}}`}},
+			{"name": "pr-ready", "description": "mark a draft PR ready for review", "examples": []string{`{"cmd":"pr-ready","args":{"number":42}}`}},
+			{"name": "issue-list", "description": "issues (open by default); state, search, author, label", "examples": []string{`{"cmd":"issue-list"}`, `{"cmd":"issue-list","args":{"state":"all","label":"bug"}}`}},
+			{"name": "issue-create", "description": "open an issue (labels comma-separated)", "examples": []string{`{"cmd":"issue-create","args":{"title":"Crash on start","body":"...","labels":"bug"}}`}},
+			{"name": "issue-close", "description": "close an issue", "examples": []string{`{"cmd":"issue-close","args":{"number":7}}`}},
 			{"name": "issue-view", "description": "one issue with discussion", "examples": []string{`{"cmd":"issue-view","args":{"number":7}}`}},
 			{"name": "issue-comment", "description": "comment on an issue", "examples": []string{`{"cmd":"issue-comment","args":{"number":7,"body":"..."}}`}},
 			{"name": "ci-status", "description": "latest workflow runs", "examples": []string{`{"cmd":"ci-status"}`}},
-			{"name": "ci-logs", "description": "failed-step logs of a run", "examples": []string{`{"cmd":"ci-logs","args":{"run":123456}}`}},
+			{"name": "ci-logs", "description": "failed-step logs of a run; grep keeps lines matching a case-insensitive regexp, tail the last N lines", "examples": []string{`{"cmd":"ci-logs","args":{"run":123456}}`, `{"cmd":"ci-logs","args":{"run":123456,"grep":"FAIL|panic","tail":80}}`}},
+			{"name": "ci-rerun", "description": "rerun a workflow run (failed:true reruns only its failed jobs)", "examples": []string{`{"cmd":"ci-rerun","args":{"run":123456,"failed":true}}`}},
 			{"name": "detect", "description": "which forge CLI would be used", "examples": []string{`{"cmd":"detect"}`}},
 		},
 	}
@@ -143,13 +159,32 @@ type forgeInvocation struct {
 	host   string
 	limit  int
 	draft  bool
+	// Verbs added in 1.1.
+	state        string // pr-list/issue-list
+	search       string
+	author       string
+	labels       string // comma-separated
+	method       string // pr-merge
+	deleteBranch bool
+	event        string // pr-review
+	grep         string // ci-logs
+	tail         int
+	failed       bool // ci-rerun
 }
 
 // forgeMutatingCmds require the security gate.
 var forgeMutatingCmds = map[string]bool{
 	"pr-create":     true,
 	"pr-comment":    true,
+	"pr-review":     true,
+	"pr-merge":      true,
+	"pr-checkout":   true,
+	"pr-close":      true,
+	"pr-ready":      true,
+	"issue-create":  true,
 	"issue-comment": true,
+	"issue-close":   true,
+	"ci-rerun":      true,
 }
 
 // Execute dispatches a @forge invocation.
@@ -177,6 +212,11 @@ func (p *BuiltinForgePlugin) ExecuteWithStream(ctx context.Context, args []strin
 	out, err := forgeRunner(opCtx, bin, cliArgs)
 	if err != nil {
 		return "", fmt.Errorf("@forge %s: %w", inv.cmd, err)
+	}
+	if inv.cmd == "ci-logs" {
+		if out, err = forgeFilterOutput(out, inv.grep, inv.tail); err != nil {
+			return "", err
+		}
 	}
 	if strings.TrimSpace(out) == "" {
 		out = "(no output)"
@@ -218,7 +258,7 @@ func buildForgeArgs(bin string, inv forgeInvocation) ([]string, error) {
 	case strings.HasPrefix(inv.cmd, "ci-"):
 		return buildForgeCIArgs(bin, inv)
 	default:
-		return nil, fmt.Errorf("@forge: unknown cmd %q (valid: pr-list|pr-view|pr-diff|pr-checks|pr-create|pr-comment|issue-list|issue-view|issue-comment|ci-status|ci-logs|detect)", inv.cmd)
+		return nil, fmt.Errorf("@forge: unknown cmd %q (valid: pr-list|pr-view|pr-diff|pr-checks|pr-create|pr-comment|pr-review|pr-merge|pr-checkout|pr-close|pr-ready|issue-list|issue-view|issue-create|issue-comment|issue-close|ci-status|ci-logs|ci-rerun|detect)", inv.cmd)
 	}
 }
 
@@ -243,7 +283,10 @@ func buildForgePRArgs(bin string, inv forgeInvocation) ([]string, error) {
 	gh := bin == "gh"
 	switch inv.cmd {
 	case "pr-list":
-		return []string{"pr", "list", "--limit", forgeLimit(inv)}, nil
+		if gh {
+			return forgeListFilters(gh, inv, []string{"pr", "list", "--limit", forgeLimit(inv)})
+		}
+		return forgeListFilters(gh, inv, []string{"mr", "list", "--per-page", forgeLimit(inv)})
 	case "pr-view":
 		if err := forgeNeedNumber(inv); err != nil {
 			return nil, err
@@ -282,7 +325,7 @@ func buildForgePRArgs(bin string, inv forgeInvocation) ([]string, error) {
 		}
 		return []string{"mr", "note", inv.number, "--message", inv.body}, nil
 	}
-	return nil, fmt.Errorf("@forge: unknown cmd %q", inv.cmd)
+	return buildForgePRExtraArgs(gh, inv)
 }
 
 // buildForgePRCreateArgs maps pr-create for both CLIs.
@@ -313,7 +356,10 @@ func buildForgeIssueArgs(bin string, inv forgeInvocation) ([]string, error) {
 	gh := bin == "gh"
 	switch inv.cmd {
 	case "issue-list":
-		return []string{"issue", "list", "--limit", forgeLimit(inv)}, nil
+		if gh {
+			return forgeListFilters(gh, inv, []string{"issue", "list", "--limit", forgeLimit(inv)})
+		}
+		return forgeListFilters(gh, inv, []string{"issue", "list", "--per-page", forgeLimit(inv)})
 	case "issue-view":
 		if err := forgeNeedNumber(inv); err != nil {
 			return nil, err
@@ -334,7 +380,7 @@ func buildForgeIssueArgs(bin string, inv forgeInvocation) ([]string, error) {
 		}
 		return []string{"issue", "note", inv.number, "--message", inv.body}, nil
 	}
-	return nil, fmt.Errorf("@forge: unknown cmd %q", inv.cmd)
+	return buildForgeIssueExtraArgs(gh, inv)
 }
 
 // buildForgeCIArgs maps the ci-* family.
@@ -359,7 +405,7 @@ func buildForgeCIArgs(bin string, inv forgeInvocation) ([]string, error) {
 		}
 		return []string{"ci", "trace", inv.run}, nil
 	}
-	return nil, fmt.Errorf("@forge: unknown cmd %q", inv.cmd)
+	return buildForgeCIExtraArgs(gh, inv)
 }
 
 // parseForgeInvocation understands the JSON envelope and flat argv forms,
@@ -398,8 +444,20 @@ func parseForgeInvocation(args []string) (forgeInvocation, error) {
 	if v := firstFlag(flags, "limit"); v != "" {
 		inv.limit = forgeAtoi(v, 0)
 	}
+	inv.state = firstFlag(flags, "state")
+	inv.search = firstFlag(flags, "search", "query")
+	inv.author = firstFlag(flags, "author")
+	inv.labels = firstFlag(flags, "labels", "label")
+	inv.method = firstFlag(flags, "method", "strategy")
+	inv.deleteBranch = bools["delete-branch"] || bools["delete_branch"] || boolFlag(flags, "delete-branch") || boolFlag(flags, "delete_branch")
+	inv.event = firstFlag(flags, "event", "action")
+	inv.grep = firstFlag(flags, "grep", "match", "filter")
+	if v := firstFlag(flags, "tail"); v != "" {
+		inv.tail = forgeAtoi(v, 0)
+	}
+	inv.failed = bools["failed"] || boolFlag(flags, "failed")
 	if len(positionals) > 0 {
-		if inv.cmd == "ci-logs" {
+		if inv.cmd == "ci-logs" || inv.cmd == "ci-rerun" {
 			if inv.run == "" {
 				inv.run = positionals[0]
 			}
@@ -469,6 +527,21 @@ func parseForgeEnvelope(payload string) (forgeInvocation, error) {
 		}
 	}
 	inv.draft = getBool("draft")
+	inv.state = getStr("state")
+	inv.search = getStr("search", "query")
+	inv.author = getStr("author")
+	inv.labels = getStr("labels", "label")
+	inv.method = getStr("method", "strategy")
+	inv.deleteBranch = getBool("delete_branch") || getBool("deleteBranch") || getBool("delete-branch")
+	inv.event = getStr("event", "action")
+	inv.grep = getStr("grep", "match", "filter")
+	if v, ok := inner["tail"]; ok {
+		var n int
+		if json.Unmarshal(v, &n) == nil {
+			inv.tail = n
+		}
+	}
+	inv.failed = getBool("failed")
 	return inv, nil
 }
 
