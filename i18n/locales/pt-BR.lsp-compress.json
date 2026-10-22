@@ -1,0 +1,8 @@
+{
+  "plugins.lsp.describe_implementation": "LSP: implementações em %s:%d",
+  "plugins.lsp.describe_workspace_symbol": "LSP: símbolos do workspace com %s",
+  "plugins.lsp.describe_rename_preview": "LSP: prévia de renomear em %s:%d -> %s",
+  "plugins.lsp.describe_rename": "LSP: renomeando em %s:%d -> %s (grava arquivos)",
+  "plugins.compress.describe.file": "Comprimindo o arquivo %s",
+  "plugins.compress.describe.files": "Comprimindo %d arquivos"
+}

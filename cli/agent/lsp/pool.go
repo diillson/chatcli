@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -293,6 +294,33 @@ func (p *Pool) Close() {
 		e.client.Shutdown()
 		delete(p.entries, key)
 	}
+}
+
+// AnyReady returns a session on any live, initialized server in the pool —
+// for workspace-wide requests (workspace/symbol) that need a server but no
+// particular document. ok is false when no server is up yet; callers then
+// ask for a file so Acquire can pick and spawn the right one. Entries are
+// visited in key order so the choice is deterministic across calls.
+func (p *Pool) AnyReady() (*Session, bool) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.closed {
+		return nil, false
+	}
+	keys := make([]string, 0, len(p.entries))
+	for k := range p.entries {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	for _, k := range keys {
+		e := p.entries[k]
+		if e.shutdown {
+			continue
+		}
+		e.lastUse = p.now()
+		return &Session{Client: e.client, Root: strings.TrimPrefix(e.rootURI, "file://")}, true
+	}
+	return nil, false
 }
 
 // findProjectRoot walks up from path looking for a workspace marker so the
