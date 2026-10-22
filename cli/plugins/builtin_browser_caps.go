@@ -30,11 +30,16 @@ var browserReadOnlyCmds = map[string]bool{
 	"tab":        true,
 	"cookies":    true, // listing only; --clear is checked below
 	"snapshot":   true,
+	"text":       true,
+	"find":       true,
 	"screenshot": true,
 	"console":    true,
 	"network":    true,
+	"downloads":  true,
 	"scroll":     true,
 	"back":       true,
+	"forward":    true,
+	"reload":     true,
 	"status":     true,
 	"close":      true,
 }
@@ -78,7 +83,7 @@ func (p *BuiltinBrowserPlugin) DescribeCall(args []string) string {
 	case "hide":
 		return i18n.T("plugins.browser.describe_hide")
 	case "wait":
-		return i18n.T("plugins.browser.describe_wait", describeTrim(browserWaitCondition(inv.url, inv.text, inv.selector, inv.changed)))
+		return i18n.T("plugins.browser.describe_wait", describeTrim(browserWaitCondition(inv.url, inv.text, inv.selector, inv.changed, inv.unblocked, inv.idle)))
 	case "press":
 		return i18n.T("plugins.browser.describe_press", describeTrim(inv.key))
 	case "hover":
@@ -104,6 +109,8 @@ func (p *BuiltinBrowserPlugin) DescribeCall(args []string) string {
 		return i18n.T("plugins.browser.describe_cookies")
 	case "snapshot":
 		return i18n.T("plugins.browser.describe_snapshot")
+	case "text", "find", "clear", "forward", "reload", "downloads":
+		return describeBrowserRead(inv)
 	case "click":
 		return i18n.T("plugins.browser.describe_click", describeTrim(inv.target))
 	case "type":
@@ -115,8 +122,29 @@ func (p *BuiltinBrowserPlugin) DescribeCall(args []string) string {
 	case "console":
 		return i18n.T("plugins.browser.describe_console")
 	case "network":
+		if inv.body {
+			return i18n.T("plugins.browser.describe_network_body")
+		}
 		return i18n.T("plugins.browser.describe_network")
 	default:
 		return i18n.T("plugins.browser.describe_generic")
+	}
+}
+
+// describeBrowserRead names the reading verbs for the spinner.
+func describeBrowserRead(inv browserInvocation) string {
+	switch inv.cmd {
+	case "text":
+		return i18n.T("plugins.browser.describe_text")
+	case "find":
+		return i18n.T("plugins.browser.describe_find", describeTrim(inv.text))
+	case "clear":
+		return i18n.T("plugins.browser.describe_clear", describeTrim(inv.target))
+	case "forward":
+		return i18n.T("plugins.browser.describe_forward")
+	case "reload":
+		return i18n.T("plugins.browser.describe_reload")
+	default:
+		return i18n.T("plugins.browser.describe_downloads")
 	}
 }

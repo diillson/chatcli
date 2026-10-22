@@ -1,0 +1,9 @@
+{
+  "plugins.browser.describe_text": "Navegador: lendo o texto da página",
+  "plugins.browser.describe_find": "Navegador: procurando %s na página",
+  "plugins.browser.describe_clear": "Navegador: limpando %s",
+  "plugins.browser.describe_forward": "Navegador: avançando",
+  "plugins.browser.describe_reload": "Navegador: recarregando a página",
+  "plugins.browser.describe_downloads": "Navegador: listando downloads",
+  "plugins.browser.describe_network_body": "Navegador: lendo o corpo de uma resposta de rede"
+}

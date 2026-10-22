@@ -521,6 +521,7 @@ func (s *Session) doSwitchTab(ctx context.Context, which string) (TabInfo, error
 	if err := s.enableDocumentGuard(ctx, attached.SessionID); err != nil {
 		return TabInfo{}, fmt.Errorf("%s: %w", "Fetch.enable", err)
 	}
+	s.applyIdentity(ctx, attached.SessionID)
 	s.mu.Lock()
 	s.targetID, s.sessionID = pick.ID, attached.SessionID
 	s.targetGone = false

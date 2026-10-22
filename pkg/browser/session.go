@@ -92,14 +92,29 @@ type Session struct {
 	targetGone bool // the page target was closed (user closed the tab/window)
 	// goneReported is set once a command has surfaced ErrPageClosed for
 	// the current closure; only then does the next command reattach.
-	goneReported bool
-	console      []ConsoleEntry
-	network      []NetworkEntry
-	networkIDs   []string                // request ids parallel to network, for response bodies
-	requests     map[string]NetworkEntry // requestId -> method/url awaiting response
-	lastNetwork  time.Time               // when the page last sent or received something
-	loadCh       chan struct{}           // closed on Page.loadEventFired; replaced per navigation
+	goneReported  bool
+	console       []ConsoleEntry
+	network       []NetworkEntry
+	networkIDs    []string                // request ids parallel to network, for response bodies
+	requests      map[string]NetworkEntry // requestId -> method/url awaiting response
+	lastNetwork   time.Time               // when the page last sent or received something
+	downloads     []DownloadInfo          // files the page downloaded, newest last
+	downloadGUIDs map[string]int          // download guid -> index in downloads
+	loadCh        chan struct{}           // closed on Page.loadEventFired; replaced per navigation
 }
+
+// DownloadInfo is one file the page downloaded into the session's download
+// directory.
+type DownloadInfo struct {
+	URL      string
+	File     string // absolute path once the download began ("" when unknown)
+	State    string // inProgress|completed|canceled
+	Received int64
+	Total    int64
+}
+
+// maxDownloads bounds the download ring.
+const maxDownloads = 50
 
 // NewSession launches a browser, attaches to a fresh page target and enables
 // the domains the actions need.
@@ -216,6 +231,8 @@ func (s *Session) attachFreshTarget(ctx context.Context) error {
 	if err := s.enableDocumentGuard(ctx, attached.SessionID); err != nil {
 		return fmt.Errorf("%s: %w", "Fetch.enable", err)
 	}
+	s.applyIdentity(ctx, attached.SessionID)
+	s.enableDownloads(ctx)
 	return nil
 }
 
@@ -426,6 +443,9 @@ func (s *Session) handleEvent(method string, params json.RawMessage, sessionID s
 		}
 		s.lastNetwork = time.Now()
 		s.mu.Unlock()
+
+	case "Browser.downloadWillBegin", "Browser.downloadProgress":
+		s.handleDownloadEvent(method, params)
 	}
 }
 
