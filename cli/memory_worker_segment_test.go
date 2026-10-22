@@ -84,3 +84,46 @@ func TestNudgeSegment_EmptyAndNoStoreAreNoops(t *testing.T) {
 		t.Fatalf("no memory store must be a no-op; got %d files", got)
 	}
 }
+
+// TestNudgeSegment_DuringRunningPassRerunsAfterIt pins the race the CI
+// runner hit: the second turn arrived while the first turn's pass still
+// held the gate, found it running, and nothing ever extracted the queue.
+func TestNudgeSegment_DuringRunningPassRerunsAfterIt(t *testing.T) {
+	extractor := &scriptedClient{name: "claude", response: "NOTHING_NEW"}
+	mw := newResilienceWorker(t, extractor)
+	segment := []models.Message{
+		{Role: "user", Content: "mcp user turn"},
+		{Role: "assistant", Content: "mcp assistant turn"},
+	}
+	// Hold the gate as a running pass would.
+	if !mw.coord.running.CompareAndSwap(false, true) {
+		t.Fatal("gate must be free at start")
+	}
+	mw.nudgeSegment(context.Background(), segment)
+	mw.nudgeSegment(context.Background(), segment)
+	if got := len(mw.pendingFiles()); got != 2 {
+		t.Fatalf("both turns must be queued while a pass runs; got %d files", got)
+	}
+	if !mw.rerunQueued.Load() {
+		t.Fatal("a nudge during a running pass must ask for a rerun")
+	}
+	if extractor.calls.Load() != 0 {
+		t.Fatal("nothing may extract while the gate is held")
+	}
+	// The running pass ends: its tail runs the pass the nudges asked for.
+	mw.coord.release()
+	mw.extractQueued(context.Background(), 0)
+	deadline := time.Now().Add(15 * time.Second)
+	for len(mw.pendingFiles()) > 0 {
+		if time.Now().After(deadline) {
+			t.Fatalf("queue must drain through the rerun: %v", mw.pendingFiles())
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if extractor.calls.Load() == 0 {
+		t.Fatal("the rerun must have extracted")
+	}
+	if mw.rerunQueued.Load() {
+		t.Fatal("the rerun request must be consumed")
+	}
+}
