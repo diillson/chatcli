@@ -44,6 +44,17 @@ type TodoAdapter interface {
 // TodoItem is the flat, LLM-facing view of a single planned task.
 // Decoupled from the agent.TaskTracker.TaskSpec type so the plugins
 // package stays out of the cli/agent dependency graph.
+// TodoEditor is an OPTIONAL capability of the wired TodoAdapter: adding
+// tasks to the plan and rewording one, without resending the whole list.
+// A separate interface because TodoAdapter is exported API.
+type TodoEditor interface {
+	// Add appends items to the plan (starting one when none exists) and
+	// returns the post-add progress summary.
+	Add(items []TodoItem) (string, error)
+	// Update rewords task id (1-indexed), keeping its status.
+	Update(id int, description string) (string, error)
+}
+
 type TodoItem struct {
 	Description string `json:"description"`
 	Status      string `json:"status,omitempty"` // pending | in_progress | completed | failed
@@ -99,7 +110,7 @@ func (p *BuiltinTodoPlugin) Description() string {
 func (p *BuiltinTodoPlugin) Usage() string { return "@todo write|list|mark" }
 
 // Version follows semver tied to the tracker contract.
-func (p *BuiltinTodoPlugin) Version() string { return "1.0.0" }
+func (p *BuiltinTodoPlugin) Version() string { return "1.1.0" }
 
 // Path is the builtin sentinel.
 func (p *BuiltinTodoPlugin) Path() string { return "[builtin]" }
@@ -128,6 +139,23 @@ func (p *BuiltinTodoPlugin) Schema() string {
 				"description": "Return the current task plan with status icons and progress counts.",
 				"flags":       []map[string]interface{}{},
 				"examples":    []string{`{"cmd":"list"}`},
+			},
+			{
+				"name":        "add",
+				"description": "Append tasks to the current plan (keeping every existing task and its status) — for a step discovered mid-run, instead of resending the whole plan with write.",
+				"flags": []map[string]interface{}{
+					{"name": "todos", "type": "array", "required": true, "description": "Array of {description,status?} objects to append"},
+				},
+				"examples": []string{`{"cmd":"add","args":{"todos":[{"description":"Update the docs"}]}}`},
+			},
+			{
+				"name":        "update",
+				"description": "Reword one task by its 1-indexed ID, keeping its status.",
+				"flags": []map[string]interface{}{
+					{"name": "id", "type": "integer", "required": true, "description": "1-indexed task id"},
+					{"name": "description", "type": "string", "required": true, "description": "New wording"},
+				},
+				"examples": []string{`{"cmd":"update","args":{"id":2,"description":"Apply the fix in auth.go"}}`},
 			},
 			{
 				"name":        "mark",
@@ -173,6 +201,30 @@ func (p *BuiltinTodoPlugin) ExecuteWithStream(_ context.Context, args []string, 
 		return adapter.Write(items)
 	case "list", "":
 		return adapter.List()
+	case "add":
+		ed, ok := adapter.(TodoEditor)
+		if !ok {
+			return "", errors.New("@todo add: not available in this session")
+		}
+		items, err := todoItemsFromPayload(payload)
+		if err != nil {
+			return "", errors.New(strings.Replace(err.Error(), "@todo write", "@todo add", 1))
+		}
+		return ed.Add(items)
+	case "update":
+		ed, ok := adapter.(TodoEditor)
+		if !ok {
+			return "", errors.New("@todo update: not available in this session")
+		}
+		id := jsonInt(payload, "id")
+		if id <= 0 {
+			return "", errors.New("@todo update: id is required (1-indexed)")
+		}
+		desc := strings.TrimSpace(jsonString(payload, "description", "text", "title"))
+		if desc == "" {
+			return "", errors.New("@todo update: description is required")
+		}
+		return ed.Update(id, desc)
 	case "mark":
 		id := jsonInt(payload, "id")
 		if id <= 0 {
@@ -185,7 +237,7 @@ func (p *BuiltinTodoPlugin) ExecuteWithStream(_ context.Context, args []string, 
 		errMsg := jsonString(payload, "error", "errorMsg", "errMsg")
 		return adapter.Mark(id, status, errMsg)
 	default:
-		return "", fmt.Errorf("@todo: unknown subcommand %q (expected write|list|mark)", sub)
+		return "", fmt.Errorf("@todo: unknown subcommand %q (expected write|add|update|list|mark)", sub)
 	}
 }
 

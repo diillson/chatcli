@@ -1,0 +1,9 @@
+{
+  "mem.tool.list.none": "No stored fact matches.",
+  "mem.tool.list.header": "%d of %d fact(s) (id  [category]  content):",
+  "mem.tool.forget.preview_none": "Dry run: no stored fact contains %q — nothing would be removed.",
+  "mem.tool.forget.preview": "Dry run: %d fact(s) contain %q and would be removed (call forget again without dry_run, or forget by id to remove one):",
+  "mem.tool.forget.byid": "Removed fact %s: %s",
+  "mem.tool.forget.byid_none": "no stored fact has an id starting with %q — list shows the ids",
+  "mem.tool.forget.byid_ambiguous": "%d facts have ids starting with %q — use a longer prefix from list"
+}

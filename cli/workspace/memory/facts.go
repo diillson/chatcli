@@ -314,6 +314,49 @@ func (fi *FactIndex) ForgetMatching(substr string) []*Fact {
 	return removed
 }
 
+// Matching returns the facts whose content contains substr
+// (case-insensitive), sorted by score, without removing anything: the
+// preview of what ForgetMatching would delete.
+func (fi *FactIndex) Matching(substr string) []*Fact {
+	substr = strings.ToLower(strings.TrimSpace(substr))
+	if substr == "" {
+		return nil
+	}
+	var out []*Fact
+	for _, f := range fi.GetAll() {
+		if strings.Contains(strings.ToLower(f.Content), substr) {
+			out = append(out, f)
+		}
+	}
+	return out
+}
+
+// RemoveByIDPrefix removes the one fact whose id starts with prefix. It
+// reports the fact removed, or how many ids matched when it is not exactly
+// one (0 = none, 2+ = ambiguous, nothing removed).
+func (fi *FactIndex) RemoveByIDPrefix(prefix string) (*Fact, int) {
+	prefix = strings.ToLower(strings.TrimSpace(prefix))
+	if prefix == "" {
+		return nil, 0
+	}
+	fi.mu.Lock()
+	var hits []string
+	for id := range fi.facts {
+		if strings.HasPrefix(strings.ToLower(id), prefix) {
+			hits = append(hits, id)
+		}
+	}
+	fi.mu.Unlock()
+	if len(hits) != 1 {
+		return nil, len(hits)
+	}
+	f, _ := fi.GetByID(hits[0])
+	if !fi.RemoveFact(hits[0]) {
+		return nil, 0
+	}
+	return f, 1
+}
+
 // GetAll returns all facts sorted by score (descending).
 func (fi *FactIndex) GetAll() []*Fact {
 	fi.mu.RLock()

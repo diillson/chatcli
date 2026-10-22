@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"strings"
 	"testing"
 
 	"go.uber.org/zap"
@@ -189,5 +190,34 @@ func TestTaskTracker_MarkByID_FailedAccumulates(t *testing.T) {
 	tracker.MarkByID(3, TaskFailed, "e3")
 	if !tracker.NeedsReplanning() {
 		t.Error("three failures must flip NeedsReplanning to true")
+	}
+}
+
+func TestTaskTracker_AppendTasksAndUpdateDescription(t *testing.T) {
+	tr := NewTaskTracker(zap.NewNop())
+	if tr.UpdateDescription(1, "x") {
+		t.Fatal("no plan: nothing to update")
+	}
+	ids := tr.AppendTasks([]TaskSpec{{Description: "Investigate"}, {Description: "  "}, {Description: "Fix", Status: TaskInProgress}})
+	if len(ids) != 2 || ids[0] != 1 || ids[1] != 2 {
+		t.Fatalf("appended ids = %v", ids)
+	}
+	tr.MarkByID(1, TaskCompleted, "")
+	ids = tr.AppendTasks([]TaskSpec{{Description: "Add tests"}})
+	if len(ids) != 1 || ids[0] != 3 {
+		t.Fatalf("second append ids = %v", ids)
+	}
+	plan := tr.GetPlan()
+	if len(plan.Tasks) != 3 || plan.Tasks[0].Status != TaskCompleted || plan.Tasks[1].Status != TaskInProgress || plan.Tasks[2].Status != TaskPending {
+		t.Fatalf("append must keep existing tasks and statuses: %+v", plan.Tasks)
+	}
+	if !tr.UpdateDescription(3, "Add unit tests") || plan.Tasks[2].Description != "Add unit tests" || plan.Tasks[2].Status != TaskPending {
+		t.Fatalf("update description: %+v", plan.Tasks[2])
+	}
+	if tr.UpdateDescription(9, "x") || tr.UpdateDescription(1, "  ") {
+		t.Fatal("bad id or empty description must be refused")
+	}
+	if !strings.Contains(tr.FormatProgress(), "3. Add unit tests") {
+		t.Fatalf("progress = %q", tr.FormatProgress())
 	}
 }

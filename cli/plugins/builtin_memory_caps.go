@@ -6,6 +6,8 @@
 
 package plugins
 
+import "strings"
+
 // Capability advertisements for BuiltinMemoryPlugin.
 
 // IsReadOnly reports true for the subcommands that only read the user's
@@ -18,8 +20,11 @@ func (*BuiltinMemoryPlugin) IsReadOnly(args []string) bool {
 		return false
 	}
 	switch cmd {
-	case "recall", "timeline", "map", "neighbors":
+	case "recall", "timeline", "map", "neighbors", "list":
 		return true
+	case "forget":
+		// A dry run only previews.
+		return strings.Contains(strings.ToLower(strings.Join(args, " ")), `"dry_run":true`) || strings.Contains(strings.Join(args, " "), "--dry_run")
 	default:
 		return false
 	}

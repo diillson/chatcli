@@ -56,6 +56,36 @@ func (a *liveTodoAdapter) Write(items []plugins.TodoItem) (string, error) {
 	return tracker.FormatProgress(), nil
 }
 
+// Add implements plugins.TodoEditor: appends tasks to the live plan.
+func (a *liveTodoAdapter) Add(items []plugins.TodoItem) (string, error) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	tracker := a.tracker()
+	if tracker == nil {
+		return "", fmt.Errorf("@todo add: no active agent task tracker")
+	}
+	specs := make([]agent.TaskSpec, 0, len(items))
+	for _, it := range items {
+		specs = append(specs, agent.TaskSpec{Description: it.Description, Status: agent.TaskStatus(it.Status)})
+	}
+	ids := tracker.AppendTasks(specs)
+	return fmt.Sprintf("Added %d task(s) (ids %v).\n%s", len(ids), ids, tracker.FormatProgress()), nil
+}
+
+// Update implements plugins.TodoEditor: rewords one task.
+func (a *liveTodoAdapter) Update(id int, description string) (string, error) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	tracker := a.tracker()
+	if tracker == nil {
+		return "", fmt.Errorf("@todo update: no active agent task tracker")
+	}
+	if !tracker.UpdateDescription(id, description) {
+		return "", fmt.Errorf("@todo update: no task with id %d (list shows the ids)", id)
+	}
+	return tracker.FormatProgress(), nil
+}
+
 // List returns the current plan's formatted progress. Returns an empty
 // summary (not an error) when no plan exists yet — that's a normal
 // state at the start of an agent run.

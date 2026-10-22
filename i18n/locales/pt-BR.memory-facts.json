@@ -1,0 +1,9 @@
+{
+  "mem.tool.list.none": "Nenhum fato armazenado corresponde.",
+  "mem.tool.list.header": "%d de %d fato(s) (id  [categoria]  conteúdo):",
+  "mem.tool.forget.preview_none": "Simulação: nenhum fato armazenado contém %q — nada seria removido.",
+  "mem.tool.forget.preview": "Simulação: %d fato(s) contêm %q e seriam removidos (chame forget de novo sem dry_run, ou forget por id para remover um só):",
+  "mem.tool.forget.byid": "Fato %s removido: %s",
+  "mem.tool.forget.byid_none": "nenhum fato armazenado tem id começando com %q — list mostra os ids",
+  "mem.tool.forget.byid_ambiguous": "%d fatos têm ids começando com %q — use um prefixo mais longo de list"
+}
