@@ -11,7 +11,9 @@
 package cli
 
 import (
+	"context"
 	"fmt"
+	"regexp"
 	"strings"
 	"time"
 
@@ -100,6 +102,61 @@ func (a *procToolAdapter) Logs(id string, tail int) (string, error) {
 	}
 	return fmt.Sprintf("%s\n---\n%s", formatProcInfo(info), logs), nil
 }
+
+// Wait implements plugins.ProcWaiter.
+func (a *procToolAdapter) Wait(ctx context.Context, id, pattern string, timeoutSec int) (string, error) {
+	var re *regexp.Regexp
+	if p := strings.TrimSpace(pattern); p != "" {
+		var err error
+		if re, err = regexp.Compile("(?i)" + p); err != nil {
+			return "", fmt.Errorf("invalid pattern %q: %w", pattern, err)
+		}
+	}
+	r, err := a.supervisor().WaitFor(ctx, id, re, time.Duration(timeoutSec)*time.Second)
+	if err != nil {
+		return "", err
+	}
+	head := formatProcInfo(r.Info)
+	var verdict string
+	switch {
+	case r.Matched:
+		verdict = fmt.Sprintf(procMsgWaitMatchedFmt, r.Line)
+	case r.Exited:
+		verdict = procMsgWaitExited
+	default:
+		verdict = fmt.Sprintf(procMsgWaitTimeoutFmt, timeoutSec, pattern)
+	}
+	if strings.TrimSpace(r.Tail) == "" {
+		return head + "\n" + verdict, nil
+	}
+	return head + "\n" + verdict + "\n---\n" + r.Tail, nil
+}
+
+// LogsGrep implements plugins.ProcWaiter.
+func (a *procToolAdapter) LogsGrep(id, pattern string, tail int) (string, error) {
+	re, err := regexp.Compile("(?i)" + strings.TrimSpace(pattern))
+	if err != nil {
+		return "", fmt.Errorf("invalid grep %q: %w", pattern, err)
+	}
+	lines, matched, total, info, err := a.supervisor().LogsMatching(id, re, tail)
+	if err != nil {
+		return "", err
+	}
+	head := formatProcInfo(info)
+	if matched == 0 {
+		return fmt.Sprintf(procMsgGrepNoneFmt, head, total, pattern), nil
+	}
+	return fmt.Sprintf(procMsgGrepFmt, head, len(lines), matched, total, pattern, strings.Join(lines, "\n")), nil
+}
+
+// Model-facing wait/grep results (named per house style).
+const (
+	procMsgWaitMatchedFmt = "Output matched: %q"
+	procMsgWaitExited     = "The process exited before the output matched (its exit code is above); the tail of its output follows."
+	procMsgWaitTimeoutFmt = "Timed out after %ds without a line matching %q; the process is still running — the tail of its output follows. Wait again with a longer timeout, check the pattern against it, or read logs."
+	procMsgGrepNoneFmt    = "%s — no line of %d matches %q."
+	procMsgGrepFmt        = "%s\n---\n[%d of %d matching line(s) shown, %d lines total, grep %q]\n%s"
+)
 
 // Stop implements plugins.ProcAdapter.
 func (a *procToolAdapter) Stop(id string) (string, error) {

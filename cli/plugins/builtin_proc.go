@@ -22,6 +22,13 @@ import (
 	"sync/atomic"
 )
 
+// procWaitDefault / procWaitMax bound `wait`: long enough for a cold dev
+// server, short enough that a forgotten wait never hangs the turn.
+const (
+	procWaitDefault = 60
+	procWaitMax     = 600
+)
+
 // ProcAdapter is the surface @proc needs from the live session. Results are
 // pre-rendered, model-facing text.
 type ProcAdapter interface {
@@ -44,6 +51,20 @@ type ProcInteractive interface {
 	// Stdin writes text into a PTY process's terminal; pressEnter appends
 	// the terminal's Enter key.
 	Stdin(id, text string, pressEnter bool) (string, error)
+}
+
+// ProcWaiter is an OPTIONAL capability of the wired ProcAdapter: blocking
+// until a process prints a line (or exits), and reading only the log lines
+// that match a pattern. A separate interface for the same reason as
+// ProcInteractive: ProcAdapter is exported API.
+type ProcWaiter interface {
+	// Wait blocks until the process's output matches pattern (a Go regexp,
+	// case-insensitive; empty = wait for exit), the process exits, or
+	// timeout seconds elapse. The result says which, with the output tail.
+	Wait(ctx context.Context, id, pattern string, timeoutSec int) (string, error)
+	// LogsGrep returns the last tail lines of the output that match
+	// pattern, with counts.
+	LogsGrep(id, pattern string, tail int) (string, error)
 }
 
 type procAdapterHolder struct{ a ProcAdapter }
@@ -76,7 +97,7 @@ func (*BuiltinProcPlugin) Name() string { return "@proc" }
 
 // Description surfaces the tool in /plugin list and the agent tool catalog.
 func (*BuiltinProcPlugin) Description() string {
-	return "Run and supervise background processes: start a long-running command (dev server, watcher), check its status, tail its logs, and stop the whole process tree. Use it when a command must KEEP RUNNING while you test against it — one-shot commands belong to @coder exec."
+	return "Run and supervise background processes: start a long-running command (dev server, watcher), wait until it prints a line (\"listening on\") or exits, check its status, tail or grep its logs, and stop the whole process tree. Use it when a command must KEEP RUNNING while you test against it — one-shot commands belong to @coder exec."
 }
 
 // Usage explains the canonical invocation forms.
@@ -89,21 +110,23 @@ Subcommands (cmd + args):
                                 REPLs/debuggers/ssh run for real (Unix)
   stdin  {id, text, no_enter?}  type into a pty process's terminal (Enter is
                                 pressed unless no_enter:true)
+  wait   {id, pattern?, timeout?}  block until the output matches pattern (regexp, case-insensitive; e.g. "listening on|ready"), the process exits, or timeout seconds pass (default 60, max 600) — use it right after start instead of polling logs
   status {id}                 running/exited, pid, uptime, exit code
-  logs   {id, tail?:1-1000}   last lines of combined stdout+stderr
+  logs   {id, tail?:1-1000, grep?}   last lines of combined stdout+stderr; grep keeps only the lines matching a regexp
   stop   {id}                 terminate the process tree (TERM → grace → KILL)
   remove {id}                 forget an exited process and its logs
   list   {}                   every tracked process
 
-Workflow: start the server, poll logs until it is ready, exercise it (e.g.
-@coder exec curl), read logs again, stop it when done. Interactive flow:
+Workflow: start the server, wait {"id":"p1","pattern":"listening on"} until it
+is ready, exercise it (e.g. @coder exec curl), read logs (grep "error" for
+the failures), stop it when done. Interactive flow:
 start {"command":"python3","pty":true} → stdin {"id":"p1","text":"1+1"} →
 logs to read the REPL's answer. Everything still running dies with the
 session.`
 }
 
 // Version is semver; bumped when the surface changes.
-func (*BuiltinProcPlugin) Version() string { return "1.0.0" }
+func (*BuiltinProcPlugin) Version() string { return "1.1.0" }
 
 // Path is empty for builtin plugins.
 func (*BuiltinProcPlugin) Path() string { return "" }
@@ -140,12 +163,22 @@ func (*BuiltinProcPlugin) Schema() string {
 				"examples":    []string{`{"cmd":"status","args":{"id":"p1"}}`},
 			},
 			{
+				"name":        "wait",
+				"description": "block until the output matches pattern (regexp, case-insensitive), the process exits, or timeout seconds pass (default 60, max 600); without pattern, wait for exit",
+				"flags": []map[string]interface{}{idFlag,
+					{"name": "pattern", "description": "regexp the output must match, e.g. \"listening on|ready\"", "type": "string"},
+					{"name": "timeout", "description": "seconds to wait", "type": "int", "default": "60"},
+				},
+				"examples": []string{`{"cmd":"wait","args":{"id":"p1","pattern":"listening on :\\d+","timeout":90}}`, `{"cmd":"wait","args":{"id":"p1"}}`},
+			},
+			{
 				"name":        "logs",
-				"description": "tail of the combined stdout+stderr",
+				"description": "tail of the combined stdout+stderr; grep keeps only the lines matching a regexp",
 				"flags": []map[string]interface{}{idFlag,
 					{"name": "tail", "description": "lines to return", "type": "int", "default": "100"},
+					{"name": "grep", "description": "regexp (case-insensitive) a line must match to be returned", "type": "string"},
 				},
-				"examples": []string{`{"cmd":"logs","args":{"id":"p1","tail":50}}`},
+				"examples": []string{`{"cmd":"logs","args":{"id":"p1","tail":50}}`, `{"cmd":"logs","args":{"id":"p1","grep":"error|panic"}}`},
 			},
 			{
 				"name":        "stop",
@@ -176,7 +209,7 @@ func (p *BuiltinProcPlugin) Execute(ctx context.Context, args []string) (string,
 }
 
 // ExecuteWithStream mirrors Execute — no incremental output.
-func (p *BuiltinProcPlugin) ExecuteWithStream(_ context.Context, args []string, _ func(string)) (string, error) {
+func (p *BuiltinProcPlugin) ExecuteWithStream(ctx context.Context, args []string, _ func(string)) (string, error) {
 	adapter := currentProcAdapter()
 	if adapter == nil {
 		return "", errors.New("@proc: no process adapter wired in this session")
@@ -198,8 +231,13 @@ func (p *BuiltinProcPlugin) ExecuteWithStream(_ context.Context, args []string, 
 		PTY     bool   `json:"pty"`
 		Text    string `json:"text"`
 		NoEnter bool   `json:"no_enter"`
+		Pattern string `json:"pattern"`
+		Timeout int    `json:"timeout"`
+		Grep    string `json:"grep"`
 	}
-	_ = json.Unmarshal([]byte(inner), &in)
+	if err := json.Unmarshal([]byte(inner), &in); err != nil {
+		return "", fmt.Errorf("@proc %s: arguments do not parse (%w) — expected {\"cmd\":%q,\"args\":{...}}", cmd, err, cmd)
+	}
 
 	switch cmd {
 	case "start":
@@ -232,7 +270,30 @@ func (p *BuiltinProcPlugin) ExecuteWithStream(_ context.Context, args []string, 
 		if err := requireProcID(in.ID); err != nil {
 			return "", err
 		}
+		if strings.TrimSpace(in.Grep) != "" {
+			w, ok := adapter.(ProcWaiter)
+			if !ok {
+				return "", errors.New("@proc logs: grep is not available in this session")
+			}
+			return w.LogsGrep(in.ID, in.Grep, in.Tail)
+		}
 		return adapter.Logs(in.ID, in.Tail)
+	case "wait":
+		if err := requireProcID(in.ID); err != nil {
+			return "", err
+		}
+		w, ok := adapter.(ProcWaiter)
+		if !ok {
+			return "", errors.New("@proc wait: not available in this session")
+		}
+		timeout := in.Timeout
+		if timeout <= 0 {
+			timeout = procWaitDefault
+		}
+		if timeout > procWaitMax {
+			timeout = procWaitMax
+		}
+		return w.Wait(ctx, in.ID, in.Pattern, timeout)
 	case "stop":
 		if err := requireProcID(in.ID); err != nil {
 			return "", err
@@ -349,6 +410,8 @@ func canonicalProcCmd(cmd string) string {
 		return "stdin"
 	case "status", "stat", "info":
 		return "status"
+	case "wait", "wait-for", "waitfor", "await", "until":
+		return "wait"
 	case "logs", "log", "tail", "output":
 		return "logs"
 	case "stop", "kill", "terminate":

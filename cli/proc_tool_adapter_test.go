@@ -8,9 +8,9 @@
 package cli
 
 import (
+	"context"
 	"strings"
 	"testing"
-	"time"
 
 	"go.uber.org/zap"
 )
@@ -39,22 +39,29 @@ func TestProcAdapterLifecycleE2E(t *testing.T) {
 		t.Fatalf("list missing running process: %q", list)
 	}
 
-	// Poll logs until the readiness line lands (the workflow the tool
-	// documents: poll readiness before testing against the process).
-	deadline := time.Now().Add(5 * time.Second)
-	var logs string
-	for time.Now().Before(deadline) {
-		logs, err = a.Logs("p1", 10)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if strings.Contains(logs, "ready") {
-			break
-		}
-		time.Sleep(50 * time.Millisecond)
+	// Wait for the readiness line (the workflow the tool documents: wait
+	// for readiness before testing against the process).
+	waited, err := a.Wait(context.Background(), "p1", "READY", 5)
+	if err != nil || !strings.Contains(waited, `Output matched: "ready"`) || !strings.Contains(waited, "p1 running") {
+		t.Fatalf("wait: %q %v", waited, err)
 	}
-	if !strings.Contains(logs, "ready") {
-		t.Fatalf("readiness line never appeared: %q", logs)
+	timedOut, err := a.Wait(context.Background(), "p1", "never", 1)
+	if err != nil || !strings.Contains(timedOut, "Timed out after 1s") || !strings.Contains(timedOut, "ready") {
+		t.Fatalf("wait timeout: %q %v", timedOut, err)
+	}
+	if _, err := a.Wait(context.Background(), "p1", "(", 1); err == nil {
+		t.Fatal("invalid pattern must error")
+	}
+	grepped, err := a.LogsGrep("p1", "rea", 10)
+	if err != nil || !strings.Contains(grepped, "[1 of 1 matching line(s) shown, 1 lines total") || !strings.HasSuffix(grepped, "ready") {
+		t.Fatalf("grep: %q %v", grepped, err)
+	}
+	if none, _ := a.LogsGrep("p1", "zzz", 10); !strings.Contains(none, "no line of 1 matches") {
+		t.Fatalf("grep none: %q", none)
+	}
+	logs, err := a.Logs("p1", 10)
+	if err != nil || !strings.Contains(logs, "ready") {
+		t.Fatalf("logs: %q %v", logs, err)
 	}
 
 	stopOut, err := a.Stop("p1")

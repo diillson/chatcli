@@ -19,7 +19,7 @@ import (
 // orchestrator's confirmation policy like any other mutating tool call.
 func (p *BuiltinProcPlugin) IsReadOnly(args []string) bool {
 	switch procInvocationCmd(args) {
-	case "status", "logs", "list":
+	case "status", "logs", "list", "wait":
 		return true
 	default:
 		return false
@@ -52,6 +52,8 @@ func (p *BuiltinProcPlugin) DescribeCall(args []string) string {
 		return i18n.T("plugins.proc.describe_status", in.ID)
 	case "logs":
 		return i18n.T("plugins.proc.describe_logs", in.ID)
+	case "wait":
+		return i18n.T("plugins.proc.describe_wait", in.ID)
 	case "stop":
 		return i18n.T("plugins.proc.describe_stop", in.ID)
 	case "remove":

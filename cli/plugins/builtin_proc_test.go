@@ -12,6 +12,8 @@ import (
 )
 
 type fakeProcAdapter struct {
+	pattern  string
+	timeout  int
 	lastCall string
 	command  string
 	dir      string
@@ -42,6 +44,14 @@ func (f *fakeProcAdapter) Remove(id string) (string, error) {
 func (f *fakeProcAdapter) List() (string, error) {
 	f.lastCall = "list"
 	return "list", nil
+}
+func (f *fakeProcAdapter) Wait(_ context.Context, id, pattern string, timeoutSec int) (string, error) {
+	f.lastCall, f.id, f.pattern, f.timeout = "wait", id, pattern, timeoutSec
+	return "waited", nil
+}
+func (f *fakeProcAdapter) LogsGrep(id, pattern string, tail int) (string, error) {
+	f.lastCall, f.id, f.pattern, f.tail = "grep", id, pattern, tail
+	return "grepped", nil
 }
 
 func withFakeProc(t *testing.T) *fakeProcAdapter {
@@ -256,5 +266,40 @@ func TestProcPTYFlattenedArgv(t *testing.T) {
 	}
 	if fake.stdinID != "p1" || fake.stdinText != "1+1" {
 		t.Fatalf("flattened stdin not routed: %+v", fake)
+	}
+}
+
+func TestProcWaitAndGrep(t *testing.T) {
+	fake := withFakeProc(t)
+	p := NewBuiltinProcPlugin()
+	out, err := p.Execute(context.Background(), []string{`{"cmd":"wait","args":{"id":"p1","pattern":"listening on","timeout":90}}`})
+	if err != nil || out != "waited" || fake.lastCall != "wait" || fake.pattern != "listening on" || fake.timeout != 90 {
+		t.Fatalf("wait: %q %v %+v", out, err, fake)
+	}
+	if _, err := p.Execute(context.Background(), []string{"wait", "--id", "p1"}); err != nil || fake.timeout != procWaitDefault {
+		t.Fatalf("wait default timeout: %v %d", err, fake.timeout)
+	}
+	if _, err := p.Execute(context.Background(), []string{`{"cmd":"until","args":{"id":"p1","timeout":99999}}`}); err != nil || fake.timeout != procWaitMax || fake.lastCall != "wait" {
+		t.Fatalf("wait alias and max: %v %d %s", err, fake.timeout, fake.lastCall)
+	}
+	if _, err := p.Execute(context.Background(), []string{`{"cmd":"wait","args":{}}`}); err == nil {
+		t.Fatal("wait without id must error")
+	}
+	out, err = p.Execute(context.Background(), []string{`{"cmd":"logs","args":{"id":"p1","grep":"error|panic","tail":30}}`})
+	if err != nil || out != "grepped" || fake.lastCall != "grep" || fake.pattern != "error|panic" || fake.tail != 30 {
+		t.Fatalf("logs grep: %q %v %+v", out, err, fake)
+	}
+	if _, err := p.Execute(context.Background(), []string{`{"cmd":"logs","args":{"id":"p1"}}`}); err != nil || fake.lastCall != "logs" {
+		t.Fatalf("plain logs stays on Logs: %v %s", err, fake.lastCall)
+	}
+	if _, err := p.Execute(context.Background(), []string{`{"cmd":"logs","args":{"id":"p1","tail":"fifty"}}`}); err == nil || !strings.Contains(err.Error(), "do not parse") {
+		t.Fatalf("a wrongly typed field is reported, not dropped: %v", err)
+	}
+	if !p.IsReadOnly([]string{`{"cmd":"wait","args":{"id":"p1"}}`}) || p.IsConcurrencySafe([]string{`{"cmd":"wait","args":{"id":"p1"}}`}) == false {
+		// wait observes; it may share a parallel batch with other reads.
+		t.Fatal("wait is read-only")
+	}
+	if d := p.DescribeCall([]string{`{"cmd":"wait","args":{"id":"p1"}}`}); !strings.Contains(d, "p1") {
+		t.Fatalf("describe wait = %q", d)
 	}
 }
