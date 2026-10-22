@@ -56,7 +56,7 @@ func NewBuiltinWebSearchPlugin() *BuiltinWebSearchPlugin {
 func (p *BuiltinWebSearchPlugin) Name() string        { return "@websearch" }
 func (p *BuiltinWebSearchPlugin) Description() string { return "Searches the web and returns results" }
 func (p *BuiltinWebSearchPlugin) Usage() string       { return "@websearch <query>" }
-func (p *BuiltinWebSearchPlugin) Version() string     { return "2.1.0" }
+func (p *BuiltinWebSearchPlugin) Version() string     { return "2.2.0" }
 func (p *BuiltinWebSearchPlugin) Path() string        { return "[builtin]" }
 
 func (p *BuiltinWebSearchPlugin) Schema() string {
@@ -92,7 +92,7 @@ func (p *BuiltinWebSearchPlugin) ExecuteWithStream(ctx context.Context, args []s
 
 	query, maxResults := parseWebSearchArgs(args)
 	if query == "" {
-		return "", fmt.Errorf("query required")
+		return "", fmt.Errorf(`query required: {"cmd":"search","args":{"query":"<terms>","maxResults":10}} (q, term or text are accepted names)`)
 	}
 
 	results, provider, lastErr := runSearchChain(ctx, query, maxResults, onOutput)
@@ -112,15 +112,15 @@ func (p *BuiltinWebSearchPlugin) ExecuteWithStream(ctx context.Context, args []s
 func parseWebSearchArgs(args []string) (string, int) {
 	maxResults := 10
 
-	// JSON-arg form first.
-	if len(args) == 1 {
-		if q, m, ok := parseSearchJSON(args[0]); ok {
+	// JSON-arg form first. A JSON payload without a usable query is an
+	// empty query, never a search for the JSON text itself.
+	if len(args) == 1 && strings.HasPrefix(strings.TrimSpace(args[0]), "{") {
+		q, m, ok := parseSearchJSON(args[0])
+		if ok {
 			if m > 0 {
 				maxResults = m
 			}
-			if q != "" {
-				return q, maxResults
-			}
+			return q, maxResults
 		}
 	}
 
@@ -171,26 +171,45 @@ func parseSearchJSON(raw string) (query string, maxResults int, ok bool) {
 	if err := json.Unmarshal([]byte(raw), &j); err != nil {
 		return "", 0, false
 	}
-	if cmd, isCmd := j["cmd"].(string); isCmd && cmd == "search" {
+	if _, isCmd := j["cmd"].(string); isCmd {
+		// {"cmd":"search","args":{…}} — any other cmd is still a search:
+		// the tool has one verb and models invent names for it.
 		if a, isMap := j["args"].(map[string]interface{}); isMap {
-			if q, isStr := a["query"].(string); isStr {
-				query = q
-			}
-			if m, isNum := a["maxResults"].(float64); isNum {
-				maxResults = int(m)
-			}
+			query, maxResults = searchFields(a)
+		}
+		if query == "" {
+			// {"cmd":"search","query":"…"} — the fields beside cmd.
+			query, maxResults = searchFields(j)
 		}
 		return query, maxResults, true
 	}
-	if q, isStr := j["query"].(string); isStr && q != "" {
-		query = q
-		for _, key := range []string{"max_results", "maxResults"} {
-			if m, isNum := j[key].(float64); isNum && m > 0 {
-				maxResults = int(m)
-			}
+	query, maxResults = searchFields(j)
+	return query, maxResults, true
+}
+
+// searchQueryKeys are the names a model gives the query; the first present
+// wins. searchLimitKeys likewise for the result count.
+var (
+	searchQueryKeys = []string{"query", "q", "search", "term", "text", "keywords"}
+	searchLimitKeys = []string{"maxResults", "max_results", "limit", "n", "count", "num_results"}
+)
+
+// searchFields reads the query and the result limit from a JSON object
+// under any of their accepted names.
+func searchFields(m map[string]interface{}) (query string, maxResults int) {
+	for _, k := range searchQueryKeys {
+		if q, ok := m[k].(string); ok && strings.TrimSpace(q) != "" {
+			query = strings.TrimSpace(q)
+			break
 		}
 	}
-	return query, maxResults, true
+	for _, k := range searchLimitKeys {
+		if n, ok := m[k].(float64); ok && n > 0 {
+			maxResults = int(n)
+			break
+		}
+	}
+	return query, maxResults
 }
 
 // runSearchChain tries each provider in order, returning the first

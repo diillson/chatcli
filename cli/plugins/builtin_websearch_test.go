@@ -122,3 +122,37 @@ func TestSearchSearxNG_TrailingSlashNormalized(t *testing.T) {
 		t.Errorf("expected /search path, got %q (double-slash trimming failed)", got)
 	}
 }
+
+// A JSON payload is never searched as text: a missing query is an empty
+// query, and the query may come under any of its usual names.
+func TestParseWebSearchArgs_JSONShapes(t *testing.T) {
+	cases := []struct {
+		args  []string
+		query string
+		max   int
+	}{
+		{[]string{`{"cmd":"search","args":{"query":"golang context","maxResults":5}}`}, "golang context", 5},
+		{[]string{`{"cmd":"search","args":{"q":"golang context","max_results":3}}`}, "golang context", 3},
+		{[]string{`{"cmd":"web_search","args":{"term":"chatcli"}}`}, "chatcli", 10},
+		{[]string{`{"cmd":"search","query":"flat with cmd","limit":4}`}, "flat with cmd", 4},
+		{[]string{`{"query":"native shape","max_results":7}`}, "native shape", 7},
+		{[]string{`{"q":"short key"}`}, "short key", 10},
+		{[]string{`{"text":"  padded  "}`}, "padded", 10},
+		{[]string{`{"cmd":"search","args":{}}`}, "", 10},
+		{[]string{`{"unrelated":"x"}`}, "", 10},
+		{[]string{"search", "--query", "positional", "--maxResults", "2"}, "positional", 2},
+		{[]string{"search", "bare", "words"}, "bare words", 10},
+		{[]string{"golang", "context"}, "golang context", 10},
+		{nil, "", 10},
+	}
+	for _, c := range cases {
+		q, m := parseWebSearchArgs(c.args)
+		if q != c.query || m != c.max {
+			t.Errorf("%v: got (%q, %d), want (%q, %d)", c.args, q, m, c.query, c.max)
+		}
+	}
+	_, err := NewBuiltinWebSearchPlugin().Execute(context.Background(), []string{`{"cmd":"search","args":{}}`})
+	if err == nil || !strings.Contains(err.Error(), `"query"`) {
+		t.Fatalf("a JSON call without a query must name the field, got %v", err)
+	}
+}

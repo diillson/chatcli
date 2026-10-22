@@ -172,11 +172,11 @@
     "surface": "90d23c8cf9801fb9"
   },
   "@webfetch": {
-    "version": "1.2.0",
-    "surface": "c18f9141bd98f3ea"
+    "version": "1.3.0",
+    "surface": "4d3606d75a3d7fa5"
   },
   "@websearch": {
-    "version": "2.1.0",
+    "version": "2.2.0",
     "surface": "d541893ef9a57165"
   },
   "@wikipedia": {
