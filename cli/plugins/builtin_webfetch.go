@@ -163,7 +163,7 @@ func (p *BuiltinWebFetchPlugin) ExecuteWithStream(ctx context.Context, args []st
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		// A 404 page, a 403 block page or a 500 error page still says
 		// something — the model reads it instead of a bare status.
-		return "", fmt.Errorf("HTTP %d: %s%s", resp.StatusCode, resp.Status, fetchErrorBodyNote(resp.StatusCode, fullContent))
+		return "", fmt.Errorf(fetchMsgStatusFmt, resp.StatusCode, resp.Status, fetchErrorBodyNote(resp.StatusCode, fullContent))
 	}
 	if !parsed.Raw {
 		fullContent = p.extractWithRenderEscalation(reqCtx, parsed, safeURL, fullContent, onOutput)
@@ -587,6 +587,10 @@ func stripHTMLTags(s string) string {
 	re := regexp.MustCompile(`<[^>]*>`)
 	return re.ReplaceAllString(s, "")
 }
+
+// fetchMsgStatusFmt is the model-facing non-2xx result (named per house
+// style, never an inline literal): status, reason and the body note.
+const fetchMsgStatusFmt = "HTTP %d: %s%s"
 
 // fetchErrorBodyCap bounds the error-page excerpt returned with a non-2xx.
 const fetchErrorBodyCap = 1500
