@@ -12,6 +12,10 @@ import (
 
 // Capability advertisements for BuiltinHTTPPlugin.
 
+// MaxResultChars keeps a full inline body (64KiB rendered plus headers)
+// under the per-tool budget instead of the 30k default.
+func (p *BuiltinHTTPPlugin) MaxResultChars() int { return 72_000 }
+
 // IsReadOnly is PER-METHOD: GET/HEAD/OPTIONS only observe the target;
 // POST/PUT/PATCH/DELETE mutate remote state and go through the
 // orchestrator's confirmation policy. Unparseable args fail closed.

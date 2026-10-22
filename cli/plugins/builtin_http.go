@@ -27,6 +27,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"sort"
 	"strings"
 	"time"
@@ -46,8 +47,15 @@ const (
 	// httpMaxResponseBody bounds how much of the response is read.
 	httpMaxResponseBody = 256 * 1024 // 256KiB read cap
 
+	// httpMaxSavedBody bounds the read when the body is being saved to a
+	// file: a large export the model asked for lands on disk whole.
+	httpMaxSavedBody = 8 << 20 // 8MiB
+
 	// httpMaxRenderedBody bounds how much body lands in the conversation.
 	httpMaxRenderedBody = 64 * 1024 // 64KiB rendered
+
+	// httpMinRenderedBody is the smallest max_body a call may ask for.
+	httpMinRenderedBody = 1024
 )
 
 // httpAllowedMethods is the closed set of supported methods; the read-only
@@ -89,7 +97,7 @@ pretty-printed. Cloud-metadata and link-local targets are always refused.`
 }
 
 // Version is semver; bumped when the surface changes.
-func (*BuiltinHTTPPlugin) Version() string { return "1.0.0" }
+func (*BuiltinHTTPPlugin) Version() string { return "1.1.0" }
 
 // Path is empty for builtin plugins.
 func (*BuiltinHTTPPlugin) Path() string { return "" }
@@ -108,6 +116,9 @@ func (*BuiltinHTTPPlugin) Schema() string {
 					{"name": "headers", "description": "request headers as a string map", "type": "object"},
 					{"name": "body", "description": "request body (string; pair with a Content-Type header)", "type": "string"},
 					{"name": "timeout_seconds", "description": "request timeout", "type": "int", "default": "30"},
+					{"name": "max_body", "description": "max response chars returned inline (default 65536)", "type": "int"},
+					{"name": "save_to_file", "description": "save the full response body (up to 8 MiB) to the session scratch dir and return a preview + path (automatic when a body read whole exceeds the inline cap); read it later with @read", "type": "bool"},
+					{"name": "save_path", "description": "file name for save_to_file (placed in the scratch dir)", "type": "string"},
 				},
 				"examples": []string{
 					`{"cmd":"request","args":{"method":"GET","url":"http://localhost:8080/healthz"}}`,
@@ -144,6 +155,13 @@ type httpArgs struct {
 	Headers        headerMap `json:"headers"`
 	Body           string    `json:"body"`
 	TimeoutSeconds int       `json:"timeout_seconds"`
+	// SaveToFile writes the full response body to the session scratch dir
+	// (SavePath names the file there) and returns a preview plus the path;
+	// a body past the inline cap that was read whole is saved automatically.
+	SaveToFile bool   `json:"save_to_file"`
+	SavePath   string `json:"save_path"`
+	// MaxBody overrides the inline body cap (chars) for this call.
+	MaxBody int `json:"max_body"`
 }
 
 // headerMap unmarshals from an object or from a JSON-encoded object string —
@@ -220,12 +238,71 @@ func (p *BuiltinHTTPPlugin) perform(ctx context.Context, in httpArgs) (string, e
 	}
 	defer func() { _ = resp.Body.Close() }()
 
-	raw, err := io.ReadAll(io.LimitReader(resp.Body, httpMaxResponseBody+1))
+	readCap := httpMaxResponseBody
+	if in.SaveToFile {
+		readCap = httpMaxSavedBody
+	}
+	raw, err := io.ReadAll(io.LimitReader(resp.Body, int64(readCap)+1))
 	if err != nil {
 		return "", fmt.Errorf("@http: read response: %w", err)
 	}
 	elapsed := time.Since(start).Round(time.Millisecond)
-	return renderHTTPResponse(in, resp, raw, elapsed), nil
+	out := renderHTTPResponse(in, resp, raw, elapsed)
+	// Save the body when asked, or when it was read whole but more of it
+	// was read than the conversation will see — the model then reads it in
+	// ranges instead of refetching.
+	wholeBody := len(raw) <= readCap
+	if in.SaveToFile || (wholeBody && len(raw) > in.renderedCap()) {
+		if !wholeBody {
+			raw = raw[:readCap]
+		}
+		path, serr := browserArtifactPath(in.SavePath, "http", httpBodyExt(resp.Header.Get("Content-Type")))
+		if serr == nil {
+			serr = os.WriteFile(path, raw, 0o600) // #nosec G703 -- path confined to the artifact dir by browserArtifactPath
+		}
+		switch {
+		case serr != nil:
+			out += fmt.Sprintf("\n[body could not be saved: %v]", serr)
+		case wholeBody:
+			out += fmt.Sprintf(httpMsgSavedFmt, path, len(raw), path)
+		default:
+			out += fmt.Sprintf(httpMsgSavedPartFmt, readCap, path, path)
+		}
+	}
+	return out, nil
+}
+
+// Model-facing notes about the saved body.
+const (
+	httpMsgSavedFmt     = "\n[full body saved to %s — %d bytes; read it in ranges with @read {\"file\":%q,\"from_line\":1,\"to_line\":200} or search it with @search]"
+	httpMsgSavedPartFmt = "\n[the response is larger than the %d-byte save cap; its first part is saved to %s — read it with @read {\"file\":%q}]"
+)
+
+// renderedCap is the inline body cap for this call.
+func (in httpArgs) renderedCap() int {
+	if in.MaxBody >= httpMinRenderedBody {
+		return in.MaxBody
+	}
+	return httpMaxRenderedBody
+}
+
+// httpBodyExt picks a file extension from the content type so the saved
+// body opens as what it is.
+func httpBodyExt(contentType string) string {
+	ct := strings.ToLower(contentType)
+	switch {
+	case strings.Contains(ct, "json"):
+		return ".json"
+	case strings.Contains(ct, "html"):
+		return ".html"
+	case strings.Contains(ct, "xml"):
+		return ".xml"
+	case strings.Contains(ct, "csv"):
+		return ".csv"
+	case strings.Contains(ct, "yaml"):
+		return ".yaml"
+	}
+	return ".txt"
 }
 
 // renderHTTPResponse formats the model-facing response summary.
@@ -251,10 +328,10 @@ func renderHTTPResponse(in httpArgs, resp *http.Response, raw []byte, elapsed ti
 	}
 
 	truncatedRead := false
-	if len(raw) > httpMaxResponseBody {
+	if len(raw) > httpMaxResponseBody && !in.SaveToFile {
 		raw, truncatedRead = raw[:httpMaxResponseBody], true
 	}
-	body := renderHTTPBody(raw, resp.Header.Get("Content-Type"))
+	body := renderHTTPBodyCapped(raw, resp.Header.Get("Content-Type"), in.renderedCap())
 	if body == "" {
 		b.WriteString("(empty body)")
 		return strings.TrimRight(b.String(), "\n")
@@ -269,17 +346,17 @@ func renderHTTPResponse(in httpArgs, resp *http.Response, raw []byte, elapsed ti
 
 // renderHTTPBody bounds the body and pretty-prints JSON so the model reads
 // structure instead of a single wrapped line. Cuts land on rune boundaries.
-func renderHTTPBody(raw []byte, contentType string) string {
+func renderHTTPBodyCapped(raw []byte, contentType string, limit int) string {
 	if len(raw) == 0 {
 		return ""
 	}
 	if strings.Contains(strings.ToLower(contentType), "json") && json.Valid(raw) {
 		var pretty bytes.Buffer
 		if err := json.Indent(&pretty, raw, "", "  "); err == nil {
-			return boundRuneSafe(pretty.String(), httpMaxRenderedBody)
+			return boundRuneSafe(pretty.String(), limit)
 		}
 	}
-	return boundRuneSafe(string(raw), httpMaxRenderedBody)
+	return boundRuneSafe(string(raw), limit)
 }
 
 // boundRuneSafe truncates s to limit bytes on a rune boundary, flagging the cut.
@@ -356,7 +433,7 @@ func parseHTTPInvocation(args []string) (httpArgs, error) {
 		}
 		// The agent flattener delivers the {cmd,args} envelope as "--flag
 		// value" argv; a bare positional is the URL.
-		inner := argvInner(tail, "url", nil, map[string]bool{"timeout_seconds": true})
+		inner := argvInner(tail, "url", nil, map[string]bool{"timeout_seconds": true, "max_body": true, "save_to_file": true})
 		if err := json.Unmarshal([]byte(inner), &in); err != nil {
 			return in, fmt.Errorf("parse args: %w", err)
 		}

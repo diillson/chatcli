@@ -334,3 +334,25 @@ func TestParseAPIExplorerArgs(t *testing.T) {
 		t.Error("expected error for missing url")
 	}
 }
+
+func TestAPIExplorerSpecOffsetPaging(t *testing.T) {
+	srv := newSpecServer(t)
+	specURL := srv.URL + "/openapi.json"
+	out := run(t, `{"cmd":"spec","args":{"url":"`+specURL+`","limit":1}}`)
+	mustContain(t, out, "Endpoints (3)", "[endpoints 1-1 of 3; continue with offset=1")
+	out = run(t, `{"cmd":"spec","args":{"url":"`+specURL+`","limit":1,"offset":1}}`)
+	mustContain(t, out, "[endpoints 2-2 of 3; continue with offset=2")
+	out = run(t, `{"cmd":"spec","args":{"url":"`+specURL+`","limit":5,"offset":2}}`)
+	mustContain(t, out, "[endpoints 3-3 of 3]")
+	if strings.Contains(out, "continue with") {
+		t.Fatalf("last page must not offer a next offset:\n%s", out)
+	}
+	out = run(t, `{"cmd":"spec","args":{"url":"`+specURL+`"}}`)
+	if strings.Contains(out, "[endpoints ") {
+		t.Fatalf("a complete listing has no paging footer:\n%s", out)
+	}
+	in, err := parseAPIExplorerArgs([]string{`{"cmd":"spec","args":{"url":"x","offset":7}}`})
+	if err != nil || in.Offset != 7 {
+		t.Fatalf("offset parse: %+v %v", in, err)
+	}
+}
