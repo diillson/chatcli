@@ -11,7 +11,8 @@
  *
  *   remember { content, category? }          -> stored fact
  *   profile  { fields:{key:value,...} }       -> updated profile
- *   forget   { match }                        -> removed matching facts
+ *   forget   { match | id, dry_run? }        -> removed matching facts (or one by id; dry_run previews)
+ *   list     { match?, category?, limit? }    -> facts with their ids
  *   recall   { query? }                       -> current relevant memory
  *
  * Like @scheduler, the top-level ChatCLI owns the memory store but the
@@ -51,6 +52,21 @@ type MemoryAdapter interface {
 // interface, not part of MemoryAdapter, so adding the knowledge-graph view never
 // breaks existing MemoryAdapter implementations; the plugin type-asserts to it
 // and degrades gracefully when an adapter does not provide it.
+// FactBrowser is an OPTIONAL capability a MemoryAdapter may implement:
+// listing facts with their ids, previewing what a forget would remove,
+// and removing exactly one fact by id. Separate interface for the same
+// reason as GraphAccessor.
+type FactBrowser interface {
+	// ListFacts renders facts (id, category, content), optionally only
+	// those containing match and/or in category, at most limit.
+	ListFacts(match, category string, limit int) (string, error)
+	// ForgetPreview renders the facts forget would remove for match,
+	// without removing them.
+	ForgetPreview(match string) (string, error)
+	// ForgetByID removes the one fact whose id starts with idPrefix.
+	ForgetByID(idPrefix string) (string, error)
+}
+
 type GraphAccessor interface {
 	// GraphMap returns the knowledge-graph map-of-content (node counts + hubs).
 	GraphMap() (string, error)
@@ -125,7 +141,9 @@ func (*BuiltinMemoryPlugin) Usage() string {
 Subcommands (cmd + args):
   remember {content, category?:architecture|pattern|preference|gotcha|project|personal|general}
   profile  {fields:{certifications:"AWS SAA", role:"SRE", goals:"...", interests:"...", directives:"...", milestone:"...", ...}}
-  forget    {match:"<substring of the fact to remove>"}
+  forget    {match:"<substring>", dry_run?:true}   remove every fact containing the substring; dry_run lists them first, nothing removed
+  forget    {id:"<id or id prefix from list>"}     remove exactly one fact
+  list      {match?, category?, limit?:50}         facts with their ids (to pick one for forget, or to audit memory)
   recall    {query?:"topic to recall", as_of?}
   timeline  {project?, from?, to?, query?, limit?, as_of?}   dated episode history (WHEN);
             as_of (YYYY-MM-DD) counts "3 months ago" from that day, this call only
@@ -162,7 +180,7 @@ examples or generated artifacts.`
 }
 
 // Version is semver; bumped when the surface changes.
-func (*BuiltinMemoryPlugin) Version() string { return "1.3.0" }
+func (*BuiltinMemoryPlugin) Version() string { return "1.4.0" }
 
 // Path is empty for builtin plugins.
 func (*BuiltinMemoryPlugin) Path() string { return "" }
@@ -199,11 +217,23 @@ func (*BuiltinMemoryPlugin) Schema() string {
 			},
 			{
 				"name":        "forget",
-				"description": "Remove stored FACTS whose text contains the given substring (case-insensitive). Does not touch profile fields — use profile with goals_remove/certifications_remove/... for those.",
+				"description": "Remove stored FACTS: every fact whose text contains match (case-insensitive) — preview with dry_run:true first when the substring could be broad — or exactly one fact by id (from list). Does not touch profile fields — use profile with goals_remove/certifications_remove/... for those.",
 				"flags": []map[string]interface{}{
-					{"name": "match", "type": "string", "required": true, "description": "Substring identifying the fact(s) to remove."},
+					{"name": "match", "type": "string", "description": "Substring identifying the fact(s) to remove."},
+					{"name": "id", "type": "string", "description": "Id (or unique prefix) of ONE fact to remove, as shown by list."},
+					{"name": "dry_run", "type": "bool", "description": "With match: list what would be removed, remove nothing."},
 				},
-				"examples": []string{`{"cmd":"forget","args":{"match":"prefers tabs"}}`},
+				"examples": []string{`{"cmd":"forget","args":{"match":"prefers tabs","dry_run":true}}`, `{"cmd":"forget","args":{"match":"prefers tabs"}}`, `{"cmd":"forget","args":{"id":"3f9a1c02"}}`},
+			},
+			{
+				"name":        "list",
+				"description": "Facts with their ids, newest-scored first: to audit what is remembered or to pick one for forget by id.",
+				"flags": []map[string]interface{}{
+					{"name": "match", "type": "string", "description": "Only facts containing this substring."},
+					{"name": "category", "type": "string", "description": "Only facts in this category (architecture, pattern, preference, gotcha, project, personal)."},
+					{"name": "limit", "type": "int", "description": "At most this many (default 50)."},
+				},
+				"examples": []string{`{"cmd":"list"}`, `{"cmd":"list","args":{"match":"tabs"}}`, `{"cmd":"list","args":{"category":"preference","limit":20}}`},
 			},
 			{
 				"name":        "recall",
@@ -294,13 +324,40 @@ func (p *BuiltinMemoryPlugin) ExecuteWithStream(_ context.Context, args []string
 		return adapter.UpdateProfile(fields)
 	case "forget":
 		var in struct {
-			Match string `json:"match"`
+			Match  string `json:"match"`
+			ID     string `json:"id"`
+			DryRun bool   `json:"dry_run"`
 		}
 		_ = json.Unmarshal([]byte(inner), &in)
+		fb, hasBrowser := adapter.(FactBrowser)
+		if id := strings.TrimSpace(in.ID); id != "" {
+			if !hasBrowser {
+				return "", errors.New("@memory forget: removing by id is not available in this session")
+			}
+			return fb.ForgetByID(id)
+		}
 		if strings.TrimSpace(in.Match) == "" {
-			return "", errors.New(`@memory forget: "match" is required`)
+			return "", errors.New(`@memory forget: "match" (a substring) or "id" (from list) is required`)
+		}
+		if in.DryRun {
+			if !hasBrowser {
+				return "", errors.New("@memory forget: dry_run is not available in this session")
+			}
+			return fb.ForgetPreview(in.Match)
 		}
 		return adapter.Forget(in.Match)
+	case "list":
+		fb, ok := adapter.(FactBrowser)
+		if !ok {
+			return "", errors.New("@memory list: not available in this session")
+		}
+		var in struct {
+			Match    string `json:"match"`
+			Category string `json:"category"`
+			Limit    int    `json:"limit"`
+		}
+		_ = json.Unmarshal([]byte(inner), &in)
+		return fb.ListFacts(in.Match, in.Category, in.Limit)
 	case "recall":
 		var in struct {
 			Query string `json:"query"`
@@ -358,7 +415,7 @@ func (p *BuiltinMemoryPlugin) ExecuteWithStream(_ context.Context, args []string
 		return ga.GraphNeighbors(in.Query)
 	default:
 		return "", fmt.Errorf(
-			"@memory: unknown cmd %q (valid: remember|profile|forget|recall|timeline|neighbors|map)", cmd,
+			"@memory: unknown cmd %q (valid: remember|profile|forget|list|recall|timeline|neighbors|map)", cmd,
 		)
 	}
 }
@@ -386,7 +443,7 @@ func parseMemoryInvocation(args []string) (string, string, error) {
 		canon := canonicalMemoryCmd(cmdStr)
 		if canon == "" {
 			return "", "", fmt.Errorf(
-				"missing or unknown cmd %q (valid: remember|profile|forget|recall|timeline|neighbors|map)", cmdStr,
+				"missing or unknown cmd %q (valid: remember|profile|forget|list|recall|timeline|neighbors|map)", cmdStr,
 			)
 		}
 		var inner string
@@ -423,6 +480,8 @@ func canonicalMemoryCmd(s string) string {
 		return "profile"
 	case "forget", "remove", "delete":
 		return "forget"
+	case "list", "facts", "ls", "show":
+		return "list"
 	case "recall", "read", "get", "search":
 		return "recall"
 	case "neighbors", "related", "links", "backlinks", "connected":

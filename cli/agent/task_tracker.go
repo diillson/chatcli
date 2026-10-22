@@ -333,6 +333,49 @@ func (t *TaskTracker) SetTasks(specs []TaskSpec) {
 	}
 }
 
+// AppendTasks adds tasks to the end of the current plan (or starts one),
+// keeping every existing task and its status; the new tasks are pending
+// unless the spec says otherwise. Returns the ids of the added tasks.
+func (t *TaskTracker) AppendTasks(specs []TaskSpec) []int {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if t.plan == nil {
+		t.plan = &TaskPlan{CreatedAt: time.Now()}
+	}
+	var ids []int
+	for _, s := range specs {
+		desc := strings.TrimSpace(s.Description)
+		if desc == "" {
+			continue
+		}
+		status := s.Status
+		if status == "" {
+			status = TaskPending
+		}
+		tk := &Task{ID: len(t.plan.Tasks) + 1, Description: desc, Status: status}
+		if status == TaskInProgress {
+			tk.StartedAt = time.Now()
+		}
+		t.plan.Tasks = append(t.plan.Tasks, tk)
+		ids = append(ids, tk.ID)
+	}
+	t.plan.UpdatedAt = time.Now()
+	return ids
+}
+
+// UpdateDescription rewords the task with the given 1-indexed ID, keeping
+// its status. Returns false when no such task exists.
+func (t *TaskTracker) UpdateDescription(id int, description string) bool {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if t.plan == nil || id < 1 || id > len(t.plan.Tasks) || strings.TrimSpace(description) == "" {
+		return false
+	}
+	t.plan.Tasks[id-1].Description = strings.TrimSpace(description)
+	t.plan.UpdatedAt = time.Now()
+	return true
+}
+
 // MarkByID updates the status of the task with the given 1-indexed ID.
 // Returns false when no such task exists. Used by the @todo plugin's
 // partial-update path when the LLM wants to flip a single status

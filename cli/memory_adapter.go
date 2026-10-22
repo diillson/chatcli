@@ -78,6 +78,85 @@ func (a *memoryPluginAdapter) Forget(match string) (string, error) {
 	return i18n.T("mem.tool.forget.result", n), nil
 }
 
+// ListFacts implements plugins.FactBrowser.
+func (a *memoryPluginAdapter) ListFacts(match, category string, limit int) (string, error) {
+	if a.cli.memoryStore == nil {
+		return "", fmt.Errorf("memory not enabled")
+	}
+	if limit <= 0 {
+		limit = 50
+	}
+	var facts []*memory.Fact
+	if m := strings.TrimSpace(match); m != "" {
+		facts = a.cli.memoryStore.Manager().FactsMatching(m)
+	} else {
+		facts = a.cli.memoryStore.Manager().Facts.GetAll()
+	}
+	cat := strings.ToLower(strings.TrimSpace(category))
+	var kept []*memory.Fact
+	for _, f := range facts {
+		if cat != "" && strings.ToLower(f.Category) != cat {
+			continue
+		}
+		kept = append(kept, f)
+	}
+	if len(kept) == 0 {
+		return i18n.T("mem.tool.list.none"), nil
+	}
+	total := len(kept)
+	if len(kept) > limit {
+		kept = kept[:limit]
+	}
+	return i18n.T("mem.tool.list.header", len(kept), total) + "\n" + renderFactLines(kept), nil
+}
+
+// ForgetPreview implements plugins.FactBrowser.
+func (a *memoryPluginAdapter) ForgetPreview(match string) (string, error) {
+	if a.cli.memoryStore == nil {
+		return "", fmt.Errorf("memory not enabled")
+	}
+	facts := a.cli.memoryStore.Manager().FactsMatching(match)
+	if len(facts) == 0 {
+		return i18n.T("mem.tool.forget.preview_none", match), nil
+	}
+	return i18n.T("mem.tool.forget.preview", len(facts), match) + "\n" + renderFactLines(facts), nil
+}
+
+// ForgetByID implements plugins.FactBrowser.
+func (a *memoryPluginAdapter) ForgetByID(idPrefix string) (string, error) {
+	if a.cli.memoryStore == nil {
+		return "", fmt.Errorf("memory not enabled")
+	}
+	f, n := a.cli.memoryStore.Manager().ForgetFactByID(idPrefix)
+	switch {
+	case f != nil:
+		a.invalidate()
+		return i18n.T("mem.tool.forget.byid", shortFactID(f.ID), f.Content), nil
+	case n == 0:
+		return "", fmt.Errorf("%s", i18n.T("mem.tool.forget.byid_none", idPrefix))
+	default:
+		return "", fmt.Errorf("%s", i18n.T("mem.tool.forget.byid_ambiguous", n, idPrefix))
+	}
+}
+
+// renderFactLines lists facts as "id  [category]  content".
+func renderFactLines(facts []*memory.Fact) string {
+	var b strings.Builder
+	for _, f := range facts {
+		fmt.Fprintf(&b, "%s  [%s]  %s\n", shortFactID(f.ID), f.Category, strings.TrimSpace(f.Content))
+	}
+	return strings.TrimRight(b.String(), "\n")
+}
+
+// shortFactID is the id prefix shown to the model: enough to be unique,
+// short enough to type back.
+func shortFactID(id string) string {
+	if len(id) > 10 {
+		return id[:10]
+	}
+	return id
+}
+
 // Recall is the on-demand (pull) retrieval primitive behind `@memory recall`.
 // It mirrors the quality of the per-turn push retrieval rather than the old
 // naive whitespace split: keywords come from ExtractKeywords (stop-word

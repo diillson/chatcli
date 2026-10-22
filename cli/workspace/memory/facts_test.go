@@ -179,3 +179,41 @@ func TestSearchBlendedMin_LexicalFloor(t *testing.T) {
 		t.Fatal("semantic hit must not be dropped by the lexical floor")
 	}
 }
+
+func TestFactIndex_MatchingAndRemoveByIDPrefix(t *testing.T) {
+	dir := t.TempDir()
+	fi := NewFactIndex(dir, DefaultConfig(), testLogger())
+	fi.AddFact("User prefers tabs over spaces", "preference", nil)
+	fi.AddFact("User prefers dark themes", "preference", nil)
+	fi.AddFact("The service runs on port 8080", "project", nil)
+
+	hits := fi.Matching("PREFERS")
+	if len(hits) != 2 {
+		t.Fatalf("matching = %d, want 2", len(hits))
+	}
+	if fi.Count() != 3 {
+		t.Fatal("Matching must not remove anything")
+	}
+	if fi.Matching("") != nil || len(fi.Matching("zzz")) != 0 {
+		t.Fatal("empty or unmatched substrings yield nothing")
+	}
+
+	id := hits[0].ID
+	if f, n := fi.RemoveByIDPrefix(id[:8]); f == nil || n != 1 || f.ID != id {
+		t.Fatalf("remove by prefix: %+v %d", f, n)
+	}
+	if fi.Count() != 2 {
+		t.Fatal("one fact removed")
+	}
+	if f, n := fi.RemoveByIDPrefix("nope"); f != nil || n != 0 {
+		t.Fatalf("unknown prefix: %+v %d", f, n)
+	}
+	// A prefix shared by two ids removes nothing and reports the count.
+	fi.ReplaceFacts([]*Fact{{ID: "abc111", Content: "a", Category: "project"}, {ID: "abc222", Content: "b", Category: "project"}})
+	if f, n := fi.RemoveByIDPrefix("abc"); f != nil || n != 2 {
+		t.Fatalf("ambiguous prefix: %+v %d", f, n)
+	}
+	if fi.Count() != 2 {
+		t.Fatal("ambiguous prefix must remove nothing")
+	}
+}

@@ -336,3 +336,49 @@ func TestSetTodoAdapter_NilUnwires(t *testing.T) {
 	t.Cleanup(func() { SetTodoAdapter(nil) })
 	assert.Nil(t, currentTodoAdapter())
 }
+
+type fakeTodoEditor struct {
+	fakeTodoAdapter
+	added   []TodoItem
+	updID   int
+	updDesc string
+}
+
+func (f *fakeTodoEditor) Add(items []TodoItem) (string, error) {
+	f.added = items
+	return "added", nil
+}
+func (f *fakeTodoEditor) Update(id int, description string) (string, error) {
+	f.updID, f.updDesc = id, description
+	return "updated", nil
+}
+
+func TestBuiltinTodo_AddAndUpdate(t *testing.T) {
+	fake := &fakeTodoEditor{}
+	SetTodoAdapter(fake)
+	t.Cleanup(func() { SetTodoAdapter(nil) })
+	p := NewBuiltinTodoPlugin()
+	ctx := context.Background()
+
+	out, err := p.Execute(ctx, []string{`{"cmd":"add","args":{"todos":[{"description":"Update docs"},{"description":"Ship","status":"pending"}]}}`})
+	if err != nil || out != "added" || len(fake.added) != 2 || fake.added[0].Description != "Update docs" {
+		t.Fatalf("add: %q %v %+v", out, err, fake.added)
+	}
+	if _, err := p.Execute(ctx, []string{`{"cmd":"add","args":{"todos":[{"description":"x","status":"weird"}]}}`}); err == nil || !strings.Contains(err.Error(), "@todo add") {
+		t.Fatalf("add validation names the verb: %v", err)
+	}
+	out, err = p.Execute(ctx, []string{`{"cmd":"update","args":{"id":2,"description":"Ship v2"}}`})
+	if err != nil || out != "updated" || fake.updID != 2 || fake.updDesc != "Ship v2" {
+		t.Fatalf("update: %q %v %d %q", out, err, fake.updID, fake.updDesc)
+	}
+	if _, err := p.Execute(ctx, []string{`{"cmd":"update","args":{"id":2}}`}); err == nil {
+		t.Fatal("update without description must error")
+	}
+	if p.IsReadOnly([]string{`{"cmd":"add","args":{"todos":[]}}`}) || p.IsReadOnly([]string{`{"cmd":"update","args":{"id":1,"description":"x"}}`}) {
+		t.Fatal("add and update mutate the plan")
+	}
+	SetTodoAdapter(&fakeTodoAdapter{})
+	if _, err := p.Execute(ctx, []string{`{"cmd":"add","args":{"todos":[{"description":"x"}]}}`}); err == nil || !strings.Contains(err.Error(), "not available") {
+		t.Fatalf("add without editor: %v", err)
+	}
+}

@@ -544,6 +544,19 @@ func (m *Manager) ForgetFacts(substr string) int {
 	return len(removed)
 }
 
+// FactsMatching previews the facts ForgetFacts would remove for substr.
+func (m *Manager) FactsMatching(substr string) []*Fact { return m.Facts.Matching(substr) }
+
+// ForgetFactByID removes the one fact whose id starts with prefix; it
+// reports the fact and how many ids matched (only exactly one removes).
+func (m *Manager) ForgetFactByID(prefix string) (*Fact, int) {
+	f, n := m.Facts.RemoveByIDPrefix(prefix)
+	if f != nil {
+		m.compactor.RegenerateMemoryMD()
+	}
+	return f, n
+}
+
 // WriteDailyNote delegates to the daily note store.
 func (m *Manager) WriteDailyNote(entry string) error {
 	return m.Daily.WriteDailyNote(entry)
