@@ -267,6 +267,11 @@ func (cli *ChatCLI) runGateway(ctx context.Context, broker hub.Store) error {
 	stopRunsBridge := startRunsHubBridge(ctx, broker, runs.Default(), cli.logger)
 	defer stopRunsBridge()
 
+	// Mirror the parks taken on this daemon's turns so a REPL's @park cancel
+	// wakes the in-turn waiter here instead of resuming the park twice.
+	stopParkBridge := startParkHubBridge(ctx, broker, cli, "gateway", cli.logger)
+	defer stopParkBridge()
+
 	adapters, err := gateway.BuildConfigured()
 	if err != nil {
 		return err

@@ -1,7 +1,7 @@
 {
   "@agents": {
-    "version": "1.1.0",
-    "surface": "99786b166f10259a"
+    "version": "1.2.0",
+    "surface": "fae5abd52c557c8f"
   },
   "@api-explorer": {
     "version": "2.1.0",
@@ -116,8 +116,8 @@
     "surface": "dc390005f7874074"
   },
   "@park": {
-    "version": "1.1.0",
-    "surface": "9d52f401ca8d27a7"
+    "version": "1.2.0",
+    "surface": "78fbba955066e824"
   },
   "@proc": {
     "version": "1.1.0",

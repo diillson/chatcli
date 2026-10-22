@@ -42,6 +42,11 @@ type AgentRunRecord struct {
 	CancelRequested bool
 	UpdatedAt       time.Time // last upsert — doubles as liveness heartbeat
 	EndedAt         time.Time // zero while running
+	// Activity is the JSON tail of the run's activity log (the cli activity
+	// entry projection), so @agents transcript works across processes. An
+	// empty Activity on upsert keeps what the row already holds: heartbeat
+	// refreshes do not resend the log, only ticks where it changed do.
+	Activity string
 }
 
 // AgentRunStore is the optional capability implemented by hub stores that
@@ -86,22 +91,23 @@ func (s *SQLiteStore) UpsertAgentRun(ctx context.Context, rec AgentRunRecord) er
 	s.wmu.Lock()
 	defer s.wmu.Unlock()
 	_, err := s.db.ExecContext(ctx, `
-		INSERT INTO agent_runs (run_id, instance, origin, status, payload, cancel_requested, updated_at, ended_at)
-		VALUES (?, ?, ?, ?, ?, 0, ?, ?)
+		INSERT INTO agent_runs (run_id, instance, origin, status, payload, cancel_requested, updated_at, ended_at, activity)
+		VALUES (?, ?, ?, ?, ?, 0, ?, ?, ?)
 		ON CONFLICT(run_id) DO UPDATE SET
 			status     = excluded.status,
 			payload    = excluded.payload,
 			updated_at = excluded.updated_at,
-			ended_at   = excluded.ended_at`,
+			ended_at   = excluded.ended_at,
+			activity   = CASE WHEN excluded.activity = '' THEN agent_runs.activity ELSE excluded.activity END`,
 		rec.RunID, rec.Instance, rec.Origin, rec.Status, rec.Payload,
-		rec.UpdatedAt.UnixMilli(), endedAt)
+		rec.UpdatedAt.UnixMilli(), endedAt, rec.Activity)
 	return err
 }
 
 // ListAgentRuns implements AgentRunStore.
 func (s *SQLiteStore) ListAgentRuns(ctx context.Context) ([]AgentRunRecord, error) {
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT run_id, instance, origin, status, payload, cancel_requested, updated_at, ended_at
+		SELECT run_id, instance, origin, status, payload, cancel_requested, updated_at, ended_at, activity
 		FROM agent_runs ORDER BY updated_at DESC`)
 	if err != nil {
 		return nil, err
@@ -114,7 +120,7 @@ func (s *SQLiteStore) ListAgentRuns(ctx context.Context) ([]AgentRunRecord, erro
 		var cancelRequested int
 		var updatedAt, endedAt int64
 		if err := rows.Scan(&rec.RunID, &rec.Instance, &rec.Origin, &rec.Status,
-			&rec.Payload, &cancelRequested, &updatedAt, &endedAt); err != nil {
+			&rec.Payload, &cancelRequested, &updatedAt, &endedAt, &rec.Activity); err != nil {
 			return nil, err
 		}
 		rec.CancelRequested = cancelRequested != 0

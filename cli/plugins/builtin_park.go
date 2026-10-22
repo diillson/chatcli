@@ -87,7 +87,7 @@ cycle's report.`
 }
 
 // Version is bumped whenever the surface changes.
-func (*BuiltinParkPlugin) Version() string { return "1.1.0" }
+func (*BuiltinParkPlugin) Version() string { return "1.2.0" }
 
 // Path is empty for builtin plugins.
 func (*BuiltinParkPlugin) Path() string { return "" }
@@ -175,7 +175,7 @@ func (*BuiltinParkPlugin) Schema() string {
 			},
 			{
 				"name":        "cancel",
-				"description": "Cancel a parked wait now. The scheduled wake is dropped and the parked agent resumes immediately with outcome=cancelled (plus your reason), so it can wrap up or re-plan instead of waiting out the timer/probe. Newest park when token is omitted.",
+				"description": "Cancel a parked wait now. The scheduled wake is dropped and the parked agent resumes immediately with outcome=cancelled (plus your reason), so it can wrap up or re-plan instead of waiting out the timer/probe. Works across processes: a park owned by another live chatcli process (gateway daemon, another REPL) is woken there through the hub; a park whose owner is gone resumes here. Newest park when token is omitted.",
 				"flags": []map[string]interface{}{
 					{"name": "token", "type": "string", "description": "Token prefix from list; newest park when omitted"},
 					{"name": "reason", "type": "string", "description": "Why the wait is being cut short; delivered to the resumed agent"},

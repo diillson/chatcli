@@ -285,7 +285,12 @@ func (cli *ChatCLI) maybeEnableLocalHubAs(ctx context.Context, principalOverride
 	// Mirror agent runs through the same store: /agents sees runs executing
 	// in other processes (gateway daemon, scheduler) and can cancel them.
 	stopRunsBridge := startRunsHubBridge(ctx, store, runs.Default(), cli.logger)
+	// Mirror the parks this session owns so @park cancel from another
+	// process (the gateway daemon, a second REPL) reaches this session's
+	// wake path instead of resuming the park twice.
+	stopParkBridge := startParkHubBridge(ctx, store, cli, "repl", cli.logger)
 	return func() {
+		stopParkBridge()
 		stopRunsBridge()
 		stopMailBridge()
 		_ = store.Close()
