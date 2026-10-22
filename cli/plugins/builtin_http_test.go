@@ -14,6 +14,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 )
@@ -189,5 +190,73 @@ func TestHTTPArgvForm(t *testing.T) {
 	}
 	if !strings.Contains(out, "200 OK") {
 		t.Fatalf("argv get failed: %s", out)
+	}
+}
+
+// A body the model asked to keep (or one read whole past the inline cap)
+// lands in the session scratch dir with a note saying how to read it.
+func TestHTTPSaveToFileAndMaxBody(t *testing.T) {
+	t.Setenv("CHATCLI_AGENT_TMPDIR", t.TempDir())
+	mux := http.NewServeMux()
+	mux.HandleFunc("/export.json", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"rows":[`))
+		for i := 0; i < 5000; i++ {
+			if i > 0 {
+				_, _ = w.Write([]byte(","))
+			}
+			_, _ = w.Write([]byte(`{"id":` + strings.Repeat("7", 10) + `}`))
+		}
+		_, _ = w.Write([]byte(`]}`))
+	})
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+	p := NewBuiltinHTTPPlugin()
+
+	// ~100KB read whole, over the 64KiB inline cap → saved automatically.
+	out, err := p.Execute(context.Background(), []string{`{"cmd":"get","args":{"url":"` + srv.URL + `/export.json"}}`})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, "[full body saved to ") || !strings.Contains(out, ".json — ") || !strings.Contains(out, `"from_line":1`) {
+		t.Fatalf("auto-save note missing: %s", out[len(out)-400:])
+	}
+	path := strings.TrimSpace(strings.SplitN(strings.SplitN(out, "[full body saved to ", 2)[1], " — ", 2)[0])
+	data, err := os.ReadFile(path)
+	if err != nil || len(data) < 90_000 || !strings.HasPrefix(string(data), `{"rows":[`) {
+		t.Fatalf("saved body: %d bytes, %v", len(data), err)
+	}
+
+	// max_body shrinks the inline part; save_path names the file.
+	out, err = p.Execute(context.Background(), []string{`{"cmd":"get","args":{"url":"` + srv.URL + `/export.json","max_body":2048,"save_to_file":true,"save_path":"../../export.json"}}`})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(out) > 2048+1500 || !strings.Contains(out, "body truncated") || !strings.Contains(out, "export.json — ") {
+		t.Fatalf("max_body + save_path: %d chars\n%s", len(out), out[len(out)-300:])
+	}
+	if strings.Contains(out, "../../") {
+		t.Fatal("save_path must be confined to the scratch dir")
+	}
+
+	// A small body is not saved.
+	fix := httpFixture(t)
+	out, err = p.Execute(context.Background(), []string{`{"cmd":"get","args":{"url":"` + fix.URL + `/healthz"}}`})
+	if err != nil || strings.Contains(out, "saved to") {
+		t.Fatalf("small body must stay inline: %q %v", out, err)
+	}
+	// A body cut by the read cap is not presented as a whole save.
+	out, err = p.Execute(context.Background(), []string{`{"cmd":"get","args":{"url":"` + fix.URL + `/big"}}`})
+	if err != nil || strings.Contains(out, "full body saved") {
+		t.Fatalf("partial read must not claim a full save: %v", err)
+	}
+	if !strings.Contains(out, "truncated") {
+		t.Fatal("partial read stays flagged")
+	}
+	if NewBuiltinHTTPPlugin().MaxResultChars() < httpMaxRenderedBody {
+		t.Fatal("the per-tool budget must fit a full inline body")
+	}
+	if httpBodyExt("text/html; charset=utf-8") != ".html" || httpBodyExt("application/octet-stream") != ".txt" {
+		t.Fatal("extension by content type")
 	}
 }

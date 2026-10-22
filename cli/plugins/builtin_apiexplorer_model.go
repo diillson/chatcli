@@ -440,6 +440,12 @@ func specTitle(doc *oasDoc) string {
 // renderSpecSummary renders the overview + endpoint listing (grouped by tag),
 // honoring an optional path-substring filter, tag filter and endpoint cap.
 func renderSpecSummary(doc *oasDoc, filter, tag string, limit int) string {
+	return renderSpecSummaryPaged(doc, filter, tag, limit, 0)
+}
+
+// renderSpecSummaryPaged is renderSpecSummary from the offset-th matching
+// endpoint, with a footer that says how to continue.
+func renderSpecSummaryPaged(doc *oasDoc, filter, tag string, limit, offset int) string {
 	var b strings.Builder
 
 	if doc.Info.Description != "" {
@@ -464,11 +470,15 @@ func renderSpecSummary(doc *oasDoc, filter, tag string, limit int) string {
 		fmt.Fprintf(&b, "**Docs:** %s\n\n", doc.ExternalDocs.URL)
 	}
 
-	total, shown, listing := renderEndpointListing(doc, filter, tag, limit)
+	total, shown, listing := renderEndpointListingFrom(doc, filter, tag, limit, offset)
 	fmt.Fprintf(&b, "## Endpoints (%d)\n\n", total)
 	b.WriteString(listing)
-	if total > shown {
-		fmt.Fprintf(&b, "\n… %d more not shown (raise limit or narrow with filter/tag).\n", total-shown)
+	if offset > 0 || total > offset+shown {
+		fmt.Fprintf(&b, "\n[endpoints %d-%d of %d", offset+1, offset+shown, total)
+		if total > offset+shown {
+			fmt.Fprintf(&b, "; continue with offset=%d, or narrow with filter/tag", offset+shown)
+		}
+		b.WriteString("]\n")
 	}
 	if wh := renderWebhooks(doc); wh != "" {
 		b.WriteString("\n")
@@ -477,8 +487,9 @@ func renderSpecSummary(doc *oasDoc, filter, tag string, limit int) string {
 	return b.String()
 }
 
-// renderEndpointListing groups matching operations by their first tag.
-func renderEndpointListing(doc *oasDoc, filter, tag string, limit int) (total, shown int, out string) {
+// renderEndpointListingFrom groups the matching operations by their first
+// tag, skipping the first offset of them.
+func renderEndpointListingFrom(doc *oasDoc, filter, tag string, limit, offset int) (total, shown int, out string) {
 	filter = strings.ToLower(filter)
 	paths := sortedKeys(pathKeys(doc.Paths))
 
@@ -493,7 +504,7 @@ func renderEndpointListing(doc *oasDoc, filter, tag string, limit int) (total, s
 				continue
 			}
 			total++
-			if shown >= limit {
+			if total <= offset || shown >= limit {
 				continue
 			}
 			shown++

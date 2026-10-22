@@ -102,7 +102,7 @@ Read-only: only GET/HEAD/OPTIONS and the GraphQL introspection query are issued.
 }
 
 // Version is semver; bumped when the surface changes.
-func (*BuiltinAPIExplorerPlugin) Version() string { return "2.0.0" }
+func (*BuiltinAPIExplorerPlugin) Version() string { return "2.1.0" }
 
 // Path is empty for builtin plugins.
 func (*BuiltinAPIExplorerPlugin) Path() string { return "" }
@@ -131,7 +131,8 @@ func (*BuiltinAPIExplorerPlugin) Schema() string {
 					{"name": "url", "description": "spec URL, docs page URL, or a base URL to auto-locate it", "type": "string", "required": true},
 					{"name": "filter", "description": "only show paths containing this substring", "type": "string"},
 					{"name": "tag", "description": "only show operations with this tag", "type": "string"},
-					{"name": "limit", "description": "max endpoints to list", "type": "int", "default": "400"},
+					{"name": "limit", "description": "max endpoints to list per call", "type": "int", "default": "400"},
+					{"name": "offset", "description": "skip this many matching endpoints (the footer of a cut listing says which offset continues it)", "type": "int", "default": "0"},
 					{"name": "format", "description": "markdown (default) or json", "type": "string", "default": "markdown"},
 				},
 				"examples": []string{
@@ -182,6 +183,7 @@ type apiExplorerArgs struct {
 	Filter string
 	Tag    string
 	Limit  int
+	Offset int
 	Format string
 }
 
@@ -205,7 +207,7 @@ func (p *BuiltinAPIExplorerPlugin) ExecuteWithStream(ctx context.Context, args [
 	case "discover", "":
 		out, err = apiExplorerDiscover(ctx, in.URL, in.Format)
 	case "spec":
-		out, err = apiExplorerSpec(ctx, in.URL, in.Filter, in.Tag, in.Limit, in.Format)
+		out, err = apiExplorerSpec(ctx, in.URL, in.Filter, in.Tag, in.Limit, in.Offset, in.Format)
 	case "endpoint":
 		out, err = apiExplorerEndpoint(ctx, in.URL, in.Path, in.Method)
 	case "security":
@@ -247,6 +249,7 @@ func parseAPIExplorerArgs(args []string) (apiExplorerArgs, error) {
 		out.Tag = strings.TrimSpace(jsonString(raw, "tag"))
 		out.Format = strings.ToLower(strings.TrimSpace(jsonString(raw, "format", "output")))
 		out.Limit = jsonInt(raw, "limit", "max")
+		out.Offset = jsonInt(raw, "offset", "skip")
 	} else {
 		for _, a := range args {
 			a = strings.ToLower(strings.TrimSpace(a))
@@ -525,7 +528,7 @@ func renderReconMarkdown(r *reconResult) string {
 // spec / endpoint.
 // ---------------------------------------------------------------------------
 
-func apiExplorerSpec(ctx context.Context, target, filter, tag string, limit int, format string) (string, error) {
+func apiExplorerSpec(ctx context.Context, target, filter, tag string, limit, offset int, format string) (string, error) {
 	doc, specFormat, specURL, err := locateSpec(ctx, target)
 	if err != nil {
 		return "", err
@@ -533,12 +536,15 @@ func apiExplorerSpec(ctx context.Context, target, filter, tag string, limit int,
 	if limit <= 0 || limit > apiExplorerSpecEndpointCap {
 		limit = apiExplorerSpecEndpointCap
 	}
+	if offset < 0 {
+		offset = 0
+	}
 	if format == "json" {
 		return renderSpecJSON(doc, specFormat, specURL, filter, tag, limit), nil
 	}
 	var b strings.Builder
 	fmt.Fprintf(&b, "# %s\n\n**%s** at %s\n\n", specTitle(doc), specFormat, specURL)
-	b.WriteString(renderSpecSummary(doc, filter, tag, limit))
+	b.WriteString(renderSpecSummaryPaged(doc, filter, tag, limit, offset))
 	return b.String(), nil
 }
 
