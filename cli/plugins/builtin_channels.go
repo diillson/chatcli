@@ -85,7 +85,7 @@ func (*BuiltinChannelsPlugin) Usage() string {
 }
 
 // Version is semver; bumped when the surface changes.
-func (*BuiltinChannelsPlugin) Version() string { return "1.0.0" }
+func (*BuiltinChannelsPlugin) Version() string { return "1.1.0" }
 
 // Path is empty for builtin plugins.
 func (*BuiltinChannelsPlugin) Path() string { return "" }
@@ -97,7 +97,12 @@ func (*BuiltinChannelsPlugin) Schema() string {
 		"subcommands": []map[string]interface{}{
 			{
 				"name":        "list",
-				"description": "Most recent inbox messages, newest last. args: {channel (optional filter), limit (default 10, max 50)}.",
+				"description": "Most recent inbox messages, newest last.",
+				"flags": []map[string]interface{}{
+					{"name": "channel", "type": "string", "required": false, "description": "Only messages from this channel (telegram, slack, discord, whatsapp, webhook…)."},
+					{"name": "limit", "type": "int", "required": false, "description": "How many messages (default 10, max 50)."},
+				},
+				"examples": []string{`{"cmd":"list"}`, `{"cmd":"list","args":{"channel":"telegram","limit":5}}`},
 			},
 			{
 				"name":        "unread",

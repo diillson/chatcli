@@ -17,11 +17,26 @@ import (
 // state-mutating primitive that suspends the agent loop, so its flags
 // reflect that: never read-only, never concurrency-safe.
 
-// IsReadOnly returns false: @park mutates scheduler state (it parks
-// the agent and registers an auto-resume callback). Even though the
-// observation subcommands (for_cmd, for_url) are mostly read-only at
-// the user level, they still create durable scheduler entries.
-func (p *BuiltinParkPlugin) IsReadOnly(_ []string) bool { return false }
+// IsReadOnly returns true only for list, which reports the parked
+// agents; every other verb mutates scheduler state (it parks the agent
+// and registers an auto-resume callback). Even though the observation
+// subcommands (for_cmd, for_url) are mostly read-only at the user level,
+// they still create durable scheduler entries.
+func (p *BuiltinParkPlugin) IsReadOnly(args []string) bool {
+	return parkSubcommand(args) == "list"
+}
+
+// parkSubcommand reads the verb of an envelope or positional invocation.
+func parkSubcommand(args []string) string {
+	if len(args) == 0 {
+		return ""
+	}
+	first := strings.TrimSpace(args[0])
+	if strings.HasPrefix(first, "{") {
+		return strings.ToLower(describeStr(first, "cmd"))
+	}
+	return strings.ToLower(first)
+}
 
 // IsConcurrencySafe returns false: parking is a process-wide event
 // that suspends the agent loop. It cannot meaningfully run in

@@ -74,13 +74,14 @@ Subcommands (cmd + args):
   list                 list saved skills
   show {name}          print a skill's content
   remove {name}        delete a skill
+  restore {name}       bring back the previous version of a skill (after an update or self-evolve went wrong)
   stats                show activation analytics (which skills earn their keep)
   export {names?, out} bundle skills into a shareable JSON pack
   import {path}        install skills from a pack (overwrite optional)`
 }
 
 // Version is semver.
-func (*BuiltinSkillPlugin) Version() string { return "1.0.0" }
+func (*BuiltinSkillPlugin) Version() string { return "1.1.0" }
 
 // Path is empty for builtin plugins.
 func (*BuiltinSkillPlugin) Path() string { return "" }
@@ -109,6 +110,7 @@ func (*BuiltinSkillPlugin) Schema() string {
 			{"name": "list", "description": "List saved skills.", "examples": []string{`{"cmd":"list"}`}},
 			{"name": "show", "description": "Print a skill's content.", "examples": []string{`{"cmd":"show","args":{"name":"deploy-x"}}`}},
 			{"name": "remove", "description": "Delete a skill.", "examples": []string{`{"cmd":"remove","args":{"name":"deploy-x"}}`}},
+			{"name": "restore", "description": "Bring back the previous version of a skill (undo an update or self-evolve).", "examples": []string{`{"cmd":"restore","args":{"name":"deploy-x"}}`}},
 			{"name": "stats", "description": "Show skill activation analytics.", "examples": []string{`{"cmd":"stats"}`}},
 			{
 				"name":        "export",

@@ -45,9 +45,10 @@ func (p *BuiltinMailPlugin) IsReadOnly(args []string) bool {
 	return false
 }
 
-// IsConcurrencySafe: the bus is an in-memory mutex-serialized structure —
-// every operation is instantaneous and safe alongside other tools.
-func (p *BuiltinMailPlugin) IsConcurrencySafe(_ []string) bool { return true }
+// IsConcurrencySafe mirrors IsReadOnly: history is a read; send enqueues
+// and inbox drains, and their order matters (a reply after the message it
+// answers), so they stay serial.
+func (p *BuiltinMailPlugin) IsConcurrencySafe(args []string) bool { return p.IsReadOnly(args) }
 
 // DescribeCall renders the spinner label for a call.
 func (p *BuiltinMailPlugin) DescribeCall(args []string) string {

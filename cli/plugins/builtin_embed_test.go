@@ -176,8 +176,11 @@ func TestEmbedCaps(t *testing.T) {
 	if !p.IsReadOnly([]string{`{"cmd":"text","args":{"text":"a"}}`}) {
 		t.Error("text without out must be read-only")
 	}
-	if !p.IsConcurrencySafe(nil) {
-		t.Error("@embed must be concurrency-safe")
+	if !p.IsConcurrencySafe([]string{`{"cmd":"similarity","args":{"a":"x","b":"y"}}`}) {
+		t.Error("@embed reads must be concurrency-safe")
+	}
+	if p.IsReadOnly([]string{`{not json`}) || p.IsConcurrencySafe(nil) {
+		t.Error("an unparseable call must fail closed")
 	}
 	if d := p.DescribeCall([]string{`{"cmd":"rank","args":{"query":"billing","candidates":["x"]}}`}); !strings.Contains(d, "billing") {
 		t.Errorf("rank describe should include the query; got %q", d)

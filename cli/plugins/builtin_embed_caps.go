@@ -19,7 +19,7 @@ import (
 func (p *BuiltinEmbedPlugin) IsReadOnly(args []string) bool {
 	cmd, inner, err := parseEmbedInvocation(args)
 	if err != nil {
-		return true
+		return false
 	}
 	if cmd != "text" {
 		return true
@@ -31,9 +31,9 @@ func (p *BuiltinEmbedPlugin) IsReadOnly(args []string) bool {
 	return in.Out == ""
 }
 
-// IsConcurrencySafe is true: @embed only makes provider HTTP calls (and
-// at most writes a caller-named file), so parallel tool fan-out is fine.
-func (p *BuiltinEmbedPlugin) IsConcurrencySafe(_ []string) bool { return true }
+// IsConcurrencySafe mirrors IsReadOnly: provider calls are independent;
+// a call that writes a vectors file stays serial, like every other write.
+func (p *BuiltinEmbedPlugin) IsConcurrencySafe(args []string) bool { return p.IsReadOnly(args) }
 
 // DescribeCall gives the spinner a concise, contextual one-liner.
 func (p *BuiltinEmbedPlugin) DescribeCall(args []string) string {

@@ -232,7 +232,7 @@ func renderToolIndexLine(plugin plugins.Plugin) string {
 // when no terminator is found), keeping index lines one line.
 func firstSentence(s string) string {
 	s = strings.TrimSpace(s)
-	if i := strings.IndexAny(s, ".!?"); i > 0 && i < len(s)-1 {
+	if i := sentenceEnd(s); i > 0 {
 		return s[:i+1]
 	}
 	const maxLen = 160
@@ -244,6 +244,34 @@ func firstSentence(s string) string {
 		return textfold.Cut(s, cut) + "…"
 	}
 	return s
+}
+
+// sentenceEnd returns the index of the terminator that ends the first
+// sentence of s, or -1. A terminator counts only when the sentence goes on
+// with a space and a capital letter, a digit or an opening quote — so
+// "e.g. foo", "go.mod", "v1.2" and a trailing "OSV." never cut the line
+// short — or when it is the last character.
+func sentenceEnd(s string) int {
+	for i := 0; i < len(s); i++ {
+		if s[i] != '.' && s[i] != '!' && s[i] != '?' {
+			continue
+		}
+		if i == len(s)-1 {
+			return -1 // the whole description is one sentence
+		}
+		if s[i+1] != ' ' {
+			continue
+		}
+		rest := strings.TrimLeft(s[i+1:], " ")
+		if rest == "" {
+			return -1
+		}
+		switch c := rest[0]; {
+		case c >= 'A' && c <= 'Z', c >= '0' && c <= '9', c == '"', c == '\'', c == '(', c == '`', c >= 0x80:
+			return i
+		}
+	}
+	return -1
 }
 
 // renderMCPToolBlock renders one MCP tool's full prompt block — the MCP
