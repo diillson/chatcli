@@ -206,20 +206,6 @@ func (e *Engine) validateWritePath(target string) error {
 	return e.validatePathForAccess(target, true)
 }
 
-// ValidateReadPath reports whether target may be read by a builtin that runs
-// outside an Engine: the same sensitive-path denylist and cwd workspace
-// boundary that @read, @search and @tree enforce, so every filesystem tool
-// answers the question with one policy instead of a private copy of it.
-func ValidateReadPath(target string) error {
-	return NewEngine(io.Discard, io.Discard, "").validatePath(target)
-}
-
-// ValidateWritePath is ValidateReadPath for a path about to be created or
-// overwritten; the system binary directories are refused as well.
-func ValidateWritePath(target string) error {
-	return NewEngine(io.Discard, io.Discard, "").validateWritePath(target)
-}
-
 func (e *Engine) validatePathForAccess(target string, write bool) error {
 	if target == "" {
 		return nil
