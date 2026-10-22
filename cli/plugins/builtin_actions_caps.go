@@ -83,8 +83,19 @@ func (*BuiltinSessionPlugin) DescribeCall(args []string) string {
 	if err != nil {
 		return i18n.T("plugins.session.describe.default")
 	}
-	if cmd == "list" {
+	switch cmd {
+	case "list":
 		return i18n.T("plugins.session.describe.list")
+	case "get":
+		return i18n.T("plugins.session.describe.get", describeTrunc(describeStr(inner, "id"), 40))
+	case "save":
+		return i18n.T("plugins.session.describe.save")
+	case "fork":
+		return i18n.T("plugins.session.describe.fork")
+	case "attach":
+		return i18n.T("plugins.session.describe.attach", describeTrunc(describeStr(inner, "id"), 40))
+	case "detach":
+		return i18n.T("plugins.session.describe.detach")
 	}
 	return i18n.T("plugins.session.describe.search", describeTrunc(describeStr(inner, "query"), 50))
 }
@@ -127,6 +138,8 @@ func (*BuiltinSkillPlugin) DescribeCall(args []string) string {
 		return i18n.T("plugins.skill.describe.show", name)
 	case "remove":
 		return i18n.T("plugins.skill.describe.remove", name)
+	case "restore":
+		return i18n.T("plugins.skill.describe.restore", name)
 	case "stats":
 		return i18n.T("plugins.skill.describe.stats")
 	case "export":

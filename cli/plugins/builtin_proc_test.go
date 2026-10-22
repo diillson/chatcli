@@ -149,8 +149,8 @@ func TestProcCapsPerSubcommand(t *testing.T) {
 			t.Fatalf("%v must NOT be read-only", args)
 		}
 	}
-	if !p.IsConcurrencySafe(nil) {
-		t.Fatal("@proc must advertise concurrency-safe")
+	if !p.IsConcurrencySafe([]string{`{"cmd":"list"}`}) || p.IsConcurrencySafe([]string{`{"cmd":"start","args":{"command":"x"}}`}) {
+		t.Fatal("@proc observers run in parallel, mutators stay serial")
 	}
 }
 

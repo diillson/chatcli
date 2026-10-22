@@ -117,8 +117,9 @@ func TestBuiltinMail_Capabilities(t *testing.T) {
 	p := NewBuiltinMailPlugin()
 	assert.True(t, p.IsReadOnly([]string{`{"cmd":"history"}`}))
 	assert.False(t, p.IsReadOnly([]string{`{"cmd":"send","args":{"to":"coder","text":"x"}}`}))
-	assert.False(t, p.IsReadOnly(nil)) // inbox drains → mutating
-	assert.True(t, p.IsConcurrencySafe(nil))
+	assert.False(t, p.IsReadOnly(nil))        // inbox drains → mutating
+	assert.False(t, p.IsConcurrencySafe(nil)) // inbox drains → serial
+	assert.True(t, p.IsConcurrencySafe([]string{`{"cmd":"history"}`}))
 	assert.NotEmpty(t, p.DescribeCall([]string{`{"cmd":"send","args":{"to":"coder","text":"x"}}`}))
 	assert.NotEmpty(t, p.Schema())
 	assert.NotEmpty(t, p.JSONSchema())

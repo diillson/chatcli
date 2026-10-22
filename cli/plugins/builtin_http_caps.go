@@ -19,9 +19,10 @@ func (p *BuiltinHTTPPlugin) IsReadOnly(args []string) bool {
 	return httpReadOnlyMethods[httpInvocationMethod(args)]
 }
 
-// IsConcurrencySafe reports true: requests are independent; the shared client
-// is safe for concurrent use.
-func (p *BuiltinHTTPPlugin) IsConcurrencySafe(_ []string) bool { return true }
+// IsConcurrencySafe mirrors IsReadOnly: GET/HEAD/OPTIONS are independent
+// reads; a POST, PUT, PATCH or DELETE may depend on the one before it (create
+// then update), so mutating requests keep their order.
+func (p *BuiltinHTTPPlugin) IsConcurrencySafe(args []string) bool { return p.IsReadOnly(args) }
 
 // DescribeCall surfaces the request line in the spinner.
 func (p *BuiltinHTTPPlugin) DescribeCall(args []string) string {

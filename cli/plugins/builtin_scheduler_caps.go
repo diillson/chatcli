@@ -21,7 +21,7 @@ import (
 // first arg (subcommand) which is the stable @scheduler schema entry
 // point.
 func (p *BuiltinSchedulerPlugin) IsReadOnly(args []string) bool {
-	sub := schedulerSubcommand(args)
+	sub := canonicalSchedulerCmd(schedulerSubcommand(args))
 	return sub == "query" || sub == "list"
 }
 
@@ -37,7 +37,10 @@ func (p *BuiltinSchedulerPlugin) IsConcurrencySafe(args []string) bool {
 // identifier or schedule name being acted on. All strings are
 // i18n-resolved.
 func (p *BuiltinSchedulerPlugin) DescribeCall(args []string) string {
-	sub := schedulerSubcommand(args)
+	sub := canonicalSchedulerCmd(schedulerSubcommand(args))
+	if sub == "" {
+		sub = schedulerSubcommand(args)
+	}
 	switch sub {
 	case "schedule":
 		if n := extractStringArg(args, "name"); n != "" {

@@ -68,10 +68,6 @@ func (*BuiltinOsvPlugin) Version() string { return "1.0.0" }
 // Path is empty for builtin plugins.
 func (*BuiltinOsvPlugin) Path() string { return "" }
 
-// IsConcurrencySafe lets the orchestrator fan @osv out in parallel — it only
-// reads files and queries a read-only API.
-func (*BuiltinOsvPlugin) IsConcurrencySafe() bool { return true }
-
 // Schema describes the subcommands.
 func (*BuiltinOsvPlugin) Schema() string {
 	schema := map[string]interface{}{

@@ -26,9 +26,11 @@ func (p *BuiltinProcPlugin) IsReadOnly(args []string) bool {
 	}
 }
 
-// IsConcurrencySafe reports true: the supervisor serializes its process table
-// behind a lock, and per-process output has its own.
-func (p *BuiltinProcPlugin) IsConcurrencySafe(_ []string) bool { return true }
+// IsConcurrencySafe mirrors IsReadOnly: status, logs and list are
+// independent reads of the process table; start, stdin, stop and remove
+// change it (and their order matters — stop before start of the same
+// port, stdin after start), so they stay serial.
+func (p *BuiltinProcPlugin) IsConcurrencySafe(args []string) bool { return p.IsReadOnly(args) }
 
 // DescribeCall surfaces what is being supervised in the spinner.
 func (p *BuiltinProcPlugin) DescribeCall(args []string) string {

@@ -20,8 +20,8 @@
     "surface": "6638fd3ee460133d"
   },
   "@channels": {
-    "version": "1.0.0",
-    "surface": "bbb496c9565d9f4e"
+    "version": "1.1.0",
+    "surface": "5c0fbc6c349daaf2"
   },
   "@coder": {
     "version": "2.0.0",
@@ -140,8 +140,8 @@
     "surface": "ee14c6ab8e50c529"
   },
   "@skill": {
-    "version": "1.0.0",
-    "surface": "83f5ed1dab3b9c98"
+    "version": "1.1.0",
+    "surface": "c2f9b7e9376ff5e6"
   },
   "@speak": {
     "version": "1.0.0",
@@ -164,8 +164,8 @@
     "surface": "7a1a3ad492406dba"
   },
   "@view": {
-    "version": "1.1.0",
-    "surface": "ec8014fc55e9b845"
+    "version": "1.2.0",
+    "surface": "0024cfefb8554436"
   },
   "@voice": {
     "version": "1.0.0",

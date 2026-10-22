@@ -80,7 +80,7 @@ PDFs up to 50 MB; scanned PDFs work on models that read PDFs natively.`
 }
 
 // Version returns the plugin contract version.
-func (*BuiltinViewPlugin) Version() string { return "1.1.0" }
+func (*BuiltinViewPlugin) Version() string { return "1.2.0" }
 
 // Path identifies the plugin as builtin.
 func (*BuiltinViewPlugin) Path() string { return "[builtin]" }
@@ -92,7 +92,9 @@ func (*BuiltinViewPlugin) Schema() string {
 		"description": "Attach a local image or PDF to the conversation through the vision/document pipeline.",
 		"argsFormat":  "JSON envelope {cmd, args} (e.g. {\"cmd\":\"view\",\"args\":{\"file\":\"shot.png\"}}); a bare path also works.",
 		"subcommands": []map[string]interface{}{
-			{"name": "view", "description": "attach a local image (png, jpeg, gif, webp) or PDF", "examples": []string{`{"cmd":"view","args":{"file":"shot.png"}}`, `{"cmd":"view","args":{"file":"report.pdf"}}`}},
+			{"name": "view", "description": "attach a local image (png, jpeg, gif, webp) or PDF", "flags": []map[string]interface{}{
+				{"name": "file", "type": "string", "required": true, "description": "Path of the image or PDF to attach."},
+			}, "examples": []string{`{"cmd":"view","args":{"file":"shot.png"}}`, `{"cmd":"view","args":{"file":"report.pdf"}}`}},
 		},
 	}
 	b, _ := json.MarshalIndent(schema, "", "  ")
