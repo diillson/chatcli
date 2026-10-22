@@ -55,7 +55,7 @@ func (p *BuiltinWebFetchPlugin) Description() string {
 	return "Fetches content from a URL and returns the text (filtering + save-to-file supported)"
 }
 func (p *BuiltinWebFetchPlugin) Usage() string   { return "@webfetch <url>" }
-func (p *BuiltinWebFetchPlugin) Version() string { return "1.2.0" }
+func (p *BuiltinWebFetchPlugin) Version() string { return "1.3.0" }
 func (p *BuiltinWebFetchPlugin) Path() string    { return "[builtin]" }
 
 func (p *BuiltinWebFetchPlugin) Schema() string {
@@ -73,7 +73,7 @@ func (p *BuiltinWebFetchPlugin) Schema() string {
 					{"name": "exclude", "type": "string", "description": "Drop lines matching this regex. Applied AFTER filter."},
 					{"name": "from_line", "type": "integer", "description": "Start at this line (1-based, inclusive). Applied after filter/exclude."},
 					{"name": "to_line", "type": "integer", "description": "End at this line (1-based, inclusive). Applied after filter/exclude."},
-					{"name": "save_to_file", "type": "boolean", "description": "Save the full (pre-truncation) content to the session scratch dir and return a preview + absolute path. Use when you want to analyze later with read_file."},
+					{"name": "save_to_file", "type": "boolean", "description": "Save the full (pre-truncation) content to the session scratch dir and return a preview + absolute path. Use when you want to analyze later with @read (read_file)."},
 					{"name": "save_path", "type": "string", "description": "If save_to_file is true, override the generated filename (will be placed under CHATCLI_AGENT_TMPDIR)."},
 					{"name": "render", "type": "boolean", "description": "Force headless-browser rendering for pages that build their content with JavaScript (SPAs, dynamic tables). By default rendering happens automatically when the static HTML looks like a JS shell and a Chrome/Chromium is available. Use render=true when a page came back empty or render=false to stay static.", "default": "auto"},
 				},
@@ -153,10 +153,6 @@ func (p *BuiltinWebFetchPlugin) ExecuteWithStream(ctx context.Context, args []st
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode != 200 {
-		return "", fmt.Errorf("HTTP %d: %s", resp.StatusCode, resp.Status)
-	}
-
 	// Read body with hard cap of 10MB to avoid memory blowup.
 	body, err := io.ReadAll(io.LimitReader(resp.Body, 10*1024*1024))
 	if err != nil {
@@ -164,6 +160,11 @@ func (p *BuiltinWebFetchPlugin) ExecuteWithStream(ctx context.Context, args []st
 	}
 
 	fullContent := string(body)
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		// A 404 page, a 403 block page or a 500 error page still says
+		// something — the model reads it instead of a bare status.
+		return "", fmt.Errorf(fetchMsgStatusFmt, resp.StatusCode, resp.Status, fetchErrorBodyNote(resp.StatusCode, fullContent))
+	}
 	if !parsed.Raw {
 		fullContent = p.extractWithRenderEscalation(reqCtx, parsed, safeURL, fullContent, onOutput)
 	}
@@ -278,13 +279,13 @@ func buildFetchOutput(parsed fetchArgs, filtered, fullContent, savedPath string,
 	var prefix string
 	switch {
 	case autoSaved:
-		prefix = fmt.Sprintf("[auto-saved: response was %d bytes — too large to inline. Full body is at %s. Preview below; use read_file with start/end or rerun with filter/from_line/to_line for specific ranges.]\n\n",
+		prefix = fmt.Sprintf("[auto-saved: response was %d bytes — too large to inline. Full body is at %s. Preview below; use @read (read_file) with from_line/to_line or rerun with filter/from_line/to_line for specific ranges.]\n\n",
 			len(fullContent), savedPath)
 	case truncated:
-		prefix = fmt.Sprintf("[response truncated inline at %d chars; full response saved to %s — %d bytes. Use read_file with start/end to examine specific ranges.]\n\n",
+		prefix = fmt.Sprintf("[response truncated inline at %d chars; full response saved to %s — %d bytes. Use @read (read_file) with from_line/to_line to examine specific ranges.]\n\n",
 			parsed.MaxLength, savedPath, len(fullContent))
 	default:
-		prefix = fmt.Sprintf("[full response saved to %s — %d bytes. Use read_file with start/end to examine specific ranges.]\n\n",
+		prefix = fmt.Sprintf("[full response saved to %s — %d bytes. Use @read (read_file) with from_line/to_line to examine specific ranges.]\n\n",
 			savedPath, len(fullContent))
 	}
 	return prefix + output
@@ -585,4 +586,35 @@ func isBlockElement(tag string) bool {
 func stripHTMLTags(s string) string {
 	re := regexp.MustCompile(`<[^>]*>`)
 	return re.ReplaceAllString(s, "")
+}
+
+// fetchMsgStatusFmt is the model-facing non-2xx result (named per house
+// style, never an inline literal): status, reason and the body note.
+const fetchMsgStatusFmt = "HTTP %d: %s%s"
+
+// fetchErrorBodyCap bounds the error-page excerpt returned with a non-2xx.
+const fetchErrorBodyCap = 1500
+
+// fetchErrorBodyNote renders what an error page said, as text, so the
+// model learns why (a missing path, a login wall, a bot challenge) instead
+// of guessing from the status alone, with the move that usually follows.
+func fetchErrorBodyNote(status int, body string) string {
+	text := strings.TrimSpace(extractText(body))
+	text = strings.Join(strings.Fields(text), " ")
+	note := ""
+	if text != "" {
+		if len(text) > fetchErrorBodyCap {
+			text = textfold.Cut(text, fetchErrorBodyCap) + "…"
+		}
+		note = "\nResponse body (as text): " + text
+	}
+	switch {
+	case status == 401 || status == 403 || status == 429 || status == 503:
+		note += "\nHint: this looks like an access check, a login wall or a bot challenge; a real browser gets past most of them — open the URL with @browser and, if it shows a challenge, hand the window to the user with `show`."
+	case status == 404 || status == 410:
+		note += "\nHint: the path does not exist (anymore); search the site or the web for the current location instead of retrying the same URL."
+	case status >= 500:
+		note += "\nHint: a server-side failure; one retry after a moment is reasonable, more is not."
+	}
+	return note
 }

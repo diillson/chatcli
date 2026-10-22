@@ -136,3 +136,48 @@ func mustMarshal(t *testing.T, v interface{}) string {
 	}
 	return string(out)
 }
+
+// A non-2xx answer is an error that carries what the page said and the
+// move that follows; any 2xx is a success.
+func TestWebFetch_ErrorPagesCarryTheirBodyAndAny2xxSucceeds(t *testing.T) {
+	stubPublicLookup(t)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/gone":
+			w.WriteHeader(http.StatusNotFound)
+			fmt.Fprint(w, "<html><body><h1>Not here</h1><p>The docs moved to /v2/docs.</p></body></html>")
+		case "/blocked":
+			w.WriteHeader(http.StatusForbidden)
+			fmt.Fprint(w, "<html><title>Just a moment...</title><body>Checking your browser</body></html>")
+		case "/created":
+			w.WriteHeader(http.StatusCreated)
+			fmt.Fprint(w, "created ok")
+		}
+	}))
+	t.Cleanup(srv.Close)
+	plug := NewBuiltinWebFetchPlugin()
+
+	_, err := plug.Execute(context.Background(), []string{mustMarshal(t, map[string]interface{}{"cmd": "fetch", "args": map[string]interface{}{"url": srv.URL + "/gone"}})})
+	if err == nil {
+		t.Fatal("404 must be an error")
+	}
+	for _, want := range []string{"HTTP 404", "The docs moved to /v2/docs.", "path does not exist"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("404 error missing %q: %v", want, err)
+		}
+	}
+	_, err = plug.Execute(context.Background(), []string{mustMarshal(t, map[string]interface{}{"cmd": "fetch", "args": map[string]interface{}{"url": srv.URL + "/blocked"}})})
+	if err == nil || !strings.Contains(err.Error(), "Checking your browser") || !strings.Contains(err.Error(), "@browser") {
+		t.Fatalf("403 must show the block page and point at @browser: %v", err)
+	}
+	out, err := plug.Execute(context.Background(), []string{mustMarshal(t, map[string]interface{}{"cmd": "fetch", "args": map[string]interface{}{"url": srv.URL + "/created", "raw": true}})})
+	if err != nil || !strings.Contains(out, "created ok") {
+		t.Fatalf("201 is a success: %q %v", out, err)
+	}
+	if note := fetchErrorBodyNote(500, strings.Repeat("<p>x</p>", 2000)); !strings.Contains(note, "…") || !strings.Contains(note, "server-side") {
+		t.Fatalf("long error bodies are capped and 5xx gets its hint: %d chars", len(note))
+	}
+	if fetchErrorBodyNote(404, "") == "" {
+		t.Fatal("an empty body still gets the hint")
+	}
+}
