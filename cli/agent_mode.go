@@ -1797,6 +1797,20 @@ func (a *AgentMode) toolResultCapFor(toolCallID string) int {
 	return a.toolResultCaps[toolCallID]
 }
 
+// toolCallIsReadOnly reports whether a parsed tool call only observes,
+// through the plugin's own capability answer (unknown tools and
+// unparseable args count as mutating, like everywhere else).
+func (a *AgentMode) toolCallIsReadOnly(tc agent.ToolCall) bool {
+	if a.cli == nil || a.cli.pluginManager == nil {
+		return false
+	}
+	p, ok := a.cli.pluginManager.GetPlugin(tc.Name)
+	if !ok || p == nil {
+		return false
+	}
+	return plugins.IsReadOnly(p, []string{tc.Args})
+}
+
 // stageViewedImage queues an image the @view tool attached mid-run for the
 // next turn boundary.
 func (a *AgentMode) stageViewedImage(img models.ImageContent, name string) {
@@ -3522,6 +3536,18 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 
 			// Iterar sobre TODAS as chamadas de ferramenta sugeridas
 			for i, tc := range toolCalls {
+				// A failed action no longer stops the batch: the model
+				// batched these calls because they were independent, so its
+				// read-only siblings still run. A mutating sibling is skipped
+				// instead — it could build on the broken step — with a note
+				// that keeps the structured results aligned with the calls.
+				if batchHasError && !a.toolCallIsReadOnly(tc) {
+					note := agent.BatchSkippedNote(i+1, tc.Name)
+					renderError(note)
+					fmt.Fprintf(&batchOutputBuilder, "--- Resultado da Ação %d (%s) ---\n%s\n\n", i+1, tc.Name, note)
+					turnToolResults = append(turnToolResults, agent.ToolResult{Output: note, IsError: true, ErrorCode: toolResultErrorCodeNotExecuted})
+					continue
+				}
 				// --- SECURITY CHECK START ---
 				if a.isCoderMode {
 					pm, err := coder.NewPolicyManager(a.logger)
@@ -3994,6 +4020,19 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 										a.cli.animation.ShowThinkingAnimation(spinnerMessage(boxLabel))
 									}
 									toolOutput, execErr = plugin.ExecuteWithStream(toolCtx, toolArgs, streamCallback)
+									if execErr != nil && toolCtx.Err() == nil && agent.IsTransientToolError(execErr) && plugins.IsReadOnly(plugin, toolArgs) {
+										// A read that hit a timeout, a reset or a
+										// 5xx gets one more try before the failure
+										// costs the model a round-trip; a write
+										// never does (it may have landed).
+										firstErr := execErr
+										a.logger.Info("Retrying transient read-only tool failure", zap.String("tool", toolName), zap.Error(firstErr))
+										time.Sleep(agent.ToolRetryBackoff)
+										toolOutput, execErr = plugin.ExecuteWithStream(toolCtx, toolArgs, streamCallback)
+										if execErr == nil {
+											toolOutput = agent.BatchRetriedNote(firstErr) + toolOutput
+										}
+									}
 									a.cli.animation.StopThinkingAnimation()
 								}
 							}
@@ -4207,13 +4246,12 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 				// Acumula o resultado para a LLM
 				fmt.Fprintf(&batchOutputBuilder, "--- Resultado da Ação %d (%s) ---\n", i+1, toolName)
 
-				if execErr != nil || batchHasError {
-					fmt.Fprintf(&batchOutputBuilder, "ERRO: %v\nSaída parcial: %s\n", execErr, toolOutput)
-					batchOutputBuilder.WriteString("\n[EXECUÇÃO EM LOTE INTERROMPIDA PREMATURAMENTE DEVIDO A ERRO NA AÇÃO ANTERIOR]\n")
-
-					// Garante flag de erro se veio de execErr
+				if execErr != nil {
+					fmt.Fprintf(&batchOutputBuilder, "ERRO: %v\nSaída parcial: %s\n\n", execErr, toolOutput)
+					// The batch goes on: read-only siblings still run,
+					// mutating ones are skipped at the top of the loop.
 					batchHasError = true
-					break // Fail-Fast: Para a execução do lote
+					continue
 				}
 
 				// Per-tool truncation already applied above, before the
