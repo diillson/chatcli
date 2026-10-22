@@ -64,6 +64,9 @@ type AgentMode struct {
 	// usually needed again, and re-searching for it would cost a round
 	// trip each time.
 	activatedTools map[string]bool
+	// builtinToolDefs are the native definitions synthesized from the
+	// builtins' schemas for this run; they travel with the MCP tools.
+	builtinToolDefs []models.ToolDefinition
 	// deferrableTools is the set the index advertises, kept so a
 	// find_tools call can be answered without rebuilding it.
 	deferrableTools []models.ToolDefinition
@@ -1806,7 +1809,7 @@ func (a *AgentMode) skipAfterFailure(i int, tc agent.ToolCall, out *strings.Buil
 	if renderError != nil {
 		renderError(note)
 	}
-	fmt.Fprintf(out, "--- Resultado da Ação %d (%s) ---\n%s\n\n", i+1, tc.Name, note)
+	out.WriteString(agent.ActionResultHeader(i+1, tc.Name) + note + "\n\n")
 	return agent.ToolResult{Output: note, IsError: true, ErrorCode: toolResultErrorCodeNotExecuted}
 }
 
@@ -3070,6 +3073,10 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 						Args: argsStr,
 						Raw:  argsStr,
 					})
+				} else if tc, isBuiltin := a.nativeBuiltinCall(ntc); isBuiltin {
+					// Any other builtin: its synthesized definition carries
+					// the {cmd,args} envelope its own parser accepts.
+					toolCalls = append(toolCalls, tc)
 				} else {
 					// Coder tool: map to @coder with JSON args
 					subcmd, _ := workers.NativeToolNameToSubcmd(ntc.Name)
@@ -3605,7 +3612,7 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 							msg := "AÇÃO BLOQUEADA (Regra de Segurança)"
 							renderError(msg)
 							a.emitBlockedTool(tc.Name, tc.Args, msg)
-							a.cli.history = append(a.cli.history, models.Message{Role: "user", Content: "ERRO: " + msg})
+							a.cli.history = append(a.cli.history, models.Message{Role: "user", Content: agent.ActionErrorLabel + msg})
 							batchHasError = true
 							break
 						}
@@ -3647,12 +3654,12 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 								}
 								msg := "AÇÃO BLOQUEADA PERMANENTEMENTE"
 								renderError(msg)
-								a.cli.history = append(a.cli.history, models.Message{Role: "user", Content: "ERRO: " + msg})
+								a.cli.history = append(a.cli.history, models.Message{Role: "user", Content: agent.ActionErrorLabel + msg})
 								batchHasError = true
 							case coder.DecisionDenyOnce:
 								msg := "AÇÃO NEGADA PELO USUÁRIO"
 								renderError(msg)
-								a.cli.history = append(a.cli.history, models.Message{Role: "user", Content: "ERRO: " + msg})
+								a.cli.history = append(a.cli.history, models.Message{Role: "user", Content: agent.ActionErrorLabel + msg})
 								batchHasError = true
 							case coder.DecisionCanceled:
 								msg := "OPERAÇÃO CANCELADA (Ctrl+C)"
@@ -4275,10 +4282,10 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 				}
 
 				// Acumula o resultado para a LLM
-				fmt.Fprintf(&batchOutputBuilder, "--- Resultado da Ação %d (%s) ---\n", i+1, toolName)
+				batchOutputBuilder.WriteString(agent.ActionResultHeader(i+1, toolName))
 
 				if execErr != nil {
-					fmt.Fprintf(&batchOutputBuilder, "ERRO: %v\nSaída parcial: %s\n\n", execErr, toolOutput)
+					batchOutputBuilder.WriteString(agent.ActionFailure(execErr.Error(), toolOutput))
 					// The batch goes on: read-only siblings still run,
 					// mutating ones are skipped at the top of the loop.
 					batchHasError = true
@@ -4360,7 +4367,7 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 						Content: "WARNING: multiple failures detected. Write a NEW <plan> with a replanned task list that accounts for the previous errors.",
 					})
 				}
-			} else if batchHasError && !strings.Contains(batchOutputBuilder.String(), "Resultado da Ação") {
+			} else if batchHasError && !strings.Contains(batchOutputBuilder.String(), agent.ActionResultPrefix) {
 				// Erro de validação sem nenhuma ação executada (via XML):
 				// a msg de correção específica já está no histórico —
 				// apenas damos continue para a IA tentar corrigir.

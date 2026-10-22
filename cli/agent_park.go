@@ -384,7 +384,7 @@ func (a *AgentMode) runResumedCore(ctx context.Context, snap *park.Snapshot, out
 		a.cli.history = append(a.cli.history, models.Message{
 			Role: "user",
 			Content: i18n.T("agent.feedback.tool_output", "park_resume",
-				fmt.Sprintf("--- Resultado da Ação 1 (@park) ---\n%s\n", resultText)),
+				agent.ActionResultHeader(1, "@park")+resultText+"\n"),
 		})
 	}
 

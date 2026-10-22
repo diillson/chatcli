@@ -50,6 +50,12 @@ var pluginGrantDenylist = map[string]bool{
 	"@ask": true, "@view": true, "@taskgraph": true, "@model": true, "@park": true,
 }
 
+// PluginGrantDenied reports whether a builtin is kept off the native and
+// granted-tool paths because the loop handles it specially.
+func PluginGrantDenied(name string) bool {
+	return pluginGrantDenylist[strings.ToLower(strings.TrimSpace(name))]
+}
+
 // Model-facing prompt strings, named per house style (never inline literals).
 const (
 	grantedPluginsPromptHeader = "## GRANTED SESSION TOOLS\nThis task additionally grants you: "

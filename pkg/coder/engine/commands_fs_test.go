@@ -119,7 +119,7 @@ func TestHandlePatch_ReadError(t *testing.T) {
 	missing := filepath.Join(root, "nope.txt")
 	err := e.Execute(context.Background(), "patch",
 		[]string{"--file", missing, "--search", "x", "--replace", "y"})
-	if err == nil || !strings.Contains(err.Error(), "leitura") {
+	if err == nil || !strings.Contains(err.Error(), "read error") {
 		t.Fatalf("expected read error, got %v", err)
 	}
 }

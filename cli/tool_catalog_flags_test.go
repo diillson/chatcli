@@ -85,7 +85,7 @@ func TestFlagsJSONSchemaTypes(t *testing.T) {
 	if flagsJSONSchema(nil) != nil {
 		t.Fatal("no flags, no schema")
 	}
-	s := flagsJSONSchema([]toolSchemaFlag{
+	s := flagsJSONSchema([]nativeSchemaFlag{
 		{Name: "a", Type: "int"}, {Name: "b", Type: "bool"}, {Name: "c", Type: "array"}, {Name: "d", Type: "weird"}, {Name: "e", Type: "number", Required: true},
 	})
 	props := s["properties"].(map[string]interface{})

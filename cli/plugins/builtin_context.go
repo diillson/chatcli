@@ -127,7 +127,7 @@ Subcommands (cmd + args):
   detach  {name}                   remove an attachment from the session.
   list                             list every available context.
   status                           show what is attached to this session.
-  delete  {name}                   permanently delete a context.
+  delete  {name, dry_run?}         permanently delete a context (dry_run:true only shows it).
 
 Autonomous docs pipeline: @websearch (find the docs source) → @docs-flatten
 (root/repo/url → corpus.jsonl) → @context create … --mode knowledge →
@@ -135,7 +135,10 @@ Autonomous docs pipeline: @websearch (find the docs source) → @docs-flatten
 }
 
 // Version is semver.
-func (*BuiltinContextPlugin) Version() string { return "1.0.0" }
+func (*BuiltinContextPlugin) Version() string { return "1.1.0" }
+
+// contextDeleteDryRunPrefix heads a delete preview: nothing was removed.
+const contextDeleteDryRunPrefix = "DRY RUN — nothing deleted. This context would be removed from disk:\n"
 
 // Path is empty for builtin plugins.
 func (*BuiltinContextPlugin) Path() string { return "" }
@@ -188,9 +191,12 @@ func (*BuiltinContextPlugin) Schema() string {
 			},
 			{
 				"name":        "delete",
-				"description": "Permanently delete a context from disk.",
-				"flags":       []map[string]interface{}{{"name": "name", "type": "string", "required": true, "description": "Context name to delete."}},
-				"examples":    []string{`{"cmd":"delete","args":{"name":"react-docs"}}`},
+				"description": "Permanently delete a context from disk. dry_run:true shows what would be deleted (name, mode, size, sources) without touching anything.",
+				"flags": []map[string]interface{}{
+					{"name": "name", "type": "string", "required": true, "description": "Context name to delete."},
+					{"name": "dry_run", "type": "boolean", "description": "Only show the context that would be deleted (default false)."},
+				},
+				"examples": []string{`{"cmd":"delete","args":{"name":"react-docs","dry_run":true}}`, `{"cmd":"delete","args":{"name":"react-docs"}}`},
 			},
 			{
 				"name":        "update",
@@ -363,15 +369,28 @@ func (p *BuiltinContextPlugin) ExecuteWithStream(_ context.Context, args []strin
 		out, serr := adapter.Status()
 		return wrapContextErr("status", out, serr)
 	case "delete":
-		name := strings.TrimSpace(jsonString(raw, "name"))
-		if name == "" {
-			return "", fmt.Errorf("@context delete: \"name\" is required")
-		}
-		out, derr := adapter.Delete(name)
-		return wrapContextErr("delete", out, derr)
+		return contextDelete(adapter, raw)
 	default:
 		return "", fmt.Errorf("@context: unknown cmd %q (valid: create|update|attach|detach|list|show|inspect|merge|status|export|import|delete|metrics)", cmd)
 	}
+}
+
+// contextDelete removes a context, or with dry_run only shows the one
+// that would be removed.
+func contextDelete(adapter ContextAdapter, raw map[string]json.RawMessage) (string, error) {
+	name := strings.TrimSpace(jsonString(raw, "name"))
+	if name == "" {
+		return "", fmt.Errorf("@context delete: \"name\" is required")
+	}
+	if jsonBool(raw, "dry_run", "dryRun", "preview") {
+		out, serr := adapter.Show(name)
+		if serr != nil {
+			return "", fmt.Errorf("@context delete (dry run): %w", serr)
+		}
+		return contextDeleteDryRunPrefix + out, nil
+	}
+	out, derr := adapter.Delete(name)
+	return wrapContextErr("delete", out, derr)
 }
 
 // wrapContextErr namespaces an adapter error under the subcommand.

@@ -59,7 +59,7 @@ func TestApplyHunksToFile_ReadError(t *testing.T) {
 	missing := filepath.Join(root, "absent.txt")
 	diff := "--- a/absent.txt\n+++ b/absent.txt\n@@ -1 +1 @@\n-x\n+y\n"
 	err := e.applyUnifiedDiff(missing, diff, "text")
-	if err == nil || !strings.Contains(err.Error(), "leitura") {
+	if err == nil || !strings.Contains(err.Error(), "read error") {
 		t.Fatalf("expected read error, got %v", err)
 	}
 }
@@ -73,7 +73,7 @@ func TestApplyHunksToFile_Mismatch(t *testing.T) {
 	// Context line "expected" doesn't match file content "actual".
 	diff := "@@ -1 +1 @@\n-expected\n+new\n"
 	err := e.applyUnifiedDiff(target, diff, "text")
-	if err == nil || !strings.Contains(err.Error(), "mismatch") {
+	if err == nil || !strings.Contains(err.Error(), "does not match") {
 		t.Fatalf("expected mismatch error, got %v", err)
 	}
 }

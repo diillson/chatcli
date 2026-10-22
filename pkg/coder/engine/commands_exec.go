@@ -87,7 +87,7 @@ func (e *Engine) handleExec(ctx context.Context, args []string) error {
 		return err
 	}
 	if *cmdStr == "" {
-		return fmt.Errorf("--cmd requerido")
+		return fmt.Errorf("--cmd is required")
 	}
 
 	finalCmd := html.UnescapeString(*cmdStr)
@@ -166,7 +166,7 @@ func (e *Engine) handleTest(ctx context.Context, args []string) error {
 	if finalCmd == "" {
 		finalCmd = detectTestCommand(*dir)
 		if finalCmd == "" {
-			return fmt.Errorf("não foi possível detectar comando de teste. Use --cmd")
+			return fmt.Errorf("could not detect a test command; pass --cmd")
 		}
 	}
 

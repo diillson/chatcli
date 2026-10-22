@@ -64,7 +64,7 @@ func TestTrimInjectedContextUsesReversibleCompression(t *testing.T) {
 func TestTrimToolFeedbackRawBranchCompresses(t *testing.T) {
 	trimmer, _ := newTestTrimmerWithCompression()
 	// Tool feedback (matches isToolFeedbackMessage), >8000 chars, no <tool_output>.
-	content := "--- Resultado da Ação 1 (@search) ---\n" + bigSearchBody()
+	content := "--- Action Result 1 (@search) ---\n" + bigSearchBody()
 	if len(content) <= 8000 {
 		content += bigSearchBody()
 	}

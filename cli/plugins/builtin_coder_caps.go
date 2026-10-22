@@ -25,7 +25,7 @@ import (
 func (p *BuiltinCoderPlugin) IsReadOnly(args []string) bool {
 	sub := coderSubcommand(args)
 	switch sub {
-	case "read", "search", "tree", "outline", "map", "git-status", "git-diff", "git-log", "git-changed", "git-branch":
+	case "read", "stat", "search", "tree", "outline", "map", "find", "git-status", "git-diff", "git-log", "git-changed", "git-branch", "git-show", "git-blame":
 		return true
 	case "checkpoint":
 		// Listing/creating snapshots only records state; restore REWRITES
@@ -85,8 +85,16 @@ func (p *BuiltinCoderPlugin) DescribeCall(args []string) string {
 		return i18n.T("plugins.coder.describe.test")
 	case "checkpoint":
 		return i18n.T("plugins.coder.describe.checkpoint")
-	case "git-status", "git-diff", "git-log", "git-changed", "git-branch":
+	case "git-status", "git-diff", "git-log", "git-changed", "git-branch", "git-show", "git-blame":
 		return i18n.T("plugins.coder.describe.git", strings.TrimPrefix(sub, "git-"))
+	case "stat":
+		return i18n.T("plugins.coder.describe.stat", extractPathArg(args))
+	case "find":
+		return i18n.T("plugins.coder.describe.find", extractStringArg(args, "pattern", "contains"))
+	case "move":
+		return i18n.T("plugins.coder.describe.move", extractStringArg(args, "from"))
+	case "delete":
+		return i18n.T("plugins.coder.describe.delete", extractPathArg(args))
 	}
 	if sub != "" {
 		return i18n.T("plugins.coder.describe.generic", sub)

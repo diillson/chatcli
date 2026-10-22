@@ -167,6 +167,10 @@ func TestContextExecuteDispatch(t *testing.T) {
 	if _, err := run(`{"cmd":"detach","args":{"name":"react"}}`); err != nil || f.detachName != "react" {
 		t.Fatalf("detach routed wrong: %v %q", err, f.detachName)
 	}
+	f.deleteName = ""
+	if out, err := run(`{"cmd":"delete","args":{"name":"react","dry_run":true}}`); err != nil || f.deleteName != "" || !strings.Contains(out, "DRY RUN") || !strings.Contains(out, "show react") {
+		t.Fatalf("delete dry run must show and not delete: %v %q %q", err, f.deleteName, out)
+	}
 	if _, err := run(`{"cmd":"delete","args":{"name":"react"}}`); err != nil || f.deleteName != "react" {
 		t.Fatalf("delete routed wrong: %v %q", err, f.deleteName)
 	}

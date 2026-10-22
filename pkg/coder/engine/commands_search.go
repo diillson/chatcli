@@ -93,7 +93,7 @@ func (e *Engine) handleSearch(ctx context.Context, args []string) error {
 	}
 
 	if *term == "" {
-		return fmt.Errorf("--term requerido")
+		return fmt.Errorf("--term is required")
 	}
 	*dir = expandPath(*dir)
 	if err := e.validatePath(*dir); err != nil {
@@ -178,7 +178,7 @@ func (e *Engine) fallbackSearch(term, dir string, useRegex, caseSensitive bool, 
 		}
 		re, err = regexp.Compile(term)
 		if err != nil {
-			return fmt.Errorf("regex inválida: %w", err)
+			return fmt.Errorf("invalid regex: %w", err)
 		}
 	}
 
