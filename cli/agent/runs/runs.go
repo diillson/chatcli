@@ -29,6 +29,7 @@ import (
 	"os"
 	"sort"
 	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -112,6 +113,7 @@ func (i Info) Elapsed() time.Duration {
 type Run struct {
 	mu     sync.Mutex
 	info   Info
+	log    []Entry // bounded activity log; see activity.go
 	cancel context.CancelFunc
 	reg    *Registry
 }
@@ -134,6 +136,7 @@ func (r *Run) SetTurn(turn, maxTurns int) {
 	r.mu.Lock()
 	r.info.Turn = turn
 	r.info.MaxTurns = maxTurns
+	r.appendActivityLocked("turn " + strconv.Itoa(turn) + "/" + strconv.Itoa(maxTurns))
 	snap, reg := r.info, r.reg
 	r.mu.Unlock()
 	reg.notify(snap)
@@ -146,6 +149,9 @@ func (r *Run) SetAction(action string) {
 	}
 	r.mu.Lock()
 	r.info.Action = action
+	if strings.TrimSpace(action) != "" {
+		r.appendActivityLocked("action: " + action)
+	}
 	snap, reg := r.info, r.reg
 	r.mu.Unlock()
 	reg.notify(snap)
@@ -196,12 +202,14 @@ func (r *Run) End(err error) {
 		r.info.Status = StatusFailed
 		r.info.Err = err.Error()
 	}
+	r.appendActivityLocked(formatEnd(r.info))
 	final := r.info
+	log := r.activitySnapshotLocked()
 	reg := r.reg
 	r.mu.Unlock()
 
 	if reg != nil {
-		reg.retire(final)
+		reg.retire(final, log)
 		reg.notify(final)
 	}
 }
@@ -214,8 +222,9 @@ const DefaultHistorySize = 200
 type Registry struct {
 	mu       sync.RWMutex
 	active   map[string]*Run
-	order    []string // active runs in start order
-	done     []Info   // ring of finished runs, oldest first
+	order    []string           // active runs in start order
+	done     []Info             // ring of finished runs, oldest first
+	doneLogs map[string][]Entry // activity logs of finished runs, evicted with done
 	doneCap  int
 	seq      atomic.Uint64
 	instance string // random token making run IDs unique across processes
@@ -234,6 +243,7 @@ func NewRegistry(historyCap int) *Registry {
 	}
 	return &Registry{
 		active:   make(map[string]*Run),
+		doneLogs: make(map[string][]Entry),
 		doneCap:  historyCap,
 		instance: newInstanceToken(),
 	}
@@ -382,7 +392,7 @@ func (g *Registry) Begin(ctx context.Context, meta Info) (context.Context, *Run)
 }
 
 // retire moves a finished run out of the active set into the history ring.
-func (g *Registry) retire(final Info) {
+func (g *Registry) retire(final Info, log []Entry) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	if _, ok := g.active[final.ID]; ok {
@@ -395,7 +405,14 @@ func (g *Registry) retire(final Info) {
 		}
 	}
 	g.done = append(g.done, final)
+	if g.doneLogs == nil {
+		g.doneLogs = make(map[string][]Entry)
+	}
+	g.doneLogs[final.ID] = log
 	if overflow := len(g.done) - g.doneCap; overflow > 0 {
+		for _, evicted := range g.done[:overflow] {
+			delete(g.doneLogs, evicted.ID)
+		}
 		g.done = append(g.done[:0], g.done[overflow:]...)
 	}
 }

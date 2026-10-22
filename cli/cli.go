@@ -966,6 +966,9 @@ func NewChatCLI(ctx context.Context, manager manager.LLMManager, logger *zap.Log
 	// Wire the @mail plugin adapter over the squad message bus.
 	plugins.SetMailAdapter(newLiveMailAdapter(nil))
 
+	// Wire the @park cancel hook over this process's park runtime.
+	plugins.SetParkCanceller(newLiveParkAdapter(cli))
+
 	// Wire the @taskgraph plugin adapter. It resolves the CURRENT
 	// AgentMode's dispatcher at call time (the AgentMode is re-created
 	// across sessions), so wiring once at boot is safe.

@@ -1,0 +1,6 @@
+{
+  "plugins.park.describe.cancel": "Cancelling parked wait %s",
+  "plugins.park.describe.cancel_newest": "Cancelling the newest parked wait",
+  "plugins.agents.describe.wait": "Waiting for agent run %s",
+  "plugins.agents.describe.transcript": "Reading activity log of agent run %s"
+}
