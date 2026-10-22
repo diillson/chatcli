@@ -69,8 +69,12 @@ func (a *liveTodoAdapter) Add(items []plugins.TodoItem) (string, error) {
 		specs = append(specs, agent.TaskSpec{Description: it.Description, Status: agent.TaskStatus(it.Status)})
 	}
 	ids := tracker.AppendTasks(specs)
-	return fmt.Sprintf("Added %d task(s) (ids %v).\n%s", len(ids), ids, tracker.FormatProgress()), nil
+	return fmt.Sprintf(todoMsgAddedFmt, len(ids), ids, tracker.FormatProgress()), nil
 }
+
+// todoMsgAddedFmt is the model-facing result of add (named per house
+// style): how many tasks landed, their ids, and the plan as it stands.
+const todoMsgAddedFmt = "Added %d task(s) (ids %v).\n%s"
 
 // Update implements plugins.TodoEditor: rewords one task.
 func (a *liveTodoAdapter) Update(id int, description string) (string, error) {
