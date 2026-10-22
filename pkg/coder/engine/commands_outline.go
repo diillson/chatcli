@@ -45,7 +45,7 @@ func (e *Engine) handleOutline(args []string) error {
 		return err
 	}
 	if strings.TrimSpace(*file) == "" {
-		return fmt.Errorf("--file requerido")
+		return fmt.Errorf("--file is required")
 	}
 	path := expandPath(*file)
 	if err := e.validatePath(path); err != nil {

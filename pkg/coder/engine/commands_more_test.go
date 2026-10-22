@@ -164,3 +164,64 @@ func TestHandleFindMoveDelete(t *testing.T) {
 		}
 	}
 }
+
+func TestHandleStat(t *testing.T) {
+	e, out, root := newWsEngine(t)
+	text := filepath.Join(root, "t.txt")
+	if err := os.WriteFile(text, []byte("one\r\ntwo longer\r\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	bin := filepath.Join(root, "b.bin")
+	if err := os.WriteFile(bin, []byte{0x89, 'P', 'N', 'G', 0, 1, 2}, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	empty := filepath.Join(root, "e.txt")
+	if err := os.WriteFile(empty, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.Execute(context.Background(), "stat", []string{"--file", text, bin, empty, root}); err != nil {
+		t.Fatalf("stat: %v", err)
+	}
+	s := out.String()
+	for _, want := range []string{"text, 2 lines, longest line 10 bytes, CRLF", "type: binary", "type: empty file", "type: directory (3 files, 0 subdirectories)", "size: 17 bytes"} {
+		if !strings.Contains(s, want) {
+			t.Fatalf("stat missing %q:\n%s", want, s)
+		}
+	}
+	out.Reset()
+	big := filepath.Join(root, "big.txt")
+	if err := os.WriteFile(big, []byte(strings.Repeat("x\n", 2001)), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.Execute(context.Background(), "stat", []string{"--file", big}); err != nil || !strings.Contains(out.String(), "read it in ranges") {
+		t.Fatalf("big file hint: %q %v", out.String(), err)
+	}
+	if err := e.Execute(context.Background(), "stat", nil); err == nil {
+		t.Fatal("stat without --file must error")
+	}
+	out.Reset()
+	if err := e.Execute(context.Background(), "stat", []string{"--file", filepath.Join(root, "missing")}); err != nil || !strings.Contains(out.String(), "ERROR STAT") {
+		t.Fatalf("missing file is reported per file: %q %v", out.String(), err)
+	}
+	for _, want := range []string{"--file is required", "cannot be combined"} {
+		if !strings.Contains(engineErrorText(t, e, want), want) {
+			t.Fatalf("engine errors must be English: %q", want)
+		}
+	}
+}
+
+// engineErrorText triggers the error that contains want and returns it.
+func engineErrorText(t *testing.T, e *Engine, want string) string {
+	t.Helper()
+	var err error
+	switch want {
+	case "--file is required":
+		err = e.Execute(context.Background(), "read", nil)
+	default:
+		err = e.Execute(context.Background(), "read", []string{"--file", "x", "--head", "1", "--tail", "1"})
+	}
+	if err == nil {
+		return ""
+	}
+	return err.Error()
+}

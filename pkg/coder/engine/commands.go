@@ -25,10 +25,10 @@ func (e *Engine) handleRead(ctx context.Context, args []string) error {
 
 	files := collectFiles(*file, fs.Args())
 	if len(files) == 0 {
-		return fmt.Errorf("--file requerido")
+		return fmt.Errorf("--file is required")
 	}
 	if *head > 0 && *tail > 0 {
-		return fmt.Errorf("--head e --tail são incompatíveis")
+		return fmt.Errorf("--head and --tail cannot be combined")
 	}
 
 	for _, f := range files {
@@ -100,10 +100,10 @@ func (e *Engine) handleWrite(args []string) error {
 	}
 
 	if *file == "" {
-		return fmt.Errorf("--file requerido")
+		return fmt.Errorf("--file is required")
 	}
 	if *content == "" {
-		return fmt.Errorf("--content vazio")
+		return fmt.Errorf("--content is empty")
 	}
 	if err := e.validateWritePath(*file); err != nil {
 		return err
@@ -111,28 +111,28 @@ func (e *Engine) handleWrite(args []string) error {
 
 	data, err := smartDecode(*content, *encoding)
 	if err != nil {
-		return fmt.Errorf("erro decode: %w", err)
+		return fmt.Errorf("decode error: %w", err)
 	}
 
 	if err := os.MkdirAll(filepath.Dir(*file), 0700); err != nil {
-		return fmt.Errorf("erro ao criar diretório: %w", err)
+		return fmt.Errorf("creating directory: %w", err)
 	}
 	if err := createBackup(*file); err != nil {
-		e.errorf("WARN: backup falhou para %s: %v\n", *file, err)
+		e.errorf("WARN: backup failed for %s: %v\n", *file, err)
 	}
 
 	if *appendMode {
 		f, err := os.OpenFile(*file, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0600)
 		if err != nil {
-			return fmt.Errorf("erro escrita: %w", err)
+			return fmt.Errorf("write error: %w", err)
 		}
 		defer func() { _ = f.Close() }()
 		if _, err := f.Write(data); err != nil {
-			return fmt.Errorf("erro escrita: %w", err)
+			return fmt.Errorf("write error: %w", err)
 		}
 	} else {
 		if err := os.WriteFile(*file, data, 0600); err != nil {
-			return fmt.Errorf("erro escrita: %w", err)
+			return fmt.Errorf("write error: %w", err)
 		}
 	}
 
@@ -166,7 +166,7 @@ func (e *Engine) handlePatch(args []string) error {
 
 	c, err := os.ReadFile(*file)
 	if err != nil {
-		return fmt.Errorf("erro leitura: %w", err)
+		return fmt.Errorf("read error: %w", err)
 	}
 	content := string(c)
 
@@ -193,7 +193,7 @@ func (e *Engine) handlePatch(args []string) error {
 	}
 	newContent := applyPatches(content, searchStr, replaceStr, matches)
 	if err := os.WriteFile(*file, []byte(newContent), 0600); err != nil { //#nosec G703 -- path validated by engine.validatePath / SensitiveReadPaths.IsReadAllowed
-		return fmt.Errorf("erro escrita: %w", err)
+		return fmt.Errorf("write error: %w", err)
 	}
 	e.printf("✅ Patch applied to '%s' (%s).\n", *file, describePatch(matches))
 	return nil
@@ -219,7 +219,7 @@ func (e *Engine) handleRollback(args []string) error {
 		return err
 	}
 	if *file == "" {
-		return fmt.Errorf("--file requerido")
+		return fmt.Errorf("--file is required")
 	}
 	if err := e.validateWritePath(*file); err != nil {
 		return err
@@ -229,7 +229,7 @@ func (e *Engine) handleRollback(args []string) error {
 		return fmt.Errorf("backup error: %w", err)
 	}
 	if err := os.WriteFile(*file, c, 0600); err != nil { //#nosec G703 -- path validated by engine.validatePath / SensitiveReadPaths.IsReadAllowed
-		return fmt.Errorf("erro ao restaurar arquivo: %w", err)
+		return fmt.Errorf("restore failed: %w", err)
 	}
 	e.println("✅ Rollback done.")
 	return nil

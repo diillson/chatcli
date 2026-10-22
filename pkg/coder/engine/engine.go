@@ -315,6 +315,8 @@ func (e *Engine) Execute(ctx context.Context, cmd string, args []string) error {
 		return e.handleGitBlame(ctx, args)
 	case "find":
 		return e.handleFind(args)
+	case "stat":
+		return e.handleStat(args)
 	case "move":
 		e.autoCheckpoint(ctx, "move")
 		return e.handleMove(args)
@@ -330,7 +332,7 @@ func (e *Engine) Execute(ctx context.Context, cmd string, args []string) error {
 
 // Commands lists every subcommand Execute dispatches, in the order the
 // usage line shows them.
-var Commands = []string{"read", "write", "patch", "multipatch", "find", "move", "delete", "tree", "search", "outline", "map", "checkpoint", "exec", "git-status", "git-diff", "git-log", "git-changed", "git-branch", "git-show", "git-blame", "test", "rollback", "clean"}
+var Commands = []string{"read", "stat", "write", "patch", "multipatch", "find", "move", "delete", "tree", "search", "outline", "map", "checkpoint", "exec", "git-status", "git-diff", "git-log", "git-changed", "git-branch", "git-show", "git-blame", "test", "rollback", "clean"}
 
 func (e *Engine) printf(format string, a ...interface{}) {
 	_, _ = fmt.Fprintf(e.Out, format, a...)

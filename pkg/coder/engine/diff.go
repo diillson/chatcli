@@ -25,16 +25,16 @@ type diffLine struct {
 func (e *Engine) applyUnifiedDiff(fileArg, diffText, enc string) error {
 	decoded, err := smartDecode(diffText, enc)
 	if err != nil {
-		return fmt.Errorf("erro decode diff: %w", err)
+		return fmt.Errorf("diff decode error: %w", err)
 	}
 
 	files, err := parseUnifiedDiff(string(decoded))
 	if err != nil {
-		return fmt.Errorf("diff inválido: %w", err)
+		return fmt.Errorf("invalid diff: %w", err)
 	}
 
 	if len(files) == 0 {
-		return fmt.Errorf("diff vazio")
+		return fmt.Errorf("empty diff")
 	}
 
 	if fileArg != "" {
@@ -57,13 +57,13 @@ func (e *Engine) applyUnifiedDiff(fileArg, diffText, enc string) error {
 			}
 		}
 		if !ok {
-			return fmt.Errorf("arquivo não encontrado no diff e --file informado não confere")
+			return fmt.Errorf("the diff names no file and the given --file does not match it")
 		}
 		return e.applyHunksToFile(fileArg, hunks)
 	}
 
 	if _, ok := files["__single__"]; ok {
-		return fmt.Errorf("diff sem headers de arquivo: informe --file")
+		return fmt.Errorf("diff without file headers: pass --file")
 	}
 	for path, hunks := range files {
 		if err := e.applyHunksToFile(path, hunks); err != nil {
@@ -119,7 +119,7 @@ func parseHunk(lines []string, start int) (diffHunk, int, error) {
 	re := regexp.MustCompile(`^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@`)
 	m := re.FindStringSubmatch(header)
 	if m == nil {
-		return diffHunk{}, start + 1, fmt.Errorf("header de hunk inválido: %s", header)
+		return diffHunk{}, start + 1, fmt.Errorf("invalid hunk header: %s", header)
 	}
 	oldStart, _ := strconv.Atoi(m[1])
 	oldLines := 1
@@ -150,7 +150,7 @@ func parseHunk(lines []string, start int) (diffHunk, int, error) {
 		}
 		kind := line[0]
 		if kind != ' ' && kind != '+' && kind != '-' {
-			return diffHunk{}, start + 1, fmt.Errorf("linha inválida no diff: %s", line)
+			return diffHunk{}, start + 1, fmt.Errorf("invalid diff line: %s", line)
 		}
 		hunk.lines = append(hunk.lines, diffLine{kind: kind, text: line[1:]})
 		i++
@@ -172,7 +172,7 @@ func normalizeDiffPath(p string) string {
 func (e *Engine) applyHunksToFile(path string, hunks []diffHunk) error {
 	content, err := os.ReadFile(path) //#nosec G304 -- path supplied by user/agent through validated tool surface (boundary check upstream)
 	if err != nil {
-		return fmt.Errorf("erro leitura: %w", err)
+		return fmt.Errorf("read error: %w", err)
 	}
 	text := strings.ReplaceAll(string(content), "\r\n", "\n")
 	lines := strings.Split(text, "\n")
@@ -182,7 +182,7 @@ func (e *Engine) applyHunksToFile(path string, hunks []diffHunk) error {
 	for _, h := range hunks {
 		idx := h.oldStart - 1 + offset
 		if idx < 0 || idx > len(lines) {
-			return fmt.Errorf("hunk fora do range do arquivo: %s", path)
+			return fmt.Errorf("hunk outside the file range: %s", path)
 		}
 
 		cur := idx
@@ -191,13 +191,13 @@ func (e *Engine) applyHunksToFile(path string, hunks []diffHunk) error {
 			switch dl.kind {
 			case ' ':
 				if cur >= len(lines) || lines[cur] != dl.text {
-					return fmt.Errorf("hunk mismatch no arquivo %s", path)
+					return fmt.Errorf("hunk does not match the file %s", path)
 				}
 				newChunk = append(newChunk, lines[cur])
 				cur++
 			case '-':
 				if cur >= len(lines) || lines[cur] != dl.text {
-					return fmt.Errorf("hunk mismatch no arquivo %s", path)
+					return fmt.Errorf("hunk does not match the file %s", path)
 				}
 				cur++
 			case '+':
@@ -216,7 +216,7 @@ func (e *Engine) applyHunksToFile(path string, hunks []diffHunk) error {
 
 	_ = createBackup(path)
 	if err := os.WriteFile(path, []byte(newText), 0600); err != nil { //#nosec G703 -- path validated by engine.validatePath / SensitiveReadPaths.IsReadAllowed
-		return fmt.Errorf("erro escrita: %w", err)
+		return fmt.Errorf("write error: %w", err)
 	}
 	e.printf("✅ Diff applied to '%s'.\n", path)
 	return nil
