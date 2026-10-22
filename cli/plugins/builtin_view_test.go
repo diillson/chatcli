@@ -18,9 +18,15 @@ import (
 	"testing"
 )
 
-type fakeViewAdapter struct{ lastPath string }
+type fakeViewAdapter struct {
+	lastPath string
+	err      error // returned instead of staging when set
+}
 
 func (f *fakeViewAdapter) ViewImage(_ context.Context, path string) (string, error) {
+	if f.err != nil {
+		return "", f.err
+	}
 	f.lastPath = path
 	return "Image " + path + " staged", nil
 }

@@ -93,13 +93,14 @@ func (*BuiltinBrowserPlugin) Name() string { return "@browser" }
 
 // Description surfaces the tool in /plugin list and the agent tool catalog.
 func (*BuiltinBrowserPlugin) Description() string {
-	return "Drive a real local Chrome/Chromium browser: open a URL, read the rendered page as text with numbered interactive elements, click and type into them, run JavaScript, capture screenshots, and inspect the page's console messages and network responses. Use it to VERIFY web work — open the app you just built or changed, interact with it, and debug it from its console/network activity. The browser runs headless by default; when the user must act in person (log in, pick an account, solve a captcha, or simply see the page), use `show` or `open --visible` to put the window on their screen, `wait` until the page reaches the expected URL/text, then `hide` and keep going — the session and its logins are kept across the switch. Requires a locally installed Chrome, Chromium, Brave or Edge."
+	return "Drive a real local Chrome/Chromium browser: open a URL, read the rendered page as text with numbered interactive elements (shadow DOM and same-origin iframes included), find text on it, click (real mouse, double/right too) and type into inputs and rich-text editors, run JavaScript, capture screenshots you then SEE, read response bodies, list downloads, and inspect the page's console and network. Use it to VERIFY web work — open the app you just built or changed, interact with it, and debug it from its console/network activity — and to browse any site for the user. The browser runs headless by default; a bot challenge (Cloudflare, captcha) is detected and reported — when the user must act in person (solve it, log in, pick an account, or simply see the page), use `show` or `open --visible` to put the window on their screen, `wait` until the page reaches the expected URL/text or is unblocked, then `hide` and keep going — the session and its logins are kept across the switch. Requires a locally installed Chrome, Chromium, Brave or Edge."
 }
 
 // Usage explains the canonical invocation forms.
 func (*BuiltinBrowserPlugin) Usage() string {
 	return `<tool_call name="@browser" args='{"cmd":"open","args":{"url":"http://localhost:3000"}}' />
 <tool_call name="@browser" args='{"cmd":"click","args":{"target":"3"}}' />
+<tool_call name="@browser" args='{"cmd":"find","args":{"text":"Sign in"}}' />
 <tool_call name="@browser" args='{"cmd":"show","args":{"url":"https://app.example.com/login"}}' />
 <tool_call name="@browser" args='{"cmd":"wait","args":{"url":"/dashboard","timeout":300}}' />
 
@@ -107,17 +108,20 @@ Subcommands:
   open {url} [--visible]           navigate to url (launches the browser on first use), returns a page snapshot; --visible puts the window on the user's screen
   show [url]                       make the browser window VISIBLE on the user's screen (relaunches a headless session on the same profile — logins are kept); optionally navigates to url
   hide                             back to headless (window disappears, session and cookies are kept)
-  wait [--url substr] [--text substr] [--selector css|ref] [--changed] [--timeout secs]   block until the page URL/text contains substr, an element exists and/or the URL leaves the current one (default 120s, max 600s) — pair with show for a user login; --changed when you cannot predict the landing page
-  snapshot [--max N]               current page as text: title, url, numbered interactive elements, visible text
-  click {target}                   click an element — target is a [n] ref from the last snapshot or a CSS selector
-  type {target} {text} [--submit]  type into an input; --submit presses Enter / submits its form
+  wait [--url substr] [--text substr] [--selector css|ref] [--changed] [--unblocked] [--idle] [--timeout secs]   block until the page URL/text contains substr, an element exists, the URL leaves the current one, a bot challenge is gone and/or the network is quiet (default 120s, max 600s) — pair with show for a user login or captcha
+  snapshot [--max N] [--offset N]  current page as text: title, url, numbered interactive elements with their state, visible text (iframes included); --offset continues a long text
+  text [target] [--offset N] [--max N]   plain visible text of the page or of one element, paged — the way to read a long article in full
+  find {text} [--max N]            locate text on the page: matching interactive elements (with [n] refs) and every occurrence in the text with context — before scrolling or guessing selectors
+  click {target} [--count 2|3] [--button right]   real mouse click on an element — target is a [n] ref from the last snapshot or a CSS selector; --count 2 double-clicks, 3 selects a word/line; --button right opens a context menu
+  type {target} {text} [--append] [--submit]   type into an input, textarea or rich-text editor (contenteditable); replaces the content unless --append; --submit presses Enter / submits its form
+  clear {target}                   empty an input, textarea or editor
   press {key}                      send a key to the focused element: Enter, Tab, Escape, ArrowDown, a character, or a chord like Control+a
   hover {target}                   move the mouse over an element (opens hover menus/tooltips)
   select {target} {value}          choose a <select> option by value or visible text
   upload {target} {file}           attach a local file to an <input type=file> (the OS picker never opens under automation)
   scroll [down|up|top|bottom|--to target]   move the viewport
-  eval {javascript}                run a JS expression in the page, returns its value
-  screenshot [--file name] [--full]   capture the viewport (or the whole page with --full) as PNG in the session scratch dir, returns the path
+  eval {javascript}                run JavaScript in the page (REPL mode: const/let may be declared again, top-level await works), returns its value
+  screenshot [--file name] [--full] [--view false]   capture the viewport (or the whole page with --full) as PNG and ATTACH it so you see it on the next turn; --view false only saves the file
   html [target] [--max N]          outerHTML of an element (or the document) — for debugging markup
   pdf [--file name]                save the page as PDF in the session scratch dir (headless only)
   resize {width} {height} [--mobile]   emulate a viewport (e.g. 390 844 --mobile) to verify responsive layouts
@@ -125,19 +129,22 @@ Subcommands:
   tab {n}                          switch to tab n from the tabs list
   cookies [domain] [--clear]       list cookies (names/domains only, never values) to check whether a login stuck; --clear logs out of everything
   console [--tail N]               last captured console messages (errors and auto-accepted dialogs included)
-  network [--tail N]               last captured network responses (method, status, url)
-  back                             history back
-  status                           whether a browser session is running, visible or headless, and what page it is on
-  close                            close the browser session
+  network [--tail N] [--filter substr] [--body]   last captured responses (method, status, url); --filter keeps urls containing substr; --body also returns the body of the newest match (JSON of an API call, for instance)
+  downloads                        files the page downloaded during this session (saved in the session scratch dir)
+  back / forward / reload          history navigation and reload
+  status                           whether a browser session is running, visible or headless, its profile, and what page it is on
+  close                            close the browser session (a throwaway profile loses its logins — only close when the user is done with the browser; it is closed on exit anyway)
 
-Workflow: open -> snapshot -> click/type (by [n] ref) -> snapshot again; use console/network to debug.
-User hand-off (login, captcha, account picker): show {login url} -> tell the user what to do -> wait --url {post-login path} (or ask them with @ask) -> hide -> continue on the authenticated session.
+Workflow: open -> snapshot (or find) -> click/type (by [n] ref) -> snapshot again; use console/network to debug; text --offset to read long pages in full.
+User hand-off (login, 2FA, captcha, account picker): show {url} -> tell the user what to do -> wait --url {post-login path} / wait --unblocked for a bot challenge (or ask them with @ask) -> hide -> continue on the authenticated session.
+A snapshot that starts with "Bot challenge detected" is the block page, not the content: hand the window to the user with show, never retry open in a loop.
+Password fields never show their value and what you type into one is not echoed; still, let the user type their own passwords in the visible window.
 alert()/confirm()/prompt() dialogs are accepted automatically and logged to console.
 The browser profile is a throwaway unless CHATCLI_BROWSER_PROFILE is set; the user's everyday Chrome logins are only available when CHATCLI_BROWSER_CDP_URL attaches to their running browser.`
 }
 
 // Version returns the plugin contract version.
-func (*BuiltinBrowserPlugin) Version() string { return "1.0.0" }
+func (*BuiltinBrowserPlugin) Version() string { return "1.1.0" }
 
 // Path identifies the plugin as builtin.
 func (*BuiltinBrowserPlugin) Path() string { return "[builtin]" }
@@ -152,17 +159,20 @@ func (*BuiltinBrowserPlugin) Schema() string {
 			{"name": "open", "description": "navigate to a URL and return a page snapshot; visible:true puts the window on the user's screen", "examples": []string{`{"cmd":"open","args":{"url":"http://localhost:3000"}}`, `{"cmd":"open","args":{"url":"https://app.example.com/login","visible":true}}`}},
 			{"name": "show", "description": "make the browser window visible to the user (session and logins kept); optional url to navigate", "examples": []string{`{"cmd":"show"}`, `{"cmd":"show","args":{"url":"https://app.example.com/login"}}`}},
 			{"name": "hide", "description": "return to headless (session and logins kept)", "examples": []string{`{"cmd":"hide"}`}},
-			{"name": "wait", "description": "block until the page URL/text contains the given substring, an element exists and/or the URL changes (changed:true — for logins whose landing page is unknown), up to timeout seconds (default 120, max 600); a timeout is a result with the current page", "examples": []string{`{"cmd":"wait","args":{"url":"/dashboard","timeout":300}}`, `{"cmd":"wait","args":{"text":"Welcome back"}}`, `{"cmd":"wait","args":{"changed":true,"timeout":300}}`}},
-			{"name": "snapshot", "description": "current page as text with numbered interactive elements", "examples": []string{`{"cmd":"snapshot"}`}},
-			{"name": "click", "description": "click an element by snapshot ref or CSS selector", "examples": []string{`{"cmd":"click","args":{"target":"3"}}`, `{"cmd":"click","args":{"target":"#submit"}}`}},
-			{"name": "type", "description": "type into an input; submit optionally presses Enter", "examples": []string{`{"cmd":"type","args":{"target":"2","text":"golang","submit":true}}`}},
+			{"name": "wait", "description": "block until the page URL/text contains the given substring, an element exists, the URL changes (changed:true — for logins whose landing page is unknown), a bot challenge is gone (unblocked:true) and/or the network is quiet (idle:true), up to timeout seconds (default 120, max 600); a timeout is a result with the current page", "examples": []string{`{"cmd":"wait","args":{"url":"/dashboard","timeout":300}}`, `{"cmd":"wait","args":{"text":"Welcome back"}}`, `{"cmd":"wait","args":{"changed":true,"timeout":300}}`, `{"cmd":"wait","args":{"unblocked":true,"timeout":300}}`, `{"cmd":"wait","args":{"idle":true}}`}},
+			{"name": "snapshot", "description": "current page as text with numbered interactive elements and their state; offset continues the page text of a long page", "examples": []string{`{"cmd":"snapshot"}`, `{"cmd":"snapshot","args":{"offset":12000}}`}},
+			{"name": "text", "description": "plain visible text of the page or of one element (target), paged with offset/max — read long content in full", "examples": []string{`{"cmd":"text"}`, `{"cmd":"text","args":{"offset":12000}}`, `{"cmd":"text","args":{"target":"article","max":20000}}`}},
+			{"name": "find", "description": "locate text on the page: matching interactive elements with refs and every occurrence in the visible text with context", "examples": []string{`{"cmd":"find","args":{"text":"Sign in"}}`, `{"cmd":"find","args":{"text":"invoice","max":10}}`}},
+			{"name": "click", "description": "real mouse click on an element by snapshot ref or CSS selector; count 2 double-clicks, 3 selects a word; button right opens a context menu", "examples": []string{`{"cmd":"click","args":{"target":"3"}}`, `{"cmd":"click","args":{"target":"#submit"}}`, `{"cmd":"click","args":{"target":"5","count":2}}`, `{"cmd":"click","args":{"target":"5","button":"right"}}`}},
+			{"name": "type", "description": "type into an input, textarea or rich-text editor (replaces the content unless append:true); submit optionally presses Enter", "examples": []string{`{"cmd":"type","args":{"target":"2","text":"golang","submit":true}}`, `{"cmd":"type","args":{"target":"2","text":" more","append":true}}`}},
+			{"name": "clear", "description": "empty an input, textarea or editor", "examples": []string{`{"cmd":"clear","args":{"target":"2"}}`}},
 			{"name": "press", "description": "send a key or chord to the focused element (Enter, Tab, Escape, ArrowDown, Control+a, a character)", "examples": []string{`{"cmd":"press","args":{"key":"Enter"}}`, `{"cmd":"press","args":{"key":"Control+a"}}`}},
 			{"name": "hover", "description": "move the mouse over an element by snapshot ref or CSS selector", "examples": []string{`{"cmd":"hover","args":{"target":"5"}}`}},
 			{"name": "select", "description": "choose a <select> option by value or visible text", "examples": []string{`{"cmd":"select","args":{"target":"4","value":"BR"}}`}},
 			{"name": "upload", "description": "attach local file(s) to an <input type=file>", "examples": []string{`{"cmd":"upload","args":{"target":"2","file":"/tmp/report.pdf"}}`, `{"cmd":"upload","args":{"target":"2","files":["/tmp/a.png","/tmp/b.png"]}}`}},
 			{"name": "scroll", "description": "scroll the viewport (down|up|top|bottom) or to a target", "examples": []string{`{"cmd":"scroll","args":{"direction":"down"}}`}},
-			{"name": "eval", "description": "run a JavaScript expression in the page", "examples": []string{`{"cmd":"eval","args":{"js":"document.querySelectorAll('li').length"}}`}},
-			{"name": "screenshot", "description": "capture the viewport as PNG in the session scratch dir (file is a file name there); full:true captures the whole page", "examples": []string{`{"cmd":"screenshot"}`, `{"cmd":"screenshot","args":{"full":true,"file":"page.png"}}`}},
+			{"name": "eval", "description": "run JavaScript in the page (REPL mode: redeclaring const/let is fine, top-level await works)", "examples": []string{`{"cmd":"eval","args":{"js":"document.querySelectorAll('li').length"}}`}},
+			{"name": "screenshot", "description": "capture the viewport as PNG in the session scratch dir (file is a file name there) and attach it so you see it on the next turn; full:true captures the whole page; view:false only saves the file", "examples": []string{`{"cmd":"screenshot"}`, `{"cmd":"screenshot","args":{"full":true,"file":"page.png"}}`, `{"cmd":"screenshot","args":{"view":false}}`}},
 			{"name": "html", "description": "outerHTML of an element (target) or the whole document, capped at max bytes", "examples": []string{`{"cmd":"html","args":{"target":"#app","max":4000}}`}},
 			{"name": "pdf", "description": "save the page as PDF in the session scratch dir (file is a file name there; headless only)", "examples": []string{`{"cmd":"pdf","args":{"file":"page.pdf"}}`}},
 			{"name": "resize", "description": "emulate a viewport; mobile:true also enables touch", "examples": []string{`{"cmd":"resize","args":{"width":390,"height":844,"mobile":true}}`}},
@@ -170,8 +180,11 @@ func (*BuiltinBrowserPlugin) Schema() string {
 			{"name": "tab", "description": "switch to tab n from the tabs list", "examples": []string{`{"cmd":"tab","args":{"target":"2"}}`}},
 			{"name": "cookies", "description": "list cookies (names/domains, never values), optionally filtered by domain; clear:true wipes all cookies", "examples": []string{`{"cmd":"cookies","args":{"domain":"example.com"}}`, `{"cmd":"cookies","args":{"clear":true}}`}},
 			{"name": "console", "description": "last captured console messages", "examples": []string{`{"cmd":"console","args":{"tail":20}}`}},
-			{"name": "network", "description": "last captured network responses", "examples": []string{`{"cmd":"network","args":{"tail":20}}`}},
+			{"name": "network", "description": "last captured network responses; filter keeps urls containing a substring; body:true also returns the body of the newest match", "examples": []string{`{"cmd":"network","args":{"tail":20}}`, `{"cmd":"network","args":{"filter":"/api/","body":true}}`}},
+			{"name": "downloads", "description": "files the page downloaded during this session and where they were saved", "examples": []string{`{"cmd":"downloads"}`}},
 			{"name": "back", "description": "history back", "examples": []string{`{"cmd":"back"}`}},
+			{"name": "forward", "description": "history forward", "examples": []string{`{"cmd":"forward"}`}},
+			{"name": "reload", "description": "reload the page", "examples": []string{`{"cmd":"reload"}`}},
 			{"name": "status", "description": "session state (visible/headless/attached, profile) and current page", "examples": []string{`{"cmd":"status"}`}},
 			{"name": "close", "description": "close the browser session", "examples": []string{`{"cmd":"close"}`}},
 		},
@@ -210,6 +223,17 @@ type browserInvocation struct {
 	mobile bool     // resize
 	full   bool     // screenshot --full
 	clear  bool     // cookies --clear
+	// Reading and interaction detail.
+	offset    int    // snapshot/text --offset
+	unblocked bool   // wait --unblocked (no bot challenge)
+	idle      bool   // wait --idle (network quiet)
+	count     int    // click --count
+	button    string // click --button
+	appendTo  bool   // type --append
+	filter    string // network --filter
+	body      bool   // network --body
+	// noView is screenshot --view false: save the file without attaching it.
+	noView bool
 }
 
 // mode maps the invocation's visibility request onto the session mode.
@@ -232,6 +256,16 @@ func (inv browserInvocation) mode() browser.Mode {
 // Model-facing result strings, named per house style (never inline literals).
 const (
 	browserMsgClosed        = "Browser session closed."
+	browserMsgClosedLogins  = "Browser session closed. Its throwaway profile is gone with it: any login made in this browser must be done again on the next open (CHATCLI_BROWSER_PROFILE keeps logins across sessions)."
+	browserMsgClickedFmt    = "Clicked %s."
+	browserMsgTypedHidden   = "Typed into %s (a password field — the text is not echoed)."
+	browserMsgClearedFmt    = "Cleared %s."
+	browserMsgForwardFmt    = "Went forward to: %s (%s)"
+	browserMsgReloadedFmt   = "Reloaded: %s (%s)"
+	browserMsgNoDownloads   = "No file has been downloaded in this browser session."
+	browserMsgDownloadsFmt  = "%d download(s) this session:\n"
+	browserMsgThrowawayTag  = " [throwaway profile: logins vanish when the session closes]"
+	browserMsgViewFailedFmt = " (not attached to the conversation: %s — use @view on the file to look at it)"
 	browserMsgScrolled      = "Scrolled."
 	browserMsgNoValue       = "(no value)"
 	browserMsgNoConsole     = "No console messages captured on this page."
@@ -271,7 +305,11 @@ func (p *BuiltinBrowserPlugin) ExecuteWithStream(ctx context.Context, args []str
 	}
 
 	if inv.cmd == "close" {
+		ephemeral := browserEphemeral()
 		browser.Shutdown(ctx)
+		if ephemeral {
+			return browserMsgClosedLogins, nil
+		}
 		return browserMsgClosed, nil
 	}
 	if inv.cmd == "status" {
@@ -311,11 +349,13 @@ func (p *BuiltinBrowserPlugin) ExecuteWithStream(ctx context.Context, args []str
 	case "wait":
 		return browserCmdWait(opCtx, b, inv)
 	case "snapshot":
-		return b.Snapshot(opCtx, inv.max)
+		return browserCmdSnapshot(opCtx, b, inv)
 	case "click":
 		return browserCmdClick(opCtx, b, inv)
 	case "type":
 		return browserCmdType(opCtx, b, inv)
+	case "text", "find", "clear", "forward", "reload", "downloads":
+		return browserCmdRead(opCtx, b, inv)
 	case "scroll":
 		if err := b.Scroll(opCtx, inv.dir, inv.target); err != nil {
 			return "", fmt.Errorf("@browser scroll: %w", err)
@@ -330,7 +370,7 @@ func (p *BuiltinBrowserPlugin) ExecuteWithStream(ctx context.Context, args []str
 	case "console":
 		return renderConsoleEntries(b.ConsoleTail(inv.tail)), nil
 	case "network":
-		return renderNetworkEntries(b.NetworkTail(inv.tail)), nil
+		return browserCmdNetwork(opCtx, b, inv)
 	case "back":
 		title, url, err := b.Back(opCtx)
 		if err != nil {
@@ -338,8 +378,18 @@ func (p *BuiltinBrowserPlugin) ExecuteWithStream(ctx context.Context, args []str
 		}
 		return fmt.Sprintf(browserMsgBackFmt, title, url), nil
 	default:
-		return "", fmt.Errorf("@browser: unknown cmd %q (valid: open|show|hide|wait|snapshot|click|type|press|hover|select|upload|scroll|eval|screenshot|html|pdf|resize|tabs|tab|cookies|console|network|back|status|close)", inv.cmd)
+		return "", fmt.Errorf("@browser: unknown cmd %q (valid: open|show|hide|wait|snapshot|text|find|click|type|clear|press|hover|select|upload|scroll|eval|screenshot|html|pdf|resize|tabs|tab|cookies|console|network|downloads|back|forward|reload|status|close)", inv.cmd)
 	}
+}
+
+// browserCmdSnapshot reads the page, continuing its text at --offset.
+func browserCmdSnapshot(ctx context.Context, b BrowserBackend, inv browserInvocation) (string, error) {
+	if inv.offset > 0 {
+		if r, ok := b.(BrowserReadBackend); ok {
+			return r.SnapshotAt(ctx, inv.max, inv.offset)
+		}
+	}
+	return b.Snapshot(ctx, inv.max)
 }
 
 // browserCmdShow surfaces the window (acquire already relaunched it visible)
@@ -373,8 +423,8 @@ func browserWaitBound(seconds int) time.Duration {
 // page state to decide whether to ask the user or wait again.
 func browserCmdWait(ctx context.Context, b BrowserBackend, inv browserInvocation) (string, error) {
 	urlSub, textSub, selector := strings.TrimSpace(inv.url), strings.TrimSpace(inv.text), strings.TrimSpace(inv.selector)
-	if urlSub == "" && textSub == "" && selector == "" && !inv.changed {
-		return "", errors.New(`@browser wait: give a condition — {"cmd":"wait","args":{"url":"/dashboard"}}, {"text":"Welcome"}, {"selector":"#app-ready"} and/or {"changed":true} (URL leaves the current one — for logins whose landing page you cannot predict); to wait for the user without a page condition, ask them with @ask instead`)
+	if urlSub == "" && textSub == "" && selector == "" && !inv.changed && !inv.unblocked && !inv.idle {
+		return "", errors.New(`@browser wait: give a condition — {"cmd":"wait","args":{"url":"/dashboard"}}, {"text":"Welcome"}, {"selector":"#app-ready"}, {"changed":true} (URL leaves the current one — for logins whose landing page you cannot predict), {"unblocked":true} (a bot challenge is gone) and/or {"idle":true} (network quiet); to wait for the user without a page condition, ask them with @ask instead`)
 	}
 	bound := browserWaitBound(inv.timeout)
 	start := time.Now()
@@ -413,6 +463,15 @@ func browserCmdWait(ctx context.Context, b BrowserBackend, inv browserInvocation
 				return "", fmt.Errorf("@browser wait: %w", err)
 			}
 		}
+		if ok && inv.unblocked {
+			ok, err = browserUnblocked(ctx, b)
+			if err != nil {
+				return "", fmt.Errorf("@browser wait: %w", err)
+			}
+		}
+		if ok && inv.idle {
+			ok = browserNetworkIdle(b)
+		}
 		if ok {
 			return fmt.Sprintf(browserMsgWaitDoneFmt, time.Since(start).Round(time.Second), browserWaitTitle(title), url), nil
 		}
@@ -423,7 +482,7 @@ func browserCmdWait(ctx context.Context, b BrowserBackend, inv browserInvocation
 			return "", fmt.Errorf("@browser wait: %w", ctx.Err())
 		}
 	}
-	msg := fmt.Sprintf(browserMsgWaitTimeout, bound, browserWaitCondition(urlSub, textSub, selector, inv.changed), browserWaitTitle(title), url)
+	msg := fmt.Sprintf(browserMsgWaitTimeout, bound, browserWaitCondition(urlSub, textSub, selector, inv.changed, inv.unblocked, inv.idle), browserWaitTitle(title), url)
 	if startURL != "" && url != startURL {
 		msg += fmt.Sprintf(browserMsgWaitMovedFmt, startURL)
 	}
@@ -511,11 +570,45 @@ func browserWaitTitle(state string) string {
 	return strings.TrimSpace(state)
 }
 
+// browserUnblocked reports whether no bot challenge is showing. A backend
+// without the probe counts as unblocked.
+func browserUnblocked(ctx context.Context, b BrowserBackend) (bool, error) {
+	r, ok := b.(BrowserReadBackend)
+	if !ok {
+		return true, nil
+	}
+	vendor, err := r.Challenge(ctx)
+	if err != nil {
+		return false, err
+	}
+	return vendor == "", nil
+}
+
+// browserNetworkIdleWindow is how long the network must stay quiet for
+// `wait --idle` to fire.
+const browserNetworkIdleWindow = 500 * time.Millisecond
+
+// browserNetworkIdle reports whether the page's network has been quiet for
+// the idle window. A backend without the probe counts as idle.
+func browserNetworkIdle(b BrowserBackend) bool {
+	r, ok := b.(BrowserReadBackend)
+	if !ok {
+		return true
+	}
+	return r.NetworkQuiet(browserNetworkIdleWindow)
+}
+
 // browserWaitCondition renders the condition for the timeout message.
-func browserWaitCondition(urlSub, textSub, selector string, changed bool) string {
+func browserWaitCondition(urlSub, textSub, selector string, changed, unblocked, idle bool) string {
 	var parts []string
 	if changed {
 		parts = append(parts, "url to change")
+	}
+	if unblocked {
+		parts = append(parts, "the bot challenge to clear")
+	}
+	if idle {
+		parts = append(parts, "the network to go quiet")
 	}
 	if urlSub != "" {
 		parts = append(parts, fmt.Sprintf("url containing %q", urlSub))
@@ -566,11 +659,30 @@ func browserCmdClick(ctx context.Context, b BrowserBackend, inv browserInvocatio
 	if inv.target == "" {
 		return "", errors.New(`@browser click: missing target — a [n] ref from the last snapshot or a CSS selector`)
 	}
-	if err := b.Click(ctx, inv.target); err != nil {
-		return "", fmt.Errorf("@browser click: %w", err)
+	note := ""
+	if r, ok := b.(BrowserReadBackend); ok {
+		n, err := r.ClickWith(ctx, inv.target, browser.ClickOptions{Count: inv.count, Button: inv.button})
+		if err != nil {
+			return "", fmt.Errorf("@browser click: %w", err)
+		}
+		note = n
+	} else {
+		if inv.count > 1 || (inv.button != "" && inv.button != "left") {
+			return "", fmt.Errorf(browserMsgExtUnsupported, "click --count/--button")
+		}
+		if err := b.Click(ctx, inv.target); err != nil {
+			return "", fmt.Errorf("@browser click: %w", err)
+		}
 	}
 	time.Sleep(600 * time.Millisecond)
-	return b.Snapshot(ctx, inv.max)
+	snap, err := b.Snapshot(ctx, inv.max)
+	if err != nil {
+		return "", err
+	}
+	if note != "" {
+		return "Note: " + note + "\n\n" + snap, nil
+	}
+	return snap, nil
 }
 
 // browserCmdType types into an input; with submit it also shows the page the
@@ -579,12 +691,27 @@ func browserCmdType(ctx context.Context, b BrowserBackend, inv browserInvocation
 	if inv.target == "" {
 		return "", errors.New(`@browser type: missing target — a [n] ref from the last snapshot or a CSS selector`)
 	}
-	if err := b.Type(ctx, inv.target, inv.text, inv.submit); err != nil {
-		return "", fmt.Errorf("@browser type: %w", err)
+	secret := false
+	if r, ok := b.(BrowserReadBackend); ok {
+		pw, err := r.TypeWith(ctx, inv.target, inv.text, inv.appendTo, inv.submit)
+		if err != nil {
+			return "", fmt.Errorf("@browser type: %w", err)
+		}
+		secret = pw
+	} else {
+		if inv.appendTo {
+			return "", fmt.Errorf(browserMsgExtUnsupported, "type --append")
+		}
+		if err := b.Type(ctx, inv.target, inv.text, inv.submit); err != nil {
+			return "", fmt.Errorf("@browser type: %w", err)
+		}
 	}
 	if inv.submit {
 		time.Sleep(800 * time.Millisecond)
 		return b.Snapshot(ctx, inv.max)
+	}
+	if secret {
+		return fmt.Sprintf(browserMsgTypedHidden, inv.target), nil
 	}
 	return fmt.Sprintf(browserMsgTypedFmt, inv.text, inv.target), nil
 }
@@ -622,12 +749,31 @@ func browserCmdScreenshot(ctx context.Context, b BrowserBackend, inv browserInvo
 		if err := ext.ScreenshotFull(ctx, path); err != nil {
 			return "", fmt.Errorf("@browser screenshot: %w", err)
 		}
-		return fmt.Sprintf(browserMsgScreenshotFmt, path), nil
-	}
-	if err := b.Screenshot(ctx, path); err != nil {
+	} else if err := b.Screenshot(ctx, path); err != nil {
 		return "", fmt.Errorf("@browser screenshot: %w", err)
 	}
-	return fmt.Sprintf(browserMsgScreenshotFmt, path), nil
+	msg := fmt.Sprintf(browserMsgScreenshotFmt, path)
+	if inv.noView {
+		return msg, nil
+	}
+	return msg + browserAttachScreenshot(ctx, path), nil
+}
+
+// browserAttachScreenshot hands the screenshot to the vision pipeline the
+// @view tool uses, so the model sees what it captured without a second
+// call. Without an adapter (no agent loop, `chatcli tool`) or when the
+// attachment fails, the file is still there and the note says how to look
+// at it.
+func browserAttachScreenshot(ctx context.Context, path string) string {
+	adapter := currentViewAdapter()
+	if adapter == nil {
+		return ""
+	}
+	out, err := adapter.ViewImage(ctx, path)
+	if err != nil {
+		return fmt.Sprintf(browserMsgViewFailedFmt, err.Error())
+	}
+	return " — " + out
 }
 
 // renderConsoleEntries formats the console tail for the model.
@@ -660,6 +806,16 @@ func renderNetworkEntries(entries []browser.NetworkEntry) string {
 // tests can exercise dispatch without pkg/browser state.
 var browserAlive = browser.DefaultAlive
 
+// browserEphemeral reports whether the running session's profile is a
+// throwaway (its logins die with it). Package variable for tests.
+var browserEphemeral = func() bool {
+	if !browser.DefaultAlive() || browser.DefaultAttached() {
+		return false
+	}
+	_, persistent := browser.DefaultProfile()
+	return !persistent
+}
+
 // browserStatus reports the session state without launching a browser.
 // Package variable so tests can exercise dispatch without pkg/browser state.
 var browserStatus = func(ctx context.Context) (string, error) {
@@ -677,6 +833,8 @@ var browserStatus = func(ctx context.Context) (string, error) {
 		tag = browserMsgAttachedTag
 	} else if dir, persistent := browser.DefaultProfile(); persistent {
 		tag += fmt.Sprintf(browserMsgProfileFmt, dir)
+	} else {
+		tag += browserMsgThrowawayTag
 	}
 	if browser.DefaultPageClosed() {
 		tag += browserMsgPageClosedTag
@@ -726,6 +884,7 @@ func (inv *browserInvocation) applyFlatFlags(flags map[string]string, bools map[
 	}
 	inv.selector = firstFlag(flags, "selector", "element", "for")
 	inv.changed = bools["changed"] || bools["navigated"] || boolFlag(flags, "changed") || boolFlag(flags, "navigated")
+	inv.applyFlatReadFlags(flags, bools)
 	inv.key = firstFlag(flags, "key", "keys", "chord")
 	if v := firstFlag(flags, "width", "w"); v != "" {
 		inv.width = atoiDefault(v, 0)
@@ -744,7 +903,7 @@ func (inv *browserInvocation) applyFlatFlags(flags map[string]string, bools map[
 	}
 	inv.url = firstFlag(flags, "url", "href")
 	inv.target = firstFlag(flags, "target", "selector", "ref", "to")
-	inv.text = firstFlag(flags, "text", "value")
+	inv.text = firstFlag(flags, "text", "value", "query")
 	if v := firstFlag(flags, "domain"); v != "" && inv.text == "" {
 		inv.text = v
 	}
@@ -760,6 +919,30 @@ func (inv *browserInvocation) applyFlatFlags(flags map[string]string, bools map[
 	}
 
 	return positionals
+}
+
+// applyFlatReadFlags maps the reading/interaction-detail flags of a
+// flattened envelope: --offset, --count, --button, --append, --filter,
+// --body, --unblocked, --idle and --view false.
+func (inv *browserInvocation) applyFlatReadFlags(flags map[string]string, bools map[string]bool) {
+	inv.unblocked = bools["unblocked"] || bools["cleared"] || boolFlag(flags, "unblocked") || boolFlag(flags, "cleared")
+	inv.idle = bools["idle"] || bools["networkidle"] || boolFlag(flags, "idle") || boolFlag(flags, "networkidle")
+	if v := firstFlag(flags, "offset", "from"); v != "" {
+		inv.offset = atoiDefault(v, 0)
+	}
+	if v := firstFlag(flags, "count", "clicks"); v != "" {
+		inv.count = atoiDefault(v, 0)
+	}
+	inv.button = strings.ToLower(firstFlag(flags, "button"))
+	inv.appendTo = bools["append"] || boolFlag(flags, "append")
+	inv.filter = firstFlag(flags, "filter", "match")
+	inv.body = bools["body"] || boolFlag(flags, "body")
+	if v, ok := flags["view"]; ok {
+		if on, isBool := boolWord(v); isBool && !on {
+			inv.noView = true
+		}
+	}
+	inv.noView = inv.noView || bools["no-view"] || bools["noview"]
 }
 
 // applyPositionals reads the bare tokens per command: `open URL`,
@@ -788,6 +971,14 @@ func (inv *browserInvocation) applyPositionals(positionals []string) {
 	case "eval":
 		if inv.js == "" {
 			inv.js = strings.Join(positionals, " ")
+		}
+	case "find":
+		if inv.text == "" {
+			inv.text = strings.Join(positionals, " ")
+		}
+	case "text", "clear":
+		if inv.target == "" && len(positionals) > 0 {
+			inv.target = positionals[0]
 		}
 	case "scroll":
 		if inv.dir == "" && len(positionals) > 0 {
@@ -975,7 +1166,7 @@ func parseBrowserEnvelope(payload string, inv browserInvocation) (browserInvocat
 
 	inv.url = getStr("url", "href")
 	inv.target = getStr("target", "selector", "ref", "to")
-	inv.text = getStr("text", "value")
+	inv.text = getStr("text", "value", "query")
 	inv.js = getStr("js", "expression", "script", "code")
 	inv.file = getStr("file", "path")
 	inv.dir = getStr("direction", "dir")
@@ -985,6 +1176,7 @@ func parseBrowserEnvelope(payload string, inv browserInvocation) (browserInvocat
 	inv.timeout = getInt("timeout", getInt("seconds", 0))
 	inv.selector = getStr("selector", "element", "for")
 	inv.changed = getBool("changed") || getBool("navigated")
+	inv.applyEnvelopeReadFields(inner, getStr, getInt, getBool)
 	inv.key = getStr("key", "keys", "chord")
 	inv.width = getInt("width", getInt("w", 0))
 	inv.height = getInt("height", getInt("h", 0))
@@ -1017,6 +1209,23 @@ func parseBrowserEnvelope(payload string, inv browserInvocation) (browserInvocat
 		}
 	}
 	return inv, nil
+}
+
+// applyEnvelopeReadFields reads the reading/interaction-detail fields of a
+// JSON envelope (offset, count, button, append, filter, body, unblocked,
+// idle, view).
+func (inv *browserInvocation) applyEnvelopeReadFields(inner map[string]json.RawMessage, getStr func(...string) string, getInt func(string, int) int, getBool func(string) bool) {
+	inv.unblocked = getBool("unblocked") || getBool("cleared")
+	inv.idle = getBool("idle") || getBool("networkidle") || getBool("networkIdle")
+	inv.offset = getInt("offset", getInt("from", 0))
+	inv.count = getInt("count", getInt("clicks", 0))
+	inv.button = strings.ToLower(getStr("button"))
+	inv.appendTo = getBool("append")
+	inv.filter = getStr("filter", "match")
+	inv.body = getBool("body")
+	if v, ok := inner["view"]; ok && !boolish(v) {
+		inv.noView = true
+	}
 }
 
 // boolFlag reads a `--flag value` boolean from the flat map.

@@ -163,6 +163,18 @@ func bodyFakeSession(t *testing.T) (*Session, func() []cdpMessage) {
 		seen = append(seen, msg)
 		mu.Unlock()
 		switch msg.Method {
+		case "Network.getResponseBody":
+			var q struct {
+				RequestID string `json:"requestId"`
+			}
+			_ = json.Unmarshal(msg.Params, &q)
+			if q.RequestID == "gone" {
+				return cdpMessage{Error: &cdpError{Code: -32000, Message: "No resource with given identifier found"}}
+			}
+			if q.RequestID == "bin" {
+				return cdpMessage{Result: json.RawMessage(`{"body":"iVBORw0KGgoAAAANSUhEUg==","base64Encoded":true}`)}
+			}
+			return cdpMessage{Result: json.RawMessage(`{"body":"{\"ok\":true,\"items\":[1,2,3]}","base64Encoded":false}`)}
 		case "Page.reload":
 			go push(cdpMessage{Method: "Page.loadEventFired", SessionID: "s1", Params: json.RawMessage(`{}`)})
 			return cdpMessage{Result: json.RawMessage(`{}`)}
