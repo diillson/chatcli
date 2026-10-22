@@ -57,7 +57,7 @@ def sample(data, per_type, seed):
 
 def base_env(state, dotenv):
     env = {
-        "HOME": str(Path.home()),
+        "HOME": os.environ.get("LME_HOME") or str(Path.home()),
         "CHATCLI_STATE_DIR": str(state),
         "CHATCLI_PARK_DIR": str(Path(state) / "parked"),
         "PATH": os.environ.get("PATH", "/usr/bin:/bin"),

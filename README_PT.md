@@ -168,7 +168,7 @@ PDFs e imagens chegam a todos os modelos, de forma nativa onde o modelo lê e co
 ### 🗂️ Memória e contexto
 Memória de longo prazo com perfil e fatos, base de conhecimento com busca BM25 sem API key, compressão reversível em que nada se perde (o `@recall` pagina originais longos) e sessões que continuam entre superfícies. [Contexto →](https://chatcli.edilsonfreitas.com/pt/context/bootstrap-memory)
 
-Medido, não prometido: no [LongMemEval-S](https://chatcli.edilsonfreitas.com/pt/context/longmemeval) (500 perguntas sobre cerca de 115 mil tokens de conversas passadas cada), o chatcli acertou **90,8%** pela própria busca nas sessões salvas, 90,0% nas perguntas que não foram usadas para ajustá-lo. [Método, dados e todas as respostas →](evals/longmemeval)
+Medido, não prometido: no [LongMemEval-S](https://chatcli.edilsonfreitas.com/pt/context/longmemeval) (500 perguntas sobre cerca de 115 mil tokens de conversas passadas cada), o chatcli acertou **92,3%** das 260 perguntas que não foram lidas durante o ajuste, e 94,4% das 500 (90,8% antes da última rodada de mudanças), pela própria busca nas sessões salvas. [Método, dados e todas as respostas →](evals/longmemeval)
 
 </td>
 </tr>

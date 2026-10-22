@@ -168,7 +168,7 @@ PDFs and images reach every model, natively where it can read them and as text w
 ### 🗂️ Memory and context
 Long-term memory with a profile and facts, a knowledge base with keyless BM25 retrieval, reversible compression where nothing is lost (`@recall` pages long originals), and sessions that continue across surfaces. [Context →](https://chatcli.edilsonfreitas.com/context/bootstrap-memory)
 
-Measured, not claimed: on [LongMemEval-S](https://chatcli.edilsonfreitas.com/context/longmemeval) (500 questions over about 115k tokens of past conversations each), chatcli answered **90.8%** through its own session recall, 90.0% on the questions not used while tuning it. [Method, data and every answer →](evals/longmemeval)
+Measured, not claimed: on [LongMemEval-S](https://chatcli.edilsonfreitas.com/context/longmemeval) (500 questions over about 115k tokens of past conversations each), chatcli answered **92.3%** of the 260 questions that were not read while tuning it, and 94.4% of all 500 (90.8% before the latest round of changes), through its own session recall. [Method, data and every answer →](evals/longmemeval)
 
 </td>
 </tr>
