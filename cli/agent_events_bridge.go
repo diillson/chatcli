@@ -48,7 +48,7 @@ var coderSubcmdKinds = map[string]agentevents.ToolKind{
 var toolNameKinds = map[string]agentevents.ToolKind{
 	"@shell": agentevents.KindExecute, "@git": agentevents.KindExecute,
 	"@docker": agentevents.KindExecute, "@kubectl": agentevents.KindExecute,
-	"@file": agentevents.KindRead, "@lsp": agentevents.KindRead,
+	"@file": agentevents.KindRead, "@lsp": agentevents.KindRead, "@json": agentevents.KindRead,
 	"@websearch": agentevents.KindSearch, "@wikipedia": agentevents.KindSearch,
 	"@registry-tags": agentevents.KindSearch, "@secrets": agentevents.KindSearch,
 	"@webfetch": agentevents.KindFetch, "@http": agentevents.KindFetch,

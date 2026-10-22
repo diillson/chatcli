@@ -1,0 +1,11 @@
+{
+  "plugins.json.description": "Read JSON/YAML files or inline text without loading them whole: value at a path, keys, filtered query, inferred schema, validation with line/column, pretty-print.",
+  "plugins.json.describe.default": "Reading structured data",
+  "plugins.json.describe.inline": "inline text",
+  "plugins.json.describe.get": "Reading value: %s",
+  "plugins.json.describe.keys": "Listing keys: %s",
+  "plugins.json.describe.query": "Querying: %s",
+  "plugins.json.describe.schema": "Inferring shape: %s",
+  "plugins.json.describe.validate": "Validating: %s",
+  "plugins.json.describe.pretty": "Formatting: %s"
+}
