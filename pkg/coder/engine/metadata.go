@@ -39,7 +39,7 @@ type PluginSchema struct {
 }
 
 // PluginVersion is the version of the @coder tool surface the model sees:
-// bumped whenever a subcommand, flag or its documented behaviour changes
+// bumped whenever a subcommand, flag or its documented behavior changes
 // (the builtin versions test enforces it). Version above is the engine's
 // original contract constant and stays as it is for API compatibility.
 const PluginVersion = "2.1.0"
