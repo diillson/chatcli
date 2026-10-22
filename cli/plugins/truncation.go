@@ -45,6 +45,9 @@ const (
 	TruncationSuffixSize  = 1000
 )
 
+// truncationMarkerReserve is the room the [TRUNCATED …] marker takes.
+const truncationMarkerReserve = 80
+
 // EffectiveMaxResultChars resolves the active cap for one tool call.
 // Plugins that implement TruncationAware with a positive value win;
 // otherwise the global default applies.
@@ -75,8 +78,13 @@ func TruncateForLLM(s string, maxChars int) string {
 	if len(s) <= maxChars {
 		return s
 	}
-	preview := TruncationPreviewSize
-	suffix := TruncationSuffixSize
+	// Head and tail in proportion to the budget — a fixed few thousand
+	// characters whatever the cap threw away most of an 80k budget.
+	suffix := maxChars / 6
+	preview := maxChars - suffix - truncationMarkerReserve
+	if suffix < TruncationSuffixSize || preview < TruncationPreviewSize {
+		preview, suffix = TruncationPreviewSize, TruncationSuffixSize
+	}
 	if preview+suffix >= maxChars {
 		// Cap too small for both halves; cut at maxChars and append
 		// a marker.

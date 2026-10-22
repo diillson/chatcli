@@ -113,3 +113,15 @@ func TestTruncateForLLM_KeepsUTF8ValidAtBothCuts(t *testing.T) {
 		t.Fatalf("expected the head/tail form, got %d bytes", len(got))
 	}
 }
+
+// A large cap keeps most of the output, not a fixed 6k: the head and tail
+// grow with the budget.
+func TestTruncateForLLM_HeadAndTailGrowWithTheCap(t *testing.T) {
+	body := strings.Repeat("a", 60_000) + strings.Repeat("c", 30_000)
+	got := TruncateForLLM(body, 80_000)
+	assert.LessOrEqual(t, len(got), 80_000)
+	assert.Greater(t, len(got), 70_000, "most of an 80k budget must be used")
+	assert.True(t, strings.HasPrefix(got, "aaaa"))
+	assert.True(t, strings.HasSuffix(got, "cccc"))
+	assert.Contains(t, got, "TRUNCATED")
+}

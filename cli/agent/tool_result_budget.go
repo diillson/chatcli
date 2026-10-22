@@ -111,7 +111,7 @@ type BudgetReport struct {
 //
 // Returns the (possibly modified) history and a report.
 func EnforceToolResultBudget(history []models.Message, logger *zap.Logger) ([]models.Message, *BudgetReport) {
-	return EnforceToolResultBudgetWith(history, DefaultTurnBudgetChars, DefaultPerResultMaxChars, logger)
+	return EnforceToolResultBudgetFor(history, DefaultTurnBudgetChars, DefaultPerResultMaxChars, nil, logger)
 }
 
 // EnforceToolResultBudgetWith is EnforceToolResultBudget with explicit
@@ -119,6 +119,15 @@ func EnforceToolResultBudget(history []models.Message, logger *zap.Logger) ([]mo
 // without touching the package defaults shared by every other session
 // of the process.
 func EnforceToolResultBudgetWith(history []models.Message, turnBudget, perResult int, logger *zap.Logger) ([]models.Message, *BudgetReport) {
+	return EnforceToolResultBudgetFor(history, turnBudget, perResult, nil, logger)
+}
+
+// EnforceToolResultBudgetFor is EnforceToolResultBudgetWith with a per-call
+// cap resolver: a tool that declared a larger result budget than the
+// per-result default (@read's 80k against the 20k default, say) keeps it,
+// so the per-result pass never cuts what the tool's own cap allowed. The
+// per-turn pass still bounds the aggregate. capFor may be nil.
+func EnforceToolResultBudgetFor(history []models.Message, turnBudget, perResult int, capFor func(toolCallID string) int, logger *zap.Logger) ([]models.Message, *BudgetReport) {
 	if turnBudget <= 0 {
 		turnBudget = DefaultTurnBudgetChars
 	}
@@ -162,19 +171,7 @@ func EnforceToolResultBudgetWith(history []models.Message, turnBudget, perResult
 
 	// Pass 1: Per-result enforcement
 	for _, turn := range turns {
-		for _, idx := range turn.toolIndices {
-			msg := &history[idx]
-			report.TotalToolResults++
-			report.TotalOriginalChars += int64(len(msg.Content))
-
-			if len(msg.Content) > perResult {
-				history[idx].Content = truncateWithDiskPersist(
-					msg.Content, msg.ToolCallID, perResult, logger)
-				report.ResultsTruncated++
-				report.ResultsPersistedDisk++
-				report.BytesSavedToDisk += int64(len(msg.Content)) - int64(len(history[idx].Content))
-			}
-		}
+		enforcePerResult(history, turn.toolIndices, perResult, capFor, report, logger)
 	}
 
 	// Pass 2: Per-turn aggregate enforcement
@@ -247,6 +244,63 @@ func EnforceToolResultBudgetWith(history []models.Message, turnBudget, perResult
 	return history, report
 }
 
+// enforcePerResult applies the per-result cap to the tool messages at
+// toolIndices: the configured cap, or the larger one the call itself ran
+// under when capFor knows it.
+func enforcePerResult(history []models.Message, toolIndices []int, perResult int, capFor func(string) int, report *BudgetReport, logger *zap.Logger) {
+	for _, idx := range toolIndices {
+		msg := &history[idx]
+		report.TotalToolResults++
+		report.TotalOriginalChars += int64(len(msg.Content))
+
+		limit := perResult
+		if capFor != nil {
+			if c := capFor(msg.ToolCallID); c > limit {
+				limit = c
+			}
+		}
+		if len(msg.Content) > limit {
+			before := len(msg.Content)
+			history[idx].Content = truncateWithDiskPersist(msg.Content, msg.ToolCallID, limit, logger)
+			report.ResultsTruncated++
+			report.ResultsPersistedDisk++
+			report.BytesSavedToDisk += int64(before) - int64(len(history[idx].Content))
+		}
+	}
+}
+
+// PreviewWithDiskPersist saves content past maxSize to the session's
+// tool-results directory and returns a preview that fits maxSize: the head
+// and the tail of the output in proportion to the budget (not a fixed few
+// thousand characters whatever the budget), joined by a marker that names
+// the omitted line range, the file, and the @read call that continues from
+// the first omitted line. label identifies the result (a tool-call id, or
+// the tool name for a text-protocol call).
+func PreviewWithDiskPersist(content, label string, maxSize int, logger *zap.Logger) string {
+	if maxSize <= 0 {
+		maxSize = DefaultPerResultMaxChars
+	}
+	return truncateWithDiskPersist(content, label, maxSize, logger)
+}
+
+// previewMarkerReserve is the room the marker between head and tail takes
+// beyond the file path it names twice.
+const previewMarkerReserve = 200
+
+// previewSplit sizes the head and tail of a preview under maxSize: the tail
+// takes a sixth (stack traces and summaries live there), the head the rest
+// after the marker (which names path twice). Below a minimum the fixed
+// historical sizes apply, so a tiny budget still shows something of both
+// ends.
+func previewSplit(maxSize int, path string) (head, tail int) {
+	tail = maxSize / 6
+	head = maxSize - tail - previewMarkerReserve - 2*len(path)
+	if head < PreviewHeadChars || tail < PreviewTailChars {
+		return PreviewHeadChars, PreviewTailChars
+	}
+	return head, tail
+}
+
 // truncateWithDiskPersist saves the full content to a temp file and returns
 // a truncated preview with a reference to the file.
 //
@@ -281,10 +335,11 @@ func truncateWithDiskPersist(content, toolCallID string, maxSize int, logger *za
 		return textfold.Cut(content, maxSize) + "\n... [output truncated — disk write failed]"
 	}
 
-	// Build preview: head + tail + reference
+	// Build preview: head + tail + reference, sized to the budget.
 	var preview strings.Builder
+	headSize, tailSize := previewSplit(maxSize, fullPath)
 
-	headEnd := PreviewHeadChars
+	headEnd := headSize
 	if headEnd > len(content) {
 		headEnd = len(content)
 	}
@@ -296,21 +351,34 @@ func truncateWithDiskPersist(content, toolCallID string, maxSize int, logger *za
 	}
 	preview.WriteString(head)
 
-	fmt.Fprintf(&preview, "\n\n... [%d chars omitted — full output saved to %s]\n\n",
-		len(content)-PreviewHeadChars-PreviewTailChars, fullPath)
-
-	tailStart := len(content) - PreviewTailChars
+	tailStart := len(content) - tailSize
 	if tailStart < 0 {
 		tailStart = 0
 	}
+	tail := ""
 	if tailStart > headEnd {
-		tail := textfold.Tail(content, len(content)-tailStart)
+		tail = textfold.Tail(content, len(content)-tailStart)
 		// Cut at first newline for cleaner output
 		if firstNL := strings.Index(tail, "\n"); firstNL > 0 && firstNL < len(tail)/2 {
 			tail = tail[firstNL+1:]
 		}
-		preview.WriteString(tail)
 	}
+
+	// The omitted range in lines, so the model continues exactly there.
+	// A trailing newline closes the last line rather than opening another.
+	totalLines := strings.Count(strings.TrimSuffix(content, "\n"), "\n") + 1
+	firstOmitted := strings.Count(head, "\n") + 1
+	tailLines := 0
+	if tail != "" {
+		tailLines = strings.Count(strings.TrimSuffix(tail, "\n"), "\n") + 1
+	}
+	lastOmitted := totalLines - tailLines
+	if lastOmitted < firstOmitted {
+		lastOmitted = firstOmitted
+	}
+	fmt.Fprintf(&preview, "\n\n... [%d chars omitted (lines %d-%d of %d) — full output saved to %s; continue with @read {\"file\":%q,\"from_line\":%d}] ...\n\n",
+		len(content)-len(head)-len(tail), firstOmitted, lastOmitted, totalLines, fullPath, fullPath, firstOmitted)
+	preview.WriteString(tail)
 
 	return preview.String()
 }
