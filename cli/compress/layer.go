@@ -22,14 +22,6 @@ import (
 // prefix). Its output must never be compressed — see CompressHinted.
 const recallToolName = "recall"
 
-// isRecallTool reports whether toolName refers to the @recall builtin. Tool
-// names reach the layer either bare ("recall") or '@'-prefixed ("@recall")
-// since GetPlugin accepts both forms, so we normalize before comparing.
-func isRecallTool(toolName string) bool {
-	name := strings.TrimPrefix(strings.TrimSpace(toolName), "@")
-	return strings.EqualFold(name, recallToolName)
-}
-
 // verbatimToolNames are the tools whose output is the evidence itself: saved
 // conversations and stored memories. The compressors detect by content, and a
 // conversation that talks about errors, warnings or file paths reads like a
@@ -39,7 +31,9 @@ func isRecallTool(toolName string) bool {
 var verbatimToolNames = []string{recallToolName, "session", "memory"}
 
 // isVerbatimTool reports whether toolName is a tool whose output must reach
-// the model exactly as the tool produced it.
+// the model exactly as the tool produced it. Tool names reach the layer either
+// bare ("recall") or '@'-prefixed ("@recall") since GetPlugin accepts both
+// forms, so the name is normalized before comparing.
 func isVerbatimTool(toolName string) bool {
 	name := strings.TrimPrefix(strings.TrimSpace(toolName), "@")
 	for _, v := range verbatimToolNames {
